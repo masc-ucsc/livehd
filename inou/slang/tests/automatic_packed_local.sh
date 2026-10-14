@@ -30,6 +30,6 @@ SV
 "$LHD" compile "$W/automatic_packed_local.sv" --top automatic_packed_local \
   --emit-dir "lg:$W/lg" --workdir "$W/compile"
 "$LHD" lec --impl "lg:$W/lg" --ref "verilog:$W/reference.sv" --top automatic_packed_local \
-  --workdir "$W/proof" --result-json "$W/proof.json"
-grep -q '"verdict":"proven".*"bounded":false' "$W/proof.json"
+  --set formal.effort=proof --workdir "$W/proof" --result-json "$W/proof.json"
+grep -q '"verdict":"proven-full"' "$W/proof.json"
 echo 'PASS: automatic packed scratch arrays preserve clocked behavior'

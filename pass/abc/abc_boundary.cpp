@@ -1613,7 +1613,7 @@ synth::Ware_score Abc_backend::score(hhds::GraphLibrary& outlib, std::string_vie
     return {};
   }
   const uint64_t memory_entry  = cost::process_footprint_bytes();
-  const uint64_t budget        = base_.allow_oversize ? 0 : cost::budget_bytes(base_.memory_budget_mb);
+  const uint64_t budget        = cost::budget_bytes(base_.memory_budget_mb);
   const auto     within_budget = [&] {
     auto rss = cost::process_footprint_bytes();
     return budget == 0 || rss <= memory_entry || rss - memory_entry < budget;

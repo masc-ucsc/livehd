@@ -1,6 +1,7 @@
 // This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 #pragma once
 
+#include <chrono>
 #include <condition_variable>
 #include <deque>
 #include <future>
@@ -19,7 +20,8 @@ namespace livehd::sim {
 // Move-only jobs own their LLVM context/module and never share LLVM state.
 class Compile_workers {
 public:
-  explicit Compile_workers(unsigned jobs = 0) : limit_(jobs == 0 ? available_compile_jobs() : jobs) {}
+  explicit Compile_workers(unsigned jobs = 0)
+      : limit_(jobs == 0 ? livehd::Job_manager::global().ceiling() : std::min(jobs, livehd::Job_manager::global().ceiling())) {}
   Compile_workers(const Compile_workers&)            = delete;
   Compile_workers& operator=(const Compile_workers&) = delete;
 
@@ -35,11 +37,27 @@ public:
   }
 
   template <class Fn>
-  auto submit(Fn&& fn) -> std::future<std::invoke_result_t<Fn>> {
-    std::packaged_task<std::invoke_result_t<Fn>()> job(std::forward<Fn>(fn));
-    auto                                           result = job.get_future();
-    std::unique_lock                               lock(mutex_);
+  auto submit(Fn&& fn, uint64_t units = 1) -> std::future<std::invoke_result_t<Fn>> {
+    std::unique_lock lock(mutex_);
     space_.wait(lock, [&] { return outstanding_ < limit_; });
+    livehd::Job_slot reservation;
+    bool             queued = false;
+    while (!(reservation = livehd::Job_manager::global().try_acquire(livehd::Job_class::sim_compile, units, 0, !queued))) {
+      queued = true;
+      // Local completions wake admission immediately. Other job classes and
+      // changes in machine pressure are revisited on the bounded timer.
+      space_.wait_for(lock, std::chrono::milliseconds(10));
+    }
+    reservation.detach();
+    std::packaged_task<std::invoke_result_t<Fn>()> job([reservation = std::move(reservation), fn = std::forward<Fn>(fn)]() mutable {
+      auto slot = std::move(reservation);
+      slot.attach();
+      // Destroy the LLVM context on completion, rather than retaining it
+      // in the future's shared callable until every color has submitted.
+      auto work = std::move(fn);
+      return work();
+    });
+    auto                                           result = job.get_future();
     // Start threads on demand: a one-object module need not launch hundreds.
     // Big-stack workers (livehd::Async_worker): LLVM's SelectionDAG legalization
     // of a very wide value recurses deeply, and a Darwin secondary thread gets
@@ -77,12 +95,12 @@ private:
     }
   }
 
-  const size_t                           limit_;
-  std::mutex                             mutex_;
-  std::condition_variable                ready_, space_;
-  std::deque<std::packaged_task<void()>> jobs_;
+  const size_t                                       limit_;
+  std::mutex                                         mutex_;
+  std::condition_variable                            ready_, space_;
+  std::deque<std::packaged_task<void()>>             jobs_;
   std::vector<std::unique_ptr<livehd::Async_worker>> workers_;
-  size_t                                 outstanding_ = 0;
-  bool                                   stopping_    = false;
+  size_t                                             outstanding_ = 0;
+  bool                                               stopping_    = false;
 };
 }  // namespace livehd::sim

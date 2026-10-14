@@ -1230,9 +1230,11 @@ void lower_lnasts(Options& opts, Result& res, Eprp_var& var, const std::string& 
       {"constprop",    "1"},
       { "verifier", "true"}
   };
-  // Inline comb calls by default; an explicit compile.upass.inline setting
-  // can preserve module boundaries (merge_sets below runs after this).
-  up["inline"] = "true";
+  // DEFAULT CONTRACT: comb calls stay module instances (pass.upass `inline`
+  // default false). Flattening is opt-in: --set compile.upass.inline=true
+  // (merge_sets below). pass.legalize still inlines a state-free instance that
+  // sits on a combinational false loop -- that is a structural repair, not a
+  // policy default.
   // Derived toln gate (the dual of the emit-derived tolg gate): when neither
   // the lnast.tolg stage below (need_graphs) nor any post-upass LNAST emit
   // (ln:/pyrope:/lnast-dump:) consumes the rewritten tree, skip materializing

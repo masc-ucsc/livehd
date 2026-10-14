@@ -37,7 +37,7 @@ sed 's/ra/xa/g; s/rb/xb/g' "$W/ref.prp" > "$W/impl.prp"
 # 1. Renamed pipeline, NO match file: tier-2 pairs both flops, the inductive
 #    proof self-certifies, and the disclosure names the uncertain pairs.
 # ---------------------------------------------------------------------------
-OUT=$("$LHD" lec "${NO_REPLAY[@]}" --ref "$W/ref.prp" --impl "$W/impl.prp" --workdir "$W/wd1" 2>&1)
+OUT=$("$LHD" lec --set formal.effort=proof "${NO_REPLAY[@]}" --ref "$W/ref.prp" --impl "$W/impl.prp" --workdir "$W/wd1" 2>&1)
 RC=$?
 [ "$RC" -eq 0 ] || fail "#1 renamed pipeline should be PROVEN (rc=$RC): $OUT"
 echo "$OUT" | grep -q "tier-2 state pairing: 2 uncertain pair(s) injected" || fail "#1 missing injection line: $OUT"
@@ -51,7 +51,7 @@ echo "PASS: renamed pipeline PROVEN via uncertain tier-2 pairs; pair hint persis
 #    set (same um=[...] key), the verdict cache hits, and the signature pass
 #    never runs.
 # ---------------------------------------------------------------------------
-OUT=$("$LHD" lec "${NO_REPLAY[@]}" --ref "$W/ref.prp" --impl "$W/impl.prp" --workdir "$W/wd1" 2>&1)
+OUT=$("$LHD" lec --set formal.effort=proof "${NO_REPLAY[@]}" --ref "$W/ref.prp" --impl "$W/impl.prp" --workdir "$W/wd1" 2>&1)
 RC=$?
 [ "$RC" -eq 0 ] || fail "#2 warm re-run should be PROVEN (rc=$RC): $OUT"
 echo "$OUT" | grep -q "PROVEN (cache)" || fail "#2 warm run should hit the verdict cache: $OUT"
@@ -63,7 +63,7 @@ echo "PASS: warm run replays the pair hint and hits the cache (no signature pass
 #    drop-all pair-free re-solve refutes on its own -> a REAL FAIL.
 # ---------------------------------------------------------------------------
 sed 's/xb = xa/xb = xa ^ 1/' "$W/impl.prp" > "$W/bad.prp"
-OUT=$("$LHD" lec "${NO_REPLAY[@]}" --ref "$W/ref.prp" --impl "$W/bad.prp" --workdir "$W/wd3" 2>&1)
+OUT=$("$LHD" lec --set formal.effort=proof "${NO_REPLAY[@]}" --ref "$W/ref.prp" --impl "$W/bad.prp" --workdir "$W/wd3" 2>&1)
 RC=$?
 [ "$RC" -ne 0 ] || fail "#3 a real difference must FAIL: $OUT"
 echo "$OUT" | grep -q "tier-2 confirm (REFUTED under 2 uncertain tier-2 pair(s); dropped all, re-solved pair-free)" \
@@ -97,7 +97,7 @@ EOF
 # Explicitly name no real reset so this pins the no-reset '?' leg even if a
 # frontend injects a conventional reset port into the graph.
 plant_crossed_hint "$W/wd4"
-OUT=$("$LHD" lec "${NO_REPLAY[@]}" --ref "$W/ref.prp" --impl "$W/impl.prp" --workdir "$W/wd4" \
+OUT=$("$LHD" lec --set formal.effort=proof "${NO_REPLAY[@]}" --ref "$W/ref.prp" --impl "$W/impl.prp" --workdir "$W/wd4" \
       --set formal.reset=missing_reset 2>&1)
 RC=$?
 [ "$RC" -eq 0 ] || fail "#4 crossed hint should recover through pair-free no-reset BMC (rc=$RC): $OUT"
@@ -113,7 +113,7 @@ echo "PASS: bogus crossed pairs are discarded; pair-free BMC proves from no-rese
 #    through the pair-free confirmation.
 # ---------------------------------------------------------------------------
 sed 's/reg xa:U8 = 0/reg xa:U8 = 1/' "$W/impl.prp" > "$W/init.prp"
-OUT=$("$LHD" lec "${NO_REPLAY[@]}" --ref "$W/ref.prp" --impl "$W/init.prp" --workdir "$W/wd5" 2>&1)
+OUT=$("$LHD" lec --set formal.effort=proof "${NO_REPLAY[@]}" --ref "$W/ref.prp" --impl "$W/init.prp" --workdir "$W/wd5" 2>&1)
 RC=$?
 [ "$RC" -ne 0 ] || fail "#5 differing reset value is a real difference, must FAIL: $OUT"
 echo "$OUT" | grep -q "kind/init mismatch" || fail "#5 missing the init-mismatch unpaired reason: $OUT"
@@ -123,7 +123,7 @@ echo "PASS: init-mismatch pair refused with reason; the reset difference still F
 # 6. All names match: zero tier-2 work (the signature pass never runs).
 # ---------------------------------------------------------------------------
 cp "$W/ref.prp" "$W/same.prp"
-OUT=$("$LHD" lec "${NO_REPLAY[@]}" --ref "$W/ref.prp" --impl "$W/same.prp" --workdir "$W/wd6" 2>&1)
+OUT=$("$LHD" lec --set formal.effort=proof "${NO_REPLAY[@]}" --ref "$W/ref.prp" --impl "$W/same.prp" --workdir "$W/wd6" 2>&1)
 RC=$?
 [ "$RC" -eq 0 ] || fail "#6 identical design should be PROVEN (rc=$RC): $OUT"
 echo "$OUT" | grep -q "tier-2" && fail "#6 all-names-match must do zero tier-2 work: $OUT"
@@ -139,7 +139,7 @@ echo "PASS: all-names-match design does zero tier-2 work"
 #    point is that the fallback is BOUNDED -- opts out of strict explicitly. That
 #    is the honest shape: it asserts the bounded pass EXISTS, not that a bounded
 #    pass is equivalence.
-OUT=$("$LHD" lec "${NO_REPLAY[@]}" --ref "$W/ref.prp" --impl "$W/impl.prp" --set formal.lec.state_pairing=false \
+OUT=$("$LHD" lec --set formal.effort=proof "${NO_REPLAY[@]}" --ref "$W/ref.prp" --impl "$W/impl.prp" --set formal.lec.state_pairing=false \
       2>&1)
 RC=$?
 [ "$RC" -eq 0 ] || fail "#7 pairing-off auto run should still bounded-pass (rc=$RC): $OUT"
@@ -147,10 +147,10 @@ echo "$OUT" | grep -q "tier-2 state pairing" && fail "#7 pairing ran despite for
 echo "$OUT" | grep -q "BOUNDED-Proven" || fail "#7 pairing-off verdict should be the bounded bmc PASS: $OUT"
 # The witness-carrying Unknown (matched portion differs through the unmatched
 # cuts) escalates in the exit policy — a nonzero exit, but NOT a REFUTED.
-OUT=$("$LHD" lec "${NO_REPLAY[@]}" --ref "$W/ref.prp" --impl "$W/impl.prp" --set formal.lec.state_pairing=false --set formal.engine=ind 2>&1)
+OUT=$("$LHD" lec --set formal.effort=proof "${NO_REPLAY[@]}" --ref "$W/ref.prp" --impl "$W/impl.prp" --set formal.lec.state_pairing=false --set formal.engine=ind 2>&1)
 RC=$?
 [ "$RC" -ne 0 ] || fail "#7 ind witness-carrying UNKNOWN escalates (rc=$RC): $OUT"
-echo "$OUT" | grep -q "UNKNOWN" || fail "#7 ind with pairing off should gate to UNKNOWN: $OUT"
+echo "$OUT" | grep -qE "TIMEOUT|UNSUPPORTED|UNDISCHARGED|UNCONFIRMED|UNPAIRED|UNCHECKED|VACUOUS|UNEXPLAINED" || fail "#7 ind with pairing off should gate to an undecided verdict: $OUT"
 echo "$OUT" | grep -q "REFUTED (not equivalent)" && fail "#7 must not claim REFUTED through unmatched cuts: $OUT"
 echo "$OUT" | grep -q "cut point" || fail "#7 the unmatched cut points should be named: $OUT"
 echo "PASS: formal.lec.state_pairing=false keeps the pre-tier-2 behavior (bounded auto / ind-UNKNOWN)"
@@ -159,7 +159,7 @@ echo "PASS: formal.lec.state_pairing=false keeps the pre-tier-2 behavior (bounde
 # 8. Flat path (formal.lec.hier=false): same pairing + proof, and the PASS
 #    stores an entity-keyed pair hint there too.
 # ---------------------------------------------------------------------------
-OUT=$("$LHD" lec "${NO_REPLAY[@]}" --ref "$W/ref.prp" --impl "$W/impl.prp" --set formal.lec.hier=false --workdir "$W/wd8" 2>&1)
+OUT=$("$LHD" lec --set formal.effort=proof "${NO_REPLAY[@]}" --ref "$W/ref.prp" --impl "$W/impl.prp" --set formal.lec.hier=false --workdir "$W/wd8" 2>&1)
 RC=$?
 [ "$RC" -eq 0 ] || fail "#8 flat path should be PROVEN (rc=$RC): $OUT"
 echo "$OUT" | grep -q "tier-2 state pairing: 2 uncertain pair(s) injected" || fail "#8 missing flat-path injection: $OUT"
@@ -229,7 +229,7 @@ module dut(
   assign out = xs ? (xa + 9'd1) : (xb + 9'd2);
 endmodule
 EOF
-OUT=$("$LHD" lec "${NO_REPLAY[@]}" --ref "$W/reset_ref.v" --impl "$W/reset_impl.v" --workdir "$W/wd9" 2>&1)
+OUT=$("$LHD" lec --set formal.effort=proof "${NO_REPLAY[@]}" --ref "$W/reset_ref.v" --impl "$W/reset_impl.v" --workdir "$W/wd9" 2>&1)
 RC=$?
 [ "$RC" -eq 0 ] || fail "#9 reset-established pair-free BMC should PASS (rc=$RC): $OUT"
 echo "$OUT" | grep -q "tier-2 state pairing: 3 uncertain pair(s) injected" \
@@ -285,7 +285,7 @@ module dut(
   assign out = flop_32 ? (flop_24 + 9'd1) : (flop_28 + 9'd2);
 endmodule
 EOF
-OUT=$("$LHD" lec "${NO_REPLAY[@]}" --ref "$W/noreset_ref.v" --impl "$W/noreset_impl.v" --workdir "$W/wd10" 2>&1)
+OUT=$("$LHD" lec --set formal.effort=proof "${NO_REPLAY[@]}" --ref "$W/noreset_ref.v" --impl "$W/noreset_impl.v" --workdir "$W/wd10" 2>&1)
 RC=$?
 [ "$RC" -eq 0 ] || fail "#10 reset-less recoded state should PASS through tracked-? BMC (rc=$RC): $OUT"
 echo "$OUT" | grep -q "tier-2 state pairing: 3 uncertain pair(s) injected" \
@@ -357,7 +357,7 @@ pub mod dut::[timecheck=false](d:U4, `reset`:Reset) -> (q:U4@[0], valid:Bool@[0]
   valid = v
 }
 EOF
-OUT=$("$LHD" lec "${NO_REPLAY[@]}" --ref "$W/aggregate_ref.v" --impl "$W/aggregate_impl.prp" --top dut --workdir "$W/wd11" 2>&1)
+OUT=$("$LHD" lec --set formal.effort=proof "${NO_REPLAY[@]}" --ref "$W/aggregate_ref.v" --impl "$W/aggregate_impl.prp" --top dut --workdir "$W/wd11" 2>&1)
 RC=$?
 [ "$RC" -eq 0 ] || fail "#11 aggregate recoding should be PROVEN (rc=$RC): $OUT"
 echo "$OUT" | grep -q "lec block 'pipe_cell' pass" || fail "#11 primitive specialization leaf was not paired/proven: $OUT"

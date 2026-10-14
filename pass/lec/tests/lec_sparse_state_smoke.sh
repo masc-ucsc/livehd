@@ -60,7 +60,7 @@ check singleton one_ref one_good ind proven
 check transition ref bad auto refuted
 check exposed exposed good auto refuted
 check feedback feedback good auto refuted
-check bounds ref out_of_range ind unknown
+check bounds ref out_of_range ind unpaired
 # Duplicate bit indices are ambiguous, even with distinct cell-model leaves.
 cat > "$WORK/duplicate.v" <<'VERILOG'
 module dut(input clk, input [3:0] d, output [1:0] y);
@@ -73,7 +73,7 @@ module dut(input clk, input [3:0] d, output [1:0] y);
   assign y = {\state[3].a ^ \state[3].b , \state[1].a };
 endmodule
 VERILOG
-check duplicate ref duplicate ind unknown
+check duplicate ref duplicate ind unpaired
 # The bit bridge must not overwrite specified implementation initial values.
 check initialization init_ref init_bad bmc refuted
 check initialization_auto init_ref init_bad auto refuted

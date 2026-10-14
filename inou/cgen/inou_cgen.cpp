@@ -538,6 +538,13 @@ void Inou_cgen::to_cgen_sim(Eprp_var& var) {
     // do_from_graph. The key folds the tune vector for a root only, so this
     // verdict and the plan loop's must stay the same rule.
     const bool root  = is_selected_root(full, entity) || (llvm && compact_kernel_defs.contains(g.get()));
+    if (llvm && compact_kernel_defs.contains(g.get())) {
+      // A loop definition always re-emits under LLVM: its sealed body is handed to
+      // its callers' kernels (Cgen_sim::Native_loop_ir), which a caller regenerated
+      // while the definition was a cache hit would not find. The native objects
+      // themselves are still reused through their `.llvm.k` sidecars.
+      continue;
+    }
     auto       probe = probe_for(g);
     probe.share_digest_memo(&digest_memo);
     probe.share_generation_index(&gen_index);
@@ -598,7 +605,39 @@ void Inou_cgen::to_cgen_sim(Eprp_var& var) {
 
   // Synchronous (one .hpp per module): the designs are small and the kernel's
   // sim_into() checks each <module>.hpp exists right after this returns.
-  for (const auto& g : sim_graphs) {
+  // A compact-loop definition is emitted before the modules that call it: its
+  // sealed body is handed to the callers' LLVM colors (Cgen_sim::Native_loop_ir),
+  // which embed the rolled loop instead of calling a separate native object.
+  std::vector<std::shared_ptr<hhds::Graph>> emit_order;
+  emit_order.reserve(sim_graphs.size());
+  {
+    // Definitions first, an inner loop before the loop that contains it.
+    absl::flat_hash_set<const hhds::Graph*> placed;
+    std::function<void(const std::shared_ptr<hhds::Graph>&)> place = [&](const std::shared_ptr<hhds::Graph>& g) {
+      if (!g || !placed.insert(g.get()).second) {
+        return;
+      }
+      for (const auto node : g->body().nodes()) {
+        if (node.subnode_loop()) {
+          if (auto inner = node.get_subnode_graph(); inner && llvm && compact_kernel_defs.contains(inner.get())) {
+            place(inner);
+          }
+        }
+      }
+      emit_order.push_back(g);
+    };
+    for (const auto& g : sim_graphs) {
+      if (g && llvm && compact_kernel_defs.contains(g.get())) {
+        place(g);
+      }
+    }
+    for (const auto& g : sim_graphs) {
+      if (g && !(llvm && compact_kernel_defs.contains(g.get()))) {
+        emit_order.push_back(g);
+      }
+    }
+  }
+  for (const auto& g : emit_order) {
     if (!g) {
       continue;
     }

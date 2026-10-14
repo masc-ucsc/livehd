@@ -159,7 +159,7 @@ compile par.sv          par     lg_par_sv
 
 lec() { # tag top impl ref extra...
   local tag="$1" top="$2" impl="$3" ref="$4"; shift 4
-  "$LHD" lec --impl "lg:$W/$impl" --ref "lg:$W/$ref" --top "$top" \
+  "$LHD" lec --set formal.effort=proof --impl "lg:$W/$impl" --ref "lg:$W/$ref" --top "$top" \
     --workdir "$W/lw_$tag" --result-json "$W/$tag.json" "$@" > "$W/$tag.out" 2>&1
   return 0
 }
@@ -200,11 +200,11 @@ echo "PASS: swapped fields / off-by-one / LSB-first input layout all REFUTED (MS
 # 4. width-sum mismatch: declined -> UNKNOWN with unmatched cut points, no
 #    crash, no proof, no refutation. (Non-strict: inconclusive is a warning.)
 lec neg_wmis leaf lg_leaf_prp lg_wmis
-grep -q "UNKNOWN" "$W/neg_wmis.out" || fail "wmis: expected UNKNOWN, got: $(tail -2 "$W/neg_wmis.out")"
+grep -qE "UNPAIRED|UNCHECKED|UNSUPPORTED" "$W/neg_wmis.out" || fail "wmis: expected UNPAIRED/UNSUPPORTED, got: $(tail -2 "$W/neg_wmis.out")"
 grep -q "PROVEN equivalent" "$W/neg_wmis.out" && fail "wmis: width-sum mismatch must not PROVE"
 grep -q "REFUTED" "$W/neg_wmis.out" && fail "wmis: width-sum mismatch must not REFUTE"
 grep -q "cut point(s)" "$W/neg_wmis.out" || fail "wmis: unmatched cut points not reported: $(tail -2 "$W/neg_wmis.out")"
-echo "PASS: width-sum mismatch declines the bundle (UNKNOWN + unmatched cut points, no crash)"
+echo "PASS: width-sum mismatch declines the bundle (undecided + unmatched cut points, no crash)"
 
 # 5. nested bundle.
 lec pos_nest leaf2 lg_leaf2_prp lg_leaf2_sv

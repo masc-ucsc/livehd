@@ -141,6 +141,22 @@ suppression — see "Compiler Warnings Policy" above).
 
 Enforced by `scripts/contracts/diff_no_compile_flags_touched.sh`.
 
+### Defaults are a contract
+
+Every user-visible default (a pass/`--set` option default, a compile recipe
+default, a CLI flag default) is part of the contract. Do **not** change a
+default unless the user **explicitly approves that specific change** in the
+conversation. Never auto-approve, and never infer approval from a related
+request, a test that "expects" another value, or a performance win. If a fix
+seems to need a different default, keep the default, add an opt-in option,
+and ask.
+
+Example: `compile.upass.inline` defaults to `false` (comb calls stay module
+instances, so hierarchy, LEC per-def checks and debug keep their boundaries).
+It was once flipped to `true` without approval; that is exactly what this rule
+forbids. (`pass.legalize` inlining a state-free instance on a combinational
+false loop is a structural repair, not a default, and stays.)
+
 ## Running Pyrope Tests
 
 - **Single test (harness)**: `python3 inou/prp/tests/pyrope_test.py -i inou/prp/tests/<dir>/<test>.prp`

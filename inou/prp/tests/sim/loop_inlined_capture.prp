@@ -12,7 +12,7 @@ comb accumulate(x:U8) -> (y:U16) {
 mod loop_inlined_capture(x:U8) -> (y:U16@[0]) {
   const a = accumulate(x=x)
   const b = accumulate(x=x ^ 3)
-  y = a + b
+  wrap y = a + b
 }
 test loop_inlined_capture.values {
   mut dut = loop_inlined_capture

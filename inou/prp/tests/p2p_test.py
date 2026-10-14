@@ -26,7 +26,7 @@ import shutil
 import subprocess
 import sys
 
-from lec import run_lec, verdict
+from lec import acceptable, run_lec, verdict
 
 CHECK_TIMEOUT = 20  # internal seconds; the external watchdog allows twice this
 
@@ -96,7 +96,7 @@ def main():
          "--impl-top", impl_top, "--ref-top", ref_top, "--workdir", os.path.join(work, "w_check")],
         timeout=CHECK_TIMEOUT)
 
-    if verdict(chk) == "proven":
+    if acceptable(verdict(chk)):
         print("{} - p2p - success (top:{})".format(name, top))
         return 0
     print("{} - p2p - FAILED: not equivalent (top:{})".format(name, top))

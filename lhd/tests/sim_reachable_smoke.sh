@@ -19,7 +19,7 @@ test second.check {
 }
 PRP
 args=(sim "$work/design.prp" --workdir "$work/SW" --set sim.tune.backend=llvm
-      --set sim.tune.profile=off --set sim.jobs=2 --set sim.ninja=false)
+      --set sim.tune.profile=off --set lhd.jobs=2 --set sim.ninja=false)
 "$LHD" "${args[@]}" --setup-only > "$work/setup.log" 2>&1 || { cat "$work/setup.log"; exit 1; }
 # If the host build still enumerates all generated modules, these unused
 # translation units/objects force a failure. Both live DUTs must still execute.

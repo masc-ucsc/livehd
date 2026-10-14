@@ -1381,6 +1381,18 @@ bool Cgen_llvm::copy_state(size_t destination, size_t source, size_t words, std:
   return true;
 }
 
+size_t Cgen_llvm::instruction_count() const {
+  size_t count = 0;
+  if (impl_ && impl_->module) {
+    for (const auto& fn : *impl_->module) {
+      for (const auto& block : fn) {
+        count += block.size();
+      }
+    }
+  }
+  return count;
+}
+
 bool Cgen_llvm::write_object(std::string_view path, std::string& error, bool track_changed, std::string_view cache_path,
                              bool* reused) {
   impl_->cache_path   = cache_path;
@@ -1666,6 +1678,224 @@ bool Cgen_llvm::inline_body(const Inline_body& body, const std::vector<Value>& i
   auto* block = continuation->getParent();
   continuation->eraseFromParent();
   b.SetInsertPoint(block);
+  return true;
+}
+
+bool Cgen_llvm::inline_loop(const Inline_body& body, const Loop_layout& layout, uint64_t count, int64_t first, int64_t step,
+                            const std::vector<Value>& inputs, std::vector<Value>& outputs, std::string& error) {
+  if (inputs.size() != layout.inputs.size() || layout.bindings.size() != body.inputs.size()) {
+    error = "inline loop input count mismatch";
+    return false;
+  }
+  const auto input_valid = [&](std::optional<size_t> input) { return !input || *input < layout.inputs.size(); };
+  if (!input_valid(layout.index) || !input_valid(layout.activation)
+      || (layout.next_active && (!layout.activation || *layout.next_active >= body.outputs.size()))) {
+    error = "inline loop has an invalid index or activation binding";
+    return false;
+  }
+  if (layout.index_bits && (!layout.index || layout.index_bits > layout.inputs[*layout.index].first)) {
+    error = "inline loop index range exceeds its declared port";
+    return false;
+  }
+  for (const auto& binding : layout.bindings) {
+    if (binding.input >= layout.inputs.size() || binding.bit >= layout.inputs[binding.input].first) {
+      error = "inline loop input slice is outside its port";
+      return false;
+    }
+  }
+  std::vector<bool> carry_inputs(layout.inputs.size(), false), carry_outputs(body.outputs.size(), false);
+  for (const auto& [input, output] : layout.carries) {
+    if (input >= layout.inputs.size() || output >= body.outputs.size() || carry_inputs[input] || carry_outputs[output]
+        || layout.index == input || layout.activation == input) {
+      error = "inline loop has an invalid or overlapping carry binding";
+      return false;
+    }
+    carry_inputs[input] = carry_outputs[output] = true;
+  }
+  auto parsed = llvm::parseBitcodeFile(llvm::MemoryBufferRef(body.bitcode, "inline.loop"), impl_->context);
+  if (!parsed) {
+    error = llvm::toString(parsed.takeError());
+    return false;
+  }
+  auto* source = (*parsed)->getFunction("__lhd_shared_color");
+  if (!source) {
+    error = "inline loop has no body";
+    return false;
+  }
+  source->setName("__lhd_inline_loop_body");
+  for (auto& fn : **parsed) {
+    if (!fn.isDeclaration() && &fn != source) {
+      fn.setLinkage(llvm::GlobalValue::InternalLinkage);  // the body's own native-loop entry is dead here
+    }
+  }
+  if (llvm::Linker::linkModules(*impl_->module, std::move(*parsed))) {
+    error = "could not import inline loop body";
+    return false;
+  }
+  auto* callee = impl_->module->getFunction("__lhd_inline_loop_body");
+  if (!callee) {
+    error = "imported inline loop body is missing";
+    return false;
+  }
+
+  auto& b       = impl_->builder;
+  auto& context = impl_->context;
+  auto* ptr     = llvm::PointerType::getUnqual(context);
+  auto* i64     = b.getInt64Ty();
+  auto* fn      = impl_->function;
+
+  std::vector<llvm::Value*> initial;
+  initial.reserve(inputs.size());
+  for (size_t i = 0; i < inputs.size(); ++i) {
+    initial.push_back(impl_->get(resize(inputs[i], layout.inputs[i].first, layout.inputs[i].second)));
+    if (initial.back() == nullptr) {
+      error = "inline loop operand is invalid";
+      return false;
+    }
+  }
+  size_t input_words = 0, output_words = 0;
+  std::vector<size_t> input_offsets, output_offsets;
+  for (const auto& [width, unsign] : body.inputs) {
+    (void)unsign;
+    input_offsets.push_back(input_words);
+    input_words += word_count(width);
+  }
+  for (const auto& [width, unsign] : body.outputs) {
+    (void)unsign;
+    output_offsets.push_back(output_words);
+    output_words += word_count(width);
+  }
+  auto* packed_in  = impl_->local_words(input_words, "loop.inputs");
+  auto* packed_out = impl_->local_words(output_words, "loop.outputs");
+  auto* changed    = impl_->local_words(word_count(static_cast<uint32_t>(body.outputs.size())), "loop.changed");
+  for (size_t i = 0; i < output_words; ++i) {
+    b.CreateStore(b.getInt64(0), b.CreateConstInBoundsGEP1_64(i64, packed_out, i));
+  }
+  for (const auto& [input, output] : layout.carries) {
+    const auto width = body.outputs[output].first;
+    impl_->store_packed(cast_integer(b, initial[input], width, layout.inputs[input].second), packed_out, output_offsets[output], width);
+  }
+  const auto bound = [&](size_t i, llvm::Value* value) {
+    const auto& binding = layout.bindings[i];
+    if (binding.bit) {
+      value = b.CreateLShr(value, binding.bit);
+    }
+    return cast_integer(b, value, body.inputs[i].first, layout.inputs[binding.input].second);
+  };
+  // Invariant ports are packed once, ahead of the loop.
+  for (size_t i = 0; i < layout.bindings.size(); ++i) {
+    const auto input = layout.bindings[i].input;
+    if (!carry_inputs[input] && layout.index != input && layout.activation != input) {
+      impl_->store_packed(bound(i, initial[input]), packed_in, input_offsets[i], body.inputs[i].first);
+    }
+  }
+  auto* start  = b.GetInsertBlock();
+  auto* header = llvm::BasicBlock::Create(context, "inline.loop", fn);
+  auto* bodyb  = llvm::BasicBlock::Create(context, "inline.body", fn);
+  auto* done   = llvm::BasicBlock::Create(context, "inline.done", fn);
+  b.CreateBr(header);
+  b.SetInsertPoint(header);
+  auto* ordinal = b.CreatePHI(i64, 2, "ordinal");
+  ordinal->addIncoming(b.getInt64(0), start);
+  std::vector<llvm::Value*>   values = initial;
+  std::vector<llvm::PHINode*> carries;
+  for (const auto& [input, output] : layout.carries) {
+    (void)output;
+    auto* phi = b.CreatePHI(initial[input]->getType(), 2, "carry");
+    phi->addIncoming(initial[input], start);
+    carries.push_back(phi);
+    values[input] = phi;
+  }
+  llvm::PHINode* active = nullptr;
+  if (layout.activation) {
+    active = b.CreatePHI(initial[*layout.activation]->getType(), 2, "active");
+    active->addIncoming(initial[*layout.activation], start);
+    values[*layout.activation] = active;
+  }
+  b.CreateCondBr(b.CreateICmpULT(ordinal, b.getInt64(count)), bodyb, done);
+  b.SetInsertPoint(bodyb);
+  if (layout.index) {
+    auto* index = b.CreateAdd(b.getInt64(static_cast<uint64_t>(first)), b.CreateMul(ordinal, b.getInt64(static_cast<uint64_t>(step))));
+    if (layout.index_bits) {
+      index = cast_integer(b, index, layout.index_bits, true);
+    }
+    values[*layout.index] = cast_integer(b, index, layout.inputs[*layout.index].first, layout.index_bits != 0);
+  }
+  for (size_t i = 0; i < layout.bindings.size(); ++i) {
+    const auto input = layout.bindings[i].input;
+    if (carry_inputs[input] || layout.index == input || layout.activation == input) {
+      impl_->store_packed(bound(i, values[input]), packed_in, input_offsets[i], body.inputs[i].first);
+    }
+  }
+  llvm::SmallVector<llvm::Value*> args;
+  if (body.scalar) {
+    for (size_t i = 0; i < layout.bindings.size(); ++i) {
+      args.push_back(cast_integer(b, impl_->load_packed(packed_in, input_offsets[i], body.inputs[i].first, "arg"), 64, true));
+    }
+    args.push_back(llvm::ConstantPointerNull::get(ptr));
+  } else {
+    args = {packed_in, packed_out, changed, llvm::ConstantPointerNull::get(ptr)};
+  }
+  auto* call = b.CreateCall(callee, args);
+  if (body.scalar) {
+    uint32_t bit = 0;
+    for (size_t i = 0; i < body.outputs.size(); ++i) {
+      const auto width = body.outputs[i].first;
+      impl_->store_packed(cast_integer(b, b.CreateLShr(call, bit), width, true), packed_out, output_offsets[i], width);
+      bit += width;
+    }
+  }
+  auto*                     is_active = active ? b.CreateICmpNE(active, llvm::ConstantInt::get(active->getType(), 0)) : b.getTrue();
+  std::vector<llvm::Value*> next_carries;
+  for (size_t i = 0; i < layout.carries.size(); ++i) {
+    const auto [input, output] = layout.carries[i];
+    const auto  width          = body.outputs[output].first;
+    auto*       next = cast_integer(b, impl_->load_packed(packed_out, output_offsets[output], width, "next.carry"),
+                                    layout.inputs[input].first, body.outputs[output].second);
+    next_carries.push_back(b.CreateSelect(is_active, next, carries[i]));
+  }
+  llvm::Value* next_active = active;
+  if (layout.next_active) {
+    const auto output = *layout.next_active;
+    const auto width  = body.outputs[output].first;
+    next_active       = cast_integer(b, impl_->load_packed(packed_out, output_offsets[output], width, "next.active"),
+                               layout.inputs[*layout.activation].first, body.outputs[output].second);
+    next_active       = b.CreateSelect(is_active, next_active, llvm::ConstantInt::get(active->getType(), 0));
+  }
+  // Carry outputs publish the retained carry, including inactive/zero trips.
+  for (size_t i = 0; i < layout.carries.size(); ++i) {
+    const auto [input, output] = layout.carries[i];
+    const auto width           = body.outputs[output].first;
+    impl_->store_packed(cast_integer(b, next_carries[i], width, layout.inputs[input].second), packed_out, output_offsets[output], width);
+  }
+  auto* next_ordinal = b.CreateAdd(ordinal, b.getInt64(1));
+  auto* latch        = b.GetInsertBlock();
+  ordinal->addIncoming(next_ordinal, latch);
+  for (size_t i = 0; i < carries.size(); ++i) {
+    carries[i]->addIncoming(next_carries[i], latch);
+  }
+  if (active) {
+    active->addIncoming(next_active, latch);
+  }
+  auto* backedge = b.CreateBr(header);
+  auto* disable  = llvm::MDNode::get(context, {llvm::MDString::get(context, "llvm.loop.unroll.disable")});
+  auto* loop_id  = llvm::MDNode::getDistinct(context, {nullptr, disable});
+  loop_id->replaceOperandWith(0, loop_id);
+  backedge->setMetadata(llvm::LLVMContext::MD_loop, loop_id);
+  b.SetInsertPoint(done);
+  outputs.clear();
+  for (size_t i = 0; i < body.outputs.size(); ++i) {
+    const auto [width, unsign] = body.outputs[i];
+    outputs.push_back(impl_->remember(impl_->load_packed(packed_out, output_offsets[i], width, "loop.result"), width, unsign));
+  }
+  // Inline explicitly: a large body still stays ONE copy inside the rolled loop.
+  llvm::InlineFunctionInfo info;
+  if (!llvm::InlineFunction(*call, info).isSuccess()) {
+    error = "could not inline the body into the rolled loop";
+    return false;
+  }
+  callee->eraseFromParent();
+  b.SetInsertPoint(done);
   return true;
 }
 

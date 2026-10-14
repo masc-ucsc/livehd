@@ -22,7 +22,7 @@ run() {
   fi
 }
 lec() {  # lec REF IMPL NAME
-  run lec --ref lg:"$1" --impl lg:"$2" --top instance_out_struct_ident.top --set formal.timeout=60 --set pass.satopt=false \
+  run lec --set formal.effort=proof --ref lg:"$1" --impl lg:"$2" --top instance_out_struct_ident.top --set formal.timeout=60 --set pass.satopt=false \
     --workdir "$W/lec-$3" --result-json "$W/lec-$3.json"
 }
 run compile "$SRC" --top top --workdir "$W/default" --emit-dir lg:"$W/original" --result-json "$W/default.json"
@@ -31,11 +31,11 @@ run compile "$SRC" --top top --set pass.satopt=true --workdir "$W/explicit" \
 lec "$W/original" "$W/compiled" compiled
 # LEC leaves satopt disabled for both source and compiled sides by default;
 # explicit opt-in still optimizes both source sides.
-run lec --ref lg:"$W/original" --impl lg:"$W/compiled" --top instance_out_struct_ident.top \
+run lec --set formal.effort=proof --ref lg:"$W/original" --impl lg:"$W/compiled" --top instance_out_struct_ident.top \
   --workdir "$W/lec-default" --result-json "$W/lec-default.json"
-run formal lec --ref pyrope:"$SRC" --impl pyrope:"$SRC" --top top \
+run formal lec --set formal.effort=proof --ref pyrope:"$SRC" --impl pyrope:"$SRC" --top top \
   --workdir "$W/lec-source" --result-json "$W/lec-source.json"
-run formal lec --ref pyrope:"$SRC" --impl pyrope:"$SRC" --top top --set pass.satopt=true \
+run formal lec --set formal.effort=proof --ref pyrope:"$SRC" --impl pyrope:"$SRC" --top top --set pass.satopt=true \
   --workdir "$W/lec-source-on" --result-json "$W/lec-source-on.json"
 
 # Standalone: the input lg: is left alone, the optimized design goes to lg:.
@@ -100,20 +100,20 @@ for mode in on off explicit default-synth; do
   [[ "$mode" != off ]] || extra+=(--set pass.satopt=false)
   [[ "$mode" != explicit ]] || extra+=(--config "$W/satopt-off.toml" --set pass.satopt=true)
   run synth "$SRC" --top top --set synth.liberty="$LIB" --set synth.opentimer=false \
-    --set synth.threads=1 ${extra[@]+"${extra[@]}"} --emit-dir lg:"$W/$mode-mapped" \
+    --set lhd.jobs=1 ${extra[@]+"${extra[@]}"} --emit-dir lg:"$W/$mode-mapped" \
     --workdir "$W/$mode" --result-json "$W/$mode.json"
 done
 run pass liberty gensim "$LIB" --emit-dir lg:"$W/models" --workdir "$W/model-work"
 for mode in on off explicit default-synth; do
-  run lec --impl lg:"$W/$mode-mapped" --ref lg:"$W/original" --lib lg:"$W/models" --set pass.satopt=false \
+  run lec --set formal.effort=proof --impl lg:"$W/$mode-mapped" --ref lg:"$W/original" --lib lg:"$W/models" --set pass.satopt=false \
     --top instance_out_struct_ident.top --set formal.timeout=60 \
     --workdir "$W/lec-$mode"
 done
 run synth "$SRC" --top top --set synth.liberty="$LIB" --set synth.opentimer=false \
-  --set pass.satopt=true --set synth.threads=1 --workdir "$W/on" --result-json "$W/warm.json"
+  --set pass.satopt=true --set lhd.jobs=1 --workdir "$W/on" --result-json "$W/warm.json"
 # Synthesis of an lg: input maps what compile produced: no satopt by default.
 run synth lg:"$W/original" --top instance_out_struct_ident.top --set synth.liberty="$LIB" --set synth.opentimer=false \
-  --set synth.threads=1 --workdir "$W/lgin" --result-json "$W/lgin.json"
+  --set lhd.jobs=1 --workdir "$W/lgin" --result-json "$W/lgin.json"
 python3 - "$W" "$CTRL_CONES" <<'PY'
 import json, pathlib, re, sys
 w = pathlib.Path(sys.argv[1])

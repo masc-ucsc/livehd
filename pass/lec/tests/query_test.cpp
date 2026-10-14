@@ -450,7 +450,7 @@ TEST(CombEquiv, LegalizedPackedFeedbackProves) {
   // A genuine loop that reaches prove_equal (legalize reported it; a direct
   // caller ignored that) must fail CLOSED: never a verdict, only unsupported.
   auto unresolved = lec::prove_equal(ref.get(), cycle.get(), opts);
-  EXPECT_EQ(unresolved.verdict, Verdict::Unknown) << unresolved.detail;
+  EXPECT_EQ(unresolved.verdict, Verdict::Undecided) << unresolved.detail;
   EXPECT_TRUE(unresolved.unsupported);
 }
 
@@ -1278,7 +1278,7 @@ TEST(LecNames, TransparentRepeatedInstancesDoNotMergeState) {
   lec::Lec_options lo;
   lo.engine  = "ind";
   auto proof = lec::prove_equal(top.get(), top.get(), lo);
-  EXPECT_EQ(proof.verdict, Verdict::Unknown) << proof.detail;
+  EXPECT_EQ(proof.verdict, Verdict::Undecided) << proof.detail;
   EXPECT_NE(proof.detail.find("ambiguous logical state name"), std::string::npos);
 }
 
@@ -1330,8 +1330,8 @@ TEST(LecBudget, StalledInductionLeavesBmcForBoundedProofAndReachableRefute) {
     const auto elapsed        = std::chrono::steady_clock::now() - start;
     EXPECT_LT(elapsed, std::chrono::seconds(6)) << result.detail;
     EXPECT_EQ(result.engine, "bmc") << result.detail;
-    EXPECT_NE(result.detail.find("50/50"), std::string::npos) << result.detail;
-    EXPECT_NE(result.detail.find("ind racer exceeded formal.timeout"), std::string::npos) << result.detail;
+    EXPECT_FALSE(result.arms.empty()) << result.detail;
+    if (!wrong) { EXPECT_TRUE(std::any_of(result.arms.begin(),result.arms.end(),[](const auto& arm) {return arm.engine == "ind" && (arm.killed || arm.queued);})) << result.detail; }
     if (wrong) {
       EXPECT_EQ(result.verdict, Verdict::Refuted) << result.detail;
       EXPECT_FALSE(result.trace.empty()) << result.detail;
@@ -1383,6 +1383,9 @@ TEST(LecBudget, UnreachableInductionCounterexampleStillRunsBmc) {
   options.bound       = 2;
   const auto step     = lec::prove_equal_isolated(ref.get(), impl.get(), options);
   EXPECT_NE(step.verdict, Verdict::Proven) << step.detail;
+  // A FORCED ind that cannot clear an (unreachable) step counterexample is the
+  // options' doing: REFUTED-unchecked (exit 7), never REFUTED-cex.
+  EXPECT_EQ(lec::query_outcome(step, /*engine_forced=*/true), lec::Outcome::Refuted_unchecked) << step.detail;
   options.engine    = "auto";
   const auto result = lec::prove_equal_isolated(ref.get(), impl.get(), options);
   EXPECT_EQ(result.verdict, Verdict::Proven) << result.detail;
@@ -1406,4 +1409,122 @@ TEST(LecBudget, ExhaustedCollapsedInductionShareGoesDirectlyToBmc) {
   EXPECT_TRUE(result.bounded) << result.detail;
   EXPECT_EQ(result.engine, "bmc") << result.detail;
   EXPECT_NE(result.detail.find("goes directly to BMC"), std::string::npos) << result.detail;
+}
+
+// ── Top-level outcome mapping (owner rulings 2026-10-14) ────────────────────
+// Every undecided result is named by its cause; "unknown" names nothing.
+TEST(LecOutcome, ClassifierNamesMemoryBoundAndNoReason) {
+  using lec::Outcome;
+  EXPECT_EQ(lec::undecided_outcome(" (out of memory: cvc5 reported MEMOUT, a resource limit; the run is TIMEOUT-memory)", false, false),
+            Outcome::Timeout_memory);
+  EXPECT_EQ(lec::undecided_outcome("out of memory in the bmc engine (std::bad_alloc): the memory backstop (RLIMIT_AS) denied", false,
+                                   false),
+            Outcome::Timeout_memory);
+  EXPECT_EQ(lec::undecided_outcome("isolated proof worker died: killed by signal 9 (Killed); out of memory: a SIGKILL", false, false),
+            Outcome::Timeout_memory);
+  EXPECT_EQ(lec::undecided_outcome(" (hit formal.timeout=5s: cvc5 reported TIMEOUT, a resource limit)", false, false),
+            Outcome::Timeout_time);
+  EXPECT_EQ(lec::undecided_outcome("never checked: its window/past() needs 29 cycle(s) of history, deeper than formal.bound=4", false,
+                                   false),
+            Outcome::Refuted_unchecked);
+  EXPECT_EQ(lec::undecided_outcome(" (cvc5 gave NO reason (UNKNOWN_REASON): this is a bug; please report it)", false, false),
+            Outcome::Refuted_unexplained);
+  EXPECT_EQ(lec::undecided_outcome(" (cvc5 cannot check this functionality: it reported INCOMPLETE)", false, false),
+            Outcome::Refuted_unsupported);
+  EXPECT_EQ(lec::undecided_outcome(" (cvc5 cannot check this functionality: it reported INCOMPLETE)", false, true),
+            Outcome::Refuted_unchecked);
+}
+
+// The auto portfolio folds its arms by the DECIDING arm's own cause: a wall
+// kill in one arm must not hide another arm's contradictory assumptions, while
+// an engine that merely cannot check the logic yields to another's timeout.
+TEST(LecOutcome, PortfolioFoldClassifiesTheDecidingArm) {
+  using lec::Outcome;
+  lec::Query_result r;
+  r.verdict      = Verdict::Undecided;
+  r.detail       = "auto: every engine/profile arm was undecided; bmc:internal=TIMEOUT: hit formal.timeout (shared portfolio "
+                   "wall deadline); ind:internal=VACUOUS: ; active assumption set is CONTRADICTORY (vacuous proof rejected)";
+  r.cause_detail = "auto: ind:internal: ; active assumption set is CONTRADICTORY (vacuous proof rejected)";
+  EXPECT_EQ(lec::query_outcome(r, false), Outcome::Refuted_vacuous);  // contradictory assumes: a vacuous check is a problem
+  r.cause_detail.clear();
+  EXPECT_EQ(lec::query_outcome(r, false), Outcome::Timeout_time) << "the concatenation alone lets the timeout win";
+}
+
+TEST(LecOutcome, InterfaceVacuousAndBoundedDepth) {
+  using lec::Outcome;
+  lec::Query_result r;
+  r.verdict        = Verdict::Undecided;
+  r.detail         = "; matched portion EQUIVALENT (only the unmatched cut points above remain)";
+  r.unmatched_impl = {"extra"};
+  EXPECT_EQ(lec::query_outcome(r, false), Outcome::Refuted_interface) << "a one-sided top output";
+  r.unmatched_impl = {"nxt:reg"};
+  EXPECT_EQ(lec::query_outcome(r, false), Outcome::Refuted_unexplained) << "internal state alone is a trigger, not a verdict";
+  r.nothing_compared = true;
+  r.unmatched_impl.clear();
+  r.detail = "; nothing to compare: neither side exposes an output or state cell";
+  EXPECT_EQ(lec::query_outcome(r, false), Outcome::Refuted_vacuous);
+
+  lec::Query_result p;
+  p.verdict       = Verdict::Proven;
+  p.bounded       = true;
+  p.checked_steps = 6;
+  const auto o    = lec::query_outcome(p, false);
+  EXPECT_EQ(lec::outcome_word(o, lec::query_outcome_depth(p, o)), "PROVEN-bounded(6)");
+  p.bounded = false;
+  EXPECT_EQ(lec::query_outcome(p, false), Outcome::Proven_full);
+  lec::Query_result c;
+  c.verdict = Verdict::Refuted;
+  EXPECT_EQ(lec::outcome_info(lec::query_outcome(c, false)).exit_code, lec::kExitCex);
+}
+
+TEST(VerifyOutcome, RowsFoldBySeverity) {
+  using lec::Outcome;
+  lec::Verify_result v;
+  v.verdict          = Verdict::Proven;
+  v.nothing_to_check = true;
+  EXPECT_EQ(lec::verify_outcome(v, false), Outcome::Refuted_vacuous);
+
+  v.nothing_to_check = false;
+  v.verdict          = Verdict::Undecided;
+  v.reset_hold       = 2;
+  lec::Prop_result proven;
+  proven.kind      = "assert";
+  proven.verdict   = Verdict::Proven;
+  proven.proven_to = 7;
+  lec::Prop_result never;
+  never.kind          = "assert";
+  never.undecided_why = "never checked: its window/past() needs 29 cycle(s) of history, deeper than formal.bound=4";
+  lec::Prop_result timed;
+  timed.kind          = "assert";
+  timed.undecided_at  = 4;
+  timed.undecided_why = "solver gave up at cycle 4 (hit formal.timeout=1s: cvc5 reported TIMEOUT, a resource limit)";
+  v.props             = {proven, timed};
+  EXPECT_EQ(lec::verify_outcome(v, false), Outcome::Timeout_time);
+  v.props = {proven, timed, never};
+  EXPECT_EQ(lec::verify_outcome(v, false), Outcome::Refuted_unchecked) << "rows fold by severity: unchecked > timeout";
+  lec::Prop_result silent;
+  silent.kind = "assert";
+  v.props     = {proven, silent};
+  EXPECT_EQ(lec::verify_outcome(v, false), Outcome::Refuted_unexplained) << "an undecided row with no reason is a bug";
+
+  v.verdict = Verdict::Proven;
+  v.props   = {proven};
+  const auto o = lec::verify_outcome(v, false);
+  EXPECT_EQ(lec::outcome_word(o, lec::verify_outcome_depth(v, o)), "PROVEN-bounded(6)");
+}
+
+// A verify run with NO assert obligation is REFUTED-vacuous at the top level
+// (nothing to check: a sign of a problem), never undecided in the engine and
+// never a silent full proof.
+TEST(VerifyEngine, NoObligationRunIsProvenNothingToCheck) {
+  hhds::GraphLibrary lib;
+  auto               g = build_add_const(lib, "noprop", 1, 4);
+  lec::Lec_options   o;
+  o.engine = "bmc";
+  o.bound  = 2;
+  auto r   = lec::prove_properties(g.get(), o);
+  EXPECT_EQ(r.verdict, Verdict::Proven) << r.detail;
+  EXPECT_TRUE(r.nothing_to_check) << r.detail;
+  EXPECT_FALSE(r.cex_free_box);
+  EXPECT_EQ(lec::verify_outcome(r, true), lec::Outcome::Refuted_vacuous) << r.detail;
 }

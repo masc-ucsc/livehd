@@ -2,7 +2,8 @@
 # This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 #
 # compile.upass.inline (pass.upass `inline` label). Inlining a fully-defined
-# `comb` is ON by default. Explicit inline=false emits a directly-named comb
+# `comb` is OFF by default (a default is a contract; see AGENTS.md). inline=false
+# (the default) emits a directly-named comb
 # with runtime arguments as a Sub module instance. Its standalone module is
 # compiled either way. A comb call with all-COMPTIME-CONSTANT arguments still inlines (so it
 # folds to a value) regardless of the flag.
@@ -10,8 +11,8 @@
 # Asserts:
 #   (1) explicit inline=false INSTANTIATES: `top` instantiates the comb (twice),
 #       and a comb-calling-comb body instantiates the inner comb too;
-#   (2) default and explicit inline=true both FLATTEN: `top`
-#       has no instance of the comb;
+#   (2) the default INSTANTIATES like explicit inline=false, and explicit
+#       inline=true FLATTENS: `top` has no instance of the comb;
 #   (3) the instanced and flattened builds are PROVEN equivalent (logic is the
 #       same; instancing is a pure structural change);
 #   (4) a const-argument comb call still FOLDS at the default (comptime
@@ -58,19 +59,17 @@ n=$(grep -Ec '^addone[[:space:]]+\\?[A-Za-z_]' "$W/voff/dut.twice.v")
 [ "$n" -eq 2 ] || fail "inline=false: twice.v should instantiate addone twice, found $n"
 echo "PASS(1): inline=false instantiates the comb (incl. comb-in-comb)"
 
-# ── (2) default and explicit inline=true both flatten ────────────────────────
+# ── (2) default instantiates; explicit inline=true flattens ─────────────────
 "$LHD" compile "$W/dut.prp" --top top \
   --emit-dir "verilog:$W/vdefault/" --workdir "$W/wdefault" -q >/dev/null 2>&1 || fail "compile failed"
-if has_inst "$W/vdefault/dut.top.v" '(addone|twice)'; then
-  fail "default: top.v instantiates the comb (expected flattened)"
-fi
-"$LHD" compile "$W/dut.prp" --top top  \
+has_inst "$W/vdefault/dut.top.v" 'addone' || fail "default: top.v does not instantiate addone (default is inline=false)"
+"$LHD" compile "$W/dut.prp" --top top --set compile.upass.inline=true \
   --emit-dir "lg:$W/on/" --emit-dir "verilog:$W/von/" --workdir "$W/won" -q >/dev/null 2>&1 \
   || fail "inline=true compile failed"
 if has_inst "$W/von/dut.top.v" '(addone|twice)'; then
   fail "inline=true: top.v instantiates the comb (expected flattened)"
 fi
-echo "PASS(2): default and inline=true flatten the comb into top"
+echo "PASS(2): default instantiates the comb; inline=true flattens it into top"
 
 # ── (3) instanced and flattened builds are PROVEN equivalent ────────────────
 # Instancing preserves behavior. Compare the emitted hierarchical and flat
@@ -87,7 +86,7 @@ cat >"$W/simple.prp" <<'EOF'
 comb addone(a:U8) -> (r:U8) { wrap r = a + 1 }
 pub comb simple_top(x:U8) -> (o:U8) { o = addone(x) }
 EOF
-"$LHD" compile "$W/simple.prp" --top simple_top  \
+"$LHD" compile "$W/simple.prp" --top simple_top --set compile.upass.inline=true \
   --emit-dir "lg:$W/son/" --workdir "$W/sonw" -q >/dev/null 2>&1 || fail "simple inline=true compile failed"
 "$LHD" compile "$W/simple.prp" --top simple_top --set compile.upass.inline=false \
   --emit-dir "lg:$W/soff/" --workdir "$W/soffw" -q >/dev/null 2>&1 || fail "simple default compile failed"
@@ -155,4 +154,4 @@ grep -q "only .mod. bodies may instantiate" "$W/negd.jsonl" \
   || fail "wrong/absent diagnostic for comb-calls-mod: $(cat "$W/negd.jsonl" 2>/dev/null)"
 echo "PASS(6): comb-calls-mod still rejected"
 
-echo "ALL PASS: compile.upass.inline (explicit instance, default flatten, const-fold, default LEC)"
+echo "ALL PASS: compile.upass.inline (default instance, explicit flatten, const-fold, default LEC)"

@@ -26,7 +26,7 @@ def combo(job):
     src=w/f'{macro}.v'
     name=f'{macro}-{ware}-{stop}'
     args=['synth',src,'--top','top','--set',f'synth.liberty={lib}','--set','synth.opentimer=false',
-          '--set','synth.threads=1','--set',f'color.ware_{kind}={ware}','--set',f'color.synth.stop_{kind}={stop}',
+          '--set','lhd.jobs=1','--set',f'color.ware_{kind}={ware}','--set',f'color.synth.stop_{kind}={stop}',
           '--workdir',w/name,'--emit-dir',f'lg:{w}/{name}-net','--emit',f'verilog:{w}/{name}.v']
     if stop=='false' and ware=='true':
         args+=['--set','synth.tune.profile=on']  # candidate trials/cache run only on explicit request
@@ -50,12 +50,12 @@ def narrow(job):
     src=w/f'{name}.v'
     src.write_text(f'module top(input {signed} [{data_bits-1}:0] a, input [{count_bits-1}:0] s, output [8:0] y); assign y=a {shift} {amount}; endmodule\n')
     run('synth',src,'--top','top','--set',f'synth.liberty={lib}','--set','synth.opentimer=false',
-        '--set','synth.threads=1','--workdir',w/name,'--emit-dir',f'lg:{w}/{name}-net')
+        '--set','lhd.jobs=1','--workdir',w/name,'--emit-dir',f'lg:{w}/{name}-net')
     run('lec','--impl',f'lg:{w}/{name}-net','--ref',src,'--lib',f'lg:{w}/models','--top','top','--workdir',w/f'lec-{name}')
     return src
 
 # Every case below is independent (its own workdir, its own emitted netlist), so
-# they run concurrently; each `lhd` is pinned to synth.threads=1 and the BUILD
+# they run concurrently; each `lhd` is pinned to lhd.jobs=1 and the BUILD
 # target reserves the fan-out with a cpu: tag.
 jobs=[(k,m,wa,st) for k,_,m in SOURCES for wa in ('true','false') for st in ('true','false')]
 narrows=[(d,c,a,sh,sg) for d,c,a in ((257,9,'s'),(17,32,'s'),(4,32,"32'd128"))

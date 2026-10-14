@@ -540,7 +540,7 @@ void Pass_formal::work(Eprp_var& var) {
       auto hr           = livehd::lec::prove_properties(root, ho, &sub_lib);
 
       if (occurrences.size() != hr.props.size()) {
-        // The encoder refused (oversize design, unorderable cone) or returned a
+        // The encoder refused (an unmodeled cell, an unorderable cone) or returned a
         // partial result. The correlation is POSITIONAL, so a mismatch means we
         // cannot say which verdict belongs to which property. Skipping the root
         // is conservative — nothing is discharged, every contract stays live as
@@ -579,7 +579,11 @@ void Pass_formal::work(Eprp_var& var) {
         }
         st.failed              = true;
         const std::string path = pr.instance.empty() ? std::string{root->get_name()} : pr.instance;
-        if (pr.verdict == livehd::lec::Verdict::Refuted) {
+        // A refute whose trace may rest on a free blackbox output
+        // (cex_free_box) is still REFUTED-cex for `formal verify`, but the
+        // compile tier keeps its conservative wording for it: "could not be
+        // proven", exactly as before the engine stopped demoting it.
+        if (pr.verdict == livehd::lec::Verdict::Refuted && !hr.cex_free_box) {
           livehd::diag::err("pass.formal", "assume-refuted", "comptime")
               .msg("child assume{} is refuted at hierarchy occurrence '{}'", pr.loc.empty() ? std::string{} : " at " + pr.loc, path)
               .hint("fix the binding, rewrite the contract as assume_nocheck, or set formal.assume_check=false")
@@ -1114,8 +1118,8 @@ void Pass_formal::work(Eprp_var& var) {
           uint32_t code = (pr.kind == "assert_always") ? gu::kFormalAssertAlways : gu::kFormalAssert;
           if (pr.verdict == livehd::lec::Verdict::Proven && pr.unbounded) {
             gu::set_proven(node.base_node(), code);  // inductive -> holds forever -> elide
-          } else if (pr.verdict == livehd::lec::Verdict::Refuted && pr.refuted_at >= pres.reset_hold && pres.reset_detected
-                     && is_top && !downgrade_refute) {
+          } else if (pr.verdict == livehd::lec::Verdict::Refuted && !pres.cex_free_box && pr.refuted_at >= pres.reset_hold
+                     && pres.reset_detected && is_top && !downgrade_refute) {
             // A reset prologue actually pinned the initial state, so the BMC CEX
             // is genuinely reachable from reset -> a real violation. Without a
             // detected reset (pres.reset_detected == false) the flops start FREE,

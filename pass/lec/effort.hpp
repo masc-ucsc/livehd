@@ -56,6 +56,7 @@ struct Sample_report {
 // Fully pinned queries are pure propagation (milliseconds, no model read);
 // partially pinned ones let the solver search the free inputs, which is what
 // finds a bug a random vector essentially never hits (one opcode among 2^32).
+class Fresh_solver;
 class Input_sampler {
 public:
   explicit Input_sampler(cvc5::TermManager& tm) : tm_(tm) {}
@@ -82,7 +83,8 @@ public:
   // (0 = none) under the caller's accounting; expired reports the caller's
   // TOTAL formal.timeout as spent.
   using Check = std::function<cvc5::Result(long long cap_ms)>;
-  Outcome run(cvc5::Solver& solver, const cvc5::Term& bad, Effort effort, const Check& check = {},
+  template <class Solver>
+  Outcome run(Solver& solver, const cvc5::Term& bad, Effort effort, const Check& check = {},
               const std::function<bool()>& expired = {});
 
 private:

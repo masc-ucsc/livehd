@@ -1,0 +1,100 @@
+diff --git a/src/prop/kissat.h b/src/prop/kissat.h
+--- a/src/prop/kissat.h
++++ b/src/prop/kissat.h
+@@ -79,10 +79,14 @@
+    */
+   void initialize() override;
+ 
++  // Kissat has no assumption API. Keep the permanent CNF and rebuild for
++  // each query; assumption units must never leak into a later query.
++  std::vector<int> d_clauses;
++  std::vector<SatLiteral> d_assumptions;
+   kissat* d_solver;
+ 
+   unsigned d_nextVarIdx;
+-  bool d_okay;
++  bool d_okay = true;
+   SatVariable d_true;
+   SatVariable d_false;
+ 
+diff --git a/src/prop/kissat.cpp b/src/prop/kissat.cpp
+--- a/src/prop/kissat.cpp
++++ b/src/prop/kissat.cpp
+@@ -73,10 +73,7 @@
+ {
+   d_true = newVar(false, true);
+   d_false = newVar(false, true);
+-  kissat_add(d_solver, toKissatVar(d_true));
+-  kissat_add(d_solver, 0);
+-  kissat_add(d_solver, -toKissatVar(d_false));
+-  kissat_add(d_solver, 0);
++  d_clauses = {toKissatVar(d_true), 0, -toKissatVar(d_false), 0};
+ }
+ 
+ KissatSolver::~KissatSolver() { kissat_release(d_solver); }
+@@ -86,9 +83,9 @@
+ {
+   for (const SatLiteral& lit : clause)
+   {
+-    kissat_add(d_solver, toKissatLit(lit));
++    d_clauses.push_back(toKissatLit(lit));
+   }
+-  kissat_add(d_solver, 0);
++  d_clauses.push_back(0);
+   ++d_statistics.d_numClauses;
+   return ClauseIdError;
+ }
+@@ -106,30 +103,37 @@
+ 
+ SatValue KissatSolver::solve()
+ {
++  return solve(std::vector<SatLiteral>{});
++}
++
++SatValue KissatSolver::solve(CVC5_UNUSED long unsigned int&)
++{
++  // No supported conflict budget in this backend. Never ignore a limit.
++  return SAT_VALUE_UNKNOWN;
++}
++
++SatValue KissatSolver::solve(const std::vector<SatLiteral>& assumptions)
++{
+   TimerStat::CodeTimer codeTimer(d_statistics.d_solveTime);
++  kissat_release(d_solver);
++  d_solver = kissat_init();
++  for (int lit : d_clauses) { kissat_add(d_solver, lit); }
++  d_assumptions = assumptions;
++  for (const auto& lit : assumptions)
++  {
++    kissat_add(d_solver, toKissatLit(lit));
++    kissat_add(d_solver, 0);
++  }
+   SatValue res = toSatValue(kissat_solve(d_solver));
+   d_okay = (res == SAT_VALUE_TRUE);
+   ++d_statistics.d_numSatCalls;
+   return res;
+ }
+ 
+-SatValue KissatSolver::solve(CVC5_UNUSED long unsigned int&)
++void KissatSolver::getUnsatAssumptions(std::vector<SatLiteral>& unsat_assumptions)
+ {
+-  Unimplemented() << "Setting limits for Kissat not supported yet";
+-  return SAT_VALUE_UNKNOWN;
+-};
+-
+-SatValue KissatSolver::solve(
+-    CVC5_UNUSED const std::vector<SatLiteral>& assumptions)
+-{
+-  Unimplemented() << "Incremental solving with Kissat not supported yet";
+-  return SAT_VALUE_UNKNOWN;
+-}
+-
+-void KissatSolver::getUnsatAssumptions(
+-    CVC5_UNUSED std::vector<SatLiteral>& unsat_assumptions)
+-{
+-  Unreachable() << "Kissat does not support unsat assumptions.";
++  // The entire assumption set is a valid (not necessarily minimal) core.
++  unsat_assumptions = d_assumptions;
+ }
+ 
+ void KissatSolver::interrupt() { kissat_terminate(d_solver); }

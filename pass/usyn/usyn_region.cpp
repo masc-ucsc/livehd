@@ -32,10 +32,8 @@ livehd::synth::Region_rewrite rewrite_region(const livehd::synth::Lnet& net, con
   Resource_observation observed;
   effort.time_limit_ms = static_cast<double>(opts.time_budget_ms);
   effort.entry_bytes   = ctx.rss_entry;
-  if (!opts.allow_oversize) {
-    effort.growth_limit_bytes  = livehd::cost::budget_bytes(opts.memory_budget_mb);
-    effort.process_limit_bytes = livehd::cost::configured_budget_bytes();
-  }
+  effort.growth_limit_bytes  = livehd::cost::budget_bytes(opts.memory_budget_mb);
+  effort.process_limit_bytes = livehd::cost::configured_budget_bytes();
   const auto sample = [&] { return observed.sample(livehd::cost::process_footprint_bytes()); };
   const auto since  = [&] {
     return entry_ms + std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - start).count();

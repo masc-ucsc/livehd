@@ -11,24 +11,26 @@
 #
 # The guard is host-dependent by nature (the default budget is physical RAM
 # minus a reserve), so this test pins it with pass.abc.memory_budget_mb — a 1 MiB
-# budget is unsatisfiable for this fixture with one worker. Pin synth.threads=1
+# budget is unsatisfiable for this fixture with one worker. Pin lhd.jobs=1
 # to test the per-color guard; parallel workers share an aggregate growth budget.
 # Asserts, in order:
-#   1. an unsatisfiable budget REFUSES: nonzero exit + the memory-oversize code
+#   1. an unsatisfiable budget REFUSES: nonzero exit + the memory-oversize code,
+#      named TIMEOUT-memory (a memory limit caught before the allocation)
 #   2. the refusal emits NO partial netlist (the emit-dir stays empty)
-#   3. allow_oversize=true overrides it and the map succeeds
+#   3. there is no escape hatch: the removed allow_oversize option is a usage
+#      error (exit 2), never silently accepted; the budget itself is the knob
 #   4. a generous budget does NOT false-positive on the same design
 #   5. a malformed budget is a clean error, not a silent default
 #
 # MAPPER=usyn runs the same sequence against native USYN's own admission,
 # pass.usyn.memory_budget_mb (invocation memory growth; ABC options are not
 # inherited, pass/usyn/README.md). Its analogues: 1. the refusal is the
-# `synthesis-refused` code naming the exhausted memory-growth budget, and the
-# recipe echoes the 1 MiB it enforced; 2. no netlist AND no report is
-# published; 3. USYN has no oversize escape hatch, so instead the ABC knobs are
-# proven NOT inherited (abc.allow_oversize does not lift the USYN refusal and
-# abc.memory_budget_mb=1 does not trigger it); 4. unchanged; 5. a malformed or
-# non-positive budget is a clean error.
+# `synthesis-refused` code naming the exhausted memory-growth budget (as
+# TIMEOUT-memory), and the recipe echoes the 1 MiB it enforced; 2. no netlist AND no report is
+# published; 3. the removed abc.allow_oversize is a usage error for pass.usyn
+# too, and ABC's budget is proven NOT inherited (abc.memory_budget_mb=1 does
+# not trigger the USYN refusal); 4. unchanged; 5. a malformed or non-positive
+# budget is a clean error.
 #
 # Hermetic: the small vendored Liberty (inou/prp/tests/abc/test.lib), no PDK.
 
@@ -78,7 +80,7 @@ run pass color synth --top "$TOP" lg:"$W/lg" --workdir "$W/w2"
 usyn_refuses() {
   local tag="$1"
   shift
-  if "$LHD" pass usyn --set synth.threads=1 --top "$TOP" lg:"$W/lg" --emit-dir lg:"$W/net_$tag" \
+  if "$LHD" pass usyn --set lhd.jobs=1 --set abc.threads=1 --top "$TOP" lg:"$W/lg" --emit-dir lg:"$W/net_$tag" \
       --set synth.liberty="$LIB" --set pass.usyn.memory_budget_mb=1 --set pass.usyn.qor="$W/qor_$tag.json" "$@" \
       --emit diagnostics:"$W/$tag.jsonl" \
       --workdir "$W/w_$tag" -q --result-json "$W/$tag.json" 2>"$W/$tag.err"; then
@@ -90,6 +92,8 @@ usyn_refuses() {
     || fail "$tag: refusal envelope is not an unsupported-class error: $(cat "$W/$tag.json" 2>/dev/null)"
   grep -q "memory-growth budget exhausted" "$W/$tag.json" \
     || fail "$tag: refusal envelope lacks the memory-growth reason: $(cat "$W/$tag.json" 2>/dev/null)"
+  grep -q "TIMEOUT-memory: " "$W/$tag.json" \
+    || fail "$tag: refusal is not named TIMEOUT-memory: $(cat "$W/$tag.json" 2>/dev/null)"
   # USYN's message names the exhausted budget kind, not its size; the recipe
   # records the value the invocation enforced.
   grep -q 'memory_budget_mb:1 ' "$W/$tag.json" \
@@ -107,7 +111,7 @@ usyn_refuses() {
 # 1. an unsatisfiable budget must refuse
 # ---------------------------------------------------------------------------
 if [ "$MAPPER" = abc ]; then
-  if "$LHD" pass "$MAPPER" --set synth.threads=1 --top "$TOP" lg:"$W/lg" --emit-dir lg:"$W/net_refused" \
+  if "$LHD" pass "$MAPPER" --set lhd.jobs=1 --set abc.threads=1 --top "$TOP" lg:"$W/lg" --emit-dir lg:"$W/net_refused" \
       --set synth.liberty="$LIB" --set abc.memory_budget_mb=1 \
       --emit diagnostics:"$W/refused.jsonl" \
       --workdir "$W/w3" -q --result-json "$W/refused.json" 2>"$W/refused.err"; then
@@ -122,6 +126,9 @@ if [ "$MAPPER" = abc ]; then
   # The diagnostic must report the real budget it enforced, not a placeholder.
   grep -q "budget 1 MiB" "$W/refused.json" \
     || fail "refusal does not name the 1 MiB budget it was given: $(cat "$W/refused.json" 2>/dev/null)"
+  # A caught memory limit carries the formal tools' word for it.
+  grep -q "TIMEOUT-memory: " "$W/refused.json" \
+    || fail "refusal is not named TIMEOUT-memory: $(cat "$W/refused.json" 2>/dev/null)"
 
   # ---------------------------------------------------------------------------
   # 2. a refusal must emit NO partial result. A half-translated netlist silently
@@ -136,19 +143,23 @@ else
 fi
 
 # ---------------------------------------------------------------------------
-# 3. allow_oversize must override the guard (the documented escape hatch)
+# 3. no escape hatch: the removed allow_oversize option is REJECTED (a usage
+#    error, exit 2, naming it) instead of silently disabling the guard, and the
+#    rejected run publishes nothing. Raising memory_budget_mb (step 4) is how a
+#    larger region is admitted.
 # ---------------------------------------------------------------------------
-if [ "$MAPPER" = abc ]; then
-  run pass "$MAPPER" --set synth.threads=1 --top "$TOP" lg:"$W/lg" --emit-dir lg:"$W/net_forced" \
-    --set synth.liberty="$LIB" --set abc.memory_budget_mb=1 --set abc.allow_oversize=true \
-    --workdir "$W/w4"
-  [ -n "$(ls -A "$W/net_forced" 2>/dev/null)" ] || fail "allow_oversize=true produced no netlist"
-else
-  # USYN has no oversize override, and ABC's admission knobs are not inherited:
-  # ABC's escape hatch must not lift the USYN refusal...
-  usyn_refuses abc_override --set abc.allow_oversize=true
-  # ...and ABC's budget must not trigger it.
-  run pass usyn --set synth.threads=1 --top "$TOP" lg:"$W/lg" --emit-dir lg:"$W/net_abc_budget" \
+"$LHD" pass "$MAPPER" --set lhd.jobs=1 --set abc.threads=1 --top "$TOP" lg:"$W/lg" --emit-dir lg:"$W/net_forced" \
+  --set synth.liberty="$LIB" --set "$BUDGET=1" --set abc.allow_oversize=true \
+  --workdir "$W/w4o" -q --result-json "$W/forced.json" 2>/dev/null
+rc=$?
+[ "$rc" -eq 2 ] || fail "abc.allow_oversize must be a usage error (exit 2), got rc=$rc: $(cat "$W/forced.json" 2>/dev/null)"
+grep -q '"class":"usage"' "$W/forced.json" || fail "abc.allow_oversize: not a usage-class error: $(cat "$W/forced.json" 2>/dev/null)"
+grep -q 'allow_oversize' "$W/forced.json" || fail "the rejection does not name allow_oversize: $(cat "$W/forced.json" 2>/dev/null)"
+[ -z "$(ls -A "$W/net_forced" 2>/dev/null)" ] || fail "a rejected allow_oversize run published a netlist"
+if [ "$MAPPER" = usyn ]; then
+  # ABC's admission knobs are not inherited: ABC's budget must not trigger the
+  # USYN refusal.
+  run pass usyn --set lhd.jobs=1 --set abc.threads=1 --top "$TOP" lg:"$W/lg" --emit-dir lg:"$W/net_abc_budget" \
     --set synth.liberty="$LIB" --set abc.memory_budget_mb=1 --workdir "$W/w4"
   [ -n "$(ls -A "$W/net_abc_budget" 2>/dev/null)" ] || fail "abc.memory_budget_mb=1 was inherited by pass.usyn (no netlist)"
 fi
@@ -156,7 +167,7 @@ fi
 # ---------------------------------------------------------------------------
 # 4. a generous budget must NOT false-positive on a design that plainly fits
 # ---------------------------------------------------------------------------
-run pass "$MAPPER" --set synth.threads=1 --top "$TOP" lg:"$W/lg" --emit-dir lg:"$W/net_ok" \
+run pass "$MAPPER" --set lhd.jobs=1 --set abc.threads=1 --top "$TOP" lg:"$W/lg" --emit-dir lg:"$W/net_ok" \
   --set synth.liberty="$LIB" --set "$BUDGET=65536" --workdir "$W/w5"
 [ -n "$(ls -A "$W/net_ok" 2>/dev/null)" ] || fail "a 64 GiB budget produced no netlist"
 
@@ -167,7 +178,7 @@ bad_budgets=(lots)
 # USYN documents the budget as a positive MiB count: zero is not "unlimited".
 [ "$MAPPER" = abc ] || bad_budgets+=(0)
 for v in "${bad_budgets[@]}"; do
-  if "$LHD" pass "$MAPPER" --set synth.threads=1 --top "$TOP" lg:"$W/lg" --emit-dir lg:"$W/net_bad_$v" \
+  if "$LHD" pass "$MAPPER" --set lhd.jobs=1 --set abc.threads=1 --top "$TOP" lg:"$W/lg" --emit-dir lg:"$W/net_bad_$v" \
       --set synth.liberty="$LIB" --set "$BUDGET=$v" \
       --workdir "$W/w6_$v" -q --result-json "$W/bad_$v.json" 2>/dev/null; then
     fail "pass.$MAPPER accepted memory_budget_mb=$v"
@@ -183,7 +194,7 @@ for v in "${bad_budgets[@]}"; do
 done
 
 if [ "$MAPPER" = abc ]; then
-  echo "PASS: pass.abc memory admission (refuse + no partial output + allow_oversize + no false positive)"
+  echo "PASS: pass.abc memory admission (TIMEOUT-memory refusal + no partial output + allow_oversize rejected + no false positive)"
 else
-  echo "PASS: pass.usyn memory admission (refuse + no partial output + ABC knobs not inherited + no false positive)"
+  echo "PASS: pass.usyn memory admission (refuse + no partial output + allow_oversize rejected + ABC knobs not inherited + no false positive)"
 fi

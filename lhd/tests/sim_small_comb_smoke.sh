@@ -9,7 +9,7 @@ pids=()
 for backend in slop llvm; do
   "$LHD" sim "$SRC" --set "sim.tune.backend=$backend" --set sim.checkpoint=false \
     --set compile.upass.inline=false \
-    --set sim.jobs=2 --set sim.tune.profile=off --workdir "$W/$backend" \
+    --set lhd.jobs=2 --set sim.tune.profile=off --workdir "$W/$backend" \
     --result-json "$W/$backend.json" -q >"$W/$backend.log" 2>&1 &
   pids+=("$!")
 done

@@ -1,0 +1,21 @@
+<!doctype html><html lang="en"><meta charset="utf-8"><title>2c — cvc5</title>
+<style>body{font:16px system-ui;max-width:920px;margin:3rem auto;padding:0 1rem;line-height:1.6}a{color:#185abc}code{background:#eee;padding:.1rem .3rem}.landed{color:#18723b}</style>
+<h1><strong>2c</strong> cvc5 1.4.2, source build and managed solver profiles</h1>
+<p>M0–M5 are implemented for Linux x86_64. LEC uses fresh solvers, default testing starts sampling immediately, and proof effort never samples. <a href="2c-cvc5.md">Full design and implementation checklist</a>; <a href="../../repros/cvc5_20261013/index.html">measurements and reproduction</a>.</p>
+<p>Final validation: 58 optimized checks, 5 debug checks and 3 prebuilt checks pass; the patched 228-query sweep has no incorrect verdict. Changes are uncommitted for review.</p>
+<h2>Depends on</h2><p>The effort-mode prerequisite was committed and pushed before implementation.</p>
+<h2>Subtasks — pending</h2><ul>
+<li><strong>V — external validation.</strong> Linux arm64/macOS arm64 and oldest-server linking; exact historical lazy reproducer if its inputs become available.</li>
+<li><strong>T — broader tuning.</strong> lhdtrack/logikbench/minion sweeps, cold memory-slope calibration and portable compiler-private CaDiCaL budgets.</li></ul>
+<h2>Subtasks — landed</h2><ul class="landed">
+<li><strong>M0 — upgrade.</strong> 1.4.2 prebuilt pins and Linux regression checks.</li>
+<li><strong>M1 — source.</strong> Offline source/dependency builds, optional SAT backends and symbol isolation.</li>
+<li><strong>M2 — profiles.</strong> Fresh LEC/sampling scopes, model retention, safe base slicing and incremental CaDiCaL property verification.</li>
+<li><strong>M3a — admission.</strong> Shared load/memory/EWMA pool, one <code>lhd.jobs</code> ceiling, native USYN and LLVM submission; ABC remains independent.</li>
+<li><strong>M3 — portfolio.</strong> Engine/profile races, one wall allowance, queue/cancel reporting, slot ownership and cache-preserving property proof workers.</li>
+<li><strong>M4 — measurements.</strong> Nine option families, SSA slicing and four Pyrope/Verilog pairs, with sampling measured separately.</li>
+<li><strong>M5 — docs.</strong> CLI/help and formal/simulation/synthesis references updated.</li></ul><p>2026-10-14 corpus follow-up: 780 comparison jobs and 585 final-build native
+checks completed on satsuma. Fixed the flat/one-definition deadline bypass and
+tracker classification of Unknown results. Six optimized deadline checks pass.
+<a href="../../../lhdtrack/repros/cvc5-lec-20261014/index.html">Corpus measurements and provenance</a>.</p>
+</html>

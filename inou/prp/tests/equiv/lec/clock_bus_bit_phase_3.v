@@ -1,5 +1,5 @@
 /*
-:lec_expect: unknown
+:lec_expect: unsupported
 :lec_grep: total order between 2 unrelated clock roots \{clks, clks\[1\]\}
 MUTATED: only the gate moved to clks[1]. Two bits of one bus clock a design
 that needs microsteps: two roots, refused by name, never PROVEN.

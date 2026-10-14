@@ -23,7 +23,7 @@ import shutil
 import subprocess
 import sys
 
-from lec import run_lec, verdict
+from lec import acceptable, run_lec, verdict
 
 CHECK_TIMEOUT = 20  # internal seconds; the external watchdog allows twice this
 
@@ -70,7 +70,7 @@ def main():
 
     chk = run_lec([lhd, "lec", "--impl", vside, "--ref", prp, "--top", top,
                   "--workdir", os.path.join(work, "w_v")], timeout=CHECK_TIMEOUT)
-    if verdict(chk) != "proven":
+    if not acceptable(verdict(chk)):
         print("{} - p2v2p - FAILED: emitted Verilog not equivalent to the Pyrope source".format(name))
         print(chk.stdout.decode("utf-8", "ignore"))
         return 1
@@ -84,7 +84,7 @@ def main():
         return 1
     chk = run_lec([lhd, "lec", "--impl", "pyrope:" + pdir + "/", "--ref", prp, "--top", top,
                   "--workdir", os.path.join(work, "w_p")], timeout=CHECK_TIMEOUT)
-    if verdict(chk) != "proven":
+    if not acceptable(verdict(chk)):
         print("{} - p2v2p - FAILED: regenerated Pyrope not equivalent to the source".format(name))
         print(chk.stdout.decode("utf-8", "ignore"))
         return 1

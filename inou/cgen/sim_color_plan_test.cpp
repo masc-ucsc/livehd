@@ -798,7 +798,9 @@ TEST(SimColorPlan, LoopBoundaryBalancesNativeConesAgainstWideCarryTransport) {
           ASSERT_TRUE(plan.complete()) << plan.report();
           EXPECT_EQ(plan.summary().grouped_sites, wide_input && computed_input ? 4u : 3u);
           EXPECT_EQ(plan.summary().compact_loops, 1u);
-          EXPECT_EQ(bits > 64 || !wide_input || !computed_input,
+          // The LLVM backend embeds a pure loop in its caller's kernel, so it has
+          // no reason to keep a narrow loop out of the surrounding cone.
+          EXPECT_EQ(bits > 64 || !wide_input || !computed_input || llvm_runtime_calls,
                     std::ranges::any_of(plan.colors(),
                                         [&](const auto& color) {
                                           return color.members.size() > 1 && std::ranges::any_of(color.members, [&](size_t member) {
@@ -852,6 +854,113 @@ TEST(SimColorPlan, RetainedPoliciesSurvivePlanMove) {
   auto moved    = std::move(original);
   EXPECT_TRUE(moved.validate_retained_handles());
   EXPECT_EQ(moved.summary().compact_loops, 1u);
+}
+
+// A used-once body whose computing sites do not pay for its seam fuses into the
+// caller; slices and packing are free wiring and do not count. Only the larger
+// body keeps its own colors.
+TEST(SimColorPlan, FenceCountsComputingSitesAndChargesTheSeam) {
+  for (const size_t length : {40u, 200u}) {
+    auto& lib      = livehd::Hhds_graph_library::instance("lgdb_color_seam_" + std::to_string(length));
+    auto  child_io = lib.create_io("leaf");
+    child_io->add_input("x", 0);
+    child_io->add_output("y", 1);
+    child_io->set_bits("x", 8);
+    child_io->set_bits("y", 8);
+    auto child = child_io->create_graph();
+    auto value = child->get_input_pin("x");
+    for (size_t i = 0; i < length; ++i) {
+      auto node = gu::create_typed_node(*child, Ntype_op::Not);
+      value.connect_sink(node.create_sink_pin(0));
+      value = node.create_driver_pin(0);
+      gu::set_bits(value, 8);
+      // Wiring between the operations: a full-width slice of each result.
+      auto slice = gu::create_typed_node(*child, Ntype_op::Get_mask);
+      value.connect_sink(gu::setup_sink_by_name(slice, "a"));
+      livehd::graph_util::connect_bit_range(slice, 0, 8);
+      value = slice.create_driver_pin(0);
+      gu::set_bits(value, 8);
+    }
+    value.connect_sink(child->get_output_pin("y"));
+    auto io = lib.create_io("parent");
+    io->add_input("a", 0);
+    io->add_output("x", 1);
+    io->set_bits("a", 8);
+    io->set_bits("x", 8);
+    auto graph = io->create_graph();
+    auto call  = gu::create_typed_node(*graph, Ntype_op::Sub);
+    call.set_subnode(child_io);
+    // Caller logic on both sides of the call, for the body to fuse with.
+    auto before = gu::create_typed_node(*graph, Ntype_op::Not);
+    graph->get_input_pin("a").connect_sink(before.create_sink_pin(0));
+    gu::set_bits(before.create_driver_pin(0), 8);
+    before.create_driver_pin(0).connect_sink(call.create_sink_pin(0));
+    auto after = gu::create_typed_node(*graph, Ntype_op::Not);
+    call.create_driver_pin(1).connect_sink(after.create_sink_pin(0));
+    gu::set_bits(after.create_driver_pin(0), 8);
+    after.create_driver_pin(0).connect_sink(graph->get_output_pin("x"));
+    const auto plan = livehd::sim::Color_plan::discover(graph.get(), false);
+    ASSERT_TRUE(plan.complete()) << plan.report();
+    // 2 interface words: fenced only at >= 16 * (2 + 1) computing sites.
+    std::set<size_t> child_colors;
+    for (size_t color = 0; color < plan.colors().size(); ++color) {
+      for (const auto member : plan.colors()[color].members) {
+        if (!plan.sites()[plan.version_sites()[member].base_site].node.path().steps().empty()) {
+          child_colors.insert(color);
+        }
+      }
+    }
+    ASSERT_FALSE(child_colors.empty()) << plan.report();
+    bool child_shares_with_parent = false;
+    for (const auto color : child_colors) {
+      for (const auto member : plan.colors()[color].members) {
+        child_shares_with_parent |= plan.sites()[plan.version_sites()[member].base_site].node.path().steps().empty();
+      }
+    }
+    EXPECT_EQ(child_shares_with_parent, length == 40u) << plan.report();
+  }
+}
+
+// `r = f(r)` whose old value also feeds a separate cone: the next-state cone is
+// often finished before that reader runs, and the update must sink past the
+// reader to update in place rather than stage a copy.
+TEST(SimColorPlan, InPlaceUpdateSinksPastLaterOldValueReaders) {
+  using Plan = livehd::sim::Color_plan;
+  for (const size_t depth : {0u, 1u, 8u}) {
+    auto& lib = livehd::Hhds_graph_library::instance("lgdb_color_plan_sink_" + std::to_string(depth));
+    auto  io  = lib.create_io("sink");
+    io->add_input("clock", 0);
+    io->add_input("x", 1);
+    io->add_output("o", 2);
+    io->set_bits("clock", 1);
+    io->set_bits("x", 8);
+    io->set_bits("o", 8);
+    auto graph = io->create_graph();
+    auto r     = gu::create_typed_node(*graph, Ntype_op::Flop);
+    graph->get_input_pin("clock").connect_sink(gu::setup_sink_by_name(r, "clock_pin"));
+    auto q = r.create_driver_pin(0);
+    gu::set_ubits(q, 8);
+    auto next = gu::create_typed_node(*graph, Ntype_op::Not);
+    q.connect_sink(next.create_sink_pin(0));
+    gu::set_bits(next.create_driver_pin(0), 8);
+    next.create_driver_pin(0).connect_sink(gu::setup_sink_by_name(r, "din"));
+    // The other reader: q ^ x through `depth` extra operations.
+    auto mix = gu::create_typed_node(*graph, Ntype_op::Xor);
+    q.connect_sink(mix.create_sink_pin(0));
+    graph->get_input_pin("x").connect_sink(mix.create_sink_pin(1));
+    auto value = mix.create_driver_pin(0);
+    gu::set_bits(value, 8);
+    for (size_t i = 0; i < depth; ++i) {
+      auto node = gu::create_typed_node(*graph, Ntype_op::Not);
+      value.connect_sink(node.create_sink_pin(0));
+      value = node.create_driver_pin(0);
+      gu::set_bits(value, 8);
+    }
+    value.connect_sink(graph->get_output_pin("o"));
+    const auto plan = Plan::discover(graph.get(), false, false);
+    ASSERT_TRUE(plan.complete()) << plan.report();
+    EXPECT_TRUE(std::ranges::any_of(plan.sites(), [&](const auto& site) { return site.in_place; })) << plan.report();
+  }
 }
 
 TEST(SimColorPlan, PreserveSubstantialLeafModulesButFuseTinyHelpers) {

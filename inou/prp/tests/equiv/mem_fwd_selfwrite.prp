@@ -3,9 +3,9 @@
 :type: equiv
 :verilog_top: mem_fwd_selfwrite.rf
 :pyrope_top: rf
-:equiv_lec_grep: (?m)^lec: '[^']+' PROVEN equivalent
+:equiv_lec_grep: (?m)^lec: '[^']+' PROVEN-full
 */
-// `:equiv_lec_grep:` pins the UNBOUNDED proof: a fall back to a bounded PASS(n)
+// `:equiv_lec_grep:` pins the UNBOUNDED proof: a fall back to a PROVEN-bounded(n)
 // means the flop-bank bridge of pass/lec/query.cpp (the golden's per-word flops
 // vs the memory) stopped pairing.
 

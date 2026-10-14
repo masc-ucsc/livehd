@@ -29,9 +29,9 @@
 #                  `lg:` library first (one `--set` cannot say two things).
 #   :lec_set: k=v … extra `--set` for `lhd lec` (base = shared, variant = adds)
 #   :lec_sweep: k=v1,v2   run the pair once per value (repeatable: cartesian)
-#   :lec_expect: proven|refuted|unknown|refused   what the run must report
-#                  (default proven); `unknown` = a sound REFUSAL reported as an
-#                  UNKNOWN verdict (rc 7); `refused` = rc 7 with NO verdict at
+#   :lec_expect: proven|refuted|unsupported|refused   what the run must report
+#                  (default proven); `unsupported` = a sound REFUSAL reported as an
+#                  UNSUPPORTED verdict (rc 7); `refused` = rc 7 with NO verdict at
 #                  all (a front-end refusal, e.g. edge normalization declined
 #                  under formal.phase_sched=false) -- pair it with a :lec_grep:
 #                  naming the reason, or any rc-7 error would satisfy it
@@ -54,17 +54,14 @@ import shutil
 import subprocess
 import sys
 
-from lec import final_verdict, run_lec
+from lec import final_verdict, run_lec, verdict_word
 
 # `<base>_<N>.prp`. Greedy stem so `a_b_2` groups under `a_b`, matching the
 # BUILD-side `rsplit("_", 1)`.
 _VARIANT_RE = re.compile(r'^(.+)_(\d+)$')
 
-# Verdict lines of `lhd lec`. PASS(n) is a completed bounded proof, so it counts
-# as proven exactly as run_equiv treats it.
-_PROVEN_RE  = re.compile(r'(?m)^lec: .* (?:PROVEN|PASS\(\d+\)) equivalent')
-_REFUTED_RE = re.compile(r'(?m)^lec: .* REFUTED')
-_UNKNOWN_RE = re.compile(r'(?m)^lec: .* UNKNOWN')
+# Verdict words of `lhd lec` (lec.py VERDICT). PROVEN-bounded(n) is a completed
+# bounded proof, so it counts as proven exactly as run_equiv treats it.
 
 
 def variant_of(prp_file):
@@ -212,21 +209,23 @@ def _sweeps(base_test, var_test):
 
 def _check(out, rc, expect, base_test, var_test):
     """The verdict + `:lec_grep:` contract for one run. Returns a reason or None."""
-    final = final_verdict(out)
+    word = verdict_word(out)
     if expect == 'refuted':
-        if rc != 10 or not _REFUTED_RE.search(final):
-            return 'expected REFUTED, got rc={} (a passing lec means the two sides agree)'.format(rc)
+        if rc != 10 or word != 'REFUTED-cex':
+            return 'expected REFUTED-cex, got rc={} {} (a passing lec means the two sides agree)'.format(rc, word or 'no verdict')
     elif expect == 'proven':
-        if rc != 0 or not _PROVEN_RE.search(final):
-            return 'expected PROVEN, got rc={}'.format(rc)
-    elif expect == 'unknown':
-        if rc != 7 or not _UNKNOWN_RE.search(final):
-            return 'expected UNKNOWN (a refusal), got rc={}'.format(rc)
+        if rc != 0 or not word.startswith('PROVEN-'):
+            return 'expected PROVEN-full/-bounded(n), got rc={} {}'.format(rc, word or 'no verdict')
+    elif expect == 'unsupported':
+        if rc != 7 or word != 'REFUTED-unsupported':
+            return 'expected REFUTED-unsupported (a refusal), got rc={} {}'.format(rc, word or 'no verdict')
     elif expect == 'refused':
-        if rc != 7 or _PROVEN_RE.search(final) or _REFUTED_RE.search(final):
-            return 'expected a REFUSAL (rc 7, no verdict), got rc={}'.format(rc)
+        # A refusal compares nothing: rc 7 and a REFUTED-unsupported/-unchecked
+        # line (never a proof, never a counterexample).
+        if rc != 7 or word not in ('REFUTED-unsupported', 'REFUTED-unchecked'):
+            return 'expected a REFUSAL (rc 7, REFUTED-unsupported/-unchecked), got rc={} {}'.format(rc, word or 'no verdict')
     else:
-        return ':lec_expect: {} is not one of proven|refuted|unknown|refused'.format(expect)
+        return ':lec_expect: {} is not one of proven|refuted|unsupported|refused'.format(expect)
 
     for pat in _tags(base_test, 'lec_grep') + _tags(var_test, 'lec_grep'):
         if not re.search(pat, out):

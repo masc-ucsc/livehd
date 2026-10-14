@@ -59,7 +59,7 @@ IDLE="${SIM_TUNE_IDLE:-inou/prp/tests/sim/tune_idle_tables.prp}"
 LFSR="${SIM_TUNE_LFSR:-inou/prp/tests/sim/tune_lfsr.prp}"
 N_IDLE="${SIM_TUNE_IDLE_CYCLES:-4000000}"
 N_LFSR="${SIM_TUNE_LFSR_CYCLES:-6000000}"
-JOBS=(--set sim.jobs=4)
+JOBS=(--set lhd.jobs=4)
 mkdir -p "$W"
 
 fail() {

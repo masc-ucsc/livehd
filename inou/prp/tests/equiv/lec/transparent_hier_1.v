@@ -5,7 +5,7 @@ matches the def with no solver call. The verdict alone would not pin that: with
 a non-transparent instance name the solver's tier-2 state pairing still proves
 it, so the grep is the test.
 :lec_grep: 'top' MATCHED \(semdiff
-:lec_grep: PROVEN equivalent
+:lec_grep: PROVEN-full
 */
 module leaf(input clk, rst, d, output reg q);
 always @(posedge clk) if (rst) q <= 0; else q <= d;

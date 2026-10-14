@@ -1565,20 +1565,23 @@ inline void for_each_memory_clock_driver(const hhds::Node_class& node, Fn&& fn) 
 }
 
 // ---------------------------------------------------------------------------
-// Design-size estimation (memory-admission size gate).
+// Design-size estimation (a large-design WARNING; there is no size gate).
 // ---------------------------------------------------------------------------
 //
 // A flattened design of more than a few million nodes is where synthesis (ABC)
 // and formal (LEC) runs start exhausting host memory. These helpers give a
-// DETERMINISTIC, host-independent node count so a pass can warn (color) or refuse
-// with a named override flag (abc/lec) BEFORE it materializes anything large --
-// unlike an RSS/footprint sample, which only catches the blow-up mid-flight.
+// DETERMINISTIC, host-independent node count so a pass can warn (pass.color)
+// BEFORE it materializes anything large -- unlike an RSS/footprint sample,
+// which only catches the blow-up mid-flight. pass.abc and lec no longer refuse
+// on it: they always attempt the design, and a run that outgrows memory is
+// reported as TIMEOUT-memory (the RLIMIT_AS backstop plus the bad_alloc
+// boundaries) instead of crashing.
 
 // "Very large flattened design" threshold, in nodes. Default ~1M: below this,
 // whole-design ABC/LEC is routinely fine; well above it, a flat run risks
 // hundreds of GB (a flat XSCore run reached 221 GB). Overridable via the env var
-// LIVEHD_LARGE_DESIGN_NODES (0 disables the gate; also lets a test exercise the
-// refusal on a small design). Read once per pass, not per node.
+// LIVEHD_LARGE_DESIGN_NODES (0 disables the warning; also lets a test exercise
+// it on a small design). Read once per pass, not per node.
 inline constexpr uint64_t large_design_nodes_default = 1'000'000;
 
 [[nodiscard]] inline uint64_t large_design_node_threshold() {

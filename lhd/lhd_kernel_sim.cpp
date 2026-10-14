@@ -1527,7 +1527,7 @@ std::set<std::string> sim_unused_artifacts(const std::string& directory, const s
 //
 // The trade used to cost what bazel would have handed us for free — per-TU
 // parallelism and incremental rebuilds. Both are back, without the sandbox
-// problems: parallelism from the built-in fan-out (`sim.jobs`), and
+// problems: parallelism from the built-in fan-out (`lhd.jobs`), and
 // incrementality from a generated `build.ninja` used when ninja is present
 // (`sim.ninja`). The build file is written either way, so `ninja -C <simdir>`
 // always reproduces exactly what lhd did — unlike the bazel project, which
@@ -2134,18 +2134,13 @@ void sim_command(Options& opts, Result& res) {
                                              shell_quote(simdir_abs),
                                              shell_quote(hlop_inc),
                                              shell_quote(iassert_inc));
-  // --set sim.jobs=N bounds the fan-out (0/unset = one per hardware thread).
+  // --set lhd.jobs=N bounds the fan-out (0/unset = one per hardware thread).
   // Pin it to make a build-time measurement reproducible, or to leave the
   // machine usable while a big design builds. Also becomes `ninja -j`.
   // Under `bazel test` (TEST_SRCDIR set) the default is 2: bazel already runs
   // tests in parallel, and a per-test fan-out of every hardware thread
   // oversubscribes the machine several times over.
-  int               jobs       = 0;
-  for (const auto& [k, v] : opts.sets) {
-    if (k == "sim.jobs") {
-      jobs = std::atoi(v.c_str());
-    }
-  }
+  int jobs = static_cast<int>(opts.jobs);
   // The load-independent job count: what the PCH decision below compares
   // against. `jobs` follows the machine's CURRENT load, and the PCH choice lands
   // in every TU's stamped command line, so deciding on the load would rebuild

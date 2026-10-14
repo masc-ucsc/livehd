@@ -698,7 +698,7 @@ file and are never trialed on their own.
 
 Never tunable, and so never under `tune`: `sim.unknown_zero`, `sim.init_zero`
 and `lhd.seed` (they change simulated values), `sim.vcd*` and `sim.checkpoint*`
-(observability), `sim.jobs`, `sim.ninja`, `sim.hlop_dir`, `sim.iassert_dir` and
+(observability), `lhd.jobs`, `sim.ninja`, `sim.hlop_dir`, `sim.iassert_dir` and
 `sim.compile_only` (build plumbing), and `sim.slop_u` / `sim.debug` (validation
 fallbacks). `sim.unroll_sites` (default 0 = off) is a debug/experiment knob,
 applied, never trialed: a compact loop whose trip count times its body's node

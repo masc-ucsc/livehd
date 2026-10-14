@@ -1,6 +1,6 @@
 /*
 :name: onehot_step_cex_2
-:lec_grep: PROVEN equivalent
+:lec_grep: PROVEN-full
 :lec_grep: PROVEN under 1 proven assume
 */
 // The invariant stated once: pass.formal proves the one-hot assume (its own

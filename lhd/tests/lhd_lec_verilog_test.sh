@@ -17,7 +17,7 @@ fail() { echo "FAIL: $*" >&2; exit 1; }
 
 # 1. Headline case: a Pyrope impl vs a Verilog reference, discharged in-process
 #    with cvc5 (the default). The Verilog side elaborates through slang.
-"$LHD" lec --impl "$PRP" --ref "$V0" --top "$TOP" --workdir "$W/c1" -q --result-json "$W/r1.json" \
+"$LHD" lec --set formal.effort=proof --impl "$PRP" --ref "$V0" --top "$TOP" --workdir "$W/c1" -q --result-json "$W/r1.json" \
   || fail "lec prp vs verilog (cvc5) not pass: $(cat "$W/r1.json" 2>/dev/null)"
 grep -q '"status":"pass"' "$W/r1.json" || fail "lec cvc5 not pass: $(cat "$W/r1.json")"
 echo "PASS: lec prp vs verilog (default cvc5, slang reader)"
@@ -26,7 +26,7 @@ echo "PASS: lec prp vs verilog (default cvc5, slang reader)"
 # independently elaborates the original source through native Slang.
 "$LHD" compile "$INV" --reader yosys --top inv --emit-dir "lg:$W/yosys_inv" \
   --workdir "$W/yosys_inv_compile" || fail "Yosys reference compilation failed"
-"$LHD" lec --impl "lg:$W/yosys_inv" --ref "$INV" --top inv \
+"$LHD" lec --set formal.effort=proof --impl "lg:$W/yosys_inv" --ref "$INV" --top inv \
   --workdir "$W/c2_slang" -q --result-json "$W/r2_slang.json" \
   || fail "Yosys graph differs from native Slang"
 grep -q '"verdict":"proven"' "$W/r2_slang.json" || fail "reader comparison was not proven"
@@ -78,7 +78,7 @@ module reset_low(input clock, input rst_ni, input d, output o);
   assign o = ~qn;
 endmodule
 V
-"$LHD" lec --impl "$W/reset_low_impl.v" --ref "$W/reset_low_ref.v" --top reset_low \
+"$LHD" lec --set formal.effort=proof --impl "$W/reset_low_impl.v" --ref "$W/reset_low_ref.v" --top reset_low \
   --workdir "$W/c2_reset_low" -q \
   --result-json "$W/r2_reset_low.json" \
   || fail "default LEC did not honor active-low reset: $(cat "$W/r2_reset_low.json" 2>/dev/null)"
@@ -212,7 +212,7 @@ for side in gold gate; do
   "$YOSYS" -Q -T -p "read_rtlil $W/cache_$side.il; write_verilog $W/cache_$side.v" \
     >"$W/cache_$side.log" 2>&1 || { cat "$W/cache_$side.log"; fail "RTLIL reload failed"; }
 done
-"$LHD" lec --ref "$W/cache_gold.v" --impl "$W/cache_gate.v" \
+"$LHD" lec --set formal.effort=proof --ref "$W/cache_gold.v" --impl "$W/cache_gate.v" \
   --top 'child$parent.u' \
   --workdir "$W/cache_child" --result-json "$W/cache_child.json" \
   >"$W/cache_child.log" 2>&1 \
@@ -232,7 +232,7 @@ V
 for side in gold gate; do
   cat "$W/cache_source_base.v" "$W/cache_$side.v" >"$W/cache_named_$side.v"
 done
-"$LHD" lec --ref "$W/cache_named_gold.v" --impl "$W/cache_named_gate.v" \
+"$LHD" lec --set formal.effort=proof --ref "$W/cache_named_gold.v" --impl "$W/cache_named_gate.v" \
   --top 'child$parent.u' \
   --workdir "$W/cache_occurrence_name" --result-json "$W/cache_occurrence_name.json" \
   >"$W/cache_occurrence_name.log" 2>&1 \
@@ -265,7 +265,7 @@ module split_ports(
   assign \resp.low = \req.hi + {1'b0, \req.lo };
 endmodule
 V
-"$LHD" lec --impl "$W/split_impl.v" --ref "$W/split_ref.sv" --top split_ports \
+"$LHD" lec --set formal.effort=proof --impl "$W/split_impl.v" --ref "$W/split_ref.sv" --top split_ports \
   --workdir "$W/c2_split_ports" -q --result-json "$W/r2_split_ports.json" \
   || fail "lec default LEC split-port adapter not pass: $(cat "$W/r2_split_ports.json" 2>/dev/null)"
 grep -q '"status":"pass"' "$W/r2_split_ports.json" \
@@ -322,7 +322,7 @@ V
 # Default Slang enforces the source language: an implicit enum assignment
 # is invalid even if the assigned value is unused. Do not inherit lgcheck's
 # permissive reader switches merely to make an equivalence check run.
-if "$LHD" lec --impl "$W/relaxed_impl.v" --ref "$W/relaxed_ref.sv" --top relaxed_ref \
+if "$LHD" lec --set formal.effort=proof --impl "$W/relaxed_impl.v" --ref "$W/relaxed_ref.sv" --top relaxed_ref \
   --workdir "$W/c2_relaxed" -q --result-json "$W/r2_relaxed.json"; then
   fail "default LEC accepted an invalid implicit enum conversion"
 fi
@@ -332,7 +332,7 @@ echo "PASS: default LEC diagnoses invalid enum source before equivalence"
 
 # A reader/top/setup failure has no equivalence evidence. Keep it a configuration
 # error, never a synthetic REFUTED verdict (only a bounded CEX may use that).
-if "$LHD" lec --impl "$INV" --ref "$INV" --top no_such_top \
+if "$LHD" lec --set formal.effort=proof --impl "$INV" --ref "$INV" --top no_such_top \
   --workdir "$W/c2_setup_fail" -q --result-json "$W/r2_setup_fail.json"; then
   fail "default LEC accepted a missing top"
 fi
@@ -350,7 +350,7 @@ echo "unexpected lgcheck invocation" >&2
 exit 99
 SH
 chmod +x "$W/lgcheck_unexpected.sh"
-LHD_LGCHECK="$W/lgcheck_unexpected.sh" "$LHD" lec --impl "$INV" --ref "$INV" --top inv \
+LHD_LGCHECK="$W/lgcheck_unexpected.sh" "$LHD" lec --set formal.effort=proof --impl "$INV" --ref "$INV" --top inv \
   --workdir "$W/default_backend" --result-json "$W/default_backend.json" \
   || fail "default LEC invoked lgcheck"
 grep -q '"verdict":"proven"' "$W/default_backend.json" || fail "default LEC did not prove identity"
@@ -360,7 +360,7 @@ echo "PASS: default LEC proves without lgcheck"
 for code in 0 1 2 99; do
   printf '#!/bin/sh\nexit %s\n' "$code" >"$W/lgcheck_result.sh"
   chmod +x "$W/lgcheck_result.sh"
-  LHD_LGCHECK="$W/lgcheck_result.sh" "$LHD" lec --impl "$INV" --ref "$INV" --top inv \
+  LHD_LGCHECK="$W/lgcheck_result.sh" "$LHD" lec --set formal.effort=proof --impl "$INV" --ref "$INV" --top inv \
     --set formal.solver=lgyosys --workdir "$W/crosscheck_$code" \
     --result-json "$W/crosscheck_$code.json" >"$W/crosscheck_$code.log" 2>&1
   rc=$?
@@ -372,7 +372,8 @@ for code in 0 1 2 99; do
     verdict=refuted
   else
     [ "$rc" -ne 0 ] || fail "undecided crosscheck passed"
-    verdict=unknown
+    # lgcheck exits 2 when it could not decide; any other status means it did not run.
+    if [ "$code" -eq 2 ]; then verdict=incomplete; else verdict=failed; fi
   fi
   grep -q "\"crosscheck\":{\"solver\":\"lgyosys\",\"verdict\":\"$verdict\",\"exit_code\":$code,\"bounded\":false}" "$W/crosscheck_$code.json" \
     || fail "independent crosscheck verdict missing from JSON"
@@ -406,7 +407,7 @@ chmod +x "$W/lgcheck_bounded.sh" "$W/lgcheck_short.sh" "$W/lgcheck_late.sh" "$W/
 for bound in 7 0; do
   cycles=$bound
   [ "$bound" -gt 0 ] || cycles=6
-  LHD_LGCHECK="$W/lgcheck_bounded.sh" LGCHECK_STEPS_OUT="$W/bounded_steps_$bound" "$LHD" lec \
+  LHD_LGCHECK="$W/lgcheck_bounded.sh" LGCHECK_STEPS_OUT="$W/bounded_steps_$bound" "$LHD" lec --set formal.effort=proof \
     --impl "$INV" --ref "$INV" --top inv --set formal.solver=lgyosys --set formal.bound=$bound \
     --workdir "$W/crosscheck_bounded_$bound" --result-json "$W/crosscheck_bounded_$bound.json" \
     >"$W/crosscheck_bounded_$bound.log" 2>&1 \
@@ -424,7 +425,7 @@ done
 for control in short late silent; do
   wd="$W/crosscheck_$control"
   [ "$control" != silent ] || wd="$W/crosscheck_bounded_7"
-  LHD_LGCHECK="$W/lgcheck_$control.sh" "$LHD" lec --impl "$INV" --ref "$INV" --top inv \
+  LHD_LGCHECK="$W/lgcheck_$control.sh" "$LHD" lec --set formal.effort=proof --impl "$INV" --ref "$INV" --top inv \
     --set formal.solver=lgyosys --set formal.bound=7 --workdir "$wd" \
     --result-json "$W/crosscheck_$control.json" >"$W/crosscheck_$control.log" 2>&1 \
     && fail "incomplete lgcheck window ($control) passed"
@@ -451,7 +452,7 @@ cat >"$L/net.v" <<'V'
 module net(input a, b, output y); NAND2x1 u(.A(a), .B(b), .Y(y)); endmodule
 V
 sed 's/NAND2x1/NOR2x1/' "$L/net.v" >"$L/bad.v"
-"$LHD" lec --impl "$L/net.v" --ref "$L/rtl.v" --impl-top net --lib "lg:$L/models" \
+"$LHD" lec --set formal.effort=proof --impl "$L/net.v" --ref "$L/rtl.v" --impl-top net --lib "lg:$L/models" \
   --workdir "$L/equal" -q --result-json "$L/equal.json" \
   || fail "Verilog netlist did not elaborate --lib cells: $(cat "$L/equal.json")"
 python3 - "$L/equal.json" <<'PY' || fail "mapped Verilog proof is not an unbounded proof"
@@ -460,7 +461,7 @@ r = json.load(open(sys.argv[1]))['lec']
 assert r['verdict'] == 'proven' and not r.get('bounded'), r
 PY
 for solver in cvc5 lgyosys; do
-  "$LHD" lec --ref "$L/net.v" --impl "$L/rtl.v" --ref-top net --impl-top rtl --lib "lg:$L/models" \
+  "$LHD" lec --set formal.effort=proof --ref "$L/net.v" --impl "$L/rtl.v" --ref-top net --impl-top rtl --lib "lg:$L/models" \
     --set pass.satopt=true --set formal.solver=$solver --workdir "$L/reversed_$solver" -q \
     --result-json "$L/reversed_$solver.json" \
     || fail "reference-side --lib with pass.satopt=true ($solver): $(cat "$L/reversed_$solver.json")"
@@ -470,10 +471,10 @@ done
 # that references a missing cell is never elaborated.
 cat "$L/net.v" >"$L/scoped.v"
 printf 'module unused; missing_cell u(); endmodule\n' >>"$L/scoped.v"
-"$LHD" lec --ref "$L/scoped.v" --impl "$L/scoped.v" --top net --lib "lg:$L/models" \
+"$LHD" lec --set formal.effort=proof --ref "$L/scoped.v" --impl "$L/scoped.v" --top net --lib "lg:$L/models" \
   --set compile.slang.top=net --workdir "$L/scoped" -q --result-json "$L/scoped.json" \
   || fail "compile.slang.top did not scope --lib elaboration: $(cat "$L/scoped.json")"
-"$LHD" lec --impl "$L/bad.v" --ref "$L/rtl.v" --impl-top net --ref-top rtl --lib "lg:$L/models" \
+"$LHD" lec --set formal.effort=proof --impl "$L/bad.v" --ref "$L/rtl.v" --impl-top net --ref-top rtl --lib "lg:$L/models" \
   --set formal.simfail_run=false --workdir "$L/different" -q --result-json "$L/bad.json" >"$L/bad.log" 2>&1
 [ $? -eq 10 ] || fail "wrong mapped cell was not refuted: $(cat "$L/bad.json")"
 grep -q '"verdict":"refuted"' "$L/bad.json" || fail "wrong mapped cell lacked a refuted verdict"
@@ -508,7 +509,7 @@ endmodule
 V
 # Bounds and engine are explicit here because this case tests bounded-result
 # classification. Solver selection still follows the default.
-"$LHD" lec --impl "$W/deep_impl.v" --ref "$W/deep_ref.v" --top deep \
+"$LHD" lec --set formal.effort=proof --impl "$W/deep_impl.v" --ref "$W/deep_ref.v" --top deep \
   --set formal.engine=bmc --set formal.bound=5 --workdir "$W/c2_bounded_short" \
   --result-json "$W/bounded_short.json" >"$W/bounded_short.log" 2>&1 \
   || { cat "$W/bounded_short.log"; fail "short bounded run failed"; }
@@ -521,7 +522,7 @@ PYBOUND
 # BUILDS AND RUNS it, which is a ~5.5s host clang build. This check asserts the
 # VERDICT, not the replay, so keep the witness emission and skip only its host
 # build (`lhd lec` still writes simfail_*.prp/.json here).
-if "$LHD" lec --impl "$W/deep_impl.v" --ref "$W/deep_ref.v" --top deep \
+if "$LHD" lec --set formal.effort=proof --impl "$W/deep_impl.v" --ref "$W/deep_ref.v" --top deep \
   --set formal.engine=bmc --set formal.bound=10 --set formal.simfail_run=false \
   --workdir "$W/c2_bounded_deep" \
   --result-json "$W/bounded_deep.json" >"$W/bounded_deep.log" 2>&1; then
@@ -557,7 +558,7 @@ module keepdc(input clk, input en, input [31:0] data, output [3:0] o);
   keepdc_dff q3(.D(d[3]), .CLK(clk), .Q(o[3]));
 endmodule
 V
-"$LHD" lec --ref "$W/keepdc_gold.v" --impl "$W/keepdc_gate.v" --top keepdc \
+"$LHD" lec --set formal.effort=proof --ref "$W/keepdc_gold.v" --impl "$W/keepdc_gate.v" --top keepdc \
   --workdir "$W/keepdc" --result-json "$W/keepdc.json" >"$W/keepdc.log" 2>&1 \
   || { cat "$W/keepdc.log"; fail "mapped enabled flops differ from their source"; }
 grep -q '"verdict":"proven"' "$W/keepdc.json" || fail "enabled-flop round trip was not proven"
@@ -565,19 +566,19 @@ echo "PASS: enabled-flop round trip preserves startup state"
 
 # 3. Bare .v paths on BOTH sides: the verilog kind is inferred from the
 #    extension; an identical netlist is trivially PROVEN (in-process cvc5).
-"$LHD" lec --impl "$INV" --ref "$INV" --top inv --workdir "$W/c3" -q --result-json "$W/r3.json" \
+"$LHD" lec --set formal.effort=proof --impl "$INV" --ref "$INV" --top inv --workdir "$W/c3" -q --result-json "$W/r3.json" \
   || fail "lec verilog identity (cvc5) not pass: $(cat "$W/r3.json" 2>/dev/null)"
 echo "PASS: lec verilog vs verilog (bare .v, kind inferred, slang)"
 
 # Reader bypasses are rejected outside explicit compilation.
 for reader in yosys yosys-slang yosys-verilog; do
-  if "$LHD" lec --impl "$INV" --ref "$INV" --reader "$reader" >"$W/reader_error.log" 2>&1; then
+  if "$LHD" lec --set formal.effort=proof --impl "$INV" --ref "$INV" --reader "$reader" >"$W/reader_error.log" 2>&1; then
     fail "LEC accepted the non-native reader $reader"
   fi
   grep -q 'only supported by lhd compile' "$W/reader_error.log" || fail "missing reader migration hint"
 done
 for option in gold_reader gate_reader; do
-  if "$LHD" lec --impl "$INV" --ref "$INV" --set "formal.lec.$option=slang" >"$W/option_error.log" 2>&1; then
+  if "$LHD" lec --set formal.effort=proof --impl "$INV" --ref "$INV" --set "formal.lec.$option=slang" >"$W/option_error.log" 2>&1; then
     fail "LEC accepted the retired reader option $option"
   fi
   grep -qi 'unknown' "$W/option_error.log" || fail "retired reader option did not report unknown option"
@@ -590,7 +591,7 @@ echo "$out" | grep -q 'merged into' || fail "check error lacks migration hint: $
 echo "PASS: check command rejected with lec migration hint"
 
 # 6. An unknown solver is a usage error, never a silent fallthrough.
-out=$("$LHD" lec --impl "$PRP" --ref "$V0" --top "$TOP" --set formal.solver=foo -q 2>/dev/null)
+out=$("$LHD" lec --set formal.effort=proof --impl "$PRP" --ref "$V0" --top "$TOP" --set formal.solver=foo -q 2>/dev/null)
 echo "$out" | grep -q '"status":"fail"' || fail "bad solver should fail: $out"
 echo "$out" | grep -q 'cvc5|bitwuzla|lgyosys' || fail "bad solver error lacks the valid set: $out"
 echo "PASS: formal.solver=foo rejected"
@@ -612,7 +613,7 @@ V
 "$LHD" compile "$W/state_identity.v" --reader yosys-verilog --top state_identity \
   --emit-dir "lg:$W/state_identity_lg" --emit verilog:"$W/state_identity_out.v" --workdir "$W/state_compile" -q \
   || fail "Yosys state identity compile"
-"$LHD" lec --impl "lg:$W/state_identity_lg" --ref "$W/state_identity.v" \
+"$LHD" lec --set formal.effort=proof --impl "lg:$W/state_identity_lg" --ref "$W/state_identity.v" \
   --top state_identity --workdir "$W/state_lec" -q --result-json "$W/state_lec.json" \
   || fail "Yosys state identity round trip: $(cat "$W/state_lec.json")"
 grep -q '"verdict":"proven"' "$W/state_lec.json" || fail "state identity proof was inconclusive"
@@ -644,7 +645,7 @@ module blocking_order(input clk, input rst, input en, input [7:0] d,
   end
 endmodule
 V
-"$LHD" lec --impl "$W/blocking_order.v" --ref "$W/blocking_order_ref.v" \
+"$LHD" lec --set formal.effort=proof --impl "$W/blocking_order.v" --ref "$W/blocking_order_ref.v" \
   --top blocking_order --workdir "$W/blocking_order_lec" -q \
   || fail "blocking assignments lost process order or partial-write state"
 sed 's/sum = first + d/sum = first ^ d/' "$W/blocking_order_ref.v" > "$W/blocking_order_bad.v"
@@ -652,7 +653,7 @@ sed 's/sum = first + d/sum = first ^ d/' "$W/blocking_order_ref.v" > "$W/blockin
 # BUILDS AND RUNS it, which is a ~5.5s host clang build. This check asserts the
 # VERDICT, not the replay, so keep the witness emission and skip only its host
 # build (`lhd lec` still writes simfail_*.prp/.json here).
-"$LHD" lec --impl "$W/blocking_order_bad.v" --ref "$W/blocking_order.v" \
+"$LHD" lec --set formal.effort=proof --impl "$W/blocking_order_bad.v" --ref "$W/blocking_order.v" \
   --top blocking_order --workdir "$W/blocking_order_bad_lec" -q \
   --set formal.simfail_run=false \
   --result-json "$W/blocking_order_bad.json" > "$W/blocking_order_bad.log" 2>&1
@@ -673,7 +674,7 @@ V
     --emit-dir "lg:$W/witness_$side" --workdir "$W/witness_compile_$side" \
     || fail "witness graph compilation failed"
 done
-"$LHD" lec --ref "lg:$W/witness_ref" --impl "lg:$W/witness_impl" \
+"$LHD" lec --set formal.effort=proof --ref "lg:$W/witness_ref" --impl "lg:$W/witness_impl" \
   --top witness_graph --set formal.engine=bmc --set formal.bound=2 \
   --workdir "$W/witness_check" --result-json "$W/witness_result.json"
 [ "$?" -eq 10 ] || fail "different graph state transitions were not refuted"

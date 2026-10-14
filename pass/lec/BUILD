@@ -1,8 +1,18 @@
 # This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 
-load("@rules_cc//cc:defs.bzl", "cc_library", "cc_test")
+load("@rules_cc//cc:defs.bzl", "cc_binary", "cc_library", "cc_test")
 load("@rules_shell//shell:sh_test.bzl", "sh_test")
 load("//tools:copt_default.bzl", "COPTS")
+
+cc_library(
+    name = "solver_profile",
+    srcs = ["solver_profile.cpp"],
+    hdrs = ["solver_profile.hpp", "fresh_solver.hpp"],
+    copts = COPTS,
+    includes = ["."],
+    visibility = ["//visibility:public"],
+    deps = ["@cvc5"],
+)
 
 # L0 encoder (LGraph -> cvc5 bit-vector terms) + L1 relational query
 # (prove_equal, a direct cvc5 combinational-miter checkSat). The reusable engine
@@ -21,6 +31,9 @@ filegroup(
         "encode.hpp",
         "effort.cpp",
         "effort.hpp",
+        "fresh_solver.hpp",
+        "solver_profile.cpp",
+        "solver_profile.hpp",
         "fork_race.hpp",
         "lib_cell_prep.cpp",
         "lib_cell_prep.hpp",
@@ -94,6 +107,7 @@ cc_library(
     visibility = ["//visibility:public"],
     deps = [
         ":lec_encode",
+        ":solver_profile",
         "//core",
         "//graph",
         "//pass/cost:host_mem",  # fork_race: cap each racer at its share of the memory budget
@@ -259,7 +273,7 @@ sh_test(
 
 # A memory port clocked by a CONSTANT never commits (multi-clock, single-clock
 # and single-root phase schedule); with a live enable the encoder refuses
-# (UNKNOWN) instead of committing it every step.
+# (REFUTED-unsupported) instead of committing it every step.
 # Reached through the yosys readers (slang refuses a constant clock).
 sh_test(
     name = "lec_mem_dead_clock_test",
@@ -370,7 +384,7 @@ sh_test(
 )
 
 # lec.timeout regression: nonlinear-multiplier miters that freeze cvc5 forever
-# must come back promptly as UNKNOWN once a per-query solver time limit is set.
+# must come back promptly as TIMEOUT-time once a per-query solver time limit is set.
 sh_test(
     name = "lec_timeout_test",
     srcs = ["tests/lec_timeout_test.sh"],
@@ -378,8 +392,8 @@ sh_test(
     tags = ["no-sandbox"],  # runs the in-process cvc5 solver under a time limit
 )
 
-# Verdict -> exit-code policy: PROVEN exits 0; UNKNOWN and REFUTED always
-# exit non-zero, with distinct error classes.
+# Verdict -> exit-code policy: PROVEN-* and TIMEOUT-* exit 0 (a TIMEOUT with a
+# warning), REFUTED-cex exits 10, every other REFUTED-<why> exits 7.
 sh_test(
     name = "lec_verdict_policy_test",
     srcs = ["tests/lec_verdict_policy_test.sh"],
@@ -388,8 +402,9 @@ sh_test(
 )
 
 # A lec run that compares NOTHING (empty module, no output/state, or a top absent
-# on one side) is a hard equiv_fail, not a PROVEN and not a tolerated exit-0
-# inconclusive -- and a real proof / real refutation are unaffected.
+# on one side) is never a silent PROVEN-full: REFUTED-vacuous (exit 7) when
+# neither side exposes anything, REFUTED-interface when a top port exists on one
+# side only -- and a real proof / real refutation are unaffected.
 sh_test(
     name = "lec_empty_module_test",
     srcs = ["tests/lec_empty_module_test.sh"],
@@ -426,7 +441,7 @@ sh_test(
 )
 
 # Agentic per-block progress: every resolved block emits one machine-parseable
-# `info`-severity diagnostic (lec-block-proven / -refuted / -inconclusive) with a
+# `info`-severity diagnostic (lec-block-proven / -refuted / -<cause>) with a
 # verdict, the winning engine, and duration_ms, without touching the exit code.
 sh_test(
     name = "lec_progress_test",
@@ -481,7 +496,7 @@ sh_test(
 # ACROSS the inner/mid boundary, so both defs refute standalone while the design
 # does not, and the refutation must be ABSORBED by the parent without re-solving
 # anything above it. Case 8 makes the same targeted parent expansion discharge
-# an UNKNOWN child in context. Case 3 (a genuine difference still refutes) and
+# an undecided child in context. Case 3 (a genuine difference still refutes) and
 # case 4 (the two orders agree on every fixture) are what keep "absorb" from
 # becoming "swallow".
 sh_test(
@@ -592,4 +607,26 @@ cc_test(
         "//:without_abc": ["@platforms//:incompatible"],
         "//conditions:default": [],
     }),
+)
+
+cc_test(
+    name = "solver_profile_test",
+    srcs = ["tests/solver_profile_test.cpp"],
+    copts = COPTS,
+    deps = [":solver_profile", ":lec_query", "@googletest//:gtest_main"],
+)
+
+# Manual experiments, bounded per query; never run as part of bazel test.
+cc_binary(
+    name = "solver_experiments",
+    srcs = ["tests/solver_experiments.cpp"],
+    copts = COPTS,
+    deps = [":solver_profile", ":lec_query"],
+)
+
+cc_binary(
+    name = "base_slice_experiment",
+    srcs = ["tests/base_slice_experiment.cpp"],
+    copts = COPTS,
+    deps = [":solver_profile", ":lec_query"],
 )

@@ -11,45 +11,329 @@
 <main>
 <h1><strong class="item-id">3p</strong> Placement feedback for synthesis</h1>
 
-<p><strong>Status: very preliminary; decisions pending.</strong> Integrate synthesis with
-DREAMPlace placement to provide more realistic timing information. The flow, library
-boundaries, and incremental reuse policy still need to be decided.</p>
+<p><strong>Status: interface agreed (2026-10-13), including sizing/buffering (own resizer) and incremental reuse (block anchors + remembered color); no code yet.</strong> Goal: a working
+<code>compile → synth → map → place</code> flow inside <code>lhd synth</code>, with legal DEF
+output and placement-aware timing. The structure must already support (a) a later loop in which
+placement-critical paths trigger re-synthesis and remap of the affected logic cone under
+input/output timing constraints, and (b) pin placement, macro placement (Re2MaP-like) and
+floorplanning tools.</p>
+
+<h2>Agreed decisions</h2>
+<ul class="subtasks">
+  <li><strong>Placer engine: torch-free C++ DREAMPlace.</strong>
+    <ul>
+      <li>DREAMPlace 4.3.1's global-placement loop is Python (<code>NonLinearPlace.py</code>,
+      <code>PlaceObj.py</code>, Nesterov optimizer). Its kernels are torch C++/CUDA extensions on
+      <code>at::Tensor</code>. LiveHD has no torch, CUDA or pybind dependency and will not gain one.</li>
+      <li>Fork the code under <code>masc-ucsc/DREAMPlace</code> (like the OpenTimer fork) with a
+      torch-free C++ library target, and pin it with <code>http_archive</code> plus
+      <code>packages/dreamplace.BUILD</code>. License is BSD-3.</li>
+      <li>Keep these kernels, with their raw-pointer cores and without the
+      <code>*_forward(at::Tensor)</code>/<code>PYBIND11_MODULE</code> wrappers:
+        <ul>
+          <li>weighted-average wirelength</li>
+          <li>electric potential/density, with the DCT moved off torch FFT (pocketfft or a plain DCT)</li>
+          <li>greedy and Abacus legalization, macro legalization (Hannan + LP)</li>
+          <li>k-reorder, independent-set matching, global swap</li>
+          <li>legality check, flute</li>
+        </ul>
+      </li>
+      <li>Rewrite the Python control loop in C++ (about 1–2k lines): Nesterov steps, density-weight
+      and gamma schedules, filler insertion, stop on overflow. Use OpenROAD <code>gpl</code>
+      (RePlAce, <code>nesterovPlace.cpp</code>) as the reference for a C++ structure.</li>
+      <li>CPU with OpenMP only. A GPU backend is a possible later option, not a goal.</li>
+      <li>Do not use DREAMPlace's <code>PlaceDB</code>: its builder methods are
+      <code>protected</code>, and the kernels never read it anyway. LiveHD exports DREAMPlace's flat
+      arrays directly:
+        <ul>
+          <li>nodes: <code>node_x/y</code>, <code>node_size_x/y</code></li>
+          <li>pins: <code>pin_offset_x/y</code>, <code>pin2node</code>, <code>pin2net</code></li>
+          <li>connectivity in CSR form: <code>flat_net2pin(_start)</code>, <code>flat_node2pin(_start)</code></li>
+          <li>nets: <code>net_weights</code></li>
+          <li>layout: rows, site width, row height</li>
+        </ul>
+      Node order is movable, then fixed, then terminals, then fillers.</li>
+    </ul>
+  </li>
+  <li><strong>Placement state: one flat placed graph.</strong>
+    <ul>
+      <li>After map, flatten and uniquify the region hierarchy (the <code>&lt;mod&gt;__cN</code>
+      modules) into one HHDS module for the top (<code>flatten_hierarchy()</code>). Instance names
+      keep the dotted path that opentimer already uses.</li>
+      <li>Extend the existing unused <code>place_t</code> attr (<code>graph/ann_place.hpp</code>) to
+      hold integer DBU x/y, orientation and status
+      <code>UNPLACED/PLACED/FIXED/LOCKED</code> (the OpenROAD status model). Net weights are a
+      per-driver attr.</li>
+      <li>This graph is the single source of truth. Placement, STA, DEF/Verilog writers and
+      re-synthesis all read or edit it. Graph edits notify the STA and placement caches through
+      observer hooks (insert/delete/rewire), like OpenROAD <code>dbBlockCallBackObj</code>.</li>
+    </ul>
+  </li>
+  <li><strong>CLI: a stage inside <code>lhd synth</code>.</strong>
+    <ul>
+      <li><code>--set synth.place=true</code> enables it. The default is <code>false</code>, so
+      plain <code>lhd synth</code> output does not change (defaults are a contract).</li>
+      <li>The stage runs after map (stage 3) and before the final STA (stage 4), in the same
+      process, so the graph stays in memory for the later loop.</li>
+      <li>Knobs are <code>synth.place.*</code> rows in <code>kSynthSetOptions</code>:
+      <code>mode</code>, <code>utilization</code>, <code>aspect</code>, <code>density</code>,
+      <code>floorplan</code>, <code>wire_rc</code>, …</li>
+      <li>Outputs go to <code>&lt;workdir&gt;/synth/place/{out.def,qor.json}</code>, with
+      <code>--emit-dir def:DIR</code> and an optional SPEF dump for debugging.</li>
+    </ul>
+  </li>
+  <li><strong>Physical inputs: <code>synth.lef</code>.</strong>
+    <ul>
+      <li>Mirrors <code>synth.liberty</code>: a comma-separated list with the tech LEF first, then
+      cell/macro LEFs, and the same <code>$HAGENT_TECH_DIR</code> default rule.</li>
+      <li>Per-layer wire RC comes from LEF <code>RESISTANCE</code>/<code>CAPACITANCE</code>, with
+      <code>synth.place.wire_rc=&lt;ohm/um&gt;,&lt;fF/um&gt;</code> as an override (needed for
+      techs like ASAP7, where ORFS keeps RC in <code>setRC.tcl</code>).</li>
+      <li>Revive <code>inou/lefdef</code> on HHDS. It was deleted in the HHDS migration
+      (<code>e446552a8</code>), but the Si2 parsers are still vendored in
+      <code>third_party/misc/{lef,def}</code>.</li>
+      <li>LEF loads into a read-only tech DB: units, sites, layers and RC, and macros with their
+      size and pin shapes. DEF provides floorplan input and placed output.</li>
+    </ul>
+  </li>
+  <li><strong>Parasitics: in-memory RC into STA.</strong>
+    <ul>
+      <li>After placement, build a FLUTE Steiner tree per net and push RC trees straight into
+      <code>ot::Timer</code>, the same pattern as DREAMPlace's <code>TimingCpp</code>.</li>
+      <li>The same estimator supplies the mapper's <code>abc_boundary</code> PI arrival and PO load
+      for re-synthesis. There is no SPEF round trip inside the loop.</li>
+    </ul>
+  </li>
+  <li><strong>Macros and memories.</strong>
+    <ul>
+      <li>Memories stay black boxes in synthesis (<code>pass.abc.memory=false</code>).</li>
+      <li>If a LEF MACRO matches the black box, use its size and pins. Otherwise use a placeholder
+      sized from bits × a per-tech area/bit, with pins spread on its edges, and tag it
+      <code>estimated</code> in <code>qor.json</code>.</li>
+      <li>M1 uses DREAMPlace's mixed-size flow plus macro legalization. A dedicated macro placer
+      comes later behind <code>synth.place.macro=</code>.</li>
+    </ul>
+  </li>
+  <li><strong>Floorplan and IO pins.</strong>
+    <ul>
+      <li>By default, size the core from cell area / <code>utilization</code> and
+      <code>aspect</code>, with rows from the LEF SITE.</li>
+      <li>IO pins: a ppl-style Hungarian slot assignment on the die edges, alternating with GP
+      (GP → assign pins → GP).</li>
+      <li>Optional <code>synth.place.floorplan=fp.def</code> supplies DIEAREA, ROWS, fixed PINS and
+      fixed macros, all with status FIXED and never moved. A future floorplanner or macro placer
+      fills this same hook.</li>
+    </ul>
+  </li>
+  <li><strong>Modes.</strong>
+    <ul>
+      <li><code>synth.place.mode=full</code>: GP + LG + DP, writes a legal DEF.</li>
+      <li><code>synth.place.mode=gp</code>: global placement only. Cells may overlap, no DEF is
+      written, and timing is tagged <code>approximate</code>.</li>
+      <li>The re-synthesis loop iterates in <code>gp</code> and finishes in <code>full</code>.</li>
+    </ul>
+  </li>
+  <li><strong>Re-synthesis unit (designed now, built after M1): a critical cone on the flat
+  graph.</strong>
+    <ul>
+      <li>Starting from failing endpoints, walk back to flops/PIs, capped by size and depth.</li>
+      <li>Wrap the cone as a <code>Region_body</code> and send it through the existing region
+      backend (<code>pass.abc</code>/<code>usyn</code>). <code>abc_boundary</code> carries the
+      placed arrival/required times, input drives and output loads.</li>
+      <li>Splice the result back, seed new cells at the centroid of their boundary pins, and lock
+      everything else. Run windowed incremental GP + LG + DP with limited displacement.</li>
+      <li>Keep the change only if WNS/TNS improves.</li>
+      <li>This follows OpenROAD <code>rmp</code>/<code>cut</code>
+      (<code>LogicExtractorFactory → BuildMappedAbcNetwork → InsertMappedAbcNetwork</code>,
+      arrival/required on cut boundaries). It improves on rmp, which leaves new cells unplaced.</li>
+    </ul>
+  </li>
+  <li><strong>Validation.</strong>
+    <ul>
+      <li>In repo:
+        <ul>
+          <li>our own legality checker: on site/row, no overlap, inside the core</li>
+          <li>a DEF write/read round trip</li>
+          <li>tests on a trimmed sky130hd subset (tech LEF plus a cell LEF matching
+          <code>sky130_test.lib</code>), each under 20 s at <code>-c opt</code></li>
+        </ul>
+      </li>
+      <li>Optional external leg, opt-in in the <code>LHD_EXTERNAL_*</code> style (it fails if
+      requested but the tool is missing):
+        <ul>
+          <li>OpenROAD <code>check_placement</code> on our DEF</li>
+          <li>HPWL within ~3% of stock DREAMPlace 4.3.1 (Python) on the same LEF/DEF for a few
+          lhdtrack designs</li>
+        </ul>
+      </li>
+      <li><code>qor.json</code> reports HPWL, overflow and placed WNS/TNS.</li>
+      <li>Full sky130/ASAP7 LEFs go into lhdtrack as <code>http_file</code>s next to the existing
+      ORFS liberty pins.</li>
+    </ul>
+  </li>
+</ul>
 
 <h2>Depends on</h2>
-<p>None established yet; identify prerequisites when deciding the flow.</p>
+<ul>
+  <li><code>pass.opentimer</code> (STA) and the <code>abc_boundary</code> table (PI/PO constraints
+  for re-synthesis).</li>
+  <li><code>pass/partition</code> <code>flatten_hierarchy()</code> and <code>Region_body</code>.</li>
+  <li>A new fork, <code>masc-ucsc/DREAMPlace</code>, with a torch-free library target.</li>
+</ul>
 
-<h2>Subtasks — pending</h2>
+<h2>Milestones — pending</h2>
 <ul class="subtasks">
-  <li><strong>A — Decide macro placement.</strong>
+  <li><strong>M0 — Infrastructure.</strong>
     <ul>
-      <li>The leading candidate is <a href="https://github.com/lamda-bbo/Re2MaP">Re2MaP</a>.
-      Decide how macros and large blocks are represented and when macro placement runs.</li>
+      <li>Fork DREAMPlace into a torch-free C++ library. Pin it and add its BUILD file (warnings
+      suppressed only in <code>packages/</code>).</li>
+      <li>Revive <code>inou/lefdef</code> on HHDS: LEF → tech DB, DEF read (floorplan) and DEF
+      write (placed).</li>
+      <li>Add the <code>synth.lef</code> option and resolution rule.</li>
+      <li>Add the trimmed sky130hd LEF test data.</li>
     </ul>
   </li>
-  <li><strong>B — Decide DREAMPlace integration.</strong>
+  <li><strong>M1 — synth → map → place (save LEF/DEF).</strong>
     <ul>
-      <li>Explore integration as a third-party library; decide the API, physical inputs,
-      build/runtime dependencies, and exchange of netlists and placement results.</li>
-      <li>Decide how placement-derived wire/load estimates feed timing back into synthesis,
-      and how much placement work each feedback iteration needs.</li>
+      <li>Flatten into the placed graph and extend <code>place_t</code> with status.</li>
+      <li>Build the floorplan from knobs or the optional DEF, and rows from the SITE.</li>
+      <li>Export the CSR arrays, run C++ Nesterov GP, IO pin assignment, then LG + DP.</li>
+      <li>Handle macros: LEF if present, otherwise an estimate.</li>
+      <li>Feed FLUTE RC into OpenTimer.</li>
+      <li>Write DEF and <code>qor.json</code>, and support <code>mode=gp|full</code>.</li>
+      <li>Validation as above.</li>
     </ul>
   </li>
-  <li><strong>C — Decide gate sizing and buffer insertion.</strong>
+  <li><strong>M2 — Timing-driven placement.</strong>
     <ul>
-      <li>Consider OpenROAD <code>rsz</code> and alternatives still to be identified as
-      library candidates. Decide feasibility, timing interfaces, and where sizing/buffering
-      belongs in the synthesis/placement loop.</li>
+      <li>Turn slack into per-net weights, in the style of gpl's linear formula or DREAMPlace's
+      momentum weighting. Re-weight at overflow checkpoints.</li>
+      <li>Consider weights computed after virtual buffering, as gpl does with
+      <code>rsz::findResizeSlacks</code>.</li>
     </ul>
   </li>
-  <li><strong>D — Decide incremental placement reuse.</strong>
+  <li><strong>M3 — Place → resynth loop.</strong>
     <ul>
-      <li>Memoize placement of large blocks to avoid rerunning Re2MaP on every incremental
-      edit. Decide cache keys, invalidation, and how changed blocks and connections affect reuse.</li>
-      <li>Consider allowing overlap and skipping legalization for fast timing feedback.
-      Decide when that approximation is useful, when legalization or fresh placement is
-      required, and how to distinguish approximate feedback from validated physical timing.</li>
+      <li>Cone extraction on the flat graph, then remap through the region backend with placed
+      boundary constraints.</li>
+      <li>Splice the result back with seeded positions, then windowed incremental placement.</li>
+      <li>Keep or revert based on WNS/TNS.</li>
     </ul>
   </li>
+  <li><strong>M4 — Macro placement and floorplanning.</strong>
+    <ul>
+      <li>A macro placer behind <code>synth.place.macro=</code>, writing FIXED macros into the
+      floorplan hook.</li>
+      <li><a href="https://github.com/lamda-bbo/Re2MaP">Re2MaP</a>
+      (<a href="https://arxiv.org/abs/2511.08054">arXiv 2511.08054</a>) is a DREAMPlace fork with
+      <strong>no LICENSE file</strong>, so it is a reference only and cannot be vendored. Usable
+      alternatives are OpenROAD <code>mpl</code> (Hier-RTLMP, BSD) and DREAMPlace's two-stage
+      macro flow.</li>
+    </ul>
+  </li>
+  <li><strong>C — Gate sizing and buffer insertion: our own resizer (decided 2026-10-13).</strong>
+    <ul>
+      <li>Write a LiveHD-native resizer instead of linking OpenROAD <code>rsz</code>. It works
+      on the flat placed graph with in-memory STA and FLUTE RC.</li>
+      <li>Design repair: fix max slew/cap/fanout violations by buffering and splitting nets on the
+      Steiner tree.</li>
+      <li>Timing repair: swap drive strength among liberty cells with the same footprint and
+      function, then buffer critical nets. Keep a change only if slack improves.</li>
+      <li>Each new or resized cell is placed at once: a seed position on the Steiner tree, then
+      single-cell legalization (OpenROAD <code>Opendp::legalCellPos</code> is the model). This is
+      the same "never leave new cells unplaced" rule as M3.</li>
+      <li>Runs after GP, before the final LG + DP, and inside each M3 iteration after re-mapping
+      a cone. Opt-in knob <code>synth.place.resize</code>, default <code>false</code> (owner ruling
+      2026-10-13; changing it later needs explicit approval).</li>
+      <li>Also produces the "after virtual buffering" slacks that M2 net weighting uses
+      (gpl's <code>findResizeSlacks</code> idea), run under a journal that is restored
+      afterwards.</li>
+    </ul>
+  </li>
+  <li><strong>D — Incremental placement reuse: block anchors + remembered color (decided
+  2026-10-13).</strong>
+    <ul>
+      <li>A color region (block) is the unit of placement reuse. The flat placed graph keeps each
+      cell's color id as a provenance attr.</li>
+      <li>After each run, save a block anchor per color: its bounding box/centroid and its cells'
+      positions. It lives in the cache under <code>--workdir</code>, follows
+      <code>lhd.incremental</code>, and is salted at build time. Macros get anchors the same
+      way.</li>
+      <li>On an incremental edit:
+        <ul>
+          <li>Blocks whose content hash did not change restore their cells' positions and are
+          anchored (LOCKED).</li>
+          <li>Changed blocks are re-placed inside or near their previous anchor box, with windowed
+          GP + LG + DP.</li>
+          <li>Only new or removed colors trigger wider re-placement.</li>
+        </ul>
+      </li>
+      <li>After a partial resynthesis (an M3 cone or a C resize), new cells inherit the color of
+      the block they replaced, or of the boundary cells driving them, so the color map stays
+      stable. The next incremental run then maps them to the same anchor instead of treating them
+      as new logic. The cache key uses the color id plus the block content hash.</li>
+      <li>Open detail: how a cone that crosses several colors assigns color to new cells, e.g.
+      the majority of the replaced cells, or the color of the endpoint.</li>
+    </ul>
+  </li>
+</ul>
+
+<h2>Future (not scheduled) — soft color macros</h2>
+<ul class="subtasks">
+  <li><strong>F1 — Soft macro per color, with flexible pins and aspect ratio, and leaky
+  boundaries.</strong> Brainstormed 2026-10-14; not part of M0–M4.
+    <ul>
+      <li>Each color region becomes a soft macro:
+        <ul>
+          <li>fixed area, with the aspect ratio free within a range (possibly rectilinear around
+          hard memories);</li>
+          <li>boundary pins placed in slots on the block edges and optimized together with the
+          floorplan.</li>
+        </ul>
+      Hard macros (memories) share the same floorplan.</li>
+      <li>Boundaries are soft. Timing-critical cells may leave their macro's area, e.g. a cone
+      feeding a macro that is not adjacent can sit between the two, instead of being forced
+      inside a hard fence. Make the fence a per-color penalty whose tightness can be tuned:
+      tight for stable blocks (incremental reuse), loose around critical paths.</li>
+      <li>Fits the current interface. The macro stage outputs fixed blocks, and a color block is a
+      macro whose shape and pins can change between iterations, so the M1 data model needs no
+      change. The block anchors from D are the reuse unit.</li>
+      <li>References, with details partly from abstracts or slides only:
+        <ul>
+          <li>ACCO, "PPA-driven Placement via Adaptive Cluster Constraints Optimization" (DATE
+          2026): per-cluster soft/hard bound tightness tuned from PPA.</li>
+          <li>GrandPlan (ISPD 2026, <a href="https://doi.org/10.1145/3764386.3779591">doi</a>):
+          flat placement with grouping penalties, then rectilinear partition extraction and fence
+          placement.</li>
+          <li>Hier-RTLMP (TCAD 2024, OpenROAD <code>mpl</code>, BSD-3): standard-cell clusters
+          as soft macros with an aspect range, plus one pin per edge segment.</li>
+          <li>"Modern Fixed-Outline Floorplanning with Rectilinear Soft Modules" (ICCAD 2024):
+          moves overlap into whitespace to make rectilinear shapes.</li>
+          <li>Piano (<a href="https://arxiv.org/abs/2508.13161">arXiv 2508.13161</a>): pins in
+          slots on block edges and feedthroughs, chosen together with the floorplan.</li>
+          <li>Kahng et al., DAC 2024, clustering-driven placement: the "guide but don't fence"
+          baseline.</li>
+          <li>FloorSet (Intel, Apache-2.0/CC-BY): benchmarks.</li>
+        </ul>
+      </li>
+      <li>Base to build on: DREAMPlace's fence regions (a separate density field per region),
+      with each fence turned into a penalty term.</li>
+    </ul>
+  </li>
+</ul>
+
+<h2>Notes from how OpenROAD connects its tools</h2>
+<ul>
+  <li><strong>One database, with adapters.</strong> Each tool (gpl, dpl, ppl, mpl, rsz) builds a
+  compact private model from <code>odb</code> and writes results back.
+  <code>sta::dbNetwork</code> lets OpenSTA view odb without a copy. LiveHD's equivalent is the
+  flat placed graph plus per-tool array exports.</li>
+  <li><strong>Integer DBU coordinates</strong>, a row/site model, and a placement status enum are
+  what keep incremental flows simple (<code>Replace::doIncrementalPlace</code> locks placed cells
+  and places only unplaced ones).</li>
+  <li><strong>Parasitics are re-estimated after every netlist edit</strong>
+  (<code>estimate_parasitics -placement</code>). Re-synthesis and resizing always call it before
+  re-timing.</li>
 </ul>
 
 <h2>Subtasks — landed</h2>

@@ -1,8 +1,8 @@
 # This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 #
 # cvc5 prebuilt non-GPL static libraries (cvc5-<os>-<cpu>-static.zip from the
-# official cvc5 releases). We consume the prebuilt archive rather than building
-# cvc5 from source. This is the pass/lec SMT backend, used directly via cvc5's
+# official cvc5 releases). This optional escape hatch consumes the prebuilt archive; the
+# default @cvc5 alias builds from source. This is the pass/lec SMT backend, used directly via cvc5's
 # native C++ API (QF_BV combinational equivalence).
 #
 # LICENSING: keep the default (no-gpl) artifact -- never `-static-gpl.zip`. The
@@ -43,6 +43,7 @@ genrule(
         "lib/libcadical.a",
         "lib/libpicpoly.a",
         "lib/libpicpolyxx.a",
+        "lib/libmpfr.a",  # required by the 1.4.2 prebuilt FP implementation
     ],
     outs = ["libcvc5_combined.a"],
     # Combine into one relocatable object pulling EVERY archive member directly

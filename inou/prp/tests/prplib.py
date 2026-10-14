@@ -11,7 +11,7 @@ import signal
 import subprocess
 import sys
 
-from lec import run_lec, final_verdict as final_lec_verdict, verdict as lec_verdict
+from lec import acceptable, run_lec, final_verdict as final_lec_verdict, verdict as lec_verdict
 
 class PrpTest:
     """
@@ -264,7 +264,7 @@ class PrpRunner:
         # bazel-builds and runs them. Exit 0 = every assert held. No --workdir:
         # the generated bazel module then lands in an OS-temp dir (outside the
         # repo), so a later `bazel build //...` here never sweeps it.
-        cmd = [self.lhd, 'sim', '--set', 'sim.jobs=2']
+        cmd = [self.lhd, 'sim', '--set', 'lhd.jobs=2']
         cmd += test.params['files']
         return cmd
 
@@ -678,17 +678,17 @@ class PrpRunner:
         if expect not in ('proven', 'refuted'):
             print('{} - equiv - FAILED: :lec_expect: {} is not one of proven|refuted'.format(name, expect))
             return 1
-        # Hierarchical LEC may retain an intermediate collapsed-box UNKNOWN in
+        # Hierarchical LEC may retain an intermediate collapsed-box undecided result in
         # the successful flat retry's detail. Judge the final top-level line;
-        # PASS(n) is a real bounded pass, not an inconclusive result.
+        # PROVEN-bounded(n) is a real bounded pass, not an undecided result.
         if expect == 'refuted':
-            lec_ok = lec.returncode == 10 and ' REFUTED ' in final_lec_verdict(ltxt)
+            lec_ok = lec_verdict(lec) == 'refuted'  # REFUTED-cex, exit 10
             if not lec_ok:
                 print('{} - equiv - FAILED: lhd lec did not REFUTE a pair marked :lec_expect: refuted '
                       '(rc={}; verilog_top:{} pyrope_top:{})'.format(name, lec.returncode, verilog_top, pyrope_top))
                 print(ltxt)
         else:
-            lec_ok = lec_verdict(lec) == 'proven'
+            lec_ok = acceptable(lec_verdict(lec))
             if not lec_ok:
                 print('{} - equiv - FAILED: lhd lec did not PROVE (our own corpus must be decidable by '
                       'our own engine; verilog_top:{} pyrope_top:{})'.format(name, verilog_top, pyrope_top))
@@ -957,7 +957,7 @@ class PrpRunner:
              '--workdir', self._scratch(test, 'equiv_slang_lec')] + self.lec_satopt_args() + self.equiv_set_args(),
             cwd=tmp_dir, timeout=20)
         crc, clog = check.returncode, check.stdout
-        if lec_verdict(check) == "proven":
+        if acceptable(lec_verdict(check)):
             print('{} - equiv_slang - success (verilog_top:{} pyrope_top:{})'.format(name, verilog_top, pyrope_top))
             return 0
         print('{} - equiv_slang - FAILED: lhd lec did not prove equivalence (verilog_top:{} pyrope_top:{})'.format(
@@ -1060,8 +1060,8 @@ class PrpRunner:
         else:
             with open(report) as f:
                 rep = json.load(f)
-            got_proven  = sum(1 for o in rep['obligations'] if o['verdict'] == 'proven')
-            got_refuted = sum(1 for o in rep['obligations'] if o['verdict'] == 'refuted')
+            got_proven  = sum(1 for o in rep['obligations'] if o['verdict'] in ('proven-full', 'proven-bounded'))
+            got_refuted = sum(1 for o in rep['obligations'] if o['verdict'] == 'refuted-cex')
             if want_proven >= 0 and got_proven != want_proven:
                 problems.append('proven count: want {}, got {}'.format(want_proven, got_proven))
             if want_refuted >= 0 and got_refuted != want_refuted:
@@ -1084,7 +1084,7 @@ class PrpRunner:
         replay = test.params.get('verify_replay', '')
         if replay:
             tb = simfail_tests[0] if simfail_tests else os.path.join(tmp_dir, wd, 'simfail_missing.prp')
-            rcmd = [self.lhd, 'sim', test.params['files'][0], tb, '--workdir', wd + '_sim', '--set', 'sim.jobs=2']
+            rcmd = [self.lhd, 'sim', test.params['files'][0], tb, '--workdir', wd + '_sim', '--set', 'lhd.jobs=2']
             rproc = subprocess.Popen(rcmd, cwd=tmp_dir, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
             try:
                 rlog_b, _ = rproc.communicate()

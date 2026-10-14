@@ -75,6 +75,19 @@ namespace livehd::cost {
 // the right "am I about to be killed" number, but it is not a live-bytes count.
 [[nodiscard]] uint64_t process_footprint_bytes();
 
+// This process's CURRENT virtual address space: every mapping, reserved or
+// committed -- the number RLIMIT_AS is enforced against, which is always above
+// the resident set (glibc reserves a 64 MiB malloc arena per allocating thread,
+// plus thread stacks and untouched reservations). On Linux it reads
+// /proc/self/statm with open/read only (no allocation), so the fatal-signal
+// handler may call it. 0 if it cannot be determined.
+[[nodiscard]] uint64_t process_virtual_bytes();
+
+// The RLIMIT_AS soft limit in force for THIS process (the backstop armed at
+// startup, a forked child's tighter share, or a caller's ulimit), or 0 when
+// none is set. A plain getrlimit: the fatal-signal handler may call it.
+[[nodiscard]] uint64_t address_space_limit_bytes();
+
 // Arm a hard address-space ceiling for THIS process using setrlimit(RLIMIT_AS),
 // allowing roughly `budget` bytes of real allocation beyond what the process
 // already maps. Returns the RLIMIT_AS value actually installed, or 0 if it could

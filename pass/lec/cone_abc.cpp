@@ -1134,7 +1134,7 @@ std::vector<Cone_verdict> batch_pass(const std::vector<cvc5::Term>& diffs, int64
     // exit is an ABC crash: it must not read as "every cone stays Unknown".
     if (eof && (WIFSIGNALED(status) || (WIFEXITED(status) && WEXITSTATUS(status) != 0))) {
       std::fprintf(stderr,
-                   "livehd:error: lec ABC cone-proof child died (%s %d): this is a crash, not an inconclusive proof\n",
+                   "livehd:error: lec ABC cone-proof child died (%s %d): this is a crash, not an undecided proof\n",
                    WIFSIGNALED(status) ? "signal" : "exit",
                    WIFSIGNALED(status) ? WTERMSIG(status) : WEXITSTATUS(status));
       std::abort();

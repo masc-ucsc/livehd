@@ -6,13 +6,17 @@ W="${TEST_TMPDIR:-/tmp/lhd_pure_loop_$$}"
 mkdir -p "$W"
 mode="${1:-fast}"
 extra=()
+fixture=lhd/tests/lhd_sim_pure_loop.prp
 case "$mode" in
   fast) ;;
   observed) extra=(--set sim.vcd=true) ;;
   legacy) extra=(--set sim.slop_u=false) ;;
+  llvm) extra=(--set sim.tune.backend=llvm) ;;
+  embedded) extra=(--set sim.tune.backend=llvm); fixture=lhd/tests/lhd_sim_embedded_loop.prp ;;
+  nested) extra=(--set sim.tune.backend=llvm); fixture=lhd/tests/lhd_sim_nested_loop.prp ;;
   *) echo "unknown pure-loop mode: $mode" >&2; exit 1 ;;
 esac
-"$LHD" sim lhd/tests/lhd_sim_pure_loop.prp --workdir "$W/$mode" --set compile.unroll=false \
+"$LHD" sim "$fixture" --workdir "$W/$mode" --set compile.unroll=false \
   --set sim.tune.profile=off ${extra[@]+"${extra[@]}"} --result-json "$W/$mode.json" --diag-fmt pretty
 python3 - "$W" "$mode" <<'PY'
 import json, pathlib, sys
@@ -23,6 +27,20 @@ assert doc['status'] == 'pass', doc
 headers = '\n'.join(p.read_text() for p in (w / mode / 'sim').glob('*.hpp'))
 if mode == 'observed':
     assert 'static Out __pure_eval(' not in headers
+elif mode == 'llvm':
+    # The wrapper can take a calling color's operands directly (a loop whose
+    # color is not an LLVM kernel), instead of binding each into its inputs.
+    assert 'const Out& __native_direct(' in headers
+elif mode == 'embedded':
+    # The loop lives inside the caller's LLVM kernel: nothing calls it.
+    bodies = '\n'.join(p.read_text() for p in (w / mode / 'sim').glob('*.cpp'))
+    for call in ('__compact_advance();  // compact-loop control', '__native_direct(', '::__native_loop('):
+        assert call not in bodies.replace('const Out& __native_direct(', ''), call
+    assert list((w / mode / 'sim').glob('*sel.color-kernel-*.llvm.o')), 'caller color is not an LLVM kernel'
+elif mode == 'nested':
+    # Two innermost levels are embedded; the outermost level keeps its one call.
+    bodies = '\n'.join(p.read_text() for p in (w / mode / 'sim').glob('*.cpp'))
+    assert bodies.count('__compact_advance();  // compact-loop control') == 1, bodies.count('__compact_advance();  // compact-loop control')
 else:
     assert 'static Out __pure_eval(' in headers
     assert 'LHD_SIM_PRESERVE_LOOP for (std::size_t ordinal' in headers

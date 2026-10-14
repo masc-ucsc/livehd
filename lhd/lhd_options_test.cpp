@@ -96,7 +96,6 @@ TEST(LhdOptions, RetiredLabelsAreHiddenAndRejected) {
            "compile.slang.defines",
            "compile.slang.includes",
            "compile.slang.undefines",
-           "pass.abc.threads",
            "pass.abc.small_flow",
            "pass.abc.small_ge",
            "pass.abc.small_min_ge",

@@ -229,3 +229,10 @@ cc_test(
 )
 
 # lconst tests removed; equivalent coverage lives in @hlop//hlop:dlop_test
+
+cc_test(
+    name = "job_manager_test",
+    srcs = ["tests/job_manager_test.cpp"],
+    copts = COPTS,
+    deps = [":core", "@googletest//:gtest_main"],
+)

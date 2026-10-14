@@ -1,7 +1,7 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 //
-// Tests the design-size estimators in node_util.hpp used by the memory-admission
-// size gate (pass.color warns, pass.abc/pass.lec refuse above the threshold).
+// Tests the design-size estimators in node_util.hpp behind pass.color's
+// large-design warning (there is no size gate: pass.abc and lec always attempt).
 // The point of these helpers is to count a flattened design WITHOUT materializing
 // the O(flat-nodes) hierarchical walk, and to multiply a shared def's cost by its
 // instance count -- both are checked here.

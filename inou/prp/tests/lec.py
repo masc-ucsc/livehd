@@ -14,6 +14,15 @@ import sys
 # but the outer watchdog -- which also covers parse/upass/satopt -- must scale.
 DBG_WATCHDOG_SCALE = 10
 
+# Top-level verdict words of `lhd lec` / `lhd formal verify` (pass/lec/property_types.hpp
+# Outcome). Every verdict carries a modifier; there is no `UNKNOWN`.
+#   PROVEN-full, PROVEN-bounded(n), TESTED-sampled(N)   exit 0
+#   TIMEOUT-time, TIMEOUT-memory                         exit 0 (+ warning): not a failure, never a proof
+#   REFUTED-cex                                          exit 10: a real counterexample
+#   REFUTED-interface|unsupported|unchecked|vacuous|unexplained   exit 7: no answer, and a failure
+VERDICT = (r'(?:PROVEN-full|PROVEN-bounded\(\d+\)|TESTED-sampled\(\d+\)|TIMEOUT-(?:time|memory)'
+           r'|REFUTED-(?:cex|interface|unsupported|unchecked|vacuous|unexplained))')
+
 
 def watchdog_scale(path=None):
     """Outer-watchdog multiplier: DBG_WATCHDOG_SCALE when running from a bazel dbg tree."""
@@ -34,6 +43,13 @@ def run_lec(cmd, cwd=None, timeout=5, scale=None):
     # therefore remove the budget entirely -- the opposite of the check above.
     # Send whole seconds to the engine; keep the float for the outer watchdog.
     cmd = list(cmd) + ['--set', 'formal.timeout={}'.format(max(1, math.ceil(timeout)))]
+    # Equivalence gates need a PROOF, not a sampled TESTED verdict: the default
+    # effort (test) samples input vectors first and reports `tested`, which these
+    # gates reject. `proof` runs only the proof engines, with formal.timeout as
+    # the limit -- the same "try as hard as you can up to the timeout" setting
+    # lhdtrack uses against yosys. A test that names its own effort keeps it.
+    if not any(arg.startswith('formal.effort=') for arg in cmd):
+        cmd += ['--set', 'formal.effort=proof']
     # These gates read only the verdict. A REFUTED run otherwise compiles and
     # runs `lhd sim` to write the counterexample VCD (seconds, against a
     # millisecond solve); the counterexample line itself is still printed, and
@@ -55,7 +71,7 @@ def run_lec(cmd, cwd=None, timeout=5, scale=None):
         out += ('\nFAIL: LEC outer watchdog exceeded {:g}s (internal budget {:g}s)\n'
                 .format(watchdog, timeout)).encode()
         return subprocess.CompletedProcess(cmd, 124, out)
-    if no_replay and b' REFUTED' in out:
+    if no_replay and b' REFUTED-cex' in out:
         out += (b'NOTE: lec.py skipped the counterexample VCD replay; add --set formal.simfail_run=true '
                 b'to the lhd lec command to write it\n')
     return subprocess.CompletedProcess(cmd, proc.returncode, out)
@@ -63,20 +79,49 @@ def run_lec(cmd, cwd=None, timeout=5, scale=None):
 
 def final_verdict(text):
     """Ignore progress/artifact lines printed after the actual verdict."""
-    lines = re.findall(r'^lec: .* (?:PROVEN|REFUTED|UNKNOWN|PASS\(\d+\))[^\n]*', text, re.M)
+    lines = re.findall(r'^lec: .* ' + VERDICT + r'(?![\w-])[^\n]*', text, re.M)
     return lines[-1] if lines else ''
 
 
+def verdict_word(text):
+    """The verdict word of the final `lec:` line ('' when there is none)."""
+    m = re.search(r' (' + VERDICT + r')(?![\w-])', final_verdict(text))
+    return m.group(1) if m else ''
+
+
 def verdict(result, sanity=False):
-    """Validate the final verdict, never equating arbitrary UNKNOWN or exit 0 with proof."""
+    """Classify a lhd lec run.
+
+    proven     PROVEN-full or PROVEN-bounded(n): a bounded proof is still a proof
+    tested     TESTED-sampled(N) (only when a caller picks a sampled effort): not a failure
+    timeout    TIMEOUT-time / TIMEOUT-memory (or the outer watchdog): not a failure, never a proof
+    refuted    REFUTED-cex: a real counterexample -- a test failure
+    refuted-<why>  REFUTED-interface/-unsupported/-unchecked/-vacuous/-unexplained: no answer, a failure
+    failed     no verdict at all (crash, setup error)
+    `sanity` is accepted for old callers and ignored: it no longer changes anything.
+    """
+    del sanity
     text = result.stdout.decode('utf-8', 'replace')
-    last = final_verdict(text)
-    if result.returncode == 0 and re.search(r' (?:PROVEN|PASS\(\d+\)) equivalent', last):
+    word = verdict_word(text)
+    rc = result.returncode
+    if rc == 124 and 'LEC outer watchdog exceeded' in text:
+        return 'timeout'
+    if rc == 0 and word.startswith('PROVEN-'):
         return 'proven'
-    if (sanity and result.returncode == 7 and ' UNKNOWN ' in last
-            and re.search(r'\(hit formal\.timeout=', last)):
-        return 'inconclusive'
+    if rc == 0 and word.startswith('TESTED-'):
+        return 'tested'
+    if rc == 0 and word.startswith('TIMEOUT-'):
+        return 'timeout'
+    if rc == 10 and word == 'REFUTED-cex':
+        return 'refuted'
+    if rc == 7 and word.startswith('REFUTED-') and word != 'REFUTED-cex':
+        return 'refuted-' + word.split('-', 1)[1]
     return 'failed'
+
+
+def acceptable(status):
+    """Only a refutation (of any kind) or no verdict at all fails a test."""
+    return status in ('proven', 'tested', 'timeout')
 
 
 def main():
@@ -92,7 +137,7 @@ def main():
     sys.stdout.write(result.stdout.decode('utf-8', 'replace'))
     status = verdict(result, args.sanity)
     print('LEC check: ' + status)
-    return 1 if status == 'failed' else 0
+    return 0 if acceptable(status) else 1
 
 
 if __name__ == '__main__':

@@ -1,0 +1,69 @@
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -506,6 +506,15 @@
+   find_package(Pip REQUIRED)
+ endif()
+ 
++if(LIVEHD_GMP_HEADER)
++  get_filename_component(GMP_INCLUDE_DIR "${LIVEHD_GMP_HEADER}" DIRECTORY)
++  get_filename_component(GMPXX_INCLUDE_DIR "${LIVEHD_GMPXX_HEADER}" DIRECTORY)
++endif()
++if(LIVEHD_OFFLINE_DEPS)
++  file(WRITE "${PROJECT_BINARY_DIR}/livehd-python" "#!/bin/sh\nPYTHONPATH='${PROJECT_SOURCE_DIR}/deps/python' exec '${Python_EXECUTABLE}' \"$@\"\n")
++  execute_process(COMMAND chmod +x "${PROJECT_BINARY_DIR}/livehd-python")
++  set(Python_EXECUTABLE "${PROJECT_BINARY_DIR}/livehd-python")
++endif()
+ find_package(GMP 6.3 REQUIRED)
+ 
+ if(ENABLE_ASAN)
+diff --git a/src/CMakeLists.txt b/src/CMakeLists.txt
+--- a/src/CMakeLists.txt
++++ b/src/CMakeLists.txt
+@@ -1486,7 +1486,9 @@
+ add_subdirectory(base)
+ add_subdirectory(context)
+ add_subdirectory(expr)
+-add_subdirectory(parser)
++if(NOT LIVEHD_LIBRARY_ONLY)
++  add_subdirectory(parser)
++endif()
+ add_subdirectory(rewriter)
+ add_subdirectory(theory)
+ add_subdirectory(util)
+@@ -1635,4 +1637,6 @@
+ # target_link_libraries(...) with object libraries for cmake versions <= 3.12.
+ # Thus, we can only visit main as soon as all dependencies for cvc5 are set up.
+ 
+-add_subdirectory(main)
++if(NOT LIVEHD_LIBRARY_ONLY)
++  add_subdirectory(main)
++endif()
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -737,7 +737,9 @@
+   add_subdirectory(docs)
+ endif()
+ 
+-add_subdirectory(test)
++if(NOT LIVEHD_LIBRARY_ONLY)
++  add_subdirectory(test)
++endif()
+ 
+ include(target-graphs)
+ 
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -739,7 +739,9 @@
+ 
+ add_subdirectory(test)
+ 
+-include(target-graphs)
++if(NOT LIVEHD_LIBRARY_ONLY)
++  include(target-graphs)
++endif()
+ 
+ #-----------------------------------------------------------------------------#
+ # Package configuration

@@ -7,7 +7,7 @@
 // `last == 0`, a state the rotation never reaches from `last = 1`. The
 // numbered variants drop that corner:
 //   _1  no invariant: equal on every reachable state, but 1-induction fails
-//       from last=0, so LEC stops at a bounded PASS and names that state;
+//       from last=0, so LEC stops at a PROVEN-bounded(n) and names that state;
 //   _2  states the invariant with a plain `assume`: pass.formal proves it,
 //       LEC uses it as an induction hypothesis -> unbounded PROVEN;
 //   _3  a REACHABLE difference under the same assume -> REFUTED.

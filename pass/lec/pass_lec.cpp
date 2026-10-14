@@ -7,6 +7,7 @@
 #include <string_view>
 
 #include "diag.hpp"
+#include "job_manager.hpp"
 #include "query.hpp"
 #include "str_tools.hpp"
 
@@ -26,16 +27,14 @@ void Pass_lec::setup() {
                 &Pass_lec::lec);
   m.add_label_optional("engine",
                        "discharge engine: auto (default; parallel portfolio: race ind+bmc as forked "
-                       "workers, take the first trustworthy verdict — ind-Proven=PASS, bmc-Refuted=FAIL) | "
-                       "bmc | ind | ic3. Each engine is trustworthy in ONE direction only, so a lone "
-                       "engine can report a verdict `auto` would not: ind (inductive flop-cut miter) can "
-                       "FALSE-NEGATIVE — its REFUTED is NOT a disproof, because the step case starts from an "
-                       "ARBITRARY equal state that may be UNREACHABLE from reset, so a refuted design may "
-                       "well be equivalent (classic k-induction incompleteness; a fail can still be a pass). "
-                       "Only ind-Proven is definitive — an unbounded proof. Symmetrically bmc's Refuted is "
-                       "definitive (a reachable CEX) but its Proven is only BOUNDED (no CEX up to formal.bound; "
-                       "deeper cycles unproven). Exception: on a purely COMBINATIONAL pair the inductive miter "
-                       "IS the combinational miter, so ind-Refuted is a genuine CEX (auto drops bmc there)",
+                       "workers, take the first trustworthy verdict — ind-Proven=PROVEN-full, bmc-Refuted=REFUTED-cex, "
+                       "a bmc pass=PROVEN-bounded(n)) | bmc | ind | ic3. Each engine is trustworthy in ONE direction only: "
+                       "ind (inductive flop-cut miter) proves unbounded, but its single-step counterexample starts from "
+                       "an ARBITRARY equal state that may be UNREACHABLE from reset, so a forced ind that cannot clear "
+                       "one reports REFUTED-unchecked (exit 7), never a disproof; bmc's REFUTED-cex is definitive (a "
+                       "reachable trace) but its pass is only PROVEN-bounded(n) (deeper cycles unproven). On a purely "
+                       "COMBINATIONAL pair the inductive miter IS the combinational miter, so ind's counterexample is a "
+                       "genuine REFUTED-cex (auto drops bmc there)",
                        "auto");
   m.add_label_optional("solver",
                        "equivalence backend: cvc5 (default, in-process SMT) | bitwuzla (in-process SMT) | "
@@ -53,7 +52,7 @@ void Pass_lec::setup() {
                        "false");
   m.add_label_optional("descend_on_inconclusive",
                        "lgcheck debug comparison only: true recursively checks direct child definitions when a top is "
-                       "inconclusive, reusing the already-read RTLIL; every child gets its own equivalence "
+                       "undecided, reusing the already-read RTLIL; every child gets its own equivalence "
                        "timeout, and any child counterexample refutes the run",
                        "false");
   m.add_label_optional("gold_x",
@@ -64,24 +63,15 @@ void Pass_lec::setup() {
                        "ignore");
   m.add_label_optional("bound", "BMC / induction depth bound k", "6");
   m.add_label_optional("timeout",
-                       "SOFT TOTAL budget in seconds for the run (0 = unbounded; the default bounds the CLI so a hard "
-                       "miter degrades to UNKNOWN instead of freezing). A target, not a cap: overshooting is fine, "
-                       "silently checking nothing is not — see formal.min_timeout for the floor that causes the "
-                       "overrun, and the 'budget Ns target / Ms actual' line that reports it. It is ONE allowance for "
-                       "the whole query (ENCODE plus every checkSat, each re-armed to what remains), and one TOTAL "
-                       "across units, not one per def / per obligation (the D x T hazard). The hierarchical driver "
-                       "spends it as wall clock (defs run concurrently under formal.jobs, so a summed budget would "
-                       "drain jobs-times faster than real time); the verify engine spends it as total solver time. "
-                       "Accounting is on whenever timeout>0. NB engine=auto races ind+bmc as two "
-                       "processes; the parent SIGKILLs a racer still running at the wall deadline timeout + "
-                       "min_timeout + clamp(timeout/4, 10s, 60s) and reports it UNKNOWN (cvc5 preprocessing is not "
-                       "covered by its own time limit)",
+                       "wall limit in seconds for LEC and explicit property proof effort (0 = unbounded). Queueing, "
+                       "encoding, checks, retries and witness confirmation share one allowance; parallel arms charge "
+                       "elapsed wall time once. Sampled efforts start sampling immediately and use this as their "
+                       "backstop. Legacy property verification retains its soft solver-time budget and per-unit floors",
                        "120");
   m.add_label_optional("hard_timeout_mult",
-                       "hard wall backstop multiplier for an isolated proof worker: formal.timeout * this value "
-                       "(default 3). cvc5's soft limit cannot preempt every underlying SAT call; 0 disables the "
-                       "backstop (and the forked-race wall deadline). This bounds diagnostics only — a killed worker "
-                       "reports UNKNOWN, never PROVEN or REFUTED",
+                       "additional backstop multiplier for legacy property verification (0 disables that backstop). "
+                       "It never extends LEC or explicit proof effort's shared formal.timeout wall limit; killed workers "
+                       "report TIMEOUT",
                        "3");
   m.add_label_optional("witness", "print the counterexample/witness on Refuted (and gate simfail/simfail_run)", "true");
   m.add_label_optional("simfail",
@@ -115,7 +105,7 @@ void Pass_lec::setup() {
                        "defs and force-blackboxes their instances (outputs become free UF(inputs), inputs "
                        "stay compare points), keeping them boxed even through a refute's flat-confirm so a "
                        "real counterexample OUTSIDE the trusted cones is still reported. Boxing "
-                       "over-approximates: a PASS under trust is a real pass modulo the trusted internals, and "
+                       "over-approximates: a PROVEN under trust is a real proof modulo the trusted internals, and "
                        "a top proven with a non-empty trust list is DISCLOSED ('PROVEN under N trusted "
                        "def(s)'), never a silent unconditional pass. Trusting the top itself is refused",
                        "");
@@ -138,7 +128,7 @@ void Pass_lec::setup() {
                        "BOXED, then discharge each premise from the same pass's other entries (the module DAG is "
                        "well-founded, so this is an induction). No def waits on another def's verdict, so the "
                        "hierarchy runs fully in parallel and every miter is at its minimum size; a refuting block is "
-                       "absorbed, and an inconclusive block is discharged in context, by re-proving its immediate "
+                       "absorbed, and an undecided block is discharged in context, by re-proving its immediate "
                        "PARENT with that block inlined; if the parent proves, nothing higher is re-solved | "
                        "bottom_up = legacy leaves-first, boxing only a child "
                        "already proven and FLATTENING one that is not",
@@ -148,9 +138,10 @@ void Pass_lec::setup() {
                        "block into its caller (its PROVEN siblings stay boxed) and prove the caller anyway — a "
                        "module boundary is not part of the specification, functionality moves across it between "
                        "front-ends, so a block-boundary counterexample is not a disproof of the design and only the "
-                       "requested top's boundary is contractual | fail = DEBUG: stop at the first differing block, "
-                       "taint its ancestors and report that counterexample as the run verdict (fast localization, "
-                       "but it calls a boundary mismatch a design bug)",
+                       "requested top's boundary is contractual | fail = DEBUG: stop at the first differing block "
+                       "and taint its ancestors (fast localization); the block counterexample is not a design "
+                       "verdict, so the run is REFUTED-unchecked (exit 7): the option forbade the escalation that "
+                       "would decide the top",
                        "escalate");
   m.add_label_optional("semdiff",
                        "structural def-diff reduction (M3): structural (default; true/on = alias) | none. Run "
@@ -163,9 +154,9 @@ void Pass_lec::setup() {
                        "tier-2 speculative state correspondence (default true): when unmatched flops survive "
                        "tier-1 name pairing, run pass.semdiff's full-match (SRP/ERP) signature pass per def-pair "
                        "and inject the resulting pairs as UNCERTAIN — REFUTED under them drops all pairs and "
-                       "re-solves once; a bounded bmc PASS under them is accepted only after a pair-free retry "
+                       "re-solves once; a bounded bmc proof under them is accepted only after a pair-free retry "
                        "from detected reset or tracked-? no-reset initialization also proves, otherwise only an "
-                       "unbounded inductive proof (self-certifying) accepts them; a PASS persists the pairs as "
+                       "unbounded inductive proof (self-certifying) accepts them; a proof persists the pairs as "
                        "entity-keyed pair hints under --workdir. false disables (renamed state stays unmatched)",
                        "true");
   m.add_label_optional("partitions",
@@ -175,7 +166,10 @@ void Pass_lec::setup() {
                        "variable barrel shift / mux selector) fold — turning one intractable miter into many trivial "
                        "cubes. A decisive case-split verdict is used; otherwise it falls back to the monolithic solve",
                        "4");
-  m.add_label_optional("jobs", "shared formal proof worker-pool size (default 4); bounds concurrent hierarchical def tasks", "4");
+  m.add_label_optional("profile",
+                       "solver profile for a single engine: internal|lazy|eager-kissat|eager-cms|intblast|witness",
+                       "internal");
+  m.add_label_optional("portfolio", "proof engine:profile list; auto chooses the measured eligible arms", "auto");
   m.add_label_optional("effort",
                        "LEC effort preset: quick-check (256 input vectors), test "
                        "(2048, the default) or long-check (16384); verify (proof-only, no default timeout); proof "
@@ -185,24 +179,19 @@ void Pass_lec::setup() {
                        "never PROVEN",
                        "");
   m.add_label_optional("min_timeout",
-                       "FLOOR in seconds under the soft `timeout` total: once the total is spent, a unit with no "
-                       "verdict yet still gets at least this much solver time, so it earns a real UNKNOWN/CEX instead "
-                       "of a silent 'not checked'. A unit is one obligation (formal verify) or one def (hierarchical "
-                       "lec). Overshooting `timeout` is intended — the bound is timeout + unsettled_units*min_timeout "
-                       "— and the run reports target/actual/units/floored so the overrun is never silent. Default 20s: "
-                       "a 1s floor cannot earn a real verdict on a non-trivial def, so on a wide design the per-def "
-                       "verdicts flip run to run purely on dispatch order",
+                       "minimum per-unit solver allowance for legacy property's soft budget and hierarchical scheduling. "
+                       "A requested floor is always clamped by LEC or explicit proof effort's shared wall deadline",
                        "20");
   m.add_label_optional("spec_mining_timeout",
                        "independent budget (seconds, 0 = off) for the SPECULATIVE post-run phase, never drawn from "
                        "`timeout`: the unproven-def straggler list, the cvc5 timeout-CORE diagnosis (which subset of "
-                       "still-unknown obligations is jointly toxic), and P3 invariant mining (see formal.mine, which "
+                       "still-undecided obligations is jointly toxic), and P3 invariant mining (see formal.mine, which "
                        "is inert unless this is set). All three are diagnosis: they cost solver time and can never "
                        "change a verdict",
                        "0");
   m.add_label_optional("report",
                        "`lhd formal verify` machine-readable run report: a JSON file written into the workdir on "
-                       "EVERY run (all verdicts, UNKNOWN included) with per-obligation verdicts/cycles/solve times, "
+                       "EVERY run (all verdicts, undecided ones included) with per-obligation verdicts/cycles/solve times, "
                        "assume classes, the structured timeout core, and witness artifact paths — the agent-loop "
                        "feedback channel. Value: a filename (default formal_report.json); ''/'false'=off",
                        "formal_report.json");
@@ -217,9 +206,9 @@ void Pass_lec::setup() {
                        "variable shift-amount / mux-selector pins) | <input-name> (force) | none (disable)",
                        "auto");
   m.add_label_optional("retry",
-                       "verdict-cache Unknown policy: changed (default; an unchanged def that already came back "
-                       "Unknown at this budget skips the re-attempt, still reported inconclusive) | all (re-attempt "
-                       "every Unknown)",
+                       "verdict-cache TIMEOUT policy: changed (default; an unchanged def that already came back "
+                       "TIMEOUT-time at this budget skips the re-attempt, reported \"TIMEOUT-time (skipped: known "
+                       "timeout)\") | all (re-attempt every known timeout)",
                        "changed");
   m.add_label_optional("cross", "also run lgcheck and assert agreement (bring-up only)", "false");
   m.add_label_optional("decompose",
@@ -245,10 +234,10 @@ void Pass_lec::setup() {
                        "seq");
   m.add_label_optional("int_blast",
                        "cvc5 int-blasting (solve-bv-as-int): auto (default) = solve bit-vector-first, and a "
-                       "solver-give-up UNKNOWN earns ONE int-blasted re-solve at the formal.min_timeout budget "
+                       "a solver give-up earns ONE int-blasted re-solve at the formal.min_timeout budget "
                        "(arithmetic-rewrite miters — reassociated/distributed/commuted multiplies — that "
                        "bit-blasting cannot finish prove in <1s as unbounded integers, while mask/extract-heavy "
-                       "cones stay Unknown, so the retry only ever adds information) | off = never | "
+                       "cones stay undecided, so the retry only ever adds information) | off = never | "
                        "iand | sum | bitwise | bv = force that cvc5 mode from the first solve. Verdicts stay "
                        "sound (the translation is equisatisfiable); only the main lec solve path is affected",
                        "auto");
@@ -258,10 +247,6 @@ void Pass_lec::setup() {
                        "first. Read-only analysis, so it composes across hierarchy; default true. false falls "
                        "back to the M8 graph rewrite, which refuses a latch or negedge flop inside a def",
                        "true");
-  m.add_label_optional("allow_oversize",
-                       "skip the design-size gate; default false (a design over ~1M nodes is refused as "
-                       "UNKNOWN because encoding it as one unit may exhaust host memory)",
-                       "false");
   m.add_label_optional("stats",
                        "print a cvc5 solve-insight report: problem size (atoms, input atoms, clause literals), "
                        "conflicts / learned clauses, decisions, propagations, restarts, theory lemmas, resource "
@@ -303,10 +288,11 @@ void Pass_lec::lec(Eprp_var& var) {
   o.semdiff           = lec::lec_canon_semdiff(var.get("semdiff", "structural"));
   o.partitions        = str_tools::to_i(var.get("partitions", "4"));
   o.split             = std::string{var.get("split", "auto")};
-  o.allow_oversize    = parse_bool(var.get("allow_oversize", "false"));
   o.stats             = parse_bool(var.get("stats", "false"));  // cvc5 solve-insight accounting (~8x slower)
   // Default `test` (see lec::kDefaultLecEffort); an unset effort with options a
   // sampled preset cannot serve falls back to the proof-only defaults.
+  o.profile                              = std::string{var.get("profile", "internal")};
+  o.portfolio                            = std::string{var.get("portfolio", "auto")};
   const std::string_view effort_label    = var.get("effort", "");
   const bool             effort_explicit = !effort_label.empty();
   try {
@@ -382,6 +368,9 @@ void Pass_lec::lec(Eprp_var& var) {
     livehd::diag::err("pass.lec", "unresolved-match", "usage").msg("{}", error).fatal();
     return;
   }
+  if (o.timeout > 0) {
+    o._deadline = std::chrono::steady_clock::now() + std::chrono::seconds(o.timeout);
+  }
   lec::Query_result r;
   if (lec::is_sampled(o.effort)) {
     auto co       = o;
@@ -390,35 +379,78 @@ void Pass_lec::lec(Eprp_var& var) {
     co.split      = "none";
     r             = lec::prove_equal_isolated(ref.get(), impl.get(), co);
   } else {
-    r = lec::prove_equal(ref.get(), impl.get(), o);
+    r = lec::prove_equal_isolated(ref.get(), impl.get(), o);
     r = lec::int_blast_retry(ref.get(), impl.get(), o, std::move(r));
   }
 
-  // BEFORE the switch: the Refuted/Unknown arms below are .fatal(), so a report
-  // printed after them would be lost in exactly the two cases where knowing how hard
+  // BEFORE the verdict: the refuted arms below are .fatal(), so a report
+  // printed after them would be lost in exactly the cases where knowing how hard
   // the solver worked matters most. Without this, `pass.lec stats:true` used as a
   // direct pipe step would pay the ~8x plugin cost and print nothing at all.
   if (o.stats) {
     livehd::lec::report_cvc5_stats("lec", r.cvc5);
   }
 
-  if (r.tested && !r.unsupported && !r.nothing_compared) {
-    std::print("lec: '{}' TESTED {} ({} input vectors, no mismatch; equivalence not proven)\n",
+  // The same outcome mapping as `lhd lec` (owner rulings 2026-10-14). This
+  // single-pair path runs no escalation of its own, so its result IS final.
+  //   PROVEN-* / TESTED-sampled   print, exit 0
+  //   TIMEOUT-time / -memory      print + warning, exit 0
+  //   REFUTED-cex                 error, code lec-refuted-cex: the kernel maps
+  //                               it to the counterexample class (exit 10)
+  //   REFUTED-<other>             error, class unsupported (exit 7); this
+  //                               includes REFUTED-vacuous (nothing compared,
+  //                               or a contradictory assume set)
+  const bool        engine_forced = o.engine != "auto" || o.portfolio != "auto";
+  const auto        outcome       = lec::query_outcome(r, engine_forced);
+  const auto        info          = lec::outcome_info(outcome);
+  const std::string word          = lec::outcome_word(outcome, lec::query_outcome_depth(r, outcome));
+  const std::string code          = "lec-" + std::string{info.json};
+  if (lec::is_proven(outcome) || outcome == lec::Outcome::Tested_sampled || lec::is_timeout(outcome)) {
+    if (outcome == lec::Outcome::Tested_sampled) {
+      std::print("lec: '{}' {} {} ({} input vectors, no mismatch; equivalence not proven)\n",
+                 mod,
+                 word,
+                 lec::effort_name(r.sampling.reached),
+                 r.sampling.vectors);
+    } else {
+      std::print("lec: '{}' {} ({})\n", mod, word, r.detail);
+    }
+    if (info.warn) {
+      livehd::diag::warn("pass.lec", code, "unsupported")
+          .msg("{}: '{}' {}",
+               word,
                mod,
-               lec::effort_name(r.sampling.reached),
-               r.sampling.vectors);
+               outcome == lec::Outcome::Timeout_memory ? "ran out of memory before a verdict (no proof, no counterexample)"
+                                                       : "hit a time limit before a verdict (no proof, no counterexample)")
+          .hint(outcome == lec::Outcome::Timeout_memory ? "run on a host with more memory, or decompose the check"
+                                                        : "raise --set formal.timeout, or decompose the check")
+          .emit();
+    }
     return;
   }
-
-  switch (r.verdict) {
-    case lec::Verdict::Proven : std::print("lec: '{}' PROVEN equivalent ({})\n", mod, r.detail); break;
-    case lec::Verdict::Refuted: {
-      std::string w = r.witness.empty() ? std::string{"(no witness)"} : r.witness;
-      livehd::diag::err("pass.lec", "not-equivalent", "internal").msg("'{}' is NOT equivalent; counterexample: {}", mod, w).fatal();
-      break;
-    }
-    case lec::Verdict::Unknown:
-      livehd::diag::err("pass.lec", "lec-unknown", "unsupported").msg("'{}' equivalence is UNKNOWN ({})", mod, r.detail).fatal();
-      break;
+  if (outcome == lec::Outcome::Refuted_cex) {
+    // NOTE: the error class of a pass diagnostic is mapped by the kernel
+    // (map_diag_category); the code `lec-refuted-cex` is what names it a design
+    // counterexample.
+    std::string w = r.witness.empty() ? std::string{"(no witness)"} : r.witness;
+    livehd::diag::err("pass.lec", code, "internal")
+        .msg("{}: '{}' is NOT equivalent; counterexample: {}", word, mod, w)
+        .fatal();
+    return;
   }
+  if (outcome == lec::Outcome::Refuted_vacuous) {
+    const std::string_view why = r.cause_detail.empty() ? std::string_view{r.detail} : std::string_view{r.cause_detail};
+    const bool contradictory   = why.find("CONTRADICTORY") != std::string_view::npos || why.find("contradictory") != std::string_view::npos;
+    livehd::diag::err("pass.lec", code, "unsupported")
+        .msg("{}: '{}' {}, so the check proved nothing ({})",
+             word,
+             mod,
+             contradictory ? "was compared under a CONTRADICTORY assume set" : "had nothing to compare",
+             r.detail)
+        .hint(contradictory ? "fix the conflicting assume statements so at least one input satisfies them all"
+                            : "select a top that drives at least one output or state cell on both sides")
+        .fatal();
+    return;
+  }
+  livehd::diag::err("pass.lec", code, "unsupported").msg("{}: '{}' equivalence was not decided ({})", word, mod, r.detail).fatal();
 }

@@ -32,5 +32,5 @@ test quadratic.exhaustive {
 TB
 # Several mapped arithmetic modules compile independently; avoid serializing
 # their expensive host builds behind the default two test compiler jobs.
-"$LHD" sim lg:"$W/impl" "$W/tb.prp" --set sim.ninja=false --set sim.jobs=8 \
+"$LHD" sim lg:"$W/impl" "$W/tb.prp" --set sim.ninja=false --set lhd.jobs=8 \
   --set sim.tune.profile=off --set sim.tune.backend=slop --workdir "$W/sim" -q

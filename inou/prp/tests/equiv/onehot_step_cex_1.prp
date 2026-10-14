@@ -2,7 +2,7 @@
 :name: onehot_step_cex_1
 :lec_grep: induction step fails from an arbitrary state
 :lec_grep: state: last=0
-:lec_grep_not: PROVEN equivalent
+:lec_grep_not: PROVEN-full
 */
 // No invariant: the designs agree on every reachable state, but the induction
 // step diverges from the unreachable last=0, and LEC must say so (the state,

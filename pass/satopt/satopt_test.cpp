@@ -310,7 +310,7 @@ TEST(SatoptSelect, InstancesKeepSeparateState) {
   EXPECT_EQ(p.is_true(same).verdict, livehd::formal::Verdict::Proven);
   // Without descent the callee stays opaque.
   livehd::formal::Prover flat(f.g.get());
-  EXPECT_EQ(flat.is_true(same).verdict, livehd::formal::Verdict::Unknown);
+  EXPECT_EQ(flat.is_true(same).verdict, livehd::formal::Verdict::Undecided);
 }
 
 TEST(SatoptSelect, CalleeEditInvalidatesReuse) {

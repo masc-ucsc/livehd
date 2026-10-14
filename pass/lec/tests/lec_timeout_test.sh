@@ -5,7 +5,7 @@
 # nonlinear-multiplier miters (mul associativity / distributivity / 3-way
 # commutativity at 16 bits) make cvc5's bit-blast never return -- without a
 # solver time limit `lhd lec` FREEZES forever. With `--set formal.timeout=N` each
-# query must come back promptly as UNKNOWN (a sound degrade, never a false
+# query must come back promptly as TIMEOUT (a sound degrade, never a false
 # PROVEN/REFUTED). A positive control checks the bound does NOT break a normal,
 # quickly-solvable proof.
 #
@@ -118,7 +118,7 @@ run_lec() {  # $1=name $2=formal.timeout secs $3=outer kill secs
 # 15+ minutes on a netlist LEC). LIVEHD_LEC_RACER_STALL_S makes every racer
 # sleep before solving -- the stand-in for that stuck child. With
 # formal.timeout=1 and min_timeout=1 the race deadline is 1 + 1 + 10 s grace =
-# 12 s: the run must come back UNKNOWN naming the deadline well inside the 25 s
+# 12 s: the run must come back TIMEOUT naming the deadline well inside the 25 s
 # watchdog, never PROVEN, never hang, and leave no racer process behind (each
 # racer is a fork of this lhd, so its argv carries the unique workdir). Runs in
 # the BACKGROUND, concurrently with the freeze cases below, to keep the test short.
@@ -188,22 +188,22 @@ EOF2
 ibstall_bg=$!
 
 # Each hard case: formal.timeout=2s, outer watchdog 25s. Must (a) NOT trip the
-# watchdog -- proving the bound actually fires -- and (b) report UNKNOWN.
+# watchdog -- proving the bound actually fires -- and (b) report TIMEOUT.
 for c in reassoc distrib poly; do
   run_lec "$c" 2 25
-  v=$(echo "$OUT" | grep -o "PROVEN equivalent\|REFUTED (not equivalent)\|UNKNOWN" | head -1)
+  v=$(echo "$OUT" | grep -o "PROVEN equivalent\|REFUTED (not equivalent)\|TIMEOUT\|TIMEOUT\|UNSUPPORTED\|UNDISCHARGED\|UNCONFIRMED\|UNPAIRED\|VACUOUS\|UNEXPLAINED" | sed -E 's/^(UNSUPPORTED|UNDISCHARGED|UNCONFIRMED|UNPAIRED|UNCHECKED|VACUOUS|UNEXPLAINED)$/UNDECIDED/' | head -1)
   if [ "$HUNG" -eq 1 ]; then
     echo "FAIL: $c HUNG past the outer 25s watchdog -> formal.timeout was NOT honored"; fail=1
-  elif [ "$v" != "UNKNOWN" ]; then
-    echo "FAIL: $c -> verdict '$v' (want UNKNOWN); rc=$RC elapsed=${ELAPSED}s"; fail=1
+  elif [ "$v" != "TIMEOUT" ]; then
+    echo "FAIL: $c -> verdict '$v' (want TIMEOUT); rc=$RC elapsed=${ELAPSED}s"; fail=1
   else
-    echo "ok: $c -> UNKNOWN in ${ELAPSED}s (bounded)"
+    echo "ok: $c -> TIMEOUT in ${ELAPSED}s (bounded)"
   fi
 done
 
 # Positive control: the bound must not turn an easy proof into UNKNOWN.
 run_lec easy 2 25
-v=$(echo "$OUT" | grep -o "PROVEN equivalent\|REFUTED (not equivalent)\|UNKNOWN" | head -1)
+v=$(echo "$OUT" | grep -o "PROVEN equivalent\|REFUTED (not equivalent)\|TIMEOUT\|TIMEOUT\|UNSUPPORTED\|UNDISCHARGED\|UNCONFIRMED\|UNPAIRED\|VACUOUS\|UNEXPLAINED" | sed -E 's/^(UNSUPPORTED|UNDISCHARGED|UNCONFIRMED|UNPAIRED|UNCHECKED|VACUOUS|UNEXPLAINED)$/UNDECIDED/' | head -1)
 if [ "$v" != "PROVEN equivalent" ]; then
   echo "FAIL: easy control -> verdict '$v' (want PROVEN equivalent); rc=$RC"; fail=1
 else
@@ -213,25 +213,25 @@ fi
 wait "$stall_bg"
 read -r SRC SEL < "$WORK/stall_rc.txt"
 SOUT=$(cat "$WORK/out_stall.txt")
-sv=$(echo "$SOUT" | grep -o "PROVEN equivalent\|REFUTED (not equivalent)\|UNKNOWN" | head -1)
+sv=$(echo "$SOUT" | grep -o "PROVEN equivalent\|REFUTED (not equivalent)\|TIMEOUT\|TIMEOUT\|UNSUPPORTED\|UNDISCHARGED\|UNCONFIRMED\|UNPAIRED\|VACUOUS\|UNEXPLAINED" | sed -E 's/^(UNSUPPORTED|UNDISCHARGED|UNCONFIRMED|UNPAIRED|UNCHECKED|VACUOUS|UNEXPLAINED)$/UNDECIDED/' | head -1)
 if [ "$SRC" -ge 128 ] && [ "$SEL" -ge 25 ]; then
   echo "FAIL: stalled race HUNG past the 25s watchdog -> the fork_race wall deadline was NOT enforced"; fail=1
-elif [ "$sv" != "UNKNOWN" ]; then
-  echo "FAIL: stalled race -> verdict '$sv' (want UNKNOWN); rc=$SRC elapsed=${SEL}s"; echo "$SOUT" | tail -5; fail=1
-elif ! echo "$SOUT" | grep -q "racer exceeded formal.timeout"; then
-  echo "FAIL: stalled race UNKNOWN does not name the wall deadline ('racer exceeded formal.timeout')"; fail=1
+elif [ "$sv" != "TIMEOUT" ]; then
+  echo "FAIL: stalled race -> verdict '$sv' (want TIMEOUT); rc=$SRC elapsed=${SEL}s"; echo "$SOUT" | tail -5; fail=1
+elif ! echo "$SOUT" | grep -q "shared portfolio wall deadline"; then
+  echo "FAIL: stalled race TIMEOUT does not name the wall deadline ('shared portfolio wall deadline')"; fail=1
 elif [ "$SEL" -gt 20 ]; then
   echo "FAIL: stalled race took ${SEL}s (deadline 12s): a retry re-spent the wall budget"; fail=1
 elif pgrep -f "$WORK/w_stall_race" >/dev/null 2>&1; then
   echo "FAIL: a killed racer outlived lhd lec (orphan process still running)"; fail=1
 else
-  echo "ok: stalled race -> UNKNOWN (racer exceeded formal.timeout) in ${SEL}s, no orphan racer"
+  echo "ok: stalled race -> TIMEOUT (shared portfolio wall deadline) in ${SEL}s, no orphan racer"
 fi
 
 wait "$ibstall_bg"
 read -r IRC IEL < "$WORK/ibstall_rc.txt"
 IOUT=$(cat "$WORK/out_ibstall.txt")
-iv=$(echo "$IOUT" | grep -o "PROVEN equivalent\|REFUTED (not equivalent)\|UNKNOWN" | head -1)
+iv=$(echo "$IOUT" | grep -o "PROVEN equivalent\|REFUTED (not equivalent)\|TIMEOUT\|TIMEOUT\|UNSUPPORTED\|UNDISCHARGED\|UNCONFIRMED\|UNPAIRED\|VACUOUS\|UNEXPLAINED" | sed -E 's/^(UNSUPPORTED|UNDISCHARGED|UNCONFIRMED|UNPAIRED|UNCHECKED|VACUOUS|UNEXPLAINED)$/UNDECIDED/' | head -1)
 if [ "$IRC" -ge 128 ] && [ "$IEL" -ge 25 ]; then
   echo "FAIL: bmc-only stall HUNG past the 25s watchdog"; fail=1
 elif [ "$iv" = "REFUTED (not equivalent)" ]; then

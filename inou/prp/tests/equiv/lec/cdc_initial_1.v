@@ -1,7 +1,7 @@
 /*
 src_level stored complemented, sync reset folded into the next-state logic.
 The bounded proof must complete after the reset-hold prologue.
-:lec_grep: PASS\(6\) equivalent
+:lec_grep: PROVEN-bounded\(6\)
 */
 module cdc(input src_clk, dst_clk, src_rst, src_pulse, output dst_pulse);
 reg src_level, sync0, sync1, dst_level_d;

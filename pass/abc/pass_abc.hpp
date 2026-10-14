@@ -23,5 +23,11 @@ public:
   static void setup();
   static void work(Eprp_var& var);
   static void add_mapping_labels(Eprp_method& method);
+  // Maps the design. An allocation failure anywhere below (std::bad_alloc, e.g.
+  // at the RLIMIT_AS memory backstop) fails with a `memory-exhausted`
+  // TIMEOUT-memory diagnostic instead of escaping as an unexplained exception.
   static void work_with(Eprp_var& var, const std::function<void(livehd::abc::Map_options&)>& configure);
+
+private:
+  static void map_with(Eprp_var& var, const std::function<void(livehd::abc::Map_options&)>& configure);
 };

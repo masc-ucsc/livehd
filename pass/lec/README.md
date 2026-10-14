@@ -24,14 +24,40 @@ An UNSET effort combined with an option the sampled presets cannot serve
 `formal.cross`, or a phase other than `after_reset`) falls back to `proof`.
 An EXPLICIT sampled preset with those options is a usage error.
 
-| verdict | meaning | exit |
-|---|---|---|
-| PROVEN / PASS(n) | no free data inputs: exhaustive check, unbounded / n cycles | 0 |
-| REFUTED | a real counterexample | 10 |
-| TESTED `<level>` | at least that level's vectors checked, no mismatch | 0 |
-| UNKNOWN | stopped before even quick-check's vectors | 7 |
+`lhd lec` and `lhd formal verify` print the SAME verdict words and exit with
+the SAME codes (owner rulings 2026-10-14). Every verdict carries a modifier;
+`unknown` is never printed, because it names nothing.
 
-`lec.verdict` is `tested` and `lec.sampling.effort_reached` names the level.
+| verdict | meaning | exit | `lec.verdict` |
+|---|---|---|---|
+| PROVEN-full | unbounded (inductive) proof | 0 | `proven-full` |
+| PROVEN-bounded(n) | no difference for n design cycles from reset; still a proof | 0 | `proven-bounded` (+ `bound`: n) |
+| TESTED-sampled(N) | a sampled effort preset (`quick-check`/`test`/`long-check`): N input vectors agreed; not a proof | 0 | `tested-sampled` (+ `vectors`: N) |
+| TIMEOUT-time | any clock limit: `formal.timeout`, the wall deadline, cvc5 TIMEOUT/RESOURCEOUT/INTERRUPTED, a step budget; no proof, no counterexample | 0 + warning | `timeout-time` |
+| TIMEOUT-memory | out of memory, caught instead of a crash: cvc5 MEMOUT, a forked worker killed at the RLIMIT_AS backstop, `std::bad_alloc` | 0 + warning | `timeout-memory` |
+| REFUTED-cex | a real counterexample trace, including one that needs only a free blackbox / trusted-box OUTPUT, and a refute only at a trusted-box INPUT (`bbin:`): the boxed model is the contract | 10 | `refuted-cex` |
+| REFUTED-interface | a TOP port NAME exists on one side only (a width mismatch is fine; a one-sided input with no fanout is fine); the selected top only, never a hierarchy child | 7 | `refuted-interface` |
+| REFUTED-unsupported | engine=auto and no engine can model/check it (an encoder refusal, a word-level cycle, a pre-solve refusal) | 7 | `refuted-unsupported` |
+| REFUTED-unchecked | options forced an engine that cannot handle the logic (`engine=ind` ...), or forbade the escalation that would decide it (`hier_refute=fail`, `decompose=true`, an obligation whose window/`past()` is deeper than `formal.bound`) | 7 | `refuted-unchecked` |
+| REFUTED-vacuous | the check proved nothing, a sign of a problem: a contradictory assume set (it can prune away a real counterexample), nothing to check (both tops expose no output/state with matching names; a verify run with no assert obligation), or a verify assert under an `if`/`match` guard that can never be true (a dead branch). The message names the cause (contradictory scope, nothing to compare, the dead-guard list) and the hint what to fix. There is no PROVEN-vacuous | 7 | `refuted-vacuous` |
+| REFUTED-unexplained | an engine gave up with no reason, or no recognized cause: a LiveHD bug to name | 7 | `refuted-unexplained` |
+
+The INTERNAL undecided causes of one block (UNCONFIRMED, UNDISCHARGED,
+UNPAIRED: per-block progress records and `lec[hier]` lines may still print
+them) are never a top-level verdict: they only make the hierarchical driver
+iterate (flat retry, inline a child, another engine). A refuted hierarchy
+BLOCK is not a refuted design. One that still reaches the top is a bug and
+reports REFUTED-unexplained. There is no design-size gate: every design is
+attempted, and one that outgrows memory reports TIMEOUT-memory.
+
+The engine-side mapping is `query_outcome` / `verify_outcome` (query.hpp) over
+`undecided_outcome` (property_types.hpp); an undecided result that folds
+several attempts (the auto portfolio) is classified from its deciding
+attempt's own detail (`Query_result::cause_detail`), so one arm's wall-clock
+kill never hides another arm's contradictory assumptions, and one engine that
+cannot check the logic plus another that timed out is TIMEOUT-time.
+
+`lec.verdict` is `tested-sampled` and `lec.sampling.effort_reached` names the level.
 The reached level can be LOWER than requested when the timeout or repeated
 per-query caps stop sampling early. Capped queries do not count.
 
@@ -47,7 +73,7 @@ random constants (1/8 all-zero, 1/8 all-one, else uniform; clock and reset
 inputs keep their roles) and asserts the miter's `bad`:
 
 - UNSAT: no mismatch among the admitted traces -> counted;
-- SAT: a mismatch, reported as REFUTED with the ordinary witness;
+- SAT: a mismatch, reported as REFUTED-cex with the ordinary witness;
 - per-query cap hit: not counted (32 in a row stop sampling).
 
 The schedule cycles pin rates 100/90/100/75/100/50%. A fully pinned query is
@@ -71,7 +97,7 @@ quick-check 256, test 2048, long-check 16384 vectors. Seeded RNG: a run is
 reproducible. On dino (depth 6): quick-check ~5 s, test ~50 s.
 
 **Limits.** Sampling is a test, never a proof: it is never `proven`, never a
-bounded PASS, never a theorem-cache entry, never a hierarchical premise. It
+PROVEN-bounded(n), never a theorem-cache entry, never a hierarchical premise. It
 checks only what reaches an output within `bound` cycles of the sampled design.
 dino's `bug1` (ADDW-only ALU mutation, in a comb module `pass.legalize`
 inlines into the top) is not found: a random instruction word hits ADDW about
@@ -81,7 +107,7 @@ pinned, register miter) does not decide in 350 s on the unrolled RV64 datapath.
 Found by it: lhdsuite's checked-in `minion_dcache_cache_op_unit.prp` had lost
 the per-call `dcache_way_encode = 0` at the `lock_way` site (a cleanup edit;
 the current `prp_writer` output is correct). The legacy flow only reported
-UNKNOWN for that def; a fully pinned random trace refuted it at once.
+undecided for that def; a fully pinned random trace refuted it at once.
 Opaque/trusted/collapsed boxes and ignored memories are diagnosed (a box makes
 a sampled mismatch possibly spurious). A design with no free data input has one
 trace per reset, so the ordinary bounded check runs instead.
@@ -128,7 +154,7 @@ Unrepresented addresses retain the unconstrained array tail. This preserves the
 full state relation while allowing the Boolean cone prover to discharge dynamic
 reads. Large read muxes use ABC's internal correspondence CEC; multiplication
 cones race correspondence CEC, SAT sweeping, and Ivy with exact carry-save, tree
-and array arithmetic expansions under the existing wall deadline. An inconclusive engine retains the
+and array arithmetic expansions under the existing wall deadline. An undecided cone retains the
 original cvc5 obligation.
 
 Sequential `auto` workers reserve half the finite solver allowance and wall
@@ -178,8 +204,11 @@ gives
 
 and **nothing in the other direction**. Refuting a premise does not refute the
 conclusion, so a child that fails does not make its parent fail — it leaves the
-parent *conditional*. A top proven only conditionally is reported **inconclusive
-(exit 7), naming the undischarged premises**, never a pass.
+parent *conditional*. A top proven only conditionally is **never a pass**: the
+driver keeps escalating (it inlines the open child, then re-proves the top flat)
+and the top's verdict is that run's outcome (PROVEN-*, REFUTED-cex, TIMEOUT-*,
+REFUTED-*). An undischarged premise is an internal iteration trigger, not a
+verdict.
 
 ### `formal.lec.hier_order=bottom_up` — the legacy order
 
@@ -302,8 +331,8 @@ which is the slow path this replaces. (User ruling, 2026-08-02.)
 
 **Measured on minion** (same compiled inputs, same trust list, order the only
 variable): 146 s top-down vs 222 s bottom-up, same 166/170 defs proven, same exit.
-The report is where it really shows. One def, `intpipe_csr_file`, is UNKNOWN under
-both. Bottom-up flattens it into `intpipe_top`, which is then UNKNOWN and flattens
+The report is where it really shows. One def, `intpipe_csr_file`, is undecided under
+both. Bottom-up flattens it into `intpipe_top`, which is then undecided and flattens
 into `core_top`, which flattens into `minion_top` — where the accumulated cone hits
 a word-level combinational cycle and the encode fails outright, so the run's
 headline is a 29-node cycle dump. Top-down proves all three with their children
@@ -476,19 +505,26 @@ directly now.
 
 ## 7. Verdict discipline
 
-PASS means definitively equivalent; FAIL means definitively different; timeout,
-unsupported timing and ambiguous correspondence are INCONCLUSIVE. Collapse,
-pairing, phase scheduling, proof order and every retry must preserve that. An
-abstraction may cause more work or an UNKNOWN — never a wrong verdict. A check
-that compares nothing is not a proof of anything.
+PROVEN-* means equivalent (PROVEN-bounded(n) for n cycles); REFUTED-cex means
+definitively different. A clock or memory limit is TIMEOUT-time / TIMEOUT-memory
+(no proof, no counterexample); unsupported timing is REFUTED-unsupported (or
+REFUTED-unchecked when an option forced the engine); ambiguous correspondence is
+an internal trigger to iterate, and only if it is still unresolved at the top
+does it become REFUTED-interface (a one-sided top port name) or
+REFUTED-unexplained. Collapse, pairing, phase scheduling, proof order and every
+retry must preserve that. An abstraction may cause more work or an undecided
+result — never a wrong verdict. A check that compares nothing is not a proof of
+anything: when neither top exposes anything to compare it is REFUTED-vacuous
+(exit 7), and so is a comparison under a contradictory assume set.
 
 Two ways the hierarchy can quietly violate this, both guarded:
 
 - **An undischarged premise is not a proof.** A top proved with every child boxed
-  is only a *conditional* result; if any premise never discharges it is degraded
-  to Unknown (exit 7) naming the open blocks. `rc 7` ("could not decide") and
-  `rc 10` ("here is a counterexample") must never be conflated
-  (`tests/lec_verdict_policy_test.sh`).
+  is only a *conditional* result; if any premise never discharges the driver
+  re-proves the top with the open child inlined (or flat), and that run's
+  outcome is the answer. `rc 7` (REFUTED-<why>: the tool, the options, the
+  assumptions or a bug) and `rc 10` (REFUTED-cex: here is a counterexample) must
+  never be conflated (`tests/lec_verdict_policy_test.sh`).
 - **An absorbed block CEX is not the design's answer.** Once a parent re-proves
   with a refuting block inlined, that block's counterexample is a diagnostic; it
   must be dropped before the run picks a fallback verdict, or a design that is
@@ -509,7 +545,7 @@ ind:  cones 312/316 PROVEN (312 by abc in 1.9 s)   residue 4 -> decompose -> 2
       total 7.5 s, and it NAMES the residue: {mem:2x49#0, mem:2x49#1,
                                               nxt:reg_scause_pre}
 bmc:  no cones at all -- ONE checkSat over the whole def, unrolled 6 deep
-      total 126.7 s, Unknown, learns nothing
+      total 126.7 s, undecided, learns nothing
 ```
 
 Induction localizes the failure to three obligations in seven seconds. BMC is
@@ -526,7 +562,7 @@ small as boxing can make it.
 
 `lec_store_cones` is deliberately **not** gated on the def's verdict:
 
-> a cone proof is per-OBLIGATION, so a def that ends Unknown because ONE cone is
+> a cone proof is per-OBLIGATION, so a def that ends undecided because ONE cone is
 > hard still proved the others, and those stay valid forever (the digest is the
 > whole claim). The next run then re-attacks only the residue.
 
@@ -561,7 +597,7 @@ solve_def(D):
         else:
             unresolved.add(c)
 
-    return PROVEN if unresolved empty else UNKNOWN(unresolved)
+    return PROVEN if unresolved empty else undecided(unresolved)
 
 ladder(D):                                  # ORDERING ONLY, never a verdict
     yield METHOD[D]                         # last winner first: a small edit
@@ -571,7 +607,7 @@ ladder(D):                                  # ORDERING ONLY, never a verdict
 
 Two properties carry the weight:
 
-- **A miss costs at most the old behaviour.** An unknown cone falls through the
+- **A miss costs at most the old behaviour.** An undecided cone falls through the
   whole ladder, which is what it does today anyway — so the worst case is the
   current cost, and the common case is a hit.
 - **`METHOD[D]` is keyed by def NAME, not by digest**, so it survives the very
@@ -586,7 +622,7 @@ Two properties carry the weight:
   UNSAT iff every disjunct is.
 - **A per-cone BMC result is BOUNDED and from reset** — a different obligation.
   "312 cones proven inductively (conditionally) + 3 cones bounded-proven" is
-  *not* a closed proof; it needs the bounded-PASS discipline §7 already applies
+  *not* a closed proof; it needs the PROVEN-bounded(n) discipline §7 already applies
   at def level. Aiming BMC at the residue as a **counterexample hunt** is
   unconditionally safe and strictly cheaper.
 - **The cone cache must stay verdict-independent.** Gating it on the def's
@@ -598,10 +634,10 @@ Two properties carry the weight:
   path as "the cache is only ever a speedup" and returns silently, and no command
   on the formal path called `ensure_dir`. Every run stored to memory, wrote
   nothing, printed its in-memory `N stored` tally, and came back `0 hit(s)`
-  forever — so the entire incremental tier (verdict cache, cone cache, Unknown
+  forever — so the entire incremental tier (verdict cache, cone cache, known-timeout
   ledger, strategy hint) was dead. A gate that greps for the string `lec[cache]`
   cannot catch this: the line prints with `0 hit(s)`. Assert HITS.
-- **An UNKNOWN def flattened every proven child** to re-enable the eager
+- **An undecided def flattened every proven child** to re-enable the eager
   bit-blaster. Inlining a proven child is never a proof obligation — UNSAT
-  through a box is already sound — so on a plain UNKNOWN it is a gamble with an
+  through a box is already sound — so on a plain undecided it is a gamble with an
   unbounded re-solve. It is worth it only while chasing a CEX (§3 escalation).

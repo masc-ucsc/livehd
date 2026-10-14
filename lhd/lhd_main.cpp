@@ -11,6 +11,7 @@
 #include "diag.hpp"
 #include "host_mem.hpp"
 #include "iassert.hpp"
+#include "job_manager.hpp"
 #include "lhd.hpp"
 #include "lhd_pyrope.hpp"
 #include "perf_tracing.hpp"
@@ -50,8 +51,17 @@ int main(int argc, char** argv) {
   // jetsam) hits an address-space ceiling and dies alone instead. Inherited
   // across fork+exec, so this one call also bounds yosys and any re-invoked
   // `lhd`. Silent by default; LIVEHD_MEMORY_DEBUG reports the armed ceiling.
-  // This is a backstop, not a clean error -- pass/abc's sampled admission and the
-  // node-count gate produce the diagnosable refusal before it fires.
+  // This is a backstop, not a clean error by itself. What makes it clean: pass/abc's
+  // sampled admission refuses a region before it allocates, the std::bad_alloc a
+  // failed allocation raises is caught at the pass.abc/pass.usyn entry (a
+  // `memory-exhausted` TIMEOUT-memory error) and in the formal engines, and a
+  // forked prover child killed at this ceiling is decoded by its parent -- all
+  // of them report TIMEOUT-memory (lec / formal verify exit 0 with a warning)
+  // instead of crashing. pass/abc's admission also compares the process
+  // address space with this cap, and a SIGSEGV that still lands at the cap (an
+  // unchecked ABC/solver malloc) is diagnosed TIMEOUT-memory by the crash
+  // reporter above, not "a livehd bug". There is no design-size gate and no
+  // override flag.
   if (const uint64_t limit = livehd::cost::install_memory_backstop(); limit != 0 && std::getenv("LIVEHD_MEMORY_DEBUG") != nullptr) {
     std::fprintf(stderr, "lhd: memory backstop armed (RLIMIT_AS = %llu MiB)\n", static_cast<unsigned long long>(limit >> 20));
   }
@@ -207,6 +217,9 @@ int main(int argc, char** argv) {
         = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - invocation_started).count();
   }
 
+  if (opts.stats) {
+    livehd::Job_manager::global().report();
+  }
   lhd::write_result(opts, res);
   return res.exit_code;
 }

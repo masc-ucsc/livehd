@@ -8,34 +8,45 @@ import tempfile
 import time
 import unittest
 
-from lec import DBG_WATCHDOG_SCALE, final_verdict, run_lec, verdict, watchdog_scale
+from lec import acceptable, DBG_WATCHDOG_SCALE, final_verdict, run_lec, verdict, watchdog_scale
 
 
 class LecHarness(unittest.TestCase):
     def result(self, code, text):
         return subprocess.CompletedProcess([], code, text.encode())
 
-    def test_only_internal_timeout_is_accepted_by_sanity_checks(self):
-        timeout = self.result(7, 'lec: top UNKNOWN unresolved (hit formal.timeout=5s)\n')
-        self.assertEqual(verdict(timeout, sanity=True), 'inconclusive')
-        self.assertEqual(verdict(timeout), 'failed')
+    def test_only_a_refutation_or_no_verdict_is_a_failure(self):
+        # A timeout (lhd's own, exit 0, or the outer watchdog) is never a failure and never a proof.
+        self.assertEqual(verdict(self.result(0, "lec: 'top' TIMEOUT-time (formal.timeout reached; neither proved nor refuted) (x)\n")), 'timeout')
+        self.assertEqual(verdict(self.result(0, "lec: 'top' TIMEOUT-memory (out of memory; neither proved nor refuted)\n")), 'timeout')
+        self.assertEqual(verdict(self.result(124, 'FAIL: LEC outer watchdog exceeded 10s (internal budget 5s)\n')), 'timeout')
+        self.assertEqual(verdict(self.result(0, "lec: 'top' TESTED-sampled(2048) (test reached)\n")), 'tested')
+        self.assertTrue(acceptable('timeout') and acceptable('proven') and acceptable('tested'))
+        # A counterexample is the failure; every other REFUTED-<why> fails too (no answer).
+        self.assertEqual(verdict(self.result(10, "lec: 'top' REFUTED-cex (not equivalent)\n")), 'refuted')
+        self.assertFalse(acceptable('refuted'))
+        for why in ('interface', 'unsupported', 'unchecked', 'vacuous', 'unexplained'):
+            status = verdict(self.result(7, "lec: 'top' REFUTED-{} (x)\n".format(why)))
+            self.assertEqual(status, 'refuted-' + why)
+            self.assertFalse(acceptable(status))
+        # A word whose exit code disagrees, or no verdict line at all, is a failure.
         for code, text in [
-            (7, 'lec: top UNKNOWN unsupported cell\n'),
-            (7, 'lec: top UNKNOWN exceeded the 10s hard wall backstop\n'),
-            (3, 'lec: top REFUTED\n'),
             (0, 'no obligations found\n'),
-            (0, 'lec: child PROVEN equivalent\nlec: top UNKNOWN unsupported\n'),
-            (124, 'lec: top UNKNOWN unresolved (hit formal.timeout=5s)\n'),
+            (7, "lec: 'top' REFUTED-cex (not equivalent)\n"),
+            (10, "lec: 'top' REFUTED-unsupported (x)\n"),
+            (0, "lec: 'child' PROVEN-full (x)\nlec: 'top' REFUTED-unsupported (x)\n"),
+            (124, "lec: 'top' TIMEOUT-time (x)\n"),
+            (0, "lec: 'top' PROVEN equivalent\n"),  # the old words are not verdicts any more
         ]:
-            self.assertEqual(verdict(self.result(code, text), sanity=True), 'failed')
-        self.assertEqual(verdict(self.result(0, 'lec: top PROVEN equivalent\n')), 'proven')
-        self.assertEqual(verdict(self.result(0, 'lec: top PASS(6) equivalent\n')), 'proven')
+            self.assertEqual(verdict(self.result(code, text)), 'failed', text)
+        self.assertEqual(verdict(self.result(0, "lec: 'top' PROVEN-full (x)\n")), 'proven')
+        self.assertEqual(verdict(self.result(0, "lec: 'top' PROVEN-bounded(6) (x)\n")), 'proven')  # bounded is a proof
 
     def test_artifact_messages_do_not_replace_the_verdict(self):
-        output = "lec: 'top' REFUTED (not equivalent)\nlec: wrote counterexample waveform /tmp/top.vcd\n"
-        self.assertEqual(final_verdict(output), "lec: 'top' REFUTED (not equivalent)")
-        self.assertEqual(verdict(self.result(10, output), sanity=True), 'failed')
-        output = "lec: 'top' PROVEN equivalent\nlec: wrote report /tmp/report.json\n"
+        output = "lec: 'top' REFUTED-cex (not equivalent)\nlec: wrote counterexample waveform /tmp/top.vcd\n"
+        self.assertEqual(final_verdict(output), "lec: 'top' REFUTED-cex (not equivalent)")
+        self.assertEqual(verdict(self.result(10, output)), 'refuted')
+        output = "lec: 'top' PROVEN-full (x)\nlec: wrote report /tmp/report.json\n"
         self.assertEqual(verdict(self.result(0, output)), 'proven')
 
     def test_option_controls_outer_budget_and_kills_children(self):
@@ -60,6 +71,14 @@ class LecHarness(unittest.TestCase):
         for mode in ('k8-opt', 'k8-fastbuild'):
             self.assertEqual(watchdog_scale(base.format(mode)), 1)
         self.assertEqual(watchdog_scale('/home/u/dbg-work/livehd'), 1)
+
+    def test_proof_effort_is_the_default_unless_a_test_names_its_own(self):
+        probe = 'import sys; print(" ".join(sys.argv[1:]))'
+        result = run_lec([sys.executable, '-c', probe], timeout=5, scale=1)
+        self.assertIn(b'formal.effort=proof', result.stdout)
+        result = run_lec([sys.executable, '-c', probe, '--set', 'formal.effort=verify'], timeout=5, scale=1)
+        self.assertIn(b'formal.effort=verify', result.stdout)
+        self.assertNotIn(b'formal.effort=proof', result.stdout)
 
     def test_unbounded_budget_is_rejected(self):
         for budget in ('0', '-1', 'nan', 'inf'):

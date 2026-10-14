@@ -1,5 +1,5 @@
 /*
-:lec_expect: unknown
+:lec_expect: unsupported
 :lec_grep: scheduled on clock `clk` but the impl side on `clkx`
 MUTATED: every clock moved from `clk` to `clkx`. Must never be PROVEN.
 */

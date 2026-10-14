@@ -14,14 +14,14 @@ import shutil
 import subprocess
 import sys
 
-from lec import final_verdict, run_lec, verdict
+from lec import acceptable, run_lec, verdict
 
 NATIVE_CHECK_TIMEOUT = 20
 # Budget for comparing emitted Verilog with its source using default LEC.
 # A fixture can override it with :verilog_check_timeout:; timeouts fail.
 VERILOG_CHECK_TIMEOUT = 20
 # Budget for the graphs-flow (lg+pyrope, DCE on) Pyrope vs the source Verilog.
-# Unlike the checks above, an UNKNOWN/timeout here passes; only REFUTED fails.
+# Unlike the checks above, an undecided run (TIMEOUT etc.) here passes; only REFUTED fails.
 GRAPHS_CHECK_TIMEOUT = 5
 
 
@@ -37,24 +37,9 @@ def _same_emission(prps, gprps):
 
 
 def _lenient_verdict(result):
-    """proven / inconclusive (UNKNOWN or timeout: pass) / failed (REFUTED, crash, refusal)."""
-    if verdict(result) == "proven":
-        return "proven"
-    text = result.stdout.decode("utf-8", "replace")
-    last = final_verdict(text)
-    if result.returncode == 10 or " REFUTED " in last:
-        return "failed"
-    if result.returncode == 124 and "LEC outer watchdog exceeded" in text:
-        return "inconclusive"
-    # An encoder REFUSAL (a cell the encoder does not model, or a top with no
-    # observable output) also exits 7 with a final UNKNOWN line, but it compared
-    # nothing: lhd lec reports it as a `lec REFUSED` error. That is a failure,
-    # not a solver give-up, so it must not pass as inconclusive.
-    if "lec REFUSED " in text:
-        return "failed"
-    if result.returncode == 7 and " UNKNOWN " in last:
-        return "inconclusive"
-    return "failed"
+    """proven / tested / timeout (pass) / failed (any REFUTED-<why>, crash): a refute is a failure here."""
+    status = verdict(result)
+    return status if acceptable(status) else "failed"
 
 
 def _header(prp_path, key):
@@ -161,7 +146,7 @@ def main():
     # 1a''. LEC the graphs-flow Pyrope against the source Verilog. When the
     # emission is byte-identical to 1a's, steps 1b/1c/2 already check that
     # very text, so the extra LEC is spent only on a differing emission (the
-    # DCE actually removed something). Short budget: UNKNOWN or a timeout
+    # DCE actually removed something). Short budget: an undecided run or a timeout
     # passes; only a REFUTED verdict or a crash/refusal fails.
     gprps = sorted(glob.glob(os.path.join(gdir, "*.prp")))
     if not gprps:
@@ -208,10 +193,9 @@ def main():
     # the golden with its OWN round trip, so it must prove either way.
     expect = (_header(ref_prp, "lec_expect") or "proven").lower()
     if expect == "refuted":
-        native_failed = native.returncode != 10 or " REFUTED " not in final_verdict(
-            native.stdout.decode("utf-8", "replace"))
+        native_failed = verdict(native) != "refuted"  # REFUTED-cex, exit 10
     else:
-        native_failed = verdict(native) != "proven"
+        native_failed = not acceptable(verdict(native))
     if native_failed:
         print("{} - v2prp2v - FAILED: native Pyrope check did not report {}".format(name, expect.upper()))
         print(native.stdout.decode("utf-8", "replace"))
@@ -270,7 +254,7 @@ def main():
     chk = run_lec(cmd, timeout=verilog_timeout)
 
     out = chk.stdout.decode("utf-8", "ignore")
-    if verdict(chk) == "proven":
+    if acceptable(verdict(chk)):
         print("{} - v2prp2v - original Verilog check success "
               "(ref_top:{} impl_top:{})".format(name, vtop, impl_top))
         return 1 if native_failed else 0

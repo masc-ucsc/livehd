@@ -664,7 +664,18 @@ bool Region_driver::over_budget(std::string_view region, uint64_t rss_before, si
   const uint64_t growth_budget = gu::sat_mul(budget, coordinator_ ? coordinator_->parallel_stats_.limit : 1U);
   const bool     over_growth   = grown > growth_budget;
   const bool     over_total    = total_ceiling != 0 && rss > total_ceiling;
-  const bool     over_now      = over_growth || over_total;
+  // A THIRD reading, against the backstop itself: lhd_main arms RLIMIT_AS on
+  // VIRTUAL address space, which is always above the footprint sampled above
+  // (glibc reserves a 64 MiB malloc arena per allocating thread, plus thread
+  // stacks and untouched reservations). ABC does not null-check its mallocs, so
+  // an allocation the backstop denies is a bare SIGSEGV, never an error. Refuse
+  // while a margin of the configured budget is still left below the cap, so the
+  // admission fires (a clean TIMEOUT-memory) before the backstop can.
+  const uint64_t as_cap    = cost::address_space_limit_bytes();
+  const uint64_t as_used   = as_cap != 0 ? cost::process_virtual_bytes() : 0;
+  const uint64_t as_margin = std::max<uint64_t>(uint64_t{256} << 20, cost::configured_budget_bytes() / 8);
+  const bool     over_va   = as_cap != 0 && as_used != 0 && gu::sat_add(gu::sat_add(as_used, pending_bytes), as_margin) > as_cap;
+  const bool     over_now  = over_growth || over_total || over_va;
   const bool     over_projected
       = coordinator_ == nullptr && grown >= kMinGrowthToProject && projected_growth / kProjectionMargin > budget;
   if (!over_now && !over_projected) {
@@ -677,7 +688,15 @@ bool Region_driver::over_budget(std::string_view region, uint64_t rss_before, si
   // verbatim and no reserve is subtracted, so quoting a reserve there would be
   // a second such invention.
   const std::string budget_desc
-      = coordinator_
+      = (over_va && !over_growth && !over_total)
+            ? std::format("process address space {} MiB{} is within {} MiB of the RLIMIT_AS memory backstop {} MiB (virtual "
+                          "memory, above the footprint: malloc arenas, stacks, reservations) -- a further allocation there "
+                          "would crash ABC instead of failing cleanly",
+                          mib(as_used),
+                          pending_bytes ? std::format(" (+{} MiB pending)", mib(pending_bytes)) : std::string{},
+                          mib(as_margin),
+                          mib(as_cap))
+        : coordinator_
             ? (over_total ? std::format("parallel process physical-memory ceiling {} MiB (half of physical RAM or the smaller "
                                         "configured process budget)",
                                         mib(total_ceiling))
@@ -1126,9 +1145,10 @@ void Region_driver::map_region(const livehd::partition::Region_body& rb) {
   uint64_t       sampled_peak_rss    = cost::process_footprint_bytes();
   // The ACCOUNTING baseline for color_peak_rss_kb: this region's footprint on
   // entry, captured unconditionally. Deliberately not the admission baseline
-  // `rss_before` below, which is pinned to 0 under allow_oversize -- reusing it
-  // made every color report the whole sticky process peak as its own growth,
-  // exactly in the large-design mode the per-color number exists to explain.
+  // `rss_before` below, which is pinned to 0 when no admission sampling runs --
+  // reusing it made every color report the whole sticky process peak as its
+  // own growth, exactly in the large-design mode the per-color number exists
+  // to explain.
   const uint64_t rss_entry           = sampled_peak_rss;
   const auto     trace_stage         = [&](std::string_view stage) {
     sampled_peak_rss = std::max(sampled_peak_rss, cost::process_footprint_bytes());
@@ -1515,16 +1535,14 @@ void Region_driver::map_region(const livehd::partition::Region_body& rb) {
   Blast_hooks hooks;
   hooks.stage      = trace_stage;
   hooks.elapsed_ms = since;
-  if (!opts_.allow_oversize) {
-    hooks.over_budget = [&](uint64_t rss_before, size_t blasted, size_t total, size_t net_nodes) {
-      // The Lnet is small; the backend network built from it is what costs
-      // memory, so count it as already allocated (measured 250-300 bytes per
-      // node or output for an ABC netlist: a node, a net, their fanin/fanout
-      // arrays and id slots).
-      constexpr uint64_t kBytesPerNetNode = 288;
-      return over_budget(rb.module_name, rss_before, blasted, total, net_nodes * kBytesPerNetNode);
-    };
-  }
+  hooks.over_budget = [&](uint64_t rss_before, size_t blasted, size_t total, size_t net_nodes) {
+    // The Lnet is small; the backend network built from it is what costs
+    // memory, so count it as already allocated (measured 250-300 bytes per
+    // node or output for an ABC netlist: a node, a net, their fanin/fanout
+    // arrays and id slots).
+    constexpr uint64_t kBytesPerNetNode = 288;
+    return over_budget(rb.module_name, rss_before, blasted, total, net_nodes * kBytesPerNetNode);
+  };
   hooks.rewrite_rems = [&] {
     auto& rewritten = coordinator_ ? coordinator_->rems_rewritten_graphs_ : rems_rewritten_graphs_;
     if (rewritten.insert(rb.src).second) {
@@ -1560,10 +1578,7 @@ void Region_driver::map_region(const livehd::partition::Region_body& rb) {
     }
     ~Graph_pause() { resume(); }
   } graph_pause{graph_lock, coordinator_};
-  if (!opts_.allow_oversize) {
-    ctx.fits
-        = [&](uint64_t rss_before, size_t done, size_t total) { return !over_budget(rb.module_name, rss_before, done, total); };
-  }
+  ctx.fits = [&](uint64_t rss_before, size_t done, size_t total) { return !over_budget(rb.module_name, rss_before, done, total); };
   ctx.admission = [&](std::string_view stage) {
     if (opts_.admission && !opts_.admission(stage)) {
       refusal_ = std::format("region '{}': caller refused mapping at {}", rb.module_name, stage);
@@ -1578,7 +1593,7 @@ void Region_driver::map_region(const livehd::partition::Region_body& rb) {
                                   stage);
       return false;
     }
-    return opts_.allow_oversize || !over_budget(rb.module_name, blast.rss_before, blast.blast_total, blast.blast_total);
+    return !over_budget(rb.module_name, blast.rss_before, blast.blast_total, blast.blast_total);
   };
   ctx.refuse_time     = [&](std::string why) { time_refusal_ = std::format("region '{}': {}", rb.module_name, why); };
   ctx.refuse_memory   = [&](std::string why) { refusal_ = std::format("region '{}': {}", rb.module_name, why); };

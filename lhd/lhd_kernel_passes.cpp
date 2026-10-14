@@ -960,7 +960,7 @@ void pass_command(Options& opts, Result& res) {
       const auto spef        = synth_set(opts, "spef", "");
       labels["timing_files"] = labels["library"] + (sdc.empty() ? "" : "," + sdc) + (spef.empty() ? "" : "," + spef);
     }
-    labels["threads"] = synth_set(opts, "threads", "0");
+    if (!labels.contains("threads")) { labels["threads"] = "0"; }
     if (mapped_output) {
       res.inputs.push_back(labels["library"]);
     }

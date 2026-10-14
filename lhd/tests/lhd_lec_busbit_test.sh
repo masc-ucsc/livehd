@@ -51,7 +51,7 @@ echo "PASS: the 8-bit register maps to DFF cells \\rot[0]..\\rot[7], the one-bit
 lec_text() {
   local tag="$1" net="$2"
   cat "$net" "$W/models.v" > "$W/impl_$tag.v"
-  "$LHD" lec --impl verilog:"$W/impl_$tag.v" --ref verilog:"$SRC" --top busbit \
+  "$LHD" lec --set formal.effort=proof --impl verilog:"$W/impl_$tag.v" --ref verilog:"$SRC" --top busbit \
       --workdir "$W/wl_$tag" -q --result-json "$W/lec_$tag.json" > "$W/lec_$tag.log" 2>&1
   echo $?
 }
@@ -66,7 +66,7 @@ grep -q '"bounded":false' "$W/lec_good.json" \
 echo "PASS: text-path netlist LEC regroups rot[0..7] into rot and proves unbounded"
 
 # The graph path (mapped lg vs source) keeps the same correspondence.
-"$LHD" lec --impl lg:"$W/net" --ref verilog:"$SRC" --lib lg:"$W/models" --top busbit \
+"$LHD" lec --set formal.effort=proof --impl lg:"$W/net" --ref verilog:"$SRC" --lib lg:"$W/models" --top busbit \
     --workdir "$W/wl_graph" -q --result-json "$W/lec_graph.json" > "$W/lec_graph.log" 2>&1 \
   || fail "graph: LEC failed: $(verdict "$W/lec_graph.json")"
 grep -q '"bounded":false' "$W/lec_graph.json" || fail "graph: only bounded: $(verdict "$W/lec_graph.json")"

@@ -124,7 +124,7 @@ lec_verdict() { # <impl> <ref> <tag> [extra args...]
   out="$("$LHD" lec --impl "lg:$W/lg_$impl" --ref "lg:$W/lg_$ref" --top four8 \
           --workdir "$W/lw_$tag" "$@" 2>&1)"
   echo "$out" > "$W/lec_$tag.log"
-  grep -oE "'[^']*' (PROVEN|REFUTED|UNKNOWN)" <<<"$out" | grep -oE "PROVEN|REFUTED|UNKNOWN" | head -1
+  grep -oE "'[^']*' (PROVEN|REFUTED|TIMEOUT|UNSUPPORTED|UNDISCHARGED|UNCONFIRMED|UNPAIRED|UNCHECKED|VACUOUS|UNEXPLAINED)" <<<"$out" | grep -oE "PROVEN|REFUTED|TIMEOUT|UNSUPPORTED|UNDISCHARGED|UNCONFIRMED|UNPAIRED|UNCHECKED|VACUOUS|UNEXPLAINED" | sed -E 's/^(TIMEOUT|UNSUPPORTED|UNDISCHARGED|UNCONFIRMED|UNPAIRED|UNCHECKED|VACUOUS|UNEXPLAINED)$/UNDECIDED/' | head -1
 }
 
 v=$(lec_verdict four_equiv four eq)

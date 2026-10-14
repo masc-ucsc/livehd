@@ -133,7 +133,7 @@ std::string_view cone_verdict_name(Cone_verdict v) {
     case Cone_verdict::Proven     : return "PROVEN";
     case Cone_verdict::Refuted    : return "DIFF";
     case Cone_verdict::Unsupported: return "unsupported";
-    default                       : return "unknown";
+    default                       : return "undecided";
   }
 }
 

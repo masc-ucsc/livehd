@@ -31,7 +31,7 @@ module distrib (input wire [7:0] a, input wire [7:0] b, input wire [7:0] c,
   assign y = a * (b + c);
 endmodule
 EOF
-out=$("$LHD" lec --ref "verilog:$WORK/ref/distrib.v" --impl "verilog:$WORK/ref/distrib.v" \
+out=$("$LHD" lec --set formal.effort=proof --ref "verilog:$WORK/ref/distrib.v" --impl "verilog:$WORK/ref/distrib.v" \
       --workdir "$WORK/w_bad" --set formal.lec.int_blast=potato 2>&1); rc=$?
 if [ "$rc" -eq 0 ] || ! echo "$out" | grep -q "int_blast unknown 'potato'"; then
   echo "FAIL: int_blast=potato accepted (rc=$rc)"; echo "$out" | tail -2; fail=1
@@ -45,7 +45,7 @@ module distrib (input wire [7:0] a, input wire [7:0] b, input wire [7:0] c,
   assign y = a * b + a * c;
 endmodule
 EOF
-out=$("$LHD" lec --ref "verilog:$WORK/ref/distrib.v" --impl "verilog:$WORK/impl/distrib.v" \
+out=$("$LHD" lec --set formal.effort=proof --ref "verilog:$WORK/ref/distrib.v" --impl "verilog:$WORK/impl/distrib.v" \
       --workdir "$WORK/w_dist" --set formal.lec.int_blast=iand --set formal.lec.cones=false 2>&1); rc=$?
 if [ "$rc" -ne 0 ] || ! echo "$out" | grep -q "PROVEN equivalent"; then
   echo "FAIL: distrib expected PROVEN under int_blast=iand (rc=$rc)"; echo "$out" | grep -aE "^lec: " | tail -2; fail=1
@@ -62,7 +62,7 @@ module mism (input wire [7:0] a, input wire [7:0] b, output wire [7:0] y);
   assign y = a + b;
 endmodule
 EOF
-out=$("$LHD" lec --ref "verilog:$WORK/ref/mism.v" --impl "verilog:$WORK/impl/mism.v" \
+out=$("$LHD" lec --set formal.effort=proof --ref "verilog:$WORK/ref/mism.v" --impl "verilog:$WORK/impl/mism.v" \
       --workdir "$WORK/w_mism" --set formal.lec.int_blast=iand --set formal.lec.cones=false \
        2>&1); rc=$?
 if ! echo "$out" | grep -q "REFUTED"; then
@@ -75,7 +75,7 @@ else echo "ok: mism REFUTED with a concrete counterexample"; fi
 # formal.timeout=3 starves the BV solve of the multiply miter (measured: it
 # cannot finish in 60s); the retry at the min_timeout floor proves it in <1s.
 # No int_blast set — this pins the DEFAULT behavior.
-out=$("$LHD" lec --ref "verilog:$WORK/ref/distrib.v" --impl "verilog:$WORK/impl/distrib.v" \
+out=$("$LHD" lec --set formal.effort=proof --ref "verilog:$WORK/ref/distrib.v" --impl "verilog:$WORK/impl/distrib.v" \
       --workdir "$WORK/w_auto" --set formal.lec.cones=false \
       --set formal.timeout=3 --set formal.min_timeout=10 2>&1); rc=$?
 if [ "$rc" -ne 0 ] || ! echo "$out" | grep -q "PROVEN equivalent"; then
@@ -85,12 +85,13 @@ elif ! echo "$out" | grep -q "int-blast retry"; then
 else echo "ok: auto default converts a BV timeout via the int-blast retry"; fi
 
 # ── 5. int_blast=off: same starved budget, NO retry — stays inconclusive ─────
-out=$("$LHD" lec --ref "verilog:$WORK/ref/distrib.v" --impl "verilog:$WORK/impl/distrib.v" \
+out=$("$LHD" lec --set formal.effort=proof --ref "verilog:$WORK/ref/distrib.v" --impl "verilog:$WORK/impl/distrib.v" \
       --workdir "$WORK/w_off" --set formal.lec.int_blast=off --set formal.lec.cones=false \
       --set formal.timeout=3 --set formal.min_timeout=1 2>&1); rc=$?
-if [ "$rc" -eq 0 ] || echo "$out" | grep -q "int-blast retry"; then
-  echo "FAIL: int_blast=off must not retry nor pass (rc=$rc)"; echo "$out" | grep -aE "^lec: " | tail -2; fail=1
-else echo "ok: int_blast=off stays inconclusive (no retry)"; fi
+if echo "$out" | grep -q "PROVEN equivalent" || echo "$out" | grep -q "int-blast retry" \
+   || ! echo "$out" | grep -q "TIMEOUT"; then
+  echo "FAIL: int_blast=off must not retry nor prove (want TIMEOUT; rc=$rc)"; echo "$out" | grep -aE "^lec: " | tail -2; fail=1
+else echo "ok: int_blast=off times out (no retry, no proof)"; fi
 
 # ── 6. Sequential path (flop cut + induction) survives the translation ───────
 cat > "$WORK/ref/cnt.v" <<'EOF'
@@ -98,7 +99,7 @@ module cnt (input wire clk, input wire rst, output reg [7:0] q);
   always @(posedge clk) q <= rst ? 8'b0 : q + 8'd1;
 endmodule
 EOF
-out=$("$LHD" lec --ref "verilog:$WORK/ref/cnt.v" --impl "verilog:$WORK/ref/cnt.v" \
+out=$("$LHD" lec --set formal.effort=proof --ref "verilog:$WORK/ref/cnt.v" --impl "verilog:$WORK/ref/cnt.v" \
       --workdir "$WORK/w_cnt" --set formal.lec.int_blast=iand --set formal.lec.cones=false 2>&1); rc=$?
 if [ "$rc" -ne 0 ] || ! echo "$out" | grep -q "PROVEN equivalent"; then
   echo "FAIL: cnt expected PROVEN under int_blast=iand (rc=$rc)"; echo "$out" | grep -aE "^lec: " | tail -2; fail=1

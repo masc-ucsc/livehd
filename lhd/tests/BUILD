@@ -1466,8 +1466,8 @@ sh_test(
 # exhaust the machine (flat XSCore reached 221 GB before the OS killed it), so
 # pass.abc samples its own RSS while bit-blasting and refuses a region that will
 # not fit. Pinned with memory_budget_mb so the refusal is deterministic on any
-# host: refuse + emit no partial netlist + allow_oversize override + no false
-# positive on a design that fits.
+# host: TIMEOUT-memory refusal + emit no partial netlist + the removed
+# allow_oversize is a usage error + no false positive on a design that fits.
 [sh_test(
     name = "lhd_abc_memory_test" + suffix,
     size = "large",
@@ -1476,11 +1476,10 @@ sh_test(
     env = {"MAPPER": mapper},
 ) for suffix, mapper in _MAPPERS]
 
-# 2opt-incr: design-size gate (node-count memory admission). pass.color warns and
-# pass.abc/lec refuse (with an override) when a flattened design is over the
-# threshold, BEFORE any translation. Pinned tiny with LIVEHD_LARGE_DESIGN_NODES so
-# the refusal is deterministic and host-independent: color warns, abc/lec refuse +
-# override, per-def and the default threshold do not fire.
+# No up-front design-size gate (ruling 2026-10-14): pass.color still warns about
+# a flattened design over LIVEHD_LARGE_DESIGN_NODES (pinned tiny here), but
+# pass.abc and lec ATTEMPT it, and the removed pass.abc/formal allow_oversize
+# options are usage errors rather than silently accepted.
 sh_test(
     name = "lhd_size_gate_test",
     size = "large",
@@ -2351,6 +2350,30 @@ sh_test(
 )
 
 sh_test(
+    name = "lhd_sim_pure_loop_test_llvm",
+    size = "small",
+    srcs = ["lhd_sim_pure_loop_test.sh"],
+    args = ["llvm"],
+    data = ["lhd_sim_pure_loop.prp", "//lhd"],
+)
+
+sh_test(
+    name = "lhd_sim_pure_loop_test_embedded",
+    size = "small",
+    srcs = ["lhd_sim_pure_loop_test.sh"],
+    args = ["embedded"],
+    data = ["lhd_sim_embedded_loop.prp", "lhd_sim_pure_loop.prp", "//lhd"],
+)
+
+sh_test(
+    name = "lhd_sim_pure_loop_test_nested",
+    size = "small",
+    srcs = ["lhd_sim_pure_loop_test.sh"],
+    args = ["nested"],
+    data = ["lhd_sim_nested_loop.prp", "lhd_sim_pure_loop.prp", "//lhd"],
+)
+
+sh_test(
     name = "lhd_sim_pure_loop_test_legacy",
     size = "small",
     srcs = ["lhd_sim_pure_loop_test.sh"],
@@ -2397,4 +2420,11 @@ sh_test(
     size = "medium",
     srcs = ["lhd_synth_attributes_smoke.py"],
     data = ["//lhd", "//inou/prp:abc_tests"],
+)
+
+sh_test(
+    name = "cvc5_profiles_smoke",
+    size = "small",
+    srcs = ["cvc5_profiles_smoke.py"],
+    data = ["//lhd"],
 )

@@ -56,7 +56,7 @@ fail() {
 lec() {
   local tag=$1 impl=$2 ref=$3 top=$4
   shift 4
-  O="$("$LHD" lec --impl "verilog:$impl" --ref "verilog:$ref" --top "$top" --set formal.simfail_run=false \
+  O="$("$LHD" lec --set formal.effort=proof --impl "verilog:$impl" --ref "verilog:$ref" --top "$top" --set formal.simfail_run=false \
     --workdir "$W/w_$tag" --result-json "$W/$tag.json" "$@" 2>&1)"
   V="$(grep -o '"verdict":"[a-z]*"' "$W/$tag.json" 2>/dev/null | head -1 | sed 's/.*:"\(.*\)"/\1/')"
   [ -n "$V" ] || V=none

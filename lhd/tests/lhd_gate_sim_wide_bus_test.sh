@@ -42,6 +42,6 @@ test wide.random {
   }
 }
 TB
-"$LHD" sim lg:"$W/net" lg:"$W/models" "$W/tb.prp" --set sim.ninja=false --set sim.jobs=8 \
+"$LHD" sim lg:"$W/net" lg:"$W/models" "$W/tb.prp" --set sim.ninja=false --set lhd.jobs=8 \
   --set sim.tune.profile=off --workdir "$W/sim" -q
 echo "PASS: gate-level sim reads a split wide input bus"

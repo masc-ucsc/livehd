@@ -117,7 +117,7 @@ sed 's/(a = d & 0xff)/(a = (d \& 0xff) ^ 1)/' "$W/state_anon.prp" > "$W/state_an
 # "pass"). proven_top() below guards against exactly that.
 run() {
   local log="$1" refv="$2" impl="$3"
-  "$LHD" lec --ref "verilog:$refv" --impl "pyrope:$impl" \
+  "$LHD" lec --set formal.effort=proof --ref "verilog:$refv" --impl "pyrope:$impl" \
     --ref-top top --impl-top top --workdir "$W/w_$log" \
     > "$W/$log.out" 2>&1
   return $?
@@ -192,7 +192,7 @@ done
 for order in top_down bottom_up; do
   order_args=()
   [ "$order" = "top_down" ] || order_args=(${order_args[@]+"${order_args[@]}"})
-  "$LHD" lec --ref "lg:$W/inline-false" --impl "lg:$W/inline-true" --top inline_box \
+  "$LHD" lec --set formal.effort=proof --ref "lg:$W/inline-false" --impl "lg:$W/inline-true" --top inline_box \
     --set formal.engine=ind --set "formal.lec.hier_order=$order" --workdir "$W/inline-lec-$order" \
     > "$W/inline-$order.out" 2>&1 || fail "asymmetric inlining failed ($order): $(cat "$W/inline-$order.out")"
   grep -q "'inline_box' PROVEN (0 child collapses)" "$W/inline-$order.out" \
@@ -205,7 +205,7 @@ sed 's/q = helper(a)/q = helper(a ^ 1)/' "$W/inline_box.prp" > "$W/inline_box_bu
 "$LHD" compile "$W/inline_box_bug.prp" --top inline_box  \
   --emit-dir "lg:$W/inline-bug" --workdir "$W/inline-compile-bug" > "$W/inline-bug.log" 2>&1 \
   || fail "inlined negative control did not compile: $(cat "$W/inline-bug.log")"
-if "$LHD" lec --ref "lg:$W/inline-false" --impl "lg:$W/inline-bug" --top inline_box \
+if "$LHD" lec --set formal.effort=proof --ref "lg:$W/inline-false" --impl "lg:$W/inline-bug" --top inline_box \
   --workdir "$W/inline-lec-bug" > "$W/inline-bug.out" 2>&1; then
   fail "asymmetric inlining hid a real output difference"
 fi

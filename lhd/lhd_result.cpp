@@ -1006,13 +1006,17 @@ void write_result(const Options& opts, const Result& res) {
   }
 
   if (res.lec.present) {
-    // The PROOF, separate from the process `status`: an inconclusive comparison
-    // exits 0 too, so a consumer that reads only `status` would record it as a
-    // proof (see Result::Lec_verdict).
+    // The PROOF, separate from the process `status`: a timeout exits 0 too, so
+    // a consumer that reads only `status` would record it as a proof (see
+    // Result::Lec_verdict).
     w.Key("lec");
     w.StartObject();
     w.Key("verdict");
     w.String(res.lec.verdict.c_str());
+    if (res.lec.verdict == "tested-sampled") {
+      w.Key("vectors");  // the N of TESTED-sampled(N)
+      w.Uint64(res.lec.vectors);
+    }
     if (!res.lec.effort.empty()) {
       w.Key("effort");
       w.String(res.lec.effort.c_str());
@@ -1030,8 +1034,8 @@ void write_result(const Options& opts, const Result& res) {
       w.Uint64(res.lec.sample_partial);
       w.Key("queries");
       w.Uint64(res.lec.sample_queries);
-      w.Key("unknown");
-      w.Uint64(res.lec.sample_unknown);
+      w.Key("capped");  // queries that hit their per-query cap
+      w.Uint64(res.lec.sample_capped);
       w.Key("solve_us");
       w.Uint64(res.lec.sample_solve_us);
       w.EndObject();
@@ -1091,6 +1095,21 @@ void write_result(const Options& opts, const Result& res) {
     if (!res.lec.induction_cex.empty()) {
       w.Key("induction_cex");
       w.String(res.lec.induction_cex.c_str());
+    }
+    w.EndObject();
+  }
+
+  if (res.formal.present) {
+    // `lhd formal verify`'s run verdict (Result::Formal_verdict).
+    w.Key("formal");
+    w.StartObject();
+    w.Key("verdict");
+    w.String(res.formal.verdict.c_str());
+    w.Key("bounded");
+    w.Bool(res.formal.bounded);
+    if (res.formal.bounded) {
+      w.Key("bound");
+      w.Int64(res.formal.bound);
     }
     w.EndObject();
   }

@@ -467,8 +467,7 @@ Options parse_args(int argc, char** argv) {
       //
       // On the formal paths that ~8x is NOT purely observational: it eats the same
       // formal.timeout budget the proof does, so a run that proves in time without
-      // --stats can time out with it and return UNKNOWN, which the default
-      // always results in a non-zero exit. Both help blocks
+      // --stats can time out with it and report TIMEOUT instead of a proof. Both help blocks
       // (lhd_meta.cpp `lec` and `formal verify`) say so; raise formal.timeout when
       // diagnosing a run that still has to pass.
     } else if (a == "--stats") {

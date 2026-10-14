@@ -25,11 +25,11 @@ grep -q '__lhdmem_h62616e6b5f61_e' "$impl" || fail "bank_a lost cgen memory prov
 grep -q '__lhdmem_h62616e6b5f62_e' "$impl" || fail "bank_b lost cgen memory provenance"
 
 "$LHD" lec --impl verilog:"$impl" --ref lg:"$W/ref_lg" --top "$TOP" \
-  --set formal.timeout=0 --set formal.jobs=1 --workdir "$W/w_lec" -q \
+  --set formal.effort=proof --set formal.timeout=0 --set lhd.jobs=1 --workdir "$W/w_lec" -q \
   >"$W/lec.log" 2>&1 || { tail -40 "$W/lec.log"; fail "native endpoint LEC"; }
 grep -q 'PROVEN equivalent' "$W/lec.log" || { tail -40 "$W/lec.log"; fail "native endpoint did not prove"; }
 
-"$LHD" lec --set formal.timeout=30 --impl verilog:"$impl" --ref verilog:"$SRC" --top "$TOP" \
+"$LHD" lec --set formal.effort=proof --set formal.timeout=30 --impl verilog:"$impl" --ref verilog:"$SRC" --top "$TOP" \
   --workdir "$W/w_verilog" -q >"$W/verilog.log" 2>&1 \
   || { tail -40 "$W/verilog.log"; fail "default LEC endpoint LEC or generated-wrapper parse"; }
 if grep -qiaE '"verdict"[[:space:]]*:[[:space:]]*"refuted"|SETUP FAILED' "$W/verilog.log"; then
@@ -57,13 +57,13 @@ grep -q '__lhdmem_h617272_e_data' "$whole_impl" \
   || fail "inline whole-array state lost cgen memory provenance"
 
 "$LHD" lec --impl verilog:"$whole_impl" --ref lg:"$W/whole_ref_lg" --top "$WHOLE_TOP" \
-  --set formal.timeout=0 --set formal.jobs=1 --workdir "$W/w_whole_lec" -q \
+  --set formal.effort=proof --set formal.timeout=0 --set lhd.jobs=1 --workdir "$W/w_whole_lec" -q \
   >"$W/whole_lec.log" 2>&1 \
   || { tail -40 "$W/whole_lec.log"; fail "whole-array native endpoint LEC"; }
 grep -q 'PROVEN equivalent' "$W/whole_lec.log" \
   || { tail -40 "$W/whole_lec.log"; fail "whole-array native endpoint did not prove"; }
 
-"$LHD" lec --set formal.timeout=30 --impl verilog:"$whole_impl" --ref verilog:"$WHOLE_SV" --top "$WHOLE_TOP" \
+"$LHD" lec --set formal.effort=proof --set formal.timeout=30 --impl verilog:"$whole_impl" --ref verilog:"$WHOLE_SV" --top "$WHOLE_TOP" \
   --workdir "$W/w_whole_verilog" -q >"$W/whole_verilog.log" 2>&1 \
   || { tail -40 "$W/whole_verilog.log"; fail "whole-array default LEC endpoint LEC or parse"; }
 if grep -qiaE '"verdict"[[:space:]]*:[[:space:]]*"refuted"|SETUP FAILED' "$W/whole_verilog.log"; then

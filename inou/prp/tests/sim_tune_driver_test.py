@@ -277,7 +277,7 @@ def main():
     # ---- the `--set` key classes ----
     # the binary was generated with the defaults (dirty on): equal is accepted, different refused
     for kv, want in (('sim.tune.dirty=on', 0), ('sim.tune.dirty=auto', 0), ('sim.tune.dirty=off', 2),
-                     ('sim.tune.live_words=0', 2), ('sim.jobs=8', 0), ('sim.tune.file=/nope', 0),
+                     ('sim.tune.live_words=0', 2), ('lhd.jobs=8', 0), ('sim.tune.file=/nope', 0),
                      ('compile.cgen.backend=llvm', 2), ('sim.color_dirty=true', 2), ('sim.tune.profile=maybe', 2),
                      ('lhd.seed=7', 0), ('sim.init_zero=true', 0)):
         rc, _, err = run(exe_r, ['--set', kv])

@@ -57,14 +57,14 @@ struct Set_pass {
 // `formal.<flag>`. Everything else on pass.lec is ref/impl-pairing machinery:
 // canonical spelling `formal.lec.<flag>`.
 inline constexpr std::string_view kFormalCommonFlags[] = {
-    "allow_oversize",
     "assume_check",
     "bound",
     "engine",
+    "profile",
+    "portfolio",
     "effort",
     "hard_timeout_mult",
     "ignore_memory",
-    "jobs",
     "mine",
     "min_timeout",
     "partitions",
@@ -198,6 +198,7 @@ struct Retired_set_option {
   std::string_view hint;
 };
 inline constexpr Retired_set_option kRetiredSetOptions[] = {
+    {"pass.usyn", "threads", "Use --set lhd.jobs=N for shared native synthesis admission."},
     {"inou.cgen.verilog","verbose",                                                                    "This option had no implemented effect; drop the setting."                         },
     {        "pass.lean",                 "normalize",                                                                    "This option had no implemented effect; drop the setting."},
     {     "pass.semdiff",                       "alg",                                                                    "This option had no implemented effect; drop the setting."},
@@ -213,7 +214,6 @@ inline constexpr Retired_set_option kRetiredSetOptions[] = {
     {       "inou.slang",                   "defines",                                                                            "Pass -D NAME=VALUE after -- to the slang reader."},
     {       "inou.slang",                  "includes",                                                                                   "Pass -I DIR after -- to the slang reader."},
     {       "inou.slang",                 "undefines",                                                                                  "Pass -U NAME after -- to the slang reader."},
-    {         "pass.abc",                   "threads",                                         "Use --set synth.threads=N for the shared ABC worker limit (0 = automatic, up to 8)."},
     {         "pass.abc",                "small_flow",                                                                  "This unused optional policy was removed; drop the setting."},
     {         "pass.abc",                  "small_ge",                                                                  "This unused optional policy was removed; drop the setting."},
     {         "pass.abc",              "small_min_ge",                                                                  "This unused optional policy was removed; drop the setting."},
@@ -239,7 +239,11 @@ inline constexpr Retired_set_option kRetiredSetOptions[] = {
     {     "pass.semdiff",                     "stats",                                                                         "Use --stats or --set lhd.stats=true for statistics."},
     {         "pass.lec",                     "stats",                                                                         "Use --stats or --set lhd.stats=true for statistics."},
     {         "pass.lec",
-     "strict", "An UNKNOWN verdict always fails now (exit 7): an inconclusive run proved nothing, so it can never exit 0. Drop the setting."                                        },
+     "allow_oversize", "The design-size gate was removed: lec and formal verify always attempt the design, and a run that outgrows memory reports TIMEOUT-memory instead of crashing. Drop the setting."},
+    {         "pass.abc",
+     "allow_oversize", "The design-size gate was removed: pass.abc always attempts the design; raise pass.abc.memory_budget_mb for a larger per-color ceiling, and a run that outgrows memory reports TIMEOUT-memory instead of crashing. Drop the setting."},
+    {         "pass.lec",
+     "strict", "formal.strict was removed. Every verdict now carries a modifier: TIMEOUT-time/-memory exit 0 with a warning (no proof claimed), REFUTED-cex exits 10, and every other REFUTED-<why> (interface, unsupported, unchecked, vacuous, unexplained) exits 7; a contradictory assume set or a check with nothing to compare is REFUTED-vacuous. Drop the setting."                                        },
     {        "pass.usyn",
      "recipes", "pass.usyn runs one native recipe; tune logical_inputs, stack, branches and cut_inputs instead. Drop the setting."},
     {        "pass.usyn",

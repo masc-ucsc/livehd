@@ -4,9 +4,9 @@
 :verilog_top: bitset_mut_branch_mem_top
 :pyrope_top: foo
 :lec_top: foo
-:equiv_lec_grep: (?m)^lec: '[^']+' PROVEN equivalent
+:equiv_lec_grep: (?m)^lec: '[^']+' PROVEN-full
 */
-// `:equiv_lec_grep:` pins the UNBOUNDED proof: a fall back to a bounded PASS(n)
+// `:equiv_lec_grep:` pins the UNBOUNDED proof: a fall back to a PROVEN-bounded(n)
 // means the wide-flop bridge of pass/lec/query.cpp (the golden's packed register
 // vs the memory) stopped pairing.
 

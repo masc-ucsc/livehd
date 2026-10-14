@@ -1,14 +1,15 @@
 # 2c-cvc5 — cvc5 1.4.2, source build, solver profiles, LEC portfolio
 
-Status: PLAN (2026-10-13). The effort-mode cleanup below is implemented;
-the cvc5 upgrade, profiles, and job manager remain planned.
+Status: IMPLEMENTED M0–M5 (2026-10-13), with host/corpus validation follow-ups
+listed below. Linux x86_64 is the validated host. Results and reproducible
+measurements: [cvc5 experiment report](../../repros/cvc5_20261013/index.html).
 Baseline: cvc5 1.3.4 prebuilt
 (`packages/cvc5_repo.bzl`, `packages/cvc5.BUILD`), pass/lec + pass/formal talk to
 cvc5 through its C++ API only (`pass/lec/query.cpp`, `pass/formal/prove.cpp`).
 
-## Findings that drive the plan (verified 2026-10-13 against cvc5-1.4.2 source)
+## Baseline findings that drove the implementation
 
-- LiveHD never sets `incremental`; cvc5 defaults it to `true`. `set_defaults.cpp`
+- The 1.3.4 baseline never set `incremental`; cvc5 defaults it to `true`. `set_defaults.cpp`
   then forces the CDCL(T) SAT solver to **MiniSat** whenever `sat-solver` is not
   set by the user. Every `bitblast-internal` query we run today is bit-blasted
   into MiniSat, including `Prover::solve` (prove.cpp:817) which never pushes.
@@ -43,9 +44,10 @@ cvc5 through its C++ API only (`pass/lec/query.cpp`, `pass/formal/prove.cpp`).
   Unknown cvc5 checks the candidate model and answers SAT if it satisfies the
   assertions. We only enable models with `opts.witness`, so today we never see
   it. Models disable `unconstrained-simp`, so it belongs on a witness arm.
-- Build: 1.4.0 renamed build types (`production` -> `unrestricted`; `safe`
-  forces `bitblast-internal` and turns `arrays-exp` off, which we set, so it
-  must be `unrestricted`); MPFR >= 4.2.1 became required unless `--no-mpfr`;
+- Build correction from the checksum-pinned 1.4.2 tarball: its CMake build
+  type is **Production**, with an unrestricted solver profile (safe/stable off).
+  The earlier statement that the build type was renamed to `unrestricted` was
+  incorrect for this source archive; MPFR >= 4.2.1 became required unless `--no-mpfr`;
   CaDiCaL >= 2.1.0, SymFPU >= 1.2.0, GMP >= 6.3, LibPoly >= 0.2.1 (`--poly`,
   needed by `nl-cov` on the int-blast path); Python 3 + `pyparsing` + `tomli`
   at build time; `--auto-download` cannot run inside the Bazel sandbox.
@@ -115,10 +117,11 @@ cvc5 through its C++ API only (`pass/lec/query.cpp`, `pass/formal/prove.cpp`).
   `cvc5.BUILD`'s `srcs`; the API changed `Term::const_iterator`'s ctor and
   made term managers outlive dependents (1.4.0) — grep our iterator uses.
 - `bazel test //pass/lec/... //pass/formal/...` green on macOS + Linux.
-- Re-run the 06-16 spurious-SAT miter (recover the fixture from commit
-  `6768d65d6`'s test diff) under `bv-solver=bitblast` + `bv-sat-solver=cadical`
-  + `produce-models`; record PASS/FAIL in this file. This decides whether the
-  `lazy` profile in M2 is enabled by default or stays opt-in.
+- Historical reproducer correction: `6768d65d6` changes `query.cpp` and
+  `abc_arith.hpp` but contains no test fixture. The exact 06-16 miter cannot be
+  recovered from that commit. The new lazy arithmetic regression, option sweep
+  and Pyrope/Verilog pairs report no false SAT; the exact old miter remains a
+  validation follow-up if its inputs become available.
 
 ### M1 — build cvc5 from source under Bazel (3-5 days)
 
@@ -129,9 +132,10 @@ cvc5 through its C++ API only (`pass/lec/query.cpp`, `pass/formal/prove.cpp`).
   `--dep-path`), SymFPU 1.2.0 (header-only), LibPoly >= 0.2.1, `@gmp` (BCR,
   already present). Python from `rules_python` with `pyparsing` + `tomli`
   as `pip` requirements (needed by cvc5's `mkoptions`).
-- configure: `./configure.sh unrestricted --static --no-static-binary --no-gpl
-  --poly --no-mpfr --kissat --cryptominisat --prefix=$INSTALLDIR`
-  + `-DENABLE_IPO=ON`; no parser lib, no bindings, no docs, assertions off.
+- Implemented configuration: CMake `Production`, static PIC libraries;
+  Poly/Kissat/CryptoMiniSat on; MPFR/GPL/parser/executable/bindings/docs off.
+  **IPO is off** so native object and COMDAT symbols survive symbol isolation.
+  Python 3.12 supplies `tomllib`; a pinned pyparsing wheel is an offline input.
 - Keep the CaDiCaL symbol localization genrule exactly as in `cvc5.BUILD`
   (the clash with Berkeley-abc's vendored CaDiCaL is unchanged by building
   from source); feed it the source-built `libcvc5.a`/`libcadical.a`/LibPoly
@@ -262,7 +266,7 @@ Design — `core/job_manager.{hpp,cpp}`, one process-wide instance:
   |---|---|---|---|
   | `formal_arm` | `flat_node_count_pruned(ref)+(impl)` (already computed by the oversize gate, query.cpp:61) x cycles (`bmc`: bound N, else 1) x profile factor (`internal`/`lazy` 1, `eager-kissat` 1.5, `intblast` 2) | cvc5 startup + encode, measure | calibrate on the lhdtrack sweep (bytes per node-cycle) |
   | `sim_compile` (LLVM kernel path, `tune.backend=llvm`) | per-color `cost_flat` from the Color_plan (`inou/cgen/sim_color_plan.hpp:304`), or the module's IR instruction count at `submit` time | LLVM context + TargetMachine, measure | calibrate (bytes of RSS per cost unit); each job is an in-process `Cgen_llvm::write_object` on a `Compile_workers` thread (`inou/cgen/sim_compile_workers.hpp`), so the peak is sampled as process RSS delta / active jobs at release |
-  | `usyn_region` | AIG nodes, liberty bytes | `projected_abc_memory` as today | as today |
+  | `usyn_region` | root LGraph node count before the serial native pipeline | 64 MiB | 4096 bytes/node, then EWMA |
   Admit iff `rss_now + sum(active predicted remainder) + predicted(cls) <=
   physical_ram_bytes()/2`; **always admit when no job of any class is
   active**. Free memory is measured, not assumed: Linux `MemAvailable`, macOS
@@ -270,9 +274,9 @@ Design — `core/job_manager.{hpp,cpp}`, one process-wide instance:
   available)`. A job whose guess alone exceeds ram/2 still runs, alone, under
   the always-one rule (the oversize gate, not the manager, is what refuses).
 - Cross-process: forked arms (M3) cannot share the in-process mutex, so the
-  manager owns a counting semaphore in `MAP_SHARED|MAP_ANONYMOUS` memory
-  sized to its current admission count and re-sized (posts/waits) as the
-  load/memory verdict changes; the parent records each reaped child's
+  implementation uses a `MAP_SHARED|MAP_ANONYMOUS` reservation table with a
+  lock-free process-owner lock, rather than resizing a counting semaphore.
+  Admission rechecks load/memory and recovers entries/locks after killed owners; the parent records each reaped child's
   `ru_maxrss` into the class EWMA. A SIGKILLed child's slot is released by
   the parent.
 - `--stats` / `lhd.stats`: per class admitted, queued, peak concurrent,
@@ -280,10 +284,11 @@ Design — `core/job_manager.{hpp,cpp}`, one process-wide instance:
 - Consumers in this plan: formal (`tf::Executor` sized to `lhd.jobs` and
   each def worker + fork arm holds a manager slot), sim compile on the
   **LLVM kernel path** (`Compile_workers::submit` acquires a `sim_compile`
-  slot with the color's cost as `units` instead of its fixed
-  `limit_ = available_compile_jobs()`), usyn (`region_driver` lanes acquire
-  `usyn_region` slots; `synthesis_thread_limit`'s automatic cap of 8 is
-  dropped in favor of `lhd.jobs`). The clang/ninja C++ TU path is out of
+  reservation using IR instruction count before queueing, transfers it to
+  the worker and frees the LLVM context on completion). Native USYN is a serial
+  whole-design pipeline, not the legacy region driver: its whole-design job is
+  admitted before synthesis. The legacy region scheduler and its automatic
+  cap of 8 remain ABC policy. The clang/ninja C++ TU path is out of
   scope for admission: ninja's `-j` is fixed at launch and cannot be
   throttled once spawned, so it is sized once from `min(lhd.jobs,
   available_compile_jobs())` and otherwise untouched. ABC (`pass/abc`, `admit_abc_worker`) untouched until its
@@ -409,15 +414,69 @@ Skip (reviewed, not relevant to netlists): `bv-gauss-elim`, `bv-intro-pow2`,
 - Source build on Linux arm64 and the glibc floor: confirm the oldest server
   we care about links the result (that is the whole point of M1).
 
-## Checklist
+## Implementation and validation
 
-- [x] Effort prerequisite: immediate default sampling; proof never samples;
-  public `rlimit`/`effort_proof` removed; wall-time hierarchy accounting;
-  47 focused checks passed
-- [ ] M0 prebuilt 1.4.2 green; spurious-SAT re-test recorded
-- [ ] M1 source build green on linux-x86_64 / linux-arm64 / macos-arm64; kissat + cms linked
-- [ ] M2 profiles + fresh-solver LEC including sampling and state-lead confirmation; verify on cadical incremental; compiler-private resource-budget reproducibility measured
-- [ ] M3a `core/job_manager` (load + memory EWMA admission, fork-shared semaphore); single `lhd.jobs` ceiling (default = available CPUs); `formal.jobs`/`sim.jobs`/`synth.threads` retired with directed renames; sim LLVM + usyn + formal on it; ABC excluded
-- [ ] M3 portfolio race under the job manager; effort dispatch preserved; one shared wall deadline; `--stats` per arm; jobs=1 no deadlock
-- [ ] M4 experiments 1-9 measured and recorded here
-- [ ] M5 lec.md / 07-formal.md updated
+- [x] M0: 1.4.2 prebuilt checksums pinned; Linux prebuilt formal/LEC baseline
+  green; lazy arithmetic regression and model checks recorded.
+- [x] M1: offline source build is the default; optional Kissat/CryptoMiniSat
+  linked and exercised; prebuilt escape hatch retained. Kissat's stock
+  assumption wrapper aborts, so the source patch rebuilds its CNF for each
+  assumption query and returns the complete assumption set as an UNSAT core.
+  ABC's Kissat/Kitten helpers are isolated alongside CaDiCaL symbols.
+  The refreshed sweep exposed a CryptoMiniSat false SAT at timeout; the source
+  patch now marks a BV backend's Unknown as model-unsound in the SAT context,
+  instead of letting the main solver interpret absence of a conflict as SAT.
+  A cap-sweep regression guards it; the original failure is retained in the
+  measurement report.
+- [x] M2: fresh nonincremental LEC scopes, including sampling and state leads;
+  live models retained; model-free SAT confirmed through the witness profile;
+  property verification uses incremental CaDiCaL. Large BMC bases slice SSA
+  definitions by dependency, accepting sliced UNSAT only; SAT/Unknown gets a
+  full-base check. The 5,000-definition experiment measured 22.3 ms full vs
+  2.2 ms sliced. Compiler-private budgets remain MiniSat; both backends' local
+  resource counts repeat across three runs and opt/debug checks.
+- [x] M3a: shared CPU/load/memory/EWMA admission and `lhd.jobs`; formal
+  preparation/arms, foreground property queries, LLVM submission and native
+  USYN use it. Retired knobs give directed errors. ABC keeps `abc.threads`.
+  CPU load is compared with real affinity CPUs, independently of the Bazel
+  two-job default. Explicit thread ownership and fork ownership prevent a
+  yielding caller from releasing a peer's slot; killed modifiers recover.
+- [x] M3: engine/profile races, sampled portfolios without duplicated coverage,
+  one wall deadline through queueing/retries/witnesses, per-arm statistics,
+  one-slot nesting and cancellation. Bounded BMC can finish once induction
+  arms finish, without waiting for other BMC profiles. Explicit property proof
+  effort preserves cache traffic through its outer wall-bounded worker.
+- [x] M4: all nine option families measured in the bounded API sweep; four
+  repository Pyrope/Verilog pairs measured with proof and sampling separated.
+  No experimental option was promoted beyond the planned profiles.
+- [x] M5: `lec.md`, option help, simulation/ABC notes, the reference site's
+  `02-usage.md` and `07-formal.md`, and this task's status updated.
+
+Final verification (2026-10-14): **58 opt checks, 5 debug checks and 3
+prebuilt checks pass**. The patched option sweep completed 228 queries without
+an incorrect verdict. All eight sampled RTL runs reached quick-check with no
+capped query or mismatch. Compiler-warning and whitespace contracts pass.
+Implementation and reference-doc edits are left uncommitted for review.
+
+Corpus follow-up (2026-10-14): lhdtrack completed a 780-job comparison and
+585 native checks on the final build, retaining exact mapped graphs and independent
+checker measurements. Latest source coverage is 188 unbounded proofs, two bounded
+proofs, one inconclusive result and four explicit skips. The measured eager induction
+arm is selected only for `br_arb_weighted_rr`; no global profile default changed.
+The run exposed and fixed the parent deadline bypass for flat/one-definition queries
+(six opt checks pass) and the tracker's Unknown-to-Refuted classification error.
+[Measurements and provenance](../../../lhdtrack/repros/cvc5-lec-20261014/index.html).
+
+## Validation follow-ups
+
+- Linux arm64 and macOS arm64 builds/runs, and linking on the oldest supported
+  Linux server: no such hosts were available in this session. Do not interpret
+  the Linux x86_64 result as cross-platform validation.
+- Recover the exact historical lazy spurious-SAT inputs, if available outside
+  the cited commit.
+- Multi-host lhdtrack and broader logikbench/minion measurements, plus calibration of cold memory
+  slopes. Current seed slopes are 256/2048/4096 bytes per unit, plus a 64 MiB
+  startup allowance; learned EWMA and measured RSS/free memory govern admission.
+  The bounded measurements justify retaining diverse profiles, not a claim of
+  universal speedup. Cross-platform compiler-private CaDiCaL resource allowances
+  remain uncalibrated; MiniSat is retained there.

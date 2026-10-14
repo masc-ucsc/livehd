@@ -144,7 +144,7 @@ U() { TO=$1; shift; OUT=$("$LHD" lec --set formal.effort=proof --ref "lg:$WORK/H
 
 # 8) First run: Unknown, and the attempt is ledgered (not a verdict).
 U 1
-if echo "$OUT" | grep -q "skipped: known inconclusive"; then echo "FAIL: first Unknown run already skipped"; fail=1
+if echo "$OUT" | grep -q "skipped: known timeout"; then echo "FAIL: first Unknown run already skipped"; fail=1
 elif ! grep -q '"unknowns"' "$WDU/formal_cache.json" || ! grep -q '"timeout"' "$WDU/formal_cache.json"; then
   echo "FAIL: Unknown attempt not ledgered"; fail=1
 else echo "ok: Unknown attempt ledgered on first run"; fi
@@ -152,17 +152,17 @@ RC1=$RC
 
 # 9) Unchanged re-run: skipped, same reported outcome (inconclusive), same rc.
 U 1
-if ! echo "$OUT" | grep -q "UNKNOWN (skipped: known inconclusive"; then echo "FAIL: unchanged Unknown not skipped"; fail=1
+if ! echo "$OUT" | grep -q "TIMEOUT (skipped: known timeout"; then echo "FAIL: unchanged Unknown not skipped"; fail=1
 elif ! echo "$OUT" | grep -q "skipped-unknown"; then echo "FAIL: no skipped-unknown count in summary"; fail=1
 elif [ "$RC" -ne "$RC1" ]; then echo "FAIL: skip changed the exit code ($RC1 -> $RC)"; fail=1
 else echo "ok: unchanged Unknown skips the re-attempt (same outcome)"; fi
 
 # 10) formal.retry=all and a LARGER budget both re-attempt.
 U 1 --set formal.retry=all
-if echo "$OUT" | grep -q "skipped: known inconclusive"; then echo "FAIL: formal.retry=all still skipped"; fail=1
+if echo "$OUT" | grep -q "skipped: known timeout"; then echo "FAIL: formal.retry=all still skipped"; fail=1
 else echo "ok: formal.retry=all re-attempts"; fi
 U 2
-if echo "$OUT" | grep -q "skipped: known inconclusive"; then echo "FAIL: larger budget did not re-attempt"; fail=1
+if echo "$OUT" | grep -q "skipped: known timeout"; then echo "FAIL: larger budget did not re-attempt"; fail=1
 else echo "ok: a larger budget re-attempts"; fi
 
 # 11) The digest keys a register's RESET VALUE and a constant-driven output.
@@ -229,10 +229,10 @@ pub mod br_delay(clk:Clock, `in`:U8, rst:U1) -> (out:U8@[], out_stages:U40@[]) {
 }
 EOF
 WDH="$WORK/wdh"; rm -rf "$WDH"; mkdir -p "$WDH"
-D() { "$LHD" lec --set formal.effort=proof --ref "verilog:$WORK/dly.v" --impl "pyrope:$WORK/$1" --top br_delay --workdir "$2" 2>&1 | grep "^lec: '" | tail -1; }
+D() { "$LHD" lec --set formal.effort=proof --ref "verilog:$WORK/dly.v" --impl "pyrope:$WORK/$1" --top br_delay --workdir "$2" 2>&1 | tee "$2.log" | grep "^lec: '" | tail -1; }
 # LEC_WINDOW_OFF disables slice pairing, so i32 can only reach a bounded pass.
 OUT=$(LEC_WINDOW_OFF=1 D i32.prp "$WDH")
-if ! echo "$OUT" | grep -q "PASS(6)"; then echo "FAIL: i32 without state windows should be bounded: $OUT"; fail=1
+if ! echo "$OUT" | grep -q "PASS(6)"; then echo "FAIL: i32 without state windows should be bounded: $OUT"; tail -25 "$WDH.log"; fail=1
 elif ! python3 -c 'import json,sys; h=json.load(open(sys.argv[1])).get("hints",{}); sys.exit(any(v.get("engine")=="bmc" for v in h.values()))' \
     "$WDH/formal_cache.json"; then echo "FAIL: a bounded pass was stored as the winning strategy"; fail=1
 else echo "ok: a bounded pass is not recorded as a strategy hint"; fi

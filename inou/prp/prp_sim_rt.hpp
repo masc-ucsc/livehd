@@ -1183,7 +1183,7 @@ inline constexpr std::string_view kSetParser = R"cpp(
                      + "; re-run --setup-only with --set " + _k + "=" + _v);
       }
       _set_check_baked(_k, _v, "false", !_off);
-    } else if (_k == "sim.jobs" || _k == "sim.ninja" || _k == "sim.hlop_dir" || _k == "sim.iassert_dir" || _k == "sim.compile_only"
+    } else if (_k == "lhd.jobs" || _k == "sim.ninja" || _k == "sim.hlop_dir" || _k == "sim.iassert_dir" || _k == "sim.compile_only"
                || _k == "sim.tune.file" || _k == "sim.tune.export" || _k.compare(0, 4, "lhd.") == 0) {
       // Build plumbing and lhd-only keys: meaningless inside a built binary, and
       // accepted so ONE --set list can go to both the setup and the run.

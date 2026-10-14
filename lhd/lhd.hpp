@@ -62,6 +62,7 @@ struct Options {
   // `pass.X.seed` option. `lhd sim` forwards it to each test driver as `--seed`
   // (the driver seeds hlop's PRNG) only when `seed_explicit` — otherwise the
   // driver keeps its own default seed.
+  unsigned    jobs          = 0;  // shared cross-domain ceiling; 0 = affinity-aware CPU count
   std::string seed          = "0";
   bool        seed_explicit = false;  // user passed `--seed`/`--set lhd.seed=`
   // Verilog front-end. Default `slang` — the direct inou.slang SV -> LNAST
@@ -320,38 +321,50 @@ struct Result {
 
   // `lhd lec`'s VERDICT, as a machine-readable value.
   //
-  // The envelope's `status` is the process outcome, not the proof: an
-  // INCONCLUSIVE lgyosys run and a real proof BOTH exit 0 with
-  // `"status":"pass"` (by design -- an inconclusive comparison must not fail a
+  // The envelope's `status` is the process outcome, not the proof: a
+  // TIMEOUT-time run, a TESTED-sampled run and a real proof ALL exit 0 with
+  // `"status":"pass"` (by design -- running out of budget must not fail a
   // pair), so a consumer that reads only `status` records a non-proof AS a
   // proof. That is the exact conflation lec's verdict discipline exists to
   // prevent, and a tracker aggregating it silently promotes an unverified
   // design into a headline comparison (lhdtrack flows/lib/lec.py). Emitted for
   // every solver, alongside the human verdict line.
   //
-  //   proven    equivalent (inductively, or exhaustively to `bound` cycles
-  //             when `bounded` -- both are real answers, see PASS(n))
-  //   refuted   a counterexample exists
-  //   unknown   the solver gave up / timed out / could not decide
+  // The outcome words of the owner rulings 2026-10-14 (the table is
+  // pass/lec/property_types.hpp; the same words as `lhd formal verify`):
+  //   proven-full          an unbounded (inductive) proof                    exit 0
+  //   proven-bounded       no difference for `bound` design cycles from reset exit 0
+  //   tested-sampled       a sampled effort preset: `vectors` agreed         exit 0
+  //   timeout-time         a clock limit stopped it; nothing claimed         exit 0 + warning
+  //   timeout-memory       out of memory, caught; nothing claimed            exit 0 + warning
+  //   refuted-cex          a real counterexample                             exit 10
+  //   refuted-interface | refuted-unsupported | refuted-unchecked |
+  //   refuted-vacuous | refuted-unexplained   no answer; the word names why  exit 7
+  //                        (refuted-vacuous: nothing to compare, or a
+  //                        contradictory assume set -- it proved nothing)
   struct Lec_verdict {
     bool        present{false};
-    std::string verdict{};  // proven | refuted | unknown | tested (sampled effort preset)
+    std::string verdict{};         // one of the outcome words above
     std::string effort{};          // requested formal.effort preset ("" = legacy)
     bool        sampled{false};    // input-vector sampling ran
     std::string effort_reached{};  // highest preset the sampled vectors satisfy ("" = none)
-    uint64_t    sample_vectors{0}, sample_traces{0}, sample_partial{0}, sample_queries{0}, sample_unknown{0};
+    // sample_capped: sampling queries that hit their per-query cap (no answer).
+    uint64_t    sample_vectors{0}, sample_traces{0}, sample_partial{0}, sample_queries{0}, sample_capped{0};
     uint64_t    sample_solve_us{0};
+    uint64_t    vectors{0};      // tested-sampled: the N of TESTED-sampled(N)
     std::string solver{};        // cvc5 | bitwuzla | lgyosys | …
-    bool        bounded{false};  // proven only to `bound` cycles from reset
-    int64_t     bound{0};        // the depth `bounded` refers to
+    bool        bounded{false};  // proven-bounded: proven only to `bound` design cycles from reset
+    int64_t     bound{0};        // the n of PROVEN-bounded(n), in design cycles
     // Independent oracle result; a native proof cannot stand in for this.
-    std::string crosscheck_verdict{};  // empty until invoked; proven | refuted | unknown
+    // empty until invoked; proven-full | proven-bounded | refuted-cex |
+    // incomplete (lgcheck could not decide) | failed (lgcheck did not run)
+    std::string crosscheck_verdict{};
     int         crosscheck_exit_code{-1};
     bool        crosscheck_bounded{false};  // proven only by lgcheck's complete bounded miter
     int64_t     crosscheck_bound{0};        // that window, in native design cycles (formal.bound)
     // State the proof could NOT correspond, reported only when a def ended
-    // weaker than an unbounded PROVEN (bounded / unknown): the usual reason a
-    // run stops at PASS(n). `reason` is semdiff's (no full match / ambiguous /
+    // weaker than PROVEN-full (bounded / undecided): the usual reason a
+    // run stops at PROVEN-bounded(n). `reason` is semdiff's (no full match / ambiguous /
     // kind/init mismatch) or "uncertain pair dropped". `suggested_match` is a
     // HEURISTIC `formal.lec.match` string (the dropped pairs, then same width +
     // name similarity) — a starting point to try, never assumed by the prover.
@@ -364,12 +377,23 @@ struct Result {
     };
     std::vector<Unpaired_state> unpaired_state{};
     std::string                 suggested_match{};
-    // A weak verdict (bounded PASS / unknown) whose induction step failed from
+    // A weak verdict (PROVEN-bounded / undecided) whose induction step failed from
     // an ARBITRARY state: the step counterexample, inputs then `| state: k=v`.
     // That state may be unreachable; a proven `assume` over it makes the step
     // inductive (suggestions6 1.6). Empty when not applicable.
     std::string                 induction_cex{};
   } lec;
+
+  // `lhd formal verify`'s run VERDICT (its obligation rows folded by severity),
+  // as a machine-readable value: the same lowercase outcome words as
+  // `lec.verdict` above, for the same reason (a TIMEOUT-time or TESTED-sampled
+  // run exits 0 too). formal_report.json carries the per-obligation rows.
+  struct Formal_verdict {
+    bool        present{false};
+    std::string verdict{};   // one of the outcome words of Lec_verdict
+    bool        bounded{false};
+    int64_t     bound{0};    // the n of PROVEN-bounded(n), in design cycles
+  } formal;
 
   // Internal hand-off from Tier A (source/LNAST sync) to Tier B (final LGraph  // Internal hand-off from Tier A (source/LNAST sync)
   // to Tier B (final LGraph restore/store). Not serialized; the public machine contract is the stats object above. A graph
@@ -553,11 +577,6 @@ inline constexpr Sim_set_option kSimSetOptions[] = {
      "binary. Ninja is what makes the host build incremental (depfile-accurate, so a header edit rebuilds exactly "
      "its dependents); the built-in path reuses whatever its own depfiles and command stamps show unchanged. A "
      "`build.ninja` reproducing the exact build is written into the sim dir either way — `ninja -C <workdir>/sim`"},
-    {"jobs",
-     "0", Sim_set_option::Kind::non_neg_num,
-     "host C++ compiles to run concurrently when building the sim driver (0 = one per hardware thread). Each "
-     "generated module body is its own translation unit sharing only headers, so the build parallelizes flat; "
-     "pin this to reproduce a build-time measurement, or to leave the machine usable on a big design"},
     {"slop_u",
      "true", Sim_set_option::Kind::boolean,
      "materialize LGraph-proven unsigned combinational values as the CANONICAL-unsigned Slop_u<n> instead of a "
@@ -792,11 +811,6 @@ inline constexpr Synth_set_option kSynthSetOptions[] = {
      "abc",  Synth_set_option::Kind::mapper,
      "abc|usyn: ABC synthesis (pass.abc), or unate synthesis (pass.usyn: a domino-gate LUT cover of every region, "
      "technology-mapped by ABC, with the ABC flow as the fallback)"                                                        },
-    {   "threads",
-     "0", Synth_set_option::Kind::integer,
-     "shared maximum concurrent ABC workers for synth and pass abc: 0 selects the machine's available CPUs; 1 maps serially. "
-     "IGNORED by synth.mapper=usyn, which pins one synthesis tree at a time. "
-     "New workers require actual process memory plus outstanding and new projections below half of physical RAM"           },
     {   "liberty",
      "",    Synth_set_option::Kind::file,
      "PATH -- THE Liberty .lib, for every command that reads one: `lhd synth`, `lhd pass abc` (maps to its cells) "

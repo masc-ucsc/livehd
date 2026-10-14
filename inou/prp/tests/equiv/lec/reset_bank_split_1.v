@@ -2,7 +2,7 @@
 lec_reset_bank_split_test.sh required a COMPLETED bounded proof at bound 2, not
 merely "some proof": the harness accepts any PROVEN or PASS(n), so a silently
 clamped bound or a different discharge path would go unnoticed.
-:lec_grep: PASS\(2\) equivalent
+:lec_grep: PROVEN-bounded\(2\)
 */
 module split(input clk, input rst, input [3:0] in, output [3:0] out);
   reg stages___q_0, stages___q_1, stages___q_2, stages___q_3;

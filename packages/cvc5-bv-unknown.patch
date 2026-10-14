@@ -1,0 +1,25 @@
+diff --git a/src/theory/bv/bv_solver_bitblast.cpp b/src/theory/bv/bv_solver_bitblast.cpp
+--- a/src/theory/bv/bv_solver_bitblast.cpp
++++ b/src/theory/bv/bv_solver_bitblast.cpp
+@@ -16,6 +16,7 @@
+ #include "prop/sat_solver_factory.h"
+ #include "theory/bv/theory_bv.h"
+ #include "theory/bv/theory_bv_utils.h"
++#include "theory/incomplete_id.h"
+ #include "theory/theory_model.h"
+ 
+ namespace cvc5::internal {
+@@ -271,6 +272,13 @@
+     }
+     d_im.trustedConflict(tconflict, InferenceId::BV_BITBLAST_CONFLICT);
+   }
++  else if (val == prop::SatValue::SAT_VALUE_UNKNOWN && level == Theory::Effort::EFFORT_FULL)
++  {
++    // A backend timeout supplies neither a conflict nor a satisfying model.
++    // Without this notification the main SAT engine can report SAT merely
++    // because the theory emitted no conflict (notably CryptoMiniSat timeouts).
++    d_im.setModelUnsound(IncompleteId::UNKNOWN);
++  }
+ }
+ 
+ bool BVSolverBitblast::preNotifyFact(CVC5_UNUSED TNode atom,

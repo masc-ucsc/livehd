@@ -35,7 +35,7 @@ root = work / 'comparison'
 report = json.loads((root / 'comparison.json').read_text())
 for mapper in ('usyn-selection', 'usyn-residual', 'usyn', 'abc'):
     result = report['results'][mapper]
-    assert result['lec']['verdict'] == 'proven', result
+    assert result['lec']['verdict'] in ('proven-full', 'proven-bounded'), result
     assert result['lec']['solver'] == 'cvc5', result
     timing = result['timing']['designs']
     assert len(timing) == 1 and timing[0]['area'] > 0, timing
@@ -103,7 +103,7 @@ assert len(report['sources']) == 2 and report['sdc']['sha256'], report
 assert report['results']['usyn']['status'] == 'failed', report
 assert report['results']['usyn']['failed_stage'] == 'usyn', report
 assert report['results']['abc']['status'] == 'completed', report
-assert report['results']['abc']['lec']['verdict'] == 'proven', report
+assert report['results']['abc']['lec']['verdict'] in ('proven-full', 'proven-bounded'), report
 commands = json.loads((root / 'commands.json').read_text())
 assert report['sources'][1]['path'] in commands[0]['argv'], commands[0]
 sta = next(command for command in commands if command['label'] == 'abc-sta')

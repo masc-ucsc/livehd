@@ -1178,7 +1178,7 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
   // it's checked at the head of the combinational fixpoint and (throttled) inside
   // its node walk, plus once here so every recursive re-entry is covered. A
   // budget-out degrades to ok=false, which the query layer maps to a sound
-  // Verdict::Unknown (never a wrong verdict).
+  // Verdict::Undecided (never a wrong verdict).
   if (budget_seconds_ > 0 && sub_depth_ == 0) {
     deadline_ = std::chrono::steady_clock::now() + std::chrono::seconds(budget_seconds_);
   }
@@ -3256,7 +3256,7 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
             }
             for (auto operand : {0, 2, 3, 4}) {
               if (!pid(operand)[0].x_mask.isNull()) {
-                return fail_unsupported("symbolic Set_mask with unknown operands");
+                return fail_unsupported("symbolic Set_mask with X-valued operands");
               }
             }
             const int cw       = std::max({W, pid(2)[0].width + 1, pid(3)[0].width + 1});

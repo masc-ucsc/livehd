@@ -1,0 +1,25 @@
+// This file is distributed under the BSD 3-Clause License. See LICENSE for details.
+// A pure rolled loop is embedded in its caller's LLVM kernel: no call, no operand transport.
+pub comb sel(x:U128, select:U4) -> (picked:U32) {
+  mut value:U32 = 0
+  for i in 0..<4 {
+    if select#[i] != 0 {
+      value |= x#[(i*32)..+32]
+    }
+  }
+  picked = value
+}
+
+test sel.check {
+  mut dut = sel
+  dut.x = 0x00000008000000040000000200000001
+  dut.select = 15
+  step
+  assert(dut.picked == 15)
+  dut.select = 6
+  step
+  assert(dut.picked == 6)
+  dut.select = 0
+  step
+  assert(dut.picked == 0)
+}

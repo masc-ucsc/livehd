@@ -113,7 +113,7 @@ EOF
 "$LHD" compile "$WORK/fan.v" --top fan --emit-dir "lg:$WORK/fanlib" --workdir "$WORK/cfan" >/dev/null 2>&1
 for jobs in 1 4; do
   jobs_args=()
-  [ "$jobs" = "4" ] || jobs_args=(--set "formal.jobs=$jobs")
+  [ "$jobs" = "4" ] || jobs_args=(--set "lhd.jobs=$jobs")
   "$LHD" lec --set formal.effort=proof --impl "lg:$WORK/fanlib" --ref "lg:$WORK/fanlib" --top fan \
      --set formal.lec.semdiff=none ${jobs_args[@]+"${jobs_args[@]}"} \
     --set lhd.incremental=false --workdir "$WORK/w_fan_$jobs" >"$WORK/fan_$jobs.out" 2>&1
@@ -125,7 +125,7 @@ if ! cmp -s "$WORK/fan_1.set" "$WORK/fan_4.set"; then
   diff -u "$WORK/fan_1.set" "$WORK/fan_4.set" || true
   fail=1
 else
-  echo "ok: formal.jobs=4 matches jobs=1 across independent ready leaves"
+  echo "ok: lhd.jobs=4 matches jobs=1 across independent ready leaves"
 fi
 
 if [ $fail -ne 0 ]; then echo "lec_hier_test: FAILED"; exit 1; fi

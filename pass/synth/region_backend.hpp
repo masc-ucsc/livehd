@@ -146,12 +146,12 @@ struct Driver_options {
   // a whole-design region means millions of gates and several network forms
   // held at once; an XSCore flat run reached 221 GB on a 64 GiB host and was
   // SIGKILLed by the OS. `memory_budget_mb` pins the ceiling for reproducible
-  // hosts/CI (0 => physical RAM minus an OS reserve); `allow_oversize`
-  // acknowledges the risk and disables the guard.
+  // hosts/CI (0 => physical RAM minus an OS reserve). There is no override:
+  // the admission always runs, and an allocation that still fails is caught
+  // at the pass entry as TIMEOUT-memory.
   int                                   memory_budget_mb = 16384;
   unsigned                              threads          = 1;  // 0: available CPUs; synth defaults to automatic
   uint64_t                              time_budget_ms   = 0;  // per mapped color; 0 disables the soft gate
-  bool                                  allow_oversize   = false;
   // Optional caller admission in addition to the normal memory/time gates.
   // False refuses the result; it never switches to an alternative flow.
   std::function<bool(std::string_view)> admission;
@@ -186,7 +186,7 @@ struct Region_ctx {
   std::function<void(std::string_view)>                               trace_stage;
   std::function<double()>                                             elapsed_ms;
   // Exact memory admission after `done` of `total` translation steps; false
-  // recorded the refusal. Null under allow_oversize.
+  // recorded the refusal. Set for every region the driver maps.
   std::function<bool(uint64_t rss_before, size_t done, size_t total)> fits;
   // Time and memory admission around a long backend step; false recorded the
   // refusal.

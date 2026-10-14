@@ -64,7 +64,7 @@ struct Prove_options {
   // yields the same verdict on every machine and build mode. A non-zero cap
   // trades that reproducibility for a BOUNDED compile (pass.formal.timeout draws
   // it down as its total budget drains). Degrading is sound either way: a
-  // time-out is `unknown` -> Verdict::Unknown -> the obligation stays a runtime
+  // time-out is `unknown` -> Verdict::Undecided -> the obligation stays a runtime
   // check, never a wrong verdict.
   int  timeout_ms               = 0;
   // Synthesis queries cut each memory dout to an independent free word.
@@ -94,7 +94,7 @@ struct Model_leaf {
 using Model = std::vector<Model_leaf>;
 
 struct Query_out {
-  Verdict     verdict  = Verdict::Unknown;
+  Verdict     verdict  = Verdict::Undecided;
   bool        stateful = false;  // cone cut a Flop/Memory (a Refuted witness may be unreachable)
   std::string witness;           // input assignment, when Refuted
   Model       model;             // every leaf of the refuted formula, when Refuted and produce_model

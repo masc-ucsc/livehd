@@ -7,7 +7,9 @@
 #include <cmath>
 #include <cstdlib>
 #include <filesystem>
+#include <format>
 #include <fstream>
+#include <new>
 #include <print>
 #include <set>
 
@@ -15,9 +17,11 @@
 #include "design_synth.hpp"
 #include "graph_library_singleton.hpp"
 #include "host_mem.hpp"
+#include "job_manager.hpp"
 #include "llvm/ADT/StringRef.h"
 #include "llvm/Support/SHA256.h"
 #include "native_report.hpp"
+#include "property_types.hpp"
 #include "provenance.hpp"
 #include "query.hpp"
 #include "resource_budget.hpp"
@@ -296,6 +300,33 @@ bool mapped_better(const livehd::synth::Mapped_cost& candidate, const livehd::sy
   const auto area = compare(candidate.area, incumbent.area);
   return area ? area < 0 : compare(candidate.maximum_region_delay, incumbent.maximum_region_delay) < 0;
 }
+// An allocation failed under the process memory backstop (lhd_main arms
+// RLIMIT_AS at this budget). The failing frame has unwound and released what
+// it held.
+[[noreturn]] void fail_out_of_memory() {
+  const uint64_t budget = livehd::cost::configured_budget_bytes();
+  livehd::diag::err("pass.usyn", "memory-exhausted", "unsupported")
+      .msg("{}: pass.usyn ran out of memory (an allocation failed) under {}",
+           livehd::lec::outcome_word(livehd::lec::Outcome::Timeout_memory),
+           budget == 0 ? std::string{"the host's memory (no process memory budget could be computed)"}
+                       : std::format("the process memory budget of {} MiB (the RLIMIT_AS backstop: LIVEHD_MEMORY_BUDGET_MB, "
+                                     "else physical RAM minus max(2 GiB, 25%))",
+                                     budget >> 20))
+      .hint("color into smaller regions and synthesize those, or synthesize on a host with more memory")
+      .fatal();
+}
+// A refusal by the cooperative resource gate names its limit with the formal
+// tools' words, as pass.abc does: the memory gate is a memory limit caught
+// before the allocation (TIMEOUT-memory), the wall-time gate a clock limit
+// (TIMEOUT-time). Empty when nothing was refused.
+std::string refusal_prefix(const livehd::usyn::Resource_budget& resources) {
+  if (resources.reason.empty()) {
+    return {};
+  }
+  return livehd::lec::outcome_word(resources.out_of_time ? livehd::lec::Outcome::Timeout_time
+                                                         : livehd::lec::Outcome::Timeout_memory)
+         + ": ";
+}
 }  // namespace
 
 void Pass_usyn::setup() {
@@ -465,7 +496,19 @@ void Pass_usyn::setup() {
   register_pass(m);
 }
 
+// The memory boundary: a std::bad_alloc from anywhere below (the native
+// search, technology mapping, the job manager's shared lease) leaves as a
+// clean TIMEOUT-memory diagnostic rather than an exception the kernel can only
+// call internal. The cooperative Resource_budget admission refuses earlier.
 void Pass_usyn::work(Eprp_var& var) {
+  try {
+    synthesize(var);
+  } catch (const std::bad_alloc&) {
+    fail_out_of_memory();
+  }
+}
+
+void Pass_usyn::synthesize(Eprp_var& var) {
   namespace fs   = std::filesystem;
   namespace usyn = livehd::usyn;
   Options options;
@@ -508,6 +551,11 @@ void Pass_usyn::work(Eprp_var& var) {
     livehd::diag::err("pass.usyn", "no-top", "unsupported").msg("source top '{}' not found", requested_top).emit();
     return;
   }
+  uint64_t job_units = 0;
+  for ([[maybe_unused]] const auto node : top->body().nodes()) {
+    ++job_units;
+  }
+  auto shared_slot = livehd::Job_manager::global().acquire(livehd::Job_class::usyn_region, job_units);
   // Explicit whole-design flattening is a single-module output contract.
   // Optional shared-cone partition hints must not recreate module boundaries.
   if (livehd::partition::flatten_is_single_module(top.get(), options.design.flatten)) {
@@ -644,7 +692,10 @@ void Pass_usyn::work(Eprp_var& var) {
   work.absorb(native_work);
   if (!selected.design) {
     livehd::diag::err("pass.usyn", "synthesis-refused", "unsupported")
-        .msg("native synthesis failed: {}{}", selected.reason, resources.reason.empty() ? "" : "; " + resources.reason)
+        .msg("{}native synthesis failed: {}{}",
+             refusal_prefix(resources),
+             selected.reason,
+             resources.reason.empty() ? "" : "; " + resources.reason)
         .emit();
     return;
   }
@@ -721,7 +772,9 @@ void Pass_usyn::work(Eprp_var& var) {
     return;
   }
   if (!work.admission()) {
-    livehd::diag::err("pass.usyn", "publication-refused", "unsupported").msg("{}", resources.reason).emit();
+    livehd::diag::err("pass.usyn", "publication-refused", "unsupported")
+        .msg("{}{}", refusal_prefix(resources), resources.reason)
+        .emit();
     return;
   }
   if (options.design.tune_profile == "on" && options.design.tune_validate != "structural") {
@@ -732,17 +785,29 @@ void Pass_usyn::work(Eprp_var& var) {
     policy.hard_timeout_mult = 2;
     const auto prove         = [&](hhds::Graph* ref, hhds::Graph* impl, std::string_view name) {
       const auto result = livehd::lec::prove_equal_isolated(ref, impl, policy);
-      const bool proven = result.verdict == livehd::lec::Verdict::Proven && !result.bounded && !result.nothing_compared;
+      // Only an unbounded proof authorizes the tuned choice; every other
+      // outcome (bounded, vacuous, a timeout, the pinned ind engine giving up)
+      // keeps the untuned one.
+      const auto outcome = livehd::lec::pinned_engine_outcome(result.verdict,
+                                                              result.bounded,
+                                                              result.nothing_compared,
+                                                              result.unsupported,
+                                                              result.detail);
       std::print("[synth.tune] mapper=usyn validation={} region={} result={}\n",
                  options.design.tune_validate,
                  name,
-                 proven                                            ? "proven"
-                         : result.verdict == livehd::lec::Verdict::Refuted ? "refuted"
-                                                                           : "unknown");
+                 livehd::lec::outcome_word(outcome, result.checked_steps > 0 ? result.checked_steps : policy.bound));
       if (result.verdict == livehd::lec::Verdict::Refuted) {
-        livehd::diag::err("pass.usyn", "synth-tune-refuted", "unsupported").msg("synthesis tuning refuted for {}", name).fatal();
+        // The `-refuted-cex` code makes the kernel exit 10 (equiv_fail): a real
+        // counterexample, exactly like `lhd lec`'s REFUTED-cex.
+        livehd::diag::err("pass.usyn", "synth-tune-refuted-cex", "unsupported")
+            .msg("{}: synthesis tuning changed the function of {} (counterexample: {})",
+                 livehd::lec::outcome_word(outcome),
+                 name,
+                 result.witness.empty() ? std::string{"none recorded"} : result.witness)
+            .fatal();
       }
-      return proven;
+      return outcome == livehd::lec::Outcome::Proven_full;
     };
     if (options.design.tune_validate == "design") {
       options.design.tune_store->authorize_all(prove(top.get(), selected.design->top.get(), requested_top));
@@ -797,7 +862,9 @@ void Pass_usyn::work(Eprp_var& var) {
     artifact_paths.push_back((artifact_path.filename() / path.filename()).generic_string());
   }
   if (!work.admission()) {
-    livehd::diag::err("pass.usyn", "publication-refused", "unsupported").msg("{}", resources.reason).emit();
+    livehd::diag::err("pass.usyn", "publication-refused", "unsupported")
+        .msg("{}{}", refusal_prefix(resources), resources.reason)
+        .emit();
     return;
   }
   const auto report = usyn::native_report(*selected.design,

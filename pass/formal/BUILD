@@ -17,6 +17,7 @@ cc_library(
     deps = [
         "//graph",
         "//pass/lec:lec_encode",  # shared Encoder/Val helpers, without the relational/ABC engines
+        "//pass/lec:solver_profile",
         "@cvc5",
         "@hhds//hhds:graph",
     ],

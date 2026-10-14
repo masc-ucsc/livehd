@@ -18,7 +18,7 @@ with open(sys.argv[1], 'w') as f:
 PY
 run_synth() {
   "$LHD" synth "$W/parallel.prp" --top parallel --workdir "$W/$1" \
-    --set synth.liberty="$LIB" --set synth.opentimer=false --set synth.threads="$2" \
+    --set synth.liberty="$LIB" --set synth.opentimer=false --set abc.threads="$2" \
     --set abc.adder=rca --set abc.multiplier=array --set abc.barrel=log --set abc.boundary=false --emit verilog:"$W/$1.v" --result-json "$W/$1-result.json" -q
 }
 run_synth serial 1
@@ -80,7 +80,7 @@ PY
 "$LHD" compile "$W/parallel.prp" --top parallel --emit-dir lg:"$W/pass-input" --workdir "$W/pass-compile" -q
 for threads in 1 2 0; do
   thread_args=()
-  [ "$threads" = "0" ] || thread_args=(--set "synth.threads=$threads")
+  [ "$threads" = "0" ] || thread_args=(--set "abc.threads=$threads")
   "$LHD" pass abc lg:"$W/pass-input" --top parallel --emit-dir lg:"$W/pass-$threads-net" \
     --workdir "$W/pass-$threads" --set synth.liberty="$LIB" ${thread_args[@]+"${thread_args[@]}"} \
     --set abc.adder=rca --set abc.multiplier=array --set abc.barrel=log --set abc.boundary=false -q
@@ -95,7 +95,7 @@ done
 
 # A worker error must join the other workers before destroying region storage.
 if "$LHD" synth "$W/parallel.prp" --top parallel --set synth.liberty="$LIB" \
-    --set synth.opentimer=false --set synth.threads=2 --set abc.adder=rca --set abc.multiplier=array --set abc.barrel=log \
+    --set synth.opentimer=false --set abc.threads=2 --set abc.adder=rca --set abc.multiplier=array --set abc.barrel=log \
     --set abc.flow=invalid_parallel_test_command --workdir "$W/worker-error" \
     --result-json "$W/worker-error.json" -q; then
   echo 'invalid ABC command unexpectedly succeeded' >&2
@@ -109,12 +109,12 @@ assert q['diagnostics_count']['errors'] > 0, q
 CHECK_ERROR
 
 for bad in -1 1.5 wrong 4294967296; do
-  if "$LHD" synth "$W/parallel.prp" --set synth.threads="$bad" --set synth.liberty="$LIB" \
+  if "$LHD" synth "$W/parallel.prp" --set abc.threads="$bad" --set synth.liberty="$LIB" \
       --workdir "$W/bad" --result-json "$W/bad.json" -q; then
     echo "invalid thread count accepted: $bad" >&2
     exit 1
   fi
   grep -q 'non-negative integer' "$W/bad.json"
 done
-"$LHD" list options | grep -q 'synth.threads'
+"$LHD" list options | grep -q 'abc.threads'
 echo 'PASS: parallel synthesis, worker limits, serial equivalence and cache reuse'

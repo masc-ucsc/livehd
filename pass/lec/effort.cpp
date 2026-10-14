@@ -7,6 +7,8 @@
 #include <random>
 #include <stdexcept>
 
+#include "fresh_solver.hpp"
+
 namespace livehd::lec {
 
 Effort parse_effort(std::string_view name) {
@@ -96,7 +98,8 @@ uint64_t micros(Clock::time_point start) {
 }
 }  // namespace
 
-Input_sampler::Outcome Input_sampler::run(cvc5::Solver& solver, const cvc5::Term& bad, Effort effort, const Check& check,
+template <class Solver>
+Input_sampler::Outcome Input_sampler::run(Solver& solver, const cvc5::Term& bad, Effort effort, const Check& check,
                                           const std::function<bool()>& expired) {
   Outcome out;
   auto&   report = out.report;
@@ -251,5 +254,10 @@ Input_sampler::Outcome Input_sampler::run(cvc5::Solver& solver, const cvc5::Term
   }
   return out;
 }
+
+template Input_sampler::Outcome Input_sampler::run(cvc5::Solver&, const cvc5::Term&, Effort, const Check&,
+                                                   const std::function<bool()>&);
+template Input_sampler::Outcome Input_sampler::run(Fresh_solver&, const cvc5::Term&, Effort, const Check&,
+                                                   const std::function<bool()>&);
 
 }  // namespace livehd::lec

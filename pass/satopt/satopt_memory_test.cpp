@@ -103,7 +103,7 @@ TEST(SatoptMemory, DistinctAddressesClearOnlyUnreachableCollision) {
 TEST(SatoptMemory, MemoryDoutsAreIndependentFreeWords) {
   Fixture                f("satopt_mem_free");
   livehd::formal::Prover normal(f.g.get());
-  EXPECT_EQ(normal.is_false(f.mem.create_driver_pin(2)).verdict, livehd::formal::Verdict::Unknown);
+  EXPECT_EQ(normal.is_false(f.mem.create_driver_pin(2)).verdict, livehd::formal::Verdict::Undecided);
   livehd::formal::Prover proof(f.g.get(), {.memory_as_symbols = true, .reject_unknown_constants = true});
   EXPECT_EQ(proof.is_false(f.mem.create_driver_pin(2)).verdict, livehd::formal::Verdict::Refuted);
 }

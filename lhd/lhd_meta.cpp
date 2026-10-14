@@ -586,7 +586,7 @@ int describe_command(const Options& opts) {
   }
   if (name == "lec" || name == "formal lec") {
     print_json_line(
-        R"json({"schema_version":1,"name":"lec","description":"Logic equivalence check (LEC): prove_equal(ref, impl). Sides are verilog:/pyrope:/ln:/lg: (or a bare .v/.sv/.prp; kind inferred), loaded/elaborated to LGraphs (Verilog always via native Slang; Yosys debug comparisons must first use lhd compile --reader yosys --emit-dir lg:DIR). The --set formal.solver knob picks the backend: cvc5 (default, in-process SMT), bitwuzla (in-process SMT), or lgyosys (inou/yosys/lgcheck, the former `lhd check`). --set formal.effort=quick-check|test|long-check immediately checks 256|2048|16384 sampled input vectors against the miter (TESTED <level reached>, not PROVEN); formal.timeout caps elapsed wall time if the sample target cannot be reached. proof runs only proof engines with timeout as its effort limit (default 120s); verify also runs only proof engines but has no default timeout. Default test (proof when the solver/engine/phase/cross options rule sampling out). Other engine knobs are --set formal.* / formal.lec.*","args":{"required":[{"name":"impl","type":"verilog:PATH|pyrope:PATH|ln:DIR|lg:DIR"},{"name":"ref","type":"verilog:PATH|pyrope:PATH|ln:DIR|lg:DIR"}],"optional":[{"name":"impl-top","type":"string"},{"name":"ref-top","type":"string"},{"name":"top","type":"string"},{"name":"reader","type":"enum","values":["slang"],"default":"slang"},{"name":"set","type":"formal.flag=value","repeatable":true}]},"inputs":["verilog","pyrope","ln","lg"],"outputs":[],"examples":["lhd lec --impl impl.prp --ref ref.v","lhd lec --impl lg:impl/ --ref lg:ref/ --top foo --set formal.engine=ind","lhd compile ref.v --reader yosys --emit-dir lg:ref_lg; lhd lec --impl lg:ref_lg --ref ref.v"]})json");
+        R"json({"schema_version":1,"name":"lec","description":"Logic equivalence check (LEC): prove_equal(ref, impl). Sides are verilog:/pyrope:/ln:/lg: (or a bare .v/.sv/.prp; kind inferred), loaded/elaborated to LGraphs (Verilog always via native Slang; Yosys debug comparisons must first use lhd compile --reader yosys --emit-dir lg:DIR). The --set formal.solver knob picks the backend: cvc5 (default, in-process SMT), bitwuzla (in-process SMT), or lgyosys (inou/yosys/lgcheck, the former `lhd check`). --set formal.effort=quick-check|test|long-check immediately checks 256|2048|16384 sampled input vectors against the miter (TESTED-sampled(N), not a proof); formal.timeout caps elapsed wall time if the sample target cannot be reached. proof runs only proof engines with timeout as its effort limit (default 120s); verify also runs only proof engines but has no default timeout. Default test (proof when the solver/engine/phase/cross options rule sampling out). Other engine knobs are --set formal.* / formal.lec.*. Verdicts (shared with formal verify; --result-json lec.verdict is the lowercase form): PROVEN-full, PROVEN-bounded(n) (n design cycles; lec.bound), TESTED-sampled(N) (lec.vectors) exit 0; TIMEOUT-time, TIMEOUT-memory exit 0 with a warning; REFUTED-cex exit 10; REFUTED-interface|unsupported|unchecked|vacuous|unexplained exit 7 (REFUTED-vacuous: nothing to compare, or a contradictory assume set -- a check that proved nothing)","args":{"required":[{"name":"impl","type":"verilog:PATH|pyrope:PATH|ln:DIR|lg:DIR"},{"name":"ref","type":"verilog:PATH|pyrope:PATH|ln:DIR|lg:DIR"}],"optional":[{"name":"impl-top","type":"string"},{"name":"ref-top","type":"string"},{"name":"top","type":"string"},{"name":"reader","type":"enum","values":["slang"],"default":"slang"},{"name":"set","type":"formal.flag=value","repeatable":true}]},"inputs":["verilog","pyrope","ln","lg"],"outputs":[],"examples":["lhd lec --impl impl.prp --ref ref.v","lhd lec --impl lg:impl/ --ref lg:ref/ --top foo --set formal.engine=ind","lhd compile ref.v --reader yosys --emit-dir lg:ref_lg; lhd lec --impl lg:ref_lg --ref ref.v"]})json");
     return 0;
   }
   // `formal` names the FAMILY (a dispatcher); the runnable thing is the
@@ -598,7 +598,7 @@ int describe_command(const Options& opts) {
   }
   if (name == "formal verify") {
     print_json_line(
-        R"json({"schema_version":1,"name":"formal verify","description":"Proves ONE design's assert/assert_always/assume obligations by BMC from reset on the pass/lec engine: per-obligation solve with frontier assumes, a per-assert/per-cycle verdict table (PROVEN-to-cycle-k is BOUNDED), per-obligation timeout isolation; only a reachable violation fails the run. Extra .prp positionals are formal-block SIDECARS; each `formal name.dotted { ... }` block is an INDEPENDENT test, enumerated and selected exactly like a sim `test`: `--list-tests` prints them as JSON (a pure parse, no design load) and a lone non-path positional (or --formal GLOB) selects one; a selector that matches nothing fails rather than silently proving only the design's own obligations. EVERY run writes formal_report.json into --workdir (per-obligation verdicts/cycles/solve_ms), and a REFUTED run adds one simfail_<formal-test>.prp/.json per refuted test when formal.simfail=true. Knobs: --set formal.* (bound/timeout/phase/reset/simfail/...)","args":{"required":[{"name":"design","type":"path or verilog:PATH|pyrope:PATH|lg:DIR","positional":true}],"optional":[{"name":"sidecars","type":"path (.prp formal blocks)","positional":true,"repeatable":true},{"name":"test","type":"string","positional":true},{"name":"list-tests","type":"flag"},{"name":"formal","type":"GLOB"},{"name":"top","type":"string"},{"name":"workdir","type":"path"},{"name":"set","type":"formal.flag=value","repeatable":true}]},"inputs":["verilog","pyrope","lg"],"outputs":[],"examples":["lhd formal verify foo.prp --top foo --set formal.bound=12","lhd formal verify dut.prp dut.verify.prp --list-tests","lhd formal verify dut.prp dut.verify.prp alu.addw --top ALU","lhd formal verify dut.prp dut.verify.prp --formal 'alu.*' --top ALU","lhd formal verify design.v --set formal.timeout=60","lhd formal verify foo.prp --workdir w/ --set formal.simfail_run=false"]})json");
+        R"json({"schema_version":1,"name":"formal verify","description":"Proves ONE design's assert/assert_always/assume obligations by BMC from reset on the pass/lec engine: per-obligation solve with frontier assumes, a per-assert/per-cycle verdict table, per-obligation timeout isolation. The run's verdict is its worst row, in lec's words and exit codes: PROVEN-full, PROVEN-bounded(n) exit 0; TIMEOUT-time, TIMEOUT-memory exit 0 with a warning; REFUTED-cex (a reachable violation or a refuted checked assume) exit 10; REFUTED-unsupported|unchecked|vacuous|unexplained exit 7 (REFUTED-vacuous: no assert, a dead if/match guard, or a contradictory assume set -- a check that proved nothing). Extra .prp positionals are formal-block SIDECARS; each `formal name.dotted { ... }` block is an INDEPENDENT test, enumerated and selected exactly like a sim `test`: `--list-tests` prints them as JSON (a pure parse, no design load) and a lone non-path positional (or --formal GLOB) selects one; a selector that matches nothing fails rather than silently proving only the design's own obligations. EVERY run writes formal_report.json into --workdir (per-obligation verdicts/cycles/solve_ms), and a REFUTED-cex run adds one simfail_<formal-test>.prp/.json per refuted test when formal.simfail=true. Knobs: --set formal.* (bound/timeout/phase/reset/simfail/...)","args":{"required":[{"name":"design","type":"path or verilog:PATH|pyrope:PATH|lg:DIR","positional":true}],"optional":[{"name":"sidecars","type":"path (.prp formal blocks)","positional":true,"repeatable":true},{"name":"test","type":"string","positional":true},{"name":"list-tests","type":"flag"},{"name":"formal","type":"GLOB"},{"name":"top","type":"string"},{"name":"workdir","type":"path"},{"name":"set","type":"formal.flag=value","repeatable":true}]},"inputs":["verilog","pyrope","lg"],"outputs":[],"examples":["lhd formal verify foo.prp --top foo --set formal.bound=12","lhd formal verify dut.prp dut.verify.prp --list-tests","lhd formal verify dut.prp dut.verify.prp alu.addw --top ALU","lhd formal verify dut.prp dut.verify.prp --formal 'alu.*' --top ALU","lhd formal verify design.v --set formal.timeout=60","lhd formal verify foo.prp --workdir w/ --set formal.simfail_run=false"]})json");
     return 0;
   }
   if (name == "semdiff" || name == "pass semdiff") {
@@ -1169,11 +1169,16 @@ int help_pass(const std::string& sub) {
         "  gates and several network forms at once — a flat XSCore run reached 221 GB on a\n"
         "  64 GiB host and was killed by the OS. pass.abc samples its own RSS while it\n"
         "  translates and refuses a region that will not fit, before running any synthesis\n"
-        "  command and without emitting a partial result (exit nonzero). The budget is\n"
-        "  PHYSICAL RAM minus max(2 GiB, 20%) — never swap, because swapping an oversize\n"
-        "  run does not make it succeed, it makes it take the machine down slowly.\n"
-        "  --set pass.abc.memory_budget_mb=N pins the ceiling (reproducible hosts, CI).\n"
-        "  --set pass.abc.allow_oversize=true disables the guard.\n"
+        "  command and without emitting a partial result (exit nonzero). The per-color\n"
+        "  growth budget is pass.abc.memory_budget_mb (default 16 GiB), under a process\n"
+        "  ceiling of physical RAM minus max(2 GiB, 25%) — never swap, because swapping an\n"
+        "  oversize run does not make it succeed, it makes it take the machine down slowly.\n"
+        "  --set pass.abc.memory_budget_mb=N pins the per-color budget (reproducible hosts, CI).\n"
+        "  It also refuses while the process ADDRESS SPACE nears the RLIMIT_AS memory\n"
+        "  backstop (virtual memory runs above RSS, and ABC does not check its mallocs).\n"
+        "  A refusal reads `TIMEOUT-memory: ...` (code memory-oversize); an allocation that\n"
+        "  still fails ends in a clean `memory-exhausted` TIMEOUT-memory error. There is no\n"
+        "  override: every design is attempted.\n"
         "  Refused? `lhd pass color <alg> --top M lg:DIR --stats` sizes the regions first.\n"
         "\n"
         "progress:\n"
@@ -1189,7 +1194,7 @@ int help_pass(const std::string& sub) {
         "                             $HAGENT_TECH_DIR default). One spelling, shared with\n"
         "                             pass.opentimer and `lhd synth`; `pass.abc.library`\n"
         "                             is refused so no two readers can disagree.\n"
-        "  --set synth.threads=N      shared ABC worker cap (0 = automatic, up to 8; 1 = serial)\n"
+        "  --set abc.threads=N      independent ABC worker cap (0 = automatic, up to 8; 1 = serial)\n"
         "  --set pass.abc.flag=value  pass options (listed below)\n"
         "\n"
         "examples:\n"
@@ -1357,7 +1362,7 @@ constexpr std::string_view kJsonPassSingleEdge
     = R"json({"schema_version":1,"name":"pass single_edge","description":"Edge normalization (2f-latch M8): rewrite latches and negedge state into plain posedge flops, carrying the original timing with a synthesized phase divider plus per-flop slot enables. CONDITIONAL - a design with no latch, no negedge flop and one clock net is skipped entirely, not run as a no-op. Verification and simulation ONLY: never on the synthesis path, since slot enables cost QoR and the netlist handed to ABC must still contain a real always_latch. --emit-dir lg: (must differ from the input) receives the normalized library","args":{"required":[{"name":"inputs","type":"lg:DIR","positional":true}],"optional":[{"name":"top","type":"string"},{"name":"emit-dir","type":"lg:DIR/"}]},"inputs":["lg"],"outputs":["lg"],"examples":["lhd pass single_edge --top m lg:dir --emit-dir lg:norm"]})json";
 
 constexpr std::string_view kJsonPassAbc
-    = R"json({"schema_version":1,"name":"pass abc","description":"Combinational ABC tech-map: bit-blast -> AIG -> Liberty blackboxes. The cells come from THE one Liberty knob (--set synth.liberty, else $HAGENT_TECH_DIR/sky130_fd_sc_hd__tt_025C_1v80.lib); pass.abc.library is refused. --emit-dir lg: (must differ from the input) receives the mapped netlist. --stats adds one QoR row per mapped color with resynth=1|0","args":{"required":[{"name":"inputs","type":"lg:DIR","positional":true}],"optional":[{"name":"top","type":"string"},{"name":"emit-dir","type":"lg:DIR/"},{"name":"stats","type":"flag"},{"name":"set","type":"synth.liberty=PATH | synth.threads=N | pass.abc.flag=value","repeatable":true}]},"inputs":["lg"],"outputs":["lg"],"examples":["lhd pass abc --top m lg:dir --emit-dir lg:net --stats"]})json";
+    = R"json({"schema_version":1,"name":"pass abc","description":"Combinational ABC tech-map: bit-blast -> AIG -> Liberty blackboxes. The cells come from THE one Liberty knob (--set synth.liberty, else $HAGENT_TECH_DIR/sky130_fd_sc_hd__tt_025C_1v80.lib); pass.abc.library is refused. --emit-dir lg: (must differ from the input) receives the mapped netlist. --stats adds one QoR row per mapped color with resynth=1|0","args":{"required":[{"name":"inputs","type":"lg:DIR","positional":true}],"optional":[{"name":"top","type":"string"},{"name":"emit-dir","type":"lg:DIR/"},{"name":"stats","type":"flag"},{"name":"set","type":"synth.liberty=PATH | abc.threads=N | pass.abc.flag=value","repeatable":true}]},"inputs":["lg"],"outputs":["lg"],"examples":["lhd pass abc --top m lg:dir --emit-dir lg:net --stats"]})json";
 
 constexpr std::string_view kJsonPassOpentimer
     = R"json({"schema_version":1,"name":"pass opentimer","description":"OpenTimer static timing analysis on ONE pass.abc tech-mapped module: reports the critical path (max_delay, critical pin, worst endpoints, source-attributed) as timing.json and the result envelope 'qor' member. --stats adds one timing row per mapped color with resynth=1|0. Timing files are POSITIONAL (1-2 Liberty .lib, a 2nd = min corner, plus optional .sdc/.spef). --top picks the def (time a <mod>__c<N> region or a flat map); flops/memories are zeroed path boundaries. hier defaults true: a --top that instantiates sub-modules is structurally flattened and timed as ONE design (--set pass.opentimer.hier=false rejects non-Liberty Subs instead: one flat module per run). With a --workdir and lhd.incremental (default true) the STA result cache at <workdir>/sta_cache replays the stored report for an unchanged netlist+environment instead of re-timing; counters ride the envelope's incremental.sta. critical=true persists module-local marks for all paths with setup slack within critical_percent (default 5) of their target period. targets=core:1ns,bus:4ns overrides SDC clocks; missing targets without SDC are an error. Marks save in place or to --emit-dir lg:DIR and can be queried with lhd tool sta","args":{"required":[{"name":"files","type":"path (.lib[,.sdc,.spef])","positional":true,"repeatable":true}],"optional":[{"name":"top","type":"string"},{"name":"workdir","type":"path"},{"name":"stats","type":"flag"},{"name":"emit-dir","type":"lg:DIR/ | verilog:DIR/"},{"name":"set","type":"pass.opentimer.flag=value","repeatable":true}]},"inputs":["lg"],"outputs":["json","lg","verilog"],"examples":["lhd pass abc --top m lg:g --emit-dir lg:net","lhd pass opentimer --top m lg:net cells.lib --workdir W --stats","lhd pass opentimer lg:net cells.lib design.sdc --top top --set pass.opentimer.critical=true","lhd tool sta lg:net --top top clock=core"]})json";
@@ -1606,11 +1611,30 @@ int help_command(const Options& opts) {
         "  --set formal.flag=value   engine knobs (the options block below)\n"
         "  --set formal.effort=quick-check|test|long-check|verify|proof   (default test)\n"
         "                     Immediately check 256 / 2048 / 16384 sampled input vectors.\n"
-        "                     TESTED <level reached> (exit 0) is not a proof; mismatches REFUTE.\n"
+        "                     TESTED-sampled(N) (exit 0) is not a proof; a mismatch is REFUTED-cex.\n"
         "                     formal.timeout caps elapsed wall time before the target is reached.\n"
         "                     proof = proof only (timeout default 120s); verify = no default timeout.\n"
         "                     Unset with a non-cvc5 solver, a proof-only engine, formal.cross or a\n"
         "                     non-after_reset phase falls back to proof.\n"
+        "\n"
+        "verdicts (the same words and exit codes as `lhd formal verify`; --result-json\n"
+        "lec.verdict carries the lowercase form, e.g. proven-bounded with lec.bound):\n"
+        "  PROVEN-full          unbounded (inductive) proof                        exit 0\n"
+        "  PROVEN-bounded(n)    no difference for n design cycles from reset       exit 0\n"
+        "  TESTED-sampled(N)    a sampled effort preset: N input vectors agreed    exit 0\n"
+        "  TIMEOUT-time         formal.timeout / a wall or solver budget ran out   exit 0 + warning\n"
+        "  TIMEOUT-memory       out of memory, caught instead of a crash           exit 0 + warning\n"
+        "  REFUTED-cex          a real counterexample (incl. one at a trusted box) exit 10\n"
+        "  REFUTED-interface    a top port NAME exists on one side only            exit 7\n"
+        "  REFUTED-unsupported  no engine can model/check it (engine=auto)         exit 7\n"
+        "  REFUTED-unchecked    the options pinned an engine or disabled the step\n"
+        "                       that would decide it                               exit 7\n"
+        "  REFUTED-vacuous      the check proved nothing: nothing to compare (no\n"
+        "                       output/state, names match) or a CONTRADICTORY\n"
+        "                       assume set (it can hide a real counterexample)     exit 7\n"
+        "  REFUTED-unexplained  no recognized cause: a LiveHD bug to report        exit 7\n"
+        "  Every REFUTED-<why> names what to fix: a port, an option, an assume, a design\n"
+        "  feature, or a bug report.\n"
         "\n"
         "  Extra .prp files supply impl-side formal helpers. Internal/output facts are\n"
         "  proven unbounded before use; input-only assumes are environment constraints;\n"
@@ -1624,8 +1648,8 @@ int help_command(const Options& opts) {
         "  the solve ~8x SLOWER — so it is a DIAGNOSIS tool for a solve that is too slow or\n"
         "  too big, never something to leave on, and never a way to time a run. That slowdown\n"
         "  can CHANGE THE VERDICT: a proof that fits formal.timeout without it may time out\n"
-        "  with it and return UNKNOWN, which always exits\n"
-        "  non-zero. Raise formal.timeout when diagnosing a run that has to keep passing.\n"
+        "  with it and report TIMEOUT instead of a proof. Raise formal.timeout when\n"
+        "  diagnosing a run that has to keep passing.\n"
         "  `no cvc5 query ran` is a normal outcome (semdiff, the verdict cache and abc cone\n"
         "  decomposition settle defs without calling cvc5). `lhd formal verify` also writes\n"
         "  the same numbers into formal_report.json; `lhd lec` prints them only.\n"
@@ -1687,12 +1711,23 @@ int help_command(const Options& opts) {
         "  Each obligation is checked per cycle as its own solver query, every proven\n"
         "  fact immediately prunes the search for the rest (frontier assumes), and a\n"
         "  timeout costs one obligation at one cycle — so the run reports a per-assert\n"
-        "  verdict table, not a single verdict:\n"
-        "    PROVEN to cycle k   BOUNDED (no violation within the unrolled window)\n"
-        "    REFUTED at cycle k  a REACHABLE violation + the per-cycle input trace (fails)\n"
-        "    UNKNOWN             solver gave up / blackbox artifact / contradictory assumes\n"
-        "                        (FAILS the run: an undecided check proved nothing, so it\n"
-        "                        must not exit 0.)\n"
+        "  verdict table; the run's verdict is its worst row. The words and exit codes are\n"
+        "  `lhd lec`'s (formal_report.json carries the lowercase form):\n"
+        "    PROVEN-full          inductive: true at every cycle of every bound      exit 0\n"
+        "    PROVEN-bounded(n)    no violation for n design cycles from reset        exit 0\n"
+        "    TIMEOUT-time         formal.timeout / a wall or solver budget ran out   exit 0 + warning\n"
+        "    TIMEOUT-memory       out of memory, caught instead of a crash           exit 0 + warning\n"
+        "    REFUTED-cex at cycle k  a REACHABLE violation (or a refuted checked\n"
+        "                         assume) + the per-cycle input trace, including a\n"
+        "                         trace that relies on a free blackbox output        exit 10\n"
+        "    REFUTED-unsupported  no engine can model/check an obligation            exit 7\n"
+        "    REFUTED-unchecked    the options cannot decide it (a pinned engine, or a\n"
+        "                         window/past() deeper than formal.bound)            exit 7\n"
+        "    REFUTED-vacuous      the check proved nothing: no assert obligation, an\n"
+        "                         `if`/`match` guard that can never be true (a dead\n"
+        "                         branch), or a CONTRADICTORY assume set (it can\n"
+        "                         hide a real counterexample)                        exit 7\n"
+        "    REFUTED-unexplained  no recognized cause: a LiveHD bug to report        exit 7\n"
         "\n"
         "  every `assume` is a PROOF OBLIGATION (prove-then-use): CHECKED as an assert\n"
         "  first, and only a proven cycle's fact constrains later obligations. A refuted\n"
@@ -1729,7 +1764,7 @@ int help_command(const Options& opts) {
         "  machine-readable feedback (agents): EVERY run writes formal_report.json into the\n"
         "  workdir (per-obligation verdicts/cycles/solve_ms, assume classes, the structured\n"
         "  spec_mining_timeout core, witness artifact paths) — pass --workdir to keep it; a\n"
-        "  REFUTED run adds simfail_<formal-test>.prp/.json (+ VCD replay). Knobs\n"
+        "  REFUTED-cex run adds simfail_<formal-test>.prp/.json (+ VCD replay). Knobs\n"
         "  formal.simfail, formal.simfail_run, and formal.report. With\n"
         "  formal.spec_mining_timeout set, a stuck run also MINES invariants (base-proven +\n"
         "  induction-surviving) into a paste-ready formal_mined.prp + the report's mined[];\n"
@@ -1739,8 +1774,8 @@ int help_command(const Options& opts) {
         "  conflicts (= learned clauses), decisions, propagations, restarts, theory lemmas,\n"
         "  resource units, timings — at a ~8x SLOWER solve, so use it to diagnose a slow\n"
         "  proof, never to time one. That slowdown can CHANGE THE VERDICT: a proof that fits\n"
-        "  formal.timeout without it may time out with it and return UNKNOWN, which always\n"
-        "  exits non-zero. Raise formal.timeout when\n"
+        "  formal.timeout without it may time out with it and report TIMEOUT instead of a\n"
+        "  proof. Raise formal.timeout when\n"
         "  diagnosing a run that has to keep passing.\n"
         "\n"
         "examples:\n"

@@ -60,7 +60,7 @@ verdict() {  # $1=ref $2=impl $3=decompose -> PROVEN | REFUTED | UNKNOWN | INCON
   $LHD lec --set formal.effort=proof --ref "$WORK/$1" --impl "$WORK/$2" --top foo \
        --set formal.lec.hier=false --set formal.engine=ind --set formal.lec.decompose="$3" \
        --workdir "$WORK/q_${1}_${2}_${3}_$$" 2>&1 \
-    | grep -o "PROVEN equivalent\|REFUTED (not equivalent)\|UNKNOWN\|INCONCLUSIVE" | head -1
+    | grep -o "PROVEN equivalent\|REFUTED (not equivalent)\|TIMEOUT\|UNSUPPORTED\|UNDISCHARGED\|UNCONFIRMED\|UNPAIRED\|VACUOUS\|UNEXPLAINED" | sed -E 's/^(TIMEOUT|UNSUPPORTED|UNDISCHARGED|UNCONFIRMED|UNPAIRED|UNCHECKED|VACUOUS|UNEXPLAINED)$/UNDECIDED/' | head -1
 }
 
 # 1) No regression: a 2-same-shape-memory design proved against ITSELF (occurrence

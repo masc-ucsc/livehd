@@ -4,19 +4,25 @@
 // (pass/synth loop_cleanup) and enclosed arithmetic modules (pass/synth
 // ware_module), each mapped by the ABC backend and checked with LEC.
 #include <cstdlib>
+#include <new>
 #include <set>
+#include <stdexcept>
+#include <string_view>
 
 #include "abc_map.hpp"
 #include "color_common.hpp"
+#include "diag.hpp"
 #include "graph_library_singleton.hpp"
 #include "gtest/gtest.h"
 #include "loop_cleanup.hpp"
 #include "node_util.hpp"
 #include "occurrence_materialize.hpp"
 #include "pass.hpp"
+#include "pass_abc.hpp"
 #include "pass_color.hpp"
 #include "pass_liberty.hpp"
 #include "pass_partition.hpp"
+#include "property_types.hpp"
 #include "query.hpp"
 #include "ware_module.hpp"
 
@@ -484,4 +490,83 @@ TEST(WareModule, PolicyFallbackAndExplicitFalse) {
   EXPECT_FALSE(policy.arith);
   EXPECT_FALSE(policy.cmp);
   EXPECT_TRUE(policy.shift);
+}
+
+// The synthesis tuning validation pins engine=ind with no escalation behind it
+// and prints the outcome word. Only PROVEN-full authorizes a tuned mapping;
+// no outcome is ever the retired "unknown".
+TEST(TuneValidation, PinnedIndOutcomeWords) {
+  using livehd::lec::Outcome;
+  using livehd::lec::Verdict;
+  const auto word = [](Verdict v, bool bounded, bool nothing, bool unsupported, std::string_view detail, int n = 6) {
+    return livehd::lec::outcome_word(livehd::lec::pinned_engine_outcome(v, bounded, nothing, unsupported, detail), n);
+  };
+  EXPECT_EQ(word(Verdict::Proven, false, false, false, "solver=cvc5"), "PROVEN-full");
+  EXPECT_EQ(word(Verdict::Proven, true, false, false, "bmc", 4), "PROVEN-bounded(4)");
+  EXPECT_EQ(word(Verdict::Refuted, false, false, false, "stateless miter"), "REFUTED-cex");
+  EXPECT_EQ(word(Verdict::Undecided, false, true, false, "; nothing to compare: neither side exposes an output or state cell"),
+            "REFUTED-vacuous");
+  EXPECT_EQ(word(Verdict::Undecided, false, true, false, "; no COMMON outputs to compare (correspondence incomplete)"),
+            "REFUTED-interface");
+  EXPECT_EQ(word(Verdict::Undecided, false, false, false, "(hit formal.timeout=20s: cvc5 reported TIMEOUT, a resource limit)"),
+            "TIMEOUT-time");
+  EXPECT_EQ(word(Verdict::Undecided, false, false, false, "(hit formal.timeout=20s: cvc5 reported MEMOUT, a resource limit)"),
+            "TIMEOUT-memory");
+  // The forced ind engine giving up on state it cannot decide alone.
+  EXPECT_EQ(word(Verdict::Undecided, false, false, false, "; single-step CEX from an ARBITRARY start state"),
+            "REFUTED-unchecked");
+  EXPECT_EQ(word(Verdict::Undecided, false, false, false, "; matched portion DIFFERS (unmatched cut points)"),
+            "REFUTED-unchecked");
+  EXPECT_EQ(word(Verdict::Undecided, false, false, true, "encoder does not model Latch"), "REFUTED-unsupported");
+  EXPECT_EQ(word(Verdict::Undecided, false, false, false, "cvc5 returned unknown with NO reason (UNKNOWN_REASON)"),
+            "REFUTED-unexplained");
+  EXPECT_EQ(word(Verdict::Undecided, false, false, false, ""), "REFUTED-unexplained");
+
+  // Acceptance is unchanged: an unbounded, non-vacuous proof and nothing else.
+  for (bool bounded : {false, true}) {
+    for (bool nothing : {false, true}) {
+      for (auto v : {Verdict::Proven, Verdict::Refuted, Verdict::Undecided}) {
+        const bool before = v == Verdict::Proven && !bounded && !nothing;
+        const bool after  = livehd::lec::pinned_engine_outcome(v, bounded, nothing, false, "") == Outcome::Proven_full;
+        EXPECT_EQ(before, after);
+      }
+    }
+  }
+}
+
+// ABC runs in-process: an allocation failure anywhere under work_with (here
+// injected through the configure hook) must leave as a clean TIMEOUT-memory
+// diagnostic, never as a raw std::bad_alloc the kernel can only call internal.
+TEST(MemoryBoundary, AllocationFailureIsTimeoutMemory) {
+  Design   d;
+  Eprp_var var;
+  var.dict["top"] = "top";
+  for (auto g : d.graphs()) {
+    var.add(g);
+  }
+  auto& sink = livehd::diag::sink();
+  sink.clear();
+  bool configured = false;
+  EXPECT_THROW(Pass_abc::work_with(var,
+                                   [&](abc::Map_options&) {
+                                     configured = true;
+                                     throw std::bad_alloc();
+                                   }),
+               std::runtime_error);
+  EXPECT_TRUE(configured);
+  const livehd::diag::Diagnostic* rec = nullptr;
+  for (const auto& r : sink.records()) {
+    if (r.code == "memory-exhausted") {
+      rec = &r;
+    }
+  }
+  ASSERT_NE(rec, nullptr);
+  EXPECT_EQ(rec->severity, livehd::diag::Severity::error);
+  EXPECT_EQ(rec->category, "unsupported");
+  EXPECT_TRUE(rec->message.starts_with("TIMEOUT-memory: pass.abc ran out of memory")) << rec->message;
+  // It names the limit it ran into.
+  EXPECT_TRUE(rec->message.find("process memory budget of") != std::string::npos
+              || rec->message.find("the host's memory") != std::string::npos)
+      << rec->message;
+  sink.clear();
 }

@@ -131,8 +131,10 @@ assert result['lec']['verdict'] == 'proven' and result['lec']['bounded'], result
 stall_env = dict(os.environ, LIVEHD_LEC_RACER_STALL_S='4', LIVEHD_LEC_RACER_STALL_ONLY='1')
 proc, result = run('test', extra=['--set', 'formal.timeout=1', '--set', 'formal.min_timeout=10',
                                 '--set', 'formal.hard_timeout_mult=0'],
-                   env=stall_env, expect=7, name='sample-timeout')
-assert result['lec']['verdict'] == 'unknown', result
+                   env=stall_env, expect=0, name='sample-timeout')
+# A timeout is reported as TIMEOUT (exit 0): neither a failure nor a proof.
+assert result['lec']['verdict'] == 'timeout', result
+assert 'TIMEOUT' in proc.stdout and 'UNKNOWN' not in proc.stdout, proc.stdout
 assert result['lec']['sampling']['vectors'] == 0, result
 assert 'hit formal.timeout=1s' in proc.stdout + proc.stderr + json.dumps(result), (proc.stdout, proc.stderr, result)
 

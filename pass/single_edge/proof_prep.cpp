@@ -655,8 +655,8 @@ std::string inline_stateful_lib_cells(const absl::flat_hash_map<hhds::Gid, hhds:
       .msg("the impl instantiates {} STATEFUL library cell(s) ({}) — lec could inline only {} of them", n, names, done)
       .hint(
           "a cell model that stays a blackbox contributes no state, so nothing corresponds to the ref's native flop "
-          "and the run is INCONCLUSIVE no matter the budget; re-synthesize with `--set pass.abc.register=false` to "
-          "keep registers native")
+          "and no budget can make the run PROVEN (expect a REFUTED-* verdict); re-synthesize with "
+          "`--set pass.abc.register=false` to keep registers native")
       .emit();
   return {};
 }
@@ -751,7 +751,7 @@ std::pair<int, int> inline_clock_gates_and_fold(hhds::Graph* top, const std::vec
       livehd::diag::warn("pass.single_edge", "icg-inline-not-folded", "unsupported")
           .msg(
               "def '{}' had its clock-gate cell inlined but the fold did not apply, so it now holds an enable latch it "
-              "did not have before; it will encode as UNKNOWN rather than refuse",
+              "did not have before; its check will come back undecided (a REFUTED-* verdict) rather than be refused",
               d->get_name())
           .hint("flatten the design, or trust this def, to get a verdict for it")
           .emit();

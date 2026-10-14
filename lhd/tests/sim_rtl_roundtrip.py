@@ -51,7 +51,8 @@ def check(name, rtl, stimulus, checks, cpp):
     # leg (or the unsplit manual run), alongside the optional Verilator twin.
     if ARGS.backend != "llvm":
         lec = run([LHD, "lec", "--ref", source, "--impl", work / "prp/top.prp", "--top", "top",
-                   "--workdir", work / "lec", "--set", "compile.upass.inline=false"], work / "lec.log")
+                   "--workdir", work / "lec", "--set", "compile.upass.inline=false",
+                   "--set", "formal.effort=proof"], work / "lec.log")
         records = [json.loads(line) for line in lec.splitlines() if line.startswith('{')]
         if records[-1].get("lec", {}).get("verdict") != "proven":
             raise RuntimeError(f"round-trip LEC did not prove equivalence:\n{lec}")

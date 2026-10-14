@@ -12,7 +12,7 @@ import subprocess
 import sys
 import tempfile
 
-from lec import run_lec, verdict
+from lec import acceptable, run_lec, verdict
 
 
 def tags(source):
@@ -53,8 +53,8 @@ def check(lhd, impl, ref, top, work, extra=(), ref_top=None, strict=False):
     print(result.stdout.decode('utf-8', 'replace'), end='')
     status = verdict(result, sanity=not strict)
     print('LEC check:', status)
-    if status == 'failed':
-        raise RuntimeError('LEC failed')
+    if not acceptable(status):
+        raise RuntimeError('LEC {}'.format(status))
 
 
 def roundtrip(lhd, source, meta, work, mapper='abc'):
@@ -91,7 +91,7 @@ def synth(lhd, source, meta, work, mapper='abc'):
             lib = Path('inou/prp/tests/abc') / (lib_name + '.lib')
             run([lhd, 'synth', 'lg:' + str(base / 'source'), '--top', top,
                  '--set', 'synth.liberty=' + str(lib), '--set', 'synth.opentimer=false',
-                 '--set', 'synth.threads=1', '--set', 'synth.mapper=' + mapper,
+                 '--set', 'lhd.jobs=1', '--set', 'synth.mapper=' + mapper,
                  *settings(meta.get('synth_set', '')),
                  '--emit-dir', 'lg:' + str(dest / 'mapped'), '--emit', 'verilog:' + str(dest / 'mapped.v'),
                  '--emit', 'diagnostics:' + str(dest / 'diagnostics.jsonl'), '--workdir', dest / 'synth'])
@@ -109,7 +109,7 @@ def synth(lhd, source, meta, work, mapper='abc'):
             ref_top = meta.get('ref_top', 'reference') if ref.exists() else top
             extra = ['--lib', 'lg:' + str(dest / 'models')] + settings(meta.get('lec_set', ''))
             # strict: post-synthesis equivalence is the entire claim of a synth
-            # fixture, so an UNKNOWN that merely hit the solver budget must fail
+            # fixture, so a TIMEOUT that merely hit the solver budget must fail
             # (measured 2026-09-21: 17/17 report `proven`). A fixture that
             # genuinely cannot be decided opts out with `:lec_may_timeout: true`.
             strict = str(meta.get('lec_may_timeout', '')).strip().lower() not in ('true', '1', 'yes')

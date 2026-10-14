@@ -27,11 +27,13 @@
 #include "file_name.hpp"  // livehd::unit_file_stem — the shared long-name policy
 #include "file_output.hpp"
 #include "file_utils.hpp"
+#include "fork_race.hpp"  // kChildExitBadAlloc: a forked solver child's out-of-memory exit status
 #include "graph_library_singleton.hpp"
 #include "hhds/graph.hpp"
 #include "hhds/tree.hpp"
+#include "host_mem.hpp"
+#include "job_manager.hpp"
 #include "lhd_kernel_internal.hpp"
-#include "synth_policy.hpp"
 #include "lhd_sim_tune_session.hpp"
 #include "lnast.hpp"
 #include "log.hpp"
@@ -41,6 +43,7 @@
 #include "rapidjson/document.h"
 #include "satopt_stages.hpp"
 #include "str_tools.hpp"
+#include "synth_policy.hpp"
 #include "woothash.hpp"
 
 namespace lhd {
@@ -508,6 +511,16 @@ void setup_diag(const Options& opts, std::string_view step) {
 // of time by run_step and are pushed out with write(2) -- no allocation, no
 // std::format, no locking. The exit status stays EXIT_FAILURE, matching what the
 // handler this replaces produced.
+//
+// OUT OF MEMORY is not a bug. lhd_main arms RLIMIT_AS (the memory backstop),
+// and ABC / the solvers do not null-check malloc, so an allocation the backstop
+// denies lands here as a SIGSEGV. When the process address space is at its cap
+// the handler says TIMEOUT-memory (owner ruling 2026-10-14) instead of "a
+// livehd bug": the main process exits 7 (class unsupported, like pass.abc's
+// `memory-exhausted` error), and a forked solver child exits
+// kChildExitBadAlloc so its parent decodes "out of memory" (TIMEOUT-memory).
+// Every other SIGSEGV keeps the previous behavior: iassert's backtrace handler
+// on glibc, the report below elsewhere.
 namespace {
 
 constexpr size_t kCrashCtxMax = 1024;
@@ -521,7 +534,10 @@ void copy_crash_ctx(char (&dst)[kCrashCtxMax], std::string_view src) {
   dst[n] = '\0';
 }
 
-#if !defined(__GLIBC__)
+struct sigaction crash_prev_segv_{};   // the handler this one replaced (iassert's on glibc)
+bool             crash_prev_set_ = false;
+pid_t            crash_main_pid_ = 0;  // a different getpid() is a forked solver child
+
 void crash_write(const char* s) {
   if (s == nullptr || *s == '\0') {
     return;
@@ -531,10 +547,78 @@ void crash_write(const char* s) {
   (void)w;  // a failed report cannot itself be reported
 }
 
+// Decimal MiB of `bytes`, async-signal-safe (no snprintf).
+void crash_write_mib(uint64_t bytes) {
+  char     buf[32];
+  size_t   i = sizeof(buf) - 1;
+  uint64_t v = bytes >> 20;
+  buf[i]     = '\0';
+  do {
+    buf[--i] = static_cast<char>('0' + v % 10);
+    v /= 10;
+  } while (v != 0 && i > 0);
+  crash_write(buf + i);
+  crash_write(" MiB");
+}
+
+// The address space is at its RLIMIT_AS cap: within max(256 MiB, 1/16 of the
+// cap) of it, the size of the allocation a dying ABC/solver malloc asked for.
+bool crash_at_memory_cap(uint64_t& used, uint64_t& cap) {
+  cap  = livehd::cost::address_space_limit_bytes();
+  used = cap != 0 ? livehd::cost::process_virtual_bytes() : 0;
+  if (cap == 0 || used == 0) {
+    return false;
+  }
+  const uint64_t margin = std::max<uint64_t>(uint64_t{256} << 20, cap / 16);
+  return used + margin >= cap;
+}
+
 // C language linkage (what sigaction wants) with internal linkage (the symbol is
 // this file's business).
 extern "C" {
-static void crash_handler(int /*sig*/) {
+static void crash_handler(int sig, siginfo_t* info, void* uctx) {
+  uint64_t used = 0, cap = 0;
+  if (crash_at_memory_cap(used, cap)) {
+    crash_write("lhd: TIMEOUT-memory: out of memory at the memory backstop (address space ");
+    crash_write_mib(used);
+    crash_write(" of the ");
+    crash_write_mib(cap);
+    crash_write(" RLIMIT_AS cap); a library that does not check its allocations (ABC, a solver) crashed on the failed "
+                "allocation -- not a livehd bug\n");
+    if (crash_step_[0] != '\0') {
+      crash_write("lhd: ran out of memory while running ");
+      crash_write(crash_step_);
+      crash_write("\n");
+    }
+    crash_write("lhd: hint: run on a host with more memory or a larger LIVEHD_MEMORY_BUDGET_MB, lower "
+                "pass.abc.memory_budget_mb so admission refuses earlier, or color/decompose into smaller pieces\n");
+    ::_exit(::getpid() != crash_main_pid_ ? livehd::lec::kChildExitBadAlloc : 7);
+  }
+#if defined(__GLIBC__)
+  if (crash_prev_set_) {
+    // Not a memory death: hand the signal to the handler this one replaced
+    // (iassert's demangled backtrace).
+    if ((crash_prev_segv_.sa_flags & SA_SIGINFO) != 0 && crash_prev_segv_.sa_sigaction != nullptr) {
+      crash_prev_segv_.sa_sigaction(sig, info, uctx);
+      ::_exit(EXIT_FAILURE);
+    }
+    if (crash_prev_segv_.sa_handler != SIG_DFL && crash_prev_segv_.sa_handler != SIG_IGN && crash_prev_segv_.sa_handler != nullptr) {
+      crash_prev_segv_.sa_handler(sig);
+      ::_exit(EXIT_FAILURE);
+    }
+  }
+  // No previous handler to chain to: die by the signal, as before this handler
+  // (unblock it first: a handler runs with its own signal blocked).
+  ::signal(sig, SIG_DFL);
+  sigset_t unblock;
+  sigemptyset(&unblock);
+  sigaddset(&unblock, sig);
+  ::pthread_sigmask(SIG_UNBLOCK, &unblock, nullptr);
+  ::raise(sig);
+  ::_exit(EXIT_FAILURE);
+#else
+  (void)info;
+  (void)uctx;
   crash_write("lhd: FATAL signal SIGSEGV -- this is a livehd bug, not a bad input\n");
   if (crash_step_[0] != '\0') {
     crash_write("lhd: crashed while running ");
@@ -549,9 +633,9 @@ static void crash_handler(int /*sig*/) {
     crash_write("lhd: re-run with --workdir DIR to keep the per-pass logs\n");
   }
   ::_exit(EXIT_FAILURE);
+#endif
 }
 }  // extern "C"
-#endif
 
 // A failing step's own output -- ABC's `Error:` lines, yosys's log, a solver's
 // trace -- is captured to its per-step log, and the CLI error is the only place
@@ -682,16 +766,16 @@ void set_crash_context(std::string_view step, std::string_view log) {
 }
 
 void install_crash_reporter() {
-#if !defined(__GLIBC__)
-  // glibc keeps iassert's handler: it renders a demangled backtrace there, which
-  // is strictly more than this reports. Everywhere else that handler is silent,
-  // and this is the only thing that names the failure.
+  // On glibc iassert's handler still renders every non-memory crash (a
+  // demangled backtrace, strictly more than the report here): this handler
+  // chains to it. Everywhere else that handler is silent, so it is replaced and
+  // the report here names the failure. Both name an out-of-memory death.
+  crash_main_pid_ = ::getpid();
   struct sigaction sa{};
-  sa.sa_handler = crash_handler;
-  sa.sa_flags   = SA_RESTART;
+  sa.sa_sigaction = crash_handler;
+  sa.sa_flags     = SA_RESTART | SA_SIGINFO;
   sigemptyset(&sa.sa_mask);
-  (void)::sigaction(SIGSEGV, &sa, nullptr);
-#endif
+  crash_prev_set_ = ::sigaction(SIGSEGV, &sa, &crash_prev_segv_) == 0;
 }
 
 // The --set/--config pass-name vocabulary -> the EPRP method that consumes
@@ -881,6 +965,9 @@ std::string leaf_match_hint(std::string_view flag) {
 
 void check_known_set_passes(const Options& opts) {
   for (const auto& [key, value] : opts.sets) {
+    if (key == "formal.jobs" || key == "formal.lec.jobs" || key == "sim.jobs" || key == "synth.threads") {
+      throw Lhd_error{"usage", std::format("--set/--config '{}' was renamed", key), "use --set lhd.jobs=" + value};
+    }
     if (key == "pass.satopt") {
       if (value != "true" && value != "false" && value != "1" && value != "0" && value != "on" && value != "off") {
         throw Lhd_error{"usage", "--set pass.satopt expects true|false", ""};
@@ -948,14 +1035,21 @@ void check_known_set_passes(const Options& opts) {
       // The `lhd.*` kernel namespace: shared, cross-pass settings folded into
       // Options by apply_lhd_settings (not consumed by any single pass). Keep
       // this list in sync with apply_lhd_settings / list_set_options.
-      if (flag != "seed" && flag != "top" && flag != "stats" && flag != "incremental") {
+      if (flag != "seed" && flag != "top" && flag != "stats" && flag != "incremental" && flag != "jobs") {
         throw Lhd_error{"usage",
                         std::format("--set/--config references unknown kernel flag 'lhd.{}'", flag),
-                        "the lhd.* namespace takes: seed, top, stats, incremental (`lhd list options lhd`)"};
+                        "the lhd.* namespace takes: seed, top, stats, incremental, jobs (`lhd list options lhd`)"};
       }
       if ((flag == "stats" || flag == "incremental") && value != "true" && value != "false" && value != "1" && value != "0"
           && value != "on" && value != "off") {
         throw Lhd_error{"usage", std::format("--set/--config lhd.{} expects true|false, got '{}'", flag, value), ""};
+      }
+      if (flag == "jobs") {
+        unsigned jobs           = 0;
+        const auto [end, error] = std::from_chars(value.data(), value.data() + value.size(), jobs);
+        if (error != std::errc{} || end != value.data() + value.size() || jobs > 4096) {
+          throw Lhd_error{"usage", "lhd.jobs expects an integer from 0 to 4096", "0 selects the available CPUs"};
+        }
       }
       continue;
     }
@@ -1455,10 +1549,13 @@ void apply_lhd_settings(Options& opts) {
     } else if (key == "lhd.stats") {
       // canonical form of --stats; the flag and the set spelling both turn it on
       opts.stats = value != "false" && value != "0" && value != "off";
+    } else if (key == "lhd.jobs") {
+      opts.jobs = static_cast<unsigned>(std::stoul(value));
     } else if (key == "lhd.incremental") {
       opts.incremental = value != "false" && value != "0" && value != "off";
     }
   }
+  livehd::Job_manager::global().configure(opts.jobs);
 }
 
 // The standard compile pipeline, in (set-name, EPRP method) order.
@@ -2249,11 +2346,7 @@ std::vector<std::string> sim_into(Options& opts, Result& res, Eprp_var& var, con
   // The tune vector always reaches cgen RESOLVED and concrete (explicit --set >
   // sim.tune.file > the workdir's tuned decision > default), never through
   // opts.sets: see Options::sim_tune.
-  for (const auto& [key, value] : opts.sets) {
-    if (key == "sim.jobs") {
-      labels["jobs"] = value;
-    }
-  }
+  labels["jobs"] = std::to_string(livehd::Job_manager::global().ceiling());
   for (auto& [label, value] : sim_tune_codegen_labels(opts, res)) {
     labels[label] = std::move(value);
   }

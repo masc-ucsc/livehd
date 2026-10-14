@@ -36,7 +36,7 @@ const impl_sub = import("impl_sub")
 pub comb impl_top(a:U8) -> (o:U8) { o = impl_sub.sub(a=a).o }
 EOF
 
-if ! "$LHD" lec --ref "$W/ref_top.prp" --impl "$W/impl_top.prp" \
+if ! "$LHD" lec --set formal.effort=proof --ref "$W/ref_top.prp" --impl "$W/impl_top.prp" \
      --ref-top ref_top --impl-top impl_top  \
      --set formal.engine=ind --workdir "$W/assumed_w" >"$W/assumed.out" 2>&1; then
   cat "$W/assumed.out" >&2
@@ -53,7 +53,7 @@ grep -v assume_nocheck "$W/ref_sub.prp" >"$W/ref_plain_sub.prp"
 grep -v assume_nocheck "$W/impl_sub.prp" >"$W/impl_plain_sub.prp"
 sed 's/import("ref_sub")/import("ref_plain_sub")/' "$W/ref_top.prp" >"$W/ref_plain_top.prp"
 sed 's/import("impl_sub")/import("impl_plain_sub")/' "$W/impl_top.prp" >"$W/impl_plain_top.prp"
-if "$LHD" lec --ref "$W/ref_plain_top.prp" --impl "$W/impl_plain_top.prp" \
+if "$LHD" lec --set formal.effort=proof --ref "$W/ref_plain_top.prp" --impl "$W/impl_plain_top.prp" \
      --ref-top ref_top --impl-top impl_top  \
      --set formal.engine=ind --workdir "$W/plain_w" >"$W/plain.out" 2>&1; then
   cat "$W/plain.out" >&2
@@ -82,7 +82,7 @@ module dut(input [7:0] a, output [7:0] o);
   assign o = a;
 endmodule
 EOF
-if "$LHD" lec --ref "$W/golden.v" --impl "$W/uncheckable.prp" --top dut \
+if "$LHD" lec --set formal.effort=proof --ref "$W/golden.v" --impl "$W/uncheckable.prp" --top dut \
      --workdir "$W/uncheckable_w" >"$W/uncheckable.out" 2>&1; then
   cat "$W/uncheckable.out" >&2
   fail "a refuted top IO assume must never become a LEC hypothesis"
@@ -96,7 +96,7 @@ grep -q "^lec: .* REFUTED" "$W/uncheckable.out" \
 # The same on the --ref side, which is lowered FIRST: its assume-refuted is a
 # deferred error (it fails the run) and must not abort the impl side's
 # lowering before lec has compared the two.
-if "$LHD" lec --ref "$W/uncheckable.prp" --impl "$W/golden.v" --top dut \
+if "$LHD" lec --set formal.effort=proof --ref "$W/uncheckable.prp" --impl "$W/golden.v" --top dut \
      --workdir "$W/uncheckable_ref_w" >"$W/uncheckable_ref.out" 2>&1; then
   cat "$W/uncheckable_ref.out" >&2
   fail "a refuted top IO assume on the ref side must never become a LEC hypothesis"
@@ -111,14 +111,14 @@ echo "PASS: lec checks a plain top IO assume instead of proving under it (either
 # lec: either sanctioned spelling of the same constraint still narrows the miter
 # and proves it (a & 3 == a for every a < 4).
 sed 's/assume(/assume_nocheck(/' "$W/uncheckable.prp" >"$W/contracted.prp"
-if ! "$LHD" lec --ref "$W/golden.v" --impl "$W/contracted.prp" --top dut \
+if ! "$LHD" lec --set formal.effort=proof --ref "$W/golden.v" --impl "$W/contracted.prp" --top dut \
      --workdir "$W/contracted_w" >"$W/contracted.out" 2>&1; then
   cat "$W/contracted.out" >&2
   fail "the assume_nocheck spelling must still constrain the miter and prove"
 fi
 grep -q 'PROVEN under 1 unchecked assume' "$W/contracted.out" \
   || { cat "$W/contracted.out" >&2; fail "the disclosed contract run must report its active assumption"; }
-if ! "$LHD" lec --ref "$W/golden.v" --impl "$W/uncheckable.prp" --top dut \
+if ! "$LHD" lec --set formal.effort=proof --ref "$W/golden.v" --impl "$W/uncheckable.prp" --top dut \
      --set formal.assume_check=false --workdir "$W/nocheck_w" >"$W/nocheck.out" 2>&1; then
   cat "$W/nocheck.out" >&2
   fail "formal.assume_check=false must accept the same constraint"
@@ -137,7 +137,7 @@ if ! "$LHD" compile "$W/uncheckable.prp" --top dut --emit-dir "lg:$W/LG_NOCHECK"
   cat "$W/lg_nocheck_c.out" >&2
   fail "compile with formal.assume_check=false to lg: failed"
 fi
-if ! "$LHD" lec --ref "$W/golden.v" --impl "lg:$W/LG_NOCHECK" --top dut \
+if ! "$LHD" lec --set formal.effort=proof --ref "$W/golden.v" --impl "lg:$W/LG_NOCHECK" --top dut \
      --workdir "$W/lg_nocheck_w" >"$W/lg_nocheck.out" 2>&1; then
   cat "$W/lg_nocheck.out" >&2
   fail "the lg: side's accepted constraint must still constrain the miter"
@@ -158,7 +158,7 @@ pub comb contra_top(a:U8) -> (o:U8) {
   o = a
 }
 EOF
-if "$LHD" lec --ref "$W/contra_top.prp" --impl "$W/contra_top.prp" \
+if "$LHD" lec --set formal.effort=proof --ref "$W/contra_top.prp" --impl "$W/contra_top.prp" \
      --top contra_top  \
      --set formal.engine=ind --workdir "$W/contra_w" >"$W/contra.out" 2>&1; then
   cat "$W/contra.out" >&2

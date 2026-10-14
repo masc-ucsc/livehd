@@ -72,7 +72,7 @@ grep -qE "budget 1s target / [0-9]+\.[0-9]s actual over [0-9]+ unit\(s\), [0-9]+
   || fail "an overshooting run must report target/actual/units/floored: $(cat "$W/budget.out")"
 grep -q "'easy'.*PROVEN" "$W/budget.out" \
   || fail "the trivial sibling must still prove under the shared budget: $(cat "$W/budget.out")"
-grep -qE "'distrib[12]'.*UNKNOWN" "$W/budget.out" \
+grep -qE "'distrib[12]'.*TIMEOUT" "$W/budget.out" \
   || fail "at least one hard obligation must go UNKNOWN under the budget: $(cat "$W/budget.out")"
 # NO obligation may be silently skipped for lack of budget. The report is from
 # the same run, so its verdict rows and textual budget accounting cannot drift.

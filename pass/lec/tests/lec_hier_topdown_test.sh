@@ -140,10 +140,10 @@ else echo "ok: a genuine difference still refutes under both orders"; fi
 # 4. Equivalence gate: the two orders must agree on the TOP verdict for every
 #    fixture. An ordering strategy may change cost, never an answer.
 # ---------------------------------------------------------------------------
-verdict_of() {  # -> PROVEN | REFUTED | UNKNOWN, from the exit class + text
+verdict_of() {  # -> PROVEN | REFUTED | UNDECIDED, from the exit class + text
   if [ "$1" -eq 0 ]; then echo PROVEN
   elif echo "$2" | grep -qiE "refut|not equivalent|equiv_fail"; then echo REFUTED
-  else echo UNKNOWN; fi
+  else echo UNDECIDED; fi
 }
 for m in B D E; do
   run td_$m "$m" top_down;   v_td=$(verdict_of "$RC" "$OUT")
@@ -282,11 +282,11 @@ if [ "$fail" -eq 0 ]; then
         --set formal.timeout=1 --set formal.min_timeout=1 --workdir "$W/wd_unknown_child" 2>&1); RC=$?
   if [ "$RC" -ne 0 ]; then
     echo "FAIL: case 8 an inconclusive child stranded a contextually equivalent parent (rc=$RC)"; fail=1
-  elif ! echo "$OUT" | grep -q "'hard' UNKNOWN"; then
-    echo "FAIL: case 8 fixture no longer exercises an UNKNOWN child"; fail=1
+  elif ! echo "$OUT" | grep -qE "'hard' (TIMEOUT|UNSUPPORTED|UNDISCHARGED|UNCONFIRMED|UNPAIRED|UNCHECKED|VACUOUS|UNEXPLAINED)"; then
+    echo "FAIL: case 8 fixture no longer exercises an undecided child"; fail=1
   elif ! echo "$OUT" | grep -q "ESCALATE 'unknown_parent'.*0 refuted, 1 inconclusive"; then
-    echo "FAIL: case 8 did not inline the UNKNOWN child into its immediate parent"; fail=1
-  else echo "ok: an UNKNOWN child is discharged by targeted parent expansion"; fi
+    echo "FAIL: case 8 did not inline the undecided child into its immediate parent"; fail=1
+  else echo "ok: an undecided child is discharged by targeted parent expansion"; fi
 fi
 
 # ---------------------------------------------------------------------------
@@ -463,7 +463,7 @@ for order in top_down bottom_up; do
 import json, sys
 with open(sys.argv[1]) as f:
     result = json.load(f)
-assert result["lec"]["verdict"] == "unknown", result
+assert result["lec"]["verdict"] == "unconfirmed", result
 PYVERDICT
   if [ "$?" -ne 0 ]; then echo "FAIL: unconfirmed child CEX changed the $order top verdict"; fail=1; fi
 done

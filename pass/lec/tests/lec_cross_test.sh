@@ -197,7 +197,7 @@ section_status() {
       --set formal.lec.hier=false --set formal.lec.cross=true --workdir "$WORK/status_${oracle_rc}_$variant" \
       > "$WORK/status_${oracle_rc}_$variant.log" 2>&1
     rc=$?
-    if [ "$rc" -ne "$expected_status" ] || ! grep -q 'lgcheck -> unknown' "$WORK/status_${oracle_rc}_$variant.log"; then
+    if [ "$rc" -ne "$expected_status" ] || ! grep -q -E 'lgcheck -> (incomplete|failed)' "$WORK/status_${oracle_rc}_$variant.log"; then
       echo "FAIL: lgcheck exit $oracle_rc became a verdict for $variant (rc=$rc)"
       cat "$WORK/status_${oracle_rc}_$variant.log"
       mark_fail "status_$oracle_rc"
@@ -215,7 +215,7 @@ LHD_LGCHECK="$WORK/oracle_legacy" $LHD lec --set formal.effort=proof --impl "lg:
   --set formal.solver=lgyosys --workdir "$WORK/legacy_cross" --result-json "$WORK/legacy_cross.json" \
   > "$WORK/legacy_cross.log" 2>&1
 if [ "$?" -ne 7 ] || ! grep -q '"solver":"cvc5"' "$WORK/legacy_cross.json" \
-    || ! grep -q 'lgcheck -> unknown' "$WORK/legacy_cross.log"; then
+    || ! grep -q 'lgcheck -> incomplete' "$WORK/legacy_cross.log"; then
   echo 'FAIL: lgyosys selector bypassed native LEC or accepted an unknown comparison'
   cat "$WORK/legacy_cross.log" "$WORK/legacy_cross.json"
   mark_fail legacy

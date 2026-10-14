@@ -29,14 +29,14 @@ for mode in "${modes[@]}"; do
   flags=()
   [ "$mode" = default ] || flags=(--set "pass.abc.memory=$mode")
   run synth lg:"$W/source" --top memory_hierarchy --set synth.liberty="$LIB" --set synth.opentimer=false \
-    --set pass.abc.flatten=true --set synth.threads=1 ${flags[@]+"${flags[@]}"} \
+    --set pass.abc.flatten=true --set lhd.jobs=1 ${flags[@]+"${flags[@]}"} \
     --emit-dir lg:"$W/$mode-lg" --emit verilog:"$W/$mode.v" --workdir "$W/$mode-work"
   run lec --impl lg:"$W/$mode-lg" --ref lg:"$W/source" --lib lg:"$W/models" --top memory_hierarchy \
     --set formal.bound=3 --set formal.timeout=60 \
     --workdir "$W/$mode-lec" --result-json "$W/$mode-lec.json"
   if [ "${NATIVE_MODE:-default}" = identities ] && [ "$mode" = true ]; then
     run synth lg:"$W/source" --top memory_hierarchy --set synth.liberty="$LIB" --set synth.opentimer=false \
-      --set pass.abc.flatten=true --set synth.threads=1 --set pass.abc.memory=true \
+      --set pass.abc.flatten=true --set lhd.jobs=1 --set pass.abc.memory=true \
       --emit-dir lg:"$W/warm-lg" --emit verilog:"$W/warm.v" --workdir "$W/$mode-work" --result-json "$W/warm.json"
     run lec --impl lg:"$W/warm-lg" --ref lg:"$W/source" --lib lg:"$W/models" --top memory_hierarchy \
       --set formal.bound=3 --set formal.timeout=60 \

@@ -5,10 +5,12 @@
 #   PROVEN  -> exit 0 (pass)
 #   REFUTED -> exit 10 / error class `equiv_fail`                         [hard fail]
 #              (a real counterexample: the designs DIFFER)
-#   UNKNOWN -> exit 7  / error class `unsupported`                        [hard fail]
-#              (the solver could not complete the proof and found NO counterexample)
-# UNKNOWN always fails; the removed formal.strict opt-out is rejected.
-# An UNKNOWN is not a disproof: its exit class remains distinct from REFUTED.
+#   TIMEOUT -> exit 0 (owner ruling 2026-10-14)                           [NOT a failure]
+#              (formal.timeout was reached: no verdict, none claimed; reported as
+#              TIMEOUT with lec.verdict="timeout" -- never as UNKNOWN, never as a proof)
+#   UNKNOWN -> exit 7 / error class `unsupported`: no verdict for a reason other
+#              than the timeout (an encoder limit); more time cannot help.
+# A TIMEOUT is not a disproof: its exit class remains distinct from REFUTED.
 # The ind/bmc trust asymmetry: an ind Refute is NOT a disproof (its step case starts from
 # an ARBITRARY, possibly unreachable state), so `auto` must let bmc clear it — case 7 pins
 # that a bmc bounded-proof still WINS over an ind refute.
@@ -124,42 +126,38 @@ run() {  # $1=label $2..=lhd args ; sets RC/OUT
         ${mt[@]+"${mt[@]}"} --workdir "$WORK/w_$1" 2>&1); RC=$?
 }
 
-# 1) UNKNOWN, DEFAULT policy (strict is on by default) -> hard fail, and the message has
-#    to say WHY it failed and how to proceed (raise the budget, or opt out explicitly).
-#    An UNKNOWN must still never be dressed up as a REFUTED.
+# 1) TIMEOUT (the hard miter below outlives formal.timeout): reported as TIMEOUT, exit 0 --
+#    not a failure. It must never be dressed up as a REFUTED or as a proof.
 run unk --ref "$WORK/hard_ref.v" --impl "$WORK/hard_impl.v"
 RC_UNK=$RC
-if [ "$RC" -eq 0 ]; then echo "FAIL: UNKNOWN default rc=0 (want non-zero: strict is the default)"; fail=1
-elif ! echo "$OUT" | grep -q "UNKNOWN"; then echo "FAIL: UNKNOWN default: verdict not UNKNOWN"; fail=1
-elif echo "$OUT" | grep -q "REFUTED"; then echo "FAIL: UNKNOWN default: reported as REFUTED"; fail=1
-elif ! echo "$OUT" | grep -q "could not decide equivalence"; then
-  echo "FAIL: UNKNOWN default: failure does not explain that nothing was decided"; fail=1
-elif ! echo "$OUT" | grep -q "NOT a disproof"; then
-  echo "FAIL: UNKNOWN default: failure does not distinguish itself from a disproof"; fail=1
-elif ! echo "$OUT" | grep -q "formal.timeout"; then
-  echo "FAIL: UNKNOWN default: failure does not point at the budget knob"; fail=1
-else echo "ok: UNKNOWN default -> exit $RC + an actionable could-not-decide message"; fi
+if [ "$RC" -ne 0 ]; then echo "FAIL: TIMEOUT rc=$RC (want 0: a timeout is not a failure)"; fail=1
+elif ! echo "$OUT" | grep -q "TIMEOUT"; then echo "FAIL: TIMEOUT: verdict not TIMEOUT"; fail=1
+elif echo "$OUT" | grep -q "UNKNOWN"; then echo "FAIL: TIMEOUT: still reported as UNKNOWN"; fail=1
+elif echo "$OUT" | grep -q "REFUTED"; then echo "FAIL: TIMEOUT: reported as REFUTED"; fail=1
+elif echo "$OUT" | grep -q "PROVEN"; then echo "FAIL: TIMEOUT: reported as PROVEN"; fail=1
+elif ! echo "$OUT" | grep -q "neither proved nor refuted"; then
+  echo "FAIL: TIMEOUT: does not say that nothing was decided"; fail=1
+else echo "ok: TIMEOUT -> exit $RC, reported as TIMEOUT (neither proved nor refuted)"; fi
 
 # The old opt-out must be rejected before any proof runs.
 run retired --set formal.strict=false --ref "$WORK/hard_ref.v" --impl "$WORK/hard_impl.v"
-if [ "$RC" -eq 0 ] || ! echo "$OUT" | grep -qi 'unknown'; then
+if [ "$RC" -eq 0 ] || ! echo "$OUT" | grep -qi 'formal.strict'; then
   echo "FAIL: removed formal.strict option was accepted"; fail=1
 fi
 
-# 4) REFUTED -> hard fail for a DIFFERENT reason than an UNKNOWN: a real counterexample.
-#    Both fail now, so the exit codes are what keeps them apart — a gate must be able to
-#    tell "the designs DIFFER" from "I could not decide".
+# 4) REFUTED -> hard fail: a real counterexample. A TIMEOUT is not a failure, so the exit
+#    codes keep them apart — a gate must be able to tell "the designs DIFFER" from "I ran out of time".
 run ref --ref "$WORK/diff_ref.v" --impl "$WORK/diff_impl.v"
 RC_REF=$RC
 if [ "$RC" -eq 0 ]; then echo "FAIL: REFUTED rc=0 (want non-zero)"; fail=1
 elif ! echo "$OUT" | grep -q "REFUTED"; then echo "FAIL: REFUTED: verdict not REFUTED"; fail=1
 elif [ "$RC" -eq "$RC_UNK" ]; then
-  echo "FAIL: REFUTED rc=$RC is the SAME as UNKNOWN rc=$RC_UNK (a disproof must not be conflated with an undecided run)"; fail=1
+  echo "FAIL: REFUTED rc=$RC is the SAME as UNKNOWN rc=$RC_UNK (a disproof must not be conflated with a timeout)"; fail=1
 elif ! echo "$OUT" | grep -q "is not equivalent"; then echo "FAIL: REFUTED: no not-equivalent error"; fail=1
 elif ! echo "$OUT" | grep -q "counterexample"; then echo "FAIL: REFUTED: no counterexample reported"; fail=1
 elif echo "$OUT" | grep -q "could not decide equivalence"; then
   echo "FAIL: REFUTED: reported as an undecided run"; fail=1
-else echo "ok: REFUTED -> exit $RC (counterexample), distinct from UNKNOWN exit $RC_UNK"; fi
+else echo "ok: REFUTED -> exit $RC (counterexample), distinct from TIMEOUT exit $RC_UNK"; fi
 
 
 # 6) PROVEN -> exit 0

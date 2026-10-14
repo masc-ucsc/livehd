@@ -16,6 +16,7 @@ class Compile_workers;
 #include "absl/container/flat_hash_map.h"
 #include "absl/container/flat_hash_set.h"
 #include "absl/container/node_hash_map.h"
+#include "cgen_llvm.hpp"
 #include "file_output.hpp"
 #include "hhds/graph.hpp"
 #include "hhds/index.hpp"
@@ -174,8 +175,20 @@ public:
     uint32_t                                             index_bits = 0;  // proven nonnegative range; zero means unknown
     bool                                                 operator==(const Native_loop&) const = default;
   };
+  // The sealed, resource-free body of a pure native loop, kept for the module
+  // that CALLS the loop: its LLVM color embeds the rolled loop (Cgen_llvm::
+  // inline_loop) instead of calling a separate native object. Filled while the
+  // loop definition is emitted, so a loop definition is emitted before its
+  // callers; a caller that does not find an entry keeps the call.
+  struct Native_loop_ir {
+    Cgen_llvm::Inline_body                 body;
+    Cgen_llvm::Loop_layout                 layout;
+    std::vector<hhds::Port_id>             input_ports;   // layout.inputs[i]'s declared port
+    std::vector<hhds::Port_id>             output_ports;  // body.outputs[i]'s declared port
+  };
   struct Generation_index {
     absl::flat_hash_map<const hhds::Graph*, std::optional<Native_loop>> native_loops;
+    absl::flat_hash_map<const hhds::Graph*, Native_loop_ir>             native_loop_ir;
     bool                                          incremental = true;  // forwarded from the single lhd.incremental switch
     std::shared_ptr<livehd::sim::Compile_workers> object_workers;
     absl::flat_hash_map<std::string, Gen_record>  digests;

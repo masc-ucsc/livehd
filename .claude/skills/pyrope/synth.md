@@ -81,9 +81,10 @@ Rules:
    noticeably worse.
 5. **Prove it.** Attributes are semantics-free by construction, but run LEC of
    the mapped netlist against the source anyway (it catches compiler bugs).
-   Source rewrites must prove against the previous version. A timeout is
-   inconclusive (back it with simulation); a refutation is a bug to find, never
-   a result.
+   Source rewrites must prove against the previous version. `TIMEOUT-time` /
+   `TIMEOUT-memory` prove nothing (back them with simulation); `REFUTED-cex` is
+   a bug to find, never a result; any other `REFUTED-<why>` means the check
+   did not reach an answer (fix the setup, or report `REFUTED-unexplained`).
 6. **Record** before/after (cells, area, delay) and the reason for each pin, in
    a comment next to it when it is not obvious.
 
@@ -156,8 +157,9 @@ Equivalent formulations that map much better (prove each with LEC):
 
 * Run-wide `--set` values do not override source pins; when an experiment
   shows no change, check whether the module already pins the key.
-* Merging many modules into one region can make name-based LEC state pairing
-  fail (`unknown`); check per module or pair state explicitly.
+* Merging many modules into one region can defeat name-based LEC state
+  pairing; lec then falls back to a flat proof that may end in `TIMEOUT-time`
+  on a large design. Check per module or pair state explicitly.
 * An attribute that disappears in an optimization (operator merging, inlining)
   should warn; if a pin seems to have no effect, confirm with a run-wide
   `--set` of the same value that the result moves.

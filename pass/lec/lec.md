@@ -56,6 +56,51 @@ everything the encoder needs.
 - **L3** is thin CLI/pass glue mirroring `pass.color` / `pass.partition` / the
   `lhd lec` plumbing.
 
+## Solver profiles and admission
+
+Default `lhd lec` effort is `test`: sampling starts immediately. `quick-check`
+and `long-check` select different vector targets. `formal.effort=proof` never
+samples, including after an undecided result or a timeout. An explicit sampled portfolio
+requires BMC arms with models; its coverage comes from one sampler, never the
+sum of duplicate profiles. Public `formal.rlimit` and `formal.effort_proof`
+are removed.
+
+| Profile | Configuration and eligibility |
+|---|---|
+| `internal` | Fresh nonincremental checks, CaDiCaL; internal bit-blasting for pure BV, lazy theory solver for arrays/UF/int blasting |
+| `lazy` | Fresh checks, CaDiCaL BV solver, arithmetic abstraction size 8 |
+| `eager-kissat` | Pure BV, no models; source build's fresh-assumption adapter |
+| `eager-cms` | Pure BV, no models; CryptoMiniSat |
+| `intblast` | Fresh nonlinear integer translation, `solve-bv-as-int=iand` |
+| `witness` | Internal profile with models; confirms SAT from model-free arms |
+| `verify` | Property verification only: incremental, explicit CaDiCaL |
+
+`formal.profile` selects the primary profile; `formal.portfolio=auto` is the
+portfolio default. Assertion scopes in LEC are term-vector snapshots: every
+obligation, sampled trace and state-lead confirmation gets a fresh solver over
+that scope. For larger decomposed BMC bases, only SSA definitions reachable
+from the obligation and non-definition constraints are asserted first. A sliced
+UNSAT proves the full obligation; SAT or undecided is checked again against the
+full base, and only its complete model can supply a witness. Small bases and
+sampling retain the full base. The term DAG is shared, and a SAT solver stays
+alive through model extraction. Property verification keeps native SMT assertion scopes and learnt
+clauses. The compiler-private resource tier currently keeps MiniSat: repeated
+local resource counts are reproducible for both backends, but cross-platform
+resource allowances have not been calibrated.
+
+`lhd.jobs=0` selects affinity-visible CPUs (at most two under Bazel tests).
+It is a shared ceiling for formal arms, LLVM object workers and native USYN.
+Admission can fall below it based on external CPU load, measured free memory,
+and an EWMA of memory per work unit. A manager always admits one job globally;
+additional work must fit below half the effective physical/cgroup RAM and
+available memory. Forked arms share reservations, and parents release killed
+workers. Native USYN currently admits one whole-design job; the legacy region
+scheduler is not its execution path. Host C++/ninja compilation samples a fixed
+limit at launch. ABC keeps independent `abc.threads` scheduling. Retired
+`formal.jobs`, `sim.jobs` and `synth.threads` give directed `lhd.jobs` errors.
+`--stats` reports admission and per-arm engine/profile/verdict/time/queue/cancel
+information.
+
 ## How a proof runs
 
 - **Combinational** (default for stateless cones): encode both designs sharing
@@ -72,8 +117,9 @@ everything the encoder needs.
   well be equivalent (a fail can still be a pass). This is ordinary k-induction
   incompleteness (the step case needs strengthening invariants), not just a
   don't-care resolved differently by two front-ends. `auto` therefore treats an
-  ind-Refute as a HINT and waits for bmc; `formal.engine=ind` alone reports it as a
-  FAIL — fast triage, but it can cry wolf.
+  ind-Refute as a HINT and waits for bmc; `formal.engine=ind` alone cannot clear
+  it and reports REFUTED-unchecked (exit 7: the forced engine cannot check this
+  logic), never REFUTED-cex.
   Exception: on a purely **combinational** pair the inductive miter IS the
   combinational miter, so an ind-Refute there is a genuine CEX (`auto` skips bmc).
 - **Sequential — BMC from reset** (`formal.engine=bmc`): start from the reset state
@@ -92,56 +138,25 @@ everything the encoder needs.
   `negreset`, or an `_n`/`_ni` suffix for a name-detected input). The verdict
   detail line reports the resolved phase and warns `no primary reset input
   found` when nothing was detected.
-- **auto — parallel portfolio** (`formal.engine=auto`): race the inductive miter and
-  the BMC-from-reset engine as **two forked worker processes** (cvc5 cross-instance
-  thread-safety is unverified, so separate processes — free kill of the loser),
-  and take the first **trustworthy** verdict. The pairing is complementary
-  (inductive *proves* deep state; BMC finds *shallow real bugs*); the content is
-  the **verdict-trust asymmetry**: inductive **Proven** (UNSAT + complete
-  correspondence) ⇒ PASS, kill BMC; BMC **Refuted** (reachable CEX from reset) ⇒
-  FAIL + witness, kill inductive; inductive **Refuted** ⇒ a *hint only* (single-step
-  assumes an arbitrary equal state, so the CEX may be an unreachable step-case — it
-  must never hard-fail the build); BMC bounded-**Proven** (no CEX ≤ bound) ⇒
-  accepted as PASS by the bounded-proof policy (`try_bounded_proven`), disclosed
-  as bounded — cycles beyond the bound stay unproven, and the bound is part of the
-  verdict-cache key; neither trustworthy ⇒ **inconclusive**. The per-query
-  `formal.timeout` (cvc5 `tlimit-per`) does **not** by itself bound a worker:
-  it limits each `checkSat`, but not cvc5 preprocessing (`push`/NonClausalSimp)
-  or one eager CaDiCaL solve, so a hard miter once ran 15+ minutes under
-  `formal.timeout=60`. The **parent** therefore enforces a wall deadline on
-  every racer (`race_deadline_ms`): `formal.timeout + formal.min_timeout +
-  clamp(formal.timeout/4, 10 s, 60 s)`. A racer that outlives it is SIGKILLed and
-  reported as a witness-free UNKNOWN (never PROVEN or REFUTED) with the note
-  `racer exceeded formal.timeout: killed at the <N>s wall deadline`, so the
-  portfolio degrades to inconclusive rather than hanging. Such a wall-killed
-  Unknown (`Query_result::wall_killed`) gets **no** flat (shape-collapse)
-  retry, and **no** int-blast retry when the *ind* racer was the one killed
-  (`ind_wall_killed`): a query that ran out of time would only run out again,
-  adding another full deadline. A bmc-only wall kill still lets the int-blast
-  retry re-solve ind's genuine solver give-up (the retry's race trusts an ind
-  PROVEN at once, and its own deadline bounds a stuck bmc). The same deadline bounds the cube workers and
-  the verify-strategy race (the latter never tighter than the isolated worker's
-  `timeout × hard_timeout_mult` backstop). With a verdict cache active (any
-  `formal verify --workdir`), the two verify strategies run back to back
-  instead of raced, but each still runs in its own forked worker under that
-  same per-strategy deadline; the worker ships its cache hits and stores back to
-  the parent, so `--workdir` changes neither the wall bound nor the
-  verdicts. `formal.hard_timeout_mult=0` (or
-  `formal.timeout<=0`) disables the wall deadline.
-  **The step CEX behind a weak verdict is reported** (`Query_result::step_cex`):
-  when the result is a bounded PASS or inconclusive and the inductive leg found a
-  step counterexample, `lhd lec` prints it under the verdict line ("induction
-  step fails from an arbitrary state") and the result JSON carries it as
-  `lec.induction_cex`. The witness lists inputs, then `| state: k=v` — the
-  ARBITRARY current state (one value per paired key; `ref.`/`impl.` for
-  one-sided state). That state is the question to answer: unreachable (state
-  the invariant with a plain `assume(...)` over the register — `pass.formal`
-  proves a root's own state assume by induction and LEC then uses it as a
-  hypothesis, "PROVEN under N proven assume(s)"; `equiv/onehot_step_cex_*`) or a
-  real bug. An inductive-only CEX is never a refutation when the miter cuts any
-  state, judged on the cuts BEFORE the cone pass prunes the ones ABC proved (a
-  discharged `nxt:` cut still means the diverging output was computed from an
-  arbitrary state).
+- **auto — managed portfolio** (`formal.engine=auto`): sequential designs
+  race `bmc:internal,bmc:lazy,ind:internal`, plus `bmc:intblast` when
+  `formal.lec.int_blast` is enabled. Each arm encodes in its own forked process.
+  An induction Proven or reachable BMC Refuted cancels the remaining arms.
+  An induction Refuted is only a step-case hint. A BMC bounded Proven may settle
+  once every induction arm has finished; it stays disclosed as bounded and never
+  enters the cache as an unbounded theorem. Combinational designs retain the
+  case-split/single-query fast path. An explicit `formal.portfolio` overrides
+  that shortcut and supplies a comma-separated list of `bmc:profile` or
+  `ind:profile` arms.
+  LEC uses one parent-owned `formal.timeout` wall deadline across queueing,
+  encoding, all checks, retries and witness confirmation. Parallel arms share
+  the elapsed interval; their solver-time sum is statistics only. A per-unit
+  floor or hard-timeout multiplier cannot extend this deadline. A hard child
+  receives a sub-deadline so its caller can still be checked in context.
+  `formal.timeout=0` disables the limit. Property verification retains its
+  incremental strategy structure; an explicit `formal.effort=proof` also
+  selects a shared wall deadline for that command.
+
 - **Observability: unobservable flop bits leave the obligation** (`observe.cpp`,
   single-step inductive miter; `LEC_OBS_OFF=1` disables, `LEC_DUMP_OBS=1` lists
   the kept bits). A flop bit is observable iff it reaches a compared obligation
@@ -180,7 +195,7 @@ everything the encoder needs.
   OR is UNSAT iff every disjunct is), so cvc5 only ever solves the residue. This
   is what makes a word-level solver viable against a **tech-mapped** netlist,
   where nothing but the state anchors matches structurally: dino
-  (`PipelinedDualIssueCPU` vs its sky130 netlist) goes from *inconclusive after 8
+  (`PipelinedDualIssueCPU` vs its sky130 netlist) goes from *undecided after 8
   minutes* to **PROVEN in 40s**, with 23 of 26 cuts discharged by abc in 3.5s.
   Two properties define the design:
   - **The obligation is taken as a cvc5 TERM, not re-sliced from the LGraph**
@@ -191,7 +206,7 @@ everything the encoder needs.
     rules is precisely how a bit-level pre-pass would "prove" a cut cvc5 refutes.
     Terms outside the pure bit-vector fragment (arrays, UF, division) are
     declined, and the cut stays with cvc5.
-  - **abc only ever SUBTRACTS.** Refuted/unknown/unsupported all mean "keep the
+  - **abc only ever SUBTRACTS.** Refuted/undecided/unsupported all mean "keep the
     cut"; cvc5 still owns every verdict and witness. An abc *Refuted* is not a
     refutation at all: free boundary symbols make the abc obligation strictly
     *stronger* than cvc5's (a memory dout is free here, but tied to
@@ -217,10 +232,10 @@ everything the encoder needs.
     obligation actually changed are re-proven (note that against a *tech-mapped*
     impl an RTL edit can perturb mapping non-locally, so a neighbouring cone may
     legitimately get a new digest);
-  - **resumable progress** — a def that ends UNKNOWN caches *nothing* in the
+  - **resumable progress** — a def that ends undecided caches *nothing* in the
     def-pair cache, but its proven cones still persist, so a re-run at a bigger
     budget only re-attacks the residue. Measured on dino: a starved run proved
-    8/26 cones and reported UNKNOWN; the next run at full budget replayed those 8
+    8/26 cones and reported undecided; the next run at full budget replayed those 8
     from cache and reached PROVEN.
   The engine may run in a forked worker, so it never touches the cache file: the
   driver hands it the PROVEN set by value (`Lec_options::_cone_cache`) and
@@ -235,26 +250,23 @@ everything the encoder needs.
   sound. This is the word-level escape hatch for the miters bit-blasting cannot
   finish — reassociated / distributed / commuted multiplies, where SAT has to
   re-prove ring axioms bit by bit — at the cost of landing in nonlinear integer
-  arithmetic (undecidable, so expect *more* Unknowns on mask/extract-heavy
+  arithmetic (undecidable, so expect *more* undecided cones on mask/extract-heavy
   cones, never a wrong verdict). Measured: 11/12 arithmetic-rewrite miters that
   neither abc nor BV finish in 60s prove in ~0.1s as integers, while the
-  mask/mem-heavy corpus only ever loses under a blanket switch — which is why
-  the default is a **retry portfolio**, not a mode: `auto` solves BV-first, and
-  a *solver-give-up* Unknown (never an unsupported/oversize refusal — no budget
-  changes those) earns ONE int-blasted re-solve at the `formal.min_timeout`
-  budget (`int_blast_retry`, applied once per driver query, after any
-  flat-confirm, before the trusted-box demotion). The retry adopts a decisive
-  verdict and labels it `int-blast retry (...)`; a retry Unknown keeps the BV
-  detail. `off` disables; `iand | sum | bitwise | bv` force that cvc5 mode from
-  the first solve. Only what cvc5 solves is affected — the abc cone pre-pass
-  above is bit-level by construction and untouched.
+  mask/mem-heavy corpus only ever loses under a blanket switch. `auto` therefore
+  adds a separate BMC int-blast arm to the proof portfolio; it never replaces
+  every bit-vector solver. The serial retry remains for non-portfolio queries
+  that gave up before the shared deadline. It cannot run after sampling, after
+  timeout, or after an int-blast portfolio arm already tried the obligation.
+  `off` disables; `iand | sum | bitwise | bv` force that mode from the first
+  check. The ABC cone pre-pass remains bit-level.
 - **Tier-2 uncertain state correspondence** (`formal.lec.state_pairing`, default on):
   correspondence is name-first (tier-1: `canon_flop_name` + explicit
   `formal.lec.match`; a rolled comptime loop's wrapper level `u_loop_<n>__li<k>.`
   is folded onto the next segment (`lane_q__li<k>`), the spelling the unrolled
   lowering produces, so rolled and unrolled designs pair tier-1); a renamed flop
   is an unmatched cut point that gates `ind` — the
-  only unbounded-PROVEN engine — to Unknown. When unmatched state survives
+  only unbounded-PROVEN engine — to undecided. When unmatched state survives
   tier-1, the driver runs `pass/semdiff`'s full-match (SRP/ERP signature) pass
   per def-pair and injects the surviving pairs as **uncertain**
   (`Lec_options::uncertain_match`; explicit `formal.lec.match` pairs seed the
@@ -264,8 +276,8 @@ everything the encoder needs.
   self-certifying (any inductive, output-implying, initially-true relation
   certifies, given init-equality) — and disclosed as "PROVEN with N uncertain
   tier-2 pair(s)"; **REFUTED under pairs is never final** (drop ALL, re-solve
-  once: a pair-free re-refute is the real FAIL, else the ceiling is Unknown);
-  a **bounded bmc PASS is never claimed directly** while pairs apply (shared-s0
+  once: a pair-free re-refute is the real REFUTED-cex, else the pair-free
+  re-solve's own cause decides); a **bounded bmc proof is never claimed directly** while pairs apply (shared-s0
   over-constraint could mask a bounded CEX). That result triggers one pair-free
   BMC retry through the normal prologue. A detected primary reset establishes
   state normally, except in a multi-clock design: there the pre-reset value of
@@ -274,13 +286,13 @@ everything the encoder needs.
   Without reset, otherwise-uninitialized reference state starts
   with a tracked full `?` plane under the default `gold_x=ignore` (implementation
   power-on remains arbitrary); `gold_x=zero` instead gives both sides canonical
-  zero. A bounded PASS from that pair-free query is accepted; timeout/Unknown
-  never retries.
-  A PASS persists the pairs as entity-keyed **pair hints** in
+  zero. A bounded proof from that pair-free query is accepted (PROVEN-bounded(n));
+  a timeout/undecided result never retries.
+  A proof persists the pairs as entity-keyed **pair hints** in
   `formal_cache.json`; warm runs re-validate and re-inject them (same
   `um=[…]` cache-key segment ⇒ verdict-cache hit) without the signature pass.
   Hint storage is all-or-nothing (a debug-nid-named pair blocks the whole
-  hint — a partial hint would wedge warm runs at Unknown) and self-healing
+  hint — a partial hint would wedge warm runs undecided) and self-healing
   (a replayed hint whose solve does not end Proven is cleared, so the next
   run pairs fresh); `validate_uncertain_pairs`'s collision guards walk the
   full hierarchy, since the miter cuts flops at every descended level.
@@ -390,12 +402,13 @@ everything the encoder needs.
   The encoder looks keys up (a miss is a loud encode error, never a silent
   re-count) — this retired the old per-walk occurrence counters, whose drift
   between the encoder and the query-side builders could silently degrade a
-  stateful box to a stateless constant one (a false-PASS hazard) and whose
+  stateful box to a stateless constant one (a false-PROVEN hazard) and whose
   traversal-order pairing falsely refuted reversed interchangeable instances
   (tests/equiv/instance_collapse_order). A key present on ONE side only yields
   one-sided obligations, which BOTH engines gate to an incomplete
   correspondence: no Proven with unchecked obligations, no Refuted through an
-  unjustified shared-box assumption — only INCONCLUSIVE.
+  unjustified shared-box assumption — only an undecided result that makes the
+  driver iterate (flat retry / inline the child).
 - **Proven-module collapse** (`lhd lec --collapse <def>` / `formal.lec.collapse`): a def
   the driver has already proven equivalent is **forced** to the blackbox path
   even when it could be flattened (so the parent stops re-solving its internals).
@@ -429,28 +442,28 @@ everything the encoder needs.
   dependency DAG over the defs present BY NAME in both libraries, topo-order it
   **leaves-first**, and LEC each def under the `auto` portfolio. Record the proven
   set; for each parent, force-black-box its **proven** child instances (collapse,
-  above) so the parent proof stops re-solving them. A child left **UNKNOWN** —
+  above) so the parent proof stops re-solving them. A child left **undecided** —
   not provable in isolation with free inputs (context-dependent equivalence) — is
   **not** collapsed: it stays flattened into the parent and is proven in context
   (the M5 CEGAR / un-black-box fallback). Correspondence is name-based, so no
   semdiff is needed when the call structures match.
   A child the solver **REFUTED** is different (`formal.lec.hier_refute=fail`, the debug mode):
-  its parents are **skipped** and the block's counterexample becomes the run
-  verdict. Flattening it instead would descend into logic already known to differ
-  — a whole-design flat miter costing minutes of cvc5 for a verdict the block
-  settled in milliseconds, and one that typically lands UNKNOWN (a witness-free
-  UNKNOWN then exits 0, silently reporting a design with a known counterexample as
-  a PASS). `formal.lec.hier_refute=escalate` (the default) restores the flatten, for the one case it
-  buys something: a block-boundary CEX can be UNREACHABLE in context, so only that
-  mode can prove a top equivalent over a differing child. Either way a refuted
-  block fails the run — a REFUTED def anywhere outranks an inconclusive top. A parent **REFUTED under a non-empty collapse
+  its parents are **skipped** and the run stops on the block's counterexample
+  (fast localization). A block counterexample is not a design verdict and the
+  option forbade the escalation that would decide the top, so that run is
+  REFUTED-unchecked (exit 7), with the block's trace as the lead.
+  `formal.lec.hier_refute=escalate` (the default) inlines the refuted block into
+  its caller and proves the caller anyway: a block-boundary CEX can be
+  UNREACHABLE in context, so only this mode can prove a top equivalent over a
+  differing child. A refuted hierarchy BLOCK is never a refuted design; only the
+  top's own outcome is the verdict. A parent **REFUTED under a non-empty collapse
   set is never final**: the collapse over-approximates the children (free/UF box
   values the real leaf may never emit; occurrence-paired unnamed instances may
   mispair), so the driver re-solves the def FLAT before reporting — flat-Proven
-  is adopted, flat-Unknown stays inconclusive, and a FAIL is only ever reported
-  from a counterexample free of collapse boxes (true blackboxes for unresolved
-  defs may remain; they correspond explicitly and gate to inconclusive when
-  one-sided). The same confirmation guards a manual `--collapse` on the
+  is adopted, a flat undecided result takes its own cause (TIMEOUT-*, REFUTED-*),
+  and a REFUTED-cex is only ever reported from a counterexample free of collapse
+  boxes (true blackboxes for unresolved defs may remain; a trace that needs only
+  a free blackbox output is still REFUTED-cex: the boxed model is the contract). The same confirmation guards a manual `--collapse` on the
   non-hierarchical path. (tests/equiv/instance_state_anon +
   lhd/tests/lec_box_pairing_test pin this.) Each def emits a per-block progress
   line the instant it resolves; the TOP def's verdict is the result. (v1 walks
@@ -524,7 +537,7 @@ window where an async reset already forces `q` before the edge is not modeled
 (a Memory `reset` / `memory_async_reset` likewise). So a design whose async
 reset a reader demoted to sync -- slang demotes a golden async MEMORY reset --
 is PROVEN against its async twin, and LEC neither models intra-cycle async
-reset nor turns a reader-demoted reset UNKNOWN. `async` matters only in a
+reset nor turns a reader-demoted reset undecided. `async` matters only in a
 step that is not the flop's own edge -- the phase schedule's microsteps and an
 explicit multi-clock commit, where an async reset overrides although the flop's
 clock does not commit and a sync one waits for it (encode.cpp). Under one clock
@@ -594,7 +607,7 @@ cross-design clock identity strips `[k]` to find the input. Edge normalization
 (`latch_contract::control_root` follows a bit select to the whole bus, and tolg
 relies on that), so it tracks the bit separately (`clock_bit_on`) and declines
 only when TWO different bits of one input (or a bit it cannot decide) clock
-state -- UNKNOWN, rc 7 (`clock_bus_bits_negedge*`; it was PROVEN as
+state -- REFUTED-unsupported, rc 7 (`clock_bus_bits_negedge*`; it was PROVEN as
 "structurally identical"). One bit used alone is one clock: it normalizes,
 every clock_pin is rebound to a select of that bit (a bare bus reads bit 0),
 and the reported reference clock is `bus[k]` so a side on clks[0] and one on
@@ -649,9 +662,12 @@ lhd compile dut.sv --reader yosys-slang --top dut --emit-dir lg:r --workdir wr
 lhd lec --impl lg:i --ref lg:r --top dut --workdir wl
 ```
 
-Output: `PROVEN equivalent`, `REFUTED (not equivalent)` + a counterexample, or
-`UNKNOWN` + a reason (an unsupported op, a spent budget, …). Exit non-zero
-unless PROVEN.
+Output: one verdict word with its modifier (pass/lec/README.md has the full
+table): `PROVEN-full`, `PROVEN-bounded(n)` and `TESTED-sampled(N)` exit 0;
+`TIMEOUT-time` / `TIMEOUT-memory` exit 0 with a warning (no proof, no
+counterexample); `REFUTED-cex` + a counterexample exits 10;
+`REFUTED-interface`, `-unsupported`, `-unchecked`, `-vacuous` (nothing to
+compare, or a contradictory assume set) and `-unexplained` exit 7. `unknown` is never printed.
 
 The `pass.lec` Eprp method's `add_label_optional(...)` calls **are** the switch
 registry, surfaced under TWO `--set` namespaces: a flag `lhd formal verify`
@@ -666,8 +682,11 @@ pointer to the new name.
 |---|---|---|
 | `formal.engine` | discharge frame: `auto` (parallel portfolio) \| `bmc` \| `ind` (inductive flop-cut) \| `ic3`. Each engine is trustworthy in ONE direction, so a lone engine can report what `auto` would not: **`ind` can false-negative** (its `Refuted` is not a disproof — the step case starts from an arbitrary, possibly UNREACHABLE state, so a fail can still be a pass; only its `Proven` is definitive), and **`bmc`'s `Proven` is only bounded** (only its `Refuted` is definitive). Combinational pairs excepted: there ind-Refuted is genuine | `auto` |
 | `formal.solver` | backend: `cvc5` (in-process) \| `bitwuzla` (opt-in, may be unbuilt) \| `lgyosys` (yosys/lgcheck) | `cvc5` |
+| `formal.profile` | primary solver profile (table above) | `internal` |
+| `formal.portfolio` | `auto` or comma-separated `engine:profile` arms | `auto` |
+| `lhd.jobs` | shared ceiling; 0 selects available CPUs, admission also checks load/memory | `0` |
 | `formal.bound` | BMC / induction depth bound `k` | `6` |
-| `formal.timeout` | SOFT TOTAL budget in seconds for the run (`0` = unbounded; a target, not a hard cap — `formal.min_timeout` is the per-unit floor that causes an overrun). ONE allowance for the whole query — **encode + every checkSat share it** (the encoders take what is left; each checkSat is re-armed to what remains) — and one TOTAL across units, not one per def. It is not charged per phase: before, encode and solve each took the full value, so a `120` cap cost ~250s of wall clock | `120` |
+| `formal.timeout` | Shared wall deadline in seconds for LEC (`0` disables), including queued arms and retries; property verification retains its default soft accounting unless proof effort is explicit | `120` |
 | `formal.witness` | print the counterexample on `Refuted` (and gate the simfail testbench below) | `true` |
 | `formal.simfail` | with `--workdir`, write a self-contained Pyrope simulation test driving BOTH designs with the counterexample sequence. The filename is derived as `simfail_<resolved-top>.prp` | `true` |
 | `formal.simfail_run` | run the generated test through `lhd sim --set sim.vcd=true` to dump the waveform (same basename, `.vcd`) | `true` |
@@ -678,7 +697,7 @@ pointer to the new name.
 | `formal.lec.hier` | hierarchical decomposition (`formal.lec.hier_order`: `top_down`, the default, or the legacy `bottom_up` leaves-first order described above): LEC every def under `formal.engine`, collapsing proven children (`false` = flat single LEC) | `true` |
 | `formal.lec.hier_refute` | what a REFUTED block means: `fail` (the block's counterexample is the run verdict; its parents are skipped — only a proven child collapses, so a parent over a refuted child would grind out a whole-design flat miter) \| `escalate` (flatten it and prove the parents anyway, so a top PROVEN over a differing block still passes) | `escalate` |
 | `formal.lec.semdiff` | structural def-diff skip: `structural` (drop a structurally-identical def with no solver; `true`/`on` alias) \| `none`. NB cross-front-end pairs never match | `structural` |
-| `formal.lec.state_pairing` | tier-2 uncertain state correspondence: pair name-unmatched flops via semdiff's full-match signature pass, injected as uncertain (drop-and-retry on REFUTE, no bounded-Proven, ind PASS self-certifies + persists pair hints) | `true` |
+| `formal.lec.state_pairing` | tier-2 uncertain state correspondence: pair name-unmatched flops via semdiff's full-match signature pass, injected as uncertain (drop-and-retry on REFUTE, no bounded-Proven, an ind proof self-certifies + persists pair hints) | `true` |
 | `formal.lec.decompose` | split the miter into per-cut queries: `auto` (sweep, fall back to the monolithic solve on a non-discharging cut) \| `true` (sweep only, report the hard residue, no monolithic solve) \| `false` (monolithic only) | `auto` |
 | `formal.lec.cones` | register-cone (compare-point) decomposition: bit-blast each per-cut obligation into an AIG and discharge it with abc, subtracting every cone abc proves from the cvc5 obligation. `auto` \| `true` (also report each cone's outcome) \| `false` | `auto` |
 | `formal.lec.conelimit` | per-cone abc SAT conflict budget (`0` = abc's own default) | `10000` |
@@ -715,9 +734,11 @@ of the native reset-hold prologue, an alignment that is unverified): it may
 corroborate a native pass, recorded as
 `crosscheck: {verdict: proven, exit_code: 2, bounded: true, bound: N}` and
 printed as `lgcheck -> equivalent for N cycles (bounded; deeper cycles not
-checked)`, but it never contradicts a native REFUTE (that pair stays
-`lgcheck cross-check did not decide`, exit 7). Any other non-zero exit is
-unknown, never a disproof.
+checked)`, but it never contradicts a native REFUTE. The cross-check rulings:
+a native TIMEOUT that lgcheck decides adopts lgcheck's decision (proven, or
+REFUTED-cex); a native REFUTED-cex that lgcheck cannot decide stays REFUTED-cex
+with a warning; a native proof that lgcheck refutes is the DISAGREE internal
+error. Any other non-zero lgcheck exit is undecided, never a disproof.
 
 ## The simfail witness testbench (`lhd lec --workdir DIR`)
 
@@ -785,21 +806,30 @@ cycle-N output inherits is the flop read at cycle N-1.
 
 ## Build facts (cvc5)
 
-- **cvc5** is vendored as the official **prebuilt non-GPL static** lib
-  (`packages/cvc5.BUILD`, pin `cvc5-1.3.4`), `select()`-ed per host: Linux
-  x86_64 / Linux arm64 / macOS arm64 — **no from-source solver build**. The
-  prebuilt `libcvc5.a` + `libcadical.a` + LibPoly are merged into **one
-  relocatable object** (`ld -r --whole-archive`) and the **CaDiCaL symbols are
-  localized** (`objcopy --localize-symbol '*CaDiCaL*'`) because **Berkeley-abc**
-  (linked into the same `lhd` binary via Yosys) **also vendors CaDiCaL** →
-  duplicate strong symbols at the final link. `libcvc5parser.a` is dropped (the
-  C++-API backend never uses the SMT-LIB parser). NB: `ar x` flattens duplicate
-  member basenames — must use `ld -r --whole-archive`, never extract.
-- **GMP** is the hermetic `@gmp` BCR module (no system/homebrew libgmp). It is
-  LGPLv3 — keep it linkable per the LGPL relink obligation; list it in `NOTICE`.
-- The `@cvc5` target is the **only** SMT dependency in `pass/lec/BUILD`
-  (`lec_query` deps `//graph`, `@cvc5`, `@hhds//hhds:graph`). MathSAT /
-  interpolation engines are excluded (non-redistributable).
+cvc5 **1.4.2 builds from source** through `rules_foreign_cc`, avoiding the
+release binary's glibc floor. Bazel fetches checksum-pinned cvc5, CaDiCaL,
+SymFPU, LibPoly, Kissat and CryptoMiniSat archives before CMake runs; dependency
+build actions use local archives and cannot auto-download. GMP is the existing
+hermetic `@gmp` module. A hermetic Python 3.12 runtime and pinned pyparsing
+supply code generation; `tomllib` is built into that runtime.
+
+The tagged source uses CMake **Production**, with PIC static libraries, Poly,
+Kissat and CryptoMiniSat enabled; GPL mode, MPFR, parser, executable, bindings,
+docs and solver tests are disabled. IPO is disabled so native object/COMDAT
+symbols survive the isolation step. CaDiCaL and Kissat/Kitten symbols are made
+private to cvc5, including helper symbols shared with ABC. The Kissat adapter
+rebuilds its permanent CNF with query-local assumption units and returns the
+complete assumption set as an UNSAT core; it cannot leak assumptions across
+checks. Kissat still needs the parent's wall cancellation. The multi-backend BV
+solver also marks a backend undecided answer as model-unsound in the SAT context; otherwise
+CryptoMiniSat timing out could become a false SAT when no conflict was emitted.
+The division/remainder regression tests several caps and rejects that outcome.
+
+`@cvc5` is the stable dependency. `--define=cvc5_prebuilt=1` temporarily
+selects the pinned host release (Linux x86_64/arm64, macOS arm64); eager Kissat
+is refused there because the stock assumption wrapper aborts. Linux x86_64
+source/prebuilt builds have been exercised here; arm64 and macOS require their
+own host validation. Static GMP retains its LGPL relink obligation.
 
 ## Tests
 

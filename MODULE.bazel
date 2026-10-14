@@ -6,8 +6,9 @@ module(
 
 bazel_dep(name = "rules_python", version = "2.4.2")
 
-#python = use_extension("@rules_python//python/extensions:python.bzl", "python")
-#python.toolchain(python_version = "3.11")
+python = use_extension("@rules_python//python/extensions:python.bzl", "python")
+python.toolchain(python_version = "3.12", is_default = True)
+use_repo(python, "python_3_12", "python_3_12_host")
 
 bazel_dep(name = "bazel_skylib", version = "1.9.2")
 http_archive = use_repo_rule("@bazel_tools//tools/build_defs/repo:http.bzl", "http_archive")
@@ -301,16 +302,9 @@ http_archive(
     patches = ["//packages:yosys.patch", "//packages:yosys_lexer.patch"],
 )
 
-# cvc5 -- SMT backend for pass/lec, used directly via its native C++ API. We use the
-# official prebuilt non-GPL static libraries (no from-source solver build).
-# Pinned to a tagged release (cvc5 >= 1.3.4 per lec.md). The bundled LGPL
-# libgmp is intentionally NOT imported (see packages/cvc5.BUILD); GMP comes from
-# the hermetic @gmp BCR module (bazel_dep above), not a system shared lib.
-#
-# The prebuilt is host-specific (we build `lhd` for the host, not cross-compile),
-# so @cvc5 is registered by a module extension that picks the Linux x86_64 /
-# macOS arm64 / ... asset matching the build host. Adding a platform is a one-row
-# edit in packages/cvc5_repo.bzl; the repo name stays @cvc5 everywhere.
+# cvc5 1.4.2 -- source-built SMT libraries, native C++ API. Bazel fetches
+# pinned dependencies before the offline CMake build; GMP comes from @gmp.
+# @cvc5 is stable, with --define=cvc5_prebuilt=1 as a host-matched escape hatch.
 cvc5_ext = use_extension("//packages:cvc5_repo.bzl", "cvc5_repo")
 use_repo(cvc5_ext, "cvc5")
 

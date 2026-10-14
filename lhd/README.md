@@ -38,17 +38,40 @@ is outside the default test suite.
 ## Formal regression policy
 
 Ordinary regressions use `lhd lec` with the default solver and native Slang
-reader. `formal.strict`, `formal.lec.gold_reader`, and
-`formal.lec.gate_reader` are removed options. UNKNOWN always exits nonzero,
-as does a vacuous assert or internal assume in `formal verify`. REFUTED keeps
-its distinct counterexample exit class. Bounded successes disclose their depth;
-cache hits preserve that scope and reject legacy records without it.
+reader. `formal.strict`, `formal.allow_oversize`, `pass.abc.allow_oversize`,
+`formal.lec.gold_reader`, and `formal.lec.gate_reader` are removed options
+(setting one is a usage error). `lhd lec` and `lhd formal verify` print the
+same verdict words and exit with the same codes; every verdict carries a
+modifier and "unknown" is never printed:
+
+| verdict | meaning | exit |
+| --- | --- | --- |
+| `PROVEN-full` | unbounded (inductive) proof | 0 |
+| `PROVEN-bounded(n)` | no difference / violation for n design cycles from reset | 0 |
+| `TESTED-sampled(N)` | a sampled `formal.effort` preset: N vectors agreed | 0 |
+| `TIMEOUT-time` | a clock limit (formal.timeout, wall deadline, solver budget) | 0 + warning |
+| `TIMEOUT-memory` | out of memory, caught instead of a crash | 0 + warning |
+| `REFUTED-cex` | a real counterexample (a boxed model is the contract) | 10 |
+| `REFUTED-interface` | a top port name exists on one side only (lec) | 7 |
+| `REFUTED-unsupported` | no engine can model or check it | 7 |
+| `REFUTED-unchecked` | the options pinned an engine or disabled the deciding step | 7 |
+| `REFUTED-vacuous` | the check proved nothing: nothing to compare (no output/state), no assert, a dead `if`/`match` guard, or a contradictory assume set (it can hide a real counterexample) | 7 |
+| `REFUTED-unexplained` | no recognized cause: a LiveHD bug to report | 7 |
+
+The machine-readable forms are lowercase (`lec.verdict` / `formal.verdict` in
+`--result-json`, `run.verdict` / `obligations[].verdict` in `formal_report.json`). There is no
+design-size gate: a run that outgrows memory reports `TIMEOUT-memory`. Bounded
+proofs disclose their depth; cache hits preserve it and reject legacy records
+without it, and only `TIMEOUT-time` results enter the known-timeout ledger.
 The explicit debug setting `formal.solver=lgyosys` also runs default native
-LEC and requires agreement with lgcheck; it cannot replace the native proof.
+LEC and requires agreement with lgcheck: a native `TIMEOUT-*` adopts lgcheck's
+decision when it has one, a native `REFUTED-cex` stands (with a warning) when
+lgcheck cannot decide, opposite decisions are an internal DISAGREE error, and a
+native proof that lgcheck cannot confirm is `REFUTED-unchecked`.
 One regression tier additionally calls `inou/yosys/lgcheck` DIRECTLY as a second
 opinion: `//inou/prp:prp-equiv-*` (Pyrope-generated Verilog vs its hand-written
 golden), so a native LEC that ever proved nothing cannot go unnoticed across
-that corpus. There a yosys refutation fails the test while an inconclusive or
+that corpus. There a yosys refutation fails the test while an undecided or
 timed-out yosys is tolerated — see `inou/prp/tests/equiv/README.md`. Every other
 LEC in the repository stays on the default cvc5 solver.
 

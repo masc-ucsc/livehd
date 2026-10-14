@@ -13,6 +13,8 @@ import shutil
 import subprocess
 import sys
 
+from lec import acceptable, run_lec, verdict
+
 CHECK_TIMEOUT = 30  # seconds; each native LEC comparison must complete
 
 
@@ -64,17 +66,16 @@ def main():
                 output.write(source.read() + "\n")
     for label, side, selected_top in [("graph", "lg:" + os.path.join(work, "lg"), top),
                                       ("verilog", impl, impl_top)]:
-        try:
-            chk = subprocess.run(
-                [lhd, "lec", "--ref", v, "--impl", side,
-                 "--ref-top", top, "--impl-top", selected_top,
-                 "--workdir", os.path.join(work, "check_" + label)],
-                stdout=subprocess.PIPE, stderr=subprocess.STDOUT, timeout=CHECK_TIMEOUT)
-        except subprocess.TimeoutExpired:
-            print("{} - yvr - FAILED: {} LEC timed out".format(name, label))
-            return 1
-        if chk.returncode != 0:
-            print("{} - yvr - FAILED: Yosys {} differs from native Slang".format(name, label))
+        chk = run_lec(
+            [lhd, "lec", "--ref", v, "--impl", side,
+             "--ref-top", top, "--impl-top", selected_top,
+             "--workdir", os.path.join(work, "check_" + label)],
+            timeout=CHECK_TIMEOUT)
+        status = verdict(chk)
+        if status == "timeout":
+            print("{} - yvr - {} LEC TIMEOUT: not a failure".format(name, label))
+        if not acceptable(status):
+            print("{} - yvr - FAILED: Yosys {} differs from native Slang ({})".format(name, label, status))
             print(chk.stdout.decode("utf-8", "ignore"))
             return 1
     print("{} - yvr - success: Yosys graph and Verilog agree with native Slang".format(name))

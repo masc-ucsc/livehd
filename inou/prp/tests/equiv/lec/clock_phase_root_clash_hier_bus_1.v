@@ -1,5 +1,5 @@
 /*
-:lec_expect: unknown
+:lec_expect: unsupported
 :lec_grep: scheduled on clock `clks` but the impl side on `clks\[1\]`
 MUTATED: the child's flops moved from port `a` (top `clks[0]`) to port `b`
 (top `clks[1]`). Must never be PROVEN.

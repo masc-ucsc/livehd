@@ -6069,6 +6069,7 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
   struct Loop_storage_shape {
     bool stateless   = true;
     bool nested_loop = false;
+    int  loop_depth  = 0;  // loop levels below this body: 0 = a leaf body
   };
   absl::flat_hash_map<const hhds::Graph*, Loop_storage_shape>            loop_storage_memo;
   absl::flat_hash_set<const hhds::Graph*>                                loop_storage_visiting;
@@ -6098,6 +6099,7 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
         const auto child   = loop_storage_shape(node.get_subnode_graph());
         shape.stateless   &= child.stateless;
         shape.nested_loop |= node.is_loop_subnode() || child.nested_loop;
+        shape.loop_depth   = std::max(shape.loop_depth, child.loop_depth + (node.is_loop_subnode() ? 1 : 0));
       }
     }
     loop_storage_visiting.erase(body_graph.get());
@@ -6108,8 +6110,14 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
   // Native eligibility is decided by the emitted color's complete IO ABI.
   // Unlike the Slop expression emitter, it can include lowered proof/place-
   // holder nodes and does not need a separate C++ pure expression for each op.
-  const bool native_loop_candidate = llvm_backend_ && !observation_on && !vcd_on && loop_storage_shape(graph).stateless
-                                     && !loop_storage_shape(graph).nested_loop;
+  // A body with an inner loop qualifies too: the inner loop is embedded in the
+  // body's kernel (Cgen_llvm::inline_loop) when its own definition was emitted
+  // first; otherwise that kernel is rejected and the body keeps the scheduler.
+  // Only the two innermost loop levels are embedded: the innermost loop is where
+  // the time goes, and each level multiplies the body inlined into its caller.
+  constexpr int kEmbeddedLoopLevels = 2;
+  const bool    native_loop_candidate = llvm_backend_ && !observation_on && !vcd_on && loop_storage_shape(graph).stateless
+                                     && loop_storage_shape(graph).loop_depth < kEmbeddedLoopLevels;
 
   for (const auto& s : subs) {
     if (!s.loop) {
@@ -6501,6 +6509,65 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
       hout->append("    __last_out = ", evaluator, entry_args, ");\n");
       emit_loop_done("advance");
       hout->append("    return __last_out;\n  }\n");
+      if (llvm_backend_) {
+        // Direct entry for a calling color: the color is already gated by its
+        // own dirty bit, so copying every operand into `__in` (a full compare
+        // and copy of each wide bus) and moving `__gen` only to be compared
+        // again is pure overhead. Operands keep the field's type (converted
+        // only when the caller's differs). Without a native body this falls
+        // back to the bound wrapper walk.
+        std::string tparams;
+        std::string params;
+        std::string direct_args = absl::StrCat("count, ", loop.first, ", ", loop.step);
+        std::string binds;
+        std::string locals;
+        size_t      k = 0;
+        for (const auto& d : sio->get_input_pin_decls()) {
+          const auto field = cpp_port_path(d.name);
+          if (loop.index_input && d.port_id == *loop.index_input) {
+            absl::StrAppend(&direct_args, ", ", pure_argument(absl::StrCat("__in.", field), d));
+            continue;
+          }
+          const auto p = absl::StrCat("__p", k);
+          absl::StrAppend(&tparams, k ? ", " : "", "class __P", k);
+          absl::StrAppend(&params, k ? ", " : "", "const __P", k, "& ", p);
+          // A local of the field's own type keeps the argument non-dependent.
+          absl::StrAppend(&locals,
+                          "      const std::remove_cvref_t<decltype(__in.",
+                          field,
+                          ")>& __a",
+                          k,
+                          " = __direct_as<std::remove_cvref_t<decltype(__in.",
+                          field,
+                          ")>>(",
+                          p,
+                          ");\n");
+          absl::StrAppend(&direct_args, ", ", pure_argument(absl::StrCat("__a", k), d));
+          const int bits = d.bits > 0 ? static_cast<int>(d.bits) : 1;
+          if (versioned_bits(bits)) {
+            absl::StrAppend(&binds, "      if (slop_update(__in.", field, ", ", p, ")) { ++__gen; ++__in.", ver_path(field), "; }\n");
+          } else {
+            absl::StrAppend(&binds, "      __gen += slop_update(__in.", field, ", ", p, ");\n");
+          }
+          ++k;
+        }
+        hout->append(
+            "  template <class F, class P> static decltype(auto) __direct_as(const P& p) {\n"
+            "    if constexpr (std::is_same_v<F, P>) { return (p); } else { F f{}; slop_update(f, p); return f; }\n"
+            "  }\n");
+        hout->append(tparams.empty() ? "  " : absl::StrCat("  template <", tparams, "> "), "const Out& __native_direct(", params, ") {\n");
+        hout->append("    if constexpr (Callee::__has_native_loop()) {\n");
+        hout->append(locals, "      __last_out = Callee::__native_loop(", direct_args, ");\n      return __last_out;\n    } else {\n");
+        hout->append(binds, "      return __compact_advance();\n    }\n  }\n");
+        // The post-edge publish of a top-level output gets its own operands.
+        hout->append(tparams.empty() ? "  " : absl::StrCat("  template <", tparams, "> "), "void __native_direct_publish(", params, ") {\n");
+        hout->append("    if constexpr (Callee::__has_native_loop()) {\n");
+        hout->append(locals, "      const auto value = Callee::__native_loop(", direct_args, ");\n");
+        for (const auto& d : sio->get_output_pin_decls()) {
+          hout->append("      __gen += slop_update(__out.", cpp_port_path(d.name), ", value.", cpp_port_path(d.name), ");\n");
+        }
+        hout->append("    } else {\n", binds, "      __compact_publish();\n    }\n  }\n");
+      }
     }
     if (!pure_loop || llvm_backend_) {
       hout->append("  void __compact_publish() {\n");
@@ -12892,8 +12959,18 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
       if (version.role != livehd::sim::Color_plan::Version_role::data) {
         return reject_data("role");
       }
-      if (op == Ntype_op::Clock_cell || op == Ntype_op::Sub) {
+      if (op == Ntype_op::Clock_cell) {
         return reject_data("operation");
+      }
+      if (op == Ntype_op::Sub) {
+        // Only a pure rolled loop whose sealed body is registered (its definition
+        // was emitted first) is embedded in the caller's LLVM color.
+        const auto loop_node = site.node.base_node();
+        const auto child     = loop_node.get_subnode_graph();
+        if (!llvm_backend_ || observation_on || shared_gen_ == nullptr || !loop_node.subnode_loop() || !child
+            || !shared_gen_->native_loop_ir.contains(child.get())) {
+          return reject_data("operation");
+        }
       }
       if (op == Ntype_op::Latch) {
         // Open-window reads are D aliases. The inline emitter and LLVM have
@@ -13522,6 +13599,9 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
 
         absl::flat_hash_map<uint64_t, Cgen_llvm::Value> llvm_inputs;
         absl::flat_hash_map<size_t, Cgen_llvm::Value>   llvm_outputs;
+        // A loop site's outputs are separate members, but the rolled loop is
+        // emitted once, at the first of them: its results, by body output.
+        absl::flat_hash_map<size_t, std::vector<Cgen_llvm::Value>> llvm_loop_results;
         absl::flat_hash_set<size_t>                     llvm_preextracted_get_masks;
         const auto input_key = [](size_t version, uint32_t input) { return (static_cast<uint64_t>(version) << 32) | input; };
         const auto input_value = [&](size_t read_index) {
@@ -13856,6 +13936,12 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
                 && edge.sink.get_port_id() != Ntype::get_sink_pid(Ntype_op::Latch, "reset_pin")
                 && edge.sink.get_port_id() != Ntype::get_sink_pid(Ntype_op::Latch, "initial")) {
               value = llvm_kernel.constant(1, 0, true);  // unused latch timing/initialization metadata
+            }
+            if (value.width == 0 && type_op_of(node) == Ntype_op::Sub && !edge.driver.is_const()
+                && edge.driver.get_master_node().get_occurrence_index() == occurrence.get_occurrence_index()) {
+              // A loop's carry/activation descriptor wire: its own output feeds its
+              // own input, and the loop supplies that value (inline_loop skips it).
+              value = llvm_kernel.constant(1, 0, true);
             }
             if (value.width == 0 && type_op_of(node) == Ntype_op::Memory) {
               const bool required = memory_required_ports.contains(edge.sink.get_port_id());
@@ -14560,6 +14646,56 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
               result = llvm_kernel.lut(table, address, result_width, result_unsign);
               break;
             }
+            case Ntype_op::Sub: {
+              // A pure rolled loop is emitted INSIDE this color: its body is the
+              // loop definition's sealed kernel, inlined once into the loop, and
+              // operands/results are SSA values (no call, no operand transport).
+              const auto loop  = node.subnode_loop();
+              const auto child = node.get_subnode_graph();
+              if (!loop || !child || shared_gen_ == nullptr || !shared_gen_->native_loop_ir.contains(child.get())) {
+                return reject("loop body is not available for embedding");
+              }
+              const auto& ir = shared_gen_->native_loop_ir.at(child.get());
+              auto        loop_it = llvm_loop_results.find(version.base_site);
+              if (loop_it == llvm_loop_results.end()) {
+                const auto                    sio = node.get_subnode_io();
+                std::vector<Cgen_llvm::Value> arguments(ir.layout.inputs.size());
+                for (size_t i = 0; i < ir.input_ports.size(); ++i) {
+                  for (const auto& decl : sio->get_input_pin_decls()) {
+                    if (decl.port_id != ir.input_ports[i]) {
+                      continue;
+                    }
+                    const auto sink = find_sink_pin(node, decl.name);
+                    if (sink.is_invalid()) {
+                      break;
+                    }
+                    for (size_t e = 0; e < edges.size(); ++e) {
+                      if (edges[e].sink.get_port_id() == sink.get_port_id()) {
+                        arguments[i] = operands[e];
+                        break;
+                      }
+                    }
+                    break;
+                  }
+                  if (arguments[i].width == 0) {
+                    arguments[i] = llvm_kernel.constant(ir.layout.inputs[i].first, 0, ir.layout.inputs[i].second);
+                  }
+                }
+                std::vector<Cgen_llvm::Value> results;
+                std::string                   error;
+                if (!llvm_kernel.inline_loop(ir.body, ir.layout, loop->count, loop->first, loop->step, arguments, results, error)) {
+                  return reject(error);
+                }
+                loop_it = llvm_loop_results.emplace(version.base_site, std::move(results)).first;
+              }
+              const auto port_it = std::ranges::find(ir.output_ports, static_cast<hhds::Port_id>(version.output_port));
+              if (port_it == ir.output_ports.end()) {
+                return reject("loop output has no body result");
+              }
+              result = llvm_kernel.resize(loop_it->second[static_cast<size_t>(port_it - ir.output_ports.begin())], result_width,
+                                          result_unsign);
+              break;
+            }
             case Ntype_op::AttrSet:
             case Ntype_op::IO:
               result = operands.empty() ? llvm_kernel.constant(result_width, 0, result_unsign)
@@ -14605,6 +14741,8 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
         }
         // A complete stateless color can be embedded in a rolled native loop.
         // Transport is once per loop invocation, and LLVM owns every iteration.
+        std::optional<Cgen_llvm::Loop_layout> registered_layout;
+        std::vector<hhds::Port_id>            registered_outputs;
         if (native_loop && shared_gen_ && resources.empty()) {
           const auto found = shared_gen_->native_loops.find(g);
           if (found != shared_gen_->native_loops.end() && found->second) {
@@ -14682,6 +14820,11 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
                 return reject(error);
               }
               native_loop_kernel[color_index] = true;
+              registered_layout               = layout;
+              registered_outputs.assign(abi.writes.size(), 0);
+              for (const auto& [port, index] : output_indices) {
+                registered_outputs[index] = port;
+              }
             }
           }
         }
@@ -14690,6 +14833,21 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
         if (sharing_key.empty()) {
           llvm_rejection = sharing_error;
           return false;
+        }
+        if (registered_layout && shared_gen_ != nullptr) {
+          // Callers embed this body (Cgen_llvm::inline_loop) instead of calling the object.
+          Cgen_sim::Native_loop_ir ir;
+          ir.body = Cgen_llvm::Inline_body{sharing_key, input_types, {}, llvm_scalar_abi};
+          for (const auto& write : abi.writes) {
+            const auto& slot = color_plan_->boundary_slots()[write.slot_index];
+            ir.body.outputs.emplace_back(slot.width, slot.unsign);
+          }
+          ir.layout       = *registered_layout;
+          ir.output_ports = registered_outputs;
+          for (const auto& port : g->get_io()->get_input_pin_decls()) {
+            ir.input_ports.push_back(port.port_id);
+          }
+          shared_gen_->native_loop_ir[g] = std::move(ir);
         }
         if (compose_loop && resources.empty() && !native_loop_kernel[color_index]) {
           Cgen_llvm::Inline_body body{sharing_key, input_types, {}, llvm_scalar_abi};
@@ -14717,6 +14875,7 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
         const auto cache_path  = (shared_gen_ != nullptr && !shared_gen_->incremental) ? std::string{}
                                         : odir.empty()                                        ? cache_name
                                                                                               : absl::StrCat(odir, "/", cache_name);
+        const auto compile_units = llvm_kernel.instruction_count();
         object_jobs.push_back(object_workers->submit(
             [kernel = std::move(llvm_kernel), object_path, cache_path, changed = llvm_changed_in_kernel(abi)]() mutable {
               std::string failure;
@@ -14724,7 +14883,7 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
                 return object_path + ": " + failure;
               }
               return std::string{};
-            }));
+            }, compile_units));
         // Objects are link inputs, so they belong in the module's artifact
         // manifest exactly like the generated .cpp files: a warm run that finds
         // one missing must miss cold rather than skip and then fail to link.
@@ -15228,14 +15387,31 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
         if (writes.empty() || !body.add_loop(entry, layout, error, false)) {
           return false;
         }
+        if (auto key = body.sharing_key(error, false); !key.empty()) {
+          Cgen_sim::Native_loop_ir ir;
+          ir.body = Cgen_llvm::Inline_body{std::move(key), layout.inputs, {}, false};
+          for (const auto& write : writes) {
+            const auto& slot = slots[write.slot_index];
+            ir.body.outputs.emplace_back(slot.width, slot.unsign);
+          }
+          ir.layout = layout;
+          for (const auto& port : g->get_io()->get_input_pin_decls()) {
+            ir.input_ports.push_back(port.port_id);
+          }
+          for (const auto& port : g->get_io()->get_output_pin_decls()) {
+            ir.output_ports.push_back(port.port_id);
+          }
+          shared_gen_->native_loop_ir[g] = std::move(ir);
+        }
         const auto object      = fstem + ".native-loop.llvm.o";
         const auto cache       = fstem + ".native-loop.llvm.k";
         const auto object_path = odir.empty() ? object : absl::StrCat(odir, "/", object);
         const auto cache_path  = !shared_gen_->incremental ? std::string{} : odir.empty() ? cache : absl::StrCat(odir, "/", cache);
+        const auto compile_units = body.instruction_count();
         object_jobs.push_back(object_workers->submit([kernel = std::move(body), object_path, cache_path]() mutable {
           std::string failure;
           return kernel.write_object(object_path, failure, false, cache_path) ? std::string{} : object_path + ": " + failure;
-        }));
+        }, compile_units));
         note_emitted(object);
         if (!cache_path.empty()) {
           note_emitted(cache);
@@ -16330,12 +16506,42 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
           if (owns_loop_walk) {
             const auto loop = node.subnode_loop();
             I(loop.has_value());
+            // A pure native loop (no clock input) is called directly with this
+            // version's operands; see `__native_direct` / `__native_direct_publish`
+            // in the wrapper. Each version passes its own operands, so the
+            // wrapper's bound `__in` is never read. It has no state, so its
+            // `__gen` never signals a commit and needs no re-dirtying.
+            // Same predicate as the wrapper's `pure_loop` (the child module may be
+            // emitted by another worker, so it is recomputed, not looked up).
+            bool direct = llvm_backend_ && !observation_on && !vcd_on;
+            if (direct) {
+              const auto shape = loop_storage_shape(node.get_subnode_graph());
+              direct           = shape.stateless && !shape.nested_loop;
+            }
+            if (direct) {
+              if (const auto child = node.get_subnode_graph(); child && !clock_guard_ports(child, port_cache).empty()) {
+                direct = false;
+              }
+              // Only when the loop has its color to itself: the color's dirty
+              // bit then says exactly "an operand changed". Inside a larger
+              // color the wrapper's bound-input generation still skips walks
+              // whose operands did not move (22 loops of a shared-FIFO arbiter:
+              // 2.28 -> 2.83 s when called unconditionally).
+              for (const size_t other : color_plan_->colors()[color_index].members) {
+                if (color_plan_->version_sites()[other].base_site != version.base_site) {
+                  direct = false;
+                  break;
+                }
+              }
+            }
+            std::vector<std::string> direct_args;
             for (const auto& decl : sio->get_input_pin_decls()) {
               if (loop->index_input && decl.port_id == *loop->index_input) {
                 continue;  // supplied as first + ordinal*step by the native wrapper
               }
               const auto sink = find_sink_pin(node, decl.name);
               if (sink.is_invalid()) {
+                direct_args.emplace_back(absl::StrCat(sub_member, ".__in.", cpp_port_path(decl.name)));
                 continue;
               }
               hhds::Pin_class driver;
@@ -16346,16 +16552,21 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
                 }
               }
               if (driver.is_invalid()) {
+                direct_args.emplace_back(absl::StrCat(sub_member, ".__in.", cpp_port_path(decl.name)));
                 continue;  // descriptor-only carry/activation input
               }
               const int    width             = decl.bits > 0 ? static_cast<int>(decl.bits) : 1;
               const size_t unresolved_before = unresolved_operands_;
-              emit_in_binding("  ",
-                              sub_member,
-                              cpp_port_path(decl.name),
-                              width,
-                              bind_operand(driver, width, decl.unsign),
-                              driver.get_graph() == g ? forward_io_of(driver, width) : nullptr);
+              if (direct) {
+                direct_args.emplace_back(bind_operand(driver, width, decl.unsign));
+              } else {
+                emit_in_binding("  ",
+                                sub_member,
+                                cpp_port_path(decl.name),
+                                width,
+                                bind_operand(driver, width, decl.unsign),
+                                driver.get_graph() == g ? forward_io_of(driver, width) : nullptr);
+              }
               // On the color root the cycle flag is noise (register reads set
               // it), so an unbound loop input would silently read 0: fail
               // closed on the count this binding added instead.
@@ -16438,7 +16649,14 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
                 }
               }
             }
-            if (version.version == livehd::sim::Color_plan::State_version::pre_rise) {
+            if (direct && version.version == livehd::sim::Color_plan::State_version::pre_rise) {
+              fout->append("  if (!__rt.__loop_advanced_", std::to_string(version.base_site), ") {\n");
+              fout->append("  __rt.__loop_advanced_", std::to_string(version.base_site), " = true;\n");
+              fout->append("  ", sub_member, ".__native_direct(", absl::StrJoin(direct_args, ", "), ");  // pure native loop walk\n");
+              fout->append("  }\n");
+            } else if (direct) {
+              fout->append("  ", sub_member, ".__native_direct_publish(", absl::StrJoin(direct_args, ", "), ");  // pure native loop publish\n");
+            } else if (version.version == livehd::sim::Color_plan::State_version::pre_rise) {
               // The walk COMMITS every lane's child state, and that state is
               // opaque to this plan (no state site, no `__state_commit` slot):
               // without the check below a design whose only state lives inside

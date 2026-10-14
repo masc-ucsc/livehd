@@ -91,7 +91,7 @@ from its private copy before partitioning.
 
 ## Parallel synthesis
 
-`lhd synth` and standalone `lhd pass abc` share `--set synth.threads=0`:
+`lhd synth` and standalone `lhd pass abc` share `--set abc.threads=0`:
 use up to 8 workers (or the machine's available logical CPUs when fewer) as a
 throughput-oriented automatic cap. A positive value explicitly caps that count
 and may opt into more workers; `1` selects serial mapping.
@@ -115,8 +115,23 @@ allowance for a private ABC session and its Liberty tables. Reservations cover
 workers that have not allocated yet; actual footprint takes precedence when
 it exceeds the projection. Insufficient headroom waits for running jobs; when
 no worker can be admitted, the caller maps serially under the existing memory
-limits. Unknown host memory also selects serial execution. `allow_oversize`
-does not bypass the parallel admission gate.
+limits. Unknown host memory also selects serial execution.
+
+There is no up-front design-size gate and no override: every design is
+attempted (setting the removed `allow_oversize` option is a usage error that
+names it). A region that will not fit under `memory_budget_mb` or the process
+ceiling is refused with a `memory-oversize` error whose message starts
+`TIMEOUT-memory:` and names the limit, before any ABC command runs and without
+a partial netlist. The admission also compares the process ADDRESS SPACE with
+the RLIMIT_AS backstop (virtual memory runs above RSS: malloc arenas, thread
+stacks, reservations), and refuses while a margin of the budget is still left,
+because ABC does not null-check its mallocs. An allocation that still fails
+(`std::bad_alloc` at the RLIMIT_AS backstop, for example during the unsampled
+whole-design flatten) ends the pass with a `memory-exhausted` TIMEOUT-memory
+error instead of a crash, and a SIGSEGV with the address space at the cap
+prints a `TIMEOUT-memory` diagnosis (exit 7) instead of "a livehd bug". A color
+that overruns `time_budget_ms` is refused with a `color-time-oversize` error whose
+message starts `TIMEOUT-time:`.
 
 `qor.json` includes `parallel.requested`, `limit`, `peak_workers`, `peak_abc`,
 `memory_limit_bytes`, and `memory_waits`. `peak_abc` counts overlapping ABC
@@ -541,7 +556,7 @@ The option namespace matches the command path (`lhd pass abc`); after the
 | `memory_max_bits` | with `memory=auto`, fold a memory whose `bits x size` is within this many bits and keep a larger one native, with a one-line note naming it (`0` = no size limit); `true`/`false` ignore it | `1024` |
 | `adder` | `auto` starts with RCA and trials CLA/CSKA; explicit `rca`/`cska`/`cla` disables adder selection | `auto` |
 | `barrel` | `auto` trials reversed mux stages; explicit `log`/`reverse` fixes stage order | `auto` |
-| `threads` | maximum ABC workers (`0` = automatic cap of 8 or available CPUs when fewer); `lhd synth` sets this through `synth.threads`, which defaults to `0` | `1` |
+| `threads` | maximum ABC workers (`0` = automatic cap of 8 or available CPUs when fewer); `lhd synth` sets this through `abc.threads`, which defaults to `0` | `1` |
 | `memory_budget_mb` | per-color physical-memory growth budget in MiB; the 16 GiB default is the soft target, independent of the process ceiling | `16384` |
 | `block_size` | CSKA/CLA block width (`0` = auto) | `0` |
 | `multiplier` | `auto` starts with serial partial-product addition and trials balanced `tree`; explicit `array`/`tree`/`csa`/`tdm` (alias `sn`) locks the multiplier and its internal adder | `auto` |

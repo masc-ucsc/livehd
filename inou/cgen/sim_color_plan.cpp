@@ -4120,6 +4120,7 @@ Color_plan Color_plan::discover(hhds::Graph* root, bool include_observations, bo
   // cut and a useful reuse unit. Tiny helpers can still fuse into their caller.
   struct Module_shape {
     size_t   sites           = 0;
+    size_t   compute_sites   = 0;  // sites minus pure wiring (slices, extensions, packing)
     size_t   height          = 0;
     uint64_t interface_words = 0;
   };
@@ -4146,11 +4147,16 @@ Color_plan Color_plan::discover(hhds::Graph* root, bool include_observations, bo
         continue;
       }
       ++shape.sites;
-      if (gu::type_op_of(node) == Ntype_op::Sub && !node.is_loop_subnode()) {
+      const auto op = gu::type_op_of(node);
+      if (op != Ntype_op::Get_mask && op != Ntype_op::Sext && op != Ntype_op::Concat && op != Ntype_op::Sub) {
+        ++shape.compute_sites;
+      }
+      if (op == Ntype_op::Sub && !node.is_loop_subnode()) {
         if (auto child = node.get_subnode_graph()) {
-          const auto nested  = module_shape(child.get());
-          shape.sites       += nested.sites;
-          shape.height       = std::max(shape.height, nested.height + 1);
+          const auto nested    = module_shape(child.get());
+          shape.sites         += nested.sites;
+          shape.compute_sites += nested.compute_sites;
+          shape.height         = std::max(shape.height, nested.height + 1);
         }
       }
     }
@@ -4172,6 +4178,11 @@ Color_plan Color_plan::discover(hhds::Graph* root, bool include_observations, bo
   // `fence_ratio` (sim.tune.fence; 0 = always). Apply the same profitability
   // rule to reused bodies: reuse saves compilation but does not remove the
   // runtime ABI traffic at each instance. Only very large bodies force a fence.
+  // Skipping saves only COMPUTING sites: slices, extensions and packing are
+  // free wiring in the generated code. The seam itself also has a fixed cost
+  // (one more color to dispatch and dirty-track), charged as one extra
+  // interface word: br_enc_gray2bin's 32 reductions over a 2-word interface,
+  // or br_flow_join's 53 operations over 4 words, run 1.5x slower fenced.
   constexpr size_t kLargeBodyFenceSites = 1024;
   const int64_t    body_ratio = fence_ratio >= 0 ? fence_ratio : kDefaultFenceRatio;
   std::vector<Control_trie_node> module_trie(1);
@@ -4184,8 +4195,8 @@ Color_plan Color_plan::discover(hhds::Graph* root, bool include_observations, bo
       continue;
     }
     const bool fenced = shape.sites >= kLargeBodyFenceSites
-                        || static_cast<int64_t>(shape.sites)
-                               >= body_ratio * static_cast<int64_t>(std::max<uint64_t>(1, shape.interface_words));
+                        || static_cast<int64_t>(shape.compute_sites)
+                               >= body_ratio * static_cast<int64_t>(std::max<uint64_t>(1, shape.interface_words) + 1);
     if (!fenced) {
       continue;
     }
@@ -4598,15 +4609,15 @@ Color_plan Color_plan::discover(hhds::Graph* root, bool include_observations, bo
         old_users[read.base_site].push_back(use.consumer_version);
       }
     }
-    for (size_t base = 0; base < plan.sites_.size(); ++base) {
+    const auto storage_eligible = [&](size_t base) {
       const auto update = state_updates[base];
       if (update == invalid_index || under_compact_loop(plan.sites_[base])) {
-        continue;
+        return false;
       }
       const auto& node = plan.sites_[base].node;
       const auto  op   = gu::type_op_of(node);
       if (op != Ntype_op::Flop && op != Ntype_op::Memory) {
-        continue;
+        return false;
       }
       bool eligible    = true;
       bool plain_clock = false;
@@ -4633,9 +4644,103 @@ Color_plan Color_plan::discover(hhds::Graph* root, bool include_observations, bo
           }
         }
       }
-      if (!eligible || !plain_clock) {
+      return eligible && plain_clock;
+    };
+    // The depth-first walk finishes a register's next-state cone as soon as it
+    // is ready, so `lfsr = f(lfsr)` often updates BEFORE other readers of the
+    // old `lfsr` (a DUT fed from the same register) run, and the proof below
+    // would fall back to a staged copy. A flop's update has no consumer in
+    // its own slot, so it can sink to just after its last old-value reader
+    // without breaking any dependency: renumber once, then prove as before.
+    {
+      // A consumer in a LATER slot (the post-fall publish of the new value)
+      // runs after this whole slot anyway.
+      std::vector<bool> produces(plan.version_sites_.size(), false);
+      const auto        same_slot_use = [&](size_t producer, size_t consumer) {
+        if (producer != invalid_index && consumer != invalid_index
+            && plan.version_sites_[producer].slot == plan.version_sites_[consumer].slot) {
+          produces[producer] = true;
+        }
+      };
+      for (const auto& edge : plan.version_dependencies_) {
+        same_slot_use(edge.producer, edge.consumer);
+      }
+      for (const auto& use : plan.value_uses_) {
+        same_slot_use(use.producer_version, use.consumer_version);
+      }
+      std::vector<uint64_t> key(plan.version_sites_.size());
+      std::vector<size_t>   at_order(plan.version_sites_.size());
+      for (size_t v = 0; v < key.size(); ++v) {
+        key[v]                                         = static_cast<uint64_t>(plan.version_sites_[v].execution_order) * 2;
+        at_order[plan.version_sites_[v].execution_order] = v;
+      }
+      // Never sink across a fence region: the coarsener cuts a color where the
+      // owner changes, and the next-state value would become a boundary slot
+      // (br_tracker_reorder_buffer_flops: 69 -> 74 slots, 1.61 -> 1.80 s).
+      // region_end[p] = last order reachable from p without changing owner.
+      // A large region is later cut by live-value pressure as well, which this
+      // pass cannot see: sinking there moves updates into another color just
+      // the same (picorv32: 529 -> 585 boundary slots, 6% slower). Only sink
+      // inside a region small enough to stay one color.
+      constexpr uint64_t    kSinkRegionVersions = 256;
+      std::vector<uint64_t> region_start(at_order.size());
+      for (size_t p = 0; p < at_order.size(); ++p) {
+        const auto& here = plan.version_sites_[at_order[p]];
+        region_start[p]  = p;
+        if (p > 0) {
+          const auto& prev = plan.version_sites_[at_order[p - 1]];
+          if (prev.slot == here.slot && site_module_owner[prev.base_site] == site_module_owner[here.base_site]) {
+            region_start[p] = region_start[p - 1];
+          }
+        }
+      }
+      std::vector<uint64_t> region_end(at_order.size());
+      for (size_t p = at_order.size(); p-- > 0;) {
+        const auto& here = plan.version_sites_[at_order[p]];
+        region_end[p]    = p;
+        if (p + 1 < at_order.size()) {
+          const auto& next = plan.version_sites_[at_order[p + 1]];
+          if (next.slot == here.slot && site_module_owner[next.base_site] == site_module_owner[here.base_site]) {
+            region_end[p] = region_end[p + 1];
+          }
+        }
+      }
+      bool moved = false;
+      for (size_t base = 0; base < plan.sites_.size(); ++base) {
+        const auto update = state_updates[base];
+        if (gu::type_op_of(plan.sites_[base].node) != Ntype_op::Flop || !storage_eligible(base) || produces[update]) {
+          continue;
+        }
+        const auto& upd    = plan.version_sites_[update];
+        uint64_t    last   = upd.execution_order;
+        bool        stable = true;
+        for (const size_t user : old_users[base]) {
+          if (user == update) {
+            continue;
+          }
+          stable &= plan.version_sites_[user].slot == upd.slot;
+          last = std::max<uint64_t>(last, plan.version_sites_[user].execution_order);
+        }
+        const auto at = upd.execution_order;
+        if (stable && last != at && region_end[at] >= last && region_end[at] - region_start[at] < kSinkRegionVersions) {
+          key[update] = last * 2 + 1;
+          moved       = true;
+        }
+      }
+      if (moved) {
+        std::vector<size_t> by_key(key.size());
+        std::iota(by_key.begin(), by_key.end(), 0);
+        std::ranges::sort(by_key, [&](size_t a, size_t b) { return std::tie(key[a], a) < std::tie(key[b], b); });
+        for (size_t rank = 0; rank < by_key.size(); ++rank) {
+          plan.version_sites_[by_key[rank]].execution_order = rank;
+        }
+      }
+    }
+    for (size_t base = 0; base < plan.sites_.size(); ++base) {
+      if (!storage_eligible(base)) {
         continue;
       }
+      const auto update          = state_updates[base];
       const auto precedes_update = [&](size_t user) {
         return user == update || plan.version_sites_[user].execution_order < plan.version_sites_[update].execution_order;
       };
@@ -4828,7 +4933,9 @@ Color_plan Color_plan::discover(hhds::Graph* root, bool include_observations, bo
     // spilling the whole carry at each seam can cost more than native lowering
     // saves, especially for chains of packed-state updates. Both backends use
     // this same rule, and the loop itself always remains compact.
-    if (narrow_loop[plan.version_sites_[version].base_site]) {
+    // The LLVM backend embeds a pure rolled loop in its caller's kernel, so
+    // there is nothing to keep out of the surrounding cone.
+    if (!separate_runtime_calls && narrow_loop[plan.version_sites_[version].base_site]) {
       return Color_plan::invalid_index - 1;
     }
     const bool  separate_sub = op == Ntype_op::Sub && site.kind != Site_kind::loop_control;

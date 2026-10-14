@@ -10,12 +10,12 @@
 #include <limits>
 #include <map>
 #include <memory>
+#include <new>
 #include <print>
 #include <set>
 #include <string>
 #include <system_error>
 #include <thread>
-#include <unordered_map>
 #include <unordered_set>
 
 #include "abc_map.hpp"
@@ -24,6 +24,7 @@
 #include "design_prepare.hpp"
 #include "diag.hpp"
 #include "graph_library_singleton.hpp"
+#include "host_mem.hpp"
 #include "json_util.hpp"
 #include "liberty_dff.hpp"
 #include "memory_module.hpp"
@@ -32,6 +33,7 @@
 #include "pass_liberty.hpp"
 #include "pass_partition.hpp"
 #include "predict_abc_size.hpp"  // sat_add
+#include "property_types.hpp"
 #include "query.hpp"
 #include "region_cache.hpp"
 #include "satopt.hpp"
@@ -252,10 +254,6 @@ void Pass_abc::add_mapping_labels(Eprp_method& m) {
                        "soft wall-time limit for one mapped color in milliseconds (0 disables); a completed "
                        "oversize color fails with its name so pass.color.synth.max_gate can be reduced",
                        "0");
-  m.add_label_optional("allow_oversize",
-                       "true|false skip memory admission and map the region regardless. It may exhaust "
-                       "physical memory and be killed by the OS",
-                       "false");
   m.add_label_optional(
       "multiplier",
       "auto|array|tree|csa|tdm (alias sn): partial-product summation; auto trials a balanced tree on critical paths. An explicit "
@@ -697,11 +695,43 @@ void emit_qor(const std::vector<livehd::abc::Region_qor>& qor, std::string_view 
   ofs << j << "\n";
 }
 
+// An allocation failed under the process memory backstop (lhd_main arms
+// RLIMIT_AS at this budget, so a runaway allocation fails instead of taking
+// the host down). By the time this runs the failing frame has unwound and the
+// Mapper's destructor has stopped every ABC session, freeing their networks.
+[[noreturn]] void fail_out_of_memory() {
+  const uint64_t budget = livehd::cost::configured_budget_bytes();
+  livehd::diag::err("pass.abc", "memory-exhausted", "unsupported")
+      .msg("{}: pass.abc ran out of memory (an allocation failed) under {}",
+           livehd::lec::outcome_word(livehd::lec::Outcome::Timeout_memory),
+           budget == 0 ? std::string{"the host's memory (no process memory budget could be computed)"}
+                       : std::format("the process memory budget of {} MiB (the RLIMIT_AS backstop: LIVEHD_MEMORY_BUDGET_MB, "
+                                     "else physical RAM minus max(2 GiB, 25%))",
+                                     budget >> 20))
+      .hint("color into smaller regions and map those (`lhd pass color synth --top <top> lg:... --stats` sizes them first), "
+            "or synthesize on a host with more memory")
+      .fatal();
+}
+
 }  // namespace
 
 void Pass_abc::work(Eprp_var& var) { work_with(var, {}); }
 
+// The memory boundary. ABC runs in-process (no forked worker), so a C++
+// allocation failure -- the unsampled whole-design flatten and partition, a
+// bit-blast, a graph copy -- unwinds to here as std::bad_alloc and leaves as a
+// clean TIMEOUT-memory diagnostic rather than an exception the kernel can only
+// call internal. The per-region admission (memory_budget_mb, the process
+// ceiling) refuses before ABC's own C allocations get near the backstop.
 void Pass_abc::work_with(Eprp_var& var, const std::function<void(livehd::abc::Map_options&)>& configure) {
+  try {
+    map_with(var, configure);
+  } catch (const std::bad_alloc&) {
+    fail_out_of_memory();
+  }
+}
+
+void Pass_abc::map_with(Eprp_var& var, const std::function<void(livehd::abc::Map_options&)>& configure) {
   const auto unroll_carry_text = var.get("unroll_carry", "true");
   if (unroll_carry_text != "true" && unroll_carry_text != "false" && unroll_carry_text != "1" && unroll_carry_text != "0"
       && unroll_carry_text != "on" && unroll_carry_text != "off") {
@@ -758,7 +788,6 @@ void Pass_abc::work_with(Eprp_var& var, const std::function<void(livehd::abc::Ma
   auto reg_margin          = std::string{var.get("reg_margin", "auto")};
   auto mem_budget_s        = std::string{var.get("memory_budget_mb", "16384")};
   auto time_budget_s       = std::string{var.get("time_budget_ms", "0")};
-  bool allow_oversize      = truthy(var.get("allow_oversize", "false"));
   auto flatten             = livehd::partition::parse_flatten_mode(var.get("flatten", "auto"), "pass.abc");
 
   livehd::abc::Region_opts_map region_opts;
@@ -1042,17 +1071,8 @@ void Pass_abc::work_with(Eprp_var& var, const std::function<void(livehd::abc::Ma
   opts.memory_budget_mb = memory_budget_mb;
   opts.threads          = threads;
   opts.time_budget_ms   = time_budget_ms;
-  opts.allow_oversize   = allow_oversize;
   if (configure) {
     configure(opts);
-  }
-  if (allow_oversize) {
-    // Loud on purpose: this is the flag that lets a run take the machine down,
-    // so it must be visible in the log of whatever ran afterwards.
-    livehd::diag::warn("pass.abc", "allow-oversize", "unsupported")
-        .msg("pass.abc.allow_oversize=true: memory admission is DISABLED for every region")
-        .hint("an oversize region can exhaust physical memory and be killed by the OS")
-        .emit();
   }
 
   if (out.empty()) {
@@ -1078,48 +1098,12 @@ void Pass_abc::work_with(Eprp_var& var, const std::function<void(livehd::abc::Ma
     }
   }
 
-  // Size gate. When ABC is about to inline the WHOLE hierarchy and bit-blast it
-  // as a single unit, refuse a very large design up front. The per-region RSS
-  // admission (Mapper::over_budget) only samples DURING bit-blast; the
-  // whole-design flatten + partition that precedes it is unsampled, and that is
-  // where a huge design first exhausts memory (a flat XSCore run reached 221 GB).
-  // Only meaningful for whole-design flatten -- the per-def path bit-blasts small
-  // units, each already guarded region-by-region, so the aggregate count there
-  // would false-refuse a run that is actually fine.
-  if (const uint64_t threshold = livehd::graph_util::large_design_node_threshold(); !allow_oversize && threshold != UINT64_MAX) {
-    std::unordered_map<hhds::Gid, hhds::Graph*> gid2graph;
-    hhds::Graph*                                top_g = nullptr;
-    for (const auto& g : resolve_graphs) {
-      if (!g) {
-        continue;
-      }
-      gid2graph[g->get_gid()] = g.get();
-      if (top_g == nullptr && (top.empty() || g->get_name() == top)) {
-        top_g = g.get();
-      }
-    }
-    // ONE unit, not merely "flattened": a virtual-flat coloring (pass.color
-    // synth) also flattens, but into many `max_gate`-bounded regions that
-    // Mapper::over_budget already guards one at a time -- refusing the whole
-    // design there would reject a run that is fine.
-    if (top_g != nullptr && livehd::partition::flatten_is_single_module(top_g, flatten)) {
-      const uint64_t nodes = livehd::graph_util::flat_node_count(top_g, [&](hhds::Gid gid) -> hhds::Graph* {
-        auto it = gid2graph.find(gid);
-        return it == gid2graph.end() ? nullptr : it->second;
-      });
-      if (nodes > threshold) {
-        livehd::diag::err("pass.abc", "large-design", "unsupported")
-            .msg("refusing to synthesize a very large flattened design as one unit: {} nodes (over {})", nodes, threshold)
-            .hint(std::format("color into smaller regions and synthesize per-region: "
-                              "`lhd pass color synth --top {} lg:... --stats`",
-                              top))
-            .hint(
-                "--set pass.abc.allow_oversize=true synthesizes it anyway -- it may exhaust the machine "
-                "(a whole-design XSCore run reached 221 GB before the OS killed it)")
-            .fatal();
-      }
-    }
-  }
+  // No up-front design-size gate: every design is attempted (owner ruling
+  // 2026-10-14). The per-region admission (Mapper::over_budget) refuses a
+  // region that will not fit while it is bit-blasted, and an allocation that
+  // still fails -- the whole-design flatten + partition before it is unsampled
+  // -- unwinds as std::bad_alloc into work_with's memory boundary, which
+  // reports TIMEOUT-memory against the process memory backstop.
 
   if (library.empty()) {
     library = default_library();
@@ -1375,23 +1359,32 @@ void Pass_abc::work_with(Eprp_var& var, const std::function<void(livehd::abc::Ma
       policy.min_timeout       = 1;
       policy.hard_timeout_mult = 2;
       auto       result        = livehd::lec::prove_equal_isolated(ref, impl, policy, &definitions);
-      const bool proven        = result.verdict == livehd::lec::Verdict::Proven && !result.bounded && !result.nothing_compared;
-      std::print("[synth.tune] validation={} region={} result={} bounded={} detail={}\n",
+      // Only an unbounded proof authorizes the tuned mapping; every other
+      // outcome (bounded, vacuous, a timeout, the pinned ind engine giving up)
+      // keeps the untuned policy.
+      const auto outcome       = livehd::lec::pinned_engine_outcome(result.verdict,
+                                                                    result.bounded,
+                                                                    result.nothing_compared,
+                                                                    result.unsupported,
+                                                                    result.detail);
+      std::print("[synth.tune] validation={} region={} result={} detail={}\n",
                  opts.tune_validate,
                  name,
-                 proven                                            ? "proven"
-                 : result.verdict == livehd::lec::Verdict::Refuted ? "refuted"
-                                                                   : "unknown",
-                 result.bounded,
+                 livehd::lec::outcome_word(outcome, result.checked_steps > 0 ? result.checked_steps : policy.bound),
                  result.detail);
       if (result.verdict == livehd::lec::Verdict::Refuted) {
         opts.tune_store->authorize_all(false);
         opts.tune_store->save();
-        livehd::diag::err("pass.abc", "synth-tune-refuted", "unsupported")
-            .msg("synthesis tuning refuted for {}: {}", name, result.witness)
+        // The `-refuted-cex` code makes the kernel exit 10 (equiv_fail): a real
+        // counterexample, exactly like `lhd lec`'s REFUTED-cex.
+        livehd::diag::err("pass.abc", "synth-tune-refuted-cex", "unsupported")
+            .msg("{}: synthesis tuning changed the function of {} (counterexample: {})",
+                 livehd::lec::outcome_word(outcome),
+                 name,
+                 result.witness.empty() ? std::string{"none recorded"} : result.witness)
             .fatal();
       }
-      return proven;
+      return outcome == livehd::lec::Outcome::Proven_full;
     };
     if (opts.tune_validate == "region") {
       mapper.validate_tuning(proof);
@@ -1433,19 +1426,21 @@ void Pass_abc::work_with(Eprp_var& var, const std::function<void(livehd::abc::Ma
   // .fatal() throws, and build_decomposition's callback runs above stop(), so
   // throwing from the region would skip Abc_Stop and leak the frame plus every
   // live network -- the opposite of what a memory guard should do.
+  // pass.abc sets no caller admission (Map_options::admission), so every
+  // admission refusal is a memory limit caught before the allocation: name it
+  // with the formal tools' word for that, TIMEOUT-memory.
   if (const auto* refusal = mapper.admission_refusal()) {
     livehd::diag::err("pass.abc", "memory-oversize", "unsupported")
-        .msg("{}", *refusal)
+        .msg("{}: {}", livehd::lec::outcome_word(livehd::lec::Outcome::Timeout_memory), *refusal)
         .hint(std::format("re-color into SMALLER regions with a tighter threshold, then check them first: "
                           "`lhd pass color synth --top {} lg:... --set pass.color.synth.max_gate=<smaller> --stats` "
                           "(lower it until the region fits). max_gate is the knob for the DEFAULT `cones` "
                           "coloring; under `--set pass.color.synth.mode=synth|pipe` the size window "
                           "`pass.color.synth.max_ge` is what splits a region instead",
                           top))
-        .hint("--set pass.abc.memory_budget_mb=N pins the ceiling explicitly (reproducible hosts, CI)")
         .hint(
-            "--set pass.abc.allow_oversize=true runs it anyway -- it may exhaust the machine (a whole-design "
-            "XSCore run reached 221 GB before the OS killed it)")
+            "--set pass.abc.memory_budget_mb=N raises or pins the per-color growth ceiling (reproducible hosts, CI); "
+            "the process ceiling is the memory backstop and has no override")
         .fatal();
   }
 
@@ -1485,8 +1480,10 @@ void Pass_abc::work_with(Eprp_var& var, const std::function<void(livehd::abc::Ma
     file << livehd::synth_attr::json(doc) << '\n';
   }
   if (const auto* refusal = mapper.time_refusal()) {
+    // A clock limit, named with the formal tools' word for it (TIMEOUT-time);
+    // the exit behavior is unchanged (category unsupported).
     livehd::diag::err("pass.abc", "color-time-oversize", "unsupported")
-        .msg("{}", *refusal)
+        .msg("{}: {}", livehd::lec::outcome_word(livehd::lec::Outcome::Timeout_time), *refusal)
         .hint(std::format("re-color into more, smaller regions: `lhd pass color synth --top {} lg:... "
                           "--set pass.color.synth.max_gate=<smaller>` (or `--set pass.color.synth.max_ge=<smaller>` "
                           "when the coloring used mode=synth|pipe); full/cold may take longer, warm runs should reuse "

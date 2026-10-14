@@ -80,19 +80,25 @@ Verdict_cache::Verdict_cache(std::string workdir, uint64_t salt) : workdir_(std:
   if (!doc.HasMember("salt") || !doc["salt"].IsString() || want_salt != doc["salt"].GetString()) {
     return;  // prover changed: every cached verdict is stale
   }
-  if (doc.HasMember("unknowns") && doc["unknowns"].IsObject()) {
-    for (auto it = doc["unknowns"].MemberBegin(); it != doc["unknowns"].MemberEnd(); ++it) {
-      if (!it->value.IsObject()) {
+  // The known-timeout ledger. A record must NAME its cause and that cause must
+  // be a time limit: the legacy "unknowns" section (no cause field) ledgered
+  // every undecided cause -- an encoder refusal, an unpaired correspondence --
+  // and replaying one of those as "known timeout" would turn an exit-7 refusal
+  // into an exit-0 warning. Such records are dropped, never trusted.
+  if (doc.HasMember("timeouts") && doc["timeouts"].IsObject()) {
+    for (auto it = doc["timeouts"].MemberBegin(); it != doc["timeouts"].MemberEnd(); ++it) {
+      if (!it->value.IsObject() || !it->value.HasMember("cause") || !it->value["cause"].IsString()
+          || std::string_view{it->value["cause"].GetString()} != kTimeoutLedgerCause) {
         continue;
       }
-      Unknown_attempt a;
+      Timeout_attempt a;
       if (it->value.HasMember("timeout") && it->value["timeout"].IsInt()) {
         a.timeout = it->value["timeout"].GetInt();
       }
       if (it->value.HasMember("ms") && it->value["ms"].IsInt64()) {
         a.elapsed_ms = it->value["ms"].GetInt64();
       }
-      unknowns_.emplace(it->name.GetString(), a);
+      timeouts_.emplace(it->name.GetString(), a);
     }
   }
   // Cone verdicts: a bare digest list (the digest IS the whole claim), inside
@@ -116,6 +122,14 @@ Verdict_cache::Verdict_cache(std::string workdir, uint64_t salt) : workdir_(std:
       }
       Cached_verdict v;
       v.bounded = it->value["bounded"].GetBool();
+      // A bounded proof replays as PROVEN-bounded(n): without its depth the
+      // replay cannot say how deep the original run checked, so drop it.
+      if (v.bounded) {
+        if (!it->value.HasMember("depth") || !it->value["depth"].IsInt() || it->value["depth"].GetInt() <= 0) {
+          continue;
+        }
+        v.depth = it->value["depth"].GetInt();
+      }
       if (it->value.HasMember("engine") && it->value["engine"].IsString()) {
         v.engine = it->value["engine"].GetString();
       }
@@ -184,10 +198,10 @@ void Verdict_cache::clear_pair_hint(const std::string& entity) {
   }
 }
 
-bool Verdict_cache::skip_unknown(const std::string& key, int timeout_s) const {
+bool Verdict_cache::skip_timeout(const std::string& key, int timeout_s) const {
   std::lock_guard lock(mutex_);
-  auto            it = unknowns_.find(key);
-  if (it == unknowns_.end()) {
+  auto            it = timeouts_.find(key);
+  if (it == timeouts_.end()) {
     return false;
   }
   // A re-attempt only makes sense with MORE budget than the recorded attempt
@@ -200,11 +214,11 @@ bool Verdict_cache::skip_unknown(const std::string& key, int timeout_s) const {
   return skip;
 }
 
-void Verdict_cache::note_unknown(const std::string& key, Unknown_attempt a) {
+void Verdict_cache::note_timeout(const std::string& key, Timeout_attempt a) {
   std::lock_guard lock(mutex_);
-  auto [it, inserted] = unknowns_.try_emplace(key, a);
+  auto [it, inserted] = timeouts_.try_emplace(key, a);
   if (!inserted) {
-    // Keep the LARGEST budget that came back Unknown (0 = unbounded wins).
+    // Keep the LARGEST budget that ran out of time (0 = unbounded wins).
     // NOTE: operator[] would default-construct timeout=0 == "unbounded" and
     // wrongly suppress future bigger-budget retries — hence try_emplace.
     auto& rec = it->second;
@@ -251,30 +265,32 @@ void Verdict_cache::save() const {
   out += "  \"verdicts\": {\n";
   for (size_t i = 0; i < vkeys.size(); ++i) {
     const auto& v  = verdicts_.at(vkeys[i]);
-    out           += std::format("    \"{}\": {{\"engine\": \"{}\", \"detail\": \"{}\", \"ms\": {}, \"bounded\": {}}}{}\n",
+    out           += std::format("    \"{}\": {{\"engine\": \"{}\", \"detail\": \"{}\", \"ms\": {}, \"bounded\": {}{}}}{}\n",
                                  esc(vkeys[i]),
                                  esc(v.engine),
                                  esc(v.detail),
                                  v.elapsed_ms,
                                  v.bounded,
+                                 v.bounded ? std::format(", \"depth\": {}", v.depth) : std::string{},
                                  i + 1 < vkeys.size() ? "," : "");
   }
   out += "  },\n";
-  out += "  \"unknowns\": {\n";
+  out += "  \"timeouts\": {\n";
   {
-    std::vector<std::string> ukeys;
-    ukeys.reserve(unknowns_.size());
-    for (const auto& [k, _] : unknowns_) {
-      ukeys.push_back(k);
+    std::vector<std::string> tkeys;
+    tkeys.reserve(timeouts_.size());
+    for (const auto& [k, _] : timeouts_) {
+      tkeys.push_back(k);
     }
-    std::sort(ukeys.begin(), ukeys.end());
-    for (size_t i = 0; i < ukeys.size(); ++i) {
-      const auto& a  = unknowns_.at(ukeys[i]);
-      out            += std::format("    \"{}\": {{\"timeout\": {}, \"ms\": {}}}{}\n",
-                                    esc(ukeys[i]),
+    std::sort(tkeys.begin(), tkeys.end());
+    for (size_t i = 0; i < tkeys.size(); ++i) {
+      const auto& a  = timeouts_.at(tkeys[i]);
+      out            += std::format("    \"{}\": {{\"cause\": \"{}\", \"timeout\": {}, \"ms\": {}}}{}\n",
+                                    esc(tkeys[i]),
+                                    kTimeoutLedgerCause,
                                     a.timeout,
                                     a.elapsed_ms,
-                                    i + 1 < ukeys.size() ? "," : "");
+                                    i + 1 < tkeys.size() ? "," : "");
     }
   }
   out += "  },\n";

@@ -13,11 +13,14 @@
 #include "fork_race.hpp"
 
 #include <signal.h>
+#include <sys/resource.h>
 #include <sys/wait.h>
 #include <unistd.h>
 
 #include <cerrno>
 #include <chrono>
+#include <new>
+#include <stdexcept>
 #include <string>
 #include <string_view>
 
@@ -50,7 +53,36 @@ void expect_no_children() {
   EXPECT_EQ(errno, ECHILD);
 }
 
-TEST(ForkRace, StalledRacersAreKilledAtTheDeadline) {
+// These cases test the race protocol independently of machine load. Admission
+// under CPU/memory pressure is covered by JobManager's injected-probe tests.
+class ForkRace : public testing::Test {
+  livehd::Job_manager::Probe previous_;
+  void SetUp() override {
+    auto& manager=livehd::Job_manager::global();
+    previous_=manager.exchange_probe([] {
+      auto h=livehd::host_resources();h.cpus=4;h.load=0;h.ram=64ull<<30;h.available=32ull<<30;return h;
+    });
+    manager.configure(4);
+  }
+  void TearDown() override {
+    auto& manager=livehd::Job_manager::global();manager.exchange_probe(std::move(previous_));manager.configure(0);
+  }
+};
+
+TEST_F(ForkRace, OneSlotRunsQueuedMethodsWithoutDeadlock) {
+  livehd::Job_manager::global().configure(1);
+  auto race=fork_race<int>(3,[](int i){ return i; },ser,deser,[](int i,const int&){return i==2;},2000);
+  EXPECT_EQ(race.winner,2);EXPECT_TRUE(race.started[0] && race.started[1] && race.started[2]);
+  expect_no_children();
+}
+TEST_F(ForkRace, QueuedArmsCannotExtendTheDeadline) {
+  livehd::Job_manager::global().configure(1);
+  auto race=fork_race<int>(2,[](int){sleep(30);return 1;},ser,deser,[](int,const int&){return false;},100);
+  EXPECT_TRUE(race.deadline_hit);EXPECT_TRUE(race.started[0]);EXPECT_FALSE(race.started[1]);
+  EXPECT_TRUE(race.queued[1]);EXPECT_LT(race.elapsed_ms,2000);expect_no_children();
+}
+
+TEST_F(ForkRace, StalledRacersAreKilledAtTheDeadline) {
   // Both racers stall far past the 2 s deadline (the stuck-in-preprocessing
   // shape). The race must return in about the deadline, not after 30 s.
   auto run = [](int i) -> int {
@@ -74,7 +106,7 @@ TEST(ForkRace, StalledRacersAreKilledAtTheDeadline) {
   expect_no_children();
 }
 
-TEST(ForkRace, FinishedRacerKeptStalledRacerKilled) {
+TEST_F(ForkRace, FinishedRacerKeptStalledRacerKilled) {
   // Racer 0 answers quickly but is not trustworthy, so the race keeps waiting
   // for racer 1 -- which is stuck. Racer 0's result survives; racer 1 is killed.
   auto run = [](int i) -> int {
@@ -97,7 +129,7 @@ TEST(ForkRace, FinishedRacerKeptStalledRacerKilled) {
   expect_no_children();
 }
 
-TEST(ForkRace, TrustedWinnerCancelsStalledLoserWithoutDeadline) {
+TEST_F(ForkRace, TrustedWinnerCancelsStalledLoserWithoutDeadline) {
   // The early-cancel path is unchanged: a trusted winner kills the stuck loser
   // long before the (generous) deadline, and that is not a timeout.
   auto run = [](int i) -> int {
@@ -117,7 +149,7 @@ TEST(ForkRace, TrustedWinnerCancelsStalledLoserWithoutDeadline) {
   expect_no_children();
 }
 
-TEST(ForkRace, NormalRaceUnderDeadlineCollectsEveryResult) {
+TEST_F(ForkRace, NormalRaceUnderDeadlineCollectsEveryResult) {
   auto run   = [](int i) -> int { return 10 * (i + 1); };
   auto trust = [](int, const int&) { return false; };
   auto race  = fork_race<int>(3, run, ser, deser, trust, 30000);
@@ -150,7 +182,7 @@ pid_t read_pid(int fd) {
   return p;
 }
 
-TEST(ForkRace, DeadlineKillTakesTheRacersGrandchildren) {
+TEST_F(ForkRace, DeadlineKillTakesTheRacersGrandchildren) {
   // Each racer forks a helper that runs on its own (the ABC cone-pass child
   // shape: only the racer enforces its clocks) and reports the helper's pid.
   // Killing just the racer pid left the helper reparented to init, burning a
@@ -184,7 +216,7 @@ TEST(ForkRace, DeadlineKillTakesTheRacersGrandchildren) {
   expect_no_children();
 }
 
-TEST(ForkRace, RacersDieWithTheirParent) {
+TEST_F(ForkRace, RacersDieWithTheirParent) {
   // An outer watchdog that kills only the lhd process (or Ctrl-C reaching it)
   // must not leave racers running: they exit once their parent is gone.
   int p[2];
@@ -222,7 +254,7 @@ TEST(ForkRace, RacersDieWithTheirParent) {
   expect_no_children();
 }
 
-TEST(ForkRace, DeadlineFormula) {
+TEST_F(ForkRace, DeadlineFormula) {
   livehd::lec::Lec_options o;
   o.timeout = 0;
   EXPECT_EQ(race_deadline_ms(o), 0) << "formal.timeout=0 is unbounded";
@@ -245,7 +277,7 @@ TEST(ForkRace, DeadlineFormula) {
 // deadline must never undercut that: a flat floor killed ind-first at 14 s on a
 // 24-obligation design whose documented bound was 1 + 24x3 = 73 s, throwing
 // away every unbounded induction proof.
-TEST(ForkRace, VerifyDeadlineScalesWithUnits) {
+TEST_F(ForkRace, VerifyDeadlineScalesWithUnits) {
   using livehd::lec::verify_race_deadline_ms;
   livehd::lec::Lec_options o;
   o.timeout = 0;
@@ -269,6 +301,69 @@ TEST(ForkRace, VerifyDeadlineScalesWithUnits) {
   // phase=full runs just_reset and after_reset back to back in one strategy.
   o.phase = "full";
   EXPECT_EQ(verify_race_deadline_ms(o, 24), (2 * (60 + 24 * 20) + 15) * 1000LL);
+}
+
+// An exception that escapes a racer's method must never unwind into the
+// caller's frames inside the child (the child would then run the rest of the
+// parent's program as a second process). It exits with a decoded status
+// instead: a std::bad_alloc is OUT OF MEMORY (TIMEOUT-memory at the top), any
+// other escape an engine crash (REFUTED-unexplained). Ruling 2026-10-14: an
+// out-of-memory run is caught and reported, never a crash.
+TEST_F(ForkRace, EscapedExceptionsAreDecodedNotUnwound) {
+  auto run = [](int i) -> int {
+    if (i == 0) {
+      throw std::bad_alloc();
+    }
+    throw std::runtime_error("boom");
+  };
+  auto race = fork_race<int>(2, run, ser, deser, [](int, const int&) { return false; }, 10000);
+  ASSERT_TRUE(race.forked);
+  for (int i = 0; i < 2; ++i) {
+    EXPECT_TRUE(race.done[i]);
+    EXPECT_FALSE(race.timed_out[i]);
+    EXPECT_EQ(race.results[i], 0) << "a dead racer must carry NO result";
+  }
+  EXPECT_NE(race.death[0].find("out of memory"), std::string::npos) << race.death[0];
+  EXPECT_NE(race.death[1].find("engine crash"), std::string::npos) << race.death[1];
+  EXPECT_EQ(livehd::lec::undecided_outcome(race.death[0], false, false), livehd::lec::Outcome::Timeout_memory);
+  EXPECT_EQ(livehd::lec::undecided_outcome(race.death[1], false, false), livehd::lec::Outcome::Refuted_unexplained);
+  expect_no_children();
+}
+
+// The wait-status decoder on real children: a SIGKILL LiveHD did not send is
+// the OS/cgroup out-of-memory killer; a tiny child that faults is a crash,
+// never blamed on the memory backstop; the parent's own wall-backstop kill is
+// left for the caller to word.
+TEST(ChildDeath, DecodesMemoryKillsAndCrashes) {
+  auto die = [](int how) {
+    const pid_t c = ::fork();
+    if (c == 0) {
+      if (how == 0) {
+        ::_exit(livehd::lec::kChildExitBadAlloc);
+      }
+      const int sig = how == 1 ? SIGKILL : SIGSEGV;
+      ::signal(sig, SIG_DFL);
+      ::kill(::getpid(), sig);
+      ::_exit(3);
+    }
+    int           status = 0;
+    struct rusage usage{};
+    while (::wait4(c, &status, 0, &usage) < 0 && errno == EINTR) {
+    }
+    return std::make_pair(status, usage);
+  };
+  const auto [oom_st, oom_ru] = die(0);
+  EXPECT_NE(livehd::lec::child_death_cause(oom_st, oom_ru, 1, false).find("out of memory"), std::string::npos);
+  const auto [kill_st, kill_ru] = die(1);
+  const auto killed             = livehd::lec::child_death_cause(kill_st, kill_ru, 1, false);
+  EXPECT_NE(killed.find("out of memory"), std::string::npos) << killed;
+  EXPECT_EQ(livehd::lec::child_death_cause(kill_st, kill_ru, 1, true).find("out of memory"), std::string::npos)
+      << "the parent's own wall-backstop SIGKILL is a timeout, never memory";
+  const auto [segv_st, segv_ru] = die(2);
+  const auto crash              = livehd::lec::child_death_cause(segv_st, segv_ru, 1, false);
+  EXPECT_NE(crash.find("engine crash"), std::string::npos) << crash;
+  EXPECT_EQ(livehd::lec::undecided_outcome(crash, false, false), livehd::lec::Outcome::Refuted_unexplained) << crash;
+  expect_no_children();
 }
 
 }  // namespace

@@ -75,7 +75,7 @@ fail() {
 }
 run() {
   if [ "${1:-}" = pass ] && [ "${2:-}" = abc ] && [ -n "${ABC_TEST_THREADS:-}" ]; then
-    set -- "$@" --set "synth.threads=$ABC_TEST_THREADS"
+    set -- "$@" --set "abc.threads=$ABC_TEST_THREADS"
   fi
   "$LHD" "$@" -q --result-json "$W/r.json" || fail "$* -> $(cat "$W/r.json" 2>/dev/null)"
 }

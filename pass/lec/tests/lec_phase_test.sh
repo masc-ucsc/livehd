@@ -60,7 +60,7 @@ verdict() {
   $LHD lec --set formal.effort=proof --impl "lg:$WORK/$1" --ref "lg:$WORK/$2" --top "$3" \
        --set formal.lec.hier=false --set formal.engine=bmc --set formal.bound=8 --set "formal.phase=$4" \
        --workdir "$WORK/q_${3}_$4_$$_$RANDOM" 2>&1 \
-    | grep -oE "PASS\\([0-9]+\\)|PROVEN equivalent|REFUTED \\(not equivalent\\)|UNKNOWN" | head -1 \
+    | grep -oE "PASS\\([0-9]+\\)|PROVEN equivalent|REFUTED \\(not equivalent\\)|TIMEOUT|UNSUPPORTED|UNDISCHARGED|UNCONFIRMED|UNPAIRED|UNCHECKED|VACUOUS|UNEXPLAINED" | sed -E 's/^(TIMEOUT|UNSUPPORTED|UNDISCHARGED|UNCONFIRMED|UNPAIRED|UNCHECKED|VACUOUS|UNEXPLAINED)$/UNDECIDED/' | head -1 \
     | sed -E "s/PASS\\([0-9]+\\)/PROVEN equivalent/"   # PASS(n) is a pass; this test is about phase mechanics, not depth
 }
 
@@ -235,7 +235,7 @@ everdict() {
   shift 3
   $LHD lec --set formal.effort=proof --impl "$WORK/$impl" --ref "$WORK/$ref" --top e_gated --set formal.simfail_run=false "$@" \
        --workdir "$WORK/q_e_$tag" 2>&1 \
-    | grep -oE "PROVEN equivalent|REFUTED \\(not equivalent\\)|UNKNOWN" | head -1 | cut -d' ' -f1
+    | grep -oE "PROVEN equivalent|REFUTED \\(not equivalent\\)|TIMEOUT|UNSUPPORTED|UNDISCHARGED|UNCONFIRMED|UNPAIRED|UNCHECKED|VACUOUS|UNEXPLAINED" | sed -E 's/^(TIMEOUT|UNSUPPORTED|UNDISCHARGED|UNCONFIRMED|UNPAIRED|UNCHECKED|VACUOUS|UNEXPLAINED)$/UNDECIDED/' | head -1 | cut -d' ' -f1
 }
 for s in hier flat; do
   expect "E $s vs complemented ref (auto)" "$(everdict e_$s.v e_ref_bad.v ${s}_bad)" "REFUTED"
@@ -244,8 +244,8 @@ done
 # The induction arm alone (semdiff off, no BMC): the complemented pair must
 # stay open, and the equal pair must prove through the compared bridge.
 e_ind=(--set formal.engine=ind --set formal.semdiff=off --set formal.timeout=10)
-expect "E hier vs complemented ref (ind)" "$(everdict e_hier.v e_ref_bad.v hier_bad_ind "${e_ind[@]}")" "UNKNOWN"
-expect "E flat vs complemented ref (ind)" "$(everdict e_flat.v e_ref_bad.v flat_bad_ind "${e_ind[@]}")" "UNKNOWN"
+expect "E hier vs complemented ref (ind)" "$(everdict e_hier.v e_ref_bad.v hier_bad_ind "${e_ind[@]}")" "UNDECIDED"
+expect "E flat vs complemented ref (ind)" "$(everdict e_flat.v e_ref_bad.v flat_bad_ind "${e_ind[@]}")" "UNDECIDED"
 expect "E hier vs equal ref (ind)" "$(everdict e_hier.v e_ref_ok.v hier_ok_ind "${e_ind[@]}")" "PROVEN"
 
 if [ $fail -ne 0 ]; then echo "lec_phase_test: FAILED"; exit 1; fi

@@ -109,3 +109,7 @@ generated/master_port/
 # regenerable and are untracked again from here.
 /formal/lean/.olean-dev/
 /formal/lean/.native-dev/
+
+# Measurement/reproduction bundles: large, regenerable, kept out of the repository
+# (files already tracked under repros/ stay tracked).
+/repros/

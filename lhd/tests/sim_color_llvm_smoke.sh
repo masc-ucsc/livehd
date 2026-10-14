@@ -56,10 +56,10 @@ SMOKE_JOBS="${SIM_COLOR_SMOKE_JOBS:-8}"
 BRANCH_JOBS="${SIM_COLOR_BRANCH_JOBS:-6}"
 run() { "$LHD" "$@" -q; }
 run sim "$batch"  --set sim.checkpoint=false \
-  --set sim.jobs="$SMOKE_JOBS" --workdir "$work/slop" --result-json "$work/slop.json" &
+  --set lhd.jobs="$SMOKE_JOBS" --workdir "$work/slop" --result-json "$work/slop.json" &
 slop_pid=$!
 run sim "$batch" --set sim.tune.backend=llvm --set sim.checkpoint=false \
-  --set sim.jobs="$SMOKE_JOBS" --workdir "$work/llvm" --result-json "$work/llvm.json" &
+  --set lhd.jobs="$SMOKE_JOBS" --workdir "$work/llvm" --result-json "$work/llvm.json" &
 llvm_pid=$!
 
 # Exercise the evaluator-shard build boundary with the default checkpoint-capable
@@ -67,14 +67,14 @@ llvm_pid=$!
 shard_work="$work/llvm-sharded-association"
 (
   set -e
-  run sim --set sim.jobs="$BRANCH_JOBS" inou/prp/tests/sim/color_kernel_llvm_scalar.prp --setup-only \
+  run sim --set lhd.jobs="$BRANCH_JOBS" inou/prp/tests/sim/color_kernel_llvm_scalar.prp --setup-only \
     --set sim.tune.backend=llvm --workdir "$shard_work"
   mv "$shard_work/sim/color_kernel_llvm_scalar.llvm_scalar.cpp" \
      "$shard_work/sim/color_kernel_llvm_scalar.llvm_scalar.color-eval-0.cpp"
-  run sim --set sim.jobs="$BRANCH_JOBS" inou/prp/tests/sim/color_kernel_llvm_scalar.prp --run-only \
+  run sim --set lhd.jobs="$BRANCH_JOBS" inou/prp/tests/sim/color_kernel_llvm_scalar.prp --run-only \
     --set sim.tune.backend=llvm --workdir "$shard_work"
   for prp in "${LLVM_ONLY_PRPS[@]}"; do
-    run sim --set sim.jobs="$BRANCH_JOBS" "$prp" --set sim.tune.backend=llvm --workdir "$work/llvm-only"
+    run sim --set lhd.jobs="$BRANCH_JOBS" "$prp" --set sim.tune.backend=llvm --workdir "$work/llvm-only"
   done
 ) &
 shard_pid=$!
@@ -87,7 +87,7 @@ switch_work="$work/backend-switch"
 (
   set -e
   for backend in llvm slop llvm; do
-    run sim inou/prp/tests/sim/loop_inline_colors.prp --set sim.jobs="$BRANCH_JOBS" --set sim.checkpoint=false \
+    run sim inou/prp/tests/sim/loop_inline_colors.prp --set lhd.jobs="$BRANCH_JOBS" --set sim.checkpoint=false \
       --set "sim.tune.backend=$backend" --workdir "$switch_work"
     if [ "$backend" = slop ]; then
       switch_objects=("$switch_work"/sim/*.llvm.o)

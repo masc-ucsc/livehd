@@ -3,7 +3,7 @@
 :type: equiv
 :verilog_top: state_window_delay
 :pyrope_top: state_window_delay
-:equiv_lec_grep: (?m)^lec: '[^']+' PROVEN equivalent
+:equiv_lec_grep: (?m)^lec: '[^']+' PROVEN-full
 :equiv_lec_grep: state window\(s\): narrower flop paired with the live slice
 */
 // A NARROWER flop against the live slice of a WIDER one (suggestions6 1.5).
@@ -14,7 +14,7 @@
 // four stored stages, so its register is 32 bits. pass/lec/query.cpp's state
 // windows pair the 32-bit flop with bits 39:8 of the 40-bit one; without them
 // the pair aligns at bit 0, induction never closes, and the run stops at a
-// bounded PASS(6). The greps pin the UNBOUNDED proof and the mechanism.
+// PROVEN-bounded(6). The greps pin the UNBOUNDED proof and the mechanism.
 pub mod state_window_delay(clk:Clock, `in`:U8, rst:U1) -> (out:U8@[], out_stages:U40@[]) {
   reg stages:U32:[reset_pin=rst] = 0
   stages = (stages#[0..<24] << 8) | `in`

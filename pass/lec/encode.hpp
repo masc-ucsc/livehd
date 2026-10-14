@@ -563,7 +563,7 @@ public:
   // budget; the recursive Sub-flatten re-entry inherits the parent's deadline
   // (so a slow subtree still counts against its parent, not a fresh clock). On
   // overrun the encode bails via the same ok=false/error path a structural
-  // failure uses, which the query layer maps to a sound Verdict::Unknown (a
+  // failure uses, which the query layer maps to a sound Verdict::Undecided (a
   // budget-out is never a wrong verdict). 0 (the default) = no encode budget.
   // Mirrors Lec_options::timeout, so encode and each checkSat share one knob.
   void set_encode_budget(int seconds) { budget_seconds_ = seconds; }

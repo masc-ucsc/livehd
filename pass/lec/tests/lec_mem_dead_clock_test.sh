@@ -104,14 +104,14 @@ for shape in multi single neg; do
         fail "$tag: a constant-clocked write port committed (REFUTED): $verdict"
       elif echo "$verdict" | grep -q "PROVEN"; then
         fail "$tag: a constant-clocked write port committed (PROVEN against $other): $verdict"
-      elif [ $rc -ne 7 ] || ! echo "$verdict" | grep -q "UNKNOWN"; then
-        fail "$tag: expected a sound refusal (UNKNOWN, rc 7), got rc=$rc: $verdict"
+      elif [ $rc -ne 7 ] || ! echo "$verdict" | grep -q "UNSUPPORTED"; then
+        fail "$tag: expected a sound refusal (UNSUPPORTED, rc 7), got rc=$rc: $verdict"
       elif [ "$shape" = neg ] && echo "$out" | grep -q "phase schedule refused"; then
         # yosys-verilog's lg hands the phase schedule the constant clock as a
         # second ROOT: it refuses before the encoder sees the memory (sound).
         echo "ok: $tag: refused by the phase schedule (constant clock root)"
       elif ! echo "$out" | grep -q "clocked by a CONSTANT"; then
-        fail "$tag: UNKNOWN for another reason than the dead-clock refusal: $verdict"
+        fail "$tag: undecided for another reason than the dead-clock refusal: $verdict"
       else
         echo "ok: $tag: dead-clock write port with a live enable is refused"
       fi

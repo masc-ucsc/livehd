@@ -88,6 +88,14 @@ Lhd_error classify_engine_failure(std::string_view fallback_msg) {
   const auto& recs = livehd::diag::sink().records();
   for (auto it = recs.rbegin(); it != recs.rend(); ++it) {
     if (it->severity == livehd::diag::Severity::error) {
+      // A REFUTED-cex (a real design counterexample) exits 10 from every
+      // command (owner ruling 2026-10-14), including a pass that reports it
+      // through a diag: `pass.lec` (lec-refuted-cex) and the pass.abc /
+      // pass.usyn tuning validation (synth-tune-refuted-cex). The code, not the
+      // category, names it, so every other diag keeps its category mapping.
+      if (std::string_view{it->code}.ends_with("-refuted-cex")) {
+        return Lhd_error{"equiv_fail", it->message, it->hint};
+      }
       return Lhd_error{map_diag_category(it->category), it->message, it->hint};
     }
   }
@@ -127,6 +135,9 @@ std::vector<Set_option> list_set_options() {
       continue;  // defensive: every kSetPasses method registers in init_engine
     }
     for (const auto& [flag, attr] : m->labels) {
+      if (sp.method == "pass.lec" && flag == "jobs") {
+        continue;
+      }
       if (is_kernel_label(flag) || !retired_set_hint(sp.method, flag).empty()) {
         continue;
       }
@@ -156,6 +167,11 @@ std::vector<Set_option> list_set_options() {
   // The `lhd.*` kernel namespace: shared, cross-pass settings the kernel folds
   // into Options (apply_lhd_settings), not labels of any single EPRP method.
   // Keep in sync with check_known_set_passes / apply_lhd_settings.
+  out.push_back(Set_option{"lhd.jobs",
+                           "lhd",
+                           "0",
+                           "maximum concurrent jobs across formal, LLVM compilation and USYN; 0 selects affinity-aware CPUs; load "
+                           "and measured memory can lower admission"});
   out.push_back(Set_option{"lhd.seed",
                            "lhd",
                            "0",

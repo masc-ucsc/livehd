@@ -65,7 +65,7 @@ run_lec() {
 
 # The VERDICT line only -- a REFUTED run also prints `lec: wrote counterexample
 # ...` afterwards, so a bare `tail -1` of `^lec: ` picks up the artifact notice.
-verdict() { grep -E "^lec: .*(PROVEN|REFUTED|PASS\(|UNKNOWN|UNSUPPORTED)" "$OUT" | tail -1; }
+verdict() { grep -E "^lec: .*(PROVEN|REFUTED|PASS\(|TIMEOUT|UNSUPPORTED|UNDISCHARGED|UNCONFIRMED|UNPAIRED|UNCHECKED|VACUOUS|UNEXPLAINED)" "$OUT" | tail -1; }
 
 # ── (1) data port, combinational: the original reproduction ──────────────────
 cat >"$WORK/ref.v" <<'EOF'

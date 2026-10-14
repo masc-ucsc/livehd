@@ -210,7 +210,7 @@ struct Region_blast {
 
 struct Blast_hooks {
   // Memory admission while blasting: true stops the translation (the region
-  // does not fit). Null disables sampling (allow_oversize).
+  // does not fit). Null disables sampling (the driver always sets it).
   std::function<bool(uint64_t rss_before, size_t blasted, size_t total, size_t net_nodes)> over_budget;
   // Stage trace: verbose timing and peak sampling.
   std::function<void(std::string_view)> stage;

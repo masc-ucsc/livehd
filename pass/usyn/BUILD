@@ -560,6 +560,22 @@ cc_test(
     ],
 )
 
+# The memory boundary: a std::bad_alloc anywhere in a run (injected through a
+# replaced global operator new, as at the RLIMIT_AS backstop) must end in a
+# clean `memory-exhausted` TIMEOUT-memory diagnostic. Its own binary, because
+# the replacement is program-wide.
+cc_test(
+    name = "pass_usyn_oom_test",
+    srcs = ["pass_usyn_oom_test.cpp"],
+    copts = COPTS,
+    deps = [
+        ":pass_usyn",
+        "//core",
+        "//graph",
+        "@googletest//:gtest_main",
+    ],
+)
+
 cc_test(
     name = "pass_usyn_choices_smoke",
     srcs = ["pass_usyn_choices_smoke.cpp"],

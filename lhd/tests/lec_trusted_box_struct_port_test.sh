@@ -79,7 +79,7 @@ run compile "${TMP}"/prp/*.prp --top flat_top --emit-dir "lg:${TMP}/impl.lg" --w
 # --- case 1: NOT trusted. The structural comparison (with top-level leaf<->bus
 # bundling where it applies) must PROVE. This is the control: everything about
 # the two designs agrees when the child is actually compared.
-run lec --impl "lg:${TMP}/impl.lg" --ref "lg:${TMP}/ref.lg" --top flat_top --workdir "${TMP}/wl1"
+run lec --set formal.effort=proof --impl "lg:${TMP}/impl.lg" --ref "lg:${TMP}/ref.lg" --top flat_top --workdir "${TMP}/wl1"
 v=$(verdict)
 if [ "${v}" = "PROVEN" ]; then
   echo "ok: untrusted child proves (bus-vs-leaf handled when the child is compared)"
@@ -98,7 +98,7 @@ cat "${TMP}"/iv/*.v >"${TMP}/gen.v" 2>/dev/null
 if [ ! -s "${TMP}/ref.v" ] || [ ! -s "${TMP}/gen.v" ]; then
   echo "FAIL: could not emit the two netlists"
   rc=1
-elif "${LHD}" lec --impl "verilog:${TMP}/gen.v" \
+elif "${LHD}" lec --set formal.effort=proof --impl "verilog:${TMP}/gen.v" \
        --ref "verilog:${TMP}/ref.v" --top flat_top --workdir "${TMP}/wl2" >"${TMP}/log" 2>&1; then
   echo "ok: netlist regenerated via Pyrope proves against the original"
 else
@@ -111,7 +111,7 @@ fi
 # --- case 3: THE TRACKED GAP. Trust the child. "Assume equal" must make the
 # parent EASIER, so this has to PROVE; today the two sides' box port names do
 # not pair (bus vs leaf) and it does not.
-run lec --impl "lg:${TMP}/impl.lg" --ref "lg:${TMP}/ref.lg" --top flat_top \
+run lec --set formal.effort=proof --impl "lg:${TMP}/impl.lg" --ref "lg:${TMP}/ref.lg" --top flat_top \
     --workdir "${TMP}/wl3" --set formal.lec.trust=kid
 v=$(verdict)
 if [ "${v}" = "PROVEN" ]; then

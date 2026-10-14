@@ -4,7 +4,7 @@
 :pyrope_top: top
 :verilog_top: top
 :lec_top: top
-:lec_grep: PROVEN equivalent
+:lec_grep: PROVEN-full
 */
 // Working spelling: callers supply concrete port types.
 mod lane_xor<Word=U4>(a:Word, b:Word) -> (y:Word@[0]) {

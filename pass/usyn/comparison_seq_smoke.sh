@@ -29,7 +29,7 @@ assert p['liberty_sha256'] == hashlib.sha256(Path(p['liberty']).read_bytes()).he
 settings = []
 names = []
 for label, row in p['results'].items():
-    assert row['lec']['verdict'] == 'proven' and row['lec']['solver'] == 'cvc5', row
+    assert row['lec']['verdict'] in ('proven-full', 'proven-bounded') and row['lec']['solver'] == 'cvc5', row
     assert row['mapping_measurement']['reason'] == 'completed', row
     assert row['mapping_measurement']['wall_ms'] > 0, row
     measurement = row['mapping_measurement']

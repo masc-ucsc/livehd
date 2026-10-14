@@ -234,7 +234,7 @@ grep -q 'raise --set formal.timeout' "$OUT" || fail "the failure must point at t
 grep -q 'REFUTED' "$OUT" && fail "an undecided run must not be reported as a refutation: $(cat "$OUT")"
 # Timeout isolation is orthogonal to the severity knob: it holds here too.
 grep -q "'easy'.*PROVEN" "$OUT" || fail "the easy sibling must still prove: $(cat "$OUT")"
-grep -q "'distrib'.*UNKNOWN (solver gave up at cycle" "$OUT" || fail "the hard obligation must time out ALONE: $(cat "$OUT")"
+grep -q "'distrib'.*TIMEOUT (solver gave up at cycle" "$OUT" || fail "the hard obligation must time out ALONE: $(cat "$OUT")"
 
 # ---------------------------------------------------------------------------
 # 4. No obligations: UNKNOWN with an explicit note — never a vacuous PASS.
@@ -796,7 +796,7 @@ OUT="$W/multifail.out"
 # ---------------------------------------------------------------------------
 # 5. `lhd formal lec` is the lec command (alias): a design LECs against itself.
 # ---------------------------------------------------------------------------
-"$LHD" formal lec --impl "$W/cnt.prp" --ref "$W/cnt.prp" --top cnt >"$W/flec.out" 2>&1
+"$LHD" formal lec --set formal.effort=proof --impl "$W/cnt.prp" --ref "$W/cnt.prp" --top cnt >"$W/flec.out" 2>&1
 [ $? -eq 0 ] || fail "formal lec self-check must pass: $(cat "$W/flec.out")"
 grep -q "lec: 'cnt.cnt' PROVEN equivalent" "$W/flec.out" || fail "formal lec must run the lec command: $(cat "$W/flec.out")"
 

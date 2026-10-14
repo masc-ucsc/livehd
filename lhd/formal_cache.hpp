@@ -6,7 +6,7 @@
 //
 // Soundness (rule F): only DEFINITIVE verdicts are cached — v1 stores PROVEN
 // only (a REFUTE is rare and fast to reconfirm; caching it would need witness
-// revalidation). Unknown is NEVER cached. The whole verdict section is keyed
+// revalidation). An undecided result is NEVER cached. The whole verdict section is keyed
 // under the engine-identity salt (kFormalSrcSalt: a build-time content hash of
 // pass/lec + pass/semdiff + the proof-prep code (lhd_kernel_formal.cpp, graph,
 // pass/single_edge, pass/cprop) + the cvc5 pin — //lhd:formal_salt), so any
@@ -36,6 +36,11 @@ struct Cached_verdict {
   std::string detail;              // original detail line (replayed inside the hit's detail)
   long long   elapsed_ms = 0;      // original solve time
   bool        bounded    = false;  // A finite-depth proof must never replay as unbounded.
+  // The checked depth of a BOUNDED proof (Query_result::checked_steps, in the
+  // same step unit as the key's bound), so a replay reports PROVEN-bounded(n)
+  // with the depth the original run actually covered. A bounded record without
+  // it is dropped on load.
+  int         depth      = 0;
 };
 
 struct Strategy_hint {
@@ -44,13 +49,19 @@ struct Strategy_hint {
   long long   elapsed_ms = 0;
 };
 
-// Fourth record kind: an Unknown ATTEMPT ledger — not a
-// verdict (the def still reports inconclusive), just "this exact digest+options
-// already came back Unknown at this budget", so an unchanged re-run skips the
-// re-grind instead of burning the full solver budget again. Salt-gated with the
-// verdicts (a prover change justifies a retry) and budget-aware (a larger
-// timeout re-attempts). lec.retry=all forces a full re-grind.
-struct Unknown_attempt {
+// Fourth record kind: the KNOWN-TIMEOUT ledger — not a verdict (a skipped def
+// still reports TIMEOUT-time, exactly what the recorded attempt reported), just
+// "this exact digest+options already ran out of TIME at this budget", so an
+// unchanged re-run skips the re-grind instead of burning the full solver budget
+// again. ONLY a TIMEOUT-time result is ledgered: replaying any other undecided
+// cause as a timeout would turn an exit-7 refusal into an exit-0 warning.
+// Salt-gated with the verdicts (a prover change justifies a retry) and
+// budget-aware (a larger timeout re-attempts). formal.retry=all forces a full
+// re-grind. On disk each record names its `cause`; a record without one (the
+// pre-2026-10-14 "unknowns" ledger, which held every undecided cause) is
+// dropped on load.
+inline constexpr const char* kTimeoutLedgerCause = "timeout-time";
+struct Timeout_attempt {
   int       timeout    = 0;  // seconds the attempt was given (0 = unbounded)
   long long elapsed_ms = 0;
 };
@@ -98,11 +109,12 @@ public:
   // re-derives the pairing fresh instead of re-suppressing the signature pass.
   void                     clear_pair_hint(const std::string& entity);
 
-  // Unknown-attempt ledger: skip_unknown() is true when a re-attempt at
+  // Known-timeout ledger: skip_timeout() is true when a re-attempt at
   // `timeout_s` cannot outspend the recorded attempt (records with timeout 0 =
-  // unbounded dominate everything).
-  bool skip_unknown(const std::string& key, int timeout_s) const;
-  void note_unknown(const std::string& key, Unknown_attempt a);
+  // unbounded dominate everything). note_timeout() must only be called for a
+  // TIMEOUT-time result.
+  bool skip_timeout(const std::string& key, int timeout_s) const;
+  void note_timeout(const std::string& key, Timeout_attempt a);
 
   // Cone verdicts (lec.cones): the whole PROVEN digest set is handed to the
   // engine by value (Lec_options::_cone_cache) because the engine may run in a
@@ -130,7 +142,7 @@ private:
   absl::flat_hash_map<std::string, Cached_verdict>  verdicts_;
   absl::flat_hash_map<std::string, Strategy_hint>   hints_;
   absl::flat_hash_map<std::string, Pair_hint>       pair_hints_;
-  absl::flat_hash_map<std::string, Unknown_attempt> unknowns_;
+  absl::flat_hash_map<std::string, Timeout_attempt> timeouts_;
   absl::flat_hash_set<std::string>                  cones_;
   int                                               cone_hits_ = 0;  // digests loaded from disk
 };

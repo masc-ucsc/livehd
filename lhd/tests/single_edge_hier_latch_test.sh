@@ -84,7 +84,7 @@ endmodule
 EOF
 build hlat "$W/hlat.v" dut
 
-out="$("$LHD" lec --impl "lg:$W/lg_hlat" --ref "lg:$W/lg_hlat" --top dut --workdir "$W/l1" 2>&1)"
+out="$("$LHD" lec --set formal.effort=proof --impl "lg:$W/lg_hlat" --ref "lg:$W/lg_hlat" --top dut --workdir "$W/l1" 2>&1)"
 rc=$?
 if [ $rc -eq 0 ]; then
   # If this ever passes, the gap is CLOSED -- say so loudly rather than silently
@@ -101,7 +101,7 @@ else
 fi
 
 # ---- 2. ...and TRUST is the documented escape hatch, so it must still work ---
-out="$("$LHD" lec --impl "lg:$W/lg_hlat" --ref "lg:$W/lg_hlat" --top dut --workdir "$W/l2" \
+out="$("$LHD" lec --set formal.effort=proof --impl "lg:$W/lg_hlat" --ref "lg:$W/lg_hlat" --top dut --workdir "$W/l2" \
         --set formal.lec.trust=leaf 2>&1)"
 [ $? -eq 0 ] \
   || { echo "$out" | tail -6; fail "trusting the latch-holding def did NOT let the design prove"; }
@@ -124,7 +124,7 @@ module dut(input clk, input [7:0] d, output [7:0] q);
 endmodule
 EOF
 build hflop "$W/hflop.v" dut
-"$LHD" lec --impl "lg:$W/lg_hflop" --ref "lg:$W/lg_hflop" --top dut --workdir "$W/l3" >"$W/l3.log" 2>&1
+"$LHD" lec --set formal.effort=proof --impl "lg:$W/lg_hflop" --ref "lg:$W/lg_hflop" --top dut --workdir "$W/l3" >"$W/l3.log" 2>&1
 [ $? -eq 0 ] \
   || { tail -6 "$W/l3.log"; fail "a def holding ONLY ordinary posedge state was refused -- the hierarchy refusal is supposed to be narrow, not a blanket rejection of hierarchy"; }
 echo "ok: a def with only ordinary posedge state is not refused"
@@ -150,7 +150,7 @@ module dut(input clk, input en, input [7:0] d, output [7:0] q);
 endmodule
 EOF
 build hicg "$W/hicg.v" dut
-"$LHD" lec --impl "lg:$W/lg_hicg" --ref "lg:$W/lg_hicg" --top dut --workdir "$W/l4" >"$W/l4.log" 2>&1
+"$LHD" lec --set formal.effort=proof --impl "lg:$W/lg_hicg" --ref "lg:$W/lg_hicg" --top dut --workdir "$W/l4" >"$W/l4.log" 2>&1
 [ $? -eq 0 ] \
   || { tail -6 "$W/l4.log"; fail "an INSTANTIATED clock-gate cell was refused -- it holds a latch in a def too, but it is meant to be inlined and folded into the flop enable"; }
 echo "ok: an instantiated clock-gate cell is still inlined and proven, not refused"
@@ -191,7 +191,7 @@ module dut(input clk, input en, input [7:0] d, input [7:0] m, output [7:0] q);
 endmodule
 EOF
 build hicgdeep "$W/hicgdeep.v" dut
-"$LHD" lec --impl "lg:$W/lg_hicgdeep" --ref "lg:$W/lg_hicgdeep" --top dut --workdir "$W/l5a" >"$W/l5a.log" 2>&1
+"$LHD" lec --set formal.effort=proof --impl "lg:$W/lg_hicgdeep" --ref "lg:$W/lg_hicgdeep" --top dut --workdir "$W/l5a" >"$W/l5a.log" 2>&1
 [ $? -eq 0 ] \
   || { tail -6 "$W/l5a.log"; fail "a clock-gate cell one level DOWN (inside a def) was refused -- inlining must reach every def the hierarchical driver encodes, not just the top body"; }
 echo "ok: a clock-gate cell inside a def is inlined and proven"
@@ -211,14 +211,14 @@ echo "ok: a clock-gate cell inside a def is inlined and proven"
 # real encode, and the gate is trusted: the only forbidden outcome is a refutation.
 sed 's/assign o = f & m;/assign o = ~(~f | ~m);/' "$W/hicgdeep.v" > "$W/hicgdeep_dm.v"
 build hicgdeep_dm "$W/hicgdeep_dm.v" dut
-out="$("$LHD" lec --impl "lg:$W/lg_hicgdeep_dm" --ref "lg:$W/lg_hicgdeep" --top dut \
+out="$("$LHD" lec --set formal.effort=proof --impl "lg:$W/lg_hicgdeep_dm" --ref "lg:$W/lg_hicgdeep" --top dut \
         --workdir "$W/l5b" --set formal.lec.trust=prim_clk_gate 2>&1)"
 # A bare negative grep is not an assertion: a build failure, an `unsupported`
 # refusal before any encoding, or a crash all produce output matching NEITHER
 # pattern, so the case would print "ok" without lec ever having run. Pin that it
 # REACHED a verdict first (the sibling cases 4/5a check $? for the same reason),
 # then that the verdict is not a refutation.
-grep -qaiE "PROVEN|UNKNOWN|INCONCLUSIVE" <<<"$out" \
+grep -qaiE "PROVEN|TIMEOUT|UNSUPPORTED|UNDISCHARGED|UNCONFIRMED|UNPAIRED|UNCHECKED|VACUOUS|UNEXPLAINED" <<<"$out" \
   || { echo "$out" | tail -8; fail "case 5b never reached a lec verdict (build failure / refusal / crash) -- it cannot distinguish 'boxed and inconclusive' from 'never ran'"; }
 grep -qaiE '"verdict"[[:space:]]*:[[:space:]]*"refuted"' <<<"$out" \
   && { echo "$out" | tail -6; fail "trusting the clock-gate cell produced a REFUTATION of two equivalent designs -- a trusted def must stay blackboxed, never be inlined into the compared cone"; }

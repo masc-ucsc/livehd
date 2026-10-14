@@ -219,7 +219,7 @@ if [ -f "$MSRC" ]; then
       echo "ok: bit-blasted memory (memory=true) PROVEN unbounded through the storage-bank bridge"
     else
       echo "FAIL: the bit-blasted memory was not proven unbounded (rc=$MRC)"
-      grep -oE "(PROVEN|REFUTED|UNKNOWN)[^;]*" "$WORK/lec_mgood_bb.txt" | head -1; fail=1
+      grep -oE "(PROVEN|REFUTED|TIMEOUT|UNSUPPORTED|UNDISCHARGED|UNCONFIRMED|UNPAIRED|UNCHECKED|VACUOUS|UNEXPLAINED)[^;]*" "$WORK/lec_mgood_bb.txt" | head -1; fail=1
     fi
     "$LHD" lec --set formal.effort=proof --ref "$MSRC" --impl lg:"$WORK/mbad_bb.net" --lib lg:"$WORK/models" --top "$MTOP" \
            --set formal.lec.cones=true > "$WORK/lec_mbad_bb.txt" 2>&1

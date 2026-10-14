@@ -113,7 +113,7 @@ TEST(Prove, ConeMaxGateDefers) {
   o.cone_max = 1;  // cone is {And, a, b} > 1 -> skip the solver
   formal::Prover p(g.get(), o);
   auto           d = out_drv(g);
-  EXPECT_EQ(p.is_true(d).verdict, Verdict::Unknown);
+  EXPECT_EQ(p.is_true(d).verdict, Verdict::Undecided);
 }
 
 TEST(Prove, HotmuxPairsDefaultAndExclusivity) {

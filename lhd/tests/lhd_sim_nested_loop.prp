@@ -1,0 +1,29 @@
+// This file is distributed under the BSD 3-Clause License. See LICENSE for details.
+// Three nested loops: only the two innermost levels are embedded in their caller's LLVM kernel.
+pub comb nest3(x:U64, s:U4) -> (acc:U16) {
+  mut sum:U16 = 0
+  for i in 0..<2 {
+    for j in 0..<2 {
+      for k in 0..<4 {
+        if s#[k] != 0 {
+          wrap sum += x#[((i*2 + j)*4 + k)*2..+2] + 1
+        }
+      }
+    }
+  }
+  acc = sum
+}
+test nest3.check {
+  mut dut = nest3
+  dut.x = 0xffffffffffffffff
+  dut.s = 15
+  step
+  assert(dut.acc == 64)
+  dut.s = 1
+  step
+  assert(dut.acc == 16)
+  dut.x = 0
+  dut.s = 15
+  step
+  assert(dut.acc == 16)
+}

@@ -364,7 +364,7 @@ struct Search {
       const auto before = prover->work();
       const auto result = prover->bit_function(t.pin, support, truth);
       meter.work(prover->work() - before);
-      if (result.verdict == formal::Verdict::Unknown) {
+      if (result.verdict == formal::Verdict::Undecided) {
         ++report.unknown;
         return false;
       }

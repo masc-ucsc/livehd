@@ -1,6 +1,6 @@
 // This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 //
-// Milestone-1 build de-risk: prove the prebuilt cvc5 static lib links and a
+// Milestone-1 build de-risk: prove the source/prebuilt cvc5 static lib links and a
 // QF_ABV (bit-vectors + arrays) query runs through cvc5's own C++ API. This is
 // the link smoke test referenced by lec.md "Build sequence" step 1 -- before
 // smt-switch / Pono are layered on top.
@@ -85,3 +85,27 @@ TEST(Cvc5Link, ArraySelectStore) {
   Result r = solver.checkSat();
   EXPECT_TRUE(r.isUnsat());
 }
+
+#ifdef LIVEHD_CVC5_SOURCE_BUILD
+TEST(Cvc5Link, SourceBuildOptionalBackends) {
+  for (const auto backend : {"kissat", "cryptominisat"}) {
+    TermManager tm;
+    Solver      solver(tm);
+    solver.setLogic("QF_BV");
+    solver.setOption("incremental", "false");
+    solver.setOption("bitblast", "eager");
+    solver.setOption("bv-sat-solver", backend);
+    auto x = tm.mkConst(tm.mkBitVectorSort(8), "x"), y = tm.mkConst(tm.mkBitVectorSort(8), "y");
+    solver.assertFormula(tm.mkTerm(Kind::EQUAL, {tm.mkTerm(Kind::BITVECTOR_MULT, {x, y}), tm.mkBitVector(8, 15)}));
+    EXPECT_TRUE(solver.checkSat().isSat()) << backend;
+    Solver contradiction(tm);
+    contradiction.setLogic("QF_BV");
+    contradiction.setOption("incremental", "false");
+    contradiction.setOption("bitblast", "eager");
+    contradiction.setOption("bv-sat-solver", backend);
+    contradiction.assertFormula(tm.mkTerm(Kind::EQUAL, {x, tm.mkBitVector(8, 0)}));
+    contradiction.assertFormula(tm.mkTerm(Kind::EQUAL, {tm.mkTerm(Kind::BITVECTOR_MULT, {x, y}), tm.mkBitVector(8, 15)}));
+    EXPECT_TRUE(contradiction.checkSat().isUnsat()) << backend;
+  }
+}
+#endif

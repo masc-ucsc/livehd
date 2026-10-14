@@ -156,5 +156,21 @@ for pass_no in 1 2; do
     || fail "--workdir run $pass_no: the forked strategy's verify cache stores must reach formal_cache.json"
 done
 
+# Explicit proof effort uses one wall allowance even with a cache and jobs=1.
+# The outer worker's cache traffic must survive that extra process boundary.
+for engine in auto bmc; do
+  LIVEHD_LEC_RACER_STALL_S=5 "$LHD" formal verify "$W/inv.prp" --top inv \
+    --set formal.effort=proof --set formal.timeout=1 --set lhd.jobs=1 \
+    --set "formal.engine=$engine" --workdir "$W/proof-$engine" >"$OUT" 2>&1
+  [ "$?" -ne 0 ] || fail "stalled proof effort must time out: $(cat "$OUT")"
+  grep -q 'property proof shared wall deadline' "$OUT" || fail "proof timeout must name its wall allowance: $(cat "$OUT")"
+done
+for pass_no in 1 2; do
+  "$LHD" formal verify "$W/inv.prp" --top inv --set formal.effort=proof \
+    --set formal.timeout=2 --set lhd.jobs=1 --workdir "$W/proof-cache" >"$OUT" 2>&1
+  [ "$?" -eq 0 ] || fail "proof cache run $pass_no did not prove: $(cat "$OUT")"
+  grep -q '"verify:' "$W/proof-cache/formal_cache.json" || fail "outer proof worker lost its cache stores"
+done
+
 echo "PASS: formal verify portfolio (engine=auto) merge + no-regression"
 exit 0

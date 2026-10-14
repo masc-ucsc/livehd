@@ -9,6 +9,10 @@ from pathlib import Path
 import shutil
 import subprocess
 
+# `lhd lec` verdicts that are proofs (an inductive or a bounded-from-reset one).
+# A vacuous proof compared nothing, so it does not prove a mapping.
+PROVEN = ("proven-full", "proven-bounded")
+
 
 def digest(path):
     value = hashlib.sha256()
@@ -144,8 +148,10 @@ def main():
                 "--emit-dir", f"lg:{root}/{label}-net", "--emit", f"verilog:{root}/{label}.v", *options)
             run(f"{label}-sta", "pass", "opentimer", f"lg:{root}/{label}-net", liberty, *timing_constraints, "--top", args.top)
             # This independent benchmark check is not a synthesis publication gate.
+            # effort=proof: the default sampled effort only reports TESTED-sampled.
             proof = run(f"{label}-lec", "lec", "--impl", f"lg:{root}/{label}-net",
-                        "--ref", f"lg:{root}/colored", "--lib", f"lg:{root}/models-lg", "--top", args.top)
+                        "--ref", f"lg:{root}/colored", "--lib", f"lg:{root}/models-lg", "--top", args.top,
+                        "--set", "formal.effort=proof")
             results[label] = {
                 "status": "completed", "mapper": mapper, "usyn_overrides": effective, "lec": proof["lec"],
                 "timing": json.loads((root / f"{label}-sta/timing.json").read_text()),
@@ -192,7 +198,7 @@ def main():
         if "native" in result:
             print(f"{label}: native={json.dumps(result['native'])}")
     print(f"Comparison: {root / 'comparison.json'}")
-    if any(result["status"] != "completed" or result["lec"]["verdict"] != "proven" for result in results.values()):
+    if any(result["status"] != "completed" or result["lec"]["verdict"] not in PROVEN for result in results.values()):
         raise SystemExit("Comparison is unproven; inspect retained LEC reports")
 
 

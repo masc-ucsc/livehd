@@ -17,6 +17,7 @@
 // class owns LLVM context/module/target details behind the pimpl.
 class Cgen_llvm {
 public:
+  [[nodiscard]] size_t instruction_count() const;
   struct Value {
     size_t   id     = 0;
     uint32_t width  = 0;
@@ -175,6 +176,18 @@ public:
     bool                                   scalar = false;
   };
   bool inline_body(const Inline_body& body, const std::vector<Value>& inputs, std::vector<Value>& outputs, std::string& error);
+
+  // Emit a rolled loop of a sealed, resource-free `body` INSIDE the current
+  // function: the caller's color keeps one function, the body is inlined into
+  // the loop once (never unrolled), and operands/results stay SSA values -- no
+  // call, no packed operand transport, no separate color. `layout` is the one
+  // add_loop() takes (one `inputs` entry per declared loop port); `inputs`
+  // supplies one Value per layout.inputs entry (the index/activation entries
+  // are replaced by the loop itself); `outputs` receives one Value per body
+  // output, a carry output being the retained carry, exactly as add_loop
+  // publishes it.
+  bool inline_loop(const Inline_body& body, const Loop_layout& layout, uint64_t count, int64_t first, int64_t step,
+                   const std::vector<Value>& inputs, std::vector<Value>& outputs, std::string& error);
 
   // Finalize the ABI and return exact bitcode with the color and optional loop
   // entry symbols normalized. Equal keys can share code; mutable instance storage is still

@@ -42,6 +42,10 @@ genrule(
         "//pass/single_edge:pass_single_edge",  # proof_prep: time base, clock gates, lib-cell splicing (archive)
         "//pass/synth:arith.hpp",  # cone_abc blasts bvmul/bvadd through the synthesis arithmetic builders
         "//packages:cvc5_repo.bzl",
+        "//packages:cvc5_src.BUILD",
+        "//packages:cvc5-offline.patch",
+        "//packages:cvc5-kissat-fresh.patch",
+        "//packages:cvc5-bv-unknown.patch",
     ] + select({
         "//:without_abc": [],
         # Salt CEC/full-adder detection when the optional accelerator exists.

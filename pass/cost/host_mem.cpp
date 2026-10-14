@@ -11,6 +11,7 @@
 #include <sys/sysctl.h>
 #include <sys/types.h>
 #else
+#include <fcntl.h>
 #include <unistd.h>
 
 #include <cstdio>
@@ -148,6 +149,38 @@ static uint64_t process_virtual_size() {
   return info.virtual_size;
 }
 #endif
+
+uint64_t process_virtual_bytes() {
+#if defined(__APPLE__)
+  return process_virtual_size();
+#else
+  // statm field 1 is the total program size in pages. open/read only: this runs
+  // inside the fatal-signal handler too, where stdio may not be used.
+  const int fd = ::open("/proc/self/statm", O_RDONLY | O_CLOEXEC);
+  if (fd < 0) {
+    return 0;
+  }
+  char          buf[64];
+  const ssize_t n = ::read(fd, buf, sizeof(buf));
+  ::close(fd);
+  uint64_t pages = 0;
+  bool     any   = false;
+  for (ssize_t i = 0; i < n && buf[i] >= '0' && buf[i] <= '9'; ++i) {
+    pages = pages * 10 + static_cast<uint64_t>(buf[i] - '0');
+    any   = true;
+  }
+  const long page_size = ::sysconf(_SC_PAGE_SIZE);
+  return !any || page_size <= 0 ? 0 : pages * static_cast<uint64_t>(page_size);
+#endif
+}
+
+uint64_t address_space_limit_bytes() {
+  struct rlimit rl{};
+  if (::getrlimit(RLIMIT_AS, &rl) != 0 || rl.rlim_cur == RLIM_INFINITY) {
+    return 0;
+  }
+  return static_cast<uint64_t>(rl.rlim_cur);
+}
 
 uint64_t arm_address_space_limit(uint64_t budget) {
   if (budget == 0) {

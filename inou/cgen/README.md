@@ -1,5 +1,16 @@
 # Simulator coloring
 
+With `compile.upass.inline=false`, ordinary combinational instances remain
+in the graph and the occurrence color planner merges their logic with the
+caller. Small bodies (fewer than 32 sites) never introduce a
+module fence, even when repeated; live-value pressure and execution phases
+still constrain merging. Both Slop and LLVM emit those members directly in
+the root color evaluator, without child evaluation calls. Larger bodies retain color boundaries when their computation amortizes their
+interface, using the same density rule for single and repeated instances.
+Bodies of at least 1,024 sites retain their boundary. This does not
+depend on frontend inlining; `sim_small_comb_smoke` tests both backends with
+that frontend transformation explicitly disabled.
+
 `sim_color_plan.cpp` builds a simulator-private, occurrence-aware DAG. It keeps
 compact loops as calls; each loop definition is compiled separately, so nested
 loops retain their hierarchy. Compact loops are PRESERVED by ruling: the
@@ -70,8 +81,12 @@ Coloring uses reverse Kahn traversal for every graph size:
    Prefer newly ready fanins in the same module occurrence, with wider edges
    first; use structural identities to break ties deterministically.
 3. Merge consecutive topological sites while the execution phase, conditional
-   owner, and non-loop runtime boundary agree. A compact loop remains an
-   indivisible call but can share its color with its input and output cones.
+   owner, and runtime boundary agree. Stateless leaf reductions of computed wide inputs
+   with at most one word of results share a runtime region separate from
+   surrounding arithmetic, so
+   their opaque calls do not force those cones into the LLVM backend's Slop
+   fallback. Loops with already-packed inputs or wider results can share a color with surrounding
+   cones to avoid repeatedly transporting large carried values.
    Stop before the estimated peak live
    payload exceeds the `sim.tune.live_words` budget (256 machine words of 64
    bits by default), or the soft 50,000 gate-equivalent limit. Preserve module
@@ -142,9 +157,9 @@ the original color identities and objects remain unchanged. Backend switches
 and eligibility changes remove obsolete derived objects. Stateful, nested and
 observation-enabled loops still use their existing scheduling path.
 
-Generated simulators default to size optimization: host C++ uses `-Os` for
+Host simulator C++ uses `-Os` for
 both backends, including Ninja, the built-in compiler, and standalone Bazel
-exports. Native LLVM objects use the `Os` module pipeline, `optsize` function
+exports. Native LLVM objects use the `O2` module pipeline without size
 attributes, and the default (O2-equivalent) machine optimization level. Loop
 unrolling and interleaving remain disabled; native bodies are explicitly inlined
 before optimization. The optimization attributes and emitter salt participate
@@ -158,9 +173,15 @@ inside a rolled loop. Persistent registers and memories keep their instance
 storage. The [stack-local regression](../../repros/sim_llvm_slop_20261007/stack-locals/index.html)
 records the reproduced IR overhead and correctness checks.
 
-Dynamic one-bit extraction loads only the selected packed word: an adjacent-word
-load and funnel shift cannot contribute to a one-bit result. Wider slices retain
-the two-word path.
+Dynamic extraction loads only the selected packed word when alignment proves
+that the slice cannot cross a word boundary. On little-endian hosts, aligned
+8/16/32/64-bit lanes load their native integer directly, including a bounds
+check; unaligned slices retain the two-word path.
+Multi-output packed kernels publish at their production points rather than
+retaining every result until the return. The state ABI still captures all
+aliased inputs and old values before publishing. Registered-memory reads after
+the commit barrier use the array directly, without scanning the cleared pending
+write slots. Pre-edge reads retain their per-port forwarding rules.
 The [LLVM/Slop audit](../../repros/sim_llvm_slop_20261007/index.html) records all
 355 ledger slowdowns, paired screening, loop-path differences, retained fixes,
 and the rejected slice-transport experiment.
@@ -214,10 +235,15 @@ changed-bit and resource-table pointers carry `noalias`: the caller supplies
 disjoint packed buffers and separate memory storage. Input buffers are also
 `readonly`; distinct fields within a buffer use distinct constant offsets.
 
-Native object emission uses bounded workers during setup. `sim.jobs` sets the
-same limit for object emission and host compilation. With no explicit limit,
-the worker budget is sampled from available CPUs and load, with at least one
-worker; setup waits for a completed job before starting another at the limit.
+Native object emission uses shared job admission during setup. `lhd.jobs`
+sets the ceiling for formal, LLVM object emission and native synthesis together;
+0 selects affinity-visible CPUs. Load and measured/predicted memory can reduce
+active LLVM workers below that ceiling, while always allowing one global job.
+Host C++ compilation uses a fixed CPU/load limit chosen at launch. The LLVM
+manager's per-job units are the module's IR instruction count. Admission happens
+before submission, so queued LLVM modules cannot grow to the CPU ceiling under
+memory pressure. Reservations transfer to the executing thread; each callable
+releases its LLVM context at completion, rather than retaining it in a future.
 A reusable worker pool spans module generation. A completion by any worker
 releases the next job; waiting for a slow first job does not idle the others.
 Objects are written only when bytes change and are generation-cache artifacts,
@@ -293,7 +319,7 @@ cross-cycle activation cache, and the default). With dirty tracking off, every
 color runs once per period with direct boundary assignments, and
 `sim.tune.fence=auto` places no module fences, since a fence only pays when
 dirty gating can skip what it isolates (with dirty on, `auto` fences a
-single-use module at 16 sites per interface word). Both knobs, with
+module below 1,024 sites at 16 sites per interface word, including reused bodies). Both knobs, with
 `sim.tune.live_words` and `sim.tune.backend`, form the tune vector (default
 `tv1:d=on;f=16;lw=256;be=slop`) that `lhd sim` resolves per workdir from a
 profile (docs/simopt.md §13). cgen folds it into the COLOR ROOT's generation key
@@ -357,6 +383,12 @@ stays separate. The host build follows driver includes and the artifact manifest
 to exclude standalone module exports that are unreachable after inlining. Those
 exports remain on disk; this does not yet eliminate their generation cost.
 
+Fixed slices within one machine word share a packed ABI carrier. Each consumer
+retains its own offset and width, including slices rebased across hierarchy.
+This avoids one machine word and dirty comparison per bit, and reduces the
+planner's live-value estimate. Both backends use the same transport layout.
+Adapters do not zero transport arrays that are completely filled before use.
+
 LLVM adapters reuse a whole input/register value already required by a color
 when other reads select slices of that value. LLVM performs the extraction;
 the adapter no longer packs those slices separately. Constant specialization
@@ -373,3 +405,55 @@ scalar declarations carry a `const` function attribute so the host compiler know
 the call cannot access simulator state. Resource-bearing calls retain their normal
 memory effects. The [ABI transport investigation](../../repros/sim_llvm_slop_20261007/abi/index.html)
 records paired speedups, aliasing/alignment experiments, and remaining gaps.
+
+### Ordered state updates in simulation
+
+The shared color plan can prove an in-place state update. Storage precedence
+edges are retained in the version DAG and in the color DAG after coarsening;
+`ordered_members()` gives both emitters the required order inside each color.
+Slop activation grouping preserves that order for colors containing in-place
+state, including the placement of reset actions. LLVM emits the operations in
+the same order.
+
+For rising-edge arrays, a zero forwarding prefix orders a read before the write
+group; a full prefix orders it after the group. This covers old, forwarded, and
+program ordering around one write group. Write ports retain their ascending
+priority. The planner proposes these edges together and rejects updates in the
+cyclic residual. Partial forwarding prefixes, array reset/bulk-update actions,
+synchronous read ports, derived/multiple clocks, latches, and structural control
+regions retain the staged protocol. Post-edge output computations remain where
+they observe a distinct state version.
+
+Compact loops do not globally disable ordering proofs for surrounding state;
+state private to a compact body retains its own schedule. Register carriers around compact
+loops retain staging to limit their live ranges.
+
+A register may overwrite Q once its last old-Q consumer has run. This proof uses
+the existing topological order and records explicit anti-dependencies; a swap
+therefore retains at least one staged endpoint. Proven updates have no commit
+flag or barrier copy. Memory reads and full-word writes become direct indexed
+loads and stores, with no pending-write records, forwarding, per-access change
+flags, or old-value loads for a full-word write. The owning color conservatively
+invalidates its memory readers once when it runs, reusing existing boundary
+write enables to avoid waking idle readers; array accesses do not report
+changes or export extra flags. If an enable is internal to the native color,
+invalidation is conservative. Write groups with dynamic enables and at most
+16 input words get their own color, keeping enable values visible to scheduling;
+larger decoded write banks retain their surrounding logic to avoid exporting
+every row predicate. This partition policy is shared by LLVM and Slop.
+Partial writes retain their lane merge, and dynamic enables and
+unproven address bounds retain the checks required by the memory semantics.
+Proven in-range addresses need no bounds check. Private root
+storage omits pending registers and array write records; shared compact-body
+storage retains the fields another occurrence's schedule may need. The LLVM
+adapter compares an in-place output just before storing it, without retaining
+old Q across the kernel call.
+
+The plan report's `in-place-state` line records the selected register and memory
+counts. `ordered_state.prp` captures old/forwarded/program memory reads into
+registers and checks a swap; planner tests check ordering at color budgets 1 and
+256 and the fallback for an interleaved write prefix. A native IR test also
+checks that a proven in-range, always-enabled full-word access has no calls,
+conditional branches, selects, or extra data loads/stores.
+Write-only native colors have no output or dirty-bitmap buffer, and do not
+clear an empty bitmap on return.

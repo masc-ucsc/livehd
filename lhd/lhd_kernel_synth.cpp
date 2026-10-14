@@ -557,8 +557,8 @@ void synth_command(Options& opts, Result& res) {
     labels["top"]        = top;
     labels["out"]        = net_dir;
     labels["qor"]        = qor_path;
-    // synth.threads is the shared ABC worker limit for every command.
-    labels["threads"]    = synth_set(opts, "threads", "0");
+    // ABC keeps its independent worker setting; USYN uses shared admission.
+    labels["threads"]    = "0";
     labels["specialize"] = synth_set(opts, "specialize", "true");
     // Each mapper receives its own labels. Native USYN does not inherit
     // ABC optimization settings; standalone dispatch uses the same rule.

@@ -8,7 +8,7 @@ cd "$TEST_TMPDIR"
 "$emitter" --gtest_filter=CgenVerilog.VariadicEqualityIncludesEveryOperand
 "$lhd" lec --impl verilog:eq_variadic/eq_variadic.v --ref "verilog:$reference" \
   --top eq_variadic --workdir work --set pass.satopt=false \
-  --set formal.timeout=5 --set formal.simfail=false --result-json result.json
+  --set formal.effort=proof --set formal.timeout=5 --set formal.simfail=false --result-json result.json
 python3 - <<'PY'
 import json
 from pathlib import Path

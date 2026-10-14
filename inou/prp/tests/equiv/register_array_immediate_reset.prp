@@ -5,7 +5,7 @@
 :verilog_top: top
 :lec_top: top
 :lec_set: formal.timeout=5
-:lec_grep: PROVEN equivalent
+:lec_grep: PROVEN-full
 */
 // Working spelling: four byte registers carried in a packed register.
 // Reset has priority over writes. Lane zero is the least-significant byte.

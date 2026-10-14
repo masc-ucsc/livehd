@@ -8,7 +8,7 @@ if [ ! -x "$LHD" ]; then LHD=./lhd/lhd; fi
 W="${TEST_TMPDIR:-$(mktemp -d)}/bmc_reserve"
 mkdir -p "$W"
 python3 - "$LHD" "$W" <<'PY'
-import json,os,pathlib,subprocess,sys,time
+import json,os,pathlib,re,subprocess,sys,time
 lhd=sys.argv[1];w=pathlib.Path(sys.argv[2])
 (w/'cell.v').write_text('module budget_cell(input A, output Y); assign Y=A; endmodule\n')
 src='''module leaf(input clk, input rst, input d, output reg q);
@@ -27,7 +27,7 @@ with (w/'compile.log').open('w') as log:
 env=dict(os.environ,LIVEHD_LEC_RACER_STALL_S='60',LIVEHD_LEC_RACER_STALL_ONLY='0')
 for tag,impl,verdict in [('equal','ref.v','proven'),('bug','bad.v','refuted')]:
  cmd=[lhd,'lec','--set','formal.effort=proof','--ref',str(w/'ref.v'),'--impl',str(w/impl),'--top','top','--lib',f'lg:{w}/models','--workdir',str(w/tag),'--result-json',str(w/(tag+'.json'))]
- for setting in ['formal.lec.semdiff=none','formal.jobs=2','formal.timeout=2','formal.min_timeout=1','formal.lec.int_blast=off','formal.simfail_run=false']:
+ for setting in ['formal.lec.semdiff=none','lhd.jobs=2','formal.timeout=2','formal.min_timeout=1','formal.lec.int_blast=off','formal.simfail_run=false']:
   cmd+=['--set',setting]
  start=time.monotonic()
  with (w/(tag+'.log')).open('w') as log:
@@ -36,7 +36,7 @@ for tag,impl,verdict in [('equal','ref.v','proven'),('bug','bad.v','refuted')]:
  assert time.monotonic()-start<10,(tag,text)
  assert lec.get('verdict')==verdict,(tag,data,text)
  assert (result.returncode==0)==(verdict=='proven'),(tag,result.returncode,text)
- assert "UNKNOWN under collapse" in text and "-> flat retry" in text,(tag,text)
+ assert re.search(r"(TIMEOUT|UNSUPPORTED|UNDISCHARGED|UNCONFIRMED|UNPAIRED|UNCHECKED|VACUOUS|UNEXPLAINED) under collapse", text) and "-> flat retry" in text,(tag,text)
  assert 'reserved budget goes directly to BMC' in text,(tag,text)
  if verdict=='proven':assert lec.get('bounded'),(tag,lec)
  print(f'{tag}: collapsed induction stalled, flat BMC returned {verdict}')

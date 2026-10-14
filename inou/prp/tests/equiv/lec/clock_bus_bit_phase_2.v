@@ -1,5 +1,5 @@
 /*
-:lec_expect: unknown
+:lec_expect: unsupported
 :lec_grep: scheduled on clock `clks` but the impl side on `clks\[1\]`
 MUTATED: every clock moved from clks[0] to clks[1]. Each side is single-root,
 but on a DIFFERENT bit, so one microstep sequence for both is two time bases

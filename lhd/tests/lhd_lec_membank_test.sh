@@ -72,7 +72,7 @@ map_design() {
 # mem_lower's refinements are sound in), compiled design as REF, cell models.
 lec_cvc5() {
   local nd="$1" rd="$2" out="$3"
-  "$LHD" lec --impl lg:"$nd/net" --ref lg:"$rd/lg" --lib lg:"$nd/models" --top membank.membank \
+  "$LHD" lec --set formal.effort=proof --impl lg:"$nd/net" --ref lg:"$rd/lg" --lib lg:"$nd/models" --top membank.membank \
       --workdir "$nd/wc5" -q --result-json "$out" > "$out.log" 2>&1
   echo $?
 }
@@ -109,7 +109,7 @@ run compile lg:"$D/models" --emit-dir verilog:"$D/modelsv" --workdir "$D/w7"
 run compile lg:"$GOOD/lg" --top membank.membank --emit-dir verilog:"$D/refv" --workdir "$D/w8"
 cat "$D/netv/"*.v "$D/modelsv/"*.v > "$D/impl.v"
 cat "$D/refv/"*.v > "$D/ref.v"
-"$LHD" lec --impl verilog:"$D/impl.v" --ref verilog:"$D/ref.v" --top membank \
+"$LHD" lec --set formal.effort=proof --impl verilog:"$D/impl.v" --ref verilog:"$D/ref.v" --top membank \
     --workdir "$D/wy" -q --result-json "$D/lec_yosys.json" > "$D/lec_yosys.log" 2>&1 \
   || fail "q: default LEC lec failed: $(cat "$D/lec_yosys.json" 2>/dev/null)"
 ! grep -q '"verdict":"refuted"' "$D/lec_yosys.json" || fail "q: default LEC REFUTED the bit-blasted register file"
@@ -117,7 +117,7 @@ echo "PASS: default LEC does not refute the mapped register file"
 
 # cgen's encoded memory instance and generated region/cell-model wrappers
 # must retain the same total storage-bank pairing after an RTL round trip.
-"$LHD" lec --impl verilog:"$D/impl.v" --ref verilog:"$D/ref.v" --top membank \
+"$LHD" lec --set formal.effort=proof --impl verilog:"$D/impl.v" --ref verilog:"$D/ref.v" --top membank \
     --workdir "$D/wv5" -q --result-json "$D/lec_verilog.json" > "$D/lec_verilog.log" 2>&1 \
   || fail "q: cvc5 Verilog LEC failed: $(cat "$D/lec_verilog.json" 2>/dev/null)"
 grep -q '"verdict":"proven"' "$D/lec_verilog.json" || fail "q: Verilog round trip did not prove"
@@ -165,7 +165,7 @@ grep -q '"class":"equiv_fail"' "$BAD/lec.json" || fail "bad: refutation is not a
 echo "PASS: a netlist with a corrupted write address in the same bank shape is REFUTED (the tie hides nothing)"
 
 cat "$BAD/netv/"*.v "$W/q/modelsv/"*.v > "$BAD/impl.v"
-"$LHD" lec --impl verilog:"$BAD/impl.v" --ref verilog:"$W/q/ref.v" --top membank \
+"$LHD" lec --set formal.effort=proof --impl verilog:"$BAD/impl.v" --ref verilog:"$W/q/ref.v" --top membank \
     --workdir "$BAD/wv5" -q --result-json "$BAD/lec_verilog.json" > "$BAD/lec_verilog.log" 2>&1
 rc=$?
 [ "$rc" -ne 0 ] || fail "bad: Verilog correspondence hid the corrupted write address"
@@ -184,7 +184,7 @@ mrun pass color synth --top membank_multi.membank_multi lg:"$M/lg" --workdir "$M
 mrun pass abc --top membank_multi.membank_multi lg:"$M/lg" --emit-dir lg:"$M/net" \
     --set synth.liberty="$LIB" --set pass.abc.memory=true --workdir "$M/w3"
 mrun pass liberty gensim "$LIB" --emit-dir lg:"$M/models" --workdir "$M/w4"
-"$LHD" lec --impl lg:"$M/net" --ref lg:"$M/lg" --lib lg:"$M/models" \
+"$LHD" lec --set formal.effort=proof --impl lg:"$M/net" --ref lg:"$M/lg" --lib lg:"$M/models" \
     --top membank_multi.membank_multi --workdir "$M/wlec" \
     -q --result-json "$M/lec.json" > "$M/lec.log" 2>&1 \
   || fail "multi: cvc5 LEC failed: $(cat "$M/lec.json" 2>/dev/null)"

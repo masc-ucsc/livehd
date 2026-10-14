@@ -2,6 +2,7 @@
 #pragma once
 
 #include <algorithm>
+#include <chrono>
 #include <functional>
 #include <string>
 #include <string_view>
@@ -15,6 +16,7 @@
 #include "phase_sched.hpp"
 #include "property_types.hpp"
 #include "solve_stats.hpp"
+#include "solver_profile.hpp"
 #include "state_match.hpp"
 
 namespace livehd::lec {
@@ -57,23 +59,31 @@ struct Witness_trace {
   bool                       empty() const { return cycles.empty(); }
 };
 
+struct Portfolio_arm_stats {
+  std::string engine, profile, verdict;
+  int64_t     elapsed_ms = 0;
+  bool        won = false, killed = false, queued = false;
+};
 struct Query_result {
-  Verdict     verdict = Verdict::Unknown;
+  std::vector<Portfolio_arm_stats> arms;
+  Verdict     verdict = Verdict::Undecided;
   std::string witness;  // satisfying input assignment when Refuted
   std::string detail;   // engine / bound / encode error, for diagnostics
 
-  // The design-size gate refused this design (too large to encode as one unit,
-  // lec.allow_oversize unset). Distinct from a solver-inconclusive UNKNOWN: it is
-  // a hard admission failure, so a driver must exit non-zero regardless of
-  // any solver outcome, exactly as pass.abc does. See Lec_options::allow_oversize.
-  bool oversize_refused = false;
+  // The DECIDING sub-result's own detail when `detail` concatenates several
+  // undecided attempts (the auto portfolio fold): the top-level outcome is
+  // classified from this text (query_outcome), never from the concatenation,
+  // whose other arms' keywords would otherwise compete by substring precedence
+  // (one arm's wall-deadline kill must not hide another arm's contradictory
+  // assumptions). Empty = classify `detail` itself.
+  std::string cause_detail;
 
   // The ENCODER refused a cell/shape it does not model (Encoded::unsupported) —
-  // e.g. a Latch, an unknown op. Like oversize_refused (and unlike a solver
-  // give-up) this decided NOTHING and no extra budget can change it, so a driver
-  // must exit non-zero unconditionally: an exit-0 "inconclusive"
-  // here is read downstream as "verified", which makes every gate built on this
-  // run vacuous (2f-latch M0).
+  // e.g. a Latch, an unsupported op. Unlike a solver give-up this decided
+  // NOTHING and no extra budget can change it, so it is REFUTED-unsupported
+  // (exit 7), never a warning: an exit-0 "undecided" here would be read
+  // downstream as "verified", which makes every gate built on this run vacuous
+  // (2f-latch M0).
   bool unsupported = false;
 
   // The miter was EMPTY: not one (output, cycle) pair entered the comparison —
@@ -102,12 +112,12 @@ struct Query_result {
   // the inductive STEP, but it is not a complete proof until BMC from reset
   // establishes that relation on a reachable state. These two wire-visible
   // flags let the auto portfolio combine the independently checked obligations;
-  // an explicit ind-only run remains Unknown.
+  // an explicit ind-only run remains Undecided.
   bool packed_scalar_step_proven = false;
   bool packed_scalar_base_proven = false;
 
   // The PARENT SIGKILLed a forked RACER at its wall deadline (the ind|bmc
-  // race deadline, race_deadline_ms): the verdict is a witness-free Unknown
+  // race deadline, race_deadline_ms): the verdict is a witness-free Undecided
   // that already spent its whole wall budget. A driver must not answer it
   // with a further re-solve (flat retry, int-blast retry) -- a query that ran
   // out of TIME only runs out again, and every retry would add another full
@@ -115,7 +125,7 @@ struct Query_result {
   // keeps its own, pre-existing retry policy.) Parent-side only: never set
   // inside a child, so not on the wire.
   bool wall_killed = false;
-  // Narrower: the IND racer itself was wall-killed (make_inconclusive keeps
+  // Narrower: the IND racer itself was wall-killed (make_undecided keeps
   // wall_killed = either leg). The int-blast retry exists to turn an ind
   // SOLVER give-up into a proof, so it gates on this one: a bmc-only wall kill
   // leaves ind's give-up genuine, and the retry's own race trusts an ind
@@ -124,7 +134,7 @@ struct Query_result {
 
   // The INDUCTION-STEP counterexample (inputs, then `| state: ...`) that kept a
   // weaker-than-unbounded verdict from being an unbounded proof: the auto
-  // portfolio fell back to a bounded PASS or INCONCLUSIVE while the ind leg
+  // portfolio fell back to a bounded PASS or UNDECIDED while the ind leg
   // found a step CEX from an arbitrary state. The state is what a reader needs
   // to tell an unreachable corner (fix: a proven `assume` over that state) from
   // a real bug (suggestions6 1.6). Empty otherwise.
@@ -137,7 +147,7 @@ struct Query_result {
   // Which engine produced this verdict + how long it took (for the per-block
   // progress/info record). Normally just the requested engine; under the `auto`
   // portfolio it is the engine that reached the trustworthy verdict FIRST
-  // (inductive-Proven or BMC-Refuted) — and for an inconclusive auto run it lists
+  // (inductive-Proven or BMC-Refuted) — and for an undecided auto run it lists
   // the attempted engines. `elapsed_ms` is that engine's wall-clock (-1 = unset).
   std::string engine;
   long long   elapsed_ms = -1;
@@ -156,7 +166,7 @@ struct Query_result {
   // BMC bound bookkeeping for the `auto` portfolio's bounded-Proven policy: the
   // checked-window size and the number of (output,cycle) comparisons actually run.
   // A BMC `Proven` with output_checks>0 is a BOUNDED proof (no CEX <= bound), which
-  // `auto` reports as PASS (transparently labelled) rather than inconclusive —
+  // `auto` reports as PASS (transparently labelled) rather than undecided —
   // deeper-than-bound cycles are out of scope by design.
   int checked_steps = 0;
   int output_checks = 0;
@@ -171,7 +181,7 @@ struct Query_result {
   // set of state/outputs, the miter still runs over the COMMON ones and these list
   // what is unmatched on each side (human-readable, control prefixes stripped).
   // Non-empty `unmatched_*` ⇒ the verdict cannot be a definitive Proven (the
-  // correspondence is incomplete); the engine reports Unknown but `detail`/`witness`
+  // correspondence is incomplete); the engine reports Undecided but `detail`/`witness`
   // still carry the matched-portion result + the per-output divergences found.
   std::vector<std::string> unmatched_ref;   // in ref, no corresponding impl signal
   std::vector<std::string> unmatched_impl;  // in impl, no corresponding ref signal
@@ -236,6 +246,9 @@ struct Monitor;
 
 // Discharge / engine knobs (filled from the lec.* set-options).
 struct Lec_options {
+  std::chrono::steady_clock::time_point _deadline{};                 // one parent-owned deadline, inherited by every arm
+  std::string                           profile       = "internal";  // fresh-solver configuration / portfolio arm
+  std::string                           portfolio     = "auto";
   Effort   effort        = Effort::Legacy;
   // Canonical assumption policy shared by compile, verify, and LEC.
   // true: checked assumptions are proof obligations before use. A checked
@@ -266,9 +279,9 @@ struct Lec_options {
   // integer arithmetic inside cvc5 (VMCAI'22 "iand" lazy refinement). Measured
   // split: arithmetic-rewrite miters (reassociated / distributed / commuted
   // multiplies) that neither abc nor BV bit-blasting finish in 60s prove in
-  // ~0.1s as integers, while mask/extract/memory-heavy cones degrade to Unknown
+  // ~0.1s as integers, while mask/extract/memory-heavy cones degrade to Undecided
   // (nonlinear integer arithmetic is undecidable). Hence:
-  //   auto (default) — solve BV-first; a solver-give-up Unknown earns ONE
+  //   auto (default) — solve BV-first; a solver-give-up Undecided earns ONE
   //     int-blasted re-solve at the formal.min_timeout budget (int_blast_retry,
   //     called by the drivers — never by the engines, so the portfolio/tier-2
   //     recursion inside prove_equal retries at most once per driver query);
@@ -278,19 +291,18 @@ struct Lec_options {
   // Main lec solve path only (the verify engine never int-blasts).
   std::string int_blast           = "auto";
   int         bound               = 6;  // BMC / induction depth
-  // `timeout` is a SOFT TOTAL budget, not a per-query cap: overshooting it is
-  // fine, silently checking nothing is not. The hier driver spends it as total
-  // WALL clock over the proof DAG (defs run concurrently under `jobs`, so a
-  // summed budget would drain jobs-times faster than real time); the verify
-  // engine spends it as total SOLVER time across the run. Either way one
-  // `formal.timeout=T` is an actual total, not T per def / per obligation (the
-  // D×T hazard). 0 = unbounded. Accounting is ON iff `timeout > 0 && compile_resource_limit == 0`
-  // — `compile_resource_limit` is the compiler-private deterministic path and owns the bound by itself, which
-  // is why there is no separate mode knob.
+  // lhd LEC commands enforce one parent-owned wall allowance across queueing,
+  // encoding, obligations, retries and witnesses. Parallel solvers share elapsed
+  // time; _deadline carries the absolute boundary. In-process query helpers
+  // clamp solver checks to their remaining allowance but cannot preempt native
+  // SAT calls without isolation. Legacy property verification retains its soft
+  // solver-time budget and per-unit floor; explicit proof effort has _deadline
+  // and cannot overrun it. 0 means unbounded. Compiler-private resource budgets
+  // remain independent of public formal effort settings.
   int         timeout             = 0;
   // FLOOR, in seconds, under the soft total: once `timeout` is spent, a unit
   // that has NO verdict yet still gets at least this much solver time so it
-  // earns a real Unknown/CEX instead of a silent "not checked". A "unit" is one
+  // earns a real Undecided/CEX instead of a silent "not checked". A "unit" is one
   // obligation (verify) or one def (hier lec).
   //
   // This is deliberately allowed to overshoot `timeout` — that is the point.
@@ -298,7 +310,7 @@ struct Lec_options {
   // the second term at ONE floor per unit (not one per BMC cycle) is the FREEZE
   // in prove_properties: once the budget is spent, a unit that already has a
   // bounded proof stops deepening, and a unit with none takes its single floored
-  // attempt and then latches `unknown_at`, which the cycle loop skips. Removing
+  // attempt and then latches `undecided_at`, which the cycle loop skips. Removing
   // that freeze turns this into units x cycles x floor.
   //
   // Default 20s. 1s (the value both floors were hardcoded to before this
@@ -306,14 +318,14 @@ struct Lec_options {
   // anything but a trivial def.
   //
   // The measured symptom on a wide design: minion_lec took
-  // `minion_dcache_miss_handler` to REFUTED in 2253ms on one run and to UNKNOWN
+  // `minion_dcache_miss_handler` to REFUTED in 2253ms on one run and to UNDECIDED
   // on the next, because most defs land past the soft total and draw the floor
   // (`budget 120s target / 485s actual over 116 def(s) solved, 92 on the 1s
   // floor`). A verdict that flips run to run is unusable as an oracle to debug
-  // against, and a 1s floor mints Unknowns that read as design problems when
+  // against, and a 1s floor mints undecided results that read as design problems when
   // they are pure scheduling.
   //
-  // Lower it to trade Unknowns back for a tighter overrun; the bound is still
+  // Lower it to trade undecided results back for a tighter overrun; the bound is still
   // `timeout + (unsettled units x min_timeout)` and the run always reports
   // target/actual/units/floored, so the overrun is never silent.
   int         min_timeout         = 20;
@@ -335,7 +347,7 @@ struct Lec_options {
   //
   // Enforced by the PARENT (spawn_isolated_worker), which owns the child pid —
   // the only place a runaway can actually be stopped. Killing a worker can only
-  // LOSE information, so the degrade is a witness-free Unknown, never a
+  // LOSE information, so the degrade is a witness-free Undecided, never a
   // verdict: sound by construction, and it SAYS the backstop fired.
   //
   // 0 also disables the forked-RACE wall deadline (race_deadline_ms): the auto
@@ -343,7 +355,7 @@ struct Lec_options {
   int         hard_timeout_mult   = 3;
   // Independent budget (seconds, 0 = off) for the SPECULATIVE post-run phase:
   // the hier straggler list, the cvc5 timeout-CORE diagnosis (which subset of
-  // still-Unknown obligations is jointly toxic), and P3 invariant MINING. All
+  // still-Undecided obligations is jointly toxic), and P3 invariant MINING. All
   // three are diagnosis — they cost solver time and can never change a verdict —
   // which is why they share one budget that is never drawn from `timeout`
   // (mining's induction rung must be able to open even when the main run is
@@ -371,7 +383,7 @@ struct Lec_options {
                                              //          are easy (a name-matched register-correspondence
                                              //          proof of two large front-end netlists is the case).
                                              //   true  : decompose ONLY — report "N/M cuts PROVEN" + the
-                                             //          unresolved residue as Unknown, NEVER run the
+                                             //          unresolved residue as Undecided, NEVER run the
                                              //          monolithic solve (the diagnostic mode to isolate the
                                              //          hard cone fast, e.g. a wide ALU/barrel-shift cone
                                              //          that needs SAT-sweeping). LEC_DECOMP_LOG=1 logs each
@@ -397,13 +409,10 @@ struct Lec_options {
   int         conelimit           = 10000;   // per-cone ABC SAT conflict budget (0 = ABC's own default).
                                              // Bounds a hard cone so it falls back to cvc5 instead of hanging.
 
-  bool allow_oversize = false;  // skip the design-size gate (lec.allow_oversize). The
-                                // encoder materializes the whole flattened design (minus
-                                // opaque/collapsed subs) into one forward_hier vector; above
-                                // ~1M nodes that alone can exhaust memory, so a design that
-                                // large is refused as Unknown unless this is set. The
-                                // per-design size is opacity-aware, so a design checked in
-                                // small decomposed pieces is not falsely refused.
+  // There is no design-size gate: every design is attempted. A run that
+  // outgrows memory is caught (std::bad_alloc, cvc5 MEMOUT, a forked worker
+  // killed at the RLIMIT_AS backstop) and reported as an undecided result
+  // whose detail classifies TIMEOUT-memory, never a crash.
 
   // Reset-phase separation for the BMC engine (lec.phase). The reset-asserted
   // and the free-running behaviors are best checked SEPARATELY:
@@ -445,9 +454,9 @@ struct Lec_options {
   // to the flop name-alias exactly like `match`, but SPECULATIVE. prove_equal
   // enforces the uncertain discipline itself: REFUTED with pairs applied is
   // never final — drop ALL of them and re-solve once (a pair-free re-refute is
-  // the real FAIL; anything else ceilings at Unknown, since dropping any pair
-  // already makes the correspondence incomplete). A timeout/Unknown never
-  // retries (the retry's ceiling is the Unknown the timeout already reports).
+  // the real FAIL; anything else ceilings at Undecided, since dropping any pair
+  // already makes the correspondence incomplete). A timeout/Undecided never
+  // retries (the retry's ceiling is the Undecided the timeout already reports).
   // A BOUNDED bmc-Proven is never claimed while pairs are applied (the shared
   // s0 constraints can mask a real bounded CEX — a false PASS). prove_equal
   // drops the speculative pairs and retries BMC through the existing prologue:
@@ -475,7 +484,7 @@ struct Lec_options {
   // uses this list (plus canon-name agreement) to CONFIRM an ambiguous bucket's
   // occurrence pairing before collapsing it; an unconfirmed ambiguous bucket is
   // kept UNCOLLAPSED (fresh per-design array symbols) — a sound degrade (worst
-  // case Unknown/flat-refute, never a false PROVEN). Empty ⇒ rely on canon names
+  // case Undecided/flat-refute, never a false PROVEN). Empty ⇒ rely on canon names
   // alone (still sound: renamed-and-reordered ambiguous mems stay uncollapsed).
   std::vector<std::pair<std::string, std::string>> mem_match;
 
@@ -722,6 +731,25 @@ inline constexpr int kLecMaxUnroll = 100000;
 
 // "" if bound/reset_cycles are in [0, kLecMaxUnroll], else a human message.
 inline std::string lec_options_range_error(const Lec_options& o) {
+  try {
+    const auto& profile = solver_profile(o.profile);
+    if (profile.incremental) {
+      return "verify is not a LEC profile";
+    }
+    if (is_sampled(o.effort) && profile.needs_models_off) {
+      return "sampled efforts require a model-producing profile";
+    }
+    if (o.portfolio != "auto") {
+      for (const auto& arm : parse_portfolio(o.portfolio)) {
+        if (is_sampled(o.effort) && (arm.engine != "bmc" || solver_profile(arm.profile).needs_models_off)) {
+          return "sampled portfolios require BMC arms with model support";
+        }
+      }
+    }
+  } catch (const std::invalid_argument& error) {
+    return error.what();
+  }
+
   if (is_sampled(o.effort) && o.phase != "after_reset") {
     return "sampled effort presets require formal.phase=after_reset";
   }
@@ -763,12 +791,12 @@ inline std::string lec_options_range_error(const Lec_options& o) {
 
 // Prove the (combinational) outputs of `ref` and `impl` equal for all inputs,
 // matching primary inputs by name. Returns Proven / Refuted(+witness) /
-// Unknown(+detail).
+// Undecided(+detail).
 //
 // `sub_lib` (optional): name-hash Gid -> definition graph, used to flatten
 // `Sub` instances inline during encoding (M5). Needed when a side is a
 // hierarchical / standard-cell netlist (e.g. an ABC mapping whose cells resolve
-// to gensim models); nullptr keeps the sound Sub -> Unknown.
+// to gensim models); nullptr keeps the sound Sub -> Undecided.
 Query_result prove_equal(hhds::Graph* ref, hhds::Graph* impl, const Lec_options& opts = {},
                          const absl::flat_hash_map<hhds::Gid, hhds::Graph*>* sub_lib = nullptr);
 
@@ -793,7 +821,7 @@ bool io_bundle_split(hhds::Graph* ref, hhds::Graph* impl);
 // "nothing to worry about" -- a child SIGKILLed by the wall backstop or its
 // RLIMIT_AS share, mid-write, would otherwise hand the parent an UNBOUNDED
 // Proven for a bounded claim. Framing makes truncation a parse failure, which
-// every caller already routes to "worker produced no result" -> Unknown.
+// every caller already routes to "worker produced no result" -> Undecided.
 //
 // Exposed (rather than file-local) so the seam has a direct regression test.
 std::string frame_blob(std::string_view payload);
@@ -814,7 +842,7 @@ bool unframe_blob(std::string_view b, std::string_view& payload);
 //   grace = clamp(formal.timeout / 4, 10 s, 60 s).
 // 0 when formal.timeout == 0 (unbounded / the deterministic rlimit tier) or
 // formal.hard_timeout_mult == 0 (the documented "disable the wall backstops"
-// setting). A killed racer is a witness-free Unknown, never a verdict.
+// setting). A killed racer is a witness-free Undecided, never a verdict.
 long long race_deadline_ms(const Lec_options& opts);
 
 // The verify STRATEGY race's wall deadline (engine=auto). Unlike one
@@ -830,14 +858,14 @@ long long verify_race_deadline_ms(const Lec_options& opts, int n_units);
 
 // Run one proof in a fork-isolated worker. Used by the Taskflow hierarchy DAG:
 // one task owns at most one active solver child, so the process count is bounded by
-// formal.jobs and cvc5 instances never execute concurrently in threads.
+// lhd.jobs and cvc5 instances never execute concurrently in threads.
 Query_result prove_equal_isolated(hhds::Graph* ref, hhds::Graph* impl, const Lec_options& opts = {},
                                   const absl::flat_hash_map<hhds::Gid, hhds::Graph*>* sub_lib = nullptr);
 
 // int_blast=auto second leg: when the BV-first solve `first` came back a
-// SOLVER-GIVE-UP Unknown (not unsupported/oversize/nothing-compared — those no
+// SOLVER-GIVE-UP Undecided (not unsupported/nothing-compared — those no
 // budget can change), re-solve ONCE with cvc5's int-blasting (iand) at the
-// formal.min_timeout budget and adopt the retry iff it SETTLES; a retry Unknown
+// formal.min_timeout budget and adopt the retry iff it SETTLES; a retry Undecided
 // keeps `first` (its detail names the real bottleneck) with a note appended.
 // DRIVER-level only — call it once per driver query, after any flat-confirm,
 // never from inside the engines: prove_equal recurses (tier-2 discipline, the
@@ -901,7 +929,7 @@ struct Prop_result {
   // prove-then-use: checked per cycle like a plain assert; only a just-PROVEN
   // cycle's fact constrains later obligations (rule A), and only an inductive
   // survivor constrains the step frame (rule E). REFUTED = a hard error;
-  // Unknown = NOT used, disclosed as unproven. Classes:
+  // Undecided = NOT used, disclosed as unproven. Classes:
   //   "input"     — the cond's cone reaches primary inputs (or free blackbox
   //                 outputs) only. Over free inputs such a constraint can
   //                 never be proven unless it is a tautology, so a refute
@@ -913,7 +941,7 @@ struct Prop_result {
   //                 fiat; never checked, disclosed distinctly.
   //   "check_disabled" — formal.assume_check=false; active and unchecked.
   std::string   aclass;
-  Verdict       verdict       = Verdict::Unknown;
+  Verdict       verdict       = Verdict::Undecided;
   // V3 verdict ladder: a bounded-proven assert that also survives the
   // simultaneous-induction step is PROVEN UNBOUNDED — true at every cycle of
   // every bound (the conjunction of survivors is inductive; the BMC run is its
@@ -921,13 +949,16 @@ struct Prop_result {
   bool          unbounded     = false;
   int           proven_to     = -1;  // deepest checked cycle proven (every checked cycle <= it is UNSAT)
   int           refuted_at    = -1;  // first cycle with a reachable violation (SAT)
-  int           unknown_at    = -1;  // first cycle where the solver gave up (timeout/unknown);
+  int           undecided_at  = -1;  // first cycle where the solver gave up (a limit / no answer);
                                      // later cycles were not attempted for this property
-  // Why an Unknown is open when it is NOT a solver giving up at `unknown_at`
-  // ("" = the solver gave up there). Set when the engine=auto race demotes a
-  // shallow ind-first bounded proof because bmc-first produced no result: no
-  // solver timed out at that cycle, so the reports must not say it did.
-  std::string   unknown_why;
+  // WHY an undecided obligation is open, in the shared classifier's vocabulary
+  // (undecided_outcome): the solver's own reason at `undecided_at` ("solver
+  // gave up at cycle N (hit formal.timeout ...)"), a strategy that never
+  // reached it ("not checked past cycle K: ... wall-killed"), an obligation
+  // whose window/past() history is deeper than formal.bound (checked at no
+  // cycle), or a contradictory / undecided assume scope that voided its proof.
+  // "" only when none of those applies (a bug: REFUTED-unexplained).
+  std::string   undecided_why;
   // Cumulative cvc5 time spent on THIS obligation's checks (BMC per-cycle checks
   // + its induction-rung candidate checks; cache hits cost ~0). P2 agent-report
   // signal — the report ranks stragglers by it. Serialized by the wire codec.
@@ -937,12 +968,13 @@ struct Prop_result {
   // cond`, not `cond`. `vacuous_guard` = that antecedent is UNSAT over every
   // checked cycle, i.e. the property held only because it was never exercised.
   //
-  // This is STRICTLY DIAGNOSTIC and never moves a verdict: unlike a
-  // contradictory assume set (which makes the proof unsound to rely on), a
-  // vacuous antecedent leaves the obligation genuinely true — it just checked
-  // nothing. So an inconclusive vacuity query leaves `vacuous_guard` false
-  // rather than accusing (the opposite of the conservative direction the
-  // per-scope check takes, and deliberately so).
+  // The engine Verdict stays Proven (the obligation is genuinely true), but
+  // the TOP-LEVEL outcome of such a row is REFUTED-vacuous (prop_outcome; final
+  // owner ruling 2026-10-14: a check that checked nothing is a sign of a
+  // problem -- a dead branch). Only a PROVEN-unsatisfiable guard sets it: an
+  // undecided vacuity query leaves `vacuous_guard` false rather than accusing
+  // (the opposite of the conservative direction the per-scope check takes, and
+  // deliberately so).
   bool          guarded       = false;
   bool          vacuous_guard = false;
   // Cone of influence: design nodes the property's cond depends on, and how
@@ -956,15 +988,25 @@ struct Prop_result {
   Witness_trace trace;
 };
 
-// Aggregate result of a prove_properties run: Refuted if any assert has a
-// reachable counterexample; else Unknown if anything is unresolved (a
-// per-property timeout, a contradictory assume set, an encode failure); else
-// Proven — a BOUNDED verdict (no violation within `checked_steps` cycles).
+// Aggregate result of a prove_properties run: Refuted if any assert (or checked
+// assume) has a reachable counterexample; else Undecided if anything is
+// unresolved (a per-property limit, a contradictory assume set, an encode
+// failure, an obligation deeper than formal.bound); else Proven — a BOUNDED
+// verdict (no violation within `checked_steps` cycles), or nothing_to_check.
 struct Verify_result {
-  Verdict                  verdict = Verdict::Unknown;
+  Verdict                  verdict = Verdict::Undecided;
   std::string              detail;
-  bool                     oversize_refused = false;  // design-size gate refused (see Query_result::oversize_refused)
   bool                     unsupported      = false;  // encoder REFUSED a cell/shape (see Query_result::unsupported)
+  // Proven because there was NOTHING to check: no assert/assert_always
+  // obligation exists (and no checked assume is refuted or open). REFUTED-vacuous
+  // at the top level (nothing to check), never a silent PROVEN-full.
+  bool                     nothing_to_check = false;
+  // Refuted while the design holds FREE blackbox outputs (a body-less Sub that
+  // nothing flattens): the counterexample may rely on a free box output value.
+  // It is still REFUTED-cex (the boxed model is the contract), but a
+  // source-level replay (the simfail testbench) cannot drive that output, so a
+  // driver must skip the replay and disclose it instead.
+  bool                     cex_free_box     = false;
   int                      checked_steps    = 0;      // bound actually run
   int                      reset_hold       = 0;      // after_reset prologue length (incl. pipeline flush)
   // Deepest history any formal block reads (`past(x, n)`). A run whose
@@ -975,12 +1017,15 @@ struct Verify_result {
                                                       // state, so a refute may rest on an unreachable initial state — the
                                                       // compile tier must NOT treat it as reachable-from-reset (no hard error).
   int                      n_assumes        = 0;      // user assumes in force (verdicts are conditional on them)
-  // An assume set was contradictory, so the proofs it governed were vacuous.
-  // With per-scope assume scoping this is now a PER-SCOPE property: `vacuous`
-  // is the roll-up (true if ANY scope was contradictory) and `vacuous_scopes`
-  // names them — "" for the design tier, else the formal block's dotted name.
-  // A contradictory BLOCK voids only that block's obligations; a contradictory
-  // DESIGN tier voids everything (every scope sits on the design frame).
+  // An assume set was PROVEN contradictory (UNSAT), so the proofs it governed
+  // were vacuous (REFUTED-vacuous: a check that proves nothing is a problem). With per-scope assume scoping this is a
+  // PER-SCOPE property: `vacuous` is the roll-up (true if ANY scope was
+  // contradictory) and `vacuous_scopes` names them — "" for the design tier,
+  // else the formal block's dotted name. A contradictory BLOCK voids only that
+  // block's obligations; a contradictory DESIGN tier voids everything (every
+  // scope sits on the design frame). An UNDECIDED consistency check is not a
+  // contradiction: it leaves these unset and demotes the proofs it governs with
+  // the check's own cause in their undecided_why (a limit stays a TIMEOUT).
   bool                     vacuous          = false;
   std::vector<std::string> vacuous_scopes;
   // Soft-budget accounting (formal.timeout is a TARGET, not a cap). What was
@@ -1005,13 +1050,13 @@ struct Verify_result {
   // refutes them instead of corrupting a run). Non-inductive entries appear
   // only under mine=speculative. Candidate sources: solver learned literals
   // over state symbols, and range/equality templates over the registers in the
-  // still-Unknown obligations' cones, seeded from a reachable model sample.
+  // still-Undecided obligations' cones, seeded from a reachable model sample.
   struct Mined_invariant {
     std::string              pyrope;      // ready-to-paste block expression ("" = shape not expressible)
     std::string              smt2;        // solver-term rendering (debug / non-expressible shapes)
     std::string              provenance;  // "learned-literal@cyc N" | "template:range(key)" | ...
     std::vector<std::string> keys;        // state keys mentioned
-    std::vector<int>         targets;     // indices of still-Unknown props whose cone overlaps
+    std::vector<int>         targets;     // indices of still-Undecided props whose cone overlaps
     bool                     inductive = false;
   };
   std::vector<Mined_invariant> mined;
@@ -1027,6 +1072,140 @@ struct Verify_result {
   // exactly that bug. Add a member here => extend BOTH codec halves.
   Cvc5_stats cvc5;
 };
+
+// ── Top-level outcome of a FINAL result (owner rulings 2026-10-14) ──────────
+// The mapping a DRIVER applies to the selected top's final result, after every
+// escalation it runs (flat retry, inlining, another engine). Never apply it to
+// a hierarchy child or an internal sub-attempt: their undecided causes
+// (Undecided_cause) are iteration triggers, not verdicts. `engine_forced` is
+// true when the options pinned the engine/portfolio (anything but
+// engine=auto). See property_types.hpp for the words and exit codes.
+
+// A top PORT name in an unmatched list: no internal prefix. `nxt:`/`mem:` name
+// one-sided state, `bbin:`/`bbox:` a collapsed box's obligations; a plain name
+// is a primary output that exists on one side only.
+[[nodiscard]] inline bool is_port_cut_name(std::string_view name) {
+  return !name.starts_with("nxt:") && !name.starts_with("mem:") && !name.starts_with("bbin:") && !name.starts_with("bbox:");
+}
+
+[[nodiscard]] inline bool has_one_sided_port(const Query_result& r) {
+  return std::any_of(r.unmatched_ref.begin(), r.unmatched_ref.end(), [](const std::string& n) { return is_port_cut_name(n); })
+         || std::any_of(r.unmatched_impl.begin(), r.unmatched_impl.end(), [](const std::string& n) { return is_port_cut_name(n); });
+}
+
+// The outcome of an equivalence result. A Refuted is a real counterexample; a
+// Proven names its strength. An undecided result with a one-sided top output
+// is an interface mismatch; an empty miter with no one-sided port (neither
+// side exposes anything comparable) is vacuous; every other undecided result
+// is classified from its deciding detail (cause_detail, else detail).
+[[nodiscard]] inline Outcome query_outcome(const Query_result& r, bool engine_forced) {
+  if (r.verdict == Verdict::Refuted) {
+    return Outcome::Refuted_cex;
+  }
+  if (r.verdict == Verdict::Proven) {
+    return r.bounded ? Outcome::Proven_bounded : Outcome::Proven_full;
+  }
+  if (r.tested && !r.unsupported && !r.nothing_compared) {
+    return Outcome::Tested_sampled;
+  }
+  if (has_one_sided_port(r)) {
+    return Outcome::Refuted_interface;
+  }
+  if (r.nothing_compared && !r.unsupported
+      && ((r.unmatched_ref.empty() && r.unmatched_impl.empty()) || internal_state_only(r.unmatched_ref, r.unmatched_impl))) {
+    return Outcome::Refuted_vacuous;
+  }
+  return undecided_outcome(r.cause_detail.empty() ? r.detail : r.cause_detail, r.unsupported, engine_forced);
+}
+
+// The `n` of outcome_word(): the checked depth of a PROVEN-bounded (design
+// cycles after the reset prologue), the vector count of a TESTED-sampled, else -1.
+[[nodiscard]] inline int64_t query_outcome_depth(const Query_result& r, Outcome o) {
+  if (o == Outcome::Proven_bounded) {
+    return r.checked_steps;
+  }
+  if (o == Outcome::Tested_sampled) {
+    return static_cast<int64_t>(r.sampling.vectors);
+  }
+  return -1;
+}
+
+// One verify obligation (an assert, or a checked assume; an unchecked
+// assume_nocheck is a constraint, never an obligation: callers skip it). A
+// proof whose `if`/`match` guard can never be true checked nothing: vacuous.
+[[nodiscard]] inline Outcome prop_outcome(const Prop_result& p, bool engine_forced) {
+  if (p.verdict == Verdict::Refuted) {
+    return Outcome::Refuted_cex;
+  }
+  if (p.verdict == Verdict::Proven) {
+    return p.vacuous_guard ? Outcome::Refuted_vacuous : p.unbounded ? Outcome::Proven_full : Outcome::Proven_bounded;
+  }
+  if (!p.undecided_why.empty()) {
+    return undecided_outcome(p.undecided_why, false, engine_forced);
+  }
+  return Outcome::Refuted_unexplained;  // undecided with no recorded reason: a bug to name
+}
+
+// Design cycles from reset a bounded-proven obligation covers.
+[[nodiscard]] inline int64_t prop_bounded_depth(const Prop_result& p, int reset_hold) {
+  return p.proven_to < 0 ? 0 : std::max<int64_t>(0, int64_t{p.proven_to} + 1 - reset_hold);
+}
+
+// The outcome of a whole verify run: the rows folded by severity (worse()). An
+// assert always counts; a checked assume counts only when it is refuted (an
+// unproven assume is unused, not a run-degrader -- the engine's own aggregate
+// rule). A run with no assert obligation at all is REFUTED-vacuous; a run whose
+// rows all proved but that is still undecided carries a run-level cause in its
+// detail (a failed encode or monitor bind, a contradictory scope).
+[[nodiscard]] inline Outcome verify_outcome(const Verify_result& v, bool engine_forced) {
+  if (v.verdict == Verdict::Refuted) {
+    return Outcome::Refuted_cex;
+  }
+  if (v.verdict == Verdict::Proven && v.nothing_to_check) {
+    return Outcome::Refuted_vacuous;
+  }
+  bool    any  = false;
+  Outcome fold = Outcome::Proven_full;
+  for (const auto& p : v.props) {
+    if (p.kind == "assume" && (is_unchecked_assume_class(p.aclass) || p.verdict != Verdict::Refuted)) {
+      continue;
+    }
+    const Outcome o = prop_outcome(p, engine_forced);
+    fold            = any ? worse(fold, o) : o;
+    any             = true;
+  }
+  if (v.verdict == Verdict::Proven) {
+    return any ? fold : Outcome::Refuted_vacuous;
+  }
+  if (v.unsupported) {
+    return Outcome::Refuted_unsupported;
+  }
+  if (any && !is_proven(fold)) {
+    return fold;
+  }
+  if (v.vacuous) {
+    // Every open row sits under a CONTRADICTORY assume scope: it proved
+    // nothing there and could hide a real counterexample (REFUTED-vacuous).
+    return Outcome::Refuted_vacuous;
+  }
+  return undecided_outcome(v.detail, v.unsupported, engine_forced);
+}
+
+// The `n` of outcome_word() for a verify run: the shallowest bounded-proven
+// assert's depth (design cycles from reset), else -1.
+[[nodiscard]] inline int64_t verify_outcome_depth(const Verify_result& v, Outcome o) {
+  if (o != Outcome::Proven_bounded) {
+    return -1;
+  }
+  int64_t n = -1;
+  for (const auto& p : v.props) {
+    if (p.kind != "assume" && p.verdict == Verdict::Proven && !p.unbounded) {
+      const int64_t d = prop_bounded_depth(p, v.reset_hold);
+      n               = n < 0 ? d : std::min(n, d);
+    }
+  }
+  return n < 0 ? v.checked_steps : n;
+}
 
 // 2f-verify V2: a formal-block MONITOR — the block's property statements
 // compiled (through the real Pyrope pipeline, so expression semantics never

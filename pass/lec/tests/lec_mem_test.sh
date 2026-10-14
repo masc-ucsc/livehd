@@ -238,13 +238,13 @@ verdict() {  # $1=impl $2=ref [$3=top] -> PROVEN | PASS(n) | REFUTED | UNKNOWN
   local top="${3:-rf}"
   $LHD lec --set formal.effort=proof --impl "lg:$WORK/$1" --ref "lg:$WORK/$2" --top "$top" --set formal.lec.hier=false \
        --workdir "$WORK/q_${1}_${2}_$$" 2>&1 \
-    | grep -oE "PASS\\([0-9]+\\)|PROVEN equivalent|REFUTED \\(not equivalent\\)|UNKNOWN" | head -1 \
+    | grep -oE "PASS\\([0-9]+\\)|PROVEN equivalent|REFUTED \\(not equivalent\\)|TIMEOUT|UNSUPPORTED|UNDISCHARGED|UNCONFIRMED|UNPAIRED|UNCHECKED|VACUOUS|UNEXPLAINED" | sed -E 's/^(TIMEOUT|UNSUPPORTED|UNDISCHARGED|UNCONFIRMED|UNPAIRED|UNCHECKED|VACUOUS|UNEXPLAINED)$/UNDECIDED/' | head -1 \
     | sed -E "s/PASS\\([0-9]+\\)/PROVEN equivalent/"   # PASS(n) is a pass; depth is not what this test checks
 }
 verdict_ind() {  # $1=impl $2=ref $3=top -> PROVEN | REFUTED | UNKNOWN
   $LHD lec --set formal.effort=proof --impl "lg:$WORK/$1" --ref "lg:$WORK/$2" --top "$3" --set formal.lec.hier=false \
        --set formal.engine=ind --workdir "$WORK/q_ind_${1}_${2}_$$" 2>&1 \
-    | grep -oE "PROVEN equivalent|REFUTED \(not equivalent\)|UNKNOWN" | head -1
+    | grep -oE "PROVEN equivalent|REFUTED \(not equivalent\)|TIMEOUT|UNSUPPORTED|UNDISCHARGED|UNCONFIRMED|UNPAIRED|UNCHECKED|VACUOUS|UNEXPLAINED" | sed -E 's/^(TIMEOUT|UNSUPPORTED|UNDISCHARGED|UNCONFIRMED|UNPAIRED|UNCHECKED|VACUOUS|UNEXPLAINED)$/UNDECIDED/' | head -1
 }
 
 expect() { if [ "$2" != "$3" ]; then echo "FAIL: $1 -> got '$2', want '$3'"; fail=1; else echo "ok: $1 -> $2"; fi; }
