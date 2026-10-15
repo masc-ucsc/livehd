@@ -118,18 +118,29 @@ run td_move D top_down
 if [ "$RC" -ne 0 ]; then
   echo "FAIL: case 2 top-down rc=$RC — moved functionality was reported as a design difference"
   echo "$OUT" | grep "lec\[hier\]"; fail=1
-elif ! echo "$OUT" | grep -q "ESCALATE"; then
-  echo "FAIL: case 2 proved without escalating — the fixture no longer exercises the absorb path"; fail=1
+elif ! echo "$OUT" | grep -q "'mid' REFUTED under collapse.*flat confirmation"; then
+  echo "FAIL: case 2 no longer exercises the parent's flat confirmation"; fail=1
+elif echo "$OUT" | grep -q "ESCALATE 'mid'"; then
+  echo "FAIL: case 2 repeated a parent proof that already expanded its children"; fail=1
 elif ! echo "$OUT" | grep -q "ABSORBED by a parent"; then
-  echo "FAIL: case 2 escalated but never reported an absorbed block refutation"; echo "$OUT" | grep "lec\[hier\]"; fail=1
+  echo "FAIL: case 2 never reported the absorbed block refutation"; echo "$OUT" | grep "lec\[hier\]"; fail=1
 else echo "ok: a block refutation is absorbed by its parent and the top still PROVES"; fi
 
-# The absorb must be TARGETED: the parent re-proves with the refuting child
-# inlined, and NOTHING above it is re-solved. Without this the feature is just
-# bottom-up escalation with extra steps.
+# The parent's flat confirmation already contains the refuting child. Its
+# proof must close the chain without repeating it or re-solving the top.
 if [ "$(echo "$OUT" | grep -c "ESCALATE 'top'")" -ne 0 ]; then
   echo "FAIL: case 2 escalated into the TOP; the parent's proof should have closed the chain"; fail=1
-else echo "ok: the escalation stopped at the absorbing parent — the top was never re-solved"; fi
+else echo "ok: the flat parent proof closed the chain — the top was never re-solved"; fi
+
+# The cached flat proof must carry the same absence of child premises. Reusing
+# it as a conditional boxed proof would trigger the redundant solve again.
+OUT=$("$LHD" lec --set formal.effort=proof --ref "lg:$W/A" --impl "lg:$W/D" --top top \
+      --workdir "$W/wd_td_move" 2>&1); RC=$?
+if [ "$RC" -ne 0 ] || ! echo "$OUT" | grep -q "'mid' PROVEN-full (cache)" \
+    || echo "$OUT" | grep -q "ESCALATE"; then
+  echo "FAIL: case 2 warm flat proof did not close the hierarchy without escalation"
+  echo "$OUT" | grep "lec\[hier\]"; fail=1
+else echo "ok: a cached flat parent proof has no speculative child premises"; fi
 return "$fail"
 }
 
@@ -378,12 +389,11 @@ if [ "$fail" -eq 0 ]; then
   # loop_o -> fb is a Moore feedback (loop_o = q): no cycle at arc level, so
   # pass.legalize keeps the instance (todo/livehd/legalize_acyclic.md) and the
   # occurrence view resolves fb through u's body to q. LEC proves the design
-  # as-is (u's refutation is absorbed by feedback_top, the ordinary top-down
-  # escalation).
+  # as-is (u's refutation is absorbed by feedback_top's flat confirmation).
   if [ "$RC" -ne 0 ]; then
     echo "FAIL: case 9 sequential Sub feedback design did not prove (rc=$RC)"
     echo "$OUT" | grep -E "lec\[hier\]|operand of|feedback"; fail=1
-  elif ! echo "$OUT" | grep -q "ESCALATE 'feedback_top'"; then
+  elif ! echo "$OUT" | grep -q "ABSORBED by a parent"; then
     echo "FAIL: case 9 did not prove top-down (u's refutation absorbed by feedback_top)"; fail=1
   else echo "ok: a sequential Sub feedback design proves with no LEC-side boundary repair"; fi
 fi

@@ -27,8 +27,12 @@ implementation.write_text(reference.read_text().replace('a ^ b', '(a | b) & ~(a 
 
 def run(preset=None, *, impl=implementation, ref=reference, extra=(), expect=0, name='run', env=None):
     result = W / f'{name}.json'
+    # Longer traces let partial queries cover the preset's vector count with
+    # fewer solver calls. Keep long-check within the subprocess budget when
+    # the smoke runs alongside the full suite; the effort thresholds stay real.
     args = [str(LHD), 'lec', '--impl', str(impl), '--ref', str(ref), '--top', 'top',
             '--workdir', str(W / 'work'), '--result-json', str(result),
+            '--set', 'formal.bound=12',
             '--set', 'formal.simfail=false', '--set', 'formal.simfail_run=false']
     if preset is not None:
         args += ['--set', f'formal.effort={preset}']
