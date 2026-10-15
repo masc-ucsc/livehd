@@ -16,9 +16,12 @@ namespace {
 using namespace LefDefParser;
 // The Si2 readers have process-global callback/configuration state.
 std::mutex reader_mutex;
-using File = std::unique_ptr<FILE, decltype(&std::fclose)>;
+struct FileCloser {
+  void operator()(FILE* file) const noexcept { std::fclose(file); }
+};
+using File = std::unique_ptr<FILE, FileCloser>;
 File open_file(const std::string& path) {
-  File file(std::fopen(path.c_str(), "r"), &std::fclose);
+  File file(std::fopen(path.c_str(), "r"));
   if (!file) {
     throw std::runtime_error("cannot open physical input: " + path);
   }
