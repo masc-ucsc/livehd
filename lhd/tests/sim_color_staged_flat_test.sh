@@ -76,15 +76,32 @@ fi
 grep -q 'struct .*::__Color_runtime' "$runtime" || fail "runtime details are not isolated from the module header"
 refute "generated simulator still contains Taskflow" -Eq 'taskflow|tf::Executor|tf::Taskflow' "$header" "$body" "$runtime"
 
+eval_body="$(sed -n '/::__color_eval(std::size_t/,/^}/p' "$body")"
 commit_body="$(sed -n '/::__color_commit(std::size_t/,/^}/p' "$body")"
-# A scalar (non-pipelined) commit lands the pending value with a plain
-# assignment: the dynamic `__state_commit` flag already says the capture ran
-# (and, under sim.tune.dirty=on, that D != Q), so slop_update's compare-on-write
-# would only repeat work. Without dirty gating the flag is read as a select
-# (`q = flag ? q_din : q`): a data-driven enable mispredicts as a branch. A
-# pipe stage still needs slop_update (it carries its own per-stage change bit).
-grep -Eq 'slop_update\(state, state_din\)|state = state_din;|state = __rt\.__state_commit\[[0-9]+\] \? state_din : state;' <<<"$commit_body" \
-  || fail "rise commit does not consume pending state"
+if grep -Eq '^in-place-state registers=[1-9]' "$plan"; then
+  # In-place register sink: the version DAG proved every old-state read
+  # precedes the update, so the capture stores its next value straight into
+  # the register inside its evaluation color -- no pending `state_din`, and
+  # the commit barrier has nothing left to land. The store must still be the
+  # `d + 1` capture, after the old-state read that publishes q, and the
+  # commit must not land the register a second time.
+  grep -Eq 'const auto __next = .*add_op.*__in\.d' <<<"$eval_body" \
+    || fail "in-place register sink does not evaluate the capture's input cone"
+  grep -Eq '^ *state = __next;' <<<"$eval_body" || fail "in-place register sink does not store the next state"
+  awk '/__last_out\.q = state;/ && !r { r = NR } /^ *state = __next;/ && !w { w = NR } END { exit !(r && w && r < w) }' \
+    <<<"$eval_body" || fail "in-place store does not follow the old-state read of q"
+  refute "in-place register is also committed from a pending value" -Eq '(^|[^_[:alnum:]])state = |slop_update\(state,' \
+    <<<"$commit_body"
+else
+  # A scalar (non-pipelined) commit lands the pending value with a plain
+  # assignment: the dynamic `__state_commit` flag already says the capture ran
+  # (and, under sim.tune.dirty=on, that D != Q), so slop_update's compare-on-write
+  # would only repeat work. Without dirty gating the flag is read as a select
+  # (`q = flag ? q_din : q`): a data-driven enable mispredicts as a branch. A
+  # pipe stage still needs slop_update (it carries its own per-stage change bit).
+  grep -Eq 'slop_update\(state, state_din\)|state = state_din;|state = __rt\.__state_commit\[[0-9]+\] \? state_din : state;' <<<"$commit_body" \
+    || fail "rise commit does not consume pending state"
+fi
 grep -q 'sum_op\|__out\.\|__o\.' <<<"$commit_body" && fail "rise commit re-evaluates combinational logic"
 
 [ ! -e "$work/setup/sim/runtime/taskflow" ] || fail "generated tree still stages Taskflow"

@@ -36,11 +36,11 @@ endmodule
 EOF
 
 lec_proven() { # <name> <prp>
-  "$LHD" lec --impl "$2" --ref "$W/gold.v" --top parent \
+  "$LHD" lec --set formal.effort=proof --impl "$2" --ref "$W/gold.v" --top parent \
     --set compile.upass.inline=false \
     --workdir "$W/lec_$1" -q --result-json "$W/lec_$1.json" \
     || fail "$1: lec run failed: $(cat "$W/lec_$1.json" 2>/dev/null)"
-  grep -q '"status":"pass"' "$W/lec_$1.json" || fail "$1: lec not PROVEN: $(cat "$W/lec_$1.json")"
+  grep -qE '"verdict":"proven-(full|bounded)"' "$W/lec_$1.json" || fail "$1: lec not PROVEN: $(cat "$W/lec_$1.json")"
 }
 
 # ── (a) mod callee + NAMED tuple actual ───────────────────────────────────────
@@ -157,10 +157,10 @@ pub comb p2(fi:U8) -> (oo:U8) {
 EOF
 "$LHD" compile "$W/local_fields.prp" --top p2 --workdir "$W/we1" -q \
   || fail "comb + tuple literal with LOCAL-computed field values did not compile"
-"$LHD" lec --impl "$W/local_fields.prp" --ref "$W/gold_local.v" --top p2 \
+"$LHD" lec --set formal.effort=proof --impl "$W/local_fields.prp" --ref "$W/gold_local.v" --top p2 \
   --workdir "$W/lec_local" -q --result-json "$W/lec_local.json" \
   || fail "local-fields lec run failed: $(cat "$W/lec_local.json" 2>/dev/null)"
-grep -q '"status":"pass"' "$W/lec_local.json" || fail "local-fields lec not PROVEN: $(cat "$W/lec_local.json")"
+grep -qE '"verdict":"proven-(full|bounded)"' "$W/lec_local.json" || fail "local-fields lec not PROVEN: $(cat "$W/lec_local.json")"
 cat >"$W/local_fields2.prp" <<'EOF'
 pub comb c2(req:(hi:U4, lo:U4)) -> (o:U8) {
   o = (req.hi << 4) | req.lo
@@ -174,10 +174,10 @@ pub comb p2(fi:U8) -> (oo:U8) {
 EOF
 "$LHD" compile "$W/local_fields2.prp" --top p2 --workdir "$W/we2" -q \
   || fail "comb + tuple literal with LOCAL const field values did not compile"
-"$LHD" lec --impl "$W/local_fields2.prp" --ref "$W/gold_local.v" --top p2 \
+"$LHD" lec --set formal.effort=proof --impl "$W/local_fields2.prp" --ref "$W/gold_local.v" --top p2 \
   --workdir "$W/lec_local2" -q --result-json "$W/lec_local2.json" \
   || fail "local-const-fields lec run failed: $(cat "$W/lec_local2.json" 2>/dev/null)"
-grep -q '"status":"pass"' "$W/lec_local2.json" || fail "local-const-fields lec not PROVEN: $(cat "$W/lec_local2.json")"
+grep -qE '"verdict":"proven-(full|bounded)"' "$W/lec_local2.json" || fail "local-const-fields lec not PROVEN: $(cat "$W/lec_local2.json")"
 echo "PASS: tuple literal with local-computed field values expands (comb callee, cvc5-PROVEN)"
 
 # ── (d) cgen: dotted instance-connection port names are escaped ───────────────
@@ -226,11 +226,11 @@ grep -q '^module core' "$W/relative/all.v" \
   || fail "single-file cgen output omitted the relative-import module"
 grep -q '^module relative_top' "$W/relative/all.v" \
   || fail "single-file cgen output omitted the relative-import top"
-"$LHD" lec --impl "$W/relative/app/top.prp" --ref "$W/relative/all.v" \
+"$LHD" lec --set formal.effort=proof --impl "$W/relative/app/top.prp" --ref "$W/relative/all.v" \
   --top relative_top \
   --workdir "$W/relative/lec" --result-json "$W/relative/lec.json" -q \
   || fail "default LEC could not materialize the relative-import hierarchy"
-grep -q '"verdict":"proven"' "$W/relative/lec.json" \
+grep -qE '"verdict":"proven-(full|bounded)"' "$W/relative/lec.json" \
   || fail "relative-import hierarchy was not default LEC-PROVEN: $(cat "$W/relative/lec.json")"
 echo "PASS: relative import graph identities receive safe cgen filenames"
 
@@ -270,11 +270,11 @@ grep -q '`state\.lane`' "$W/escaped_state_prp/escaped_state.prp" \
 "$LHD" compile "$W/escaped_state_prp/escaped_state.prp" --top escaped_state \
   --emit verilog:"$W/escaped_state_roundtrip.v" --workdir "$W/wescaped_state_v" -q \
   || fail "escaped dotted state Pyrope did not regenerate Verilog"
-"$LHD" lec --impl verilog:"$W/escaped_state_roundtrip.v" --ref verilog:"$W/escaped_state.v" \
+"$LHD" lec --set formal.effort=proof --impl verilog:"$W/escaped_state_roundtrip.v" --ref verilog:"$W/escaped_state.v" \
   --top escaped_state --set formal.engine=ind --workdir "$W/lec_escaped_state" -q \
   --result-json "$W/lec_escaped_state.json" \
   || fail "escaped dotted state v2prp2v LEC failed: $(cat "$W/lec_escaped_state.json" 2>/dev/null)"
-grep -q '"status":"pass"' "$W/lec_escaped_state.json" \
+grep -q '"verdict":"proven-full"' "$W/lec_escaped_state.json" \
   || fail "escaped dotted state v2prp2v is not inductively PROVEN"
 echo "PASS: escaped dotted state keeps one identity through Verilog -> Pyrope -> Verilog"
 

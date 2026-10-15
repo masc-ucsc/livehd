@@ -58,7 +58,7 @@ EOF
 OUT="$W/good.out"
 "$LHD" formal verify "$W/good.sv" --top good --set formal.bound=20 --workdir "$W/wg" --diag-fmt pretty >"$OUT" 2>&1 \
   || fail "a true \$past claim must prove: $(cat "$OUT")"
-grep -q 'PROVEN' "$OUT" || fail "expected PROVEN: $(cat "$OUT")"
+grep -qE "^formal verify: '[^']*' PROVEN-(full|bounded)" "$OUT" || fail "expected PROVEN: $(cat "$OUT")"
 
 # ---- the false twin must REFUTE --------------------------------------------
 # Off by one: q1 is d delayed ONE cycle, so claiming it equals two cycles back
@@ -73,8 +73,9 @@ endmodule
 EOF
 OUT="$W/bad.out"
 "$LHD" formal verify "$W/bad.sv" --top bad --set formal.bound=20 --workdir "$W/wb" --diag-fmt pretty >"$OUT" 2>&1
-[ $? -ne 0 ] || fail "a false \$past claim must refute: $(cat "$OUT")"
-grep -q 'REFUT' "$OUT" || fail "expected REFUTED: $(cat "$OUT")"
+RC=$?
+[ "$RC" -eq 10 ] || fail "a false \$past claim must refute: (rc=$RC, want the counterexample class 10) $(cat "$OUT")"
+grep -q "^formal verify: '[^']*' REFUTED-cex" "$OUT" || fail "expected REFUTED: $(cat "$OUT")"
 
 # ---- the edge functions are sugar over one cycle of history ------------------
 # State the identities and prove them, so a wrong polarity ($rose lowered as
@@ -93,7 +94,7 @@ EOF
 OUT="$W/edges.out"
 "$LHD" formal verify "$W/edges.sv" --top edges --set formal.bound=20 --workdir "$W/we" --diag-fmt pretty >"$OUT" 2>&1 \
   || fail "the edge identities must prove: $(cat "$OUT")"
-grep -q 'PROVEN' "$OUT" || fail "expected PROVEN for the edge identities: $(cat "$OUT")"
+grep -qE "^formal verify: '[^']*' PROVEN-(full|bounded)" "$OUT" || fail "expected PROVEN for the edge identities: $(cat "$OUT")"
 
 # ---- a rise is not a fall ---------------------------------------------------
 cat >"$W/rf.sv" <<EOF
@@ -104,8 +105,9 @@ endmodule
 EOF
 OUT="$W/rf.out"
 "$LHD" formal verify "$W/rf.sv" --top rf --set formal.bound=20 --workdir "$W/wr" --diag-fmt pretty >"$OUT" 2>&1
-[ $? -ne 0 ] || fail "\$rose == \$fell must refute: $(cat "$OUT")"
-grep -q 'REFUT' "$OUT" || fail "expected REFUTED for rose == fell: $(cat "$OUT")"
+RC=$?
+[ "$RC" -eq 10 ] || fail "\$rose == \$fell must refute: (rc=$RC, want the counterexample class 10) $(cat "$OUT")"
+grep -q "^formal verify: '[^']*' REFUTED-cex" "$OUT" || fail "expected REFUTED for rose == fell: $(cat "$OUT")"
 
 # ---- refused, not guessed ---------------------------------------------------
 # An expression argument would have to be re-lowered in the epilogue where its
@@ -146,7 +148,7 @@ EOF
 OUT="$W/multi.out"
 "$LHD" formal verify "$W/multi.sv" --top multi --set formal.bound=20 --workdir "$W/wm" --diag-fmt pretty >"$OUT" 2>&1 \
   || fail "one signal at two depths + a second signal must prove: $(cat "$OUT")"
-grep -q 'PROVEN' "$OUT" || fail "expected PROVEN for the multi-depth case: $(cat "$OUT")"
+grep -qE "^formal verify: '[^']*' PROVEN-(full|bounded)" "$OUT" || fail "expected PROVEN for the multi-depth case: $(cat "$OUT")"
 
 # The same design with the depths SWAPPED is false, so the chain cannot be
 # returning the same stage for every depth.
@@ -164,8 +166,9 @@ endmodule
 EOF
 OUT="$W/multi_bad.out"
 "$LHD" formal verify "$W/multi_bad.sv" --top multi_bad --set formal.bound=20 --workdir "$W/wmb" --diag-fmt pretty >"$OUT" 2>&1
-[ $? -ne 0 ] || fail "depth 1 is not depth 3; this must refute: $(cat "$OUT")"
-grep -q 'REFUT' "$OUT" || fail "expected REFUTED for the swapped depth: $(cat "$OUT")"
+RC=$?
+[ "$RC" -eq 10 ] || fail "depth 1 is not depth 3; this must refute: (rc=$RC, want the counterexample class 10) $(cat "$OUT")"
+grep -q "^formal verify: '[^']*' REFUTED-cex" "$OUT" || fail "expected REFUTED for the swapped depth: $(cat "$OUT")"
 
 # ---- $past of a REGISTER, and a WIDE $stable/$changed -----------------------
 # Everything above samples an input. A register is the other source, and its
@@ -189,7 +192,7 @@ EOF
 OUT="$W/wide.out"
 "$LHD" formal verify "$W/wide.sv" --top wide --set formal.bound=20 --workdir "$W/ww" --diag-fmt pretty >"$OUT" 2>&1 \
   || fail "\$past of a register and wide stable/changed must prove: $(cat "$OUT")"
-grep -q 'PROVEN' "$OUT" || fail "expected PROVEN for the register/wide case: $(cat "$OUT")"
+grep -qE "^formal verify: '[^']*' PROVEN-(full|bounded)" "$OUT" || fail "expected PROVEN for the register/wide case: $(cat "$OUT")"
 
 # NOTE: `$past(x, 0)` is NOT tested because it is not legal SystemVerilog --
 # IEEE 1800 requires number_of_ticks >= 1, and slang rejects it before this
@@ -232,6 +235,6 @@ EOF
 OUT="$W/lsb.out"
 "$LHD" formal verify "$W/lsb.sv" --top lsb --set formal.bound=20 --workdir "$W/wl" --diag-fmt pretty >"$OUT" 2>&1 \
   || fail "\$rose/\$fell must read the LSB of a wide operand: $(cat "$OUT")"
-grep -q 'PROVEN' "$OUT" || fail "expected PROVEN for the LSB case: $(cat "$OUT")"
+grep -qE "^formal verify: '[^']*' PROVEN-(full|bounded)" "$OUT" || fail "expected PROVEN for the LSB case: $(cat "$OUT")"
 
 echo "PASS: SystemVerilog \$past/\$rose/\$fell/\$stable/\$changed lower to a design history chain"

@@ -131,7 +131,7 @@ run() {  # $1=label $2..=lhd args ; sets RC/OUT
 run unk --ref "$WORK/hard_ref.v" --impl "$WORK/hard_impl.v"
 RC_UNK=$RC
 if [ "$RC" -ne 0 ]; then echo "FAIL: TIMEOUT rc=$RC (want 0: a timeout is not a failure)"; fail=1
-elif ! echo "$OUT" | grep -q "TIMEOUT"; then echo "FAIL: TIMEOUT: verdict not TIMEOUT"; fail=1
+elif ! echo "$OUT" | grep -qE "^lec: .* TIMEOUT-(time|memory)"; then echo "FAIL: TIMEOUT: verdict not TIMEOUT-time/-memory"; fail=1
 elif echo "$OUT" | grep -q "UNKNOWN"; then echo "FAIL: TIMEOUT: still reported as UNKNOWN"; fail=1
 elif echo "$OUT" | grep -q "REFUTED"; then echo "FAIL: TIMEOUT: reported as REFUTED"; fail=1
 elif echo "$OUT" | grep -q "PROVEN"; then echo "FAIL: TIMEOUT: reported as PROVEN"; fail=1
@@ -149,8 +149,8 @@ fi
 #    codes keep them apart — a gate must be able to tell "the designs DIFFER" from "I ran out of time".
 run ref --ref "$WORK/diff_ref.v" --impl "$WORK/diff_impl.v"
 RC_REF=$RC
-if [ "$RC" -eq 0 ]; then echo "FAIL: REFUTED rc=0 (want non-zero)"; fail=1
-elif ! echo "$OUT" | grep -q "REFUTED"; then echo "FAIL: REFUTED: verdict not REFUTED"; fail=1
+if [ "$RC" -ne 10 ]; then echo "FAIL: REFUTED rc=$RC (want 10: a real counterexample)"; fail=1
+elif ! echo "$OUT" | grep -q "^lec: .* REFUTED-cex"; then echo "FAIL: REFUTED: verdict not REFUTED-cex"; fail=1
 elif [ "$RC" -eq "$RC_UNK" ]; then
   echo "FAIL: REFUTED rc=$RC is the SAME as UNKNOWN rc=$RC_UNK (a disproof must not be conflated with a timeout)"; fail=1
 elif ! echo "$OUT" | grep -q "is not equivalent"; then echo "FAIL: REFUTED: no not-equivalent error"; fail=1
@@ -163,7 +163,7 @@ else echo "ok: REFUTED -> exit $RC (counterexample), distinct from TIMEOUT exit 
 # 6) PROVEN -> exit 0
 run prv --ref "$WORK/diff_ref.v" --impl "$WORK/eq_impl.v"
 if [ "$RC" -ne 0 ]; then echo "FAIL: PROVEN rc=$RC (want 0)"; fail=1
-elif ! echo "$OUT" | grep -q "PROVEN equivalent"; then echo "FAIL: PROVEN: verdict not PROVEN"; fail=1
+elif ! echo "$OUT" | grep -q "^lec: .* PROVEN-full"; then echo "FAIL: PROVEN: verdict not PROVEN-full"; fail=1
 else echo "ok: PROVEN -> exit 0"; fi
 
 # 7) ind-Refuted but bmc clears it (unreachable step-case) -> PROVEN, exit 0.
@@ -184,8 +184,8 @@ run dead --ref "$WORK/dead_ref.v" --impl "$WORK/dead_impl.v" --set formal.engine
   --set formal.lec.cones=true --set formal.lec.decompose=true
 if [ "$RC" -ne 0 ]; then
   echo "FAIL: dead one-sided state rc=$RC (want 0): $OUT"; fail=1
-elif ! echo "$OUT" | grep -q "PROVEN equivalent"; then
-  echo "FAIL: dead one-sided state did not report PROVEN: $OUT"; fail=1
+elif ! echo "$OUT" | grep -q "^lec: .* PROVEN-full"; then
+  echo "FAIL: dead one-sided state did not report PROVEN-full: $OUT"; fail=1
 elif ! echo "$OUT" | grep -q "one-sided internal state is unobservable"; then
   echo "FAIL: dead one-sided state proof did not disclose why the unmatched cut is safe: $OUT"; fail=1
 else echo "ok: dead one-sided internal state -> unbounded PROVEN"; fi

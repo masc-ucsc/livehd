@@ -54,7 +54,7 @@ def check(name, rtl, stimulus, checks, cpp):
                    "--workdir", work / "lec", "--set", "compile.upass.inline=false",
                    "--set", "formal.effort=proof"], work / "lec.log")
         records = [json.loads(line) for line in lec.splitlines() if line.startswith('{')]
-        if records[-1].get("lec", {}).get("verdict") != "proven":
+        if records[-1].get("lec", {}).get("verdict") not in ("proven-full", "proven-bounded"):
             raise RuntimeError(f"round-trip LEC did not prove equivalence:\n{lec}")
     for language in ("verilog", "pyrope"):
         entry = 'lg:top' if language == "verilog" else 'prp/top.top'

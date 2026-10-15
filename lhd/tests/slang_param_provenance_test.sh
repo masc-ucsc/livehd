@@ -95,7 +95,7 @@ $LHD compile "$W/p1"/*.prp --top tmod.tmod --workdir "$W/rc" -q \
   || fail "emitted provenance Pyrope did not recompile"
 $LHD compile "$W/tpkg.sv" "$W/tmod.sv" --top tmod --emit-dir lg:"$W/ref_lg" --workdir "$W/refw" -q \
   || fail "reference SV did not compile to lg"
-$LHD lec --impl pyrope:"$W/p1"/ --impl-top tmod.tmod --ref lg:"$W/ref_lg" --ref-top tmod \
+$LHD lec --set formal.effort=proof --impl pyrope:"$W/p1"/ --impl-top tmod.tmod --ref lg:"$W/ref_lg" --ref-top tmod \
   --workdir "$W/lec" -q --result-json "$W/lec.json" \
   || fail "provenance Pyrope not proven equivalent: $(cat "$W/lec.json" 2>/dev/null)"
 grep -q '"status":"pass"' "$W/lec.json" || fail "lec not pass: $(cat "$W/lec.json")"
@@ -146,7 +146,7 @@ grep -Fq 'TAG="a' "$W/params/params.prp" || fail "string generic default missing
 grep -Eq 'const `STEP`|const NEG\b' "$W/params/params.prp" && fail "generic parameter rebound in body"
 grep -q 'const BIAS' "$W/params/params.prp" || fail "localparam missing from body"
 for top in pair params; do
-  $LHD lec --ref verilog:"$W/params.sv" --ref-top "$top" --impl pyrope:"$W/params/" --impl-top "$top.$top" \
+  $LHD lec --set formal.effort=proof --ref verilog:"$W/params.sv" --ref-top "$top" --impl pyrope:"$W/params/" --impl-top "$top.$top" \
     --workdir "$W/params-lec-$top" -q --result-json "$W/params-lec-$top.json" \
     || fail "generated generic parameters not equivalent ($top): $(cat "$W/params-lec-$top.json" 2>/dev/null)"
 done
@@ -158,7 +158,7 @@ pub comb params_override(a:U8) -> (y:U9, z:U9) {
   z = r.z
 }
 EOF
-$LHD lec --ref verilog:"$W/params.sv" --ref-top params_override --impl pyrope:"$W/params/" \
+$LHD lec --set formal.effort=proof --ref verilog:"$W/params.sv" --ref-top params_override --impl pyrope:"$W/params/" \
   --impl-top params_override.params_override --workdir "$W/params-lec-override" -q \
   --result-json "$W/params-lec-override.json" \
   || fail "overriding emitted parameters changed semantics: $(cat "$W/params-lec-override.json" 2>/dev/null)"

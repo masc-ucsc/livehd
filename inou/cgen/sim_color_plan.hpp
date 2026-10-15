@@ -8,9 +8,11 @@
 #include <format>
 #include <functional>
 #include <limits>
+#include <map>
 #include <memory>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 #include "hhds/graph.hpp"
@@ -123,6 +125,11 @@ public:
     // The version DAG proves that all old-state users precede the update.
     // Emitters may store directly only while preserving that DAG inside colors.
     bool                  in_place         = false;
+    // A pure compact loop on a ring that closes only through its atomic
+    // boundary (pass.legalize's arc-level contract keeps it rolled). Each of
+    // its output versions consumes only that port's carry-closed input support
+    // (split_loop_support) and owns its walk of the rolled loop.
+    bool                  port_split       = false;
   };
 
   struct Dependency {
@@ -265,6 +272,7 @@ public:
     // silently scheduled against a stale value.
     // MEASURED: no design has produced one (XiangShan `Backend` is 0).
     uint64_t self_edges_dropped        = 0;
+    uint64_t port_split_loops          = 0;  // compact loops marked Site::port_split
     uint64_t version_sites             = 0;
     uint64_t version_edges             = 0;
     uint64_t fine_colors               = 0;
@@ -437,6 +445,11 @@ public:
   // sim.tune: see Occurrence / Support above. Occurrences are ordered by path.
   [[nodiscard]] const std::vector<Occurrence>&          occurrences() const noexcept { return occurrences_; }
   [[nodiscard]] const Support&                          support() const noexcept { return support_; }
+  // A port-split compact loop's (Site::port_split) input ports that output
+  // `output_port` of loop site `base_site` reads within one walk: the body's
+  // port reach closed over the loop carries, plus the activation input. Sorted.
+  // nullptr for any other site, and for an output no version consumed.
+  [[nodiscard]] const std::vector<hhds::Port_id>*       split_loop_support(size_t base_site, hhds::Port_id output_port) const;
 
   // Re-resolves lazy edges after construction.  Besides checking the retained
   // handles, this pins the policy-lifetime contract: moving a Color_plan must
@@ -485,6 +498,7 @@ private:
   std::vector<std::string>           errors_;
   std::vector<Occurrence>            occurrences_;
   Support                            support_;
+  std::map<std::pair<size_t, hhds::Port_id>, std::vector<hhds::Port_id>> split_loop_support_;
   // Live machine words this plan's coarsener was allowed to keep alive across
   // one color's members. Per-PLAN, not a global: report() prints the budget the
   // colors below were actually built at, so a later discover() at a different

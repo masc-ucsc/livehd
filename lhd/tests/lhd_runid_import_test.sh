@@ -70,7 +70,7 @@ cmp -s "$W/a/t.prp" "$W/c/t.prp" || fail "harness files differ (test setup)"
 # proof (a direction-sensitive one when either side carries assumptions).
 cp "$W/a/leaf.prp" "$W/other_leaf.prp"
 lec_rid() {  # IMPL REF JSON
-  "$LHD" lec --impl "$1" --ref "$2" --top leaf.inc --impl-top "$(basename "$1" .prp).inc" \
+  "$LHD" lec --set formal.effort=proof --impl "$1" --ref "$2" --top leaf.inc --impl-top "$(basename "$1" .prp).inc" \
     --ref-top "$(basename "$2" .prp).inc" -q --result-json "$3" --workdir "$W/wl" \
     --set formal.timeout=60 >/dev/null 2>&1
   sed 's/.*"run_id":"\([^"]*\)".*/\1/' "$3"

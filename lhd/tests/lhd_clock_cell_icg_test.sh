@@ -31,9 +31,9 @@ for fixture in equiv/mclk_derived:derived sim/chained_clock_gates:chain8; do
       echo "FAIL: $fixture abc did not map the clock gate onto the ICG cell" >&2
       exit 1
     fi
-    "$LHD" lec --impl lg:"$o/net" --ref "$src" --lib lg:"$W/models" --top "$top" \
+    "$LHD" lec --set formal.effort=proof --impl lg:"$o/net" --ref "$src" --lib lg:"$W/models" --top "$top" \
       --workdir "$o/lec" > "$o.lec.log" 2>&1 || { cat "$o.lec.log"; echo "FAIL: $fixture $mapper lec" >&2; exit 1; }
-    grep -q 'PROVEN equivalent' "$o.lec.log" || { cat "$o.lec.log"; echo "FAIL: $fixture $mapper not proven" >&2; exit 1; }
+    grep -qE "^lec: .* PROVEN-(full|bounded)" "$o.lec.log" || { cat "$o.lec.log"; echo "FAIL: $fixture $mapper not proven" >&2; exit 1; }
   done
 done
 echo "PASS: Pyrope clock gates map (abc: ICG cell, usyn: native gate) and prove against the source"

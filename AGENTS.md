@@ -78,8 +78,10 @@ lhd synth foo.prp --top foo --workdir W --stats   # compile -> color synth -> ab
 ```
 Graph compilation always runs constant propagation followed by bitwidth
 inference. There is no optimization-level or `--recipe` selection. Comb
-inlining defaults on; use `--set compile.upass.inline=false` when preserving
-comb module boundaries is part of the flow.
+inlining defaults off (`compile.upass.inline=false`): comb calls stay module
+instances, and upass splices one only when it must (tuple-shaped results the
+instance boundary cannot carry, generic/untyped callees); `pass.legalize`
+handles combinational loops through an instance.
 
 `lhd synth` is the fused synthesis flow (reports in `W/synth/`; `--emit-dir
 lg:` / `verilog:` for the mapped netlist, `report:` for the sidecars); the

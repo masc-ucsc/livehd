@@ -64,7 +64,7 @@ grep -q '__wtmp' "$W/bv/bedge.prp" || fail "expected a wire split (mut __wtmp ac
 $LHD compile "$W/bv"/*.prp --top bedge.bedge --workdir "$W/brc" -q \
   || fail "emitted Pyrope (with wire split) did not recompile"
 # …and be PROVEN equivalent to the original Verilog.
-$LHD lec --impl pyrope:"$W/bv"/ --impl-top bedge.bedge --ref verilog:"$W/bedge.sv" --ref-top bedge \
+$LHD lec --set formal.effort=proof --impl pyrope:"$W/bv"/ --impl-top bedge.bedge --ref verilog:"$W/bedge.sv" --ref-top bedge \
   --workdir "$W/blec" -q --result-json "$W/blec.json" \
   || fail "wire-split design not proven equivalent: $(cat "$W/blec.json" 2>/dev/null)"
 grep -q '"status":"pass"' "$W/blec.json" || fail "bedge lec not pass: $(cat "$W/blec.json")"
@@ -156,7 +156,7 @@ endmodule
 EOF
 $LHD compile "$W/output_alias.sv" --top output_alias --emit-dir pyrope:"$W/av" --workdir "$W/aw" -q \
   || fail "generated child-output alias fixture did not emit Pyrope"
-$LHD lec --impl pyrope:"$W/av"/ --impl-top output_alias.output_alias \
+$LHD lec --set formal.effort=proof --impl pyrope:"$W/av"/ --impl-top output_alias.output_alias \
   --ref verilog:"$W/output_alias.sv" --ref-top output_alias \
   --workdir "$W/alec" -q --result-json "$W/alec.json" \
   || fail "generated child-output alias was not preserved: $(cat "$W/alec.json" 2>/dev/null)"
@@ -168,7 +168,7 @@ grep -q '"status":"pass"' "$W/alec.json" || fail "output-alias lec not pass: $(c
 $LHD compile "$W/av"/*.prp --top output_alias.output_alias \
   --emit verilog:"$W/output_alias_all.v" --workdir "$W/acgen" -q \
   || fail "output-alias Pyrope did not regenerate Verilog"
-$LHD lec --impl verilog:"$W/output_alias_all.v" --impl-top output_alias \
+$LHD lec --set formal.effort=proof --impl verilog:"$W/output_alias_all.v" --impl-top output_alias \
   --ref pyrope:"$W/av"/ --ref-top output_alias.output_alias \
   --workdir "$W/artlec" -q --result-json "$W/artlec.json" \
   || fail "generated always_comb temporary order was not recovered: $(cat "$W/artlec.json" 2>/dev/null)"
@@ -207,7 +207,7 @@ $LHD compile "$W/cpv"/*.prp --top const_cond_tmp.const_cond_tmp \
 if grep -q 'unresolved ref' "$W/cp.log" "$W/cpr.log"; then
   fail "constant-conditional temporary lost its module-scope driver: $(grep 'unresolved ref' "$W/cp.log" "$W/cpr.log")"
 fi
-$LHD lec --impl lg:"$W/cplg" --impl-top const_cond_tmp.const_cond_tmp \
+$LHD lec --set formal.effort=proof --impl lg:"$W/cplg" --impl-top const_cond_tmp.const_cond_tmp \
   --ref verilog:"$W/const_cond_tmp.sv" --ref-top const_cond_tmp \
   --workdir "$W/cplec" -q --result-json "$W/cplec.json" \
   || fail "constant-conditional temporary changed behavior: $(cat "$W/cplec.json" 2>/dev/null)"

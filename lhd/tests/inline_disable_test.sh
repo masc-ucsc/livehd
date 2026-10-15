@@ -74,7 +74,7 @@ echo "PASS(2): default instantiates the comb; inline=true flattens it into top"
 # ── (3) instanced and flattened builds are PROVEN equivalent ────────────────
 # Instancing preserves behavior. Compare the emitted hierarchical and flat
 # LGraphs with the default LEC engine.
-"$LHD" lec --ref "lg:$W/on/" --impl "lg:$W/off/" \
+"$LHD" lec --set formal.effort=proof --ref "lg:$W/on/" --impl "lg:$W/off/" \
   --ref-top dut.top --impl-top dut.top \
   --workdir "$W/lec" -q --result-json "$W/r.json" \
   || fail "lec did NOT prove flattened==instanced: $(cat "$W/r.json" 2>/dev/null)"
@@ -90,7 +90,7 @@ EOF
   --emit-dir "lg:$W/son/" --workdir "$W/sonw" -q >/dev/null 2>&1 || fail "simple inline=true compile failed"
 "$LHD" compile "$W/simple.prp" --top simple_top --set compile.upass.inline=false \
   --emit-dir "lg:$W/soff/" --workdir "$W/soffw" -q >/dev/null 2>&1 || fail "simple default compile failed"
-"$LHD" lec --ref "lg:$W/son/" --impl "lg:$W/soff/" \
+"$LHD" lec --set formal.effort=proof --ref "lg:$W/son/" --impl "lg:$W/soff/" \
   --ref-top simple.simple_top --impl-top simple.simple_top \
   --workdir "$W/slec" -q --result-json "$W/sr.json" \
   || fail "cvc5 lec did NOT prove simple flattened==instanced: $(cat "$W/sr.json" 2>/dev/null)"

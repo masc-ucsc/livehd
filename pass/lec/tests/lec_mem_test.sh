@@ -234,41 +234,47 @@ compile packed_select_bad.sv packed_select_bad slang packed_select
 # stateful design (user ruling 2026-08-02: only a SURE counterexample is a
 # failure). `auto` races ind|bmc and bmc confirms the CEX from reset, which is
 # what makes the corrupted-RF case below a real refutation rather than a lead.
-verdict() {  # $1=impl $2=ref [$3=top] -> PROVEN | PASS(n) | REFUTED | UNKNOWN
+# final_word: the verdict word of the FINAL top-level `lec: '<top>' <WORD>` line
+# (pass/lec/property_types.hpp: PROVEN-full, PROVEN-bounded(n), TIMEOUT-time,
+# REFUTED-cex, REFUTED-unchecked, ...); empty when the run printed none.
+final_word() {
+  grep -aE "^lec: '[^']+' " | grep -oE " (PROVEN-full|PROVEN-bounded\([0-9]+\)|TESTED-sampled\([0-9]+\)|TIMEOUT-(time|memory)|REFUTED-(cex|interface|unsupported|unchecked|vacuous|unexplained))( |$)" | tail -1 | tr -d ' '
+}
+verdict() {  # $1=impl $2=ref [$3=top] -> PROVEN (full or bounded) | the final verdict word
   local top="${3:-rf}"
   $LHD lec --set formal.effort=proof --impl "lg:$WORK/$1" --ref "lg:$WORK/$2" --top "$top" --set formal.lec.hier=false \
        --workdir "$WORK/q_${1}_${2}_$$" 2>&1 \
-    | grep -oE "PASS\\([0-9]+\\)|PROVEN equivalent|REFUTED \\(not equivalent\\)|TIMEOUT|UNSUPPORTED|UNDISCHARGED|UNCONFIRMED|UNPAIRED|UNCHECKED|VACUOUS|UNEXPLAINED" | sed -E 's/^(TIMEOUT|UNSUPPORTED|UNDISCHARGED|UNCONFIRMED|UNPAIRED|UNCHECKED|VACUOUS|UNEXPLAINED)$/UNDECIDED/' | head -1 \
-    | sed -E "s/PASS\\([0-9]+\\)/PROVEN equivalent/"   # PASS(n) is a pass; depth is not what this test checks
+    | final_word \
+    | sed -E "s/^PROVEN-(full|bounded\\([0-9]+\\))$/PROVEN/"   # a bounded proof is a pass; depth is not what this test checks
 }
-verdict_ind() {  # $1=impl $2=ref $3=top -> PROVEN | REFUTED | UNKNOWN
+verdict_ind() {  # $1=impl $2=ref $3=top -> the final verdict word
   $LHD lec --set formal.effort=proof --impl "lg:$WORK/$1" --ref "lg:$WORK/$2" --top "$3" --set formal.lec.hier=false \
        --set formal.engine=ind --workdir "$WORK/q_ind_${1}_${2}_$$" 2>&1 \
-    | grep -oE "PROVEN equivalent|REFUTED \(not equivalent\)|TIMEOUT|UNSUPPORTED|UNDISCHARGED|UNCONFIRMED|UNPAIRED|UNCHECKED|VACUOUS|UNEXPLAINED" | sed -E 's/^(TIMEOUT|UNSUPPORTED|UNDISCHARGED|UNCONFIRMED|UNPAIRED|UNCHECKED|VACUOUS|UNEXPLAINED)$/UNDECIDED/' | head -1
+    | final_word
 }
 
 expect() { if [ "$2" != "$3" ]; then echo "FAIL: $1 -> got '$2', want '$3'"; fail=1; else echo "ok: $1 -> $2"; fi; }
 
 # Cross-front-end: native RF == yosys-slang RF (the collapse + wensize bridge).
-expect "cross-reader RF" "$(verdict g_native g_ys)" "PROVEN equivalent"
+expect "cross-reader RF" "$(verdict g_native g_ys)" "PROVEN"
 # Corrupted write address must be caught.
-expect "corrupted RF"    "$(verdict b_native g_native)" "REFUTED (not equivalent)"
+expect "corrupted RF"    "$(verdict b_native g_native)" "REFUTED-cex"
 # Reordering writes to disjoint lanes must preserve the memory transition.
-expect "commuted lane writes" "$(verdict lane_impl lane_ref rf_lane)" "PROVEN equivalent"
+expect "commuted lane writes" "$(verdict lane_impl lane_ref rf_lane)" "PROVEN"
 # A wide count must not wrap modulo a narrow shifted value.
-expect "self-determined shift count" "$(verdict narrow_shift_impl narrow_shift_ref narrow_shift)" "PROVEN equivalent"
+expect "self-determined shift count" "$(verdict narrow_shift_impl narrow_shift_ref narrow_shift)" "PROVEN"
 # One packed flop and one same-named Memory are the same state aggregate.
-expect "memory to packed-flop state" "$(verdict_ind packed_state_impl packed_state_ref packed_state)" "PROVEN equivalent"
+expect "memory to packed-flop state" "$(verdict_ind packed_state_impl packed_state_ref packed_state)" "PROVEN-full"
 # Disabled write-data differences are unobservable when the masks agree.
-expect "masked write data" "$(verdict_ind masked_din_impl masked_din_ref masked_din)" "PROVEN equivalent"
+expect "masked write data" "$(verdict_ind masked_din_impl masked_din_ref masked_din)" "PROVEN-full"
 # Unequal dynamic-read counts still correspond through proven addresses.
-expect "unequal equivalent read ports" "$(verdict_ind unequal_reads_impl unequal_reads_ref unequal_reads)" "PROVEN equivalent"
+expect "unequal equivalent read ports" "$(verdict_ind unequal_reads_impl unequal_reads_ref unequal_reads)" "PROVEN-full"
 
-expect "reordered equivalent read ports" "$(verdict_ind reordered_reads_impl reordered_reads_ref reordered_reads)" "PROVEN equivalent"
-expect "corrupted reordered read address" "$(verdict reordered_reads_bad reordered_reads_ref reordered_reads)" "REFUTED (not equivalent)"
+expect "reordered equivalent read ports" "$(verdict_ind reordered_reads_impl reordered_reads_ref reordered_reads)" "PROVEN-full"
+expect "corrupted reordered read address" "$(verdict reordered_reads_bad reordered_reads_ref reordered_reads)" "REFUTED-cex"
 
-expect "equivalent packed read address" "$(verdict_ind packed_select_impl packed_select_ref packed_select)" "PROVEN equivalent"
-expect "corrupted packed read address" "$(verdict packed_select_bad packed_select_ref packed_select)" "REFUTED (not equivalent)"
+expect "equivalent packed read address" "$(verdict_ind packed_select_impl packed_select_ref packed_select)" "PROVEN-full"
+expect "corrupted packed read address" "$(verdict packed_select_bad packed_select_ref packed_select)" "REFUTED-cex"
 
 if [ $fail -ne 0 ]; then echo "lec_mem_test: FAILED"; exit 1; fi
 echo "lec_mem_test: PASSED"

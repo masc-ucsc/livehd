@@ -100,12 +100,12 @@ for shape in multi single neg; do
         --workdir "$W/wl_${shape}_${reader}_$other" --set lhd.incremental=false --set formal.timeout=20 2>&1)
       rc=$?
       verdict=$(echo "$out" | grep -E "^lec: 'top' " | tail -1)
-      if echo "$verdict" | grep -q "REFUTED"; then
-        fail "$tag: a constant-clocked write port committed (REFUTED): $verdict"
-      elif echo "$verdict" | grep -q "PROVEN"; then
+      if echo "$verdict" | grep -q "REFUTED-cex"; then
+        fail "$tag: a constant-clocked write port committed (REFUTED-cex): $verdict"
+      elif echo "$verdict" | grep -qE "PROVEN-|TESTED-"; then
         fail "$tag: a constant-clocked write port committed (PROVEN against $other): $verdict"
-      elif [ $rc -ne 7 ] || ! echo "$verdict" | grep -q "UNSUPPORTED"; then
-        fail "$tag: expected a sound refusal (UNSUPPORTED, rc 7), got rc=$rc: $verdict"
+      elif [ $rc -ne 7 ] || ! echo "$verdict" | grep -q "REFUTED-unsupported"; then
+        fail "$tag: expected a sound refusal (REFUTED-unsupported, rc 7), got rc=$rc: $verdict"
       elif [ "$shape" = neg ] && echo "$out" | grep -q "phase schedule refused"; then
         # yosys-verilog's lg hands the phase schedule the constant clock as a
         # second ROOT: it refuses before the encoder sees the memory (sound).

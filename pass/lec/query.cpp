@@ -2175,10 +2175,28 @@ Query_result run_auto_portfolio(hhds::Graph* ref, hhds::Graph* impl, const Lec_o
   }
   absl::flat_hash_set<hhds::Graph*> seen;
   const bool comb = graph_is_combinational(ref, sub_lib, seen) && graph_is_combinational(impl, sub_lib, seen);
+  // Strategy hint from the persistent cache (the engine that settled this
+  // entity last run). ORDERING ONLY: the hinted engine's arm starts first, and
+  // everything else in the portfolio still runs when it does not settle the
+  // (possibly edited) design, so a hint can speed a verdict but never change it.
+  const std::string hint = opts._preferred_engine == "ind" || opts._preferred_engine == "bmc" ? opts._preferred_engine : "";
+  opts._preferred_engine.clear();
+  auto hint_note = [&hint](Query_result& r, std::string_view engine) {
+    if (!hint.empty() && engine == hint && (r.verdict == Verdict::Proven || r.verdict == Verdict::Refuted)) {
+      r.detail = "auto: strategy hint tried " + hint + " first and settled; " + r.detail;
+    }
+  };
+  struct Arm {
+    std::string engine, profile;
+  };
+  std::vector<Arm> arms;
+  // Work already spent before the race below (a case split that did not settle).
+  Cvc5_stats       carried;
+  long long        spent = 0;
   if (comb && opts.portfolio == "auto") {
-    Cvc5_stats carried;
-    long long  spent = 0;
-    if (opts.partitions >= 2 && opts.split != "none" && !opts.split.empty()) {
+    // A hinted ind replays the strategy that settled last time: the single ind
+    // query, ahead of the case split.
+    if (hint != "ind" && opts.partitions >= 2 && opts.split != "none" && !opts.split.empty()) {
       auto cs = run_case_split(ref, impl, opts, sub_lib);
       if (cs.engine == "casesplit" && (cs.verdict == Verdict::Proven || cs.verdict == Verdict::Refuted)) {
         return cs;
@@ -2186,24 +2204,39 @@ Query_result run_auto_portfolio(hhds::Graph* ref, hhds::Graph* impl, const Lec_o
       carried += cs.cvc5;
       spent   += cs.solve_ms;
     }
-    auto single    = opts;
-    single.engine  = "ind";
-    auto r         = prove_equal_isolated(ref, impl, single, sub_lib);
-    r.detail       = "auto: combinational (no flop/latch/mem) -> single ind query, bmc skipped; " + r.detail;
-    r.cvc5        += carried;
-    r.solve_ms    += spent;
-    return r;
-  }
-  struct Arm {
-    std::string engine, profile;
-  };
-  std::vector<Arm> arms;
-  if (opts.portfolio == "auto") {
+    if (opts.int_blast != "auto" || is_sampled(opts.effort)) {
+      auto single    = opts;
+      single.engine  = "ind";
+      auto r         = prove_equal_isolated(ref, impl, single, sub_lib);
+      r.detail       = "auto: combinational (no flop/latch/mem) -> single ind query, bmc skipped; " + r.detail;
+      r.cvc5        += carried;
+      r.solve_ms    += spent;
+      hint_note(r, "ind");
+      return r;
+    }
+    // int_blast=auto: the BV solve first, and the int-blast retry (cvc5
+    // solve-bv-as-int, iand) as a DEFERRED second leg inside the same wall
+    // allowance -- it starts only when BV has not settled within a slice
+    // quantum. Under one parent-owned deadline a sequential retry after a BV
+    // timeout would have no time left, which silently dropped the retry for
+    // every combinational arithmetic miter.
     arms = {
-        {"bmc", opts.profile},
-        {"bmc",       "lazy"},
-        {"ind", opts.profile}
+        {"ind",  opts.profile},
+        {"ind", "intblast"}
     };
+  } else if (opts.portfolio == "auto") {
+    // Induction leads: it is the only arm that settles an equivalent design
+    // unbounded, and when admission runs fewer arms than this list (a loaded
+    // host, lhd.jobs) the first arm gets the CPU first. A hinted bmc leads
+    // instead. Time slicing (fork_race) still gives every arm its turn.
+    arms = {
+        {"ind", opts.profile},
+        {"bmc", opts.profile},
+        {"bmc",       "lazy"}
+    };
+    if (hint == "bmc") {
+      std::swap(arms[0], arms[1]);
+    }
     if (opts.int_blast != "off") {
       arms.push_back({"bmc", "intblast"});
     }
@@ -2258,7 +2291,25 @@ Query_result run_auto_portfolio(hhds::Graph* ref, hhds::Graph* impl, const Lec_o
            || (arms[i].engine == "bmc" && r.verdict == Verdict::Refuted)
            || (comb && (r.verdict == Verdict::Proven || r.verdict == Verdict::Refuted));
   };
+  // One-sided BOX compare points (bbin:/bbox:) come from the shared encoder and
+  // miter, not from an engine: once one arm reports them, every arm ends
+  // UNPAIRED on this miter (an incomplete correspondence decides nothing either
+  // way), and the hierarchical driver answers it with a flat retry. Waiting for
+  // the other arms only spent the wall allowance that retry needs --
+  // matched_filter_4's collapsed top burned ~9 s of bmc arms in a debug build
+  // and left its flat retry too little time to prove.
+  auto one_sided_box = [](const Query_result& r) {
+    const auto box = [](const std::string& n) { return n.starts_with("bbin:") || n.starts_with("bbox:"); };
+    return r.verdict == Verdict::Undecided
+           && (std::any_of(r.unmatched_ref.begin(), r.unmatched_ref.end(), box)
+               || std::any_of(r.unmatched_impl.begin(), r.unmatched_impl.end(), box));
+  };
   auto bounded_winner = [&](const Race_result<Query_result>& race) {
+    for (size_t i = 0; i < arms.size(); ++i) {
+      if (race.done[i] && one_sided_box(race.results[i])) {
+        return static_cast<int>(i);  // an early STOP, not a verdict (see the winner handling below)
+      }
+    }
     const Query_result* induction = nullptr;
     for (size_t i = 0; i < arms.size(); ++i) {
       if (arms[i].engine == "ind") {
@@ -2278,13 +2329,17 @@ Query_result run_auto_portfolio(hhds::Graph* ref, hhds::Graph* impl, const Lec_o
     }
     return -1;
   };
-  auto race = fork_race<Query_result>(
+  const long long race_ms = race_deadline_ms(opts);
+  // The combinational int-blast leg is the BV solve's retry: deferred by one
+  // slice quantum, so a miter BV settles quickly never pays for a second solver.
+  const long long retry_after_ms = race_slice_quantum_ms(race_ms);
+  auto            race           = fork_race<Query_result>(
       static_cast<int>(arms.size()),
       run,
       serialize_result,
       deserialize_result,
       trust,
-      race_deadline_ms(opts),
+      race_ms,
       0,
       units,
       [&](int i) { return arms[i].engine == "ind" ? 0 : 1; },
@@ -2297,16 +2352,26 @@ Query_result run_auto_portfolio(hhds::Graph* ref, hhds::Graph* impl, const Lec_o
           estimate = (estimate * 3 + 1) / 2;
         }
         return estimate;
-      });
+      },
+      [&](int i) -> long long { return comb && arms[i].profile == "intblast" ? retry_after_ms : 0; });
   if (!race.forked) {
-    return run_auto_sequential(ref, impl, opts, sub_lib);
+    auto r = run_auto_sequential(ref, impl, opts, sub_lib);
+    r.cvc5     += carried;
+    r.solve_ms += spent;
+    return r;
   }
-  Cvc5_stats                       total;
-  long long                        solve_ms = 0;
+  Cvc5_stats                       total    = carried;
+  long long                        solve_ms = spent;
   std::vector<Portfolio_arm_stats> reports;
+  // An early stop on one-sided box points (see one_sided_box) is not a winner.
+  const bool box_stop = race.winner >= 0 && one_sided_box(race.results[race.winner]);
   for (size_t i = 0; i < arms.size(); ++i) {
     auto& r = race.results[i];
-    if (race.timed_out[i]) {
+    if (box_stop && !race.done[i]) {
+      r.verdict = Verdict::Undecided;
+      r.detail  = "stopped: " + arms[race.winner].engine + ":" + arms[race.winner].profile
+                 + " found one-sided box compare points, which no engine can pair on this miter";
+    } else if (race.timed_out[i]) {
       r.verdict     = Verdict::Undecided;
       r.wall_killed = true;
       r.detail      = "hit formal.timeout (shared portfolio wall deadline)";
@@ -2323,7 +2388,7 @@ Query_result run_auto_portfolio(hhds::Graph* ref, hhds::Graph* impl, const Lec_o
                        arms[i].profile,
                        vname(r),
                        race.arm_ms[i],
-                       race.winner == static_cast<int>(i),
+                       !box_stop && race.winner == static_cast<int>(i),
                        race.started[i] && !race.done[i],
                        race.queued[i]});
   }
@@ -2334,7 +2399,7 @@ Query_result run_auto_portfolio(hhds::Graph* ref, hhds::Graph* impl, const Lec_o
     r.elapsed_ms = now_ms(start);
     return r;
   };
-  if (race.winner >= 0) {
+  if (race.winner >= 0 && !box_stop) {
     auto r = race.results[race.winner];
     if (!comb && arms[race.winner].engine == "bmc" && r.verdict == Verdict::Proven) {
       const Query_result* induction = nullptr;
@@ -2349,8 +2414,19 @@ Query_result run_auto_portfolio(hhds::Graph* ref, hhds::Graph* impl, const Lec_o
         r = std::move(bounded);
       }
     }
-    r.detail = "auto: " + arms[race.winner].engine + ":" + arms[race.winner].profile + " reached " + vname(r)
-               + " first (raced ind|bmc profiles); " + r.detail;
+    if (comb) {
+      r.detail = "auto: combinational (no flop/latch/mem) -> single ind query, bmc skipped; "
+                 + (arms[race.winner].profile == "intblast"
+                        ? std::format("int-blast retry (the BV solve did not settle within {:.2f}s; re-solved as unbounded "
+                                      "integers (iand) in the same wall allowance): ",
+                                      static_cast<double>(retry_after_ms) / 1000.0)
+                        : std::string{})
+                 + r.detail;
+    } else {
+      r.detail = "auto: " + arms[race.winner].engine + ":" + arms[race.winner].profile + " reached " + vname(r)
+                 + " first (raced ind|bmc profiles); " + r.detail;
+    }
+    hint_note(r, arms[race.winner].engine);
     return finish(std::move(r));
   }
   // A name-paired induction step is conditional. Pair it only with its matching
@@ -2417,6 +2493,23 @@ Query_result run_auto_portfolio(hhds::Graph* ref, hhds::Graph* impl, const Lec_o
     const auto& leg        = *legs[static_cast<size_t>(k)];
     undecided.cause_detail = "auto: " + arms[static_cast<size_t>(k)].engine + ":" + arms[static_cast<size_t>(k)].profile + ": "
                              + (leg.cause_detail.empty() ? leg.detail : leg.cause_detail);
+  }
+  if (comb) {
+    undecided.detail = "auto: combinational (no flop/latch/mem) -> single ind query, bmc skipped; " + undecided.detail;
+    // The ind hint went ahead of the case split; it did not settle, so the
+    // portfolio continues with the split it skipped (hints are ordering only).
+    if (hint == "ind" && opts.partitions >= 2 && opts.split != "none" && !opts.split.empty()
+        && (opts._deadline == std::chrono::steady_clock::time_point{} || std::chrono::steady_clock::now() < opts._deadline)) {
+      auto cs = run_case_split(ref, impl, opts, sub_lib);
+      if (cs.engine == "casesplit" && (cs.verdict == Verdict::Proven || cs.verdict == Verdict::Refuted)) {
+        cs.cvc5     += total;
+        cs.solve_ms += solve_ms;
+        cs.arms      = reports;
+        return cs;
+      }
+      total    += cs.cvc5;
+      solve_ms += cs.solve_ms;
+    }
   }
   return finish(std::move(undecided));
 }
@@ -4982,8 +5075,9 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
     // not compares two designs in different time bases, which is the failure the
     // M8 preflight's "declined rather than half-transform" rule exists to stop.
     const auto*      clk_forest = opts.clock_forest.empty() ? nullptr : &opts.clock_forest;
+    const auto*      impl_forest = opts.clock_forest_impl.empty() ? clk_forest : &opts.clock_forest_impl;
     const Phase_plan ref_plan   = plan_phases(ref, collapse_ptr, clk_forest);
-    const Phase_plan impl_plan  = plan_phases(impl, collapse_ptr, clk_forest);
+    const Phase_plan impl_plan  = plan_phases(impl, collapse_ptr, impl_forest);
     // A design with only a recognized GATE (no latch, no negedge endpoint) does
     // not need sub-period resolution, but it does need the schedule's chain
     // CANONICALIZATION -- a gate of a gate is what the per-node encoder refuses
@@ -7016,9 +7110,10 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
   Phase_plan ind_ref_plan, ind_impl_plan;
   bool       ind_use_plan = false;
   if (opts.phase_sched) {
-    const auto* ind_forest = opts.clock_forest.empty() ? nullptr : &opts.clock_forest;
-    ind_ref_plan           = plan_phases(ref, collapse_ptr, ind_forest);
-    ind_impl_plan          = plan_phases(impl, collapse_ptr, ind_forest);
+    const auto* ind_forest      = opts.clock_forest.empty() ? nullptr : &opts.clock_forest;
+    const auto* ind_impl_forest = opts.clock_forest_impl.empty() ? ind_forest : &opts.clock_forest_impl;
+    ind_ref_plan                = plan_phases(ref, collapse_ptr, ind_forest);
+    ind_impl_plan               = plan_phases(impl, collapse_ptr, ind_impl_forest);
     if (std::getenv("LEC_PHASE_LOG") != nullptr) {
       std::fprintf(stderr, "[LEC_PHASE] ref plan:  %s\n", ind_ref_plan.describe().c_str());
       std::fprintf(stderr, "[LEC_PHASE] impl plan: %s\n", ind_impl_plan.describe().c_str());
@@ -11285,9 +11380,12 @@ Query_result prove_equal(hhds::Graph* ref, hhds::Graph* impl, const Lec_options&
   try {
     // The lease is inside the try: the job manager's shared lease table can
     // throw std::bad_alloc too (its first use maps it).
+    // A nested process (a racer, an isolated worker) already runs on its
+    // blocked parent's capacity (Job_manager::nested), even when time slicing
+    // gave it the race's inherited token instead of a lease.
     auto&            manager = livehd::Job_manager::global();
     livehd::Job_slot slot;
-    if (!manager.owns_slot()) {
+    if (!manager.owns_slot() && !manager.nested()) {
       slot = manager.acquire(livehd::Job_class::formal_arm,
                              solver_job_units(ref, impl, opts.engine == "ind" ? 1 : opts.bound, &opts, sub_lib),
                              0,
@@ -11351,8 +11449,14 @@ Query_result spawn_isolated_worker(hhds::Graph* ref, hhds::Graph* impl, const Le
   const auto                 deadline = opts._deadline != std::chrono::steady_clock::time_point{} ? opts._deadline
                                         : opts.timeout > 0 ? t0 + std::chrono::seconds(opts.timeout)
                                                            : std::chrono::steady_clock::time_point{};
-  auto lease = manager.acquire(livehd::Job_class::formal_arm, solver_job_units(ref, impl, opts.bound, &opts, sub_lib), 0, deadline);
-  if (!lease) {
+  // The worker replaces its caller, which waits for it. In a nested process
+  // that caller already runs on its own parent's capacity, so the worker takes
+  // a free slot when there is one and otherwise inherits that capacity
+  // (Job_manager::nested); only a top-level caller queues for admission.
+  const uint64_t worker_units = solver_job_units(ref, impl, opts.bound, &opts, sub_lib);
+  auto           lease        = manager.nested() ? manager.try_acquire(livehd::Job_class::formal_arm, worker_units, 0, false)
+                                                 : manager.acquire(livehd::Job_class::formal_arm, worker_units, 0, deadline);
+  if (!lease && !manager.nested()) {
     Query_result out;
     out.verdict    = Verdict::Undecided;
     out.detail     = "hit formal.timeout while queued for a worker";
@@ -12406,6 +12510,14 @@ static Verify_result prove_properties_impl(hhds::Graph* design, const Lec_option
   // the requested last cycle, which is TIMEOUT-time (not a smaller bounded
   // proof) unless induction later proves it unbounded.
   absl::flat_hash_set<size_t> budget_frozen;
+  // Wall time of each obligation's latest solver check (prop index -> ms). The
+  // freeze below spares a checked ASSUME whose checks are CHEAP: it does not
+  // re-burn the floor, and it is a premise (prove-then-use) -- freezing it left
+  // a mined assume that proves in milliseconds per cycle "proven to cycle 2" of
+  // 4, TIMEOUT-time and unused at the deeper cycles, only because a hard
+  // sibling assert had spent the total. Asserts keep the freeze.
+  absl::flat_hash_map<size_t, long long> last_check_ms;
+  const long long                        cheap_check_ms = std::max<long long>(1, min_ms / 10);
   // Obligations that ran on the floor. A SET of prop indices, not a counter of
   // checks: one obligation is checked once per BMC cycle, so counting checks
   // reported "5 floored" on a 4-obligation design — the report promises UNITS.
@@ -13231,9 +13343,12 @@ static Verify_result prove_properties_impl(hhds::Graph* design, const Lec_option
         // never-resolved obligation (proven_to < 0) still gets one floored attempt
         // below, so it earns a real Unknown/CEX rather than a silent "not checked".
         if (budget_spent() && pr.proven_to >= 0) {
-          budget_capped = true;
-          budget_frozen.insert(ix);
-          continue;
+          if (auto lc = last_check_ms.find(ix);
+              pr.kind != "assume" || lc == last_check_ms.end() || lc->second >= cheap_check_ms) {
+            budget_capped = true;
+            budget_frozen.insert(ix);
+            continue;
+          }
         }
         cvc5::Term       bad    = tm.mkTerm(cvc5::Kind::EQUAL, {fit_to(tm, ob.cond, w), zero});
         // This obligation's scope literal: forced TRUE for the check, so its own
@@ -13282,7 +13397,8 @@ static Verify_result prove_properties_impl(hhds::Graph* design, const Lec_option
           }
         }
         if (!cached) {
-          pr.solve_ms += now_ms(tob);
+          last_check_ms[ix]  = now_ms(tob);
+          pr.solve_ms       += last_check_ms[ix];
           if (last_check_floored) {
             floored_units.insert(ix);  // this OBLIGATION ran past the soft total (counted once, not per cycle)
           }
@@ -14564,7 +14680,7 @@ static Verify_result prove_properties_dispatch(hhds::Graph* design, const Lec_op
   }
   auto&            manager = livehd::Job_manager::global();
   livehd::Job_slot slot;
-  if (!manager.owns_slot()) {
+  if (!manager.owns_slot() && !manager.nested()) {  // nested: the parent's capacity (see prove_equal)
     slot = manager.acquire(livehd::Job_class::formal_arm, units, 0, opts._deadline);
     if (!slot) {
       Verify_result result;

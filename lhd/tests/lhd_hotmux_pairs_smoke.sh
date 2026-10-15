@@ -28,7 +28,7 @@ module dec(input [1:0] x, input [7:0] a,b,c,d, output [7:0] res);
 assign res = x==0 ? a : x==1 ? b : x==2 ? c : d;
 endmodule
 VERILOG
-"$LHD" lec --impl "lg:$W/lg" --ref "verilog:$W/ref.v" --impl-top pairs.dec --ref-top dec --workdir "$W/lec"
+"$LHD" lec --set formal.effort=proof --impl "lg:$W/lg" --ref "verilog:$W/ref.v" --impl-top pairs.dec --ref-top dec --workdir "$W/lec"
 # Overlapping controls that CAN change the result must reach pass.formal. The
 # arms differ here; identical arms keep the obligation too (see the ruling
 # below).

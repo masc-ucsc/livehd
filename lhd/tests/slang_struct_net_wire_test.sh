@@ -151,7 +151,7 @@ module sn (input logic clk, input logic [3:0] x, output logic [7:0] \res.data , 
   always_comb dbg = {coef_exc, coef_c0[0]};
 endmodule
 EOF
-"$LHD" lec --impl "verilog:$W/sn.v" --ref "verilog:$W/sn_ref.v" --top sn --workdir "$W/w_lec" >"$W/lec.log" 2>&1 \
+"$LHD" lec --set formal.effort=proof --impl "verilog:$W/sn.v" --ref "verilog:$W/sn_ref.v" --top sn --workdir "$W/w_lec" >"$W/lec.log" 2>&1 \
   || fail "the struct connection does not carry the source value (netlist not equivalent to the scalar reference):
 $(tail -5 "$W/lec.log")"
 # dbg reads the same net through a third driver; a severed net folds it to a
@@ -290,7 +290,7 @@ EOF
 "$LHD" compile "$W/member_dep.sv" --top member_dep \
   --emit-dir "pyrope:$W/member_dep_prp" --workdir "$W/w_member_dep" >"$W/member_dep.log" 2>&1 \
   || fail "compile of member_dep failed: $(cat "$W/member_dep.log")"
-"$LHD" lec --impl "pyrope:$W/member_dep_prp/member_dep.prp" \
+"$LHD" lec --set formal.effort=proof --impl "pyrope:$W/member_dep_prp/member_dep.prp" \
   --ref "verilog:$W/member_dep.sv" --top member_dep \
    --workdir "$W/lec_member_dep" >"$W/member_dep_lec.log" 2>&1 \
   || fail "aggregate member dependency was lost on the Pyrope round trip: $(cat "$W/member_dep_lec.log")"
@@ -364,7 +364,7 @@ if grep -Fq 'async-reset-as-sync' "$W/nonuniform_array_reset_reread.log"; then
 fi
 grep -Fq 'always @(posedge clock or posedge reset)' "$W/nonuniform_array_reset_reread.v" \
   || fail "cgen packed-array async reset edge was lost on reread: $(grep -n 'always @' "$W/nonuniform_array_reset_reread.v")"
-"$LHD" lec --impl "pyrope:$W/nonuniform_array_reset_prp/nonuniform_array_reset.prp" \
+"$LHD" lec --set formal.effort=proof --impl "pyrope:$W/nonuniform_array_reset_prp/nonuniform_array_reset.prp" \
   --ref "verilog:$W/nonuniform_array_reset.sv" --top nonuniform_array_reset \
    --workdir "$W/lec_nonuniform_array_reset" \
   >"$W/nonuniform_array_reset_lec.log" 2>&1 \
@@ -396,7 +396,7 @@ EOF
   || fail "compile of struct_sibling_dep failed: $(cat "$W/struct_sibling_dep.log")"
 grep -q '"code":"unresolved-ref"' "$W/struct_sibling_dep.log" \
   && fail "sibling field read resolved before its driver: $(cat "$W/struct_sibling_dep.log")"
-"$LHD" lec --impl "pyrope:$W/struct_sibling_dep_prp/struct_sibling_dep.prp" \
+"$LHD" lec --set formal.effort=proof --impl "pyrope:$W/struct_sibling_dep_prp/struct_sibling_dep.prp" \
   --ref "verilog:$W/struct_sibling_dep.sv" --top struct_sibling_dep \
    --workdir "$W/lec_struct_sibling_dep" \
   >"$W/struct_sibling_dep_lec.log" 2>&1 \

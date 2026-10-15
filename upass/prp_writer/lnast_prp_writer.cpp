@@ -3267,10 +3267,12 @@ bool Lnast_prp_writer::body_has_state(Lnast_nid nid) const {
     return false;
   }
   // A submodule instantiation lowers to a `func_call`; only a `mod` (or `pipe`)
-  // may instantiate (a `comb` calling a sub has "no hardware lowering yet"), so
-  // such a module must be emitted as `mod` even when it carries no register.
+  // may instantiate a `mod`/`pipe`, so such a module must be emitted as `mod`
+  // even when it carries no register. A `comb` unit's calls are comb calls (a
+  // comb kept as a Sub instance under compile.upass.inline=false; lnast.tolg
+  // rejects a comb instantiating a mod/pipe): stateless, the unit stays a comb.
   if (lnast->get_type(nid) == Lnast_ntype::Lnast_ntype_func_call) {
-    return !default_prologue_.contains(nid.get_class_index().value);
+    return lnast->get_lambda_kind() != "comb" && !default_prologue_.contains(nid.get_class_index().value);
   }
   // A `declare` whose qualifier child (const) is "reg"/"latch" marks state.
   if (lnast->get_type(nid) == Lnast_ntype::Lnast_ntype_declare) {

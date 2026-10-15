@@ -19,7 +19,7 @@ for mode in default library raw; do
   "$LHD" compile "$W/source.v" --reader slang --top a.b \
     --emit verilog:"$W/$mode.v" --workdir "$W/$mode" "${flags[@]}" > "$W/$mode.log" 2>&1 \
     || { cat "$W/$mode.log"; exit 1; }
-  "$LHD" lec --impl "$W/$mode.v" --ref "$W/ref.v" --top b \
+  "$LHD" lec --set formal.effort=proof --impl "$W/$mode.v" --ref "$W/ref.v" --top b \
     --workdir "$W/$mode-lec" -q
 done
 echo 'PASS: literal escaped top selects only its hierarchy with default, custom and raw library options'

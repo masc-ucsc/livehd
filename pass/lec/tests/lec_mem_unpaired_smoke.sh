@@ -34,14 +34,15 @@ check() {
     --set formal.simfail=false \
     --set "formal.lec.gold_x=$policy" --workdir "$WORK/$tag" \
     --result-json "$WORK/$tag.json" > "$WORK/$tag.log" 2>&1 || code=$?
-  if [ "$expected" = proven ]; then test "$code" = 0; else test "$code" = 10; fi
+  case "$expected" in proven-*) test "$code" = 0 ;; refuted-cex) test "$code" = 10 ;; *) false ;; esac
   python3 - "$WORK/$tag.json" "$expected" <<'PYRESULT'
 import json, sys
 result = json.load(open(sys.argv[1]))
 assert result["lec"]["verdict"] == sys.argv[2], result
 PYRESULT
 }
-check unwritten ref good proven ignore
-check written ref bad refuted ignore
-check initialized init init_bad refuted ignore
-check zero ref good proven zero
+# engine=bmc at bound 3: a pass is PROVEN-bounded(3), a real difference REFUTED-cex.
+check unwritten ref good proven-bounded ignore
+check written ref bad refuted-cex ignore
+check initialized init init_bad refuted-cex ignore
+check zero ref good proven-bounded zero

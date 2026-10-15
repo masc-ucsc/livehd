@@ -54,6 +54,17 @@ llvm_configure = use_repo_rule("@llvm-raw//utils/bazel:configure.bzl", "llvm_con
 llvm_configure(name = "llvm-project", targets = ["AArch64", "X86"])
 
 bazel_dep(name = "abseil-cpp", version = "20250814.2") # version = "20240722.1")
+# The module graph resolves abseil to 20260526.0 (a dep needs it). Its swiss
+# table published a grown capacity BEFORE allocating the backing array, so a
+# std::bad_alloc there (lhd's RLIMIT_AS memory backstop) left a table whose
+# destructor freed garbage while the TIMEOUT-memory unwind ran
+# (pass_usyn_oom_test). The patch publishes the capacity after the allocation.
+single_version_override(
+    module_name = "abseil-cpp",
+    patch_strip = 1,
+    patches = ["//packages:abseil-bad-alloc-resize.patch"],
+    version = "20260526.0",
+)
 bazel_dep(name = "google_benchmark", version = "1.9.5")
 bazel_dep(name = "googletest", version = "1.18.0.bcr.1")
 

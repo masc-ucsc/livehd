@@ -131,7 +131,7 @@ echo "ok: the fixture carries the unaligned rotating read"
 "$LHD" compile "$W/prp/test_mem.prp" --top test_mem --emit-dir "lg:$W/impl" --workdir "$W/wi" >"$W/ci.log" 2>&1 \
   || { tail -5 "$W/ci.log"; fail "the generated Pyrope did not compile"; }
 
-OUT=$("$LHD" lec --ref "lg:$W/ref" --impl "lg:$W/impl" --top test_mem --workdir "$W/l" 2>&1); RC=$?
+OUT=$("$LHD" lec --set formal.effort=proof --ref "lg:$W/ref" --impl "lg:$W/impl" --top test_mem --workdir "$W/l" 2>&1); RC=$?
 if [ "$RC" -ne 0 ]; then
   echo "$OUT" | grep -aE "^lec: " | head -1
   echo "$OUT" | grep -aoE "first divergence at [^\"]{0,160}" | head -1

@@ -83,29 +83,31 @@ ck() { if eval "$2"; then echo "ok: $1"; else echo "FAIL: $1 (rc=$RC)"; echo "$O
 run empty_ref.v empty_impl.v
 ck "empty module (no output/state) exits non-zero"      '[ "$RC" -ne 0 ]'
 ck "empty module reports setup refusal"                 '[ "$RC" -eq 7 ] && echo "$OUT" | grep -q "\"class\":\"unsupported\""'
-ck "empty module never claims PROVEN"                   '! echo "$OUT" | grep -q "PROVEN equivalent"'
-ck "empty module says nothing was compared"             'echo "$OUT" | grep -qi "nothing was compared"'
+ck "empty module never claims PROVEN"                   '! echo "$OUT" | grep -qE "PROVEN-|TESTED-"'
+ck "empty module says nothing was compared"             'echo "$OUT" | grep -q "^lec: .* REFUTED-vacuous (nothing to compare"'
 
 # --- 2. impl dropped the only output ----------------------------------------
+# A top port NAME present on one side only is an interface mismatch: REFUTED-
+# interface, exit 7 (not a counterexample, and never a pass).
 run drop_ref.v drop_impl.v
 ck "dropped-output impl exits non-zero"                 '[ "$RC" -ne 0 ]'
-ck "dropped-output impl reports equiv_fail"             'echo "$OUT" | grep -q "\"class\":\"equiv_fail\""'
-ck "dropped-output impl never claims PROVEN"            '! echo "$OUT" | grep -q "PROVEN equivalent"'
+ck "dropped-output impl reports REFUTED-interface"      '[ "$RC" -eq 7 ] && echo "$OUT" | grep -q "^lec: .* REFUTED-interface (output .y. only in ref)" && echo "$OUT" | grep -q "\"class\":\"unsupported\""'
+ck "dropped-output impl never claims PROVEN"            '! echo "$OUT" | grep -qE "PROVEN-|TESTED-"'
 
 # --- 3. requested top missing on one side -----------------------------------
 run drop_ref.v other.v
 ck "missing top exits non-zero"                         '[ "$RC" -ne 0 ]'
-ck "missing top never claims PROVEN"                    '! echo "$OUT" | grep -q "PROVEN equivalent"'
+ck "missing top never claims PROVEN"                    '! echo "$OUT" | grep -qE "PROVEN-|TESTED-"'
 
 # --- 4. regression: a real proof still passes -------------------------------
 run eq_ref.v eq_impl.v
 ck "equivalent designs still exit 0"                    '[ "$RC" -eq 0 ]'
-ck "equivalent designs still report PROVEN"             'echo "$OUT" | grep -q "PROVEN equivalent"'
+ck "equivalent designs still report PROVEN"             'echo "$OUT" | grep -q "^lec: .* PROVEN-full"'
 
 # --- 5. regression: a real refutation still fails ---------------------------
 run eq_ref.v ne_impl.v
-ck "different designs still exit non-zero"              '[ "$RC" -ne 0 ]'
-ck "different designs still report REFUTED"             'echo "$OUT" | grep -q "REFUTED"'
+ck "different designs still exit 10"                    '[ "$RC" -eq 10 ]'
+ck "different designs still report REFUTED-cex"         'echo "$OUT" | grep -q "^lec: .* REFUTED-cex"'
 
 if [ $fail -ne 0 ]; then echo "lec_empty_module_test: FAILED"; exit 1; fi
 echo "lec_empty_module_test: PASSED"

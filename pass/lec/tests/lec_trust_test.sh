@@ -76,7 +76,7 @@ run() {  # $1=label ; $2..=lhd lec args ; sets RC/OUT (default hier driver)
 #    check would be vacuous.
 run refuse --impl "lg:$WORK/lg_base" --ref "lg:$WORK/lg_base" --set formal.lec.semdiff=none
 if [ "$RC" -ne 0 ]; then echo "FAIL: untrusted latch leaf rc=$RC (want PROVEN without trust)"; echo "$OUT" | tail -4; fail=1
-elif ! echo "$OUT" | grep -q "PROVEN equivalent"; then echo "FAIL: untrusted latch leaf not PROVEN"; echo "$OUT" | tail -3; fail=1
+elif ! echo "$OUT" | grep -q "^lec: .* PROVEN-full"; then echo "FAIL: untrusted latch leaf not PROVEN-full"; echo "$OUT" | tail -3; fail=1
 elif echo "$OUT" | grep -qi "trusted def"; then echo "FAIL: no --trust was given, yet a def was trusted"; fail=1
 else echo "ok: untrusted latch leaf -> PROVEN by the phase schedule (no trust needed)"; fi
 
@@ -84,15 +84,15 @@ else echo "ok: untrusted latch leaf -> PROVEN by the phase schedule (no trust ne
 #    and the assumption is DISCLOSED (never a silent unconditional pass).
 run trust --impl "lg:$WORK/lg_base" --ref "lg:$WORK/lg_base" --trust leaf
 if [ "$RC" -ne 0 ]; then echo "FAIL: --trust leaf rc=$RC (want PROVEN)"; echo "$OUT" | tail -4; fail=1
-elif ! echo "$OUT" | grep -q "PROVEN equivalent"; then echo "FAIL: --trust leaf: top not PROVEN"; fail=1
+elif ! echo "$OUT" | grep -q "^lec: .* PROVEN-full"; then echo "FAIL: --trust leaf: top not PROVEN-full"; fail=1
 elif ! echo "$OUT" | grep -qi "trusted"; then echo "FAIL: --trust leaf: assumption not disclosed"; fail=1
 else echo "ok: --trust leaf -> PROVEN under a disclosed trusted def"; fi
 
 # 3) soundness: a REAL divergence OUTSIDE the leaf (r=p^s vs p&s) still REFUTES
 #    with --trust leaf — trust boxes only the leaf, never out-of-leaf logic.
 run sound --impl "lg:$WORK/lg_base" --ref "lg:$WORK/lg_rdiff" --trust leaf
-if [ "$RC" -eq 0 ]; then echo "FAIL: real out-of-leaf diff rc=0 (want REFUTED)"; echo "$OUT" | tail -3; fail=1
-elif ! echo "$OUT" | grep -qi "refut\|not equivalent"; then echo "FAIL: out-of-leaf diff not REFUTED"; echo "$OUT" | tail -3; fail=1
+if [ "$RC" -ne 10 ]; then echo "FAIL: real out-of-leaf diff rc=$RC (want 10: REFUTED-cex)"; echo "$OUT" | tail -3; fail=1
+elif ! echo "$OUT" | grep -q "^lec: .* REFUTED-cex"; then echo "FAIL: out-of-leaf diff not REFUTED-cex"; echo "$OUT" | tail -3; fail=1
 else echo "ok: a real diff outside a trusted leaf -> REFUTED (bug still caught)"; fi
 
 # 4) trusting the TOP would assume the whole design equal (a vacuous pass): the

@@ -74,10 +74,10 @@ for kind in test test_qn native; do
     iverilog -g2012 -s tb -o "$D/sim" "$W/tb.v" "$D/net.v" "$D/models.v"
     vvp "$D/sim"
   fi
-  run lec --impl lg:"$D/net" --ref lg:"$W/ref" --lib lg:"$D/models" --top edges \
+  run lec --set formal.effort=proof --impl lg:"$D/net" --ref lg:"$W/ref" --lib lg:"$D/models" --top edges \
     --set formal.timeout=60 --workdir "$D/native"
   cat "$D/net.v" "$D/models.v" > "$D/impl.v"
-  run lec --impl verilog:"$D/impl.v" --ref verilog:"$W/ref.v" --top edges \
+  run lec --set formal.effort=proof --impl verilog:"$D/impl.v" --ref verilog:"$W/ref.v" --top edges \
     --set formal.timeout=60 --workdir "$D/verilog"
 done
 echo 'PASS: rising and falling register edges survive mapped Q and QN cells'

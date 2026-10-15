@@ -90,10 +90,10 @@ module rom(input [1:0] addr, output [7:0] data);
   assign data = mem[addr];
 endmodule
 VERILOG
-"$LHD" lec --ref "$W/ref.v" --impl "$W/rom.prp" --top rom \
+"$LHD" lec --set formal.effort=proof --ref "$W/ref.v" --impl "$W/rom.prp" --top rom \
   --workdir "$W/proof" --result-json "$W/proof.json"
 sed 's/data = mem\[addr\]/data = mem[addr] ^ 1/' "$W/rom.prp" > "$W/bad.prp"
-if "$LHD" lec --ref "$W/ref.v" --impl "$W/bad.prp" --top rom \
+if "$LHD" lec --set formal.effort=proof --ref "$W/ref.v" --impl "$W/bad.prp" --top rom \
   --workdir "$W/refutation" --result-json "$W/refutation.json"; then
   echo 'FAIL: altered ROM output proved equivalent' >&2
   exit 1
@@ -102,8 +102,8 @@ python3 - "$W" <<'PY'
 import json, pathlib, sys
 w = pathlib.Path(sys.argv[1])
 p = json.loads((w / 'proof.json').read_text())
-assert p['lec']['verdict'] == 'proven' and not p['lec']['bounded'], p
+assert p['lec']['verdict'] == 'proven-full' and not p['lec']['bounded'], p
 r = json.loads((w / 'refutation.json').read_text())
-assert r['lec']['verdict'] == 'refuted', r
+assert r['lec']['verdict'] == 'refuted-cex', r
 PY
 echo 'PASS: clockless file-preloaded memory preserves its interface and behavior'

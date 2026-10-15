@@ -29,7 +29,7 @@ EOF
   if [ "$kind" = opposite ]; then
     grep -q 'mixes clock edges' "$W/$kind.log"
     set +e
-    "$LHD" lec --impl "lg:$W/$kind-lg" --ref "$W/$kind.v" --top memory_clock \
+    "$LHD" lec --set formal.effort=proof --impl "lg:$W/$kind-lg" --ref "$W/$kind.v" --top memory_clock \
       --workdir "$W/$kind-lec" -q > "$W/$kind-lec.log" 2>&1
     rc=$?
     set -e
@@ -45,7 +45,7 @@ EOF
     grep -q '\.wr_clock_1(clk_b)' "$W/$kind-out.v"
   elif [ "$kind" = negative ]; then
     grep -Fq '.clk(~(clk))' "$W/$kind-out.v"
-    if "$LHD" lec --impl "$W/$kind-out.v" --ref "$W/$kind.v" --top memory_clock \
+    if "$LHD" lec --set formal.effort=proof --impl "$W/$kind-out.v" --ref "$W/$kind.v" --top memory_clock \
         --workdir "$W/$kind-lec" -q > "$W/$kind-lec.log" 2>&1; then
       echo 'FAIL: formal accepted an unsupported falling-edge memory'; exit 1
     else
@@ -114,7 +114,7 @@ SV
       echo "note: external-simulator leg skipped (set LHD_EXTERNAL_SIM=1)"
     fi
   else
-    "$LHD" lec --impl "$W/$kind-out.v" --ref "$W/$kind.v" --top memory_clock \
+    "$LHD" lec --set formal.effort=proof --impl "$W/$kind-out.v" --ref "$W/$kind.v" --top memory_clock \
       --workdir "$W/$kind-lec" -q > "$W/$kind-lec.log" 2>&1 \
       || { cat "$W/$kind-lec.log"; exit 1; }
   fi

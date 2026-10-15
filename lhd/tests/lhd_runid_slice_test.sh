@@ -39,7 +39,7 @@ cp "$W/des.prp" "$W/impl.prp"  # impl bytes stay fixed: only the ref lib moves
 
 # run <json>: lec des.par (ref lib) vs the fixed impl copy; prints the run_id.
 run() {
-  "$LHD" lec --top des.par --impl-top impl.par --ref lg:"$W/lib" --impl "$W/impl.prp" \
+  "$LHD" lec --set formal.effort=proof --top des.par --impl-top impl.par --ref lg:"$W/lib" --impl "$W/impl.prp" \
     -q --result-json "$1" --workdir "$W/wl" >/dev/null 2>&1 \
     || fail "lec run: $(cat "$1" 2>/dev/null)"
   sed 's/.*"run_id":"\([^"]*\)".*/\1/' "$1"
@@ -79,7 +79,7 @@ grep -q '"class":"config"' "$W/r5.json" || fail "unknown top not a config error:
 # and lec pairs pins by name — a decl-only edit inside the slice must move the
 # run_id even though every graph_<gid>/ dir is byte-identical.
 sed 's/bits=4/bits=9/' "$W/lib/library.txt" > "$W/lib/library.tmp" && mv "$W/lib/library.tmp" "$W/lib/library.txt"
-id_decl=$("$LHD" lec --top des.par --impl-top impl.par --ref lg:"$W/lib" --impl "$W/impl.prp" \
+id_decl=$("$LHD" lec --set formal.effort=proof --top des.par --impl-top impl.par --ref lg:"$W/lib" --impl "$W/impl.prp" \
   -q --result-json "$W/r6.json" --workdir "$W/wd" >/dev/null 2>&1; \
   sed 's/.*"run_id":"\([^"]*\)".*/\1/' "$W/r6.json")
 [ -n "$id_decl" ] || fail "decl-edit run missing run_id: $(cat "$W/r6.json")"
@@ -87,10 +87,10 @@ id_decl=$("$LHD" lec --top des.par --impl-top impl.par --ref lg:"$W/lib" --impl 
 
 # Per-side tops are proof obligations: two runs differing only in --impl-top
 # must not share a run_id (the impl side here is a plain file).
-ia=$("$LHD" lec --top des.par --impl-top impl.par --ref lg:"$W/lib" --impl "$W/impl.prp" \
+ia=$("$LHD" lec --set formal.effort=proof --top des.par --impl-top impl.par --ref lg:"$W/lib" --impl "$W/impl.prp" \
   -q --result-json "$W/r7.json" --workdir "$W/wt1" >/dev/null 2>&1; \
   sed 's/.*"run_id":"\([^"]*\)".*/\1/' "$W/r7.json")
-ib=$("$LHD" lec --top des.par --impl-top impl.kid --ref lg:"$W/lib" --impl "$W/impl.prp" \
+ib=$("$LHD" lec --set formal.effort=proof --top des.par --impl-top impl.kid --ref lg:"$W/lib" --impl "$W/impl.prp" \
   -q --result-json "$W/r8.json" --workdir "$W/wt2" >/dev/null 2>&1; \
   sed 's/.*"run_id":"\([^"]*\)".*/\1/' "$W/r8.json")
 [ -n "$ia" ] && [ -n "$ib" ] || fail "impl-top runs missing run_id"

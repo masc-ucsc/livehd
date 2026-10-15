@@ -1638,6 +1638,166 @@ std::optional<Icg_cone> clock_op_depth(const hhds::Pin_class& clock_pin, const D
 }
 }  // namespace
 
+namespace {
+
+// One gate output's shape test: match_icg_def's per-output body, shared with
+// materialize_inline_clock_gates (the same gate spelled in a module body rather
+// than in a cell def). `inner` is the driver of the candidate clock output;
+// `abort` reports a shape that rules the WHOLE def out (an inverted clock
+// port, a polarity-flipped latch operand, an operand that is neither). The
+// result leaves `out` unset.
+std::optional<Icg_def_match> match_icg_driver(hhds::Pin_class inner, bool& abort) {
+  inner = peel_width_mask(inner);  // see the helper: `(value & 1)` is a width mask, not the gate
+  if (inner.is_invalid() || inner.is_const() || gu::is_graph_input_pin(inner)) {
+    return std::nullopt;
+  }
+  // The CANONICAL cell: a Pyrope `Clock(clock_pin=clk, enable=en)` body is
+  // one Clock_cell on a clock input port, the enable already its `en`.
+  if (const auto cell = inner.get_master_node(); gu::type_op_of(cell) == Ntype_op::Clock_cell) {
+    const auto ref = gu::get_driver_of_sink_name(cell, "clk_ref");
+    const auto en  = gu::get_driver_of_sink_name(cell, "en");
+    const auto div = gu::get_driver_of_sink_name(cell, "div");
+    const auto inv = gu::get_driver_of_sink_name(cell, "invert");
+    if (!ref.is_invalid() && gu::is_graph_input_pin(ref) && !en.is_invalid() && (div.is_invalid() || const_is(div, 1))
+        && (inv.is_invalid() || inv.is_const())) {
+      Icg_def_match m;
+      m.clk_in      = ref;
+      m.enable_cone = en;
+      m.invert      = !inv.is_invalid() && inv.is_known_true();
+      return m;
+    }
+    return std::nullopt;
+  }
+  const Phase op_ph = resolve_phase(inner);
+  if (op_ph.net.is_invalid() || gu::is_graph_input_pin(op_ph.net) || op_ph.net.is_const()) {
+    return std::nullopt;
+  }
+  auto       gate    = op_ph.net.get_master_node();
+  const auto gate_op = gu::type_op_of(gate);
+  // TWO flavours, and the design corpus has both. `clk & en_latch` (enable
+  // latched while the clock is LOW, output idles low) is the ordinary ICG;
+  // `clk | ~en_latch` (enable latched while the clock is HIGH, output idles
+  // high) is minion's prim_clk_gate_n. They gate the SAME reference edges --
+  // neither output moves while the enable is deasserted -- so the only
+  // difference is the enable's sample point, recorded as `invert`.
+  if (gate_op != Ntype_op::And && gate_op != Ntype_op::Or) {
+    return std::nullopt;
+  }
+  if (op_ph.inverted) {
+    // An inversion between the gate and the output (`~(clk & en)`) is a
+    // genuinely inverted CLOCK, not a flavour: its consumers commit on the
+    // opposite reference edge. Not modelled -- leave it to the derived-clock
+    // refusal rather than fold it into `invert`, whose meaning is the flavour.
+    return std::nullopt;
+  }
+  // Split the And's operands into "the one holding a latch below it" (the
+  // enable) and "the bare input port" (the clock). This is the STRUCTURAL
+  // anchor that replaces the name heuristic: a gate cell's own body holds no
+  // flop, so Design_clocks has no root to offer inside the def.
+  hhds::Pin_class clk_port, latched;
+  int             n_ports = 0, n_latched = 0;
+  for (auto sink : gate.inp_sorted_pins()) {  // read-only walk
+    auto drv = sink.get_driver_pin();
+    if (drv.is_invalid() || drv.is_const()) {
+      continue;  // a width mask, not an operand
+    }
+    const Phase ph = resolve_phase(drv);
+    // The operand POLARITIES are part of the shape, and the match result
+    // carries neither: `clk & L` / `clk | ~L` gate the reference edges with
+    // enable L, while `clk & ~L` (enable ~L) or `~clk & L` (the falling edge)
+    // are different gates. Accepting them dropped the inversion, so a design
+    // whose gate enable was inverted came back PROVEN against the original.
+    if (!ph.net.is_invalid() && gu::is_graph_input_pin(ph.net)) {
+      if (ph.inverted) {
+        abort = true;
+        return std::nullopt;
+      }
+      ++n_ports;
+      clk_port = ph.net;
+      continue;
+    }
+    if (!ph.net.is_invalid() && !ph.net.is_const() && gu::type_op_of(ph.net.get_master_node()) == Ntype_op::Latch) {
+      if (ph.inverted != (gate_op == Ntype_op::Or)) {
+        abort = true;
+        return std::nullopt;
+      }
+      ++n_latched;
+      latched = ph.net;
+      continue;
+    }
+    abort = true;
+    return std::nullopt;  // an operand that is neither: not a gate cell
+  }
+  if (n_ports != 1 || n_latched != 1) {
+    return std::nullopt;
+  }
+  // CONFIRM the latch is the enable sampler for THIS clock: it must be
+  // transparent on the opposite phase of the same port. Conditional-call
+  // lowering may additionally qualify that enable with __valid, spelling the
+  // cone as `(!clk) & __valid`; search an And-only qualifier cone instead of
+  // requiring the whole expression to reduce to clk. Without the clock-phase
+  // leaf check a module that ANDs a clock with an unrelated latched data bit
+  // would match and sample its "enable" at an arbitrary time.
+  auto       latch_node              = latched.get_master_node();
+  const auto latch_enable            = gu::get_driver_of_sink_name(latch_node, "enable");
+  // EVERY leaf of that And cone is checked, not just "one of them is the
+  // clock phase": the match result carries only `latch_transparent_arm`, so a
+  // qualifier operand is DROPPED, and the Clock_cell built from it re-samples
+  // its enable on every reference edge instead of holding while the qualifier
+  // is low. A vendor/DFT gate spelled `(!clk) & test_en` would therefore tick
+  // its gated clock on cycles the RTL holds, advancing downstream registers a
+  // cycle early -- wrong state, silently. Only the activation spelling this
+  // relaxation exists for (`(!clk) & __valid`, whose guard the caller-side
+  // Clock_cell already carries) is accepted; anything else falls back to the
+  // ordinary latch model, which is exact.
+  const auto is_activation_qualifier = [&](const hhds::Pin_class& pin) {
+    const auto root = control_root(pin).net;
+    return !root.is_invalid() && gu::is_graph_input_pin(root) && gu::pin_name_of(root) == "__valid";
+  };
+  std::function<bool(hhds::Pin_class, int, bool&)> scan_enable;
+  scan_enable = [&](hhds::Pin_class pin, int depth, bool& saw_clock) {
+    if (pin.is_invalid() || depth > 16) {
+      return false;
+    }
+    const auto phase = resolve_phase(pin);
+    if (!phase.net.is_invalid() && phase.net.get_class_index() == clk_port.get_class_index()
+        && phase.inverted == (gate_op == Ntype_op::And)) {
+      saw_clock = true;
+      return true;
+    }
+    if (pin.is_const()) {
+      return const_is(pin, 1) || const_is(pin, -1);  // an always-true And operand changes nothing
+    }
+    if (!gu::is_graph_input_pin(pin) && gu::type_op_of(pin.get_master_node()) == Ntype_op::And) {
+      for (auto sink : pin.get_master_node().inp_sorted_pins()) {  // read-only walk
+        if (!scan_enable(sink.get_driver_pin(), depth + 1, saw_clock)) {
+          return false;
+        }
+      }
+      return true;
+    }
+    return is_activation_qualifier(pin);
+  };
+  bool saw_clock_phase = false;
+  if (!scan_enable(latch_enable, 0, saw_clock_phase) || !saw_clock_phase) {
+    return std::nullopt;
+  }
+  auto arm = latch_transparent_arm(latch_node);
+  if (arm.is_invalid()) {
+    arm = gu::get_driver_of_sink_name(latch_node, "din");  // raw yosys D/EN shape
+  }
+  if (arm.is_invalid()) {
+    return std::nullopt;
+  }
+  Icg_def_match m;
+  m.clk_in      = clk_port;
+  m.enable_cone = arm;
+  m.invert      = gate_op == Ntype_op::Or;
+  return m;
+}
+
+}  // namespace
+
 std::optional<Icg_def_match> match_icg_def(hhds::Graph* def) {
   if (def == nullptr) {
     return std::nullopt;
@@ -1647,159 +1807,21 @@ std::optional<Icg_def_match> match_icg_def(hhds::Graph* def) {
     return std::nullopt;
   }
   // A gate cell has exactly one clock output. Try each declared output; the
-  // shape test below is strict enough that at most one can match.
+  // shape test is strict enough that at most one can match.
   for (const auto& od : gio->get_output_pin_decls()) {
     auto opin = def->get_output_pin(od.name);
     if (opin.is_invalid()) {
       continue;
     }
-    hhds::Pin_class inner = opin.get_driver_pin();  // output pin is a sink: one driver
-    inner                 = peel_width_mask(inner);  // see the helper: `(value & 1)` is a width mask, not the gate
-    if (inner.is_invalid() || inner.is_const() || gu::is_graph_input_pin(inner)) {
-      continue;
+    bool abort = false;
+    auto m     = match_icg_driver(opin.get_driver_pin(), abort);  // output pin is a sink: one driver
+    if (abort) {
+      return std::nullopt;
     }
-    // The CANONICAL cell: a Pyrope `Clock(clock_pin=clk, enable=en)` body is
-    // one Clock_cell on a clock input port, the enable already its `en`.
-    if (const auto cell = inner.get_master_node(); gu::type_op_of(cell) == Ntype_op::Clock_cell) {
-      const auto ref = gu::get_driver_of_sink_name(cell, "clk_ref");
-      const auto en  = gu::get_driver_of_sink_name(cell, "en");
-      const auto div = gu::get_driver_of_sink_name(cell, "div");
-      const auto inv = gu::get_driver_of_sink_name(cell, "invert");
-      if (!ref.is_invalid() && gu::is_graph_input_pin(ref) && !en.is_invalid() && (div.is_invalid() || const_is(div, 1))
-          && (inv.is_invalid() || inv.is_const())) {
-        Icg_def_match m;
-        m.clk_in      = ref;
-        m.out         = opin;
-        m.enable_cone = en;
-        m.invert      = !inv.is_invalid() && inv.is_known_true();
-        return m;
-      }
-      continue;
+    if (m) {
+      m->out = opin;
+      return m;
     }
-    const Phase op_ph = resolve_phase(inner);
-    if (op_ph.net.is_invalid() || gu::is_graph_input_pin(op_ph.net) || op_ph.net.is_const()) {
-      continue;
-    }
-    auto       gate    = op_ph.net.get_master_node();
-    const auto gate_op = gu::type_op_of(gate);
-    // TWO flavours, and the design corpus has both. `clk & en_latch` (enable
-    // latched while the clock is LOW, output idles low) is the ordinary ICG;
-    // `clk | ~en_latch` (enable latched while the clock is HIGH, output idles
-    // high) is minion's prim_clk_gate_n. They gate the SAME reference edges --
-    // neither output moves while the enable is deasserted -- so the only
-    // difference is the enable's sample point, recorded as `invert`.
-    if (gate_op != Ntype_op::And && gate_op != Ntype_op::Or) {
-      continue;
-    }
-    if (op_ph.inverted) {
-      // An inversion between the gate and the output (`~(clk & en)`) is a
-      // genuinely inverted CLOCK, not a flavour: its consumers commit on the
-      // opposite reference edge. Not modelled -- leave it to the derived-clock
-      // refusal rather than fold it into `invert`, whose meaning is the flavour.
-      continue;
-    }
-    // Split the And's operands into "the one holding a latch below it" (the
-    // enable) and "the bare input port" (the clock). This is the STRUCTURAL
-    // anchor that replaces the name heuristic: a gate cell's own body holds no
-    // flop, so Design_clocks has no root to offer inside the def.
-    hhds::Pin_class clk_port, latched;
-    int             n_ports = 0, n_latched = 0;
-    for (auto sink : gate.inp_sorted_pins()) {  // read-only walk
-      auto drv = sink.get_driver_pin();
-      if (drv.is_invalid() || drv.is_const()) {
-        continue;  // a width mask, not an operand
-      }
-      const Phase ph = resolve_phase(drv);
-      // The operand POLARITIES are part of the shape, and the match result
-      // carries neither: `clk & L` / `clk | ~L` gate the reference edges with
-      // enable L, while `clk & ~L` (enable ~L) or `~clk & L` (the falling edge)
-      // are different gates. Accepting them dropped the inversion, so a design
-      // whose gate enable was inverted came back PROVEN against the original.
-      if (!ph.net.is_invalid() && gu::is_graph_input_pin(ph.net)) {
-        if (ph.inverted) {
-          return std::nullopt;
-        }
-        ++n_ports;
-        clk_port = ph.net;
-        continue;
-      }
-      if (!ph.net.is_invalid() && !ph.net.is_const() && gu::type_op_of(ph.net.get_master_node()) == Ntype_op::Latch) {
-        if (ph.inverted != (gate_op == Ntype_op::Or)) {
-          return std::nullopt;
-        }
-        ++n_latched;
-        latched = ph.net;
-        continue;
-      }
-      return std::nullopt;  // an operand that is neither: not a gate cell
-    }
-    if (n_ports != 1 || n_latched != 1) {
-      continue;
-    }
-    // CONFIRM the latch is the enable sampler for THIS clock: it must be
-    // transparent on the opposite phase of the same port. Conditional-call
-    // lowering may additionally qualify that enable with __valid, spelling the
-    // cone as `(!clk) & __valid`; search an And-only qualifier cone instead of
-    // requiring the whole expression to reduce to clk. Without the clock-phase
-    // leaf check a module that ANDs a clock with an unrelated latched data bit
-    // would match and sample its "enable" at an arbitrary time.
-    auto       latch_node              = latched.get_master_node();
-    const auto latch_enable            = gu::get_driver_of_sink_name(latch_node, "enable");
-    // EVERY leaf of that And cone is checked, not just "one of them is the
-    // clock phase": the match result carries only `latch_transparent_arm`, so a
-    // qualifier operand is DROPPED, and the Clock_cell built from it re-samples
-    // its enable on every reference edge instead of holding while the qualifier
-    // is low. A vendor/DFT gate spelled `(!clk) & test_en` would therefore tick
-    // its gated clock on cycles the RTL holds, advancing downstream registers a
-    // cycle early -- wrong state, silently. Only the activation spelling this
-    // relaxation exists for (`(!clk) & __valid`, whose guard the caller-side
-    // Clock_cell already carries) is accepted; anything else falls back to the
-    // ordinary latch model, which is exact.
-    const auto is_activation_qualifier = [&](const hhds::Pin_class& pin) {
-      const auto root = control_root(pin).net;
-      return !root.is_invalid() && gu::is_graph_input_pin(root) && gu::pin_name_of(root) == "__valid";
-    };
-    std::function<bool(hhds::Pin_class, int, bool&)> scan_enable;
-    scan_enable = [&](hhds::Pin_class pin, int depth, bool& saw_clock) {
-      if (pin.is_invalid() || depth > 16) {
-        return false;
-      }
-      const auto phase = resolve_phase(pin);
-      if (!phase.net.is_invalid() && phase.net.get_class_index() == clk_port.get_class_index()
-          && phase.inverted == (gate_op == Ntype_op::And)) {
-        saw_clock = true;
-        return true;
-      }
-      if (pin.is_const()) {
-        return const_is(pin, 1) || const_is(pin, -1);  // an always-true And operand changes nothing
-      }
-      if (!gu::is_graph_input_pin(pin) && gu::type_op_of(pin.get_master_node()) == Ntype_op::And) {
-        for (auto sink : pin.get_master_node().inp_sorted_pins()) {  // read-only walk
-          if (!scan_enable(sink.get_driver_pin(), depth + 1, saw_clock)) {
-            return false;
-          }
-        }
-        return true;
-      }
-      return is_activation_qualifier(pin);
-    };
-    bool saw_clock_phase = false;
-    if (!scan_enable(latch_enable, 0, saw_clock_phase) || !saw_clock_phase) {
-      continue;
-    }
-    auto arm = latch_transparent_arm(latch_node);
-    if (arm.is_invalid()) {
-      arm = gu::get_driver_of_sink_name(latch_node, "din");  // raw yosys D/EN shape
-    }
-    if (arm.is_invalid()) {
-      continue;
-    }
-    Icg_def_match m;
-    m.clk_in      = clk_port;
-    m.out         = opin;
-    m.enable_cone = arm;
-    m.invert      = gate_op == Ntype_op::Or;
-    return m;
   }
   return std::nullopt;
 }
@@ -2017,10 +2039,29 @@ absl::flat_hash_set<std::string> clock_port_names(hhds::Graph* def, int depth) {
 
 }  // namespace
 
-int materialize_clock_cells(hhds::Graph* g, std::string_view from_pass, const std::function<bool(const hhds::Graph*)>& is_boxed) {
+int materialize_clock_cells(hhds::Graph* g, std::string_view from_pass, const std::function<bool(const hhds::Graph*)>& is_boxed,
+                            const std::function<hhds::Graph*(const hhds::Node_class&)>& resolve_def) {
   if (g == nullptr) {
     return 0;
   }
+  // The body to read for an instance: the caller's resolver first (a mapped
+  // netlist's cell is a bodyless declaration whose model lives in the `--lib`
+  // library), else the instance's own definition (`keep` holds it alive).
+  auto def_of = [&resolve_def](const hhds::Node_class& n, std::shared_ptr<hhds::Graph>& keep) -> hhds::Graph* {
+    if (resolve_def) {
+      if (auto* r = resolve_def(n); r != nullptr) {
+        return r;
+      }
+    }
+    keep = n.get_subnode_graph();
+    return keep.get();
+  };
+  // Port ids are the INSTANCE's: its own declaration when it has one (a
+  // resolved model may number the same names differently), else the body's.
+  auto io_of = [](const hhds::Node_class& n, hhds::Graph* def) {
+    auto io = n.get_subnode_io();
+    return io ? io : def->get_io();
+  };
   // 1. Which nodes drive a state element's clock_pin? Same scan (and the same
   //    node-keyed trap) as inline_clock_gate_cells: the SAME pin reached through
   //    an edge and through out_pins() does not compare equal.
@@ -2059,15 +2100,16 @@ int materialize_clock_cells(hhds::Graph* g, std::string_view from_pass, const st
     if (op != Ntype_op::Sub) {
       continue;
     }
-    auto def = n.get_subnode_graph();
-    if (!def) {
+    std::shared_ptr<hhds::Graph> keep;
+    auto* const                  def = def_of(n, keep);
+    if (def == nullptr) {
       continue;
     }
-    const auto cnames = clock_port_names(def.get(), 0);
+    const auto cnames = clock_port_names(def, 0);
     if (cnames.empty()) {
       continue;
     }
-    auto gio = def->get_io();
+    auto gio = io_of(n, def);
     if (!gio) {
       continue;
     }
@@ -2087,26 +2129,33 @@ int materialize_clock_cells(hhds::Graph* g, std::string_view from_pass, const st
     return 0;
   }
   // 2. Collect the instantiated gate cells (never mutate while walking).
-  std::vector<std::pair<hhds::Node_class, Icg_def_match>> cells;
+  struct Gate_inst {
+    hhds::Node_class             inst;
+    Icg_def_match                m;
+    hhds::Graph*                 def = nullptr;
+    std::shared_ptr<hhds::Graph> keep;
+  };
+  std::vector<Gate_inst> cells;
   for (auto n : g->body().nodes()) {
     if (gu::type_op_of(n) != Ntype_op::Sub || !clock_drivers.contains(n.get_class_index())) {
       continue;
     }
-    auto def = n.get_subnode_graph();
-    if (!def) {
+    std::shared_ptr<hhds::Graph> keep;
+    auto* const                  def = def_of(n, keep);
+    if (def == nullptr) {
       continue;  // a body-less blackbox needs the DECLARED entry point (not implemented yet)
     }
-    if (is_boxed && is_boxed(def.get())) {
+    if (is_boxed && is_boxed(def)) {
       continue;
     }
-    if (auto m = match_icg_def(def.get())) {
-      cells.emplace_back(n, *m);
+    if (auto m = match_icg_def(def)) {
+      cells.push_back({n, *m, def, std::move(keep)});
     }
   }
   int done = 0;
-  for (const auto& [inst, m] : cells) {
-    auto def = inst.get_subnode_graph();
-    auto gio = def ? def->get_io() : nullptr;
+  for (const auto& [inst, m, def, keep] : cells) {
+    (void)keep;
+    auto gio = io_of(inst, def);
     if (!gio) {
       continue;
     }
@@ -2139,7 +2188,7 @@ int materialize_clock_cells(hhds::Graph* g, std::string_view from_pass, const st
     if (clk_src.is_invalid()) {
       continue;
     }
-    Cone_cloner cc(g, def.get(), inst, in_name2pid);
+    Cone_cloner cc(g, def, inst, in_name2pid);
     auto        en_src = cc.clone(m.enable_cone);
     if (cc.failed() || en_src.is_invalid()) {
       continue;  // fail closed: leave the Sub alone and let the consumer refuse by name
@@ -2183,6 +2232,122 @@ int materialize_clock_cells(hhds::Graph* g, std::string_view from_pass, const st
         .emit();
   }
   return done;
+}
+
+int materialize_inline_clock_gates(hhds::Graph* g, std::string_view from_pass) {
+  if (g == nullptr) {
+    return 0;
+  }
+  // 1. Every clock SINK (a register's clock_pin, a child's clock port) whose
+  //    driver, through 1-bit identity wrappers, is a recognized inline gate.
+  //    Collected first: the rewrite below mutates edges.
+  struct Hit {
+    hhds::Pin_class  sink;
+    hhds::Pin_class  driver;  // what the sink reads today
+    hhds::Node_class gate;
+    Icg_def_match    m;
+  };
+  std::vector<Hit>                       hits;
+  absl::flat_hash_set<hhds::Class_index> path_nodes;  // gates and the wrappers between them and a rewired sink
+  auto                                   consider = [&](const hhds::Pin_class& sink) {
+    const auto                    driver = sink.get_driver_pin();
+    auto                          d      = driver;
+    std::vector<hhds::Class_index> chain;
+    for (int hops = 0; hops < 8 && !d.is_invalid() && !d.is_const() && !gu::is_graph_input_pin(d); ++hops) {
+      auto       dn  = d.get_master_node();
+      const auto dop = gu::type_op_of(dn);
+      chain.push_back(dn.get_class_index());
+      if (dop == Ntype_op::And || dop == Ntype_op::Or) {
+        bool abort = false;
+        if (auto m = match_icg_driver(d, abort); m && !abort && gu::is_graph_input_pin(m->clk_in)) {
+          hits.push_back({sink, driver, dn, *m});
+          path_nodes.insert(chain.begin(), chain.end());
+        }
+        return;
+      }
+      if (dop != Ntype_op::Get_mask && dop != Ntype_op::Sext && dop != Ntype_op::Set_mask) {
+        return;
+      }
+      d = gu::first_value_driver(dn);
+    }
+  };
+  for (auto n : g->body().nodes()) {
+    const auto op = gu::type_op_of(n);
+    if (op == Ntype_op::Flop || op == Ntype_op::Fflop) {
+      for (auto sink : n.inp_sorted_pins()) {  // read-only walk
+        if (static_cast<int>(sink.get_port_id()) == static_cast<int>(Ntype::get_sink_pid(op, "clock_pin"))) {
+          consider(sink);
+        }
+      }
+      continue;
+    }
+    if (op != Ntype_op::Sub) {
+      continue;
+    }
+    auto def = n.get_subnode_graph();
+    auto sio = n.get_subnode_io();
+    if (!def || !sio) {
+      continue;
+    }
+    const auto cnames = clock_port_names(def.get(), 0);
+    if (cnames.empty()) {
+      continue;
+    }
+    absl::flat_hash_set<uint32_t> clk_pids;
+    for (const auto& d : sio->get_input_pin_decls()) {
+      if (cnames.contains(d.name)) {
+        clk_pids.insert(static_cast<uint32_t>(d.port_id));
+      }
+    }
+    for (auto sink : n.inp_sorted_pins()) {  // read-only walk
+      if (clk_pids.contains(static_cast<uint32_t>(sink.get_port_id()))) {
+        consider(sink);
+      }
+    }
+  }
+  if (hits.empty()) {
+    return 0;
+  }
+  // 2. One Clock_cell per gate, every recognized clock sink re-pointed at it.
+  absl::flat_hash_map<hhds::Class_index, hhds::Pin_class> cell_of;
+  for (const auto& h : hits) {
+    auto [it, fresh] = cell_of.try_emplace(h.gate.get_class_index());
+    if (fresh) {
+      auto cell = gu::create_typed_node(*g, Ntype_op::Clock_cell);
+      h.m.clk_in.connect_sink(gu::setup_sink_by_name(cell, "clk_ref"));
+      h.m.enable_cone.connect_sink(gu::setup_sink_by_name(cell, "en"));
+      if (h.m.invert) {
+        gu::create_const(*g, *Dlop::create_integer(1)).connect_sink(gu::setup_sink_by_name(cell, "invert"));
+      }
+      it->second = cell.get_driver_pin(0);
+      gu::set_bits(it->second, 1);
+    }
+    auto sink = h.sink;
+    sink.del_sink(h.driver);
+    it->second.connect_sink(sink);
+  }
+  // 3. A gate (and the identity wrappers between it and the clock sinks) left
+  //    with no reader is dead: drop it, so its enable latch -- now read by
+  //    nothing -- is unobservable and no schedule counts it as a clock-role
+  //    latch. A gate still read as DATA stays, latch and all.
+  for (bool removed = true; removed;) {
+    removed = false;
+    std::vector<hhds::Node_class> dead;
+    for (auto n : g->body().nodes()) {
+      if (path_nodes.contains(n.get_class_index()) && !n.has_out_edges()) {
+        dead.push_back(n);
+      }
+    }
+    for (auto& n : dead) {
+      path_nodes.erase(n.get_class_index());
+      n.del_node();
+      removed = true;
+    }
+  }
+  livehd::diag::info(from_pass, "clock-cell-materialized", "progress")
+      .msg("{}: materialized {} inline clock gate(s) as Clock_cell in `{}`", from_pass, cell_of.size(), g->get_name())
+      .emit();
+  return static_cast<int>(cell_of.size());
 }
 
 namespace {

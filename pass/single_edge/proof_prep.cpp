@@ -30,14 +30,31 @@ namespace livehd::single_edge {
 // compares. So trust is respected rather than fought -- and since the instance
 // is then gone, the def is no longer instantiated at all and its trust entry
 // becomes a no-op, which is what lets `prim_clk_gate` leave the trust list.
-int materialize_clock_cells_all(hhds::Graph* top, const std::vector<hhds::Graph*>& defs) {
-  int                               n = livehd::latch_contract::materialize_clock_cells(top, "pass.single_edge");
+int materialize_clock_cells_all(hhds::Graph* top, const std::vector<hhds::Graph*>& defs, const Cell_models* sub_lib) {
+  // A --lib cell instance reads its MODEL when its own definition is a bodyless
+  // declaration (a mapped netlist's library keeps only the cell's IO).
+  std::function<hhds::Graph*(const hhds::Node_class&)> resolve;
+  if (sub_lib != nullptr && !sub_lib->empty()) {
+    resolve = [sub_lib](const hhds::Node_class& inst) -> hhds::Graph* {
+      auto it = sub_lib->find(inst.get_subnode_gid());
+      if (it == sub_lib->end()) {
+        return nullptr;
+      }
+      if (auto own = inst.get_subnode_graph(); own) {
+        for ([[maybe_unused]] auto n : own->body().nodes()) {
+          return nullptr;  // the design's own body wins (lib_splice_body's rule)
+        }
+      }
+      return it->second;
+    };
+  }
+  int n = livehd::latch_contract::materialize_clock_cells(top, "pass.single_edge", {}, resolve);
   absl::flat_hash_set<hhds::Graph*> seen{top};
   for (auto* d : defs) {
     if (d == nullptr || !seen.insert(d).second) {
       continue;  // ref and impl def lists share every --lib cell model: same Graph*
     }
-    n += livehd::latch_contract::materialize_clock_cells(d, "pass.single_edge");
+    n += livehd::latch_contract::materialize_clock_cells(d, "pass.single_edge", {}, resolve);
   }
   return n;
 }
@@ -1032,7 +1049,34 @@ Time_base prepare_time_base(const Cell_models& sub_lib, hhds::Graph* ref, std::v
     }
     return {};
   };
-  auto lib_error = inline_lib_cells(ref, ref_defs);
+  // A recognized clock-gate CELL (a mapped ICG: latch + gate, match_icg_def)
+  // is the one clock operator, not state to expand: recognize it as a
+  // Clock_cell BEFORE the stateful --lib inliner below splices its latch into
+  // the body. Spliced, the ICG latch becomes a clock-role latch that needs the
+  // four-microstep schedule, and a netlist with a second, unrelated clock
+  // input (`clock` beside the gated `clk_b`) is then refused for want of a
+  // total order between the two roots, although the source -- whose gate is a
+  // Clock_cell -- needs no microsteps at all. Idempotent: the post-inline M9
+  // pass below still catches gates the inlining exposes.
+  int pre_ref_cells  = materialize_clock_cells_all(ref, ref_defs, &sub_lib);
+  int pre_impl_cells = materialize_clock_cells_all(impl, impl_defs, &sub_lib);
+  // The same gate spelled INLINE (RTL `always_latch if (!clk) en_l = en;
+  // assign gclk = clk & en_l;`) becomes the same Clock_cell, on both sides and
+  // in every def, so an RTL ICG and an instantiated (or Pyrope `Clock()`) one
+  // reach the schedule in one form. See materialize_inline_clock_gates.
+  auto inline_gates = [](hhds::Graph* top, const std::vector<hhds::Graph*>& defs) {
+    int                               n = livehd::latch_contract::materialize_inline_clock_gates(top, "pass.single_edge");
+    absl::flat_hash_set<hhds::Graph*> seen{top};
+    for (auto* d : defs) {
+      if (d != nullptr && seen.insert(d).second) {
+        n += livehd::latch_contract::materialize_inline_clock_gates(d, "pass.single_edge");
+      }
+    }
+    return n;
+  };
+  pre_ref_cells += inline_gates(ref, ref_defs);
+  pre_impl_cells += inline_gates(impl, impl_defs);
+  auto      lib_error      = inline_lib_cells(ref, ref_defs);
   if (lib_error.empty()) {
     lib_error = inline_lib_cells(impl, impl_defs);
   }
@@ -1057,10 +1101,10 @@ Time_base prepare_time_base(const Cell_models& sub_lib, hhds::Graph* ref, std::v
   };
   // M9 recognition runs FIRST and on BOTH sides, since a gate recognized on one
   // side only would compare a Clock_cell against a Sub.
-  if (const int mr = materialize_clock_cells_all(ref, ref_defs); mr > 0) {
+  if (const int mr = pre_ref_cells + materialize_clock_cells_all(ref, ref_defs); mr > 0) {
     tb.recipe_steps.emplace_back(std::format("pass.single_edge recognized {} ref clock gate(s) as Clock_cell", mr));
   }
-  if (const int mi = materialize_clock_cells_all(impl, impl_defs); mi > 0) {
+  if (const int mi = pre_impl_cells + materialize_clock_cells_all(impl, impl_defs); mi > 0) {
     tb.recipe_steps.emplace_back(std::format("pass.single_edge recognized {} impl clock gate(s) as Clock_cell", mi));
   }
   note_gates("ref", inline_clock_gates_and_fold(ref, ref_defs, &unfolded, is_boxed));

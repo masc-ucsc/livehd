@@ -110,6 +110,8 @@ if [ $rc -ne 0 ]; then
   echo "$out" | tail -5
   fail "formal verify on a latch exited $rc — M8 edge normalization regressed (the encoder is refusing the cell again)"
 fi
+grep -qE "^formal verify: '[^']*' PROVEN-(full|bounded)" <<<"$out" \
+  || { echo "$out" | tail -5; fail "formal verify on a latch exited 0 without a PROVEN verdict"; }
 grep -q "pass.single_edge" <<<"$out" \
   || fail "the latch was proven WITHOUT edge normalization in the recipe — the verdict is not coming from where we think"
 echo "ok: formal verify PROVES a latch design (M8 lifted the encoder refusal)"
@@ -117,12 +119,15 @@ echo "ok: formal verify PROVES a latch design (M8 lifted the encoder refusal)"
 # NON-VACUITY. "PROVEN" means nothing unless the same machinery REFUTES a wrong
 # claim: an encoder that quietly checks nothing also reports success. The mutant
 # asserts the latch captured 6 where it captures 5, and must come back REFUTED
-# verbatim (a degradation to UNKNOWN is NOT a fix -- verdict discipline).
+# verbatim as REFUTED-cex (a degradation to a TIMEOUT or a REFUTED-<refusal> is NOT
+# a fix -- verdict discipline).
 sed 's/(lq == 5)/(lq == 6)/' "$W/lverify.prp" > "$W/lverify_mutant.prp"
 out="$("$LHD" formal verify "$W/lverify_mutant.prp" --top lhold_tb --workdir "$W/vwdm" \
   --set formal.bound=8 --set formal.simfail_run=false 2>&1)"
-[ $? -ne 0 ] || fail "the MUTATED latch property still passed: the obligation is not actually being checked (vacuous)"
-grep -q "REFUTED" <<<"$out" \
+rc=$?
+[ $rc -ne 0 ] || fail "the MUTATED latch property still passed: the obligation is not actually being checked (vacuous)"
+[ $rc -eq 10 ] || { echo "$out" | tail -5; fail "the mutated latch property must exit with the counterexample class 10 (rc=$rc)"; }
+grep -q "^formal verify: '[^']*' REFUTED-cex" <<<"$out" \
   || { echo "$out" | tail -5; fail "the mutated latch property must be REFUTED verbatim, not merely inconclusive"; }
 echo "ok: a wrong latch claim is REFUTED (the proof above is not vacuous)"
 
@@ -193,13 +198,17 @@ module dut(input g, input [7:0] d, output reg [7:0] q);
 endmodule
 EOF
 
-out="$("$LHD" lec --impl verilog:"$W/lecimpl.v" --ref verilog:"$W/lecref.v" --top dut --workdir "$W/lwd" 2>&1)"
+out="$("$LHD" lec --set formal.effort=proof --impl verilog:"$W/lecimpl.v" --ref verilog:"$W/lecref.v" --top dut --workdir "$W/lwd" 2>&1)"
 [ $? -eq 0 ] || { echo "$out" | tail -5; fail "lec on an EQUIVALENT latch pair no longer passes (M8 normalization regressed)"; }
+grep -qE "^lec: .* PROVEN-(full|bounded)" <<<"$out" \
+  || { echo "$out" | tail -5; fail "lec on an EQUIVALENT latch pair exited 0 without a PROVEN verdict"; }
 echo "ok: lec PROVES an equivalent latch pair"
 
-out="$("$LHD" lec --impl verilog:"$W/lecflip.v" --ref verilog:"$W/lecref.v" --top dut --workdir "$W/lwdf" 2>&1)"
-[ $? -eq 0 ] && { echo "$out" | tail -5; fail "lec did NOT see a transparent-high vs transparent-low latch difference (the polarity fold is blind — the double-negation hazard)"; }
-grep -q "REFUTED" <<<"$out" \
+out="$("$LHD" lec --set formal.effort=proof --impl verilog:"$W/lecflip.v" --ref verilog:"$W/lecref.v" --top dut --workdir "$W/lwdf" 2>&1)"
+rc=$?
+[ $rc -eq 0 ] && { echo "$out" | tail -5; fail "lec did NOT see a transparent-high vs transparent-low latch difference (the polarity fold is blind — the double-negation hazard)"; }
+[ $rc -eq 10 ] || { echo "$out" | tail -5; fail "the polarity flip must exit with the counterexample class 10 (rc=$rc)"; }
+grep -q "^lec: .* REFUTED-cex" <<<"$out" \
   || { echo "$out" | tail -5; fail "the polarity flip must be REFUTED verbatim, not merely inconclusive"; }
 echo "ok: lec REFUTES an enable-polarity flip (the proof above is not vacuous)"
 

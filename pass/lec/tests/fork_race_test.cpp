@@ -82,6 +82,31 @@ TEST_F(ForkRace, QueuedArmsCannotExtendTheDeadline) {
   EXPECT_TRUE(race.queued[1]);EXPECT_LT(race.elapsed_ms,2000);expect_no_children();
 }
 
+// The ABC cone helper shape: a racer (here the root, holding the only slot)
+// forks a helper that owns no slot and runs a nested race while the racer
+// waits for it. The helper's race must run on its blocked caller's capacity;
+// it used to queue for the slot its own caller held, until its deadline.
+TEST_F(ForkRace, NestedRaceRunsOnItsBlockedCallersCapacity) {
+  auto& manager = livehd::Job_manager::global();
+  manager.configure(1);
+  auto slot = manager.try_acquire(livehd::Job_class::formal_arm);
+  ASSERT_TRUE(slot);
+  const pid_t helper = ::fork();
+  ASSERT_GE(helper, 0);
+  if (helper == 0) {
+    const auto t0   = std::chrono::steady_clock::now();
+    auto       race = fork_race<int>(2, [](int i) { return i; }, ser, deser, [](int i, const int&) { return i == 1; }, 10000);
+    const bool ok   = race.forked && race.winner == 1 && !race.deadline_hit && ms_since(t0) < 5000;
+    ::_exit(ok ? 0 : 1);
+  }
+  int st = 0;
+  while (::waitpid(helper, &st, 0) < 0 && errno == EINTR) {
+  }
+  EXPECT_TRUE(WIFEXITED(st) && WEXITSTATUS(st) == 0) << "the nested race starved behind its own caller's slot";
+  slot.complete();
+  expect_no_children();
+}
+
 TEST_F(ForkRace, StalledRacersAreKilledAtTheDeadline) {
   // Both racers stall far past the 2 s deadline (the stuck-in-preprocessing
   // shape). The race must return in about the deadline, not after 30 s.

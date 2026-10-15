@@ -62,15 +62,15 @@ build() { # <name> <src> <top>
 # refusal before any encoding, or a crash matches neither "proven" nor
 # "refuted", so a bare negative grep would print ok without lec ever running.
 expect_proven() { # <output> <what>
-  grep -qa "PROVEN equivalent" <<<"$1" \
+  grep -qaE "^lec: .* PROVEN-(full|bounded)" <<<"$1" \
     || { tail -8 <<<"$1"; fail "$2: never reached a PROVEN verdict"; }
-  grep -qaiE '"verdict"[[:space:]]*:[[:space:]]*"refuted"' <<<"$1" \
+  grep -qaiE '"verdict"[[:space:]]*:[[:space:]]*"refuted-cex"' <<<"$1" \
     && { tail -8 <<<"$1"; fail "$2: REFUTED two equivalent designs"; }
   return 0
 }
 
 expect_refuted() { # <output> <what>
-  grep -qaiE '"verdict"[[:space:]]*:[[:space:]]*"refuted"' <<<"$1" \
+  grep -qaiE '"verdict"[[:space:]]*:[[:space:]]*"refuted-cex"' <<<"$1" \
     || { tail -8 <<<"$1"; fail "$2: expected a REFUTATION and did not get one -- the gate was dropped, or the miter is vacuous"; }
   return 0
 }
@@ -100,7 +100,7 @@ build icg "$W/icg.v" dut
 sed 's/assign o = f;/assign o = ~(~f);/' "$W/icg.v" > "$W/icg_dm.v"
 build icg_dm "$W/icg_dm.v" dut
 
-out="$("$LHD" lec --impl "lg:$W/lg_icg_dm" --ref "lg:$W/lg_icg" --top dut --workdir "$W/l1" 2>&1)"
+out="$("$LHD" lec --set formal.effort=proof --impl "lg:$W/lg_icg_dm" --ref "lg:$W/lg_icg" --top dut --workdir "$W/l1" 2>&1)"
 expect_proven "$out" "case 1 (instantiated gate, equivalent pair)"
 # ...and it got there through RECOGNITION, not through the inline+fold path.
 grep -qa "Clock_cell" <<<"$out" \
@@ -123,7 +123,7 @@ module dut(input clk, input en, input [7:0] d, output [7:0] o);
 endmodule
 EOF
 build icg_ungated "$W/icg_ungated.v" dut
-out="$("$LHD" lec --impl "lg:$W/lg_icg_ungated" --ref "lg:$W/lg_icg" --top dut --workdir "$W/l1b" 2>&1)"
+out="$("$LHD" lec --set formal.effort=proof --impl "lg:$W/lg_icg_ungated" --ref "lg:$W/lg_icg" --top dut --workdir "$W/l1b" 2>&1)"
 expect_refuted "$out" "case 1b (gated vs ungated)"
 echo "ok: gated vs ungated still REFUTES -- the recognized cell really gates"
 
@@ -151,7 +151,7 @@ EOF
 build icgc "$W/icgc.v" dut
 sed 's/assign o = f;/assign o = ~(~f);/' "$W/icgc.v" > "$W/icgc_dm.v"
 build icgc_dm "$W/icgc_dm.v" dut
-out="$("$LHD" lec --impl "lg:$W/lg_icgc_dm" --ref "lg:$W/lg_icgc" --top dut --workdir "$W/l2" 2>&1)"
+out="$("$LHD" lec --set formal.effort=proof --impl "lg:$W/lg_icgc_dm" --ref "lg:$W/lg_icgc" --top dut --workdir "$W/l2" 2>&1)"
 expect_proven "$out" "case 2 (cone enable, equivalent pair)"
 grep -qa "Clock_cell" <<<"$out" \
   || { tail -8 <<<"$out"; fail "case 2: a two-port enable CONE was not recognized -- the recognizer accepts only a bare port, which matches no real ICG"; }
@@ -163,7 +163,7 @@ echo "ok: an enable that is a CONE of two ports (the scan-enable shape) is recog
 sed 's/always_latch if (!clk_i) en_latch <= en_i | scan_i;/always_latch if (!clk_i) en_latch <= en_i;/' \
     "$W/icgc.v" > "$W/icgc_noscan.v"
 build icgc_noscan "$W/icgc_noscan.v" dut
-out="$("$LHD" lec --impl "lg:$W/lg_icgc_noscan" --ref "lg:$W/lg_icgc" --top dut --workdir "$W/l2b" 2>&1)"
+out="$("$LHD" lec --set formal.effort=proof --impl "lg:$W/lg_icgc_noscan" --ref "lg:$W/lg_icgc" --top dut --workdir "$W/l2b" 2>&1)"
 expect_refuted "$out" "case 2b (scan term dropped from the enable cone)"
 echo "ok: dropping the scan term from the enable cone REFUTES -- the whole cone is re-rooted, not just the first port"
 
@@ -177,13 +177,13 @@ echo "ok: dropping the scan term from the enable cone REFUTES -- the whole cone 
 # state and no new compare point crosses the boundary, so trust is respected
 # and the gated flop still encodes. That is exactly what unblocks minion, whose
 # `prim_clk_gate` is trusted.
-out="$("$LHD" lec --impl "lg:$W/lg_icg_dm" --ref "lg:$W/lg_icg" --top dut \
+out="$("$LHD" lec --set formal.effort=proof --impl "lg:$W/lg_icg_dm" --ref "lg:$W/lg_icg" --top dut \
         --workdir "$W/l3" --set formal.lec.trust=clkgate 2>&1)"
 expect_proven "$out" "case 3 (trusted gate, equivalent pair)"
 echo "ok: a TRUSTED clock gate is still recognized -- proving what inlining had to leave unproven"
 
 # Trust must not become a way to lose the gate either.
-out="$("$LHD" lec --impl "lg:$W/lg_icg_ungated" --ref "lg:$W/lg_icg" --top dut \
+out="$("$LHD" lec --set formal.effort=proof --impl "lg:$W/lg_icg_ungated" --ref "lg:$W/lg_icg" --top dut \
         --workdir "$W/l3b" --set formal.lec.trust=clkgate 2>&1)"
 expect_refuted "$out" "case 3b (trusted gate, gated vs ungated)"
 echo "ok: with the gate TRUSTED, gated vs ungated still REFUTES"
@@ -216,13 +216,13 @@ EOF
 build icg_pad "$W/icg_pad.v" dut
 sed 's/assign o = f;/assign o = ~(~f);/' "$W/icg_pad.v" > "$W/icg_pad_dm.v"
 build icg_pad_dm "$W/icg_pad_dm.v" dut
-out="$("$LHD" lec --impl "lg:$W/lg_icg_pad_dm" --ref "lg:$W/lg_icg_pad" --top dut --workdir "$W/l4" 2>&1)"
+out="$("$LHD" lec --set formal.effort=proof --impl "lg:$W/lg_icg_pad_dm" --ref "lg:$W/lg_icg_pad" --top dut --workdir "$W/l4" 2>&1)"
 expect_proven "$out" "case 4 (Clock_cell behind signed zero-pad OR)"
 grep -qa "Clock_cell" <<<"$out" \
   || { tail -8 <<<"$out"; fail "case 4 proved without recognizing the padded clock as a Clock_cell"; }
 echo "ok: Clock_cell survives a cgen-style signed zero-pad OR"
 
-out="$("$LHD" lec --impl "lg:$W/lg_icg_ungated" --ref "lg:$W/lg_icg_pad" --top dut --workdir "$W/l4b" 2>&1)"
+out="$("$LHD" lec --set formal.effort=proof --impl "lg:$W/lg_icg_ungated" --ref "lg:$W/lg_icg_pad" --top dut --workdir "$W/l4b" 2>&1)"
 expect_refuted "$out" "case 4b (padded gated vs ungated clock)"
 echo "ok: the padded clock still gates -- gated vs ungated REFUTES"
 
@@ -253,7 +253,7 @@ EOF
 build icg_nested "$W/icg_nested.v" dut
 sed 's/assign o = f;/assign o = ~(~f);/' "$W/icg_nested.v" > "$W/icg_nested_dm.v"
 build icg_nested_dm "$W/icg_nested_dm.v" dut
-out="$("$LHD" lec --impl "lg:$W/lg_icg_nested_dm" --ref "lg:$W/lg_icg_nested" --top dut --workdir "$W/l5" 2>&1)"
+out="$("$LHD" lec --set formal.effort=proof --impl "lg:$W/lg_icg_nested_dm" --ref "lg:$W/lg_icg_nested" --top dut --workdir "$W/l5" 2>&1)"
 expect_proven "$out" "case 5 (nested Clock_cell timing latch)"
 grep -qa "Clock_cell" <<<"$out" \
   || { tail -8 <<<"$out"; fail "case 5 proved without recognizing the nested Clock_cell chain"; }
@@ -267,7 +267,7 @@ echo "ok: a nested ICG latch consumes the inner Clock_cell as timing, not data"
   >"$W/c_icg_nested_cgen.log" 2>&1 \
   || { tail -5 "$W/c_icg_nested_cgen.log"; fail "cgen round trip of nested gate failed"; }
 build icg_nested_cgen "$W/icg_nested_cgen.v" dut
-out="$("$LHD" lec --impl "lg:$W/lg_icg_nested_cgen" --ref "lg:$W/lg_icg_nested" --top dut --workdir "$W/l5rt" 2>&1)"
+out="$("$LHD" lec --set formal.effort=proof --impl "lg:$W/lg_icg_nested_cgen" --ref "lg:$W/lg_icg_nested" --top dut --workdir "$W/l5rt" 2>&1)"
 expect_proven "$out" "case 5 round trip (Clock_cell through cgen Eq/Xor clock_pin path)"
 echo "ok: the cgen Eq/Xor clock_pin round trip remains timing-only and proves"
 
@@ -287,7 +287,7 @@ module dut(input clk, input en0, input en1, input [7:0] d, output [7:0] o);
 endmodule
 EOF
 build icg_inner_only "$W/icg_inner_only.v" dut
-out="$("$LHD" lec --impl "lg:$W/lg_icg_inner_only" --ref "lg:$W/lg_icg_nested" --top dut --workdir "$W/l5b" 2>&1)"
+out="$("$LHD" lec --set formal.effort=proof --impl "lg:$W/lg_icg_inner_only" --ref "lg:$W/lg_icg_nested" --top dut --workdir "$W/l5b" 2>&1)"
 expect_refuted "$out" "case 5b (nested gate vs inner gate only)"
 echo "ok: removing the outer gate REFUTES -- nested timing absorption preserves its enable"
 
@@ -314,7 +314,7 @@ EOF
 build icgm "$W/icgm.v" dut
 sed 's/assign o = mem\[a\];/assign o = ~(~mem[a]);/' "$W/icgm.v" > "$W/icgm_dm.v"
 build icgm_dm "$W/icgm_dm.v" dut
-out="$("$LHD" lec --impl "lg:$W/lg_icgm_dm" --ref "lg:$W/lg_icgm" --top dut --workdir "$W/l6" 2>&1)"
+out="$("$LHD" lec --set formal.effort=proof --impl "lg:$W/lg_icgm_dm" --ref "lg:$W/lg_icgm" --top dut --workdir "$W/l6" 2>&1)"
 expect_proven "$out" "case 6 (gated memory, equivalent pair)"
 echo "ok: a gated MEMORY clock encodes -- the half the flop-enable fold cannot reach"
 
@@ -329,7 +329,7 @@ module dut(input clk, input en, input we, input [3:0] a, input [7:0] d, output [
 endmodule
 EOF
 build icgm_ungated "$W/icgm_ungated.v" dut
-out="$("$LHD" lec --impl "lg:$W/lg_icgm_ungated" --ref "lg:$W/lg_icgm" --top dut --workdir "$W/l6b" 2>&1)"
+out="$("$LHD" lec --set formal.effort=proof --impl "lg:$W/lg_icgm_ungated" --ref "lg:$W/lg_icgm" --top dut --workdir "$W/l6b" 2>&1)"
 expect_refuted "$out" "case 6b (gated vs ungated MEMORY write)"
 echo "ok: gated vs ungated memory writes REFUTE -- writes really are suppressed when the gate is closed"
 
@@ -365,7 +365,7 @@ EOF
 build icg_write_commit "$W/icg_write_commit.v" dut
 sed 's/assign o = q;/assign o = ~(~q);/' "$W/icg_write_commit.v" > "$W/icg_write_commit_dm.v"
 build icg_write_commit_dm "$W/icg_write_commit_dm.v" dut
-out="$("$LHD" lec --impl "lg:$W/lg_icg_write_commit_dm" --ref "lg:$W/lg_icg_write_commit" --top dut --workdir "$W/l7" 2>&1)"
+out="$("$LHD" lec --set formal.effort=proof --impl "lg:$W/lg_icg_write_commit_dm" --ref "lg:$W/lg_icg_write_commit" --top dut --workdir "$W/l7" 2>&1)"
 expect_proven "$out" "case 7 (Clock_cell level in resettable write-commit latch)"
 echo "ok: a resettable write-commit latch reads the scheduled Clock_cell level and proves"
 
@@ -378,12 +378,12 @@ echo "ok: a resettable write-commit latch reads the scheduled Clock_cell level a
 # route now refuses the design by name instead. It must never be PROVEN.
 sed 's/write_commit u_wc(.clk_i(gclk)/write_commit u_wc(.clk_i(clk)/' "$W/icg_write_commit.v" > "$W/icg_write_commit_ungated.v"
 build icg_write_commit_ungated "$W/icg_write_commit_ungated.v" dut
-out="$("$LHD" lec --impl "lg:$W/lg_icg_write_commit_ungated" --ref "lg:$W/lg_icg_write_commit" --top dut --workdir "$W/l7b" 2>&1)"
-if grep -qa "PROVEN equivalent" <<<"$out"; then
+out="$("$LHD" lec --set formal.effort=proof --impl "lg:$W/lg_icg_write_commit_ungated" --ref "lg:$W/lg_icg_write_commit" --top dut --workdir "$W/l7b" 2>&1)"
+if grep -qaE "^lec: .* PROVEN-(full|bounded)" <<<"$out"; then
   tail -8 <<<"$out"
   fail "case 7b (gated vs ungated write-commit latch): PROVED two different designs"
 fi
-grep -qaiE '"verdict"[[:space:]]*:[[:space:]]*"refuted"|is not closed for a whole clock phase' <<<"$out" \
+grep -qaiE '"verdict"[[:space:]]*:[[:space:]]*"refuted-cex"|is not closed for a whole clock phase' <<<"$out" \
   || { tail -8 <<<"$out"; fail "case 7b: neither refuted nor refused by name"; }
 echo "ok: removing the write-commit gate is never PROVEN (the rst-opened window is refused by name)"
 
@@ -420,12 +420,12 @@ build icg_box_dm "$W/icg_box_dm.v" dut
 sed 's/child u_child(.clk(gclk)/child u_child(.clk(clk)/' "$W/icg_box.v" > "$W/icg_box_ungated.v"
 build icg_box_ungated "$W/icg_box_ungated.v" dut
 
-out="$("$LHD" lec --impl "lg:$W/lg_icg_box_dm" --ref "lg:$W/lg_icg_box" --top dut \
+out="$("$LHD" lec --set formal.effort=proof --impl "lg:$W/lg_icg_box_dm" --ref "lg:$W/lg_icg_box" --top dut \
         --workdir "$W/l8" --set formal.lec.hier=false --set formal.lec.collapse=child 2>&1)"
 expect_proven "$out" "case 8 (Clock_cell into collapsed child clock port)"
 echo "ok: a Clock_cell waveform is compared at a collapsed child's structural clock boundary"
 
-out="$("$LHD" lec --impl "lg:$W/lg_icg_box_ungated" --ref "lg:$W/lg_icg_box" --top dut \
+out="$("$LHD" lec --set formal.effort=proof --impl "lg:$W/lg_icg_box_ungated" --ref "lg:$W/lg_icg_box" --top dut \
         --workdir "$W/l8b" --set formal.lec.hier=false --set formal.lec.collapse=child 2>&1)"
 expect_refuted "$out" "case 8b (collapsed child gated vs ungated clock)"
 echo "ok: a collapsed child's gated-vs-ungated clock REFUTES -- the boundary did not drop clock semantics"

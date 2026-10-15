@@ -58,6 +58,14 @@ public:
   void                configure(unsigned ceiling);
   Probe               exchange_probe(Probe probe);  // change injected measurements only while idle
   unsigned            ceiling() const;
+  // NESTED work: a process forked below the one that created this manager
+  // (a racer, an isolated worker, a helper a racer forked) runs on behalf of a
+  // parent that is blocked until it finishes, so it already runs on that
+  // parent's admitted capacity. Such a process finds its slots by owner (a
+  // time-sliced racer may be resumed on a lease its thread never acquired),
+  // and its own first unit of work never waits for admission: the slots it
+  // would wait for can be held by the very callers waiting on it.
+  bool                nested() const;
   bool                owns_slot() const;
   Job_slot            try_acquire(Job_class cls, uint64_t units = 1, uint64_t prediction = 0, bool record_queue = true);
   Job_slot            acquire(Job_class cls, uint64_t units = 1, uint64_t prediction = 0, Clock::time_point deadline = {});
@@ -65,6 +73,13 @@ public:
   void                                                           report() const;
   // Used by a parent after killing/reaping a worker, including its nested arms.
   void                                                           reap_tree(pid_t root);
+  // Time slicing (fork_race): SIGSTOP the process group led by `child` (a
+  // direct child of the caller) and wait until the leader has stopped. The stop
+  // is sent and observed while holding the admission lock, so a stopped child
+  // can never be holding that lock (a stopped holder would wedge every process
+  // sharing this manager). Returns false when the child exited instead; it is
+  // left unreaped for the caller's normal wait.
+  bool                                                           suspend_child(pid_t child);
   class Yield {
   public:
     explicit Yield(Job_manager& manager);

@@ -12,6 +12,14 @@ def run(*args):
     p = subprocess.run([lhd,*map(str,args),'-q'],capture_output=True,text=True,timeout=120)
     assert p.returncode == 0, (args,p.stdout,p.stderr)
     return p
+# Mapped netlist vs source: a proof (formal.effort=proof), and the verdict must
+# be PROVEN -- a TIMEOUT also exits 0, so the exit code alone is no gate.
+def lec(name, src):
+    result = w/f'lec-{name}.json'
+    run('lec','--set','formal.effort=proof','--impl',f'lg:{w}/{name}-net','--ref',src,'--lib',f'lg:{w}/models',
+        '--top','top','--workdir',w/f'lec-{name}','--result-json',result)
+    verdict = json.loads(result.read_text())['lec']['verdict']
+    assert verdict.startswith('proven-'), (name, verdict)
 run('pass','liberty','gensim',lib,'--emit-dir',f'lg:{w}/models')
 
 # The 5 sources are shared by the ware/stop combinations below; write them once.
@@ -33,7 +41,7 @@ def combo(job):
     run(*args)
     net=(w/f'{name}.v').read_text()
     assert (f'__ware_{macro}_' in net)==(ware=='true'), (name,net)
-    run('lec','--impl',f'lg:{w}/{name}-net','--ref',src,'--lib',f'lg:{w}/models','--top','top','--workdir',w/f'lec-{name}')
+    lec(name, src)
     if stop=='false' and ware=='true':
         before={p:p.read_text() for p in (w/name/'logs').glob('*.log')}
         run(*args)
@@ -51,7 +59,7 @@ def narrow(job):
     src.write_text(f'module top(input {signed} [{data_bits-1}:0] a, input [{count_bits-1}:0] s, output [8:0] y); assign y=a {shift} {amount}; endmodule\n')
     run('synth',src,'--top','top','--set',f'synth.liberty={lib}','--set','synth.opentimer=false',
         '--set','lhd.jobs=1','--workdir',w/name,'--emit-dir',f'lg:{w}/{name}-net')
-    run('lec','--impl',f'lg:{w}/{name}-net','--ref',src,'--lib',f'lg:{w}/models','--top','top','--workdir',w/f'lec-{name}')
+    lec(name, src)
     return src
 
 # Every case below is independent (its own workdir, its own emitted netlist), so

@@ -2,7 +2,7 @@
 
 Three tiny Verilog pairs that make `lhd lec` (default cvc5 solver) **freeze
 forever**. All three sides are genuinely *equivalent*; the verdict should be
-`PROVEN equivalent`, but cvc5 never returns.
+`PROVEN-full`, but cvc5 never returns.
 
 ```
 LHD=./bazel-bin/lhd/lhd

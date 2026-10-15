@@ -121,10 +121,19 @@ lec_verdict() { # <impl> <ref> <tag> [extra args...]
   local impl=$1 ref=$2 tag=$3
   shift 3
   local out
-  out="$("$LHD" lec --impl "lg:$W/lg_$impl" --ref "lg:$W/lg_$ref" --top four8 \
+  out="$("$LHD" lec --set formal.effort=proof --impl "lg:$W/lg_$impl" --ref "lg:$W/lg_$ref" --top four8 \
           --workdir "$W/lw_$tag" "$@" 2>&1)"
   echo "$out" > "$W/lec_$tag.log"
-  grep -oE "'[^']*' (PROVEN|REFUTED|TIMEOUT|UNSUPPORTED|UNDISCHARGED|UNCONFIRMED|UNPAIRED|UNCHECKED|VACUOUS|UNEXPLAINED)" <<<"$out" | grep -oE "PROVEN|REFUTED|TIMEOUT|UNSUPPORTED|UNDISCHARGED|UNCONFIRMED|UNPAIRED|UNCHECKED|VACUOUS|UNEXPLAINED" | sed -E 's/^(TIMEOUT|UNSUPPORTED|UNDISCHARGED|UNCONFIRMED|UNPAIRED|UNCHECKED|VACUOUS|UNEXPLAINED)$/UNDECIDED/' | head -1
+  # The final "lec: '<top>' WORD-why" line: PROVEN-full/-bounded is a proof and
+  # REFUTED-cex a real counterexample; anything else (TESTED-sampled, TIMEOUT-*, a
+  # REFUTED-<refusal>) is undecided and satisfies neither expectation.
+  local w
+  w=$(grep -oE "^lec: '[^']*' [A-Z]+-[a-z]+" <<<"$out" | tail -1 | awk '{print $NF}')
+  case "$w" in
+    PROVEN-full | PROVEN-bounded) echo PROVEN ;;
+    REFUTED-cex) echo REFUTED ;;
+    *) echo "UNDECIDED($w)" ;;
+  esac
 }
 
 v=$(lec_verdict four_equiv four eq)

@@ -42,7 +42,7 @@ run() { "$LHD" "$@" -q --result-json "$W/r.json" || fail "$* -> $(cat "$W/r.json
 
 # 1. the annotation is semantics-free: annotated vs stripped source PROVEN
 sed 's/{::\[.*\]/{/' "$PRP" > "$W/plain.prp"
-run lec --impl "$PRP" --ref "$W/plain.prp" --top "$TOP" --workdir "$W/wl"
+run lec --set formal.effort=proof --impl "$PRP" --ref "$W/plain.prp" --top "$TOP" --workdir "$W/wl"
 
 # 2. compile + abc WITHOUT pass.color: the block is its own region
 run compile "$PRP" --top "$TOP" --emit-dir lg:"$W/lg" --workdir "$W/w1"
@@ -66,7 +66,7 @@ run compile lg:"$W/models" --emit-dir verilog:"$W/modelsv" --workdir "$W/w8"
 run compile lg:"$W/re" --top "$TOP" --emit-dir verilog:"$W/rev" --workdir "$W/w9"
 cat "$W/netv/"*.v "$W/modelsv/"*.v > "$W/impl.v"
 cat "$W/rev/"*.v > "$W/ref.v"
-run lec --impl verilog:"$W/impl.v" --ref verilog:"$W/ref.v" --top "$TOP" --workdir "$W/wc"
+run lec --set formal.effort=proof --impl verilog:"$W/impl.v" --ref verilog:"$W/ref.v" --top "$TOP" --workdir "$W/wc"
 
 # 5a. negative control: unknown scope attribute must fail the compile
 sed "s/abc='[^']*'/colour=3/" "$PRP" > "$W/bad_key.prp"

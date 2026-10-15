@@ -42,21 +42,21 @@ run() { OUT=$("$LHD" lec --set formal.effort=proof "${@}" --top m --set formal.l
 # 1) auto case-split PROVES the equal pair (solver path forced via semdiff=none).
 run --ref "$WORK/good.sv" --impl "$WORK/good.sv"
 if [ "$RC" -ne 0 ]; then echo "FAIL: equal rc=$RC (want 0)"; echo "$OUT"; fail=1
-elif ! echo "$OUT" | grep -q "PROVEN equivalent"; then echo "FAIL: equal not PROVEN"; fail=1
+elif ! echo "$OUT" | grep -q "^lec: .* PROVEN-full"; then echo "FAIL: equal not PROVEN-full"; fail=1
 elif ! echo "$OUT" | grep -q "case-split sel"; then echo "FAIL: equal did not case-split on sel"; fail=1
 else echo "ok: equal -> case-split on sel PROVEN"; fi
 
 # 2) auto case-split REFUTES the sel==2-arm bug, witness pinned to sel=2.
 run --ref "$WORK/good.sv" --impl "$WORK/bug.sv"
-if [ "$RC" -eq 0 ]; then echo "FAIL: bug rc=0 (want non-zero)"; fail=1
-elif ! echo "$OUT" | grep -q "REFUTED"; then echo "FAIL: bug not REFUTED"; fail=1
+if [ "$RC" -ne 10 ]; then echo "FAIL: bug rc=$RC (want 10: a real counterexample)"; fail=1
+elif ! echo "$OUT" | grep -q "^lec: .* REFUTED-cex"; then echo "FAIL: bug not REFUTED-cex"; fail=1
 elif ! echo "$OUT" | grep -q "sel=2"; then echo "FAIL: bug witness did not pin sel=2"; echo "$OUT" | grep -i witness; fail=1
 else echo "ok: bug -> case-split REFUTED @ sel=2"; fi
 
 # 3) formal.partitions=1 DISABLES the case-split -> single monolithic ind query.
 run --ref "$WORK/good.sv" --impl "$WORK/good.sv" --set formal.partitions=1
 if [ "$RC" -ne 0 ]; then echo "FAIL: partitions=1 rc=$RC (want 0)"; fail=1
-elif ! echo "$OUT" | grep -q "PROVEN equivalent"; then echo "FAIL: partitions=1 not PROVEN"; fail=1
+elif ! echo "$OUT" | grep -q "^lec: .* PROVEN-full"; then echo "FAIL: partitions=1 not PROVEN-full"; fail=1
 elif echo "$OUT" | grep -q "case-split"; then echo "FAIL: partitions=1 still case-split (should disable)"; fail=1
 else echo "ok: partitions=1 -> case-split disabled (single ind)"; fi
 
@@ -68,7 +68,7 @@ else echo "ok: explicit split=sel -> case-split on sel"; fi
 # 5) no control operand -> auto finds no split -> graceful fallback, still PROVEN.
 run --ref "$WORK/plain.sv" --impl "$WORK/plain.sv"
 if [ "$RC" -ne 0 ]; then echo "FAIL: plain rc=$RC (want 0)"; fail=1
-elif ! echo "$OUT" | grep -q "PROVEN equivalent"; then echo "FAIL: plain not PROVEN"; fail=1
+elif ! echo "$OUT" | grep -q "^lec: .* PROVEN-full"; then echo "FAIL: plain not PROVEN-full"; fail=1
 elif echo "$OUT" | grep -q "case-split"; then echo "FAIL: plain case-split (no selector to split on)"; fail=1
 else echo "ok: no-selector -> fallback PROVEN (no case-split)"; fi
 

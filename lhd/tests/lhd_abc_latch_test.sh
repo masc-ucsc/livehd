@@ -117,12 +117,14 @@ synth() {
   cat "$d/netv/"*.v > "$d/net.v"
   "$LHD" pass liberty gensim "$lib" --emit-dir lg:"$d/models" --emit verilog:"$d/models.v" --workdir "$d/Wm" -q \
     --result-json "$d/g.json" > "$d/gensim.log" 2>&1 || fail "$d: gensim -> $(cat "$d/g.json")"
-  "$LHD" lec --impl lg:"$d/net" --ref lg:"$d/W/synth/lg" --lib lg:"$d/models" --top "$top" --workdir "$d/Wlec" -q \
+  "$LHD" lec --set formal.effort=proof --impl lg:"$d/net" --ref lg:"$d/W/synth/lg" --lib lg:"$d/models" --top "$top" --workdir "$d/Wlec" -q \
     --result-json "$d/lec.json" > "$d/lec.log" 2>&1
   if [ "$glec" = prove ]; then
-    grep -q '"verdict":"proven"' "$d/lec.json" || defer "$d: graph LEC did not prove: $(cat "$d/lec.json")"
+    grep -qE '"verdict":"proven-(full|bounded)"' "$d/lec.json" || defer "$d: graph LEC did not prove: $(cat "$d/lec.json")"
   elif [ "$glec" = norefute ]; then
-    ! grep -q '"verdict":"refuted"' "$d/lec.json" || defer "$d: graph LEC refuted: $(cat "$d/lec.json")"
+    # A counterexample against the correct netlist is a false refutation; an
+    # honest refusal (REFUTED-unsupported, e.g. a latch window) is tolerated here.
+    ! grep -q '"verdict":"refuted-cex"' "$d/lec.json" || defer "$d: graph LEC refuted: $(cat "$d/lec.json")"
   fi
   { cat "$d/net.v"; echo; cat "$d/models.v"; } > "$d/impl.v"
   { cat "$refv"; echo; cat "$d/models.v"; } > "$d/ref.v"
@@ -181,9 +183,9 @@ neg() {
   if [ "$solver" = cvc5 ]; then
     "$LHD" compile -q --reader slang --top "$top" --emit-dir lg:"$d/ref" --workdir "$d/Wc" -- "$d/src.v" > "$d/c.log" 2>&1 \
       || fail "$tag/$what: compile"
-    "$LHD" lec --impl lg:"$W/$tag/$sub/net" --ref lg:"$d/ref" --lib lg:"$W/$tag/$sub/models" --top "$top" \
+    "$LHD" lec --set formal.effort=proof --impl lg:"$W/$tag/$sub/net" --ref lg:"$d/ref" --lib lg:"$W/$tag/$sub/models" --top "$top" \
       --set formal.simfail_run=false --workdir "$d/Wlec" -q --result-json "$d/r.json" > "$d/lec.log" 2>&1
-    grep -q '"verdict":"refuted"' "$d/r.json" || fail "$tag/$what: broken twin was not refuted (cvc5): $(cat "$d/r.json")"
+    grep -q '"verdict":"refuted-cex"' "$d/r.json" || fail "$tag/$what: broken twin was not refuted (cvc5): $(cat "$d/r.json")"
   else
     { cat "$d/src.v"; echo; cat "$W/$tag/$sub/models.v"; } > "$d/ref.v"
     local v

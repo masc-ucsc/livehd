@@ -13943,6 +13943,15 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
               // own input, and the loop supplies that value (inline_loop skips it).
               value = llvm_kernel.constant(1, 0, true);
             }
+            if (value.width == 0 && type_op_of(node) == Ntype_op::Sub && !edge.driver.is_const()
+                && color_plan_->sites()[version.base_site].port_split) {
+              // A port-split loop output (Color_plan::Site::port_split) reads only
+              // its own support; the plan bound none of the other inputs.
+              const auto* support = color_plan_->split_loop_support(version.base_site, version.output_port);
+              if (support != nullptr && !std::ranges::binary_search(*support, edge.sink.get_port_id())) {
+                value = llvm_kernel.constant(1, 0, true);
+              }
+            }
             if (value.width == 0 && type_op_of(node) == Ntype_op::Memory) {
               const bool required = memory_required_ports.contains(edge.sink.get_port_id());
               if (!required) {
@@ -14656,7 +14665,12 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
                 return reject("loop body is not available for embedding");
               }
               const auto& ir = shared_gen_->native_loop_ir.at(child.get());
-              auto        loop_it = llvm_loop_results.find(version.base_site);
+              // One embedded walk per loop site, shared by its outputs -- except
+              // a port-split loop, whose outputs each walk with their own operands.
+              const size_t loop_key = color_plan_->sites()[version.base_site].port_split
+                                          ? color_plan_->sites().size() + member
+                                          : version.base_site;
+              auto         loop_it  = llvm_loop_results.find(loop_key);
               if (loop_it == llvm_loop_results.end()) {
                 const auto                    sio = node.get_subnode_io();
                 std::vector<Cgen_llvm::Value> arguments(ir.layout.inputs.size());
@@ -14686,7 +14700,7 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
                 if (!llvm_kernel.inline_loop(ir.body, ir.layout, loop->count, loop->first, loop->step, arguments, results, error)) {
                   return reject(error);
                 }
-                loop_it = llvm_loop_results.emplace(version.base_site, std::move(results)).first;
+                loop_it = llvm_loop_results.emplace(loop_key, std::move(results)).first;
               }
               const auto port_it = std::ranges::find(ir.output_ports, static_cast<hhds::Port_id>(version.output_port));
               if (port_it == ir.output_ports.end()) {
@@ -16494,7 +16508,19 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
           const auto sub_member = occurrence_sub_member(site);
           I(!sub_member.empty());
           bool owns_loop_walk = false;
-          if (site.kind == livehd::sim::Color_plan::Site_kind::loop_control) {
+          // A port-split loop (Color_plan::Site::port_split, a pure loop on a
+          // ring that closes only through its atomic boundary): each output
+          // version binds just the inputs its own output reads and walks the
+          // rolled loop itself, so the walk feeding `s` from `p` precedes the
+          // walk that reads `s`. The walk is a pure function: re-walking costs
+          // time, never a second state commit.
+          const bool port_split = site.kind == livehd::sim::Color_plan::Site_kind::loop_control && site.port_split;
+          const auto* port_support
+              = port_split ? color_plan_->split_loop_support(version.base_site, version.output_port) : nullptr;
+          I(!port_split || port_support != nullptr);
+          if (port_split) {
+            owns_loop_walk = true;
+          } else if (site.kind == livehd::sim::Color_plan::Site_kind::loop_control) {
             const auto [owner, inserted] = compact_loop_controlled.try_emplace(
                 absl::StrCat(sub_member, version.version == livehd::sim::Color_plan::State_version::pre_rise ? "#pre" : "#post"),
                 member);
@@ -16513,7 +16539,7 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
             // `__gen` never signals a commit and needs no re-dirtying.
             // Same predicate as the wrapper's `pure_loop` (the child module may be
             // emitted by another worker, so it is recomputed, not looked up).
-            bool direct = llvm_backend_ && !observation_on && !vcd_on;
+            bool direct = llvm_backend_ && !observation_on && !vcd_on && !port_split;
             if (direct) {
               const auto shape = loop_storage_shape(node.get_subnode_graph());
               direct           = shape.stateless && !shape.nested_loop;
@@ -16538,6 +16564,9 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
             for (const auto& decl : sio->get_input_pin_decls()) {
               if (loop->index_input && decl.port_id == *loop->index_input) {
                 continue;  // supplied as first + ordinal*step by the native wrapper
+              }
+              if (port_support != nullptr && !std::ranges::binary_search(*port_support, decl.port_id)) {
+                continue;  // this output never reads it: `__in` keeps the last bound value
               }
               const auto sink = find_sink_pin(node, decl.name);
               if (sink.is_invalid()) {
@@ -16656,6 +16685,15 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
               fout->append("  }\n");
             } else if (direct) {
               fout->append("  ", sub_member, ".__native_direct_publish(", absl::StrJoin(direct_args, ", "), ");  // pure native loop publish\n");
+            } else if (port_split) {
+              // No once-per-period guard and no state re-dirtying: the body is
+              // pure, and the wrapper's bound-input generation still skips a
+              // walk whose operands did not move.
+              fout->append("  ",
+                           sub_member,
+                           version.version == livehd::sim::Color_plan::State_version::pre_rise ? ".__compact_advance();"
+                                                                                                : ".__compact_publish();",
+                           "  // port-split compact loop: this output's own walk\n");
             } else if (version.version == livehd::sim::Color_plan::State_version::pre_rise) {
               // The walk COMMITS every lane's child state, and that state is
               // opaque to this plan (no state site, no `__state_commit` slot):

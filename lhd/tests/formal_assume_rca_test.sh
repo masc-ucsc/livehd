@@ -64,11 +64,11 @@ EOF
 # that input.
 if ! "$LHD" lec --ref "$W/rca_assumed.prp" --impl "$W/plus_one.prp" \
      --ref-top rca_top --impl-top plus_one  \
-     --set formal.engine=ind --workdir "$W/lec_assumed_w" >"$W/lec_assumed.out" 2>&1; then
+     --set formal.effort=proof --set formal.engine=ind --workdir "$W/lec_assumed_w" >"$W/lec_assumed.out" 2>&1; then
   cat "$W/lec_assumed.out" >&2
   fail "RCA did not match hard-coded +1 under carry_in==true"
 fi
-grep -qE 'PASS\(|PROVEN equivalent' "$W/lec_assumed.out" \
+grep -qE "^lec: .* PROVEN-(full|bounded)" "$W/lec_assumed.out" \
   || { cat "$W/lec_assumed.out" >&2; fail "assumed RCA LEC exited cleanly without a proof"; }
 grep -q 'unchecked assume' "$W/lec_assumed.out" \
   || { cat "$W/lec_assumed.out" >&2; fail "RCA LEC did not disclose its active carry contract"; }
@@ -76,13 +76,15 @@ grep -q 'unchecked assume' "$W/lec_assumed.out" \
 # Removing only the contract admits carry_in==false.  The RCA then computes
 # a+b while the other side still computes a+b+1, so LEC must find a witness.
 grep -v assume_nocheck "$W/rca_assumed.prp" >"$W/rca_plain.prp"
-if "$LHD" lec --ref "$W/rca_plain.prp" --impl "$W/plus_one.prp" \
-     --ref-top rca_top --impl-top plus_one  \
-     --set formal.engine=ind --workdir "$W/lec_plain_w" >"$W/lec_plain.out" 2>&1; then
+"$LHD" lec --ref "$W/rca_plain.prp" --impl "$W/plus_one.prp" \
+  --ref-top rca_top --impl-top plus_one  \
+  --set formal.effort=proof --set formal.engine=ind --workdir "$W/lec_plain_w" >"$W/lec_plain.out" 2>&1
+rc=$?
+if [ "$rc" -ne 10 ]; then
   cat "$W/lec_plain.out" >&2
-  fail "RCA unexpectedly matched hard-coded +1 without the carry contract"
+  fail "RCA without the carry contract must be a real counterexample (rc 10), got rc=$rc"
 fi
-grep -q 'REFUTED' "$W/lec_plain.out" \
+grep -q "^lec: .* REFUTED-cex" "$W/lec_plain.out" \
   || { cat "$W/lec_plain.out" >&2; fail "no-assumption RCA LEC did not report REFUTED"; }
 grep -q 'carry_in=0' "$W/lec_plain.out" \
   || { cat "$W/lec_plain.out" >&2; fail "no-assumption RCA LEC witness did not use carry_in=0"; }
@@ -94,7 +96,7 @@ if ! "$LHD" formal verify "$W/rca_assumed.prp" "$W/rca_assumed.verify.prp" \
   cat "$W/verify_assumed.out" >&2
   fail "RCA +1 assertion did not prove under carry_in==true"
 fi
-grep -q 'RCA matches hard-coded +1.*PROVEN' "$W/verify_assumed.out" \
+grep -qE 'RCA matches hard-coded \+1.*PROVEN-(full|bounded)' "$W/verify_assumed.out" \
   || { cat "$W/verify_assumed.out" >&2; fail "assumed RCA verify did not report PROVEN"; }
 grep -q 'in force (UNCHECKED assume_nocheck' "$W/verify_assumed.out" \
   || { cat "$W/verify_assumed.out" >&2; fail "verify did not disclose the active carry contract"; }
@@ -109,7 +111,7 @@ if "$LHD" formal verify "$W/rca_plain.prp" "$W/rca_plain.verify.prp" \
   cat "$W/verify_plain.out" >&2
   fail "RCA +1 assertion unexpectedly passed without the carry contract"
 fi
-grep -q 'RCA matches hard-coded +1.*REFUTED' "$W/verify_plain.out" \
+grep -q 'RCA matches hard-coded +1.*REFUTED-cex' "$W/verify_plain.out" \
   || { cat "$W/verify_plain.out" >&2; fail "no-assumption RCA verify did not report REFUTED"; }
 grep -q 'carry_in=0' "$W/verify_plain.out" \
   || { cat "$W/verify_plain.out" >&2; fail "no-assumption RCA verify witness did not use carry_in=0"; }

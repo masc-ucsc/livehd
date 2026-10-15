@@ -65,7 +65,7 @@ run_lec() {
 
 # The VERDICT line only -- a REFUTED run also prints `lec: wrote counterexample
 # ...` afterwards, so a bare `tail -1` of `^lec: ` picks up the artifact notice.
-verdict() { grep -E "^lec: .*(PROVEN|REFUTED|PASS\(|TIMEOUT|UNSUPPORTED|UNDISCHARGED|UNCONFIRMED|UNPAIRED|UNCHECKED|VACUOUS|UNEXPLAINED)" "$OUT" | tail -1; }
+verdict() { grep -E "^lec: '[^']+' (PROVEN-|TESTED-|TIMEOUT-|REFUTED-)" "$OUT" | tail -1; }
 
 # ── (1) data port, combinational: the original reproduction ──────────────────
 cat >"$WORK/ref.v" <<'EOF'
@@ -79,7 +79,7 @@ module m(input a, output signed [3:0] y);
 endmodule
 EOF
 run_lec comb --ref "$WORK/ref.v" --impl "$WORK/impl.v"
-verdict | grep -q 'PROVEN' \
+verdict | grep -q ' PROVEN-full ' \
   || fail "sign-slot data port did not reconcile: $(verdict)"
 verdict | grep -q 'width/sign reconciled on top port(s) a' \
   || fail "the sign-slot PROVEN did not disclose the assumption: $(verdict)"
@@ -112,7 +112,7 @@ decl_case u8s "[7:0]" '$signed(a)'
 for pair in "u8 u4" "u3 s5" "s4 s8" "s3 u8s"; do
   set -- $pair
   run_lec "shape_$1_$2" --ref "$WORK/$1.v" --impl "$WORK/$2.v" --set formal.lec.semdiff=none
-  verdict | grep -Eq 'PROVEN|PASS\(' \
+  verdict | grep -Eq ' PROVEN-(full|bounded\([0-9]+\)) ' \
     || fail "$1 vs $2 did not reconcile by enlargement: $(verdict)"
   verdict | grep -q 'width/sign reconciled on top port(s) a' \
     || fail "$1 vs $2 reconciled without disclosing it: $(verdict)"
@@ -128,7 +128,7 @@ for eng in auto bmc; do
   [ "$eng" = "auto" ] || engine_args=(--set "formal.engine=$eng")
   run_lec "shape_s3_u8_$eng" --ref "$WORK/s3.v" --impl "$WORK/u8.v" --set formal.lec.semdiff=none \
     ${engine_args[@]+"${engine_args[@]}"}
-  verdict | grep -q 'REFUTED' \
+  verdict | grep -q ' REFUTED-cex ' \
     || fail "engine=$eng: s3 vs u8 hid a sign- vs zero-extension difference: $(verdict)"
 done
 echo "PASS: a signed narrow port facing a wider unsigned one refutes a sign-extension difference"
@@ -161,7 +161,7 @@ for eng in auto ind bmc; do
   engine_args=()
   [ "$eng" = "auto" ] || engine_args=(--set "formal.engine=$eng")
   run_lec "seq_$eng" --ref "$WORK/seq_ref.v" --impl "$WORK/seq_impl.v" ${engine_args[@]+"${engine_args[@]}"}
-  verdict | grep -Eq 'PROVEN|PASS\(' \
+  verdict | grep -Eq ' PROVEN-(full|bounded\([0-9]+\)) ' \
     || fail "engine=$eng did not reconcile the sequential sign-slot port: $(verdict)"
   verdict | grep -q 'width/sign reconciled on top port(s) a' \
     || fail "engine=$eng dropped the sign-slot disclosure (an arm that ASSIGNS res.detail?): $(verdict)"
@@ -195,14 +195,14 @@ module r(input clk, input rst_n, input [3:0] a, output [3:0] y);
 endmodule
 EOF
 run_lec rst --ref "$WORK/rst_ref.v" --impl "$WORK/rst_impl.v" --set formal.engine=bmc
-verdict | grep -Eq 'PROVEN|PASS\(' \
+verdict | grep -Eq ' PROVEN-(full|bounded\([0-9]+\)) ' \
   || fail "sign-slot RESET port did not reconcile: $(verdict)"
 # A structural proof need not mention reset in its log. A corrupted update
 # with the same sign-slot reset pair must refute under BMC: an impossible reset
 # assumption would instead vacuously prove this negative control too.
 sed "s/q <= a;/q <= a ^ 4'h1;/" "$WORK/rst_impl.v" > "$WORK/rst_bad.v"
 run_lec rst_bad --ref "$WORK/rst_ref.v" --impl "$WORK/rst_bad.v" --set formal.engine=bmc
-verdict | grep -q 'REFUTED' || fail "sign-slot reset made a differing design pass: $(verdict)"
+verdict | grep -q ' REFUTED-cex ' || fail "sign-slot reset made a differing design pass: $(verdict)"
 echo "PASS: a sign-slot reset port does not pin an unsatisfiable level"
 
 # ── (5) NEGATIVE control: a real difference still refutes ────────────────────
@@ -219,7 +219,7 @@ module s(input clk, input rst_n, input a, output signed [3:0] y);
 endmodule
 EOF
 run_lec neg --ref "$WORK/seq_ref.v" --impl "$WORK/neg_impl.v" --set formal.engine=bmc
-verdict | grep -q 'REFUTED' \
+verdict | grep -q ' REFUTED-cex ' \
   || fail "a real functional difference was swallowed by the sign-slot carrier: $(verdict)"
 echo "PASS: a real difference on a sign-slot port pair still refutes"
 
@@ -238,11 +238,11 @@ module b(input signed [3:0] b, output signed [7:0] y);
 endmodule
 EOF
 run_lec bus --ref "$WORK/bus_ref.v" --impl "$WORK/bus_impl.v"
-verdict | grep -q 'REFUTED' \
+verdict | grep -q ' REFUTED-cex ' \
   || fail "an equal-width signed/unsigned port hid a sign-extension difference: $(verdict)"
 sed 's/assign y = b;/assign y = $unsigned(b);/' "$WORK/bus_impl.v" >"$WORK/bus_zext.v"
 run_lec bus_zext --ref "$WORK/bus_ref.v" --impl "$WORK/bus_zext.v"
-verdict | grep -q 'PROVEN' || fail "an equal-width zero-extension did not prove: $(verdict)"
+verdict | grep -q ' PROVEN-full ' || fail "an equal-width zero-extension did not prove: $(verdict)"
 if verdict | grep -q 'reconciled'; then
   fail "an equal-width port pair was reconciled: $(verdict)"
 fi
@@ -265,7 +265,7 @@ endmodule
 EOF
 sed -e 's/output signed \[3:0\] o/output [3:0] o/' -e 's/wire signed/wire/' "$WORK/box_ref.v" >"$WORK/box_impl.v"
 run_lec box --ref "$WORK/box_ref.v" --impl "$WORK/box_impl.v" --top top
-verdict | grep -q 'REFUTED' \
+verdict | grep -q ' REFUTED-cex ' \
   || fail "a collapsed child's output sign was not honored per side: $(verdict)"
 grep -q "'c' PROVEN" "$OUT" || fail "the bit-equal child did not prove (so no box was exercised): $(cat "$OUT")"
 echo "PASS: a collapsed child's output keeps each side's own sign"

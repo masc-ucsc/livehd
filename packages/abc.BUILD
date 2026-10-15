@@ -136,6 +136,11 @@ cc_library(
         "ABC_USE_CUDD=1",
         "ABC_USE_PTHREADS",
     ],
+    # No interactive command history: every Abc_Start() read ./abc.history and
+    # every Abc_Stop() appended to it, in whatever directory lhd ran from (the
+    # repo root, an NFS workdir) -- a forked lec cone child stalled seconds in
+    # that open on NFS, and every pass.abc run grew the file.
+    local_defines = ["ABC_NO_HISTORY"],
     includes = ["src"],
     visibility = ["//visibility:public"],
     # ABC's aiger/liberty readers use gz*; link the hermetic BCR zlib (zlib-ng in

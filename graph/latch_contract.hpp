@@ -269,9 +269,27 @@ struct Icg_def_match {
 // of nets the parent already drives.
 //
 // `is_boxed` still applies to the DEF-BODY match: a caller may declare a def
-// out of scope entirely. Returns the number of cells materialized.
+// out of scope entirely. `resolve_def`, when given, names the body to read for
+// an instance (a mapped netlist's cells are bodyless declarations whose models
+// live in a separate `--lib` library); nullptr from it falls back to the
+// instance's own definition. Returns the number of cells materialized.
 [[nodiscard]] int materialize_clock_cells(hhds::Graph* g, std::string_view from_pass,
-                                          const std::function<bool(const hhds::Graph*)>& is_boxed = {});
+                                          const std::function<bool(const hhds::Graph*)>&               is_boxed    = {},
+                                          const std::function<hhds::Graph*(const hhds::Node_class&)>& resolve_def = {});
+
+// The same recognition for a gate spelled INLINE in `g`'s own body: a register
+// clock (or a child's clock port) driven by `clk & en_l` / `clk | ~en_l`, where
+// `clk` is an input of `g` and `en_l` a latch transparent on the opposite phase
+// of it -- exactly the body match_icg_def accepts in a cell def. Each such sink
+// is re-pointed at a `Clock_cell(clk_ref=clk, en=<the latch's transparent
+// arm>)`, the glitch-free sampling contract instead of its implementation; a
+// gate left with no reader is dropped, so its enable latch becomes
+// unobservable. A gate also read as DATA keeps that reader (and its latch).
+// Without this an RTL ICG next to a second, unrelated clock input needs the
+// four-microstep schedule for its latch and is refused for want of a total
+// order between the two roots, while the same gate as an instantiated cell (or
+// a Pyrope `Clock()`) is a Clock_cell and proves. Returns the cells created.
+[[nodiscard]] int materialize_inline_clock_gates(hhds::Graph* g, std::string_view from_pass);
 
 // The value a latch passes THROUGH while its window is open. Peels tolg's hold
 // mux (`gate ? d : q`) when `din` still carries one; once

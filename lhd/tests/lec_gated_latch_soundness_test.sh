@@ -52,13 +52,22 @@ fail() {
   exit 1
 }
 
-# lec <tag> <impl.v> <ref.v> <top> [--set ...]: sets $V (verdict or "none") and $O (output)
+# lec <tag> <impl.v> <ref.v> <top> [--set ...]: sets $V (verdict class or "none"), $RAWV
+# (the JSON verdict word) and $O (output). The class folds PROVEN-full/-bounded into
+# "proven" and REFUTED-cex (a real counterexample) into "refuted"; every other
+# REFUTED-<why> (a refusal: unsupported, unchecked, ...) keeps its own word, so it can
+# never satisfy an expect "refuted" nor trip an expect_not "refuted".
 lec() {
   local tag=$1 impl=$2 ref=$3 top=$4
   shift 4
   O="$("$LHD" lec --set formal.effort=proof --impl "verilog:$impl" --ref "verilog:$ref" --top "$top" --set formal.simfail_run=false \
     --workdir "$W/w_$tag" --result-json "$W/$tag.json" "$@" 2>&1)"
-  V="$(grep -o '"verdict":"[a-z]*"' "$W/$tag.json" 2>/dev/null | head -1 | sed 's/.*:"\(.*\)"/\1/')"
+  V="$(grep -o '"verdict":"[a-z-]*"' "$W/$tag.json" 2>/dev/null | head -1 | sed 's/.*:"\(.*\)"/\1/')"
+  RAWV="$V"
+  case "$V" in
+    proven-full | proven-bounded) V=proven ;;
+    refuted-cex) V=refuted ;;
+  esac
   [ -n "$V" ] || V=none
 }
 expect() { # <tag> <want: proven|refuted> <impl> <ref> <top> [args]
@@ -66,14 +75,14 @@ expect() { # <tag> <want: proven|refuted> <impl> <ref> <top> [args]
   shift 2
   lec "$tag" "$@"
   [ "$V" = "$want" ] || { tail -5 <<<"$O"; fail "$tag: expected $want, got $V"; }
-  echo "ok: $tag -> $V"
+  echo "ok: $tag -> $V ($RAWV)"
 }
 expect_not() { # <tag> <forbidden verdict> <impl> <ref> <top> [args]
   local tag=$1 bad=$2
   shift 2
   lec "$tag" "$@"
   [ "$V" != "$bad" ] || { tail -5 <<<"$O"; fail "$tag: must not be $bad"; }
-  echo "ok: $tag -> $V (not $bad)"
+  echo "ok: $tag -> $RAWV (not $bad)"
 }
 
 # ---- 1. transparent-while-gated-off latches ---------------------------------

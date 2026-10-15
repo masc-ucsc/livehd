@@ -59,7 +59,8 @@ else echo "ok: hierarchical self-lec proves leaves-first, collapsing proven chil
 #    difference is real, so mid/top still refute; what is pinned is that the
 #    parents were ATTEMPTED rather than skipped on the child's say-so.
 H cegar --impl "lg:$WORK/lib3" --ref "lg:$WORK/lib3_or"
-if [ "$RC" -eq 0 ]; then echo "FAIL: hier refuted-leaf rc=0 (want a REFUTED run)"; fail=1
+if [ "$RC" -ne 10 ]; then echo "FAIL: hier refuted-leaf rc=$RC (want 10: a REFUTED-cex run)"; fail=1
+elif ! echo "$OUT" | grep -q "^lec: .* REFUTED-cex"; then echo "FAIL: hier refuted-leaf run is not REFUTED-cex"; fail=1
 elif ! echo "$OUT" | grep -q "lec\[hier\]: 'leaf' REFUTED"; then echo "FAIL: leaf-diff not refuted"; fail=1
 elif echo "$OUT" | grep -q "SKIPPED (child"; then
   echo "FAIL: default must ESCALATE, not skip a parent over its refuted child"; fail=1
@@ -68,10 +69,13 @@ elif ! echo "$OUT" | grep -q "lec\[hier\]: 'mid' REFUTED (0 child collapse"; the
 else echo "ok: a REFUTED child is inlined into its caller (escalate is the default)"; fi
 
 # 2a) formal.lec.hier_refute=fail is the DEBUG mode: it stops at the first
-#     differing block and reports that block-boundary CEX as the run verdict.
-#     It must still work, and it must say loudly that it is a debug aid.
+#     differing block and reports that block. It forbade the escalation that
+#     would confirm the block-boundary CEX at the top, so the run is
+#     REFUTED-unchecked (exit 7), never REFUTED-cex. It must still work, and it
+#     must say loudly that it is a debug aid.
 H ff --impl "lg:$WORK/lib3" --ref "lg:$WORK/lib3_or" --set formal.lec.hier_refute=fail
-if [ "$RC" -eq 0 ]; then echo "FAIL: hier_refute=fail rc=0 (want a REFUTED run)"; fail=1
+if [ "$RC" -ne 7 ]; then echo "FAIL: hier_refute=fail rc=$RC (want 7: REFUTED-unchecked)"; fail=1
+elif ! echo "$OUT" | grep -q "^lec: .* REFUTED-unchecked"; then echo "FAIL: hier_refute=fail run is not REFUTED-unchecked"; fail=1
 elif ! echo "$OUT" | grep -q "lec\[hier\]: 'mid' SKIPPED (child 'leaf' REFUTED"; then
   echo "FAIL: hier_refute=fail did not skip mid over its REFUTED leaf"; fail=1
 elif ! echo "$OUT" | grep -q "hierarchical: block 'leaf' REFUTED"; then
@@ -85,7 +89,8 @@ else echo "ok: hier_refute=fail still fails fast, and warns that it is a debug m
 #     can still prove a top equivalent over a differing child). The run must fail
 #     either way — a refuted block never exits 0 just because the top was inconclusive.
 H esc --impl "lg:$WORK/lib3" --ref "lg:$WORK/lib3_or"
-if [ "$RC" -eq 0 ]; then echo "FAIL: hier escalate rc=0 (want REFUTED)"; fail=1
+if [ "$RC" -ne 10 ]; then echo "FAIL: hier escalate rc=$RC (want 10: REFUTED-cex)"; fail=1
+elif ! echo "$OUT" | grep -q "^lec: .* REFUTED-cex"; then echo "FAIL: hier escalate run is not REFUTED-cex"; fail=1
 elif ! echo "$OUT" | grep -q "lec\[hier\]: 'mid' REFUTED (0 child collapse"; then
   echo "FAIL: escalate did not FLATTEN the unproven leaf into mid (CEGAR)"; fail=1
 else echo "ok: formal.lec.hier_refute=escalate flattens the refuted child into its parent"; fi

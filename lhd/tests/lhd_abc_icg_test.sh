@@ -157,9 +157,9 @@ prepare() {
 verify() {
   local d="$1" top="$2"
   if [ "$ICG_CHECK" != verilog ]; then
-    "$LHD" lec --impl lg:"$d/net" --ref lg:"$d/W/synth/lg" --lib lg:"$d/models" --top "$top" --workdir "$d/Wlec" -q \
+    "$LHD" lec --set formal.effort=proof --impl lg:"$d/net" --ref lg:"$d/W/synth/lg" --lib lg:"$d/models" --top "$top" --workdir "$d/Wlec" -q \
       --result-json "$d/lec.json" > "$d/lec.log" 2>&1
-    grep -q '"verdict":"proven"' "$d/lec.json" || fail "$d: graph LEC did not prove: $(cat "$d/lec.json")"
+    grep -qE '"verdict":"proven-(full|bounded)"' "$d/lec.json" || fail "$d: graph LEC did not prove: $(cat "$d/lec.json")"
   fi
   if [ "$ICG_CHECK" != graph ]; then
     local v
@@ -199,9 +199,9 @@ neg() {
   if [ "$solver" = cvc5 ]; then
     "$LHD" compile -q --reader slang --top "$TOP" --emit-dir lg:"$d/ref" --workdir "$d/Wc" -- "$d/src.v" > "$d/c.log" 2>&1 \
       || fail "$tag/$what: compile"
-    "$LHD" lec --impl lg:"$W/$tag/net" --ref lg:"$d/ref" --lib lg:"$W/$tag/models" --top "$TOP" \
+    "$LHD" lec --set formal.effort=proof --impl lg:"$W/$tag/net" --ref lg:"$d/ref" --lib lg:"$W/$tag/models" --top "$TOP" \
       --set formal.simfail_run=false --workdir "$d/Wlec" -q --result-json "$d/r.json" > "$d/lec.log" 2>&1
-    grep -q '"verdict":"refuted"' "$d/r.json" || fail "$tag/$what: broken twin was not refuted (cvc5): $(cat "$d/r.json")"
+    grep -q '"verdict":"refuted-cex"' "$d/r.json" || fail "$tag/$what: broken twin was not refuted (cvc5): $(cat "$d/r.json")"
   else
     { cat "$d/src.v"; echo; cat "$W/$tag/models.v"; } > "$d/ref.v"
     local v

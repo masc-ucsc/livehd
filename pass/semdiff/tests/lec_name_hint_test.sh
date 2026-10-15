@@ -152,17 +152,22 @@ for s in rst arst init_flat init_hier; do
   sed "s/1'b0;/1'b1;/" "$WORK/${s}_ok.v" > "$WORK/${s}_bad.v"
 done
 
-# check <label> <top> <impl> <ref> <want PROVEN|REFUTED> [fast]
+# check <label> <top> <impl> <ref> <want PROVEN-full|REFUTED-cex> [fast]
+#   want: the verdict word of the final `lec:` line, with its exit code
+#         (PROVEN-full exits 0, REFUTED-cex -- a real counterexample -- exits 10).
 #   fast: the PROVEN must come from semdiff's no-solver structural match.
+# formal.effort=proof: this is an equivalence gate, so it needs a PROOF (the
+# default sampled effort reports TESTED-sampled(N) for an equivalent pair).
 check() {
   local label=$1 top=$2 impl=$3 ref=$4 want=$5 fast=${6:-}
-  local log="$WORK/$label.log"
-  "$LHD" lec --impl "$WORK/$impl" --ref "$WORK/$ref" --top "$top" --set formal.simfail_run=false \
-    --workdir "$WORK/w_$label" > "$log" 2>&1
+  local log="$WORK/$label.log" rc=0 want_rc
+  "$LHD" lec --set formal.effort=proof --impl "$WORK/$impl" --ref "$WORK/$ref" --top "$top" --set formal.simfail_run=false \
+    --workdir "$WORK/w_$label" > "$log" 2>&1 || rc=$?
   local got
-  got=$(grep -oE "PROVEN equivalent|REFUTED \\(not equivalent\\)|UNKNOWN" "$log" | head -1 | cut -d' ' -f1)
-  if [ "$got" != "$want" ]; then
-    echo "FAIL: $label -> got '$got', want '$want'"
+  got=$(grep -aE "^lec: '[^']+' " "$log" | grep -oE " (PROVEN-full|PROVEN-bounded\([0-9]+\)|TESTED-sampled\([0-9]+\)|TIMEOUT-(time|memory)|REFUTED-(cex|interface|unsupported|unchecked|vacuous|unexplained))( |$)" | tail -1 | tr -d ' ')
+  if [ "$want" = REFUTED-cex ]; then want_rc=10; else want_rc=0; fi
+  if [ "$got" != "$want" ] || [ "$rc" -ne "$want_rc" ]; then
+    echo "FAIL: $label -> got '$got' rc=$rc, want '$want' rc=$want_rc"
     sed 's/^/    /' "$log" | head -20
     fail=1
     return
@@ -177,20 +182,20 @@ check() {
 }
 
 for s in hier flat cgen; do
-  check "sw_${s}_bad" t "sw_${s}_bad.v" sw_ref.v REFUTED
-  check "sw_${s}_ok" t "sw_${s}_ok.v" sw_ref.v PROVEN fast
+  check "sw_${s}_bad" t "sw_${s}_bad.v" sw_ref.v REFUTED-cex
+  check "sw_${s}_ok" t "sw_${s}_ok.v" sw_ref.v PROVEN-full fast
 done
 for s in hier flat; do
-  check "lsw_${s}_bad" lg "lsw_${s}_bad.v" lsw_ref.v REFUTED
-  check "lsw_${s}_ok" lg "lsw_${s}_ok.v" lsw_ref.v PROVEN fast
+  check "lsw_${s}_bad" lg "lsw_${s}_bad.v" lsw_ref.v REFUTED-cex
+  check "lsw_${s}_ok" lg "lsw_${s}_ok.v" lsw_ref.v PROVEN-full fast
 done
-check rst_bad t rst_bad.v rst_ref.v REFUTED
-check rst_ok t rst_ok.v rst_ref.v PROVEN
-check arst_bad t arst_bad.v arst_ref.v REFUTED
-check arst_ok t arst_ok.v arst_ref.v PROVEN
+check rst_bad t rst_bad.v rst_ref.v REFUTED-cex
+check rst_ok t rst_ok.v rst_ref.v PROVEN-full
+check arst_bad t arst_bad.v arst_ref.v REFUTED-cex
+check arst_ok t arst_ok.v arst_ref.v PROVEN-full
 for s in flat hier; do
-  check "init_${s}_bad" t "init_${s}_bad.v" init_ref.v REFUTED
-  check "init_${s}_ok" t "init_${s}_ok.v" init_ref.v PROVEN
+  check "init_${s}_bad" t "init_${s}_bad.v" init_ref.v REFUTED-cex
+  check "init_${s}_ok" t "init_${s}_ok.v" init_ref.v PROVEN-full
 done
 
 if [ $fail -ne 0 ]; then echo "lec_name_hint_test: FAILED"; exit 1; fi

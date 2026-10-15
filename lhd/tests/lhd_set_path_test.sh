@@ -90,9 +90,9 @@ echo "ok: --config [pass.color] table accepted"
 # `lhd lec` used to root at `lec`, which names no pass, so the abbreviation
 # only worked after `formal lec`.
 LG0="lg:$W/lg0"
-"$LHD" lec --impl "$LG0" --ref "$LG0" --top "$TOP" --set engine=bmc -q --result-json "$W/rl1.json" >/dev/null 2>&1 \
+"$LHD" lec --set formal.effort=proof --impl "$LG0" --ref "$LG0" --top "$TOP" --set engine=bmc -q --result-json "$W/rl1.json" >/dev/null 2>&1 \
   || fail "lec --set engine=bmc (abbreviated) failed: $(cat "$W/rl1.json" 2>/dev/null)"
-"$LHD" formal lec --impl "$LG0" --ref "$LG0" --top "$TOP" --set engine=bmc -q --result-json "$W/rl2.json" >/dev/null 2>&1 \
+"$LHD" formal lec --set formal.effort=proof --impl "$LG0" --ref "$LG0" --top "$TOP" --set engine=bmc -q --result-json "$W/rl2.json" >/dev/null 2>&1 \
   || fail "formal lec --set engine=bmc (abbreviated) failed: $(cat "$W/rl2.json" 2>/dev/null)"
 idL1=$(sed 's/.*"run_id":"\([^"]*\)".*/\1/' "$W/rl1.json")
 idL2=$(sed 's/.*"run_id":"\([^"]*\)".*/\1/' "$W/rl2.json")

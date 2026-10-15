@@ -29,8 +29,12 @@ for mode in true false off; do
       grep -q 'u_loop_0__li5' "$W/net.v"
     fi
     cat "$W/net.v" "$W/models/"*.v > "$W/impl.v"
-    run lec --impl verilog:"$W/impl.v" --ref verilog:"$W/ref.v" \
-      --top "$TOP" --workdir "$W/lec_${mode}_${iteration}"
+    # A proof, not a sampled test: formal.effort=proof, and the verdict must
+    # be PROVEN (a TIMEOUT also exits 0, so the exit code alone is no gate).
+    run lec --set formal.effort=proof --impl verilog:"$W/impl.v" --ref verilog:"$W/ref.v" \
+      --top "$TOP" --workdir "$W/lec_${mode}_${iteration}" --result-json "$W/lec.json"
+    grep -q '"verdict":"proven-' "$W/lec.json" ||
+      { echo "FAIL: mode=$mode iteration=$iteration: mapped netlist not PROVEN: $(cat "$W/lec.json")" >&2; exit 1; }
   done
 done
 if "$LHD" pass abc lg:"$W/src" --top "$TOP" --set synth.liberty="$LIB" \

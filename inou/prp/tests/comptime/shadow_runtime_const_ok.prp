@@ -1,7 +1,7 @@
 /*
 :name: shadow_runtime_const_ok
 :type: comptime
-:verifier_pass: 3
+:verifier_pass: 2
 :verifier_fail: 0
 :verifier_include_funcs: true
 */
@@ -14,6 +14,9 @@
 // (errors/nested_lambda_const_shadow.prp, errors/io_name_shadows_const.prp).
 // Before, a runtime const counted as visible and both lambdas below were
 // "variable shadowing" errors.
+// The 2 discharged casserts are the top's and g's, checked in g's own
+// definition: `g(v=x)` is a runtime call and stays a Sub instance
+// (compile.upass.inline=false), so no inlined copy counts g's twice.
 pub mod shadow_runtime_const_ok(x:U8) -> (o:U8@[0]) {
   const s = x + 1
   comb f(s:U8) -> (r:U8) {

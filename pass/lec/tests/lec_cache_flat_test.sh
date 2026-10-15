@@ -5,7 +5,7 @@
 # The hierarchical driver has cached verdicts since F2; this pins the same store on
 # `--set formal.lec.hier=false`, which proves the whole design as ONE top-pair miter
 # and so stores/hits exactly ONE verdict. Cold run stores; identical warm re-run hits
-# ("PROVEN (cache)", no solver); a verdict-relevant option change (bound) is a new key
+# ("PROVEN-full (cache)", no solver); a verdict-relevant option change (bound) is a new key
 # (miss); a design edit is a new digest (miss); a REFUTE is never cached;
 # lhd.incremental=false opts out.
 
@@ -58,7 +58,7 @@ if [ -f "$WD/formal_cache.json" ]; then echo "ok: formal_cache.json written"; el
 
 # 2) warm re-run: hits the cache (no solver), engine=cache.
 OUT=$(H b.v a.v)
-ck "$OUT" "PROVEN (cache)"                 "warm flat re-run hits (PROVEN (cache))"
+ck "$OUT" "lec: 'foo' PROVEN-full (cache)"  "warm flat re-run hits (PROVEN-full (cache))"
 ck "$OUT" "lec\[cache\]: 1 hit(s), 0 stored" "warm flat re-run reports 1 hit"
 
 # 3) verdict-relevant option change (bound) is a distinct key -> miss (new store).
@@ -68,7 +68,7 @@ ck "$OUT" "lec\[cache\]: 0 hit(s), 1 stored" "bound change is a new key (miss)"
 # 4) REFUTE is never cached.
 OUT=$(H c.v a.v)
 ckn "$OUT" "0 hit(s), 1 stored" "REFUTE never stored"   # a fresh store line would list >=1 stored for THIS run; c!=a refutes
-ck  "$OUT" "REFUTED"            "c vs a refutes"
+ck  "$OUT" "lec: 'foo' REFUTED-cex" "c vs a refutes (REFUTED-cex)"
 
 # 5) lhd.incremental=false opts out (no cache line at all even with a --workdir).
 OUT=$(H b.v a.v --set lhd.incremental=false)
@@ -115,11 +115,11 @@ for mode in flat hier; do
 import json, pathlib, sys
 root, mode = pathlib.Path(sys.argv[1]), sys.argv[2]
 cold, warm = [json.loads((root / f"{mode}_{run}.json").read_text())["lec"] for run in ("cold", "warm")]
-assert cold["verdict"] == warm["verdict"] == "proven", (cold, warm)
+assert cold["verdict"] == warm["verdict"] == "proven-bounded", (cold, warm)
 assert cold["bounded"] is True and warm["bounded"] is True, (cold, warm)
 assert cold["bound"] == warm["bound"], (cold, warm)
 log = (root / f"{mode}_warm.log").read_text()
-assert "PROVEN (cache)" in log, log
+assert f"PROVEN-bounded({warm['bound']}) (cache)" in log, log
 # Simulate a pre-fix cache record. Scope-less verdicts must be re-proved.
 cache_file = root / f"scope_{mode}" / "formal_cache.json"
 cache = json.loads(cache_file.read_text())
@@ -137,7 +137,7 @@ PY_CHECK
     --top bounded_top ${args[@]+"${args[@]}"} --workdir "$scope_work" \
     --result-json "$WORK/${mode}_legacy.json" >"$WORK/${mode}_legacy.log" 2>&1 \
     || { cat "$WORK/${mode}_legacy.log"; fail=1; }
-  if grep -q 'PROVEN (cache)' "$WORK/${mode}_legacy.log"; then
+  if grep -qE 'PROVEN-(full|bounded\([0-9]+\)) \(cache\)' "$WORK/${mode}_legacy.log"; then
     echo "FAIL: $mode reused a legacy verdict without proof scope"; fail=1
   fi
   grep -q '"bounded":true' "$WORK/${mode}_legacy.json" || fail=1

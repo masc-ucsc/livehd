@@ -202,6 +202,13 @@ public:
   // where nothing reads the value. Copied to a user-visible alias of the
   // handle with the pending facts. Transient; cleared with the stash.
   absl::flat_hash_map<std::string, std::vector<std::string>>                     sub_output_names;
+  // The ELEMENT range of a SINGLE-output Sub instance whose output is an ARRAY
+  // (`-> (rows:[2]U8)`), by handle: `h[k]` reads lane k of that output, never
+  // the handle's own whole-port scalar slot (which `h[0]` used to alias).
+  // Invalid bounds when the element is not a known integer. Copied to a
+  // user-visible alias of the handle with the pending facts. Transient;
+  // cleared with the stash.
+  absl::flat_hash_map<std::string, Port_range>                                   sub_array_output_elems;
   // How a diagnostic names a Sub call-result handle that is a compiler temp
   // (`%y_0` for `a + cmp(a=a, b=b)`): `cmp(…).lt` (the runner's
   // stash_sub_instance_port_facts). Transient; cleared with the stash.

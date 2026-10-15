@@ -170,6 +170,27 @@ bool reaches_clock(const hhds::Occurrence_pin& p, const lc::Design_clocks& clock
 Clock_chain resolve_chain(hhds::Occurrence_pin clk, const lc::Design_clocks& clocks, int depth) {
   Clock_chain ch;
   auto        cur = clk;
+  // WHEN a gate's enable is sampled: in the half-period just before the gate's
+  // OWN active edge. An And gate (`c & en`) passes the rise of its clock operand
+  // c, so its enable is sampled while c is low; the Or flavour (`c | ~en`) passes
+  // c's fall, sampled while c is high. In ROOT time that edge is the root's rise
+  // or fall depending on c's parity to the root: `~(en & ~clk)` is an And on
+  // ~clk -- the same gate as `clk | ~en` -- and samples before the clk FALL.
+  // Reading only the gate's flavour sampled it before the rise, half a period
+  // early (a spurious BMC counterexample against the Or spelling of the same
+  // netlist). Every gate of a chain must agree: an endpoint has one sample point.
+  auto set_sample_point = [&](bool or_flavour, const hhds::Occurrence_pin& clock_operand) {
+    const bool operand_inverted = resolve_chain(clock_operand, clocks, depth + 1).inverted;
+    const bool before_fall      = or_flavour != operand_inverted;
+    if (ch.gated && ch.guard_before_fall != before_fall) {
+      ch.refused = true;
+      ch.why     = "is clocked through chained clock gates whose enables are sampled in different half-periods; the phase "
+                   "schedule models one guard sample point per state element";
+      return false;
+    }
+    ch.guard_before_fall = before_fall;
+    return true;
+  };
   for (int hops = 0; hops < 16 && !cur.is_invalid(); ++hops) {
     const auto cr = lc::control_root(cur, /*stop_at_clock_cell=*/true);
     ch.inverted   = ch.inverted != cr.inverted;
@@ -208,14 +229,19 @@ Clock_chain resolve_chain(hhds::Occurrence_pin clk, const lc::Design_clocks& clo
           return ch;
         }
       }
+      bool invert = false;
       if (auto inv = lc::sink_driver_hier(n, "invert"); inv.is_const() && !inv.is_known_false()) {
-        ch.guard_before_fall = true;
+        invert = true;  // the active-low flavour: `clk_ref | ~en`
       }
+      const auto clk_ref = lc::sink_driver_hier(n, "clk_ref");
       if (auto en = lc::sink_driver_hier(n, "en"); !en.is_invalid() && !en.is_const()) {
+        if (!set_sample_point(invert, clk_ref)) {
+          return ch;
+        }
         ch.guards.push_back(en);
         ch.gated = true;
       }
-      cur = lc::sink_driver_hier(n, "clk_ref");
+      cur = clk_ref;
       continue;
     }
     if ((op == Ntype_op::And || op == Ntype_op::Or) && depth < 6) {
@@ -300,6 +326,12 @@ Clock_chain resolve_chain(hhds::Occurrence_pin clk, const lc::Design_clocks& clo
         return open_while_low != (op == Ntype_op::And);
       });
       if (n_clock == 1 && !ens.empty() && !inverted_latch_enable) {
+        // `clk | ~en` is the active-low flavour: its enable is sampled before
+        // its clock operand FALLS, an And gate's before it rises (in root time,
+        // per that operand's parity; see set_sample_point).
+        if (!set_sample_point(op == Ntype_op::Or, clk_op)) {
+          return ch;
+        }
         ch.live_guards.insert(ch.live_guards.end(), ens.begin(), ens.end());
         for (auto& en : ens) {
           // THE L1 ERROR. A real ICG latches its enable on the opposite phase
@@ -324,12 +356,7 @@ Clock_chain resolve_chain(hhds::Occurrence_pin clk, const lc::Design_clocks& clo
         }
         ch.guards.insert(ch.guards.end(), ens.begin(), ens.end());
         ch.gated = true;
-        // `clk | ~en` is the active-low flavour: its enable is sampled before
-        // the FALL, not before the rise.
-        if (op == Ntype_op::Or) {
-          ch.guard_before_fall = true;
-        }
-        cur = clk_op;
+        cur      = clk_op;
         continue;
       }
       ch.root = cr.net;  // a mask or an ambiguous cone: this node IS the root

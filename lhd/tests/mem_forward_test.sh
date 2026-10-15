@@ -80,7 +80,7 @@ build_v()   { rm -rf "$W/$2"; "$LHD" compile "$1" --reader slang --top rf_ref --
 
 lec() {  # <ref_lg> <impl_lg> <tag> -> OUT/RC
   rm -rf "$W/l_$3"
-  OUT=$("$LHD" lec --ref "lg:$W/$1" --impl "lg:$W/$2" --ref-top rf_ref --impl-top rf \
+  OUT=$("$LHD" lec --set formal.effort=proof --ref "lg:$W/$1" --impl "lg:$W/$2" --ref-top rf_ref --impl-top rf \
         --workdir "$W/l_$3" 2>&1); RC=$?
 }
 
@@ -96,7 +96,9 @@ if [ "$RC" -ne 0 ]; then
   echo "$OUT" | grep -E "^lec: " | head -1
   fail "case 1: a memory and an equivalent flop-array+mux implementation did not prove (rc=$RC)"
 fi
-grep -qaiE '"verdict"[[:space:]]*:[[:space:]]*"refuted"' <<<"$OUT" && fail "case 1: reported a refutation on an equivalent pair"
+grep -qaE "^lec: .* PROVEN-(full|bounded)" <<<"$OUT" \
+  || { echo "$OUT" | grep -E "^lec: " | head -1; fail "case 1: an equivalent pair did not PROVE"; }
+grep -qaiE '"verdict"[[:space:]]*:[[:space:]]*"refuted-' <<<"$OUT" && fail "case 1: reported a refutation on an equivalent pair"
 echo "ok: a forwarding, self-written memory proves against a flop-array+mux implementation"
 
 # ---------------------------------------------------------------------------
@@ -109,8 +111,8 @@ sed 's|assign z = rst ? 4.d0 : ((wr \&\& (wsel==rsel)) ? wdata : cur_r);|assign 
 grep -q "assign z = rst ? 4'd0 : cur_r;" "$W/ref_nofwd.v" || fail "case 2: the mutant sed did not apply"
 build_v "$W/ref_nofwd.v" ref_nofwd
 lec ref_nofwd impl nofwd
-[ "$RC" -eq 0 ] && fail "case 2: a reference WITHOUT forwarding proved equal to a forwarding memory -- the forward is not modelled"
-grep -qaiE '"verdict"[[:space:]]*:[[:space:]]*"refuted"' <<<"$OUT" \
+[ "$RC" -eq 10 ] || fail "case 2: a reference WITHOUT forwarding proved equal to a forwarding memory -- the forward is not modelled (rc=$RC, want the counterexample class 10)"
+grep -qaiE '"verdict"[[:space:]]*:[[:space:]]*"refuted-cex"' <<<"$OUT" \
   || { echo "$OUT" | grep -E "^lec: " | head -1; fail "case 2: expected a REFUTATION for the dropped forward"; }
 echo "ok: dropping the forward REFUTES -- the forwarding read is really compared"
 
@@ -123,8 +125,8 @@ sed 's|assign z = rst ? 4.d0 : ((wr \&\& (wsel==rsel)) ? wdata : cur_r);|assign 
 grep -q "((wsel==rsel) ? wdata : cur_r)" "$W/ref_ungated.v" || fail "case 3: the mutant sed did not apply"
 build_v "$W/ref_ungated.v" ref_ungated
 lec ref_ungated impl ungated
-[ "$RC" -eq 0 ] && fail "case 3: an UNGATED forward proved equal -- the write enable is not part of the forwarding condition"
-grep -qaiE '"verdict"[[:space:]]*:[[:space:]]*"refuted"' <<<"$OUT" \
+[ "$RC" -eq 10 ] || fail "case 3: an UNGATED forward proved equal -- the write enable is not part of the forwarding condition (rc=$RC, want the counterexample class 10)"
+grep -qaiE '"verdict"[[:space:]]*:[[:space:]]*"refuted-cex"' <<<"$OUT" \
   || { echo "$OUT" | grep -E "^lec: " | head -1; fail "case 3: expected a REFUTATION for the ungated forward"; }
 echo "ok: forwarding without the write enable REFUTES -- the enable gates the forward"
 
@@ -139,8 +141,8 @@ sed 's#wire \[3:0\] wdata = cur_w | a;#wire [3:0] wdata = a;#' "$W/ref.v" > "$W/
 grep -q "wire \[3:0\] wdata = a;" "$W/ref_noself.v" || fail "case 4: the mutant sed did not apply"
 build_v "$W/ref_noself.v" ref_noself
 lec ref_noself impl noself
-[ "$RC" -eq 0 ] && fail "case 4: dropping the self-read from the write data proved equal"
-grep -qaiE '"verdict"[[:space:]]*:[[:space:]]*"refuted"' <<<"$OUT" \
+[ "$RC" -eq 10 ] || fail "case 4: dropping the self-read from the write data proved equal (rc=$RC, want the counterexample class 10)"
+grep -qaiE '"verdict"[[:space:]]*:[[:space:]]*"refuted-cex"' <<<"$OUT" \
   || { echo "$OUT" | grep -E "^lec: " | head -1; fail "case 4: expected a REFUTATION for the dropped self-read"; }
 echo "ok: dropping the write-data self-read REFUTES -- the read-modify-write is really compared"
 
@@ -160,6 +162,8 @@ if [ "$RC" -ne 0 ]; then
   echo "$OUT" | grep -E "^lec: " | head -1
   fail "case 5: an ordering=old memory did not prove against a NON-forwarding flop array (rc=$RC)"
 fi
+grep -qaE "^lec: .* PROVEN-(full|bounded)" <<<"$OUT" \
+  || { echo "$OUT" | grep -E "^lec: " | head -1; fail "case 5: an ordering=old memory did not PROVE against a non-forwarding flop array"; }
 echo 'ok: an ordering="old" memory proves against a non-forwarding flop array'
 
 # ---------------------------------------------------------------------------
@@ -168,8 +172,8 @@ echo 'ok: an ordering="old" memory proves against a non-forwarding flop array'
 #    entirely and happens to match whichever reference it is given.
 # ---------------------------------------------------------------------------
 lec ref impl_old cross
-[ "$RC" -eq 0 ] && fail "case 6: ordering=old proved equal to a FORWARDING reference -- the ordering is not modelled"
-grep -qaiE '"verdict"[[:space:]]*:[[:space:]]*"refuted"' <<<"$OUT" \
+[ "$RC" -eq 10 ] || fail "case 6: ordering=old proved equal to a FORWARDING reference -- the ordering is not modelled (rc=$RC, want the counterexample class 10)"
+grep -qaiE '"verdict"[[:space:]]*:[[:space:]]*"refuted-cex"' <<<"$OUT" \
   || { echo "$OUT" | grep -E "^lec: " | head -1; fail "case 6: expected a REFUTATION between the two orderings"; }
 echo "ok: the forwarding and read-old orderings are distinguished, not conflated"
 

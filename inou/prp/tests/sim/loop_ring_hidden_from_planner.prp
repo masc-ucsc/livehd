@@ -1,7 +1,7 @@
 /*
 :name: loop_ring_hidden_from_planner
 :type: simulation
-:expect_instances: u_loop*=3
+:expect_instances: u_loop*=2
 */
 // pass.legalize never splits or inlines a rolled loop (user ruling
 // 2026-10-08): a ring through one that is a cycle only while the instance is
@@ -14,16 +14,25 @@
 // shapes hide it, so the loop stays rolled:
 //   * lrh_later: the ring runs through a LATER loop that declines to roll
 //     (`cp` has no declared type), so its unrolled copy is plain logic;
-//   * lrh_call: the rolled loop sits in a comb, and the ring is in the CALLER
-//     that inlines it.
+//   * lrh_call: the rolled loop sits in a comb, and the ring is in the CALLER.
+//     With compile.upass.inline=false (the default) the comb stays an
+//     instance (`res`), so the ring `w -> res.s ... res.p -> w` closes only
+//     through the kept comb and the atomic loop inside it: `p` reads `b`,
+//     never `s`, so pass.legalize (arc level) accepts it and keeps the loop
+//     rolled. The occurrence-wide sim planner sees the loop's output feed its
+//     own invariant input and marks it port-split (Color_plan::Site::
+//     port_split): each loop output reads only its own carry-closed port
+//     support and walks the rolled loop itself. It used to fail with
+//     "version site ... precedes ITSELF".
 // Once cprop/bitwidth fold the wire's buffer, the loop instance's output would
 // drive its own invariant input, and a self-edge on a loop Sub IS a carry
-// (hhds Subnode_group::carries): both died with
+// (hhds Subnode_group::carries): with the loop inlined into the caller both
+// died with
 //   error[internal]: Subnode_group::validate: carry input needs one self-edge
 //   and one external initial driver
 // The folds now keep that buffer (graph_util::closes_loop_self_edge).
-// `:expect_instances:` keeps the loops rolled (lrh_later's, the one
-// in lrh_lanes' own module, and its copy inlined into lrh_call), so the fixture
+// `:expect_instances:` keeps the loops rolled (lrh_later's and the one in
+// lrh_lanes' own module, which lrh_call reaches through `res`), so the fixture
 // keeps exercising that path. `::[timecheck=false]`: see
 // loop_ring_nested_outer_index.prp. Same values as `--set compile.unroll=true`.
 mod lrh_later::[timecheck=false](b:U16, sel:U8) -> (o:U4@[0]) {
@@ -90,5 +99,5 @@ test loop_ring_hidden_from_planner.values {
   }
   assert(seen == 16, "the comparisons ran")
   assert(badl == 0, "a ring through a later unrolled loop reads the rolled loop's output")
-  assert(badc == 0, "a ring through the caller of an inlined comb reads the rolled loop's output")
+  assert(badc == 0, "a ring through the caller of a kept comb reads the rolled loop's output")
 }

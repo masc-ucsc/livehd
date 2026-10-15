@@ -58,7 +58,7 @@ EOF
 OUT="$W/good.out"
 "$LHD" formal verify "$W/good.sv" --top good --workdir "$W/wg" --diag-fmt pretty >"$OUT" 2>&1 \
   || fail "a true immediate assert must pass: $(cat "$OUT")"
-grep -q 'PROVEN' "$OUT" || fail "expected PROVEN: $(cat "$OUT")"
+grep -qE "^formal verify: '[^']*' PROVEN-(full|bounded)" "$OUT" || fail "expected PROVEN: $(cat "$OUT")"
 # The regression this test exists for: the assertion must not be DROPPED. A
 # dropped one leaves the run with nothing to prove, which is not a pass.
 ! grep -q 'no assert/assert_always obligations found' "$OUT" \
@@ -69,8 +69,9 @@ grep -q 'good.sv:4' "$OUT" || fail "the obligation must carry its source locatio
 # ---- a false one REFUTES with a trace ---------------------------------------
 OUT="$W/bad.out"
 "$LHD" formal verify "$W/bad.sv" --top bad --workdir "$W/wb" --diag-fmt pretty >"$OUT" 2>&1
-[ $? -ne 0 ] || fail "a false immediate assert must fail the run: $(cat "$OUT")"
-grep -q 'REFUTED' "$OUT" || fail "expected REFUTED: $(cat "$OUT")"
+RC=$?
+[ "$RC" -eq 10 ] || fail "a false immediate assert must fail the run: (rc=$RC, want the counterexample class 10) $(cat "$OUT")"
+grep -q "^formal verify: '[^']*' REFUTED-cex" "$OUT" || fail "expected REFUTED: $(cat "$OUT")"
 grep -q 'bad.sv:4' "$OUT" || fail "the refutation must name the assertion's line: $(cat "$OUT")"
 
 # ---- `assume` is a hypothesis, classified apart from an assert ---------------

@@ -31,17 +31,17 @@ fail=0
 check() {
   local label=$1 ref=$2 impl=$3 top=$4 want=$5; shift 5
   local out rc
-  out=$("$LHD" lec --impl "$WORK/$impl" --ref "verilog:$WORK/$ref" --top "$top" --reader slang \
+  out=$("$LHD" lec --set formal.effort=proof --impl "$WORK/$impl" --ref "verilog:$WORK/$ref" --top "$top" --reader slang \
         --workdir "$WORK/w_$label" "$@" 2>&1); rc=$?
   case "$want" in
     PROVEN)
-      if [ "$rc" -ne 0 ] || ! echo "$out" | grep -qE "PASS\\(|PROVEN equivalent"; then
+      if [ "$rc" -ne 0 ] || ! echo "$out" | grep -qE "^lec: .* PROVEN-(full|bounded)"; then
         echo "FAIL: $label expected PROVEN (rc=$rc)"; echo "$out" | grep -aE "^lec: " | tail -2; fail=1
       else echo "ok: $label PROVEN"; fi ;;
     REFUTED)
       # A REFUTATION must be a real counterexample, never an UNKNOWN: an encoder
       # that merely degraded to "could not decide" has not caught the bug.
-      if ! echo "$out" | grep -q "REFUTED"; then
+      if ! echo "$out" | grep -q "REFUTED-cex"; then
         echo "FAIL: $label expected REFUTED (rc=$rc)"; echo "$out" | grep -aE "^lec: " | tail -2; fail=1
       else echo "ok: $label REFUTED (the control still fires)"; fi ;;
   esac
@@ -139,7 +139,7 @@ check gate_invert_mut inv.v inv_bad.prp inv REFUTED
 # `formal.phase_sched=false` puts the run back on the M8 rewrite, which DECLINES
 # a coincident latch/flop edge by name. Pinning it keeps the fallback honest:
 # turning the schedule off must fail closed, never silently answer.
-out=$("$LHD" lec --impl "$WORK/edges.prp" --ref "verilog:$WORK/edges.v" --top edges --reader slang \
+out=$("$LHD" lec --set formal.effort=proof --impl "$WORK/edges.prp" --ref "verilog:$WORK/edges.v" --top edges --reader slang \
       --workdir "$WORK/w_off" --set formal.phase_sched=false 2>&1); rc=$?
 if [ "$rc" -eq 0 ]; then
   echo "FAIL: phase_sched=false did not refuse the coincident-edge design (rc=0)"; fail=1

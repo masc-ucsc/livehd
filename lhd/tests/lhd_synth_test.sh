@@ -509,10 +509,10 @@ group_ram128() {
     ! grep -q 'always @' "$W/ram128_mapped.v" || fail "ram128: a register stayed a native flop"
   fi
   wait "$p" || exit 1
-  run lec --ref lg:"$W/ram128_source" --impl lg:"$W/ram128_mapped" \
+  run lec --set formal.effort=proof --ref lg:"$W/ram128_source" --impl lg:"$W/ram128_mapped" \
       --lib lg:"$W/ram128_models" --top ram128_repro --set formal.timeout=30 \
       --workdir "$W/ram128_lec"
-  [ "$(jget "$RJ" lec.verdict)" = proven ] || fail "128-bit memory synthesis is not equivalent"
+  [ "$(jget "$RJ" lec.verdict)" = proven-full ] || fail "128-bit memory synthesis is not equivalent: $(jget "$RJ" lec.verdict)"
   echo "PASS: default synthesis preserves one 128-bit memory with byte writes"
 }
 spawn group_ram128

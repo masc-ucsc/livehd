@@ -1477,6 +1477,37 @@ TEST(LecOutcome, InterfaceVacuousAndBoundedDepth) {
   EXPECT_EQ(lec::outcome_info(lec::query_outcome(c, false)).exit_code, lec::kExitCex);
 }
 
+// A bmc divergence that needs only the free outputs of boxes on ONE side (a
+// netlist checked without its cell models) is a real counterexample (owner
+// ruling 2026-10-14); anything that could be a pairing failure is not.
+TEST(LecOutcome, OneSidedBoxDivergenceIsACounterexample) {
+  using lec::Outcome;
+  lec::Query_result r;
+  r.verdict        = Verdict::Undecided;
+  r.engine         = "auto";
+  r.detail         = "auto: every engine/profile arm was undecided; bmc:lazy=UNPAIRED: ...; matched portion DIFFERS (witness "
+                     "below; may be an artifact of the unmatched cut points)";
+  r.witness        = "first divergence at checked step 6/6: y(ref=1 impl=0)";
+  r.unmatched_impl = {"bbin:INVx1#o0:A", "bbin:INVx1#o1:A"};
+  EXPECT_EQ(lec::query_outcome(r, false), Outcome::Refuted_cex);
+  EXPECT_EQ(lec::outcome_info(lec::query_outcome(r, false)).exit_code, lec::kExitCex);
+
+  r.unmatched_ref = {"bbin:INVx1#u0:A"};
+  EXPECT_NE(lec::query_outcome(r, false), Outcome::Refuted_cex) << "boxes on both sides may be one unpaired cell";
+  r.unmatched_ref.clear();
+  r.unmatched_impl.push_back("nxt:q");
+  EXPECT_NE(lec::query_outcome(r, false), Outcome::Refuted_cex) << "one-sided state can make the divergence an artifact";
+  r.unmatched_impl.pop_back();
+  r.engine = "ind";
+  EXPECT_NE(lec::query_outcome(r, false), Outcome::Refuted_cex) << "an induction step starts from an arbitrary state";
+  r.engine = "auto";
+  r.witness.clear();
+  EXPECT_NE(lec::query_outcome(r, false), Outcome::Refuted_cex) << "no trace, no counterexample";
+  r.witness = "first divergence at checked step 6/6: y(ref=1 impl=0)";
+  r.detail  = "; matched portion EQUIVALENT (only the unmatched cut points above remain)";
+  EXPECT_NE(lec::query_outcome(r, false), Outcome::Refuted_cex) << "the common outputs agree";
+}
+
 TEST(VerifyOutcome, RowsFoldBySeverity) {
   using lec::Outcome;
   lec::Verify_result v;

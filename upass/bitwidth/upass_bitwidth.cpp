@@ -744,6 +744,14 @@ std::optional<Lnast_range> uPass_bitwidth::array_elem_envelope_of(std::string_vi
     r.unbounded = false;
     return r;
   }
+  // A Sub instance whose one output is an array: the handle IS that array, and
+  // its element type bounds a lane read (`h[k]`).
+  for (const auto n : {name, base}) {
+    if (const auto ae = runner_st->sub_array_output_elems.find(n); ae != runner_st->sub_array_output_elems.end()) {
+      const auto env = range_from_entry(ae->second.second, ae->second.first);
+      return env.is_unbounded() ? std::nullopt : std::optional<Lnast_range>(env);
+    }
+  }
   // A declared body array: the element envelope rides the root bundle's
   // internal __elem_max/__elem_min attrs (baked by the runner's declare
   // pre-step; [4][8]u8 -> u8).

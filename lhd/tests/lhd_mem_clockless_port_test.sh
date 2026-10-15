@@ -55,7 +55,7 @@ wait "$usyn_pid" || exit 1
 echo "PASS: lhd synth (abc and usyn) maps the memory"
 
 # 3. LEC: mapped netlist vs the compiled reference graph
-"$LHD" lec --impl lg:"$W/abc/net" --ref lg:"$W/abc/w/synth/lg" --lib lg:"$W/models" --top "$TOP.$TOP" \
+"$LHD" lec --set formal.effort=proof --impl lg:"$W/abc/net" --ref lg:"$W/abc/w/synth/lg" --lib lg:"$W/models" --top "$TOP.$TOP" \
     --workdir "$W/wl" -q --result-json "$W/lec.json" || fail "lec -> $(cat "$W/lec.json" 2>/dev/null)"
-grep -q '"verdict":"proven"' "$W/lec.json" || fail "netlist not PROVEN: $(cat "$W/lec.json")"
+grep -qE '"verdict":"proven-(full|bounded)"' "$W/lec.json" || fail "netlist not PROVEN: $(cat "$W/lec.json")"
 echo "PASS: abc netlist PROVEN equivalent to the compiled design"

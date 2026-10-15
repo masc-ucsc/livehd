@@ -597,6 +597,14 @@ struct Lec_options {
   // cone that stops at an opaque boundary names the CHILD's port. Empty means
   // every port is its own root — the pre-propagation behaviour.
   Clock_forest clock_forest;
+  // The IMPL side's own forest when the driver built one per side; empty means
+  // `clock_forest` serves both designs. Both are keyed by def NAME, and the two
+  // designs share names (the same top on each side), so one merged map let the
+  // ref's row for a port decide the impl's root for that port too: a ref whose
+  // unused `clock` input closed onto its only root `clk_b` scheduled the impl's
+  // `clock` registers on `clk_b` -- a register moved between two independent
+  // clocks came back PROVEN.
+  Clock_forest clock_forest_impl;
 
   // Input-space case-split (lec.partitions / lec.split): prove the combinational
   // miter one CONTROL-cofactor at a time, in parallel. `partitions` caps the
@@ -1093,6 +1101,29 @@ struct Verify_result {
          || std::any_of(r.unmatched_impl.begin(), r.unmatched_impl.end(), [](const std::string& n) { return is_port_cut_name(n); });
 }
 
+// A bmc divergence on a COMMON output whose only unmatched cut points are the
+// box points (bbin:/bbox:) of boxes that exist on ONE side -- a tech-mapped
+// netlist checked without its cell models, an undefined or trusted cell. Such
+// a box's outputs are free, and the boxed model is the contract, so the trace
+// is a real counterexample (owner ruling 2026-10-14: "a trace that needs only a
+// free blackbox/trusted-box output" is REFUTED-cex). Its one-sided box INPUT
+// points have nothing on the other side to compare against; leaving them out
+// only removes obligations, so it cannot create the divergence. Box points on
+// BOTH sides may be one box whose instances failed to pair (independent free
+// outputs for what is one cell): that stays an incomplete correspondence. An
+// induction-step witness starts from an arbitrary state and never counts.
+[[nodiscard]] inline bool one_sided_box_counterexample(const Query_result& r) {
+  if (r.verdict != Verdict::Undecided || r.unsupported || r.nothing_compared || r.witness.empty() || r.engine == "ind") {
+    return false;
+  }
+  if (r.unmatched_ref.empty() == r.unmatched_impl.empty()) {
+    return false;  // nothing unmatched (not this case), or unmatched points on both sides
+  }
+  const auto box  = [](const std::string& n) { return n.starts_with("bbin:") || n.starts_with("bbox:"); };
+  const auto& one = r.unmatched_ref.empty() ? r.unmatched_impl : r.unmatched_ref;
+  return std::all_of(one.begin(), one.end(), box) && r.detail.find("matched portion DIFFERS") != std::string::npos;
+}
+
 // The outcome of an equivalence result. A Refuted is a real counterexample; a
 // Proven names its strength. An undecided result with a one-sided top output
 // is an interface mismatch; an empty miter with no one-sided port (neither
@@ -1110,6 +1141,9 @@ struct Verify_result {
   }
   if (has_one_sided_port(r)) {
     return Outcome::Refuted_interface;
+  }
+  if (one_sided_box_counterexample(r)) {
+    return Outcome::Refuted_cex;
   }
   if (r.nothing_compared && !r.unsupported
       && ((r.unmatched_ref.empty() && r.unmatched_impl.empty()) || internal_state_only(r.unmatched_ref, r.unmatched_impl))) {

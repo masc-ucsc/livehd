@@ -89,7 +89,7 @@ rc=$?
 if [ $rc -eq 0 ]; then
   # If this ever passes, the gap is CLOSED -- say so loudly rather than silently
   # keeping a stale expectation, and check it proved for the right reason.
-  grep -q "PROVEN" <<<"$out" || fail "a latch-in-a-def run exited 0 without a PROVEN verdict"
+  grep -qE "^lec: .* PROVEN-(full|bounded)" <<<"$out" || fail "a latch-in-a-def run exited 0 without a PROVEN verdict"
   echo "NOTE: a latch inside a def now PROVES -- the gap is closed."
   echo "      Update this case to require proof when untrusted latch bodies are supported."
 else
@@ -200,7 +200,8 @@ echo "ok: a clock-gate cell inside a def is inlined and proven"
 # the user declared out of scope: "assume these two equal, do not compare them".
 # So a trusted clock-gate cell is NOT inlined, even though inlining is what
 # makes its gated flops encodable — and the run is allowed to come back
-# UNKNOWN. What it may never do is come back REFUTED.
+# undecided (a TIMEOUT or a REFUTED-<refusal>). What it may never do is come back
+# REFUTED-cex.
 #
 # That is not hypothetical. minion trusts `prim_clk_gate`, whose enable latch
 # carries no reset; the Verilog and Pyrope front-ends default it to 0 and 1.
@@ -218,9 +219,9 @@ out="$("$LHD" lec --set formal.effort=proof --impl "lg:$W/lg_hicgdeep_dm" --ref 
 # pattern, so the case would print "ok" without lec ever having run. Pin that it
 # REACHED a verdict first (the sibling cases 4/5a check $? for the same reason),
 # then that the verdict is not a refutation.
-grep -qaiE "PROVEN|TIMEOUT|UNSUPPORTED|UNDISCHARGED|UNCONFIRMED|UNPAIRED|UNCHECKED|VACUOUS|UNEXPLAINED" <<<"$out" \
+grep -qaE "^lec: .* (PROVEN-(full|bounded)|TESTED-sampled|TIMEOUT-(time|memory)|REFUTED-[a-z]+)" <<<"$out" \
   || { echo "$out" | tail -8; fail "case 5b never reached a lec verdict (build failure / refusal / crash) -- it cannot distinguish 'boxed and inconclusive' from 'never ran'"; }
-grep -qaiE '"verdict"[[:space:]]*:[[:space:]]*"refuted"' <<<"$out" \
+grep -qaiE '"verdict"[[:space:]]*:[[:space:]]*"refuted-cex"' <<<"$out" \
   && { echo "$out" | tail -6; fail "trusting the clock-gate cell produced a REFUTATION of two equivalent designs -- a trusted def must stay blackboxed, never be inlined into the compared cone"; }
 echo "ok: a trusted clock-gate cell stays boxed, reached a verdict, and did not refute"
 

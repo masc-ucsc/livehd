@@ -230,7 +230,7 @@ run compile lg:"$W/models" --emit-dir verilog:"$W/modelsv" --workdir "$W/w_model
 run compile lg:"$W/re" --top "$TOP" --emit-dir verilog:"$W/rev" --workdir "$W/w_rev"
 cat "$W/v_on/"*.v "$W/modelsv/"*.v > "$W/impl.v"
 cat "$W/rev/"*.v > "$W/ref.v"
-run lec --impl verilog:"$W/impl.v" --ref verilog:"$W/ref.v" --top "$TOP" --workdir "$W/w_lec"
+run lec --set formal.effort=proof --impl verilog:"$W/impl.v" --ref verilog:"$W/ref.v" --top "$TOP" --workdir "$W/w_lec"
 echo "PASS: boundary-sized netlist is LEC-equivalent to the partition twin"
 
 # 4. incremental: the cache holds the refined bodies; an all-hit run neither

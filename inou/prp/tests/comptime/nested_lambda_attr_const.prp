@@ -1,7 +1,7 @@
 /*
 :name: nested_lambda_attr_const
 :type: comptime
-:verifier_pass: 7
+:verifier_pass: 4
 :verifier_fail: 0
 :verifier_include_funcs: true
 */
@@ -13,6 +13,9 @@
 // change K (replaying `a.[bits]` inside `f` would read `f`'s `a`, K == 4: the
 // silent bug that made this an error before). Formerly
 // errors/nested_lambda_runtime_derived_const.prp.
+// The 4 discharged casserts are the top's and f's three, checked in f's own
+// definition with f's `a:U4` in scope: `f(a=...)` is a runtime call and stays a
+// Sub instance (compile.upass.inline=false), so no inlined copy counts them twice.
 pub mod nested_lambda_attr_const(a:U8) -> (o:U8@[0], p:U8@[0]) {
   comptime const K = a.[bits]
   const W = a.[bits]

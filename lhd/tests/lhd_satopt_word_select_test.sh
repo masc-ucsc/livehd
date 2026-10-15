@@ -40,9 +40,12 @@ assert on <= off * 1.001, f'satopt-on maps larger than satopt-off: {on} > {off}'
 PY
 
 "$LHD" pass liberty gensim "$LIB" --emit-dir "lg:$W/models" -q > /dev/null
+# A proof (formal.effort=proof), and the verdict must be PROVEN: a TIMEOUT
+# also exits 0, so the exit code alone is no gate.
 for s in on off; do
-  "$LHD" lec --impl "lg:$W/net$s" --ref "lg:$W/w$s/synth/lg" --lib "lg:$W/models" --top word_select.word_select \
-    --workdir "$W/lec$s" --result-json "$W/lec$s.json" -q > "$W/lec$s.txt" 2>&1 \
+  "$LHD" lec --set formal.effort=proof --impl "lg:$W/net$s" --ref "lg:$W/w$s/synth/lg" --lib "lg:$W/models" \
+    --top word_select.word_select --workdir "$W/lec$s" --result-json "$W/lec$s.json" -q > "$W/lec$s.txt" 2>&1 \
     || { cat "$W/lec$s.txt"; echo "FAIL: LEC satopt=$s"; exit 1; }
+  grep -q '"verdict":"proven-' "$W/lec$s.json" || { cat "$W/lec$s.json"; echo "FAIL: LEC satopt=$s not PROVEN"; exit 1; }
 done
 echo PASS

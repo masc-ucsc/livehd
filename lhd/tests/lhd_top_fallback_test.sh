@@ -52,7 +52,7 @@ grep -q 'top-entity-fallback' "$W/lntree.err" || fail "tool tree ln:: no top-ent
 
 # lec / semdiff per-side top pick (semdiff used to hard-error on the entity;
 # semdiff needs two DISTINCT lg: libraries, so diff a copy).
-run lec --impl lg:"$W/lg" --ref lg:"$W/lg" --top adder
+run lec --set formal.effort=proof --impl lg:"$W/lg" --ref lg:"$W/lg" --top adder
 cp -r "$W/lg" "$W/lg2"
 run pass semdiff --ref lg:"$W/lg" --impl lg:"$W/lg2" --top adder
 
@@ -104,7 +104,7 @@ run compile lg:"$W/selection-lg" --top selection_top --emit-dir verilog:"$W/sele
 grep -q 'module selection_top(' "$W/selected-v/"*.v || fail "selected top missing"
 grep -q 'module selection_leaf(' "$W/selected-v/"*.v || fail "selected child missing"
 ! grep -q 'module selection_unused' "$W/selected-v/"*.v || fail "unrelated module emitted"
-run lec --ref lg:"$W/selection-lg" --impl lg:"$W/selection-lg" --top selection_top \
+run lec --set formal.effort=proof --ref lg:"$W/selection-lg" --impl lg:"$W/selection-lg" --top selection_top \
   --set formal.solver=lgyosys --workdir "$W/selection-lec"
 ! grep -q 'module selection_unused' "$W/selection-lec/check_ref.v" || fail "LEC emitted unrelated module"
 ! grep -q 'module selection_unused' "$W/selection-lec/check_impl.v" || fail "LEC emitted unrelated module"

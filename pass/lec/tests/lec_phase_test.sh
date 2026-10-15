@@ -53,15 +53,21 @@ compile a2.v a2_lg cnt
 compile b1.v b1_lg dut
 compile b2.v b2_lg dut
 
-# verdict $impl $ref $top $phase  -> echoes PROVEN | REFUTED | UNKNOWN
+# final_word: the verdict word of the FINAL top-level `lec: '<top>' <WORD>` line
+# (pass/lec/property_types.hpp: PROVEN-full, PROVEN-bounded(n), TIMEOUT-time,
+# REFUTED-cex, REFUTED-unchecked, ...); empty when the run printed none.
+final_word() {
+  grep -aE "^lec: '[^']+' " | grep -oE " (PROVEN-full|PROVEN-bounded\([0-9]+\)|TESTED-sampled\([0-9]+\)|TIMEOUT-(time|memory)|REFUTED-(cex|interface|unsupported|unchecked|vacuous|unexplained))( |$)" | tail -1 | tr -d ' '
+}
+# verdict $impl $ref $top $phase  -> echoes PROVEN (full or bounded) | the final verdict word
 verdict() {
   phase_args=()
   [ "$4" = "after_reset" ] || phase_args=(${phase_args[@]+"${phase_args[@]}"})
   $LHD lec --set formal.effort=proof --impl "lg:$WORK/$1" --ref "lg:$WORK/$2" --top "$3" \
        --set formal.lec.hier=false --set formal.engine=bmc --set formal.bound=8 --set "formal.phase=$4" \
        --workdir "$WORK/q_${3}_$4_$$_$RANDOM" 2>&1 \
-    | grep -oE "PASS\\([0-9]+\\)|PROVEN equivalent|REFUTED \\(not equivalent\\)|TIMEOUT|UNSUPPORTED|UNDISCHARGED|UNCONFIRMED|UNPAIRED|UNCHECKED|VACUOUS|UNEXPLAINED" | sed -E 's/^(TIMEOUT|UNSUPPORTED|UNDISCHARGED|UNCONFIRMED|UNPAIRED|UNCHECKED|VACUOUS|UNEXPLAINED)$/UNDECIDED/' | head -1 \
-    | sed -E "s/PASS\\([0-9]+\\)/PROVEN equivalent/"   # PASS(n) is a pass; this test is about phase mechanics, not depth
+    | final_word \
+    | sed -E "s/^PROVEN-(full|bounded\\([0-9]+\\))$/PROVEN/"   # a bounded proof is a pass; this test is about phase mechanics, not depth
 }
 
 expect() {  # $1=label $2=got $3=want
@@ -70,18 +76,18 @@ expect() {  # $1=label $2=got $3=want
 }
 
 # pair A: equivalent only during reset
-expect "A just_reset"  "$(verdict a2_lg a1_lg cnt just_reset)"  "PROVEN equivalent"
-expect "A after_reset" "$(verdict a2_lg a1_lg cnt after_reset)" "REFUTED (not equivalent)"
+expect "A just_reset"  "$(verdict a2_lg a1_lg cnt just_reset)"  "PROVEN"
+expect "A after_reset" "$(verdict a2_lg a1_lg cnt after_reset)" "REFUTED-cex"
 
 # pair B: equivalent only while running (after reset)
-expect "B just_reset"  "$(verdict b2_lg b1_lg dut just_reset)"  "REFUTED (not equivalent)"
-expect "B after_reset" "$(verdict b2_lg b1_lg dut after_reset)" "PROVEN equivalent"
+expect "B just_reset"  "$(verdict b2_lg b1_lg dut just_reset)"  "REFUTED-cex"
+expect "B after_reset" "$(verdict b2_lg b1_lg dut after_reset)" "PROVEN"
 
 # `full` = just_reset AND after_reset: each pair fails one stage, so full REFUTES both;
 # a design compared against itself is equivalent in BOTH stages, so full PROVES it.
-expect "A full"      "$(verdict a2_lg a1_lg cnt full)" "REFUTED (not equivalent)"
-expect "B full"      "$(verdict b2_lg b1_lg dut full)" "REFUTED (not equivalent)"
-expect "self full"   "$(verdict a1_lg a1_lg cnt full)" "PROVEN equivalent"
+expect "A full"      "$(verdict a2_lg a1_lg cnt full)" "REFUTED-cex"
+expect "B full"      "$(verdict b2_lg b1_lg dut full)" "REFUTED-cex"
+expect "self full"   "$(verdict a1_lg a1_lg cnt full)" "PROVEN"
 
 # ---- pair C: slang -> Pyrope latch round trip ------------------------------
 # The high-phase latch captures an enable used LIVE by the low-phase latch.
@@ -118,8 +124,8 @@ elif ! $LHD compile "$WORK/c_prp/latch_pair.prp" --top latch_pair \
 else
   c_out=$($LHD lec --set formal.effort=proof --impl "lg:$WORK/c_impl_lg" --ref "lg:$WORK/c_ref_lg" --top latch_pair \
           --set formal.engine=ind --set formal.timeout=10 --workdir "$WORK/q_c" 2>&1)
-  if ! grep -qa "PROVEN equivalent" <<<"$c_out"; then
-    echo "FAIL: latch round trip was not PROVEN"; fail=1
+  if ! grep -qa "^lec: .* PROVEN-full" <<<"$c_out"; then
+    echo "FAIL: latch round trip was not PROVEN-full"; fail=1
   # Pin the EXACT proof arm. BOTH phase arms spell the word "microstep", so
   # matching that alone lets the proof drift between arms with no test turning
   # red. Expected arm here: the COMPOSED-PERIOD one, query.cpp's
@@ -133,7 +139,7 @@ else
   elif ! grep -qa "phase-inductive: one composed source period" <<<"$c_out"; then
     echo "FAIL: latch round trip was not proven on the composed-period phase arm"; fail=1
   else
-    echo "ok: latch round trip -> PROVEN equivalent (composed period)"
+    echo "ok: latch round trip -> PROVEN-full (composed period)"
   fi
 fi
 
@@ -176,12 +182,12 @@ if ! $LHD compile "$WORK/d.v" --reader slang --top latch_pair \
 else
   d_out=$($LHD lec --set formal.effort=proof --impl "lg:$WORK/d_lg" --ref "lg:$WORK/c_ref_lg" --top latch_pair \
           --set formal.engine=ind --set formal.timeout=10 --workdir "$WORK/q_d" 2>&1)
-  if ! grep -qa "PROVEN equivalent" <<<"$d_out"; then
-    echo "FAIL: latch spelling pair was not PROVEN"; fail=1
+  if ! grep -qa "^lec: .* PROVEN-full" <<<"$d_out"; then
+    echo "FAIL: latch spelling pair was not PROVEN-full"; fail=1
   elif ! grep -qa "phase-step induction" <<<"$d_out"; then
     echo "FAIL: latch spelling pair did not exercise phase-step induction"; fail=1
   else
-    echo "ok: latch spelling pair -> PROVEN equivalent (phase-step)"
+    echo "ok: latch spelling pair -> PROVEN-full (phase-step)"
   fi
 fi
 
@@ -229,24 +235,25 @@ module e_gated(input clk, input en, input d, output qg);
   assign qg = \g.l ;
 endmodule
 EOF
-# everdict <impl> <ref> <tag> [extra --set args] -> PROVEN | REFUTED | UNKNOWN
+# everdict <impl> <ref> <tag> [extra --set args] -> the final verdict word, with a
+# forced engine's undecided answers (TIMEOUT-*, REFUTED-unchecked) folded to UNDECIDED
 everdict() {
   local impl=$1 ref=$2 tag=$3
   shift 3
   $LHD lec --set formal.effort=proof --impl "$WORK/$impl" --ref "$WORK/$ref" --top e_gated --set formal.simfail_run=false "$@" \
        --workdir "$WORK/q_e_$tag" 2>&1 \
-    | grep -oE "PROVEN equivalent|REFUTED \\(not equivalent\\)|TIMEOUT|UNSUPPORTED|UNDISCHARGED|UNCONFIRMED|UNPAIRED|UNCHECKED|VACUOUS|UNEXPLAINED" | sed -E 's/^(TIMEOUT|UNSUPPORTED|UNDISCHARGED|UNCONFIRMED|UNPAIRED|UNCHECKED|VACUOUS|UNEXPLAINED)$/UNDECIDED/' | head -1 | cut -d' ' -f1
+    | final_word | sed -E 's/^(TIMEOUT-(time|memory)|REFUTED-unchecked)$/UNDECIDED/'
 }
 for s in hier flat; do
-  expect "E $s vs complemented ref (auto)" "$(everdict e_$s.v e_ref_bad.v ${s}_bad)" "REFUTED"
-  expect "E $s vs equal ref (auto)" "$(everdict e_$s.v e_ref_ok.v ${s}_ok)" "PROVEN"
+  expect "E $s vs complemented ref (auto)" "$(everdict e_$s.v e_ref_bad.v ${s}_bad)" "REFUTED-cex"
+  expect "E $s vs equal ref (auto)" "$(everdict e_$s.v e_ref_ok.v ${s}_ok)" "PROVEN-full"
 done
 # The induction arm alone (semdiff off, no BMC): the complemented pair must
 # stay open, and the equal pair must prove through the compared bridge.
 e_ind=(--set formal.engine=ind --set formal.semdiff=off --set formal.timeout=10)
 expect "E hier vs complemented ref (ind)" "$(everdict e_hier.v e_ref_bad.v hier_bad_ind "${e_ind[@]}")" "UNDECIDED"
 expect "E flat vs complemented ref (ind)" "$(everdict e_flat.v e_ref_bad.v flat_bad_ind "${e_ind[@]}")" "UNDECIDED"
-expect "E hier vs equal ref (ind)" "$(everdict e_hier.v e_ref_ok.v hier_ok_ind "${e_ind[@]}")" "PROVEN"
+expect "E hier vs equal ref (ind)" "$(everdict e_hier.v e_ref_ok.v hier_ok_ind "${e_ind[@]}")" "PROVEN-full"
 
 if [ $fail -ne 0 ]; then echo "lec_phase_test: FAILED"; exit 1; fi
 echo "lec_phase_test: PASSED"

@@ -165,11 +165,11 @@ lec() { # tag top impl ref extra...
 }
 expect_proven() { # tag
   grep -q '"status":"pass"' "$W/$1.json" || fail "$1: expected PROVEN, got: $(tail -2 "$W/$1.out")"
-  grep -qE "PASS\\(|PROVEN equivalent" "$W/$1.out" || fail "$1: no PROVEN/bounded line: $(tail -2 "$W/$1.out")"
+  grep -qE "^lec: .* PROVEN-(full|bounded)" "$W/$1.out" || fail "$1: no PROVEN/bounded line: $(tail -2 "$W/$1.out")"
 }
 expect_refuted() { # tag
   grep -q '"status":"fail"' "$W/$1.json" || fail "$1: expected REFUTED, got: $(tail -2 "$W/$1.out")"
-  grep -q "REFUTED" "$W/$1.out" || fail "$1: no REFUTED line: $(tail -2 "$W/$1.out")"
+  grep -q "REFUTED-cex" "$W/$1.out" || fail "$1: no REFUTED line: $(tail -2 "$W/$1.out")"
 }
 
 # 1. positive, both directions; the disclosure names the bundles.
@@ -197,12 +197,14 @@ lec neg_swap_bmc leaf lg_leaf_prp lg_swap --set formal.engine=bmc
 expect_refuted neg_swap_bmc
 echo "PASS: swapped fields / off-by-one / LSB-first input layout all REFUTED (MSB-first convention exercised)"
 
-# 4. width-sum mismatch: declined -> UNKNOWN with unmatched cut points, no
-#    crash, no proof, no refutation. (Non-strict: inconclusive is a warning.)
+# 4. width-sum mismatch: declined -> the bundle's top ports exist under a
+#    different name on each side, so the run is REFUTED-interface (exit 7) with
+#    the unmatched cut points named: no crash, no proof, no counterexample.
 lec neg_wmis leaf lg_leaf_prp lg_wmis
-grep -qE "UNPAIRED|UNCHECKED|UNSUPPORTED" "$W/neg_wmis.out" || fail "wmis: expected UNPAIRED/UNSUPPORTED, got: $(tail -2 "$W/neg_wmis.out")"
-grep -q "PROVEN equivalent" "$W/neg_wmis.out" && fail "wmis: width-sum mismatch must not PROVE"
-grep -q "REFUTED" "$W/neg_wmis.out" && fail "wmis: width-sum mismatch must not REFUTE"
+grep -qE "^lec: .* REFUTED-(interface|unsupported)" "$W/neg_wmis.out" || fail "wmis: expected REFUTED-interface/-unsupported, got: $(tail -2 "$W/neg_wmis.out")"
+grep -q '"exit_code":7' "$W/neg_wmis.json" || fail "wmis: a declined bundle must exit 7: $(cat "$W/neg_wmis.json")"
+grep -q "PROVEN-" "$W/neg_wmis.out" && fail "wmis: width-sum mismatch must not PROVE"
+grep -q "REFUTED-cex" "$W/neg_wmis.out" && fail "wmis: width-sum mismatch must not REFUTE"
 grep -q "cut point(s)" "$W/neg_wmis.out" || fail "wmis: unmatched cut points not reported: $(tail -2 "$W/neg_wmis.out")"
 echo "PASS: width-sum mismatch declines the bundle (undecided + unmatched cut points, no crash)"
 

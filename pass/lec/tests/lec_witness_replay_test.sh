@@ -65,12 +65,15 @@ EOF
 # workdirs (lec -> witness JSON -> replay sim, ~11s, nearly all of it the two
 # host clang builds the replay needs). Start it now so it overlaps the mini
 # chain; every assertion about it still runs in this shell, after the wait.
+# `only_impl` is an impl-only input that drives NOTHING (a one-sided top input
+# with no fanout is ignored); one that drove logic would be REFUTED-interface
+# (exit 7, no counterexample, so no witness to replay).
 cat > "$WORK/simpl.prp" <<'EOF'
 pub mod dut(`clock`:Clock, `reset`:Reset, io:(valid:U1, bits:(x:U4, y:U3, only_impl:U2))) -> (o:U8@[]) {
   reg cnt:U8:[reset_pin=`reset`] = 0
   o = cnt
   const pc:U4 = io.bits.x#+[..]
-  if io.valid != 0 { cnt = (cnt + pc + io.bits.y + io.bits.only_impl)#[0..=7] }
+  if io.valid != 0 { cnt = (cnt + pc + io.bits.y)#[0..=7] }
 }
 EOF
 cat > "$WORK/sref.prp" <<'EOF'
@@ -108,7 +111,7 @@ rm -rf "$W"
 OUT=$($LHD lec --set formal.effort=proof --ref "$WORK/mini.v" --impl "$WORK/mini_bug.prp" --workdir "$W" \
         --set sim.vcd_fake_delay=false 2>&1)
 
-ck "REFUTED"                 'echo "$OUT" | grep -q REFUTED'
+ck "REFUTED-cex"             'echo "$OUT" | grep -q "^lec: .* REFUTED-cex"'
 ck "wrote simfail_mini.prp"  '[ -f "$W/simfail_mini.prp" ]'
 ck "wrote simfail_mini.json" '[ -f "$W/simfail_mini.json" ]'
 ck "wrote simfail_mini.vcd"  '[ -s "$W/simfail_mini.vcd" ]'
@@ -208,7 +211,7 @@ ck "verdict names the divergence" 'echo "$OUT" | grep -q "o(ref=1 impl=2)"'
 # values it names.
 wait "$struct_pid" || true   # a REFUTED lec exits non-zero; the cks below judge it
 OUT2=$(cat "$WORK/out2.log")
-ck "struct: REFUTED"          'echo "$OUT2" | grep -q REFUTED'
+ck "struct: REFUTED-cex"      'echo "$OUT2" | grep -q "^lec: .* REFUTED-cex"'
 ck "struct: wrote the prp"    '[ -f "$WT/simfail_dut.prp" ]'
 ck "struct: wrote the vcd"    '[ -s "$WT/simfail_dut.vcd" ]'
 ck "struct: no writer round trip" '[ ! -d "$WT/lecfail_impl_prp" ] && [ ! -d "$WT/lecfail_ref_prp" ]'

@@ -32,14 +32,14 @@ for mode in "${modes[@]}"; do
     --set pass.abc.flatten=true --set lhd.jobs=1 ${flags[@]+"${flags[@]}"} \
     --emit-dir lg:"$W/$mode-lg" --emit verilog:"$W/$mode.v" --workdir "$W/$mode-work"
   run lec --impl lg:"$W/$mode-lg" --ref lg:"$W/source" --lib lg:"$W/models" --top memory_hierarchy \
-    --set formal.bound=3 --set formal.timeout=60 \
+    --set formal.effort=proof --set formal.bound=3 --set formal.timeout=60 \
     --workdir "$W/$mode-lec" --result-json "$W/$mode-lec.json"
   if [ "${NATIVE_MODE:-default}" = identities ] && [ "$mode" = true ]; then
     run synth lg:"$W/source" --top memory_hierarchy --set synth.liberty="$LIB" --set synth.opentimer=false \
       --set pass.abc.flatten=true --set lhd.jobs=1 --set pass.abc.memory=true \
       --emit-dir lg:"$W/warm-lg" --emit verilog:"$W/warm.v" --workdir "$W/$mode-work" --result-json "$W/warm.json"
     run lec --impl lg:"$W/warm-lg" --ref lg:"$W/source" --lib lg:"$W/models" --top memory_hierarchy \
-      --set formal.bound=3 --set formal.timeout=60 \
+      --set formal.effort=proof --set formal.bound=3 --set formal.timeout=60 \
       --workdir "$W/warm-lec" --result-json "$W/warm-lec.json"
     python3 - "$W/warm.json" "$W/warm-lec.json" <<'PYW'
 import json, sys
@@ -47,7 +47,8 @@ regions = json.load(open(sys.argv[1]))['qor']['abc']['regions']
 memories = [r for r in regions if r['module'].startswith('cgen_memory_')]
 assert memories and sum(r.get('instances', 1) for r in memories) == 2, memories
 assert all(r['cache'] == 'hit' for r in memories), memories
-assert json.load(open(sys.argv[2]))['lec']['verdict'] == 'proven'
+# formal.bound=3 is an intentionally bounded check: PROVEN-bounded is a proof.
+assert json.load(open(sys.argv[2]))['lec']['verdict'] in ('proven-full', 'proven-bounded')
 print('PASS: both lowered-memory implementations reuse their mapped bodies')
 PYW
   fi
@@ -73,7 +74,7 @@ for m in ('default','true','warm'):
     assert 'DFFx1 ' in texts[m] or 'always @(posedge' in texts[m],m
 for m in texts:
     r=json.loads((w/f'{m}-lec.json').read_text())['lec']
-    assert r['verdict']=='proven',(m,r)
+    assert r['verdict'] in ('proven-full','proven-bounded'),(m,r)
 print('PASS: stable memory instance identities across all three modes and parent flatten; bounded LEC proven')
 PY
 exit 0
@@ -81,7 +82,8 @@ fi
 python3 - "$W/$mode-lec.json" <<'PY'
 import json, sys
 r = json.load(open(sys.argv[1]))['lec']
-assert r['verdict'] == 'proven', r
+# formal.bound=3 is an intentionally bounded check: PROVEN-bounded is a proof.
+assert r['verdict'] in ('proven-full', 'proven-bounded'), r
 PY
 
 # Native values check initialization and writes without inventing reset

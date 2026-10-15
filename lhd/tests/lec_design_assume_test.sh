@@ -42,7 +42,7 @@ if ! "$LHD" lec --set formal.effort=proof --ref "$W/ref_top.prp" --impl "$W/impl
   cat "$W/assumed.out" >&2
   fail "hierarchical LEC did not consume the child occurrence assumption"
 fi
-grep -qE 'PASS\(|PROVEN equivalent' "$W/assumed.out" \
+grep -qE '^lec: .* PROVEN-(full|bounded)' "$W/assumed.out" \
   || { cat "$W/assumed.out" >&2; fail "assumed-domain run exited cleanly without a proof"; }
 grep -q 'unchecked assume' "$W/assumed.out" \
   || { cat "$W/assumed.out" >&2; fail "LEC did not disclose the active design assumption"; }
@@ -59,7 +59,7 @@ if "$LHD" lec --set formal.effort=proof --ref "$W/ref_plain_top.prp" --impl "$W/
   cat "$W/plain.out" >&2
   fail "the out-of-domain implementation mismatch passed without assumptions"
 fi
-grep -q 'REFUTED' "$W/plain.out" \
+grep -q 'REFUTED-cex' "$W/plain.out" \
   || { cat "$W/plain.out" >&2; fail "the no-assumption mismatch did not report REFUTED"; }
 echo "PASS: removing the assumption exposes the mismatch"
 
@@ -91,7 +91,7 @@ grep -q '"code":"assume-refuted"' "$W/uncheckable.out" \
   || { cat "$W/uncheckable.out" >&2; fail "the plain top IO assume must be checked and refuted"; }
 grep -q 'assume_nocheck' "$W/uncheckable.out" \
   || { cat "$W/uncheckable.out" >&2; fail "the refute must name the sanctioned spelling"; }
-grep -q "^lec: .* REFUTED" "$W/uncheckable.out" \
+grep -q "^lec: .* REFUTED-cex" "$W/uncheckable.out" \
   || { cat "$W/uncheckable.out" >&2; fail "lec must compare the full input space and refute"; }
 # The same on the --ref side, which is lowered FIRST: its assume-refuted is a
 # deferred error (it fails the run) and must not abort the impl side's
@@ -103,7 +103,7 @@ if "$LHD" lec --set formal.effort=proof --ref "$W/uncheckable.prp" --impl "$W/go
 fi
 grep -q '"code":"assume-refuted"' "$W/uncheckable_ref.out" \
   || { cat "$W/uncheckable_ref.out" >&2; fail "the ref side's plain top IO assume must be checked and refuted"; }
-grep -q "^lec: .* REFUTED" "$W/uncheckable_ref.out" \
+grep -q "^lec: .* REFUTED-cex" "$W/uncheckable_ref.out" \
   || { cat "$W/uncheckable_ref.out" >&2; fail "lec must compare the full input space and refute with the assume on the ref side"; }
 echo "PASS: lec checks a plain top IO assume instead of proving under it (either side)"
 

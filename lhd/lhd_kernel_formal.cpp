@@ -195,9 +195,12 @@ struct Top_outcome {
     // correspondence -- is the same case). "NO reason" stays a bug.
     const std::string_view d   = r.cause_detail.empty() ? r.detail : r.cause_detail;
     const auto             has = [&](std::string_view needle) { return d.find(needle) != std::string_view::npos; };
+    // "no inductive base" is the same give-up by name: two memories with
+    // different power-on contents leave the shared memory cut no base, and the
+    // BMC leg that decides it is exactly the escalation the options forbade.
     if (!has("NO reason")
         && (livehd::lec::internal_state_only(r.unmatched_ref, r.unmatched_impl) || has("single-step CEX")
-            || has("correspondence") || has("cut point"))) {
+            || has("correspondence") || has("cut point") || has("no inductive base"))) {
       kind = livehd::lec::Outcome::Refuted_unchecked;
     }
   }
@@ -1375,6 +1378,11 @@ static livehd::lec::Query_result lec_hierarchical(Result& res, Eprp_var& ref_var
     // mechanism that pairs the prim_rf_*_preview family's `preview_clk_i` +
     // `rf_clk_i`.
     absl::flat_hash_map<std::string, std::string> port_uf;  // port -> representative
+    // Whether the selected top is instantiated anywhere in the loaded library,
+    // and whether any such site drives its `clock` port (THE IMPLICIT-CLOCK
+    // PORT rule below needs both answers).
+    bool top_has_site     = false;
+    bool top_clock_driven = false;
     {
       std::function<std::string(const std::string&)> find = [&](const std::string& x) -> std::string {
         auto it = port_uf.find(x);
@@ -1398,6 +1406,7 @@ static livehd::lec::Query_result lec_hierarchical(Result& res, Eprp_var& ref_var
             continue;
           }
           absl::flat_hash_map<std::string, std::vector<std::string>> by_net;
+          top_has_site = true;
           for (auto sink : node.inp_sorted_pins()) {
             std::string port;
             for (const auto& d : sio->get_input_pin_decls()) {
@@ -1412,6 +1421,9 @@ static livehd::lec::Query_result lec_hierarchical(Result& res, Eprp_var& ref_var
               const auto cr = livehd::latch_contract::control_root(drv);
               if (port.empty() || cr.net.is_invalid()) {
                 continue;
+              }
+              if (port == "clock") {
+                top_clock_driven = true;
               }
               // Keyed by (net, BIT): control_root follows a bit select to the
               // whole net, so `.a(clks[0]), .b(clks[1])` would union two
@@ -1554,7 +1566,16 @@ static livehd::lec::Query_result lec_hierarchical(Result& res, Eprp_var& ref_var
       // present, `clock` is that root. Deliberately narrow — with two other
       // roots there is nothing unique to attach it to and it stays its own,
       // which keeps a genuinely multi-clock module an honest refusal.
-      {
+      //
+      // ONLY for a top the library instantiates without ever driving its
+      // `clock`: that port is then the auto-wired implicit clock no site
+      // spells. On the DESIGN top (no site at all) `clock` is a primary input
+      // like any other, and two top clock inputs are two independent clocks of
+      // the miter's environment. Merging them there scheduled both on one
+      // microstep sequence -- an undisclosed "the clocks are tied" assumption:
+      // `mod derived(clock:Clock, clk_b:Clock)` with a register moved from
+      // `clock` to `clk_b` came back PROVEN-full (the sampled run refutes it).
+      if (top_has_site && !top_clock_driven) {
         std::string other;
         bool        unique = true;
         for (const auto& [pn, r] : row) {
@@ -1631,25 +1652,11 @@ static livehd::lec::Query_result lec_hierarchical(Result& res, Eprp_var& ref_var
           }
         }
       }
-      // Same implicit-clock rule for every def, once its bound ports are known.
-      for (auto& [dname, row] : forest.port_root) {
-        std::string other;
-        bool        unique = true;
-        for (const auto& [pn, r] : row) {
-          if (pn.empty() || pn == "clock" || r == "\x03ambiguous") {
-            continue;
-          }
-          if (other.empty()) {
-            other = r;
-          } else if (other != r) {
-            unique = false;
-            break;
-          }
-        }
-        if (unique && !other.empty() && row.count("clock") != 0) {
-          row["clock"] = other;
-        }
-      }
+      // (No implicit-clock rewrite here. A child's `clock` row entry exists only
+      // when a site DRIVES that port, and then the site's root is the fact:
+      // overriding it with the def's other clock root merged two independently
+      // driven clocks -- and re-merged the design top's own two clock inputs,
+      // whose row this loop also visits.)
       // A def's IMPLICIT clock is the root reaching it -- well defined when its
       // clock ports all carry ONE root.
       for (auto& [dname, row] : forest.port_root) {
@@ -2558,14 +2565,12 @@ static livehd::lec::Query_result lec_hierarchical(Result& res, Eprp_var& ref_var
     // The design-wide clock forest. Carried by VALUE so it survives the isolated
     // worker fork; both sides' rows go in, since plan_phases runs over each
     // design's own graphs and looks each up by that design's def name.
+    // One forest PER SIDE: the two designs share def names (the same top on
+    // each side), so a merged map let one side's row decide the other side's
+    // roots (see Lec_options::clock_forest_impl).
     ensure_forests();
-    o.clock_forest = ref_forest;
-    for (const auto& [dname, row] : impl_forest.port_root) {
-      auto& dst = o.clock_forest.port_root[dname];
-      for (const auto& [pn, r] : row) {
-        dst.emplace(pn, r);
-      }
-    }
+    o.clock_forest      = ref_forest;
+    o.clock_forest_impl = impl_forest;
     auto              t0               = std::chrono::steady_clock::now();
     // A Liberty-model (`--lib`) comparison pits a gate-level netlist against
     // RTL. Under proven-child collapse the boxes are an abstraction the cone
@@ -5326,6 +5331,7 @@ void lec_command(Options& opts, Result& res) {
   // lhd.stats: per-def (name, conflicts) ranking, filled by the hierarchical
   // driver only (the flat path is one def, so the totals already say it all).
   std::vector<std::pair<std::string, int64_t>> cvc5_hot;
+  bool                                         sampled_verdict = false;
   if (sampled_effort) {
     // Sample the requested top with concrete children. A tested child is never
     // a premise, and cached proofs must not replace the requested fresh work.
@@ -5334,7 +5340,31 @@ void lec_command(Options& opts, Result& res) {
     sample_opts.partitions = 1;
     sample_opts.split      = "none";
     res.recipe_steps.emplace_back(std::format("pass.lec effort:{} engine:bmc", livehd::lec::effort_name(effort)));
-    r = livehd::lec::prove_equal_isolated(ref_g.get(), impl_g.get(), sample_opts, &sub_lib);
+    r               = livehd::lec::prove_equal_isolated(ref_g.get(), impl_g.get(), sample_opts, &sub_lib);
+    sampled_verdict = true;
+    // The sampler is ONE engine (concrete-hierarchy BMC). When it cannot model
+    // the design -- a collapsed/trusted/ignored box, a phase schedule only the
+    // inductive engine composes -- that is not "no engine can model it"
+    // (REFUTED-unsupported, owner ruling 1): escalate to the proof engines,
+    // which either decide it or name the feature none of them can model.
+    if (r.verdict == livehd::lec::Verdict::Undecided && r.unsupported) {
+      const std::string why = r.detail;
+      std::print("lec: sampled testing ({}) cannot run on this design; escalating to the proof engines (formal.effort=proof): {}\n",
+                 livehd::lec::effort_name(effort),
+                 why);
+      res.recipe_steps.emplace_back(
+          std::format("pass.lec effort:{} -> proof (sampling cannot model the design)", livehd::lec::effort_name(effort)));
+      effort   = livehd::lec::Effort::Legacy;
+      o.effort = effort;
+      if (o.timeout > 0) {
+        o._deadline = std::chrono::steady_clock::now() + std::chrono::seconds(o.timeout);
+      }
+      r               = livehd::lec::Query_result{};
+      sampled_verdict = false;
+    }
+  }
+  if (sampled_verdict) {
+    // The sampled verdict stands.
   } else if (label("hier", "true") != "false" && label("hier", "true") != "0") {
     // Bottom-up: LEC every def leaves-first under `auto`, collapsing proven
     // children. The driver emits a per-def progress line itself; the TOP def's
@@ -5812,7 +5842,14 @@ void lec_command(Options& opts, Result& res) {
                                : std::string{});
       case livehd::lec::Outcome::Timeout_time: return "formal.timeout reached; neither proved nor refuted";
       case livehd::lec::Outcome::Timeout_memory: return "out of memory; neither proved nor refuted";
-      case livehd::lec::Outcome::Refuted_cex: return "not equivalent";
+      case livehd::lec::Outcome::Refuted_cex:
+        if (livehd::lec::one_sided_box_counterexample(r)) {
+          return std::format(
+              "not equivalent: the counterexample needs only free outputs of blackbox cell(s) that exist on the {} side alone; "
+              "the boxed model is the contract (give their definitions, e.g. --lib, to check the cells)",
+              r.unmatched_ref.empty() ? "impl" : "ref");
+        }
+        return "not equivalent";
       case livehd::lec::Outcome::Refuted_interface: return "the top port names differ";
       case livehd::lec::Outcome::Refuted_unsupported: return "no engine can model or check this design";
       case livehd::lec::Outcome::Refuted_unchecked: return "the selected options cannot decide it";
@@ -5894,8 +5931,9 @@ void lec_command(Options& opts, Result& res) {
     // model is the contract -- but the source replay flattens the real leaf,
     // which can neither drive that free output nor show a box-input difference
     // the leaf ignores. A replay that runs clean would read as "spurious".
+    // A one-sided box (an undefined cell) has no source to replay at all.
     const bool on_box = !o.trust.empty() || r.witness.find("bbin:") != std::string::npos
-                        || r.witness.find("bbox:") != std::string::npos;
+                        || r.witness.find("bbox:") != std::string::npos || livehd::lec::one_sided_box_counterexample(r);
     if (simfail && lec_single_edge_slots > 1) {
       // 2f-latch M8 step 2d, same reason as the verify half: the generator
       // re-emits the un-normalized sides and drives the trace at the reported
@@ -5910,8 +5948,9 @@ void lec_command(Options& opts, Result& res) {
     } else if (simfail && on_box) {
       livehd::diag::info("pass.lec", "simfail-skip", "io")
           .msg(
-              "formal.simfail testbench not generated: the counterexample rests on a boxed (formal.lec.trust) model, "
-              "and a source replay cannot drive a box output or show a box-input difference the real leaf ignores")
+              "formal.simfail testbench not generated: the counterexample rests on a boxed model (formal.lec.trust, or "
+              "cells with no definition), and a source replay cannot drive a box output or show a box-input difference "
+              "the real leaf ignores")
           .emit();
     } else if (simfail) {
       const std::string top_name = lecfail_simple_name(impl_g->get_name());

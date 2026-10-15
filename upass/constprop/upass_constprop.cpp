@@ -5028,6 +5028,18 @@ void uPass_constprop::process_tuple_get() {
     }
   }
 
+  // A lane of a Sub instance's single ARRAY output (`h[0]` of `-> (rows:[2]U8)`):
+  // never the handle's own whole-port scalar slot, whose facts (the packed
+  // port's range) `h.0` used to pick up. Keep the runtime value, like any other
+  // lane; lnast.tolg reads the lane and upass.bitwidth bounds it by the element
+  // type (Symbol_table::sub_array_output_elems).
+  if (first_captured && first_is_index && st().sub_array_output_elems.contains(src)) {
+    if (st().has_trivial(src)) {
+      store_trivial(dst, st().get_trivial(src));
+    }
+    return;
+  }
+
   // Enum entry read (`Mammal.rat`, `Color.Red`): alias the CARRIER bundle —
   // its `__enumentry` identity attr is what enum-aware `in` / `string()` /
   // interpolation read. The trivial path below would copy only the raw

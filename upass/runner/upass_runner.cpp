@@ -5980,6 +5980,24 @@ void uPass_runner::stash_sub_instance_port_facts(std::string_view handle, const 
   }
   if (const auto& outs = callee->io_meta().outputs; outs.size() == 1 && !outs.front().name.empty()) {
     symbol_table_.single_output_port.insert_or_assign(std::string(handle), outs.front().name);
+    // The handle IS that output; when it is an ARRAY, `h[k]` reads lane k --
+    // never the handle's own (packed, whole-port) scalar slot -- and the
+    // element type bounds it (upass.constprop / upass.bitwidth tuple_get).
+    if (const auto& ae = outs.front(); ae.array_size > 0) {
+      int64_t row = 1;
+      for (const auto d : ae.inner_dims) {
+        row *= d;
+      }
+      const int64_t           bits = row > 0 && ae.elem_bits % row == 0 ? ae.elem_bits / row : 0;
+      Symbol_table::Port_range elem;  // invalid bounds: the element is not a known integer
+      if (bits > 0 && ae.kind != Io_kind::boolean) {
+        elem = {upass::min_from_bits(static_cast<uint32_t>(bits), ae.elem_signed),
+                upass::max_from_bits(static_cast<uint32_t>(bits), ae.elem_signed)};
+      }
+      symbol_table_.sub_array_output_elems.insert_or_assign(std::string(handle), std::move(elem));
+    } else {
+      symbol_table_.sub_array_output_elems.erase(std::string(handle));
+    }
     if (Lnast::is_tmp(handle)) {
       const auto cn = callee->get_top_module_name();
       symbol_table_.call_result_label.insert_or_assign(
@@ -5992,19 +6010,42 @@ void uPass_runner::stash_sub_instance_port_facts(std::string_view handle, const 
     symbol_table_.call_result_callee.insert_or_assign(std::string(handle),
                                                       cn.substr(cn.rfind('.') == std::string_view::npos ? 0 : cn.rfind('.') + 1));
   }
-  const auto& outs  = callee->io_meta().outputs;
-  auto&       names = symbol_table_.sub_output_names[std::string(handle)];
+  const auto& outs = callee->io_meta().outputs;
+  // A `comb` call is a VALUE: when its one output is a tuple, the result IS
+  // that tuple (06-functions "Binding return values", no `t.r` level), so a
+  // kept instance answers `t.a` for its output `r.a` as well. The prefix of
+  // that lone tuple output, when every (unquoted) output leaf shares it.
+  std::string unwrap;
+  if (callee->get_lambda_kind() == "comb") {
+    for (const auto& oe : outs) {
+      const auto dot = oe.name.find('.');
+      if (dot == std::string::npos || dot == 0 || oe.name.front() == '`'
+          || (!unwrap.empty() && std::string_view(oe.name).substr(0, dot) != unwrap)) {
+        unwrap.clear();
+        break;
+      }
+      unwrap = oe.name.substr(0, dot);
+    }
+  }
+  const auto unwrapped = [&](const std::string& oname) {
+    return unwrap.empty() || oname.size() <= unwrap.size() + 1 ? std::string{} : oname.substr(unwrap.size() + 1);
+  };
+  auto& names = symbol_table_.sub_output_names[std::string(handle)];
   names.clear();
   for (const auto& oe : outs) {
     // Unquoted, as a field read spells it (a Verilog port rides `` `rsp.data` ``).
     const bool quoted = oe.name.size() >= 2 && oe.name.front() == '`' && oe.name.back() == '`';
     names.push_back(quoted ? oe.name.substr(1, oe.name.size() - 2) : oe.name);
+    if (auto alt = unwrapped(oe.name); !alt.empty()) {
+      names.push_back(std::move(alt));
+    }
   }
   for (std::size_t oi = 0; oi < outs.size(); ++oi) {
     auto oe = outs[oi];
     if (oe.name.empty()) {
       continue;
     }
+    const auto alt = unwrapped(oe.name);  // the unwrapped spelling of a lone tuple output's leaf
     // A generic-width output (`o:unsigned(bits=N)`) of a specialized template:
     // its width is this call's folded bound, not the template's unbounded port.
     // An array output's folded bound is its ELEMENT's, never the port's.
@@ -6038,14 +6079,44 @@ void uPass_runner::stash_sub_instance_port_facts(std::string_view handle, const 
       symbol_table_.opaque_sub_outputs[handle].insert(oe.name);
     }
     if (oe.kind == Io_kind::integer && oe.array_size == 0) {
-      auto& ports = symbol_table_.sub_output_ranges[handle];
+      std::optional<Symbol_table::Port_range> range;
       if (oe.has_range) {
-        ports.insert_or_assign(oe.name, std::pair{*Dlop::create_integer(oe.range_min), *Dlop::create_integer(oe.range_max)});
+        range = std::pair{*Dlop::create_integer(oe.range_min), *Dlop::create_integer(oe.range_max)};
       } else if (oe.wide_range_min && oe.wide_range_max) {
-        ports.insert_or_assign(oe.name, std::pair{*oe.wide_range_min, *oe.wide_range_max});
+        range = std::pair{*oe.wide_range_min, *oe.wide_range_max};
       } else if (oe.bits > 0) {
         const auto w = static_cast<uint32_t>(oe.bits);
-        ports.insert_or_assign(oe.name, std::pair{upass::min_from_bits(w, oe.is_signed), upass::max_from_bits(w, oe.is_signed)});
+        range        = std::pair{upass::min_from_bits(w, oe.is_signed), upass::max_from_bits(w, oe.is_signed)};
+      }
+      // A typed `comb` is a pure function of its typed inputs, and every
+      // argument is held to its parameter's type, so the range its OWN walk
+      // derived for this output (its bw_meta, published as that walk ended)
+      // bounds the instance output at every call site -- the same range the
+      // inlined body derives, so keeping the Sub (compile.upass.inline=false)
+      // does not make a fitting program overflow. Only narrows: the declared
+      // type stays the envelope. A callee not walked yet keeps its declared
+      // range. (A `mod`/`pipe` port stays the boundary; its UNTYPED outputs
+      // carry the derived range through io_meta, ruling 28.)
+      if (range && callee->get_lambda_kind() == "comb" && !callee->is_template()) {
+        const auto& derived = callee->bw_meta().ranges;
+        if (const auto dr = derived.find(oe.name); dr != derived.end() && !dr->second.unbounded) {
+          const auto dmin = *Dlop::create_integer(dr->second.min);
+          const auto dmax = *Dlop::create_integer(dr->second.max);
+          if (dmin.gt_op(range->first)->is_known_true()) {
+            range->first = dmin;
+          }
+          if (dmax.lt_op(range->second)->is_known_true()) {
+            range->second = dmax;
+          }
+        }
+      }
+      if (range) {
+        auto& ports = symbol_table_.sub_output_ranges[handle];
+        ports.insert_or_assign(oe.name, *range);
+        // (A ONE-port map also answers a bare read of the handle: keep it one.)
+        if (!alt.empty() && outs.size() > 1) {
+          ports.insert_or_assign(alt, *range);
+        }
       }
     }
     Symbol_table::Pending_decl pd;
@@ -6074,6 +6145,11 @@ void uPass_runner::stash_sub_instance_port_facts(std::string_view handle, const 
     }
     symbol_table_.pending_decl_facts.insert_or_assign(key, pd);
     symbol_table_.pending_keys_by_root[std::string(handle)].push_back(key);
+    if (!alt.empty()) {
+      auto alt_key = absl::StrCat(handle, ".", alt);
+      symbol_table_.pending_decl_facts.insert_or_assign(alt_key, pd);
+      symbol_table_.pending_keys_by_root[std::string(handle)].push_back(std::move(alt_key));
+    }
   }
 }
 
@@ -7603,6 +7679,25 @@ bool uPass_runner::try_inline_func_call() {
   // runtime-vs-comptime decision is deferred to the post-gather check below: an
   // all-constant call still inlines so it folds to a comptime value (casserts /
   // comptime evaluation keep working — there is no runtime instance to keep).
+  //
+  // Splice only when NEEDED (user ruling 2, 2026-10-14). An eligible runtime
+  // call stays a Sub instance unless THIS call needs the callee's body:
+  //   (a) its TUPLE result is used in a way the instance boundary cannot carry
+  //       -- read whole (an operand, an argument, a tuple member, a dynamic
+  //       index, a sub-tuple `t.ex`), assigned whole to a typed/`reg`/`wire`
+  //       tuple or an io port, or bound to a variable that is written again
+  //       (a conditional whole reassign `mut f = g(x); if s { f = g(y) }`, an
+  //       if-expression over call results). comb_call_needs_splice decides
+  //       this per call from the source tree; a result read only through its
+  //       outputs (`t.a`, a destructure, a one-output tuple's unwrapped
+  //       `t.a` for `-> (r:(a, b))`) keeps the instance;
+  //   (b) an argument is untyped/generic: such a callee is a template, never
+  //       Sub-convertible (set_function_registry), so it always specializes
+  //       by splicing;
+  //   (c) a combinational loop through the instance is broken later, by
+  //       pass.legalize (a structural repair, not an inline decision).
+  // Never "inline everything": a scalar result, or a tuple result read field
+  // by field, keeps its module boundary.
   auto sub_instance_eligible = [&](const std::shared_ptr<Lnast>& c) {
     // 2f-nested_type — this used to ALSO force a Sub instance whenever any
     // output leaf had two or more dots, because "the splice ABI currently
@@ -8299,8 +8394,10 @@ bool uPass_runner::try_inline_func_call() {
 
   // compile.upass.inline=false (see consider_sub_instance above): decline the
   // splice for a runtime-argument call so tolg emits a Sub module instance. An
-  // all-constant call falls through and inlines, folding to a comptime value.
-  if (consider_sub_instance && !all_actuals_const) {
+  // all-constant call falls through and inlines, folding to a comptime value,
+  // and so does a call whose tuple result the instance cannot carry (rule (a)
+  // in sub_instance_eligible).
+  if (consider_sub_instance && !all_actuals_const && !comb_call_needs_splice(call_nid, io)) {
     // Same re-emit as the mod/pipe block above, deferred to HERE because a comb
     // only becomes a Sub once the runtime-actual check settles it (an
     // all-const call keeps the splice path so it folds to a comptime value —
@@ -14745,6 +14842,284 @@ bool uPass_runner::return_matches(const Lnast_tree_io& io, const absl::flat_hash
   return true;
 }
 
+const uPass_runner::Result_use_index& uPass_runner::result_use_index(const Lnast& ln) {
+  // One walk of the source tree answers every call in it (the walk below is
+  // O(tree); a per-call scan of the rest of the body would be quadratic).
+  auto& slot = result_use_cache_[&ln];
+  if (slot) {
+    return *slot;
+  }
+  slot        = std::make_unique<Result_use_index>();
+  auto& index = *slot;
+
+  const auto base_of = [](std::string_view name) {
+    if (const auto p = name.find("___ssa_"); p != std::string_view::npos) {
+      name = name.substr(0, p);  // every SSA version is the same variable
+    }
+    return std::string(name);
+  };
+  const auto is_ref = [&](Lnast_nid n) { return !n.is_invalid() && Lnast_ntype::is_ref(ln.get_type(n)); };
+  const auto is_leaf
+      = [&](Lnast_nid n) { return n.is_invalid() || Lnast_ntype::is_ref(ln.get_type(n)) || Lnast_ntype::is_const(ln.get_type(n)); };
+  const auto note_write = [&](Lnast_nid n) {
+    if (is_ref(n)) {
+      ++index[base_of(ln.get_name(n))].writes;
+    }
+  };
+  const auto note_bound = [&](std::string_view name) {
+    index[base_of(name)].bound = true;
+    if (const auto dot = name.find('.'); dot != std::string_view::npos && dot > 0) {
+      index[base_of(name.substr(0, dot))].bound = true;  // a flattened tuple port `r.a` is port `r`
+    }
+  };
+
+  std::vector<Lnast_nid> stack;
+  // A value child: a ref is a whole-value read, a nested expression is walked.
+  const auto value_child = [&](Lnast_nid c) {
+    if (is_ref(c)) {
+      index[base_of(ln.get_name(c))].whole_use = true;
+    } else if (!is_leaf(c)) {
+      stack.push_back(c);
+    }
+  };
+  // A `key = value` binding under a call or a tuple literal: the key names a
+  // parameter / field (never a variable write); the value is read whole.
+  const auto binding = [&](Lnast_nid store) {
+    const auto key = ln.get_first_child(store);
+    if (key.is_invalid()) {
+      return;
+    }
+    for (auto c = ln.get_sibling_next(key); !c.is_invalid(); c = ln.get_sibling_next(c)) {
+      value_child(c);
+    }
+  };
+
+  stack.push_back(ln.get_root());
+  while (!stack.empty()) {
+    const auto node = stack.back();
+    stack.pop_back();
+    const auto t  = ln.get_type(node);
+    const auto c0 = ln.get_first_child(node);
+    if (c0.is_invalid() || Lnast_ntype::is_func_def(t) || Lnast_ntype::is_comp_type_lambda(t)) {
+      continue;  // a leaf, or a nested lambda (its own name scope)
+    }
+    if (Lnast_ntype::is_io(t)) {
+      // The unit's own ports: a copy into one is an output write, never an alias.
+      std::vector<Lnast_nid> io_stack{node};
+      while (!io_stack.empty()) {
+        const auto n = io_stack.back();
+        io_stack.pop_back();
+        for (auto c = ln.get_first_child(n); !c.is_invalid(); c = ln.get_sibling_next(c)) {
+          if (Lnast_ntype::is_store(ln.get_type(c))) {
+            if (const auto k = ln.get_first_child(c); is_ref(k)) {
+              note_bound(ln.get_name(k));
+            }
+          } else if (!is_leaf(c)) {
+            io_stack.push_back(c);
+          }
+        }
+      }
+      continue;
+    }
+    if (Lnast_ntype::is_declare(t)) {
+      // declare(var, type, mode): a type, or a storage the copy cannot alias
+      // (`reg`, `wire`, `stage`), makes the destination a value of its own.
+      if (!is_ref(c0)) {
+        continue;
+      }
+      const auto ty   = ln.get_sibling_next(c0);
+      const auto mode = ty.is_invalid() ? ty : ln.get_sibling_next(ty);
+      bool       own  = !ty.is_invalid() && !Lnast_ntype::is_prim_type_none(ln.get_type(ty));
+      if (!mode.is_invalid() && Lnast_ntype::is_const(ln.get_type(mode))) {
+        const auto m = ln.get_name(mode);
+        own          = own || (!m.empty() && m != "mut" && m != "const");
+      }
+      if (own) {
+        note_bound(ln.get_name(c0));  // a detupled `declare(c.addr, …)` types `c`
+      }
+      continue;
+    }
+    if (Lnast_ntype::is_type_spec(t)) {
+      if (is_ref(c0)) {
+        note_bound(ln.get_name(c0));
+      }
+      continue;
+    }
+    if (Lnast_ntype::is_tuple_get(t)) {
+      note_write(c0);
+      const auto src = ln.get_sibling_next(c0);
+      if (!is_ref(src)) {
+        value_child(src);
+        continue;
+      }
+      std::string path;
+      bool        const_path = true;
+      for (auto ix = ln.get_sibling_next(src); !ix.is_invalid(); ix = ln.get_sibling_next(ix)) {
+        if (!Lnast_ntype::is_const(ln.get_type(ix))) {
+          const_path = false;
+          value_child(ix);
+          continue;
+        }
+        const auto v = Dlop::from_pyrope(ln.get_name(ix));
+        if (!v || v->is_invalid()) {
+          const_path = false;
+          continue;
+        }
+        if (!path.empty()) {
+          path += '.';
+        }
+        path += v->to_field();
+      }
+      auto& inf = index[base_of(ln.get_name(src))];
+      if (const_path && !path.empty()) {
+        inf.fields.push_back(std::move(path));
+      } else {
+        inf.whole_use = true;  // a runtime index reads the whole value
+      }
+      continue;
+    }
+    if (Lnast_ntype::is_store(t)) {
+      note_write(c0);
+      const auto c1 = ln.get_sibling_next(c0);
+      if (is_ref(c0) && is_ref(c1) && ln.get_sibling_next(c1).is_invalid()) {
+        auto dst = base_of(ln.get_name(c0));  // plain copy: `dst` aliases `c1`
+        index[base_of(ln.get_name(c1))].aliases.push_back(std::move(dst));
+        continue;
+      }
+      for (auto c = c1; !c.is_invalid(); c = ln.get_sibling_next(c)) {
+        value_child(c);
+      }
+      continue;
+    }
+    if (Lnast_ntype::is_func_call(t) || Lnast_ntype::is_tuple_add(t) || Lnast_ntype::is_tuple_concat(t)) {
+      note_write(c0);
+      auto c = ln.get_sibling_next(c0);
+      if (Lnast_ntype::is_func_call(t) && !c.is_invalid()) {
+        c = ln.get_sibling_next(c);  // the callee name is not a value read
+      }
+      for (; !c.is_invalid(); c = ln.get_sibling_next(c)) {
+        if (Lnast_ntype::is_store(ln.get_type(c))) {
+          binding(c);
+        } else {
+          value_child(c);
+        }
+      }
+      continue;
+    }
+    const bool writes_dst = Lnast_ntype::is_primitive_op(t) && !Lnast_ntype::is_attr_set(t) && !Lnast_ntype::is_range(t)
+                            && !Lnast_ntype::is_stages(t) && !Lnast_ntype::is_timecheck(t);
+    if (writes_dst) {
+      note_write(c0);
+    }
+    for (auto c = writes_dst || Lnast_ntype::is_attr_set(t) ? ln.get_sibling_next(c0) : c0; !c.is_invalid();
+         c = ln.get_sibling_next(c)) {
+      value_child(c);
+    }
+  }
+  return index;
+}
+
+bool uPass_runner::comb_call_needs_splice(Lnast_nid call_nid, const Lnast_tree_io& callee_io) {
+  // A scalar result (one output, no tuple leaves) is a plain value on either
+  // side of the boundary: any use of it is carried by the instance.
+  std::vector<std::string_view> leaves;
+  bool                          tuple_shaped = callee_io.outputs.size() > 1;
+  for (const auto& o : callee_io.outputs) {
+    std::string_view n = o.name;
+    if (n.size() >= 2 && n.front() == '`' && n.back() == '`') {
+      n = n.substr(1, n.size() - 2);
+    }
+    leaves.push_back(n);
+    tuple_shaped = tuple_shaped || n.find('.') != std::string_view::npos;
+  }
+  if (!tuple_shaped) {
+    return false;
+  }
+  // A lone TUPLE output auto-unwraps (06-functions "Binding return values"):
+  // `t.a` reads output `r.a` of `-> (r:(a, b))`.
+  std::string_view unwrap;
+  for (const auto n : leaves) {
+    const auto dot = n.find('.');
+    if (dot == std::string_view::npos || dot == 0 || (!unwrap.empty() && n.substr(0, dot) != unwrap)) {
+      unwrap = {};
+      break;
+    }
+    unwrap = n.substr(0, dot);
+  }
+  // true when `path` names a SUB-tuple (a level above some flattened leaves):
+  // that read is a tuple value, which no single output pin carries.
+  const auto match = [&](std::string_view p) -> std::optional<bool> {
+    if (std::find(leaves.begin(), leaves.end(), p) != leaves.end()) {
+      return false;
+    }
+    for (const auto l : leaves) {
+      if (l.size() > p.size() && l.starts_with(p) && l[p.size()] == '.') {
+        return true;
+      }
+    }
+    return std::nullopt;
+  };
+  const auto names_sub_tuple = [&](std::string_view path) {
+    if (const auto r = match(path)) {
+      return *r;
+    }
+    if (!unwrap.empty()) {
+      if (const auto r = match(absl::StrCat(unwrap, ".", path))) {
+        return *r;
+      }
+    }
+    return false;  // no such output: upass.constprop reports the unknown field
+  };
+
+  const auto& ln  = *lm->get_lnast();
+  const auto  dst = ln.get_first_child(call_nid);
+  if (dst.is_invalid() || !Lnast_ntype::is_ref(ln.get_type(dst))) {
+    return false;
+  }
+  const auto& index = result_use_index(ln);
+  // A port of this unit (also once upass.ssa dropped the io node: io_meta keeps
+  // the flattened leaves `o.a`): a copy into one is a whole output write.
+  const auto is_port = [&](std::string_view name) {
+    const auto& io  = ln.io_meta();
+    const auto  hit = [&](const Lnast_io_entry& e) {
+      return e.name == name || (e.name.size() > name.size() && e.name.starts_with(name) && e.name[name.size()] == '.');
+    };
+    return std::any_of(io.inputs.begin(), io.inputs.end(), hit) || std::any_of(io.outputs.begin(), io.outputs.end(), hit);
+  };
+  std::string root(ln.get_name(dst));
+  if (const auto p = root.find("___ssa_"); p != std::string::npos) {
+    root.resize(p);
+  }
+  // Follow the result through its plain copies. Each copy must be the one
+  // write of an untyped `mut`/`const`/temp: a second write (a conditional or
+  // later whole reassign) or a typed/storage/port destination needs the tuple
+  // VALUE, which only the spliced body has.
+  absl::flat_hash_set<std::string> seen;
+  std::vector<std::string>         work{root};
+  while (!work.empty()) {
+    auto name = std::move(work.back());
+    work.pop_back();
+    if (!seen.insert(name).second) {
+      continue;
+    }
+    const auto it = index.find(name);
+    if (it == index.end()) {
+      continue;
+    }
+    const auto& inf = it->second;
+    if (inf.whole_use || inf.writes > 1 || (name != root && (inf.bound || is_port(name)))) {
+      return true;
+    }
+    for (const auto& f : inf.fields) {
+      if (names_sub_tuple(f)) {
+        return true;
+      }
+    }
+    work.insert(work.end(), inf.aliases.begin(), inf.aliases.end());
+  }
+  return false;
+}
+
 // ── init constructor hook ─────────────────────────────────────────────────────
 
 std::vector<std::string> uPass_runner::init_candidates_of(std::string_view tn) {
@@ -15704,6 +16079,7 @@ void uPass_runner::run() {
   symbol_table_.instance_handles.clear();
   symbol_table_.opaque_sub_outputs.clear();
   symbol_table_.sub_output_names.clear();
+  symbol_table_.sub_array_output_elems.clear();
   symbol_table_.nil_seeded.clear();
   symbol_table_.uninitialized.clear();
   symbol_table_.field_touched.clear();
@@ -17866,6 +18242,11 @@ void uPass_runner::process_lnast() {
             if (const auto on = symbol_table_.sub_output_names.find(rhs_name); on != symbol_table_.sub_output_names.end()) {
               auto names = on->second;  // by value: the insert below can rehash
               symbol_table_.sub_output_names.insert_or_assign(self_dst, std::move(names));
+            }
+            if (const auto ae = symbol_table_.sub_array_output_elems.find(rhs_name);
+                ae != symbol_table_.sub_array_output_elems.end()) {
+              auto elem = ae->second;  // by value: the insert below can rehash
+              symbol_table_.sub_array_output_elems.insert_or_assign(self_dst, std::move(elem));
             }
           }
           // An io port is a value, never a function, even when some comb

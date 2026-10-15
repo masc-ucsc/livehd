@@ -48,7 +48,7 @@ EOF
 OUT="$W/ok.out"
 "$LHD" formal verify "$W/ok.sv" --top ok --set formal.bound=20 --workdir "$W/wo" --diag-fmt pretty >"$OUT" 2>&1 \
   || fail "a property disabled during reset must prove: $(cat "$OUT")"
-grep -q 'PROVEN' "$OUT" || fail "expected PROVEN: $(cat "$OUT")"
+grep -qE "^formal verify: '[^']*' PROVEN-(full|bounded)" "$OUT" || fail "expected PROVEN: $(cat "$OUT")"
 
 # ---- a claim TRUE during reset and FALSE after must REFUTE -----------------
 # This is the vacuity direction. b is 0 throughout reset and 1 once rst clears,
@@ -63,8 +63,9 @@ endmodule
 EOF
 OUT="$W/bad.out"
 "$LHD" formal verify "$W/bad.sv" --top bad --set formal.bound=20 --workdir "$W/wb" --diag-fmt pretty >"$OUT" 2>&1
-[ $? -ne 0 ] || fail "a property that is false AFTER reset must refute, not pass vacuously: $(cat "$OUT")"
-grep -q 'REFUTED' "$OUT" || fail "expected REFUTED, got: $(cat "$OUT")"
+RC=$?
+[ "$RC" -eq 10 ] || fail "a property that is false AFTER reset must refute, not pass vacuously: (rc=$RC, want the counterexample class 10) $(cat "$OUT")"
+grep -q "^formal verify: '[^']*' REFUTED-cex" "$OUT" || fail "expected REFUTED, got: $(cat "$OUT")"
 
 # ---- the disable condition composes with the rest of the property ----------
 # Two disable terms and a $past body: the shape the lhdverif assert_concurrent
@@ -81,6 +82,6 @@ EOF
 OUT="$W/past.out"
 "$LHD" formal verify "$W/past.sv" --top past --set formal.bound=20 --workdir "$W/wp" --diag-fmt pretty >"$OUT" 2>&1 \
   || fail "disable iff over a \$past body must prove: $(cat "$OUT")"
-grep -q 'PROVEN' "$OUT" || fail "expected PROVEN for the \$past case: $(cat "$OUT")"
+grep -qE "^formal verify: '[^']*' PROVEN-(full|bounded)" "$OUT" || fail "expected PROVEN for the \$past case: $(cat "$OUT")"
 
 echo "PASS: disable iff discharges the property while its condition holds"

@@ -59,7 +59,7 @@ verdict() { grep -o '"lec":{[^}]*}' "$1"; }
 
 rc=$(lec_text good "$W/net.v")
 [ "$rc" -eq 0 ] || fail "good: text-path LEC exited $rc: $(verdict "$W/lec_good.json")"
-grep -q '"verdict":"proven"' "$W/lec_good.json" || fail "good: not PROVEN: $(verdict "$W/lec_good.json")"
+grep -q '"verdict":"proven-full"' "$W/lec_good.json" || fail "good: not PROVEN: $(verdict "$W/lec_good.json")"
 grep -q '"bounded":false' "$W/lec_good.json" \
   || fail "good: only BOUNDED -- the rot[i] cells were not paired with rot: $(verdict "$W/lec_good.json")"
 ! grep -q 'tier-2 unpaired state' "$W/lec_good.log" || fail "good: state left unpaired: $(grep 'unpaired state' "$W/lec_good.log")"
@@ -107,10 +107,10 @@ done
 wait
 for how in swap invert busy; do
   [ "$(cat "$W/rc_$how")" -ne 0 ] || fail "$how: LEC exited 0 on a broken netlist: $(verdict "$W/lec_$how.json")"
-  grep -q '"verdict":"refuted"' "$W/lec_$how.json" || fail "$how: expected REFUTED, got $(verdict "$W/lec_$how.json")"
+  grep -q '"verdict":"refuted-cex"' "$W/lec_$how.json" || fail "$how: expected REFUTED, got $(verdict "$W/lec_$how.json")"
   echo "PASS: $how mutant is REFUTED"
 done
-! grep -q '"verdict":"refuted"' "$W/lec_rename.json" \
+! grep -q '"verdict":"refuted-' "$W/lec_rename.json" \
   || fail "rename: an equivalent netlist with exchanged names was REFUTED (pairing treated as an assumption)"
 echo "PASS: exchanged bit names are only a wrong hint (no refutation): $(verdict "$W/lec_rename.json")"
 

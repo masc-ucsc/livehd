@@ -81,7 +81,7 @@ for entry in "${DESIGNS[@]}"; do
     || fail "$FIX: partition emitted no <def>__c<id> region module"
   grep -qE "__(c[0-9]+|a_[0-9a-f]+)_r[0-9]+" "$D/post.v" && fail "$FIX: packed color was split into per-cloud _r modules"
 
-  run lec --impl verilog:"$D/post.v" --ref verilog:"$D/ref.v" --top "$TOP" --workdir "$D/c"
+  run lec --set formal.effort=proof --impl verilog:"$D/post.v" --ref verilog:"$D/ref.v" --top "$TOP" --workdir "$D/c"
   echo "PASS: $FIX cones -> partition -> LEC-equivalent"
 done
 
@@ -98,7 +98,7 @@ for MODE in false pair; do
   LC_ALL=C grep -raq -- "\"forward\":\"$MODE\"" "$D/lg" || fail "forward=$MODE not recorded in coloring_info"
   run pass partition --top hier_seq.top lg:"$D/lg" --emit-dir lg:"$D/part" --workdir "$D/w4"
   run compile lg:"$D/part" --top hier_seq.top --emit verilog:"$D/post.v" --workdir "$D/w5"
-  run lec --impl verilog:"$D/post.v" --ref verilog:"$D/ref.v" --top hier_seq.top --workdir "$D/c"
+  run lec --set formal.effort=proof --impl verilog:"$D/post.v" --ref verilog:"$D/ref.v" --top hier_seq.top --workdir "$D/c"
   echo "PASS: cones forward=$MODE -> partition -> LEC-equivalent"
 done
 
@@ -209,7 +209,7 @@ run pass color synth --set color.synth.min_color_nodes=0 lg:"$D/lg_off" --top ct
 LC_ALL=C grep -raq '"ctrl_cones":false' "$D/lg_off" || fail 'explicit ctrl_cones=false ignored'
 run pass partition lg:"$D/lg" --top ctrl_shared --emit-dir lg:"$D/part" --workdir "$D/w3"
 run compile lg:"$D/part" --top ctrl_shared --emit verilog:"$D/post.v" --workdir "$D/w4"
-run lec --impl verilog:"$D/post.v" --ref verilog:"$D/ref.v" --top ctrl_shared --workdir "$D/lec"
+run lec --set formal.effort=proof --impl verilog:"$D/post.v" --ref verilog:"$D/ref.v" --top ctrl_shared --workdir "$D/lec"
 run synth "$D/ref.v" --top ctrl_shared --workdir "$D/syn" --set synth.liberty="$LIB" --set synth.opentimer=false  --set color.synth.max_gate=40 --emit verilog:"$D/mapped.v"
 python3 - "$D/syn/synth/qor.json" <<'PY' || fail 'missing control-tier QoR rows'
 import json,sys
@@ -217,7 +217,7 @@ q=json.load(open(sys.argv[1]));assert any(r['ctrl'] for r in q['regions'])
 PY
 run pass liberty gensim "$LIB" --emit-dir lg:"$D/models" --emit verilog:"$D/models.v" --workdir "$D/models-work"
 cat "$D/models.v" >> "$D/mapped.v"
-run lec --impl verilog:"$D/mapped.v" --ref verilog:"$D/ref.v" --top ctrl_shared --workdir "$D/mapped_lec"
+run lec --set formal.effort=proof --impl verilog:"$D/mapped.v" --ref verilog:"$D/ref.v" --top ctrl_shared --workdir "$D/mapped_lec"
 echo 'PASS: merged mux groups, partition and ABC remain equivalent'
 
 
@@ -250,10 +250,10 @@ LC_ALL=C grep -raq '"enable_groups":0' "$D/lg_merged" || fail 'the enable closur
 run pass color synth --set color.synth.min_color_nodes=0 lg:"$D/lg" --top ctrl_families   --set color.synth.max_gate=40 --workdir "$D/w2"
 run pass partition lg:"$D/lg" --top ctrl_families --emit-dir lg:"$D/part" --workdir "$D/w3"
 run compile lg:"$D/part" --top ctrl_families --emit verilog:"$D/post.v" --workdir "$D/w4"
-run lec --impl verilog:"$D/post.v" --ref verilog:"$D/ref.v" --top ctrl_families --workdir "$D/lec"
+run lec --set formal.effort=proof --impl verilog:"$D/post.v" --ref verilog:"$D/ref.v" --top ctrl_families --workdir "$D/lec"
 run synth "$D/ref.v" --top ctrl_families --workdir "$D/syn" --set synth.liberty="$LIB" --set synth.opentimer=false   --set color.synth.max_gate=40 --emit verilog:"$D/mapped.v"
 cat "$W/ctrl_shared/models.v" >> "$D/mapped.v"
-run lec --impl verilog:"$D/mapped.v" --ref verilog:"$D/ref.v" --top ctrl_families --workdir "$D/mapped_lec"
+run lec --set formal.effort=proof --impl verilog:"$D/mapped.v" --ref verilog:"$D/ref.v" --top ctrl_families --workdir "$D/mapped_lec"
 echo 'PASS: mux chains and shared mux/enable control groups remain equivalent after partition and ABC'
 
 # Constant shifts between muxes are internal wiring of the same control group.
@@ -277,8 +277,8 @@ run compile "$D/ref.v" --top ctrl_normalizer --emit-dir lg:"$D/lg" --workdir "$D
 run pass color synth --set color.synth.min_color_nodes=0 lg:"$D/lg" --top ctrl_normalizer  --workdir "$D/w2"
 run pass partition lg:"$D/lg" --top ctrl_normalizer --emit-dir lg:"$D/part" --workdir "$D/w3"
 run compile lg:"$D/part" --top ctrl_normalizer --emit verilog:"$D/post.v" --workdir "$D/w4"
-run lec --impl verilog:"$D/post.v" --ref verilog:"$D/ref.v" --top ctrl_normalizer --workdir "$D/lec"
+run lec --set formal.effort=proof --impl verilog:"$D/post.v" --ref verilog:"$D/ref.v" --top ctrl_normalizer --workdir "$D/lec"
 run synth "$D/ref.v" --top ctrl_normalizer --workdir "$D/syn" --set synth.liberty="$LIB" --set synth.opentimer=false --emit verilog:"$D/mapped.v"
 cat "$W/ctrl_shared/models.v" >> "$D/mapped.v"
-run lec --impl verilog:"$D/mapped.v" --ref verilog:"$D/ref.v" --top ctrl_normalizer --workdir "$D/mapped_lec"
+run lec --set formal.effort=proof --impl verilog:"$D/mapped.v" --ref verilog:"$D/ref.v" --top ctrl_normalizer --workdir "$D/mapped_lec"
 echo 'PASS: default mux groups preserve normalizer wiring through partition and ABC'

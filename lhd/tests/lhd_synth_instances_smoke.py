@@ -134,9 +134,10 @@ def cold_run(label, directory):
 
 
 def prove(label, directory):
-    value = run(label, ["lec", "--impl", "lg:" + str(directory / "synth/net"), "--ref", "verilog:" + str(reference),
+    value = run(label, ["lec", "--set", "formal.effort=proof", "--impl", "lg:" + str(directory / "synth/net"),
+                        "--ref", "verilog:" + str(reference),
                         "--lib", "lg:" + str(root / "models"), "--top", "top", "--workdir", str(root / label)])
-    assert value["lec"]["verdict"] == "proven" and value["lec"]["solver"] == "cvc5", (label, value)
+    assert value["lec"]["verdict"] == "proven-full" and value["lec"]["solver"] == "cvc5", (label, value)
 
 
 work = root / "incremental"

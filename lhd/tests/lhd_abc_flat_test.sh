@@ -102,7 +102,7 @@ done
 
 cat "$D/netv/"*.v "$D/modelsv/"*.v > "$D/impl.v"
 cat "$D/rev/"*.v > "$D/ref.v"
-run lec --impl verilog:"$D/impl.v" --ref verilog:"$D/ref.v" --top "$TOP" --workdir "$D/wc"
+run lec --set formal.effort=proof --impl verilog:"$D/impl.v" --ref verilog:"$D/ref.v" --top "$TOP" --workdir "$D/wc"
 echo "PASS: flat netlist LEC-equivalent to the flat original-logic twin"
 
 # Flop-name preservation through the flatten: abc_flat_names' registers are
@@ -141,7 +141,7 @@ done
 ! grep -hqE "DFFx1 \\\\?g[0-9]+_" "$D2/netv/"*.v || fail "anonymous g<id>_<cell> flop leaked (original register names must survive)"
 cat "$D2/netv/"*.v "$D/modelsv/"*.v > "$D2/impl.v"
 cat "$D2/rev/"*.v > "$D2/ref.v"
-run lec --impl verilog:"$D2/impl.v" --ref verilog:"$D2/ref.v" --top "$TOP2" --workdir "$D2/wc"
+run lec --set formal.effort=proof --impl verilog:"$D2/impl.v" --ref verilog:"$D2/ref.v" --top "$TOP2" --workdir "$D2/wc"
 echo "PASS: registers keep their hierarchical names through the flat tech-map (LEC-proven)"
 
 # A CONSTANT actual on a child's input port must survive the flatten.
@@ -185,7 +185,7 @@ run compile lg:"$D3/net" --top "$TOP3" --emit-dir verilog:"$D3/netv" --workdir "
 run compile lg:"$D3/re" --top "$TOP3" --emit-dir verilog:"$D3/rev" --workdir "$D3/w6"
 cat "$D3/netv/"*.v "$D/modelsv/"*.v > "$D3/impl.v"
 cat "$D3/rev/"*.v > "$D3/ref.v"
-run lec --impl verilog:"$D3/impl.v" --ref verilog:"$D3/ref.v" --top "$TOP3" \
+run lec --set formal.effort=proof --impl verilog:"$D3/impl.v" --ref verilog:"$D3/ref.v" --top "$TOP3" \
     --workdir "$D3/wc"
 echo "PASS: a constant instance-port actual survives the whole-design flatten (LEC-proven)"
 

@@ -9,10 +9,10 @@
 #     (assume(acc.count <= 5)) with provenance comments;
 #   * formal_report.json mined[] carries the same facts as machine records
 #     (status=inductive, pyrope text, the stuck obligation among targets);
-#   * EXIT POLICY : an undecided run is a FAILURE,
-#     not a pass — the stuck run exits 7 ("unsupported": the TOOL ran out, the
-#     design is not disproved) and says so actionably, while STILL writing its
-#     mining artifacts so an agent loop can read them off the failing run.
+#   * EXIT POLICY : a budget-limited run is TIMEOUT-time — exit 0 plus a
+#     formal-timeout-time warning (the TOOL ran out, the design is neither
+#     proved nor disproved) that says so actionably, while STILL writing its
+#     mining artifacts so an agent loop can read them off the stuck run.
 #   * ROUND-TRIP: re-running with the mined block as a sidecar re-proves each
 #     mined assume (prove-then-use: "checked assume(s): ... proven (used)");
 #   * STALENESS: after a design edit that falsifies the mined fact (wrap at 7),
@@ -22,11 +22,11 @@
 # The stuck obligation is hard BY CONSTRUCTION, not budget-limited: over u32
 # operands `(a*b)*(count+1) == a*b*count + a*b` bit-blasts to a 64x33 multiplier
 # distributivity miter. The identical design with u4 operands is PROVEN
-# inductively in ~2s; u8/u10/u12 are already UNKNOWN at 60s per query, and u32
-# stays UNKNOWN at 120s per query. The permanent UNKNOWN is the whole point of
+# inductively in ~2s; u8/u10/u12 already TIMEOUT at 60s per query, and u32
+# stays undecided at 120s per query. The permanent TIMEOUT is the whole point of
 # the fixture (something must stay open for mining to have a target) — do NOT
 # try to "fix" it by raising formal.timeout. The short budgets below are enough
-# to establish UNKNOWN while leaving most of this test's time for mining.
+# to establish TIMEOUT-time while leaving most of this test's time for mining.
 
 set -u
 
@@ -34,10 +34,10 @@ LHD=lhd/lhd
 W="${TEST_TMPDIR:-/tmp/lhd_formal_mine_$$}"
 mkdir -p "$W"
 
-# lhd::exit_code_for (lhd/lhd_meta.cpp): distinct class -> code, so a caller can
-# tell a TOOL limitation from a DESIGN result. The two this test discriminates:
-RC_INCONCLUSIVE=7   # class "unsupported" — solver gave up; nothing proved, nothing disproved
-RC_REFUTED=10       # class "equiv_fail"  — a real counterexample exists
+# Verdict exit codes (pass/lec/property_types.hpp Outcome): a caller can tell a
+# time limit from a DESIGN result. The two this test discriminates:
+RC_TIMEOUT=0        # TIMEOUT-time — the budget ran out; nothing proved, nothing disproved (+ warning)
+RC_REFUTED=10       # REFUTED-cex  — a real counterexample exists
 
 fail() {
   echo "FAIL: $*" >&2
@@ -66,16 +66,18 @@ OUT="$W/mine.out"
   --set formal.min_timeout=1 --set formal.spec_mining_timeout=2 --set formal.engine=bmc \
   --set formal.mine=speculative --workdir "$WD" >"$OUT" 2>&1
 RC=$?
-# Exit policy: an inconclusive run must NOT exit 0 (a gate built on
-# this run could not otherwise tell it from a proof), and must NOT be reported as a
-# refutation either — the design is undecided, not disproved.
-[ "$RC" -eq "$RC_INCONCLUSIVE" ] \
-  || fail "the stuck run must exit $RC_INCONCLUSIVE (undecided, not a pass and not a refutation); got rc=$RC: $(cat "$OUT")"
-grep -q "could not decide 'miner.miner'" "$OUT" || fail "the strict failure must name the undecided design: $(cat "$OUT")"
-grep -q 'hard with count' "$OUT" || fail "the strict failure must name the stuck obligation: $(cat "$OUT")"
-grep -q 'raise --set formal.timeout' "$OUT" || fail "the strict failure must say the budget ran out (actionable): $(cat "$OUT")"
-# The mining artifacts are written BEFORE the strict exit: the agent loop that
-# consumes them only ever runs on stuck designs, so a failing run must still emit.
+# Exit policy (owner ruling): a budget-limited run is TIMEOUT-time — exit 0 with a
+# formal-timeout-time warning. It must NOT read as a proof (the verdict word and
+# the warning say so) and must NOT be reported as a refutation either — the
+# design is undecided, not disproved.
+[ "$RC" -eq "$RC_TIMEOUT" ] \
+  || fail "the stuck run must exit $RC_TIMEOUT (TIMEOUT-time: not a refutation, not a refusal); got rc=$RC: $(cat "$OUT")"
+grep -q "^formal verify: 'miner.miner' TIMEOUT-time" "$OUT" || fail "the stuck run must report TIMEOUT-time for the design: $(cat "$OUT")"
+grep -q '"code":"formal-timeout-time"' "$OUT" || fail "a TIMEOUT-time run must warn (formal-timeout-time): $(cat "$OUT")"
+grep -q "'hard with count'\": TIMEOUT-time" "$OUT" || fail "the timeout must name the stuck obligation: $(cat "$OUT")"
+grep -q 'raise --set formal.timeout' "$OUT" || fail "the timeout must say the budget ran out (actionable): $(cat "$OUT")"
+# The mining artifacts are written for the undecided run: the agent loop that
+# consumes them only ever runs on stuck designs, so a timed-out run must emit.
 grep -qE 'mined [1-9][0-9]* inductive invariant' "$OUT" || fail "mining must report inductive survivors: $(cat "$OUT")"
 [ -s "$WD/formal_mined.prp" ] || fail "formal_mined.prp must be written: $(cat "$OUT")"
 grep -q 'AUTO-GENERATED by `lhd formal verify` (mined invariants)' "$WD/formal_mined.prp" || fail "mined block must carry provenance"
@@ -91,23 +93,25 @@ tight = [m for m in ind if m["pyrope"] == "acc.count <= 5"]
 assert tight, ind
 assert "count" in tight[0]["keys"]
 assert any("hard with count" in json.dumps(o) or True for o in d["obligations"])  # obligations present
-stuck = [o["id"] for o in d["obligations"] if o["verdict"] == "unknown"]
+stuck = [o["id"] for o in d["obligations"] if o["verdict"] == "timeout-time"]
 assert stuck and any(t in stuck for t in tight[0]["targets"]), (stuck, tight[0]["targets"])
 assert all(m["status"] in ("inductive", "speculative") for m in d["mined"])
 PYEOF
 
 # Round-trip: the mined block re-parses as a sidecar; its assumes are INTERNAL
 # (over design state), get RE-PROVEN, and constrain the remaining obligations.
-# The hard obligation is still stuck, so the run is inconclusive (rc=7) — what
+# The hard obligation is still stuck, so the run is TIMEOUT-time (rc=0) — what
 # matters is that adding the mined block does NOT turn it into a refutation
 # (rc=10) and that the assumes are proven and used.
 OUT="$W/roundtrip.out"
 "$LHD" formal verify "$W/miner.prp" "$WD/formal_mined.prp" --top miner --set formal.bound=3 \
   --set formal.timeout=1 --set formal.min_timeout=1 --set formal.engine=bmc >"$OUT" 2>&1
 RC=$?
-[ "$RC" -eq "$RC_INCONCLUSIVE" ] \
-  || fail "the round-trip must stay merely inconclusive (rc=$RC_INCONCLUSIVE), not break the run; got rc=$RC: $(cat "$OUT")"
-grep -q '\[miner.mined\].*PROVEN' "$OUT" || fail "the mined assume must re-prove on use: $(cat "$OUT")"
+[ "$RC" -eq "$RC_TIMEOUT" ] \
+  || fail "the round-trip must stay merely TIMEOUT-time (rc=$RC_TIMEOUT), not break the run; got rc=$RC: $(cat "$OUT")"
+grep -q "^formal verify: 'miner.miner' TIMEOUT-time" "$OUT" \
+  || fail "the round-trip must stay TIMEOUT-time on the stuck obligation: $(cat "$OUT")"
+grep -qE '\[miner.mined\]: PROVEN-(full|bounded)' "$OUT" || fail "the mined assume must re-prove on use: $(cat "$OUT")"
 grep -qE 'checked assume\(s\): [1-9][0-9]* proven \(used\)' "$OUT" || fail "the ledger must show the mined assumes as used: $(cat "$OUT")"
 
 # Staleness: edit the design so the mined fact is FALSE (wrap at 7): the stale
@@ -115,9 +119,9 @@ grep -qE 'checked assume\(s\): [1-9][0-9]* proven \(used\)' "$OUT" || fail "the 
 # The hard obligation is swapped for an easy one so the budget FREEZE cannot
 # stop the assume's deepening before its refuting cycle (a frozen assume stays
 # honestly disclosed as bounded — but this case pins the refutation itself).
-# rc must be the REFUTED class, not merely non-zero: an
-# inconclusive also exits non-zero, so only the exact code separates "the mined
-# fact is disproved" from "the solver gave up".
+# rc must be the REFUTED-cex class, not merely non-zero: a refusal
+# (REFUTED-unsupported, rc 7) also exits non-zero, so only the exact code
+# separates "the mined fact is disproved" from "the tool could not check it".
 sed -e 's/count == 5/count == 7/' \
     -e 's/assert(.*hard with count.*/assert(count != 200, "easy")/' "$W/miner.prp" >"$W/miner7.prp"
 OUT="$W/stale.out"
@@ -126,6 +130,6 @@ OUT="$W/stale.out"
 RC=$?
 [ "$RC" -eq "$RC_REFUTED" ] \
   || fail "a stale mined assume must REFUTE the run after the edit (want rc=$RC_REFUTED, got rc=$RC): $(cat "$OUT")"
-grep -q '\[miner.mined\].*REFUTED' "$OUT" || fail "the stale mined assume must be REFUTED: $(cat "$OUT")"
+grep -q '\[miner.mined\]: REFUTED-cex' "$OUT" || fail "the stale mined assume must be REFUTED: $(cat "$OUT")"
 
-echo "PASS: P3 mining (tight inductive bound mined + emitted; strict fails the stuck run; report mined[] including speculative tier; round-trip re-proves; stale fact refutes)"
+echo "PASS: P3 mining (tight inductive bound mined + emitted; the stuck run is TIMEOUT-time; report mined[] including speculative tier; round-trip re-proves; stale fact refutes)"

@@ -131,13 +131,17 @@ grep -E "always @\(posedge" "$W/norm.v" | grep -vE "posedge clk[ )]" | grep -q .
 echo "ok: the normalized netlist has a plain posedge flop with an enable"
 
 # ---- lhd lec: real verdicts, both directions --------------------------------
-"$LHD" lec --impl "lg:$W/lg_good" --ref "lg:$W/lg_good" --top icgf --workdir "$W/l1" >"$W/l1.log" 2>&1
+"$LHD" lec --set formal.effort=proof --impl "lg:$W/lg_good" --ref "lg:$W/lg_good" --top icgf --workdir "$W/l1" >"$W/l1.log" 2>&1
 [ $? -eq 0 ] || { tail -5 "$W/l1.log"; fail "an ICG design does not prove against itself (it used to be REFUSED as a second clock domain)"; }
+grep -qE "^lec: .* PROVEN-(full|bounded)" "$W/l1.log" \
+  || { tail -5 "$W/l1.log"; fail "an ICG design exited 0 against itself without a PROVEN verdict"; }
 echo "ok: lec PROVES an ICG design against itself"
 
-"$LHD" lec --impl "lg:$W/lg_bad" --ref "lg:$W/lg_good" --top icgf --workdir "$W/l2" >"$W/l2.log" 2>&1
-[ $? -eq 0 ] && { tail -5 "$W/l2.log"; fail "a real logic difference inside an ICG design was NOT caught -- the gate is masking it"; }
-grep -q "REFUTED" "$W/l2.log" \
+"$LHD" lec --set formal.effort=proof --impl "lg:$W/lg_bad" --ref "lg:$W/lg_good" --top icgf --workdir "$W/l2" >"$W/l2.log" 2>&1
+rc=$?
+[ $rc -eq 0 ] && { tail -5 "$W/l2.log"; fail "a real logic difference inside an ICG design was NOT caught -- the gate is masking it"; }
+[ $rc -eq 10 ] || { tail -5 "$W/l2.log"; fail "the mutated ICG design must exit with the counterexample class 10 (rc=$rc)"; }
+grep -q "^lec: .* REFUTED-cex" "$W/l2.log" \
   || { tail -5 "$W/l2.log"; fail "the mutated ICG design must be REFUTED verbatim, not merely inconclusive"; }
 echo "ok: lec REFUTES a real difference inside an ICG design (not vacuous)"
 
@@ -242,11 +246,15 @@ grep -q "gated clock(s) folded into an enable" <<<"$out" \
   || { echo "$out" | tail -5; fail "the inlined cell's gate was not folded into the flop enable"; }
 echo "ok: an INSTANTIATED clock-gate cell is inlined and folded into the flop enable"
 
-"$LHD" lec --impl "lg:$W/lgc_good" --ref "lg:$W/lgc_good" --top dut --workdir "$W/lc1" >"$W/lc1.log" 2>&1
+"$LHD" lec --set formal.effort=proof --impl "lg:$W/lgc_good" --ref "lg:$W/lgc_good" --top dut --workdir "$W/lc1" >"$W/lc1.log" 2>&1
 [ $? -eq 0 ] || { tail -5 "$W/lc1.log"; fail "a design with an instantiated ICG cell does not prove against itself"; }
-"$LHD" lec --impl "lg:$W/lgc_bad" --ref "lg:$W/lgc_good" --top dut --workdir "$W/lc2" >"$W/lc2.log" 2>&1
-[ $? -eq 0 ] && { tail -5 "$W/lc2.log"; fail "a real difference behind an instantiated ICG cell was NOT caught"; }
-grep -q "REFUTED" "$W/lc2.log" || { tail -5 "$W/lc2.log"; fail "the mutated instantiated-ICG design must be REFUTED verbatim"; }
+grep -qE "^lec: .* PROVEN-(full|bounded)" "$W/lc1.log" \
+  || { tail -5 "$W/lc1.log"; fail "a design with an instantiated ICG cell exited 0 without a PROVEN verdict"; }
+"$LHD" lec --set formal.effort=proof --impl "lg:$W/lgc_bad" --ref "lg:$W/lgc_good" --top dut --workdir "$W/lc2" >"$W/lc2.log" 2>&1
+rc=$?
+[ $rc -eq 0 ] && { tail -5 "$W/lc2.log"; fail "a real difference behind an instantiated ICG cell was NOT caught"; }
+[ $rc -eq 10 ] || { tail -5 "$W/lc2.log"; fail "the mutated instantiated-ICG design must exit with the counterexample class 10 (rc=$rc)"; }
+grep -q "^lec: .* REFUTED-cex" "$W/lc2.log" || { tail -5 "$W/lc2.log"; fail "the mutated instantiated-ICG design must be REFUTED verbatim"; }
 echo "ok: lec PROVES and REFUTES correctly through an instantiated clock-gate cell"
 
 # ---- a latch gated by CLOCK **AND** DATA -------------------------------------

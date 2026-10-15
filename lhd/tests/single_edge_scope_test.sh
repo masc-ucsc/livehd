@@ -318,7 +318,7 @@ echo "ok: the top IO assume_nocheck stays active at every P=2 microstep"
 grep -v 'assume_nocheck(!sel' "$W/asm.prp" > "$W/asm_novac.prp"
 out="$("$LHD" formal verify "$W/asm_novac.prp" --top asm_tb --workdir "$W/awv" \
         --set formal.bound=12 --set formal.simfail_run=false 2>&1)"
-grep -q "REFUTED" <<<"$out" \
+grep -q "REFUTED-cex" <<<"$out" \
   || { echo "$out" | tail -5; fail "the same design WITHOUT the assume still passed: the fixture's asserts hold on their own, so the case above pins nothing"; }
 echo "ok: the fixture's asserts are load-bearing (removing the assume still REFUTES)"
 
@@ -330,7 +330,7 @@ echo "ok: the fixture's asserts are load-bearing (removing the assume still REFU
 # reference clock -- which the cross-side agreement checks read as a
 # disagreement and refuse a design that is trivially equal to itself.
 compile_lg lat lat8   # a latch design: normalization definitely fires
-out="$("$LHD" lec --impl "lg:$W/lg_lat" --ref "lg:$W/lg_lat" --top lat8 --workdir "$W/selfw" 2>&1)"
+out="$("$LHD" lec --set formal.effort=proof --impl "lg:$W/lg_lat" --ref "lg:$W/lg_lat" --top lat8 --workdir "$W/selfw" 2>&1)"
 [ $? -eq 0 ] || { echo "$out" | tail -5; fail "a latch design compared against ITSELF did not prove -- the miter-wide agreement checks are firing on a single shared graph"; }
 grep -qE "'[^']*lat8' PROVEN" <<<"$out" \
   || { echo "$out" | tail -5; fail "self-comparison of a latch design did not report PROVEN"; }

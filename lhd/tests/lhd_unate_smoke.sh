@@ -101,10 +101,10 @@ assert all(s['boundaries']==0 and s['boundary_work']==0 for s in search),search
 assert all(s[k]==0 for s in search for k in ('boundary_trials','boundary_replacements','boundary_bytes_peak','boundary_wins','boundary_two_cell_work','boundary_multi_cell_work')),search
 assert pathlib.Path(sys.argv[2]).read_text().count('posedge')==1
 PY
-run lec --impl "lg:$W/divisor_out" --ref "lg:$W/divisor/synth/lg" --top divisor --workdir "$W/lec_divisor"
+run lec --set formal.effort=proof --impl "lg:$W/divisor_out" --ref "lg:$W/divisor/synth/lg" --top divisor --workdir "$W/lec_divisor"
 python3 - "$W/result.json" <<'PY'
 import json,sys
-r=json.load(open(sys.argv[1])); assert r['lec']['verdict']=='proven',r
+r=json.load(open(sys.argv[1])); assert r['lec']['verdict']=='proven-full',r
 PY
 cat > "$W/care.v" <<'VERILOG'
 module care(input clk,a,b,c,d, output reg q);
@@ -123,10 +123,10 @@ endpoints=[e for r in p['regions'] for e in r['endpoints']]
 assert len(endpoints)==1 and endpoints[0]['origin']=='functional-two-phase',endpoints
 assert sum(s['completion_attempts'] for r in p['regions'] for s in r['search'])>0,p
 PY
-run lec --impl "lg:$W/care_out" --ref "lg:$W/care/synth/lg" --top care --workdir "$W/lec_care"
+run lec --set formal.effort=proof --impl "lg:$W/care_out" --ref "lg:$W/care/synth/lg" --top care --workdir "$W/lec_care"
 python3 - "$W/result.json" <<'PY'
 import json,sys
-r=json.load(open(sys.argv[1])); assert r['lec']['verdict']=='proven',r
+r=json.load(open(sys.argv[1])); assert r['lec']['verdict']=='proven-full',r
 PY
 # Continuing past the early full-cone result can reuse a better divisor set.
 # Reuse the compiled source and check the emitted result independently.
@@ -143,10 +143,10 @@ assert local['totals']['register_bits']==1,local
 assert sum(s['local_wins'] for r in local['regions'] for s in r['search'])>0,local
 assert sum(r['after']['total'] for r in local['regions']) < sum(r['after']['total'] for r in fast['regions']),(fast,local)
 PY
-run lec --impl "lg:$W/local_out" --ref "lg:$W/care/synth/lg" --top care --workdir "$W/lec_local"
+run lec --set formal.effort=proof --impl "lg:$W/local_out" --ref "lg:$W/care/synth/lg" --top care --workdir "$W/lec_local"
 python3 - "$W/result.json" <<'PY'
 import json,sys
-r=json.load(open(sys.argv[1])); assert r['lec']['verdict']=='proven',r
+r=json.load(open(sys.argv[1])); assert r['lec']['verdict']=='proven-full',r
 PY
 cat > "$W/existing_care.v" <<'VERILOG'
 module existing_care(input clk,a,b,c, output reg q, output shared);
@@ -166,10 +166,10 @@ endpoints=[e for r in p['regions'] for e in r['endpoints']]
 assert len(endpoints)==1 and endpoints[0]['origin']=='existing-care-residual',endpoints
 assert sum(s['existing_care_images'] for r in p['regions'] for s in r['search'])>0,p
 PY
-run lec --impl "lg:$W/existing_care_out" --ref "lg:$W/existing_care/synth/lg" --top existing_care --workdir "$W/lec_existing_care"
+run lec --set formal.effort=proof --impl "lg:$W/existing_care_out" --ref "lg:$W/existing_care/synth/lg" --top existing_care --workdir "$W/lec_existing_care"
 python3 - "$W/result.json" <<'PY'
 import json,sys
-r=json.load(open(sys.argv[1])); assert r['lec']['verdict']=='proven',r
+r=json.load(open(sys.argv[1])); assert r['lec']['verdict']=='proven-full',r
 PY
 # Two overlapping pairs must be refreshed after the first atomic commit to
 # delete both shared XORs. Independent selection retains their shared readers.
@@ -204,10 +204,10 @@ assert len(endpoints)==3 and all(e['origin'].startswith('pair-') for e in endpoi
 v=pathlib.Path(sys.argv[2]).read_text()
 assert v.count('posedge')==3 and all(name in v for name in ('q0','q1','q2')),v
 PY
-run lec --impl "lg:$W/pair_out" --ref "lg:$W/pair/synth/lg" --top pair --workdir "$W/lec_pair"
+run lec --set formal.effort=proof --impl "lg:$W/pair_out" --ref "lg:$W/pair/synth/lg" --top pair --workdir "$W/lec_pair"
 python3 - "$W/result.json" <<'PY'
 import json,sys
-r=json.load(open(sys.argv[1])); assert r['lec']['verdict']=='proven',r
+r=json.load(open(sys.argv[1])); assert r['lec']['verdict']=='proven-full',r
 PY
 run pass usyn "lg:$W/pair/synth/lg" --top pair --set pass.usyn.tmap=none \
   --set pass.usyn.clock_phases=1 --set pass.usyn.static_xor=10 --set pass.usyn.pair_trials=1 \
@@ -248,10 +248,10 @@ assert sum(r['after']['domino'] for r in p['regions'])==27,p
 v=pathlib.Path(sys.argv[2]).read_text()
 assert v.count('posedge')==2 and all(name in v for name in ('left','right')),v
 PYTHON
-run lec --impl "lg:$W/shared_phase_out" --ref "lg:$W/shared_phase/synth/lg" --top shared_phase --workdir "$W/lec_shared_phase"
+run lec --set formal.effort=proof --impl "lg:$W/shared_phase_out" --ref "lg:$W/shared_phase/synth/lg" --top shared_phase --workdir "$W/lec_shared_phase"
 python3 - "$W/result.json" <<'PYTHON'
 import json,sys
-r=json.load(open(sys.argv[1])); assert r['lec']['verdict']=='proven',r
+r=json.load(open(sys.argv[1])); assert r['lec']['verdict']=='proven-full',r
 PYTHON
 run pass usyn "lg:$W/logical/synth/lg" --top pipe --set pass.usyn.tmap=none \
   --emit-dir "lg:$W/standalone" --emit "verilog:$W/standalone.v" --workdir "$W/manual"
@@ -263,10 +263,10 @@ outs=json.load(open(sys.argv[1]))['outputs']
 for s in ('qor.json.provenance','qor.json.usyn.json','qor.json.usyn.artifacts'):
     assert any(o.endswith('/manual/'+s) for o in outs),(s,outs)
 PY
-run lec --impl "lg:$W/standalone" --ref "lg:$W/logical/synth/lg" --top pipe --workdir "$W/lec_native"
+run lec --set formal.effort=proof --impl "lg:$W/standalone" --ref "lg:$W/logical/synth/lg" --top pipe --workdir "$W/lec_native"
 python3 - "$W/result.json" <<'PY'
 import json,sys
-r=json.load(open(sys.argv[1])); assert r['lec']['verdict']=='proven',r
+r=json.load(open(sys.argv[1])); assert r['lec']['verdict']=='proven-full',r
 PY
 run pass usyn "lg:$W/logical/synth/lg" --top pipe --set synth.liberty="$LIB" \
   --emit-dir "lg:$W/mapped" --emit "verilog:$W/mapped.v" --workdir "$W/mapping"
@@ -289,10 +289,10 @@ assert native['cache']['reused']==(len(native['regions']) if enabled else 0),nat
 PYTHON
 done
 run pass liberty gensim "$LIB" --emit-dir "lg:$W/models"
-run lec --impl "lg:$W/mapped" --ref "lg:$W/logical/synth/lg" --lib "lg:$W/models" --top pipe --workdir "$W/lec_mapped"
+run lec --set formal.effort=proof --impl "lg:$W/mapped" --ref "lg:$W/logical/synth/lg" --lib "lg:$W/models" --top pipe --workdir "$W/lec_mapped"
 python3 - "$W/result.json" "$W/mapping/qor.json.usyn.json" <<'PY'
 import json,sys
-r=json.load(open(sys.argv[1])); assert r['lec']['verdict']=='proven',r
+r=json.load(open(sys.argv[1])); assert r['lec']['verdict']=='proven-full',r
 p=json.load(open(sys.argv[2])); assert p['tmap']=='abc' and p['output']=='mapped-cmos',p
 assert p['totals']['register_bits']==1,p
 PY

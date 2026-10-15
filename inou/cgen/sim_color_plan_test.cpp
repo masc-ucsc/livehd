@@ -780,6 +780,87 @@ TEST(SimColorPlan, CompactLoopDiscoveryIsConstantSizeAndCutsCarry) {
   EXPECT_EQ(text.find("nid"), std::string::npos);
   EXPECT_NE(text.find("kind=loop-control"), std::string::npos);
   EXPECT_NE(text.find("kind=loop-carry cut=true"), std::string::npos);
+  EXPECT_EQ(plan.summary().port_split_loops, 0u) << "a loop on no ring keeps one walk shared by its outputs";
+  EXPECT_EQ(text.find("port-split"), std::string::npos);
+}
+
+// A pure loop whose `p` output (read from `b` only) feeds its own `s` input
+// (read only by `o`) through parent logic: a ring through the atomic loop that
+// is no combinational loop at port level (pass.legalize keeps the loop rolled).
+// As one version per output that consumes every input it preceded itself
+// ("version site ... precedes ITSELF"); port-split, each output version
+// consumes only its own port support.
+TEST(SimColorPlan, PureLoopRingThroughItsOwnInputSplitsByPort) {
+  auto& lib     = livehd::Hhds_graph_library::instance("lgdb_color_plan_port_split_loop");
+  auto  body_io = lib.create_io("port_split_body");
+  body_io->add_input("b", 0);
+  body_io->add_input("s", 1);
+  body_io->add_output("p", 2);
+  body_io->add_output("o", 3);
+  for (const auto* name : {"b", "s", "p", "o"}) {
+    body_io->set_bits(name, 8);
+  }
+  auto body = body_io->create_graph();
+  for (const auto& [in, out] : {std::pair{"b", "p"}, std::pair{"s", "o"}}) {
+    auto inv = gu::create_typed_node(*body, Ntype_op::Not);
+    body->get_input_pin(in).connect_sink(inv.create_sink_pin(0));
+    gu::set_bits(inv.create_driver_pin(0), 8);
+    inv.create_driver_pin(0).connect_sink(body->get_output_pin(out));
+  }
+
+  auto parent_io = lib.create_io("port_split_parent");
+  parent_io->add_input("b", 0);
+  parent_io->add_output("o", 1);
+  parent_io->set_bits("b", 8);
+  parent_io->set_bits("o", 8);
+  auto parent = parent_io->create_graph();
+
+  auto               compact = gu::create_typed_node(*parent, Ntype_op::Sub);
+  hhds::Subnode_loop loop;
+  loop.count = 4;
+  compact.set_subnode(body_io, loop);
+  parent->get_input_pin("b").connect_sink(compact.create_sink_pin(0));
+  auto p = compact.create_driver_pin(2);
+  auto o = compact.create_driver_pin(3);
+  gu::set_bits(p, 8);
+  gu::set_bits(o, 8);
+  auto ring = gu::create_typed_node(*parent, Ntype_op::Not);  // the caller-side hop of the ring
+  p.connect_sink(ring.create_sink_pin(0));
+  gu::set_bits(ring.create_driver_pin(0), 8);
+  ring.create_driver_pin(0).connect_sink(compact.create_sink_pin(1));
+  o.connect_sink(parent->get_output_pin("o"));
+  compact.subnode_group().validate();
+
+  const auto plan = livehd::sim::Color_plan::discover(parent.get());
+  ASSERT_TRUE(plan.complete()) << plan.report();
+  EXPECT_EQ(plan.summary().self_edges_dropped, 0u);
+  EXPECT_TRUE(plan.summary().version_dag_acyclic);
+  EXPECT_EQ(plan.summary().port_split_loops, 1u);
+  EXPECT_NE(plan.report().find("port-split=true"), std::string::npos);
+
+  size_t loop_site = livehd::sim::Color_plan::invalid_index;
+  for (size_t site = 0; site < plan.sites().size(); ++site) {
+    if (plan.sites()[site].kind == livehd::sim::Color_plan::Site_kind::loop_control) {
+      loop_site = site;
+    }
+  }
+  ASSERT_NE(loop_site, livehd::sim::Color_plan::invalid_index);
+  EXPECT_TRUE(plan.sites()[loop_site].port_split);
+  const auto* p_support = plan.split_loop_support(loop_site, 2);
+  const auto* o_support = plan.split_loop_support(loop_site, 3);
+  ASSERT_NE(p_support, nullptr);
+  ASSERT_NE(o_support, nullptr);
+  EXPECT_EQ(*p_support, std::vector<hhds::Port_id>{0}) << "p reads b, never the s it feeds";
+  EXPECT_EQ(*o_support, std::vector<hhds::Port_id>{1});
+
+  // Every value the loop's outputs consume is in that output's own support.
+  for (const auto& use : plan.value_uses()) {
+    const auto& consumer = plan.version_sites()[use.consumer_version];
+    if (consumer.base_site != loop_site) {
+      continue;
+    }
+    EXPECT_EQ(use.consumer_port, consumer.output_port == 2 ? 0u : 1u);
+  }
 }
 
 TEST(SimColorPlan, LoopBoundaryBalancesNativeConesAgainstWideCarryTransport) {
@@ -1473,7 +1554,11 @@ TEST(SimColorPlan, InPlaceRegisterProofOrdersConsumersInsideAndAcrossColors) {
 
 TEST(SimColorPlan, CompactLoopDoesNotDisableOrderingOfSurroundingMemory) {
   using Plan = livehd::sim::Color_plan;
-  auto fixture = make_compact_loop("ordered_state_around_loop", 3);
+  // surrounding_cones: the carry seed arrives through a Not, so the flop is
+  // spliced in by rewiring THAT Not. Replacing the seed edge on the loop's own
+  // carry-in would leave it, between the two edits, with zero or two external
+  // drivers -- which hhds rejects on every loop-edge mutation in a debug build.
+  auto fixture = make_compact_loop("ordered_state_around_loop", 3, /*surrounding_cones=*/true);
   auto graph = fixture.parent;
   auto io = graph->get_io();
   io->add_input("clock", 3);
@@ -1484,13 +1569,15 @@ TEST(SimColorPlan, CompactLoopDoesNotDisableOrderingOfSurroundingMemory) {
   auto q = state.create_driver_pin(0);
   gu::set_ubits(q, 8);
   graph->get_input_pin("clock").connect_sink(gu::setup_sink_by_name(state, "clock_pin"));
+  hhds::Pin_class seed_hop;
   for (const auto& edge : graph->get_input_pin("seed").out_edges()) {
-    if (edge.sink == fixture.compact.get_sink_pin(0)) {
-      edge.del_edge();
-      break;
-    }
+    seed_hop = edge.sink;
+    edge.del_edge();
+    break;
   }
-  q.connect_sink(fixture.compact.get_sink_pin(0));
+  ASSERT_FALSE(seed_hop.is_invalid());
+  ASSERT_EQ(gu::type_op_of(seed_hop.get_master_node()), Ntype_op::Not);
+  q.connect_sink(seed_hop);
   fixture.compact.get_driver_pin(1).connect_sink(gu::setup_sink_by_name(state, "din"));
 
   auto memory = gu::create_typed_node(*graph, Ntype_op::Memory);

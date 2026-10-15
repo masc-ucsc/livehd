@@ -75,8 +75,8 @@ echo "$out" | grep -i "cross-check" || true
 if echo "$out" | grep -qi "DISAGREE"; then
   echo "FAIL: lec engine and lgcheck DISAGREE on the different pair"; mark_fail comb
 fi
-if [ $rc -eq 0 ]; then
-  echo "FAIL: different pair returned rc=0 (expected non-zero equiv_fail)"; mark_fail comb
+if [ $rc -ne 10 ]; then
+  echo "FAIL: different pair returned rc=$rc (expected 10: REFUTED-cex)"; mark_fail comb
 fi
 }
 
@@ -106,8 +106,8 @@ section_memory() {
     --result-json "$WORK/$variant.json" > "$WORK/check_$variant.log" 2>&1
   rc=$?
   expected=0
-  verdict=proven
-  if [ "$variant" = memory_bad ]; then expected=10; verdict=refuted; fi
+  verdict=proven-full
+  if [ "$variant" = memory_bad ]; then expected=10; verdict=refuted-cex; fi
   if [ "$rc" -ne "$expected" ] || ! grep -q "\"verdict\":\"$verdict\"" "$WORK/$variant.json"; then
     echo "FAIL: memory cross-check $variant returned rc=$rc, expected $expected ($verdict)"
     cat "$WORK/check_$variant.log" "$WORK/$variant.json"
@@ -135,8 +135,8 @@ section_latch() {
     --result-json "$WORK/$variant.json" > "$WORK/check_$variant.log" 2>&1
   rc=$?
   expected=0
-  verdict=proven
-  if [ "$variant" = latch_bad ]; then expected=10; verdict=refuted; fi
+  verdict=proven-full
+  if [ "$variant" = latch_bad ]; then expected=10; verdict=refuted-cex; fi
   if [ "$rc" -ne "$expected" ] || ! grep -q "\"verdict\":\"$verdict\"" "$WORK/$variant.json"; then
     echo "FAIL: latch cross-check $variant returned rc=$rc, expected $expected ($verdict)"
     cat "$WORK/check_$variant.log" "$WORK/$variant.json"
@@ -173,10 +173,10 @@ section_bounded() {
   rc=$?
   if [ "$bound" -eq 5 ]; then
     expected=0
-    cross='"crosscheck":{"solver":"lgyosys","verdict":"proven","exit_code":2,"bounded":true,"bound":5}'
+    cross='"crosscheck":{"solver":"lgyosys","verdict":"proven-bounded","exit_code":2,"bounded":true,"bound":5}'
   else
     expected=10
-    cross='"crosscheck":{"solver":"lgyosys","verdict":"refuted","exit_code":1,"bounded":false}'
+    cross='"crosscheck":{"solver":"lgyosys","verdict":"refuted-cex","exit_code":1,"bounded":false}'
   fi
   if [ "$rc" -ne "$expected" ] || grep -qi DISAGREE "$WORK/cnt_$bound.log" || ! grep -qF "$cross" "$WORK/cnt_$bound.json"; then
     echo "FAIL: bounded counter cross-check at formal.bound=$bound returned rc=$rc, expected $expected with $cross"
@@ -185,11 +185,16 @@ section_bounded() {
   fi
 }
 
-# Deterministic process-status controls: UNKNOWN and a crashed/setup oracle
-# must not be reported as a counterexample or agreement with native REFUTED.
+# Deterministic process-status controls (owner rulings 2026-10-14): an
+# undecided (exit 2) or crashed/setup (exit 5) oracle never becomes a verdict
+# or an agreement of its own.
+#   exit 5 (failed to run)          -> dependency failure, exit 5, for both pairs
+#   exit 2 + native PROVEN (eq)     -> REFUTED-unchecked, exit 7: the requested
+#                                      cross-check did not confirm the proof
+#   exit 2 + native REFUTED-cex (ne)-> the NATIVE REFUTED-cex stands, exit 10,
+#                                      with a warning that lgcheck did not decide
 section_status() {
-  local oracle_rc=$1 expected_status=7 variant rc
-  [ "$oracle_rc" -ne 5 ] || expected_status=5
+  local oracle_rc=$1 variant rc expected_status want
   printf '#!/bin/sh\nexit %s\n' "$oracle_rc" > "$WORK/oracle_$oracle_rc"
   chmod +x "$WORK/oracle_$oracle_rc"
   for variant in eq ne; do
@@ -197,8 +202,13 @@ section_status() {
       --set formal.lec.hier=false --set formal.lec.cross=true --workdir "$WORK/status_${oracle_rc}_$variant" \
       > "$WORK/status_${oracle_rc}_$variant.log" 2>&1
     rc=$?
-    if [ "$rc" -ne "$expected_status" ] || ! grep -q -E 'lgcheck -> (incomplete|failed)' "$WORK/status_${oracle_rc}_$variant.log"; then
-      echo "FAIL: lgcheck exit $oracle_rc became a verdict for $variant (rc=$rc)"
+    if [ "$oracle_rc" -eq 5 ]; then expected_status=5; want=''
+    elif [ "$variant" = eq ]; then expected_status=7; want="^lec: .* REFUTED-unchecked"
+    else expected_status=10; want="lgcheck cross-check did not decide .*native REFUTED-cex stands"
+    fi
+    if [ "$rc" -ne "$expected_status" ] || ! grep -q -E 'lgcheck -> (incomplete|failed)' "$WORK/status_${oracle_rc}_$variant.log" \
+        || { [ -n "$want" ] && ! grep -q -E "$want" "$WORK/status_${oracle_rc}_$variant.log"; }; then
+      echo "FAIL: lgcheck exit $oracle_rc for $variant: rc=$rc (want $expected_status${want:+, '$want'})"
       cat "$WORK/status_${oracle_rc}_$variant.log"
       mark_fail "status_$oracle_rc"
     fi

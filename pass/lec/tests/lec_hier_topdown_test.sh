@@ -90,6 +90,13 @@ run() {  # <tag> <impl> <order> [extra...] -> RC/OUT
         --workdir "$W/wd_$tag" "$@" 2>&1); RC=$?
 }
 
+# The numbered sections below are independent (each has its own fixtures and
+# workdirs), so they run CONCURRENTLY in background subshells: run serially the
+# whole file is ~25 s of mostly single-threaded lhd runs, at the edge of the
+# per-test budget. Each section keeps its own `fail` and returns it; its output
+# goes to a log that is printed in order once every section is done.
+
+section_s1_2() {
 # ---------------------------------------------------------------------------
 # 1. Equivalent pair: top-down proves it, and says so in the recipe.
 # ---------------------------------------------------------------------------
@@ -123,27 +130,37 @@ else echo "ok: a block refutation is absorbed by its parent and the top still PR
 if [ "$(echo "$OUT" | grep -c "ESCALATE 'top'")" -ne 0 ]; then
   echo "FAIL: case 2 escalated into the TOP; the parent's proof should have closed the chain"; fail=1
 else echo "ok: the escalation stopped at the absorbing parent — the top was never re-solved"; fi
+return "$fail"
+}
 
+section_s3() {
 # ---------------------------------------------------------------------------
 # 3. A real difference still REFUTES under both orders.
 # ---------------------------------------------------------------------------
 run td_bad E top_down
 RC_TD=$RC; OUT_TD=$OUT
 run bu_bad E bottom_up
-if [ "$RC_TD" -eq 0 ] || [ "$RC" -eq 0 ]; then
-  echo "FAIL: case 3 a genuinely different design PASSED (top_down rc=$RC_TD, bottom_up rc=$RC)"; fail=1
-elif ! echo "$OUT_TD" | grep -qiE "refut|not equivalent|equiv_fail"; then
-  echo "FAIL: case 3 top-down did not produce a refutation"; echo "$OUT_TD" | grep "lec\[hier\]"; fail=1
+if [ "$RC_TD" -ne 10 ] || [ "$RC" -ne 10 ]; then
+  echo "FAIL: case 3 a genuinely different design did not exit 10 (top_down rc=$RC_TD, bottom_up rc=$RC)"; fail=1
+elif ! echo "$OUT_TD" | grep -q "^lec: .* REFUTED-cex"; then
+  echo "FAIL: case 3 top-down did not produce a REFUTED-cex"; echo "$OUT_TD" | grep "lec\[hier\]"; fail=1
+elif ! echo "$OUT" | grep -q "^lec: .* REFUTED-cex"; then
+  echo "FAIL: case 3 bottom-up did not produce a REFUTED-cex"; echo "$OUT" | grep "lec\[hier\]"; fail=1
 else echo "ok: a genuine difference still refutes under both orders"; fi
+return "$fail"
+}
 
+section_s4() {
 # ---------------------------------------------------------------------------
 # 4. Equivalence gate: the two orders must agree on the TOP verdict for every
 #    fixture. An ordering strategy may change cost, never an answer.
 # ---------------------------------------------------------------------------
-verdict_of() {  # -> PROVEN | REFUTED | UNDECIDED, from the exit class + text
-  if [ "$1" -eq 0 ]; then echo PROVEN
-  elif echo "$2" | grep -qiE "refut|not equivalent|equiv_fail"; then echo REFUTED
-  else echo UNDECIDED; fi
+verdict_of() {  # -> PROVEN | REFUTED | UNDECIDED(<word>), from the exit code + final verdict word
+  local word
+  word=$(echo "$2" | grep -E "^lec: '[^']+' " | grep -oE " (PROVEN|TESTED|TIMEOUT|REFUTED)-[a-z]+" | tail -1 | tr -d ' ')
+  if [ "$1" -eq 0 ] && [ "${word%%-*}" = PROVEN ]; then echo PROVEN
+  elif [ "$1" -eq 10 ] && [ "$word" = REFUTED-cex ]; then echo REFUTED
+  else echo "UNDECIDED($word,rc=$1)"; fi
 }
 for m in B D E; do
   run td_$m "$m" top_down;   v_td=$(verdict_of "$RC" "$OUT")
@@ -153,7 +170,10 @@ for m in B D E; do
   fi
 done
 [ "$fail" -eq 0 ] && echo "ok: top_down and bottom_up agree on every fixture's top verdict"
+return "$fail"
+}
 
+section_s5() {
 # ---------------------------------------------------------------------------
 # 5. The option is validated, and hier_refute=fail (a leaves-first debug mode)
 #    falls back rather than silently combining with an order that has no
@@ -175,7 +195,10 @@ if ! echo "$OUT" | grep -q "forces the legacy bottom_up order"; then
 elif ! echo "$OUT" | grep -q "order:bottom_up"; then
   echo "FAIL: case 5 hier_refute=fail announced the fallback but still ran top_down"; fail=1
 else echo "ok: hier_refute=fail falls back to bottom_up, and says so"; fi
+return "$fail"
+}
 
+section_s6() {
 # ---------------------------------------------------------------------------
 # 6. A hierarchy large enough to grow the DFS mark table must remain safe.
 #    The traversal used to retain an int& into absl::flat_hash_map across the
@@ -205,7 +228,10 @@ if [ "$fail" -eq 0 ]; then
     echo "FAIL: case 6 deep hierarchy traversal did not prove safely (rc=$RC)"; fail=1
   else echo "ok: deep hierarchy DFS survives mark-table growth and proves all 82 defs"; fi
 fi
+return "$fail"
+}
 
+section_s7() {
 # ---------------------------------------------------------------------------
 # 7. A non-top definition with no outputs is unobservable hardware. XiangShan
 #    keeps simulation-only DummyDPICWrapper_* instances under `ifdef DUMMY`; in
@@ -232,18 +258,22 @@ if [ "$fail" -eq 0 ]; then
   # The compile pipeline may already erase a pure outputless instance. In that
   # case the hierarchy contains only the parent; otherwise LEC discharges the
   # retained child explicitly. Both are the same unobservable-hardware result.
-  if [ "$RC" -ne 0 ] || { ! echo "$OUT" | grep -q "'sink' PROVEN (no observable output ports)" \
+  if [ "$RC" -ne 0 ] || { ! echo "$OUT" | grep -qE "'sink' PROVEN(-full)? \(no observable output ports\)" \
                           && ! echo "$OUT" | grep -q "1/1 def(s) proven"; }; then
     echo "FAIL: case 7 an outputless child did not discharge the parent (rc=$RC)"; fail=1
   else echo "ok: an outputless DPI-style child is structurally unobservable to its parent"; fi
 
   OUT=$("$LHD" lec --set formal.effort=proof --ref "lg:$W/empty_a" --impl "lg:$W/empty_b" --top sink \
         --workdir "$W/wd_empty_top" 2>&1); RC=$?
-  if [ "$RC" -ne 7 ] || ! echo "$OUT" | grep -q "selected top has no observable output ports"; then
+  if [ "$RC" -ne 7 ] || ! echo "$OUT" | grep -q "^lec: .* REFUTED-vacuous (nothing to compare" \
+      || ! echo "$OUT" | grep -q "the selected top has no output port on either side"; then
     echo "FAIL: case 7 selected outputless top was not an explicit setup refusal (rc=$RC)"; fail=1
   else echo "ok: a selected outputless top still refuses a vacuous proof"; fi
 fi
+return "$fail"
+}
 
+section_s8() {
 # ---------------------------------------------------------------------------
 # 8. An UNKNOWN child is contextualized exactly like a REFUTED boundary: inline
 #    it into its immediate parent and retry only that parent. The full 16-bit
@@ -284,11 +314,14 @@ if [ "$fail" -eq 0 ]; then
     echo "FAIL: case 8 an inconclusive child stranded a contextually equivalent parent (rc=$RC)"; fail=1
   elif ! echo "$OUT" | grep -qE "'hard' (TIMEOUT|UNSUPPORTED|UNDISCHARGED|UNCONFIRMED|UNPAIRED|UNCHECKED|VACUOUS|UNEXPLAINED)"; then
     echo "FAIL: case 8 fixture no longer exercises an undecided child"; fail=1
-  elif ! echo "$OUT" | grep -q "ESCALATE 'unknown_parent'.*0 refuted, 1 inconclusive"; then
+  elif ! echo "$OUT" | grep -q "ESCALATE 'unknown_parent'.*0 refuted, 1 undecided"; then
     echo "FAIL: case 8 did not inline the undecided child into its immediate parent"; fail=1
   else echo "ok: an undecided child is discharged by targeted parent expansion"; fi
 fi
+return "$fail"
+}
 
+section_s9() {
 # ---------------------------------------------------------------------------
 # 9. A Sub output may feed an input of the same instance while a flop INSIDE
 #    the callee breaks the path.  The hierarchy boundary alone looks cyclic;
@@ -354,7 +387,10 @@ if [ "$fail" -eq 0 ]; then
     echo "FAIL: case 9 did not prove top-down (u's refutation absorbed by feedback_top)"; fail=1
   else echo "ok: a sequential Sub feedback design proves with no LEC-side boundary repair"; fi
 fi
+return "$fail"
+}
 
+section_s10() {
 # ---------------------------------------------------------------------------
 # 10. Hierarchy is representation, not specification. One side may retain a
 #     stateful helper while the other front-end has already flattened it into
@@ -394,10 +430,13 @@ elif ! echo "$OUT" | grep -q "inlined 1 ref and 0 impl instance(s) absent from t
   echo "FAIL: case 10 proved without exposing the one-sided helper's machine state"; fail=1
 elif ! echo "$OUT" | grep -q "tier-2 state pairing: 1 uncertain pair(s) injected"; then
   echo "FAIL: case 10 flattened the helper but did not pair its state flop"; fail=1
-elif ! echo "$OUT" | grep -q "PROVEN equivalent"; then
-  echo "FAIL: case 10 did not reach PROVEN (rc=0 also covers UNKNOWN)"; echo "$OUT" | tail -3; fail=1
+elif ! echo "$OUT" | grep -q "^lec: .* PROVEN-full"; then
+  echo "FAIL: case 10 did not reach PROVEN-full (rc=0 also covers TIMEOUT)"; echo "$OUT" | tail -3; fail=1
 else echo "ok: asymmetric hierarchy is flattened to paired machine state and proves"; fi
+return "$fail"
+}
 
+section_s11() {
 # ---------------------------------------------------------------------------
 # 11. pass.partition's mapped-region wrappers are named `sub_<id>`. Inlining
 #     that synthetic hierarchy must expose its scalar DFFs (`state[i]`,
@@ -436,36 +475,73 @@ elif ! echo "$OUT" | grep -q "inlined 0 ref and 1 impl instance(s) absent from t
 elif echo "$OUT" | grep -q "tier-2 state pairing:"; then
   echo "FAIL: case 11 speculatively paired one scalar bit to the packed register instead of using the exact bit split"
   echo "$OUT" | grep -E "tier-2 state pairing|tier-2 unpaired state"; fail=1
-elif ! echo "$OUT" | grep -q "PROVEN equivalent"; then
-  # rc=0 also covers UNKNOWN, and the whole point of the `sub_<id>` bridge is
+elif ! echo "$OUT" | grep -q "^lec: .* PROVEN-full"; then
+  # rc=0 also covers TIMEOUT, and the whole point of the `sub_<id>` bridge is
   # that it turns this shape into a PROOF -- assert it rather than the exit code.
-  echo "FAIL: case 11 did not reach PROVEN (rc=0 also covers UNKNOWN)"; echo "$OUT" | tail -3; fail=1
+  echo "FAIL: case 11 did not reach PROVEN-full (rc=0 also covers TIMEOUT)"; echo "$OUT" | tail -3; fail=1
 else echo "ok: synthetic partition hierarchy collapses to packed/scalar machine state and proves"; fi
+return "$fail"
+}
 
-# An unconfirmed child CEX must not overwrite an inconclusive top verdict.
-# The child differs only when b=1, but its caller always supplies b=0. The
-# unmatched extra output keeps the top inconclusive without relying on timing.
+section_s_unconfirmed() {
+# An unconfirmed child CEX must not overwrite an undecided top verdict.
+# The child differs only when b=1, but its caller always supplies b=0, so its
+# block-boundary REFUTED is unreachable in context. The top stays undecided
+# without relying on timing (and without a one-sided port, which would stop the
+# run as REFUTED-interface before any child is checked): its 2-bit counter only
+# visits 0..2, the ref special-cases the unreachable s==3, and the forced
+# engine=ind can only produce a single-step CEX from an arbitrary start state,
+# so the top's OWN answer is REFUTED-unchecked (exit 7). The child's boundary CEX
+# is a diagnostic; promoting it would turn the run into REFUTED-cex (exit 10).
 for side in ref impl; do
-  if [ "$side" = ref ]; then op='^'; else op='|'; fi
+  if [ "$side" = ref ]; then op='^'; zz="(s == 2'd3) ? 4'hF : {2'b00, s}"; else op='|'; zz="{2'b00, s}"; fi
   cat > "$W/unconfirmed_$side.v" <<EOF
-module child(input a,b, output y); assign y=a $op b; endmodule
-module top(input a,b,output y,output extra_$side);
-  child u(a,1'b0,y); assign extra_$side=a;
+module child(input a, input b, output y); assign y = a $op b; endmodule
+module top(input clk, input rst, input a, output y, output [3:0] z);
+  reg [1:0] s;
+  always @(posedge clk) if (rst) s <= 2'd0; else s <= (s == 2'd2) ? 2'd0 : s + 2'd1;
+  child u(.a(a), .b(1'b0), .y(y));
+  assign z = $zz;
 endmodule
 EOF
   C "unconfirmed_$side"
 done
 for order in top_down bottom_up; do
   "$LHD" lec --set formal.effort=proof --ref "lg:$W/unconfirmed_ref" --impl "lg:$W/unconfirmed_impl" --top top \
-    --set "formal.lec.hier_order=$order" --workdir "$W/unconfirmed_$order" \
+    --set formal.engine=ind --set "formal.lec.hier_order=$order" --workdir "$W/unconfirmed_$order" \
     --result-json "$W/unconfirmed_$order.json" > "$W/unconfirmed_$order.log" 2>&1
-  python3 - "$W/unconfirmed_$order.json" <<'PYVERDICT'
+  urc=$?
+  if [ "$urc" -ne 7 ]; then
+    echo "FAIL: unconfirmed child CEX: $order rc=$urc (want 7, the top's own REFUTED-unchecked)"; fail=1
+  elif ! grep -q "lec\[hier\]: 'child' REFUTED" "$W/unconfirmed_$order.log" \
+      || ! grep -q "child 'child' differs at its boundary" "$W/unconfirmed_$order.log"; then
+    echo "FAIL: unconfirmed child CEX: $order fixture no longer refutes the child at its boundary"; fail=1
+  elif grep -q "^lec: 'top' REFUTED-cex" "$W/unconfirmed_$order.log"; then
+    echo "FAIL: unconfirmed child CEX was promoted to the $order top verdict"; fail=1
+  else
+    python3 - "$W/unconfirmed_$order.json" <<'PYVERDICT'
 import json, sys
 with open(sys.argv[1]) as f:
     result = json.load(f)
-assert result["lec"]["verdict"] == "unconfirmed", result
+assert result["lec"]["verdict"] == "refuted-unchecked", result
 PYVERDICT
-  if [ "$?" -ne 0 ]; then echo "FAIL: unconfirmed child CEX changed the $order top verdict"; fail=1; fi
+    if [ "$?" -ne 0 ]; then echo "FAIL: unconfirmed child CEX changed the $order top verdict"; fail=1
+    else echo "ok: $order keeps the top's own REFUTED-unchecked; the child's boundary CEX stays a diagnostic"; fi
+  fi
+done
+return "$fail"
+}
+
+pids=()
+for s in s1_2 s3 s4 s5 s6 s7 s8 s9 s10 s11 s_unconfirmed; do
+  "section_$s" > "$W/section_$s.log" 2>&1 &
+  pids+=($!)
+done
+i=0
+for s in s1_2 s3 s4 s5 s6 s7 s8 s9 s10 s11 s_unconfirmed; do
+  wait "${pids[$i]}" || fail=1
+  cat "$W/section_$s.log"
+  i=$((i + 1))
 done
 
 if [ "$fail" -ne 0 ]; then echo "lec_hier_topdown_test: FAILED"; exit 1; fi

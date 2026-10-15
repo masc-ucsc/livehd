@@ -107,7 +107,7 @@ run pass liberty gensim "$LIB" --emit-dir lg:"$W/models" --workdir "$W/model-wor
 for mode in on off explicit default-synth; do
   run lec --set formal.effort=proof --impl lg:"$W/$mode-mapped" --ref lg:"$W/original" --lib lg:"$W/models" --set pass.satopt=false \
     --top instance_out_struct_ident.top --set formal.timeout=60 \
-    --workdir "$W/lec-$mode"
+    --workdir "$W/lec-$mode" --result-json "$W/lec-$mode.json"
 done
 run synth "$SRC" --top top --set synth.liberty="$LIB" --set synth.opentimer=false \
   --set pass.satopt=true --set lhd.jobs=1 --workdir "$W/on" --result-json "$W/warm.json"
@@ -126,7 +126,10 @@ satopt = next(i for i, s in enumerate(recipe) if s.startswith('pass.satopt'))
 formal = next(i for i, s in enumerate(recipe) if s.startswith('pass.formal'))
 assert satopt < formal, recipe
 for name in ('compiled', 'standalone', 'starved', 'ctrl'):
-    assert data('lec-' + name)['lec']['verdict'] == 'proven', name
+    assert data('lec-' + name)['lec']['verdict'] == 'proven-full', name
+# The mapped netlists (every satopt mode) must PROVE against the original.
+for name in ('on', 'off', 'explicit', 'default-synth'):
+    assert data('lec-' + name)['lec']['verdict'] in ('proven-full', 'proven-bounded'), (name, data('lec-' + name)['lec'])
 # The run's stage report is the result's "satopt" member (H).
 for name in ('compile-on', 'standalone'):
     stages = data(name)['satopt']['stages']
@@ -141,7 +144,7 @@ assert all(s['state'] == 'disabled' for k, s in control_stages.items() if k != '
 assert 'satopt' not in data('default')
 for name, runs in (('lec-default', 0), ('lec-source', 0), ('lec-source-on', 2)):
     result = data(name)
-    assert result['lec']['verdict'] == 'proven', name
+    assert result['lec']['verdict'] == 'proven-full', name
     assert satopt_steps(name) == runs, result['recipe']
     assert ('satopt' in result) == (runs > 0), name
 assert 'satopt' not in data('lec-compiled')

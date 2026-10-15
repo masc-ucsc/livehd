@@ -13,7 +13,7 @@ python3 - <<'PY'
 import json
 from pathlib import Path
 result = json.loads(Path('result.json').read_text())
-assert result['lec']['verdict'] == 'proven', result
+assert result['lec']['verdict'] == 'proven-full', result
 assert not result['lec']['bounded'], result
 PY
 python3 - "$lhd" "$native_helper" <<'PY'

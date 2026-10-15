@@ -113,10 +113,10 @@ module args(input [7:0] a, output [7:0] b);
   assign b = a;
 endmodule
 SV
-"$LHD" lec --impl "$W/args.sv" --ref "$W/plain.sv" --top args --workdir "$W/lec" --result-json "$W/lec.json" > "$W/lec.log" 2>&1
+"$LHD" lec --set formal.effort=proof --impl "$W/args.sv" --ref "$W/plain.sv" --top args --workdir "$W/lec" --result-json "$W/lec.json" > "$W/lec.log" 2>&1
 python3 - "$W/lec.json" "$W/plus.json" <<'PY'
 import json, sys
-assert json.load(open(sys.argv[1]))['lec']['verdict'] == 'proven'
+assert json.load(open(sys.argv[1]))['lec']['verdict'] == 'proven-full'
 result = json.load(open(sys.argv[2]))
 rows = result['tests'] if isinstance(result, dict) else result
 assert rows[0]['status'] == 'pass'

@@ -103,18 +103,18 @@ lec_both() {
   # The two queries below share no state (separate inputs, separate workdirs,
   # separate result JSON), so they are solved side by side rather than in turn.
   # Default LEC: graph-level, netlist as IMPL (the direction mem_lower's refinements are sound in)
-  "$LHD" lec --impl lg:"$d/net" --ref lg:"$d/re" --lib lg:"$d/models" --top "$top.$top" \
+  "$LHD" lec --set formal.effort=proof --impl lg:"$d/net" --ref lg:"$d/re" --lib lg:"$d/models" --top "$top.$top" \
       --workdir "$d/wc5" -q --result-json "$d/lec_graph.json" &
   local graph_pid=$!
   # default LEC: Verilog-level (the lhdtrack lec_netlist path)
-  "$LHD" lec --impl verilog:"$d/impl.v" --ref verilog:"$d/ref.v" --top "$top" \
+  "$LHD" lec --set formal.effort=proof --impl verilog:"$d/impl.v" --ref verilog:"$d/ref.v" --top "$top" \
       --workdir "$d/wc" -q --result-json "$d/lec_verilog.json" &
   local verilog_pid=$!
   wait "$graph_pid" || fail "$top: graph LEC failed: $(cat "$d/lec_graph.json" 2>/dev/null)"
-  grep -q '"verdict":"proven"' "$d/lec_graph.json" \
+  grep -qE '"verdict":"proven-(full|bounded)"' "$d/lec_graph.json" \
     || fail "$top: graph LEC did not PROVE the bit-blasted memory: $(grep -o '"lec":{[^}]*}' "$d/lec_graph.json")"
   wait "$verilog_pid" || fail "$top: Verilog LEC failed: $(cat "$d/lec_verilog.json" 2>/dev/null)"
-  ! grep -q '"verdict":"refuted"' "$d/lec_verilog.json" || fail "$top: default LEC REFUTED the bit-blasted memory"
+  ! grep -q '"verdict":"refuted-' "$d/lec_verilog.json" || fail "$top: default LEC REFUTED the bit-blasted memory"
 }
 
 

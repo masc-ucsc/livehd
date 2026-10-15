@@ -47,7 +47,7 @@ endmodule
 EOF
 out=$("$LHD" lec --set formal.effort=proof --ref "verilog:$WORK/ref/distrib.v" --impl "verilog:$WORK/impl/distrib.v" \
       --workdir "$WORK/w_dist" --set formal.lec.int_blast=iand --set formal.lec.cones=false 2>&1); rc=$?
-if [ "$rc" -ne 0 ] || ! echo "$out" | grep -q "PROVEN equivalent"; then
+if [ "$rc" -ne 0 ] || ! echo "$out" | grep -qE "^lec: .* PROVEN-(full|bounded)"; then
   echo "FAIL: distrib expected PROVEN under int_blast=iand (rc=$rc)"; echo "$out" | grep -aE "^lec: " | tail -2; fail=1
 else echo "ok: distributed multiply PROVEN under int_blast"; fi
 
@@ -65,7 +65,7 @@ EOF
 out=$("$LHD" lec --set formal.effort=proof --ref "verilog:$WORK/ref/mism.v" --impl "verilog:$WORK/impl/mism.v" \
       --workdir "$WORK/w_mism" --set formal.lec.int_blast=iand --set formal.lec.cones=false \
        2>&1); rc=$?
-if ! echo "$out" | grep -q "REFUTED"; then
+if [ "$rc" -ne 10 ] || ! echo "$out" | grep -q "^lec: .* REFUTED-cex"; then
   echo "FAIL: mism expected REFUTED under int_blast=iand (rc=$rc)"; echo "$out" | grep -aE "^lec: " | tail -2; fail=1
 elif ! echo "$out" | grep -q "counterexample: diff"; then
   echo "FAIL: mism REFUTED but no concrete counterexample (model round-trip broke?)"; echo "$out" | tail -3; fail=1
@@ -78,7 +78,7 @@ else echo "ok: mism REFUTED with a concrete counterexample"; fi
 out=$("$LHD" lec --set formal.effort=proof --ref "verilog:$WORK/ref/distrib.v" --impl "verilog:$WORK/impl/distrib.v" \
       --workdir "$WORK/w_auto" --set formal.lec.cones=false \
       --set formal.timeout=3 --set formal.min_timeout=10 2>&1); rc=$?
-if [ "$rc" -ne 0 ] || ! echo "$out" | grep -q "PROVEN equivalent"; then
+if [ "$rc" -ne 0 ] || ! echo "$out" | grep -qE "^lec: .* PROVEN-(full|bounded)"; then
   echo "FAIL: auto default expected retry PROVEN (rc=$rc)"; echo "$out" | grep -aE "^lec: " | tail -2; fail=1
 elif ! echo "$out" | grep -q "int-blast retry"; then
   echo "FAIL: PROVEN but not via the int-blast retry (BV should not finish at 3s)"; echo "$out" | grep -aE "^lec: " | tail -2; fail=1
@@ -88,8 +88,8 @@ else echo "ok: auto default converts a BV timeout via the int-blast retry"; fi
 out=$("$LHD" lec --set formal.effort=proof --ref "verilog:$WORK/ref/distrib.v" --impl "verilog:$WORK/impl/distrib.v" \
       --workdir "$WORK/w_off" --set formal.lec.int_blast=off --set formal.lec.cones=false \
       --set formal.timeout=3 --set formal.min_timeout=1 2>&1); rc=$?
-if echo "$out" | grep -q "PROVEN equivalent" || echo "$out" | grep -q "int-blast retry" \
-   || ! echo "$out" | grep -q "TIMEOUT"; then
+if echo "$out" | grep -q "^lec: .* PROVEN-" || echo "$out" | grep -q "int-blast retry" \
+   || ! echo "$out" | grep -q "^lec: .* TIMEOUT-time"; then
   echo "FAIL: int_blast=off must not retry nor prove (want TIMEOUT; rc=$rc)"; echo "$out" | grep -aE "^lec: " | tail -2; fail=1
 else echo "ok: int_blast=off times out (no retry, no proof)"; fi
 
@@ -101,7 +101,7 @@ endmodule
 EOF
 out=$("$LHD" lec --set formal.effort=proof --ref "verilog:$WORK/ref/cnt.v" --impl "verilog:$WORK/ref/cnt.v" \
       --workdir "$WORK/w_cnt" --set formal.lec.int_blast=iand --set formal.lec.cones=false 2>&1); rc=$?
-if [ "$rc" -ne 0 ] || ! echo "$out" | grep -q "PROVEN equivalent"; then
+if [ "$rc" -ne 0 ] || ! echo "$out" | grep -qE "^lec: .* PROVEN-(full|bounded)"; then
   echo "FAIL: cnt expected PROVEN under int_blast=iand (rc=$rc)"; echo "$out" | grep -aE "^lec: " | tail -2; fail=1
 else echo "ok: sequential counter PROVEN under int_blast"; fi
 

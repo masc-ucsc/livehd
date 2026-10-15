@@ -50,7 +50,7 @@ for ALG in acyclic synth; do
   # design at the end of this file.
   grep -qE "part_flat__(c[0-9]+|a_[0-9a-f]+)" "$D/part.v" || fail "$ALG: multi-region partition has no per-color submodules"
   # 5. LEC: the partitioned design must equal the original
-  run lec --impl verilog:"$D/part.v" --ref verilog:"$V0" --top "$TOP" --workdir "$D/c"
+  run lec --set formal.effort=proof --impl verilog:"$D/part.v" --ref verilog:"$V0" --top "$TOP" --workdir "$D/c"
   echo "PASS: $ALG partition is LEC-equivalent to the original"
 done
 
@@ -84,7 +84,7 @@ run compile lg:"$CD/lg2" --top "$TOP" --emit verilog:"$CD/part.v" --workdir "$CD
 grep -q "^module part_flat" "$CD/part.v" || fail "uncolored partition did not emit the top module"
 grep -qE "part_flat__(c[0-9]+|a_[0-9a-f]+)" "$CD/part.v" && fail "uncolored single-region design must not get a __c wrapper"
 # and it is still LEC-equivalent to the original
-run lec --impl verilog:"$CD/part.v" --ref verilog:"$V0" --top "$TOP" --workdir "$CD/c"
+run lec --set formal.effort=proof --impl verilog:"$CD/part.v" --ref verilog:"$V0" --top "$TOP" --workdir "$CD/c"
 echo "PASS: uncolored design -> partition warns once + color-0 region, LEC-equivalent"
 
 echo "PASS: all pass.color/pass.partition flows"

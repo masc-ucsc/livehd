@@ -96,8 +96,9 @@ module dtop(input [3:0] a, output [3:0] y, output [3:0] z, output [3:0] w);
   assign w = a ^ {2'b00, a[1:0]};
 endmodule
 EOF
-"$LHD" lec --impl "$W/dtop.prp" --ref "$W/dtop.v" --top dtop --set formal.timeout=60 --workdir "$W/wl" -q \
+"$LHD" lec --set formal.effort=proof --impl "$W/dtop.prp" --ref "$W/dtop.v" --top dtop --set formal.timeout=60 --workdir "$W/wl" -q \
   >"$W/lec.json" 2>/dev/null || fail "re-emitted defaults are not equivalent: $(cat "$W/lec.json")"
+grep -qE '"verdict":"proven-(full|bounded)"' "$W/lec.json" || fail "re-emitted defaults were not proven: $(cat "$W/lec.json")"
 
 # A Verilog clock that is ALSO data has no Pyrope spelling (a Clock is not
 # data, a U1 cannot clock): the writer reports it instead of writing a unit
@@ -298,13 +299,13 @@ for fixture in ${roundtrip[@]+"${roundtrip[@]}"}; do
     >"$W/regress/emit.json" 2>"$W/regress/error" || fail "$fixture emission: $(cat "$W/regress/error")"
   if [[ "$fixture" == *.sv ]]; then emitted="$dir/top.prp"; else emitted="$dir/$(basename "$fixture")"; fi
   "$LHD" pyrope fmt -i "$dir"/*.prp >"$W/regress/fmt.log" 2>&1 || fail "$fixture formatting"
-  "$LHD" lec --ref "$W/regress/$fixture" --impl "$emitted" --top top --set formal.timeout=5 \
+  "$LHD" lec --set formal.effort=proof --ref "$W/regress/$fixture" --impl "$emitted" --top top --set formal.timeout=5 \
     --workdir "$dir/lec" --result-json "$dir/lec.json" -q >"$W/regress/lec.log" 2>&1 \
     || fail "$fixture roundtrip equivalence: $(cat "$W/regress/lec.log")"
   python3 - "$dir/lec.json" <<'PYJSON'
 import json, sys
 r = json.load(open(sys.argv[1]))
-assert r["lec"]["verdict"] == "proven" and not r["lec"].get("bounded", False), r
+assert r["lec"]["verdict"] == "proven-full" and not r["lec"].get("bounded", False), r
 PYJSON
   [ "$?" -eq 0 ] || fail "$fixture did not prove unbounded equivalence"
 done
@@ -330,13 +331,13 @@ for fixture in compare.prp readmem.sv; do
   mkdir -p "$dir"
   "$LHD" compile "$W/regress/$fixture" --top top --emit verilog:"$dir/net.v" --workdir "$dir/work" -q \
     >"$dir/compile.json" 2>"$dir/error" || fail "$fixture Verilog emission"
-  "$LHD" lec --ref "$W/regress/$fixture" --impl "$dir/net.v" --top top --set formal.timeout=5 \
+  "$LHD" lec --set formal.effort=proof --ref "$W/regress/$fixture" --impl "$dir/net.v" --top top --set formal.timeout=5 \
     --workdir "$dir/lec" --result-json "$dir/lec.json" -q >"$dir/lec.log" 2>&1 \
     || fail "$fixture emitted-Verilog equivalence: $(cat "$dir/lec.log")"
   python3 - "$dir/lec.json" <<'PYJSON'
 import json, sys
 r = json.load(open(sys.argv[1]))
-assert r["lec"]["verdict"] == "proven" and not r["lec"].get("bounded", False), r
+assert r["lec"]["verdict"] == "proven-full" and not r["lec"].get("bounded", False), r
 PYJSON
   [ "$?" -eq 0 ] || fail "$fixture emitted Verilog did not prove"
 done
@@ -365,7 +366,7 @@ for reader in verilog slang; do
 done
 
 # Bad side qualifiers must fail before a solver consumes the timeout budget.
-if "$LHD" lec --ref "$W/regress/forward_clock.sv" --impl "$W/regress/forward_clock.sv" --top top \
+if "$LHD" lec --set formal.effort=proof --ref "$W/regress/forward_clock.sv" --impl "$W/regress/forward_clock.sv" --top top \
     --set formal.lec.match=ref.u.q=impl.u.q --workdir "$W/regress/badmatch" \
     --result-json "$W/regress/badmatch.json" -q >"$W/regress/badmatch.log" 2>&1; then
   fail "unknown explicit correspondence names were accepted"

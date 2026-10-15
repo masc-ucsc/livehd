@@ -27,7 +27,7 @@ blocks=re.findall(r'always_comb begin\n(.*?)\nend',s,re.S)
 assert len(blocks)>3, 'large combinational and output blocks were not divided'
 assert max(x.count(';') for x in blocks)<1024, 'unbounded generated process'
 PY
-"$LHD" lec --impl "$W/generated.v" --ref "$W/source.v" --top chain \
+"$LHD" lec --set formal.effort=proof --impl "$W/generated.v" --ref "$W/source.v" --top chain \
   --set formal.timeout=180 --workdir "$W/lec-default" > "$W/lec-default.log" 2>&1 \
   || { cat "$W/lec-default.log"; exit 1; }
 echo 'PASS: bounded combinational processes preserve all chain stages in LiveHD equivalence checking'

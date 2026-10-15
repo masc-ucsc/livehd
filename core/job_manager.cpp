@@ -3,6 +3,7 @@
 
 #include <signal.h>
 #include <sys/mman.h>
+#include <sys/wait.h>
 #include <unistd.h>
 
 #include <algorithm>
@@ -237,12 +238,23 @@ unsigned Job_manager::ceiling() const {
   shared_->reap_dead();
   return shared_->ceiling;
 }
+bool Job_manager::nested() const { return getpid() != shared_->root; }
 bool Job_manager::owns_slot() const {
-  Lock lock(shared_->lock);
+  Lock       lock(shared_->lock);
+  const auto self = getpid();
   for (const auto& ticket : held) {
     if (ticket.manager == this) {
       const auto& entry = shared_->entries[ticket.id];
-      if (entry.active && entry.generation == ticket.generation && entry.owner == getpid()) {
+      if (entry.active && entry.generation == ticket.generation && entry.owner == self) {
+        return true;
+      }
+    }
+  }
+  if (self != shared_->root) {
+    // A nested process is single-purpose: every slot it owns is its own, even
+    // one handed to it by time slicing (never in this thread's tickets).
+    for (const auto& entry : shared_->entries) {
+      if (entry.active && entry.owner == self) {
         return true;
       }
     }
@@ -423,19 +435,50 @@ void Job_manager::reap_tree(pid_t pid) {
     }
   }
 }
+bool Job_manager::suspend_child(pid_t child) {
+  if (child <= 0) {
+    return false;
+  }
+  Lock lock(shared_->lock);
+  ::kill(-child, SIGSTOP);  // the child leads its own group (fork_race kill_tree)
+  ::kill(child, SIGSTOP);   // and a child whose setpgid failed
+  siginfo_t info{};
+  // WNOWAIT: observe the stop (or an exit that beat it) without consuming it,
+  // so the caller's later wait4 still reaps an exited child normally.
+  while (::waitid(P_PID, static_cast<id_t>(child), &info, WSTOPPED | WEXITED | WNOWAIT) < 0) {
+    if (errno != EINTR) {
+      return false;
+    }
+  }
+  return info.si_code == CLD_STOPPED;
+}
 Job_manager::Yield::Yield(Job_manager& manager) : manager_(manager) {
   Lock lock(manager_.shared_->lock);
   manager_.shared_->reap_dead();
+  const auto self  = getpid();
+  auto       pause = [&](unsigned id) {
+    auto& e = manager_.shared_->entries[id];
+    e.active = false;
+    e.paused = true;
+    --manager_.shared_->active;
+    --manager_.shared_->stats[static_cast<unsigned>(e.cls)].active;
+    manager_.shared_->reserved -= e.predicted;
+    tickets_.push_back({id, e.generation});
+  };
   for (const auto& t : held) {
     if (t.manager == &manager_) {
       auto& e = manager_.shared_->entries[t.id];
-      if (e.active && e.generation == t.generation && e.owner == getpid()) {
-        e.active = false;
-        e.paused = true;
-        --manager_.shared_->active;
-        --manager_.shared_->stats[static_cast<unsigned>(e.cls)].active;
-        manager_.shared_->reserved -= e.predicted;
-        tickets_.push_back({t.id, t.generation});
+      if (e.active && e.generation == t.generation && e.owner == self) {
+        pause(t.id);
+      }
+    }
+  }
+  if (self != manager_.shared_->root) {
+    // Nested: also the slots time slicing handed this process (see nested()).
+    for (unsigned id = 0; id < slots; ++id) {
+      const auto& e = manager_.shared_->entries[id];
+      if (e.active && e.owner == self) {
+        pause(id);
       }
     }
   }

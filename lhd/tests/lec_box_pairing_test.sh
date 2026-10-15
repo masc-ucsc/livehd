@@ -126,7 +126,7 @@ run() {
 # proven_top <log> : the run must have PROVEN the top itself (not exited 0 on
 # an inconclusive UNKNOWN).
 proven_top() {
-  grep -qE "PASS\\(|PROVEN equivalent" "$W/$1.out"
+  grep -qE "^lec: .* PROVEN-(full|bounded)" "$W/$1.out"
 }
 
 # ── 1. stateless reversed: PROVEN, and directly (no flat fallback) ─────────
@@ -160,14 +160,14 @@ if run comb_bug "$W/comb.v" "$W/comb_bug.prp"; then
   cat "$W/comb_bug.out" >&2
   fail "stateless REAL bug passed (UF congruence unsound or fallback laundered a fail)"
 fi
-grep -q "REFUTED" "$W/comb_bug.out" || { cat "$W/comb_bug.out" >&2; fail "stateless REAL bug did not report REFUTED"; }
+grep -q "REFUTED-cex" "$W/comb_bug.out" || { cat "$W/comb_bug.out" >&2; fail "stateless REAL bug did not report REFUTED"; }
 echo "PASS(comb_bug): real stateless bug still REFUTED"
 
 if run state_anon_bug "$W/state_anon.v" "$W/state_anon_bug.prp"; then
   cat "$W/state_anon_bug.out" >&2
   fail "stateful REAL bug passed (flat confirmation laundered a fail)"
 fi
-grep -q "REFUTED" "$W/state_anon_bug.out" || { cat "$W/state_anon_bug.out" >&2; fail "stateful REAL bug did not report REFUTED"; }
+grep -q "REFUTED-cex" "$W/state_anon_bug.out" || { cat "$W/state_anon_bug.out" >&2; fail "stateful REAL bug did not report REFUTED"; }
 echo "PASS(state_anon_bug): real stateful bug still REFUTED through the flat confirmation"
 
 # An inlined child definition still exists in the library. It must not become
@@ -209,6 +209,6 @@ if "$LHD" lec --set formal.effort=proof --ref "lg:$W/inline-false" --impl "lg:$W
   --workdir "$W/inline-lec-bug" > "$W/inline-bug.out" 2>&1; then
   fail "asymmetric inlining hid a real output difference"
 fi
-grep -q 'REFUTED' "$W/inline-bug.out" || fail "asymmetric inlining negative control did not refute"
+grep -q 'REFUTED-cex' "$W/inline-bug.out" || fail "asymmetric inlining negative control did not refute"
 
 echo "lec_box_pairing_test: all sections PASS"

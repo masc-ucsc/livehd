@@ -92,7 +92,7 @@ grep -q 'requires per-port clock edge polarity' "$W/mixed_emit.log" \
 sed 's/dbg = d ^ 8.hFF/dbg = ~(~(d ^ 8\x27hFF))/' "$W/mixed.v" > "$W/mixed_eq.v"
 compile_emit mixed_eq "$W/mixed_eq.v" mixed \
   || { tail -8 "$W/mixed_eq.log"; fail "case 1b: the equivalent variant must compile"; }
-LOUT=$("$LHD" lec --ref "lg:$W/lg_mixed" --impl "lg:$W/lg_mixed_eq" --top mixed \
+LOUT=$("$LHD" lec --set formal.effort=proof --ref "lg:$W/lg_mixed" --impl "lg:$W/lg_mixed_eq" --top mixed \
        --workdir "$W/lw1" 2>&1); LRC=$?
 if [ "$LRC" -eq 0 ]; then
   fail "case 1b: formal PASSED a memory whose per-port clock edges it cannot model"
@@ -109,7 +109,7 @@ echo "ok: formal refuses a mixed-edge memory by name at rc=$LRC (not a counterex
 # ---------------------------------------------------------------------------
 SUG=$(grep -oaE "formal.ignore_memory=[A-Za-z0-9_:.]+" <<<"$LOUT" | head -1)
 [ -n "$SUG" ] || fail "case 1c: the refusal does not tell the user how to proceed"
-IOUT=$("$LHD" lec --ref "lg:$W/lg_mixed" --impl "lg:$W/lg_mixed_eq" --top mixed \
+IOUT=$("$LHD" lec --set formal.effort=proof --ref "lg:$W/lg_mixed" --impl "lg:$W/lg_mixed_eq" --top mixed \
        --workdir "$W/lw2" --set "$SUG" 2>&1); IRC=$?
 [ "$IRC" -eq 0 ] \
   || { tail -8 <<<"$IOUT"; fail "case 1c: '--set $SUG' -- the tool's OWN suggestion -- did not let the run proceed (rc=$IRC)"; }
@@ -125,7 +125,7 @@ echo "ok: the suggested ignore works verbatim, proves, and the pass is disclosed
 sed 's/dbg = d ^ 8.hFF/dbg = d ^ 8\x27hF0/' "$W/mixed.v" > "$W/mixed_bad.v"
 compile_emit mixed_bad "$W/mixed_bad.v" mixed \
   || { tail -8 "$W/mixed_bad.log"; fail "case 1d: the differing variant must compile"; }
-BOUT=$("$LHD" lec --ref "lg:$W/lg_mixed" --impl "lg:$W/lg_mixed_bad" --top mixed \
+BOUT=$("$LHD" lec --set formal.effort=proof --ref "lg:$W/lg_mixed" --impl "lg:$W/lg_mixed_bad" --top mixed \
        --workdir "$W/lw3" --set "$SUG" 2>&1); BRC=$?
 if [ "$BRC" -eq 0 ]; then
   tail -8 <<<"$BOUT"; fail "case 1d: an ignored memory SWALLOWED a real difference in the logic around it"

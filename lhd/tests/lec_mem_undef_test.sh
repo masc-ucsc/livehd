@@ -83,7 +83,7 @@ run_lec() { # $1 = impl .v, $2 = extra flags
 out=$(run_lec "$W/impl_old.v") \
   || fail "case 1 (committed-value refinement) did not PROVE:
 $out"
-echo "$out" | grep -q "PROVEN equivalent" || fail "case 1: no PROVEN in output:
+echo "$out" | grep -qE "PROVEN-(full|bounded)" || fail "case 1: no PROVEN in output:
 $out"
 
 out=$(run_lec "$W/impl_fwd.v") \
@@ -91,19 +91,19 @@ out=$(run_lec "$W/impl_fwd.v") \
 pinning a value it must leave undefined (the \`undef\` matrix is not reaching the
 lec encoder's X bit-plane):
 $out"
-echo "$out" | grep -q "PROVEN equivalent" || fail "case 2: no PROVEN in output:
+echo "$out" | grep -qE "PROVEN-(full|bounded)" || fail "case 2: no PROVEN in output:
 $out"
 
 out=$(run_lec "$W/impl_bad.v") && fail "case 3 (real bug OUTSIDE the collision
 window) did not refute — the X plane is masking more than the collision:
 $out"
-echo "$out" | grep -q "REFUTED" || fail "case 3: no REFUTED in output:
+echo "$out" | grep -q "REFUTED-cex" || fail "case 3: no REFUTED in output:
 $out"
 
 out=$(run_lec "$W/impl_fwd.v" "--set formal.lec.gold_x=zero" "_zero") \
   && fail "case 4 (legacy zero mode) unexpectedly proved:
 $out"
-echo "$out" | grep -q "REFUTED" || fail "case 4: no REFUTED in output:
+echo "$out" | grep -q "REFUTED-cex" || fail "case 4: no REFUTED in output:
 $out"
 
 echo "PASS: ordering=\"none\" leaves the collision window undefined for the lec miter"

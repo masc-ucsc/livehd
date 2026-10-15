@@ -32,5 +32,10 @@ test quadratic.exhaustive {
 TB
 # Several mapped arithmetic modules compile independently; avoid serializing
 # their expensive host builds behind the default two test compiler jobs.
+# The LLVM backend is the oracle here: the Slop host build of this gate-level
+# netlist (one ~1900-statement color case per evaluator shard) spends over a
+# minute in clang's JumpThreading pass, while LLVM builds it in ~8 s. What the
+# test checks -- every one of the 65536 inputs through the mapped netlist --
+# does not depend on the backend.
 "$LHD" sim lg:"$W/impl" "$W/tb.prp" --set sim.ninja=false --set lhd.jobs=8 \
-  --set sim.tune.profile=off --set sim.tune.backend=slop --workdir "$W/sim" -q
+  --set sim.tune.profile=off --set sim.tune.backend=llvm --workdir "$W/sim" -q

@@ -45,7 +45,7 @@ EOF
 # run must still exit REFUTED even if the reproduction sim can't host-compile. ----
 W1="$WORK/w1"
 OUT=$($LHD lec --set formal.effort=proof --impl "$WORK/impl.prp" --ref "$WORK/ref.prp" --workdir "$W1" 2>&1)
-ck "REFUTED"                    'echo "$OUT" | grep -q REFUTED'
+ck "REFUTED-cex"                'echo "$OUT" | grep -q "^lec: .* REFUTED-cex"'
 ck "wrote simfail_dut.prp"      '[ -f "$W1/simfail_dut.prp" ]'
 ck "testbench has both modules" 'grep -q "mod dut" "$W1/simfail_dut.prp" && grep -q "lecref_dut" "$W1/simfail_dut.prp"'
 ck "testbench has the wrapper"  'grep -q "__simfail_dut_pair" "$W1/simfail_dut.prp"'
@@ -240,12 +240,15 @@ ck "comb: testbench sim-valid"  '[ -f "$SQ/sim/drv.cpp" ]'
 # test pokes those. The impl here also carries a field the ref does NOT
 # (`only_impl`), which must appear on the wrapper (impl needs it) and be absent
 # from the ref call. Before leaves existed the header split on every comma, so a
-# struct port shredded into garbage and no testbench came out at all. ----
+# struct port shredded into garbage and no testbench came out at all.
+# `only_impl` drives NOTHING: a one-sided top input with no fanout is ignored
+# ("interface note: ... (no fanout: ignored)"), while one that drives logic is a
+# REFUTED-interface (exit 7, no counterexample and so no witness to replay). ----
 cat > "$WORK/simpl.prp" <<'EOF'
 pub mod dut(`clock`:Clock, `reset`:Reset, io:(valid:U1, bits:(x:U4, y:U3, only_impl:U2))) -> (o:U8@[]) {
   reg cnt:U8:[reset_pin=`reset`] = 0
   o = cnt
-  if io.valid != 0 { cnt = (cnt + io.bits.x + io.bits.y + io.bits.only_impl)#[0..=7] }
+  if io.valid != 0 { cnt = (cnt + io.bits.x + io.bits.y)#[0..=7] }
 }
 EOF
 cat > "$WORK/sref.prp" <<'EOF'

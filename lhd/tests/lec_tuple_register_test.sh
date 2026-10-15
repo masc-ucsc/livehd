@@ -17,7 +17,7 @@ helper = fixture.parent / 'generic_tuple_register/cell.prp'
 
 def run(label, source, expected):
     result = work / (label + '.json')
-    cmd = [str(lhd), 'lec', '--impl', str(source), '--ref', str(golden),
+    cmd = [str(lhd), 'lec', '--set', 'formal.effort=proof', '--impl', str(source), '--ref', str(golden),
            '--top', 'generic_tuple_register', '--set', 'formal.lec.hier=false',
            '--workdir', str(work / (label + '-work')), '--result-json', str(result)]
     with (work / (label + '.log')).open('w') as out:
@@ -25,7 +25,7 @@ def run(label, source, expected):
     payload = json.loads(result.read_text())
     lec = payload.get('lec', {})
     assert lec.get('verdict') == expected, (label, rc, payload)
-    if expected == 'proven':
+    if expected == 'proven-full':
         assert rc == 0 and lec.get('bounded') is False, (label, payload)
     else:
         assert rc != 0, (label, payload)
@@ -42,13 +42,13 @@ for label, edit in [('good', lambda s: s),
     mutated = edit(original)
     assert label == 'good' or mutated != original, (label, 'mutation did not change the fixture')
     (root / 'generic_tuple_register/cell.prp').write_text(mutated)
-    run(label, source, 'proven' if label == 'good' else 'refuted')
+    run(label, source, 'proven-full' if label == 'good' else 'refuted-cex')
 
 # A whole exported bundle must retain its specialized tuple types and state.
 source = work / 'good' / fixture.name
 bundle = 'ln:' + str(work / 'bundle')
 subprocess.run([str(lhd), 'compile', str(source),
                 '--emit-dir', bundle, '--workdir', str(work / 'export')], check=True)
-run('precompiled', bundle, 'proven')
+run('precompiled', bundle, 'proven-full')
 print('PASS: unbounded tuple-register proof, precompiled proof, and three behavioral mutations')
 PY

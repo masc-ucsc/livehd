@@ -80,7 +80,7 @@ PY
     # Module name: first module header in the reference emission.
     top="$(grep -m1 -oE '^module +\\?[A-Za-z_][^ (;]*' "$ref" | sed 's/module *//; s/^\\//')"
     [ -n "$top" ] || fail "$name: could not find module name in $ref"
-    if ! "$LHD" lec --impl "verilog:$impl" --ref "verilog:$ref" --top "$top" \
+    if ! "$LHD" lec --set formal.effort=proof --impl "verilog:$impl" --ref "verilog:$ref" --top "$top" \
         --workdir "$d/lec_$top" >"$d/lec_$top.log" 2>&1; then
       grep -E "counterexample|REFUTED|error" "$d/lec_$top.log" | head -5 >&2
       fail "$name: fuzzed netlist not PROVEN equivalent to baseline for $top (see $d/lec_$top.log)"

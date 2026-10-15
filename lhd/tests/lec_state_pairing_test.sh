@@ -54,7 +54,7 @@ echo "PASS: renamed pipeline PROVEN via uncertain tier-2 pairs; pair hint persis
 OUT=$("$LHD" lec --set formal.effort=proof "${NO_REPLAY[@]}" --ref "$W/ref.prp" --impl "$W/impl.prp" --workdir "$W/wd1" 2>&1)
 RC=$?
 [ "$RC" -eq 0 ] || fail "#2 warm re-run should be PROVEN (rc=$RC): $OUT"
-echo "$OUT" | grep -q "PROVEN (cache)" || fail "#2 warm run should hit the verdict cache: $OUT"
+echo "$OUT" | grep -q "PROVEN-full (cache)" || fail "#2 warm run should hit the verdict cache: $OUT"
 echo "$OUT" | grep -q "tier-2 state pairing" && fail "#2 warm run must skip the signature pass: $OUT"
 echo "PASS: warm run replays the pair hint and hits the cache (no signature pass)"
 
@@ -133,7 +133,7 @@ echo "PASS: all-names-match design does zero tier-2 work"
 # 7. formal.lec.state_pairing=false: the pre-tier-2 behavior. Under `auto` the
 #    renamed pair still passes, but only BOUNDED (bmc; ind is gated Unknown by
 #    the unmatched cut points) — the unbounded ind PROVEN of #1 is exactly
-#    what tier-2 buys. Forcing engine=ind shows the gate directly: UNKNOWN.
+#    what tier-2 buys. Forcing engine=ind shows the gate directly: REFUTED-unchecked.
 # ---------------------------------------------------------------------------
 #    A bounded result is INCONCLUSIVE by default now, so this case -- whose whole
 #    point is that the fallback is BOUNDED -- opts out of strict explicitly. That
@@ -145,15 +145,16 @@ RC=$?
 [ "$RC" -eq 0 ] || fail "#7 pairing-off auto run should still bounded-pass (rc=$RC): $OUT"
 echo "$OUT" | grep -q "tier-2 state pairing" && fail "#7 pairing ran despite formal.lec.state_pairing=false: $OUT"
 echo "$OUT" | grep -q "BOUNDED-Proven" || fail "#7 pairing-off verdict should be the bounded bmc PASS: $OUT"
-# The witness-carrying Unknown (matched portion differs through the unmatched
-# cuts) escalates in the exit policy — a nonzero exit, but NOT a REFUTED.
+# The witness-carrying undecided run (matched portion differs through the
+# unmatched cuts) with a FORCED engine is REFUTED-unchecked (owner ruling: the
+# options forbade escalation) — exit 7, but NOT a REFUTED-cex.
 OUT=$("$LHD" lec --set formal.effort=proof "${NO_REPLAY[@]}" --ref "$W/ref.prp" --impl "$W/impl.prp" --set formal.lec.state_pairing=false --set formal.engine=ind 2>&1)
 RC=$?
-[ "$RC" -ne 0 ] || fail "#7 ind witness-carrying UNKNOWN escalates (rc=$RC): $OUT"
-echo "$OUT" | grep -qE "TIMEOUT|UNSUPPORTED|UNDISCHARGED|UNCONFIRMED|UNPAIRED|UNCHECKED|VACUOUS|UNEXPLAINED" || fail "#7 ind with pairing off should gate to an undecided verdict: $OUT"
-echo "$OUT" | grep -q "REFUTED (not equivalent)" && fail "#7 must not claim REFUTED through unmatched cuts: $OUT"
+[ "$RC" -eq 7 ] || fail "#7 ind witness-carrying undecided run must exit 7 (rc=$RC): $OUT"
+echo "$OUT" | grep -qE "^lec: .* REFUTED-unchecked" || fail "#7 forced ind with pairing off should gate to REFUTED-unchecked: $OUT"
+echo "$OUT" | grep -q "REFUTED-cex" && fail "#7 must not claim REFUTED through unmatched cuts: $OUT"
 echo "$OUT" | grep -q "cut point" || fail "#7 the unmatched cut points should be named: $OUT"
-echo "PASS: formal.lec.state_pairing=false keeps the pre-tier-2 behavior (bounded auto / ind-UNKNOWN)"
+echo "PASS: formal.lec.state_pairing=false keeps the pre-tier-2 behavior (bounded auto / ind REFUTED-unchecked)"
 
 # ---------------------------------------------------------------------------
 # 8. Flat path (formal.lec.hier=false): same pairing + proof, and the PASS
@@ -363,7 +364,7 @@ RC=$?
 echo "$OUT" | grep -q "lec block 'pipe_cell' pass" || fail "#11 primitive specialization leaf was not paired/proven: $OUT"
 echo "$OUT" | grep -q "PROVEN by packed/scalar relation" || fail "#11 missing combined base+step proof: $OUT"
 echo "$OUT" | grep -q "packed/scalar relation reached from reset" || fail "#11 missing reset-reachable base disclosure: $OUT"
-echo "$OUT" | grep -q "PROVEN equivalent" || fail "#11 did not report unbounded equivalence: $OUT"
+echo "$OUT" | grep -q "PROVEN-full" || fail "#11 did not report unbounded equivalence: $OUT"
 echo "PASS: primitive generic leaf collapse + reset-established packed/scalar induction"
 
 echo "ALL PASS: lec tier-2 uncertain state correspondence"

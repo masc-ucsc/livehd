@@ -2,7 +2,8 @@
 # This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 # Array-of-struct scalar banks bridge to Pyrope memories at the whole top.
 set -eu
-LHD=lhd/lhd
+LHD=./bazel-bin/lhd/lhd
+if [ ! -x "$LHD" ]; then LHD=./lhd/lhd; fi
 W="${TEST_TMPDIR:-/tmp/lec_struct_array_bank_$$}"
 mkdir -p "$W"
 cat > "$W/bank.prp" <<'PRP'
@@ -22,13 +23,15 @@ endmodule
 RTL
 "$LHD" lec --set formal.effort=proof --impl "$W/bank.prp" --ref "$W/bank.v" --top array_field \
   --set formal.engine=ind --set formal.lec.hier=false --workdir "$W/good" --result-json "$W/good.json"
-grep -q '"verdict":"proven".*"bounded":false' "$W/good.json"
+grep -q '"verdict":"proven-full".*"bounded":false' "$W/good.json"
 # The bridge must prove the next-state relation, not assume it.
 sed 's/bank_bits_data\[1\] = b/bank_bits_data[1] = a/' "$W/bank.prp" > "$W/bad.prp"
-if "$LHD" lec --set formal.effort=proof --impl "$W/bad.prp" --ref "$W/bank.v" --top array_field \
-  --set formal.lec.hier=false --workdir "$W/bad" --result-json "$W/bad.json"; then
-  echo 'FAIL: incorrect array write passed' >&2
+rc=0
+"$LHD" lec --set formal.effort=proof --impl "$W/bad.prp" --ref "$W/bank.v" --top array_field \
+  --set formal.lec.hier=false --workdir "$W/bad" --result-json "$W/bad.json" || rc=$?
+if [ "$rc" -ne 10 ]; then
+  echo "FAIL: incorrect array write was not refuted with a counterexample (rc=$rc, want 10)" >&2
   exit 1
 fi
-grep -q '"verdict":"refuted"' "$W/bad.json"
+grep -q '"verdict":"refuted-cex"' "$W/bad.json"
 echo 'PASS: array-of-struct flop bank and mutation'

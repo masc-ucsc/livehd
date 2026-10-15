@@ -98,12 +98,12 @@ assert names == want, f"endpoints {names} != source registers {want}"
 PY
   fi
   run pass liberty gensim "$lib" --emit-dir lg:"$d/models" --emit verilog:"$d/models.v" --workdir "$d/Wm"
-  run lec --impl lg:"$d/net" --ref lg:"$d/ref" --lib lg:"$d/models" --top "$TOP" --workdir "$d/Wlec"
-  grep -q '"verdict":"proven"' "$r" || fail "$tag: graph LEC did not prove: $(cat "$r")"
+  run lec --set formal.effort=proof --impl lg:"$d/net" --ref lg:"$d/ref" --lib lg:"$d/models" --top "$TOP" --workdir "$d/Wlec"
+  grep -qE '"verdict":"proven-(full|bounded)"' "$r" || fail "$tag: graph LEC did not prove: $(cat "$r")"
   { cat "$d/net.v"; echo; cat "$d/models.v"; } > "$d/impl.v"
   { cat "$SRC"; echo; cat "$d/models.v"; } > "$d/ref.v"
-  run lec --impl verilog:"$d/impl.v" --ref verilog:"$d/ref.v" --top "$TOP" --set formal.solver=lgyosys --workdir "$d/Wlgy"
-  grep -q '"verdict":"proven"' "$r" || fail "$tag: lgyosys did not prove the Verilog netlist: $(cat "$r")"
+  run lec --set formal.effort=proof --impl verilog:"$d/impl.v" --ref verilog:"$d/ref.v" --top "$TOP" --set formal.solver=lgyosys --workdir "$d/Wlgy"
+  grep -qE '"verdict":"proven-(full|bounded)"' "$r" || fail "$tag: lgyosys did not prove the Verilog netlist: $(cat "$r")"
 }
 
 # neg <tag> <name> <sed> <cvc5|lgyosys>: the reference with one reset turned
@@ -116,7 +116,7 @@ neg() {
   if [ "$solver" = cvc5 ]; then
     "$LHD" compile -q --reader slang --top "$TOP" --emit-dir lg:"$d/ref" --workdir "$d/Wc" -- "$d/src.v" > "$d/c.log" 2>&1 \
       || fail "$tag/$what: compile"
-    "$LHD" lec --impl lg:"$W/$tag/net" --ref lg:"$d/ref" --lib lg:"$W/$tag/models" --top "$TOP" \
+    "$LHD" lec --set formal.effort=proof --impl lg:"$W/$tag/net" --ref lg:"$d/ref" --lib lg:"$W/$tag/models" --top "$TOP" \
       --set formal.simfail_run=false --workdir "$d/Wlec" -q --result-json "$d/r.json" > "$d/lec.log" 2>&1
   else
     { cat "$d/src.v"; echo; cat "$W/$tag/models.v"; } > "$d/ref.v"
@@ -124,10 +124,10 @@ neg() {
     # async-vs-sync divergence shows on the first of them, and lgcheck solves
     # every requested depth even after a FAIL (the default 10 cost ~16 s).
     # Refuting inside the shorter window is the same (not a weaker) claim.
-    "$LHD" lec --impl verilog:"$W/$tag/impl.v" --ref verilog:"$d/ref.v" --top "$TOP" --set formal.solver=lgyosys \
+    "$LHD" lec --set formal.effort=proof --impl verilog:"$W/$tag/impl.v" --ref verilog:"$d/ref.v" --top "$TOP" --set formal.solver=lgyosys \
       --set formal.simfail_run=false --set formal.bound=2 --workdir "$d/Wlec" -q --result-json "$d/r.json" > "$d/lec.log" 2>&1
   fi
-  grep -q '"verdict":"refuted"' "$d/r.json" || fail "$tag/$what: broken twin was not refuted ($solver): $(cat "$d/r.json")"
+  grep -q '"verdict":"refuted-cex"' "$d/r.json" || fail "$tag/$what: broken twin was not refuted ($solver): $(cat "$d/r.json")"
 }
 
 run_lib q || exit 1

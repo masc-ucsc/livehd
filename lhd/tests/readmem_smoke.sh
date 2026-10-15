@@ -143,14 +143,14 @@ sed 's/zero.hex/other.hex/' "$W/state.prp" > "$W/other.prp"
 cat > "$W/constant.prp" <<'PRP'
 pub mod state(clk:Clock, addr:U2) -> (data:U8@[]) { data = 0 }
 PRP
-"$LHD" lec --ref "$W/state.prp" --impl "$W/other.prp" --top state --workdir "$W/equal" --result-json "$W/equal.json" > "$W/equal.log" 2>&1
-if "$LHD" lec --ref "$W/state.prp" --impl "$W/constant.prp" --top state --workdir "$W/unequal" --result-json "$W/unequal.json" > "$W/unequal.log" 2>&1; then
+"$LHD" lec --set formal.effort=proof --ref "$W/state.prp" --impl "$W/other.prp" --top state --workdir "$W/equal" --result-json "$W/equal.json" > "$W/equal.log" 2>&1
+if "$LHD" lec --set formal.effort=proof --ref "$W/state.prp" --impl "$W/constant.prp" --top state --workdir "$W/unequal" --result-json "$W/unequal.json" > "$W/unequal.log" 2>&1; then
   echo 'external memory was treated as constant zero' >&2; exit 1
 fi
 python3 - "$W/equal.json" "$W/unequal.json" <<'PYTHON'
 import json,sys
-assert json.load(open(sys.argv[1]))['lec']['verdict']=='proven'
-assert json.load(open(sys.argv[2]))['lec']['verdict']=='refuted'
+assert json.load(open(sys.argv[1]))['lec']['verdict']=='proven-full'
+assert json.load(open(sys.argv[2]))['lec']['verdict']=='refuted-cex'
 PYTHON
 "$LHD" synth "$W/state.prp" --top state --set synth.liberty="$LIB" --set synth.opentimer=false --workdir "$W/synth" --emit verilog:"$W/mapped.v" --result-json "$W/synth.json" > "$W/synth.log" 2>&1
 grep -q 'blackbox, keep' "$W/mapped.v"

@@ -27,7 +27,7 @@ run() {
 }
 
 run "$W/first.out" || fail "first verify run failed: $(cat "$W/first.out")"
-grep -q 'PROVEN (bounded)' "$W/first.out" || fail "invariant did not prove: $(cat "$W/first.out")"
+grep -qE "'onehot invariant'\": PROVEN-(full|bounded)" "$W/first.out" || fail "invariant did not prove: $(cat "$W/first.out")"
 grep -q 'case-split sel' "$W/first.out" || fail "verify did not use the selected control input: $(cat "$W/first.out")"
 [ -s "$W/wd/formal_cache.json" ] || fail "formal_cache.json was not written"
 grep -q '"verify:' "$W/wd/formal_cache.json" || fail "cache has no serialized verify-obligation key"

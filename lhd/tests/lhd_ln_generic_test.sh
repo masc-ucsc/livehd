@@ -31,15 +31,15 @@ pub mod signed_chain::[timecheck=false](a:S4, b:S4) -> (s:S10@[0]) {
 PRP
 "$LHD" compile "$W/templates.prp" --emit-dir "ln:$W/library_first" --workdir "$W/export"
 "$LHD" compile "ln:$W/library_first" --emit-dir "ln:$W/library" --workdir "$W/republish"
-"$LHD" lec --impl "ln:$W/library" --ref "$W/templates.prp" --top top \
+"$LHD" lec --set formal.effort=proof --impl "ln:$W/library" --ref "$W/templates.prp" --top top \
   --workdir "$W/reload" --result-json "$W/reload.json"
-grep -q '"verdict":"proven".*"bounded":false' "$W/reload.json"
-"$LHD" lec --impl "ln:$W/library" --ref "$W/templates.prp" --top default_chain \
+grep -q '"verdict":"proven-full".*"bounded":false' "$W/reload.json"
+"$LHD" lec --set formal.effort=proof --impl "ln:$W/library" --ref "$W/templates.prp" --top default_chain \
   --workdir "$W/default_chain" --result-json "$W/default_chain.json"
-grep -q '"verdict":"proven".*"bounded":false' "$W/default_chain.json"
-"$LHD" lec --impl "ln:$W/library" --ref "$W/templates.prp" --top signed_chain \
+grep -q '"verdict":"proven-full".*"bounded":false' "$W/default_chain.json"
+"$LHD" lec --set formal.effort=proof --impl "ln:$W/library" --ref "$W/templates.prp" --top signed_chain \
   --set formal.engine=ind --workdir "$W/signed_chain" --result-json "$W/signed_chain.json"
-grep -q '"verdict":"proven".*"bounded":false' "$W/signed_chain.json"
+grep -q '"verdict":"proven-full".*"bounded":false' "$W/signed_chain.json"
 # Hide the source so the importer cannot silently rediscover it. Exercise a
 # new specialization and an omitted default in a source + ln: invocation.
 cat > "$W/consumer.prp" <<'PRP'
@@ -61,7 +61,7 @@ PRP
 mv "$W/templates.prp" "$W/templates.hidden"
 "$LHD" compile "$W/consumer.prp" "ln:$W/library" --top consumer \
   --emit-dir "lg:$W/consumer_lg" --workdir "$W/import"
-"$LHD" lec --impl "lg:$W/consumer_lg" --ref "$W/reference.prp" --top consumer \
+"$LHD" lec --set formal.effort=proof --impl "lg:$W/consumer_lg" --ref "$W/reference.prp" --top consumer \
   --workdir "$W/proof" --result-json "$W/proof.json"
-grep -q '"verdict":"proven".*"bounded":false' "$W/proof.json"
+grep -q '"verdict":"proven-full".*"bounded":false' "$W/proof.json"
 echo 'PASS: saved generic templates and fresh importer'

@@ -68,7 +68,7 @@ LEC_CONE_LOG=1 $LHD lec --set formal.effort=proof --impl "lg:$WORK/impl" --ref "
 
 # Precondition: the child really was proven and collapsed. Without this the test
 # could pass vacuously by never building a comb box at all.
-if grep -qa "'cbx' PROVEN (1 child collapse)" "$WORK/out.txt"; then
+if grep -qaE "'cbx' PROVEN(-full)? \(1 child collapse\)" "$WORK/out.txt"; then
   echo "ok: the stateless child was proven and collapsed into a box"
 else
   echo "FAIL: fixture is vacuous -- no child collapse happened"
@@ -88,8 +88,8 @@ esac
 
 # And the verdict must stay correct throughout (cvc5 covers for the cone pass
 # today; it must still be PROVEN after the fix, not just faster).
-if grep -qa "PROVEN equivalent" "$WORK/out.txt"; then
-  echo "ok: verdict PROVEN"
+if grep -qa "^lec: 'cbx' PROVEN-full" "$WORK/out.txt"; then
+  echo "ok: verdict PROVEN-full"
 else
   echo "FAIL: verdict is not PROVEN ->"; grep -a "^lec:" "$WORK/out.txt" | head -1; fail=1
 fi

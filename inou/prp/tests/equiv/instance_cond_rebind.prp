@@ -1,0 +1,48 @@
+/*
+:name: instance_cond_rebind
+:type: equiv
+:verilog_top: top
+:pyrope_top: top
+*/
+
+// An instance result REBOUND under an `if` is one value after it: each output
+// muxes between the instance each path bound. lnast.tolg kept a call result as
+// a flat name -> instance alias with no if-arm scope, so the last arm's
+// instance leaked into the later arms and past the `if`:
+//   r -- `f = pair(x=y)` under `if s` drove `r` on BOTH paths (the
+//        tuple_cond_pass_port REFUTED-cex: `s=0` read the then-arm instance);
+//   e -- the else arm read the then-arm's instance instead of the pre-`if` one;
+//   o/q -- a kept SINGLE-output comb: the bare read `q` always muxed (pin
+//        merge), but the field read `h.o` bypassed it.
+// (A conditionally rebound TUPLE comb result is spliced by upass instead --
+// see sub_instance_eligible -- so the mods carry the multi-output claim.)
+mod pair(x:U8) -> (a:U8@[0], b:U8@[0]) {
+  a = x ^ 1
+  b = x
+}
+comb inc(x:U8) -> (o:U8) {
+  wrap o = x + 1
+}
+
+pub mod top(x:U8, y:U8, s:Bool) -> (r:U8@[0], e:U8@[0], o:U8@[0], q:U8@[0]) {
+  mut f = pair(x=x)
+  if s {
+    f = pair(x=y)
+  }
+  wrap r = f.a - f.b
+
+  mut g = pair(x=x)
+  if s {
+    g = pair(x=y)
+    e = g.a
+  } else {
+    e = g.b
+  }
+
+  mut h = inc(x=x)
+  if s {
+    h = inc(x=y)
+  }
+  o = h.o
+  q = h
+}

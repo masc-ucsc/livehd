@@ -16,6 +16,12 @@
 // parent yet), so each builds its own solver — the CALLER MUST invoke this
 // before constructing any cvc5 object in the parent.
 //
+// DEFERRED METHODS. `start_after_ms(i)` > 0 makes method i a fallback leg: it
+// is not started before the race has run that long without a trusted result
+// (or every method started so far has finished). Methods start in index
+// order, so deferred ones go last. lec's combinational int-blast retry uses it:
+// a miter the BV solve settles quickly never pays for the second solver.
+//
 // WALL DEADLINE. cvc5's tlimit-per bounds a checkSat, NOT the preprocessing a
 // push()/refreshAssertions runs (NonClausalSimp, SubstitutionMap::apply) nor a
 // single eager CaDiCaL solve, so a racer CAN outlive formal.timeout without
@@ -44,6 +50,18 @@
 // `racer_id_base` offsets that id for a caller that runs its methods as
 // successive one-racer races (verify's cache-active path: bmc-first = 0, then
 // ind-first = 1), so the hook names the same strategy on both paths.
+//
+// TIME SLICING. Admission (Job_manager: lhd.jobs, host load, memory) may run
+// fewer racers than there are methods. A racer that never finishes before the
+// deadline then held its slot for the whole race while a queued method -- the
+// one that would have settled it in milliseconds -- was never started: a loaded
+// `bazel test //...` leaves one slot per race, and a bmc arm deepening to the
+// wall starved the induction arm that proves the design in 0.1 s (TIMEOUT-time
+// for a provable design). So when a method waits and no slot frees for a
+// quantum (race_slice_quantum_ms), the parent SIGSTOPs the longest-running
+// racer's group and hands ITS slot to the waiting method, round-robin. Never
+// more racers RUN than admission allows; at most max(2, lhd.jobs) are RESIDENT
+// (running or stopped), and each racer's memory share is sized for that.
 //
 // WHOLE-SUBTREE KILL. A racer is not always a leaf: the ABC cone pre-pass
 // (cone_abc.cpp) forks an ABC child whose stall/deadline clocks only the racer
@@ -256,7 +274,28 @@ inline void maybe_test_stall(int i) {
   }
 }
 
+inline void continue_tree(pid_t p) {
+  if (p <= 0) {
+    return;  // never kill(-1)/kill(0): that signals every process we can reach
+  }
+  ::kill(-p, SIGCONT);
+  ::kill(p, SIGCONT);
+}
+
 }  // namespace race_detail
+
+// How long a racer runs before a waiting method may take its slot (see TIME
+// SLICING). A stop/continue costs microseconds, while every quantum a
+// decisive arm waits is pure latency -- and one lec run races several times
+// (per def, flat confirmation, retries), so a 2 s quantum turned a 1 s refute
+// into 20 s on a loaded host. A very short race (<= 150 ms) keeps its first
+// racers to itself.
+inline long long race_slice_quantum_ms(long long deadline_ms) {
+  if (deadline_ms <= 0) {
+    return 500;
+  }
+  return std::clamp<long long>(deadline_ms / 32, 150, 500);
+}
 
 template <class R>
 Race_result<R> fork_race(int nmethods, const std::function<R(int)>& run_method, const std::function<std::string(const R&)>& ser,
@@ -264,7 +303,8 @@ Race_result<R> fork_race(int nmethods, const std::function<R(int)>& run_method, 
                          long long deadline_ms = 0, int racer_id_base = 0, uint64_t job_units = 1,
                          const std::function<int(int)>&                   stall_id   = {},
                          const std::function<int(const Race_result<R>&)>& resolve    = {},
-                         const std::function<uint64_t(int)>&              work_units = {}) {
+                         const std::function<uint64_t(int)>&              work_units = {},
+                         const std::function<long long(int)>&             start_after_ms = {}) {
   auto&                      manager = livehd::Job_manager::global();
   livehd::Job_manager::Yield parent_slot(manager);
   Race_result<R>             out;
@@ -288,9 +328,42 @@ Race_result<R> fork_race(int nmethods, const std::function<R(int)>& run_method, 
   bool                          fork_ok = true;
   const pid_t                   self    = ::getpid();
   std::vector<livehd::Job_slot> leases(nmethods);
-  auto                          launch = [&](int i) {
-    auto lease = manager.try_acquire(livehd::Job_class::formal_arm, work_units ? work_units(i) : job_units, 0, !out.queued[i]);
-    if (!lease) {
+  // TIME SLICING state: `stopped` racers wait in `parked` (FIFO) for a slot;
+  // `slice_at` is when a racer last got the CPU.
+  const int                     resident_cap = static_cast<int>(std::max(2u, manager.ceiling()));
+  const int                     share_ways   = std::min(nmethods, resident_cap);
+  const long long               quantum      = race_slice_quantum_ms(out.deadline_ms);
+  std::vector<bool>             stopped(nmethods, false);
+  std::vector<long long>        slice_at(nmethods, 0);
+  std::vector<int>              parked;
+  // INHERITED CAPACITY. A race in a nested process (a racer, or the ABC helper
+  // a racer forks) runs for a caller that is blocked until the race ends, so
+  // the caller's capacity belongs to the race: it always keeps one racer
+  // running, on an unadmitted token that time slicing rotates like a lease.
+  // Without it a nested race whose caller held no slot it could yield (the
+  // helper owns none; its racer parent does) waited for slots held by the very
+  // racers blocked on it, and burned its whole deadline doing nothing.
+  const bool                    nested    = manager.nested();
+  int                           inherited = -1;  // the racer holding the token
+  auto                          units_of  = [&](int i) { return work_units ? work_units(i) : job_units; };
+  auto                          resident  = [&]() {
+    int n = 0;
+    for (int i = 0; i < nmethods; ++i) {
+      n += out.started[i] && !out.done[i] ? 1 : 0;
+    }
+    return n;
+  };
+  auto running = [&]() {
+    int n = 0;
+    for (int i = 0; i < nmethods; ++i) {
+      n += out.started[i] && !out.done[i] && !stopped[i] ? 1 : 0;
+    }
+    return n;
+  };
+  auto launch = [&](int i, livehd::Job_slot given = {}, bool inherit = false) {
+    auto lease = given || inherit ? std::move(given)
+                                  : manager.try_acquire(livehd::Job_class::formal_arm, units_of(i), 0, !out.queued[i]);
+    if (!lease && !inherit) {
       out.queued[i] = true;
       return false;
     }
@@ -325,7 +398,9 @@ Race_result<R> fork_race(int nmethods, const std::function<R(int)>& run_method, 
       // case the backstop exists to prevent. A child that outgrows its share dies
       // and reports no result, which the parent already tags as Unknown (never a
       // false verdict). Must happen before run_method builds any cvc5 object.
-      if (const uint64_t share = livehd::cost::arm_child_share(std::min<unsigned>(nmethods, manager.ceiling()));
+      // Sized by how many racers can be RESIDENT at once (TIME SLICING), not
+      // just running: a stopped racer keeps its memory.
+      if (const uint64_t share = livehd::cost::arm_child_share(share_ways);
           share != 0 && std::getenv("LIVEHD_MEMORY_DEBUG") != nullptr) {
         std::fprintf(stderr,
                      "lec: racer %d/%d capped (RLIMIT_AS = %llu MiB)\n",
@@ -351,18 +426,106 @@ Race_result<R> fork_race(int nmethods, const std::function<R(int)>& run_method, 
     }
     out.started[i] = true;
     started_at[i]  = ms();
+    slice_at[i]    = started_at[i];
     leases[i]      = std::move(lease);
     leases[i].adopt(c);
+    if (inherit) {
+      inherited = i;
+    }
     pid[i] = c;
     ::setpgid(c, c);  // also here: the group must exist before any kill_tree(c)
     ::close(wfd[i]);  // parent never writes
     wfd[i] = -1;
     return true;
   };
-  int next = 0;
-  while (next < nmethods && launch(next)) {
-    ++next;
-  }
+  // Give a parked (stopped) racer a slot and let it run again.
+  auto resume = [&](int j, livehd::Job_slot lease, bool inherit = false) {
+    leases[j] = std::move(lease);
+    leases[j].adopt(pid[j]);
+    if (inherit) {
+      inherited = j;
+    }
+    stopped[j]  = false;
+    slice_at[j] = ms();
+    race_detail::continue_tree(pid[j]);
+  };
+  int  next = 0;
+  // A DEFERRED method (start_after_ms) is a fallback leg: it starts once the
+  // race has run that long without a trusted result, or at once when every
+  // racer started so far has already finished.
+  auto due  = [&](int i) {
+    if (!start_after_ms || ms() >= start_after_ms(i)) {
+      return true;
+    }
+    for (int j = 0; j < nmethods; ++j) {
+      if (out.started[j] && !out.done[j]) {
+        return false;
+      }
+    }
+    return true;
+  };
+  // Start new methods while admission allows, then let parked racers back in.
+  auto admit_all = [&]() {
+    while (fork_ok && next < nmethods && resident() < resident_cap && due(next) && launch(next)) {
+      ++next;
+    }
+    while (fork_ok && !parked.empty()) {
+      auto lease = manager.try_acquire(livehd::Job_class::formal_arm, units_of(parked.front()), 0, false);
+      if (!lease) {
+        break;
+      }
+      resume(parked.front(), std::move(lease));
+      parked.erase(parked.begin());
+    }
+    // Nested and nothing runs (admission refused everything): the caller's
+    // capacity starts the next method, or lets a parked racer back in.
+    if (nested && fork_ok && running() == 0) {
+      if (next < nmethods && resident() < resident_cap && due(next)) {
+        if (launch(next, {}, true)) {
+          ++next;
+        }
+      } else if (!parked.empty()) {
+        resume(parked.front(), {}, true);
+        parked.erase(parked.begin());
+      }
+    }
+  };
+  // No slot is free and a method waits: once the longest-running racer has had
+  // a whole quantum, stop it and hand its slot (or the inherited token) to the
+  // waiting method.
+  auto rotate = [&]() {
+    const bool fresh = next < nmethods && resident() < resident_cap && due(next);
+    if (!fork_ok || (!fresh && parked.empty())) {
+      return;
+    }
+    const long long now    = ms();
+    int             victim = -1;
+    for (int i = 0; i < nmethods; ++i) {
+      if (pid[i] > 0 && !out.done[i] && !stopped[i] && (leases[i] || i == inherited) && now - slice_at[i] >= quantum
+          && (victim < 0 || slice_at[i] < slice_at[victim])) {
+        victim = i;
+      }
+    }
+    if (victim < 0 || !manager.suspend_child(pid[victim])) {
+      return;  // nobody's quantum is up, or the victim just exited (its EOF frees the slot)
+    }
+    stopped[victim]  = true;
+    const bool token = victim == inherited;
+    if (token) {
+      inherited = -1;
+    }
+    auto lease = std::move(leases[victim]);
+    if (fresh) {
+      if (launch(next, std::move(lease), token)) {
+        ++next;
+      }
+    } else {
+      resume(parked.front(), std::move(lease), token);
+      parked.erase(parked.begin());
+    }
+    parked.push_back(victim);
+  };
+  admit_all();
 
   if (!fork_ok) {
     for (int j = 0; j < nmethods; ++j) {
@@ -386,22 +549,24 @@ Race_result<R> fork_race(int nmethods, const std::function<R(int)>& run_method, 
   std::vector<std::string> bufs(nmethods);
   int                      remaining = nmethods;
   while (remaining > 0 && out.winner < 0) {
-    while (next < nmethods && launch(next)) {
-      ++next;
+    admit_all();
+    if (out.deadline_ms <= 0 || ms() < out.deadline_ms) {
+      rotate();
     }
     if (!fork_ok) {
       break;
     }
     // Finite poll: never block past the deadline. The cap of 1 s per poll is
     // only a re-check cadence; a child's EOF still wakes the poll immediately.
-    int wait_ms = next < nmethods ? 10 : -1;
+    const bool waiting = next < nmethods || !parked.empty();
+    int        wait_ms = waiting ? 10 : -1;
     if (out.deadline_ms > 0) {
       const long long left = out.deadline_ms - ms();
       if (left <= 0) {
         out.deadline_hit = true;
         break;
       }
-      wait_ms = static_cast<int>(std::min<long long>(left, next < nmethods ? 10 : 1000));
+      wait_ms = static_cast<int>(std::min<long long>(left, waiting ? 10 : 1000));
     }
     std::vector<struct pollfd> pfds;
     std::vector<int>           map;
@@ -451,12 +616,19 @@ Race_result<R> fork_race(int nmethods, const std::function<R(int)>& run_method, 
       manager.reap_tree(pid[i]);
       pid[i]        = -1;
       out.done[i]   = true;
+      if (inherited == i) {
+        inherited = -1;  // the token is free again (admit_all re-grants it)
+      }
       out.arm_ms[i] = ms() - started_at[i];
       --remaining;
+      // A parked racer can still die (the OS out-of-memory killer): it must
+      // never be "resumed" through a stale pid.
+      stopped[i] = false;
+      std::erase(parked, i);
       std::string_view payload;
       if (!unframe_blob(bufs[i], payload) || !deser(payload, out.results[i])) {
         out.results[i] = R{};  // truncated/absent frame: no result, never a partial verdict
-        out.death[i]   = child_death_cause(status, usage, std::min<int>(nmethods, static_cast<int>(manager.ceiling())), false);
+        out.death[i]   = child_death_cause(status, usage, share_ways, false);
       }
       if (trust(i, out.results[i])) {
         out.winner = i;

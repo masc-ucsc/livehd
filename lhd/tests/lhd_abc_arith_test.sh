@@ -75,7 +75,7 @@ REGIONS=$(grep -oE '^graph_io [0-9]+ [A-Za-z0-9_.]+' "$W/re/library.txt" | awk '
 lec_regions() {
   local net="$1" tag="$2" r
   for r in $REGIONS; do
-    run lec --impl lg:"$net" --ref lg:"$W/re" --lib lg:"$W/models" --top "$r" --workdir "$W/wlec_${tag}"
+    run lec --set formal.effort=proof --impl lg:"$net" --ref lg:"$W/re" --lib lg:"$W/models" --top "$r" --workdir "$W/wlec_${tag}"
   done
 }
 
@@ -140,7 +140,7 @@ else
   [ "$(usyn_report_field "$W/wa_usyn_none" 'd["tmap"],d["output"]')" = "('none', 'logical-cmos')" ] \
     || fail "usyn tmap=none: report is not logical-cmos"
   for r in $REGIONS; do
-    run lec --impl lg:"$W/net_usyn_none" --ref lg:"$W/re" --top "$r" --workdir "$W/wlec_usyn_none"
+    run lec --set formal.effort=proof --impl lg:"$W/net_usyn_none" --ref lg:"$W/re" --top "$r" --workdir "$W/wlec_usyn_none"
   done
   echo "LEC PASS (lhd lec): usyn tmap=none logical output, no --lib"
   map_and_lec usyn rca --set pass.usyn.adder=rca
@@ -171,7 +171,7 @@ fi
 # can neither prove nor refute), which exits 0 unless strict — so run the
 # control strict, where any non-Proven outcome is a hard failure exit.
 one_region=$(echo "$REGIONS" | head -1)
-if "$LHD" lec --impl lg:"$NET_CTRL" --ref lg:"$W/re" --top "$one_region" \
+if "$LHD" lec --set formal.effort=proof --impl lg:"$NET_CTRL" --ref lg:"$W/re" --top "$one_region" \
     --workdir "$W/wlec_nolib" -q --result-json "$W/rn.json" 2>/dev/null; then
   fail "lec proved equivalence with no --lib (unresolved cells must not vacuously pass)"
 fi
@@ -204,7 +204,7 @@ run pass partition --top "$CTOP" lg:"$C/lg" --emit-dir lg:"$C/re" --workdir "$C/
 CREGIONS=$(grep -oE '^graph_io [0-9]+ [A-Za-z0-9_.]+' "$C/re/library.txt" | awk '{print $3}' | sort -u)
 [ -n "$CREGIONS" ] || fail "no region modules in the constmul partition twin: $(cat "$C/re/library.txt")"
 for r in $CREGIONS; do
-  run lec --impl lg:"$C/net" --ref lg:"$C/re" --lib lg:"$W/models" --top "$r" --workdir "$C/wlec"
+  run lec --set formal.effort=proof --impl lg:"$C/net" --ref lg:"$C/re" --lib lg:"$W/models" --top "$r" --workdir "$C/wlec"
 done
 echo "PASS: pass.$MAPPER constant-operand multiply lhd-lec-equivalent (no const0 collapse)"
 
@@ -227,7 +227,7 @@ PRP
   run pass abc --top sn_mul.sn_mul lg:"$S/lg" --emit-dir lg:"$S/net" --set synth.liberty="$LIB" \
     --set pass.abc.adder=brent --set pass.abc.multiplier=tdm --set pass.abc.barrel=log --workdir "$S/map"
   run pass partition --top sn_mul.sn_mul lg:"$S/lg" --emit-dir lg:"$S/re" --workdir "$S/partition"
-  run lec --impl lg:"$S/net" --ref lg:"$S/re" --lib lg:"$W/models" --top sn_mul.sn_mul --workdir "$S/lec"
+  run lec --set formal.effort=proof --impl lg:"$S/net" --ref lg:"$S/re" --lib lg:"$W/models" --top sn_mul.sn_mul --workdir "$S/lec"
   python3 - "$S/map/qor.json" <<'JSON'
 import json, sys
 q = json.load(open(sys.argv[1]))

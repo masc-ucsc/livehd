@@ -1,8 +1,13 @@
 /*
 :name: loop_inlined_capture
 :type: simulation
-:expect_instances: u_loop_*=3 *=3
+:expect_instances: u_loop_*=1 *=3
 */
+// The loop in `accumulate` captures the comptime OFFSET and must stay ROLLED:
+// one loop instance (u_loop_0) inside accumulate's own module. Both calls are
+// typed scalar runtime calls, so they stay Sub instances `a` and `b`
+// (compile.upass.inline=false) -- three instances in all. An unrolled loop
+// would leave no u_loop_* instance.
 comb accumulate(x:U8) -> (y:U16) {
   comptime const OFFSET = 9
   mut acc:U16 = x

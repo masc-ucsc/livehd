@@ -64,7 +64,7 @@ OUT="$W/good.out"
 "$LHD" formal verify "$W/dly.prp" "$W/good.verify.prp" --top dly --workdir "$W/wg" \
   --set formal.simfail_run=false --diag-fmt pretty >"$OUT" 2>&1 \
   || fail "a true past() property must pass: $(cat "$OUT")"
-grep -q 'PROVEN' "$OUT" || fail "expected PROVEN: $(cat "$OUT")"
+grep -qE "^formal verify: '[^']*' PROVEN-(full|bounded)" "$OUT" || fail "expected PROVEN: $(cat "$OUT")"
 # The stateless-monitor refusal must NOT fire: past() is engine-resolved history,
 # not a flop in the monitor.
 ! grep -qi 'holds STATE' "$OUT" || fail "past() must not be treated as monitor state: $(cat "$OUT")"
@@ -85,8 +85,9 @@ EOF
 OUT="$W/bad.out"
 "$LHD" formal verify "$W/dly.prp" "$W/bad.verify.prp" --top dly --workdir "$W/wb" \
   --set formal.simfail_run=false --diag-fmt pretty >"$OUT" 2>&1
-[ $? -ne 0 ] || fail "a false past() property must fail the run: $(cat "$OUT")"
-grep -q 'REFUTED' "$OUT" || fail "expected REFUTED: $(cat "$OUT")"
+RC=$?
+[ "$RC" -eq 10 ] || fail "a false past() property must fail the run: (rc=$RC, want the counterexample class 10) $(cat "$OUT")"
+grep -q "^formal verify: '[^']*' REFUTED-cex" "$OUT" || fail "expected REFUTED: $(cat "$OUT")"
 grep -q 'counterexample inputs' "$OUT" || fail "a refuted past() must carry the input trace: $(cat "$OUT")"
 
 # ---- an UNGUARDED mirror claim is false across reset ------------------------
@@ -105,8 +106,9 @@ EOF
 OUT="$W/unguarded.out"
 "$LHD" formal verify "$W/dly.prp" "$W/unguarded.verify.prp" --top dly --workdir "$W/wu" \
   --set formal.simfail_run=false --diag-fmt pretty >"$OUT" 2>&1
-[ $? -ne 0 ] || fail "an unguarded mirror claim must refute across reset: $(cat "$OUT")"
-grep -q 'REFUTED' "$OUT" || fail "expected REFUTED for the unguarded claim: $(cat "$OUT")"
+RC=$?
+[ "$RC" -eq 10 ] || fail "an unguarded mirror claim must refute across reset: (rc=$RC, want the counterexample class 10) $(cat "$OUT")"
+grep -q "^formal verify: '[^']*' REFUTED-cex" "$OUT" || fail "expected REFUTED for the unguarded claim: $(cat "$OUT")"
 
 # ---- past(x, 0) is x --------------------------------------------------------
 cat >"$W/zero.verify.prp" <<'EOF'
@@ -121,7 +123,7 @@ OUT="$W/zero.out"
 "$LHD" formal verify "$W/dly.prp" "$W/zero.verify.prp" --top dly --workdir "$W/wz" \
   --set formal.simfail_run=false --diag-fmt pretty >"$OUT" 2>&1 \
   || fail "past(x, 0) must be the current value: $(cat "$OUT")"
-grep -q 'PROVEN' "$OUT" || fail "expected PROVEN for past(x,0): $(cat "$OUT")"
+grep -qE "^formal verify: '[^']*' PROVEN-(full|bounded)" "$OUT" || fail "expected PROVEN for past(x,0): $(cat "$OUT")"
 
 # ---- misuse is a usage error, not a wrong answer ----------------------------
 cat >"$W/expr.verify.prp" <<'EOF'
@@ -180,7 +182,7 @@ OUT="$W/edges.out"
 "$LHD" formal verify "$W/dly1.prp" "$W/edges.verify.prp" --top dly1 --workdir "$W/we2" \
   --set formal.simfail_run=false --diag-fmt pretty >"$OUT" 2>&1 \
   || fail "rose/fell/stable/changed identities must prove: $(cat "$OUT")"
-grep -q 'PROVEN' "$OUT" || fail "expected PROVEN for the edge identities: $(cat "$OUT")"
+grep -qE "^formal verify: '[^']*' PROVEN-(full|bounded)" "$OUT" || fail "expected PROVEN for the edge identities: $(cat "$OUT")"
 ! grep -qi 'holds STATE' "$OUT" || fail "edge operators must not be monitor state: $(cat "$OUT")"
 
 # a WRONG edge sense must refute — the identities above are only meaningful if
@@ -196,8 +198,9 @@ EOF
 OUT="$W/badedge.out"
 "$LHD" formal verify "$W/dly1.prp" "$W/badedge.verify.prp" --top dly1 --workdir "$W/wbe" \
   --set formal.simfail_run=false --diag-fmt pretty >"$OUT" 2>&1
-[ $? -ne 0 ] || fail "rose == fell must refute: $(cat "$OUT")"
-grep -q 'REFUTED' "$OUT" || fail "expected REFUTED for rose == fell: $(cat "$OUT")"
+RC=$?
+[ "$RC" -eq 10 ] || fail "rose == fell must refute: (rc=$RC, want the counterexample class 10) $(cat "$OUT")"
+grep -q "^formal verify: '[^']*' REFUTED-cex" "$OUT" || fail "expected REFUTED for rose == fell: $(cat "$OUT")"
 
 # The same identities on a `Bool` line. The monitor declares a bool port `Bool`
 # (bool ports are strict: `acc.dout != 0` would be a type error), so each
@@ -226,7 +229,7 @@ OUT="$W/edgesb.out"
 "$LHD" formal verify "$W/dlyb.prp" "$W/edgesb.verify.prp" --top dlyb --workdir "$W/web" \
   --set formal.simfail_run=false --diag-fmt pretty >"$OUT" 2>&1 \
   || fail "the temporal identities over a bool port must prove: $(cat "$OUT")"
-grep -q 'PROVEN' "$OUT" || fail "expected PROVEN for the bool edge identities: $(cat "$OUT")"
+grep -qE "^formal verify: '[^']*' PROVEN-(full|bounded)" "$OUT" || fail "expected PROVEN for the bool edge identities: $(cat "$OUT")"
 
 # History inside a SUBMODULE-bound block, over a `reg t:Bool` of the instance.
 # The monitor declares the register `Bool` like a bool port (so `not acc.t` and
@@ -271,8 +274,9 @@ EOF
 OUT="$W/tglbad.out"
 "$LHD" formal verify "$W/tgl.prp" "$W/tglbad.verify.prp" --top tgl --workdir "$W/wtb" \
   --set formal.simfail_run=false --diag-fmt pretty >"$OUT" 2>&1
-[ $? -ne 0 ] || fail "past() in an instance context must read an earlier cycle: $(cat "$OUT")"
-grep -q 'REFUTED' "$OUT" || fail "expected REFUTED for a toggling register claimed frozen: $(cat "$OUT")"
+RC=$?
+[ "$RC" -eq 10 ] || fail "past() in an instance context must read an earlier cycle: (rc=$RC, want the counterexample class 10) $(cat "$OUT")"
+grep -q "^formal verify: '[^']*' REFUTED-cex" "$OUT" || fail "expected REFUTED for a toggling register claimed frozen: $(cat "$OUT")"
 
 # ---- arity is enforced ------------------------------------------------------
 cat >"$W/arity.verify.prp" <<'EOF'

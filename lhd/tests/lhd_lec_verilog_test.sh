@@ -29,7 +29,7 @@ echo "PASS: lec prp vs verilog (default cvc5, slang reader)"
 "$LHD" lec --set formal.effort=proof --impl "lg:$W/yosys_inv" --ref "$INV" --top inv \
   --workdir "$W/c2_slang" -q --result-json "$W/r2_slang.json" \
   || fail "Yosys graph differs from native Slang"
-grep -q '"verdict":"proven"' "$W/r2_slang.json" || fail "reader comparison was not proven"
+grep -q '"verdict":"proven-' "$W/r2_slang.json" || fail "reader comparison was not proven"
 echo "PASS: Yosys graphs agree with native Slang LEC"
 
 # Hierarchical default LEC fallback must detect reset per selected module, not by
@@ -217,7 +217,7 @@ done
   --workdir "$W/cache_child" --result-json "$W/cache_child.json" \
   >"$W/cache_child.log" 2>&1 \
   || { cat "$W/cache_child.log"; fail "reloaded descendant proof selected the wrong top"; }
-grep -q '"verdict":"proven"' "$W/cache_child.json" || fail "descendant was not proven"
+grep -q '"verdict":"proven-' "$W/cache_child.json" || fail "descendant was not proven"
 echo "PASS: reloaded descendant proofs select the child rather than the parent"
 
 # A cached occurrence name can end in the base module's own spelling, e.g.
@@ -237,7 +237,7 @@ done
   --workdir "$W/cache_occurrence_name" --result-json "$W/cache_occurrence_name.json" \
   >"$W/cache_occurrence_name.log" 2>&1 \
   || { cat "$W/cache_occurrence_name.log"; fail "source base replaced the selected occurrence"; }
-grep -q '"verdict":"proven"' "$W/cache_occurrence_name.json" || fail "named occurrence was not proven"
+grep -q '"verdict":"proven-' "$W/cache_occurrence_name.json" || fail "named occurrence was not proven"
 echo "PASS: selected occurrence tops are not rewritten to a source base name"
 
 # cgen exposes tuple leaves as escaped dotted top ports, while an original
@@ -338,7 +338,7 @@ if "$LHD" lec --set formal.effort=proof --impl "$INV" --ref "$INV" --top no_such
 fi
 grep -q '"class":"config"' "$W/r2_setup_fail.json" \
   || fail "default LEC setup failure was not classified as config: $(cat "$W/r2_setup_fail.json")"
-grep -q 'REFUTED' "$W/r2_setup_fail.json" \
+grep -qE '"verdict":"refuted-|REFUTED-' "$W/r2_setup_fail.json" \
   && fail "default LEC setup failure was mislabeled REFUTED: $(cat "$W/r2_setup_fail.json")"
 echo "PASS: default LEC setup failures stay distinct from refutations"
 
@@ -353,7 +353,7 @@ chmod +x "$W/lgcheck_unexpected.sh"
 LHD_LGCHECK="$W/lgcheck_unexpected.sh" "$LHD" lec --set formal.effort=proof --impl "$INV" --ref "$INV" --top inv \
   --workdir "$W/default_backend" --result-json "$W/default_backend.json" \
   || fail "default LEC invoked lgcheck"
-grep -q '"verdict":"proven"' "$W/default_backend.json" || fail "default LEC did not prove identity"
+grep -q '"verdict":"proven-' "$W/default_backend.json" || fail "default LEC did not prove identity"
 echo "PASS: default LEC proves without lgcheck"
 
 # A native proof must not masquerade as an independent lgcheck proof in JSON.
@@ -366,10 +366,10 @@ for code in 0 1 2 99; do
   rc=$?
   if [ "$code" -eq 0 ]; then
     [ "$rc" -eq 0 ] || fail "successful crosscheck failed"
-    verdict=proven
+    verdict=proven-full
   elif [ "$code" -eq 1 ]; then
     [ "$rc" -ne 0 ] || fail "disagreeing crosscheck passed"
-    verdict=refuted
+    verdict=refuted-cex
   else
     [ "$rc" -ne 0 ] || fail "undecided crosscheck passed"
     # lgcheck exits 2 when it could not decide; any other status means it did not run.
@@ -412,9 +412,9 @@ for bound in 7 0; do
     --workdir "$W/crosscheck_bounded_$bound" --result-json "$W/crosscheck_bounded_$bound.json" \
     >"$W/crosscheck_bounded_$bound.log" 2>&1 \
     || fail "complete bounded lgcheck window did not corroborate a native proof: $(cat "$W/crosscheck_bounded_$bound.log")"
-  grep -q "\"crosscheck\":{\"solver\":\"lgyosys\",\"verdict\":\"proven\",\"exit_code\":2,\"bounded\":true,\"bound\":$cycles}" \
+  grep -q "\"crosscheck\":{\"solver\":\"lgyosys\",\"verdict\":\"proven-bounded\",\"exit_code\":2,\"bounded\":true,\"bound\":$cycles}" \
     "$W/crosscheck_bounded_$bound.json" || fail "bounded crosscheck missing from JSON: $(cat "$W/crosscheck_bounded_$bound.json")"
-  grep -q "lgcheck -> equivalent for $cycles cycles (bounded" "$W/crosscheck_bounded_$bound.log" \
+  grep -q "lgcheck -> proven-bounded($cycles)" "$W/crosscheck_bounded_$bound.log" \
     || fail "bounded lgcheck result printed without its bound"
   [ "$(cat "$W/bounded_steps_$bound")" = "$((2 * (cycles - 1)))" ] \
     || fail "formal.bound=$bound exported LGCHECK_BMC_STEPS=$(cat "$W/bounded_steps_$bound"), expected $((2 * (cycles - 1)))"
@@ -429,7 +429,7 @@ for control in short late silent; do
     --set formal.solver=lgyosys --set formal.bound=7 --workdir "$wd" \
     --result-json "$W/crosscheck_$control.json" >"$W/crosscheck_$control.log" 2>&1 \
     && fail "incomplete lgcheck window ($control) passed"
-  grep -q '"crosscheck":{"solver":"lgyosys","verdict":"unknown","exit_code":2,"bounded":false}' "$W/crosscheck_$control.json" \
+  grep -q '"crosscheck":{"solver":"lgyosys","verdict":"incomplete","exit_code":2,"bounded":false}' "$W/crosscheck_$control.json" \
     || fail "incomplete lgcheck window ($control) was not unknown: $(cat "$W/crosscheck_$control.json")"
 done
 [ "$(ls "$W/crosscheck_bounded_7/logs/"*_lhd_lec_lgcheck.log | wc -l)" -eq 1 ] \
@@ -458,14 +458,14 @@ sed 's/NAND2x1/NOR2x1/' "$L/net.v" >"$L/bad.v"
 python3 - "$L/equal.json" <<'PY' || fail "mapped Verilog proof is not an unbounded proof"
 import json, sys
 r = json.load(open(sys.argv[1]))['lec']
-assert r['verdict'] == 'proven' and not r.get('bounded'), r
+assert r['verdict'] == 'proven-full' and not r.get('bounded'), r
 PY
 for solver in cvc5 lgyosys; do
   "$LHD" lec --set formal.effort=proof --ref "$L/net.v" --impl "$L/rtl.v" --ref-top net --impl-top rtl --lib "lg:$L/models" \
     --set pass.satopt=true --set formal.solver=$solver --workdir "$L/reversed_$solver" -q \
     --result-json "$L/reversed_$solver.json" \
     || fail "reference-side --lib with pass.satopt=true ($solver): $(cat "$L/reversed_$solver.json")"
-  grep -q '"verdict":"proven"' "$L/reversed_$solver.json" || fail "reference-side --lib proof missing ($solver)"
+  grep -q '"verdict":"proven-' "$L/reversed_$solver.json" || fail "reference-side --lib proof missing ($solver)"
 done
 # Explicit frontend selection reaches slang on both sides: an unselected root
 # that references a missing cell is never elaborated.
@@ -477,7 +477,7 @@ printf 'module unused; missing_cell u(); endmodule\n' >>"$L/scoped.v"
 "$LHD" lec --set formal.effort=proof --impl "$L/bad.v" --ref "$L/rtl.v" --impl-top net --ref-top rtl --lib "lg:$L/models" \
   --set formal.simfail_run=false --workdir "$L/different" -q --result-json "$L/bad.json" >"$L/bad.log" 2>&1
 [ $? -eq 10 ] || fail "wrong mapped cell was not refuted: $(cat "$L/bad.json")"
-grep -q '"verdict":"refuted"' "$L/bad.json" || fail "wrong mapped cell lacked a refuted verdict"
+grep -q '"verdict":"refuted-cex"' "$L/bad.json" || fail "wrong mapped cell lacked a refuted verdict"
 # `formal verify` shares the Verilog side loader: --lib must not break its
 # sole-module top pick, and a bad --lib kind names the command that ran.
 cat >"$L/fv.v" <<'V'
@@ -516,7 +516,7 @@ V
 python3 - "$W/bounded_short.json" <<'PYBOUND'
 import json, sys
 r = json.load(open(sys.argv[1]))['lec']
-assert r['verdict'] == 'proven' and r['bounded'], r
+assert r['verdict'] == 'proven-bounded' and r['bounded'], r
 PYBOUND
 # A refuted run also writes the counterexample as a Pyrope replay test and then
 # BUILDS AND RUNS it, which is a ~5.5s host clang build. This check asserts the
@@ -528,7 +528,7 @@ if "$LHD" lec --set formal.effort=proof --impl "$W/deep_impl.v" --ref "$W/deep_r
   --result-json "$W/bounded_deep.json" >"$W/bounded_deep.log" 2>&1; then
   fail "deeper BMC missed the delayed mismatch"
 fi
-grep -q '"verdict":"refuted"' "$W/bounded_deep.json" \
+grep -q '"verdict":"refuted-cex"' "$W/bounded_deep.json" \
   || { cat "$W/bounded_deep.log"; fail "deeper BMC did not refute the mismatch"; }
 echo "PASS: short BMC is explicitly bounded; a deeper counterexample refutes"
 
@@ -561,7 +561,7 @@ V
 "$LHD" lec --set formal.effort=proof --ref "$W/keepdc_gold.v" --impl "$W/keepdc_gate.v" --top keepdc \
   --workdir "$W/keepdc" --result-json "$W/keepdc.json" >"$W/keepdc.log" 2>&1 \
   || { cat "$W/keepdc.log"; fail "mapped enabled flops differ from their source"; }
-grep -q '"verdict":"proven"' "$W/keepdc.json" || fail "enabled-flop round trip was not proven"
+grep -q '"verdict":"proven-' "$W/keepdc.json" || fail "enabled-flop round trip was not proven"
 echo "PASS: enabled-flop round trip preserves startup state"
 
 # 3. Bare .v paths on BOTH sides: the verilog kind is inferred from the
@@ -616,7 +616,7 @@ V
 "$LHD" lec --set formal.effort=proof --impl "lg:$W/state_identity_lg" --ref "$W/state_identity.v" \
   --top state_identity --workdir "$W/state_lec" -q --result-json "$W/state_lec.json" \
   || fail "Yosys state identity round trip: $(cat "$W/state_lec.json")"
-grep -q '"verdict":"proven"' "$W/state_lec.json" || fail "state identity proof was inconclusive"
+grep -q '"verdict":"proven-' "$W/state_lec.json" || fail "state identity proof was inconclusive"
 echo "PASS: Yosys state names survive a Verilog round trip with partially reset state"
 
 # Blocking writes see earlier writes in their process; partial/conditional

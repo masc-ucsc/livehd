@@ -39,6 +39,12 @@ fail() {
   exit 1
 }
 run() { "$LHD" "$@" -q --result-json "$W/r.json" || fail "$* -> $(cat "$W/r.json" 2>/dev/null)"; }
+# lec_proven <lec args>: an equivalence gate needs a PROOF (PROVEN-full or
+# PROVEN-bounded), not merely exit 0 (a sampled or timed-out run also exits 0).
+lec_proven() {
+  run lec --set formal.effort=proof "$@"
+  grep -qE '"verdict":"proven-(full|bounded)"' "$W/r.json" || fail "lec $* did not prove: $(cat "$W/r.json")"
+}
 
 # fixture  top                child-def-kept
 DESIGNS=(
@@ -74,7 +80,7 @@ for entry in "${DESIGNS[@]}"; do
     # -- is pinned below.
     grep -qE "__(c[0-9]+|a_[0-9a-f]+)" "$D/part.v" || fail "$FIX/$ALG: multi-region partition has no per-color submodules"
     # 6. LEC: the partitioned hierarchical design must equal the original
-    run lec --impl verilog:"$D/part.v" --ref verilog:"$D/ref.v" --top "$TOP" --workdir "$D/c"
+    lec_proven --impl verilog:"$D/part.v" --ref verilog:"$D/ref.v" --top "$TOP" --workdir "$D/c"
     # 7. The anonymous region wrappers are emitted with the reserved transparent
     # prefix as a plain identifier (an escaped dotted `\__flat___file.entity`
     # reloads as two levels and keeps a spurious `entity` level in state names).
@@ -82,10 +88,10 @@ for entry in "${DESIGNS[@]}"; do
     grep -qF '\__flat___' "$D/part.v" && fail "$FIX/$ALG: transparent wrapper emitted as an escaped/dotted identifier"
     # Name-only correspondence: no tier-2 pairing, and the proof must be
     # unbounded (a wrapper that is not transparent on reload leaves unmatched
-    # state cuts: UNKNOWN, or only a bounded PASS from the auto engine).
-    run lec --impl verilog:"$D/part.v" --ref verilog:"$D/ref.v" --top "$TOP" \
+    # state cuts: a REFUTED-<why>, or only a PROVEN-bounded from the auto engine).
+    run lec --set formal.effort=proof --impl verilog:"$D/part.v" --ref verilog:"$D/ref.v" --top "$TOP" \
       --set formal.lec.state_pairing=false --workdir "$D/cn"
-    python3 -c 'import json,sys; l=json.load(open(sys.argv[1]))["lec"]; sys.exit(0 if l["verdict"]=="proven" and not l.get("bounded") else 1)' \
+    python3 -c 'import json,sys; l=json.load(open(sys.argv[1]))["lec"]; sys.exit(0 if l["verdict"]=="proven-full" and not l.get("bounded") else 1)' \
       "$W/r.json" || fail "$FIX/$ALG: transparent wrappers not name-matched: $(cat "$W/r.json")"
     echo "PASS: $FIX [$ALG] hierarchical partition is LEC-equivalent to the original"
   done
@@ -102,10 +108,10 @@ run compile "$ND/hier_seq.prp" --top hier_seq.top --emit-dir lg:"$ND/lg" --workd
 run pass color acyclic --top hier_seq.top lg:"$ND/lg" --workdir "$ND/w2"
 run pass partition --top hier_seq.top lg:"$ND/lg" --emit-dir lg:"$ND/lg2" --workdir "$ND/w3"
 run compile lg:"$ND/lg2" --top hier_seq.top --emit verilog:"$ND/part.v" --workdir "$ND/w4"
-"$LHD" lec --impl verilog:"$ND/part.v" --ref verilog:"$W/hier_seq/acyclic/ref.v" --top hier_seq.top \
+"$LHD" lec --set formal.effort=proof --impl verilog:"$ND/part.v" --ref verilog:"$W/hier_seq/acyclic/ref.v" --top hier_seq.top \
   --set formal.lec.state_pairing=false --set formal.engine=bmc --set formal.bound=3 \
   --workdir "$ND/c" -q --result-json "$ND/c.json" && fail "mutated transition behind transparent wrappers unexpectedly proved"
-python3 -c 'import json,sys; sys.exit(0 if json.load(open(sys.argv[1]))["lec"]["verdict"]=="refuted" else 1)' "$ND/c.json" \
+python3 -c 'import json,sys; sys.exit(0 if json.load(open(sys.argv[1]))["lec"]["verdict"]=="refuted-cex" else 1)' "$ND/c.json" \
   || fail "negative control not refuted: $(cat "$ND/c.json")"
 echo "PASS: changed transition behind transparent region wrappers is refuted"
 
@@ -127,7 +133,7 @@ run pass partition --top hier_comb.top lg:"$FD/lg" --emit-dir lg:"$FD/lg2" --wor
 run compile lg:"$FD/lg2" --top hier_comb.top --emit verilog:"$FD/part.v" --workdir "$FD/w5"
 grep -q "^module adder" "$FD/part.v" || fail "pipe: child def 'adder' dropped (hierarchy lost)"
 grep -qE "__(c[0-9]+|a_[0-9a-f]+)" "$FD/part.v" && fail "pipe: single-region defs must not get a __c wrapper"
-run lec --impl verilog:"$FD/part.v" --ref verilog:"$FD/ref.v" --top hier_comb.top --workdir "$FD/c"
+lec_proven --impl verilog:"$FD/part.v" --ref verilog:"$FD/ref.v" --top hier_comb.top --workdir "$FD/c"
 echo "PASS: single-region-per-def partition needs no __c wrapper and is LEC-equivalent"
 
 # stats-only mode on a hierarchical input must succeed (per-def region stats).

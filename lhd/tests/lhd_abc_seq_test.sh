@@ -220,7 +220,7 @@ run_abc_lec() {
     sed "s/<= wdata;/<= wdata ^ 8'h01;/" "$d/ref.v" > "$d/bad_ref.v"
     cmp -s "$d/ref.v" "$d/bad_ref.v" && fail "memory negative control changed nothing"
     (
-      "$LHD" lec --impl "$d/impl.v" --ref "$d/bad_ref.v" --top "$top" \
+      "$LHD" lec --set formal.effort=proof --impl "$d/impl.v" --ref "$d/bad_ref.v" --top "$top" \
         --set formal.simfail_run=false \
         --workdir "$d/wc_bad" -q --result-json "$d/bad.json" > "$d/bad.log" 2>&1
       [ $? -eq 10 ]
@@ -249,7 +249,7 @@ run_abc_lec() {
     # result JSON stands in for the one this identical query would have produced.
     cp "$key.json" "$r"
   else
-    run lec --impl verilog:"$d/impl.v" --ref verilog:"$d/ref.v" --top "$top" --workdir "$d/wc"
+    run lec --set formal.effort=proof --impl verilog:"$d/impl.v" --ref verilog:"$d/ref.v" --top "$top" --workdir "$d/wc"
     cp "$r" "$key.json"
     printf '%s' "${d##*/}" > "$key"
   fi

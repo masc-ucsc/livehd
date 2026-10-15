@@ -43,7 +43,7 @@ assert 'lhd.jobs' in listed, listed
 for portfolio in ('bmc:internal', 'bmc:internal,bmc:lazy,ind:internal'):
     proc, result = run('proof', ['formal.effort=proof', 'lhd.jobs=1',
                                f'formal.portfolio={portfolio}', 'formal.timeout=2'])
-    assert result['lec']['verdict'] == 'proven', (proc.stdout, result)
+    assert result['lec']['verdict'] in ('proven-full','proven-bounded'), (proc.stdout, result)
     assert 'sampling' not in result['lec'], result
 wrong = W / 'wrong.v'
 wrong.write_text(source.read_text().replace('a ^ b', 'a | b'))
@@ -53,13 +53,13 @@ for profile in ('eager-kissat', 'eager-cms'):
     proc, result = run('eager-cex', ['formal.effort=proof', 'formal.engine=bmc',
                                    f'formal.profile={profile}', 'formal.timeout=2'],
                        expect=10, impl=f'lg:{W}/wrong-lg')
-    assert result['lec']['verdict'] == 'refuted', result
+    assert result['lec']['verdict'] == 'refuted-cex', result
     assert 'counterexample:' in proc.stdout, proc.stdout
     assert 'confirmed with witness profile' in proc.stdout, proc.stdout
 
 proc, result = run('sample', ['formal.effort=quick-check', 'lhd.jobs=1',
                             'formal.portfolio=bmc:internal,bmc:lazy'])
-assert result['lec']['verdict'] == 'tested', (proc.stdout, result)
+assert result['lec']['verdict'] == 'tested-sampled', (proc.stdout, result)
 # One winning sampler's coverage; racing duplicate profiles never adds vectors.
 assert result['lec']['sampling']['vectors'] < 512, result
 
@@ -69,9 +69,9 @@ env = dict(os.environ, LIVEHD_LEC_RACER_STALL_S='5')
 start = time.monotonic()
 proc, result = run('timeout', ['formal.effort=proof', 'formal.timeout=1',
                              'lhd.jobs=1', 'formal.lec.int_blast=off',
-                             'formal.portfolio=bmc:internal,ind:internal'], expect=7, env=env)
+                             'formal.portfolio=bmc:internal,ind:internal'], expect=0, env=env)
 assert time.monotonic() - start < 3, proc.stdout
-assert result['lec']['verdict'] == 'unknown', result
+assert result['lec']['verdict'] == 'timeout-time', result
 assert 'sampling' not in result['lec'], result
 # Single-engine queries must retain the same parent backstop even when the
 # hierarchy contains only one definition or is explicitly disabled.
@@ -81,9 +81,9 @@ for hierarchy in ('true', 'false'):
         'formal.effort=proof', 'formal.timeout=1', 'formal.engine=ind',
         'formal.profile=eager-kissat', 'formal.lec.int_blast=off',
         f'formal.lec.hier={hierarchy}', 'formal.lec.cones=off',
-    ], expect=7, env=env)
+    ], expect=0, env=env)
     assert time.monotonic() - start < 3, proc.stdout
-    assert result['lec']['verdict'] == 'unknown', result
+    assert result['lec']['verdict'] == 'timeout-time', result
     assert 'sampling' not in result['lec'], result
 
 print('PASS: jobs migration, managed portfolio, sampling coverage and proof wall deadline')

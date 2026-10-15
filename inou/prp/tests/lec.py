@@ -13,6 +13,14 @@ import sys
 # slower while the prebuilt cvc5 does not, so formal.timeout (solve time) holds
 # but the outer watchdog -- which also covers parse/upass/satopt -- must scale.
 DBG_WATCHDOG_SCALE = 10
+# ...but under formal.effort=proof the engine's formal.timeout is ONE wall
+# deadline for the whole run: the hierarchy walk and the LiveHD-side encoding
+# (graph traversal, unrolling; ~7-9x slower at -O0) spend it too, not only the
+# solve. matched_filter_4's flat bmc arm encodes for ~9 s in dbg against ~1 s
+# of cvc5, and a loaded dbg run then hit its 20 s budget. A budget the HARNESS
+# picked is scaled for a dbg tree as well; a formal.timeout the test pins
+# itself is its own claim and stays exact.
+DBG_BUDGET_SCALE = 3
 
 # Top-level verdict words of `lhd lec` / `lhd formal verify` (pass/lec/property_types.hpp
 # Outcome). Every verdict carries a modifier; there is no `UNKNOWN`.
@@ -33,11 +41,16 @@ def watchdog_scale(path=None):
 
 def run_lec(cmd, cwd=None, timeout=5, scale=None):
     """Return CompletedProcess with bytes output; kill the whole owned group on overrun."""
+    pinned = False
     for i, arg in enumerate(cmd):
         if arg == '--set' and i + 1 < len(cmd) and cmd[i + 1].startswith('formal.timeout='):
             timeout = float(cmd[i + 1].split('=', 1)[1])
+            pinned = True
     if not 0 < timeout < float('inf'):
         raise ValueError('integration LEC requires a finite, positive formal.timeout')
+    dbg = watchdog_scale() if scale is None else scale
+    if not pinned and dbg > 1:
+        timeout *= DBG_BUDGET_SCALE
     # pass.lec parses formal.timeout with str_tools::to_i (std::from_chars stops
     # at the '.'), and formal.timeout=0 means UNBOUNDED. Emitting '0.5' would
     # therefore remove the budget entirely -- the opposite of the check above.
@@ -57,7 +70,7 @@ def run_lec(cmd, cwd=None, timeout=5, scale=None):
     no_replay = not any(arg.startswith('formal.simfail_run=') for arg in cmd)
     if no_replay:
         cmd += ['--set', 'formal.simfail_run=false']
-    watchdog = 2 * timeout * (watchdog_scale() if scale is None else scale)
+    watchdog = 2 * timeout * dbg
     proc = subprocess.Popen(cmd, cwd=cwd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                             start_new_session=True)
     try:

@@ -118,8 +118,9 @@ assert (root / 'long-sim-root' / (stems['a'] + '.color-plan.txt')).is_file()
 PYCODE
 grep -q "module ${long_name}a" "$W/long.v" || fail "first long module identity lost"
 grep -q "module ${long_name}b" "$W/long.v" || fail "second long module identity lost"
-"$LHD" lec --impl "$W/long.v" --ref "$W/long.sv" --top top --workdir "$W/long-lec" -q \
-  || fail "long module name emission changed behavior"
+"$LHD" lec --set formal.effort=proof --impl "$W/long.v" --ref "$W/long.sv" --top top --workdir "$W/long-lec" -q \
+  --result-json "$W/long-lec.json" || fail "long module name emission changed behavior"
+grep -qE '"verdict":"proven-(full|bounded)"' "$W/long-lec.json" || fail "long module name emission was not proven: $(cat "$W/long-lec.json")"
 
 # Integrated frontend errors must retain their source diagnostic; upstream's
 # captureOutput API is adapted to LiveHD's Slang version without buffering
@@ -160,10 +161,10 @@ endmodule
 EOF
   "$LHD" compile "$W/latch-$polarity.sv" --reader yosys --top reader_latch \
     --emit-dir "lg:$W/latch-$polarity-lg" --emit verilog:"$W/latch-$polarity.v" --workdir "$W/latch-$polarity-work" -q || fail "Yosys latch import failed"
-  "$LHD" lec --impl "$W/latch-$polarity.v" --ref "$W/latch-$polarity.sv" --top reader_latch \
+  "$LHD" lec --set formal.effort=proof --impl "$W/latch-$polarity.v" --ref "$W/latch-$polarity.sv" --top reader_latch \
     --workdir "$W/latch-$polarity-lec" --result-json "$W/latch-$polarity-lec.json" -q \
     || fail "Yosys latch roundtrip failed ($polarity)"
-  grep -q '"verdict":"proven"' "$W/latch-$polarity-lec.json" || fail "latch roundtrip was not proven ($polarity)"
+  grep -qE '"verdict":"proven-(full|bounded)"' "$W/latch-$polarity-lec.json" || fail "latch roundtrip was not proven ($polarity)"
 done
 
 echo "PASS: long module names, read_slang diagnostics, and async-reset latches"

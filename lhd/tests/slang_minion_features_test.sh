@@ -83,7 +83,7 @@ ${LHD} compile "$W/md2array.sv" --top md2array \
   || fail "2-D unpacked struct array design did not compile"
 cat "$W/md2v"/*.v >"$W/md2_all.v" 2>/dev/null
 [ -s "$W/md2_all.v" ] || fail "no verilog emitted for md2array"
-${LHD} lec --impl verilog:"$W/md2_all.v" \
+${LHD} lec --set formal.effort=proof --impl verilog:"$W/md2_all.v" \
   --ref verilog:"$W/md2array.sv" --top md2array --workdir "$W/md2lec" -q \
   --result-json "$W/md2lec.json" \
   || fail "2-D unpacked struct array LEC failed: $(cat "$W/md2lec.json" 2>/dev/null)"
@@ -186,7 +186,7 @@ ${LHD} compile "$W/wren.sv" --top wren_cast --emit-dir pyrope:"$W/wren_prp/" --w
 if grep -q 'en4_q#\[0\.\.<4\]' "$W/wren_prp"/*.prp; then
   fail "widening cast emitted an identity slice/getmask for en4_q"
 fi
-${LHD} lec --impl pyrope:"$W/wren_prp/wren_cast.prp" \
+${LHD} lec --set formal.effort=proof --impl pyrope:"$W/wren_prp/wren_cast.prp" \
   --ref verilog:"$W/wren.sv" --top wren_cast --set formal.engine=bmc \
    --workdir "$W/wren_lec" -q \
   || fail "mask-free widening cast is not equivalent to the Verilog source"
@@ -244,7 +244,7 @@ EOF
 ${LHD} compile "$W/unarrow.sv" --reader slang --top unarrow \
   --emit-dir pyrope:"$W/unarrow_prp/" --workdir "$W/unarrow_w" -q \
   || fail "unsigned-to-signed narrowing fixture did not compile"
-${LHD} lec --impl pyrope:"$W/unarrow_prp/unarrow.prp" \
+${LHD} lec --set formal.effort=proof --impl pyrope:"$W/unarrow_prp/unarrow.prp" \
   --ref verilog:"$W/unarrow.sv" --top unarrow --set formal.engine=bmc \
    --workdir "$W/unarrow_lec" -q \
   || fail "unsigned-to-signed narrowing lost the destination sign bit"
@@ -285,7 +285,7 @@ ${LHD} compile "$W/substruct_unpack.sv" --reader slang --top substruct_unpack \
 if ! grep -q '#\[3\.\.<9\]' "$W/substruct_unpack_prp/substruct_unpack.prp"; then
   fail "packed-substruct leaf split omitted the explicit padding slice"
 fi
-${LHD} lec --impl pyrope:"$W/substruct_unpack_prp/substruct_unpack.prp" \
+${LHD} lec --set formal.effort=proof --impl pyrope:"$W/substruct_unpack_prp/substruct_unpack.prp" \
   --ref verilog:"$W/substruct_unpack.sv" --top substruct_unpack \
   --set formal.engine=bmc  \
   --workdir "$W/substruct_unpack_lec" -q \
@@ -320,7 +320,7 @@ ${LHD} compile "$W/dynamic_packed_write.sv" --reader slang --top dynamic_packed_
 if grep -q '<<' "$W/dynamic_packed_write_prp/dynamic_packed_write.prp"; then
   fail "dynamic packed-lvalue update is an unbounded shift splice, not a range write"
 fi
-${LHD} lec --impl pyrope:"$W/dynamic_packed_write_prp/dynamic_packed_write.prp" \
+${LHD} lec --set formal.effort=proof --impl pyrope:"$W/dynamic_packed_write_prp/dynamic_packed_write.prp" \
   --ref verilog:"$W/dynamic_packed_write.sv" --top dynamic_packed_write \
   --set formal.engine=bmc  \
   --workdir "$W/dynamic_packed_write_lec" -q \
@@ -388,7 +388,7 @@ grep -qE '#\[5\.\.<10\]' "$W/packed_sroa_stride_prp/packed_sroa_stride.prp" \
 if grep -qE '#\[1\.\.<6\]' "$W/packed_sroa_stride_prp/packed_sroa_stride.prp"; then
   fail "packed inner element 1 used its ordinal as a bit offset"
 fi
-${LHD} lec --impl pyrope:"$W/packed_sroa_stride_prp/packed_sroa_stride.prp" \
+${LHD} lec --set formal.effort=proof --impl pyrope:"$W/packed_sroa_stride_prp/packed_sroa_stride.prp" \
   --ref verilog:"$W/packed_sroa_stride.sv" --top packed_sroa_stride \
   --set formal.engine=bmc  \
   --workdir "$W/packed_sroa_stride_lec" -q \
@@ -567,7 +567,7 @@ EOF
 ${LHD} compile "$W/guarded_inc.prp" --top guarded_inc \
   --emit verilog:"$W/guarded_inc_out.v" --workdir "$W/guarded_inc_w" -q \
   || fail "guarded increment Pyrope did not emit Verilog"
-${LHD} lec --impl verilog:"$W/guarded_inc_out.v" --ref verilog:"$W/guarded_inc.sv" \
+${LHD} lec --set formal.effort=proof --impl verilog:"$W/guarded_inc_out.v" --ref verilog:"$W/guarded_inc.sv" \
   --top guarded_inc --set formal.engine=ind --workdir "$W/guarded_inc_lec" -q \
   || fail "branch-local narrow assignment leaked its width into the sibling arm"
 echo "PASS: branch rollback restores width metadata before lowering sibling arms"
@@ -595,7 +595,7 @@ ${LHD} compile "$W/function_call_snapshot.sv" --top function_call_snapshot \
 if grep -Eq 'classify[[:space:]]*<[[:space:]]*classify' "$W/function_call_snapshot_prp"/*.prp; then
   fail "two function calls aliased the same mutable return slot"
 fi
-${LHD} lec --impl pyrope:"$W/function_call_snapshot_prp/function_call_snapshot.prp" \
+${LHD} lec --set formal.effort=proof --impl pyrope:"$W/function_call_snapshot_prp/function_call_snapshot.prp" \
   --ref verilog:"$W/function_call_snapshot.sv" --top function_call_snapshot \
   --set formal.engine=bmc  \
   --workdir "$W/function_call_snapshot_lec" -q \
@@ -634,7 +634,7 @@ grep -Eq 'req_o\.wdata[[:space:]]*=[[:space:]]*1' "$W/bundle_field_uncertainty_p
   || fail "conditional opcode write erased the definite wdata sibling"
 grep -Eq 'req_o\.data[[:space:]]*=[[:space:]]*0' "$W/bundle_field_uncertainty_prp"/*.prp \
   || fail "conditional opcode write erased the definite data sibling"
-${LHD} lec --impl pyrope:"$W/bundle_field_uncertainty_prp/bundle_field_uncertainty.prp" \
+${LHD} lec --set formal.effort=proof --impl pyrope:"$W/bundle_field_uncertainty_prp/bundle_field_uncertainty.prp" \
   --ref verilog:"$W/bundle_field_uncertainty.sv" --top bundle_field_uncertainty \
   --workdir "$W/bundle_field_uncertainty_lec" -q \
   || fail "field-precise uncertainty lowering is not equivalent to the Verilog source"

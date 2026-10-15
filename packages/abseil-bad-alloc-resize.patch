@@ -1,0 +1,99 @@
+--- a/absl/container/internal/raw_hash_set.cc	2026-10-14 20:08:48.011590217 -0700
++++ b/absl/container/internal/raw_hash_set.cc	2026-10-14 20:09:10.744017203 -0700
+@@ -815,9 +815,11 @@
+   const bool has_infoz = infoz.IsSampled();
+   void* alloc = policy.get_char_alloc(common);
+ 
+-  common.set_capacity(new_capacity);
+   const auto [new_ctrl, new_slots] =
+       AllocBackingArray(common, policy, new_capacity, has_infoz, alloc);
++  // LiveHD: publish the new capacity only once its backing array exists, so a
++  // throwing allocation (std::bad_alloc at RLIMIT_AS) leaves the table intact.
++  common.set_capacity(new_capacity);
+   common.set_control(new_ctrl);
+   common.set_slots(new_slots);
+   common.generate_new_seed(has_infoz);
+@@ -934,12 +936,13 @@
+     has_infoz = true;
+   }
+ 
+-  common.set_capacity(new_capacity);
+-
+   // We do not set control and slots in CommonFields yet to avoid overriding
+   // SOO data.
+   const auto [new_ctrl, new_slots] =
+       AllocBackingArray(common, policy, new_capacity, has_infoz, alloc);
++  // LiveHD: publish the new capacity only once its backing array exists, so a
++  // throwing allocation (std::bad_alloc at RLIMIT_AS) leaves the table intact.
++  common.set_capacity(new_capacity);
+ 
+   InsertOldSooSlotAndInitializeControlBytes(common, policy, new_ctrl, new_slots,
+                                             has_infoz);
+@@ -1428,10 +1431,11 @@
+   void* alloc = policy.get_char_alloc(common);
+   HashtablezInfoHandle infoz = common.infoz();
+   const bool has_infoz = infoz.IsSampled();
+-  common.set_capacity(kNewCapacity);
+-
+   const auto [new_ctrl, new_slots] =
+       AllocBackingArray(common, policy, kNewCapacity, has_infoz, alloc);
++  // LiveHD: publish the new capacity only once its backing array exists, so a
++  // throwing allocation (std::bad_alloc at RLIMIT_AS) leaves the table intact.
++  common.set_capacity(kNewCapacity);
+   common.set_control(new_ctrl);
+   common.set_slots(new_slots);
+   SanitizerPoisonMemoryRegion(new_slots, kNewCapacity * slot_size);
+@@ -1480,7 +1484,6 @@
+   ctrl_t* old_ctrl = common.control();
+   void* old_slots = common.slot_array();
+ 
+-  common.set_capacity(new_capacity);
+   const size_t slot_size = policy.slot_size;
+   const size_t slot_align = policy.slot_align;
+   void* alloc = policy.get_char_alloc(common);
+@@ -1489,6 +1492,9 @@
+ 
+   const auto [new_ctrl, new_slots] =
+       AllocBackingArray(common, policy, new_capacity, has_infoz, alloc);
++  // LiveHD: publish the new capacity only once its backing array exists, so a
++  // throwing allocation (std::bad_alloc at RLIMIT_AS) leaves the table intact.
++  common.set_capacity(new_capacity);
+   common.set_control(new_ctrl);
+   common.set_slots(new_slots);
+   SanitizerPoisonMemoryRegion(new_slots, new_capacity * slot_size);
+@@ -1558,7 +1564,6 @@
+   ABSL_SWISSTABLE_ASSERT(common.capacity() == 0);
+   constexpr size_t kNewCapacity = 1;
+ 
+-  common.set_capacity(kNewCapacity);
+   HashtablezInfoHandle infoz;
+   const bool should_sample =
+       policy.is_hashtablez_eligible && ShouldSampleNextTable();
+@@ -1571,6 +1576,9 @@
+ 
+   const auto [new_ctrl, new_slots] =
+       AllocBackingArray(common, policy, kNewCapacity, has_infoz, alloc);
++  // LiveHD: publish the new capacity only once its backing array exists, so a
++  // throwing allocation (std::bad_alloc at RLIMIT_AS) leaves the table intact.
++  common.set_capacity(kNewCapacity);
+   common.set_control(new_ctrl);
+   common.set_slots(new_slots);
+ 
+@@ -1788,7 +1796,6 @@
+   static constexpr size_t kNewCapacity = NextCapacity(SooCapacity());
+   const size_t slot_size = policy.slot_size;
+   void* alloc = policy.get_char_alloc(common);
+-  common.set_capacity(kNewCapacity);
+ 
+   // Since the table is not empty, it will not be sampled.
+   // The decision to sample was already made during the first insertion.
+@@ -1797,6 +1804,9 @@
+   // SOO data.
+   const auto [new_ctrl, new_slots] = AllocBackingArray(
+       common, policy, kNewCapacity, /*has_infoz=*/false, alloc);
++  // LiveHD: publish the new capacity only once its backing array exists, so a
++  // throwing allocation (std::bad_alloc at RLIMIT_AS) leaves the table intact.
++  common.set_capacity(kNewCapacity);
+ 
+   PrepareInsertCommon(common);
+   ABSL_SWISSTABLE_ASSERT(common.size() == 2);

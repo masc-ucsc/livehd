@@ -67,6 +67,43 @@ the theorem cache and never uses a tested child as a proof premise. When the
 pipeline-flush analysis extends the reset hold, the checked window is
 `bound + flush`, so delayed output differences remain observable.
 
+**When sampling cannot run.** The sampler is one engine. A design it cannot
+model (a collapsed/trusted/ignored box such as `formal.ignore_memory`, a phase
+schedule only the inductive engine composes) escalates to the proof engines
+(`lec: sampled testing ... escalating`), which decide it or name the feature
+no engine models: REFUTED-unsupported is never the sampler's answer alone.
+
+**Portfolio scheduling.** `engine=auto` races `ind`, `bmc`, `bmc:lazy` and
+`bmc:intblast` (induction first; a cached `bmc` strategy hint leads instead).
+When admission (`lhd.jobs`, host load) runs fewer arms than the race has,
+`fork_race` time-slices: a waiting arm takes the slot of the longest-running
+one after a short quantum (SIGSTOP/SIGCONT of the racer's process group), so
+the decisive arm is never starved behind one that deepens to the deadline. A
+combinational miter races the BV `ind` query against a deferred int-blasted
+leg (the int-blast retry) inside the same wall allowance. One-sided box
+compare points end the race at once: every arm shares that miter, and the
+hierarchical driver answers them with a flat retry.
+
+**Nested work runs on its caller's capacity.** A process forked below the lhd
+root (a racer, an isolated worker, the ABC cone helper a racer forks) exists
+only for a parent that is blocked until it finishes (`Job_manager::nested()`).
+Its own first unit of work never queues for admission: a nested `fork_race`
+always keeps one racer running on an unadmitted token that time slicing
+rotates like a lease, and `prove_equal`/property dispatch/isolated workers in
+a nested process do not wait for a slot. Such a process also finds its slots
+by owner (a time-sliced racer may be resumed on a lease its thread never
+acquired), so `Yield` hands them to its racers. Before this, the ABC helper's
+arithmetic race queued for slots held by the very racers blocked on it and
+burned its whole deadline under bazel's 2-CPU cap (15 s instead of 0.3 s).
+
+**A one-sided box counterexample is real.** When the only unmatched points of
+a bmc divergence on a common output are the box points (`bbin:`/`bbox:`) of
+boxes that exist on ONE side (cells with no definition, trusted boxes), the
+trace needs only those boxes' free outputs: REFUTED-cex (exit 10), with the
+headline naming the side (`query.hpp` `one_sided_box_counterexample`). Box
+points on both sides may be one cell whose instances failed to pair, so that
+stays an incomplete correspondence.
+
 **Sampling (random-restricted BMC).** Each query pins a
 random subset of the free primary data-input symbols of every cycle to biased
 random constants (1/8 all-zero, 1/8 all-one, else uniform; clock and reset

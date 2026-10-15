@@ -42,7 +42,7 @@ nodes = [row for line in open(sys.argv[1]) if (row := json.loads(line)).get("t")
 assert len(nodes) < 32, f"constant table still builds hardware: {len(nodes)} nodes"
 assert not any(row["kind"] == "shl" for row in nodes), nodes
 PYCOUNT
-"$LHD" lec --impl lg:"$W/lg" --ref verilog:"$W/gold.v" --top table_columns \
+"$LHD" lec --set formal.effort=proof --impl lg:"$W/lg" --ref verilog:"$W/gold.v" --top table_columns \
   --set formal.timeout=60 --workdir "$W/default" \
   --result-json "$W/default.json" -q
-grep -q '"verdict":"proven"' "$W/default.json"
+grep -qE '"verdict":"proven-(full|bounded)"' "$W/default.json"

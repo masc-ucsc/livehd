@@ -2592,6 +2592,18 @@ std::string Cgen_verilog::build_simple_expr(std::shared_ptr<File_output> fout, c
       // wider AND/NOT must not widen the shift and expose extra high bits.
       final_expr = absl::StrCat(obits, "'(", final_expr, ")");
     }
+    if (!operand_reads_signed(val_dpin) && !is_unsign(dpin)) {
+      // The zero pad makes this text UNSIGNED, but the result pin is signed and
+      // every consumer reads it so (operand_reads_signed trusts the pin). A
+      // declared signed destination re-reads it by declaration; an INLINED shift
+      // has no such variable, so an unsigned text beside a signed constant made
+      // the whole consumer unsigned: `(({N{1'b0}} | 1) << k) ^ (1'sh1)` -- the
+      // `^ -1` flip of a comb call kept as an instance -- zero-extended the -1
+      // to 1 and flipped bit 0 only. The pad already gives the text its full
+      // `obits` width, so `$signed(...)` (self-determined) is the exact
+      // reinterpretation a signed declaration would do.
+      final_expr = absl::StrCat("$signed(", final_expr, ")");
+    }
   } else if (op == Ntype_op::SRA) {
     auto a_dpin   = get_driver(find_sink_pin(node, "a"));
     auto val_expr = get_expression(a_dpin);

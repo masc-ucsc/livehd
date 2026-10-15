@@ -63,7 +63,7 @@ run_lec() {
 
 # --- equal: cones discharge the cuts, verdict PROVEN -------------------------
 run_lec good true
-if [ "$RC" = 0 ] && printf '%s' "$OUT" | grep -q "PROVEN equivalent"; then
+if [ "$RC" = 0 ] && printf '%s' "$OUT" | grep -q "^lec: .* PROVEN-full"; then
   echo "ok: equal netlist under cones -> PROVEN"
 else
   echo "FAIL: equal netlist under cones -> rc=$RC"; printf '%s\n' "$OUT" | tail -3; fail=1
@@ -78,7 +78,7 @@ fi
 
 # --- cones=false must reach the SAME verdict (cones are an optimization) -----
 run_lec good false
-if [ "$RC" = 0 ] && printf '%s' "$OUT" | grep -q "PROVEN equivalent"; then
+if [ "$RC" = 0 ] && printf '%s' "$OUT" | grep -q "^lec: .* PROVEN-full"; then
   echo "ok: equal netlist with cones=false -> PROVEN (same verdict)"
 else
   echo "FAIL: cones=false changed the verdict on the equal netlist (rc=$RC)"; fail=1
@@ -86,7 +86,7 @@ fi
 
 # --- broken: the cone pass must NOT hide a real bug --------------------------
 run_lec bad true
-if [ "$RC" != 0 ] && printf '%s' "$OUT" | grep -q "REFUTED (not equivalent)"; then
+if [ "$RC" = 10 ] && printf '%s' "$OUT" | grep -q "^lec: .* REFUTED-cex"; then
   echo "ok: broken netlist under cones -> REFUTED (exit $RC)"
 else
   echo "FAIL: broken netlist under cones -> rc=$RC (a cone pass must never mask a real difference)"
@@ -105,7 +105,7 @@ fi
 
 # --- broken with cones=false must ALSO refute (no verdict divergence) --------
 run_lec bad false
-if [ "$RC" != 0 ] && printf '%s' "$OUT" | grep -q "REFUTED (not equivalent)"; then
+if [ "$RC" = 10 ] && printf '%s' "$OUT" | grep -q "^lec: .* REFUTED-cex"; then
   echo "ok: broken netlist with cones=false -> REFUTED (same verdict)"
 else
   echo "FAIL: cones=false changed the verdict on the broken netlist (rc=$RC)"; fail=1
@@ -180,7 +180,7 @@ if [ -f "$MSRC" ]; then
     MRC=$?
     # The array cut itself must come back PROVEN from the cone pass -- i.e. the
     # per-port decomposition ran and cvc5 never saw an array query.
-    if [ "$MRC" = 0 ] && grep -q "PROVEN equivalent" "$WORK/lec_mgood.txt" \
+    if [ "$MRC" = 0 ] && grep -q "^lec: .* PROVEN-full" "$WORK/lec_mgood.txt" \
        && grep -q "every cut discharged by the cone pass" "$WORK/lec_mgood.txt"; then
       echo "ok: memory design PROVEN entirely by the cone pass (array cut decomposed into port cones)"
     else
@@ -195,7 +195,7 @@ if [ -f "$MSRC" ]; then
     "$LHD" lec --set formal.effort=proof --ref "$MSRC" --impl lg:"$WORK/mbad.net" --lib lg:"$WORK/models" --top "$MTOP" \
            --set formal.lec.cones=true > "$WORK/lec_mbad.txt" 2>&1
     MBRC=$?
-    if [ "$MBRC" != 0 ] && grep -q "REFUTED (not equivalent)" "$WORK/lec_mbad.txt"; then
+    if [ "$MBRC" = 10 ] && grep -q "^lec: .* REFUTED-cex" "$WORK/lec_mbad.txt"; then
       echo "ok: broken memory WRITE ADDRESS -> REFUTED (the port decomposition never masks it)"
     else
       echo "FAIL: a broken memory write address was not refuted (rc=$MBRC)"; fail=1
@@ -214,7 +214,7 @@ if [ -f "$MSRC" ]; then
     "$LHD" lec --set formal.effort=proof --ref "$MSRC" --impl lg:"$WORK/mgood_bb.net" --lib lg:"$WORK/models" --top "$MTOP" \
            --set formal.lec.cones=true > "$WORK/lec_mgood_bb.txt" 2>&1
     MRC=$?
-    if [ "$MRC" = 0 ] && grep -q "PROVEN equivalent" "$WORK/lec_mgood_bb.txt" \
+    if [ "$MRC" = 0 ] && grep -q "^lec: .* PROVEN-full" "$WORK/lec_mgood_bb.txt" \
        && grep -q '"bounded":false' "$WORK/lec_mgood_bb.txt"; then
       echo "ok: bit-blasted memory (memory=true) PROVEN unbounded through the storage-bank bridge"
     else
@@ -224,7 +224,7 @@ if [ -f "$MSRC" ]; then
     "$LHD" lec --set formal.effort=proof --ref "$MSRC" --impl lg:"$WORK/mbad_bb.net" --lib lg:"$WORK/models" --top "$MTOP" \
            --set formal.lec.cones=true > "$WORK/lec_mbad_bb.txt" 2>&1
     MBRC=$?
-    if [ "$MBRC" != 0 ] && grep -q "REFUTED (not equivalent)" "$WORK/lec_mbad_bb.txt"; then
+    if [ "$MBRC" = 10 ] && grep -q "^lec: .* REFUTED-cex" "$WORK/lec_mbad_bb.txt"; then
       echo "ok: broken memory WRITE ADDRESS under memory=true -> REFUTED (the bank bridge never masks it)"
     else
       echo "FAIL: a broken memory write address under memory=true was not refuted (rc=$MBRC)"; fail=1

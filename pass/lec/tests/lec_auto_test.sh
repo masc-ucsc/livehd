@@ -10,7 +10,8 @@
 #   BMC bounded-Proven (no CEX <= bound, outputs cmp)  -> BOUNDED PASS (exit 0)
 #   neither trustworthy                                -> inconclusive (exit 0)
 # The headline property: on a design that ind FALSE-refutes (an unreachable
-# step-case) auto must NOT hard-fail, even though `engine=ind` alone exits 1.
+# step-case) auto must NOT hard-fail, even though `engine=ind` alone exits 7
+# (REFUTED-unchecked: the forced engine cannot decide it).
 #
 # COMBINATIONAL FAST-PATH: when neither side has a state cell (Flop/Fflop/Latch/
 # Memory), bmc has nothing to unroll and the inductive miter degenerates to a
@@ -66,7 +67,7 @@ run() {  # $1=label ; $2..=lhd args ; sets RC/OUT
 #    proves it. exit 0.
 run eq --ref "$WORK/eq_ref.v" --impl "$WORK/eq_impl.v"
 if [ "$RC" -ne 0 ]; then echo "FAIL: auto equal rc=$RC (want 0)"; fail=1
-elif ! echo "$OUT" | grep -q "PROVEN equivalent"; then echo "FAIL: auto equal: not PROVEN"; fail=1
+elif ! echo "$OUT" | grep -q "PROVEN-full"; then echo "FAIL: auto equal: not PROVEN-full"; fail=1
 elif ! echo "$OUT" | grep -q "combinational.*bmc skipped"; then echo "FAIL: auto equal: combinational fast-path did not fire"; fail=1
 else echo "ok: auto equal -> combinational single-ind Proven (PASS, bmc skipped)"; fi
 
@@ -74,15 +75,20 @@ else echo "ok: auto equal -> combinational single-ind Proven (PASS, bmc skipped)
 #    Stateless, so the combinational fast-path trusts ind's single-step CEX as a
 #    genuine reachable counterexample (bmc skipped) — no false-refute risk here.
 run bug --ref "$WORK/eq_ref.v" --impl "$WORK/bug_impl.v"
-if [ "$RC" -eq 0 ]; then echo "FAIL: auto bug rc=0 (want non-zero)"; fail=1
-elif ! echo "$OUT" | grep -q "REFUTED"; then echo "FAIL: auto bug: not REFUTED"; fail=1
+if [ "$RC" -ne 10 ]; then echo "FAIL: auto bug rc=$RC (want 10, a real counterexample)"; fail=1
+elif ! echo "$OUT" | grep -q "REFUTED-cex"; then echo "FAIL: auto bug: not REFUTED-cex"; fail=1
 elif ! echo "$OUT" | grep -q "combinational.*bmc skipped"; then echo "FAIL: auto bug: combinational fast-path did not fire"; fail=1
 else echo "ok: auto bug -> combinational single-ind Refuted (FAIL, bmc skipped)"; fi
 
-# 3a) ind ALONE false-refutes the unreachable-state design -> exit non-zero
+# 3a) ind ALONE cannot decide the unreachable-state design: its single-step CEX
+#     starts from an arbitrary (maybe unreachable) state, and the forced engine
+#     forbids escalation -> REFUTED-unchecked, exit 7. Never REFUTED-cex (that
+#     would claim the unreachable step is a real difference), never a pass.
 run ur_ind --ref "$WORK/ur_ref.v" --impl "$WORK/ur_impl.v" --set formal.engine=ind
-if [ "$RC" -eq 0 ]; then echo "FAIL: ind-only unreachable rc=0 (expected a FALSE refute, non-zero)"; fail=1
-else echo "ok: ind-only unreachable -> REFUTED (the false refute auto must not trust)"; fi
+if [ "$RC" -ne 7 ]; then echo "FAIL: ind-only unreachable rc=$RC (want 7: REFUTED-unchecked, not a pass and not a real CEX)"; fail=1
+elif ! echo "$OUT" | grep -q "REFUTED-unchecked"; then echo "FAIL: ind-only unreachable: not REFUTED-unchecked"; fail=1
+elif echo "$OUT" | grep -q "REFUTED-cex"; then echo "FAIL: ind-only unreachable: trusted the unreachable step as REFUTED-cex"; fail=1
+else echo "ok: ind-only unreachable -> REFUTED-unchecked (the step CEX auto must not trust)"; fi
 
 # 3b) auto on the SAME design must NOT hard-fail on the unreachable ind-CEX. bmc
 #     finds no REACHABLE CEX up to the bound, so under the bounded-Proven policy
@@ -91,7 +97,7 @@ else echo "ok: ind-only unreachable -> REFUTED (the false refute auto must not t
 run ur_auto --ref "$WORK/ur_ref.v" --impl "$WORK/ur_impl.v"
 if [ "$RC" -ne 0 ]; then echo "FAIL: auto unreachable rc=$RC (want 0 — ind-Refuted must not hard-fail)"; fail=1
 elif echo "$OUT" | grep -q "REFUTED"; then echo "FAIL: auto unreachable reported REFUTED (must not trust the ind CEX)"; fail=1
-elif ! echo "$OUT" | grep -qi "bounded-Proven\|PROVEN equivalent"; then echo "FAIL: auto unreachable: expected a bounded PASS"; fail=1
+elif ! echo "$OUT" | grep -qE "PROVEN-(full|bounded\([0-9]+\))"; then echo "FAIL: auto unreachable: expected a (bounded) PROVEN"; fail=1
 else echo "ok: auto unreachable -> bmc BOUNDED-Proven (PASS, not a false refute)"; fi
 
 if [ $fail -ne 0 ]; then echo "lec_auto_test: FAILED"; exit 1; fi

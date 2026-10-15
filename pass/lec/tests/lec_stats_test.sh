@@ -97,7 +97,7 @@ if [ "$(grep -c 'stats\]:' "$OUT")" -eq 0 ]; then
 else
   echo "FAIL: stats printed without being asked for: $(grep 'stats\]:' "$OUT")"; fail=1
 fi
-grep -q "PROVEN equivalent" "$OUT" || { echo "FAIL: the fixture stopped being PROVEN, every case below is now meaningless: $(tail -3 "$OUT")"; fail=1; }
+grep -q "^lec: .* PROVEN-full" "$OUT" || { echo "FAIL: the fixture stopped being PROVEN, every case below is now meaningless: $(tail -3 "$OUT")"; fail=1; }
 
 # 2) *** THE FORK GATE *** engine=auto races ind|bmc in two FORKED children, so
 #    everything asserted here had to cross the wire codec to be visible at all.

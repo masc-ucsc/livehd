@@ -112,8 +112,8 @@ expect() {  # $1=label $2=line $3=must-match regex [$4=must-also-match regex]
     fail=1
   fi
 }
-reject_proven() {  # $1=label $2=line: anything but PROVEN/PASS
-  if echo "$2" | grep -Eq "PROVEN equivalent|PASS\([0-9]+\) equivalent"; then
+reject_proven() {  # $1=label $2=line: anything but a PROVEN-full/-bounded(n) (or a sampled TESTED)
+  if echo "$2" | grep -Eq " (PROVEN-full|PROVEN-bounded\([0-9]+\)|TESTED-sampled\([0-9]+\))( |$)"; then
     echo "FAIL: $1 -> '$2' (a PROVEN here is a false proof)"
     fail=1
   elif [ -z "$2" ]; then
@@ -125,17 +125,17 @@ reject_proven() {  # $1=label $2=line: anything but PROVEN/PASS
 }
 
 expect "dead bits prove under ind" "$(run dead_ref.prp dead_impl.prp ind)" \
-  "PROVEN equivalent" "observability: 8 unobservable state bit"
+  " PROVEN-full " "observability: 8 unobservable state bit"
 reject_proven "dead bits without the reduction (LEC_OBS_OFF)" "$(run dead_ref.prp dead_impl.prp ind LEC_OBS_OFF=1)"
 
 for v in live_self live_chain; do
   reject_proven "$v under ind" "$(run live_ref.prp $v.prp ind)"
-  expect "$v under auto" "$(run live_ref.prp $v.prp auto)" "REFUTED"
+  expect "$v under auto" "$(run live_ref.prp $v.prp auto)" " REFUTED-cex "
 done
 
 expect "reset spelled two ways (tier-2 reset-agnostic pair)" "$(run rst_ref.v rst_impl.prp auto)" \
-  "PROVEN equivalent" "uncertain tier-2 pair"
-expect "wrong observable reset value" "$(run rst_ref.v rst_bad.prp auto)" "REFUTED"
+  " PROVEN-full " "uncertain tier-2 pair"
+expect "wrong observable reset value" "$(run rst_ref.v rst_bad.prp auto)" " REFUTED-cex "
 reject_proven "wrong observable reset value under ind" "$(run rst_ref.v rst_bad.prp ind)"
 
 if [ $fail -ne 0 ]; then

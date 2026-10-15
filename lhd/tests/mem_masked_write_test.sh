@@ -114,8 +114,9 @@ grep -q '_data\[a\]\[7:0\] <=' <<<"$V" || fail "case 1: the reset array S must w
 echo "ok: partial writes are write-masked ports (wensize 2 / 16), no old-value read ports"
 
 # 2. The design against its golden.
-OUT=$("$LHD" lec --ref "verilog:$W/gold.v" --impl "$W/mw.prp" --top mw --workdir "$W/l1" 2>&1); RC=$?
+OUT=$("$LHD" lec --set formal.effort=proof --ref "verilog:$W/gold.v" --impl "$W/mw.prp" --top mw --workdir "$W/l1" 2>&1); RC=$?
 [ "$RC" -eq 0 ] || { echo "$OUT" | grep -aoE "first divergence at [^\"]{0,200}" | head -1; fail "case 2: not equivalent to the golden (rc=$RC)"; }
+echo "$OUT" | grep -qE "^lec: .* PROVEN-(full|bounded)" || fail "case 2: equivalence to the golden was not PROVEN: $(echo "$OUT" | grep '^lec:')"
 echo "ok: LEC-equivalent to the per-bit merging golden"
 
 # 3. The mutant (the old last-lane-only bug) must refute.
@@ -149,8 +150,8 @@ module ms(input clock, input reset, input we0, input we1, input [1:0] a, input [
   assign qs = s_after;
 endmodule
 EOF
-OUT=$("$LHD" lec --ref "verilog:$W/mutant.v" --impl "$W/ms.prp" --top ms --workdir "$W/l2" 2>&1); RC=$?
-echo "$OUT" | grep -q '"verdict":"refuted"' || fail "case 3: the last-lane-only mutant was not refuted (rc=$RC)"
+OUT=$("$LHD" lec --set formal.effort=proof --ref "verilog:$W/mutant.v" --impl "$W/ms.prp" --top ms --workdir "$W/l2" 2>&1); RC=$?
+[ "$RC" -eq 10 ] && echo "$OUT" | grep -q '"verdict":"refuted-cex"' || fail "case 3: the last-lane-only mutant was not refuted (rc=$RC)"
 echo "ok: the last-lane-only mutant is refuted"
 
 echo "PASS"

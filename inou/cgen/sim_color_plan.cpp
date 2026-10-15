@@ -1212,6 +1212,36 @@ std::optional<bool> update_on_rise(const hhds::Occurrence_node& node, const lc::
   return std::nullopt;  // data-enabled latches have separate actions in each settling phase
 }
 
+// A compact-loop body whose walk is a pure function of its inputs: no state
+// (flop, latch, memory, body-less cell) and no nested loop anywhere below it.
+// Walking such a loop once per output version is exact, which is what lets a
+// port-split loop (Site::port_split) give each output its own walk. A nested
+// loop is refused as well: its port summary is one ordinal of the inner body,
+// and the inner carries would have to be closed level by level.
+bool pure_loop_body(const std::shared_ptr<hhds::Graph>& graph, absl::flat_hash_map<const hhds::Graph*, bool>& memo) {
+  if (graph == nullptr) {
+    return false;
+  }
+  if (const auto it = memo.find(graph.get()); it != memo.end()) {
+    return it->second;
+  }
+  memo.emplace(graph.get(), false);  // the instance hierarchy is a DAG; a revisit is conservative
+  bool pure = true;
+  for (const auto& node : graph->body().nodes()) {
+    const auto op = gu::type_op_of(node);
+    if (gu::is_type_register(node) || op == Ntype_op::Memory || op == Ntype_op::Latch || node.is_loop_subnode()) {
+      pure = false;
+    } else if (op == Ntype_op::Sub) {
+      pure = pure_loop_body(node.get_subnode_graph(), memo);
+    }
+    if (!pure) {
+      break;
+    }
+  }
+  memo[graph.get()] = pure;
+  return pure;
+}
+
 }  // namespace
 
 // Live machine words a color may keep alive across its members lives on the
@@ -1587,6 +1617,119 @@ Color_plan Color_plan::discover(hhds::Graph* root, bool include_observations, bo
           dep.kind = Dependency_kind::control;
         }
         plan.dependencies_.push_back(dep);
+      }
+    }
+  }
+
+  // A compact loop is ONE atomic site above, yet pass.legalize accepts a ring
+  // that closes only through that atomic boundary: its contract is ARC level,
+  // and a rolled loop is never split, inlined or unrolled (ruling 2026-10-08).
+  // The shape: a comb callee's rolled loop whose `p` output (read from `b`)
+  // feeds, through the caller, the same loop's `s` input (read only by `o`).
+  // As one version per output that consumes EVERY input, that loop precedes
+  // itself. Mark each such loop `port_split` when its walk is a pure function
+  // (pure_loop_body): its output versions below consume only their own
+  // carry-closed port support, and the emitter gives each output version its
+  // own walk of the same rolled loop. A loop with state keeps its single
+  // per-period walk (the advance commits lane state) and its ring still fails
+  // the plan. Only a loop on a cycle of the site graph is marked, found by one
+  // Tarjan pass rooted at the candidate loops (a cycle through a loop is
+  // reachable from it); state reads are last period's values, not edges.
+  {
+    absl::flat_hash_map<const hhds::Graph*, bool> pure_memo;
+    std::vector<size_t>                           candidates;
+    for (size_t i = 0; i < plan.sites_.size(); ++i) {
+      const auto& site = plan.sites_[i];
+      if (site.live && site.kind == Site_kind::loop_control && pure_loop_body(site.node.base_node().get_subnode_graph(), pure_memo)) {
+        candidates.push_back(i);
+      }
+    }
+    if (!candidates.empty()) {
+      const size_t      nsites = plan.sites_.size();
+      std::vector<bool> self_ring(nsites, false);
+      const auto        ring_edge = [&](const Dependency& dep) {
+        return !dep.cut && dep.kind != Dependency_kind::loop_carry && plan.sites_[dep.producer].kind != Site_kind::state;
+      };
+      std::vector<size_t> first(nsites + 1, 0);
+      for (const auto& dep : plan.dependencies_) {
+        if (!ring_edge(dep)) {
+          continue;
+        }
+        if (dep.producer == dep.consumer) {
+          self_ring[dep.producer] = true;  // a non-carry self edge: the ring is one hop
+        } else {
+          ++first[dep.producer + 1];
+        }
+      }
+      for (size_t i = 0; i < nsites; ++i) {
+        first[i + 1] += first[i];
+      }
+      std::vector<size_t> successors(first[nsites]);
+      {
+        std::vector<size_t> cursor(first.begin(), first.end() - 1);
+        for (const auto& dep : plan.dependencies_) {
+          if (ring_edge(dep) && dep.producer != dep.consumer) {
+            successors[cursor[dep.producer]++] = dep.consumer;
+          }
+        }
+      }
+      constexpr size_t    unvisited = std::numeric_limits<size_t>::max();
+      std::vector<size_t> order(nsites, unvisited);
+      std::vector<size_t> low(nsites, 0);
+      std::vector<size_t> component(nsites, unvisited);
+      std::vector<size_t> component_size;
+      std::vector<size_t> stack;
+      std::vector<bool>   on_stack(nsites, false);
+      size_t              next_order = 0;
+      for (const size_t seed : candidates) {
+        if (order[seed] != unvisited) {
+          continue;
+        }
+        std::vector<std::pair<size_t, size_t>> frames{
+            {seed, first[seed]}
+        };
+        order[seed] = low[seed] = next_order++;
+        stack.push_back(seed);
+        on_stack[seed] = true;
+        while (!frames.empty()) {
+          auto& [at, next] = frames.back();
+          if (next < first[at + 1]) {
+            const size_t to = successors[next++];
+            if (order[to] == unvisited) {
+              order[to] = low[to] = next_order++;
+              stack.push_back(to);
+              on_stack[to] = true;
+              frames.emplace_back(to, first[to]);
+            } else if (on_stack[to]) {
+              low[at] = std::min(low[at], order[to]);
+            }
+            continue;
+          }
+          const size_t done = at;
+          frames.pop_back();
+          if (!frames.empty()) {
+            low[frames.back().first] = std::min(low[frames.back().first], low[done]);
+          }
+          if (low[done] != order[done]) {
+            continue;
+          }
+          const size_t id   = component_size.size();
+          size_t       size = 0;
+          for (size_t member = unvisited; member != done;) {
+            member = stack.back();
+            stack.pop_back();
+            on_stack[member]  = false;
+            component[member] = id;
+            ++size;
+          }
+          component_size.push_back(size);
+        }
+      }
+      for (const size_t loop : candidates) {
+        if (self_ring[loop] || component_size[component[loop]] > 1) {
+          plan.sites_[loop].port_split = true;
+          ++plan.summary_.port_split_loops;
+        }
       }
     }
   }
@@ -3533,6 +3676,43 @@ Color_plan Color_plan::discover(hhds::Graph* root, bool include_observations, bo
     }
   }
 
+  // A port-split loop's output version reads only this support: the one-
+  // ordinal port reach of its body, closed over the carries (from the second
+  // ordinal on a carry-in holds the previous carry-out, so the output also
+  // reads whatever that carry-out reads -- pass.legalize's arc closure), plus
+  // the activation input, which the native wrapper's lane gating reads.
+  const auto split_support = [&](size_t base, hhds::Port_id output_port) -> const std::vector<hhds::Port_id>& {
+    const auto key = std::pair{base, output_port};
+    if (const auto found = plan.split_loop_support_.find(key); found != plan.split_loop_support_.end()) {
+      return found->second;
+    }
+    const auto&                   node = plan.sites_[base].node;
+    absl::flat_hash_set<uint32_t> ins;
+    const auto&                   reach = port_reach.of(node.base_node().get_subnode_graph());
+    if (const auto row = reach.out2ins.find(static_cast<uint32_t>(output_port)); row != reach.out2ins.end()) {
+      ins.insert(row->second.begin(), row->second.end());
+    }
+    for (bool grew = true; grew;) {
+      grew = false;
+      for (const auto& carry : node.subnode_group().carries()) {
+        if (!ins.contains(static_cast<uint32_t>(carry.input_port()))) {
+          continue;
+        }
+        if (const auto row = reach.out2ins.find(static_cast<uint32_t>(carry.output_port())); row != reach.out2ins.end()) {
+          for (const auto in : row->second) {
+            grew |= ins.insert(in).second;
+          }
+        }
+      }
+    }
+    if (const auto loop = node.subnode_loop(); loop && loop->activation_input) {
+      ins.insert(static_cast<uint32_t>(*loop->activation_input));
+    }
+    std::vector<hhds::Port_id> support(ins.begin(), ins.end());
+    std::ranges::sort(support);
+    return plan.split_loop_support_.emplace(key, std::move(support)).first->second;
+  };
+
   // Back-propagate each required version through its combinational cone. A
   // state Q is an anchor at that version; its update cone is scheduled only by
   // the explicit state-update site above.
@@ -3660,9 +3840,15 @@ Color_plan Color_plan::discover(hhds::Graph* root, bool include_observations, bo
       }
       continue;
     }
+    const std::vector<hhds::Port_id>* port_support
+        = base_site.port_split ? &split_support(consumer_site.base_site, consumer_site.output_port) : nullptr;
     uint32_t consumer_input = 0;
     for (const auto& edge_sink : base_site.node.inp_sorted_pins()) {
       for (const auto& edge_drv : edge_sink.get_driver_pins()) {
+        if (port_support != nullptr && !std::ranges::binary_search(*port_support, edge_sink.get_port_id())) {
+          ++consumer_input;
+          continue;  // this output's walk does not read that input (Site::port_split)
+        }
         if (gu::type_op_of(base_site.node) == Ntype_op::Latch
             && edge_sink.get_port_id() != Ntype::get_sink_pid(Ntype_op::Latch, "din")
             && edge_sink.get_port_id() != Ntype::get_sink_pid(Ntype_op::Latch, "reset_pin")
@@ -5166,6 +5352,9 @@ Color_plan Color_plan::discover(hhds::Graph* root, bool include_observations, bo
     signature.u(static_cast<uint64_t>(plan.version_sites_[color_members.front()].slot));
     for (const size_t member : identity_members) {
       signature.id(plan.version_sites_[member].structural_id).u(plan.sites_[plan.version_sites_[member].base_site].in_place);
+      if (plan.sites_[plan.version_sites_[member].base_site].port_split) {
+        signature.text("port-split");  // own walk, partial bindings: never a plain loop's kernel
+      }
     }
     // Allocate activation storage by the interval's terminal value, not by
     // its whole implementation. An internal cone edit must not move the dirty
@@ -5291,7 +5480,13 @@ Color_plan Color_plan::discover(hhds::Graph* root, bool include_observations, bo
     slot_index.emplace(signature, result);
     return result;
   };
-  const auto add_consumer = [&](size_t        slot_index_value,
+  // A slot's consumers are deduplicated through one hash set keyed by (slot,
+  // every consumer field): a linear scan of the slot's consumer list made a
+  // fanout-heavy slot quadratic (a clock feeding 32k flops: ~1e9 compares, 90 s
+  // in a debug build).
+  using Consumer_key = std::tuple<size_t, size_t, size_t, hhds::Port_id, uint32_t, uint32_t, bool, uint32_t>;
+  absl::flat_hash_set<Consumer_key> consumer_seen;
+  const auto                        add_consumer = [&](size_t        slot_index_value,
                                 size_t        version,
                                 hhds::Port_id port,
                                 uint32_t      input,
@@ -5300,23 +5495,16 @@ Color_plan Color_plan::discover(hhds::Graph* root, bool include_observations, bo
                                 uint32_t      lane_offset = 0) {
     auto&                   slot = plan.boundary_slots_[slot_index_value];
     const Boundary_consumer consumer{version, color_of_version(version), port, input, consumer_width, preextracted, lane_offset};
-    const auto              duplicate = std::ranges::find_if(slot.consumers, [&](const Boundary_consumer& existing) {
-      return std::tie(existing.version_site,
-                      existing.color,
-                      existing.port,
-                      existing.input,
-                      existing.width,
-                      existing.preextracted,
-                      existing.lane_offset)
-             == std::tie(consumer.version_site,
-                         consumer.color,
-                         consumer.port,
-                         consumer.input,
-                         consumer.width,
-                         consumer.preextracted,
-                         consumer.lane_offset);
-    });
-    if (duplicate == slot.consumers.end()) {
+    if (consumer_seen
+            .emplace(slot_index_value,
+                     consumer.version_site,
+                     consumer.color,
+                     consumer.port,
+                     consumer.input,
+                     consumer.width,
+                     consumer.preextracted,
+                     consumer.lane_offset)
+            .second) {
       slot.consumers.push_back(consumer);
     }
   };
@@ -6426,6 +6614,11 @@ const std::vector<size_t>& Color_plan::colors_in_execution_order() const {
   return colors_in_execution_order_;
 }
 
+const std::vector<hhds::Port_id>* Color_plan::split_loop_support(size_t base_site, hhds::Port_id output_port) const {
+  const auto found = split_loop_support_.find(std::pair{base_site, output_port});
+  return found == split_loop_support_.end() ? nullptr : &found->second;
+}
+
 bool Color_plan::validate_retained_handles() const {
   // One in-edge per (sink pin, driver) pair: summing the PLURAL driver lists
   // over the sorted sink pins is the same count the in-edge range reported,
@@ -6553,13 +6746,14 @@ std::string Color_plan::report() const {
     std::vector<std::string> sites;
     sites.reserve(sites_.size());
     for (const auto& site : sites_) {
-      sites.push_back(std::format("site {} kind={} op={} depth={} live={} ge={}\n",
+      sites.push_back(std::format("site {} kind={} op={} depth={} live={} ge={}{}\n",
                                   site.structural_id,
                                   site_kind_name(site.kind),
                                   Ntype::get_name(gu::type_op_of(site.node)),
                                   site.node.path().steps().size(),
                                   site.live ? "true" : "false",
-                                  site.gate_equivalents));
+                                  site.gate_equivalents,
+                                  site.port_split ? " port-split=true" : ""));
     }
     std::ranges::sort(sites);
     for (const auto& site : sites) {

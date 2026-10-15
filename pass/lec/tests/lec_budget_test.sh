@@ -92,7 +92,10 @@ EOF
 mkeasy ref
 mkeasy impl
 
-# run_lec TAG BASE TIMEOUT OUTER_KILL [extra --set ...] -> sets ELAPSED / VERDICT / OUTFILE
+# run_lec TAG BASE TIMEOUT OUTER_KILL [extra --set ...] -> sets ELAPSED / VERDICT / RC / OUTFILE
+# VERDICT is the word of the FINAL top-level `lec: '<top>' <WORD>` line (the
+# pass/lec/property_types.hpp vocabulary: PROVEN-full, PROVEN-bounded(n),
+# TIMEOUT-time, REFUTED-cex, ...), never a per-def `lec[hier]:` or progress word.
 run_lec() {  # $1=tag $2=basename $3=formal.timeout $4=outer_kill_s; $5.. = extra args
   local mode=$1 base=$2 to=$3 outer=$4 start end pid wd
   shift 4
@@ -113,9 +116,9 @@ run_lec() {  # $1=tag $2=basename $3=formal.timeout $4=outer_kill_s; $5.. = extr
       kill -0 "$pid" 2>/dev/null || exit 0
     done
     kill -9 "$pid" 2>/dev/null ) >/dev/null 2>&1 & wd=$!
-  wait "$pid"; kill -9 "$wd" 2>/dev/null; wait "$wd" 2>/dev/null
+  wait "$pid"; RC=$?; kill -9 "$wd" 2>/dev/null; wait "$wd" 2>/dev/null
   end=$(date +%s); ELAPSED=$((end-start))
-  VERDICT=$(grep -oE "PROVEN equivalent|REFUTED \(not equivalent\)|TIMEOUT|UNSUPPORTED|UNDISCHARGED|UNCONFIRMED|UNPAIRED|UNCHECKED|VACUOUS|UNEXPLAINED" "$OUTFILE" | head -1)
+  VERDICT=$(grep -E "^lec: '[^']+' " "$OUTFILE" | grep -oE " (PROVEN-full|PROVEN-bounded\([0-9]+\)|TESTED-sampled\([0-9]+\)|TIMEOUT-(time|memory)|REFUTED-(cex|interface|unsupported|unchecked|vacuous|unexplained))( |$)" | tail -1 | tr -d ' ')
   # The scheduler's own solving window (compile excluded) — see the header note.
   ACTUAL=$(python3 -c 'import json,sys,math; q=json.load(open(sys.argv[1])); print(math.ceil(sum(p["ms"] for p in q["phases"] if p["name"]=="pass.lec")/1000))' "$WORK/${mode}_${base}.json")
 }
@@ -126,7 +129,7 @@ run_lec() {  # $1=tag $2=basename $3=formal.timeout $4=outer_kill_s; $5.. = extr
 #    COUNT is the deterministic proof the budget is a total and not per-def (per-def
 #    budgeting floors nobody), and the per-def verdict lines are the proof that
 #    running out of budget never SILENTLY SKIPS a def — it must still earn a real
-#    UNKNOWN/CEX on the floor (user ruling). The two legitimate skips in run_def are
+#    TIMEOUT/CEX on the floor (user ruling). The two legitimate skips in run_def are
 #    verdict-CACHE hits (a known Proven, or a known-Unknown at >= this budget on an
 #    unchanged digest); a fresh workdir has neither, so every line is a real attempt.
 #    The floor is pinned to 1s EXPLICITLY (it used to ride the default): this
@@ -169,19 +172,24 @@ fi
 if [ "$ELAPSED" -ge 25 ]; then
   echo "FAIL: end-to-end took ${ELAPSED}s for a 2s budget (want < 25s)"; fail=1
 fi
-# The hard hierarchy must degrade soundly (never a false PROVEN).
-if [ "$VERDICT" = "PROVEN equivalent" ]; then
-  echo "FAIL: hard hierarchy under budget -> FALSE PROVEN"; fail=1
-else
-  echo "ok: hard hierarchy under budget -> ${VERDICT:-<none>} (sound)"
-fi
+# The hard hierarchy must degrade soundly: never a false PROVEN, and running
+# out of budget is a TIMEOUT-<why> (exit 0, a warning), never a refute.
+case "$VERDICT" in
+  PROVEN-*) echo "FAIL: hard hierarchy under budget -> FALSE PROVEN ($VERDICT)"; fail=1 ;;
+  TIMEOUT-*) if [ "$RC" -eq 0 ]; then
+               echo "ok: hard hierarchy under budget -> $VERDICT (sound)"
+             else
+               echo "FAIL: hard hierarchy under budget -> $VERDICT but rc=$RC (want 0)"; fail=1
+             fi ;;
+  *) echo "FAIL: hard hierarchy under budget -> '${VERDICT:-<none>}' rc=$RC (want TIMEOUT-*, rc 0): $(cat "$OUTFILE")"; fail=1 ;;
+esac
 
 # 2) No regression: an easy, genuinely-equivalent hierarchy still PROVES under wall.
 run_lec wall easy 2 30
-if [ "$VERDICT" = "PROVEN equivalent" ]; then
-  echo "ok: easy hierarchy under wall budget -> PROVEN (no regression)"
+if [ "$VERDICT" = "PROVEN-full" ] && [ "$RC" -eq 0 ]; then
+  echo "ok: easy hierarchy under wall budget -> PROVEN-full (no regression)"
 else
-  echo "FAIL: easy hierarchy under wall budget -> '${VERDICT:-<none>}' (want PROVEN)"; fail=1
+  echo "FAIL: easy hierarchy under wall budget -> '${VERDICT:-<none>}' rc=$RC (want PROVEN-full, rc 0)"; fail=1
 fi
 fi
 
@@ -189,11 +197,15 @@ fi
 if [ "$MODE" != budget ]; then
 run_lec base hard1 1 30 --set formal.min_timeout=1
 BASE_ACTUAL=${ACTUAL:-1}
-if [ "$VERDICT" = "PROVEN equivalent" ]; then
-  echo "FAIL: hard leaf under budget -> FALSE PROVEN"; fail=1
-else
-  echo "ok: floor A/B baseline (1s floor) -> ${VERDICT:-<none>} in ${BASE_ACTUAL:-<none>}s of solving (sound)"
-fi
+case "$VERDICT" in
+  PROVEN-*) echo "FAIL: hard leaf under budget -> FALSE PROVEN ($VERDICT)"; fail=1 ;;
+  TIMEOUT-*) if [ "$RC" -eq 0 ]; then
+               echo "ok: floor A/B baseline (1s floor) -> $VERDICT in ${BASE_ACTUAL:-<none>}s of solving (sound)"
+             else
+               echo "FAIL: floor A/B baseline -> $VERDICT but rc=$RC (want 0)"; fail=1
+             fi ;;
+  *) echo "FAIL: floor A/B baseline -> '${VERDICT:-<none>}' rc=$RC (want TIMEOUT-*, rc 0): $(cat "$OUTFILE")"; fail=1 ;;
+esac
 run_lec floor hard1 1 30 --set formal.min_timeout=2
 FLOOR_ACTUAL=${ACTUAL:-1}
 if grep -qE "budget 1s target / [0-9]+s actual over [0-9]+ def\(s\) solved, [0-9]+ on the 2s floor" "$OUTFILE"; then
@@ -207,11 +219,15 @@ else
   echo "FAIL: min_timeout extended the proof deadline (${FLOOR_ACTUAL:-<none>}s proof, ${ELAPSED}s end-to-end)"; fail=1
 fi
 # A bigger floor must still not turn an unprovable hierarchy into a false PROVEN.
-if [ "$VERDICT" = "PROVEN equivalent" ]; then
-  echo "FAIL: hard hierarchy with a bigger floor -> FALSE PROVEN"; fail=1
-else
-  echo "ok: bigger floor keeps the sound verdict (${VERDICT:-<none>})"
-fi
+case "$VERDICT" in
+  PROVEN-*) echo "FAIL: hard hierarchy with a bigger floor -> FALSE PROVEN ($VERDICT)"; fail=1 ;;
+  TIMEOUT-*) if [ "$RC" -eq 0 ]; then
+               echo "ok: bigger floor keeps the sound verdict ($VERDICT)"
+             else
+               echo "FAIL: bigger floor -> $VERDICT but rc=$RC (want 0)"; fail=1
+             fi ;;
+  *) echo "FAIL: bigger floor -> '${VERDICT:-<none>}' rc=$RC (want TIMEOUT-*, rc 0): $(cat "$OUTFILE")"; fail=1 ;;
+esac
 fi
 
 if [ $fail -ne 0 ]; then echo "lec_budget_test: FAILED"; exit 1; fi

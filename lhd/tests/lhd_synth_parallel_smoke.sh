@@ -68,7 +68,7 @@ cmp "$W/cold.v" "$W/parallel.v"
 "$LHD" compile lg:"$W/model-lg" --emit-dir verilog:"$W/models" --workdir "$W/models-compile" --result-json "$W/models-compile-result.json" -q
 cat "$W/models/"*.v >> "$W/serial.v"
 cat "$W/models/"*.v >> "$W/parallel.v"
-"$LHD" lec --impl verilog:"$W/parallel.v" --ref verilog:"$W/serial.v" --top parallel.parallel \
+"$LHD" lec --set formal.effort=proof --impl verilog:"$W/parallel.v" --ref verilog:"$W/serial.v" --top parallel.parallel \
   --workdir "$W/lec" --result-json "$W/lec.json" -q
 python3 - "$W/lec.json" <<'PY'
 import json, sys

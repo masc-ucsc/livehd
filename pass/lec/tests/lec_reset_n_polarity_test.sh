@@ -76,11 +76,14 @@ EOF
 
 # This checks proof/refutation polarity; witness replay has separate tests.
 # Avoid compiling a witness simulator for every deliberately broken twin.
-# verdict <ref.v> <impl kind:path> -> proven | refuted | <other>
+# verdict <ref.v> <impl kind:path> -> the result JSON's lec verdict (proven-full,
+# refuted-cex, timeout-time, refuted-unchecked, ...); progress records carry their
+# own bare "verdict" words, so read the final `"tool":"lhd"` result record only.
 verdict() {
   $LHD lec --set formal.effort=proof --ref "verilog:$WORK/$1" --ref-top m --impl "$2" --impl-top m \
        --set formal.timeout=30 --set formal.simfail_run=false --workdir "$WORK/q_$$_$RANDOM" 2>&1 \
-    | grep -oE '"verdict":"(proven|refuted|unknown)"' | head -1 | sed -E 's/"verdict":"([a-z]+)"/\1/'
+    | grep -E '^\{"schema_version":[0-9]+,"tool":"lhd"' | tail -1 \
+    | grep -oE '"verdict":"[a-z]+-[a-z]+"' | head -1 | sed -E 's/"verdict":"([a-z-]+)"/\1/'
 }
 expect() {  # $1=label $2=got $3=want
   if [ "$2" != "$3" ]; then echo "FAIL: $1 -> got '$2', want '$3'"; fail=1
@@ -93,11 +96,11 @@ fi
 MV=$(ls "$WORK"/v/*.v | head -1)
 grep -q 'if (rst_n)' "$MV" || { echo "FAIL: cgen did not emit an active-high rst_n guard: $(cat "$MV")"; fail=1; }
 
-expect "native vs gold"            "$(verdict gold.v "pyrope:$WORK/m.prp")"           proven
-expect "native vs mutated gold"    "$(verdict gold_mut.v "pyrope:$WORK/m.prp")"       refuted
-expect "cgen vs gold"              "$(verdict gold.v "verilog:$MV")"                  proven
-expect "cgen vs mutated gold"      "$(verdict gold_mut.v "verilog:$MV")"              refuted
-expect "cgen vs async gold"        "$(verdict gold_async.v "verilog:$MV")"            proven
-expect "cgen vs mutated async"     "$(verdict gold_async_mut.v "verilog:$MV")"        refuted
+expect "native vs gold"            "$(verdict gold.v "pyrope:$WORK/m.prp")"           proven-full
+expect "native vs mutated gold"    "$(verdict gold_mut.v "pyrope:$WORK/m.prp")"       refuted-cex
+expect "cgen vs gold"              "$(verdict gold.v "verilog:$MV")"                  proven-full
+expect "cgen vs mutated gold"      "$(verdict gold_mut.v "verilog:$MV")"              refuted-cex
+expect "cgen vs async gold"        "$(verdict gold_async.v "verilog:$MV")"            proven-full
+expect "cgen vs mutated async"     "$(verdict gold_async_mut.v "verilog:$MV")"        refuted-cex
 
 [ "$fail" -eq 0 ] && echo "PASS" || exit 1

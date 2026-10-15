@@ -48,10 +48,10 @@ warm, _ = synth("guided", guided)
 assert {r["module"]: r["gates"] for r in warm["qor"]["abc"]["regions"]} == cold
 assert all(r["cache"] == "hit" for r in warm["qor"]["abc"]["regions"])
 run("pass", "liberty", "gensim", lib, "--emit-dir", "lg:" + str(work / "models"))
-proof, _ = run("lec", "--impl", "lg:" + str(work / "guided-net"), "--ref", guided,
+proof, _ = run("lec", "--set", "formal.effort=proof", "--impl", "lg:" + str(work / "guided-net"), "--ref", guided,
                "--lib", "lg:" + str(work / "models"), "--top", "guided.guided",
                "--workdir", work / "proof", "--set", "formal.timeout=10")
-assert proof["lec"]["verdict"] == "proven", proof
+assert proof["lec"]["verdict"] == "proven-full", proof
 
 for attrs, code in [("synth.foo=1", "synth-value"),
                     ('synth=(color="a"),synth.color="b"', "synth-duplicate")]:
@@ -117,10 +117,10 @@ cycle.write_text('''pub comb cycle::[timecheck=false](a:U8,b:U8,c:U8,d:U8)->(y:U
 }''')
 cyclic, _ = synth("cycle", cycle)
 assert {r["module"].split("__g_")[-1] for r in cyclic["qor"]["abc"]["regions"]} == {"a", "b"}
-proof, _ = run("lec", "--impl", "lg:" + str(work / "cycle-net"), "--ref", cycle,
+proof, _ = run("lec", "--set", "formal.effort=proof", "--impl", "lg:" + str(work / "cycle-net"), "--ref", cycle,
                "--lib", "lg:" + str(work / "models"), "--top", "cycle.cycle",
                "--workdir", work / "cycle-proof", "--set", "formal.timeout=10")
-assert proof["lec"]["verdict"] == "proven", proof
+assert proof["lec"]["verdict"] == "proven-full", proof
 
 # A module-level color covers compact-loop bodies. Call-site specialization must
 # keep the loop descriptor: otherwise the loop index port is left undriven and
@@ -142,10 +142,10 @@ looped.write_text('''pub comb looped::[timecheck=false,synth.color="all"](reques
  grant = request & can_grant
 }''')
 synth("looped", looped)
-proof, _ = run("lec", "--impl", "lg:" + str(work / "looped-net"), "--ref", looped,
+proof, _ = run("lec", "--set", "formal.effort=proof", "--impl", "lg:" + str(work / "looped-net"), "--ref", looped,
                "--lib", "lg:" + str(work / "models"), "--top", "looped.looped",
                "--workdir", work / "looped-proof", "--set", "formal.timeout=10")
-assert proof["lec"]["verdict"] == "proven", proof
+assert proof["lec"]["verdict"] == "proven-full", proof
 
 # A runtime shift keeps its amount-shaping wiring (`select << 5`, a constant add)
 # in the shifter's region, so the known-zero low bits prune the barrel. Without it
@@ -177,10 +177,10 @@ for m in ("array", "tdm", "csa", "tree"):
     gates[m] = total_gates(synth(f"cmul_{m}", src, "synth.multiplier=" + m)[0])
 assert len(set(gates.values())) == 1, gates
 synth("cmul", cmul)
-proof, _ = run("lec", "--impl", "lg:" + str(work / "cmul-net"), "--ref", cmul,
+proof, _ = run("lec", "--set", "formal.effort=proof", "--impl", "lg:" + str(work / "cmul-net"), "--ref", cmul,
                "--lib", "lg:" + str(work / "models"), "--top", "cmul.cmul",
                "--workdir", work / "cmul-proof", "--set", "formal.timeout=10")
-assert proof["lec"]["verdict"] == "proven", proof
+assert proof["lec"]["verdict"] == "proven-full", proof
 
 # Exploration ranks regions and stops early: a big adder and a small one. With the
 # area objective every alternative loses to rca, so patience=1 must stop after the

@@ -30,12 +30,16 @@ endmodule
 ''')
 PY
 run compile "$W/source.v" --reader slang --emit-dir lg:"$W/lg" --emit verilog:"$W/compiled.v" --workdir "$W/compile"
-run lec --impl lg:"$W/lg" --ref verilog:"$W/ref.v" --impl-top parameter_array --ref-top reference \
+run lec --set formal.effort=proof --impl lg:"$W/lg" --ref verilog:"$W/ref.v" --impl-top parameter_array --ref-top reference \
   --set formal.timeout=60 --workdir "$W/default"
 python3 - "$W/result.json" <<'PY'
 import json,sys
-r=json.load(open(sys.argv[1]))['lec']; assert r['verdict']=='proven',r
+r=json.load(open(sys.argv[1]))['lec']; assert r['verdict']=='proven-full',r
 PY
-run lec --impl verilog:"$W/compiled.v" --ref verilog:"$W/ref.v" --impl-top parameter_array --ref-top reference \
+run lec --set formal.effort=proof --impl verilog:"$W/compiled.v" --ref verilog:"$W/ref.v" --impl-top parameter_array --ref-top reference \
   --set formal.timeout=20 --workdir "$W/emitted"
+python3 - "$W/result.json" <<'PY'
+import json,sys
+r=json.load(open(sys.argv[1]))['lec']; assert r['verdict'] in ('proven-full','proven-bounded'),r
+PY
 echo 'PASS: parameter-array lookup preserves range direction, bounds, wide entries, and signed values'

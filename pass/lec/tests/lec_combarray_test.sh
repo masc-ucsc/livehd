@@ -95,7 +95,7 @@ EOF
   $LHD lec --set formal.effort=proof --impl "verilog:$WORK/rom_impl_$value.sv" --ref "verilog:$WORK/rom_ref.sv" \
     --top rom_diff --workdir "$WORK/rom_check_$value" > "$WORK/rom_check_$value.log" 2>&1
   rc=$?
-  if [ "$value" = 0 ]; then want_rc=0; want_verdict=proven; else want_rc=10; want_verdict=refuted; fi
+  if [ "$value" = 0 ]; then want_rc=0; want_verdict=proven-full; else want_rc=10; want_verdict=refuted-cex; fi
   if [ "$rc" -ne "$want_rc" ] || ! grep -q "\"verdict\":\"$want_verdict\"" "$WORK/rom_check_$value.log"; then
     echo "FAIL: ROM value=$value expected $want_verdict (rc=$want_rc), got rc=$rc"
     cat "$WORK/rom_check_$value.log"

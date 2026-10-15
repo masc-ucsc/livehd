@@ -2,6 +2,7 @@
 #  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 #
 # prpsim: fixture-driven simulation through the same lhd host build as the CLI.
+import concurrent.futures
 import itertools
 import json
 import os
@@ -74,7 +75,8 @@ def run_simulation(runner, tmp_dir, test):
         choices.append([key + '=' + v for v in values.split(',')])
     vectors = list(itertools.product(*choices)) if choices else [()]
     base = runner._scratch(test, 'simulation')
-    for i, vector in enumerate(vectors):
+
+    def leg(i, vector):
         work = os.path.join(base, 'v' + str(i))
         # lhd.jobs=2: the harness already runs fixtures in parallel (bazel or a
         # batch driver); a per-fixture fan-out of every core oversubscribes.
@@ -84,7 +86,14 @@ def run_simulation(runner, tmp_dir, test):
             cmd += ['--set', setting]
         for key, value in _parse_args(test):
             cmd += ['+' + key + '=' + value]
-        run = subprocess.run(cmd, cwd=tmp_dir, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+        return work, subprocess.run(cmd, cwd=tmp_dir, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+
+    # The sweep legs are independent runs (own workdir each), and almost all of
+    # a leg is its host C++ build: run them side by side, then check and report
+    # each in sweep order exactly as before.
+    with concurrent.futures.ThreadPoolExecutor(max_workers=len(vectors)) as pool:
+        legs = list(pool.map(lambda iv: leg(*iv), enumerate(vectors)))
+    for vector, (work, run) in zip(vectors, legs):
         if run.returncode:
             print('{} - simulation - FAILED {}: rc={}'.format(name, vector, run.returncode))
             print(run.stdout.decode('utf-8', 'replace'))

@@ -49,6 +49,10 @@ C "$WORK/B2.v" --top top --emit-dir "lg:$WORK/B2" --workdir "$WORK/cb2"
 C "$WORK/C.v"  --top top --emit-dir "lg:$WORK/C"  --workdir "$WORK/cc"
 
 WD="$WORK/wd"; mkdir -p "$WD"
+# A cache-served PROVEN, in any spelling the per-def `lec[hier]:` line or the
+# final `lec:` line can use: bare PROVEN, PROVEN-full or PROVEN-bounded(n).
+CACHED='PROVEN(-full|-bounded\([0-9]+\))? \(cache\)'
+
 H() {  # $1..=extra lhd lec args ; sets RC/OUT ; ONE shared workdir (the cache)
 # A REFUTED `lhd lec` also writes the counterexample as a Pyrope replay test and
 # then BUILDS AND RUNS it -- ~5.5s of host clang per refutation. Nothing here
@@ -82,30 +86,31 @@ else echo "ok: identical re-run is 3/3 via cache"; fi
 #    semdiff. No stale verdict may survive for mid/top.
 H --ref "lg:$WORK/A" --impl "lg:$WORK/B2"
 if [ "$RC" -ne 0 ]; then echo "FAIL: A/B2 rc=$RC (want PROVEN)"; fail=1
-elif ! echo "$OUT" | grep -q "lec\[hier\]: 'leaf' PROVEN (cache)"; then echo "FAIL: unchanged leaf below the edit did not hit the cache"; fail=1
-elif echo "$OUT" | grep -q "lec\[hier\]: 'mid' PROVEN (cache)"; then echo "FAIL: EDITED mid served from the cache (stale verdict!)"; fail=1
-elif echo "$OUT" | grep -q "lec\[hier\]: 'top' PROVEN (cache)"; then echo "FAIL: ancestor top served from the cache despite a child edit (Merkle broken!)"; fail=1
+elif ! echo "$OUT" | grep -q "lec\[hier\]: 'leaf' PROVEN-full (cache)"; then echo "FAIL: unchanged leaf below the edit did not hit the cache"; fail=1
+elif echo "$OUT" | grep -qE "lec\[hier\]: 'mid' $CACHED"; then echo "FAIL: EDITED mid served from the cache (stale verdict!)"; fail=1
+elif echo "$OUT" | grep -qE "lec\[hier\]: 'top' $CACHED"; then echo "FAIL: ancestor top served from the cache despite a child edit (Merkle broken!)"; fail=1
 else echo "ok: edit re-proves mid + ancestors; unchanged leaf hits"; fi
 
 # 4) Option change = key change: same designs, different bound => no hits.
 H --ref "lg:$WORK/A" --impl "lg:$WORK/B" --set formal.bound=8
 if [ "$RC" -ne 0 ]; then echo "FAIL: A/B bound=8 rc=$RC"; fail=1
-elif echo "$OUT" | grep -q "PROVEN (cache)"; then echo "FAIL: bound change did not invalidate the key"; fail=1
+elif echo "$OUT" | grep -qE "$CACHED"; then echo "FAIL: bound change did not invalidate the key"; fail=1
 else echo "ok: an option change misses the cache"; fi
 
 # 5) Soundness: a REFUTE is never served from (or stored into) the cache.
 H --ref "lg:$WORK/A" --impl "lg:$WORK/C"
 RC1=$RC
 H --ref "lg:$WORK/A" --impl "lg:$WORK/C"
-if [ "$RC1" -eq 0 ] || [ "$RC" -eq 0 ]; then echo "FAIL: A/C did not refute (rc $RC1/$RC)"; fail=1
+if [ "$RC1" -ne 10 ] || [ "$RC" -ne 10 ]; then echo "FAIL: A/C did not refute with a counterexample (rc $RC1/$RC, want 10/10)"; fail=1
+elif ! echo "$OUT" | grep -q "^lec: 'top' REFUTED-cex"; then echo "FAIL: A/C second run is not REFUTED-cex"; fail=1
 elif ! echo "$OUT" | grep -q "lec\[hier\]: 'leaf' REFUTED"; then echo "FAIL: refuted leaf not re-proven on the second run"; fail=1
-elif echo "$OUT" | grep -q "'leaf' PROVEN (cache)"; then echo "FAIL: a REFUTED def was served PROVEN from the cache"; fail=1
+elif echo "$OUT" | grep -qE "'leaf' $CACHED"; then echo "FAIL: a REFUTED def was served PROVEN from the cache"; fail=1
 else echo "ok: refutes always re-prove"; fi
 
 # 6) Opt-out: lhd.incremental=false runs with no cache at all.
 H --ref "lg:$WORK/A" --impl "lg:$WORK/B" --set lhd.incremental=false
 if [ "$RC" -ne 0 ]; then echo "FAIL: cache=false rc=$RC"; fail=1
-elif echo "$OUT" | grep -q "lec\[cache\]\|PROVEN (cache)"; then echo "FAIL: lhd.incremental=false still used the cache"; fail=1
+elif echo "$OUT" | grep -qE "lec\[cache\]|$CACHED"; then echo "FAIL: lhd.incremental=false still used the cache"; fail=1
 else echo "ok: lhd.incremental=false disables the cache"; fi
 
 # 7) The strategy hint file section exists and records a winning engine per def.
@@ -145,15 +150,15 @@ U() { TO=$1; shift; OUT=$("$LHD" lec --set formal.effort=proof --ref "lg:$WORK/H
 # 8) First run: Unknown, and the attempt is ledgered (not a verdict).
 U 1
 if echo "$OUT" | grep -q "skipped: known timeout"; then echo "FAIL: first Unknown run already skipped"; fail=1
-elif ! grep -q '"unknowns"' "$WDU/formal_cache.json" || ! grep -q '"timeout"' "$WDU/formal_cache.json"; then
+elif ! python3 -c 'import json,sys; t=json.load(open(sys.argv[1])).get("timeouts",{}); sys.exit(not any(isinstance(v,dict) and "cause" in v and "timeout" in v for v in t.values()))' "$WDU/formal_cache.json"; then
   echo "FAIL: Unknown attempt not ledgered"; fail=1
 else echo "ok: Unknown attempt ledgered on first run"; fi
 RC1=$RC
 
 # 9) Unchanged re-run: skipped, same reported outcome (inconclusive), same rc.
 U 1
-if ! echo "$OUT" | grep -q "TIMEOUT (skipped: known timeout"; then echo "FAIL: unchanged Unknown not skipped"; fail=1
-elif ! echo "$OUT" | grep -q "skipped-unknown"; then echo "FAIL: no skipped-unknown count in summary"; fail=1
+if ! echo "$OUT" | grep -q "TIMEOUT-time (skipped: known timeout"; then echo "FAIL: unchanged Unknown not skipped"; fail=1
+elif ! echo "$OUT" | grep -qE "lec\[cache\]: .* [1-9][0-9]* skipped-timeout"; then echo "FAIL: no non-zero skipped-timeout count in summary"; fail=1
 elif [ "$RC" -ne "$RC1" ]; then echo "FAIL: skip changed the exit code ($RC1 -> $RC)"; fail=1
 else echo "ok: unchanged Unknown skips the re-attempt (same outcome)"; fi
 
@@ -186,10 +191,10 @@ C "$WORK/R3.v" --top rv --emit-dir "lg:$WORK/R3" --workdir "$WORK/cr3"
 WDR="$WORK/wdr"; rm -rf "$WDR"; mkdir -p "$WDR"
 R() { "$LHD" lec --set formal.effort=proof --ref "lg:$WORK/R1" --impl "lg:$WORK/$1" --top rv --workdir "$WDR" 2>&1 | grep "^lec: '" | head -1; }
 OUT=$(R R1b)
-if ! echo "$OUT" | grep -q "PROVEN equivalent"; then echo "FAIL: reset-value self pair not proven: $OUT"; fail=1; fi
+if ! echo "$OUT" | grep -q "PROVEN-full"; then echo "FAIL: reset-value self pair not proven: $OUT"; fail=1; fi
 for v in R2 R3; do
   OUT=$(R $v)
-  if echo "$OUT" | grep -q "PROVEN equivalent\|verdict cache hit"; then
+  if echo "$OUT" | grep -qE "PROVEN-|TESTED-|verdict cache hit"; then
     echo "FAIL: $v (a different reset value / output constant) replayed a cached verdict: $OUT"; fail=1
   else echo "ok: $v re-proves (digest keys the constant)"; fi
 done
@@ -232,24 +237,24 @@ WDH="$WORK/wdh"; rm -rf "$WDH"; mkdir -p "$WDH"
 D() { "$LHD" lec --set formal.effort=proof --ref "verilog:$WORK/dly.v" --impl "pyrope:$WORK/$1" --top br_delay --workdir "$2" 2>&1 | tee "$2.log" | grep "^lec: '" | tail -1; }
 # LEC_WINDOW_OFF disables slice pairing, so i32 can only reach a bounded pass.
 OUT=$(LEC_WINDOW_OFF=1 D i32.prp "$WDH")
-if ! echo "$OUT" | grep -q "PASS(6)"; then echo "FAIL: i32 without state windows should be bounded: $OUT"; tail -25 "$WDH.log"; fail=1
+if ! echo "$OUT" | grep -q "PROVEN-bounded(6)"; then echo "FAIL: i32 without state windows should be bounded: $OUT"; tail -25 "$WDH.log"; fail=1
 elif ! python3 -c 'import json,sys; h=json.load(open(sys.argv[1])).get("hints",{}); sys.exit(any(v.get("engine")=="bmc" for v in h.values()))' \
     "$WDH/formal_cache.json"; then echo "FAIL: a bounded pass was stored as the winning strategy"; fail=1
 else echo "ok: a bounded pass is not recorded as a strategy hint"; fi
 OUT=$(D i40.prp "$WDH")
-if ! echo "$OUT" | grep -q "PROVEN equivalent"; then echo "FAIL: i40 after i32 in one workdir is not unbounded: $OUT"; fail=1
+if ! echo "$OUT" | grep -q "PROVEN-full"; then echo "FAIL: i40 after i32 in one workdir is not unbounded: $OUT"; fail=1
 else echo "ok: the second impl in a shared workdir gets its own unbounded proof"; fi
 # A stale bmc hint (an older lhd wrote them) may reorder, never weaken.
 WDS="$WORK/wds"; rm -rf "$WDS"; mkdir -p "$WDS"
-echo '{"schema":1,"salt":"0","verdicts":{},"unknowns":{},"hints":{"br_delay":{"engine":"bmc","split":"","ms":1}},"pair_hints":{}}' \
+echo '{"schema":1,"salt":"0","verdicts":{},"timeouts":{},"hints":{"br_delay":{"engine":"bmc","split":"","ms":1}},"pair_hints":{}}' \
   > "$WDS/formal_cache.json"
 OUT=$(D i40.prp "$WDS")
-if ! echo "$OUT" | grep -q "PROVEN equivalent"; then echo "FAIL: a stale bmc hint weakened the verdict: $OUT"; fail=1
+if ! echo "$OUT" | grep -q "PROVEN-full"; then echo "FAIL: a stale bmc hint weakened the verdict: $OUT"; fail=1
 else echo "ok: a stale bmc hint cannot settle for a bounded pass"; fi
 # State windows (suggestions6 1.5): the 32-bit shift register pairs with the
 # live slice [39:8] of the 40-bit reference flop and proves unbounded.
 OUT=$(D i32.prp "$WORK/wdw")
-if ! echo "$OUT" | grep -q "PROVEN equivalent.*state window"; then echo "FAIL: i32 did not prove through a state window: $OUT"; fail=1
+if ! echo "$OUT" | grep -q "PROVEN-full.*state window"; then echo "FAIL: i32 did not prove through a state window: $OUT"; fail=1
 else echo "ok: narrower flop proves against the live slice of the wider one"; fi
 
 exit $fail

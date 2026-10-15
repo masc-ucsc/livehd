@@ -12,7 +12,9 @@
 #     the explicitly selected `formal.min_timeout` floor.
 #   * spec_mining_timeout timeout-core diagnosis: under an INDEPENDENT spec_mining_timeout budget a
 #     timed-out run NAMES the toxic obligation subset ("spec_mining_timeout core (k/n ...)").
-#   * INCONCLUSIVE always fails.
+#   * A budget-limited run is TIMEOUT-time: exit 0 plus a formal-timeout-time
+#     warning that says what was left open (owner ruling: a timeout is not a
+#     failure, and never a proof).
 
 #   * induction + reset soundness: a true twin-register invariant proves UNBOUNDED
 #     (the induction step pins the PRIMARY reset input deasserted), while an
@@ -44,7 +46,7 @@ mod hard2(a:U32, b:U32, c:U32, en:Bool) -> (o:U8@[0]) {
 EOF
 
 start=$(date +%s)
-# One short run covers the shared total, the 1s floor, strict UNKNOWN policy,
+# One short run covers the shared total, the 1s floor, the TIMEOUT-time policy,
 # every-obligation scheduling, and timeout-core diagnosis. Keeping these checks
 # on the same solver result avoids repeatedly waiting on the deliberately hard
 # multiplier identities.
@@ -55,32 +57,46 @@ start=$(date +%s)
 rc=$?
 end=$(date +%s); elapsed=$((end-start))
 
-# A budget-limited UNKNOWN is still an UNKNOWN: it proves nothing and disproves
-# nothing, so the result is a failure
-# with the `unsupported` class (rc 7) rather than exit 0 on a warning. The
-# hardness here is real and not a tool bug: the same three obligations are
-# PROVEN inductively in ~1.5s at 4-bit operands, and only the 32-bit
-# bit-blasted nonlinear products outrun the solver (120s/obligation still
-# UNKNOWN) — exactly the budget-limited case this file exists to account for.
-# The failure must NAME that cause, not just die.
-[ "$rc" -eq 7 ] || fail "an inconclusive UNKNOWN must fail with the unsupported class rc=7 (rc=$rc): $(cat "$W/budget.out")"
-grep -q "could not decide" "$W/budget.out" \
-  || fail "the strict failure must explain WHY it failed (could not decide): $(cat "$W/budget.out")"
+# A budget-limited run proves nothing and disproves nothing: it is TIMEOUT-time,
+# which exits 0 with a formal-timeout-time warning (owner ruling: a timeout is
+# acceptable, never a failure and never a proof). The hardness here is real and
+# not a tool bug: the same three obligations are PROVEN inductively in ~1.5s at
+# 4-bit operands, and only the 32-bit bit-blasted nonlinear products outrun the
+# solver (120s/obligation still undecided) — exactly the budget-limited case
+# this file exists to account for. The warning must NAME that cause.
+[ "$rc" -eq 0 ] || fail "a budget-limited TIMEOUT-time run must exit 0 (rc=$rc): $(cat "$W/budget.out")"
+grep -q "^formal verify: 'hard2.hard2' TIMEOUT-time" "$W/budget.out" \
+  || fail "the budget-limited run must report TIMEOUT-time: $(cat "$W/budget.out")"
+grep -q '"code":"formal-timeout-time"' "$W/budget.out" \
+  || fail "a TIMEOUT-time run must warn (formal-timeout-time): $(cat "$W/budget.out")"
+grep -q "neither proved nor refuted" "$W/budget.out" \
+  || fail "the timeout warning must explain what was left open: $(cat "$W/budget.out")"
+grep -qE "PROVEN-|REFUTED-" <(grep "^formal verify: 'hard2.hard2'" "$W/budget.out") \
+  && fail "a budget-limited run must be neither a proof nor a refutation: $(cat "$W/budget.out")"
 grep -q "budget-limited depth" "$W/budget.out" \
   || fail "the budget-freeze disclosure must appear: $(cat "$W/budget.out")"
 grep -qE "budget 1s target / [0-9]+\.[0-9]s actual over [0-9]+ unit\(s\), [0-9]+ on the 1s floor" "$W/budget.out" \
   || fail "an overshooting run must report target/actual/units/floored: $(cat "$W/budget.out")"
-grep -q "'easy'.*PROVEN" "$W/budget.out" \
-  || fail "the trivial sibling must still prove under the shared budget: $(cat "$W/budget.out")"
-grep -qE "'distrib[12]'.*TIMEOUT" "$W/budget.out" \
-  || fail "at least one hard obligation must go UNKNOWN under the budget: $(cat "$W/budget.out")"
+# The trivial sibling is still checked under the shared budget. When the hard
+# ones exhaust the total before the requested last cycle it is cut short at the
+# depth it reached: TIMEOUT-time "(proven to cycle k ...)", never PROVEN-bounded
+# at a smaller depth (owner ruling 2026-10-14) — but it must have reached k >= 1.
+grep -qE "'easy'\": (PROVEN-(full|bounded)|TIMEOUT-time \(proven to cycle [1-9])" "$W/budget.out" \
+  || fail "the trivial sibling must still prove (to some depth) under the shared budget: $(cat "$W/budget.out")"
+grep -qE "'distrib[12]'\": TIMEOUT-time" "$W/budget.out" \
+  || fail "at least one hard obligation must go TIMEOUT-time under the budget: $(cat "$W/budget.out")"
 # NO obligation may be silently skipped for lack of budget. The report is from
 # the same run, so its verdict rows and textual budget accounting cannot drift.
 python3 - "$W/budget/formal_report.json" <<'PYEOF' || fail "an obligation was skipped for lack of budget: $(cat "$W/budget.out")"
 import json, sys
 obs = json.load(open(sys.argv[1]))["obligations"]
 assert len(obs) == 3, obs
-skipped = [o["id"] for o in obs if o.get("unknown_why") == "not checked"]
+# Fail loudly if the report schema moves (a renamed key would make this vacuous).
+assert all(k in o for o in obs for k in ("verdict", "proven_to", "refuted_at", "undecided_at", "undecided_why")), obs
+skipped = [o["id"] for o in obs
+           if (o["undecided_why"] or "").startswith(("not checked", "never checked"))
+           or (o["verdict"] not in ("proven-full", "proven-bounded", "refuted-cex")
+               and o["proven_to"] < 0 and o["refuted_at"] < 0 and o["undecided_at"] < 0)]
 assert not skipped, f"never-attempted obligation(s) under a 1s budget: {skipped}"
 PYEOF
 echo "ok: every obligation still attempted under a 1s total (floor, not skip)"
@@ -107,7 +123,7 @@ awk -v actual="$budget_actual" 'BEGIN { exit !(actual < 20.0) }' \
 if [ "$elapsed" -ge 30 ]; then
   fail "formal verify wall time is excessive: ${elapsed}s (want < 30s)"
 fi
-echo "ok: strict inconclusive policy, shared budget, floor disclosure, and timeout core checked in ${budget_actual}s solver / ${elapsed}s wall"
+echo "ok: TIMEOUT-time policy, shared budget, floor disclosure, and timeout core checked in ${budget_actual}s solver / ${elapsed}s wall"
 echo "ok: spec_mining_timeout named the toxic obligation core"
 
 # ---------------------------------------------------------------------------
@@ -129,7 +145,7 @@ EOF
 "$LHD" formal verify "$W/twin_ok.prp" --top twin_ok --set formal.engine=bmc --set formal.bound=4 \
   >"$W/twin_ok.out" 2>&1
 [ "$?" -eq 0 ] || fail "the true twin invariant must not fail: $(cat "$W/twin_ok.out")"
-grep -q "'twins equal'.*PROVEN (inductive" "$W/twin_ok.out" \
+grep -q "'twins equal'.*PROVEN-full (inductive" "$W/twin_ok.out" \
   || fail "the twin invariant must prove UNBOUNDED by induction: $(cat "$W/twin_ok.out")"
 grep -q "reset deasserted" "$W/twin_ok.out" \
   || fail "the induction reset narrowing must be disclosed: $(cat "$W/twin_ok.out")"
@@ -152,10 +168,11 @@ mod twin_bad(enable:Bool) -> (value:U8@[0]) {
 EOF
 "$LHD" formal verify "$W/twin_bad.prp" --top twin_bad --set formal.engine=bmc --set formal.bound=4 \
   >"$W/twin_bad.out" 2>&1
-[ "$?" -ne 0 ] || fail "a reachable violation must fail the run (rc=0): $(cat "$W/twin_bad.out")"
-grep -q "'twins differ from reset'.*REFUTED" "$W/twin_bad.out" \
+rc=$?
+[ "$rc" -eq 10 ] || fail "a reachable violation must fail the run with the counterexample class (rc=$rc): $(cat "$W/twin_bad.out")"
+grep -q "'twins differ from reset'.*REFUTED-cex" "$W/twin_bad.out" \
   || fail "the unequal-reset twin must be REFUTED, never falsely proven: $(cat "$W/twin_bad.out")"
-grep -q "PROVEN (inductive" "$W/twin_bad.out" \
+grep -q "PROVEN-" "$W/twin_bad.out" \
   && fail "induction must NOT manufacture an unbounded proof for a false invariant: $(cat "$W/twin_bad.out")"
 echo "ok: unequal-reset twin refuted; induction stays sound"
 

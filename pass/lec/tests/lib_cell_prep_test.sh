@@ -76,23 +76,35 @@ awk '/cell\(AND2x1\)/{c=1} /cell\(DLCLKPx1\)/{c=0} c{gsub(/"B"/,"\"BB\""); gsub(
   "$LIB" >"$W/ren_and.lib"
 
 # lec <dir> <tag> <want: proven|refuted> <lec args...>
+#   proven  = "proven-full" or "proven-bounded" (n), exit 0: one consistent
+#             verdict is the point here, not its depth (the latch state stays
+#             unpaired, so every read settles as the same bounded proof)
+#   refuted = "refuted-cex", exit 10: a real counterexample
 lec() {
-  local d=$1 tag=$2 want=$3
+  local d=$1 tag=$2 want=$3 rc=0 pat code
   shift 3
   "$LHD" lec --set formal.effort=proof "$@" --top "$TOP" --set formal.simfail_run=false --workdir "$d/W_$tag" -q \
-    --result-json "$d/$tag.json" >"$d/$tag.log" 2>&1
-  grep -q "\"verdict\":\"$want\"" "$d/$tag.json" || bad "$d: $tag is not $want: $(head -c 600 "$d/$tag.json")"
+    --result-json "$d/$tag.json" >"$d/$tag.log" 2>&1 || rc=$?
+  case "$want" in
+    proven) pat='"verdict":"proven-(full|bounded)"'; code=0 ;;
+    refuted) pat='"verdict":"refuted-cex"'; code=10 ;;
+    *) bad "lec(): unknown want '$want'"; return ;;
+  esac
+  { [ "$rc" -eq "$code" ] && grep -qE "$pat" "$d/$tag.json"; } \
+    || bad "$d: $tag is not $want (rc=$rc, want $code): $(head -c 600 "$d/$tag.json")"
 }
 
 # refused <dir> <tag> <message fragment> <lec args...>: the run must stop with
-# an `unsupported` error naming the mismatched port, and never reach a verdict.
+# an `unsupported` error naming the mismatched port, and never reach a proof or
+# a counterexample: REFUTED-unsupported, exit 7.
 refused() {
-  local d=$1 tag=$2 want=$3
+  local d=$1 tag=$2 want=$3 rc=0
   shift 3
   "$LHD" lec --set formal.effort=proof "$@" --top "$TOP" --set formal.simfail_run=false --workdir "$d/W_$tag" -q \
-    --result-json "$d/$tag.json" >"$d/$tag.log" 2>&1
-  grep -q '"class":"unsupported"' "$d/$tag.json" && grep -qF "$want" "$d/$tag.json" \
-    && ! grep -q '"verdict"' "$d/$tag.json" || bad "$d: $tag must refuse ($want): $(head -c 600 "$d/$tag.json")"
+    --result-json "$d/$tag.json" >"$d/$tag.log" 2>&1 || rc=$?
+  [ "$rc" -eq 7 ] && grep -q '"class":"unsupported"' "$d/$tag.json" && grep -qF "$want" "$d/$tag.json" \
+    && grep -q '"verdict":"refuted-unsupported"' "$d/$tag.json" \
+    || bad "$d: $tag must refuse ($want; rc=$rc, want 7): $(head -c 600 "$d/$tag.json")"
 }
 
 # One job per mapper: synthesis, the gensim models, the representation matrix,

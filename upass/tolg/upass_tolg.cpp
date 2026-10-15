@@ -296,7 +296,13 @@ struct Val {
       ++suffix_matches;
     }
   }
-  if (exact) {
+  // Same preference order as the runner's call_resolver::lookup_callee: an
+  // exact match wins only when it carries a real signature. An imported FILE
+  // unit shares its name with the file (`leaf` for leaf.prp) and has no io; it
+  // must not shadow the caller's own `comb leaf` (`<file>.leaf`), which the
+  // runner already bound -- tolg then reported "call to undefined function".
+  const auto has_sig = [](const std::shared_ptr<Lnast>& ln) { return ln && !ln->io_meta().empty(); };
+  if (has_sig(exact)) {
     return exact;
   }
   if (!caller_unit.empty()) {
@@ -306,7 +312,7 @@ struct Val {
       scoped.push_back('.');
       scoped.append(name);
       for (const auto& ln : registry) {
-        if (candidate(ln) && ln->get_top_module_name() == scoped) {
+        if (candidate(ln) && ln->get_top_module_name() == scoped && (has_sig(ln) || !exact)) {
           return ln;
         }
       }
@@ -317,8 +323,11 @@ struct Val {
       unit = unit.substr(0, dot);
     }
   }
-  if (suffix_matches == 1) {
+  if (suffix_matches == 1 && (has_sig(suffix_hit) || !exact)) {
     return suffix_hit;
+  }
+  if (exact) {
+    return exact;  // an empty-io exact match (e.g. a void marker) is the last resort
   }
   return nullptr;
 }
@@ -3241,18 +3250,16 @@ private:
       // result IS scalar-bindable (the result temp has a direct pin record), so
       // alias it AND fall through to bind the scalar — otherwise a plain read
       // of the named var (`s1 + s2`, no `.field`) would find no driver.
-      if (auto sft = staged_fields_.find(rhs_name); sft != staged_fields_.end()) {
-        auto fields_copy                      = sft->second;
-        staged_fields_[std::string(lhs_name)] = std::move(fields_copy);
-        if (!sub_results_.contains(rhs_name)) {
-          return;  // a staged tuple has no scalar pin
-        }
-      }
-      if (auto srt = sub_results_.find(rhs_name); srt != sub_results_.end()) {
-        const bool multi                    = srt->second.outputs.size() > 1;
-        auto       rec_copy                 = srt->second;
-        sub_results_[std::string(lhs_name)] = std::move(rec_copy);
-        if (multi) {
+      // The WHOLE view moves together (Sub_result, staged fields, poison): a
+      // stale part left on the destination would shadow the new binding.
+      if (sub_results_.contains(rhs_name) || staged_fields_.contains(rhs_name) || sub_view_poison_.contains(rhs_name)) {
+        auto       view   = current_sub_view(rhs_name);
+        // A staged/merged view keeps the scalar binding of a single-output
+        // result (pin_map_ merged it); a multi-output result has none.
+        const bool scalar = view.sub ? view.sub->outputs.size() == 1 : pin_map_.contains(canon_io_name(rhs_name));
+        note_sub_view_write(lhs_name);
+        set_sub_view(std::string(lhs_name), std::move(view));
+        if (!scalar) {
           return;
         }
         // single-output: fall through to the scalar record below
@@ -5824,17 +5831,42 @@ private:
     }
     auto it = mem_map_.find(src_name);
     if (it == mem_map_.end()) {
-      // A field of a `stage[N]` over several values: its own stage flops.
-      if (auto sft = staged_fields_.find(src_name); sft != staged_fields_.end() && Lnast_ntype::is_const(lnast_->get_type(idx))
-                                                    && lnast_->get_sibling_next(idx).is_invalid()) {
-        std::string_view fld = lnast_->get_name(idx);
-        if (fld.size() >= 2 && (fld.front() == '\'' || fld.front() == '"') && fld.back() == fld.front()) {
-          fld = fld.substr(1, fld.size() - 2);
+      // An instance result that is not one value on every path (merge_sub_views).
+      if (const auto pit = sub_view_poison_.find(src_name); pit != sub_view_poison_.end()) {
+        error_at(nid,
+                 {"conditional-instance-result", "unsupported"},
+                 "upass.tolg: cannot read a field of '{}': {}",
+                 src_name,
+                 pit->second);
+        return;
+      }
+      // A field of a `stage[N]` over several values: its own stage flops; also
+      // an instance result merged over an `if` (merge_sub_views). A dotted read
+      // (`t.rsp.sum`) arrives as a flat chain of const indices: join them, as
+      // the Sub_result path below does.
+      if (auto sft = staged_fields_.find(src_name); sft != staged_fields_.end()) {
+        std::string joined;
+        bool        all_const = true;
+        for (auto ix = idx; !ix.is_invalid(); ix = lnast_->get_sibling_next(ix)) {
+          if (!Lnast_ntype::is_const(lnast_->get_type(ix))) {
+            all_const = false;
+            break;
+          }
+          std::string_view fld = lnast_->get_name(ix);
+          if (fld.size() >= 2 && (fld.front() == '\'' || fld.front() == '"') && fld.back() == fld.front()) {
+            fld = fld.substr(1, fld.size() - 2);
+          }
+          if (!joined.empty()) {
+            joined += '.';
+          }
+          joined += canon_io_name(fld);
         }
-        if (auto fit = sft->second.find(canon_io_name(fld)); fit != sft->second.end()) {
-          const auto v = fit->second;  // record may grow the maps
-          record(lnast_->get_name(dst), v.pin, v.mw);
-          return;
+        if (all_const) {
+          if (auto fit = sft->second.find(joined); fit != sft->second.end()) {
+            const auto v = fit->second;  // record may grow the maps
+            record(lnast_->get_name(dst), v.pin, v.mw);
+            return;
+          }
         }
       }
       // Multi-output Sub result: tuple_get(dst, result, 'port') binds that
@@ -5908,6 +5940,16 @@ private:
           if (canon_io_name(e.name) == pname) {
             oe = &e;
             break;
+          }
+        }
+        if (oe == nullptr && !srt->second.unwrap.empty()) {
+          // A comb's lone tuple output auto-unwraps: `t.a` is output `r.a`.
+          const auto full = absl::StrCat(srt->second.unwrap, ".", pname);
+          for (const auto& e : srt->second.outputs) {
+            if (canon_io_name(e.name) == full) {
+              oe = &e;
+              break;
+            }
           }
         }
         if (oe == nullptr) {
@@ -7149,6 +7191,7 @@ private:
             = make_stage_flop(absl::StrCat(name, "_", oname), sub_output_val(res.sub, res.outputs[i]), deficit[i], deficit[i]);
       }
     }
+    note_sub_view_write(name);
     sub_results_[std::string(name)] = res;
     if (!fields.empty()) {
       staged_fields_[std::string(name)] = std::move(fields);
@@ -7177,6 +7220,7 @@ private:
     for (const auto& [key, value] : rec.named) {
       stage_field(std::string(canon_io_name(key)), value);
     }
+    note_sub_view_write(name);
     staged_fields_[std::string(name)] = std::move(fields);
   }
 
@@ -8956,10 +9000,13 @@ private:
           out_stages.emplace_back(std::nullopt);
         }
       }
+      note_sub_view_write(dst_name);
+      staged_fields_.erase(dst_name);  // a fresh result: no stale merged/staged fields
       sub_results_[dst_name] = Sub_result{
           sub,
           {cio.outputs.begin(), cio.outputs.end()},
           std::move(out_stages),
+          comb_unwrap_prefix(kind, cio.outputs),
       };
       return;
     }
@@ -8998,7 +9045,9 @@ private:
     // read via `.out` left the field unbound (the port wire was dropped and the
     // consumer wired to nil). The bare-result form (`r = f(...)`) keeps using
     // the direct record above (resolve() reads pin_map_).
-    sub_results_[dst_name] = Sub_result{sub, {oe}, {}};
+    note_sub_view_write(dst_name);
+    staged_fields_.erase(dst_name);  // a fresh result: no stale merged/staged fields
+    sub_results_[dst_name] = Sub_result{sub, {oe}, {}, comb_unwrap_prefix(kind, cio.outputs)};
     // A following stage[N] re-stamps the pinned pick on the instance.
     if (const auto t = stamp_sub_out_time(sub, out_dpin, oe, kind)) {
       sub.attr(livehd::attrs::time_range).set({t->first, t->second});
@@ -11075,6 +11124,7 @@ private:
   WriteMap lower_branch(const Lnast_nid& stmts) {
     branch_writes_.emplace_back();
     branch_restore_.emplace_back();
+    sub_view_restore_.emplace_back();
     if (Lnast_ntype::is_stmts(lnast_->get_type(stmts))) {
       lower_stmts(stmts);
     } else {
@@ -11095,6 +11145,16 @@ private:
       } else {
         mw_map_.erase(name);
       }
+    }
+    // Instance-result views the arm rebound: hand the arm's views to lower_if's
+    // merge (merge_sub_views) and roll each name back to its pre-arm view, so
+    // the next arm starts from the pre-`if` state like pin_map_ does.
+    auto views = std::move(sub_view_restore_.back());
+    sub_view_restore_.pop_back();
+    last_arm_sub_views_.clear();
+    for (auto& [name, old] : views) {
+      last_arm_sub_views_.emplace(name, current_sub_view(name));
+      set_sub_view(name, std::move(old));
     }
     return writes;
   }
@@ -11142,6 +11202,8 @@ private:
     // every path drives it (merge_arm_coverage).
     const auto                 pre_cov    = nil_array_output_lanes_;
     std::vector<Lane_coverage> arm_cov;
+    // Per arm (parallel to `branches`): the instance-result views it rebound.
+    std::vector<absl::flat_hash_map<std::string, Sub_view>> arm_views;
     auto                       lower_arm = [&](const Lnast_nid& stmts, const Pin& cond, bool is_else) {
       for (const auto& pc : prior_conds) {
         push_path_term(pc, /*negated=*/true);
@@ -11153,6 +11215,7 @@ private:
       auto w                  = lower_branch(stmts);
       truncate_path_terms(path_base);
       arm_cov.push_back(std::exchange(nil_array_output_lanes_, pre_cov));
+      arm_views.push_back(std::exchange(last_arm_sub_views_, {}));
       return w;
     };
 
@@ -11210,6 +11273,11 @@ private:
 
     const bool      has_else    = !branches.empty() && branches.back().is_else;
     const WriteMap& else_writes = has_else ? branches.back().writes : empty_writes_;
+
+    // Instance results rebound in an arm merge output by output (merge_sub_views
+    // muxes on the same priority order the per-variable chains below use; the
+    // arms of a unique_if are exclusive, so that order is equivalent there).
+    merge_sub_views(branches, arm_views, has_else);
 
     if (unique && !all_vars.empty()) {
       lower_unique_merge(branches, all_vars, has_else, else_writes);
@@ -11731,12 +11799,236 @@ private:
     // A MULTI-output call: each output's declared latency (parallel to
     // `outputs`; nullopt = untimed), for a `stage[N]` over the whole result.
     std::vector<std::optional<Sub_out>> out_stages;
+    // A `comb` whose one output is a tuple `r` (leaves `r.a`, `r.b`): its call
+    // result IS that tuple (06-functions "Binding return values"), so `t.a`
+    // reads output `r.a`. Empty otherwise (a mod/pipe handle keeps `m.r.a`).
+    std::string unwrap;
   };
+  // The lone-tuple-output prefix of a comb callee's outputs (Sub_result::unwrap).
+  [[nodiscard]] static std::string comb_unwrap_prefix(std::string_view kind, const std::vector<Lnast_io_entry>& outputs) {
+    if (kind != "comb") {
+      return {};
+    }
+    std::string prefix;
+    for (const auto& oe : outputs) {
+      const auto n   = canon_io_name(oe.name);
+      const auto dot = n.find('.');
+      if (dot == std::string_view::npos || dot == 0 || (!prefix.empty() && n.substr(0, dot) != prefix)) {
+        return {};
+      }
+      prefix = std::string(n.substr(0, dot));
+    }
+    return prefix;
+  }
   absl::flat_hash_map<std::string, Sub_result>                            sub_results_;
   // `stage[N] t = f(...)` over SEVERAL values (a multi-output call, an inlined
   // comb's result tuple): stage name -> field -> the field's value after its
-  // own stage flops. tuple_get reads a field here before any Sub_result.
+  // own stage flops. tuple_get reads a field here before any Sub_result. Also
+  // the per-output muxes of an instance result rebound under an `if`
+  // (merge_sub_views).
   absl::flat_hash_map<std::string, absl::flat_hash_map<std::string, Val>> staged_fields_;
+  // What one name reads through tuple_get as an instance result: its
+  // Sub_result and/or staged fields. `poison` (why) when it cannot be read:
+  // bound on only some paths of an `if`, or to differently shaped results.
+  struct Sub_view {
+    std::optional<Sub_result>                            sub;
+    std::optional<absl::flat_hash_map<std::string, Val>> staged;
+    std::optional<std::string>                           poison;
+  };
+  // Per active if-arm (parallel to branch_writes_): the PRE-arm view of each
+  // name the arm rebinds to an instance result. pin_map_ has its own rollback
+  // (branch_restore_) and merge; without this one an instance result bound in
+  // an arm leaked into the later arms and past the `if` with no merge -- the
+  // last arm's instance silently drove every path.
+  std::vector<absl::flat_hash_map<std::string, Sub_view>> sub_view_restore_;
+  // The views the arm lower_branch just finished bound (for lower_if's merge).
+  absl::flat_hash_map<std::string, Sub_view>              last_arm_sub_views_;
+  // Names whose instance-result view cannot be read (see Sub_view::poison).
+  absl::flat_hash_map<std::string, std::string>           sub_view_poison_;
+
+  [[nodiscard]] Sub_view current_sub_view(const std::string& name) const {
+    Sub_view v;
+    if (const auto it = sub_results_.find(name); it != sub_results_.end()) {
+      v.sub = it->second;
+    }
+    if (const auto it = staged_fields_.find(name); it != staged_fields_.end()) {
+      v.staged = it->second;
+    }
+    if (const auto it = sub_view_poison_.find(name); it != sub_view_poison_.end()) {
+      v.poison = it->second;
+    }
+    return v;
+  }
+  // Raw (re)binding of a name's whole view -- the arm rollback, no bookkeeping.
+  void set_sub_view(const std::string& name, Sub_view v) {
+    if (v.sub) {
+      sub_results_.insert_or_assign(name, std::move(*v.sub));
+    } else {
+      sub_results_.erase(name);
+    }
+    if (v.staged) {
+      staged_fields_.insert_or_assign(name, std::move(*v.staged));
+    } else {
+      staged_fields_.erase(name);
+    }
+    if (v.poison) {
+      sub_view_poison_.insert_or_assign(name, std::move(*v.poison));
+    } else {
+      sub_view_poison_.erase(name);
+    }
+  }
+  // Every (re)binding of a name's instance-result view goes through here first:
+  // inside an if-arm it records the pre-arm view for lower_branch to restore.
+  void note_sub_view_write(std::string_view name_in) {
+    const std::string name{name_in};
+    if (!sub_view_restore_.empty() && !sub_view_restore_.back().contains(name)) {
+      auto pre = current_sub_view(name);
+      sub_view_restore_.back().emplace(name, std::move(pre));
+    }
+    sub_view_poison_.erase(name);
+  }
+  void poison_sub_view(std::string_view name, std::string why) {
+    note_sub_view_write(name);
+    sub_view_poison_.insert_or_assign(std::string(name), std::move(why));
+  }
+  // The per-field values a view reads as; nullopt when nothing is bound or it
+  // is poisoned. A comb's lone tuple output also answers its unwrapped name.
+  std::optional<absl::flat_hash_map<std::string, Val>> sub_view_fields(const Sub_view& v) {
+    if (v.poison || (!v.sub && !v.staged)) {
+      return std::nullopt;
+    }
+    absl::flat_hash_map<std::string, Val> fields;
+    if (v.sub) {
+      const auto& unwrap = v.sub->unwrap;
+      for (const auto& oe : v.sub->outputs) {
+        const std::string key{canon_io_name(oe.name)};
+        const auto        val = sub_output_val(v.sub->sub, oe);
+        if (!unwrap.empty() && key.size() > unwrap.size() + 1 && key.starts_with(unwrap) && key[unwrap.size()] == '.') {
+          fields.insert_or_assign(key.substr(unwrap.size() + 1), val);
+        }
+        fields.insert_or_assign(key, val);
+      }
+    }
+    if (v.staged) {
+      for (const auto& [k, val] : *v.staged) {
+        fields.insert_or_assign(k, val);
+      }
+    }
+    return fields;
+  }
+  // After an `if`: each name some arm rebound to an instance result reads, on
+  // every path, that arm's result or the pre-`if` one. Mux them output by
+  // output (the per-variable merge lower_if builds for pins) into a staged
+  // view; a name not bound on every path, or bound to results of different
+  // shapes, is poisoned -- a later field read errors instead of silently
+  // reading one arm's instance.
+  void merge_sub_views(const std::vector<Branch>& branches, const std::vector<absl::flat_hash_map<std::string, Sub_view>>& arm_views,
+                       bool has_else) {
+    std::vector<std::string> names;
+    for (const auto& av : arm_views) {
+      for (const auto& [name, _] : av) {
+        names.push_back(name);
+      }
+    }
+    if (names.empty()) {
+      return;
+    }
+    std::sort(names.begin(), names.end());  // deterministic mux creation order
+    names.erase(std::unique(names.begin(), names.end()), names.end());
+    const int n         = static_cast<int>(branches.size());
+    const int last_cond = has_else ? n - 2 : n - 1;
+    using Fields        = absl::flat_hash_map<std::string, Val>;
+    for (const auto& name : names) {
+      const Sub_view                     pre = current_sub_view(name);  // lower_branch restored it
+      std::vector<std::optional<Fields>> arm(static_cast<size_t>(n));
+      for (int i = 0; i < n; ++i) {
+        const auto& av = arm_views[static_cast<size_t>(i)];
+        const auto  it = av.find(name);
+        arm[static_cast<size_t>(i)] = sub_view_fields(it != av.end() ? it->second : pre);
+      }
+      const auto fall     = has_else ? arm[static_cast<size_t>(n - 1)] : sub_view_fields(pre);
+      bool       complete = fall.has_value();
+      for (int i = 0; complete && i <= last_cond; ++i) {
+        complete = arm[static_cast<size_t>(i)].has_value();
+      }
+      if (!complete) {
+        poison_sub_view(name, "it is bound to an instance result on only some paths of an `if`");
+        continue;
+      }
+      bool same_shape = true;
+      for (int i = 0; same_shape && i <= last_cond; ++i) {
+        const auto& f = *arm[static_cast<size_t>(i)];
+        same_shape    = f.size() == fall->size()
+                     && std::all_of(fall->begin(), fall->end(), [&](const auto& kv) { return f.contains(kv.first); });
+      }
+      if (!same_shape) {
+        poison_sub_view(name, "the arms of an `if` bind it to instance results with different outputs");
+        continue;
+      }
+      std::vector<std::string> keys;
+      keys.reserve(fall->size());
+      for (const auto& [k, _] : *fall) {
+        keys.push_back(k);
+      }
+      std::sort(keys.begin(), keys.end());
+      Fields merged;
+      bool   any_mux = false;
+      for (const auto& key : keys) {
+        const auto& base = fall->at(key);
+        bool        same = true;
+        for (int i = 0; same && i <= last_cond; ++i) {
+          same = arm[static_cast<size_t>(i)]->at(key).pin == base.pin;
+        }
+        if (same) {
+          merged.insert_or_assign(key, base);
+          continue;
+        }
+        any_mux = true;
+        int32_t    signed_mw   = 0;
+        int32_t    unsigned_mw = 0;
+        bool       any_signed  = false;
+        const auto note_arm    = [&](const Val& v) {
+          const auto w = std::max(pin_mw_of(v.pin), v.mw);
+          if (pin_can_be_negative(v.pin)) {
+            any_signed = true;
+            signed_mw  = std::max(signed_mw, w);
+          } else {
+            unsigned_mw = std::max(unsigned_mw, w);
+          }
+        };
+        note_arm(base);
+        for (int i = 0; i <= last_cond; ++i) {
+          note_arm(arm[static_cast<size_t>(i)]->at(key));
+        }
+        const auto mw  = std::max<int32_t>(1, any_signed ? std::max(signed_mw, unsigned_mw > 0 ? unsigned_mw + 1 : 0) : unsigned_mw);
+        Pin        cur = base.pin;
+        for (int i = last_cond; i >= 0; --i) {
+          auto mux = make_node(Ntype_op::Mux);
+          livehd::graph_util::setup_sink_pid(mux, 0).connect_driver(branches[static_cast<size_t>(i)].cond);
+          livehd::graph_util::setup_sink_pid(mux, 1).connect_driver(cur);
+          livehd::graph_util::setup_sink_pid(mux, 2).connect_driver(arm[static_cast<size_t>(i)]->at(key).pin);
+          cur = mux.create_driver_pin(0);
+          if (any_signed) {
+            set_sbits(cur, mw);
+          } else {
+            set_ubits(cur, mw);
+          }
+        }
+        merged.insert_or_assign(key, Val{cur, mw});
+      }
+      note_sub_view_write(name);
+      if (!any_mux) {
+        // Every path reads the very same pins (e.g. both arms copy one result):
+        // keep that view whole (its array lanes, latency riders, ...).
+        const auto& last = arm_views[static_cast<size_t>(n - 1)];
+        const auto  it   = has_else ? last.find(name) : last.end();
+        set_sub_view(name, it != last.end() ? it->second : pre);
+        continue;
+      }
+      sub_results_.erase(name);
+      staged_fields_.insert_or_assign(name, std::move(merged));
+    }
+  }
   // Array OUTPUTS built lane by lane (ruling 15: they start as nil), with the
   // lanes driven so far on the current path (check_nil_array_outputs). A whole
   // write drives every lane.

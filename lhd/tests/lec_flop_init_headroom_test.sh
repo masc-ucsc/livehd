@@ -28,7 +28,7 @@ mkdir -p "$W"
 fail() { echo "FAIL: $*" >&2; exit 1; }
 
 # ── Case 1: value-consistent headroom bit -> PROVEN ─────────────────────────
-"$LHD" lec --ref "verilog:$EQUIV/flop_init_headroom.v" \
+"$LHD" lec --set formal.effort=proof --ref "verilog:$EQUIV/flop_init_headroom.v" \
            --impl "pyrope:$EQUIV/flop_init_headroom.prp" \
            --ref-top 'flop_init_headroom.top' --impl-top 'flop_init_headroom.top' \
            --workdir "$W/pos" -q --result-json "$W/pos.json" \
@@ -66,7 +66,7 @@ pub mod top(`clock`:Clock, `reset`:Reset, io_en:U1) -> (io_q:U1@[0]) {
   io_q = 0
 }
 EOF
-if "$LHD" lec --ref "verilog:$W/neg_wide.v" --impl "pyrope:$W/neg_wide.prp" \
+if "$LHD" lec --set formal.effort=proof --ref "verilog:$W/neg_wide.v" --impl "pyrope:$W/neg_wide.prp" \
               --ref-top 'neg_wide.top' --impl-top 'neg_wide.top' \
               --workdir "$W/neg" -q --result-json "$W/neg.json"; then
   fail "genuinely-wider counter PROVED (min-width init sharing is over-constraining writes?)"

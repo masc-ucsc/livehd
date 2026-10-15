@@ -77,9 +77,9 @@ divs="$("$LHD" tool grep kind=div lg:"$W/net" 2>/dev/null)"
 # port names can differ from the unextracted partition twin. Compare through
 # the public top interface, checking every arithmetic output and its wiring.
 # Cell models from --lib supply the mapped standard-cell implementations.
-run lec --impl lg:"$W/net" --ref lg:"$W/re" --lib lg:"$W/models" --top "$TOP" --workdir "$W/wlec"
+run lec --set formal.effort=proof --impl lg:"$W/net" --ref lg:"$W/re" --lib lg:"$W/models" --top "$TOP" --workdir "$W/wlec"
 
-grep -q '"verdict":"proven"' "$W/r.json" \
+grep -qE '"verdict":"proven-(full|bounded)"' "$W/r.json" \
   || fail "default LEC did not prove mapped hierarchy with --lib models: $(cat "$W/r.json")"
 
 if [ "$MAPPER" = abc ]; then
@@ -88,7 +88,9 @@ if [ "$MAPPER" = abc ]; then
   rm -rf "$W/net_cska"
   run pass "$MAPPER" --top "$TOP" lg:"$W/lg" --emit-dir lg:"$W/net_cska" --set synth.liberty="$LIB" --set adder=cska \
     --workdir "$W/w6"
-  run lec --impl lg:"$W/net_cska" --ref lg:"$W/re" --lib lg:"$W/models" --top "$TOP" --workdir "$W/wlec_cska"
+  run lec --set formal.effort=proof --impl lg:"$W/net_cska" --ref lg:"$W/re" --lib lg:"$W/models" --top "$TOP" --workdir "$W/wlec_cska"
+  grep -qE '"verdict":"proven-(full|bounded)"' "$W/r.json" \
+    || fail "cska adder LEC did not prove mapped hierarchy with --lib models: $(cat "$W/r.json")"
 else
   # Native logical CMOS output (tmap=none): the XAG expansion of mult/sra/div
   # has no Liberty cells, so it proves equivalent WITHOUT --lib.
@@ -98,8 +100,8 @@ else
     "$W/w6/qor.json" || fail "usyn tmap=none: qor.json is not the schema-5 logical-cmos decision report"
   divs="$("$LHD" tool grep kind=div lg:"$W/net_none" 2>/dev/null)"
   [ -z "$divs" ] || fail "tmap=none kept a native divider: $divs"
-  run lec --impl lg:"$W/net_none" --ref lg:"$W/re" --top "$TOP" --workdir "$W/wlec_none"
-  grep -q '"verdict":"proven"' "$W/r.json" \
+  run lec --set formal.effort=proof --impl lg:"$W/net_none" --ref lg:"$W/re" --top "$TOP" --workdir "$W/wlec_none"
+  grep -qE '"verdict":"proven-(full|bounded)"' "$W/r.json" \
     || fail "usyn tmap=none LEC did not prove the logical hierarchy: $(cat "$W/r.json")"
   # A flag pass.usyn does not register is a usage error (exit 2). block_size is
   # the shared registry spelling of adder_block and is accepted.
@@ -111,12 +113,10 @@ else
 fi
 
 # Negative control: the cell models are load-bearing. Without --lib the netlist's
-# blackbox cell Subs are unresolved, so lec must NOT prove equivalence — a sound
-# Unknown or a fail, never a vacuous pass. The impl-only box obligations gate the
-# miter to INCONCLUSIVE (an incomplete correspondence can neither prove nor
-# refute), which exits 0 unless strict — so run the control strict, where any
-# non-Proven outcome is a hard failure exit.
-if "$LHD" lec --impl lg:"$W/net" --ref lg:"$W/re" --top "$TOP" \
+# blackbox cell Subs are unresolved, so lec must NOT prove equivalence — a
+# REFUTED-<why> refusal or a counterexample, never a vacuous pass. Every
+# non-proof here is a failure exit (7 or 10), so the control only needs rc != 0.
+if "$LHD" lec --set formal.effort=proof --impl lg:"$W/net" --ref lg:"$W/re" --top "$TOP" \
     --workdir "$W/wlec_nolib" -q --result-json "$W/rn.json" 2>/dev/null; then
   fail "lec proved equivalence with no --lib (unresolved cells must not vacuously pass)"
 fi

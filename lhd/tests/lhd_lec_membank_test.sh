@@ -99,7 +99,7 @@ nhas() { cat "$1/netv/"*.v | grep -q "$2"; }
 nhas "$D" "_mem\[3\]\[5\] " || fail "q: storage cells lack local _mem[i][b] entry names: $(cat "$D/netv/"*.v | grep -m3 DFFx1)"
 rc=$(lec_cvc5 "$D" "$GOOD" "$D/lec.json")
 [ "$rc" -eq 0 ] || fail "q: cvc5 lec exited $rc: $(cat "$D/lec.json" 2>/dev/null)"
-grep -q '"verdict":"proven"' "$D/lec.json" || fail "q: cvc5 did not PROVE the bit-blasted register file: $(verdict "$D/lec.json")"
+grep -q '"verdict":"proven-full"' "$D/lec.json" || fail "q: cvc5 did not PROVE the bit-blasted register file: $(verdict "$D/lec.json")"
 grep -q '"bounded":false' "$D/lec.json" || fail "q: proof is only BOUNDED (the inductive bank twin did not pair the cells): $(verdict "$D/lec.json")"
 echo "PASS: 8x8 resetless register file as 64 DFFx1 cells is PROVEN (unbounded) against its Memory"
 
@@ -112,7 +112,7 @@ cat "$D/refv/"*.v > "$D/ref.v"
 "$LHD" lec --set formal.effort=proof --impl verilog:"$D/impl.v" --ref verilog:"$D/ref.v" --top membank \
     --workdir "$D/wy" -q --result-json "$D/lec_yosys.json" > "$D/lec_yosys.log" 2>&1 \
   || fail "q: default LEC lec failed: $(cat "$D/lec_yosys.json" 2>/dev/null)"
-! grep -q '"verdict":"refuted"' "$D/lec_yosys.json" || fail "q: default LEC REFUTED the bit-blasted register file"
+! grep -q '"verdict":"refuted-' "$D/lec_yosys.json" || fail "q: default LEC REFUTED the bit-blasted register file"
 echo "PASS: default LEC does not refute the mapped register file"
 
 # cgen's encoded memory instance and generated region/cell-model wrappers
@@ -120,7 +120,7 @@ echo "PASS: default LEC does not refute the mapped register file"
 "$LHD" lec --set formal.effort=proof --impl verilog:"$D/impl.v" --ref verilog:"$D/ref.v" --top membank \
     --workdir "$D/wv5" -q --result-json "$D/lec_verilog.json" > "$D/lec_verilog.log" 2>&1 \
   || fail "q: cvc5 Verilog LEC failed: $(cat "$D/lec_verilog.json" 2>/dev/null)"
-grep -q '"verdict":"proven"' "$D/lec_verilog.json" || fail "q: Verilog round trip did not prove"
+grep -q '"verdict":"proven-full"' "$D/lec_verilog.json" || fail "q: Verilog round trip did not prove"
 grep -q '"bounded":false' "$D/lec_verilog.json" || fail "q: Verilog proof is only bounded"
 echo "PASS: emitted Verilog retains the memory-bank correspondence and proves unbounded"
 
@@ -133,7 +133,7 @@ map_design "$D" "$QLIB"
 [ "$(ncell "$D" DFFNx1)" -eq 64 ] || fail "qn: expected 64 DFFNx1 storage cells, got $(ncell "$D" DFFNx1)"
 rc=$(lec_cvc5 "$D" "$GOOD" "$D/lec.json")
 [ "$rc" -eq 0 ] || fail "qn: cvc5 lec exited $rc: $(cat "$D/lec.json" 2>/dev/null)"
-grep -q '"verdict":"proven"' "$D/lec.json" || fail "qn: cvc5 did not PROVE the QN-cell register file (model state != pin?): $(verdict "$D/lec.json")"
+grep -q '"verdict":"proven-full"' "$D/lec.json" || fail "qn: cvc5 did not PROVE the QN-cell register file (model state != pin?): $(verdict "$D/lec.json")"
 grep -q '"bounded":false' "$D/lec.json" || fail "qn: proof is only BOUNDED: $(verdict "$D/lec.json")"
 echo "PASS: the same register file on QN-only DFFNx1 cells is PROVEN (unbounded) through the Flop(Not(D)) model"
 
@@ -147,7 +147,7 @@ map_design "$D" "$LIB" --set pass.abc.register_max_bits=1
 nhas "$D" "_mem\[3\] " || fail "native: no whole storage register _mem[i] in the netlist: $(cat "$D/netv/"*.v | grep -m3 posedge)"
 rc=$(lec_cvc5 "$D" "$GOOD" "$D/lec.json")
 [ "$rc" -eq 0 ] || fail "native: cvc5 lec exited $rc: $(cat "$D/lec.json" 2>/dev/null)"
-grep -q '"verdict":"proven"' "$D/lec.json" || fail "native: cvc5 did not PROVE the native storage flops: $(verdict "$D/lec.json")"
+grep -q '"verdict":"proven-full"' "$D/lec.json" || fail "native: cvc5 did not PROVE the native storage flops: $(verdict "$D/lec.json")"
 grep -q '"bounded":false' "$D/lec.json" || fail "native: proof is only BOUNDED: $(verdict "$D/lec.json")"
 echo "PASS: whole native storage flops mem._mem[i] are PROVEN (unbounded) against the Memory"
 
@@ -159,17 +159,21 @@ compile_design "$BAD" -GBAD=1
 map_design "$BAD" "$LIB"
 [ "$(ncell "$BAD" DFFx1)" -eq 64 ] || fail "bad: expected 64 DFFx1 storage cells, got $(ncell "$BAD" DFFx1)"
 rc=$(lec_cvc5 "$BAD" "$GOOD" "$BAD/lec.json")
-[ "$rc" -ne 0 ] || fail "bad: cvc5 lec exited 0 on a netlist that writes the wrong entry: $(verdict "$BAD/lec.json")"
-grep -q '"verdict":"refuted"' "$BAD/lec.json" || fail "bad: expected REFUTED for the corrupted write address, got $(verdict "$BAD/lec.json")"
+[ "$rc" -eq 10 ] || fail "bad: cvc5 lec exited $rc (want the counterexample class 10) on a netlist that writes the wrong entry: $(verdict "$BAD/lec.json")"
+grep -q '"verdict":"refuted-cex"' "$BAD/lec.json" || fail "bad: expected REFUTED for the corrupted write address, got $(verdict "$BAD/lec.json")"
 grep -q '"class":"equiv_fail"' "$BAD/lec.json" || fail "bad: refutation is not an equiv_fail: $(cat "$BAD/lec.json")"
 echo "PASS: a netlist with a corrupted write address in the same bank shape is REFUTED (the tie hides nothing)"
 
 cat "$BAD/netv/"*.v "$W/q/modelsv/"*.v > "$BAD/impl.v"
-"$LHD" lec --set formal.effort=proof --impl verilog:"$BAD/impl.v" --ref verilog:"$W/q/ref.v" --top membank \
-    --workdir "$BAD/wv5" -q --result-json "$BAD/lec_verilog.json" > "$BAD/lec_verilog.log" 2>&1
+# The verdict is what this control checks. Replaying its counterexample in
+# `lhd sim` (formal.simfail_run) would build a 333-instance gate-level host
+# simulator -- 16 s of the test under bazel's 2-CPU cap -- and that replay has
+# its own tests (lec_witness_replay_test, lec_witness_prpfail_test).
+"$LHD" lec --set formal.effort=proof --set formal.simfail_run=false --impl verilog:"$BAD/impl.v" --ref verilog:"$W/q/ref.v" \
+    --top membank --workdir "$BAD/wv5" -q --result-json "$BAD/lec_verilog.json" > "$BAD/lec_verilog.log" 2>&1
 rc=$?
-[ "$rc" -ne 0 ] || fail "bad: Verilog correspondence hid the corrupted write address"
-grep -q '"verdict":"refuted"' "$BAD/lec_verilog.json" || fail "bad: Verilog mutant did not refute"
+[ "$rc" -eq 10 ] || fail "bad: Verilog correspondence hid the corrupted write address (rc=$rc)"
+grep -q '"verdict":"refuted-cex"' "$BAD/lec_verilog.json" || fail "bad: Verilog mutant did not refute"
 echo "PASS: the corrupted write address still refutes after the Verilog round trip"
 
 # ---------------------------------------------------------------------------
@@ -188,7 +192,7 @@ mrun pass liberty gensim "$LIB" --emit-dir lg:"$M/models" --workdir "$M/w4"
     --top membank_multi.membank_multi --workdir "$M/wlec" \
     -q --result-json "$M/lec.json" > "$M/lec.log" 2>&1 \
   || fail "multi: cvc5 LEC failed: $(cat "$M/lec.json" 2>/dev/null)"
-grep -q '"verdict":"proven"' "$M/lec.json" \
+grep -q '"verdict":"proven-full"' "$M/lec.json" \
   || fail "multi: two same-shaped Memory/DFF-bank pairs did not prove: $(verdict "$M/lec.json")"
 grep -q '"bounded":false' "$M/lec.json" \
   || fail "multi: proof is only bounded: $(verdict "$M/lec.json")"

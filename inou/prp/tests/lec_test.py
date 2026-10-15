@@ -80,6 +80,17 @@ class LecHarness(unittest.TestCase):
         self.assertIn(b'formal.effort=verify', result.stdout)
         self.assertNotIn(b'formal.effort=proof', result.stdout)
 
+    def test_harness_budget_scales_in_dbg_but_a_pinned_one_does_not(self):
+        probe = 'import sys; print(" ".join(sys.argv[1:]))'
+        result = run_lec([sys.executable, '-c', probe], timeout=5, scale=1)
+        self.assertTrue(result.stdout.strip().endswith(b'formal.timeout=5 --set formal.effort=proof --set formal.simfail_run=false'),
+                        result.stdout)
+        result = run_lec([sys.executable, '-c', probe], timeout=5, scale=DBG_WATCHDOG_SCALE)
+        self.assertIn(b'formal.timeout=15', result.stdout)
+        result = run_lec([sys.executable, '-c', probe, '--set', 'formal.timeout=2'], timeout=5, scale=DBG_WATCHDOG_SCALE)
+        self.assertNotIn(b'formal.timeout=6', result.stdout)
+        self.assertTrue(result.stdout.count(b'formal.timeout=2') == 2, result.stdout)
+
     def test_unbounded_budget_is_rejected(self):
         for budget in ('0', '-1', 'nan', 'inf'):
             with self.assertRaises(ValueError):

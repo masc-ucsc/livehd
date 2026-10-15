@@ -81,21 +81,27 @@ sync_rom sa "(1,2,3,4)"
 sync_rom sb "(1,2,3,4)"
 sync_rom sc "(1,2,3,9)"  # wrong init
 
-verdict() {  # $1=ref.v $2=impl.prp $3=top -> PROVEN | REFUTED | UNKNOWN
+# final_word: the verdict word of the FINAL top-level `lec: '<top>' <WORD>` line
+# (pass/lec/property_types.hpp: PROVEN-full, PROVEN-bounded(n), TIMEOUT-time,
+# REFUTED-cex, REFUTED-unchecked, ...); empty when the run printed none.
+final_word() {
+  grep -aE "^lec: '[^']+' " | grep -oE " (PROVEN-full|PROVEN-bounded\([0-9]+\)|TESTED-sampled\([0-9]+\)|TIMEOUT-(time|memory)|REFUTED-(cex|interface|unsupported|unchecked|vacuous|unexplained))( |$)" | tail -1 | tr -d ' '
+}
+verdict() {  # $1=ref.v $2=impl.prp $3=top -> the final verdict word
   $LHD lec --set formal.effort=proof --ref "verilog:$WORK/$1" --impl "pyrope:$WORK/$2" --top "$3" \
        --set formal.engine=ind --workdir "$WORK/q_${1}_$$" 2>&1 \
-    | grep -o "PROVEN equivalent\|REFUTED (not equivalent)\|TIMEOUT\|UNSUPPORTED\|UNDISCHARGED\|UNCONFIRMED\|UNPAIRED\|VACUOUS\|UNEXPLAINED" | sed -E 's/^(TIMEOUT|UNSUPPORTED|UNDISCHARGED|UNCONFIRMED|UNPAIRED|UNCHECKED|VACUOUS|UNEXPLAINED)$/UNDECIDED/' | head -1
+    | final_word
 }
-verdict_pp() {  # $1=ref.prp $2=impl.prp $3=top -> PROVEN | REFUTED | UNKNOWN
+verdict_pp() {  # $1=ref.prp $2=impl.prp $3=top -> the final verdict word
   $LHD lec --set formal.effort=proof --ref "pyrope:$WORK/$1" --impl "pyrope:$WORK/$2" --top "$3" \
        --set formal.engine=ind --workdir "$WORK/qpp_$$_${RANDOM}" 2>&1 \
-    | grep -o "PROVEN equivalent\|REFUTED (not equivalent)\|TIMEOUT\|UNSUPPORTED\|UNDISCHARGED\|UNCONFIRMED\|UNPAIRED\|VACUOUS\|UNEXPLAINED" | sed -E 's/^(TIMEOUT|UNSUPPORTED|UNDISCHARGED|UNCONFIRMED|UNPAIRED|UNCHECKED|VACUOUS|UNEXPLAINED)$/UNDECIDED/' | head -1
+    | final_word
 }
 
 verdict_pp_auto() {  # verdict_pp with the default (ind|bmc) engine
   $LHD lec --set formal.effort=proof --ref "pyrope:$WORK/$1" --impl "pyrope:$WORK/$2" --top "$3" \
        --workdir "$WORK/qppa_$$_${RANDOM}" 2>&1 \
-    | grep -o "PROVEN equivalent\|REFUTED (not equivalent)\|TIMEOUT\|UNSUPPORTED\|UNDISCHARGED\|UNCONFIRMED\|UNPAIRED\|VACUOUS\|UNEXPLAINED" | sed -E 's/^(TIMEOUT|UNSUPPORTED|UNDISCHARGED|UNCONFIRMED|UNPAIRED|UNCHECKED|VACUOUS|UNEXPLAINED)$/UNDECIDED/' | head -1
+    | final_word
 }
 
 expect() { if [ "$2" != "$3" ]; then echo "FAIL: $1 -> got '$2', want '$3'"; fail=1; else echo "ok: $1 -> $2"; fi; }
@@ -118,17 +124,19 @@ module \rom.rom (input [1:0] rsel, output [7:0] z);
 endmodule
 EOF
 
-expect "ROM init read"           "$(verdict rom_good.v rom.prp rom.rom)"  "PROVEN equivalent"
-expect "verilog initial ROM"     "$(verdict rom_vinit.v rom.prp rom.rom)" "PROVEN equivalent"
-expect "verilog init wrong(snd)" "$(verdict rom_vinit_bad.v rom.prp rom.rom)" "REFUTED (not equivalent)"
-expect "ROM wrong init (sound)"  "$(verdict rom_bad.v  rom.prp rom.rom)"  "REFUTED (not equivalent)"
-expect "comb mut-array init"     "$(verdict ca_good.v  ca.prp  ca.ca)"    "PROVEN equivalent"
-expect "sync ROM init match"     "$(verdict_pp sa/srom.prp sb/srom.prp srom.srom)" "PROVEN equivalent"
+expect "ROM init read"           "$(verdict rom_good.v rom.prp rom.rom)"  "PROVEN-full"
+expect "verilog initial ROM"     "$(verdict rom_vinit.v rom.prp rom.rom)" "PROVEN-full"
+expect "verilog init wrong(snd)" "$(verdict rom_vinit_bad.v rom.prp rom.rom)" "REFUTED-cex"
+expect "ROM wrong init (sound)"  "$(verdict rom_bad.v  rom.prp rom.rom)"  "REFUTED-cex"
+expect "comb mut-array init"     "$(verdict ca_good.v  ca.prp  ca.ca)"    "PROVEN-full"
+expect "sync ROM init match"     "$(verdict_pp sa/srom.prp sb/srom.prp srom.srom)" "PROVEN-full"
 # engine=ind alone cannot refute: its single-step CEX starts from an arbitrary
 # memory state (it used to say REFUTED only because the cut names it tested
-# had been moved out by the cone pass). The default engine's bmc leg refutes.
-expect "sync ROM wrong (ind)"    "$(verdict_pp sa/srom.prp sc/srom.prp srom.srom)" "UNDECIDED"
-expect "sync ROM wrong (sound)"  "$(verdict_pp_auto sa/srom.prp sc/srom.prp srom.srom)" "REFUTED (not equivalent)"
+# had been moved out by the cone pass), and the forced engine forbids the
+# escalation that would confirm it: REFUTED-unchecked (exit 7), never
+# REFUTED-cex. The default engine's bmc leg refutes.
+expect "sync ROM wrong (ind)"    "$(verdict_pp sa/srom.prp sc/srom.prp srom.srom)" "REFUTED-unchecked"
+expect "sync ROM wrong (sound)"  "$(verdict_pp_auto sa/srom.prp sc/srom.prp srom.srom)" "REFUTED-cex"
 
 # Round-trip the zero-write-port synchronous helper as well. Emission splits
 # its read register from the ROM, so use BMC across that state representation
@@ -137,14 +145,14 @@ verdict_rom_bmc() {  # $1=ref.v $2=impl.prp
   $LHD lec --set formal.effort=proof --ref "verilog:$WORK/$1" --impl "pyrope:$WORK/$2" --top srom.srom \
        --set formal.engine=bmc --set formal.bound=6 --set formal.simfail_run=false \
        --workdir "$WORK/rom_bmc_$$_${RANDOM}" 2>&1 \
-    | grep -o "PASS(6) equivalent\|REFUTED (not equivalent)\|TIMEOUT\|UNSUPPORTED\|UNDISCHARGED\|UNCONFIRMED\|UNPAIRED\|VACUOUS\|UNEXPLAINED" | sed -E 's/^(TIMEOUT|UNSUPPORTED|UNDISCHARGED|UNCONFIRMED|UNPAIRED|UNCHECKED|VACUOUS|UNEXPLAINED)$/UNDECIDED/' | head -1
+    | final_word
 }
 if $LHD compile "$WORK/sa/srom.prp" --top srom.srom --emit "verilog:$WORK/srom.v" \
      --workdir "$WORK/emit_srom" >"$WORK/emit_srom.log" 2>&1; then
-  expect "sync ROM emitted init" "$(verdict_rom_bmc srom.v sb/srom.prp)" "PASS(6) equivalent"
-  expect "sync ROM emitted wrong" "$(verdict_rom_bmc srom.v sc/srom.prp)" "REFUTED (not equivalent)"
+  expect "sync ROM emitted init" "$(verdict_rom_bmc srom.v sb/srom.prp)" "PROVEN-bounded(6)"
+  expect "sync ROM emitted wrong" "$(verdict_rom_bmc srom.v sc/srom.prp)" "REFUTED-cex"
   sed 's/\.LATENCY_0(1)/.LATENCY_0(0)/' "$WORK/srom.v" > "$WORK/srom_async.v"
-  expect "sync ROM wrong latency" "$(verdict_rom_bmc srom_async.v sb/srom.prp)" "REFUTED (not equivalent)"
+  expect "sync ROM wrong latency" "$(verdict_rom_bmc srom_async.v sb/srom.prp)" "REFUTED-cex"
 else
   cat "$WORK/emit_srom.log"
   echo "FAIL: sync ROM Verilog emission"
@@ -179,17 +187,17 @@ pub mod romt(clk:Clock, we:Bool, wa:U2, d:U8, ra:U2) -> (q:U8@[0]) {
   if we { mem[wa] = d }
 }
 EOF
-verdict_eng() {  # $1=ref $2=impl $3=engine [extra --set...] -> PROVEN | REFUTED | UNKNOWN
+verdict_eng() {  # $1=ref $2=impl $3=engine [extra --set...] -> the final verdict word
   local r="$1" i="$2" e="$3"
   shift 3
   $LHD lec --set formal.effort=proof --ref "$WORK/$r" --impl "$WORK/$i" --top romt --set "formal.engine=$e" "$@" \
        --set formal.simfail_run=false --workdir "$WORK/qe_$$_${RANDOM}" 2>&1 \
-    | grep -o "PROVEN equivalent\|REFUTED (not equivalent)\|TIMEOUT\|UNSUPPORTED\|UNDISCHARGED\|UNCONFIRMED\|UNPAIRED\|VACUOUS\|UNEXPLAINED" | sed -E 's/^(TIMEOUT|UNSUPPORTED|UNDISCHARGED|UNCONFIRMED|UNPAIRED|UNCHECKED|VACUOUS|UNEXPLAINED)$/UNDECIDED/' | head -1
+    | final_word
 }
-expect "power-on mem differs (auto)"   "$(verdict_eng pow_a.v pow_b.v auto)" "REFUTED (not equivalent)"
-expect "power-on mem differs (ind)"    "$(verdict_eng pow_a.v pow_b.v ind)"  "UNDECIDED"
+expect "power-on mem differs (auto)"   "$(verdict_eng pow_a.v pow_b.v auto)" "REFUTED-cex"
+expect "power-on mem differs (ind)"    "$(verdict_eng pow_a.v pow_b.v ind)"  "REFUTED-unchecked"
 expect "power-on mem equal (v vs prp)" "$(verdict_eng pow_a.v pow_a.prp auto --set formal.lec.semdiff=none)" \
-  "PROVEN equivalent"
+  "PROVEN-full"
 
 # Same power-on hole for a memory written ONLY through the whole-array `update`
 # bus (`mem = nx`): it has no per-port write (n_wr == 0) yet is not a ROM, so the
@@ -208,8 +216,8 @@ EOF
 mkdir -p "$WORK/ua" "$WORK/ub"
 pow_upd ua/romt.prp 01
 pow_upd ub/romt.prp 09
-expect "power-on update-bus mem (auto)" "$(verdict_eng ua/romt.prp ub/romt.prp auto)" "REFUTED (not equivalent)"
-expect "power-on update-bus mem (ind)"  "$(verdict_eng ua/romt.prp ub/romt.prp ind)"  "UNDECIDED"
+expect "power-on update-bus mem (auto)" "$(verdict_eng ua/romt.prp ub/romt.prp auto)" "REFUTED-cex"
+expect "power-on update-bus mem (ind)"  "$(verdict_eng ua/romt.prp ub/romt.prp ind)"  "REFUTED-unchecked"
 
 if [ $fail -ne 0 ]; then echo "lec_mem_init_test: FAILED"; exit 1; fi
 echo "lec_mem_init_test: PASSED"

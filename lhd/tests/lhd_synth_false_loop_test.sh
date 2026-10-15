@@ -37,9 +37,9 @@ done
 
 run pass liberty gensim "$LIB" --emit-dir lg:"$W/models" --workdir "$W/w_models"
 for mapper in abc usyn; do
-  run lec --impl lg:"$W/net_$mapper" --ref lg:"$W/w_$mapper/synth/lg" --lib lg:"$W/models" --top "$TOP" \
+  run lec --set formal.effort=proof --impl lg:"$W/net_$mapper" --ref lg:"$W/w_$mapper/synth/lg" --lib lg:"$W/models" --top "$TOP" \
     --workdir "$W/w_lec_$mapper"
-  run lec --impl lg:"$W/net_$mapper" --ref verilog:"$FIX" --lib lg:"$W/models" --top "$TOP" \
+  run lec --set formal.effort=proof --impl lg:"$W/net_$mapper" --ref verilog:"$FIX" --lib lg:"$W/models" --top "$TOP" \
     --workdir "$W/w_lec_src_$mapper"
 done
 

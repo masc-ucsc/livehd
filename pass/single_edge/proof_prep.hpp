@@ -32,8 +32,10 @@ namespace livehd::single_edge {
 using Cell_models = absl::flat_hash_map<hhds::Gid, hhds::Graph*>;
 
 // 2f-latch M9: recognize instantiated clock gates as `Clock_cell` in `top` and
-// every def. Returns the number recognized.
-int materialize_clock_cells_all(hhds::Graph* top, const std::vector<hhds::Graph*>& defs);
+// every def. With `sub_lib`, an instance of a `--lib` cell whose own definition
+// has no body (a mapped netlist's cell declaration) is matched against its
+// model. Returns the number recognized.
+int materialize_clock_cells_all(hhds::Graph* top, const std::vector<hhds::Graph*>& defs, const Cell_models* sub_lib = nullptr);
 
 // Both `--lib` splices below take an instance of a `--lib` cell from the body
 // the ENCODER would use for it: the design's own definition when the design's

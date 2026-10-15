@@ -80,7 +80,7 @@ good_line=$(run impl)
 bad_line=$(run implbad)
 
 case "$good_line" in
-  *"PROVEN equivalent"*) echo "ok: whole-array RF PROVEN" ;;
+  *" PROVEN-full "*) echo "ok: whole-array RF PROVEN-full" ;;
   *) echo "FAIL: whole-array RF not proven -> $good_line"; fail=1 ;;
 esac
 # The point of the change: the array cut is discharged by the CONE pass, not
@@ -90,7 +90,7 @@ case "$good_line" in
   *) echo "FAIL: the whole-array cut was NOT discharged by the cone pass -> $good_line"; fail=1 ;;
 esac
 case "$bad_line" in
-  *REFUTED*) echo "ok: corrupted bulk update REFUTED" ;;
+  *" REFUTED-cex "*) echo "ok: corrupted bulk update REFUTED-cex" ;;
   *) echo "FAIL: corrupted bulk update not refuted -> $bad_line"; fail=1 ;;
 esac
 

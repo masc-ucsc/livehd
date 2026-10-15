@@ -187,37 +187,45 @@ EOF2
 ) &
 ibstall_bg=$!
 
+# vword: the verdict word of the FINAL top-level `lec: '<top>' <WORD>` line
+# (pass/lec/property_types.hpp: PROVEN-full, PROVEN-bounded(n), TIMEOUT-time,
+# REFUTED-cex, REFUTED-unchecked, ...); '' when the run printed none.
+vword() {
+  grep -aE "^lec: '[^']+' " | grep -oE " (PROVEN-full|PROVEN-bounded\([0-9]+\)|TESTED-sampled\([0-9]+\)|TIMEOUT-(time|memory)|REFUTED-(cex|interface|unsupported|unchecked|vacuous|unexplained))( |$)" | tail -1 | tr -d ' '
+}
+
 # Each hard case: formal.timeout=2s, outer watchdog 25s. Must (a) NOT trip the
-# watchdog -- proving the bound actually fires -- and (b) report TIMEOUT.
+# watchdog -- proving the bound actually fires -- and (b) report TIMEOUT-<why>
+# with exit 0 (a timeout is a warning, not a failure).
 for c in reassoc distrib poly; do
   run_lec "$c" 2 25
-  v=$(echo "$OUT" | grep -o "PROVEN equivalent\|REFUTED (not equivalent)\|TIMEOUT\|TIMEOUT\|UNSUPPORTED\|UNDISCHARGED\|UNCONFIRMED\|UNPAIRED\|VACUOUS\|UNEXPLAINED" | sed -E 's/^(UNSUPPORTED|UNDISCHARGED|UNCONFIRMED|UNPAIRED|UNCHECKED|VACUOUS|UNEXPLAINED)$/UNDECIDED/' | head -1)
+  v=$(echo "$OUT" | vword)
   if [ "$HUNG" -eq 1 ]; then
     echo "FAIL: $c HUNG past the outer 25s watchdog -> formal.timeout was NOT honored"; fail=1
-  elif [ "$v" != "TIMEOUT" ]; then
-    echo "FAIL: $c -> verdict '$v' (want TIMEOUT); rc=$RC elapsed=${ELAPSED}s"; fail=1
+  elif [ "${v%%-*}" != "TIMEOUT" ] || [ "$RC" -ne 0 ]; then
+    echo "FAIL: $c -> verdict '$v' (want TIMEOUT-*, rc 0); rc=$RC elapsed=${ELAPSED}s"; fail=1
   else
-    echo "ok: $c -> TIMEOUT in ${ELAPSED}s (bounded)"
+    echo "ok: $c -> $v in ${ELAPSED}s (bounded)"
   fi
 done
 
-# Positive control: the bound must not turn an easy proof into UNKNOWN.
+# Positive control: the bound must not turn an easy proof into a TIMEOUT.
 run_lec easy 2 25
-v=$(echo "$OUT" | grep -o "PROVEN equivalent\|REFUTED (not equivalent)\|TIMEOUT\|TIMEOUT\|UNSUPPORTED\|UNDISCHARGED\|UNCONFIRMED\|UNPAIRED\|VACUOUS\|UNEXPLAINED" | sed -E 's/^(UNSUPPORTED|UNDISCHARGED|UNCONFIRMED|UNPAIRED|UNCHECKED|VACUOUS|UNEXPLAINED)$/UNDECIDED/' | head -1)
-if [ "$v" != "PROVEN equivalent" ]; then
-  echo "FAIL: easy control -> verdict '$v' (want PROVEN equivalent); rc=$RC"; fail=1
+v=$(echo "$OUT" | vword)
+if [ "$v" != "PROVEN-full" ] || [ "$RC" -ne 0 ]; then
+  echo "FAIL: easy control -> verdict '$v' (want PROVEN-full, rc 0); rc=$RC"; fail=1
 else
-  echo "ok: easy control -> PROVEN equivalent in ${ELAPSED}s"
+  echo "ok: easy control -> PROVEN-full in ${ELAPSED}s"
 fi
 
 wait "$stall_bg"
 read -r SRC SEL < "$WORK/stall_rc.txt"
 SOUT=$(cat "$WORK/out_stall.txt")
-sv=$(echo "$SOUT" | grep -o "PROVEN equivalent\|REFUTED (not equivalent)\|TIMEOUT\|TIMEOUT\|UNSUPPORTED\|UNDISCHARGED\|UNCONFIRMED\|UNPAIRED\|VACUOUS\|UNEXPLAINED" | sed -E 's/^(UNSUPPORTED|UNDISCHARGED|UNCONFIRMED|UNPAIRED|UNCHECKED|VACUOUS|UNEXPLAINED)$/UNDECIDED/' | head -1)
+sv=$(echo "$SOUT" | vword)
 if [ "$SRC" -ge 128 ] && [ "$SEL" -ge 25 ]; then
   echo "FAIL: stalled race HUNG past the 25s watchdog -> the fork_race wall deadline was NOT enforced"; fail=1
-elif [ "$sv" != "TIMEOUT" ]; then
-  echo "FAIL: stalled race -> verdict '$sv' (want TIMEOUT); rc=$SRC elapsed=${SEL}s"; echo "$SOUT" | tail -5; fail=1
+elif [ "${sv%%-*}" != "TIMEOUT" ] || [ "$SRC" -ne 0 ]; then
+  echo "FAIL: stalled race -> verdict '$sv' (want TIMEOUT-*, rc 0); rc=$SRC elapsed=${SEL}s"; echo "$SOUT" | tail -5; fail=1
 elif ! echo "$SOUT" | grep -q "shared portfolio wall deadline"; then
   echo "FAIL: stalled race TIMEOUT does not name the wall deadline ('shared portfolio wall deadline')"; fail=1
 elif [ "$SEL" -gt 20 ]; then
@@ -231,16 +239,18 @@ fi
 wait "$ibstall_bg"
 read -r IRC IEL < "$WORK/ibstall_rc.txt"
 IOUT=$(cat "$WORK/out_ibstall.txt")
-iv=$(echo "$IOUT" | grep -o "PROVEN equivalent\|REFUTED (not equivalent)\|TIMEOUT\|TIMEOUT\|UNSUPPORTED\|UNDISCHARGED\|UNCONFIRMED\|UNPAIRED\|VACUOUS\|UNEXPLAINED" | sed -E 's/^(UNSUPPORTED|UNDISCHARGED|UNCONFIRMED|UNPAIRED|UNCHECKED|VACUOUS|UNEXPLAINED)$/UNDECIDED/' | head -1)
+iv=$(echo "$IOUT" | vword)
 if [ "$IRC" -ge 128 ] && [ "$IEL" -ge 25 ]; then
   echo "FAIL: bmc-only stall HUNG past the 25s watchdog"; fail=1
-elif [ "$iv" = "REFUTED (not equivalent)" ]; then
+elif [ "${iv%%-*}" = "REFUTED" ]; then
   echo "FAIL: bmc-only stall -> REFUTED on an equivalent pair; rc=$IRC"; echo "$IOUT" | tail -5; fail=1
-elif ! echo "$IOUT" | grep -q "ind=Unknown.*hit formal.timeout" && [ "$iv" != "PROVEN equivalent" ]; then
-  # ind did not give up the way this case needs (e.g. a much faster machine
-  # proved it under BV, or a slower one wall-killed it too): not this bug.
+elif ! echo "$IOUT" | grep -qE "ind(:[a-z-]+)?=(TIMEOUT|Unknown)[^;]*hit formal\.timeout=[0-9]+s: cvc5 reported" && [ "$iv" != "PROVEN-full" ]; then
+  # ind did not give up the way this case needs -- cvc5's own time limit, printed
+  # as "ind:<profile>=TIMEOUT: ... (hit formal.timeout=Ns: cvc5 reported ...)"
+  # (e.g. a much faster machine proved it under BV, or a slower one wall-killed
+  # it too, "... (shared portfolio wall deadline)"): not this bug.
   echo "ok: bmc-only stall -> '$iv' without a genuine ind give-up (precondition not met; skipped)"
-elif [ "$iv" != "PROVEN equivalent" ]; then
+elif [ "$iv" != "PROVEN-full" ]; then
   echo "FAIL: bmc-only stall -> verdict '$iv' (want PROVEN via the int-blast retry): a wall-killed BMC racer suppressed the retry of ind's genuine give-up; rc=$IRC"
   echo "$IOUT" | grep -i "inconclusive\|int-blast" | head -3; fail=1
 elif pgrep -f "$WORK/w_ibstall" >/dev/null 2>&1; then

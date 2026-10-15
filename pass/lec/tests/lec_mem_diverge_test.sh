@@ -56,11 +56,17 @@ module foo(input clk, input we, input [1:0] wa, input [7:0] wd,
 endmodule
 EOF
 
-verdict() {  # $1=ref $2=impl $3=decompose -> PROVEN | REFUTED | UNKNOWN | INCONCLUSIVE
+# final_word: the verdict word of the FINAL top-level `lec: '<top>' <WORD>` line
+# (pass/lec/property_types.hpp: PROVEN-full, PROVEN-bounded(n), TIMEOUT-time,
+# REFUTED-cex, REFUTED-unchecked, ...); empty when the run printed none.
+final_word() {
+  grep -aE "^lec: '[^']+' " | grep -oE " (PROVEN-full|PROVEN-bounded\([0-9]+\)|TESTED-sampled\([0-9]+\)|TIMEOUT-(time|memory)|REFUTED-(cex|interface|unsupported|unchecked|vacuous|unexplained))( |$)" | tail -1 | tr -d ' '
+}
+verdict() {  # $1=ref $2=impl $3=decompose -> the final verdict word
   $LHD lec --set formal.effort=proof --ref "$WORK/$1" --impl "$WORK/$2" --top foo \
        --set formal.lec.hier=false --set formal.engine=ind --set formal.lec.decompose="$3" \
        --workdir "$WORK/q_${1}_${2}_${3}_$$" 2>&1 \
-    | grep -o "PROVEN equivalent\|REFUTED (not equivalent)\|TIMEOUT\|UNSUPPORTED\|UNDISCHARGED\|UNCONFIRMED\|UNPAIRED\|VACUOUS\|UNEXPLAINED" | sed -E 's/^(TIMEOUT|UNSUPPORTED|UNDISCHARGED|UNCONFIRMED|UNPAIRED|UNCHECKED|VACUOUS|UNEXPLAINED)$/UNDECIDED/' | head -1
+    | final_word
 }
 
 # 1) No regression: a 2-same-shape-memory design proved against ITSELF (occurrence
@@ -68,20 +74,20 @@ verdict() {  # $1=ref $2=impl $3=decompose -> PROVEN | REFUTED | UNKNOWN | INCON
 #    same-shape collapse.
 for dec in true false; do
   v=$(verdict ref.v ref.v "$dec")
-  if [ "$v" = "PROVEN equivalent" ]; then
-    echo "ok: self-LEC (decompose=$dec) -> PROVEN"
+  if [ "$v" = "PROVEN-full" ]; then
+    echo "ok: self-LEC (decompose=$dec) -> PROVEN-full"
   else
-    echo "FAIL: self-LEC (decompose=$dec) -> '$v' (want PROVEN; guard over-blocked a legitimate collapse)"; fail=1
+    echo "FAIL: self-LEC (decompose=$dec) -> '$v' (want PROVEN-full; guard over-blocked a legitimate collapse)"; fail=1
   fi
 done
 
 # 2) Soundness: the crossed (genuinely different) design must NEVER come back
-#    PROVEN. REFUTED or an inconclusive (UNKNOWN/INCONCLUSIVE) degrade are both
-#    sound; only a PROVEN is a wrong verdict.
+#    PROVEN. REFUTED-cex or an undecided (TIMEOUT-*/REFUTED-<why>) degrade are
+#    both sound; only a PROVEN (or a sampled TESTED) is a wrong verdict.
 for dec in true false; do
   v=$(verdict ref.v crossed.v "$dec")
-  if [ "$v" = "PROVEN equivalent" ]; then
-    echo "FAIL: crossed design (decompose=$dec) -> FALSE PROVEN (a wrong verdict)"; fail=1
+  if [ "${v%%-*}" = "PROVEN" ] || [ "${v%%-*}" = "TESTED" ]; then
+    echo "FAIL: crossed design (decompose=$dec) -> FALSE PROVEN ($v, a wrong verdict)"; fail=1
   elif [ -n "$v" ]; then
     echo "ok: crossed design (decompose=$dec) -> $v (sound, not a false PROVEN)"
   else

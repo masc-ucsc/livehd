@@ -77,7 +77,7 @@ OUT="$W/ev_good.out"
 "$LHD" formal verify "$W/dly2.prp" "$W/ev_good.verify.prp" --top dly2 --set formal.bound=8 \
   --workdir "$W/w1" --diag-fmt pretty >"$OUT" 2>&1 \
   || fail "a true windowed property must pass: $(cat "$OUT")"
-grep -q 'PROVEN' "$OUT" || fail "expected PROVEN: $(cat "$OUT")"
+grep -qE "^formal verify: '[^']*' PROVEN-(full|bounded)" "$OUT" || fail "expected PROVEN: $(cat "$OUT")"
 # Retiming, not a monitor flop.
 ! grep -qi 'holds STATE' "$OUT" || fail "a window must not be lowered to monitor state: $(cat "$OUT")"
 grep -q 'cycle(s) of history' "$OUT" \
@@ -100,8 +100,9 @@ EOF
 OUT="$W/ev_bad.out"
 "$LHD" formal verify "$W/dly2.prp" "$W/ev_bad.verify.prp" --top dly2 --set formal.bound=8 \
   --workdir "$W/w2" --diag-fmt pretty >"$OUT" 2>&1
-[ $? -ne 0 ] || fail "a window that excludes the real latency must refute: $(cat "$OUT")"
-grep -q 'REFUTED' "$OUT" || fail "expected REFUTED: $(cat "$OUT")"
+RC=$?
+[ "$RC" -eq 10 ] || fail "a window that excludes the real latency must refute: (rc=$RC, want the counterexample class 10) $(cat "$OUT")"
+grep -q "^formal verify: '[^']*' REFUTED-cex" "$OUT" || fail "expected REFUTED: $(cat "$OUT")"
 
 # ---- universal: always() over a window where the signal is NOT always true --
 cat >"$W/al_bad.verify.prp" <<'EOF'
@@ -116,8 +117,9 @@ EOF
 OUT="$W/al_bad.out"
 "$LHD" formal verify "$W/dly2.prp" "$W/al_bad.verify.prp" --top dly2 --set formal.bound=8 \
   --workdir "$W/w3" --diag-fmt pretty >"$OUT" 2>&1
-[ $? -ne 0 ] || fail "always() over a window it does not hold across must refute: $(cat "$OUT")"
-grep -q 'REFUTED' "$OUT" || fail "expected REFUTED for always(): $(cat "$OUT")"
+RC=$?
+[ "$RC" -eq 10 ] || fail "always() over a window it does not hold across must refute: (rc=$RC, want the counterexample class 10) $(cat "$OUT")"
+grep -q "^formal verify: '[^']*' REFUTED-cex" "$OUT" || fail "expected REFUTED for always(): $(cat "$OUT")"
 
 # ---- universal: stable() across a window where the value really is stable ---
 # req is a free input, so `ack` is only guaranteed stable when the two cycles
@@ -136,7 +138,7 @@ OUT="$W/st_good.out"
 "$LHD" formal verify "$W/dly2.prp" "$W/st_good.verify.prp" --top dly2 --set formal.bound=8 \
   --workdir "$W/w4" --diag-fmt pretty >"$OUT" 2>&1 \
   || fail "a true stable() window must prove: $(cat "$OUT")"
-grep -q 'PROVEN' "$OUT" || fail "expected PROVEN for stable(): $(cat "$OUT")"
+grep -qE "^formal verify: '[^']*' PROVEN-(full|bounded)" "$OUT" || fail "expected PROVEN for stable(): $(cat "$OUT")"
 
 # ---- a window WIDER than the bound must not read as a proof ------------------
 # The dangerous failure mode: if the unroll is too short to hold any anchor, the

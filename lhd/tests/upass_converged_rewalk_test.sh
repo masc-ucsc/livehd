@@ -79,9 +79,9 @@ rounds=$(grep -o 'pass.upass' "$W/r_tree.json" | wc -l | tr -d ' ')
 [ "$rounds" -ge 2 ] || fail "fixture no longer forces a second upass round (rounds=$rounds); it cannot see the bug: $(cat "$W/r_tree.json")"
 
 # ── 3. the two graphs must be equivalent ─────────────────────────────────────
-"$LHD" lec --impl lg:"$W/tree" --ref lg:"$W/solo" --top victim --workdir "$W/w_lec" \
+"$LHD" lec --set formal.effort=proof --impl lg:"$W/tree" --ref lg:"$W/solo" --top victim --workdir "$W/w_lec" \
   > "$W/lec.log" 2>&1 || fail "lec exited non-zero — in-tree victim differs from standalone: $(cat "$W/lec.log")"
-grep -q "PROVEN equivalent" "$W/lec.log" \
+grep -qE "^lec: .* PROVEN-(full|bounded)" "$W/lec.log" \
   || fail "in-tree victim not PROVEN equivalent to the standalone compile: $(cat "$W/lec.log")"
 
 # ── 4. and the IR itself must be identical, not merely equivalent ────────────

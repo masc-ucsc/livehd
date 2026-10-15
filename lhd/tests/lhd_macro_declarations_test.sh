@@ -58,7 +58,7 @@ for reader in yosys-verilog yosys-slang; do
     || { cat "$W/models-$reader.log"; exit 1; }
   cat "$W/models.v" "$W/$reader.v" "$W/cells-$reader"/*.v > "$W/impl.v"
   cat "$W/models.v" "$W/source.v" > "$W/ref.v"
-  "$LHD" lec --impl "$W/impl.v" --ref "$W/ref.v" --top macro_declarations \
+  "$LHD" lec --set formal.effort=proof --impl "$W/impl.v" --ref "$W/ref.v" --top macro_declarations \
     --workdir "$W/$reader-lec" -q
 done
 echo 'PASS: Liberty and Verilog hard macros preserve ports and behavior through mapping'

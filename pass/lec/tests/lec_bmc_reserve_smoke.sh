@@ -25,7 +25,7 @@ endmodule
 with (w/'compile.log').open('w') as log:
  subprocess.run([lhd,'compile',str(w/'cell.v'),'--top','budget_cell','--emit-dir',f'lg:{w}/models','--workdir',str(w/'cell-work')],stdout=log,stderr=subprocess.STDOUT,check=True,timeout=10)
 env=dict(os.environ,LIVEHD_LEC_RACER_STALL_S='60',LIVEHD_LEC_RACER_STALL_ONLY='0')
-for tag,impl,verdict in [('equal','ref.v','proven'),('bug','bad.v','refuted')]:
+for tag,impl,verdict in [('equal','ref.v','proven-bounded'),('bug','bad.v','refuted-cex')]:
  cmd=[lhd,'lec','--set','formal.effort=proof','--ref',str(w/'ref.v'),'--impl',str(w/impl),'--top','top','--lib',f'lg:{w}/models','--workdir',str(w/tag),'--result-json',str(w/(tag+'.json'))]
  for setting in ['formal.lec.semdiff=none','lhd.jobs=2','formal.timeout=2','formal.min_timeout=1','formal.lec.int_blast=off','formal.simfail_run=false']:
   cmd+=['--set',setting]
@@ -35,9 +35,9 @@ for tag,impl,verdict in [('equal','ref.v','proven'),('bug','bad.v','refuted')]:
  text=(w/(tag+'.log')).read_text();data=json.loads((w/(tag+'.json')).read_text());lec=data.get('lec',{})
  assert time.monotonic()-start<10,(tag,text)
  assert lec.get('verdict')==verdict,(tag,data,text)
- assert (result.returncode==0)==(verdict=='proven'),(tag,result.returncode,text)
+ assert result.returncode==(0 if verdict.startswith('proven') else 10),(tag,result.returncode,text)
  assert re.search(r"(TIMEOUT|UNSUPPORTED|UNDISCHARGED|UNCONFIRMED|UNPAIRED|UNCHECKED|VACUOUS|UNEXPLAINED) under collapse", text) and "-> flat retry" in text,(tag,text)
  assert 'reserved budget goes directly to BMC' in text,(tag,text)
- if verdict=='proven':assert lec.get('bounded'),(tag,lec)
+ if verdict.startswith('proven'):assert lec.get('bounded'),(tag,lec)
  print(f'{tag}: collapsed induction stalled, flat BMC returned {verdict}')
 PY

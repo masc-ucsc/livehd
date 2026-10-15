@@ -34,6 +34,12 @@ fail() {
   exit 1
 }
 run() { "$LHD" "$@" -q --result-json "$W/r.json" || fail "$* -> $(cat "$W/r.json" 2>/dev/null)"; }
+# lec_proven <lec args>: an equivalence gate needs a PROOF (PROVEN-full or
+# PROVEN-bounded), not merely exit 0 (a sampled or timed-out run also exits 0).
+lec_proven() {
+  run lec --set formal.effort=proof "$@"
+  grep -qE '"verdict":"proven-(full|bounded)"' "$W/r.json" || fail "lec $* did not prove: $(cat "$W/r.json")"
+}
 
 [ -f "$PRP" ] || fail "missing fixture $PRP"
 [ -f "$LIB" ] || fail "missing liberty $LIB"
@@ -103,17 +109,17 @@ cat "$W/netv/"*.v "$W/modelsv/"*.v > "$W/impl.v"
 cat "$W/rev/"*.v > "$W/ref.v"
 
 # 7. LEC: the tech-mapped netlist must equal the original logic
-run lec --impl verilog:"$W/impl.v" --ref verilog:"$W/ref.v" --top "$TOP" --workdir "$W/wc"
+lec_proven --impl verilog:"$W/impl.v" --ref verilog:"$W/ref.v" --top "$TOP" --workdir "$W/wc"
 
 # 8. A corrupted reference MUST refute. Witness replay is covered separately;
 # this check needs the solver verdict, not a host build of the replay driver.
 sed 's/\^/\&/g' "$W/ref.v" > "$W/ref_bad.v"
-if "$LHD" lec --impl verilog:"$W/impl.v" --ref verilog:"$W/ref_bad.v" --top "$TOP" \
+if "$LHD" lec --set formal.effort=proof --impl verilog:"$W/impl.v" --ref verilog:"$W/ref_bad.v" --top "$TOP" \
     --set formal.simfail_run=false --workdir "$W/wcn" -q --result-json "$W/rn.json" 2>/dev/null; then
   fail "negative control passed LEC against a corrupted reference (the check is not sound)"
 fi
 
-grep -q '"verdict":"refuted"' "$W/rn.json" || fail "corrupted reference did not produce a refutation"
+grep -q '"verdict":"refuted-cex"' "$W/rn.json" || fail "corrupted reference did not produce a refutation"
 
 echo "PASS: pass.abc tech-map LEC-equivalent to original logic (+ negative control)"
 
@@ -165,7 +171,7 @@ run compile lg:"$T/timed" --top "$TOP" --emit-dir verilog:"$T/netv" --workdir "$
 run pass liberty gensim "$TIMING_LIB" --emit-dir lg:"$T/models" --workdir "$T/w_models"
 run compile lg:"$T/models" --emit-dir verilog:"$T/modelsv" --workdir "$T/w_modelsv"
 cat "$T/netv/"*.v "$T/modelsv/"*.v > "$T/impl.v"
-run lec --impl verilog:"$T/impl.v" --ref verilog:"$W/ref.v" --top "$TOP" --workdir "$T/w_lec"
+lec_proven --impl verilog:"$T/impl.v" --ref verilog:"$W/ref.v" --top "$TOP" --workdir "$T/w_lec"
 echo "PASS: pass.abc delay target uses physical NLDM delays (unit=$unit_delay ps, timed=$timed_delay ps)"
 
 # Custom area flows own the untimed command list; an explicit flow still wins.
@@ -200,7 +206,7 @@ run compile lg:"$N/lg" --top "$TOP" --emit-dir verilog:"$N/origv" --workdir "$N/
 grep -q "NAND2x1\|NOR2x1\|INVx1\|XOR2x1" "$N/netv/"*.v || fail "no standard cells in the uncolored ABC netlist"
 cat "$N/netv/"*.v "$N/modelsv/"*.v > "$N/impl.v"
 cat "$N/origv/"*.v > "$N/orig.v"
-run lec --impl verilog:"$N/impl.v" --ref verilog:"$N/orig.v" --top "$TOP" --workdir "$N/c"
+lec_proven --impl verilog:"$N/impl.v" --ref verilog:"$N/orig.v" --top "$TOP" --workdir "$N/c"
 echo "PASS: pass.abc runs WITHOUT a prior color pass (color-0 region, LEC-equivalent)"
 
 # ---------------------------------------------------------------------------
@@ -216,7 +222,7 @@ run pass abc --top "$TOP" lg:"$W/lg" --emit-dir lg:"$A/net" --set synth.liberty=
 run compile lg:"$A/net" --top "$TOP" --emit-dir verilog:"$A/netv" --workdir "$A/w2"
 grep -q "NAND2x1\|NOR2x1\|INVx1\|XOR2x1" "$A/netv/"*.v || fail "no standard cells in the resyn2-mapped netlist (alias did not resolve?)"
 cat "$A/netv/"*.v "$W/modelsv/"*.v > "$A/impl.v"
-run lec --impl verilog:"$A/impl.v" --ref verilog:"$W/ref.v" --top "$TOP" --workdir "$A/c"
+lec_proven --impl verilog:"$A/impl.v" --ref verilog:"$W/ref.v" --top "$TOP" --workdir "$A/c"
 echo "PASS: pass.abc resolves abc.rc script aliases in flow (resyn2, LEC-equivalent)"
 
 # ---------------------------------------------------------------------------
@@ -233,7 +239,7 @@ grep -q "large_flow selected" "$G/w1/logs/"*_lhd_pass_abc.log \
   || fail "large-region tier was not selected at large_ge=1"
 run compile lg:"$G/net" --top "$TOP" --emit-dir verilog:"$G/netv" --workdir "$G/w2"
 cat "$G/netv/"*.v "$W/modelsv/"*.v > "$G/impl.v"
-run lec --impl verilog:"$G/impl.v" --ref verilog:"$W/ref.v" --top "$TOP" --workdir "$G/c"
+lec_proven --impl verilog:"$G/impl.v" --ref verilog:"$W/ref.v" --top "$TOP" --workdir "$G/c"
 echo "PASS: pass.abc large-region direct flow is selected and LEC-equivalent"
 
 # ---------------------------------------------------------------------------
@@ -259,7 +265,7 @@ run pass color synth --top wide_wiring.wide_wiring lg:"$P/lg" --workdir "$P/w2"
 if grep -Eq '"gates":[1-9][0-9]*' "$P/r.json"; then
   fail "wide zero-delay wiring expanded into Liberty gates: $(cat "$P/r.json")"
 fi
-run lec --impl lg:"$P/net" --ref lg:"$P/lg" --top wide_wiring.wide_wiring --workdir "$P/w4"
+lec_proven --impl lg:"$P/net" --ref lg:"$P/lg" --top wide_wiring.wide_wiring --workdir "$P/w4"
 echo "PASS: wide constant pack/unpack remains exact native zero-delay wiring"
 
 # ---------------------------------------------------------------------------
@@ -350,7 +356,7 @@ grep -hq "^DFFx1 " "$FT/netv/"*.v || fail "the resetless register did not map to
 cat "$FT/netv/"*.v | grep -q "= ({\\\\state\\[3\\]\|= {\\\\state\\[3\\]" \
   || fail "flop Q -> output is not a direct wire in the netlist"
 run pass liberty gensim "$LIB" --emit-dir lg:"$FT/models" --workdir "$FT/w6"
-run lec --impl lg:"$FT/net" --ref lg:"$FT/re" --lib lg:"$FT/models" --top abc_feedthrough.abc_feedthrough \
+lec_proven --impl lg:"$FT/net" --ref lg:"$FT/re" --lib lg:"$FT/models" --top abc_feedthrough.abc_feedthrough \
     --workdir "$FT/w7"
 echo "PASS: feed-through wires map to no buffer cell (identity-buffer bypass) and the netlist stays LEC-equivalent"
 
@@ -366,6 +372,6 @@ PRP
 run compile "$RO/reduce_or.prp" --emit-dir lg:"$RO/lg" --workdir "$RO/w1"
 run synth lg:"$RO/lg" --top reduce_or.reduce_or --emit-dir lg:"$RO/net" \
     --set synth.liberty="$LIB" --set synth.opentimer=false --workdir "$RO/w2"
-run lec --impl lg:"$RO/net" --ref lg:"$RO/lg" --lib lg:"$W/models" --top reduce_or.reduce_or \
+lec_proven --impl lg:"$RO/net" --ref lg:"$RO/lg" --lib lg:"$W/models" --top reduce_or.reduce_or \
     --workdir "$RO/w3"
 echo "PASS: wide and signed reduce-OR map and remain equivalent"

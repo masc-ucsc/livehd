@@ -5,20 +5,21 @@
 # pass/lec engine (lec::prove_properties). Contract under test:
 #   * a true STATE invariant (that single-frame induction defers) is PROVEN to
 #     the bound, per-assert, with a per-cycle depth in the table;
-#   * a reachable violation is REFUTED at its cycle with the per-cycle input
-#     trace, carries the user message, and fails the run (exit != 0);
+#   * a reachable violation is REFUTED-cex at its cycle with the per-cycle input
+#     trace, carries the user message, and fails the run (exit 10);
 #   * assume discipline: every plain `assume` is a prove-then-use obligation,
 #     a selected-top IO one included (it has no parent that could discharge
 #     it, so over free inputs it REFUTES). `assume_nocheck` is the only
 #     free UNCHECKED environment constraint
 #     (disclosed; the fcore spelling assume_nocheck_formal also warns);
 #     assume_nocheck_synth is invisible to verify;
-#   * per-obligation timeout isolation: a hard obligation goes UNKNOWN on its
-#     own budget while its easy sibling still proves; UNKNOWN FAILS the run
-#     with no warning-only opt-out;
+#   * per-obligation timeout isolation: a hard obligation goes TIMEOUT-time on
+#     its own budget while its easy sibling is still checked; a TIMEOUT-time run
+#     exits 0 with a formal-timeout-time warning (owner ruling: a timeout is not a
+#     failure, and never a proof);
 #   * knob namespaces: formal.* and the legacy lec.* spelling both work;
 #   * `lhd formal lec` is the lec command (behavior-preserving alias);
-#   * a design with no obligations is UNKNOWN (never a vacuous PASS).
+#   * a design with no obligations is REFUTED-vacuous, exit 7 (never a vacuous PASS).
 
 set -u
 
@@ -62,18 +63,18 @@ mod cnt(enable:Bool) -> (value:U8@[0]) {
 }
 EOF
 verify cnt cnt --top cnt --set formal.bound=10
-[ "$RC" -ne 0 ] || fail "a reachable violation must fail the run (got rc=0): $(cat "$OUT")"
-grep -q 'REFUTED$\|REFUTED (' "$OUT" || fail "aggregate verdict must be REFUTED: $(cat "$OUT")"
-grep -q 'cnt.prp:5.*PROVEN' "$OUT" || fail "the parity invariant must be PROVEN per-assert: $(cat "$OUT")"
-grep -q 'cnt.prp:6.*REFUTED at cycle 7' "$OUT" || fail "count!=5 must be REFUTED at cycle 7: $(cat "$OUT")"
+[ "$RC" -eq 10 ] || fail "a reachable violation must fail the run with the counterexample class (got rc=$RC): $(cat "$OUT")"
+grep -q "^formal verify: 'cnt.cnt' REFUTED-cex" "$OUT" || fail "aggregate verdict must be REFUTED-cex: $(cat "$OUT")"
+grep -q 'cnt.prp:5.*PROVEN-' "$OUT" || fail "the parity invariant must be PROVEN per-assert: $(cat "$OUT")"
+grep -q 'cnt.prp:6.*REFUTED-cex at cycle 7' "$OUT" || fail "count!=5 must be REFUTED at cycle 7: $(cat "$OUT")"
 grep -q 'counter hit 5' "$OUT" || fail "the refuted row must carry the user message: $(cat "$OUT")"
 grep -q 'counterexample inputs: cyc0:' "$OUT" || fail "REFUTED must print the per-cycle input trace: $(cat "$OUT")"
 grep -q 'enable=1' "$OUT" || fail "the trace must drive enable to reach count==5: $(cat "$OUT")"
 
 # The legacy lec.* spelling is an alias for the same knob.
 verify cnt cnt_alias --top cnt --set formal.bound=10
-[ "$RC" -ne 0 ] || fail "formal.bound alias must behave like formal.bound (got rc=0)"
-grep -q 'REFUTED at cycle 7' "$OUT" || fail "formal.bound=10 must reach the cycle-7 refutation: $(cat "$OUT")"
+[ "$RC" -eq 10 ] || fail "formal.bound alias must behave like formal.bound (got rc=$RC)"
+grep -q 'REFUTED-cex at cycle 7' "$OUT" || fail "formal.bound=10 must reach the cycle-7 refutation: $(cat "$OUT")"
 
 # ---------------------------------------------------------------------------
 # 2. P1 assume discipline, internal (state) assumes are PROVE-THEN-USE:
@@ -93,10 +94,10 @@ mod cnt(enable:Bool) -> (value:U8@[0]) {
 }
 EOF
 verify cnt_assume assume --top cnt --set formal.bound=10
-[ "$RC" -ne 0 ] || fail "a FALSE internal assume must REFUTE the run, never fake a PROVEN (got rc=0): $(cat "$OUT")"
-grep -q 'assume at.*cnt_assume.prp:4.*REFUTED at cycle' "$OUT" || fail "the false state assume must be REFUTED at its cycle: $(cat "$OUT")"
+[ "$RC" -eq 10 ] || fail "a FALSE internal assume must REFUTE the run, never fake a PROVEN (got rc=$RC): $(cat "$OUT")"
+grep -q 'assume at.*cnt_assume.prp:4.*REFUTED-cex at cycle' "$OUT" || fail "the false state assume must be REFUTED at its cycle: $(cat "$OUT")"
 grep -q 'checked assume(s):.*REFUTED' "$OUT" || fail "the headline must disclose the refuted assume: $(cat "$OUT")"
-grep -q 'cnt_assume.prp:5.*REFUTED' "$OUT" || fail "the companion assert must refute honestly (no masking): $(cat "$OUT")"
+grep -q 'cnt_assume.prp:5.*REFUTED-cex' "$OUT" || fail "the companion assert must refute honestly (no masking): $(cat "$OUT")"
 
 # The single canonical opt-out disables the check but does not drop the
 # constraint: the same assume becomes an active unchecked environment fact and
@@ -106,7 +107,7 @@ verify cnt_assume assume_check_off --top cnt --set formal.bound=10 --set formal.
 grep -q 'formal-unchecked-assume' "$OUT" || fail "assume_check=false must warn about the unchecked constraint: $(cat "$OUT")"
 grep -q 'formal.assume_check=false; treated as assume_nocheck' "$OUT" \
   || fail "the unchecked row must identify formal.assume_check=false: $(cat "$OUT")"
-grep -q 'cnt_assume.prp:5.*PROVEN' "$OUT" || fail "the assume must still constrain the companion assert: $(cat "$OUT")"
+grep -q 'cnt_assume.prp:5.*PROVEN-' "$OUT" || fail "the assume must still constrain the companion assert: $(cat "$OUT")"
 
 # 2a. A TRUE state invariant assume PROVES (here: inductively) and is disclosed
 #     as used; the run stays green.
@@ -127,7 +128,7 @@ mod wrapcnt(enable:Bool) -> (value:U8@[0]) {
 EOF
 verify wrap_assume wrap_assume --top wrapcnt --set formal.bound=8
 [ "$RC" -eq 0 ] || fail "a TRUE internal assume must prove and keep the run green (got rc=$RC): $(cat "$OUT")"
-grep -q 'assume at.*wrap_assume.prp:4.*PROVEN' "$OUT" || fail "the true state assume must get a PROVEN row: $(cat "$OUT")"
+grep -q 'assume at.*wrap_assume.prp:4.*PROVEN-' "$OUT" || fail "the true state assume must get a PROVEN row: $(cat "$OUT")"
 grep -q 'checked assume(s): 1 proven (used)' "$OUT" || fail "the headline must disclose the proven assume: $(cat "$OUT")"
 
 # ---------------------------------------------------------------------------
@@ -153,20 +154,20 @@ mod always_env(a:U8, en:Bool) -> (o:U8@[0]) {
 }
 EOF
 verify always_env always_env_gate --top always_env --set formal.bound=4
-[ "$RC" -ne 0 ] || fail "a plain top-level IO assume is checked and must refute (got rc=0): $(cat "$OUT")"
+[ "$RC" -eq 10 ] || fail "a plain top-level IO assume is checked and must refute with a counterexample (got rc=$RC): $(cat "$OUT")"
 grep -q 'formal-top-assume' "$OUT" && fail "a top IO assume is no longer an unchecked constraint: $(cat "$OUT")"
 grep -q 'assume-refuted' "$OUT" || fail "the compile gate must refute the checked top IO assume: $(cat "$OUT")"
-grep -q 'assume at.*always_env.prp:4.*REFUTED at cycle' "$OUT" \
+grep -q 'assume at.*always_env.prp:4.*REFUTED-cex at cycle' "$OUT" \
   || fail "verify must report the checked top IO assume REFUTED: $(cat "$OUT")"
 grep -q 'spell it assume_nocheck' "$OUT" || fail "the refuted top IO assume must hint at assume_nocheck: $(cat "$OUT")"
-grep -q "assert_always.*'env bound'.*REFUTED" "$OUT" \
+grep -q "assert_always.*'env bound'.*REFUTED-cex" "$OUT" \
   || fail "a refuted assume must not constrain the companion assert: $(cat "$OUT")"
 # The design-body environment contract: assume_nocheck constrains without a check.
 sed 's/  assume(a < 4)/  assume_nocheck(a < 4)/' "$W/always_env.prp" >"$W/always_env_nock.prp"
 verify always_env_nock always_env_nock --top always_env --set formal.bound=4
 [ "$RC" -eq 0 ] || fail "a design-body assume_nocheck must constrain the companion assert (got rc=$RC): $(cat "$OUT")"
 grep -q 'in force (UNCHECKED assume_nocheck' "$OUT" || fail "the nocheck constraint must be disclosed as UNCHECKED: $(cat "$OUT")"
-grep -q 'assert_always.*PROVEN' "$OUT" || fail "the design-body assume_nocheck must prove the assert_always: $(cat "$OUT")"
+grep -q 'assert_always.*PROVEN-' "$OUT" || fail "the design-body assume_nocheck must prove the assert_always: $(cat "$OUT")"
 # The sanctioned spelling: a formal-block assume_nocheck. In force at every
 # cycle, prologue included, so the block's assert_always proves.
 cat >"$W/always_env2.prp" <<'EOF'
@@ -190,24 +191,25 @@ OUT="$W/always_env2.out"
 "$LHD" formal verify "$W/always_env2.prp" "$W/always_env2.verify.prp" --top always_env2 --set formal.bound=4 >"$OUT" 2>&1
 RC=$?
 [ "$RC" -eq 0 ] || fail "assert_always under a prologue-relevant assume_nocheck must prove (got rc=$RC): $(cat "$OUT")"
-grep -q 'assert_always.*PROVEN' "$OUT" || fail "assert_always must be proven incl. the prologue: $(cat "$OUT")"
+grep -q 'assert_always.*PROVEN-' "$OUT" || fail "assert_always must be proven incl. the prologue: $(cat "$OUT")"
 grep -q 'in force (UNCHECKED assume_nocheck' "$OUT" || fail "the nocheck constraint must be disclosed as UNCHECKED: $(cat "$OUT")"
 grep -q 'under 1 UNCHECKED assume(s)' "$OUT" || fail "the headline must disclose the unchecked assume count: $(cat "$OUT")"
 
 # ---------------------------------------------------------------------------
 # 3. Per-obligation timeout isolation: a 32-bit multiply identity blows the 2s
-#    budget and goes UNKNOWN at its first checked cycle; the easy sibling still
-#    proves.
+#    budget and goes TIMEOUT-time at its first checked cycle; the easy sibling is
+#    still checked on its own (it never "gives up").
 #
 #    `distrib` is DELIBERATELY undecidable-in-practice, not merely under-budgeted:
 #    it is a bit-vector multiplier-distributivity miter, (a*b)*((a*c)+1) ==
 #    a*a*b*c + a*b, which is TRUE mod 2^32 (so no counterexample exists) but whose
 #    bit-blasted proof is exponential in the operand width. Measured: at u4 it
-#    PROVES inductively in 0.7s; at u8 it is already UNKNOWN against a 120s
-#    per-query budget; at u32 it is still UNKNOWN at 120s (240s wall). Raising the
+#    PROVES inductively in 0.7s; at u8 it already times out against a 120s
+#    per-query budget; at u32 it still times out at 120s (240s wall). Raising the
 #    budget does not move it — that is the point of the fixture.
 #
-#    UNKNOWN fails while easy obligations still prove independently.
+#    TIMEOUT-time (exit 0 + warning) while easy obligations are still checked
+#    independently.
 # ---------------------------------------------------------------------------
 cat >"$W/hard.prp" <<'EOF'
 mod hard(a:U32, b:U32, c:U32, en:Bool) -> (o:U8@[0]) {
@@ -220,24 +222,30 @@ mod hard(a:U32, b:U32, c:U32, en:Bool) -> (o:U8@[0]) {
   }
 }
 EOF
-# 3a. the UNKNOWN fails the run, and the failure
-#     says it could not DECIDE — it must never read as a refutation, and it must
-#     point at the budget knob so the user can retry or opt out.
+# 3a. the run is TIMEOUT-time: exit 0 with a formal-timeout-time warning that
+#     says it could not DECIDE — it must never read as a proof or a refutation,
+#     and it must point at the budget knob so the user can retry.
 WDU="$W/wd_report_unknown"
 mkdir -p "$WDU"
 verify hard hard --top hard --set formal.engine=bmc --set formal.bound=2 \
   --set formal.timeout=1 --set formal.min_timeout=1 --workdir "$WDU"
-[ "$RC" -ne 0 ] || fail "an UNKNOWN must FAIL by default (got rc=0): $(cat "$OUT")"
-grep -q 'could not decide' "$OUT" || fail "the failure must say the run was UNDECIDED, not refuted: $(cat "$OUT")"
-grep -q '"class":"unsupported"' "$OUT" || fail "an undecided run must fail as 'unsupported', not as a proof failure: $(cat "$OUT")"
-grep -q 'raise --set formal.timeout' "$OUT" || fail "the failure must point at the budget knob so the user can retry: $(cat "$OUT")"
-grep -q 'REFUTED' "$OUT" && fail "an undecided run must not be reported as a refutation: $(cat "$OUT")"
-# Timeout isolation is orthogonal to the severity knob: it holds here too.
-grep -q "'easy'.*PROVEN" "$OUT" || fail "the easy sibling must still prove: $(cat "$OUT")"
-grep -q "'distrib'.*TIMEOUT (solver gave up at cycle" "$OUT" || fail "the hard obligation must time out ALONE: $(cat "$OUT")"
+[ "$RC" -eq 0 ] || fail "a TIMEOUT-time run exits 0 with a warning (got rc=$RC): $(cat "$OUT")"
+grep -q "^formal verify: 'hard.hard' TIMEOUT-time" "$OUT" || fail "the run must say it was UNDECIDED (TIMEOUT-time): $(cat "$OUT")"
+grep -q '"code":"formal-timeout-time"' "$OUT" || fail "an undecided run must warn (formal-timeout-time): $(cat "$OUT")"
+grep -q 'neither proved nor refuted' "$OUT" || fail "the warning must say nothing was proved or refuted: $(cat "$OUT")"
+grep -q 'raise --set formal.timeout' "$OUT" || fail "the warning must point at the budget knob so the user can retry: $(cat "$OUT")"
+grep -qE "^formal verify: .* (PROVEN|REFUTED)-|^  (assert|assume) .*: (PROVEN|REFUTED)-" "$OUT" \
+  && fail "an undecided run must not be reported as a proof or a refutation: $(cat "$OUT")"
+# Timeout isolation: the easy sibling is checked on its own -- proven to the
+# depth the shared total allowed (a budget freeze before the requested last cycle
+# is TIMEOUT-time "proven to cycle k", owner ruling 2026-10-14) -- and only the
+# hard obligation is the one whose solver gave up.
+grep -qE "'easy'\": (PROVEN-(full|bounded)|TIMEOUT-time \(proven to cycle [1-9])" "$OUT" || fail "the easy sibling must still prove: $(cat "$OUT")"
+grep -q "'distrib'\": TIMEOUT-time (solver gave up at cycle" "$OUT" || fail "the hard obligation must time out ALONE: $(cat "$OUT")"
+grep -q "'easy'.*solver gave up" "$OUT" && fail "the easy sibling must not be the one whose solver gave up: $(cat "$OUT")"
 
 # ---------------------------------------------------------------------------
-# 4. No obligations: UNKNOWN with an explicit note — never a vacuous PASS.
+# 4. No obligations: REFUTED-vacuous (exit 7) with an explicit note — never a vacuous PASS.
 # ---------------------------------------------------------------------------
 cat >"$W/noprops.prp" <<'EOF'
 comb pass_through(a:U8) -> (x:U8) {
@@ -249,10 +257,13 @@ grep -q 'no assert/assert_always obligations found' "$OUT" || fail "no-obligatio
 grep -q 'PROVEN' "$OUT" && fail "no-obligation run must not claim PROVEN: $(cat "$OUT")"
 
 # No-obligation runs always fail; there is no warning-only proof mode.
-[ "$RC" -ne 0 ] || fail "a run with no obligations must fail"
+[ "$RC" -eq 7 ] || fail "a run with no obligations must fail as REFUTED-vacuous (rc 7, got $RC)"
+grep -q "^formal verify: 'noprops.pass_through' REFUTED-vacuous" "$OUT" \
+  || fail "a run with no obligations is REFUTED-vacuous: $(cat "$OUT")"
 verify noprops retired_strict --top pass_through --set formal.strict=false
-[ "$RC" -ne 0 ] || fail "removed formal.strict option was accepted"
-grep -qi 'unknown' "$OUT" || fail "removed option did not produce a usage diagnostic"
+[ "$RC" -eq 2 ] || fail "removed formal.strict option was accepted (rc=$RC)"
+grep -q '"class":"usage"' "$OUT" || fail "removed option did not produce a usage diagnostic"
+grep -q "'formal.strict' is no longer a public option" "$OUT" || fail "the usage diagnostic must name the removed option: $(cat "$OUT")"
 
 # ---------------------------------------------------------------------------
 # 6. V2 formal blocks: a sidecar .prp with `formal name.dotted { ... }` blocks
@@ -278,9 +289,9 @@ EOF
 OUT="$W/blocks.out"
 "$LHD" formal verify "$W/cnt.prp" "$W/cnt.verify.prp" --top cnt --set formal.bound=10 >"$OUT" 2>&1
 RC=$?
-[ "$RC" -ne 0 ] || fail "the speculative block's violation must fail the run (got rc=0): $(cat "$OUT")"
-grep -q 'cnt.verify.prp:5.*\[cnt.parity\].*PROVEN' "$OUT" || fail "block parity assert must prove with original loc + block name: $(cat "$OUT")"
-grep -q 'cnt.verify.prp:10.*\[cnt.speculative\].*REFUTED at cycle 5' "$OUT" || fail "block count!=3 must refute at cycle 5: $(cat "$OUT")"
+[ "$RC" -eq 10 ] || fail "the speculative block's violation must fail the run (got rc=$RC): $(cat "$OUT")"
+grep -q 'cnt.verify.prp:5.*\[cnt.parity\].*PROVEN-' "$OUT" || fail "block parity assert must prove with original loc + block name: $(cat "$OUT")"
+grep -q 'cnt.verify.prp:10.*\[cnt.speculative\].*REFUTED-cex at cycle 5' "$OUT" || fail "block count!=3 must refute at cycle 5: $(cat "$OUT")"
 
 OUT="$W/blocks_filter.out"
 "$LHD" formal verify "$W/cnt.prp" "$W/cnt.verify.prp" --top cnt --formal 'cnt.parity'  >"$OUT" 2>&1
@@ -300,7 +311,7 @@ formal cnt.escaped {
 EOF
 OUT="$W/blocks_escaped.out"
 "$LHD" formal verify "$W/cnt.prp" "$W/esc.verify.prp" --top cnt --formal 'cnt.escaped' --set formal.bound=10 >"$OUT" 2>&1
-grep -q 'esc.verify.prp:5.*\[cnt.escaped\].*PROVEN' "$OUT" || fail "escaped-name block assert must prove: $(cat "$OUT")"
+grep -q 'esc.verify.prp:5.*\[cnt.escaped\].*PROVEN-' "$OUT" || fail "escaped-name block assert must prove: $(cat "$OUT")"
 
 cat >"$W/bad.verify.prp" <<'EOF'
 const top = import("cnt.cnt")
@@ -330,7 +341,7 @@ EOF
 OUT="$W/blocks_frozen.out"
 "$LHD" formal verify "$W/cnt.prp" "$W/frozen.verify.prp" --formal 'cnt.frozen' --top cnt --set formal.bound=10 >"$OUT" 2>&1
 grep -q '\[cnt.frozen\].*in force (UNCHECKED assume_nocheck' "$OUT" || fail "block nocheck assume must be disclosed: $(cat "$OUT")"
-grep -q "'frozen counter'.*PROVEN" "$OUT" || fail "block nocheck assume must prune the violation: $(cat "$OUT")"
+grep -q "'frozen counter'.*PROVEN-" "$OUT" || fail "block nocheck assume must prune the violation: $(cat "$OUT")"
 
 # The same constraint spelled as a plain (checked) assume REFUTES: an input
 # assume is a proof obligation and a free input cannot be proven frozen.
@@ -345,8 +356,8 @@ EOF
 OUT="$W/blocks_frozen_checked.out"
 "$LHD" formal verify "$W/cnt.prp" "$W/frozen_checked.verify.prp" --formal 'cnt.frozen_checked' --top cnt --set formal.bound=10 >"$OUT" 2>&1
 RC=$?
-[ "$RC" -ne 0 ] || fail "a plain input assume must refute its check (got rc=0): $(cat "$OUT")"
-grep -q '\[cnt.frozen_checked\].*REFUTED at cycle' "$OUT" || fail "the checked input assume must get a REFUTED row: $(cat "$OUT")"
+[ "$RC" -eq 10 ] || fail "a plain input assume must refute its check (got rc=$RC): $(cat "$OUT")"
+grep -q '\[cnt.frozen_checked\].*REFUTED-cex at cycle' "$OUT" || fail "the checked input assume must get a REFUTED row: $(cat "$OUT")"
 grep -q 'spell it assume_nocheck' "$OUT" || fail "the refuted input assume must hint at assume_nocheck: $(cat "$OUT")"
 
 # 6c. Assume forms in blocks. A plain block assume over STATE is a proof
@@ -368,8 +379,9 @@ formal cnt.stateassume {
 EOF
 OUT="$W/blocks_stateassume.out"
 "$LHD" formal verify "$W/cnt.prp" "$W/stateassume.verify.prp" --formal 'cnt.stateassume' --top cnt --set formal.bound=10 >"$OUT" 2>&1
-[ $? -ne 0 ] || fail "a false block STATE assume must refute the run (got rc=0): $(cat "$OUT")"
-grep -q '\[cnt.stateassume\].*REFUTED at cycle' "$OUT" || fail "the false block state assume must be REFUTED: $(cat "$OUT")"
+RC=$?
+[ "$RC" -eq 10 ] || fail "a false block STATE assume must refute the run (got rc=$RC): $(cat "$OUT")"
+grep -q '\[cnt.stateassume\].*REFUTED-cex at cycle' "$OUT" || fail "the false block state assume must be REFUTED: $(cat "$OUT")"
 
 cat >"$W/nocheck.verify.prp" <<'EOF'
 const top = import("cnt.cnt")
@@ -385,11 +397,11 @@ OUT="$W/blocks_nocheck.out"
 grep -q 'formal-unchecked-assume' "$OUT" || fail "assume_nocheck_formal must warn per encounter: $(cat "$OUT")"
 grep -q 'in force (UNCHECKED assume_nocheck' "$OUT" || fail "the unchecked assume row must be distinct: $(cat "$OUT")"
 grep -q 'under 1 UNCHECKED assume(s)' "$OUT" || fail "the headline must disclose the unchecked count: $(cat "$OUT")"
-grep -q "'shadow'.*PROVEN" "$OUT" || fail "the unchecked constraint must prune its OWN block: $(cat "$OUT")"
+grep -q "'shadow'.*PROVEN-" "$OUT" || fail "the unchecked constraint must prune its OWN block: $(cat "$OUT")"
 grep -q 'count < 3' "$OUT" && fail "assume_nocheck_synth must be INVISIBLE to verify: $(cat "$OUT")"
 # Scope isolation, the point of the ruling: the SAME run's design-tier assert is
 # NOT pruned by the block's unchecked assume — it refutes at its real cycle.
-grep -q "'counter hit 5'.*REFUTED at cycle" "$OUT" \
+grep -q "'counter hit 5'.*REFUTED-cex at cycle" "$OUT" \
   || fail "a block assume must NOT weaken the design's own assert: $(cat "$OUT")"
 
 # The plain assume_nocheck spelling is the SANCTIONED env-constraint form: same
@@ -407,14 +419,14 @@ OUT="$W/blocks_nocheck_plain.out"
 grep -q 'formal-unchecked-assume' "$OUT" && fail "the plain assume_nocheck spelling must NOT warn: $(cat "$OUT")"
 grep -q 'in force (UNCHECKED assume_nocheck' "$OUT" || fail "plain assume_nocheck must still be disclosed as UNCHECKED: $(cat "$OUT")"
 grep -q 'under 1 UNCHECKED assume(s)' "$OUT" || fail "the headline must disclose the plain nocheck count: $(cat "$OUT")"
-grep -q "'shadow2'.*PROVEN" "$OUT" || fail "the plain nocheck constraint must prune its OWN block: $(cat "$OUT")"
+grep -q "'shadow2'.*PROVEN-" "$OUT" || fail "the plain nocheck constraint must prune its OWN block: $(cat "$OUT")"
 
 # ---------------------------------------------------------------------------
 # 6d. SCOPING (fixme issue 3, user ruling 2026-07-25): formal blocks are
 #     INDEPENDENT tests, exactly like `test` blocks. Each block's assumes are in
 #     force ONLY for that block's own obligations, so two blocks may carry
 #     MUTUALLY EXCLUSIVE assumes and both still prove. Before the fix this run
-#     reported "assume set contradictory" and every obligation went UNKNOWN,
+#     reported "assume set contradictory" and every obligation went undecided,
 #     which forced sidecar authors to collapse to one block + implication-style
 #     asserts.
 # ---------------------------------------------------------------------------
@@ -441,8 +453,8 @@ AEOF
 OUT="$W/blocks_two.out"
 "$LHD" formal verify "$W/alu.prp" "$W/two.verify.prp" --top aluop --set formal.bound=2 >"$OUT" 2>&1
 [ $? -eq 0 ] || fail "two blocks with exclusive assumes must both prove (got rc!=0): $(cat "$OUT")"
-grep -q "'ADDW is the sum'.*PROVEN" "$OUT" || fail "block 1 must prove under its own assume: $(cat "$OUT")"
-grep -q "'SUBW is the difference'.*PROVEN" "$OUT" || fail "block 2 must prove under its own assume: $(cat "$OUT")"
+grep -q "'ADDW is the sum'.*PROVEN-" "$OUT" || fail "block 1 must prove under its own assume: $(cat "$OUT")"
+grep -q "'SUBW is the difference'.*PROVEN-" "$OUT" || fail "block 2 must prove under its own assume: $(cat "$OUT")"
 grep -q 'CONTRADICTORY' "$OUT" && fail "independent blocks must not form one contradictory assume set: $(cat "$OUT")"
 
 # The dual: a block must NOT borrow a SIBLING's assume. `leak` asserts the ADDW
@@ -464,13 +476,14 @@ formal alu.leak {
 AEOF
 OUT="$W/blocks_leak.out"
 "$LHD" formal verify "$W/alu.prp" "$W/leak.verify.prp" --top aluop --set formal.bound=2 >"$OUT" 2>&1
-[ $? -ne 0 ] || fail "a sibling block's assume must not prove a false property (got rc=0): $(cat "$OUT")"
-grep -q "'LEAK only holds under addw's assume'.*REFUTED" "$OUT" \
+RC=$?
+[ "$RC" -eq 10 ] || fail "a sibling block's assume must not prove a false property (got rc=$RC): $(cat "$OUT")"
+grep -q "'LEAK only holds under addw's assume'.*REFUTED-cex" "$OUT" \
   || fail "the borrowing block must REFUTE: $(cat "$OUT")"
-grep -q "'ADDW is the sum'.*PROVEN" "$OUT" || fail "the honest block must still prove alongside it: $(cat "$OUT")"
+grep -q "'ADDW is the sum'.*PROVEN-" "$OUT" || fail "the honest block must still prove alongside it: $(cat "$OUT")"
 
 # A block whose OWN assume set is contradictory is named, is NOT allowed to
-# vacuously prove, and fails the run (exit != 0) —
+# vacuously prove, and fails the run as REFUTED-vacuous (exit 7) —
 # while a healthy sibling in the same run still proves.
 cat >"$W/contra.verify.prp" <<'AEOF'
 const a = import("alu.aluop")
@@ -490,10 +503,12 @@ formal alu.contra {
 AEOF
 OUT="$W/blocks_contra.out"
 "$LHD" formal verify "$W/alu.prp" "$W/contra.verify.prp" --top aluop --set formal.bound=2 >"$OUT" 2>&1
-[ $? -ne 0 ] || fail "a contradictory assume set must fail the run (got rc=0): $(cat "$OUT")"
+RC=$?
+[ "$RC" -eq 7 ] || fail "a contradictory assume set must fail the run as REFUTED-vacuous (got rc=$RC): $(cat "$OUT")"
+grep -q "'anything at all'.*REFUTED-vacuous" "$OUT" || fail "the contradictory block's obligation must be REFUTED-vacuous: $(cat "$OUT")"
 grep -q "CONTRADICTORY in block 'alu.contra'" "$OUT" || fail "the contradiction must NAME its block: $(cat "$OUT")"
 grep -q "'anything at all'.*PROVEN" "$OUT" && fail "a contradictory block must not prove anything vacuously: $(cat "$OUT")"
-grep -q "'ADDW is the sum'.*PROVEN" "$OUT" || fail "a healthy sibling block must survive: $(cat "$OUT")"
+grep -q "'ADDW is the sum'.*PROVEN-" "$OUT" || fail "a healthy sibling block must survive: $(cat "$OUT")"
 
 # ---------------------------------------------------------------------------
 # 6b. A block may target a SUBMODULE (user ruling): it binds to EVERY instance
@@ -557,7 +572,7 @@ HEOF
 OUT="$W/leafports.out"
 "$LHD" formal verify "$W/hier.prp" "$W/leafports.verify.prp" --top duo  >"$OUT" 2>&1
 [ $? -eq 0 ] || fail "submodule port binding must prove (got rc!=0): $(cat "$OUT")"
-n_rows=$(grep -c 'frozen leaf pins.*PROVEN' "$OUT")
+n_rows=$(grep -c 'frozen leaf pins.*PROVEN-' "$OUT")
 [ "$n_rows" -eq 2 ] || fail "the port block must bind BOTH leafcnt instances (got $n_rows rows): $(cat "$OUT")"
 grep -q 'in force (UNCHECKED assume_nocheck' "$OUT" || fail "an instance input-port nocheck assume must be disclosed: $(cat "$OUT")"
 
@@ -570,8 +585,9 @@ formal leaf.badport {
 HEOF
 OUT="$W/leafbad.out"
 "$LHD" formal verify "$W/hier.prp" "$W/leafbad.verify.prp" --top duo  >"$OUT" 2>&1
-[ $? -ne 0 ] || fail "a false submodule port assert must refute (got rc=0): $(cat "$OUT")"
-grep -q '\[leaf.badport@.*REFUTED at cycle' "$OUT" || fail "the port refute must carry @instance: $(cat "$OUT")"
+RC=$?
+[ "$RC" -eq 10 ] || fail "a false submodule port assert must refute (got rc=$RC): $(cat "$OUT")"
+grep -q '\[leaf.badport@.*REFUTED-cex at cycle' "$OUT" || fail "the port refute must carry @instance: $(cat "$OUT")"
 
 # ---------------------------------------------------------------------------
 # 8. --workdir on a REFUTED run writes simfail_<test>.prp: a self-contained
@@ -585,7 +601,8 @@ mkdir -p "$WD"
 OUT="$W/simfail.out"
 "$LHD" formal verify "$W/cnt.prp" --top cnt --set formal.bound=10 --workdir "$WD" \
   --set formal.simfail_run=false >"$OUT" 2>&1
-[ $? -ne 0 ] || fail "the refuted run must still exit non-zero"
+RC=$?
+[ "$RC" -eq 10 ] || fail "the refuted run must still exit with the counterexample class (rc=$RC)"
 grep -q 'wrote counterexample simulation test' "$OUT" || fail "--workdir must write simfail_cnt.prp: $(cat "$OUT")"
 [ -s "$WD/simfail_cnt.prp" ] || fail "simfail_cnt.prp missing in --workdir"
 grep -q 'AUTO-GENERATED by `lhd formal verify`' "$WD/simfail_cnt.prp" || fail "testbench must carry provenance"
@@ -606,10 +623,10 @@ import json, sys
 wd = sys.argv[1]
 d = json.load(open(wd + "/formal_report.json"))
 assert d["schema_version"] == 1 and d["kind"] == "formal_report"
-assert d["run"]["verdict"] == "refuted", d["run"]["verdict"]
+assert d["run"]["verdict"] == "refuted-cex", d["run"]["verdict"]
 obs = d["obligations"]
 assert len(obs) == 2, obs  # parity assert + count!=5 assert
-ref = [o for o in obs if o["verdict"] == "refuted"]
+ref = [o for o in obs if o["verdict"] == "refuted-cex"]
 assert len(ref) == 1 and ref[0]["refuted_at"] == 7 and ref[0]["witness"], ref
 assert ref[0]["id"].startswith("assert@") and ref[0]["file"].endswith("cnt.prp") and ref[0]["line"] > 0, ref
 assert all(o["solve_ms"] >= 0 for o in obs)
@@ -630,24 +647,32 @@ mkdir -p "$WDP"
 python3 - "$WDP" <<'PYEOF' || fail "PROVEN formal_report.json contract check failed"
 import json, sys
 d = json.load(open(sys.argv[1] + "/formal_report.json"))
-assert d["run"]["verdict"] == "proven"
+assert d["run"]["verdict"] in ("proven-full", "proven-bounded"), d["run"]["verdict"]
 assert d["run"]["assume_counts"]["checked_proven"] == 1
 a = [o for o in d["obligations"] if o["kind"] == "assume"]
-assert len(a) == 1 and a[0]["aclass"] == "internal" and a[0]["verdict"] == "proven", a
+assert len(a) == 1 and a[0]["aclass"] == "internal" and a[0]["verdict"] in ("proven-full", "proven-bounded"), a
 PYEOF
 
-# UNKNOWN run report: the structured timeout_core names the straggler by id and
-# in_timeout_core marks it; the easy sibling stays out of the core.
-python3 - "$WDU" <<'PYEOF' || fail "UNKNOWN formal_report.json contract check failed"
+# TIMEOUT-time run report: the solver gave up on the straggler ALONE (the easy
+# sibling is at most budget-frozen, "proven to cycle k"); the structured
+# timeout_core names the straggler by id and in_timeout_core marks it; the easy
+# sibling stays out of the core.
+python3 - "$WDU" <<'PYEOF' || fail "TIMEOUT-time formal_report.json contract check failed"
 import json, sys
 d = json.load(open(sys.argv[1] + "/formal_report.json"))
-assert d["run"]["verdict"] == "unknown"
-unk = [o for o in d["obligations"] if o["verdict"] == "unknown"]
-assert len(unk) == 1 and unk[0]["unknown_why"] and unk[0]["msg"] == "'distrib'", unk
+assert d["run"]["verdict"] == "timeout-time", d["run"]["verdict"]
+by = {o["msg"]: o for o in d["obligations"]}
+assert set(by) == {"'easy'", "'distrib'"}, list(by)
+gave_up = [o for o in d["obligations"]
+           if o["verdict"] == "timeout-time" and (o["undecided_why"] or "").startswith("solver gave up")]
+assert len(gave_up) == 1 and gave_up[0]["msg"] == "'distrib'", gave_up
+easy = by["'easy'"]
+assert easy["verdict"] in ("proven-full", "proven-bounded") or (
+    easy["verdict"] == "timeout-time" and easy["proven_to"] >= 1
+    and (easy["undecided_why"] or "").startswith("proven to cycle")), easy
 if d["timeout_core"]:  # best-effort cvc5 API: when present it must be consistent
-    assert unk[0]["in_timeout_core"] and unk[0]["id"] in d["timeout_core"], (unk, d["timeout_core"])
-    easy = [o for o in d["obligations"] if o["verdict"] == "proven"]
-    assert all(not o["in_timeout_core"] for o in easy)
+    assert gave_up[0]["in_timeout_core"] and gave_up[0]["id"] in d["timeout_core"], (gave_up, d["timeout_core"])
+    assert not easy["in_timeout_core"], easy
 PYEOF
 
 # A refuted FORMAL-BLOCK obligation is embedded into the testbench as a
@@ -694,7 +719,8 @@ mkdir -p "$WD3"
 OUT="$W/combfail.out"
 "$LHD" formal verify "$W/combdut.prp" "$W/combdut.verify.prp" --top combdut \
    --workdir "$WD3" --set formal.simfail_run=false >"$OUT" 2>&1
-[ $? -ne 0 ] || fail "the false comb assert must refute: $(cat "$OUT")"
+RC=$?
+[ "$RC" -eq 10 ] || fail "the false comb assert must refute (rc=$RC): $(cat "$OUT")"
 grep -q 'no Pyrope modules were re-emitted' "$OUT" && fail "a comb top must not be reported as un-re-emitted: $(cat "$OUT")"
 [ -s "$WD3/simfail_combdut_bad.prp" ] || fail "a combinational design must get simfail_combdut_bad.prp: $(cat "$OUT")"
 grep -q 'import("combdut.combdut")' "$WD3/simfail_combdut_bad.prp" || fail "the comb testbench must import the pub top: $(cat "$WD3/simfail_combdut_bad.prp")"
@@ -719,7 +745,8 @@ mkdir -p "$WD4"
 OUT="$W/assumefail.out"
 "$LHD" formal verify "$W/combdut.prp" "$W/combassume.verify.prp" --top combdut \
    --workdir "$WD4" --set formal.simfail_run=false >"$OUT" 2>&1
-[ $? -ne 0 ] || fail "an unprovable input assume must refute: $(cat "$OUT")"
+RC=$?
+[ "$RC" -eq 10 ] || fail "an unprovable input assume must refute (rc=$RC): $(cat "$OUT")"
 [ -s "$WD4/simfail_combdut_env.prp" ] || fail "a refuted assume must get simfail_combdut_env.prp: $(cat "$OUT")"
 grep -q 'assert(_dut.a == 7)' "$WD4/simfail_combdut_env.prp" \
   || fail "a refuted CHECKED assume must be embedded as a test assert: $(cat "$WD4/simfail_combdut_env.prp")"
@@ -740,7 +767,8 @@ mkdir -p "$WD5"
 OUT="$W/nocheckfail.out"
 "$LHD" formal verify "$W/combdut.prp" "$W/combnocheck.verify.prp" --top combdut \
    --workdir "$WD5" --set formal.simfail_run=false >"$OUT" 2>&1
-[ $? -ne 0 ] || fail "the assert under a nocheck constraint must refute: $(cat "$OUT")"
+RC=$?
+[ "$RC" -eq 10 ] || fail "the assert under a nocheck constraint must refute (rc=$RC): $(cat "$OUT")"
 grep -q 'assert(_dut.r != 5, "r never 5")' "$WD5/simfail_combdut_nock.prp" || fail "the failing assert must be embedded: $(cat "$WD5/simfail_combdut_nock.prp")"
 grep -q 'assume_nocheck' "$WD5/simfail_combdut_nock.prp" && fail "an assume_nocheck must never reach the testbench: $(cat "$WD5/simfail_combdut_nock.prp")"
 grep -q 'assume(' "$WD5/simfail_combdut_nock.prp" && fail "an assume_nocheck must not be rewritten into a plain assume: $(cat "$WD5/simfail_combdut_nock.prp")"
@@ -765,7 +793,8 @@ mkdir -p "$WD6"
 OUT="$W/collfail.out"
 "$LHD" formal verify "$W/combdut.prp" "$W/combcoll.verify.prp" --top combdut \
    --workdir "$WD6" --set formal.simfail_run=false >"$OUT" 2>&1
-[ $? -ne 0 ] || fail "the false assert must still refute when it shares a line: $(cat "$OUT")"
+RC=$?
+[ "$RC" -eq 10 ] || fail "the false assert must still refute when it shares a line (rc=$RC): $(cat "$OUT")"
 grep -q 'simfail-embed-ambiguous' "$OUT" || fail "a same-line statement pair must be reported ambiguous: $(cat "$OUT")"
 [ -s "$WD6/simfail_combdut_two.prp" ] || fail "an ambiguous embed must still write the input-trace testbench: $(cat "$OUT")"
 grep -q '_drv_a = \[0, 0, 5\]' "$WD6/simfail_combdut_two.prp" || fail "the trace must still be driven: $(cat "$WD6/simfail_combdut_two.prp")"
@@ -789,7 +818,8 @@ mkdir -p "$WD7"
 OUT="$W/multifail.out"
 "$LHD" formal verify "$W/combdut.prp" "$W/combmulti.verify.prp" --top combdut \
    --workdir "$WD7" --set formal.simfail_run=false >"$OUT" 2>&1
-[ $? -ne 0 ] || fail "the two false formal tests must refute: $(cat "$OUT")"
+RC=$?
+[ "$RC" -eq 10 ] || fail "the two false formal tests must refute (rc=$RC): $(cat "$OUT")"
 [ -s "$WD7/simfail_combdut_five.prp" ] || fail "missing simfail_combdut_five.prp: $(cat "$OUT")"
 [ -s "$WD7/simfail_combdut_seven.prp" ] || fail "missing simfail_combdut_seven.prp: $(cat "$OUT")"
 
@@ -798,7 +828,7 @@ OUT="$W/multifail.out"
 # ---------------------------------------------------------------------------
 "$LHD" formal lec --set formal.effort=proof --impl "$W/cnt.prp" --ref "$W/cnt.prp" --top cnt >"$W/flec.out" 2>&1
 [ $? -eq 0 ] || fail "formal lec self-check must pass: $(cat "$W/flec.out")"
-grep -q "lec: 'cnt.cnt' PROVEN equivalent" "$W/flec.out" || fail "formal lec must run the lec command: $(cat "$W/flec.out")"
+grep -qE "^lec: 'cnt.cnt' PROVEN-(full|bounded)" "$W/flec.out" || fail "formal lec must run the lec command: $(cat "$W/flec.out")"
 
 # ---------------------------------------------------------------------------
 # 7. V3 verdict ladder: the parity invariant is INDUCTIVE (relative to the
@@ -821,8 +851,8 @@ mod cnt2(enable:Bool) -> (value:U8@[0]) {
 EOF
 verify ladder ladder --top cnt2
 [ "$RC" -eq 0 ] || fail "ladder design must pass (got rc=$RC): $(cat "$OUT")"
-grep -q "'parity'\": PROVEN (inductive" "$OUT" || fail "the inductive invariant must upgrade to unbounded: $(cat "$OUT")"
-grep -q "'bounded only'\": PROVEN to cycle 7 (bounded)" "$OUT" || fail "a non-inductive fact must STAY bounded: $(cat "$OUT")"
+grep -q "'parity'\": PROVEN-full (inductive" "$OUT" || fail "the inductive invariant must upgrade to unbounded: $(cat "$OUT")"
+grep -q "'bounded only'\": PROVEN-bounded([0-9]*) (no violation through cycle 7)" "$OUT" || fail "a non-inductive fact must STAY bounded: $(cat "$OUT")"
 
 # ---------------------------------------------------------------------------
 # 9. R1 — a property inside an `if`/`elif`/`else`/`match` arm is GUARDED by
@@ -871,7 +901,7 @@ verify guarded guarded --top guarded --set formal.bound=4
 # rides the same path stack (it lowers to a unique_if whose arms are
 # branch-lowered before the Hotmux merge), and `nested` needs BOTH guards.
 for m in nested then elif else match-eq match-lt match-else; do
-  grep -q "'$m'\": PROVEN" "$OUT" || fail "guarded property '$m' must prove (its arm's path condition was dropped): $(cat "$OUT")"
+  grep -q "'$m'\": PROVEN-" "$OUT" || fail "guarded property '$m' must prove (its arm's path condition was dropped): $(cat "$OUT")"
 done
 
 # 9b. The guard must not swallow a real violation, and the counterexample must
@@ -886,7 +916,8 @@ mod guarded_bad(a:U8) -> (o:U8@[0]) {
 }
 EOF
 verify guarded_bad guarded_bad --top guarded_bad --set formal.bound=4
-[ "$RC" -ne 0 ] || fail "a property FALSE under its own guard must still refute: $(cat "$OUT")"
+[ "$RC" -eq 10 ] || fail "a property FALSE under its own guard must still refute (rc=$RC): $(cat "$OUT")"
+grep -q "'false under its own guard'\": REFUTED-cex" "$OUT" || fail "the refutation must be a counterexample: $(cat "$OUT")"
 grep -q "false under its own guard" "$OUT" || fail "the refutation must name the failing assertion: $(cat "$OUT")"
 CEX=$(grep -oE 'counterexample: a=[0-9]+' "$OUT" | head -1 | grep -oE '[0-9]+$')
 [ -n "$CEX" ] || fail "the refutation must carry a counterexample: $(cat "$OUT")"
@@ -905,7 +936,8 @@ mod guarded_assume(a:U8) -> (o:U8@[0]) {
 }
 EOF
 verify guarded_assume guarded_assume --top guarded_assume --set formal.bound=4
-[ "$RC" -ne 0 ] || fail "a guarded assume must not over-constrain into a FALSE PROVEN: $(cat "$OUT")"
+[ "$RC" -eq 10 ] || fail "a guarded assume must not over-constrain into a FALSE PROVEN (rc=$RC): $(cat "$OUT")"
+grep -q "'must NOT be provable'\": REFUTED-cex" "$OUT" || fail "the faked assert must be refuted with a counterexample: $(cat "$OUT")"
 grep -q "must NOT be provable" "$OUT" || fail "the refutation must name the assert the over-constrained assume was faking: $(cat "$OUT")"
 
 # ---------------------------------------------------------------------------
@@ -913,7 +945,8 @@ grep -q "must NOT be provable" "$OUT" || fail "the refutation must name the asse
 #     `guard implies cond`, which is right but introduced a new silent failure:
 #     a guard that can NEVER hold proves trivially while checking nothing. Each
 #     obligation now carries `guarded` + `vacuous_guard` in formal_report.json,
-#     prints a VACUOUS continuation row and fails the run.
+#     its row is REFUTED-vacuous ("dead guard: ...", owner ruling: every vacuous
+#     case is REFUTED-vacuous) and it fails the run with exit 7.
 #
 #     10d is the load-bearing case: the measure must be a FREE frame, not the
 #     unrolled window. "Was the guard ever true in the cycles we checked?" is
@@ -935,15 +968,18 @@ EOF
 WDV="$W/wd_vacuity"
 mkdir -p "$WDV"
 verify vacuity vacuity --top vacuity --set formal.bound=4 --workdir "$WDV"
-[ "$RC" -ne 0 ] || fail "a vacuous obligation FAILS by default (rc=$RC): $(cat "$OUT")"
-grep -q "VACUOUS obligation" "$OUT" || fail "the default failure must name the vacuous obligations: $(cat "$OUT")"
+[ "$RC" -eq 7 ] || fail "a vacuous obligation FAILS by default as REFUTED-vacuous (rc=$RC): $(cat "$OUT")"
+grep -q "^formal verify: 'vacuity.vacuity' REFUTED-vacuous" "$OUT" || fail "the run verdict must be REFUTED-vacuous: $(cat "$OUT")"
+grep -q "\"message\":\"REFUTED-vacuous: 1 obligation(s) checked nothing (assert at [^)]*'dead guard'" "$OUT" \
+  || fail "the default failure must name the vacuous obligations: $(cat "$OUT")"
 grep -q "obligation(s) VACUOUS (guard can never be true)" "$OUT" || fail "the run detail must count vacuous obligations: $(cat "$OUT")"
-grep -q "formal-vacuous-guard" "$OUT" || fail "a vacuous obligation must emit the formal-vacuous-guard warning: $(cat "$OUT")"
-grep -q "VACUOUS: its \`if\`/\`match\` guard can never be true" "$OUT" || fail "the obligation's own row must carry the vacuity note: $(cat "$OUT")"
-# The note is a CONTINUATION of the verdict row, never a replacement: the
-# obligation is honestly PROVEN (a dead antecedent leaves it true), so vacuity
-# must not be implemented by downgrading the verdict.
-grep -q "'dead guard'\": PROVEN" "$OUT" || fail "vacuity is a diagnostic, not a verdict downgrade: $(cat "$OUT")"
+# The dead-guard obligation checked nothing: its row is REFUTED-vacuous with the
+# dead-guard note (owner ruling), never a PROVEN — and the LIVE sibling keeps its
+# honest proof (vacuity is per obligation, not a run-wide downgrade).
+grep -q "'dead guard'\": REFUTED-vacuous (dead guard: its \`if\`/\`match\` guard can never be true" "$OUT" \
+  || fail "the obligation's own row must be REFUTED-vacuous with the vacuity note: $(cat "$OUT")"
+grep -q "'dead guard'\": PROVEN" "$OUT" && fail "a dead-guard obligation checked nothing and must not read PROVEN: $(cat "$OUT")"
+grep -q "'live guard'\": PROVEN-" "$OUT" || fail "the live-guard sibling must keep its proof: $(cat "$OUT")"
 python3 - "$WDV" <<'PYEOF' || fail "vacuity formal_report.json contract check failed"
 import json, sys
 d = json.load(open(sys.argv[1] + "/formal_report.json"))
@@ -954,7 +990,8 @@ dead, live = by["dead guard"], by["live guard"]
 # would "pass" a sloppier assertion, so pin the live one explicitly.
 assert dead["guarded"] and dead["vacuous_guard"], dead
 assert live["guarded"] and not live["vacuous_guard"], live
-assert dead["verdict"] == "proven" and live["verdict"] == "proven", (dead, live)
+assert dead["verdict"] == "refuted-vacuous" and live["verdict"] in ("proven-full", "proven-bounded"), (dead, live)
+assert d["run"]["verdict"] == "refuted-vacuous", d["run"]
 PYEOF
 
 # 10d. BOUND- AND ENGINE-INDEPENDENCE (the reason the measure is a free frame).
@@ -980,14 +1017,14 @@ EOF
 for b in 3 10; do
   verify vacuity_deep "vacuity_deep_$b" --top vacuity_deep --set formal.bound=$b
   [ "$RC" -eq 0 ] || fail "vacuity_deep must pass at bound=$b (rc=$RC): $(cat "$OUT")"
-  grep -q "VACUOUS" "$OUT" && fail "a LIVE guard the bound cannot reach must NOT be called vacuous (bound=$b) — the measure regressed to the unrolled window: $(cat "$OUT")"
+  grep -qE "VACUOUS|REFUTED-vacuous \(dead guard" "$OUT" && fail "a LIVE guard the bound cannot reach must NOT be called vacuous (bound=$b) — the measure regressed to the unrolled window: $(cat "$OUT")"
 done
 # Same design, --workdir path (the non-forking / cached path): still not vacuous.
 WDD="$W/wd_vac_deep"
 mkdir -p "$WDD"
 verify vacuity_deep vacuity_deep_wd --top vacuity_deep  --workdir "$WDD"
 [ "$RC" -eq 0 ] || fail "vacuity_deep must pass on the --workdir path: $(cat "$OUT")"
-grep -q "VACUOUS" "$OUT" && fail "a LIVE guard must not be vacuous on the --workdir path either: $(cat "$OUT")"
+grep -qE "VACUOUS|REFUTED-vacuous \(dead guard" "$OUT" && fail "a LIVE guard must not be vacuous on the --workdir path either: $(cat "$OUT")"
 python3 - "$WDD" <<'PYEOF' || fail "vacuity_deep report must record guarded-but-not-vacuous"
 import json, sys
 o = [p for p in json.load(open(sys.argv[1] + "/formal_report.json"))["obligations"] if p["kind"] == "assert"]
@@ -1000,8 +1037,8 @@ PYEOF
 #      A lost flag now shows up twice over: the row note disappears AND the run
 #      goes green, since the default severity rides on the same bit.
 verify vacuity vacuity_fork --top vacuity --set formal.bound=4
-grep -q "VACUOUS: its" "$OUT" || fail "vacuous_guard was LOST across the verify fork codec (serialize_verify/deserialize_verify): $(cat "$OUT")"
-[ "$RC" -ne 0 ] || fail "the fork-path vacuity must also FAIL by default — a green exit means the flag did not survive the codec: $(cat "$OUT")"
+grep -q "'dead guard'\": REFUTED-vacuous (dead guard: its" "$OUT" || fail "vacuous_guard was LOST across the verify fork codec (serialize_verify/deserialize_verify): $(cat "$OUT")"
+[ "$RC" -eq 7 ] || fail "the fork-path vacuity must also FAIL by default (rc 7) — a green exit means the flag did not survive the codec: $(cat "$OUT")"
 
 # ---------------------------------------------------------------------------
 # 11. Code-review fixes on the R1 / Phase-2 work (2026-07-26). Each case below
@@ -1038,7 +1075,8 @@ mod widecond_bad(flags:U8, d:Bool) -> (o:U8@[0]) {
 }
 EOF
 verify widecond_bad widecond_bad --top widecond_bad --set formal.bound=2
-[ "$RC" -ne 0 ] || fail "a NESTED multi-bit guard clamped to its LSB hides the flags==0 violation (false PROVEN): $(cat "$OUT")"
+[ "$RC" -eq 10 ] || fail "a NESTED multi-bit guard clamped to its LSB hides the flags==0 violation (false PROVEN, rc=$RC): $(cat "$OUT")"
+grep -q "'false on even flags'\": REFUTED-cex" "$OUT" || fail "the nested-guard violation must be a counterexample: $(cat "$OUT")"
 
 # 11b. A contradictory assume set makes every checkSatAssuming UNSAT, which used
 #      to stamp `vacuous_guard` on a perfectly live guard and — under strict —
@@ -1067,12 +1105,14 @@ EOF
 OUT="$W/contra_guard.out"
 "$LHD" formal verify "$W/contra_guard.prp" "$W/contra_guard.verify.prp" --top contra_guard --set formal.bound=2 >"$OUT" 2>&1
 RC=$?
+[ "$RC" -eq 7 ] || fail "a contradictory assume set is REFUTED-vacuous (rc 7, got $RC): $(cat "$OUT")"
 grep -q "contradictory assume set" "$OUT" || fail "the contradictory assume set must be the reported problem: $(cat "$OUT")"
-grep -q "VACUOUS: its" "$OUT" && fail "a LIVE guard must not be called dead just because the assume set is contradictory: $(cat "$OUT")"
+grep -qE "VACUOUS \(guard can never be true\)|REFUTED-vacuous \(dead guard" "$OUT" \
+  && fail "a LIVE guard must not be called dead just because the assume set is contradictory: $(cat "$OUT")"
 
 # 11c. The strict vacuity throw must not pre-empt a more severe exit: a design
 #      with BOTH a dead branch and a reachable violation must report the
-#      violation (equiv_fail), not an `unsupported` dead-branch complaint.
+#      violation (REFUTED-cex, exit 10), not a REFUTED-vacuous dead-branch complaint.
 cat >"$W/vac_and_refute.prp" <<'EOF'
 mod vac_and_refute(a:U8) -> (o:U8@[0]) {
   o = a
@@ -1083,7 +1123,9 @@ mod vac_and_refute(a:U8) -> (o:U8@[0]) {
 }
 EOF
 verify vac_and_refute vac_and_refute --top vac_and_refute --set formal.bound=2
-[ "$RC" -ne 0 ] || fail "a reachable violation must fail the run"
+[ "$RC" -eq 10 ] || fail "a reachable violation must fail the run with the counterexample class (rc=$RC)"
+grep -q "^formal verify: 'vac_and_refute.vac_and_refute' REFUTED-cex" "$OUT" \
+  || fail "the run verdict must be the REFUTED-cex, not the vacuous dead branch: $(cat "$OUT")"
 grep -q "reachable property violation" "$OUT" \
   || fail "the REFUTATION must be the reported failure, not the vacuous dead branch: $(cat "$OUT")"
 
@@ -1144,7 +1186,7 @@ grep -q "contradictory assume set in the design" "$OUT" \
 #     generator wraps the DUT in a flat-leaf `__simfail_dut_wrap`. It used to
 #     emit `_dut.io = _drv_io[clock]` — a scalar into a struct port — which
 #     failed the replay compile and silently produced NO VCD while the verify
-#     verdict still read REFUTED. The embedded check has to follow the design
+#     verdict still read REFUTED-cex. The embedded check has to follow the design
 #     one level down, EXCEPT for a port the wrapper re-exposes.
 #     The design also uses `#+[..]` (popcount). The writer supports it now,
 #     but replay must still import the original design directly: the absence
@@ -1183,4 +1225,4 @@ grep -q 'assert(_dut.o != 3' "$WD3/simfail_stp_bound.prp" \
 grep -q 'the replay reproduced the violation' "$OUT" \
   || fail "the replay must re-fire the embedded check: $(cat "$OUT")"
 
-echo "PASS: 2f-verify V1-V3 + assume discipline (bounded/inductive ladder; refuted-at-cycle + trace; every assume checked-as-assert with the assume_nocheck escape; formal blocks + filter; timeout isolation; inconclusive/vacuous FAIL unconditionally; aliases; no vacuous pass; R1 if/elif/else/match property guards + antecedent vacuity + the 2026-07-26 review fixes)"
+echo "PASS: 2f-verify V1-V3 + assume discipline (bounded/inductive ladder; refuted-at-cycle + trace; every assume checked-as-assert with the assume_nocheck escape; formal blocks + filter; timeout isolation (TIMEOUT-time exits 0 + warns); vacuous FAILS unconditionally; aliases; no vacuous pass; R1 if/elif/else/match property guards + antecedent vacuity + the 2026-07-26 review fixes)"

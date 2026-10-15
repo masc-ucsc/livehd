@@ -26,7 +26,7 @@ fail() {
   --emit verilog:"$W/bw_mix.gen.v" --workdir "$W/w_mix" -q 2>/dev/null \
   || fail "compile of bw_mix.v failed"
 [ -s "$W/bw_mix.gen.v" ] || fail "compile produced empty netlist"
-"$LHD" lec --impl verilog:"$W/bw_mix.gen.v" --ref verilog:"$MIX" --top bw_mix \
+"$LHD" lec --set formal.effort=proof --impl verilog:"$W/bw_mix.gen.v" --ref verilog:"$MIX" --top bw_mix \
   --workdir "$W/w_chk" -q 2>/dev/null \
   || fail "bw_mix optimized netlist is not equivalent to the source"
 
@@ -65,7 +65,7 @@ shifts = {r['nid'] for r in rows if r.get('t') == 'node' and r.get('kind') == 's
 pins = [r for r in rows if r.get('t') == 'pin' and r['nid'] in shifts]
 assert len(pins) == 1 and pins[0]['bits'] == 64 and pins[0]['signed'] is False, pins
 PY
-"$LHD" lec --impl "verilog:$W/mux.gen.v" \
+"$LHD" lec --set formal.effort=proof --impl "verilog:$W/mux.gen.v" \
   --ref "verilog:$W/mux_ref.v" --top mux --workdir "$W/w_mux_lec" -q \
   || fail "narrow-output shift differs from the 16-to-1 word mux"
 

@@ -1,0 +1,22 @@
+/*
+:name: instance_partial_rebind
+:type: error
+:tolg: 1
+:error: bound to an instance result on only some paths
+*/
+
+// An instance result bound on only SOME paths of an `if` has no value on the
+// others: reading a field of it after the `if` is refused (lnast.tolg), never
+// silently answered by the one arm's instance.
+mod pair(x:U8) -> (a:U8@[0], b:U8@[0]) {
+  a = x ^ 1
+  b = x
+}
+
+pub mod instance_partial_rebind(x:U8, s:Bool) -> (r:U8@[0]) {
+  mut f = nil
+  if s {
+    f = pair(x=x)
+  }
+  r = f.a
+}

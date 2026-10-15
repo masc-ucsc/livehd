@@ -98,14 +98,14 @@ EOF
 "$LHD" compile "$W/ok.prp" --emit verilog:"$W/ok.v" --workdir "$W/w_ok" -q >"$W/ok.log" 2>&1 \
   || { tail -3 "$W/ok.log"; fail "the \`if !g\` active-low spelling does not compile"; }
 
-"$LHD" lec --impl verilog:"$W/ok.v" --ref verilog:"$W/gold_low.v" \
+"$LHD" lec --set formal.effort=proof --impl verilog:"$W/ok.v" --ref verilog:"$W/gold_low.v" \
   --top enlow --workdir "$W/w_lo" -q >"$W/lo.log" 2>&1 \
   || { tail -3 "$W/lo.log"; fail "\`if !g\` is NOT equivalent to its active-low golden"; }
 echo "ok: the \`if !g\` spelling PROVES against an active-low golden"
 
 # Vacuity guard: the same oracle must REFUTE the opposite polarity, or the
 # PROVEN above says nothing.
-if "$LHD" lec --impl verilog:"$W/ok.v" --ref verilog:"$W/gold_high.v" \
+if "$LHD" lec --set formal.effort=proof --impl verilog:"$W/ok.v" --ref verilog:"$W/gold_high.v" \
      --top enlow --workdir "$W/w_hi" -q >"$W/hi.log" 2>&1; then
   fail "the oracle PROVED active-low == active-high — it is blind here, so check 2 is vacuous"
 fi

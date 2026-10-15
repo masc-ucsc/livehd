@@ -58,7 +58,7 @@ done
 # 3. Supply the blackbox definitions as .prp and LEC against the golden.
 cp "$DIR"/array_0_ext.prp "$DIR"/bb2.prp "$WD"/prp/
 cat "$DIR"/bbtop.v "$DIR"/bbdefs.v >"$WD"/golden.v
-${LHD} lec --impl pyrope:"$WD"/prp --ref verilog:"$WD"/golden.v --top bbtop \
+${LHD} lec --set formal.effort=proof --impl pyrope:"$WD"/prp --ref verilog:"$WD"/golden.v --top bbtop \
   --workdir "$WD"/wc -q >"$WD"/lec.log 2>&1 || {
   echo "FAIL(blackbox): LEC vs golden failed"
   tail -10 "$WD"/lec.log

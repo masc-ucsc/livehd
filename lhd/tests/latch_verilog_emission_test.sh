@@ -68,7 +68,7 @@ EOF
 # The independent oracle. Pre-fix this REFUTED: yosys accepts the undeclared
 # name as an implicit wire reading X, so the miter genuinely sees two different
 # circuits. That makes lgcheck able to catch bug 1 even without iverilog.
-"$LHD" lec --impl verilog:"$W/raw_out.v" --ref verilog:"$W/raw.v" \
+"$LHD" lec --set formal.effort=proof --impl verilog:"$W/raw_out.v" --ref verilog:"$W/raw.v" \
   --top raw --workdir "$W/w_rawchk" -q >"$W/rawchk.log" 2>&1 \
   || { tail -3 "$W/rawchk.log"; fail "yosys-importer latch round-trip is NOT equivalent to its source"; }
 echo "ok: yosys-importer latch round-trip LEC-proves against its source"

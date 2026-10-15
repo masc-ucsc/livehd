@@ -2149,12 +2149,31 @@ sh_test(
     data = _FLOW_DATA,
 )
 
-# Critical-path ware trials, rollback, explicit selectors and mapped LEC.
-sh_test(
+# Critical-path ware trials, rollback, explicit selectors and mapped LEC: one
+# target per independent section of lhd_ware_test.sh (see its usage).
+_WARE_SECTIONS = [
+    "area",
+    "timed",
+    "small",
+    "hier",
+    "seq",
+    "mulshr",
+]
+
+[
+    sh_test(
+        name = "lhd_ware_" + section + "_test",
+        size = "medium",
+        srcs = ["lhd_ware_test.sh"],
+        args = [section],
+        data = _FLOW_DATA + ["//inou/prp:abc_tests"],
+    )
+    for section in _WARE_SECTIONS
+]
+
+test_suite(
     name = "lhd_ware_test",
-    size = "large",
-    srcs = ["lhd_ware_test.sh"],
-    data = _FLOW_DATA + ["//inou/prp:abc_tests"],
+    tests = ["lhd_ware_" + section + "_test" for section in _WARE_SECTIONS],
 )
 
 sh_test(
@@ -2399,20 +2418,90 @@ sh_test(
     env_inherit = ["PATH"],
 )
 
-sh_test(
+# One target per verilog_sim/<case>.v and simulator backend: each `lhd sim`
+# pays a full host C++ build, so the 13-case x 2-backend sweep in one target
+# could not fit the per-test budget. A new fixture is one new <case>.v +
+# <case>_tb.prp pair, picked up by the glob.
+_VERILOG_SIM_CASES = [
+    f[len("verilog_sim/"):-len(".v")]
+    for f in glob(["verilog_sim/*.v"])
+]
+
+[
+    sh_test(
+        name = "verilog_sim_parity_" + case + "_" + backend,
+        size = "medium",
+        srcs = ["verilog_sim_parity_test.sh"],
+        args = [
+            case,
+            backend,
+        ],
+        data = [
+            "verilog_sim/%s.v" % case,
+            "verilog_sim/%s_tb.prp" % case,
+            "//lhd",
+        ],
+        env = {"LHD": "lhd/lhd"},
+    )
+    for case in _VERILOG_SIM_CASES
+    for backend in [
+        "slop",
+        "llvm",
+    ]
+]
+
+test_suite(
     name = "verilog_sim_parity_test",
-    size = "large",
-    srcs = ["verilog_sim_parity_test.sh"],
-    data = glob(["verilog_sim/*.v", "verilog_sim/*.prp"]) + ["//lhd"],
-    env = {"LHD": "lhd/lhd"},
+    tests = [
+        "verilog_sim_parity_" + case + "_" + backend
+        for case in _VERILOG_SIM_CASES
+        for backend in [
+            "slop",
+            "llvm",
+        ]
+    ],
 )
 
-sh_test(
+# One target per simulator backend and fixture (every `lhd sim` pays a full
+# host C++ build; the whole 2 x 3 matrix in one target overran the budget).
+_SIM_WARN_CASES = [
+    "div",
+    "mem",
+    "vmem",
+]
+
+[
+    sh_test(
+        name = "sim_warn_undefined_" + backend + "_" + case,
+        size = "medium",
+        srcs = ["sim_warn_undefined_test.sh"],
+        args = [
+            backend,
+            case,
+        ],
+        data = glob([
+            "sim_warn_undefined/*.v",
+            "sim_warn_undefined/*.prp",
+        ]) + ["//lhd"],
+        env = {"LHD": "lhd/lhd"},
+    )
+    for backend in [
+        "slop",
+        "llvm",
+    ]
+    for case in _SIM_WARN_CASES
+]
+
+test_suite(
     name = "sim_warn_undefined_test",
-    size = "large",
-    srcs = ["sim_warn_undefined_test.sh"],
-    data = glob(["sim_warn_undefined/*.v", "sim_warn_undefined/*.prp"]) + ["//lhd"],
-    env = {"LHD": "lhd/lhd"},
+    tests = [
+        "sim_warn_undefined_" + backend + "_" + case
+        for backend in [
+            "slop",
+            "llvm",
+        ]
+        for case in _SIM_WARN_CASES
+    ],
 )
 
 sh_test(

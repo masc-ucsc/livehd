@@ -1592,6 +1592,24 @@ protected:
   // such tags are skipped. Scanned lazily once per unit (inline_tags_unit_).
   absl::flat_hash_set<uint32_t> inline_tags_taken_;
   const Lnast*                  inline_tags_unit_{nullptr};
+  // How every variable of one SOURCE tree is used, for the per-call
+  // inline=false splice decision (comb_call_needs_splice). Keyed by the SSA
+  // base name (a `___ssa_N` version is the same variable). Built once per
+  // source tree and cached for the whole walk of this unit (O(tree) total).
+  struct Result_use_info {
+    uint32_t                 writes{0};         // statements that define the name (a dst child)
+    bool                     whole_use{false};  // read as a whole value, not through a const field path
+    bool                     bound{false};      // typed declaration, `reg`/`wire`/`stage` storage, or an io port
+    std::vector<std::string> fields;            // const field paths read with tuple_get (`ex.aa`)
+    std::vector<std::string> aliases;           // destinations of a plain `store(alias, name)` copy
+  };
+  using Result_use_index = absl::flat_hash_map<std::string, Result_use_info>;
+  const Result_use_index& result_use_index(const Lnast& ln);
+  absl::flat_hash_map<const Lnast*, std::unique_ptr<Result_use_index>> result_use_cache_;
+  // compile.upass.inline=false: whether THIS call of a Sub-convertible comb
+  // must still be spliced because the instance boundary cannot carry how its
+  // tuple result is used (see sub_instance_eligible in try_inline_func_call).
+  bool comb_call_needs_splice(Lnast_nid call_nid, const Lnast_tree_io& callee_io);
   // Comptime loop unroll state. loop_break_hit_ is set by a `func_break`
   // reached on a comptime-taken path during a loop body re-walk; the unroller
   // checks it after each iteration and stops. loop_depth_ counts active
