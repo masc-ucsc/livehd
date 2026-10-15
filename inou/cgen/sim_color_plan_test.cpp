@@ -372,6 +372,69 @@ std::shared_ptr<hhds::Graph> make_disjoint_or_pack_feedback(std::string_view tag
   return graph;
 }
 
+// Same disjoint-lane packed feedback, with a SIGN EXTEND on the path back into
+// the word. The read is bit 8 and the feedback occupies bits [0,4), so the two
+// lanes are disjoint and the word-level cycle is false -- but dissolving it
+// means walking a slice THROUGH the Sext, which is exactly the shape the CVA6
+// MMU builds (legalize reports its cycle as sext -> get_mask -> sra -> sext).
+// `b` = 4 keeps the 1-bit operand's only bit well below the sign position, so
+// the extension is value-preserving and the slice walk is exact.
+std::shared_ptr<hhds::Graph> make_sext_packed_feedback(std::string_view tag) {
+  auto& lib = livehd::Hhds_graph_library::instance(std::string("lgdb_color_plan_") + std::string(tag));
+  auto  io  = lib.create_io(std::string(tag) + "_sext_pack_feedback");
+  io->add_input("low", 0);
+  io->add_output("out", 1);
+  io->set_bits("low", 1);
+  io->set_bits("out", 1);
+  io->set_unsign("low", true);
+  io->set_unsign("out", true);
+  auto graph = io->create_graph();
+  gu::set_bits(graph->get_input_pin("low"), 1);
+  gu::set_unsign(graph->get_input_pin("low"));
+
+  auto packed_or = gu::create_typed_node(*graph, Ntype_op::Or);
+  auto packed    = packed_or.create_driver_pin(0);
+  gu::set_bits(packed, 16);
+  gu::set_unsign(packed);
+
+  auto low_read = gu::create_typed_node(*graph, Ntype_op::Get_mask);
+  packed.connect_sink(gu::setup_sink_by_name(low_read, "a"));
+  livehd::graph_util::connect_bit_range(low_read, 8, 9);
+  auto low_lane = low_read.create_driver_pin(0);
+  gu::set_bits(low_lane, 1);
+  gu::set_unsign(low_lane);
+
+  auto high_lane = gu::create_typed_node(*graph, Ntype_op::SHL);
+  graph->get_input_pin("low").connect_sink(high_lane.create_sink_pin(0));
+  gu::create_const(*graph, *Dlop::create_integer(8)).connect_sink(high_lane.create_sink_pin(1));
+  auto shifted = high_lane.create_driver_pin(0);
+  gu::set_bits(shifted, 16);
+  gu::set_unsign(shifted);
+  shifted.connect_sink(packed_or.create_sink_pin(0));
+
+  // The sign extend is the ONLY thing that bounds the feedback lane: there is no
+  // masking And to short-circuit the footprint, so the disjointness proof has to
+  // go through Sext(a, b) itself. b = 4 with a 1-bit operand leaves the sign
+  // position provably clear, which is what makes the extension value-preserving.
+  auto widen = gu::create_typed_node(*graph, Ntype_op::Sext);
+  low_lane.connect_sink(gu::setup_sink_by_name(widen, "a"));
+  gu::create_const(*graph, *Dlop::create_integer(4)).connect_sink(gu::setup_sink_by_name(widen, "b"));
+  auto widened = widen.create_driver_pin(0);
+  gu::set_sbits(widened, 16);
+  widened.connect_sink(packed_or.create_sink_pin(1));
+
+  // ... and the module output is a slice taken THROUGH the extension, so the
+  // resolver has to walk it too, not merely bound it.
+  auto out_read = gu::create_typed_node(*graph, Ntype_op::Get_mask);
+  widened.connect_sink(gu::setup_sink_by_name(out_read, "a"));
+  livehd::graph_util::connect_bit_range(out_read, 2, 3);
+  auto out_lane = out_read.create_driver_pin(0);
+  gu::set_bits(out_lane, 1);
+  gu::set_unsign(out_lane);
+  out_lane.connect_sink(graph->get_output_pin("out"));
+  return graph;
+}
+
 std::shared_ptr<hhds::Graph> make_cross_child_packed_feedback(std::string_view tag) {
   auto& lib = livehd::Hhds_graph_library::instance(std::string("lgdb_color_plan_") + std::string(tag));
 
@@ -910,6 +973,21 @@ TEST(SimColorPlan, PrivateRepairSplitsPackedFeedbackAcrossPureCombChildren) {
   absl::flat_hash_set<hhds::Node_class> residual;
   gu::word_level_cycle_nodes(graph.get(), /*strict=*/false, residual);
   EXPECT_TRUE(residual.empty());
+}
+
+TEST(SimColorPlan, PrivateRepairSplitsPackedFeedbackThroughSignExtend) {
+  auto                                  graph = make_sext_packed_feedback("sext_packed_feedback");
+  absl::flat_hash_set<hhds::Node_class> before;
+  gu::word_level_cycle_nodes(graph.get(), /*strict=*/true, before);
+  ASSERT_FALSE(before.empty()) << "the fixture must actually close a word-level cycle";
+  EXPECT_TRUE(std::ranges::any_of(before, [](const auto& n) { return gu::type_op_of(n) == Ntype_op::Sext; }))
+      << "the cycle must run THROUGH the sign extend, or this is not the case under test";
+
+  EXPECT_GT(gu::repair_simulator_packed_cycles(graph.get()), 0);
+
+  absl::flat_hash_set<hhds::Node_class> residual;
+  gu::word_level_cycle_nodes(graph.get(), /*strict=*/false, residual);
+  EXPECT_TRUE(residual.empty()) << "a slice must walk through Sext; without that arm the splitter leaves this cycle intact";
 }
 
 TEST(SimColorPlan, MemoryClockOnLaterPortCreatesStateUpdate) {
