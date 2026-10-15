@@ -46,6 +46,51 @@ using Node        = hhds::Node_class;
 using Pin         = hhds::Pin_class;
 using Orientation = ph::Orientation;
 using Status      = ph::Status;
+// Fully assigned combinational Verilog regs can retain a Latch declaration
+// after mapping. Like cgen's always_comb emission, an always-open latch with
+// no reset is just its data value. Normalize only the private physical graph.
+void remove_transparent_latches(hhds::Graph& graph) {
+  std::vector<Node> aliases;
+  for (auto node : graph.body().nodes()) {
+    if (gu::type_op_of(node) != Ntype_op::Latch || !gu::get_driver_of_sink_name(node, "reset_pin").is_invalid()
+        || !gu::get_driver_of_sink_name(node, "clock_pin").is_invalid()) {
+      continue;
+    }
+    const auto enable = gu::get_driver_of_sink_name(node, "enable");
+    if (!enable.is_invalid()) {
+      const auto polarity = gu::get_driver_of_sink_name(node, "posclk");
+      if (!enable.is_const() || gu::const_of(enable).has_unknowns() || (!polarity.is_invalid() && !polarity.is_const())
+          || (polarity.is_const() && gu::const_of(polarity).has_unknowns())) {
+        continue;
+      }
+      const bool active_low = polarity.is_known_false();
+      if (active_low != gu::const_of(enable).is_known_zero()) {
+        continue;
+      }
+    }
+    const auto din = gu::get_driver_of_sink_name(node, "din");
+    const auto q   = node.try_get_driver_pin(0);
+    if (!din.is_invalid() && !q.is_invalid() && din != q && gu::bits_of(din) == gu::bits_of(q)) {
+      aliases.push_back(node);
+    }
+  }
+  for (auto node : aliases) {
+    const auto din = gu::get_driver_of_sink_name(node, "din");
+    const auto q   = node.get_driver_pin(0);
+    if (din == q) {
+      throw std::runtime_error("cycle in always-transparent latch aliases");
+    }
+    std::vector<Pin> sinks;
+    for (const auto& edge : q.out_edges()) {
+      sinks.push_back(edge.sink);
+    }
+    for (auto sink : sinks) {
+      sink.del_sink(q);
+      sink.connect_driver(din);
+    }
+    node.del_node();
+  }
+}
 uint64_t    hash_text(std::string_view text, uint64_t hash = hash_util::kFnv1a64_offset) { return hash_util::fnv1a64(text, hash); }
 std::string file_text(const std::string& path) {
   std::ifstream input(path, std::ios::binary);
@@ -1271,7 +1316,8 @@ Result place(hhds::Graph& source, hhds::GraphLibrary& library, const Options& op
     throw std::runtime_error("cannot flatten mapped netlist for placement");
   }
   auto& graph = *result.graph;
-  View  v;
+  remove_transparent_latches(graph);
+  View v;
   v.weights            = options.net_weights;
   v.fp.design          = std::string(source.get_name());
   v.fp.dbu             = tech.dbu;
@@ -1831,9 +1877,23 @@ Result place(hhds::Graph& source, hhds::GraphLibrary& library, const Options& op
     c.node.attr(attrs::placement_block).set(c.block);
     v.fp.components.push_back({c.name, c.macro, c.place});
   }
+  // Keep input port and net names identical: OpenROAD's structural Verilog
+  // writer does not emit input aliases for otherwise valid DEF pin/net names.
+  // Reserve every port name before choosing names for internal nets.
+  std::set<std::string> net_names;
+  for (const auto& terminal : v.fp.terminals) {
+    net_names.insert(terminal.name);
+  }
   for (size_t net = 0; net < v.drivers.size(); ++net) {
-    const auto name = std::format("net_{}", net);
-    ph::Net    n{name, {}};
+    auto name = v.drivers[net].instance == "PIN" ? v.drivers[net].pin : std::format("net_{}", net);
+    if (v.drivers[net].instance != "PIN") {
+      const auto base   = name;
+      unsigned   suffix = 0;
+      while (!net_names.insert(name).second) {
+        name = base + "_" + std::to_string(++suffix);
+      }
+    }
+    ph::Net n{name, {}};
     n.connections.push_back({v.drivers[net].instance, v.drivers[net].pin});
     for (const auto& sink : v.nets.at(v.drivers[net])) {
       n.connections.push_back({sink.instance, sink.pin});
@@ -1848,7 +1908,7 @@ Result place(hhds::Graph& source, hhds::GraphLibrary& library, const Options& op
   // Unconnected input ports still need a DEF NET and stable terminal identity.
   for (auto& t : v.fp.terminals) {
     if (t.net.empty()) {
-      t.net = "unused_" + t.name;
+      t.net = t.name;
       v.fp.nets.push_back({t.net, {{"PIN", t.name}}});
     }
   }

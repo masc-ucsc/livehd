@@ -38,6 +38,14 @@ DREAMPlace boundary, the flat placed graph and in-memory OpenTimer RC/STA.</p>
       the ALU rejected later weighting and repair trials while the memory accepted a
       weighting refinement. Retain rejection reasons, residual violations, area and
       displacement alongside delay.</li>
+      <li>Use per-class logic area as well as the flow's reported standard-cell area:
+      the latter includes tap cells, which are absent before a LiveHD DEF handoff.
+      Keep clock/activity assumptions identical for power and distinguish pre-CTS
+      placement from propagated-clock routed timing.</li>
+      <li>Investigate native LEC's counterexamples against the LFSR pre-synthesis graph.
+      Independent Yosys state/output equivalence and reset checks pass for placed and
+      routed exports. Isolate the always-transparent declaration, cell-model and initial-state
+      assumptions; retain both sets of evidence before using native LEC as this flow's gate.</li>
       <li>Run synthesis trials serially with process-tree memory and wall-time limits.
       Validate emitted netlists independently. Measure cold and warm incremental runs
       with a frozen binary; after a rebuild, run the warm command twice before judging

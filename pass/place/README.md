@@ -16,6 +16,11 @@ The native fork's HHDS adapter expects a graph containing physical cells only.
 LiveHD's flat mapped graph also contains Get_mask, Concat and other bus aliases,
 so the host resolves these into the fork's public flat-array interface while
 keeping the original graph's bus ports and logical connectivity.
+Always-transparent latch declarations from fully assigned combinational regs
+are bypassed only in the private physical graph; gated or resettable latches
+still require cell mapping. DEF input nets retain their port names, and internal
+net names reserve every port name, so OpenROAD's structural Verilog writer keeps
+input connectivity when exporting a DEF-imported design.
 
 Full mode checks site/row alignment, cell overlap and core bounds independently,
 then writes and reads back `synth/place/out.def`. GP mode may overlap, reports

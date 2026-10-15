@@ -6,6 +6,7 @@
 #include <format>
 #include <fstream>
 #include <map>
+#include <set>
 
 #include "attrs.hpp"
 #include "gtest/gtest.h"
@@ -16,6 +17,85 @@
 #include "rapidjson/document.h"
 namespace livehd::placement {
 namespace gu = graph_util;
+TEST(Placement, AlwaysTransparentLatchAliasesPreservePackedInputsAndSource) {
+  // Missing gate, active-high true and active-low false all store no state.
+  // Dynamic/closed gates and resettable latches must still require mapping.
+  for (unsigned mode = 0; mode < 6; ++mode) {
+    hhds::GraphLibrary source, flat;
+    auto               io = source.create_io("top");
+    io->add_input("a", 0);
+    io->set_bits("a", 2);
+    io->add_input("net_1", 1);  // Collides with a generated internal net name.
+    io->set_bits("net_1", 1);
+    io->add_output("y", 0);
+    io->set_bits("y", 1);
+    auto graph = io->create_graph();
+    auto a     = graph->get_input_pin("a");
+    gu::set_bits(a, 2);
+    gu::set_bits(graph->get_input_pin("net_1"), 1);
+    auto latch = gu::create_typed_node(*graph, Ntype_op::Latch);
+    latch.set_name("combinational_reg");
+    gu::setup_sink_by_name(latch, "din").connect_driver(a);
+    auto q = latch.create_driver_pin(0);
+    gu::set_bits(q, 2);
+    const auto constant = [&](int value) { return gu::create_const(*graph, *Dlop::create_integer(value)); };
+    if (mode) {
+      gu::setup_sink_by_name(latch, "enable")
+          .connect_driver(mode == 3 ? gu::create_get_mask(*graph, a, 0).get_driver_pin(0)
+                                    : constant(mode == 2 || mode == 4 ? 0 : 1));
+    }
+    if (mode == 2) {
+      gu::setup_sink_by_name(latch, "posclk").connect_driver(constant(0));
+    }
+    if (mode == 5) {
+      gu::setup_sink_by_name(latch, "reset_pin").connect_driver(gu::create_get_mask(*graph, a, 0).get_driver_pin(0));
+    }
+    auto inv = source.create_io("sky130_fd_sc_hd__inv_1");
+    inv->add_input("A", 0);
+    inv->add_output("Y", 0);
+    auto cell = gu::create_typed_node(*graph, Ntype_op::Sub);
+    cell.set_subnode(inv);
+    cell.set_name("invert_high_bit");
+    cell.create_sink_pin("A").connect_driver(gu::create_get_mask(*graph, q, 1).get_driver_pin(0));
+    auto y = cell.create_driver_pin("Y");
+    gu::set_bits(y, 1);
+    graph->get_output_pin("y").connect_driver(y);
+    Options options;
+    options.lefs       = {"inou/lefdef/tests/data/sky130hd.tlef", "inou/lefdef/tests/data/sky130hd.lef"};
+    options.output_dir = std::string(std::getenv("TEST_TMPDIR")) + "/transparent_" + std::to_string(mode);
+    options.iterations = 0;
+    options.bins       = 8;
+    if (mode >= 3) {
+      EXPECT_THROW((void)place(*graph, flat, options), std::runtime_error) << mode;
+    } else {
+      const auto result = place(*graph, flat, options);
+      ASSERT_EQ(result.floorplan.components.size(), 1);
+      bool connected = false;
+      for (const auto& net : result.parasitics->nets) {
+        if (net.driver == "a[1]") {
+          for (const auto& pin : net.nodes) {
+            connected |= pin.pin == "invert_high_bit:A";
+          }
+        }
+      }
+      EXPECT_TRUE(connected) << mode;
+      std::set<std::string> names;
+      for (const auto& net : result.floorplan.nets) {
+        EXPECT_TRUE(names.insert(net.name).second);
+      }
+      for (const auto& terminal : result.floorplan.terminals) {
+        if (terminal.direction == "INPUT") {
+          EXPECT_EQ(terminal.net, terminal.name);
+        }
+      }
+      for (auto node : result.graph->body().nodes()) {
+        EXPECT_NE(gu::type_op_of(node), Ntype_op::Latch);
+      }
+    }
+    EXPECT_EQ(gu::type_op_of(latch), Ntype_op::Latch);
+    EXPECT_EQ(gu::get_driver_of_sink_name(latch, "din"), a);
+  }
+}
 TEST(Placement, MappedBusGraphLegalityRcAndReuse) {
   hhds::GraphLibrary source;
   auto               io = source.create_io("top");
