@@ -390,9 +390,9 @@ struct Result {
   // run exits 0 too). formal_report.json carries the per-obligation rows.
   struct Formal_verdict {
     bool        present{false};
-    std::string verdict{};   // one of the outcome words of Lec_verdict
+    std::string verdict{};  // one of the outcome words of Lec_verdict
     bool        bounded{false};
-    int64_t     bound{0};    // the n of PROVEN-bounded(n), in design cycles
+    int64_t     bound{0};  // the n of PROVEN-bounded(n), in design cycles
   } formal;
 
   // Internal hand-off from Tier A (source/LNAST sync) to Tier B (final LGraph  // Internal hand-off from Tier A (source/LNAST sync)
@@ -766,72 +766,112 @@ inline constexpr Mapper kMappers[] = {
 }
 
 inline constexpr Synth_set_option kSynthSetOptions[] = {
-    {"adder","auto",Synth_set_option::Kind::file,"shared default: auto|rca|cska|cla|prefix|brent; source pins override it"},
-    {"multiplier","auto",Synth_set_option::Kind::file,"shared default: auto|array|tree|csa|tdm"},
-    {"barrel","auto",Synth_set_option::Kind::file,"shared default: auto|log|reverse"},
-    {"block_size","0",Synth_set_option::Kind::integer,"shared CSKA/CLA block width; 0 derives it from width"},
-    {"memory","auto",Synth_set_option::Kind::file,
-     "auto|flops|macro: bit-blast memories to flops + decode (flops), keep the native macro (macro), or let pass.abc.memory_max_bits and "
-     "the port count decide (auto); an explicit pass.abc.memory wins; source pins override it per memory"},
-    {"delay","",Synth_set_option::Kind::integer,"timing budget in ps for every region (= pass.abc.delay); source pins override it"},
-    {"stop_mux","",Synth_set_option::Kind::boolean,
-     "cut colors at muxes (= pass.color.synth.stop_mux); empty follows the mapper profile; source pins override it"},
-    {"stop_arith","",Synth_set_option::Kind::boolean,
-     "cut colors at wide adders/multipliers/dividers (= pass.color.synth.stop_arith); empty follows the mapper profile"},
-    {"stop_cmp","",Synth_set_option::Kind::boolean,
-     "cut colors at wide comparisons (= pass.color.synth.stop_cmp); empty follows the mapper profile"},
-    {"stop_shift","",Synth_set_option::Kind::boolean,
-     "cut colors at runtime shifters (= pass.color.synth.stop_shift); empty follows the mapper profile"},
-    {"abc_pre","",Synth_set_option::Kind::file,
+    {            "place","false",     Synth_set_option::Kind::boolean,"place mapped cells with native DREAMPlace before final STA"                                                                       },
+    {              "lef",
+     "",        Synth_set_option::Kind::file,
+     "comma-separated tech LEF then cell/macro LEFs; empty uses sky130HD beside $HAGENT_TECH_DIR"                                                       },
+    {       "place.mode",
+     "full",        Synth_set_option::Kind::file,
+     "full: legalize/detail and emit DEF; gp: approximate global placement, no DEF"                                                                     },
+    {"place.utilization",   "0.5",        Synth_set_option::Kind::file,                                      "cell area / generated core area, in (0,1)"},
+    {     "place.aspect",     "1",        Synth_set_option::Kind::file,                                                  "generated core width / height"},
+    {    "place.density",   "0.8",        Synth_set_option::Kind::file,                          "global-placement target density, at least utilization"},
+    {  "place.floorplan",      "",        Synth_set_option::Kind::file,                   "optional DEF with contiguous N/FS rows and FIXED pins/macros"},
+    {    "place.wire_rc",      "",        Synth_set_option::Kind::file,                      "wire RC override: ohm/um,fF/um; empty derives it from LEF"},
+    { "place.iterations",
+     "500",     Synth_set_option::Kind::integer,
+     "GP iteration budget per call (0 runs legalization only in full mode)"                                                                             },
+    {       "place.bins",    "32",     Synth_set_option::Kind::integer,                                                          "density bins per axis"},
+    {    "place.threads",
+     "1",     Synth_set_option::Kind::integer,
+     "CPU worker count; threading needs --define=dreamplace_openmp=true at build time"                                                                  },
+    {     "place.resize", "false",     Synth_set_option::Kind::boolean,                   "reserved for the native resizer; true is not implemented yet"},
+    {            "adder",  "auto",        Synth_set_option::Kind::file,        "shared default: auto|rca|cska|cla|prefix|brent; source pins override it"},
+    {       "multiplier",  "auto",        Synth_set_option::Kind::file,                                        "shared default: auto|array|tree|csa|tdm"},
+    {           "barrel",  "auto",        Synth_set_option::Kind::file,                                               "shared default: auto|log|reverse"},
+    {       "block_size",     "0",     Synth_set_option::Kind::integer,                           "shared CSKA/CLA block width; 0 derives it from width"},
+    {           "memory",
+     "auto",        Synth_set_option::Kind::file,
+     "auto|flops|macro: bit-blast memories to flops + decode (flops), keep the native macro (macro), or let "
+     "pass.abc.memory_max_bits and "
+     "the port count decide (auto); an explicit pass.abc.memory wins; source pins override it per memory"                                               },
+    {            "delay",
+     "",     Synth_set_option::Kind::integer,
+     "timing budget in ps for every region (= pass.abc.delay); source pins override it"                                                                 },
+    {         "stop_mux",
+     "",     Synth_set_option::Kind::boolean,
+     "cut colors at muxes (= pass.color.synth.stop_mux); empty follows the mapper profile; source pins override it"                                     },
+    {       "stop_arith",
+     "",     Synth_set_option::Kind::boolean,
+     "cut colors at wide adders/multipliers/dividers (= pass.color.synth.stop_arith); empty follows the mapper profile"                                 },
+    {         "stop_cmp",
+     "",     Synth_set_option::Kind::boolean,
+     "cut colors at wide comparisons (= pass.color.synth.stop_cmp); empty follows the mapper profile"                                                   },
+    {       "stop_shift",
+     "",     Synth_set_option::Kind::boolean,
+     "cut colors at runtime shifters (= pass.color.synth.stop_shift); empty follows the mapper profile"                                                 },
+    {          "abc_pre",
+     "",        Synth_set_option::Kind::file,
      "`;`-separated ABC optimization steps run before the abc mapper of every region, e.g. `dc2; &dch -f` "
      "(= pass.abc.pre; ignored by usyn); a source pin overrides it per region, and one color is one run, so "
-     "cells of a color that disagree are an error"},
-    {"color","",Synth_set_option::Kind::source_only,
-     "no run-wide value; names one explicit synthesis group (a name or integer)"},
-    {"grow","",Synth_set_option::Kind::source_only,
-     "no run-wide value; false keeps an explicit group from absorbing neighbouring cones"},
-    {"ware","",Synth_set_option::Kind::source_only,
+     "cells of a color that disagree are an error"                                                                                                      },
+    {            "color",      "", Synth_set_option::Kind::source_only,      "no run-wide value; names one explicit synthesis group (a name or integer)"},
+    {             "grow",
+     "", Synth_set_option::Kind::source_only,
+     "no run-wide value; false keeps an explicit group from absorbing neighbouring cones"                                                               },
+    {             "ware",
+     "", Synth_set_option::Kind::source_only,
      "no run-wide value; true|false whether the region's arithmetic/shift modules are explored; run-wide control is "
-     "synth.tune.profile and pass.color.synth.ware_*"},
-    {"abc","",Synth_set_option::Kind::source_only,
-     "no run-wide value; the ABC flow script for the region (run-wide: pass.abc.flow)"},
-    {"partition","auto",Synth_set_option::Kind::file,
+     "synth.tune.profile and pass.color.synth.ware_*"                                                                                                   },
+    {              "abc",
+     "", Synth_set_option::Kind::source_only,
+     "no run-wide value; the ABC flow script for the region (run-wide: pass.abc.flow)"                                                                  },
+    {        "partition",
+     "auto",        Synth_set_option::Kind::file,
      "auto|fine|coarse: region granularity, independent of the mapper. fine cuts at wide arithmetic/shifters/compares/muxes "
      "and extracts ware modules (small ABC regions); coarse keeps register-to-register cones and extracts nothing. "
-     "auto = the mapper's own profile (abc: fine, usyn: coarse). Explicit color.* settings still win"},
-    {"tune.profile","auto",Synth_set_option::Kind::file,"auto replays compatible decisions; on explicitly explores; off ignores stored decisions"},
-    {"tune.validate","structural",Synth_set_option::Kind::file,"structural|region|design: validation required before storing a tuned choice"},
-    {"tune.file","",Synth_set_option::Kind::file,"portable synthesis decision JSON to replay"},
-    {"tune.export","",Synth_set_option::Kind::file,"export compatible synthesis decisions as versioned JSON"},
-    {"tune.attempts","24",Synth_set_option::Kind::integer,"maximum arithmetic candidates per region during explicit profiling"},
-    {"tune.time_ms","60000",Synth_set_option::Kind::integer,"soft profiling time budget per region"},
-    {"tune.patience","3",Synth_set_option::Kind::integer,"stop exploring a region after this many consecutive non-improving candidates (0 = never)"},
-    {"tune.min_share","0.02",Synth_set_option::Kind::file,"skip regions below this fraction of the mapped area (area objective); regions are explored most-critical / largest first"},
-    {    "mapper",
-     "abc",  Synth_set_option::Kind::mapper,
+     "auto = the mapper's own profile (abc: fine, usyn: coarse). Explicit color.* settings still win"                                                   },
+    {     "tune.profile",
+     "auto",        Synth_set_option::Kind::file,
+     "auto replays compatible decisions; on explicitly explores; off ignores stored decisions"                                                          },
+    {    "tune.validate",
+     "structural",        Synth_set_option::Kind::file,
+     "structural|region|design: validation required before storing a tuned choice"                                                                      },
+    {        "tune.file",      "",        Synth_set_option::Kind::file,                                     "portable synthesis decision JSON to replay"},
+    {      "tune.export",      "",        Synth_set_option::Kind::file,                        "export compatible synthesis decisions as versioned JSON"},
+    {    "tune.attempts",    "24",     Synth_set_option::Kind::integer,             "maximum arithmetic candidates per region during explicit profiling"},
+    {     "tune.time_ms", "60000",     Synth_set_option::Kind::integer,                                          "soft profiling time budget per region"},
+    {    "tune.patience",
+     "3",     Synth_set_option::Kind::integer,
+     "stop exploring a region after this many consecutive non-improving candidates (0 = never)"                                                         },
+    {   "tune.min_share",
+     "0.02",        Synth_set_option::Kind::file,
+     "skip regions below this fraction of the mapped area (area objective); regions are explored most-critical / largest first"                         },
+    {           "mapper",
+     "abc",      Synth_set_option::Kind::mapper,
      "abc|usyn: ABC synthesis (pass.abc), or unate synthesis (pass.usyn: a domino-gate LUT cover of every region, "
-     "technology-mapped by ABC, with the ABC flow as the fallback)"                                                        },
-    {   "liberty",
-     "",    Synth_set_option::Kind::file,
+     "technology-mapped by ABC, with the ABC flow as the fallback)"                                                                                     },
+    {          "liberty",
+     "",        Synth_set_option::Kind::file,
      "PATH -- THE Liberty .lib, for every command that reads one: `lhd synth`, `lhd pass abc` (maps to its cells) "
      "and `lhd pass opentimer` (times with it, when no .lib positional is given). Empty = "
      "$HAGENT_TECH_DIR/sky130_fd_sc_hd__tt_025C_1v80.lib (install a PDK with `ciel`). It is the ONE spelling -- a "
-     "`pass.abc.library` --set is refused -- so no two readers in a flow can land on different cells"                      },
-    { "opentimer",
-     "true", Synth_set_option::Kind::boolean,
+     "`pass.abc.library` --set is refused -- so no two readers in a flow can land on different cells"                                                   },
+    {        "opentimer",
+     "true",     Synth_set_option::Kind::boolean,
      "run OpenTimer STA on the mapped netlist (timing.json under --workdir/synth, the critical path in the "
-     "report). false stops after the ABC map"                                                                              },
-    {    "reduce",
-     "false", Synth_set_option::Kind::boolean,
+     "report). false stops after the ABC map"                                                                                                           },
+    {           "reduce",
+     "false",     Synth_set_option::Kind::boolean,
      "experimental: can reduce synthesis time but degrade QoR (area and depth). Extract repeated one- and two-node "
-     "combinational cones into shared definitions before coloring; disabled by default"                                    },
-    {"specialize",
-     "true", Synth_set_option::Kind::boolean,
+     "combinational cones into shared definitions before coloring; disabled by default"                                                                 },
+    {       "specialize",
+     "true",     Synth_set_option::Kind::boolean,
      "run pass.specialize on the mapper's private copy after pass.color: a constant instance input is folded into a "
      "content-named copy of its state-free callee, and a constant a callee returns reaches its parent. false keeps "
-     "every instance boundary as compiled"                                                                                 },
-    {       "sdc", "",    Synth_set_option::Kind::file, "PATH -- optional .sdc timing constraints handed to pass.opentimer"},
-    {      "spef", "",    Synth_set_option::Kind::file,        "PATH -- optional .spef parasitics handed to pass.opentimer"},
+     "every instance boundary as compiled"                                                                                                              },
+    {              "sdc",      "",        Synth_set_option::Kind::file,              "PATH -- optional .sdc timing constraints handed to pass.opentimer"},
+    {             "spef",      "",        Synth_set_option::Kind::file,                     "PATH -- optional .spef parasitics handed to pass.opentimer"},
 };
 
 // The `lhd pass` subcommand vocabulary (pass_command dispatches exactly these).

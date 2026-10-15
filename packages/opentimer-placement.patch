@@ -1,0 +1,21 @@
+diff repo
+--- ot/timer/timer.hpp
++++ ot/timer/timer.hpp
+@@ -38,6 +38,17 @@
+     Timer& read_celllib(std::filesystem::path, std::optional<Split> = {});
+     Timer& read_verilog(std::filesystem::path);
+     Timer& read_spef(std::filesystem::path);
++    // In-memory placement parasitics, with fully expanded names and R/C units.
++    Timer& read_parasitics(spef::Spef value) {
++      auto data = std::make_shared<spef::Spef>(std::move(value));
++      std::scoped_lock lock(_mutex);
++      auto reader = _taskflow.emplace([this, data] () {
++        _rebase_unit(*data);
++        _read_spef(*data);
++      });
++      _add_to_lineage(reader);
++      return *this;
++    }
+     Timer& read_sdc(std::filesystem::path);
+     Timer& read_timing(std::filesystem::path);
+     Timer& insert_net(std::string);

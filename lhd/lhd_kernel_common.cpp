@@ -617,6 +617,7 @@ static void crash_handler(int sig, siginfo_t* info, void* uctx) {
   ::raise(sig);
   ::_exit(EXIT_FAILURE);
 #else
+  (void)sig;
   (void)info;
   (void)uctx;
   crash_write("lhd: FATAL signal SIGSEGV -- this is a livehd bug, not a bad input\n");

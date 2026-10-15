@@ -65,9 +65,11 @@ using Flat_origin_map = absl::flat_hash_map<hhds::Node_class, Flat_origin>;
 // returns nullptr without a diagnostic; callback exceptions still propagate.
 // As with other failures, lib/origin may contain partial output: callers must
 // discard it and must not publish it. Source definitions remain unchanged.
+// physical_names retains synthetic/transparent instance scopes too. Physical
+// consumers require unique instance names even across separately mapped colors.
 [[nodiscard]] std::shared_ptr<hhds::Graph> flatten_hierarchy(hhds::Graph* top, hhds::GraphLibrary* lib, std::string_view flat_name,
                                                              Flat_origin_map* origin = nullptr, bool preserve_modules = false,
                                                              const std::unordered_set<hhds::Gid>& preserved_defs = {},
-                                                             const Admission&                     admission      = {});
+                                                             const Admission& admission = {}, bool physical_names = false);
 
 }  // namespace livehd::partition

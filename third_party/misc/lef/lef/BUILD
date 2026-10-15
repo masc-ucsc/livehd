@@ -13,6 +13,7 @@ yosys_bison(
         "lef.tab.hpp",
     ],
     args = [
+        "--name-prefix=lefyy",
         "--defines=$(execpath lef.tab.hpp)",
         "--output-file=$(execpath lef.tab.cpp)",
         "$(execpath lef.y)",

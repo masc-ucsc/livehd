@@ -229,8 +229,12 @@ cmp -s "$W/net0.v" "$W/net2.v" || fail "cold (incremental=false) netlist differs
 # script fails if any group fails.
 PIDS=()
 spawn() {
-  "$@" &
-  PIDS+=($!)
+  if [ "${LHD_TEST_SERIAL:-0}" = 1 ]; then
+    ( "$@" ) || exit 1
+  else
+    "$@" &
+    PIDS+=($!)
+  fi
 }
 
 # ... and on a design whose region boundary has ANONYMOUS crossings, which is
@@ -512,7 +516,7 @@ group_ram128() {
   run lec --set formal.effort=proof --ref lg:"$W/ram128_source" --impl lg:"$W/ram128_mapped" \
       --lib lg:"$W/ram128_models" --top ram128_repro --set formal.timeout=30 \
       --workdir "$W/ram128_lec"
-  [ "$(jget "$RJ" lec.verdict)" = proven-full ] || fail "128-bit memory synthesis is not equivalent: $(jget "$RJ" lec.verdict)"
+  [ "$(jget "$RJ" lec.verdict)" = proven-full ] || fail "128-bit memory synthesis lacks an unbounded equivalence proof: $(jget "$RJ" lec.verdict)"
   echo "PASS: default synthesis preserves one 128-bit memory with byte writes"
 }
 spawn group_ram128
@@ -571,7 +575,9 @@ group_reduce() {
 spawn group_reduce
 
 rc=0
-for p in "${PIDS[@]}"; do wait "$p" || rc=1; done
+if [ "${LHD_TEST_SERIAL:-0}" != 1 ]; then
+  for p in "${PIDS[@]}"; do wait "$p" || rc=1; done
+fi
 [ "$rc" = 0 ] || fail "a check above failed"
 echo "PASS: negative controls"
 echo "PASS: help surface"

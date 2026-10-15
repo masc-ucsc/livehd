@@ -62,8 +62,8 @@ void validate_emits(const Options& opts) {
   // file. (pyrope: is allowed as a single file for a one-unit design; the
   // multi-unit check lives in emit_pyrope_single_file.)
   for (const auto& e : opts.emits) {
-    if (e.kind == "ln" || e.kind == "lg" || e.kind == "lnast-dump" || e.kind == "isabelle" || e.kind == "lean"
-        || e.kind == "report") {
+    if (e.kind == "ln" || e.kind == "lg" || e.kind == "lnast-dump" || e.kind == "isabelle" || e.kind == "lean" || e.kind == "report"
+        || e.kind == "def") {
       throw Lhd_error{"usage",
                       std::format("--emit {0}:PATH is a directory container; use --emit-dir {0}:DIR/", e.kind),
                       "ln: is a Forest save dir, lg: a GraphLibrary save dir, lnast-dump:/isabelle:/lean: one file per unit, "
@@ -73,6 +73,7 @@ void validate_emits(const Options& opts) {
   // `report:` is the synth flow's QoR/timing sidecar directory; no other
   // command produces one, so anywhere else it is a typo, not a silent no-op.
   if (opts.command != "synth") {
+    reject_emit_kind(opts, "def", {"usage", "--emit-dir def: is a `lhd synth --set synth.place=true` output", ""});
     reject_emit_kind(opts, "report", {"usage", "--emit-dir report: is a `lhd synth` output (qor.json + timing.json)", ""});
   }
   if (opts.command == "synth") {
@@ -87,10 +88,9 @@ void validate_emits(const Options& opts) {
     }
   }
   if (opts.command == "pass" && !is_pass_semdiff(opts)) {
-    const std::string sub = opts.files.empty() ? std::string{} : opts.files.front();
-    const bool        graph_output
-        = sub == "color" || sub == "partition" || find_mapper(sub) != nullptr || sub == "single_edge" || sub == "liberty"
-          || sub == "satopt" || sub == "opentimer";
+    const std::string sub          = opts.files.empty() ? std::string{} : opts.files.front();
+    const bool        graph_output = sub == "color" || sub == "partition" || find_mapper(sub) != nullptr || sub == "single_edge"
+                                     || sub == "liberty" || sub == "satopt" || sub == "opentimer";
     for (const char* k : {"ln", "pyrope", "lnast-dump", "isabelle", "lean", "sim", "lg", "verilog"}) {
       if (graph_output && (std::string_view{k} == "lg" || std::string_view{k} == "verilog")) {
         continue;
@@ -1339,8 +1339,7 @@ void lower_lnasts(Options& opts, Result& res, Eprp_var& var, const std::string& 
           std::string target;
           if (file_units.count(text) != 0) {
             target = text;
-          } else if (const auto dot = text.rfind('.');
-                     dot != std::string::npos && file_units.count(text.substr(0, dot)) != 0) {
+          } else if (const auto dot = text.rfind('.'); dot != std::string::npos && file_units.count(text.substr(0, dot)) != 0) {
             target = text.substr(0, dot);
           }
           if (!target.empty() && target != me) {
@@ -1456,10 +1455,9 @@ void lower_lnasts(Options& opts, Result& res, Eprp_var& var, const std::string& 
           continue;
         }
         std::erase_if(var.lnasts, [&](const std::shared_ptr<Lnast>& ln) {
-          std::string  name{ln->get_top_module_name()};
-          const bool drop = name.size() > file.size() + 1 && name.compare(0, file.size(), file) == 0
-                            && name[file.size()] == '.'
-                            && !pristine.contains(name);  // derived this invocation, not a loaded unit
+          std::string name{ln->get_top_module_name()};
+          const bool  drop = name.size() > file.size() + 1 && name.compare(0, file.size(), file) == 0 && name[file.size()] == '.'
+                             && !pristine.contains(name);  // derived this invocation, not a loaded unit
           if (drop) {
             erased.insert(name);
           }

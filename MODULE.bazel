@@ -81,6 +81,26 @@ bazel_dep(name = "bison", version = "3.8.2.bcr.11")
 bazel_dep(name = "flex", version = "2.6.4.bcr.8")
 
 bazel_dep(name = "rapidjson", version = "1.1.0.bcr.20250205")
+# Native CPU placement; the archive uses LiveHD's HHDS/HLOP repositories.
+http_archive(
+    name = "dreamplace",
+    patches = ["//packages:dreamplace-lemon.patch", "//packages:dreamplace-zero-area.patch"],
+    patch_args = ["-p1"],
+    urls = ["https://github.com/masc-ucsc/DREAMPlace/archive/fc5e043a9ad2bb7808fcbe262f4281f06e1d23d3.tar.gz"],
+    sha256 = "0730511d153d712f78fa4a700fd34ebe4adc62d647334ce9e9e15cb9c1675d2a",
+    strip_prefix = "DREAMPlace-fc5e043a9ad2bb7808fcbe262f4281f06e1d23d3",
+)
+bazel_dep(name = "openmp", version = "21.1.5.bcr.3")
+# Plain-repository fetch: Bzlmod root-only overrides would break LiveHD consumers.
+http_archive(
+    name = "dreamplace_lemon",
+    urls = ["https://github.com/QuantamHD/lemon/archive/refs/tags/1.3.1.tar.gz"],
+    strip_prefix = "lemon-1.3.1",
+    integrity = "sha256-p/KIIUMbdlBZZumjTJTBgBMPYWLtL8Wa3opoW11dz+s=",
+    patches = ["//packages:lemon-allocator.patch", "//packages:lemon-bcr.patch"],
+    patch_args = ["-p1"],
+    build_file = "//packages:lemon.BUILD",
+)
 bazel_dep(name = "mimalloc", version = "3.5.3.bcr.1")
 
 bazel_dep(name = "libffi", version = "3.4.7.bcr.5")
@@ -245,7 +265,7 @@ http_archive(
 http_archive(
     name = "opentimer",
     build_file = "//packages:opentimer.BUILD",
-    patches = ["//packages:opentimer.patch"],
+    patches = ["//packages:opentimer.patch", "//packages:opentimer-placement.patch"],
     sha256 = "52791ebff1a4d18d1bb55da5328cf201c41736e278d5f1a4ce0f7410de128b6f",
     strip_prefix = "OpenTimer-5e0d5bba4b9d5725c932a7b42815f7231813b6a5",
     urls = [

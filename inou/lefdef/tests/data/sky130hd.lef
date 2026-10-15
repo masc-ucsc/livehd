@@ -1,0 +1,631 @@
+VERSION 5.7 ;
+  NOWIREEXTENSIONATPIN ON ;
+  DIVIDERCHAR "/" ;
+  BUSBITCHARS "[]" ;
+MACRO sky130_fd_sc_hd__inv_1
+  CLASS CORE ;
+  FOREIGN sky130_fd_sc_hd__inv_1 ;
+  ORIGIN 0.000 0.000 ;
+  SIZE 1.380 BY 2.720 ;
+  SYMMETRY X Y R90 ;
+  SITE unithd ;
+  PIN A
+    DIRECTION INPUT ;
+    USE SIGNAL ;
+    ANTENNAGATEAREA 0.247500 ;
+    PORT
+      LAYER li1 ;
+        RECT 0.320 1.075 0.650 1.315 ;
+    END
+  END A
+  PIN VGND
+    DIRECTION INOUT ;
+    USE GROUND ;
+    SHAPE ABUTMENT ;
+    PORT
+      LAYER met1 ;
+        RECT 0.000 -0.240 1.380 0.240 ;
+    END
+  END VGND
+  PIN VNB
+    DIRECTION INOUT ;
+    USE GROUND ;
+    PORT
+      LAYER pwell ;
+        RECT 0.210 0.105 1.140 1.015 ;
+        RECT 0.210 0.085 0.315 0.105 ;
+        RECT 0.145 -0.085 0.315 0.085 ;
+    END
+  END VNB
+  PIN VPB
+    DIRECTION INOUT ;
+    USE POWER ;
+    PORT
+      LAYER nwell ;
+        RECT -0.190 1.305 1.570 2.910 ;
+    END
+  END VPB
+  PIN VPWR
+    DIRECTION INOUT ;
+    USE POWER ;
+    SHAPE ABUTMENT ;
+    PORT
+      LAYER met1 ;
+        RECT 0.000 2.480 1.380 2.960 ;
+    END
+  END VPWR
+  PIN Y
+    DIRECTION OUTPUT ;
+    USE SIGNAL ;
+    ANTENNADIFFAREA 0.429000 ;
+    PORT
+      LAYER li1 ;
+        RECT 0.720 1.485 1.050 2.465 ;
+        RECT 0.820 0.885 1.050 1.485 ;
+        RECT 0.720 0.255 1.050 0.885 ;
+    END
+  END Y
+  OBS
+      LAYER li1 ;
+        RECT 0.000 2.635 1.380 2.805 ;
+        RECT 0.340 1.495 0.550 2.635 ;
+        RECT 0.320 0.085 0.550 0.905 ;
+        RECT 0.000 -0.085 1.380 0.085 ;
+  END
+END sky130_fd_sc_hd__inv_1
+
+MACRO sky130_fd_sc_hd__buf_1
+  CLASS CORE ;
+  FOREIGN sky130_fd_sc_hd__buf_1 ;
+  ORIGIN 0.000 0.000 ;
+  SIZE 1.380 BY 2.720 ;
+  SYMMETRY X Y R90 ;
+  SITE unithd ;
+  PIN A
+    DIRECTION INPUT ;
+    USE SIGNAL ;
+    ANTENNAGATEAREA 0.196500 ;
+    PORT
+      LAYER li1 ;
+        RECT 0.105 0.985 0.445 1.355 ;
+    END
+  END A
+  PIN VGND
+    DIRECTION INOUT ;
+    USE GROUND ;
+    SHAPE ABUTMENT ;
+    PORT
+      LAYER met1 ;
+        RECT 0.000 -0.240 1.380 0.240 ;
+    END
+  END VGND
+  PIN VNB
+    DIRECTION INOUT ;
+    USE GROUND ;
+    PORT
+      LAYER pwell ;
+        RECT 0.005 0.105 1.375 0.885 ;
+        RECT 0.155 -0.085 0.325 0.105 ;
+    END
+  END VNB
+  PIN VPB
+    DIRECTION INOUT ;
+    USE POWER ;
+    PORT
+      LAYER nwell ;
+        RECT -0.190 1.305 1.570 2.910 ;
+    END
+  END VPB
+  PIN VPWR
+    DIRECTION INOUT ;
+    USE POWER ;
+    SHAPE ABUTMENT ;
+    PORT
+      LAYER met1 ;
+        RECT 0.000 2.480 1.380 2.960 ;
+    END
+  END VPWR
+  PIN X
+    DIRECTION OUTPUT ;
+    USE SIGNAL ;
+    ANTENNADIFFAREA 0.340600 ;
+    PORT
+      LAYER li1 ;
+        RECT 1.025 1.560 1.295 2.465 ;
+        RECT 1.115 0.760 1.295 1.560 ;
+        RECT 1.035 0.255 1.295 0.760 ;
+    END
+  END X
+  OBS
+      LAYER li1 ;
+        RECT 0.000 2.635 1.380 2.805 ;
+        RECT 0.165 1.705 0.345 2.465 ;
+        RECT 0.525 1.875 0.855 2.635 ;
+        RECT 0.165 1.535 0.840 1.705 ;
+        RECT 0.670 1.390 0.840 1.535 ;
+        RECT 0.670 1.060 0.945 1.390 ;
+        RECT 0.670 0.805 0.840 1.060 ;
+        RECT 0.175 0.635 0.840 0.805 ;
+        RECT 0.175 0.255 0.345 0.635 ;
+        RECT 0.525 0.085 0.855 0.465 ;
+        RECT 0.000 -0.085 1.380 0.085 ;
+  END
+END sky130_fd_sc_hd__buf_1
+
+MACRO sky130_fd_sc_hd__nand2_1
+  CLASS CORE ;
+  FOREIGN sky130_fd_sc_hd__nand2_1 ;
+  ORIGIN 0.000 0.000 ;
+  SIZE 1.380 BY 2.720 ;
+  SYMMETRY X Y R90 ;
+  SITE unithd ;
+  PIN A
+    DIRECTION INPUT ;
+    USE SIGNAL ;
+    ANTENNAGATEAREA 0.247500 ;
+    PORT
+      LAYER li1 ;
+        RECT 0.940 1.075 1.275 1.325 ;
+    END
+  END A
+  PIN B
+    DIRECTION INPUT ;
+    USE SIGNAL ;
+    ANTENNAGATEAREA 0.247500 ;
+    PORT
+      LAYER li1 ;
+        RECT 0.095 1.055 0.430 1.325 ;
+    END
+  END B
+  PIN VGND
+    DIRECTION INOUT ;
+    USE GROUND ;
+    SHAPE ABUTMENT ;
+    PORT
+      LAYER met1 ;
+        RECT 0.000 -0.240 1.380 0.240 ;
+    END
+  END VGND
+  PIN VNB
+    DIRECTION INOUT ;
+    USE GROUND ;
+    PORT
+      LAYER pwell ;
+        RECT 0.025 0.105 1.375 1.015 ;
+        RECT 0.140 -0.085 0.310 0.105 ;
+    END
+  END VNB
+  PIN VPB
+    DIRECTION INOUT ;
+    USE POWER ;
+    PORT
+      LAYER nwell ;
+        RECT -0.190 1.305 1.570 2.910 ;
+    END
+  END VPB
+  PIN VPWR
+    DIRECTION INOUT ;
+    USE POWER ;
+    SHAPE ABUTMENT ;
+    PORT
+      LAYER met1 ;
+        RECT 0.000 2.480 1.380 2.960 ;
+    END
+  END VPWR
+  PIN Y
+    DIRECTION OUTPUT ;
+    USE SIGNAL ;
+    ANTENNADIFFAREA 0.439000 ;
+    PORT
+      LAYER li1 ;
+        RECT 0.535 1.485 0.865 2.465 ;
+        RECT 0.600 0.885 0.770 1.485 ;
+        RECT 0.600 0.255 1.295 0.885 ;
+    END
+  END Y
+  OBS
+      LAYER li1 ;
+        RECT 0.000 2.635 1.380 2.805 ;
+        RECT 0.085 1.495 0.365 2.635 ;
+        RECT 1.035 1.495 1.295 2.635 ;
+        RECT 0.085 0.085 0.395 0.885 ;
+        RECT 0.000 -0.085 1.380 0.085 ;
+  END
+END sky130_fd_sc_hd__nand2_1
+
+MACRO sky130_fd_sc_hd__nor2_1
+  CLASS CORE ;
+  FOREIGN sky130_fd_sc_hd__nor2_1 ;
+  ORIGIN 0.000 0.000 ;
+  SIZE 1.380 BY 2.720 ;
+  SYMMETRY X Y R90 ;
+  SITE unithd ;
+  PIN A
+    DIRECTION INPUT ;
+    USE SIGNAL ;
+    ANTENNAGATEAREA 0.247500 ;
+    PORT
+      LAYER li1 ;
+        RECT 0.945 1.075 1.295 1.325 ;
+    END
+  END A
+  PIN B
+    DIRECTION INPUT ;
+    USE SIGNAL ;
+    ANTENNAGATEAREA 0.247500 ;
+    PORT
+      LAYER li1 ;
+        RECT 0.085 1.075 0.435 1.325 ;
+    END
+  END B
+  PIN VGND
+    DIRECTION INOUT ;
+    USE GROUND ;
+    SHAPE ABUTMENT ;
+    PORT
+      LAYER met1 ;
+        RECT 0.000 -0.240 1.380 0.240 ;
+    END
+  END VGND
+  PIN VNB
+    DIRECTION INOUT ;
+    USE GROUND ;
+    PORT
+      LAYER pwell ;
+        RECT 0.005 0.105 1.355 1.015 ;
+        RECT 0.150 -0.085 0.320 0.105 ;
+    END
+  END VNB
+  PIN VPB
+    DIRECTION INOUT ;
+    USE POWER ;
+    PORT
+      LAYER nwell ;
+        RECT -0.190 1.305 1.570 2.910 ;
+    END
+  END VPB
+  PIN VPWR
+    DIRECTION INOUT ;
+    USE POWER ;
+    SHAPE ABUTMENT ;
+    PORT
+      LAYER met1 ;
+        RECT 0.000 2.480 1.380 2.960 ;
+    END
+  END VPWR
+  PIN Y
+    DIRECTION OUTPUT ;
+    USE SIGNAL ;
+    ANTENNADIFFAREA 0.435500 ;
+    PORT
+      LAYER li1 ;
+        RECT 0.095 1.665 0.425 2.450 ;
+        RECT 0.095 1.495 0.775 1.665 ;
+        RECT 0.605 0.895 0.775 1.495 ;
+        RECT 0.515 0.255 0.845 0.895 ;
+    END
+  END Y
+  OBS
+      LAYER li1 ;
+        RECT 0.000 2.635 1.380 2.805 ;
+        RECT 0.955 1.495 1.285 2.635 ;
+        RECT 0.105 0.085 0.345 0.895 ;
+        RECT 1.015 0.085 1.285 0.895 ;
+        RECT 0.000 -0.085 1.380 0.085 ;
+  END
+END sky130_fd_sc_hd__nor2_1
+
+MACRO sky130_fd_sc_hd__xor2_1
+  CLASS CORE ;
+  FOREIGN sky130_fd_sc_hd__xor2_1 ;
+  ORIGIN 0.000 0.000 ;
+  SIZE 3.220 BY 2.720 ;
+  SYMMETRY X Y R90 ;
+  SITE unithd ;
+  PIN A
+    DIRECTION INPUT ;
+    USE SIGNAL ;
+    ANTENNAGATEAREA 0.495000 ;
+    PORT
+      LAYER li1 ;
+        RECT 0.840 1.075 1.390 1.275 ;
+    END
+  END A
+  PIN B
+    DIRECTION INPUT ;
+    USE SIGNAL ;
+    ANTENNAGATEAREA 0.495000 ;
+    PORT
+      LAYER li1 ;
+        RECT 0.425 1.445 1.730 1.615 ;
+        RECT 0.425 0.995 0.670 1.445 ;
+        RECT 1.560 1.245 1.730 1.445 ;
+        RECT 1.560 1.075 1.935 1.245 ;
+    END
+  END B
+  PIN VGND
+    DIRECTION INOUT ;
+    USE GROUND ;
+    SHAPE ABUTMENT ;
+    PORT
+      LAYER met1 ;
+        RECT 0.000 -0.240 3.220 0.240 ;
+    END
+  END VGND
+  PIN VNB
+    DIRECTION INOUT ;
+    USE GROUND ;
+    PORT
+      LAYER pwell ;
+        RECT 0.045 0.105 3.215 1.015 ;
+        RECT 0.145 -0.085 0.315 0.105 ;
+    END
+  END VNB
+  PIN VPB
+    DIRECTION INOUT ;
+    USE POWER ;
+    PORT
+      LAYER nwell ;
+        RECT -0.190 1.305 3.410 2.910 ;
+    END
+  END VPB
+  PIN VPWR
+    DIRECTION INOUT ;
+    USE POWER ;
+    SHAPE ABUTMENT ;
+    PORT
+      LAYER met1 ;
+        RECT 0.000 2.480 3.220 2.960 ;
+    END
+  END VPWR
+  PIN X
+    DIRECTION OUTPUT ;
+    USE SIGNAL ;
+    ANTENNADIFFAREA 0.800500 ;
+    PORT
+      LAYER li1 ;
+        RECT 2.815 1.535 3.135 2.465 ;
+        RECT 2.505 1.365 3.135 1.535 ;
+        RECT 2.505 0.485 2.675 1.365 ;
+        RECT 1.720 0.315 2.675 0.485 ;
+    END
+  END X
+  OBS
+      LAYER li1 ;
+        RECT 0.000 2.635 3.220 2.805 ;
+        RECT 0.085 1.785 0.465 2.465 ;
+        RECT 1.055 1.785 1.225 2.635 ;
+        RECT 1.395 1.955 1.725 2.465 ;
+        RECT 1.895 2.125 2.065 2.635 ;
+        RECT 2.235 1.955 2.635 2.465 ;
+        RECT 1.395 1.785 2.635 1.955 ;
+        RECT 0.085 0.825 0.255 1.785 ;
+        RECT 2.105 0.825 2.335 1.325 ;
+        RECT 0.085 0.655 2.335 0.825 ;
+        RECT 0.135 0.085 0.465 0.475 ;
+        RECT 0.635 0.335 0.805 0.655 ;
+        RECT 0.975 0.085 1.305 0.475 ;
+        RECT 2.845 0.085 3.135 0.920 ;
+        RECT 0.000 -0.085 3.220 0.085 ;
+  END
+END sky130_fd_sc_hd__xor2_1
+
+MACRO sky130_fd_sc_hd__dfxtp_1
+  CLASS CORE ;
+  FOREIGN sky130_fd_sc_hd__dfxtp_1 ;
+  ORIGIN 0.000 0.000 ;
+  SIZE 7.360 BY 2.720 ;
+  SYMMETRY X Y R90 ;
+  SITE unithd ;
+  PIN CLK
+    DIRECTION INPUT ;
+    USE CLOCK ;
+    ANTENNAGATEAREA 0.159000 ;
+    PORT
+      LAYER li1 ;
+        RECT 0.090 0.975 0.440 1.625 ;
+    END
+  END CLK
+  PIN D
+    DIRECTION INPUT ;
+    USE SIGNAL ;
+    ANTENNAGATEAREA 0.126000 ;
+    PORT
+      LAYER li1 ;
+        RECT 1.370 0.715 1.650 1.665 ;
+    END
+  END D
+  PIN VGND
+    DIRECTION INOUT ;
+    USE GROUND ;
+    SHAPE ABUTMENT ;
+    PORT
+      LAYER met1 ;
+        RECT 0.000 -0.240 7.360 0.240 ;
+    END
+  END VGND
+  PIN VNB
+    DIRECTION INOUT ;
+    USE GROUND ;
+    PORT
+      LAYER pwell ;
+        RECT 3.520 0.785 4.430 1.005 ;
+        RECT 5.965 0.785 7.315 1.015 ;
+        RECT 0.005 0.105 7.315 0.785 ;
+        RECT 0.145 -0.085 0.315 0.105 ;
+    END
+  END VNB
+  PIN VPB
+    DIRECTION INOUT ;
+    USE POWER ;
+    PORT
+      LAYER nwell ;
+        RECT -0.190 1.305 7.550 2.910 ;
+    END
+  END VPB
+  PIN VPWR
+    DIRECTION INOUT ;
+    USE POWER ;
+    SHAPE ABUTMENT ;
+    PORT
+      LAYER met1 ;
+        RECT 0.000 2.480 7.360 2.960 ;
+    END
+  END VPWR
+  PIN Q
+    DIRECTION OUTPUT ;
+    USE SIGNAL ;
+    ANTENNADIFFAREA 0.429000 ;
+    PORT
+      LAYER li1 ;
+        RECT 6.885 1.575 7.215 2.420 ;
+        RECT 6.885 1.495 7.275 1.575 ;
+        RECT 7.060 1.445 7.275 1.495 ;
+        RECT 7.105 0.865 7.275 1.445 ;
+        RECT 7.050 0.825 7.275 0.865 ;
+        RECT 6.895 0.740 7.275 0.825 ;
+        RECT 6.895 0.305 7.225 0.740 ;
+    END
+  END Q
+  OBS
+      LAYER li1 ;
+        RECT 0.000 2.635 7.360 2.805 ;
+        RECT 0.175 1.965 0.345 2.465 ;
+        RECT 0.515 2.135 0.845 2.635 ;
+        RECT 0.175 1.795 0.840 1.965 ;
+        RECT 0.610 0.805 0.840 1.795 ;
+        RECT 0.175 0.635 0.840 0.805 ;
+        RECT 0.175 0.345 0.345 0.635 ;
+        RECT 0.515 0.085 0.845 0.465 ;
+        RECT 1.015 0.345 1.200 2.465 ;
+        RECT 1.440 2.175 1.705 2.635 ;
+        RECT 1.875 2.040 2.125 2.465 ;
+        RECT 2.335 2.190 3.440 2.360 ;
+        RECT 1.820 1.910 2.125 2.040 ;
+        RECT 1.820 0.805 1.990 1.910 ;
+        RECT 2.160 1.125 2.400 1.720 ;
+        RECT 2.570 1.655 3.100 2.020 ;
+        RECT 2.570 0.955 2.740 1.655 ;
+        RECT 3.270 1.575 3.440 2.190 ;
+        RECT 3.610 1.835 3.780 2.635 ;
+        RECT 3.950 2.135 4.200 2.465 ;
+        RECT 4.425 2.165 5.310 2.335 ;
+        RECT 3.270 1.485 3.780 1.575 ;
+        RECT 1.820 0.675 2.045 0.805 ;
+        RECT 2.215 0.735 2.740 0.955 ;
+        RECT 2.910 1.315 3.780 1.485 ;
+        RECT 1.455 0.085 1.705 0.545 ;
+        RECT 1.875 0.535 2.045 0.675 ;
+        RECT 2.910 0.535 3.080 1.315 ;
+        RECT 3.610 1.245 3.780 1.315 ;
+        RECT 3.290 1.065 3.490 1.095 ;
+        RECT 3.950 1.065 4.120 2.135 ;
+        RECT 4.290 1.245 4.480 1.965 ;
+        RECT 3.290 0.765 4.120 1.065 ;
+        RECT 4.650 1.035 4.970 1.995 ;
+        RECT 1.875 0.365 2.210 0.535 ;
+        RECT 2.405 0.365 3.080 0.535 ;
+        RECT 3.400 0.085 3.770 0.585 ;
+        RECT 3.950 0.535 4.120 0.765 ;
+        RECT 4.505 0.705 4.970 1.035 ;
+        RECT 5.140 1.325 5.310 2.165 ;
+        RECT 5.490 2.135 5.805 2.635 ;
+        RECT 6.035 1.905 6.375 2.465 ;
+        RECT 5.480 1.530 6.375 1.905 ;
+        RECT 6.545 1.625 6.715 2.635 ;
+        RECT 6.185 1.325 6.375 1.530 ;
+        RECT 5.140 0.995 6.015 1.325 ;
+        RECT 6.185 0.995 6.935 1.325 ;
+        RECT 5.140 0.535 5.310 0.995 ;
+        RECT 6.185 0.825 6.385 0.995 ;
+        RECT 3.950 0.365 4.355 0.535 ;
+        RECT 4.525 0.365 5.310 0.535 ;
+        RECT 5.585 0.085 5.795 0.615 ;
+        RECT 6.055 0.300 6.385 0.825 ;
+        RECT 6.555 0.085 6.725 0.695 ;
+        RECT 0.000 -0.085 7.360 0.085 ;
+      LAYER met1 ;
+        RECT 0.570 1.940 0.860 1.985 ;
+        RECT 2.670 1.940 2.960 1.985 ;
+        RECT 4.240 1.940 4.530 1.985 ;
+        RECT 0.570 1.800 4.530 1.940 ;
+        RECT 0.570 1.755 0.860 1.800 ;
+        RECT 2.670 1.755 2.960 1.800 ;
+        RECT 4.240 1.755 4.530 1.800 ;
+        RECT 0.965 1.600 1.255 1.645 ;
+        RECT 2.155 1.600 2.445 1.645 ;
+        RECT 4.675 1.600 4.965 1.645 ;
+        RECT 0.965 1.460 4.965 1.600 ;
+        RECT 0.965 1.415 1.255 1.460 ;
+        RECT 2.155 1.415 2.445 1.460 ;
+        RECT 4.675 1.415 4.965 1.460 ;
+  END
+END sky130_fd_sc_hd__dfxtp_1
+
+MACRO sky130_fd_sc_hd__conb_1
+  CLASS CORE ;
+  FOREIGN sky130_fd_sc_hd__conb_1 ;
+  ORIGIN 0.000 0.000 ;
+  SIZE 1.380 BY 2.720 ;
+  SYMMETRY X Y R90 ;
+  SITE unithd ;
+  PIN VGND
+    DIRECTION INOUT ;
+    USE GROUND ;
+    SHAPE ABUTMENT ;
+    PORT
+      LAYER met1 ;
+        RECT 0.000 -0.240 1.380 0.240 ;
+    END
+  END VGND
+  PIN VNB
+    DIRECTION INOUT ;
+    USE GROUND ;
+    PORT
+      LAYER pwell ;
+        RECT 0.145 -0.085 0.315 0.085 ;
+    END
+  END VNB
+  PIN VPB
+    DIRECTION INOUT ;
+    USE POWER ;
+    PORT
+      LAYER nwell ;
+        RECT -0.190 1.305 1.570 2.910 ;
+    END
+  END VPB
+  PIN VPWR
+    DIRECTION INOUT ;
+    USE POWER ;
+    SHAPE ABUTMENT ;
+    PORT
+      LAYER met1 ;
+        RECT 0.000 2.480 1.380 2.960 ;
+    END
+  END VPWR
+  PIN HI
+    DIRECTION OUTPUT ;
+    USE SIGNAL ;
+    PORT
+      LAYER li1 ;
+        RECT 0.085 0.255 0.605 1.740 ;
+    END
+  END HI
+  PIN LO
+    DIRECTION OUTPUT ;
+    USE SIGNAL ;
+    PORT
+      LAYER li1 ;
+        RECT 0.775 0.915 1.295 2.465 ;
+    END
+  END LO
+  OBS
+      LAYER li1 ;
+        RECT 0.000 2.635 1.380 2.805 ;
+        RECT 0.275 1.910 0.605 2.635 ;
+        RECT 0.775 0.085 1.115 0.745 ;
+        RECT 0.000 -0.085 1.380 0.085 ;
+  END
+END sky130_fd_sc_hd__conb_1
+
+END LIBRARY

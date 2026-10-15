@@ -59,6 +59,7 @@ void Pass_opentimer::setup() {
 }
 
 Pass_opentimer::Pass_opentimer(const Eprp_var& var) : Pass("pass.opentimer", var) {
+  physical_rc_ = var.physical_rc;
   parse_critical_options(var);
   const auto load_text = std::string(var.get("io_load", "-1"));
   char*      load_end  = nullptr;

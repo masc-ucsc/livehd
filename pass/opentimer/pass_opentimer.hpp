@@ -12,6 +12,7 @@
 #include "hhds/graph.hpp"
 #include "ot/timer/timer.hpp"
 #include "pass.hpp"
+#include "physical_rc.hpp"
 #include "sta_cache.hpp"
 #include "vcd_power.hpp"
 
@@ -39,7 +40,9 @@ protected:
   // in this set, so the hier walk descends into them. Empty in flat mode.
   ankerl::unordered_dense::set<hhds::Gid> opaque_gids_;
 
-  ot::Timer timer;
+  ot::Timer                                           timer;
+  std::shared_ptr<const livehd::physical::Parasitics> physical_rc_;
+  void                                                apply_physical_rc(const std::shared_ptr<hhds::Graph>& graph);
 
   int    margin;  // % margin to mark nodes
   double freq;

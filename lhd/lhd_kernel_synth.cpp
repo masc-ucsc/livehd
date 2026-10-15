@@ -36,6 +36,7 @@
 // seeded and deterministic).
 
 #include <algorithm>
+#include <cmath>
 #include <cstdlib>
 #include <filesystem>
 #include <format>
@@ -49,13 +50,16 @@
 #include <vector>
 
 #include "absl/container/flat_hash_set.h"
-#include "rapidjson/document.h"
 #include "attrs.hpp"
 #include "diag.hpp"
 #include "graph_library_singleton.hpp"
 #include "lhd_kernel_internal.hpp"
 #include "node_util.hpp"
 #include "pass.hpp"
+#include "pass/place/place.hpp"
+#include "rapidjson/document.h"
+#include "rapidjson/stringbuffer.h"
+#include "rapidjson/writer.h"
 #include "synth_policy.hpp"
 
 namespace lhd {
@@ -63,6 +67,82 @@ namespace lhd {
 namespace {
 
 bool truthy(std::string_view v) { return !v.empty() && v != "false" && v != "0" && v != "off"; }
+
+livehd::placement::Options placement_options(const Options& opts) {
+  livehd::placement::Options out;
+  auto                       number = [&](std::string_view key, std::string_view fallback) {
+    const auto   text  = synth_set(opts, key, fallback);
+    char*        end   = nullptr;
+    const double value = std::strtod(text.c_str(), &end);
+    if (end != text.c_str() + text.size() || end == text.c_str() || !std::isfinite(value)) {
+      throw Lhd_error{"usage", "invalid synth." + std::string(key) + ": " + text, "expected a finite number"};
+    }
+    return value;
+  };
+  auto integer = [&](std::string_view key, std::string_view fallback) {
+    const double value = number(key, fallback);
+    if (value < 0 || value > 1000000 || std::floor(value) != value) {
+      throw Lhd_error{"usage", "invalid synth." + std::string(key), "expected a nonnegative integer <= 1000000"};
+    }
+    return static_cast<int>(value);
+  };
+  std::string lefs = synth_set(opts, "lef", "");
+  if (lefs.empty()) {
+    const char* tech = std::getenv("HAGENT_TECH_DIR");
+    if (tech == nullptr || *tech == '\0') {
+      throw Lhd_error{"missing_file", "placement needs synth.lef or $HAGENT_TECH_DIR", "set synth.lef=tech.lef,cells.lef"};
+    }
+    lefs = (fs::path(tech) / "../techlef/sky130_fd_sc_hd__nom.tlef").string() + ","
+           + (fs::path(tech) / "../lef/sky130_fd_sc_hd.lef").string();
+  }
+  size_t begin = 0;
+  for (;;) {
+    const auto comma = lefs.find(',', begin);
+    auto       path  = lefs.substr(begin, comma == std::string::npos ? comma : comma - begin);
+    if (path.empty()) {
+      throw Lhd_error{"usage", "empty entry in synth.lef", "expected tech.lef,cells.lef"};
+    }
+    out.lefs.push_back(path);
+    if (comma == std::string::npos) {
+      break;
+    }
+    begin = comma + 1;
+  }
+  check_inputs_exist(out.lefs);
+  out.floorplan = synth_set(opts, "place.floorplan", "");
+  if (!out.floorplan.empty()) {
+    check_inputs_exist({out.floorplan});
+  }
+  const auto mode = synth_set(opts, "place.mode", "full");
+  if (mode != "full" && mode != "gp") {
+    throw Lhd_error{"usage", "synth.place.mode must be full or gp", ""};
+  }
+  out.full        = mode == "full";
+  out.utilization = number("place.utilization", "0.5");
+  out.aspect      = number("place.aspect", "1");
+  out.density     = number("place.density", "0.8");
+  out.iterations  = integer("place.iterations", "500");
+  out.bins        = integer("place.bins", "32");
+  out.threads     = integer("place.threads", "1");
+  const auto rc   = synth_set(opts, "place.wire_rc", "");
+  if (!rc.empty()) {
+    char* end             = nullptr;
+    out.resistance_ohm_um = std::strtod(rc.c_str(), &end);
+    if (end == rc.c_str() || *end != ',') {
+      throw Lhd_error{"usage", "invalid synth.place.wire_rc", "expected ohm/um,fF/um"};
+    }
+    const auto* cap       = end + 1;
+    out.capacitance_ff_um = std::strtod(cap, &end);
+    if (end == cap || *end != '\0' || !std::isfinite(out.resistance_ohm_um) || !std::isfinite(out.capacitance_ff_um)
+        || out.resistance_ohm_um < 0 || out.capacitance_ff_um < 0) {
+      throw Lhd_error{"usage", "invalid synth.place.wire_rc", "expected nonnegative ohm/um,fF/um"};
+    }
+  }
+  if (truthy(synth_set(opts, "place.resize", "false"))) {
+    throw Lhd_error{"unsupported", "synth.place.resize is not implemented yet", ""};
+  }
+  return out;
+}
 
 // The timing target the run was asked to meet against what STA measured, so a
 // reader (and the delay-driven decisions that feed on it) can tell "target met",
@@ -80,7 +160,7 @@ std::string timing_target_json(const std::string& abc_qor, const std::string& st
       || !sta.HasMember("time_unit") || !sta["time_unit"].IsString()) {
     return {};
   }
-  const std::string unit = sta["time_unit"].GetString();
+  const std::string unit  = sta["time_unit"].GetString();
   const double      to_ps = unit == "ns" ? 1e3 : unit == "us" ? 1e6 : unit == "ps" ? 1.0 : unit == "fs" ? 1e-3 : 0.0;
   const auto&       top   = sta["designs"][0];
   if (to_ps == 0.0 || !top.IsObject() || !top.HasMember("max_delay") || !top["max_delay"].IsNumber()) {
@@ -93,7 +173,7 @@ std::string timing_target_json(const std::string& abc_qor, const std::string& st
     rapidjson::Document abc;
     abc.Parse(abc_qor.c_str());
     if (!abc.HasParseError() && abc.IsObject() && abc.HasMember("delay_target") && abc["delay_target"].IsString()) {
-      const std::string t = abc["delay_target"].GetString();
+      const std::string t   = abc["delay_target"].GetString();
       char*             end = nullptr;
       const double      v   = std::strtod(t.c_str(), &end);
       if (!t.empty() && end != t.c_str() && v > 0) {
@@ -103,7 +183,7 @@ std::string timing_target_json(const std::string& abc_qor, const std::string& st
     }
   }
   if (source == "none" && !sdc_path.empty()) {
-    std::ifstream in(sdc_path);
+    std::ifstream     in(sdc_path);
     const std::string text{std::istreambuf_iterator<char>(in), {}};
     if (const auto at = text.find("-period"); at != std::string::npos) {
       char*        end = nullptr;
@@ -118,19 +198,20 @@ std::string timing_target_json(const std::string& abc_qor, const std::string& st
   if (source == "none") {
     return std::format(R"({{"source":"none","achieved_ps":{:.1f}}})", achieved);
   }
-  const double slack = target - achieved;
-  const bool   met   = slack >= 0;
+  const double slack       = target - achieved;
+  const bool   met         = slack >= 0;
   // Beyond 25 % over, the timing objective is degenerate: every adder/shifter
   // choice lands on the same path, so trials rank on noise.
-  const bool unreachable = achieved > target * 1.25;
+  const bool   unreachable = achieved > target * 1.25;
   if (unreachable) {
     livehd::diag::info("synth", "synth-target-unreachable", "unsupported")
-        .msg("timing target {:.0f} ps ({}) is out of reach: achieved {:.0f} ps (+{:.0f} %); delay-driven choices "
-             "are degenerate here -- relax the target or compare designs by delay instead",
-             target,
-             source,
-             achieved,
-             (achieved / target - 1.0) * 100.0)
+        .msg(
+            "timing target {:.0f} ps ({}) is out of reach: achieved {:.0f} ps (+{:.0f} %); delay-driven choices "
+            "are degenerate here -- relax the target or compare designs by delay instead",
+            target,
+            source,
+            achieved,
+            (achieved / target - 1.0) * 100.0)
         .emit();
   }
   return std::format(R"({{"source":"{}","target_ps":{:.1f},"achieved_ps":{:.1f},"slack_ps":{:.1f},"met":{},"unreachable":{}}})",
@@ -267,12 +348,23 @@ void synth_command(Options& opts, Result& res) {
   const bool        mapped_output = mapper_maps_cells(opts, mapper_method);
   const std::string liberty       = mapped_output ? resolve_liberty(opts) : std::string{};
   const bool        run_sta       = mapped_output && truthy(synth_set(opts, "opentimer", "true"));
+  const bool        run_place     = truthy(synth_set(opts, "place", "false"));
+  auto              place_options = run_place ? placement_options(opts) : livehd::placement::Options{};
+  if (run_place && !mapped_output) {
+    throw Lhd_error{"usage", "placement requires technology-mapped output", "use pass.usyn.tmap=abc"};
+  }
+  if (find_slot(opts.emit_dirs, "def") && (!run_place || !place_options.full)) {
+    throw Lhd_error{"usage", "def: output requires synth.place=true and synth.place.mode=full", ""};
+  }
   if (!mapped_output && truthy(synth_set(opts, "opentimer", ""))) {
     throw Lhd_error{"usage", "logical-only USYN cannot run OpenTimer", "use tmap=abc or synth.opentimer=false"};
   }
   const bool        run_reduce = truthy(synth_set(opts, "reduce", "false"));
   const std::string sdc        = synth_set(opts, "sdc", "");
   const std::string spef       = synth_set(opts, "spef", "");
+  if (run_place && !spef.empty()) {
+    throw Lhd_error{"usage", "synth.spef cannot be combined with generated placement RC", ""};
+  }
   {
     std::vector<std::string> extra;
     if (!sdc.empty()) {
@@ -426,9 +518,9 @@ void synth_command(Options& opts, Result& res) {
   }
   {
     Eprp_var::Eprp_dict labels;
-    labels["alg"]    = "synth";
-    labels["seed"]   = opts.seed;
-    labels["top"]    = top;
+    labels["alg"]        = "synth";
+    labels["seed"]       = opts.seed;
+    labels["top"]        = top;
     // The coloring profile follows the mapper: ABC wants the stop_* cuts (small
     // regions), the unate/domino mapper wants register-to-register colors.
     // Merged BEFORE the user's sets so an explicit pass.color.synth.* wins.
@@ -499,10 +591,10 @@ void synth_command(Options& opts, Result& res) {
       if (!first) {
         groups += ",";
       }
-      first   = false;
-      groups += "{\"module\":" + livehd::synth_attr::quote(graph->get_name())
-                + ",\"physical_instances\":" + std::to_string(occurrences[graph->get_gid()]) + ",\"specialized\":"
-                + (graph->get_name().find("__s_") != std::string_view::npos ? "true" : "false") + ",\"coloring\":";
+      first      = false;
+      groups    += "{\"module\":" + livehd::synth_attr::quote(graph->get_name())
+                   + ",\"physical_instances\":" + std::to_string(occurrences[graph->get_gid()]) + ",\"specialized\":"
+                   + (graph->get_name().find("__s_") != std::string_view::npos ? "true" : "false") + ",\"coloring\":";
       auto info  = graph->get_input_node().attr(livehd::attrs::coloring_info);
       groups    += info.has() ? std::string(info.get()) : "{}";
       if (auto policy = graph->get_input_node().attr(livehd::attrs::synth_policy); policy.has()) {
@@ -514,17 +606,18 @@ void synth_command(Options& opts, Result& res) {
         if (!member_first) {
           groups += ",";
         }
-        member_first  = false;
-        const auto sid = node.attr(hhds::attrs::srcid).has() ? node.attr(hhds::attrs::srcid).get() : 0;
-        groups       += std::format("{{\"node\":{},\"color\":{},\"source_id\":{}",
-                              node.get_debug_nid(),
-                              livehd::graph_util::node_color_of(node),
-                              sid);
+        member_first    = false;
+        const auto sid  = node.attr(hhds::attrs::srcid).has() ? node.attr(hhds::attrs::srcid).get() : 0;
+        groups         += std::format("{{\"node\":{},\"color\":{},\"source_id\":{}",
+                                      node.get_debug_nid(),
+                                      livehd::graph_util::node_color_of(node),
+                                      sid);
         // The source locator turns the id into the file and line a person can open.
         if (sid != 0) {
           const auto span = graph->source_locator().resolve_spans(static_cast<hhds::SourceId>(sid)).primary;
           if (!span.is_null()) {
-            groups += ",\"file\":" + livehd::synth_attr::quote(span.file) + ",\"line\":" + std::to_string(span.start_line.value_or(0));
+            groups
+                += ",\"file\":" + livehd::synth_attr::quote(span.file) + ",\"line\":" + std::to_string(span.start_line.value_or(0));
           }
         }
         if (auto a = node.attr(livehd::attrs::synth_policy); a.has()) {
@@ -607,6 +700,57 @@ void synth_command(Options& opts, Result& res) {
     throw Lhd_error{"internal", mapper_method + " produced an empty netlist library", ""};
   }
 
+  // ---- placement: one persistent flat graph for physical outputs and STA ----
+  hhds::GraphLibrary placed_library;
+  std::string        place_qor;
+  const std::string  place_qor_path = root + "/place/qor.json";
+  if (run_place) {
+    const auto found = std::find_if(net.graphs.begin(), net.graphs.end(), [&](const auto& g) { return g && g->get_name() == top; });
+    if (found == net.graphs.end()) {
+      throw Lhd_error{"internal", "mapped top missing before placement", ""};
+    }
+    place_options.output_dir = root + "/place";
+    if (user_workdir && opts.incremental) {
+      place_options.cache_dir = opts.workdir + "/place_cache";
+    }
+    const auto log = next_log_path(opts, "pass.place");
+    set_crash_context("pass.place", log);
+    livehd::placement::Result placed;
+    try {
+      Phase_timer   phase(res, "pass.place");
+      Stdout_to_log redirect(log);
+      placed = livehd::placement::place(**found, placed_library, place_options);
+    } catch (const std::exception& e) {
+      throw Lhd_error{"unsupported", std::string("placement failed: ") + e.what(), "see " + log};
+    }
+    set_crash_context({}, {});
+    res.recipe_steps.emplace_back("pass.place");
+    net.graphs      = {placed.graph};
+    net.physical_rc = placed.parasitics;
+    place_qor       = placed.qor;
+    placed_library.save(net_dir);
+    for (const auto& path : place_options.lefs) {
+      res.inputs.push_back(path);
+    }
+    if (!place_options.floorplan.empty()) {
+      res.inputs.push_back(place_options.floorplan);
+    }
+    if (user_workdir) {
+      res.outputs.push_back(place_qor_path);
+      if (place_options.full) {
+        res.outputs.push_back(root + "/place/out.def");
+      }
+    }
+    if (const auto* def_out = find_slot(opts.emit_dirs, "def")) {
+      ensure_dir(def_out->path);
+      const auto destination = fs::path(def_out->path) / "out.def";
+      if (canon(destination.string()) != canon(root + "/place/out.def")) {
+        fs::copy_file(root + "/place/out.def", destination, fs::copy_options::overwrite_existing);
+      }
+      res.outputs.push_back(destination.string());
+    }
+  }
+
   // ---- 4. STA -----------------------------------------------------------------
   const std::string timing_path = root + "/timing.json";
   std::string       sta_qor;
@@ -634,11 +778,54 @@ void synth_command(Options& opts, Result& res) {
     }
     run_step("pass.opentimer", net, labels, opts, res);
     if (labels["critical"] == "true" || labels["critical"] == "1") {
-      livehd::Hhds_graph_library::save(net_dir);
+      if (run_place) {
+        placed_library.save(net_dir);
+      } else {
+        livehd::Hhds_graph_library::save(net_dir);
+      }
     }
     sta_qor = slurp_json(timing_path);
     if (user_workdir && !sta_qor.empty()) {
       res.outputs.push_back(timing_path);
+    }
+  }
+
+  if (run_place) {
+    rapidjson::Document placement, timing;
+    placement.Parse(place_qor.c_str());
+    timing.Parse(sta_qor.c_str());
+    auto& allocator = placement.GetAllocator();
+    if (!timing.HasParseError() && timing.IsObject() && timing.HasMember("designs") && timing["designs"].IsArray()
+        && !timing["designs"].Empty()) {
+      const auto& design = timing["designs"][0];
+      for (const auto* metric : {"wns", "tns"}) {
+        rapidjson::Value value;
+        if (design.HasMember(metric) && design[metric].IsNumber()) {
+          value.SetDouble(design[metric].GetDouble());
+        }
+        placement.AddMember(rapidjson::Value(metric, allocator), value, allocator);
+      }
+      if (timing.HasMember("time_unit")) {
+        placement.AddMember("time_unit", rapidjson::Value(timing["time_unit"], allocator), allocator);
+      }
+    }
+    rapidjson::StringBuffer                    buffer;
+    rapidjson::Writer<rapidjson::StringBuffer> writer(buffer);
+    placement.Accept(writer);
+    place_qor = buffer.GetString();
+    std::ofstream output(place_qor_path);
+    output << place_qor << '\n';
+    output.close();
+    if (!output) {
+      throw Lhd_error{"io", "cannot write placement QoR", place_qor_path};
+    }
+    if (report_emit != nullptr) {
+      ensure_dir(report_emit->path);
+      const auto destination = fs::path(report_emit->path) / "placement.json";
+      if (canon(destination.string()) != canon(place_qor_path)) {
+        fs::copy_file(place_qor_path, destination, fs::copy_options::overwrite_existing);
+      }
+      res.outputs.push_back(destination.string());
     }
   }
 
@@ -655,6 +842,10 @@ void synth_command(Options& opts, Result& res) {
                              sta_qor.empty() ? std::string{} : std::format(R"(,"sta":{})", sta_qor),
                              timing_target.empty() ? std::string{} : std::format(R"(,"timing_target":{})", timing_target),
                              mapper_qor.empty() ? std::string{} : std::format(R"(,"{}":{})", mapper->report, mapper_qor));
+  if (!place_qor.empty()) {
+    res.qor_json.pop_back();
+    res.qor_json += ",\"place\":" + place_qor + "}";
+  }
   harvest_abc_incremental(res);           // the envelope's `incremental.abc` (one place for every reuse tier)
   harvest_sta_incremental(res, sta_qor);  // ... and `incremental.sta`
   if (report_emit != nullptr) {

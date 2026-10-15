@@ -1,0 +1,12 @@
+diff --git a/dreamplace/ops/BUILD.bazel b/dreamplace/ops/BUILD.bazel
+--- a/dreamplace/ops/BUILD.bazel
++++ b/dreamplace/ops/BUILD.bazel
+@@ -63,7 +63,7 @@
+     }),
+     defines = ["DREAMPLACE_TORCH_FREE"],
+     includes = ["."],
+-    deps = ["@coin-or-lemon//:graph"] + select({
++    deps = ["@dreamplace_lemon//:graph"] + select({
+         ":openmp": ["@openmp"],
+         "//conditions:default": [],
+     }),

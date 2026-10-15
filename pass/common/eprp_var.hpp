@@ -14,6 +14,10 @@
 #include "lnast.hpp"
 #include "str_tools.hpp"
 
+namespace livehd::physical {
+struct Parasitics;
+}
+
 struct eprp_casecmp_str {
   struct nocase_compare {
     bool operator()(const unsigned char& c1, const unsigned char& c2) const { return std::tolower(c1) < std::tolower(c2); }
@@ -27,12 +31,14 @@ class Eprp_var {
 public:
   using Eprp_dict   = absl::flat_hash_map<std::string, std::string>;
   using Eprp_graphs = std::vector<std::shared_ptr<hhds::Graph>>;
-  using Eprp_lnasts = std::vector<std::shared_ptr<Lnast> >;
+  using Eprp_lnasts = std::vector<std::shared_ptr<Lnast>>;
 
-  Eprp_dict   dict;
-  Eprp_dict   stage_dict;
-  Eprp_graphs graphs;
-  Eprp_lnasts lnasts;
+  Eprp_dict                                           dict;
+  Eprp_dict                                           stage_dict;
+  Eprp_graphs                                         graphs;
+  Eprp_lnasts                                         lnasts;
+  // Typed in-memory placement RC, consumed by pass.opentimer. No file round trip.
+  std::shared_ptr<const livehd::physical::Parasitics> physical_rc;
 
   // Optional stable ordering for a mixed forest reconstructed from persisted
   // and freshly parsed units. pass.upass applies it after lambda extraction,
@@ -50,6 +56,7 @@ public:
     stage_dict.clear();
     graphs.clear();
     lnasts.clear();
+    physical_rc.reset();
     lnast_order_hint.clear();
   }
 

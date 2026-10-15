@@ -190,6 +190,7 @@ cc_library(
         "//pass/color:pass_color",
         "//pass/common:pass",
         "//pass/opentimer:pass_opentimer",
+        "//pass/place",
         "//pass/cprop:pass_cprop",
         "//pass/enableopt:pass_enableopt",
         "//pass/isabelle:pass_isabelle",
@@ -251,6 +252,7 @@ cc_binary(
     ],
     copts = COPTS,
     data = [
+        "@dreamplace//thirdparty/flute:flute",
         "//ware:cgen_memory_rtl",
         ":sim_runtime_hdrs",
         "//inou/cgen:llvm_sim_link",

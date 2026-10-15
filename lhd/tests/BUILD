@@ -2517,3 +2517,20 @@ sh_test(
     srcs = ["cvc5_profiles_smoke.py"],
     data = ["//lhd"],
 )
+
+sh_test(
+    name = "lhd_placement_smoke",
+    size = "small",
+    timeout = "short",
+    srcs = ["lhd_placement_smoke.py"],
+    data = ["//lhd", "//inou/lefdef:test_data"],
+)
+
+sh_test(
+    name = "lhd_placement_smoke_usyn",
+    size = "small",
+    timeout = "short",
+    srcs = ["lhd_placement_smoke.py"],
+    env = {"MAPPER": "usyn"},
+    data = ["//lhd", "//inou/lefdef:test_data"],
+)

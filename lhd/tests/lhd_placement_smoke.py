@@ -1,0 +1,80 @@
+#!/usr/bin/env python3
+"""Hermetic mapped-bus placement, RC-aware timing, and persistent reuse."""
+import json
+import os
+from pathlib import Path
+import subprocess
+
+root = Path(os.environ['TEST_TMPDIR']) / 'placement'
+root.mkdir()
+source = root / 'dut.v'
+source.write_text('module dut(input [3:0] a,b, output [3:0] y);\n'
+                  'assign y=(a ^ b) & {a[2:0],a[3]};\nendmodule\n')
+sdc = root / 'timing.sdc'
+sdc.write_text('create_clock -name virtual -period 10\n'
+               'set_input_delay -clock virtual 0 [all_inputs]\n'
+               'set_output_delay -clock virtual 0 [all_outputs]\n')
+libdir = Path('inou/lefdef/tests/data')
+base = ['lhd/lhd', 'synth', str(source), '--top', 'dut',
+        '--set', f'synth.liberty={libdir}/sky130hd.lib',
+        '--set', f'synth.lef={libdir}/sky130hd.tlef,{libdir}/sky130hd.lef',
+        '--set', f'synth.sdc={sdc}', '--set', 'synth.place.iterations=80',
+        '--set', 'synth.place.bins=8', '--set', f'synth.mapper={os.environ.get("MAPPER", "abc")}', '--workdir', str(root/'W'), '-q']
+
+def run(name, extra, success=True):
+    result = root / f'{name}.json'
+    completed = subprocess.run(base + extra + ['--result-json', str(result)],
+                               capture_output=True, text=True, timeout=15)
+    data = json.loads(result.read_text())
+    assert (completed.returncode == 0) == success, (name, completed.returncode, data, completed.stderr)
+    return data
+
+cold = run('cold', ['--set', 'synth.place=true', '--emit-dir', f'def:{root}/def',
+                    '--emit', f'verilog:{root}/placed.v'])
+place = cold['qor']['place']
+assert place['legal'] and place['mode'] == 'full', place
+assert (root/'def/out.def').is_file()
+assert any(p['name'] == 'pass.place' for p in cold['phases']), cold['phases']
+sta = cold['qor']['sta']['designs'][0]
+assert sta['parasitics']['nets'] > 0 and sta['parasitics']['identity'] == place['rc_identity'], sta
+assert 'wns' in sta and 'tns' in sta, sta
+# A new process recovers RC from the persisted placed graph.
+replay_result = root / 'replay.json'
+subprocess.run(['lhd/lhd', 'pass', 'opentimer', f'lg:{root}/W/synth/net',
+                str(libdir/'sky130hd.lib'), str(sdc), '--top', cold['qor']['top'],
+                '--workdir', str(root/'replay'), '--result-json', str(replay_result), '-q'],
+               check=True, capture_output=True, timeout=15)
+replayed = json.loads(replay_result.read_text())['qor']['designs'][0]
+assert replayed['parasitics']['identity'] == place['rc_identity']
+assert replayed['max_delay'] == sta['max_delay']
+# Independent logical equivalence includes the hierarchy flattening and the
+# physical graph that was actually saved, rather than comparing checksums.
+subprocess.run(['lhd/lhd', 'pass', 'liberty', 'gensim', str(libdir/'sky130hd.lib'),
+                '--emit-dir', f'lg:{root}/models', '--workdir', str(root/'gensim'), '-q'],
+               check=True, capture_output=True, timeout=15)
+proof = root / 'proof.json'
+subprocess.run(['lhd/lhd', 'lec', '--impl', f'lg:{root}/W/synth/net', '--ref', f'verilog:{source}',
+                '--lib', f'lg:{root}/models', '--top', 'dut', '--set', 'formal.effort=proof', '--set', 'formal.timeout=5',
+                '--workdir', str(root/'lec'), '--result-json', str(proof), '-q'],
+               check=True, capture_output=True, timeout=15)
+proof_data = json.loads(proof.read_text())['lec']
+assert proof_data['verdict'] == 'proven-full' and not proof_data['bounded'], proof_data
+first_def = (root/'def/out.def').read_bytes()
+warm = run('warm', ['--set', 'synth.place=true', '--emit-dir', f'def:{root}/def'])
+assert warm['qor']['place']['incremental']['hit'], warm['qor']['place']
+assert first_def == (root/'def/out.def').read_bytes()
+assert warm['qor']['sta']['designs'][0]['parasitics']['identity'] == place['rc_identity']
+assert warm['incremental']['sta']['hits'] == 1, warm['incremental']
+rc = run('rc_change', ['--set', 'synth.place=true', '--set', 'synth.place.wire_rc=50,5'])
+assert rc['qor']['place']['rc_identity'] != place['rc_identity']
+assert rc['incremental']['sta']['hits'] == 0, rc['incremental']
+assert rc['qor']['sta']['designs'][0]['max_delay'] != sta['max_delay']
+disabled = run('disabled', ['--set', 'synth.place=true', '--set', 'lhd.incremental=false'])
+assert not disabled['qor']['place']['incremental']['enabled']
+gp = run('gp', ['--set', 'synth.place=true', '--set', 'synth.place.mode=gp'])
+assert gp['qor']['place']['timing_approximate']
+assert not (root/'W/synth/place/out.def').exists()
+run('bad_def', ['--set', 'synth.place=true', '--set', 'synth.place.mode=gp', '--emit-dir', f'def:{root}/bad'], False)
+plain = run('plain', [])
+assert 'place' not in plain['qor'], plain['qor']
+print('placement: legal DEF, bus connectivity, RC timing, warm/cold reuse, GP/default controls passed')

@@ -26,9 +26,11 @@
 
 namespace livehd::attrs {
 // Resolved source hints, retained independently of temporary numeric colors.
-struct synth_policy_t { using value_type = std::string; using storage = hhds::flat_storage; };
+struct synth_policy_t {
+  using value_type = std::string;
+  using storage    = hhds::flat_storage;
+};
 inline constexpr synth_policy_t synth_policy{};
-
 
 // Where an attribute legitimately lives — used by the graph_util pin setters to
 // assert (and, for `node`, statically reject) the wrong pin role at the call
@@ -184,6 +186,22 @@ struct place_t {
   using storage    = hhds::flat_storage;
 };
 inline constexpr place_t place{};
+struct placement_rc_t {
+  using value_type = std::string;
+  using storage    = hhds::flat_storage;
+};
+inline constexpr placement_rc_t placement_rc{};
+
+struct pin_place_t {
+  using value_type = Ann_place;
+  using storage    = hhds::flat_storage;
+};
+inline constexpr pin_place_t pin_place{};
+struct place_weight_t {
+  using value_type = double;
+  using storage    = hhds::flat_storage;
+};
+inline constexpr place_weight_t place_weight{};
 
 // Per-hierarchical-instance color (pass/color "hier" storage mode). Unlike
 // the flat `color` above (one value per node-in-a-def), this is keyed per
@@ -409,6 +427,12 @@ inline constexpr Attr_kind attr_kind<native_comb_boundary_t> = Attr_kind::node;
 template <>
 inline constexpr Attr_kind attr_kind<place_t> = Attr_kind::node;
 template <>
+inline constexpr Attr_kind attr_kind<placement_rc_t> = Attr_kind::node;
+template <>
+inline constexpr Attr_kind attr_kind<pin_place_t> = Attr_kind::any_pin;
+template <>
+inline constexpr Attr_kind attr_kind<place_weight_t> = Attr_kind::driver_pin;
+template <>
 inline constexpr Attr_kind attr_kind<hier_color_t> = Attr_kind::node;
 template <>
 inline constexpr Attr_kind attr_kind<coloring_info_t> = Attr_kind::node;
@@ -449,6 +473,9 @@ inline constexpr Attr_kind attr_kind<lut_t> = Attr_kind::node;
 // two cannot drift, and a new tag is one row here. `hhds::attrs::name` and
 // `hhds::attrs::srcid` are hhds-owned and handled by those two files directly.
 #define LIVEHD_FOR_EACH_ATTR_TAG(X) \
+  X(placement_rc)                   \
+  X(pin_place)                      \
+  X(place_weight)                   \
   X(bits)                           \
   X(pin_offset)                     \
   X(pin_name)                       \

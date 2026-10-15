@@ -57,6 +57,7 @@ TEST(AttrCarry, EveryNodeAttributeSurvivesARebuild) {
   src.attr(la::native_comb_boundary).set(la::native_comb_boundary_t::value_type{});
   src.attr(la::place).set(Ann_place{1.0F, 2.0F, 3.0F, 4.0F});
   src.attr(la::coloring_info).set(std::string{"info_blob"});
+  src.attr(la::placement_rc).set(std::string{"physical_rc_blob"});
   src.attr(la::simulation_init).set(std::string{"simulation_init_blob"});
   src.attr(la::proven).set(uint32_t{3});
   src.attr(la::runtime_check).set(uint32_t{5});
@@ -73,7 +74,7 @@ TEST(AttrCarry, EveryNodeAttributeSurvivesARebuild) {
   src.attr(la::legalize_inlined).set(std::string{"callee.split"});
   src.attr(la::comb_reach).set(std::string{"s 0 1\no 2 0\n"});
   gu::set_match(src, 9);  // the NODE overload of the dual-role `match`
-  static_assert(kNodeTagsStamped == 29, "a node-kind tag was added to LIVEHD_FOR_EACH_ATTR_TAG: stamp and check it here");
+  static_assert(kNodeTagsStamped == 30, "a node-kind tag was added to LIVEHD_FOR_EACH_ATTR_TAG: stamp and check it here");
 
   gu::carry_node_attrs(src, dst);
 
@@ -91,6 +92,7 @@ TEST(AttrCarry, EveryNodeAttributeSurvivesARebuild) {
   EXPECT_TRUE(dst.attr(la::place).has());
   EXPECT_EQ(dst.attr(la::place).get(), Ann_place(1.0F, 2.0F, 3.0F, 4.0F));
   EXPECT_EQ(dst.attr(la::coloring_info).get(), "info_blob");
+  EXPECT_EQ(dst.attr(la::placement_rc).get(), "physical_rc_blob");
   EXPECT_EQ(dst.attr(la::simulation_init).get(), "simulation_init_blob");
   EXPECT_EQ(dst.attr(la::proven).get(), 3u);
   EXPECT_EQ(dst.attr(la::runtime_check).get(), 5u);
@@ -120,18 +122,22 @@ TEST(AttrCarry, EveryPinAttributeSurvivesARebuild) {
   src.attr(la::bits).set(int32_t{13});
   src.attr(la::pin_signed).set();
   src.attr(la::pin_delay).set(float{2.5});
+  src.attr(la::pin_place).set(Ann_place{10, 20, 0, 0});
+  src.attr(la::place_weight).set(2.0);
   src.attr(la::match).set(uint32_t{42});
   src.attr(la::pin_name).set(std::string{"wire_x"});
   src.attr(la::pin_offset).set(int32_t{6});
   src.attr(la::time_range).set(la::time_range_t::value_type{.min = 0, .max = 3});
   src.attr(la::pending_time).set(la::pending_time_t::value_type{.min = 1, .max = 2});
-  static_assert(kPinTagsStamped == 8, "a pin-kind tag was added to LIVEHD_FOR_EACH_ATTR_TAG: stamp and check it here");
+  static_assert(kPinTagsStamped == 10, "a pin-kind tag was added to LIVEHD_FOR_EACH_ATTR_TAG: stamp and check it here");
 
   gu::carry_pin_attrs(src, dst);
 
   EXPECT_EQ(dst.attr(la::bits).get(), 13);
   EXPECT_TRUE(dst.attr(la::pin_signed).has());
   EXPECT_FLOAT_EQ(dst.attr(la::pin_delay).get(), 2.5F);
+  EXPECT_EQ(dst.attr(la::pin_place).get(), Ann_place(10, 20, 0, 0));
+  EXPECT_EQ(dst.attr(la::place_weight).get(), 2.0);
   EXPECT_EQ(dst.attr(la::match).get(), 42u);
   EXPECT_EQ(dst.attr(la::pin_name).get(), "wire_x");
   EXPECT_EQ(dst.attr(la::pin_offset).get(), 6);

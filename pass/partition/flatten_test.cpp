@@ -57,6 +57,27 @@ protected:
   }
 };
 
+TEST_F(FlattenAdmission, PhysicalNamesRetainTransparentInstanceScopes) {
+  invert.set_name("same_leaf");
+  auto root = make_graph(source, "physical_root");
+  auto left = instance(*root, child->get_io());
+  auto right = instance(*root, child->get_io());
+  left.get_master_node().set_name("__flat___left");
+  right.get_master_node().set_name("__flat___right");
+  left.connect_sink(root->get_output_pin("y"));
+  hhds::GraphLibrary destination;
+  const auto         flat = flatten_hierarchy(root.get(), &destination, "physical", nullptr, false, {}, {}, true);
+  ASSERT_TRUE(flat);
+  std::vector<std::string> names;
+  for (auto node : flat->body().nodes()) {
+    if (gu::type_op_of(node) == Ntype_op::Not) {
+      names.emplace_back(node.get_name());
+    }
+  }
+  std::sort(names.begin(), names.end());
+  EXPECT_EQ(names, (std::vector<std::string>{"__flat___left.same_leaf", "__flat___right.same_leaf"}));
+}
+
 TEST_F(FlattenAdmission, WideInputsKeepTheirPortsAndInstanceIdentity) {
   constexpr unsigned            count = 4096;
   auto                          wide  = make_graph(source, "wide_top");

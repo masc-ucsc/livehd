@@ -107,10 +107,11 @@ struct Ictx {
 class Flattener {
 public:
   Flattener(hhds::Graph* top, hhds::GraphLibrary* lib, livehd::partition::Flat_origin_map* origin, bool preserve_modules,
-            const std::unordered_set<hhds::Gid>& preserved_defs, const livehd::partition::Admission& admission)
+            const std::unordered_set<hhds::Gid>& preserved_defs, const livehd::partition::Admission& admission, bool physical_names)
       : top_(top)
       , lib_(lib)
       , preserve_modules_(preserve_modules)
+      , physical_names_(physical_names)
       , origin_(origin)
       , preserved_defs_(preserved_defs)
       , admission_(admission) {}
@@ -124,6 +125,7 @@ private:
   std::deque<Ictx>                    arena_;  // stable pointers
   bool                                failed_           = false;
   bool                                preserve_modules_ = false;
+  bool                                physical_names_   = false;
   // Optional flat-node -> (def, source node) sink. Filled at the single site
   // that mints a clone, so it cannot drift from node_map.
   livehd::partition::Flat_origin_map* origin_           = nullptr;
@@ -394,7 +396,8 @@ void Flattener::create_nodes(Ictx* ctx) {
         failed_ = true;
         return;
       }
-      auto* child       = make_ctx(n.get_subnode_graph().get(), ctx, n, ctx->prefix + gu::logical_instance_prefix(n));
+      const auto prefix = physical_names_ ? gu::default_instance_name(n) + "." : gu::logical_instance_prefix(n);
+      auto*      child  = make_ctx(n.get_subnode_graph().get(), ctx, n, ctx->prefix + prefix);
       ctx->child_ctx[n] = child;
       create_nodes(child);
       inline_stack_.erase(cgid);
@@ -774,9 +777,9 @@ std::shared_ptr<hhds::GraphIO> resolve_or_clone_subdef(hhds::GraphLibrary* outli
 
 std::shared_ptr<hhds::Graph> flatten_hierarchy(hhds::Graph* top, hhds::GraphLibrary* lib, std::string_view flat_name,
                                                Flat_origin_map* origin, bool preserve_modules,
-                                               const std::unordered_set<hhds::Gid>& preserved_defs,
-                                               const Admission&                     admission) try {
-  Flattener f(top, lib, origin, preserve_modules, preserved_defs, admission);
+                                               const std::unordered_set<hhds::Gid>& preserved_defs, const Admission& admission,
+                                               bool physical_names) try {
+  Flattener f(top, lib, origin, preserve_modules, preserved_defs, admission, physical_names);
   return f.run(flat_name);
 } catch (const Flatten_refused&) {
   return nullptr;

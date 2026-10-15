@@ -35,6 +35,7 @@ const std::vector<std::string_view> kOutputKinds{"ln",
                                                  "metadata",
                                                  "results",
                                                  "report",
+                                                 "def",
                                                  "diagnostics"};
 
 std::string canonical_kind(std::string_view kind) {

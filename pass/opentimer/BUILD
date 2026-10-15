@@ -39,6 +39,7 @@ genrule(
         "//pass/partition:partition_srcs",
         "//:MODULE.bazel",
         "//packages:opentimer.patch",
+        "//packages:opentimer-placement.patch",
     ],
     outs = ["sta_salt.hpp"],
     cmd = "h=$$(cat $(SRCS) | (shasum -a 256 2>/dev/null || sha256sum) | cut -c1-16); " +

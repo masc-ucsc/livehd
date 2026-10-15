@@ -326,6 +326,11 @@ void Pass_opentimer::time_work(Eprp_var& var) {
 
   auto       g              = selected.front();
   const auto annotation_top = g;
+  if (!pass.physical_rc_) {
+    if (auto stored = g->get_input_node().attr(livehd::attrs::placement_rc); stored.has()) {
+      pass.physical_rc_ = std::make_shared<livehd::physical::Parasitics>(livehd::physical::deserialize_parasitics(stored.get()));
+    }
+  }
 
   // A design compiled WITHOUT `compile.unroll` -- false is the DEFAULT, so this
   // is the ordinary path -- keeps ONE compact Sub standing for `count`
@@ -537,6 +542,7 @@ void Pass_opentimer::time_work(Eprp_var& var) {
   pass.setup_hier(g);
   pass.build_circuit(g);  // ensure_libs() runs here: a cache hit above never parses a Liberty
   pass.read_sdc_spef();
+  pass.apply_physical_rc(g);
   pass.prepare_critical_targets();
   pass.annotate_critical(g);
   pass.compute_timing(g);
@@ -1714,7 +1720,9 @@ void Pass_opentimer::build_circuit(const std::shared_ptr<hhds::Graph>& g) {
     }
     if (critical_ && launch_clock.empty()) {
       livehd::diag::err("pass.opentimer", "critical-clock-unresolved", "io")
-          .msg("native {} '{}' has no resolvable clock net", Ntype::get_name(op), livehd::graph_util::node_name_of(node.base_node()))
+          .msg("native {} '{}' has no resolvable clock net",
+               Ntype::get_name(op),
+               livehd::graph_util::node_name_of(node.base_node()))
           .fatal();
     }
     ++native_state_nodes_;
@@ -2323,7 +2331,7 @@ void Pass_opentimer::compute_timing(const std::shared_ptr<hhds::Graph>& g) {
   std::string j = std::format("{{\"module\":\"{}\"", jesc(report_module_.empty() ? std::string{g->get_name()} : report_module_));
   bool        timing_cells_complete = true;
   std::string incomplete_cell;
-  bool        area_cells_complete   = true;
+  bool        area_cells_complete = true;
   for (const auto corner : {ot::MIN, ot::MAX}) {
     const auto& celllib = timer.celllib(corner);
     for (const auto& [name, gate] : timer.gates()) {
@@ -2367,20 +2375,20 @@ void Pass_opentimer::compute_timing(const std::shared_ptr<hhds::Graph>& g) {
         for (const auto& arc : pin.timings) {
           // Directional arcs (combinational_rise/fall, async preset/clear) move the output one way:
           // their one table pair is complete. Pulse-width, period and tree-path records carry no delay.
-          const auto type       = arc.type.value_or(ot::TimingType::COMBINATIONAL);
-          const bool rise_pair  = arc.cell_rise && arc.rise_transition;
-          const bool fall_pair  = arc.cell_fall && arc.fall_transition;
-          const bool no_delay   = type == ot::TimingType::MIN_PULSE_WIDTH || type == ot::TimingType::MINIMUM_PERIOD
-                                || type == ot::TimingType::MAX_CLOCK_TREE_PATH || type == ot::TimingType::MIN_CLOCK_TREE_PATH;
-          const bool tables
-              = no_delay                                           ? true
-                : type == ot::TimingType::COMBINATIONAL_RISE       ? rise_pair
-                : type == ot::TimingType::COMBINATIONAL_FALL       ? fall_pair
-                : (type == ot::TimingType::PRESET || type == ot::TimingType::CLEAR) ? (rise_pair || fall_pair)
-                                                                    : (rise_pair && fall_pair);
+          const auto type      = arc.type.value_or(ot::TimingType::COMBINATIONAL);
+          const bool rise_pair = arc.cell_rise && arc.rise_transition;
+          const bool fall_pair = arc.cell_fall && arc.fall_transition;
+          const bool no_delay  = type == ot::TimingType::MIN_PULSE_WIDTH || type == ot::TimingType::MINIMUM_PERIOD
+                                 || type == ot::TimingType::MAX_CLOCK_TREE_PATH || type == ot::TimingType::MIN_CLOCK_TREE_PATH;
+          const bool tables    = no_delay                                                            ? true
+                                 : type == ot::TimingType::COMBINATIONAL_RISE                        ? rise_pair
+                                 : type == ot::TimingType::COMBINATIONAL_FALL                        ? fall_pair
+                                 : (type == ot::TimingType::PRESET || type == ot::TimingType::CLEAR) ? (rise_pair || fall_pair)
+                                                                                                     : (rise_pair && fall_pair);
           if (!arc.is_constraint() && !tables) {
             timing_cells_complete = false;
-            incomplete_cell       = gate.cell_name() + "/" + pin_name + " (arc from " + arc.related_pin + " lacks a delay/transition table)";
+            incomplete_cell
+                = gate.cell_name() + "/" + pin_name + " (arc from " + arc.related_pin + " lacks a delay/transition table)";
           }
         }
       }
@@ -2392,6 +2400,18 @@ void Pass_opentimer::compute_timing(const std::shared_ptr<hhds::Graph>& g) {
         .fatal();
   }
   j += clock_qor_json();
+  if (physical_rc_) {
+    j += std::format(",\"parasitics\":{{\"model\":\"placement_flute\",\"identity\":\"{}\",\"approximate\":{},\"nets\":{}}}",
+                     physical_rc_->identity,
+                     physical_rc_->approximate,
+                     physical_rc_->nets.size());
+    if (const auto wns = timer.report_wns(ot::MAX); wns && std::isfinite(*wns)) {
+      j += std::format(",\"wns\":{:.9g}", *wns);
+    }
+    if (const auto tns = timer.report_tns(ot::MAX); tns && std::isfinite(*tns)) {
+      j += std::format(",\"tns\":{:.9g}", *tns);
+    }
+  }
   if (const auto area = timer.report_area(); area_cells_complete && area && std::isfinite(*area) && *area >= 0) {
     j += std::format(",\"area\":{:.9g}", *area);
   }
@@ -2526,7 +2546,7 @@ std::string Pass_opentimer::cache_key(const std::shared_ptr<hhds::Graph>& g) con
     return {};
   }
   const uint64_t env = livehd::opentimer::Sta_cache::env_hash(timing_file_list, top_filter, hier_setting_, margin, stats_);
-  return std::format("{:016x}{:016x}{:016x}:load={:.9g}:critical={}:percent={:.9g}:targets={}:nodes={}",
+  return std::format("{:016x}{:016x}{:016x}:load={:.9g}:critical={}:percent={:.9g}:targets={}:nodes={}:physical={}",
                      d.h0,
                      d.h1,
                      env,
@@ -2534,7 +2554,8 @@ std::string Pass_opentimer::cache_key(const std::shared_ptr<hhds::Graph>& g) con
                      critical_,
                      critical_percent_,
                      targets_text_,
-                     annotation_identity(g));
+                     annotation_identity(g),
+                     physical_rc_ ? physical_rc_->identity : std::string{});
 }
 
 void Pass_opentimer::replay(const livehd::opentimer::Sta_record& rec) {
