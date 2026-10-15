@@ -49,7 +49,9 @@ test accum.run {
 }
 EOF
 
-"$LHD" sim "$work/staged.prp" --setup-only --workdir "$work/setup" -q >/dev/null
+# The structural greps below read the reference C++ (Slop) color bodies: pin
+# that backend for this setup. The executed runs further down use the default.
+"$LHD" sim "$work/staged.prp" --setup-only --set sim.tune.backend=slop --workdir "$work/setup" -q >/dev/null
 header="$(ls "$work"/setup/sim/*accum.hpp | head -1)"
 body="$(ls "$work"/setup/sim/*accum.cpp | head -1)"
 runtime="$(ls "$work"/setup/sim/*accum.color-runtime.hpp | head -1)"

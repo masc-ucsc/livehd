@@ -682,17 +682,18 @@ result, and an explicit `--set` always wins.
 | `sim.tune.dirty` | `auto`\|`on`\|`off` | `auto` = on | the cross-cycle color activation cache: a color runs only when an input changed, a flop commit compares before it writes, and a fully quiescent period exits early. `true`/`false`/`1`/`0` are accepted aliases |
 | `sim.tune.fence` | `auto`\|`none`\|N (0..2^20) | `auto` = `none` with dirty off, 16 with it on | fence a module used once into its own colors when it has at least N sites per interface word; `0` fences every such module. A fence pays only when dirty gating can skip what it isolates |
 | `sim.tune.live_words` | `auto`\|N (1..2^20) | `auto` = 256 | per-color live-value budget, in 64-bit words |
-| `sim.tune.backend` | `auto`\|`slop`\|`llvm` | `auto` = slop | color-kernel backend. `llvm` needs a clang host, and a color it cannot lower fails setup rather than falling back |
+| `sim.tune.backend` | `llvm`\|`slop`\|`auto` | `llvm` | color-kernel backend. `llvm` emits native color objects (a color it cannot lower fails setup rather than falling back); `slop` emits the reference C++ kernels; an explicit `auto` keeps its old meaning, the tuned decision, else slop (the tuner never trials the backend, so `auto` is slop unless a tune file pins one) |
 | `sim.tune.file` | PATH | "" | apply a vector written by `sim.tune.export` (§13.6) |
 | `sim.tune.export` | PATH | "" | write the applied vector, with its provenance, to PATH |
 | `sim.tune.profile_dir` | DIR | "" | drv.bin only: where a profiling run writes its raw run file |
 | `sim.tune.profile_stride` | N (0..2^20) | 0 = auto | drv.bin only, for tests: a fixed sampling stride with no jitter |
 
 `dirty`, `fence`, `live_words` and `backend` form the **tune vector**, printed
-canonically as `tv1:d=on;f=16;lw=256;be=slop` (that string IS the
+canonically as `tv1:d=on;f=16;lw=256;be=llvm` (that string IS the
 default: dirty gating on, because the large designs it exists for win with it,
 and small always-toggling DUTs such as lhdtrack's pin `sim.tune.dirty=off` or
-let the ladder take them to L0). The automatic ladder moves only `dirty` and
+let the ladder take them to L0; and the native LLVM color backend, ruling
+2026-10-15). The automatic ladder moves only `dirty` and
 `fence` today; `live_words` and `backend` are applied from `--set` or a tune
 file and are never trialed on their own.
 
@@ -929,7 +930,7 @@ user set it, or the implicit zero fill of a profiling run). The pretty output
 prints one line such as:
 
 ```
-sim.tune: applied d=on f=16 lw=256 be=slop (default) | I_s=0.12 q=0.00 pairs=812 | next setup: TRIAL d=off f=none
+sim.tune: applied d=on f=16 lw=256 be=llvm (default) | I_s=0.12 q=0.00 pairs=812 | next setup: TRIAL d=off f=none
 ```
 
 A generated simulator identifies itself: `<stem>.tune-id.cpp` bakes the
@@ -951,8 +952,8 @@ lhd sim DUT TB --workdir W --set sim.tune.profile=off --set sim.tune.file=design
 ```
 
 ```json
-{"schema":"lhd-sim-tune-file-1","vector":"tv1:d=on;f=0;lw=256;be=slop",
- "knobs":{"dirty":"on","fence":"0","live_words":"256","backend":"slop"},
+{"schema":"lhd-sim-tune-file-1","vector":"tv1:d=on;f=0;lw=256;be=llvm",
+ "knobs":{"dirty":"on","fence":"0","live_words":"256","backend":"llvm"},
  "provenance":{"structure":"...","converged":true,
                "stats":{"I_s":0.93,"I":0.91,"q":0.00,"pairs":812},"created":"..."}}
 ```

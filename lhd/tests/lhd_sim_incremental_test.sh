@@ -90,8 +90,14 @@ test top.hello(cycles:U20 = 4) {
 }
 EOF
 
+# Steps 1-7 pin the reference C++ (Slop) backend: they assert which generated
+# C++ sources a body edit rewrites and how the host build reuses their objects.
+# Under the default LLVM backend a circuit edit lands in a native color object
+# instead, so these source-level checks are about the Slop emitter.
+BE=(--set sim.tune.backend=slop)
+
 setup() {
-  "$LHD" sim "$W/tb.prp" --set compile.upass.inline=false --setup-only --workdir "$W/wd" >"$W/setup.log" 2>&1 \
+  "$LHD" sim "$W/tb.prp" "${BE[@]}" --set compile.upass.inline=false --setup-only --workdir "$W/wd" >"$W/setup.log" 2>&1 \
     || { cat "$W/setup.log" >&2; fail "lhd sim --setup-only failed"; }
 }
 
@@ -206,7 +212,7 @@ setup
   || fail "deleting the recorded artifact '$victim' did not force a re-emission — an incomplete tree reads as a hit"
 
 # ---- 6. compile-only stops at drv.bin; a second build compiles nothing -------
-if ! "$LHD" sim "$W/tb.prp" --run-only --set sim.compile_only=true --set sim.ninja=false --set sim.tune.profile=off \
+if ! "$LHD" sim "$W/tb.prp" --run-only "${BE[@]}" --set sim.compile_only=true --set sim.ninja=false --set sim.tune.profile=off \
   --diag-fmt pretty --workdir "$W/wd" >"$W/build1.log" 2>&1; then
   cat "$W/build1.log" >&2
   fail "generated simulator host build failed"
@@ -217,7 +223,7 @@ grep -qa "hello world" "$W/build1.log" && fail "compile-only executed the testbe
 
 # A second built-in build must neither compile nor link.
 touch "$W/build-marker"
-"$LHD" sim "$W/tb.prp" --run-only --set sim.compile_only=true \
+"$LHD" sim "$W/tb.prp" --run-only "${BE[@]}" --set sim.compile_only=true \
   --set sim.ninja=false --set sim.tune.profile=off --workdir "$W/wd" >"$W/build2.log" 2>&1 \
   || { cat "$W/build2.log" >&2; fail "warm build failed"; }
 [ -z "$(find "$W/wd/sim" \( -name '*.o' -o -name drv.bin \) -newer "$W/build-marker")" ] \
@@ -233,7 +239,7 @@ grep -q 'b:U7' "$W/leaf.prp" || fail "the interface edit did not apply (test bug
 sed -e 's/b = y/b = y#[0..=6]/' "$W/top.prp" > "$W/top.new" && mv "$W/top.new" "$W/top.prp"
 setup
 touch "$W/build-marker"
-"$LHD" sim "$W/tb.prp" --run-only --set sim.compile_only=true \
+"$LHD" sim "$W/tb.prp" --run-only "${BE[@]}" --set sim.compile_only=true \
   --set sim.ninja=false --set sim.tune.profile=off --workdir "$W/wd" >"$W/build3.log" 2>&1 \
   || { cat "$W/build3.log" >&2; fail "interface rebuild failed"; }
 for obj in leaf.leaf.o top.top.o; do

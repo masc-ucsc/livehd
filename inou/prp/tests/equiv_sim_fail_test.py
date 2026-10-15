@@ -149,6 +149,7 @@ def gen_driver(simdir, top):
 def compile_driver(simdir):
     top = next(p.stem for p in simdir.glob("*.hpp"))
     cpp = [str(p) for p in simdir.glob("*.cpp") if p.name != "drv_compare.cpp"]
+    cpp += [str(p) for p in sorted(simdir.glob("*.llvm.o"))]  # the LLVM backend's native color objects
     incs = ["-I" + str(simdir)] + ["-I" + d for d in sim_include_dirs(simdir)]
     cmd = [
         "clang++",

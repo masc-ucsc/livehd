@@ -221,7 +221,7 @@ struct Options {
     bool     dirty      = true;  // the built-in L1 vector (sim_tune_vector.hpp kTuneDefault*)
     int64_t  fence      = 16;    // std::numeric_limits<int64_t>::max() = no fences ("none")
     uint64_t live_words = 256;
-    bool     llvm       = false;
+    bool     llvm       = true;  // an unset sim.tune.backend is llvm (kTuneDefaultLlvm)
   } sim_tune;
 
   Diag_fmt diag_fmt = default_diag_fmt();
@@ -664,9 +664,11 @@ inline constexpr Sim_set_option kSimSetOptions[] = {
      Sim_set_option::Tune::perf_g,
      "lw"},
     {"tune.backend",
-     "auto", Sim_set_option::Kind::backend,
-     "auto|slop|llvm (was sim.backend) — simulator color-kernel backend. llvm is experimental and emits native "
-     "object files directly; a color its lowering rejects is a setup error. auto = the tuned decision, else slop", Sim_set_option::Stage::codegen,
+     "llvm", Sim_set_option::Kind::backend,
+     "llvm|slop|auto (was sim.backend) — simulator color-kernel backend. llvm (the default) emits native object "
+     "files directly; a color its lowering rejects is a setup error, never a silent fallback. slop emits the "
+     "reference C++ kernels. auto = the tuned decision, else slop (the tuner never trials the backend, so auto is "
+     "slop unless sim.tune.file pins one)", Sim_set_option::Stage::codegen,
      Sim_set_option::Tune::perf_g,
      "be"},
     {"tune.file",

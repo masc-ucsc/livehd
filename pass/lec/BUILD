@@ -550,6 +550,17 @@ sh_test(
     data = ["//lhd"],
 )
 
+# A packed struct field loop through a mux instance (word-level only, acyclic
+# per bit) proves both when pass.legalize inlines the mux and when lhd lec
+# splices an absent stateful one; a wrong impl refutes, a real loop is refused.
+sh_test(
+    name = "lec_packed_false_loop_test",
+    size = "small",
+    srcs = ["tests/lec_packed_false_loop_test.sh"],
+    data = ["//lhd"],
+    tags = ["no-sandbox"],  # compiles RTL + runs the in-process cvc5 engine
+)
+
 sh_test(
     name = "lec_observe_test",
     srcs = ["tests/lec_observe_test.sh"],

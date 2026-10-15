@@ -132,7 +132,7 @@ cost threshold. Generated loop traversals carry Clang `unroll(disable)` (or GCC 
 hints. LLVM pipeline tuning also disables loop unrolling. `compile.unroll=false` remains the
 front-end default, independently preserving the compact graph representation.
 
-`sim.tune.backend=llvm` emits each circuit color directly as a native,
+`sim.tune.backend=llvm` (the default) emits each circuit color directly as a native,
 position-independent object; `slop` emits C++ kernels. LLVM color objects have
 no external calls or undefined symbols: object emission validates the native symbol
 table, including dependencies introduced by instruction selection. Wide division
@@ -321,7 +321,7 @@ color runs once per period with direct boundary assignments, and
 dirty gating can skip what it isolates (with dirty on, `auto` fences a
 module below 1,024 sites at 16 sites per interface word, including reused bodies). Both knobs, with
 `sim.tune.live_words` and `sim.tune.backend`, form the tune vector (default
-`tv1:d=on;f=16;lw=256;be=slop`) that `lhd sim` resolves per workdir from a
+`tv1:d=on;f=16;lw=256;be=llvm`) that `lhd sim` resolves per workdir from a
 profile (docs/simopt.md §13). cgen folds it into the COLOR ROOT's generation key
 only: non-root bodies never read it, so flipping it regenerates only the root,
 and a default-equal vector keys exactly like the defaults.

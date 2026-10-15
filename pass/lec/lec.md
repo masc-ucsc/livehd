@@ -393,6 +393,13 @@ information.
   instance; both give the same value. Regressions: query_test
   `AbsentHierarchyInlineKeepsTheSubPortFit`, `SignedPortFitKeepsItsWholeWidth`,
   `InstanceOutputNetStepIsKeptByBothBoundaryViews`; graph inline_sub_test.
+  The same splice re-applies pass.legalize's packed-slice repair
+  (`split_packed_cycle_slices`) to each host it spliced into: legalize keeps an
+  instance whose packed-port loop is acyclic per bit, and dissolving it can
+  leave that loop inside the host, a word-level cycle the encoder cannot
+  order. A true bit-level loop is left for the encoder to refuse
+  (REFUTED-unsupported). Regressions: query_test
+  `AbsentHierarchyInlineRepairsAPackedSliceLoop`, `lec_packed_false_loop_test`.
 - **Box correspondence** (query.cpp builder, `Encoder::set_box_keys`): every Sub
   the encoder will treat as a box is enumerated ONCE per design (the encoder's
   own hierarchical walk + blackbox predicate) and keyed `defname#tag`. `tag` is

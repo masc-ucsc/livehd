@@ -27,17 +27,24 @@ namespace livehd::sim {
 // harnesses, 1.2-3.6x) pin `sim.tune.dirty=off` in their scripts, and the tuner
 // trials L0 for any design it profiles busy.
 inline constexpr bool     kTuneDefaultDirty      = true;
+// The backend default (owner ruling 2026-10-15): an UNSET sim.tune.backend is
+// llvm. An explicit `auto` keeps its earlier meaning -- the tuned decision,
+// else slop -- and the tuner never trials the backend, so it has none to make:
+// `auto` is slop unless sim.tune.file pins one.
+inline constexpr bool     kTuneDefaultLlvm       = true;   // unset
+inline constexpr bool     kTuneAutoLlvm          = false;  // `auto` with no tuned decision
 inline constexpr uint64_t kTuneDefaultLiveWords  = 256;
 inline constexpr int64_t  kTuneDefaultFenceRatio = 16;
 inline constexpr int64_t  kTuneNoFences          = std::numeric_limits<int64_t>::max();
 inline constexpr uint64_t kTuneMaxNumber         = uint64_t{1} << 20;
 
-// Default-constructed == the built-in default vector.
+// Default-constructed == the built-in default vector (what a run with no knob
+// pinned anywhere builds): tv1:d=on;f=16;lw=256;be=llvm.
 struct Tune_vector {
   bool     dirty      = kTuneDefaultDirty;       // sim.tune.dirty
   int64_t  fence      = kTuneDefaultFenceRatio;  // sim.tune.fence: kTuneNoFences == "none", else a ratio in [0, 2^20]
   uint64_t live_words = kTuneDefaultLiveWords;   // sim.tune.live_words, in [1, 2^20]
-  bool     llvm       = false;                   // sim.tune.backend
+  bool     llvm       = kTuneDefaultLlvm;        // sim.tune.backend
 
   bool operator==(const Tune_vector&) const = default;
 
@@ -46,7 +53,7 @@ struct Tune_vector {
   [[nodiscard]] std::string live_words_str() const { return std::to_string(live_words); }
   [[nodiscard]] std::string backend_str() const { return llvm ? "llvm" : "slop"; }
 
-  // Canonical text: "tv1:d=on;f=16;lw=256;be=slop". Byte-stable: it is a
+  // Canonical text: "tv1:d=on;f=16;lw=256;be=llvm". Byte-stable: it is a
   // generation-key input and the tune store's vector identity.
   [[nodiscard]] std::string tv1() const {
     return "tv1:d=" + dirty_str() + ";f=" + fence_str() + ";lw=" + live_words_str() + ";be=" + backend_str();
@@ -123,7 +130,9 @@ inline Tune_knob<uint64_t> parse_tune_live_words(std::string_view v) {
   return {false, std::nullopt, "expects auto|N (N a whole number in [1, 1048576]), got '" + std::string(v) + "'"};
 }
 
-// auto|slop|llvm (value = true for llvm).
+// auto|slop|llvm (value = true for llvm). `auto` and empty both leave the knob
+// unpinned; what an unpinned backend means differs (see default_tune_backend),
+// so a caller that resolves it also asks is_tune_backend_auto.
 inline Tune_knob<bool> parse_tune_backend(std::string_view v) {
   if (v.empty() || v == "auto") {
     return {};
@@ -137,6 +146,13 @@ inline Tune_knob<bool> parse_tune_backend(std::string_view v) {
   return {false, std::nullopt, "expects auto|slop|llvm, got '" + std::string(v) + "'"};
 }
 
+// True when the spelling is the explicit `auto` (not merely unset/empty).
+inline bool is_tune_backend_auto(std::string_view v) { return v == "auto"; }
+
+// What an unpinned backend resolves to without a tuned decision: an unset knob
+// takes the built-in default (llvm); an explicit `auto` falls back to slop.
+inline bool default_tune_backend(bool spelled_auto) { return spelled_auto ? kTuneAutoLlvm : kTuneDefaultLlvm; }
+
 // Built-in defaults for whatever no source pinned. The fence default FOLLOWS
 // dirty: fences only pay when dirty gating can skip what they isolate
 // (sim_profile.md §1), so `auto` is none with dirty off and 16 with it on.
@@ -146,7 +162,7 @@ inline Tune_vector resolve_tune_defaults(std::optional<bool> dirty, std::optiona
   v.dirty      = dirty.value_or(kTuneDefaultDirty);
   v.fence      = fence.value_or(v.dirty ? kTuneDefaultFenceRatio : kTuneNoFences);
   v.live_words = live_words.value_or(kTuneDefaultLiveWords);
-  v.llvm       = llvm.value_or(false);
+  v.llvm       = llvm.value_or(kTuneDefaultLlvm);
   return v;
 }
 

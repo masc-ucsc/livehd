@@ -3,7 +3,7 @@ load("//tools:copt_default.bzl", "COPTS")
 filegroup(name = "place_srcs", srcs = ["place.cpp", "place.hpp"], visibility = ["//visibility:public"])
 genrule(
     name = "place_salt",
-    srcs = [":place_srcs", "//:MODULE.bazel", "//graph", "//inou/lefdef:inou_lefdef", "//pass/partition:partition_srcs", "@dreamplace//:dreamplace", "//packages:dreamplace-lemon.patch", "//packages:dreamplace-zero-area.patch"],
+    srcs = [":place_srcs", "//:MODULE.bazel", "//graph", "//inou/lefdef:inou_lefdef", "//pass/partition:partition_srcs", "@dreamplace//:dreamplace", "//packages:dreamplace-lemon.patch", "//packages:dreamplace-zero-area.patch", "//packages:dreamplace-instantiate.patch"],
     outs = ["place_salt.hpp"],
     cmd = "h=$$(cat $(SRCS) | (shasum -a 256 2>/dev/null || sha256sum) | cut -c1-16); " +
           "printf '#pragma once\\n#include <cstdint>\\nnamespace livehd::placement { inline constexpr uint64_t kPlaceSalt = 0x%sULL; }\\n' \"$$h\" > $@",

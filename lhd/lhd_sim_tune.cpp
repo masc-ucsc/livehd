@@ -395,17 +395,18 @@ Resolved resolve(const Pins& ex, const Pins& file, const std::optional<Tune_vect
     r.live_words   = Source::dflt;
   }
 
+  // The backend: an UNSET knob is the built-in llvm (ruling 2026-10-15). The
+  // tuner never trials the backend, so the store holds no decision for it (its
+  // incumbent only carries the default along): an explicit `auto` -- the tuned
+  // decision, else slop -- resolves to slop below the explicit and file pins.
   if (ex.llvm) {
     r.v.llvm  = *ex.llvm;
     r.backend = Source::explicit_;
   } else if (file.llvm) {
     r.v.llvm  = *file.llvm;
     r.backend = Source::file;
-  } else if (store) {
-    r.v.llvm  = store->llvm;
-    r.backend = Source::store;
   } else {
-    r.v.llvm  = false;
+    r.v.llvm  = livehd::sim::default_tune_backend(ex.backend_auto || file.backend_auto);
     r.backend = Source::dflt;
   }
   return r;
@@ -451,7 +452,8 @@ Pins pins_from_sets(const std::vector<std::pair<std::string, std::string>>& sets
         err = std::format("sim.tune.backend {}", kn.err);
         return {};
       }
-      p.llvm = kn.value;
+      p.llvm         = kn.value;
+      p.backend_auto = livehd::sim::is_tune_backend_auto(v);
     }
   }
   return p;
@@ -1761,7 +1763,8 @@ std::optional<Tune_file> parse_tune_file(std::string_view text, std::string& err
     const auto dk = livehd::sim::parse_tune_dirty(knob("dirty", true, false, "\"auto\"|\"on\"|\"off\" or true|false"));
     const auto fk = livehd::sim::parse_tune_fence(knob("fence", false, true, "\"auto\"|\"none\"|N"));
     const auto lk = livehd::sim::parse_tune_live_words(knob("live_words", false, true, "\"auto\"|N"));
-    const auto bk = livehd::sim::parse_tune_backend(knob("backend", false, false, "\"auto\"|\"slop\"|\"llvm\""));
+    const auto bs = knob("backend", false, false, "\"auto\"|\"slop\"|\"llvm\"");
+    const auto bk = livehd::sim::parse_tune_backend(bs);
     if (!bad.empty()) {
       err = bad;
       return std::nullopt;
@@ -1778,7 +1781,7 @@ std::optional<Tune_file> parse_tune_file(std::string_view text, std::string& err
         return std::nullopt;
       }
     }
-    f.pins = Pins{dk.value, fk.value, lk.value, bk.value};
+    f.pins = Pins{dk.value, fk.value, lk.value, bk.value, livehd::sim::is_tune_backend_auto(bs)};
   } else if (const auto v = Tune_vector::parse(f.vector)) {
     f.pins = Pins{v->dirty, v->fence, v->live_words, v->llvm};
   } else {

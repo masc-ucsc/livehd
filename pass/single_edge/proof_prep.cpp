@@ -12,6 +12,7 @@
 #include "latch_contract.hpp"
 #include "node_util.hpp"
 #include "pass_single_edge.hpp"
+#include "split_selfref.hpp"
 #include "str_tools.hpp"
 
 namespace livehd::single_edge {
@@ -865,7 +866,8 @@ size_t inline_instances_missing_from_other_side(const absl::flat_hash_map<hhds::
   std::vector<std::shared_ptr<hhds::Graph>> icg_defs_keepalive;
   size_t done = 0;
   for (auto* host : hosts) {
-    bool collect_all_candidates = false;
+    const size_t done_before            = done;
+    bool         collect_all_candidates = false;
     // ONE SPLICE PER COLLECTION, then re-collect.
     //
     // `inline_sub_instance` MUTATES `host`, and every other handle in the
@@ -975,6 +977,18 @@ size_t inline_instances_missing_from_other_side(const absl::flat_hash_map<hhds::
       }
       icg_defs.erase(host);  // this definition's body changed
       done += spliced;
+    }
+    if (done != done_before) {
+      // A splice connects the host's packing cells straight to the callee's
+      // body, so a field select that used to stop at the instance boundary can
+      // now close a packed-slice loop INSIDE the host: a word-level cycle that
+      // pass.legalize (which ran on each def with that instance still in place,
+      // and kept it because its bit-level arcs are acyclic) never saw, and that
+      // the encoder cannot order. Re-establish legalize's per-body contract
+      // with legalize's own repair. It rewires only slices it proves
+      // independent of the cycle, so a true bit-level loop stays for the
+      // encoder to refuse; on a host with no word-level cycle it is a no-op.
+      (void)livehd::graph_util::split_packed_cycle_slices(host);
     }
   }
   return done;

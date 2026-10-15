@@ -7,10 +7,12 @@ mkdir -p "$W"
 mode="${1:-fast}"
 extra=()
 fixture=lhd/tests/lhd_sim_pure_loop.prp
+# `fast` and `legacy` assert the reference C++ (Slop) pure evaluator, so they
+# pin that backend; `llvm`, `embedded` and `nested` cover the native loop.
 case "$mode" in
-  fast) ;;
+  fast) extra=(--set sim.tune.backend=slop) ;;
   observed) extra=(--set sim.vcd=true) ;;
-  legacy) extra=(--set sim.slop_u=false) ;;
+  legacy) extra=(--set sim.tune.backend=slop --set sim.slop_u=false) ;;
   llvm) extra=(--set sim.tune.backend=llvm) ;;
   embedded) extra=(--set sim.tune.backend=llvm); fixture=lhd/tests/lhd_sim_embedded_loop.prp ;;
   nested) extra=(--set sim.tune.backend=llvm); fixture=lhd/tests/lhd_sim_nested_loop.prp ;;

@@ -84,7 +84,7 @@ bazel_dep(name = "rapidjson", version = "1.1.0.bcr.20250205")
 # Native CPU placement; the archive uses LiveHD's HHDS/HLOP repositories.
 http_archive(
     name = "dreamplace",
-    patches = ["//packages:dreamplace-lemon.patch", "//packages:dreamplace-zero-area.patch"],
+    patches = ["//packages:dreamplace-lemon.patch", "//packages:dreamplace-zero-area.patch", "//packages:dreamplace-instantiate.patch"],
     patch_args = ["-p1"],
     urls = ["https://github.com/masc-ucsc/DREAMPlace/archive/fc5e043a9ad2bb7808fcbe262f4281f06e1d23d3.tar.gz"],
     sha256 = "0730511d153d712f78fa4a700fd34ebe4adc62d647334ce9e9e15cb9c1675d2a",

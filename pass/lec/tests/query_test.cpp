@@ -871,6 +871,109 @@ TEST(CombEquiv, AbsentHierarchyInlineKeepsTheSubPortFit) {
   }
 }
 
+namespace {
+// impl: word = {b, high} (Concat is MSB first: b in bits [2,4), high in
+// [0,2)); u = mixer(word) with mixer.y = a ^ 4'b0101; high = u.y[lo, lo+2);
+// o = word. ref: the same function spelled flat, o = {b, b ^ 1}.
+// With lo == 2 the loop through `u` exists per WORD only -- pass.legalize keeps
+// such an instance, bit-level arcs being acyclic -- and the absent-def splice
+// turns it into a packed-slice loop INSIDE the host. With lo == 0 it is a real
+// loop (high = high ^ 1).
+std::pair<std::shared_ptr<hhds::Graph>, std::shared_ptr<hhds::Graph>> build_spliced_packed_loop(hhds::GraphLibrary& ref_lib,
+                                                                                                hhds::GraphLibrary& impl_lib,
+                                                                                                int                 lo) {
+  namespace gu  = graph_util;
+  auto make_top = [](hhds::GraphLibrary& lib) {
+    auto io = lib.create_io("spliced_top");
+    io->add_input("b", 0);
+    io->set_bits("b", 2);
+    io->set_unsign("b", true);
+    io->add_output("o", 1);
+    io->set_bits("o", 4);
+    io->set_unsign("o", true);
+    auto g = io->create_graph();
+    gu::set_ubits(g->get_input_pin("b"), 2);
+    return g;
+  };
+  auto concat_into = [](hhds::Graph& g, const hhds::Pin_class& msb, const hhds::Pin_class& lsb) {
+    auto cat = gu::create_typed_node(g, Ntype_op::Concat, 4);
+    msb.connect_sink(gu::setup_sink_pid(cat, 0));
+    gu::create_const(g, *Dlop::create_integer(2)).connect_sink(gu::setup_sink_pid(cat, 1));
+    lsb.connect_sink(gu::setup_sink_pid(cat, 2));
+    gu::create_const(g, *Dlop::create_integer(2)).connect_sink(gu::setup_sink_pid(cat, 3));
+    auto word = cat.create_driver_pin(0);
+    gu::set_ubits(word, 4);
+    word.connect_sink(g.get_output_pin("o"));
+    return cat;
+  };
+
+  auto ref  = make_top(ref_lib);
+  auto flip = gu::create_typed_node(*ref, Ntype_op::Xor, 2);
+  ref->get_input_pin("b").connect_sink(gu::setup_sink_pid(flip, 0));
+  gu::create_const(*ref, *Dlop::create_integer(1)).connect_sink(gu::setup_sink_pid(flip, 0));
+  gu::set_ubits(flip.create_driver_pin(0), 2);
+  (void)concat_into(*ref, ref->get_input_pin("b"), flip.create_driver_pin(0));
+
+  auto mio = impl_lib.create_io("mixer");
+  mio->add_input("a", 0);
+  mio->set_bits("a", 4);
+  mio->set_unsign("a", true);
+  mio->add_output("y", 1);
+  mio->set_bits("y", 4);
+  mio->set_unsign("y", true);
+  auto mixer = mio->create_graph();
+  gu::set_ubits(mixer->get_input_pin("a"), 4);
+  auto mix = gu::create_typed_node(*mixer, Ntype_op::Xor, 4);
+  mixer->get_input_pin("a").connect_sink(gu::setup_sink_pid(mix, 0));
+  gu::create_const(*mixer, *Dlop::create_integer(5)).connect_sink(gu::setup_sink_pid(mix, 0));
+  gu::set_ubits(mix.create_driver_pin(0), 4);
+  mix.create_driver_pin(0).connect_sink(mixer->get_output_pin("y"));
+
+  auto impl = make_top(impl_lib);
+  auto sub  = gu::create_typed_node(*impl, Ntype_op::Sub);
+  sub.set_name("u");
+  sub.set_subnode(mio);
+  auto y = sub.create_driver_pin(1);
+  gu::set_ubits(y, 4);
+  auto slice = gu::create_get_mask(*impl, y, lo, lo + 2);
+  auto high  = slice.create_driver_pin(0);
+  gu::set_ubits(high, 2);
+  auto cat = concat_into(*impl, impl->get_input_pin("b"), high);
+  cat.create_driver_pin(0).connect_sink(gu::setup_sink_pid(sub, 0));
+  return {ref, impl};
+}
+}  // namespace
+
+// lhd lec dissolves an instance whose def the other side lacks; that splice
+// can expose a packed-slice loop the encoder cannot order (the instance kept
+// it at the boundary). The splice re-applies pass.legalize's packed-slice
+// repair to the host, so the false loop proves -- and a real loop still
+// fails CLOSED (undecided + unsupported), never a verdict.
+TEST(CombEquiv, AbsentHierarchyInlineRepairsAPackedSliceLoop) {
+  for (const int lo : {2, 0}) {
+    SCOPED_TRACE(lo);
+    hhds::GraphLibrary ref_lib;
+    hhds::GraphLibrary impl_lib;
+    auto [ref, impl] = build_spliced_packed_loop(ref_lib, impl_lib, lo);
+    std::vector<std::shared_ptr<hhds::Graph>> impl_graphs;
+    for (const auto& g : impl->definitions().graphs()) {
+      impl_graphs.push_back(g);
+    }
+    ASSERT_EQ(single_edge::inline_instances_missing_from_other_side({}, impl_graphs, {ref}, impl.get()), 1U);
+
+    lec::Lec_options options;
+    options.engine = "ind";
+    auto result    = lec::prove_equal(ref.get(), impl.get(), options);
+    if (lo == 2) {
+      EXPECT_EQ(result.verdict, Verdict::Proven) << result.detail;
+    } else {
+      EXPECT_EQ(result.verdict, Verdict::Undecided) << result.detail;
+      EXPECT_TRUE(result.unsupported) << result.detail;
+      EXPECT_NE(result.detail.find("WORD-LEVEL CYCLE"), std::string::npos) << result.detail;
+    }
+  }
+}
+
 // An instance output crosses TWO declarations: the callee's port, then the
 // parent net the instance pin is stamped with. A signed net reinterprets the
 // unsigned port's 0..255 as -128..127, so the 17-bit reader sign-extends it.

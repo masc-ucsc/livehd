@@ -87,7 +87,15 @@ Per def, callee first, to a fixpoint (64 rounds):
    packed-bus false loop is no cycle.
 3. **What is left** gets `split_packed_cycle_slices`; anything still cyclic is
    a diag error (`comb-loop`, or `comb-loop-through-loop`), category "time"
-   (exit 6).
+   (exit 6). The split also runs when an SCC through an instance was refined
+   away at bit level (2026-10-14): a packed-slice loop INSIDE the body can
+   share that SCC with a stateful instance, and is then no loop per bit yet
+   still a cycle per word for the LEC encoder (br_amba_axi_shrinker, after its
+   state-free mux was inlined). The splitter is a no-op on a body with no
+   word-level cycle. `lhd lec`'s absent-definition splice
+   (`single_edge::inline_instances_missing_from_other_side`) re-applies the
+   same split to every host it spliced into, since a kept instance's packed
+   port can become such a body loop once it is dissolved.
 
 `flatten_false_loop_subs` is no longer called by legalize or LEC.
 

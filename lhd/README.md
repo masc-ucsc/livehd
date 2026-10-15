@@ -89,8 +89,10 @@ their Verilog emission is supported and covered by RTL simulation.
 ## Simulator tuning (`sim.tune.*`)
 
 Knobs that change only simulator speed, never a simulated value, live under
-`sim.tune.*`: `dirty`, `fence`, `live_words` and `backend`, each `auto` by
-default. `sim.tune.profile=auto|on|off` (default `auto`) decides whether
+`sim.tune.*`: `dirty`, `fence`, `live_words` and `backend`; the first three
+are `auto` by default and `backend` defaults to `llvm` (`slop` selects the
+reference C++ kernels; an explicit `auto` is the tuned decision, else slop).
+`sim.tune.profile=auto|on|off` (default `auto`) decides whether
 `lhd sim` learns them per workdir. With a user `--workdir` and
 `lhd.incremental=true`, an `auto` run profiles until the workdir's decision
 converges, trying at most one better vector per setup and keeping it only when
@@ -102,7 +104,7 @@ not learn but builds the tuned vector, so it replays the same binary. A profilin
 zero-fills `?` literals unless `sim.unknown_zero` is set, and takes no
 checkpoints. Per knob, an explicit `--set` beats `sim.tune.file`, which beats
 the workdir's decision (`<workdir>/incr/scopes/sim/<scope>/tune.jsonl`), which
-beats the built-in default, `d=on f=16` (dirty gating on; a design profiled
+beats the built-in default, `d=on f=16 lw=256 be=llvm` (dirty gating on; a design profiled
 busy is trialed back to `d=off`, and small always-toggling benches can pin
 `--set sim.tune.dirty=off`). `off` ignores the workdir's data.
 `sim.tune.export=FILE` writes the applied vector for `sim.tune.file` to pin

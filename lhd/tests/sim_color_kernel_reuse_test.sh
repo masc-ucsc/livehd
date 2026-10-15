@@ -13,17 +13,20 @@ fail() {
   exit 1
 }
 
-"$LHD" sim "$PRP" --setup-only --workdir "$work/setup" -q >/dev/null
+# sim.debug is a Slop knob (Slop_u validation landings in the reference C++
+# kernels); pin that backend so the landings are in the generated body.
+BE=(--set sim.tune.backend=slop)
+"$LHD" sim "$PRP" --setup-only "${BE[@]}" --workdir "$work/setup" -q >/dev/null
 body="$(ls "$work"/setup/sim/*kernel_multiwrite.cpp | head -1)"
 plan="$(ls "$work"/setup/sim/*kernel_multiwrite.color-plan.txt | head -1)"
 
 # A debug landing must change the generated artifacts in the same workdir.
 ! grep -q '::land(' "$body" || fail "default generated code retained a debug landing"
-"$LHD" sim "$PRP" --setup-only --set sim.debug=true --workdir "$work/setup" -q >/dev/null
+"$LHD" sim "$PRP" --setup-only "${BE[@]}" --set sim.debug=true --workdir "$work/setup" -q >/dev/null
 grep -q '::land(' "$body" || fail "sim.debug=true did not invalidate the generated body"
 
 # Changing the budget in the same workdir must invalidate generated artifacts.
-"$LHD" sim "$PRP" --setup-only --set sim.debug=true --set sim.tune.live_words=20 --workdir "$work/setup" -q >/dev/null
+"$LHD" sim "$PRP" --setup-only "${BE[@]}" --set sim.debug=true --set sim.tune.live_words=20 --workdir "$work/setup" -q >/dev/null
 grep -Eq 'register-budget words=20 ' "$plan" || fail "explicit live-word budget did not replace the cached plan"
 
 echo "PASS: debug and live-word options invalidate cached simulator artifacts"

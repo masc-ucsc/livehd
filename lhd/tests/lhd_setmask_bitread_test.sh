@@ -62,7 +62,9 @@ grep -q 'pass.cprop' "$W/identity.json" || fail "identity recipe did not run pas
 grep -Eqi "95'h0?7f+|0*7fffffffffffffffffffffff" "$W/identity.gen.v" \
   && fail "identity Set_mask survived cprop: $(cat "$W/identity.gen.v")"
 
-"$LHD" compile "$IDENTITY_PRP" --emit-dir sim:"$W/identity-sim" \
+# Slop backend pinned: the greps read the reference C++ (HLOP set_mask_op_opt),
+# not the default LLVM color objects.
+"$LHD" compile "$IDENTITY_PRP" --emit-dir sim:"$W/identity-sim" --set sim.tune.backend=slop \
   --workdir "$W/identity-sim-w" -q 2>/dev/null || fail "sim cgen of setmask_identity.prp failed"
 grep -Rq 'set_mask_op_opt(64, 96,' "$W/identity-sim" \
   || fail "contiguous dynamic write did not use set_mask_op_opt"

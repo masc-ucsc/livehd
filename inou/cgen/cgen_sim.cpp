@@ -8238,6 +8238,20 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
     if (color_runtime_root) {
       if (!compact_kernel_) {
         hout->append("    (void)__finish;  // selected hierarchy roots always own the complete period\n");
+      } else if (!clock_in_fields.empty()) {
+        // A compact body is driven per period by its caller, which withholds
+        // the edge through `<port>__tick` (a conditional activation, a parent
+        // gate). The color schedule commits state unconditionally -- in-place
+        // registers and flattened child state never see the word -- so a
+        // withheld period publishes the outputs of the held state instead.
+        std::vector<std::string> ticks(clock_in_fields.begin(), clock_in_fields.end());
+        std::ranges::sort(ticks);
+        std::string all;
+        for (const auto& field : ticks) {
+          absl::StrAppend(&all, all.empty() ? "" : " && ", "__in.", field, "__tick");
+        }
+        hout->append("    if (!(", all, ")) {  // a withheld period: no edge reaches this body's state\n");
+        hout->append("      __color_reset_settle();\n      return __last_out;\n    }\n");
       }
       hout->append("    __color_run();\n");
       if (!direct_effect_slots.empty()) {
@@ -12962,6 +12976,18 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
       if (op == Ntype_op::Clock_cell) {
         return reject_data("operation");
       }
+      if (op == Ntype_op::Memory) {
+        // A registered (type 1) read publishes the value latched at the last
+        // edge -- external state, which the LLVM lowering refuses (see its
+        // Memory arm). Only the whole-array read-all view lowers natively.
+        const auto* memory = direct_memory(site);
+        if (memory == nullptr) {
+          return reject_data("memory-description");
+        }
+        if (memory->type == 1 && !(memory->has_read_all && version.output_port == Ntype::Memory_readall_pid)) {
+          return reject_data("registered-memory-read");
+        }
+      }
       if (op == Ntype_op::Sub) {
         // Only a pure rolled loop whose sealed body is registered (its definition
         // was emitted first) is embedded in the caller's LLVM color.
@@ -13030,6 +13056,13 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
             && (version.base_site >= llvm_memory_gates.size() || !llvm_memory_gates[version.base_site].complete)) {
           return reject_state("memory-clock-guard");
         }
+        // A registered (type 1) read port latches its read data in the same
+        // update (`<mem>_q<k>_din`, the reference emitter's memory arm); the
+        // LLVM memory update stages writes only, so the latch would never move.
+        if (memory->type == 1
+            && std::ranges::any_of(memory->ports, [](const auto& port) { return port.rd && !port.addr.is_invalid(); })) {
+          return reject_state("memory-sync-read");
+        }
         if (llvm_state_debug) {
           ++llvm_state_eligibility["eligible-memory"];
         }
@@ -13054,6 +13087,17 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
         if (local_flop != nullptr && !local_flop->sec_clock.is_invalid()) {
           return reject_state("explicit-clock-edge");
         }
+        // A gated clock: the reference emitter folds the gate into the
+        // flop's COMMIT predicate (the ICG enables, the parent's tick word).
+        // The LLVM state ABI carries data/enable/reset only, so such a flop
+        // would commit every period with the gate as dead code.
+        if (local_flop != nullptr && (!local_flop->clock_guards.empty() || local_flop->gate_fall)) {
+          return reject_state("clock-guard");
+        }
+        // A clock PORT's `<port>__tick` word needs no input here: a color
+        // root's tick words are all true while its schedule runs. Only a
+        // parent writes one, so the top's never move, and a compact body's
+        // withheld period settles instead of running (`__compact_advance`).
         const auto definition_inputs = livehd::graph_util::inp_sink_drivers(node);
         const auto occurrence_inputs = occurrence_sorted_inputs(site.node);
         if (definition_inputs.size() != occurrence_inputs.size()) {
@@ -13063,12 +13107,17 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
           if (definition_inputs[input].sink.get_port_id() != Ntype::get_sink_pid(op, "clock_pin")) {
             continue;
           }
-          const auto local_root = livehd::latch_contract::control_root(definition_inputs[input].driver);
+          // Stop at a Clock_cell: canonicalizing through it to the reference
+          // clock (control_root's default) hides the cell's enable, which is
+          // exactly the commit guard this ABI cannot express.
+          const auto local_root
+              = livehd::latch_contract::control_root(definition_inputs[input].driver, /*stop_at_clock_cell=*/true);
           if (local_root.inverted || local_root.net.is_invalid() || !livehd::graph_util::is_graph_input_pin(local_root.net)
               || pin_name_of(local_root.net) != clock_input_of(site.node.get_graph())) {
             return reject_state("local-clock");
           }
-          const auto resolved_root = livehd::latch_contract::control_root(occurrence_inputs[input].driver);
+          const auto resolved_root
+              = livehd::latch_contract::control_root(occurrence_inputs[input].driver, /*stop_at_clock_cell=*/true);
           if (resolved_root.inverted || resolved_root.net.is_invalid()
               || !livehd::graph_util::is_graph_input_pin(resolved_root.net.base_pin()) || resolved_root.net.get_graph() != g
               || pin_name_of(resolved_root.net.base_pin()) != clock_input_of(g)) {
@@ -14462,13 +14511,40 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
             case Ntype_op::EQ:
             case Ntype_op::LT:
             case Ntype_op::GT: {
-              if (operands.size() != 2) {
-                return reject("comparison does not have two operands");
-              }
               const auto operation = type_op_of(node) == Ntype_op::EQ   ? Cgen_llvm::Binary_op::eq
                                             : type_op_of(node) == Ntype_op::LT ? Cgen_llvm::Binary_op::lt
                                                                                : Cgen_llvm::Binary_op::gt;
-              result               = llvm_kernel.binary(operation, operands[0], operands[1], result_width, true);
+              if (operands.size() == 2) {
+                result = llvm_kernel.binary(operation, operands[0], operands[1], result_width, true);
+                break;
+              }
+              // Variadic, as the reference emitter: EQ compares every operand
+              // with the first; LT/GT require every cross-bank (A, B) pair to
+              // hold. Fewer than two operands compare nothing (0).
+              Cgen_llvm::Value all;
+              bool             any    = false;
+              const auto       append = [&](const Cgen_llvm::Value& a, const Cgen_llvm::Value& b) {
+                const auto pair = llvm_kernel.binary(operation, a, b, 1, true);
+                all             = any ? llvm_kernel.binary(Cgen_llvm::Binary_op::bit_and, all, pair, 1, true) : pair;
+                any             = true;
+              };
+              if (type_op_of(node) == Ntype_op::EQ) {
+                for (size_t i = 1; i < operands.size(); ++i) {
+                  append(operands[0], operands[i]);
+                }
+              } else {
+                for (size_t a = 0; a < operands.size(); ++a) {
+                  if (Ntype::sink_bank(type_op_of(node), edges[a].sink.get_port_id()) != 0) {
+                    continue;
+                  }
+                  for (size_t b = 0; b < operands.size(); ++b) {
+                    if (Ntype::sink_bank(type_op_of(node), edges[b].sink.get_port_id()) == 1) {
+                      append(operands[a], operands[b]);
+                    }
+                  }
+                }
+              }
+              result = any ? llvm_kernel.resize(all, result_width, true) : llvm_kernel.constant(result_width, 0, true);
               break;
             }
             case Ntype_op::SHL:
@@ -18620,7 +18696,13 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
     }
     fout->append("  __color_refresh_inputs();\n");
     if (tune_dirty()) {
-      fout->append("  __rt.__color_dirty.fill(~uint64_t{0});  // reset/load invalidates the serial activation cache\n");
+      // The refresh above consumed any input change (it updated the previous
+      // values), so the next __color_run's quiescence test cannot see it: a
+      // compact-loop lane published between periods would skip its next
+      // period with every color still dirty. Invalidate the fixed point too.
+      fout->append(
+          "  __rt.__color_dirty.fill(~uint64_t{0});  // reset/load invalidates the serial activation cache\n"
+          "  __rt.__color_quiescent = false;\n");
     }
     std::vector<bool> reset_required(color_plan_->colors().size(), false);
     for (size_t color = 0; color < color_plan_->colors().size(); ++color) {

@@ -63,7 +63,10 @@ lhd tool cat|grep|diff|tree ...                   # inspect ln:/lg: artifacts
 Builds a C++ simulation of the `test` blocks. Useful: `--list-tests`,
 `--seed N`, `--set sim.vcd=true`, `--probe SIG`, `--break-when 'SIG OP VALUE'`,
 `--vcd-on-fail`. Only asserts inside `test` blocks are checked at simulation
-time; design-body asserts belong to `pass.formal`.
+time; design-body asserts belong to `pass.formal`. The circuit kernels default
+to the LLVM backend (`sim.tune.backend=llvm`); `--set sim.tune.backend=slop`
+selects the reference C++ (Slop) kernels, e.g. to cross-check a suspected
+simulator bug.
 
 ### formal verify
 

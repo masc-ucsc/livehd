@@ -13,8 +13,10 @@ fail() {
   exit 1
 }
 
+# Pins the Slop backend: the assertions below read the reference C++ kernels
+# (HLOP get_mask_op_opt / sra_op), not the default LLVM color objects.
 "$LHD" compile "$SRC" --reader slang --top getmask_range \
-  --emit-dir sim:"$W/sim" --workdir "$W/work" -q 2>/dev/null \
+  --emit-dir sim:"$W/sim" --workdir "$W/work" --set sim.tune.backend=slop -q 2>/dev/null \
   || fail "range-extraction simulator generation failed"
 
 # pass/cprop collapses the source SRA + low mask into one ranged Get_mask.

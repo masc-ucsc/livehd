@@ -36,9 +36,12 @@ using Sim_run = lhd::sim_tune::Run;
 using livehd::sim::kTuneDefaultFenceRatio;
 using livehd::sim::kTuneNoFences;
 
-const Tune_vector kL0{false, kTuneNoFences, 256, false};
-const Tune_vector kL1{true, kTuneDefaultFenceRatio, 256, false};
-const Tune_vector kL2{true, 0, 256, false};
+using livehd::sim::kTuneDefaultLlvm;
+
+// The ladder's rungs on the built-in backend (an unset sim.tune.backend = llvm).
+const Tune_vector kL0{false, kTuneNoFences, 256, kTuneDefaultLlvm};
+const Tune_vector kL1{true, kTuneDefaultFenceRatio, 256, kTuneDefaultLlvm};
+const Tune_vector kL2{true, 0, 256, kTuneDefaultLlvm};
 
 // ---- a synthetic drv.bin raw run file (DESIGN §6.8) ------------------------------------
 
@@ -240,7 +243,7 @@ std::string tmp_dir(std::string_view tag) {
 TEST(SimTuneResolve, DefaultsAreTheCanonicalL1) {
   const auto r = resolve({}, {}, std::nullopt);
   EXPECT_EQ(r.v, kL1);
-  EXPECT_EQ(r.v.tv1(), "tv1:d=on;f=16;lw=256;be=slop");
+  EXPECT_EQ(r.v.tv1(), "tv1:d=on;f=16;lw=256;be=llvm");
   EXPECT_EQ(r.v, Tune_vector{});  // default-constructed IS the default vector
   EXPECT_EQ(r.dirty, Source::dflt);
   EXPECT_EQ(r.fence, Source::dflt);
@@ -267,6 +270,63 @@ TEST(SimTuneResolve, StoreMovesOnlyTheDefaults) {
   EXPECT_EQ(r2.backend, Source::file);
   EXPECT_TRUE(r2.v.dirty);
   EXPECT_EQ(r2.dirty, Source::store);
+}
+
+// Owner ruling 2026-10-15: an UNSET backend is llvm; an explicit `auto` keeps
+// its old meaning (the tuned decision, else slop -- the tuner never trials the
+// backend, so the store's copy is never a decision); slop/llvm pin as before.
+TEST(SimTuneResolve, BackendUnsetIsLlvmAutoIsSlop) {
+  const Tune_vector slop_store{true, kTuneDefaultFenceRatio, 256, false};
+  for (const auto& store :
+       {std::optional<Tune_vector>{}, std::optional<Tune_vector>{kL1}, std::optional<Tune_vector>{slop_store}}) {
+    const auto unset = resolve({}, {}, store);
+    EXPECT_TRUE(unset.v.llvm);
+    EXPECT_EQ(unset.backend, Source::dflt);
+    Pins aut;
+    aut.backend_auto = true;
+    const auto a     = resolve(aut, {}, store);
+    EXPECT_FALSE(a.v.llvm);
+    EXPECT_EQ(a.backend, Source::dflt);
+    // a file's `auto` is the same spelling, one level down
+    EXPECT_FALSE(resolve({}, aut, store).v.llvm);
+    // explicit auto does not hide a file pin (it only unpins the explicit level)
+    Pins file;
+    file.llvm     = true;
+    const auto af = resolve(aut, file, store);
+    EXPECT_TRUE(af.v.llvm);
+    EXPECT_EQ(af.backend, Source::file);
+    Pins slop;
+    slop.llvm = false;
+    EXPECT_FALSE(resolve(slop, file, store).v.llvm);
+    EXPECT_EQ(resolve(slop, file, store).backend, Source::explicit_);
+  }
+  std::string err;
+  const auto  p = pins_from_sets(
+      {
+          {"sim.tune.backend", "slop"},
+          {"sim.tune.backend", "auto"}
+  },
+      err);
+  EXPECT_TRUE(err.empty()) << err;
+  EXPECT_FALSE(p.llvm.has_value());
+  EXPECT_TRUE(p.backend_auto);
+  const auto q = pins_from_sets(
+      {
+          {"sim.tune.backend", "auto"},
+          {"sim.tune.backend", "llvm"}
+  },
+      err);
+  EXPECT_EQ(q.llvm, std::optional<bool>{true});
+  EXPECT_FALSE(q.backend_auto);  // the last occurrence wins
+  const auto e = pins_from_sets(
+      {
+          {"sim.tune.backend", "auto"},
+          {"sim.tune.backend",     ""}
+  },
+      err);
+  EXPECT_FALSE(e.llvm.has_value());
+  EXPECT_FALSE(e.backend_auto);  // empty unsets: the built-in llvm
+  EXPECT_TRUE(resolve(e, {}, std::nullopt).v.llvm);
 }
 
 TEST(SimTuneResolve, PinnedDirtyProjectsTheDefaultFence) {
@@ -630,13 +690,13 @@ TEST(SimTuneLadder, PinnedLeversNeverMove) {
   // be a run of the vector the pins resolve to)
   Pins file;
   file.live_words = 20;
-  file.llvm       = true;
-  EXPECT_FALSE(propose(st, ctx(Mode::auto_, {}, file)).to.has_value());  // no run of lw=20 be=llvm yet
-  add_run(st, make_run(Tune_vector{false, kTuneNoFences, 20, true}.tv1(), {idle_test(0.8)}));
+  file.llvm       = false;
+  EXPECT_FALSE(propose(st, ctx(Mode::auto_, {}, file)).to.has_value());  // no run of lw=20 be=slop yet
+  add_run(st, make_run(Tune_vector{false, kTuneNoFences, 20, false}.tv1(), {idle_test(0.8)}));
   const auto p3 = propose(st, ctx(Mode::auto_, {}, file));
   ASSERT_TRUE(p3.to.has_value());
   EXPECT_EQ(p3.to->live_words, 20u);
-  EXPECT_TRUE(p3.to->llvm);
+  EXPECT_FALSE(p3.to->llvm);
 }
 
 TEST(SimTuneLadder, RejectedRuntimeRandomAndFlipLimit) {
@@ -1386,7 +1446,7 @@ TEST(SimTuneDecide, PinsMakeATrialStale) {
   lw.live_words = 64;  // not moved by L1, but `from` is no longer the resolved vector
   EXPECT_TRUE(stale_reason(st, ctx(Mode::auto_, lw)).has_value());
   Pins same_be;
-  same_be.llvm = false;  // pins a knob L1 does not move to the value it has: still valid
+  same_be.llvm = kTuneDefaultLlvm;  // pins a knob L1 does not move to the value it has: still valid
   EXPECT_FALSE(stale_reason(st, ctx(Mode::auto_, same_be)).has_value());
   // run-only of the built trial tree: an agreeing pin is fine, a contradicting one is stale
   Pins on;
@@ -1528,7 +1588,7 @@ TEST(SimTuneStore, CompactionBoundsNonRunHistory) {
       lines.push_back(std::move(line));
     }
   };
-  const Tune_vector kLw{true, kTuneDefaultFenceRatio, 64, false};  // a vector banned by repeated failures
+  const Tune_vector kLw{true, kTuneDefaultFenceRatio, 64, kTuneDefaultLlvm};  // a vector banned by repeated failures
   // an early divergence ban and a failure ban on structures long gone
   run(kL0, "S0", 1);
   trial_of(kL2);
@@ -1634,7 +1694,7 @@ TEST(SimTuneFile, ExportImportRoundTrip) {
   std::string err;
   const auto  f = parse_tune_file(text, err);
   ASSERT_TRUE(f.has_value()) << err;
-  EXPECT_EQ(f->pins, (Pins{true, 0, 256, false}));
+  EXPECT_EQ(f->pins, (Pins{true, 0, 256, kTuneDefaultLlvm}));
   EXPECT_EQ(f->structure, "S1");
   EXPECT_TRUE(f->converged);
   // file-sourced knobs resolve as "file"
@@ -1647,7 +1707,8 @@ TEST(SimTuneFile, ExportImportRoundTrip) {
       R"({"schema":"lhd-sim-tune-file-1","vector":"","knobs":{"dirty":"on","fence":"auto","live_words":"auto","backend":"auto"}})",
       err);
   ASSERT_TRUE(partial.has_value()) << err;
-  EXPECT_EQ(partial->pins, (Pins{true, std::nullopt, std::nullopt, std::nullopt}));
+  EXPECT_EQ(partial->pins, (Pins{true, std::nullopt, std::nullopt, std::nullopt, /*backend_auto=*/true}));
+  EXPECT_FALSE(resolve({}, partial->pins, std::nullopt).v.llvm);  // the file's `auto` backend: slop
   EXPECT_FALSE(parse_tune_file(R"({"schema":"x"})", err).has_value());
   EXPECT_FALSE(parse_tune_file(R"({"schema":"lhd-sim-tune-file-1","knobs":{"dirty":"maybe"}})", err).has_value());
   EXPECT_TRUE(err.find("dirty") != std::string::npos) << err;
@@ -1697,7 +1758,7 @@ TEST(SimTuneEnvelope, JsonAndNote) {
   e.stats         = s;
   e.pending       = kL0.tv1();
   const auto note = envelope_note(e);
-  EXPECT_EQ(note, "applied d=on f=16 lw=256 be=slop (default) | I_s=0.12 q=0.00 pairs=812 | next setup: TRIAL d=off f=none");
+  EXPECT_EQ(note, "applied d=on f=16 lw=256 be=llvm (default) | I_s=0.12 q=0.00 pairs=812 | next setup: TRIAL d=off f=none");
 
   rapidjson::Document d;
   const auto          j = envelope_json(e);
@@ -1705,14 +1766,14 @@ TEST(SimTuneEnvelope, JsonAndNote) {
   ASSERT_FALSE(d.HasParseError()) << j;
   EXPECT_EQ(d["schema_version"].GetInt(), 1);
   EXPECT_STREQ(d["mode"].GetString(), "auto");
-  EXPECT_STREQ(d["applied"]["vector"].GetString(), "tv1:d=on;f=16;lw=256;be=slop");
+  EXPECT_STREQ(d["applied"]["vector"].GetString(), "tv1:d=on;f=16;lw=256;be=llvm");
   EXPECT_EQ(d["applied"]["live_words"].GetUint64(), 256u);
   EXPECT_STREQ(d["source"]["fence"].GetString(), "default");
   EXPECT_TRUE(d["trial"].IsNull());
   EXPECT_TRUE(d["verdict"].IsNull());
-  EXPECT_STREQ(d["pending"].GetString(), "tv1:d=off;f=none;lw=256;be=slop");
+  EXPECT_STREQ(d["pending"].GetString(), "tv1:d=off;f=none;lw=256;be=llvm");
   EXPECT_STREQ(d["reproduce"].GetString(),
-               "--set sim.tune.dirty=on --set sim.tune.fence=16 --set sim.tune.live_words=256 --set sim.tune.backend=slop "
+               "--set sim.tune.dirty=on --set sim.tune.fence=16 --set sim.tune.live_words=256 --set sim.tune.backend=llvm "
                "--set sim.unknown_zero=true");
   EXPECT_STREQ(d["note"].GetString(), note.c_str());
 
@@ -1726,7 +1787,7 @@ TEST(SimTuneEnvelope, JsonAndNote) {
   off.enabled = false;
   off.reason  = "no-workdir";
   off.applied = resolve({}, {}, std::nullopt);
-  EXPECT_EQ(envelope_note(off), "applied d=on f=16 lw=256 be=slop (default) | tuner off (no-workdir)");
+  EXPECT_EQ(envelope_note(off), "applied d=on f=16 lw=256 be=llvm (default) | tuner off (no-workdir)");
 }
 
 }  // namespace

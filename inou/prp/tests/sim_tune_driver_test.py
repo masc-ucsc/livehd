@@ -68,7 +68,8 @@ def build(simdir, incs):
     drv = os.path.join(simdir, 'drv.cpp')
     srcs = [drv]
     for fn in sorted(os.listdir(simdir)):
-        if fn.endswith('.cpp') and fn != 'drv.cpp':
+        # `.llvm.o`: the native color objects of the (default) LLVM backend.
+        if (fn.endswith('.cpp') and fn != 'drv.cpp') or fn.endswith('.llvm.o'):
             srcs.append(os.path.join(simdir, fn))
     exe = os.path.join(simdir, 'drv.bin')
     cc = [prpsim._sim_compiler(), '-std=c++23', '-DNDEBUG', '-O1', '-pthread', '-I' + simdir]

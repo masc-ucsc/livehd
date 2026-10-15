@@ -50,7 +50,7 @@ PRP="$W/acc.prp"
 
 # ---- listing / describe / help --------------------------------------------------
 out=$("$LHD" list options)
-for kv in tune.profile:auto tune.dirty:auto tune.fence:auto tune.live_words:auto tune.backend:auto tune.file: tune.export: \
+for kv in tune.profile:auto tune.dirty:auto tune.fence:auto tune.live_words:auto tune.backend:llvm tune.file: tune.export: \
   tune.profile_dir: tune.profile_stride:0; do
   echo "$out" | grep -q "\"name\":\"sim.${kv%%:*}\",\"method\":\"sim\",\"default\":\"${kv#*:}\"" \
     || fail "sim.${kv%%:*} missing or wrong default in lhd list options"
@@ -90,7 +90,8 @@ for bad in tune.dirty=maybe tune.fence=-1 tune.fence=x tune.fence=2000000 tune.l
 done
 
 # ---- [sim.tune] --config table --------------------------------------------------------
-printf '[sim.tune]\ndirty = "on"\nfence = 0\nprofile = "off"\n' >"$W/tune.toml"
+# backend = "auto" keeps its meaning (the tuned decision, else slop); unset is llvm.
+printf '[sim.tune]\ndirty = "on"\nfence = 0\nprofile = "off"\nbackend = "auto"\n' >"$W/tune.toml"
 "$LHD" sim "$PRP" --config "$W/tune.toml" --setup-only --workdir "$W/cfg" -q --result-json "$W/cfg.json" 2>/dev/null \
   || fail "[sim.tune] config rejected: $(cat "$W/cfg.json")"
 python3 - "$W/cfg.json" <<'PY' || fail "[sim.tune] config not applied: $(cat "$W/cfg.json")"
@@ -98,6 +99,7 @@ import json, sys
 t = json.load(open(sys.argv[1]))["sim_tune"]
 assert t["applied"]["vector"] == "tv1:d=on;f=0;lw=256;be=slop", t
 assert t["source"]["dirty"] == "explicit" and t["source"]["fence"] == "explicit", t
+assert t["source"]["backend"] == "default", t
 assert t["mode"] == "off" and t["enabled"] is False and t["reason"] == "mode-off", t
 PY
 [ -e "$W/cfg/incr/scopes/sim" ] && fail "profile=off created a tune store"
@@ -118,8 +120,8 @@ python3 - "$W/nowd.json" <<'PY' || fail "sim_tune without --workdir: $(cat "$W/n
 import json, sys
 t = json.load(open(sys.argv[1]))["sim_tune"]
 assert t["enabled"] is False and t["reason"] == "no-workdir", t
-assert t["applied"]["vector"] == "tv1:d=on;f=16;lw=256;be=slop", t
-assert t["source"]["dirty"] == "default", t
+assert t["applied"]["vector"] == "tv1:d=on;f=16;lw=256;be=llvm", t
+assert t["source"]["dirty"] == "default" and t["source"]["backend"] == "default", t
 PY
 "$LHD" sim "$PRP" -q --set sim.tune.profile=on --result-json "$W/nowd_on.json" 2>"$W/nowd_on.err" || fail "profile=on without workdir failed"
 grep -q '"warnings":[1-9]' "$W/nowd_on.json" || fail "profile=on without a --workdir must warn (tune-disabled)"
@@ -132,7 +134,7 @@ for f in "$W"/es/*.cpp; do
   grep -qF "\"$b\"" "$W/es/BUILD" || fail "--emit-dir sim: BUILD does not compile $b"
 done
 if ls "$W"/es/*.tune-id.cpp >/dev/null 2>&1; then
-  grep -q 'tv1:d=off;f=none;lw=256;be=slop' "$W"/es/*.tune-id.cpp || fail "--emit-dir sim: did not bake the explicit vector"
+  grep -q 'tv1:d=off;f=none;lw=256;be=llvm' "$W"/es/*.tune-id.cpp || fail "--emit-dir sim: did not bake the explicit vector"
 fi
 
 grep -q "alwayslink = True" "$W/es/BUILD" || fail "--emit-dir sim: BUILD must alwayslink the sim library (tune-id identity)"
@@ -142,7 +144,7 @@ echo '{"schema":"lhd-sim-tune-file-1","knobs":{"dirty":true,"fence":0}}' >"$W/tf
 "$LHD" compile "$PRP" --emit-dir "sim:$W/et" --set sim.tune.file="$W/tf_json.json" --depfile "$W/et.d" -q \
   --result-json "$W/et.json" 2>/dev/null || fail "a JSON-typed tune file was rejected: $(cat "$W/et.json")"
 if ls "$W"/et/*.tune-id.cpp >/dev/null 2>&1; then
-  grep -q 'tv1:d=on;f=0;lw=256;be=slop' "$W"/et/*.tune-id.cpp || fail "the JSON bool/int tune file was not applied"
+  grep -q 'tv1:d=on;f=0;lw=256;be=llvm' "$W"/et/*.tune-id.cpp || fail "the JSON bool/int tune file was not applied"
 fi
 grep -q "tf_json.json" "$W/et.d" || fail "the tune file is not in the --depfile: $(cat "$W/et.d")"
 grep -q "tf_json.json" "$W/et.json" || fail "the tune file is not an envelope input"

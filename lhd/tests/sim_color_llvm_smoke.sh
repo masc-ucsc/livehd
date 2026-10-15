@@ -55,7 +55,7 @@ cat "${PRPS[@]}" > "$batch"
 SMOKE_JOBS="${SIM_COLOR_SMOKE_JOBS:-8}"
 BRANCH_JOBS="${SIM_COLOR_BRANCH_JOBS:-6}"
 run() { "$LHD" "$@" -q; }
-run sim "$batch"  --set sim.checkpoint=false \
+run sim "$batch" --set sim.tune.backend=slop --set sim.checkpoint=false \
   --set lhd.jobs="$SMOKE_JOBS" --workdir "$work/slop" --result-json "$work/slop.json" &
 slop_pid=$!
 run sim "$batch" --set sim.tune.backend=llvm --set sim.checkpoint=false \

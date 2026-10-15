@@ -732,3 +732,136 @@ TEST(LegalizeAcyclic, RolledLoopIsNeverSplitOrInlinedAndATrueLoopIsReported) {
   EXPECT_GT(r.loops, 0) << "a real comb loop through a rolled loop must be an error";
   EXPECT_EQ(loop_subs(host.get()), 1u);
 }
+
+namespace {
+// child `regc`: q = register(d), one bit. It holds STATE, so legalize never
+// inlines it, and it has no combinational arc.
+std::shared_ptr<hhds::GraphIO> regc_io(hhds::GraphLibrary& lib) {
+  if (auto io = lib.find_io("regc")) {
+    return io;
+  }
+  auto cio = lib.create_io("regc");
+  cio->add_input("d", 1);
+  cio->set_bits("d", 1);
+  cio->set_unsign("d", true);
+  cio->add_input("clk", 2);
+  cio->set_bits("clk", 1);
+  cio->add_output("q", 3);
+  cio->set_bits("q", 1);
+  cio->set_unsign("q", true);
+  auto cg = cio->create_graph();
+  gu::set_ubits(cg->get_input_pin("d"), 1);
+  gu::set_ubits(cg->get_input_pin("clk"), 1);
+  auto reg = gu::create_typed_node(*cg, Ntype_op::Flop, 1);
+  reg.attr(hhds::attrs::name).set(std::string{"r"});
+  cg->get_input_pin("d").connect_sink(gu::setup_sink_by_name(reg, "din"));
+  cg->get_input_pin("clk").connect_sink(gu::setup_sink_by_name(reg, "clock_pin"));
+  auto q = reg.create_driver_pin(0);
+  gu::set_ubits(q, 1);
+  q.connect_sink(cg->get_output_pin("q"));
+  return cio;
+}
+
+// top: word = {a, high} (Concat is MSB first: a in bits [2,4), high in [0,2)),
+// high = lane ^ regc.q, regc.d = word[0], o = word. The register's d/q close
+// the loop's ATOMIC component through the instance, so legalize refines that
+// component by port_reach arcs and bits.
+//   packed=false            lane = a (the loop-free reference)
+//   packed, !real_loop      lane = word[2,4) -- the `a` lane: a cycle per WORD
+//                           only (the br_amba_axi_shrinker struct-field shape)
+//   packed, real_loop       lane = word[0,2) -- high reads itself: a real loop
+std::shared_ptr<hhds::Graph> build_packed_beside_state(hhds::GraphLibrary& lib, const std::string& name, bool packed,
+                                                       bool real_loop) {
+  auto cio = regc_io(lib);
+  auto pio = lib.create_io(name);
+  pio->add_input("a", 1);
+  pio->set_bits("a", 2);
+  pio->set_unsign("a", true);
+  pio->add_input("clk", 2);
+  pio->set_bits("clk", 1);
+  pio->add_output("o", 3);
+  pio->set_bits("o", 4);
+  pio->set_unsign("o", true);
+  auto g   = pio->create_graph();
+  auto a   = g->get_input_pin("a");
+  auto clk = g->get_input_pin("clk");
+  gu::set_ubits(a, 2);
+  gu::set_ubits(clk, 1);
+
+  auto sub = gu::create_typed_node(*g, Ntype_op::Sub);
+  sub.set_subnode(cio);
+  auto q = sub.create_driver_pin(3);
+  gu::set_ubits(q, 1);
+  clk.connect_sink(sub.create_sink_pin(2));
+
+  auto concat = gu::create_typed_node(*g, Ntype_op::Concat, 4);
+  auto word   = concat.create_driver_pin(0);
+  gu::set_ubits(word, 4);
+  auto lane = a;
+  if (packed) {
+    auto slice = gu::create_typed_node(*g, Ntype_op::Get_mask, 2);
+    gu::connect_mask_operands(slice, word, real_loop ? 0 : 2, real_loop ? 2 : 4);
+    lane = slice.create_driver_pin(0);
+    gu::set_ubits(lane, 2);
+  }
+  auto mix = gu::create_typed_node(*g, Ntype_op::Xor, 2);
+  lane.connect_sink(gu::setup_sink_pid(mix, 0));
+  q.connect_sink(gu::setup_sink_pid(mix, 0));
+  auto high = mix.create_driver_pin(0);
+  gu::set_ubits(high, 2);
+  a.connect_sink(gu::setup_sink_pid(concat, 0));
+  gu::create_const(*g, *Dlop::create_integer(2)).connect_sink(gu::setup_sink_pid(concat, 1));
+  high.connect_sink(gu::setup_sink_pid(concat, 2));
+  gu::create_const(*g, *Dlop::create_integer(2)).connect_sink(gu::setup_sink_pid(concat, 3));
+
+  auto tap = gu::create_typed_node(*g, Ntype_op::Get_mask, 1);
+  gu::connect_mask_operands(tap, word, 0, 1);
+  auto d = tap.create_driver_pin(0);
+  gu::set_ubits(d, 1);
+  d.connect_sink(sub.create_sink_pin(1));
+  word.connect_sink(g->get_output_pin("o"));
+  return g;
+}
+}  // namespace
+
+// A packed-slice loop INSIDE a body that shares its atomic component with a
+// stateful instance: the bit-refined arc view (rightly) finds no loop, but the
+// body is still cyclic per word, and a word-level consumer (LEC's encoder)
+// stalls on it. br_amba_axi_shrinker hit exactly this after legalize inlined
+// its state-free mux: the muxed struct's `shift` field feeds its `data` field,
+// in one component with a stateful flow register. Legalize must split it like
+// any other packed body loop, and must still report a real one.
+TEST(LegalizeAcyclic, PackedSliceLoopBesideAStatefulInstanceIsSplit) {
+  auto& lib    = livehd::Hhds_graph_library::instance("lgdb_legalize_packed_beside_state");
+  auto  ref    = build_packed_beside_state(lib, "ref", /*packed=*/false, /*real_loop=*/false);
+  auto  packed = build_packed_beside_state(lib, "packed", /*packed=*/true, /*real_loop=*/false);
+  auto  cycle  = build_packed_beside_state(lib, "cycle", /*packed=*/true, /*real_loop=*/true);
+  auto  regc   = lib.find_io("regc")->get_graph();
+
+  livehd::lec::Lec_options o;
+  o.engine  = "ind";
+  o.timeout = 30;
+  // Unrepaired, the encoder refuses the word-level cycle (never a verdict).
+  {
+    const auto before = livehd::lec::prove_equal(ref.get(), packed.get(), o);
+    EXPECT_EQ(before.verdict, livehd::lec::Verdict::Undecided) << before.detail;
+    EXPECT_TRUE(before.unsupported) << before.detail;
+  }
+
+  livehd::legalize::Split_state state;
+  const auto                    r = livehd::legalize::make_acyclic({regc, packed}, state);
+  EXPECT_EQ(r.loops, 0);
+  EXPECT_EQ(r.instances_inlined, 0) << "a stateful instance keeps its boundary";
+  EXPECT_GT(r.slices_rewired, 0) << "the packed-slice loop beside the instance must be split";
+  EXPECT_EQ(count_subs(packed.get()), 1);
+  const auto good = livehd::lec::prove_equal(ref.get(), packed.get(), o);
+  EXPECT_EQ(good.verdict, livehd::lec::Verdict::Proven) << good.detail;
+
+  // The real loop in the same place is reported, and LEC fails CLOSED on it.
+  livehd::legalize::Split_state cycle_state;
+  const auto                    rc = livehd::legalize::make_acyclic({regc, cycle}, cycle_state);
+  EXPECT_GT(rc.loops, 0) << "a real loop beside the instance must still be an error";
+  const auto unresolved = livehd::lec::prove_equal(ref.get(), cycle.get(), o);
+  EXPECT_EQ(unresolved.verdict, livehd::lec::Verdict::Undecided) << unresolved.detail;
+  EXPECT_TRUE(unresolved.unsupported) << unresolved.detail;
+}

@@ -59,8 +59,9 @@ void Inou_cgen::setup() {
   // backend) keep their historical label names: lhd resolves the `--set
   // sim.tune.*` spellings and hands this pass CONCRETE values.
   m2.add_label_optional("backend",
-                        "sim.tune.backend: slop (reference C++) or llvm (direct native color objects); auto or empty = slop",
-                        "slop");
+                        "sim.tune.backend: llvm (direct native color objects; the default, also when empty) or slop "
+                        "(reference C++); auto = slop (this pass has no tuned decision)",
+                        "llvm");
   m2.add_label_optional("vcd",
                         "baked-in VCD trace path (the sim.vcd knob: the kernel maps false->none, true-><top>.vcd, "
                         "FILE->that path); empty = no VCD",
@@ -220,7 +221,12 @@ void Inou_cgen::to_cgen_sim(Eprp_var& var) {
   const auto fence_knob = knob("sim.tune.fence", livehd::sim::parse_tune_fence(fence_ratio_s));
   const auto live_words_knob
       = knob("sim.tune.live_words", livehd::sim::parse_tune_live_words(live_words_s == "0" ? std::string_view{} : live_words_s));
-  const auto backend_knob = knob("sim.tune.backend", livehd::sim::parse_tune_backend(backend_s));
+  // An unpinned backend: empty is the built-in llvm, an explicit `auto` keeps
+  // its meaning (no tuned decision here, so slop).
+  auto backend_knob = knob("sim.tune.backend", livehd::sim::parse_tune_backend(backend_s));
+  if (!backend_knob) {
+    backend_knob = livehd::sim::default_tune_backend(livehd::sim::is_tune_backend_auto(backend_s));
+  }
   // sim.unroll_sites: a plain whole number (0 = never unroll). Not a tune
   // knob: it is applied, never trialed, so it is not part of the tune vector.
   uint32_t   unroll_sites = Cgen_sim::kDefaultUnrollSites;

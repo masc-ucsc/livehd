@@ -964,6 +964,13 @@ struct Scc_scan {
   // per-output-group callee partitions): state-free instances, inlined (no
   // state moves). Rolled loops are never here -- never split, never inlined.
   std::vector<hhds::Node_class> state_free;
+  // A component through an instance that the arc view refined away. It can
+  // still hold a packed-slice loop INSIDE this body: a field read of a packed
+  // word that feeds another field of that same word is no loop at bit level
+  // (which is what the refined view sees once any instance shares the
+  // component), but it IS a word-level cycle for every consumer that orders
+  // this body's cells one word at a time -- LEC's encoder stalls on it.
+  bool refined_away = false;
 };
 
 Scc_scan scan(hhds::Graph* g, Scan_ctx& ctx) {
@@ -1006,6 +1013,7 @@ Scc_scan scan(hhds::Graph* g, Scan_ctx& ctx) {
     // Port-level arcs first (cheap), then bit level only inside the cycles
     // they leave: a false loop through a packed bus is port-level only.
     comb_sccs(members, &inside, /*refined=*/true, comb, [&](const std::vector<hhds::Pin_class>& port_cycle) {
+      out.refined_away = true;  // a port-level cycle; the bit view below may refine it away
       absl::flat_hash_set<hhds::Class_index> in_cycle;
       for (const auto& p : port_cycle) {
         in_cycle.insert(p.get_class_index());
@@ -1086,8 +1094,13 @@ Acyclic_result make_acyclic(const std::vector<std::shared_ptr<hhds::Graph>>& gra
           .emit();
     }
     // What is left has no inlinable instance on it: packed slices inside this
-    // body (false), a real path through a rolled loop, or a true loop.
-    if (!found.cycles.empty()) {
+    // body (false), a real path through a rolled loop, or a true loop. A
+    // component the arc view refined away can hide the same packed-slice loop
+    // (br_amba_axi_shrinker: inlining its state-free mux left the struct
+    // `shift` field feeding the `data` field of the same muxed word, in one
+    // component with stateful instances), so split there too; the
+    // splitter is a no-op on a body with no word-level cycle.
+    if (!found.cycles.empty() || found.refined_away) {
       result.slices_rewired += gu::split_packed_cycle_slices(g);
       found = scan(g, ctx);
     }

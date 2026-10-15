@@ -161,9 +161,9 @@ PY
 # `jget FILE KEY`: a top-level field of a JSON file.
 jget() { python3 -c 'import json,sys; v=json.load(open(sys.argv[1])).get(sys.argv[2]); print(v if isinstance(v,str) else json.dumps(v))' "$1" "$2"; }
 
-L0="tv1:d=off;f=none;lw=256;be=slop"
-L1="tv1:d=on;f=16;lw=256;be=slop" # the built-in default: every workdir's first incumbent
-L2="tv1:d=on;f=0;lw=256;be=slop"  # the idle design's trial out of L1
+L0="tv1:d=off;f=none;lw=256;be=llvm"
+L1="tv1:d=on;f=16;lw=256;be=llvm" # the built-in default: every workdir's first incumbent
+L2="tv1:d=on;f=0;lw=256;be=llvm"  # the idle design's trial out of L1
 
 # Each Bazel target owns one independent lifecycle and a fresh scratch directory.
 # Running this script without an argument still exercises every lifecycle.

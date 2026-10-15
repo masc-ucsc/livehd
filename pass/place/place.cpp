@@ -999,8 +999,8 @@ Result place(hhds::Graph& source, hhds::GraphLibrary& library, const Options& op
     t.status    = Status::PLACED;
     t.x         = std::llround((v.fp.die.xl + v.fp.die.xh) / 2);
     t.y         = std::llround(v.fp.die.yl);
-    auto layer  = std::find_if(tech.routing_layers.begin(), tech.routing_layers.end(), [&](const auto& name) {
-      return tech.layers.at(name).direction == "HORIZONTAL";
+    auto layer  = std::find_if(tech.routing_layers.begin(), tech.routing_layers.end(), [&](const auto& layer_name) {
+      return tech.layers.at(layer_name).direction == "HORIZONTAL";
     });
     if (layer == tech.routing_layers.end()) {
       throw std::runtime_error("LEF has no horizontal routing layer for IO pins");

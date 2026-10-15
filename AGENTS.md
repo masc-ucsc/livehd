@@ -17,6 +17,11 @@
 - **Independent tests**: LiveHD scripts and BUILD rules must not access sibling
   benchmark repositories. Test inputs must be provided by this repository or
   declared build dependencies.
+- **Simulator backend**: `lhd sim` defaults to `sim.tune.backend=llvm` (native
+  color objects). A test that is about the Slop backend itself (its C++ output,
+  slop-only knobs) pins `--set sim.tune.backend=slop`; a general sim test that
+  fails under llvm is an LLVM-backend bug to fix in `inou/cgen`, not a reason
+  to switch it to slop.
 - **External simulators**: the default suite must not need iverilog, vvp,
   verilator or ninja. Optional independent event-simulator legs are skipped
   unless `LHD_EXTERNAL_SIM` is set:

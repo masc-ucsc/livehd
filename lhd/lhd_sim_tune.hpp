@@ -86,12 +86,16 @@ enum class Mode : uint8_t { auto_, on, off };
 enum class Source : uint8_t { dflt, store, file, explicit_ };
 [[nodiscard]] std::string_view source_name(Source s);
 
-// Knobs one source pins; nullopt = that source says `auto`.
+// Knobs one source pins; nullopt = that source says `auto` (or nothing).
+// The backend is the one knob whose unpinned meaning depends on the spelling:
+// unset = the built-in llvm, an explicit `auto` = the tuned decision, else
+// slop (sim_tune_vector.hpp kTuneDefaultLlvm / kTuneAutoLlvm).
 struct Pins {
   std::optional<bool>     dirty;
   std::optional<int64_t>  fence;
   std::optional<uint64_t> live_words;
   std::optional<bool>     llvm;
+  bool                    backend_auto = false;  // the source spelled sim.tune.backend=auto (llvm is then nullopt)
   [[nodiscard]] bool      any() const { return dirty || fence || live_words || llvm; }
   bool                    operator==(const Pins&) const = default;
 };

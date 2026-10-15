@@ -437,8 +437,10 @@ ${LHD} compile "$W/sub_output_boundary.sv" --reader slang --top sub_output_bound
   --emit-dir lg:"$W/sub_output_boundary_lg/" \
   --workdir "$W/sub_output_boundary_lgw" -q \
   || fail "sub-output boundary LGraph emission failed"
+# Slop backend pinned: the boundary check below greps the reference C++ color
+# bodies (Slop_u conversions / typed slots), not the default LLVM objects.
 ${LHD} sim lg:"$W/sub_output_boundary_lg/" "$W/sub_output_boundary_tb.prp" \
-   --workdir "$W/sub_output_boundary_sim" -q &
+   --set sim.tune.backend=slop --workdir "$W/sub_output_boundary_sim" -q &
 sub_output_boundary_sim_pid=$!
 
 # Collect the three overlapped simulator builds.
