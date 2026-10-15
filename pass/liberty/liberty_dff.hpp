@@ -1,6 +1,7 @@
 // This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 #pragma once
 
+#include <cstdint>
 #include <memory>
 #include <optional>
 #include <string>
@@ -27,11 +28,29 @@ struct Comb_cell {
   std::string              output;
   std::string              function;
   double                   area = 0;
+  std::string              footprint;
+  bool                     physical_barrier = false;
+  // Electrical repair estimates; absent limits are not invented. Timing
+  // entries are conservative first-slew NLDM samples, not a replacement for STA.
+  std::vector<double>      input_capacitance_ff;
+  std::optional<double>    max_capacitance_ff, max_transition_ps, max_fanout;
+  double                   intrinsic_ps = 0, resistance_ohm = 0;
 };
-std::vector<Comb_cell> scan_comb_cells(const std::string& lib_files);
+// Exact scalar truth table in the declared input order, repeated to 64 bits.
+// Reject unsupported syntax, absent pins and cells with more than six inputs.
+std::optional<uint64_t> cell_truth(const Comb_cell& cell);
+std::vector<Comb_cell>  scan_comb_cells(const std::string& lib_files);
 // Parse an owned content snapshot so a cost table and its cache digest cannot
 // observe different bytes if a library file is replaced during an invocation.
-std::vector<Comb_cell> scan_comb_cells_text(const std::string& contents);
+std::vector<Comb_cell>  scan_comb_cells_text(const std::string& contents);
+
+// Input-free tie cells can have multiple constant outputs (e.g. SKY130 conb).
+// ABC's single-output Mio inventory does not describe those cells faithfully.
+struct Constant_cell {
+  std::string                               name;
+  std::vector<std::pair<std::string, bool>> outputs;
+};
+std::vector<Constant_cell> scan_constant_cells(const std::string& lib_files);
 
 struct Dff_cell {
   std::string                      name;     // Liberty cell name (e.g. sky130_fd_sc_hd__dfxtp_1)
@@ -114,13 +133,17 @@ struct Icg_cell {
 // (state_)function is `CLK & <state>`. File order; unranked.
 std::vector<Icg_cell> scan_icg_cells(const std::string& lib_files);
 
+// Smallest usable single-bit ff area, including scan/enable and either edge.
+// Geometry estimates do not require the register mapper's narrower semantics.
+std::optional<double> smallest_flop_area(const std::string& lib_files);
+
 // Every plain POSEDGE D-flop in the whitespace-separated Liberty file list: a
 // cell with an `ff(){}` group whose `clocked_on` is a bare pin (posedge, not
 // `!CLK` -- that is what keeps ASAP7's negedge DFFLQ* / sky130's dfrtn out),
 // `next_state` a bare pin or its complement (`!D`, `D'`, `(!D)`; no scan/enable
 // logic), no async clear/preset, exactly one data + one clock input, and a Q
 // (preferred) or QN output. File order; unranked.
-std::vector<Dff_cell>    scan_dff_cells(const std::string& lib_files);
+std::vector<Dff_cell> scan_dff_cells(const std::string& lib_files);
 // Every posedge D-flop that is plain except for an asynchronous clear and/or
 // preset -- each a bare input pin or its complement (`!RESET_B`, `RN'`),
 // distinct from D and CLK -- with a Q/QN output whose function names a state

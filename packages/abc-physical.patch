@@ -1,0 +1,57 @@
+diff --git src/map/scl/sclSize.h src/map/scl/sclSize.h
+--- src/map/scl/sclSize.h
++++ src/map/scl/sclSize.h
+@@ -53,6 +53,7 @@
+     Vec_Flt_t *    vPoLoad;       // per PO: external load in fF added to the driver's load (<0: none)
+     Vec_Flt_t *    vPoDelay;      // per PO: virtual delay after the PO in ps -- budget minus required time (<0: none)
+     Vec_Ptr_t *    vPiCell;       // per PI: SC_Cell * of the driving cell (NULL: ideal driver)
++    Vec_Flt_t *    vPiSlew;       // boundary: fixed input slew in ps (<0: unspecified)
+     Vec_Flt_t *    vPiArr;        // per PI: arrival time in ps (<0: none)
+ };
+ 
+@@ -78,6 +79,7 @@
+     Vec_Que_t *    vQue;          // outputs by their time
+     SC_Cell *      pPiDrive;      // cell driving primary inputs
+     Vec_Ptr_t *    vPiDrive;      // boundary: per-CI driving cell (NULL entry: pPiDrive)
++    Vec_Flt_t *    vPiSlew;       // boundary: fixed input slew in ps (<0: unspecified)
+     Vec_Flt_t *    vPiArr;        // boundary: per-CI arrival time
+     Vec_Flt_t *    vCoDelay;      // boundary: per-CO virtual downstream delay
+     // backup information
+@@ -303,6 +305,7 @@
+     Vec_FltFreeP( &p->vTimesOut );
+     Vec_IntFreeP( &p->vBestFans );
+     Vec_PtrFreeP( &p->vPiDrive );
++    Vec_FltFreeP( &p->vPiSlew );
+     Vec_FltFreeP( &p->vPiArr );
+     Vec_FltFreeP( &p->vCoDelay );
+     Vec_FltFreeP( &p->vInDrive );
+diff --git src/map/scl/sclSize.c src/map/scl/sclSize.c
+--- src/map/scl/sclSize.c
++++ src/map/scl/sclSize.c
+@@ -399,6 +399,11 @@
+         else
+             Abc_SclHandleInputDriverAny( pDrive, pLoad, pTime, pSlew );
+     }
++    if ( p->vPiSlew != NULL && Vec_FltEntry(p->vPiSlew, pObj->iData) >= 0 )
++    {
++        SC_Pair * pSlew = Abc_SclObjSlew( p, pObj );
++        pSlew->rise = pSlew->fall = Vec_FltEntry( p->vPiSlew, pObj->iData );
++    }
+     if ( p->vPiArr != NULL && Vec_FltEntry(p->vPiArr, pObj->iData) > 0 )
+     {
+         SC_Pair * pTime = Abc_SclObjTime( p, pObj );
+@@ -771,6 +776,14 @@
+                 if ( pCell != NULL && pCell->n_inputs >= 1 && pCell->n_outputs >= 1 )
+                     Vec_PtrWriteEntry( p->vPiDrive, pObj->iData, pCell );
+             }
++        }
++        if ( pBnd->vPiSlew )
++        {
++            p->vPiSlew = Vec_FltStart( Abc_NtkCiNum(pNtk) );
++            Vec_FltFill( p->vPiSlew, Abc_NtkCiNum(pNtk), -1 );
++            Abc_NtkForEachPi( pNtk, pObj, i )
++                if ( i < Vec_FltSize(pBnd->vPiSlew) )
++                    Vec_FltWriteEntry( p->vPiSlew, pObj->iData, Vec_FltEntry(pBnd->vPiSlew, i) );
+         }
+         if ( pBnd->vPiArr )
+         {

@@ -749,3 +749,94 @@ TEST(LibertyDff, LatchQnOnlyCellIsInvertedWithResetsInPinTerms) {
   EXPECT_FALSE(sel.latch_ladder[0][2][0].reset1_low);
   EXPECT_TRUE(sel.latch_ladder[0][0].empty());  // a reset cell is not a plain pick
 }
+
+TEST(LibertyDff, MemoryAreaUsesEitherClockEdgeWithoutChangingRegisterSelection) {
+  auto disabled = q_cell("DONT_USE", 0.01);
+  disabled.insert(disabled.find('{') + 1, "dont_use:true;");
+  const auto path = write_lib("memory_area.lib",
+                              lib(q_cell("POS", 2) + q_cell("NEG", 1, "D", "!CLK") + disabled
+                                  + "cell(LATCH) { area:0.001; latch(IQ,IQN) { data_in:D; enable:G; } }"));
+  const auto area = livehd::liberty::smallest_flop_area(path);
+  ASSERT_TRUE(area);
+  EXPECT_DOUBLE_EQ(*area, 1);
+  const auto registers = livehd::liberty::scan_dff_cells(path);
+  ASSERT_EQ(registers.size(), 1);
+  EXPECT_EQ(registers.front().name, "POS");
+}
+TEST(LibertyDff, DualOutputTieInventoryPreservesBothConstants) {
+  const auto path = write_lib(
+      "tie_cells.lib",
+      lib("cell(TIE) { area:1; pin(HI) {direction:output; function:\"1\";} pin(LO) {direction:output; function:\"0\";} }"
+          "cell(NOT_A_TIE) {area:1; pin(A) {direction:input;} pin(Y) {direction:output; function:\"1\";} }"));
+  const auto cells = livehd::liberty::scan_constant_cells(path);
+  ASSERT_EQ(cells.size(), 1);
+  EXPECT_EQ(cells.front().name, "TIE");
+  EXPECT_EQ(cells.front().outputs,
+            (std::vector<std::pair<std::string, bool>>{
+                {"HI",  true},
+                {"LO", false}
+  }));
+}
+
+TEST(LibertyFunction, ExactTruthAndUnsupportedSyntax) {
+  livehd::liberty::Comb_cell c;
+  c.inputs   = {"A", "B", "C"};
+  c.function = "A ^ B * C";
+  EXPECT_EQ(livehd::liberty::cell_truth(c), uint64_t{0x6060606060606060});
+  c.function = "A B' + !C";
+  EXPECT_EQ(livehd::liberty::cell_truth(c), uint64_t{0x2f2f2f2f2f2f2f2f});
+  c.function = "A & absent";
+  EXPECT_FALSE(livehd::liberty::cell_truth(c));
+  c.function = "(A & B";
+  EXPECT_FALSE(livehd::liberty::cell_truth(c));
+  c.function = "A ? B : C";
+  EXPECT_FALSE(livehd::liberty::cell_truth(c));
+  c.inputs   = {"A", "B", "C", "D", "E", "F", "G"};
+  c.function = "A";
+  EXPECT_FALSE(livehd::liberty::cell_truth(c));
+}
+
+TEST(LibertyFunction, RepairElectricalUnitsAndNldmEstimate) {
+  const auto cells = livehd::liberty::scan_comb_cells_text(R"(
+    library (picofarads) { time_unit : "1ns"; capacitive_load_unit (1, "pf"); default_max_transition : 2;
+      cell (BUF) { area : 1; pin(A) { direction : input; capacitance : 0.002; }
+        pin (Y) { direction : output; function : "A"; max_capacitance : 0.1; max_fanout : 8;
+          timing () { cell_rise(t) { index_2("0.01, 0.1"); values("0.03, 0.12"); } } } } }
+    library (femtofarads) { time_unit : "1ps"; capacitive_load_unit (1, "ff");
+      cell (BUF2) { area : 1; pin(A) { direction : input; capacitance : 3; }
+        pin(Y) { direction : output; function : "A"; max_capacitance : 15; } } }
+  )");
+  ASSERT_EQ(cells.size(), 2);
+  EXPECT_DOUBLE_EQ(cells[0].input_capacitance_ff.front(), 2);
+  EXPECT_DOUBLE_EQ(cells[0].max_capacitance_ff.value(), 100);
+  EXPECT_DOUBLE_EQ(cells[0].max_transition_ps.value(), 2000);
+  EXPECT_DOUBLE_EQ(cells[0].max_fanout.value(), 8);
+  EXPECT_DOUBLE_EQ(cells[0].intrinsic_ps, 30);
+  EXPECT_NEAR(cells[0].resistance_ohm, 1000, 1e-8);
+  EXPECT_DOUBLE_EQ(cells[1].input_capacitance_ff.front(), 3);
+  EXPECT_DOUBLE_EQ(cells[1].max_capacitance_ff.value(), 15);
+  EXPECT_FALSE(cells[1].max_transition_ps);
+}
+
+TEST(LibertyFunction, RepairNldmLoadAxisFollowsTemplate) {
+  // osu018 shape: variable_1 is the load, so index_2 holds slews and the load
+  // sweep is column 0. A template with no load axis gives no estimate.
+  const auto cells = livehd::liberty::scan_comb_cells_text(R"(
+    library (osu) { time_unit : "1ns"; capacitive_load_unit (1, "pf");
+      lu_table_template(load_first) { variable_1 : total_output_net_capacitance; variable_2 : input_net_transition;
+        index_1 ("1, 2"); index_2 ("1, 2, 3"); }
+      lu_table_template(slew_only) { variable_1 : input_net_transition; index_1 ("1, 2"); }
+      cell (BUFX2) { area : 1; pin(A) { direction : input; capacitance : 0.002; }
+        pin (Y) { direction : output; function : "A";
+          timing () { cell_rise(load_first) { index_1 ("0.005, 0.105"); index_2 ("0.06, 0.6, 1.2");
+            values ("0.065, 0.07, 0.09", "0.235, 0.24, 0.26"); } } } }
+      cell (BUFX4) { area : 1; pin(A) { direction : input; capacitance : 0.002; }
+        pin (Y) { direction : output; function : "A";
+          timing () { cell_rise(slew_only) { index_1 ("0.06, 1.2"); values ("0.04, 0.09"); } } } } }
+  )");
+  ASSERT_EQ(cells.size(), 2);
+  EXPECT_DOUBLE_EQ(cells[0].intrinsic_ps, 65);
+  EXPECT_NEAR(cells[0].resistance_ohm, 1700, 1e-6);  // (0.235-0.065) ns / 0.1 pF
+  EXPECT_DOUBLE_EQ(cells[1].intrinsic_ps, 40);
+  EXPECT_DOUBLE_EQ(cells[1].resistance_ohm, 0);
+}

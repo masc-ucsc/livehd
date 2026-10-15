@@ -16637,6 +16637,11 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
               }
             }
             std::vector<std::string> direct_args;
+            // The `<port>__tick` words this walk writes (`gated_ports`: the ones
+            // a gate or a forwarded guard can hold false), for the withheld-
+            // period re-arm and the multi-port refusal below.
+            std::vector<std::string> written_ticks;
+            std::vector<std::string> gated_ports;
             for (const auto& decl : sio->get_input_pin_decls()) {
               if (loop->index_input && decl.port_id == *loop->index_input) {
                 continue;  // supplied as first + ordinal*step by the native wrapper
@@ -16727,6 +16732,12 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
                       tick = tick.empty() ? emit_known_true(activation) : absl::StrCat(tick, " && ", emit_known_true(activation));
                     }
                     if (resolved && !tick.empty()) {
+                      written_ticks.emplace_back(absl::StrCat(sub_member, ".__in.", cpp_port_path(decl.name), "__tick"));
+                      // A top's own tick words never move; a compact root's are
+                      // its parent's gate.
+                      if (compact_kernel_ || (!gate.is_invalid() && !livehd::graph_util::is_graph_input_pin(gate.base_pin()))) {
+                        gated_ports.emplace_back(decl.name);
+                      }
                       fout->append(absl::StrCat("  ",
                                                 sub_member,
                                                 ".__gen += slop_update(",
@@ -16752,6 +16763,71 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
                       .emit();
                   cycle_reported_ = true;
                 }
+              }
+            }
+            // The body's withheld period (`__compact_advance`) holds ALL of its
+            // state when any one tick word is false, so a gate on one of several
+            // clock ports mis-simulates every domain. Gated or not, state on a
+            // SECONDARY clock (a module's clock port other than its reference,
+            // committed on a detected edge of the port value) never commits: the
+            // walk never toggles that value. A fused body's per-loop ports, each
+            // the reference of its own lane child, are fine. Fail closed.
+            if (const auto child = node.get_subnode_graph();
+                child && version.version == livehd::sim::Color_plan::State_version::pre_rise
+                && clock_guard_ports(child, port_cache).size() > 1) {
+              absl::flat_hash_set<const hhds::Graph*>    seen;
+              std::function<std::string(hhds::Graph*)> secondary_clock_state = [&](hhds::Graph* def) -> std::string {
+                if (def == nullptr || !seen.insert(def).second) {
+                  return {};
+                }
+                const auto ref_clock = clock_input_of(def);
+                for (auto n : def->body().nodes()) {
+                  if (livehd::graph_util::is_type_sub(n)) {
+                    if (auto found = secondary_clock_state(n.get_subnode_graph().get()); !found.empty()) {
+                      return found;
+                    }
+                    continue;
+                  }
+                  if (!is_type_flop(n) && type_op_of(n) != Ntype_op::Latch) {
+                    continue;
+                  }
+                  // The same width-wrapper walk as the Flop builder's sec_clock.
+                  auto cd = get_driver(find_sink_pin(n, "clock_pin"));
+                  for (int hops = 0; hops < 8 && !cd.is_invalid(); ++hops) {
+                    auto cn = cd.get_master_node();
+                    if (type_op_of(cn) != Ntype_op::Get_mask) {
+                      break;
+                    }
+                    auto ce = cn.inp_pins_snapshot();
+                    if (ce.empty() || (ce.size() >= 2 && !ce[1].get_driver_pin().is_const())) {
+                      break;
+                    }
+                    cd = ce[0].get_driver_pin();
+                  }
+                  if (!cd.is_invalid() && livehd::graph_util::is_graph_input_pin(cd) && pin_name_of(cd) != ref_clock) {
+                    return absl::StrCat(def->get_name(), ".", pin_name_of(cd));
+                  }
+                }
+                return {};
+              };
+              const auto secondary = secondary_clock_state(child.get());
+              if (!gated_ports.empty() || !secondary.empty()) {
+                livehd::diag::err("inou.cgen.sim", "gated-clock-unsupported", "unsupported")
+                    .msg("module `{}`: compact loop `{}` has {} clock ports and {}",
+                         gname,
+                         sub_member,
+                         clock_guard_ports(child, port_cache).size(),
+                         secondary.empty() ? absl::StrCat("`",
+                                                          gated_ports.front(),
+                                                          "` is gated; a withheld period on it would hold the state of "
+                                                          "every other clock domain in the loop")
+                                           : absl::StrCat("state on the secondary clock `",
+                                                          secondary,
+                                                          "`; the walk ticks only the reference clock, so that state "
+                                                          "would never commit"))
+                    .hint("unroll the loop (`--set compile.unroll=true`) or give its state a single clock")
+                    .emit();
+                cycle_reported_ = true;
               }
             }
             if (direct && version.version == livehd::sim::Color_plan::State_version::pre_rise) {
@@ -16784,7 +16860,19 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
               fout->append("  __rt.__loop_advanced_", std::to_string(version.base_site), " = true;\n");
               fout->append("  const uint64_t __loop_gen_before = ", sub_member, ".__gen;\n");
               fout->append("  ", sub_member, ".__compact_advance();  // compact-loop control: one native ordinal walk\n");
-              fout->append("  if (", sub_member, ".__gen != __loop_gen_before) {\n    __rt.__color_state_changed = true;\n");
+              // A withheld period commits nothing, so `__gen` holds, and the
+              // gate's enable is not an input of this color: going quiescent
+              // here never re-ran the walk once the gate reopened (the loop's
+              // state froze for good). Stay live while any tick is held off.
+              std::string withheld;
+              for (const auto& tick : written_ticks) {
+                absl::StrAppend(&withheld, withheld.empty() ? "" : " && ", tick);
+              }
+              fout->append("  if (",
+                           sub_member,
+                           ".__gen != __loop_gen_before",
+                           withheld.empty() ? "" : absl::StrCat(" || !(", withheld, ")"),
+                           ") {\n    __rt.__color_state_changed = true;\n");
               emit_serial_dirty_site_colors(version.base_site, "    ");
               fout->append("  } }\n");
             } else {

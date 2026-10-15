@@ -58,6 +58,7 @@ TEST(AttrCarry, EveryNodeAttributeSurvivesARebuild) {
   src.attr(la::place).set(Ann_place{1.0F, 2.0F, 3.0F, 4.0F});
   src.attr(la::coloring_info).set(std::string{"info_blob"});
   src.attr(la::placement_rc).set(std::string{"physical_rc_blob"});
+  src.attr(la::placement_block).set(std::string{"region:7"});
   src.attr(la::simulation_init).set(std::string{"simulation_init_blob"});
   src.attr(la::proven).set(uint32_t{3});
   src.attr(la::runtime_check).set(uint32_t{5});
@@ -74,7 +75,7 @@ TEST(AttrCarry, EveryNodeAttributeSurvivesARebuild) {
   src.attr(la::legalize_inlined).set(std::string{"callee.split"});
   src.attr(la::comb_reach).set(std::string{"s 0 1\no 2 0\n"});
   gu::set_match(src, 9);  // the NODE overload of the dual-role `match`
-  static_assert(kNodeTagsStamped == 30, "a node-kind tag was added to LIVEHD_FOR_EACH_ATTR_TAG: stamp and check it here");
+  static_assert(kNodeTagsStamped == 31, "a node-kind tag was added to LIVEHD_FOR_EACH_ATTR_TAG: stamp and check it here");
 
   gu::carry_node_attrs(src, dst);
 
@@ -93,6 +94,7 @@ TEST(AttrCarry, EveryNodeAttributeSurvivesARebuild) {
   EXPECT_EQ(dst.attr(la::place).get(), Ann_place(1.0F, 2.0F, 3.0F, 4.0F));
   EXPECT_EQ(dst.attr(la::coloring_info).get(), "info_blob");
   EXPECT_EQ(dst.attr(la::placement_rc).get(), "physical_rc_blob");
+  EXPECT_EQ(dst.attr(la::placement_block).get(), "region:7");
   EXPECT_EQ(dst.attr(la::simulation_init).get(), "simulation_init_blob");
   EXPECT_EQ(dst.attr(la::proven).get(), 3u);
   EXPECT_EQ(dst.attr(la::runtime_check).get(), 5u);

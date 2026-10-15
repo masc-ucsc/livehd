@@ -1,0 +1,55 @@
+/*
+:name: loop_gated_clock_port_reopen
+:type: simulation
+:expect_instances: u_loop*=1
+*/
+
+// A rolled loop of stateful children inside a module whose Clock PORT the
+// parent gates (`Clock(clock_pin=clk, enable=en)`). The root forwards the gate
+// through the loop's `gclk__tick` word, and a withheld period commits nothing,
+// so the loop's `__gen` holds. The gate's enable is not an input of the color
+// that walks the loop, so that color went quiescent on the first closed period
+// and never ran again: the lanes froze at their value from before the gate
+// closed, under both sim backends (sim.tune.dirty=off and compile.unroll=true
+// were already right). The walk now stays live while any tick is held off.
+//
+// Same values as `--set compile.unroll=true`.
+mod gl_cnt(gclk:Clock, inc:Bool) -> (q:U4@[0]) {
+  reg c:U4:[clock_pin=gclk] = 0
+  q = c
+  if inc { wrap c += 1 }
+}
+
+mod gl_lanes(gclk:Clock, inc:Bool) -> (s:U8@[0]) {
+  mut acc:U8 = 0
+  for j in 0..<2 {
+    const c = gl_cnt(gclk=gclk, inc=inc)
+    wrap acc = acc + c
+  }
+  s = acc
+}
+
+pub mod gl_top(clk:Clock, en:Bool, inc:Bool) -> (s:U8@[]) {
+  const g = Clock(clock_pin=clk, enable=en)
+  s = gl_lanes(gclk=g, inc=inc)
+}
+
+test gl_top.lanes_resume_after_the_gate_reopens {
+  mut x     = gl_top
+  mut cnt:U8 = 0
+  mut bad   = 0
+  mut seen  = 0
+  tick 10 {
+    // c0,c1 open; c2,c3 closed; c4.. open again
+    const en:Bool = (clock <= 1) or (clock >= 4)
+    x.en  = en
+    x.inc = true
+    step
+    if en { wrap cnt += 1 }
+    seen += 1
+    if x.s != 2 * cnt { bad += 1 }
+  }
+  assert(seen == 10, "the comparisons ran")
+  assert(cnt == 8, "the gate reopened (guards against a vacuous pass)")
+  assert(bad == 0, "the gated lanes hold while closed and count again once the gate reopens")
+}

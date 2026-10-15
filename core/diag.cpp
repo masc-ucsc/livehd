@@ -472,6 +472,35 @@ void Sink::clear() {
   }
 }
 
+Sink::Mark Sink::mark() const {
+  const std::lock_guard lock(mutex_);
+  return Mark{records_.size()};
+}
+
+void Sink::rollback(const Mark& m) {
+  const std::lock_guard lock(mutex_);
+  if (m.records >= records_.size()) {
+    return;  // nothing emitted since (or the sink was cleared in between)
+  }
+  for (size_t i = m.records; i < records_.size(); ++i) {
+    const auto& d = records_[i];
+    switch (d.severity) {
+      case Severity::error:
+        --error_count_;
+        if (d.deferred) {
+          --deferred_error_count_;
+        }
+        break;
+      case Severity::warning: --warn_count_; break;
+      case Severity::note   : --note_count_; break;
+      case Severity::info   : --info_count_; break;
+    }
+    // A retracted record must not dedup a later genuine one in this step.
+    seen_.erase(dedup_key(d));
+  }
+  records_.erase(records_.begin() + static_cast<std::ptrdiff_t>(m.records), records_.end());
+}
+
 void Sink::set_step(std::string_view step) {
   const std::lock_guard lock(mutex_);
   step_ = step;

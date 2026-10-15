@@ -13,7 +13,7 @@ std::string serialize_parasitics(const Parasitics& rc) {
   rapidjson::Writer<rapidjson::StringBuffer> w(buffer);
   w.StartObject();
   w.Key("version");
-  w.Int(1);
+  w.Int(2);
   w.Key("identity");
   w.String(rc.identity.c_str());
   w.Key("approximate");
@@ -26,6 +26,9 @@ std::string serialize_parasitics(const Parasitics& rc) {
     w.Int64(c.x);
     w.Int64(c.y);
     w.Uint(c.orientation);
+    w.String(c.master.c_str());
+    w.Int64(c.width);
+    w.Int64(c.height);
     w.EndArray();
   }
   w.EndArray();
@@ -79,7 +82,7 @@ Parasitics deserialize_parasitics(std::string_view text) {
   rapidjson::Document json;
   json.Parse(text.data(), text.size());
   require(!json.HasParseError() && json.IsObject());
-  require(json.HasMember("version") && json["version"].IsInt() && json["version"].GetInt() == 1);
+  require(json.HasMember("version") && json["version"].IsInt() && (json["version"].GetInt() == 1 || json["version"].GetInt() == 2));
   require(json.HasMember("identity") && json["identity"].IsString() && json.HasMember("approximate")
           && json["approximate"].IsBool());
   require(json.HasMember("cells") && json["cells"].IsArray() && json.HasMember("terminals") && json["terminals"].IsArray()
@@ -88,9 +91,20 @@ Parasitics deserialize_parasitics(std::string_view text) {
   result.identity    = json["identity"].GetString();
   result.approximate = json["approximate"].GetBool();
   for (const auto& cell : json["cells"].GetArray()) {
-    require(cell.IsArray() && cell.Size() == 4 && cell[0].IsString() && cell[1].IsInt64() && cell[2].IsInt64() && cell[3].IsUint()
-            && cell[3].GetUint() < 8);
-    result.cells.push_back({cell[0].GetString(), cell[1].GetInt64(), cell[2].GetInt64(), cell[3].GetUint()});
+    require(cell.IsArray() && (cell.Size() == 4 || cell.Size() == 7) && cell[0].IsString() && cell[1].IsInt64() && cell[2].IsInt64()
+            && cell[3].IsUint() && cell[3].GetUint() < 8);
+    Parasitics::Cell c;
+    c.name        = cell[0].GetString();
+    c.x           = cell[1].GetInt64();
+    c.y           = cell[2].GetInt64();
+    c.orientation = cell[3].GetUint();
+    if (cell.Size() == 7) {
+      require(cell[4].IsString() && cell[5].IsInt64() && cell[6].IsInt64() && cell[5].GetInt64() >= 0 && cell[6].GetInt64() >= 0);
+      c.master = cell[4].GetString();
+      c.width  = cell[5].GetInt64();
+      c.height = cell[6].GetInt64();
+    }
+    result.cells.push_back(std::move(c));
   }
   for (const auto& terminal : json["terminals"].GetArray()) {
     require(terminal.IsArray() && terminal.Size() == 3 && terminal[0].IsString() && terminal[1].IsInt64() && terminal[2].IsInt64());

@@ -191,6 +191,12 @@ struct placement_rc_t {
   using storage    = hhds::flat_storage;
 };
 inline constexpr placement_rc_t placement_rc{};
+// Persistent physical block ownership, including cells introduced by ECOs.
+struct placement_block_t {
+  using value_type = std::string;
+  using storage    = hhds::flat_storage;
+};
+inline constexpr placement_block_t placement_block{};
 
 struct pin_place_t {
   using value_type = Ann_place;
@@ -429,6 +435,8 @@ inline constexpr Attr_kind attr_kind<place_t> = Attr_kind::node;
 template <>
 inline constexpr Attr_kind attr_kind<placement_rc_t> = Attr_kind::node;
 template <>
+inline constexpr Attr_kind attr_kind<placement_block_t> = Attr_kind::node;
+template <>
 inline constexpr Attr_kind attr_kind<pin_place_t> = Attr_kind::any_pin;
 template <>
 inline constexpr Attr_kind attr_kind<place_weight_t> = Attr_kind::driver_pin;
@@ -474,6 +482,7 @@ inline constexpr Attr_kind attr_kind<lut_t> = Attr_kind::node;
 // `hhds::attrs::srcid` are hhds-owned and handled by those two files directly.
 #define LIVEHD_FOR_EACH_ATTR_TAG(X) \
   X(placement_rc)                   \
+  X(placement_block)                \
   X(pin_place)                      \
   X(place_weight)                   \
   X(bits)                           \

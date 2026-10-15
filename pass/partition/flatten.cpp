@@ -282,6 +282,11 @@ void Flattener::carry_node_attrs(Ictx* ctx, const hhds::Node_class& orig, const 
   if (auto a = orig.attr(livehd::attrs::lut); a.has()) {
     neo.attr(livehd::attrs::lut).set(std::string{a.get()});
   }
+  if (physical_names_) {
+    if (auto a = orig.attr(livehd::attrs::place); a.has()) neo.attr(livehd::attrs::place).set(a.get());
+    if (auto a = orig.attr(livehd::attrs::placement_block); a.has()) neo.attr(livehd::attrs::placement_block).set(a.get());
+    if (auto a = orig.attr(livehd::attrs::synth_region_id); a.has()) neo.attr(livehd::attrs::synth_region_id).set(a.get());
+  }
   if (auto a = orig.attr(hhds::attrs::srcid); a.has() && a.get() != 0) {
     // Into the owning library's shared srcmap, not the flat body's own locator:
     // the flat def is a deleted-after-use scratch, and a per-body import would

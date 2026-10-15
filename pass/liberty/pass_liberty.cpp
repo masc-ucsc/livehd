@@ -8,8 +8,6 @@
 
 #include "pass_liberty.hpp"
 
-#include "liberty_dff.hpp"
-
 #include <algorithm>
 #include <cctype>
 #include <format>
@@ -25,8 +23,10 @@
 #include "dlop.hpp"
 #include "graph_library_singleton.hpp"
 #include "hhds/graph.hpp"
+#include "liberty_dff.hpp"
 #include "node_util.hpp"
 
+// clang-format off: ABC cmd.h requires main.h to define Abc_Frame_t.
 extern "C" {
 #include "base/abc/abc.h"
 #include "base/main/abcapis.h"
@@ -34,6 +34,7 @@ extern "C" {
 #include "base/cmd/cmd.h"
 #include "map/mio/mio.h"
 }
+// clang-format on
 
 namespace gu = livehd::graph_util;
 
@@ -53,7 +54,7 @@ namespace {
 
 // One SOP cube: characters '0'/'1'/'-' per input pin (in pin order).
 struct Cube {
-  std::string lits;  // length == n_inputs
+  std::string lits;       // length == n_inputs
   bool        on = true;  // output value for this cube ('1' => on-set)
 };
 
@@ -91,7 +92,7 @@ std::vector<Cube> parse_sop(const char* sop, int n_inputs) {
       continue;
     }
     Cube c;
-    if (tok.size() == 1) {        // 0-input cell: just the output char
+    if (tok.size() == 1) {  // 0-input cell: just the output char
       c.lits = std::string(static_cast<size_t>(std::max(0, n_inputs)), '-');
       c.on   = tok[0] == "1";
     } else {
@@ -121,7 +122,7 @@ bool model_cell(hhds::GraphLibrary& outlib, Mio_Gate_t* g) {
   if (outlib.find_io(cell)) {
     return false;  // already modeled (dedup across calls)
   }
-  auto io = outlib.create_io(cell);
+  auto          io  = outlib.create_io(cell);
   hhds::Port_id pid = 1;
   for (const auto& p : pins) {
     io->add_input(p, pid++);
@@ -238,7 +239,9 @@ void Pass_liberty::gensim(Eprp_var& var) {
   bool verbose = truthy(var.get("verbose", "false"));
 
   if (files.empty()) {
-    livehd::diag::err("pass.liberty", "no-file", "unsupported").msg("pass.liberty gensim needs a Liberty .lib file argument").fatal();
+    livehd::diag::err("pass.liberty", "no-file", "unsupported")
+        .msg("pass.liberty gensim needs a Liberty .lib file argument")
+        .fatal();
     return;
   }
   if (out.empty()) {
@@ -267,10 +270,31 @@ void Pass_liberty::gensim(Eprp_var& var) {
     return;
   }
 
-  auto&       outlib = livehd::Hhds_graph_library::instance(out);
+  auto&       outlib  = livehd::Hhds_graph_library::instance(out);
   int         modeled = 0;
   int         skipped = 0;
   Mio_Gate_t* g       = nullptr;
+  // Preserve all outputs of physical tie cells. Mio is single-output and
+  // otherwise leaves conb's second output as an unmatched formal black box.
+  for (const auto& cell : livehd::liberty::scan_constant_cells(files)) {
+    if (outlib.find_io(cell.name)) {
+      continue;
+    }
+    auto          io  = outlib.create_io(cell.name);
+    hhds::Port_id pid = 1;
+    for (const auto& [name, value] : cell.outputs) {
+      (void)value;
+      io->add_output(name, pid++);
+      io->set_bits(name, 1);
+      io->set_unsign(name, true);
+    }
+    auto body = io->create_graph();
+    for (const auto& [name, value] : cell.outputs) {
+      auto pin = gu::create_const(*body, *Dlop::create_integer(value ? 1 : 0));
+      body->get_output_pin(name).connect_driver(pin);
+    }
+    ++modeled;
+  }
   Mio_LibraryForEachGate(lib, g) {
     if (model_cell(outlib, g)) {
       ++modeled;

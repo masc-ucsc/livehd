@@ -250,6 +250,9 @@ void Pass_opentimer::annotate_critical(const std::shared_ptr<hhds::Graph>& g) {
     return it == net_driver.end() ? clock_for_net(wire) : clock_of_pin(it->second);
   };
   for (const auto& [pin, wire] : native_end_clocks_) {
+    if (physical_clock_endpoints_.contains(pin)) {
+      continue;  // a memory clock pin is an RC sink, not a capture
+    }
     output_clocks_[pin] = clock_of_wire(wire);
     for (auto tran : {ot::RISE, ot::FALL}) {
       timer.set_rat(pin, ot::MAX, tran, timing_targets_.at(output_clocks_[pin]).period);

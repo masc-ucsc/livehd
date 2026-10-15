@@ -1,6 +1,6 @@
 load("@rules_cc//cc:defs.bzl", "cc_library", "cc_test")
 load("//tools:copt_default.bzl", "COPTS")
-filegroup(name = "place_srcs", srcs = ["place.cpp", "place.hpp"], visibility = ["//visibility:public"])
+filegroup(name = "place_srcs", srcs = ["place.cpp", "place.hpp", "memory_proxy.cpp", "memory_proxy.hpp", "repair.cpp", "repair.hpp", "steiner_repair.hpp", "timing_place.cpp", "resynthesize.cpp", "steiner_repair.cpp"], visibility = ["//visibility:public"])
 genrule(
     name = "place_salt",
     srcs = [":place_srcs", "//:MODULE.bazel", "//graph", "//inou/lefdef:inou_lefdef", "//pass/partition:partition_srcs", "@dreamplace//:dreamplace", "//packages:dreamplace-lemon.patch", "//packages:dreamplace-zero-area.patch", "//packages:dreamplace-instantiate.patch"],
@@ -10,16 +10,24 @@ genrule(
 )
 cc_library(
     name = "place",
-    srcs = ["place.cpp"],
-    hdrs = ["place.hpp", ":place_salt"],
+    srcs = ["place.cpp", "memory_proxy.cpp", "repair.cpp", "timing_place.cpp", "resynthesize.cpp", "steiner_repair.cpp"],
+    hdrs = ["place.hpp", "memory_proxy.hpp", "repair.hpp", "steiner_repair.hpp", ":place_salt"],
     copts = COPTS,
     visibility = ["//visibility:public"],
-    deps = ["//core", "//graph", "//inou/lefdef:inou_lefdef", "//pass/partition:flatten", "@dreamplace//:dreamplace", "@dreamplace//thirdparty/flute:flute", "@rapidjson", "@rules_cc//cc/runfiles"],
+    deps = ["//pass/synth", "//core", "//graph", "//pass/liberty:liberty_dff", "//inou/lefdef:inou_lefdef", "//pass/partition:flatten", "@dreamplace//:dreamplace", "@dreamplace//thirdparty/flute:flute", "@rapidjson", "@rules_cc//cc/runfiles"],
 )
 cc_test(
     name = "place_test",
     srcs = ["place_test.cpp"],
     copts = COPTS,
     data = ["//inou/lefdef:test_data"],
-    deps = [":place", "@googletest//:gtest_main"],
+    deps = [":place", "//pass/opentimer:pass_opentimer", "@googletest//:gtest_main"],
+)
+cc_test(
+    name = "repair_test",
+    size = "small",
+    srcs = ["repair_test.cpp"],
+    copts = COPTS,
+    data = ["//inou/lefdef:test_data"],
+    deps = ["//pass/abc:pass_abc", ":place", "//pass/opentimer:pass_opentimer", "@googletest//:gtest_main"],
 )

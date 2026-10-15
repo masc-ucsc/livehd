@@ -17,6 +17,7 @@
 
 #include "arith.hpp"
 #include "cell_netlist.hpp"
+#include "cone_map.hpp"
 #include "liberty_dff.hpp"
 #include "memory_module.hpp"
 #include "pass_partition.hpp"
@@ -168,6 +169,8 @@ struct Region_ctx {
   // region hook after blasting; null before translation and on cache hits.
   // No source-graph access is needed to read these snapshots.
   const Source_state_table*             source_state = nullptr;
+  // Placed cone re-synthesis overrides the static partition estimate.
+  const Cone_boundary*                  physical_boundary = nullptr;
   // region_opts overrides of the backend's own command strings (flow, load).
   std::optional<std::string>            flow;
   std::optional<std::string>            load;

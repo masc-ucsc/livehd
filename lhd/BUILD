@@ -50,7 +50,7 @@ genrule(
         "//:without_abc": [],
         # Salt CEC/full-adder detection when the optional accelerator exists.
         # An ABC-removed source checkout must not retain a patch dependency.
-        "//conditions:default": ["//packages:abc.patch"],
+        "//conditions:default": ["//packages:abc.patch", "//packages:abc-physical.patch"],
     }),
     outs = ["formal_salt.hpp"],
     cmd = "h=$$(cat $(SRCS) | (shasum -a 256 2>/dev/null || sha256sum) | cut -c1-16); " +
