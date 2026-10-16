@@ -745,7 +745,8 @@ void Pass_abc::map_with(Eprp_var& var, const std::function<void(livehd::abc::Map
                                       unroll_carry_text == "true" || unroll_carry_text == "1" || unroll_carry_text == "on",
                                       "pass.abc",
                                       nullptr,
-                                      var.get("specialize", "true") != "false");
+                                      var.get("specialize", "true") != "false",
+                                      /*reassociate_loops=*/true);
   if (!prepared) {
     return;
   }

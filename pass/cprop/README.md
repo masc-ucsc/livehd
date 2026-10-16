@@ -102,6 +102,21 @@ Exclusive Hotmux CSE sorts complete control/value pairs and retains a separate
 default and proof distinction. Runtime-check cells and unproven Hotmuxes do not
 participate. Even equal data cannot erase an unproven overlap obligation.
 
+`scalar_mux` also moves an accumulation guard onto its term:
+`mux(s, a, a OP x)` becomes `a OP mux(s, id, x)` for Or/Xor (id 0) and And
+(id -1), either arm, when the update cell is a private, unnamed, uncolored
+operand of that Mux alone (extra operands go to a fresh cell) and the held
+value is not a state output (enableopt's Q-hold enables, the latch contract).
+An unrolled run of `if c { acc |= x }` is then a chain of one operator that
+the next sweep flattens instead of a serial MUX chain that pass.color's abc
+profile splits between a control and a data region and ABC never rebalances
+(eight guarded 32-bit ORs: 577 ps / 66 um^2 -> 92 ps / 15 um^2). The fresh
+guard has no width stamp, so the rule runs only under the `low_lanes` opt-in
+that callers following cprop with bitwidth set (pass.cprop does);
+`Bitwidth_rewrite`, which reuses `scalar_mux` after inference converged,
+never mints one. Sums are not guarded: `a + mux(s, 0, x)` puts the select
+ahead of the carry chain.
+
 `cprop_mux.cpp` groups repeated data values across binary `Mux` and exclusive
 `Hotmux` regions. With exactly two values, it first plans a predicate over the
 owned selection tree, replacing terminals by false/true. Local folds can use

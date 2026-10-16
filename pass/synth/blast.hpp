@@ -7,10 +7,14 @@
 // The caller owns boundaries, scheduling, bit storage and failure policy.
 #include <algorithm>
 #include <climits>
+#include <concepts>
+#include <cstdint>
+#include <cstdlib>
 #include <format>
 #include <optional>
 #include <print>
 #include <span>
+#include <string_view>
 #include <vector>
 
 #include "absl/container/btree_map.h"
@@ -193,6 +197,101 @@ public:
   }
 };
 
+// Arrival-aware reduction of one bit of an n-ary And/Or/Xor cell. The
+// positional pairwise reduction below is the balanced tree the cell always
+// lowered to. With `arrival_aware` and a builder that exposes logic levels (a RAW
+// Lnet does), operands that arrive at different levels -- a late cone ORed
+// with early masks -- are combined two earliest first (Golumbic's Huffman
+// variant for max(a, b) + 1): the minimum root level, late operands next to
+// the root. It is used only when that root is strictly shallower than the
+// positional one, so a cell whose operands arrive together keeps exactly the
+// structure it had.
+//
+// OPT-IN (LIVEHD_SYNTH_ARRIVAL=1; no cache key covers it): RAW levels see
+// only this region's own logic -- a region input is level 0 however late it
+// arrives -- and on the lhdtrack sample (34 tests, asap7, abc and usyn) the
+// reordering was a wash for ABC and a small loss for usyn.
+inline bool blast_arrival_aware() {
+  static const bool enabled = [] {
+    const char* env = std::getenv("LIVEHD_SYNTH_ARRIVAL");
+    return env != nullptr && std::string_view{env} == "1";
+  }();
+  return enabled;
+}
+
+template <class Ops, class Bit, class Bin>
+Bit blast_reduce_assoc(Ops& ops, std::vector<Bit>& level, const Bin& bin, bool arrival_aware) {
+  if constexpr (requires(Ops& o, Bit b) {
+                  { o.net().level(b) } -> std::convertible_to<uint32_t>;
+                }) {
+    if (level.size() > 2 && arrival_aware) {
+      const size_t          n = level.size();
+      std::vector<uint32_t> arrival(n);
+      bool                  equal = true;
+      for (size_t i = 0; i < n; ++i) {
+        arrival[i] = ops.net().level(level[i]);
+        equal      = equal && arrival[i] == arrival[0];
+      }
+      if (!equal) {
+        std::vector<uint32_t> pos = arrival;
+        while (pos.size() > 1) {
+          std::vector<uint32_t> next;
+          next.reserve((pos.size() + 1) / 2);
+          for (size_t i = 0; i < pos.size(); i += 2) {
+            next.push_back(i + 1 < pos.size() ? std::max(pos[i], pos[i + 1]) + 1 : pos[i]);
+          }
+          pos = std::move(next);
+        }
+        std::vector<size_t> order(n);
+        for (size_t i = 0; i < n; ++i) {
+          order[i] = i;
+        }
+        std::ranges::stable_sort(order, {}, [&](size_t i) { return arrival[i]; });
+        // Two queues: leaves by (arrival, position) and merged results, whose
+        // levels never decrease, in creation order. A tie takes the leaf.
+        struct Item {
+          Bit      bit;
+          uint32_t at;
+        };
+        std::vector<Item> merged;
+        merged.reserve(n);
+        size_t     leaf = 0, head = 0;
+        const auto pick = [&](bool build) -> Item {
+          if (leaf < n && (head == merged.size() || arrival[order[leaf]] <= merged[head].at)) {
+            const auto i = order[leaf++];
+            return {build ? level[i] : Bit{}, arrival[i]};
+          }
+          return merged[head++];
+        };
+        for (size_t k = 1; k < n; ++k) {
+          const auto a = pick(false);
+          const auto b = pick(false);
+          merged.push_back({Bit{}, std::max(a.at, b.at) + 1});
+        }
+        if (merged.back().at < pos.front()) {
+          merged.clear();
+          leaf = head = 0;
+          for (size_t k = 1; k < n; ++k) {
+            const auto a = pick(true);
+            const auto b = pick(true);
+            merged.push_back({bin(a.bit, b.bit), std::max(a.at, b.at) + 1});
+          }
+          return merged.back().bit;
+        }
+      }
+    }
+  }
+  while (level.size() > 1) {
+    std::vector<Bit> next;
+    next.reserve((level.size() + 1) / 2);
+    for (size_t i = 0; i < level.size(); i += 2) {
+      next.push_back(i + 1 < level.size() ? bin(level[i], level[i + 1]) : level[i]);
+    }
+    level = std::move(next);
+  }
+  return level.front();
+}
+
 template <class Ops, class ReadBit, class Slots, class Refuse, class RefuseShift>
 void blast_comb(const hhds::Node_class& n, int out_bits, Slots& slots, Ops& ops, const ReadBit& abc_bit,
                 const Blast_options& defaults, const livehd::partition::Region_body& rb,
@@ -351,16 +450,11 @@ void blast_comb(const hhds::Node_class& n, int out_bits, Slots& slots, Ops& ops,
       // Preserve the associativity already expressed by the n-ary LGraph
       // cell. A left fold turns N parallel arbiter predicates into an
       // artificial N-deep critical path before ABC sees the network; a
-      // pairwise reduction exposes the intended logarithmic structure.
-      while (level.size() > 1) {
-        std::vector<Bit> next;
-        next.reserve((level.size() + 1) / 2);
-        for (size_t i = 0; i < level.size(); i += 2) {
-          next.push_back(i + 1 < level.size() ? abc_bin(level[i], level[i + 1], kind) : level[i]);
-        }
-        level = std::move(next);
-      }
-      slots[b] = level.empty() ? abc_const_bit(false) : level.front();
+      // pairwise reduction exposes the intended logarithmic structure (and,
+      // opted in, differing operand arrivals put the late ones at the root).
+      slots[b] = level.empty() ? abc_const_bit(false)
+                               : blast_reduce_assoc(
+                                     ops, level, [&](Bit x, Bit y) { return abc_bin(x, y, kind); }, blast_arrival_aware());
     }
   } else if (op == Ntype_op::Hotmux) {
     const auto       inputs = gu::hotmux_inputs(n);

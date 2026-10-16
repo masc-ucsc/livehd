@@ -7,6 +7,8 @@
 #include <concepts>
 #include <cstdint>
 #include <format>
+#include <memory>
+#include <mutex>
 #include <optional>
 #include <string>
 #include <type_traits>
@@ -21,6 +23,7 @@
 
 #include "hhds/source_locator.hpp"
 #include "hlop/dlop.hpp"
+#include "hlop/readmem.hpp"
 #include "latch_contract.hpp"  // Design_clocks::name_looks_like_clock (the ICG clock-operand disambiguator)
 #include "node_util.hpp"
 #include "property_types.hpp"  // is_assume_kind -- shared with the asserter, without its query engine
@@ -548,21 +551,163 @@ Memory_clocks memory_clocks(const hhds::Occurrence_node& node) {
   return r;
 }
 
-absl::flat_hash_set<std::string> design_clock_inputs(hhds::Graph* g, const absl::flat_hash_map<std::string, bool>* collapse_defs) {
-  ankerl::unordered_dense::set<hhds::Gid> opaque_subs;
-  if (collapse_defs != nullptr) {
-    for (auto sn : g->grouped_hierarchy().nodes()) {
-      if (gu::type_op_of(sn) != Ntype_op::Sub) {
+// The census scope of design_clock_inputs, decided per DEFINITION (each body
+// is read once, whatever its instance count): the definitions the census must
+// descend are the ones holding state (a Flop or a Memory, transitively) and
+// the ones a clock may pass THROUGH -- an output reachable from an input or a
+// Clock_cell over the only cells the clock walks peel (And/Or masks,
+// Get_mask/Set_mask/Sext, Clock_cell, a transparent child). Every other
+// instance is made opaque: neither the census nor a clock walk can learn
+// anything inside it, so the result is the full occurrence walk's, at the cost
+// of the state-bearing part only (a gate-level netlist whose flops are
+// library cells has none: the census returns at once). Collapsed (proven)
+// definitions stay opaque as before. `any_state` says whether there is
+// anything to count at all.
+namespace {
+ankerl::unordered_dense::set<hhds::Gid> clock_census_scope(hhds::Graph*                                  g,
+                                                           const absl::flat_hash_map<std::string, bool>* collapse_defs,
+                                                           bool&                                         any_state) {
+  struct Info {
+    bool state       = false;  // holds a Flop/Memory, here or below
+    bool transparent = false;  // a clock may pass from an input to an output
+    bool opaque      = false;  // collapsed (proven) definition
+  };
+  absl::flat_hash_map<hhds::Gid, Info>    info;
+  ankerl::unordered_dense::set<hhds::Gid> scope;  // opaque gids
+  // Post-order over the definition DAG (explicit stack: deep hierarchies).
+  struct Frame {
+    std::shared_ptr<hhds::Graph> def;
+    hhds::Graph*                 raw;
+    bool                         expanded;
+  };
+  auto is_collapsed = [&](const hhds::Node_class& sn) {
+    auto sio = sn.get_subnode_io();
+    return collapse_defs != nullptr && sio != nullptr && collapse_defs->count(std::string(sio->get_name())) > 0;
+  };
+  // Through the peeled cells from a definition output, does the walk reach an
+  // input (or a Clock_cell, whose clk_ref the census follows)?
+  auto transparent = [&](hhds::Graph* d) {
+    auto dio = d->get_io();
+    if (dio == nullptr) {
+      return false;
+    }
+    std::vector<hhds::Pin_class>           stk;
+    absl::flat_hash_set<hhds::Class_index> seen;
+    for (const auto& decl : dio->get_output_pin_decls()) {
+      auto spin = d->get_output_pin(decl.name);
+      if (spin.is_invalid()) {
         continue;
       }
-      auto sio = sn.get_subnode_io();
-      if (sio != nullptr && collapse_defs->count(std::string(sio->get_name())) > 0) {
-        opaque_subs.insert(sn.get_subnode_gid());
+      for (const auto& drv : spin.get_driver_pins()) {
+        stk.push_back(drv);
       }
     }
+    while (!stk.empty()) {
+      auto p = stk.back();
+      stk.pop_back();
+      if (p.is_invalid() || p.is_const() || !seen.insert(p.get_class_index()).second) {
+        continue;
+      }
+      if (gu::is_graph_input_pin(p)) {
+        return true;
+      }
+      auto       n  = p.get_master_node();
+      const auto op = gu::type_op_of(n);
+      if (op == Ntype_op::Clock_cell) {
+        return true;
+      }
+      if (op == Ntype_op::Sub) {
+        const auto it = info.find(n.get_subnode_gid());
+        if (it == info.end() || !it->second.transparent || it->second.opaque) {
+          continue;
+        }
+      } else if (op != Ntype_op::And && op != Ntype_op::Or && op != Ntype_op::Get_mask && op != Ntype_op::Set_mask
+                 && op != Ntype_op::Sext) {
+        continue;
+      }
+      for (const auto& sink : n.inp_sorted_pins()) {
+        for (const auto& drv : sink.get_driver_pins()) {
+          stk.push_back(drv);
+        }
+      }
+    }
+    return false;
+  };
+  std::vector<Frame> stk{
+      {nullptr, g, false}
+  };
+  info[g->get_gid()];
+  absl::flat_hash_set<hhds::Gid> done;
+  while (!stk.empty()) {
+    auto& fr = stk.back();
+    if (done.contains(fr.raw->get_gid())) {
+      stk.pop_back();  // reached again through another parent before this frame ran
+      continue;
+    }
+    if (!fr.expanded) {
+      fr.expanded    = true;
+      hhds::Graph* d = fr.raw;  // `fr` dangles once a child is pushed
+      for (auto sn : d->body().nodes()) {
+        if (gu::type_op_of(sn) != Ntype_op::Sub) {
+          continue;
+        }
+        const auto gid = sn.get_subnode_gid();
+        if (done.contains(gid) || info[gid].opaque) {
+          continue;
+        }
+        if (is_collapsed(sn)) {
+          info[gid].opaque = true;
+          continue;
+        }
+        if (auto child = sn.get_subnode_graph()) {
+          auto* raw = child.get();
+          stk.push_back({std::move(child), raw, false});
+        } else {
+          done.insert(gid);  // body-less: nothing inside to count or to pass through
+        }
+      }
+      continue;
+    }
+    hhds::Graph* d = fr.raw;
+    stk.pop_back();
+    auto& di = info[d->get_gid()];
+    for (auto n : d->body().nodes()) {
+      const auto op = gu::type_op_of(n);
+      if (op == Ntype_op::Flop || op == Ntype_op::Memory) {
+        di.state = true;
+      } else if (op == Ntype_op::Sub) {
+        if (auto it = info.find(n.get_subnode_gid()); it != info.end() && !it->second.opaque && it->second.state) {
+          di.state = true;
+        }
+      }
+      if (di.state) {
+        break;
+      }
+    }
+    di.transparent = transparent(d);
+    done.insert(d->get_gid());
   }
+  any_state = info[g->get_gid()].state;
+  for (const auto& [gid, i] : info) {
+    if (gid != g->get_gid() && (i.opaque || (!i.state && !i.transparent))) {
+      scope.insert(gid);
+    }
+  }
+  return scope;
+}
+}  // namespace
+
+absl::flat_hash_set<std::string> design_clock_inputs(hhds::Graph* g, const absl::flat_hash_map<std::string, bool>* collapse_defs) {
+  bool                             any_state = false;
+  const auto                       opaque    = clock_census_scope(g, collapse_defs, any_state);
   absl::flat_hash_set<std::string> names;
-  for (auto node : g->occurrences(opaque_subs.empty() ? nullptr : &opaque_subs).nodes(hhds::Node_order::forward)) {
+  if (!any_state) {
+    return names;
+  }
+  // Order-free set: the STREAMING occurrence walk, never the forward order
+  // (a topological sort resolving every sink of every occurrence: >80 min and
+  // 25 GB on the cva6 netlist before any deadline was armed).
+  for (auto node : g->occurrences(opaque.empty() ? nullptr : &opaque).nodes()) {
     const auto op = gu::type_op_of(node);
     if (op == Ntype_op::Flop) {
       if (auto ci = flop_clock_input(node)) {
@@ -619,6 +764,9 @@ static std::string normalize_reg_name(std::string_view raw) {
 //   u_loop_0__li1.lane_q.acc           -> lane_q__li1.acc
 //   u_loop_1__li2.lane_r.acc           -> lane_r__li2.acc    (second sibling loop)
 //   u_loop_0__li0.u_loop_0__li1.t.acc  -> t__li0__li1.acc    (nested)
+//   u_loop_0__li0.t__li1.acc           -> t__li0__li1.acc    (inner loop unrolled in the rolled body)
+// The tags are outermost first (loop_iter_ordinals_), so a carried wrapper tag
+// goes BEFORE the segment's own `__li` tags, which an inner loop stamped.
 // Applied to BOTH designs (rolled-vs-rolled keeps pairing). It is only a
 // correspondence HYPOTHESIS, like any equal-name pair: the inductive step and
 // the reset-equality precondition still have to prove it, so a wrong fold can
@@ -660,8 +808,21 @@ static std::string fold_rolled_loop_wrappers(const std::string& s) {
       if (!out.empty()) {
         out += '.';
       }
-      out += seg;
+      // Start of the segment's trailing `__li<k>` run (its own, inner tags).
+      size_t own = seg.size();
+      for (;;) {
+        size_t d = own;
+        while (d > 0 && std::isdigit(static_cast<unsigned char>(seg[d - 1]))) {
+          --d;
+        }
+        if (d == own || d < 4 || seg.substr(d - 4, 4) != "__li") {
+          break;
+        }
+        own = d - 4;
+      }
+      out += seg.substr(0, own);
       out += carry;
+      out += seg.substr(own);
       carry.clear();
     }
     if (dot == std::string::npos) {
@@ -1010,6 +1171,178 @@ std::string mem_state_key(const Mem_sig& sig, std::string_view name) {
   return std::format("\x01m:{}x{}:n:{}", sig.size, sig.bits, name);
 }
 
+namespace {
+// Whole $readmem files, cached by (path, radix, bits, size): BMC re-encodes a
+// design once per cycle, and a hierarchy proves many defs.
+struct Image_load {
+  std::vector<hlop::Memory_image_word> words;
+  std::string                          error;
+};
+const Image_load& load_memory_image(const hlop::Memory_image& image, const Mem_sig& sig) {
+  static std::mutex                                          mu;
+  static absl::flat_hash_map<std::string, std::unique_ptr<Image_load>> cache;
+  const std::string key = std::format("{}\x1f{}\x1f{}\x1f{}", image.path, image.radix, sig.bits, sig.size);
+  std::lock_guard   lock(mu);
+  auto&             slot = cache[key];
+  if (!slot) {
+    slot = std::make_unique<Image_load>();
+    try {
+      slot->words = hlop::read_memory_image(image.path, image.radix, sig.bits, static_cast<std::size_t>(sig.size));
+    } catch (const std::exception& e) {
+      slot->error = e.what();
+    }
+  }
+  return *slot;
+}
+}  // namespace
+
+Mem_power_on memory_power_on(const hhds::Occurrence_node& node, const Mem_sig& sig) {
+  Mem_power_on out;
+  if (sig.bits <= 0 || sig.size <= 0) {
+    return out;
+  }
+  auto init = gu::get_driver_of_sink_name(node, "initial");
+  if (init.is_invalid() || !init.is_const()) {
+    return out;
+  }
+  const auto bits = static_cast<size_t>(sig.bits);
+  if (auto image = gu::memory_image_of(node)) {
+    out.kind   = Mem_power_on::Kind::image;
+    out.source = std::string(image->radix == 16 ? "$readmemh(" : "$readmemb(") + image->path + ")";
+    auto type  = gu::get_driver_of_sink_name(node, "type");
+    if (type.is_const() && gu::const_of(type).to_just_i64() == 2) {
+      out.error = "a combinational array has no power-on contents to load";
+    } else if (!gu::get_driver_of_sink_name(node, "reset").is_invalid()) {
+      out.error = "the memory also has a reset arm, which the image does not define";
+    } else if (!gu::get_driver_of_sink_name(node, "update").is_invalid()) {
+      out.error = "the memory is written by a whole-array update";
+    } else {
+      const auto& load = load_memory_image(*image, sig);
+      if (!load.error.empty()) {
+        out.error = load.error;
+      } else {
+        out.entries.assign(static_cast<size_t>(sig.size), std::string{});
+        for (const auto& w : load.words) {
+          std::string bin = w.binary;
+          for (auto& ch : bin) {
+            if (ch != '0' && ch != '1') {
+              ch = '0';
+            }
+          }
+          out.entries[w.address] = std::move(bin);  // a later word for the same address wins, like $readmem
+        }
+      }
+    }
+    return out;
+  }
+  out.kind          = Mem_power_on::Kind::constant;
+  const auto  width = bits * static_cast<size_t>(sig.size);
+  std::string bin   = gu::const_of(init).to_binary();
+  for (auto& ch : bin) {
+    if (ch != '0' && ch != '1') {
+      ch = '0';
+    }
+  }
+  if (bin.size() < width) {
+    bin.insert(bin.begin(), width - bin.size(), '0');
+  } else if (bin.size() > width) {
+    bin.erase(0, bin.size() - width);
+  }
+  out.entries.resize(static_cast<size_t>(sig.size));
+  for (size_t i = 0; i < out.entries.size(); ++i) {
+    out.entries[i] = bin.substr(width - (i + 1) * bits, bits);  // entry 0 in the low bits
+  }
+  return out;
+}
+
+bool same_power_on(const Mem_power_on& a, const Mem_power_on& b) {
+  return a.has_contents() == b.has_contents() && (!a.has_contents() || a.entries == b.entries);
+}
+
+// Memory knowledge state (see encode.hpp).
+namespace {
+cvc5::Term mem_x_index(cvc5::TermManager& tm, const cvc5::Term& epoch, const cvc5::Term& addr) {
+  return tm.mkTerm(Kind::BITVECTOR_CONCAT, {epoch, addr});
+}
+}  // namespace
+
+Mem_x_state mem_x_fresh(cvc5::TermManager& tm, const Mem_sig& sig, bool unknown, const std::string& name) {
+  const auto zero_w = bv_const(tm, sig.bits, 0);
+  if (sig.size <= kMem_x_word_entries) {
+    Mem_x_state s;
+    s.words.assign(static_cast<size_t>(sig.size), unknown ? tm.mkTerm(Kind::BITVECTOR_NOT, {zero_w}) : zero_w);
+    return s;
+  }
+  const auto ew   = tm.mkBitVectorSort(kMem_x_epoch_bits);
+  const auto sort = tm.mkArraySort(tm.mkBitVectorSort(kMem_x_epoch_bits + static_cast<uint32_t>(sig.addr_w)),
+                                   tm.mkBitVectorSort(static_cast<uint32_t>(sig.bits)));
+  const auto zero = bv_const(tm, sig.bits, 0);
+  return Mem_x_state{.plane = tm.mkConstArray(sort, zero),
+                     .epoch = tm.mkConst(ew, name),
+                     .fill  = unknown ? tm.mkTerm(Kind::BITVECTOR_NOT, {zero}) : zero};
+}
+
+cvc5::Term mem_x_read(cvc5::TermManager& tm, const Mem_x_state& s, const cvc5::Term& addr) {
+  if (!s.words.empty()) {
+    // An address past the last entry reads entry 0: every consumer marks such
+    // a read wholly unknown itself (no stored word backs it).
+    Term out = s.words.front();
+    for (size_t i = 1; i < s.words.size(); ++i) {
+      const auto at = bv_const(tm, static_cast<int>(addr.getSort().getBitVectorSize()), static_cast<uint64_t>(i));
+      out           = tm.mkTerm(Kind::ITE, {tm.mkTerm(Kind::EQUAL, {addr, at}), s.words[i], out});
+    }
+    return out;
+  }
+  return tm.mkTerm(Kind::BITVECTOR_XOR, {tm.mkTerm(Kind::SELECT, {s.plane, mem_x_index(tm, s.epoch, addr)}), s.fill});
+}
+
+Mem_x_state mem_x_write(cvc5::TermManager& tm, const Mem_x_state& s, const cvc5::Term& addr, const cvc5::Term& x) {
+  if (!s.words.empty()) {
+    Mem_x_state out = s;
+    for (size_t i = 0; i < out.words.size(); ++i) {
+      const auto at = bv_const(tm, static_cast<int>(addr.getSort().getBitVectorSize()), static_cast<uint64_t>(i));
+      out.words[i]  = tm.mkTerm(Kind::ITE, {tm.mkTerm(Kind::EQUAL, {addr, at}), x, out.words[i]});
+    }
+    return out;
+  }
+  return Mem_x_state{
+      .plane = tm.mkTerm(Kind::STORE, {s.plane, mem_x_index(tm, s.epoch, addr), tm.mkTerm(Kind::BITVECTOR_XOR, {x, s.fill})}),
+      .epoch = s.epoch,
+      .fill  = s.fill};
+}
+
+Mem_x_state mem_x_restart(cvc5::TermManager& tm, const Mem_x_state& s, const Mem_sig& sig, const cvc5::Term& cond,
+                          const cvc5::Term& fill, const cvc5::Term& entries) {
+  if (!s.words.empty()) {
+    Mem_x_state out = s;
+    for (size_t i = 0; i < out.words.size(); ++i) {
+      const auto ix = static_cast<int>(i);
+      const auto x  = entries.isNull() ? fill : bv_extract(tm, entries, (ix + 1) * sig.bits - 1, ix * sig.bits);
+      out.words[i]  = tm.mkTerm(Kind::ITE, {cond, x, out.words[i]});
+    }
+    return out;
+  }
+  const auto  one  = bv_const(tm, static_cast<int>(kMem_x_epoch_bits), 1);
+  const auto  next = tm.mkTerm(Kind::BITVECTOR_ADD, {s.epoch, one});
+  Mem_x_state out{.plane = s.plane,
+                  .epoch = tm.mkTerm(Kind::ITE, {cond, next, s.epoch}),
+                  .fill  = tm.mkTerm(Kind::ITE, {cond, fill, s.fill})};
+  if (entries.isNull()) {
+    return out;
+  }
+  // Per-entry contents land in the new epoch only when `cond` holds; otherwise
+  // the store goes to an epoch that is already over (s.epoch - 1), which no
+  // read can address again -- a conditional write with no array-sorted ITE.
+  const auto dead = tm.mkTerm(Kind::BITVECTOR_SUB, {s.epoch, one});
+  for (int i = 0; i < sig.size; ++i) {
+    const auto at    = bv_const(tm, sig.addr_w, static_cast<uint64_t>(i));
+    const auto index = tm.mkTerm(Kind::ITE, {cond, mem_x_index(tm, next, at), mem_x_index(tm, dead, at)});
+    const auto x     = bv_extract(tm, entries, (i + 1) * sig.bits - 1, i * sig.bits);
+    out.plane        = tm.mkTerm(Kind::STORE, {out.plane, index, tm.mkTerm(Kind::BITVECTOR_XOR, {x, out.fill})});
+  }
+  return out;
+}
+
 // Structural node identity within one design (see encode.hpp). Must stay in
 // lock-step with the encoder's pinkey convention (INVALID -> ROOT), so the
 // query-side box-correspondence builder and the encoder name the same instance
@@ -1101,6 +1434,22 @@ Encoded::Cone_stats cone_over(const std::vector<hhds::Occurrence_pin>& seeds) {
     }
   }
   return cs;
+}
+
+const hhds::OccurrenceNodeRange& Encoder::forward_nodes(hhds::Graph* g, const ankerl::unordered_dense::set<hhds::Gid>& opaque) {
+  for (auto& v : fwd_cache_) {
+    if (v.g == g && v.opaque->size() == opaque.size()
+        && std::all_of(opaque.begin(), opaque.end(), [&](const hhds::Gid gid) { return v.opaque->contains(gid); })) {
+      return v.range;
+    }
+  }
+  // The view keeps a pointer to its opaque set: the cache owns the copy.
+  Fwd_view v;
+  v.g      = g;
+  v.opaque = std::make_unique<ankerl::unordered_dense::set<hhds::Gid>>(opaque);
+  v.range  = g->occurrences(v.opaque->empty() ? nullptr : v.opaque.get()).nodes(hhds::Node_order::forward);
+  fwd_cache_.push_back(std::move(v));
+  return fwd_cache_.back().range;
 }
 
 Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, std::string_view prefix,
@@ -1420,6 +1769,12 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
     }
   }
   const ankerl::unordered_dense::set<hhds::Gid>* opaque = opaque_subs.empty() ? nullptr : &opaque_subs;
+  // The forward occurrence order, built once per (graph, opaque scope) for the
+  // Encoder's lifetime: a BMC unrolling encodes each design once per cycle and
+  // walks this order seven times per encode, and building it (a topological
+  // sort resolving every sink's drivers across the hierarchy) was a fifth of
+  // a sampled dino run.
+  const hhds::OccurrenceNodeRange&               fwd_nodes = forward_nodes(g, opaque_subs);
   std::vector<hhds::Occurrence_node>             flops;
   absl::flat_hash_set<std::string>               flop_names;
   std::vector<int>                               flop_depths;     // pipe_min depth per flop (>=1)
@@ -1504,7 +1859,7 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
     }
     return acc;
   };
-  for (auto node : g->occurrences(opaque).nodes(hhds::Node_order::forward)) {
+  for (auto node : fwd_nodes) {
     auto op = gu::type_op_of(node);
     if (op != Ntype_op::Flop && !(phased && op == Ntype_op::Latch)) {
       continue;
@@ -1601,7 +1956,7 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
     int                               mtype  = -1;
     bool                              is_rom = false;
     cvc5::Term                        a_cur;
-    cvc5::Term                        x_cur;                 // BMC reference memory knowledge (null = all known)
+    Mem_x_state                            x_cur;                 // BMC reference memory knowledge (null = all known)
     bool                              x_track      = false;  // reference port memory: an unknown write builds x_cur
     // a_cur came from `shared_mems` (the SAME symbol on both designs) rather
     // than being minted per-design. The whole-array bulk-update record is only
@@ -1639,6 +1994,12 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
     // clock exactly like a flop on that clock.
     Memory_clocks                     clocks;
     std::vector<size_t>               rd_pid;  // per read port (rd_fresh order): its cell port index
+    // `$readmem` image contents per entry ("" = not loaded); empty when the
+    // memory has no readable image.
+    std::vector<std::string>          image;
+    // Per read port (rd_fresh order): the free value an UNDEFINED read returns
+    // on the implementation side (set_undef_read_free); null = none.
+    std::vector<Term>                 rd_xfree;
     // formal.ignore_memory: the user EXCLUDED this memory from the comparison.
     // It is blackboxed -- every read dout becomes ONE SHARED free symbol per
     // (memory, port, cycle) across ref and impl, and no next-state array is
@@ -1648,7 +2009,7 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
   };
   std::vector<MemCut> mem_cuts;
   Io_name_map<int>    mem_occ;  // per-signature occurrence -> stable key
-  for (auto node : g->occurrences(opaque).nodes(hhds::Node_order::forward)) {
+  for (auto node : fwd_nodes) {
     if (gu::type_op_of(node) != Ntype_op::Memory || !node.has_out_edges()) {
       continue;
     }
@@ -1787,8 +2148,12 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
           mc.reset = driver;
         } else if (pn == "initial") {
           if (!gu::memory_image_of(mc.node)) {
-            mc.init = driver;  // file preload is symbolic external state
+            mc.init = driver;
           }
+          // A `$readmem` image: its contents (memory_power_on) pin a ROM below;
+          // a writable memory's power-on contents are state[0], which the
+          // caller seeds (query.cpp). An image that cannot be read leaves the
+          // contents free here; the LEC queries refuse it before encoding.
         } else if (pn == "type") {
           if (driver.is_const()) {
             mtype = static_cast<int>(gu::const_of(driver).to_just_i64());
@@ -1839,7 +2204,12 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
     // would be a vacuous proof when the two inits differ; per-design + compared
     // outputs makes equal inits PROVE and differing inits REFUTE.
     Sort asort = tm_.mkArraySort(bv(mc.sig.addr_w), bv(mc.sig.bits));
-    mc.is_rom  = (!mc.is_comb && !mc.is_whole && mc.sig.n_wr == 0 && !mc.init.is_invalid());
+    if (gu::memory_image_of(node)) {
+      if (auto po = memory_power_on(node, mc.sig); po.has_contents()) {
+        mc.image = std::move(po.entries);
+      }
+    }
+    mc.is_rom = (!mc.is_comb && !mc.is_whole && mc.sig.n_wr == 0 && (!mc.init.is_invalid() || !mc.image.empty()));
     if (shared_mems != nullptr && !mc.is_rom) {
       if (auto it = shared_mems->find(mc.key); it != shared_mems->end()) {
         mc.a_cur        = it->second;
@@ -1974,10 +2344,25 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
           fwd_write = mc.fwd->bit_test(static_cast<int>(static_cast<size_t>(n_rd_pos) * n_wr_cells + w));
         }
       }
-      if ((!mc.x_cur.isNull() || fwd_write) && xm.isNull() && !dout_dpin.is_invalid()) {
+      if ((!mc.x_cur.is_null() || fwd_write) && xm.isNull() && !dout_dpin.is_invalid()) {
         xm                                = tm_.mkConst(bv(mc.sig.bits), std::string(prefix) + rk + ":xm");
         pin2val[pinkey(dout_dpin)].x_mask = sync_threaded ? carried_xm : xm;
       }
+      // The IMPLEMENTATION's undefined read (set_undef_read_free): a collision
+      // window the `undef` matrix leaves undefined returns a value nothing
+      // constrains. Minted here, per encode (so per cycle); phase 2 splices it
+      // into the colliding bits of the read value.
+      Term xfree;
+      if (undef_read_free_ && !x_dontcare_ && !mc.ignored && mc.undef && !mc.is_whole && !mc.is_comb && n_wr_cells > 0
+          && !dout_dpin.is_invalid()) {
+        for (size_t w = 0; w < n_wr_cells; ++w) {
+          if (mc.undef->bit_test(static_cast<int>(static_cast<size_t>(n_rd_pos) * n_wr_cells + w))) {
+            xfree = tm_.mkConst(bv(mc.sig.bits), std::string(prefix) + rk + ":xv");
+            break;
+          }
+        }
+      }
+      mc.rd_xfree.push_back(xfree);
       mc.rd_xmask.push_back(xm);
       mc.rd_xcur.push_back(sync_threaded ? carried_xm : Term{});
       mc.rd_fresh.push_back(fresh);
@@ -1997,11 +2382,15 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
         mc.ra_fresh                = tm_.mkConst(bv(rw), std::string(prefix) + mc.key + ":ra");
         pin2val[pinkey(mc.ra_pin)] = Val{mc.ra_fresh, rw, sgn};
       } else {
-        auto whole = [&](const Term& arr) {
-          Term bus = tm_.mkTerm(Kind::SELECT, {arr, bv_const(tm_, mc.sig.addr_w, 0)});  // entry 0 (low bits)
+        // `x`: read the knowledge state's entries instead of the array's.
+        auto whole = [&](const Term& arr, const Mem_x_state* x = nullptr) {
+          auto entry = [&](int i) {
+            const Term at = bv_const(tm_, mc.sig.addr_w, static_cast<uint64_t>(i));
+            return x != nullptr ? mem_x_read(tm_, *x, at) : tm_.mkTerm(Kind::SELECT, {arr, at});
+          };
+          Term bus = entry(0);  // entry 0 (low bits)
           for (int i = 1; i < mc.sig.size; ++i) {
-            Term ei = tm_.mkTerm(Kind::SELECT, {arr, bv_const(tm_, mc.sig.addr_w, static_cast<uint64_t>(i))});
-            bus     = tm_.mkTerm(Kind::BITVECTOR_CONCAT, {ei, bus});  // CONCAT arg0 = high
+            bus = tm_.mkTerm(Kind::BITVECTOR_CONCAT, {entry(i), bus});  // CONCAT arg0 = high
           }
           return bus;
         };
@@ -2015,8 +2404,8 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
         // equivalent netlist (bedrock br_tracker_linked_list_ctrl `head`, a
         // onehot mux over the whole `ll_head` array written under the un-reset
         // br_delay_valid select stage).
-        if (mc.x_track && !mc.x_cur.isNull()) {
-          ra.x_mask = whole(mc.x_cur);
+        if (mc.x_track && !mc.x_cur.is_null()) {
+          ra.x_mask = whole(Term{}, &mc.x_cur);
         }
         pin2val[pinkey(mc.ra_pin)] = ra;
       }
@@ -2123,7 +2512,7 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
         }
       }
     };
-    for (auto n : g->occurrences(opaque).nodes(hhds::Node_order::forward)) {
+    for (auto n : fwd_nodes) {
       const auto op = gu::type_op_of(n);
       if (op != Ntype_op::Flop && op != Ntype_op::Fflop && op != Ntype_op::Latch && op != Ntype_op::Memory) {
         continue;
@@ -2152,7 +2541,7 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
       return fail("encode budget exceeded during combinational fixpoint (formal.timeout); raise --set formal.timeout");
     }
     progress = false;
-    for (auto node : g->occurrences(opaque).nodes(hhds::Node_order::forward)) {
+    for (auto node : fwd_nodes) {
       // A single forward_hier pass over a huge flattened design can itself blow
       // the budget before the while-head re-checks; sample the clock every 1024 nodes.
       if ((++budget_tick & 0x3ff) == 0 && over_budget()) {
@@ -2590,6 +2979,12 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
           continue;
         }
         for (const auto& [port, v] : bb_in_by_port) {  // inputs = miter compare points
+          // A port the proven child never lets reach an output owes nothing
+          // (query.cpp, box_dead_inputs: sound for the shared-symbol box only).
+          if (sbox == nullptr && box_dead_inputs_ != nullptr && !box_dead_inputs_->empty()
+              && box_dead_inputs_->contains(bk.substr(0, bk.find('#')) + ":" + port)) {
+            continue;
+          }
           if (const char* de = std::getenv("LEC_DUMP_ENC"); de != nullptr && std::string_view(de) == "bbin") {
             std::string ts = v.term.toString();
             if (ts.size() > 700) {
@@ -3672,7 +4067,7 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
   // Fixpoint converged. Any combinational node still unresolved is a genuine
   // structural error (a real combinational cycle, or a driver the encoder can't
   // build) — surface it instead of silently dropping logic.
-  for (auto node : g->occurrences(opaque).nodes(hhds::Node_order::forward)) {
+  for (auto node : fwd_nodes) {
     auto op = gu::type_op_of(node);
     if (!node.base_node().has_out_edges() || op == Ntype_op::Flop || op == Ntype_op::Memory) {
       continue;
@@ -3817,7 +4212,7 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
   // so the engine's per-cycle encodes agree on which property is which.
   if (emit_props_) {
     int prop_occ = 0;
-    for (auto node : g->occurrences(opaque).nodes(hhds::Node_order::forward)) {
+    for (auto node : fwd_nodes) {
       if (gu::type_op_of(node) != Ntype_op::Sub) {
         continue;
       }
@@ -3960,7 +4355,7 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
   // no tap (the CLI validated the referenced names upfront; the engine's bind
   // step fails loudly if a referenced tap is missing).
   if (port_taps_ != nullptr && !port_taps_->empty()) {
-    for (auto node : g->occurrences(opaque).nodes(hhds::Node_order::forward)) {
+    for (auto node : fwd_nodes) {
       if (gu::type_op_of(node) != Ntype_op::Sub) {
         continue;
       }
@@ -5122,7 +5517,7 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
     // writes below STORE on top of it (per-port wins). update_enable gates the
     // whole array (hold = a_cur). A plain memory starts from a_cur unchanged.
     Term a_next = mc.a_cur;
-    Term x_next = mc.x_cur;
+    Mem_x_state x_next = mc.x_cur;
     if (mc.is_whole) {
       Val uv = driver_val(mc.update, ok);
       if (!ok) {
@@ -5183,6 +5578,18 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
         return fail("memory '" + gu::debug_name(mc.node) + "' init contents not encodable");
       }
       a_next = array_from_bus(mc.a_cur, fit_unsigned(iv, mc.sig.size * mc.sig.bits));
+    } else if (mc.is_rom && !mc.image.empty()) {
+      // A `$readmem` ROM: pin each entry the image loads, exactly like the
+      // comptime-init ROM below. An entry the file leaves out stays free per
+      // design (power-on hardware state: a read of it cannot prove).
+      for (size_t i = 0; i < mc.image.size(); ++i) {
+        if (mc.image[i].empty()) {
+          continue;
+        }
+        const Term at = bv_const(tm_, mc.sig.addr_w, static_cast<uint64_t>(i));
+        out.equalities.emplace_back(tm_.mkTerm(Kind::SELECT, {mc.a_cur, at}),
+                                    tm_.mkBitVector(static_cast<uint32_t>(mc.sig.bits), mc.image[i], 2));
+      }
     } else if (mc.is_rom) {
       // no-write PERSISTENT ROM (type==0/1): pin the per-design a_cur to the
       // comptime init constant so committed reads (rd_src == a_cur) return init.
@@ -5200,7 +5607,7 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
     // ordinal to its a_after index, since a port with no din is skipped by the
     // fold but still occupies a column of the `fwd` matrix.
     std::vector<Term>                  a_after;
-    std::vector<Term>                  x_after;
+    std::vector<Mem_x_state>           x_after;
     std::vector<size_t>                applied_upto;
     // Per cell write-port ordinal (lockstep with `applied_upto`): the resolved
     // (address, per-bit write mask) this port drives, for the `undef` X-plane
@@ -5309,12 +5716,12 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
       auto data_x   = mc.x_track ? fit_x_mask_to(tm_, dv, mc.sig.bits) : Term{};
       // A known write into an all-known memory keeps it all-known: the plane
       // is materialized only once some unknown can actually be stored.
-      if (mc.x_track && x_next.isNull() && (!data_x.isNull() || !enable_x.isNull() || !av.x_mask.isNull())) {
-        x_next = tm_.mkConstArray(a_next.getSort(), bv_const(tm_, mc.sig.bits, 0));
+      if (mc.x_track && x_next.is_null() && (!data_x.isNull() || !enable_x.isNull() || !av.x_mask.isNull())) {
+        x_next = mem_x_fresh(tm_, mc.sig, false, std::string(prefix) + mc.key + ":xep");
       }
-      if (mc.x_track && !x_next.isNull()) {
+      if (mc.x_track && !x_next.is_null()) {
         auto zero  = bv_const(tm_, mc.sig.bits, 0);
-        auto old_x = tm_.mkTerm(Kind::SELECT, {x_next, addr});
+        auto old_x = mem_x_read(tm_, x_next, addr);
         if (data_x.isNull()) {
           data_x = zero;
         }
@@ -5329,7 +5736,7 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
                                    {tm_.mkTerm(Kind::BITVECTOR_OR, {old_x, data_x}), tm_.mkTerm(Kind::BITVECTOR_XOR, {old, din})});
           next_x      = tm_.mkTerm(Kind::BITVECTOR_OR, {next_x, tm_.mkTerm(Kind::BITVECTOR_AND, {enable_x, either})});
         }
-        x_next = tm_.mkTerm(Kind::STORE, {x_next, addr, next_x});
+        x_next = mem_x_write(tm_, x_next, addr, next_x);
         if (!av.x_mask.isNull()) {
           // An unknown write address may touch any entry. Conservatively cloud
           // the array on a possible write; later known writes restore knowledge.
@@ -5337,8 +5744,7 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
           auto uncertain = tm_.mkTerm(
               Kind::AND,
               {tm_.mkTerm(Kind::DISTINCT, {av.x_mask, bv_const(tm_, av.width, 0)}), tm_.mkTerm(Kind::DISTINCT, {possible, zero})});
-          auto unknown_array = tm_.mkConstArray(x_next.getSort(), tm_.mkBitVector(mc.sig.bits, std::string(mc.sig.bits, '1'), 2));
-          x_next             = tm_.mkTerm(Kind::ITE, {uncertain, unknown_array, x_next});
+          x_next = mem_x_restart(tm_, x_next, mc.sig, uncertain, tm_.mkTerm(Kind::BITVECTOR_NOT, {zero}));
         }
       }
       a_next = tm_.mkTerm(Kind::STORE, {a_next, addr, new_word});
@@ -5390,10 +5796,11 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
             init_xm = fit_x_mask_to(tm_, iv, mc.sig.size * mc.sig.bits);
           }
           // Resetting to fully known contents needs a plane only if one exists.
-          if (!x_next.isNull() || !init_xm.isNull()) {
-            auto known  = tm_.mkConstArray(a_next.getSort(), bv_const(tm_, mc.sig.bits, 0));
-            auto init_x = init_xm.isNull() ? known : array_from_bus(known, init_xm);
-            x_next      = tm_.mkTerm(Kind::ITE, {rst_hot, init_x, x_next.isNull() ? known : x_next});
+          if (!x_next.is_null() || !init_xm.isNull()) {
+            if (x_next.is_null()) {
+              x_next = mem_x_fresh(tm_, mc.sig, false, std::string(prefix) + mc.key + ":xep");
+            }
+            x_next = mem_x_restart(tm_, x_next, mc.sig, rst_hot, bv_const(tm_, mc.sig.bits, 0), init_xm);
           }
         }
         Term a_init = array_from_bus(mc.a_cur, init_bus);
@@ -5423,10 +5830,10 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
     // as a snapshot, so it keeps the historical coarse behavior (any bit set =>
     // read the fully-written array).
     auto         fwd_bit   = [&](size_t r, size_t w) { return mc.fwd && mc.fwd->bit_test(static_cast<int>(r * n_wr + w)); };
-    auto         rd_source = [&](size_t r, bool x = false) -> const Term& {
-      const auto& cur   = x ? mc.x_cur : mc.a_cur;
-      const auto& next  = x ? x_next : a_next;
-      const auto& after = x ? x_after : a_after;
+    // The snapshot read port r sees: the committed state, the fully written
+    // one, or the one after its forwarded prefix -- for the array and for its
+    // knowledge state alike.
+    auto         rd_snapshot = [&](size_t r, const auto& cur, const auto& next, const auto& after) -> const auto& {
       if (mc.is_comb || mc.is_whole || n_wr == 0) {
         return mc.is_comb ? next : ((mc.fwd && !mc.fwd->is_known_false()) ? next : cur);
       }
@@ -5450,6 +5857,42 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
       }
       return after[applied_upto[forwarded_writes]];
     };
+    auto rd_source = [&](size_t r) -> const Term& { return rd_snapshot(r, mc.a_cur, a_next, a_after); };
+    auto x_source  = [&](size_t r) -> const Mem_x_state& { return rd_snapshot(r, mc.x_cur, x_next, x_after); };
+    // Read port k's ordering="none" collision bits at `addr`, and the bits a
+    // write column already decided (`claimed`). Walk the write columns HIGH ->
+    // LOW, the priority gen_mem_wrapper's ITE chain gives the emitted RTL: the
+    // first rung that HITS decides the bit, and a plain (neither fwd nor
+    // undef) column emits no rung, so it does not stop the chain. Bits an
+    // upper FWD column forwards are DEFINED -- they read that column's din --
+    // so a lower undef column must not cloud them. ORing every undef column
+    // unconditionally masked those bits too and let a real difference inside
+    // the window pass as PROVEN.
+    auto collision = [&](size_t k, const Term& addr) -> std::pair<Term, Term> {
+      Term zero    = bv_const(tm_, mc.sig.bits, 0);
+      Term undef   = zero;
+      Term claimed = zero;
+      for (size_t wi = std::min(n_wr, wr_am.size()); wi-- > 0;) {
+        const bool u = mc.undef && mc.undef->bit_test(static_cast<int>(k * n_wr + wi));
+        if (!u && !fwd_bit(k, wi)) {
+          continue;
+        }
+        if (wr_am[wi].first.isNull()) {
+          continue;  // no din this cycle: the column writes nothing and claims nothing
+        }
+        Term hit  = tm_.mkTerm(Kind::EQUAL, {wr_am[wi].first, addr});
+        Term rung = tm_.mkTerm(Kind::ITE, {hit, wr_am[wi].second, zero});
+        if (u) {
+          // UNDEF is emitted BEFORE FWD inside one write port's step, so it
+          // wins a pair that sets both (upass_tolg rejects that spelling; a
+          // matrix built elsewhere still lands on the wrapper's answer).
+          undef = tm_.mkTerm(Kind::BITVECTOR_OR,
+                             {undef, tm_.mkTerm(Kind::BITVECTOR_AND, {rung, tm_.mkTerm(Kind::BITVECTOR_NOT, {claimed})})});
+        }
+        claimed = tm_.mkTerm(Kind::BITVECTOR_OR, {claimed, rung});
+      }
+      return {undef, claimed};
+    };
     for (size_t k = 0; k < mc.rd_fresh.size(); ++k) {
       const Term& rd_src = rd_source(k);
       Val         av     = driver_val(mc.rd_addr[k], ok);
@@ -5458,6 +5901,15 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
       }
       Term addr = fit_unsigned(av, mc.sig.addr_w);
       Term real = tm_.mkTerm(Kind::SELECT, {rd_src, addr});
+      // The implementation's undefined read: the colliding bits take the free
+      // value minted in phase 1, every other bit the stored word.
+      const bool free_undef = k < mc.rd_xfree.size() && !mc.rd_xfree[k].isNull();
+      if (free_undef) {
+        const Term undef = collision(k, addr).first;
+        real             = tm_.mkTerm(Kind::BITVECTOR_OR,
+                                      {tm_.mkTerm(Kind::BITVECTOR_AND, {real, tm_.mkTerm(Kind::BITVECTOR_NOT, {undef})}),
+                                       tm_.mkTerm(Kind::BITVECTOR_AND, {mc.rd_xfree[k], undef})});
+      }
       // ordering="none": tie the deferred X bit-plane minted in phase 1 to this
       // read's collision predicate. The plane is the OR of every undefined write
       // column's write mask, gated on that column hitting THIS read address —
@@ -5471,41 +5923,17 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
         // A null knowledge array (none yet, or a snapshot taken before the
         // first unknown write this cycle) is the all-known plane.
         if (mc.x_track) {
-          if (const Term& x_src = rd_source(k, true); !x_src.isNull()) {
-            plane = tm_.mkTerm(Kind::SELECT, {x_src, addr});
+          if (const Mem_x_state& x_src = x_source(k); !x_src.is_null()) {
+            plane = mem_x_read(tm_, x_src, addr);
           }
         }
         if (!av.x_mask.isNull()) {
           auto unknown = tm_.mkTerm(Kind::DISTINCT, {av.x_mask, bv_const(tm_, av.width, 0)});
           plane        = tm_.mkTerm(Kind::ITE, {unknown, tm_.mkTerm(Kind::BITVECTOR_NOT, {zero}), plane});
         }
-        Term claimed = zero;  // bits a HIGHER-priority write column already resolved
-        // Walk the write columns HIGH -> LOW, the priority gen_mem_wrapper's ITE
-        // chain gives the emitted RTL: the first rung that HITS decides the bit,
-        // and a plain (neither fwd nor undef) column emits no rung, so it does
-        // not stop the chain. Bits an upper FWD column forwards are DEFINED —
-        // they read that column's din — so a lower undef column must not cloud
-        // them. ORing every undef column unconditionally masked those bits too
-        // and let a real difference inside the window pass as PROVEN.
-        for (size_t wi = std::min(n_wr, wr_am.size()); wi-- > 0;) {
-          const bool u = mc.undef && mc.undef->bit_test(static_cast<int>(k * n_wr + wi));
-          if (!u && !fwd_bit(k, wi)) {
-            continue;
-          }
-          if (wr_am[wi].first.isNull()) {
-            continue;  // no din this cycle: the column writes nothing and claims nothing
-          }
-          Term hit  = tm_.mkTerm(Kind::EQUAL, {wr_am[wi].first, addr});
-          Term rung = tm_.mkTerm(Kind::ITE, {hit, wr_am[wi].second, zero});
-          if (u) {
-            // UNDEF is emitted BEFORE FWD inside one write port's step, so it
-            // wins a pair that sets both (upass_tolg rejects that spelling; a
-            // matrix built elsewhere still lands on the wrapper's answer).
-            plane = tm_.mkTerm(Kind::BITVECTOR_OR,
-                               {plane, tm_.mkTerm(Kind::BITVECTOR_AND, {rung, tm_.mkTerm(Kind::BITVECTOR_NOT, {claimed})})});
-          }
-          claimed = tm_.mkTerm(Kind::BITVECTOR_OR, {claimed, rung});
-        }
+        // The collision bits; `claimed` = bits a write column already resolved.
+        const auto [undef, claimed] = collision(k, addr);
+        plane                       = tm_.mkTerm(Kind::BITVECTOR_OR, {plane, undef});
         if (!mc.rd_enable[k].is_invalid()) {
           Val ev = driver_val(mc.rd_enable[k], ok);
           if (!ok) {
@@ -5526,7 +5954,12 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
       // array term => provably equal values. A forwarding / combinational read
       // sources this design's OWN a_next, so nothing can be assumed about it.
       const bool shared_cur = !mc.is_comb && !mc.is_rom && rd_src == mc.a_cur;
-      out.mem_rd[mc.key].push_back(Encoded::Mem_rd_port{mc.rd_fresh[k], addr, mc.mtype == 1 ? Term{} : real, shared_cur});
+      if (!free_undef) {
+        // An undefined implementation read is not a function of (array,
+        // address): exporting it would let the merge and exact-read routes
+        // replace its free bits with the stored word.
+        out.mem_rd[mc.key].push_back(Encoded::Mem_rd_port{mc.rd_fresh[k], addr, mc.mtype == 1 ? Term{} : real, shared_cur});
+      }
       if (mc.mtype == 1 && shared_reads != nullptr) {
         // Sync read (latency-1): rd_fresh is the CURRENT registered dout (seeded
         // from shared_reads in phase 1); THIS cycle's read is its NEXT state,
@@ -5571,7 +6004,7 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
     // contents are a pure function of this cycle's update, compared as outputs).
     if (!mc.is_comb) {
       out.next_mem[mc.key] = a_next;
-      if (!x_next.isNull()) {
+      if (!x_next.is_null()) {
         out.next_mem_x[mc.key] = x_next;
       }
     }

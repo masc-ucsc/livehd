@@ -2932,6 +2932,34 @@ bool compile_cache_restore_graphs(Options& opts, Result& res, Eprp_var& var, con
                  || (!row.owner.empty() && clean.contains(row.owner) && !run_live.contains(row.owner) && !row.unit_key.empty()
                      && row.unit_key == key_of(row.owner, res)));
     };
+    // pass.legalize INLINES a child instance into its parent body (the stored
+    // row's `inlined` list), copying the child body as it stands when the
+    // PARENT's legalize runs. In a cold compile that is the child right after
+    // tolg + the first cprop/bitwidth; a restored child is its FINAL post-
+    // formal body, which the later passes have already reshaped. So a live
+    // parent that inlined a restored child came out structurally different
+    // from the cold compile (equivalent, but H5's warm==cold gate failed: dino
+    // bug1 rebuilt its top with other Sum/And operand orders and fewer
+    // sext/get_mask cells). A child a LIVE parent inlined therefore runs live
+    // too, so the parent inlines exactly what a cold compile inlines. The
+    // child's content is unchanged, so this does not dirty its OTHER callers:
+    // their stored bodies (with the same inlined copy) stay restorable.
+    const auto pull_inlined_children_live = [&] {
+      for (bool grew = true; grew;) {
+        grew = false;
+        for (const auto& row : expected->rows) {
+          if (row.inlined.empty() || !row.has_body || !row.design || owner_eligible(row)) {
+            continue;  // a restored parent keeps its stored inlined copies
+          }
+          for (const auto& callee : row.inlined) {
+            const auto owner = owner_of(callee, res);
+            if (!owner.empty() && clean.contains(owner) && run_live.insert(owner).second) {
+              grew = true;
+            }
+          }
+        }
+      }
+    };
     std::set<std::string> restored_owners;
     auto                  owner_graph_restored = [&](std::string_view name) {
       const auto owner = owner_of(name, res);
@@ -2957,6 +2985,9 @@ bool compile_cache_restore_graphs(Options& opts, Result& res, Eprp_var& var, con
     // Graph names of runner-minted trees no kept call site mints any more.
     std::set<std::string>               unminted;
     for (;;) {
+      if (!full_clean) {
+        pull_inlined_children_live();  // run_live only grows, here and below
+      }
       restored_owners.clear();
       for (const auto& row : expected->rows) {
         if (row.has_body && owner_eligible(row) && !row.owner.empty()) {

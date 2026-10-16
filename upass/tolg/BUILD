@@ -1,6 +1,7 @@
 # This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 
 load("@rules_cc//cc:defs.bzl", "cc_library", "cc_test")
+load("@rules_shell//shell:sh_test.bzl", "sh_test")
 load("//tools:copt_default.bzl", "COPTS")
 
 cc_library(
@@ -17,6 +18,7 @@ cc_library(
         "//upass/core:array_dim_hdr",
         "//upass/core:default_prologue_hdr",
         "//upass/core:io_port_rules_hdr",
+        "//upass/core:loop_index_ports_hdr",
         "//upass/core:range_bits_hdr",
         "//pass/common:pass",
         "@abseil-cpp//absl/container:flat_hash_map",
@@ -36,5 +38,23 @@ cc_test(
         "//graph",
         "//lnast",
         "@googletest//:gtest_main",
+    ],
+)
+
+# Loop lowering QoR guard: a rolled loop's per-bit writes into a packed word
+# merge into one narrow write that folds to a constant position once synthesis
+# expands the loop (a `unique if` merge stays one-hot), and the copies of
+# `for j in (i + 1)..<N` share one lifted definition (see
+# tests/loop_bit_write_qor_test.sh).
+sh_test(
+    name = "loop_bit_write_qor_test",
+    size = "medium",
+    srcs = ["tests/loop_bit_write_qor_test.sh"],
+    data = [
+        "tests/loop_gray2bin.prp",
+        "tests/loop_lru_matrix.prp",
+        "tests/loop_unique_window.prp",
+        "//inou/prp:abc_tests",
+        "//lhd",
     ],
 )

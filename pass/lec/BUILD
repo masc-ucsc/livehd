@@ -46,6 +46,8 @@ filegroup(
         "query.hpp",
         "solve_stats.cpp",
         "solve_stats.hpp",
+        "term_sim.cpp",
+        "term_sim.hpp",
     ] + select({
         "//:without_abc": ["cone_unavailable.cpp"],
         "//conditions:default": [
@@ -89,6 +91,7 @@ cc_library(
         "observe.cpp",
         "query.cpp",
         "solve_stats.cpp",
+        "term_sim.cpp",
     ] + select({
         "//:without_abc": ["cone_unavailable.cpp"],
         "//conditions:default": ["cone_abc.cpp"],
@@ -101,6 +104,7 @@ cc_library(
         "observe.hpp",
         "query.hpp",
         "solve_stats.hpp",
+        "term_sim.hpp",
     ],
     copts = COPTS,
     includes = ["."],
@@ -193,6 +197,20 @@ cc_test(
     name = "effort_test",
     size = "small",
     srcs = ["tests/effort_test.cpp"],
+    copts = COPTS,
+    deps = [
+        ":lec_query",
+        "@cvc5",
+        "@googletest//:gtest_main",
+    ],
+)
+
+# The sampled-effort simulator: native evaluation of random QF_ABV terms must
+# match cvc5's own evaluation, and reduce() must keep the formula equisatisfiable.
+cc_test(
+    name = "term_sim_test",
+    size = "small",
+    srcs = ["tests/term_sim_test.cpp"],
     copts = COPTS,
     deps = [
         ":lec_query",
@@ -412,6 +430,18 @@ sh_test(
     tags = ["no-sandbox"],  # runs the in-process cvc5 solver
 )
 
+# REFUTED-interface vs one-sided INPUTS: an input outside the cone of influence
+# of every compared point (only assertions, outputless checker instances, an
+# unread instance output, dead state) is ignored and noted; one that reaches a
+# top output -- through instances and flops -- or a one-sided output is still
+# REFUTED-interface (exit 7).
+sh_test(
+    name = "lec_interface_observe_test",
+    srcs = ["tests/lec_interface_observe_test.sh"],
+    data = ["//lhd"],
+    tags = ["no-sandbox"],  # runs the in-process cvc5 solver
+)
+
 # lecfail witness reproduction (`lhd lec` + --workdir): a REFUTED verdict writes a
 # self-contained Pyrope testbench (formal.simfail) driving BOTH designs and runs
 # `lhd sim` to dump one VCD (formal.simfail_run). Covers the default-on behavior, the
@@ -458,6 +488,26 @@ sh_test(
     srcs = ["tests/lec_auto_test.sh"],
     data = ["//lhd"],
     tags = ["no-sandbox"],  # forks the in-process cvc5 solver as race workers
+)
+
+# Sampled effort presets simulate their vectors natively and draw decoded
+# opcode constants: an equivalent rewrite reaches TESTED-sampled(2048) and a
+# bug behind one 16-bit opcode is REFUTED-cex at the default effort.
+sh_test(
+    name = "lec_effort_sampling_test",
+    srcs = ["tests/lec_effort_sampling_test.sh"],
+    data = ["//lhd"],
+    tags = ["no-sandbox"],  # runs the in-process cvc5 solver
+)
+
+# A proven child's input port its body never lets reach an output owes no
+# `bbin:` obligation (a synthesized parent may tie it off); a read port still
+# refutes, and a trusted child keeps every input obligation.
+sh_test(
+    name = "lec_box_dead_input_test",
+    srcs = ["tests/lec_box_dead_input_test.sh"],
+    data = ["//lhd"],
+    tags = ["no-sandbox"],  # runs the in-process cvc5 solver
 )
 
 # Reserve reachable-trace checking after a wall-killed collapsed attempt.
@@ -596,6 +646,26 @@ sh_test(
     name = "lec_mem_unpaired_smoke",
     size = "small",
     srcs = ["tests/lec_mem_unpaired_smoke.sh"],
+    data = ["//lhd"],
+    tags = ["no-sandbox"],
+)
+
+# A reference memory written through an unknown (reset-less) address: BMC's
+# knowledge state must not chain two different constant arrays (a cvc5 abort).
+sh_test(
+    name = "lec_mem_unknown_addr_smoke",
+    size = "small",
+    srcs = ["tests/lec_mem_unknown_addr_smoke.sh"],
+    data = ["//lhd"],
+    tags = ["no-sandbox"],
+)
+
+# Loop-built (Pyrope) and generate-built (Verilog) memories pair by leaf name
+# plus iteration indices; equivalent lanes prove in either lane order.
+sh_test(
+    name = "lec_mem_positional_smoke",
+    size = "small",
+    srcs = ["tests/lec_mem_positional_smoke.sh"],
     data = ["//lhd"],
     tags = ["no-sandbox"],
 )

@@ -4771,10 +4771,17 @@ Color_plan Color_plan::discover(hhds::Graph* root, bool include_observations, bo
   // ranges just to eliminate a small pending register. A failed proof retains
   // the staged protocol. Add the accepted anti-dependencies to the DAG itself:
   // they must survive both coarsening and the emitter's intra-color ordering.
-  // Compact-loop register carriers retain staging: extending their old-Q
-  // live ranges through loop adapters currently costs more than the saved copy.
+  // With Slop (separate runtime calls), registers around compact loops retain
+  // staging: extending their old-Q live ranges through loop adapters costs
+  // more than the saved copy. The LLVM backend embeds a pure loop in its
+  // caller's kernel, so a loop is one more consumer in the same color and the
+  // proof applies as it does without loops; state private to a loop body stays
+  // excluded (storage_eligible). Keeping every register of a design staged
+  // because it contains one loop cost the Pyrope leg of lhdtrack, whose `for`
+  // loops stay rolled, 5-17% against the same design read from Verilog
+  // (br_flow_burst_mux_rr_stable, br_fifo_shared_dynamic_ctrl, br_csr_demux).
   if (!include_observations && plan.summary_.version_dag_acyclic && rise_only && clocks.n_clock_inputs() <= 1
-      && plan.summary_.compact_loops == 0 && plan.summary_.conditional_regions == 0) {
+      && (plan.summary_.compact_loops == 0 || separate_runtime_calls) && plan.summary_.conditional_regions == 0) {
     std::vector<std::vector<size_t>> old_users(plan.sites_.size());
     for (size_t version = 0; version < plan.version_sites_.size(); ++version) {
       const auto& read = plan.version_sites_[version];

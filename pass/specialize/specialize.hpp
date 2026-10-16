@@ -3,6 +3,7 @@
 #include <memory>
 #include <vector>
 
+#include "absl/container/flat_hash_set.h"
 #include "hhds/graph.hpp"
 
 // pass.specialize -- cross-instance constant specialization, on a PRIVATE copy
@@ -50,5 +51,13 @@ int specialize_constants(std::vector<std::shared_ptr<hhds::Graph>>& graphs, cons
 // after a callee publishes a constant. Kept here so cgen_sim.cpp does not
 // include the pass headers (pass/common/pass.hpp's `Pass` shadows its locals).
 void refold_private_body(const std::shared_ptr<hhds::Graph>& graph);
+
+// In a colored graph (synthesis regions), give every node created since
+// `existed` (node debug ids; nullptr = every node) the color of a colored
+// neighbor -- drivers first, then readers, to a fixpoint -- so a rewrite of a
+// colored body (a fold, an expanded loop's cleanup) gains no stray color-0
+// region. A node pass.color left uncolored on purpose is in `existed` and keeps
+// no color. A graph with no colored node is left alone.
+void inherit_colors(hhds::Graph& g, const absl::flat_hash_set<uint64_t>* existed);
 
 }  // namespace livehd::specialize

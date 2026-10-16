@@ -259,6 +259,82 @@ the extracted body. Function scopes on the shared table are read-through
 (closure capture of outer comptime consts) / write-block (an outer write is
 a compile error).
 
+### Rolled loops (roll planner, lifted bodies, bit writes)
+
+A range `for` that can stay rolled (`compile.unroll=false`, the default) is
+planned by `plan_loop_roll`, its body is LIFTED into a definition of its own
+(`<owner>.__loop<N>`: the index port, `__valid`, invariants, carry-in/out
+ports) and the loop becomes a `rolled_for` node that upass.tolg lowers to a
+`Sub` with a loop descriptor (first/step/count PER INSTANCE).
+
+- **Shared definitions.** A loop nested in a loop that unrolls (its domain
+  reads the outer index: `for j in (i + 1)..<N` inside `for i`) is rolled
+  once per outer iteration. The outer index is a constant in each copy; when
+  nothing in the body needs it at compile time (`unrolled_index_promotable`:
+  only arithmetic, comparisons, bit selects/writes and branch conditions read
+  it), it is PROMOTED to an invariant port typed by the outer domain, and
+  `lift_or_share_loop` instantiates the definition an earlier copy lifted
+  (same source body and plan signature, a domain and carry/invariant ranges
+  the definition admits). A copy outside them (`for j in 0..<i` grows with
+  `i`) re-plans the body over the hull of both domains and, when that plan
+  has the same signature and admits both, widens the still-queued definition
+  in place (`widen_lifted_loop`: index port type and published ranges). One
+  definition, N instances; the bound is the descriptor, not part of the body.
+  Legalize never splits or unrolls these Subs, so sharing is purely a
+  front-end naming decision.
+- **Loop-index ports.** The lifted body marks its index, every invariant that
+  is an enclosing loop's index and every promoted index as loop-index ports
+  (`upass::mark_loop_index_port`, `upass/core/loop_index_ports.hpp`; persisted
+  in `bw_meta` under a `#` key). upass.tolg treats a bit position computed
+  only from these and constants as LOOP-AFFINE: constant wherever a consumer
+  expands the loop (pass.abc's carry unroll, the simulator's small-loop
+  unroll).
+- **Bit writes.** `v#[p +: w] = x` (and an array element `a[i] = x`) at a
+  loop-affine `p` lowers to
+  `(v & ((1 << p) - 1)) | (set_mask(v >> p, x, 0, w) << p)`, which cprop folds
+  to the slices `v[p + w ..]`, `x`, `v[0 .. p]` once `p` is constant (the
+  masked RMW `(v & ~(m << p)) | ((x << p) & (m << p))` does not fold: a
+  word-wide And with a one-hole mask stays per write). A data-dependent `p`
+  keeps the masked RMW, which is cheaper for a genuinely runtime position.
+  Independently of loops, when every arm of an `if` (or a non-exhaustive
+  `unique if`/`match`) that writes `v` writes the SAME window of the same
+  pre-`if` value, the arms' narrow lanes are muxed and the window is written
+  once (`merge_window_writes`; an arm that does not write keeps the old lane
+  through the write enable), instead of a full-width mux of full-width copies
+  per arm. A data-dependent window written by ONE arm keeps the per-arm form
+  (`c ? rmw : v` is the same gates; the merge only adds nets).
+  After synthesis expands the loop, the slices and splices these fold to take
+  a colored neighbor's region (pass/synth `loop_cleanup.cpp`): uncolored, they
+  formed a color-0 wiring region that handed every state bit back to ABC as a
+  fresh input (br_arb_lru mapped 2x larger than the loop-free form).
+- **Bit reads** `v#[p +: w]` at a runtime `p` stay `get_mask(v >> p, 0, w)`:
+  pass.abc builds only the demanded prefix of that shift (a W:1 select per
+  bit) and the cost model charges the same, and a constant `p` folds it to a
+  slice.
+- **Tuple invariants.** A tuple-valued name the body reads only through
+  constant fields (`s.sel#[i]` of a child instance `const s = sub(..)`, a
+  dotted `t.a` of a tuple local) is not one port: each field read becomes an
+  invariant port of its own (`s__sel`, typed by the instance's output port or
+  the field's facts) or a captured constant, the call reads the field in front
+  of the loop (`tuple_get(tmp, s, 'sel')`, or the dotted name), and the lifted
+  body's copy reads the port where the source read the field
+  (`tuple_get(d, s, 'sel')` -> `store(d, s__sel)`) -- the same hardware as
+  hoisting `const sel = s.sel` by hand, and a nested loop sees a typed port
+  (`Loop_roll_plan::tuple_invariants`, `constant_field_reads`). A single-output
+  handle used to cross as a scalar and leave `s.sel` undriven in the body; a
+  multi-output one declined the roll and silently unrolled.
+- **Result ranges.** The values a rolled loop produces are bound in the
+  hidden payload, which the plugins do not walk, so each result's range is
+  published by the runner: the carry-out range of the last iteration
+  (`eval_carry_ranges`), else the declared type. Without it a later read was
+  judged by the PRE-loop value (`mut v:U10 = 0`): a narrowing write went
+  unreported and a needed `wrap` read as unnecessary, so what compiled
+  depended on compile.unroll.
+- **Runtime `#sext`.** `x#sext[lo..=hi]` with loop-index bounds has a runtime
+  sign position `hi - lo`; tolg lowers it with shifts
+  (`(x & ((2 << p) - 1)) - (x[p] << (p + 1))`, `p` clamped to x's width) that
+  fold to the `Sext` cell's slice once `p` is constant.
+
 ### SSA and tuple-port scalarization
 
 `uPass_ssa::run` runs once over each LNAST **before** the main runner

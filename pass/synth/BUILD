@@ -306,3 +306,17 @@ cc_test(
         "@googletest//:gtest_main",
     ],
 )
+
+# Associative-chain reassociation in the synthesis private copy (reassoc.cpp)
+# and the blaster's arrival-aware n-ary reduction (blast.hpp).
+cc_test(
+    name = "reassoc_test",
+    srcs = ["reassoc_test.cpp"],
+    copts = COPTS,
+    deps = [
+        ":synth",
+        "//graph",
+        "@googletest//:gtest_main",
+        "@hhds//hhds:graph",
+    ],
+)

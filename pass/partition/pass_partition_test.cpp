@@ -549,3 +549,62 @@ TEST(PartitionWiringContext, OrdinaryNarrowLogicSliceRemainsTheExportedInterface
                                                   hook, Flatten_mode::off, true));
   EXPECT_EQ(visited, 2U);
 }
+
+// A single-region def is emitted "as top": the region IS the def, and outputs
+// driven straight by a primary input or a constant bypass the region, so the
+// partitioner wires them itself after the hook returns. pass.abc's region cache
+// stores the mapped def AFTER that wiring (save() copies it out of the output
+// library), so a cache hit installs a body that already carries those wires.
+// Wiring them again stacked a second, identical driver on the output sink: the
+// warm netlist then broke the one-driver-per-sink invariant and its canonical
+// digest moved, so the STA reuse tier missed on every comment-only rebuild.
+TEST(PartitionAsTop, PassthroughOutputsAreWiredOnceEvenOverAPrewiredBody) {
+  namespace gu = livehd::graph_util;
+  using namespace livehd::partition;
+  for (const bool prewired : {false, true}) {
+    SCOPED_TRACE(prewired ? "hook body already carries the passthroughs" : "fresh hook body");
+    hhds::GraphLibrary input, output;
+    auto               io = input.create_io("astop");
+    io->add_input("a", 1);
+    io->add_input("b", 2);
+    io->add_output("y", 3);
+    io->add_output("k", 4);
+    io->add_output("p", 5);
+    for (const auto* name : {"a", "b", "y", "p"}) {
+      io->set_bits(name, 1);
+    }
+    io->set_bits("k", 4);
+    auto graph = io->create_graph();
+    auto inv   = gu::create_typed_node(*graph, Ntype_op::Not, 1);
+    gu::set_color(inv, 1);
+    graph->get_input_pin("a").connect_sink(inv.create_sink_pin(0));
+    inv.create_driver_pin(0).connect_sink(graph->get_output_pin("y"));
+    gu::create_const(*graph, *Dlop::create_integer(5)).connect_sink(graph->get_output_pin("k"));
+    graph->get_input_pin("b").connect_sink(graph->get_output_pin("p"));
+
+    unsigned           calls = 0;
+    const Body_builder hook  = [&](const Region_body& rb) {
+      ++calls;
+      ASSERT_EQ(rb.module_name, "astop");
+      ASSERT_EQ(rb.outputs.size(), 1U);  // only `y` is the region's to drive
+      auto n = gu::create_typed_node(*rb.body, Ntype_op::Not, 1);
+      rb.body->get_input_pin("a").connect_sink(n.create_sink_pin(0));
+      n.create_driver_pin(0).connect_sink(rb.body->get_output_pin("y"));
+      if (prewired) {  // what a reused (cached) mapped body looks like
+        gu::create_const(*rb.body, *Dlop::create_integer(5)).connect_sink(rb.body->get_output_pin("k"));
+        rb.body->get_input_pin("b").connect_sink(rb.body->get_output_pin("p"));
+      }
+    };
+    ASSERT_TRUE(Pass_partition::build_decomposition({graph}, &output, "astop", false, hook));
+    EXPECT_EQ(calls, 1U);
+    auto result = output.find_io("astop")->get_graph();
+    ASSERT_TRUE(result);
+    for (const auto* name : {"y", "k", "p"}) {
+      EXPECT_EQ(result->get_output_pin(name).get_driver_pins().size(), 1U) << name;
+    }
+    auto k = result->get_output_pin("k").get_driver_pin();
+    ASSERT_TRUE(k.is_const());
+    EXPECT_EQ(gu::const_of(k).to_just_i64(), 5);
+    EXPECT_EQ(result->get_output_pin("p").get_driver_pin(), result->get_input_pin("b"));
+  }
+}

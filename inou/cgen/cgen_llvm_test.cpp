@@ -2,8 +2,10 @@
 
 #include "cgen_llvm.hpp"
 
+#include <array>
 #include <bit>
 #include <filesystem>
+#include <functional>
 #include <fstream>
 #include <string>
 #include <system_error>
@@ -1708,4 +1710,293 @@ TEST(CgenLlvm, NativeLoopSharingIgnoresEntryAndInlineScopeNames) {
   ASSERT_FALSE(first.empty());
   EXPECT_EQ(first, make("phase_two", 0));
   EXPECT_NE(first, make("phase_one", 1));
+}
+
+namespace {
+// One trip of a per-bit loop: acc | (x#[i] << (15 - i)), a 16-bit bit reversal
+// over i in 0..<16. Rolled, every trip pays variable shifts.
+Cgen_llvm::Inline_body bit_reverse_trip(std::string& error) {
+  const std::vector<std::pair<uint32_t, bool>> ports{
+      { 8, true}, // index
+      {16, true}, // x
+      {16, true}, // acc (carry)
+  };
+  Cgen_llvm  body("reverse_trip", ports);
+  const auto index = body.resize(body.input(0), 16, true);
+  const auto bit   = body.binary(Cgen_llvm::Binary_op::bit_and,
+                               body.binary(Cgen_llvm::Binary_op::lshr, body.input(1), index, 16, true),
+                               body.constant(16, 1),
+                               16,
+                               true);
+  const auto pos   = body.binary(Cgen_llvm::Binary_op::sub, body.constant(16, 15), index, 16, true);
+  const auto out
+      = body.binary(Cgen_llvm::Binary_op::bit_or, body.input(2), body.binary(Cgen_llvm::Binary_op::shl, bit, pos, 16, true), 16, true);
+  EXPECT_TRUE(body.add_output(0, out, error)) << error;
+  return {body.sharing_key(error), ports, {{16, true}}, false};
+}
+
+Cgen_llvm::Loop_layout carry_loop_layout() {
+  Cgen_llvm::Loop_layout layout;
+  layout.inputs = {
+      { 8, true},
+      {16, true},
+      {16, true},
+  };
+  layout.bindings = {
+      {0, 0},
+      {1, 0},
+      {2, 0},
+  };
+  layout.index   = 0;
+  layout.carries = {
+      {2, 0}
+  };
+  return layout;
+}
+
+uint16_t reverse16(uint16_t x) {
+  uint16_t r = 0;
+  for (unsigned i = 0; i < 16; ++i) {
+    r |= ((x >> i) & 1) << (15 - i);
+  }
+  return r;
+}
+
+struct Loop_shape {
+  unsigned full     = 0;  // loops still marked llvm.loop.unroll.full
+  unsigned disabled = 0;  // loops kept rolled (llvm.loop.unroll.disable)
+  unsigned phis     = 0;
+};
+
+// Optimize `kernel` (state ABI: word 0 = x, word 1 = result), report the loops
+// left in its native code, and check it against `expected` for many x.
+Loop_shape run_reverse_kernel(Cgen_llvm& kernel, std::string_view name, const std::function<uint16_t(uint16_t)>& expected) {
+  Loop_shape  shape;
+  std::string error;
+  const auto  path = std::filesystem::temp_directory_path() / (std::string("livehd-unroll-") + std::string(name) + ".bc");
+  EXPECT_TRUE(kernel.write_bitcode(path.string(), error, false)) << error;
+  auto buffer = llvm::MemoryBuffer::getFile(path.string());
+  EXPECT_TRUE(buffer);
+  llvm::LLVMContext context;
+  auto              module = llvm::parseBitcodeFile((*buffer)->getMemBufferRef(), context);
+  EXPECT_TRUE(static_cast<bool>(module));
+  const auto* fn = (*module)->getFunction(name);
+  EXPECT_NE(fn, nullptr);
+  for (const auto& block : *fn) {
+    for (const auto& instruction : block) {
+      shape.phis += llvm::isa<llvm::PHINode>(instruction);
+      const auto* md = instruction.getMetadata(llvm::LLVMContext::MD_loop);
+      for (unsigned i = 1; md && i < md->getNumOperands(); ++i) {
+        const auto* property = llvm::dyn_cast<llvm::MDNode>(md->getOperand(i));
+        const auto* key      = property && property->getNumOperands() == 1 ? llvm::dyn_cast<llvm::MDString>(property->getOperand(0)) : nullptr;
+        shape.full          += key && key->getString() == "llvm.loop.unroll.full";
+        shape.disabled      += key && key->getString() == "llvm.loop.unroll.disable";
+      }
+    }
+  }
+  const auto object = path.string() + ".o";
+  EXPECT_TRUE(kernel.write_object(object, error, false)) << error;
+  livehd::sim::Native_objects objects;
+  EXPECT_TRUE(objects.load(object, error)) << error;
+  const auto run = objects.lookup(std::string(name), error);
+  EXPECT_NE(run, nullptr) << error;
+  for (uint32_t x = 0; run && x < 0x10000; x += 0x1235) {
+    uint64_t state[2] = {x, 0xdead};
+    run(state, nullptr);
+    EXPECT_EQ(state[1], expected(static_cast<uint16_t>(x))) << name << " x=" << x;
+  }
+  std::filesystem::remove(path);
+  std::filesystem::remove(object);
+  return shape;
+}
+}  // namespace
+
+TEST(CgenLlvm, EmbeddedLoopFullyUnrollsSmallConstantTripBodies) {
+  // A small per-bit loop embedded in its caller (sim br_flow_arb_rr shape)
+  // leaves no loop in the native kernel: every lane index is a constant.
+  std::string error;
+  const auto  trip = bit_reverse_trip(error);
+  ASSERT_FALSE(trip.bitcode.empty()) << error;
+  Cgen_llvm                     kernel("unrolled_reverse", Cgen_llvm::State_layout{2, {{0, 16, true}}});
+  std::vector<Cgen_llvm::Value> results;
+  ASSERT_TRUE(kernel.inline_loop(trip,
+                                 carry_loop_layout(),
+                                 16,
+                                 0,
+                                 1,
+                                 {kernel.constant(8, 0), kernel.input(0), kernel.constant(16, 0)},
+                                 results,
+                                 error))
+      << error;
+  ASSERT_TRUE(kernel.add_state_output(1, 1, results[0], {}, error)) << error;
+  const auto shape = run_reverse_kernel(kernel, "unrolled_reverse", reverse16);
+  EXPECT_EQ(shape.full + shape.disabled, 0u);
+  EXPECT_EQ(shape.phis, 0u);
+}
+
+// One trip of a recurrence LLVM can neither vectorize nor fold away:
+// rotl16(acc, 1) ^ x#[i % 16]. A rolled loop of it stays a loop.
+Cgen_llvm::Inline_body rotate_trip(std::string& error) {
+  const std::vector<std::pair<uint32_t, bool>> ports{
+      { 8, true},
+      {16, true},
+      {16, true},
+  };
+  Cgen_llvm  body("rotate_trip", ports);
+  const auto acc   = body.input(2);
+  const auto rot   = body.binary(Cgen_llvm::Binary_op::bit_or,
+                               body.binary(Cgen_llvm::Binary_op::shl, acc, body.constant(16, 1), 16, true),
+                               body.binary(Cgen_llvm::Binary_op::lshr, acc, body.constant(16, 15), 16, true),
+                               16,
+                               true);
+  const auto index = body.binary(Cgen_llvm::Binary_op::bit_and, body.resize(body.input(0), 16, true), body.constant(16, 15), 16, true);
+  const auto bit   = body.binary(Cgen_llvm::Binary_op::bit_and,
+                               body.binary(Cgen_llvm::Binary_op::lshr, body.input(1), index, 16, true),
+                               body.constant(16, 1),
+                               16,
+                               true);
+  EXPECT_TRUE(body.add_output(0, body.binary(Cgen_llvm::Binary_op::bit_xor, rot, bit, 16, true), error)) << error;
+  return {body.sharing_key(error), ports, {{16, true}}, false};
+}
+
+uint16_t rotl16(uint16_t x) { return static_cast<uint16_t>((x << 1) | (x >> 15)); }
+
+TEST(CgenLlvm, EmbeddedLoopStaysRolledPastTheTripLimit) {
+  std::string error;
+  const auto  trip = rotate_trip(error);
+  ASSERT_FALSE(trip.bitcode.empty()) << error;
+  Cgen_llvm                     kernel("rolled_rotate", Cgen_llvm::State_layout{2, {{0, 16, true}}});
+  std::vector<Cgen_llvm::Value> results;
+  // 300 trips: far more than any unroll replicates (the 8-bit index wraps).
+  ASSERT_TRUE(kernel.inline_loop(trip,
+                                 carry_loop_layout(),
+                                 300,
+                                 0,
+                                 1,
+                                 {kernel.constant(8, 0), kernel.input(0), kernel.constant(16, 0)},
+                                 results,
+                                 error))
+      << error;
+  ASSERT_TRUE(kernel.add_state_output(1, 1, results[0], {}, error)) << error;
+  const auto shape = run_reverse_kernel(kernel, "rolled_rotate", [](uint16_t x) {
+    uint16_t acc = 0;
+    for (unsigned ordinal = 0; ordinal < 300; ++ordinal) {
+      acc = static_cast<uint16_t>(rotl16(acc) ^ ((x >> ((ordinal & 255) & 15)) & 1));
+    }
+    return acc;
+  });
+  EXPECT_EQ(shape.disabled, 1u);
+  EXPECT_EQ(shape.full, 0u);
+}
+
+TEST(CgenLlvm, NestedEmbeddedLoopsSizeTheOuterUnrollWithInnerExpansion) {
+  // middle(j, x, acc) = rotl16(acc, 1) ^ reverse16(x ^ j) ^ reverse16(x + j),
+  // each 16-trip reversal embedded (and unrolled). An unroll of 64 outer trips
+  // would replicate 64 x 2 x 16 inner trips -- past the budget although the
+  // rolled middle body itself is small -- so it stays rolled, while 2 outer
+  // trips fit.
+  std::string error;
+  const auto  trip = bit_reverse_trip(error);
+  ASSERT_FALSE(trip.bitcode.empty()) << error;
+  const std::vector<std::pair<uint32_t, bool>> ports{
+      { 8, true},
+      {16, true},
+      {16, true},
+  };
+  Cgen_llvm  middle("middle", ports);
+  const auto j     = middle.resize(middle.input(0), 16, true);
+  const auto keys  = std::array{middle.binary(Cgen_llvm::Binary_op::bit_xor, middle.input(1), j, 16, true),
+                               middle.binary(Cgen_llvm::Binary_op::add, middle.input(1), j, 16, true)};
+  const auto acc   = middle.input(2);
+  auto       mixed = middle.binary(Cgen_llvm::Binary_op::bit_or,
+                                 middle.binary(Cgen_llvm::Binary_op::shl, acc, middle.constant(16, 1), 16, true),
+                                 middle.binary(Cgen_llvm::Binary_op::lshr, acc, middle.constant(16, 15), 16, true),
+                                 16,
+                                 true);
+  for (const auto& key : keys) {
+    std::vector<Cgen_llvm::Value> reversed;
+    ASSERT_TRUE(middle.inline_loop(trip,
+                                   carry_loop_layout(),
+                                   16,
+                                   0,
+                                   1,
+                                   {middle.constant(8, 0), key, middle.constant(16, 0)},
+                                   reversed,
+                                   error))
+        << error;
+    mixed = middle.binary(Cgen_llvm::Binary_op::bit_xor, mixed, reversed[0], 16, true);
+  }
+  ASSERT_TRUE(middle.add_output(0, mixed, error)) << error;
+  const Cgen_llvm::Inline_body body{middle.sharing_key(error), ports, {{16, true}}, false};
+  ASSERT_FALSE(body.bitcode.empty()) << error;
+  for (const uint64_t outer : {2u, 64u}) {
+    const std::string             name = "nested_reverse_" + std::to_string(outer);
+    Cgen_llvm                     kernel(name, Cgen_llvm::State_layout{2, {{0, 16, true}}});
+    std::vector<Cgen_llvm::Value> results;
+    ASSERT_TRUE(kernel.inline_loop(body,
+                                   carry_loop_layout(),
+                                   outer,
+                                   0,
+                                   1,
+                                   {kernel.constant(8, 0), kernel.input(0), kernel.constant(16, 0)},
+                                   results,
+                                   error))
+        << error;
+    ASSERT_TRUE(kernel.add_state_output(1, 1, results[0], {}, error)) << error;
+    const auto shape = run_reverse_kernel(kernel, name, [outer](uint16_t x) {
+      uint16_t expected = 0;
+      for (uint16_t index = 0; index < outer; ++index) {
+        expected = static_cast<uint16_t>(rotl16(expected) ^ reverse16(static_cast<uint16_t>(x ^ index))
+                                         ^ reverse16(static_cast<uint16_t>(x + index)));
+      }
+      return expected;
+    });
+    EXPECT_EQ(shape.full, 0u) << outer;  // the inner loops always unroll
+    EXPECT_EQ(shape.disabled, outer == 2 ? 0u : 1u) << outer;
+  }
+}
+
+TEST(CgenLlvm, HotmuxOverlapAndMuxSelectorPastTheArmsNeverTrap) {
+  // Run-time contract violations simulate (first active arm; X read as 0)
+  // instead of reaching a trap that kills the driver with SIGILL.
+  Cgen_llvm   kernel("no_traps",
+                   Cgen_llvm::State_layout{
+                       5,
+                         {{0, 1, true}, {0, 1, true, 1}, {0, 2, true, 2}, {1, 8, true}, {2, 8, true}}
+  });
+  std::string error;
+  const auto  p = kernel.input(0), q = kernel.input(1), sel = kernel.input(2), a = kernel.input(3), b = kernel.input(4);
+  const auto  c = kernel.constant(8, 7);
+  ASSERT_TRUE(kernel.add_state_output(3, 3, kernel.hotmux({p, a, q, b, c}, 8, true), {}, error)) << error;
+  ASSERT_TRUE(kernel.add_state_output(4, 4, kernel.indexed_mux(sel, {a, b, c}, 8, true), {}, error)) << error;
+  const auto path = std::filesystem::temp_directory_path() / "livehd-no-traps.bc";
+  ASSERT_TRUE(kernel.write_bitcode(path.string(), error, false)) << error;
+  auto buffer = llvm::MemoryBuffer::getFile(path.string());
+  ASSERT_TRUE(buffer);
+  llvm::LLVMContext context;
+  auto              module = llvm::parseBitcodeFile((*buffer)->getMemBufferRef(), context);
+  ASSERT_TRUE(module);
+  for (const auto& block : *(*module)->getFunction("no_traps")) {
+    for (const auto& instruction : block) {
+      EXPECT_FALSE(llvm::isa<llvm::UnreachableInst>(instruction));
+      if (const auto* call = llvm::dyn_cast<llvm::CallBase>(&instruction)) {
+        EXPECT_NE(call->getIntrinsicID(), llvm::Intrinsic::trap);
+      }
+    }
+  }
+  const auto object = path.string() + ".o";
+  ASSERT_TRUE(kernel.write_object(object, error, false)) << error;
+  livehd::sim::Native_objects objects;
+  ASSERT_TRUE(objects.load(object, error)) << error;
+  const auto run = objects.lookup("no_traps", error);
+  ASSERT_NE(run, nullptr) << error;
+  for (uint64_t control = 0; control < 32; ++control) {  // p, q, sel in bits 0..3
+    uint64_t       state[5] = {control, 0x11, 0x22, 0xdead, 0xdead};
+    const uint64_t pv = control & 1, qv = (control >> 1) & 1, sv = (control >> 2) & 3;
+    run(state, nullptr);
+    EXPECT_EQ(state[3], pv ? 0x11u : qv ? 0x22u : 7u) << control;  // both set: the FIRST arm
+    EXPECT_EQ(state[4], sv == 0 ? 0x11u : sv == 1 ? 0x22u : sv == 2 ? 7u : 0u) << control;
+  }
+  std::filesystem::remove(path);
+  std::filesystem::remove(object);
 }

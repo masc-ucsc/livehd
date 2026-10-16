@@ -16,6 +16,7 @@
 // netlist was REFUTED on a register that is never even clocked. Any client that
 // shares this preparation proves what `lhd lec` proves.
 
+#include <chrono>
 #include <functional>
 #include <memory>
 #include <string>
@@ -74,10 +75,15 @@ std::pair<int, int> inline_clock_gates_and_fold(hhds::Graph* top, const std::vec
 // `side_g` (the side's top, or nullptr) is a host even when the other side
 // names its top differently. Returns the number of instances spliced, and adds
 // to `absorbed` the name of each definition an instance of which was spliced.
+// Linear in the total spliced size (one worklist per host, no re-scan). A set
+// `deadline` is checked between splices; reaching it stops with `*timed_out`
+// set and the side partially inlined -- the caller must report TIMEOUT-time
+// and not query.
 size_t inline_instances_missing_from_other_side(const Cell_models&                               sub_lib,
                                                 const std::vector<std::shared_ptr<hhds::Graph>>& side_graphs,
                                                 const std::vector<std::shared_ptr<hhds::Graph>>& other_graphs, hhds::Graph* side_g,
-                                                absl::flat_hash_set<std::string>* absorbed = nullptr);
+                                                absl::flat_hash_set<std::string>*     absorbed = nullptr,
+                                                std::chrono::steady_clock::time_point deadline = {}, bool* timed_out = nullptr);
 
 // Outcome of prepare_time_base. Nothing here throws: each caller decides what a
 // decline or an error means for it (`lhd lec` refuses; the publication gate

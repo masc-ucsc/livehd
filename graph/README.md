@@ -36,6 +36,14 @@ just the directory orientation.
 - `attrs.hpp` — per-pin / per-node attributes (e.g. `bits`, `sign`).
 - `graph_library_singleton.{hpp,cpp}` — the process graph library.
 - `node_util.hpp`, `const_pin.cpp`, `ann_place.hpp` — node helpers / annotations.
+- `inline_sub.{hpp,cpp}` — single-level structural inline of one Sub instance
+  (`inline_sub_instance`), and `Host_inliner` for splicing MANY instances into
+  one host at a cost linear in the spliced size: a splice reports the Sub
+  clones it created (node ids are append-only, so a worklist in id order
+  replaces re-scanning the host), and the host's `simulation_init` merge is
+  deferred to `flush()`. Each splice indexes the clone pins, the instance's
+  input drivers and the child's input names once, because hhds answers those
+  by walking a pin list (`find_or_create_pin`, `Graph::pin_name`).
 
 > Per-pin `bits`/`sign` are HHDS attributes today; the native-storage campaign is
 > tracked in the TODO hub (`todo/livehd/hhds-pinentry.html`).
@@ -76,7 +84,9 @@ instance name, so transparent siblings stay distinct compare points. Anonymous
 partition instances remain anonymous in LGraph; cgen assigns reserved-prefix
 names (`__flat___<module>`, built from the flat, dot-free module identifier)
 when Verilog requires an identifier, so transparency survives emission and
-reload.
+reload. Inlining a named instance `inst` whose body holds an anonymous instance
+names the clone `inst.__flat___<module>` (graph/inline_sub.cpp): it stays
+transparent, but under `inst`, so a later inline of it still prefixes `inst.`.
 
 A transparent wrapper groups existing logical state; it does not introduce a
 new state namespace. A transformation duplicating state must give the copies

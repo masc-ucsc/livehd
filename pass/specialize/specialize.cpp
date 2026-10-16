@@ -70,7 +70,6 @@ void refold_private_body(const std::shared_ptr<hhds::Graph>& graph) {
   Bitwidth{16}.do_trans(graph);
 }
 
-namespace {
 // A node this pass created (a folded clone's new cells, the fit_to_port masks
 // around a published output constant) has no color. In a colored graph it
 // would land in color 0 -- a stray region of its own -- so it takes the color
@@ -114,7 +113,6 @@ void inherit_colors(hhds::Graph& g, const absl::flat_hash_set<uint64_t>* existed
     });
   }
 }
-}  // namespace
 
 namespace {
 // max_versions > 1: one content-named clone per distinct constant binding, at

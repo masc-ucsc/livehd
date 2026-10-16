@@ -92,6 +92,14 @@ struct uPass_tolg {
   // rest keep their registry order.
   static Registry lowering_order(const Registry& registry, const std::function<bool(const Lnast&)>& follow = {});
 
+  // The units an explicit-top compile need not lower: a file-scope `comb` that
+  // is not `pub` (no other file can import it) and that no lowered unit reaches
+  // through a call -- used only at comptime, inlined, or called only from a
+  // branch a comptime `if` folded away. Roots are every other non-template
+  // unit, `top` (the resolved top unit name) included. A unit whose owning file
+  // unit is not in `registry`, a pre-elaborated one, and a template are kept.
+  static Registry unreferenced_private_combs(const Registry& registry, std::string_view top);
+
   // Phase 3: refresh Sub loop-break classification bottom-up and gate
   // conditionally activated instance clocks after every phase-2 body exists.
   // Both classifications are structural and recursive, so they cannot be

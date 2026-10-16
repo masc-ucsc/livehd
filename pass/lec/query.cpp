@@ -26,6 +26,7 @@
 #include <sstream>
 #include <string>
 #include <tuple>
+#include <unordered_map>
 #include <unordered_set>
 #include <vector>
 
@@ -96,6 +97,50 @@ std::string memory_correspondence_name(std::string_view name) {
     return *decoded;
   }
   return canon_flop_name(name);
+}
+
+// POSITIONAL correspondence evidence for a Memory whose name cannot pair: its
+// leaf name plus the iteration indices along its hierarchical path, outermost
+// first. A Verilog generate and a Pyrope loop that build the same grid of
+// memories agree on it although every path segment is spelled differently:
+//   gen_row_1_gen_col_0_br_ram_flops_tile\.mem   (generate blocks)  -> "mem@1,0"
+//   u_loop_0__li1.tile__li0.mem                  (Pyrope loops)     -> "mem@1,0"
+// An index is a `__li<k>` loop-iteration suffix or a purely numeric token
+// (between '_', '.', '\\', '[' or ']').
+// The `<n>` of a compact loop's `u_loop_<n>` instance names the loop, not an
+// iteration, so it is skipped. Linear in the name.
+std::string memory_index_path(std::string_view hier_name) {
+  const auto                    dot  = hier_name.rfind('.');
+  auto                          leaf = dot == std::string_view::npos ? hier_name : hier_name.substr(dot + 1);
+  auto                          path = dot == std::string_view::npos ? std::string_view{} : hier_name.substr(0, dot);
+  std::vector<std::string_view> toks;
+  size_t                        start = 0;
+  for (size_t i = 0; i <= path.size(); ++i) {
+    if (i == path.size() || path[i] == '_' || path[i] == '.' || path[i] == '\\' || path[i] == '[' || path[i] == ']') {
+      toks.push_back(path.substr(start, i - start));
+      start = i + 1;
+    }
+  }
+  auto numeric = [](std::string_view t) {
+    return !t.empty() && std::all_of(t.begin(), t.end(), [](char c) { return c >= '0' && c <= '9'; });
+  };
+  std::string out{leaf};
+  out        += '@';
+  bool first  = true;
+  for (size_t i = 0; i < toks.size(); ++i) {
+    std::string_view idx;
+    if (numeric(toks[i]) && !(i >= 2 && toks[i - 2] == "u" && toks[i - 1] == "loop")) {
+      idx = toks[i];
+    } else if (i >= 1 && toks[i - 1].empty() && toks[i].size() > 2 && toks[i].starts_with("li") && numeric(toks[i].substr(2))) {
+      idx = toks[i].substr(2);  // `<name>__li<k>`: the empty token is the doubled '_'
+    } else {
+      continue;
+    }
+    out   += first ? "" : ",";
+    out   += idx;
+    first  = false;
+  }
+  return out;
 }
 
 // cvc5's OWN reason for an undecided check, read from the result and never assumed to be the timeout.
@@ -1449,6 +1494,8 @@ std::string vname(const Query_result& r) {
 // The fork-per-method race harness (Race_result / fork_race) lives in
 // fork_race.hpp so its wall-deadline path has a direct unit test.
 
+}  // namespace
+
 // The undecided attempt whose cause DECIDES a portfolio's (or an ind|bmc
 // ladder's) top-level outcome -- owner ruling 2026-10-14. Each attempt is
 // classified as under engine=auto. An attempt that only says its own engine
@@ -1457,15 +1504,21 @@ std::string vname(const Query_result& r) {
 // ARM-LEVEL inability: it yields to any other attempt's cause, so one engine
 // that cannot check the logic plus another that timed out is TIMEOUT-time, and
 // only when every attempt says it is the result REFUTED-unsupported. Among the
-// rest the most severe outcome wins (worse()): a time or memory limit in one arm
-// never hides another arm's contradictory assumptions or an unexplained
-// give-up. Attempts that settled (Proven / Refuted) are not candidates. An
+// rest a design-level refusal (the encoder cannot model the design: no engine
+// and no amount of time can check it) wins, then a memory or time limit: an
+// undecided-by-time result is TIMEOUT-time, never REFUTED-unexplained (owner
+// ruling 2026-10-15), even when another arm crashed or gave up without a
+// reason -- more time on the limited arm could still decide, and the crash
+// stays in the detail. Only without any such limit does the most severe
+// remaining outcome (an unchecked or unexplained give-up) decide. A time or
+// memory limit never hides another arm's contradictory assumptions (below).
+// Attempts that settled (Proven / Refuted) are not candidates. An
 // attempt that found the active assume set CONTRADICTORY is itself an answer
 // (REFUTED-vacuous: it can prune away a real counterexample, final owner ruling 2026-10-14), so it
 // decides ahead of any other arm's limit. Returns an index into `legs`, or -1
 // when no attempt is undecided.
 int deciding_attempt(const std::vector<const Query_result*>& legs) {
-  auto cause_of  = [](const Query_result& r) -> std::string_view { return r.cause_detail.empty() ? r.detail : r.cause_detail; };
+  auto cause_of = [](const Query_result& r) -> std::string_view { return r.cause_detail.empty() ? r.detail : r.cause_detail; };
   for (size_t i = 0; i < legs.size(); ++i) {
     const auto& leg = *legs[i];
     if (leg.verdict == Verdict::Undecided && !leg.unsupported
@@ -1481,21 +1534,34 @@ int deciding_attempt(const std::vector<const Query_result*>& legs) {
   for (const auto* leg : legs) {
     any_able = any_able || (leg->verdict == Verdict::Undecided && !inability(*leg));
   }
-  int     best = -1;
-  Outcome best_o{};
+  auto precedence = [&](Outcome o, const Query_result& leg) {
+    if (o == Outcome::Refuted_unsupported && !inability(leg)) {
+      return 300;  // design-level refusal
+    }
+    if (o == Outcome::Timeout_memory) {
+      return 250;
+    }
+    if (o == Outcome::Timeout_time) {
+      return 240;
+    }
+    return outcome_rank(o);
+  };
+  int best = -1, best_p = 0;
   for (size_t i = 0; i < legs.size(); ++i) {
     const auto& leg = *legs[i];
     if (leg.verdict != Verdict::Undecided || (any_able && inability(leg))) {
       continue;
     }
-    const Outcome o = undecided_outcome(cause_of(leg), leg.unsupported, false);
-    if (best < 0 || outcome_rank(o) > outcome_rank(best_o)) {
+    const int p = precedence(undecided_outcome(cause_of(leg), leg.unsupported, false), leg);
+    if (best < 0 || p > best_p) {
       best   = static_cast<int>(i);
-      best_o = o;
+      best_p = p;
     }
   }
   return best;
 }
+
+namespace {
 
 // Build the undecided result from two completed engine results. Neither was
 // trustworthy here (no BMC-Refuted, no inductive-Proven, no bounded BMC pass).
@@ -3372,6 +3438,101 @@ std::vector<Packed_scalar_bridge> infer_packed_scalar_bridges(const Io_name_map<
 
 bool io_bundle_split(hhds::Graph* ref, hhds::Graph* impl) { return !detect_port_bundles(ref, impl).empty(); }
 
+namespace {
+
+// Input ports of a definition that NOTHING it outputs depends on: no path from
+// the port, through logic, state (flops, memories) or nested instances, to any
+// output pin. One backward liveness walk per body from its output pins, so it
+// is linear in the body. Conservative in the sound direction -- every doubt
+// keeps a port LIVE: a reached node makes all of its inputs live, a nested
+// instance with no body (a blackbox, a --lib cell) or a replicated loop site
+// keeps all of its inputs live, a recursion keeps all live; a nested instance
+// with a body keeps live the inputs its own body does not prove dead. Property
+// markers (assert/assume/lgundef) drive nothing an output reads, so they are
+// never reached.
+class Def_dead_inputs {
+public:
+  // Port ids of `g`'s inputs that reach no output of `g`.
+  const absl::flat_hash_set<hhds::Port_id>& of(hhds::Graph* g) {
+    if (auto it = memo_.find(g); it != memo_.end()) {
+      return it->second;
+    }
+    absl::flat_hash_set<hhds::Port_id> dead;
+    if (g != nullptr && g->get_io() != nullptr && busy_.insert(g).second) {
+      dead = compute(g);
+      busy_.erase(g);
+    }
+    // (A def re-entered through itself computes nothing above: every port live.)
+    return memo_.emplace(g, std::move(dead)).first->second;
+  }
+
+  // The same set by port NAME.
+  absl::flat_hash_set<std::string> names_of(hhds::Graph* g) {
+    absl::flat_hash_set<std::string> out;
+    const auto&                      dead = of(g);
+    if (!dead.empty()) {
+      for (const auto& d : g->get_io()->get_input_pin_decls()) {
+        if (dead.contains(d.port_id)) {
+          out.insert(d.name);
+        }
+      }
+    }
+    return out;
+  }
+
+private:
+  absl::flat_hash_set<hhds::Port_id> compute(hhds::Graph* g) {
+    absl::flat_hash_set<hhds::Class_index> live_drivers;  // driver pins some live sink reads
+    absl::flat_hash_set<hhds::Class_index> live_nodes;
+    std::vector<hhds::Pin_class>           stk;           // live sink pins to resolve
+    for (auto sink : g->get_output_node().inp_sorted_pins()) {
+      stk.push_back(sink);
+    }
+    while (!stk.empty()) {
+      const auto sink = stk.back();
+      stk.pop_back();
+      const auto drv = sink.get_driver_pin();
+      if (drv.is_invalid() || !live_drivers.insert(drv.get_class_index()).second) {
+        continue;
+      }
+      if (graph_util::is_graph_input_pin(drv) || drv.is_const()) {
+        continue;
+      }
+      const auto m = drv.get_master_node();
+      if (!live_nodes.insert(m.get_class_index()).second) {
+        continue;
+      }
+      const absl::flat_hash_set<hhds::Port_id>* child_dead = nullptr;
+      if (graph_util::type_op_of(m) == Ntype_op::Sub && !m.is_loop_subnode()) {
+        if (auto cg = m.get_subnode_graph(); cg) {
+          child_dead = &of(cg.get());
+        }
+      }
+      for (auto in : m.inp_sorted_pins()) {
+        if (child_dead != nullptr && child_dead->contains(in.get_port_id())) {
+          continue;  // the nested body proves this input reaches none of its outputs
+        }
+        stk.push_back(in);
+      }
+    }
+    absl::flat_hash_set<hhds::Port_id> dead;
+    for (const auto& d : g->get_io()->get_input_pin_decls()) {
+      const auto pin = g->get_input_pin(d.name);
+      if (!pin.is_invalid() && !live_drivers.contains(pin.get_class_index())) {
+        dead.insert(d.port_id);
+      }
+    }
+    return dead;
+  }
+
+  // Node-based: of() hands out references that must survive later inserts
+  // (compute() holds a child's set while it recurses into other children).
+  std::unordered_map<const hhds::Graph*, absl::flat_hash_set<hhds::Port_id>> memo_;
+  absl::flat_hash_set<const hhds::Graph*>                                     busy_;
+};
+
+}  // namespace
+
 // The real engine. `acc` is the caller-owned cvc5 statistics accumulator
 // (lhd.stats): NULL when stats are off, which makes every Solve_probe /
 // Stats_guard / capture_cvc5_stats call below a no-op, so no call site needs an
@@ -4077,12 +4238,91 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
     }
   }
 
+  // Box inputs NOT owed an obligation: a PROVEN (collapsed, untrusted) child D
+  // whose body on EITHER side reaches no output from input port p. D's proof
+  // says D_ref(x,u) == D_impl(x,u) for every input sequence; if D_ref ignores
+  // u, then D_ref(x,u_ref) == D_ref(x,u_impl) == D_impl(x,u_impl), so the shared
+  // box outputs stay justified whatever the parent drives into p (symmetric for
+  // D_impl). The `bbin:` compare point there checks a difference no output can
+  // show -- a synthesized parent that ties an unread port to 0 while the source
+  // still computes it (lhdtrack br_fifo_shared_pstatic_flops: the push ctrl
+  // core's `bypass_ready` and the staging buffer's `bypass_*_unstable` with
+  // bypass disabled) made a collapsed proof impossible. Keyed "<defkey>:<port>"
+  // so both encoders drop the same points. A TRUSTED box keeps every input
+  // obligation (owner ruling 2026-10-14: the boxed model is the contract), and
+  // a body-less blackbox has nothing to inspect.
+  absl::flat_hash_set<std::string> box_dead_inputs;
+  // The output-side twin: a proven (collapsed, untrusted) child's output port
+  // that its body on EITHER side drives with a known constant. D_impl's output
+  // o is c whatever its inputs and state, and D_ref == D_impl, so D_ref's o is
+  // c as well: the box output is c on both sides, not a free shared symbol (a
+  // synthesized side that folded the constant into the parent -- a disabled
+  // bypass's `bypass_ready` = 0 -- otherwise differs from the free symbol the
+  // source still routes there). "<defkey>:<port>" -> value; bodies that drive
+  // different constants (a refuted child) keep the free symbol.
+  absl::flat_hash_map<std::string, int64_t> box_const_outputs;
+  {
+    auto trusted = [&](std::string_view full) {
+      const auto ent = str_tools::canonical_entity_name(full);
+      return std::ranges::any_of(opts.trust, [&](const std::string& t) {
+        return t == full || t == ent || str_tools::canonical_entity_name(t) == ent;
+      });
+    };
+    Def_dead_inputs dead_inputs;
+    for (const auto& defkey : box_defnames) {
+      bool                                     skip = false;
+      absl::flat_hash_set<std::string>         dead;
+      absl::flat_hash_map<std::string, int64_t> consts;  // port -> value; -1: the bodies disagree
+      absl::flat_hash_set<const void*>         seen_bodies;
+      for (const auto& bi : boxes_by_def[defkey]) {
+        auto sio = bi.node.get_subnode_io();
+        if (sio == nullptr || trusted(sio->get_name()) || bi.node.is_loop_subnode()) {
+          skip = true;
+          break;
+        }
+        auto body = bi.node.get_subnode_graph();
+        if (!body || !seen_bodies.insert(body.get()).second) {
+          continue;
+        }
+        for (auto& p : dead_inputs.names_of(body.get())) {
+          dead.insert(std::move(p));
+        }
+        for (const auto& d : body->get_io()->get_output_pin_decls()) {
+          const auto drv = body->get_output_pin(d.name).get_driver_pin();
+          if (drv.is_invalid() || !drv.is_const()) {
+            continue;
+          }
+          const Dlop c = gu::const_of(drv);
+          if (c.has_unknowns() || !c.is_just_i64() || c.to_just_i64() < 0) {
+            continue;
+          }
+          auto [it, fresh] = consts.try_emplace(d.name, c.to_just_i64());
+          if (!fresh && it->second != c.to_just_i64()) {
+            it->second = -1;
+          }
+        }
+      }
+      if (skip) {
+        continue;
+      }
+      for (const auto& p : dead) {
+        box_dead_inputs.insert(defkey + ":" + p);
+      }
+      for (const auto& [p, v] : consts) {
+        if (v >= 0) {
+          box_const_outputs.emplace(defkey + ":" + p, v);
+        }
+      }
+    }
+  }
+
   absl::flat_hash_map<std::string, State_box> state_boxes;
   absl::flat_hash_map<std::string, Comb_box>  comb_boxes;
   Io_name_map<Val>                            shared_bbox;
   {
     Io_name_map<int>  bw;   // true-blackbox "key:port" -> max real width across designs
     Io_name_map<bool> bsg;  // "key:port" -> signedness of the widest side
+    Io_name_map<int64_t> bconst;  // "key:port" -> a proven child's constant output (box_const_outputs)
     auto              out_port_name = [](const std::shared_ptr<hhds::GraphIO>& sio, const auto& dp) -> std::string {
       for (const auto& d : sio->get_output_pin_decls()) {
         if (sio->get_output_port_id(d.name) == dp.get_port_id()) {
@@ -4280,10 +4520,19 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
             bw[key]  = w;
             bsg[key] = !graph_util::is_unsign(dp);
           }
+          if (auto cit = box_const_outputs.find(defname + ":" + port); cit != box_const_outputs.end()) {
+            bconst[key] = cit->second;
+          }
         }
       }
     }
     for (const auto& [key, w] : bw) {
+      // A proven child's constant output (box_const_outputs) is that constant
+      // on both sides; it must fit the shared width, else stay a free symbol.
+      if (auto cit = bconst.find(key); cit != bconst.end() && (w >= 63 || cit->second < (int64_t{1} << w))) {
+        shared_bbox[key] = Val{tm.mkBitVector(static_cast<uint32_t>(w), static_cast<uint64_t>(cit->second)), w, bsg[key]};
+        continue;
+      }
       shared_bbox[key] = Val{tm.mkConst(tm.mkBitVectorSort(static_cast<uint32_t>(w)), "bb:" + key), w, bsg[key]};
     }
   }
@@ -4306,10 +4555,11 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
   // site that keys a memory reads these maps, and so does the encoder
   // (set_mem_keys).
   struct Mem_census_entry {
-    std::string nk;     // box_node_key: the structural node identity
-    std::string shape;  // "<size>x<bits>"
-    std::string name;   // hier name
-    bool        named;  // the node carries its own name
+    std::string nk;      // box_node_key: the structural node identity
+    std::string shape;   // "<size>x<bits>"
+    std::string name;    // hier name
+    bool        named;   // the node carries its own name
+    bool        uninit;  // a port-written memory with no initial contents, reset arm or $readmem image
     Mem_sig     sig;
   };
   auto mem_census = [&](hhds::Graph* g) {
@@ -4318,18 +4568,25 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
       if (graph_util::type_op_of(node) != Ntype_op::Memory || !node.has_out_edges()) {
         continue;
       }
-      auto sig = read_mem_sig(node);
-      out.push_back(Mem_census_entry{.nk    = box_node_key(node),
-                                     .shape = std::to_string(sig.size) + "x" + std::to_string(sig.bits),
-                                     .name  = std::string(node.get_hier_name()),
-                                     .named = !node.get_name().empty(),
-                                     .sig   = sig});
+      auto       sig    = read_mem_sig(node);
+      const auto mtype  = graph_util::get_driver_of_sink_name(node, "type");
+      const bool uninit = sig.n_wr > 0 && !(mtype.is_const() && graph_util::const_of(mtype).to_just_i64() == 2)
+                          && graph_util::get_driver_of_sink_name(node, "update").is_invalid()
+                          && graph_util::get_driver_of_sink_name(node, "initial").is_invalid()
+                          && graph_util::get_driver_of_sink_name(node, "reset").is_invalid() && !graph_util::memory_image_of(node);
+      out.push_back(Mem_census_entry{.nk     = box_node_key(node),
+                                     .shape  = std::to_string(sig.size) + "x" + std::to_string(sig.bits),
+                                     .name   = std::string(node.get_hier_name()),
+                                     .named  = !node.get_name().empty(),
+                                     .uninit = uninit,
+                                     .sig    = sig});
     }
     return out;
   };
   const auto               ref_mem_census  = mem_census(ref);
   const auto               impl_mem_census = mem_census(impl);
   Io_name_map<std::string> ref_mem_cut_keys, impl_mem_cut_keys;
+  absl::flat_hash_set<std::string> positional_mem_keys;  // keys paired by memory_index_path, not by name
   {
     // "<shape>\x1f<correspondence name>" -> count of the NAMED memories: an
     // unnamed node whose hhds fallback spells the same text must not unpair
@@ -4343,14 +4600,51 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
         }
       }
     }
+    auto name_paired = [&](const Mem_census_entry& e, const std::string& cname) {
+      const auto ck = e.shape + "\x1f" + cname;
+      return e.named && !cname.empty() && ref_cnt[ck] == 1 && impl_cnt[ck] == 1;
+    };
+    // POSITIONAL pairing for the uninitialized memories a name cannot pair
+    // (memory_index_path): a Pyrope loop and a Verilog generate that build the
+    // same grid agree on leaf + iteration indices although no path segment
+    // matches. Only a "<shape>\x1f<leaf@indices>" that is unique on BOTH sides
+    // pairs. It is weaker evidence than a name, so it is restricted to
+    // port-written memories with no initial contents on either side (any
+    // bijection of free initial contents is a valid choice for an X
+    // reference, and these are the memories whose unknown entries BMC
+    // tracks), BMC keeps the
+    // reference's unwritten entries unknown (positional_mem_keys, below), and
+    // induction only uses it as a hypothesis it must re-establish every step.
+    // Under formal.lec.gold_x=zero an uninitialized reference reads zeros, so
+    // there is no free choice to make and no positional pair.
+    Io_name_map<int> ref_pos_cnt, impl_pos_cnt;
+    for (const auto* census : {&ref_mem_census, &impl_mem_census}) {
+      auto& cnt = census == &ref_mem_census ? ref_pos_cnt : impl_pos_cnt;
+      for (const auto& e : *census) {
+        if (e.uninit && !name_paired(e, memory_correspondence_name(e.name))) {
+          ++cnt[e.shape + "\x1f" + memory_index_path(e.name)];
+        }
+      }
+    }
     for (const auto* census : {&ref_mem_census, &impl_mem_census}) {
       auto&            keys = census == &ref_mem_census ? ref_mem_cut_keys : impl_mem_cut_keys;
       Io_name_map<int> ordinal;
       for (const auto& e : *census) {
         const auto cname = memory_correspondence_name(e.name);
-        const auto ck    = e.shape + "\x1f" + cname;
-        keys[e.nk] = e.named && !cname.empty() && ref_cnt[ck] == 1 && impl_cnt[ck] == 1 ? mem_state_key(e.sig, cname)
-                                                                                        : mem_state_key(e.sig, ordinal[e.shape]++);
+        if (name_paired(e, cname)) {
+          keys[e.nk] = mem_state_key(e.sig, cname);
+          continue;
+        }
+        if (e.uninit && opts.gold_x != "zero") {
+          const auto ipath = memory_index_path(e.name);
+          const auto pk    = e.shape + "\x1f" + ipath;
+          if (ref_pos_cnt[pk] == 1 && impl_pos_cnt[pk] == 1) {
+            keys[e.nk] = mem_state_key(e.sig, "pos:" + ipath);  // '@' never appears in a correspondence name
+            positional_mem_keys.insert(keys[e.nk]);
+            continue;
+          }
+        }
+        keys[e.nk] = mem_state_key(e.sig, ordinal[e.shape]++);
       }
     }
   }
@@ -4581,6 +4875,7 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
   const auto ref_mem_shapes  = mem_names_by_shape(ref_mem_census);
   const auto impl_mem_shapes = mem_names_by_shape(impl_mem_census);
   absl::flat_hash_map<std::string, std::vector<std::pair<std::string, std::string>>> mem_pairs_by_shape;
+  absl::flat_hash_set<std::string> positional_pairs;  // ref name \x01 impl name, paired by memory_index_path
   {
     Io_name_map<std::string> impl_name_of_key;
     for (const auto& e : impl_mem_census) {
@@ -4592,6 +4887,9 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
       }
       if (auto it = impl_name_of_key.find(ref_mem_cut_keys.at(e.nk)); it != impl_name_of_key.end()) {
         mem_pairs_by_shape[e.shape].emplace_back(e.name, it->second);
+        if (positional_mem_keys.contains(ref_mem_cut_keys.at(e.nk))) {
+          positional_pairs.insert(e.name + "\x01" + it->second);
+        }
       }
     }
   }
@@ -4669,7 +4967,20 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
     {
       bool aligned = !pairs.empty();
       for (size_t i = 0; i < pairs.size() && aligned; ++i) {
-        const auto& [rname, iname]   = pairs[i];
+        const auto& [rname, iname] = pairs[i];
+        if (positional_pairs.contains(rname + "\x01" + iname)) {
+          // A positional pair (uninitialized on both sides, see the census) is
+          // a correspondence CHOICE, not a claim semdiff could refute: the
+          // reference's unwritten entries stay unknown in BMC, and induction
+          // re-proves the pairing every step. Only a confident semdiff pair
+          // that puts either memory with a DIFFERENT partner overrules it. A
+          // semdiff "no counterpart" is no evidence here: semdiff may not see
+          // the other side's memory at all (e.g. one inside a compact loop).
+          const auto rc = canon_flop_name(rname);
+          const auto ic = canon_flop_name(iname);
+          aligned       = mem_confirmed.contains(rc + "\x01" + ic) || (!mem_opined.contains(rc) && !mem_opined.contains(ic));
+          continue;
+        }
         const std::string rcn        = memory_correspondence_name(rname);
         const std::string icn        = memory_correspondence_name(iname);
         const bool        cgen_exact = is_cgen_memory_storage_name(rname) != is_cgen_memory_storage_name(iname);
@@ -4966,9 +5277,11 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
       denc.set_comb_boxes(comb_boxes_ptr);
       denc.set_force_multi_clock(force_multi_clock);
       denc.set_shared_bbox(&shared_bbox);
+      denc.set_box_dead_inputs(&box_dead_inputs);
       denc.set_emit_props(false);
       denc.set_box_keys(s == 0 ? &ref_box_keys : &impl_box_keys);
       denc.set_mem_keys(s == 0 ? &ref_mem_cut_keys : &impl_mem_cut_keys);
+      denc.set_undef_read_free(s == 1);
       Encoded de = denc.encode(s == 0 ? ref : impl, nullptr, s == 0 ? "wr_" : "wi_");
       if (!de.ok) {
         continue;
@@ -5067,6 +5380,7 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
     enc.set_comb_boxes(comb_boxes_ptr);
     enc.set_force_multi_clock(force_multi_clock);
     enc.set_shared_bbox(&shared_bbox);
+    enc.set_box_dead_inputs(&box_dead_inputs);
 
     // ---- FORMAL PHASE SCHEDULE (2f-lec / 2f-latch M10) -----------------------
     // One source period becomes FOUR microsteps whenever either design holds a
@@ -5293,6 +5607,9 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
           // same amount). Sampling only `bound` cycles past a 70-cycle flush
           // never saw lhdsuite matched_filter's broken tap product.
           N += flush;
+          // A windowed search looks that far (capped: the cone it solves
+          // grows with it) past the cycles it frees.
+          sampler.set_horizon(std::clamp(flush / 2, 2, 8));
         }
       }
     }
@@ -5728,8 +6045,8 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
     // collapse to the same initial contents); threaded forward like flop state.
     Io_name_map<cvc5::Term> ref_mem  = build_shared_mems("m0_");
     Io_name_map<cvc5::Term> impl_mem = ref_mem;
-    Io_name_map<cvc5::Term> ref_mem_x;
-    std::set<std::string>   bridged_mem_keys;
+    Io_name_map<Mem_x_state> ref_mem_x;
+    std::set<std::string>    bridged_mem_keys;
 
     // ── Memory <-> single-wide-flop init bridge ───────────────────────────────
     // A behavioral memory (one SMT array) on one design can appear on the OTHER
@@ -6049,21 +6366,24 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
     // and explicit initial contents observable. The encoder threads this
     // knowledge array and clears written bits, so incorrect writes still
     // refute; only unwritten reference bits are don't-cares under gold_x=ignore.
+    // "Shared" means both designs really start from ONE array: the key exists
+    // on both sides AND its shape bucket collapsed (build_shared_mems minted
+    // it). An uncollapsed bucket keeps the key on both sides with a private
+    // free array per design, and a positional pair is a correspondence choice
+    // rather than a name claim: for both, unwritten reference entries are as
+    // unknown as an unmatched memory's.
     for (const auto& [key, sig] : ref_mem_sig) {
-      if (impl_mem_sig.contains(key) || bridged_mem_keys.contains(key) || initialized_mem_keys.contains(key)
-          || memory_image_keys.contains(key) || sig.n_wr == 0 || !ref_mem_type.contains(key) || ref_mem_type.at(key) == 2) {
+      const bool shared = impl_mem_sig.contains(key) && ref_mem.contains(key) && !positional_mem_keys.contains(key);
+      if (shared || bridged_mem_keys.contains(key) || initialized_mem_keys.contains(key) || memory_image_keys.contains(key)
+          || sig.n_wr == 0 || !ref_mem_type.contains(key) || ref_mem_type.at(key) == 2) {
         continue;
       }
-      auto it = ref_mem.find(key);
-      if (it == ref_mem.end()) {
-        continue;
-      }
-      const auto zero = tm.mkBitVector(static_cast<uint32_t>(sig.bits), 0);
       if (opts.gold_x == "zero") {
-        it->second = tm.mkConstArray(it->second.getSort(), zero);
+        if (auto it = ref_mem.find(key); it != ref_mem.end()) {
+          it->second = tm.mkConstArray(it->second.getSort(), tm.mkBitVector(static_cast<uint32_t>(sig.bits), 0));
+        }
       } else {
-        const auto unknown = tm.mkBitVector(static_cast<uint32_t>(sig.bits), std::string(static_cast<size_t>(sig.bits), '1'), 2);
-        ref_mem_x[key]     = tm.mkConstArray(it->second.getSort(), unknown);
+        ref_mem_x[key] = mem_x_fresh(tm, sig, true, "m0_" + key + ":xep");
       }
     }
 
@@ -6162,8 +6482,11 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
       }
       Io_name_map<Val> dry_bbox;
       for (const auto& [bk, bv] : shared_bbox) {
+        // A proven child's constant output (box_const_outputs) stays constant.
         dry_bbox[bk]
-            = Val{tm.mkConst(tm.mkBitVectorSort(static_cast<uint32_t>(bv.width)), "rdry_bb:" + bk), bv.width, bv.is_signed};
+            = bv.term.isBitVectorValue()
+                  ? bv
+                  : Val{tm.mkConst(tm.mkBitVectorSort(static_cast<uint32_t>(bv.width)), "rdry_bb:" + bk), bv.width, bv.is_signed};
       }
       enc.set_shared_bbox(&dry_bbox);
       enc.set_emit_props(false);
@@ -6287,7 +6610,7 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
             cvc5::Term lvl          = drive_zero ? tm.mkBitVector(static_cast<uint32_t>(info.w), 0) : top_in_ones(tm, info);
             solver.assertFormula(tm.mkTerm(cvc5::Kind::EQUAL, {t, lvl}));
           } else if (sample_effort && !sample_clocks.contains(std::string(name))) {
-            sampler.add_input(t, cyc);
+            sampler.add_input(t, cyc, name);
           }
           snap_ins[name] = Val{t, info.w, info.sgn};
           if (opts.witness) {
@@ -6340,6 +6663,10 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
       // constrained by nothing except that its inputs matched.
       Io_name_map<Val> step_bbox;
       for (const auto& [bk, bv] : shared_bbox) {
+        if (bv.term.isBitVectorValue()) {
+          step_bbox[bk] = bv;  // a proven child's constant output (box_const_outputs) is constant every step
+          continue;
+        }
         step_bbox[bk] = Val{tm.mkConst(tm.mkBitVectorSort(static_cast<uint32_t>(bv.width)), "bb" + std::to_string(step) + ":" + bk),
                             bv.width,
                             bv.is_signed};
@@ -6375,7 +6702,9 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
       enc.set_mem_keys(&impl_mem_cut_keys);
       const bool impl_use_plan = use_plan && (use_phase || impl_plan.needs_plan());
       enc.set_phase_plan(impl_use_plan ? &impl_plan : nullptr, ms);
+      enc.set_undef_read_free(true);  // the implementation's undefined reads are free values
       Encoded ie = enc.encode(impl, &sh_impl, "i" + std::to_string(step) + "_", &impl_mem, &impl_reads);
+      enc.set_undef_read_free(false);
       if (!ie.ok) {
         res.verdict      = Verdict::Undecided;
         res.unsupported  = ie.unsupported;
@@ -6455,6 +6784,9 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
           cvc5::Term diff = tm.mkTerm(cvc5::Kind::DISTINCT, {rfit, ifit});
           bad             = bad.isNull() ? diff : tm.mkTerm(cvc5::Kind::OR, {bad, diff});
           decomp_diffs.push_back({name + "@" + cyc_tag, diff});
+          if (sample_effort) {
+            sampler.add_output_diff(cyc, diff);
+          }
           if (opts.witness) {
             wit_outs.push_back({cyc, name, rfit, ifit});
           }
@@ -6486,6 +6818,9 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
           cvc5::Term diff = tm.mkTerm(cvc5::Kind::DISTINCT, {rt, it2});
           bad             = bad.isNull() ? diff : tm.mkTerm(cvc5::Kind::OR, {bad, diff});
           decomp_diffs.push_back({b->base + "@" + cyc_tag, diff});
+          if (sample_effort) {
+            sampler.add_output_diff(cyc, diff);
+          }
           if (opts.witness) {
             wit_outs.push_back({cyc, b->base, rt, it2});
           }
@@ -6716,9 +7051,16 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
     }
     cvc5::Result sampled_mismatch;
     if (sample_effort && !blocking_incomplete && sampler.input_count() > 0) {
-      const auto sample_deadline = opts._deadline != std::chrono::steady_clock::time_point{}
+      // Stop sampling a little BEFORE the wall deadline: an isolated worker is
+      // SIGKILLed at that deadline (spawn_isolated_worker's backstop), and a
+      // killed worker's report is lost -- a run that checked hundreds of
+      // vectors used to come back as "0 input vectors". The margin leaves time
+      // to finish the query in flight and serialize the report.
+      const auto wall_deadline   = opts._deadline != std::chrono::steady_clock::time_point{}
                                        ? opts._deadline
                                        : query_start + std::chrono::milliseconds(budget_ms);
+      const auto report_margin   = std::chrono::milliseconds(std::clamp<long long>(budget_ms / 20, 250, 5000));
+      const auto sample_deadline = wall_deadline - report_margin;
       const auto sample_expired  = [&]() { return budget_on && std::chrono::steady_clock::now() >= sample_deadline; };
       const auto sample_check    = [&](long long cap_ms) {
         // Zero means no extra per-query cap; the total deadline still applies.
@@ -6740,7 +7082,13 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
         return cr;
       };
       sampler.set_cycles(static_cast<uint64_t>(N));
+      if (budget_on) {
+        sampler.set_deadline(sample_deadline);
+      }
       auto outcome = sampler.run(solver, bad, opts.effort, sample_check, sample_expired);
+      if (!outcome.note.empty()) {
+        res.detail += "; sampling: " + outcome.note;
+      }
       solver.setOption("tlimit-per", std::to_string(static_cast<long long>(std::max(0, opts.timeout)) * 1000));
       res.sampling = outcome.report;
       if (outcome.mismatch) {
@@ -7876,6 +8224,7 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
     penc.set_comb_boxes(comb_boxes_ptr);
     penc.set_force_multi_clock(force_multi_clock);
     penc.set_shared_bbox(&shared_bbox);
+    penc.set_box_dead_inputs(&box_dead_inputs);
     penc.set_emit_props(opts.design_assumes);
 
     // Two independent input snapshots per period (microsteps 0-1 share the
@@ -7928,7 +8277,9 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
         penc.set_box_keys(&impl_box_keys);
         penc.set_mem_keys(&impl_mem_cut_keys);
         penc.set_phase_plan(&ind_impl_plan, ms);
+        penc.set_undef_read_free(true);
         Encoded sie = penc.encode(impl, &shared, "psi" + std::to_string(si) + "_", &shared_mems);
+        penc.set_undef_read_free(false);
         if (!sre.ok || !sie.ok) {
           solver.pop();
           step_proven = false;
@@ -8152,11 +8503,13 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
           sh[k] = v;  // state committed by the earlier microsteps of THIS period
         }
         penc.set_x_dontcare(x_dc);
+        penc.set_undef_read_free(g == impl);
         penc.set_box_keys(bkeys);
         penc.set_mem_keys(g == ref ? &ref_mem_cut_keys : &impl_mem_cut_keys);
         penc.set_phase_plan(&plan, ms);
         Encoded e = penc.encode(g, &sh, std::string(pfx) + "m" + std::to_string(si) + "_", &out.mem, &out.reads);
         penc.set_x_dontcare(false);
+        penc.set_undef_read_free(false);
         if (!e.ok) {
           err = e.error;
           return false;
@@ -8380,6 +8733,7 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
   enc.set_comb_boxes(comb_boxes_ptr);
   enc.set_force_multi_clock(force_multi_clock);
   enc.set_shared_bbox(&shared_bbox);
+  enc.set_box_dead_inputs(&box_dead_inputs);
   enc.set_emit_props(opts.design_assumes);
   enc.set_x_dontcare(opts.gold_x != "zero");  // ref X = don't-care (formal.lec.gold_x)
   enc.set_box_keys(&ref_box_keys);            // per-design box correspondence
@@ -8425,7 +8779,9 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
   enc.set_box_keys(&impl_box_keys);
   enc.set_mem_keys(&impl_mem_cut_keys);
   enc.set_phase_plan(ind_impl_plan.needs_plan() ? &ind_impl_plan : nullptr, -1);
+  enc.set_undef_read_free(true);
   Encoded ie = enc.encode(impl, ind_shared[1], "", &shared_mems);
+  enc.set_undef_read_free(false);
   if (!ie.ok) {
     res.verdict      = Verdict::Undecided;
     res.unsupported  = ie.unsupported;
@@ -8542,7 +8898,9 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
         enc.set_box_keys(&impl_box_keys);
         enc.set_mem_keys(&impl_mem_cut_keys);
         enc.set_phase_plan(ind_impl_plan.needs_plan() ? &ind_impl_plan : nullptr, -1);
-        ie2      = enc.encode(impl, &side_shared[1], "", &shared_mems);
+        enc.set_undef_read_free(true);
+        ie2 = enc.encode(impl, &side_shared[1], "", &shared_mems);
+        enc.set_undef_read_free(false);
         reenc_ok = ie2.ok;
       }
       if (!reenc_ok) {

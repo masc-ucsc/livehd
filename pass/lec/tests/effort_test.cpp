@@ -69,8 +69,8 @@ TEST_F(SamplerFixture, EquivalentDesignReachesRequestedLevel) {
 // A bug only on ONE operand value (a == 0x1234): random vectors essentially
 // never hit it, the partially pinned queries let the solver find it.
 TEST_F(SamplerFixture, PartialPinningFindsRareMismatch) {
-  const auto a    = variable(16, "a");
-  const auto b    = variable(16, "b");
+  const auto a = variable(16, "a");
+  const auto b = variable(16, "b");
   sampler.add_input(a);
   sampler.add_input(b);
   const auto ref  = tm.mkTerm(Kind::BITVECTOR_ADD, {a, b});
@@ -81,6 +81,63 @@ TEST_F(SamplerFixture, PartialPinningFindsRareMismatch) {
   ASSERT_TRUE(out.mismatch);
   EXPECT_TRUE(out.result.isSat());
   EXPECT_EQ(solver.getValue(a).getBitVectorValue(16), "1234");
+  solver.pop();  // the caller owns the live mismatch model
+  EXPECT_TRUE(solver.checkSat().isSat());
+}
+
+// A fully pinned step is SIMULATED (term_sim.hpp): every free symbol gets a
+// value -- the inputs and also a power-on state symbol the old cube left free,
+// which turned each "fully pinned" query into a real search -- and no solver
+// query is issued for it. Here the free state symbol `s` is shared by both
+// sides through a definitional assertion chain, as the BMC unrolling writes it.
+TEST_F(SamplerFixture, PinnedTracesAreSimulatedWithoutSolverQueries) {
+  std::vector<cvc5::Term> diffs;
+  cvc5::Term              state = variable(32, "s0");  // power-on state: not an input
+  for (int cyc = 0; cyc < 4; ++cyc) {
+    const auto a  = variable(32, "a" + std::to_string(cyc));
+    const auto st = variable(32, "st" + std::to_string(cyc));
+    sampler.add_input(a, cyc, "a");
+    solver.assertFormula(tm.mkTerm(Kind::EQUAL, {st, tm.mkTerm(Kind::BITVECTOR_MULT, {state, a})}));
+    const auto ref  = tm.mkTerm(Kind::BITVECTOR_ADD, {st, a});
+    const auto impl = tm.mkTerm(Kind::BITVECTOR_ADD, {a, st});
+    const auto diff = tm.mkTerm(Kind::DISTINCT, {ref, impl});
+    diffs.push_back(diff);
+    sampler.add_output_diff(cyc, diff);
+    state = st;
+  }
+  sampler.set_cycles(4);
+  const auto out = sampler.run(solver, tm.mkTerm(Kind::OR, diffs), Effort::Quick);
+  EXPECT_FALSE(out.mismatch);
+  EXPECT_EQ(out.report.reached, Effort::Quick) << out.reason;
+  EXPECT_NE(out.note.find("simulated"), std::string::npos) << out.note;
+  EXPECT_LT(out.report.queries, out.report.traces) << "most steps must be simulations, not solver queries";
+}
+
+// The constants a design compares an input FIELD against bias the random
+// values: a bug behind a 32-bit opcode (one value in 2^32) is hit by a
+// simulated trace at once, and the caller's solver re-derives the mismatch
+// with every free symbol pinned so its witness path reads a live model.
+TEST_F(SamplerFixture, DecodedFieldConstantsReachARareOpcode) {
+  std::vector<cvc5::Term> diffs, hits;
+  for (int cyc = 0; cyc < 2; ++cyc) {
+    const auto inst = variable(48, "inst" + std::to_string(cyc));
+    sampler.add_input(inst, cyc, "inst");
+    const auto op   = tm.mkTerm(tm.mkOp(Kind::BITVECTOR_EXTRACT, {39, 8}), {inst});
+    const auto x    = tm.mkTerm(tm.mkOp(Kind::BITVECTOR_EXTRACT, {7, 0}), {inst});
+    const auto hit  = tm.mkTerm(Kind::EQUAL, {op, tm.mkBitVector(32, 0xC0FFEE11u)});
+    const auto ref  = tm.mkTerm(Kind::ITE, {hit, tm.mkTerm(Kind::BITVECTOR_ADD, {x, x}), x});
+    const auto impl = tm.mkTerm(Kind::ITE, {hit, tm.mkTerm(Kind::BITVECTOR_ADD, {x, tm.mkBitVector(8, 1)}), x});
+    const auto diff = tm.mkTerm(Kind::DISTINCT, {ref, impl});
+    diffs.push_back(diff);
+    hits.push_back(hit);
+    sampler.add_output_diff(cyc, diff);
+  }
+  sampler.set_cycles(2);
+  const auto out = sampler.run(solver, tm.mkTerm(Kind::OR, diffs), Effort::Test);
+  ASSERT_TRUE(out.mismatch) << out.reason << " / " << out.note;
+  EXPECT_NE(out.note.find("1 decoded input field(s)"), std::string::npos) << out.note;
+  EXPECT_TRUE(out.result.isSat());
+  EXPECT_TRUE(solver.getValue(tm.mkTerm(Kind::OR, hits)).getBooleanValue()) << "the witness takes the rare opcode";
   solver.pop();  // the caller owns the live mismatch model
   EXPECT_TRUE(solver.checkSat().isSat());
 }
@@ -98,19 +155,21 @@ TEST_F(SamplerFixture, ImpossibleAssumptionsNeverCountAsMismatch) {
 TEST_F(SamplerFixture, TimeoutStopsBeforeTheLevel) {
   const auto a = variable(8, "a");
   sampler.add_input(a);
-  const auto out = sampler.run(
-      solver, tm.mkTerm(Kind::DISTINCT, {a, a}), Effort::Long, {}, [] { return true; });
+  const auto out = sampler.run(solver, tm.mkTerm(Kind::DISTINCT, {a, a}), Effort::Long, {}, [] { return true; });
   EXPECT_EQ(out.report.queries, 0u);
   EXPECT_FALSE(out.report.passed());
   EXPECT_EQ(out.reason, "hit formal.timeout");
 }
 
 // Timeout during a state lead must not start another query or count the lead.
+// The first (simulated) trace finds the lead; the deadline passes before its
+// confirmation search starts.
 TEST_F(SamplerFixture, TimeoutBeforeLeadConfirmation) {
   const auto a = variable(8, "a");
   sampler.add_input(a);
   sampler.add_state_diff("q", 0, tm.mkTrue());
   int        checks = 0;
+  int        polls  = 0;
   const auto out    = sampler.run(
       solver,
       tm.mkFalse(),
@@ -119,8 +178,9 @@ TEST_F(SamplerFixture, TimeoutBeforeLeadConfirmation) {
         ++checks;
         return solver.checkSat();
       },
-      [&] { return checks > 0; });
-  EXPECT_EQ(checks, 1);
+      [&] { return polls++ > 0; });
+  EXPECT_EQ(checks, 0);
+  EXPECT_EQ(out.report.queries, 0u);
   EXPECT_EQ(out.report.leads, 1u);
   EXPECT_EQ(out.report.vectors, 0u);
   EXPECT_FALSE(out.report.passed());

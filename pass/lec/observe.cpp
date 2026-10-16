@@ -627,8 +627,13 @@ absl::flat_hash_map<std::string, Obs_plan> plan_observability(const Encoded& re,
     for (const auto& [k, t] : e.next_mem) {
       g.demand_all(t);
     }
-    for (const auto& [k, t] : e.next_mem_x) {
-      g.demand_all(t);
+    for (const auto& [k, x] : e.next_mem_x) {
+      g.demand_all(x.plane);
+      g.demand_all(x.epoch);
+      g.demand_all(x.fill);
+      for (const auto& w : x.words) {
+        g.demand_all(w);
+      }
     }
     for (const auto& [k, v] : e.next_read) {
       g.demand_all(v.term);
@@ -799,8 +804,13 @@ absl::flat_hash_map<std::string, Bit_set> state_bit_demand(const Encoded& e, con
   for (const auto& [k, t] : e.next_mem) {
     eng.demand_all(t);
   }
-  for (const auto& [k, t] : e.next_mem_x) {
-    eng.demand_all(t);
+  for (const auto& [k, x] : e.next_mem_x) {
+    eng.demand_all(x.plane);
+    eng.demand_all(x.epoch);
+    eng.demand_all(x.fill);
+    for (const auto& w : x.words) {
+      eng.demand_all(w);
+    }
   }
   for (const auto& [k, v] : e.next_read) {
     eng.demand_all(v.term);

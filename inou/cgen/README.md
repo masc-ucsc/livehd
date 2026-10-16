@@ -150,8 +150,8 @@ removes impossible sign/bounds guards without unrolling; unsupported or wrapping
 domains retain the general representation. Shared definitions merge their range
 requirements conservatively. The emitter shares objects across identical
 phase computations. Binding layouts salt generation reuse; the existing bounded
-workers emit these objects. Unroll-disable metadata and IR regression tests
-preserve the loop regardless of trip count. Multi-color bodies add a derived
+workers emit these objects. A native rolled-loop entry keeps unroll-disable
+metadata regardless of trip count. Multi-color bodies add a derived
 `.native-loop.llvm.o` object with its own content cache and artifact tracking;
 the original color identities and objects remain unchanged. Backend switches
 and eligibility changes remove obsolete derived objects. Stateful, nested and
@@ -160,9 +160,47 @@ observation-enabled loops still use their existing scheduling path.
 Host simulator C++ uses `-Os` for
 both backends, including Ninja, the built-in compiler, and standalone Bazel
 exports. Native LLVM objects use the `O2` module pipeline without size
-attributes, and the default (O2-equivalent) machine optimization level. Loop
-unrolling and interleaving remain disabled; native bodies are explicitly inlined
-before optimization. The optimization attributes and emitter salt participate
+attributes, and the default (O2-equivalent) machine optimization level. The
+pipeline's own unrolling heuristics and interleaving remain disabled; native
+bodies are explicitly inlined before optimization.
+
+A loop EMBEDDED in its caller's kernel (`Cgen_llvm::inline_loop`) has a
+constant trip count. When `count` trips of its body fit a budget (16,384
+compute instructions per loop -- arithmetic, compares, selects and control, not
+the packed-word loads, stores and casts of the sealed body's ABI, which inlining
+removes -- at most 256 trips, 32,768 added per kernel) the loop is marked
+`llvm.loop.unroll.full`; otherwise it keeps `llvm.loop.unroll.disable`.
+A body's own embedded loops count expanded (the `lhd-unrolled-extra` function
+attribute carries their pending growth into the enclosing body), so an outer
+loop never multiplies an inner unroll past the budget. The graph and the Slop
+code keep the loop rolled; only the native code is unrolled. Rolled, a per-bit
+loop paid a variable shift, mask and insert per lane every cycle and LLVM could
+vectorize it over a stack copy of a wide operand (store-to-load forwarding
+stalls); unrolled, every lane index is a constant. lhdtrack Pyrope over the
+equivalent Verilog, LLVM backend: br_flow_arb_rr 1.75x -> 0.96x, br_mux_bin
+1.34x -> 0.95x, br_csr_demux 1.19x -> 0.94x, br_fifo_shared_dynamic_ctrl
+1.29x -> 1.01x, br_flow_xbar_rr 1.08x -> 0.89x (mada4).
+
+Simulation never stops on a cell contract the slop backend resolves: hotmux
+controls that overlap at run time read the FIRST active arm (as Verilator does a
+`parallel_case`), and an indexed mux selector past its last arm reads 0 (two-state
+X). Both used to reach `llvm.trap` and kill the driver with SIGILL (picorv32 with
+BARREL_SHIFTER + TWO_CYCLE_ALU); lhd now names a driver's terminating signal
+instead of reporting "exited with code -1".
+
+An embedded loop's carry-in sink has two drivers, the external seed and the
+self edge from its own carry-out; the caller binds the seed (it used to take
+whichever edge sorted first, and a self edge made the seed 0: XiangShan
+RenameTableWrapper's `io_v0_old_pdest` diverged from slop). Native-object jobs
+are drained once after every module is emitted rather than per module, so a
+design whose loops are separate definitions no longer queues one object compile
+behind the previous module's (RenameTableWrapper setup 89 s -> 46 s). Each LLVM
+color reads its own members' value uses and boundary writes from per-module and
+per-color indices instead of scanning the whole plan, and per-color eligibility
+is memoized (XiangShan Rob LLVM emission 267 s -> 177 s; slop 143 s). Write-port
+guards over many memory ports are balanced OR trees (`Cgen_sim::balanced_or`):
+the left-nested chain exceeded clang's 256 bracket levels and Rob's simulator
+did not compile on either backend. The optimization attributes and emitter salt participate
 in object reuse, while host command changes invalidate compiled support objects.
 
 Arithmetic temporaries remain LLVM SSA values, so register allocation can keep
@@ -425,8 +463,16 @@ regions retain the staged protocol. Post-edge output computations remain where
 they observe a distinct state version.
 
 Compact loops do not globally disable ordering proofs for surrounding state;
-state private to a compact body retains its own schedule. Register carriers around compact
-loops retain staging to limit their live ranges.
+state private to a compact body retains its own schedule. With Slop, registers around
+compact loops retain staging to limit their live ranges through the loop adapters; the
+LLVM backend embeds a pure loop in its caller's kernel, so their in-place proof is the
+same as in a loop-free design.
+
+Color activation marks and clears store the whole 64-bit word, and a staged register
+commit copies its pending value word by word: the host compiler otherwise narrows
+`word |= 1 << k` to a byte store and copies a small Slop with one 16-byte move, and
+the next full-width read cannot be forwarded from the store buffer (a store-to-load
+interlock per executed color or commit; `ls_bad_status2.stli_other` on Zen 2).
 
 A register may overwrite Q once its last old-Q consumer has run. This proof uses
 the existing topological order and records explicit anti-dependencies; a swap

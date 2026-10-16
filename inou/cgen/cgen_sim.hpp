@@ -7,6 +7,7 @@ class Compile_workers;
 
 #include <cstdint>
 #include <functional>
+#include <future>
 #include <memory>
 #include <optional>
 #include <string>
@@ -195,6 +196,17 @@ public:
     bool                                          loaded = false;
     bool                                          dirty  = false;
     std::optional<std::vector<std::string>>       files;  // sorted regular-file basenames of odir, as of first use
+    // A module's native-object jobs, drained once EVERY module is emitted
+    // (drain_objects) instead of at the end of its own emission: modules emit
+    // one after another, so waiting per module serialized each module's
+    // slowest object compile (a design whose loops are separate definitions
+    // queued one multi-second object per loop behind the previous one).
+    struct Pending_objects {
+      std::string                           module;
+      std::optional<Gen_record>             record;  // published only if every job succeeds
+      std::vector<std::future<std::string>> jobs;
+    };
+    std::vector<Pending_objects> pending_objects;
   };
 
 private:
@@ -372,6 +384,13 @@ public:
 
   void        share_generation_index(Generation_index* index) { shared_gen_ = index; }
   static void flush_generation_index(std::string_view odir, Generation_index& index);
+  // `t0 || t1 || ...` (each term a self-contained C++ boolean) with parentheses
+  // nested O(log n) deep; "false" when empty. Generated guards over many terms
+  // must not nest one level per term (clang stops at 256).
+  static std::string balanced_or(const std::vector<std::string>& terms);
+  // Wait for every deferred object job, record the modules whose objects all
+  // compiled, and report the first failure (fatal) after draining them all.
+  static void drain_objects(Generation_index& index);
   Cgen_sim(std::string_view _odir, std::string_view _vcd, std::string_view _top, std::string_view _fakedelay,
            const livehd::sim::Color_plan* _color_plan = nullptr, bool _compact_kernel = false, bool _observation_on = false,
            bool _runtime_support_on = true, bool _slop_u = true, bool _color_dirty = false, bool _debug = false,

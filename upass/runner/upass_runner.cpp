@@ -53,6 +53,7 @@
 
 #include <algorithm>
 #include <bit>
+#include <cctype>
 #include <charconv>
 #include <chrono>
 #include <cstdlib>
@@ -76,6 +77,7 @@
 #include "hash_util.hpp"
 #include "io_port_rules.hpp"
 #include "lnast_range.hpp"
+#include "loop_index_ports.hpp"
 #include "lsp_index.hpp"
 #include "op_kind_rules.hpp"
 #include "range_bits.hpp"
@@ -10607,11 +10609,16 @@ bool written_before(const Lnast& ln, const Lnast_nid& loop, std::string_view nam
       break;  // a lambda boundary: an enclosing scope's writes are not this one's
     }
     const bool parent_keys = makes_store_keys(ln, parent);
+    // The arms of an if are ALTERNATIVES, not predecessors: in `if c { o = x }
+    // else { for … { o#[i] = … } }` the then-arm's write never reaches the
+    // else-arm's loop (comptime-folded or not), so it must not count as the
+    // value entering ordinal 0 -- the carry-in would read an undriven `o`.
+    const bool parent_if = Lnast_ntype::is_if_like(ln.get_type(parent));
     for (auto sib : ln.children(parent)) {
       if (sib == node) {
         break;  // only the siblings BEFORE this level's ancestor have run
       }
-      if (Lnast_ntype::is_func_def(ln.get_type(sib))) {
+      if (Lnast_ntype::is_func_def(ln.get_type(sib)) || (parent_if && Lnast_ntype::is_stmts(ln.get_type(sib)))) {
         continue;
       }
       if (written_outside(ln, sib, Lnast_nid{}, name, parent_keys)) {
@@ -10981,6 +10988,240 @@ bool nested_loop_domain_reads_any(const Lnast& ln, const Lnast_nid& body_stmts, 
     return false;
   };
   return walk(body_stmts);
+}
+
+// Whether `name` -- a constant inside this occurrence of the body, the index
+// of an enclosing loop that unrolls -- may become a runtime input port of the
+// lifted definition instead (so the occurrences of the body share one
+// definition). Every value computed from it (statement-order taint) may only
+// feed plain arithmetic, comparisons, bit selects/writes, sign extension, a
+// local's value and branch conditions: all of those compute the same value
+// from a runtime port. Anything that needs it at compile time -- a loop domain,
+// a generic bind or call actual, a type bound, a tuple position, an attribute,
+// a cassert -- keeps it a captured constant.
+bool unrolled_index_promotable(const Lnast& ln, const Lnast_nid& body_stmts, const std::string& name) {
+  absl::flat_hash_set<std::string> tainted{name};
+  const auto                       reads_tainted = [&](const Lnast_nid& nid) {
+    std::function<bool(const Lnast_nid&)> reads = [&](const Lnast_nid& n) {
+      if (Lnast_ntype::is_ref(ln.get_type(n)) && tainted.contains(std::string(ln.get_name(n)))) {
+        return true;
+      }
+      for (auto c : ln.children(n)) {
+        if (!Lnast_ntype::is_stmts(ln.get_type(c)) && reads(c)) {
+          return true;
+        }
+      }
+      return false;
+    };
+    return reads(nid);
+  };
+  std::function<bool(const Lnast_nid&)> walk = [&](const Lnast_nid& stmts) -> bool {
+    for (auto stmt : ln.children(stmts)) {
+      const auto t = ln.get_type(stmt);
+      if (Lnast_ntype::is_func_def(t)) {
+        continue;
+      }
+      if (Lnast_ntype::is_stmts(t)) {
+        if (!walk(stmt)) {
+          return false;
+        }
+        continue;
+      }
+      if (Lnast_ntype::is_if(t) || Lnast_ntype::is_unique_if(t)) {
+        // Conditions are plain reads (a runtime `if` is fine); arms nest.
+        for (auto c : ln.children(stmt)) {
+          if (Lnast_ntype::is_stmts(ln.get_type(c)) && !walk(c)) {
+            return false;
+          }
+        }
+        continue;
+      }
+      if (Lnast_ntype::is_cassert(t)) {
+        // A cassert's first child is its condition, not a destination: one
+        // over the index is checked per copy at compile time today.
+        for (auto c : ln.children(stmt)) {
+          if (reads_tainted(c)) {
+            return false;
+          }
+        }
+        continue;
+      }
+      const auto dst     = ln.get_first_child(stmt);
+      bool       operand = false;  // a tainted operand (children after the destination)
+      for (auto c = dst.is_invalid() ? dst : ln.get_sibling_next(dst); !c.is_invalid(); c = ln.get_sibling_next(c)) {
+        if (!Lnast_ntype::is_stmts(ln.get_type(c)) && reads_tainted(c)) {
+          operand = true;
+        }
+      }
+      bool compound = false;
+      for (auto c : ln.children(stmt)) {
+        if (Lnast_ntype::is_stmts(ln.get_type(c))) {
+          compound = true;
+          if (!walk(c)) {
+            return false;
+          }
+        }
+      }
+      if (!operand) {
+        continue;
+      }
+      if (compound) {
+        return false;  // a loop domain or another compound reads it
+      }
+      const bool value_op = Lnast_ntype::is_plus(t) || Lnast_ntype::is_minus(t) || Lnast_ntype::is_mult(t)
+                            || Lnast_ntype::is_shl(t) || Lnast_ntype::is_sra(t) || Lnast_ntype::is_bit_and(t)
+                            || Lnast_ntype::is_bit_or(t) || Lnast_ntype::is_bit_xor(t) || Lnast_ntype::is_bit_not(t)
+                            || Lnast_ntype::is_log_and(t) || Lnast_ntype::is_log_or(t) || Lnast_ntype::is_log_not(t)
+                            || Lnast_ntype::is_eq(t) || Lnast_ntype::is_ne(t) || Lnast_ntype::is_lt(t) || Lnast_ntype::is_le(t)
+                            || Lnast_ntype::is_gt(t) || Lnast_ntype::is_ge(t) || Lnast_ntype::is_get_mask(t)
+                            || Lnast_ntype::is_set_mask(t) || Lnast_ntype::is_sext(t)
+                            // a bit-select's non-literal window; a loop domain or a tuple slice
+                            // that reads the range result is rejected where it is used
+                            || Lnast_ntype::is_range(t);
+      // A whole-value store into a name (`k = i*N + j`): the name is runtime too.
+      const bool plain_store = Lnast_ntype::is_store(t) && !dst.is_invalid() && Lnast_ntype::is_ref(ln.get_type(dst))
+                               && !ln.get_sibling_next(dst).is_invalid()
+                               && ln.get_sibling_next(ln.get_sibling_next(dst)).is_invalid();
+      if ((!value_op && !plain_store) || dst.is_invalid() || !Lnast_ntype::is_ref(ln.get_type(dst))) {
+        return false;
+      }
+      tainted.insert(std::string(ln.get_name(dst)));
+    }
+    return true;
+  };
+  return walk(body_stmts);
+}
+
+// The fields a loop body reads of each candidate `name` when EVERY read is a
+// constant single-level field read -- `tuple_get(dst, ref name, const f)` (a
+// child instance's output `s.sel`) or a dotted `ref name.f` -- with `dotted`
+// set when some read used the dotted spelling. A candidate is absent from the
+// result when the body uses the value whole (a copy, a call actual, an
+// operand), reads a nested or positional field, or a nested lambda sees it:
+// then it stays one port. A field read whose value the body then INDEXES
+// (`s.arr[i]`: `tuple_get(t, s, 'arr')`, then `tuple_get(u, t, i)`, also
+// through a plain copy of `t`) is a positional read too: the field is a
+// tuple/array, and one scalar port cannot carry it. ONE walk over the body for
+// every candidate (each ref looks up the names it spells, itself and each
+// dotted prefix), so the cost is O(body), not O(candidates x body).
+absl::flat_hash_map<std::string, std::map<std::string, bool>> constant_field_reads(const Lnast&                    ln,
+                                                                                   const Lnast_nid&                body_stmts,
+                                                                                   const std::vector<std::string>& names) {
+  struct Reads {
+    std::map<std::string, bool> fields;
+    bool                        ok = true;
+  };
+  absl::flat_hash_map<std::string, Reads> cand;
+  for (const auto& n : names) {
+    cand.try_emplace(n);
+  }
+  if (cand.empty()) {
+    return {};
+  }
+  const auto is_ident = [](std::string_view s) {
+    if (s.empty() || !(std::isalpha(static_cast<unsigned char>(s.front())) || s.front() == '_')) {
+      return false;
+    }
+    return std::ranges::all_of(s, [](char c) { return std::isalnum(static_cast<unsigned char>(c)) || c == '_'; });
+  };
+  // f(candidate, field): `nm` IS the candidate (field empty), or is the dotted
+  // path `<candidate>.<field>`.
+  const auto for_each_owner = [&](std::string_view nm, const auto& f) {
+    if (const auto it = cand.find(nm); it != cand.end()) {
+      f(it->second, std::string_view{});
+    }
+    for (auto p = nm.find('.'); p != std::string_view::npos; p = nm.find('.', p + 1)) {
+      if (const auto it = cand.find(nm.substr(0, p)); it != cand.end()) {
+        f(it->second, nm.substr(p + 1));
+      }
+    }
+  };
+  // The value of a field read (its tuple_get destination, and plain copies of
+  // it) -> the candidate it was read from. `cand` takes no insert during the
+  // walk, so the pointers stay valid.
+  absl::flat_hash_map<std::string, Reads*> field_values;
+  // `c` (a child of `nid`) is the base an index/field read or a loop domain reads.
+  const auto indexed = [&](const Lnast_nid& nid, const Lnast_nid& c) {
+    const auto pt = ln.get_type(nid);
+    return (Lnast_ntype::is_tuple_get(pt) || Lnast_ntype::is_for(pt)) && ln.get_sibling_next(ln.get_first_child(nid)) == c;
+  };
+  // `c` is the value of a plain copy `store(dst, c)`: the ref it binds.
+  const auto copied_to = [&](const Lnast_nid& nid, const Lnast_nid& c) -> std::string_view {
+    const auto dst = ln.get_first_child(nid);
+    if (!Lnast_ntype::is_store(ln.get_type(nid)) || !Lnast_ntype::is_ref(ln.get_type(dst)) || ln.get_sibling_next(dst) != c
+        || !ln.get_sibling_next(c).is_invalid()) {
+      return {};
+    }
+    return ln.get_name(dst);
+  };
+  std::function<void(const Lnast_nid&)> walk = [&](const Lnast_nid& nid) {
+    for (auto c : ln.children(nid)) {
+      const auto t = ln.get_type(c);
+      if (Lnast_ntype::is_func_def(t)) {
+        // A lambda capturing the base would need the whole value.
+        for (const auto& node : ln.depth_preorder(c)) {
+          const auto n = Lnast_nid(node);
+          if (Lnast_ntype::is_ref(ln.get_type(n))) {
+            for_each_owner(ln.get_name(n), [](Reads& r, std::string_view) { r.ok = false; });
+          }
+        }
+        continue;
+      }
+      if (Lnast_ntype::is_ref(t)) {
+        if (const auto fv = field_values.find(ln.get_name(c)); fv != field_values.end()) {
+          if (indexed(nid, c)) {
+            fv->second->ok = false;
+          } else if (const auto to = copied_to(nid, c); !to.empty()) {
+            auto* owner = fv->second;
+            field_values.insert_or_assign(std::string(to), owner);
+          }
+        }
+        for_each_owner(ln.get_name(c), [&](Reads& r, std::string_view field) {
+          if (!r.ok) {
+            return;
+          }
+          if (field.empty()) {
+            // Only as the base of `tuple_get(dst, base, const field)`.
+            const auto dst = ln.get_first_child(nid);
+            const auto fld = ln.get_sibling_next(c);
+            if (!Lnast_ntype::is_tuple_get(ln.get_type(nid)) || ln.get_sibling_next(dst) != c || fld.is_invalid()
+                || !Lnast_ntype::is_const(ln.get_type(fld)) || !ln.get_sibling_next(fld).is_invalid()
+                || !is_ident(ln.get_name(fld))) {
+              r.ok = false;
+              return;
+            }
+            r.fields.try_emplace(std::string(ln.get_name(fld)), false);
+            if (Lnast_ntype::is_ref(ln.get_type(dst))) {
+              field_values.insert_or_assign(std::string(ln.get_name(dst)), &r);
+            }
+            return;
+          }
+          // A dotted WRITE target would be a carry, never an invariant read;
+          // an indexed one (`s.arr[i]` spelled through the dotted name) is a
+          // positional read.
+          if (!is_ident(field) || ln.get_first_child(nid) == c || indexed(nid, c)) {
+            r.ok = false;
+            return;
+          }
+          r.fields[std::string(field)] = true;
+          // A copy of the dotted field (`store(t, ref s.arr)`) is its value too.
+          if (const auto to = copied_to(nid, c); !to.empty()) {
+            field_values.insert_or_assign(std::string(to), &r);
+          }
+        });
+        continue;
+      }
+      walk(c);
+    }
+  };
+  walk(body_stmts);
+  absl::flat_hash_map<std::string, std::map<std::string, bool>> out;
+  for (auto& [n, r] : cand) {
+    if (r.ok && !r.fields.empty()) {
+      out.emplace(n, std::move(r.fields));
+    }
+  }
+  return out;
 }
 
 bool later_loop_domain_reads_any(const Lnast& ln, const Lnast_nid& body_stmts, const std::vector<std::string>& names) {
@@ -11612,7 +11853,9 @@ private:
         }
         continue;
       }
-      if (Lnast_ntype::is_func_break(t) || Lnast_ntype::is_func_continue(t)) {
+      if (Lnast_ntype::is_func_break(t) || Lnast_ntype::is_func_continue(t) || Lnast_ntype::is_func_return(t)) {
+        // A `return` leaves the loop too: what the carries hold there is a
+        // value the loop's results can take, like a break's.
         exits_.push_back(env);
         continue;
       }
@@ -11779,6 +12022,14 @@ private:
           env.insert_or_assign(dst, it->second);
           continue;
         }
+        // A constant field of a tuple (`s.sel` of a child instance): the value
+        // seeded under its dotted name (plan_loop_roll's tuple invariants).
+        if (!arr.empty() && Lnast_ntype::is_const(ln_.get_type(ops[1]))) {
+          if (const auto it = env.find(absl::StrCat(ref_name(ops[0]), ".", ln_.get_name(ops[1]))); it != env.end()) {
+            env.insert_or_assign(dst, it->second);
+            continue;
+          }
+        }
       }
       if (Lnast::is_tmp(dst) && (Lnast_ntype::is_plus(t) || Lnast_ntype::is_minus(t))) {
         bound_defs_.insert_or_assign(dst, stmt);
@@ -11792,16 +12043,19 @@ private:
 struct Carry_ranges {
   bool                                          ok = false;  // every carry evaluated (possibly to unbounded)
   absl::flat_hash_map<std::string, Lnast_range> carry_in;    // the union of the values entering an iteration
+  absl::flat_hash_map<std::string, Lnast_range> carry_out;   // every value the loop's result can take
   bool rolled_stricter = false;  // one walk over carry_in rejects a typed write no single iteration does
 };
 
 // Iterate the body over its carries: exactly, one index value per iteration,
 // for a short loop; for a long one, the whole index domain at once until the
-// carry unions stop growing (or give up).
+// carry unions stop growing (or give up). `early_exit`: the body has a
+// break/continue/return, so the loop may leave after ANY iteration (at any
+// exit point in it), not only after the last one.
 Carry_ranges eval_carry_ranges(const Lnast& ln, const Lnast_nid& body, const std::string& ivar, int64_t first, int64_t step,
                                uint64_t count, const Loop_range_eval::Env& base, const Loop_range_eval::Env& carry_init,
                                const Loop_range_eval::Env& typed, const Loop_range_eval::Env& elem_typed,
-                               const Loop_range_eval::Callee_out& callee_out) {
+                               const Loop_range_eval::Callee_out& callee_out, bool early_exit) {
   Carry_ranges       out;
   Loop_range_eval    per_iter(ln, typed, elem_typed, callee_out);
   const int64_t      last    = static_cast<int64_t>(static_cast<__int128>(first) + static_cast<__int128>(count - 1) * step);
@@ -11826,6 +12080,11 @@ Carry_ranges eval_carry_ranges(const Lnast& ln, const Lnast_nid& body, const std
     }
   };
   u = carry_init;
+  // Exact mode with an early exit: the join of EVERY iteration's carry-out
+  // (each already joins the values at that iteration's exit points, see
+  // Loop_range_eval::run). A `break` in iteration k ends the loop with
+  // iteration k's value, so the last iteration's carry-out alone is no bound.
+  Loop_range_eval::Env all_out;
   if (count <= kExactIterations) {
     for (uint64_t k = 0; k < count; ++k) {
       join_in(current);
@@ -11840,6 +12099,14 @@ Carry_ranges eval_carry_ranges(const Lnast& ln, const Lnast_nid& body, const std
         return out;
       }
       carry_out(env);
+      if (early_exit) {
+        for (const auto& [c, r] : current) {
+          const auto [it, fresh] = all_out.try_emplace(c, r);
+          if (!fresh) {
+            it->second = Loop_range_eval::join(it->second, r);
+          }
+        }
+      }
     }
   } else {
     // Every iteration's carry-in is some earlier iteration's carry-out.
@@ -11872,7 +12139,11 @@ Carry_ranges eval_carry_ranges(const Lnast& ln, const Lnast_nid& body, const std
     return out;
   }
   out.rolled_stricter = std::ranges::any_of(rolled.overflow, [&](const Lnast_nid& n) { return !per_iter.overflow.contains(n); });
-  out.ok              = true;
+  // Exact: the last iteration's carry-out, or with an early exit the join of
+  // every iteration's (all_out). Converged: one walk over every iteration's
+  // carry-in (exit points joined), which covers every iteration's carry-out.
+  out.carry_out = early_exit && count <= kExactIterations ? std::move(all_out) : current;
+  out.ok        = true;
   return out;
 }
 
@@ -12000,6 +12271,89 @@ bool uPass_runner::plan_loop_roll(const Lnast_nid& body_stmts, const std::string
       out.invariants.emplace_back(n);
     }
   }
+  // A TUPLE-valued invariant the body reads only through constant fields --
+  // `s.sel#[i]` of a child instance `const s = sub(..)`, `t.a` of a runtime
+  // tuple local -- has no scalar type for one port (a single-output handle
+  // typed as its output left `s.sel` unresolved inside the lifted body; a
+  // multi-output one declined the roll). Each field it reads becomes its own
+  // invariant port, or a captured constant, exactly as if the source hoisted
+  // `const s_sel = s.sel` in front of the loop (Loop_roll_plan::Tuple_field).
+  absl::flat_hash_map<std::string, std::string> field_paths;  // field port -> "<actual>.<field>"
+  std::vector<std::string>                      tuple_bases;  // still runtime in the body (domain/ring checks)
+  {
+    std::vector<std::string> kept;
+    const auto               field_reads = constant_field_reads(ln, body_stmts, out.invariants);
+    for (auto& n : out.invariants) {
+      const auto fields = field_reads.find(n);
+      if (fields == field_reads.end()) {
+        kept.emplace_back(std::move(n));
+        continue;
+      }
+      const auto&                             actual = out.actual_names.at(n);
+      std::vector<Loop_roll_plan::Tuple_field> entries;
+      bool                                     clash = false;
+      for (const auto& [field, dotted] : fields->second) {
+        const auto path = absl::StrCat(actual, ".", field);
+        if (auto value = symbol_table_.known_const_scalar(path)) {
+          entries.push_back(Loop_roll_plan::Tuple_field{.field = field, .value = *value, .dotted = dotted});
+          continue;
+        }
+        auto port = absl::StrCat(n, "__", field);
+        if (read.contains(port) || written.contains(port) || declared.contains(port) || port == ivar
+            || out.actual_names.contains(port)) {
+          clash = true;
+          break;
+        }
+        entries.push_back(Loop_roll_plan::Tuple_field{.field = field, .port = std::move(port), .dotted = dotted});
+      }
+      if (clash) {
+        kept.emplace_back(std::move(n));
+        continue;
+      }
+      for (const auto& e : entries) {
+        if (!e.port.empty()) {
+          out.actual_names.emplace(e.port, absl::StrCat(actual, ".", e.field));
+          field_paths.emplace(e.port, absl::StrCat(actual, ".", e.field));
+          kept.emplace_back(e.port);
+        }
+      }
+      tuple_bases.emplace_back(n);
+      out.tuple_invariants.emplace_back(std::move(n), std::move(entries));
+    }
+    out.invariants = std::move(kept);
+    std::ranges::sort(out.tuple_invariants, {}, &std::pair<std::string, std::vector<Loop_roll_plan::Tuple_field>>::first);
+  }
+  // An invariant that is a loop-index port of the definition being walked (an
+  // enclosing rolled loop's index) is one per occurrence here too.
+  for (const auto& n : out.invariants) {
+    if (upass::is_loop_index_port(ln, out.actual_names.at(n))) {
+      out.index_ports.insert(n);
+    }
+  }
+  // The index of an enclosing loop that UNROLLS is a constant in each copy of
+  // this body, so every copy would lift its own definition (`for j in
+  // (i + 1)..<N` inside `for i` rolls N times). Pass it as an input instead,
+  // when nothing in the body needs it at compile time, and the copies share
+  // one definition (lift_or_share_loop); the per-copy bound is the instance's
+  // loop descriptor. Its port and range span the unrolled loop's whole domain.
+  absl::flat_hash_map<std::string, std::pair<int64_t, int64_t>> promoted;
+  if (!unroll_indices_.empty()) {
+    std::vector<std::pair<std::string, Dlop>> kept;
+    for (auto& [n, value] : out.constants) {
+      const auto& actual = out.actual_names.at(n);
+      const auto  it = std::find_if(unroll_indices_.rbegin(), unroll_indices_.rend(), [&](const Unroll_index& u) { return u.name == actual; });
+      if (it == unroll_indices_.rend() || !value.is_integer() || value.has_unknowns() || !value.is_just_i64()
+          || !unrolled_index_promotable(ln, body_stmts, n)) {
+        kept.emplace_back(n, std::move(value));
+        continue;
+      }
+      promoted.emplace(n, std::pair{it->lo, it->hi});
+      out.invariants.emplace_back(n);
+      out.index_ports.insert(n);
+      out.promoted.emplace_back(n, std::move(value));
+    }
+    out.constants = std::move(kept);
+  }
   std::ranges::sort(out.constants, {}, &std::pair<std::string, Dlop>::first);
   // Deterministic port order: the lifted definition's interface must not depend
   // on hash iteration order, or two compiles of the same source disagree.
@@ -12083,6 +12437,7 @@ bool uPass_runner::plan_loop_roll(const Lnast_nid& body_stmts, const std::string
     }
     auto seeds = out.invariants;
     seeds.insert(seeds.end(), out.carries.begin(), out.carries.end());
+    seeds.insert(seeds.end(), tuple_bases.begin(), tuple_bases.end());
     if (loop_output_rings_back(deps, facts.wires, seeds, produced)) {
       return refuse("a value the loop produces reaches its own input through a wire");
     }
@@ -12096,6 +12451,7 @@ bool uPass_runner::plan_loop_roll(const Lnast_nid& body_stmts, const std::string
     std::vector<std::string> runtime_in_body = produced;
     runtime_in_body.emplace_back(ivar);
     runtime_in_body.insert(runtime_in_body.end(), out.invariants.begin(), out.invariants.end());
+    runtime_in_body.insert(runtime_in_body.end(), tuple_bases.begin(), tuple_bases.end());
     if (nested_loop_domain_reads_any(ln, body_stmts, runtime_in_body)) {
       return refuse(
           "a nested loop domain, a generic `<...>` bind or an integer type bound in the body reads the index, a carry or "
@@ -12170,6 +12526,21 @@ bool uPass_runner::plan_loop_roll(const Lnast_nid& body_stmts, const std::string
     //   declare(Word, prim_type_int(4095,0), type)
     // Resolve that chain to a concrete boundary instead of copying `Word`
     // into the separately compiled lifted module.
+    //
+    // Only declarations the loop can SEE count: never one inside an `if` arm
+    // that does not enclose the loop -- the other arm of the loop's own `if`
+    // (the dead arm of a comptime-folded `if cfg.x { … } else { <loop> }`, which
+    // must behave like the loop written without the `if`), or any arm of an
+    // unrelated `if`. A by-name scan found `const next_wins:U16` in the dead
+    // arm and rolled the live arm's untyped `mut next_wins` loop.
+    absl::flat_hash_set<Lnast_nid> loop_path;  // the loop and its ancestors
+    for (auto p = loop_nid; !p.is_invalid(); p = ln.get_parent(p)) {
+      loop_path.insert(p);
+    }
+    const auto hidden_arm = [&](const Lnast& tree, const Lnast_nid& parent, const Lnast_nid& child) {
+      return &tree == &ln && Lnast_ntype::is_if_like(tree.get_type(parent)) && Lnast_ntype::is_stmts(tree.get_type(child))
+             && !loop_path.contains(child);
+    };
     const auto resolve_decl_in = [&](const Lnast& tree, std::string_view first_name) {
       absl::flat_hash_set<std::string>      resolving;
       std::function<bool(std::string_view)> resolve_decl = [&](std::string_view wanted) {
@@ -12284,7 +12655,7 @@ bool uPass_runner::plan_loop_roll(const Lnast_nid& body_stmts, const std::string
             }
           }
           for (auto c : tree.children(nid)) {
-            if (!Lnast_ntype::is_func_def(tree.get_type(c)) && scan(c)) {
+            if (!Lnast_ntype::is_func_def(tree.get_type(c)) && !hidden_arm(tree, nid, c) && scan(c)) {
               return true;
             }
           }
@@ -12315,7 +12686,7 @@ bool uPass_runner::plan_loop_roll(const Lnast_nid& body_stmts, const std::string
         }
       }
       for (auto child : ln.children(nid)) {
-        if (!Lnast_ntype::is_func_def(ln.get_type(child))) {
+        if (!Lnast_ntype::is_func_def(ln.get_type(child)) && !hidden_arm(ln, nid, child)) {
           find_nominal(child);
         }
       }
@@ -12393,7 +12764,61 @@ bool uPass_runner::plan_loop_roll(const Lnast_nid& body_stmts, const std::string
     }
     out.types[n] = sp;
   }
+  // Two's-complement width, sign bit included, of a value in [lo, hi]: the
+  // signed storage of a loop-index port (see the index port below).
+  const auto signed_domain = [](int64_t dom_lo, int64_t dom_hi) {
+    const auto sbits = [](int64_t v) {
+      int b = 1;
+      if (v > 0) {
+        for (; v != 0; v >>= 1) {
+          ++b;
+        }
+      } else if (v < 0) {
+        b = 2;
+        while (b < 64 && v < -(static_cast<int64_t>(1) << (b - 1))) {
+          ++b;
+        }
+      }
+      return b;
+    };
+    const int w = std::max(sbits(dom_lo), sbits(dom_hi));
+    return Spec_port{.inject = true, .max = upass::signed_max_from_bits(w), .min = upass::signed_min_from_bits(w)};
+  };
   for (const auto& n : out.invariants) {
+    if (const auto pit = promoted.find(n); pit != promoted.end()) {
+      out.types[n] = signed_domain(pit->second.first, pit->second.second);
+      continue;
+    }
+    if (const auto fit = field_paths.find(n); fit != field_paths.end()) {
+      // A field port: the declared facts of that field (an instance output's
+      // port type), else its value envelope where the loop starts.
+      Spec_port  sp;
+      const auto f = upass::decl_facts::lookup_operand(symbol_table_, lm->get_lnast().get(), fit->second);
+      if (f && f->kind == upass::decl_facts::Num::boolean) {
+        sp = Spec_port{.inject = true, .kind = Io_kind::boolean};
+      } else if (f && f->range_max && f->range_min) {
+        sp = Spec_port{.inject = true, .max = f->range_max, .min = f->range_min};
+      } else if (const auto* r = symbol_table_.sub_output_range(fit->second)) {
+        sp = Spec_port{.inject = true, .max = r->second, .min = r->first};
+      } else if (const auto dot = fit->second.rfind('.'); dot != std::string::npos) {
+        if (auto bundle = symbol_table_.get_bundle(fit->second.substr(0, dot))) {
+          const auto& value = bundle->get_entry(bundle_path::of_string(std::string_view(fit->second).substr(dot + 1)));
+          if (value.bw_max.is_integer() && value.bw_min.is_integer()) {
+            sp = Spec_port{.inject = true, .max = value.bw_max, .min = value.bw_min};
+          }
+        }
+      }
+      if (!sp.inject) {
+        if (const auto r = value_range_of(Lnast_node::create_ref(fit->second)); r.bounded()) {
+          sp = Spec_port{.inject = true, .max = *r.max, .min = *r.min};
+        }
+      }
+      if (!sp.inject) {
+        return refuse(std::format("loop-invariant field `{}` has no inferred type", fit->second));
+      }
+      out.types[n] = sp;
+      continue;
+    }
     Spec_port sp;
     if (!type_of(n, sp) || half_open(sp)) {
       // Unlike a carry, an invariant cannot widen while this loop executes.
@@ -12484,10 +12909,37 @@ bool uPass_runner::plan_loop_roll(const Lnast_nid& body_stmts, const std::string
       }
     }
     for (const auto& n : out.invariants) {
-      const auto r = entry_range(n);
+      // A promoted unrolled index takes every value of its loop's domain in
+      // the definition the copies share, not just this copy's.
+      const auto pit = promoted.find(n);
+      const auto r   = pit != promoted.end()
+                           ? Lnast_range::constant(pit->second.first).join(Lnast_range::constant(pit->second.second))
+                           : entry_range(n);
       base.emplace(n, r);
       if (!r.is_unbounded()) {
         out.invariant_ranges.emplace(n, std::pair{r.min, r.max});
+      }
+    }
+    // A tuple invariant's fields (Loop_roll_plan::Tuple_field): the body walked
+    // here still reads them as `tuple_get(d, s, 'f')` or `ref s.f`, so seed the
+    // dotted name `s.f` (Loop_range_eval resolves both spellings through it)
+    // with the field port's range, or its captured constant -- what the
+    // lifted body's port will hold, exactly as a plain invariant is seeded.
+    // Unseeded, every value computed from a field was unbounded here while the
+    // lifted body judged it against the port's range: the carries went
+    // unpublished and the one walk was stricter than any iteration
+    // (`t = t + s.neg` into an S8 rolled, then failed to compile).
+    for (const auto& [tuple_base, fields] : out.tuple_invariants) {
+      for (const auto& f : fields) {
+        auto r = Lnast_range::make_unbounded();
+        if (f.value) {
+          if (f.value->is_integer() && !f.value->has_unknowns() && f.value->get_signed_bits() <= 62) {
+            r = Lnast_range::constant(f.value->to_just_i64());
+          }
+        } else if (const auto it = base.find(f.port); it != base.end()) {
+          r = it->second;
+        }
+        base.insert_or_assign(absl::StrCat(tuple_base, ".", f.field), r);
       }
     }
     Loop_range_eval::Env carry_init;
@@ -12512,7 +12964,8 @@ bool uPass_runner::plan_loop_roll(const Lnast_nid& body_stmts, const std::string
       }
       return std::nullopt;
     };
-    const auto cr = eval_carry_ranges(ln, body_stmts, ivar, lo, step, count, base, carry_init, typed, elem_typed, callee_out);
+    const auto cr
+        = eval_carry_ranges(ln, body_stmts, ivar, lo, step, count, base, carry_init, typed, elem_typed, callee_out, out.has_loop_control);
     if (!out.has_loop_control) {
       if (cr.ok && cr.rolled_stricter) {
         return refuse("one walk of the lifted body would judge a typed write stricter than every iteration does");
@@ -12527,6 +12980,13 @@ bool uPass_runner::plan_loop_roll(const Lnast_nid& body_stmts, const std::string
         const auto s = t == typed.end() ? r : r.meet(t->second);
         if (!s.is_unbounded()) {
           out.carry_in_ranges.emplace(c, std::pair{s.min, s.max});
+        }
+      }
+      for (const auto& [c, r] : cr.carry_out) {
+        const auto t = typed.find(c);
+        const auto s = t == typed.end() ? r : r.meet(t->second);
+        if (!s.is_unbounded()) {
+          out.carry_out_ranges.emplace(c, std::pair{s.min, s.max});
         }
       }
     }
@@ -12621,6 +13081,13 @@ std::shared_ptr<Lnast> uPass_runner::lift_loop_body(const Lnast_nid& body_stmts,
   // window (`[-4, 3]`) and report a negative array index or shift amount.
   for (const auto& [n, r] : plan.invariant_ranges) {
     body->bw_meta().ranges[n] = BitwidthEntry{.min = r.first, .max = r.second, .unbounded = false};
+  }
+  // The index and every invariant that is one per loop occurrence: a bit
+  // position computed from these alone is constant once the loop is expanded
+  // (upass.tolg lowers such a bit write so it folds; loop_index_ports.hpp).
+  upass::mark_loop_index_port(*body, plan.ivar);
+  for (const auto& n : plan.index_ports) {
+    upass::mark_loop_index_port(*body, n);
   }
 
   // One io port declaration: store(ref(name), const(nil), <type>) [+ stages].
@@ -12756,6 +13223,90 @@ std::shared_ptr<Lnast> uPass_runner::lift_loop_body(const Lnast_nid& body_stmts,
       body->set_srcid(to, body->source_locator().import_from(src->source_locator(), id));
     }
   };
+  // A tuple invariant's field reads (Loop_roll_plan::Tuple_field) read the
+  // field's own port, or its captured constant: `tuple_get(d, s, 'sel')`
+  // becomes `store(d, s__sel)` and a dotted `ref s.sel` becomes `ref s__sel`,
+  // the body the source would have with `const s__sel = s.sel` hoisted. A
+  // nested loop then sees a typed port, not a tuple it would have to type.
+  // One pass marks the statements that hold such a read (and their
+  // ancestors); everything else is copied verbatim.
+  absl::flat_hash_map<std::string, absl::flat_hash_map<std::string, const Loop_roll_plan::Tuple_field*>> tuple_fields;
+  for (const auto& [base, fields] : plan.tuple_invariants) {
+    for (const auto& f : fields) {
+      tuple_fields[base][f.field] = &f;
+    }
+  }
+  const auto field_of_ref = [&](std::string_view nm) -> const Loop_roll_plan::Tuple_field* {
+    const auto dot = nm.find('.');
+    if (dot == std::string_view::npos) {
+      return nullptr;
+    }
+    const auto b = tuple_fields.find(nm.substr(0, dot));
+    if (b == tuple_fields.end()) {
+      return nullptr;
+    }
+    const auto f = b->second.find(nm.substr(dot + 1));
+    return f == b->second.end() ? nullptr : f->second;
+  };
+  const auto field_of_get = [&](const Lnast_nid& n) -> const Loop_roll_plan::Tuple_field* {
+    const auto dst   = src->get_first_child(n);
+    const auto base  = dst.is_invalid() ? dst : src->get_sibling_next(dst);
+    const auto field = base.is_invalid() ? base : src->get_sibling_next(base);
+    if (field.is_invalid() || !Lnast_ntype::is_ref(src->get_type(base)) || !Lnast_ntype::is_const(src->get_type(field))
+        || !src->get_sibling_next(field).is_invalid()) {
+      return nullptr;
+    }
+    const auto b = tuple_fields.find(src->get_name(base));
+    if (b == tuple_fields.end()) {
+      return nullptr;
+    }
+    const auto f = b->second.find(src->get_name(field));
+    return f == b->second.end() ? nullptr : f->second;
+  };
+  const auto field_value = [](const Loop_roll_plan::Tuple_field& f) {
+    return f.value ? Lnast_node::create_const(f.value->to_pyrope()) : Lnast_node::create_ref(f.port);
+  };
+  absl::flat_hash_set<Lnast_nid> field_dirty;  // a field read at or below
+  if (!tuple_fields.empty()) {
+    for (const auto& node : src->depth_preorder(body_stmts)) {
+      const auto n = Lnast_nid(node);
+      const auto t = src->get_type(n);
+      if ((Lnast_ntype::is_ref(t) && field_of_ref(src->get_name(n)) != nullptr)
+          || (Lnast_ntype::is_tuple_get(t) && field_of_get(n) != nullptr)) {
+        for (auto p = n; !p.is_invalid() && p != body_stmts && field_dirty.insert(p).second; p = src->get_parent(p)) {
+        }
+      }
+    }
+  }
+  std::function<void(const Lnast_nid&, const Lnast_nid&)> copy_body = [&](const Lnast_nid& from, const Lnast_nid& to) {
+    if (!field_dirty.contains(from)) {
+      copy_subtree_into(src, from, body, to, nullptr);
+      return;
+    }
+    const auto t = src->get_type(from);
+    if (Lnast_ntype::is_ref(t)) {
+      body->add_child(to, field_value(*field_of_ref(src->get_name(from))));
+      return;
+    }
+    if (const auto* f = Lnast_ntype::is_tuple_get(t) ? field_of_get(from) : nullptr) {
+      auto st = body->add_child(to, Lnast_ntype::create_store());
+      if (const auto id = src->get_srcid(from); id != hhds::SourceId_invalid) {
+        body->set_srcid(st, body->source_locator().import_from(src->source_locator(), id));
+      }
+      copy_subtree_into(src, src->get_first_child(from), body, st, nullptr);
+      body->add_child(st, field_value(*f));
+      return;
+    }
+    auto n = body->add_child(to, t);
+    if (Lnast::srcid_carries(t)) {
+      if (const auto id = src->get_srcid(from); id != hhds::SourceId_invalid) {
+        body->set_srcid(n, body->source_locator().import_from(src->source_locator(), id));
+      }
+    }
+    for (auto c : src->children(from)) {
+      copy_body(c, n);
+    }
+  };
   const auto guarded_parent = [&](const Lnast_nid& parent, const Lnast_nid& anchor) {
     auto guard = body->add_child(parent, Lnast_ntype::create_if());
     copy_srcid(anchor, guard);
@@ -12781,7 +13332,7 @@ std::shared_ptr<Lnast> uPass_runner::lift_loop_body(const Lnast_nid& body_stmts,
                              || Lnast_ntype::is_while(type) || Lnast_ntype::is_func_break(type)
                              || Lnast_ntype::is_func_continue(type) || Lnast_ntype::is_func_return(type);
     if (!needs_guard) {
-      copy_subtree_into(src, source_stmt, body, target_stmts, nullptr);
+      copy_body(source_stmt, target_stmts);
       return;
     }
     auto dst = guarded_parent(target_stmts, source_stmt);
@@ -12807,7 +13358,7 @@ std::shared_ptr<Lnast> uPass_runner::lift_loop_body(const Lnast_nid& body_stmts,
           copy_srcid(c, copied_arm);
           copy_controlled_stmts(c, copied_arm);
         } else {
-          copy_subtree_into(src, c, body, copied_if, nullptr);
+          copy_body(c, copied_if);
         }
       }
       return;
@@ -12815,7 +13366,7 @@ std::shared_ptr<Lnast> uPass_runner::lift_loop_body(const Lnast_nid& body_stmts,
     // A nested loop owns its own break/continue. Treat the whole node as one
     // guarded statement; its runner invocation will lower its control at the
     // inner loop boundary rather than stealing it for this loop.
-    copy_subtree_into(src, source_stmt, body, dst, nullptr);
+    copy_body(source_stmt, dst);
   };
 
   if (plan.has_loop_control) {
@@ -12824,7 +13375,7 @@ std::shared_ptr<Lnast> uPass_runner::lift_loop_body(const Lnast_nid& body_stmts,
     // `for` is an SSA scope barrier, so its names are raw source names and the
     // port names above were chosen to match them.
     for (auto c : src->children(body_stmts)) {
-      copy_subtree_into(src, c, body, stmts, nullptr);
+      copy_body(c, stmts);
     }
   }
 
@@ -12939,8 +13490,176 @@ std::shared_ptr<Lnast> uPass_runner::lift_loop_body(const Lnast_nid& body_stmts,
       ranges.erase(it);
       ranges.insert_or_assign(to, r);
     }
+    if (upass::is_loop_index_port(*body, from)) {
+      ranges.erase(upass::loop_index_key(from));
+      upass::mark_loop_index_port(*body, to);
+    }
   }
   return body;
+}
+
+namespace {
+// Every range `outer` publishes also bounds `inner` (an unbounded entry, i.e.
+// a missing one, admits anything).
+bool ranges_within(const absl::flat_hash_map<std::string, std::pair<int64_t, int64_t>>& inner,
+                   const absl::flat_hash_map<std::string, std::pair<int64_t, int64_t>>& outer) {
+  for (const auto& [n, r] : outer) {
+    const auto it = inner.find(n);
+    if (it == inner.end() || it->second.first < r.first || it->second.second > r.second) {
+      return false;
+    }
+  }
+  return true;
+}
+}  // namespace
+
+void uPass_runner::lift_or_share_loop(const Lnast_nid& body_stmts, Loop_roll_plan& plan) {
+  // The part of a plan that shapes the lifted definition, apart from the
+  // index domain and the value ranges (compared by containment below): two
+  // occurrences of one source body with the same signature lift the same
+  // definition.
+  const auto signature_of = [](const Loop_roll_plan& p) {
+    const auto port = [&](const std::string& n) {
+      const auto it = p.types.find(n);
+      if (it == p.types.end()) {
+        return std::format("{}:?", n);
+      }
+      const auto& t = it->second;
+      return std::format("{}:{}/{}/{}/{}/{}/{}",
+                         n,
+                         t.inject,
+                         static_cast<int>(t.kind),
+                         t.max ? t.max->to_pyrope() : std::string("-"),
+                         t.min ? t.min->to_pyrope() : std::string("-"),
+                         t.type_name,
+                         t.array_size);
+    };
+    std::string sig = std::format("{}|{}|{}", p.ivar, p.step, p.has_loop_control);
+    for (const auto& [n, v] : p.constants) {
+      sig += std::format("|c {}={}", n, v.to_pyrope());
+    }
+    for (const auto& n : p.invariants) {
+      sig += "|i " + port(n);
+    }
+    for (const auto& n : p.carries) {
+      sig += "|r " + port(n) + (p.registers.contains(n) ? "@" : "");
+    }
+    for (const auto& n : p.finals) {
+      sig += "|f " + port(n);
+    }
+    std::vector<std::string> idx(p.index_ports.begin(), p.index_ports.end());
+    std::ranges::sort(idx);
+    for (const auto& n : idx) {
+      sig += "|x " + n;
+    }
+    for (const auto& [base, fields] : p.tuple_invariants) {
+      sig += "|t " + base;
+      for (const auto& f : fields) {
+        sig += std::format(",{}={}", f.field, f.value ? f.value->to_pyrope() : f.port);
+      }
+    }
+    return sig;
+  };
+  const auto sig = signature_of(plan);
+
+  const auto last = static_cast<int64_t>(static_cast<__int128>(plan.first) + static_cast<__int128>(plan.count - 1) * plan.step);
+  const auto lo   = std::min(plan.first, last);
+  const auto hi   = std::max(plan.first, last);
+  const auto key  = std::format("{}|{}|{}|{}",
+                               lm->outlining_owner(),
+                               static_cast<const void*>(lm->get_lnast().get()),
+                               body_stmts.get_debug_nid(),
+                               sig);
+  plan.inst = std::format("u_loop_{}", roll_seq_);
+  // The lifted body's index port and range cover the domain it was lifted for
+  // and the carry/invariant ranges seed its analysis: an occurrence whose
+  // domain and ranges lie inside those computes, iteration by iteration, what
+  // its own definition would, so it instantiates that definition (with its
+  // own first/count descriptor).
+  if (const auto it = rolled_loop_defs_.find(key); it != rolled_loop_defs_.end()) {
+    auto&      def   = it->second;
+    const bool fits  = lo >= def.lo && hi <= def.hi && ranges_within(plan.carry_in_ranges, def.plan.carry_in_ranges)
+                      && ranges_within(plan.invariant_ranges, def.plan.invariant_ranges);
+    // A domain outside the definition's (`for j in 0..<i` grows with `i`):
+    // widen the definition to the hull of both when the hull is a domain this
+    // body rolls over with the same plan -- re-planned, so the per-iteration
+    // range checks judge the hull -- and its ranges admit both occurrences.
+    // The tree is still queued (new_lnasts is walked after this one), so its
+    // index port and published ranges can change in place.
+    bool widened = false;
+    if (!fits && def.body && plan.step > 0 && ((lo - def.lo) % plan.step) == 0) {
+      const auto     hull_lo = std::min(lo, def.lo);
+      const auto     hull_hi = std::max(hi, def.hi);
+      Loop_roll_plan wide;
+      if (plan_loop_roll(body_stmts, plan.ivar, hull_lo, hull_hi, plan.step, wide) && signature_of(wide) == sig
+          && ranges_within(def.plan.carry_in_ranges, wide.carry_in_ranges) && ranges_within(plan.carry_in_ranges, wide.carry_in_ranges)
+          && ranges_within(def.plan.invariant_ranges, wide.invariant_ranges)
+          && ranges_within(plan.invariant_ranges, wide.invariant_ranges)) {
+        widen_lifted_loop(def, wide, hull_lo, hull_hi);
+        widened = true;
+      }
+    }
+    if (fits || widened) {
+      plan.mangled    = def.plan.mangled;
+      plan.port_names = def.plan.port_names;
+      ++roll_seq_;
+      return;
+    }
+  }
+  plan.mangled = std::format("{}.__loop{}", lm->outlining_owner(), roll_seq_);
+  ++roll_seq_;
+  if (specialized_emitted_.insert(plan.mangled).second) {
+    auto body = lift_loop_body(body_stmts, plan);
+    new_lnasts.push_back(body);
+    rolled_loop_defs_.insert_or_assign(key, Rolled_loop_def{.plan = plan, .body = std::move(body), .lo = lo, .hi = hi});
+  }
+}
+
+void uPass_runner::widen_lifted_loop(Rolled_loop_def& def, const Loop_roll_plan& wide, int64_t lo, int64_t hi) {
+  auto&      body    = *def.body;
+  auto&      ranges  = body.bw_meta().ranges;
+  const auto in_body = [&](const std::string& n) {
+    const auto it = def.plan.port_names.find(n);
+    return it == def.plan.port_names.end() ? n : it->second;
+  };
+  // The index port is the first input (lift_loop_body): store(ref(i), nil, prim_type_int(max, min)).
+  const auto& index_type = wide.types.at(wide.ivar);
+  for (auto io : body.children(body.get_root())) {
+    if (!Lnast_ntype::is_io(body.get_type(io))) {
+      continue;
+    }
+    const auto ins   = body.get_first_child(io);
+    const auto port  = ins.is_invalid() ? ins : body.get_first_child(ins);
+    const auto name  = port.is_invalid() ? port : body.get_first_child(port);
+    const auto dflt  = name.is_invalid() ? name : body.get_sibling_next(name);
+    const auto type  = dflt.is_invalid() ? dflt : body.get_sibling_next(dflt);
+    const auto max_n = type.is_invalid() ? type : body.get_first_child(type);
+    const auto min_n = max_n.is_invalid() ? max_n : body.get_sibling_next(max_n);
+    if (!min_n.is_invalid() && body.get_name(name) == wide.ivar && Lnast_ntype::is_prim_type_int(body.get_type(type))
+        && index_type.max && index_type.min) {
+      body.set_name(max_n, index_type.max->to_pyrope());
+      body.set_name(min_n, index_type.min->to_pyrope());
+    }
+    break;
+  }
+  ranges[wide.ivar] = BitwidthEntry{.min = lo, .max = hi, .unbounded = false};
+  for (const auto& n : def.plan.carries) {
+    ranges.erase(in_body(n) + std::string(kCarryInSuffix));
+  }
+  for (const auto& [n, r] : wide.carry_in_ranges) {
+    ranges[in_body(n) + std::string(kCarryInSuffix)] = BitwidthEntry{.min = r.first, .max = r.second, .unbounded = false};
+  }
+  for (const auto& n : def.plan.invariants) {
+    ranges.erase(in_body(n));
+  }
+  for (const auto& [n, r] : wide.invariant_ranges) {
+    ranges[in_body(n)] = BitwidthEntry{.min = r.first, .max = r.second, .unbounded = false};
+  }
+  def.lo                    = lo;
+  def.hi                    = hi;
+  def.plan.types[wide.ivar] = index_type;
+  def.plan.carry_in_ranges  = wide.carry_in_ranges;
+  def.plan.invariant_ranges = wide.invariant_ranges;
 }
 
 void uPass_runner::emit_rolled_loop_call(const Loop_roll_plan& plan, const Lnast_nid& source_body) {
@@ -13009,6 +13728,12 @@ void uPass_runner::emit_rolled_loop_call(const Loop_roll_plan& plan, const Lnast
   for (const auto& [name, value] : plan.constants) {
     captured[name].const_text = value.to_pyrope();
   }
+  // A promoted unrolled index is a port of the shared definition, but in this
+  // copy of the source body (and as this call's actual) it is this
+  // occurrence's constant: the unroll binding it reads is folded away.
+  for (const auto& [name, value] : plan.promoted) {
+    captured[name].const_text = value.to_pyrope();
+  }
   // A re-rolled inline body lives in the caller's namespace. The hardware
   // payload already binds actual_names; retain the same names in the source
   // body used by the Pyrope writer and by any subsequent inline replay.
@@ -13060,8 +13785,31 @@ void uPass_runner::emit_rolled_loop_call(const Loop_roll_plan& plan, const Lnast
   };
   auto                                            lowered = staging->add_child(rolled, Lnast_ntype::create_stmts());
   std::vector<std::pair<std::string, Lnast_node>> actuals;
+  // A tuple field port reads its field in front of the call, spelled as the
+  // body read it: `tuple_get(tmp, s, 'sel')` (an instance output), or the
+  // dotted `t.a` name itself (a tuple local's flattened field).
+  absl::flat_hash_map<std::string, std::pair<std::string, const Loop_roll_plan::Tuple_field*>> field_of;
+  for (const auto& [base, fields] : plan.tuple_invariants) {
+    for (const auto& f : fields) {
+      if (!f.port.empty()) {
+        field_of.emplace(f.port, std::pair{base, &f});
+      }
+    }
+  }
   for (const auto& n : plan.invariants) {
-    actuals.emplace_back(port_of(n), Lnast_node::create_ref(bound_actual(n)));
+    if (const auto fit = field_of.find(n); fit != field_of.end() && !fit->second.second->dotted) {
+      const auto tmp  = absl::StrCat("%", plan.inst, "_", n);
+      auto       pick = staging->add_child(lowered, Lnast_ntype::create_tuple_get());
+      staging->add_child(pick, Lnast_node::create_ref(tmp));
+      staging->add_child(pick, Lnast_node::create_ref(stream_ssa_ref_name(plan.actual_names.at(fit->second.first))));
+      staging->add_child(pick, Lnast_node::create_const(fit->second.second->field));
+      actuals.emplace_back(port_of(n), Lnast_node::create_ref(tmp));
+      continue;
+    }
+    const auto pit = std::ranges::find(plan.promoted, n, &std::pair<std::string, Dlop>::first);
+    actuals.emplace_back(port_of(n),
+                         pit != plan.promoted.end() ? Lnast_node::create_const(pit->second.to_pyrope())
+                                                    : Lnast_node::create_ref(bound_actual(n)));
   }
   for (const auto& n : plan.carries) {
     // See bound_actual: upass_ssa keeps a stream-SSA name written in a loop
@@ -13090,6 +13838,38 @@ void uPass_runner::emit_rolled_loop_call(const Loop_roll_plan& plan, const Lnast
     staging->add_child(arg, value);
   }
 
+  // A result holds what the loop produced: its carry-out range (plan_loop_roll's
+  // per-iteration walk), else its declared type. Publish it as upass.bitwidth
+  // does after the unrolled loop's last write; otherwise a later read is judged
+  // by the PRE-loop value (`mut v:U10 = 0` before the loop): a needed `wrap`
+  // read as unnecessary, a narrowing write went unreported, and what compiles
+  // depended on compile.unroll. A register keeps its own declared range.
+  const auto publish_result_range = [&](const std::string& raw_name, const std::string& name) {
+    if (plan.registers.contains(raw_name)) {
+      return;
+    }
+    std::optional<std::pair<int64_t, int64_t>> r;
+    if (const auto it = plan.carry_out_ranges.find(raw_name); it != plan.carry_out_ranges.end()) {
+      r = it->second;
+    } else if (const auto t = plan.types.find(raw_name); t != plan.types.end()) {
+      const auto& sp = t->second;
+      if (sp.kind != Io_kind::boolean && sp.array_size == 0 && sp.type_name.empty() && sp.max && sp.min && sp.max->is_integer()
+          && sp.min->is_integer() && sp.max->get_signed_bits() <= 62 && sp.min->get_signed_bits() <= 62) {
+        r = std::pair{sp.min->to_just_i64(), sp.max->to_just_i64()};
+      }
+    }
+    if (!r) {
+      return;
+    }
+    if (auto b = symbol_table_.get_bundle_for_write(name); b && (b->is_empty() || b->has_trivial(bundle_path::of_string("0")))) {
+      Bundle::Entry e = b->get_entry(bundle_path::of_string("0"));
+      e.immutable     = false;
+      e.bw_max        = *Dlop::create_integer(r->second);
+      e.bw_min        = *Dlop::create_integer(r->first);
+      b->set(bundle_path::of_string("0"), std::move(e));
+    }
+    lm->get_lnast()->bw_meta().ranges[name] = BitwidthEntry{.min = r->first, .max = r->second, .unbounded = false};
+  };
   std::vector<std::pair<std::string, std::string>> results;
   results.reserve(plan.finals.size() + plan.carries.size());
   for (const auto& n : plan.finals) {
@@ -13143,6 +13923,7 @@ void uPass_runner::emit_rolled_loop_call(const Loop_roll_plan& plan, const Lnast
       }
     } else {
       (void)symbol_table_.set(name, Bundle::invalid_lconst);
+      publish_result_range(raw_name, name);
     }
   }
 }
@@ -15733,12 +16514,7 @@ void uPass_runner::unroll_for() {
       const std::string body_index(lm->current_raw_text());
       lm->restore_cursor(for_bm);
       if (plan_loop_roll(body_nid, body_index, lo, hi, step, plan)) {
-        plan.inst    = std::format("u_loop_{}", roll_seq_);
-        plan.mangled = std::format("{}.__loop{}", lm->outlining_owner(), roll_seq_);
-        ++roll_seq_;
-        if (specialized_emitted_.insert(plan.mangled).second) {
-          new_lnasts.push_back(lift_loop_body(body_nid, plan));
-        }
+        lift_or_share_loop(body_nid, plan);
         emit_rolled_loop_call(plan, body_nid);
         const size_t depth = loop_iter_ordinals_.size();
         if (next_loop_ordinal_bases_.size() <= depth) {
@@ -15754,6 +16530,7 @@ void uPass_runner::unroll_for() {
     const bool saved_break = loop_break_hit_;
     loop_break_hit_        = false;
     Unroll_scope unroll(*this);  // ++loop_depth_ + iteration-ordinal level, both undone on return
+    Unroll_index_scope index_scope(*this, tagged_i, lo, hi);
     for (int64_t v = lo; v <= hi; v += step) {
       to_body();
       if (!walk_loop_iteration([&]() { emit_inline_binding(tagged_i, Lnast_node::create_const(std::to_string(v))); })) {
@@ -18759,11 +19536,7 @@ void uPass_runner::process_lnast() {
         const auto raw_index = std::string(source->get_name(kids[lnast_rolled_for::index]));
         const auto last = static_cast<int64_t>(static_cast<__int128>(first) + static_cast<__int128>(count - 1) * step);
         if (plan_loop_roll(kids[lnast_rolled_for::source_body], raw_index, first, last, step, plan)) {
-          plan.inst = std::format("u_loop_{}", roll_seq_);
-          plan.mangled = std::format("{}.__loop{}", lm->outlining_owner(), roll_seq_++);
-          if (specialized_emitted_.insert(plan.mangled).second) {
-            new_lnasts.push_back(lift_loop_body(kids[lnast_rolled_for::source_body], plan));
-          }
+          lift_or_share_loop(kids[lnast_rolled_for::source_body], plan);
           emit_rolled_loop_call(plan, kids[lnast_rolled_for::source_body]);
           lm->restore_cursor(here);
           break;
@@ -18772,6 +19545,9 @@ void uPass_runner::process_lnast() {
       const bool saved_break = loop_break_hit_;
       loop_break_hit_ = false;
       Unroll_scope unroll(*this);
+      const auto   last_value
+          = count > 0 ? static_cast<int64_t>(static_cast<__int128>(first) + static_cast<__int128>(count - 1) * step) : first;
+      Unroll_index_scope index_scope(*this, index, std::min(first, last_value), std::max(first, last_value));
       for (int64_t ordinal = 0; ordinal < count; ++ordinal) {
         const auto value = static_cast<int64_t>(static_cast<__int128>(first) + static_cast<__int128>(ordinal) * step);
         lm->restore_cursor(here);

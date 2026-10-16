@@ -179,8 +179,11 @@ public:
 
   // Emit a rolled loop of a sealed, resource-free `body` INSIDE the current
   // function: the caller's color keeps one function, the body is inlined into
-  // the loop once (never unrolled), and operands/results stay SSA values -- no
-  // call, no packed operand transport, no separate color. `layout` is the one
+  // the loop once, and operands/results stay SSA values -- no call, no packed
+  // operand transport, no separate color. The native code alone is fully
+  // unrolled when `count` trips of the body (its own embedded loops counted
+  // expanded) fit a small instruction budget: a per-bit loop then folds to
+  // constant lane positions; a larger loop stays rolled. `layout` is the one
   // add_loop() takes (one `inputs` entry per declared loop port); `inputs`
   // supplies one Value per layout.inputs entry (the index/activation entries
   // are replaced by the loop itself); `outputs` receives one Value per body

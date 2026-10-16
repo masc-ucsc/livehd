@@ -661,5 +661,6 @@ void Inou_cgen::to_cgen_sim(Eprp_var& var) {
     p.share_generation_index(&gen_index);
     p.do_from_graph(g);
   }
+  Cgen_sim::drain_objects(gen_index);
   Cgen_sim::flush_generation_index(dir, gen_index);
 }

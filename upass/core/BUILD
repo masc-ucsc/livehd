@@ -52,6 +52,21 @@ cc_library(
     alwayslink = True,
 )
 
+# Header-only: the loop-index port marker a lifted loop body carries in its
+# bw_meta (loop_index_ports.hpp). Shared by the roll planner (upass/runner) and
+# lnast.tolg, which does not link the upass/core plugin.
+cc_library(
+    name = "loop_index_ports_hdr",
+    hdrs = ["loop_index_ports.hpp"],
+    copts = COPTS,
+    includes = ["."],
+    visibility = ["//visibility:public"],
+    deps = [
+        "//lnast",
+        "@abseil-cpp//absl/strings",
+    ],
+)
+
 # Header-only: canonical (max,min)-from-bits reconstruction. Depends only on
 # hlop so lightweight consumers (e.g. the wrap_sat_hdr header) can pull it in
 # without linking the full upass/core plugin.
