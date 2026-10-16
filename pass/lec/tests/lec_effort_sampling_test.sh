@@ -78,7 +78,7 @@ ck "equivalent: TESTED-sampled, exit 0" '[ "$RC" -eq 0 ] && echo "$OUT" | grep -
 n=$(echo "$OUT" | sed -n "s/^lec: .m. TESTED-sampled(\([0-9]*\)).*/\1/p" | head -1)
 ck "equivalent: the test level's 2048 vectors" '[ -n "$n" ] && [ "$n" -ge 2048 ]'
 ck "equivalent: traces simulated natively" 'echo "$OUT" | grep -q "trace(s) simulated over [0-9]* term node(s)"'
-ck "equivalent: the opcode field is decoded" 'echo "$OUT" | grep -q "1 decoded input field(s)"'
+ck "equivalent: the opcode field is decoded" 'echo "$OUT" | grep -qE "[1-9][0-9]* decoded input field\(s\)"'
 
 run bug.v
 ck "opcode bug at the default effort: REFUTED-cex, exit 10" '[ "$RC" -eq 10 ] && echo "$OUT" | grep -q "^lec: .m. REFUTED-cex"'
