@@ -62,16 +62,18 @@ set -e
 work=$$(mktemp -d "$(@D)/cvc5-XXXXXX")
 trap 'rm -rf "$$work"' EXIT
 if [ "$$(uname)" = "Darwin" ]; then
+  # Mach-O C symbols include a leading underscore. The C++ wildcards below
+  # match their mangled names, but bare C API patterns must name that prefix.
   clang -nostdlib -Wl,-r -Wl,-all_load \
     -Wl,-unexported_symbol,'*CaDiCaL*' \
     -Wl,-unexported_symbol,'*ccadical*' \
     -Wl,-unexported_symbol,'*Reap*' \
-    -Wl,-unexported_symbol,'ipasir_*' \
-    -Wl,-unexported_symbol,'kissat_*' \
-    -Wl,-unexported_symbol,'kitten_*' \
-    -Wl,-unexported_symbol,'new_learned_klause' \
+    -Wl,-unexported_symbol,'_ipasir_*' \
+    -Wl,-unexported_symbol,'_kissat_*' \
+    -Wl,-unexported_symbol,'_kitten_*' \
+    -Wl,-unexported_symbol,'_new_learned_klause' \
     -Wl,-unexported_symbol,'*CMSat*' \
-    -Wl,-unexported_symbol,'cmsat_*' \
+    -Wl,-unexported_symbol,'_cmsat_*' \
     -o "$$work/combined.o" $(SRCS)
   rm -f $@
   ar rcs $@ "$$work/combined.o"

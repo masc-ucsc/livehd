@@ -37,7 +37,7 @@ genrule(
         "//pass/satopt:satopt_salt",
         "//pass/synth:synth_salt",
         "//:MODULE.bazel",
-        "//packages:abc.patch",
+        "//packages:abc.patch", "//packages:abc-physical.patch",
     ],
     outs = ["abc_salt.hpp"],
     cmd = "h=$$(cat $(SRCS) | (shasum -a 256 2>/dev/null || sha256sum) | cut -c1-16); " +

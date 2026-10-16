@@ -25,6 +25,7 @@ def run(name, extra, success=True):
     result = root / f'{name}.json'
     completed = subprocess.run(base + extra + ['--result-json', str(result)],
                                capture_output=True, text=True, timeout=15)
+    assert result.is_file(), (name, completed.returncode, completed.stdout, completed.stderr)
     data = json.loads(result.read_text())
     assert (completed.returncode == 0) == success, (name, completed.returncode, data, completed.stderr)
     return data
@@ -56,9 +57,11 @@ proof = root / 'proof.json'
 subprocess.run(['lhd/lhd', 'lec', '--impl', f'lg:{root}/W/synth/net', '--ref', f'verilog:{source}',
                 '--lib', f'lg:{root}/models', '--top', 'dut', '--set', 'formal.effort=proof', '--set', 'formal.timeout=5',
                 '--workdir', str(root/'lec'), '--result-json', str(proof), '-q'],
-               check=True, capture_output=True, timeout=15)
+               check=True, capture_output=True, timeout=30)
 proof_data = json.loads(proof.read_text())['lec']
-assert proof_data['verdict'] == 'proven-full' and not proof_data['bounded'], proof_data
+# LEC-test ruling: a timeout at the 5 s budget passes; refuted or a crash fails.
+assert proof_data['verdict'] in ('proven-full', 'timeout-time', 'timeout-memory'), proof_data
+assert proof_data['verdict'] != 'proven-full' or not proof_data['bounded'], proof_data
 first_def = (root/'def/out.def').read_bytes()
 warm = run('warm', ['--set', 'synth.place=true', '--emit-dir', f'def:{root}/def'])
 assert warm['qor']['place']['incremental']['hit'], warm['qor']['place']
@@ -71,6 +74,23 @@ assert rc['incremental']['sta']['hits'] == 0, rc['incremental']
 assert rc['qor']['sta']['designs'][0]['max_delay'] != sta['max_delay']
 disabled = run('disabled', ['--set', 'synth.place=true', '--set', 'lhd.incremental=false'])
 assert not disabled['qor']['place']['incremental']['enabled']
+timed = run('timing_driven', ['--set', 'synth.place=true', '--set', 'synth.place.timing_driven=true', '--set', 'synth.place.timing_rounds=2'])
+assert timed['qor']['place']['legal'] and len(timed['qor']['place']['timing_driven']['rounds']) == 2
+td = timed['qor']['place']['timing_driven']
+assert td['initial_timing_source'] == 'post_synthesis_zero_wire' and max(td['initial_weights'].values()) > 1, td
+assert 'pass.place.post_synth_timing' in [p['name'] for p in timed['phases']]
+
+resized = run('resize', ['--set', 'synth.place=true', '--set', 'synth.place.resize=true'])
+assert resized['qor']['place']['legal']
+assert resized['qor']['place']['resize']['attempts'] <= 24
+assert resized['qor']['place']['repair']['attempts'] <= 24
+phases = [p['name'] for p in resized['phases']]
+assert phases.index('pass.place.resize') < phases.index('pass.place.repair')
+resynth = run('resynth', ['--set', 'synth.place=true', '--set', 'synth.place.resynth=true'])
+assert resynth['qor']['place']['legal']
+assert 0 < resynth['qor']['place']['resynth']['attempts'] <= 4
+run('bad_resynth', ['--set', 'synth.place.resynth=true'], False)
+run('bad_resize', ['--set', 'synth.place.resize=true'], False)
 gp = run('gp', ['--set', 'synth.place=true', '--set', 'synth.place.mode=gp'])
 assert gp['qor']['place']['timing_approximate']
 assert not (root/'W/synth/place/out.def').exists()

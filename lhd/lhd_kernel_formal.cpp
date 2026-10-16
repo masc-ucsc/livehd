@@ -2407,7 +2407,8 @@ static livehd::lec::Query_result lec_hierarchical(Result& res, Eprp_var& ref_var
   std::vector<int>                                           composed_bounded_steps(order.size(), 0);
   std::vector<std::vector<std::string>>                      assumed(order.size());
   //   descended[i] children def i DESCENDED because the implementation parent has
-  //                no occurrence of them (asymmetric inlining). Such a child was
+  //                no occurrence of them (asymmetric inlining), or because a
+  //                successful flat confirmation expanded every child. Such a child was
   //                already flat on both sides inside def i's own proof, so an
   //                escalation round has nothing left to inline there: re-solving
   //                it is a bit-identical query, and the force_flat_refuted it
@@ -2720,6 +2721,13 @@ static livehd::lec::Query_result lec_hierarchical(Result& res, Eprp_var& ref_var
       }
     }
 
+    auto record_flat_proof = [&] {
+      assumed[def_ix].clear();
+      if (auto it = children.find(name); it != children.end()) {
+        descended[def_ix].insert(it->second.begin(), it->second.end());
+      }
+    };
+
     // 2f-fcore verdict cache: digest-equal def-pair (hierarchical Merkle
     // digest) + identical verdict-relevant options => the stored PROVEN
     // verdict transfers. A hit needs no encode and no solver — an unchanged
@@ -2737,7 +2745,18 @@ static livehd::lec::Query_result lec_hierarchical(Result& res, Eprp_var& ref_var
         return false;
       }
       ckey = lec_pair_cache_key(dr, di, o);
-      if (auto hit = vcache->lookup(ckey); hit.has_value()) {
+      // Prefer a proof with no speculative boxes over a conditional one.
+      auto flat_options = o;
+      flat_options.collapse.assign(base.trust.begin(), base.trust.end());
+      const auto flat_key = lec_pair_cache_key(dr, di, flat_options);
+      auto       hit      = vcache->lookup(flat_key);
+      if (hit.has_value()) {
+        ckey = flat_key;
+        record_flat_proof();
+      } else if (flat_key != ckey) {
+        hit = vcache->lookup(ckey);
+      }
+      if (hit.has_value()) {
         livehd::lec::Query_result cr;
         cr.verdict                = Verdict::Proven;
         cr.bounded                = hit->bounded;
@@ -3392,6 +3411,17 @@ static livehd::lec::Query_result lec_hierarchical(Result& res, Eprp_var& ref_var
           r.cvc5               += rf.cvc5;  // here `rf` is the discarded side; the effort was still spent
         }
       }
+      if (r.verdict == Verdict::Proven) {
+        // Every successful branch above adopted the flat query. Its only
+        // remaining boxes are explicitly trusted, so the speculative child
+        // premises no longer belong to this proof. Otherwise escalation can
+        // discard a settled flat proof and time out repeating the same miter.
+        record_flat_proof();
+        if (!ckey.empty()) {
+          // A warm hit must recover the same absence of speculative premises.
+          ckey = lec_pair_cache_key(ref_digest[def_ix], impl_digest[def_ix], oflat);
+        }
+      }
     }
     // int_blast=auto second leg: a solver-give-up Unknown (after any flat retry)
     // earns ONE int-blasted re-solve at the min_timeout floor. Before the
@@ -3805,7 +3835,8 @@ static livehd::lec::Query_result lec_hierarchical(Result& res, Eprp_var& ref_var
       bool is_absorbed = false;
       for (const auto& p : parents[order[i]]) {
         auto pi = order_ix.find(p);
-        if (pi != order_ix.end() && force_flat_refuted[pi->second].count(order[i]) > 0 && proven[pi->second] != 0) {
+        if (pi != order_ix.end() && proven[pi->second] != 0
+            && (force_flat_refuted[pi->second].count(order[i]) > 0 || descended[pi->second].count(order[i]) > 0)) {
           is_absorbed = true;  // the parent re-proved with this block inlined
           break;
         }

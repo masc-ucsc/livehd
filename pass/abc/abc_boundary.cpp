@@ -71,10 +71,12 @@ Boundary_table::Boundary_table(size_t n_pi, size_t n_po) {
   b->vPoLoad  = Vec_FltStart(static_cast<int>(n_po));
   b->vPoDelay = Vec_FltStart(static_cast<int>(n_po));
   b->vPiCell  = Vec_PtrStart(static_cast<int>(n_pi));
+  b->vPiSlew  = Vec_FltStart(static_cast<int>(n_pi));
   b->vPiArr   = Vec_FltStart(static_cast<int>(n_pi));
   Vec_FltFill(b->vPoLoad, static_cast<int>(n_po), -1.0f);
   Vec_FltFill(b->vPoDelay, static_cast<int>(n_po), -1.0f);
   Vec_FltFill(b->vPiArr, static_cast<int>(n_pi), -1.0f);
+  Vec_FltFill(b->vPiSlew, static_cast<int>(n_pi), -1.0f);
   bnd_ = b;
 }
 
@@ -88,6 +90,7 @@ Boundary_table::~Boundary_table() {
   Vec_FltFreeP(&b->vPoDelay);
   Vec_PtrFreeP(&b->vPiCell);
   Vec_FltFreeP(&b->vPiArr);
+  Vec_FltFreeP(&b->vPiSlew);
   ABC_FREE(b);
   bnd_ = nullptr;
 }
@@ -101,13 +104,14 @@ void Boundary_table::set_po(size_t i, float load_ff, float delay_ps) {
   Vec_FltWriteEntry(b->vPoDelay, static_cast<int>(i), delay_ps);
 }
 
-void Boundary_table::set_pi(size_t i, void* sc_cell, float arrival_ps) {
+void Boundary_table::set_pi(size_t i, void* sc_cell, float arrival_ps, float slew_ps) {
   auto* b = static_cast<SC_Bnd*>(bnd_);
   if (static_cast<int>(i) >= Vec_PtrSize(b->vPiCell)) {
     return;
   }
   Vec_PtrWriteEntry(b->vPiCell, static_cast<int>(i), sc_cell);
   Vec_FltWriteEntry(b->vPiArr, static_cast<int>(i), arrival_ps);
+  Vec_FltWriteEntry(b->vPiSlew, static_cast<int>(i), slew_ps);
 }
 
 float Boundary_table::po_load(size_t i) const {

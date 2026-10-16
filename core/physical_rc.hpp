@@ -32,6 +32,8 @@ struct Parasitics {
     std::string name;
     int64_t     x = 0, y = 0;
     unsigned    orientation = 0;
+    std::string master;
+    int64_t     width = 0, height = 0;
   };
   std::vector<Cell> cells;
 };

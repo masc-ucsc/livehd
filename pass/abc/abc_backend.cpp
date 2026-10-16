@@ -645,7 +645,16 @@ std::optional<synth::Cell_netlist> Abc_backend::map(const synth::Region_ctx& ctx
   // uninstalls itself. Exact loads come later (refine_boundaries). ---
   Boundary_table boundary_table(static_cast<size_t>(Abc_NtkPiNum(manNtk)), static_cast<size_t>(Abc_NtkPoNum(manNtk)));
   int            boundary_bits = 0;
-  if (region_.boundary && scl_lib_ok_) {
+  if (ctx.physical_boundary && scl_lib_ok_) {
+    const auto& b = *ctx.physical_boundary;
+    for (size_t i = 0; i < b.inputs.size(); ++i) {
+      boundary_table.set_pi(i, nullptr, b.inputs[i].arrival_ps, b.inputs[i].slew_ps);
+    }
+    for (size_t i = 0; i < b.outputs.size(); ++i) {
+      boundary_table.set_po(i, b.outputs[i].load_ff, std::max(0.0, b.budget_ps - b.outputs[i].required_ps));
+    }
+    boundary_table.install();
+  } else if (region_.boundary && scl_lib_ok_) {
     std::vector<int> pi_port(all_pi_order.size(), -1);
     for (size_t i = 0; i < all_pi_order.size(); ++i) {
       if (all_pi_order[i].kind == Pi_kind::region_input) {

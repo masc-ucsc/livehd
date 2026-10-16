@@ -57,6 +57,7 @@
 #include "node_util.hpp"
 #include "pass.hpp"
 #include "pass/place/place.hpp"
+#include "pass/place/repair.hpp"
 #include "rapidjson/document.h"
 #include "rapidjson/stringbuffer.h"
 #include "rapidjson/writer.h"
@@ -138,9 +139,7 @@ livehd::placement::Options placement_options(const Options& opts) {
       throw Lhd_error{"usage", "invalid synth.place.wire_rc", "expected nonnegative ohm/um,fF/um"};
     }
   }
-  if (truthy(synth_set(opts, "place.resize", "false"))) {
-    throw Lhd_error{"unsupported", "synth.place.resize is not implemented yet", ""};
-  }
+
   return out;
 }
 
@@ -343,13 +342,26 @@ void synth_command(Options& opts, Result& res) {
   // ---- the synth.* knobs --------------------------------------------------
   // (`pass.abc.library` is refused for every command by check_known_set_passes:
   // synth.liberty is the one spelling, so no two Liberty readers can disagree.)
-  const auto*       mapper        = find_mapper(synth_set(opts, "mapper", "abc"));  // validated by check_known_set_passes
-  const auto        mapper_method = std::string{mapper->method};
-  const bool        mapped_output = mapper_maps_cells(opts, mapper_method);
-  const std::string liberty       = mapped_output ? resolve_liberty(opts) : std::string{};
-  const bool        run_sta       = mapped_output && truthy(synth_set(opts, "opentimer", "true"));
-  const bool        run_place     = truthy(synth_set(opts, "place", "false"));
-  auto              place_options = run_place ? placement_options(opts) : livehd::placement::Options{};
+  const auto*       mapper           = find_mapper(synth_set(opts, "mapper", "abc"));  // validated by check_known_set_passes
+  const auto        mapper_method    = std::string{mapper->method};
+  const bool        mapped_output    = mapper_maps_cells(opts, mapper_method);
+  const std::string liberty          = mapped_output ? resolve_liberty(opts) : std::string{};
+  const bool        run_sta          = mapped_output && truthy(synth_set(opts, "opentimer", "true"));
+  const bool        run_place        = truthy(synth_set(opts, "place", "false"));
+  auto              place_options    = run_place ? placement_options(opts) : livehd::placement::Options{};
+  const bool        run_resynth      = truthy(synth_set(opts, "place.resynth", "false"));
+  const bool        run_resize       = truthy(synth_set(opts, "place.resize", "false"));
+  const bool        run_timing_place = truthy(synth_set(opts, "place.timing_driven", "false"));
+  const int         timing_rounds    = std::stoi(synth_set(opts, "place.timing_rounds", "3"));
+  if (timing_rounds < 1 || timing_rounds > 8) {
+    throw Lhd_error{"usage", "synth.place.timing_rounds expects 1..8", ""};
+  }
+  if ((run_resize || run_timing_place || run_resynth) && (!run_place || !run_sta || !place_options.full)) {
+    throw Lhd_error{"usage", "physical optimization requires placement in full mode and OpenTimer", ""};
+  }
+  if (run_resynth && !livehd::synth::has_cone_provider("abc")) {
+    throw Lhd_error{"unsupported", "cone resynthesis requires the ABC provider", ""};
+  }
   if (run_place && !mapped_output) {
     throw Lhd_error{"usage", "placement requires technology-mapped output", "use pass.usyn.tmap=abc"};
   }
@@ -701,17 +713,73 @@ void synth_command(Options& opts, Result& res) {
   }
 
   // ---- placement: one persistent flat graph for physical outputs and STA ----
-  hhds::GraphLibrary placed_library;
-  std::string        place_qor;
-  const std::string  place_qor_path = root + "/place/qor.json";
+  hhds::GraphLibrary               placed_library;
+  livehd::placement::Repair_result repaired;
+  livehd::placement::Repair_result design_repaired;
+  livehd::placement::Repair_result timed_placement;
+  livehd::placement::Repair_result resynthesized;
+  std::string                      place_qor;
+  const std::string                place_qor_path = root + "/place/qor.json";
   if (run_place) {
     const auto found = std::find_if(net.graphs.begin(), net.graphs.end(), [&](const auto& g) { return g && g->get_name() == top; });
     if (found == net.graphs.end()) {
       throw Lhd_error{"internal", "mapped top missing before placement", ""};
     }
+    place_options.liberty    = liberty;
     place_options.output_dir = root + "/place";
     if (user_workdir && opts.incremental) {
       place_options.cache_dir = opts.workdir + "/place_cache";
+    }
+    unsigned    trial = 0;
+    // The placement phase that drives evaluate(): its run_step clears the crash
+    // context, which then names that phase again for the next placement call.
+    std::string phase_step;
+    std::string phase_log;
+    const auto  evaluate = [&](const livehd::placement::Result& state) {
+      Eprp_var analysis;
+      analysis.graphs            = {state.graph};
+      analysis.physical_rc       = state.parasitics;
+      const auto          report = root + "/place/resize_timing_" + std::to_string(trial++) + ".json";
+      Eprp_var::Eprp_dict labels{
+          {"files", liberty + (sdc.empty() ? "" : "," + sdc)},
+          {  "top",                                      top},
+          {  "qor",                                   report}
+      };
+      merge_sets(opts, "pass.opentimer", labels);
+      labels["cache_dir"] = "";
+      run_step("pass.opentimer", analysis, labels, opts, res);
+      set_crash_context(phase_step, phase_log);
+      return livehd::placement::timing_feedback(slurp_json(report));
+    };
+    hhds::GraphLibrary seed_library;
+    auto               placement_input = *found;
+    if (run_timing_place) {
+      auto seed_options        = place_options;
+      seed_options.timing_seed = true;
+      seed_options.cache_dir.clear();
+      seed_options.output_dir += "/post_synth";
+      Phase_timer phase(res, "pass.place.post_synth_timing");
+      // Like pass.place below: DREAMPlace prints to stdout, which is reserved
+      // for the result protocol, and a refusal is a placement failure.
+      const auto  seed_log = next_log_path(opts, "pass.place.post_synth_timing");
+      set_crash_context("pass.place.post_synth_timing", seed_log);
+      livehd::placement::Result seed;
+      try {
+        Stdout_to_log redirect(seed_log);
+        seed = livehd::placement::place(**found, seed_library, seed_options);
+      } catch (const std::exception& e) {
+        throw Lhd_error{"unsupported", std::string("timing seed placement failed: ") + e.what(), "see " + seed_log};
+      }
+      set_crash_context({}, {});
+      const auto timing         = evaluate(seed);
+      place_options.net_weights = livehd::placement::timing_weights(*seed.parasitics, timing);
+      if (place_options.net_weights.empty()) {
+        throw Lhd_error{"unsupported",
+                        "post-synthesis timing has no constrained data nets for placement weighting",
+                        "check synth.sdc"};
+      }
+      placement_input = seed.graph;
+      res.recipe_steps.emplace_back("pass.place.post_synth_timing");
     }
     const auto log = next_log_path(opts, "pass.place");
     set_crash_context("pass.place", log);
@@ -719,16 +787,66 @@ void synth_command(Options& opts, Result& res) {
     try {
       Phase_timer   phase(res, "pass.place");
       Stdout_to_log redirect(log);
-      placed = livehd::placement::place(**found, placed_library, place_options);
+      placed = livehd::placement::place(*placement_input, placed_library, place_options);
     } catch (const std::exception& e) {
       throw Lhd_error{"unsupported", std::string("placement failed: ") + e.what(), "see " + log};
     }
     set_crash_context({}, {});
     res.recipe_steps.emplace_back("pass.place");
+    if (run_resize || run_timing_place || run_resynth) {
+      // Every round/trial below re-runs placement (and resynth a fresh ABC frame
+      // per cone): keep their output off the protocol stdout, as for pass.place.
+      phase_step = "pass.place.optimize";
+      phase_log  = next_log_path(opts, phase_step);
+      set_crash_context(phase_step, phase_log);
+      try {
+        Stdout_to_log redirect(phase_log);
+        if (run_timing_place) {
+          Phase_timer phase(res, "pass.place.timing_driven");
+          timed_placement = livehd::placement::timing_place(std::move(placed), place_options, evaluate, timing_rounds);
+          placed          = std::move(timed_placement.placed);
+          res.recipe_steps.emplace_back("pass.place.timing_driven");
+        }
+        if (run_resize) {
+          Phase_timer phase(res, "pass.place.resize");
+          repaired = livehd::placement::repair_buffers(std::move(placed),
+                                                       place_options,
+                                                       evaluate,
+                                                       livehd::placement::Repair_scope::sizing);
+          placed   = std::move(repaired.placed);
+          res.recipe_steps.emplace_back("pass.place.resize");
+        }
+        if (run_resize) {
+          Phase_timer phase(res, "pass.place.repair");
+          design_repaired = livehd::placement::repair_buffers(std::move(placed),
+                                                              place_options,
+                                                              evaluate,
+                                                              livehd::placement::Repair_scope::design);
+          placed          = std::move(design_repaired.placed);
+          res.recipe_steps.emplace_back("pass.place.repair");
+        }
+        if (run_resynth) {
+          Phase_timer phase(res, "pass.place.resynth");
+          resynthesized = livehd::placement::resynthesize_cones(std::move(placed),
+                                                                place_options,
+                                                                evaluate,
+                                                                [](const auto& logic, const auto& boundary, const auto& library) {
+                                                                  return livehd::synth::map_cone("abc", logic, boundary, library);
+                                                                });
+          placed        = std::move(resynthesized.placed);
+          res.recipe_steps.emplace_back("pass.place.resynth");
+        }
+      } catch (const std::exception& e) {
+        throw Lhd_error{"unsupported", std::string("placement optimization failed: ") + e.what(), "see " + phase_log};
+      }
+      phase_step.clear();
+      phase_log.clear();
+      set_crash_context({}, {});
+    }
     net.graphs      = {placed.graph};
     net.physical_rc = placed.parasitics;
     place_qor       = placed.qor;
-    placed_library.save(net_dir);
+    placed.graph->get_io()->get_library()->save(net_dir);
     for (const auto& path : place_options.lefs) {
       res.inputs.push_back(path);
     }
@@ -748,6 +866,14 @@ void synth_command(Options& opts, Result& res) {
         fs::copy_file(root + "/place/out.def", destination, fs::copy_options::overwrite_existing);
       }
       res.outputs.push_back(destination.string());
+      const auto proxy_lef = fs::path(root) / "place/memory_proxies.lef";
+      if (fs::is_regular_file(proxy_lef)) {
+        const auto proxy_destination = fs::path(def_out->path) / "memory_proxies.lef";
+        if (canon(proxy_destination.string()) != canon(proxy_lef.string())) {
+          fs::copy_file(proxy_lef, proxy_destination, fs::copy_options::overwrite_existing);
+        }
+        res.outputs.push_back(proxy_destination.string());
+      }
     }
   }
 
@@ -779,7 +905,7 @@ void synth_command(Options& opts, Result& res) {
     run_step("pass.opentimer", net, labels, opts, res);
     if (labels["critical"] == "true" || labels["critical"] == "1") {
       if (run_place) {
-        placed_library.save(net_dir);
+        net.graphs.front()->get_io()->get_library()->save(net_dir);
       } else {
         livehd::Hhds_graph_library::save(net_dir);
       }

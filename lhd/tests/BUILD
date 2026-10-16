@@ -2595,3 +2595,11 @@ sh_test(
     ],
     tags = ["cpu:4"],
 )
+
+sh_test(
+    name = "lhd_placement_memory_smoke",
+    size = "small",
+    timeout = "short",
+    srcs = ["lhd_placement_memory_smoke.py"],
+    data = ["//lhd", "//inou/lefdef:test_data"],
+)

@@ -61,7 +61,7 @@ public:
   // delay after the port in ps (<=0 none).
   void                set_po(size_t i, float load_ff, float delay_ps);
   // PI i: driving SC_Cell* (nullptr = ideal driver) and arrival in ps (<=0 none).
-  void                set_pi(size_t i, void* sc_cell, float arrival_ps);
+  void                set_pi(size_t i, void* sc_cell, float arrival_ps, float slew_ps = -1);
   [[nodiscard]] float po_load(size_t i) const;
 
   void               install();

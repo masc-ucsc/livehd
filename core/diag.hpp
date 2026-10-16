@@ -185,6 +185,17 @@ public:
   // Reset all state (records, counters, dedup, seq, staged) and close any file.
   void clear();
 
+  // Retract an optional trial whose failure the caller recovers from (a
+  // discarded resynthesis cone): take a mark() before the trial, and
+  // rollback() drops every record emitted since, restoring the counters and
+  // the dedup set. Lines already written to stderr / diagnostics.jsonl stay
+  // (seq keeps counting). The trial must not overlap other emitting threads.
+  struct Mark {
+    size_t records = 0;
+  };
+  [[nodiscard]] Mark mark() const;
+  void               rollback(const Mark& m);
+
   // Tag subsequent records with a pipeline step (resets the per-step dedup set).
   void set_step(std::string_view step);
 

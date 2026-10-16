@@ -5,6 +5,7 @@
 #include <cstdint>
 #include <map>
 #include <memory>
+#include <set>
 #include <string>
 #include <vector>
 
@@ -42,7 +43,13 @@ protected:
 
   ot::Timer                                           timer;
   std::shared_ptr<const livehd::physical::Parasitics> physical_rc_;
+  std::map<std::string, std::string>                  physical_native_pins_;
+  std::map<std::string, std::string>                  physical_timing_pins_;
+  std::map<std::string, std::string>                  physical_memory_captures_;
+  std::set<std::string>                               physical_clock_endpoints_;  // memory clock pins: RC sinks, not captures
+  void                                                validate_physical_rc(const std::shared_ptr<hhds::Graph>& graph) const;
   void                                                apply_physical_rc(const std::shared_ptr<hhds::Graph>& graph);
+  void                                                apply_physical_captures();
 
   int    margin;  // % margin to mark nodes
   double freq;

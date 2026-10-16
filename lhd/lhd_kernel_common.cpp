@@ -2669,7 +2669,7 @@ void emit_sim_outputs(Options& opts, Result& res, Eprp_var& var) {
            || filename.ends_with(".tune-id.cpp") || filename.ends_with(".tune.cpp"))
           && filename.ends_with(".cpp")) {
         color_aux_sources.push_back(filename);
-      } else if (filename.find(".color-kernel-") != std::string::npos && filename.ends_with(".llvm.o")) {
+      } else if (filename.ends_with(".llvm.o")) {  // color kernels AND <stem>.native-loop.llvm.o, as `lhd sim` globs
         color_objects.push_back(filename);
       }
     }
@@ -2734,7 +2734,9 @@ void emit_sim_outputs(Options& opts, Result& res, Eprp_var& var) {
       ofs << std::format("        \"{}\",\n", object);
     }
     ofs << "    ],\n";
-    ofs << "    hdrs = glob([\"*.hpp\"]),\n";
+    // `*.inc`: the `<stem>.pure.inc` / `<stem>.native-loop.inc` adapters each
+    // `<stem>.hpp` includes; an undeclared include fails the sandboxed build.
+    ofs << "    hdrs = glob([\"*.hpp\", \"*.inc\"]),\n";
     ofs << "    copts = [\"-std=c++23\", \"-Os\", \"-pthread\"],\n"
            "    linkopts = [\"-pthread\"],\n";
     // alwayslink: nothing references a `<stem>.tune-id.cpp` object by name --

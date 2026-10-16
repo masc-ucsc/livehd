@@ -11,7 +11,9 @@
 #   - the envelope carries `sim_tune` (disabled without a --workdir);
 #   - `lhd compile --emit-dir sim:` lists every generated .cpp in its BUILD
 #     (alwayslink, so the tune-id identity survives a static-archive link) and
-#     bakes the explicit vector;
+#     bakes the explicit vector; a rolled loop's every `*.llvm.o` (including
+#     `<stem>.native-loop.llvm.o`) is linked and hashed, and `*.inc` is a header;
+#   - a rolled loop with a gated or secondary clock among several clock ports is refused;
 #   - sim.tune.profile_stride is range-checked at parse time like drv.bin does;
 #   - a hand-written sim.tune.file may spell dirty as a JSON bool and fence /
 #     live_words as JSON integers; any other JSON type is a config error naming
@@ -138,6 +140,136 @@ if ls "$W"/es/*.tune-id.cpp >/dev/null 2>&1; then
 fi
 
 grep -q "alwayslink = True" "$W/es/BUILD" || fail "--emit-dir sim: BUILD must alwayslink the sim library (tune-id identity)"
+
+# Rolled loops under the default llvm backend (two, so they fuse) write a
+# `<stem>.native-loop.llvm.o` (it defines the `__lhd_loop_<mod>` its adapter
+# calls) and `#include` `.inc` adapters: every object must be a BUILD input and
+# the headers must cover `*.inc`.
+cat >"$W/rolled.prp" <<'EOF'
+mod rolled(data:U32, select_a:U4, select_b:U4) -> (a:U8@[0], b:U8@[0]) {
+  mut carry_a:U8 = 128
+  mut carry_b:U8 = 64
+  for i in 0..<4 {
+    if select_a#[i] != 0 {
+      carry_a |= data#[(i*8)..+8]
+    }
+  }
+  for j in 0..<4 {
+    if select_b#[j] != 0 {
+      carry_b |= data#[(j*8)..+8]
+    }
+  }
+  a = carry_a
+  b = carry_b
+}
+EOF
+"$LHD" compile "$W/rolled.prp" --emit-dir "sim:$W/el" -q --result-json "$W/el.json" 2>/dev/null \
+  || fail "compile --emit-dir sim: of a rolled loop failed: $(cat "$W/el.json")"
+ls "$W"/el/*.native-loop.llvm.o >/dev/null 2>&1 || fail "--emit-dir sim: the rolled loop emitted no native-loop object"
+for f in "$W"/el/*.llvm.o; do
+  b=$(basename "$f")
+  grep -qF "\"$b\"" "$W/el/BUILD" || fail "--emit-dir sim: BUILD does not link $b"
+  grep -qF "\"$b\"" "$W/el/manifest.json" || fail "--emit-dir sim: manifest.json does not hash $b"
+done
+grep -qF '"*.inc"' "$W/el/BUILD" || fail "--emit-dir sim: BUILD hdrs must declare the .inc adapters"
+
+# ---- several clock ports on a rolled loop: refused on both backends, gated or not -----
+# `pair`'s second port is a secondary (edge-detected) clock the walk never toggles,
+# even when it is the same root clock, and a withheld period holds the whole loop body
+# (every clock domain): fail closed, not mis-simulate. (A fused body's per-loop clock
+# ports, each its lane child's reference, stay legal: tests/sim/loop_fused_state.)
+cat >"$W/twoclk.prp" <<'EOF'
+mod pair(clk:Clock, gclk:Clock, inc:Bool) -> (a:U4@[0], b:U4@[0]) {
+  reg fa:U4:[clock_pin=clk] = 0
+  reg fb:U4:[clock_pin=gclk] = 0
+  a = fa
+  b = fb
+  if inc {
+    wrap fa += 1
+    wrap fb += 1
+  }
+}
+mod lanes(clk:Clock, gclk:Clock, inc:Bool) -> (sa:U8@[0], sb:U8@[0]) {
+  mut acc_a:U8 = 0
+  mut acc_b:U8 = 0
+  for j in 0..<2 {
+    const p = pair(clk=clk, gclk=gclk, inc=inc)
+    wrap acc_a = acc_a + p.a
+    wrap acc_b = acc_b + p.b
+  }
+  sa = acc_a
+  sb = acc_b
+}
+pub mod twoclk(clk:Clock, en:Bool, inc:Bool) -> (sa:U8@[], sb:U8@[]) {
+  const g = Clock(clock_pin=clk, enable=en)
+  const r = lanes(clk=clk, gclk=g, inc=inc)
+  sa = r.sa
+  sb = r.sb
+}
+test twoclk.t {
+  mut x = twoclk
+  x.en = true
+  x.inc = true
+  step
+}
+EOF
+# Same loop, both ports on the ungated top clock: `b` would never count.
+sed -e 's/pub mod twoclk(clk:Clock, en:Bool, inc:Bool)/pub mod twoclk(clk:Clock, inc:Bool)/' \
+  -e '/const g = Clock(clock_pin=clk, enable=en)/d' -e 's/gclk=g,/gclk=clk,/' -e '/x.en = true/d' \
+  "$W/twoclk.prp" >"$W/twoclk_ungated.prp"
+grep -qF 'gclk=clk,' "$W/twoclk_ungated.prp" || fail "the ungated two-clock fixture was not derived"
+for be in llvm slop; do
+  "$LHD" sim "$W/twoclk.prp" --setup-only --set sim.tune.backend=$be --workdir "$W/tc_$be" -q >"$W/r.json" 2>/dev/null \
+    && fail "$be: a gated clock among several clock ports of a rolled loop must be refused"
+  grep -qF 'has 2 clock ports and state on the secondary clock `twoclk.pair.gclk`' "$W/r.json" \
+    || fail "$be: not the multi-port loop refusal: $(cat "$W/r.json")"
+  "$LHD" sim "$W/twoclk_ungated.prp" --setup-only --set sim.tune.backend=$be --workdir "$W/tcu_$be" -q >"$W/r.json" 2>/dev/null \
+    && fail "$be: an ungated second clock port of a rolled loop must be refused"
+  grep -qF 'has 2 clock ports and state on the secondary clock `twoclk_ungated.pair.gclk`' "$W/r.json" \
+    || fail "$be: not the multi-port loop refusal (ungated): $(cat "$W/r.json")"
+done
+
+# Two loops fused into one body, one lane on a gated clock: no secondary-clock state,
+# but a withheld period on the gated port would also hold the ungated lanes.
+cat >"$W/fusedg.prp" <<'EOF'
+mod lane1(clk:Clock, a:U8) -> (q:U16@[0]) {
+  reg acc:U16:[clock_pin=clk] = 0
+  wrap acc = acc + a
+  q = acc
+}
+mod body(clk:Clock, gclk:Clock, a:U8) -> (first:U16@[0], second:U16@[0]) {
+  mut x:U16 = 0
+  for i in 0..<3 {
+    const value = lane1(clk=clk, a=(a + i)#[0..<8])
+    wrap x = x + value
+  }
+  first = x
+  mut y:U16 = 0
+  for i in 0..<3 {
+    const value = lane1(clk=gclk, a=(a + i + 1)#[0..<8])
+    wrap y = y + value
+  }
+  second = y
+}
+pub mod fusedg(clk:Clock, en:Bool, a:U8) -> (first:U16@[], second:U16@[]) {
+  const g = Clock(clock_pin=clk, enable=en)
+  const r = body(clk=clk, gclk=g, a=a)
+  first = r.first
+  second = r.second
+}
+test fusedg.t {
+  mut x = fusedg
+  x.en = false
+  x.a = 1
+  step
+}
+EOF
+for be in llvm slop; do
+  "$LHD" sim "$W/fusedg.prp" --setup-only --set sim.tune.backend=$be --workdir "$W/fg_$be" -q >"$W/r.json" 2>/dev/null \
+    && fail "$be: a gated port among several clock ports of a fused loop body must be refused"
+  grep -qF 'has 2 clock ports and `' "$W/r.json" && grep -qF '` is gated; a withheld period' "$W/r.json" \
+    || fail "$be: not the gated multi-port loop refusal: $(cat "$W/r.json")"
+done
 
 # ---- sim.tune.file: JSON types, depfile and envelope inputs ----------------------------
 echo '{"schema":"lhd-sim-tune-file-1","knobs":{"dirty":true,"fence":0}}' >"$W/tf_json.json"

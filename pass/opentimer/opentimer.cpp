@@ -262,6 +262,9 @@ std::string jesc(std::string_view text) { return livehd::json_util::escape(text)
 // critical pin points back at the pre-synthesis RTL.
 template <typename Node>
 std::string src_of_node(const std::shared_ptr<hhds::Graph>& g, const Node& n) {
+  if (n.is_invalid()) {
+    return {};
+  }
   const auto base = [&]() {
     if constexpr (std::same_as<Node, hhds::Occurrence_node>) {
       return n.base_node();
@@ -331,6 +334,8 @@ void Pass_opentimer::time_work(Eprp_var& var) {
       pass.physical_rc_ = std::make_shared<livehd::physical::Parasitics>(livehd::physical::deserialize_parasitics(stored.get()));
     }
   }
+
+  pass.validate_physical_rc(g);  // validate before a warm STA result can be replayed
 
   // A design compiled WITHOUT `compile.unroll` -- false is the DEFAULT, so this
   // is the ordinary path -- keeps ONE compact Sub standing for `count`
@@ -544,6 +549,7 @@ void Pass_opentimer::time_work(Eprp_var& var) {
   pass.read_sdc_spef();
   pass.apply_physical_rc(g);
   pass.prepare_critical_targets();
+  pass.apply_physical_captures();
   pass.annotate_critical(g);
   pass.compute_timing(g);
   if (!pass.critical_) {
@@ -1699,7 +1705,7 @@ void Pass_opentimer::build_circuit(const std::shared_ptr<hhds::Graph>& g) {
           .fatal();
     }
     auto launch_clock = critical_ && op != Ntype_op::Memory ? state_clock(node) : std::string{};
-    if (critical_ && op == Ntype_op::Memory) {
+    if ((critical_ || physical_rc_) && op == Ntype_op::Memory) {
       // A port without a clock (asynchronous read, constant clock pin) does not
       // vote: the memory launches in the one clock its clocked ports share.
       for (auto sink : node.inp_sorted_pins()) {
@@ -1710,7 +1716,7 @@ void Pass_opentimer::build_circuit(const std::shared_ptr<hhds::Graph>& g) {
         if (clock.empty()) {
           continue;
         }
-        if (!launch_clock.empty() && clock != launch_clock) {
+        if (critical_ && !launch_clock.empty() && clock != launch_clock) {
           livehd::diag::err("pass.opentimer", "critical-memory-clock", "unsupported")
               .msg("critical annotations require a Liberty timing model for a native memory with multiple clocks")
               .fatal();
@@ -1755,14 +1761,27 @@ void Pass_opentimer::build_circuit(const std::shared_ptr<hhds::Graph>& g) {
         continue;
       }
       auto dnet = net_of_node(node, dpin, hier_mode_);  // flop/mem output (driver side)
-      if (is_overwritten(dnet, dpin)) {
+      if (is_overwritten(dnet, dpin) && !(physical_rc_ && op == Ntype_op::Memory)) {
         continue;  // drives a primary output directly: already a PO net
       }
-      auto       wname = dnet;
-      const auto bits  = bits_of(dpin);
+      auto       wname         = physical_rc_ && op == Ntype_op::Memory ? get_driver_net_name(dpin) : dnet;
+      const auto bits          = bits_of(dpin);
+      const auto physical_wire = wname;
+      if (physical_rc_ && op == Ntype_op::Memory && is_overwritten(dnet, dpin)) {
+        wname = std::format("__sta_mem_src_{}_{}", inst_of(node, hier_mode_), dpin.get_port_id());
+      }
+      if (physical_rc_ && op == Ntype_op::Memory) {
+        for (int bit = 0; bit < std::max(1, bits); ++bit) {
+          physical_native_pins_[std::format("{}:out_{}[{}]", node.get_name(), dpin.get_port_id(), bit)]
+              = bit ? std::format("{}.{}", wname, bit) : wname;
+        }
+      }
       timer.insert_primary_input(wname);  // idempotent net insert underneath
       set_input_delays(wname);
-      if (critical_) {
+      if (wname != physical_wire) {
+        timer.disconnect_pin(wname).connect_pin(wname, physical_wire);
+      }
+      if (critical_ || (physical_rc_ && op == Ntype_op::Memory)) {
         timing_pin_nodes_[wname]    = node.base_node();
         native_start_clocks_[wname] = launch_clock;
       }
@@ -1770,7 +1789,10 @@ void Pass_opentimer::build_circuit(const std::shared_ptr<hhds::Graph>& g) {
         auto bus_bit_name = absl::StrCat(wname, ".", str_tools::to_s(i));
         timer.insert_primary_input(bus_bit_name);
         set_input_delays(bus_bit_name);
-        if (critical_) {
+        if (wname != physical_wire) {
+          timer.disconnect_pin(bus_bit_name).connect_pin(bus_bit_name, std::format("{}.{}", physical_wire, i));
+        }
+        if (critical_ || (physical_rc_ && op == Ntype_op::Memory)) {
           timing_pin_nodes_[bus_bit_name]    = node.base_node();
           native_start_clocks_[bus_bit_name] = launch_clock;
         }
@@ -1781,7 +1803,7 @@ void Pass_opentimer::build_circuit(const std::shared_ptr<hhds::Graph>& g) {
   // Native state has no Liberty test arc. Attach a zero-load virtual output
   // to each sampled data/control bit so it participates in required-time
   // propagation, with the actual capture clock resolved through hierarchy.
-  if (critical_) {
+  if (critical_ || physical_rc_) {
     for (const auto& node : nodes) {
       const auto op = type_op_of(node);
       if (op != Ntype_op::Flop && op != Ntype_op::Latch && op != Ntype_op::Memory) {
@@ -1791,7 +1813,10 @@ void Pass_opentimer::build_circuit(const std::shared_ptr<hhds::Graph>& g) {
         const auto name = sink_pin_name_of(node, sink);
         const bool data = name.ends_with("din") || (op != Ntype_op::Latch && name.ends_with("enable")) || name == "update"
                           || name.ends_with("addr");
-        if (!data) {
+        const auto off  = sink.get_port_id() % Ntype::Memory_port_stride;
+        const bool memory_physical = physical_rc_ && op == Ntype_op::Memory
+                                     && (off == 0 || off == 2 || off == 3 || off == 4 || off == 12 || off == 13 || off == 14);
+        if (!data && !memory_physical) {
           continue;
         }
         for (const auto& driver : sink.get_driver_pins()) {
@@ -1811,12 +1836,15 @@ void Pass_opentimer::build_circuit(const std::shared_ptr<hhds::Graph>& g) {
             const auto endpoint = std::format("__sta_end_{}_{}_{}", inst_of(node, hier_mode_), name, bit);
             timer.insert_primary_output(endpoint).disconnect_pin(endpoint).connect_pin(endpoint, wire);
             timing_pin_nodes_[endpoint] = node.base_node();
+            if (memory_physical) {
+              physical_native_pins_[std::format("{}:in_{}[{}]", node.get_name(), sink.get_port_id(), bit)] = endpoint;
+            }
             const auto clock_port
                 = op == Ntype_op::Memory
                       ? static_cast<hhds::Port_id>((sink.get_port_id() / Ntype::Memory_port_stride) * Ntype::Memory_port_stride + 2)
                       : hhds::Port_id{2};
             native_end_clocks_[endpoint] = state_clock(node, clock_port);
-            if (critical_ && native_end_clocks_[endpoint].empty() && op == Ntype_op::Memory) {
+            if ((critical_ || memory_physical) && native_end_clocks_[endpoint].empty() && op == Ntype_op::Memory) {
               // An asynchronous read port has no clock of its own: it is timed in the memory's clock domain.
               for (auto other : node.inp_sorted_pins()) {
                 if (other.get_port_id() % Ntype::Memory_port_stride != 2) {
@@ -1827,6 +1855,11 @@ void Pass_opentimer::build_circuit(const std::shared_ptr<hhds::Graph>& g) {
                   break;
                 }
               }
+            }
+            if (memory_physical && off != 2) {
+              physical_memory_captures_[endpoint] = native_end_clocks_[endpoint];
+            } else if (memory_physical) {
+              physical_clock_endpoints_.insert(endpoint);  // carries clock-net RC only; never a data endpoint
             }
             if (critical_ && native_end_clocks_[endpoint].empty()) {
               livehd::diag::err("pass.opentimer", "critical-clock-unresolved", "io")
@@ -1937,7 +1970,7 @@ void Pass_opentimer::build_circuit(const std::shared_ptr<hhds::Graph>& g) {
     // the pin, and a driver with no consumer needs no net at all, so take the
     // union of both and dedup by pin.
     std::vector<hhds::Occurrence_pin> dpins;
-    for (auto& dpin : node.out_pins()) {
+    for (auto dpin : node.out_sorted_pins()) {
       if (!dpin.is_invalid() && !dpin.out_edges().empty()) {
         dpins.push_back(dpin);
       }
@@ -2186,7 +2219,7 @@ void Pass_opentimer::compute_timing(const std::shared_ptr<hhds::Graph>& g) {
       }
     }
 
-    for (auto& dpin : node.out_pins()) {
+    for (auto dpin : node.out_sorted_pins()) {
       if (dpin.is_invalid() || dpin.out_edges().empty()) {
         continue;
       }
@@ -2228,6 +2261,33 @@ void Pass_opentimer::compute_timing(const std::shared_ptr<hhds::Graph>& g) {
     }
   }
 
+  if (physical_rc_) {
+    // Include capture/primary-output wire delay in the placed timing report.
+    // Looking only at gate outputs omits the last interconnect segment and
+    // leaves a memory-only design with no reported arrival at all.
+    for (const auto& [name, terminal] : timer.primary_outputs()) {
+      (void)terminal;
+      const auto it = pins.find(name);
+      if (it == pins.end() || physical_clock_endpoints_.contains(name)) {
+        continue;
+      }
+      float delay = -1;
+      for (const auto tran : {ot::RISE, ot::FALL}) {
+        if (const auto at = it->second.at(ot::MAX, tran)) {
+          delay = std::max(delay, *at);
+        }
+      }
+      if (delay < 0) {
+        continue;
+      }
+      arrivals.push_back({delay, name, {}});
+      if (delay > max_delay) {
+        max_delay = delay;
+        max_pin   = name;
+        max_node  = {};
+      }
+    }
+  }
   if (!max_pin.empty()) {
     if (margin) {
       margin_delay = (max_delay / 100.0) * (100 - margin);
@@ -2411,6 +2471,96 @@ void Pass_opentimer::compute_timing(const std::shared_ptr<hhds::Graph>& g) {
     if (const auto tns = timer.report_tns(ot::MAX); tns && std::isfinite(*tns)) {
       j += std::format(",\"tns\":{:.9g}", *tns);
     }
+    if (const auto hold = timer.report_wns(ot::MIN); hold && std::isfinite(*hold)) {
+      j += std::format(",\"hold_wns\":{:.9g}", *hold);
+    }
+    if (!physical_native_pins_.empty()) {
+      j += ",\"memory_timing_model\":\"clock_boundary_zero_internal_delay\"";
+    }
+    // Normalize electrical violations into counts and a dimensionless excess.
+    // The optimizer must not trade a new slew/cap/fanout violation for slack.
+    unsigned violations = 0;
+    double   excess     = 0;
+    for (const auto& [name, pin] : timer.pins()) {
+      for (const auto split : {ot::MIN, ot::MAX}) {
+        const auto* cp = pin.cellpin(split);
+        if (!cp) {
+          continue;
+        }
+        const auto check = [&](double actual, const std::optional<float>& limit) {
+          if (limit && *limit > 0 && actual > *limit * (1 + 1e-6)) {
+            ++violations;
+            excess += actual / *limit - 1;
+          }
+        };
+        for (const auto tran : {ot::RISE, ot::FALL}) {
+          if (const auto slew = pin.slew(split, tran)) {
+            check(*slew, cp->max_transition);
+          }
+          if (pin.is_output() && pin.net()) {
+            if (const auto load = timer.report_load(pin.net()->name(), split, tran)) {
+              check(*load, cp->max_capacitance);
+            }
+          }
+        }
+        if (pin.is_output() && pin.net()) {
+          check((pin.net()->num_pins() - 1), cp->max_fanout);
+        }
+      }
+    }
+    j += std::format(",\"electrical\":{{\"violations\":{},\"excess\":{:.9g}}}", violations, excess);
+  }
+  if (physical_rc_) {
+    const double cap_scale  = timer.capacitance_unit() ? timer.capacitance_unit()->value() / 1e-15 : 1;
+    const double unit_ps    = timer.time_unit() ? timer.time_unit()->value() * 1e12 : 1000;
+    j                      += std::format(",\"time_unit_ps\":{},\"physical_pins\":[", unit_ps);
+    bool comma              = false;
+    for (const auto& [physical, name] : physical_timing_pins_) {
+      const auto it = pins.find(name);
+      if (it == pins.end()) {
+        continue;
+      }
+      const auto& pin = it->second;
+      if (comma) {
+        j += ",";
+      }
+      comma               = true;
+      j                  += std::format("{{\"pin\":\"{}\",\"timer_pin\":\"{}\"", jesc(physical), jesc(name));
+      const auto extreme  = [&](auto getter, bool largest) {
+        std::optional<float> value;
+        for (const auto tran : {ot::RISE, ot::FALL}) {
+          if (const auto v = getter(tran); v && std::isfinite(*v)) {
+            value = value ? (largest ? std::max(*value, *v) : std::min(*value, *v)) : *v;
+          }
+        }
+        return value;
+      };
+      const auto field = [&](const char* key, const std::optional<float>& value, double scale = 1) {
+        if (value) {
+          j += std::format(",\"{}\":{:.9g}", key, *value * scale);
+        }
+      };
+      field("arrival", extreme([&](ot::Tran t) { return pin.at(ot::MAX, t); }, true));
+      field("required", extreme([&](ot::Tran t) { return pin.rat(ot::MAX, t); }, false));
+      field("slack", extreme([&](ot::Tran t) { return pin.slack(ot::MAX, t); }, false));
+      field("slew", extreme([&](ot::Tran t) { return pin.slew(ot::MAX, t); }, true));
+      if (pin.net() && (pin.is_output() || pin.primary_input())) {
+        field("load_ff", extreme([&](ot::Tran t) { return timer.report_load(pin.net()->name(), ot::MAX, t); }, true), cap_scale);
+      }
+      const auto* cp = pin.cellpin(ot::MAX);
+      field("capacitance_ff", cp ? cp->capacitance : std::optional<float>{}, cap_scale);
+      bool clock = cp && cp->is_clock.value_or(false);
+      for (const auto& [clock_name, target] : timing_targets_) {
+        (void)clock_name;
+        clock |= std::find(target.ports.begin(), target.ports.end(), name) != target.ports.end();
+      }
+      if (const auto colon = physical.rfind(":in_"); colon != std::string::npos && physical_native_pins_.contains(physical)) {
+        const auto pid  = std::stoul(physical.substr(colon + 4));
+        clock          |= pid % Ntype::Memory_port_stride == 2;
+      }
+      j += std::format(",\"clock\":{}}}", clock);
+    }
+    j += "]";
   }
   if (const auto area = timer.report_area(); area_cells_complete && area && std::isfinite(*area) && *area >= 0) {
     j += std::format(",\"area\":{:.9g}", *area);
@@ -2422,7 +2572,7 @@ void Pass_opentimer::compute_timing(const std::shared_ptr<hhds::Graph>& g) {
       native_state_nodes_,
       constraints_complete_,
       timing_cells_complete);
-  if (!max_pin.empty()) {
+  if (!max_pin.empty() || physical_rc_) {
     j += std::format(",\"max_delay\":{:.6g},\"critical_pin\":\"{}\"", max_delay, jesc(max_pin));
     if (auto src = src_of_node(g, max_node); !src.empty()) {
       j += std::format(",\"critical_src\":\"{}\"", jesc(src));
@@ -2748,7 +2898,7 @@ void Pass_opentimer::populate_table(const std::shared_ptr<hhds::Graph>& g) {
   }
 
   for (auto node : g->body().nodes()) {
-    for (auto& dpin : node.out_pins()) {
+    for (auto dpin : node.out_sorted_pins()) {
       if (dpin.is_invalid() || dpin.out_edges().empty()) {
         continue;
       }

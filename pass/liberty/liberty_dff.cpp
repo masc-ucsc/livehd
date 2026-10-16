@@ -5,12 +5,14 @@
 #include <algorithm>
 #include <cctype>
 #include <charconv>
+#include <cmath>
 #include <cstdint>
 #include <format>
 #include <fstream>
 #include <initializer_list>
 #include <iterator>
 #include <limits>
+#include <map>
 #include <sstream>
 
 #include "cell.hpp"
@@ -22,6 +24,118 @@ namespace gu = livehd::graph_util;
 namespace livehd::liberty {
 
 namespace {
+
+// Evaluate the entire independent pin basis at once. Reject unknown tokens,
+// absent pins and unfinished expressions; never use a sampled signature.
+class Expression {
+public:
+  Expression(std::string_view expression, const std::vector<std::string>& pins) : text(expression) {
+    for (uint32_t i = 0; i < pins.size(); ++i) {
+      uint64_t bits = 0;
+      for (uint32_t p = 0; p < 64U; ++p) {
+        bits |= uint64_t{(p >> i) & 1} << p;
+      }
+      variables.emplace(pins[i], bits);
+    }
+  }
+  std::optional<uint64_t> parse() {
+    auto value = disjunction();
+    space();
+    if (!valid || position != text.size()) {
+      return {};
+    }
+    return value;
+  }
+
+private:
+  std::string_view                text;
+  size_t                          position = 0;
+  bool                            valid    = true;
+  std::map<std::string, uint64_t> variables;
+  void                            space() {
+    while (position < text.size() && std::isspace(static_cast<unsigned char>(text[position]))) {
+      ++position;
+    }
+  }
+  bool take(char token) {
+    space();
+    if (position < text.size() && text[position] == token) {
+      ++position;
+      return true;
+    }
+    return false;
+  }
+  // Liberty precedence, loosest to tightest: OR (`+` `|`), AND (`*` `&` and
+  // juxtaposition), XOR (`^`), then inversion (`!` prefix, `'` postfix) --
+  // OpenSTA's LibExprParse.yy declares `%left '+' '|'`, `%left '*' '&'`,
+  // `%left '^'`, `%left '!' '\''` in that order. So `A^B*C` is `(A^B)*C`.
+  uint64_t disjunction() {
+    auto value = conjunction();
+    while (take('+') || take('|')) {
+      value |= conjunction();
+    }
+    return value;
+  }
+  uint64_t conjunction() {
+    auto value = exclusive();
+    while (valid) {
+      if (take('*') || take('&')) {
+        value &= exclusive();
+        continue;
+      }
+      space();
+      if (position < text.size()
+          && (text[position] == '(' || text[position] == '!' || text[position] == '~'
+              || std::isalnum(static_cast<unsigned char>(text[position])) || text[position] == '_')) {
+        value &= exclusive();
+        continue;
+      }
+      break;
+    }
+    return value;
+  }
+  uint64_t exclusive() {
+    auto value = literal();
+    while (take('^')) {
+      value ^= literal();
+    }
+    return value;
+  }
+  uint64_t literal() {
+    const bool inverse = take('!') || take('~');
+    if (inverse) {
+      return ~literal();
+    }
+    uint64_t value = 0;
+    if (take('(')) {
+      value = disjunction();
+      if (!take(')')) {
+        valid = false;
+      }
+    } else {
+      space();
+      const auto begin = position;
+      while (position < text.size() && (std::isalnum(static_cast<unsigned char>(text[position])) || text[position] == '_')) {
+        ++position;
+      }
+      const auto name  = std::string(text.substr(begin, position - begin));
+      const auto found = variables.find(name);
+      if (name == "0") {
+        value = 0;
+      } else if (name == "1") {
+        value = ~uint64_t{0};
+      } else if (found != variables.end()) {
+        value = found->second;
+      } else {
+        valid = false;
+      }
+    }
+    while (take('\'')) {
+      value = ~value;
+    }
+    return value;
+  }
+};
 
 std::string read_files(const std::string& lib_files) {
   std::string       all;
@@ -981,8 +1095,114 @@ Cell_scan scan_cells(const std::string& lib_files) {
 
 }  // namespace
 
+namespace {
+std::optional<double> positive_number(const std::string& value) {
+  double number           = 0;
+  const auto [end, error] = std::from_chars(value.data(), value.data() + value.size(), number);
+  return error == std::errc{} && end == value.data() + value.size() && std::isfinite(number) && number >= 0
+             ? std::optional<double>{number}
+             : std::nullopt;
+}
+struct Electrical_units {
+  double                time = 1000, cap = 1000;
+  std::optional<double> slew, fanout;
+  // lu_table_template name -> body: variable_1/variable_2 say which axis is the load.
+  std::map<std::string, std::string> templates;
+};
+std::map<size_t, Electrical_units> electrical_units(const std::string& text) {
+  std::map<size_t, Electrical_units> result;
+  std::string                        args;
+  for (auto open = find_group(text, "library", 0, args); open != std::string::npos;
+       open      = find_group(text, "library", open + 1, args)) {
+    const auto close = match_brace(text, open);
+    if (close == std::string::npos) {
+      break;
+    }
+    const auto       header = top_level_only(text.substr(open + 1, close - open - 1));
+    Electrical_units u;
+    u.time   = time_unit_ps(scalar_attr(header, "time_unit"));
+    auto cap = header.find("capacitive_load_unit");
+    if (cap != std::string::npos) {
+      cap              = header.find('(', cap);
+      const auto comma = header.find(',', cap), end = header.find(')', comma);
+      if (cap != std::string::npos && comma != std::string::npos && end != std::string::npos) {
+        const auto value = positive_number(unquote_trim(header.substr(cap + 1, comma - cap - 1)));
+        const auto unit  = unquote_trim(header.substr(comma + 1, end - comma - 1));
+        if (value && (unit == "pf" || unit == "ff")) {
+          u.cap = *value * (unit == "pf" ? 1000 : 1);
+        }
+      }
+    }
+    u.slew = positive_number(scalar_attr(header, "default_max_transition"));
+    if (u.slew) {
+      *u.slew *= u.time;
+    }
+    u.fanout = positive_number(scalar_attr(header, "default_max_fanout"));
+    for (auto t = find_group(text, "lu_table_template", open + 1, args); t != std::string::npos && t < close;
+         t      = find_group(text, "lu_table_template", t + 1, args)) {
+      if (const auto end = match_brace(text, t); end != std::string::npos && end < close) {
+        u.templates.emplace(unquote_trim(args), text.substr(t + 1, end - t - 1));
+      }
+    }
+    result.emplace(open, u);
+  }
+  return result;
+}
+void repair_timing(Comb_cell& cell, const std::string& body, const Electrical_units& units) {
+  std::string args;
+  for (const auto* key : {"cell_rise", "cell_fall"}) {
+    for (auto open = find_group(body, key, 0, args); open != std::string::npos; open = find_group(body, key, open + 1, args)) {
+      const auto end = match_brace(body, open);
+      if (end == std::string::npos) {
+        break;
+      }
+      const auto table = body.substr(open + 1, end - open - 1);
+      const auto rows  = table_values(table);
+      if (rows.empty() || rows.front().empty()) {
+        continue;
+      }
+      cell.intrinsic_ps = std::max(cell.intrinsic_ps, std::max(0.0, rows.front().front() * units.time));
+      // The load axis comes from the template (osu018 puts it in variable_1).
+      // An undeclared template keeps the common variable_2 = load layout.
+      std::string load_axis = "index_2";
+      if (const auto tmpl = units.templates.find(unquote_trim(args)); tmpl != units.templates.end()) {
+        const auto own = top_level_only(tmpl->second);
+        if (scalar_attr(own, "variable_1") == "total_output_net_capacitance") {
+          load_axis = "index_1";
+        } else if (scalar_attr(own, "variable_2") != "total_output_net_capacitance") {
+          continue;  // no load axis: no drive-resistance estimate
+        }
+      }
+      const auto index = table.find(load_axis);
+      if (index == std::string::npos) {
+        continue;
+      }
+      const auto loads = table_values("values" + table.substr(index + 7));
+      // Delay along the load axis at the first entry of the other axis: row 0
+      // for a variable_2 load (or a 1-D table), column 0 for a 2-D variable_1 load.
+      std::vector<double> values;
+      if (load_axis == "index_2" || rows.size() == 1) {
+        values = rows.front();
+      } else {
+        for (const auto& row : rows) {
+          values.push_back(row.front());
+        }
+      }
+      if (loads.empty() || loads.front().size() != values.size() || values.size() < 2) {
+        continue;
+      }
+      const auto dc = (loads.front().back() - loads.front().front()) * units.cap;
+      if (dc > 0) {
+        cell.resistance_ohm = std::max(cell.resistance_ohm, (values.back() - values.front()) * units.time / dc * 1000);
+      }
+    }
+  }
+}
+}  // namespace
+
 std::vector<Comb_cell> scan_comb_cells_text(const std::string& contents) {
-  const auto             text = strip_comments(contents);
+  const auto             text  = strip_comments(contents);
+  const auto             units = electrical_units(text);
   std::vector<Comb_cell> cells;
   std::string            args;
   for (size_t open = find_group(text, "cell", 0, args); open != std::string::npos;
@@ -1001,10 +1221,20 @@ std::vector<Comb_cell> scan_comb_cells_text(const std::string& contents) {
         || !scalar_attr(top_level_only(body), "clock_gating_integrated_cell").empty()) {
       continue;
     }
+    Electrical_units unit;
+    if (const auto it = units.upper_bound(open); it != units.begin()) {
+      unit = std::prev(it)->second;
+    }
     Comb_cell cell;
-    cell.name         = unquote_trim(args);
-    cell.area         = parse_area(body);
-    bool        legal = cell.area > 0;
+    cell.max_transition_ps = unit.slew;
+    cell.max_fanout        = unit.fanout;
+    cell.name              = unquote_trim(args);
+    cell.area              = parse_area(body);
+    const auto own         = top_level_only(body);
+    cell.footprint         = scalar_attr(own, "cell_footprint");
+    cell.physical_barrier  = scalar_attr(own, "is_isolation_cell") == "true" || scalar_attr(own, "is_level_shifter") == "true"
+                             || scalar_attr(own, "always_on") == "true";
+    bool        legal      = cell.area > 0;
     std::string pins;
     for (size_t pin = find_group(body, "pin", 0, pins); pin != std::string::npos; pin = find_group(body, "pin", pin + 1, pins)) {
       const auto end = match_brace(body, pin);
@@ -1024,14 +1254,32 @@ std::vector<Comb_cell> scan_comb_cells_text(const std::string& contents) {
           legal = false;
           break;
         }
+        auto cap = positive_number(scalar_attr(attrs, "capacitance"));
+        for (const auto* key : {"rise_capacitance", "fall_capacitance"}) {
+          if (const auto value = positive_number(scalar_attr(attrs, key)); value) {
+            cap = std::max(cap.value_or(0), *value);
+          }
+        }
+        cell.input_capacitance_ff.push_back(cap.value_or(0) * unit.cap);
         cell.inputs.push_back(std::move(name));
       } else if (direction == "output" && cell.output.empty() && scalar_attr(attrs, "three_state").empty()) {
         if (std::find(cell.inputs.begin(), cell.inputs.end(), name) != cell.inputs.end()) {
           legal = false;
           break;
         }
-        cell.output   = std::move(name);
-        cell.function = scalar_attr(attrs, "function");
+        cell.output             = std::move(name);
+        cell.function           = scalar_attr(attrs, "function");
+        cell.max_capacitance_ff = positive_number(scalar_attr(attrs, "max_capacitance"));
+        if (cell.max_capacitance_ff) {
+          *cell.max_capacitance_ff *= unit.cap;
+        }
+        if (const auto slew = positive_number(scalar_attr(attrs, "max_transition")); slew) {
+          cell.max_transition_ps = *slew * unit.time;
+        }
+        if (const auto fanout = positive_number(scalar_attr(attrs, "max_fanout")); fanout) {
+          cell.max_fanout = fanout;
+        }
+        repair_timing(cell, body.substr(pin + 1, end - pin - 1), unit);
       } else {
         legal = false;
         break;
@@ -1045,6 +1293,65 @@ std::vector<Comb_cell> scan_comb_cells_text(const std::string& contents) {
 }
 
 std::vector<Comb_cell> scan_comb_cells(const std::string& lib_files) { return scan_comb_cells_text(read_files(lib_files)); }
+
+std::vector<Constant_cell> scan_constant_cells(const std::string& lib_files) {
+  const auto                 text = strip_comments(read_files(lib_files));
+  std::vector<Constant_cell> result;
+  std::string                args;
+  for (size_t p = find_group(text, "cell", 0, args); p != std::string::npos; p = find_group(text, "cell", p + 1, args)) {
+    const auto end = match_brace(text, p);
+    if (end == std::string::npos) {
+      break;
+    }
+    const auto body = text.substr(p + 1, end - p - 1);
+    if (cell_is_dont_use(body)) {
+      continue;
+    }
+    Constant_cell cell{unquote_trim(args), {}};
+    bool          valid = true;
+    std::string   pin_args;
+    for (size_t pin = find_group(body, "pin", 0, pin_args); pin != std::string::npos;
+         pin        = find_group(body, "pin", pin + 1, pin_args)) {
+      const auto close = match_brace(body, pin);
+      if (close == std::string::npos) {
+        valid = false;
+        break;
+      }
+      const auto own       = top_level_only(body.substr(pin + 1, close - pin - 1));
+      const auto direction = scalar_attr(own, "direction");
+      const auto function  = scalar_attr(own, "function");
+      if (direction != "output" || (function != "0" && function != "1")) {
+        valid = false;
+        break;
+      }
+      cell.outputs.emplace_back(unquote_trim(pin_args), function == "1");
+    }
+    if (valid && !cell.outputs.empty()) {
+      result.push_back(std::move(cell));
+    }
+  }
+  return result;
+}
+
+std::optional<double> smallest_flop_area(const std::string& lib_files) {
+  const auto            text = strip_comments(read_files(lib_files));
+  std::optional<double> smallest;
+  std::string           args;
+  for (size_t p = find_group(text, "cell", 0, args); p != std::string::npos; p = find_group(text, "cell", p + 1, args)) {
+    const auto end = match_brace(text, p);
+    if (end == std::string::npos) {
+      break;
+    }
+    const auto   body = text.substr(p + 1, end - p - 1);
+    std::string  ff;
+    const double area = parse_area(body);
+    if (!cell_is_dont_use(body) && find_group(body, "ff", 0, ff) != std::string::npos && area > 0
+        && area < std::numeric_limits<double>::infinity() && (!smallest || area < *smallest)) {
+      smallest = area;
+    }
+  }
+  return smallest;
+}
 
 std::vector<Dff_cell> scan_dff_cells(const std::string& lib_files) { return scan_cells(lib_files).dffs; }
 
@@ -1424,6 +1731,13 @@ void emit_dff_model(hhds::GraphLibrary& outlib, const Dff_cell& dff) {
   }
   Fq.connect_sink(body->get_output_pin(dff.q_pin));
   body->commit();
+}
+
+std::optional<uint64_t> cell_truth(const Comb_cell& cell) {
+  if (cell.inputs.empty() || cell.inputs.size() > 6) {
+    return {};
+  }
+  return Expression(cell.function, cell.inputs).parse();
 }
 
 }  // namespace livehd::liberty
