@@ -1597,20 +1597,25 @@ TEST(SimColorPlan, CompactLoopDoesNotDisableOrderingOfSurroundingMemory) {
   gu::set_ubits(memory.create_driver_pin(1), 8);
   memory.create_driver_pin(1).connect_sink(graph->get_output_pin("memory_q"));
 
-  for (uint64_t budget : {1, 256}) {
-    const auto plan = Plan::discover(graph.get(), false, false, budget);
-    ASSERT_TRUE(plan.complete()) << plan.report();
-    ASSERT_EQ(plan.summary().compact_loops, 1u);
-    size_t direct = 0;
-    for (const auto& site : plan.sites()) {
-      if (site.node.base_node() == state || site.node.base_node() == memory) {
-        EXPECT_EQ(site.in_place, site.node.base_node() == memory) << plan.report();
-        direct += site.in_place;
+  // Slop keeps the register around the loop staged (its loop adapters would
+  // extend the old-Q live range); LLVM embeds the loop in the caller's kernel,
+  // so the register is proven in place like the memory.
+  for (const bool llvm : {false, true}) {
+    for (uint64_t budget : {1, 256}) {
+      const auto plan = Plan::discover(graph.get(), false, llvm, budget);
+      ASSERT_TRUE(plan.complete()) << plan.report();
+      ASSERT_EQ(plan.summary().compact_loops, 1u);
+      size_t direct = 0;
+      for (const auto& site : plan.sites()) {
+        if (site.node.base_node() == state || site.node.base_node() == memory) {
+          EXPECT_EQ(site.in_place, llvm || site.node.base_node() == memory) << plan.report();
+          direct += site.in_place;
+        }
       }
-    }
-    EXPECT_EQ(direct, 1u);
-    for (const auto& dep : plan.version_dependencies()) {
-      EXPECT_LT(plan.version_sites()[dep.producer].execution_order, plan.version_sites()[dep.consumer].execution_order);
+      EXPECT_EQ(direct, llvm ? 2u : 1u);
+      for (const auto& dep : plan.version_dependencies()) {
+        EXPECT_LT(plan.version_sites()[dep.producer].execution_order, plan.version_sites()[dep.consumer].execution_order);
+      }
     }
   }
 }

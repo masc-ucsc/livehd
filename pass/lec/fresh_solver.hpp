@@ -54,8 +54,22 @@ public:
   }
   cvc5::Result checkSat() { return check(nullptr); }
   cvc5::Result checkSatAssuming(const cvc5::Term& assumption) { return check(&assumption); }
-  cvc5::Term   getValue(const cvc5::Term& term) const { return solver_->getValue(term); }
-  cvc5::Term   simplify(const cvc5::Term& term) {
+  // Check the innermost pushed scope ALONE, without the base assertions. For
+  // a scope that pins every symbol to a value whose consistency with the base
+  // the caller has already established (the sampled-effort simulator: one
+  // substitution + rewrite of the base instead of cvc5 re-preprocessing the
+  // whole unrolling); the model then serves getValue as usual.
+  cvc5::Result check_scope() {
+    std::vector<bool> keep(assertions_.size(), false);
+    for (size_t i = scopes_.empty() ? 0 : scopes_.back(); i < assertions_.size(); ++i) {
+      keep[i] = true;
+    }
+    rebuild(nullptr, false, &keep);
+    checked_ = true;
+    return solver_->checkSat();
+  }
+  cvc5::Term getValue(const cvc5::Term& term) const { return solver_->getValue(term); }
+  cvc5::Term simplify(const cvc5::Term& term) {
     if (!solver_) {
       rebuild();
     }
@@ -131,9 +145,9 @@ private:
     solver_.reset();
     checked_ = false;
   }
-  void rebuild(const cvc5::Term* assumption = nullptr, bool allow_slice = false) {
+  void rebuild(const cvc5::Term* assumption = nullptr, bool allow_slice = false, const std::vector<bool>* only = nullptr) {
     finish();
-    const auto keep = allow_slice ? slice(assumption) : std::vector<bool>(assertions_.size(), true);
+    const auto keep = only != nullptr ? *only : allow_slice ? slice(assumption) : std::vector<bool>(assertions_.size(), true);
     sliced_         = std::find(keep.begin(), keep.end(), false) != keep.end();
     solver_         = std::make_unique<cvc5::Solver>(tm_);
     if (attach_) {

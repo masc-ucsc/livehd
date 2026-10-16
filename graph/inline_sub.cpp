@@ -4,8 +4,12 @@
 
 #include <algorithm>
 #include <format>
+#include <iterator>
 #include <optional>
+#include <set>
 #include <string>
+#include <tuple>
+#include <utility>
 #include <vector>
 
 #include "absl/container/flat_hash_map.h"
@@ -21,13 +25,109 @@
 
 namespace livehd::graph_util {
 
+namespace detail {
+
+// IO declaration lookups hhds only answers by walking every declaration of a
+// graph: an output decl by port id (GraphIO keeps decls searchable by name
+// only) and the name of a graph input pin (Graph::pin_name scans every input).
+// The boundary fit check and resolve_driver ask once per connection, which is
+// O(ports) apiece -- quadratic across a wide wrapper's boundary. Each graph /
+// definition is indexed once, on first use. Decls do not change while
+// instances are being spliced.
+class Io_decl_index {
+public:
+  [[nodiscard]] const hhds::GraphIO::DeclaredIoPin* output_decl(const std::shared_ptr<hhds::GraphIO>& io, hhds::Port_id port) {
+    auto [it, fresh] = outputs_.try_emplace(io.get());
+    if (fresh) {
+      keepalive_.push_back(io);  // a released GraphIO must not hand its address to another
+      const auto& decls = io->get_output_pin_decls();
+      for (size_t i = 0; i < decls.size(); ++i) {
+        it->second.try_emplace(decls[i].port_id, &decls[i]);  // first decl per port, as a walk finds it
+      }
+    }
+    const auto dit = it->second.find(port);
+    return dit != it->second.end() ? dit->second : nullptr;
+  }
+
+  // hhds's own name of `pin`, a pin of `graph`'s input node (Pin_class::get_pin_name).
+  [[nodiscard]] std::string_view input_name(hhds::Graph& graph, const hhds::Pin_class& pin) {
+    auto [it, fresh] = inputs_.try_emplace(&graph);
+    if (fresh) {
+      if (const auto io = graph.get_io()) {
+        keepalive_.push_back(io);
+        for (const auto& d : io->get_input_pin_decls()) {
+          if (auto ip = graph.get_input_pin(d.name); !ip.is_invalid()) {
+            it->second.try_emplace(canonical(ip), d.name);
+          }
+        }
+      }
+    }
+    const auto nit = it->second.find(canonical(pin));
+    return nit != it->second.end() ? nit->second : pin.get_pin_name();
+  }
+
+private:
+  [[nodiscard]] static hhds::Pid canonical(const hhds::Pin_class& pin) { return pin.get_debug_pid() & ~static_cast<hhds::Pid>(2); }
+
+  absl::flat_hash_map<const hhds::GraphIO*, absl::flat_hash_map<hhds::Port_id, const hhds::GraphIO::DeclaredIoPin*>> outputs_;
+  absl::flat_hash_map<const hhds::Graph*, absl::flat_hash_map<hhds::Pid, std::string_view>> inputs_;  // names live in the decls
+  std::vector<std::shared_ptr<hhds::GraphIO>>                                               keepalive_;
+};
+
+// What a Host_inliner batch keeps across its splices.
+struct Host_state {
+  // The host's simulation_init program: decoded on the first spliced callee
+  // that carries a program, re-encoded by flush().
+  std::optional<livehd::sim_ir::Node> program;
+  // The same wide neighbor is met by many splices: index each graph and
+  // definition once per batch.
+  Io_decl_index                       io_decls;
+};
+
+}  // namespace detail
+
 namespace {
+bool driver_fits_port_impl(const hhds::Pin_class& driver, int bits, bool is_signed, detail::Io_decl_index* io_decls);
+}  // namespace
+
+namespace {
+
+// Would hhds mint `ports` ((port, is_driver), in this order) on a pin-less node
+// in O(ports) list steps? hhds::Graph::find_or_create_pin keeps a node's pins
+// in one port-sorted list and walks it from the head -- or from just past the
+// pin the previous create on that node minted, when that pin's port is
+// smaller (its append cursor) -- up to the insertion point. This replays that
+// walk over the ports minted so far and gives up past 4 steps per port. Only
+// the cost depends on it: the pins are the same in any order.
+bool mints_in_linear_steps(const std::vector<std::pair<hhds::Port_id, bool>>& ports) {
+  const size_t            budget = 4 * ports.size() + 64;
+  size_t                  steps  = 0;
+  std::set<hhds::Port_id> minted;
+  auto                    cursor = minted.end();
+  for (const auto& entry : ports) {
+    const auto port = entry.first;
+    if (port == 0) {
+      continue;  // the node itself
+    }
+    auto it = cursor != minted.end() && *cursor < port ? std::next(cursor) : minted.begin();
+    for (; it != minted.end() && *it < port; ++it) {
+      if (++steps > budget) {
+        return false;
+      }
+    }
+    if (it != minted.end() && *it == port) {
+      continue;  // found: hhds leaves its cursor where it was
+    }
+    cursor = minted.insert(it, port);
+  }
+  return true;
+}
 
 class Sub_inliner {
 public:
   Sub_inliner(hhds::Graph* parent, const hhds::Node_class& inst, std::string_view from_pass, hhds::Graph* def = nullptr,
               bool name_state = false, bool prefix_instance = true, bool inherit_color = false,
-              const std::optional<std::string>& state_name = std::nullopt)
+              const std::optional<std::string>& state_name = std::nullopt, detail::Host_state* host_state = nullptr)
       : parent_(parent)
       , inst_(inst)
       , from_pass_(from_pass)
@@ -35,9 +135,13 @@ public:
       , name_state_(name_state)
       , prefix_instance_(prefix_instance)
       , inherit_color_(inherit_color)
-      , state_name_(state_name) {}
+      , state_name_(state_name)
+      , host_state_(host_state) {}
 
   bool run();
+
+  // The Sub clones this splice created, in creation (= ascending node id) order.
+  [[nodiscard]] const std::vector<hhds::Node_class>& cloned_subs() const { return cloned_subs_; }
 
 private:
   hhds::Graph*               parent_;
@@ -58,6 +162,10 @@ private:
   // Replaces the body's own name on every spliced flop/latch (see the header):
   // non-empty is prefixed like any name, empty leaves the node unnamed.
   std::optional<std::string> state_name_;
+  // The Host_inliner batch this splice belongs to (nullptr = a lone splice:
+  // merge simulation_init now, index decls for this splice only).
+  detail::Host_state*        host_state_ = nullptr;
+  detail::Io_decl_index      own_io_decls_;
   hhds::Graph*               child_ = nullptr;
   std::string                prefix_;
 
@@ -67,6 +175,30 @@ private:
   absl::flat_hash_map<uint32_t, std::string>              out_pid2name_;
   absl::flat_hash_map<hhds::Pin_class, hhds::Pin_class>   fit_source_;  // fit_boundary driver -> the driver it fits
   bool                                                    failed_ = false;
+
+  // Every Sub clone's pin with a non-zero port, by (clone nid, port, is_driver).
+  // hhds keeps a node's pins in ONE sorted singly-linked list, so a
+  // create_*_pin(port) that finds an existing pin walks that list. A nested
+  // Sub clone gets one pin per declared port up front (create_nodes), and
+  // resolving each of its drivers then walked the list again: Theta(P^2) per
+  // nested instance, and a netlist region wrapper has tens of thousands of
+  // ports (the cva6 netlist LEC sat >9 min in find_or_create_pin). Each pin
+  // still goes through hhds ONCE, at the same point as before -- same pin ids,
+  // same direction marks -- and every later request is answered here.
+  absl::flat_hash_map<std::tuple<hhds::Nid, hhds::Port_id, bool>, hhds::Pin_class> clone_pins_;
+  // The instance's input sink pin of each port, indexed on first use (see
+  // driver_feeding_inst_port) instead of a walk over every instance sink per
+  // resolved child input.
+  absl::flat_hash_map<uint32_t, hhds::Pin_class>                                   inst_input_sink_;
+  bool                                                                             inst_inputs_indexed_ = false;
+  std::vector<hhds::Node_class>                                                    cloned_subs_;
+
+  [[nodiscard]] hhds::Pin_class        clone_pin(const hhds::Node_class& neo, hhds::Port_id pid, bool driver);
+  [[nodiscard]] std::string_view       child_input_name(const hhds::Pin_class& pin);
+  [[nodiscard]] detail::Io_decl_index& io_decls() { return host_state_ != nullptr ? host_state_->io_decls : own_io_decls_; }
+  [[nodiscard]] bool                   fits(const hhds::Pin_class& driver, int bits, bool is_signed) {
+    return driver_fits_port_impl(driver, bits, is_signed, &io_decls());
+  }
 
   void                          fit_boundary();
   [[nodiscard]] hhds::Pin_class add_fit(const hhds::Pin_class& driver, int bits, bool is_signed);
@@ -105,6 +237,24 @@ void Sub_inliner::carry_node_attrs(const hhds::Node_class& orig, const hhds::Nod
     // trailing '.'). Done here, once per spliced node, instead of re-walking the
     // parent body after every inline.
     neo.attr(hhds::attrs::name).set(prefix_.substr(0, prefix_.size() - 1));
+  } else if (op == Ntype_op::Sub && !prefix_.empty() && !orig.is_loop_subnode()) {
+    // An ANONYMOUS nested instance is hierarchy-transparent: everything below it
+    // sits logically directly under the instance being inlined (`inst.q`).
+    // Cloned unnamed, it would sit directly under the PARENT instead, so the
+    // next inline of it (prefix "") drops `inst.` from every name below it --
+    // two instances of one def holding an anonymous wrapper (cgen/abc region
+    // wrappers, `__flat___<module>`) then collapse onto the same logical state
+    // names and the LEC encoder refuses them as ambiguous. Keep the position as
+    // a reserved transparent component: logical_instance_prefix of the clone is
+    // prefix_ again, and logical_hier_name of anything under it keeps `inst.`.
+    // (A replicated loop site keeps its anonymity: its occurrence ordinal is
+    // its identity, and a transparent name would swallow it.)
+    std::string def;
+    if (const auto io = orig.get_subnode_io()) {
+      def = std::string{io->get_name()};
+    }
+    std::replace(def.begin(), def.end(), '.', '_');  // one dot-free component (as cgen's flat module name)
+    neo.attr(hhds::attrs::name).set(prefix_ + std::string{transparent_instance_prefix} + def);
   }
   if (auto a = orig.attr(livehd::attrs::lut); a.has()) {
     neo.attr(livehd::attrs::lut).set(std::string{a.get()});
@@ -203,17 +353,16 @@ void Sub_inliner::fit_boundary() {
     const bool net_sign  = !is_unsign(drv);
     Out_fit    f{drv, {}};
     if (net_bits != 0 && net_bits <= bits) {
-      if (!driver_fits_port(inner, net_bits, net_sign)) {
+      if (!fits(inner, net_bits, net_sign)) {
         f.steps.emplace_back(net_bits, net_sign);
       }
     } else {
-      const bool port_step = !driver_fits_port(inner, bits, is_signed);
+      const bool port_step = !fits(inner, bits, is_signed);
       if (port_step) {
         f.steps.emplace_back(bits, is_signed);
       }
       // A wider net extends the port's value by the port's sign.
-      if (net_bits != 0
-          && (port_step ? !range_fits_port(bits, is_signed, net_bits, net_sign) : !driver_fits_port(inner, net_bits, net_sign))) {
+      if (net_bits != 0 && (port_step ? !range_fits_port(bits, is_signed, net_bits, net_sign) : !fits(inner, net_bits, net_sign))) {
         f.steps.emplace_back(net_bits, net_sign);
       }
     }
@@ -260,7 +409,7 @@ void Sub_inliner::fit_boundary() {
     const int  bits      = sub_port_width(ipin, *gio, nit->second);
     const bool is_signed = !gio->is_unsign(nit->second);
     for (auto driver : sink.get_driver_pins()) {
-      if (!driver_fits_port(driver, bits, is_signed)) {
+      if (!fits(driver, bits, is_signed)) {
         in_fits.push_back(In_fit{driver, sink, bits, is_signed});
       }
     }
@@ -336,13 +485,46 @@ void Sub_inliner::create_nodes() {
         // leaves a nested Sub structurally incomplete: walking an internally
         // driven but unused output asks for a pin that was never created.  The
         // same applies to an internally read, unconnected input.
-        for (const auto& d : io->get_input_pin_decls()) {
-          (void)neo.create_sink_pin(d.port_id);
-        }
-        for (const auto& d : io->get_output_pin_decls()) {
-          (void)neo.create_driver_pin(d.port_id);
+        //
+        // Inputs then outputs, each in declaration order: the order the
+        // inliner has always minted them in, so the clone gets the same pin
+        // ids (hhds numbers a pin by creation). hhds keeps a node's pins in one
+        // port-sorted list and resumes a create just past the previous one
+        // when that one had a smaller port, so two ascending runs -- every
+        // front end's GraphIO, where declaration order IS port order -- cost
+        // O(ports) in all. An unsorted declaration list goes through
+        // mints_in_linear_steps: the input splitter's (`a` at port 1, outputs
+        // W+1 down to 2) inserts every pin next to the head and stays in
+        // declaration order; an order that would walk the list per pin is
+        // minted in one ascending pass instead -- the same pins, other ids.
+        const auto& ins     = io->get_input_pin_decls();
+        const auto& outs    = io->get_output_pin_decls();
+        auto        by_port = [](const auto& a, const auto& b) { return a.port_id < b.port_id; };
+        if (std::is_sorted(ins.begin(), ins.end(), by_port) && std::is_sorted(outs.begin(), outs.end(), by_port)) {
+          for (const auto& d : ins) {
+            (void)clone_pin(neo, d.port_id, false);
+          }
+          for (const auto& d : outs) {
+            (void)clone_pin(neo, d.port_id, true);
+          }
+        } else {
+          std::vector<std::pair<hhds::Port_id, bool>> ports;  // (port, is_driver), in mint order
+          ports.reserve(ins.size() + outs.size());
+          for (const auto& d : ins) {
+            ports.emplace_back(d.port_id, false);
+          }
+          for (const auto& d : outs) {
+            ports.emplace_back(d.port_id, true);
+          }
+          if (!mints_in_linear_steps(ports)) {
+            std::sort(ports.begin(), ports.end());
+          }
+          for (const auto& [port, driver] : ports) {
+            (void)clone_pin(neo, port, driver);
+          }
         }
       }
+      cloned_subs_.push_back(neo);
     }
     node_map_[n] = neo;
     carry_node_attrs(n, neo);
@@ -362,19 +544,47 @@ void Sub_inliner::create_nodes() {
   }
 }
 
+// A clone's pin. Only a Sub clone goes through clone_pins_: it is the one cell
+// with a pin per declared port (create_nodes), so a lookup on it walks a long
+// list. Every other cell has a handful of pins, and asking hhds again is
+// cheaper than a map entry per pin -- recording every pin of every clone cost
+// the minion LEC ~20% of its run. Port 0 is the node itself: no list walk.
+hhds::Pin_class Sub_inliner::clone_pin(const hhds::Node_class& neo, hhds::Port_id pid, bool driver) {
+  if (pid == 0 || type_op_of(neo) != Ntype_op::Sub) {
+    return driver ? neo.create_driver_pin(pid) : neo.create_sink_pin(pid);
+  }
+  auto [it, fresh] = clone_pins_.try_emplace(std::tuple{neo.get_debug_nid() & ~static_cast<hhds::Nid>(3), pid, driver});
+  if (fresh) {
+    it->second = driver ? neo.create_driver_pin(pid) : neo.create_sink_pin(pid);
+  }
+  return it->second;
+}
+
+// pin_name_of(pin) for a pin of the child's input node, without hhds's scan
+// over every input of the graph.
+std::string_view Sub_inliner::child_input_name(const hhds::Pin_class& pin) {
+  if (auto a = pin.attr(livehd::attrs::pin_name); a.has()) {
+    return pin_name_of(pin);  // a caller-stamped override wins (pin_name_of)
+  }
+  return io_decls().input_name(*child_, pin);
+}
+
 // The parent-side driver feeding instance port `pid`, or an invalid pin when the
 // parent left that port unconnected.
 hhds::Pin_class Sub_inliner::driver_feeding_inst_port(uint32_t pid) {
-  // Read-only pin walk. The const clone below is deliberately OUTSIDE the loop:
-  // it creates a node in the parent graph, which is the graph being walked.
-  hhds::Pin_class drv;
-  for (auto sink : inst_.inp_sorted_pins()) {
-    if (static_cast<uint32_t>(sink.get_port_id()) != pid) {
-      continue;
+  // The instance's sink pins are indexed once (a splice never adds or removes
+  // one); the driver is still read here, per request, from the live edge, and
+  // only for the port asked about. First sink per port wins, as the old walk's
+  // `break` did. Read-only pin walk; the const clone below is deliberately
+  // OUTSIDE it: it creates a node in the parent graph, which holds the instance.
+  if (!inst_inputs_indexed_) {
+    inst_inputs_indexed_ = true;
+    for (auto sink : inst_.inp_sorted_pins()) {
+      inst_input_sink_.try_emplace(static_cast<uint32_t>(sink.get_port_id()), sink);
     }
-    drv = sink.get_driver_pin();  // exactly one driver per sink pin
-    break;
   }
+  const auto      sit = inst_input_sink_.find(pid);
+  hhds::Pin_class drv = sit != inst_input_sink_.end() ? sit->second.get_driver_pin() : hhds::Pin_class{};  // one driver per sink
   if (drv.is_invalid()) {
     return {};
   }
@@ -412,12 +622,12 @@ hhds::Pin_class Sub_inliner::resolve_driver(const hhds::Pin_class& d) {
     }
     if (!is_graph_input_pin(cur)) {
       if (auto it = node_map_.find(cur.get_master_node()); it != node_map_.end()) {
-        res = it->second.create_driver_pin(cur.get_port_id());
+        res = clone_pin(it->second, cur.get_port_id(), true);
         carry_driver_attrs(cur, res);
       }
       break;
     }
-    const auto pit = in_name2pid_.find(std::string{pin_name_of(cur)});
+    const auto pit = in_name2pid_.find(child_input_name(cur));
     if (pit == in_name2pid_.end()) {
       break;
     }
@@ -478,7 +688,7 @@ void Sub_inliner::wire_edges() {
     // mutation either graph sees mid-loop -- the old inp_edges() materialized
     // for exactly this reason.
     for (auto sink : n.inp_pins_snapshot()) {
-      auto sp = neo.create_sink_pin(sink.get_port_id());
+      auto sp = clone_pin(neo, sink.get_port_id(), false);
       for (auto driver : sink.get_driver_pins()) {
         if (driver.is_const()) {
           create_const(*parent_, const_of(driver)).connect_sink(sp);
@@ -606,11 +816,21 @@ bool Sub_inliner::run() {
   if (const auto program = child_->get_input_node().attr(livehd::attrs::simulation_init);
       program.has() && !program.get().empty()) {
     auto metadata = parent_->get_input_node().attr(livehd::attrs::simulation_init);
-    auto combined = metadata.has() && !metadata.get().empty()
-                        ? livehd::sim_ir::decode(metadata.get())
-                        : livehd::sim_ir::Node{"seq", "", 0, false, {}};
-    combined.kids.push_back(livehd::sim_ir::decode(program.get()));
-    metadata.set(livehd::sim_ir::encode(combined));
+    auto load     = [&] {
+      return metadata.has() && !metadata.get().empty() ? livehd::sim_ir::decode(metadata.get())
+                                                           : livehd::sim_ir::Node{"seq", "", 0, false, {}};
+    };
+    if (host_state_ != nullptr) {
+      // Batched (Host_inliner): one decode per host here, one encode in flush().
+      if (!host_state_->program.has_value()) {
+        host_state_->program = load();
+      }
+      host_state_->program->kids.push_back(livehd::sim_ir::decode(program.get()));
+    } else {
+      auto combined = load();
+      combined.kids.push_back(livehd::sim_ir::decode(program.get()));
+      metadata.set(livehd::sim_ir::encode(combined));
+    }
   }
   inst_.del_node();  // its edges go with it; everything it carried is now inline
   return true;
@@ -618,11 +838,46 @@ bool Sub_inliner::run() {
 
 }  // namespace
 
+Host_inliner::Host_inliner(hhds::Graph* host, std::string_view from_pass)
+    : host_(host), from_pass_(from_pass), state_(std::make_unique<detail::Host_state>()) {}
+
+Host_inliner::~Host_inliner() {
+  try {
+    flush();
+  } catch (...) {  // NOLINT(bugprone-empty-catch): a destructor must not throw; flush() first to see the error
+  }
+}
+
+bool Host_inliner::splice(const hhds::Node_class& inst, std::vector<hhds::Node_class>* new_subs) {
+  Sub_inliner s(host_, inst, from_pass_, nullptr, false, true, false, std::nullopt, state_.get());
+  const bool  ok = s.run();
+  if (ok && new_subs != nullptr) {
+    new_subs->insert(new_subs->end(), s.cloned_subs().begin(), s.cloned_subs().end());
+  }
+  return ok;
+}
+
+void Host_inliner::flush() {
+  if (!state_->program.has_value()) {
+    return;
+  }
+  auto program = std::move(*state_->program);
+  state_->program.reset();
+  host_->get_input_node().attr(livehd::attrs::simulation_init).set(livehd::sim_ir::encode(program));
+}
+
 int sub_port_width(const hhds::Pin_class& port, const hhds::GraphIO& io, std::string_view name) {
   return std::max(1, bits_of(port, io, name));
 }
 
 bool driver_fits_port(const hhds::Pin_class& driver, int bits, bool is_signed) {
+  return driver_fits_port_impl(driver, bits, is_signed, nullptr);
+}
+
+namespace {
+// `io_decls`, when set, answers a graph input's name and an unstamped Sub
+// output's decl from its index; nullptr asks hhds (one lone query).
+bool driver_fits_port_impl(const hhds::Pin_class& driver, int bits, bool is_signed, detail::Io_decl_index* io_decls) {
   if (driver.is_const()) {
     const auto& value = const_of(driver);
     if (value.is_nil()) {
@@ -637,8 +892,9 @@ bool driver_fits_port(const hhds::Pin_class& driver, int bits, bool is_signed) {
     if (io == nullptr) {
       return true;
     }
-    dbits   = sub_port_width(driver, *io, driver.get_pin_name());
-    dsigned = !io->is_unsign(driver.get_pin_name());
+    const auto name = io_decls != nullptr ? io_decls->input_name(*driver.get_graph(), driver) : driver.get_pin_name();
+    dbits           = sub_port_width(driver, *io, name);
+    dsigned         = !io->is_unsign(name);
   } else if (dbits == 0) {
     // An unstamped Sub output is as wide as the callee realizes that port.
     const auto sub = driver.get_master_node();
@@ -646,14 +902,22 @@ bool driver_fits_port(const hhds::Pin_class& driver, int bits, bool is_signed) {
     if (io == nullptr) {
       return true;
     }
-    for (const auto& decl : io->get_output_pin_decls()) {
-      if (decl.port_id == driver.get_port_id()) {
-        const auto callee = sub.get_subnode_graph();
-        dbits
-            = callee ? sub_port_width(callee->get_output_pin(decl.name), *io, decl.name) : std::max(1, static_cast<int>(decl.bits));
-        dsigned = !decl.unsign;
-        break;
+    const hhds::GraphIO::DeclaredIoPin* decl = nullptr;
+    if (io_decls != nullptr) {
+      decl = io_decls->output_decl(io, driver.get_port_id());
+    } else {
+      for (const auto& d : io->get_output_pin_decls()) {
+        if (d.port_id == driver.get_port_id()) {
+          decl = &d;
+          break;
+        }
       }
+    }
+    if (decl != nullptr) {
+      const auto callee = sub.get_subnode_graph();
+      dbits             = callee ? sub_port_width(callee->get_output_pin(decl->name), *io, decl->name)
+                                 : std::max(1, static_cast<int>(decl->bits));
+      dsigned           = !decl->unsign;
     }
     if (dbits == 0) {
       return true;
@@ -661,6 +925,7 @@ bool driver_fits_port(const hhds::Pin_class& driver, int bits, bool is_signed) {
   }
   return range_fits_port(dbits, dsigned, bits, is_signed);
 }
+}  // namespace
 
 bool range_fits_port(int dbits, bool dsigned, int bits, bool is_signed) {
   if (dsigned) {

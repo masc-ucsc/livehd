@@ -4,6 +4,7 @@
 #include "upass_tolg.hpp"
 
 #include <algorithm>
+#include <array>
 #include <bit>
 #include <charconv>
 #include <cstdint>
@@ -36,6 +37,7 @@
 #include "json_util.hpp"
 #include "latch_contract.hpp"
 #include "lnast_ntype.hpp"
+#include "loop_index_ports.hpp"
 #include "mask_eval.hpp"
 #include "node_util.hpp"
 #include "pass.hpp"
@@ -807,6 +809,21 @@ private:
     uint64_t         out_pid = 0;  // the result's output port on `node`
   };
 
+  // A packed window write `v#[lo +: width] = lane` over `base`, keyed by the
+  // pin its result was bound to (lower_set_mask). lower_if merges the arms of
+  // one `if` that write the SAME window of the SAME pre-`if` value into one
+  // write whose lane is a narrow mux, instead of a full-width mux of full-width
+  // copies per arm (merge_window_writes).
+  struct Window_write {
+    Pin     base;
+    Pin     lane;
+    Pin     pos;        // runtime low bit position; invalid when `lo` is constant
+    int32_t lo    = 0;  // constant low bit position (pos invalid)
+    int32_t width = 0;
+    int32_t mw    = 0;   // result width (the base's)
+    int64_t pos_max = -1;  // >= 0: a shift-form write (shift_window_write) whose position stays <= this
+  };
+
 public:
   void build() {
     if (const auto program = lnast_->get_simulation_init(); !program.empty()) {
@@ -863,6 +880,15 @@ public:
         // `a[i]` lower exactly like a body `mut` array (a rolled loop's array
         // carry crosses the lifted boundary this way).
         array_scalar_views_[e.name] = array_view_of(e);
+      }
+      if (upass::is_loop_index_port(*lnast_, e.name)) {
+        lifted_loop_body_ = true;
+      }
+      if (upass::is_loop_index_port(*lnast_, e.name) && !raw.is_invalid()) {
+        loop_index_pins_.insert(raw);
+        if (const auto r = range_of_name(e.name)) {
+          loop_index_ranges_.insert_or_assign(raw, *r);
+        }
       }
     }
     for (const auto& e : lnast_->io_meta().outputs) {
@@ -5742,6 +5768,26 @@ private:
       lane_value = gm.create_driver_pin(0);
       set_ubits(lane_value, view.elem_mw);
     }
+    // A loop-affine lane index (a rolled loop writing `arr[i]`): the shift
+    // form, which folds to a constant lane once the loop is expanded (see
+    // shift_window_write). The mask built above is then dead.
+    if (const auto r = loop_affine(dyn.pin) ? loop_affine_range(dyn.pin) : std::nullopt;
+        r && r->first >= 0
+        && r->second < (int64_t{1} << 20) / std::max<int64_t>(view.elem_mw, 1)) {
+      maskn.del_node();
+      const auto pos_max = r->second * view.elem_mw;
+      const auto shown   = shift_window_view(base, offset);
+      const auto out     = shift_window_write(base, offset, pos_max, shown, view.elem_mw, lane_value);
+      note_window_write(out,
+                        Window_write{.base    = base.pin,
+                                     .lane    = lane_value,
+                                     .pos     = offset,
+                                     .width   = view.elem_mw,
+                                     .mw      = base.mw,
+                                     .pos_max = pos_max});
+      record(name, out, base.mw);
+      return;
+    }
     auto shifted = make_node(Ntype_op::SHL);
     setup_sink_by_name(shifted, "a").connect_driver(lane_value);
     setup_sink_by_name(shifted, "b").connect_driver(offset);
@@ -5749,6 +5795,7 @@ private:
     set_ubits(placed, base.mw);
 
     auto out = lower_dynamic_mask_rmw(base, mask, placed);
+    note_window_write(out, Window_write{.base = base.pin, .lane = lane_value, .pos = offset, .width = view.elem_mw, .mw = base.mw});
     record(name, out, base.mw);
   }
 
@@ -9889,6 +9936,304 @@ private:
     }
   }
 
+  // Whether a runtime bit position is computed only from constants and the
+  // loop-index ports of this lifted loop body (loop_index_pins_), through
+  // combinational cells: it becomes a constant wherever the loop is expanded
+  // (pass.abc's carry unroll, the simulator's small-loop unroll). A position
+  // that reads data (an invariant select, a carry) stays the masked RMW, which
+  // is cheaper for a genuinely runtime position.
+  [[nodiscard]] bool loop_affine(const Pin& pos) const {
+    if (loop_index_pins_.empty() || pos.is_invalid()) {
+      return false;
+    }
+    std::vector<Pin>         work{pos};
+    absl::flat_hash_set<Pin> seen;
+    bool                     reaches_index = false;
+    while (!work.empty()) {
+      const auto p = work.back();
+      work.pop_back();
+      if (p.is_const() || !seen.insert(p).second) {
+        continue;
+      }
+      if (loop_index_pins_.contains(p)) {
+        reaches_index = true;
+        continue;
+      }
+      if (seen.size() > 64 || livehd::graph_util::is_graph_input_pin(p)) {
+        return false;
+      }
+      const auto node = p.get_master_node();
+      const auto op   = livehd::graph_util::type_op_of(node);
+      if (!Ntype::is_comb(op) || op == Ntype_op::LUT || op == Ntype_op::Clock_cell) {
+        return false;
+      }
+      for (const auto& sink : node.inp_pins_snapshot()) {
+        for (const auto& d : sink.get_driver_pins()) {
+          work.push_back(d);
+        }
+      }
+    }
+    return reaches_index;
+  }
+
+  // The largest value of a runtime bit position `lo` (LNAST operand, lowered
+  // to `pos`) when that position should take the shift form: it is
+  // loop-affine and provably non-negative. nullopt keeps the masked RMW.
+  [[nodiscard]] std::optional<int64_t> shift_form_position(const Lnast_nid& lo, const Pin& pos) const {
+    if (!loop_affine(pos)) {
+      return std::nullopt;
+    }
+    constexpr int64_t kMaxPos = int64_t{1} << 20;
+    // Both are sound bounds: the published range of the position's name and
+    // the interval from the index ports' ranges. Their intersection is the
+    // tightest (a published range may be just its storage envelope), and it
+    // sizes the shifts and masks of the rolled form.
+    auto       r      = range_of_operand(lo);
+    const auto affine = loop_affine_range(pos);
+    if (!r) {
+      r = affine;
+    } else if (affine) {
+      r = std::pair{std::max(r->first, affine->first), std::min(r->second, affine->second)};
+    }
+    if (!r || r->first < 0 || r->second > kMaxPos || r->first > r->second) {
+      return std::nullopt;
+    }
+    return r->second;
+  }
+
+  // Interval of a loop-affine position (loop_affine), from the published
+  // ranges of the loop-index ports it reads: the fallback when upass.bitwidth
+  // published no range for the position's own name. nullopt = not derivable.
+  // Each (pin, remaining depth) is evaluated once: the position's cone is a
+  // DAG (`(i*N + j) + (i*N + j)` reuses its operands), and an unmemoized walk
+  // re-derives every shared operand once per path to it.
+  using Affine_memo = absl::flat_hash_map<std::pair<Pin, int>, std::optional<std::pair<int64_t, int64_t>>>;
+  [[nodiscard]] std::optional<std::pair<int64_t, int64_t>> loop_affine_range(const Pin& pos) const {
+    Affine_memo memo;
+    return loop_affine_range(pos, 16, memo);
+  }
+  [[nodiscard]] std::optional<std::pair<int64_t, int64_t>> loop_affine_range(const Pin& pos, int depth, Affine_memo& memo) const {
+    if (pos.is_invalid() || depth == 0) {
+      return std::nullopt;
+    }
+    const auto key = std::pair{pos, depth};
+    if (const auto it = memo.find(key); it != memo.end()) {
+      return it->second;
+    }
+    auto r = loop_affine_range_of(pos, depth, memo);
+    memo.insert_or_assign(key, r);
+    return r;
+  }
+  [[nodiscard]] std::optional<std::pair<int64_t, int64_t>> loop_affine_range_of(const Pin& pos, int depth, Affine_memo& memo) const {
+    constexpr int64_t kCap = int64_t{1} << 40;
+    using R                = std::pair<int64_t, int64_t>;
+    const auto ok          = [&](const R& r) { return r.first > -kCap && r.second < kCap && r.first <= r.second; };
+    if (pos.is_const()) {
+      const auto& v = livehd::graph_util::const_of(pos);
+      if (v.has_unknowns() || !v.is_just_i64()) {
+        return std::nullopt;
+      }
+      return R{v.to_just_i64(), v.to_just_i64()};
+    }
+    if (const auto it = loop_index_ranges_.find(pos); it != loop_index_ranges_.end()) {
+      return it->second;
+    }
+    const auto node = pos.get_master_node();
+    const auto op   = livehd::graph_util::type_op_of(node);
+    const auto all  = [&](std::string_view bank) {
+      std::vector<R> out;
+      for (const auto& d : livehd::graph_util::inp_drivers_of(node, bank)) {
+        const auto r = loop_affine_range(d, depth - 1, memo);
+        if (!r) {
+          return std::optional<std::vector<R>>{};
+        }
+        out.push_back(*r);
+      }
+      return std::optional<std::vector<R>>{std::move(out)};
+    };
+    switch (op) {
+      case Ntype_op::Sum: {
+        const auto as = all("as");
+        const auto bs = all("bs");
+        if (!as || !bs) {
+          return std::nullopt;
+        }
+        R acc{0, 0};
+        for (const auto& r : *as) {
+          acc = R{acc.first + r.first, acc.second + r.second};
+        }
+        for (const auto& r : *bs) {
+          acc = R{acc.first - r.second, acc.second - r.first};
+        }
+        return ok(acc) ? std::optional<R>{acc} : std::nullopt;
+      }
+      case Ntype_op::Mult: {
+        const auto as = all("as");
+        if (!as || as->empty()) {
+          return std::nullopt;
+        }
+        R acc{1, 1};
+        for (const auto& r : *as) {
+          const std::array<int64_t, 4> c{acc.first * r.first, acc.first * r.second, acc.second * r.first, acc.second * r.second};
+          acc = R{*std::ranges::min_element(c), *std::ranges::max_element(c)};
+          if (!ok(acc)) {
+            return std::nullopt;
+          }
+        }
+        return acc;
+      }
+      case Ntype_op::SHL: {
+        const auto a = loop_affine_range(livehd::graph_util::get_driver_of_sink_name(node, "a"), depth - 1, memo);
+        const auto b = loop_affine_range(livehd::graph_util::get_driver_of_sink_name(node, "b"), depth - 1, memo);
+        if (!a || !b || a->first < 0 || b->first < 0 || b->second > 30) {
+          return std::nullopt;
+        }
+        const R r{a->first << b->first, a->second << b->second};
+        return ok(r) ? std::optional<R>{r} : std::nullopt;
+      }
+      case Ntype_op::Or:
+      case Ntype_op::Xor: {
+        const auto as = all("as");
+        if (!as) {
+          return std::nullopt;
+        }
+        int64_t hi = 0;
+        for (const auto& r : *as) {
+          if (r.first < 0) {
+            return std::nullopt;
+          }
+          hi |= r.second;
+        }
+        // Every value fits in the ones-cover of the largest operand max.
+        const int64_t cover = hi == 0 ? 0 : (int64_t{1} << std::bit_width(static_cast<uint64_t>(hi))) - 1;
+        return R{0, cover};
+      }
+      case Ntype_op::Get_mask: {
+        const auto range = livehd::graph_util::bit_range(node);
+        const auto a     = loop_affine_range(livehd::graph_util::get_driver_of_sink_name(node, "a"), depth - 1, memo);
+        if (!range || range->second - range->first > 40) {
+          return std::nullopt;
+        }
+        if (a && a->first >= 0 && range->first == 0 && a->second < (int64_t{1} << (range->second - range->first))) {
+          return a;
+        }
+        return R{0, (int64_t{1} << (range->second - range->first)) - 1};
+      }
+      default: return std::nullopt;
+    }
+  }
+
+  void note_window_write(const Pin& result, Window_write ww) { window_writes_.insert_or_assign(result, std::move(ww)); }
+
+  // The view `base >> pos` of a shift-form window write (shift_window_write);
+  // the old lane is its low window. `base` is non-negative (an unsigned RMW
+  // base) and `mw` bits wide.
+  [[nodiscard]] Pin shift_window_view(const Val& base, const Pin& pos) {
+    Pin src = base.pin;
+    if (pin_can_be_negative(src)) {
+      auto gm = make_node(Ntype_op::Get_mask);
+      livehd::graph_util::connect_mask_operands(gm, src, 0, std::max<int32_t>(base.mw, 1));
+      src = gm.create_driver_pin(0);
+      set_ubits(src, std::max<int32_t>(base.mw, 1));
+    }
+    auto sra = make_node(Ntype_op::SRA);
+    setup_sink_by_name(sra, "a").connect_driver(src);
+    setup_sink_by_name(sra, "b").connect_driver(pos);
+    auto view = sra.create_driver_pin(0);
+    set_ubits(view, std::max<int32_t>(base.mw, 1));
+    return view;
+  }
+
+  // `base` with bits [pos, pos + width) replaced by the low `width` bits of
+  // `lane`, for a loop-affine `pos` (loop_affine). The masked RMW
+  // `(base & ~(m << pos)) | ((lane << pos) & (m << pos))` is not recognizable
+  // once `pos` is a constant: cprop keeps a word-wide And with a one-hole mask
+  // and an Or per write, so an expanded loop that updates a 256-bit matrix bit
+  // by bit stays 120 word-wide RMWs. This spelling folds, with a constant
+  // `pos = K`, to the slices `base[K + width ..]`, `lane`, `base[0 .. K]`:
+  //   view  = base >> pos                       (shift_window_view)
+  //   upper = set_mask(view, lane, 0, width) << pos
+  //   low   = base & ((1 << pos) - 1)
+  //   out   = (low | upper)[0 .. mw]
+  // `pos_max` bounds the position (a non-negative published range).
+  [[nodiscard]] Pin shift_window_write(const Val& base, const Pin& pos, int64_t pos_max, const Pin& view, int32_t width,
+                                       const Pin& lane) {
+    const int32_t mw   = std::max<int32_t>(base.mw, 1);
+    const int32_t pmax = static_cast<int32_t>(std::min<int64_t>(pos_max, std::numeric_limits<int32_t>::max() / 2));
+    Pin           src  = base.pin;
+    if (pin_can_be_negative(src)) {
+      auto gm = make_node(Ntype_op::Get_mask);
+      livehd::graph_util::connect_mask_operands(gm, src, 0, mw);
+      src = gm.create_driver_pin(0);
+      set_ubits(src, mw);
+    }
+
+    auto put = make_node(Ntype_op::Set_mask);
+    livehd::graph_util::connect_mask_operands(put, view, 0, width, lane);
+    auto put_dp = put.create_driver_pin(0);
+    set_ubits(put_dp, std::max(mw, width));
+
+    const int32_t up_mw = std::max(mw, pmax + width);
+    auto          up    = make_node(Ntype_op::SHL);
+    setup_sink_by_name(up, "a").connect_driver(put_dp);
+    setup_sink_by_name(up, "b").connect_driver(pos);
+    auto up_dp = up.create_driver_pin(0);
+    set_ubits(up_dp, up_mw);
+
+    auto pow = make_node(Ntype_op::SHL);
+    setup_sink_by_name(pow, "a").connect_driver(create_const(*g_, *Dlop::create_integer(1)));
+    setup_sink_by_name(pow, "b").connect_driver(pos);
+    auto pow_dp = pow.create_driver_pin(0);
+    set_ubits(pow_dp, pmax + 1);
+
+    auto low_mask = make_node(Ntype_op::Sum);
+    setup_sink_by_name(low_mask, "as").connect_driver(pow_dp);
+    setup_sink_by_name(low_mask, "bs").connect_driver(create_const(*g_, *Dlop::create_integer(1)));
+    auto low_mask_dp = low_mask.create_driver_pin(0);
+    set_ubits(low_mask_dp, std::max(pmax, 1));
+
+    auto low = make_node(Ntype_op::And);
+    setup_sink_by_name(low, "as").connect_driver(src);
+    setup_sink_by_name(low, "as").connect_driver(low_mask_dp);
+    auto low_dp = low.create_driver_pin(0);
+    set_ubits(low_dp, mw);
+
+    auto merged = make_node(Ntype_op::Or);
+    setup_sink_by_name(merged, "as").connect_driver(low_dp);
+    setup_sink_by_name(merged, "as").connect_driver(up_dp);
+    auto merged_dp = merged.create_driver_pin(0);
+    set_ubits(merged_dp, up_mw);
+    if (up_mw <= mw) {
+      return merged_dp;
+    }
+    // A window that may reach past the base's top bit: the variable keeps its
+    // own bits only, as the masked RMW's base-width inverse mask did.
+    auto keep = make_node(Ntype_op::Get_mask);
+    livehd::graph_util::connect_mask_operands(keep, merged_dp, 0, mw);
+    auto keep_dp = keep.create_driver_pin(0);
+    set_ubits(keep_dp, mw);
+    return keep_dp;
+  }
+
+  // `lane` reduced to its low `width` bits as a non-negative value (the bits a
+  // window write lands), so a mux of lanes is `width` bits wide.
+  [[nodiscard]] Pin window_lane(const Pin& lane, int32_t width) {
+    if (lane.is_const()) {
+      const auto& v = livehd::graph_util::const_of(lane);
+      if (!v.has_unknowns() && v.is_integer()) {
+        return create_const(*g_, *v.and_op(*Dlop::get_mask_value(width)));
+      }
+    }
+    if (!pin_can_be_negative(lane) && pin_mw_of(lane) > 0 && pin_mw_of(lane) <= width) {
+      return lane;
+    }
+    auto gm = make_node(Ntype_op::Get_mask);
+    livehd::graph_util::connect_mask_operands(gm, lane, 0, width);
+    auto out = gm.create_driver_pin(0);
+    set_ubits(out, width);
+    return out;
+  }
+
   // Build `(base & ~mask) | (shifted_value & mask)` using an explicitly
   // width-bounded inverse mask. This is the common full-value RMW used by
   // runtime bit and range writes; no dynamic Set_mask cell is required.
@@ -10050,6 +10395,23 @@ private:
     auto          base      = dynamic_update_base(loc_nid, dst, val, is_signed, hi_bits <= 12 ? int32_t{1} << hi_bits : 4097);
     const int32_t mw        = std::max<int32_t>(base.mw, 1);
 
+    const auto fixed = const_window_offset(m.pin, n.pin);
+    // A constant-width window at a loop-affine position: the spelling that
+    // folds to a constant-position slice once the loop is expanded.
+    if (fixed && *fixed > 0 && *fixed < 4096) {
+      if (const auto pos_max = shift_form_position(lo, n.pin)) {
+        const auto width  = static_cast<int32_t>(*fixed);
+        const auto view   = shift_window_view(base, n.pin);
+        const auto merged = shift_window_write(base, n.pin, *pos_max, view, width, iv.pin);
+        if (!is_signed) {
+          note_window_write(merged,
+                            Window_write{.base = base.pin, .lane = iv.pin, .pos = n.pin, .width = width, .mw = mw, .pos_max = *pos_max});
+        }
+        record_set_mask_result(lnast_->get_name(dst), dynamic_update_result(merged, mw, is_signed), mw);
+        return;
+      }
+    }
+
     auto shifted = make_node(Ntype_op::SHL);
     setup_sink_by_name(shifted, "a").connect_driver(iv.pin);
     setup_sink_by_name(shifted, "b").connect_driver(n.pin);
@@ -10060,7 +10422,7 @@ private:
     // constant run shifted into place, it is never reversed (no runtime
     // check), and a value of at most W non-negative bits already stays inside
     // it once shifted.
-    if (const auto fixed = const_window_offset(m.pin, n.pin)) {
+    if (fixed) {
       const int64_t w     = *fixed;
       auto          maskn = make_node(Ntype_op::SHL);
       setup_sink_by_name(maskn, "a").connect_driver(create_const(*g_, *Dlop::get_mask_value(static_cast<int>(w))));
@@ -10068,8 +10430,12 @@ private:
       auto mask_dp = maskn.create_driver_pin(0);
       set_ubits(mask_dp, mw);
       const bool inside = !pin_can_be_negative(iv.pin) && iv.mw > 0 && iv.mw <= w;
-      auto       merged = dynamic_update_result(lower_dynamic_mask_rmw(base, mask_dp, shifted_dp, inside), mw, is_signed);
-      record_set_mask_result(lnast_->get_name(dst), merged, mw);
+      auto       merged = lower_dynamic_mask_rmw(base, mask_dp, shifted_dp, inside);
+      if (!is_signed && w > 0 && w < 4096) {
+        note_window_write(merged,
+                          Window_write{.base = base.pin, .lane = iv.pin, .pos = n.pin, .width = static_cast<int32_t>(w), .mw = mw});
+      }
+      record_set_mask_result(lnast_->get_name(dst), dynamic_update_result(merged, mw, is_signed), mw);
       return;
     }
 
@@ -10200,12 +10566,16 @@ private:
     bool              is_signed = false;
     auto vv = signed_scalar_bit_write(nid, dst, val) ? dynamic_update_base(nid, dst, val, is_signed) : set_mask_base(val, nid);
 
-    auto node = make_node(Ntype_op::Set_mask);
-    livehd::graph_util::connect_mask_operands(node, vv.pin, low, high, leaf(ins).pin);
+    const auto lane = leaf(ins).pin;
+    auto       node = make_node(Ntype_op::Set_mask);
+    livehd::graph_util::connect_mask_operands(node, vv.pin, low, high, lane);
     int32_t mask_mw = high;
     auto    drv     = node.create_driver_pin(0);
     int32_t res_mw  = std::max(vv.mw, mask_mw);
     set_ubits(drv, res_mw);
+    if (!is_signed && !pw_base && high - low < 4096) {
+      note_window_write(drv, Window_write{.base = vv.pin, .lane = lane, .lo = low, .width = high - low, .mw = res_mw});
+    }
     record_set_mask_result(dst_name, dynamic_update_result(drv, res_mw, is_signed), res_mw);
   }
 
@@ -10623,14 +10993,34 @@ private:
     if (b.is_invalid()) {
       return;
     }
-    if (!Lnast_ntype::is_const(lnast_->get_type(b))) {
-      error_at(b,
-               {"sext-runtime-pos", "unsupported"},
-               "upass.tolg: sign-extend with a runtime sign position has no "
-               "lowering — the sign-bit position must be a "
-               "compile-time constant");
+    // A constant sign position comes from the operand itself (a literal, or
+    // a window `hi - lo` of structurally constant width), never from a
+    // published range alone: a range that is one value (a rolled loop's
+    // result after a `break`) is only as sound as its derivation, and a wrong
+    // one would hard-wire a wrong sign bit. Anything else is a runtime
+    // position (lower_runtime_sext), which folds once the value is constant.
+    std::optional<int64_t> known_pos;
+    if (Lnast_ntype::is_const(lnast_->get_type(b))) {
+      known_pos = const_val(b);
+    } else {
+      // The position of `x#sext[lo..=hi]` is `hi - lo`; with both bounds
+      // runtime (a loop index) a window of constant width (`i..=i`,
+      // `i..=i+3`) still has a constant position, which no range sees.
+      const auto bp = leaf(b).pin;
+      if (!bp.is_invalid() && !bp.is_const() && livehd::graph_util::type_op_of(bp.get_master_node()) == Ntype_op::Sum) {
+        const auto node = bp.get_master_node();
+        const auto as   = livehd::graph_util::inp_drivers_of(node, "as");
+        const auto bs   = livehd::graph_util::inp_drivers_of(node, "bs");
+        if (as.size() == 1 && bs.size() == 1) {
+          known_pos = const_window_offset(as.front(), bs.front());
+        }
+      }
     }
-    const auto pos  = const_val(b);
+    if (!known_pos) {
+      lower_runtime_sext(dst, a, b);
+      return;
+    }
+    const auto pos  = *known_pos;
     auto       av   = leaf(a);
     auto       node = make_node(Ntype_op::Sext);
     setup_sink_by_name(node, "a").connect_driver(av.pin);
@@ -10640,6 +11030,114 @@ private:
     set_bits(drv, mw > 0 ? mw : 1);
     set_sign(drv);
     record(lnast_->get_name(dst), drv, mw > 0 ? mw : 1);
+  }
+
+  // sext(dst, a, b) with a RUNTIME sign position b (`x#sext[i..=j]` whose
+  // bounds are a rolled loop's index: the position `j - i` is a compile-time
+  // value only once the loop is expanded). The Sext cell takes a constant bit
+  // count, so spell the same value with shifts that fold back to slices when
+  // b becomes constant:
+  //   p = min(b, M)          (a sign position at/above a's M bits reads a's
+  //                           own sign, so the result is a itself)
+  //   s = (a >> p)#[0]       (the sign bit; arithmetic for a negative a)
+  //   r = (a & ((2 << p) - 1)) - (s << (p + 1))
+  // A position that may be negative has no meaning and stays an error.
+  //
+  // The published range of b only decides that (an error or not); the
+  // hardware is sized from what b's PIN can hold, so a range tighter than the
+  // value cannot drop the clamp or truncate the shifts. A pin that may be
+  // negative reads as its non-negative bit pattern (a negative position never
+  // occurs, and it clamps to M).
+  void lower_runtime_sext(const Lnast_nid& dst, const Lnast_nid& a, const Lnast_nid& b) {
+    auto          av    = leaf(a);
+    auto          bv    = leaf(b);
+    const auto    range = range_of_operand(b);
+    const int32_t pb    = std::max<int32_t>(bv.mw, pin_mw_of(bv.pin));
+    if (!range || range->first < 0 || pb <= 0 || pb > 62) {
+      error_at(b,
+               {"sext-runtime-pos", "unsupported"},
+               "upass.tolg: sign-extend with a runtime sign position needs a non-negative bounded position — the sign-bit "
+               "position must be a compile-time constant or a loop index");
+      return;
+    }
+    const int32_t m      = std::max<int32_t>(av.mw, 1);
+    const int64_t pin_hi = (int64_t{1} << pb) - 1;  // the largest value b's pb bits hold
+    const int64_t top    = std::min<int64_t>(pin_hi, m);
+    const auto    k      = [&](int64_t v) { return create_const(*g_, *Dlop::create_integer(v)); };
+
+    Pin p = bv.pin;
+    if (pin_can_be_negative(p)) {
+      auto gm = make_node(Ntype_op::Get_mask);
+      livehd::graph_util::connect_mask_operands(gm, p, 0, pb);
+      p = gm.create_driver_pin(0);
+      set_ubits(p, pb);
+    }
+    if (pin_hi > m) {
+      auto gt = make_node(Ntype_op::GT);
+      setup_sink_by_name(gt, "as").connect_driver(p);
+      setup_sink_by_name(gt, "bs").connect_driver(k(m));
+      auto gt_dp = gt.create_driver_pin(0);
+      set_ubits(gt_dp, 1);
+      auto clamp = make_node(Ntype_op::Mux);
+      livehd::graph_util::setup_sink_pid(clamp, 0).connect_driver(gt_dp);
+      livehd::graph_util::setup_sink_pid(clamp, 1).connect_driver(p);
+      livehd::graph_util::setup_sink_pid(clamp, 2).connect_driver(k(m));
+      p = clamp.create_driver_pin(0);
+      set_ubits(p, mw_of_val(m));
+    }
+    const int32_t p_mw = mw_of_val(top + 1);
+
+    auto p1 = make_node(Ntype_op::Sum);
+    setup_sink_by_name(p1, "as").connect_driver(p);
+    setup_sink_by_name(p1, "as").connect_driver(k(1));
+    auto p1_dp = p1.create_driver_pin(0);
+    set_ubits(p1_dp, p_mw);
+
+    auto sra = make_node(Ntype_op::SRA);
+    setup_sink_by_name(sra, "a").connect_driver(av.pin);
+    setup_sink_by_name(sra, "b").connect_driver(p);
+    auto sra_dp = sra.create_driver_pin(0);
+    if (pin_can_be_negative(av.pin)) {
+      set_sbits(sra_dp, m);
+    } else {
+      set_ubits(sra_dp, m);
+    }
+    auto sign = make_node(Ntype_op::Get_mask);
+    livehd::graph_util::connect_mask_operands(sign, sra_dp, 0, 1);
+    auto sign_dp = sign.create_driver_pin(0);
+    set_ubits(sign_dp, 1);
+
+    const auto wide = static_cast<int32_t>(top) + 2;
+    auto       pow  = make_node(Ntype_op::SHL);
+    setup_sink_by_name(pow, "a").connect_driver(k(1));
+    setup_sink_by_name(pow, "b").connect_driver(p1_dp);
+    auto pow_dp = pow.create_driver_pin(0);
+    set_ubits(pow_dp, wide);
+
+    auto low_mask = make_node(Ntype_op::Sum);
+    setup_sink_by_name(low_mask, "as").connect_driver(pow_dp);
+    setup_sink_by_name(low_mask, "bs").connect_driver(k(1));
+    auto low_mask_dp = low_mask.create_driver_pin(0);
+    set_ubits(low_mask_dp, wide - 1);
+
+    auto low = make_node(Ntype_op::And);
+    setup_sink_by_name(low, "as").connect_driver(av.pin);
+    setup_sink_by_name(low, "as").connect_driver(low_mask_dp);
+    auto low_dp = low.create_driver_pin(0);
+    set_ubits(low_dp, wide - 1);
+
+    auto neg = make_node(Ntype_op::SHL);
+    setup_sink_by_name(neg, "a").connect_driver(sign_dp);
+    setup_sink_by_name(neg, "b").connect_driver(p1_dp);
+    auto neg_dp = neg.create_driver_pin(0);
+    set_ubits(neg_dp, wide);
+
+    auto res = make_node(Ntype_op::Sum);
+    setup_sink_by_name(res, "as").connect_driver(low_dp);
+    setup_sink_by_name(res, "bs").connect_driver(neg_dp);
+    auto res_dp = res.create_driver_pin(0);
+    set_sbits(res_dp, wide);
+    record(lnast_->get_name(dst), res_dp, wide);
   }
 
   // `~x` — bitwise NOT (the only unary lowered through here).
@@ -11334,7 +11832,10 @@ private:
       // A wire arm that writes nothing selects nothing: skip it (and the seed
       // arm, already the chain's base) instead of muxing in a don't-care.
       auto skip_arm = [&](int i, bool writes) { return !wire_fill.is_invalid() && (i == wire_seed || !writes); };
-      Pin  cur      = (ew != else_writes.end()) ? ew->second : pre;
+      if (wire_fill.is_invalid() && merge_window_writes(var, branches, has_else, last_cond, pre)) {
+        continue;
+      }
+      Pin cur = (ew != else_writes.end()) ? ew->second : pre;
 
       // The merged value's width is the widest among the branch sources;
       // mw_lookup alone holds whatever the LAST write recorded (or 1 for a
@@ -11433,6 +11934,198 @@ private:
       // binding first left a signed driver behind an unsigned buffer.
       maybe_bind_wire_shadow(var, cur, mw);
     }
+  }
+
+  // lower_if, one variable: every arm that writes `var` wrote the SAME window
+  // of the SAME pre-`if` value `pre` (Window_write) -- `if a { v#[k] = 0 }
+  // elif b { v#[k] = 1 }`, the per-bit update of a packed state word. Mux the
+  // arms' narrow LANES (an arm that does not write keeps the old lane through
+  // the write enable) and write the window once. The per-arm merge would
+  // instead select the whole word per arm: in a loop that updates a 256-bit
+  // matrix one bit per iteration, a 256-bit mux per arm and iteration.
+  // Returns false, building nothing, when the arms do not share one window.
+  //
+  // Only inside a lifted loop body (lifted_loop_body_): that is where the
+  // word-wide per-arm mux multiplies by the trip count. Elsewhere the per-arm
+  // merge stays exactly as it was -- on ordinary straight-line code (the
+  // per-field reset idiom `if rst { q#[a..b] = 0 } elif v { q#[a..b] = d }`)
+  // the narrow-lane form cost synthesis delay, and the loop lowering must not
+  // change what non-loop code compiles to.
+  //
+  // `unique` (lower_unique_merge): the arms are exclusive, so the enable and
+  // the lane are each ONE Hotmux over the arm conditions instead of a
+  // priority chain -- the one-hot information survives (a `unique case` in
+  // the emitted Verilog), as the whole-word Hotmux kept it.
+  bool merge_window_writes(const std::string& var, const std::vector<Branch>& branches, bool has_else, int last_cond,
+                           const Pin& pre, bool unique = false) {
+    if (!lifted_loop_body_ || pre.is_invalid() || pre.is_const()) {
+      return false;
+    }
+    const Window_write*              first = nullptr;
+    std::vector<const Window_write*> arm(branches.size(), nullptr);
+    for (size_t i = 0; i < branches.size(); ++i) {
+      const auto wr = branches[i].writes.find(var);
+      if (wr == branches[i].writes.end()) {
+        continue;
+      }
+      const auto it = window_writes_.find(wr->second);
+      if (it == window_writes_.end() || it->second.base != pre) {
+        return false;
+      }
+      const auto& ww = it->second;
+      if (first == nullptr) {
+        first = &ww;
+      } else if (ww.width != first->width || ww.mw != first->mw || ww.pos.is_invalid() != first->pos.is_invalid()
+                 || (ww.pos.is_invalid() ? ww.lo != first->lo : !same_value(ww.pos, first->pos))
+                 || (ww.pos_max >= 0) != (first->pos_max >= 0)) {
+        return false;
+      }
+      arm[i] = &ww;
+    }
+    if (first == nullptr) {
+      return false;
+    }
+    // A data-dependent position written by ONE arm gains nothing: `c ? rmw : v`
+    // and the enable-gated mask are the same gates bit for bit, and the merged
+    // form only adds a lane mux and a mask net (byte_lane_write).
+    if (!first->pos.is_invalid() && first->pos_max < 0 && std::ranges::count(arm, nullptr) + 1 >= static_cast<std::ptrdiff_t>(arm.size())) {
+      return false;
+    }
+    const Window_write win   = *first;  // `arm` points into window_writes_, which note_window_write below may rehash
+    const auto         width = win.width;
+    std::vector<Pin>   lanes(branches.size());
+    for (size_t i = 0; i < branches.size(); ++i) {
+      if (arm[i] != nullptr) {
+        lanes[i] = window_lane(arm[i]->lane, width);
+      }
+    }
+
+    const auto one  = create_const(*g_, *Dlop::create_integer(1));
+    const auto zero = create_const(*g_, *Dlop::create_integer(0));
+    const auto mux  = [&](const Pin& sel, const Pin& f, const Pin& t, int32_t bits) {
+      if (f == t) {
+        return f;
+      }
+      auto node = make_node(Ntype_op::Mux);
+      livehd::graph_util::setup_sink_pid(node, 0).connect_driver(sel);
+      livehd::graph_util::setup_sink_pid(node, 1).connect_driver(f);
+      livehd::graph_util::setup_sink_pid(node, 2).connect_driver(t);
+      auto out = node.create_driver_pin(0);
+      set_ubits(out, bits);
+      return out;
+    };
+    const bool else_writes = has_else && arm.back() != nullptr;
+    Pin        en          = else_writes ? one : zero;
+    bool       always      = else_writes;  // every path writes the window
+    Pin        lane        = else_writes ? lanes.back() : Pin{};
+    if (unique) {
+      // One Hotmux per value over the exclusive conditions; the none-of slot
+      // is the else arm. A slot whose arm does not write the window holds a
+      // lane some arm does write (a don't-care: the enable keeps the old lane
+      // there), so only the enable says who writes.
+      const auto n_conds = static_cast<size_t>(last_cond + 1);
+      Pin        fill    = lane;
+      for (size_t i = 0; i < n_conds && fill.is_invalid(); ++i) {
+        fill = lanes[i];
+      }
+      always = else_writes && std::all_of(arm.begin(), arm.begin() + static_cast<std::ptrdiff_t>(n_conds), [](const auto* a) {
+                 return a != nullptr;
+               });
+      const auto hotmux = [&](const std::vector<Pin>& vals, const Pin& none, int32_t bits) {
+        if (std::ranges::all_of(vals, [&](const Pin& v) { return v == none; })) {
+          return none;
+        }
+        auto node = make_node(Ntype_op::Hotmux);
+        for (size_t i = 0; i < n_conds; ++i) {
+          livehd::graph_util::setup_sink_pid(node, static_cast<hhds::Port_id>(2 * i)).connect_driver(branches[i].cond);
+          livehd::graph_util::setup_sink_pid(node, static_cast<hhds::Port_id>(2 * i + 1)).connect_driver(vals[i]);
+        }
+        livehd::graph_util::setup_sink_pid(node, static_cast<hhds::Port_id>(2 * n_conds)).connect_driver(none);
+        auto out = node.create_driver_pin(0);
+        set_ubits(out, bits);
+        return out;
+      };
+      std::vector<Pin> lane_vals(n_conds);
+      std::vector<Pin> en_vals(n_conds);
+      for (size_t i = 0; i < n_conds; ++i) {
+        lane_vals[i] = arm[i] != nullptr ? lanes[i] : fill;
+        en_vals[i]   = arm[i] != nullptr ? one : zero;
+      }
+      lane = hotmux(lane_vals, else_writes ? lanes.back() : fill, width);
+      if (!always) {
+        en = hotmux(en_vals, else_writes ? one : zero, 1);
+      }
+    } else {
+      // Same priority chain as the per-variable merge: the else arm (if it
+      // writes) is the base, then each condition from the last to the first.
+      for (int i = last_cond; i >= 0; --i) {
+        const bool writes = arm[static_cast<size_t>(i)] != nullptr;
+        if (!(writes && always)) {
+          en     = mux(branches[static_cast<size_t>(i)].cond, en, writes ? one : zero, 1);
+          always = false;
+        }
+        if (writes) {
+          const auto& li = lanes[static_cast<size_t>(i)];
+          lane           = lane.is_invalid() ? li : mux(branches[static_cast<size_t>(i)].cond, lane, li, width);
+        }
+      }
+    }
+
+    const Val base{pre, win.mw};
+    Pin       out;
+    Pin       final_lane = lane;
+    if (win.pos.is_invalid()) {
+      if (!always) {
+        auto old = make_node(Ntype_op::Get_mask);
+        livehd::graph_util::connect_mask_operands(old, pre, win.lo, win.lo + width);
+        auto old_dp = old.create_driver_pin(0);
+        set_ubits(old_dp, width);
+        final_lane = mux(en, old_dp, lane, width);
+      }
+      auto node = make_node(Ntype_op::Set_mask);
+      livehd::graph_util::connect_mask_operands(node, pre, win.lo, win.lo + width, final_lane);
+      out = node.create_driver_pin(0);
+      set_ubits(out, win.mw);
+    } else if (win.pos_max >= 0) {
+      const auto view = shift_window_view(base, win.pos);
+      if (!always) {
+        auto old = make_node(Ntype_op::Get_mask);
+        livehd::graph_util::connect_mask_operands(old, view, 0, width);
+        auto old_dp = old.create_driver_pin(0);
+        set_ubits(old_dp, width);
+        final_lane = mux(en, old_dp, lane, width);
+      }
+      out = shift_window_write(base, win.pos, win.pos_max, view, width, final_lane);
+    } else {
+      // A data-dependent position: gate the window mask with the enable
+      // instead of reading the old lane back (no word-wide shift for it).
+      Pin run = create_const(*g_, *Dlop::get_mask_value(width));
+      if (!always) {
+        run = mux(en, zero, run, width);
+      }
+      auto maskn = make_node(Ntype_op::SHL);
+      setup_sink_by_name(maskn, "a").connect_driver(run);
+      setup_sink_by_name(maskn, "b").connect_driver(win.pos);
+      auto mask_dp = maskn.create_driver_pin(0);
+      set_ubits(mask_dp, win.mw);
+      auto shifted = make_node(Ntype_op::SHL);
+      setup_sink_by_name(shifted, "a").connect_driver(lane);
+      setup_sink_by_name(shifted, "b").connect_driver(win.pos);
+      auto shifted_dp = shifted.create_driver_pin(0);
+      set_ubits(shifted_dp, win.mw);
+      out = lower_dynamic_mask_rmw(base, mask_dp, shifted_dp, always);
+    }
+    note_window_write(out,
+                      Window_write{.base    = pre,
+                                   .lane    = final_lane,
+                                   .pos     = win.pos,
+                                   .lo      = win.lo,
+                                   .width   = width,
+                                   .mw      = win.mw,
+                                   .pos_max = win.pos_max});
+    bind_result(var, out, win.mw);
+    maybe_bind_wire_shadow(var, out, win.mw);
+    return true;
   }
 
   // Prove coverage from the SOURCE input declaration, never from inferred pin
@@ -11547,6 +12240,14 @@ private:
         has_pre = true;
       } else {
         pre = nil_pin();
+      }
+      // Every writing arm updates the same window of `pre`: merge the narrow
+      // lanes, through Hotmuxes over the same exclusive conditions.
+      // (An exhaustive match keeps the whole-word Hotmux: its none-of slot
+      // must not hold the old value, see covers_input_domain.)
+      if (!exhaustive && has_pre && wire_fill.is_invalid()
+          && merge_window_writes(var, branches, has_else, n_conds - 1, pre, /*unique=*/true)) {
+        continue;
       }
       Pin else_val = has_ev ? ew->second : pre;
 
@@ -11745,6 +12446,16 @@ private:
   absl::flat_hash_map<std::string, Masked_pw_base>    masked_pw_bases_;
   absl::flat_hash_map<std::string, Masked_pw_val>     masked_pw_vals_;
   Pin                                                 last_rmw_mask_;  // the mask of the last lower_dynamic_mask_rmw
+  // Window writes by result pin (Window_write; merge_window_writes).
+  absl::flat_hash_map<Pin, Window_write>              window_writes_;
+  // Input pins of a lifted loop body that hold one value per loop occurrence
+  // (upass::is_loop_index_port): a bit position computed only from these and
+  // constants is constant wherever the loop is expanded (see loop_affine).
+  absl::flat_hash_set<Pin>                            loop_index_pins_;
+  // This unit is a rolled loop's lifted body (an input is a loop-index port):
+  // the only place merge_window_writes rewrites an `if` merge.
+  bool                                                lifted_loop_body_ = false;
+  absl::flat_hash_map<Pin, std::pair<int64_t, int64_t>> loop_index_ranges_;  // their published ranges
   absl::flat_hash_map<std::string, Array_scalar_view> array_scalar_views_;
   absl::flat_hash_set<std::string>                    comptime_array_names_;
   absl::flat_hash_set<std::string>                    comptime_scalar_names_;
@@ -14538,6 +15249,95 @@ uPass_tolg::Registry uPass_tolg::lowering_order(const Registry& registry, const 
     }
   }
   return order;
+}
+
+uPass_tolg::Registry uPass_tolg::unreferenced_private_combs(const Registry& registry, std::string_view top) {
+  absl::flat_hash_map<std::string_view, std::vector<size_t>> by_graph;
+  absl::flat_hash_map<std::string_view, const Lnast*>        by_unit;
+  for (size_t i = 0; i < registry.size(); ++i) {
+    if (registry[i]) {
+      by_graph[registry[i]->get_graph_name()].push_back(i);
+      by_unit.try_emplace(registry[i]->get_top_module_name(), registry[i].get());
+    }
+  }
+  // `pub` lives in the owning FILE unit's pub list (`file.entity`); a nested
+  // helper (`file.outer.helper`) or a lifted loop (`file.f.__loop0`) is owned by
+  // a lambda unit with no pub list. An owner absent from this compile (a loaded
+  // library) cannot be checked: keep the unit.
+  const auto is_pub = [&](const Lnast& ln) {
+    const auto full = ln.get_top_module_name();
+    const auto dot  = full.rfind('.');
+    if (dot == std::string_view::npos) {
+      return true;
+    }
+    const auto owner = by_unit.find(full.substr(0, dot));
+    if (owner == by_unit.end()) {
+      return true;
+    }
+    const auto  entity = full.substr(dot + 1);
+    const auto& pubs   = owner->second->get_pub_list();
+    return std::any_of(pubs.begin(), pubs.end(), [&](const auto& p) { return p.name == entity; });
+  };
+  const auto prunable = [&](const Lnast& ln) {
+    return ln.get_lambda_kind() == "comb" && !ln.is_template() && !ln.is_pre_elaborated() && ln.get_top_module_name() != top
+           && !is_pub(ln);
+  };
+  std::vector<bool>   reached(registry.size(), false);
+  std::vector<size_t> work;
+  const auto          reach_group = [&](std::string_view graph_name) {
+    const auto it = by_graph.find(graph_name);
+    if (it == by_graph.end()) {
+      return;
+    }
+    for (const size_t j : it->second) {
+      // A template shares its name with its identity specialization, but its
+      // own (unspecialized) body lowers nothing: never expand it.
+      if (!reached[j]) {
+        reached[j] = true;
+        if (!registry[j]->is_template()) {
+          work.push_back(j);
+        }
+      }
+    }
+  };
+  for (size_t i = 0; i < registry.size(); ++i) {
+    if (registry[i] && !registry[i]->is_template() && !prunable(*registry[i])) {
+      reached[i] = true;
+      work.push_back(i);
+    }
+  }
+  // Callee resolution as lower_func_call's (the runner's lookup rules, else a
+  // name spelled through an import binding), plus every unit whose graph name
+  // the call spells: a superset, so nothing a call can bind is dropped.
+  while (!work.empty()) {
+    const auto& ln = registry[work.back()];
+    work.pop_back();
+    std::optional<absl::flat_hash_map<std::string, std::string>> imports;
+    for (const auto& callee_name : collect_callee_names(ln)) {
+      reach_group(callee_name);
+      auto callee = resolve_callee_lnast(callee_name, registry, ln->get_top_module_name());
+      if (!callee) {
+        if (!imports) {
+          imports = top_level_import_bindings(*ln);
+        }
+        const auto dot = callee_name.find('.');
+        if (const auto it = imports->find(callee_name.substr(0, dot)); it != imports->end()) {
+          const auto target = dot == std::string::npos ? it->second : it->second + callee_name.substr(dot);
+          callee            = resolve_callee_lnast(target, registry, ln->get_top_module_name());
+        }
+      }
+      if (callee) {
+        reach_group(callee->get_graph_name());
+      }
+    }
+  }
+  Registry out;
+  for (size_t i = 0; i < registry.size(); ++i) {
+    if (registry[i] && !reached[i] && prunable(*registry[i])) {
+      out.push_back(registry[i]);
+    }
+  }
+  return out;
 }
 
 void uPass_tolg::set_prior_units(const std::vector<std::string>& units) {

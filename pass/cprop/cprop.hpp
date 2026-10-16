@@ -130,13 +130,19 @@ protected:
   // re-attaches the low part. true = node replaced.
   bool low_lane(hhds::Node_class& node);
   bool low_lanes_ = false;
+  // The constructor's `low_lanes` opt-in doubles as "bitwidth runs after this
+  // sweep": rewrites that mint cells with no width stamp (low-lane narrowing,
+  // the accumulation guard in scalar_mux) run only then. Bitwidth_rewrite
+  // reuses scalar_mux AFTER inference converged, so it must never see one.
+  [[nodiscard]] bool may_emit_unstamped() const { return low_lanes_; }
   void normalize_emitted(hhds::Node_class& node);
   void scalar_node(hhds::Node_class& node);
 
 public:
   Cprop() = default;
-  // `low_lanes`: also narrow operations over known low lanes. It creates cells
-  // with no width stamp, so only callers that run bitwidth afterwards set it.
+  // `low_lanes`: also narrow operations over known low lanes and move
+  // accumulation guards onto their terms. Both create cells with no width
+  // stamp, so only callers that run bitwidth afterwards set it.
   explicit Cprop(bool low_lanes) : low_lanes_(low_lanes) {}
   // Rewrites unlimited-precision values without consulting width/sign hints.
   void do_trans(const std::shared_ptr<hhds::Graph>& g);

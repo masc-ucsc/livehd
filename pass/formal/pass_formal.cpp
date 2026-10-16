@@ -100,6 +100,52 @@ Fprop fprop_parts(const hhds::Node_class& node) {
   return f;
 }
 
+// Does any DEFINITION reachable from `roots` (through Sub bodies) hold an
+// assume-kind fproperty? A definition-level scan, O(definition nodes): the
+// hierarchy contract preflight only ever solves assumptions, so without one it
+// has nothing to do -- yet its design-wide occurrence census walks every root's
+// virtually-flat hierarchy in forward (topological) order to find out. On minion
+// that walk alone was ~9 s of a ~12 s pass.formal; the pass's wall-clock budget
+// (compile.formal.timeout, 10 s) then ran out part-way through the per-module
+// obligations, and WHICH Hotmux checks were left as `runtime_check` moved from
+// run to run with machine load (minion_compile_incremental's cold compiles were
+// not reproducible).
+bool any_assume_reachable(const std::vector<std::shared_ptr<hhds::Graph>>& roots) {
+  absl::flat_hash_set<hhds::Gid> seen;
+  std::vector<hhds::Graph*>      work;
+  for (const auto& g : roots) {
+    if (g != nullptr && seen.insert(g->get_gid()).second) {
+      work.push_back(g.get());
+    }
+  }
+  // Keep the shared_ptrs alive while their raw pointers sit in `work`.
+  std::vector<std::shared_ptr<hhds::Graph>> held;
+  while (!work.empty()) {
+    auto* g = work.back();
+    work.pop_back();
+    for (auto node : g->body().nodes()) {
+      if (gu::type_op_of(node) != Ntype_op::Sub) {
+        continue;
+      }
+      auto sio = node.get_subnode_io();
+      if (sio == nullptr) {
+        continue;
+      }
+      if (sio->get_name() == gu::fproperty_module_name) {
+        if (livehd::lec::is_assume_kind(fprop_parts(node).kind)) {
+          return true;
+        }
+        continue;
+      }
+      if (auto child = node.get_subnode_graph(); child && seen.insert(child->get_gid()).second) {
+        work.push_back(child.get());
+        held.push_back(std::move(child));
+      }
+    }
+  }
+  return false;
+}
+
 // A refuted property (the solver found a definitive counterexample). Per
 // 2f-formal the FAIL is RECORDED but the compile CONTINUES (non-fatal .emit()),
 // and the caller keeps the runtime check without ever eliding it or using it to
@@ -402,7 +448,10 @@ void Pass_formal::work(Eprp_var& var) {
   using Prop_key = std::pair<hhds::Gid, hhds::Nid>;
   auto prop_key  = [](const hhds::Node_class& n) { return Prop_key{n.get_graph()->get_gid(), n.get_debug_nid()}; };
   absl::flat_hash_set<Prop_key> hier_discharged;
-  if (truthy(var.get("hier_preflight", "true"))) {
+  // No assumption anywhere below the roots: the preflight below solves nothing
+  // and discharges nothing, so skip its whole-hierarchy occurrence walks (see
+  // any_assume_reachable -- they otherwise dominate the pass budget).
+  if (truthy(var.get("hier_preflight", "true")) && any_assume_reachable(var.graphs)) {
     struct Hier_prop_state {
       hhds::Node_class node;  // the definition-level fproperty to discharge
       int              total     = 0;

@@ -1,0 +1,77 @@
+// Generic mods for ../generic_loop_default_import.prp. Each flips lane w (bits
+// 2w+1..2w) of `a` when b#[w] is set; the generic `W` is never bound by the
+// default-generics call sites, which is what makes them IDENTITY specializations.
+const cfg = import("gl_cfg")
+
+pub mod flip_loop<W=8>(a:U8, b:U4) -> (o:U8@[]) {
+  if cfg.no_loop {
+    o = a
+  } else {
+    mut t:U8 = a
+    for w in 0..<b.[bits] {
+      if b#[w] == 1 {
+        t#[(w*2)..+2] = ~a#[(w*2)..+2]
+      }
+    }
+    o = t
+  }
+}
+
+pub mod flip_flat<W=8>(a:U8, b:U4) -> (o:U8@[]) {
+  if cfg.flat {
+    mut t:U8 = a
+    if b#[0] == 1 { t#[0..+2] = ~a#[0..+2] }
+    if b#[1] == 1 { t#[2..+2] = ~a#[2..+2] }
+    if b#[2] == 1 { t#[4..+2] = ~a#[4..+2] }
+    if b#[3] == 1 { t#[6..+2] = ~a#[6..+2] }
+    o = t
+  } else {
+    mut t:U8 = a
+    for w in 0..<b.[bits] {
+      if b#[w] == 1 {
+        t#[(w*2)..+2] = ~a#[(w*2)..+2]
+      }
+    }
+    o = t
+  }
+}
+
+pub mod flip_rt<W=8>(a:U8, b:U4) -> (o:U8@[]) {
+  if b == 0 {
+    o = a
+  } else {
+    mut t:U8 = a
+    for w in 0..<b.[bits] {
+      if b#[w] == 1 {
+        t#[(w*2)..+2] = ~a#[(w*2)..+2]
+      }
+    }
+    o = t
+  }
+}
+
+// A source-UNROLLED loop (untyped carry `lo`) declaring a `const` per
+// iteration, then a ROLLED one. The stale identity clone was re-walked from its
+// ELABORATED body, where the unrolled iterations' `const h` copies share one
+// scope: semacheck `redeclaration of variable 'h' in the same scope`.
+pub mod flip_two<W=8>(a:U8, b:U4) -> (o:U8@[]) {
+  if cfg.no_loop {
+    o = a
+  } else {
+    mut lo = a
+    for w in 0..<2 {
+      const h = a#[(w*2)..+2]
+      if b#[w] == 1 {
+        lo#[(w*2)..+2] = ~h
+      }
+    }
+    mut t:U8 = lo
+    for w in 2..<4 {
+      const h = lo#[(w*2)..+2]
+      if b#[w] == 1 {
+        t#[(w*2)..+2] = ~h
+      }
+    }
+    o = t
+  }
+}

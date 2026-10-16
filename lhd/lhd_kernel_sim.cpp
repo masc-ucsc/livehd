@@ -6,7 +6,9 @@
 #include <algorithm>
 #include <atomic>
 #include <cctype>
+#include <csignal>
 #include <cstdint>
+#include <cstring>
 #include <filesystem>
 #include <format>
 #include <fstream>
@@ -41,6 +43,41 @@ namespace lhd {
 // ---- sim --------------------------------------------------------------------
 
 std::string shell_quote(const std::string& s);  // defined below (check section)
+
+namespace {
+// The signal that ended a popen()ed command, or 0. A shell that exec()s its
+// command leaves the signal in the wait status; one that forks reports it as
+// exit status 128+N (the generated driver itself only exits 0, 1 or 2).
+int terminating_signal(int status) {
+  if (WIFSIGNALED(status)) {
+    return WTERMSIG(status);
+  }
+  if (WIFEXITED(status) && WEXITSTATUS(status) > 128 && WEXITSTATUS(status) < 128 + NSIG) {
+    return WEXITSTATUS(status) - 128;
+  }
+  return 0;
+}
+
+std::string signal_name(int signal) {
+  switch (signal) {
+    case SIGILL : return "SIGILL";
+    case SIGSEGV: return "SIGSEGV";
+    case SIGFPE : return "SIGFPE";
+    case SIGBUS : return "SIGBUS";
+    case SIGABRT: return "SIGABRT";
+    case SIGTRAP: return "SIGTRAP";
+    case SIGKILL: return "SIGKILL";
+    case SIGTERM: return "SIGTERM";
+    case SIGINT : return "SIGINT";
+    default     : return std::format("signal {}", signal);
+  }
+}
+
+std::string signal_description(int signal) {
+  const char* text = ::strsignal(signal);
+  return text != nullptr ? std::string{text} : std::string{"unknown signal"};
+}
+}  // namespace
 
 // ---- `sim --query`: the batched JSON query API (todo/livehd/2f-sim.html) ------
 //
@@ -1917,7 +1954,8 @@ void sim_command(Options& opts, Result& res) {
     return;  // status stays pass
   }
 
-  auto capture = [](const std::string& c, int& rc) {
+  // `killed_by` (optional) receives the signal that ended the command, or 0.
+  auto capture = [](const std::string& c, int& rc, int* killed_by = nullptr) {
     std::string out;
     char        buf[4096];
     FILE*       p = ::popen(c.c_str(), "r");
@@ -1931,6 +1969,9 @@ void sim_command(Options& opts, Result& res) {
     }
     int st = ::pclose(p);
     rc     = (WIFEXITED(st) ? WEXITSTATUS(st) : -1);
+    if (killed_by != nullptr) {
+      *killed_by = terminating_signal(st);
+    }
     return out;
   };
 
@@ -3020,12 +3061,13 @@ void sim_command(Options& opts, Result& res) {
   // through to the user's stderr UNCHANGED — that is where the driver prints its
   // warnings (e.g. a `--arg` that matches no test parameter) and usage errors, so
   // they stay visible in JSON mode too (not only in the pretty relay below).
-  int         rc = 0;
+  int         rc        = 0;
+  int         killed_by = 0;
   std::string out;
   tune.before_run();
   {
     Phase_timer run_phase(res, "sim.run");  // the driver binary itself, argv assembly excluded
-    out = capture(std::format("{}{}", shell_quote(exe), run_args), rc);
+    out = capture(std::format("{}{}", shell_quote(exe), run_args), rc, &killed_by);
   }
 
   // Read back the per-test result array (present whenever the driver ran, even on
@@ -3118,8 +3160,22 @@ void sim_command(Options& opts, Result& res) {
     res.error_message = (!test_sel.empty() && n_run == 0) ? std::format("no test matched '{}' in {}", test_sel, file)
                                                           : std::format("the sim driver rejected an argument in {}", file);
     res.exit_code     = exit_code_for(res.error_class);
+  } else if (killed_by != 0) {
+    // The driver CRASHED (no test verdict): name the signal, never a bare exit
+    // code (-1, or the shell's 128+N). A crash of generated code is a LiveHD
+    // bug, so the other backend is the first thing to compare against.
+    res.status        = "fail";
+    res.error_class   = "assert";
+    res.error_message = std::format("the sim driver was killed by signal {} ({}) after {} test verdict(s){}",
+                                    signal_name(killed_by),
+                                    signal_description(killed_by),
+                                    n_run,
+                                    killed_by == SIGILL ? "; an illegal instruction in generated code is a simulator bug, compare "
+                                                       "with --set sim.tune.backend=slop"
+                                                     : "");
+    res.exit_code     = exit_code_for(res.error_class);
   } else {
-    // rc == 1 (a test's assert fired) or rc < 0 (the driver crashed / signaled).
+    // rc == 1 (a test's assert fired) or rc < 0 (the driver could not run).
     res.status        = "fail";
     res.error_class   = "assert";
     res.error_message = (n_fail > 0 && n_run > 0) ? std::format("{} of {} test(s) failed", n_fail, n_run)

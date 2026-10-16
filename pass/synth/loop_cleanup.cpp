@@ -12,6 +12,7 @@
 #include "inline_sub.hpp"
 #include "node_util.hpp"
 #include "occurrence_materialize.hpp"
+#include "specialize.hpp"
 
 namespace livehd::synth {
 namespace {
@@ -225,6 +226,19 @@ bool cleanup_loop_bodies(const std::vector<std::shared_ptr<hhds::Graph>>& graphs
       changed = true;
     }
     if (changed) {
+      // The inlined iterations took their instance's color; the cells the
+      // folding below creates (a constant-position slice or splice of a packed
+      // word the iteration read or wrote at its index, an accumulation guard
+      // moved onto its term) take a colored neighbor's, as pass.specialize's
+      // do. Uncolored, they formed a color-0 region of their own: a rolled
+      // loop's per-bit state update then crossed that region and came back as
+      // fresh region inputs, so ABC no longer saw that an unwritten bit is the
+      // register's own value (one mux per state bit) nor the grant logic
+      // behind each written one.
+      absl::flat_hash_set<uint64_t> existed;
+      for (const auto node : graph->body().nodes()) {
+        existed.insert(static_cast<uint64_t>(node.get_debug_nid()));
+      }
       // Reduction may have hidden a loop's control expression in a shared
       // pattern or extracted parallel body. Once iteration inputs become
       // constants, specialize those sites so index-dependent data routing can
@@ -274,6 +288,7 @@ bool cleanup_loop_bodies(const std::vector<std::shared_ptr<hhds::Graph>>& graphs
           }
         }
       } while (specialized);
+      livehd::specialize::inherit_colors(*graph, &existed);
     }
     return true;
   };

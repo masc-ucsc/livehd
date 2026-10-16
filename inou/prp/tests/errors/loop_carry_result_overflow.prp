@@ -1,0 +1,19 @@
+/*
+:name: loop_carry_result_overflow
+:type: error
+:error: may not fit its declared range
+*/
+// A ROLLED loop's (the default) result holds what the loop produced, not the
+// value the carry had before it: `pushed` leaves the loop as a 10-bit value,
+// so narrowing it into a U4 needs `wrap`, exactly as with compile.unroll=true.
+// The rolled result used to keep the pre-loop range ([0, 0]), so the write was
+// accepted silently (and a needed `wrap` was reported as unnecessary).
+pub comb loop_carry_result_overflow(push_data:U10, push_sendable:U2) -> (o:U4) {
+  mut pushed:U10 = 0
+  for i in 0..<2 {
+    if push_sendable > i {
+      pushed#[(i*5)..+5] = push_data#[(i*5)..+5]
+    }
+  }
+  o = pushed  // locate_error_here
+}

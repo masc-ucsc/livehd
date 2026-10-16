@@ -1,0 +1,44 @@
+// This file is distributed under the BSD 3-Clause License. See LICENSE for details.
+// A loop carry SEED read from a register (a XiangShan RenameTableWrapper
+// reduction). The carry-in sink of a loop has two drivers, the seed and the
+// loop's own carry-out self edge; the LLVM backend bound the self edge when it
+// sorted first, so `next`/`previous` started from 0 instead of the table and
+// every cycle without a write to an early lane lost the old value.
+pub mod seed_table::[timecheck = false](clock:Clock, reset:U1, writes:U72) -> (old:U64@[], table_q:U8@[]) {
+  reg table:U8:[reset_pin=reset, async = true] = 0
+  reg old_pdest:U64:[reset_pin=reset, async = true] = 0
+  for entry in 0 ..< 1 {
+    mut next:U8 = table#[(entry*8) ..+ 8]
+    for lane in 0 ..< 8 {
+      const write = writes#[(lane*9) ..+ 9]
+      if write#[8] != 0 { next = write#[0 ..< 8] }
+    }
+    table#[(entry*8) ..+ 8] = next
+  }
+  old = old_pdest
+  table_q = table
+  for lane in 0 ..< 8 {
+    const write     = writes#[(lane*9) ..+ 9]
+    mut previous:U8 = table#[0 ..+ 8]
+    for earlier in 0 ..< lane {
+      const older = writes#[(earlier*9) ..+ 9]
+      if older#[8] != 0 { previous = older#[0 ..< 8] }
+    }
+    old_pdest#[(lane*8) ..+ 8] = if write#[8] != 0 { previous } else { 0 }
+  }
+}
+
+test seed_table.trace(cycles:U16=200) {
+  mut dut = seed_table
+  mut o:U64 = 0
+  mut t:U8 = 0
+  tick cycles {
+    dut.reset = U1(clock < 2)
+    // Sparse valid lanes: most cycles leave the table to its seed.
+    dut.writes = ((clock * 0x9e3779b97f4a7c15d1) & 0x7fbfdfeff7fbfdfeff) | (if (clock & 3) == 1 { 1 << (8 + 9 * ((clock >> 2) & 7)) } else { 0 })
+    step
+    o = dut.old
+    t = dut.table_q
+    if clock >= 2 { puts("TRACE {clock} {o} {t}") }
+  }
+}

@@ -177,6 +177,15 @@ sh_test(
     ],
 )
 
+# H5 warm==cold over a PARTIAL compile-cache restore: a child that
+# pass.legalize inlined into a live (dirty) parent runs live too, so the parent
+# inlines the same pre-final body a cold compile does (dino bug1 regression).
+sh_test(
+    name = "lhd_compile_cache_inline_test",
+    srcs = ["lhd_compile_cache_inline_test.sh"],
+    data = ["//lhd"],
+)
+
 # `lhd sim` runtime test-parameter flags: each `test name(params)` parameter is a
 # `+<name>=VALUE` flag on the generated driver (+ `--seed`/`--help`/validating
 # parsers); unsafe/reserved parameter names are rejected with a clear message,
@@ -1794,6 +1803,16 @@ sh_test(
     data = _FLOW_DATA + glob(["merge_demo/*"]),
 )
 
+# An explicit --top does not lower a non-pub file-scope comb nothing reaches by
+# a call (a comptime switch's dead-arm helper): the switched design emits the
+# plain design's modules; pub combs, reached helpers, a no---top library
+# compile and --top naming the helper itself keep theirs.
+sh_test(
+    name = "lhd_top_prune_private_comb_test",
+    srcs = ["lhd_top_prune_private_comb_test.sh"],
+    data = ["//lhd"],
+)
+
 # The `lhd tool` lg-side inspector (cat/grep/diff/tree, the filter grammar,
 # jsonl, --max) on a real colored design.
 sh_test(
@@ -2074,6 +2093,15 @@ sh_test(
     data = ["//lhd"],
 )
 
+# The hierarchy contract preflight's occurrence census must not run (and burn
+# the formal budget, making which checks get proven load-dependent) on a design
+# with no assume; an assume deep in the hierarchy is still discharged.
+sh_test(
+    name = "formal_census_budget_test",
+    srcs = ["formal_census_budget_test.sh"],
+    data = ["//lhd"],
+)
+
 # Design-body assumptions constrain the existing hierarchical LEC translation.
 # Assumption-bearing child cones stay transparent until box-boundary contracts
 # exist; contradictory unchecked contracts are rejected as vacuous.
@@ -2249,6 +2277,17 @@ sh_test(
     data = [
         "//inou/prp:generic_tuple_register_fixture",
         "//lhd",
+    ],
+)
+
+# Loop accumulator chains: reassociated per region, balanced, proven (abc + usyn).
+sh_test(
+    name = "lhd_synth_loop_reassoc_test",
+    size = "medium",
+    srcs = ["lhd_synth_loop_reassoc_test.sh"],
+    data = _FLOW_DATA + [
+        "synth_loop_accum.prp",
+        "//inou/prp:abc_tests",
     ],
 )
 
@@ -2541,6 +2580,28 @@ sh_test(
     srcs = ["lhd_placement_smoke.py"],
     env = {"MAPPER": "usyn"},
     data = ["//lhd", "//inou/lefdef:test_data"],
+)
+
+sh_test(
+    name = "lhd_sim_hotmux_overlap_test",
+    size = "medium",  # an llvm and a slop simulator build side by side, then one rebuild
+    srcs = ["lhd_sim_hotmux_overlap_test.sh"],
+    data = [
+        "lhd_sim_hotmux_overlap.prp",
+        "//lhd",
+    ],
+    tags = ["cpu:4"],
+)
+
+sh_test(
+    name = "lhd_sim_loop_carry_seed_test",
+    size = "medium",  # an llvm and a slop simulator build side by side
+    srcs = ["lhd_sim_loop_carry_seed_test.sh"],
+    data = [
+        "lhd_sim_loop_carry_seed.prp",
+        "//lhd",
+    ],
+    tags = ["cpu:4"],
 )
 
 sh_test(

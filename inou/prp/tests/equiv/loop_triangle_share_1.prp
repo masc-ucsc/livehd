@@ -1,0 +1,5 @@
+/*
+:name: loop_triangle_share_1
+:set: compile.unroll=true
+*/
+// Rolled (shared, widened inner definitions) vs the source unroll.

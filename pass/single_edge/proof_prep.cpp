@@ -2,6 +2,8 @@
 #include "proof_prep.hpp"
 
 #include <algorithm>
+#include <chrono>
+#include <deque>
 #include <format>
 #include <optional>
 #include <set>
@@ -810,10 +812,13 @@ std::pair<int, int> inline_clock_gates_and_fold(hhds::Graph* top, const std::vec
 // treated as absorbed design hierarchy. Returns how many instances were
 // spliced on `side`.
 size_t inline_instances_missing_from_other_side(const absl::flat_hash_map<hhds::Gid, hhds::Graph*>& sub_lib,
-                                                       const std::vector<std::shared_ptr<hhds::Graph>>&    side_graphs,
-                                                       const std::vector<std::shared_ptr<hhds::Graph>>&    other_graphs,
-                                                       hhds::Graph*                                        side_g,
-                                                       absl::flat_hash_set<std::string>*                   absorbed) {
+                                                const std::vector<std::shared_ptr<hhds::Graph>>&    side_graphs,
+                                                const std::vector<std::shared_ptr<hhds::Graph>>& other_graphs, hhds::Graph* side_g,
+                                                absl::flat_hash_set<std::string>*     absorbed,
+                                                std::chrono::steady_clock::time_point deadline, bool* timed_out) {
+  if (timed_out != nullptr) {
+    *timed_out = false;
+  }
   // The defs the other side still has, by full name AND by entity tail (a
   // Pyrope graph keeps `file.entity`; the tail covers a flat Verilog side).
   absl::flat_hash_set<std::string> other_defs;
@@ -841,8 +846,9 @@ size_t inline_instances_missing_from_other_side(const absl::flat_hash_map<hhds::
     }
   }
   // RUNAWAY GUARD ONLY -- it is not the termination argument. Termination comes
-  // from the `spliced == 0` break below: a pass either inlines something or
-  // stops. This exists solely so a hierarchy that somehow regenerates instances
+  // from the worklist below: a splice retires one instance and brings in only
+  // the callee's own sub-instances, so a finite (acyclic) definition hierarchy
+  // drains it. This exists solely so a hierarchy that somehow regenerates instances
   // fails loudly instead of spinning, so it must be UNREACHABLE for any real
   // design. It is NOT a bound on the instance count: a def instantiated N times
   // contributes N copies of its whole subtree, so the transitive total is a
@@ -864,69 +870,95 @@ size_t inline_instances_missing_from_other_side(const absl::flat_hash_map<hhds::
   // definitions alive while caching so a released graph cannot reuse its key.
   absl::flat_hash_map<hhds::Graph*, bool>   icg_defs;
   std::vector<std::shared_ptr<hhds::Graph>> icg_defs_keepalive;
+  // Is `n` an instance of absorbed design hierarchy? A property of the
+  // instance's definition alone, so a clone a splice brings in answers the
+  // same as it would on any later scan of the host.
+  auto                                      absorbed_instance = [&](const hhds::Node_class& n) {
+    if (livehd::graph_util::type_op_of(n) != Ntype_op::Sub || sub_lib.find(n.get_subnode_gid()) != sub_lib.end()) {
+      return false;  // a Liberty cell is the impl's vocabulary, never an absorbed def
+    }
+    auto sio = n.get_subnode_io();
+    if (sio == nullptr || other_has_def(sio->get_name())) {
+      return false;  // the other side kept this def: it pairs def by def
+    }
+    // A genuine BLACKBOX -- an assertion/diagnostic marker instance, a
+    // memory macro, any def whose body this side does not hold either --
+    // has nothing to splice, and inline_sub_instance answers a bodyless or
+    // replicated Sub with a FATAL internal error that kills the whole run.
+    // This used to be unreachable because the caller only ran on a `--lib`
+    // mapped-netlist comparison; now that ANY design reaches here, leave
+    // such an instance a boundary (it is a boundary on both sides anyway).
+    auto def_g = n.get_subnode_graph();
+    if (n.is_loop_subnode() || !def_g) {
+      return false;
+    }
+    // An instantiated CLOCK GATE is not absorbed design hierarchy either: it
+    // is the one recognized clock operator, and materialize_clock_cells (run
+    // further down) is what turns it into the `Clock_cell` the encoder can
+    // model. Dissolving it here leaves a plain derived-clock cone, the
+    // encoder REFUSES the def, and a real difference downstream of the gate
+    // comes back UNKNOWN instead of REFUTED (clock_cell_test case 6b).
+    // Cached per definition: a splice edits only its host, and a host is
+    // never the definition of an instance it holds.
+    auto [icg, inserted] = icg_defs.try_emplace(def_g.get(), false);
+    if (inserted) {
+      icg->second = livehd::latch_contract::match_icg_def(def_g.get()).has_value();
+      icg_defs_keepalive.push_back(def_g);
+    }
+    return !icg->second;
+  };
+
   size_t done = 0;
   for (auto* host : hosts) {
-    const size_t done_before            = done;
-    bool         collect_all_candidates = false;
-    // ONE SPLICE PER COLLECTION, then re-collect.
+    if (timed_out != nullptr && *timed_out) {
+      break;
+    }
+    const size_t                 done_before = done;
+    // ONE WORKLIST PER HOST, in ascending node id: the host's absorbed
+    // instances, then every absorbed instance a splice clones in (appended as
+    // it appears). That is exactly the order the previous form -- splice the
+    // FIRST candidate of a fresh host scan, then re-scan -- visited them in,
+    // so the spliced graph is the same: hhds node ids are append-only, so a
+    // splice's clones sort after everything already in the host, and a
+    // candidate's status depends on its definition only (absorbed_instance).
+    // Re-scanning the whole host after every splice was O(host) per instance
+    // -- quadratic on a netlist whose top absorbs thousands of region
+    // instances (cva6) -- and finding the clones costs nothing extra:
+    // Host_inliner::splice reports them.
     //
-    // `inline_sub_instance` MUTATES `host`, and every other handle in the
-    // collected vector points into that same host. Splicing the whole batch
-    // reused handles that the first splice had already invalidated, which
-    // silently corrupted the model: with >=2 absorbed instances LEC reported a
-    // counterexample that DOES NOT REPRODUCE IN SIMULATION. Swapping two
-    // instantiation lines in the reference flipped REFUTED<->PROVEN with the
-    // implementation byte-identical, while 20,052 random vectors showed zero
-    // mismatch between source Verilog, ref netlist and impl netlist.
-    // Collecting first is necessary (never mutate while walking) but NOT
-    // sufficient -- the handles have to be re-derived after each mutation.
+    // Handles stay valid across splices: a splice deletes only its own
+    // instance, and hhds never reuses a node id. (An early batch splice that
+    // reused stale handles produced a counterexample that did not reproduce
+    // in simulation; is_valid() below skips a handle that is somehow gone
+    // instead of splicing through it.)
     //
-    // Progress-bounded rather than a fixed round cap: the loop only continues
-    // while a splice actually happened, so it cannot spin, and the old magic 64
-    // silently truncated any host with more absorbed instances than that.
-    while (true) {
-      std::vector<hhds::Node_class> insts;  // collect first: never mutate while walking
-      for (auto n : host->body().nodes()) {
-        if (livehd::graph_util::type_op_of(n) != Ntype_op::Sub || sub_lib.find(n.get_subnode_gid()) != sub_lib.end()) {
-          continue;  // a Liberty cell is the impl's vocabulary, never an absorbed def
-        }
-        auto sio = n.get_subnode_io();
-        if (sio == nullptr || other_has_def(sio->get_name())) {
-          continue;  // the other side kept this def: it pairs def by def
-        }
-        // A genuine BLACKBOX -- an assertion/diagnostic marker instance, a
-        // memory macro, any def whose body this side does not hold either --
-        // has nothing to splice, and inline_sub_instance answers a bodyless or
-        // replicated Sub with a FATAL internal error that kills the whole run.
-        // This used to be unreachable because the caller only ran on a `--lib`
-        // mapped-netlist comparison; now that ANY design reaches here, leave
-        // such an instance a boundary (it is a boundary on both sides anyway).
-        auto def_g = n.get_subnode_graph();
-        if (n.is_loop_subnode() || !def_g) {
-          continue;
-        }
-        // An instantiated CLOCK GATE is not absorbed design hierarchy either: it
-        // is the one recognized clock operator, and materialize_clock_cells (run
-        // further down) is what turns it into the `Clock_cell` the encoder can
-        // model. Dissolving it here leaves a plain derived-clock cone, the
-        // encoder REFUSES the def, and a real difference downstream of the gate
-        // comes back UNKNOWN instead of REFUTED (clock_cell_test case 6b).
-        auto [icg, inserted] = icg_defs.try_emplace(def_g.get(), false);
-        if (inserted) {
-          icg->second = livehd::latch_contract::match_icg_def(def_g.get()).has_value();
-          icg_defs_keepalive.push_back(def_g);
-        }
-        if (icg->second) {
-          continue;
-        }
-        insts.push_back(n);
-        // Most candidates splice immediately. Do not collect the entire host
-        // only to discard all but its first handle after that mutation.
-        if (!collect_all_candidates) {
-          break;
-        }
+    // A candidate the inliner refuses did not mutate anything (a real
+    // blackbox) and is not retried: a refusal is a property of the instance
+    // and its definition, so the old re-scans refused it again every round.
+    std::deque<hhds::Node_class> work;
+    for (auto n : host->body().nodes()) {
+      if (absorbed_instance(n)) {
+        work.push_back(n);
       }
-      if (insts.empty()) {
+    }
+    if (work.empty()) {
+      continue;
+    }
+    livehd::graph_util::Host_inliner inliner(host, "pass.lec");
+    std::vector<hhds::Node_class>    cloned;
+    while (!work.empty()) {
+      const auto inst = work.front();
+      work.pop_front();
+      if (!inst.is_valid()) {
+        continue;
+      }
+      // formal.timeout covers the whole run, setup included: a splice is
+      // linear in the callee, so checking between splices bounds the overrun
+      // by the largest single definition.
+      if (deadline != std::chrono::steady_clock::time_point{} && std::chrono::steady_clock::now() >= deadline) {
+        if (timed_out != nullptr) {
+          *timed_out = true;
+        }
         break;
       }
       if (done >= splice_budget) {
@@ -937,47 +969,36 @@ size_t inline_instances_missing_from_other_side(const absl::flat_hash_map<hhds::
             .emit();
         break;
       }
-      size_t spliced = 0;
-      // Try candidates in order and STOP AT THE FIRST SUCCESS: that splice
-      // invalidates every remaining handle, so the rest of `insts` is discarded
-      // and re-derived on the next pass. A candidate that returns false did not
-      // mutate anything (a real blackbox), so it is safe to try the next one --
-      // otherwise one un-inlinable instance would mask every later one, which is
-      // what the batch loop got right and a naive one-shot fix would lose.
-      for (const auto& inst : insts) {
-        if (spliced != 0) {
-          break;
-        }
-        // Inlining prefixes spliced names with the instance's LOGICAL prefix
-        // (graph_util::logical_instance_prefix). An unnamed instance -- such as
-        // pass.color's `<host>__c<N>` region wrapper or any other generated
-        // wrapper -- and a `__flat___*` instance are hierarchy-transparent: they
-        // add no component, matching HHDS get_hier_name, so every preserved
-        // register name keeps its flop correspondence after collapse. A named
-        // instance keeps its `inst.` component. Two transparent occurrences of
-        // one stateful def therefore share logical state names, and the encoder
-        // refuses them as ambiguous rather than merging them (graph/README.md,
-        // "Transparent hierarchy wrappers").
-        const std::string def_name{inst.get_subnode_io()->get_name()};  // `inst` is gone after the splice
-        if (livehd::graph_util::inline_sub_instance(host, inst, "pass.lec")) {
-          ++spliced;
-          if (absorbed != nullptr) {
-            absorbed->insert(def_name);
-          }
+      // Inlining prefixes spliced names with the instance's LOGICAL prefix
+      // (graph_util::logical_instance_prefix). An unnamed instance -- such as
+      // pass.color's `<host>__c<N>` region wrapper or any other generated
+      // wrapper -- and a `__flat___*` instance are hierarchy-transparent: they
+      // add no component, matching HHDS get_hier_name, so every preserved
+      // register name keeps its flop correspondence after collapse. A named
+      // instance keeps its `inst.` component. Two transparent occurrences of
+      // one stateful def therefore share logical state names, and the encoder
+      // refuses them as ambiguous rather than merging them (graph/README.md,
+      // "Transparent hierarchy wrappers").
+      const std::string def_name{inst.get_subnode_io()->get_name()};  // `inst` is gone after the splice
+      cloned.clear();
+      if (!inliner.splice(inst, &cloned)) {
+        continue;
+      }
+      ++done;
+      if (absorbed != nullptr) {
+        absorbed->insert(def_name);
+      }
+      for (const auto& sub : cloned) {
+        if (absorbed_instance(sub)) {
+          work.push_back(sub);
         }
       }
-      if (spliced == 0) {
-        if (!collect_all_candidates) {
-          // A refused candidate must not hide a later inlinable instance.
-          // Nothing mutated: retry with the original full collection.
-          collect_all_candidates = true;
-          continue;
-        }
-        break;  // nothing inlinable left (a real blackbox): stop rather than spin
-      }
-      icg_defs.erase(host);  // this definition's body changed
-      done += spliced;
     }
+    inliner.flush();
+    if (timed_out != nullptr && *timed_out) {
+      break;  // the caller reports TIMEOUT-time and never reads these graphs
+    }
+    icg_defs.erase(host);  // this definition's body changed (should a later host instantiate it)
     if (done != done_before) {
       // A splice connects the host's packing cells straight to the callee's
       // body, so a field select that used to stop at the instance boundary can
@@ -1008,27 +1029,51 @@ size_t inline_instances_for_divider(hhds::Graph* host, const std::function<bool(
   if (host == nullptr) {
     return 0;
   }
-  size_t done = 0;
-  while (done < 100000) {
-    bool spliced = false;
-    for (auto n : host->body().nodes()) {
-      if (livehd::graph_util::type_op_of(n) != Ntype_op::Sub || n.is_loop_subnode()) {
-        continue;
-      }
-      auto def_g = n.get_subnode_graph();
-      if (!def_g || (is_boxed && is_boxed(def_g.get())) || livehd::latch_contract::match_icg_def(def_g.get())) {
-        continue;
-      }
-      if (livehd::graph_util::inline_sub_instance(host, n, "pass.lec")) {
-        spliced = true;
-        ++done;
-        break;  // `n` and the walk are stale now: re-collect
-      }
+  // One worklist in ascending node id, as inline_instances_missing_from_other_side
+  // keeps: the order a re-scan for the first candidate after every splice
+  // visits, at O(total spliced size) instead of O(host) per splice.
+  // Classification is per definition (a splice edits only `host`).
+  absl::flat_hash_map<hhds::Graph*, bool>   spliceable_defs;
+  std::vector<std::shared_ptr<hhds::Graph>> keepalive;
+  auto                                      wanted = [&](const hhds::Node_class& n) {
+    if (livehd::graph_util::type_op_of(n) != Ntype_op::Sub || n.is_loop_subnode()) {
+      return false;
     }
-    if (!spliced) {
-      break;
+    auto def_g = n.get_subnode_graph();
+    if (!def_g) {
+      return false;
+    }
+    auto [it, fresh] = spliceable_defs.try_emplace(def_g.get(), false);
+    if (fresh) {
+      it->second = !(is_boxed && is_boxed(def_g.get())) && !livehd::latch_contract::match_icg_def(def_g.get());
+      keepalive.push_back(def_g);
+    }
+    return it->second;
+  };
+  std::deque<hhds::Node_class> work;
+  for (auto n : host->body().nodes()) {
+    if (wanted(n)) {
+      work.push_back(n);
     }
   }
+  livehd::graph_util::Host_inliner inliner(host, "pass.lec");
+  std::vector<hhds::Node_class>    cloned;
+  size_t                           done = 0;
+  while (!work.empty() && done < 100000) {
+    const auto n = work.front();
+    work.pop_front();
+    cloned.clear();
+    if (!n.is_valid() || !inliner.splice(n, &cloned)) {
+      continue;
+    }
+    ++done;
+    for (const auto& sub : cloned) {
+      if (wanted(sub)) {
+        work.push_back(sub);
+      }
+    }
+  }
+  inliner.flush();
   return done;
 }
 

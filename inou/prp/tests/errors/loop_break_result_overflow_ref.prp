@@ -1,0 +1,18 @@
+/*
+:name: loop_break_result_overflow_ref
+:type: error
+:error: may not fit its declared range
+*/
+// The loop-free twin of loop_break_result_overflow.prp: the priority chain the
+// `break` loop computes. `acc` is in [20, 200], so `o:U5 = acc` needs `wrap`.
+pub comb loop_break_result_overflow_ref(x:U4) -> (o:U5) {
+  mut acc:U8 = 200
+  if x#[0] == 0 {
+    acc = 140
+    if x#[1] == 0 {
+      acc = 80
+      if x#[2] == 0 { acc = 20 }
+    }
+  }
+  o = acc  // locate_error_here
+}

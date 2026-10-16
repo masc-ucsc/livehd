@@ -127,6 +127,62 @@ TEST(CgenSim, LlvmObjectsSurviveInsertionAndLongModuleNames) {
   std::filesystem::remove_all(dir);
 }
 
+// Dirty marks, staged commits and native result landings keep whole machine
+// words: a byte-narrowed `word |= 1 << k`, a 16-byte Slop copy or a 16-byte
+// identical() over a temporary stored a word at a time each make the next
+// full-width read wait for the store buffer (a store-to-load interlock).
+TEST(CgenSim, LlvmRuntimeStoresKeepWholeWords) {
+  const std::string name = "llvm_whole_word_stores";
+  auto&             lib  = livehd::Hhds_graph_library::instance("lgdb_" + name);
+  auto              io   = lib.create_io(name);
+  io->add_input("clock", 0);
+  io->set_bits("clock", 1);
+  io->set_unsign("clock", true);
+  for (unsigned i = 0; i < 4; ++i) {
+    io->add_input("a" + std::to_string(i), 1 + i);
+    io->set_bits("a" + std::to_string(i), 40);
+    io->set_unsign("a" + std::to_string(i), true);
+    io->add_output("y" + std::to_string(i), 5 + i);
+    io->set_bits("y" + std::to_string(i), 40);
+    io->set_unsign("y" + std::to_string(i), true);
+  }
+  auto graph = io->create_graph();
+  for (unsigned i = 0; i < 4; ++i) {
+    // a -> Not -> flop -> Not -> y: each Not is its own color at a one-word
+    // live budget, so results land in boundary slots and colors mark readers.
+    auto first = gu::create_typed_node(*graph, Ntype_op::Not, 40);
+    graph->get_input_pin("a" + std::to_string(i)).connect_sink(first.create_sink_pin(0));
+    gu::set_ubits(first.create_driver_pin(0), 40);
+    auto flop = gu::create_typed_node(*graph, Ntype_op::Flop, 40);
+    graph->get_input_pin("clock").connect_sink(gu::setup_sink_by_name(flop, "clock_pin"));
+    first.create_driver_pin(0).connect_sink(gu::setup_sink_by_name(flop, "din"));
+    gu::set_ubits(flop.create_driver_pin(0), 40);
+    auto second = gu::create_typed_node(*graph, Ntype_op::Not, 40);
+    flop.create_driver_pin(0).connect_sink(second.create_sink_pin(0));
+    gu::set_ubits(second.create_driver_pin(0), 40);
+    second.create_driver_pin(0).connect_sink(graph->get_output_pin("y" + std::to_string(i)));
+  }
+  std::filesystem::create_directories(name);
+  const auto plan = livehd::sim::Color_plan::discover(graph.get(), false, true, 1);
+  ASSERT_TRUE(plan.complete()) << plan.report();
+  Cgen_sim emitter(name, "", name, "false", &plan, false, false, true, true, true, false, false, true, true, 1);
+  emitter.do_from_graph(graph);
+  std::string code;
+  for (const auto& entry : std::filesystem::directory_iterator(name)) {
+    if (entry.path().extension() == ".cpp" || entry.path().extension() == ".hpp") {
+      code += slurp(entry.path());
+    }
+  }
+  EXPECT_NE(code.find("lhd_sim_dirty_or(__rt.__color_dirty["), std::string::npos) << code;
+  EXPECT_EQ(std::regex_search(code, std::regex(R"(__color_dirty\[[0-9]+\] (\|=|&=) [(~])")), false) << code;
+  // Adapter-side compare-on-write (colors with many outputs) uses the packed
+  // words, never a Slop temporary; the helpers ship in every module header.
+  EXPECT_EQ(code.find("slop_update(__rt.__color_slot_u"), std::string::npos) << code;
+  EXPECT_NE(code.find("inline bool lhd_sim_update_packed(Slop_u<N>& dst"), std::string::npos);
+  EXPECT_NE(code.find("inline void lhd_sim_copy_state(T& dst, const S& src)"), std::string::npos);
+  std::filesystem::remove_all(name);
+}
+
 TEST(CgenSim, LlvmSemanticEditKeepsModuleSupportUnchanged) {
   const std::string name = "llvm_checkpoint_identity";
   std::filesystem::create_directories(name);
@@ -1265,5 +1321,32 @@ TEST(CgenSim, LoneDivisorDivRemSimulatesAsZero) {
     std::smatch m;
     // The output assignment must not be a read of the divisor input.
     EXPECT_FALSE(std::regex_search(code, m, std::regex(R"(__out\.q = [^;\n]*lone_divisor_in)"))) << name << "\n" << code;
+  }
+}
+
+// One write-port guard per term of a large memory (XiangShan Rob) used to be
+// a left-nested `((a || b) || c) ...` chain past clang's 256-level bracket
+// limit; the balanced form nests logarithmically and keeps every term in order.
+TEST(CgenSim, BalancedOrNestsLogarithmically) {
+  EXPECT_EQ(Cgen_sim::balanced_or({}), "false");
+  EXPECT_EQ(Cgen_sim::balanced_or({"a"}), "a");
+  EXPECT_EQ(Cgen_sim::balanced_or({"a", "b", "c"}), "(a || (b || c))");
+  std::vector<std::string> terms;
+  for (int i = 0; i < 4128; ++i) {
+    terms.push_back("(t" + std::to_string(i) + ").is_known_true()");
+  }
+  const auto text  = Cgen_sim::balanced_or(terms);
+  int        depth = 0, deepest = 0;
+  for (const char c : text) {
+    depth   += c == '(' ? 1 : c == ')' ? -1 : 0;
+    deepest  = std::max(deepest, depth);
+  }
+  EXPECT_EQ(depth, 0);
+  EXPECT_LE(deepest, 16);
+  size_t at = 0;
+  for (const auto& term : terms) {
+    at = text.find(term, at);
+    ASSERT_NE(at, std::string::npos) << term;
+    at += term.size();
   }
 }

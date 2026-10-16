@@ -1,0 +1,20 @@
+/*
+:name: loop_break_needed_wrap_1
+:set: compile.unroll=false
+*/
+// The same value from a ROLLED loop with a `break`. Its result is any
+// iteration's carry-out ([20, 200]), so the `wrap` into U5 is needed. The
+// roller used to publish only the LAST iteration's carry-out ([20, 20]) as
+// the result's range, and upass reported this needed `wrap` as unnecessary
+// (code unnecessary-wrap). (The explicit `:set:` of the default compiles this
+// side on its own, so its compile diagnostics reach :lec_grep_not:.)
+pub comb loop_break_needed_wrap(x:U4) -> (o:U5) {
+  mut acc:U8 = 0
+  mut seen:U1 = 0
+  for i in 0..<4 {
+    seen = seen | U1(acc == 15)
+    acc = 200 - i * 60
+    if x#[i] == 1 { break }
+  }
+  wrap o = acc
+}

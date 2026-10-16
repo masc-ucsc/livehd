@@ -1,0 +1,25 @@
+/*
+:name: generic_depth_default_import
+:type: equiv
+:verilog_top: top
+:pyrope_top: top
+*/
+// A non-generic top instantiates a GENERIC `mod mid<N=4>` with its default
+// generics (an IDENTITY specialization named after the template,
+// `gd_mid.mid`), and that clone specializes the generic `mod sub_*<N, W>`
+// with explicit generics (`gd_sub.sub_lo__U32_N_4_W_8_h...`). gd_sub.prp
+// imports a constants unit it is discovered before, so the kernel's first
+// import round blocks on gd_sub and retries the file, dropping the
+// specialization minted from it. Its minter is the identity clone, which the
+// name-keyed retry confused with the pristine `mid` template: the TEMPLATE was
+// restored instead, the stale clone was re-walked still calling the dropped
+// specialization, and tolg reported `call to undefined function
+// 'gd_sub.sub_lo__U32_N_4_W_8_h...'`. The import alone triggers it (no `if`
+// needs to read it); sub_lo/sub_hi read it with both settings anyway.
+const mid = import("generic_depth_default_import/gd_mid.mid")
+
+pub mod top(a:U32) -> (lo:U8@[], hi:U8@[]) {
+  const m = mid(a=a)
+  lo = m.lo
+  hi = m.hi
+}

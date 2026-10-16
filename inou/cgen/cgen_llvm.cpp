@@ -127,6 +127,55 @@ public:
 
 constexpr size_t word_count(uint32_t width) { return (static_cast<size_t>(width) + 63) / 64; }
 
+// Native full unroll of an embedded rolled loop (Cgen_llvm::inline_loop).
+// Rolled, a per-bit loop pays a variable shift, mask and insert per lane every
+// cycle (br_flow_arb_rr: ~900 native instructions/cycle against ~400 for the
+// unrolled Verilog), and LLVM may vectorize it over a stack copy of a wide
+// operand (store-to-load forwarding stalls). Unrolled, every lane index is a
+// constant and the body folds to the fixed-position logic the equivalent
+// unrolled Verilog produces. The loop stays a loop in the graph and in the
+// reference (Slop) code; only the native kernel is unrolled, and only while
+// the replicated body stays within this many compute instructions (see
+// unroll_cost; lhdtrack br_arb_lru's 16x16 nest needs ~15k and runs 3x faster
+// unrolled, larger loops such as XiangShan's 520-lane ones stay rolled).
+constexpr uint64_t kUnrollBudget   = 16384;
+constexpr uint64_t kUnrollMaxTrips = 256;
+// All unrolls of one kernel together add at most this many compute
+// instructions, so a color holding many loop sites cannot grow into one
+// enormous function.
+constexpr uint64_t kUnrollKernelBudget = 32768;
+// Instructions that the full unrolls pending in a function still add: a
+// sealed body carries it in its bitcode, so an enclosing loop sizes its own
+// unroll with the inner loops already expanded.
+constexpr llvm::StringLiteral kUnrolledExtra = "lhd-unrolled-extra";
+
+// The instructions a trip of `function` costs once inlined into a loop: its
+// arithmetic, compares, selects and control. Loads, stores and address
+// arithmetic are the sealed body's packed-word ABI, which inlining and SROA
+// remove (a 512-bit operand alone is a dozen of them), and casts are free.
+uint64_t unroll_cost(const llvm::Function& function) {
+  uint64_t cost = 0;
+  for (const auto& block : function) {
+    for (const auto& instruction : block) {
+      if (!llvm::isa<llvm::LoadInst>(instruction) && !llvm::isa<llvm::StoreInst>(instruction)
+          && !llvm::isa<llvm::GetElementPtrInst>(instruction) && !llvm::isa<llvm::CastInst>(instruction)
+          && !llvm::isa<llvm::FreezeInst>(instruction)) {
+        ++cost;
+      }
+    }
+  }
+  return cost;
+}
+
+uint64_t unrolled_extra(const llvm::Function& function) {
+  uint64_t   extra = 0;
+  const auto attr  = function.getFnAttribute(kUnrolledExtra);
+  if (!attr.isStringAttribute() || attr.getValueAsString().getAsInteger(10, extra)) {
+    return 0;
+  }
+  return extra;
+}
+
 llvm::Value* cast_integer(llvm::IRBuilder<>& builder, llvm::Value* value, unsigned width, bool source_unsigned) {
   const unsigned source_width = value->getType()->getIntegerBitWidth();
   if (source_width == width) {
@@ -267,6 +316,7 @@ public:
   bool                                    scalar_abi  = false;
   bool                                    state_abi   = false;
   size_t                                  state_words = 0;
+  uint64_t                                unroll_extra = 0;  // see kUnrolledExtra
   std::vector<State_output>               state_outputs;
   std::unordered_map<std::string, Memory> memories;
 
@@ -494,6 +544,15 @@ public:
     auto* words = local_words(word_count(width), name);
     store_packed(value, words, 0, width);
     return words;
+  }
+
+  void add_unroll_extra(uint64_t extra) {
+    if (extra == 0) {
+      return;
+    }
+    constexpr uint64_t cap = uint64_t{1} << 48;  // saturate: only compared against small budgets
+    unroll_extra           = std::min(cap, unroll_extra + std::min(cap, extra));
+    function->addFnAttr(kUnrolledExtra, std::to_string(unroll_extra));
   }
 
   Value remember(llvm::Value* value, uint32_t width, bool unsign) {
@@ -1029,8 +1088,6 @@ Cgen_llvm::Value Cgen_llvm::hotmux(const std::vector<Value>& inputs, uint32_t re
     }
     result = cast_integer(impl_->builder, fallback, result_width, inputs.back().unsign);
   }
-  llvm::Value*              seen    = llvm::ConstantInt::getFalse(impl_->context);
-  llvm::Value*              overlap = llvm::ConstantInt::getFalse(impl_->context);
   std::vector<llvm::Value*> active;
   active.reserve(inputs.size() / 2);
   for (size_t i = 0; i + 1 < inputs.size(); i += 2) {
@@ -1038,15 +1095,15 @@ Cgen_llvm::Value Cgen_llvm::hotmux(const std::vector<Value>& inputs, uint32_t re
     if (control == nullptr) {
       return {};
     }
-    auto* a = impl_->builder.CreateICmpNE(control, llvm::ConstantInt::get(control->getType(), 0));
-    overlap = impl_->builder.CreateOr(overlap, impl_->builder.CreateAnd(seen, a));
-    seen    = impl_->builder.CreateOr(seen, a);
-    active.push_back(a);
+    active.push_back(impl_->builder.CreateICmpNE(control, llvm::ConstantInt::get(control->getType(), 0)));
   }
   // Fold from the LAST arm back so the FIRST active control wins -- the priority
-  // cgen_verilog's `unique case` and the SMT encoders use. Exclusive controls
-  // (the cell contract, enforced by the trap below) make the order unobservable;
-  // matching it keeps a contract violation from reading differently per backend.
+  // cgen_verilog's `unique case`, the SMT encoders and the slop backend use.
+  // Overlapping controls break the cell's one-hot contract (pass.formal reports
+  // it), but simulation RESOLVES them to the first active arm, it never stops:
+  // a `unique if` whose conditions overlap at run time (picorv32's ALU result
+  // under BARREL_SHIFTER + TWO_CYCLE_ALU, which Verilator simulates first-match)
+  // used to reach a trap here and kill the driver with SIGILL.
   for (size_t k = active.size(); k-- > 0;) {
     auto* value = impl_->get(inputs[2 * k + 1]);
     if (value == nullptr) {
@@ -1055,7 +1112,6 @@ Cgen_llvm::Value Cgen_llvm::hotmux(const std::vector<Value>& inputs, uint32_t re
     value  = cast_integer(impl_->builder, value, result_width, inputs[2 * k + 1].unsign);
     result = impl_->builder.CreateSelect(active[k], value, result);
   }
-  impl_->trap_if(overlap, "hotmux.controls");
   return impl_->remember(result, result_width, result_unsign);
 }
 
@@ -1064,11 +1120,10 @@ Cgen_llvm::Value Cgen_llvm::indexed_mux(Value select, const std::vector<Value>& 
   if (selector == nullptr || arms.empty() || result_width == 0) {
     return {};
   }
-  const unsigned arm_index_bits = llvm::APInt(64, arms.size()).getActiveBits();
-  if (arm_index_bits <= select.width) {
-    auto* limit = llvm::ConstantInt::get(selector->getType(), arms.size());
-    impl_->trap_if(impl_->builder.CreateICmpUGE(selector, limit), "mux.select");
-  }
+  // A selector past the last arm (a `match` without `else` that sees an
+  // unlisted key, a reset-time value) reads X; two-state native code reads it
+  // as 0, the fold's seed, as sim.unknown_zero does. It must not stop the run:
+  // a trap here was a SIGILL with no diagnostic.
   llvm::Value* result = llvm::ConstantInt::get(impl_->builder.getIntNTy(result_width), 0);
   for (size_t i = arms.size(); i-- > 0;) {
     auto* arm = impl_->get(arms[i]);
@@ -1621,6 +1676,7 @@ bool Cgen_llvm::inline_body(const Inline_body& body, const std::vector<Value>& i
     error = "imported inline color is missing";
     return false;
   }
+  impl_->add_unroll_extra(unrolled_extra(*callee));
   auto&                           b   = impl_->builder;
   auto*                           ptr = llvm::PointerType::getUnqual(impl_->context);
   llvm::SmallVector<llvm::Value*> args;
@@ -1737,6 +1793,13 @@ bool Cgen_llvm::inline_loop(const Inline_body& body, const Loop_layout& layout, 
     error = "imported inline loop body is missing";
     return false;
   }
+  // Per trip, a full unroll replicates the body and the inner loops it embeds
+  // as they will be once expanded (kUnrolledExtra).
+  const uint64_t body_extra = unrolled_extra(*callee);
+  const uint64_t trip_cost  = unroll_cost(*callee) + body_extra;
+  const bool     unroll     = count <= kUnrollMaxTrips && trip_cost <= kUnrollBudget && count * trip_cost <= kUnrollBudget
+                     && impl_->unroll_extra + count * trip_cost <= kUnrollKernelBudget;
+  impl_->add_unroll_extra(body_extra + (unroll && count > 0 ? (count - 1) * trip_cost : 0));
 
   auto& b       = impl_->builder;
   auto& context = impl_->context;
@@ -1878,8 +1941,10 @@ bool Cgen_llvm::inline_loop(const Inline_body& body, const Loop_layout& layout, 
     active->addIncoming(next_active, latch);
   }
   auto* backedge = b.CreateBr(header);
-  auto* disable  = llvm::MDNode::get(context, {llvm::MDString::get(context, "llvm.loop.unroll.disable")});
-  auto* loop_id  = llvm::MDNode::getDistinct(context, {nullptr, disable});
+  // The pipeline runs LoopFullUnrollPass only when forced (PipelineTuningOptions
+  // LoopUnrolling is off), so this metadata alone decides, per loop.
+  auto* policy   = llvm::MDNode::get(context, {llvm::MDString::get(context, unroll ? "llvm.loop.unroll.full" : "llvm.loop.unroll.disable")});
+  auto* loop_id  = llvm::MDNode::getDistinct(context, {nullptr, policy});
   loop_id->replaceOperandWith(0, loop_id);
   backedge->setMetadata(llvm::LLVMContext::MD_loop, loop_id);
   b.SetInsertPoint(done);

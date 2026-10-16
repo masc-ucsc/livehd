@@ -1,9 +1,11 @@
 // This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 #pragma once
 
+#include <memory>
 #include <optional>
 #include <string>
 #include <string_view>
+#include <vector>
 
 #include "hhds/graph.hpp"
 
@@ -76,6 +78,55 @@ namespace livehd::graph_util {
 [[nodiscard]] bool inline_sub_instance(hhds::Graph* parent, const hhds::Node_class& inst, std::string_view from_pass,
                                        hhds::Graph* def = nullptr, bool name_state = false, bool prefix_instance = true,
                                        bool inherit_color = false, const std::optional<std::string>& state_name = std::nullopt);
+
+namespace detail {
+struct Host_state;  // inline_sub.cpp
+}
+
+// Splices MANY instances into ONE host, one after another: the same graph as
+// calling inline_sub_instance (default options) on each in turn, at a cost
+// linear in the total spliced size.
+//
+// What a one-at-a-time caller pays per splice and this does not:
+//   * finding the next instance. A splice only ever ADDS Sub nodes by cloning
+//     the callee's own sub-instances, and hhds node ids are append-only (a
+//     deleted id is never reused), so `splice` reports exactly those clones,
+//     in ascending id order, through `new_subs`. A caller that keeps a
+//     worklist in node-id order visits instances in the order a re-scan of
+//     the host for "the first remaining candidate" would, without re-scanning
+//     (an O(host) walk per splice was quadratic on a netlist whose top absorbs
+//     thousands of region instances). A handle collected from the host stays
+//     valid across other splices: only the spliced instance is deleted.
+//   * merging the callee's `simulation_init` program into the host's. The
+//     host's program is decoded once, gains one child per spliced callee that
+//     carries one, and is re-encoded once, by `flush()` (or the destructor),
+//     instead of a decode+encode of the whole accumulated program per splice.
+//     Nothing a splice does reads the host's program, so the deferral is
+//     invisible until then; call `flush()` before reading it.
+//   * indexing a wide neighbor's IO declarations again: the boundary fit
+//     check reads an unstamped Sub output's width from its definition's decl
+//     and a graph input's width under its name, both of which hhds only finds
+//     by walking every declaration; each graph is indexed once per batch.
+// Every refusal and diagnostic is inline_sub_instance's own.
+class Host_inliner {
+public:
+  Host_inliner(hhds::Graph* host, std::string_view from_pass);
+  ~Host_inliner();
+  Host_inliner(const Host_inliner&)            = delete;
+  Host_inliner& operator=(const Host_inliner&) = delete;
+
+  // Splice `inst` (a Sub in the host). `new_subs`, when non-null, receives
+  // (appended) the Sub clones the splice created, ascending node id.
+  [[nodiscard]] bool splice(const hhds::Node_class& inst, std::vector<hhds::Node_class>* new_subs = nullptr);
+
+  // Write the deferred simulation_init merge into the host (idempotent).
+  void flush();
+
+private:
+  hhds::Graph*                        host_;
+  std::string_view                    from_pass_;
+  std::unique_ptr<detail::Host_state> state_;
+};
 
 // ---------------------------------------------------------------------------
 // Sub port boundary: the reinterpretation a connection performs

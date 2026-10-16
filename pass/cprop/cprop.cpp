@@ -2213,6 +2213,98 @@ bool Cprop::scalar_mux(hhds::Node_class& node, Inp_pins& inp_edges_ordered, bool
     }
   }
 
+  // Guarded accumulation: `if s { acc OP= x }` is mux(s, acc, acc OP x).
+  //
+  //   mux(s, a, a | x) -> a | mux(s, 0, x)        (Xor alike)
+  //   mux(s, a, a & x) -> a & mux(s, -1, x)
+  //
+  // and the false-arm form. Bit for bit the same logic, but the Mux no longer
+  // sits on the accumulator: an unrolled run of guarded updates becomes a
+  // chain of ONE associative operator, which the next sweep's
+  // collapse_forward_same_op flattens into one n-ary cell (and pass/synth's
+  // blaster lowers balanced), instead of a serial MUX chain that neither
+  // pass.color's abc profile (it cuts data colors at muxes, so the chain
+  // ping-pongs between a control and a data region) nor the mapper
+  // rebalances: eight guarded 32-bit ORs mapped at 577 ps / 66 um^2 as a mux
+  // chain against 92 ps / 15 um^2 as AND-OR. Exact in cprop's integer algebra
+  // (a OP id == a); the guard Mux is a fresh node, so bitwidth infers its
+  // range (an And guard can be -1) -- which is why the rule needs the
+  // bitwidth-follows opt-in (may_emit_unstamped): post-convergence
+  // Bitwidth_rewrite also calls scalar_mux, and a guard minted there kept no
+  // width (`w = s ? a : a ^ 9` emitted `reg mux;`, one bit). The update cell
+  // must be a private, unnamed, uncolored, check-free operand of this Mux
+  // alone; extra operands go to a fresh cell
+  // (mux(s, a, a | x | y) -> a | mux(s, 0, x | y)). A held state
+  // output (Flop/Latch/Memory/Sub) stays a Mux: enableopt turns a Q hold into
+  // an enable, and the latch contract exempts Q only as a direct Mux arm. A
+  // Sum is not guarded: a + mux(s, 0, x) moves the select ahead of the carry
+  // chain, which is a loss when the select is the late signal.
+  auto guard_accumulation = [&](size_t updated_idx, size_t hold_idx) {
+    const auto sel     = inp_edges_ordered[0].get_driver_pin();
+    const auto updated = inp_edges_ordered[updated_idx].get_driver_pin();
+    const auto hold    = inp_edges_ordered[hold_idx].get_driver_pin();
+    if (sel.is_invalid() || sel.is_const() || updated.is_invalid() || updated.is_const() || is_graph_input_pin(updated)
+        || hold.is_invalid() || livehd::graph_util::has_color(node)) {
+      return false;
+    }
+    if (hold.is_const() ? const_of(hold).has_unknowns()
+                        : (!is_graph_input_pin(hold) && Ntype::is_loop_last(type_op_of(hold.get_master_node())))) {
+      return false;
+    }
+    auto       cell = updated.get_master_node();
+    const auto op   = type_op_of(cell);
+    if ((op != Ntype_op::Or && op != Ntype_op::Xor && op != Ntype_op::And) || cell == node || livehd::graph_util::has_color(cell)
+        || livehd::graph_util::has_runtime_check(cell) || livehd::graph_util::has_name(cell)
+        || !livehd::graph_util::pin_name_of(updated).empty() || !has_single_consumer(cell)) {
+      return false;
+    }
+    hhds::Pin_class              held_sink;
+    std::vector<hhds::Pin_class> rest;
+    for (const auto& sink : cell.inp_sorted_pins()) {
+      const auto drv = sink.get_driver_pin();
+      if (same_pin(drv, hold)) {
+        if (!held_sink.is_invalid()) {
+          return false;  // the held value twice (a Xor parity): leave it
+        }
+        held_sink = sink;
+      } else {
+        rest.push_back(drv);
+      }
+    }
+    if (held_sink.is_invalid() || rest.empty()) {
+      return false;
+    }
+    hhds::Pin_class term = rest.front();
+    if (rest.size() > 1) {
+      // A fresh cell for the other operands: the old cell's width hint
+      // described `a OP x OP y`, not `x OP y` (an And with a narrow `a`).
+      auto inner = make_node(*current_graph, op);
+      for (const auto& operand : rest) {
+        livehd::graph_util::append_sink_operand(inner, op, 0).connect_driver(operand);
+      }
+      term = inner.create_driver_pin(0);
+    }
+    auto guard = make_node(*current_graph, Ntype_op::Mux);
+    livehd::graph_util::setup_sink_pid(guard, 0).connect_driver(sel);
+    const auto identity = create_const(*current_graph, *Dlop::create_integer(op == Ntype_op::And ? -1 : 0));
+    livehd::graph_util::setup_sink_pid(guard, static_cast<hhds::Port_id>(updated_idx)).connect_driver(term);
+    livehd::graph_util::setup_sink_pid(guard, static_cast<hhds::Port_id>(hold_idx)).connect_driver(identity);
+
+    clear_all_sinks(node);
+    livehd::graph_util::set_type_op(node, op);
+    livehd::graph_util::append_sink_operand(node, op, 0).connect_driver(hold);
+    livehd::graph_util::append_sink_operand(node, op, 0).connect_driver(guard.create_driver_pin(0));
+    normalize_emitted(guard);
+    if (!cell.has_out_edges()) {
+      bwd_del_node(cell);
+    }
+    inp_edges_ordered = ordered_inp_edges(node);
+    return true;
+  };
+  if (may_emit_unstamped() && is_two_arm_mux(inp_edges_ordered) && (guard_accumulation(2, 1) || guard_accumulation(1, 2))) {
+    return false;  // retyped: scalar_node continues it as the operator
+  }
+
   // Constant 0/1 arms are a boolean materialization of the selector itself.
   if (inp_edges_ordered[1].get_driver_pin().is_const() && inp_edges_ordered[2].get_driver_pin().is_const()) {
     const auto& c0 = const_of(inp_edges_ordered[1].get_driver_pin());

@@ -1323,10 +1323,24 @@ void lower_lnasts(Options& opts, Result& res, Eprp_var& var, const std::string& 
     run_step("pass.upass", var, up, opts, res);
   } else {
     up["import_defer"] = "1";
-    // Pristine (post-lnastfmt, pre-upass) bodies for the whole-file retry.
-    absl::flat_hash_map<std::string, std::shared_ptr<hhds::Tree>> pristine;
+    // Pristine (post-lnastfmt, pre-upass) bodies for the whole-file retry,
+    // keyed by the unit OBJECT. A name is not an identity here: a runner-minted
+    // IDENTITY specialization (a generic `mod` instantiated with every generic
+    // at its declaration default) is named after its template, so a by-name
+    // lookup mistook that derived clone for the pristine template -- it was
+    // never dropped with its file, and restoring "the" unit of that name
+    // rewound the TEMPLATE while the stale clone kept calling trees the retry
+    // had just erased (`call to undefined function 'sub.sub.__loop0'`).
+    // `pristine` keeps the names (file-unit prefixes for the blocked mapping).
+    struct Pristine_unit {
+      std::shared_ptr<Lnast>      unit;  // held: keeps the key address unique
+      std::shared_ptr<hhds::Tree> body;
+    };
+    absl::flat_hash_map<const Lnast*, Pristine_unit> pristine_units;
+    absl::flat_hash_set<std::string>                 pristine;
     for (const auto& ln : var.lnasts) {
-      pristine.emplace(std::string(ln->get_top_module_name()), ln->tree_ptr()->clone());
+      pristine.emplace(ln->get_top_module_name());
+      pristine_units.try_emplace(ln.get(), Pristine_unit{ln, ln->tree_ptr()->clone()});
     }
     // file unit -> the file units that IMPORT it, built BEFORE the first round
     // while every body is still pristine (a walked body has had its import
@@ -1334,7 +1348,7 @@ void lower_lnasts(Options& opts, Result& res, Eprp_var& var, const std::string& 
     std::map<std::string, std::set<std::string>> importers;
     {
       std::set<std::string> file_units;
-      for (const auto& [pname, _] : pristine) {
+      for (const auto& pname : pristine) {
         file_units.insert(pname);
       }
       for (const auto& ln : var.lnasts) {
@@ -1368,7 +1382,7 @@ void lower_lnasts(Options& opts, Result& res, Eprp_var& var, const std::string& 
       std::map<std::string, std::set<std::string>> blocked;
       for (const auto& [unit, text] : var.unresolved_imports) {
         std::string file;
-        for (const auto& [pname, _] : pristine) {
+        for (const auto& pname : pristine) {
           const bool prefix
               = unit == pname
                 || (unit.size() > pname.size() + 1 && unit.compare(0, pname.size(), pname) == 0 && unit[pname.size()] == '.');
@@ -1381,7 +1395,7 @@ void lower_lnasts(Options& opts, Result& res, Eprp_var& var, const std::string& 
       if (blocked == prev_blocked) {
         std::vector<std::string> available_units;
         available_units.reserve(pristine.size());
-        for (const auto& [pname, _] : pristine) {
+        for (const auto& pname : pristine) {
           available_units.push_back(pname);
         }
         std::sort(available_units.begin(), available_units.end());
@@ -1442,69 +1456,97 @@ void lower_lnasts(Options& opts, Result& res, Eprp_var& var, const std::string& 
           }
         }
       }
-      // Whole-file retry: restore each retried file's pristine body and drop
-      // its round-derived trees so re-extraction doesn't duplicate units.
-      auto restore_unit = [&](const std::string& name) {
-        auto pit = pristine.find(name);
-        if (pit == pristine.end()) {
-          return false;
+      // Whole-unit retry: restore each retried unit's pristine body and drop
+      // its round-derived trees (every unit minted this invocation named `U` or
+      // `U.*` -- lifted loop bodies `U.__loopN`, extracted functions, and the
+      // identity specialization that shares a template's name) so the re-walk
+      // re-derives them instead of keeping stale copies by name-dedup.
+      // Derived units by name, for the prefix lookup (names sharing a prefix
+      // are contiguous in this order).
+      std::multimap<std::string, const Lnast*> derived_by_name;
+      for (const auto& ln : var.lnasts) {
+        if (!pristine_units.contains(ln.get())) {
+          derived_by_name.emplace(std::string(ln->get_top_module_name()), ln.get());
         }
-        for (const auto& ln : var.lnasts) {
-          if (ln->get_top_module_name() == name) {
-            ln->replace_body(pit->second->clone());
-            ln->set_pub_values({});
-            return true;
-          }
-        }
-        return false;
-      };
-      std::set<std::string> erased;
-      for (const auto& file : retry) {
-        if (!restore_unit(file)) {
-          continue;
-        }
-        std::erase_if(var.lnasts, [&](const std::shared_ptr<Lnast>& ln) {
+      }
+      absl::flat_hash_set<const Lnast*> restored;
+      absl::flat_hash_set<const Lnast*> dropped;
+      std::set<std::string>             erased;
+      std::vector<std::string>          erased_work;
+      auto drop_unit = [&](const Lnast* ln) {
+        if (dropped.insert(ln).second) {
           std::string name{ln->get_top_module_name()};
-          const bool  drop = name.size() > file.size() + 1 && name.compare(0, file.size(), file) == 0 && name[file.size()] == '.'
-                             && !pristine.contains(name);  // derived this invocation, not a loaded unit
-          if (drop) {
-            erased.insert(name);
+          if (erased.insert(name).second) {
+            erased_work.push_back(std::move(name));
           }
-          return drop;
-        });
+        }
+      };
+      auto restore_unit = [&](const std::shared_ptr<Lnast>& ln) {
+        const auto pit = pristine_units.find(ln.get());
+        if (pit == pristine_units.end() || !restored.insert(ln.get()).second) {
+          return;
+        }
+        ln->replace_body(pit->second.body->clone());
+        ln->set_pub_values({});
+        const std::string name{ln->get_top_module_name()};
+        retry.insert(name);
+        for (auto it = derived_by_name.lower_bound(name); it != derived_by_name.end() && it->first.starts_with(name); ++it) {
+          if (it->first.size() == name.size() || it->first[name.size()] == '.') {
+            drop_unit(it->second);
+          }
+        }
+      };
+      for (const auto& ln : var.lnasts) {
+        if (retry.contains(std::string(ln->get_top_module_name()))) {
+          restore_unit(ln);
+        }
       }
       // An erased tree may be a runner-minted TEMPLATE SPECIALIZATION
       // (`<callee-file>.<callee>__<mangled>`, see uPass_runner's
-      // maybe_specialize_template_call). Re-walking the CALLEE's file never
-      // recreates it: only the CALL SITE that minted it does, and that call
-      // site lives in a different unit — one that may have blocked on nothing
-      // and is therefore about to be frozen as final just below. Retry the
-      // minter too, restored to its pristine body so the re-walk is a fresh
-      // elaboration rather than the corrupting re-walk the comment below warns
-      // about. Symptom when skipped: tolg reports `call to undefined function
+      // maybe_specialize_template_call) or a loop body lifted from one.
+      // Re-walking the CALLEE's file never recreates it: only the CALL SITE
+      // that minted it does, and that call site lives in a different unit —
+      // one that may have blocked on nothing and is therefore about to be
+      // frozen as final just below. Retry the minter too, restored to its
+      // pristine body so the re-walk is a fresh elaboration rather than the
+      // corrupting re-walk the comment below warns about. A caller that is
+      // itself DERIVED (a specialization minted by another specialization,
+      // e.g. the identity clone of `mid<N=4>` calling `sub__N_4_W_8`) has no
+      // pristine body: drop it as well, so the search continues to ITS minter.
+      // Symptom when skipped: tolg reports `call to undefined function
       // '<mangled>'` in a unit that itself looks perfectly resolved (minion's
       // minion_dcache_tlb_array -> minion_tlb<Entries=8, NrMinions=1>).
-      if (!erased.empty()) {
-        bool grew = true;
-        while (grew) {
-          grew = false;
-          for (const auto& ln : var.lnasts) {
-            std::string name{ln->get_top_module_name()};
-            if (retry.contains(name) || !pristine.contains(name)) {
-              continue;  // already retried, or not restorable to a pristine body
+      if (!erased_work.empty()) {
+        absl::flat_hash_map<std::string, std::vector<std::shared_ptr<Lnast>>> callers;
+        for (const auto& ln : var.lnasts) {
+          if (restored.contains(ln.get()) || dropped.contains(ln.get())) {
+            continue;
+          }
+          for (auto& callee : collect_called_names(ln)) {
+            callers[std::move(callee)].push_back(ln);
+          }
+        }
+        while (!erased_work.empty()) {
+          const auto callee = std::move(erased_work.back());
+          erased_work.pop_back();
+          const auto cit = callers.find(callee);
+          if (cit == callers.end()) {
+            continue;
+          }
+          for (const auto& ln : cit->second) {
+            if (restored.contains(ln.get()) || dropped.contains(ln.get())) {
+              continue;
             }
-            for (const auto& callee : collect_called_names(ln)) {
-              if (!erased.contains(callee)) {
-                continue;
-              }
-              if (restore_unit(name)) {
-                retry.insert(name);
-                grew = true;
-              }
-              break;
+            if (pristine_units.contains(ln.get())) {
+              restore_unit(ln);
+            } else {
+              drop_unit(ln.get());
             }
           }
         }
+      }
+      if (!dropped.empty()) {
+        std::erase_if(var.lnasts, [&](const std::shared_ptr<Lnast>& ln) { return dropped.contains(ln.get()); });
       }
       // Everything still standing walked to completion with every import
       // resolved, so its body is FINAL. Freeze it: the next round exists only
@@ -1646,6 +1688,27 @@ void lower_lnasts(Options& opts, Result& res, Eprp_var& var, const std::string& 
   {
     Phase_timer   phase(res, "lnast.tolg");
     Stdout_to_log redirect(next_log_path(opts, "lnast.tolg"));
+    // An explicit `--top` names the design. A file-scope helper `comb` that is
+    // not `pub` and that nothing lowered reaches through a call (used only at
+    // comptime, inlined, or called only from a branch a comptime `if` folded
+    // away) is then not lowered at all: no GraphIO, no emitted module. A
+    // comptime switch between two spellings of a design must leave no trace of
+    // the dead spelling's helpers. Without `--top` (a library compile) every
+    // unit still lowers.
+    absl::flat_hash_set<const Lnast*> unlowered;
+    if (!opts.top.empty() && opts.top != "-auto-top") {
+      std::vector<std::string> names;
+      for (const auto& ln : var.lnasts) {
+        if (!ln->get_lambda_kind().empty()) {
+          names.emplace_back(ln->get_top_module_name());
+        }
+      }
+      if (const auto top = resolve_top_name(names, opts.top, /*diag_pass=*/""); !top.empty()) {
+        for (const auto& ln : uPass_tolg::unreferenced_private_combs(var.lnasts, top)) {
+          unlowered.insert(ln.get());
+        }
+      }
+    }
     // 2f-lg: reject two units pinned to the same artifact name (lg="…")
     // before any GraphIO is created.
     uPass_tolg::detect_lg_collisions(var.lnasts);
@@ -1670,8 +1733,8 @@ void lower_lnasts(Options& opts, Result& res, Eprp_var& var, const std::string& 
     // sites can bind callee GraphIOs (Sub instances) regardless of order.
     try {
       for (const auto& ln : var.lnasts) {
-        if (ln->is_graph_restored()) {
-          continue;  // graph body restored from the compile cache
+        if (ln->is_graph_restored() || unlowered.contains(ln.get())) {
+          continue;  // graph body restored from the compile cache, or not needed
         }
         uPass_tolg::register_io(ln, lib_path, var.lnasts);
       }
@@ -1690,8 +1753,8 @@ void lower_lnasts(Options& opts, Result& res, Eprp_var& var, const std::string& 
     // var.lnasts); the graphs still join `var` in registry order.
     absl::flat_hash_map<const Lnast*, std::shared_ptr<hhds::Graph>> built;
     for (const auto& ln : uPass_tolg::lowering_order(var.lnasts)) {
-      if (ln->is_graph_restored()) {
-        continue;  // final post-formal graph already lives in lib_path/var
+      if (ln->is_graph_restored() || unlowered.contains(ln.get())) {
+        continue;  // final post-formal graph already lives in lib_path/var, or not needed
       }
       if (auto g = uPass_tolg::run(ln, lib_path, var.lnasts, reset_style)) {
         built.insert_or_assign(ln.get(), std::move(g));  // a unit listed twice: the last lowering wins

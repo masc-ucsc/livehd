@@ -1,0 +1,17 @@
+/*
+:name: comptime_if_loop_compaction
+:type: lec
+:lec_top: comptime_if_loop_compaction
+*/
+// PYROPE-vs-PYROPE group. This file is the REFERENCE: the row update of
+// lhdtrack's br_lru_state_internal written plainly, a `for` over an UNTYPED
+// `mut next_wins`. The roller needs a declared type for every carry, so this
+// loop source-unrolls (no Sub instance). See _1 for the claim.
+pub mod comptime_if_loop_compaction(grant:U4, wins:U16) -> (next:U16@[]) {
+  comptime const N = 4
+  mut next_wins = wins
+  for i in 0..<N {
+    next_wins#[(i*N)..+N] = if grant#[i] == 1 { 0 } else { wins#[(i*N)..+N] | grant }
+  }
+  next = next_wins
+}

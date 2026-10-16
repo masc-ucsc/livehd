@@ -2167,15 +2167,37 @@ void Partitioner::emit_region_body_as_top(uint32_t r, hhds::Graph* body, hhds::G
 
 // Outputs driven directly by a primary input or a constant (they bypass the
 // region entirely). Applied to both the mapped body and the pre-body.
+//
+// IDEMPOTENT: the hook may have filled `body` from a body that already carries
+// these wires. pass.abc's region cache stores a mapped module by copying it
+// out of the output library at save() -- AFTER this ran -- and a reuse
+// (another run's cache hit, or a same-run cross-name hit read straight from
+// the output library) installs that copy with replace_body_from before we get
+// here. Connecting again added a SECOND identical driver edge to the output
+// sink (hhds keeps parallel edges), so a warm netlist broke the one-driver-per-
+// sink invariant and digested differently from the cold one -- the STA cache
+// keyed on that digest missed on every comment-only rebuild.
 void Partitioner::emit_top_passthrough_outputs(hhds::Graph* body) {
   admit("emit_top_passthrough_outputs", 0);
   for (const auto& ow : top_outputs_) {
     admit("emit_top_passthrough_outputs-step");
+    hhds::Pin_class drv;
     if (ow.kind == OutWire::Const) {
-      gu::create_const(*body, gu::const_of(ow.cdriver)).connect_sink(body->get_output_pin(ow.oname));
+      drv = gu::create_const(*body, gu::const_of(ow.cdriver));  // canonical per value: same pin if already minted
     } else if (ow.kind == OutWire::Primary) {
-      body->get_input_pin(ow.primary_name).connect_sink(body->get_output_pin(ow.oname));
+      drv = body->get_input_pin(ow.primary_name);
+    } else {
+      continue;
     }
+    auto       out     = body->get_output_pin(ow.oname);
+    const auto drivers = out.get_driver_pins();
+    if (drivers.size() == 1 && drivers.front() == drv) {
+      continue;  // already wired exactly so (a reused body)
+    }
+    if (!drivers.empty()) {
+      out.del_sink();  // a region never drives a passthrough output: drop whatever is there
+    }
+    drv.connect_sink(out);
   }
 }
 

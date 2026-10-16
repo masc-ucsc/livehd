@@ -4,6 +4,7 @@
 #include <cvc5/cvc5.h>
 
 #include <chrono>
+#include <deque>
 #include <map>
 #include <optional>
 #include <set>
@@ -51,6 +52,19 @@ struct Val {
   // the query-side miters, which exclude ref-unknown bits from the compare —
   // the cvc5 analogue of yosys `miter -ignore_gold_x`.
   cvc5::Term x_mask{};  // ('undef' avoided: C-preprocessor collision risk)
+};
+
+// Reference-side memory knowledge threaded by BMC; see mem_x_fresh below.
+inline constexpr uint32_t kMem_x_epoch_bits = 32;
+// Memories of at most this many entries keep one bit-vector per entry
+// (`words`) instead of the epoch array: no array theory at all.
+inline constexpr int kMem_x_word_entries = 64;
+struct Mem_x_state {
+  cvc5::Term              plane;  // array: bv(kMem_x_epoch_bits + addr_w) -> bv(bits); null = every bit known
+  cvc5::Term              epoch;  // bv(kMem_x_epoch_bits)
+  cvc5::Term              fill;   // bv(bits)
+  std::vector<cvc5::Term> words;  // small memories: entry i's unknown bits (plane/epoch/fill unused)
+  [[nodiscard]] bool      is_null() const { return plane.isNull() && words.empty(); }
 };
 
 struct Encoded {
@@ -107,7 +121,7 @@ struct Encoded {
   // corresponding memories "collapse"), and its post-cycle contents are the
   // next-state array. Read douts are ordinary BV terms in `outputs`/pin2val.
   Io_name_map<cvc5::Term> next_mem;  // key -> next-state array
-  Io_name_map<cvc5::Term> next_mem_x;  // reference-side unknown bits, threaded by BMC
+  Io_name_map<Mem_x_state> next_mem_x;  // reference-side unknown bits, threaded by BMC
 
   // M4 SYNC-read latency. A type==1 (registered / latency-1) read port's dout is
   // a 1-cycle REGISTERED value: the dout this cycle is a CURRENT-STATE symbol
@@ -305,6 +319,71 @@ inline Mem_sig read_mem_sig(const hhds::Occurrence_node& node) { return read_mem
 std::string    mem_state_key(const Mem_sig& sig, int occ);
 std::string    mem_state_key(const Mem_sig& sig, std::string_view name);
 
+// Reference-side memory KNOWLEDGE (Mem_x_state, BMC under
+// formal.lec.gold_x=ignore): bit i of entry e is 1 when that stored bit is
+// unknown.
+// A memory of at most kMem_x_word_entries entries holds one bit-vector per
+// entry: a write is an address-compare ITE per entry and a read an ITE chain,
+// which the bit-vector solver settles directly. The epoch array below made a
+// two-lane 4x8 design (unknown write addresses on both lanes) take 22 s at
+// bound 2 and time out at bound 3; per-entry words prove it in well under a
+// second. Larger memories keep the array:
+//   unknown(e) = select(plane, epoch ++ e) ^ fill
+// `fill` is the plane of every entry not written in the current epoch; a
+// whole-array event (a reset, or a write whose address is unknown, which may
+// touch any entry) starts a new epoch instead of replacing the array, so the
+// older entries simply stop being addressed.
+// The encoding exists because cvc5's array solver throws "write-chains
+// connecting two different constant arrays" whenever an ITE, an equality or a
+// congruence may merge array terms rooted at two DIFFERENT constant arrays --
+// e.g. the all-known and the all-unknown plane, or a constant store chain the
+// rewriter folds into a new constant. Here the all-zero array is the ONLY
+// constant, there is no array-sorted ITE, and every index carries the epoch,
+// which starts as a fresh symbol, so no store chain is ever a constant.
+// Epochs are kMem_x_epoch_bits wide: they never wrap within a bounded run.
+
+// A new knowledge state: every bit known (or unknown). `name` names the
+// fresh epoch symbol (cvc5 does not intern by name; it is for dumps only).
+// The representation is chosen from sig.size (see kMem_x_word_entries).
+Mem_x_state mem_x_fresh(cvc5::TermManager& tm, const Mem_sig& sig, bool unknown, const std::string& name);
+// Unknown bits of entry `addr` (an addr_w-bit term).
+cvc5::Term  mem_x_read(cvc5::TermManager& tm, const Mem_x_state& s, const cvc5::Term& addr);
+// Entry `addr`'s unknown bits become `x`.
+Mem_x_state mem_x_write(cvc5::TermManager& tm, const Mem_x_state& s, const cvc5::Term& addr, const cvc5::Term& x);
+// When `cond` holds, every entry's unknown bits become `fill`; with a
+// size*bits `entries` bus (entry 0 in the low bits), entry i's become that
+// slice instead. Otherwise `s` is unchanged.
+Mem_x_state mem_x_restart(cvc5::TermManager& tm, const Mem_x_state& s, const Mem_sig& sig, const cvc5::Term& cond,
+                          const cvc5::Term& fill, const cvc5::Term& entries = cvc5::Term{});
+
+// Power-on contents of a Memory (its `initial` pin), entry by entry: a
+// comptime constant or a `$readmem` image file. A memory whose initial pin is
+// neither has kind `none` (its power-on contents are unspecified hardware
+// state). Entries come out as `bits` binary digits, MSB first; an image entry
+// the file does not load stays "" (unspecified, like an uninitialized
+// memory's). An unknown digit ('?', x, z) reads as 0, the convention of the
+// constant path and of a flop's power-on value.
+// An image is read from its path as the simulator would ($readmem paths are
+// relative to the current directory; Pyrope records an absolute one) and
+// cached by (path, radix, shape). `error` is set, and `entries` left empty,
+// when the file cannot be read or the memory cannot be modelled with it (a
+// reset arm or whole-array update would rewrite contents that only exist at
+// power-on; the Verilog emitter refuses the same shapes). LEC must answer
+// REFUTED-unsupported then: comparing an unread image is never a proof.
+struct Mem_power_on {
+  enum class Kind { none, constant, image };
+  Kind                     kind = Kind::none;
+  std::vector<std::string> entries;  // per entry (index 0 first); "" = not loaded
+  std::string              source;   // image: "$readmemh(<path>)", for diagnostics
+  std::string              error;    // image only: why it cannot be used
+  [[nodiscard]] bool       has_contents() const { return kind != Kind::none && error.empty(); }
+  [[nodiscard]] bool       operator==(const Mem_power_on& o) const { return kind == o.kind && entries == o.entries && error == o.error; }
+};
+Mem_power_on memory_power_on(const hhds::Occurrence_node& node, const Mem_sig& sig);
+// Equal power-on contents: the same entries loaded with the same values. A
+// constant and an image that load the same words compare equal.
+bool         same_power_on(const Mem_power_on& a, const Mem_power_on& b);
+
 // Stable cross-design / cross-front-end correspondence key for a Flop state
 // cell (source span preferred, then pin name). Used by both the encoder (to
 // emit current/next state under one key) and prove_equal (to share the
@@ -468,6 +547,14 @@ public:
   // Unset (a bare Encoder user) keeps the legacy per-encode occurrence counter.
   void set_box_keys(const Io_name_map<std::string>* k) { box_keys_ = k; }
 
+  // Box inputs owed NO `bbin:` obligation, as "<defkey>:<port>" (defkey = the
+  // correspondence key's def part, before '#'): an input port of a proven
+  // (collapsed, untrusted) child that the child's body never lets reach an
+  // output, on either design. query.cpp builds it once from both designs'
+  // bodies, so both encodes drop the same points. Only the default
+  // shared-symbol box honours it (a UF box consumes its inputs).
+  void set_box_dead_inputs(const absl::flat_hash_set<std::string>* d) { box_dead_inputs_ = d; }
+
   // Memory correspondence: box_node_key(memory node) -> its cross-design key
   // (mem_state_key), built ONCE by query.cpp over both designs (name-first,
   // occurrence fallback) and set separately before encoding each side. Once
@@ -501,7 +588,16 @@ public:
   // undef bit-plane on every Val (see Val::undef) instead of being silently
   // masked to 0. Toggled ON only while encoding the REFERENCE design.
   void set_x_dontcare(bool on) { x_dontcare_ = on; }
-  void set_memory_x_state(const Io_name_map<cvc5::Term>* state) { memory_x_state_ = state; }
+  void set_memory_x_state(const Io_name_map<Mem_x_state>* state) { memory_x_state_ = state; }
+  // LEC IMPLEMENTATION side: a read the memory leaves undefined (an
+  // ordering="none" collision with a write) returns an UNCONSTRAINED value --
+  // a fresh symbol per encode, so per cycle -- in the colliding bits instead
+  // of the stored word. The reference side marks the same bits don't-care
+  // (x_dontcare); the implementation's own X must not be resolved to the
+  // "old" value it happens to hold, or ordering="none" would refine "old".
+  // Such a read is not exported as a mergeable read port (Encoded::mem_rd):
+  // its value is not a function of the array and the address.
+  void set_undef_read_free(bool on) { undef_read_free_ = on; }
 
   // 2f-verify: while true, each `fproperty` Sub (a user assert/assume/
   // assert_always materialized by tolg — see graph_util::fproperty_module_name)
@@ -569,9 +665,19 @@ public:
   void set_encode_budget(int seconds) { budget_seconds_ = seconds; }
 
 private:
+  // Forward occurrence order of `g` under an opaque scope, cached for this
+  // Encoder's lifetime (see encode()). A deque: references to its entries stay
+  // valid as views are added, and none is ever erased.
+  struct Fwd_view {
+    hhds::Graph*                                             g = nullptr;
+    std::unique_ptr<ankerl::unordered_dense::set<hhds::Gid>> opaque;
+    hhds::OccurrenceNodeRange                                range;
+  };
+  const hhds::OccurrenceNodeRange& forward_nodes(hhds::Graph* g, const ankerl::unordered_dense::set<hhds::Gid>& opaque);
+  std::deque<Fwd_view>             fwd_cache_;
   // Fit `v` to exactly `width` bits: sign/zero-extend (per v.is_signed) when
   // widening, low-bit Extract when narrowing.
-  cvc5::Term fit(const Val& v, int width);
+  cvc5::Term                       fit(const Val& v, int width);
 
   // Bit-vector sort of `width` bits (clamped to >= 1).
   cvc5::Sort bv(int width);
@@ -603,10 +709,12 @@ private:
   const absl::flat_hash_map<std::string, State_box>*  state_boxes_   = nullptr;
   const absl::flat_hash_map<std::string, Comb_box>*   comb_boxes_    = nullptr;
   const Io_name_map<std::string>*                     box_keys_      = nullptr;
+  const absl::flat_hash_set<std::string>*             box_dead_inputs_ = nullptr;
   const Io_name_map<std::string>*                     mem_keys_      = nullptr;
   int                                                 sub_depth_     = 0;      // Sub flattening recursion guard
-  const Io_name_map<cvc5::Term>*                       memory_x_state_ = nullptr;
+  const Io_name_map<Mem_x_state>*                      memory_x_state_ = nullptr;
   bool                                                x_dontcare_    = false;  // ref-side X = don't-care (lec.gold_x=ignore)
+  bool                                                undef_read_free_ = false;  // impl-side undefined read = free value
   bool                                                emit_props_ = false;  // emit fproperty conds as \x04prop: outputs (2f-verify)
   bool                                                force_multi_clock_ = false;  // see set_force_multi_clock
   const absl::flat_hash_set<std::string>*             port_taps_  = nullptr;  // sub instances whose ports get \x05tap: outputs

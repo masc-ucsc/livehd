@@ -1,12 +1,15 @@
 // This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 #include "inline_sub.hpp"
 
+#include <algorithm>
 #include <format>
 #include <memory>
 #include <optional>
 #include <stdexcept>
 #include <string>
 #include <string_view>
+#include <utility>
+#include <vector>
 
 #include "cell.hpp"
 #include "graph_library_singleton.hpp"
@@ -407,4 +410,82 @@ TEST(SubInline, FeedThroughCycleThroughAFitIsStillACycle) {
   y.connect_sink(inst.create_sink_pin(0));
   y.connect_sink(parent->get_output_pin("result"));
   EXPECT_THROW((void)gu::inline_sub_instance(parent.get(), inst, "test"), std::runtime_error);
+}
+
+// Two NAMED instances `a`, `b` of a wrapper whose body is one ANONYMOUS
+// instance (a `__flat___<module>` region wrapper) of the state leaf. Inlining
+// level by level -- the named instance, then the anonymous clone it leaves in
+// the parent -- must keep each flop under its own instance (`a.q`, `b.q`). The
+// anonymous clone used to arrive unnamed, so the second splice added no prefix
+// and both flops became `q`: the LEC encoder then refused the pair as an
+// ambiguous logical state name (lhdtrack lec_netlist pyrope-vs-netlist,
+// br_arb_weighted_lru `value[0]`).
+TEST(SubInline, AnonymousNestedWrapperKeepsTheInstancePrefix) {
+  auto& lib  = livehd::Hhds_graph_library::instance("lgdb_inline_anon_nested");
+  auto  lio  = lib.create_io("leaf");
+  lio->add_input("d", 0);
+  lio->add_input("c", 1);
+  lio->add_output("o", 2);
+  for (const auto* p : {"d", "c", "o"}) {
+    lio->set_bits(p, 1);
+  }
+  auto leaf = lio->create_graph();
+  auto st   = gu::create_typed_node(*leaf, Ntype_op::Flop);
+  st.attr(hhds::attrs::name).set("q");
+  leaf->get_input_pin("d").connect_sink(gu::setup_sink_by_name(st, "din"));
+  leaf->get_input_pin("c").connect_sink(gu::setup_sink_by_name(st, "clock_pin"));
+  auto q = st.create_driver_pin(0);
+  gu::set_bits(q, 1);
+  q.connect_sink(leaf->get_output_pin("o"));
+
+  auto wio = lib.create_io("lib.wrap");  // a dotted `file.entity` def name
+  wio->add_input("d", 0);
+  wio->add_input("c", 1);
+  wio->add_output("o", 2);
+  for (const auto* p : {"d", "c", "o"}) {
+    wio->set_bits(p, 1);
+  }
+  auto wrap = wio->create_graph();
+  auto anon = gu::create_typed_node(*wrap, Ntype_op::Sub);  // no name attr: transparent
+  anon.set_subnode(lio);
+  wrap->get_input_pin("d").connect_sink(anon.create_sink_pin(0));
+  wrap->get_input_pin("c").connect_sink(anon.create_sink_pin(1));
+  anon.create_driver_pin(2).connect_sink(wrap->get_output_pin("o"));
+
+  auto pio = lib.create_io("top");
+  pio->add_input("d", 0);
+  pio->add_input("c", 1);
+  pio->add_output("x", 2);
+  pio->add_output("y", 3);
+  for (const auto* p : {"d", "c", "x", "y"}) {
+    pio->set_bits(p, 1);
+  }
+  auto parent = pio->create_graph();
+  for (const auto& [iname, out] : {std::pair{"a", "x"}, std::pair{"b", "y"}}) {
+    auto inst = gu::create_typed_node(*parent, Ntype_op::Sub);
+    inst.set_subnode(wio);
+    inst.attr(hhds::attrs::name).set(iname);
+    parent->get_input_pin("d").connect_sink(inst.create_sink_pin(0));
+    parent->get_input_pin("c").connect_sink(inst.create_sink_pin(1));
+    inst.create_driver_pin(2).connect_sink(parent->get_output_pin(out));
+  }
+  // Splice every Sub, one per collection (a splice invalidates other handles).
+  for (bool spliced = true; spliced;) {
+    spliced = false;
+    for (auto n : parent->body().nodes()) {
+      if (gu::type_op_of(n) == Ntype_op::Sub) {
+        ASSERT_TRUE(gu::inline_sub_instance(parent.get(), n, "test"));
+        spliced = true;
+        break;
+      }
+    }
+  }
+  std::vector<std::string> names;
+  for (auto n : parent->body().nodes()) {
+    if (gu::type_op_of(n) == Ntype_op::Flop) {
+      names.emplace_back(gu::logical_hier_name(gu::node_name_of(n)));
+    }
+  }
+  std::sort(names.begin(), names.end());
+  EXPECT_EQ(names, (std::vector<std::string>{"a.q", "b.q"}));
 }

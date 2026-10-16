@@ -1,0 +1,33 @@
+// An 8-requester LRU arbiter written with loops (lhdtrack br_arb_lru's shape):
+// the pairwise matrix is a packed 64-bit register read and updated ONE BIT per
+// iteration at a loop-affine position `i*N + j`. See loop_bit_write_qor_test.sh.
+pub mod loop_lru_matrix(en:U1, request:U8) -> (grant:U8@[]) {
+  comptime const N = 8
+  reg state:U64 = 0
+
+  mut can:U8 = 0
+  for i in 0..<N {
+    mut wins = true
+    for j in 0..<N {
+      if i < j {
+        wins = wins and (request#[j] == 0 or state#[i*N + j] == 1)
+      } elif i > j {
+        wins = wins and (request#[j] == 0 or state#[j*N + i] == 0)
+      }
+    }
+    can#[i] = U1(wins)
+  }
+  grant = request & can
+
+  if en == 1 and request != 0 {
+    for i in 0..<N {
+      for j in (i + 1)..<N {
+        if grant#[i] == 1 {
+          state#[i*N + j] = 0
+        } elif grant#[j] == 1 {
+          state#[i*N + j] = 1
+        }
+      }
+    }
+  }
+}

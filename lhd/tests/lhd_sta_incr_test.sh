@@ -211,4 +211,40 @@ if cold != warm:
 PY
 echo "PASS: a warm synth replays the whole timing report and re-stamps only resynth"
 
+# --- 8. a comment-only edit of a HIERARCHICAL design still hits ------------
+# A def that maps to one region is emitted "as top", and an output driven by a
+# constant (`k = 5`) or straight by an input (`p = a`) bypasses that region: the
+# partitioner wires it after the mapper. pass.abc's region cache stores the
+# def with those wires, so a cache hit used to get them a SECOND time -- two
+# identical driver edges on one output sink. The warm netlist then digested
+# differently from the cold one and the STA cache missed although every region
+# was reused and the netlists were otherwise identical (minion: 215/215 abc
+# hits, sta 0 hits).
+HP="$W/hier_pt.prp"
+cat > "$HP" <<'PRP'
+mod leaf(a:U8, b:U8) -> (s:U9@[0], k:U4@[0], p:U8@[0]) {
+  s = a + b
+  k = 5
+  p = a
+}
+
+mod hier_pt(a:U8, b:U8, c:U8) -> (o:U9@[0], ko:U4@[0], po:U8@[0], o2:U9@[0]) {
+  const l1 = leaf(a=a, b=b)
+  const l2 = leaf(a=b, b=c)
+  o  = l1.s
+  ko = l1.k
+  po = l1.p
+  o2 = l2.s
+}
+PRP
+HW="$W/wh"
+run synth "$HP" --top hier_pt --set synth.liberty="$LIB" --workdir "$HW"
+expect_sta 0 1 "cold hierarchical synth"
+printf '\n// comment-only touch: the netlist must not change\n' >> "$HP"
+run synth "$HP" --top hier_pt --set synth.liberty="$LIB" --workdir "$HW"
+[ "$(python3 -c 'import json,sys; d=json.load(open(sys.argv[1]))["incremental"]["abc"]; print(d["misses"])' "$W/r.json")" = 0 ] \
+  || fail "the comment-only rebuild re-mapped a region; this step needs an all-hit abc pass"
+expect_sta 1 0 "comment-only hierarchical synth (all regions reused)"
+echo "PASS: a comment-only rebuild of a design with constant/passthrough outputs reuses the STA result"
+
 echo "PASS: lhd_sta_incr_test"

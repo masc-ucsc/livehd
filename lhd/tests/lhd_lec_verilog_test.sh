@@ -436,6 +436,31 @@ done
   || fail "stale-log control did not reuse the earlier lgcheck log name"
 echo "PASS: a complete lgcheck BMC is a bounded cross-check; incomplete or stale windows stay unknown"
 
+# lgcheck undecided because ITS time budget ran out (LGCHECK_EQUIV_TIMEOUT; it
+# prints TIMEOUT: before INCONCLUSIVE) is a resource limit: TIMEOUT-time (exit
+# 0 + warning), never REFUTED-unchecked (lhdtrack lec_netlist alpha_blend,
+# br_ram_flops, cpu ... reported "Drop the pinned formal.engine" for it).
+cat >"$W/lgcheck_timeout.sh" <<'SH'
+#!/bin/sh
+echo "TIMEOUT: bounded miter exhausted the shared equivalence budget (300s)."
+echo "WARN: Yosys could not prove equivalency and found NO counterexample."
+echo "INCONCLUSIVE: equivalence undetermined"
+exit 2
+SH
+chmod +x "$W/lgcheck_timeout.sh"
+LHD_LGCHECK="$W/lgcheck_timeout.sh" "$LHD" lec --set formal.effort=proof --impl "$INV" --ref "$INV" --top inv \
+  --set formal.solver=lgyosys --workdir "$W/crosscheck_timeout" --result-json "$W/crosscheck_timeout.json" \
+  >"$W/crosscheck_timeout.log" 2>&1 \
+  || fail "an lgcheck budget exhaustion did not exit 0 as TIMEOUT-time: $(cat "$W/crosscheck_timeout.log")"
+python3 - "$W/crosscheck_timeout.json" <<'PY' || fail "lgcheck budget exhaustion was not TIMEOUT-time: $(cat "$W/crosscheck_timeout.json")"
+import json, sys
+r = json.load(open(sys.argv[1]))['lec']
+assert r['verdict'] == 'timeout-time', r
+assert r['crosscheck']['verdict'] == 'timeout-time' and r['crosscheck']['exit_code'] == 2, r
+PY
+grep -q 'LGCHECK_EQUIV_TIMEOUT' "$W/crosscheck_timeout.log" || fail "lgcheck timeout hint does not name its budget"
+echo "PASS: an lgcheck time-budget exhaustion is TIMEOUT-time"
+
 # Verilog netlists elaborate the --lib cell models. slang reads them as library
 # files: a model is elaborated only when instantiated, so the RTL reference
 # below keeps the sole-module top fallback. An explicit satopt optimizes the

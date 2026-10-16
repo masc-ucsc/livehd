@@ -31,6 +31,16 @@ void optimize_state(const std::shared_ptr<hhds::Graph>& graph) {
   Bitwidth{10}.do_trans(graph);
 }
 
+// The compile schedule as pass.cprop runs it: bitwidth follows every sweep,
+// so the rewrites that mint unstamped cells are on.
+void optimize_lanes(const std::shared_ptr<hhds::Graph>& graph) {
+  Cprop{true}.do_trans(graph);
+  Bitwidth{10}.do_trans(graph);
+  Enableopt{}.do_trans(graph);
+  Cprop{true}.do_trans(graph);
+  Bitwidth{10}.do_trans(graph);
+}
+
 TEST(CpropConstants, FoldedValueIgnoresResultAndOutputWidthHints) {
   namespace gu = livehd::graph_util;
   auto& lib    = livehd::Hhds_graph_library::instance("lgdb_cprop_hint_independence");
@@ -3080,6 +3090,111 @@ TEST(CpropOpSharing, DeepCascadeHasLinearGeneratedSize) {
     }
   }
   EXPECT_LE(edges, 2 * depth + 3);
+}
+
+// `if c_i { acc OP= b + k_i }` unrolled: mux(c_i, acc, acc OP x_i) per link,
+// or the update on the false arm. The guard moves onto the term
+// (acc OP mux(c_i, id, x_i)) and the compile schedule flattens the plain
+// chain into one n-ary operator: AND-OR logic, not a serial MUX chain.
+TEST(CpropMux, GuardedAccumulationBecomesOneOperator) {
+  for (const auto op : {Ntype_op::Or, Ntype_op::And, Ntype_op::Xor}) {
+    for (const bool update_true : {true, false}) {
+      SCOPED_TRACE(std::string{Ntype::get_name(op)} + (update_true ? " true-arm" : " false-arm"));
+      Mux_graph f(std::string{"guard_"} + std::string{Ntype::get_name(op)} + (update_true ? "_t" : "_f"), 4, 8);
+      auto      acc = f.a;
+      for (int i = 0; i < 4; ++i) {
+        auto term = f.node(Ntype_op::Sum);
+        gu::setup_sink_pid(term, 0).connect_driver(f.b);
+        gu::setup_sink_pid(term, 0).connect_driver(f.constant(3 * i + 1));
+        auto upd = f.node(op);
+        gu::setup_sink_pid(upd, 0).connect_driver(acc);
+        gu::setup_sink_pid(upd, 0).connect_driver(term.create_driver_pin(0));
+        acc = update_true ? f.mux(f.controls[i], acc, upd.create_driver_pin(0))
+                          : f.mux(f.controls[i], upd.create_driver_pin(0), acc);
+      }
+      acc.connect_sink(f.graph->get_output_pin("out"));
+      std::vector<int64_t> expected;
+      for (uint64_t mask = 0; mask < 16; ++mask) {
+        for (const auto& [av, bv] : {std::pair{0x5a, 0x21}, std::pair{0xff, 0x0f}, std::pair{0x00, 0x7f}}) {
+          auto values = f.inputs(mask, av, bv);
+          expected.push_back(mux_eval(f.output(), values));
+        }
+      }
+      optimize_lanes(f.graph);
+      EXPECT_EQ(f.count(Ntype_op::Mux), 4U);  // the guards, one per term
+      EXPECT_EQ(f.count(op), 1U);
+      const auto root = f.output().get_master_node();
+      EXPECT_EQ(gu::type_op_of(root), op);
+      EXPECT_EQ(root.inp_pins_snapshot().size(), 5U);
+      size_t i = 0;
+      for (uint64_t mask = 0; mask < 16; ++mask) {
+        for (const auto& [av, bv] : {std::pair{0x5a, 0x21}, std::pair{0xff, 0x0f}, std::pair{0x00, 0x7f}}) {
+          auto values = f.inputs(mask, av, bv);
+          EXPECT_EQ(mux_eval(f.output(), values), expected[i++]) << mask;
+        }
+      }
+    }
+  }
+}
+
+// `w = s ? a : a ^ 9` twice (sim_loop_mux_arm's two copies of the low
+// nibble): the update cell has two consumers until CSE merges the muxes, so
+// the guard can only appear in a later sweep. Bitwidth_rewrite runs scalar_mux
+// after inference converged; a guard minted THERE kept no width and the
+// emitted Verilog declared the constant-arm mux(s, 9, 0) one bit wide. Every
+// value cell must end stamped, and both outputs keep their values.
+TEST(CpropMux, GuardedAccumulationNeverLeavesAnUnstampedCell) {
+  Mux_graph f("guard_const_term", 1, 4);
+  auto      upd = f.node(Ntype_op::Xor);
+  gu::setup_sink_pid(upd, 0).connect_driver(f.a);
+  gu::setup_sink_pid(upd, 0).connect_driver(f.constant(9));
+  f.mux(f.controls[0], upd.create_driver_pin(0), f.a).connect_sink(f.graph->get_output_pin("out"));
+  f.mux(f.controls[0], upd.create_driver_pin(0), f.a).connect_sink(f.graph->get_output_pin("observe"));
+  // One round, as the compile schedule's last: CSE merges the muxes in this
+  // sweep, so the next scalar_mux to see them is Bitwidth_rewrite's.
+  Cprop{true}.do_trans(f.graph);
+  Bitwidth{10}.do_trans(f.graph);
+  for (auto node : f.graph->body().nodes()) {
+    if (!gu::is_builtin_node(node)) {
+      EXPECT_GT(gu::bits_of(node.get_driver_pin(0)), 0) << gu::debug_name(node);
+    }
+  }
+  for (uint64_t mask = 0; mask < 2; ++mask) {
+    for (int64_t av = 0; av < 16; ++av) {
+      auto values = f.inputs(mask, av, 0);
+      EXPECT_EQ(mux_eval(f.output(), values), mask ? av : (av ^ 9));
+      auto values2 = f.inputs(mask, av, 0);
+      EXPECT_EQ(mux_eval(f.observed(), values2), mask ? av : (av ^ 9));
+    }
+  }
+}
+
+// The guard rewrite needs a private update cell that reads the held value: a
+// shared or named update, a colored Mux, and an update without the held
+// value keep the Mux.
+TEST(CpropMux, GuardedAccumulationNeedsAPrivateUpdate) {
+  const auto build = [](const std::string& name, int variant) {
+    auto f   = std::make_unique<Mux_graph>(name, 1, 8);
+    auto upd = f->node(Ntype_op::Or);
+    gu::setup_sink_pid(upd, 0).connect_driver(variant == 3 ? f->constant(3) : f->a);
+    gu::setup_sink_pid(upd, 0).connect_driver(f->b);
+    auto root = f->mux(f->controls[0], f->a, upd.create_driver_pin(0));
+    root.connect_sink(f->graph->get_output_pin("out"));
+    if (variant == 0) {
+      upd.create_driver_pin(0).connect_sink(f->graph->get_output_pin("observe"));  // shared
+    } else if (variant == 1) {
+      gu::set_pin_name(upd.create_driver_pin(0), "named_update");
+    } else if (variant == 2) {
+      gu::set_color(root.get_master_node(), 3);
+    }
+    return f;
+  };
+  for (int variant = 0; variant < 4; ++variant) {
+    SCOPED_TRACE(variant);
+    auto f = build("guard_keep_" + std::to_string(variant), variant);
+    Cprop{true}.do_trans(f->graph);
+    EXPECT_EQ(gu::type_op_of(f->output().get_master_node()), Ntype_op::Mux);
+  }
 }
 }  // namespace
 

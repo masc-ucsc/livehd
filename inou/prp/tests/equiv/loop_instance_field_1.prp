@@ -1,0 +1,6 @@
+/*
+:name: loop_instance_field_1
+:set: compile.unroll=true
+*/
+// Rolled vs unrolled: the base reads each instance-output field through its
+// own port of the lifted loop body; the source unroll reads it in place.

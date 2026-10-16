@@ -1746,9 +1746,67 @@ protected:
     // Carry -> {min, max} of the values that enter an iteration (seeds the
     // lifted body's carry-in range; see plan_loop_roll).
     absl::flat_hash_map<std::string, std::pair<int64_t, int64_t>> carry_in_ranges;
+    // Carry -> {min, max} of what leaves the last iteration: the range the
+    // result binding publishes after the loop (emit_rolled_loop_call).
+    absl::flat_hash_map<std::string, std::pair<int64_t, int64_t>> carry_out_ranges;
     // Invariant -> {min, max} of the value it holds where the loop starts (an
     // enclosing rolled loop's index is only a signed storage window otherwise).
     absl::flat_hash_map<std::string, std::pair<int64_t, int64_t>> invariant_ranges;
+    // Invariants that hold one value per loop occurrence: an enclosing loop's
+    // index (a loop-index port of the definition being walked), or an
+    // enclosing UNROLLED loop's index promoted from a constant so the
+    // occurrences share one definition (promote_unrolled_indices). Marked as
+    // loop-index ports of the lifted body (upass::mark_loop_index_port).
+    absl::flat_hash_set<std::string>                              index_ports;
+    // The promoted unrolled indices (a subset of invariants and index_ports)
+    // with THIS occurrence's value: the call passes it as a constant actual,
+    // and the retained source body keeps it captured like `constants`.
+    std::vector<std::pair<std::string, Dlop>>                     promoted;
+    // A TUPLE-valued name the body reads only through constant fields (`s.sel`
+    // of a child instance `const s = sub(..)`, `t.a` of a runtime tuple local)
+    // is no boundary port itself: each field it reads is one (an invariant
+    // named `port`), or a captured constant (`value`). The call reads each
+    // field in front of the loop, as if the source hoisted `const s_sel =
+    // s.sel`, and the lifted body's copy reads that port wherever the source
+    // body read the field (lift_loop_body). Sorted by base, then field.
+    struct Tuple_field {
+      std::string         field;
+      std::string         port;    // invariant port; empty when `value` is set
+      std::optional<Dlop> value;   // a field known constant where the loop starts
+      bool                dotted = false;  // the body reads `base.field` (else tuple_get)
+    };
+    std::vector<std::pair<std::string, std::vector<Tuple_field>>> tuple_invariants;
+  };
+
+  // One rolled-loop definition shared by every occurrence of the same source
+  // body whose plan matches (share_rolled_loop): `for j in (i + 1)..<N` inside
+  // an unrolled `for i` rolls N times with different bounds, and the bound is
+  // per-instance descriptor data, not part of the body.
+  struct Rolled_loop_def {
+    Loop_roll_plan         plan;    // of the occurrence that lifted it (index type = its domain)
+    std::shared_ptr<Lnast> body;    // the lifted tree (queued in new_lnasts, not walked yet)
+    int64_t                lo = 0;  // index domain the lifted body admits
+    int64_t                hi = 0;
+  };
+  absl::flat_hash_map<std::string, Rolled_loop_def> rolled_loop_defs_;
+  // Indices of the enclosing loops being unrolled right now (outermost first):
+  // the runner-frame name each iteration binds and its domain.
+  struct Unroll_index {
+    std::string name;
+    int64_t     lo = 0;
+    int64_t     hi = 0;
+  };
+  std::vector<Unroll_index> unroll_indices_;
+  // Pushes one unroll_indices_ entry for the lifetime of an unroll (also when
+  // the unroll throws through loop_fail).
+  struct Unroll_index_scope {
+    uPass_runner& r;
+    Unroll_index_scope(uPass_runner& runner, std::string name, int64_t lo, int64_t hi) : r(runner) {
+      r.unroll_indices_.push_back(Unroll_index{std::move(name), lo, hi});
+    }
+    ~Unroll_index_scope() { r.unroll_indices_.pop_back(); }
+    Unroll_index_scope(const Unroll_index_scope&)            = delete;
+    Unroll_index_scope& operator=(const Unroll_index_scope&) = delete;
   };
 
   // Suffixes for the two compiler-owned ports a carry needs. The body is copied
@@ -1778,6 +1836,17 @@ protected:
   // Emits one explicit rolled_for node containing the surviving source body
   // and the hidden Sub-call/result transport consumed by tolg.
   void emit_rolled_loop_call(const Loop_roll_plan& plan, const Lnast_nid& source_body);
+
+  // Names `plan` (mangled/inst) and lifts its body unless an earlier
+  // occurrence of the same source body already lifted a definition this one
+  // can instantiate (same interface, a domain it admits): then the plan reuses
+  // that definition and its port names. Returns the plan ready for
+  // emit_rolled_loop_call.
+  void lift_or_share_loop(const Lnast_nid& body_stmts, Loop_roll_plan& plan);
+  // Widens a still-queued shared loop definition to the index domain [lo, hi]
+  // of `wide` (a plan of the same body over that hull): index port type and
+  // the published index/carry/invariant ranges.
+  void widen_lifted_loop(Rolled_loop_def& def, const Loop_roll_plan& wide, int64_t lo, int64_t hi);
 
   // What plan_loop_roll consults about ONE definition (a lambda, or the root)
   // for every loop in it, built once per definition instead of once per loop.

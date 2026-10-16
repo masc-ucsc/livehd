@@ -36,7 +36,7 @@ the SAME codes (owner rulings 2026-10-14). Every verdict carries a modifier;
 | TIMEOUT-time | any clock limit: `formal.timeout`, the wall deadline, cvc5 TIMEOUT/RESOURCEOUT/INTERRUPTED, a step budget; no proof, no counterexample | 0 + warning | `timeout-time` |
 | TIMEOUT-memory | out of memory, caught instead of a crash: cvc5 MEMOUT, a forked worker killed at the RLIMIT_AS backstop, `std::bad_alloc` | 0 + warning | `timeout-memory` |
 | REFUTED-cex | a real counterexample trace, including one that needs only a free blackbox / trusted-box OUTPUT, and a refute only at a trusted-box INPUT (`bbin:`): the boxed model is the contract | 10 | `refuted-cex` |
-| REFUTED-interface | a TOP port NAME exists on one side only (a width mismatch is fine; a one-sided input with no fanout is fine); the selected top only, never a hierarchy child | 7 | `refuted-interface` |
+| REFUTED-interface | a TOP port NAME exists on one side only (a width mismatch is fine; a one-sided input that is not observable -- in the cone of influence of no output, e.g. a `clk` feeding only assertions or instances whose outputs nobody reads -- is ignored and noted in the detail); the selected top only, never a hierarchy child | 7 | `refuted-interface` |
 | REFUTED-unsupported | engine=auto and no engine can model/check it (an encoder refusal, a word-level cycle, a pre-solve refusal) | 7 | `refuted-unsupported` |
 | REFUTED-unchecked | options forced an engine that cannot handle the logic (`engine=ind` ...), or forbade the escalation that would decide it (`hier_refute=fail`, `decompose=true`, an obligation whose window/`past()` is deeper than `formal.bound`) | 7 | `refuted-unchecked` |
 | REFUTED-vacuous | the check proved nothing, a sign of a problem: a contradictory assume set (it can prune away a real counterexample), nothing to check (both tops expose no output/state with matching names; a verify run with no assert obligation), or a verify assert under an `if`/`match` guard that can never be true (a dead branch). The message names the cause (contradictory scope, nothing to compare, the dead-guard list) and the hint what to fix. There is no PROVEN-vacuous | 7 | `refuted-vacuous` |
@@ -55,7 +55,20 @@ The engine-side mapping is `query_outcome` / `verify_outcome` (query.hpp) over
 several attempts (the auto portfolio) is classified from its deciding
 attempt's own detail (`Query_result::cause_detail`), so one arm's wall-clock
 kill never hides another arm's contradictory assumptions, and one engine that
-cannot check the logic plus another that timed out is TIMEOUT-time.
+cannot check the logic -- or that crashed, or gave up with no reason -- plus
+another that timed out is TIMEOUT-time (owner ruling 2026-10-15: an
+undecided-by-time result is never REFUTED-unexplained; the crash stays in the
+detail). Only a design-level refusal (the encoder cannot model the design)
+and a contradictory assume set outrank a time limit.
+
+The top-interface pre-check (REFUTED-interface) is linear in the port count
+and the definition sizes and runs under the run's wall deadline, which is
+armed before it: the clock census it needs is taken per DEFINITION
+(`design_clock_inputs` descends only the state-bearing and clock-transparent
+instances, with an order-free occurrence walk), only when a one-sided input
+needs it, and the one-sided-input observability walks share one step budget
+before a single backward pass from every compared point answers the rest. A
+deadline reached there is TIMEOUT-time.
 
 `lec.verdict` is `tested-sampled` and `lec.sampling.effort_reached` names the level.
 The reached level can be LOWER than requested when the timeout or repeated
@@ -104,42 +117,63 @@ headline naming the side (`query.hpp` `one_sided_box_counterexample`). Box
 points on both sides may be one cell whose instances failed to pair, so that
 stays an incomplete correspondence.
 
-**Sampling (random-restricted BMC).** Each query pins a
-random subset of the free primary data-input symbols of every cycle to biased
-random constants (1/8 all-zero, 1/8 all-one, else uniform; clock and reset
-inputs keep their roles) and asserts the miter's `bad`:
+**Sampling (simulated random traces + windowed searches).** One BMC unrolling
+is encoded as usual; the sampler (`effort.cpp`) then works on it in two ways:
 
-- UNSAT: no mismatch among the admitted traces -> counted;
-- SAT: a mismatch, reported as REFUTED-cex with the ordinary witness;
-- per-query cap hit: not counted (32 in a row stop sampling).
+- **Simulated traces.** Every free symbol of the miter gets a value -- each
+  cycle's data inputs (biased draws: 1/8 all-zero, 1/8 all-one, else uniform;
+  clock and reset inputs keep their roles), but also the power-on state of
+  reset-less registers, fresh X values and free memory contents (a seeded
+  pseudo-random image) -- and the unrolled terms are EVALUATED natively
+  (`term_sim.hpp`: SMT-LIB semantics, one linear pass over the cone of `bad`
+  through the unrolling's `symbol == term` definitions; any other assertion,
+  e.g. a design assume, is a constraint a trace must satisfy or it is not
+  counted). No mismatch: the trace counts `bound` vectors. A mismatch: the
+  caller's solver re-derives it with every free symbol pinned (cvc5 first
+  confirms the trace by substituting it into every assertion and rewriting to
+  `true`), and that model feeds the ordinary witness. dino
+  PipelinedDualIssueCPU (26 unrolled cycles, 246k term nodes): ~4 ms per trace.
+- **Decoded fields.** Three traces in four draw input FIELDS from the
+  constants the design compares them against (`Term_sim::fields`: an
+  `EQUAL(field, constant)` whose bits are copies of one input port's bits
+  through registers, slices, concats, extensions and agreeing mux arms), so a
+  random instruction word is a real instruction: dino's ADDIW mutation is
+  exposed by ~1 trace in 25-50 instead of none in 1024 uniform traces.
+- **Windowed searches.** Every other trace is followed by a search around it:
+  the inputs of one or two cycles stay symbolic, everything else is
+  constant-folded (`Term_sim::reduce`), and a private solver asks for an output
+  or paired-register divergence within a horizon after the window (`flush/2`
+  cycles, clamped to 2..8; halved while the reduced cone exceeds 25k terms).
+  This finds a bug a random vector essentially never hits (one operand pair in
+  2^16). An UNSAT counts `free symbols x horizon cycles` vectors (a floor); a
+  per-query cap (250 ms) hit counts nothing. Searches share the run with
+  simulation: they may spend as much time as building and simulating did (plus
+  0.5 s), so an expensive search never sets the pace.
 
-The schedule cycles pin rates 100/90/100/75/100/50%. A fully pinned query is
-one simulated trace by propagation (~55 ms on dino, no model read). A partially
-pinned query lets the solver search the free symbols for ANY mismatch, which
-finds bugs a random vector essentially never hits (the smoke test's 1-in-65536
-operand pair); it is capped at 250 ms because such queries are bimodal (cheap or
-a real search). Do not batch several traces as a disjunction of cubes: cvc5
-case-splits instead of propagating (8 cubes: >4 s per query).
+Before this, every sampled step was an SMT query on a fresh non-incremental
+solver (the cvc5 1.4.2 profiles are non-incremental) that re-bit-blasted the
+whole unrolling, with the power-on state left free so a "fully pinned" query
+was a real search: dino's `test` reached formal.timeout=300 s while a proof
+took 1.8 s. Now (mada4): quick-check 2.7 s, test 3.5 s, long-check 11.9 s,
+proof 1.8 s; the bug1 mutation is REFUTED-cex at `test` in 6.5 s (a proof
+takes 199 s). Sampling stops a little before the wall deadline (5% of the
+budget, 0.25-5 s), so a run the deadline cuts short still reports the vectors
+it checked instead of a killed worker's empty report.
 
-**Register leads.** Each query also watches the name-paired registers'
+**Register leads.** Each trace also watches the name-paired registers'
 next states (ref-X masked). A reachable register divergence whose outputs still
-agree is only a lead: the sampler pins that trace's inputs up to the divergence
-cycle and asks for an OUTPUT mismatch in the remaining cycles (2 s cap); only
-that is reported. An unconfirmed (register, cycle) is not chased again.
+agree is only a lead: the sampler pins that trace up to the divergence cycle
+and searches the following cycles for an OUTPUT mismatch (2 s cap); only that
+is reported. An unconfirmed (register, cycle) is not chased again.
 
-Counting: a vector is one cycle of one trace. A fully pinned UNSAT adds
-`bound` vectors; a partially pinned UNSAT covers every assignment of its free
-symbols and adds `bound * (1 + free symbols)` (a floor, not 2^bits). Levels:
-quick-check 256, test 2048, long-check 16384 vectors. Seeded RNG: a run is
-reproducible. On dino (depth 6): quick-check ~5 s, test ~50 s.
+Counting: a vector is one cycle of one trace. Levels: quick-check 256, test
+2048, long-check 16384 vectors. Seeded RNG: a run is reproducible.
 
 **Limits.** Sampling is a test, never a proof: it is never `proven`, never a
 PROVEN-bounded(n), never a theorem-cache entry, never a hierarchical premise. It
-checks only what reaches an output within `bound` cycles of the sampled design.
-dino's `bug1` (ADDW-only ALU mutation, in a comb module `pass.legalize`
-inlines into the top) is not found: a random instruction word hits ADDW about
-1e-5 of the time, and even a targeted search (instruction words free, others
-pinned, register miter) does not decide in 350 s on the unrolled RV64 datapath.
+checks only what reaches an output within the sampled window. A miter outside
+the simulator's fragment (an uninterpreted function: boxes, which the sampler
+refuses anyway) falls back to solver-only steps.
 
 Found by it: lhdsuite's checked-in `minion_dcache_cache_op_unit.prp` had lost
 the per-call `dcache_way_encode = 0` at the `lock_way` site (a cleanup edit;
@@ -152,9 +186,13 @@ trace per reset, so the ordinary bounded check runs instead.
 The single-design `lhd formal verify` accepts the uncapped `verify` preset;
 the sampled presets are for `lhd lec` comparisons.
 
-Tests: `//pass/lec:effort_test` (levels, sampler accounting, rare-mismatch
-search, timeout); `//lhd/tests:lhd_effort_smoke` (immediate sampling, proof-only verdicts, level
-reporting, cache separation, diagnostics, sampled and rare failures).
+Tests: `//pass/lec:effort_test` (levels, sampler accounting, simulated traces,
+decoded fields, rare-mismatch search, timeout); `//pass/lec:term_sim_test`
+(native evaluation against cvc5 on random QF_BV terms, memories, constraints,
+reduce() equisatisfiability); `//pass/lec:lec_effort_sampling_test` (an
+opcode bug REFUTED at the default effort); `//lhd/tests:lhd_effort_smoke`
+(immediate sampling, proof-only verdicts, level reporting, cache separation,
+diagnostics, sampled and rare failures).
 
 The ABC cone accelerator is optional. In the ABC-free CLI build
 (`--define=livehd_abc=false`), every accelerator request returns `Unsupported`;
@@ -183,6 +221,36 @@ The shared bank-name normalizer also removes the cell model's final state
 segment from ordinary names such as `mem._mem[0][24].flop_16`, as well as
 encoded memory wrappers. Several states claiming the same alias remain
 ambiguous and cannot establish a bank relation.
+
+Memories pair across the two designs by correspondence name first. A
+port-written memory with no initial contents, reset arm or `$readmem` image on
+either side that no name pairs can pair POSITIONALLY: its leaf name plus the
+iteration indices along its path, outermost first, so the memories a Pyrope
+loop builds (`u_loop_0__li1.tile__li0.mem`) pair with the ones a Verilog
+generate builds (`gen_row_1_gen_col_0_tile.mem`) when that key is unique on
+both sides. semdiff's "no counterpart" for such a memory does not veto the
+pair (semdiff may not see a memory inside a compact loop at all); only a
+confident semdiff pair with a different partner does. A positional pair is a
+correspondence choice, not a claim: induction re-proves it every step, and BMC
+keeps the reference's unwritten entries unknown, exactly like an unpaired
+reference memory and like any reference memory whose bucket did not collapse
+(each design then holds its own free array). Remaining memories pair by
+ordinal, as before.
+
+Rolled and unrolled loop levels share one spelling: a `u_loop_<n>__li<k>`
+wrapper level folds onto the next segment with its tag placed before that
+segment's own `__li` tags, so `u_loop_0__li0.t__li1` and the unrolled
+`t__li0__li1` name the same state (iteration tags are outermost first).
+
+Under `formal.lec.gold_x=ignore` BMC threads a knowledge state for each
+reference memory (`Mem_x_state` in `encode.hpp`): bit i of entry e is unknown
+when `select(plane, epoch ++ e) ^ fill` has it set. A reset or a write through
+an unknown address starts a new epoch with a new fill word instead of swapping
+in another constant array. The all-zero array is the only constant, nothing
+chains through an array-sorted ITE, and the epoch starts as a fresh symbol, so
+no store chain is ever constant: cvc5's array solver aborts with "write-chains
+connecting two different constant arrays" when two different constant arrays
+can merge, which the old all-known/all-unknown pair of planes allowed.
 
 For a memory-to-bank induction bridge, the memory is represented by stores of
 independent bank state symbols at each valid address. Read definitions are
@@ -292,6 +360,26 @@ The symbol must be **fresh per cycle**. Reusing one symbol across the unroll pin
 the child's output to a constant, which false-proves a design whose only
 difference is *when* that output changes. A's obligations are re-checked every
 step, so the sharing stays justified step by step.
+
+### What D's own body already says
+
+A synthesized side folds constants and drops unread ports across module
+boundaries, while the source keeps computing them; the box must not turn those
+folds into differences no output can show. Read from D's body on **either** side
+(D_ref ≡ D_impl carries the fact to the other), for an untrusted proven child:
+
+- **An input port that reaches no output** (no path through logic, state or
+  nested instances) owes no `bbin:` obligation: `D_ref(x,u) = D_ref(x,u') =
+  D_impl(x,u')`. (A bedrock FIFO with bypass disabled: the parent ties
+  `bypass_ready` to 0, the source still drives it.)
+- **An output port driven by a known constant** is that constant on both sides,
+  not a free symbol (the same FIFO's `bypass_ready` = 0 output).
+- **A child with no input port** (a tie-off constant generator) is never boxed:
+  descending it is exact, and a side that folded one of its instances away would
+  leave the box one-sided.
+
+A TRUSTED box keeps every input obligation and free output: there the boxed
+model, not a body, is the contract.
 
 ### Initial state
 

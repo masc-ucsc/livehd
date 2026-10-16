@@ -13,6 +13,7 @@
 #include <functional>
 #include <map>
 #include <mutex>
+#include <optional>
 #include <regex>
 #include <set>
 #include <sstream>
@@ -297,23 +298,386 @@ static void adopt_cause(livehd::lec::Query_result& dst, const livehd::lec::Query
          == livehd::lec::Outcome::Timeout_time;
 }
 
+// Observability of a top INPUT for the interface pre-check below (owner ruling
+// 2026-10-14): a one-sided input matters only when it is in the cone of
+// influence of something the miter compares -- a top output, a state element
+// (flop/latch/memory) that itself reaches one, or a body-less blackbox's input
+// (the encoder's `bbin:` obligation). "State that reaches an output" needs no
+// separate pass: input -> flop -> ... -> output is just a path, and state that
+// reaches no output is never compared. Property markers (fproperty
+// assert/assume/cover, lgassert, lgundef) carry no hardware and end a path, and
+// an instance output nothing reads ends it too, so an input feeding only
+// assertion/monitor logic -- a bedrock `clk` "used only for assertions" -- is
+// dead. Every cell other than a Sub is treated as all-inputs-reach-all-outputs
+// (a memory's clock/address/data reach its douts, a flop's clock/enable/reset
+// reach its q): conservative, it can only call an input observable.
+//
+// Hierarchy is crossed without flattening, through per-definition summaries
+// computed once and spliced at every instance, so the cost is linear in the
+// sum of the DEFINITION sizes (a flattened gate-level netlist: its top), never
+// in the instance count. Two passes answer the question:
+//   * of_top_input: a FORWARD walk from one input that stops at the first
+//     compared point it reaches -- usually a handful of steps (any library
+//     cell of a netlist is one) -- under a step budget shared by all inputs;
+//   * observable_inputs: when that budget runs out, ONE BACKWARD pass from
+//     every compared point marks the observable inputs at once.
+// So K one-sided inputs cost O(budget + N), never O(K * N). Both stop at the
+// wall deadline (timed_out(): the caller reports TIMEOUT-time).
+class Lec_input_observability {
+public:
+  struct Reach {
+    std::vector<hhds::Port_id> outs;              // outputs of the walked definition the input reaches
+    bool                       compared = false;  // reaches a compared point inside (a blackbox input)
+  };
+
+  explicit Lec_input_observability(std::chrono::steady_clock::time_point deadline) : deadline_(deadline) {
+    // Test hook: a forward budget of 0 sends every input to the backward pass.
+    if (const char* b = std::getenv("LIVEHD_LEC_IFACE_FORWARD_BUDGET"); b != nullptr) {
+      forward_budget_ = std::strtoull(b, nullptr, 10);
+    }
+  }
+
+  // How top input `name` of `top` reaches a compared point (stops at the
+  // first); nullopt when the shared forward budget ran out or the deadline
+  // passed (timed_out()) first.
+  [[nodiscard]] std::optional<Reach> of_top_input(hhds::Graph* top, std::string_view name) {
+    auto pin = top->get_input_pin(name);
+    if (pin.is_invalid()) {
+      return Reach{};
+    }
+    if (forward_steps_ >= forward_budget_) {
+      return std::nullopt;
+    }
+    try {
+      return walk(pin, true);
+    } catch (const Abort&) {
+      busy_.clear();
+      return std::nullopt;
+    }
+  }
+
+  // The inputs of `top` in the cone of influence of a compared point; empty
+  // with timed_out() set when the deadline passed.
+  [[nodiscard]] absl::flat_hash_set<std::string> observable_inputs(hhds::Graph* top) {
+    absl::flat_hash_set<std::string> obs;
+    try {
+      std::vector<hhds::Pin_class> seeds;
+      if (auto tio = top->get_io(); tio != nullptr) {
+        for (const auto& d : tio->get_output_pin_decls()) {
+          if (auto o = top->get_output_pin(d.name); !o.is_invalid()) {
+            for (const auto& drv : o.get_driver_pins()) {
+              seeds.push_back(drv);
+            }
+          }
+        }
+      }
+      sub_compare_seeds(top, seeds);
+      for (const auto& in : back_walk(seeds)) {
+        obs.insert(input_name(top, in));
+      }
+    } catch (const Abort&) {
+      timed_out_ = true;
+      obs.clear();
+    }
+    return obs;
+  }
+
+  [[nodiscard]] bool timed_out() const { return timed_out_; }
+
+private:
+  using Key = std::pair<const hhds::Graph*, hhds::Port_id>;
+  struct Abort {};
+  void tick(bool forward) {
+    if (forward && ++forward_steps_ > forward_budget_) {
+      throw Abort{};
+    }
+    if ((++steps_ & 4095) == 1 && deadline_ != std::chrono::steady_clock::time_point{}
+        && std::chrono::steady_clock::now() >= deadline_) {
+      timed_out_ = true;
+      throw Abort{};
+    }
+  }
+
+  // By value: summary() recurses into callees and may rehash memo_.
+  Reach summary(const std::shared_ptr<hhds::Graph>& g, hhds::Port_id pid) {
+    const Key key{g.get(), pid};
+    if (auto it = memo_.find(key); it != memo_.end()) {
+      return it->second;
+    }
+    Reach r;
+    auto  in = input_pin(g.get(), pid);
+    if (in.is_invalid() || !busy_.insert(key).second) {
+      // A sink port the callee does not declare, or a definition re-entered
+      // through itself: nothing to splice, so call it observable.
+      r.compared = true;
+      return r;
+    }
+    r = walk(in, false);
+    busy_.erase(key);
+    memo_.emplace(key, r);
+    return r;
+  }
+
+  const absl::flat_hash_map<hhds::Port_id, std::string>& inputs_of(hhds::Graph* g) {
+    auto [it, fresh] = inputs_.try_emplace(g);
+    if (fresh && g->get_io() != nullptr) {
+      for (const auto& d : g->get_io()->get_input_pin_decls()) {
+        it->second.emplace(d.port_id, d.name);
+      }
+    }
+    return it->second;
+  }
+  hhds::Pin_class input_pin(hhds::Graph* g, hhds::Port_id pid) {
+    const auto& ins = inputs_of(g);
+    const auto  f   = ins.find(pid);
+    return f == ins.end() ? hhds::Pin_class{} : g->get_input_pin(f->second);
+  }
+  std::string input_name(hhds::Graph* g, hhds::Port_id pid) {
+    const auto& ins = inputs_of(g);
+    const auto  f   = ins.find(pid);
+    return f == ins.end() ? std::string{} : f->second;
+  }
+
+  // Forward walk inside one body from the driver `seed`. `first_hit` stops at
+  // the first output or compared point (the top's yes/no question); a callee
+  // summary walks the whole body so every reached output is recorded.
+  Reach walk(const hhds::Pin_class& seed, bool first_hit) {
+    Reach                                  r;
+    absl::flat_hash_set<hhds::Class_index> seen;      // driver pins queued
+    absl::flat_hash_set<hhds::Class_index> expanded;  // non-Sub cells whose outputs were queued
+    absl::flat_hash_set<hhds::Port_id>     outs;
+    std::vector<hhds::Pin_class>           stk;
+    auto                                   push = [&](const hhds::Pin_class& d) {
+      if (!d.is_invalid() && seen.insert(d.get_class_index()).second) {
+        stk.push_back(d);
+      }
+    };
+    push(seed);
+    while (!stk.empty()) {
+      const auto d = stk.back();
+      stk.pop_back();
+      tick(first_hit);
+      for (const auto& e : d.out_edges()) {
+        const auto& s = e.sink;
+        if (livehd::graph_util::is_graph_output_pin(s)) {
+          if (outs.insert(s.get_port_id()).second) {
+            r.outs.push_back(s.get_port_id());
+          }
+          if (first_hit) {
+            return r;
+          }
+          continue;
+        }
+        const auto m = s.get_master_node();
+        if (livehd::graph_util::type_op_of(m) != Ntype_op::Sub) {
+          if (expanded.insert(m.get_class_index()).second) {
+            for (const auto od : m.out_sorted_pins()) {
+              push(od);
+            }
+          }
+          continue;
+        }
+        if (livehd::graph_util::is_property_marker(m)) {
+          continue;  // assert/assume/cover, lgassert, lgundef: no hardware, nothing compared
+        }
+        auto cg = m.get_subnode_graph();
+        if (!cg) {
+          r.compared = true;  // body-less blackbox: its inputs are miter obligations
+          if (first_hit) {
+            return r;
+          }
+          continue;
+        }
+        const auto cr = summary(cg, s.get_port_id());
+        if (cr.compared) {
+          r.compared = true;
+          if (first_hit) {
+            return r;
+          }
+        }
+        for (const auto o : cr.outs) {
+          push(m.try_get_driver_pin(o));  // invalid (skipped) when the parent reads nothing there
+        }
+      }
+    }
+    return r;
+  }
+
+  // ---- the backward pass (same relation, walked from the compared points) ----
+
+  // Seeds of `g`'s compared points inside its instances: every input of a
+  // body-less blackbox, and the inputs of a bodied instance its definition
+  // carries to a compared point of its own (cmp_inputs).
+  void sub_compare_seeds(hhds::Graph* g, std::vector<hhds::Pin_class>& seeds) {
+    for (auto m : g->body().nodes()) {
+      tick(false);
+      if (livehd::graph_util::type_op_of(m) != Ntype_op::Sub || livehd::graph_util::is_property_marker(m)) {
+        continue;
+      }
+      auto cg = m.get_subnode_graph();
+      if (!cg) {
+        for (const auto& sink : m.inp_sorted_pins()) {
+          for (const auto& drv : sink.get_driver_pins()) {
+            seeds.push_back(drv);
+          }
+        }
+        continue;
+      }
+      for (const auto pid : cmp_inputs(cg)) {
+        if (auto sink = m.try_get_sink_pin(pid); !sink.is_invalid()) {
+          for (const auto& drv : sink.get_driver_pins()) {
+            seeds.push_back(drv);
+          }
+        }
+      }
+    }
+  }
+
+  // Backward reachability inside one body: the graph INPUT ports the seeds'
+  // cones reach. A bodied instance output steps to the instance inputs its
+  // definition carries there (ins_of_output); a blackbox output and a property
+  // marker end a path (the forward walk's rules, reversed).
+  std::vector<hhds::Port_id> back_walk(const std::vector<hhds::Pin_class>& seeds) {
+    std::vector<hhds::Port_id>             found;
+    absl::flat_hash_set<hhds::Port_id>     found_set;
+    absl::flat_hash_set<hhds::Class_index> seen;      // driver pins queued
+    absl::flat_hash_set<hhds::Class_index> expanded;  // non-Sub cells whose inputs were queued
+    std::vector<hhds::Pin_class>           stk;
+    auto                                   push = [&](const hhds::Pin_class& d) {
+      if (!d.is_invalid() && seen.insert(d.get_class_index()).second) {
+        stk.push_back(d);
+      }
+    };
+    auto push_sink = [&](const hhds::Pin_class& sink) {
+      if (!sink.is_invalid()) {
+        for (const auto& drv : sink.get_driver_pins()) {
+          push(drv);
+        }
+      }
+    };
+    for (const auto& s : seeds) {
+      push(s);
+    }
+    while (!stk.empty()) {
+      const auto d = stk.back();
+      stk.pop_back();
+      tick(false);
+      if (livehd::graph_util::is_graph_input_pin(d)) {
+        if (found_set.insert(d.get_port_id()).second) {
+          found.push_back(d.get_port_id());
+        }
+        continue;
+      }
+      const auto m = d.get_master_node();
+      if (livehd::graph_util::type_op_of(m) != Ntype_op::Sub) {
+        if (expanded.insert(m.get_class_index()).second) {
+          for (const auto& sink : m.inp_sorted_pins()) {
+            push_sink(sink);
+          }
+        }
+        continue;
+      }
+      if (livehd::graph_util::is_property_marker(m)) {
+        continue;
+      }
+      auto cg = m.get_subnode_graph();
+      if (!cg) {
+        continue;  // a blackbox output: its inputs are compared points already
+      }
+      for (const auto pid : ins_of_output(cg, d.get_port_id())) {
+        push_sink(m.try_get_sink_pin(pid));
+      }
+    }
+    return found;
+  }
+
+  // The input ports of `g` whose cone reaches output `opid` (memoized).
+  std::vector<hhds::Port_id> ins_of_output(const std::shared_ptr<hhds::Graph>& g, hhds::Port_id opid) {
+    const Key key{g.get(), opid};
+    if (auto it = back_memo_.find(key); it != back_memo_.end()) {
+      return it->second;
+    }
+    std::vector<hhds::Port_id> r;
+    if (!back_busy_.insert(key).second) {
+      for (const auto& [pid, name] : inputs_of(g.get())) {
+        r.push_back(pid);  // re-entered through itself: every input, conservatively
+      }
+      return r;
+    }
+    std::vector<hhds::Pin_class> seeds;
+    if (auto gio = g->get_io(); gio != nullptr) {
+      for (const auto& d : gio->get_output_pin_decls()) {
+        if (d.port_id == opid) {
+          if (auto o = g->get_output_pin(d.name); !o.is_invalid()) {
+            for (const auto& drv : o.get_driver_pins()) {
+              seeds.push_back(drv);
+            }
+          }
+        }
+      }
+    }
+    r = back_walk(seeds);
+    back_busy_.erase(key);
+    back_memo_.emplace(key, r);
+    return r;
+  }
+
+  // The input ports of `g` that reach a compared point inside it (memoized).
+  std::vector<hhds::Port_id> cmp_inputs(const std::shared_ptr<hhds::Graph>& g) {
+    if (auto it = cmp_memo_.find(g.get()); it != cmp_memo_.end()) {
+      return it->second;
+    }
+    if (!cmp_busy_.insert(g.get()).second) {
+      return {};
+    }
+    std::vector<hhds::Pin_class> seeds;
+    sub_compare_seeds(g.get(), seeds);
+    auto r = back_walk(seeds);
+    cmp_busy_.erase(g.get());
+    cmp_memo_.emplace(g.get(), r);
+    return r;
+  }
+
+  std::chrono::steady_clock::time_point                               deadline_;
+  uint64_t                                                            forward_budget_ = 1'000'000;  // forward steps over ALL inputs
+  uint64_t                                                            steps_          = 0;
+  uint64_t                                                            forward_steps_  = 0;
+  bool                                                                timed_out_      = false;
+  absl::flat_hash_map<Key, Reach>                                     memo_;
+  absl::flat_hash_set<Key>                                            busy_;
+  absl::flat_hash_map<Key, std::vector<hhds::Port_id>>                back_memo_;
+  absl::flat_hash_set<Key>                                            back_busy_;
+  absl::flat_hash_map<const hhds::Graph*, std::vector<hhds::Port_id>> cmp_memo_;
+  absl::flat_hash_set<const hhds::Graph*>                             cmp_busy_;
+  absl::flat_hash_map<const hhds::Graph*, absl::flat_hash_map<hhds::Port_id, std::string>> inputs_;
+};
+
 // REFUTED-interface: the selected tops' port NAMES (owner ruling 2026-10-14).
-// A top OUTPUT name on one side only, or a one-sided top INPUT that has fanout
-// on the side that declares it, is an interface mismatch; widths never matter
-// (the miter sign/zero extends). A one-sided input with no fanout is reported
-// in the detail only. Clocks and resets pair by role, exactly as the engine
+// A top OUTPUT name on one side only, or a one-sided top INPUT that is
+// OBSERVABLE on the side that declares it (Lec_input_observability: it reaches
+// a top output, through logic, state or instances), is an interface mismatch;
+// widths never matter (the miter sign/zero extends). A one-sided input that
+// reaches nothing the miter compares -- no fanout at all, or only assertion /
+// monitor logic and instance outputs nobody reads -- is reported in the detail
+// only. Clocks and resets pair by role, exactly as the engine
 // pairs them (clock inputs are the time base, resets are pinned by the reset
 // phase), so they never count. A tuple-leaf <-> flat-bus split (`req.a`,`req.b`
 // on one side, `req` on the other) is a MATCH: the engine bridges it with
-// bundle compare points (detect_port_bundles), and this check accepts any
+// a concat/extract compare point (bundle_out_terms/bundle_leaf_vals); test the
 // leaf/base relation by name so it is never stricter than the engine.
+//
+// The whole check is linear in the port count plus the definition sizes, and
+// runs under the run's wall deadline: the clock census is only taken when a
+// one-sided input needs it, and `timed_out` reports a deadline reached here
+// (TIMEOUT-time, like any other resource limit).
 struct Lec_interface_report {
   std::vector<std::string> mismatched;  // "output 'x' only in ref", ...
-  std::vector<std::string> unused;      // one-sided inputs without fanout (noted, not an error)
+  std::vector<std::string> unused;      // one-sided inputs nothing compared observes (noted, not an error)
+  bool                     timed_out = false;
   [[nodiscard]] bool       ok() const { return mismatched.empty(); }
 };
 
-static Lec_interface_report lec_top_interface(hhds::Graph* ref, hhds::Graph* impl) {
+static Lec_interface_report lec_top_interface(hhds::Graph* ref, hhds::Graph* impl, std::chrono::steady_clock::time_point deadline) {
   Lec_interface_report rep;
   if (ref == nullptr || impl == nullptr || ref->get_io() == nullptr || impl->get_io() == nullptr) {
     return rep;
@@ -326,14 +690,24 @@ static Lec_interface_report lec_top_interface(hhds::Graph* ref, hhds::Graph* imp
     }
     return s;
   };
+  // Every proper dotted prefix of a set's names: `name` is a flat bus whose
+  // leaves the other side declares iff it is one of them.
+  auto bases = [](const absl::flat_hash_set<std::string>& s) {
+    absl::flat_hash_set<std::string> b;
+    for (const auto& n : s) {
+      for (size_t dot = n.find('.'); dot != std::string::npos; dot = n.find('.', dot + 1)) {
+        b.insert(n.substr(0, dot));
+      }
+    }
+    return b;
+  };
   // `name` pairs with the other side's port set by name, or as a leaf/base of a
   // tuple-leaf <-> flat-bus bundle.
-  auto bundle_matched = [](const std::string& name, const absl::flat_hash_set<std::string>& other) {
-    const std::string prefix = name + ".";
-    for (const auto& o : other) {
-      if (o.size() > prefix.size() && o.compare(0, prefix.size(), prefix) == 0) {
-        return true;  // `name` is the flat bus, `other` holds its leaves
-      }
+  auto bundle_matched = [](const std::string&                      name,
+                           const absl::flat_hash_set<std::string>& other,
+                           const absl::flat_hash_set<std::string>& other_bases) {
+    if (other_bases.contains(name)) {
+      return true;  // `name` is the flat bus, `other` holds its leaves
     }
     for (size_t dot = name.find('.'); dot != std::string::npos; dot = name.find('.', dot + 1)) {
       if (other.contains(name.substr(0, dot))) {
@@ -346,8 +720,6 @@ static Lec_interface_report lec_top_interface(hhds::Graph* ref, hhds::Graph* imp
   const auto impl_in  = names(impl, true);
   const auto ref_out  = names(ref, false);
   const auto impl_out = names(impl, false);
-  const auto ref_ck   = livehd::lec::design_clock_inputs(ref, nullptr);
-  const auto impl_ck  = livehd::lec::design_clock_inputs(impl, nullptr);
   auto       is_reset = [](const std::string& n) {
     bool neg = false;
     return str_tools::reset_name_polarity(n, neg);
@@ -357,30 +729,64 @@ static Lec_interface_report lec_top_interface(hhds::Graph* ref, hhds::Graph* imp
     std::sort(v.begin(), v.end());
     return v;
   };
-  for (const auto& [mine, other, side] : {std::tuple{&ref_out, &impl_out, "ref"}, std::tuple{&impl_out, &ref_out, "impl"}}) {
+  for (const auto& [mine, other, side] : {
+           std::tuple{ &ref_out, &impl_out,  "ref"},
+           std::tuple{&impl_out,  &ref_out, "impl"}
+  }) {
+    const auto other_bases = bases(*other);
     for (const auto& n : sorted(*mine)) {
-      if (!other->contains(n) && !bundle_matched(n, *other)) {
+      if (!other->contains(n) && !bundle_matched(n, *other, other_bases)) {
         rep.mismatched.push_back(std::format("output '{}' only in {}", n, side));
       }
     }
   }
-  for (const auto& [g, mine, other, ck, side] :
-       {std::tuple{ref, &ref_in, &impl_in, &ref_ck, "ref"}, std::tuple{impl, &impl_in, &ref_in, &impl_ck, "impl"}}) {
+  // One summary cache for both sides: definitions are distinct graphs, and a
+  // def shared by both libraries has one body either way.
+  Lec_input_observability obs(deadline);
+  for (const auto& [g, mine, other, side] : {
+           std::tuple{ ref,  &ref_in, &impl_in,  "ref"},
+           std::tuple{impl, &impl_in,  &ref_in, "impl"}
+  }) {
+    const auto               other_bases = bases(*other);
+    std::vector<std::string> one_sided;
     for (const auto& n : sorted(*mine)) {
-      if (other->contains(n) || bundle_matched(n, *other) || ck->contains(n) || is_reset(n)) {
+      if (!other->contains(n) && !bundle_matched(n, *other, other_bases) && !is_reset(n)) {
+        one_sided.push_back(n);
+      }
+    }
+    if (one_sided.empty()) {
+      continue;  // the common case: no clock census, no cone walk
+    }
+    const auto                                      clocks = livehd::lec::design_clock_inputs(g, nullptr);
+    std::optional<absl::flat_hash_set<std::string>> observable;  // the backward pass, once a forward walk gives up
+    for (const auto& n : one_sided) {
+      if (clocks.contains(n)) {
         continue;
       }
-      bool fanout = false;
-      if (auto pin = g->get_input_pin(n); !pin.is_invalid()) {
-        for ([[maybe_unused]] const auto& e : pin.out_edges()) {
-          fanout = true;
-          break;
-        }
+      bool                                          seen_obs = false;
+      std::string                                   why;
+      std::optional<Lec_input_observability::Reach> r;
+      if (!observable) {
+        r = obs.of_top_input(g, n);
       }
-      if (fanout) {
-        rep.mismatched.push_back(std::format("input '{}' only in {} (and it drives logic there)", n, side));
+      if (r) {
+        seen_obs = !r->outs.empty() || r->compared;
+        why      = !r->outs.empty() ? "it reaches an output there" : "it reaches a blackbox input there";
       } else {
-        rep.unused.push_back(std::format("input '{}' only in {} (no fanout: ignored)", n, side));
+        if (!observable) {
+          observable = obs.observable_inputs(g);
+        }
+        if (obs.timed_out()) {
+          rep.timed_out = true;
+          return rep;
+        }
+        seen_obs = observable->contains(n);
+        why      = "it reaches a compared point there";
+      }
+      if (seen_obs) {
+        rep.mismatched.push_back(std::format("input '{}' only in {} (observable: {})", n, side, why));
+      } else {
+        rep.unused.push_back(std::format("input '{}' only in {}, not observable: ignored", n, side));
       }
     }
   }
@@ -1023,12 +1429,90 @@ struct Design_assumes {
   int proven    = 0;
   int unchecked = 0;
 };
+// The definitions under `top` whose whole subtree holds no node `pred`
+// accepts. An order-free occurrence walk that only looks for such nodes can
+// treat them as opaque: one read per DEFINITION body instead of one per
+// instance (a netlist's thousands of instances of a few modules, none holding
+// an assertion). `any` says whether the top's subtree holds one at all.
+template <class Pred>
+static ankerl::unordered_dense::set<hhds::Gid> barren_definitions(hhds::Graph* top, const Pred& pred, bool& any) {
+  absl::flat_hash_map<hhds::Gid, bool> holds;  // done definitions -> subtree holds a match
+  struct Frame {
+    std::shared_ptr<hhds::Graph> keep;
+    hhds::Graph*                 g;
+    bool                         expanded;
+  };
+  std::vector<Frame> stk{
+      {nullptr, top, false}
+  };
+  while (!stk.empty()) {
+    if (holds.contains(stk.back().g->get_gid())) {
+      stk.pop_back();
+      continue;
+    }
+    if (!stk.back().expanded) {
+      stk.back().expanded = true;
+      hhds::Graph* g      = stk.back().g;
+      for (auto n : g->body().nodes()) {
+        if (livehd::graph_util::type_op_of(n) != Ntype_op::Sub || holds.contains(n.get_subnode_gid())) {
+          continue;
+        }
+        if (auto child = n.get_subnode_graph()) {
+          auto* raw = child.get();
+          stk.push_back({std::move(child), raw, false});
+        } else {
+          holds[n.get_subnode_gid()] = false;  // body-less: nothing inside
+        }
+      }
+      continue;
+    }
+    hhds::Graph* g = stk.back().g;
+    stk.pop_back();
+    bool h = false;
+    for (auto n : g->body().nodes()) {
+      if (pred(n)
+          || (livehd::graph_util::type_op_of(n) == Ntype_op::Sub && holds.contains(n.get_subnode_gid())
+              && holds.at(n.get_subnode_gid()))) {
+        h = true;
+        break;
+      }
+    }
+    holds[g->get_gid()] = h;
+  }
+  any = holds[top->get_gid()];
+  ankerl::unordered_dense::set<hhds::Gid> barren;
+  for (const auto& [gid, h] : holds) {
+    if (!h && gid != top->get_gid()) {
+      barren.insert(gid);
+    }
+  }
+  return barren;
+}
+
 static Design_assumes design_assume_occurrences(hhds::Graph* top) {
   Design_assumes active;
   if (top == nullptr) {
     return active;
   }
-  for (auto node : top->occurrences().nodes(hhds::Node_order::forward)) {
+  // Only definitions holding an fproperty instance are descended, and the
+  // count is order-free: the streaming walk, never the forward order (a
+  // topological sort resolving every sink's drivers across the hierarchy:
+  // minutes and tens of GB on the cva6 netlist, before any solve).
+  bool       any    = false;
+  const auto barren = barren_definitions(
+      top,
+      [](const hhds::Node_class& n) {
+        if (livehd::graph_util::type_op_of(n) != Ntype_op::Sub) {
+          return false;
+        }
+        auto sio = n.get_subnode_io();
+        return sio != nullptr && sio->get_name() == livehd::graph_util::fproperty_module_name;
+      },
+      any);
+  if (!any) {
+    return active;
+  }
+  for (auto node : top->occurrences(barren.empty() ? nullptr : &barren).nodes()) {
     if (livehd::graph_util::type_op_of(node) != Ntype_op::Sub) {
       continue;
     }
@@ -2085,6 +2569,17 @@ static livehd::lec::Query_result lec_hierarchical(Result& res, Eprp_var& ref_var
     o.collapse.insert(o.collapse.end(), base.trust.begin(), base.trust.end());
     std::vector<std::string> coll;  // SPECULATIVE child boxes (the retry confirms these; trust is excluded)
     bool                     kids_proven = true;
+    // A def with no input port on either side: a constant generator (see the
+    // child loop below), never boxed.
+    auto constant_child = [&](const std::string& c) {
+      for (const auto* side : {&ref_by_name, &impl_by_name}) {
+        if (auto it = side->find(c); it != side->end() && it->second != nullptr && it->second->get_io() != nullptr
+                                     && it->second->get_io()->get_input_pin_decls().empty()) {
+          return true;
+        }
+      }
+      return false;
+    };
     assumed[def_ix].clear();
     descended[def_ix].clear();
     if (auto it = children.find(name); it != children.end()) {
@@ -2094,6 +2589,18 @@ static livehd::lec::Query_result lec_hierarchical(Result& res, Eprp_var& ref_var
         }
         auto       ci                  = order_ix.find(c);
         const bool is_proven           = ci != order_ix.end() && proven[ci->second] != 0;
+        // A child with NO input port is a constant generator (bedrock
+        // br_misc_tieoff_zero). Boxed, its exact constant outputs become free
+        // symbols, and a mapped side that folded the constant into its parent
+        // no longer reads its instance at all -- the box turns one-sided and
+        // the parent cannot settle under collapse (lhdtrack
+        // br_fifo_shared_pstatic_flops: the push ctrl core's tied-off bypass
+        // outputs). Descending it is exact and costs a constant.
+        if (constant_child(c)) {
+          kids_proven = kids_proven && is_proven;
+          descended[def_ix].insert(c);
+          continue;
+        }
         // A definition can survive in both libraries even after its instances
         // were inlined on one side. Boxing that one-sided boundary creates
         // unmatched UF cut points and sends an easy combinational comparison
@@ -2157,7 +2664,7 @@ static livehd::lec::Query_result lec_hierarchical(Result& res, Eprp_var& ref_var
                   continue;  // asymmetric inlining also applies during escalation
                 }
                 if (gi == order_ix.end() || force_flat[def_ix].count(g) > 0 || refuted_snapshot[gi->second] != 0
-                    || assume_cones.contains(g)) {
+                    || assume_cones.contains(g) || constant_child(g)) {
                   continue;  // itself being absorbed, or known-different: descend it too
                 }
                 auto rg = ref_by_name.find(g);
@@ -4860,11 +5367,32 @@ void lec_command(Options& opts, Result& res) {
     conclude_outcome(t, "pass.lec", "lec", std::format("'{}' {}", impl_g->get_name(), why), hint);
   };
 
+  // The run's wall deadline is armed HERE, before the first pass over the
+  // designs, and every later stage inherits it (formal.timeout bounds the
+  // whole comparison: "hard miters degrade to TIMEOUT, never freeze"). The
+  // cva6 netlist spent >80 min in the interface pre-check below with no
+  // deadline armed yet.
+  const int  run_timeout_s = std::atoi(label("timeout", effort == livehd::lec::Effort::Verify ? "0" : "120").c_str());
+  const auto run_deadline  = run_timeout_s > 0 ? std::chrono::steady_clock::now() + std::chrono::seconds(run_timeout_s)
+                                               : std::chrono::steady_clock::time_point{};
+
   // REFUTED-interface (owner ruling 2026-10-14): the selected tops must expose
-  // the same port NAMES -- every output, and every input that drives logic.
+  // the same port NAMES -- every output, and every input that is observable
+  // (in the cone of influence of an output, through logic, state or instances).
   // Checked before any solve or cache lookup; widths never matter.
   {
-    const auto iface = lec_top_interface(ref_g.get(), impl_g.get());
+    auto iface_deadline = run_deadline;
+    if (const char* ms = std::getenv("LIVEHD_LEC_IFACE_DEADLINE_MS"); ms != nullptr) {  // test hook
+      iface_deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(std::atoll(ms));
+    }
+    const auto iface = lec_top_interface(ref_g.get(), impl_g.get(), iface_deadline);
+    if (iface.timed_out) {
+      refuse_presolve(
+          livehd::lec::Outcome::Timeout_time,
+          std::format("hit formal.timeout={}s in the top-interface check (one-sided input observability)", run_timeout_s),
+          "raise formal.timeout, or give both tops the same input port names");
+      return;
+    }
     if (!iface.ok()) {
       std::string why = absl::StrJoin(iface.mismatched, "; ");
       if (!iface.unused.empty()) {
@@ -4872,9 +5400,9 @@ void lec_command(Options& opts, Result& res) {
       }
       refuse_presolve(livehd::lec::Outcome::Refuted_interface,
                       why,
-                      "the two tops must declare the same port names (widths may differ; an input that drives nothing "
-                      "may be one-sided). Rename the port, add it to the other side, or pick the matching tops with "
-                      "--ref-top/--impl-top");
+                      "the two tops must declare the same port names (widths may differ; an input that reaches no "
+                      "output, e.g. one feeding only assertions, may be one-sided). Rename the port, add it to the other "
+                      "side, or pick the matching tops with --ref-top/--impl-top");
       return;
     }
     if (!iface.unused.empty()) {
@@ -4941,7 +5469,7 @@ void lec_command(Options& opts, Result& res) {
   // Statistics are selected once by --stats / lhd.stats.
   o.stats               = opts.stats;
   if (label("effort", "") == "proof" && o.timeout > 0) {
-    o._deadline = std::chrono::steady_clock::now() + std::chrono::seconds(o.timeout);
+    o._deadline = run_deadline;
   }
 
   // formal.lec.match: explicit register correspondence, inline or @FILE.
@@ -5125,8 +5653,34 @@ void lec_command(Options& opts, Result& res) {
     // untouched by inlining the top alone and that def stays inconclusive.
     // A `--lib` model itself never instantiates one, so skip those (they are
     // shared with ref_defs — mutating one would be a cross-side edit).
-    const auto ref_flat  = inline_instances_missing_from_other_side(sub_lib, ref_var.graphs, impl_var.graphs, ref_g.get());
-    const auto impl_flat = inline_instances_missing_from_other_side(sub_lib, impl_var.graphs, ref_var.graphs, impl_g.get());
+    // Linear in the spliced size, and under the run deadline: a netlist whose
+    // top absorbs thousands of region instances (cva6) spends real time here.
+    bool       inline_timed_out = false;
+    const auto ref_flat         = inline_instances_missing_from_other_side(sub_lib,
+                                                                   ref_var.graphs,
+                                                                   impl_var.graphs,
+                                                                   ref_g.get(),
+                                                                   nullptr,
+                                                                   run_deadline,
+                                                                   &inline_timed_out);
+    const auto impl_flat        = inline_timed_out ? size_t{0}
+                                                   : inline_instances_missing_from_other_side(sub_lib,
+                                                                                       impl_var.graphs,
+                                                                                       ref_var.graphs,
+                                                                                       impl_g.get(),
+                                                                                       nullptr,
+                                                                                       run_deadline,
+                                                                                       &inline_timed_out);
+    if (inline_timed_out) {
+      refuse_presolve(livehd::lec::Outcome::Timeout_time,
+                      std::format("hit formal.timeout={}s while inlining the instances one hierarchy absorbed ({} ref, {} impl "
+                                  "spliced so far)",
+                                  run_timeout_s,
+                                  ref_flat,
+                                  impl_flat),
+                      "raise formal.timeout, or compare designs that keep the same hierarchy");
+      return;
+    }
     if (ref_flat + impl_flat > 0) {
       std::print("lec: inlined {} ref and {} impl instance(s) absent from the other hierarchy\n", ref_flat, impl_flat);
       // Those definitions are inline now wherever the other side dropped them;
@@ -5337,7 +5891,7 @@ void lec_command(Options& opts, Result& res) {
   // a prover change invalidates every stored verdict automatically. v1 wires
   // it into the hierarchical driver (the default path).
   if (o.timeout > 0) {
-    o._deadline = std::chrono::steady_clock::now() + std::chrono::seconds(o.timeout);
+    o._deadline = run_deadline;  // armed before the interface check: one budget for the whole run
   }
   std::unique_ptr<livehd::formal::Verdict_cache> vcache;
   if (workdir_set && opts.incremental && !sampled_effort) {
@@ -6133,6 +6687,11 @@ void lec_command(Options& opts, Result& res) {
   // a native REFUTE. The marker is emitted only after every depth succeeds;
   // failures and incomplete runs retain their original verdict.
   bool      lg_bounded  = false;
+  // lgcheck undecided BECAUSE its shared equivalence budget ran out
+  // (LGCHECK_EQUIV_TIMEOUT: it prints `TIMEOUT: ... exhausted the shared
+  // equivalence budget` before INCONCLUSIVE). A resource limit, not a
+  // limitation of the logic: the combined verdict is TIMEOUT-time.
+  bool      lg_timeout  = false;
   if (code == 2) {
     std::ifstream proof_log(log);
     std::string   line;
@@ -6142,6 +6701,7 @@ void lec_command(Options& opts, Result& res) {
         break;  // later descent diagnostics concern children, not this miter
       }
       lg_bounded |= line.starts_with(marker);
+      lg_timeout |= line.starts_with("TIMEOUT:");
     }
   }
   res.lec.crosscheck_bounded   = lg_bounded;
@@ -6156,6 +6716,7 @@ void lec_command(Options& opts, Result& res) {
                                   : lg_bounded ? "proven-bounded"
                                   : lg_refuted ? "refuted-cex"
                                   : lg_failed  ? "failed"
+                                  : lg_timeout ? "timeout-time"
                                                : "incomplete";
   res.lec.crosscheck_exit_code  = code;
   const std::string lg_verdict  = lg_bounded ? std::format("proven-bounded({})", lg_cycles) : res.lec.crosscheck_verdict;
@@ -6177,7 +6738,10 @@ void lec_command(Options& opts, Result& res) {
   //  * native REFUTED-cex + lgcheck undecided -> REFUTED-cex with a warning;
   //  * native and lgcheck decide opposite ways -> the DISAGREE internal error;
   //  * native proven + lgcheck undecided -> REFUTED-unchecked: the cross-check
-  //    option requires lgcheck's agreement, and it did not decide.
+  //    option requires lgcheck's agreement, and it did not decide;
+  //  * ...unless lgcheck was undecided because its time budget ran out: any
+  //    resource limit is TIMEOUT-time (owner ruling 2026-10-15), never a
+  //    REFUTED-* word whose hint sends the user after engine options.
   const bool native_proven  = top.kind == livehd::lec::Outcome::Proven_full || top.kind == livehd::lec::Outcome::Proven_bounded;
   const bool native_cex     = top.kind == livehd::lec::Outcome::Refuted_cex;
   const bool native_timeout = livehd::lec::is_timeout(top.kind);
@@ -6217,6 +6781,23 @@ void lec_command(Options& opts, Result& res) {
                                        log)
                          : std::format("see {}", log))
         .emit();
+  }
+  if (native_proven && !lg_proven && !lg_bounded && lg_timeout) {
+    const auto timed = make_top_outcome(livehd::lec::Outcome::Timeout_time);
+    const auto why   = std::format(
+        "formal.solver=lgyosys requires lgcheck's agreement and lgcheck exhausted its time budget before deciding (see {}); "
+        "the native engine reported {}",
+        log,
+        top.word);
+    print_headline(timed, why);
+    record_verdict(timed);
+    conclude_outcome(timed,
+                     "pass.lec",
+                     "lec",
+                     std::format("'{}' hit a time limit before a verdict: {}", impl_g->get_name(), why),
+                     "raise lgcheck's budget (LGCHECK_EQUIV_TIMEOUT, seconds), or drop formal.solver=lgyosys to accept the "
+                     "native verdict alone");
+    return;
   }
   if (native_proven && !lg_proven && !lg_bounded) {
     const auto unchecked = make_top_outcome(livehd::lec::Outcome::Refuted_unchecked);

@@ -5196,7 +5196,11 @@ void uPass_constprop::process_tuple_get() {
     // mistake: a scalar integer has attributes (read with `.[name]`), never
     // dot-fields. Reject it with a pointed hint instead of silently returning
     // the scalar value (which made `res <<= x.bits` quietly compute garbage).
-    if (!first_is_index && battr::is_builtin_attr_name(first_seg)) {
+    // A single-output instance handle whose one output IS named like a
+    // built-in attribute (`-> (out:U2)`, then `q.out`) reads that output.
+    const auto so           = st().single_output_port.find(src);
+    const bool output_field = so != st().single_output_port.end() && so->second == first_seg;
+    if (!first_is_index && !output_field && battr::is_builtin_attr_name(first_seg)) {
       // Prefer the un-renamed source name for the message (`x`, not `inl1_x`).
       const std::string& shown = src_raw.empty() ? src : src_raw;
       livehd::diag::sink().emit(livehd::diag::Diagnostic{

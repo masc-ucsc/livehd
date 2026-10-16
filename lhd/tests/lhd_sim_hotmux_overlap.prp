@@ -1,0 +1,35 @@
+// This file is distributed under the BSD 3-Clause License. See LICENSE for details.
+// `unique if` controls that overlap at RUN time (not provably, so the compile
+// keeps the one-hot obligation for pass.formal): simulation resolves them to
+// the FIRST active arm on every backend, as Verilator does a parallel_case
+// (picorv32's ALU result under BARREL_SHIFTER + TWO_CYCLE_ALU). The LLVM
+// backend used to trap there, killing the driver with SIGILL.
+pub comb pick(p:U1, q:U1, s:U2, a:U8, b:U8, c:U8) -> (res:U8, idx:U8) {
+  res = unique if p == 1 { a } elif q == 1 { b } else { c }
+  idx = match s {
+    == 0 { a }
+    == 1 { b }
+    == 2 { c }
+  }
+}
+
+test pick.overlap {
+  mut dut = pick
+  dut.a = 5
+  dut.b = 9
+  dut.c = 7
+  dut.p = 1
+  dut.q = 1
+  dut.s = 1
+  step
+  assert(dut.res == 5)
+  assert(dut.idx == 9)
+  dut.p = 0
+  step
+  assert(dut.res == 9)
+  dut.q = 0
+  dut.s = 2
+  step
+  assert(dut.res == 7)
+  assert(dut.idx == 7)
+}

@@ -1,0 +1,19 @@
+// Generic leaves for ../generic_depth_default_import.prp: each picks lane 0 or
+// lane 1 of `a` through a comptime-folded `if` on an imported constant.
+const cfg = import("gd_cfg")
+
+pub mod sub_lo<N=4, W=8>::[timecheck=false](a:Unsigned(bits=N*W)) -> (o:Unsigned(bits=W)@[]) {
+  if cfg.pick_lo {
+    o = a#[0..<W]
+  } else {
+    o = a#[W..<(2*W)]
+  }
+}
+
+pub mod sub_hi<N=4, W=8>::[timecheck=false](a:Unsigned(bits=N*W)) -> (o:Unsigned(bits=W)@[]) {
+  if cfg.pick_hi {
+    o = a#[0..<W]
+  } else {
+    o = a#[W..<(2*W)]
+  }
+}

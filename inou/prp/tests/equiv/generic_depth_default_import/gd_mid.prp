@@ -1,0 +1,9 @@
+// Generic middle level for ../generic_depth_default_import.prp: instantiated by
+// the top with its DEFAULT generics, it specializes both leaves explicitly.
+const sub_lo = import("gd_sub.sub_lo")
+const sub_hi = import("gd_sub.sub_hi")
+
+pub mod mid<N=4>(a:U32) -> (lo:U8@[], hi:U8@[]) {
+  lo = sub_lo<N=4, W=8>(a=a)
+  hi = sub_hi<N=4, W=8>(a=a)
+}

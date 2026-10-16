@@ -1,0 +1,58 @@
+/*
+:name: loop_instance_field
+:type: equiv
+:verilog_top: top
+:pyrope_top: top
+:expect_instances: u_loop_*=4
+*/
+// A rolled loop (the default) reading a child instance's OUTPUT at the loop
+// index: `s.sel#[i]` with `const s = pick2(..)`. The handle is a tuple, so it
+// cannot cross the lifted loop boundary as one port; each field it reads is a
+// port of its own, read in front of the loop exactly as if the source hoisted
+// `const sel = s.sel` (a single-output handle used to reach the lifted body
+// as a scalar, leaving `s.sel` undriven there; a two-output one silently
+// unrolled the loop). The second loop reads a single-output handle whose
+// output is named `out`.
+// Two outputs: the parent's handle is a tuple of them.
+mod pick2(x:U8) -> (sel:U8@[0], inv:U8@[0]) {
+  sel = x
+  inv = ~x
+}
+
+// One output, named like the built-in `.[out]` attribute: `q.out` on the
+// single-output handle must read the output, not report an attribute misuse.
+mod one(x:U4) -> (out:U4@[0]) {
+  out = x ^ 0ub0101
+}
+
+pub mod top(sel_in:U8, din:U64, a:U4) -> (o:U8@[], p:U4@[], n:U2@[]) {
+  const s = pick2(x=sel_in)
+  mut acc:U8 = 0
+  for i in 0..<8 {
+    if s.sel#[i] == 1 and s.inv#[7 - i] == 0 {
+      acc |= din#[(i*8)..+8]
+    }
+  }
+  o = acc
+
+  const q = one(x=a)
+  mut m:U4 = 0
+  for i in 0..<4 {
+    m#[i] = q.out#[3 - i]
+  }
+  p = m
+
+  // Nested: the outer loop rolls too, so the inner loop's field read reaches
+  // it through the outer body's field port (typed like the output).
+  mut r:U2 = 0
+  for f in 0..<2 {
+    mut bit:U1 = 0
+    for k in 0..<2 {
+      if s.sel#[k*2 + f] == 1 {
+        bit = 1
+      }
+    }
+    r#[f] = bit
+  }
+  n = r
+}

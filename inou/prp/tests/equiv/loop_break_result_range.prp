@@ -1,0 +1,21 @@
+/*
+:name: loop_break_result_range
+:type: lec
+:lec_top: loop_break_result_range
+*/
+// PYROPE-vs-PYROPE group. This file is the REFERENCE: the value a loop with a
+// `break` leaves behind, written as the loop-free priority chain it is. `acc`
+// is 3 - k for the first k with x#[k] set (0 when none is), so the sign
+// position of `a#sext[0..=acc]` is a RUNTIME value in [0, 3]. See _1.
+pub comb loop_break_result_range(x:U4, a:U8) -> (o:S8, q:U3) {
+  mut acc:U3 = 3
+  if x#[0] == 0 {
+    acc = 2
+    if x#[1] == 0 {
+      acc = 1
+      if x#[2] == 0 { acc = 0 }
+    }
+  }
+  o = a#sext[0..=acc]
+  q = acc
+}

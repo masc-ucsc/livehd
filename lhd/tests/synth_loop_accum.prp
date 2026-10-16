@@ -1,0 +1,18 @@
+// Loop accumulators (`acc |= term`, `&=`, `^=`): synthesis expands each carried
+// loop into one two-input cell per iteration, a left-deep chain. pass/synth
+// reassociates each chain into one n-ary cell per region (reassoc.cpp) so the
+// blaster lowers a balanced tree: 16 terms map at logarithmic, not linear,
+// depth. lhd_synth_loop_reassoc_test.sh proves the mapped netlist.
+pub comb synth_loop_accum(lanes:U128, sel:U16) -> (any:U8, all:U8, parity:U8) {
+  mut acc_or:U8 = 0
+  mut acc_and:U8 = 0xff
+  mut acc_xor:U8 = 0
+  for i in 0..<16 {
+    acc_or |= lanes#[(i*8)..+8] & (if sel#[i] == 1 { 0xff } else { 0 })
+    acc_and &= lanes#[(i*8)..+8] | (if sel#[i] == 1 { 0 } else { 0xff })
+    acc_xor ^= lanes#[(i*8)..+8]
+  }
+  any = acc_or
+  all = acc_and
+  parity = acc_xor
+}

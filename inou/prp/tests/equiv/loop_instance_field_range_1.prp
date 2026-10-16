@@ -1,0 +1,23 @@
+/*
+:name: loop_instance_field_range_1
+*/
+// The loop reads the field in place (`t = t + s.neg`). The field becomes its
+// own port of the lifted body, as if hoisted; its range must seed the
+// per-iteration carry analysis exactly as the hoisted local's does. Unseeded,
+// every value computed from the field was unbounded there, `t` reached the
+// lifted body at its whole declared range, and the one walk rejected
+// `t = t + s__neg` ("`t` (range [-135, 127]) may not fit its declared range
+// [-128, 127]") although no iteration overflows and the reference compiles.
+comb negsub(a:U8) -> (neg:S4, pos:U4) {
+  neg = -U4(a#[0..<3])
+  pos = a#[4..<8]
+}
+
+pub comb top(a:U8) -> (p:S8) {
+  const s = negsub(a)
+  mut t:S8 = 0
+  for i in 0..<4 {
+    t = t + s.neg
+  }
+  p = t
+}

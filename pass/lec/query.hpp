@@ -1129,6 +1129,10 @@ struct Verify_result {
 // is an interface mismatch; an empty miter with no one-sided port (neither
 // side exposes anything comparable) is vacuous; every other undecided result
 // is classified from its deciding detail (cause_detail, else detail).
+// The undecided attempt of a portfolio (or an ind|bmc ladder) whose own cause
+// decides the folded outcome (query.cpp); -1 when none is undecided.
+[[nodiscard]] int deciding_attempt(const std::vector<const Query_result*>& legs);
+
 [[nodiscard]] inline Outcome query_outcome(const Query_result& r, bool engine_forced) {
   if (r.verdict == Verdict::Refuted) {
     return Outcome::Refuted_cex;

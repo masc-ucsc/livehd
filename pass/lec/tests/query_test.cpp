@@ -384,6 +384,84 @@ TEST(LecNames, PyropeQuotedStateMatchesDirectRtlName) {
   EXPECT_EQ(lec::canon_flop_name("csrMod\\_Mhpmevent10_0"), lec::canon_flop_name("csrMod_Mhpmevent10_0"));
 }
 
+// Loop-iteration tags are outermost first, whether a level is rolled (a
+// `u_loop_<n>__li<k>` wrapper) or unrolled (a `__li<k>` instance suffix).
+TEST(LecNames, RolledLoopFoldKeepsOuterTagsFirst) {
+  EXPECT_EQ(lec::canon_flop_name("u_loop_0__li0.u_loop_0__li1.t.acc"), "t__li0__li1_acc");
+  EXPECT_EQ(lec::canon_flop_name("u_loop_0__li0.t__li1.acc"), lec::canon_flop_name("t__li0__li1.acc"));
+  EXPECT_EQ(lec::canon_flop_name("u_loop_2__li3.t.acc"), "t__li3_acc");
+}
+
+// The reference memory knowledge state (BMC, gold_x=ignore). The old encoding
+// put an all-unknown constant array next to the all-known one and cvc5 threw
+// "write-chains connecting two different constant arrays" as soon as a solve
+// could merge them (a write through an unknown address, then a reset).
+TEST(LecState, MemoryKnowledgeRestartsWithoutConstantArrayChains) {
+  cvc5::TermManager tm;
+  cvc5::Solver      solver(tm);
+  solver.setLogic("QF_ABV");
+  solver.setOption("arrays-exp", "true");  // as configure_solver sets for a query with memories
+  solver.setOption("arrays-prop", "1");
+  solver.setOption("incremental", "true");
+  const lec::Mem_sig sig{.size = 4, .bits = 8, .addr_w = 2, .n_rd = 1, .n_wr = 1};
+  const auto         bv2   = tm.mkBitVectorSort(2);
+  const auto         bv8   = tm.mkBitVectorSort(8);
+  const auto         a     = tm.mkConst(bv2, "a");
+  const auto         b     = tm.mkConst(bv2, "b");
+  const auto         x     = tm.mkConst(bv8, "x");
+  const auto         cloud = tm.mkConst(tm.getBooleanSort(), "cloud");
+  const auto         rst   = tm.mkConst(tm.getBooleanSort(), "rst");
+  const auto         ones  = tm.mkBitVector(8, 0xff);
+  const auto         zero  = tm.mkBitVector(8, 0);
+  const auto         init  = tm.mkConst(tm.mkBitVectorSort(32), "init");  // per-entry reset contents
+
+  // Two writes, a conditional cloud, a conditional reset to per-entry contents.
+  auto s0 = lec::mem_x_fresh(tm, sig, /*unknown=*/false, "e0");
+  auto s1 = lec::mem_x_write(tm, s0, a, x);
+  auto s2 = lec::mem_x_restart(tm, s1, sig, cloud, ones);
+  auto s3 = lec::mem_x_write(tm, s2, b, zero);
+  auto s4 = lec::mem_x_restart(tm, s3, sig, rst, zero, init);
+  auto u0 = lec::mem_x_fresh(tm, sig, /*unknown=*/true, "u0");
+  auto u1 = lec::mem_x_write(tm, u0, a, x);
+
+  auto entry = [&](const cvc5::Term& bus, const cvc5::Term& at) {
+    auto e = tm.mkTerm(tm.mkOp(cvc5::Kind::BITVECTOR_EXTRACT, {7, 0}), {bus});
+    for (uint32_t i = 1; i < 4; ++i) {
+      e = tm.mkTerm(cvc5::Kind::ITE,
+                    {tm.mkTerm(cvc5::Kind::EQUAL, {at, tm.mkBitVector(2, i)}),
+                     tm.mkTerm(tm.mkOp(cvc5::Kind::BITVECTOR_EXTRACT, {8 * i + 7, 8 * i}), {bus}),
+                     e});
+    }
+    return e;
+  };
+  auto ite = [&](const cvc5::Term& c, const cvc5::Term& t, const cvc5::Term& e) { return tm.mkTerm(cvc5::Kind::ITE, {c, t, e}); };
+  auto eq  = [&](const cvc5::Term& l, const cvc5::Term& r) { return tm.mkTerm(cvc5::Kind::EQUAL, {l, r}); };
+  // Reference model of reading entry `b` (then `a`) after each step.
+  const auto              after_s1 = [&](const cvc5::Term& at) { return ite(eq(at, a), x, zero); };
+  const auto              after_s3 = [&](const cvc5::Term& at) { return ite(eq(at, b), zero, ite(cloud, ones, after_s1(at))); };
+  const auto              after_s4 = [&](const cvc5::Term& at) { return ite(rst, entry(init, at), after_s3(at)); };
+  std::vector<cvc5::Term> wrong{
+      tm.mkTerm(cvc5::Kind::DISTINCT, {lec::mem_x_read(tm, s1, b), after_s1(b)}),
+      tm.mkTerm(cvc5::Kind::DISTINCT, {lec::mem_x_read(tm, s3, a), after_s3(a)}),
+      tm.mkTerm(cvc5::Kind::DISTINCT, {lec::mem_x_read(tm, s4, a), after_s4(a)}),
+      tm.mkTerm(cvc5::Kind::DISTINCT, {lec::mem_x_read(tm, s4, b), after_s4(b)}),
+      tm.mkTerm(cvc5::Kind::DISTINCT, {lec::mem_x_read(tm, u1, b), ite(eq(a, b), x, ones)}),
+  };
+  for (const auto& w : wrong) {
+    solver.push();
+    solver.assertFormula(w);
+    cvc5::Result r;
+    ASSERT_NO_THROW(r = solver.checkSat());
+    EXPECT_TRUE(r.isUnsat()) << w;
+    solver.pop();
+  }
+  // Both outcomes of a cloud/reset stay reachable (nothing is vacuous).
+  solver.assertFormula(tm.mkTerm(cvc5::Kind::DISTINCT, {lec::mem_x_read(tm, s4, a), lec::mem_x_read(tm, u1, a)}));
+  cvc5::Result r;
+  ASSERT_NO_THROW(r = solver.checkSat());
+  EXPECT_TRUE(r.isSat());
+}
+
 TEST(CombEquiv, LegalizedPackedFeedbackProves) {
   hhds::GraphLibrary lib;
   auto               build = [&](const std::string& name, bool packed, int invert, bool real_cycle = false) {
@@ -1551,6 +1629,36 @@ TEST(LecOutcome, PortfolioFoldClassifiesTheDecidingArm) {
   EXPECT_EQ(lec::query_outcome(r, false), Outcome::Refuted_vacuous);  // contradictory assumes: a vacuous check is a problem
   r.cause_detail.clear();
   EXPECT_EQ(lec::query_outcome(r, false), Outcome::Timeout_time) << "the concatenation alone lets the timeout win";
+}
+
+// An arm that ran out of time decides over an arm that crashed or gave up
+// without a reason (owner ruling 2026-10-15: undecided-by-time is
+// TIMEOUT-time, never REFUTED-unexplained; br_ram_flops: two bmc profiles hit
+// a cvc5 array-theory exception while bmc:intblast reached the wall deadline).
+// A design-level refusal and contradictory assumptions still win.
+TEST(LecOutcome, TimeLimitedArmDecidesOverCrashedArm) {
+  using lec::Outcome;
+  lec::Query_result crash, timeout, refusal, vacuous;
+  for (auto* r : {&crash, &timeout, &refusal, &vacuous}) {
+    r->verdict = Verdict::Undecided;
+  }
+  crash.detail
+      = "ENGINE CRASH (bmc): Array theory solver does not yet support write-chains connecting two different "
+        "constant arrays";
+  timeout.detail = "hit formal.timeout (shared portfolio wall deadline)";
+  refusal.detail = "; ref encode failed: the encoder does not model cell X";
+  vacuous.detail = "; active assumption set is CONTRADICTORY (vacuous proof rejected)";
+  EXPECT_EQ(lec::deciding_attempt({&crash, &timeout, &crash}), 1);
+  EXPECT_EQ(lec::deciding_attempt({&timeout, &crash}), 0);
+  EXPECT_EQ(lec::deciding_attempt({&crash}), 0) << "alone, the crash still names a bug";
+  EXPECT_EQ(lec::deciding_attempt({&crash, &timeout, &refusal}), 2) << "no amount of time models a refused design";
+  EXPECT_EQ(lec::deciding_attempt({&timeout, &vacuous}), 1);
+  lec::Query_result folded;
+  folded.verdict = Verdict::Undecided;
+  folded.detail  = "auto: every engine/profile arm was undecided; bmc:internal=UNEXPLAINED: " + crash.detail
+                  + "; bmc:intblast=TIMEOUT: " + timeout.detail;
+  folded.cause_detail = "auto: bmc:intblast: " + timeout.detail;
+  EXPECT_EQ(lec::query_outcome(folded, false), Outcome::Timeout_time);
 }
 
 TEST(LecOutcome, InterfaceVacuousAndBoundedDepth) {

@@ -30,8 +30,13 @@ struct Prepared_design {
 // retain their existing diagnostics. A refused budget stays refused.
 // `specialize` runs pass.specialize (state-free callees only) on the private
 // copy, after pass.color decided the regions (synth.specialize, default true).
+// `reassociate_loops` merges the associative chains an expanded carried loop
+// leaves into balanced n-ary cells (reassoc.hpp). pass.abc asks for it: ABC
+// maps the structure it is handed and does not rebalance a 16-link chain.
+// pass.usyn does not: its XAG flow measured neutral to worse on balanced
+// loop chains (lhdtrack br_arb_lru +8% delay).
 std::unique_ptr<Prepared_design> prepare_design(std::span<const std::shared_ptr<hhds::Graph>> sources, bool unroll_carry,
                                                 std::string_view from_pass, Preparation_budget* budget = nullptr,
-                                                bool specialize = true);
+                                                bool specialize = true, bool reassociate_loops = false);
 
 }  // namespace livehd::synth
