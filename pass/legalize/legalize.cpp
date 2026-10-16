@@ -825,7 +825,8 @@ std::vector<std::shared_ptr<hhds::Graph>> loop_body_order(const std::vector<std:
 
 }  // namespace
 
-Legalize_result legalize_design(const std::vector<std::shared_ptr<hhds::Graph>>& graphs, bool freeze_graphs) {
+Legalize_result legalize_design(const std::vector<std::shared_ptr<hhds::Graph>>& graphs, bool freeze_graphs,
+                                bool defer_inlined_loops, const std::vector<std::shared_ptr<hhds::Graph>>& roots) {
   Legalize_result out;
   Split_state     state;
 
@@ -836,7 +837,14 @@ Legalize_result legalize_design(const std::vector<std::shared_ptr<hhds::Graph>>&
   //    instances atomic (no state moves); packed slices left inside a body are
   //    resolved, and a true loop is an error. Before any split, so a half is
   //    copied from a repaired body.
-  const auto acyclic = make_acyclic(graphs, state);
+  const auto acyclic   = make_acyclic(graphs, state, defer_inlined_loops, roots);
+  out.needs_loop_check = acyclic.needs_loop_check;
+  for (const auto& graph : state.removed) {
+    auto*             library = graph->get_io()->get_library();
+    const std::string name{graph->get_name()};
+    library->delete_graph(graph);
+    library->delete_graphio(name);
+  }
   for (const auto& g : graphs) {
     if (is_live(g.get())) {
       auto attr = g->get_input_node().attr(livehd::attrs::legalize_inlined);

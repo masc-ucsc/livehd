@@ -368,7 +368,7 @@ inline std::vector<Bit> build_sum(Adder_kind kind, int block_size, Ops& ops, con
 // overflow when the divisor occupies the full input width.
 template <class Bit, class Ops>
 inline std::vector<Bit> build_div(Adder_kind kind, int block_size, Ops& ops, const std::vector<Bit>& a, const std::vector<Bit>& b,
-                                  bool a_signed, bool b_signed) {
+                                  bool a_signed, bool b_signed, bool remainder = false) {
   const int w = static_cast<int>(a.size());
   if (w == 0) {
     return {};
@@ -401,9 +401,21 @@ inline std::vector<Bit> build_div(Adder_kind kind, int block_size, Ops& ops, con
       rem[j] = select(diff.carry_out, diff.sum[j], rem[j]);
     }
   }
+  if (remainder) {
+    rem.resize(w);
+    // Truncated remainder follows the dividend's sign, independent of the
+    // divisor's sign. A zero divisor retains the dividend (SMT bv{s,u}rem).
+    return conditional_negate(rem, aneg);
+  }
   // Division by zero yields all ones in the unsigned machine, and +/-1
   // after restoring the dividend sign, as in SMT bit-vector division.
   return conditional_negate(quotient, ops.xor_(aneg, bneg));
+}
+
+template <class Bit, class Ops>
+inline std::vector<Bit> build_rem(Adder_kind kind, int block_size, Ops& ops, const std::vector<Bit>& a, const std::vector<Bit>& b,
+                                  bool a_signed, bool b_signed) {
+  return build_div(kind, block_size, ops, a, b, a_signed, b_signed, true);
 }
 
 // a < b via a balanced comparison tree for prefix, otherwise the chosen

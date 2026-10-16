@@ -18,6 +18,7 @@
 #include "slang/ast/Compilation.h"
 #include "slang/diagnostics/ExpressionsDiags.h"  // CannotIndexScalar
 #include "slang/driver/Driver.h"
+#include "slang/syntax/SyntaxTree.h"
 #include "slang_context.hpp"
 #include "slang_diag.hpp"
 
@@ -35,6 +36,13 @@ static int driverMain(int argc, TArgs argv, Slang_context& slang_tree) {
     // (-I/-D/-U, --ignore-unknown-modules) is a standard arg.
     std::optional<bool> quiet;
     driver.cmdLine.add("-q,--quiet", quiet, "Suppress non-essential output");
+    // Slang has this compilation policy but does not expose a driver argument.
+    // Keep it opt-in: a synthesis top may coexist with unfinished, unreferenced
+    // modules in a vendor source bundle without weakening the selected hierarchy.
+    auto& reachableOnly = driver.options.compilationFlags[slang::ast::CompilationFlags::IgnoreUninstantiatedModules];
+    driver.cmdLine.add("--ignore-uninstantiated-modules",
+                       reachableOnly,
+                       "Skip semantic elaboration of modules outside the selected hierarchy");
     std::optional<std::string> literalTop;
     driver.cmdLine.add("--lhd-top", literalTop, "Select a literal LiveHD module name");
 
@@ -80,6 +88,14 @@ static int driverMain(int argc, TArgs argv, Slang_context& slang_tree) {
     const bool quietMode = quiet == true;
 
     bool ok = driver.parseAllSources();
+
+    if (!slang_tree.get_options().liberty_declarations.empty()) {
+      auto interfaces           = slang::syntax::SyntaxTree::fromText(slang_tree.get_options().liberty_declarations,
+                                                                      driver.sourceManager,
+                                                                      "<liberty-memory-interfaces>");
+      interfaces->isLibraryUnit = true;
+      driver.syntaxTrees.push_back(std::move(interfaces));
+    }
 
     auto compilation = driver.createCompilation();
     driver.reportCompilation(*compilation, quietMode);

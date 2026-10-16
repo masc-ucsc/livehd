@@ -821,6 +821,7 @@ sh_test(
 # a new equiv fixture then defaults to COVERED rather than silently uncovered.
 # A pair whose claim IS that no state appears stays OUT of this list.
 _STATEMATCH_COMB = [
+    "module_cycle_context",
     "and_zero_annihilator",
     "arr2d_dyn_sel",
     "arr_comb_mux_const",

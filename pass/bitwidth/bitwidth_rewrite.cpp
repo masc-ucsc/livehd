@@ -76,7 +76,16 @@ bool Bitwidth_rewrite::scalar_get_mask_range(hhds::Node_class& node) {
   std::function<hhds::Pin_class(hhds::Pin_class, int)> window;
   window = [&](hhds::Pin_class pin, int bits) -> hhds::Pin_class {
     if (pin.is_const()) {
-      return create_const(*current_graph, *const_of(pin).get_mask_op_opt(0, bits));
+      // P7: mint only a fully known window. A '?' literal's window is the
+      // literal's own pin when it already fits, else a Get_mask over it (the
+      // fallback below): one new spelling per consumer window would split it.
+      const auto narrowed = const_of(pin).get_mask_op_opt(0, bits);
+      if (!narrowed->has_unknowns()) {
+        return livehd::cprop_value::create_folded_const(*current_graph, *narrowed);
+      }
+      if (narrowed->same_repr(const_of(pin))) {
+        return pin;
+      }
     }
     if (fits_unsigned_window(pin, bits)) {
       return pin;

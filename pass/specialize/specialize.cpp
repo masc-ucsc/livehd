@@ -68,6 +68,52 @@ std::vector<hhds::Node_class> zero_index_shifts(hhds::Graph& graph, hhds::Port_i
 void refold_private_body(const std::shared_ptr<hhds::Graph>& graph) {
   Cprop{}.do_trans(graph);
   Bitwidth{16}.do_trans(graph);
+  // cprop deliberately works on unlimited-precision integers, so 1 | x is
+  // generally not an annihilator. Here widths have just been inferred. When
+  // every operand is an unsigned single bit, OR with one is exactly one,
+  // including a configured ready network whose other operand feeds itself.
+  // Remove that structural feedback before the graph's cycle check.
+  std::vector<hhds::Node_class> nodes;
+  for (auto node : graph->body().nodes()) {
+    nodes.push_back(node);
+  }
+  bool folded = false;
+  for (auto node : nodes) {
+    if (node.is_invalid() || gu::type_op_of(node) != Ntype_op::Or) {
+      continue;
+    }
+    bool bounded = true, one = false;
+    for (const auto& sink : node.inp_sorted_pins()) {
+      for (const auto& driver : sink.get_driver_pins()) {
+        if (driver.is_const()) {
+          const auto& value = gu::const_of(driver);
+          if (!value.has_unknowns() && value.is_just_i64() && value.to_just_i64() >= 0 && value.to_just_i64() <= 1) {
+            one |= value.to_just_i64() == 1;
+          } else {
+            bounded = false;
+          }
+        } else {
+          bounded &= gu::bits_of(driver) == 1 && gu::is_unsign(driver);
+        }
+      }
+    }
+    if (!bounded || !one) {
+      continue;
+    }
+    const auto output  = node.get_driver_pin(0);
+    const auto readers = gu::Edge_vec(output.out_edges().begin(), output.out_edges().end());
+    const auto value   = gu::create_const(*graph, *Dlop::create_integer(1));
+    for (const auto& edge : readers) {
+      edge.sink.del_sink(output);
+      value.connect_sink(edge.sink);
+    }
+    node.del_node();
+    folded = true;
+  }
+  if (folded) {
+    Cprop{}.do_trans(graph);
+    Bitwidth{16}.do_trans(graph);
+  }
 }
 
 namespace {

@@ -42,6 +42,11 @@
 
 namespace livehd::port_reach {
 
+// An explicitly declared registered blackbox output is a state boundary even
+// without a body. Per output: mixed combinational/registered cells retain arcs.
+bool state_output(const hhds::Node_class& node, const hhds::Pin_class& output);
+
+
 // One SLICE of a packed output: the bit range a single concat leaf drives,
 // with ITS OWN input support. Slices exist only when the output's driver is
 // the disjoint `Or`-of-`SHL` concat idiom (or a pass-through of a sliced

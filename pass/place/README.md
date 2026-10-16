@@ -22,6 +22,20 @@ still require cell mapping. DEF input nets retain their port names, and internal
 net names reserve every port name, so OpenROAD's structural Verilog writer keeps
 input connectivity when exporting a DEF-imported design.
 
+Physical constant drivers are discovered from `synth.liberty`: usable input-free
+cells with scalar output functions `0` or `1`, including dual-output ties. The
+selection excludes `dont_use`, sequential and three-state cells and requires a
+matching row-compatible CORE LEF master with the declared signal pins and output
+geometry. Masters with LEF `SYMMETRY X` rank first, then the smallest physical
+area wins, followed by cell/pin name for a stable tie break. A tie that cannot
+flip turns generated N/FS rows into all-N rows (a frame reused from `cache_dir`
+counts as generated, so warm and cold runs agree); an imported floorplan or a
+caller-supplied previous floorplan with FS rows rejects it. Supply pins remain physical power/ground pins. No technology, cell or
+signal-pin spelling is hardcoded. Both the physical nets and private graph use
+the selected constant output; later placement/ECO rounds reuse existing ties.
+Missing characterization or geometry produces an explicit error for the required
+constant value. Library contents participate in placement-cache identity.
+
 Full mode checks site/row alignment, cell overlap and core bounds independently,
 then writes and reads back `synth/place/out.def`. GP mode may overlap, reports
 approximate timing and removes the stage's DEF. `synth/place/qor.json` reports
@@ -60,8 +74,39 @@ radius constraint, and solver momentum is not reused across calls.
 
 Floorplan input currently requires the same DBU as LEF, contiguous equal-width
 N/FS rows, and FIXED IO pins. Row gaps/blockages and rotated rows are refused.
-Mapped standard cells need matching LEF and Liberty models. Native memories use
-physical-only square BLOCK proxies, while their state and interfaces stay native:
+Mapped standard cells need matching LEF and Liberty models. Explicit hard macros
+remain movable and retain exact LEF dimensions, even when their widths/heights
+are not integral standard-cell sites/rows. DREAMPlace uses its existing macro
+legalizer, which rounds private occupancy envelopes for packing without changing
+physical dimensions or pin offsets. Row flips apply only to CORE cells; BLOCK
+macros keep their supplied orientation, including when a warm cache hit locks
+them.
+
+`synth.place.halo=H` reserves H microns per side around every non-CORE LEF
+macro, including native-memory BLOCK proxies. `synth.place.halo=X,Y` selects
+horizontal and vertical clearance separately; the default is zero. Clearance
+rounds up to the technology's site width and row height. CORE standard cells
+receive no halo. Physical dimensions, pin offsets and reported physical area
+remain unchanged; private padded occupancy participates in density, legalization
+and detailed placement. Two macros reserve both halos between them. The same
+clearance applies to cache reuse, ECO placement and independent legality checks;
+an imported fixed macro with an illegal halo cannot silently pass. Requested
+microns and effective DBU clearance are recorded in placement QoR. Floorplan
+utilization continues to use physical area, so halo occupancy can exceed the
+requested density target even when physical utilization is low.
+
+The ASAP7 Eyeriss geometry trial with `synth.place.halo=5`, utilization 0.30 and
+density 0.5 places all 1040 supplied SRAMs and 303436 standard cells legally.
+OpenROAD placement checking and a separate expanded-box audit pass with unchanged
+physical cell counts and sizes. Effective halos are 5.022/5.130 microns; padded
+occupancy is 57.04% versus 30.00% physical utilization. GP does not converge;
+the padded-area lower bound on overflow is already 0.123 at the requested density.
+The native macro LP preserves both axes on infeasible heuristic constraints so
+the existing full Hannan-grid fallback can run. Intermediate grid attempts can
+log failed macro positions before the final accepted legal placement.
+
+Native memories use physical-only square
+BLOCK proxies, while their state and interfaces stay native:
 
 ```
 area = (word_bits * depth) * smallest_flop_area * pow(1.1, read_ports + write_ports)

@@ -14,9 +14,112 @@
 repair quality before widening optimization bounds; the current flow and its limits
 are documented in <a href="../../pass/place/README.md">pass/place/README.md</a>.</p>
 
+<h2 id="eyeriss-placement">Next — Eyeriss ASAP7 placement bring-up</h2>
+<p>Try mixed-size placement with all supplied SRAM macros movable before selecting
+a separate macro-placement stage. The first trial omitted halos and blockages;
+the 5 µm halo rerun is also legal. Iterate through legal post-placement results before
+comparing QoR. Stop before CTS, routing and extraction.
+Keep the direct Slang frontend, <code>compile.specialize_modules=true</code>, explicit
+<code>--ignore-uninstantiated-modules</code> and <code>SYNTHESIS=1</code>. Use the
+corrected HighTide wrappers and all seven supplied SRAM LEF/Liberty interfaces.</p>
+<p>The first complete native mixed-size run is legal in LiveHD and OpenROAD with
+all 1040 supplied SRAMs movable, exact LEF sizes and no proxies or imported macro
+positions. The size-validation and stale macro-obstacle handoff bugs are fixed.
+The halo rerun passes OpenROAD placement checking and an independent expanded-box
+audit with zero halo violations; physical cell counts, sizes and core are unchanged.
+Effective clearance is 5.022/5.130 µm after site/row rounding. It also exposed and
+fixed a native LP abort that prevented the existing Hannan-grid fallback.
+GP did not converge (overflow 0.699 without halos, 0.474 with halos at density 0.5).
+With halos, padded occupancy is 57.04%, imposing an overflow lower bound of 0.123
+at density 0.5 even with perfect distribution. These overflow values use different
+occupancy envelopes; keep legality, convergence and physical HPWL separate.</p>
+<ol>
+  <li><strong>Freeze inputs and validate timing semantics.</strong> Save the mapped
+  netlist, tool revisions, library hashes and exact command/configuration for reuse.
+  Audit standard-cell and SRAM corners, Liberty time/capacitance/area units, LEF
+  geometry and DBU, bus-bit identities and clock-to-output/setup/hold arcs. Validate
+  representative SRAM paths and loads against OpenSTA before trusting OpenTimer
+  optimization. Evaluate the original Tcl SDC into an equivalent literal internal
+  SDC: 2500 ps clock, 500 ps input/output delays, and the reset false path. The current
+  OpenTimer reader does not model <code>set_false_path</code>; implement the required
+  exception before claiming constraint parity. Keep OpenTimer disabled for the
+  initial geometry-only trial so this does not block testing placement itself.
+  Preserve characterized SRAM delay;
+  the native-memory zero-internal-delay proxy model does not apply to these cells.
+  Retain the deferred one-hot and full-design equivalence checks as unresolved
+  functional evidence, separately from physical legality.</li>
+  <li><strong>Improve GP convergence and inspect placement quality.</strong> Use
+  the legal movable-macro checkpoint to investigate high overflow and the clustered
+  layout. Measure explicit bin/iteration experiments with frozen inputs and binary,
+  utilization 0.30 and density 0.5. Record HPWL, displacement, runtime and whole-core
+  legality; do not change defaults from a single design. Decide whether a dedicated
+  macro-placement stage or additional blockage support helps after these results.
+  The generated floorplan is not proof of equality with HighTide's floorplan sizing.</li>
+  <li><strong>Broaden physical connectivity and ECO validation.</strong> Compare
+  each SRAM bank's address, data and clock connections in the source, mapped netlist
+  and DEF, including repeated vector-port macros and oriented pins. Extend ECO
+  checks around relocated macros and automatically discovered constant drivers.
+  Preserve exact master dimensions and require independent legality and DEF round
+  trips. Keep minimal self-contained regressions in LiveHD and benchmark assets
+  and orchestration in the benchmark repository.</li>
+  <li><strong>Enable timing improvements one stage at a time.</strong> Once the
+  physical and timing checks pass, run post-synthesis timing seeding plus placed-RC
+  weighting, then sizing/buffer repair, then proved cone resynthesis. Save each
+  accepted checkpoint and rejected candidate reason. Freeze the accepted macro/IO
+  frame when attributing standard-cell optimization changes; record any later
+  macro movement as a separate experiment. Keep inputs and resource budgets fixed. Require whole-core
+  legality, connectivity preservation and fresh RC/STA after edits; compare selected
+  critical SRAM and register paths with OpenSTA. Serialize resource-bounded trials.
+  Reuse compatible compiled/mapped artifacts with a frozen binary, and separate cold
+  runs from warm reuse measurements.</li>
+  <li><strong>Compare the stable pre-CTS checkpoints.</strong> Build the corrected
+  <code>//designs/asap7/eyeriss:eyeriss_place</code> reference and score both untouched
+  placements with HighTide's pinned OpenROAD/OpenSTA, original SDC, ideal clocks,
+  common placement-RC assumptions and activity assumptions. OpenROAD import and
+  <code>check_placement</code> must not silently move or resize LiveHD cells; any
+  handoff repair is a separate checkpoint with its own delta and time. Generate
+  <code>comparison.html</code> with both post-placement PNGs at the same scale,
+  legality/convergence, HPWL, WNS/TNS, cell classes, standard-cell and macro area,
+  achieved utilization and estimated power. The top table has separate synthesis
+  and placement times; retain every pre-CTS step in the breakdown, including macro
+  preparation and OpenROAD validation, counted once. Show shared preparation
+  explicitly. Mark downstream stages as not run, with no fabricated zero durations.
+  No routed timing, congestion or DRC closure claim follows from this checkpoint.</li>
+</ol>
+
+<h3>Explicit parameters and implementation gaps to resolve</h3>
+<table>
+  <thead><tr><th>HighTide/user setting</th><th>LiveHD plan</th></tr></thead>
+  <tbody>
+    <tr><td><code>CORE_UTILIZATION=30</code></td><td>Use the reference core geometry
+    and report actual utilization in both results. A native area-based utilization
+    setting is not proof of equivalent macro floorplanning.</td></tr>
+    <tr><td><code>synth.place.density=0.5</code></td><td>Keep the user's explicit
+    DREAMPlace density target; distinguish it from floorplan utilization.</td></tr>
+    <tr><td><code>MACRO_PLACE_HALO="5 5"</code></td><td>Use
+    <code>synth.place.halo=5</code> (or <code>5,5</code>). It applies only to
+    non-CORE macros; clearance rounds up to site/row pitches without changing
+    physical sizes or pins. Native, host, ECO and CLI regressions pass, as do full
+    Eyeriss placement and independent halo checks. Keep the explicit density;
+    account for padded occupancy when interpreting GP convergence.</td></tr>
+    <tr><td><code>PLACE_DENSITY_LB_ADDON=0.20</code></td><td>OpenROAD's lower-bound
+    density adjustment has no demonstrated equivalent in the native DREAMPlace
+    density control. Report this difference; do not substitute 0.20 or 0.70 for
+    the requested 0.5, or invent a new mapping without a decision.</td></tr>
+    <tr><td><code>TNS_END_PERCENT=100</code></td><td>Keep it in the OpenROAD
+    reference. LiveHD's bounded sizing/repair/cone trials have different endpoint
+    coverage; do not label them equivalent.</td></tr>
+    <tr><td>Hard-macro placement</td><td>The native DREAMPlace GP and macro legalizer now
+    accept these movable SRAMs and produce legal placement. A separate
+    <code>synth.place.macro=</code> backend is not a prerequisite; evaluate it
+    only if later placement-quality measurements justify it.</td></tr>
+  </tbody>
+</table>
+
 <h2>Depends on</h2>
-<p>No blocking prerequisite tasks. Backend extensions must use the native C++
-DREAMPlace boundary, the flat placed graph and in-memory OpenTimer RC/STA.</p>
+<p>Eyeriss timing optimization depends on the unit/SDC checks above. Geometry-only
+placement now passes independent legality checks; GP convergence remains open. Backend extensions must use the native C++ DREAMPlace boundary, the flat
+placed graph and in-memory OpenTimer RC/STA.</p>
 
 <h2>Subtasks — pending</h2>
 <ul class="subtasks">
@@ -46,6 +149,10 @@ DREAMPlace boundary, the flat placed graph and in-memory OpenTimer RC/STA.</p>
       Independent Yosys state/output equivalence and reset checks pass for placed and
       routed exports. Isolate the always-transparent declaration, cell-model and initial-state
       assumptions; retain both sets of evidence before using native LEC as this flow's gate.</li>
+      <li>Complete the <a href="#eyeriss-placement">Eyeriss pre-CTS placement
+      bring-up sequence</a> above. Corrected ASAP7 banking requires 1040 physical
+      memories, so the old 193-cell HighTide PPA baseline cannot be reused.
+      Collision/forwarding semantics still require a functional macro contract.</li>
       <li>Run synthesis trials serially with process-tree memory and wall-time limits.
       Validate emitted netlists independently. Measure cold and warm incremental runs
       with a frozen binary; after a rebuild, run the warm command twice before judging
@@ -80,8 +187,11 @@ DREAMPlace boundary, the flat placed graph and in-memory OpenTimer RC/STA.</p>
       <li>Support row gaps, placement blockages and additional row orientations/layouts.
       The current contiguous equal-width N/FS-row boundary needs explicit compatibility
       and legality checks before accepting broader DEF inputs.</li>
-      <li>Add opt-in characterized hard-memory LEF/Liberty binding and broader mixed-size
-      placement. Keep estimated square proxies and clock-boundary zero-internal-delay
+      <li>Add semantically compatible inferred-array to hard-memory LEF/Liberty binding
+      and broader mixed-size placement. Explicitly instantiated Liberty RAM cells
+      already retain their typed opaque interfaces; Liberty alone does not establish
+      forwarding, collision, reset or cross-port priority semantics for inference.
+      Keep estimated square proxies and clock-boundary zero-internal-delay
       timing explicit when characterization is unavailable; do not report proxy timing
       as characterized memory timing.</li>
       <li>Replace the high-fanout Manhattan-star RC fallback beyond FLUTE's 1000-location

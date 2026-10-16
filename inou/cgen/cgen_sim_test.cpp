@@ -1237,3 +1237,33 @@ TEST(CgenSim, SharedSpecializationOffKeepsEveryBoundary) {
   EXPECT_EQ(copies, 0);
   EXPECT_EQ(f.instances[0].get_subnode_graph(), f.child);
 }
+
+// P4 class: a Div/Rem with ONE connected operand. A lone dividend `a` is
+// `a/?`, which may be a (cprop forwards it). A lone divisor `b` is `?/b` or
+// `?%b`: 0 is a legal value of both, but `b` is never a legal remainder
+// (|r| < |b| for b != 0), and simulating it as the divisor disagreed with
+// cprop's fold to 0. The emitted body must not read `b` for the lone-divisor
+// node.
+TEST(CgenSim, LoneDivisorDivRemSimulatesAsZero) {
+  for (auto op : {Ntype_op::Div, Ntype_op::Rem}) {
+    const std::string name = std::string("lone_divisor_") + std::string(Ntype::get_name(op));
+    auto&             lib  = livehd::Hhds_graph_library::instance("lgdb_" + name);
+    auto              io   = lib.create_io(name);
+    io->add_input("lone_divisor_in", 0);
+    io->set_bits("lone_divisor_in", 8);
+    io->set_unsign("lone_divisor_in", true);
+    io->add_output("q", 1);
+    io->set_bits("q", 8);
+    io->set_unsign("q", true);
+    auto graph = io->create_graph();
+    auto node  = gu::create_typed_node(*graph, op, 8);
+    graph->get_input_pin("lone_divisor_in").connect_sink(gu::setup_sink_by_name(node, "b"));
+    auto out = node.create_driver_pin(0);
+    gu::set_ubits(out, 8);
+    out.connect_sink(graph->get_output_pin("q"));
+    const auto  code = emit(graph, name);
+    std::smatch m;
+    // The output assignment must not be a read of the divisor input.
+    EXPECT_FALSE(std::regex_search(code, m, std::regex(R"(__out\.q = [^;\n]*lone_divisor_in)"))) << name << "\n" << code;
+  }
+}

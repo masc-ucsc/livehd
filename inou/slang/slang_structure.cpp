@@ -28,6 +28,7 @@
 #include "slang/ast/symbols/ParameterSymbols.h"
 #include "slang/ast/types/AllTypes.h"
 #include "slang/syntax/AllSyntax.h"
+#include "slang/syntax/SyntaxTree.h"
 #include "slang_context.hpp"
 #include "str_tools.hpp"
 
@@ -7799,14 +7800,65 @@ static std::string slang_array_element_name(const slang::ast::Symbol& sym) {
   return name;
 }
 
+// A definition that came from the synth.liberty RAM declarations slang_driver.cpp
+// injects (buffer named by a line directive, hence getFileName not the raw name).
+static bool is_liberty_interface_definition(const slang::SourceManager* sm, const slang::ast::DefinitionSymbol& def) {
+  return sm != nullptr && def.location.valid() && sm->getFileName(def.location) == "<liberty-memory-interfaces>";
+}
+
+// A design-source module/interface/program named `name`, other than `def`'s own
+// tree: the first root-level declaration found, or nullptr.
+static const slang::syntax::ModuleDeclarationSyntax* other_root_declaration(const slang::ast::Compilation&      comp,
+                                                                            const slang::ast::DefinitionSymbol& def,
+                                                                            std::string_view                    name) {
+  for (const auto& tree : comp.getSyntaxTrees()) {
+    if (tree.get() == def.syntaxTree || tree->root().kind != slang::syntax::SyntaxKind::CompilationUnit) {
+      continue;
+    }
+    for (const auto* member : tree->root().as<slang::syntax::CompilationUnitSyntax>().members) {
+      if (slang::syntax::ModuleDeclarationSyntax::isKind(member->kind)) {
+        const auto& decl = member->as<slang::syntax::ModuleDeclarationSyntax>();
+        if (decl.header->name.valueText() == name) {
+          return &decl;
+        }
+      }
+    }
+  }
+  return nullptr;
+}
+
 void Slang_context::lower_instance(const slang::ast::InstanceSymbol& inst) {
   // 2c-wire — a cyclic handshake's forward reference to a not-yet-lowered net is
   // handled by declaring that net a `wire` (position-independent reads), so no
   // transient cycle flag needs preserving across the recursive lower_module.
-  if (!lower_module(inst)) {
+  const auto& definition     = inst.getDefinition();
+  const bool  liberty_memory = options_.liberty_memories.contains(std::string(definition.name));
+  if (liberty_memory) {
+    // The sources also define this name (e.g. the behavioral model OpenRAM
+    // ships beside its .lib). Slang keeps ONE definition; its DuplicateDefinition
+    // can be silenced (-Wno-duplicate-definition), and lowering either side then
+    // silently drops the other: the RTL body (macro picked) or the Liberty pins
+    // the graph IO is declared from (RTL picked, e.g. via a liblist).
+    const bool  from_liberty = is_liberty_interface_definition(sm_, definition);
+    const auto* other        = from_liberty ? other_root_declaration(body_->getCompilation(), definition, definition.name) : nullptr;
+    if (!from_liberty || other != nullptr) {
+      const auto where = other != nullptr ? other->header->name.range() : slang::SourceRange(definition.location, definition.location);
+      emit_error(where,
+                 "liberty-memory-name-collision",
+                 "name",
+                 "module '" + std::string(definition.name)
+                     + "' is defined in the design sources and as a synth.liberty memory macro",
+                 "remove the behavioral model from the synthesis sources, or rename it");
+      return;
+    }
+  }
+  if (!liberty_memory && !lower_module(inst)) {
     return;  // diagnosed inside
   }
   auto callee = module_name_of(inst);
+  if (liberty_memory) {
+    builder_.lnast->add_external_module(callee);
+  }
 
   proc_kind_ = Proc_kind::none;
 
@@ -7987,6 +8039,20 @@ void Slang_context::lower_instance(const slang::ast::InstanceSymbol& inst) {
     const auto& port   = conn->port.as<slang::ast::PortSymbol>();
     const auto* expr   = conn->getExpression();
     const bool  is_out = port.direction == slang::ast::ArgumentDirection::Out;
+    if (liberty_memory && !is_out && expr != nullptr) {
+      const auto* actual = expr;
+      while (actual->kind == ExpressionKind::Conversion && actual->as<slang::ast::ConversionExpression>().isImplicit()) {
+        actual = &actual->as<slang::ast::ConversionExpression>().operand();
+      }
+      const auto width = flat_or_tinfo(port.getType()).bits;
+      if (flat_or_tinfo(*actual->type).bits > width && value_width(*actual).value_or(width + 1) > width) {
+        emit_unsupported(inst.location,
+                         "liberty-memory-port-truncation",
+                         "Liberty memory '" + callee + "' input '" + std::string(port.name) + "' would discard address/data bits",
+                         "use a matching macro interface or explicit, semantically validated banking logic");
+        return;
+      }
+    }
     if (port.direction == slang::ast::ArgumentDirection::InOut || port.direction == slang::ast::ArgumentDirection::Ref) {
       emit_unsupported(
           inst.location,
@@ -8075,7 +8141,8 @@ void Slang_context::lower_instance(const slang::ast::InstanceSymbol& inst) {
   auto result
       = inst.name.empty() ? (arr_name.empty() ? builder_.create_lnast_tmp() : qualify(arr_name)) : qualify(std::string(inst.name));
   ln.add_child(fcall_idx, Lnast_node::create_ref(result));
-  ln.add_child(fcall_idx, Lnast_node::create_ref(ref_name_of_raw(callee)));
+  ln.add_child(fcall_idx,
+               liberty_memory ? Lnast_node::create_const("'lg:" + callee + "'") : Lnast_node::create_ref(ref_name_of_raw(callee)));
   const auto synthesis = synth_attributes(body_->getCompilation().getAttributes(inst), 3);
   if (!synthesis.empty()) {
     auto arg = ln.add_child(fcall_idx, Lnast_ntype::create_store());

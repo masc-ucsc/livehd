@@ -12,6 +12,7 @@
 #include "diag.hpp"
 #include "file_utils.hpp"
 #include "slang_context.hpp"
+#include "liberty_dff.hpp"
 #include "inou_slang.hpp"
 
 #include "perf_tracing.hpp"
@@ -133,6 +134,7 @@ void Inou_slang::setup() {
   m2.add_label_optional("slang_flags",
                         "raw slang driver args ('\\x1f'-separated, e.g. -F filelist.f); supplied by `lhd --reader slang -- ...`");
 
+  m2.add_label_optional("liberty", "Selected Liberty: typed, opaque memory-cell interfaces", "");
   register_pass(m2);
 }
 
@@ -249,6 +251,13 @@ void Inou_slang::work(Eprp_var& var) {
   const bool keep_timecheck = var.has_label("timecheck") && var.get("timecheck") == "true";
 
   Slang_context::Options opts;
+  if (var.has_label("liberty") && !var.get("liberty").empty()) {
+    const auto memories       = livehd::liberty::scan_memory_cells(std::string(var.get("liberty")));
+    opts.liberty_declarations = livehd::liberty::memory_cell_declarations(memories);
+    for (const auto& cell : memories) {
+      opts.liberty_memories.insert(cell.name);
+    }
+  }
   opts.keep_timecheck            = keep_timecheck;
   // Only a USER-supplied --ignore-unknown-modules turns unknown modules into
   // blackbox sub-instances; the copy injected above (so slang itself never

@@ -933,7 +933,7 @@ void blast_comb(const hhds::Node_class& n, int out_bits, Slots& slots, Ops& ops,
     for (int b = 0; b < out_bits; ++b) {
       slots[b] = (b < out_w && b < static_cast<int>(res.size())) ? res[b] : pad;
     }
-  } else if (op == Ntype_op::Div) {
+  } else if (op == Ntype_op::Div || op == Ntype_op::Rem) {
     const auto       a     = gu::get_driver_of_sink_name(n, "a");
     const auto       b     = gu::get_driver_of_sink_name(n, "b");
     // eff_width, NOT real_width: a constant driver carries no `bits` attr, so
@@ -960,9 +960,10 @@ void blast_comb(const hhds::Node_class& n, int out_bits, Slots& slots, Ops& ops,
       }
       return !gu::is_unsign(d);
     };
-    const auto quotient = arith::build_div(opts_.adder, bs, ops, av, bv, operand_signed(a), operand_signed(b));
+    const auto result = op == Ntype_op::Rem ? arith::build_rem(opts_.adder, bs, ops, av, bv, operand_signed(a), operand_signed(b))
+                                            : arith::build_div(opts_.adder, bs, ops, av, bv, operand_signed(a), operand_signed(b));
     for (int i = 0; i < out_bits; ++i) {
-      slots[i] = i < width ? quotient[i] : (gu::is_unsign(out_pin) ? abc_const_bit(false) : quotient.back());
+      slots[i] = i < width ? result[i] : (gu::is_unsign(out_pin) ? abc_const_bit(false) : result.back());
     }
   } else if (op == Ntype_op::Mult) {
     // n-ary product of every input driver (all on pid 0), at width out_bits
@@ -1091,7 +1092,7 @@ void blast_comb(const hhds::Node_class& n, int out_bits, Slots& slots, Ops& ops,
            "unsupported-cell",
            "unsupported",
            std::format("cell '{}' has no combinational bit-blast yet", Ntype::get_name(op)),
-           "supported: and/or/xor/ror/not/mux/hotmux/sum/mult/div/lt/gt/eq/get_mask/set_mask/sext/shl/sra/const; concat is pure "
+           "supported: and/or/xor/ror/not/mux/hotmux/sum/mult/div/rem/lt/gt/eq/get_mask/set_mask/sext/shl/sra/const; concat is pure "
            "wiring, resolved per demanded bit");
   }
 }

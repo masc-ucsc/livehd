@@ -1610,7 +1610,9 @@ void Region_driver::map_region(const livehd::partition::Region_body& rb) {
   q.pred_aig    = pred_aig;
   for (const auto& bb : blast.bboxes) {
     if (bb.op == Ntype_op::Div || bb.op == Ntype_op::Rem) {
-      ++q.div_blackbox;  // unmapped cone: the region score is partial
+      // Div/Rem are bit-blasted; only one caught in a comb-cycle remainder
+      // stays native (unmapped), so the region score is partial.
+      ++q.div_blackbox;
     }
   }
   // The hook sees Lnet plus the owned source-state snapshot. Both can be read

@@ -19,6 +19,7 @@ struct Options {
   std::vector<std::string>                   changed_cells;
   std::map<std::string, double>              net_weights;
   double                                     utilization = 0.5, aspect = 1, density = 0.8;
+  double                                     halo_x = 0, halo_y = 0;  // microns per side, non-CORE macros only
   double                                     resistance_ohm_um = -1, capacitance_ff_um = -1;
   int                                        iterations = 500, bins = 32, threads = 1;
   bool                                       full           = true;
@@ -46,5 +47,5 @@ Steiner_tree steiner_tree(const std::vector<Point>& points);
 // flat_library must outlive the returned graph. Source graphs are read-only.
 Result       place(hhds::Graph& source, hhds::GraphLibrary& flat_library, const Options& options);
 // Independent physical check against the LEF/DEF model, after DBU rounding.
-void         check_legality(const physical::Technology& tech, const physical::Floorplan& fp);
+void         check_legality(const physical::Technology& tech, const physical::Floorplan& fp, double halo_x = 0, double halo_y = 0);
 }  // namespace livehd::placement

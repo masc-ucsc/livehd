@@ -199,3 +199,28 @@ TEST(SatoptMemory, NarrowWriteDataIsZeroExtended) {
   auto proof       = livehd::lec::prove_equal(f.g.get(), impl.get(), opts);
   EXPECT_EQ(proof.verdict, livehd::lec::Verdict::Proven) << proof.detail << " " << proof.witness;
 }
+// P7: a constant address literal with '?' bits is ONE literal. Compressing a
+// fixed address dimension must not mint a second '?' constant from it (the
+// two would resolve independently). The seed sampler already refuses a '?'
+// address, so the memory stays as-is; this pins that guard.
+TEST(SatoptMemory, UnknownConstantAddressIsNotSplit) {
+  Fixture    f("satopt_mem_unknown_addr", false);
+  const auto lit = gu::create_const(*f.g, *Dlop::from_pyrope("0ub0?"));
+  for (int block : {0, 1, 2}) {
+    gu::drop_drivers(f.mem.create_sink_pin(block * 16));
+    f.wire(block, 0, lit);
+  }
+  const auto r = livehd::satopt::optimize_memories({f.g});
+  EXPECT_EQ(r.address_bits, 0);  // a known 0ub01 here does compress one bit
+  int unknown_consts = 0;
+  for (auto n : f.g->body().nodes()) {
+    for (auto sink : n.inp_sorted_pins()) {
+      const auto d = sink.get_driver_pin();
+      if (!d.is_invalid() && d.is_const() && gu::const_of(d).has_unknowns()) {
+        EXPECT_TRUE(d == lit) << "minted " << gu::const_of(d).to_pyrope();
+        ++unknown_consts;
+      }
+    }
+  }
+  EXPECT_GT(unknown_consts, 0);
+}

@@ -1,6 +1,8 @@
 /*
 Equivalent rewrite (positive control): same clocks, the read double-inverted
 so the encoder's memory edge gating must decide it. Must PROVE.
+A plain `~(~x)` no longer works: cprop folds Not(Not x) to x, so the
+complement is spelled `~(x ^ 4'hF)` (the same function at 4 bits).
 :lec_grep_not: structurally identical
 */
 module mem_rst_multiclock(input logic clk_a, input logic clk_b, input logic rst, input logic we,
@@ -12,5 +14,5 @@ module mem_rst_multiclock(input logic clk_a, input logic clk_b, input logic rst,
     else if (we) mem[wa] <= wd;
   end
   always_ff @(posedge clk_b) z <= d;
-  assign o = ~(~mem[ra]) ^ 4'h0;
+  assign o = ~(mem[ra] ^ 4'hF) ^ 4'h0;
 endmodule

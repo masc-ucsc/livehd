@@ -348,3 +348,30 @@ accept an unsupported LEC verdict. Ordinary roundtrips still use LEC.
 The discovered integration cases reserve four Bazel CPUs each so concurrent
 frontend/solver jobs do not exhaust the fixed LEC watchdog through resource
 contention. Synthesis integration cases in `//inou/prp:integration` run exclusively.
+
+For source bundles containing unfinished modules outside an explicit top hierarchy,
+pass `-- --ignore-uninstantiated-modules`. This opts into Slang's existing
+`IgnoreUninstantiatedModules` policy; syntax errors and semantic errors within the
+selected hierarchy remain errors. The separate upstream argument
+`--allow-use-before-declare` supports legacy declaration ordering. Both are explicit
+compatibility choices; the frontend's strict defaults are unchanged.
+Unfinished reference RTL that must not even be parsed belongs inside a Verilog
+`` `ifndef SYNTHESIS `` guard. Define it explicitly with `-- -DSYNTHESIS=1`.
+The HighTide run uses both that define and `--ignore-uninstantiated-modules`.
+
+`--set compile.specialize_modules=true` opts into the existing cross-instance
+specializer before legalization. It folds constants per instance binding (up to 64 contexts per definition,
+including a stateful definition), retains the original design roots,
+and drops unused generic definitions. Loop legalization independently inlines
+affected instances and defers their loop verdict until the existing cprop/bitwidth
+cleanup, so a constant-configured router
+does not require this optimization flag. Dynamic feedback still fails cycle
+checking. The default remains false.
+
+A `synth.liberty` RAM cell is bound as an opaque macro only when the instance
+resolves to the injected Liberty declaration. A module of the same name in the
+design sources (for example a behavioral SRAM model shipped next to the `.lib`)
+fails the read: slang reports `DuplicateDefinition`, and with that diagnostic
+silenced the reader still refuses it as `liberty-memory-name-collision` rather
+than silently picking the macro pins or the RTL body. Remove the model from the
+synthesis sources.

@@ -97,4 +97,10 @@ assert not (root/'W/synth/place/out.def').exists()
 run('bad_def', ['--set', 'synth.place=true', '--set', 'synth.place.mode=gp', '--emit-dir', f'def:{root}/bad'], False)
 plain = run('plain', [])
 assert 'place' not in plain['qor'], plain['qor']
+# Global scalar and X,Y halo syntax is accepted; CORE-only placement is unchanged.
+for label, halo in [('scalar', '5'), ('xy', '1.1,2.2')]:
+    data = run('halo_' + label, ['--set', 'synth.place=true', '--set', 'synth.place.halo=' + halo])
+    assert data['qor']['place']['halo']['macros'] == 0, data
+for halo in ['-1', '1,-2', 'nan', 'inf', '1,', '1,2,3', 'x']:
+    run('bad_halo_' + halo.replace(',', '_'), ['--set', 'synth.place=true', '--set', 'synth.place.halo=' + halo], False)
 print('placement: legal DEF, bus connectivity, RC timing, warm/cold reuse, GP/default controls passed')

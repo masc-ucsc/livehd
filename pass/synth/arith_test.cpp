@@ -685,3 +685,25 @@ TEST(abc_arith, sn_multiplier_random_wide_and_square) {
     }
   }
 }
+
+TEST(abc_arith, remainder_exhaustive_independent_operand_signs) {
+  ByteOps ops;
+  for (const auto kind : kKinds) {
+    for (int width = 1; width <= 5; ++width) {
+      const int64_t modulus = int64_t{1} << width;
+      const auto    value   = [&](int64_t bits, bool sign) { return sign && bits >= modulus / 2 ? bits - modulus : bits; };
+      for (const bool a_signed : {false, true}) {
+        for (const bool b_signed : {false, true}) {
+          for (int64_t a = 0; a < modulus; ++a) {
+            for (int64_t b = 0; b < modulus; ++b) {
+              const auto av = value(a, a_signed), bv = value(b, b_signed);
+              const auto expected = static_cast<uint64_t>(bv == 0 ? av : av % bv) & (modulus - 1);
+              const auto actual   = build_rem(kind, 2, ops, to_bits(a, width), to_bits(b, width), a_signed, b_signed);
+              ASSERT_EQ(from_bits(actual), expected) << "w=" << width << " a=" << av << " b=" << bv;
+            }
+          }
+        }
+      }
+    }
+  }
+}

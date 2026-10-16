@@ -5180,11 +5180,11 @@ void lec_command(Options& opts, Result& res) {
             continue;
           }
           Cprop cprop;
-          // This is not a raw front-end graph: the hierarchy transform above
-          // may expose an intentionally truncated Concat lane whose internal
-          // carrier has no standalone width stamp.  The normal cprop entry
-          // assertion is specifically a tolg/upass contract, so skip that
-          // assertion here while retaining every value-preserving fold.
+          // Re-simplify after the hierarchy transform above. This is not a raw
+          // front-end graph: it may expose an intentionally truncated Concat
+          // lane whose internal carrier has no standalone width stamp. cprop
+          // has no entry check on width stamps and keeps only value-preserving
+          // folds, so it runs here unchanged.
           cprop.do_trans(sp);
         }
       };

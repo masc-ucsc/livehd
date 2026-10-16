@@ -1,0 +1,141 @@
+diff --git a/dreamplace/native/README.md b/dreamplace/native/README.md
+index 6010ce1..e397590 100644
+--- a/dreamplace/native/README.md
++++ b/dreamplace/native/README.md
+@@ -74,8 +74,10 @@ Include `dreamplace/native/placement.hpp` and construct a `Design`:
+ All coordinates, dimensions and pin offsets use the same unit. Use integer
+ DBU for mixed-size placement: macro LP coefficients and displacement anchors
+ are rounded to integer units, as in upstream. Pin offsets must already reflect
+-cell orientation; the placer does not rotate cells. Movable cell dimensions
+-are integral numbers of sites and rows. Zero-area terminals have no density
++cell orientation; the placer does not rotate cells. Movable dimensions need
++not be integral site/row multiples. Macro legalization uses private conservative
++site/row-rounded occupancy envelopes; physical dimensions and pin offsets remain
++unchanged. Movable origins are still aligned to sites/rows. Zero-area terminals have no density
+ or overlap contribution, and their positions are preserved exactly.
+ 
+ ```cpp
+diff --git a/dreamplace/native/kernels.cpp b/dreamplace/native/kernels.cpp
+index f04a15a..8f9e6c8 100644
+--- a/dreamplace/native/kernels.cpp
++++ b/dreamplace/native/kernels.cpp
+@@ -86,6 +86,15 @@ void legalize(Design& d, int bx, int by) {
+   db.num_nodes = ix.size();
+   db.num_movable_nodes = d.num_movable;
+   if (!macroLegalizationLauncher(db)) throw std::runtime_error("DREAMPlace macro legalization failed");
++  // Greedy's fixed-obstacle bins and row blanks are built from init_x/y.
++  // Macros have just moved: reserve their legalized footprints, while keeping
++  // the original standard-cell anchors for the displacement objective.
++  for (int i = 0; i < d.num_movable; ++i) {
++    if (db.is_dummy_fixed(i)) {
++      ix[i] = d.node_x[i];
++      iy[i] = d.node_y[i];
++    }
++  }
+   greedyLegalizationCPU(db, db.init_x, db.init_y, db.node_size_x, db.node_size_y, db.x, db.y, db.xl, db.yl, db.xh,
+                         db.yh, db.site_width, db.row_height, bx, by, db.num_nodes, db.num_movable_nodes);
+   // Abacus operates within the rows established by greedy legalization.
+diff --git a/dreamplace/native/placement.cpp b/dreamplace/native/placement.cpp
+index 3cb2b6c..0cf5f65 100644
+--- a/dreamplace/native/placement.cpp
++++ b/dreamplace/native/placement.cpp
+@@ -138,7 +138,8 @@ void Design::validate() const {
+     require(finite(node_x[i] + w) && finite(node_y[i] + h), "node bounds overflow");
+     if (i < num_movable) {
+       require(w > 0 && h > 0 && w <= l.xh - l.xl && h <= l.yh - l.yl, "movable node does not fit core");
+-      require(aligned(w / l.site_width) && aligned(h / l.row_height), "movable size must be integral sites/rows");
++      // Macro legalization uses private site/row-rounded occupancy envelopes.
++      // Keep the caller's physical dimensions and pin offsets unchanged.
+     }
+   }
+   require(pin2net.size() == pin2node.size() && pin_offset_x.size() == pin2node.size() &&
+diff --git a/dreamplace/native/placement_test.cpp b/dreamplace/native/placement_test.cpp
+index 4c55580..a425ea1 100644
+--- a/dreamplace/native/placement_test.cpp
++++ b/dreamplace/native/placement_test.cpp
+@@ -317,6 +317,76 @@ void macros() {
+   for (auto& y : shifted.node_y) y -= 40;
+   check(place(shifted, o).legal, "macro legalization with negative core origin");
+ }
++void mixed_sizes() {
++  // Integer DBU, with macro and cell sizes not divisible by site/row pitch.
++  Design original;
++  original.layout = {0, 0, 400, 200, 10, 10};
++  original.num_movable = 5;
++  original.node_x = {100, 100, 100, 100, 100, 100, 0};
++  original.node_y = {50, 50, 50, 50, 50, 50, 0};
++  original.node_size_x = {83, 67, 13, 17, 20, 40, 0};
++  original.node_size_y = {63, 77, 23, 10, 10, 80, 0};
++  original.pin2node = {6, 0, 0, 1, 1, 2, 2, 3, 3, 4};
++  original.pin_offset_x.assign(10, 1);
++  original.pin_offset_y.assign(10, 2);
++  original.flat_net2pin = {0, 1, 2, 3, 4, 5, 6, 7, 8, 9};
++  original.flat_net2pin_start = {0, 2, 4, 6, 8, 10};
++  original.build_maps();
++  for (int iterations : {0, 20}) {
++    for (bool detailed : {false, true}) {
++      auto d = original;
++      Options o;
++      o.max_iterations = iterations;
++      o.bins_x = o.bins_y = 8;
++      o.add_fillers = false;
++      o.detailed_place = detailed;
++      o.observer = [&](const Design& frame, PlacementStage, int) {
++        check(frame.node_size_x == original.node_size_x && frame.node_size_y == original.node_size_y &&
++                  frame.pin_offset_x == original.pin_offset_x && frame.pin_offset_y == original.pin_offset_y,
++              "mixed-size solver changed physical sizes or pin offsets");
++      };
++      const auto result = place(d, o);
++      check(result.legal && is_legal(d) && detail::kernel_is_legal(d), "nonintegral mixed-size legalization");
++      check(d.node_size_x == original.node_size_x && d.node_size_y == original.node_size_y,
++            "mixed-size writeback changed master dimensions");
++      for (size_t i = d.num_movable; i < d.node_x.size(); ++i)
++        check(d.node_x[i] == original.node_x[i] && d.node_y[i] == original.node_y[i],
++              "mixed-size placement moved a fixed object");
++    }
++  }
++}
++void relocated_macro_obstacles() {
++  Design macro;
++  macro.layout = {0, 0, 120, 80, 10, 10};
++  macro.num_movable = 1;
++  macro.node_x = {40, 40};
++  macro.node_y = {0, 0};
++  macro.node_size_x = {31, 40};
++  macro.node_size_y = {61, 80};
++  macro.build_maps();
++  auto preview = macro;
++  detail::legalize(preview, 4, 4);
++  check(is_legal(preview) && preview.node_x[0] != macro.node_x[0], "macro fixture must relocate");
++  // Put five row cells inside the macro's new position. Greedy legalization
++  // must reserve that location, rather than the macro's obsolete GP anchor.
++  Design d;
++  d.layout = macro.layout;
++  d.num_movable = 6;
++  d.node_x = {40}; d.node_y = {0};
++  d.node_size_x = {31}; d.node_size_y = {61};
++  for (int i = 0; i < 5; ++i) {
++    d.node_x.push_back(preview.node_x[0]); d.node_y.push_back(10 * i);
++    d.node_size_x.push_back(10); d.node_size_y.push_back(10);
++  }
++  d.node_x.push_back(40); d.node_y.push_back(0);
++  d.node_size_x.push_back(40); d.node_size_y.push_back(80);
++  d.build_maps();
++  Options o;
++  o.max_iterations = 0; o.bins_x = o.bins_y = 4;
++  o.add_fillers = false; o.detailed_place = false;
++  check(place(d, o).legal && is_legal(d), "row cells must avoid the relocated macro");
++  check(d.node_x.back() == 40 && d.node_y.back() == 0, "fixed obstacle moved");
++}
+ void failures_and_empty() {
+   Design empty;
+   empty.layout = {0, 0, 20, 10, 1, 1};
+@@ -359,6 +429,8 @@ int main() {
+     placer_instances();
+     concurrent_instances();
+     macros();
++    mixed_sizes();
++    relocated_macro_obstacles();
+     failures_and_empty();
+   } catch (const std::exception& e) {
+     std::cerr << "FAIL: " << e.what() << '\n';

@@ -38,6 +38,10 @@ Remaining native synthesis work is tracked in [2u-usyn](../../todo/livehd/2u-usy
 2. **Modules.** `ware_module.cpp` extracts width-specialized arithmetic
    modules, `memory_module.cpp` lowers small or many-ported memories, and
    `loop_cleanup.cpp` prepares compact loops.
+   Explicit SRAM cells declared by the selected Liberty remain opaque `Sub`
+   instances. They bypass native-array lowering; their physical geometry is
+   supplied by the corresponding LEF. The library interface alone does not
+   authorize replacing an inferred array with unspecified collision semantics.
 3. **Regions.** `pass/partition` cuts the colored source into region bodies;
    `region_driver.cpp` (`Region_driver`) maps them: per-region options
    (`region_qor.hpp`), the region cache (`region_cache.cpp`), parallel lanes
@@ -142,3 +146,11 @@ and `region_cache_test` are unit tests here (satopt's are in `pass/satopt`). The
 end to end runs through `pass.abc` and `pass.usyn`: `//pass/abc:*`,
 `//lhd/tests:lhd_abc_*` and the `prp-synth-*` fixtures of
 `//inou/prp:integration`, each proved with `lhd lec`.
+
+The shared blaster maps general truncated remainder (`%`) with the restoring
+divider network, restoring the dividend's sign for signed operands. The existing
+non-negative power-of-two case remains a mask shortcut. A zero divisor yields the
+dividend for remainder (the SMT-LIB bvurem/bvsrem convention). LiveHD treats
+division and remainder by zero as X (`pass/lec/encode.cpp`: value 0 with an
+all-ones x-mask), so this is one legal refinement and `lhd lec` does not constrain
+it. Runtime divisors and non-power-of-two constants are supported.

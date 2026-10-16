@@ -24,3 +24,32 @@ clock-gate cells (`CLK & Latch(!CLK, EN|SE)`), and the transparent data-latch
 cells (`Latch(din=D, enable=CLK)`, through `Not` for an active-low enable or a
 QN output, with the Latch's own `reset_pin` for a clear/preset latch). Every
 other sequential cell is skipped.
+
+`lhd synth` and `lhd compile` also use explicitly selected `synth.liberty`
+RAM cells as typed, opaque module interfaces. Scalar and bus pin directions,
+widths and declaration order come from that library. The direct Slang reader
+resolves named SRAM instances without `--ignore-unknown-modules`; unrelated
+unknown modules remain errors. Mapping keeps those instances, with no generated
+memory RTL, flop array, or fabricated functional model. Implicit truncation of
+an SRAM input is refused rather than silently discarding address or data bits.
+
+This is binding of an explicitly instantiated macro, not automatic substitution
+of an inferred array based on dimensions. A Liberty `memory()` group and its
+timing arcs do not establish read/write collision, forwarding, reset or
+cross-port priority semantics. Such inference needs a compatible functional
+contract and, where required, an external adapter. In particular, per-bank
+LEF/Liberty cells require real bank decoding and read-bank selection; the macro
+name alone does not establish its address width or capacity.
+
+Clock-edge-only SRAM output timing arcs mark the corresponding opaque output as
+a registered boundary in the graph declaration. Combinational or unspecified
+outputs keep their dependency arcs; this does not create a functional RAM model.
+The nested bit-range cycle check uses the same per-output boundary as port reach.
+
+The memory inventory skips cells it cannot represent (a non-RAM `memory()`
+type such as `rom`, an `inout` pin, an unresolved `bus_type`, a malformed
+width) instead of failing every read of the library; instantiating such a cell
+remains an unknown-module error. `internal` pins are not ports. A `bus_type`
+resolves against cell-scope `type()` groups first, then the library's. A
+reused `lg:` directory keeps a matching body-less RAM declaration and replaces
+one left by an older `.lib`; a same-named module with a body is refused.

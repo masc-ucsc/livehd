@@ -20,6 +20,7 @@ cc_library(
     ] + [
         "//core",
         "//pass/common:pass",
+        "//pass/liberty:liberty_dff",
         # prpparse's OWN keyword table (prp_keywords.def) -- a Verilog parameter
         # named like a Pyrope reserved word cannot be emitted as a generic. Same
         # dep, same reason, as upass/prp_writer: never hand-copy the list.
@@ -270,4 +271,12 @@ sh_test(
 test_suite(
     name = "integration",
     tests = [":slang_" + src.split("/")[-1].rsplit(".", 1)[0] for src in _SV_SOURCES],
+)
+
+sh_test(
+    name = "slang_reachable_modules",
+    size = "small",
+    timeout = "short",
+    srcs = ["tests/reachable_modules.sh"],
+    data = ["//lhd"],
 )

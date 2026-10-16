@@ -20,7 +20,9 @@ namespace livehd::sim {
 // applied `--set sim.unknown_zero=true`). A function template's local static is
 // ONE object across every TU, so every site that emits the same literal gets
 // the same value -- an unknown net has one value per run, and that value is a
-// function of (seed, literal) only, so every backend and call order agrees.
+// function of (seed, literal spelling) only, so every backend, call order and
+// emitted carrier width W agrees (P7, todo/livehd/2a-aegraph.html: a literal
+// read whole by one consumer and through a slice by another is one draw).
 //
 // `__lhd_unknown_zero` is the RUN-TIME spelling of sim.unknown_zero=true: every
 // `?` bit resolves to 0, byte-for-byte the value a build generated with
@@ -45,7 +47,9 @@ inline constexpr std::string_view kUnknownLiteralHelper
       "    // Each literal's bits come from (run seed, key) alone, never from the\n"
       "    // shared PRNG's position: which literal a backend touches first must\n"
       "    // not change its value (slop and llvm reach them in different orders).\n"
-      "    unsigned long long __s = hlop_random_seed() ^ (K * 0x9E3779B97F4A7C15ull) ^ static_cast<unsigned long long>(W);\n"
+      "    // Nor from W: one literal is emitted at several carrier widths (an\n"
+      "    // output vs a Get_mask operand), and it must read ONE value at all.\n"
+      "    unsigned long long __s = hlop_random_seed() ^ (K * 0x9E3779B97F4A7C15ull);\n"
       "    std::string __z(__txt);\n"
       "    for (auto& __c : __z) {\n"
       "      if (__c != '?') continue;\n"

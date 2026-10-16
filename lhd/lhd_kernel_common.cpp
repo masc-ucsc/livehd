@@ -1089,6 +1089,10 @@ void check_known_set_passes(const Options& opts) {
                                   "with --set synth.liberty={}",
                                   value)};
     }
+    if (pass == "compile.slang" && flag == "liberty") {
+      throw Lhd_error{"usage", "compile.slang.liberty is an internal label",
+                      "select the SRAM interfaces and mapper cells with --set synth.liberty=" + value};
+    }
     if (pass == "compile" && flag == "cache") {
       // The per-tier switch was folded into the one kernel knob: a directed
       // answer, not the generic unknown-flag guess.
@@ -1110,7 +1114,7 @@ void check_known_set_passes(const Options& opts) {
       }
       continue;
     }
-    if (pass == "compile" && (flag == "lnast_fmt" || flag == "verify_frozen")) {
+    if (pass == "compile" && (flag == "lnast_fmt" || flag == "verify_frozen" || flag == "specialize_modules")) {
       // Kernel gates (not pass options): whether the pass.lnastfmt LNAST
       // self-check runs / whether pass.legalize freezes and re-checks the graphs.
       // Folded into a kernel decision; merge_sets never copies them into a pass

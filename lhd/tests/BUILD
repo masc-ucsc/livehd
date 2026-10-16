@@ -1328,6 +1328,14 @@ sh_test(
     data = ["//lhd"],
 )
 
+# compile.specialize_modules keeps a --top that another unit instantiates.
+sh_test(
+    name = "specialize_modules_top_test",
+    size = "small",
+    srcs = ["specialize_modules_top_test.sh"],
+    data = ["//lhd"],
+)
+
 # 2c-color / 2p hierarchical-input (prerequisite for 2a-abc): color + partition
 # descend a multi-module Pyrope hierarchy (combinational + sequential fixtures),
 # re-link Sub instances, and the partitioned design stays LEC-equivalent.
@@ -2541,4 +2549,20 @@ sh_test(
     timeout = "short",
     srcs = ["lhd_placement_memory_smoke.py"],
     data = ["//lhd", "//inou/lefdef:test_data"],
+)
+
+sh_test(
+    name = "lhd_liberty_memory_smoke",
+    size = "small",
+    timeout = "short",
+    srcs = ["lhd_liberty_memory_smoke.py"],
+    data = ["//lhd", "//inou/lefdef:test_data"],
+)
+
+sh_test(
+    name = "lhd_remainder_smoke",
+    size = "small",
+    timeout = "short",
+    srcs = ["lhd_remainder_smoke.py"],
+    data = ["//lhd", "//inou/prp:abc_tests"],
 )

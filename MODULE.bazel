@@ -14,10 +14,8 @@ bazel_dep(name = "bazel_skylib", version = "1.9.2")
 http_archive = use_repo_rule("@bazel_tools//tools/build_defs/repo:http.bzl", "http_archive")
 git_repository = use_repo_rule("@bazel_tools//tools/build_defs/repo:git.bzl", "git_repository")
 new_git_repository = use_repo_rule("@bazel_tools//tools/build_defs/repo:git.bzl", "new_git_repository")
-# The two local_repository rules are currently UNUSED on purpose: every sibling
-# is on its pinned archive so a fresh clone builds with no checkout next to it.
-# They stay declared because each pin's comment documents a one-line swap to a
-# local path for co-development, and that swap should not also need this line.
+# Local repository rules support explicit sibling co-development; the other
+# dependencies retain their pinned sources below.
 local_repository = use_repo_rule("@bazel_tools//tools/build_defs/repo:local.bzl", "local_repository")
 new_local_repository = use_repo_rule("@bazel_tools//tools/build_defs/repo:local.bzl", "new_local_repository")
 
@@ -81,15 +79,21 @@ bazel_dep(name = "bison", version = "3.8.2.bcr.11")
 bazel_dep(name = "flex", version = "2.6.4.bcr.8")
 
 bazel_dep(name = "rapidjson", version = "1.1.0.bcr.20250205")
-# Native CPU placement; the archive uses LiveHD's HHDS/HLOP repositories.
-http_archive(
+# Co-development: the sibling supplies the native per-node halo API.
+# Refresh the archive pin after publishing these changes before restoring it.
+local_repository(
     name = "dreamplace",
-    patches = ["//packages:dreamplace-lemon.patch", "//packages:dreamplace-zero-area.patch", "//packages:dreamplace-instantiate.patch"],
-    patch_args = ["-p1"],
-    urls = ["https://github.com/masc-ucsc/DREAMPlace/archive/fc5e043a9ad2bb7808fcbe262f4281f06e1d23d3.tar.gz"],
-    sha256 = "0730511d153d712f78fa4a700fd34ebe4adc62d647334ce9e9e15cb9c1675d2a",
-    strip_prefix = "DREAMPlace-fc5e043a9ad2bb7808fcbe262f4281f06e1d23d3",
+    path = "../DREAMPlace",
 )
+# Native CPU placement; the archive uses LiveHD's HHDS/HLOP repositories.
+# http_archive(
+#     name = "dreamplace",
+#     patches = ["//packages:dreamplace-lemon.patch", "//packages:dreamplace-zero-area.patch", "//packages:dreamplace-instantiate.patch", "//packages:dreamplace-mixed-size.patch"],
+#     patch_args = ["-p1"],
+#     urls = ["https://github.com/masc-ucsc/DREAMPlace/archive/fc5e043a9ad2bb7808fcbe262f4281f06e1d23d3.tar.gz"],
+#     sha256 = "0730511d153d712f78fa4a700fd34ebe4adc62d647334ce9e9e15cb9c1675d2a",
+#     strip_prefix = "DREAMPlace-fc5e043a9ad2bb7808fcbe262f4281f06e1d23d3",
+# )
 bazel_dep(name = "openmp", version = "21.1.5.bcr.3")
 # Plain-repository fetch: Bzlmod root-only overrides would break LiveHD consumers.
 http_archive(

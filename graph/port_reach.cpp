@@ -114,7 +114,6 @@ bool Memory_deps::deps(hhds::Port_id want_pid, const std::function<void(const hh
   return handled;
 }
 
-namespace {
 // A body-less cell's output declared loop_break (a mapped flop/latch Q) is last
 // period's value. Per pin: a blackbox mixing registered and combinational
 // outputs keeps its combinational paths.
@@ -134,6 +133,7 @@ bool state_output(const hhds::Node_class& m, const hhds::Pin_class& d) {
   return false;
 }
 
+namespace {
 
 // Decompose a packed-output driver into disjoint (lo, leaf) ranges when it is
 // the concat idiom a packed struct lowers to: an `Or` tree whose operands are

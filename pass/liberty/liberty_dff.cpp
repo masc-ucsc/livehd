@@ -14,6 +14,8 @@
 #include <limits>
 #include <map>
 #include <sstream>
+#include <stdexcept>
+#include <tuple>
 
 #include "cell.hpp"
 #include "dlop.hpp"
@@ -1303,8 +1305,15 @@ std::vector<Constant_cell> scan_constant_cells(const std::string& lib_files) {
     if (end == std::string::npos) {
       break;
     }
-    const auto body = text.substr(p + 1, end - p - 1);
-    if (cell_is_dont_use(body)) {
+    const auto  body = text.substr(p + 1, end - p - 1);
+    std::string ignored;
+    if (cell_is_dont_use(body) || find_group(body, "ff", 0, ignored) != std::string::npos
+        || find_group(body, "latch", 0, ignored) != std::string::npos
+        || find_group(body, "ff_bank", 0, ignored) != std::string::npos
+        || find_group(body, "latch_bank", 0, ignored) != std::string::npos
+        || find_group(body, "statetable", 0, ignored) != std::string::npos
+        || find_group(body, "memory", 0, ignored) != std::string::npos || find_group(body, "bus", 0, ignored) != std::string::npos
+        || find_group(body, "bundle", 0, ignored) != std::string::npos) {
       continue;
     }
     Constant_cell cell{unquote_trim(args), {}};
@@ -1320,7 +1329,7 @@ std::vector<Constant_cell> scan_constant_cells(const std::string& lib_files) {
       const auto own       = top_level_only(body.substr(pin + 1, close - pin - 1));
       const auto direction = scalar_attr(own, "direction");
       const auto function  = scalar_attr(own, "function");
-      if (direction != "output" || (function != "0" && function != "1")) {
+      if (direction != "output" || (function != "0" && function != "1") || !scalar_attr(own, "three_state").empty()) {
         valid = false;
         break;
       }
@@ -1731,6 +1740,285 @@ void emit_dff_model(hhds::GraphLibrary& outlib, const Dff_cell& dff) {
   }
   Fq.connect_sink(body->get_output_pin(dff.q_pin));
   body->commit();
+}
+
+std::vector<Memory_cell> scan_memory_cells(const std::string& lib_files, std::vector<Memory_skip>* skipped) {
+  const auto               text = strip_comments(read_files(lib_files));
+  std::vector<Memory_cell> cells;
+  const auto               integer = [](const std::string& value) -> std::optional<int> {
+    int number              = 0;
+    const auto [end, error] = std::from_chars(value.data(), value.data() + value.size(), number);
+    if (error != std::errc{} || end != value.data() + value.size() || number < 0 || number > 1000000) {
+      return std::nullopt;
+    }
+    return number;
+  };
+  const auto shallow = [](const std::string& body, size_t position) {
+    int  depth = 0;
+    bool quote = false, escape = false;
+    for (size_t i = 0; i < position; ++i) {
+      const auto c = body[i];
+      if (escape) {
+        escape = false;
+        continue;
+      }
+      if (quote && c == '\\') {
+        escape = true;
+        continue;
+      }
+      if (c == '"') {
+        quote = !quote;
+        continue;
+      }
+      if (!quote) {
+        depth += (c == '{') - (c == '}');
+      }
+    }
+    return depth == 0;
+  };
+  // `type()` groups at one scope (library or cell; Liberty allows both). Only
+  // malformed braces are fatal here: a group with absent or contradictory
+  // bit_from/bit_to/bit_width is kept with its error, which only refuses the
+  // library when an accepted RAM bus actually names that type.
+  struct Bus_type {
+    int         hi = 0, lo = 0;
+    std::string error;
+  };
+  const auto bus_types = [&](const std::string& scope) {
+    std::map<std::string, Bus_type> types;
+    std::string                     targs;
+    for (size_t at = find_group(scope, "type", 0, targs); at != std::string::npos; at = find_group(scope, "type", at + 1, targs)) {
+      if (!shallow(scope, at)) {
+        continue;
+      }
+      const auto close = match_brace(scope, at);
+      if (close == std::string::npos) {
+        throw std::runtime_error("unclosed Liberty bus type");
+      }
+      const auto type = top_level_only(scope.substr(at + 1, close - at - 1));
+      const auto hi = integer(scalar_attr(type, "bit_from")), lo = integer(scalar_attr(type, "bit_to"));
+      const auto width = integer(scalar_attr(type, "bit_width"));
+      Bus_type   entry;
+      if (!hi || !lo || !width) {
+        entry.error = "invalid Liberty bus type integer: " + targs;
+      } else if (std::abs(*hi - *lo) + 1 != *width) {
+        entry.error = "inconsistent Liberty bus width: " + targs;
+      } else {
+        entry.hi = *hi;
+        entry.lo = *lo;
+      }
+      types.emplace(unquote_trim(targs), std::move(entry));
+    }
+    return types;
+  };
+  std::string args;
+  for (size_t lib = find_group(text, "library", 0, args); lib != std::string::npos;) {
+    const auto end = match_brace(text, lib);
+    if (end == std::string::npos) {
+      throw std::runtime_error("unclosed Liberty library");
+    }
+    const auto body  = text.substr(lib + 1, end - lib - 1);
+    const auto types = bus_types(body);
+    for (size_t at = find_group(body, "cell", 0, args); at != std::string::npos;) {
+      const auto close = match_brace(body, at);
+      if (close == std::string::npos) {
+        throw std::runtime_error("unclosed Liberty cell");
+      }
+      const auto  name = unquote_trim(args);
+      const auto  cell = body.substr(at + 1, close - at - 1);
+      std::string group;
+      const auto  memory = find_group(cell, "memory", 0, group);
+      if (memory != std::string::npos) {
+        const auto mend = match_brace(cell, memory);
+        if (mend == std::string::npos) {
+          throw std::runtime_error("unclosed Liberty memory");
+        }
+        // A memory cell this inventory cannot represent (a ROM, an inout pin,
+        // an untyped bus, ...) is skipped, not fatal: the selected library is
+        // scanned on every slang read, and a design that never instantiates the
+        // cell must not fail for it. Instantiating a skipped cell stays an
+        // unknown-module error. Contradictions inside an accepted RAM still throw.
+        Memory_cell result;
+        const auto  reason = [&]() -> std::string {
+          const auto info = top_level_only(cell.substr(memory + 1, mend - memory - 1));
+          const auto kind = scalar_attr(info, "type");
+          if (kind != "ram") {
+            return "unsupported Liberty memory type '" + kind + "'";
+          }
+          const auto address_bits = integer(scalar_attr(info, "address_width"));
+          const auto word_bits    = integer(scalar_attr(info, "word_width"));
+          if (!address_bits || !word_bits) {
+            return "invalid Liberty memory address_width/word_width";
+          }
+          if (*address_bits == 0 || *word_bits == 0) {
+            return "empty Liberty RAM";
+          }
+          result.name         = name;
+          result.area         = parse_area(cell);
+          result.address_bits = *address_bits;
+          result.word_bits    = *word_bits;
+          const auto local    = bus_types(cell);
+          // Preserve declaration order across scalar pins and buses.
+          size_t cursor = 0;
+          for (;;) {
+            std::string pargs, bargs;
+            const auto  pin  = find_group(cell, "pin", cursor, pargs);
+            const auto  bus  = find_group(cell, "bus", cursor, bargs);
+            const auto  next = std::min(pin, bus);
+            if (next == std::string::npos) {
+              break;
+            }
+            const auto pend = match_brace(cell, next);
+            if (pend == std::string::npos) {
+              throw std::runtime_error("unclosed Liberty memory pin");
+            }
+            cursor = pend + 1;
+            if (!shallow(cell, next)) {
+              continue;
+            }
+            const auto pin_body = cell.substr(next + 1, pend - next - 1);
+            const auto header   = top_level_only(pin_body);
+            Memory_pin port;
+            port.name      = unquote_trim(next == pin ? pargs : bargs);
+            port.direction = scalar_attr(header, "direction");
+            port.bus       = next == bus;
+            if (port.direction == "internal") {
+              continue;  // an internal node, not part of the cell's port list
+            }
+            if (port.direction != "input" && port.direction != "output") {
+              return "unsupported Liberty memory pin direction '" + port.direction + "' on " + port.name;
+            }
+            if (port.direction == "output") {
+              bool        saw_edge = false, only_edges = true;
+              std::string timing_args;
+              for (auto t = find_group(pin_body, "timing", 0, timing_args); t != std::string::npos;
+                   t      = find_group(pin_body, "timing", t + 1, timing_args)) {
+                const auto timing_end = match_brace(pin_body, t);
+                if (timing_end == std::string::npos) {
+                  throw std::runtime_error("unclosed Liberty memory timing: " + name);
+                }
+                const auto timing  = top_level_only(pin_body.substr(t + 1, timing_end - t - 1));
+                const auto type    = scalar_attr(timing, "timing_type");
+                const bool edge    = (type == "rising_edge" || type == "falling_edge") && !scalar_attr(timing, "related_pin").empty();
+                saw_edge          |= edge;
+                only_edges        &= edge;
+              }
+              port.clocked = saw_edge && only_edges;
+            }
+            if (port.bus) {
+              // The innermost scope wins: a cell-level type shadows the library's.
+              const auto type_name = scalar_attr(header, "bus_type");
+              auto       type      = local.find(type_name);
+              if (type == local.end()) {
+                type = types.find(type_name);
+                if (type == types.end()) {
+                  return "missing Liberty bus type '" + type_name + "' on " + port.name;
+                }
+              }
+              if (!type->second.error.empty()) {
+                throw std::runtime_error(type->second.error + " (" + name + ":" + port.name + ")");
+              }
+              port.msb = type->second.hi;
+              port.lsb = type->second.lo;
+            }
+            if (std::ranges::any_of(result.pins, [&](const auto& p) { return p.name == port.name; })) {
+              throw std::runtime_error("duplicate Liberty memory pin: " + name + ":" + port.name);
+            }
+            result.pins.push_back(std::move(port));
+          }
+          if (result.pins.empty()) {
+            return "Liberty RAM has no pins";
+          }
+          return {};
+        }();
+        if (!reason.empty()) {
+          if (skipped != nullptr) {
+            skipped->push_back(Memory_skip{name, reason});
+          }
+        } else if (const auto duplicate = std::ranges::find_if(cells, [&](const auto& c) { return c.name == name; });
+                   duplicate == cells.end()) {
+          cells.push_back(std::move(result));
+        } else if (duplicate->pins != result.pins || duplicate->word_bits != result.word_bits
+                   || duplicate->address_bits != result.address_bits) {
+          throw std::runtime_error("conflicting Liberty memory interfaces: " + name);
+        }
+      }
+      at = find_group(body, "cell", close + 1, args);
+    }
+    lib = find_group(text, "library", end + 1, args);
+  }
+  return cells;
+}
+
+std::string memory_cell_declarations(const std::vector<Memory_cell>& cells) {
+  std::string text;
+  const auto  identifier = [](const std::string& name) {
+    if (name.empty() || name.find_first_of(" \t\r\n\\") != std::string::npos) {
+      throw std::runtime_error("unsupported Liberty memory identifier: " + name);
+    }
+    return "\\" + name + " ";
+  };
+  for (const auto& cell : cells) {
+    text += "(* blackbox *) module " + identifier(cell.name) + "(";
+    for (size_t i = 0; i < cell.pins.size(); ++i) {
+      text += (i ? ", " : "") + identifier(cell.pins[i].name);
+    }
+    text += ");\n";
+    for (const auto& p : cell.pins) {
+      text += p.direction + " ";
+      if (p.bus) {
+        text += std::format("[{}:{}] ", p.msb, p.lsb);
+      }
+      text += identifier(p.name) + ";\n";
+    }
+    text += "endmodule\n";
+  }
+  return text;
+}
+
+void declare_memory_cells(hhds::GraphLibrary& library, const std::vector<Memory_cell>& cells) {
+  for (const auto& cell : cells) {
+    if (const auto existing = library.find_io(cell.name)) {
+      if (existing->has_graph()) {
+        // A real module owns the name (possibly another design in a shared lg:
+        // dir): binding the macro to it would give the RAM a functional body.
+        throw std::runtime_error("Liberty memory cell collides with a module that has a body: " + cell.name);
+      }
+      std::map<std::string, std::pair<std::string, int>> ports;
+      for (const auto& p : existing->get_input_pin_decls()) {
+        ports.emplace(p.name, std::pair{"input", static_cast<int>(p.bits)});
+      }
+      for (const auto& p : existing->get_output_pin_decls()) {
+        ports.emplace(p.name, std::pair{"output", static_cast<int>(p.bits)});
+      }
+      bool matches = ports.size() == cell.pins.size();
+      for (const auto& p : cell.pins) {
+        const auto found  = ports.find(p.name);
+        matches          &= found != ports.end() && found->second == std::pair{p.direction, std::abs(p.msb - p.lsb) + 1};
+        if (matches && p.direction == "output") {  // is_loop_break asserts on an undeclared pin
+          matches &= existing->is_loop_break(p.name) == p.clocked;
+        }
+      }
+      if (matches) {
+        continue;  // unchanged Liberty: leave the saved library untouched
+      }
+      // A declaration-only leftover of an earlier run (a reused lg: dir or
+      // workdir lgdb) describing an older .lib: the current Liberty wins. The
+      // name-hash gid is reused, so instances rebuilt this run bind to it.
+      library.delete_graphio(cell.name);
+    }
+    auto          io = library.create_io(cell.name);
+    hhds::Port_id id = 1;
+    for (const auto& p : cell.pins) {
+      if (p.direction == "input") {
+        io->add_input(p.name, id++);
+      } else {
+        io->add_output(p.name, id++, p.clocked);
+      }
+      io->set_bits(p.name, std::abs(p.msb - p.lsb) + 1);
+      io->set_unsign(p.name, true);
+    }
+  }
 }
 
 std::optional<uint64_t> cell_truth(const Comb_cell& cell) {

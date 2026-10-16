@@ -1,0 +1,26 @@
+/*
+:name: unknown_literal_one_draw
+:type: simulation
+:sim_sweep: sim.tune.backend=slop,llvm
+*/
+// P7 (todo/livehd/2a-aegraph.html): a '?' literal is ONE const node, so it has
+// one value at all its uses. Here `c` is read whole by `all` and through two
+// slices by `lo` and `mid`. Classic cprop folded each slice into a NEW
+// constant (`0ub????????` for `lo`), a second literal that sim drew on its
+// own, and the simulator keyed each draw on the emitted carrier width as well
+// as the spelling. Either split makes `lo`/`mid` disagree with `all` (a
+// 1-in-256 chance per check of passing by accident).
+
+pub comb unknown_literal_one_draw() -> (all:U16, lo:U8, mid:U8) {
+  const c = 0ub????????????????
+  all = c
+  lo  = c#[0..=7]
+  mid = c#[4..=11]
+}
+
+test unknown_literal_one_draw.same_value {
+  mut s = unknown_literal_one_draw
+  step
+  assert(s.lo == (s.all & 0xff), "the low slice reads the same draw as the whole literal")
+  assert(s.mid == ((s.all >> 4) & 0xff), "the middle slice reads the same draw as the whole literal")
+}

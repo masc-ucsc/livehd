@@ -197,21 +197,23 @@ bool split_loop_by_ring(hhds::Graph* host, hhds::GraphLibrary& lib, const hhds::
 struct Legalize_result {
   std::vector<std::shared_ptr<hhds::Graph>> added;    // new defs (split halves) the design now contains
   std::vector<std::shared_ptr<hhds::Graph>> removed;  // defs deleted from their library (orphaned bodies, stale halves)
+  bool needs_loop_check = false;                      // check rewritten candidates after the existing cprop + bitwidth
 };
 
 // Run legalize over a whole design: the acyclic repair, the loop split and the
 // one-driver check, then FREEZE every def (when `freeze_graphs`). The compile
-// kernel runs it EARLY -- right after the first cprop+bitwidth, ahead of
-// enableopt, satopt and pass.formal, so every later pass (formal's hierarchy
-// views included) already sees an acyclic design -- with `freeze_graphs`
-// false, and seals the design with seal_design() after the last pass.
+// kernel runs it after the first cprop+bitwidth, without freezing. When
+// defer_inlined_loops is true, needs_loop_check requires a final verdict after
+// the already scheduled second cprop+bitwidth; enableopt and loop hoisting wait
+// for acyclicity. The kernel seals the design after the last pass.
 //
 // The caller MUST apply the result to its own view of the design: drop
 // `removed` (their bodies are gone; touching them asserts) and add `added`.
 //
 // Semantically a no-op: the split is proven equivalent to the unsplit loop
 // (pass/legalize/tests), and nothing else here changes behavior.
-Legalize_result legalize_design(const std::vector<std::shared_ptr<hhds::Graph>>& graphs, bool freeze_graphs = true);
+Legalize_result legalize_design(const std::vector<std::shared_ptr<hhds::Graph>>& graphs, bool freeze_graphs = true,
+                                bool defer_inlined_loops = false, const std::vector<std::shared_ptr<hhds::Graph>>& roots = {});
 
 // The end of the compile pipeline: re-check one driver per sink pin on the
 // settled design (the passes after legalize may rewire), and FREEZE every def

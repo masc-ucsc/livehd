@@ -2,6 +2,8 @@
 Equivalent rewrite (positive control): same clocks per port, the read
 double-inverted so semdiff cannot match it structurally and the encoder's
 per-port edge gating must decide it. Must PROVE.
+A plain `~(~x)` no longer works: cprop folds Not(Not x) to x, so the
+complement is spelled `~(x ^ 4'hF)` (the same function at 4 bits).
 :lec_grep_not: structurally identical
 */
 module mem_two_wr_clk(input logic clk_a, input logic clk_b, input logic we0, input logic we1,
@@ -10,5 +12,5 @@ module mem_two_wr_clk(input logic clk_a, input logic clk_b, input logic we0, inp
   logic [3:0] mem [4];
   always_ff @(posedge clk_a) if (we0) mem[wa0] <= wd0;
   always_ff @(posedge clk_b) if (we1) mem[wa1] <= wd1;
-  assign o = ~(~mem[ra]) ^ 4'h0;
+  assign o = ~(mem[ra] ^ 4'hF) ^ 4'h0;
 endmodule

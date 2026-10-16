@@ -188,17 +188,17 @@ std::string nearest_named_signal(const hhds::Node_class& n, std::string_view& re
 }
 
 // Rewrite the TRIVIALLY convertible remainders in a region into a mask, in
-// place, and report whether any survived.
+// place. General remainders use the restoring-divider bit translation.
 //
 // `a % 2^k` is `a & (2^k - 1)` -- but ONLY for a non-negative dividend. The op
 // is truncated remainder (the sign follows the dividend), so `-9 % 8` is -1,
 // not 7, and masking a negative value is simply a different function.
 //
 // upass/tolg's lower_mod already folds this shape when it lowers Pyrope, so a
-// Rem arriving from THAT path is non-trivial by construction. This pass exists
+// Rem arriving from THAT path can be non-trivial. This shortcut also exists
 // for the readers that build the cell directly -- inou/yosys turns `$mod` into
 // a Rem with whatever divisor the Verilog had, so a perfectly ordinary
-// `x % 8` read from Verilog would otherwise hit the error below despite being
+// `x % 8` read from Verilog can use a mask instead of restoring division, being
 // one AND gate.
 void rewrite_trivial_rems(hhds::Graph* g) {
   std::vector<hhds::Node_class> to_fix;
@@ -216,7 +216,7 @@ void rewrite_trivial_rems(hhds::Graph* g) {
       continue;
     }
     const int64_t bv = bc.to_just_i64();
-    const int64_t ba = bv < 0 ? -bv : bv;
+    const uint64_t ba = bv < 0 ? uint64_t{0} - static_cast<uint64_t>(bv) : static_cast<uint64_t>(bv);
     // A negative-capable dividend cannot use the mask (see above). `is_unsign`
     // is the same non-negativity test lower_mod uses.
     if (ba < 2 || (ba & (ba - 1)) != 0 || !gu::is_unsign(a)) {
@@ -229,7 +229,7 @@ void rewrite_trivial_rems(hhds::Graph* g) {
     auto          b  = gu::get_driver_of_sink_name(n, "b");  // named: gcc -Wdangling-reference on const_of(temporary)
     const auto&   bc = gu::const_of(b);
     const int64_t bv = bc.to_just_i64();
-    const int64_t ba = bv < 0 ? -bv : bv;
+    const uint64_t ba = bv < 0 ? uint64_t{0} - static_cast<uint64_t>(bv) : static_cast<uint64_t>(bv);
 
     auto andn = gu::create_typed_node(*g, Ntype_op::And, gu::bits_of(n.get_driver_pin(0)));
     gu::setup_sink_by_name(andn, "as").connect_driver(a);
@@ -1188,7 +1188,7 @@ Region_blast blast_region(const livehd::partition::Region_body& rb, const Blast_
     absl::flat_hash_set<hhds::Node_class> comb_set;
     for (const auto& n : rb.nodes) {
       const auto op = gu::type_op_of(n);
-      if (gu::is_type_register(n) || op == Ntype_op::Sub || op == Ntype_op::Clock_cell || op == Ntype_op::Rem) {
+      if (gu::is_type_register(n) || op == Ntype_op::Sub || op == Ntype_op::Clock_cell) {
         continue;
       }
       comb.push_back(n);
@@ -1524,29 +1524,9 @@ Region_blast blast_region(const livehd::partition::Region_body& rb, const Blast_
     // POs, exactly like a Sub/Memory. Before this, a Latch matched none of the
     // cases below and fell into the bit-blast loop, aborting the whole region.
     const bool latch_boundary = op == Ntype_op::Latch;
-    if (op != Ntype_op::Sub && op != Ntype_op::Memory && op != Ntype_op::Clock_cell && op != Ntype_op::Rem && !flop_boundary
+    if (op != Ntype_op::Sub && op != Ntype_op::Memory && op != Ntype_op::Clock_cell && !flop_boundary
         && !latch_boundary && !native_wiring.contains(n)) {
       continue;
-    }
-    if (op == Ntype_op::Rem) {
-      // REMAINDER is where the synthesis constraint lives, and it is an ERROR
-      // rather than a warning. The rest of LiveHD handles `%` as an ordinary
-      // op -- bitwidth ranges it, constprop folds it, the LEC encoder proves it
-      // (SREM), the simulator runs it -- because none of those need it to become
-      // gates. Only the netlist mapper does. Raising it HERE, rather than at
-      // lowering time, is what lets a design that merely CONTAINS `%` compile,
-      // simulate and verify.
-      //
-      // Anything trivially convertible was already rewritten to a mask by
-      // rewrite_trivial_rems() above, so reaching this point means the shape
-      // genuinely has no easy gate-level translation.
-      livehd::diag::err(from_pass, "rem-unsupported", "unsupported")
-          .at(node_span(rb, n))
-          .msg("{}: {} in region '{}': remainder (`%`) has no gate-level translation", from_pass, node_identity(n), rb.module_name)
-          .hint(
-              "only a power-of-two divisor over a non-negative dividend converts trivially (to a mask); keep other "
-              "remainders out of the synthesized region")
-          .emit();
     }
     Bbox bb;
     bb.node = n;
@@ -1689,7 +1669,7 @@ Region_blast blast_region(const livehd::partition::Region_body& rb, const Blast_
     std::vector<hhds::Node_class> pending;
     for (const auto& n : rb.nodes) {
       auto op = gu::type_op_of(n);
-      if (op == Ntype_op::Sub || op == Ntype_op::Memory || op == Ntype_op::Clock_cell || op == Ntype_op::Rem
+      if (op == Ntype_op::Sub || op == Ntype_op::Memory || op == Ntype_op::Clock_cell
           || native_wiring.contains(n)) {
         continue;  // native boundary -- never eagerly bit-blasted
       }

@@ -1,5 +1,6 @@
 #include "place.hpp"
 
+#include <algorithm>
 #include <cmath>
 #include <cstdlib>
 #include <filesystem>
@@ -140,6 +141,16 @@ TEST(Placement, MappedBusGraphLegalityRcAndReuse) {
   const auto         placed = place(*graph, first, options);
   EXPECT_EQ(placed.floorplan.components.size(), 2);
   EXPECT_EQ(placed.floorplan.terminals.size(), 3);
+  {
+    auto core_only   = options;
+    core_only.halo_x = core_only.halo_y = 1000;
+    core_only.cache_dir.clear();
+    core_only.output_dir = (root / "core_halo").string();
+    hhds::GraphLibrary untouched;
+    const auto         same = place(*graph, untouched, core_only);
+    EXPECT_EQ(same.floorplan.components, placed.floorplan.components);
+    EXPECT_EQ(same.floorplan.die, placed.floorplan.die);
+  }
   EXPECT_FALSE(placed.parasitics->nets.empty());
   EXPECT_TRUE(std::filesystem::exists(root / "place/out.def"));
   double cap = 0;
@@ -267,8 +278,9 @@ TEST(Placement, SignedWiringExtendsMsb) {
   EXPECT_EQ(placed.floorplan.components.size(), 1);  // no tie cell
 }
 // nand(a[0], 1) -> inv -> y, plus a constant output k: the tie cell drives both
-// a cell input and a top output that keeps its logical constant.
-static std::shared_ptr<hhds::Graph> tie_graph(hhds::GraphLibrary& source) {
+// a cell input and a top output that keeps its logical constant. Without
+// constants, the same top uses a[1] for both instead (no tie cell needed).
+static std::shared_ptr<hhds::Graph> tie_graph(hhds::GraphLibrary& source, bool constants = true) {
   auto io = source.create_io("tie_top");
   io->add_input("a", 0);
   io->set_bits("a", 2);
@@ -290,7 +302,10 @@ static std::shared_ptr<hhds::Graph> tie_graph(hhds::GraphLibrary& source) {
   n.set_subnode(nand);
   n.set_name("nand");
   n.create_sink_pin("A").connect_driver(gu::create_get_mask(*graph, a, 0).get_driver_pin(0));
-  n.create_sink_pin("B").connect_driver(gu::create_const(*graph, *Dlop::create_integer(1)));
+  const auto one = [&] {
+    return constants ? gu::create_const(*graph, *Dlop::create_integer(1)) : gu::create_get_mask(*graph, a, 1).get_driver_pin(0);
+  };
+  n.create_sink_pin("B").connect_driver(one());
   auto mid = n.create_driver_pin("Y");
   gu::set_bits(mid, 1);
   auto b = gu::create_typed_node(*graph, Ntype_op::Sub);
@@ -300,13 +315,238 @@ static std::shared_ptr<hhds::Graph> tie_graph(hhds::GraphLibrary& source) {
   auto y = b.create_driver_pin("Y");
   gu::set_bits(y, 1);
   graph->get_output_pin("y").connect_driver(y);
-  graph->get_output_pin("k").connect_driver(gu::create_const(*graph, *Dlop::create_integer(1)));
+  graph->get_output_pin("k").connect_driver(one());
   return graph;
+}
+struct Tie_fixture {
+  std::string                               name;
+  std::vector<std::pair<std::string, bool>> outputs;
+  double                                    width    = 0.92;
+  bool                                      physical = true, disabled = false, geometry = true, symmetric = true;
+};
+static Options tie_options(const std::string& label, const std::vector<Tie_fixture>& cells) {
+  const auto dir = std::filesystem::path(std::getenv("TEST_TMPDIR")) / ("constant_" + label);
+  std::filesystem::create_directories(dir);
+  std::ofstream lib(dir / "ties.lib"), lef(dir / "ties.lef");
+  lib << "library(test) {\n";
+  lef << "VERSION 5.8 ;\n";
+  for (const auto& cell : cells) {
+    lib << "cell(" << cell.name << ") {\n";
+    if (cell.disabled) {
+      lib << "dont_use : true;\n";
+    }
+    if (cell.physical) {
+      lef << "MACRO " << cell.name << "\n CLASS CORE ;\n SIZE " << cell.width << " BY 2.72 ;\n SYMMETRY "
+          << (cell.symmetric ? "X Y" : "Y") << " ;\n SITE unithd ;\n";
+    }
+    for (const auto& [pin, value] : cell.outputs) {
+      lib << "pin(" << pin << ") { direction:output; function:\"" << (value ? '1' : '0') << "\"; }\n";
+      if (cell.physical) {
+        lef << " PIN " << pin << "\n DIRECTION OUTPUT ;\n USE SIGNAL ;\n";
+        if (cell.geometry) {
+          lef << " PORT\n LAYER met1 ;\n RECT 0.1 0.1 0.2 0.2 ;\n END\n";
+        }
+        lef << " END " << pin << '\n';
+      }
+    }
+    lib << "}\n";
+    if (cell.physical) {
+      lef << "END " << cell.name << '\n';
+    }
+  }
+  lib << "}\n";
+  lef << "END LIBRARY\n";
+  Options options;
+  options.lefs       = {"inou/lefdef/tests/data/sky130hd.tlef", "inou/lefdef/tests/data/sky130hd.lef", (dir / "ties.lef").string()};
+  options.liberty    = (dir / "ties.lib").string();
+  options.output_dir = (dir / "out").string();
+  options.iterations = 0;
+  options.bins       = 8;
+  return options;
+}
+static std::shared_ptr<hhds::Graph> both_constants(hhds::GraphLibrary& source) {
+  auto graph = tie_graph(source);
+  graph->get_io()->add_output("low", 2);
+  graph->get_io()->set_bits("low", 1);
+  graph->get_output_pin("low").connect_driver(gu::create_const(*graph, *Dlop::create_integer(0)));
+  return graph;
+}
+TEST(Placement, ConstantDriversUseLibertyPolarityAndPhysicalCandidates) {
+  hhds::GraphLibrary source, flat;
+  const auto         graph   = both_constants(source);
+  const auto         options = tie_options("separate",
+                                           {
+                                               {"disabled", {{"p", true}}, 0.46, true, true},
+                                               {"absent_lef", {{"p", true}}, 0.46, false},
+                                               {"absent_geometry", {{"p", true}}, 0.46, true, false, false},
+                                               {"z_high", {{"p", true}}},
+                                               {"a_high", {{"upper", true}}},
+                                               {"low_driver", {{"lower", false}}},
+  });
+  const auto         placed  = place(*graph, flat, options);
+  for (const auto& c : placed.floorplan.components) {
+    if (c.name == "__place_tiehi" || c.name == "__place_tielo") {
+      const bool high = c.name == "__place_tiehi";
+      EXPECT_EQ(c.macro, high ? "a_high" : "low_driver");
+      const auto io = flat.find_io(c.macro);
+      ASSERT_TRUE(io);
+      ASSERT_EQ(io->get_output_pin_decls().size(), 1);
+      EXPECT_EQ(io->get_output_pin_decls().front().name, high ? "upper" : "lower");
+    }
+  }
+  // Each tie must drive both the physical DEF and the logical graph with the
+  // actual library pin. Re-placement and ECO must reuse each instance once.
+  for (bool eco : {false, true}) {
+    auto next = options;
+    if (eco) {
+      next.previous = std::make_shared<physical::Floorplan>(placed.floorplan);
+    }
+    hhds::GraphLibrary again;
+    const auto         result = place(*placed.graph, again, next);
+    for (bool value : {false, true}) {
+      const std::string instance = value ? "__place_tiehi" : "__place_tielo";
+      EXPECT_EQ(std::count_if(result.floorplan.components.begin(),
+                              result.floorplan.components.end(),
+                              [&](const auto& c) { return c.name == instance; }),
+                1);
+      bool connected = false;
+      for (const auto& net : result.floorplan.nets) {
+        for (const auto& pin : net.connections) {
+          if (pin.instance == instance) {
+            EXPECT_EQ(pin.pin, value ? "upper" : "lower");
+            connected = true;
+          }
+        }
+      }
+      EXPECT_TRUE(connected);
+    }
+  }
+  EXPECT_FALSE(source.find_io("a_high"));  // Only the private physical library changes.
+}
+TEST(Placement, DualConstantDriverDeclaresAndPreservesAllLibraryOutputs) {
+  hhds::GraphLibrary source, flat;
+  const auto         graph   = both_constants(source);
+  const auto         options = tie_options("dual",
+                                           {
+                                               {"supply_pair", {{"plus", true}, {"minus", false}}}
+  });
+  const auto         placed  = place(*graph, flat, options);
+  ASSERT_EQ(flat.find_io("supply_pair")->get_output_pin_decls().size(), 2);
+  for (bool value : {false, true}) {
+    const std::string instance  = value ? "__place_tiehi" : "__place_tielo";
+    bool              connected = false;
+    for (const auto& net : placed.floorplan.nets) {
+      for (const auto& pin : net.connections) {
+        if (pin.instance == instance) {
+          EXPECT_EQ(pin.pin, value ? "plus" : "minus");
+          connected = true;
+        }
+      }
+    }
+    EXPECT_TRUE(connected);
+  }
+}
+TEST(Placement, MissingConstantModelNeverGuessesFromLefOrPinName) {
+  for (bool empty_library : {false, true}) {
+    hhds::GraphLibrary source, flat;
+    const auto         graph   = both_constants(source);
+    auto               options = tie_options("missing_" + std::to_string(empty_library),
+                                             {
+                                                 {"only_high", {{"not_a_conventional_pin", true}}}
+    });
+    if (empty_library) {
+      options.liberty.clear();
+    }
+    try {
+      (void)place(*graph, flat, options);
+      FAIL() << "Missing constant-0 model accepted";
+    } catch (const std::runtime_error& e) {
+      EXPECT_NE(std::string(e.what()).find("constant-0"), std::string::npos) << e.what();
+    }
+  }
+}
+// The generated N/FS rows are decided from the mapped cells alone; a tie
+// master without SYMMETRY X must not land in (or be offered) an FS row.
+TEST(Placement, ConstantDriverWithoutSymmetryXAvoidsFlippedRows) {
+  const auto all_n = [](const physical::Floorplan& fp) {
+    return std::all_of(fp.rows.begin(), fp.rows.end(), [](const auto& r) { return r.orientation == Ann_place::Orientation::N; });
+  };
+  {  // Only a non-flippable tie: generated rows fall back to all-N.
+    hhds::GraphLibrary source, flat;
+    const auto         graph   = tie_graph(source);
+    const auto         options = tie_options("flipless_only",
+                                             {
+                                                 {"flipless_high", {{"p", true}}, 0.46, true, false, true, false}
+    });
+    const auto         placed  = place(*graph, flat, options);
+    EXPECT_TRUE(all_n(placed.floorplan));
+    for (const auto& c : placed.floorplan.components) {
+      EXPECT_EQ(c.place.orientation, Ann_place::Orientation::N) << c.name;
+    }
+  }
+  hhds::GraphLibrary sym_source, sym_flat;
+  const auto         sym_graph   = tie_graph(sym_source);
+  const auto         sym_options = tie_options("flipless_smaller",
+                                               {
+                                                   {"flipless_high", {{"p", true}}, 0.46, true, false, true, false},
+                                                   {"flippable_high", {{"p", true}}},
+  });
+  {  // A larger X-symmetric tie outranks a smaller non-flippable one; rows still alternate.
+    const auto placed = place(*sym_graph, sym_flat, sym_options);
+    EXPECT_FALSE(all_n(placed.floorplan));
+    const auto tie = std::find_if(placed.floorplan.components.begin(), placed.floorplan.components.end(), [](const auto& c) {
+      return c.name == "__place_tiehi";
+    });
+    ASSERT_NE(tie, placed.floorplan.components.end());
+    EXPECT_EQ(tie->macro, "flippable_high");
+    // A user floorplan with FS rows cannot take the non-flippable tie at all.
+    auto frame = placed.floorplan;
+    frame.components.clear();
+    frame.terminals.clear();
+    frame.nets.clear();
+    const auto def = std::filesystem::path(std::getenv("TEST_TMPDIR")) / "flipless_rows.def";
+    physical::write_def(frame, def.string());
+    hhds::GraphLibrary source, flat;
+    const auto         graph   = tie_graph(source);
+    auto               options = tie_options("flipless_def",
+                                             {
+                                                 {"flipless_high", {{"p", true}}, 0.46, true, false, true, false}
+    });
+    options.floorplan          = def.string();
+    try {
+      (void)place(*graph, flat, options);
+      FAIL() << "non-X-symmetric tie accepted for FS rows";
+    } catch (const std::runtime_error& e) {
+      EXPECT_NE(std::string(e.what()).find("constant-1"), std::string::npos) << e.what();
+    }
+  }
+  {  // A cached N/FS frame from a tie-free run is still regenerable: an edit that
+     // now needs the non-flippable tie falls back to all-N, exactly as cold.
+    auto options      = tie_options("flipless_cached",
+                                    {
+                                        {"flipless_high", {{"p", true}}, 0.46, true, false, true, false}
+    });
+    options.cache_dir = options.output_dir + "/cache";
+    hhds::GraphLibrary first_source, first_flat;
+    const auto         first = place(*tie_graph(first_source, false), first_flat, options);
+    ASSERT_FALSE(all_n(first.floorplan));
+    ASSERT_TRUE(std::filesystem::is_regular_file(options.cache_dir + "/floorplan.def"));
+    hhds::GraphLibrary source, flat;
+    const auto         placed = place(*tie_graph(source), flat, options);
+    EXPECT_TRUE(all_n(placed.floorplan));
+    bool tie = false;
+    for (const auto& c : placed.floorplan.components) {
+      EXPECT_EQ(c.place.orientation, Ann_place::Orientation::N) << c.name;
+      tie |= c.name == "__place_tiehi";
+    }
+    EXPECT_TRUE(tie);
+  }
 }
 TEST(Placement, ReplaceReusesTieCellForConstantOutput) {
   hhds::GraphLibrary source;
   auto               graph = tie_graph(source);
   Options            options;
+  options.liberty    = "inou/lefdef/tests/data/sky130hd.lib";
   options.lefs       = {"inou/lefdef/tests/data/sky130hd.tlef", "inou/lefdef/tests/data/sky130hd.lef"};
   options.output_dir = std::string(std::getenv("TEST_TMPDIR")) + "/tie";
   options.iterations = 20;
@@ -350,6 +590,7 @@ TEST(Placement, PreviousFrameKeepsIoPositionsAndSlotsNewOnes) {
   hhds::GraphLibrary source;
   auto               graph = tie_graph(source);
   Options            options;
+  options.liberty    = "inou/lefdef/tests/data/sky130hd.lib";
   options.lefs       = {"inou/lefdef/tests/data/sky130hd.tlef", "inou/lefdef/tests/data/sky130hd.lef"};
   options.output_dir = std::string(std::getenv("TEST_TMPDIR")) + "/io_frame";
   options.iterations = 20;
@@ -386,6 +627,205 @@ TEST(Placement, PreviousFrameKeepsIoPositionsAndSlotsNewOnes) {
       EXPECT_FALSE(p.x == t.x && p.y == t.y) << "new pin k on top of " << p.name;
     }
   }
+}
+TEST(Placement, MovableHardMacrosPreserveNonintegralDimensionsAndPins) {
+  const auto dir = std::filesystem::path(std::getenv("TEST_TMPDIR")) / "mixed_hard_macros";
+  std::filesystem::create_directories(dir);
+  {
+    std::ofstream lef(dir / "macros.lef");
+    lef << R"(VERSION 5.8 ;
+MACRO mixed_ram_a
+ CLASS BLOCK ; SIZE 1.03 BY 17.01 ; SYMMETRY X Y ;
+ PIN A
+  DIRECTION INPUT ; USE SIGNAL ;
+  PORT LAYER met1 ; RECT 0 0.1 0.1 0.2 ; END
+ END A
+ PIN Z
+  DIRECTION OUTPUT ; USE SIGNAL ;
+  PORT LAYER met1 ; RECT 0.93 0.1 1.03 0.2 ; END
+ END Z
+END mixed_ram_a
+MACRO mixed_ram_b
+ CLASS BLOCK ; SIZE 2.11 BY 16.41 ; SYMMETRY X Y ;
+ PIN A
+  DIRECTION INPUT ; USE SIGNAL ;
+  PORT LAYER met1 ; RECT 0 0.1 0.1 0.2 ; END
+ END A
+ PIN Z
+  DIRECTION OUTPUT ; USE SIGNAL ;
+  PORT LAYER met1 ; RECT 2.01 0.1 2.11 0.2 ; END
+ END Z
+END mixed_ram_b
+END LIBRARY
+)";
+  }
+  hhds::GraphLibrary source, flat;
+  auto               io = source.create_io("mixed");
+  io->add_input("a", 0);
+  io->set_bits("a", 1);
+  io->add_output("y", 0);
+  io->set_bits("y", 1);
+  auto graph  = io->create_graph();
+  auto signal = graph->get_input_pin("a");
+  gu::set_bits(signal, 1);
+  for (const auto& [master, instance] : std::vector<std::pair<std::string, std::string>>{
+           {           "mixed_ram_a", "ram0"},
+           {           "mixed_ram_b", "ram1"},
+           {"sky130_fd_sc_hd__inv_1",  "inv"}
+  }) {
+    auto cell_io = source.create_io(master);
+    cell_io->add_input("A", 0);
+    const std::string output = instance == "inv" ? "Y" : "Z";
+    cell_io->add_output(output, 0);
+    auto node = gu::create_typed_node(*graph, Ntype_op::Sub);
+    node.set_name(instance);
+    node.set_subnode(cell_io);
+    node.create_sink_pin("A").connect_driver(signal);
+    signal = node.create_driver_pin(output);
+    gu::set_bits(signal, 1);
+  }
+  graph->get_output_pin("y").connect_driver(signal);
+  Options options;
+  options.lefs = {"inou/lefdef/tests/data/sky130hd.tlef", "inou/lefdef/tests/data/sky130hd.lef", (dir / "macros.lef").string()};
+  options.output_dir  = (dir / "out").string();
+  options.cache_dir   = (dir / "cache").string();
+  options.iterations  = 20;
+  options.bins        = 8;
+  options.utilization = 0.02;  // enough rows that a macro origin can land on an odd (FS) row
+  const auto result   = place(*graph, flat, options);
+  ASSERT_EQ(result.floorplan.components.size(), 3);
+  for (const auto& c : result.floorplan.components) {
+    if (c.name == "ram0" || c.name == "ram1") {
+      const bool first = c.name == "ram0";
+      EXPECT_EQ(c.place.width, first ? 1030 : 2110);
+      EXPECT_EQ(c.place.height, first ? 17010 : 16410);
+      EXPECT_EQ(c.place.orientation, Ann_place::Orientation::N);
+      const auto pin = result.pin_locations.at(c.name + ":Z");
+      EXPECT_DOUBLE_EQ(pin.first, c.place.x + (first ? 980 : 2060));
+      EXPECT_DOUBLE_EQ(pin.second, c.place.y + 150);
+    }
+  }
+  const auto tech = physical::read_lef(options.lefs);
+  EXPECT_NO_THROW(check_legality(tech, result.floorplan));
+  EXPECT_NO_THROW(physical::verify_def_roundtrip(result.floorplan, physical::read_def((dir / "out/out.def").string())));
+  // A warm cache hit locks the macros: they must keep N (not the row's FS)
+  // and the same pins as the cold run.
+  hhds::GraphLibrary again;
+  const auto         warm = place(*graph, again, options);
+  EXPECT_NE(warm.qor.find("\"hit\":true"), std::string::npos);
+  EXPECT_EQ(result.floorplan.components, warm.floorplan.components);
+  for (const auto* name : {"ram0:Z", "ram1:Z"}) {
+    EXPECT_EQ(result.pin_locations.at(name), warm.pin_locations.at(name)) << name;
+  }
+}
+TEST(Placement, MacroHaloSpacingPinsCacheAndEco) {
+  const auto dir = std::filesystem::path(std::getenv("TEST_TMPDIR")) / "halos";
+  std::filesystem::create_directories(dir);
+  std::ofstream(dir / "ram.lef") << R"(VERSION 5.8 ;
+MACRO halo_ram
+ CLASS BLOCK ; SIZE 3.17 BY 5.19 ; SYMMETRY X Y ;
+ PIN A
+  DIRECTION INPUT ; USE SIGNAL ;
+  PORT LAYER met1 ; RECT 0 0.1 0.1 0.2 ; END
+ END A
+ PIN Z
+  DIRECTION OUTPUT ; USE SIGNAL ;
+  PORT LAYER met1 ; RECT 3.07 0.1 3.17 0.2 ; END
+ END Z
+END halo_ram
+END LIBRARY
+)";
+  hhds::GraphLibrary source, flat;
+  auto               io = source.create_io("halo_top");
+  io->add_input("a", 0);
+  io->add_output("y", 0);
+  io->set_bits("a", 1);
+  io->set_bits("y", 1);
+  auto graph  = io->create_graph();
+  auto signal = graph->get_input_pin("a");
+  gu::set_bits(signal, 1);
+  auto ram = source.create_io("halo_ram");
+  ram->add_input("A", 0);
+  ram->add_output("Z", 0);
+  auto inv = source.create_io("sky130_fd_sc_hd__inv_1");
+  inv->add_input("A", 0);
+  inv->add_output("Y", 0);
+  for (int i = 0; i < 4; ++i) {
+    auto node = gu::create_typed_node(*graph, Ntype_op::Sub);
+    node.set_name(std::string(i < 2 ? "ram" : "inv") + std::to_string(i));
+    node.set_subnode(i < 2 ? ram : inv);
+    node.create_sink_pin("A").connect_driver(signal);
+    signal = node.create_driver_pin(i < 2 ? "Z" : "Y");
+    gu::set_bits(signal, 1);
+  }
+  graph->get_output_pin("y").connect_driver(signal);
+  Options o;
+  o.lefs           = {"inou/lefdef/tests/data/sky130hd.tlef", "inou/lefdef/tests/data/sky130hd.lef", (dir / "ram.lef").string()};
+  o.output_dir     = (dir / "out").string();
+  o.cache_dir      = (dir / "cache").string();
+  o.utilization    = .03;
+  o.iterations     = 20;
+  o.bins           = 8;
+  o.halo_x         = 1.1;
+  o.halo_y         = .75;
+  const auto tech  = physical::read_lef(o.lefs);
+  const auto check = [&](const Result& r) {
+    EXPECT_NO_THROW(check_legality(tech, r.floorplan, o.halo_x, o.halo_y));
+    for (const auto& a : r.floorplan.components) {
+      if (a.macro != "halo_ram") {
+        continue;
+      }
+      EXPECT_EQ(a.place.width, 3170);
+      EXPECT_EQ(a.place.height, 5190);
+      const auto pin = r.pin_locations.at(a.name + ":Z");
+      EXPECT_EQ(pin.first, a.place.x + 3120);
+      EXPECT_EQ(pin.second, a.place.y + 150);
+      for (const auto& b : r.floorplan.components) {
+        if (a.name == b.name) {
+          continue;
+        }
+        const int x = 1380 * (b.macro == "halo_ram" ? 2 : 1);
+        const int y = 2720 * (b.macro == "halo_ram" ? 2 : 1);
+        EXPECT_TRUE(a.place.x + a.place.width + x <= b.place.x || b.place.x + b.place.width + x <= a.place.x
+                    || a.place.y + a.place.height + y <= b.place.y || b.place.y + b.place.height + y <= a.place.y);
+      }
+    }
+  };
+  const auto placed = place(*graph, flat, o);
+  check(placed);
+  EXPECT_NO_THROW(physical::verify_def_roundtrip(placed.floorplan, physical::read_def((dir / "out/out.def").string())));
+  rapidjson::Document qor;
+  qor.Parse(placed.qor.c_str());
+  EXPECT_EQ(qor["halo"]["macros"].GetUint64(), 2);
+  EXPECT_EQ(qor["halo"]["x_dbu"].GetInt64(), 1380);
+  EXPECT_EQ(qor["halo"]["y_dbu"].GetInt64(), 2720);
+  hhds::GraphLibrary warm_library;
+  const auto         warm = place(*graph, warm_library, o);
+  EXPECT_NE(warm.qor.find("\"hit\":true"), std::string::npos);
+  EXPECT_EQ(placed.floorplan.components, warm.floorplan.components);
+  // Changing clearance must invalidate reuse, even though mapping is unchanged.
+  o.halo_x = 2.1;
+  hhds::GraphLibrary changed_library;
+  const auto         changed = place(*graph, changed_library, o);
+  EXPECT_NE(changed.qor.find("\"hit\":false"), std::string::npos);
+  EXPECT_NO_THROW(check_legality(tech, changed.floorplan, o.halo_x, o.halo_y));
+  // Move a standard cell into only a macro's halo (no physical overlap).
+  auto  illegal = placed.floorplan;
+  auto& a   = *std::find_if(illegal.components.begin(), illegal.components.end(), [](const auto& c) { return c.name == "ram0"; });
+  auto& b   = *std::find_if(illegal.components.begin(), illegal.components.end(), [](const auto& c) { return c.name == "inv2"; });
+  b.place.x = a.place.x - 1380;
+  b.place.y = a.place.y;
+  b.place.orientation = illegal.rows.at((b.place.y - illegal.rows.front().y) / 2720).orientation;
+  EXPECT_NO_THROW(check_legality(tech, illegal));
+  EXPECT_THROW(check_legality(tech, illegal, 1.1, .75), std::runtime_error);
+  o.previous = std::make_shared<physical::Floorplan>(illegal);
+  o.cache_dir.clear();
+  o.halo_x         = 1.1;
+  o.legalize_cells = true;
+  o.changed_cells  = {"inv2"};
+  hhds::GraphLibrary eco_library;
+  const auto         eco = place(*graph, eco_library, o);
+  check(eco);
 }
 TEST(Placement, LegalityRejectsOverlapAndOffGrid) {
   auto                tech = physical::read_lef({"inou/lefdef/tests/data/sky130hd.tlef", "inou/lefdef/tests/data/sky130hd.lef"});

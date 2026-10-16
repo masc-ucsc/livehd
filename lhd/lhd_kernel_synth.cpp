@@ -118,14 +118,31 @@ livehd::placement::Options placement_options(const Options& opts) {
   if (mode != "full" && mode != "gp") {
     throw Lhd_error{"usage", "synth.place.mode must be full or gp", ""};
   }
-  out.full        = mode == "full";
-  out.utilization = number("place.utilization", "0.5");
-  out.aspect      = number("place.aspect", "1");
-  out.density     = number("place.density", "0.8");
-  out.iterations  = integer("place.iterations", "500");
-  out.bins        = integer("place.bins", "32");
-  out.threads     = integer("place.threads", "1");
-  const auto rc   = synth_set(opts, "place.wire_rc", "");
+  out.full            = mode == "full";
+  out.utilization     = number("place.utilization", "0.5");
+  out.aspect          = number("place.aspect", "1");
+  out.density         = number("place.density", "0.8");
+  out.iterations      = integer("place.iterations", "500");
+  out.bins            = integer("place.bins", "32");
+  out.threads         = integer("place.threads", "1");
+  const auto halo     = synth_set(opts, "place.halo", "0");
+  char*      halo_end = nullptr;
+  out.halo_x          = std::strtod(halo.c_str(), &halo_end);
+  if (halo_end == halo.c_str()) {
+    throw Lhd_error{"usage", "invalid synth.place.halo", "expected nonnegative microns: H or X,Y"};
+  }
+  out.halo_y = out.halo_x;
+  if (*halo_end == ',') {
+    const auto* y = halo_end + 1;
+    out.halo_y    = std::strtod(y, &halo_end);
+    if (halo_end == y) {
+      throw Lhd_error{"usage", "invalid synth.place.halo", "expected nonnegative microns: H or X,Y"};
+    }
+  }
+  if (*halo_end != '\0' || !std::isfinite(out.halo_x) || !std::isfinite(out.halo_y) || out.halo_x < 0 || out.halo_y < 0) {
+    throw Lhd_error{"usage", "invalid synth.place.halo", "expected nonnegative microns: H or X,Y"};
+  }
+  const auto rc = synth_set(opts, "place.wire_rc", "");
   if (!rc.empty()) {
     char* end             = nullptr;
     out.resistance_ohm_um = std::strtod(rc.c_str(), &end);
@@ -454,10 +471,23 @@ void synth_command(Options& opts, Result& res) {
   const std::vector<Typed_path> user_emits     = opts.emits;
   const std::vector<Typed_path> user_emit_dirs = opts.emit_dirs;
   opts.emits.clear();
+  for (const auto& emit : user_emits) {
+    if (emit.kind == "diagnostics") {
+      opts.emits.push_back(emit);
+    }
+  }
   opts.emit_dirs = {
       Typed_path{"lg", lg_dir}
   };
-  compile_command(opts, res);
+  try {
+    compile_command(opts, res);
+  } catch (...) {
+    // Frontend failures still owe the caller its requested diagnostics emit.
+    // The temporary compile outputs must not hide that slot during unwinding.
+    opts.emits     = user_emits;
+    opts.emit_dirs = user_emit_dirs;
+    throw;
+  }
   opts.emits     = user_emits;
   opts.emit_dirs = user_emit_dirs;
   if (res.status != "pass") {

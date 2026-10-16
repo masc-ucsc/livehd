@@ -336,15 +336,35 @@ TEST(PredictAbcSize, BlackboxesAreZero) {
   EXPECT_EQ(predict_abc_size(sub), 0u);
 }
 
-// `a % 2^k` never reaches ABC as a remainder -- it is rewritten to an AND, so it
-// is charged as one rather than as a full divider.
+// `a % +-2^k` with an UNSIGNED dividend never reaches ABC as a remainder --
+// region_blast rewrites it to an AND, so it is charged as one. A signed
+// dividend or a non-power-of-two divisor is charged as a full divider.
 TEST(PredictAbcSize, PowerOfTwoRemIsAnAnd) {
   auto& lib = lib_for("lgdb_pred_rem");
   auto  gio = lib.create_io("rems");
   gio->add_input("a", 32);
   gio->add_input("b", 32);
+  gio->add_input("s", 32);
   gio->add_output("y", 32);
+  gio->set_unsign("a", true);
   auto g = gio->create_graph();
+
+  // A signed dividend keeps the full divider: `-9 % 8` is not `-9 & 7`.
+  livehd::graph_util::set_sign(g->get_input_pin("s"));
+  auto signed_rem = create_typed_node(*g, Ntype_op::Rem);
+  g->get_input_pin("s").connect_sink(signed_rem.create_sink_pin(0));
+  create_const(*g, *Dlop::create_integer(16)).connect_sink(signed_rem.create_sink_pin(1));
+  set_bits(signed_rem.create_driver_pin(0), 32);
+  EXPECT_FALSE(livehd::graph_util::rem_is_power_of_two_mask(signed_rem));
+  EXPECT_EQ(predict_abc_size(signed_rem), livehd::graph_util::division_aig_count(signed_rem));
+
+  // A negative power-of-two divisor is still a mask on an unsigned dividend.
+  auto neg_div = create_typed_node(*g, Ntype_op::Rem);
+  g->get_input_pin("a").connect_sink(neg_div.create_sink_pin(0));
+  create_const(*g, *Dlop::create_integer(-16)).connect_sink(neg_div.create_sink_pin(1));
+  set_bits(neg_div.create_driver_pin(0), 32);
+  EXPECT_TRUE(livehd::graph_util::rem_is_power_of_two_mask(neg_div));
+  EXPECT_EQ(predict_abc_size(neg_div), 32u);
 
   auto masked = create_typed_node(*g, Ntype_op::Rem);
   g->get_input_pin("a").connect_sink(masked.create_sink_pin(0));
@@ -359,5 +379,6 @@ TEST(PredictAbcSize, PowerOfTwoRemIsAnAnd) {
   set_bits(runtime.create_driver_pin(0), 32);
 
   EXPECT_EQ(predict_abc_size(masked), 32u);
-  EXPECT_EQ(predict_abc_size(runtime), 0u);
+  EXPECT_EQ(predict_abc_size(runtime), livehd::graph_util::division_aig_count(runtime));
+  EXPECT_GT(predict_abc_size(runtime), predict_abc_size(masked));
 }

@@ -178,6 +178,23 @@ namespace shift_detail {
   return shift_detail::mux_count(node, op, amount, mappable_ge_weight(node));
 }
 
+// Match the mapper's exact shortcut: only non-negative dividends permit a
+// power-of-two remainder to become a low mask. The divisor may be negative.
+[[nodiscard]] inline bool rem_is_power_of_two_mask(const hhds::Node_class& node) {
+  const auto a = get_driver_of_sink_name(node, "a");
+  const auto b = get_driver_of_sink_name(node, "b");
+  if (a.is_invalid() || !is_unsign(a) || b.is_invalid() || !b.is_const()) {
+    return false;
+  }
+  const auto& value = const_of(b);
+  if (value.has_unknowns() || !value.is_just_i64()) {
+    return false;
+  }
+  const auto integer   = value.to_just_i64();
+  const auto magnitude = integer < 0 ? uint64_t{0} - static_cast<uint64_t>(integer) : static_cast<uint64_t>(integer);
+  return magnitude >= 2 && (magnitude & (magnitude - 1)) == 0;
+}
+
 // Restoring division has W subtract/select rows of W+1 bits, plus sign
 // conversion. Charge operand width even when the quotient is only one bit.
 [[nodiscard]] inline uint64_t division_aig_count(const hhds::Node_class& node) {
@@ -201,7 +218,7 @@ namespace shift_detail {
   if (op == Ntype_op::Not) {
     return std::min(full, masked_output_width(node));
   }
-  if (op == Ntype_op::Div) {
+  if (op == Ntype_op::Div || (op == Ntype_op::Rem && !rem_is_power_of_two_mask(node))) {
     return division_aig_count(node);
   }
   if (op != Ntype_op::SRA && op != Ntype_op::SHL) {

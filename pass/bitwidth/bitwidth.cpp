@@ -296,6 +296,10 @@ void Bitwidth::adjust_bw(hhds::Pin_class dpin, const Bitwidth_range& bw) {
       // consumers read the exact value. Callers that passed an INPUT driver
       // (process_mux/hotmux selectors) keep a handle that is now invalid; every
       // one of them already tolerates that.
+      // P7: never a split. A range bound is an int64 (or a width bound for an
+      // overflow range, excluded above), so min==max is one fully known value
+      // for every resolution of every '?' literal in the cone.
+      I(!bw.get_min().has_unknowns());
       auto cdpin = create_const(*current_graph, bw.get_min());
       bwmap.insert_or_assign(cdpin.get_class_index(), bw);
       bwmap.erase(dpin.get_class_index());
@@ -453,9 +457,18 @@ void Bitwidth::process_mux(hhds::Node_class& node, Inp_pins& inp_edges) {
       // in all of them because the one pair mux over the missing entries of a
       // non-power-of-two array had no data arms left. Only a real envelope
       // is a hint worth recording.
-      const auto n_data = inp_edges.size() - 1;
+      //
+      // The envelope's TOP is the highest data arm PORT ID, not the arm
+      // count: a gapped Mux on pins 0,2,3 selects pin 3 with selector 2
+      // (Q1: the disconnected pin 1 reads '?'), and [0..count-1] would stamp
+      // a selector no other range widens 1 bit wide, truncating 2 to 0.
+      const auto n_data   = inp_edges.size() - 1;
+      size_t     max_port = 0;
+      for (const auto& arm : inp_edges) {
+        max_port = std::max<size_t>(max_port, arm.get_port_id());
+      }
       if (n_data >= 2) {
-        Bitwidth_range bw2(0, static_cast<int64_t>(n_data) - 1);
+        Bitwidth_range bw2(0, static_cast<int64_t>(max_port) - 1);
         adjust_bw(e.get_driver_pin(), bw2);
       }
       continue;

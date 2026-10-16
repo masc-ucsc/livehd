@@ -2,7 +2,8 @@
 #pragma once
 
 // pass.legalize acyclicity: the ONE place that reasons about combinational
-// loops (todo/livehd/legalize_acyclic.md). After legalize, every definition is
+// loops (todo/livehd/legalize_acyclic.md). After repair and any deferred
+// check following cprop/bitwidth, every definition is
 // acyclic at ARC level: each Sub instance is one call whose output depends on
 // the inputs its callee's port_reach summary lists (its comb arcs; a Moore
 // output on none). A consumer orders instances by those arcs (or flattens) and
@@ -22,9 +23,9 @@
 //   any other node        every input
 
 #include <cstdint>
-#include <string_view>
 #include <memory>
 #include <string>
+#include <string_view>
 #include <vector>
 
 #include "absl/container/flat_hash_map.h"
@@ -36,10 +37,11 @@ namespace livehd::legalize {
 inline constexpr std::string_view kAcyclicPass = "pass.legalize";
 
 struct Acyclic_result {
-  int instances_inlined = 0;
-  int loops_split       = 0;
-  int slices_rewired    = 0;
-  int loops             = 0;  // true loops left (each a diag error)
+  int  instances_inlined = 0;
+  int  loops_split       = 0;
+  int  slices_rewired    = 0;
+  int  loops             = 0;      // candidate loops left (errors unless deferred)
+  bool needs_loop_check  = false;  // rewritten candidate: check after the existing cprop + bitwidth
   // per graph: callee names of the instances inlined into it
   absl::flat_hash_map<const hhds::Graph*, std::vector<std::string>> inlined;
 };
@@ -48,9 +50,17 @@ struct Acyclic_result {
 // each instance on an arc-level cycle (warning comb-loop-through-module) and
 // each state-free instance on an atomic-level one, split each rolled loop on
 // an atomic-only ring by ring/free carries, fixpoint; resolve packed slices on
-// what remains inside a body; report any loop left as an error. Loop halves
-// land in `state` like legalize's own loop split.
-Acyclic_result make_acyclic(const std::vector<std::shared_ptr<hhds::Graph>>& graphs, Split_state& state);
+// what remains inside a body; report any loop left as an error. With
+// defer_inlined_loops, carry internal candidates into their callers and leave
+// rewritten candidates for check_comb_cycles after the scheduled cleanup.
+// Definitions made unreachable by loop repair land in state.removed; the caller deletes
+// them and drops them from its view. Explicit roots are retained even when
+// instantiated elsewhere. No cprop/bitwidth runs inside this pass.
+Acyclic_result make_acyclic(const std::vector<std::shared_ptr<hhds::Graph>>& graphs, Split_state& state,
+                            bool defer_inlined_loops = false, const std::vector<std::shared_ptr<hhds::Graph>>& roots = {});
+
+// Final user-facing loop verdict, with fresh dependency summaries after cleanup.
+int check_comb_cycles(const std::vector<std::shared_ptr<hhds::Graph>>& graphs);
 
 // Read-only: the arc-level combinational cycles left in `graphs` (0 on a
 // legalized design). Each one is described in `where` when given.

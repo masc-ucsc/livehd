@@ -436,7 +436,11 @@ struct Slang_module_state {
 class Slang_context : private Slang_module_state {
 public:
   struct Options {
-    int  unroll_limit              = 4000;  // slang-side loop unroll cap (yosys-slang default)
+    // Typed opaque RAM interfaces from the selected Liberty. Their bodies
+    // and collision semantics are deliberately not synthesized or invented.
+    absl::flat_hash_set<std::string> liberty_memories;
+    std::string                      liberty_declarations;
+    int                              unroll_limit              = 4000;  // slang-side loop unroll cap (yosys-slang default)
     // Emit a canonical procedural `for` as an LNAST/Pyrope LOOP instead of
     // unrolling it here. LNAST already owns loops with `break`/`continue`
     // (uPass lowers func_break/func_continue to loop_exec/loop_next_active, the
@@ -477,8 +481,9 @@ public:
 
   Slang_context() = default;
 
-  void set_source_manager(const slang::SourceManager* sm) { sm_ = sm; }
-  void set_options(const Options& o) { options_ = o; }
+  void           set_source_manager(const slang::SourceManager* sm) { sm_ = sm; }
+  void           set_options(const Options& o) { options_ = o; }
+  const Options& get_options() const { return options_; }
 
   void process_root(const slang::ast::RootSymbol& root);
 

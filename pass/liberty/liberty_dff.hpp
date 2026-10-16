@@ -17,6 +17,37 @@
 // Liberty text directly — that is what find_dff_cell does.
 namespace livehd::liberty {
 
+// An explicitly instantiated Liberty RAM is an opaque cell, not an inferred
+// array. Liberty interface/timing data does not establish collision, reset or
+// forwarding semantics, so this inventory never substitutes a native Memory.
+struct Memory_pin {
+  std::string name, direction;
+  int         msb = 0, lsb = 0;
+  bool        bus                                 = false;
+  bool        clocked                             = false;  // output arcs are exclusively clock-edge triggered
+  bool        operator==(const Memory_pin&) const = default;
+};
+struct Memory_cell {
+  std::string             name;
+  std::vector<Memory_pin> pins;
+  int                     address_bits = 0, word_bits = 0;
+  double                  area = 0;
+};
+// A memory cell the inventory cannot represent (non-RAM `memory()` type, an
+// inout pin, an unresolved bus type, ...) is left out, with its reason in
+// `skipped` when given; a design that never instantiates it is unaffected.
+// Malformed braces, duplicate pins, a contradictory bus type on an accepted
+// RAM, and conflicting duplicate RAM interfaces still throw.
+struct Memory_skip {
+  std::string name, reason;
+};
+std::vector<Memory_cell> scan_memory_cells(const std::string& lib_files, std::vector<Memory_skip>* skipped = nullptr);
+std::string              memory_cell_declarations(const std::vector<Memory_cell>& cells);
+// Declare each RAM as a body-less GraphIO. A body-less declaration already in
+// `library` (a reused lg: dir) is kept when it matches and replaced when the
+// Liberty changed; a same-named module WITH a body is refused.
+void                     declare_memory_cells(hhds::GraphLibrary& library, const std::vector<Memory_cell>& cells);
+
 // ABC-free scalar combinational inventory for native cost estimates. Keep the
 // pin order explicit; function syntax is validated by the consumer. Excludes
 // dont_use, state, tri-state and multi-output cells, matching the mapper's
@@ -44,7 +75,9 @@ std::vector<Comb_cell>  scan_comb_cells(const std::string& lib_files);
 // observe different bytes if a library file is replaced during an invocation.
 std::vector<Comb_cell>  scan_comb_cells_text(const std::string& contents);
 
-// Input-free tie cells can have multiple constant outputs (e.g. SKY130 conb).
+// Input-free, non-dont_use combinational cells whose scalar outputs all have
+// literal 0/1 functions. Reject sequential, bus and three-state cells; pg_pin
+// supplies are not signal inputs. Ties can have multiple outputs (e.g. conb).
 // ABC's single-output Mio inventory does not describe those cells faithfully.
 struct Constant_cell {
   std::string                               name;
@@ -143,7 +176,7 @@ std::optional<double> smallest_flop_area(const std::string& lib_files);
 // `next_state` a bare pin or its complement (`!D`, `D'`, `(!D)`; no scan/enable
 // logic), no async clear/preset, exactly one data + one clock input, and a Q
 // (preferred) or QN output. File order; unranked.
-std::vector<Dff_cell> scan_dff_cells(const std::string& lib_files);
+std::vector<Dff_cell>    scan_dff_cells(const std::string& lib_files);
 // Every posedge D-flop that is plain except for an asynchronous clear and/or
 // preset -- each a bare input pin or its complement (`!RESET_B`, `RN'`),
 // distinct from D and CLK -- with a Q/QN output whose function names a state
