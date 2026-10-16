@@ -1,0 +1,38 @@
+/*
+:name: selfref_rows
+:type: equiv
+:verilog_top: selfref_rows
+:pyrope_top: selfref_rows
+*/
+
+// A three-row priority encoder assembled bit by bit in ONE wire: row r+1 is
+// masked by the bits row r wrote, read back from the same wire. This is the
+// shape the Pyrope writer emits for bedrock's br_enc_priority_encoder: every
+// read of `w` is a word-level self-reference that is acyclic bit by bit, and
+// row 2's reads only leave the cycle once row 1's are resolved. The golden
+// states the same function with word arithmetic.
+
+pub comb selfref_rows(a:U6) -> (y:U18) {
+  wire w:U18 = nil
+  w#[0] = a#[0]
+  w#[1] = U1(a#[1] == 1 and a#[0..<1] == 0)
+  w#[2] = U1(a#[2] == 1 and a#[0..<2] == 0)
+  w#[3] = U1(a#[3] == 1 and a#[0..<3] == 0)
+  w#[4] = U1(a#[4] == 1 and a#[0..<4] == 0)
+  w#[5] = U1(a#[5] == 1 and a#[0..<5] == 0)
+  const m1:U6 = a & ~((w#[5] << 5) | (w#[4] << 4) | (w#[3] << 3) | (w#[2] << 2) | (w#[1] << 1) | w#[0])#[0..<6]
+  w#[6] = m1#[0]
+  w#[7] = U1(m1#[1] == 1 and m1#[0..<1] == 0)
+  w#[8] = U1(m1#[2] == 1 and m1#[0..<2] == 0)
+  w#[9] = U1(m1#[3] == 1 and m1#[0..<3] == 0)
+  w#[10] = U1(m1#[4] == 1 and m1#[0..<4] == 0)
+  w#[11] = U1(m1#[5] == 1 and m1#[0..<5] == 0)
+  const m2:U6 = m1 & ~((w#[11] << 5) | (w#[10] << 4) | (w#[9] << 3) | (w#[8] << 2) | (w#[7] << 1) | w#[6])#[0..<6]
+  w#[12] = m2#[0]
+  w#[13] = U1(m2#[1] == 1 and m2#[0..<1] == 0)
+  w#[14] = U1(m2#[2] == 1 and m2#[0..<2] == 0)
+  w#[15] = U1(m2#[3] == 1 and m2#[0..<3] == 0)
+  w#[16] = U1(m2#[4] == 1 and m2#[0..<4] == 0)
+  w#[17] = U1(m2#[5] == 1 and m2#[0..<5] == 0)
+  y = w
+}

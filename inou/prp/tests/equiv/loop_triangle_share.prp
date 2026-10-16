@@ -1,0 +1,30 @@
+/*
+:name: loop_triangle_share
+:type: equiv
+:verilog_top: loop_triangle_share.top
+:pyrope_top: top
+:expect_instances: u_loop_*=6
+*/
+// Triangular loop nests (rolled, the default): the inner domains read the
+// outer index, so `for i` unrolls and each copy of an inner loop rolls with
+// its own bounds. `i` is promoted to a port of the inner definition and the
+// bound is each instance's descriptor, so every copy of one inner body
+// instantiates ONE lifted definition: `(i + 1)..<N` shrinks with `i` (the first
+// copy's domain admits the rest) and `0..<i` grows (the definition widens to
+// the hull of the domains). Each inner body writes one bit of a packed carry
+// at the loop-affine position `i*N + j`.
+pub comb top(a:U4) -> (lo_tri:U16, up_tri:U16) {
+  comptime const N = 4
+  mut lo:U16 = 0
+  mut up:U16 = 0
+  for i in 0..<N {
+    for j in 0..<i {
+      lo#[i*N + j] = a#[i] ^ a#[j]
+    }
+    for j in (i + 1)..<N {
+      up#[i*N + j] = a#[i] & a#[j]
+    }
+  }
+  lo_tri = lo
+  up_tri = up
+}

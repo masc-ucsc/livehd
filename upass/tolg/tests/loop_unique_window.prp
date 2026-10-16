@@ -1,0 +1,17 @@
+// A rolled loop whose `unique if` arms write the SAME bit of a packed word:
+// upass.tolg merges the arms into one narrow-lane write (merge_window_writes)
+// and must keep the arms' exclusivity -- the lane and the write enable are
+// Hotmuxes, so the lifted body's Verilog keeps its `unique case`. See
+// loop_bit_write_qor_test.sh.
+pub comb loop_unique_window(a:U16, c:U8) -> (o:U8) {
+  mut v:U8 = c
+  for i in 0..<8 {
+    const s = a#[(i*2)..+2]
+    unique if s == 1 {
+      v#[i] = 1
+    } elif s == 2 {
+      v#[i] = 0
+    }
+  }
+  o = v
+}

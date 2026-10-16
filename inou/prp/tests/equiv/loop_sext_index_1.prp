@@ -1,0 +1,6 @@
+/*
+:name: loop_sext_index_1
+:set: compile.unroll=true
+*/
+// Rolled vs unrolled: the base's runtime-position sign extensions (rolled)
+// against the source unroll, where every `#sext` window is constant.

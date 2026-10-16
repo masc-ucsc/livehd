@@ -1,0 +1,8 @@
+/*
+:name: loop_lru_bit_update_1
+:set: compile.unroll=true
+*/
+// Rolled vs unrolled: the base design (rolled loops, merged per-bit writes in
+// the shift form, one shared inner-loop definition) against the source
+// unroll, where every bit position is a constant and each write is a plain
+// constant-position set_mask.

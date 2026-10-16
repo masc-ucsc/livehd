@@ -1,0 +1,44 @@
+/*
+:name: generic_loop_default_import
+:type: equiv
+:verilog_top: top
+:pyrope_top: top
+*/
+// A generic `mod` (`<W=8>`) whose body holds a compact `for` loop, instantiated
+// with its DEFAULT generics, from a file that imports a constants unit. The call
+// site mints an IDENTITY specialization named after the template
+// (`gl_lib.flip_loop`), and the rolled loop is lifted to `gl_lib.flip_loop.__loop0`.
+// gl_lib.prp is discovered (and walked) before gl_cfg.prp publishes, so the
+// kernel's import round blocks on it and retries the file. The retry keyed its
+// bookkeeping by NAME: the identity clone shares the pristine template's name,
+// so it was neither dropped with its file nor restored -- the TEMPLATE was
+// restored in its place -- while the lifted loop body WAS dropped. The stale
+// clone kept calling it: tolg `call to undefined function
+// 'gl_lib.flip_loop.__loop0'`.
+//
+// flip_loop: the comptime-folded `if` takes the LOOP arm (cfg.no_loop = false).
+// flip_flat: the comptime-folded `if` takes the loop-free arm (cfg.flat = true).
+// flip_rt:   a RUNTIME `if` around the loop (the loop is always elaborated).
+// flip_two:  an unrolled loop declaring a `const` per iteration plus a rolled
+//            one; the stale clone's re-walk reported `redeclaration of
+//            variable 'h' in the same scope` instead.
+// s_spec:    explicit generics (`<W=8>`) mint a mangled, non-identity name --
+//            the control that always worked.
+// All five compute the same lane flip, so one golden function covers them.
+const flip_loop = import("generic_loop_default_import/gl_lib.flip_loop")
+const flip_flat = import("generic_loop_default_import/gl_lib.flip_flat")
+const flip_rt   = import("generic_loop_default_import/gl_lib.flip_rt")
+const flip_two  = import("generic_loop_default_import/gl_lib.flip_two")
+
+pub mod top(a:U8, b:U4) -> (o_loop:U8@[], o_flat:U8@[], o_rt:U8@[], o_two:U8@[], o_spec:U8@[]) {
+  const s_loop = flip_loop(a=a, b=b)
+  const s_flat = flip_flat(a=a, b=b)
+  const s_rt   = flip_rt(a=a, b=b)
+  const s_two  = flip_two(a=a, b=b)
+  const s_spec = flip_loop<W=8>(a=a, b=b)
+  o_loop = s_loop.o
+  o_flat = s_flat.o
+  o_rt   = s_rt.o
+  o_two  = s_two.o
+  o_spec = s_spec.o
+}

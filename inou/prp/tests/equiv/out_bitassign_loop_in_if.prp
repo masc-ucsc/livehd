@@ -1,0 +1,41 @@
+/*
+:name: out_bitassign_loop_in_if
+:type: equiv
+:verilog_top: out_bitassign_loop_in_if
+:pyrope_top: out_bitassign_loop_in_if
+*/
+// An OUTPUT driven only by per-bit writes inside a `for` that sits in the ELSE
+// arm of an `if`. The loop roller asks whether a value of the output reaches
+// the loop (the carry's ordinal-0 value); its "written before" walk counted the
+// THEN arm's `o = a` as a predecessor, but the arms are alternatives. The loop
+// rolled with a carry-in reading the undriven output, and tolg reported
+// `unresolved reference 'o' -- it has no driver`. The same loop at the body's
+// top level (no `if`) always worked: it is the same "no value enters ordinal 0"
+// shape and lowers the same way.
+//
+// o: literal comptime-false `if`; p: comptime constant; q: runtime `if`.
+comptime const no_loop = false
+
+pub comb out_bitassign_loop_in_if(a:U4, s:U1) -> (o:U4, p:U4, q:U4) {
+  if false {
+    o = a
+  } else {
+    for i in 0..<4 {
+      o#[i] = ~a#[i]
+    }
+  }
+  if no_loop {
+    p = a
+  } else {
+    for i in 0..<4 {
+      p#[i] = a#[3 - i]
+    }
+  }
+  if s == 1 {
+    q = a
+  } else {
+    for i in 0..<4 {
+      q#[i] = ~a#[i]
+    }
+  }
+}

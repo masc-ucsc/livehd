@@ -1,0 +1,25 @@
+/*
+:name: loop_sext_index
+:type: equiv
+:verilog_top: loop_sext_index.top
+:pyrope_top: top
+:expect_instances: u_loop_*=2
+*/
+// `#sext` windows whose bounds are a ROLLED loop's index (the default): inside
+// the lifted body the index is a runtime port, so the sign position (`hi - lo`
+// of the window) is runtime too. `a#sext[i..=i]` (position `i - i`) and the
+// growing prefix `a#sext[0..=i]` (position `i`) must compile -- with shifts
+// that fold back to constant slices once the loop is expanded -- and compute
+// what the unrolled source does.
+pub comb top(a:U4, b:U8) -> (o:U8, t:S8) {
+  mut d:U8 = 0
+  for i in 0..<4 {
+    d |= b & a#sext[i..=i]
+  }
+  mut s:S8 = 0
+  for i in 0..<4 {
+    wrap s = s + a#sext[0..=i]
+  }
+  o = d
+  t = s
+}

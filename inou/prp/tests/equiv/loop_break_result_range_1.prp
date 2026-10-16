@@ -1,0 +1,21 @@
+/*
+:name: loop_break_result_range_1
+*/
+// The same value from a ROLLED loop with a `break` (a runtime exit always
+// rolls). The loop may leave after ANY iteration, so its result ranges over
+// every iteration's carry-out ([0, 3] here), not just the last one's. The
+// roller used to publish the last iteration's ([0, 0]), and upass.tolg folded
+// that one-value range into a constant sign position: `a#sext[0..=0]`, a
+// REFUTED-cex against the reference (o ref=253 impl=255 at x=2, a=13). A
+// published range must never fix a hardware sign position on its own.
+pub comb loop_break_result_range(x:U4, a:U8) -> (o:S8, q:U3) {
+  mut acc:U3 = 0
+  mut seen:U1 = 0
+  for i in 0..<4 {
+    seen = seen | U1(acc == 7)
+    acc = 3 - i
+    if x#[i] == 1 { break }
+  }
+  o = a#sext[0..=acc]
+  q = acc
+}

@@ -1,0 +1,20 @@
+/*
+:name: loop_break_needed_wrap
+:type: lec
+:lec_top: loop_break_needed_wrap
+:lec_grep_not: unnecessary-wrap
+*/
+// PYROPE-vs-PYROPE group. This file is the REFERENCE: the loop-free priority
+// chain a `break` loop computes (see _1). `acc` ends in [20, 200], so the U5
+// output needs its `wrap`, and nothing may call it unnecessary.
+pub comb loop_break_needed_wrap(x:U4) -> (o:U5) {
+  mut acc:U8 = 200
+  if x#[0] == 0 {
+    acc = 140
+    if x#[1] == 0 {
+      acc = 80
+      if x#[2] == 0 { acc = 20 }
+    }
+  }
+  wrap o = acc
+}

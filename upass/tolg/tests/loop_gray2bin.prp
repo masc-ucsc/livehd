@@ -1,0 +1,9 @@
+// Gray to binary with a rolled loop: bit i is the XOR of gray#[i..], a
+// reduction over a slice that starts at the loop index.
+pub comb loop_gray2bin(gray:U16) -> (bin:U16) {
+  mut b:U16 = 0
+  for i in 0..<16 {
+    b#[i] = gray#^[i..]
+  }
+  bin = b
+}

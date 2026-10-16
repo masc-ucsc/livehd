@@ -1,0 +1,51 @@
+/*
+:name: loop_lru_bit_update
+:type: equiv
+:verilog_top: loop_lru_bit_update.top
+:pyrope_top: top
+:expect_instances: u_loop_*=5
+*/
+// A packed pairwise matrix updated one bit per iteration of a ROLLED loop (the
+// default): `state#[i*N + j]` is cleared or set under an if/elif inside
+// `for j in (i + 1)..<N`, nested in `for i` (lhdtrack br_arb_lru's update),
+// and read back at a loop index in the grant scan.
+//  * The `if`/`elif` arms write the SAME bit, so upass.tolg merges the arms'
+//    one-bit lanes and writes the bit once (not a 16-bit mux per arm), and the
+//    position `i*N + j` is loop-affine, so the write takes the shift form that
+//    folds to a constant-position bit once the loop is expanded.
+//  * The inner domain reads the unrolled `i`: every copy of the inner loop
+//    instantiates ONE lifted definition (`i` is a port, the bound is the
+//    instance's descriptor) instead of one definition per `i`.
+// The golden spells every matrix bit out by hand.
+pub mod top(en:U1, request:U4) -> (grant:U4@[], state_q:U16@[]) {
+  comptime const N = 4
+  // Upper triangle: requester i outranks j for i < j.
+  reg state:U16 = 0x08CE
+
+  mut can:U4 = 0
+  for i in 0..<N {
+    mut wins = true
+    for j in 0..<N {
+      if i < j {
+        wins = wins and (request#[j] == 0 or state#[i*N + j] == 1)
+      } elif i > j {
+        wins = wins and (request#[j] == 0 or state#[j*N + i] == 0)
+      }
+    }
+    can#[i] = U1(wins)
+  }
+  grant = request & can
+
+  if en == 1 and request != 0 {
+    for i in 0..<N {
+      for j in (i + 1)..<N {
+        if grant#[i] == 1 {
+          state#[i*N + j] = 0
+        } elif grant#[j] == 1 {
+          state#[i*N + j] = 1
+        }
+      }
+    }
+  }
+  state_q = state
+}

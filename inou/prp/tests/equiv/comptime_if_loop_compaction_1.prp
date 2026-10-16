@@ -1,0 +1,31 @@
+/*
+:name: comptime_if_loop_compaction_1
+:expect_instances: *=0
+*/
+// The same loop wrapped in a comptime-folded `if` whose DEAD arm spells the
+// rows out and declares a TYPED `const next_wins:U16`. A comptime `if` must act
+// like a preprocessor switch: the surviving arm lowers exactly as if written
+// without the `if`, so the loop source-unrolls like the reference (no Sub
+// instance). The roller's declared-type fallback scanned the whole tree BY
+// NAME, found the dead arm's `next_wins:U16`, and rolled the loop into a
+// `__loop0` instance: the same netlist, but a different module structure and a
+// slower generated simulator (br_flow_burst_mux_lru).
+comptime const no_loop = false
+
+pub mod comptime_if_loop_compaction(grant:U4, wins:U16) -> (next:U16@[]) {
+  comptime const N = 4
+  if no_loop {
+    const row0:U4 = if grant#[0] == 1 { 0 } else { wins#[0..<N] | grant }
+    const row1:U4 = if grant#[1] == 1 { 0 } else { wins#[N..+N] | grant }
+    const row2:U4 = if grant#[2] == 1 { 0 } else { wins#[(2*N)..+N] | grant }
+    const row3:U4 = if grant#[3] == 1 { 0 } else { wins#[(3*N)..+N] | grant }
+    const next_wins:U16 = (row0, row1, row2, row3)#[..]
+    next = next_wins
+  } else {
+    mut next_wins = wins
+    for i in 0..<N {
+      next_wins#[(i*N)..+N] = if grant#[i] == 1 { 0 } else { wins#[(i*N)..+N] | grant }
+    }
+    next = next_wins
+  }
+}

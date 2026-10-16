@@ -1,0 +1,4 @@
+// Constants unit for ../generic_loop_default_import.prp. gl_lib.prp imports it
+// and is discovered first, so gl_lib blocks in the first import round.
+pub comptime const no_loop = false
+pub comptime const flat    = true

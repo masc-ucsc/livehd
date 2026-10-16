@@ -1,0 +1,23 @@
+/*
+:name: loop_instance_field_range
+:type: lec
+:lec_top: top
+*/
+// PYROPE-vs-PYROPE group. This file is the REFERENCE: a rolled loop (the
+// default) accumulating a child instance's SIGNED output, hoisted by hand into
+// a local first (`const sn = s.neg`), so the loop reads a plain invariant. See
+// _1 for the claim.
+comb negsub(a:U8) -> (neg:S4, pos:U4) {
+  neg = -U4(a#[0..<3])
+  pos = a#[4..<8]
+}
+
+pub comb top(a:U8) -> (p:S8) {
+  const s  = negsub(a)
+  const sn = s.neg
+  mut t:S8 = 0
+  for i in 0..<4 {
+    t = t + sn
+  }
+  p = t
+}
