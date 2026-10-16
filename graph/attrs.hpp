@@ -154,6 +154,14 @@ struct synth_region_id_t {
 };
 inline constexpr synth_region_id_t synth_region_id{};
 
+// Synthesis-color provenance on mapped nodes. Flattening scopes this key by
+// instance path, so reused definitions do not attract unrelated replicas.
+struct synth_color_group_t {
+  using value_type = std::string;
+  using storage    = hhds::flat_storage;
+};
+inline constexpr synth_color_group_t synth_color_group{};
+
 // Present on a mapped-region node when this pass.abc invocation rebuilt the
 // region; absent means the node came from the incremental cache.  This is a
 // marker rather than a bool because flat_storage reserves the zero value as
@@ -427,6 +435,8 @@ inline constexpr Attr_kind attr_kind<synth_region_t> = Attr_kind::node;
 template <>
 inline constexpr Attr_kind attr_kind<synth_region_id_t> = Attr_kind::node;
 template <>
+inline constexpr Attr_kind attr_kind<synth_color_group_t> = Attr_kind::node;
+template <>
 inline constexpr Attr_kind attr_kind<resynth_t> = Attr_kind::node;
 template <>
 inline constexpr Attr_kind attr_kind<native_comb_boundary_t> = Attr_kind::node;
@@ -498,6 +508,7 @@ inline constexpr Attr_kind attr_kind<lut_t> = Attr_kind::node;
   X(ctrl_stats)                     \
   X(synth_region)                   \
   X(synth_region_id)                \
+  X(synth_color_group)              \
   X(resynth)                        \
   X(native_comb_boundary)           \
   X(hier_color)                     \

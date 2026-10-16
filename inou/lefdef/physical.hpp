@@ -2,6 +2,7 @@
 #pragma once
 #include <cstdint>
 #include <map>
+#include <set>
 #include <string>
 #include <vector>
 
@@ -28,6 +29,7 @@ struct Macro {
   std::string                site, klass;
   bool                       symmetry_x = false, symmetry_y = false;
   std::map<std::string, Pin> pins;
+  std::set<std::string>      blocked_layers;  // OBS layers; routability uses conservative full-footprint blocking
 };
 struct Site {
   double width = 0, height = 0;
@@ -36,6 +38,7 @@ struct Site {
 struct Layer {
   double      width = 0, resistance = 0, capacitance = 0, edge_cap = 0;
   std::string direction;
+  double      pitch_x = 0, pitch_y = 0;
 };
 // LEF geometry is in microns; graph/DEF positions are integer DBU.
 struct Technology {

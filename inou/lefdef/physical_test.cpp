@@ -12,6 +12,10 @@ TEST(Physical, Sky130GeometryAndRc) {
   EXPECT_NEAR(tech.macros.at("sky130_fd_sc_hd__inv_1").width, 1.38, 1e-9);
   EXPECT_FALSE(tech.macros.at("sky130_fd_sc_hd__inv_1").pins.at("Y").shapes.empty());
   EXPECT_GT(tech.layers.at("met1").resistance, 0);
+  EXPECT_TRUE(tech.macros.at("sky130_fd_sc_hd__inv_1").blocked_layers.contains("li1"));
+  EXPECT_NEAR(tech.layers.at("li1").pitch_x, 0.46, 1e-9);
+  EXPECT_NEAR(tech.layers.at("li1").pitch_y, 0.34, 1e-9);
+  EXPECT_NEAR(tech.layers.at("met1").pitch_y, 0.34, 1e-9);
 }
 TEST(Physical, DefIdentityRoundtrip) {
   Floorplan fp;

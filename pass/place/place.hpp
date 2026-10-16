@@ -6,28 +6,39 @@
 #include <vector>
 
 #include "core/physical_rc.hpp"
+#include "dreamplace/native/macro/topology.hpp"
 #include "hhds/graph.hpp"
 #include "inou/lefdef/physical.hpp"
 
 namespace livehd::placement {
 struct Options {
-  std::vector<std::string>                   lefs;
-  std::string                                floorplan, output_dir, cache_dir;
-  std::string                                liberty;
+  std::vector<std::string>                                   lefs;
+  std::string                                                floorplan, output_dir, cache_dir;
+  std::string                                                liberty;
+  std::string                                                macro_mode = "none";
+  DreamPlace::native::macro::Parameters                      macro_parameters;
+  std::shared_ptr<const DreamPlace::native::macro::Topology> macro_topology;
   // In-process ECO reference; independent of persistent-cache admission.
-  std::shared_ptr<const physical::Floorplan> previous;
-  std::vector<std::string>                   changed_cells;
-  std::map<std::string, double>              net_weights;
-  double                                     utilization = 0.5, aspect = 1, density = 0.8;
-  double                                     halo_x = 0, halo_y = 0;  // microns per side, non-CORE macros only
-  double                                     resistance_ohm_um = -1, capacitance_ff_um = -1;
-  int                                        iterations = 500, bins = 32, threads = 1;
-  bool                                       full           = true;
+  std::shared_ptr<const physical::Floorplan>                 previous;
+  std::vector<std::string>                                   changed_cells;
+  std::map<std::string, double>                              net_weights;
+  double                                                     utilization = 0.5, aspect = 1, density = 0.8;
+  double                                                     halo_x = 0, halo_y = 0;  // microns per side, non-CORE macros only
+  bool                                                       scale_macro_density = false;
+  bool   automatic_bins = false, exact_macro_density = false, adaptive_density = false, routability = false;
+  double macro_overlap_weight = 0, macro_jitter = 0;
+  int    schedule_iterations = 0, io_iterations = 0;
+  double cohesion          = 0;
+  double resistance_ohm_um = -1, capacitance_ff_um = -1;
+  int    iterations = 500, bins = 32, threads = 1;
+  bool   full           = true;
+  // Diagnostic physical GP coordinates, before macro/cell legalization.
+  bool   snapshots      = false;
   // Internal post-synthesis STA snapshot: mapped pins and zero wire RC, no GP
   // or legalization, and no placement-cache publication.
-  bool                                       timing_seed    = false;
+  bool   timing_seed    = false;
   // Try nearest-whitespace placement of edited/new cells before windowed GP.
-  bool                                       legalize_cells = false;
+  bool   legalize_cells = false;
 };
 struct Result {
   std::map<std::string, std::pair<double, double>> pin_locations;

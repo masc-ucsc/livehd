@@ -2627,3 +2627,11 @@ sh_test(
     srcs = ["lhd_remainder_smoke.py"],
     data = ["//lhd", "//inou/prp:abc_tests"],
 )
+
+sh_test(
+    name = "lhd_placement_macro_smoke",
+    size = "small",
+    timeout = "short",
+    srcs = ["lhd_placement_macro_smoke.py"],
+    data = ["//lhd", "//inou/lefdef:test_data"],
+)

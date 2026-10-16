@@ -21,6 +21,7 @@
 #include <unordered_map>
 #include <unordered_set>
 
+#include "h2d.hpp"
 #include "memory_proxy.hpp"
 #if defined(__APPLE__)
 #include <mach-o/dyld.h>
@@ -44,6 +45,7 @@ namespace {
 namespace ph      = physical;
 namespace gu      = graph_util;
 namespace dp      = DreamPlace::native;
+namespace mp      = dp::macro;
 namespace fs      = std::filesystem;
 using Node        = hhds::Node_class;
 using Pin         = hhds::Pin_class;
@@ -134,6 +136,27 @@ std::string environment_key(const Options& o, const ph::Technology& tech) {
                             o.halo_x,
                             o.halo_y),
                 h);
+  h = hash_text(o.macro_mode, h);
+  if (o.scale_macro_density || o.automatic_bins || o.exact_macro_density || o.adaptive_density || o.routability
+      || o.macro_overlap_weight || o.macro_jitter || o.schedule_iterations || o.io_iterations) {
+    h = hash_text(std::format("repulsion:{}:{}:{}:{}:{}:{}:{}:{}:{}",
+                              o.automatic_bins,
+                              o.exact_macro_density,
+                              o.adaptive_density,
+                              o.routability,
+                              o.macro_overlap_weight,
+                              o.macro_jitter,
+                              o.schedule_iterations,
+                              o.io_iterations,
+                              o.scale_macro_density),
+                  h);
+  }
+  if (o.cohesion > 0) {
+    h = hash_text(std::format("cohesion:{}", o.cohesion), h);
+  }
+  if (o.macro_mode == "h2d") {
+    h = hash_text(mp::parameter_key(o.macro_parameters), h);
+  }
   for (const auto& [name, weight] : o.net_weights) {
     h = hash_text(std::format("{}:{}", name, weight), h);
   }
@@ -366,6 +389,7 @@ struct Cell {
 };
 struct View {
   dp::Design                                design;
+  bool                                      native_orientations = false;
   int64_t                                   halo_x = 0, halo_y = 0;
   ph::Floorplan                             fp;
   std::vector<Cell>                         cells;
@@ -375,6 +399,7 @@ struct View {
   std::map<std::string, size_t>             terminal;
   std::map<std::string, size_t>             cell;
   std::map<std::string, double>             weights;
+  std::map<std::string, std::string>        cohesion_owners;
 };
 std::pair<double, double> offset(const ph::Macro& macro, const std::string& name, Orientation o, int64_t dbu) {
   auto it = macro.pins.find(name);
@@ -415,9 +440,32 @@ void make_arrays(View& v, const ph::Technology& tech) {
     d.node_y.push_back(c.place.y);
     d.node_size_x.push_back(c.place.width);
     d.node_size_y.push_back(c.place.height);
-    const bool standard = tech.macros.at(c.macro).klass.starts_with("CORE");
+    const bool standard  = tech.macros.at(c.macro).klass.starts_with("CORE");
+    double     blocked_h = 0, blocked_v = 0;
+    if (!standard) {
+      for (const auto& name : tech.macros.at(c.macro).blocked_layers) {
+        const auto layer = tech.layers.find(name);
+        if (layer == tech.layers.end()) {
+          continue;
+        }
+        const auto& l = layer->second;
+        if (l.direction == "HORIZONTAL" && l.pitch_y > 0) {
+          blocked_h += 1 / (l.pitch_y * tech.dbu);
+        }
+        if (l.direction == "VERTICAL" && l.pitch_x > 0) {
+          blocked_v += 1 / (l.pitch_x * tech.dbu);
+        }
+      }
+    }
+    d.node_blocked_capacity_h.push_back(blocked_h);
+    d.node_blocked_capacity_v.push_back(blocked_v);
+    d.node_macro.push_back(!standard);
+    d.node_inflatable.push_back(standard);
     d.node_halo_x.push_back(standard ? 0 : v.halo_x);
     d.node_halo_y.push_back(standard ? 0 : v.halo_y);
+    if (v.native_orientations) {
+      d.node_orientation.push_back(native_orientation(c.place.orientation));
+    }
     if (!c.locked && c.place.status != Status::FIXED && c.place.status != Status::LOCKED) {
       ++d.num_movable;
     }
@@ -429,8 +477,28 @@ void make_arrays(View& v, const ph::Technology& tech) {
     d.node_y.push_back(p.y);
     d.node_size_x.push_back(0);
     d.node_size_y.push_back(0);
+    d.node_blocked_capacity_h.push_back(0); d.node_blocked_capacity_v.push_back(0);
+    d.node_macro.push_back(0);
+    d.node_inflatable.push_back(0);
     d.node_halo_x.push_back(0);
     d.node_halo_y.push_back(0);
+    if (v.native_orientations) {
+      d.node_orientation.push_back(dp::Orientation::N);
+    }
+  }
+  if (!v.cohesion_owners.empty()) {
+    std::map<std::string, std::vector<int>> groups;
+    for (const auto& c : v.cells) {
+      if (auto found = v.cohesion_owners.find(c.name); found != v.cohesion_owners.end()) {
+        groups[found->second].push_back(static_cast<int>(v.cell.at(c.name)));
+      }
+    }
+    for (auto& [name, members] : groups) {
+      (void)name;
+      if (members.size() > 1) {
+        d.cohesion_groups.push_back({std::move(members), 1, {}});
+      }
+    }
   }
   v.pins.clear();
   v.drivers.clear();
@@ -465,6 +533,19 @@ void make_arrays(View& v, const ph::Technology& tech) {
     d.net_weights.push_back(weight);
   }
   d.build_maps();
+  if (v.native_orientations) {
+    // Net-driver enumeration changes after standard-cell ECOs. A macro-frame
+    // fingerprint describes pin geometry, so give that geometry a stable order.
+    for (size_t i = 0; i < v.cells.size(); ++i) {
+      if (!tech.macros.at(v.cells[i].macro).klass.starts_with("CORE")) {
+        std::sort(d.flat_node2pin.begin() + d.flat_node2pin_start[i],
+                  d.flat_node2pin.begin() + d.flat_node2pin_start[i + 1],
+                  [&](auto a, auto b) {
+                    return std::pair{d.pin_offset_x[a], d.pin_offset_y[a]} < std::pair{d.pin_offset_x[b], d.pin_offset_y[b]};
+                  });
+      }
+    }
+  }
   d.validate();
 }
 // Row flips apply only to CORE cells; BLOCK macros keep their supplied
@@ -1446,7 +1527,29 @@ Result place(hhds::Graph& source, hhds::GraphLibrary& library, const Options& op
   if (!std::isfinite(options.halo_x) || !std::isfinite(options.halo_y) || options.halo_x < 0 || options.halo_y < 0) {
     throw std::invalid_argument("invalid macro halo");
   }
-  auto                          tech = ph::read_lef(options.lefs);
+  if (options.macro_mode != "none" && options.macro_mode != "h2d") {
+    throw std::invalid_argument("macro placement mode must be none or h2d");
+  }
+  const bool macro_active = options.macro_mode == "h2d" && !options.timing_seed;
+  if (macro_active
+      && (options.automatic_bins || options.exact_macro_density || options.scale_macro_density || options.adaptive_density
+          || options.routability || options.macro_overlap_weight || options.macro_jitter || options.schedule_iterations
+          || options.io_iterations)) {
+    throw std::invalid_argument("native repulsion experiment controls currently require synth.place.macro=none");
+  }
+  if (!std::isfinite(options.cohesion) || options.cohesion < 0 || (macro_active && options.cohesion > 0)) {
+    throw std::invalid_argument("cohesion requires a nonnegative coefficient and plain placement mode");
+  }
+  if (macro_active && !options.full) {
+    throw std::invalid_argument("H2D requires full placement mode");
+  }
+  options.macro_parameters.validate();
+  auto                           tech = ph::read_lef(options.lefs);
+  std::optional<Macro_hierarchy> hierarchy;
+  if (macro_active) {
+    hierarchy = macro_hierarchy(source, tech, options.liberty);
+  }
+
   std::unordered_set<hhds::Gid> preserved;
   for (const auto& g : source.definitions().graphs()) {
     if (tech.macros.contains(std::string(g->get_name()))) {
@@ -1461,10 +1564,11 @@ Result place(hhds::Graph& source, hhds::GraphLibrary& library, const Options& op
   auto& graph = *result.graph;
   remove_transparent_latches(graph);
   View v;
-  v.weights            = options.net_weights;
-  v.fp.design          = std::string(source.get_name());
-  v.fp.dbu             = tech.dbu;
-  const auto  memories = memory_proxies(graph, tech, options.liberty);
+  v.native_orientations = macro_active;
+  v.weights             = options.net_weights;
+  v.fp.design           = std::string(source.get_name());
+  v.fp.dbu              = tech.dbu;
+  const auto  memories  = memory_proxies(graph, tech, options.liberty);
   Resolver    resolver(tech, memories);
   double      area      = 0;
   int64_t     max_width = 0, max_height = 0;
@@ -1499,6 +1603,11 @@ Result place(hhds::Graph& source, hhds::GraphLibrary& library, const Options& op
       const auto owner  = node.attr(attrs::placement_block);
       const auto block  = owner.has() ? owner.get() : std::format("{}:{}", prefix, gu::node_color_of(node));
       node.attr(attrs::placement_block).set(block);
+      if (options.cohesion > 0) {
+        if (auto group = node.attr(attrs::synth_color_group); group.has()) {
+          v.cohesion_owners.emplace(instance, std::string(group.get()));
+        }
+      }
       v.cells.push_back({node, instance, name, block, p});
       area       += double(p.width) * p.height;
       max_width   = std::max(max_width, p.width);
@@ -1529,7 +1638,15 @@ Result place(hhds::Graph& source, hhds::GraphLibrary& library, const Options& op
       max_height = std::max(max_height, c.place.height + 2 * v.halo_y);
     }
   }
-  const auto env = environment_key(options, tech);
+  auto env = environment_key(options, tech);
+  if (options.cohesion > 0) {
+    uint64_t membership = hash_util::kFnv1a64_offset;
+    for (const auto& [name, group] : v.cohesion_owners) {
+      membership = hash_text(name, membership);
+      membership = hash_text(group, membership);
+    }
+    env += std::format(":groups:{:016x}", membership);
+  }
   const auto cache_path
       = (options.timing_seed || options.cache_dir.empty()) ? std::string{} : options.cache_dir + "/placement.json";
   auto previous         = options.previous;
@@ -1616,11 +1733,22 @@ Result place(hhds::Graph& source, hhds::GraphLibrary& library, const Options& op
     }
     for (auto& c : v.cells) {
       if (const auto it = old.find(c.name); it != old.end()) {
-        c.place.x           = it->second->place.x;
-        c.place.y           = it->second->place.y;
-        c.place.orientation = it->second->place.orientation;
+        const auto source_orientation = c.place.orientation;
+        c.place.x                     = it->second->place.x;
+        c.place.y                     = it->second->place.y;
+        c.place.orientation           = it->second->place.orientation;
         if (c.macro == it->second->macro) {
-          c.place.status = it->second->place.status;
+          // Persisted H2D FIXED positions are a cache frame, not new user
+          // constraints. Restore them through the macro cache after matching
+          // the original movable-macro fingerprint.
+          const bool cached_macro = macro_active && cached_reference && !tech.macros.at(c.macro).klass.starts_with("CORE")
+                                    && c.place.status != Status::FIXED && c.place.status != Status::LOCKED;
+          c.place.status          = cached_macro ? Status::PLACED : it->second->place.status;
+          if (cached_macro) {
+            // The solved orientation changes pin geometry in the fingerprint.
+            // Reuse must compare the original movable-macro inputs first.
+            c.place.orientation = source_orientation;
+          }
         } else {
           c.place.status = Status::PLACED;
         }
@@ -1943,11 +2071,103 @@ Result place(hhds::Graph& source, hhds::GraphLibrary& library, const Options& op
       c.place.y       = row.y;
     }
   }
+  std::optional<Macro_run>  macro_run;
+  dp::Design                macro_report_design;
+  std::vector<mp::NodeInfo> macro_report_info;
+  bool                      macro_solved = false;
+  if (macro_active) {
+    make_arrays(v, tech);
+    // Cold automatic IO assignment uses the same first GP as the regular flow.
+    // Warm floorplan/cache IOs are already fixed and avoid this prototype call.
+    if (std::any_of(v.fp.terminals.begin(), v.fp.terminals.end(), [&](const auto& t) {
+          return t.status != Status::FIXED && !imported_pos.contains(t.name);
+        })) {
+      dp::Options prototype;
+      prototype.max_iterations = options.iterations;
+      prototype.bins_x = prototype.bins_y = options.bins;
+      prototype.num_threads               = options.threads;
+      prototype.target_density            = options.density;
+      prototype.legalize = prototype.detailed_place = false;
+      dp::place(v.design, prototype);
+      capture(v, tech, false);
+      std::vector<Status> statuses;
+      for (auto& t : v.fp.terminals) {
+        statuses.push_back(t.status);
+        if (imported_pos.contains(t.name)) {
+          t.status = Status::FIXED;
+        }
+      }
+      assign_io(v);
+      for (size_t i = 0; i < statuses.size(); ++i) {
+        v.fp.terminals[i].status = statuses[i];
+      }
+      make_arrays(v, tech);
+    }
+    Options resolved          = options;
+    resolved.macro_parameters = macro_parameters(options, tech);
+    std::map<std::string, const mp::Hierarchy::Instance*> origin;
+    for (const auto& i : hierarchy->hierarchy.instances) {
+      origin[i.name] = &i;
+    }
+    for (const auto& c : v.cells) {
+      const auto& m      = tech.macros.at(c.macro);
+      const auto  dot    = c.name.rfind('.');
+      std::string parent = dot == std::string::npos ? std::string{} : c.name.substr(0, dot);
+      bool        stable = true;
+      if (auto it = origin.find(c.name); it != origin.end()) {
+        parent = it->second->parent;
+        stable = it->second->stable;
+      }
+      unsigned mask = 1;
+      if (m.symmetry_y) {
+        mask |= 1U << unsigned(dp::Orientation::FN);
+      }
+      if (m.symmetry_x) {
+        mask |= 1U << unsigned(dp::Orientation::FS);
+      }
+      if (m.symmetry_x && m.symmetry_y) {
+        mask |= 1U << unsigned(dp::Orientation::S);
+      }
+      macro_report_info.push_back({c.name,
+                                   parent,
+                                   c.macro,
+                                   !m.klass.starts_with("CORE"),
+                                   hierarchy->sequential_masters.contains(c.macro),
+                                   false,
+                                   stable,
+                                   mask});
+    }
+    for (const auto& t : v.fp.terminals) {
+      macro_report_info.push_back({"@io:" + t.name, {}, {}, false, false, true});
+    }
+    std::string identity
+        = env + ":" + mp::parameter_key(resolved.macro_parameters) + ":" + mp::fingerprint(v.design, macro_report_info);
+    if (options.macro_topology) {
+      identity += ":" + mp::topology_key(*options.macro_topology);
+    }
+    for (const auto& t : v.fp.terminals) {
+      identity += std::format(":{}:{},{}", t.name, t.x, t.y);
+    }
+    macro_run           = place_macros(v.design, macro_report_info, *hierarchy, resolved, identity);
+    macro_solved        = !macro_run->cache_hit;
+    macro_report_design = v.design;
+    for (size_t i = 0; i < v.cells.size(); ++i) {
+      if (macro_report_info[i].macro) {
+        auto& c   = v.cells[i];
+        c.place.x = std::llround(v.design.node_x[i]);
+        c.place.y = std::llround(v.design.node_y[i]);
+        c.place.orientation
+            = physical_orientation(v.design.node_orientation.empty() ? dp::Orientation::N : v.design.node_orientation[i]);
+        c.place.status = Status::FIXED;
+      }
+    }
+    capture(v, tech, macro_solved);
+  }
   // Square proxy macros are packed first and become obstacles for DREAMPlace.
   // Their exact square dimensions need not be a multiple of the standard site.
   std::vector<Cell*> macros;
   for (auto& c : v.cells) {
-    if (memories.contains(c.node.get_debug_nid())) {
+    if (!macro_active && memories.contains(c.node.get_debug_nid())) {
       macros.push_back(&c);
     }
   }
@@ -1988,15 +2208,64 @@ Result place(hhds::Graph& source, hhds::GraphLibrary& library, const Options& op
   }
   std::sort(v.cells.begin(), v.cells.end(), [](const auto& a, const auto& b) { return a.name < b.name; });
   const auto hashes = block_hashes(v);
-  auto       cache  = restore_cache(v, tech, cache_path, env, hashes);
+  // H2D already legalized the complete cell frame after changing the macro
+  // topology. Old block anchors must not overwrite that solved placement.
+  auto       cache  = macro_solved ? CacheInfo{0, hashes.size(), false} : restore_cache(v, tech, cache_path, env, hashes);
   make_arrays(v, tech);
   dp::Options control;
   control.max_iterations = options.iterations;
   control.bins_x = control.bins_y = options.bins;
   control.num_threads             = options.threads;
   control.target_density          = options.density;
-  control.legalize                = false;
-  control.detailed_place          = false;
+  control.cohesion_weight         = options.cohesion / tech.dbu;
+  control.automatic_bins          = options.automatic_bins;
+  control.scale_macro_density     = options.scale_macro_density;
+  control.exact_macro_density     = options.exact_macro_density;
+  control.adaptive_density        = options.adaptive_density;
+  control.macro_overlap_weight    = options.macro_overlap_weight;
+  control.macro_jitter            = options.macro_jitter;
+  control.schedule_iterations     = options.schedule_iterations;
+  control.routability = control.improved_routability = options.routability;
+  if (options.routability) {
+    control.route_capacity_h = control.route_capacity_v = 0;
+    for (const auto& name : tech.routing_layers) {
+      const auto& l = tech.layers.at(name);
+      if (l.direction == "HORIZONTAL" && l.pitch_y > 0) {
+        control.route_capacity_h += 1 / (l.pitch_y * tech.dbu);
+      }
+      if (l.direction == "VERTICAL" && l.pitch_x > 0) {
+        control.route_capacity_v += 1 / (l.pitch_x * tech.dbu);
+      }
+    }
+    if (!(control.route_capacity_h > 0 && control.route_capacity_v > 0)) {
+      throw std::runtime_error("routability requires horizontal and vertical LEF routing pitches");
+    }
+  }
+  control.legalize       = false;
+  control.detailed_place = false;
+  std::shared_ptr<std::ofstream> progress;
+  if (options.snapshots) {
+    fs::create_directories(options.output_dir);
+    progress                  = std::make_shared<std::ofstream>(options.output_dir + "/gp_history.jsonl");
+    control.progress_observer = [progress, dbu = tech.dbu](const dp::GpSample& s) {
+      *progress << std::format(
+          "{{\"iteration\":{},\"overflow\":{},\"raw_overflow\":{},\"hpwl_um\":{},\"density_weight\":{},\"route_overflow\":{},"
+          "\"inflation_area_ratio\":{},\"model_density\":{},\"filler_charge_scale\":{},\"macro_overlap_pairs\":{},\"macro_stack_"
+          "pairs\":{}}}\n",
+          s.iteration,
+          s.overflow,
+          s.raw_overflow,
+          s.hpwl / dbu,
+          s.density_weight,
+          s.route_overflow,
+          s.inflation_area_ratio,
+          s.model_density,
+          s.filler_charge_scale,
+          s.macro_overlaps,
+          s.macro_stacks);
+      progress->flush();
+    };
+  }
   dp::Result   metrics;
   const double initial_hpwl = [&] {
     auto d = v.design;
@@ -2006,6 +2275,10 @@ Result place(hhds::Graph& source, hhds::GraphLibrary& library, const Options& op
   Eco_stats eco;
   if (options.timing_seed) {
     metrics.legal = false;
+  } else if (macro_solved && !cache.reused) {
+    metrics       = macro_run->result.placement;
+    metrics.legal = dp::is_legal(v.design);
+    metrics.hpwl  = dp::hpwl(v.design);
   } else if (!cache.hit && previous && options.full) {
     // The ECO path keeps imported IO positions; slot only the new terminals,
     // treating the imported ones as fixed obstacles for assign_io.
@@ -2042,12 +2315,43 @@ Result place(hhds::Graph& source, hhds::GraphLibrary& library, const Options& op
       }
     }
   } else if (!cache.hit) {
-    metrics = dp::place(v.design, control);
-    capture(v, tech, false);
-    assign_io(v);
-    make_arrays(v, tech);
+    if (!macro_active) {
+      // This prototype determines automatic IO locations. Keep it unchanged
+      // so a cohesion comparison starts with the same fixed IOs and GP seed.
+      auto prototype                = control;
+      prototype.progress_observer   = {};
+      prototype.cohesion_weight     = 0;
+      prototype.scale_macro_density = false;
+      prototype.automatic_bins = prototype.exact_macro_density = prototype.adaptive_density = false;
+      prototype.routability = prototype.improved_routability = false;
+      prototype.macro_overlap_weight = prototype.macro_jitter = 0;
+      if (options.io_iterations) {
+        prototype.max_iterations = options.io_iterations;
+      }
+      prototype.schedule_iterations = 0;
+      metrics                       = dp::place(v.design, prototype);
+      capture(v, tech, false);
+      assign_io(v);
+      make_arrays(v, tech);
+    }
     control.legalize       = options.full;
     control.detailed_place = options.full;
+    if (options.snapshots) {
+      control.observer_interval = options.iterations + 1;
+      control.observer          = [&](const dp::Design& snapshot, dp::PlacementStage stage, int iteration) {
+        if (stage != dp::PlacementStage::global_placement) {
+          return;
+        }
+        std::vector<mp::NodeInfo> info;
+        for (const auto& c : v.cells) {
+          info.push_back({c.name});
+        }
+        for (const auto& t : v.fp.terminals) {
+          info.push_back({"@io:" + t.name, {}, {}, false, false, true});
+        }
+        write_gp_snapshot(snapshot, info, options.output_dir + "/gp.json", iteration);
+      };
+    }
     try {
       metrics = dp::place(v.design, control);
     } catch (const std::runtime_error&) {
@@ -2074,6 +2378,9 @@ Result place(hhds::Graph& source, hhds::GraphLibrary& library, const Options& op
     c.node.attr(attrs::placement_block).set(c.block);
     v.fp.components.push_back({c.name, c.macro, c.place});
   }
+  // Internal array order depends on which cells were cache-locked. Keep the
+  // exported frame identical for the same physical placement.
+  std::ranges::sort(v.fp.components, {}, &ph::Component::name);
   // Keep input port and net names identical: OpenROAD's structural Verilog
   // writer does not emit input aliases for otherwise valid DEF pin/net names.
   // Reserve every port name before choosing names for internal nets.
@@ -2155,6 +2462,128 @@ Result place(hhds::Graph& source, hhds::GraphLibrary& library, const Options& op
   }
   graph.get_input_node().attr(attrs::placement_rc).set(ph::serialize_parasitics(*result.parasitics));
   fs::create_directories(options.output_dir);
+  if (!metrics.history.empty()) {
+    rapidjson::StringBuffer                    buffer;
+    rapidjson::Writer<rapidjson::StringBuffer> json(buffer);
+    json.StartObject();
+    json.Key("bins_x");
+    json.Int(metrics.bins_x);
+    json.Key("bins_y");
+    json.Int(metrics.bins_y);
+    json.Key("poisson_seconds");
+    json.Double(metrics.poisson_seconds);
+    json.Key("converged");
+    json.Bool(metrics.converged);
+    json.Key("iterations");
+    json.Int(metrics.iterations);
+    json.Key("samples");
+    json.StartArray();
+    for (const auto& s : metrics.history) {
+      json.StartObject();
+      json.Key("iteration");
+      json.Int(s.iteration);
+      json.Key("overflow");
+      json.Double(s.overflow);
+      json.Key("hpwl_dbu");
+      json.Double(s.hpwl);
+      json.Key("raw_overflow");
+      json.Double(s.raw_overflow);
+      json.Key("density_weight");
+      json.Double(s.density_weight);
+      json.Key("route_overflow");
+      json.Double(s.route_overflow);
+      json.Key("inflation_area_ratio");
+      json.Double(s.inflation_area_ratio);
+      json.Key("model_density");
+      json.Double(s.model_density);
+      json.Key("filler_charge_scale");
+      json.Double(s.filler_charge_scale);
+      json.Key("macro_overlap_pairs");
+      json.Uint64(s.macro_overlaps);
+      json.Key("macro_stack_pairs");
+      json.Uint64(s.macro_stacks);
+      json.EndObject();
+    }
+    json.EndArray();
+    json.EndObject();
+    std::ofstream output(options.output_dir + "/gp_history.json");
+    if (!(output << buffer.GetString() << '\n')) {
+      throw std::runtime_error("cannot write GP history");
+    }
+    if (!metrics.converged) {
+      std::print(stderr,
+                 "WARNING: native DREAMPlace GP hit iteration cap {} with overflow {:.6f} (target {:.6f})\n",
+                 metrics.iterations,
+                 metrics.overflow,
+                 control.stop_overflow);
+    }
+  }
+  if (options.cohesion > 0) {
+    std::map<std::string, std::vector<const Cell*>> groups;
+    for (const auto& c : v.cells) {
+      if (auto found = v.cohesion_owners.find(c.name); found != v.cohesion_owners.end()) {
+        groups[found->second].push_back(&c);
+      }
+    }
+    rapidjson::StringBuffer                    buffer;
+    rapidjson::Writer<rapidjson::StringBuffer> json(buffer);
+    json.StartObject();
+    json.Key("coefficient_per_um");
+    json.Double(options.cohesion);
+    json.Key("schedule");
+    json.String("linear zero to coefficient during final GP; IO prototype unchanged");
+    json.Key("groups");
+    json.StartArray();
+    for (const auto& [key, members] : groups) {
+      if (members.size() < 2) {
+        continue;
+      }
+      json.StartObject();
+      json.Key("key");
+      json.String(key.c_str());
+      json.Key("macro_members");
+      json.Uint(std::count_if(members.begin(), members.end(), [&](const auto* c) {
+        return !tech.macros.at(c->macro).klass.starts_with("CORE");
+      }));
+      json.Key("nodes");
+      json.StartArray();
+      for (const auto* c : members) {
+        json.String(c->name.c_str());
+      }
+      json.EndArray();
+      json.EndObject();
+    }
+    json.EndArray();
+    json.EndObject();
+    std::ofstream output(options.output_dir + "/cohesion_groups.json");
+    if (!(output << buffer.GetString() << '\n')) throw std::runtime_error("cannot write cohesion groups");
+  }
+  if (macro_run) {
+    // Reconcile the report's original array order with the host's final row
+    // orientations and any standard-cell ECO/cache legalization.
+    for (size_t i = 0; i < macro_report_info.size(); ++i) {
+      const auto& n = macro_report_info[i];
+      if (n.io) {
+        auto terminal                 = v.terminal.at(n.name.substr(4));
+        macro_report_design.node_x[i] = v.fp.terminals[terminal].x;
+        macro_report_design.node_y[i] = v.fp.terminals[terminal].y;
+      } else {
+        const auto& c                           = v.cells[v.cell.at(n.name)];
+        macro_report_design.node_x[i]           = c.place.x;
+        macro_report_design.node_y[i]           = c.place.y;
+        macro_report_design.node_orientation[i] = native_orientation(c.place.orientation);
+      }
+    }
+    // Net and pin CSR order is invariant under cell-array permutation.
+    macro_report_design.pin_offset_x = v.design.pin_offset_x;
+    macro_report_design.pin_offset_y = v.design.pin_offset_y;
+    write_macro_report(*macro_run, macro_report_design, macro_report_info, options, tech.dbu);
+  } else if (!options.timing_seed) {
+    std::error_code error;
+    fs::remove(options.output_dir + "/macro_topology.json", error);
+    fs::remove(options.output_dir + "/h2d.png", error);
+  }
+
   if (memories.empty()) {
     std::error_code error;
     fs::remove(options.output_dir + "/memory_proxies.lef", error);
@@ -2232,6 +2661,18 @@ Result place(hhds::Graph& source, hhds::GraphLibrary& library, const Options& op
             [&](const Cell& c) { return (v.halo_x || v.halo_y) && !tech.macros.at(c.macro).klass.starts_with("CORE"); })),
         allocator);
     json.AddMember("halo", halo, allocator);
+    if (macro_run) {
+      rapidjson::Value macro(rapidjson::kObjectType);
+      macro.AddMember("mode", "h2d", allocator);
+      macro.AddMember("cache_hit", macro_run->cache_hit, allocator);
+      macro.AddMember("groups", static_cast<uint64_t>(macro_run->result.topology.groups.size()), allocator);
+      macro.AddMember("iterations", static_cast<uint64_t>(macro_run->result.iterations.size()), allocator);
+      macro.AddMember("legal", true, allocator);
+      macro.AddMember("topology_file", "macro_topology.json", allocator);
+      macro.AddMember("image_file", "h2d.png", allocator);
+      json.AddMember("macro", macro, allocator);
+    }
+
     rapidjson::Document details;
     const auto          text = std::format(
         R"({{"used":{},"single_cell":{},"released_locks":{},"attempts":{},"moved_cells":{},"max_displacement_um":{},"window_dbu":[{},{},{},{}]}})",

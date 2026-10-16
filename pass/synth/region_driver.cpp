@@ -1176,6 +1176,14 @@ void Region_driver::map_region(const livehd::partition::Region_body& rb) {
       input.attr(livehd::attrs::synth_region).set(rb->module_name);
       input.attr(livehd::attrs::synth_region_id).set(region_id);
       input.attr(livehd::attrs::color).set(rb->color);
+      if (rb->color > 0) {
+        const auto group = rb->module_name + ":color:" + std::to_string(rb->color);
+        for (auto node : rb->body->body().nodes()) {
+          if (!gu::is_builtin_node(node)) {
+            node.attr(livehd::attrs::synth_color_group).set(group);
+          }
+        }
+      }
       if (*resynthesized) {
         input.attr(livehd::attrs::resynth).set({});
       } else {

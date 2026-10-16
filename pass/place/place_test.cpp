@@ -18,6 +18,15 @@
 #include "rapidjson/document.h"
 namespace livehd::placement {
 namespace gu = graph_util;
+TEST(Placement, RepulsionControlsRejectUnsupportedH2dCombination) {
+  hhds::GraphLibrary source, scratch;
+  auto               io    = source.create_io("repulsion_validation");
+  auto               graph = io->create_graph();
+  Options            options;
+  options.macro_mode     = "h2d";
+  options.automatic_bins = true;
+  EXPECT_THROW((void)place(*graph, scratch, options), std::invalid_argument);
+}
 TEST(Placement, AlwaysTransparentLatchAliasesPreservePackedInputsAndSource) {
   // Missing gate, active-high true and active-low false all store no state.
   // Dynamic/closed gates and resettable latches must still require mapping.
@@ -146,10 +155,26 @@ TEST(Placement, MappedBusGraphLegalityRcAndReuse) {
     core_only.halo_x = core_only.halo_y = 1000;
     core_only.cache_dir.clear();
     core_only.output_dir = (root / "core_halo").string();
+    core_only.snapshots  = true;
     hhds::GraphLibrary untouched;
     const auto         same = place(*graph, untouched, core_only);
     EXPECT_EQ(same.floorplan.components, placed.floorplan.components);
     EXPECT_EQ(same.floorplan.die, placed.floorplan.die);
+    std::ifstream snapshot(root / "core_halo/gp.json");
+    ASSERT_TRUE(snapshot.good());
+    const std::string   text{std::istreambuf_iterator<char>(snapshot), {}};
+    rapidjson::Document json;
+    json.Parse(text.c_str());
+    ASSERT_FALSE(json.HasParseError());
+    EXPECT_STREQ(json["stage"].GetString(), "global_placement_before_legalization");
+    ASSERT_EQ(json["nodes"].Size(), 2);
+    std::set<std::string> snapshot_names;
+    for (const auto& node : json["nodes"].GetArray()) {
+      snapshot_names.insert(node[0].GetString());
+      EXPECT_TRUE(std::isfinite(node[1].GetDouble()));
+      EXPECT_TRUE(std::isfinite(node[2].GetDouble()));
+    }
+    EXPECT_EQ(snapshot_names, (std::set<std::string>{"logic.inv", "logic.nand"}));
   }
   EXPECT_FALSE(placed.parasitics->nets.empty());
   EXPECT_TRUE(std::filesystem::exists(root / "place/out.def"));
@@ -1238,4 +1263,116 @@ TEST(Placement, MemoryReadWiderThanPortExtends) {
   EXPECT_EQ(net_of.at("z[5]"), net_of.at("z[3]"));
   EXPECT_TRUE(drives("z[5]", "ram:out_2[3]"));
 }
+TEST(Placement, H2dHierarchyHaloAndMacroCache) {
+  const auto dir = std::filesystem::path(std::getenv("TEST_TMPDIR")) / "h2d_hierarchy";
+  std::filesystem::create_directories(dir);
+  std::ofstream(dir / "ram.lef") << R"(VERSION 5.8 ;
+MACRO h2d_ram
+ CLASS BLOCK ; SIZE 3.17 BY 5.19 ; SYMMETRY X Y ;
+ PIN A
+  DIRECTION INPUT ; USE SIGNAL ;
+  PORT LAYER met1 ; RECT 0 0.1 0.1 0.2 ; END
+ END A
+ PIN Z
+  DIRECTION OUTPUT ; USE SIGNAL ;
+  PORT LAYER met1 ; RECT 3.07 0.1 3.17 0.2 ; END
+ END Z
+END h2d_ram
+END LIBRARY
+)";
+  hhds::GraphLibrary source;
+  auto               ram = source.create_io("h2d_ram");
+  ram->add_input("A", 0);
+  ram->add_output("Z", 0);
+  ram->set_bits("A", 1);
+  ram->set_bits("Z", 1);
+  auto branch = source.create_io("branch");
+  branch->add_input("a", 0);
+  branch->add_output("z", 0);
+  branch->set_bits("a", 1);
+  branch->set_bits("z", 1);
+  auto body   = branch->create_graph();
+  auto signal = body->get_input_pin("a");
+  gu::set_bits(signal, 1);
+  for (int i = 0; i < 2; ++i) {
+    auto node = gu::create_typed_node(*body, Ntype_op::Sub);
+    node.set_name("ram" + std::to_string(i));
+    node.set_subnode(ram);
+    node.create_sink_pin("A").connect_driver(signal);
+    signal = node.create_driver_pin("Z");
+    gu::set_bits(signal, 1);
+  }
+  body->get_output_pin("z").connect_driver(signal);
+  auto top = source.create_io("h2d_top");
+  top->add_input("a", 0);
+  top->add_output("z", 0);
+  top->set_bits("a", 1);
+  top->set_bits("z", 1);
+  auto graph = top->create_graph();
+  signal     = graph->get_input_pin("a");
+  gu::set_bits(signal, 1);
+  for (int i = 0; i < 2; ++i) {
+    auto node = gu::create_typed_node(*graph, Ntype_op::Sub);
+    node.set_name("u" + std::to_string(i));
+    node.set_subnode(branch);
+    node.create_sink_pin("a").connect_driver(signal);
+    signal = node.create_driver_pin("z");
+    gu::set_bits(signal, 1);
+  }
+  graph->get_output_pin("z").connect_driver(signal);
+  Options options;
+  options.lefs        = {"inou/lefdef/tests/data/sky130hd.tlef", "inou/lefdef/tests/data/sky130hd.lef", (dir / "ram.lef").string()};
+  options.liberty     = "inou/lefdef/tests/data/sky130hd.lib";
+  options.output_dir  = (dir / "out").string();
+  options.cache_dir   = (dir / "cache").string();
+  options.utilization = .03;
+  options.density     = .5;
+  options.iterations  = 10;
+  options.bins        = 8;
+  options.halo_x      = 1;
+  options.halo_y      = 1;
+  options.macro_mode  = "h2d";
+  options.macro_parameters.K               = 2;
+  options.macro_parameters.iters_per_outer = 5;
+  options.macro_parameters.bins            = 8;
+  options.macro_parameters.evals           = 4;
+  options.macro_parameters.seed_sa_evals   = 4;
+  hhds::GraphLibrary flat;
+  const auto         first = place(*graph, flat, options);
+  auto               tech  = physical::read_lef(options.lefs);
+  EXPECT_NO_THROW(check_legality(tech, first.floorplan, 1, 1));
+  ASSERT_EQ(first.floorplan.components.size(), 4);
+  for (const auto& c : first.floorplan.components) {
+    EXPECT_EQ(c.place.status, physical::Status::FIXED);
+    EXPECT_EQ(c.place.width, 3170);
+    EXPECT_EQ(c.place.height, 5190);
+  }
+  auto read = [&](const char* name) {
+    std::ifstream in(options.output_dir + "/" + name);
+    return std::string{std::istreambuf_iterator<char>(in), {}};
+  };
+  rapidjson::Document report;
+  report.Parse(read("macro_topology.json").c_str());
+  ASSERT_FALSE(report.HasParseError());
+  EXPECT_FALSE(report["cache_hit"].GetBool());
+  ASSERT_EQ(report["groups"].Size(), 2);
+  for (const auto& g : report["groups"].GetArray()) {
+    EXPECT_EQ(g["members"].Size(), 2);
+  }
+  EXPECT_TRUE(std::filesystem::is_regular_file(options.output_dir + "/h2d.png"));
+  hhds::GraphLibrary warm_flat;
+  auto               warm = place(*graph, warm_flat, options);
+  EXPECT_EQ(first.floorplan.components, warm.floorplan.components);
+  report.Parse(read("macro_topology.json").c_str());
+  ASSERT_FALSE(report.HasParseError());
+  EXPECT_TRUE(report["cache_hit"].GetBool());
+  options.macro_parameters.seed += 1;
+  hhds::GraphLibrary changed;
+  auto               rerun = place(*graph, changed, options);
+  (void)rerun;
+  report.Parse(read("macro_topology.json").c_str());
+  ASSERT_FALSE(report.HasParseError());
+  EXPECT_FALSE(report["cache_hit"].GetBool());
+}
+
 }  // namespace livehd::placement

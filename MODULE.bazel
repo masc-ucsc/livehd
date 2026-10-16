@@ -79,7 +79,8 @@ bazel_dep(name = "bison", version = "3.8.2.bcr.11")
 bazel_dep(name = "flex", version = "2.6.4.bcr.8")
 
 bazel_dep(name = "rapidjson", version = "1.1.0.bcr.20250205")
-# Co-development: the sibling supplies the native per-node halo API.
+# Co-development: native placement, halos, H2D and opt-in repulsion/routability.
+# Validated sibling revision: 7b9b496 (original 32-bin default; auto grid <=64).
 # Refresh the archive pin after publishing these changes before restoring it.
 local_repository(
     name = "dreamplace",

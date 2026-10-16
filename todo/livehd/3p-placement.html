@@ -10,7 +10,7 @@
 <nav><span class="brand">LiveHD TODO</span><a href="../index.html">← All tasks</a></nav>
 <main>
 <h1><strong class="item-id">3p</strong> Placement feedback for synthesis</h1>
-<p>Pending placement work, reviewed 2026-10-15. Prioritize independent validation and
+<p>Pending placement work, reviewed 2026-10-16. Prioritize independent validation and
 repair quality before widening optimization bounds; the current flow and its limits
 are documented in <a href="../../pass/place/README.md">pass/place/README.md</a>.</p>
 
@@ -33,9 +33,48 @@ GP did not converge (overflow 0.699 without halos, 0.474 with halos at density 0
 With halos, padded occupancy is 57.04%, imposing an overflow lower bound of 0.123
 at density 0.5 even with perfect distribution. These overflow values use different
 occupancy envelopes; keep legality, convergence and physical HPWL separate.</p>
+<p>The later matched-input native repulsion ablation reaches macro-aware overflow
+0.0965 in 560 iterations with zero stacked pairs. Its final corrected routability
+run has 4,739 mm physical HPWL versus the frozen plain baseline's 6,201 mm;
+maximum macro legalization movement falls from 629 to 18.7 µm. A finer grid alone
+worsens quality. Movable macro charge, filler accounting, explicit overlap forces
+and overflow-driven weights must be evaluated together. The new controls remain
+opt-in; direct DCT loops and existing defaults are retained. Common-grid overflow,
+per-step times, pre/post legalization PNGs, independent halo checks and separate
+OpenROAD congestion probes are recorded in
+<code>repros/eyeriss_repulsion_20261016/comparison.html</code>.</p>
+<p><strong>Grid decision:</strong> retain the original 32×32 default and cap
+optional automatic refinement at 64×64. In the fixed-IO follow-up, the R4-family
+corrected model gives 6,641 mm HPWL at 32 bins (40 iterations), 6,578 mm at
+64 bins capped at the same 40 iterations, and 5,767 mm at 64 bins with normal
+stopping (480 iterations). Its direct DCT solve costs 0.57 s, versus 81.25 s
+for the historical 256-bin case. The large-grid result above is retained as
+historical evidence, not the current grid recommendation. Keep density and
+stopping calibration open: the 64-bin final frame measures 0.1425 overflow on
+the common 256-bin evaluation grid despite meeting its selected-grid target.
+See the committed <a href="placement-results/eyeriss-20261016/comparison.html">grid
+comparison with PNGs and per-run settings</a>. H2D remains off for these runs.</p>
+<p>Downstream 30-iteration global routing reaches zero overflow for both the
+native baseline and final variant, with routed length falling from 8.105 to
+6.670 m. The equal-effort one-iteration probe completes for every placement:
+native baseline/final overflow is 1160/718, versus 219 for the archived
+OpenROAD reference. Keep these protocols separate; the reference 30-iteration
+attempt times out at 900 seconds. These are pre-CTS congestion probes, not
+completed CTS/detail-routing or signoff timing results.</p>
+<p>The matched-core 2026-10-16 comparison is complete for native
+<code>none</code>, full <code>h2d</code> and the OpenROAD geometry-only variant.
+All pass OpenROAD physical checking; both native runs also pass the strict 5 µm
+per-SRAM halo audit. H2D has 193 groups, 3 rounds (round 1 selected), 401 screened
+search proposals and zero accepted moves. It trades higher HPWL (12,565 versus
+6,201 mm) and placement/export time (592.5 versus 77.0 s) for improved preliminary
+OpenSTA WNS (−34.13 versus −77.15 ns). The geometry reference has 8,941 mm HPWL
+and −16.84 ns WNS. Its uniform per-SRAM halo audit fails, so clearance semantics
+are not yet controlled across backends. Reference synthesis and macro/IO
+preparation are reused with measured times; GP/DP, checking, timing and PNGs are
+fresh. Artifacts: <code>repros/eyeriss_h2d_20261016/comparison.html</code>.</p>
 <ol>
-  <li><strong>Freeze inputs and validate timing semantics.</strong> Save the mapped
-  netlist, tool revisions, library hashes and exact command/configuration for reuse.
+  <li><strong>Validate timing semantics against the frozen inputs.</strong> Use
+  the saved mapped netlists, revisions, library hashes and exact commands.
   Audit standard-cell and SRAM corners, Liberty time/capacitance/area units, LEF
   geometry and DBU, bus-bit identities and clock-to-output/setup/hold arcs. Validate
   representative SRAM paths and loads against OpenSTA before trusting OpenTimer
@@ -48,13 +87,18 @@ occupancy envelopes; keep legality, convergence and physical HPWL separate.</p>
   the native-memory zero-internal-delay proxy model does not apply to these cells.
   Retain the deferred one-hot and full-design equivalence checks as unresolved
   functional evidence, separately from physical legality.</li>
-  <li><strong>Improve GP convergence and inspect placement quality.</strong> Use
-  the legal movable-macro checkpoint to investigate high overflow and the clustered
-  layout. Measure explicit bin/iteration experiments with frozen inputs and binary,
-  utilization 0.30 and density 0.5. Record HPWL, displacement, runtime and whole-core
-  legality; do not change defaults from a single design. Decide whether a dedicated
-  macro-placement stage or additional blockage support helps after these results.
-  The generated floorplan is not proof of equality with HighTide's floorplan sizing.</li>
+  <li><strong>Validate repulsion and routability beyond Eyeriss.</strong> Repeat
+  the opt-in controls on other technologies, macro mixes and tight whitespace.
+  Use common-resolution macro-aware overflow alongside physical overlaps, since
+  coarse-grid stopping can be optimistic and full-density macros impose an
+  intrinsic excess against a sub-unity target. Separate density-grid effects from
+  the currently coupled wirelength-smoothing and RUDY scales. Measure DCT cost,
+  HPWL, displacement, runtime and whole-core legality; do not change defaults from
+  a single design. Evaluate per-bin multipliers only if global feedback is insufficient.
+  Repair H2D's geometry-to-sequence-pair conversion before tuning search: the
+  selected legal packing encodes to a required height of 1805.502 µm in a
+  1412.64 µm core. Keep the feasibility screen and validate the incumbent pair.
+  Keep the measured common core/rows and paired native IO positions fixed.</li>
   <li><strong>Broaden physical connectivity and ECO validation.</strong> Compare
   each SRAM bank's address, data and clock connections in the source, mapped netlist
   and DEF, including repeated vector-port macros and oriented pins. Extend ECO
@@ -72,9 +116,13 @@ occupancy envelopes; keep legality, convergence and physical HPWL separate.</p>
   critical SRAM and register paths with OpenSTA. Serialize resource-bounded trials.
   Reuse compatible compiled/mapped artifacts with a frozen binary, and separate cold
   runs from warm reuse measurements.</li>
-  <li><strong>Compare the stable pre-CTS checkpoints.</strong> Build the corrected
-  <code>//designs/asap7/eyeriss:eyeriss_place</code> reference and score both untouched
-  placements with HighTide's pinned OpenROAD/OpenSTA, original SDC, ideal clocks,
+  <li><strong>Complete the standard OpenROAD reference and clearance parity.</strong> Build the corrected
+  <code>//designs/asap7/eyeriss:eyeriss_place</code> reference: default hierarchical
+  macro placement failed MPL-0040, and the one-level timing-driven attempt did
+  not complete. The completed geometry-only comparison is a separate variant.
+  Resolve the uniform per-SRAM halo difference (55 expanded reference boxes
+  cross the core boundary); keep physical legality separate from clearance.
+  Score untouched placements with HighTide's pinned OpenROAD/OpenSTA, original SDC, ideal clocks,
   common placement-RC assumptions and activity assumptions. OpenROAD import and
   <code>check_placement</code> must not silently move or resize LiveHD cells; any
   handoff repair is a separate checkpoint with its own delta and time. Generate
@@ -111,14 +159,16 @@ occupancy envelopes; keep legality, convergence and physical HPWL separate.</p>
     coverage; do not label them equivalent.</td></tr>
     <tr><td>Hard-macro placement</td><td>The native DREAMPlace GP and macro legalizer now
     accept these movable SRAMs and produce legal placement. A separate
-    <code>synth.place.macro=</code> backend is not a prerequisite; evaluate it
-    only if later placement-quality measurements justify it.</td></tr>
+    <code>synth.place.macro=h2d</code> backend is now implemented and evaluated;
+    fix the measured sequence-pair, grouping and runtime gaps before claiming
+    improved placement quality. The default remains <code>none</code>.</td></tr>
   </tbody>
 </table>
 
 <h2>Depends on</h2>
 <p>Eyeriss timing optimization depends on the unit/SDC checks above. Geometry-only
-placement now passes independent legality checks; GP convergence remains open. Backend extensions must use the native C++ DREAMPlace boundary, the flat
+placement passes independent legality checks and opt-in Eyeriss GP now reaches its
+macro-aware overflow target. Broader/default tuning remains open. Backend extensions must use the native C++ DREAMPlace boundary, the flat
 placed graph and in-memory OpenTimer RC/STA.</p>
 
 <h2>Subtasks — pending</h2>
@@ -132,10 +182,11 @@ placed graph and in-memory OpenTimer RC/STA.</p>
       <li>Measure full SKY130 and ASAP7 designs, including high fanout, multiple memories,
       tight whitespace and incremental edits. Declare benchmark inputs and technology
       dependencies in the benchmark repository; keep default LiveHD tests self-contained.</li>
-      <li>Report legality separately from GP overflow/convergence. Sweep bins and iteration
-      budgets: a small trial legalized at 32 bins/500 iterations without reaching the GP
-      target, while 16/1500 reached it. Do not generalize that tuning or change defaults
-      from one fixture.</li>
+      <li>Report legality separately from GP overflow/convergence. Broaden the
+      Eyeriss repulsion/routability ablation with fixed seeds, common-grid overflow
+      and independent halo checks. Validate the late RUDY model against reference
+      routing, including capacity-layer choices, conservative OBS envelopes and pin
+      access. Do not generalize tuning or change defaults from one fixture.</li>
       <li>Attribute gains with separate timing-seed, placed-RC refinement, sizing, Steiner
       repair and cone ablations. Small SKY130 trials do not establish large-design QoR;
       the ALU rejected later weighting and repair trials while the memory accepted a
@@ -205,8 +256,9 @@ placed graph and in-memory OpenTimer RC/STA.</p>
   </li>
   <li><strong>M2 — Timing optimizer refinements.</strong>
     <ul>
-      <li>Add timing/overflow checkpoints inside a solver call and evaluate retaining
-      Nesterov state between weight updates. The current post-synthesis seed and
+      <li>Integrate the native progress observer and continuation state with timing
+      checkpoints and evaluate retaining Nesterov state between timing-weight updates.
+      The current post-synthesis seed and
       placed-RC rounds restart the solver; compare total work and final QoR before
       replacing that baseline.</li>
       <li>Evaluate slacks after virtual buffering, following the
@@ -251,12 +303,37 @@ placed graph and in-memory OpenTimer RC/STA.</p>
   </li>
   <li><strong>M4 — Macro placement and floorplanning.</strong>
     <ul>
-      <li>Select a permissively licensed backend and verify the selected revision's
-      license before integration. Evaluate the native DREAMPlace macro flow or an
-      OpenROAD <code>mpl</code> adapter through the existing floorplan boundary.</li>
-      <li>Add the planned <code>synth.place.macro=</code> stage for hard macros and memories,
-      producing FIXED macro positions for standard-cell placement. Account for halos,
-      channels, pin access and whitespace needed by later repair.</li>
+      <li>Repair H2D's legal-geometry-to-sequence-pair conversion and require that
+      the incumbent pair fits the outline before search. The Eyeriss conversion
+      requires 1805.502 µm height despite legal 1412.64 µm geometry; all 401 moves
+      were screened out. Retain hard constraints and packing checks. Recompute
+      accepted-frame slack after heuristic recovery rather than carrying failed
+      LP outline slack into the legal fallback's score/report.</li>
+      <li>Reduce H2D dataflow and TopoSearch overhead using the Eyeriss profile.
+      First remove the full-topology copy used for each final anchor/order
+      violation: 193 + 848 constraints cause 1041 copies; driver topology
+      copy/destruction is 19.4% of full-run samples. Compute against const
+      references and a cached group index. The sampled run reproduces the exact
+      quality-run DEF. Detailed placement is 16.1% of samples; measure an opt-in
+      final-frame-only DP experiment. Dataflow construction is 2.25%, so cached
+      HHDS traversal is useful but is not the main measured bottleneck.
+      Separate immutable dataflow from mutable candidate geometry: 193 Eyeriss
+      groups carry 2,388,229 named flows and a 736 MiB topology JSON. Seed/search
+      currently copy all flows. Reuse physical-name/member indexes and screen
+      sequence pairs before rebuilding the full abstract design. Aggregate solver
+      links after the existing threshold; keep weights/multiplicities and full
+      metadata. Serialize host/native reports once and intern cached edge names. For hierarchy
+      and dataflow preparation, use HHDS
+      <code>body().nodes(hhds::Node_order::forward)</code>, whose walk already
+      provides a cached topological order; do not recompute that order.
+      Preserve contextual instance boundaries, register-hop weights, fanout cuts
+      and cycle handling. The flat TopoSearch geometry graph has its own changing
+      candidate order and remains independent of HHDS.</li>
+      <li>Measure anchors/order/loop, pseudo-net, lite/SA and opt-in routability
+      ablations on macro-heavy designs. Synthetic correctness and cache tests
+      do not establish a quality advantage or large-design throughput.</li>
+      <li>Add future hierarchical/leaf constraint attributes through the typed
+      topology seam, with leaf precedence and incremental invalidation.</li>
       <li>Co-optimize macro positions and IO pins under timing feedback, with independent
       mixed-size legality checks. Compare against deterministic proxy packing before
       adding more floorplanning complexity.</li>

@@ -118,12 +118,30 @@ livehd::placement::Options placement_options(const Options& opts) {
   if (mode != "full" && mode != "gp") {
     throw Lhd_error{"usage", "synth.place.mode must be full or gp", ""};
   }
-  out.full            = mode == "full";
-  out.utilization     = number("place.utilization", "0.5");
-  out.aspect          = number("place.aspect", "1");
-  out.density         = number("place.density", "0.8");
-  out.iterations      = integer("place.iterations", "500");
-  out.bins            = integer("place.bins", "32");
+  out.full      = mode == "full";
+  out.snapshots = truthy(synth_set(opts, "place.snapshots", "false"));
+  out.cohesion  = number("place.cohesion", "0");
+  if (out.cohesion < 0) {
+    throw Lhd_error{"usage", "synth.place.cohesion must be nonnegative", ""};
+  }
+  out.utilization          = number("place.utilization", "0.5");
+  out.aspect               = number("place.aspect", "1");
+  out.density              = number("place.density", "0.8");
+  out.iterations           = integer("place.iterations", "500");
+  out.bins                 = integer("place.bins", "32");
+  out.scale_macro_density  = truthy(synth_set(opts, "place.scale_macro_density", "false"));
+  out.automatic_bins       = truthy(synth_set(opts, "place.auto_bins", "false"));
+  out.exact_macro_density  = truthy(synth_set(opts, "place.exact_macro_density", "false"));
+  out.adaptive_density     = truthy(synth_set(opts, "place.adaptive_density", "false"));
+  out.routability          = truthy(synth_set(opts, "place.routability", "false"));
+  out.macro_overlap_weight = number("place.macro_overlap", "0");
+  out.macro_jitter         = number("place.macro_jitter", "0");
+  out.io_iterations        = integer("place.io_iterations", "0");
+  out.schedule_iterations  = integer("place.schedule_iterations", "0");
+  if (out.macro_overlap_weight < 0 || out.macro_jitter < 0 || out.macro_jitter > .1 || out.schedule_iterations < 0
+      || out.io_iterations < 0) {
+    throw Lhd_error{"usage", "invalid synth.place repulsion controls", ""};
+  }
   out.threads         = integer("place.threads", "1");
   const auto halo     = synth_set(opts, "place.halo", "0");
   char*      halo_end = nullptr;
@@ -141,6 +159,38 @@ livehd::placement::Options placement_options(const Options& opts) {
   }
   if (*halo_end != '\0' || !std::isfinite(out.halo_x) || !std::isfinite(out.halo_y) || out.halo_x < 0 || out.halo_y < 0) {
     throw Lhd_error{"usage", "invalid synth.place.halo", "expected nonnegative microns: H or X,Y"};
+  }
+  out.macro_mode = synth_set(opts, "place.macro", "none");
+  if (out.macro_mode != "none" && out.macro_mode != "h2d") {
+    throw Lhd_error{"usage", "synth.place.macro must be none or h2d", ""};
+  }
+  if (out.macro_mode == "h2d" && !out.full) {
+    throw Lhd_error{"usage", "H2D requires synth.place.mode=full", "macro realization includes legal cell placement"};
+  }
+  namespace mp = DreamPlace::native::macro;
+  try {
+    for (const auto& spec : mp::parameter_specs()) {
+      const std::string key   = "place.macro." + std::string(spec.name);
+      auto              value = synth_set(opts, key, spec.default_value);
+      if (spec.kind == mp::ParameterKind::boolean) {
+        if (value != "true" && value != "false" && value != "1" && value != "0" && value != "on" && value != "off") {
+          throw std::invalid_argument("expected boolean for " + key);
+        }
+        value = truthy(value) ? "true" : "false";
+      }
+      mp::set_parameter(out.macro_parameters, spec.name, value);
+    }
+    // Explicit global placement grid/worker settings are inherited unless a
+    // corresponding H2D-specific setting was supplied.
+    if (!std::any_of(opts.sets.begin(), opts.sets.end(), [](const auto& s) { return s.first == "synth.place.macro.bins"; })) {
+      out.macro_parameters.bins = out.bins;
+    }
+    if (!std::any_of(opts.sets.begin(), opts.sets.end(), [](const auto& s) { return s.first == "synth.place.macro.threads"; })) {
+      out.macro_parameters.threads = out.threads;
+    }
+    out.macro_parameters.validate();
+  } catch (const std::invalid_argument& error) {
+    throw Lhd_error{"usage", "invalid synth.place.macro parameter", error.what()};
   }
   const auto rc = synth_set(opts, "place.wire_rc", "");
   if (!rc.empty()) {
