@@ -18,6 +18,7 @@ struct Options {
   std::string                           liberty, tech_rc_file;
   std::string                           macro_mode = "none";
   bool                                  fp_place = true, fp_snap_enabled = true;
+  bool                                  fp_colors     = false;  // uncovered single-color candidates, never centroid-snapped
   int                                   fp_iterations = 1500, fp_min_copies = 4;
   double                                fp_minimum = 3000, fp_attraction = .25, fp_repulsion = 5, fp_anchor = .25;
   DreamPlace::native::FloorplanOptions  fp_snap;
@@ -33,7 +34,6 @@ struct Options {
   bool   automatic_bins = false, exact_macro_density = true, adaptive_density = true, routability = true;
   bool   routability_charge_compensation = true;
   double macro_overlap_weight = 50, macro_jitter = .01;
-  double filler_width       = 0;  // microns; zero keeps native mean-cell sizing
   double macro_align_weight = 0, macro_align_sigma = 0, macro_align_overlap_boost = 0;
   int    macro_align_start = 100, macro_align_full = 500;
   bool   macro_align_nearest = false, macro_snap = true;

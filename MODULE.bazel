@@ -79,22 +79,15 @@ bazel_dep(name = "bison", version = "3.8.2.bcr.11")
 bazel_dep(name = "flex", version = "2.6.4.bcr.8")
 
 bazel_dep(name = "rapidjson", version = "1.1.0.bcr.20250205")
-# Co-development: native placement, halos, H2D and opt-in repulsion/routability.
-# Validated sibling revision: 7b9b496 (original 32-bin default; auto grid <=64).
-# Refresh the archive pin after publishing these changes before restoring it.
-local_repository(
-    name = "dreamplace",
-    path = "../DREAMPlace",
-)
 # Native CPU placement; the archive uses LiveHD's HHDS/HLOP repositories.
-# http_archive(
-#     name = "dreamplace",
-#     patches = ["//packages:dreamplace-lemon.patch", "//packages:dreamplace-zero-area.patch", "//packages:dreamplace-instantiate.patch", "//packages:dreamplace-mixed-size.patch"],
-#     patch_args = ["-p1"],
-#     urls = ["https://github.com/masc-ucsc/DREAMPlace/archive/fc5e043a9ad2bb7808fcbe262f4281f06e1d23d3.tar.gz"],
-#     sha256 = "0730511d153d712f78fa4a700fd34ebe4adc62d647334ce9e9e15cb9c1675d2a",
-#     strip_prefix = "DREAMPlace-fc5e043a9ad2bb7808fcbe262f4281f06e1d23d3",
-# )
+http_archive(
+    name = "dreamplace",
+    urls = ["https://github.com/masc-ucsc/DREAMPlace/archive/fa11983f5c3ba29280afc4b804f8dd6c261a8a33.tar.gz"],
+    sha256 = "d1627167528165474e5cc13a5487e9a9becd821da80094eb4f4b6f9ee63ac9b3",
+    strip_prefix = "DREAMPlace-fa11983f5c3ba29280afc4b804f8dd6c261a8a33",
+)
+# For local co-development swap the http_archive above for:
+# local_repository(name = "dreamplace", path = "../DREAMPlace")
 bazel_dep(name = "openmp", version = "21.1.5.bcr.3")
 # Plain-repository fetch: Bzlmod root-only overrides would break LiveHD consumers.
 http_archive(

@@ -22,6 +22,7 @@
 #include <unordered_map>
 #include <unordered_set>
 
+#include "color_centroids.hpp"
 #include "h2d.hpp"
 #include "memory_proxy.hpp"
 #include "technology_rc.hpp"
@@ -162,8 +163,8 @@ std::string environment_key(const Options& o, const ph::Technology& tech) {
   if (o.fp_place && !o.fp_snap_enabled) {
     h = hash_text("fp:no_snap", h);
   }
-  if (o.filler_width > 0) {
-    h = hash_text(std::format("filler_width:{}", o.filler_width), h);
+  if (o.fp_place && o.fp_colors) {
+    h = hash_text("fp:uncovered-colors", h);
   }
   if (o.scale_macro_density || o.automatic_bins || o.exact_macro_density || o.adaptive_density || o.routability
       || o.macro_overlap_weight || o.macro_jitter || o.schedule_iterations || o.io_iterations) {
@@ -436,6 +437,8 @@ struct View {
   bool                                      native_orientations = false;
   bool                                      align_macros        = false;
   bool                                      centroids           = false;
+  bool                                      color_centroids     = false;
+  size_t                                    hierarchy_centroids = 0;
   double                                    centroid_minimum    = 2000;
   int                                       centroid_min_copies = 4;
   int64_t                                   halo_x = 0, halo_y = 0;
@@ -639,7 +642,11 @@ void make_arrays(View& v, const ph::Technology& tech) {
         d.node_centroid_color[i] = it->second;
       }
     }
-    d.centroid_groups = dp::detail::centroid_candidates(d, paths, masters, v.centroid_minimum, v.centroid_min_copies);
+    d.centroid_groups     = dp::detail::centroid_candidates(d, paths, masters, v.centroid_minimum, v.centroid_min_copies);
+    v.hierarchy_centroids = d.centroid_groups.size();
+    if (v.color_centroids) {
+      add_color_centroids(d, v.centroid_minimum);
+    }
   }
   if (v.native_orientations) {
     // Net-driver enumeration changes after standard-cell ECOs. A macro-frame
@@ -1404,7 +1411,7 @@ dp::Result local_place(View& v, const ph::Technology& tech, const Options& optio
       control.bins_x = control.bins_y = std::min(options.bins, 16);
       control.num_threads             = options.threads;
       control.target_density          = options.density;
-      control.filler_width            = options.filler_width * tech.dbu;
+      control.add_fillers             = false;
       control.legalize                = true;
       control.detailed_place          = true;
       metrics                         = dp::place(d, control);
@@ -1638,8 +1645,7 @@ Steiner_tree steiner_tree(const std::vector<Point>& points) {
 }
 static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, const Options& options) {
   if (!(options.utilization > 0 && options.utilization < 1) || !(options.aspect > 0 && std::isfinite(options.aspect))
-      || !(options.density > 0 && options.density <= 1) || options.utilization > options.density || options.iterations < 0
-      || options.bins < 2 || options.threads < 1) {
+      || !(options.density > 0 && options.density <= 1) || options.iterations < 0 || options.bins < 2 || options.threads < 1) {
     throw std::invalid_argument("invalid placement utilization/aspect/density/iteration/bin/thread settings");
   }
   if (!std::isfinite(options.halo_x) || !std::isfinite(options.halo_y) || options.halo_x < 0 || options.halo_y < 0) {
@@ -1647,9 +1653,6 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
   }
   if (options.macro_mode != "none" && options.macro_mode != "h2d" && options.macro_mode != "r8h2" && options.macro_mode != "r8h3") {
     throw std::invalid_argument("macro placement mode must be none, h2d, r8h2 or r8h3");
-  }
-  if (!std::isfinite(options.filler_width) || options.filler_width < 0) {
-    throw std::invalid_argument("invalid GP filler width");
   }
   if (options.fp_iterations < 0 || options.fp_min_copies < 2 || options.fp_attraction <= 0 || options.fp_repulsion <= 0
       || (options.fp_place && options.macro_mode == "h2d")) {
@@ -1672,7 +1675,7 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
   if (macro_active
       && (options.automatic_bins || options.exact_macro_density || options.scale_macro_density || options.adaptive_density
           || options.routability || options.macro_overlap_weight || options.macro_jitter || options.schedule_iterations
-          || options.io_iterations || options.filler_width > 0)) {
+          || options.io_iterations)) {
     throw std::invalid_argument("native repulsion experiment controls currently require synth.place.macro=none");
   }
   if (!std::isfinite(options.cohesion) || options.cohesion < 0 || (macro_active && options.cohesion > 0)) {
@@ -1719,6 +1722,7 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
   // ECO starts from the supplied physical frame; centroid initialization is a
   // fresh-placement stage and must not overwrite its unchanged neighbors.
   v.centroids           = !options.previous && (options.fp_place || options.macro_mode == "r8h2" || options.macro_mode == "r8h3");
+  v.color_centroids     = options.fp_place && options.fp_colors;
   v.centroid_minimum    = options.fp_place ? options.fp_minimum : (options.macro_mode == "r8h3" ? 1000 : 2000);
   v.centroid_min_copies = options.fp_min_copies;
   v.align_macros        = options.macro_align_weight > 0 || options.macro_snap;
@@ -1825,7 +1829,7 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
           }
         }
         const auto width = frame.rows.front().count * sw, height = static_cast<int64_t>(frame.rows.size()) * rh;
-        if (frame.design == source.get_name() && area <= double(width) * height * options.density && max_width <= width
+        if (frame.design == source.get_name() && area <= double(width) * height && max_width <= width
             && max_height <= static_cast<int64_t>(height)) {
           previous         = std::make_shared<ph::Floorplan>(std::move(frame));
           cached_reference = true;
@@ -2245,6 +2249,7 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
       prototype.bins_x = prototype.bins_y = options.bins;
       prototype.num_threads               = options.threads;
       prototype.target_density            = options.density;
+      prototype.add_fillers               = false;
       prototype.legalize = prototype.detailed_place = false;
       dp::place(v.design, prototype);
       capture(v, tech, false);
@@ -2383,7 +2388,9 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
   control.bins_x = control.bins_y   = options.bins;
   control.num_threads               = options.threads;
   control.target_density            = options.density;
-  control.filler_width              = options.filler_width * tech.dbu;
+  // The caller's floorplan is authoritative. Density is a soft spreading
+  // target; never add artificial nodes merely to fill its whitespace.
+  control.add_fillers               = false;
   control.cohesion_weight           = options.cohesion / tech.dbu;
   control.macro_align_weight        = options.macro_align_weight;
   control.macro_align_sigma         = options.macro_align_sigma;
@@ -2602,7 +2609,7 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
       }
       const auto& l = v.design.layout;
       if (options.fp_snap_enabled) {
-        fp_snap = dp::snap_floorplan(fp_before, l.xl, l.yl, l.xh, l.yh, options.fp_snap);
+        fp_snap = snap_centroid_targets(fp_before, v.hierarchy_centroids, l, options.fp_snap);
       } else {
         // A true bypass: do not call the point fitter or repair its circles.
         fp_snap.emplace();
@@ -2678,6 +2685,8 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
     json.Int(options.bins);
     json.Key("minimum_equivalent_cells");
     json.Double(options.fp_minimum);
+    json.Key("color_candidates_enabled");
+    json.Bool(options.fp_colors);
     json.Key("minimum_copies_per_parent");
     json.Int(options.fp_min_copies);
     json.Key("copy_scope");
@@ -2731,6 +2740,12 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
       json.StartObject();
       json.Key("name");
       json.String(p.name.c_str());
+      json.Key("kind");
+      json.String(i < v.hierarchy_centroids ? "hierarchy" : "color");
+      json.Key("snap_eligible");
+      json.Bool(i < v.hierarchy_centroids);
+      json.Key("repulsion_scope");
+      json.Int(v.design.centroid_groups[i].repulsion_scope);
       json.Key("family");
       json.Int(p.family);
       json.Key("parent");
@@ -2860,6 +2875,12 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
       json.StartObject();
       json.Key("path");
       json.String(g.name.c_str());
+      json.Key("kind");
+      json.String(i < v.hierarchy_centroids ? "hierarchy" : "color");
+      json.Key("snap_eligible");
+      json.Bool(i < v.hierarchy_centroids);
+      json.Key("repulsion_scope");
+      json.Int(g.repulsion_scope);
       json.Key("copy_parent");
       json.String(g.copy_parent.c_str());
       json.Key("copies_per_parent");
@@ -3325,7 +3346,7 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
     fs::remove(def, ec);
   }
   result.qor = std::format(
-      R"({{"schema_version":1,"kind":"placement","mode":"{}","legal":{},"gp_converged":{},"gp_overflow":{},"hpwl_um":{},"initial_hpwl_um":{},"cells":{},"nets":{},"estimated_macros":{},"timing_model":"placement_rc","timing_approximate":{},"rc_identity":"{}","incremental":{{"enabled":{},"hit":{},"reused_blocks":{},"changed_blocks":{}}}}})",
+      R"({{"schema_version":1,"kind":"placement","mode":"{}","legal":{},"gp_converged":{},"gp_overflow":{},"hpwl_um":{},"initial_hpwl_um":{},"cells":{},"nets":{},"estimated_macros":{},"virtual_fillers":false,"density_constraint":"soft","timing_model":"placement_rc","timing_approximate":{},"rc_identity":"{}","incremental":{{"enabled":{},"hit":{},"reused_blocks":{},"changed_blocks":{}}}}})",
       options.timing_seed ? "post_synthesis_zero_wire"
       : options.full      ? "full"
                           : "gp",

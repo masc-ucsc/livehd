@@ -14,11 +14,133 @@
 repair quality before widening optimization bounds; the current flow and its limits
 are documented in <a href="../../pass/place/README.md">pass/place/README.md</a>.</p>
 
-<h2 id="eyeriss-placement">Next — Eyeriss ASAP7 placement bring-up</h2>
+<h2 id="eyeriss-placement">Next — Eyeriss fixed-macro cell placement and CTS/routing comparison</h2>
+<p>The current follow-on freezes saved R4/R7/R8 SRAM layouts, reruns native
+DREAMPlace for standard cells with 64×64 bins, and hands the resulting DEF to
+the installed HighTide OpenROAD flow for CTS, global/detail routing and extraction.
+R4's source macro GP used 256 bins, R7 used 64 and R8 used 32; keeping those
+macro positions preserves the distinct layouts. Report both source and cell-pass
+grids. The R7 snap-only and alignment+snap fixed-cell passes are legal, meet their
+selected-grid GP target and preserve all 1040 SRAM positions, masters and
+orientations plus IO locations. HPWL becomes 4.644/4.740 m. R8 and R4 also finish legal and below overflow 0.1,
+with HPWL 4.936/11.809 m; retain the R4 regression as a measured outcome.
+Downstream CTS/routing is still in progress; no routed-completion claim yet.
+The <a href="placement-results/eyeriss-cts-route-20261016/comparison.html">comparison report</a>
+includes selectable boxes and SRAM highlights for all four ClusterGroups and
+36 ProcessingElements. These are visualization envelopes only; no placement
+algorithm, geometry or bounds change. Live artifacts remain in
+<code>repros/eyeriss_cts_route_20261016/comparison.html</code>.</p>
+<p>The LiveHD-only <a href="placement-results/eyeriss-cluster-template-20261016/comparison.html">quarter-area ClusterGroup SRAM-template experiment</a>
+finishes legal at 4.816 m native HPWL versus 4.934 m for existing R8 (−2.40%).
+It places one representative in a quarter core, copies only its 258 SRAM locations
+into four quadrants, then re-places the full design with 1032 SRAMs fixed and all
+standard cells plus eight non-cluster SRAMs movable. Full/quarter grids are
+64×64/32×32, giving the same physical bin pitch. Connectivity, IOs, cell inventory,
+copied SRAM geometry and independent halo legality pass. No placement algorithm
+or default changes; no timing/routed claim. Within-cluster wirelength improves,
+partly offset by more top-level/inter-cluster wiring.</p>
+<p><strong>Comparison protocol:</strong> every new GP stage uses explicit 64×64 bins,
+including the IO pilot, macro-source pass and fixed-macro cell pass. Earlier
+mixed-grid tables are historical. The rejected R8H template implementation is
+removed; R8H2 is also a rejected experiment and is not a comparison target.</p>
+<p>The <a href="placement-results/eyeriss-r8h3-repulsion-20261016/comparison.html">stronger R8H3 comparison</a>
+uses &gt;1 repeated copy, &gt;2 macros and &gt;1000 equivalent cells of physical area,
+with the same unit for eligibility and circle sizing. GP starts from scratch;
+all candidate/color standard cells and macros receive weak pulls toward each of
+their moving centroids. Nested children inherit the parent pull through all
+members; parents and children do not repel. Only same-type copies repel.
+Circle radius is sqrt(A/(pi*rho)), where A is full anchored physical area and rho
+is requested density (0.5). The cutoff is r_i+r_j, or 2r for equal circles.
+The adaptive penalty doubles on stalled circle separation, while successful GP
+stopping requires density plus maximum relative circle penetration &lt;=0.001.
+No hard cell bounds or rigid template reuse are introduced.</p>
+<p>All four large ClusterGroup circles are non-overlapping after macro legalization
+and after ordinary fixed-macro cell placement. Radius is 304.692 µm, so required
+center spacing is 609.385 µm; measured minima are 613.392/613.375 µm respectively.
+Source GP meets both targets at 640 iterations (maximum relative penetration
+0.000958, effective penalty 2560); cell GP reaches density at 780 iterations.
+Final legal HPWL is 4.595 m versus the reused all-64-bin R8 reference’s 11.149 m
+(-58.78%). Combined synthesis/placement-export is 27.86/216.26 s versus
+28.12/252.78 s. All 18 focused checks and an additional nested-candidate regression
+pass. Independent physical/halo/connectivity/IO checks pass, preserving all 1040
+fixed SRAM frames. The HTML includes pre/post legalization PNGs, phase times,
+centroid-circle overlays, candidate selectors and penalty/overlap history.</p>
+<p><strong>Pending:</strong> downstream legalization/cell placement can perturb
+centroid constraints: 9 of 3234 same-type pairs overlap after the cell pass,
+with maximum relative penetration 11.15%, all among smaller candidates. The large
+ClusterGroup circles remain separated. Evaluate this before relative-shape reuse;
+GP target convergence does not establish stationary wirelength or routed benefit.
+No new STA/routing claim. R8H3 stays opt-in; every GP stage remains 64×64.</p>
+<p>The opt-in <a href="placement-results/eyeriss-fp-snap-20261016/comparison.html">floorplan snap evaluation</a>
+separates floorplan GP, circle-target snapping and frozen-target refinement, then
+uses the ordinary fixed-macro cell pass. All stages use 64×64. Mesh, staggered
+triangle and tree examples pass; all 204 Eyeriss target circles separate, with
+191 accepted alignment/spacing/symmetry relations in 1.15 s. The report distinguishes
+fixed targets from measured full-color means. The latter drift under weak anchors:
+30 of 3234 same-type pairs overlap after final placement, including one large
+ClusterGroup pair. Physical SRAM/cell and halo legality still pass. Final HPWL is
+6.578 m versus the reused R8H3 reference's 4.595 m (+43.15%). Existing defaults stay
+unchanged. <strong>Pending:</strong> investigate target/actual-mean consistency with
+shared color membership, preserve separation through refinement, and isolate snap
+from the additional GP stage before considering promotion. No routed/timing benefit
+is established.</p>
+<p>The <a href="placement-results/eyeriss-fp-3k-20261016/comparison.html">3K candidate controls and hierarchy-local snap evaluation</a>
+reruns the recent R8H3 flows with explicit <code>synth.place.fp.minimum=3000</code>
+and 64×64 bins throughout. All 204 candidates remain: the smallest selected scope
+is 4.578K equivalent cells, so the threshold increase alone changes no placement.
+Direct macro locking gives 4.595 m final HPWL and unsnapped target refinement gives
+7.395 m, matching the recorded 1K layouts. Snap relationships now require both the
+same type and the same immediate parent candidate; top-level candidates share the
+implicit design root. The local snap accepts 50 alignment, 13 spacing and 23 symmetry
+relations, with zero cross-parent relations or target-circle overlap. Final HPWL is
+5.345 m, improving the older cross-parent snapped result by 18.75%, while remaining
+above direct R8H3. Independent physical/halo/fixed-SRAM checks pass. The report adds
+small-circle centroid PNGs before/after snap, nested-candidate zooms, stage-selectable
+hierarchy/circle overlays and timing breakdowns. <strong>Pending:</strong> target
+points remain distinct from weakly anchored measured means: four of six large
+ClusterGroup circle pairs overlap after the local-snap final cell pass. Preserve
+separation through refinement before promoting this experimental flow. The 1K
+reports are preserved; no new routing/timing claim.</p>
+<p>The <a href="placement-results/eyeriss-macro-snap-controls-20261016/comparison.html">SRAM snap before locking comparison</a>
+adds exactly two runs, both with explicit <code>synth.place.macro.snap=true</code>
+before locking SRAMs. Two design-GP passes (skip centroid snap/refinement) give
+4.644 m final HPWL; three passes with hierarchy-local centroid snap/refinement give
+4.769 m. Relative to the recorded SRAM-snap-off controls, these are +1.05% and
+-10.78%. The two-pass flow remains better. First-floorplan and refinement GP
+snapshots match their controls byte-for-byte; differences begin at legalization.
+Independent DEF checks confirm 392/403 and 427/430 exact SRAM snap groups, with
+hard halo legality preserved, and all 1040 SRAM frames fixed through final cell
+placement. Required R8 evaluation protocol now explicitly enables SRAM macro snap
+before locking; this is independent of centroid snapping and does not change global
+option defaults. All GP grids remain 64×64 and candidate minimum 3K. Reports include
+stage PNGs, hierarchy overlays, synthesis/placement totals and phase breakdowns.
+No additional OpenROAD/CTS/routing/timing run is claimed.</p>
+<p><strong>Current candidate eligibility:</strong>
+<code>synth.place.fp.min_copies=4</code> requires at least four matching copies
+under each immediate hierarchy parent; copies elsewhere do not count. Each copy
+must also meet the equivalent-area threshold and contain more than two movable
+macros. Count siblings before collapsing wrapper scopes, and retain copy-parent
+paths/counts in reports. The configured area threshold remains separate (3K in
+the current experiments). Four focused native/LiveHD checks pass. A discovery-only
+native replay of saved Eyeriss data gives 76 candidates: four ClusterGroups,
+36 input-activation SRAM banks and 36 PEs, with four/nine/nine copies per parent.
+The <a href="placement-results/eyeriss-parent4-20261016/comparison.html">76-candidate placement rerun</a>
+keeps SRAM snapping on before locking, 3K minimum and 64×64 bins. Two passes reach
+<strong>4.559 m</strong> final legal HPWL (−1.83% versus the recorded 204-candidate
+snap-on control), with 28.42 s synthesis / 222.81 s placement-export. Three passes
+reach <strong>11.890 m</strong> (+149.32% versus the matching 4.769 m control), with
+28.81 s synthesis / 294.89 s placement-export. The latter regression grows during
+the final fixed-SRAM cell GP as adaptive density weight rises near the overflow
+stop threshold; density stopping does not establish stationary wirelength.
+Independent physical/halo/connectivity/IO and fixed-SRAM audits pass. The report
+includes stage PNGs, hierarchy overlays, centroid before/after-snap PNGs, stage
+HPWL and phase times. The preceding 204-candidate tables remain unchanged.</p>
+<p><strong>Committed source defaults:</strong> LiveHD <code>c0451c7b0</code> and native RAPIDPlace/DREAMPlace <code>875d328</code> (local commits only) enable the three-pass floorplan/macro/cell flow, centroid and SRAM snapping, 3K/four-per-parent eligibility, 64×64 bins and the evaluated repulsion/routability settings. The final pass fixes only macros/IO and removes centroid anchors. Reports and documentation remain uncommitted. A <a href="placement-results/asap7-defaults-20261016/comparison.html">four-design ASAP7 comparison</a> against HighTide/OpenROAD, including CTS/routing and OpenSTA scoring, is in progress. LFSR completes both routed flows with shared physical inputs. The initial Eyeriss RTLMP failure is repaired by a validated one-level macro-placement setup; its complete baseline rebuild is pending. The integrated LiveHD final pass exposed the native automatic-filler allocation limit; a bounded automatic-sizing change awaits explicit approval. Technology-file RC input (<code>synth.place.tech_rc</code>, commit <code>e551bc0ab</code>) is implemented and verified on the platform setRC file.</p>
 <p>Try mixed-size placement with all supplied SRAM macros movable before selecting
 a separate macro-placement stage. The first trial omitted halos and blockages;
 the 5 µm halo rerun is also legal. Iterate through legal post-placement results before
-comparing QoR. Stop before CTS, routing and extraction.
+comparing QoR. That initial bring-up stopped before CTS, routing and extraction;
+the follow-on above now evaluates those stages.
 Keep the direct Slang frontend, <code>compile.specialize_modules=true</code>, explicit
 <code>--ignore-uninstantiated-modules</code> and <code>SYNTHESIS=1</code>. Use the
 corrected HighTide wrappers and all seven supplied SRAM LEF/Liberty interfaces.</p>
@@ -54,6 +176,24 @@ stopping calibration open: the 64-bin final frame measures 0.1425 overflow on
 the common 256-bin evaluation grid despite meeting its selected-grid target.
 See the committed <a href="placement-results/eyeriss-20261016/comparison.html">grid
 comparison with PNGs and per-run settings</a>. H2D remains off for these runs.</p>
+<p><strong>Macro alignment and soft snapping:</strong> both are implemented as
+independent opt-in controls. The twelve-case
+<a href="placement-results/eyeriss-alignment-20261016/comparison.html">alignment/snap
+comparison</a> includes before/after legalization PNGs, synthesis and placement
+times, native phase breakdowns, HPWL, independent halo checks and matched external
+OpenSTA/congestion probes. It evaluates R7 and the earlier inflation-only model
+at the same 64-bin grid (the latter explicitly named R4_64); historical R4 and
+corrected R4c used 256 bins. R4c already shares R7's corrected charge accounting.
+R7 with snapping alone keeps identical GP, changes final HPWL from 5.767 to
+5.764 m and one-iteration route overflow from 2137 to 1278; exact eligible-pair
+alignment rises from 24% to 76%. WNS improves but TNS worsens about 4%.
+R4_64 snapping improves alignment but worsens route overflow. The tested GP
+alignment recipe increases HPWL in both families; some configurations improve
+congestion with timing regressions. All twelve cases are physically and halo
+legal. No flips, second cell GP, new buffering or CTS were added. Keep both
+controls off by default and preserve the no-H2D default. The local baseline
+commits are LiveHD <code>7ac2e8071</code> and DREAMPlace <code>7b9b496</code>;
+the new alignment/snap changes are subsequent work.</p>
 <p>Downstream 30-iteration global routing reaches zero overflow for both the
 native baseline and final variant, with routed length falling from 8.105 to
 6.670 m. The equal-effort one-iteration probe completes for every placement:
@@ -303,6 +443,15 @@ placed graph and in-memory OpenTimer RC/STA.</p>
   </li>
   <li><strong>M4 — Macro placement and floorplanning.</strong>
     <ul>
+      <li>Validate opt-in same-color/master alignment and soft snapping beyond
+      Eyeriss. Measure both WNS and TNS alongside congestion and HPWL; the
+      current study does not justify enabling the GP alignment recipe by default.
+      Isolate its attraction, overlap boost and minimum ramp duration before
+      attributing effects to one force. Consider soft relative-layout templates
+      matched by module-relative SRAM paths: Eyeriss has 36 repeated PEs with
+      ten SRAMs each and four ClusterGroups with 258 SRAMs each. Matching SRAM
+      signatures do not establish identical specialized logic; preserve instance
+      colors and permit translation, mirrors and local relaxation.</li>
       <li>Repair H2D's legal-geometry-to-sequence-pair conversion and require that
       the incumbent pair fits the outline before search. The Eyeriss conversion
       requires 1805.502 µm height despite legal 1412.64 µm geometry; all 401 moves

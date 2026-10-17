@@ -4,6 +4,8 @@ load("//tools:copt_default.bzl", "COPTS")
 filegroup(
     name = "place_srcs",
     srcs = [
+        "color_centroids.cpp",
+        "color_centroids.hpp",
         "h2d.cpp",
         "h2d.hpp",
         "memory_proxy.cpp",
@@ -51,6 +53,7 @@ genrule(
 cc_library(
     name = "place",
     srcs = [
+        "color_centroids.cpp",
         "h2d.cpp",
         "memory_proxy.cpp",
         "place.cpp",
@@ -61,6 +64,7 @@ cc_library(
         "technology_rc.cpp",
     ],
     hdrs = [
+        "color_centroids.hpp",
         "h2d.hpp",
         "memory_proxy.hpp",
         "place.hpp",
@@ -97,6 +101,16 @@ cc_test(
     deps = [
         ":place",
         "//pass/opentimer:pass_opentimer",
+        "@googletest//:gtest_main",
+    ],
+)
+
+cc_test(
+    name = "color_centroids_test",
+    srcs = ["color_centroids_test.cpp"],
+    copts = COPTS,
+    deps = [
+        ":place",
         "@googletest//:gtest_main",
     ],
 )

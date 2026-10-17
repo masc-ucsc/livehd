@@ -170,16 +170,48 @@ TEST(Placement, MappedBusGraphLegalityRcAndReuse) {
   EXPECT_EQ(placed.floorplan.components.size(), 2);
   EXPECT_EQ(placed.floorplan.terminals.size(), 3);
   {
-    auto explicit_fillers = options;
-    explicit_fillers.cache_dir.clear();
-    explicit_fillers.output_dir   = (root / "explicit_fillers").string();
-    explicit_fillers.filler_width = 4.6;
-    hhds::GraphLibrary check;
-    const auto         filled = place(*graph, check, explicit_fillers);
-    EXPECT_NO_THROW(check_legality(livehd::physical::read_lef(options.lefs), filled.floorplan));
-    explicit_fillers.filler_width = -1;
-    hhds::GraphLibrary rejected;
-    EXPECT_THROW(place(*graph, rejected, explicit_fillers), std::invalid_argument);
+    // A supplied frame is authoritative even above the soft density target.
+    auto frame = placed.floorplan;
+    for (auto& terminal : frame.terminals) {
+      terminal.status = physical::Status::FIXED;
+    }
+    const auto frame_path = root / "soft_density.def";
+    physical::write_def(frame, frame_path.string());
+    auto soft = options;
+    soft.cache_dir.clear();
+    soft.floorplan   = frame_path.string();
+    soft.output_dir  = (root / "soft_density").string();
+    soft.utilization = .9;
+    soft.density     = .01;
+    soft.iterations  = 1;
+    soft.full        = false;
+    hhds::GraphLibrary soft_library;
+    const auto         result = place(*graph, soft_library, soft);
+    EXPECT_EQ(result.floorplan.die.xh, frame.die.xh);
+    EXPECT_EQ(result.floorplan.die.yh, frame.die.yh);
+    EXPECT_EQ(result.floorplan.components.size(), 2);
+    // This whitespace would exceed the native one-million-filler budget if
+    // LiveHD enabled virtual fillers. Keep the IOs fixed to isolate the GP.
+    const auto original_rows = frame.rows;
+    for (int block = 1; block < 1000; ++block) {
+      for (auto row : original_rows) {
+        row.name += "_" + std::to_string(block);
+        row.y    += std::llround(block * frame.die.yh);
+        frame.rows.push_back(std::move(row));
+      }
+    }
+    for (auto& row : frame.rows) {
+      row.count *= 1000;
+    }
+    frame.die.xh *= 1000;
+    frame.die.yh *= 1000;
+    physical::write_def(frame, frame_path.string());
+    soft.output_dir = (root / "no_virtual_fillers").string();
+    soft.density    = .8;
+    hhds::GraphLibrary sparse_library;
+    const auto         sparse = place(*graph, sparse_library, soft);
+    EXPECT_EQ(sparse.floorplan.components.size(), 2);
+    EXPECT_EQ(sparse.floorplan.die.xh, frame.die.xh);
   }
   {
     auto core_only   = options;

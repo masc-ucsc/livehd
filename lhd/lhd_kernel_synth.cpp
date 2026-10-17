@@ -124,15 +124,11 @@ livehd::placement::Options placement_options(const Options& opts) {
   if (out.cohesion < 0) {
     throw Lhd_error{"usage", "synth.place.cohesion must be nonnegative", ""};
   }
-  out.utilization  = number("place.utilization", "0.30");
-  out.aspect       = number("place.aspect", "1");
-  out.density      = number("place.density", "0.5");
-  out.iterations   = integer("place.iterations", "1500");
-  out.bins         = integer("place.bins", "64");
-  out.filler_width = number("place.filler_width", "0");
-  if (out.filler_width < 0) {
-    throw Lhd_error{"usage", "synth.place.filler_width must be nonnegative", ""};
-  }
+  out.utilization                     = number("place.utilization", "0.30");
+  out.aspect                          = number("place.aspect", "1");
+  out.density                         = number("place.density", "0.5");
+  out.iterations                      = integer("place.iterations", "1500");
+  out.bins                            = integer("place.bins", "64");
   out.scale_macro_density             = truthy(synth_set(opts, "place.scale_macro_density", "true"));
   out.automatic_bins                  = truthy(synth_set(opts, "place.auto_bins", "false"));
   out.exact_macro_density             = truthy(synth_set(opts, "place.exact_macro_density", "true"));
@@ -169,6 +165,7 @@ livehd::placement::Options placement_options(const Options& opts) {
   out.final_iterations            = integer("place.final.iterations", "0");
   out.fp_place                    = truthy(synth_set(opts, "place.fp", "true"));
   out.fp_snap_enabled             = truthy(synth_set(opts, "place.fp.snap", "true"));
+  out.fp_colors                   = truthy(synth_set(opts, "place.fp.colors", "false"));
   out.fp_iterations               = integer("place.fp.iterations", "1500");
   out.fp_minimum                  = number("place.fp.minimum", "3000");
   out.fp_min_copies               = integer("place.fp.min_copies", "4");

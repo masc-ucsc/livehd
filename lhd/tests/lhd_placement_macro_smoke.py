@@ -97,7 +97,6 @@ run('bad_mode',['--set','synth.place.macro=gp'],False)
 run('bad_gp',['--set','synth.place.mode=gp'],False)
 run('bad_align',['--set','synth.place.macro=none','--set','synth.place.macro.align_weight=25','--set','synth.place.macro.align_start=100','--set','synth.place.macro.align_full=100'],False)
 run('bad_snap_gp',['--set','synth.place.macro=none','--set','synth.place.mode=gp','--set','synth.place.macro.snap=true'],False)
-run('bad_filler_width',['--set','synth.place.filler_width=-1'],False)
 outputs=Path(os.environ['TEST_UNDECLARED_OUTPUTS_DIR'])
 outputs.mkdir(parents=True,exist_ok=True)
 for name in ['macro_topology.json','h2d.png','out.def']:
@@ -216,6 +215,11 @@ while i<len(common):
 run('fp_default_four_rejects_two',default_common+['--set','synth.place.macro=none','--set','synth.place.fp=true','--set','synth.place.fp.minimum=0'])
 copy_report=json.loads((root/'W/synth/place/fp_candidates.json').read_text())
 assert copy_report['minimum_copies_per_parent']==4 and not copy_report['instances'],copy_report
+run('fp_color_fallback',default_common+['--set','synth.place.macro=none','--set','synth.place.fp=true','--set','synth.place.fp.colors=true','--set','synth.place.fp.minimum=1000','--set','synth.place.fp.iterations=40'])
+color_report=json.loads((root/'W/synth/place/fp_candidates.json').read_text())
+color_fp=json.loads((root/'W/synth/place/fp_place.json').read_text())
+assert color_report['instances'] and all(g['kind']=='color' and not g['snap_eligible'] and g['repulsion_scope']==0 for g in color_report['instances']),color_report
+assert all(c['before']==c['target'] for c in color_fp['candidates']) and not color_fp['relations'] and color_fp['snap_attempted']==0,color_fp
 for value in ['1','0','2.5']:
  run('bad_fp_copies_'+value,common+['--set','synth.place.macro=none','--set','synth.place.fp.min_copies='+value],False)
 source.write_text("""module bank(input clk,we,input [2:0] a,input [4:0] d,output [4:0] q);

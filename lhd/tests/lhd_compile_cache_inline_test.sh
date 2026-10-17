@@ -101,7 +101,7 @@ raise SystemExit(0 if {"alu.alu", "immg.immg"} <= set(rows.get("ptop.ptop", []))
 PY
 
 # Edit ONE inlined child; the other one (immg) and the registered child are clean.
-sed -i 's/(a + b)/(a - b)/' "$W/src/alu.prp"
+sed -i.bak 's/(a + b)/(a - b)/' "$W/src/alu.prp"
 grep -q '(a - b)' "$W/src/alu.prp" || fail "edit did not apply"
 compile "$W/warm.json" "$W/warm_lg" "$W/w"
 [ "$(field "$W/warm.json" incremental.compile.misses)" = 1 ] || fail "the one-unit edit did not take the partial-restore path"

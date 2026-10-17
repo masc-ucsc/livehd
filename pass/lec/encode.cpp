@@ -1992,14 +1992,11 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
     // Clock INPUT lanes (memory_clocks): consumed by phase 2 only when the
     // design is multi-clock, to commit on a detected edge of the memory's OWN
     // clock exactly like a flop on that clock.
-    Memory_clocks                     clocks;
-    std::vector<size_t>               rd_pid;  // per read port (rd_fresh order): its cell port index
-    // `$readmem` image contents per entry ("" = not loaded); empty when the
-    // memory has no readable image.
-    std::vector<std::string>          image;
+    Memory_clocks                          clocks;
+    std::vector<size_t>                    rd_pid;  // per read port (rd_fresh order): its cell port index
     // Per read port (rd_fresh order): the free value an UNDEFINED read returns
     // on the implementation side (set_undef_read_free); null = none.
-    std::vector<Term>                 rd_xfree;
+    std::vector<Term>                      rd_xfree;
     // formal.ignore_memory: the user EXCLUDED this memory from the comparison.
     // It is blackboxed -- every read dout becomes ONE SHARED free symbol per
     // (memory, port, cycle) across ref and impl, and no next-state array is
@@ -2150,10 +2147,9 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
           if (!gu::memory_image_of(mc.node)) {
             mc.init = driver;
           }
-          // A `$readmem` image: its contents (memory_power_on) pin a ROM below;
-          // a writable memory's power-on contents are state[0], which the
-          // caller seeds (query.cpp). An image that cannot be read leaves the
-          // contents free here; the LEC queries refuse it before encoding.
+          // File-loaded storage stays symbolic, including memories without
+          // an RTL writer. Image contents are a simulation dependency, not a
+          // specialization of the native formal proof.
         } else if (pn == "type") {
           if (driver.is_const()) {
             mtype = static_cast<int>(gu::const_of(driver).to_just_i64());
@@ -2204,12 +2200,7 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
     // would be a vacuous proof when the two inits differ; per-design + compared
     // outputs makes equal inits PROVE and differing inits REFUTE.
     Sort asort = tm_.mkArraySort(bv(mc.sig.addr_w), bv(mc.sig.bits));
-    if (gu::memory_image_of(node)) {
-      if (auto po = memory_power_on(node, mc.sig); po.has_contents()) {
-        mc.image = std::move(po.entries);
-      }
-    }
-    mc.is_rom = (!mc.is_comb && !mc.is_whole && mc.sig.n_wr == 0 && (!mc.init.is_invalid() || !mc.image.empty()));
+    mc.is_rom  = (!mc.is_comb && !mc.is_whole && mc.sig.n_wr == 0 && !mc.init.is_invalid());
     if (shared_mems != nullptr && !mc.is_rom) {
       if (auto it = shared_mems->find(mc.key); it != shared_mems->end()) {
         mc.a_cur        = it->second;
@@ -5578,18 +5569,6 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
         return fail("memory '" + gu::debug_name(mc.node) + "' init contents not encodable");
       }
       a_next = array_from_bus(mc.a_cur, fit_unsigned(iv, mc.sig.size * mc.sig.bits));
-    } else if (mc.is_rom && !mc.image.empty()) {
-      // A `$readmem` ROM: pin each entry the image loads, exactly like the
-      // comptime-init ROM below. An entry the file leaves out stays free per
-      // design (power-on hardware state: a read of it cannot prove).
-      for (size_t i = 0; i < mc.image.size(); ++i) {
-        if (mc.image[i].empty()) {
-          continue;
-        }
-        const Term at = bv_const(tm_, mc.sig.addr_w, static_cast<uint64_t>(i));
-        out.equalities.emplace_back(tm_.mkTerm(Kind::SELECT, {mc.a_cur, at}),
-                                    tm_.mkBitVector(static_cast<uint32_t>(mc.sig.bits), mc.image[i], 2));
-      }
     } else if (mc.is_rom) {
       // no-write PERSISTENT ROM (type==0/1): pin the per-design a_cur to the
       // comptime init constant so committed reads (rd_src == a_cur) return init.

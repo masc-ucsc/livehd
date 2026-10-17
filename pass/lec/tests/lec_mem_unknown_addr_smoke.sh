@@ -22,9 +22,19 @@ module dut(input clk, input we, input [1:0] wa_in, input [7:0] d, input [1:0] ra
   assign q = mem[ra];
 endmodule
 V
-sed 's/\bwa\b/wa_q/g; s/\bmem\b/store/g; s/wa_q_in/wa_in/g' "$WORK/ref.v" > "$WORK/good.v"
-sed 's/store\[wa_q\] <= d;/store[wa_q] <= d ^ 8'"'"'h01;/' "$WORK/good.v" > "$WORK/bad.v"
-grep -q "d ^ 8'h01" "$WORK/bad.v"
+python3 - "$WORK" <<'PYFIXTURE'
+from pathlib import Path
+import re
+import sys
+work = Path(sys.argv[1])
+good = re.sub(r'\bwa\b', 'wa_q', (work / 'ref.v').read_text())
+good = re.sub(r'\bmem\b', 'store', good)
+(work / 'good.v').write_text(good)
+bad = good.replace('store[wa_q] <= d;', "store[wa_q] <= d ^ 8'h01;")
+assert bad != good, 'negative fixture must change the write data'
+(work / 'bad.v').write_text(bad)
+PYFIXTURE
+
 check() {
   local tag=$1 impl=$2 expected=$3 code=0
   shift 3

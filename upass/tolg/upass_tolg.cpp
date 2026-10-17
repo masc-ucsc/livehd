@@ -10027,16 +10027,24 @@ private:
   [[nodiscard]] std::optional<std::pair<int64_t, int64_t>> loop_affine_range_of(const Pin& pos, int depth, Affine_memo& memo) const {
     constexpr int64_t kCap = int64_t{1} << 40;
     using R                = std::pair<int64_t, int64_t>;
-    const auto ok          = [&](const R& r) { return r.first > -kCap && r.second < kCap && r.first <= r.second; };
+    // Check BEFORE narrowing: two admitted 40-bit bounds can have an 80-bit
+    // product. An overflowing int64 bound could otherwise look small enough
+    // to size a shift-form write and truncate its real position.
+    const auto narrow      = [&](const __int128 lo, const __int128 hi) -> std::optional<R> {
+      if (lo <= -kCap || hi >= kCap || lo > hi) {
+        return std::nullopt;
+      }
+      return R{static_cast<int64_t>(lo), static_cast<int64_t>(hi)};
+    };
     if (pos.is_const()) {
       const auto& v = livehd::graph_util::const_of(pos);
       if (v.has_unknowns() || !v.is_just_i64()) {
         return std::nullopt;
       }
-      return R{v.to_just_i64(), v.to_just_i64()};
+      return narrow(v.to_just_i64(), v.to_just_i64());
     }
     if (const auto it = loop_index_ranges_.find(pos); it != loop_index_ranges_.end()) {
-      return it->second;
+      return narrow(it->second.first, it->second.second);
     }
     const auto node = pos.get_master_node();
     const auto op   = livehd::graph_util::type_op_of(node);
@@ -10058,14 +10066,14 @@ private:
         if (!as || !bs) {
           return std::nullopt;
         }
-        R acc{0, 0};
+        std::pair<__int128, __int128> acc{0, 0};
         for (const auto& r : *as) {
-          acc = R{acc.first + r.first, acc.second + r.second};
+          acc = {acc.first + r.first, acc.second + r.second};
         }
         for (const auto& r : *bs) {
-          acc = R{acc.first - r.second, acc.second - r.first};
+          acc = {acc.first - r.second, acc.second - r.first};
         }
-        return ok(acc) ? std::optional<R>{acc} : std::nullopt;
+        return narrow(acc.first, acc.second);
       }
       case Ntype_op::Mult: {
         const auto as = all("as");
@@ -10074,11 +10082,15 @@ private:
         }
         R acc{1, 1};
         for (const auto& r : *as) {
-          const std::array<int64_t, 4> c{acc.first * r.first, acc.first * r.second, acc.second * r.first, acc.second * r.second};
-          acc = R{*std::ranges::min_element(c), *std::ranges::max_element(c)};
-          if (!ok(acc)) {
+          const std::array<__int128, 4> c{static_cast<__int128>(acc.first) * r.first,
+                                          static_cast<__int128>(acc.first) * r.second,
+                                          static_cast<__int128>(acc.second) * r.first,
+                                          static_cast<__int128>(acc.second) * r.second};
+          const auto                    next = narrow(*std::ranges::min_element(c), *std::ranges::max_element(c));
+          if (!next) {
             return std::nullopt;
           }
+          acc = *next;
         }
         return acc;
       }
@@ -10088,8 +10100,7 @@ private:
         if (!a || !b || a->first < 0 || b->first < 0 || b->second > 30) {
           return std::nullopt;
         }
-        const R r{a->first << b->first, a->second << b->second};
-        return ok(r) ? std::optional<R>{r} : std::nullopt;
+        return narrow(static_cast<__int128>(a->first) << b->first, static_cast<__int128>(a->second) << b->second);
       }
       case Ntype_op::Or:
       case Ntype_op::Xor: {

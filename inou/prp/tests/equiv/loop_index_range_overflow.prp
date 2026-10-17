@@ -1,0 +1,25 @@
+/*
+:name: loop_index_range_overflow
+:type: equiv
+:verilog_top: loop_index_range_overflow.top
+:pyrope_top: top
+*/
+// The low two bits of either huge value are zero, so both loops copy a.
+// Range analysis must decline the huge intermediate before narrowing it to
+// int64: the product used to overflow even though the final index is small.
+pub comb top(a:U4) -> (o:U4, p:U4) {
+  mut product:U4 = 0
+  mut shifted:U4 = 0
+  for i in 0..<4 {
+    const huge = (i * 68719476736) * 1073741824
+    const offset = huge#[0..<2]
+    product#[i + offset] = a#[i]
+  }
+  for j in 0..<4 {
+    const huge_shift = (j * 68719476736) << 30
+    const shift_offset = huge_shift#[0..<2]
+    shifted#[j + shift_offset] = a#[j]
+  }
+  o = product
+  p = shifted
+}

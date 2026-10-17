@@ -12289,7 +12289,9 @@ bool uPass_runner::plan_loop_roll(const Lnast_nid& body_stmts, const std::string
         kept.emplace_back(std::move(n));
         continue;
       }
-      const auto&                             actual = out.actual_names.at(n);
+      // Inserting the field ports below can rehash actual_names. Keep an
+      // owned name across those insertions, including the field_paths write.
+      const std::string                        actual = out.actual_names.at(n);
       std::vector<Loop_roll_plan::Tuple_field> entries;
       bool                                     clash = false;
       for (const auto& [field, dotted] : fields->second) {

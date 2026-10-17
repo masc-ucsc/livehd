@@ -231,6 +231,7 @@ Macro_run place_macros(dp::Design& d, const std::vector<mp::NodeInfo>& info, con
   cells.bins_x = cells.bins_y = o.bins;
   cells.num_threads           = o.threads;
   cells.target_density        = o.density;
+  cells.add_fillers           = false;
   if (o.snapshots) {
     cells.observer_interval = o.iterations + 1;
     cells.observer          = [&, round = 0](const dp::Design& snapshot, dp::PlacementStage stage, int iteration) mutable {
