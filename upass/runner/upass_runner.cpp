@@ -12362,7 +12362,12 @@ bool uPass_runner::plan_loop_roll(const Lnast_nid& body_stmts, const std::string
         kept.emplace_back(std::move(n));
         continue;
       }
-      const auto&                             actual = out.actual_names.at(n);
+      // A COPY, not a reference: the loop below emplaces each field port into
+      // this same absl::flat_hash_map, and a rehash relocates its values. A
+      // reference left dangling read the moved-from (empty) string in dbg, so
+      // the field path became ".out", had no type, and the loop unrolled only
+      // there (opt happened to read the stale bytes back intact).
+      const std::string                        actual = out.actual_names.at(n);
       std::vector<Loop_roll_plan::Tuple_field> entries;
       bool                                     clash = false;
       for (const auto& [field, dotted] : fields->second) {

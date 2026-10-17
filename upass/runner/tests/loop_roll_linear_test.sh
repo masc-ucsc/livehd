@@ -71,10 +71,24 @@ upass_ms() {  # upass_ms <shape> <K>: best pass.upass ms of three compiles (and 
   echo "$best"
 }
 
+# A -c dbg lhd runs pass.upass ~25x slower than -c opt (inv at K=1000: 2988 ms
+# against 116 ms), so the opt sizes blow the 150 s test timeout there. A dbg
+# build -- the runfiles tree sits under bazel-out/<cfg>-dbg/, which is how
+# inou/prp/tests/lec.py watchdog_scale tells it apart -- divides every K by
+# $div (60 s instead of >150 s). The step between the two sizes stays 4x, the
+# bound stays 10x and every loop must still roll. Smaller K is a weaker probe:
+# it still fails a gross quadratic form (the old `unt` one grows ~15x from
+# K=125 to 500), but a mild quadratic term like the old `inv` or `fin` ones
+# only clears 10x at the opt sizes, so the -c opt run stays the sensitive guard.
+div=1
+[[ "${TEST_SRCDIR:-$PWD}" =~ /bazel-out/[^/]*-dbg/ ]] && div=4
+
 for shape in inv fin unt mlp; do
   small=1000
   large=4000
   [ "$shape" != inv ] && small=500 && large=2000
+  small=$((small / div))
+  large=$((large / div))
   gen "$shape" "$small"
   gen "$shape" "$large"
   a=$(upass_ms "$shape" "$small")
