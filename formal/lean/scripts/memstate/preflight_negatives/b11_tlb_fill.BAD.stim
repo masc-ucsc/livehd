@@ -1,0 +1,54 @@
+# SUPPLIED stimulus for whole minion_tlb (B11), derived from the PINNED
+# CORE-ET DV sequence, not invented here.
+#
+# SOURCE.  hw/ip/minion/tlb/dv/minion_tlb_test.cc:299, the FIRST existing
+# fill_entry call: fill_entry(sim, 0, vpn_for_idx(1, 0x11), 0xABCDE, ...).
+# Packed against the pinned minion_pkg.sv / tlb_pkg.sv structs for THIS
+# artifact's configuration (NrMinions = 1, Entries = 8), so the wrapper's
+# two-minion vectors are NOT copied:
+#
+#   req_data_i      (ordinal  7, w48) = 0x580000001110   vpn 0x111 at 39:4
+#   satp_info_i     (ordinal 11, w32) = 0x80010000       mode 8, ppn 0x10000
+#   ptw_resp_data_i (ordinal  5, w64) = 0x2af378c7       ppn 0xABCDE at 53:10
+#
+# Expected committed word at address 1: 0x223600abcde = {req_tag_q, entry},
+# tag 0x22 recomputed as vpn >> 3 for the one-minion index width.
+#
+# THE WRITE CONDITION is registered.  minion_tlb.sv:332 is
+#   rf_latch_wr_en = !ptw_req_invalidated && ptw_resp_valid_q && !canceled_req
+# -- `ptw_resp_valid_q`, not `_i`.  The pinned test holds the PTW response for
+# TWO ticks for exactly this reason, and under P=2 each source tick is two
+# sub-steps, so the hold is widened accordingly below.
+#
+# Constants: ready high, no invalidate, no coop mode, base page size.
+in 4 1 1          # ptw_req_ready_i
+in 12 1 0         # tlb_invalidate_i
+in 1 1 0          # coop_mode_i
+in 13 2 0         # vmspagesize_i
+in 8 1 0          # req_min_id_i
+in 3 32 0         # matp_info_i
+in 11 32 2147549184        # satp_info_i = 0x80010000
+in 7 48 96757023511824     # req_data_i  = 0x580000001110
+in 5 64 716267719          # ptw_resp_data_i = 0x2af378c7
+#
+# RESET: rst_ni LOW for the first two sub-steps, then HIGH.
+at 0 in 10 1 0
+at 1 in 10 1 0
+in 10 1 1
+#
+# REQUEST: req_valid_i high while the request is presented.
+at 0 in 9 1 0
+at 1 in 9 1 0
+at 2 in 9 1 1
+at 3 in 9 1 1
+#
+# PTW RESPONSE, held across four sub-steps = two source ticks, so the
+# registered `ptw_resp_valid_q` the write condition reads is asserted.
+at 0 in 6 1 0
+at 1 in 6 1 0
+at 2 in 6 1 0
+at 3 in 6 1 0
+at 4 in 6 1 1
+at 5 in 6 1 1
+at 6 in 6 1 1
+at 7 in 6 1 1

@@ -152,7 +152,16 @@ Flow_result execute_flow(void* opaque, const Flow_plan& plan, const std::functio
   } else if (delay && plan.remappable) {
     const int relax = area_relax_percent(plan.budget, delay->first, plan.area_relax_pct);
     if (relax > 0) {
-      const auto command = std::format("&undo; {} -R {}{}", plan.map_step, relax, plan.remap_post);
+      // The remap spends the measured slack on area. When it (after the
+      // repair below) no longer meets the budget the mapping before it did,
+      // that mapping is the result: kept upsized past the budget, the remap
+      // also cost the area candidate its turn (it runs only on a result that
+      // meets the budget). A 256-term guarded XOR accumulator mapped at 253 ps
+      // overshot to 437 ps on its -R 58 remap and came back sized at
+      // 572 um^2 / 424 ps instead of 566 um^2 / 312 ps.
+      Network        met(Abc_NtkDup(Abc_FrameReadNtk(frame)));
+      const Flow_qor met_qor = delay;
+      const auto     command = std::format("&undo; {} -R {}{}", plan.map_step, relax, plan.remap_post);
       if (!execute(command, "area-recovery") || !measure(delay)) {
         return result;
       }
@@ -161,6 +170,10 @@ Flow_result execute_flow(void* opaque, const Flow_plan& plan, const std::functio
         if (!execute(plan.size_to_budget, "sizing-repair") || !measure(delay)) {
           return result;
         }
+      }
+      if (!delay || delay->first > plan.budget) {
+        Abc_FrameReplaceCurrentNetwork(frame, met.release());
+        delay = met_qor;
       }
     }
   }

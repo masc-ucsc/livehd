@@ -307,8 +307,7 @@ cc_test(
     ],
 )
 
-# Associative-chain reassociation in the synthesis private copy (reassoc.cpp)
-# and the blaster's arrival-aware n-ary reduction (blast.hpp).
+# Associative-chain reassociation in the synthesis private copy (reassoc.cpp).
 cc_test(
     name = "reassoc_test",
     srcs = ["reassoc_test.cpp"],

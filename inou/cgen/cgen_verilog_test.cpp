@@ -111,4 +111,54 @@ TEST(CgenVerilog, CyclicExpressionsRetainNets) {
     EXPECT_LT(verilog.size(), 4096);
   }
 }
+
+// A chain of two-reader bitwise cells: or_k = (or_{k-1} & y) | x also drives
+// output o_k, the shape a rolled loop's runtime-position bit writes produce
+// (each write's Or feeds the next write's shift and its low-part And). Every Or
+// is inlined at both readers, so without a bound on duplicated text each o_k
+// re-spelled the whole chain below it and the module grew quadratically.
+TEST(CgenVerilog, DuplicatedInlineChainStaysLinear) {
+  const auto emit = [](int k) {
+    const std::string name = "dup_chain_" + std::to_string(k);
+    auto&             lib  = livehd::Hhds_graph_library::instance("lgdb_" + name);
+    auto              io   = lib.create_io(name);
+    for (const char* input : {"x", "y"}) {
+      io->add_input(input, input[0] == 'x' ? 1 : 2);
+      io->set_bits(input, 8);
+      io->set_unsign(input, true);
+    }
+    for (int i = 0; i < k; ++i) {
+      const auto output = "o" + std::to_string(i);
+      io->add_output(output, 3 + i);
+      io->set_bits(output, 8);
+      io->set_unsign(output, true);
+    }
+    auto graph = io->create_graph();
+    gu::set_ubits(graph->get_input_pin("x"), 8);
+    gu::set_ubits(graph->get_input_pin("y"), 8);
+    auto prev = graph->get_input_pin("x");
+    for (int i = 0; i < k; ++i) {
+      auto low = gu::create_typed_node(*graph, Ntype_op::And);
+      gu::setup_sink_pid(low, 0).connect_driver(prev);
+      gu::setup_sink_pid(low, 0).connect_driver(graph->get_input_pin("y"));
+      gu::set_ubits(low.create_driver_pin(0), 8);
+      auto merged = gu::create_typed_node(*graph, Ntype_op::Or);
+      gu::setup_sink_pid(merged, 0).connect_driver(low.create_driver_pin(0));
+      gu::setup_sink_pid(merged, 0).connect_driver(graph->get_input_pin("x"));
+      gu::set_ubits(merged.create_driver_pin(0), 8);
+      merged.create_driver_pin(0).connect_sink(graph->get_output_pin("o" + std::to_string(i)));
+      prev = merged.create_driver_pin(0);
+    }
+    std::filesystem::create_directories(name);
+    Cgen_verilog{name}.do_from_graph(graph);
+    std::ifstream input(name + "/" + name + ".v");
+    return std::string{std::istreambuf_iterator<char>(input), std::istreambuf_iterator<char>()};
+  };
+  const auto small = emit(100);
+  const auto large = emit(400);
+  EXPECT_NE(large.find("endmodule"), std::string::npos);
+  EXPECT_EQ(large.find("cgen-miss"), std::string::npos);
+  // 4x the cells: linear text grows ~4x, the quadratic re-spelling ~16x.
+  EXPECT_LT(large.size(), small.size() * 6) << "small=" << small.size() << " large=" << large.size();
+}
 }  // namespace

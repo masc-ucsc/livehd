@@ -20,7 +20,7 @@
 # sides; fuel 200000/2000; identical certificate bytes.
 #   counterbalanced.sh <out-subdir> <block>...
 set -uo pipefail
-R=/mada/users/czeng14/projects/livehd-pass-lean-master
+R=/WORKROOT/projects/livehd-pass-lean-master
 G=$R/generated/master_port/fp/genprobe
 CPU=80
 REPS=8

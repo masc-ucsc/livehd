@@ -52,6 +52,14 @@ struct DesignNode {
   uint32_t             width     = 0;
   bool                 is_signed = false;
   std::vector<Operand> operands;
+  // `op == ScanOp::Memory` ONLY: which READ PORT of memory `id` this entry
+  // schedules, as an ordinal into `Memory::read_ports`. One memory contributes
+  // one entry per read port whose output is consumed, each at its own place in
+  // the order, because two read ports of one array are two independent values
+  // over one shared image -- a dependency from one to the other's address is an
+  // ordinary DAG edge, not a cycle. The image itself, and the next-state write
+  // chain, stay ONE identity per memory.
+  uint32_t             memory_read = 0;
 };
 struct Port {
   std::string           name;
@@ -121,7 +129,14 @@ struct Memory {
   uint32_t                 addr_width = 1;
   uint64_t                 size       = 0;
   uint32_t                 wensize    = 1;
-  int64_t                  type = 0, fwd = 0, posclk = 1;
+  int64_t                  type = 0, posclk = 1;
+  // Read-during-write forwarding, as PER-READ ROWS: `fwd_rows[r][w]` means read
+  // ordinal r sees write ordinal w's new data on a same-address collision.
+  // Rows rather than one integer because the matrix is reads x writes, and a
+  // wide memory's does not fit any fixed-width window.  Plain `bool` rows keep
+  // this struct free of `Dlop` and so free of HHDS, which is the contract
+  // directly below.
+  std::vector<std::vector<bool>> fwd_rows;
   // The ONE domain this memory commits on. `DesignCert` carries a single
   // `MemoryDesc.clock`, which is a CERTIFICATE RESTRICTION, not a hardware
   // guarantee: cells have a per-port `clock_pin` and one global `posclk`, and a

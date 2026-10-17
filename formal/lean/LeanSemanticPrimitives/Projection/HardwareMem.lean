@@ -18,8 +18,8 @@ function id is reused.
     - `memConst _ dw ct` -> first-order initialised words built from `ct` with a
       zero default, so the word count is `contents.size` and the contents are
       preserved -- matching the reference bound, which is NOT `2 ^ aw`.
-* `applyOpM` dispatches the real opcodes 26 (`Op_MemRead`) and 28
-  (`Op_MemWriteBE`) to the corresponding object primitives, reading operands in
+* `applyOpM` dispatches the real opcodes 26 (`Op_MemRead`), 27 (`Op_MemWrite`)
+  and 28 (`Op_MemWriteBE`) to the corresponding object primitives, reading operands in
   certificate dependency order and taking the node width and the payload
   (`byte_w`) from the certificate; every other opcode DELEGATES to the original
   `applyOp`.
@@ -94,6 +94,15 @@ private def fApplyOpM : SFun :=
             , C "slot" [R "env", R "n", P .hd [R "deps"]]
             , C "slot" [R "env", R "n", P .hd [P .tl [R "deps"]]]
             , C "slot" [R "env", R "n", P .hd [P .tl [P .tl [R "deps"]]]] ])
+        (.ite (P .eqI [R "code", int 27])
+          -- Op_MemWrite [mem, addr, data, enable] -> mem.  The PLAIN write:
+          -- the enable is the whole operand under `bv_nonzero`, and the datum
+          -- is stored raw.  Not a call into the byte-enabled write.
+          (P .memWrite
+            [ C "slot" [R "env", R "n", P .hd [R "deps"]]
+            , C "slot" [R "env", R "n", P .hd [P .tl [R "deps"]]]
+            , C "slot" [R "env", R "n", P .hd [P .tl [P .tl [R "deps"]]]]
+            , C "slot" [R "env", R "n", P .hd [P .tl [P .tl [P .tl [R "deps"]]]]] ])
         (.ite (P .eqI [R "code", int 28])
           -- Op_MemWriteBE byte_w [mem, addr, data, byte_enable] -> mem
           (P .memWriteBE
@@ -103,7 +112,7 @@ private def fApplyOpM : SFun :=
             , C "slot" [R "env", R "n", P .hd [P .tl [P .tl [R "deps"]]]]
             , C "slot" [R "env", R "n", P .hd [P .tl [P .tl [P .tl [R "deps"]]]]]
             , R "pay" ])
-          (C "applyOp" [R "op", R "w", R "deps", R "env", R "n"])))] }
+          (C "applyOp" [R "op", R "w", R "deps", R "env", R "n"]))))] }
 
 /-! ## The whole-cycle caller layer
 

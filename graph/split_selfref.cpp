@@ -227,6 +227,32 @@ static int split_selfref_pass(hhds::Graph* g, int& unresolved_out, unsigned& sto
       const auto range = gu::bit_range(m);
       return range ? std::pair<int, int>{0, range->second - range->first} : kBail;
     }
+    if (op == Ntype_op::Sext) {
+      // Sext(a, b) keeps bits [0,b) of `a` and fills every position at or above
+      // b with a copy of bit b-1. It is value-preserving -- and NON-NEGATIVE,
+      // which every consumer of a footprint needs -- exactly when the operand's
+      // own bits already sit strictly below the sign position, so no fill can
+      // happen. Without this arm a Sext fell to the generic bound below, which
+      // bails on any signed pin, and that bail propagated up through the Mux
+      // union and the Set_mask `value` check.
+      auto bd = drv_at(m, 1);
+      if (!bd.is_const()) {
+        return kBail;
+      }
+      const auto& bc = gu::const_of(bd);
+      if (bc.has_unknowns() || bc.is_negative() || !bc.is_just_i64() || bc.to_just_i64() < 1 || bc.to_just_i64() > (1 << 28)) {
+        return kBail;
+      }
+      const int b  = static_cast<int>(bc.to_just_i64());
+      auto      fx = self(self, drv_at(m, 0), depth + 1);
+      if (fx.first < 0) {
+        return kBail;
+      }
+      if (fx.second <= fx.first) {
+        return {0, 0};  // known zero stays zero under any extension
+      }
+      return fx.second <= b - 1 ? fx : kBail;  // sign position provably clear
+    }
     // generic value: an over-approximation is sound only when UNSIGNED; its
     // literal width bounds every possibly-set bit.
     int b = gu::bits_of(p);
@@ -561,6 +587,61 @@ static int split_selfref_pass(hhds::Graph* g, int& unresolved_out, unsigned& sto
         }
       } else if (split_dbg) {
         std::print("split[dbg]:   sra amount NON-CONST (dynamic shift)\n");
+      }
+    } else if (op == Ntype_op::Sext) {
+      // Sext(a, b) keeps bits [0,b) of `a` and fills everything at or above b
+      // with a COPY of bit b-1 (the cell's `b` is the kept bit COUNT -- the
+      // same convention cgen_verilog documents and cprop's
+      // Sext(Sext(X,a),b) == Sext(X,min(a,b)) rule assumes). Both halves are
+      // reads of `a` ALONE, so a slice walks straight through. Sext was the one
+      // op on the sext -> get_mask -> sra -> shl chain legalize reports for the
+      // CVA6 MMU with no arm here, so every descent into that SCC died at the
+      // first sign extend.
+      auto bd = drv_at(m, 1);
+      if (bd.is_const()) {
+        const auto& bc = gu::const_of(bd);
+        if (!bc.has_unknowns() && !bc.is_negative() && bc.is_just_i64() && bc.to_just_i64() >= 1
+            && bc.to_just_i64() <= (1 << 28)) {
+          const int b = static_cast<int>(bc.to_just_i64());
+          if (hi <= b) {
+            res = self(self, drv_at(m, 0), lo, hi, depth + 1);  // wholly inside the kept bits
+          } else if (lo >= b) {
+            // wholly above the sign: every requested bit IS bit b-1 of `a`
+            auto sgn = self(self, drv_at(m, 0), b - 1, b, depth + 1);
+            if (!sgn.is_invalid()) {
+              if (w == 1) {
+                res = sgn;
+              } else {
+                // replicate: Sext(sgn,1) is all-ones exactly when sgn is 1, and
+                // the And re-packs it to the requested unsigned width
+                auto rep = gu::create_typed_node(*g, Ntype_op::Sext);
+                ++created;
+                sgn.connect_sink(livehd::graph_util::setup_sink_pid(rep, static_cast<hhds::Port_id>(0)));
+                livehd::graph_util::create_const(*g, *Dlop::create_integer(1))
+                    .connect_sink(livehd::graph_util::setup_sink_pid(rep, static_cast<hhds::Port_id>(1)));
+                auto rp = rep.create_driver_pin(0);
+                gu::set_sbits(rp, w + 1);
+                auto n = gu::create_typed_node(*g, Ntype_op::And);
+                ++created;
+                rp.connect_sink(livehd::graph_util::setup_sink_pid(n, static_cast<hhds::Port_id>(0)));
+                livehd::graph_util::create_const(*g, gu::mask_window_const(0, w))
+                    .connect_sink(livehd::graph_util::setup_sink_pid(n, static_cast<hhds::Port_id>(0)));
+                auto dp = n.create_driver_pin(0);
+                gu::set_ubits(dp, w);
+                res = dp;
+              }
+            }
+          } else if (split_dbg) {
+            // [lo,b) kept + [b,hi) sign-filled. A 1-bit read -- what this chain
+            // actually asks for -- can never land here, so leave it unresolved
+            // rather than grow a concat whose value equality no test pins yet.
+            std::print("split[dbg]:   sext slice straddles the sign at b={}\n", b);
+          }
+        } else if (split_dbg) {
+          std::print("split[dbg]:   sext width const but unknowns/neg/zero/wide\n");
+        }
+      } else if (split_dbg) {
+        std::print("split[dbg]:   sext width NON-CONST\n");
       }
     } else if (op == Ntype_op::Mux) {
       // Distribute the slice through the arms: Get_mask(mux(s, xs...), m) ==

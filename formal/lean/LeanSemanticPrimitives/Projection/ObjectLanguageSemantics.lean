@@ -131,6 +131,33 @@ def valMemSet : Val → Int → BV → Val
   | .cons a rest, x, v => if x = 0 then .cons (ofBV v) rest else .cons a (valMemSet rest (x - 1) v)
   | other,        _, _ => other
 
+/-- The PLAIN write, on an encoded image.
+
+The same three answers as the byte-enabled write -- a disabled write is a
+no-op, an enabled in-range write updates, an enabled OUT-OF-RANGE write is
+REFUSED -- and two deliberate differences:
+
+  * the enable is `bv_nonzero`, the whole operand, not bit `i / byte_w` of it;
+  * the datum is stored RAW, with no masked update and no `mk_bv`.
+
+The image's default is still required to be a `BV`, so a malformed image is
+refused exactly as it is for the byte-enabled write, even though the plain
+write never reads the default. -/
+def valMemWrite (img a d en : Val) : Option Val :=
+  match img, asBV a, asBV d, asBV en with
+  | .ctor t [ws, dv], some av, some dval, some enval =>
+      if t = memImgTag && valAllBV ws then
+        match asBV dv with
+        | none   => none
+        | some _ =>
+          if bv_nonzero enval then
+            (if valInRange ws (bv_uint av) then
+               some (.ctor memImgTag [valMemSet ws (bv_uint av) dval, dv])
+             else none)
+          else some img
+      else none
+  | _, _, _, _ => none
+
 /-- The byte-enabled write, on an encoded image.
 
   * a DISABLED write is a no-op and is admitted;
@@ -207,6 +234,10 @@ def evalPrim (p : Prim) (vs : List Val) : Except String Val :=
       match valMemWriteBE (widthOf w) img a d bev (widthOf bw) with
       | some v => .ok v
       | none   => .error "memWriteBE: malformed image, bad operand, or out-of-range enabled write"
+  | .memWrite, [img, a, d, en] =>
+      match valMemWrite img a d en with
+      | some v => .ok v
+      | none   => .error "memWrite: malformed image, bad operand, or out-of-range enabled write"
   | .memRead, [.int w, img, a, en] =>
       match valMemRead (widthOf w) img a en with
       | some b => .ok (ofBV b)

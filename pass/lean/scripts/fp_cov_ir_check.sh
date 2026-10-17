@@ -19,9 +19,9 @@
 # timeout cap (124), a producer refusal (other nonzero) and a phase that never
 # produced an exit record (MISSING -> 97) are distinguishable from OK.
 set -uo pipefail
-R=/mada/users/czeng14/projects/livehd-pass-lean-master
+R=/WORKROOT/projects/livehd-pass-lean-master
 COV=$R/generated/master_port/cov12x5
-LEANBIN=/mada/users/czeng14/.elan/toolchains/leanprover--lean4---v4.31.0/bin/lean
+LEANBIN=/WORKROOT/.elan/toolchains/leanprover--lean4---v4.31.0/bin/lean
 
 # classify <cell-dir> <phase-name>  ->  prints "<label> exit=<e> time_exit=<t>"
 #   OK | CAP | REFUSED | MISSING | DISAGREE

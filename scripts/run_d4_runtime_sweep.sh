@@ -12,7 +12,7 @@
 # at the ORDINARY stack limit, and emits one machine-readable row.
 #
 # Everything is resolved relative to THIS worktree.  `run_cva6_vc_sweep.sh`
-# hardcodes R=/soe/czeng14/projects/livehd-new, so it could silently use another
+# hardcodes R=/HOMEROOT/projects/livehd-new, so it could silently use another
 # checkout's binary, sources, wrappers and outputs; nothing here may.  Every
 # required input AND TOOL is checked before the first block, so a missing
 # dependency is one FATAL line rather than 122 rows of downstream noise paid for
@@ -23,7 +23,7 @@
 #
 # Env (all optional, all validated when set):
 #   LAKE          lake executable        (default $HOME/.elan/bin/lake, else PATH)
-#   COREET_ROOT   CORE-ET RTL corpus     (default /soe/czeng14/projects/core-et)
+#   COREET_ROOT   CORE-ET RTL corpus     (default /HOMEROOT/projects/core-et)
 #   CVA6_FILELIST flat filelist for CVA6 (no default -- required for cva6)
 #   CVA6_WRAP_DIR <mod>_gate.sv wrappers (no default -- required for cva6)
 #   EMIT_TIMEOUT  per-block emission timeout, seconds (default 1800)
@@ -184,7 +184,7 @@ if [[ "$CORPUS" == "coreet" ]]; then
   if [[ -n "${COREET_ROOT:-}" ]]; then
     [[ -d "$COREET_ROOT" ]] || die "COREET_ROOT=$COREET_ROOT is not a directory; an explicit setting is never replaced by a fallback"
   else
-    COREET_ROOT="/soe/czeng14/projects/core-et"
+    COREET_ROOT="/HOMEROOT/projects/core-et"
     [[ -d "$COREET_ROOT" ]] || die "CORE-ET corpus not found at $COREET_ROOT"
   fi
   # ONE PREFLIGHT BINDS THE EXTERNAL CORPUS.  It resolves the checkout once,

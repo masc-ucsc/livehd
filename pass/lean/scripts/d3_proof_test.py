@@ -423,7 +423,7 @@ def main() -> int:
             return 1 if fails else 0
 
         env = dict(os.environ)
-        env["PATH"] = "/mada/users/czeng14/.elan/bin:" + env.get("PATH", "")
+        env["PATH"] = "/WORKROOT/.elan/bin:" + env.get("PATH", "")
         env["TMPDIR"] = str(tmp)
 
         def run_lean(name, text, timeout=900):

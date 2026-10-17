@@ -18,7 +18,7 @@
   OK    RECORDED   emit_max_rss_kb = 8388608
   OK    RECORDED   reconciled = YES
   OK    RECORDED   d4_head = 53136031b143e9a43511db2d21a9aec74298aea3
-  OK    RECORDED   lake = /soe/czeng14/.elan/bin/lake
+  OK    RECORDED   lake = /HOMEROOT/.elan/bin/lake
   OK    RECORDED   lake_version = Lake version 5.0.0-src+68218e8 (Lean version 4.31.0)
   OK    RECOMPUTED module list matches 416bc154e9643af3d7c2529e975e4e141a50dbcf562318dbacd34298159336a6
   OK    RECOMPUTED foundation matches fbf1b38b8d8ed7f032b68a7fe1351bb65ef49806122c74eb4eb84cb493fef037

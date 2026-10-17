@@ -50,6 +50,12 @@ theorem OpSupported_code_ne {op : LGraphOp} (h : OpSupported op = true) :
     opCode op ≠ 26 ∧ opCode op ≠ 28 := by
   cases op <;> simp_all [OpSupported, opCode]
 
+/-- …and 27, the PLAIN write, which `applyOpM` now dispatches too.  Stated
+separately so `OpSupported_code_ne` keeps its exact statement. -/
+theorem OpSupported_code_ne27 {op : LGraphOp} (h : OpSupported op = true) :
+    opCode op ≠ 27 := by
+  cases op <;> simp_all [OpSupported, opCode]
+
 /-! ## 2. Delegation: every supported operator still runs the original `applyOp` -/
 
 theorem applyOpM_scalar {vals : List Val} {arg : Nat → BV} (hsv : SlotVals vals arg)
@@ -64,8 +70,12 @@ theorem applyOpM_scalar {vals : List Val} {arg : Nat → BV} (hsv : SlotVals val
     SEval hwMemS σ (.call "applyOpM" [eo, ew, ed, ee, en])
       (encBV (eval_op op w (deps.map arg))) := by
   obtain ⟨h26, h28⟩ := OpSupported_code_ne hsup
+  have h27 := OpSupported_code_ne27 hsup
   refine SEval_call5 hop hw hdv henv hlen rfl rfl ?_
   refine SEval_switch_of_tag (.ref rfl) rfl rfl ?_
+  refine SEval.iteF (SEval_prim2 (.ref rfl) .lit ?_) ?_
+  · simp [evalPrim, encNat]
+    omega
   refine SEval.iteF (SEval_prim2 (.ref rfl) .lit ?_) ?_
   · simp [evalPrim, encNat]
     omega
@@ -129,6 +139,8 @@ theorem applyOpM_memWriteBE {vals : List Val} {σ : SEnv} {eo ew ed ee en : SExp
   refine SEval_call5 hop hw hdv henv hlen rfl rfl ?_
   refine SEval_switch_of_tag (.ref rfl) rfl rfl ?_
   refine SEval.iteF (SEval_prim2 (.ref rfl) .lit rfl) ?_
+  -- past opcode 27 (the PLAIN write) as well
+  refine SEval.iteF (SEval_prim2 (.ref rfl) .lit rfl) ?_
   refine SEval.iteT (SEval_prim2 (.ref rfl) .lit rfl) ?_
   have hv1' : vals[d1]'hb1 = ofBV a := hv1
   have hv2' : vals[d2]'hb2 = ofBV dat := hv2
@@ -175,6 +187,8 @@ theorem applyOpM_memWriteBE_disabled {vals : List Val} {σ : SEnv} {eo ew ed ee 
   constructor
   · refine SEval_call5 hop hw hdv henv hlen rfl rfl ?_
     refine SEval_switch_of_tag (.ref rfl) rfl rfl ?_
+    refine SEval.iteF (SEval_prim2 (.ref rfl) .lit rfl) ?_
+    -- past opcode 27 (the PLAIN write) as well
     refine SEval.iteF (SEval_prim2 (.ref rfl) .lit rfl) ?_
     refine SEval.iteT (SEval_prim2 (.ref rfl) .lit rfl) ?_
     have hp : evalPrim .memWriteBE

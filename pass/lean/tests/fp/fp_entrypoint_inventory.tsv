@@ -4,9 +4,9 @@
 # earlier version of this table hashed master and called it the pin, which
 # was wrong for the nine adapted files.
 # THE PIN IS NOT REACHABLE FROM THIS REPOSITORY. 9bb41a09d is the head of branch
-# `projection` in /mada/users/czeng14/projects/livehd-futamura/livehd, and every
+# `projection` in /WORKROOT/projects/livehd-futamura/livehd, and every
 # pinned_sha256 below was read there:
-#   git -C /mada/users/czeng14/projects/livehd-futamura/livehd show 9bb41a09d:<path> | sha256sum
+#   git -C /WORKROOT/projects/livehd-futamura/livehd show 9bb41a09d:<path> | sha256sum
 # All 18 rows were re-verified against that repository: pinned_sha256 matches the
 # object, master_sha256 matches the working tree, and `adapted` matches whether the
 # two differ, with no exceptions.  The S1 tree the S1/S2/S3 probes compare against is

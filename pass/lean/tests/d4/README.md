@@ -25,7 +25,7 @@ emission failures, and a runtime sweep must report them as such -- a coverage
 percentage over "blocks that happened to emit" would be measuring the wrong
 denominator.
 
-RTL corpus: `COREET_ROOT`, default `/soe/czeng14/projects/core-et`.  External to
+RTL corpus: `COREET_ROOT`, default `/HOMEROOT/projects/core-et`.  External to
 this repository, validated by the driver.
 
 ## CORE-ET 122-block runtime result
@@ -129,8 +129,8 @@ stands at **85 RAN + 37 NO_CERT, and zero runtime failures**.
 
 Two provenance notes.  The replay was run on the working tree that became the
 commit carrying this section, so it records `d4_tracked_dirty=YES`.  And its
-`worktree=` is the `/mada/users/czeng14` spelling of the same directory the
-earlier evidence records as `/soe/czeng14` -- one filesystem, two mount paths.
+`worktree=` is the `/WORKROOT` spelling of the same directory the
+earlier evidence records as `/HOMEROOT` -- one filesystem, two mount paths.
 
 #### The gate was not closed; now it is
 
@@ -200,7 +200,7 @@ Full provenance is in `CVA6_MODULE_SET_PROVENANCE.md`.  In brief:
 against ONE named CVA6 revision and ONE named config, and writes a manifest that
 pins every input by SHA-256 (`cva6_foundation_provenance.txt`,
 `cva6_foundation_wrappers.tsv`).  Nothing is read from
-`/soe/czeng14/projects/livehd-new`.
+`/HOMEROOT/projects/livehd-new`.
 
     cva6_rev  6cb200105fb9441d170e45786125a737fab98e91  (tracked tree CLEAN)
     target    cv64a6_imafdc_sv39_hpdcache_wb
@@ -272,8 +272,8 @@ foundation -- and all six produced BYTE-IDENTICAL certificates (same
 
 The wrapper-corpus hashes in provenance are over `"<module> <digest>"` pairs, not
 over `sha256sum <path>` output -- the latter folds the DIRECTORY into the value,
-and this worktree is reachable as both `/soe/czeng14/...` and
-`/mada/users/czeng14/...`, so the same corpus would have hashed differently
+and this worktree is reachable as both `/HOMEROOT/...` and
+`/WORKROOT/...`, so the same corpus would have hashed differently
 depending on which spelling the operator used.
 
 ### Blockers found on this route, preserved as failures

@@ -23,8 +23,8 @@
 # a_gates           = temp/dg/A/gates3.tsv
 # b_gates           = temp/dg/B/gates3.tsv
 # limits            = stack 8192 KB, emit 3600s, run 1800s, ceiling 8388608 KB, jobs 1
-# a_run             = /mada/users/czeng14/projects/livehd-d4-incremental/temp/dg/A/out2
-# b_run             = /mada/users/czeng14/projects/livehd-d4-incremental/temp/dg/B/out2
+# a_run             = /WORKROOT/projects/livehd-d4-incremental/temp/dg/A/out2
+# b_run             = /WORKROOT/projects/livehd-d4-incremental/temp/dg/B/out2
 # a_cert_sha256     = 56d22bb5fb3ce5b49c4fe478497bd70a4e089a7709140f96de1f6482b46e5d35
 # b_cert_sha256     = 210cd4ac7bfc940d4b8b6510be2623e94932f5df7a83e72d4d7cec002a6fe589
 # a_digest          = 7303403973398102700

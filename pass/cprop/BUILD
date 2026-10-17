@@ -31,6 +31,7 @@ cc_test(
         "//pass/bitwidth:pass_bitwidth",
         "//core",
         "//graph",
+        "@abseil-cpp//absl/container:flat_hash_set",
         "@googletest//:gtest_main",
     ],
 )

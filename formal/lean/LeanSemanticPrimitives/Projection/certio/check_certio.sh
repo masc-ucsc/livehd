@@ -14,7 +14,7 @@ set -uo pipefail
 HERE=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 ROOT=$(cd "$HERE/../../../../.." && pwd)
 
-SRC_REPO=${SRC_REPO:-/mada/users/czeng14/projects/livehd-d4-incremental}
+SRC_REPO=${SRC_REPO:-/WORKROOT/projects/livehd-d4-incremental}
 SRC_REV=c63b21cea2adff657083af02e34e680268692e42
 SRC_PATH=formal/lean/LeanSemanticPrimitives/Compiler/CertIO.lean
 EXPECTED_SHA256=26b2f61c722f377128b6137bcedfcb0fa060b1a23d26b80348c2b2fa6ef02994

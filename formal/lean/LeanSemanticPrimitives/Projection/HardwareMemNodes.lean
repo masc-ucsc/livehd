@@ -35,7 +35,12 @@ admitted node is never it.  Nothing is admitted by default; `OpSupported`,
 
 ## The write's range obligation
 
-`WriteInRange` names it rather than assuming it away, and
+`WriteInRange` is a STANDALONE shape lemma about one image and one address: it
+names the obligation and `writeInRange_of_FullTable` discharges it from the
+admitted shape.  It is NOT the premise the node fold carries — that is
+`HwMem.WriteAddrFits`, which is stated over the geometry of the witness the
+interpreter actually holds and is required only where an ENABLED write needs
+it.  Nothing here claims the obligation is discharged for a traversal.
 `writeInRange_of_FullTable` discharges it from the admitted shape:
 a `FullTable aw` image with an `aw`-bit address.  That is the real PicoRV32
 shape (`aw = 5`, `dw = 32`), and `MemImg.writeBE_FullTable` shows it survives
@@ -225,8 +230,10 @@ theorem NodeAdmitted_ne_sub {c : DenseNodeCert} (h : NodeAdmitted c) :
 /-! ## 4. The write's range obligation, named and discharged from shapes -/
 
 /-- The obligation an admitted WRITE node carries: the image it updates holds
-the address it is given.  Named here so it is visible, and discharged below
-from the admitted table shape rather than assumed. -/
+the address it is given.  Stated for ONE image and ONE address, and discharged
+below from that image's admitted table shape.  The fold's own premise is
+`HwMem.WriteAddrFits`; this lemma is what makes that premise dischargeable, not
+a claim that any traversal has discharged it. -/
 def WriteInRange (m : MemImg) (a : BV) : Prop := MemImg.InRange m (bv_uint a)
 
 /-- **Discharged from the admitted shape**: a full `2 ^ aw` table and an
@@ -258,7 +265,51 @@ theorem rom_not_admitted_write : ¬ MemImg.FullTable 5 (MemImg.ofMemConst 32 #[1
 #print axioms depIsMem_false_of_supported
 #print axioms opKind_isMem_of_supported
 #print axioms nodeSlot_slotIsMem
+/-! ### The EXTENDED admission, for the route that implements the plain write
+
+`NodeAdmitted`, `nodeAdmittedB` and `NodeAdmitted_ne_memWrite` above are
+UNCHANGED and keep their exact meanings: an operator with no object primitive
+and no `applyOpM` case is still excluded by them, and every theorem stated about
+them still says what it said.
+
+`Op_MemWrite` now HAS both, so a strictly larger predicate is defined beside the
+original rather than in place of it.  Nothing is renamed away: a caller that
+wants the original contract asks for `NodeAdmitted` and gets the original
+exclusion with it. -/
+
+def NodeAdmittedW (c : DenseNodeCert) : Prop :=
+  NodeAdmitted c ∨ c.op = .Op_MemWrite
+
+def nodeAdmittedWB (c : DenseNodeCert) : Bool :=
+  match c.op with
+  | .Op_MemWrite => true
+  | _            => nodeAdmittedB c
+
+theorem NodeAdmitted_toW {c : DenseNodeCert} (h : NodeAdmitted c) :
+    NodeAdmittedW c := Or.inl h
+
+theorem nodeAdmittedWB_iff (c : DenseNodeCert) :
+    nodeAdmittedWB c = true ↔ NodeAdmittedW c := by
+  unfold nodeAdmittedWB NodeAdmittedW NodeAdmitted nodeAdmittedB
+  cases c.op <;> simp [OpSupported]
+
+/-- The extension is EXACTLY the plain write: everything else that was refused
+still is. -/
+theorem NodeAdmittedW_ne_sub {c : DenseNodeCert} (h : NodeAdmittedW c) :
+    c.op ≠ .Op_Sub := by
+  rcases h with h | h
+  · exact NodeAdmitted_ne_sub h
+  · intro hc; rw [hc] at h; exact absurd h (by simp)
+
+#guard nodeAdmittedWB { op := .Op_MemWrite, width := 32, deps := #[0,1,2,3], origin := 0 } = true
+#guard nodeAdmittedWB { op := .Op_Sub, width := 32, deps := #[0,1], origin := 0 } = false
+#guard nodeAdmittedWB { op := .Op_UDiv, width := 32, deps := #[0,1], origin := 0 } = false
+/- and the ORIGINAL predicate still refuses the plain write -/
+#guard nodeAdmittedB { op := .Op_MemWrite, width := 32, deps := #[0,1,2,3], origin := 0 } = false
+
 #print axioms NodeAdmitted_ne_memWrite
+#print axioms nodeAdmittedWB_iff
+#print axioms NodeAdmittedW_ne_sub
 #print axioms nodeAdmittedB_iff
 #print axioms writeInRange_of_FullTable
 #print axioms writeInRange_pico

@@ -2675,6 +2675,156 @@ TEST(DesignIoMeta, LegacyEmissionAlsoOutlivesTheGraph) {
 //
 // `fwd = 0b0110` is chosen to make the second one visible: read 0 is forwarded
 // write 1 only, read 1 is forwarded write 0 only.
+// PER-READ FORWARDING ROWS, EXECUTED.  Two ASYNCHRONOUS read ports over one
+// array and one write port, with `fwd = 0b10`: read 1's row forwards write 0,
+// read 0's row does not.
+//
+// This is the case a whole-cell forwarding flag cannot express.  `fwd_nonzero`
+// would say "this memory forwards" and give both ports the same value; the
+// certificate chains `fwd_rows[r]`'s writes into the image port r reads, so the
+// two ports must DISAGREE on the writing step.  Nothing structural can show
+// that -- both ports lower to a `MemRead` either way -- so it is decided here,
+// on values.
+TEST(DesignScanClocks, PerReadRowForwardingValueOracle) {
+  auto&    lib = livehd::Hhds_graph_library::instance("lgdb_clk_mem_rowfwd");
+  auto     io  = lib.create_io("rowfix");
+  uint32_t pid = 1;
+  for (const char* n : {"clk", "we", "re0", "re1"}) {
+    io->add_input(n, pid++);
+    io->set_bits(n, 1);
+  }
+  for (const char* n : {"wa", "ra0", "ra1"}) {
+    io->add_input(n, pid++);
+    io->set_bits(n, 2);
+  }
+  io->add_input("wd", pid++);
+  io->set_bits("wd", 8);
+  io->add_output("rd0", 1);
+  io->set_bits("rd0", 8);
+  io->add_output("rd1", 2);
+  io->set_bits("rd1", 8);
+  auto       g       = io->create_graph();
+  auto       mem     = create_typed_node(*g, Ntype_op::Memory);
+  const auto mstride = static_cast<uint32_t>(Ntype::Memory_port_stride);
+  auto       sink    = [&](std::string_view n, uint32_t port) {
+    return mem.create_sink_pin(Ntype::get_sink_pid(Ntype_op::Memory, n) + port * mstride);
+  };
+  auto konst = [&](std::string_view n, int64_t v, uint32_t port = 0) {
+    livehd::graph_util::create_const(*g, *Dlop::create_integer(v)).connect_sink(sink(n, port));
+  };
+  konst("bits", 8);
+  konst("size", 4);
+  konst("type", 2);  // ASYNCHRONOUS reads: the value is combinational
+  konst("wensize", 1);
+  konst("posclk", 1);
+  // fwd bit (r * n_writes + w) with ONE write port: bit 0 = read 0, bit 1 =
+  // read 1. 0b10 forwards write 0 to read 1 ONLY.
+  konst("fwd", 0b10);
+  konst("rdport", 0, 0);
+  konst("rdport", 1, 1);
+  konst("rdport", 1, 2);
+  g->get_input_pin("wa").connect_sink(sink("addr", 0));
+  g->get_input_pin("wd").connect_sink(sink("din", 0));
+  g->get_input_pin("we").connect_sink(sink("enable", 0));
+  g->get_input_pin("clk").connect_sink(sink("clock_pin", 0));
+  const char* raddr[] = {"ra0", "ra1"};
+  const char* ren[]   = {"re0", "re1"};
+  for (uint32_t r = 0; r < 2; ++r) {
+    g->get_input_pin(raddr[r]).connect_sink(sink("addr", 1 + r));
+    g->get_input_pin(ren[r]).connect_sink(sink("enable", 1 + r));
+    set_bits(mem.create_driver_pin(1 + r), 8);
+    mem.create_driver_pin(1 + r).connect_sink(g->get_output_pin(r == 0 ? "rd0" : "rd1"));
+  }
+
+  DesignScan design;
+  try {
+    design = scan_design(*g, {});
+  } catch (const std::exception& e) {
+    GTEST_SKIP() << "fixture refused by the scanner: " << e.what();
+  }
+  const auto cert = build_certificate(design, {});
+  ASSERT_EQ(cert.memories.size(), 1u) << "one array, one state identity";
+  size_t reads = 0, images = 0;
+  for (const auto& n : cert.nodes) {
+    reads += n.op.kind == Operation::MemRead;
+  }
+  for (const auto& src : cert.sources) {
+    images += src.kind == SourceKind::MemImage;
+  }
+  ASSERT_EQ(reads, 2u) << "each read port lowers to its own MemRead";
+  ASSERT_EQ(images, 1u) << "both ports read ONE image";
+  ASSERT_TRUE(cert.flops.empty()) << "asynchronous reads are values, not registers";
+
+  const char* path = std::getenv("LEAN_ROW_FIXTURE");
+  if (path == nullptr) {
+    GTEST_SKIP() << "set LEAN_ROW_FIXTURE to emit the Lean oracle";
+  }
+  std::ofstream out(path);
+  emit_design_cert(design, cert, out);
+
+  auto ordinal_of = [&](std::string_view name) -> size_t {
+    for (size_t i = 0; i < design.inputs.size(); ++i) {
+      if (design.inputs[i].name == name) {
+        return i;
+      }
+    }
+    ADD_FAILURE() << "no input " << name;
+    return 0;
+  };
+  struct In {
+    const char* name;
+    int         value;
+  };
+  auto inputs = [&](std::initializer_list<In> set) {
+    std::map<size_t, int> by;
+    for (const auto& v : set) {
+      by[ordinal_of(v.name)] = v.value;
+    }
+    std::ostringstream o;
+    for (size_t k = 0; k < design.inputs.size(); ++k) {
+      const auto it = by.find(k);
+      o << (k ? ", " : "") << "mk_bv " << design.inputs[k].width << " " << (it != by.end() ? it->second : 0);
+    }
+    return o.str();
+  };
+  // `design.outputs` is sorted by name, so rd0 is output 0 and rd1 output 1.
+  ASSERT_EQ(design.outputs.size(), 2u);
+  ASSERT_EQ(design.outputs[0].name, "rd0");
+  ASSERT_EQ(design.outputs[1].name, "rd1");
+  const std::string fire  = "#[true]";
+  const std::string quiet = "#[false]";
+  // Distinguishable cells, so a read from the wrong address shows.
+  const char* st = "(⟨#[], #[fun a => if a = 0 then mk_bv 8 11 else if a = 1 then mk_bv 8 22 "
+                   "else if a = 2 then mk_bv 8 33 else mk_bv 8 44]⟩ : RuntimeState)";
+  // Write 77 to address 1; BOTH ports read address 1 on that same step.
+  const auto writing = inputs({{"we", 1}, {"wa", 1}, {"wd", 77}, {"re0", 1}, {"re1", 1}, {"ra0", 1}, {"ra1", 1}});
+  const auto quietw  = inputs({{"we", 0}, {"wa", 1}, {"wd", 77}, {"re0", 1}, {"re1", 1}, {"ra0", 1}, {"ra1", 1}});
+  const auto elsewhere
+      = inputs({{"we", 1}, {"wa", 1}, {"wd", 77}, {"re0", 1}, {"re1", 1}, {"ra0", 2}, {"ra1", 2}});
+  auto run = [&](const std::string& edges, const std::string& in) {
+    return "(compileAndRun rowfix_designCert " + edges + " #[" + in + "] " + std::string(st) + ")";
+  };
+  out << "\n-- PER-READ FORWARDING ROWS. fwd = 0b10 over one write port: read 1\n"
+      << "-- forwards write 0, read 0 does not. On the WRITING step the two ports\n"
+      << "-- must disagree -- a whole-cell forwarding flag would make them agree.\n";
+  out << "example : " << run(fire, writing) << ".outputs[0]! = mk_bv 8 22 := by native_decide\n";
+  out << "example : " << run(fire, writing) << ".outputs[1]! = mk_bv 8 77 := by native_decide\n";
+  out << "\n-- A DISABLED write forwards nothing: both ports read the committed cell.\n";
+  out << "example : " << run(fire, quietw) << ".outputs[0]! = mk_bv 8 22 := by native_decide\n";
+  out << "example : " << run(fire, quietw) << ".outputs[1]! = mk_bv 8 22 := by native_decide\n";
+  out << "\n-- A DIFFERENT address is not forwarded even on the forwarding port.\n";
+  out << "example : " << run(fire, elsewhere) << ".outputs[0]! = mk_bv 8 33 := by native_decide\n";
+  out << "example : " << run(fire, elsewhere) << ".outputs[1]! = mk_bv 8 33 := by native_decide\n";
+  out << "\n-- CLOCKED NEXT STATE: the write commits on the edge...\n";
+  out << "example : " << run(fire, writing) << ".nextState.mems[0]! (1 : Int) = mk_bv 8 77 := by native_decide\n";
+  out << "-- ...and an untouched address is preserved.\n";
+  out << "example : " << run(fire, writing) << ".nextState.mems[0]! (2 : Int) = mk_bv 8 33 := by native_decide\n";
+  out << "-- A QUIET clock commits nothing, however the write port is driven.\n";
+  out << "example : " << run(quiet, writing) << ".nextState.mems[0]! (1 : Int) = mk_bv 8 22 := by native_decide\n";
+  out << "-- A DISABLED write commits nothing even on a firing edge.\n";
+  out << "example : " << run(fire, quietw) << ".nextState.mems[0]! (1 : Int) = mk_bv 8 22 := by native_decide\n";
+}
+
 TEST(DesignScanClocks, TwoWriteTwoReadCollisionValueOracle) {
   auto&    lib = livehd::Hhds_graph_library::instance("lgdb_clk_mem_collide");
   auto     io  = lib.create_io("colfix");
@@ -2831,6 +2981,512 @@ TEST(DesignScanClocks, TwoWriteTwoReadCollisionValueOracle) {
     }
   }
   ASSERT_TRUE(out.good());
+}
+
+// ARBITRARY-WIDTH FORWARDING.  The matrix is reads x writes, so port counts
+// multiply: this memory's 2 reads and 32 writes need 64 cells, two past the 62
+// the old i64 window allowed, and the design it stands in for (a 128-write-port
+// memory) needs 256.  Those were refused outright with "the `fwd` matrix needs
+// N bits (reads x writes), which does not fit".
+//
+// A WIDE MATRIX IS NOT ENOUGH ON ITS OWN.  A 256-bit matrix whose value is zero
+// exercises no high bit at all -- every read would be read-first and the test
+// would pass against a reader that silently truncates.  So the matrix here has
+// its HIGHEST cell set (bit 63: read 1 <- write 31), which no 62-bit window can
+// even represent, and the two read rows are DIFFERENT, so a reader that shared
+// one row between reads would make the two registers agree.
+TEST(DesignScanClocks, WideMatrixHighBitForwardingValueOracle) {
+  constexpr uint32_t kWrites = 32;  // 2 reads x 32 writes = 64 cells
+  auto&              lib     = livehd::Hhds_graph_library::instance("lgdb_clk_mem_wide");
+  auto               io      = lib.create_io("widefwd");
+  uint32_t           pid     = 1;
+  for (const char* n : {"clk", "we0", "weN", "re0", "re1"}) {
+    io->add_input(n, pid++);
+    io->set_bits(n, 1);
+  }
+  for (const char* n : {"wa0", "waN", "ra0", "ra1"}) {
+    io->add_input(n, pid++);
+    io->set_bits(n, 2);
+  }
+  for (const char* n : {"wd0", "wdN"}) {
+    io->add_input(n, pid++);
+    io->set_bits(n, 8);
+  }
+  io->add_output("rd0", 1);
+  io->set_bits("rd0", 8);
+  io->add_output("rd1", 2);
+  io->set_bits("rd1", 8);
+  auto       g       = io->create_graph();
+  auto       mem     = create_typed_node(*g, Ntype_op::Memory);
+  const auto mstride = static_cast<uint32_t>(Ntype::Memory_port_stride);
+  auto       sink    = [&](std::string_view n, uint32_t port) {
+    return mem.create_sink_pin(Ntype::get_sink_pid(Ntype_op::Memory, n) + port * mstride);
+  };
+  auto konst = [&](std::string_view n, int64_t v, uint32_t port = 0) {
+    livehd::graph_util::create_const(*g, *Dlop::create_integer(v)).connect_sink(sink(n, port));
+  };
+  konst("bits", 8);
+  konst("size", 4);
+  konst("type", 1);  // synchronous reads
+  konst("wensize", 1);
+  konst("posclk", 1);
+
+  // The matrix, MSB first: bit 63 (read 1 <- write 31) and bit 0 (read 0 <-
+  // write 0).  `from_binary` because the value is 2^63 + 1, which is not an
+  // int64 at all -- the representation this test exists for.
+  std::string bits(kWrites * 2, '0');
+  bits[0]                    = '1';  // bit 63, the HIGHEST cell
+  bits[kWrites * 2 - 1]      = '1';  // bit 0
+  livehd::graph_util::create_const(*g, *Dlop::from_binary(bits, true)).connect_sink(sink("fwd", 0));
+
+  // ports 0..kWrites-1 = writes; the last two = synchronous reads.
+  for (uint32_t w = 0; w < kWrites; ++w) {
+    konst("rdport", 0, w);
+    g->get_input_pin("clk").connect_sink(sink("clock_pin", w));
+    if (w == 0 || w == kWrites - 1) {
+      const char* a = w == 0 ? "wa0" : "waN";
+      const char* d = w == 0 ? "wd0" : "wdN";
+      const char* e = w == 0 ? "we0" : "weN";
+      g->get_input_pin(a).connect_sink(sink("addr", w));
+      g->get_input_pin(d).connect_sink(sink("din", w));
+      g->get_input_pin(e).connect_sink(sink("enable", w));
+    } else {
+      // The middle writes are HELD OFF so the expectations stay crisp: they
+      // sit in the committed chain but commit nothing.
+      konst("addr", 3, w);
+      konst("din", 0, w);
+      konst("enable", 0, w);
+    }
+  }
+  const char* raddr[] = {"ra0", "ra1"};
+  const char* ren[]   = {"re0", "re1"};
+  for (uint32_t r = 0; r < 2; ++r) {
+    const uint32_t port = kWrites + r;
+    konst("rdport", 1, port);
+    g->get_input_pin(raddr[r]).connect_sink(sink("addr", port));
+    g->get_input_pin(ren[r]).connect_sink(sink("enable", port));
+    g->get_input_pin("clk").connect_sink(sink("clock_pin", port));
+    mem.create_driver_pin(port).connect_sink(g->get_output_pin(r == 0 ? "rd0" : "rd1"));
+    set_bits(mem.create_driver_pin(port), 8);
+  }
+
+  DesignScan design;
+  try {
+    design = scan_design(*g, {});
+  } catch (const std::exception& e) {
+    FAIL() << "the scanner refused a 64-cell forwarding matrix: " << e.what();
+  }
+  // THE REGRESSION, checked directly on the scan: the high cell survived and
+  // the two rows differ.
+  ASSERT_EQ(design.memories.size(), 1u);
+  const auto& m = design.memories.begin()->second;
+  ASSERT_EQ(m.fwd_rows.size(), 2u) << "one row per read port";
+  ASSERT_EQ(m.fwd_rows[0].size(), kWrites);
+  EXPECT_TRUE(m.fwd_rows[1][kWrites - 1]) << "the HIGHEST cell (bit 63) was lost";
+  EXPECT_TRUE(m.fwd_rows[0][0]);
+  EXPECT_FALSE(m.fwd_rows[0][kWrites - 1]) << "read 0 must not inherit read 1's row";
+  EXPECT_FALSE(m.fwd_rows[1][0]) << "read 1 must not inherit read 0's row";
+
+  const auto cert = build_certificate(design, {});
+  ASSERT_EQ(cert.memories.size(), 1u);
+  ASSERT_EQ(cert.flops.size(), 2u) << "expected one read register per synchronous read port";
+
+  const char* path = std::getenv("LEAN_WIDE_COLLIDE_FIXTURE");
+  if (path == nullptr) {
+    GTEST_SKIP() << "set LEAN_WIDE_COLLIDE_FIXTURE to emit the Lean oracle";
+  }
+  std::ofstream out(path);
+  emit_design_cert(design, cert, out);
+
+  auto ordinal_of = [&](std::string_view name) -> size_t {
+    for (size_t i = 0; i < design.inputs.size(); ++i) {
+      if (design.inputs[i].name == name) {
+        return i;
+      }
+    }
+    ADD_FAILURE() << "no input " << name;
+    return 0;
+  };
+  struct In { const char* name; int value; };
+  auto inputs = [&](std::initializer_list<In> set) {
+    std::map<size_t, int> by;
+    for (const auto& v : set) {
+      by[ordinal_of(v.name)] = v.value;
+    }
+    std::ostringstream o;
+    for (size_t k = 0; k < design.inputs.size(); ++k) {
+      const auto it = by.find(k);
+      o << (k ? ", " : "") << "mk_bv " << design.inputs[k].width << " " << (it != by.end() ? it->second : 0);
+    }
+    return o.str();
+  };
+  const std::string fire  = "#[true]";
+  const std::string quiet = "#[false]";
+  const char*       st    = "(⟨#[mk_bv 8 99, mk_bv 8 99], "
+                            "#[fun a => if a = 0 then mk_bv 8 11 else if a = 1 then mk_bv 8 22 "
+                            "else if a = 2 then mk_bv 8 33 else mk_bv 8 44]⟩ : RuntimeState)";
+  // Both writes hit address 1; both reads read address 1.
+  const auto both = inputs({{"we0", 1}, {"weN", 1}, {"wa0", 1}, {"waN", 1},
+                            {"wd0", 55}, {"wdN", 77}, {"re0", 1}, {"re1", 1},
+                            {"ra0", 1}, {"ra1", 1}});
+
+  out << "\n-- WIDE MATRIX, HIGH CELL SET. 2 reads x 32 writes = 64 cells, two\n"
+      << "-- past the 62 the i64 window allowed. fwd = 2^63 + 1: read 1 <- write\n"
+      << "-- 31 (the HIGHEST cell) and read 0 <- write 0.\n"
+      << "-- The rows DIFFER, so the two read registers must disagree: 55 is\n"
+      << "-- write 0's datum and 77 is write 31's. A reader that truncated the\n"
+      << "-- matrix, or shared one row between reads, cannot produce this pair.\n";
+  out << "example : ((compileAndRun widefwd_designCert " << fire << " #[" << both << "] " << st
+      << ").nextState.flops[0]!) = mk_bv 8 55 := by native_decide\n";
+  out << "example : ((compileAndRun widefwd_designCert " << fire << " #[" << both << "] " << st
+      << ").nextState.flops[1]!) = mk_bv 8 77 := by native_decide\n";
+  out << "-- the LATER write still wins the committed image.\n";
+  out << "example : ((compileAndRun widefwd_designCert " << fire << " #[" << both << "] " << st
+      << ").nextState.mems[0]! (1 : Int)) = mk_bv 8 77 := by native_decide\n";
+  out << "-- the held-off middle writes commit nothing: address 3 is untouched.\n";
+  out << "example : ((compileAndRun widefwd_designCert " << fire << " #[" << both << "] " << st
+      << ").nextState.mems[0]! (3 : Int)) = mk_bv 8 44 := by native_decide\n";
+  out << "-- a QUIET clock commits nothing.\n";
+  for (int a = 0; a < 4; ++a) {
+    const int want = a == 0 ? 11 : (a == 1 ? 22 : (a == 2 ? 33 : 44));
+    out << "example : ((compileAndRun widefwd_designCert " << quiet << " #[" << both << "] " << st
+        << ").nextState.mems[0]! (" << a << " : Int)) = mk_bv 8 " << want << " := by native_decide\n";
+  }
+  out << "\n-- direct vs compiled, every tiny address.\n";
+  for (const auto& e : {fire, quiet}) {
+    out << "example : diffStep widefwd_designCert widefwd_residual " << e << " #[" << both << "] " << st
+        << " [0,1,2,3] = none := by native_decide\n";
+  }
+  ASSERT_TRUE(out.good());
+}
+
+// ---------------------------------------------------------------------------
+// MEMORY PORT DEPENDENCIES.
+//
+// The scan used to expand every node by its input edges and cut only flops, so
+// a Memory became ONE combinational vertex joining all of its inputs to all of
+// its outputs. That reports `read dout -> ... -> WRITE address` as a cycle. It
+// is not one: a write port samples its address AT THE EDGE, so the path is
+// feedback through the array, like `always @(posedge clk) r <= f(r)`.
+//
+// Dependencies now come from `Memory_deps`, asked per READ PORT and unioned
+// over all of them, with `writes = true` so that FORWARDED write cones -- which
+// `memory_lowering` really does build into a read's value -- stay visible.
+namespace {
+struct MemFix {
+  std::shared_ptr<hhds::Graph> g;
+  hhds::Node_class             mem;
+};
+
+// One write port (0) and `reads` async-or-sync read ports (1..reads) over a
+// 4-entry x 8-bit array. `fwd` is the forwarding matrix the certificate reads.
+MemFix build_mem(hhds::GraphLibrary& lib, const std::string& mod, bool sync_read, int fwd, int reads = 1) {
+  auto io = lib.create_io(mod);
+  int  p  = 0;
+  for (const char* n : {"clk", "we"}) {
+    io->add_input(n, p++);
+    io->set_bits(n, 1);
+    io->set_unsign(n, true);
+  }
+  io->add_input("wa", p++);
+  io->set_bits("wa", 2);
+  io->set_unsign("wa", true);
+  for (int r = 0; r < reads; ++r) {
+    const auto n = "ra" + std::to_string(r);
+    io->add_input(n, p++);
+    io->set_bits(n, 2);
+    io->set_unsign(n, true);
+  }
+  io->add_input("din", p++);
+  io->set_bits("din", 8);
+  io->set_unsign("din", true);
+  for (int r = 0; r < reads; ++r) {
+    const auto n = "dout" + std::to_string(r);
+    io->add_output(n, p++);
+    io->set_bits(n, 8);
+    io->set_unsign(n, true);
+  }
+
+  MemFix f;
+  f.g       = io->create_graph();
+  auto* g   = f.g.get();
+  f.mem     = create_typed_node(*g, Ntype_op::Memory);
+  const int stride = static_cast<int>(Ntype::Memory_port_stride);
+  auto      konst  = [&](int64_t v) { return livehd::graph_util::create_const(*g, *Dlop::create_integer(v)); };
+  auto      global = [&](const char* name, int64_t v) {
+    konst(v).connect_sink(f.mem.create_sink_pin(Ntype::get_sink_pid(Ntype_op::Memory, name)));
+  };
+  global("bits", 8);
+  global("size", 4);
+  global("fwd", fwd);
+  global("wensize", 1);
+  global("posclk", 1);
+  global("type", sync_read ? 1 : 2);
+  auto port = [&](int idx, const char* name, const hhds::Pin_class& drv) {
+    drv.connect_sink(f.mem.create_sink_pin(Ntype::get_sink_pid(Ntype_op::Memory, name) + idx * stride));
+  };
+  // write port 0
+  port(0, "addr", g->get_input_pin("wa"));
+  port(0, "din", g->get_input_pin("din"));
+  port(0, "enable", g->get_input_pin("we"));
+  port(0, "clock_pin", g->get_input_pin("clk"));
+  port(0, "rdport", konst(0));
+  // read ports 1..reads
+  for (int r = 0; r < reads; ++r) {
+    port(1 + r, "addr", g->get_input_pin("ra" + std::to_string(r)));
+    port(1 + r, "enable", konst(1));
+    port(1 + r, "clock_pin", g->get_input_pin("clk"));
+    port(1 + r, "rdport", konst(1));
+    // dout pid follows the cgen convention: (write ports) + (read index).
+    auto dout = f.mem.create_driver_pin(1 + r);
+    set_bits(dout, 8);
+    livehd::graph_util::set_unsign(dout);
+    dout.connect_sink(g->get_output_pin("dout" + std::to_string(r)));
+  }
+  return f;
+}
+
+// Route the read output back into a chosen memory sink through pure
+// combinational logic (an Or with a constant, so nothing folds it away).
+void feed_back(MemFix& f, const char* sink_name, int port_idx, int from_read = 0) {
+  auto* g      = f.g.get();
+  auto  dout   = f.mem.create_driver_pin(1 + from_read);
+  auto  orn    = create_typed_node(*g, Ntype_op::Or);
+  dout.connect_sink(orn.create_sink_pin(0));
+  livehd::graph_util::create_const(*g, *Dlop::create_integer(0)).connect_sink(orn.create_sink_pin(1));
+  auto oq = orn.create_driver_pin(0);
+  set_bits(oq, 2);
+  livehd::graph_util::set_unsign(oq);
+  const int stride = static_cast<int>(Ntype::Memory_port_stride);
+  auto      sink   = f.mem.create_sink_pin(Ntype::get_sink_pid(Ntype_op::Memory, sink_name) + port_idx * stride);
+  sink.del_sink();
+  oq.connect_sink(sink);
+}
+
+// The WHOLE chain, not just the scan: `build_certificate` ends in
+// `index_certificate`, which refuses any node whose dependency was not declared
+// earlier. A scan that accepts a graph but schedules it in an order the
+// certificate cannot express has to fail here, not pass quietly.
+CertificateIR scan_and_build(hhds::Graph& g) {
+  const auto design = scan_design(g, {});
+  return build_certificate(design, {});
+}
+}  // namespace
+
+// A write ADDRESS fed from the read output is sampled at the edge: not a loop.
+TEST(DesignScan, ClockedWriteAddressFeedbackIsNotACombinationalCycle) {
+  auto& lib = livehd::Hhds_graph_library::instance("lgdb_scan_mem_waddr_fb");
+  auto  f   = build_mem(lib, "waddr_fb", /*sync_read=*/false, /*fwd=*/0);
+  feed_back(f, "addr", /*port_idx=*/0);
+  EXPECT_NO_THROW(scan_and_build(*f.g))
+      << "a write port samples its address AT THE EDGE, so read -> write-address is feedback through the array";
+}
+
+// The read's OWN address fed from its own output closes with no edge between:
+// a real zero-delay loop, and it must still be refused.
+TEST(DesignScan, AsyncReadAddressFeedbackIsStillACycle) {
+  auto& lib = livehd::Hhds_graph_library::instance("lgdb_scan_mem_raddr_fb");
+  auto  f   = build_mem(lib, "raddr_fb", /*sync_read=*/false, /*fwd=*/0);
+  feed_back(f, "addr", /*port_idx=*/1);
+  EXPECT_THROW(scan_design(*f.g, {}), std::runtime_error)
+      << "an ASYNC read output driving its own read address is a genuine combinational loop";
+}
+
+// A SYNCHRONOUS read is a register: its output cuts the dependency, so even a
+// direct feedback to its own address is not combinational.
+TEST(DesignScan, SyncReadOutputCutsTheDependency) {
+  auto& lib = livehd::Hhds_graph_library::instance("lgdb_scan_mem_sync_cut");
+  auto  f   = build_mem(lib, "sync_cut", /*sync_read=*/true, /*fwd=*/0);
+  feed_back(f, "addr", /*port_idx=*/1);
+  EXPECT_NO_THROW(scan_and_build(*f.g))
+      << "a synchronous read output is state; it cannot be a combinational dependency";
+}
+
+// FORWARDING makes a write cone part of the read's VALUE -- `memory_lowering`
+// chains the forwarded writes into the image before `MemRead`. So a read output
+// reaching a forwarded write's ADDRESS really is a combinational loop, and the
+// scan must keep seeing it. This is why the walk asks for `writes = true`;
+// legalize's loop-check policy (`writes = false`) would hide it.
+TEST(DesignScan, ForwardedWriteCycleStaysVisible) {
+  auto& lib = livehd::Hhds_graph_library::instance("lgdb_scan_mem_fwd_fb");
+  auto  f   = build_mem(lib, "fwd_fb", /*sync_read=*/false, /*fwd=*/1);
+  feed_back(f, "addr", /*port_idx=*/0);
+  EXPECT_THROW(scan_design(*f.g, {}), std::runtime_error)
+      << "with forwarding the write cone IS part of the read value, so this path closes combinationally";
+}
+
+// TWO read ports with independent addresses must still scan. The walk expands
+// the UNION over every read port, so a second port is a second cone to cross,
+// not a second chance to report a loop -- CORE-ET minion_dcache_top carries two
+// 8-read-port memories, and over-reporting here would refuse the whole design.
+TEST(DesignScan, TwoIndependentReadPortsAreNotACycle) {
+  auto& lib = livehd::Hhds_graph_library::instance("lgdb_scan_mem_two_rd");
+  auto  f   = build_mem(lib, "two_rd", /*sync_read=*/false, /*fwd=*/0, /*reads=*/2);
+  feed_back(f, "addr", /*port_idx=*/0, /*from_read=*/1);
+  EXPECT_NO_THROW(scan_and_build(*f.g))
+      << "two read ports whose addresses do not depend on each other are independent cones";
+}
+
+// ONE WAY across two read ports is an ordinary DAG edge, not a cycle: read 0's
+// data feeds read 1's address and nothing returns. Two reads of one array are
+// two `MemRead` nodes over one image, and the certificate orders them like any
+// other pair of nodes -- which it can only do because each read port is
+// scheduled, and lowered, as its own unit.
+TEST(DesignScan, OneWayCrossReadPortDependencyIsNotACycle) {
+  auto& lib = livehd::Hhds_graph_library::instance("lgdb_scan_mem_cross_rd");
+  auto  f   = build_mem(lib, "cross_rd", /*sync_read=*/false, /*fwd=*/0, /*reads=*/2);
+  feed_back(f, "addr", /*port_idx=*/2, /*from_read=*/0);
+  CertificateIR cert;
+  ASSERT_NO_THROW(cert = scan_and_build(*f.g))
+      << "read 0 -> read 1's address has a valid order: read 0, the logic, then read 1";
+  // Both reads are present, over ONE image: the array keeps a single state
+  // identity however many ports read it.
+  size_t reads = 0, images = 0;
+  for (const auto& n : cert.nodes) {
+    reads += n.op.kind == Operation::MemRead;
+  }
+  for (const auto& src : cert.sources) {
+    images += src.kind == SourceKind::MemImage;
+  }
+  EXPECT_EQ(reads, 2u) << "each consumed read port must lower to its own MemRead";
+  EXPECT_EQ(images, 1u) << "one memory, one image identity";
+  EXPECT_EQ(cert.memories.size(), 1u);
+}
+
+// A RETURN dependency is a genuine loop and must still be refused: read 0's
+// data feeds read 1's address AND read 1's data feeds read 0's address, with no
+// edge anywhere between.
+TEST(DesignScan, TwoWayCrossReadPortDependencyIsACycle) {
+  auto& lib = livehd::Hhds_graph_library::instance("lgdb_scan_mem_cross_rd2");
+  auto  f   = build_mem(lib, "cross_rd2", /*sync_read=*/false, /*fwd=*/0, /*reads=*/2);
+  feed_back(f, "addr", /*port_idx=*/2, /*from_read=*/0);
+  feed_back(f, "addr", /*port_idx=*/1, /*from_read=*/1);
+  EXPECT_THROW(scan_design(*f.g, {}), std::runtime_error)
+      << "read 0 -> read 1's address and read 1 -> read 0's address closes with no edge between";
+}
+
+// WHICH WRITE CONE a read depends on comes from that read's OWN row of the
+// forwarding matrix, `fwd_rows[r][w]`, because that is what `lower_memory_read`
+// chains into the image it reads. Here `fwd = 0b10` over one write port: read 1
+// forwards write 0, read 0 does not.
+//
+// The shared `Memory_deps` helper cannot express this -- its `fwd_nonzero` is a
+// whole-cell flag -- so asking it here would make BOTH of these a cycle and
+// refuse a design that is perfectly ordinary.
+TEST(DesignScan, ReadFirstPortSharingAnArrayWithAForwardingPortIsNotACycle) {
+  auto& lib = livehd::Hhds_graph_library::instance("lgdb_scan_mem_row_readfirst");
+  auto  f   = build_mem(lib, "row_readfirst", /*sync_read=*/false, /*fwd=*/0b10, /*reads=*/2);
+  feed_back(f, "addr", /*port_idx=*/0, /*from_read=*/0);
+  EXPECT_NO_THROW(scan_and_build(*f.g))
+      << "read 0's row does not forward write 0, so write 0's address is not part of read 0's value";
+}
+
+TEST(DesignScan, ForwardingPortReachingItsOwnForwardedWriteIsACycle) {
+  auto& lib = livehd::Hhds_graph_library::instance("lgdb_scan_mem_row_fwd");
+  auto  f   = build_mem(lib, "row_fwd", /*sync_read=*/false, /*fwd=*/0b10, /*reads=*/2);
+  feed_back(f, "addr", /*port_idx=*/0, /*from_read=*/1);
+  EXPECT_THROW(scan_design(*f.g, {}), std::runtime_error)
+      << "read 1's row DOES forward write 0, so write 0's address is part of read 1's value";
+}
+
+namespace {
+// Two arrays in series: the second memory's write DATA is the first memory's
+// read output. CORE-ET minion_dcache_top has exactly this pair (n_107860's
+// dout drives n_107868's write din).
+std::shared_ptr<hhds::Graph> build_chained_memories(hhds::GraphLibrary& lib, const std::string& mod, bool consumer_first) {
+  auto io = lib.create_io(mod);
+  int  p  = 0;
+  for (const char* n : {"clk", "we"}) {
+    io->add_input(n, p++);
+    io->set_bits(n, 1);
+    io->set_unsign(n, true);
+  }
+  for (const char* n : {"wa", "ra"}) {
+    io->add_input(n, p++);
+    io->set_bits(n, 2);
+    io->set_unsign(n, true);
+  }
+  io->add_input("din", p++);
+  io->set_bits("din", 8);
+  io->set_unsign("din", true);
+  io->add_output("dout", p++);
+  io->set_bits("dout", 8);
+  io->set_unsign("dout", true);
+
+  auto      gp     = io->create_graph();
+  auto*     g      = gp.get();
+  const int stride = static_cast<int>(Ntype::Memory_port_stride);
+  auto      konst  = [&](int64_t v) { return livehd::graph_util::create_const(*g, *Dlop::create_integer(v)); };
+  auto      build  = [&](const hhds::Pin_class& wr_data, hhds::Node_class* out_mem) {
+    auto mem    = create_typed_node(*g, Ntype_op::Memory);
+    if (out_mem != nullptr) {
+      *out_mem = mem;
+    }
+    auto global = [&](const char* name, int64_t v) {
+      konst(v).connect_sink(mem.create_sink_pin(Ntype::get_sink_pid(Ntype_op::Memory, name)));
+    };
+    global("bits", 8);
+    global("size", 4);
+    global("fwd", 0);
+    global("wensize", 1);
+    global("posclk", 1);
+    global("type", 2);
+    auto port = [&](int idx, const char* name, const hhds::Pin_class& drv) {
+      drv.connect_sink(mem.create_sink_pin(Ntype::get_sink_pid(Ntype_op::Memory, name) + idx * stride));
+    };
+    port(0, "addr", g->get_input_pin("wa"));
+    if (!wr_data.is_invalid()) {
+      port(0, "din", wr_data);
+    }
+    port(0, "enable", g->get_input_pin("we"));
+    port(0, "clock_pin", g->get_input_pin("clk"));
+    port(0, "rdport", konst(0));
+    port(1, "addr", g->get_input_pin("ra"));
+    port(1, "enable", konst(1));
+    port(1, "clock_pin", g->get_input_pin("clk"));
+    port(1, "rdport", konst(1));
+    auto dout = mem.create_driver_pin(1);
+    set_bits(dout, 8);
+    livehd::graph_util::set_unsign(dout);
+    return dout;
+  };
+  if (consumer_first) {
+    // The CONSUMER memory exists before the producer it will read: its write
+    // `din` sink is connected only once the producer has been built.
+    hhds::Node_class consumer;
+    const auto       consumer_dout = build(hhds::Pin_class(), &consumer);
+    const auto       producer_dout = build(g->get_input_pin("din"), nullptr);
+    producer_dout.connect_sink(consumer.create_sink_pin(Ntype::get_sink_pid(Ntype_op::Memory, "din")));
+    consumer_dout.connect_sink(g->get_output_pin("dout"));
+    return gp;
+  }
+  const auto first  = build(g->get_input_pin("din"), nullptr);
+  const auto second = build(first, nullptr);
+  second.connect_sink(g->get_output_pin("dout"));
+  return gp;
+}
+}  // namespace
+
+// A memory's WRITE side is a next-state function and may read anything in the
+// design, including another memory. Lowering both sides at the Memory node's
+// own place in the topological order makes this pair unschedulable: the second
+// memory would have to be lowered both before its own read consumers and after
+// the first memory's. The write side is therefore emitted after every node,
+// exactly like a flop's `din`.
+//
+// BOTH CREATION ORDERS. The graph's node order is not the certificate's, but it
+// is what the scan walks from, so a scheduler that happened to work only when
+// the producing memory was built first would pass a one-sided test.
+TEST(CertificateIr, MemoryWriteDataFromAnotherMemorysRead) {
+  auto& lib = livehd::Hhds_graph_library::instance("lgdb_cert_mem_chain");
+  auto  g   = build_chained_memories(lib, "mem_chain", /*consumer_first=*/false);
+  EXPECT_NO_THROW(scan_and_build(*g)) << "a memory's next-state cone may name another memory's read output";
+}
+
+TEST(CertificateIr, MemoryWriteDataFromAnotherMemorysReadConsumerBuiltFirst) {
+  auto& lib = livehd::Hhds_graph_library::instance("lgdb_cert_mem_chain_rev");
+  auto  g   = build_chained_memories(lib, "mem_chain_rev", /*consumer_first=*/true);
+  EXPECT_NO_THROW(scan_and_build(*g)) << "the schedule must not depend on which memory node was created first";
 }
 }  // namespace
 }  // namespace lean_export

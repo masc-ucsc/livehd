@@ -49,3 +49,15 @@ cc_test(
         "@hhds//hhds:graph",
     ],
 )
+
+cc_test(
+    name = "pass_single_edge_test",
+    srcs = ["pass_single_edge_test.cpp"],
+    copts = COPTS,
+    deps = [
+        ":pass_single_edge",
+        "//graph",
+        "@googletest//:gtest_main",
+        "@hhds//hhds:graph",
+    ],
+)

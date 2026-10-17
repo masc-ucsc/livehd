@@ -17,7 +17,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 LIVEHD_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 
 LHD="${LHD:-$LIVEHD_ROOT/bazel-bin/lhd/lhd}"
-HAGENT="${HAGENT:-/mada/users/czeng14/projects/hagent/.cache/setup_simplechisel_mcp_2025.11/build}"
+HAGENT="${HAGENT:-/WORKROOT/projects/hagent/.cache/setup_simplechisel_mcp_2025.11/build}"
 OUT="${OUT:-$LIVEHD_ROOT/generated/dino_lgraph_lec_gate}"
 
 declare -a DESIGNS

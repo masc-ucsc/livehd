@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """Verilog -> Pyrope -> Verilog regression using the default LEC solver.
 
-Both emitted Pyrope versus its handwritten twin and emitted Verilog versus
-its original source must pass. Source Verilog is always read by native Slang;
-unknown results, refusals, and timeouts fail the regression.
+Compare emitted Pyrope with its handwritten twin and emitted Verilog with its
+original source. Source Verilog is always read by native Slang. Timeouts are
+inconclusive; refutations, refusals, and failed setups fail the regression.
 """
 
 import argparse
@@ -16,12 +16,14 @@ import sys
 
 from lec import acceptable, run_lec, verdict
 
+# Fixtures can budget each comparison separately to keep the entire round
+# trip within its test runtime limit. A timeout stays inconclusive, not proof.
 NATIVE_CHECK_TIMEOUT = 20
 # Budget for comparing emitted Verilog with its source using default LEC.
-# A fixture can override it with :verilog_check_timeout:; timeouts fail.
+# A fixture can override it with :verilog_check_timeout:.
 VERILOG_CHECK_TIMEOUT = 20
 # Budget for the graphs-flow (lg+pyrope, DCE on) Pyrope vs the source Verilog.
-# Unlike the checks above, an undecided run (TIMEOUT etc.) here passes; only REFUTED fails.
+# An undecided run is inconclusive; refutations, refusals, and crashes fail.
 GRAPHS_CHECK_TIMEOUT = 5
 
 
@@ -62,6 +64,19 @@ def _modules(vpath):
         return []
 
 
+def _check_timeout(prp_path, key, default):
+    value = _header(prp_path, key)
+    if value is None:
+        return default
+    try:
+        seconds = int(value)
+        if seconds > 0:
+            return seconds
+    except ValueError:
+        pass
+    raise ValueError(":{}: must be a positive integer (got '{}')".format(key, value))
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("-i", "--input", required=True, help="golden .v file")
@@ -78,6 +93,13 @@ def main():
     ref_prp = os.path.join(os.path.dirname(v), name + ".prp")
     if not os.path.exists(ref_prp):
         print("{} - v2prp2v - FAILED: no original .prp reference next to {}".format(name, v))
+        return 1
+
+    try:
+        native_timeout = _check_timeout(ref_prp, "native_check_timeout", NATIVE_CHECK_TIMEOUT)
+        verilog_timeout = _check_timeout(ref_prp, "verilog_check_timeout", VERILOG_CHECK_TIMEOUT)
+    except ValueError as error:
+        print("{} - v2prp2v - FAILED: {}".format(name, error))
         return 1
 
     vtop = _header(ref_prp, "verilog_top")
@@ -187,20 +209,27 @@ def main():
     native = run_lec(
         [lhd, "lec", "--impl", impl_arg, "--ref", "pyrope:" + ref_prp,
          "--impl-top", vtop, "--ref-top", ptop,
-         "--workdir", os.path.join(work, "w_native_check")], timeout=NATIVE_CHECK_TIMEOUT)
+         "--workdir", os.path.join(work, "w_native_check")], timeout=native_timeout)
     # A `:lec_expect: refuted` pair is a MUTATED golden: its round trip must
     # still differ from the handwritten Pyrope. The Verilog leg below compares
     # the golden with its OWN round trip, so it must prove either way.
-    expect = (_header(ref_prp, "lec_expect") or "proven").lower()
+    # `:v2prp_native_expect:` overrides it for this leg alone: the native leg
+    # runs the handwritten Pyrope as the REFERENCE against the round trip of the
+    # golden, the reverse of the equiv test's direction. A Pyrope twin that
+    # REFINES its golden (power-on contents the golden leaves undefined) proves
+    # there but must refute here: a defined reference against an uninitialized
+    # implementation is REFUTED-cex (LEC initial-state ruling 2026-10-16).
+    expect = (_header(ref_prp, "v2prp_native_expect") or _header(ref_prp, "lec_expect") or "proven").lower()
+    native_status = verdict(native)
     if expect == "refuted":
-        native_failed = verdict(native) != "refuted"  # REFUTED-cex, exit 10
+        native_failed = native_status != "refuted"  # REFUTED-cex, exit 10
     else:
-        native_failed = not acceptable(verdict(native))
+        native_failed = not acceptable(native_status)
     if native_failed:
         print("{} - v2prp2v - FAILED: native Pyrope check did not report {}".format(name, expect.upper()))
         print(native.stdout.decode("utf-8", "replace"))
     else:
-        print("{} - v2prp2v - native Pyrope check {}".format(name, "refuted as expected" if expect == "refuted" else "passed"))
+        print("{} - v2prp2v - native Pyrope check {}".format(name, "refuted as expected" if expect == "refuted" else native_status))
     if args.native_only:
         return int(native_failed)
 
@@ -238,16 +267,6 @@ def main():
                 out.write("\n")
 
     # 2. Compare the round-trip Verilog with its source using native Slang LEC.
-    verilog_timeout = VERILOG_CHECK_TIMEOUT
-    hdr_timeout = _header(ref_prp, "verilog_check_timeout")
-    if hdr_timeout:
-        try:
-            verilog_timeout = int(hdr_timeout)
-        except ValueError:
-            print("{} - v2prp2v - FAILED: :verilog_check_timeout: must be an "
-                  "integer (got '{}')".format(name, hdr_timeout))
-            return 1
-
     cmd = [lhd, "lec", "--ref", v, "--impl", impl,
            "--ref-top", vtop, "--impl-top", impl_top,
            "--workdir", os.path.join(work, "w_verilog_check")]
@@ -255,8 +274,8 @@ def main():
 
     out = chk.stdout.decode("utf-8", "ignore")
     if acceptable(verdict(chk)):
-        print("{} - v2prp2v - original Verilog check success "
-              "(ref_top:{} impl_top:{})".format(name, vtop, impl_top))
+        print("{} - v2prp2v - original Verilog check {} "
+              "(ref_top:{} impl_top:{})".format(name, verdict(chk), vtop, impl_top))
         return 1 if native_failed else 0
     print("{} - v2prp2v - FAILED: round-trip did not prove equivalent "
           "(ref_top:{} impl_top:{})".format(name, vtop, impl_top))

@@ -8,7 +8,6 @@
 #include <cstdint>
 #include <format>
 #include <memory>
-#include <mutex>
 #include <optional>
 #include <string>
 #include <type_traits>
@@ -23,7 +22,6 @@
 
 #include "hhds/source_locator.hpp"
 #include "hlop/dlop.hpp"
-#include "hlop/readmem.hpp"
 #include "latch_contract.hpp"  // Design_clocks::name_looks_like_clock (the ICG clock-operand disambiguator)
 #include "node_util.hpp"
 #include "property_types.hpp"  // is_assume_kind -- shared with the asserter, without its query engine
@@ -1171,94 +1169,6 @@ std::string mem_state_key(const Mem_sig& sig, std::string_view name) {
   return std::format("\x01m:{}x{}:n:{}", sig.size, sig.bits, name);
 }
 
-namespace {
-// Whole $readmem files, cached by (path, radix, bits, size): BMC re-encodes a
-// design once per cycle, and a hierarchy proves many defs.
-struct Image_load {
-  std::vector<hlop::Memory_image_word> words;
-  std::string                          error;
-};
-const Image_load& load_memory_image(const hlop::Memory_image& image, const Mem_sig& sig) {
-  static std::mutex                                          mu;
-  static absl::flat_hash_map<std::string, std::unique_ptr<Image_load>> cache;
-  const std::string key = std::format("{}\x1f{}\x1f{}\x1f{}", image.path, image.radix, sig.bits, sig.size);
-  std::lock_guard   lock(mu);
-  auto&             slot = cache[key];
-  if (!slot) {
-    slot = std::make_unique<Image_load>();
-    try {
-      slot->words = hlop::read_memory_image(image.path, image.radix, sig.bits, static_cast<std::size_t>(sig.size));
-    } catch (const std::exception& e) {
-      slot->error = e.what();
-    }
-  }
-  return *slot;
-}
-}  // namespace
-
-Mem_power_on memory_power_on(const hhds::Occurrence_node& node, const Mem_sig& sig) {
-  Mem_power_on out;
-  if (sig.bits <= 0 || sig.size <= 0) {
-    return out;
-  }
-  auto init = gu::get_driver_of_sink_name(node, "initial");
-  if (init.is_invalid() || !init.is_const()) {
-    return out;
-  }
-  const auto bits = static_cast<size_t>(sig.bits);
-  if (auto image = gu::memory_image_of(node)) {
-    out.kind   = Mem_power_on::Kind::image;
-    out.source = std::string(image->radix == 16 ? "$readmemh(" : "$readmemb(") + image->path + ")";
-    auto type  = gu::get_driver_of_sink_name(node, "type");
-    if (type.is_const() && gu::const_of(type).to_just_i64() == 2) {
-      out.error = "a combinational array has no power-on contents to load";
-    } else if (!gu::get_driver_of_sink_name(node, "reset").is_invalid()) {
-      out.error = "the memory also has a reset arm, which the image does not define";
-    } else if (!gu::get_driver_of_sink_name(node, "update").is_invalid()) {
-      out.error = "the memory is written by a whole-array update";
-    } else {
-      const auto& load = load_memory_image(*image, sig);
-      if (!load.error.empty()) {
-        out.error = load.error;
-      } else {
-        out.entries.assign(static_cast<size_t>(sig.size), std::string{});
-        for (const auto& w : load.words) {
-          std::string bin = w.binary;
-          for (auto& ch : bin) {
-            if (ch != '0' && ch != '1') {
-              ch = '0';
-            }
-          }
-          out.entries[w.address] = std::move(bin);  // a later word for the same address wins, like $readmem
-        }
-      }
-    }
-    return out;
-  }
-  out.kind          = Mem_power_on::Kind::constant;
-  const auto  width = bits * static_cast<size_t>(sig.size);
-  std::string bin   = gu::const_of(init).to_binary();
-  for (auto& ch : bin) {
-    if (ch != '0' && ch != '1') {
-      ch = '0';
-    }
-  }
-  if (bin.size() < width) {
-    bin.insert(bin.begin(), width - bin.size(), '0');
-  } else if (bin.size() > width) {
-    bin.erase(0, bin.size() - width);
-  }
-  out.entries.resize(static_cast<size_t>(sig.size));
-  for (size_t i = 0; i < out.entries.size(); ++i) {
-    out.entries[i] = bin.substr(width - (i + 1) * bits, bits);  // entry 0 in the low bits
-  }
-  return out;
-}
-
-bool same_power_on(const Mem_power_on& a, const Mem_power_on& b) {
-  return a.has_contents() == b.has_contents() && (!a.has_contents() || a.entries == b.entries);
-}
-
 // Memory knowledge state (see encode.hpp).
 namespace {
 cvc5::Term mem_x_index(cvc5::TermManager& tm, const cvc5::Term& epoch, const cvc5::Term& addr) {
@@ -1992,8 +1902,8 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
     // Clock INPUT lanes (memory_clocks): consumed by phase 2 only when the
     // design is multi-clock, to commit on a detected edge of the memory's OWN
     // clock exactly like a flop on that clock.
-    Memory_clocks                          clocks;
-    std::vector<size_t>                    rd_pid;  // per read port (rd_fresh order): its cell port index
+    Memory_clocks                     clocks;
+    std::vector<size_t>               rd_pid;  // per read port (rd_fresh order): its cell port index
     // Per read port (rd_fresh order): the free value an UNDEFINED read returns
     // on the implementation side (set_undef_read_free); null = none.
     std::vector<Term>                      rd_xfree;
@@ -2145,7 +2055,7 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
           mc.reset = driver;
         } else if (pn == "initial") {
           if (!gu::memory_image_of(mc.node)) {
-            mc.init = driver;
+            mc.init = driver;  // file preload is symbolic external state
           }
           // File-loaded storage stays symbolic, including memories without
           // an RTL writer. Image contents are a simulation dependency, not a
@@ -2200,7 +2110,12 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
     // would be a vacuous proof when the two inits differ; per-design + compared
     // outputs makes equal inits PROVE and differing inits REFUTE.
     Sort asort = tm_.mkArraySort(bv(mc.sig.addr_w), bv(mc.sig.bits));
-    mc.is_rom  = (!mc.is_comb && !mc.is_whole && mc.sig.n_wr == 0 && !mc.init.is_invalid());
+    // A `$readmem` image is EXTERNALLY LOADABLE state, not a constant: its
+    // memory never takes the image's contents (mc.init stays unset), so it is
+    // no ROM and starts from the shared array like any uninitialized memory.
+    // Two designs loading different files are therefore equal, and an image
+    // is never folded to its contents (lhd/tests/readmem_smoke.sh).
+    mc.is_rom = (!mc.is_comb && !mc.is_whole && mc.sig.n_wr == 0 && !mc.init.is_invalid());
     if (shared_mems != nullptr && !mc.is_rom) {
       if (auto it = shared_mems->find(mc.key); it != shared_mems->end()) {
         mc.a_cur        = it->second;

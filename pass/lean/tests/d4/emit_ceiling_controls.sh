@@ -27,7 +27,7 @@ ROOT="$(cd "$HERE/../../../.." && pwd)"
 SWEEP="$ROOT/scripts/run_d4_runtime_sweep.sh"
 FL="$ROOT/generated/cva6_filelists/cv64a6_imafdc_sv39_hpdcache_wb.flistplus.f"
 WRAPDIR="$ROOT/generated/cva6_wrappers"
-REAL_ROOT="${CVA6_ROOT:-/soe/czeng14/projects/cva6-blockfinding}"
+REAL_ROOT="${CVA6_ROOT:-/HOMEROOT/projects/cva6-blockfinding}"
 
 mkdir -p "$ROOT/temp"
 TMP="$(mktemp -d "$ROOT/temp/ceil_ctl.XXXXXX")"

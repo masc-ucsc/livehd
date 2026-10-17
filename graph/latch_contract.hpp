@@ -436,6 +436,15 @@ struct Clock_port_cache {
 // (fine for a one-shot query, quadratic in a loop).
 [[nodiscard]] std::optional<Commit_class> commit_class_of(const hhds::Node_class& n, const Design_clocks* clocks = nullptr);
 
+// Classify a CLOCK DRIVER PIN against an explicit edge policy.  This is the
+// flop branch of `commit_class_of` factored out, for a cell whose clock lives
+// PER PORT -- a `Memory` -- so the root net, ICG gating and cone inversion are
+// resolved by the same code a flop uses rather than a parallel copy.
+// `commit_class_of` itself returns nullopt for a Memory and always will; that
+// is the node-level contract and it is unchanged.
+[[nodiscard]] std::optional<Commit_class> commit_class_of_clock(const hhds::Pin_class& clk, bool rising_policy,
+                                                                const Design_clocks*   clocks = nullptr);
+
 // ---------------------------------------------------------------------------
 // M8 trigger. `pass.single_edge` is CONDITIONAL: it does not run at all unless
 // the design actually mixes commit classes. A plain posedge single-clock design

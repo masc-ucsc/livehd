@@ -362,6 +362,9 @@ std::string mod_of_hpp(const std::string& fname) {
   return dot == std::string::npos ? base : base.substr(dot + 1);
 }
 
+// The full module name of a unit header: "imp_p1.top.hpp" -> "imp_p1.top".
+std::string stem_of_hpp(const std::string& fname) { return fname.substr(0, fname.size() - 4); }
+
 // ---- AST helpers ------------------------------------------------------------
 TSNode field(TSNode n, const char* name) { return ts_node_child_by_field_name(n, name, std::char_traits<char>::length(name)); }
 std::string_view ntype(TSNode n) { return ts_node_type(n); }
@@ -813,6 +816,9 @@ public:
       , unknown_zero_(unknown_zero) {
     auto slash  = file_.find_last_of("/\\");
     file_short_ = (slash == std::string::npos) ? file_ : file_.substr(slash + 1);
+    // The testbench file's own unit: its full stem, as inou.prp names it.
+    const auto ext = file_short_.rfind('.');
+    file_unit_     = ext == std::string::npos ? file_short_ : file_short_.substr(0, ext);
     // Pre-scan file-scope import bindings (`const my_top = import("unit.lam")`):
     // the bound NAME references a DUT even when it is not a dut-map key (an lg=
     // rename makes the module/hpp name differ from the source lambda). Only such
@@ -1236,6 +1242,7 @@ private:
   std::string                                 vcd_dir_;                     // empty = no VCD; else <vcd_dir>/<test>.vcd per test
   std::string                                 file_;                        // source .prp path (for failing_assert file:line)
   std::string                                 file_short_;                  // basename of file_ (the inline located message)
+  std::string                                 file_unit_;                   // file_short_ minus its extension (the tb's unit)
   bool                                        runtime_support_on_ = true;   // checkpoint/probe/query generated control plane
   bool                                        unknown_zero_       = false;  // sim.unknown_zero: `?` literal bits are 0, not random
   bool                                        in_tick_            = false;  // inside a tick body (reject nested ticks)
@@ -1266,6 +1273,28 @@ private:
   std::map<std::string, std::string>                         import_ref_;   // bound name -> import string, `lg:`/`ln:` stripped
   std::set<std::string> import_artifact_;                                   // ...of those, the ones that named lg:/ln: explicitly
 
+  // Several simulated units define a module named `tail` (generate() then keys
+  // each by its full stem, so none answers to the bare name): a reference that
+  // did not resolve to one of them exactly must not pick one.
+  void fail_if_shared(const std::string& tail, const std::string& what) const {
+    std::vector<std::string> units;
+    for (const auto& [k, d] : duts_) {
+      if (mod_of_hpp(d.hpp) == tail) {
+        units.push_back(k);
+      }
+    }
+    if (units.size() < 2) {
+      return;
+    }
+    std::string list;
+    for (const auto& u : units) {
+      list += list.empty() ? "" : ", ";
+      list += u;
+    }
+    fail(what + " is ambiguous: several simulated units define `" + tail + "` (" + list
+         + "); bind the one meant by its full name, e.g. `const m = import(\"" + units.front() + "\")`");
+  }
+
   // `mut acc = Module` -- the rvalue is a bare module name. Unwrap single-child
   // expression wrappers and return the module name iff it is a known DUT.
   std::string rvalue_module(TSNode rv) const {
@@ -1273,18 +1302,35 @@ private:
       auto t = ntype(rv);
       if (t == "identifier") {
         std::string nm = text_of(src_, rv);
-        if (duts_.count(nm) != 0) {
-          return nm;
+        if (!import_bound_.count(nm)) {
+          if (duts_.count(nm) != 0) {
+            return nm;
+          }
+          // A module name several units define is keyed by each unit's full
+          // stem (generate): a bare name is the testbench file's own one.
+          if (const std::string own = file_unit_ + "." + nm; duts_.count(own) != 0) {
+            return own;
+          }
+          fail_if_shared(nm, "`" + nm + "`");
+          return {};
         }
+        // An IMPORT-BOUND name resolves through its import string first: the
+        // const names that module even when another one answers to the same
+        // spelling.
         // lg= rename: the imported pub lambda name (e.g. `my_top`) differs from
         // the sole generated module/hpp (`chip_top`), so `mut acc = my_top` names
         // no dut key. Bind an IMPORT-BOUND name to the sole DUT; a scalar/param/
         // literal (`mut acc = base`, `mut v_final = nil`) is never import-bound.
-        if (import_bound_.count(nm)) {
+        {
           // The import string names the module directly. `duts_` is keyed by the
           // ENTITY tail (mod_of_hpp), so both spellings have to be tried: an lg:
           // graph name is often dotless (`PipelinedDualIssueCPU`) while a
-          // Pyrope-origin one is `unit.entity` against the key `entity`.
+          // Pyrope-origin one is `unit.entity` against the key `entity`. When
+          // two units share the tail (`imp_p1.top`, `imp_p2.top`), each is
+          // keyed by its full stem and only the exact spelling matches; the
+          // tail must never stand in for either, or both imports bind the
+          // same class and a testbench comparing them compares a module with
+          // itself.
           if (auto rit = import_ref_.find(nm); rit != import_ref_.end()) {
             const std::string& ref = rit->second;
             if (duts_.count(ref) != 0) {
@@ -1319,6 +1365,18 @@ private:
             if (const std::string joined = unit + "_" + entry; duts_.count(joined) != 0) {
               return joined;
             }
+          }
+          // Neither the import string nor its lg= rename names a module, and
+          // its entity is one several units define: never guess between them.
+          if (auto rit = import_ref_.find(nm); rit != import_ref_.end()) {
+            const std::string& ref = rit->second;
+            const auto         dot = ref.find_last_of('.');
+            fail_if_shared(dot == std::string::npos ? ref : ref.substr(dot + 1), "import(\"" + ref + "\")");
+          }
+          // The bound name itself names a module (`const counter =
+          // import("counter")` over the unit's sole `counter.counter`).
+          if (duts_.count(nm) != 0) {
+            return nm;
           }
           // Everything below GUESSES which module the tb meant. That is right
           // for a bare `import("x")`, whose string is a unit/pub name that may
@@ -4107,6 +4165,7 @@ int generate(const std::string& file, const std::string& simdir, const std::stri
   // One <stem>.iface.json per emitted module; the matching <stem>.hpp is still
   // the header the driver #includes, so the two names are kept side by side.
   std::map<std::string, Dut> duts;
+  std::vector<Dut>           found;
   std::error_code            ec;
   for (auto& de : std::filesystem::directory_iterator(simdir, ec)) {
     if (!de.is_regular_file()) {
@@ -4125,12 +4184,31 @@ int generate(const std::string& file, const std::string& simdir, const std::stri
     d.hpp = stem + ".hpp";
     std::string perr;
     if (parse_iface(de.path().string(), d, perr)) {
-      duts[mod_of_hpp(d.hpp)] = d;
+      found.push_back(std::move(d));
     } else if (!perr.empty()) {
       // A manifest that exists but cannot be understood is a HARD error: silently
       // skipping it is exactly the failure mode the old text scrape had.
       err = perr;
       return 1;
+    }
+  }
+  // Key each unit by its entity tail, the name a testbench spells (`mut acc =
+  // counter` for `counter.counter`), unless several units share that tail.
+  // `imp_p1.top` and `imp_p2.top` both reduce to `top`, and one map slot then
+  // held whichever manifest the directory listed last: `import("imp_p1.top")`
+  // and `import("imp_p2.top")` instantiated the SAME class, with no warning,
+  // and a testbench comparing them compared a module with itself. A shared
+  // tail keys every unit that has it by its full stem instead; rvalue_module
+  // resolves those only by an exact import string (or the testbench file's
+  // own unit) and rejects a spelling that could mean either.
+  {
+    std::map<std::string, int> tail_uses;
+    for (const auto& d : found) {
+      ++tail_uses[mod_of_hpp(d.hpp)];
+    }
+    for (auto& d : found) {
+      const auto tail = mod_of_hpp(d.hpp);
+      duts[tail_uses[tail] == 1 ? tail : stem_of_hpp(d.hpp)] = std::move(d);
     }
   }
   if (duts.empty()) {

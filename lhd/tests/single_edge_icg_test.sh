@@ -187,20 +187,49 @@ EOF
     || { echo "$out" | head -8; fail "the normalized design does not match the real always_latch + gated-clock source under iverilog"; }
   echo "ok: source ICG and normalized flop-with-enable agree over 29 cycles under iverilog"
 
-  # NEGATIVE CONTROL: use the enable latch's HELD Q instead of the value it passes
-  # through. That is the L1 error the bypass exists to prevent, and it must fail
-  # here -- otherwise the agreement above proves nothing about the bypass.
-  sed 's/^if (en) begin/if (enl) begin/' "$W/norm.v" > "$W/norm_late.v"
-  if ! cmp -s "$W/norm.v" "$W/norm_late.v"; then
-    iverilog -g2012 -o "$W/late.vvp" "$W/src.v" "$W/norm_late.v" "$W/tb.v" >"$W/iv2.log" 2>&1 \
-      || { cat "$W/iv2.log"; fail "could not build the L1 negative control"; }
-    out="$(vvp "$W/late.vvp" 2>&1)"
-    grep -q "ICG_DIFF_FAIL" <<<"$out" \
-      || fail "reading the enable latch's HELD Q still matched the source -- the harness cannot see a one-cycle-late enable, so the agreement above is not evidence"
-    echo "ok: reading the enable latch's held Q instead FAILS (the bypass is load-bearing)"
-  else
-    fail "the L1 negative control did not apply (the normalized netlist does not spell its enable as expected)"
-  fi
+  # NEGATIVE CONTROL: use the enable latch's HELD Q instead of the value it
+  # passes through. That is the L1 error the bypass exists to prevent, and it
+  # must fail here -- otherwise the agreement above proves nothing about it.
+  #
+  # DERIVE the arm net; do NOT hardcode its spelling. The previous version ran
+  # `sed 's/^if (en) begin/if (enl) begin/'`, which never matched any emission
+  # and so silently tested nothing (the retained
+  # generated/master_port/d2_runtime/single_edge_icg_test_extsim.log records it
+  # as "did not apply", with the positive leg passing beside it). cgen does not
+  # spell the enable that way: the direct-slang shape emits
+  # `if ((en & ((reset) == ('sb0))))` and the yosys shape emits
+  # `if (sext_116)`. What IS stable in both is that the held latch survives as
+  # `reg enl` fed by `___next_enl = <arm>;`, so the arm is read off that line
+  # and every occurrence of it is swapped for the held `enl`.
+  l1_mutate() { # <norm.v> <out.v>  -> prints the arm net, or fails
+    local arm tgt cond
+    arm="$(sed -n 's/^[[:space:]]*___next_enl[[:space:]]*=[[:space:]]*\([A-Za-z_][A-Za-z0-9_]*\)[[:space:]]*;.*$/\1/p' "$1" | head -1)"
+    [ -n "$arm" ] || return 1
+    # The target is the GATED FLOP's enable only: the `if (...)` guarding
+    # `f <= ___next_f;`. Substituting the arm everywhere would also rewrite its
+    # own declaration and definition (the yosys shape defines the arm as
+    # `sext_116 = $signed(mux_56[0:0]);`), which would collide with the real
+    # `enl` and build a different design rather than the L1 defect.
+    tgt="$(grep -n 'f <= ___next_f;' "$1" | head -1 | cut -d: -f1)"
+    [ -n "$tgt" ] || return 1
+    cond="$(awk -v t="$tgt" 'NR < t && /if[ \t]*\(/ { l = NR } END { print l }' "$1")"
+    [ -n "$cond" ] || return 1
+    sed "${cond}s/\\b${arm}\\b/enl/g" "$1" > "$2"
+    printf '%s' "$arm"
+  }
+  arm_net="$(l1_mutate "$W/norm.v" "$W/norm_late.v")" \
+    || fail "the L1 negative could not find the enable latch's arm (`___next_enl = <net>;`) in the normalized netlist"
+  cmp -s "$W/norm.v" "$W/norm_late.v" \
+    && fail "the L1 negative control did not apply: arm net '$arm_net' was found but substituting it changed nothing"
+  echo "ok: the L1 mutation applied (arm net '$arm_net' -> held 'enl')"
+  iverilog -g2012 -o "$W/late.vvp" "$W/src.v" "$W/norm_late.v" "$W/tb.v" >"$W/iv2.log" 2>&1 \
+    || { cat "$W/iv2.log"; fail "could not build the L1 negative control (it must EXECUTE, not merely be generated)"; }
+  out="$(vvp "$W/late.vvp" 2>&1)"
+  grep -qE "ICG_DIFF_OK|ICG_DIFF_FAIL" <<<"$out" \
+    || { echo "$out" | head -8; fail "the L1 negative control did not run to a verdict"; }
+  grep -q "ICG_DIFF_FAIL" <<<"$out" \
+    || fail "reading the enable latch's HELD Q still matched the source -- the harness cannot see a one-cycle-late enable, so the agreement above is not evidence"
+  echo "ok: reading the enable latch's held Q instead FAILS (the bypass is load-bearing)"
 fi
 
 # ---- the shape REAL designs actually have: an INSTANTIATED ICG cell ---------
@@ -325,5 +354,412 @@ EOF
     || { echo "$out" | head -6; fail "the normalized clk-and-data latch does not match the real gated latch under iverilog"; }
   echo "ok: clk-AND-data latch agrees with the real gated latch over 23 cycles under iverilog"
 fi
+
+
+# ---- the CORE-ET prim_clk_gate shape, and its same-phase twin ---------------
+#
+# The fixture above writes the enable latch as `always_latch if (!clk) enl = en;`
+# -- a BLOCKING assignment in always_latch. CORE-ET's
+# hw/ip/tech_generic/prim_clk_gate/rtl/prim_clk_gate.sv writes the SAME latch in
+# the original cell's event-control form, with a NON-BLOCKING assignment and a
+# scan-mode term:
+#
+#     always @(clk_i or en_i or dft_i.scanmode)
+#       if (!clk_i) en_latch <= en_i | dft_i.scanmode;
+#     assign clk_o = clk_i & en_latch;
+#
+# Same contract, different spelling -- and the reader lowers this one's window as
+# `Get_mask(Mux(Ror(clk), c0, c1), [0,1))`. `values_with_root` understood And/Or/
+# Clock_cell and nothing else, so the window came back kAny and the
+# opposite-phase test failed BOTH halves: a textbook ICG was refused with
+# `clock-gate-latch-phase` on minion_dcache_top (`flop_75936:...count_q`
+# through `latch_50396:...u_clk_gate.en_latch`).
+#
+# The three pass-throughs added to values_with_root (1-bit Ror, identity
+# Get_mask, Mux with a decided selector) are exact, so a genuinely same-phase
+# latch must STILL be refused. That is the second design here, and it is what
+# makes this a discriminating control rather than a smoke test: if the fix ever
+# degrades into "unknown means fine", the same-phase leg passes and fails loudly.
+cat > "$W/icg_ec.sv" <<'EOF'
+module icgf(input clk, input reset, input en, input scan, input [7:0] d, output [7:0] q);
+  reg enl;
+  always @(clk or en or scan) if (!clk) enl <= en | scan;
+  wire gclk = clk & enl;
+  reg [7:0] f;
+  always @(posedge gclk) if (reset) f <= 0; else f <= d;
+  assign q = f;
+endmodule
+EOF
+# The ONLY change is the transparent phase: open while the gated clock is HIGH.
+sed 's/if (!clk) enl <= en | scan;/if (clk) enl <= en | scan;/' "$W/icg_ec.sv" > "$W/icg_ec_same.sv"
+cmp -s "$W/icg_ec.sv" "$W/icg_ec_same.sv" && fail "the same-phase mutation did not apply"
+
+# The YOSYS reader, deliberately: B01 is compiled with `--reader yosys-slang`,
+# and it is that reader which lowers this latch's window as
+# `Get_mask(Mux(Ror(clk), c0, c1), [0,1))`. The direct slang reader produces a
+# different, already-readable shape, so building these two designs with it would
+# make the control vacuous -- measured: with `--reader slang` both legs pass even
+# with the pass-throughs removed.
+build_top() { # <name> <src> <top>
+  rm -rf "$W/lg_$1"
+  "$LHD" compile "$2" --reader yosys-slang --top "$3" --emit-dir "lg:$W/lg_$1" --workdir "$W/cw_$1" >"$W/c_$1.log" 2>&1 \
+    || { tail -5 "$W/c_$1.log"; fail "compile of $2 failed"; }
+}
+build_top ec      "$W/icg_ec.sv"      icgf
+build_top ec_same "$W/icg_ec_same.sv" icgf
+
+# POSITIVE: the event-control / non-blocking / scan-OR spelling is recognized.
+rm -rf "$W/lg_ec_norm"
+out="$("$LHD" pass single_edge --top icgf "lg:$W/lg_ec" --emit-dir "lg:$W/lg_ec_norm" \
+       --workdir "$W/pw_ec" 2>&1)"
+rc=$?
+[ $rc -eq 0 ] \
+  || { echo "$out" | tail -6; fail "the CORE-ET prim_clk_gate spelling was refused (rc=$rc); an opposite-phase ICG must be recognized whatever its RTL form"; }
+grep -q "gated clock(s) folded into an enable" <<<"$out" \
+  || { echo "$out" | tail -6; fail "the event-control ICG was not folded into an enable"; }
+grep -q "P=1 slots" <<<"$out" \
+  || { echo "$out" | tail -6; fail "the event-control ICG did not stay at P=1"; }
+echo "ok: the CORE-ET prim_clk_gate spelling (event control, non-blocking, scan OR) is recognized"
+
+# ...AND IT SIMULATES. Recognition is not the gate: `single_edge` exiting 0 and
+# reporting a folded gate says the classifier read the phase, nothing about the
+# design it produced. It produced `q = x` -- the yosys reader spells the latch's
+# hold branch as a don't-care constant two identity wrappers down
+# (`Sext(Get_mask(Mux(Ror(clk), 1'sb?, en|scan)))`), so the "transparent arm"
+# the bypass took was the clock-muxed wrapper, which is X at the sampling edge.
+# Nothing caught it because the iverilog legs above run the DIRECT-SLANG shape.
+# This leg runs the ORIGINAL RTL against the normalized output, P=1 so both sit
+# on the same clock, with `en` and `scan` moving in the low phase and `en` also
+# moving MID-HIGH where the real latch is shut.
+if external_sim; then
+  emit "$W/lg_ec"      "$W/v_ec_src"
+  emit "$W/lg_ec_norm" "$W/v_ec_norm"
+  sed 's/^module icgf(/module icgf_n(/' "$W"/v_ec_norm/*.v > "$W/ec_norm.v"
+  cat > "$W/ec_tb.v" <<'EOF'
+`timescale 1ns/1ps
+module tb;
+  reg clk = 0, reset = 1, en = 0, scan = 0;
+  reg [7:0] d = 0;
+  wire [7:0] qs, qn;
+  integer errs = 0, checks = 0, k = 0;
+  always #10 clk = ~clk;                 // rise 10+20p, fall 20+20p
+  icgf   s(.clk(clk), .reset(reset), .en(en), .scan(scan), .d(d), .q(qs));
+  icgf_n n(.clk(clk), .reset(reset), .en(en), .scan(scan), .d(d), .q(qn));
+  // LOW-phase stimulus: the ICG's own contract, stable across the rise.
+  always @(negedge clk) begin
+    #6 d    <= (k * 8'd37 + 8'd11) & 8'hff;
+       en   <= (k % 3) != 0;
+       scan <= (k % 7) == 0;
+       k    <= k + 1;
+  end
+  // HIGH-phase disturbance: the latch is SHUT, so neither side may react.
+  always @(posedge clk) #6 en <= ~en;
+  always @(posedge clk) begin
+    #16 if (!reset) begin
+          checks <= checks + 1;
+          if (qs !== qn) begin
+            errs = errs + 1;
+            if (errs < 8) $display("MISMATCH @%0t source=%0d normalized=%0d", $time, qs, qn);
+          end
+        end
+  end
+  initial begin
+    #27 reset = 0;
+    #600;
+    if (checks < 20)    $display("ICG_EC_VACUOUS checks=%0d", checks);
+    else if (errs != 0) $display("ICG_EC_FAIL errs=%0d", errs);
+    else                $display("ICG_EC_OK checks=%0d", checks);
+    $finish;
+  end
+endmodule
+EOF
+  iverilog -g2012 -o "$W/ec.vvp" "$W/icg_ec.sv" "$W/ec_norm.v" "$W/ec_tb.v" >"$W/iv_ec.log" 2>&1 \
+    || { tail -5 "$W/iv_ec.log"; fail "iverilog could not elaborate the CORE-ET-spelling pair"; }
+  out="$(timeout 120 vvp "$W/ec.vvp" 2>&1)"
+  grep -qE "ICG_EC_OK|ICG_EC_FAIL|ICG_EC_VACUOUS" <<<"$out" \
+    || { echo "$out" | head -8; fail "the CORE-ET-spelling differential did not run to a verdict"; }
+  grep -q "ICG_EC_VACUOUS" <<<"$out" && { echo "$out" | head -4; fail "the CORE-ET-spelling differential observed too few cycles to mean anything"; }
+  grep -q "ICG_EC_OK" <<<"$out" \
+    || { echo "$out" | head -8; fail "the CORE-ET prim_clk_gate spelling normalizes to a design that does not match its own RTL"; }
+  echo "ok: the CORE-ET spelling agrees with its ORIGINAL RTL over 30 cycles under iverilog"
+fi
+
+# NEGATIVE, and it must fail for the RIGHT reason: a latch transparent on the
+# GATED phase passes an enable change through while the gated clock is high.
+out="$("$LHD" pass single_edge --top icgf "lg:$W/lg_ec_same" --emit-dir "lg:$W/lg_ec_same_norm" \
+       --workdir "$W/pw_ec_same" 2>&1)"
+rc=$?
+[ $rc -eq 0 ] \
+  && { echo "$out" | tail -6; fail "a SAME-phase enable latch was accepted -- the opposite-phase guard has been defeated, not taught"; }
+grep -q "clock-gate-latch-phase" <<<"$out" \
+  || { echo "$out" | tail -6; fail "the same-phase latch was refused, but not by the phase guard (wrong refusal: the control proves nothing)"; }
+echo "ok: the same-phase twin is still refused by clock-gate-latch-phase"
+
+
+# ---- ONE GATE, a RISING and a FALLING consumer -----------------------------
+#
+# This is CORE-ET minion_dcache_top's shape: `latch_50396:...u_clk_gate.en_latch`
+# feeds `flop_75936:...count_q` (posedge) AND
+# `flop_76000:...u_tmp_data.wr_data_del_q` (negedge). The negedge half is real
+# RTL -- B01's filelist selects tech_generic/prim_rf_1r1w{,_reg,_par}_preview,
+# each `always_ff @(negedge rf_clk_i)` for the data delay against
+# `always_ff @(posedge rf_clk_i)` for the array: a half-cycle register file.
+#
+# The arm bypass is NOT exact for the falling consumer -- the latch OPENS at
+# that edge, so its Q is the value held across the high phase while its D is the
+# live enable. So the GATE GUARD (and only the gate guard) is sampled in the
+# rising slot and held; the consumer's OWN enable and the slot predicate combine
+# at its commit. Sampling the conjunction instead would freeze the local enable
+# half a period early, which is why `len` below moves in BOTH directions during
+# the high phase.
+cat > "$W/icg_dual.sv" <<'EOF'
+module icgf(input clk, input reset, input en, input scan, input len, input [7:0] d,
+            output [7:0] qr, output [7:0] qf);
+  reg enl;
+  always @(clk or en or scan) if (!clk) enl <= en | scan;
+  wire gclk = clk & enl;
+  reg [7:0] fr, ff;
+  always @(posedge gclk) if (reset) fr <= 0; else fr <= d;   // rising consumer
+  always @(negedge gclk) if (len) ff <= d;                   // falling + LOCAL enable
+  assign qr = fr;
+  assign qf = ff;
+endmodule
+EOF
+build_top dual "$W/icg_dual.sv" icgf
+out="$("$LHD" pass single_edge --top icgf "lg:$W/lg_dual" --emit-dir "lg:$W/lg_dual_norm" \
+       --workdir "$W/pw_dual" 2>&1)"
+rc=$?
+[ $rc -eq 0 ] \
+  || { echo "$out" | tail -6; fail "one gate driving a rising AND a falling consumer was refused (rc=$rc)"; }
+grep -q "sampled-held" <<<"$out" \
+  || { echo "$out" | tail -6; fail "the falling consumer normalized WITHOUT a sampled gate guard; its enable would be the live arm"; }
+grep -q "P=2 slots" <<<"$out" \
+  || { echo "$out" | tail -6; fail "a rising and a falling consumer need two slots"; }
+echo "ok: one gate drives both edges, the falling consumer on a sampled-held guard at P=2"
+
+if external_sim; then
+  emit "$W/lg_dual"      "$W/v_dual_src"
+  emit "$W/lg_dual_norm" "$W/v_dual_norm"
+  sed 's/^module icgf(/module icgf_n(/' "$W"/v_dual_norm/*.v > "$W/dual_norm.v"
+  cat > "$W/dual_tb.v" <<'EOF'
+`timescale 1ns/1ps
+// The normalized oscillator starts 5 ns LATE so its posedges land at
+// 10,20,30,... -- slot 0 on the source's rise (10+20p), slot 1 on its fall
+// (20+20p). With `always #5` from 0 they would be at 5,15,25,... i.e. a HALF
+// PHASE AHEAD of the source, and the two designs would sample different inputs.
+module tb;
+  reg clk_s = 0, clk_n = 0, reset = 1, en = 0, scan = 0, len = 1;
+  reg [7:0] d = 0;
+  wire [7:0] sr, sf, nr, nf;
+  integer errs = 0, checks = 0, hi = 0, lo_up = 0, lo_dn = 0, k = 0;
+  reg     prologue_bad = 0;
+  always #10 clk_s = ~clk_s;
+  initial begin clk_n = 0; #5; forever #5 clk_n = ~clk_n; end
+  icgf   s(.clk(clk_s), .reset(reset), .en(en), .scan(scan), .len(len), .d(d), .qr(sr), .qf(sf));
+  icgf_n n(.clk(clk_n), .reset(reset), .en(en), .scan(scan), .len(len), .d(d), .qr(nr), .qf(nf));
+  always @(negedge clk_s) begin          // LOW phase: the ICG's own contract
+    #6 d    <= (k * 8'd37 + 8'd11) & 8'hff;
+       en   <= (k % 3) != 0;
+       scan <= (k % 11) == 0;
+       len  <= (k % 2) == 0;
+       k    <= k + 1;
+  end
+  always @(posedge clk_s) begin          // HIGH phase: latch SHUT
+    #6 en  <= ~en;                       //   gate enable must be ignored
+       len <= ~len;                      //   LOCAL enable must NOT be
+       hi  <= hi + 1;
+       if (len) lo_dn <= lo_dn + 1; else lo_up <= lo_up + 1;
+  end
+  // THE STARTUP BOUNDARY, asserted rather than chosen. `prim_clk_gate`'s latch
+  // is `always @(clk or en or scan) if (!clk) enl <= ...`; with clk starting LOW
+  // there is no EVENT until clk rises, so `enl` is x until the FIRST LOW PHASE
+  // AFTER that. During that window the source's `gclk = clk & enl` goes 0 -> x,
+  // which Verilog treats as a POSEDGE, so the source commits under an UNDEFINED
+  // gate while the normalized design (which has no gated clock) correctly does
+  // not. Comparing there compares undefined behaviour, not the rewrite.
+  //
+  // So comparison starts when the SOURCE's gate is established, and the run
+  // FAILS if it never is -- a boundary that cannot silently swallow the test.
+  // Retained evidence for the excluded observation:
+  // generated/master_port/b01_extsim_20261014/startup_evidence/.
+  //
+  // So the prologue is DRIVEN, not waited out: reset is held past the first
+  // rise that happens with a DEFINED gate, which is the rising consumer's own
+  // reset contract (`if (reset) fr <= 0`), so both designs enter the comparison
+  // from the same state. The falling consumer has no reset and is x on both
+  // sides until its first write, which compares equal.
+  reg gate_ready = 0;
+  always @(s.enl) if (s.enl !== 1'bx) gate_ready <= 1;
+  always @(negedge clk_s) begin
+    #8 if (!reset && gate_ready) begin
+         checks <= checks + 1;
+         // The prologue must have WORKED: a reset commit under a defined gate
+         // leaves the rising output defined on both sides. If it is still x the
+         // comparison below would be vacuous or wrong, so say so.
+         if (checks == 1 && (sr === 8'bx || nr === 8'bx)) prologue_bad <= 1;
+         if (sr !== nr) begin errs = errs + 1;
+           if (errs < 8) $display("MISMATCH qr @%0t source=%0d normalized=%0d", $time, sr, nr); end
+         if (sf !== nf) begin errs = errs + 1;
+           if (errs < 8) $display("MISMATCH qf @%0t source=%0d normalized=%0d", $time, sf, nf); end
+       end
+  end
+  initial begin
+    #51 reset = 0;   // past the rise at t=30, which happens with enl defined
+    #600;
+    if (!gate_ready)               $display("DUAL_GATE_NEVER_READY");
+    else if (prologue_bad)         $display("DUAL_PROLOGUE_BAD");
+    else if (checks < 20)          $display("DUAL_VACUOUS checks=%0d", checks);
+    else if (hi < 20)              $display("DUAL_NO_HIGH_MOVES n=%0d", hi);
+    else if (lo_up < 5 || lo_dn < 5) $display("DUAL_LOCAL_ONESIDED up=%0d dn=%0d", lo_up, lo_dn);
+    else if (errs != 0)            $display("DUAL_FAIL errs=%0d", errs);
+    else                           $display("DUAL_OK checks=%0d high=%0d up=%0d dn=%0d", checks, hi, lo_up, lo_dn);
+    $finish;
+  end
+endmodule
+EOF
+  iverilog -g2012 -o "$W/dual.vvp" "$W/icg_dual.sv" "$W/dual_norm.v" "$W/dual_tb.v" >"$W/iv_dual.log" 2>&1 \
+    || { tail -5 "$W/iv_dual.log"; fail "iverilog could not elaborate the dual-edge pair"; }
+  out="$(timeout 120 vvp "$W/dual.vvp" 2>&1)"
+  grep -qE "DUAL_OK|DUAL_FAIL|DUAL_VACUOUS|DUAL_NO_HIGH_MOVES|DUAL_LOCAL_ONESIDED|DUAL_GATE_NEVER_READY|DUAL_PROLOGUE_BAD" <<<"$out" \
+    || { echo "$out" | head -8; fail "the dual-edge differential did not run to a verdict"; }
+  grep -qE "DUAL_VACUOUS|DUAL_NO_HIGH_MOVES|DUAL_LOCAL_ONESIDED|DUAL_GATE_NEVER_READY|DUAL_PROLOGUE_BAD" <<<"$out" \
+    && { echo "$out" | head -4; fail "the dual-edge differential did not exercise what it claims"; }
+  grep -q "DUAL_OK" <<<"$out" \
+    || { echo "$out" | head -8; fail "the sampled-held falling consumer does not match its ORIGINAL RTL"; }
+  echo "ok: both consumers of one gate agree with the ORIGINAL RTL (gate moves high-phase, local enable both ways)"
+
+  # NEGATIVE: the falling consumer on the LIVE arm instead of the held guard --
+  # the very error the sampling exists to prevent. Derived from the netlist, not
+  # hardcoded, and required to apply, elaborate, run and MISMATCH.
+  hold="$(sed -n 's/^if ((\(flop_[0-9]*\) & single_edge_phase)) begin$/\1/p' "$W/dual_norm.v" | head -1)"
+  [ -n "$hold" ] || fail "no sampled-held guard found in the normalized netlist"
+  live="$(sed -n "s/^  ___next_${hold} = \([A-Za-z_][A-Za-z0-9_]*\);\$/\1/p" "$W/dual_norm.v" | head -1)"
+  [ -n "$live" ] || fail "could not find what the held guard samples"
+  sed "s/^if ((${hold} & single_edge_phase)) begin\$/if ((${live} \& single_edge_phase)) begin/" \
+      "$W/dual_norm.v" > "$W/dual_live.v"
+  cmp -s "$W/dual_norm.v" "$W/dual_live.v" \
+    && fail "the held-vs-live negative did not apply ($hold -> $live)"
+  iverilog -g2012 -o "$W/dual_live.vvp" "$W/icg_dual.sv" "$W/dual_live.v" "$W/dual_tb.v" >"$W/iv_dual_live.log" 2>&1 \
+    || { tail -5 "$W/iv_dual_live.log"; fail "could not build the held-vs-live negative"; }
+  out="$(timeout 120 vvp "$W/dual_live.vvp" 2>&1)"
+  grep -qE "DUAL_OK|DUAL_FAIL" <<<"$out" || { echo "$out" | head -6; fail "the held-vs-live negative did not run to a verdict"; }
+  grep -q "DUAL_FAIL" <<<"$out" \
+    || fail "reading the LIVE arm at the falling edge still matched the source -- the harness cannot see the sampling, so the agreement above is not evidence"
+  echo "ok: reading the live arm instead of the held guard FAILS (the sampling is load-bearing)"
+fi
+
+# ---- one guard per GATE, not per consumer ----------------------------------
+#
+# The sampled guard is keyed on a PLANNED identity -- the gate's clock root, the
+# edge it is sampled against, and the guard cone's own pins -- built before any
+# node exists, which is what pass/lec/phase_sched.cpp does (root_key + polarity
+# + cone_digest, then guard_cones). Keying on the folded AND node instead would
+# give a COMPOUND guard a fresh id per consumer and so a separate held state.
+#
+# LIMIT, stated because the control below does not cover it: the only RTL shape
+# that puts MORE THAN ONE pin in a gate's enable list is a gate CHAIN
+# (`gate(gate(clk,en0),en1)`), and that shape is currently refused for an
+# unrelated reason -- the inner enable latch is clocked by the GATED clock, so
+# it is not opposite-phase against the root. So the compound case cannot be
+# exercised here, and no control pretends to. What IS checked is that two
+# consumers of one gate share a guard and a third on a DIFFERENT gate does not.
+cat > "$W/icg_share.sv" <<'EOF'
+module icgf(input clk, input reset, input en0, input en1, input en2, input [7:0] d,
+            output [7:0] qa, output [7:0] qb, output [7:0] qc, output [7:0] qr);
+  reg enlA, enlB;
+  always @(clk or en0 or en1) if (!clk) enlA <= en0 & en1;
+  always @(clk or en0 or en2) if (!clk) enlB <= en0 & en2;
+  wire gclkA = clk & enlA;
+  wire gclkB = clk & enlB;
+  reg [7:0] fa, fb, fc, fr;
+  always @(negedge gclkA) fa <= d;            // two falling consumers, ONE gate
+  always @(negedge gclkA) fb <= d + 8'd1;
+  always @(negedge gclkB) fc <= d + 8'd2;     // a third, DIFFERENT gate
+  always @(posedge gclkA) if (reset) fr <= 0; else fr <= d;
+  assign qa = fa; assign qb = fb; assign qc = fc; assign qr = fr;
+endmodule
+EOF
+build_top share "$W/icg_share.sv" icgf
+out="$("$LHD" pass single_edge --top icgf "lg:$W/lg_share" --emit-dir "lg:$W/lg_share_norm" \
+       --workdir "$W/pw_share" 2>&1)"
+rc=$?
+[ $rc -eq 0 ] || { echo "$out" | tail -6; fail "two gates with three falling consumers were refused (rc=$rc)"; }
+grep -q "3 sampled-held" <<<"$out" \
+  || { echo "$out" | tail -4; fail "expected three sampled-held consumers"; }
+emit "$W/lg_share_norm" "$W/v_share"
+held=$(grep -cE "^reg flop_[0-9]+;" "$W"/v_share/*.v)
+[ "$held" = "2" ] \
+  || { grep -nE "^reg flop_[0-9]+;|flop_[0-9]+ & single_edge_phase" "$W"/v_share/*.v; \
+       fail "three held consumers across TWO gates produced $held held guard(s); expected 2 -- one per gate"; }
+shared=$(grep -oE "flop_[0-9]+ & single_edge_phase" "$W"/v_share/*.v | sort | uniq -c | awk '$1==2{n++} END{print n+0}')
+[ "$shared" = "1" ] \
+  || fail "no held guard is read by two consumers; the gate's guard was minted per consumer"
+echo "ok: one sampled guard per GATE (3 held consumers over 2 gates -> 2 guards, one shared by two)"
+
+# ---- a memory whose WRITE CLOCK IS GATED ------------------------------------
+#
+# `commit_class_of_clock` resolves an ICG to its ROOT and drops the gate's
+# conditions, so a gated memory clock used to be refused outright: accepting it
+# would have discarded the gate. The flop path re-introduces those conditions by
+# folding them into the element's enable; a memory needs the same, but its
+# enable is a VECTOR -- `wensize` bits, one per lane -- so the gate joins the
+# 1-bit SLOT PREDICATE and the pair is widened by the Sext + Get_mask idiom the
+# slot mask already uses. That is what keeps every lane and mints no wide shared
+# constant.
+#
+# The write clock is REBOUND to the gate's root as well. Folding the gate while
+# leaving the gated net on `clock_pin` would apply it twice and leave a derived
+# clock in a design this pass exists to make single-edge.
+#
+# Lanes are 40 bits so the TOP LANE IS ABOVE BIT 31: a mask truncated to 1 or 32
+# bits shows up here as a clobbered or preserved word, not as a silent pass.
+cat > "$W/memgate.sv" <<'EOF'
+module memg(input clk, input en, input scan, input [2:0] addr,
+            input [39:0] din, input [39:0] wen, output [39:0] dout);
+  reg enl;
+  always @(clk or en or scan) if (!clk) enl <= en | scan;
+  wire gclk = clk & enl;
+  reg [39:0] mem [0:7];
+  always @(posedge gclk) mem[addr] <= (mem[addr] & ~wen) | (din & wen);
+  reg [7:0] nf;
+  always @(negedge clk) nf <= din[7:0];      // forces P=2, as B01 has
+  assign dout = mem[addr] ^ {32'd0, nf};
+endmodule
+EOF
+build_top mg "$W/memgate.sv" memg
+"$LHD" pass single_edge --top memg "lg:$W/lg_mg" --emit-dir "lg:$W/lg_mg_norm" \
+  --workdir "$W/pw_mg" >"$W/p_mg.log" 2>&1 \
+  || { tail -6 "$W/p_mg.log"; fail "a memory with a GATED write clock was refused"; }
+grep -q "1 memory(ies) slotted" "$W/p_mg.log" \
+  || { grep -o "P=[0-9]* slots[^\"]*" "$W/p_mg.log" | head -1; fail "the gated memory was not slot-gated"; }
+echo "ok: a memory with a gated write clock is accepted and slot-gated"
+
+"$LHD" compile "lg:$W/lg_mg_norm" --top memg --emit-dir "verilog:$W/v_mg" --workdir "$W/vw_mg" \
+  >"$W/e_mg.log" 2>&1 || { tail -6 "$W/e_mg.log"; fail "verilog emission of the gated memory failed"; }
+mgv="$(ls "$W"/v_mg/*.v | head -1)"
+# The write clock must be the ROOT, not the gated net.
+grep -qE "\.wr_clock_0\(clk\)" "$mgv" \
+  || { grep -nE "wr_clock_0|wr_enable_0" "$mgv"; fail "the write clock was not rebound to the gate root"; }
+# The widened enable must be a FULL-WIDTH vector, not a 1-bit predicate.
+wnet="$(sed -n 's/^  *,\.wr_enable_0(\([A-Za-z_][A-Za-z0-9_]*\))$/\1/p' "$mgv" | head -1)"
+[ -n "$wnet" ] || fail "could not find the memory's write-enable net"
+grep -qE "^reg \[39:0\] ${wnet};" "$mgv" \
+  || { grep -nE "reg .*${wnet};" "$mgv"; fail "the gated write enable is not 40 bits wide -- a lane above bit 31 would be truncated"; }
+echo "ok: the gate is folded into a full-width write enable and the clock is rebound to its root"
+
+# THE SIMULATION LEG LIVES OUTSIDE THIS TEST, deliberately. The normalized
+# memory instantiates `cgen_memory_multiclock_1rd_1wr`, which lives in
+# ware/rtl and is not on this test's data path; and the fixture that does host
+# memory differentials, lhd/tests/single_edge_memory_slot_test.sh, is in NO
+# bazel target and is currently RED for a pre-existing reason (its flop legs
+# report SINGLE_EDGE_MEM_DIFF_FAIL errs=78 against the COMMITTED source, with
+# this change reverted -- so nothing here caused it). Putting the differential
+# behind that failure would make it dead code.
+#
+# The original-RTL differential WAS run, and its evidence is retained with the
+# exact commands at
+# generated/master_port/b01_memgate_20261014/ (MEM_OK checks=44 gate_off=15,
+# 40-bit lanes; gate-dropped mutant MEM_FAIL errs=9). The structural checks
+# above -- root clock rebound, full-width enable -- are what this test guards.
 
 echo "PASS: single_edge_icg_test"

@@ -864,7 +864,7 @@ legacy, and IR-as-semantics. The twelve rows are CORE-ET DCache; CVA6 HPDcache;
 CORE-ET neighborhood I-cache; CVA6 MMU/TLB/PTW; CORE-ET ET-Link→AXI; CVA6 LSU;
 CORE-ET VPU; CORE-ET IntPipe/scoreboards; CVA6 issue/scoreboard; CVA6 frontend;
 CORE-ET TLB; and PicoRV32 whole core. PicoRV32 is at the user-provided
-`/soe/czeng14/projects/picorv32` (observed clean pin
+`/HOMEROOT/projects/picorv32` (observed clean pin
 `ef203c2b0a3fb793280f5114941416c425c5b461`, source `picorv32.v`).
 
 First freeze each row's exact top(s), configuration and source inputs and each
@@ -922,7 +922,7 @@ validation, Futamura projection. Do not replay completed unchanged phases.
 
 Start with the **Futamura projection branch**, whose existing coverage provides
 the first baseline. Use the original checkout
-`/mada/users/czeng14/projects/livehd-futamura/livehd`, branch `projection`, pinned
+`/WORKROOT/projects/livehd-futamura/livehd`, branch `projection`, pinned
 at `9bb41a09d6b57111ed2b3fd10102ec4ff174b6c6`. This is a separate repository;
 the similarly named ref in the master repository is not this baseline. Freeze
 the compared master revision and both sides' actual build/tool/dependency
@@ -1099,10 +1099,90 @@ interpreter is a comparison oracle, never the FP implementation.
 | Original native frontend | Fresh old-source build succeeded; binary SHA256 `1c089c4edf0f817bcd5cd15833feba0967e0ab45a505778e6764c8da9b87e030`. It uses a fresh dependency closure with explicitly recorded protobuf yanked-version admission, not a reproduced historical binary closure. |
 | DCache comparison | Same frozen whole RTL/filelist/options: old frontend passes; retained master binary reproduces Concat width refusal in its second bitwidth pass. Pass sequences and reader versions differ; root cause is not yet localized. Old `single_edge` then actually refuses a memory commit under a phase divider. Neither result is old FP admission. |
 | I-cache comparison | Old and master both reject the same first ambiguous `PaSize` imports on the frozen 31-source input. This is observed shared raw-source/configuration refusal, not established master-only regression. |
-| Current table | 12 YES / 11 NO / 37 BLOCKED. FP has 2 YES / 10 BLOCKED: Pico reached memory support refusal; nine units have upstream input/frontend blockers. Every cell has a disposition, but not every emitter was reached. |
+| Current table | 14 YES / 11 NO / 35 BLOCKED. FP has 4 YES / 8 BLOCKED: B11 CORE-ET TLB joins B09, B10 and B12. Its historical blocker -- `pass.single_edge` refusing every Memory at P>1 -- is closed by a per-port slot gate whose clock/edge/bit classification runs before mutation. B11 carries an INITIALIZED TRANSITION discharged over a complete per-step trace: address 1 commits the source-derived word 0x223600abcde at step 15, every other address and the default are preserved on all 18 steps, and five synthetic verifier controls (including a transient quiet-step write restored before the end) each fail the gate. The eight remaining FP blockers are upstream refusals; B03 shares B11's lowering fix and now stops at a genuine pass.lean forwarding-matrix limit. This is NOT full-project acceptance. |
 
 The old native build and phase attempts are under
 `livehd-futamura/baseline_frontend_build_9bb41a09d_20261012/`.
+
+#### Deferred item: does the OLD projection branch clear the nine FP blockers?
+
+Raised because the nine remaining FP blockers are upstream front-end refusals,
+not projection gaps.  If the old branch's front end clears them, the right move
+is to rebase and integrate that stage rather than re-derive it.  **Recorded as
+a finding and a plan; not executed in this checkpoint.**
+
+What the RETAINED evidence already answers — two of the nine:
+
+| row | old branch | master | reading |
+| --- | --- | --- | --- |
+| B01 CORE-ET DCache | front end **passes** | refuses: Concat lane width, second bitwidth pass | a real asymmetry, but root cause NOT localized, and pass sequences and reader versions differ |
+| B03 CORE-ET I-cache | front end **passes** (adapted) | front end **passes** (adapted) | then BOTH refuse at `pass.single_edge`, identically — NOT a master-only regression and NOT an import problem any more |
+
+**B03's import story is HISTORY, not its current state.**  The earlier row said
+old and master both reject the same ambiguous `PaSize` imports.  That was the
+raw-source configuration.  The checked explicit-import adapter repaired it, and
+the CURRENT retained evidence is
+`audits/icache_explicit_import_adapter_20261012_1710_r2/audit_result.json`
+(adapter sha256 `da7d07bf…`, source pin `c72b6a2f…`, 31 ordered sources, 944
+snapshot files):
+
+* **both** native front-end compiles PASS — old `producer_exit 0` (6.96 s), master `producer_exit 0`;
+* **both** `pass.single_edge` attempts then refuse with `producer_exit 7`, the
+  same `unsupported` class and the same message — *"memory
+  `…:$auto$proc_rom.cc:155:do_switch$10` would commit on every sub-step under a
+  phase divider"* (old `memory_29272`, master `memory_34720`);
+* the compiled graphs are preserved (`graph_164589746783/body.bin`, 3,980,549 B,
+  sha256 `9b741889…`, plus overflow/library/srcmap), so **this experiment must
+  be reused, not repeated**;
+* the audit's own `next_required_capability` names the gap: *"Slot-aware memory
+  normalization, with complete memory/clock/reset/init metadata preserved and
+  correctness evidence."*
+
+So B03 is blocked by the **same memory-slot lowering gap as B11**, on both
+branches equally.  There is nothing to rebase for it, and describing it as
+blocked by imports is out of date.
+
+That leaves the hypothesis half-refuted: it holds for B01 and fails for B03.
+And B01 shows that clearing the front end is **not** the same as unblocking the
+row — old then refuses at `single_edge` on a memory commit under a phase
+divider, so neither result is old FP admission.
+
+**Unmeasured against the old branch: six rows** — B02, B04, B05, B06, B07 and
+B08.  B11 is not on that list in the sense that matters: it shares B03's
+lowering gap, which is a known gap to FIX, not an asymmetry to measure.
+Nothing retained says how the old front end behaves on the six, and no claim
+should be made until it is measured.
+
+One observation worth testing, stated as a HYPOTHESIS and not a conclusion:
+five of the blockers are combinational loops (B02, B04, B06, B07, B08) and
+their reported cycles run through the SAME operator family this port has been
+working in — `sra → sext → get_mask → sra → …` for IntPipe,
+`mux → mux → sext → sext → sext → mux` for VPU, `sext → get_mask → sra → …`
+for the MMU and LSU.  Whether that is a loop-detection difference, a lowering
+difference, or a genuine source loop is unknown.
+
+Plan, to execute AFTER the current twelve-unit FP work reaches its next
+checkpoint:
+
+1. Run the retained pinned old front end (`1c089c4e…`) on the six unmeasured
+   rows, on the SAME frozen inputs and options the master attempts used.  This
+   is a measurement pass; it produces a per-row asymmetry table, not a rebase.
+   **Source comparison and retained evidence come first for every remaining
+   unit**, and a broad old-branch sweep is NOT a prerequisite to fixing a gap
+   that is already localized — B03 and B11's memory-slot lowering is already
+   localized and is being fixed inside the twelve-unit objective, using the
+   existing `slot_pred` machinery to gate the ENTIRE enable vector.
+2. Classify each row: shared refusal (like B03 — nothing to integrate),
+   master-only regression (like B01 — a candidate), or old-only failure.
+3. For candidates only, localize the actual differing stage before porting
+   anything.  "Old passes" is not a root cause.
+4. Any integration must respect the constraints already in this document: no
+   duplicate graph scanners, no private certificate builders, no obsolete shell
+   interfaces, and no rollback of the SHL/SRA/Sext meanings or the mask-endpoint
+   and signed-mask work.
+
+Upstream refusals remain inside the end-to-end twelve-unit FP objective; they
+are not out of scope merely because they precede projection.
 The supervisor's detailed audits are under
 `automate_workspace/master_rebase/audits/`; the ledger retains their exact paths.
 Treat section 14's original inventory/status tables as dated audit baselines,
@@ -1350,7 +1430,7 @@ content-based identity and correct propagation of pipeline producer failures.
 Small regression fixtures belong to the repository and must respect AGENTS.md
 runtime/dependency rules. Whole benchmark coverage belongs to separate bound
 benchmark inputs/runners. Use project-local runtime directories. Supervision
-continues at the user's 20-minute interval and sends another instruction only
+continues at the user's 15-minute interval and sends another instruction only
 when the current one has finished or needs verified corrective guidance. No
 performance/profiling/optional native-build research before functional coverage.
 
@@ -1403,3 +1483,204 @@ already-authorized final action.
 
 Continue implementing section 15.5 now; this final integration stage does not
 replace or delay the currently runnable FP memory proof/support work.
+
+
+### 15.7 Low-memory Ubuntu experiment execution, after functional acceptance
+
+User-requested extension, 2026-10-12: make the complete experiment suite runnable
+on Ubuntu machines with less than 16 GB or less than 24 GB RAM, including machines
+with stronger CPUs/more cores. Implement this phase after the preceding functional
+support and original acceptance work; it must not interrupt the current FP proof
+and support implementation. An intermediate user-requested rebase/push does not
+make those unfinished functional gates complete.
+
+#### What can trade CPU time for memory
+
+Extra cores do not replace the live working set of an unchanged algorithm.
+Concurrent compiler/experiment processes usually add their memory requirements.
+Use additional compute for recomputation instead of retaining large caches,
+compression, and independently checkable bounded pieces. Parallelize only pieces
+whose combined measured memory fits. A faster CPU may offset added work; neither
+speedup nor successful execution below a particular RAM limit is guaranteed.
+A single memory-heavy specialization or theorem requires its own memory reduction;
+setting a scheduler to one job cannot shrink that process's working set.
+
+#### One configurable launch interface
+
+Implement the resource runner as a single entry point that orchestrates the
+existing `lhd` CLI and proved backend drivers. It must not replace their semantics
+or become a second graph/certificate implementation. The following is the planned
+interface for this final phase, **not a command already implemented today**:
+
+```bash
+python3 pass/lean/scripts/run_experiments.py \
+  --suite acceptance \
+  --resource-profile lowmem12 \
+  --memory-high 7GiB --memory-max 8GiB \
+  --threads 2 --build-jobs 2 --workers 1 \
+  --swap-max 0 \
+  --memory-saving auto \
+  --resume
+```
+
+Provide shipped portable profiles for `lowmem8`, `lowmem12`, `lowmem16` and
+`lowmem24`, plus a user-supplied configuration file. Resolve explicit command-line
+overrides over the configuration file, then profile defaults. Print and retain
+that resolved configuration, its hash and the actual applied limits for every
+attempt. Keep host-specific identities/paths in local run records; do not bake
+personal machine profiles into shipped configuration.
+
+The options have distinct, enforced meanings:
+
+- `memory-high` / `memory-max`: aggregate experiment process-tree reclaim and hard
+  budgets, with all children and owned build daemons accounted for.
+- `threads`: per-process thread allowance; `build-jobs`: concurrent compiler/build
+  actions using the selected tool's verified interface; `workers`: concurrent
+  experiment tasks. Do not treat these three as interchangeable or forward an
+  unsupported jobs flag to Lake. Resource profiles include the Bazel heap/cache
+  settings and a conservative scheduler allowance within the aggregate budget.
+- `swap-max`: allowed swap usage, default zero. An optional compressed-swap mode
+  can select a verified, already configured target-machine zswap or zram setup;
+  it cannot create physical RAM or silently reconfigure the host. Report when
+  requested compression or cgroup controls are unavailable.
+- `memory-saving`: `off`, `auto`, or an explicit set of implemented backend
+  features, such as bounded caches, recomputation, validated streaming and
+  residual reuse. `auto` selects only the features whose proof/compatibility
+  obligations have passed for that backend and input. Advertise the supported
+  feature table and reject explicit unsupported selections. The launcher may
+  enforce resource limits before algorithmic features exist, but must not claim
+  that resource limits implement those features or guarantee successful fit.
+- `resume`: reuse only completed, identity-matched artifacts/checkpoints whose
+  dependencies still validate. Preserve attempt histories and report reused
+  phases separately from newly executed ones.
+
+Add `--print-config` and `--dry-run` for reviewable configuration and execution
+plans. Preserve real exit codes, original required experiment coverage and strict
+support/checking under every profile. Validation must cover option precedence,
+invalid budgets, missing enforcement, unsupported features, process-tree and
+concurrency limits, safe resume invalidation and identical functional results.
+Use small local fixtures for launcher checks; run complete benchmark acceptance
+under the selected budgets in the separate experiment phase below.
+
+#### Implementation sequence and required deliverables
+
+1. **Bind the target and all experiments.** Record actual Ubuntu/kernel/systemd,
+   cgroup version/controllers, CPU/core counts, physical `MemTotal`, local SSD
+   capacity, swap configuration and pinned tools/dependencies. Distinguish decimal
+   GB from GiB. Inventory every required build, proof, generation/checking,
+   readiness, replay and comparison from sections 15.5–15.6, including all five
+   approaches and the independent D2/D3/D4 gates. Preserve complete whole-unit
+   inputs, metadata, theorem meanings and acceptance scope. The deliverable is
+   the complete suite on the smaller machine, not a reduced benchmark subset.
+
+2. **Add project-local resource profiles and a bounded runner.** Start with these
+   planning budgets, then reduce them if actual available RAM needs more reserve:
+
+   | Nominal machine RAM | Experiment `MemoryHigh` | Experiment `MemoryMax` | Heavy jobs initially |
+   | --- | --- | --- | --- |
+   | 8 GB | 4 GiB | 5 GiB | 1 |
+   | 12 GB (below 16 GB target) | 7 GiB | 8 GiB | 1 |
+   | 16 GB | 10 GiB | 11 GiB | 1 |
+   | 24 GB | 16 GiB | 18 GiB | 1 |
+
+   These are proposed aggregate process-tree budgets, not observed passes.
+   Select from actual memory, rather than rounding a sub-24-GB host up to 24 GB.
+   Reserve RAM for Ubuntu, the editor and background services. Use cgroup v2/
+   systemd to contain the whole runner and its children; keep already-running
+   build daemons outside the group from escaping accounting by using a dedicated
+   owned daemon/output root inside it. `MemoryHigh` causes reclaim/throttling;
+   `MemoryMax` is a hard boundary and can result in OOM. Neither is a memory
+   optimization. Verify controller delegation before running; never silently
+   accept a resource profile whose limits were not applied. See the
+   [systemd resource-control definitions](https://github.com/systemd/systemd/blob/main/man/systemd.resource-control.xml)
+   and [kernel cgroup v2 memory controls](https://docs.kernel.org/admin-guide/cgroup-v2.html).
+
+3. **Limit concurrency independently at each layer.** Run whole benchmarks and
+   large proof/generation phases serially first. Build only exact needed targets
+   and prepare the dependency closure once; preserve exact-target no-build checks.
+   Start Bazel with few actions and an explicit scheduler RAM allowance. Verify
+   `--jobs` and the supported RAM resource flag against the pinned Bazel version;
+   scheduler resource estimates are not enforced RSS limits. Evaluate a smaller
+   Bazel JVM heap, `--discard_analysis_cache`, `--nokeep_state_after_build` and
+   `--notrack_incremental_state` where needed, recording extra rebuild cost.
+   `--nokeep_state_after_build` alone does not reduce the current build's peak.
+   These documented options trade incremental reuse for memory; see
+   [Bazel's memory guidance](https://bazel.build/advanced/performance/memory).
+
+   Lean 4.31.0's installed help verifies `--threads=N`, `--memory=MB` and
+   `--tstack=KB`. Calibrate one heavy process at one/two threads before increasing
+   threads. Lean's internal memory option is not a cap on the complete process
+   tree; enforce the OS budget separately. `LEAN_NUM_THREADS` is not evidence
+   that Lake launches only one compiler. Verify Lake's actual supported controls
+   or schedule compiler invocations over a prepared dependency DAG explicitly;
+   do not invent a `lake -j` flag. Preserve necessary stack/fuel bounds rather
+   than reducing them until valid designs fail. Permit concurrent small jobs
+   only after conservative measured peaks plus runner/cache overhead fit the
+   aggregate budget. More available cores are not a reason to raise job count.
+
+4. **Reduce the largest individual working sets.** Measure phase peaks and live
+   allocations only when this final phase begins. First remove avoidable copies
+   and retention of certificates, decoded graphs, environments, residual ASTs
+   and proof data. Release each phase's transient structures before the next;
+   share immutable DAG data where semantics permit. Evaluate bounded memoization,
+   recomputation, streaming validated transport and disk-backed intermediate
+   artifacts. Split a large proof/check into composable pieces only with a proved
+   bridge back to the same whole result. Whole FP specialization must retain its
+   static design, complete state and proved semantics. Any change to encoding,
+   traversal, checking or specialization needs its affected correctness proofs
+   and regression/admission checks before use; no host-simulator replacement,
+   erased memories/components/clock/reset/async metadata or weaker checker.
+
+   Where generation currently produces only an ephemeral residual, implement
+   serialization/loading with the required round-trip/validation bridge and
+   artifact identity before using it to avoid readiness re-specialization.
+   Keep generation, serialization, checking, loading and readiness costs separate;
+   cached/reused artifacts are not fresh generation evidence. Store artifacts and
+   temporary files on project-local SSD paths, not RAM-backed filesystems or
+   root-level temporary directories. Local storage can avoid the observed NFS
+   import stalls; it does not by itself establish lower algorithmic RAM usage.
+
+5. **Evaluate compressed swap as a separate mode.** After a no-swap baseline,
+   test zswap with SSD-backed swap, or a separately configured zram mode, using
+   compression supported by that target kernel. Zswap trades CPU work for reduced
+   swap I/O; its compressed pool still occupies RAM and incompressible/hot data
+   may benefit little. Zram also consumes physical RAM; its configured logical
+   capacity is not additional installed memory. Do not stack both blindly or
+   describe compression as a guaranteed RAM multiplier. Keep a bounded swap
+   allowance and label swap-assisted passes separately from no-swap passes.
+   Record host-wide compression backing memory as well as cgroup/process usage,
+   because compressed-device accounting need not equal task RSS. Setup commands
+   belong to the target-machine runbook; this plan does not change the current
+   shared host's swap/kernel configuration. See the kernel's
+   [zswap](https://docs.kernel.org/admin-guide/mm/zswap.html) and
+   [zram](https://docs.kernel.org/admin-guide/blockdev/zram.html) documentation.
+
+6. **Validate actual fit and results.** Calibrate on a small representative set
+   plus the largest known working set, then select a configuration per relevant
+   budget and run the entire required suite. Begin with the below-24-GB profile,
+   then the below-16-GB profile; attempt smaller profiles after that. Record one
+   controlled thread comparison rather than repeating every benchmark for every
+   core count. Collect true producer exits, wall/user/system CPU, aggregate
+   `memory.peak` (or a documented sampled fallback), per-process raw RSS KiB,
+   swap peak, page faults, memory pressure and OOM events. Sum of unrelated
+   process RSS maxima is not an observed aggregate peak. Separate build/preparation
+   from runtime, and distinguish cold versus warm/cached execution.
+
+   Check the same outputs, proof/admission results, residual bounds, edge/reset
+   schedules and real state/memory transitions against the accepted baseline.
+   Validate on the actual smaller Ubuntu machine: an isolated cgroup on a larger
+   host is useful preparation but does not reproduce its CPU, disk, page cache
+   and complete host pressure. Preserve original time caps; any additionally
+   authorized slower low-memory run is a separately labelled configuration, not
+   a rewrite of an earlier capped attempt. Classify OOM, timeout and I/O waits
+   as resource outcomes, not semantic refusals or proof failures. Retain every
+   failed attempt and report which experiments still exceed the target budget.
+
+7. **Publish a reproducible low-memory runbook and results.** Deliver versioned
+   profiles/runner commands, exact hardware/software/artifact bindings, resume
+   checkpoints with revalidated dependencies, and per-experiment memory/time/
+   swap/result tables. Report the lowest *demonstrated* budget for each phase and
+   for the complete suite. Declare a target supported only after all required
+   experiments and unchanged acceptance checks pass within its measured aggregate
+   memory limit. If one job still needs more RAM, continue its proved memory
+   reduction or report the exact limitation; unused CPU cores do not close it.

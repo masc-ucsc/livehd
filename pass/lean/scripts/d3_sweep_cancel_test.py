@@ -248,9 +248,9 @@ def phase_isolation(certs_a: str, certs_b: str) -> bool:
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--certs",
-                    default="/soe/czeng14/projects/livehd-new/generated/vc_sweep2/lean")
+                    default="/HOMEROOT/projects/livehd-new/generated/vc_sweep2/lean")
     ap.add_argument("--certs-b",
-                    default="/soe/czeng14/projects/livehd-new/generated/cva6_vc/lean")
+                    default="/HOMEROOT/projects/livehd-new/generated/cva6_vc/lean")
     ap.add_argument("--module", default="intpipe_alu",
                     help="a module large enough that 5s is certain to time out")
     a = ap.parse_args()

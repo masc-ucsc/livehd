@@ -28,13 +28,17 @@ only top-level `.prp` files are discovered as fixtures.
 
 ## Proof budgets
 
-These small equivalence fixtures require their expected definitive verdict;
-timeouts and unsupported encodings fail. The shared `../lec.py` runner sets
+These fixtures reject contradictory decided verdicts, unsupported encodings,
+and failed setups. An accepted timeout is inconclusive, never proof; an
+expected-refutation case still requires its counterexample. The shared `../lec.py` runner sets
 `formal.timeout` (20 seconds by default for proof gates) and enforces an outer
 watchdog at twice that budget, including setup and loading. A `:set:
 formal.timeout=N` override controls both budgets where the harness accepts
-`:set:` flags. The Verilog round-trip runner uses `:verilog_check_timeout: N`
-for its original-Verilog leg.
+`:set:` flags. The Verilog round-trip runner uses `:native_check_timeout: N`
+for its emitted-versus-handwritten Pyrope leg and `:verilog_check_timeout: N`
+for its original-Verilog leg. Both default to 20 seconds. Budget the legs
+together to keep the whole test under its runtime limit; an accepted timeout
+is inconclusive, never a proof.
 
 Ordinary Slang/Yosys integration uses the same runner with a five-second
 internal budget and ten-second watchdog. Those sanity checks may report an
@@ -127,12 +131,14 @@ Every tag is a `:name: value` line inside the leading `/* … */` block.
 | `:compile_top:` | optional source top to materialize explicitly during Pyrope compilation, including a defaulted generic among multiple public templates |
 | `:set: k=v …` | extra `--set` flags, applied to every mode |
 | `:reset_style: async` | elaborate implicit resets as async, so the golden can spell an async `always` |
-| `:verilog_check_timeout: N` | v2prp2v only: seconds for the original-Verilog LEC leg (default 20); a timeout fails the test |
+| `:native_check_timeout: N` | v2prp2v only: positive seconds for the Pyrope LEC leg (default 20); a timeout is inconclusive |
+| `:verilog_check_timeout: N` | v2prp2v only: positive seconds for the original-Verilog LEC leg (default 20); a timeout is inconclusive |
 | `:expect_instances:` | instance-count assertion — see `../sim/README.md` |
 | `:name_match_only:` | accept a STRUCTURAL state pair — see below |
 | `:yosys_lec: false` | drop the `lgyosys` oracle for this pair; say WHY in the header prose |
 | `:yosys_lec_timeout: N` | the oracle's `LGCHECK_EQUIV_TIMEOUT` in seconds (default 3; the outer wall is 3N) |
 | `:equiv_lec_grep: REGEX` / `:equiv_lec_grep_not: REGEX` | must (not) appear in this pair's native `lhd lec` output (repeatable); the base `:lec_grep:` tags belong to the `prp-lec-*` groups below |
+| `:v2prp_native_expect: refuted` | the `prp-v2prp2v-*` native leg only (handwritten Pyrope as the REFERENCE, the golden's round trip as the implementation) must refute, while the equiv test still proves: a Pyrope twin that refines its golden with power-on contents the golden leaves undefined is the defined side of that leg, and an initialized reference against an uninitialized implementation is REFUTED-cex |
 | `:lec_expect: refuted` | a MUTATED pair: the golden deliberately computes something else, so the native `lhd lec` must REFUTE it, the `lgyosys` oracle must not prove it, and the `prp-v2prp2v-*` native leg must refute too (its golden-vs-round-trip leg still proves). A regression guard for a false PROVEN, such as `spec_types_cast_runtime_zext` |
 
 ## Pyrope ↔ Pyrope variants (`prp-lec-*`)

@@ -1854,7 +1854,7 @@ serializer; **no runtime coverage is claimed from this pilot.**
 
 I reported that no clean CVA6 checkout existed and that the frozen-30
 procedure was blocked. **That was my error.**
-`/mada/users/czeng14/projects/cva6-blockfinding` is clean at
+`/WORKROOT/projects/cva6-blockfinding` is clean at
 `6cb200105fb9441d170e45786125a737fab98e91` — exactly the revision
 `verify_d4_run.sh` expects, and already the default `CVA6_ROOT` in
 `build_cva6_foundation.sh`. It was in my `ls cva6*` output and I simply did not
@@ -3474,7 +3474,7 @@ measurement.
 
 ## 38. FP checkpoint 1: installed, adapted, built, and two real reconciliation gaps
 
-Source: read-only `/mada/users/czeng14/projects/livehd-futamura/livehd` at
+Source: read-only `/WORKROOT/projects/livehd-futamura/livehd` at
 `9bb41a09d6b57111ed2b3fd10102ec4ff174b6c6`, semantic pin
 `90583be1349acbd25f740b176a406aa8bbe1251c`. Asset list and pinned digests from
 `audits/fp_original_procedure_baseline_20261010/result.json` -- named in
@@ -4756,7 +4756,7 @@ integrated summary, there is nothing for the prototype to beat. That is the
 cross-build comparison, and it is exactly the half that is missing.
 
 The S1 tree is reachable: `0f175676b` and the pin `9bb41a09d` are both in
-`/mada/users/czeng14/projects/livehd-futamura/livehd`, branch `projection`.
+`/WORKROOT/projects/livehd-futamura/livehd`, branch `projection`.
 Building against it is a branch-history performance study, not a statement
 about master's behaviour, so it is left open rather than attempted here.
 
@@ -4810,7 +4810,7 @@ column is unusable as a peak in both builds, for two different reasons.
 ### 47.7 Two repository findings from the same pass
 
 **The pin is not reachable from this repository.** `9bb41a09d` is the head of
-branch `projection` in `/mada/users/czeng14/projects/livehd-futamura/livehd`;
+branch `projection` in `/WORKROOT/projects/livehd-futamura/livehd`;
 `git cat-file` fails on it here. `fp_entrypoint_inventory.tsv` claimed its
 `pinned_sha256` column was read with `git show` without saying where, which is
 not reproducible. The header now names the repository and the exact command.
@@ -5696,7 +5696,7 @@ job is launched ahead of this.
 
 ## Final stage requested by the user: 12 × 5 simulator generation matrix
 
-Execute after the existing plan and acceptance obligations. [Plan section 15](PASS_LEAN_RESTRUCTURE_PLAN.md#15-final-stage-simulator-generation-across-five-approaches-and-twelve-blockscores) and the [live progress table](../../todo/livehd/simulator-generation-matrix.html) define all twelve rows and five approach columns. Prioritize standalone generation latency and complete block coverage. Every cell is PENDING until its own generation evidence exists. Only when all 60 cells are YES, make the final checkpoint and commit locally; the user will push. PicoRV32 uses `/soe/czeng14/projects/picorv32`. Current generation-first experiments continue unchanged.
+Execute after the existing plan and acceptance obligations. [Plan section 15](PASS_LEAN_RESTRUCTURE_PLAN.md#15-final-stage-simulator-generation-across-five-approaches-and-twelve-blockscores) and the [live progress table](../../todo/livehd/simulator-generation-matrix.html) define all twelve rows and five approach columns. Prioritize standalone generation latency and complete block coverage. Every cell is PENDING until its own generation evidence exists. Only when all 60 cells are YES, make the final checkpoint and commit locally; the user will push. PicoRV32 uses `/HOMEROOT/projects/picorv32`. Current generation-first experiments continue unchanged.
 
 ## 56. Generation latency, measured matched against the exact pin
 
@@ -5995,7 +5995,7 @@ profiling or `ProtoShift` proof work happens until coverage is done.
 
 ### 58.1 PicoRV32 whole core, the first row attempted
 
-RTL `/soe/czeng14/projects/picorv32/picorv32.v`, 94,657 bytes, sha256
+RTL `/HOMEROOT/projects/picorv32/picorv32.v`, 94,657 bytes, sha256
 `0836050971b3c6cd…`, pin `ef203c2b0a3f…`, tracked tree clean. Top is
 `picorv32`, the **whole core**. Shape: 1,302 sources, 2,279 nodes.
 
@@ -8503,3 +8503,4581 @@ generic `mainM` adequacy against `StateRelR`/`ResultRelR`.  Public support stays
 refused — `SourceSupported`, `OpSupported` and `memFree` are untouched and no
 design is admitted by the public route.  PicoRV32 stays **BLOCKED**; matrix
 unchanged at **12 YES / 11 NO / 37 BLOCKED** (FP 2 YES / 10 BLOCKED).
+
+---
+
+## §63.36 — The write-range premise was vacuous; geometry now rides the actual witness
+
+### The defect, as a theorem
+
+`NodeWriteRange` quantified over **every** `MemImg` with a given DENOTATION.
+Denotation does not determine table length, so that premise was strictly
+stronger than anything the interpreter's own image supplies — and it was FALSE
+at the very design the module instantiated.  `MemImg.emptyZero` (no words,
+32-bit zero default) denotes **exactly** `zeroImg 5 32` and holds no address at
+all.  `evalNodesM_agree` and `sourcesThenNodes[_resolved]` assumed it for every
+node, so the fold was **vacuous** on `mixedDesign`.  Checker acceptance,
+`nodeAdmittedB` and the kind guards did not instantiate it, and I had presented
+them as if they did.
+
+That is no longer prose: `MemImg.denote_does_not_determine_geometry` proves
+
+```
+∃ m₁ m₂, denote m₁ = denote m₂ ∧ FullTable 5 m₂ ∧ ¬ FullTable 5 m₁
+         ∧ ∀ x, ¬ InRange m₁ x
+```
+
+A second defect went with it: the range premise was imposed on reads, scalars
+and DISABLED writes, none of whose proofs need it.
+
+### The fix — geometry on the ACTUAL witness
+
+`PrefixRelM` gains a slot assignment `G : Nat → Option Nat` and a fourth field
+
+```
+geom : ∀ k h g, (ss[k]'h) = .img g → ∀ aw, G k = some aw → MemImg.FullTable aw g
+```
+
+`G k = some aw` means slot `k` holds a MUTABLE table covering every `aw`-bit
+address; `G k = none` means no such claim — a scalar slot, or a **ROM**, whose
+table is its actual `contents.size` and which therefore cannot be written at
+all, because the write step needs `G d0 = some aw` to reach `FullTable`.
+
+* **Initialised at the sources.**  `srcGeomOf` reads the geometry off the
+  source descriptors; `StateShapeOK` is an explicit premise that the incoming
+  state's images have the geometry the certificate declares; and
+  `memDesc_of_sourceOK` extracts from `checkSource` — the real checker — that a
+  `memImg` source's `aw` **is** the declared memory's.  `srcGeom_of_StateShape`
+  joins them.
+* **Preserved at each node.**  Scalars and reads produce `.bv`, so the field is
+  vacuous; the write produces `.img` and `MemImg.writeBE_FullTable` carries the
+  shape across it.  `prefixRelM_snoc` re-establishes all four fields.
+* **Split by need.**  `WritePropagates` (every write: the output slot inherits
+  dep 0's geometry) is static.  `WriteAddrFits` — the only part mentioning an
+  address — is **gated on `bv_nonzero` of the byte-enable**, so reads, scalars
+  and disabled writes neither consume nor must satisfy it.  The disabled branch
+  is proved without any range condition and returns the image exactly.
+* `MemImg.InRange_of_FullTable_le` supplies the range from `a.width ≤ aw`, the
+  form a certificate driving a narrow address into a wider table needs.
+
+### Instantiated, not merely stated
+
+`mixed_fold_resolved` discharges **every** premise on the checker-accepted
+`mixedDesign` and produces the resolved `Eval` on `hwMemP`:
+`designCertWF_of_semwf` from the checker, `StateShapeOK` from the state,
+`mixedG_src` against the sources, `mixedG_prop` across the write, and
+`mixedG_fits` from `mixed_addr_width` (the address is `input 0` at width 5, for
+every input and state).  `mixed_fold_resolved_zero` is the full Pico-shaped
+all-zero state — the one the broken premise could not be satisfied at — and
+`mixed_fold_resolved_init` the initialised one.
+
+Twelve `#guard`s execute it.  On an initialised table (word `k` holds `k+1`):
+address 20 reads 21, the intervening scalar `Op_And` with `0xF` gives 5, and
+the ENABLED byte-enabled write stores 5 — so **the word at 20 changes from 21
+to 5**, address 19 still holds 20, and the table is still 32 words.  With a
+zero byte-enable the image comes back **exactly** equal to the original.
+
+### Headers corrected
+
+The fold's header now records the defect and the split premise.  The nodes
+module no longer implies its `WriteInRange` discharges a traversal's
+obligation: it is a standalone one-image/one-address shape lemma, and the
+fold's premise is `WriteAddrFits`.
+
+### Axioms
+
+`propext`, `Quot.sound`, `Classical.choice` — Lean's own.  No **new unsafe**
+axiom in any module.
+
+### Still owed
+
+`mkOutputs`, `flopNexts` and `memNext(s)` on active **and** quiet domains, then
+generic `mainM` adequacy against `StateRelR`/`ResultRelR`.  Public support stays
+refused: `SourceSupported`, `OpSupported` and `memFree` are untouched and
+`Op_MemWrite`/`Op_Sub` remain refused.  PicoRV32 stays **BLOCKED**; matrix
+unchanged at **12 YES / 11 NO / 37 BLOCKED**.
+
+---
+
+## §63.37 — Clock-controlled memory commit, general and instantiated
+
+New module `formal/lean/LeanSemanticPrimitives/Projection/HardwareMemCommit.lean`
+(641 lines), `PRODUCER_EXIT=0`, 0 errors, **14 `#guard`s**, 0 matches for
+`sorryAx`/`Lean.ofReduceBool`/`Lean.trustCompiler`.
+
+### The general lemmas
+
+* `memNext_agree` — on an **active** declared clock the memory's own
+  `MemoryDesc.nextImg` slot is selected out of the typed final `PrefixRelM` as
+  the ACTUAL image that slot holds (`slotImg`, `memSlot_img`); on a **quiet**
+  clock the EXACT prior first-order image comes back through `memAt` on the
+  incoming state's image list.  `firesAt_agree` supplies the edge test, and the
+  clock ordinal bound, the slot bound and the slot KIND are taken from the real
+  records — `Direct.DesignSemWF.memKinds`, `memClocks`,
+  `DesignCertWF.slotsInRange` — never assumed.
+* `memNexts_agree` — the whole array, for every suffix and every starting
+  index, matching the object's own index increment (`memNextsOf`).
+* `memNextOf_denote` / `memNextsOf_denote` — correspondence with
+  `Compiler.srcMemNext`, stated as an equality of `MemImg.denote`, i.e. of
+  `Int → BV` **functions**.  That is every address at once; **no read is
+  sampled anywhere in the statement**.
+* `memNextOf_FullTable` / `stepState_shape` — the committed array again
+  satisfies `StateShapeOK`, from the invariant's geometry on the active branch
+  and from the incoming state's shape on the quiet one, so the design can take
+  another step.
+
+The old denotation-universal claim is not reintroduced anywhere: every
+obligation is stated over the actual witness image, as §63.36 established.
+
+### `NextImgGeomOK`, and how a checker is meant to establish it
+
+`NextImgGeomOK D G` says each memory's `nextImg` slot carries that memory's
+declared address width.  `checkDesign` already establishes the KIND half
+(`memKinds`).  The geometry half is the natural refinement — propagate a slot's
+address width the way `WritePropagates` does at a write node and compare with
+`MemoryDesc.aw`, a static walk over the dense slot order.  It is carried as a
+**premise**; the checker extension is **not** claimed to exist.
+
+### What `StateShapeOK` is not
+
+It constrains **table length only**.  The module header names what remains
+explicit and owed: **word and default widths** (`dw` bits), **data and mask
+widths** at a write beyond the address width `WriteAddrFits` already pins, and
+**ROM initialisation** — a `memConst` keeps its actual `contents.size` and its
+own default, is assigned no mutable geometry, and is therefore never a write
+target.  `FullTable` is not complete admission and is not described as such.
+
+### Instantiated on two memories with DISTINCT clocks
+
+`twoMemDesign`: six sources (two mutable images, address, byte-enable mask,
+read enable, scalar), four nodes (read → intervening scalar `Op_And` → one
+byte-enabled write per memory), two memories on clock ordinals **0** and **1**.
+`Direct.acceptsDesign` accepts it; `twoMem_commit` discharges every premise and
+delivers the fold, the commit and the preserved shape together.
+
+Executed controls, with memory 0 holding 21 at address 20 and memory 1 holding
+120:
+
+| edges | memory 0 | memory 1 |
+|---|---|---|
+| `#[true, false]` | commits → 5 | **exactly** `imgB` |
+| `#[false, true]` | **exactly** `imgA` | commits → 5 |
+| `#[false, false]` | **exactly** `imgA` | **exactly** `imgB` |
+| `#[true, true]` | commits → 5 | commits → 5 |
+| `#[true, true]`, zero byte-enable | **exactly** `imgA` | **exactly** `imgB` |
+
+The both-quiet row is a genuine control, not a tautology: a `#guard` records
+that the held values (21, 120) **differ** from the committed value (5), so a
+proof that ignored the clock would be wrong there.  A further guard confirms
+both tables are still 32 words after the commit.
+
+### Still owed
+
+Mixed-environment `mkOutputs` and `flopNexts` — where local scalar dependencies
+must suffice and the old global `SlotVals` cannot be assumed — then generic
+`mainM` adequacy through `StateRelR`/`ResultRelR`, composing the ACTUAL
+`mkSourcesM` evaluation with the node fold rather than starting from
+host-created source slots.  Public support stays refused:
+`SourceSupported`, `OpSupported` and `memFree` are untouched and
+`Op_MemWrite`/`Op_Sub` remain refused.  PicoRV32 stays **BLOCKED**; matrix
+unchanged at **12 YES / 11 NO / 37 BLOCKED**.
+
+---
+
+## §63.38 — Mixed-environment outputs and flops, and generic `mainM` adequacy
+
+Two new modules, both `PRODUCER_EXIT=0`, 0 errors, no unsafe axioms:
+`HardwareMemOutFlop.lean` (228 lines) and `HardwareMemMain.lean` (244 lines).
+
+### Outputs and flops, localized
+
+`Hw.mkOutputs_agree` and the flop family take the GLOBAL `SlotVals`, which
+§63.33 proved unsatisfiable wherever an `encMemImg` is present.  All five —
+`mkOutputs_agreeOn`, `rstActive_agreeOn`, `capture_agreeOn`, `flopNext_agreeOn`,
+`flopNexts_agreeOn` — are mirrored with the local `SlotHere`, exactly as the 27
+operator lemmas were.  `SlotVals` is unchanged and every original theorem keeps
+its meaning; each mirrored proof is the original with the slot read localized,
+so **no scalar behaviour is restated**: active/quiet clocks, the flop ENABLE,
+SYNCHRONOUS reset, ASYNCHRONOUS reset with its polarity and the old-state hold
+are the same code running.
+
+### The premises are the checker's
+
+`outputs_scalar` and `flops_scalar` derive `SlotHere` at exactly the slots these
+lemmas read, from `Direct.DesignSemWF.outputKinds` and `flopKinds` together with
+`DesignCertWF.slotsInRange` — not from assumptions.
+
+### The array bridge
+
+`memNextsOf_denote_array` lifts the pointwise `srcMemNext` lemmas to the
+COMPLETE `RuntimeState` memory array: same length, same `Int → BV` function at
+every index.  That is the length/index bridge the pointwise lemmas needed.
+
+### `mainM_adequate`
+
+```
+∃ r, SEval hwMemS [] (.call "mainM" [encDesign D, encEdges e, encInput i, encStateM st]) (encResultM r)
+   ∧ r.denote = Compiler.interpretDesign D e i (StateM.denote st)
+```
+
+`mkSourcesM`, the corrected node fold, `mkOutputs`, `flopNexts` and `memNexts`
+are composed into one cycle.  **The node fold's evaluation witness is retained
+and used** — the environment `mainM` hands to the output, flop and memory stages
+is the one `evalNodesM` actually produced, not one assumed to exist.  §63.37's
+`twoMem_commit` discarded that witness; this does not.
+
+`mainM_resultRel` restates it through `StateM.ResultRelR`, i.e. the object's
+value decodes to a representable witness whose denotation **is** the reference
+`RuntimeResult`.
+
+No host interpreter is called as the implementation, and nothing stops at a
+helper-only fixture: the statement is about `hwMemS`'s own `mainM`.
+
+### Still owed
+
+The whole-`mainM` fixture instantiation — decoding the returned state and
+feeding it to a SECOND step, with a negative control that detects a
+quiet-domain commit or lost reset.  `FullTable`/`StateShapeOK` still describe
+length only; word/default/data/mask/address/ROM and next-image geometry
+checking, its soundness and reachable-state preservation all remain before
+public support can broaden.  `SourceSupported`, `OpSupported` and `memFree` are
+untouched; `Op_MemWrite`/`Op_Sub` still refused.  PicoRV32 stays **BLOCKED**;
+matrix unchanged at **12 YES / 11 NO / 37 BLOCKED**.
+
+---
+
+## §63.39 — The resolved whole-cycle entry, instantiated and executed
+
+`HardwareMemMain.lean` extended and a new `HardwareMemFixture.lean` (354 lines),
+both `PRODUCER_EXIT=0`, 0 errors, **19 `#guard`s**, no unsafe axioms.
+
+### The resolved entry — verified, not relabelled
+
+`hwMemS_entry : hwMemS.entry = "mainM"` and `mainM_id : idOf "mainM" = some 50`
+are checked by reduction, and `main_ne_mainM` records that this is a DIFFERENT
+function from the memory-free `main`.  `mainM_adequate_resolved` crosses to
+`hwMemP` through the production transfer `Surface.SEval_entry`, which resolves
+the entry and all four literal arguments itself — no `resolve` hypothesis is
+left to the caller.
+
+`mainM_adequate` also now concludes
+`NextImgGeomOK D G → StateShapeOK D r.nextState`: the RETURNED state carries the
+declared geometry, which is what lets a second step run.
+
+### The fixture, with premises DISCHARGED
+
+`fullDesign` — accepted by `Direct.checkDesign` — has **two clock domains**, a
+**mutable** `aw = 5`/`dw = 32` table and a **read-only `memConst` ROM** whose
+table is its actual `contents.size = 3`, a flop with an **enable** and a
+**synchronous** reset on clock 0, a second flop with an **asynchronous** reset
+on clock 1, and a `byte_w = 1` write — PicoRV32's bit-enable shape.
+
+Every antecedent of `mainM_adequate_resolved` is proved for it: `DesignSemWF`
+from `checkDesign_sound`, node admission, arity, `fullG_src` against the
+sources, `fullG_prop` across the write, `fullG_fits` from `full_addr_width`, the
+state's shape, the input/flop bounds, both clock bounds and the flop count.
+**Computational agreement is not instantiation**, and this is the instantiation.
+The ROM gets geometry `none`, so a write to it could not be discharged.
+
+`fullTwoSteps` chains two steps: the second runs on the state the FIRST
+returned, and both agree with `Compiler.interpretDesign` on their own inputs and
+edges.  `flops_size_of_denote` reads the returned flop count off the adequacy
+equation rather than assuming it.
+
+### Executed controls
+
+At address 1 the table holds 2 and the ROM holds 8, so `Op_Xor` gives 10.
+
+| case | observed |
+|---|---|
+| clock A only | output 10, word 1 → 10, flop 0 captures 10, flop 1 holds |
+| both quiet | flops and the image preserved **exactly** |
+| **negative control** | the quiet state **differs** from the active one |
+| async reset, both clocks quiet | flop 1 → 255; flop 0's SYNC reset does **not** fire |
+| **negative control** | with the reset low, flop 1 is **not** 255 |
+| sync reset, clock A firing | flop 0 loads 0 rather than din 10 |
+| zero byte-enable | image **exactly** preserved despite clock A firing |
+| **two steps** | decoded state fed back: reads 10, xors with the ROM's 8, writes 2 |
+
+The ROM's actual contents (8 at address 1) and its DEFAULT above them (0 at
+address 20) are both checked.
+
+### Still owed — the next checkpoint
+
+The checked ADMISSION POLICY: `FullTable`/`StateShapeOK` remain **length only**.
+Word/default/data/mask/address widths, mutable-versus-ROM images, source and
+slot bounds, clock/reset/async metadata and static next-image geometry all need
+a checker, its soundness, and initialization/preservation lemmas, with runtime
+address-fit DERIVED from checked shape and typing.  Until then
+`SourceSupported`, `OpSupported` and `memFree` stay untouched and
+`Op_MemWrite`/`Op_Sub` stay refused.  PicoRV32 remains **BLOCKED**; matrix
+unchanged at **12 YES / 11 NO / 37 BLOCKED**.
+
+---
+
+## §63.40 — The width discipline, so `WriteAddrFits` can be DERIVED
+
+New `formal/lean/LeanSemanticPrimitives/Projection/HardwareMemWidth.lean`
+(115 lines), `PRODUCER_EXIT=0`, 0 errors, no unsafe axioms.
+
+### Why this first
+
+Instruction 119 requires the checked admission policy to **derive** the enabled
+write's address fit from checked shape and typing, not to take `WriteAddrFits`
+as the checker's own premise.  Deriving it needs a fact the repository did not
+have: that a slot's runtime value has the width the certificate declares.  That
+is what this module proves, and it is the foundation the static checker is
+built on — not the checker itself.
+
+### What is proved
+
+* `eval_op_width : (eval_op op w l).width = w` — for **every** operator, by case
+  analysis over `LGraphOp`.  The supporting helper widths (`mk_bv`, `bv_resize`,
+  `bv_bitwise`, `bv_not`, `bv_sdiv`, `bv_sra`, `bv_get_mask`, `bv_set_mask`) and
+  the two folds (`Op_And`/`Op_Or`/`Op_Xor` and `Op_SHL`) are proved alongside,
+  the folds by induction on the operand list.
+* `cert_mem_read_width` — the memory READ returns the node width on **both**
+  branches, enabled and disabled.
+* `eval_op_cert_width_of_supported` and `eval_op_cert_width_memRead` — the same
+  at `CertVal` level, which is the form the node fold produces.
+* `sourceValue_width_input/_const/_flopQ/_flopQAsync` — every SCALAR source
+  returns its declared width, the asynchronous-reset source on both its reset
+  and its hold branch.
+
+### Scope, stated exactly
+
+This is the width half only.  **The executable static admission checker, its
+soundness theorem, the runtime state/input/edge policy, the
+initialization/preservation lemmas, the admission-to-resolved-main composition
+and the rejection controls are NOT in this commit.**  `StateShapeOK` still
+proves table length only; `SourceSupported`, `OpSupported` and `memFree` are
+untouched; `Op_MemWrite` and `Op_Sub` stay refused.  PicoRV32 remains
+**BLOCKED**; matrix unchanged at **12 YES / 11 NO / 37 BLOCKED**.
+
+---
+
+## §63.41 — The executable static admission checker, and what it does not yet prove
+
+Header correction, import re-layering, and a new
+`formal/lean/LeanSemanticPrimitives/Projection/HardwareMemAdmit.lean`
+(377 lines, **24 `#guard`s**), `PRODUCER_EXIT=0`, 0 errors, no unsafe axioms.
+
+### Two corrections first
+
+`HardwareMemWidth`'s header said the width facts were "lifted to `slotValM` by
+induction over the dense order".  **They were not**, and the claim is withdrawn
+in the source.  The module also imported `HardwareMemFixture`, i.e. upward; it
+now imports `HardwareMemMain`, so the width and admission layers sit BELOW the
+fixtures and a fixture can import and instantiate the checker without a cycle.
+
+### The checker
+
+A slot-type inference over the dense source/node order:
+`SlotTy := bv w | tbl aw dw | rom dw n`.  `tbl` and `rom` are deliberately
+distinct — a `memConst` keeps its real `contents.size` and its own default and
+is typed `rom`, so it can be READ but never written.
+
+* `Op_MemRead [m,a,en]` — `m` an image of either kind, `a`/`en` scalars, and
+  against a `tbl aw _` the address no wider than `aw`.
+* `Op_MemWriteBE bw [m,a,d,be]` — `m` must be `tbl aw dw`; address no wider than
+  `aw`; node width and data width exactly `dw`; `0 < bw`; and the mask must
+  cover every data bit, `dw ≤ wb * bw`.  At `bw = 1` that is Pico's bit-enable
+  rule (32-bit mask for 32-bit data at `aw = 5`); at `bw = 8` it is the lane
+  rule (4 mask bits suffice).  The result propagates `tbl aw dw`.
+* Anything else — `OpSupported` with all-scalar dependencies.  `Op_MemWrite` and
+  `Op_Sub` have no rule and are REFUSED.
+* Every `MemoryDesc.nextImg` is checked against that memory's `aw` and `dw`.
+
+`Direct.checkDesign` is **retained**, not replaced: `admitsB` conjoins it.
+
+### Soundness — proved
+
+`admits_semwf`, `admits_wf`, `admits_geom_src` (the source-consistent geometry
+assignment, via the `infer_foldl_prefix` lemma that the source prefix survives
+the whole walk) and `admits_nextImgGeom`.  That is three of
+`mainM_adequate_resolved`'s antecedents plus the WF facts.
+
+### Executed controls
+
+`mixedDesign`, `twoMemDesign` and a new `byte_w = 8` `laneDesign` all pass.
+Refused, each a small changed-source variant: a ROM write target; a `nextImg`
+geometry mismatch in `aw`; one in `dw`; an address wider than the table; a data
+width that is not `dw`; a node width that is not `dw`; plain `Op_MemWrite`;
+`Op_Sub`; a memory operand in a scalar position; an out-of-range `nextImg`; an
+undeclared clock ordinal (caught by the retained `checkDesign`); and the lane
+design with `byte_w = 1`, where a 4-bit mask cannot cover 32 data bits.
+
+### NOT proved here — stated plainly
+
+* **`NodeAdmitted`/arity and `WritePropagates` from the checker** — these need
+  the node-type recurrence and are not claimed.
+* **The `slotValM` width/kind induction and the DERIVED `WriteAddrFits`** — the
+  per-operator and per-source width facts exist (§63.40) but are not yet
+  carried to the value the interpreter computes at a slot.
+* **Applying soundness to a concrete design.**  `admitsB D = true` is currently
+  carried by `#guard` (compiler evaluation) for the concrete designs: neither
+  `decide` nor `rfl` reduces `admitsB` to a literal, because the fold over the
+  node list does not evaluate in the kernel here.  That is executed evidence,
+  **not** a theorem, it is said so in the module, and no theorem depends on it.
+* The runtime state/input/edge policy, its codec correspondence and
+  preservation, and the admission-to-resolved-main composition.
+
+`FullTable`/`StateShapeOK` still prove table length only.  `SourceSupported`,
+`OpSupported` and `memFree` are untouched.  PicoRV32 stays **BLOCKED**; matrix
+unchanged at **12 YES / 11 NO / 37 BLOCKED**.
+
+---
+
+## §63.42 — Kernel acceptance integrated, and the checker-to-static-premises bridge
+
+`HardwareMemAdmit.lean` and `HardwareMemFixture.lean` extended; both
+`PRODUCER_EXIT=0`, 0 errors, no unsafe axioms.
+
+### Two corrections
+
+* **`admitsB` DOES reduce in the kernel.**  §63.41 said "the fold over the node
+  list does not evaluate in the kernel".  That was wrong: `decide +kernel`
+  evaluates it.  What had failed was default `decide`/`rfl`, which is a
+  different thing and does not license the stronger claim.  The module text is
+  corrected and the acceptance lemmas are now THEOREMS:
+  `mixedDesign_admits`, `twoMemDesign_admits`, `laneDesign_admits`,
+  `fullDesign_admits`, each `propext` only.
+* **The `#guard` count in §63.41 was 24; the executable count is 22.**  Two of
+  the 24 were prose mentions, not commands.  Corrected.
+
+### The per-node recurrence
+
+`nodeTy` now consults its lookup ONLY through `c.deps.toList.map ty`, which
+makes `nodeTy_congr` immediate.  With `inferStep_size`, `infer_foldl_size`,
+`infer_foldl_prefix` and `infer_foldl_none`, `infer_foldl_node` turns the fold
+into a per-node equation, and `admits_node_ty` specialises it to the real
+design using `DepsBounded` for the topological bound.
+
+### `StaticPremises`, from one Boolean check
+
+`admits_static_premises : admitsB D = true → StaticPremises D` delivers **all
+seven** static antecedents of `mainM_adequate_resolved`:
+
+| premise | source |
+|---|---|
+| `DesignCertWF` / `DesignSemWF` | retained `Direct.checkDesign` |
+| source-consistent `geomAt` | `infer_foldl_prefix` |
+| `NodeAdmitted` | `nodeTy_admits` — `nodeTy` refuses whatever `nodeAdmittedB` refuses, so `Op_MemWrite` and `Op_Sub` cannot type |
+| `ArityOK` | `arityOK_of_opArity`, bridging `Direct.opArity` to `Hw.RequiredArity` |
+| `WritePropagates` | `nodeTy_write_geom` — a typing write consumed a MUTABLE image and returns its geometry |
+| `NextImgGeomOK` | the `nextImg` check |
+
+Instantiated as theorems on all four designs: `mixedDesign_static`,
+`twoMemDesign_static`, `laneDesign_static`, `fullDesign_static`.
+
+### Still open
+
+**`WriteAddrFits` is NOT derived yet** — it is a runtime condition and needs the
+`slotValM` kind/width induction over the dense order, using §63.40's operator
+and source width lemmas.  That is the next increment, together with the runtime
+state/input/edge policy, its codec correspondence and preservation, and the
+admission-to-resolved-main composition.  `FullTable`/`StateShapeOK` still prove
+length only.  `SourceSupported`, `OpSupported` and `memFree` untouched.
+PicoRV32 **BLOCKED**; matrix **12 YES / 11 NO / 37 BLOCKED**.
+
+## §63.43 — scalar slot widths, and `WriteAddrFits` DERIVED from the check
+
+`LeanSemanticPrimitives/Projection/HardwareMemSlotTy.lean` (new, builds clean;
+`fullDesign`/`HardwareMemFixture` and `HardwareMemWidth` rebuilt on top of it).
+
+### The circularity that had to be avoided
+
+`sourcesThenNodes` and `evalNodesM_agree` **assume** `WriteAddrFits`, so neither
+can be used to prove it: an induction over the dense order that invoked the fold
+lemmas would be arguing in a circle.  It turned out no such induction is needed.
+`eval_op_cert_width_nonMem` says every admitted non-write operator returns the
+NODE WIDTH **at any argument list whatsoever** — it never inspects the
+arguments — and `eval_op_cert_memRead_width` says the same for `Op_MemRead`.
+The dense-order case analysis therefore collapses to a source/node split with no
+recursive hypothesis:
+
+| slot | inferred type | value width |
+|---|---|---|
+| source | `srcTy sd` | `srcTy_bv_width` — all four scalar source families, async reset on **both** branches |
+| node | `nodeTy ty c` | `nodeTy_bv_width` forces `w = c.width`; the operator lemmas give the width unconditionally |
+
+* `admits_slot_width : admitsB D = true → k < D.numSlots → tyAt D k = some (.bv w)
+  → (slotValM D i st k).asBV.width = w`.
+
+### The derived premise
+
+* `admits_writeAddrFits : admitsB D = true →
+   ∀ c ∈ D.nodes.toList, WriteAddrFits D i st (geomAt D) c`.
+
+`nodeTy_write_geom` hands back the inferred `tbl aw dw` of the written image
+together with `ty addr = some (.bv wa)` and `wa ≤ aw`; `admits_slot_width` turns
+that inferred `wa` into the runtime width of the actual address value.  The
+address fit is **read off the checker's own inference**, not assumed.  It is
+enabled-only, exactly as `WriteAddrFits` is stated.
+
+### Composition
+
+* `admits_mainM_resolved` — `admitsB D = true` plus the runtime premises
+  (`SourceInputBound`, `SourceFlopBound`, flop/memory clock bounds, flop-array
+  size, `StateShapeOK`) gives the **actual resolved `mainM`** evaluation, with
+  `r.denote = Compiler.interpretDesign D e i (StateM.denote st)` and
+  `StateShapeOK D r.nextState`, at `G = geomAt D`.  Every static antecedent
+  comes from `admits_static_premises` (§63.42); the write-fit from the theorem
+  above.
+
+### The hand-written geometries are gone from the proof path
+
+`geomAt` agrees with each hand assignment **everywhere**, not just at the
+guarded slots — by `funext` with a finite kernel split under `numSlots` and
+`geomAt_out` above it:
+
+| control | theorem |
+|---|---|
+| `geomAt fullDesign = fullG` | `geomAt_full` |
+| `geomAt mixedDesign = mixedG` | `geomAt_mixed` |
+| `geomAt twoMemDesign = twoMemG` | `geomAt_twoMem` |
+
+So the three hand `WriteAddrFits` case analyses are re-proved from the generic
+theorem alone — `full_fits_checked`, `mixed_fits_checked`,
+`twoMem_fits_checked` — and the instantiated fold is re-proved from
+`admits_static_premises` alone: `mixed_fold_checked` and `twoMem_fold_checked`
+use **no** `*G_src`, `*_admitted`, `*_arity`, `*G_prop` or `*G_fits`.
+`fullStep` now takes the checker route outright (`admits_mainM_resolved
+fullDesign_admits`), so the full fixture carries no hand write-fit at all;
+`fullG_fits` and the other `fullG` lemmas are retained below it purely as
+independent controls, and the decoded two-step changing-memory and quiet/reset
+`#guard`s are unchanged.
+
+`HardwareMemFold` and `HardwareMemCommit` sit BELOW the checker, so their own
+`mixedG_fits` / `twoMemG_fits` cannot call it; those hand proofs stay where they
+are, superseded by the checked versions proved above them.
+
+Axioms: `propext`, `Classical.choice`, `Quot.sound` only — no `sorryAx`
+anywhere in the chain.
+
+### Still open
+
+This is the **conditional** admission wrapper.  `FullTable` and `StateShapeOK`
+still prove LENGTH only: the complete executable runtime state/input/edge policy
+— real image presence, table/word/default widths, flop and input bounds, edge
+discipline, memory initialisation, exact active/quiet/disabled behaviour and the
+full clock/reset/async metadata through the real codecs, plus initialisation and
+returned-state preservation and the codec/`RuntimeState` correspondence — is the
+next increment.  `SourceSupported`, `OpSupported` and `memFree` untouched; the
+public route still refuses memory-bearing designs.  PicoRV32 **BLOCKED**;
+matrix **12 YES / 11 NO / 37 BLOCKED**.
+
+## §63.44 — the executable runtime state / input / edge policy
+
+`LeanSemanticPrimitives/Projection/HardwareMemRuntime.lean` (new, builds clean,
+22 executed guards); `HardwareMemFixture` re-pointed onto it.
+
+`admitsB` decides the DESIGN.  Six premises of `admits_mainM_resolved` were
+still runtime facts carried by hand at every call site.  They are now one
+Boolean.
+
+### The shape is no longer length-only
+
+`StateShapeOK` says `words.length = 2 ^ aw` and nothing else — which is all the
+address fit needs, so it was all that was proved.  It is not what a real state
+must satisfy.  `MemShapeOK md m` adds the two missing facts:
+
+* every word is `md.dw` wide, and
+* so is `m.dflt` — the word EVERY out-of-range read returns.
+
+`MemShapeOK.toFullTable` discharges the length statement every existing proof
+consumes, so nothing below had to change.  The executed control is explicit:
+`narrowImg` has 32 words of width **7** against a `dw = 32` memory —
+`#guard MemImg.FullTable 5 narrowImg` passes, `memImgOKB … narrowImg == false`.
+
+### The four checks
+
+| check | premise discharged |
+|---|---|
+| `stateOKB D st` | `StateShapeOK D st` (via `stateOKB_shapeW`, which gives the stronger `MemShapeOK`) and `D.flops.size ≤ st.flops.size` |
+| `inputOKB D i.size` | `SourceInputBound` for every source — `input idx`, and `flopQAsync`'s reset index, which reads the INPUT vector |
+| `flopBoundOKB D st.flops.size` | `SourceFlopBound` for every source |
+| `edgesOKB D e` | `f.clock < e.size` and `md.clock < e.size`, so `firesAt` never reads past the edge vector |
+
+`runtimeOKB` is their conjunction, and
+
+* `admits_run : admitsB D = true → runtimeOKB D i st e = true → ∃ r, Eval … ∧
+  r.denote = Compiler.interpretDesign D e i (StateM.denote st) ∧
+  StateShapeOK D r.nextState`
+
+takes **two Booleans and nothing else**.  `fullRun` is the full fixture's
+instantiation; `fullStep`/`fullTwoSteps` keep the hypothesis form unchanged.
+
+### Refusals that bite
+
+Executed, all `== false`: wrong word width, wrong default width, a table half
+the declared length, a declared image ABSENT from the state, a two-memory design
+given one image, `input 3` against a 3-element input vector, clock 1 against a
+one-element edge vector, an empty edge vector, a flop vector shorter than the
+design's flop array, and the two `runtimeOKB` compositions of those.
+
+### Still open
+
+**Returned-state preservation at the WORD level.**  `admits_run` concludes the
+length-level `StateShapeOK` for `r.nextState`, exactly as
+`admits_mainM_resolved` does — not `stateOKB D r.nextState`.  Unlike §63.43's
+scalar width lift, that one IS a recurrence: a `tbl` slot produced by a write
+has the shape of the image it wrote into, so the dense order has to be walked.
+It is the next increment, together with the memory-initialisation statement and
+the codec/`RuntimeState` correspondence for the strengthened shape.
+`SourceSupported`, `OpSupported` and `memFree` untouched; the public route still
+refuses memory-bearing designs.  PicoRV32 **BLOCKED**; matrix
+**12 YES / 11 NO / 37 BLOCKED**.
+
+## §63.45 — word-level returned-state preservation
+
+`HardwareMemRuntime` §§6–7 (same module, extended); `HardwareMemFixture` gains
+`fullRunTwo`.
+
+### Why the shape is recoverable without touching `PrefixRelM`
+
+The object side of a memory is a `MemImg` — a word list and a default.  The
+reference side is a FUNCTION `Int → BV`, which has neither, and §63.42's
+`denote_does_not_determine_geometry` says the LENGTH genuinely is lost in
+between.  The WIDTHS are not: a full table's every address is in range, so each
+word is the denotation at its own index, and the default is the denotation at
+any negative address.  Hence
+
+* `memShape_denote_width` — shape gives pointwise width, and
+* `memShape_of_denote` — `FullTable` plus pointwise width gives shape back.
+
+That is the whole reason this increment needed **no** change to `PrefixRelM`,
+`sourcesThenNodes`, `mainM_adequate` or any of their call sites: the missing
+facts are recovered from the reference function, which the adequacy equation
+already pins.
+
+### The induction
+
+`admits_slot_memwidth`: under `admitsB` and the word-level state check, a slot
+inferred `tbl aw dw` or `rom dw n` has a reference value returning `dw`-wide
+words at EVERY address.  Unlike §63.43's scalar lift this IS a recurrence — a
+written table's values are the values of the image it wrote into, everywhere the
+write did not land — so it is a strong induction on the slot index, with the
+memory operand reached through `DepsBounded`.  It is still not circular: every
+statement is about `slotValM`, the reference side, so none of the fold lemmas
+that assume `WriteAddrFits` is involved.
+
+Supporting checker facts, both read off `nodeTy`/`admitsB` rather than assumed:
+
+* `nodeTy_tbl_op` — only a byte-enabled write can type as a TABLE; every other
+  arm of `nodeTy` returns `.bv` or nothing;
+* `nodeTy_write_dw` — the write's NODE WIDTH equals the table's data width
+  (`nodeTy_write_geom` gives the address fit, this gives the word width);
+* `admits_nextImgTy` — the checker pins the next-image slot's FULL type, both
+  widths, to the memory it commits;
+* `memDesc_dw_of_sourceOK` — `checkSource` pins BOTH of a `memImg` source's
+  declared widths, not just the address width.
+
+### Preservation, and the loop
+
+* `admits_run_pres` — `admitsB` and `runtimeOKB` give the resolved cycle AND
+  `stateOKB D r.nextState = true`: the written branch from the induction, the
+  quiet branch from the incoming state.
+* `flopBoundOKB_of_flopSize` — the flop-vector bound is not independent;
+  `checkSource` already pins every `flopQ`/`flopQAsync` source to a declared
+  flop.
+* `admits_run_two` — two steps, the second on the state the first returned.
+  Only the second step's INPUT and EDGE vectors need checking; its state does
+  not, because the policy is preserved.  `fullRunTwo` instantiates it.
+
+So `runtimeOKB` is now a loop invariant, not a one-off precondition, and
+`FullTable`/`StateShapeOK` are no longer the only thing proved about a state.
+
+Axioms: `propext`, `Classical.choice`, `Quot.sound` — no `sorryAx`.
+
+### Still open
+
+Memory INITIALISATION (building a legal `StateM` for a design, rather than
+checking one) and the codec/`RuntimeState` correspondence for the strengthened
+shape are the next increment, then the public support/DCERT2 generation and
+readiness drivers.  `SourceSupported`, `OpSupported` and `memFree` untouched;
+the public route still refuses memory-bearing designs.  PicoRV32 **BLOCKED**;
+matrix **12 YES / 11 NO / 37 BLOCKED**.
+
+## §63.46 — initialisation, and the codec correspondence
+
+`HardwareMemRuntime` §8; `HardwareMemFixture` gains `fullRunInit`.
+
+Checking a state is half a policy.  If no state passed, `admits_run` would be
+vacuous — so the design itself must be able to produce one.
+
+* `initStateOf D` — each flop at its DECLARED reset value, each memory a zero
+  table of its declared geometry, built from the design alone.
+* `initStateOf_ok : stateOKB D (initStateOf D) = true` — via `zeroImg_shape`,
+  so the canonical state passes the word-level check, not merely the length one.
+* `admits_run_init` — **every admitted design can actually be run.**  The state
+  premise is discharged by construction and the flop bound by
+  `flopBoundOKB_of_flopSize`, so only the input and the edge vector remain.
+  `fullRunInit` instantiates it with no state hypothesis at all.
+
+### `RuntimeWF`, on the nose
+
+`stateOKB` deliberately accepts a LONGER vector than the design declares,
+because the interpreter reads by index.  `RuntimeWF` wants the sizes exactly,
+and the canonical state has them: `initStateOf_runtimeWF`, with
+`runtimeWF_of_sizes` for any other state whose vectors are the declared sizes.
+The two are kept separate on purpose — neither is weakened to fit the other.
+
+### The codec
+
+`StateM.decStateM_encStateM` is the round trip and was already proved.  What the
+policy needs is that the state coming BACK out of the encoder is the one that
+went in, so it passes the SAME check and denotes the same `RuntimeState`:
+`stateOKB_codec`, `initStateOf_codec`, and `StateRelR_initStateOf` for the
+relation the interpreter's correctness statements use.  The shape rides through
+the literal argument; it is not re-established on the far side.
+
+Eleven further executed guards (7 in `HardwareMemRuntime`, 4 in the fixture):
+the canonical state of `mixedDesign`, `twoMemDesign` and `fullDesign` passes,
+with the right memory count, flop count and 32-word tables, and `runtimeOKB`
+accepts it against a real input and edge vector.
+
+### Still open
+
+Public support / DCERT2 generation and the readiness drivers; BTA with the
+design static and exactly edges/input/state dynamic; annotation erasure and
+proved specialisation; production arity-3 residual checking at its returned
+bound; whole PicoRV32 execution with genuine memory transitions and phase
+metrics.  `SourceSupported`, `OpSupported` and `memFree` untouched; the public
+route still refuses memory-bearing designs.  PicoRV32 **BLOCKED**; matrix
+**12 YES / 11 NO / 37 BLOCKED**.
+
+## §63.47 — the declared flop width, and the strengthened route
+
+`HardwareMemRuntime` §9; `HardwareMemFixture` §6.  Reported gap: `stateOKB`
+checks the flop VECTOR's size but no declared flop WIDTHS, so `runtimeOKB`
+accepts `fullDesign` with two 7-bit values against 32-bit descriptors even with
+both clocks quiet.  Confirmed, closed, and the confirmation is executed here:
+
+| control | result |
+|---|---|
+| `runtimeOKB fullDesign inRun fullNarrowFlops eOff` | `true` — the reported gap |
+| decoded `runMain fullNarrowFlops inRun eOff` | returns flops of width **7** — the gap is observable, not hypothetical |
+| `flopShapeOKB` / `stateFullOKB` / `runtimeFullOKB` on the same state | `false` |
+
+It was a gap in what the policy SAYS, never a contradiction of the adequacy
+equation.  `stateOKB`, `runtimeOKB` and every theorem about them are unchanged;
+`stateFullOKB`/`runtimeFullOKB` are their conjunction with `flopShapeOKB`.
+
+### Why the raw INPUT widths stay unchecked — stated, not assumed away
+
+Every source read RESIZES to the width its descriptor declares: `sourceValue`
+of `.input idx w` and of `.flopQ idx w` is `bv_resize w …`, both `.flopQAsync`
+branches resize, and `srcFlopNext`'s CAPTURE branch is
+`bv_resize f.width (rho f.din).asBV`.
+
+**Corrected in §63.50.**  This section originally said a raw vector's widths
+"cannot be observed".  That is wrong: resizing fixes the RESULT width, but
+`bv_resize w x = mk_bv w (bv_uint x)` and `bv_uint x = x.value % 2 ^ x.width`
+reads the SOURCE width, so a differently-wide raw entry can change the VALUE.
+Width noninterference is neither proved nor claimed.  What is true, and what
+`inputOKB` rests on, is that raw input widths are UNNECESSARY here:
+`admits_run_full` is an AGREEMENT statement and both sides are applied to the
+same vector `i`, so whatever widths it carries they are read identically.
+Asserting declared widths on the raw vector would be a hypothesis the agreement
+never uses, and would reject inputs the reference accepts.
+
+The STORED FLOP width is not like that, and that asymmetry is the whole point:
+`srcFlopNext`'s HOLD branch is `s.flops[idx]?.getD (mk_bv f.width 0)`, which
+copies the stored value into the next state VERBATIM, with no resize.
+
+### The commit rule, branch by branch
+
+`srcFlopNext_unfold` names the two guards (`resetAsserted`, `flopEnabled`);
+each branch is then given its exact VALUE and its width:
+
+| branch | condition | value | premise |
+|---|---|---|---|
+| `srcFlopNext_reset` | reset asserted and (edge **or** `asyncReset`) | `mk_bv f.width f.resetValue` | none |
+| `srcFlopNext_capture` | no reset, edge, enable high | `bv_resize f.width (rho f.din).asBV` | none — `din`'s own width is irrelevant |
+| `srcFlopNext_hold` | no reset, quiet clock **or** low enable | `s.flops[idx]?.getD (mk_bv f.width 0)` | the policy's, and only here |
+
+### Preservation and composition
+
+`StateM.denote` carries the flop array VERBATIM, so the returned widths come
+straight off the adequacy equation — the same move §7 made for the memories.
+`admits_run_full` concludes `stateFullOKB D r.nextState = true`;
+`admits_run_full_init` runs from `initStateOf` with no state hypothesis at all;
+`admits_run_full_two` composes two steps with only the second step's input and
+edge vector left to check.  `fullRunFull`, `fullRunFullInit` and
+`fullRunFullTwo` instantiate them.
+
+### Controls retained and added
+
+The decoded two-step changing-memory control (word 1: 2 → 10 → 2), the
+disabled-write control, the quiet-clock controls and the reset/polarity
+controls are all unchanged.  Added, decoded on `fullDesign`: the widths survive
+`eOff`/`eA`/`eB`/`eAll`; the ASYNCHRONOUS reset acts on a quiet clock and still
+at width 32 (flop 1 takes 255 with both edges low) while the SYNCHRONOUS one
+holds on the same step; and the two-step now also checks
+`runtimeFullOKB`/`stateFullOKB` on the intermediate and final states.
+`laneDesign` (`byte_w = 8`) and the `byte_w = 1` refusal beside it are retained
+and carried into the strengthened route by
+`stateFullOKB laneDesign (initStateOf laneDesign)`.
+
+The module header is reconciled: word-level preservation is no longer described
+as future work, and the one remaining scope limit named there is the one §9
+closes.
+
+### Scope of `initStateOf`
+
+It is a legal-state / non-vacuity witness — zero mutable tables and
+reset-valued flops — and nothing more.  It does **not** establish an arbitrary
+RTL startup contract, and the drivers must use the supplied dynamic state or a
+justified initialisation adapter, preserving imported initialised contents,
+actual-size ROM bounds and defaults, and reset/async/clock/component metadata,
+refusing unsupported initialisation rather than silently zeroing it.
+
+Axioms: `propext`, `Classical.choice`, `Quot.sound` — no `sorryAx`.
+
+### Still open
+
+Public support / DCERT2 generation and the readiness drivers under this
+admission policy; BTA with the design static and exactly edges/input/state
+dynamic; annotation erasure and proved specialisation; production arity-3
+residual checking at its returned bound; whole PicoRV32 generation and
+execution with genuine transitions and phase metrics.  `SourceSupported`,
+`OpSupported` and `memFree` untouched; the public route still refuses
+memory-bearing designs.  PicoRV32 **BLOCKED**; matrix
+**12 YES / 11 NO / 37 BLOCKED**.
+
+## §63.48 — the memory route's checked support answer, and its actual entry
+
+`LeanSemanticPrimitives/Projection/MemSupport.lean` (new, builds clean, 12
+executed guards).  Dependency chain built to reach it: `PartialEvaluatorCorrect`,
+`ProjectionCorrect`, `ResidualFragment`, `ProjectedStep`, `CertLoad` — all
+producer 0.
+
+### The scalar route is untouched
+
+`CertLoad.supportReport`, `SupportReport.allOK`, `runOne`, `SourceSupported`,
+`OpSupported` and `SupportedByProjection` are unchanged.  `memFree` is still a
+REFUSAL there, and `scalar_refuses_memory` proves it has to be: a design with a
+memory makes that conjunct false, so the scalar verdict is `false` whatever else
+holds.  Broadening those predicates would subtract meaning from the scalar
+adequacy theorems, so the alternative is stated BESIDE them, not in them.
+
+### The alternative answer
+
+`MemSupport.Report` carries the scalar verdict and the conjunct that decides it
+(`scalar`, `memFree`) together with the three components of the memory admission
+check (`accepts`, `sized`, `nextImgs`, plus `typed` as a diagnostic), so a
+refusal names the part that failed.
+
+* `admitOK_eq : (report D).admitOK = admitsB D` — the report **is** the check,
+  not a summary of it.
+
+### The entry and codec correspondence
+
+`mainM` is a function ADDED to `hwS`; the scalar `main` is still there, unedited,
+under its own name.  `entry_name`, `entry_index` and `entry_distinct`
+(`idOf "main" ≠ idOf "mainM"`) record that the memory route is a different entry
+of the same program, not a replacement.
+
+* `run_of_report` — a report-admitted design, run on a state/input/edge vector
+  `runtimeFullOKB` accepts, evaluates at the ACTUAL resolved entry
+  `hwMemP.entry` on the real `encDesign`/`encEdges`/`encInput`/`encStateM`
+  literals to a value that DECODES through `StateM.decResultM`, and the decoded
+  result denotes `Compiler.interpretDesign`'s — with the returned state passing
+  the same strengthened policy.
+* `run_of_report_init` — the same from the design's own canonical state.
+
+### Readiness
+
+`Report.line` and `verdict` are pure, so they are guarded; `sayReport` wraps
+them in `CertLoad.say`'s shape so a driver can print them without any change to
+`runOne`.  Executed:
+
+| design | verdict |
+|---|---|
+| `fullDesign` | `SCALAR ROUTE: refused (memFree) -- MEMORY ROUTE: admitted` |
+| `scalarDesign` (memory-free) | `SCALAR ROUTE: supported` — unchanged where it was already right |
+| `mixedDesign` whose write target is a ROM | `REFUSED BY BOTH ROUTES` |
+
+`mixedDesign`, `twoMemDesign` and `laneDesign` (`byte_w = 8`) all report
+`admitOK`.
+
+### Scope
+
+No whole-unit admission credit follows from this.  A design passing `report` is
+a design the memory route's own theorems apply to, nothing more; `initStateOf`
+remains a legal-state witness and not an RTL startup contract, and a driver with
+real initial contents must pass them in as the dynamic state.
+
+Axioms: `propext`, `Classical.choice`, `Quot.sound` — no `sorryAx`.
+
+### Still open
+
+Wiring the readiness lines into a production DCERT2 driver that preserves
+imported initialised contents, actual-size ROM bounds/defaults and
+reset/async/clock/component metadata and refuses unsupported initialisation;
+BTA with the design static and exactly edges/input/state dynamic; annotation
+erasure and proved specialisation; production arity-3 residual checking at its
+returned bound; whole PicoRV32 generation and execution with genuine transitions
+and phase metrics.  PicoRV32 **BLOCKED**; matrix **12 YES / 11 NO / 37 BLOCKED**.
+
+## §63.49 — BTA, proved specialization and the arity-3 residual, on the MEMORY entry
+
+`LeanSemanticPrimitives/Projection/MemProjection.lean` (new, builds clean,
+12 executed guards).
+
+### Binding time: design static, exactly edges/input/state dynamic
+
+```
+hwMemA = bta hwMemP hwMemInl [.stat, .dyn, .dyn, .dyn] 200
+```
+
+the same division the scalar route uses, on the memory entry.  Proved, not
+guarded:
+
+* `hwMemAP_entry_params` / `hwMemAP_entry` — the entry's division really is
+  `[.stat, .dyn, .dyn, .dyn]`: ONE static argument (the certificate) and three
+  dynamic ones (edges, input, state), in that order;
+* `hwMemAP_erases : eraseProgram hwMemAP = hwMemP` — **annotation erasure**, via
+  `bta_erases`: the annotated program is the memory interpreter with annotations
+  ON it, not a different program;
+* `hwMemAP_wf` — via `bta_sound`.
+
+Both kernel reductions need the raised heartbeat budget, as the scalar ones do.
+
+### Proved specialization
+
+`Hw.specialize_correct_of` bakes in `encState`/`ResultRel`, which are the
+memory-FREE codecs, so it cannot be instantiated here.
+`specializeFour_correct_of` is the same proof with the static value, the three
+dynamic values and the answer left as `Val`s — the source/dynamic SPLIT is
+preserved exactly, pinned by the same `[.stat, .dyn, .dyn, .dyn]`.  The original
+is untouched.
+
+`memEntry_unique` turns `admits_run_full`'s existence statement into the `iff`
+the specializer consumes: `Eval_det` makes the value the memory entry produces
+the ONLY one.
+
+* **`projectMemDesign_correct` — the first Futamura projection on the memory
+  entry.**  Specializing the memory interpreter to a design yields a residual
+  that, run on the three dynamic arguments of one cycle, computes exactly what
+  the shared reference semantics computes, as an `iff` over `Eval` with no fuel
+  in the conclusion.  The specialization fuel enters only through
+  `projectMemDesign D = .ok R`.
+
+### Production arity-3 residual checking, at its returned bound
+
+The residual passes the **same** production checker, `Hw.checkResidual`,
+unchanged: one function, entry 0, **arity 3**, in the fragment, with the bound
+it returns.  `MemSimulator`/`MemSimWF`/`mkMemSim` mirror the scalar bundle, with
+`memFree` replaced by `admitsB`.
+
+* `runMemSim_correct` — for an honest bundle on a `runtimeFullOKB`-accepted
+  state, the run TERMINATES within `sim.bound` (`.outOfFuel` unreachable, via
+  `checkResidual_complete`), decodes through `StateM.decResultM`, agrees with
+  `Compiler.interpretDesign`, and leaves a state passing the same policy.
+
+### Executed, with genuine memory transitions through the RESIDUAL
+
+`mixedDesign` at `initState` (word `k` holds `k + 1`): address 20 holds 21,
+ANDed with `0xF` is 5, and the enabled write stores 5.
+
+| control | result |
+|---|---|
+| one cycle, clock firing, mask `0xFFFFFFFF` | word 20: **21 → 5** |
+| same edge, mask 0 | image EXACTLY unchanged |
+| quiet clock, write enabled | image EXACTLY unchanged |
+| two cycles, second on the state the first returned | word 20 stays 5, and `stateFullOKB` holds on BOTH returned states |
+| the residual itself | `funs.map arity == [3]` — the design is gone |
+
+Axioms: `propext`, `Classical.choice`, `Quot.sound` — no `sorryAx`.
+
+### Still open
+
+Whole PicoRV32 generation and execution with phase metrics; wiring the
+readiness lines into a production DCERT2 driver that preserves imported
+initialised contents, actual-size ROM bounds/defaults and
+reset/async/clock/component metadata and refuses unsupported initialisation.
+PicoRV32 **BLOCKED**; matrix **12 YES / 11 NO / 37 BLOCKED**.  No whole-unit
+admission credit follows from any fixture or proof compile here.
+
+## §63.50 — two reporting corrections, the production memory-route driver, and Pico
+
+### Correction 1: the scalar refusal reason was INFERRED
+
+`MemSupport.verdict` printed `refused (memFree)` for every design the memory
+route admitted.  The audit's control is decisive: a ROM-only design has **no
+declared memories**, so `memFree` is TRUE and the scalar refusal is `sources`.
+Fixed by reading the reason off the scalar report:
+
+* `scalarFailures D` lists the fields that are actually `false`;
+* `memFree_mem_scalarFailures` / `sources_mem_scalarFailures` — when a field is
+  false, the list NAMES it;
+* `scalarFailures_ne_nil` — a scalar refusal always names at least one.
+
+Executed on the control: `memFree == true`, `scalarFailures` contains
+`"sources"` and does NOT contain `"memFree"`, and the verdict is no longer the
+string the audit caught.  On `fullDesign` the actual fields are
+`memFree,sources,ops` — `ops` because `Op_MemRead` is not in `OpSupported`,
+which the old wording never showed.
+
+### Correction 2: "raw input widths cannot be observed" was FALSE
+
+Withdrawn in `HardwareMemRuntime`'s §9 and in §63.47 above.  `bv_resize w x` is
+`mk_bv w (bv_uint x)` and `bv_uint x` is `x.value % 2 ^ x.width`, so resizing
+fixes the RESULT width while READING the source width: a differently-wide raw
+entry can change the VALUE.  **Width noninterference is neither proved nor
+claimed.**  The accurate statement, and the one `inputOKB` actually rests on, is
+that raw input widths are UNNECESSARY here: `admits_run_full` is an AGREEMENT
+statement and both sides are applied to the same vector, so whatever widths it
+carries are read identically by both.
+
+Neither correction touches a proof.
+
+### The production driver
+
+`formal/lean/scripts/dcert2_memroute.lean`, wired into
+`pass/lean/scripts/fp_cov_dcert2.sh` as the `memroute` phase.
+
+| phase | what runs | distinct exit |
+|---|---|---|
+| parse | `CertIO.admitAny`, under the format's own policy | 8 |
+| support | scalar report VERBATIM + the fields that failed + the memory report | 6 (memory route refuses) |
+| specialize | `mixDriver` on `hwMemAP` at the requested budget | 3 out of fuel / 4 failed |
+| check | `Projection.Hw.checkResidual`, unchanged, at its RETURNED bound | 5 |
+| execute | gated by `runtimeFullOKB`, decoded by `StateM.decResultM` | 1 / 7 policy refused |
+
+* Metadata is RETAINED and reported, not dropped: clock names, per-flop width /
+  din / enable / resetPin / resetValue / polarity / clock ordinal / async flag,
+  per-memory aw/dw/nextImg/clock, and for every `memConst` the actual contents,
+  the `contents.size` table bound (printed beside `2 ^ aw` so the difference is
+  visible), the default's value AND width, and an out-of-contents read.
+* The DECODED next state is what the following cycle runs on.
+* The bundle is built only by `mkMemSimAt`, and `mkMemSimAt_design` (new) proves
+  the result is bound to the design it was handed; `projectMemDesignAt` /
+  `MemSimWFAt` generalise the fixed-fuel forms so the driver's budget is the one
+  that was checked.  An arbitrary `MemSimulator` cannot be handed to it.
+* The certificate's own bytes are digested (FNV-1a) and printed; the harness
+  additionally binds cert/driver/lean/LEAN_PATH content hashes per attempt.
+* `init=zero` is `initStateOf` and is printed as a **legal-state witness, not an
+  RTL startup contract**; `init=ramp` is caller-SUPPLIED contents; **any other
+  startup contract is refused, not replaced** (exit 2).
+* Scalar behaviour is preserved: `memroute` is NOT in `--only all`, because a
+  memory-bearing certificate currently stops the scalar row at `support`, and
+  folding in a sixth phase would change that row's disposition.
+
+### Exercised
+
+Fixtures, `init=ramp`, 6 cycles, all agreeing with `Compiler.interpretDesign`
+(outputs, flops, and memories compared EXHAUSTIVELY over the table, never
+sampled):
+
+| fixture | residual | bound | transitions |
+|---|---|---|---|
+| `full` (2 clocks, sync+async reset, ROM, `byte_w=1`) | 427 terms, arity [3] | 22 | 1 word, 3 distinct outputs, 2 distinct flop vectors |
+| `mixed` (`byte_w=1`) | 181 terms | 15 | 1 word |
+| `twomem` (two memories, distinct clocks) | 271 terms | 17 | 1 word in EACH |
+| `lane` (`byte_w=8`) | 181 terms | 15 | 1 word |
+
+Real retained DCERT2 certificates: `tiny_byte_ram` **admitted and executed** —
+178 terms, bound 24, 2 words changed, reference agreement — and `two_domain`
+(memory-free) likewise.  `tiny_ram`, `tiny_sync_ram`, `mem_domain` and
+`mem_nondefault` are REFUSED with the exact reason now named:
+`node N (Op_MemWrite, width 8, 4 operands) has no slot type` — the memory route
+implements `Op_MemWriteBE`, not the non-byte-enabled write.
+
+Negative controls, each with its own exit: ROM write target → 6; narrow flops →
+**7, all four cycles `policy-refused`, none run on an unchecked state**;
+unsupported startup contract → 2; fuel 5/5 → 3, reported as a failure AT THAT
+BUDGET.
+
+Through the harness: `tiny_byte_ram memroute exit=0` (producer status 0, wall
+17.21 s, maxrss 6,621,352 KiB), `tiny_ram memroute exit=6`.  `--only support`
+on the same certificate still reports exit 0, unchanged.
+
+### Whole PicoRV32, at the pinned source and configuration
+
+Fresh generation attempted, not reused.
+
+* source `picorv32.v` sha256 `0836050971b3c6cdd28ac3b1e5719a67fb645161912bef1e472e63995ceb0622`, upstream rev `ef203c2`
+* compiler `bazel-bin/lhd/lhd` sha256 `414d5dcbf99b37fea2ceac2b81c131401c9bef2a7e580613f5b388199af63f2a`
+* configuration: `--reader yosys-slang --top picorv32 --set formal.lean.mode=verified_compiler --set yosys.setundef=zero -- --ignore-assertions`
+* **producer exit 1**; wall 4.01 s, user 3.91 s, sys 0.21 s, peak RSS 324,480 KiB
+* phases: `inou.yosys.tolg` 2094.8 ms … `pass.lean` **45.6 ms**
+
+```
+[ERROR] pass.lean: unsupported certificate op(s): latch (first at n_1460).
+68 node(s) in this design have no certificate encoding.
+```
+
+The LGraph was produced; the `lean/` emit directory is **empty**.  So there is
+no DCERT2 for this unit, and support, BTA, specialization, residual check and
+execution are **not applicable** — not refused, not attempted.  This is a
+SEMANTIC refusal, an unencodable component, **not** a fuel or resource cap: the
+certificate encoder has no latch form, and 68 nodes need one.  Supplying one
+means a new component in the SHARED `DesignCert`, its reference semantics, its
+checker case and its interpreter case — it is not a driver change and nothing
+here fakes it.  **PicoRV32 remains BLOCKED on `pass.lean: latch`.**
+
+Matrix unchanged: **12 YES / 11 NO / 37 BLOCKED**.  No whole-unit admission
+credit is taken from any fixture, certificate or compile above.
+
+## §63.51 — B09 and B10: the blocker was a CAP, and it is cleared
+
+Continuing the master FP units after the Pico increment.  Of the thirteen unit
+directories under `cov12x5`, three had a recorded `verified_compiler` attempt
+and all three failed:
+
+| unit | recorded refusal | kind |
+|---|---|---|
+| B09 `cva6_issue_scoreboard` | `pass.lean: node n_684 (node) has width 3536 > max_width=1024` | **cap** |
+| B10 `cva6_frontend` | `pass.lean: node n_10692 (node) has width 2080 > max_width=1024` | **cap** |
+| B12 `picorv32` | `pass.lean: unsupported certificate op(s): latch` | **semantic** |
+
+`max_width` is a documented, configurable label on `pass.lean`
+(`pass/lean/pass_lean.cpp:31`, "Hard cap on node Bits width; 0 or 'unlimited' =
+no cap (default 1024)").  A cap is not a semantic refusal, so B09 and B10 were
+re-run from their own retained `s2_single_edge/lg` at the pinned top and mode
+with `--set formal.lean.max_width=unlimited`:
+
+| unit | producer exit | wall | user+sys | peak RSS | `pass.lean` | emitted |
+|---|---|---|---|---|---|---|
+| B09 `issue_stage_gate` | **0** | 4.90 s | 4.82 + 0.04 s | 203,140 KiB | 312.0 ms | `issue_stage_gate_Lgraph.lean` 1,252,028 B, sha256 `4afcfb50…` |
+| B10 `frontend_gate` | **0** | 5.82 s | 5.71 + 0.07 s | 211,820 KiB | 248.7 ms | `frontend_gate_Lgraph.lean` 970,752 B, sha256 `cb73b273…` |
+
+Both now emit the verified-compiler certificate module where they previously
+refused.  Nothing was weakened to get there: `max_width` bounds the WIDTH a node
+may carry in the emitted certificate, and raising it admits wider nodes rather
+than relaxing any check.
+
+**A caution recorded with it.**  The same parameter also bounds a memory's
+ADDRESS width (`pass/lean/graph_access.cpp:313`).  Removing the cap outright
+would admit an `aw` whose `2 ^ aw`-word table cannot exist, and the memory-route
+driver builds such a table for `init=zero`/`init=ramp`.  These two units declare
+no memories, so the run above is unaffected, but `max_width=unlimited` must not
+be adopted as a blanket default for a memory-bearing design without an address
+bound of its own.
+
+### What is NOT claimed
+
+Generation is the first gate, not the unit.  The emitted modules have **not**
+been built: `d3_guarded_build.py` refuses in this session —
+
+```
+d3_guarded_build: REFUSING -- no delegated cgroup v2 base.
+The build would run unguarded, which is what this wrapper exists to prevent.
+```
+
+— and the session's own cgroup (`/user.slice/user-1008.slice/session-*.scope`)
+is root-owned with `cgroup.subtree_control` not writable, so there is no
+delegation to use.  A bare `lean` on a real design is exactly what the guarded
+runner exists to prevent, so the build gate was **not** run and no result is
+claimed for it.  That is an environment limitation, not a refusal and not a
+pass.
+
+The ten remaining unit directories have no recorded `verified_compiler` attempt
+at all, so they are untouched here.
+
+Matrix unchanged: **12 YES / 11 NO / 37 BLOCKED**.  B09 and B10 advance from a
+generation refusal to a generation PASS awaiting the guarded build; B12 stays
+BLOCKED on `pass.lean: latch`.
+
+## §63.52 — CORRECTIONS to §63.50 and §63.51
+
+Both sections overstated what their evidence showed.  Reconciled against the
+retained artifacts.
+
+### §63.50's Pico conclusion was out of scope
+
+The raw-Verilog recipe I ran really does exit 1 on 68 latches, and that
+observation stands **for that recipe**.  What it does NOT establish is anything
+about the whole unit, because it **omits the retained single-edge
+normalization stage**.  The retained evidence says the opposite of what §63.50
+implied:
+
+| stage | exit |
+|---|---|
+| `B12_picorv32/s1_compile` | **0** |
+| `B12_picorv32/s2_single_edge` | **0** |
+| `B12_picorv32/vc_opt` | **0** |
+
+and `vc_opt/lean/picorv32.dcert` exists: **70,067 bytes**, sha256
+`f85a2a9db8ac89ba71adac23ccbefac9bf290301974733545c0f939d3abf49c9`, format v2.
+
+So whole Pico **does** have a DCERT2 certificate, and the claim "PicoRV32
+remains BLOCKED on `pass.lean: latch`" was wrong as a statement about the unit.
+The correct statement: the **raw-Verilog route** refuses on latches; the
+**normalized route** produces a certificate.  Both are kept; neither is erased,
+and normalization is not irrelevant.
+
+### §63.51's B09/B10 conclusion was wrong
+
+B09 and B10 already have FP YES and verified-compiler YES, including generation
+checks and eight-cycle readiness, and both already have a retained
+`verified_compiler_mw` attempt at exit 0.  My "newly unblocked" modules are
+**byte-identical** to those retained artifacts:
+
+* B09 `4afcfb504459d9a787b5e2e5b730ea7d4f36f79680fab9d1326af21fb4fca461`
+* B10 `cb73b273cb7aba6d15eaefaba6758171ec221f4a22ff24afd99eea2d9eca8d4e`
+
+They were **not** newly unblocked and were **not** awaiting a first build.  What
+§63.51 actually recorded was a duplicate of an already-passing gate.  The
+`d3_guarded_build.py` refusal is retained as an honest observation about that
+duplicate attempt, and it is **not** a task-wide blocker.
+
+### Emitter provenance
+
+The binary I used, `bazel-bin/lhd/lhd` sha256
+`414d5dcbf99b37fea2ceac2b81c131401c9bef2a7e580613f5b388199af63f2a`, is dated
+before the current source: the retained `verified_compiler_mw/lean/` carries a
+`.dcert` sidecar and **my new directories do not**, although the current
+`pass/lean/pass_lean.cpp` emits one in `verified_compiler` mode.  A path does
+not establish a source revision.  Fresh emission must use a source-bound
+current functional build; the retained certificates and this binary observation
+are kept separately.
+
+### Standing
+
+The reporting fixes of §63.50 (actual scalar failure fields; the withdrawn
+width claim), the configurable-fuel proof, and every audited memory semantic
+are unaffected by these corrections.  Matrix stays **12 YES / 11 NO /
+37 BLOCKED**.
+
+## §63.53 — whole Pico on the memory route, and the driver's production contract
+
+### Whole PicoRV32, on the NORMALIZED route
+
+The retained `vc_opt/lean/picorv32.dcert` (70,067 bytes, sha256
+`f85a2a9d…`, format v2) was run through the memory route end to end.
+
+```
+shape: sources 1302  nodes 2279  outputs 18  flops 174  memories 1  clocks 1
+memory 0: aw 5 dw 32 nextImg slot 3488 clock 0 (table 32 words)
+scalar support: wf true memFree false sources false ops false arities true
+                flopClocks true | ALL false
+scalar refused on: memFree,sources,ops
+memory route: accepts true typed true sized true nextImgs true | ADMITTED true
+```
+
+**Whole Pico is ADMITTED by the checked memory route** — exactly the
+aw5/dw32 memory, the `MemRead` nodes and the `MemWriteBE 1` the matrix records.
+The run then specialized, passed the unchanged production residual checker,
+and executed at its returned bound with the reference agreeing on every cycle:
+`step outcomes ok,ok,ok,ok`, producer exit 0.
+
+A resource note, kept separate from any refusal: the first attempt died in
+`mixDriver` with `deep recursion ... increase --tstack`.  That is a STACK cap,
+not a semantic refusal — the production harness already runs
+`ulimit -s unlimited` and the standalone runner did not.  With the limit raised
+the same input succeeds.
+
+### The double specialization the timing hid
+
+That run reported `specialize 676932 ms  check 659085 ms`.  The "check" was a
+**second full specialization**: the driver called `projectMemDesignAt` and then
+`mkMemSimAt`, which specializes again.  Fixed by a new constructor that binds
+the residual already in hand:
+
+* `MemProjection.mkMemSimOf D R` — admission plus the production residual check,
+  and no specialization;
+* `mkMemSimOf_parts` / `mkMemSimOf_wf` — the bundle is honest exactly when the
+  caller can EXHIBIT the specialization that produced `R`, so this is not a way
+  to launder an arbitrary `Program` into a checked one.
+
+### The supplied-state contract
+
+`init=ramp` was called "caller-supplied" in §63.50.  It is not: it is an
+internally generated pattern.  Corrected — `zero`, `ramp` and `narrow` are now
+labelled SYNTHETIC controls, and a real loader was added:
+
+```
+memstate v1
+flops reset            # explicit: use the design's DECLARED reset values
+flop <width> <value>
+mem  <aw> <dw> <default>
+word <addr> <value>
+```
+
+The supplied state is read, used AS IT IS, carried through the production codec
+(`encStateM`/`decStateM` round-trip CHECKED, not assumed) and gated by
+`stateFullOKB` before any cycle runs.  Nothing is defaulted and nothing is
+manufactured; `flops reset` is the file's explicit request and the provenance
+line says that part is synthetic.  Malformed input is refused by line:
+
+```
+REFUSING: …malformed_word_before_mem.memstate: line 2: `word` before any `mem`
+```
+
+Executed control (`scripts/memstate/full_nonzero_default.memstate`): a NONZERO
+default of 255 and non-ramp words 11/22/33 survive the driver —
+`initial memory 0 words [11,22,255,255,255,255]` — the codec round trip holds,
+one word changes over six cycles, and the comparison is COMPLETE.
+
+### Comparison is a STATUS, not a boolean
+
+`agreement=true` was printed even when `aw > 12` skipped the memory check, and
+`nocompare` still claimed agreement.  Both fixed.  The status is now
+`COMPLETE` / `PARTIAL (what was skipped)` / `DISABLED` / `FAILED (what)`, only
+`COMPLETE` earns credit, and the final verdict says which it was:
+
+```
+RESULT: MEMROUTE EXECUTED … -- reference comparison DISABLED by nocompare
+        -- NOT full credit; nothing was compared …
+```
+
+`COMPLETE` now means the memory **array length**, **every** admitted table word,
+the **default** (read at `-1`) and the **out-of-range** read above the table, as
+well as outputs and flops.  `CmpStatus.meet` keeps the weakest status, so one
+skipped cycle cannot be reported as a complete comparison.
+
+The **returned-state policy is a gate**, not an informational line: a run whose
+returned state fails `stateFullOKB` exits 7.
+
+### `--selftest`: 22 controls, all PASS
+
+Including the ones this instruction asked for: a **default-only** mismatch is
+rejected (every word equal, only `dflt` differs), a length mismatch is rejected,
+an over-large table is reported SKIPPED rather than passed, a memory-array
+length mismatch FAILS rather than skips, `DISABLED`/`PARTIAL` do not earn
+credit, and the state parser refuses a missing header, a bad keyword, a
+non-numeric field, a `word` before any `mem` and an out-of-table address.
+
+Matrix stays **12 YES / 11 NO / 37 BLOCKED**.
+
+## §63.54 — the ten blocked FP units, by their ACTUAL refusal
+
+Instruction 125 directs attention to the ten blocked units.  Surveyed from the
+retained attempt records, not re-run: each one's first failing stage, its exit,
+the class the tool assigned it, and its message.
+
+| unit | first failing stage | exit | class | refusal |
+|---|---|---|---|---|
+| B01 `coreet_dcache` | `s1_compile` | 1 | internal | `Concat lane 0 (of 2, MSB-first) driver 'mux_94508' occupies 2 bits but its declared window is 1` |
+| B02 `cva6_hpdcache` | `s1_compile` | 6 | syntax | combinational loop in `cva6_hpdcache_subsystem_gate` |
+| B03 `coreet_icache` | `s1_compile` | 1 | internal | `read_slang` failed on the icache filelist |
+| B04 `cva6_mmu_tlb_ptw` | `s1_compile` | 6 | syntax | combinational loop in `cva6_mmu_gate` |
+| B05 `coreet_etlink_axi` | `s1_compile` | 1 | internal | `read_slang` failed on `shirecache_mesh_master` |
+| B05b `coreet_etlink_axiport` | — | — | — | **no attempt recorded at all** |
+| B06 `cva6_lsu` | `s1_compile` | 6 | syntax | combinational loop in `load_store_unit_gate` |
+| B07 `coreet_vpu` | `s1_compile` | 6 | syntax | combinational loop in `vpu_top` |
+| B08 `coreet_intpipe` | `s1_compile` | 6 | syntax | combinational loop in `intpipe_top` |
+| B11 `coreet_tlb` | `s2_single_edge` | 7 | unsupported | `memory memory_1660:u_tlb_cache_rf.rf_q would commit on every sub-step under a phase divider` |
+
+Three groupings, and they are not the same problem:
+
+1. **Front-end (B03, B05)** — `read_slang` does not get as far as an LGraph.
+2. **Combinational loops (B02, B04, B06, B07, B08)** — five units, all reported
+   as `syntax`/exit 6 at `s1_compile`.  Four of the five chains are
+   `sext -> get_mask -> sra -> sext -> …`.  That is the SHL/SRA/Sext area, and
+   the repairs there are **not** to be rolled back; whether these are real
+   loops or an artefact of how the loop detector walks those chains is an open
+   question and is NOT answered here.
+3. **Structural (B01)** — a concat lane driver wider than its declared window.
+
+**B11 is the only one blocked inside the memory area, and it is the closest to
+the gate it fails.** It passes `s1_compile` and is refused by
+`pass.single_edge`, whose own hint names the gap:
+
+```
+code: memory-unsupported
+hint: slot enables are not wired into the Memory cell yet
+```
+
+So B11 is an implementation gap in the normalization pass — a memory whose
+commit cannot currently be qualified by a slot enable under a phase divider —
+and not a statement that the design cannot be certified.  It is recorded here
+as the next candidate in this area; nothing is claimed for it yet, and no
+component is erased to get past it.
+
+Matrix stays **12 YES / 11 NO / 37 BLOCKED**.
+
+## §63.55 — whole Pico, measured; the check metric; fresh source-bound emission
+
+### The double specialization, measured away
+
+Same certificate, same fuel, the only change being `mkMemSimOf`:
+
+| phase | before | after |
+|---|---|---|
+| specialize | 676,932 ms | 949,243 ms |
+| **check** | **659,085 ms** | **2,590 ms** |
+| execute | 756,889 ms (4 cycles) | 1,048,206 ms (6 cycles) |
+
+The "check" was a second full specialization.  It is now a check: **659 s → 2.6 s**.
+(The specialize figures are two different runs of the same work, not a
+regression claim; the point is the check column.)
+
+### Whole PicoRV32, on the retained normalized certificate
+
+`vc_opt/lean/picorv32.dcert`, 70,067 B, sha256 `f85a2a9d…`:
+
+```
+shape: sources 1302 nodes 2279 outputs 18 flops 174 memories 1 clocks 1
+memory 0: aw 5 dw 32 nextImg slot 3225 clock 0 (table 32 words)
+memory route: accepts true typed true sized true nextImgs true | ADMITTED true
+residual 4,670,254 terms, 1 function(s), arity [3], checker bound 99,236
+step outcomes: ok,ok,ok,ok,ok,ok
+reference comparison: COMPLETE (array length, every table word, default and out-of-range)
+final returned-state policy: stateFullOKB true
+```
+
+producer exit 0; 34:52 wall, 1956.9 s user + 15.9 s sys, peak RSS 6,965,844 KiB.
+
+The SUPPLIED image survives the whole route — the file's nonzero default
+`4294967295` and its words are intact at the end:
+`[19088743,2309737967,305419896,2882400001,4294967295,4294967295]`, and the
+`encStateM`/`decStateM` round trip was checked, not assumed.  The file's
+`flops reset` directive is reported as the synthetic part it is.
+
+**What did NOT happen, stated plainly: `memory 0: 0 word(s) differ`.**  Under
+the generated width-derived stimulus the register file never commits, so this
+run has NO memory transition.  The driver reports that rather than describing
+motion that did not occur.  A `stim` file was added for exactly this reason —
+`mkInputFor` cannot drive a core that needs `resetn` deasserted and a ready
+memory interface — and a run with `resetn = 1`, `mem_ready = 1` and
+`mem_rdata = 0x00100093` (`addi x1, x0, 1`, which writes the 32×32 register
+file this certificate declares as its aw5/dw32 memory) is the one that can
+produce a transition.
+
+### Fresh emission, from a source-bound build
+
+`bazel build -c opt //lhd:lhd` at repo HEAD `1b180a422`: 10,279 actions,
+completed successfully.  New binary sha256
+`9ea9245ee4e3f8ac01176bcf9be003b04212a2abbb1f809b0487732a8d798a97` — **not**
+the `414d5dcb…` of §63.51, whose missing `.dcert` sidecar was the symptom.
+
+Re-emitted from the MATCHED `s2_single_edge` LGraph with the same
+`formal.lean.mode=verified_compiler` invocation `vc_opt` used: producer exit 0,
+0.98 s, 77,076 KiB, and it **does** emit the sidecar.
+
+| certificate | bytes | sha256 | sources | nodes | flops | memory | admitted |
+|---|---|---|---|---|---|---|---|
+| retained `vc_opt` | 70,067 | `f85a2a9d…` | 1302 | 2279 | 174 | aw5 dw32 | **yes** |
+| fresh, current emitter | 69,657 | `ef77dfab…` | 1292 | 2269 | 174 | aw5 dw32 | **yes** |
+
+They are NOT byte-identical and are not claimed to be: the current emitter
+produces ten fewer sources and ten fewer nodes.  Both are retained separately,
+and both are admitted by the memory route with the same memory geometry.
+
+### Driver additions
+
+* `stim:<path>` — a SUPPLIED input vector (`stim v1` / `in <ordinal> <width>
+  <value>`), applied every cycle, provenance and hash reported; unlisted
+  ordinals keep their declared width at 0.  The generated stimulus remains the
+  default and is labelled synthetic.
+* `support-only` — stop after the support report, so two certificates'
+  admission can be compared without paying for specialization.
+
+Matrix stays **12 YES / 11 NO / 37 BLOCKED**.
+
+## §63.56 — B11's blocker, assessed: no new IR component is needed
+
+`pass/single_edge/pass_single_edge.cpp:901` refuses any design containing a
+`Ntype_op::Memory` once the slot plan needs more than one slot:
+
+```cpp
+if (op == Ntype_op::Memory && plan.slots > 1) {
+  r.reason = "memory `" + label_of(n) + "` would commit on every sub-step under a phase divider";
+  refuse(quiet, "memory-unsupported", …, "slot enables are not wired into the Memory cell yet");
+```
+
+The pass fails closed on purpose — its own comment is *"edge normalization
+declines rather than half-transform: a partial lowering is a silent full-cycle
+error"* — so the refusal is correct behaviour for a gap, not a bug to delete.
+
+### What the gap is, and what it is NOT
+
+It is a **lowering** gap: under a phase divider the Memory cell has no
+slot-qualified commit, so the pass cannot guarantee the write lands only on its
+own sub-step.
+
+It is **not** a certificate-language gap, and this is worth recording because
+the obvious assumption is the opposite.  DCERT2 and the proofs already express
+a memory that commits on an edge WITHOUT changing: a byte-enable of zero leaves
+the image EXACTLY alone, proved, not sampled —
+
+* `MemImg.writeBE_disabled_eq : ¬ bv_nonzero bev → writeBE w m a d bev bw = m`
+* `applyOpM_memWriteBE_disabled` — the same at the object level
+* `memNextOf_quiet` — the prior image, exactly, when the clock does not fire
+
+and the executed fixture control (`inNoWr` / the `mask 0` rows of §63.49) shows
+the image unchanged on a FIRING edge with the write disabled.
+
+So a slot-gated memory write is expressible today by ANDing the slot predicate
+into the existing byte-enable operand: no new `MemoryDesc` field, no new
+component on the shared `DesignCert`, and no change to the memory semantics
+already proved.  The work is in `pass.single_edge`'s lowering, where the slot
+machinery lives (`plan.slots`, the per-element `e.slot` assignment at
+`pass_single_edge.cpp:613-641`), and it is NOT attempted here: the pass assigns
+slots by retyping elements onto slot-specific clocks rather than by building an
+enable predicate, so the right shape of the change needs that machinery
+understood rather than guessed at.  A half-understood edit to a deliberately
+fail-closed pass is the one thing its comment warns against.
+
+Recorded as the next concrete candidate in the memory area, with the finding
+that it does not require extending the IR.  B11 stays BLOCKED; nothing is
+claimed for it, and no component is erased.
+
+## §63.57 — Pico on the FRESH certificate, and the handshake the stimulus needed
+
+Twelve cycles on the freshly emitted `picorv32.dcert` (`ef77dfab…`, the
+source-bound emitter), with the supplied image and a supplied CONSTANT
+stimulus:
+
+```
+state survives encStateM/decStateM unchanged (words, defaults and flops)
+initial memory 0 words [19088743,2309737967,305419896,2882400001,4294967295,4294967295]
+stimulus: SUPPLIED file …pico_run_instr.stim, 9 input(s) pinned, applied every cycle
+step outcomes: ok × 12
+reference comparison: COMPLETE (array length, every table word, default and out-of-range)
+distinct output vectors 2 of 12; distinct flop vectors 8 of 12
+memory 0: 0 word(s) differ from the initial image
+final returned-state policy: stateFullOKB true
+ms: support 85  specialize 676099  check 2565  execute 2077290
+```
+
+producer exit 0, 46:14 wall, 2756.8 s user, peak RSS 7,003,828 KiB.
+
+**The core advances — 8 distinct flop vectors of 12 — and the register file
+still does not commit.**  Reported as it happened, not described as motion.
+
+### Why, and what was added
+
+Holding `mem_ready` high unconditionally is not the picorv32 handshake: it
+acknowledges transactions the core never started.  The core's own `mem_valid`
+is output ordinal 8 and `mem_ready` is input ordinal 3, so the stimulus needs a
+REACTIVE input, not a constant.  Added:
+
+```
+react <input-ordinal> <output-ordinal>
+```
+
+The named input takes the PREVIOUS cycle's value of that output (0 on the first
+cycle, where there is no previous one).  It is the only part of a stimulus that
+is not a constant, and the provenance line counts it separately:
+`8 input(s) pinned, 1 reactive (from the previous cycle's outputs)`.
+
+The retained stimulus now carries `react 3 8` — `mem_ready := mem_valid` — with
+`mem_rdata` held at `0x00100093` (`addi x1, x0, 1`), the instruction that writes
+the 32×32 register file this certificate declares as its aw5/dw32 memory.
+
+### Standing
+
+Nothing about the route changed: whole Pico is admitted, specializes, passes
+the unchanged production residual checker, and executes at its returned bound
+with a COMPLETE reference comparison on both certificates.  What is still open
+is a stimulus that makes the register file commit, and a longer run is under
+way at 24 cycles.  Until a transition is observed, **no claim of "meaningful
+initialized memory transitions" is made for Pico** — `tiny_byte_ram` (§63.50)
+remains the real certificate where the route moved memory, at 2 words.
+
+Matrix stays **12 YES / 11 NO / 37 BLOCKED**.
+
+## §63.58 — admission census: ONE operator gap remains, and it reduces
+
+`support-only` over the named retained certificates, so the census costs a
+support report and not a specialization.
+
+| certificate | memories | admitted | reason |
+|---|---|---|---|
+| `memfix_a` | 0 | **yes** | — |
+| `tiny_async` | 0 | **yes** | — |
+| `SingleCycleCPU` (810 src / 1113 nodes) | 0 | **yes** | — |
+| `PipelinedCPU` (1007 / 1533) | 0 | **yes** | — |
+| `PipelinedDualIssueCPU` (2087 / 3561) | 0 | **yes** | — |
+| `two_domain` | 0 | **yes** | — |
+| `tiny_byte_ram` | 1 | **yes** | runs; 2 words changed |
+| `picorv32` (both certificates) | 1 | **yes** | runs |
+| `memfix_b` | 1 | no | `node 7 Op_MemWrite` has no slot type |
+| `tiny_ram` | 1 | no | `node 6 Op_MemWrite` |
+| `tiny_sync_ram` | 1 | no | `node 7 Op_MemWrite` |
+| `mem_domain` | 1 | no | `node 7 Op_MemWrite` |
+| `mem_nondefault` | 1 | no | `node 7 Op_MemWrite` |
+
+The memory route admits **everything the scalar route admits** — it subsumes
+the memory-free case — plus every memory-bearing certificate that uses
+`Op_MemWriteBE`.  **Exactly one operator gap remains across the whole retained
+corpus: `Op_MemWrite`, the non-byte-enabled write**, and it is the sole reason
+for all five refusals.
+
+### It reduces to the write already implemented
+
+Recorded because it changes what that gap costs.  The reference definitions:
+
+```lean
+cert_mem_write m a d en =
+  if bv_nonzero en then (fun x => if x = bv_uint a then d else m x) else m
+
+cert_masked_update w old new bev byte_w =
+  mk_bv w (bits_to_int w (fun i => if bv_bit bev (i / byte_w) then bv_bit new i else bv_bit old i))
+```
+
+Take `byte_w := w` and a one-bit `bev := en`.  Then `i / byte_w = 0` for every
+`i < w`, so each bit comes from `new` exactly when `en` is set, and the masked
+update is `bv_resize w d` — which is `d` itself precisely when `d.width = w`.
+`nodeTy`'s `Op_MemWriteBE` case ALREADY requires `bvWidthOf td == dw` and
+`c.width == dw`, and its payload conditions `0 < bw` and
+`dw ≤ bvWidthOf tbe * bw` hold at `bw = dw` with a one-bit enable.
+
+So `Op_MemWrite` is `Op_MemWriteBE w` with the enable as the byte-enable, under
+the checker's own typing — **no new object primitive and no new reference
+operator**.
+
+What it is NOT is free.  `NodeAdmitted_ne_memWrite` is a theorem the current
+chain USES (`admits_slot_width` excludes a write when it concludes `.bv`), and
+`Direct`'s `opKind`/`opArity`/`nodeAdmittedB` name `Op_MemWrite` as refused.
+Admitting it means re-proving those, not deleting them, and re-running the two
+kernel reductions that pin `hwMemAP`.  That is the next checkpoint in this
+area, and it is not started here.
+
+Matrix stays **12 YES / 11 NO / 37 BLOCKED**.
+
+### §63.58 addendum — the reduction's two side conditions
+
+Working the equivalence out rather than asserting it turns up two conditions
+that the one-line statement above hides.  Both are recorded now so the next
+checkpoint does not discover them late.
+
+`cert_mem_write` writes `d` RAW; the byte-enable form writes
+`cert_masked_update w (m a) d en w`.  For those to agree:
+
+1. **The enable must be one bit, not merely nonzero.**  `cert_mem_write` tests
+   `bv_nonzero en`, while `cert_masked_update` tests `bv_bit en (i / byte_w)`,
+   which at `byte_w = w` is `bv_bit en 0` for every `i < w`.  Those coincide
+   only when `en` is 1 bit wide — a 4-bit enable of value 8 is NONZERO with bit
+   0 CLEAR, and the two definitions then disagree.  So the normalization must
+   CHECK `bvWidthOf ten = 1`, and refuse otherwise rather than assume it.
+
+2. **The data must be normalized.**  `cert_masked_update` ends in
+   `mk_bv w (bits_to_int w …)`, so it yields `bv_resize w d`, whereas
+   `cert_mem_write` yields `d` itself.  `bv_resize w d = d` needs
+   `d.value = d.value % 2 ^ w`, which is not a consequence of `d.width = w` —
+   a `BV` is a (width, value) pair and nothing in the type normalizes it.  It
+   IS true of every value `eval_op` produces, since those all go through
+   `mk_bv`, so the next increment needs a slot-normalization lemma in the shape
+   of `admits_slot_width`: *every admitted slot's value is `mk_bv`-normalized*.
+
+Neither condition weakens anything; they are two obligations the next
+checkpoint owes, and stating them is why the reduction is worth recording
+before it is attempted.
+
+## §63.59 — 24 cycles with the handshake: still no commit, and why
+
+The reactive handshake run, on the fresh certificate, supplied image, 24
+cycles:
+
+```
+stimulus: 8 input(s) pinned, 1 reactive (from the previous cycle's outputs)
+step outcomes: ok × 24
+reference comparison: COMPLETE (array length, every table word, default and out-of-range)
+distinct output vectors 2 of 24; distinct flop vectors 16 of 24
+memory 0: 0 word(s) differ from the initial image
+final returned-state policy: stateFullOKB true
+ms: support 82  specialize 640063  check 2504  execute 4025031
+```
+
+producer exit 0, 1:18:03 wall, 4671.0 s user, peak RSS 6,945,540 KiB.
+
+**Still no commit** — and `distinct output vectors 2 of 24` is the diagnosis.
+Sixteen distinct flop vectors means parts of the design are moving, but two
+output vectors over twenty-four cycles means the fetch address is NOT advancing:
+the core is in a two-state loop, not executing.
+
+The cause is the reset, not the handshake.  This certificate's flops carry
+`resetPin none` — picorv32's state registers are not reset-pinned, so `resetn`
+initialises them THROUGH THE LOGIC.  Holding it high from cycle 0, starting
+from the declared reset values, never takes the state machine through the
+initialisation its logic expects.  A constant stimulus cannot express a reset
+PULSE, which is what both previous runs supplied.
+
+### `at`, the third kind of stimulus entry
+
+```
+at <cycle> in <ordinal> <width> <value>
+```
+
+A per-cycle override, which beats a reactive input, which beats a constant.
+The retained stimulus now holds `resetn` LOW for cycles 0-1 and high after, and
+the provenance line reports the three kinds separately:
+`8 constant(s), 2 per-cycle override(s), 1 reactive`.
+
+### Accounting
+
+Three Pico runs so far, all producer exit 0, all COMPLETE reference
+comparison, and **none has moved the memory**:
+
+| run | certificate | cycles | stimulus | flop vectors | memory |
+|---|---|---|---|---|---|
+| §63.55 | retained | 6 | generated | 3 of 6 | 0 words |
+| §63.57 | fresh | 12 | constant supplied | 8 of 12 | 0 words |
+| §63.59 | fresh | 24 | + reactive handshake | 16 of 24 | 0 words |
+
+The route is not in question in any of them — admitted, specialized, checked at
+the returned bound, executed, reference-agreeing.  What has been missing each
+time is a stimulus that makes the core execute, and each run has named the
+reason rather than rounding the result up.  A fourth run with the reset pulse
+is under way; **no claim of meaningful initialized memory transitions is made
+for Pico unless and until one is observed.**
+
+Matrix stays **12 YES / 11 NO / 37 BLOCKED**.
+
+## §63.60 — the reset pulse: the core starts executing
+
+Fourth Pico run, fresh certificate, supplied image, 20 cycles, with `resetn`
+held LOW for cycles 0-1 by the new `at` overrides:
+
+```
+stimulus: 8 constant(s), 2 per-cycle override(s), 1 reactive
+step outcomes: ok × 20
+reference comparison: COMPLETE (array length, every table word, default and out-of-range)
+distinct output vectors 12 of 20; distinct flop vectors 13 of 20
+memory 0: 0 word(s) differ from the initial image
+final returned-state policy: stateFullOKB true
+ms: support 87  specialize 650044  check 2548  execute 3560724
+```
+
+producer exit 0, peak RSS 7,006,000 KiB.
+
+**The diagnosis was right.**  Distinct output vectors go from **2 of 24** to
+**12 of 20**: with a reset pulse the core leaves its two-state loop and the
+fetch address advances.  That is the behavioural difference a constant
+stimulus could not produce, and it came from the stimulus, not from any change
+to the route.
+
+**And the register file still has not committed in 20 cycles.**  Reported as
+it stands.  Fetching is not retiring: each memory transaction takes at least
+two cycles under the one-cycle-lagged `mem_ready` this stimulus supplies, so
+twenty cycles buys fewer instructions than it looks like.
+
+### A cheaper way to ask the question
+
+`scripts/pico_stim_probe.lean` — the same stimulus against
+`Compiler.interpretDesign` ALONE.  A driver cycle costs ~168 s because it
+evaluates a 4.67-million-term residual *and* the reference; the question "does
+this stimulus ever make the register file commit, and at which cycle" is a
+question about the reference only.  The probe reports the first committing
+cycle and the `mem_addr` trace, so a stimulus is validated BEFORE an hour of
+specialization is spent on it.
+
+It is a diagnostic and says so in its own header: reference only, no
+specialization, no residual, **no readiness credit**.  The driver remains the
+thing that executes the projection.
+
+### Accounting, updated
+
+| run | cycles | stimulus | distinct outputs | memory |
+|---|---|---|---|---|
+| §63.55 | 6 | generated | 3 of 6 | 0 words |
+| §63.57 | 12 | constant supplied | 2 of 12 | 0 words |
+| §63.59 | 24 | + reactive handshake | 2 of 24 | 0 words |
+| §63.60 | 20 | + reset pulse | **12 of 20** | 0 words |
+
+Four runs, all producer exit 0, all COMPLETE reference comparison, none moving
+the memory.  The route is not in question in any of them.  **No claim of
+meaningful initialized memory transitions is made for Pico.**
+
+Matrix stays **12 YES / 11 NO / 37 BLOCKED**.
+
+## §63.61 — `Op_MemWrite` groundwork, and what was already there
+
+`LeanSemanticPrimitives/Projection/HardwareMemWrite.lean` (new, builds clean,
+5 executed guards).  Strictly additive: it touches no existing definition,
+admits nothing and changes no route.
+
+### Already proved, before this module
+
+The image semantics of the missing operator were done:
+
+* `MemImg.writeEn m a d en` — the word write with an enable;
+* `MemImg.denote_writeEn` — it denotes `cert_mem_write` whenever the address is
+  in range.
+
+So the gap is not in the semantics.  It is the ROUTE: an object primitive, an
+`applyOpM` dispatch, the checker's admission and typing, and the node/fold
+lemmas.  Those move `ObjectLanguage`, `hwMemS`, `hwMemP`, `hwMemAP` and the two
+kernel reductions that pin them, which is the next checkpoint and is NOT
+started here.
+
+### Added
+
+| fact | statement |
+|---|---|
+| `eval_op_cert_memWrite` | the certificate evaluator on a four-operand write, definitionally |
+| `cert_mem_write_disabled` | disabled ⇒ the memory function is returned UNCHANGED |
+| `cert_mem_write_width` | pointwise width, with the datum's width as a HYPOTHESIS |
+| `writeEn_disabled_eq` | disabled ⇒ the IMAGE is unchanged, not merely equivalent |
+| `writeEn_length` / `writeEn_dflt` / `writeEn_FullTable` | geometry survives |
+| `writeEn_MemShapeOK` | §63.45's word-and-default shape survives, given `d.width = dw` |
+| `writeEn_denote` | the three facts a write node needs, stated together |
+
+`mem_set_cases` is proved by induction rather than by library name, so the
+module does not depend on which spelling of "a member of `l.set n b` is `b` or
+was already in `l`" this toolchain ships.
+
+### The side condition, carried not assumed
+
+§63.58's addendum found that `cert_mem_write` stores `d` **raw** — unlike
+`cert_mem_read` and the byte-enabled write, which both end in `mk_bv`.  So an
+image whose words must all be `dw` wide stays that way only when the datum IS
+`dw` wide.  That appears here as an explicit hypothesis on
+`cert_mem_write_width` and `writeEn_MemShapeOK`, which is exactly what the
+checker's existing `bvWidthOf td == dw` would supply.  Nothing assumes it.
+
+Executed controls: an enabled write changes the addressed word and nothing
+else; a disabled write returns the SAME image; the default is untouched either
+way; and an out-of-range write is a no-op that does not extend the table.
+
+Axioms: `propext`, `Quot.sound` only.  Matrix stays **12 YES / 11 NO /
+37 BLOCKED**.
+
+## §63.62 — what the Pico transition question actually is, and where it stops
+
+### The reference probe
+
+`scripts/pico_stim_probe.lean`, 40 cycles, reference only:
+
+```
+mem_addr over 40 cycles: 0,0,0,0,0,0,0,0,4,4,4,4,8,8,8,8,12,12,12,12,16,16,16,16
+register file NEVER commits in 40 cycles
+```
+
+**The core executes.**  The fetch address advances 0 → 4 → 8 → 12 → 16, one
+instruction every four cycles, which is picorv32's normal rate under a
+one-cycle-lagged `mem_ready`.  That is established on the REFERENCE semantics,
+independently of the residual.
+
+A correction about this probe, since §63.60 justified it on cost: it was built
+on the assumption that the reference alone would be far cheaper than the
+driver's residual-plus-reference.  It is not — 83 minutes for 40 cycles against
+the driver's 70 for 20.  The idea (validate a stimulus before paying for
+specialization) is sound; the cost model behind it was wrong, and it saved no
+time on this pass.  What it did buy is the `mem_addr` trace, which no driver
+run reports.
+
+### The write node, statically
+
+`scripts/pico_write_trace.lean` — structure only, no simulation, no cost:
+
+```
+memory 0: aw 5 dw 32 clock 0 nextImg slot 3209
+  node 1917: Op_MemWriteBE 1 w32 deps [1077, 3206, 3207, 3208]
+    mem    -> source memImg 0 (aw 5 dw 32)
+    addr   -> Op_Or w5
+    data   -> Op_Or w32
+    ENABLE -> Op_Or w32 -> Op_GetMask w32 [cond, const 0xFFFFFFFF]
+                             cond = Op_MuxBool w1 [Op_GetMask w1 [...], const 0, const -1]
+```
+
+With `byte_w = 1` a 32-bit byte-enable is a per-BIT write mask, and this one is
+`0xFFFFFFFF` exactly when its condition holds and `0` otherwise — the correct
+shape for a whole-word register-file write.  **The write is structured
+correctly; its condition simply does not assert within 40 cycles under this
+stimulus.**
+
+### Where this stops, and why
+
+What is established: the memory route runs whole Pico (four runs, producer exit
+0, COMPLETE reference comparison, returned-state policy passing); the core
+executes under the supplied reset pulse and handshake; and the declared memory's
+write is correctly formed.
+
+What is NOT established: which input or internal condition makes that write's
+gate assert.  Answering it means debugging a third-party core's
+microarchitecture at roughly 100-170 s per simulated cycle, and each further
+guess at a stimulus would be an expensive repeat of a run whose route result is
+already known.  That is not verified-compiler work and it is not continued here.
+
+**`tiny_byte_ram` remains the real certificate on which this route MOVED
+memory** — 2 words, §63.50 — so "the route commits memory on a real
+certificate" is demonstrated; what is open for Pico is a stimulus question, not
+a route question.  No claim of meaningful initialized memory transitions is
+made for PicoRV32.
+
+Matrix stays **12 YES / 11 NO / 37 BLOCKED**.
+
+## §63.63 — CORRECTIONS to §63.62, and the driver header
+
+### "only a stimulus problem" is withdrawn
+
+§63.62 concluded that the open Pico item "is a stimulus question, not a route
+question".  That is not established, and the evidence behind it does not carry
+that weight:
+
+* **The probe compares resulting words to the INITIAL image.**  It does not
+  observe the write enable and it does not observe attempted writes.  Unchanged
+  words do NOT establish that the gate never asserted — a write that stored the
+  value already at that address, or an enabled write the interpreter dropped,
+  would both look identical to "never wrote".
+* **An advancing fetch address does not establish instruction RETIREMENT.**
+  `mem_addr` stepping 0,4,8,12,16 shows the fetch path moving; it does not show
+  that any instruction reached a register write.
+* **The static cone trace shows SHAPE, not correctness.**  It cannot rule out a
+  lowering error, an emission error, or an error in the reference itself.
+
+So PicoRV32's required initialized changing-memory transition **stays open**,
+with the cause unidentified among stimulus, lowering, emission and reference.
+`tiny_byte_ram` is NOT a substitute for it: a transition on one small retained
+certificate is evidence about that certificate, not about Pico.
+
+### The operator census is scoped to the named fixtures
+
+§63.58's "exactly one operator gap remains across the whole retained corpus"
+means across **the named retained certificates it lists**.  It is not a
+statement about all designs, and it is not a statement about the twelve whole
+units — ten of which never reach a certificate at all.
+
+### Driver header
+
+Two things the header said that the code does not do:
+
+* It attributed binding to `mkMemSimAt`.  The driver uses `mkMemSimOf`, whose
+  honesty comes from `mkMemSimOf_wf` requiring the caller to exhibit the
+  specialization that produced the residual.  `mkMemSimAt` remains available
+  and is simply not what this driver calls.
+* It claimed a supplied state file is used with "no field defaulted and nothing
+  manufactured".  Two parts of it ARE the driver's: every numeric field goes
+  through `mk_bv`, so `BV(8,300)` is stored as 44; and a `mem` line fills the
+  whole `2 ^ aw`-word table with its declared default, so an address the file
+  does not name holds the default rather than anything the file wrote.  Both
+  are now stated in the header and at `buildState`.
+
+Matrix stays **12 YES / 11 NO / 37 BLOCKED**.
+
+## §63.64 — REFUTED: the Pico write was asserting and executing all along
+
+Kernel-checked controls (`audits/pico_mask_cone_ef77dfab_20261013_1050`,
+propext only, exit 0) on the exact fresh certificate `ef77dfab`, slots
+3185 → 3186 → 3208:
+
+```lean
+cone select = Or w32 [ GetMask w32 [ MuxBool w1 [select, 0, -1], 0xffffffff ] ]
+
+cone_on          : cone (mk_bv 1 1) = mk_bv 32 1          -- NOT 0xffffffff
+cone_on_not_full : cone (mk_bv 1 1) ≠ mk_bv 32 4294967295
+enabled_no_change : writeBE 32 image (mk_bv 5 1) (mk_bv 32 1) (cone (mk_bv 1 1)) 1 = image
+full_mask_changes_word : (writeBE 32 image … 0xffffffff 1).get 1 = mk_bv 32 1
+even_word_bit_only : cert_masked_update 32 (mk_bv 32 2309737966) (mk_bv 32 1) (cone …) 1
+                       = mk_bv 32 2309737967
+```
+
+### What this overturns
+
+**§63.62 said the write's condition "does not assert".  That is false.**  The
+selected mask is **1**, not `0xffffffff`, so at `byte_w = 1` the write touches
+**bit 0 only**.  The supplied word 1 is `2309737967`, which is ODD — bit 0 is
+already set — so an ENABLED, EXECUTED write of datum 1 leaves the word
+bit-identical.  `even_word_bit_only` closes it from the other side: on an EVEN
+word the very same write DOES change it.
+
+So the gate asserted, the write executed, and the image was unchanged anyway.
+Every "memory 0: 0 word(s) differ" line in §§63.55, 63.57, 63.59 and 63.60 is
+consistent with a write that ran — and my reading of them as "the register file
+does not commit" was the exact error §63.63 had just warned about, committed
+one section earlier and not caught by writing the warning down.
+
+`§63.62`'s claim that the enable is `GetMask(cond, 0xFFFFFFFF)` producing an
+all-ones mask is withdrawn: it read the CONSTANT operand as the result.
+
+### The real candidate: operand signedness at the translation boundary
+
+Read-only queries against the source-bound binary: retained normalized graph
+origin 1284 is a **SIGNED one-bit mux**; origin 21124 is an **unsigned 32-bit
+Get_mask**.  Native `cgen_sim.cpp` (~2690) explicitly SIGN-EXTENDS a signed
+input for an over-wide `Get_mask` window.  The certificate path preserves input
+WIDTH but does not carry operand SIGNEDNESS, so the width-1 `-1` stays 1 instead
+of extending to `0xffffffff`.
+
+That is a widening/provenance candidate at the translation boundary, and it is
+NOT yet established as the fault layer: old `pass_lean.cpp` (~1305) also keeps
+the source width, so it cannot simply be copied, and the matched old/master
+graph has to be compared before anything is changed.  `GetMask`/SHL/SRA/Sext
+meanings are preserved; only the translation boundary is in question.
+
+Pico's required initialized changing-memory transition remains OPEN, now with a
+specific candidate instead of a stimulus guess.  No further speculative
+stimulus runs.
+
+Matrix stays **12 YES / 11 NO / 37 BLOCKED**.
+
+## §63.65 — `Op_MemWrite` in the object language; admission deliberately unchanged
+
+Whole chain rebuilt in topological order: **102 / 102 modules, all exit 0**,
+with the memory-route driver and its 22-control self-test still passing and the
+full fixture still reporting a COMPLETE reference comparison.
+
+### Landed
+
+| layer | what |
+|---|---|
+| `ObjectLanguage` | a `memWrite` PRIMITIVE, arity 4, appended last so nothing is renumbered |
+| `ObjectLanguageSemantics` | `valMemWrite`: disabled → the EXACT prior image value; enabled in range → `valMemSet` of the RAW datum; enabled OUT OF RANGE → `none`, which `evalPrim` turns into an error |
+| `Encoding` | `primCode`/`primOfCode` extended to 34; the round trip still `cases <;> rfl` |
+| `MemImage` | `valMemWrite_eq` (= `MemImg.writeEn` on an admitted operand), `valMemWrite_disabled`, `valMemWrite_refuses_outOfRange` |
+| `HardwareMem` | `applyOpM` dispatches opcode **27** to that primitive |
+| `HardwareMemOp`, `HardwareMemSlots` | the scalar and mixed-environment delegations step past 27; `OpSupported_code_ne27` is a NEW theorem so `OpSupported_code_ne` keeps its exact statement |
+| `PartialEvaluatorCorrect` | two exhaustive `Prim` case lists gain `memWrite` (additive; the file is not otherwise touched) |
+
+It is a primitive in its own right, not a call into `memWriteBE`, and the
+difference is observable: the enable is tested whole by `bv_nonzero`, so a
+4-bit enable of value 8 — NONZERO with bit 0 clear — enables this write and
+would enable no byte of a byte-enabled one; and the datum is stored RAW, so an
+unnormalised `BV(8,300)` is stored as it is where the byte-enabled write would
+return `mk_bv` of it.  Reducing one operator to the other would owe exactly the
+one-bit-enable and normalised-datum obligations §63.58's addendum identified;
+the direct primitive does not incur them.
+
+### Admission is UNCHANGED, on purpose
+
+An earlier draft of this work broadened `NodeAdmitted` and replaced
+`NodeAdmitted_ne_memWrite`.  That is withdrawn.  `NodeAdmitted`,
+`nodeAdmittedB`, `NodeAdmitted_ne_memWrite` and their guards are byte-identical
+to before — including `#guard nodeAdmittedB {op := .Op_MemWrite, …} = false` —
+so every theorem stated about them still says what it said.
+
+The extension is defined BESIDE them and is not yet wired in:
+
+* `NodeAdmittedW c := NodeAdmitted c ∨ c.op = .Op_MemWrite`
+* `nodeAdmittedWB`, with `nodeAdmittedWB_iff`
+* `NodeAdmitted_toW`, and `NodeAdmittedW_ne_sub` — the extension is EXACTLY the
+  plain write; `Op_Sub`, `Op_UDiv` and the rest are still refused.
+
+`nodeTy` is still gated on the ORIGINAL `nodeAdmittedB`, so no design's
+admission changes and `admitsB` accepts exactly what it accepted before.  That
+is deliberate rather than unfinished bookkeeping: typing the operator before the
+node-step, fold-preservation and `WriteAddrFits` lemmas exist would let the
+checker accept a design the fold cannot prove, which is the one thing a
+soundness gate must not do.  Those lemmas, and the fixture, are the next
+increment.
+
+Matrix stays **12 YES / 11 NO / 37 BLOCKED**.  No fixture or compile here is
+whole-unit credit.
+
+## §63.66 — old/master cone comparison, and a validated candidate adaptation
+
+### Old-source reuse, as verified
+
+From `audits/old_fp_reuse_user_steering_20261013_1058/comparison.json`
+(old `livehd-futamura/livehd` @ `9bb41a09d`):
+
+| file | old vs master |
+|---|---|
+| `Projection/PartialEvaluator.lean` | **byte-identical** |
+| `Projection/HardwareInterpreter.lean` | **byte-identical** |
+| `Projection/HardwareAdequacy.lean` | **byte-identical** |
+| `Projection/PartialEvaluatorCorrect.lean` | differs (already, before this work) |
+| `Translation/LGraphModel.lean` | differs (already) |
+
+That reuse is PRESERVED: none of the three identical files is touched by any of
+this work.  `PartialEvaluatorCorrect.lean`, which already differed, gains two
+`memWrite` alternatives in exhaustive `Prim` case lists — additive and required
+for exhaustiveness, not a rewrite.
+
+Recorded with it, from the same evidence: **the old scalar FP route explicitly
+requires `memFree` and refuses `memImg`/`memConst`, so there is no complete old
+memory FP route to copy** — only its reference semantics, specializer and
+proofs, which master already reuses.
+
+### The GetMask cone: old and master AGREE, so copying is not the fix
+
+The old GetMask emitter widens the mask and preserves the source width, and so
+does master's `certificate_ir` — which has an explicit test saying so,
+`CertificateIR.GetMaskWidensMaskAndPreservesSourceWidth`.  So the divergence is
+NOT between old and master.
+
+It is between the CERTIFICATE path and the NATIVE lowering, and the native code
+states its own rule:
+
+```
+// A window that reaches past the value's declared width selects its SIGN bits.
+// For an UNSIGNED value those are all zero, so a zero-extended read already
+// reproduces them; only a signed value needs the sign actually replicated.
+if (!in_width && !is_unsign(e[0].get_driver_pin())) { … }
+```
+
+The certificate path cannot make that test.  `design_scan.cpp`'s `capture_pin`
+records a pin's `kind`, `id`, `port` and `width` — and **no signedness** — so
+Pico's signed one-bit mux reaches Lean as a width-1 `BV` and `bv_get_mask`
+reads the one bit it is.
+
+### Controls, kernel-checked (`scripts/pico_mask_signed.lean`, propext only)
+
+| control | result |
+|---|---|
+| `cert_narrow` | `GetMask 32 [bv 1 1, 0xffffffff] = 1` — what the certificate computes today |
+| `native_signed` | `GetMask 32 [bv 32 (-1), 0xffffffff] = 0xffffffff` — what the native read produces |
+| `unsigned_agrees` | `GetMask 32 [bv 32 1, 0xffffffff] = 1` — the two paths AGREE when the operand is unsigned |
+| `sext_reproduces_native` | `GetMask 32 [Sext 32 [bv 1 1, 32], 0xffffffff] = 0xffffffff` |
+| `sext_inert_on_zero` | the same widening on a zero operand changes nothing |
+
+So the divergence is exactly SIGN extension, and the existing, already proved
+`Op_Sext` reproduces the native value from the certificate's own operators.
+
+### The candidate, and what it is not
+
+**Candidate:** at the scan boundary, when a `Get_mask` window reaches past a
+SIGNED operand's declared width, emit an `Op_Sext` widening that operand to the
+window before the mask.  It changes the meaning of NO operator — `GetMask`,
+`SHL`, `SRA` and `Sext` all keep theirs — and adds no field to the certificate
+IR.
+
+**Not established:** that this is the fault layer.  The native path could be
+the one that is wrong, the normalized graph's signedness could itself be
+suspect, and the matched old/master graph has not been compared yet.  Nothing
+is changed on this basis; the controls say only that IF the certificate should
+reproduce the native value, this is the smallest way to get it, and that it is
+inert where the native code says no extension is needed.
+
+Pico's initialized changing-memory transition remains OPEN.  Matrix stays
+**12 YES / 11 NO / 37 BLOCKED**.
+
+## §63.67 — CORRECTIONS to §63.64 and §63.66
+
+### "the gate asserted and the write executed" is withdrawn
+
+`fda2c1643`/§63.64 said the Pico write's gate ASSERTED and the write EXECUTED.
+The controls do not show that.  What `enabled_no_change` proves is a
+conditional: *an enabled write of datum 1 under the selected mask leaves that
+particular odd word unchanged.*  It observes no runtime gate value, no runtime
+address and no runtime datum — the cone control says so itself ("this
+conditional cone control does not assert its selector is reached at runtime").
+
+So the correct statement is the negative one only: **an unchanged image does
+NOT establish that the gate never asserted**, because a write that did execute
+could leave this word identical.  Whether it asserted at runtime is UNKNOWN and
+is not replaced here by the opposite unobserved claim.  §63.62's "does not
+assert" and §63.64's "asserted and executed" are BOTH withdrawn.
+
+### The enable-8 comparison was over-general
+
+§63.65 said a 4-bit enable of value 8 "would enable no byte of a byte-enabled
+one".  That depends on the word and lane geometry: bit 3 selects lane 3, and if
+that lane exists — `byte_w` small enough that the datum has four or more lanes
+— value 8 DOES enable a byte.  It enables no lane only when no lane 3 exists.
+
+The distinction that holds without qualification is the one that was the point:
+the plain write tests the enable WHOLE, by `bv_nonzero`, while a byte-enabled
+write tests individual mask BITS at `i / byte_w`.  That is a difference in
+semantics, not a claim about any particular value.
+
+### What the new controls prove, exactly
+
+`scripts/pico_mask_signed.lean` proves **explicit `BV` equalities** about
+`eval_op`.  It does NOT execute the native emitter, the certificate emitter, or
+any design; it compares two closed terms.  Its value is bounding the candidate,
+not confirming a fault.
+
+`sext_inert_on_zero` establishes inertness **at zero only**.  It is not a
+statement about arbitrary unsigned inputs, and §63.66's "inert where the native
+path says no extension is needed" overstates it.
+
+Matrix stays **12 YES / 11 NO / 37 BLOCKED**.
+
+## §63.68 — the signed-mask translation adapter, reusing the existing widening
+
+### Reused, not invented
+
+The rule comes from the implementations, in both pins:
+
+* OLD `inou/cgen/cgen_sim.cpp` 1253-1298: the `mask == -1` to-positive idiom
+  reads UNSIGNED and **stays zero-extending**; a non-negative finite mask takes
+  the zero-extending fast path only when `in_width || is_unsign(driver)`.
+* OLD 1346-1374: otherwise the slow path sets `val_sign = 0` — a SIGNED read —
+  for a finite mask reaching past the value width, with `mask == -1` excepted.
+* MASTER ~2677-2718: the same rule in the endpoint representation, and it names
+  the carrier: `read_cw = max(me, wbits_of(driver), 1)`.
+
+The shared old/master `GetMask` semantics are identical and are PRESERVED.
+Nothing in `bv_get_mask`, SHL, SRA or Sext changes.
+
+### The adapter
+
+`pass/lean/design_scan.cpp`, at the `Get_mask` scan site: when the window's HIGH
+ENDPOINT exceeds a **signed, non-constant** source's width, widen that source
+with `ScanOp::Sext` to the endpoint before the mask — the SAME idiom this file
+already applies to a signed Concat lane (≈197) and a signed Hotmux arm (≈274),
+with the same `!is_unsign` guard and the same `natural_operand(width)` amount.
+
+`Set_mask` is untouched (this is the value-READ rule), constants are untouched
+(their value carries their sign), unsigned sources are untouched, and the
+synthesized mask on this path is always a finite window from `bit_range`, so
+the `mask == -1` idiom cannot arise here.
+
+**The target is the endpoint, not the result width** — and on the real
+certificate that distinction is not academic:
+
+| | |
+|---|---|
+| `Get_mask` nodes given a `Sext` operand | **63** |
+| …whose window is SHIFTED (`lo > 0`) | **62** |
+| …whose extension width DIFFERS from the node's result width | **62** |
+
+e.g. emitted node 2201 has **result width 1** and window **[17,18)**: extending
+to the result width would have put the sign nowhere near bit 17.
+
+### Controls, on ACTUALLY EMITTED certificates
+
+Re-emitted from the matched `s2_single_edge` LGraph with the adapter build
+(exit 0, 0.72 s, 74,552 KiB); certificate `ba5aee83…`, 71,703 B.  The enable
+cone is evaluated by parsing the real `.dcert` and forcing only the `MuxBool`
+selector — every other width, constant and operator is read from the file:
+
+| certificate | selector on | selector off |
+|---|---|---|
+| retained `vc_opt` | `1` | — |
+| fresh pre-adapter `ef77dfab` | `1` | `0` |
+| **with adapter `ba5aee83`** | **`4294967295`** | **`0`** |
+
+That is the gate this run was required to clear before any whole-Pico attempt.
+The cone evaluator OVERRIDES the selector rather than observing it, so it says
+what the enable WOULD be at that value and asserts nothing about reachability.
+
+Selectivity: `Op_GetMask` count is **unchanged at 180**, `Op_Sext` goes 213 →
+276, so the adapter fired on 63 of 180 and left 117 alone.
+
+Existing immutable controls, run UNCHANGED on the new artifact:
+
+* `pass/lean/tests/legacy_semantic_audit/MaskEndpointPort.lean` — exit 0, no errors;
+* `pass/lean/tests/d4/getmask_const_width_regress.sh` — `ALL CONTROLS PASS`,
+  180 `Op_GetMask` nodes checked, 0 violations, and the planted pre-fix shape
+  still rejected by both gates.
+
+### Provenance limit, recorded
+
+The signedness observation (`origin 1284` a signed one-bit mux, `origin 21124`
+an unsigned 32-bit `Get_mask`) came from read-only queries against the
+normalized graph, and the emission recipe runs further passes after
+`s2_single_edge` whose final graph is not separately retained — `work/` holds
+logs only.  So that part is PRE-RECIPE origin matching, not final-graph
+provenance.  What IS final-artifact evidence is everything above: the adapter's
+effect is measured on the emitted certificate itself.  This limit is recorded
+rather than closed, and it is not turned into an old-Pico rebuild prerequisite.
+
+The original certificates and their records are retained separately and
+untouched.  Matrix stays **12 YES / 11 NO / 37 BLOCKED**.
+
+## §63.69 — the changed-source whole-Pico acceptance run, and the two remaining emitted-certificate controls
+
+### 1. The acceptance run (instruction 127's single changed-source run)
+
+One run, on the adapter certificate `ba5aee83…`, 20 cycles, with the SUPPLIED
+initial image and the SUPPLIED stimulus.  True producer exit **0**.
+
+```
+init: file:scripts/memstate/pico_rom_image.memstate (SUPPLIED initial state, read from the file)
+  state provenance: supplied file …, 498 bytes, fnv1a 1213049153655308483
+  flops: the design's DECLARED RESET VALUES, as the file requested (synthetic, not supplied)
+state survives encStateM/decStateM unchanged (words, defaults and flops)
+initial memory 0 words [19088743,2309737967,305419896,2882400001,4294967295,4294967295]
+stimulus: SUPPLIED file scripts/memstate/pico_run_instr.stim, 1046 bytes,
+  fnv1a 9873059989712225821, 8 constant(s), 2 per-cycle override(s), 1 reactive
+executing 20 cycle(s) of the residual at the checked bound
+step outcomes: ok x20
+reference comparison: COMPLETE (array length, every table word, default and out-of-range)
+final memory 0 words [19088743,1,305419896,2882400001,4294967295,4294967295]
+memory 0: 1 word(s) differ from the initial image
+final returned-state policy: stateFullOKB true
+ms: support 86  specialize 702788  check 2654  execute 4514582
+cpu_ticks 523646  peak_rss 6947016 kB
+RESULT: MEMROUTE OK
+```
+
+All three requirements of instruction 127 are met by the log itself:
+
+* **actual initialized changing-memory evidence** — the image is read from the
+  supplied file (not synthesized), and word 1 goes `2309737967 → 1`;
+* **decoded returned-state reuse** — `stateFullOKB true` on the returned state,
+  which survives `encStateM`/`decStateM` unchanged and is fed to the next cycle;
+* **COMPLETE reference comparison**, at the residual's own returned bound
+  (checker bound 106126), over array length, every table word, the default and
+  out-of-range.
+
+This is the FIRST actual changing-memory observation for whole Pico on the
+memory route.  **No whole-unit credit follows**; matrix stays
+**12 YES / 11 NO / 37 BLOCKED**.
+
+### 1a. It is a PAIRED run, and the certificate is the only changed input
+
+`pico_mem6` (pre-adapter `9018002480722012621`) and `pico_mem7` (adapter
+`9014279324719788780`) used the SAME state file (`fnv1a 1213049153655308483`)
+and the SAME stimulus file (`fnv1a 9873059989712225821`) for the same 20
+cycles.  A whole-log diff differs ONLY in: the path and certificate hash, the
+shape (`sources 1292→1355`, `nodes 2269→2332` — the adapter's 63 insertions),
+the slot numbers those shift, the residual size, the timings, and:
+
+| | pre-adapter | with adapter |
+|---|---|---|
+| final word 1 | `2309737967` | **`1`** |
+| words differing | `0` | **`1`** |
+
+`step outcomes`, `reference comparison`, `distinct output vectors 12 of 20` and
+`distinct flop vectors 13 of 20` are textually IDENTICAL in both logs.  Those
+are distinct-vector COUNTS, not the vectors themselves — the logs do not record
+per-cycle vectors, so this says the summary statistics match and does NOT
+establish identical trajectories.
+
+### 1b. What the run does and does not observe
+
+The driver compares the FINAL image against the INITIAL one.  It therefore
+observes that exactly one word changed and what it changed to.  It does NOT
+observe which cycle wrote, nor the runtime gate, address or datum.  §63.67's
+withdrawal stands in both directions: nothing here asserts the gate asserted,
+and nothing here asserts it did not.
+
+Recorded as an observation, not as a derivation: the changed word is at index
+**1** and its value is **1**, and the stimulus supplies `mem_rdata = 1048723`
+= `addi x1, x0, 1`, whose destination register is x1 and whose immediate is 1.
+The memory is the `cpuregs` file (`aw 5 dw 32`, 32 words), reached through the
+full-word assignment at `picorv32.v:1344`.  The index and value coincide with
+that instruction's register and immediate.  This is a coincidence of observed
+numbers; it is not a proof that the datapath computed it that way.
+
+### 2. The two remaining controls, on ACTUALLY EMITTED certificates
+
+Instruction 127 asked for three small controls.  The signed one-bit on/off
+under a 32-bit window was delivered in §63.68 (on `4294967295`, off `0`).  The
+other two are delivered here, as a MATCHED PAIR: two modules in
+`pass/lean/tests/d4/maskctl/` that are identical except for the word `signed`,
+each emitted through the real `lhd compile … pass.lean mode:verified_compiler`
+path into `generated/master_port/maskctl_20261013/`.
+
+The window is `[4,12)` on an 8-bit source: **lo = 4 is nonzero** and **hi = 12
+is above the source width 8**.  This is instruction 127's third case, and it
+is also where the endpoint rule bites — the `Op_GetMask` RESULT width is 8,
+while the sign has to reach bit 11.
+
+Evaluated on the emitted `.dcert` files with the input forced to `0x80`
+(`formal/lean/scripts/cert_mask_eval.lean`, which reads every width, constant
+and operator from the file):
+
+| certificate | Sext inserted | mask constant | result | set bits |
+|---|---|---|---|---|
+| `gm_offset_above` signed, **pre-adapter** | none | `const 8 4080` — **does not fit** | `8` | 1 |
+| `gm_offset_above` signed, **with adapter** | `Op_Sext width 12` | `const 12 4080` — fits | **`248`** | **5** |
+| `gm_unsigned_onebit` unsigned, pre = post | none | `const 8 4080` — does not fit | `8` | **1** |
+
+Three things are established, each on an emitted artifact:
+
+* **The endpoint, not the result width.**  The inserted `Op_Sext` has width
+  **12** — the window's high endpoint — while the `Op_GetMask` result width is
+  **8**.  Extending to the result width would have left the source at 8 bits
+  and read zeros at bits 8..11.
+* **Pre-adapter, a signed source was read as unsigned above its width.**  The
+  pre-adapter signed result is `8`, which is BIT-FOR-BIT the unsigned twin's
+  answer.  With the adapter it is `248`, five set bits, the sign filling
+  bits 8..11.
+* **Unsigned behaviour is preserved, exactly.**  The unsigned twin's emitted
+  Lean file is **byte-identical** pre- and post-adapter (`cmp` clean), and its
+  result keeps **exactly one remaining 1** — instruction 127's "unsigned
+  one-bit one remaining 1".
+
+The pre-adapter binary used for the comparison was built by reverting
+`pass/lean/design_scan.cpp` to `HEAD~1` (`sha256 9ea9245e…`); the adapter
+source and binary were restored afterwards and the binary re-verified at
+`sha256 8dec9066…`, the exact build that produced `ba5aee83…`.
+
+### 3. A PRE-EXISTING unsigned-path defect, exposed by the control and NOT fixed
+
+`getmask_const_width_regress.sh`, run unchanged on the new artifacts:
+
+* `gm_offset_above` **with the adapter** — `ALL CONTROLS PASS`;
+* `gm_offset_above` **pre-adapter** — `2 CONTROL(S) FAILED`;
+* `gm_unsigned_onebit` — `2 CONTROL(S) FAILED`, pre- and post-adapter alike.
+
+Both failures are the same shape: `mask const declared width 8 cannot hold
+4080 (needs 12 bits)`, and BOTH existing gates reject it (`vc_gates.py` rc=1,
+`cert_lgraph_diff.py` rc=1).
+
+Scope, stated exactly:
+
+* The adapter **removes** this violation on the signed path, as a side effect
+  of widening the source to the endpoint — the mask constant then lands at
+  width 12 and fits.  This was not its stated purpose and is reported as
+  measured, not as designed.
+* On the **unsigned** path the violation is **pre-existing and untouched** —
+  proved by the byte-identical pre/post artifacts.  The mask's VALUE as read at
+  the declared width (`240`) is the semantically right window for an 8-bit
+  unsigned source, since bits 8..11 are zero anyway; it is the DECLARED width
+  that is wrong, and the gates reject the artifact for it.
+* I have **not** fixed it.  Instruction 127 says to preserve unsigned
+  behaviour, and this is a separate defect in the mask-constant width
+  derivation, not in the signed widening.  It is recorded as **required next
+  work**, alongside the unfinished plain-write integration and B11.
+
+This did not weaken any check: the gate that catches it is the existing
+immutable one, run unchanged, and it is still catching the planted pre-fix
+shape on every artifact.
+
+### 4. Standing
+
+Still required next work, unchanged: the plain-`Op_MemWrite` fold/main/runtime
+admission chain (route support remains REFUSED until it is proved), B11's
+slot-qualified memory lowering in `pass.single_edge`, and now the unsigned
+mask-constant width derivation above.  All twelve master FP whole units first,
+then IR-as-semantics, then translation validation.  All 60 dispositions and
+every original acceptance gate preserved.  Matrix **12 YES / 11 NO / 37
+BLOCKED**.
+
+## §63.70 — the constant-mask width defect closed, the control scopes corrected, and B12's FP entry reconciled
+
+### 1. The defect, fixed where it is
+
+`CertificateBuilder`'s `ScanOp::GetMask` case passed `max(src_width, node.width)`
+straight to `add` for the mask operand.  `pin_width` is where the strict fit
+check lives, so handing `add` a width directly BYPASSED it: a mask whose value
+needs more bits than that join was emitted at the join and silently truncated.
+
+The rule is the one `getmask_const_width_regress.sh` already states — the
+mask's own checked width JOINS the maximum instead of being overridden by it.
+`pin_width` is now called unconditionally on the mask (so its fit and
+`max_width` checks run on every mask), and only the JOIN is conditional.
+Taking a maximum can only widen, so this line cannot truncate.
+
+The **`mask == -1` convention is DISTINCT and untouched**: -1 is all-ones at
+every width, `pin_width` deliberately does not fit-check a negative literal, and
+widening it would change how many bits the window selects.  It has no checked
+own width to join, so it keeps the previous two-way join.
+`CertificateIR.GetMaskWidensMaskAndPreservesSourceWidth` passes unchanged.
+
+Not claimed: the pinned old `9bb41a09d6b5` has the SAME two-way max at
+`pass_lean.cpp:1317`, so no complete fix exists at that pin.  This is new.
+
+### 2. The signed-negative-constant exclusion, settled by source comparison
+
+The adapter excluded constants because "their value carries their own sign".
+That is insufficient, and the sources say why:
+
+* native `inou/cgen/cgen_sim.cpp` `operand()` materializes a constant AT THE
+  TARGET WIDTH — `Slop<target_bits>::create_integer(v)` — so a negative value's
+  sign occupies every position the window can select;
+* a certificate source is normalized at its OWN narrow width, where the
+  positions above it read ZERO, not sign.
+
+For a window reaching above that width the two disagree.  Closed in the
+builder, not with another node: a NEGATIVE constant value operand is declared at
+the window carrier (the mask's declared width).  The raw value is unchanged,
+widening cannot truncate, and GetMask reads only bits the mask names, so sign
+bits above the window are never selected.  POSITIVE constants are untouched —
+zero-fill above them is already what both sides do.  The stale comment at
+`design_scan.cpp:965` is corrected to say this.
+
+### 3. Controls, in the SUPPORTED harness
+
+Four tests added to `pass/lean/certificate_ir_test.cpp`, which builds
+`DesignScan` structures directly — the right home, because constant folding
+removes these shapes from any tiny RTL module before the scan sees them.  This
+is also why the requested **one-bit source under a 32-bit window** is stated
+here rather than as RTL: the emitted `gm_unsigned_onebit.v` fixture was an
+8-bit input with one bit set, which is NOT that case.
+
+| test | asserts |
+|---|---|
+| `GetMaskOneBitSourceUnderWideWindowKeepsSourceWidthAndFitsMask` | source width stays 1; mask declared 32 holding 4294967295 |
+| `GetMaskMaskWidthJoinsItsOwnCheckedWidthInsteadOfBeingOverridden` | mask 4080 lands at 12, source width 8 preserved |
+| `GetMaskNegativeConstantValueIsDeclaredAtTheWindowCarrier` | `-3` kept verbatim, declared at 12 |
+| `GetMaskPositiveConstantValueKeepsItsOwnNarrowWidth` | `5` keeps width 3 |
+
+**Both defect controls were confirmed to FAIL against the unfixed builder** and
+pass with it; the two preservation controls hold either way, which is what a
+preservation control should do.  All four emitter suites pass
+(`certificate_ir`, `design_scan`, `emit_dcert`, `legacy_model`).
+
+### 4. A SCOPE ERROR in my own control, corrected
+
+`cert_cone_eval.findMux` returned the mux's RESULT slot and `evalSlot`
+overrode it.  That is RESULT INJECTION; §63.68 described it as forcing the
+selector.  Those are different things — result injection bypasses the arms
+entirely.  **The claim as worded was wrong and is withdrawn.**
+
+Corrected: the script now forces the mux's SELECTOR DEPENDENCY, `deps[0]`, the
+slot the certificate itself names, and EVALUATES the mux from its own declared
+arms.  Re-measured on the emitted certificate:
+
+```
+enable slot 3272, MuxBool at slot 3248 (w1)
+  selector dependency slot 3247 = LGraphOp.Op_GetMask w1
+  arms [const1 0, const1 -1]          <- checked, not assumed
+  selector forced to 1 -> mux EVALUATES to 1   ENABLE = 4294967295
+  selector forced to 0 -> mux EVALUATES to 0   ENABLE = 0
+```
+
+The downstream values are unchanged, and now correctly justified: at width 1
+the real arms are `mk_bv 1 0 = 0` and `mk_bv 1 (-1) = 1`, exactly the two
+values the old injection happened to supply.  The arms are now CHECKED under
+`--expect-arms`, so the two can never again be confused.  The standing scope
+limit is unchanged: this overrides the selector rather than observing it.
+
+**Both evaluators returned 0 on wrong values or missing nodes.**  Fixed, with
+distinct exits, each demonstrated:
+
+| condition | exit | demonstrated |
+|---|---|---|
+| wrong `--expect` value | 3 | yes, on both scripts |
+| no declared memory (cone) | 2 | yes |
+| no `Op_GetMask` node (mask) | 2 | — |
+| `--require-fit` on the retained failing artifact | 5 | yes |
+| wrong `--expect-sext` width | 6 | yes |
+
+### 5. Re-emission, and the signed/unsigned contrast preserved
+
+Both tiny controls re-emitted with the fixed builder; the pre-fix artifacts are
+retained separately under `maskctl_failing_retained_20261013/`.
+
+| | mask constant | result | set bits |
+|---|---|---|---|
+| signed `gm_offset_above` | `const 12 4080` — fits | **248** | 5 |
+| unsigned `gm_unsigned_onebit` | `const 12 4080` — fits (was `const 8 4080`) | **8** | **1** |
+
+The useful contrast is preserved exactly: signed 248 versus unsigned 8.  The
+unsigned mask now reads 4080 rather than the truncated 240, and the RESULT is
+unchanged — bits 8..11 of an 8-bit unsigned source are zero either way, so the
+defect was in the declared width, not in which bits were selected.  Both
+artifacts now give `ALL CONTROLS PASS`, planted pre-fix shape still rejected.
+
+### 6. Pico: BOUND, not re-run
+
+Re-emitted with the fixed builder (`lhd d49f2f12…`): `picorv32.dcert` is
+**byte-identical** to the audited `ba5aee83…`, 71,703 bytes, and
+`picorv32_Lgraph.lean` is byte-identical too.  The completed 20-cycle run is
+therefore bound to the current emitter **without being repeated**.  Its raw log
+(sha256 `7f48d90b…`, matching the independently verified value) and GNU-time
+record are retained project-local under
+`memroute_pico_sext_20261013/acceptance_run/`, with the pre-adapter paired
+control beside them.
+
+### 7. B12's FP entry, reconciled
+
+Moved **BLOCKED → YES** on the Futamura projection approach, under the SAME
+interpreted generation/readiness standard as B09/B10:
+
+* **decode** DCERT2 under `readCertChecked`;
+* **support** scalar REFUSED (memFree/sources/ops) — retained verbatim under
+  `prior_attempts.scalar_support_refusal` and still the correct scalar answer —
+  MEMORY route ADMITTED on its own separately proved predicate;
+* **generate** residual 4,977,427 terms, arity [3], checker bound 106126;
+* **readiness** 20 cycles at the checked bound, all ok, 12/20 distinct output
+  and 13/20 distinct flop vectors, decoded returned-state reuse,
+  `stateFullOKB true`, and a COMPLETE reference comparison that B09/B10 do not
+  carry;
+* **no respecialization** — `mkMemSimOf` binds the already-produced residual.
+
+Certificate, emitter, source LGraph, driver, both supplied input files, the raw
+log and the GNU-time record are all bound by sha256 in the entry.  The
+standalone per-phase CPU split is recorded **explicitly unavailable**, because
+generation and readiness share one process here; only whole-run GNU time is
+measured.
+
+`entry_specific_gates_remaining: NONE` for this cell, with two adjacent items
+named so they are not misread as gates: the plain `Op_MemWrite` route is still
+unproved and REFUSED, but picorv32 lowers to `Op_MemWriteBE` and never reaches
+it; and this is one cell of sixty, not project acceptance.
+
+Counts move **12 YES / 11 NO / 37 BLOCKED → 13 YES / 11 NO / 36 BLOCKED**, FP
+column **2 YES / 10 BLOCKED → 3 YES / 9 BLOCKED**.  Verified mechanically that
+`B12/Futamura projection` is the ONLY changed cell and that the historical
+refusal is retained verbatim.  The nine remaining FP blockers are upstream
+refusals, and **none of them emits a certificate**.  An earlier wording here
+said B11 "emits then fails `single_edge`"; that is **wrong and withdrawn**.
+B11 passes front-end compilation and is then refused by `pass.single_edge`,
+which runs BEFORE certificate emission — so B11 reaches a later STAGE than the
+other eight, not a later artifact.  B03 is in the same position.  They remain
+in scope for the twelve-unit objective.
+
+## §63.71 — the ordinary `Op_MemWrite` route: typing, admission, object and node layers
+
+`HardwareMemWrite` listed what the plain write still needed: "an object
+primitive, an `applyOpM` dispatch, the checker's admission and typing, and the
+node/fold lemmas."  The primitive and the dispatch landed with the object
+layer.  This checkpoint adds **the typing, the admission, the object-level
+bridges, the node theorems and the fold step**, in one new module
+`Projection/HardwareMemWriteAdmit.lean` (≈700 lines).  It compiles with no
+`sorry`: every theorem reports only `propext`, `Quot.sound` and
+`Classical.choice` — the same three the existing byte-enabled route uses.
+
+### The original contract is preserved, and checked to be
+
+`NodeAdmitted`, `nodeAdmittedB`, `NodeAdmitted_ne_memWrite` and `nodeTy` are
+**untouched**.  `nodeTy_memWrite_none` restates the original refusal as a
+theorem rather than leaving it implicit.  The extension is a separate
+`nodeTyW`, written so the delegation is an `if`, not a match arm:
+
+```lean
+def nodeTyW ty c := if c.op = .Op_MemWrite then nodeTyWBody ty c else nodeTy ty c
+```
+
+so "off the plain write this IS `nodeTy`" is `if_neg`, not a 30-case analysis
+that could silently drift.  From that: `inferTysW_eq` and `admitsWB_eq` prove a
+design with no plain write gets **the same answer on both routes**.
+
+`admitsWB_eq` needed `tysOK` and `admitsB_tysOK` first: a `match` written twice
+elaborates to two DIFFERENT auxiliary functions, so two inline copies that read
+identically are not `rfl`-equal.  The original tail is pinned to a named
+function and the extended checker reuses it.
+
+### The plain write's own semantics, typed directly
+
+`Op_MemWriteBE`'s typing enforces a lane geometry (`0 < bw`,
+`dw ≤ bvWidthOf tbe * bw`).  The plain write has no lanes, and its typing says
+so:
+
+* the **enable** must be a bit vector and nothing more — no width relation,
+  because `bv_nonzero` reads the whole operand and no width relation is true of
+  it.  A one-bit enable is NOT demanded and the write is NOT reduced to a
+  one-lane `Op_MemWriteBE`;
+* the **datum** must be EXACTLY `dw` wide (`==`, not `≤`), because
+  `cert_mem_write` stores it raw — precisely the side condition
+  `cert_mem_write_width` was left holding.
+
+`nodeTyW_write_geom` reports the address and datum geometry and deliberately
+says nothing about the enable, because there is nothing to say.
+
+### What is proved
+
+| layer | theorem |
+|---|---|
+| object | `evalPrim_memWrite`, `evalPrim_memWrite_disabled` |
+| dispatch | `applyOpM_memWrite`, `applyOpM_memWrite_disabled` (opcode 27, one `ite` earlier than BE) |
+| node | `evalNodeM_memWrite`, `evalNodeM_memWrite_disabled` |
+| fold | `memWrite_deps`, `node_step_memWrite`, `node_stepW` |
+| typing | `nodeTyW_result`, `nodeTyW_bv_width`, `nodeTyW_bv_ne_memWrite`, `nodeTyW_admits`, `nodeTyW_write_geom` |
+| checker | `inferTysW_eq`, `admitsWB_eq`, `admitsWB_infer`, `admitsWB_acceptsDesign`, `tyAtW_source` |
+
+`node_stepW` **reuses the original `node_step` untouched** for everything it
+already covered and adds only the plain-write branch.  `WritePropagatesW` and
+`WriteAddrFitsW` CONJOIN the plain write's obligation onto the originals rather
+than generalising them, so a caller holding the original still holds exactly
+what it held.
+
+`nodeTyW_bv_ne_memWrite` is worth naming: a node that types `.bv` is not a
+plain write, derived FROM THE TYPING exactly as the byte-enabled exclusion is.
+That is what lets the extended route keep `NodeAdmitted_ne_memWrite` untouched
+— the scalar-width agreement never needed the exclusion theorem, only the fact
+that a write types a table.
+
+### Controls
+
+Ten `#guard`s on the extended typing, each exposing a distinction rather than
+re-checking the happy path: the original checker still refuses the same node; a
+**four-bit** and a **32-bit** enable are both accepted; a datum narrower OR
+wider than `dw` is refused; an over-wide address is refused; a MEMORY enable is
+refused; `Op_Sub`/`Op_UDiv` are still refused on the extended route too; and an
+admitted scalar operator types identically on both routes.
+
+### On the RETAINED refused certificates
+
+`formal/lean/scripts/plainwrite_admit.lean`, run on the five certificates
+§63.58 named — exit 0, `ALL CONTROLS PASS`:
+
+| certificate | nodes | `Op_MemWrite` | `admitsB` | `admitsWB` |
+|---|---|---|---|---|
+| `tiny_ram` | 7 | 1 | **false** | **true** |
+| `tiny_sync_ram` | 8 | 1 | **false** | **true** |
+| `mem_domain` | 12 | 1 | **false** | **true** |
+| `mem_nondefault` | 12 | 1 | **false** | **true** |
+| `memfix_b` | 12 | 1 | **false** | **true** |
+
+and, in the other direction, on five designs with no plain write — whole Pico
+(2,332 nodes, one `Op_MemWriteBE`), `tiny`, `SingleCycleCPU` (1,113 nodes),
+`two_domain`, `memfix_a` — **both routes agree**, as `admitsWB_eq` proves.  The
+driver fails loudly if the original ever admits a plain write or if a
+no-plain-write design disagrees.
+
+### What is NOT yet done, and so is NOT admitted
+
+The production route is **unchanged**: `dcert2_memroute` still runs `admitsB`,
+and plain-write support is still REFUSED there.  `admitsWB` is defined and
+sound at the layers above, but the `mainM` entry, the runtime policy and
+preservation, the codec correspondence and the checked specialization have not
+been carried over, so no design is admitted through it.  That is the next
+work, and it is required before any plain-write design is run.
+
+## §63.72 — the ordinary write reaches the resolved entry
+
+Continues §63.71.  The chain is now carried through the fold, `mainM` and the
+resolved entry, and a whole plain-write design is admitted by the extended
+checker in the kernel.  Module is ≈1,190 lines with **25 `#guard`s**; every
+theorem reports only `propext`, `Quot.sound` and `Classical.choice`.
+
+### The composition is REUSED, not copied
+
+`evalNodesM_agree`, `sourcesThenNodes`, `mainM_adequate` and
+`mainM_adequate_resolved` each had one use of `node_step` buried in a long
+proof.  Rather than transcribe those proofs for the extended route, each is now
+generalised over its per-node step:
+
+```lean
+theorem evalNodesM_agree_gen … (hstep : ∀ j c, D.nodes[j]? = some c → … →
+    ∃ v, NodeStepOK D i st G j c ss v) : …
+```
+
+and **the original keeps its exact statement as a one-line instantiation at
+`node_step`**.  Nothing downstream changed: `HardwareMemSlotTy`,
+`HardwareMemRuntime` and the fixtures all rebuilt unchanged against the
+original names.  The extended route instantiates the same `_gen` theorems at
+`node_stepW`.
+
+### What that buys
+
+`admitsW_mainM_resolved` — admission to the ACTUAL resolved entry
+(`Eval hwMemP`), with `r.denote = interpretDesign D e i (denote st)` and
+`StateShapeOK D r.nextState` — on a design containing ordinary writes.  Its
+supporting premises all come from the one Boolean check:
+
+| premise | from |
+|---|---|
+| `DesignCertWF`, `DesignSemWF` | `admitsW_wf`, `admitsW_semwf` (via `Direct.acceptsDesign`, which the extended checker demands exactly as the original does) |
+| source geometry | `admitsW_geom_src` |
+| every node admitted | `admitsW_nodeAdmitted` → `NodeAdmittedW` |
+| arity | `admitsW_arity` |
+| write propagation | `admitsW_writePropagates` → `WritePropagatesW` (BOTH writes) |
+| address fits | `admits_writeAddrFitsW` → `WriteAddrFitsW`, derived from `admits_slot_widthW` |
+| next-image geometry | `admitsW_nextImgGeom` |
+
+`admits_slot_widthW` is where the preserved contract pays off.  The original
+proof excluded the plain write with `NodeAdmitted_ne_memWrite`.  The extended
+one cannot — the plain write is admitted now — so it excludes it the way the
+byte-enabled write was always excluded: **from the typing**, by
+`nodeTyW_bv_ne_memWrite`, because a write answers a table and `.bv` is not a
+table.  `NodeAdmitted_ne_memWrite` is untouched and still means what it meant.
+
+### A whole design, decided in the kernel
+
+`plainRamDesign` — a declared memory `aw 2, dw 8` whose **next image IS the
+plain write**, so the checker's memory clause is exercised, not just the node:
+
+* `#guard admitsB plainRamDesign = false` — the original still refuses it;
+* `theorem plainRamDesign_admitsW : admitsWB plainRamDesign = true := by decide +kernel`;
+* `geomAtW … 4 = some 2` and `tyAtW … 4 = some (.tbl 2 8)` — the produced
+  geometry is the declared one.
+
+Three changed-source rejections, each sinking the WHOLE design rather than one
+node: a datum of the wrong width, an over-wide address, and a declared memory
+whose geometry disagrees with the write's table.
+
+### Disabled and quiet preservation, run
+
+* enabled: `[11,22,33,44] → [11,99,33,44]` — that word, and only that word;
+* disabled (`mk_bv 4 0`): `[11,22,33,44]` unchanged, default included;
+* `bv_nonzero (mk_bv 4 8) = true` — **the whole enable operand is read.**  Value
+  8 is zero in bit 0; a one-bit-enable reading would have dropped this write.
+  This is the distinction §63.67 asked to be kept, now executable;
+* the datum is stored RAW: `255` at `dw = 8` lands unchanged, no resize;
+* an ENABLED out-of-range write is REFUSED by the primitive (`isOk = false`),
+  while a DISABLED out-of-range write is admitted and changes nothing — the
+  quiet branch, which needs no range premise.
+
+### Still not done, and still not admitted
+
+The production route is **unchanged**: `dcert2_memroute` runs `admitsB`, and
+plain-write support is still REFUSED there.  What remains before any
+plain-write design is RUN: the full runtime policy and preservation
+(`runtimeFullOKB` / `admits_run_full` have no W form yet), the codec
+correspondence at the returned state, and the checked specialization.
+`StateShapeOK` here is still LENGTH-ONLY, so `admitsW_mainM_resolved` is a
+conditional admission-to-main theorem, exactly as `admits_mainM_resolved` is
+for the byte-enabled route — not full production admission.
+
+## §63.73 — the full runtime policy on the ordinary write, and the control gaps closed
+
+### 1. Producer accounting, fixed before anything was claimed on it
+
+`lakeb.sh` piped `lake` into `tail` with neither `pipefail` nor `PIPESTATUS`,
+so the status it reported was the TAIL's.  A build whose Lean exit was 1 was
+reported as an outer exit 0 — a module that failed to compile looked like a
+success.  Rewritten: the producer writes a COMPLETE log to a file, its own
+status is captured directly, the tail is only a view, and the script exits with
+the producer's status.  The log ends with measured metrics and
+`PRODUCER_EXIT=<n>`, so a reader of the log alone sees the true status.
+
+Demonstrated in both directions before use: exit **0** with `errors: 0` on a
+good target, exit **1** with `errors: 2` on a bad one.  Every build reported
+below went through it.  The already-compiling checkpoints are supported by
+their `.trace` and axiom reports and were NOT replayed to repair historical
+reporting.
+
+Stale waiter shells from this session were stopped **by PID** (six of them); no
+producer and no other session was touched.
+
+### 2. The full runtime policy, extended
+
+| theorem | what it adds |
+|---|---|
+| `nodeTyW_tbl_op` | a table result means a write — now EITHER write |
+| `admits_slot_memwidthW` | **every word of every table slot has the declared data width** |
+| `admitsW_nextImgTy` | the next-image slot's FULL type is the declared memory's |
+| `admits_runW` | one step at the length level |
+| `admits_runW_pres` | word and default preservation, both branches |
+| `admits_runW_full` | the strengthened policy, declared flop widths included |
+| `admits_runW_full_two` | **two steps, the second on the DECODED returned state** |
+
+`admits_slot_memwidthW`'s plain-write branch is where
+`HardwareMemWrite`'s recorded side condition is finally discharged.  The
+reference write stores its datum RAW, so the image stays `dw`-wide only because
+the CHECKER demanded `bvWidthOf td == dw`; `admits_slot_widthW` turns that
+demand into the runtime width, and `cert_mem_write_width` consumes it.  The
+quiet branch needs nothing: its image comes from the incoming state.
+
+Everything in the executable policy — `stateOKB`, `memImgOKB`,
+`flopShapeOKB`, `stateOKB_codec`, `flopBoundOKB_of_flopSize` — is stated
+without reference to a checker and is **reused verbatim**, not duplicated.
+
+### 3. Two steps on the real fixture, with a COMPLETE comparison
+
+`plainRamDesign_two_steps` instantiates `admits_runW_full_two` at
+`plainRamDesign`, with the runtime policy **decided in the kernel**
+(`by decide +kernel`), not assumed.  Step 1 fires the clock with a WIDE enable
+(`mk_bv 4 8`, zero in bit 0); step 2 runs on the state step 1 returned, decoded
+through the codec, with the clock QUIET.
+
+**What the `refImg` guards beside it are, exactly.**  They are HELPER/IMAGE
+checks: `refImg` is a small local function that applies `MemImg.writeEn` (or
+returns the incoming image when the clock is quiet), and the `#guard`s compare
+its result.  They do **not** execute `interpretDesign`, they do **not** execute
+`mainM`, and they do **not** compare against the state the entry actually
+returned.  An earlier wording here implied otherwise; that is corrected.  They
+are worth keeping because they pin the expected image independently of the
+route, but the **actual execution evidence is elsewhere**: the `runMemSim`
+controls in §63.74 and the five production `cycleCheck` runs, which do run the
+residual and do compare against the returned state.
+
+With that scope stated, the helper comparison is complete over length, every
+word's value, every word's width, and the default:
+
+* enabled: `4` words, `[11,99,33,44]`, widths `[8,8,8,8]`, default `7` at width 8;
+* **quiet clock**: the whole ENCODED image is the incoming one;
+* **disabled enable with the clock FIRING**: likewise — a different reason, and
+  both hold;
+* the committed image still passes `memImgOKB` and `stateFullOKB`, so the run
+  composes.
+
+### 4. Three control gaps, closed
+
+* **The raw-datum control could not detect a resize.**  `mk_bv 8 255` is
+  already normalized, so a raw store and a resizing store both answer 255.
+  Replaced with `rawDatum : BV := { width := 8, value := 300 }` — width 8, raw
+  value OUTSIDE that width.  `bv_uint rawDatum = 44` is what a resize would
+  produce; the control requires the stored word to be **300**, and separately
+  requires its width to still be 8, so a raw value does not break `MemShapeOK`.
+  Also run through the PRIMITIVE, not only the image function.
+* **The disabled control compared only `words`**, which cannot see the default
+  or the widths.  Replaced with a comparison of the ENCODED images, on a
+  fixture whose default is **nonzero** (7), so default preservation is
+  observable; the nonzero default is also checked to survive an ENABLED write.
+* **`plainWriteDesign` is a ROM-backed node-typing fixture.**  Its `tbl` lookup
+  is supplied by hand, so it says nothing about whole-design admission; the
+  header now says so.  `plainRomWriteDesign` records the whole-design
+  rejection: a `memConst` types `.rom 8 4`, not `.tbl`, and both checkers
+  refuse the design.
+
+### 5. `plainwrite_admit` no longer passes a refusal
+
+It returned `ALL CONTROLS PASS` even when `admitsWB` was false on a plain-write
+design, so its exit 0 could not distinguish admission from refusal.  Now two
+modes: **CENSUS** (default — reports both answers, checks only what must hold
+regardless) and **`--expect-admitted`** (ACCEPTANCE — additionally REQUIRES
+`admitsWB = true` on every plain-write design and fails on an unexpected
+refusal).  A `--selftest` builds an admitted design and a refused one (datum
+narrower than `dw`) and checks the decision itself: acceptance mode **fails**
+on the refused design, passes the admitted one, and census mode tolerates both.
+`SELFTEST PASS`, exit 0.
+
+Acceptance run on the five retained certificates: exit **0**,
+`5 with a plain write, 5 of those admitted by the extended checker`,
+`ALL ACCEPTANCE CONTROLS PASS`.
+
+### 6. Still refused in production
+
+`dcert2_memroute` still runs `admitsB`, and plain-write support is still
+REFUSED there.  What remains: the checked specialization.
+
+**Correction.**  This paragraph first said `projectMemDesignAt` gates on
+`admitsB` inside its own definition.  It does **not** — it is
+`mixDriver sf wf hwMemAP [encDesign D]` and consults no checker, as §63.74 and
+the code show.  What gates on `admitsB` is the BUNDLE: `mkMemSimAt`,
+`mkMemSimOf` and `MemSimWFAt`, together with the correctness theorems that take
+`admitsB D = true` as a hypothesis.  So the same ungated specializer is reused,
+and only W-specific bundle constructors and correctness proofs are needed
+before a plain-write design is RUN through the production arity-3 checker at
+its returned bound.
+
+## §63.74 — the checked specialization lands, and the five retained certificates RUN
+
+The last link of the ordinary-write chain.  The module is now ≈1,900 lines with
+**56 `#guard`s**; every theorem reports only `propext`, `Quot.sound` and
+`Classical.choice`.  Producer exit **0**, `errors: 0  sorry: 0`.
+
+### What was keyed on the checker, and what was not
+
+`projectMemDesignAt` is **REUSED UNCHANGED**.  It is
+`mixDriver sf wf hwMemAP [encDesign D]` — the design STATIC and exactly the
+edge vector, the input vector and the state DYNAMIC — and it never consulted a
+checker.  So is `checkResidual`, so is `runMemSim`.  What was keyed on
+`admitsB` is only the BUNDLE and the theorems that consume it, and those get
+extended forms:
+
+| extended | mirrors |
+|---|---|
+| `memEntry_uniqueW` | `memEntry_unique` |
+| `projectMemDesignAtW_correct` | `projectMemDesignAt_correct` |
+| `MemSimWFAtW`, `mkMemSimAtW`, `mkMemSimOfW` | the originals, untouched |
+| `runMemSimW_correct` | `runMemSim_correct` |
+
+`MemSimWFAt_toW` proves an originally-honest bundle is honest on the extended
+route too, so the extension never un-admits anything.
+
+### Executed through the RESIDUAL, on the fixture
+
+`plainRamSim = mkMemSimAtW 20000 200 plainRamDesign` is `isSome`, its residual
+has **arity `[3]`** — the unchanged production shape — and it is bound to that
+design.  Through it, at the bound `checkResidual` returned:
+
+* ENABLED: `[11,22,33,44] → [11,99,33,44]`, default `7` survives, widths `[8,8,8,8]`;
+* DISABLED enable with the clock FIRING: the whole ENCODED image returns identical;
+* QUIET clock: likewise, for the other reason;
+* TWO STEPS, the second on the state the first returned: the write lands, the
+  quiet step preserves it exactly.
+
+`plainRamSim_runs` states the whole production shape as a theorem.
+
+### The five retained certificates, through the PRODUCTION driver
+
+`dcert2_memroute` gained a `plain-write` token.  **Off by default**, and the
+default route is unchanged: `tiny_ram` on the default route still exits **6**,
+`MEMORY ROUTE REFUSES ADMISSION`, naming the reason — *"the memory route
+implements Op_MemWriteBE and Op_MemRead"*.  With the token, admission is
+`admitsWB` and the bundle is `mkMemSimOfW`; the specialization function, the
+production residual checker and the execution function are the SAME ones.
+
+All five, two cycles each, `init=zero`:
+
+| certificate | `admitsB` | `admitsWB` | residual | arity | bound | words changed | comparison | exit |
+|---|---|---|---|---|---|---|---|---|
+| `tiny_ram` | false | **true** | 176 terms | `[3]` | 24 | 1 | COMPLETE | 0 |
+| `tiny_sync_ram` | false | **true** | 287 terms | `[3]` | 26 | 1 | COMPLETE | 0 |
+| `mem_domain` | false | **true** | 769 terms | `[3]` | 36 | 1 | COMPLETE | 0 |
+| `mem_nondefault` | false | **true** | 772 terms | `[3]` | 36 | 1 | COMPLETE | 0 |
+| `memfix_b` | false | **true** | 772 terms | `[3]` | 36 | 1 | COMPLETE | 0 |
+
+Every one ends `stateFullOKB true` and `RESULT: MEMROUTE OK (admitted,
+specialized, checked, executed at the returned bound, returned state passes the
+policy, and the reference comparison is COMPLETE)`.  `tiny_ram`'s word 3 goes
+`0 → 171` — a real transition taken through the residual, not a shape argument.
+
+The driver also fails closed on the one thing `admitsWB_eq` forbids: if a
+design has NO plain write and the two checkers disagree, it exits 7 rather than
+continuing.
+
+### Scope
+
+This is **§63.58's operator gap closed**: the census found exactly one missing
+operator across the retained corpus, and those five certificates were refused
+for exactly that reason.  It is NOT whole-unit credit — none of these is one of
+the twelve FP units, and the matrix is unchanged at **13 YES / 11 NO / 36
+BLOCKED**, FP **3 YES / 9 BLOCKED**.  Whole Pico was NOT re-run: it contains no
+plain write, `admitsWB_eq` proves its answer cannot change, and the census
+confirms both routes agree on it.
+
+## §63.75 — the B03/B11 memory-slot lowering, implemented
+
+`pass.single_edge` refused EVERY design holding a `Memory` cell at P>1, with
+the hint *"slot enables are not wired into the Memory cell yet"*.  That is the
+gap B03 and B11 sit behind.  `MASTER_INTEGRATION` R34.4 named it "Gap 2" and
+recorded that master does not carry the capability; the pinned old checkout
+refuses identically.  **There was no old lowering to copy.**
+
+### The inspection came first, and it changed the design
+
+Read from the ACTUAL retained graph with the existing `lean_graph_census`,
+cross-checked against the retained RTLIL inventory — 19 memories, old and
+master identical:
+
+| write ports | read ports | `type` | count |
+|---|---|---|---|
+| 0 | 1 | 0 (async) | **8** |
+| 1 | 1 | 0 | 5 |
+| 1 | 16 | 0 | 2 |
+| 128 | 2 | 0 | 4 |
+
+Two facts decided everything:
+
+* **the memory the refusal named — `$auto$proc_rom.cc:155:do_switch$10` — has
+  `WR_PORTS = 0`.**  No writable port, asynchronous read.  It commits nothing
+  on any sub-step, so the refusal was firing on a cell that cannot be
+  mis-timed.  Instruction 131 warned against assuming that memory was writable;
+  the data says it is not.
+* write-enable widths are **16, 27, 34, 70 and 8224 — never 1**.  The flop form
+  `enable &= (phase == slot)` is a ONE-BIT AND; applied here it would keep lane
+  0 and silently drop every higher lane.
+
+All 19 have `type = 0`, so this design has **no synchronous read port**.
+
+### What landed
+
+* `mem_shape_of` reads the per-port pins (`raw_pid % stride` → name,
+  `raw_pid / stride` → port) — the same decoding `parse_memory_info` uses.
+* The refusal is **narrowed, not removed**.  Still refused, each with its own
+  message: a **synchronous read port** (its read register would commit on every
+  sub-step, and rebinding it without changing read latency is not validated
+  here), a non-constant `type`/`wensize`/`rdport` pin, and a write port with no
+  positive `wensize`.  A memory with **no write port** is no longer refused.
+* The gate is a width-preserving SELECT, per write port:
+  `enable' = (phase == slot) ? enable : 0^wensize`.  Active: the ORIGINAL
+  vector bit for bit, so byte-lane meaning is untouched.  Quiet: a
+  width-correct zero.  An ABSENT enable becomes all-ones at `wensize`, never a
+  single 1.
+* The slot comes from the **same commit model the flops use** —
+  `lc::commit_class_of` then `plan.slot_of_key`.  Nothing new is invented.
+* Untouched: geometry, `initial`/default contents, `fwd`, `posclk`, read
+  latency, and every clock pin.  No shared-IR field was added and no component
+  erased.
+
+### Validated on the retained independent reference machinery
+
+`lhd/tests/single_edge_memory_slot_test.sh` is the ported D2 fixture R34.4
+recorded as blocked by this exact gap — the procedure this work had to satisfy,
+not a new one:
+
+* structural legs PASS: `1 memory(ies) slotted`, no `negedge` left;
+* the independent **iverilog** differential (retained project-local v13_0
+  build): source versus normalized **agree over 39 periods, memory read
+  included**;
+* the **P=1 negative control still FAILS**, so the harness discriminates.
+
+An epoch sweep of the normalized clock's start gives OK at 5 and 10 and
+`errs=78` at 0 and 15.  Every mismatch is on `qp`/`qn` — the flops — and
+**never on `rd`**, with the normalized side lagging exactly one period.  The
+divider is deliberately reset-independent, so where its phase sits at reset
+release is a property of the HARNESS; this is R34.3's already characterized
+"epoch/phase conflict with a reset-independent divider", not a memory-gate
+defect.
+
+Regressions all exit 0: `single_edge_four_classes`, `single_edge_icg`,
+`single_edge_hier_latch`, `single_edge_scope`, `latch_fail_closed`,
+`lhd_memory_hierarchy`.  `single_edge_multi_clock_test` and
+`lhd_abc_memory_test` fail and were **verified pre-existing** — the pass was
+reverted to `HEAD`, rebuilt, and both failed identically.
+
+### The retained B03/B11 inputs now normalize
+
+| row | top | before | after |
+|---|---|---|---|
+| B03 | `icache_top` | exit 7 refused | **exit 0**: P=2, 8 latch(es), 504 element(s), **11 memory(ies) over 519 write port(s)** |
+| B11 | `minion_tlb` | exit 7 refused | **exit 0**: P=2, 1 latch, 29 element(s), **1 memory over 1 write port** |
+
+519 = 5×1 + 2×1 + 4×128, exactly the inventory; the 8 ROMs are neither refused
+nor gated.
+
+### …and then fail at the NEXT stage
+
+Both reach `pass.lean` certificate emission and stop there, in the same class:
+
+* B03: `Concat lane 1 (of 4, MSB-first) driver '…unused_ok' occupies 27 bits but its declared window is 1`
+* B11: `Concat lane 1 (of 2, MSB-first) driver 'unused_dft' occupies 69 bits but its declared window is 9`
+
+That is **B01's recorded blocker class**.  So B03 and B11 remain **BLOCKED** —
+neither emits a certificate — and the counts are unchanged at
+**13 YES / 11 NO / 36 BLOCKED**, FP **3 YES / 9 BLOCKED**.  A normalization
+pass is not a whole-unit YES.  What changed is that the lowering gap is closed
+and three of the nine remaining FP blockers now share one named stage and one
+named class, which is where the next work goes.
+
+## §63.76 — the memory gate's shared-constant mutation, and three corrections I owe
+
+### 1. WITHDRAWN: B03/B11's Concat failures were MINE
+
+§63.75 recorded B03's and B11's `pass.bitwidth` Concat refusals as "the same
+class as B01's recorded blocker" and treated them as independent, pre-existing.
+**That is wrong and is withdrawn.**  They were introduced by the §63.75 rewrite
+itself.
+
+`gu::create_const` delegates to `Graph::create_constant`, which returns a
+CANONICAL pin deduplicated by value representation
+(`graph/node_util.hpp:326`; pinned HHDS `hhds/graph.hpp:1815`), and
+`gu::set_bits` (`node_util.hpp:838`) writes that pin's own attribute.  The gate
+minted a zero for the quiet arm and stamped `wensize` onto it, so the ONE zero
+pin the whole graph shares was restamped.  Read from the retained graphs:
+
+| | shared zero, before | after | Concat lane |
+|---|---|---|---|
+| B11 node 3600 pid 2 | raw width 0 | **69** | 9 |
+| B03 node 27400 pids 2, 6 | raw width 0 | **27** | 1 |
+
+69 is B11's write-enable width; 27 is B03's last.  Those are exactly the
+operands the failed generation logs named, and the names `unused_dft` /
+`unused_ok` belong to constant pins, not to widened variable inputs.
+**B01's cause remains separate and is not established by any of this.**
+
+Removing the explicit `set_bits` was NOT sufficient — re-measured, the shared
+zero still reached width 69, because CONNECTING it to a `wensize`-wide consumer
+carries the width too.  The fix mints no wide constant at all and uses the
+repository's own sizing idiom (`pass/abc`'s `a AND Sext(c, 1)`):
+
+```
+enable' = enable AND sext(phase == slot, 1)
+```
+
+Active: the original vector bit for bit, so every high lane survives.  Quiet: a
+width-correct all-zero vector.  Every pin stamped is this gate's own driver
+pin.  The strict Concat check, the lane windows and the constant pool's
+contract are untouched.
+
+**Result on the retained inputs**: B11's shared zero stays at raw width 0 (122
+operands, was 123 at width 69) and **B11 now emits a certificate** — 13,285 B,
+sha256 `1f83897e…`.  B03's zeros are clean too.
+
+### 2. The instruction-132 defects, fixed
+
+* **`commit_class_of` returns `nullopt` for a Memory.**  `latch_contract.cpp`
+  gates on Flop/Fflop/Latch, so the class was ALWAYS empty and the slot fell
+  back to 0 regardless of the port's clock or `posclk`.  My comment claiming
+  the slot came "from the same commit model" was **false**.  Fixed by factoring
+  the flop branch into `commit_class_of_clock(clk, rising_policy, clocks)` —
+  one implementation, not a transcription — and classifying each port's own
+  clock driver.  Measured on the negedge fixture: the emission went from
+  `eq_36 = (single_edge_phase == 0); and_44 = eq_36 & we;` (slot 0) to
+  `and_44 = single_edge_phase & we;` (slot 1).
+* **Port discovery.**  `mem_shape_of` found ports only from explicit `rdport`
+  pins; `graph_access.cpp` discovers them from ANY driven field with `rdport`
+  defaulting to FALSE.  A port carrying `addr`/`din`/`enable`/`clock` and no
+  `rdport` was invisible, and a writable cell could be mistaken for a ROM and
+  left ungated.  Fixed.  (On B03/B11 every port does carry `rdport`, so their
+  counts are unchanged — 19 memories / 11 writable / 519 ports for B03, and
+  **1 memory, 1 writable, 1 write port, 69-bit enable, size 8** for B11, which
+  is B11's OWN shape and not B03's.)
+
+Named refusals added, each before any mutation: a **whole-array** cell
+(`update`/`update_enable`/`reset` driven, judged BEFORE any ROM
+classification), **mixed polarity** (`posclk == Ntype::Memory_posclk_mixed`,
+compared explicitly rather than reading "nonzero = rising"), a **gated** clock
+(`commit_class_of_clock` resolves an ICG to its root and drops the enable
+conditions, which this pass does not fold into a memory enable), a **different
+bit of the clock bus** (`clock_bit_on` against `plan.ref_clk_bit`), an
+**absent enable** (not given an invented default), and a **falling committing
+edge** (a Memory has no retype here, so gating alone would leave an inverted
+memory clock in a single-edge design).
+
+### 3. Differential evidence, reported precisely
+
+* The **unchanged** `single_edge_memory_slot_test` **FAILS** at its original
+  epoch (`errs=78`), and that log is retained.  §63.75 said the retained test
+  passed; it did not.  What passes is a **private EPOCH=5 variant**, whose
+  wrong-time-base control still fails.  The mapping is from the
+  implementation: the phase counter is a free-running 1-bit flop on the
+  reference clock with a concrete initial 0 and **deliberately no reset**, so
+  which sub-step is "slot 0" depends on where that counter sits when reset
+  releases — a property of the harness's clock origin, not of the design.
+* `single_edge_four_classes_test` **skipped its external-simulator leg**
+  (`note: external-simulator leg skipped (set LHD_EXTERNAL_SIM=1)`), so it is
+  NOT an independent no-memory differential baseline, and §63.75 should not
+  have leaned on it.
+* `pre_lhd_abc_memory_test.log` reads `lhd/tests/lhd_abc_memory_test.sh: line
+  68: lhd/lhd: No such file or directory` — a **harness invocation failure
+  before either binary was exercised**, not evidence of pre-existing behaviour.
+  The pre-existing claim for that test is withdrawn; `single_edge_multi_clock`
+  remains unmeasured by that run for the same reason.
+
+### 4. The regression
+
+`lhd/tests/rtl/mem_slot_constant_alias.v` puts a shared zero in a **1-bit
+Concat lane** and gives two memories write-enable widths **4 and 9**.
+`single_edge_memory_constant_alias_test.sh` lowers it, runs the generation
+gate, and checks no constant-zero operand was widened.  **Verified to reject
+the b6b0a5cb6 behaviour**: with the stamping reconstructed it exits 1 —
+*"a constant ZERO operand is now wider than 8 bits (36 of them)"*.  Note the
+generation leg alone still passed on that small fixture, which is why the
+metadata leg exists; an isolated mux equality would have seen nothing.
+
+### 5. Where B03 and B11 now stand
+
+| row | `single_edge` | generation | next |
+|---|---|---|---|
+| B11 `minion_tlb` | exit 0 | **exit 0, certificate emitted** | FP chain below |
+| B03 `icache_top` | exit 0 | exit 1 | a GENUINE `pass.lean` limit, newly reached |
+
+B03's new stop is not a Concat error and not mine: *"memory node n_50820
+bits=27 size=128 … wrports=128. the `fwd` matrix needs 256 bits (reads x
+writes), which does not fit"* — a real emitter limit on a 128-write-port
+memory.
+
+**B11's full chain, on its own certificate** (`dcert2_memroute`, 4 cycles,
+`init=zero`): scalar route refused (memFree/sources/ops), **memory route
+ADMITTED**; specialized `hwMemAP` with the design static and exactly
+edges/input/state dynamic; residual **258,278 terms, arity [3]**, checker bound
+**1127**; 4 cycles executed **at the returned bound**, all ok; **COMPLETE**
+reference comparison; `stateFullOKB true`; producer exit **0**.
+
+Stated plainly: the initial image is the SYNTHETIC zero table and the stimulus
+is generated, so **no memory word changed** (0 of 6 differ).  This is
+generation and readiness, not a changing-memory demonstration.
+
+**Counts are unchanged: 13 YES / 11 NO / 36 BLOCKED, FP 3 YES / 9 BLOCKED.**
+No row credit before its required gates pass.
+
+## §63.77 — a stale-binary conclusion withdrawn, the native enable contract, and a frozen plan
+
+### 1. WITHDRAWN: "width inference defeats removing `set_bits`"
+
+§63.76 reported that removing the explicit `set_bits` was NOT enough — that the
+shared zero still reached width 69 — and concluded the connection itself
+carried the width.  **That measurement was made with a stale executable and the
+conclusion is withdrawn.**
+
+`pass/single_edge/BUILD` declares a `cc_library` and no binary, so
+`bazel build //pass/single_edge:all` compiles the library and **does not relink
+`lhd`**.  The source changed at 22:36:17 UTC; the `bazel-bin/lhd/lhd` those runs
+used was linked at 22:31:36, i.e. **before the fix**.  The 0→9 and 0→69
+observations therefore describe the PRE-fix gate.  They establish nothing about
+width inference, and they are not a reason to touch the constant pool, the
+`Dlop` representation or any global width rule — none of which was changed.
+
+What remains true, and is source-bound: the later `//lhd:lhd` link validates the
+`Sext`/`And` implementation, B11's generation is pass/exit 0, and its
+certificate is `1f83897e…`.  Whether the simpler Mux-with-unstamped-zero form
+would also have sufficed is **open and not re-litigated**; the shipped gate is
+the mask idiom.
+
+The failed runs are retained with this provenance note attached.
+
+**A staleness guard now lives in the test itself**: it fails if `lhd` is older
+than `pass_single_edge.cpp`, so this cannot recur silently.
+
+### 2. CORRECTED: the native contract for an absent write enable
+
+§63.76 said the native contract "does not say absent means always".  **That is
+false.**  Both the pinned old and the master simulator's `emit_wen` spell an
+invalid enable pin as `Slop<wensize>::create_integer(-1)` — *all lanes write* —
+and the LLVM path agrees.
+
+The refusal is replaced by the real semantics, and it needs no wide constant:
+when the enable is absent the gated enable IS the slot mask, which is already an
+all-ones vector of the right width whenever the slot is active.
+
+```
+enable' = enable AND sext(phase == slot, 1)      (enable present)
+enable' =           sext(phase == slot, 1)       (enable ABSENT)
+```
+
+### 3. The per-port plan is now frozen
+
+At 7439f30ea the gate still recomputed `mem_shape_of` and
+`commit_class_of_clock`, and kept an `int slot = 0` fallback.  Now the refusal
+scan records each validated port into `mem_gate_plans` — node, port, enable
+driver, `wensize`, slot — and the gate consumes only those.  Nothing is
+reclassified at mutation time and **there is no fallback**: a port reaches the
+vector only after its class resolved, sat on the reference net AND bit, was not
+gated, and was rising.
+
+### 4. The regression, strengthened
+
+The earlier version had an optional census, an arbitrary `width <= 8` threshold,
+and leaned on successful emission.  Now it:
+
+* **requires** the census, and fails without it;
+* asserts the fixture really carries **two distinct wide write-enable widths**
+  (16 and 27) — and the fixture was rebuilt, because the first one's lane had
+  **folded away**, which the new assertion caught;
+* asserts a **narrow anchor**: at least one constant-zero consumer is narrower
+  than the smallest wide enable, so restamping could break it;
+* compares **per pin, width AND signedness**, for every surviving constant-zero
+  operand against the pre-pass census — a pin that DISAPPEARS is a rewiring the
+  pass does by design (a retyped flop's `posclk`, a memory's `enable`), a pin
+  that REMAINS must be unchanged;
+* carries **no emission leg**, deliberately: emission succeeding does not
+  establish the property, and this fixture stops later at an unrelated
+  "RAM with initial contents" refusal.
+
+**Rejection proved with a source-bound binary** (lhd 16:06:26 newer than source
+16:04:23): with the stamping reinjected it exits 1 and names the pins —
+`CHANGED node 1340 (get_mask) pid 2: width 0->27`.
+
+Honest scope: on B03/B11 the narrow consumer is a `concat` lane (B11 node 3600
+pid 2, a 9-bit window); **this frontend lowers the same source to `get_mask`**,
+so the test asserts the property on whatever consumer exists and reports the
+concat count, which is 0 here.  The property is identical; the Concat window
+check is where it bites on the real units.
+
+### 5. State after the repair
+
+Both retained inputs re-normalize with the frozen-plan build — B11 `1 memory
+over 1 write port`, B03 `11 memories over 519 write ports` — and **B11 re-emits
+a byte-identical certificate `1f83897e…`**, matching the independently verified
+result, so the refactor is behaviour-preserving.
+
+B11's retained chain is NOT repeated: certificate `1f83897e…`, 258,278 residual
+terms, arity 3, bound 1127, four steps, COMPLETE comparison, `stateFullOKB
+true`, exit 0 — on synthetic zero state and generated input, changing zero
+words.  That is progress, **not whole-row acceptance**.
+
+Counts unchanged: **13 YES / 11 NO / 36 BLOCKED**, FP **3 YES / 9 BLOCKED**.
+
+## §63.78 — the D4 fixtures reused, and three self-inflicted errors corrected
+
+### 1. The RTL fixture was malformed, and my diagnosis of it was wrong
+
+`mem_slot_constant_alias.v` declared `we0` as `[3:0]` while the write loop read
+`we0[i]` for **i = 0..15**.  Those out-of-range selectors introduced X.
+
+The consequences were a chain of wrong conclusions, all withdrawn:
+
+* `alias_v8`'s *"Const node n_12 has X/Z bits"* was attributed to an
+  **uninitialized memory**.  It was not; its exact origin is still not
+  established, but the out-of-range selectors are a sufficient X source and the
+  uninitialized-memory claim is retracted;
+* the `initial` block added to "fix" that is what produced `alias_v9`'s
+  separate *"RAM with initial contents"* refusal;
+* that refusal was then used to **drop the end-to-end generation leg**.  That
+  reasoning is void.
+
+Corrected: `we0` is `[15:0]`, the `initial` block is gone, and **the generation
+leg is restored and passes**, emitting a certificate.  No runtime
+initialization policy was broadened.
+
+### 2. Three harness defects
+
+* **The staleness guard never ran.**  `dirname(lhd/tests/x.sh)/..` is `lhd/`,
+  so the path resolved to `lhd/pass/single_edge/...`, which does not exist, and
+  `[ -f ]` skipped it silently.  Fixed to `../..`, and a missing path is now a
+  FAILURE rather than a skip.  It is also announced when it passes.
+* **The census was tolerated.**  `|| true` plus an emptiness check let a
+  nonzero exit through.  Both censuses must now exit 0.
+* **The comparator was too permissive.**  After node 24 turned out to be a flop
+  whose `posclk` is legitimately dropped, it skipped ANY missing or
+  non-constant operand, allowed zero survivors, and never checked the value.
+  The exceptions are now NAMED and only two: a memory write port's `enable`
+  (pid 4 + port*16) and a retyped flop's `posclk` (pid 6).  Everything else
+  must still be present, still constant, still **zero**, and at its original
+  width and signedness — and **at least one survivor is required**.
+
+Re-verified against the stamping mutant with a source-bound binary and the
+guard armed: exit 1, naming `node 1388 (get_mask) pid 2: width 0->27`.
+
+### 3. The real narrow Concat consumer, from the D4 fixtures
+
+Three successive `.v` rewrites each lost the narrow constant-zero lane to a
+different front-end fold, so "raw unstamped width 0" was standing in for a
+declared narrow window — which it is not.  The pinned **D4 revision
+`f6ad1fe29`** solved this the same way: its `pass_single_edge_test.cpp` builds
+memories directly as LGraphs.
+
+`pass/single_edge/pass_single_edge_test.cpp` now exists on master, adapted to
+master's schema (uniform `type` 0/1; no per-read mask in `type`) and HHDS API
+(`gu::inp_sink_drivers`, since `Node_class::inp_edges` is gone).  Historical
+presence is reuse material, not test credit — every assertion runs against the
+CURRENT pass.  Four controls, all passing:
+
+| test | what it pins |
+|---|---|
+| `NarrowConcatLaneOfTheSharedZeroIsUntouched` | a **5-bit Concat window** fed by the canonical zero keeps its driver's kind, value, width and signedness, and the window is unaltered |
+| `ActiveStepKeepsTheWholeEnableVector` | the gated enable is the ORIGINAL vector ANDed with the mask at full `wensize`, so every high lane survives |
+| `QuietStepMaskIsAWidthCorrectSignExtension` | the mask is a `Sext` of a ONE-BIT predicate at `wensize`, so a quiet step zeroes every lane, with no wide constant |
+| `AbsentEnableWritesEveryLaneOnTheActiveStep` | an absent enable lowers to the mask itself at full width — the native all-lanes contract |
+
+**Discrimination proved**: under the stamping mutant the Concat test fails with
+exactly the B03/B11 shape — *"the narrow Concat lane's driver is now WIDER than
+its 5-bit window … actual: 16 vs 5"*.
+
+### 4. Scope and what remains
+
+Counts unchanged: **13 YES / 11 NO / 36 BLOCKED**, FP **3 YES / 9 BLOCKED**.
+B11's four-cycle run keeps **only its recorded scope** — synthetic zero state,
+generated input, zero words changed — and was not repeated.
+
+Still outstanding, in order: B11's **initialized-transition acceptance** from a
+source-derived validated stimulus with decoded-state reuse, complete reference
+comparison and quiet/disabled preservation; then B03's **forwarding matrix**,
+reusing native `Dlop.bit_test(r*n_wr+w)` per read/write pair across
+`graph_access`, `DesignScan` and lowering, preserving write priority and the
+unknown/undef refusals rather than deleting the guard around the i64 shift or
+adopting the FP pin's global `fwd==1` shortcut.
+
+## §63.79 — the emitted slot mask was narrowed to one bit; repaired
+
+### 1. The defect, in the retained certificate
+
+The §63.75 gate built its mask as `Sext(phase == slot, 1)` and stamped
+`wensize` on that driver.  **The stamp did not survive.**
+`Bitwidth::process_sext` recomputes the range from the POSITION operand —
+`bw.set_sbits_range(sign_max)` with `sign_max = 1` — so the emitted node is
+`Op_Sext width 1`.  The certificate's `Op_And` does not sign-extend, so the
+emitted gate was
+
+```
+Op_And w69 [enable_69, mask_1]
+```
+
+and **lanes 1..68 could never be enabled**.  Read directly out of the retained
+v4 certificate `1f83897e…` at origin 6792/6796.
+
+This is a static consequence of the emitted graph — it is NOT a claim that any
+write was observed, reachable or attempted.  And the earlier COMPLETE
+comparison stands only for what it was: certificate-versus-reference agreement,
+where both sides compute the same narrowed thing.  It was never high-lane
+acceptance.
+
+**My normalize-time gtest could not see it**: it inspects the graph the pass
+leaves, before bitwidth/cprop.  Those three tests are now labelled
+STRUCTURE ONLY in the file itself.
+
+### 2. The repair reuses this design's own widening adapter
+
+The same certificate already widens a 1-bit value to a 69-bit mask at origin
+5268: `Op_GetMask w69 [Op_Sext w69, const70 2^69-1]`.  The gate now does the
+same — `Get_mask` over the sign-extended predicate, window `[0, wensize)`,
+built with `connect_mask_operands` so the `lo`/`hi` endpoints `bit_range`
+requires are present (without them `pass.lean` refuses the node, which is how
+the first attempt failed).
+
+No BV or `Sext` semantics were changed and no unsigned operand was blindly
+widened.  The only new value is the gate's own window constant, built by
+`mask_window_const` at arbitrary width.
+
+Emitted cone, fresh:
+
+```
+slot 357: Op_And     w69 [356, 337]
+  slot 337: Op_GetMask w69 [336, const70 2^69-1]      <- the slot mask
+    slot 336: Op_Sext  w69 [335, 1]
+      slot 335: Op_Sext w1 [334, 1]
+        slot 334: Op_EQ  w1 [const 0, flopQ 29]       <- phase == 0
+```
+
+### 3. Values, on real certificates, with failure exits
+
+`formal/lean/scripts/slot_mask_check.lean` locates the write node's enable
+gate, overrides the phase source and the gate's other operand, and evaluates.
+It exits 3 on a value mismatch and 2 on a shape failure.
+
+| certificate | active / full enable | quiet | active / high lane only | exit |
+|---|---|---|---|---|
+| **fresh emission** | **2^69-1** | **0** | **2^68** | **0** |
+| retained v4 `1f83897e…` | **1** | 0 | **0** | **3** |
+
+The retained certificate is the negative control and fails exactly as the audit
+predicted: *"the mask does not pass every lane"* and *"lane 68 cannot be
+enabled"*.  It overrides the phase and the enable, so it reports what the gate
+WOULD pass and asserts nothing about reachability.
+
+### 4. Scope, unchanged
+
+B03 re-normalizes (exit 0) with the repaired mask.  B11's **four-cycle
+synthetic-zero run keeps only its recorded scope and is not re-credited** — its
+certificate has changed, so that run no longer describes the current emission
+at all.  The initialized-transition acceptance is still **not done**, and the
+three structural gtests do not stand in for it.
+
+Counts unchanged: **13 YES / 11 NO / 36 BLOCKED**, FP **3 YES / 9 BLOCKED**.
+
+## §63.80 — B11's initialized transition, and four preflight defects corrected
+
+### 1. What I claimed and what the files held
+
+My end-of-turn report described stimulus and state files that **did not work**.
+Every defect named was real:
+
+* the stimulus had **no `stim v1` header**, and its trailing `#` comments break
+  `parseStim`, which strips only whole comment lines;
+* two decimals disagreed with their own hex.  Regenerated mechanically and
+  decoded back field by field: `req_data_i` is **96757023248656**
+  (`0x580000001110`) — I had written 96757023511824, which is `0x580000041510`
+  — and `ptw_resp_data_i` is **720599239** (`0x2af378c7`) — I had written
+  716267719, which is `0x2ab160c7`.  `satp_info_i` 2147549184 was right;
+* the "eight distinguishable 69-bit words" were not: word 0 was 128 bits and
+  the rest were 2^70…2^76, so `setWord`'s `mk_bv 69` loaded
+  `[2^69-1, 0, 0, 0, 0, 0, 0, 0]`.  Now `(1 << 60) + address`, which fits, and
+  the preflight **confirms the loaded values**;
+* the schedule held `ptw_req_ready_i` constantly high, dropped `req_valid_i`
+  after sub-step 3, omitted `clk_i`, and ended with the response still
+  asserted.
+
+Both bad files are retained under `preflight_negatives/`.
+
+**And one overclaim is withdrawn**: "the emitted cone carries it".  A set of
+reached inputs and flops is a **dependency inventory**; it does not establish a
+Boolean condition, an address or a datum.  It is recorded as an inventory, and
+the scope is discharged below by a source-derived expectation that was then
+observed.
+
+Jobs: the two duplicate checker producers had already exited; the queued
+acceptance launcher and its waiters were cancelled before firing — it waited on
+the text "retained exit", not on a validated result — so **nothing ran from the
+invalid files**.
+
+### 2. The corrected stimulus follows the pinned sequence
+
+`SimCtrl::tick()` drives `clk_i` LOW, evaluates, then HIGH — so one source tick
+is two P=2 sub-steps, and `clk_i` is driven explicitly because the emitted
+flop 0 enable is `(clk_i == 0 AND phase == 0)`.  The pinned `fill_entry` order
+is reproduced: ready LOW, **one** ack tick, LOW again; the PTW leaf presented
+with `ptw_resp_valid_i` held **two ticks** — because `rf_latch_wr_en` reads
+`ptw_resp_valid_q`, not `_i` — then `clear_ptw_resp` and a quiet tail.
+
+### 3. The transition, predicted then observed
+
+Expectation computed **before** the run from the pinned DV call and packed
+structs for this artifact's `NrMinions=1, Entries=8`: **address 1, word
+`0x223600abcde`**.
+
+```
+address 1   before 1152921504606846977 (2^60+1)
+            after  2350958427358       = 0x223600abcde
+```
+
+18 sub-steps, all ok, at checker bound **1131** on an **arity-[3]** residual of
+260,672 terms; COMPLETE reference comparison; supplied state surviving the
+codec and reused decoded each cycle; `stateFullOKB true`; producer exit **0**.
+Exactly one word changed and **every other address is bit-for-bit preserved**.
+
+### 4. The negative discriminates, and names the mechanism
+
+The SAME state and stimulus on the **pre-repair** certificate `1f83897e`, whose
+emitted mask was `Op_Sext width 1`:
+
+| | address 1 after | XOR with initial |
+|---|---|---|
+| pre-repair | 1152921504606846976 | **1** — only bit 0 |
+| repaired | 2350958427358 | `0x10000223600abcdf` — 21 bits across 0..60 |
+
+The one-bit mask wrote exactly lane 0 and could never produce the expected
+word.  That is the §63.79 defect reproduced dynamically.
+
+### 5. The gate is failure-enforcing
+
+`pass/lean/tests/d4/b11_tlb_acceptance.sh` reads the run log and FAILS on a
+missing or wrong transition — `dcert2_memroute` exits 0 and reports COMPLETE
+for a design whose memory never changes, so exit 0 alone cannot satisfy B11.
+It requires the route, the arity-3 residual at its checked bound, every step
+ok, COMPLETE, the codec, the policy, a SUPPLIED state, the exact address and
+word, a change **above bit 31**, exactly one changed word, and every other
+address preserved.  `--expect-no-transition` runs it as the negative.
+
+### 6. B11's FP cell moves
+
+**BLOCKED → YES**, with certificate, emitter, driver, state, stimulus, gate and
+logs bound by sha256.  Counts move **13 YES / 11 NO / 36 BLOCKED → 14 YES /
+11 NO / 35 BLOCKED**, FP **3 YES / 8 BLOCKED → 4 YES / 8 BLOCKED**.  Verified
+mechanically that `B11/Futamura projection` is the ONLY changed cell and that
+the historical scalar and single-edge refusals are retained verbatim.
+
+Scope, stated: INTERPRETED, `hproj` TRUSTED, not equivalence and not RTL
+acceptance.  The expected word is source-derived and was then observed; the run
+shows that THIS residual, on THIS supplied state and THIS source-derived
+stimulus, commits that word at that address.
+
+## §63.81 — the acceptance gate was insufficient; replaced with a per-step trace
+
+### 1. WITHDRAWN: the first gate's preservation claim
+
+§63.80's gate said "quiet/disabled preservation".  It did not establish that.
+It compared only the INITIAL and FINAL images, so:
+
+* a write on a quiet step that is **overwritten before the end** is invisible;
+* the written address itself was excluded from the loop;
+* and it read the driver's **six-word preview of an eight-word memory**, so
+  addresses 6 and 7 were never compared at all.
+
+Synthetic log controls confirmed it also accepted a 12-step log missing the
+clear/quiet tail and a two-word preview.  **The transition finding was correct;
+the preservation claim was not supported**, so B11 was returned to BLOCKED and
+the counts to 13/11/36 until this passed.
+
+Also corrected: `artifact_bytes` is measured from the bound file — the
+certificate is **13,364** bytes, not the 13,285 carried over from v3/v4.
+
+### 2. The driver now retains the intermediate states
+
+A `trace` token on `dcert2_memroute` records, inside the existing production
+driver and with no new simulator:
+
+* the loaded image, **every word with its width, plus the default**;
+* each step's edge vector and input vector;
+* each step's **active/quiet classification from `fires e md.clock`** — actual
+  state, never the final image;
+* each **decoded next image** in full;
+* the returned-state policy at each step.
+
+### 3. The gate is per-step
+
+It requires all eight supplied words and the default loaded unchanged at width
+69; a complete 18-step trace with every step `ok` and policy true; **at most one
+commit across the entire run**; that commit at address 1 to `0x223600abcde` at
+width 69 with bits above 31 changed; **whole-image equality on every non-active
+step, including address 1 and the default**; and a final image equal to the
+supplied image plus exactly that commit.
+
+Result — the commit lands at **step 15**, the `clear_ptw_resp` tick, which is
+consistent with `rf_latch_wr_en` reading the still-high `ptw_resp_valid_q`:
+
+```
+ok: all 8 supplied words and the default loaded unchanged, each at width 69
+ok: a complete 18-step trace, policy checked on every step
+ok: exactly one commit, at step 15: address 1  1152921504606846977 -> 2350958427358
+ok: bits above 31 changed (268435456 -> 547)
+ok: every other address AND the default are bit-for-bit preserved on ALL 18 steps
+ok: the final image is exactly the supplied image with the one expected commit
+```
+
+### 4. Five verifier controls, each failing
+
+**Synthetic log mutations — verifier controls, NOT execution evidence:**
+
+| control | gate's answer |
+|---|---|
+| steps 16-17 removed | missing/malformed trace for [16, 17] |
+| every image truncated to two words | loaded image has 2 words, supplied declares 8 |
+| committed word off by one bit | step 15 wrote 2350958427359 |
+| no transition at all | NO memory transition occurred |
+| **transient quiet write at addr 5, step 2, restored** | step 2 is quiet but changed [5] |
+| **transient default change, step 2, restored** | step 2 CHANGED THE DEFAULT |
+
+The last two are exactly what the withdrawn gate could not see.
+
+The retained v4 negative still passes in `--expect-no-transition` mode: the
+pre-repair certificate holds `1152921504606846976` at address 1 — one bit off
+the initial value — and never produces the expected word.  Neither the v6 nor
+the v4 run was repeated; the single changed-driver run is justified because the
+earlier run retained no intermediate states.
+
+### 5. B11 reconciled
+
+**BLOCKED → YES**, with certificate, emitter, driver, state, stimulus, gate,
+trace and verifier controls bound by sha256.  Counts **13 YES / 11 NO / 36
+BLOCKED → 14 YES / 11 NO / 35 BLOCKED**, FP **3 YES / 9 BLOCKED → 4 YES / 8
+BLOCKED**; `B11/Futamura projection` is mechanically the only changed cell.
+
+> **Withdrawn the same day.**  This reconcile did not hold: the gate described
+> above was itself insufficient, B11 went back to BLOCKED, and §63.82 records
+> the defect, the repair and the reconcile that did hold.  The FP before-count
+> above is also corrected here from "3 YES / 8 BLOCKED" — the FP column has
+> twelve cells, so the state before this change was 3 YES / 9 BLOCKED.
+
+Not gates for this cell, and recorded as such: the three `pass/single_edge`
+gtests are STRUCTURAL and run before bitwidth/cprop, and the memory-hierarchy
+external-simulator leg was skipped.
+
+## §63.82 — clock-fires is not enabled: the gate's second defect, and B11's reconcile
+
+§63.81's gate was still insufficient, and the supervisor's counterexamples are
+right.  It classified every step by `fires e md.clock` alone.  That predicate is
+**true on steps where the write does not happen**, so a planted image change on
+such a step passed with exit 0 — twice over, with the same final image and
+exactly one change:
+
+| counterexample | why the old gate accepted it | why it cannot occur |
+|---|---|---|
+| sole change moved to **step 13** | the clock fires there | `pred` is 0: phase is 1, so `EQ(0,phase)` is false and the slot mask zeroes a *fully set* `origEn` |
+| sole change moved to **step 0** | the clock fires there | `origEn` is 0: the design's own enable is low |
+
+Neither is execution evidence.  Both are **synthetic log mutations** — controls
+on the verifier — and the real run contradicts both.
+
+### 1. What the design actually does, recorded rather than argued
+
+The driver now discovers the write gate's slots **from the certificate** and
+reports `UNRESOLVED` rather than assuming anything:
+
+```
+TRACE slots write 374 addr 371 datum 372 effEn 373 origEn 356 mask 337 pred 334 phaseSrc 29
+```
+
+These match the independent audit exactly, and the gate **pins them** to the
+audited ids — otherwise the per-step numbers below describe some other node and
+prove nothing.  Each step's pre-state values are then computed by the design's
+own semantics, `evalGraphG` over `Compiler.srcEnv` applied to the real pre-state
+and input, with no internal overrides:
+
+| step | phase | pred | origEn | effEn | clock | commits? |
+|---|---|---|---|---|---|---|
+| 0 | 0 | 1 | **0** | 0 | fires | no — the design's enable is low |
+| 12 | 0 | 1 | **0** | 0 | fires | no — same |
+| 13 | 1 | **0** | 2⁶⁹−1 | **0** | fires | no — *the slot mask alone* disables a fully enabled write |
+| 14 | 0 | 1 | 2⁶⁹−1 | 2⁶⁹−1 | **quiet** | no — `edgeSchedule` suppresses `k%3==2` |
+| **15** | 0 | 1 | 2⁶⁹−1 | 2⁶⁹−1 | fires | **yes** — addr 1, datum 2350958427358 |
+
+**Step 14 is the one neither of us named.**  It is *fully* enabled — predicate
+true, all 69 lanes set, datum ready — and still commits nothing, because no edge
+fires.  A fires-only gate misses steps 0/12/13; an enable-only gate misses step
+14.  Three independent reasons a commit does not happen, all three live in this
+one 18-step trace.
+
+### 2. The rule the gate now enforces
+
+A step may commit only when the clock **fires** *and* `pred ≠ 0` *and*
+`effEn ≠ 0`, read off those recorded values rather than a free-form
+active/quiet label.  On every step that is not such an **enabled commit**, the
+gate requires **complete-image** equality — every word, every width, and the
+default.  An image-changing step is kept distinct from an enabled commit, since
+an idempotent write leaves no diff: the enabled set is reported separately and
+every image change must fall inside it.
+
+```
+ok: the per-step values are read off the AUDITED write gate {...}
+ok: enabled-commit step(s) [15]; every other step could not commit, and none of
+    them changed the image, the default or any width
+ok: exactly one commit, at step 15 (phase 0, pred 1, effEn 590295810358705651711)
+ok: the committing step's effective enable is the FULL 69-lane mask
+ok: the committing step's recorded address and datum are the source-derived pair
+```
+
+### 3. Ten planted defects, each rejected by its own message
+
+The five controls of §63.81 had a quiet problem: they were written against an
+older trace format and carried no `pre` lines, so against the new gate they
+failed for a **missing diagnostic line** rather than for the defect each was
+named for — testing nothing while still looking green.  They are now *derived
+from the real trace* by `pass/lean/tests/d4/b11_make_verifier_controls.py`, and
+`b11_tlb_acceptance_controls.sh` **pins each failure message** for exactly that
+reason.
+
+| control | the gate's answer |
+|---|---|
+| slots `UNRESOLVED` | could not resolve the write-gate slots |
+| slots resolved to another node | the discovered slots are not the audited ones |
+| quiet tail 14-17 absent | trace missing/malformed for [14, 15, 16, 17] |
+| six-word preview of an eight-word memory | loaded image has 6 words, supplied declares 8 |
+| committed word off by one bit | step 15 wrote 2350958427359 |
+| no transition at all | NO memory transition occurred |
+| transient write, **quiet** step 14, restored | step 14 changed [3] but the clock is QUIET |
+| transient default, step 7, restored | step 7 CHANGED THE DEFAULT |
+| **sole change at step 13** | could not commit: the slot predicate is FALSE (phase 1) |
+| **sole change at step 0** | could not commit: the write enable is ZERO (origEn 0) |
+
+All ten are rejected, the real trace is accepted, and the retained v4 log still
+reads as a negative under `--expect-no-transition`.  **No run was repeated**:
+the diagnostics were added to the driver and one fresh trace run was taken.
+
+### 4. B11 reconciled, this time on evidence that survives the counterexamples
+
+**BLOCKED → YES.**  Counts **13 YES / 11 NO / 36 BLOCKED → 14 YES / 11 NO / 35
+BLOCKED**; FP **3 YES / 9 BLOCKED → 4 YES / 8 BLOCKED**.
+`B11/Futamura projection` is mechanically the only changed cell.
+
+## §63.83 — B03's forwarding matrix, read at arbitrary width
+
+The `fwd` read-during-write matrix was read through an i64 window, so a memory
+with more than 62 (read x write) cells was refused outright:
+
+```
+memory node n_50820 bits=27 size=128 addr_width=7 type=0 fwd=0 undef=0
+posclk=1 wensize=27 rdports=2 wrports=128.
+the `fwd` matrix needs 256 bits (reads x writes), which does not fit the i64
+window used to read it.
+```
+
+Note `fwd=0`.  The matrix this design actually carries is **all zeros** — every
+read is read-first — and it was still refused, purely on width.  Which is also
+the trap in testing the fix: a 256-bit matrix whose value is zero exercises no
+high bit at all, and would pass against a reader that silently truncates.
+
+### 1. The native reader, reused rather than reinvented
+
+`cgen_verilog` and `cgen_sim` already read this pin per cell with
+`Dlop::bit_test`, which is arbitrary precision — `cgen_sim` says so in as many
+words ("Held as the const itself — Dlop::bit_test is arbitrary precision, and
+n_rd*n_wr overflows an int on wide shapes").  `pass.lean` now reads it the same
+way, and holds the result as **per-read rows**:
+
+* `Memory_info::fwd_rows` replaces `int64_t fwd`; the constant is kept whole
+  across the pin walk and shaped into rows afterwards, because the row stride is
+  the write-port count and that is not known until every port pin has been seen.
+* `DesignScan::Memory::fwd_rows` carries plain `bool` rows, keeping that struct
+  free of `Dlop` and so free of HHDS — the portability contract stated in its
+  own header.
+* An **UNKNOWN cell** now joins the non-constant case and is refused where the
+  policy is observable.  The old `is_just_i64()` test excluded unknowns only as
+  a side effect of the i64 window; dropping the window without this would have
+  started reading `x` as read-first.
+
+**The guard was kept, in the form the representation needs.**  It used to hold
+`>> idx` inside the i64 window.  `memory_fwd_bit` still bounds the ordinals
+against the row, and the shaping step still refuses a cell count that would
+overflow the `int` position `bit_test` accepts.  Out of range reads as
+read-first, which never invents a forward the design did not ask for.
+
+`memory_lowering` consumed the matrix as `(uint64_t)m.fwd >> (r * n_wr + w)`
+with **no guard at all** — undefined behaviour the moment the matrix passed 63
+cells, which is exactly the shape that got there.  It is a row lookup now.
+`forwarded` is still built in ascending write ordinal, so the chain still lets
+the LATER write win a collision, and per-lane priority still rides on the
+`MemWriteBE` enable.
+
+### 2. The oracle, extended where it was blind
+
+`TwoWriteTwoReadCollisionValueOracle` is a 2x2 matrix — it fits every window and
+cannot see this.  `WideMatrixHighBitForwardingValueOracle` is 2 reads x 32
+writes = **64 cells, two past the old limit**, with its **highest cell set**
+(bit 63: read 1 <- write 31) and read 0 <- write 0.  The value is 2^63 + 1,
+which is not an int64 at all, so it is built with `Dlop::from_binary`.
+
+The two rows DIFFER, and both reads read the address both writes target, so the
+read registers must disagree — 55 is write 0's datum, 77 is write 31's.  A
+reader that truncated the matrix, or shared one row between reads, cannot
+produce that pair.  `collide_oracle.sh` drives both fixtures through the same
+gates and adds two: the two read registers must carry DISTINCT expectations,
+and the wide fixture must really be wide (its write count is read back off the
+emitted certificate, not assumed).
+
+```
+[collide-oracle] wide fixture: 34 write op(s), top cell at bit 63
+[collide-oracle] CollideOracle: 18 case(s) decided
+[collide-oracle] WideCollideOracle: 10 case(s) decided
+[collide-oracle] PASS: all 28 case(s) decided across 2 fixture(s)
+```
+
+Decided by `native_decide` on the formal/lean 4.31.0 pin, no `sorry`.
+
+### 3. B03 moved, and where it now stands
+
+Against the real design the refusal is gone, and B03 reaches **DCERT2 emission**
+for the first time: `icache_top.dcert`, 956571 bytes, exit 0, alongside the
+model and the IO sidecar.  `single_edge` already passed (exit 0) after the
+memory-slot lowering, so the matrix was the last refusal in front of emission.
+
+One honest caveat, and it is not a gate I can wave through: emission needed
+`formal.lean.max_width` above the default 1024, because a memory data node in
+this design is **8224 bits** wide.  That option is a declared resource guard on
+the per-node `Bits` attribute, with an `unlimited` setting, not a soundness
+check — but it is a knob the default does not turn, so B03's emission is
+conditional on it and I have not changed the default.
+
+**B03's FP cell stays BLOCKED.**  Emission is necessary and not sufficient: the
+memory route still has to admit, specialize, check and execute against a
+reference the way B11's did.  The matrix limit is cleared; the cell is not.
+
+## §63.84 — B01's clock gate was readable all along, and the pin map behind that claim
+
+### 1. The three pins, and what master may actually reuse
+
+Pinned by commit, from the ORIGINAL checkouts. Master's own local `projection`
+ref is **`aa2f8134a` (2026-08-20)** and is NOT the recent FP baseline — quoting
+"the projection branch" from inside this repository names a seven-week-old tree.
+None of the three is an ancestor of master HEAD; they are independent lines.
+
+| pin | commit / date | relevant implementation | retained capability | reuse or gap |
+|---|---|---|---|---|
+| FP | `/mada/users/czeng14/projects/livehd-futamura/livehd` @ `9bb41a09d`, 2026-10-06, branch `projection` | `Projection/*.lean`: 25 top-level, 38 recursive; built specializer `gen_probe` | §56: 33 frozen rows vs master, 25 GENERATION OK, 8 refused | REUSE for an FP-level A/B on any `.dcert`. GAP: no CORE-ET **helper** route (0 `coreet*` scripts); its CORE-ET certificates came from a third repo (`livehd-new`). It DOES carry the generic yosys/slang reader (`inou/yosys/inou_yosys_api.cpp`), so this is `helpers-absent`, NOT "no frontend" |
+| D2 | `/mada/users/czeng14/projects/livehd-d2-ir-semantics` @ `c21200e0c`, 2026-10-03 | memory model / cgen memory semantics | generated-wrapper simulation, multi-read model | Stage 2 of the order; not consulted for B01 |
+| D3 | `/mada/users/czeng14/projects/livehd-d3-translation-validation` @ `78a3e0d8c`, 2026-10-04 | compileDesign kernel-evaluation measurements | two recorded REJECTED hypotheses | Stage 3; its value here is the negative results, which stop a re-run |
+
+Master has 50 top-level / 64 recursive `Projection/*.lean` to the FP pin's
+25 / 38 (top-level and recursive counted separately, because the recursive total
+includes `Proto/` and `overlays/` submodules). `pass/legalize` exists ONLY on
+master.
+
+**The guard this section is about is master-only too**, which settles a question
+that keeps recurring. `values_with_root`, `latch_window_at`, `latch_open_at` and
+`gated_latch_closed_at` appear **0 times** in all three pins' `latch_contract.cpp`
+and are master-only. So the FP pin accepting a design through this area says
+nothing about the guard being wrong — it has no such guard. Its acceptance is
+not evidence and was not used as any.
+
+### 2. What B01's clock gate actually is — measured, not inferred from a name
+
+`pass.single_edge` refused `minion_dcache_top` with `clock-gate-latch-phase` on
+`flop_75936:gen_offload.u_tensor_load_0.count_q` through
+`latch_50396:gen_offload.u_tensor_load_0.u_clk_gate.en_latch`.
+
+The RTL is `hw/ip/tech_generic/prim_clk_gate/rtl/prim_clk_gate.sv`, reached from
+B01's own filelist:
+
+```systemverilog
+always @(clk_i or en_i or dft_i.scanmode)
+  if (!clk_i) en_latch <= en_i | dft_i.scanmode;
+assign clk_o = clk_i & en_latch;
+```
+
+Open on the LOW phase, gated edge RISING — **exactly the opposite phase the
+guard requires.** It was never wrong-phase.
+
+A probe at the refusal site measured why it failed anyway:
+
+```
+latch=latch_50396:...en_latch rising=true icgclk=clk_i
+enable=get_mask_118492 enable_op=get_mask posclk_known_false=false
+closed_at_ok=false open_at_ok=false
+  get_mask_118492  bits=1  window=[0,1)
+    mux_99352  bits=1
+      ror_132056  bits=1
+        clk_i   <-- the root, a graph input
+      <const>
+      <const>
+```
+
+The window is `Get_mask(Mux(Ror(clk_i), c0, c1), [0,1))`. `Ror` of a one-bit
+clock is the clock; a mux over two constants selected by it is `!clk_i`.
+`resolve_phase` already saw through the `Get_mask`, but stopped at the `Mux`,
+and `values_with_root` understood only And / Or / Clock_cell — so the window
+came back `kAny` and BOTH halves of the opposite-phase test failed.
+
+**Unrecognized representation, not a phase error.**
+
+### 3. The extension, and why it cannot launder a bad latch
+
+Two rules added to `values_with_root`, each width-guarded:
+
+* `Ror` with a **one-bit** operand is that bit. Wider operands genuinely reduce
+  and keep falling through to `kAny`.
+* `Mux`, **two-arm only**: when the selector is decided at this root level, the
+  mux IS the arm it selects. A two-arm Mux is a TRUTH TEST -- cgen emits
+  `if (sel) arm1 else arm0` (`cgen_verilog.cpp` process_mux, the
+  `ordered_inp.size() == 3` branch) -- so this holds at any selector width.
+  Three or more arms is an INDEXED case with `default: '0` whenever
+  `2^width(sel)` exceeds the arm count, so a sparse indexed mux can be ZERO at a
+  selector value no arm covers; a union over its arms alone would call three
+  all-1 arms "provably 1" while selector 3 yields 0. Those forms return `kAny`
+  and are not analyzed, so no out-of-range control is owed.
+
+**Why `resolve_phase` did not already handle it -- WITHDRAWN as unsupported.**
+An earlier draft asserted that B01's mux has two nonzero constant arms, so that
+`resolve_phase`'s own Mux recognizer (which needs a constant-ZERO arm,
+`cond ? nonzero : 0`) could not fire. The retained probe prints only
+`const=true`; it never printed the arms' VALUES, and `is_const` alone does not
+establish "nonzero". The claim is withdrawn rather than patched: it is an
+explanation of why the older recognizer stops, and NOTHING in the fix depends on
+it -- the new rule reasons about the SELECTOR's level and is correct whatever
+the arms hold. If it is ever wanted, it needs one inspection of the frozen
+cone's actual port ids and constant values, not a re-reading of this probe.
+
+**What the deletion tests actually establish** (not re-run for prose): with ALL
+rules removed the fixture's yosys leg fails (`rc=7`); with the `Get_mask` rule
+removed ALONE it still passes, so that rule was dead and is gone. Those two runs
+do NOT individually establish that each of `Ror` and `Mux` is separately
+necessary -- no single-rule deletion was run for either. Both sit on the
+measured cone (`Get_mask -> Mux -> Ror -> clk_i`), which is why both were
+written, but "each is independently required" is not claimed here.
+
+Both return the operand's own value set, so a genuinely same-phase latch still
+computes the wrong set and is still refused. No rule returns "safe" for an
+unknown shape; everything outside the guarded forms still reaches `kAny`.
+
+A `Get_mask` rule was written first and then **deleted as dead code**:
+`resolve_phase` already treats Get_mask and Sext as identity wiring, so `ph.net`
+is never one. Confirmed by deleting each rule in turn against the fixture.
+
+### 4. The second flop, and B01's real frontier
+
+With the rules in, `latch_50396` reads `closed_at_ok=true open_at_ok=true` and
+`flop_75936` passes. `single_edge` still exits 7 — on a **different flop sharing
+the same latch**:
+
+```
+flop_76000:gen_offload.u_tensor_load_0.gen_tmp_data_rf
+           .gen_tmp_data_blk[0].u_tmp_data.wr_data_del_q     rising=FALSE
+```
+
+That is genuine, and the RTL **B01 actually compiled** says so. Its retained
+filelist selects three `tech_generic` preview variants --
+`prim_rf_1r1w_preview`, `prim_rf_1r1w_reg_preview` and
+`prim_rf_1r1w_par_preview` -- each carrying the same shape
+(`prim_rf_1r1w_preview.sv:40`):
+
+```systemverilog
+always_ff @(negedge rf_clk_i) if (wr_data_en_1p) wr_data_del_q <= wr_data_i;
+always_ff @(posedge rf_clk_i) if (wr_en_i)       rf_q[wr_addr_i] <= wr_data_del_q;
+```
+
+(An earlier draft of this section cited `tech_ecp5/prim_rf_1r1w`: the same
+structure, but NOT a file in B01's filelist. Corrected here.)
+
+A deliberate half-cycle register file: capture on the falling edge, commit to
+the array on the rising one. Its `clk_i` is the parent's GATED clock, so a
+**negedge flop sits on a gate built for posedge sampling**.
+
+For that flop the bypass is **not** exact, so refusing is correct GIVEN THE
+CURRENT LOWERING. That is a missing capability, not an invalid design: a
+dual-edge consumer behind a positive ICG is legal hardware, and the retained
+`result4.json` supports only that `single_edge` still exits 7 on `flop_76000`
+through `latch_50396`.
+The bypass replaces the latch's Q with its transparent arm, which is exact only
+when the latch CLOSES at the sampling edge:
+
+* posedge flop, low-transparent latch — closes at the edge, so `Q == D` there;
+* negedge flop, low-transparent latch — **opens** at the edge, so just before it
+  the latch was holding and `Q != D` in general.
+
+So this is a NEW semantic boundary, not another recognition gap, and it is not
+closed here.
+
+### 5. The lowering this needs, derived from `pass/lec/phase_sched.cpp`
+
+The scheduler already owns the right contract, and it is reusable rather than
+something to invent. `phase_sched.cpp:587` states it outright:
+
+> A recognized gate contributes a guard sampled on the INACTIVE PHASE
+> IMMEDIATELY BEFORE THE CELL'S OWN ACTIVE EDGE -- **parity of the CELL, not of
+> the consumer.**
+
+`guard_before_fall` is set from the CELL's own `invert` attribute
+(`phase_sched.cpp:211`), never from a consumer flop's edge, and
+`guard_sample = guard_before_fall ? Close_high : Close_low` (`:594`). For B01's
+gate (`clk & en_latch`, not inverted) that is `Close_low` -- precisely the
+latch's transparent window.
+
+The state-transition contract that follows, for ONE gate driving BOTH a rising
+and a falling consumer:
+
+1. the enable is captured while the latch is transparent (the LOW phase) and
+   HELD across the whole HIGH phase;
+2. the gated clock's rising edge occurs iff that held value is 1;
+3. the gated clock's falling edge occurs iff the SAME held value is 1 -- the
+   latch is shut through the high phase, so an enable change there can neither
+   cancel nor invent the following falling event;
+4. therefore **both consumers are governed by the same sampled guard**, and the
+   falling consumer's enable is the HELD value, not the live arm.
+
+That rules out all three shortcuts: removing the phase guard (loses 2-3),
+substituting the raw arm D at the falling edge (reads the live enable, which may
+have moved during the high phase), and reading Q blindly (the full-cycle-late
+error the bypass comment at `pass_single_edge.cpp` exists to prevent, since
+normalized state updates on one edge).
+
+The exact lowering is therefore a HELD GATE STATE -- the enable sampled at the
+preceding `Close_low` -- shared by both consumers, with the rising consumer
+keeping today's arm bypass (equivalent there, because the latch shuts at its
+edge). **Specified here, not implemented**: it adds a new sampled element to
+single_edge's slot machinery and must be proven against a dual-edge fixture with
+enable and scan changes during the high phase, which is the next B01 step.
+
+**CORRECTION -- the simulator IS provisioned, and the earlier "not installed"
+claim was wrong.** It was made after checking only system PATH directories
+(`/usr/bin`, `/usr/local/bin`, `~/.local/bin`). The retained tools live
+PROJECT-LOCALLY, as MASTER_INTEGRATION.md R34.1 records:
+
+```
+generated/validation-tools/iverilog-v13_0/bin/iverilog   Icarus 13.0, exit 0
+  sha256 5506c214f778cc5eb79e503c86b683216ebc0c7975b0d9228fa157fcb4e41e97
+generated/validation-tools/iverilog-v13_0/bin/vvp        Icarus 13.0, exit 0
+  sha256 ab92b3ffd910f0c3682ace1a0befa8f1b444bf98d4330483cf6afa46ff58a188
+```
+
+So the external leg is runnable here and the gate is open only until it is run,
+not blocked. **It has now been run, and the L1 negative repaired.** Note first
+what the RETAINED evidence showed about it
+(`generated/master_port/d2_runtime/single_edge_icg_test_extsim.log` and
+`master_rebase/audits/native_runtime_reproduction_20261010/result.json`): the
+older external ICG positive agreed for 29 cycles, but its L1 NEGATIVE FAILED TO
+APPLY -- so that run is not a full pass and must not be counted as one.
+
+**Why it could not apply, and the repair.** The mutation was
+`sed 's/^if (en) begin/if (enl) begin/'` on the normalized netlist. cgen never
+spells the enable that way: the direct-slang shape emits
+`if ((en & ((reset) == ('sb0))))` and the yosys shape emits `if (sext_116)`.
+The pattern matched nothing, `cmp` saw no change, and the leg reported "did not
+apply" while the positive passed beside it -- a negative control that tested
+nothing. What IS stable across both shapes is that the held latch survives as
+`reg enl` driven by `___next_enl = <arm>;`, so the arm is now READ OFF that
+line and substituted for the held `enl` on exactly one line: the `if (...)`
+guarding `f <= ___next_f;`. Substituting it everywhere would rewrite the arm's
+own definition (`sext_116 = $signed(mux_56[0:0]);`) and build a different
+design instead of the L1 defect. The leg now asserts the arm was found, that
+the substitution CHANGED the file, that the mutant ELABORATED, that it RAN to a
+verdict, and that the verdict is a mismatch.
+
+Measured with the retained Icarus 13.0
+(`generated/validation-tools/iverilog-v13_0/bin`), `LHD_EXTERNAL_SIM=1`:
+
+```
+ok: source ICG and normalized flop-with-enable agree over 29 cycles under iverilog
+ok: the L1 mutation applied (arm net 'en' -> held 'enl')
+ok: reading the enable latch's held Q instead FAILS (the bypass is load-bearing)
+ok: clk-AND-data latch agrees with the real gated latch over 23 cycles under iverilog
+```
+
+### 6. B01's boundary, reduced to a twelve-line reproducer
+
+The dual-edge shape is now a fixture leg of its own:
+
+```systemverilog
+always @(clk or en or scan) if (!clk) enl <= en | scan;
+wire gclk = clk & enl;
+always @(posedge gclk) if (reset) fr <= 0; else fr <= d;   // rising consumer
+always @(negedge gclk) ff <= d;                            // falling consumer
+```
+
+`pass.single_edge` refuses it exit 7, `clock-gate-latch-phase`, naming
+`flop_48:ff` through `latch_40:enl` -- the same code and the same shape as B01's
+`flop_76000:...wr_data_del_q` through `latch_50396:...en_latch`, in a design
+that compiles in under a second instead of a whole cache.
+
+The leg PINS the current refusal rather than endorsing it, and fails loudly if
+the design ever normalizes without the leg being rewritten to assert the
+recognition plus the simulator differential. So the boundary cannot move
+silently, and the lowering of section 5 now has a cheap target to be developed
+against. Closing it means deciding what a negedge flop on a posedge ICG
+should lower to — plausibly "take the enable from the latch's Q, not its arm",
+which is a different lowering with its own hazard (the comment at the bypass
+records why reading Q is otherwise a full-cycle error). That decision is not
+made unilaterally.
+
+**B01 remains BLOCKED.** It compiles and its first normalization refusal is
+gone; the certificate does not exist, so no FP credit is claimed or implied.
+
+## §63.85 — the yosys ICG spelling normalized to X, and two unsound fixes on the way to the real one
+
+### 1. The defect a differential found and "recognized" was hiding
+
+§63.84's fixture leg declared the CORE-ET `prim_clk_gate` spelling recognized on
+the strength of `single_edge` exiting 0 and reporting a folded gate. It never
+simulated the result. The result was **`q = x`**.
+
+`latch_transparent_arm` peels a latch's hold mux only when one arm is the
+latch's own `Q`. tolg spells "holds" that way; the YOSYS reader spells it as a
+DON'T-CARE constant, and puts it two identity wrappers down:
+
+```
+din = Sext(Get_mask(Mux(Ror(clk), 1'sb?, en|scan), [0,1)))
+```
+
+So the mux was never found, the clock-muxed wrapper became the "transparent
+arm", and at the sampling edge that arm is X -- every flop behind the gate
+emitted `q = x`. Nothing caught it because the fixture's iverilog legs all ran
+the DIRECT-SLANG shape.
+
+### 2. Two unsound attempts, and what caught each
+
+| attempt | what actually established it was wrong |
+|---|---|
+| unwrap `Sext`/`Get_mask` unconditionally | Nothing measured. It drops real width work on a wider latch, which is an argument, not an observation; the run that refuted `abc_latch_gated` at `qg(ref=15 impl=14)` had the hold path in the tree too, and isolating ONLY the hold path made it pass. So that refutation is attributable to the hold path and NOT to the unwrap. The width restriction stands on its own reasoning. |
+| accept ANY don't-care arm as a hold arm | `DontCareOnTheOpenPhaseIsNotAHoldArm` — a deterministic unit counterexample. |
+
+**CORRECTION, and it matters.** An earlier draft of this section said that
+accepting any don't-care arm "stopped `lgcheck_memory_poweron_smoke` REFUTING
+its planted break" and failed `yosys_clock_domain_test`. **That causal claim is
+withdrawn.** Both retained logs
+(`master_rebase/audits/b01_instruction145_progress_20261014_0356.json`) show a
+BUDGET TIMEOUT, not a false verdict:
+
+```
+lgcheck_memory_poweron_smoke: starting equivalence checks (shared budget 3s)
+                              TIMEOUT: bounded miter exhausted the shared budget (3s)
+                              INCONCLUSIVE ... FAIL: broken returned 2; expected 1
+yosys_clock_domain_test:      exhausted its 8s budget the same way
+```
+
+Neither returned a false PROVEN. Both pass when re-run unloaded — the machine
+was at load average ~61 from other sessions. They are timing-sensitive under
+load and say nothing about this rewrite.
+
+What DOES establish the polarity bug is the paired control, and only that:
+comparing only the selector's ROOT against the window's root is not a proof. With enable `!clk`, selector `clk` and arms
+`{X, d}`, the don't-care is selected while the latch is **OPEN** -- the latch
+really passes X -- yet a root-only test accepts and hands back `d`.
+
+### 3. The discriminator that holds
+
+Polarity AND the arm mapping, from `resolve_phase` alone:
+
+```
+open_level   = active_low ? wr.inverted : !wr.inverted
+closed_level = !open_level
+sel_at_close = (closed_level != sr.inverted) ? 1 : 0   // sel is 1 iff L != sr.inverted
+require        x_index == sel_at_close                 // pid1 -> 0, pid2 -> 1
+```
+
+plus exactly two arms, exactly one don't-care, and a single driver on it.
+`pid1`/`pid2` is cgen's own two-arm mapping (`if (sel) arm1 else arm0`).
+Anything undecidable returns false and the mux keeps its value semantics.
+
+Applied to **both** overloads, which now share ONE arm classifier
+(`classify_mux_arms`) and ONE wrapper walk rather than two subtly different
+loops. They had drifted twice: the don't-care spelling was taught to the flat
+overload alone, and then the wrapper walk was too, so a hierarchical caller kept
+reading the clock-muxed value even after the first repair. The classifier also
+fails closed on the shapes the old hierarchical loop accepted loosely -- a
+selector or arm reached by more than one driver, or more than one don't-care,
+now leaves the mux with its value semantics instead of being peeled.
+
+### 4. The gates, and what each would catch
+
+* `graph/latch_contract_test`: four controls -- `DontCareOnTheClosedPhaseIsAHoldArm`
+  / `DontCareOnTheOpenPhaseIsNotAHoldArm` for the bare mux, and
+  `WrappedDontCareOnTheClosedPhaseIsStillAHoldArm` /
+  `WrappedDontCareOnTheOpenPhaseIsStillRefused` for the REAL shape, where the
+  mux sits under the `Get_mask` the reader emits. Each pair is the same design
+  twice, differing only in which arm holds the don't-care. Reverting to the
+  root-only form fails exactly the two open-phase negatives.
+* There is deliberately NO control for the window-OFFSET guard. One was written
+  and removed: in every shape that reaches it the mux is wider than one bit, so
+  the arm-width rule refuses first and the test passed without exercising the
+  offset at all. A control that cannot fail for its stated reason is worse than
+  none, which is what the L1 negative had been.
+* `single_edge_icg_test`: the CORE-ET spelling now runs its ORIGINAL RTL against
+  the normalized output (P=1, same clock), `en`/`scan` moving in the low phase
+  and `en` also moving MID-HIGH where the real latch is shut. 30 checks, with a
+  vacuity floor, keyed on markers because `$finish(1)` leaves vvp's exit at 0.
+  Against the pre-fix netlist: `ICG_EC_FAIL errs=30`, `normalized=x`.
+
+466/466 on `//graph //lhd/tests //pass/single_edge //pass/lec //inou/yosys`.
+
+### 5. Corrections to §63.84 and to the previous report
+
+* **The simulator was never unavailable.** `generated/validation-tools/iverilog-v13_0/bin`
+  holds Icarus 13.0; the earlier "not installed" came from checking only system
+  PATH. Already corrected in §63.84.
+* **`q = 37` is not an equivalence gate** and is no longer cited as one. It was
+  one normalized instance, constant inputs, one `$display`. The RTL differential
+  above replaces it.
+* **The dual-edge harness epoch was wrong.** `dnorm7.v` initializes
+  `single_edge_phase` to 0 and toggles every normalized posedge, so with
+  `clk_n = 0` and `always #5` slot 0 lands at 5,25,... and slot 1 at 15,35,...
+  -- the normalized design ran 5 ns AHEAD of a source rising at 10. The comment
+  claiming slot0@15/slot1@25 was copied from `single_edge_four_classes_test` and
+  is false for this artifact. **So the 49 mismatches do not implicate the hold
+  lowering**, and that attribution is withdrawn. The fix is to start the
+  normalized oscillator 5 ns late so its posedges pair with source rise/fall.
+* **The `qg(ref=15 impl=14)` isolation says one thing only:** disabling the hold
+  path made those two tests pass, so the hold path caused them. It does not
+  implicate the unwrap or the X-arm change, and this section no longer cites it
+  against either.
+* **`icg_hold` is retained, not shipped**
+  (`generated/master_port/b01_extsim_20261014/icg_hold_ATTEMPT.patch`). Beyond
+  the harness error it has a real source-level bug: `old_en` -- the consumer's
+  own local enable -- is folded into the gate enables BEFORE the sample, so it
+  gets frozen at the rise. A falling consumer evaluates its local enable at the
+  FALL; with gate on and local enable 0@rise/1@fall the sample suppresses a
+  required commit, and 1@rise/0@fall invents one. B01's `wr_data_en_i` is
+  exactly such a local enable. Only the GATE GUARD may be sampled; the local
+  enable and the slot predicate combine at the consumer's commit. The guard
+  should also be shared by gate/root/polarity the way
+  `pass/lec/phase_sched.cpp` keys `guard_key`/`guard_cones`, not minted per
+  consumer, and the added state's startup correspondence has to be argued rather
+  than asserted by an `initial = 0`.
+
+B01 remains BLOCKED. Its boundary is unchanged and still pinned by the
+dual-edge leg; no certificate exists and no FP credit is claimed.
+
+## §63.86 — the sampled gate guard, and B01's frontier moves to the memory write port
+
+### 1. The harness was wrong, not the lowering
+
+§63.85 reported 49 mismatches from the dual-edge differential and did not
+attribute them. They were the harness. `dnorm7.v` initializes
+`single_edge_phase` to 0 and toggles it on every normalized posedge, so with
+`clk_n = 0` and `always #5` slot 0 landed at 5,25,... and slot 1 at 15,35,... --
+a HALF PHASE AHEAD of a source rising at 10 and falling at 20. The two designs
+were sampling different inputs, including on the rising consumer, which is why
+`qr` disagreed even though nothing in the lowering touches it.
+
+Starting the normalized oscillator 5 ns late pairs them exactly, and that is
+asserted rather than assumed:
+
+```
+SLOT0 @10  SLOT1 @20  SLOT0 @30  SLOT1 @40  ...
+```
+
+Recalibrated, the same comparison went **49 mismatches -> 1**.
+
+That is scoped evidence about THIS artifact and this run. It does not prove that
+every earlier difference arose only from oscillator alignment -- the
+implementation changed between those runs too, so the two are not a controlled
+comparison.
+
+### 1a. The last mismatch, explained rather than excluded
+
+An earlier revision silenced it with `$time > 60` and called it a transient.
+That was an observation exclusion, not an explanation, and the "validated",
+"transient" and "exonerated" wording that rested on it is withdrawn. Traced
+(`generated/master_port/b01_extsim_20261014/startup_evidence/`):
+
+```
+ t     | src.enl src.fr | nrm.fr
+10000  |   x       x    |   x      <- source rise
+11000  |   x       0    |   x      <- the SOURCE committed
+21000  |   1       0    |   x      <- the gate is only now DEFINED
+31000  |   1      11    |  11      <- both agree from here
+```
+
+`prim_clk_gate`'s latch is `always @(clk or en or scan) if (!clk) enl <= ...`.
+With `clk` starting LOW there is no EVENT, so `enl` is x until the first low
+phase after the first rise. At t=10 the source's `gclk = clk & enl` goes
+`0 -> x`, which Verilog treats as a POSEDGE, so the source committed its reset
+arm under an UNDEFINED gate; the normalized design has no gated clock, its
+enable was x, and it correctly did not commit. The divergence is created there
+and persists until the next write.
+
+So it is a source-side X artifact before the gate exists -- not settling, and
+not a defect in the lowering. The harness now DRIVES the prologue instead of
+waiting it out: reset is held past the first rise that happens with a defined
+gate, which is the rising consumer's own `if (reset) fr <= 0` contract, and the
+run fails `DUAL_GATE_NEVER_READY` or `DUAL_PROLOGUE_BAD` if that does not take
+effect. The failing artifact and trace are retained.
+
+### 2. What the repaired lowering does
+
+Only the GATE GUARD is sampled. The retained attempt folded the consumer's own
+enable into the guard BEFORE sampling, which freezes a local enable half a
+period early: with the gate on and the local enable 0@rise/1@fall that
+suppresses a commit the design makes, and 1@rise/0@fall invents one. B01's
+`wr_data_en_i` is exactly such a local enable.
+
+In the emitted netlist:
+
+```verilog
+flop_276 <= ___next_flop_276;          // the held guard, enabled by slot 0
+if ((flop_276 & single_edge_phase))    // falling consumer: HELD guard
+if ((sext_244 & eq_264))               // rising consumer: live arm, unchanged
+```
+
+and the local enable lands in the data mux, evaluated at the consumer's own
+commit. The differential moves it 31 times during the high phase, 16 up and 15
+down, and the harness refuses to pass if it ever stops exercising both
+directions.
+
+One guard per GATE, keyed on a PLANNED identity -- the gate's clock root, the
+reference edge, and the guard cone's own pins, sorted, built before any node is
+created. An earlier revision keyed on the FOLDED AND NODE, which shares only
+when a gate has a single enable: a compound guard mints a fresh node per
+consumer and so would have got separate held state. This is the
+`guard_key`/`guard_cones` separation `pass/lec/phase_sched.cpp` already uses --
+"a guard sampled on the inactive phase immediately before the CELL's own active
+edge, parity of the CELL, not of the consumer".
+
+**Epoch, argued.** The divider initializes to 0, so slot 0 is the FIRST
+normalized step and the sampling commit always precedes the first slot-1 read;
+the held flop's power-on value is never observed. The concrete `0` is for a
+definite encoder initial state, not for correctness.
+
+### 3. The negative that makes it evidence
+
+Swapping the held guard for the live arm -- derived from the netlist, required
+to apply, elaborate and run -- gives `DUAL_FAIL errs=26`. Without that, the
+agreement above would prove nothing. The flop-only restriction, the rising
+bypass, the same-phase refusal and the L1 negative are all unchanged, and the
+two LEC oracles that caught the first attempt (`lib_cell_prep_test`,
+`lhd_abc_latch_test_usyn`) pass.
+
+**Limit, stated because the control does not cover it.** No discriminating test
+exists for the COMPOUND guard. The only RTL shape that puts more than one pin in
+a gate's enable list is a gate CHAIN, and that shape is currently refused for an
+unrelated reason (the inner enable latch is clocked by the GATED clock, so it is
+not opposite-phase against the root). A first attempt at a compound fixture
+passed under the OLD keying too, because `en0 & en1` collapses to a single
+enable pin. The fix is correct by construction, not by measurement, and the
+fixture says so. What IS checked: three held consumers over two gates produce
+two guards, one of them read by two consumers.
+
+350/350 on `//pass/single_edge //lhd/tests //pass/lec //graph`.
+
+### 4. B01's frontier, and it is a real advance
+
+One source-bound normalization of the RETAINED raw graph
+(`lhd` sha256 `dbdc86e4...`, frontend producer unchanged since the graph was
+emitted, so no recompile):
+
+```
+s2_single_edge  exit 7  memory-unsupported
+  memory `memory_107860:gen_offload_reduce.u_reduce.u_ba_alloc_fifo.mem`
+  write port 0 has a GATED clock
+  hint: the gate's enable conditions are not folded into a memory's write
+        enable by this pass, so accepting it would drop the gate
+```
+
+`clock-gate-latch-phase` is gone. The new stop is the **same memory** the
+projection branch stopped at -- `baseline_frontend_build_9bb41a09d_20261012/
+old_dcache_single_edge_attempt_20261012_1545` records
+`memory_91680:gen_offload_reduce.u_reduce.u_ba_alloc_fifo.mem` -- but with a
+different and later refusal: that run said the memory "would commit on every
+sub-step under a phase divider", which the memory-slot lowering cleared, and
+what remains is the GATE on its write port.
+
+So the next B01 step is the memory analogue of this section's work: fold a
+gate's enable into a memory's WRITE ENABLE the way it is now folded into a flop
+enable, preserving the slot gating the write port already has.
+
+**B01 remains BLOCKED.** It still produces no certificate, and no FP credit is
+claimed or implied.
+
+## §63.87 — a gated memory write port, and B01 normalizes for the first time
+
+### 1. The contract, measured before anything was written
+
+`memory_107860:gen_offload_reduce.u_reduce.u_ba_alloc_fifo.mem`, write port 0:
+
+| fact | value |
+|---|---|
+| edge | **rising** |
+| `wensize` | **3 lanes** |
+| clock | `clkgt`, root `clk_i`, **div = 1** |
+| gate cone | ONE enable: `u_clk_gate.en_latch`, 1 bit, op = **latch** |
+| port enable | `get_mask_304088`, 3 bits |
+
+Two things follow. The guard is the latch **Q**, so it needs the same bypass and
+the same opposite-phase proof the flop path demands. And it is ONE BIT against a
+THREE-LANE enable, so it cannot simply be ANDed in.
+
+### 2. The lowering, reusing what exists
+
+The gate joins the **slot predicate** -- both one bit -- and the PAIR is widened
+by the Sext + `Get_mask` idiom the slot mask already uses. So the gate reaches
+every lane, no wide shared constant is minted, and the traps that note already
+records (a restamped shared zero, a `Sext` that bitwidth recomputes back to
+width 1) are avoided by construction rather than re-discovered.
+
+`div != 1` is refused by name. A latch that is not opposite-phase is refused
+rather than mis-timed. The sampled-held guard is deliberately NOT extended to a
+Memory in this increment, and a falling memory is still refused.
+
+**The write clock is REBOUND to the gate root.** The pass previously did not
+touch `clock_pin` on a Memory at all, and the falling-memory refusal says so.
+Folding the gate while leaving the gated net on the clock would apply it twice
+and leave a DERIVED clock in a design this pass exists to make single-edge --
+the encoder refuses one, so the cell would come back UNKNOWN after a successful
+lowering.
+
+Verified in the emitted netlist:
+
+```verilog
+.wr_clock_0(clk)             // the ROOT, not gclk
+.wr_enable_0(get_mask_320)   // reg [39:0] -- full width
+and_312 = eq_304 & sext_228  // slot AND gate, one bit
+get_mask_320 = sext_316      // widened to 40
+```
+
+### 3. Evidence, and where it lives
+
+Original RTL against normalized, 40-bit lanes so the TOP LANE IS BIT 39 (above
+31, where a 1-bit or 32-bit mask truncation shows), gate turning off every third
+step: **`MEM_OK checks=44 gate_off=15 gate_on=29`**. The gate-dropped mutant
+**`MEM_FAIL errs=9`**, diverging on real data (`b6deadbe00` vs `bedeadbe00`),
+not X -- writes the source suppresses get through.
+
+That differential is retained under `generated/master_port/b01_memgate_20261014/`
+rather than wired into CI, and the reason is recorded in the fixture:
+
+* the normalized memory instantiates `cgen_memory_multiclock_1rd_1wr` from
+  `ware/rtl`, which is not on the ICG test's data path; and
+* `lhd/tests/single_edge_memory_slot_test.sh`, the fixture that DOES host memory
+  differentials, is **in no bazel target** and is currently **RED** --
+  `SINGLE_EDGE_MEM_DIFF_FAIL errs=78` on its flop legs. That is PRE-EXISTING:
+  reverting this change to the committed source and rebuilding reproduces it
+  exactly. Nothing in CI has been running it.
+
+Burying a new differential behind a red unwired fixture would make it dead code,
+so the structural half -- root clock rebound, full-width enable -- went into the
+wired-in `single_edge_icg_test` instead, where it runs.
+
+354/354 on `//pass/single_edge //lhd/tests //pass/lec //graph //pass/lean`.
+
+### 4. B01 normalizes
+
+```
+s1_compile      exit 0    (the retained raw graph)
+s2_single_edge  exit 0    FIRST successful normalization of this unit
+lean emission   exit 1    pass.lean: combinational cycle at node n_144984
+```
+
+```
+P=2 slots, 12 latch(es) retyped, 305 gated clock(s) folded into an enable
+(16 sampled-held), 988 element(s) slotted,
+21 memory(ies) slotted over 21 write port(s)
+```
+
+Both new capabilities are exercised by the real design, but read the counters
+exactly as they are defined:
+
+* `21 memory(ies) slotted over 21 write port(s)` counts SLOTTED write ports, not
+  newly ungated ones. How many of those 21 had a GATED clock folded is
+  `mem_ports_ungated`, which this report line does not print -- so "21 gated
+  memory clocks" would be wrong, and is not claimed.
+* `16 sampled-held` counts CONSUMERS served by a sampled guard, not distinct
+  guards. The guards are shared per gate, so the number of guard registers is at
+  most 16 and may be fewer.
+
+What is established is that both paths fire on this unit at all, which no
+fixture could show.
+
+**B01 remains BLOCKED.** There is no certificate; emission refuses immediately
+after. No FP credit is claimed, and normalization is not equivalence.
+
+The new boundary is `pass.lean: combinational cycle at node n_144984` on the
+NORMALIZED graph -- the first boundary past normalization for this unit.
+(The accompanying `onehot-deferred` is a warning, not the stop.) It is diagnosed
+in 63.88; an earlier sentence here called it the same family as the `comb-loop`
+refusals blocking B02/B04/B06/B07/B08 and that is WITHDRAWN -- this graph passes
+`pass.legalize`, so it is a different checker and not a shown-shared cause.
+
+### 5. A standing note on P=2 harnesses
+
+The first memory differential drove the P=2 normalized design with the SOURCE
+clock and produced eight X mismatches; the 5 ns-late 2x oscillator fixed it.
+That is the second time this exact miscalibration has been mistaken for a
+transformation defect. Any new P=2 differential needs its slot schedule asserted
+before its results mean anything.
+
+## §63.88 — three memory-plan repairs, and B01's emission cycle localized
+
+### 1. What was wrong with the accepted memory rewrite
+
+| defect | why it mattered |
+|---|---|
+| **Planning mutated the graph.** The gate's AND cone was built during the refusal scan, before the `dry_run` return. | `dry_run` promises an untouched graph and `proof_prep` relies on it; a dry run, and any plan refused later, left nodes and edges behind. The plan now freezes only pre-existing operand PINS and the cone is built in the rewrite. |
+| **The rebind lost the clock-bus bit.** It bound the bare `icg->clock`. | The common rewrite selects `ref_clk_bit` into `ref_clk_pin` precisely because a rebound `clock_pin` reads bit 0 of its driver. A memory on bit k>0 would have passed the different-bit check and then been moved to bit 0 alone. It now rebinds to the validated selected pin. |
+| **The rebind could lose polarity.** `clock_inverted` was not consulted. | `commit_class_of_clock` folds `~clk & en` in, so a NEGEDGE memory on an inverted gate is a double inversion presenting as rising -- the falling-edge refusal does not fire. Rebinding to the root would have moved the committing edge, which `cgen_verilog`'s clock_expr still inverts. Now refused BY NAME before any mutation. |
+
+The gate is also resolved AFTER `cc` now, so the latch-window proof uses the
+EFFECTIVE edge rather than raw `ms.rising`.
+
+**Rule 4** walked `addr`/`din`/`enable` only. A folded gate is read
+combinationally by the commit too, so `check_rule4` now resolves the ICG itself
+and walks the (bypassed) gate cone -- it runs before the memory plan exists, so
+the cone is resolved there rather than read off the plan.
+
+Controls in `pass/single_edge/pass_single_edge_test.cpp` (a permitted
+non-contract harness; `graph/latch_contract_test.cpp` is untouched), each
+verified to FAIL when its repair is reverted:
+`DryRunLeavesAGatedMemoryGraphUntouched`,
+`ARefusedInvertedGateLeavesTheGraphUntouched`,
+`AGatedWriteClockFoldsIntoTheFullWidthEnable`,
+`AGatedWriteClockWithNoPortEnableStillGatesEveryLane`.
+
+354/354 on `//pass/single_edge //pass/lean //lhd/tests //graph //pass/lec`.
+
+### 2. B01's cycle, localized
+
+`pass.legalize` AND `pass.legalize.seal` both PASS on this graph -- seal re-scans
+with `check_acyclic=true`. Only `pass.lean` refuses, because the two checks are
+different instruments:
+
+* `pass/legalize/acyclic.cpp`: driver-pin-level, BIT-REFINED, hierarchical arc.
+* `pass/lean/design_scan.cpp:883`: node-level DFS, leaf = input | const | FLOP.
+  No bit refinement, and **a Memory is not a leaf**.
+
+The closing node is `n_144984[eq]`. The path is 55 `mux`, 37 `or`, 21 `and`, 7
+`get_mask`, 7 `eq`, 3 `ror`, 1 `lt` and ONE memory:
+
+```
+... -> n_332884[get_mask] -> n_107996[memory]{sink_pid=0 port=0 off=0}
+    -> n_361716[get_mask] -> n_419680[and] -> ...
+```
+
+Memory offset **0 is `addr`** (graph/cell.cpp:222), so the cycle is
+
+> memory dout -> a long mux/or/and cone -> that same memory's write ADDRESS
+
+the allocator FIFO computing its next address from what it just read.
+
+**This rules out the gated-memory fold**, which writes only offset 4 (`enable`)
+and offset 2 (`clock_pin`). The question was worth asking -- the fold does make
+a memory's enable depend on the gate arm, and a Memory is not a leaf here -- and
+the measurement answers it rather than an argument.
+
+Evidence: `generated/master_port/b01_cycle_20261014/` (`cycle_path.txt`,
+`DIAGNOSIS.md`).
+
+**The open decision is NOT taken here.** Whether `pass.lean` should treat a
+Memory read->write path as a cut, the way legalize already does ("an async read
+is combinational in its own address/enable; write cones are sequenced after the
+read by every consumer, so they are no loop"), or whether this design genuinely
+needs the address resolved before the write, is the next question. The check is
+not relaxed and no acceptance gate is substituted.
+
+### 3. Evidence corrections
+
+* `startup_evidence/startup_trace.log` held `timeout: failed to run command
+  'vvp'` -- captured without PATH. The real 68-line trace replaces it.
+* `21 memory(ies) slotted over 21 write port(s)` counts SLOTTED ports, not newly
+  ungated ones (`mem_ports_ungated` is not in that line). `16 sampled-held`
+  counts CONSUMERS, not distinct guards, which are shared per gate.
+* The B01 run under `b01_20261014/` is rebound to its RUN-TIME state --
+  `08a34eb93` plus uncommitted changes, later committed as `ca84bb0ec` -- rather
+  than relabelled "ca84bb0ec clean", which was a post-hoc equivalence.
+
+B01 remains BLOCKED: no certificate, no FP credit.

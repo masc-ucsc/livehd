@@ -481,7 +481,7 @@ TEST(DcertStreamFailure, MidRecordFailurePropagatesInsteadOfTerminating) {
 TEST(DcertStreamFailure, WriteDcertReportsAnUnopenablePath) {
   // A directory is never a writable file; the serialiser says so rather than
   // leaving a caller believing an artifact was published.
-  EXPECT_THROW(write_dcert(full_fixture(), "/mada/users/czeng14/projects"), std::runtime_error);
+  EXPECT_THROW(write_dcert(full_fixture(), "/tmp"), std::runtime_error);
 }
 
 }  // namespace

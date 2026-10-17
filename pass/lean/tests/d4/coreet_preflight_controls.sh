@@ -13,7 +13,7 @@ HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT="$(cd "$HERE/../../../.." && pwd)"
 PRE="$ROOT/scripts/coreet_preflight.sh"
 PATCHER="$ROOT/scripts/coreet_patch_srcs.py"
-REAL_ROOT="${COREET_ROOT:-/soe/czeng14/projects/core-et}"
+REAL_ROOT="${COREET_ROOT:-/HOMEROOT/projects/core-et}"
 REAL_DERIVED="$ROOT/generated/core-et/patched_src"
 
 fails=0

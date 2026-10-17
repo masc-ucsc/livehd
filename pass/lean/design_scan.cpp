@@ -686,7 +686,7 @@ DesignScan scan_design(hhds::Graph& graph, const ScanOptions& options) {
     m.size         = info.size;
     m.wensize      = info.wensize;
     m.type         = info.type;
-    m.fwd          = info.fwd;
+    m.fwd_rows     = info.fwd_rows;
     m.posclk       = info.posclk;
     m.sync         = info.sync;
     m.is_rom       = info.is_rom;
@@ -875,24 +875,107 @@ DesignScan scan_design(hhds::Graph& graph, const ScanOptions& options) {
       }
     }
   }
-  std::set<uint32_t>                 reached, active;
-  std::vector<std::pair<Node, bool>> stack;
+  // A MEMORY IS NOT ONE COMBINATIONAL VERTEX, AND ITS READ PORTS ARE NOT ONE
+  // SCHEDULING UNIT EITHER.
+  //
+  // This walk used to join every memory INPUT to every memory OUTPUT, because
+  // it expanded a node by `inp_edges_ordered` and cut only flops. That reports
+  // a cycle for `read dout -> ... -> WRITE address`, which is not one: a write
+  // port samples its address AT THE EDGE, so that path is feedback through the
+  // array exactly like `always @(posedge clk) r <= f(r)`. Measured on CORE-ET
+  // minion_dcache_top, which `pass.legalize` and `legalize.seal` both accept.
+  //
+  // Each READ PORT is now walked, and emitted, as its own unit, keyed by
+  // (memory node, read ordinal). Two read ports of one array are two
+  // independent values over one shared image, so `read 0 -> logic -> read 1's
+  // address` is an ordinary DAG edge; only a path that returns, `read 0 ->
+  // read 1's address` AND `read 1 -> read 0's address`, is a cycle. The image
+  // and the next-state write chain remain ONE identity per memory, created
+  // once in the builder.
+  //
+  // WHAT A READ DEPENDS ON is taken from the same decoded `Memory_info` the
+  // certificate is built from, so the dependency set is exactly the set of pins
+  // `lower_memory_read` will reference -- no more and no less:
+  //
+  //   * a SYNCHRONOUS read presents last cycle's value. It is a state source,
+  //     so it has no combinational operand at all; its address and enable cone
+  //     belong to the next-state side, which is scheduled after every node.
+  //   * an ASYNCHRONOUS read reaches its own address and enable, plus the
+  //     address, data and lane-enable cones of the writes ITS OWN ROW forwards.
+  //     `memory_lowering.cpp` really does chain `fwd_rows[r]`'s writes into the
+  //     image that feeds this port's `MemRead`, so those cones are genuine
+  //     combinational dependencies of the value and must stay visible.
+  //
+  // The ROW matters, not the cell. `port_reach.hpp`'s `Memory_deps` is the
+  // repository's shared decoder and `pass.legalize`'s loop check uses it, but
+  // its `fwd_nonzero` is a WHOLE-CELL flag: one forwarding read makes it join
+  // every write cone into every read. The certificate forwards per
+  // `fwd_rows[r][w]`, so asking the shared helper here would invent a cycle for
+  // a READ-FIRST port that merely shares an array with a forwarding one.
+  const auto read_deps = [&](const lean_pass::Memory_info& mi, size_t r, const auto& enqueue) {
+    if (mi.sync) {
+      return;
+    }
+    const auto& p = mi.ports.at(mi.read_ports.at(r));
+    enqueue(p.addr);
+    enqueue(p.enable);
+    for (size_t w = 0; w < mi.write_ports.size(); ++w) {
+      if (!lean_pass::memory_fwd_bit(mi, r, w)) {
+        continue;
+      }
+      const auto& wp = mi.ports.at(mi.write_ports[w]);
+      enqueue(wp.addr);
+      enqueue(wp.din);
+      enqueue(wp.enable);
+    }
+  };
+  // The visit key is (node, read ordinal); -1 is "not a memory read output",
+  // which is every other node and its single result.
+  const auto vkey = [](uint32_t nid, int read_ordinal) {
+    return (static_cast<uint64_t>(nid) << 32) | static_cast<uint32_t>(read_ordinal + 1);
+  };
+  const auto read_ordinal_of = [&](const Node_pin& pin) {
+    const auto node = pin_node(pin);
+    if (!node_is_memory(node)) {
+      return -1;
+    }
+    const auto id = node_id(node);
+    const auto it = ctx.memory_info.find(id);
+    if (it != ctx.memory_info.end()) {
+      const auto pid = static_cast<uint32_t>(pin.get_port_id());
+      for (size_t r = 0; r < it->second.read_ports.size(); ++r) {
+        if (it->second.ports.at(it->second.read_ports[r]).driver_pid == pid) {
+          return static_cast<int>(r);
+        }
+      }
+    }
+    // A memory OUTPUT that is not a decoded read port -- `readall`, or a pin
+    // the cell grew. There is no certificate value to bind it to, so refuse it
+    // by name rather than join every input and emit something unrelated.
+    fatal(ctx,
+          "memory n_" + std::to_string(id) + " drives output pin " + std::to_string(pin.get_port_id())
+              + ", which is not a decoded read port. A certificate binds a value per READ PORT.");
+    return -1;
+  };
+  std::set<uint64_t>                 reached, active;
+  std::vector<std::tuple<Node, bool, int>> stack;
   // Operator census: name -> first node that used it, plus a total node count.
   std::map<std::string, std::string> unsupported;
   size_t                             unsupported_nodes = 0;
   const auto leaf = [&](const Node_pin& pin) { return pin_is_input(pin) || pin_is_const(pin) || node_is_flop(pin_node(pin)); };
   for (const auto& pin : roots) {
     design.roots.push_back(capture_pin(ctx, pin));
-    if (leaf(pin) || reached.contains(node_id(pin_node(pin)))) {
+    if (leaf(pin) || reached.contains(vkey(node_id(pin_node(pin)), read_ordinal_of(pin)))) {
       continue;
     }
-    stack.emplace_back(pin_node(pin), false);
+    stack.emplace_back(pin_node(pin), false, read_ordinal_of(pin));
     while (!stack.empty()) {
       // Own the frame: growing stack invalidates references to stack.back().
-      const auto [node, visited] = stack.back();
-      const auto id              = node_id(node);
+      const auto [node, visited, read_ordinal] = stack.back();
+      const auto id                            = node_id(node);
+      const auto key                           = vkey(id, read_ordinal);
       if (visited) {
-        if (reached.insert(id).second) {
+        if (reached.insert(key).second) {
           if (node_op(node) == Ntype_op::Concat) {
             lower_concat(ctx, node, design, next_lowered_id);
           } else if (node_op(node) == Ntype_op::Hotmux) {
@@ -910,7 +993,10 @@ DesignScan scan_design(hhds::Graph& graph, const ScanOptions& options) {
             DesignNode n;
             n.id = id;
             n.op = *mapped;
-            if (n.op != ScanOp::Memory) {
+            if (n.op == ScanOp::Memory) {
+              // One entry per READ PORT, at that port's own place in the order.
+              n.memory_read = static_cast<uint32_t>(read_ordinal);
+            } else {
               n.width     = node_width(ctx, node);
               n.is_signed = node_output_is_signed(node);
               if (n.op == ScanOp::GetMask || n.op == ScanOp::SetMask) {
@@ -937,9 +1023,68 @@ DesignScan scan_design(hhds::Graph& graph, const ScanOptions& options) {
                 mask.width               = std::max(static_cast<uint32_t>(range->second), mask.intrinsic_width);
                 mask.minimum_shift_width = minimal_unsigned_const_width(value);
                 mask.value               = value.is_just_i64() ? std::to_string(value.to_just_i64()) : value.to_decimal_string();
+                auto a_pin = capture_pin(ctx, a);
+                // A SIGNED source under an OUT-OF-WIDTH window.
+                //
+                // The native lowering reads such a value at a carrier wide
+                // enough to hold the window -- `read_cw = max(me, width(src))`
+                // in inou/cgen/cgen_sim.cpp -- precisely so a SIGNED read
+                // replicates the sign into the positions the window selects
+                // above the source. The old implementation does the same thing
+                // by the other route: its finite-mask arm falls off the
+                // zero-extending fast path when `me > wbits` on a signed value
+                // and takes the slow path with `val_sign = 0`, a signed read.
+                //
+                // `PinRef` carries a width and NO signedness, so neither test is
+                // expressible downstream and the sign has to be made explicit
+                // here -- with the SAME `Sext` idiom this file already applies
+                // to a signed Concat lane and a signed Hotmux arm.
+                //
+                // THE TARGET IS THE WINDOW'S HIGH ENDPOINT, not the node's
+                // result width: a shifted window selects bits up to `me`, and
+                // the result width says nothing about how far the sign must
+                // reach.
+                //
+                // Unsigned sources are untouched: the positions above an
+                // unsigned value are zero, which the existing zero-extending
+                // read already reproduces, and the native code says so.
+                // Constants need no Sext HERE, but NOT because a raw value
+                // carries its own sign: it carries it only at a width that
+                // reaches the window.  The native lowering materializes a
+                // constant AT THE TARGET WIDTH -- `Slop<target_bits>::
+                // create_integer(v)` in inou/cgen/cgen_sim.cpp operand() --
+                // while a certificate source is normalized at its own narrow
+                // width, where the positions above it read ZERO, not sign.
+                // That gap is closed in the CertificateBuilder instead, by
+                // declaring a NEGATIVE constant value operand at the window
+                // carrier (certificate_ir.cpp, ScanOp::GetMask), which needs
+                // no new node and preserves the raw value.
+                // `Set_mask` is untouched: this is the value-READ rule.
+                //
+                // The mask here is always a FINITE window synthesized from
+                // `bit_range`, so the old `mask == -1` to-positive idiom -- which
+                // stays zero-extending -- cannot arise on this path.
+                if (n.op == ScanOp::GetMask && a_pin.kind != PinKind::Constant
+                    && a_pin.width < static_cast<uint32_t>(range->second)
+                    && !livehd::graph_util::is_unsign(a)) {
+                  if (next_lowered_id >= 1000000000) {
+                    fatal(ctx, "Get_mask sign widening exhausted the graph-node ID range");
+                  }
+                  check_width(ctx, node, a_pin.width, "Get_mask signed source");
+                  const auto target = static_cast<uint32_t>(range->second);
+                  PinRef     ext;
+                  ext.id    = static_cast<uint32_t>(next_lowered_id++);
+                  ext.width = target;
+                  design.nodes.push_back({ext.id,
+                                          ScanOp::Sext,
+                                          target,
+                                          false,
+                                          {{0, 0, a_pin}, {1, 1, natural_operand(a_pin.width)}}});
+                  a_pin = ext;
+                }
                 // Get_mask/Set_mask are unbanked, so bank == port on each slot.
                 n.operands               = {
-                    {0, 0, capture_pin(ctx, a)},
+                    {0, 0, std::move(a_pin)},
                     {1, 1, std::move(mask)}
                 };
                 if (n.op == ScanOp::SetMask) {
@@ -962,23 +1107,36 @@ DesignScan scan_design(hhds::Graph& graph, const ScanOptions& options) {
             design.nodes.push_back(std::move(n));
           }
         }
-        active.erase(id);
+        active.erase(key);
         stack.pop_back();
         continue;
       }
-      if (reached.contains(id)) {
+      if (reached.contains(key)) {
         stack.pop_back();
         continue;
       }
-      if (!active.insert(id).second) {
-        fatal(ctx, "combinational cycle at node n_" + std::to_string(id));
+      if (!active.insert(key).second) {
+        fatal(ctx,
+              "combinational cycle at node n_" + std::to_string(id)
+                  + (read_ordinal >= 0 ? " read port " + std::to_string(read_ordinal) : ""));
       }
-      stack.back().second = true;
-      for (const auto& e : inp_edges_ordered(node)) {
-        if (leaf(e.driver) || reached.contains(node_id(pin_node(e.driver)))) {
-          continue;
+      std::get<1>(stack.back()) = true;
+      const auto push           = [&](const Node_pin& drv) {
+        if (drv.is_invalid() || leaf(drv)) {
+          return;
         }
-        stack.emplace_back(pin_node(e.driver), false);
+        const auto r = read_ordinal_of(drv);
+        if (reached.contains(vkey(node_id(pin_node(drv)), r))) {
+          return;
+        }
+        stack.emplace_back(pin_node(drv), false, r);
+      };
+      if (read_ordinal >= 0) {
+        read_deps(ctx.memory_info.at(id), static_cast<size_t>(read_ordinal), push);
+      } else {
+        for (const auto& e : inp_edges_ordered(node)) {
+          push(e.driver);
+        }
       }
     }
   }

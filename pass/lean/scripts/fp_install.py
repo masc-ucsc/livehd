@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Install the pinned Futamura-projection contribution into tracked master paths.
 
-The source is READ-ONLY: /mada/users/czeng14/projects/livehd-futamura/livehd at
+The source is READ-ONLY: /WORKROOT/projects/livehd-futamura/livehd at
 `9bb41a09d6b57111ed2b3fd10102ec4ff174b6c6`.  The asset list and the pinned
 sha256 of every file come from the recorded baseline packet, not from walking
 the tree -- a walk picks up whatever happens to be there, and the point of a

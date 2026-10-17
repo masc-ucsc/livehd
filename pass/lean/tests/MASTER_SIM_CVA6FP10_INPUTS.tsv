@@ -8,7 +8,7 @@
 # CONFIG PKG    core/include/cv64a6_imafdc_sv39_hpdcache_wb_config_pkg.sv
 #               sha256 409f3b2c4a69bdc1bb5f44f546af353a583c3dac8e28586a7da5285322888367  7026 bytes
 # FILELIST      (cd $CVA6_ROOT && bender script flist-plus -t $TARGET --top $BENDER_TOP --trim-incdirs auto) > $FILELIST
-#               bender 0.32.0 at /soe/czeng14/.local/bin/bender
+#               bender 0.32.0 at /HOMEROOT/.local/bin/bender
 # DEPENDENCY LOCK  Bender.lock (UNTRACKED, gitignored) sha256 2e26726993e63ac921f59f2bbb01f14076d1854e65c82b5e2a47ff4a09fdbd52
 #                  Bender.yml  (tracked)              sha256 26d6cc70a2167e4154e0469a8fbe6f4e61c737ce759b8d80f02b749536f0f85a
 #               Running the ten resolutions left Bender.lock byte-identical and the

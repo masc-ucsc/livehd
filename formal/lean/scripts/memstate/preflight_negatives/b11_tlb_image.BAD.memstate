@@ -1,0 +1,20 @@
+# A SUPPLIED initial image for the whole minion_tlb unit (B11).
+#
+# The TLB cache RF is aw 3, dw 69: eight 69-bit words.  Every word here is
+# DISTINGUISHABLE and legal, and every one differs from the expected committed
+# word 0x223600abcde ABOVE BIT 31 -- so a run that writes the expected value
+# cannot be confused with the initial contents, and a gate that can only reach
+# the low lanes cannot produce it either.
+#
+# The default is nonzero too, so a substituted zero table would be visible.
+memstate v1
+flops reset
+mem 3 69 590295810358705651710
+word 0 340282366920938463463374607431768211455
+word 1 1180591620717411303424
+word 2 2361183241434822606848
+word 3 4722366482869645213696
+word 4 9444732965739290427392
+word 5 18889465931478580854784
+word 6 37778931862957161709568
+word 7 75557863725914323419136

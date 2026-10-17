@@ -3,6 +3,8 @@
 :type: equiv
 :verilog_top: mem_partial_write_update
 :pyrope_top: mem_partial_write_update
+:native_check_timeout: 5
+:verilog_check_timeout: 5
 */
 // Partial writes to one memory entry in one cycle merge in every shape the
 // memory takes, next to the two neighbours of lhdtrack suggestions2.md 1.2

@@ -3,6 +3,8 @@
 :type: equiv
 :verilog_top: mem_bulk_vs_entry_order
 :pyrope_top: mem_bulk_vs_entry_order
+:native_check_timeout: 5
+:verilog_check_timeout: 5
 */
 // Ruling 45: a whole-array store (`mem = v`) and a per-entry write of the same
 // cycle resolve in PROGRAM ORDER, like any two writes (docs 08-memories, "last

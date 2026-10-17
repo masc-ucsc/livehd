@@ -14,7 +14,7 @@ Options: `--generated <dir>` and `--interpreter <HardwareInterpreter.lean>`.
 
 ## Inputs and filter
 
-    generated dir  /mada/users/czeng14/projects/livehd-new/generated/core-et
+    generated dir  /WORKROOT/projects/livehd-new/generated/core-et
                    one subdirectory per module, each holding
                    <mod>/lean/<mod>_Lgraph.lean
     population     <generated>/coreet_census.tsv, rows with verdict == READY

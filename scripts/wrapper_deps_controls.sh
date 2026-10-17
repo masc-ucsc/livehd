@@ -37,7 +37,7 @@ run_assembly() { # $1 = OUT dir, $2 = CVA6_WRAPPER_DEPS
   OUT="$1" CVA6_TOP=cva6_alu_export CVA6_BENDER_TOP=cva6_alu_export \
     CVA6_FILELIST="$FL" CVA6_WRAPPER_FILE="$W/cva6_alu_export.sv" \
     CVA6_WRAPPER_DEPS="$2" LHD=/bin/true RUN_LEAN=false \
-    CVA6_ROOT="${CVA6_ROOT:-/mada/users/czeng14/projects/cva6}" \
+    CVA6_ROOT="${CVA6_ROOT:-/WORKROOT/projects/cva6}" \
     bash "$ROOT/scripts/run_cva6_module_lean_stress.sh" > "$1/run.log" 2>&1
 }
 

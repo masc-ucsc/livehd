@@ -27,10 +27,9 @@ namespace livehd::synth {
 // same operator, and both sit in the same synthesis region (equal color and
 // equal control-cone membership, no per-cell synth policy, no native boundary
 // marker) into its root as one n-ary cell. The blaster then lowers the n-ary
-// cell into a balanced tree (arrival-aware when operand levels differ, see
-// blast.hpp). It never crosses a region cut, an instance, a graph port or a
-// shared value, so the partition, every boundary and every other consumer
-// see the same values. Width safety follows the blaster's bit semantics: a
+// cell into a balanced pairwise tree (blast.hpp). It never crosses a region
+// cut, an instance, a graph port or a shared value, so the partition, every
+// boundary and every other consumer see the same values. Width safety follows the blaster's bit semantics: a
 // narrower intermediate is absorbed only when its truncation/extension is
 // value-neutral for every bit the root reads. Wide (packed-wiring) Or cells
 // are left alone because the region blaster keeps some of them native.

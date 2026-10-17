@@ -4,9 +4,9 @@
 #
 # TOOLS, resolved rather than inferred absent (the supervisor's narrow PATH saw
 # neither):
-#   bazel   /soe/czeng14/.local/bin/bazel    9.2.0
-#   bender  /soe/czeng14/.local/bin/bender   0.32.0
-#   slang   /soe/czeng14/projects/slang/build/bin/slang 9.1.214  -- NOT the one used;
+#   bazel   /HOMEROOT/.local/bin/bazel    9.2.0
+#   bender  /HOMEROOT/.local/bin/bender   0.32.0
+#   slang   /HOMEROOT/projects/slang/build/bin/slang 9.1.214  -- NOT the one used;
 #           lhd links the bazel-vendored slang-11.0 (MODULE.bazel f33547e9...)
 #   yosys   not on PATH by design; vendored as @at_clifford_yosys2 and exec'd from
 #           runfiles by inou/yosys/inou_yosys_api.cpp
@@ -22,14 +22,14 @@
 # byte-identical between the two builds; only the .dcert differed.
 #
 approach	generator	invocation	input_type	artifact	verified_on
-Futamura projection	gen_probe (Projection.mixDriver + hwAPVarT)	gen_probe <cert.dcert> 200000 2000	DCERT1 certificate	in-memory Program (NOT emitted source; no file is written)	blocked on PicoRV32: master emits DCERT2 and the loader is DCERT1-only
+Futamura projection	gen_probe (Projection.mixDriver + hwAPVarT); dcert2_memroute (Projection.mixDriver + hwMemAP) for a design WITH memory	gen_probe <cert.dcert> 200000 2000; dcert2_memroute <cert.dcert> 20000 200 <cycles> [init] [stim]	DCERT1 certificate; DCERT2 via CertIO.admitAny for the memory route	in-memory Program (NOT emitted source; no file is written)	PicoRV32: YES on the MEMORY route. The DCERT1-only loader note is retained history -- admitAny routes by magic. The SCALAR route still refuses picorv32 (memFree/sources/ops), which remains correct for a design with memory.
 Verified compiler	pass.lean mode:verified_compiler	lhd compile lg:<dir> --top <T> --emit-dir lean:<dir> --set formal.lean.mode=verified_compiler	LGraph	<T>_Lgraph.lean + <T>.dcert (DCERT2) + <T>_io.json, one publish_group	PicoRV32: YES
 Translation validation	d3_sweep.py	python3 pass/lean/scripts/d3_sweep.py --manifest <tsv> --certs <dir> --out <dir> --jobs 1	generated <T>_Lgraph.lean indexed from a directory, selected by a manifest row	D3 reified probes and sweep rows	PicoRV32: manifest resolves, run refused from a dirty worktree
 Legacy	pass.lean legacy emitter	lhd compile lg:<dir> --top <T> --emit-dir lean:<dir> --set formal.lean.emit_cert=true	LGraph	<T>_Lgraph.lean (fast model: <T>_comb/_next/_step plus <T>_node/_source/_graph) + <T>_io.json	PicoRV32: YES
 IR-as-semantics	make_sim_launcher.py (Direction 2 generic simulator)	python3 pass/lean/scripts/make_sim_launcher.py <T>_Lgraph.lean	the verified-compiler <T>_Lgraph.lean	Sims/<T>_Cert.lean + Sims/<T>_Main.lean, built as lake exe Sim<T>	PicoRV32: YES
 #
 # ROW PREPARATION, PicoRV32 (B12), the only row bound so far:
-#   RTL      /soe/czeng14/projects/picorv32/picorv32.v  94,657 bytes
+#   RTL      /HOMEROOT/projects/picorv32/picorv32.v  94,657 bytes
 #            sha256 0836050971b3c6cdd28ac3b1e5719a67fb645161912bef1e472e63995ceb0622
 #            pin ef203c2b0a3fb793280f5114941416c425c5b461, tracked tree CLEAN
 #   top      picorv32 -- the WHOLE CORE, not a submodule

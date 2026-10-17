@@ -7,3 +7,5 @@ tmp*
 verif*
 tmp
 repros
+# Placement reports can contain archived third-party source trees.
+todo/livehd/placement-results

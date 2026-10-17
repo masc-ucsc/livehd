@@ -1,0 +1,10 @@
+# A SUPPLIED initial state for the `full` fixture.
+# Not a ramp: the default is NONZERO and the words are arbitrary, so a driver
+# that quietly substituted zeros or a generated pattern would be visible.
+memstate v1
+flop 32 7
+flop 32 9
+mem 5 32 255
+word 0 11
+word 1 22
+word 20 33

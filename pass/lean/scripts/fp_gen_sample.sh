@@ -11,7 +11,7 @@
 #     frames may be elided.
 # Usage: sample_gen.sh <side> <block> <out-dir> [max-samples]
 set -uo pipefail
-R=/mada/users/czeng14/projects/livehd-pass-lean-master
+R=/WORKROOT/projects/livehd-pass-lean-master
 G=$R/generated/master_port/fp/genprobe
 side=${1:?side}; blk=${2:?block}; OUT=${3:?outdir}; MAX=${4:-40}
 mkdir -p "$OUT"

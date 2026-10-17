@@ -1,0 +1,29 @@
+# SUPPLIED stimulus for the whole PicoRV32 unit.
+# Input ordinals (picorv32_io.json): 2 mem_rdata, 3 mem_ready, 8 resetn.
+# Output ordinal 8 is mem_valid.
+#
+# RESET PULSE. picorv32's state registers are not reset-pinned in this
+# certificate; `resetn` initialises them through the logic, so the core must
+# see it LOW for a couple of cycles and then HIGH. Constants alone cannot do
+# that, which is what the `at` overrides are for -- two runs with `resetn`
+# held high throughout left the core in a two-output loop.
+#
+# HANDSHAKE. `react 3 8` wires mem_ready to the PREVIOUS cycle's mem_valid,
+# the zero-latency memory handshake; holding mem_ready high unconditionally
+# acknowledges transactions the core never started.
+#
+# INSTRUCTION. mem_rdata is held at `addi x1, x0, 1` (0x00100093), so every
+# fetch retires an instruction that WRITES the 32x32 register file -- the
+# aw5/dw32 memory this certificate declares.
+stim v1
+in 0 1 0
+in 1 32 0
+in 2 32 1048723
+in 4 32 0
+in 5 1 0
+in 6 1 0
+in 7 1 0
+in 8 1 1
+at 0 in 8 1 0
+at 1 in 8 1 0
+react 3 8

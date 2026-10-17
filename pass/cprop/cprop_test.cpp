@@ -14,6 +14,7 @@
 #include <unordered_set>
 #include <vector>
 
+#include "absl/container/flat_hash_set.h"
 #include "bitwidth.hpp"
 #include "enableopt.hpp"
 #include "graph_library_singleton.hpp"
@@ -32,12 +33,15 @@ void optimize_state(const std::shared_ptr<hhds::Graph>& graph) {
 }
 
 // The compile schedule as pass.cprop runs it: bitwidth follows every sweep,
-// so the rewrites that mint unstamped cells are on.
-void optimize_lanes(const std::shared_ptr<hhds::Graph>& graph) {
-  Cprop{true}.do_trans(graph);
+// so the rewrites that mint unstamped cells are on. `guard_scope` is what
+// pass.cprop passes for the graph (whole_graph() on a lifted loop body).
+void optimize_lanes(const std::shared_ptr<hhds::Graph>& graph, const Cprop::Node_scope& guard_scope = {}) {
+  Cprop cprop{true};
+  cprop.set_guard_scope(guard_scope);
+  cprop.do_trans(graph);
   Bitwidth{10}.do_trans(graph);
   Enableopt{}.do_trans(graph);
-  Cprop{true}.do_trans(graph);
+  cprop.do_trans(graph);
   Bitwidth{10}.do_trans(graph);
 }
 
@@ -3093,7 +3097,30 @@ TEST(CpropOpSharing, DeepCascadeHasLinearGeneratedSize) {
 }
 
 // `if c_i { acc OP= b + k_i }` unrolled: mux(c_i, acc, acc OP x_i) per link,
-// or the update on the false arm. The guard moves onto the term
+// or the update on the false arm. `links` is the chain's update cells
+// (link i: its Mux and its update cell).
+struct Guard_chain {
+  std::vector<hhds::Node_class> muxes, updates;
+};
+Guard_chain build_guard_chain(Mux_graph& f, Ntype_op op, bool update_true) {
+  Guard_chain chain;
+  auto        acc = f.a;
+  for (int i = 0; i < 4; ++i) {
+    auto term = f.node(Ntype_op::Sum);
+    gu::setup_sink_pid(term, 0).connect_driver(f.b);
+    gu::setup_sink_pid(term, 0).connect_driver(f.constant(3 * i + 1));
+    auto upd = f.node(op);
+    gu::setup_sink_pid(upd, 0).connect_driver(acc);
+    gu::setup_sink_pid(upd, 0).connect_driver(term.create_driver_pin(0));
+    acc = update_true ? f.mux(f.controls[i], acc, upd.create_driver_pin(0)) : f.mux(f.controls[i], upd.create_driver_pin(0), acc);
+    chain.updates.push_back(upd);
+    chain.muxes.push_back(acc.get_master_node());
+  }
+  acc.connect_sink(f.graph->get_output_pin("out"));
+  return chain;
+}
+
+// Inside a guard scope (a lifted loop body) the guard moves onto the term
 // (acc OP mux(c_i, id, x_i)) and the compile schedule flattens the plain
 // chain into one n-ary operator: AND-OR logic, not a serial MUX chain.
 TEST(CpropMux, GuardedAccumulationBecomesOneOperator) {
@@ -3101,18 +3128,7 @@ TEST(CpropMux, GuardedAccumulationBecomesOneOperator) {
     for (const bool update_true : {true, false}) {
       SCOPED_TRACE(std::string{Ntype::get_name(op)} + (update_true ? " true-arm" : " false-arm"));
       Mux_graph f(std::string{"guard_"} + std::string{Ntype::get_name(op)} + (update_true ? "_t" : "_f"), 4, 8);
-      auto      acc = f.a;
-      for (int i = 0; i < 4; ++i) {
-        auto term = f.node(Ntype_op::Sum);
-        gu::setup_sink_pid(term, 0).connect_driver(f.b);
-        gu::setup_sink_pid(term, 0).connect_driver(f.constant(3 * i + 1));
-        auto upd = f.node(op);
-        gu::setup_sink_pid(upd, 0).connect_driver(acc);
-        gu::setup_sink_pid(upd, 0).connect_driver(term.create_driver_pin(0));
-        acc = update_true ? f.mux(f.controls[i], acc, upd.create_driver_pin(0))
-                          : f.mux(f.controls[i], upd.create_driver_pin(0), acc);
-      }
-      acc.connect_sink(f.graph->get_output_pin("out"));
+      build_guard_chain(f, op, update_true);
       std::vector<int64_t> expected;
       for (uint64_t mask = 0; mask < 16; ++mask) {
         for (const auto& [av, bv] : {std::pair{0x5a, 0x21}, std::pair{0xff, 0x0f}, std::pair{0x00, 0x7f}}) {
@@ -3120,7 +3136,7 @@ TEST(CpropMux, GuardedAccumulationBecomesOneOperator) {
           expected.push_back(mux_eval(f.output(), values));
         }
       }
-      optimize_lanes(f.graph);
+      optimize_lanes(f.graph, Cprop::whole_graph());
       EXPECT_EQ(f.count(Ntype_op::Mux), 4U);  // the guards, one per term
       EXPECT_EQ(f.count(op), 1U);
       const auto root = f.output().get_master_node();
@@ -3132,6 +3148,60 @@ TEST(CpropMux, GuardedAccumulationBecomesOneOperator) {
           auto values = f.inputs(mask, av, bv);
           EXPECT_EQ(mux_eval(f.output(), values), expected[i++]) << mask;
         }
+      }
+    }
+  }
+}
+
+// Outside a guard scope -- straight-line code, a hand-unrolled run like
+// br_enc_onehot2bin -- the chain keeps every Mux on the accumulator: the
+// rolled-loop rewrite must not change what loop-free code compiles to. A
+// partial scope (synthesis' loop cleanup admits only the cells an expansion
+// minted) rewrites exactly the links whose Mux and update cell it admits.
+TEST(CpropMux, GuardedAccumulationOnlyInsideTheGuardScope) {
+  for (const auto op : {Ntype_op::Or, Ntype_op::And, Ntype_op::Xor}) {
+    SCOPED_TRACE(std::string{Ntype::get_name(op)});
+    {
+      Mux_graph f(std::string{"guard_off_"} + std::string{Ntype::get_name(op)}, 4, 8);
+      build_guard_chain(f, op, true);
+      optimize_lanes(f.graph);
+      EXPECT_EQ(gu::type_op_of(f.output().get_master_node()), Ntype_op::Mux);
+      EXPECT_EQ(f.count(Ntype_op::Mux), 4U);
+      EXPECT_EQ(f.count(op), 4U);  // one update per link, still behind its Mux
+    }
+    {
+      Mux_graph f(std::string{"guard_partial_"} + std::string{Ntype::get_name(op)}, 4, 8);
+      auto      chain = build_guard_chain(f, op, true);
+      // Admit the last link only: its Mux and its update cell. A link whose
+      // update cell is outside the scope stays a Mux even if its Mux is in.
+      absl::flat_hash_set<hhds::Node_class> admitted{chain.muxes[3], chain.updates[3], chain.muxes[1]};
+      std::vector<int64_t>                  expected;
+      for (uint64_t mask = 0; mask < 16; ++mask) {
+        auto values = f.inputs(mask, 0x5a, 0x21);
+        expected.push_back(mux_eval(f.output(), values));
+      }
+      Cprop cprop{true};
+      cprop.set_guard_scope([&](const hhds::Node_class& n) { return admitted.contains(n); });
+      cprop.do_trans(f.graph);
+      Bitwidth{10}.do_trans(f.graph);
+      const auto root = f.output().get_master_node();
+      EXPECT_EQ(gu::type_op_of(root), op);  // the admitted link moved its guard
+      size_t guards = 0;
+      for (auto n : f.graph->body().nodes()) {
+        if (gu::type_op_of(n) != Ntype_op::Mux) {
+          continue;
+        }
+        for (const auto& sink : n.inp_sorted_pins()) {
+          if (sink.get_port_id() != 0 && sink.get_driver_pin().is_const()) {
+            ++guards;  // an identity arm: a moved guard, off the accumulator
+          }
+        }
+      }
+      EXPECT_EQ(guards, 1U);
+      EXPECT_EQ(f.count(Ntype_op::Mux), 4U);  // three links still hold the accumulator
+      for (uint64_t mask = 0; mask < 16; ++mask) {
+        auto values = f.inputs(mask, 0x5a, 0x21);
+        EXPECT_EQ(mux_eval(f.output(), values), expected[mask]) << mask;
       }
     }
   }
@@ -3152,7 +3222,9 @@ TEST(CpropMux, GuardedAccumulationNeverLeavesAnUnstampedCell) {
   f.mux(f.controls[0], upd.create_driver_pin(0), f.a).connect_sink(f.graph->get_output_pin("observe"));
   // One round, as the compile schedule's last: CSE merges the muxes in this
   // sweep, so the next scalar_mux to see them is Bitwidth_rewrite's.
-  Cprop{true}.do_trans(f.graph);
+  Cprop cprop{true};
+  cprop.set_guard_scope(Cprop::whole_graph());
+  cprop.do_trans(f.graph);
   Bitwidth{10}.do_trans(f.graph);
   for (auto node : f.graph->body().nodes()) {
     if (!gu::is_builtin_node(node)) {
@@ -3191,8 +3263,10 @@ TEST(CpropMux, GuardedAccumulationNeedsAPrivateUpdate) {
   };
   for (int variant = 0; variant < 4; ++variant) {
     SCOPED_TRACE(variant);
-    auto f = build("guard_keep_" + std::to_string(variant), variant);
-    Cprop{true}.do_trans(f->graph);
+    auto  f = build("guard_keep_" + std::to_string(variant), variant);
+    Cprop cprop{true};
+    cprop.set_guard_scope(Cprop::whole_graph());
+    cprop.do_trans(f->graph);
     EXPECT_EQ(gu::type_op_of(f->output().get_master_node()), Ntype_op::Mux);
   }
 }

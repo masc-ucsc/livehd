@@ -30,7 +30,7 @@ first hard target.
 Build `lhd` first:
 
 ```bash
-cd /mada/users/czeng14/projects/livehd-new
+cd /WORKROOT/projects/livehd-new
 bazel build //lhd:lhd
 ```
 
@@ -61,7 +61,7 @@ This file is a `flist-plus` snapshot: it contains `+incdir+...`,
 `-f`, so translate the filelist into command-line arguments:
 
 ```bash
-cd /mada/users/czeng14/projects/livehd-new
+cd /WORKROOT/projects/livehd-new
 
 flist2sv2v() {
   while IFS= read -r line; do
@@ -81,7 +81,7 @@ guarded by `` `ifndef VERILATOR ``, and `sv2v` cannot parse SystemVerilog
 classes.
 
 ```bash
-cd /mada/users/czeng14/projects/livehd-new
+cd /WORKROOT/projects/livehd-new
 
 OUT=$PWD/generated/cva6_sv2v_isabelle_sv39
 mkdir -p "$OUT/runtime_tmp" "$OUT/logs"
@@ -99,7 +99,7 @@ mapfile -t SV2V_ARGS < <(flist2sv2v "$FLIST")
 Then feed the lowered Verilog into the Dino-style Verilog reader path:
 
 ```bash
-cd /mada/users/czeng14/projects/livehd-new
+cd /WORKROOT/projects/livehd-new
 
 ./bazel-bin/lhd/lhd compile verilog \
   "$OUT/cva6.lowered.v" \
@@ -140,12 +140,12 @@ Do not run Bender as part of the normal Isabelle generation flow. If CVA6
 dependencies or target packages change, refresh the frozen filelist explicitly:
 
 ```bash
-cd /mada/users/czeng14/projects/cva6-clean/cva6
+cd /WORKROOT/projects/cva6-clean/cva6
 bender script flist-plus \
   -t cv64a6_imafdc_sv39_hpdcache_wb \
   --top cva6 \
   --trim-incdirs auto \
-  > /mada/users/czeng14/projects/livehd-new/generated/cva6_filelists/cv64a6_imafdc_sv39_hpdcache_wb.top_cva6.flistplus.f
+  > /WORKROOT/projects/livehd-new/generated/cva6_filelists/cv64a6_imafdc_sv39_hpdcache_wb.top_cva6.flistplus.f
 ```
 
 After that, the regular flow consumes only the static filelist.
@@ -374,7 +374,7 @@ HOME=$LIVEHD_ROOT/generated/semantic_primitives_build/isabelle_home_isolated \
 TMPDIR=$LIVEHD_ROOT/generated/semantic_primitives_build/runtime_tmp \
 TMP=$LIVEHD_ROOT/generated/semantic_primitives_build/runtime_tmp \
 TEMP=$LIVEHD_ROOT/generated/semantic_primitives_build/runtime_tmp \
-/soe/czeng14/.local/Isabelle2025-2/bin/isabelle build -v \
+/HOMEROOT/.local/Isabelle2025-2/bin/isabelle build -v \
   -o document=false -o browser_info=false \
   -d $LIVEHD_ROOT/formal/semantic_primitives \
   DINO_Semantic_Primitives_Test

@@ -183,6 +183,20 @@ inductive Prim where
   | memRead
   -- `memWriteBE w img a d bev bw` -> the updated ENCODED image.
   | memWriteBE
+  -- `memWrite img a d en` -> the updated ENCODED image, for the PLAIN
+  -- (non-byte-enabled) write.  Appended at the end, so no existing primitive is
+  -- renumbered.
+  --
+  -- It is a primitive in its own right rather than a call into `memWriteBE`,
+  -- and the difference is observable: the enable is tested by `bv_nonzero`,
+  -- not bit by bit, and the datum is stored RAW.  A four-bit enable of value 8
+  -- is NONZERO with bit 0 clear, so it enables this write and would enable no
+  -- byte of a byte-enabled one; and an unnormalised datum is stored as it is,
+  -- where the byte-enabled write would return `mk_bv` of it.  Reducing this
+  -- operator to the other would therefore owe a one-bit-enable obligation and
+  -- a normalised-datum obligation that the direct primitive simply does not
+  -- incur.
+  | memWrite
   deriving DecidableEq, Inhabited, Repr
 
 /-- Arity of a primitive.  `evalPrim` rejects any other operand count, so this is
@@ -190,6 +204,7 @@ the single source of truth for primitive shape. -/
 def Prim.arity : Prim → Nat
   | .memRead                              => 4
   | .memWriteBE                           => 6
+  | .memWrite                             => 4
   | .addI | .subI | .mulI | .divI | .modI => 2
   | .ltI  | .leI  | .eqI                  => 2
   | .andB | .orB                          => 2

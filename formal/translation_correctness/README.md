@@ -668,15 +668,15 @@ directory, and run the Isabelle build outside the sandbox when heap writes are
 required:
 
 ```bash
-cd /mada/users/czeng14/projects/livehd-proof
+cd /WORKROOT/projects/livehd-proof
 
 mkdir -p generated/dino_lgraph_isabelle/runtime_tmp
 
-HOME=/mada/users/czeng14/projects/livehd-proof/generated/dino_lgraph_isabelle/isabelle_home_tiered_64 \
-TMPDIR=/mada/users/czeng14/projects/livehd-proof/generated/dino_lgraph_isabelle/runtime_tmp \
-TMP=/mada/users/czeng14/projects/livehd-proof/generated/dino_lgraph_isabelle/runtime_tmp \
-TEMP=/mada/users/czeng14/projects/livehd-proof/generated/dino_lgraph_isabelle/runtime_tmp \
-/mada/users/czeng14/.local/Isabelle2025-2/bin/isabelle build \
+HOME=/WORKROOT/projects/livehd-proof/generated/dino_lgraph_isabelle/isabelle_home_tiered_64 \
+TMPDIR=/WORKROOT/projects/livehd-proof/generated/dino_lgraph_isabelle/runtime_tmp \
+TMP=/WORKROOT/projects/livehd-proof/generated/dino_lgraph_isabelle/runtime_tmp \
+TEMP=/WORKROOT/projects/livehd-proof/generated/dino_lgraph_isabelle/runtime_tmp \
+/WORKROOT/.local/Isabelle2025-2/bin/isabelle build \
   -v \
   -o ML_system_64=true \
   -o document=false \
@@ -684,9 +684,9 @@ TEMP=/mada/users/czeng14/projects/livehd-proof/generated/dino_lgraph_isabelle/ru
   -o parallel_proofs=0 \
   -o threads=1 \
   -j1 \
-  -d /mada/users/czeng14/projects/livehd-proof/formal/semantic_primitives \
-  -d /mada/users/czeng14/projects/livehd-proof/translation-correctness \
-  -d /mada/users/czeng14/projects/livehd-proof/generated/dino_lgraph_isabelle/isabelle \
+  -d /WORKROOT/projects/livehd-proof/formal/semantic_primitives \
+  -d /WORKROOT/projects/livehd-proof/translation-correctness \
+  -d /WORKROOT/projects/livehd-proof/generated/dino_lgraph_isabelle/isabelle \
   DINO-Lgraph-SingleCycle-Cert
 ```
 

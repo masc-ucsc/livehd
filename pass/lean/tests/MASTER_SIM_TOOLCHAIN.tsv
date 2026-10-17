@@ -20,7 +20,7 @@
 # the emitter.  The handoff SUPPLEMENTS the same-external-input checks and
 # cannot waive a mismatch found by them.
 #
-# The system `slang` at /soe/czeng14/projects/slang/build/bin/slang (version
+# The system `slang` at /HOMEROOT/projects/slang/build/bin/slang (version
 # 9.1.214+68cad5ea0) is NOT the one used: MODULE.bazel vendors slang-11.0.
 # `yosys` is not on PATH at all; inou/yosys/inou_yosys_api.cpp execvp's the
 # runfiles copy.
@@ -38,12 +38,12 @@ master b9515eaf8	0acfc76294937e39	yosys-435977e9 69fbe16a8bc5032d	slang-11.0 f33
 #
 # 1. Build each branch's lhd into an ISOLATED output root, so no shared bazel
 #    cache is touched:
-#      for W in /mada/users/czeng14/projects/livehd-d3-translation-validation \
-#               /mada/users/czeng14/projects/livehd-d4-incremental \
-#               /mada/users/czeng14/projects/livehd-futamura/livehd ; do
+#      for W in /WORKROOT/projects/livehd-d3-translation-validation \
+#               /WORKROOT/projects/livehd-d4-incremental \
+#               /WORKROOT/projects/livehd-futamura/livehd ; do
 #        git -C "$W" rev-parse HEAD        # must equal the pin before building
 #        ( cd "$W" && nice -n19 ionice -c3 \
-#            bazel --output_user_root=/mada/users/czeng14/projects/livehd-pass-lean-master/generated/master_port/sim_bazel/$(basename "$W") \
+#            bazel --output_user_root=/WORKROOT/projects/livehd-pass-lean-master/generated/master_port/sim_bazel/$(basename "$W") \
 #            build -c opt //lhd:lhd )
 #      done
 #
