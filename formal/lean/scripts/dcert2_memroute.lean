@@ -77,6 +77,7 @@ import LeanSemanticPrimitives.Projection.MemProjection
 import LeanSemanticPrimitives.Projection.HardwareMemWriteAdmit
 import LeanSemanticPrimitives.Projection.Proto.RunnerSupport
 import LeanSemanticPrimitives.Compiler.CertIOFacade
+import LeanSemanticPrimitives.Compiler.RunAdmission   -- C3 edges / C4 reset polarity
 
 open Compiler Projection Projection.Hw Projection.HwMem Projection.MemProjection
 open Projection.Runner
@@ -549,6 +550,7 @@ def runRoute (label : String) (certHash : String) (D : DesignCert) (cfg : Cfg)
   say s!"  certificate fnv1a {certHash}"
   say s!"  shape: sources {D.sources.size} nodes {D.nodes.size} outputs {D.outputs.size} \
 flops {D.flops.size} memories {D.memories.size} clocks {D.clocks.size}"
+  if let some rc := (← RunAdmission.refuseDesign? D) then return rc
   -- 1. retained metadata
   say s!"  clocks: {String.intercalate ", " (D.clocks.toList.map (fun c => c.name))}"
   -- every flop's metadata is RETAINED; the per-flop dump is capped so a
@@ -672,6 +674,7 @@ effEn {ws.effEn} origEn {ws.origEn} mask {ws.mask} pred {ws.pred} phaseSrc {ws.p
       let mut cmp : CmpStatus := if cfg.compare then .complete else .disabled
       for k in List.range cfg.cycles do
         let e := edgeSchedule D k
+        if let some rc := (← RunAdmission.refuseEdges? D k e) then return rc
         let i := match cfg.stim with
                  | some spec => stimInput D spec cfg.react cfg.ats prevOuts k
                  | none      => mkInputFor D k

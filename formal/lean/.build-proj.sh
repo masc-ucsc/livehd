@@ -36,6 +36,9 @@ MODULES=(
   Compiler/CertIOV1
   Compiler/CertIOCodec
   Compiler/CertIORoute
+  # Run admission (decisions C3, C4): exact edge vectors, reset-polarity guard.
+  Compiler/ResetPolarity
+  Compiler/RunAdmission
   # The axiom gate (`#audit_axioms`), first: every module that audits imports it.
   Projection/AxiomGate
   Projection/ObjectLanguage
@@ -94,6 +97,8 @@ MODULES=(
   Projection/MemLog
   Projection/MemPrimChecks
   Projection/Proto/ShiftBridge
+  # The bridge: exact edges + certWfError imply every route's edge premise.
+  Projection/EdgePolicy
   Projection/Scaling
   # The central audit: `#audit_axioms` FAILS this build on any axiom outside
   # propext/Classical.choice/Quot.sound. The memory-route modules above audit

@@ -26,6 +26,7 @@ MODULES=(
   # DCERT2 via readCertChecked. Dependency ORDER and the invalidation rule
   # below are unchanged; nothing is deleted.
   Compiler/DesignSemantics Compiler/CertIOV1 Compiler/CertIOCodec Compiler/CertIORoute
+  Compiler/ResetPolarity Compiler/RunAdmission
   Projection/ObjectLanguage Projection/ObjectLanguageSemantics
   Projection/BindingTime Projection/Encoding Projection/Surface
   Projection/SurfaceSemantics Projection/BTA Projection/PartialEvaluator

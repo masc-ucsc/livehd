@@ -47,6 +47,7 @@ unsupported / 3 out of fuel at the requested budget.
 import LeanSemanticPrimitives.Projection.Proto.RunnerSupport
 import LeanSemanticPrimitives.Projection.CertLoad
 import LeanSemanticPrimitives.Projection.CertLoadAny   -- DCERT1 (unchanged) or DCERT2
+import LeanSemanticPrimitives.Compiler.RunAdmission   -- C3 edges / C4 reset polarity
 
 open Compiler Projection Projection.Hw Projection.Runner Projection.ProtoVar
 
@@ -59,6 +60,7 @@ def main (args : List String) : IO UInt32 := do
       let wf := (b.toNat?).getD 200
       let t0 ← IO.monoMsNow
       let D ← CertLoadAny.loadCertAny path                -- DCERT1 (unchanged) or DCERT2
+      if let some rc := (← RunAdmission.refuseDesign? D) then return rc
       let t1 ← IO.monoMsNow
       let sr := CertLoad.supportReport D
       let okAll := sr.wf && sr.memFree && sr.sources && sr.ops && sr.arities && sr.flopClocks

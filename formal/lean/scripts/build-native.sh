@@ -22,6 +22,8 @@ MODULES=(
   Compiler/CertIOV1
   Compiler/CertIOCodec
   Compiler/CertIORoute
+  Compiler/ResetPolarity
+  Compiler/RunAdmission
   Projection/ObjectLanguage
   Projection/ObjectLanguageSemantics
   Projection/BindingTime

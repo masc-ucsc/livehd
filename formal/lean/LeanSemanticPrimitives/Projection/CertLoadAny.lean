@@ -26,6 +26,7 @@ keeps each format's own policy:
 
 import LeanSemanticPrimitives.Projection.CertLoad
 import LeanSemanticPrimitives.Compiler.CertIORoute
+import LeanSemanticPrimitives.Compiler.RunAdmission
 
 namespace Projection
 namespace CertLoadAny
@@ -58,7 +59,8 @@ def loadCertAny (p : System.FilePath) : IO DesignCert :=
 /-- `runOne` for a DCERT2 certificate: the same five steps and the same exit
 codes, with `readCertChecked` as the admission and the codec's (byte-identical)
 `stimulus`/`digest`.  Exit codes: 1 admission, 3 support, 4 specialization or
-fragment check, 5/6 one cycle refused/mismatch, 7/8 trace refused/mismatch. -/
+fragment check, 5/6 one cycle refused/mismatch, 7/8 trace refused/mismatch,
+9 run admission (`Compiler.RunAdmission`: reset polarity, edge vector). -/
 def runV2 (path : String) (bytes : ByteArray) (cycles : Nat) (seed : Nat) : IO UInt32 := do
   say s!"=== {path}  [DCERT2]"
   let t1 ← ms
@@ -90,6 +92,7 @@ size {(sim.prog.funs.map (fun fd => tsize fd.body)).foldl (·+·) 0}  bound {sim
   say s!"  surviving caseT tags {tagsIn sim.prog}   (tagState = {tagState})"
   let (inp, st) := CertIO.stimulus D seed
   let e := allEdges D
+  if let some rc := (← RunAdmission.refuseEdges? D 0 e) then return rc
   let t7 ← ms
   let projected := stepOf sim D e inp st
   let t8 ← ms
@@ -125,6 +128,18 @@ kernel proof about it; `SimWF` is still undischarged for a loaded certificate."
 /-- Route one certificate: DCERT1 to FP's `runOne` unchanged, DCERT2 to `runV2`. -/
 def runOneAny (path : String) (cycles : Nat) (seed : Nat) : IO UInt32 := do
   let bytes ← IO.FS.readBinFile path
+  -- Run admission (decision C4), for BOTH formats, before either runner:
+  -- a raw-input reset-polarity contradiction is a DCERT1 exporter defect and
+  -- is refused with exit 9.  A file that does not parse falls through to the
+  -- runner, which reports the parse failure itself.
+  let parsed? := match CertIO.detect bytes with
+    | some .v1 => (CertIO.V1.parseCert bytes).toOption
+    | some .v2 => (CertIO.parseCert bytes).toOption
+    | none     => none
+  if let some D := parsed? then
+    if let some rc := (← RunAdmission.refuseDesign? D) then
+      say s!"=== {path}"
+      return rc
   match CertIO.detect bytes with
   | some .v1 => runOne path cycles seed
   | some .v2 => runV2 path bytes cycles seed
