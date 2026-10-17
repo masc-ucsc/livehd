@@ -3,12 +3,16 @@
 # (no lake, no Mathlib).
 #
 # The shared core -- SemanticPrimitives, Translation/LGraphModel,
-# Translation/GraphRefine, Compiler/* -- is imported verbatim from livehd-new at
-# a pinned revision (see Projection/SHARED_SEMANTICS.md).  None of it imports
-# Mathlib, so it builds here in seconds alongside everything else.
+# Translation/GraphRefine and the Mathlib-free part of Compiler/* -- is
+# master's own (the FP branch pinned a livehd-new revision; master carries the
+# SHL/SRA/Sext boundary repairs, see Projection/SHARED_SEMANTICS.md).  None of
+# it imports Mathlib, so it builds here in seconds alongside everything else.
 #
-# Translation/OpBridge.lean DOES need Mathlib and is deliberately absent from
-# the list below; it is pinned for consistency, not built by this script.
+# Mathlib enters only through Compiler/{CompileOp,CompileGraph,CompileDesign}
+# and Translation/OpBridge; anything importing those (Compiler/CertIO's
+# runChecked_correct, CertIORoundTrip, ...) belongs to `lake build`, not here.
+# Every Projection module, including the whole memory route, is Mathlib-free
+# and is built by this script.
 set -uo pipefail
 cd "$(dirname "$0")"
 OUT=.olean-dev
@@ -55,6 +59,37 @@ MODULES=(
   Projection/ResidualFragment
   Projection/ProjectedStep
   Projection/CertLoad
+  # The memory route (master-only): finite memory images, the hwMemS entry,
+  # its adequacy chain, the static and runtime admission checks, BTA and the
+  # proved specialization on the memory entry. Mathlib-free; Compiler/DirectCheck
+  # (also Mathlib-free) supplies the checker's slot kinds.
+  Projection/MemImage
+  Projection/HardwareMem
+  Projection/HardwareMemSource
+  Projection/HardwareMemOp
+  Projection/HardwareMemSlots
+  Compiler/DirectCheck
+  Projection/HardwareMemTraversal
+  Projection/HardwareMemShapes
+  Projection/HardwareMemNodes
+  Projection/HardwareMemFold
+  Projection/HardwareMemCommit
+  Projection/HardwareMemOutFlop
+  Projection/HardwareMemMain
+  Projection/HardwareMemWidth
+  Projection/HardwareMemAdmit
+  Projection/HardwareMemChecks
+  Projection/HardwareMemCycle
+  Projection/HardwareMemSlotTy
+  Projection/HardwareMemRuntime
+  Projection/HardwareMemFixture
+  Projection/HardwareMemWrite
+  Projection/MemSupport
+  Projection/MemProjection
+  Projection/HardwareMemWriteAdmit
+  Projection/MemLog
+  Projection/MemPrimChecks
+  Projection/Proto/ShiftBridge
   Projection/Scaling
   # The axiom gate, then the audit that uses it: `#audit_axioms` FAILS this
   # build on any axiom outside propext/Classical.choice/Quot.sound.
