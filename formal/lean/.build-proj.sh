@@ -28,14 +28,14 @@ MODULES=(
   Compiler/Runtime
   Compiler/DesignCertWF
   Compiler/DesignSemantics
-  # Compiler/CertIO is NOT built here. On the FP branch it was the DCERT1
-  # codec with no heavy dependencies; master's is DCERT2 and imports
-  # Compiler/CompileDesign, whose whole chain imports Mathlib. This driver
-  # is deliberately "no lake, no Mathlib" -- it excludes Translation/OpBridge
-  # for the same reason -- so DCERT2 is out of its scope and belongs to
-  # `lake build`. Nothing in the Projection contribution needs it:
-  # Projection/CertLoad takes the V1 route.
+  # Compiler/CertIO itself is NOT built here: its verified entry point
+  # (runChecked_correct) imports Compiler/CompileDesign, whose chain imports
+  # Mathlib, so it belongs to `lake build`. The DCERT2 CODEC it used to
+  # contain is Compiler/CertIOCodec (Mathlib-free), and the format router is
+  # Compiler/CertIORoute; both are built here, next to FP's DCERT1 codec.
   Compiler/CertIOV1
+  Compiler/CertIOCodec
+  Compiler/CertIORoute
   # The axiom gate (`#audit_axioms`), first: every module that audits imports it.
   Projection/AxiomGate
   Projection/ObjectLanguage
