@@ -96,6 +96,8 @@ MODULES=(
   Projection/HardwareMemWriteAdmit
   Projection/MemLog
   Projection/MemPrimChecks
+  # host vs object specializer on the three memory primitives
+  Projection/MemMixMirrorCheck
   Projection/Proto/ShiftBridge
   # The bridge: exact edges + certWfError imply every route's edge premise.
   Projection/EdgePolicy
