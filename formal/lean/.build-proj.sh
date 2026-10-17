@@ -61,6 +61,8 @@ MODULES=(
   Projection/ResidualFragment
   Projection/ProjectedStep
   Projection/CertLoad
+  # DCERT1 or DCERT2: one loader for the FP runners (CertLoad stays DCERT1-only).
+  Projection/CertLoadAny
   # The memory route (master-only): finite memory images, the hwMemS entry,
   # its adequacy chain, the static and runtime admission checks, BTA and the
   # proved specialization on the memory entry. Mathlib-free; Compiler/DirectCheck

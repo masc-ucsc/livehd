@@ -19,11 +19,13 @@ export LEAN_PATH="$OUT"
 MODULES=(
   SemanticPrimitives Translation/LGraphModel Translation/GraphRefine
   Compiler/DesignCert Compiler/Runtime Compiler/DesignCertWF
-  # master's Compiler/CertIO is DCERT2 and its chain imports Mathlib, which
-  # this route does not build. The historical V1 runners take CertIOV1, the
-  # same reconciliation CertLoad and the probes take. Dependency ORDER and
-  # the invalidation rule below are unchanged; nothing is deleted.
-  Compiler/DesignSemantics Compiler/CertIOV1
+  # master's Compiler/CertIO imports the Mathlib compiler chain, which this
+  # route does not build; its DCERT2 CODEC is Compiler/CertIOCodec and the
+  # format router Compiler/CertIORoute, both Mathlib-free. The probes load
+  # through Projection/CertLoadAny: DCERT1 exactly as before (CertIOV1),
+  # DCERT2 via readCertChecked. Dependency ORDER and the invalidation rule
+  # below are unchanged; nothing is deleted.
+  Compiler/DesignSemantics Compiler/CertIOV1 Compiler/CertIOCodec Compiler/CertIORoute
   Projection/ObjectLanguage Projection/ObjectLanguageSemantics
   Projection/BindingTime Projection/Encoding Projection/Surface
   Projection/SurfaceSemantics Projection/BTA Projection/PartialEvaluator
@@ -32,7 +34,7 @@ MODULES=(
   Projection/DesignEncoding Projection/RuntimeEncoding Projection/OperatorBridge
   Projection/HardwareInterpreter Projection/HardwareAdequacy
   Projection/ProjectionCorrect Projection/ResidualFragment
-  Projection/ProjectedStep Projection/CertLoad
+  Projection/ProjectedStep Projection/CertLoad Projection/CertLoadAny
   Projection/Proto/PartialEvaluatorFast Projection/Proto/PartialEvaluatorSummary
   Projection/Proto/PartialEvaluatorShift
   Projection/Proto/InterpreterVariant

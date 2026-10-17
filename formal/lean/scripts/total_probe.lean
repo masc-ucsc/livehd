@@ -20,7 +20,7 @@ unsupported / 3 projection ran out of fuel at the requested budget.
 -/
 import LeanSemanticPrimitives.Projection.Proto.RunnerSupport
 import LeanSemanticPrimitives.Projection.CertLoad
-import LeanSemanticPrimitives.Compiler.CertIOV1
+import LeanSemanticPrimitives.Projection.CertLoadAny   -- DCERT1 (unchanged) or DCERT2
 
 open Compiler Projection Projection.Hw Projection.Runner Projection.ProtoVar
 
@@ -55,7 +55,7 @@ def traceBoth (sim : ProjectedSimulator) (D : DesignCert) (n seed : Nat) :
 def main (args : List String) : IO UInt32 := do
   match args with
   | path :: a :: b :: _ => do
-      let D ← CertIO.V1.loadCert path
+      let D ← CertLoadAny.loadCertAny path
       let sf := (a.toNat?).getD 20000
       let wf := (b.toNat?).getD 200
       IO.println s!"{path}"
