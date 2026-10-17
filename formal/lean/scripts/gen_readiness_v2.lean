@@ -7,12 +7,12 @@ specialization and `Hw.checkResidual`.  What it produces is an IN-MEMORY
 a GENERATION-AND-CHECK result and nothing more.  A usable-simulator claim needs
 the residual to run, and that is what this file does and all it adds.
 
-WHY IT RE-SPECIALIZES.  `gen_probe_v2` serializes nothing -- the residual lives
-only in that process and dies with it -- so there is NO retained `Program` to
-load, and a readiness run must rebuild one.  That is a stated reason, not a
-convenience: this is therefore a NEW ATTEMPT with its own cost, not a replay of
-the generation benchmark for timing, and its specialize time must never be
-entered as a second measurement of the generation metric.
+LOAD OR RE-SPECIALIZE.  With `load:<file>` the residual `gen_probe_v2 save:`
+wrote (Projection/ResidualIO) is decoded -- its header must name this
+certificate, backend and fuel -- and `checkResidual` is re-run on it; the timed
+phase is then `residual-load`.  Without it the design is re-specialized: a NEW
+attempt with its own cost, whose specialize time must never be entered as a
+second measurement of the generation metric.
 
 WHAT THE EXECUTION IS.  `Projection.Hw.stepOf` on a `ProjectedSimulator`
 `⟨design, residual, bound⟩`, at the bound `checkResidual` itself computed.  That
@@ -21,10 +21,20 @@ NOT `interpretDesign`, not the variant control interpreter, and not a generic
 design interpreter standing in for the residual.  There is no fallback bound: a
 checker rejection fails closed.
 
-WHAT IT IS NOT.  No reference comparison against `interpretDesign`, no threaded
-agreement trace, no control interpreter, no mutation controls: this is a
-readiness check, NOT acceptance and NOT the full benchmark, and a pass here must
-never be entered as one.  `total_probe` owns that and is untouched.
+THE REFERENCE COMPARISON (default ON; `nocompare` turns it off).  Every
+executed cycle is also run through `interpretDesign` -- the shared reference
+semantics, NOT the specializer and NOT the residual -- from the SAME pre-state
+(the residual's own threaded state), edges and inputs, and the residual's result
+must equal it: every output and the whole next state, by `encResult`.  A
+disagreement fails closed (exit 1).  The stimulus is the deterministic generator
+`mkInputFor D k` / `edgeSchedule D k` from `mkStateFor D 0`; its exact sequence
+is RECORDED as an fnv1a digest over the edges and input values of every cycle.
+The reference runs are timed separately and are not part of `execute`.
+
+WHAT IT IS NOT.  No control interpreter and no mutation controls, and the
+stimuli are generated, not RTL-derived: a pass is the C6 bar (proved
+specializer, checker-accepted residual, N cycles executed, every cycle equal to
+`interpretDesign`), NOT a proof about the design for all inputs.
 
 HONEST STATE REPORTING.  The per-cycle state and output vectors are compared,
 and the driver prints how many DISTINCT ones were seen.  A run whose flop vector
@@ -41,7 +51,8 @@ Zero cycles would execute no residual step and still report `READINESS OK`; that
 is a pass earned by doing nothing, and it is now refused before the certificate
 is even loaded.
 
-Exit: 0 readiness OK / 1 checker rejection or a cycle that did not step /
+Exit: 0 readiness OK / 1 checker rejection, a cycle that did not step, or a
+reference disagreement /
 2 setup, unsupported, or a refused configuration / 3 out of fuel at the
 requested budget.
 -/
@@ -123,6 +134,7 @@ ops {sr.ops} arities {sr.arities} flopClocks {sr.flopClocks} | ALL {okAll}"
       -- Its header must name THIS certificate (fnv1a), backend and fuel, or the
       -- file is refused; `checkResidual` is re-run on the decoded program below.
       let loadFrom := rest.findSome? (fun t => (t.dropPrefix? "load:").map (·.toString))
+      let compare := !(rest.contains "nocompare")
       let mut loaded : Option Program := none
       let t3 ← IO.monoMsNow
       if let some f := loadFrom then
@@ -178,7 +190,10 @@ is a NEW specialization, not a timing replay."
             IO.println s!"  residual {szOf R} terms, checker bound {bound} \
 (height; proved sufficient, not a minimum)"
             IO.println s!"  EXECUTING {cycles} cycle(s) of Hw.stepOf at the checked bound \
--- the projection's own simulator, no reference run and no control interpreter."
+-- the projection's own simulator; reference comparison against interpretDesign \
+{if compare then "ON (every cycle: outputs and next state)" else "OFF (nocompare)"}"
+            IO.println "  stimulus: generated -- inputs mkInputFor D k, edges edgeSchedule D k \
+(every third cycle quiet), initial state mkStateFor D 0"
             (← IO.getStdout).flush
             let t6 ← IO.monoMsNow
             let mut st := mkStateFor D 0
@@ -186,12 +201,27 @@ is a NEW specialization, not a timing replay."
             let mut outs : List (Array BV) := []
             let mut tags : List String := []
             let mut bad := false
+            let mut tRef : Nat := 0
+            let mut firstDisagree : Option Nat := none
+            let mut compared : Nat := 0
+            let mut stimText : String := ""
             for k in List.range cycles do
               let e := edgeSchedule D k
               if let some rc := (← RunAdmission.refuseEdges? D k e) then return rc
               let i := mkInputFor D k
+              stimText := stimText ++ s!"{k}:" ++
+                String.intercalate "," (e.toList.map (fun b => if b then "1" else "0")) ++ "|" ++
+                String.intercalate "," (i.toList.map (fun v => s!"{v.width}'{v.value}")) ++ ";"
               let o := runStep sim D e i st
               tags := o.tag :: tags
+              if compare then
+                let r0 ← IO.monoMsNow
+                let want := interpretDesign D e i st
+                let agrees := Outcome.agree o (Outcome.ok want)
+                let r1 ← IO.monoMsNow
+                tRef := tRef + (r1 - r0)
+                compared := compared + 1
+                if !agrees && firstDisagree.isNone then firstDisagree := some k
               match o with
               | .ok r => do
                   outs := r.outputs :: outs
@@ -200,8 +230,15 @@ is a NEW specialization, not a timing replay."
               | _ => bad := true
             let t7 ← IO.monoMsNow
             IO.println s!"  ms: load {t1 - t0}  support {t2 - t1}  {phase} {t4 - t3}  \
-check {t5 - t4}  execute {t7 - t6}"
+check {t5 - t4}  execute {t7 - t6 - tRef}  reference {tRef}"
+            IO.println s!"  stimulus digest fnv1a {ResidualIO.fnv1a stimText.toUTF8} over {cycles} cycle(s)"
             IO.println s!"  step outcomes: {String.intercalate "," tags.reverse}"
+            let cmpLabel :=
+              if !compare then "DISABLED by nocompare -- nothing was compared"
+              else match firstDisagree with
+                | some k => s!"FAILED at cycle {k}"
+                | none   => s!"COMPLETE ({compared} cycle(s): every output and the whole next state equal interpretDesign)"
+            IO.println s!"  reference comparison: {cmpLabel}"
             IO.println s!"  distinct flop-state vectors {distinct (states.map (·.flops))} \
 of {states.length} (1 means the state never changed)"
             IO.println s!"  distinct output vectors {distinct outs} of {outs.length}"
@@ -209,9 +246,17 @@ of {states.length} (1 means the state never changed)"
               IO.eprintln "  at least one cycle did not step -- failing closed"
               IO.println "  RESULT: READINESS FAILED (a cycle did not step)"
               return 1
-            IO.println "  RESULT: READINESS OK (residual executed at the checked bound; \
-NOT acceptance, NOT a reference comparison, NOT native linking)"
+            if let some k := firstDisagree then
+              IO.eprintln s!"  the residual DISAGREED with interpretDesign at cycle {k} -- failing closed"
+              IO.println "  RESULT: READINESS FAILED (reference disagreement)"
+              return 1
+            if compare then
+              IO.println "  RESULT: READINESS OK (residual executed at the checked bound; \
+reference comparison COMPLETE against interpretDesign)"
+            else
+              IO.println "  RESULT: READINESS OK (residual executed at the checked bound; \
+reference comparison DISABLED -- does NOT earn comparison credit)"
             return 0
   | _ => do
-      IO.eprintln "usage: gen_readiness_v2 <cert.dcert> <stepFuel> <workFuel> [cycles] [load:<residual.fpres>]"
+      IO.eprintln "usage: gen_readiness_v2 <cert.dcert> <stepFuel> <workFuel> [cycles] [load:<residual.fpres>] [nocompare]"
       return 2

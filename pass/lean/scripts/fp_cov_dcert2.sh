@@ -48,20 +48,48 @@
 # recorded as such -- it is NOT an optimization result and NOT a regression, and
 # no further stack-limit experiments are run here.
 #
-# Everything here is INTERPRETED.  Native linking is a separate readiness mode
-# and is not implied by any of it: the native route (scripts/build-opt.sh) builds
-# Compiler/CertIOV1 and NOT Compiler/CertIO, because the DCERT2 codec reaches
-# Compiler/CompileDesign, which does `import Mathlib`, and this workspace's
-# mathlib package currently ships oleans with no native objects.  That is a
-# MISSING PREREQUISITE in this route, not a proof that such a build is impossible.
+# Without --native everything is INTERPRETED (lean --run); the route is recorded
+# in every request and attempt either way.
 #
-#   fp_cov_dcert2.sh [--only PHASE] [--force] <private-checkout> <out-dir> \
-#                    <stepFuel> <workFuel> <cycles> <cert.dcert>...
+# THE NATIVE ROUTE (--native DIR).  DIR holds the drivers built by
+# scripts/build-opt.sh (dcert2_loadcheck, dcert2_support, gen_probe_v2,
+# gen_readiness_v2, dcert2_memroute).  The DCERT2 codec is Mathlib-free since the
+# CertIOCodec/CertIORoute split, so the drivers link natively.  A native binary
+# carries all of its code, so its IDENTITY is its own sha256: no LEAN_PATH is
+# resolved and no .olean closure is digested -- which is also what removes the
+# B01 decode stall (that digest read ~1.9 GiB of oleans over NFS per call).
+#
+# NO WALL-CLOCK CAPS.  Every phase runs to completion; wall, user and system CPU,
+# peak RSS and the driver's own per-phase times (PHASES.txt) are recorded.  The
+# only limit is a MEMORY CEILING for host safety (--memmax, default 32G, a
+# systemd --user scope with MemoryMax); a run it kills is recorded as KILLED,
+# never as a refusal by the design.
+#
+# READINESS COMPARES.  gen_readiness_v2 runs every cycle through interpretDesign
+# as well and fails closed on a disagreement; dcert2_memroute does the same for
+# the memory route.  --save-residual makes generate write the residual
+# (save:<file>) and readiness LOAD it (load:<file>) instead of re-specializing;
+# the file's sha256 is part of the readiness identity.
+#
+# FORWARDED TOKENS (--extra TOKEN, repeatable) go to the memroute driver:
+# stim:<file> (a supplied stimulus, its sha256 bound into the identity), trace,
+# plain-write, nocompare.  Readiness takes only nocompare (recorded; it forfeits
+# comparison credit) -- it has no stimulus file, trace or write-mode option, and
+# a token it would ignore is not passed to it.
+#
+#   fp_cov_dcert2.sh [--only PHASE] [--force] [--native DIR] [--memmax SIZE]
+#                    [--save-residual] [--extra TOKEN]... [--meminit MODE]
+#                    <private-checkout> <out-dir> <stepFuel> <workFuel> <cycles>
+#                    <cert.dcert>...
 set -uo pipefail
-ONLY=all; FORCE=0; MEMINIT=zero
+ONLY=all; FORCE=0; MEMINIT=zero; NATIVE=""; MEMMAX=32G; SAVE=0; EXTRA=()
 while [ $# -gt 0 ]; do
   case "$1" in
     --only)  ONLY=${2:?--only needs a phase}; shift 2 ;;
+    --native) NATIVE=${2:?--native needs a directory}; shift 2 ;;
+    --memmax) MEMMAX=${2:?--memmax needs a size, e.g. 32G}; shift 2 ;;
+    --save-residual) SAVE=1; shift ;;
+    --extra) EXTRA+=("${2:?--extra needs a token}"); shift 2 ;;
     # The memory route's initial state.  `zero` and `ramp` are SYNTHETIC
     # controls the driver generates -- `zero` is a legal-state witness, not an
     # RTL startup contract, and `ramp` is an internally generated pattern, not
@@ -88,6 +116,14 @@ case "$MEMINIT" in
     ;;
   *) echo "REFUSING: --meminit must be zero|ramp|narrow|file:<path>, got '$MEMINIT'"; exit 2 ;;
 esac
+for t in "${EXTRA[@]}"; do
+  case "$t" in
+    trace|plain-write|nocompare) : ;;
+    stim:*) [ -f "${t#stim:}" ] || { echo "REFUSING: --extra $t: no such file"; exit 2; } ;;
+    *) echo "REFUSING: --extra must be stim:<file>|trace|plain-write|nocompare, got '$t'"; exit 2 ;;
+  esac
+done
+case "$MEMMAX" in ''|*[!0-9KMGT]*) echo "REFUSING: --memmax '$MEMMAX' is not a size like 32G"; exit 2 ;; esac
 P=${1:?private checkout root}; OUT=${2:?out dir}
 SF=${3:?stepFuel}; WF=${4:?workFuel}; CYC=${5:?cycles}; shift 5
 
@@ -104,10 +140,20 @@ done
 [ "$#" -gt 0 ] || { echo "REFUSING: no certificate given; a sweep with no target is not a pass"; exit 2; }
 
 R=${FP_REPO_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)}
+PABS=$(readlink -e "$P") || { echo "REFUSING: cannot resolve $P"; exit 2; }
+if [ -n "$NATIVE" ]; then
+  NATABS=$(readlink -e "$NATIVE") || { echo "REFUSING: cannot resolve --native $NATIVE"; exit 2; }
+  for b in dcert2_loadcheck dcert2_support gen_probe_v2 gen_readiness_v2 dcert2_memroute; do
+    [ -x "$NATABS/$b" ] || { echo "REFUSING: --native $NATABS has no executable $b"; exit 2; }
+  done
+  LP=""; LPCLOSURE="(native: not applicable)"; LEANBIN="(native)"; LEANVER="(native)"; LEANSHA="(native)"
+  ROUTE="NATIVE ($NATABS; identity = each binary's sha256)"
+  echo "route: native drivers in $NATABS"
+else
+ROUTE="INTERPRETED (lean --run, ulimit -s unlimited, --tstack=1048576)"
 LEANBIN=${FP_LEAN_BIN:-${ELAN_HOME:-$HOME/.elan}/toolchains/leanprover--lean4---v4.31.0/bin/lean}
 TOOLCHAIN=${FP_TOOLCHAIN_ROOT:-${ELAN_HOME:-$HOME/.elan}/toolchains/leanprover--lean4---v4.31.0}
 [ -x "$LEANBIN" ] || { echo "REFUSING: no lean at $LEANBIN"; exit 2; }
-PABS=$(readlink -e "$P") || { echo "REFUSING: cannot resolve $P"; exit 2; }
 TCABS=$(readlink -e "$TOOLCHAIN") || { echo "REFUSING: cannot resolve toolchain $TOOLCHAIN"; exit 2; }
 
 LP=$(cd "$PABS/formal/lean" && lake env printenv LEAN_PATH 2>/dev/null)
@@ -150,6 +196,7 @@ LEANSHA=$(sha256sum "$LEANBIN" | cut -d' ' -f1)
 LPCLOSURE=$( { for d in "${LPPRIV[@]}"; do find "$d" -name '*.olean' -print0; done; } \
              | sort -z | xargs -0 -r sha256sum | sha256sum | cut -d' ' -f1 )
 echo "lean_path closure digest $LPCLOSURE over ${#LPPRIV[@]} private entries"
+fi
 
 DRV_DECODE=$R/formal/lean/scripts/dcert2_loadcheck.lean
 DRV_SUPPORT=$R/formal/lean/scripts/dcert2_support.lean
@@ -167,6 +214,13 @@ done
 mkdir -p "$OUT"
 TS=$(date +%Y%m%d-%H%M%S)-$$
 
+# runner_of <driver.lean> <args...>  -- sets RUNNER to the exact argv that runs
+runner_of() {
+  local drv=$1; shift
+  if [ -n "$NATIVE" ]; then RUNNER=("$NATABS/$(basename "$drv" .lean)" "$@")
+  else RUNNER=("$LEANBIN" "--tstack=1048576" "--run" "$drv" "$@"); fi
+}
+
 # identity_of <out-file> <timeout> <driver> <cert> <args...>
 #   The identity a reuse must match EXACTLY.  Content hashes, not paths alone:
 #   a driver edited in place must not be mistaken for the one that ran.
@@ -175,11 +229,25 @@ identity_of() {
   local -a dargs=("$@")
   local drvn certn
   drvn=$(readlink -m "$drv"); certn=$(readlink -m "$cert")
+  runner_of "$drv" "${dargs[@]}"
   { echo "cert=$certn"
     echo "cert_sha256=$(sha256sum "$cert" | cut -d' ' -f1)"
     echo "cert_bytes=$(stat -c%s "$cert")"
     echo "driver=$drvn"
     echo "driver_sha256=$(sha256sum "$drv" | cut -d' ' -f1)"
+    # every FILE an argument names, by content (a supplied stimulus, a residual)
+    local x
+    for x in "${dargs[@]}"; do
+      case "$x" in stim:*|load:*|file:*)
+        local fx=${x#*:}
+        [ -f "$fx" ] && echo "input_file=$(readlink -m "$fx") $(sha256sum "$fx" | cut -d' ' -f1)" ;;
+      esac
+    done
+    if [ -n "$NATIVE" ]; then
+    echo "route=native"
+    echo "native_bin=${RUNNER[0]}"
+    echo "native_bin_sha256=$(sha256sum "${RUNNER[0]}" | cut -d' ' -f1)"
+    else
     echo "lean_bin=$(readlink -m "$LEANBIN")"
     echo "lean_bin_sha256=$LEANSHA"
     echo "lean_version=$LEANVER"
@@ -196,12 +264,13 @@ identity_of() {
         echo "import_direct=$(readlink -m "$o") $(sha256sum "$o" 2>/dev/null | cut -d' ' -f1)"
       done
     fi
-    echo "timeout_s=$tmo"
     echo "tstack=1048576 ulimit_stack=unlimited"
+    fi
+    echo "wall_cap=none memmax=$MEMMAX"
     # EXACT argv, one element per line.  A single `$*` string cannot distinguish
     # two arguments from one argument containing a space.
     local i=0 a
-    for a in "$LEANBIN" "--tstack=1048576" "--run" "$drv" "${dargs[@]}"; do
+    for a in "${RUNNER[@]}"; do
       printf 'argv[%d]=%s\n' "$i" "$a"; i=$((i+1))
     done
   } > "$f"
@@ -264,23 +333,32 @@ phase() {
   done
   echo "attempt=$a" >> "$dec"
   mv "$want" "$a/IDENTITY.txt"
-  printf '%s\n' "$LEANBIN" "--tstack=1048576" "--run" "$drv" "${dargs[@]}" > "$a/argv.txt"
+  runner_of "$drv" "${dargs[@]}"
+  printf '%s\n' "${RUNNER[@]}" > "$a/argv.txt"
   { echo "launched_at=$(date -Iseconds)"
     echo "host=$(uname -n) kernel=$(uname -r)"
     echo "cwd=$PWD"
     echo "private_root=$PABS"
     echo "private_head=$(git -C "$PABS" rev-parse HEAD 2>/dev/null)"
-    echo "timeout_s=$tmo"
+    echo "route=$ROUTE"
+    echo "wall_cap=none memmax=$MEMMAX"
     echo "LEAN_PATH=$LP"
     echo "lean_path_closure_sha256=$LPCLOSURE"
   } > "$a/BINDING.txt"
 
-  LEAN_PATH="$LP" /usr/bin/time \
-      -f 'wall %e\nuser %U\nsys %S\nmaxrss_kib %M\nexit %x' -o "$a/time.txt" \
-      bash -c 'ulimit -s unlimited; exec nice -n19 ionice -c3 timeout "$@"' bash \
-      "$tmo" "$LEANBIN" --tstack=1048576 --run "$drv" "${dargs[@]}" \
+  # the memory ceiling: a named systemd --user scope, so its cgroup is this run's
+  local unit="fpcov-$(basename "$pd")-$(basename "$a")"
+  LEAN_PATH="$LP" systemd-run --user --scope --quiet --unit="$unit" \
+      --property=MemoryMax="$MEMMAX" \
+      /usr/bin/time -f 'wall %e\nuser %U\nsys %S\nmaxrss_kib %M\nexit %x' -o "$a/time.txt" \
+      bash -c 'ulimit -s unlimited; exec nice -n19 ionice -c3 "$@"' bash "${RUNNER[@]}" \
       > "$a/stdout.log" 2> "$a/stderr.log"
   local rc=$? t tr
+  grep -E '^ *(GEN )?ms:|^ *STAGE TIMES|^ *specialize [0-9]+ ms' "$a/stdout.log" > "$a/PHASES.txt" 2>/dev/null
+  if grep -q 'terminated by signal' "$a/time.txt" 2>/dev/null; then
+    echo "KILLED exit=$rc ($(grep 'terminated by signal' "$a/time.txt"); memory ceiling $MEMMAX -- NOT a refusal by the design)" > "$a/DISPOSITION.txt"
+    printf '%s\t%s\t%s\n' "$(basename "$a")" "KILLED" "$rc" >> "$pd/index.tsv"; return 95
+  fi
   echo "$rc" > "$a/exit"
   t=$(awk '$1=="exit"{print $2; f=1} END{exit !f}' "$a/time.txt" 2>/dev/null); tr=$?
   if [ "$tr" != 0 ] || [ -z "$t" ]; then
@@ -293,7 +371,6 @@ phase() {
   fi
   case "$rc" in
     0)   echo "OK exit=0" ;;
-    124) echo "CAP exit=124 (timeout ${tmo}s; partial and UNDECIDED, not a pass and not a refusal)" ;;
     *)   echo "REFUSED exit=$rc" ;;
   esac > "$a/DISPOSITION.txt"
   printf '%s\t%s\t%s\n' "$(basename "$a")" "$(head -1 "$a/DISPOSITION.txt" | cut -d' ' -f1)" "$rc" >> "$pd/index.tsv"
@@ -319,7 +396,8 @@ for cert in "$@"; do
     echo "fuel=$SF/$WF cycles=$CYC only=$ONLY force=$FORCE meminit=$MEMINIT"
     echo "lean_bin=$LEANBIN version=$LEANVER sha256=$LEANSHA"
     echo "lean_path_closure_sha256=$LPCLOSURE"
-    echo "route=INTERPRETED (lean --run, ulimit -s unlimited, --tstack=1048576); NOT native linking"
+    echo "route=$ROUTE"
+    echo "wall_cap=none memmax=$MEMMAX save_residual=$SAVE extra=${EXTRA[*]}"
   } > "$d/requests/REQUEST-$TS.txt"
 
   # THE MEMORY ROUTE, when it is the selected phase.  It runs BEFORE the scalar
@@ -328,27 +406,31 @@ for cert in "$@"; do
   # real dispositions for the certificate (6 = not admitted by the memory route,
   # 7 = the runtime policy refuses the supplied state), not harness failures.
   if [ "$ONLY" = memroute ]; then
-    phase "$d/memroute" 5400 "$DRV_MEMROUTE" "$cert" "$SF" "$WF" "$CYC" "$MEMINIT"; e=$?
+    phase "$d/memroute" 0 "$DRV_MEMROUTE" "$cert" "$SF" "$WF" "$CYC" "$MEMINIT" "${EXTRA[@]}"; e=$?
     echo "$m memroute  exit=$e"; [ "$e" = 0 ] || note "$e"
     continue
   fi
   if want decode; then
-    phase "$d/decode" 600 "$DRV_DECODE" "$cert"; e=$?
+    phase "$d/decode" 0 "$DRV_DECODE" "$cert"; e=$?
     echo "$m decode    exit=$e"; [ "$e" = 0 ] || { note "$e"; continue; }
   fi
   if want support; then
-    phase "$d/support" 600 "$DRV_SUPPORT" "$cert"; e=$?
+    phase "$d/support" 0 "$DRV_SUPPORT" "$cert"; e=$?
     echo "$m support   exit=$e"; [ "$e" = 0 ] || { note "$e"; continue; }
   fi
+  RES=""
+  if [ "$SAVE" = 1 ]; then mkdir -p "$d/residuals"; RES=$d/residuals/$m-$TS.fpres; fi
   if want generate; then
-    phase "$d/generate" 3600 "$DRV_GEN" "$cert" "$SF" "$WF"; e=$?
+    phase "$d/generate" 0 "$DRV_GEN" "$cert" "$SF" "$WF" ${RES:+"save:$RES"}; e=$?
     echo "$m generate  exit=$e"
     # exit 2 = unsupported, 3 = out of fuel: REAL dispositions for this
     # certificate.  They stop this row without stopping the sweep.
     [ "$e" = 0 ] || { note "$e"; continue; }
   fi
   if want readiness; then
-    phase "$d/readiness" 5400 "$DRV_READY" "$cert" "$SF" "$WF" "$CYC"; e=$?
+    LOADARG=(); [ -n "$RES" ] && [ -f "$RES" ] && LOADARG=("load:$RES")
+    RDYX=(); for t in "${EXTRA[@]}"; do [ "$t" = nocompare ] && RDYX+=(nocompare); done
+    phase "$d/readiness" 0 "$DRV_READY" "$cert" "$SF" "$WF" "$CYC" "${LOADARG[@]}" "${RDYX[@]}"; e=$?
     echo "$m readiness exit=$e"; [ "$e" = 0 ] || note "$e"
   fi
 done
