@@ -55,6 +55,7 @@ original proofs with the slot read localized, so `evalOp_Ror`, `muxAt`,
 equations are the same facts in the same places.
 -/
 import LeanSemanticPrimitives.Projection.HardwareMemOp
+import LeanSemanticPrimitives.Projection.AxiomGate
 
 namespace Projection
 namespace HwLocal
@@ -948,10 +949,10 @@ theorem applyOp_agree_of_On {vals : List Val} {arg : Nat → BV} (hsv : SlotVals
   applyOp_agreeOn hsup harity (fun d hd => SlotVals_SlotHere hsv (hb d hd))
     hop hw hdv henv hlen
 
-#print axioms applyOp_agreeOn
-#print axioms applyOp_agree_of_On
-#print axioms slot_readH
-#print axioms SlotVals_SlotHere
+#audit_axioms applyOp_agreeOn
+#audit_axioms applyOp_agree_of_On
+#audit_axioms slot_readH
+#audit_axioms SlotVals_SlotHere
 
 
 end HwLocal
@@ -1081,10 +1082,10 @@ private def applyOpMId' : Nat := (idOf "applyOpM").getD 999
         | .value v => v == encBV (eval_op .Op_SRA 8 ([1, 2].map mixedArg))
         | _ => false)
 
-#print axioms applyOpM_scalar_mixed
-#print axioms applyOpM_scalar_mixed_cert
-#print axioms mixed_SlotHere
-#print axioms mixed_not_SlotVals
+#audit_axioms applyOpM_scalar_mixed
+#audit_axioms applyOpM_scalar_mixed_cert
+#audit_axioms mixed_SlotHere
+#audit_axioms mixed_not_SlotVals
 
 end HwMem
 end Projection

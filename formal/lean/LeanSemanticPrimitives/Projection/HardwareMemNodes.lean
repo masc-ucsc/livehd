@@ -49,6 +49,7 @@ NOT a full table.
 -/
 import LeanSemanticPrimitives.Projection.HardwareMemTraversal
 import LeanSemanticPrimitives.Projection.HardwareMemShapes
+import LeanSemanticPrimitives.Projection.AxiomGate
 
 namespace Projection
 namespace HwMem
@@ -258,13 +259,13 @@ counterexample and the primitive refuses the write outright. -/
 theorem rom_not_admitted_write : ¬ MemImg.FullTable 5 (MemImg.ofMemConst 32 #[11, 22, 33]) :=
   MemImg.romNotFull_example
 
-#print axioms evalNodeM_scalar
-#print axioms evalNodeM_memRead
-#print axioms evalNodeM_memWriteBE
-#print axioms evalNodeM_memWriteBE_disabled
-#print axioms depIsMem_false_of_supported
-#print axioms opKind_isMem_of_supported
-#print axioms nodeSlot_slotIsMem
+#audit_axioms evalNodeM_scalar
+#audit_axioms evalNodeM_memRead
+#audit_axioms evalNodeM_memWriteBE
+#audit_axioms evalNodeM_memWriteBE_disabled
+#audit_axioms depIsMem_false_of_supported
+#audit_axioms opKind_isMem_of_supported
+#audit_axioms nodeSlot_slotIsMem
 /-! ### The EXTENDED admission, for the route that implements the plain write
 
 `NodeAdmitted`, `nodeAdmittedB` and `NodeAdmitted_ne_memWrite` above are
@@ -307,13 +308,13 @@ theorem NodeAdmittedW_ne_sub {c : DenseNodeCert} (h : NodeAdmittedW c) :
 /- and the ORIGINAL predicate still refuses the plain write -/
 #guard nodeAdmittedB { op := .Op_MemWrite, width := 32, deps := #[0,1,2,3], origin := 0 } = false
 
-#print axioms NodeAdmitted_ne_memWrite
-#print axioms nodeAdmittedWB_iff
-#print axioms NodeAdmittedW_ne_sub
-#print axioms nodeAdmittedB_iff
-#print axioms writeInRange_of_FullTable
-#print axioms writeInRange_pico
-#print axioms writeInRange_after
+#audit_axioms NodeAdmitted_ne_memWrite
+#audit_axioms nodeAdmittedWB_iff
+#audit_axioms NodeAdmittedW_ne_sub
+#audit_axioms nodeAdmittedB_iff
+#audit_axioms writeInRange_of_FullTable
+#audit_axioms writeInRange_pico
+#audit_axioms writeInRange_after
 
 end HwMem
 end Projection

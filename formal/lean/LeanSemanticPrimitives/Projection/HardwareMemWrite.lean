@@ -40,6 +40,7 @@ not an assumption: it is exactly what the checker's `bvWidthOf td == dw` would
 have to supply.
 -/
 import LeanSemanticPrimitives.Projection.HardwareMemRuntime
+import LeanSemanticPrimitives.Projection.AxiomGate
 
 namespace Projection
 namespace HwMem
@@ -177,10 +178,10 @@ private def t4 : MemImg := ⟨(List.range 4).map (fun k => mk_bv 8 (Int.ofNat k)
 #guard writeEn t4 (mk_bv 8 9) (mk_bv 8 77) (mk_bv 1 1) == t4
 #guard (writeEn t4 (mk_bv 8 9) (mk_bv 8 77) (mk_bv 1 1)).words.length == 4
 
-#print axioms cert_mem_write_width
-#print axioms writeEn_FullTable
-#print axioms writeEn_MemShapeOK
-#print axioms writeEn_denote
+#audit_axioms cert_mem_write_width
+#audit_axioms writeEn_FullTable
+#audit_axioms writeEn_MemShapeOK
+#audit_axioms writeEn_denote
 
 end HwMem
 end Projection

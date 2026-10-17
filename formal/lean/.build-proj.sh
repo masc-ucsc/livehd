@@ -36,6 +36,8 @@ MODULES=(
   # `lake build`. Nothing in the Projection contribution needs it:
   # Projection/CertLoad takes the V1 route.
   Compiler/CertIOV1
+  # The axiom gate (`#audit_axioms`), first: every module that audits imports it.
+  Projection/AxiomGate
   Projection/ObjectLanguage
   Projection/ObjectLanguageSemantics
   Projection/BindingTime
@@ -91,9 +93,9 @@ MODULES=(
   Projection/MemPrimChecks
   Projection/Proto/ShiftBridge
   Projection/Scaling
-  # The axiom gate, then the audit that uses it: `#audit_axioms` FAILS this
-  # build on any axiom outside propext/Classical.choice/Quot.sound.
-  Projection/AxiomGate
+  # The central audit: `#audit_axioms` FAILS this build on any axiom outside
+  # propext/Classical.choice/Quot.sound. The memory-route modules above audit
+  # their own theorems in place with the same command.
   Projection/Audit
 )
 

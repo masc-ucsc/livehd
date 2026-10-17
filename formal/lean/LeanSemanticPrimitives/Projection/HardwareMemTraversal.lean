@@ -34,6 +34,7 @@ the next module and reuses `SlotV` unchanged.
 -/
 import LeanSemanticPrimitives.Projection.HardwareMemSlots
 import LeanSemanticPrimitives.Compiler.DirectCheck
+import LeanSemanticPrimitives.Projection.AxiomGate
 
 namespace Projection
 namespace HwMem
@@ -229,13 +230,13 @@ theorem srcSlots_slotKind {D : DesignCert} (i : RuntimeInput) (st : StateM)
     rw [Array.getElem?_eq_getElem h]; simp
   simp [Direct.slotIsMem, Direct.slotKind, hs, srcSlotV_isMem]
 
-#print axioms SrcRel_enc
-#print axioms srcSlotV_denote
-#print axioms srcSlotV_isMem
-#print axioms srcValM_slotV
-#print axioms mkSourcesM_agree
-#print axioms mkSourcesM_objEnv
-#print axioms srcSlots_slotKind
+#audit_axioms SrcRel_enc
+#audit_axioms srcSlotV_denote
+#audit_axioms srcSlotV_isMem
+#audit_axioms srcValM_slotV
+#audit_axioms mkSourcesM_agree
+#audit_axioms mkSourcesM_objEnv
+#audit_axioms srcSlots_slotKind
 
 end HwMem
 end Projection

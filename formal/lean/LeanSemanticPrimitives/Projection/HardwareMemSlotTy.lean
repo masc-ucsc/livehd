@@ -28,6 +28,7 @@ dependencies, and the dense-order induction collapses to a case split on
 `admits_node_ty` — to know WHICH node a slot belongs to.
 -/
 import LeanSemanticPrimitives.Projection.HardwareMemAdmit
+import LeanSemanticPrimitives.Projection.AxiomGate
 
 namespace Projection
 namespace HwMem
@@ -330,19 +331,19 @@ theorem twoMem_fold_checked (i : RuntimeInput) :
   exact sourcesThenNodes_resolved hwf hsem twoMemState_shape hgsrc hadm harity hprop
     (admits_writeAddrFits twoMemDesign_admits i twoMemState)
 
-#print axioms geomAt_mixed
-#print axioms geomAt_twoMem
-#print axioms mixed_fits_checked
-#print axioms twoMem_fits_checked
-#print axioms mixed_fold_checked
-#print axioms twoMem_fold_checked
+#audit_axioms geomAt_mixed
+#audit_axioms geomAt_twoMem
+#audit_axioms mixed_fits_checked
+#audit_axioms twoMem_fits_checked
+#audit_axioms mixed_fold_checked
+#audit_axioms twoMem_fold_checked
 
-#print axioms admits_writeAddrFits
-#print axioms admits_mainM_resolved
-#print axioms eval_op_cert_width_nonMem
-#print axioms srcTy_bv_width
-#print axioms nodeTy_result
-#print axioms admits_slot_width
+#audit_axioms admits_writeAddrFits
+#audit_axioms admits_mainM_resolved
+#audit_axioms eval_op_cert_width_nonMem
+#audit_axioms srcTy_bv_width
+#audit_axioms nodeTy_result
+#audit_axioms admits_slot_width
 
 end HwMem
 end Projection

@@ -42,6 +42,7 @@ semantics — `byte_w = 1`, so mask bit `i` selects data bit `i` — which is th
 `byte_w` the certificate payload carries and `applyOpM` passes through.
 -/
 import LeanSemanticPrimitives.Projection.HardwareMemSlots
+import LeanSemanticPrimitives.Projection.AxiomGate
 
 namespace Projection
 namespace MemImg
@@ -249,19 +250,19 @@ example : get (writeBE 32 picoImg (mk_bv 5 7) (mk_bv 32 0xFFFFFFFF) (mk_bv 32 8)
 example : get (writeBE 32 picoImg (mk_bv 5 7) (mk_bv 32 0xFFFFFFFF) (mk_bv 4 1) 8)
     (bv_uint (mk_bv 5 7)) = mk_bv 32 0xFF := by decide
 
-#print axioms InRange_of_FullTable
-#print axioms InRange_of_FullTable_le
-#print axioms emptyZero_denote
-#print axioms denote_does_not_determine_geometry
-#print axioms ofMemConst_FullTable_iff
-#print axioms romNotFull_example
-#print axioms rom_write_outOfRange_refused
-#print axioms writeBE_FullTable
-#print axioms writeBE_disabled_eq
-#print axioms writeBE_other
-#print axioms pico_InRange
-#print axioms pico_InRange_after
-#print axioms pico_byte_w_one
+#audit_axioms InRange_of_FullTable
+#audit_axioms InRange_of_FullTable_le
+#audit_axioms emptyZero_denote
+#audit_axioms denote_does_not_determine_geometry
+#audit_axioms ofMemConst_FullTable_iff
+#audit_axioms romNotFull_example
+#audit_axioms rom_write_outOfRange_refused
+#audit_axioms writeBE_FullTable
+#audit_axioms writeBE_disabled_eq
+#audit_axioms writeBE_other
+#audit_axioms pico_InRange
+#audit_axioms pico_InRange_after
+#audit_axioms pico_byte_w_one
 
 end MemImg
 end Projection

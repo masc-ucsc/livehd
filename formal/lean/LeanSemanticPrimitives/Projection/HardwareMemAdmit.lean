@@ -41,6 +41,7 @@ Nothing here weakens `SourceSupported`, `OpSupported` or `memFree`, and no
 original predicate or theorem changes meaning.
 -/
 import LeanSemanticPrimitives.Projection.HardwareMemWidth
+import LeanSemanticPrimitives.Projection.AxiomGate
 
 namespace Projection
 namespace HwMem
@@ -636,30 +637,30 @@ theorem twoMemDesign_static : StaticPremises twoMemDesign :=
 theorem laneDesign_static : StaticPremises laneDesign :=
   admits_static_premises laneDesign_admits
 
-#print axioms admits_semwf
-#print axioms admits_wf
-#print axioms admits_geom_src
-#print axioms admits_nextImgGeom
-#print axioms nodeTy_congr
-#print axioms infer_foldl_node
-#print axioms admits_node_ty
-#print axioms nodeTy_admits
-#print axioms nodeTy_write_geom
-#print axioms admits_nodeAdmitted
-#print axioms admits_writePropagates
-#print axioms arityOK_of_opArity
-#print axioms admits_arity
-#print axioms admits_static_premises
-#print axioms mixedDesign_static
-#print axioms twoMemDesign_static
-#print axioms laneDesign_static
-#print axioms mixedDesign_admits
-#print axioms twoMemDesign_admits
-#print axioms laneDesign_admits
-#print axioms mixedDesign_nextImgGeom
-#print axioms mixedDesign_geom_src
-#print axioms twoMemDesign_nextImgGeom
-#print axioms laneDesign_nextImgGeom
+#audit_axioms admits_semwf
+#audit_axioms admits_wf
+#audit_axioms admits_geom_src
+#audit_axioms admits_nextImgGeom
+#audit_axioms nodeTy_congr
+#audit_axioms infer_foldl_node
+#audit_axioms admits_node_ty
+#audit_axioms nodeTy_admits
+#audit_axioms nodeTy_write_geom
+#audit_axioms admits_nodeAdmitted
+#audit_axioms admits_writePropagates
+#audit_axioms arityOK_of_opArity
+#audit_axioms admits_arity
+#audit_axioms admits_static_premises
+#audit_axioms mixedDesign_static
+#audit_axioms twoMemDesign_static
+#audit_axioms laneDesign_static
+#audit_axioms mixedDesign_admits
+#audit_axioms twoMemDesign_admits
+#audit_axioms laneDesign_admits
+#audit_axioms mixedDesign_nextImgGeom
+#audit_axioms mixedDesign_geom_src
+#audit_axioms twoMemDesign_nextImgGeom
+#audit_axioms laneDesign_nextImgGeom
 
 end HwMem
 end Projection

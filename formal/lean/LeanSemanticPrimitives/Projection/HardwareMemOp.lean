@@ -35,6 +35,7 @@ on DIFFERENT premises:
 * Nothing here changes `OpSupported` or admits any design.
 -/
 import LeanSemanticPrimitives.Projection.HardwareMemSource
+import LeanSemanticPrimitives.Projection.AxiomGate
 
 namespace Projection
 namespace HwMem
@@ -310,16 +311,16 @@ private def applyOpMId : Nat := (idOf "applyOpM").getD 999
 `Lean.ofReduceBool`, no `Lean.trustCompiler`); `propext`/`Quot.sound`/
 `Classical.choice` are Lean's own. -/
 
-#print axioms OpSupported_code_ne
-#print axioms OpSupported_not_mem
-#print axioms applyOpM_scalar
-#print axioms applyOpM_scalar_cert
-#print axioms applyOpM_memRead
-#print axioms applyOpM_memRead_cert
-#print axioms applyOpM_memWriteBE
-#print axioms applyOpM_memWriteBE_denote
-#print axioms applyOpM_memWriteBE_cert
-#print axioms applyOpM_memWriteBE_disabled
+#audit_axioms OpSupported_code_ne
+#audit_axioms OpSupported_not_mem
+#audit_axioms applyOpM_scalar
+#audit_axioms applyOpM_scalar_cert
+#audit_axioms applyOpM_memRead
+#audit_axioms applyOpM_memRead_cert
+#audit_axioms applyOpM_memWriteBE
+#audit_axioms applyOpM_memWriteBE_denote
+#audit_axioms applyOpM_memWriteBE_cert
+#audit_axioms applyOpM_memWriteBE_disabled
 
 end HwMem
 end Projection
