@@ -32,9 +32,18 @@ json_status() { python3 -I -c "import json,sys;print((json.load(open(sys.argv[1]
 has_top() { awk -v want="$2" '$1=="graph_io" && $3==want {found=1} END{exit !found}' "$1/library.txt" 2>/dev/null; }
 
 FL=$B/$UNIT.f
-if ! timeout 600 bash "$SNAP/scripts/coreet_filelist.sh" "$UNIT" "$FL" > "$B/filelist.log" 2>&1; then
+# FP_FILELIST: a PREPARED adapter filelist (e.g. coreet_icache_input.py's
+# explicit-import input for B03) used instead of coreet_filelist.sh.  It is
+# copied into the attempt and recorded by sha256; FP_INCLUDE_DIR adds its -I.
+if [ -n "${FP_FILELIST:-}" ]; then
+  [ -r "$FP_FILELIST" ] || { echo "$ROW/$ATTEMPT: NO FILELIST $FP_FILELIST"; exit 2; }
+  cp "$FP_FILELIST" "$FL"
+  echo "adapter filelist $FP_FILELIST sha256=$(sha256sum "$FP_FILELIST" | cut -d' ' -f1)" > "$B/filelist.log"
+elif ! timeout 600 bash "$SNAP/scripts/coreet_filelist.sh" "$UNIT" "$FL" > "$B/filelist.log" 2>&1; then
   echo "$ROW/$ATTEMPT: BLOCKED at filelist -- $(tail -1 "$B/filelist.log")"; exit 2
 fi
+INC=$(grep -m1 "^+incdir+" "$FL" | sed "s/^+incdir+/-I /")
+[ -n "${FP_INCLUDE_DIR:-}" ] && INC="-I $FP_INCLUDE_DIR"
 n=$(grep -c '^/' "$FL" || true)
 [ "$n" -gt 0 ] || { echo "$ROW/$ATTEMPT: BLOCKED, empty filelist"; exit 2; }
 
@@ -48,13 +57,14 @@ printf '// Empty anchor. Real CORE-ET sources arrive via yosys.filelist_file.\n'
   echo "filelist=$FL sha256=$(sha256sum "$FL" | cut -d' ' -f1) files=$n"
   echo "lhd=$LOPT sha256=$(sha256sum "$LOPT" | cut -d' ' -f1)"
   echo "coreet_root=$COREET_ROOT rev=$(git -C $COREET_ROOT rev-parse HEAD)"
-  echo "max_width=1048576 (default 1024 refusal preserved)"; } > "$B/BINDING.txt"
+  echo "max_width=1048576 (default 1024 refusal preserved)"
+  echo "adapter_filelist=${FP_FILELIST:-none} include=${INC:-none}"; } > "$B/BINDING.txt"
 
 $CR "$ROW" s1_compile_lg "$B/s1_compile" "${FP_MEMMAX:-48G}" "${FP_TIMEOUT:-0}" -- \
   "$LOPT" compile verilog "$ANCHOR" --reader yosys-slang --top "$UNIT" \
   --workdir "$B/s1_compile/work" --result-json "$B/s1_compile/result.json" \
   --emit-dir lg:"$B/s1_compile/lg" --set yosys.filelist_file="$FL" \
-  --set yosys.setundef=zero -- --ignore-assertions --relax-enum-conversions $(grep -m1 "^+incdir+" "$FL" | sed "s/^+incdir+/-I /")
+  --set yosys.setundef=zero -- --ignore-assertions --relax-enum-conversions $INC
 s1=$(cat "$B/s1_compile/exit" 2>/dev/null || echo 99)
 { [ "$s1" = 0 ] && [ "$(json_status "$B/s1_compile/result.json")" = pass ] \
   && [ -s "$B/s1_compile/lg/library.txt" ] && has_top "$B/s1_compile/lg" "$UNIT"; } \

@@ -18,6 +18,16 @@ degenerate model that still compiles, so every step hard-fails instead.
        TXFMA_EXP_FRAC_OFFSET   used ~:875, declared ~:892
   2. hw/ip/tech_generic/prim_mul_div/rtl/intpipe_mul_div_ctl.sv
        start_mul_2p / start_div_2p   used ~:114/:123, declared ~:139/:140
+  3. hw/ip/shirecache/rtl/shirecache_pkg.sv  (B05, ET-Link->AXI)
+       TagDataSize    used :65, declared :74
+       L3ShireIdSize  used :105, declared :143, and with it L3Shires (:142),
+                      which L3ShireIdSize's own initializer reads -- moved
+                      SECOND so it lands above its new first use
+  4. hw/ip/shirecache/rtl/shirecache_mesh_master_axi_port.sv  (B05)
+       r_fifo_pop / b_fifo_pop  (one `logic` line)  used :224/:245, declared :278
+     and, separately (EXPLICIT_IMPORTS), `import etlink_pkg::PaSize;`: the
+     module wildcard-imports both etlink_pkg and shirecache_pkg, and
+     shirecache_pkg::PaSize is declared `= etlink_pkg::PaSize` (checked).
 """
 import os, re, sys, hashlib
 
@@ -41,6 +51,10 @@ PATCHES = {
     "hw/ip/minion/vpu/rtl/vpu_defs_pkg.sv": ["TXFMA_EXP_FRAC_OFFSET"],
     "hw/ip/tech_generic/prim_mul_div/rtl/intpipe_mul_div_ctl.sv":
         ["start_mul_2p", "start_div_2p"],
+    # ORDER MATTERS: L3ShireIdSize moves first, then L3Shires follows it up.
+    "hw/ip/shirecache/rtl/shirecache_pkg.sv":
+        ["TagDataSize", "L3ShireIdSize", "L3Shires"],
+    "hw/ip/shirecache/rtl/shirecache_mesh_master_axi_port.sv": ["r_fifo_pop"],
 }
 
 # Files whose ANSI `output` ports carry NO data type and are then driven from an
@@ -53,6 +67,18 @@ UNTYPED_OUTPUT_FILES = [
     "hw/ip/minion/vpu/rtl/txfmactl_top.sv",
     "hw/ip/minion/vpu/rtl/txfmaexp_top.sv",
 ]
+
+# Files where two WILDCARD-imported packages both declare a name the module
+# uses -- slang: "multiple imports found for identifier".  The adapter inserts
+# ONE explicit `import <pkg>::<name>;` right after that package's wildcard
+# import, which SystemVerilog resolves ahead of any wildcard.  It is CHECKED,
+# not assumed: every other wildcard-imported package declaring the name must
+# define it as `<pkg>::<name>` itself (an alias), so the choice changes no value.
+#   rel -> [(package, name)]
+EXPLICIT_IMPORTS = {
+    # B05: shirecache_pkg::PaSize is declared `= etlink_pkg::PaSize`
+    "hw/ip/shirecache/rtl/shirecache_mesh_master_axi_port.sv": [("etlink_pkg", "PaSize")],
+}
 
 OUTPUT_RE = re.compile(r"^(\s*output\s+)(?!(?:logic|wire|reg|bit|var)\b)(\S.*)$")
 
@@ -199,6 +225,66 @@ def type_outputs(rel, coreet_root):
     return src, out
 
 
+def find_pkg_file(coreet_root, pkg):
+    hits = []
+    for d, _, fs in os.walk(os.path.join(coreet_root, "hw")):
+        for f in fs:
+            if f == pkg + ".sv":
+                hits.append(os.path.join(d, f))
+    if len(hits) != 1:
+        raise SystemExit(f"FATAL: expected exactly 1 file for package {pkg}, found {len(hits)}")
+    return hits[0]
+
+
+def explicit_imports(rel, pairs, coreet_root, derived):
+    """Insert checked explicit imports; compose with an earlier derived copy."""
+    src = os.path.join(coreet_root, rel)
+    base = derived.get(os.path.realpath(src), src)
+    with open(base) as f:
+        original = f.readlines()
+    lines = list(original)
+    wild = re.findall(r"(?m)^\s*import\s+(\w+)::\*;", "".join(original))
+    done = []
+    for pkg, name in pairs:
+        if pkg not in wild:
+            raise SystemExit(f"FATAL: {rel} has no `import {pkg}::*;` to qualify")
+        # the alias check: every OTHER wildcard package declaring `name`
+        decl = re.compile(r"(?m)^\s*localparam\b[^;=]*\b" + re.escape(name) + r"\s*=\s*([^;]+);")
+        others = []
+        for q in wild:
+            if q == pkg:
+                continue
+            m = decl.search(open(find_pkg_file(coreet_root, q)).read())
+            if m:
+                rhs = m.group(1).split("//")[0].strip()
+                if rhs != f"{pkg}::{name}":
+                    raise SystemExit(f"FATAL: {q}::{name} = {rhs}, not an alias of {pkg}::{name}; "
+                                     f"an explicit import would choose a different value")
+                others.append(q)
+        if not others:
+            raise SystemExit(f"FATAL: {rel}: no other wildcard package declares {name}; nothing to resolve")
+        i = next(k for k, l in enumerate(lines) if re.match(r"^\s*import\s+" + pkg + r"::\*;", l))
+        indent = re.match(r"^(\s*)", lines[i]).group(1)
+        lines.insert(i + 1, f"{indent}import {pkg}::{name};\n")
+        done.append(f"{pkg}::{name} (aliased by {', '.join(others)})")
+    # ONLY inserted import lines may differ
+    extra = list(lines)
+    for l in original:
+        extra.remove(l)
+    if not all(re.match(r"^\s*import \w+::\w+;\s*$", l) for l in extra):
+        raise SystemExit(f"FATAL: {rel} explicit-import adapter changed more than import lines")
+    out = os.path.join(OUTDIR, os.path.basename(rel))
+    os.makedirs(OUTDIR, exist_ok=True)
+    hdr = ("// DERIVED by scripts/coreet_patch_srcs.py -- do not edit.\n"
+           f"// change: explicit import(s) {'; '.join(done)}\n"
+           "// reason: two wildcard-imported packages declare the name; slang\n"
+           "//         refuses the ambiguity.  The packages alias one value (checked).\n")
+    with open(out, "w") as f:
+        f.write(hdr + "".join(lines))
+    print(f"{rel}\n  -> {out}\n     {'; '.join(done)}")
+    return src, out
+
+
 def main():
     coreet_root = os.environ.get("COREET_ROOT")
     if not coreet_root:
@@ -209,6 +295,9 @@ def main():
         mapping[os.path.realpath(src)] = out
     for rel in UNTYPED_OUTPUT_FILES:
         src, out = type_outputs(rel, coreet_root)
+        mapping[os.path.realpath(src)] = out
+    for rel, pairs in EXPLICIT_IMPORTS.items():
+        src, out = explicit_imports(rel, pairs, coreet_root, mapping)
         mapping[os.path.realpath(src)] = out
     mf = os.path.join(OUTDIR, "map.tsv")
     with open(mf, "w") as f:
