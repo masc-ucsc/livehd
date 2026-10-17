@@ -20,7 +20,7 @@
 # sides; fuel 200000/2000; identical certificate bytes.
 #   counterbalanced.sh <out-subdir> <block>...
 set -uo pipefail
-R=/WORKROOT/projects/livehd-pass-lean-master
+R="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"   # the repo root, from this script's location
 G=$R/generated/master_port/fp/genprobe
 CPU=80
 REPS=8

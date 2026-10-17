@@ -4,7 +4,7 @@
 #   pin side    -> the extracted 9bb41a09d tree + gen_probe.pin.lean
 # Same Lean 4.31.0 (both trees pin it), same leanc, same -O2.
 set -uo pipefail
-R=/WORKROOT/projects/livehd-pass-lean-master
+R="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"   # the repo root, from this script's location
 G=$R/generated/master_port/fp/genprobe
 export LEAN_NUM_THREADS=4
 

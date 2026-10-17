@@ -6,10 +6,10 @@
 # are immutable.
 #   fp_cov_queue_coreet.sh <row-id> <unit> <approach>
 set -uo pipefail
-R=/WORKROOT/projects/livehd-pass-lean-master
+R="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"   # the repo root, from this script's location
 COV=$R/generated/master_port/cov12x5
 SNAP=$R/generated/master_port/sim_inputs/pinned
-LOPT=/var/tmp/bazel_USER/_bazel_USER/8036432c6fc5c16a245c44de062c5637/execroot/_main/bazel-out/k8-opt/bin/lhd/lhd
+LOPT=${FP_LHD:-$(readlink -f "$R/bazel-bin/lhd/lhd")}   # bound by realpath; its sha256 is recorded below
 ROW=${1:?row}; UNIT=${2:?unit}; APP=${3:-legacy}
 case "$APP" in legacy|verified_compiler) ;; *) echo "unknown approach: $APP"; exit 2 ;; esac
 ATTEMPT=${ATTEMPT:-$(date +%Y%m%dT%H%M%S)-$$}
@@ -18,7 +18,7 @@ B=$COV/$ROW/attempt-$ATTEMPT
 # colliding ATTEMPT is refused rather than silently reused (mkdir -p would).
 mkdir -p "$COV/tmp" "$(dirname "$B")"
 mkdir "$B" 2>/dev/null || { echo "$ROW: ATTEMPT COLLISION, $B exists; refusing to reuse"; exit 3; }
-export TMPDIR=$COV/tmp TMP=$COV/tmp TEMP=$COV/tmp COREET_ROOT=/WORKROOT/projects/core-et
+export TMPDIR=$COV/tmp TMP=$COV/tmp TEMP=$COV/tmp COREET_ROOT=${COREET_ROOT:?set COREET_ROOT to the pinned core-et checkout}
 CR="bash $R/pass/lean/scripts/fp_cov_run.sh"
 # Parse the TOP-LEVEL status field, never a "pass" substring that a phase name
 # or a diagnostic could carry.

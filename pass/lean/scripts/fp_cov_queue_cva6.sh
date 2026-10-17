@@ -7,10 +7,10 @@
 # scripts/gen_cva6_wrappers.py from slang's elaborated AST.
 #   fp_cov_queue_cva6.sh <row-id> <block>
 set -uo pipefail
-R=/WORKROOT/projects/livehd-pass-lean-master
+R="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"   # the repo root, from this script's location
 COV=$R/generated/master_port/cov12x5
 FND=$R/generated/master_port/cva6_foundation
-LOPT=/var/tmp/bazel_USER/_bazel_USER/8036432c6fc5c16a245c44de062c5637/execroot/_main/bazel-out/k8-opt/bin/lhd/lhd
+LOPT=${FP_LHD:-$(readlink -f "$R/bazel-bin/lhd/lhd")}   # bound by realpath; its sha256 is recorded below
 FL=$FND/cva6_filelists/cv64a6_imafdc_sv39_hpdcache_wb.flistplus.f
 ROW=${1:?row}; BLK=${2:?block}; APP=${3:?approach: legacy|verified_compiler}
 case "$APP" in legacy|verified_compiler) ;; *) echo "unknown approach: $APP"; exit 2 ;; esac
