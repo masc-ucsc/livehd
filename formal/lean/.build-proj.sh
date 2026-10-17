@@ -56,6 +56,9 @@ MODULES=(
   Projection/ProjectedStep
   Projection/CertLoad
   Projection/Scaling
+  # The axiom gate, then the audit that uses it: `#audit_axioms` FAILS this
+  # build on any axiom outside propext/Classical.choice/Quot.sound.
+  Projection/AxiomGate
   Projection/Audit
 )
 
