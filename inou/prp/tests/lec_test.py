@@ -64,13 +64,14 @@ class LecHarness(unittest.TestCase):
             time.sleep(.5)
             self.assertFalse(os.path.exists(marker), 'watchdog left its simulator/solver child running')
 
-    def test_watchdog_scales_only_in_dbg_trees(self):
+    def test_watchdog_scales_only_in_unoptimized_trees(self):
         base = '/x/execroot/_main/bazel-out/{}/bin/inou/prp/t.runfiles'
-        self.assertEqual(watchdog_scale(base.format('k8-dbg')), DBG_WATCHDOG_SCALE)
-        self.assertEqual(watchdog_scale(base.format('darwin_arm64-dbg')), DBG_WATCHDOG_SCALE)
-        for mode in ('k8-opt', 'k8-fastbuild'):
+        for mode in ('k8-dbg', 'darwin_arm64-dbg', 'k8-fastbuild', 'darwin_arm64-fastbuild'):
+            self.assertEqual(watchdog_scale(base.format(mode)), DBG_WATCHDOG_SCALE)
+        for mode in ('k8-opt', 'darwin_arm64-opt'):
             self.assertEqual(watchdog_scale(base.format(mode)), 1)
         self.assertEqual(watchdog_scale('/home/u/dbg-work/livehd'), 1)
+        self.assertEqual(watchdog_scale('/home/u/fastbuild-work/livehd'), 1)
 
     def test_proof_effort_is_the_default_unless_a_test_names_its_own(self):
         probe = 'import sys; print(" ".join(sys.argv[1:]))'

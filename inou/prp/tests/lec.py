@@ -9,7 +9,8 @@ import subprocess
 import sys
 
 
-# `-c dbg` builds lhd (and yosys/abc) at -O0: everything LiveHD-side runs ~9x
+# `-c dbg` and default fastbuild compile lhd (and yosys/abc) at -O0:
+# everything LiveHD-side runs ~9x
 # slower while the prebuilt cvc5 does not, so formal.timeout (solve time) holds
 # but the outer watchdog -- which also covers parse/upass/satopt -- must scale.
 DBG_WATCHDOG_SCALE = 10
@@ -18,7 +19,7 @@ DBG_WATCHDOG_SCALE = 10
 # (graph traversal, unrolling; ~7-9x slower at -O0) spend it too, not only the
 # solve. matched_filter_4's flat bmc arm encodes for ~9 s in dbg against ~1 s
 # of cvc5, and a loaded dbg run then hit its 20 s budget. A budget the HARNESS
-# picked is scaled for a dbg tree as well; a formal.timeout the test pins
+# picked is scaled for an unoptimized tree as well; a formal.timeout the test pins
 # itself is its own claim and stays exact.
 DBG_BUDGET_SCALE = 3
 
@@ -33,10 +34,10 @@ VERDICT = (r'(?:PROVEN-full|PROVEN-bounded\(\d+\)|TESTED-sampled\(\d+\)|TIMEOUT-
 
 
 def watchdog_scale(path=None):
-    """Outer-watchdog multiplier: DBG_WATCHDOG_SCALE when running from a bazel dbg tree."""
+    """Outer-watchdog multiplier for Bazel dbg and fastbuild (both unoptimized)."""
     if path is None:
         path = os.environ.get('TEST_SRCDIR') or os.getcwd()
-    return DBG_WATCHDOG_SCALE if re.search(r'/bazel-out/[^/]*-dbg/', path) else 1
+    return DBG_WATCHDOG_SCALE if re.search(r'/bazel-out/[^/]*-(?:dbg|fastbuild)/', path) else 1
 
 
 def run_lec(cmd, cwd=None, timeout=5, scale=None):
