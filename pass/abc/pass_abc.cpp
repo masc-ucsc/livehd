@@ -68,6 +68,12 @@ void Pass_abc::add_mapping_labels(Eprp_method& m) {
                        "true|false: run pass.specialize (constant instance inputs folded into state-free callees) on "
                        "the private copy after pass.color (default true; the synth.specialize spelling)",
                        "true");
+  m.add_label_optional("reassoc",
+                       "true|false: merge the And/Or/Xor chains an expanded carried loop leaves (`acc |= x` per "
+                       "iteration, also the guarded `if c { acc |= x }`) into balanced n-ary cells before blasting "
+                       "(pass/synth/reassoc.hpp; default true). False hands ABC the chains as expanded (A/B runs); the "
+                       "region cache compares the prepared region bodies, so either setting reuses only its own rows",
+                       "true");
   m.add_label_optional("out", "output graph_library directory (the --emit-dir lg: slot)", "");
   m.add_label_optional("library",
                        "INTERNAL kernel-plumbed Liberty .lib for read_lib: the lhd CLI resolves it from `--set synth.liberty` "
@@ -740,13 +746,18 @@ void Pass_abc::map_with(Eprp_var& var, const std::function<void(livehd::abc::Map
         .emit();
     return;
   }
+  const auto reassoc_text = var.get("reassoc", "true");
+  if (reassoc_text != "true" && reassoc_text != "false") {
+    livehd::diag::err("pass.abc", "bad-reassoc", "syntax").msg("pass.abc.reassoc expects true|false, got '{}'", reassoc_text).emit();
+    return;
+  }
   auto prepared
       = livehd::synth::prepare_design(var.graphs,
                                       unroll_carry_text == "true" || unroll_carry_text == "1" || unroll_carry_text == "on",
                                       "pass.abc",
                                       nullptr,
                                       var.get("specialize", "true") != "false",
-                                      /*reassociate_loops=*/true);
+                                      reassoc_text == "true");
   if (!prepared) {
     return;
   }
@@ -755,11 +766,14 @@ void Pass_abc::map_with(Eprp_var& var, const std::function<void(livehd::abc::Map
   auto& resolve_graphs    = prepared->resolve_graphs;
   auto& loops             = prepared->loops;
   if (truthy(var.get("stats", "false"))) {
-    std::print("pass.abc loops: independent={} carried={} expanded={} retained={}\n",
+    std::print("pass.abc loops: independent={} carried={} expanded={} retained={} reassoc: guarded={} trees={} absorbed={}\n",
                loops.independent,
                loops.carried,
                loops.expanded,
-               loops.independent + loops.carried - loops.expanded);
+               loops.independent + loops.carried - loops.expanded,
+               prepared->reassoc.guarded,
+               prepared->reassoc.roots,
+               prepared->reassoc.absorbed);
   }
 
   auto top                 = std::string{var.get("top", "")};

@@ -6,8 +6,15 @@ load("//tools:copt_default.bzl", "COPTS")
 
 cc_library(
     name = "solver_profile",
-    srcs = ["solver_profile.cpp"],
-    hdrs = ["solver_profile.hpp", "fresh_solver.hpp"],
+    srcs = [
+        "array_blast.cpp",
+        "solver_profile.cpp",
+    ],
+    hdrs = [
+        "array_blast.hpp",
+        "fresh_solver.hpp",
+        "solver_profile.hpp",
+    ],
     copts = COPTS,
     includes = ["."],
     visibility = ["//visibility:public"],
@@ -27,6 +34,8 @@ filegroup(
         "cone_expand.hpp",
         "cone_digest.cpp",
         "cone_expand.cpp",
+        "array_blast.cpp",
+        "array_blast.hpp",
         "encode.cpp",
         "encode.hpp",
         "effort.cpp",
@@ -660,6 +669,50 @@ sh_test(
     tags = ["no-sandbox"],
 )
 
+# One-sided memory power-on contents follow the flop convention: an
+# initialized reference against an uninitialized implementation refutes (both
+# engines used to tie the two and prove), the reverse is a refinement.
+sh_test(
+    name = "lec_mem_init_refine_test",
+    size = "small",
+    srcs = ["tests/lec_mem_init_refine_test.sh"],
+    data = ["//lhd"],
+    tags = ["no-sandbox"],
+)
+
+# An uninitialized reference register or memory against an implementation that
+# initializes or resets it is a refinement (PROVEN); the reverse direction and
+# a real bug behind the refinement refute.
+sh_test(
+    name = "lec_flop_init_refine_test",
+    size = "small",
+    srcs = ["tests/lec_flop_init_refine_test.sh"],
+    data = ["//lhd"],
+    tags = ["no-sandbox"],
+)
+
+# ordering="none" on the implementation side reads an arbitrary value on a
+# write collision: it cannot refine an ordering="old" reference (it used to
+# prove while LiveHD's own emitted Verilog of the same design refuted).
+sh_test(
+    name = "lec_mem_undef_impl_test",
+    size = "small",
+    srcs = ["tests/lec_mem_undef_impl_test.sh"],
+    data = ["//lhd"],
+    tags = ["no-sandbox"],
+)
+
+# Small memories reach cvc5 as per-entry bit-vectors (array_blast.hpp): a
+# two-lane 4x8 design with unknown write addresses finishes BMC bound 2 well
+# inside a 15 s budget (it took ~21 s, and bound 3 timed out).
+sh_test(
+    name = "lec_mem_small_blast_test",
+    size = "small",
+    srcs = ["tests/lec_mem_small_blast_test.sh"],
+    data = ["//lhd"],
+    tags = ["no-sandbox"],
+)
+
 # Loop-built (Pyrope) and generate-built (Verilog) memories pair by leaf name
 # plus iteration indices; equivalent lanes prove in either lane order.
 sh_test(
@@ -695,6 +748,16 @@ cc_test(
     srcs = ["tests/solver_profile_test.cpp"],
     copts = COPTS,
     deps = [":solver_profile", ":lec_query", "@googletest//:gtest_main"],
+)
+
+# Small-array elimination (array_blast.hpp): the per-entry bit-vector rewrite
+# must agree with cvc5's array theory, and models must read back through it.
+cc_test(
+    name = "array_blast_test",
+    size = "small",
+    srcs = ["tests/array_blast_test.cpp"],
+    copts = COPTS,
+    deps = [":solver_profile", "@googletest//:gtest_main"],
 )
 
 # Manual experiments, bounded per query; never run as part of bazel test.

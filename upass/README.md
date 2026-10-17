@@ -325,15 +325,32 @@ ports) and the loop becomes a `rolled_for` node that upass.tolg lowers to a
   multi-output one declined the roll and silently unrolled.
 - **Result ranges.** The values a rolled loop produces are bound in the
   hidden payload, which the plugins do not walk, so each result's range is
-  published by the runner: the carry-out range of the last iteration
-  (`eval_carry_ranges`), else the declared type. Without it a later read was
-  judged by the PRE-loop value (`mut v:U10 = 0`): a narrowing write went
-  unreported and a needed `wrap` read as unnecessary, so what compiled
-  depended on compile.unroll.
+  published by the runner: every value the loop can leave with
+  (`eval_carry_ranges`), else the declared type. Without a `break`/`continue`
+  that is the last iteration's carry-out; with one, the loop may leave after
+  ANY iteration, so it is the join of every iteration's carry-out (each
+  already joining that iteration's exit points) -- the last iteration's alone
+  made a `break` loop's `acc` look like one value. Without a published range a
+  later read was judged by the PRE-loop value (`mut v:U10 = 0`): a narrowing
+  write went unreported and a needed `wrap` read as unnecessary, so what
+  compiled depended on compile.unroll.
 - **Runtime `#sext`.** `x#sext[lo..=hi]` with loop-index bounds has a runtime
   sign position `hi - lo`; tolg lowers it with shifts
   (`(x & ((2 << p) - 1)) - (x[p] << (p + 1))`, `p` clamped to x's width) that
-  fold to the `Sext` cell's slice once `p` is constant.
+  fold to the `Sext` cell's slice once `p` is constant. A position is constant
+  only from the operand itself (a literal, or a window `hi - lo` of
+  structurally constant width), never from a published range alone, and the
+  shifts and the clamp are sized from what the position's pin can hold: a
+  range is only as sound as its derivation, and a one-value range must not
+  hard-wire a sign bit.
+- **Linear planning.** upass must stay O(N): the planner walks a loop body
+  once per CLASS of names, never once per name (`constant_field_reads`,
+  `body_must_write`), and what lies outside the body comes from per-tree
+  indexes built once: "written before this loop" and "read by a later loop
+  domain" from a preorder index (`Loop_tree_order`: a name's stores and the
+  domains reading it, by position and scope), a typed name's declaration from
+  its declaration sites (`decl_sites_of`) -- never a walk of the definition
+  per name or per loop (tests/loop_roll_linear_test.sh in upass/runner).
 
 ### SSA and tuple-port scalarization
 

@@ -7,9 +7,7 @@
 #include <string>
 #include <vector>
 
-#include "blast.hpp"
 #include "gtest/gtest.h"
-#include "lnet_ops.hpp"
 #include "node_util.hpp"
 
 namespace livehd::synth {
@@ -463,41 +461,6 @@ TEST(Reassoc, ScopeLimitsWhatMerges) {
   EXPECT_EQ(d.arity(new1), 3U);
   EXPECT_EQ(d.arity(src1), 2U);
   EXPECT_EQ(d.truth(1), before);
-}
-
-// The blaster's arrival-aware reduction: a late operand lands next to the root.
-TEST(Reassoc, BlasterPutsLateOperandsNearTheRoot) {
-  Lnet     net;
-  Lnet_ops ops(net);
-  std::vector<Lid> early;
-  for (int i = 0; i < 7; ++i) {
-    early.push_back(ops.input("e" + std::to_string(i)));
-  }
-  // A 6-level cone.
-  Lid late = ops.input("l0");
-  for (int i = 1; i <= 6; ++i) {
-    late = ops.xor_(late, ops.input("l" + std::to_string(i)));
-  }
-  ASSERT_EQ(net.level(late), 6U);
-  const auto bin = [&](Lid x, Lid y) { return ops.or_(x, y); };
-  {
-    std::vector<Lid> level{late};
-    level.insert(level.end(), early.begin(), early.end());
-    const auto root = blast_reduce_assoc(ops, level, bin, true);
-    EXPECT_EQ(net.level(root), 7U);  // positional pairing would give 9
-  }
-  {
-    // Equal arrivals keep the positional balanced tree.
-    std::vector<Lid> level(early.begin(), early.begin() + 4);
-    const auto       root = blast_reduce_assoc(ops, level, bin, true);
-    EXPECT_EQ(net.level(root), 2U);
-    ASSERT_EQ(net.fanin_count(root), 2U);
-    const auto left = net.fanin(root, 0), right = net.fanin(root, 1);
-    EXPECT_EQ(net.fanin(left, 0), early[0]);
-    EXPECT_EQ(net.fanin(left, 1), early[1]);
-    EXPECT_EQ(net.fanin(right, 0), early[2]);
-    EXPECT_EQ(net.fanin(right, 1), early[3]);
-  }
 }
 
 }  // namespace

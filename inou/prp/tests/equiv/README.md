@@ -133,6 +133,7 @@ Every tag is a `:name: value` line inside the leading `/* … */` block.
 | `:yosys_lec: false` | drop the `lgyosys` oracle for this pair; say WHY in the header prose |
 | `:yosys_lec_timeout: N` | the oracle's `LGCHECK_EQUIV_TIMEOUT` in seconds (default 3; the outer wall is 3N) |
 | `:equiv_lec_grep: REGEX` / `:equiv_lec_grep_not: REGEX` | must (not) appear in this pair's native `lhd lec` output (repeatable); the base `:lec_grep:` tags belong to the `prp-lec-*` groups below |
+| `:v2prp_native_expect: refuted` | the `prp-v2prp2v-*` native leg only (handwritten Pyrope as the REFERENCE, the golden's round trip as the implementation) must refute, while the equiv test still proves: a Pyrope twin that refines its golden with power-on contents the golden leaves undefined is the defined side of that leg, and an initialized reference against an uninitialized implementation is REFUTED-cex |
 | `:lec_expect: refuted` | a MUTATED pair: the golden deliberately computes something else, so the native `lhd lec` must REFUTE it, the `lgyosys` oracle must not prove it, and the `prp-v2prp2v-*` native leg must refute too (its golden-vs-round-trip leg still proves). A regression guard for a false PROVEN, such as `spec_types_cast_runtime_zext` |
 
 ## Pyrope ↔ Pyrope variants (`prp-lec-*`)

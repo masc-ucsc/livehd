@@ -7,6 +7,7 @@
 #include <thread>
 #include <vector>
 
+#include "absl/container/flat_hash_set.h"
 #include "cprop.hpp"
 #include "loop_hoist.hpp"
 #include "worker_pool.hpp"  // livehd::run_workers (big-stack workers)
@@ -40,9 +41,35 @@ static void hoist_after(Eprp_var& var) {
   livehd::cprop::hoist_loop_invariants(var.graphs);
 }
 
+// The lifted loop bodies among `graphs`: the callees of a compact-loop Sub
+// (Subnode_loop) any of them instantiates. Only a graph with a loop Sub is
+// walked (has_loop_subnodes is O(1)), so a loop-free design pays one flag read
+// per graph. A body whose loop parent is outside `graphs` (a partial pass run)
+// is not found and simply keeps the loop-free rules.
+static absl::flat_hash_set<hhds::Gid> lifted_loop_bodies(const std::vector<std::shared_ptr<hhds::Graph>>& graphs) {
+  absl::flat_hash_set<hhds::Gid> bodies;
+  for (const auto& g : graphs) {
+    if (!g || !g->has_loop_subnodes()) {
+      continue;
+    }
+    for (const auto node : g->body().nodes()) {
+      if (node.is_loop_subnode()) {
+        bodies.insert(node.get_subnode_gid());
+      }
+    }
+  }
+  return bodies;
+}
+
 void Pass_cprop::optimize(Eprp_var& var) {
   Pass_cprop pcp(var);
   const auto low_lanes = var.get("low_lanes", "true") != "false";
+  // The accumulation guard is a rolled-loop rewrite (Cprop::set_guard_scope):
+  // every cell of a lifted loop body, nothing else.
+  const auto loop_bodies = lifted_loop_bodies(var.graphs);
+  const auto scoped      = [&](Cprop& cp, const std::shared_ptr<hhds::Graph>& g) {
+    cp.set_guard_scope(g && loop_bodies.contains(g->get_gid()) ? Cprop::whole_graph() : Cprop::Node_scope{});
+  };
 
   // Graph bodies are independently owned; cprop neither reads nor mutates a
   // sibling graph.  Large generated designs contain thousands of modules, so
@@ -57,6 +84,7 @@ void Pass_cprop::optimize(Eprp_var& var) {
   if (nw <= 1) {
     Cprop cp{low_lanes};
     for (const auto& g : var.graphs) {
+      scoped(cp, g);
       cp.do_trans(g);
     }
     hoist_after(var);
@@ -80,6 +108,7 @@ void Pass_cprop::optimize(Eprp_var& var) {
         break;
       }
       try {
+        scoped(cp, var.graphs[i]);
         cp.do_trans(var.graphs[i]);
       } catch (...) {
         errors[i] = std::current_exception();

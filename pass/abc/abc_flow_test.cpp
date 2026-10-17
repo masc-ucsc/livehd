@@ -178,6 +178,36 @@ TEST_F(AbcFlow, RecoveryRetainsLiveGiaUndoState) {
   EXPECT_LE(result.delay_qor->first, plan.budget);
   EXPECT_EQ(physical_flow_qor(Abc_FrameReadNtk(frame)), result.delay_qor);
 }
+
+// Area recovery may spend the slack, never the budget: a remap that comes
+// back without a mapping that meets it (here a LUT remap, which no cell timing
+// can measure, standing in for one that overshoots past what sizing repairs)
+// is discarded, and the mapping that met the budget is the result -- in the
+// frame and reported, so the area candidate still gets its turn.
+TEST_F(AbcFlow, AreaRecoveryThatMissesTheBudgetIsDiscarded) {
+  plan.flow       = "strash; &get -n; &st; &nf; &put -o";
+  plan.map_step   = "&if -K 2";
+  plan.remap_post = "; &put";
+  plan.ladder = plan.remappable = plan.area_candidate = true;
+  plan.area_relax_pct                               = 200;
+  auto* unmapped = Abc_NtkDup(Abc_FrameReadNtk(frame));
+  ASSERT_EQ(Cmd_CommandExecute(frame, plan.flow.c_str()), 0);
+  const auto met = physical_flow_qor(Abc_FrameReadNtk(frame));
+  ASSERT_TRUE(met);
+  Abc_FrameReplaceCurrentNetwork(frame, unmapped);  // the flow starts from the logic network again
+  std::vector<std::string> stages;
+  const auto               result = execute_flow(frame, plan, [&](auto stage) {
+    stages.emplace_back(stage);
+    return true;
+  });
+  ASSERT_EQ(result.status, Flow_status::completed);
+  EXPECT_EQ(std::count(stages.begin(), stages.end(), "area-recovery"), 2);  // the remap ran
+  EXPECT_GT(std::count(stages.begin(), stages.end(), "area-candidate"), 0);  // and so did the candidate
+  ASSERT_TRUE(result.delay_qor);
+  EXPECT_EQ(result.delay_qor, met);
+  EXPECT_TRUE(Abc_NtkIsMappedLogic(Abc_FrameReadNtk(frame)));
+  EXPECT_TRUE(physical_flow_qor(Abc_FrameReadNtk(frame)));
+}
 }  // namespace
 }  // namespace livehd::abc
 

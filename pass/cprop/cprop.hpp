@@ -114,11 +114,34 @@ protected:
   void scalar_node(hhds::Node_class& node);
 
 public:
+  // The cells a rewrite may touch; see set_guard_scope.
+  using Node_scope = std::function<bool(const hhds::Node_class&)>;
+
+private:
+  Node_scope guard_scope_;
+
+public:
   Cprop() = default;
-  // `low_lanes`: also narrow operations over known low lanes and move
-  // accumulation guards onto their terms. Both create cells with no width
-  // stamp, so only callers that run bitwidth afterwards set it.
+  // `low_lanes`: also narrow operations over known low lanes (and, inside
+  // set_guard_scope, move accumulation guards onto their terms). Both create
+  // cells with no width stamp, so only callers that run bitwidth afterwards
+  // set it.
   explicit Cprop(bool low_lanes) : low_lanes_(low_lanes) {}
+  // The accumulation-guard rewrite in scalar_mux (`mux(s, a, a OP x)` ->
+  // `a OP mux(s, id, x)`) is a ROLLED-LOOP rule: it turns a loop body's
+  // guarded update into an associative reduction of its carry, which is what
+  // the loop consumers (loop_split's assoc_reduction, synthesis' parallel-data
+  // extraction and chain merge) exploit. It runs only on the Muxes and update
+  // cells `scope` admits, and only with `low_lanes`. Empty (the default):
+  // nowhere, so straight-line code -- including a hand-unrolled
+  // `if c { acc |= x }` run -- compiles exactly as it did before rolled loops
+  // existed. pass.cprop admits every cell of a lifted loop body (a callee of a
+  // compact-loop Sub); synthesis' loop cleanup admits the cells an expansion
+  // minted.
+  void set_guard_scope(Node_scope scope) { guard_scope_ = std::move(scope); }
+  [[nodiscard]] static Node_scope whole_graph() {
+    return [](const hhds::Node_class&) { return true; };
+  }
   // Rewrites unlimited-precision values without consulting width/sign hints.
   void do_trans(const std::shared_ptr<hhds::Graph>& g);
 };

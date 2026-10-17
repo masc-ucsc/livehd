@@ -242,15 +242,46 @@ wrapper level folds onto the next segment with its tag placed before that
 segment's own `__li` tags, so `u_loop_0__li0.t__li1` and the unrolled
 `t__li0__li1` name the same state (iteration tags are outermost first).
 
+One-sided initial state follows one convention for registers and memories
+(owner ruling 2026-10-16). A REFERENCE that is uninitialized (power-on X)
+against an IMPLEMENTATION that initializes or resets the same state is a
+refinement: the reference allows any value, so BMC starts the reference at the
+implementation's value -- at power-on for an `initial` value, and at the first
+checked cycle for state the implementation's reset defines (the reference's
+own writes during the reset prologue do not define it). The opposite
+direction, a reference with power-on contents or a reset against an
+uninitialized implementation, keeps the implementation's state arbitrary and
+refutes: `initial mem[i] = 8'h5a` against no initializer is REFUTED-cex, and
+induction gives up on a memory whose power-on contents only the reference has
+(no inductive base). The induction step cannot see a reset present on one side
+only, so those refinements come back PROVEN-bounded. A `$readmem` image is
+externally loadable state, not an initializer: the memory starts from the
+shared array, images are never compared and never folded to their contents.
+An `ordering="none"` read that collides with a write is a don't-care on the
+reference and an unconstrained value on the implementation, so "none" refines
+"old" but not the other way around.
+
 Under `formal.lec.gold_x=ignore` BMC threads a knowledge state for each
-reference memory (`Mem_x_state` in `encode.hpp`): bit i of entry e is unknown
-when `select(plane, epoch ++ e) ^ fill` has it set. A reset or a write through
-an unknown address starts a new epoch with a new fill word instead of swapping
-in another constant array. The all-zero array is the only constant, nothing
-chains through an array-sorted ITE, and the epoch starts as a fresh symbol, so
-no store chain is ever constant: cvc5's array solver aborts with "write-chains
-connecting two different constant arrays" when two different constant arrays
-can merge, which the old all-known/all-unknown pair of planes allowed.
+reference memory (`Mem_x_state` in `encode.hpp`). A memory of at most 64
+entries keeps one bit-vector per entry (`words`): bit i of entry e is unknown
+when bit i of `words[e]` is set. A larger one uses an array: bit i of entry e
+is unknown when `select(plane, epoch ++ e) ^ fill` has it set. A reset or a
+write through an unknown address starts a new epoch with a new fill word
+instead of swapping in another constant array. The all-zero array is the only
+constant, nothing chains through an array-sorted ITE, and the epoch starts as a
+fresh symbol, so no store chain is ever constant: cvc5's array solver aborts
+with "write-chains connecting two different constant arrays" when two different
+constant arrays can merge, which the old all-known/all-unknown pair of planes
+allowed.
+
+The memory VALUE arrays of memories with at most 32 entries never reach cvc5
+as arrays: `Fresh_solver` rewrites every array with an index of at most five
+bits into one bit-vector term per entry before each check (`array_blast.hpp`,
+an exact equivalence), and a query left without arrays is solved as QF_BV.
+cvc5's lazy array solver case-split on every pair of symbolic addresses of the
+unrolling: two 4x8 lanes written through an unknown address took 21 s at BMC
+bound 2 and timed out at bound 3 at 120 s (now about 7 s and 18 s; deeper
+bounds still grow quickly, so `auto` on that design ends TIMEOUT-time).
 
 For a memory-to-bank induction bridge, the memory is represented by stores of
 independent bank state symbols at each valid address. Read definitions are

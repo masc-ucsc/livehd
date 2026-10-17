@@ -10033,10 +10033,13 @@ private:
       if (v.has_unknowns() || !v.is_just_i64()) {
         return std::nullopt;
       }
-      return R{v.to_just_i64(), v.to_just_i64()};
+      // Every interval stays inside +/-2^40 (ok), which keeps the int64
+      // arithmetic below from wrapping.
+      const R r{v.to_just_i64(), v.to_just_i64()};
+      return ok(r) ? std::optional<R>{r} : std::nullopt;
     }
     if (const auto it = loop_index_ranges_.find(pos); it != loop_index_ranges_.end()) {
-      return it->second;
+      return ok(it->second) ? std::optional<R>{it->second} : std::nullopt;
     }
     const auto node = pos.get_master_node();
     const auto op   = livehd::graph_util::type_op_of(node);
@@ -10044,7 +10047,7 @@ private:
       std::vector<R> out;
       for (const auto& d : livehd::graph_util::inp_drivers_of(node, bank)) {
         const auto r = loop_affine_range(d, depth - 1, memo);
-        if (!r) {
+        if (!r || !ok(*r)) {
           return std::optional<std::vector<R>>{};
         }
         out.push_back(*r);
@@ -10058,34 +10061,52 @@ private:
         if (!as || !bs) {
           return std::nullopt;
         }
+        // Each term is inside +/-2^40 and the running sum is checked after
+        // every term, so no partial sum leaves +/-2^41.
         R acc{0, 0};
         for (const auto& r : *as) {
           acc = R{acc.first + r.first, acc.second + r.second};
+          if (!ok(acc)) {
+            return std::nullopt;
+          }
         }
         for (const auto& r : *bs) {
           acc = R{acc.first - r.second, acc.second - r.first};
-        }
-        return ok(acc) ? std::optional<R>{acc} : std::nullopt;
-      }
-      case Ntype_op::Mult: {
-        const auto as = all("as");
-        if (!as || as->empty()) {
-          return std::nullopt;
-        }
-        R acc{1, 1};
-        for (const auto& r : *as) {
-          const std::array<int64_t, 4> c{acc.first * r.first, acc.first * r.second, acc.second * r.first, acc.second * r.second};
-          acc = R{*std::ranges::min_element(c), *std::ranges::max_element(c)};
           if (!ok(acc)) {
             return std::nullopt;
           }
         }
         return acc;
       }
+      case Ntype_op::Mult: {
+        const auto as = all("as");
+        if (!as || as->empty()) {
+          return std::nullopt;
+        }
+        // Every operand and partial product stays inside +/-2^40, so the
+        // corner products fit __int128 (an int64 product could wrap).
+        using W = __int128;
+        R acc{1, 1};
+        for (const auto& r : *as) {
+          if (!ok(r)) {
+            return std::nullopt;
+          }
+          const std::array<W, 4> c{W{acc.first} * r.first, W{acc.first} * r.second, W{acc.second} * r.first, W{acc.second} * r.second};
+          const W lo = *std::ranges::min_element(c);
+          const W hi = *std::ranges::max_element(c);
+          if (lo <= -W{kCap} || hi >= W{kCap}) {
+            return std::nullopt;
+          }
+          acc = R{static_cast<int64_t>(lo), static_cast<int64_t>(hi)};
+        }
+        return acc;
+      }
       case Ntype_op::SHL: {
         const auto a = loop_affine_range(livehd::graph_util::get_driver_of_sink_name(node, "a"), depth - 1, memo);
         const auto b = loop_affine_range(livehd::graph_util::get_driver_of_sink_name(node, "b"), depth - 1, memo);
-        if (!a || !b || a->first < 0 || b->first < 0 || b->second > 30) {
+        // a->second < 2^40 and b <= 30: the largest shift stays below 2^70,
+        // so test it against the cap before shifting (an int64 shift wraps).
+        if (!a || !b || a->first < 0 || b->first < 0 || b->second > 30 || a->second >= (kCap >> b->second)) {
           return std::nullopt;
         }
         const R r{a->first << b->first, a->second << b->second};

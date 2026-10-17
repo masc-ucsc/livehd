@@ -82,6 +82,9 @@ struct Host_state {
   // The same wide neighbor is met by many splices: index each graph and
   // definition once per batch.
   Io_decl_index                       io_decls;
+  // The batch's wall deadline (unset = none) and whether a splice stopped at it.
+  std::chrono::steady_clock::time_point deadline{};
+  bool                                  timed_out = false;
 };
 
 }  // namespace detail
@@ -192,6 +195,23 @@ private:
   absl::flat_hash_map<uint32_t, hhds::Pin_class>                                   inst_input_sink_;
   bool                                                                             inst_inputs_indexed_ = false;
   std::vector<hhds::Node_class>                                                    cloned_subs_;
+  uint32_t                                                                         deadline_ticks_ = 0;
+
+  // The batch deadline (Host_inliner) has passed: checked once every 4096
+  // steps of a splice's node walks, so a lone splice or an unset deadline
+  // costs one compare per step. Sets failed_: the caller abandons the host.
+  [[nodiscard]] bool past_deadline() {
+    if (host_state_ == nullptr || host_state_->deadline == std::chrono::steady_clock::time_point{}
+        || (++deadline_ticks_ & 4095U) != 0) {
+      return false;
+    }
+    if (std::chrono::steady_clock::now() < host_state_->deadline) {
+      return false;
+    }
+    host_state_->timed_out = true;
+    failed_                = true;
+    return true;
+  }
 
   [[nodiscard]] hhds::Pin_class        clone_pin(const hhds::Node_class& neo, hhds::Port_id pid, bool driver);
   [[nodiscard]] std::string_view       child_input_name(const hhds::Pin_class& pin);
@@ -459,6 +479,9 @@ void Sub_inliner::report_cycle(const hhds::Pin_class& at) {
 
 void Sub_inliner::create_nodes() {
   for (auto n : child_->body().nodes(hhds::Node_order::forward)) {
+    if (past_deadline()) {
+      return;
+    }
     if (n.is_invalid() || is_builtin_node(n) || node_map_.contains(n)) {
       continue;
     }
@@ -674,7 +697,7 @@ hhds::Pin_class Sub_inliner::resolve_output_of(std::string_view oname) {
 
 void Sub_inliner::wire_edges() {
   for (auto n : child_->body().nodes(hhds::Node_order::forward)) {
-    if (failed_) {
+    if (failed_ || past_deadline()) {
       return;
     }
     auto it = node_map_.find(n);
@@ -717,7 +740,7 @@ void Sub_inliner::rewire_instance_outputs() {
   // instance input, which must still have its original, single driver.
   std::vector<std::pair<hhds::Pin_class, hhds::Pin_class>> rewires;
   for (const auto& [pid, sink] : readers) {
-    if (failed_) {
+    if (failed_ || past_deadline()) {
       return;
     }
     auto oit = out_pid2name_.find(pid);
@@ -838,8 +861,12 @@ bool Sub_inliner::run() {
 
 }  // namespace
 
-Host_inliner::Host_inliner(hhds::Graph* host, std::string_view from_pass)
-    : host_(host), from_pass_(from_pass), state_(std::make_unique<detail::Host_state>()) {}
+Host_inliner::Host_inliner(hhds::Graph* host, std::string_view from_pass, std::chrono::steady_clock::time_point deadline)
+    : host_(host), from_pass_(from_pass), state_(std::make_unique<detail::Host_state>()) {
+  state_->deadline = deadline;
+}
+
+bool Host_inliner::timed_out() const { return state_->timed_out; }
 
 Host_inliner::~Host_inliner() {
   try {

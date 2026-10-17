@@ -9,6 +9,7 @@
 #include "hhds/graph.hpp"
 #include "loop_cleanup.hpp"
 #include "preparation_budget.hpp"
+#include "reassoc.hpp"
 
 namespace livehd::synth {
 
@@ -21,6 +22,7 @@ struct Prepared_design {
   std::vector<std::shared_ptr<hhds::Graph>> definitions;
   std::vector<std::shared_ptr<hhds::Graph>> resolve_graphs;
   Loop_preparation                          loops;
+  Reassoc_stats                             reassoc;  // what `reassociate_loops` merged
 };
 
 // ABC-independent private-copy and compact-loop preparation. Source graphs

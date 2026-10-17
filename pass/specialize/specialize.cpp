@@ -2,6 +2,7 @@
 #include "specialize.hpp"
 
 #include <cstdint>
+#include <deque>
 #include <format>
 #include <functional>
 #include <map>
@@ -9,6 +10,7 @@
 #include <set>
 #include <string>
 #include <utility>
+#include <vector>
 
 #include "absl/container/flat_hash_map.h"
 #include "absl/container/flat_hash_set.h"
@@ -77,40 +79,112 @@ void refold_private_body(const std::shared_ptr<hhds::Graph>& graph) {
 // those nodes: a node pass.color left uncolored on purpose (a clock-gate
 // barrier the mapper keeps native) stays uncolored. Graph IO and constants are
 // never colored.
+//
+// The colors are those of the sweep "visit every open node in body order;
+// take the color of the first colored non-constant driver, else of the first
+// colored reader; repeat until a sweep colors nothing", computed in O(V + E)
+// rather than one sweep per link of a chain colored from its far end. Node n
+// is colored in sweep
+//   k(n) = min over the neighbors m that may color it of
+//          0          m colored on entry
+//          k(m)       m precedes n in body order (the same sweep reaches it)
+//          k(m) + 1   otherwise                   (the next sweep)
+// -- a 0-1 shortest path (deque BFS) -- and visiting the open nodes in
+// (k, body order) shows each one exactly the colored neighbors the sweep
+// would have shown it.
 void inherit_colors(hhds::Graph& g, const absl::flat_hash_set<uint64_t>* existed) {
-  std::vector<hhds::Node_class> open;
-  bool                          colored = false;
+  std::vector<hhds::Node_class>                    open;
+  absl::flat_hash_map<hhds::Class_index, uint32_t> order;  // open node -> its body-order position
+  bool                                             colored = false;
   for (auto n : g.body().nodes()) {
     if (gu::has_color(n)) {
       colored = true;
     } else if (existed == nullptr || !existed->contains(static_cast<uint64_t>(n.get_debug_nid()))) {
+      order.emplace(n.get_class_index(), static_cast<uint32_t>(open.size()));
       open.push_back(n);
     }
   }
-  if (!colored) {
+  if (!colored || open.empty()) {
     return;
   }
-  for (bool grew = true; grew && !open.empty();) {
-    grew = false;
-    std::erase_if(open, [&](const hhds::Node_class& n) {
-      for (auto sink : n.inp_sorted_pins()) {
-        for (auto drv : sink.get_driver_pins()) {
-          if (!drv.is_const() && gu::has_color(drv.get_master_node())) {
-            gu::set_color(n, gu::color_of(drv.get_master_node()));
-            grew = true;
-            return true;
-          }
+  constexpr uint32_t kNever     = UINT32_MAX;
+  const auto         open_index = [&](const hhds::Node_class& n) -> uint32_t {
+    const auto it = order.find(n.get_class_index());
+    return it == order.end() ? kNever : it->second;
+  };
+  // The first colored neighbor, in the sweep's preference: drivers (through a
+  // non-constant pin) in pin order, then readers.
+  const auto colored_neighbor = [](const hhds::Node_class& n) -> std::optional<hhds::Node_class> {
+    for (const auto& sink : n.inp_sorted_pins()) {
+      for (const auto& drv : sink.get_driver_pins()) {
+        if (!drv.is_const() && gu::has_color(drv.get_master_node())) {
+          return drv.get_master_node();
         }
       }
-      for (const auto& e : n.out_edges()) {
-        if (gu::has_color(e.sink.get_master_node())) {
-          gu::set_color(n, gu::color_of(e.sink.get_master_node()));
-          grew = true;
-          return true;
-        }
+    }
+    for (const auto& e : n.out_edges()) {
+      if (gu::has_color(e.sink.get_master_node())) {
+        return e.sink.get_master_node();
       }
-      return false;
-    });
+    }
+    return std::nullopt;
+  };
+  std::vector<uint32_t> sweep(open.size(), kNever);
+  std::deque<uint32_t>  work;
+  for (uint32_t i = 0; i < open.size(); ++i) {
+    if (colored_neighbor(open[i])) {
+      sweep[i] = 0;
+      work.push_back(i);
+    }
+  }
+  // Once m is colored it may color its readers (m drives them) and its
+  // drivers (m reads them).
+  const auto relax = [&](uint32_t m, const hhds::Node_class& n) {
+    const auto j = open_index(n);
+    if (j == kNever) {
+      return;
+    }
+    const uint32_t at = m < j ? sweep[m] : sweep[m] + 1;
+    if (at < sweep[j]) {
+      sweep[j] = at;
+      if (at == sweep[m]) {
+        work.push_front(j);
+      } else {
+        work.push_back(j);
+      }
+    }
+  };
+  while (!work.empty()) {
+    const auto m = work.front();
+    work.pop_front();
+    for (const auto& e : open[m].out_edges()) {
+      if (!e.driver.is_const()) {
+        relax(m, e.sink.get_master_node());
+      }
+    }
+    for (const auto& sink : open[m].inp_sorted_pins()) {
+      for (const auto& drv : sink.get_driver_pins()) {
+        relax(m, drv.get_master_node());
+      }
+    }
+  }
+  // Visit in (sweep, body order): one bucket per sweep, each filled in order.
+  std::vector<std::vector<uint32_t>> buckets;
+  for (uint32_t i = 0; i < open.size(); ++i) {
+    if (sweep[i] == kNever) {
+      continue;
+    }
+    if (buckets.size() <= sweep[i]) {
+      buckets.resize(sweep[i] + 1);
+    }
+    buckets[sweep[i]].push_back(i);
+  }
+  for (const auto& bucket : buckets) {
+    for (const auto i : bucket) {
+      if (const auto from = colored_neighbor(open[i])) {
+        gu::set_color(open[i], gu::color_of(*from));
+      }
+    }
   }
 }
 

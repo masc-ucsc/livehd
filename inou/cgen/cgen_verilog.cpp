@@ -64,6 +64,39 @@ bool unsigned_mask_identity(const hhds::Node_class& node) {
   return m->first == 0 && m->second >= bits_of(a) && bits_of(node.get_driver_pin(0)) == bits_of(a);
 }
 
+// Does get_expression fold this (undeclared, non-constant) driver's text into
+// its reader? Anything else is read by its wire name.
+bool expression_inlines(const hhds::Pin_class& pin) {
+  if (pin.is_invalid()) {
+    return false;
+  }
+  const auto node = pin.get_master_node();
+  if (node.is_invalid()) {
+    return false;
+  }
+  switch (type_op_of(node)) {
+    case Ntype_op::Get_mask: return unsigned_mask_identity(node);
+    case Ntype_op::Sum     :
+    case Ntype_op::Rxor    :
+    case Ntype_op::Popcount:
+    case Ntype_op::Ror     :
+    case Ntype_op::Div     :
+    case Ntype_op::Rem     :
+    case Ntype_op::Not     :
+    case Ntype_op::LT      :
+    case Ntype_op::GT      :
+    case Ntype_op::SHL     :
+    case Ntype_op::SRA     :
+    case Ntype_op::Mult    :
+    case Ntype_op::And     :
+    case Ntype_op::Or      :
+    case Ntype_op::Xor     :
+    case Ntype_op::Concat  :
+    case Ntype_op::EQ      : return true;
+    default                : return false;
+  }
+}
+
 // Emit a constant as Verilog. hlop's Dlop::to_verilog() formats a NEGATIVE
 // value as its bare magnitude ("{n}'sh{mag}", dropping the sign), so it
 // re-reads as +mag (e.g. -6 -> "4'sh6" == +6, a silent miscompile that broke
@@ -642,36 +675,7 @@ std::string Cgen_verilog::get_expression(const hhds::Pin_class& dpin) {
   const auto ready = [&](const hhds::Pin_class& pin) {
     return pin.is_const() || pin2var.contains(pin.get_class_index()) || pin2expr.contains(pin.get_class_index());
   };
-  const auto inlineable = [](const hhds::Pin_class& pin) {
-    if (pin.is_invalid()) {
-      return false;
-    }
-    const auto node = pin.get_master_node();
-    if (node.is_invalid()) {
-      return false;
-    }
-    switch (type_op_of(node)) {
-      case Ntype_op::Get_mask: return unsigned_mask_identity(node);
-      case Ntype_op::Sum     :
-      case Ntype_op::Rxor    :
-      case Ntype_op::Popcount:
-      case Ntype_op::Ror     :
-      case Ntype_op::Div     :
-      case Ntype_op::Rem     :
-      case Ntype_op::Not     :
-      case Ntype_op::LT      :
-      case Ntype_op::GT      :
-      case Ntype_op::SHL     :
-      case Ntype_op::SRA     :
-      case Ntype_op::Mult    :
-      case Ntype_op::And     :
-      case Ntype_op::Or      :
-      case Ntype_op::Xor     :
-      case Ntype_op::Concat  :
-      case Ntype_op::EQ      : return true;
-      default                : return false;
-    }
-  };
+  const auto inlineable = [](const hhds::Pin_class& pin) { return expression_inlines(pin); };
 
   // The normal forward traversal has already cached producers. For a producer
   // first encountered through a consumer, build its dependency cone with an
@@ -4665,6 +4669,121 @@ void Cgen_verilog::create_locals(std::shared_ptr<File_output> fout, hhds::Graph*
         continue;
       }
       add_to_pin2var(fout, v, get_scaped_name(pin_wire_name(v)), is_unsign(v));
+    }
+  }
+
+  // Fifth pass — a DUPLICATED inline expression must stay small.
+  //
+  // The first pass leaves a bitwise cell with two readers inline at both
+  // ("cheaper to inline at two uses than to materialize"), which copies its
+  // whole inline cone into two statements. That is cheap only while the cone
+  // is small, and nothing bounded it. A runtime-position bit write lowers to
+  // `(prev & ((1 << pos) - 1)) | (shifted << pos)`, and in a chain of them (a
+  // rolled loop writing `v#[i*K + n]` for n < K) each Or is read by the next
+  // write's shift AND by the next write's low part: Or_k's inline text held
+  // Or_{k-1}'s, every Set_mask line re-spelled the whole chain before it, and
+  // the Verilog grew quadratically (141 MB at K=256).
+  //
+  // Weigh each inline cone as get_expression will spell it -- a cell is one
+  // unit plus its operands; a declared net or wire name is one leaf, a literal
+  // wider than 64 bits one unit per 16 bits -- and give a two-reader bitwise
+  // cell whose cone outweighs the budget a net of its own. Its readers then
+  // name it and the cones above restart from a leaf, so no text is copied more
+  // than a bounded number of times and the output stays linear in the graph.
+  // A cone within the budget keeps the first pass's inlining byte for byte.
+  // The budget (~4 KB of text per copy) is deliberately loose: it cuts only
+  // runaway re-spelling, so designs without such chains emit exactly the
+  // Verilog they did before.
+  // Runs last, so it weighs against the FINAL declarations of the passes above
+  // (each one only cuts cones). The decision at a cell reads only its
+  // operands' settled weights, so it does not depend on visit order.
+  {
+    constexpr int64_t kDupInlineBudget = 256;
+    constexpr int64_t kWeightCap       = int64_t{1} << 40;
+    const auto        is_inline        = [&](const hhds::Pin_class& p) {
+      return !p.is_invalid() && !p.is_const() && !pin2var.contains(p.get_class_index())
+             && !pin2expr.contains(p.get_class_index()) && expression_inlines(p);
+    };
+    // The cells the first pass inlines at two readers: bitwise, unnamed.
+    const auto duplicated = [&](const hhds::Node_class& cell) {
+      const auto op = type_op_of(cell);
+      if (op != Ntype_op::And && op != Ntype_op::Or && op != Ntype_op::Xor) {
+        return false;
+      }
+      if (const auto nname = node_name_of(cell); !nname.empty() && nname.front() != '_') {
+        return false;
+      }
+      int readers = 0;
+      for (const auto& e : cell.out_edges()) {
+        (void)e;
+        if (++readers >= 2) {
+          return true;
+        }
+      }
+      return false;
+    };
+    absl::flat_hash_map<pin_key_t, int64_t>       weight;  // settled inline pins (1 once given a net)
+    absl::flat_hash_set<pin_key_t>                active;
+    std::vector<hhds::Pin_class>                  to_declare;
+    std::vector<std::pair<hhds::Pin_class, bool>> stack;
+    for (auto node : graph->body().nodes()) {
+      if (Ntype::has_multiple_driver_pins(type_op_of(node)) || !node.has_out_edges()) {
+        continue;
+      }
+      const auto root = node.get_driver_pin(0);
+      if (!is_inline(root) || weight.contains(root.get_class_index())) {
+        continue;
+      }
+      // Explicit postorder worklist, like get_expression: a long chain must
+      // not recurse through the host stack.
+      stack.emplace_back(root, false);
+      while (!stack.empty()) {
+        const auto [pin, expanded] = stack.back();
+        stack.pop_back();
+        const auto key = pin.get_class_index();
+        if (weight.contains(key)) {
+          continue;
+        }
+        const auto cell = pin.get_master_node();
+        if (!expanded) {
+          if (!active.insert(key).second) {
+            continue;  // reached again through itself: weighed as a leaf below
+          }
+          stack.emplace_back(pin, true);
+          for (const auto& sink : cell.inp_sorted_pins()) {
+            const auto drv = sink.get_driver_pin();
+            if (is_inline(drv) && !weight.contains(drv.get_class_index()) && !active.contains(drv.get_class_index())) {
+              stack.emplace_back(drv, false);
+            }
+          }
+          continue;
+        }
+        int64_t w = 1;
+        for (const auto& sink : cell.inp_sorted_pins()) {
+          const auto drv = sink.get_driver_pin();
+          int64_t    dw  = 1;
+          if (drv.is_const()) {
+            // A literal wider than 64 bits is spelled bit by bit, at up to the
+            // reader's width (a Sum sizes its constants to the result): that
+            // text is what a copy repeats, so it weighs ~16 bits per unit.
+            const int64_t spelled = std::max<int64_t>(bits_of(drv), bits_of(pin));
+            dw += spelled > 64 ? spelled / 16 : 0;
+          } else if (is_inline(drv)) {
+            const auto it = weight.find(drv.get_class_index());
+            dw            = it == weight.end() ? 1 : it->second;
+          }
+          w = std::min(kWeightCap, w + dw);
+        }
+        if (w > kDupInlineBudget && duplicated(cell)) {
+          to_declare.push_back(pin);
+          w = 1;
+        }
+        weight.emplace(key, w);
+        active.erase(key);
+      }
+    }
+    for (const auto& pin : to_declare) {
+      add_to_pin2var(fout, pin, get_scaped_name(pin_wire_name(pin)), is_unsign(pin));
     }
   }
 }

@@ -5372,9 +5372,44 @@ void lec_command(Options& opts, Result& res) {
   // whole comparison: "hard miters degrade to TIMEOUT, never freeze"). The
   // cva6 netlist spent >80 min in the interface pre-check below with no
   // deadline armed yet.
-  const int  run_timeout_s = std::atoi(label("timeout", effort == livehd::lec::Effort::Verify ? "0" : "120").c_str());
-  const auto run_deadline  = run_timeout_s > 0 ? std::chrono::steady_clock::now() + std::chrono::seconds(run_timeout_s)
-                                               : std::chrono::steady_clock::time_point{};
+  //
+  // It counts from BEFORE the lhd driver's run_id content hash (lhd_main.cpp,
+  // phase "lhd.run_id"): for an lg: side that hash walks the side's slice and
+  // materializes every body in it -- 13-15 s of the cva6 netlist LEC, which
+  // used to come on top of the budget (formal.timeout=30 -> 47 s wall). The
+  // bodies it loads are the ones this proof reads, so the work is charged to
+  // the run rather than added to it. (A file-typed side's front end, which ran
+  // in between, is not charged: it is elaboration, not proof preparation, and
+  // it cannot stop at a deadline anyway.)
+  const int    run_timeout_s = std::atoi(label("timeout", effort == livehd::lec::Effort::Verify ? "0" : "120").c_str());
+  const double run_id_ms     = [&] {
+    double ms_sum = 0;
+    for (const auto& [phase, ms] : res.phase_ms) {
+      ms_sum += phase == "lhd.run_id" ? ms : 0.0;
+    }
+    return ms_sum;
+  }();
+  const auto run_deadline = run_timeout_s > 0 ? std::chrono::steady_clock::now() + std::chrono::seconds(run_timeout_s)
+                                                    - std::chrono::duration_cast<std::chrono::steady_clock::duration>(
+                                                        std::chrono::duration<double, std::milli>(run_id_ms))
+                                              : std::chrono::steady_clock::time_point{};
+  auto run_timed_out = [&] {
+    return run_deadline != std::chrono::steady_clock::time_point{} && std::chrono::steady_clock::now() >= run_deadline;
+  };
+  // A preparation step found the budget spent: TIMEOUT-time, nothing queried.
+  // Each step below that walks a whole side (or loads a library) asks first.
+  auto prep_timed_out = [&](std::string_view stage) {
+    if (!run_timed_out()) {
+      return false;
+    }
+    refuse_presolve(livehd::lec::Outcome::Timeout_time,
+                    std::format("hit formal.timeout={}s {} (the run_id content hash of the inputs took {:.1f}s of it)",
+                                run_timeout_s,
+                                stage,
+                                run_id_ms / 1000.0),
+                    "raise formal.timeout");
+    return true;
+  };
 
   // REFUTED-interface (owner ruling 2026-10-14): the selected tops must expose
   // the same port NAMES -- every output, and every input that is observable
@@ -5424,6 +5459,9 @@ void lec_command(Options& opts, Result& res) {
   // prove -- a selected-top IO one included (docs 05-assert: every plain
   // assume is an obligation) -- is no hypothesis: it would narrow the compared
   // input space of a miter whose other side never made the claim.
+  if (prep_timed_out("before proof preparation began")) {
+    return;
+  }
   const auto ref_assumes  = design_assume_occurrences(ref_g.get());
   const auto impl_assumes = design_assume_occurrences(impl_g.get());
   o.proven_assumes        = ref_assumes.proven + impl_assumes.proven;
@@ -5562,6 +5600,9 @@ void lec_command(Options& opts, Result& res) {
   // gensim cell models behind an ABC standard-cell netlist), so lec can flatten
   // a hierarchical/mapped impl. Gids are name-hash stable, so an instance's
   // subnode gid matches its def's gid across libraries.
+  if (!opts.libs.empty() && prep_timed_out("before loading the --lib cell models")) {
+    return;
+  }
   absl::flat_hash_map<hhds::Gid, hhds::Graph*> sub_lib;
   std::vector<std::shared_ptr<hhds::Graph>>    sub_lib_keep;
   for (const auto& lp : opts.libs) {
@@ -5726,12 +5767,18 @@ void lec_command(Options& opts, Result& res) {
       // spliced into a retained common definition, not only into the top.
       // Never touch --lib models: they are shared vocabulary, and mutating one
       // side's cell definition would mutate the other side too.
+      //
+      // Under the run deadline, checked between graphs (a cprop of one graph
+      // cannot stop part-way): on cva6 this step alone ran ~7 min.
       absl::flat_hash_set<hhds::Graph*> simplified;
       auto                              simplify_after_inline = [&](const std::vector<std::shared_ptr<hhds::Graph>>& graphs) {
         for (const auto& sp : graphs) {
           auto* g = sp.get();
           if (g == nullptr || sub_lib.find(g->get_gid()) != sub_lib.end() || !simplified.insert(g).second) {
             continue;
+          }
+          if (run_timed_out()) {
+            return false;
           }
           Cprop cprop;
           // This is not a raw front-end graph: the hierarchy transform above
@@ -5741,9 +5788,16 @@ void lec_command(Options& opts, Result& res) {
           // assertion here while retaining every value-preserving fold.
           cprop.do_trans(sp);
         }
+        return true;
       };
-      simplify_after_inline(ref_var.graphs);
-      simplify_after_inline(impl_var.graphs);
+      if (!simplify_after_inline(ref_var.graphs) || !simplify_after_inline(impl_var.graphs)) {
+        refuse_presolve(livehd::lec::Outcome::Timeout_time,
+                        std::format("hit formal.timeout={}s while simplifying the graphs the inlining changed ({} of them done)",
+                                    run_timeout_s,
+                                    simplified.size() - 1),
+                        "raise formal.timeout, or compare designs that keep the same hierarchy");
+        return;
+      }
     }
     if (std::getenv("LEC_DUMP_COLLAPSE") != nullptr) {
       for (auto* side : {ref_g.get(), impl_g.get()}) {
@@ -5785,10 +5839,22 @@ void lec_command(Options& opts, Result& res) {
     // `formal.phase_sched` (the default) the encoder's READ-ONLY four-microstep
     // schedule takes the design instead, which composes across hierarchy
     // because it rewrites nothing; only without it is a decline a refusal.
-    const auto tb
-        = livehd::single_edge::prepare_time_base(sub_lib, ref_g.get(), ref_defs, impl_g.get(), impl_defs, o.phase_sched, is_boxed);
+    const auto tb = livehd::single_edge::prepare_time_base(sub_lib,
+                                                           ref_g.get(),
+                                                           ref_defs,
+                                                           impl_g.get(),
+                                                           impl_defs,
+                                                           o.phase_sched,
+                                                           is_boxed,
+                                                           run_deadline);
     for (const auto& step : tb.recipe_steps) {
       res.recipe_steps.push_back(step);
+    }
+    if (tb.timed_out) {
+      refuse_presolve(livehd::lec::Outcome::Timeout_time,
+                      std::format("hit formal.timeout={}s in proof preparation ({})", run_timeout_s, tb.timeout_stage),
+                      "raise formal.timeout");
+      return;
     }
     if (tb.declined && !o.phase_sched) {
       // Re-run loudly so the user gets the specific diagnostic, then fail. The
@@ -5828,6 +5894,9 @@ void lec_command(Options& opts, Result& res) {
         sides.push_back(impl_g.get());
       }
       for (auto* side : sides) {
+        if (prep_timed_out("in proof preparation (latch-enable --lib cell inlining)")) {
+          return;
+        }
         const auto cr = livehd::lec::inline_clock_latch_enable_cells(sub_lib, side, is_boxed);
         if (!cr.error.empty()) {
           refuse_presolve(livehd::lec::Outcome::Refuted_unsupported,
@@ -5941,8 +6010,10 @@ void lec_command(Options& opts, Result& res) {
           std::format("pass.lec effort:{} -> proof (sampling cannot model the design)", livehd::lec::effort_name(effort)));
       effort   = livehd::lec::Effort::Legacy;
       o.effort = effort;
+      // The proof engines get what is LEFT of the run's budget, never a fresh
+      // one: formal.timeout bounds the whole run, escalation included.
       if (o.timeout > 0) {
-        o._deadline = std::chrono::steady_clock::now() + std::chrono::seconds(o.timeout);
+        o._deadline = run_deadline;
       }
       r               = livehd::lec::Query_result{};
       sampled_verdict = false;

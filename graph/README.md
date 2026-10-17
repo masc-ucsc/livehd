@@ -43,7 +43,10 @@ just the directory orientation.
   replaces re-scanning the host), and the host's `simulation_init` merge is
   deferred to `flush()`. Each splice indexes the clone pins, the instance's
   input drivers and the child's input names once, because hhds answers those
-  by walking a pin list (`find_or_create_pin`, `Graph::pin_name`).
+  by walking a pin list (`find_or_create_pin`, `Graph::pin_name`). An
+  optional wall deadline (lec's `formal.timeout`) is checked inside a splice
+  too; a splice stopped there leaves the host partial (`timed_out()`), and the
+  caller abandons it.
 
 > Per-pin `bits`/`sign` are HHDS attributes today; the native-storage campaign is
 > tracked in the TODO hub (`todo/livehd/hhds-pinentry.html`).

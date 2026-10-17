@@ -3,6 +3,7 @@
 :type: equiv
 :verilog_top: spec_memory_poweron_not_reset
 :pyrope_top: spec_memory_poweron_not_reset
+:v2prp_native_expect: refuted
 */
 // SPEC (docs 08-memories.md): "A `reg` array's initializer means exactly what a
 // scalar `reg`'s does: it is the **reset value** of every entry, and it is the
@@ -14,6 +15,10 @@
 // block is power-on contents only, so re-reading that Verilog must not turn it
 // into a second reset. The golden declares no power-on contents (an unknown start
 // is a don't-care on the reference side), so the pair must PROVE.
+// The prp-v2prp2v native leg runs the other direction (this Pyrope as the
+// reference, the golden's round trip as the implementation): there the
+// reference's power-on contents face an implementation that has none, which is
+// REFUTED-cex (:v2prp_native_expect: refuted).
 pub mod spec_memory_poweron_not_reset(ck:Clock, zap:Reset, we:Bool, a:U2, d:U8, ra:U2) -> (q:U8@[0]) {
   reg mem:[4]U8 = 3
   q = mem[ra]

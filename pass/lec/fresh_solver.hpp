@@ -10,6 +10,7 @@
 #include <unordered_set>
 #include <vector>
 
+#include "array_blast.hpp"
 #include "solver_profile.hpp"
 
 namespace livehd::lec {
@@ -36,6 +37,14 @@ public:
     ctx_     = ctx;
   }
   void set_base_slicing(bool enable) { slice_base_ = enable; }
+  // Rewrite arrays whose index has at most `max_index_bits` bits into
+  // per-entry bit-vectors before every check (see array_blast.hpp); 0 = off.
+  // getValue/simplify follow the same rewrite, so callers keep using their
+  // original terms.
+  void set_array_blast(uint32_t max_index_bits) {
+    blast_bits_ = max_index_bits;
+    blaster_.reset();
+  }
   void set_deadline(std::chrono::steady_clock::time_point deadline) { deadline_ = deadline; }
   void assertFormula(const cvc5::Term& term) { assertions_.push_back(term); }
   void push(uint32_t n = 1) {
@@ -68,10 +77,23 @@ public:
     checked_ = true;
     return solver_->checkSat();
   }
-  cvc5::Term getValue(const cvc5::Term& term) const { return solver_->getValue(term); }
+  cvc5::Term getValue(const cvc5::Term& term) const {
+    if (blasted_) {
+      auto v = blaster_->value(term, [&](const cvc5::Term& t) { return solver_->getValue(t); });
+      if (!v.isNull()) {
+        return v;
+      }
+    }
+    return solver_->getValue(term);
+  }
   cvc5::Term simplify(const cvc5::Term& term) {
     if (!solver_) {
       rebuild();
+    }
+    if (blasted_ && !term.getSort().isArray()) {
+      if (auto r = blaster_->rewrite(term); !r.isNull()) {
+        return solver_->simplify(r);
+      }
     }
     return solver_->simplify(term);
   }
@@ -149,11 +171,42 @@ private:
     finish();
     const auto keep = only != nullptr ? *only : allow_slice ? slice(assumption) : std::vector<bool>(assertions_.size(), true);
     sliced_         = std::find(keep.begin(), keep.end(), false) != keep.end();
-    solver_         = std::make_unique<cvc5::Solver>(tm_);
+    // Small arrays become per-entry bit-vectors (all-or-nothing: an array's
+    // entry symbols are related to it only through the rewrite).
+    std::vector<cvc5::Term> blasted;
+    blasted_ = false;
+    if (blast_bits_ > 0) {
+      if (!blaster_) {
+        blaster_ = std::make_unique<Array_blaster>(tm_, blast_bits_);
+      }
+      bool ok = !blaster_->failed();
+      for (size_t i = 0; ok && i < assertions_.size(); ++i) {
+        if (keep[i]) {
+          blasted.push_back(blaster_->rewrite(assertions_[i]));
+          ok = !blasted.back().isNull();
+        }
+      }
+      if (ok && assumption) {
+        blasted.push_back(blaster_->rewrite(*assumption));
+        ok = !blasted.back().isNull();
+      }
+      blasted_ = ok && blaster_->active();
+    }
+    solver_ = std::make_unique<cvc5::Solver>(tm_);
     if (attach_) {
       attach_(*solver_);
     }
-    solver_->setLogic(profile_ == "intblast" ? "QF_AUFBVNIA" : logic_);
+    // Every array was rewritten away: the query is array-free, and declaring
+    // the array theory anyway costs cvc5 several times the solve time (a
+    // two-lane 4x8 BMC miter: 11.9 s under QF_ABV, 2.6 s under QF_BV).
+    const bool  array_free = blasted_ && !blaster_->saw_large_array();
+    std::string logic      = profile_ == "intblast" ? "QF_AUFBVNIA" : logic_;
+    if (array_free && logic == "QF_ABV") {
+      logic = "QF_BV";
+    } else if (array_free && logic == "QF_AUFBV") {
+      logic = "QF_UFBV";
+    }
+    solver_->setLogic(logic);
     for (const auto& [key, value] : options_) {
       solver_->setOption(key, value);
     }
@@ -161,6 +214,9 @@ private:
     // Legacy call sites can widen the logic for int blasting or UF boxes.
     ctx.int_blast = ctx.int_blast || (logic_ == "ALL" || logic_ == "QF_AUFBVNIA") || profile_ == "intblast";
     ctx.has_boxes = ctx.has_boxes || logic_ == "QF_AUFBV";
+    if (array_free) {
+      ctx.has_mem = false;
+    }
     configure_solver(*solver_, solver_profile(profile_), ctx);
     // Dynamic caps must win over the profile's initial allowance.
     if (auto it = options_.find("tlimit-per"); it != options_.end()) {
@@ -179,6 +235,12 @@ private:
         }
       }
       solver_->setOption("tlimit-per", std::to_string(cap));
+    }
+    if (blasted_) {
+      for (const auto& t : blasted) {
+        solver_->assertFormula(t);
+      }
+      return;
     }
     for (size_t i = 0; i < assertions_.size(); ++i) {
       if (keep[i]) {
@@ -199,6 +261,8 @@ private:
   std::vector<size_t>                   scopes_;
   std::unique_ptr<cvc5::Solver>         solver_;
   std::chrono::steady_clock::time_point deadline_{};
-  bool                                  checked_ = false, slice_base_ = false, sliced_ = false;
+  std::unique_ptr<Array_blaster>        blaster_;
+  uint32_t                              blast_bits_ = 0;
+  bool                                  checked_ = false, slice_base_ = false, sliced_ = false, blasted_ = false;
 };
 }  // namespace livehd::lec

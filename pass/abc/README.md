@@ -652,6 +652,13 @@ is re-run: `&undo` restores the GIA `&nf` consumed, so `&fraig`/`dc2`/`&dch` —
 the expensive part — run once. `-R` relaxes the mapper's depth model while the
 slack came from the SCL timer, so a miss after the remap is repaired with step
 2. `&undo` reverses exactly ONE step, which is why there is no second undo.
+The remap spends slack, never the budget: when even the repair leaves it over
+the budget, the mapping from before the remap (which met it, kept as a
+duplicate) is restored -- otherwise the region came back upsized past its
+budget and, no longer meeting it, also lost its area candidate (a 256-term
+guarded XOR accumulator: 253 ps before the `-R 58` remap, 437 ps after it,
+572 um^2 / 424 ps sized, against 566 um^2 / 312 ps restored; on the lhdtrack
+corpus no ABC region overshot, two `usyn` tmap regions did).
 
 **The area candidate.** A region that met its budget is then mapped a second
 time from a duplicate of the same pre-flow logic network with `area_flow` —

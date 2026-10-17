@@ -1,0 +1,17 @@
+/*
+:name: loop_break_result_positions
+:type: lec
+:lec_top: loop_break_result_positions
+*/
+// PYROPE-vs-PYROPE group. This file is the REFERENCE: the value a loop with a
+// `break` leaves behind (12, 8, 4 or 0), written as the loop-free priority
+// chain it is, then used as a RUNTIME shift amount, bit position, window
+// position and sign position. See _1.
+pub comb loop_break_result_positions(x:U4, a:U16) -> (o:U16, p:U1, q:U4, r:S8) {
+  mut acc:U4 = 0
+  if x#[0] == 1 { acc = 12 } elif x#[1] == 1 { acc = 8 } elif x#[2] == 1 { acc = 4 } else { acc = 0 }
+  o = a >> acc
+  p = a#[acc]
+  q = a#[acc..+4]
+  r = a#sext[0..=acc]
+}

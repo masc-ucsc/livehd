@@ -2,6 +2,7 @@
 #include "inline_sub.hpp"
 
 #include <algorithm>
+#include <chrono>
 #include <format>
 #include <memory>
 #include <optional>
@@ -488,4 +489,73 @@ TEST(SubInline, AnonymousNestedWrapperKeepsTheInstancePrefix) {
   }
   std::sort(names.begin(), names.end());
   EXPECT_EQ(names, (std::vector<std::string>{"a.q", "b.q"}));
+}
+
+// formal.timeout bounds a whole lec run, and one splice of a huge definition
+// is linear in it: Host_inliner checks a set deadline INSIDE the splice too.
+// A deadline already passed stops the splice part-way (false + timed_out(),
+// the instance still there); an unset one never stops it.
+TEST(SubInline, HostInlinerStopsALongSpliceAtItsDeadline) {
+  constexpr int chain = 20000;  // several 4096-step deadline checks into the splice
+  auto&         lib   = livehd::Hhds_graph_library::instance("lgdb_inline_deadline");
+  auto          cio   = lib.create_io("long_chain");
+  cio->add_input("a", 0);
+  cio->add_output("y", 1);
+  cio->set_bits("a", 1);
+  cio->set_bits("y", 1);
+  auto            child = cio->create_graph();
+  hhds::Pin_class v     = child->get_input_pin("a");
+  for (int i = 0; i < chain; ++i) {
+    auto inv = gu::create_typed_node(*child, Ntype_op::Not);
+    v.connect_sink(gu::setup_sink_pid(inv, 0));
+    v = inv.create_driver_pin(0);
+    gu::set_ubits(v, 1);
+  }
+  v.connect_sink(child->get_output_pin("y"));
+
+  auto make_host = [&](std::string_view name) {
+    auto pio = lib.create_io(std::format("host_{}", name));
+    pio->add_input("a", 0);
+    pio->add_output("y", 1);
+    pio->set_bits("a", 1);
+    pio->set_bits("y", 1);
+    auto g    = pio->create_graph();
+    auto inst = gu::create_typed_node(*g, Ntype_op::Sub);
+    inst.set_subnode(cio);
+    inst.attr(hhds::attrs::name).set(std::string{name});
+    g->get_input_pin("a").connect_sink(inst.create_sink_pin(0));
+    inst.create_driver_pin(1).connect_sink(g->get_output_pin("y"));
+    return std::pair{g, inst};
+  };
+  auto count = [](hhds::Graph& g, Ntype_op op) {
+    int n = 0;
+    for (auto node : g.body().nodes()) {
+      n += gu::type_op_of(node) == op ? 1 : 0;
+    }
+    return n;
+  };
+
+  {
+    auto [host, inst] = make_host("late");
+    gu::Host_inliner inliner(host.get(), "test", std::chrono::steady_clock::now() - std::chrono::seconds(1));
+    EXPECT_FALSE(inliner.splice(inst));
+    EXPECT_TRUE(inliner.timed_out());
+    EXPECT_EQ(count(*host, Ntype_op::Sub), 1) << "a stopped splice keeps its instance";
+    EXPECT_LT(count(*host, Ntype_op::Not), chain) << "the splice stopped part-way, not after the whole body";
+  }
+  {
+    auto [host, inst] = make_host("on_time");
+    gu::Host_inliner inliner(host.get(), "test", std::chrono::steady_clock::now() + std::chrono::hours(1));
+    EXPECT_TRUE(inliner.splice(inst));
+    EXPECT_FALSE(inliner.timed_out());
+    EXPECT_EQ(count(*host, Ntype_op::Sub), 0);
+    EXPECT_EQ(count(*host, Ntype_op::Not), chain);
+  }
+  {
+    auto [host, inst] = make_host("unbounded");
+    gu::Host_inliner inliner(host.get(), "test");
+    EXPECT_TRUE(inliner.splice(inst));
+    EXPECT_FALSE(inliner.timed_out());
+    EXPECT_EQ(count(*host, Ntype_op::Not), chain);
+  }
 }

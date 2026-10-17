@@ -8,6 +8,7 @@
 #include <optional>
 #include <set>
 #include <string_view>
+#include <tuple>
 
 #include "diag.hpp"
 #include "inline_sub.hpp"
@@ -18,6 +19,13 @@
 #include "str_tools.hpp"
 
 namespace livehd::single_edge {
+
+namespace {
+// Has the run's wall `deadline` (formal.timeout) passed? An unset deadline never does.
+[[nodiscard]] bool past(std::chrono::steady_clock::time_point deadline) {
+  return deadline != std::chrono::steady_clock::time_point{} && std::chrono::steady_clock::now() >= deadline;
+}
+}  // namespace
 
 // find, and a def with no gate at all is not touched in any way.
 // 2f-latch M9 — RECOGNIZE instantiated clock gates as `Clock_cell`, everywhere
@@ -702,7 +710,11 @@ std::string inline_stateful_lib_cells(const absl::flat_hash_map<hhds::Gid, hhds:
 // that: a def whose plan wants a divider is left untouched for the refusal to
 std::pair<int, int> inline_clock_gates_and_fold(hhds::Graph* top, const std::vector<hhds::Graph*>& defs,
                                                        absl::flat_hash_set<hhds::Graph*>*             unfolded,
-                                                       const std::function<bool(const hhds::Graph*)>& is_boxed) {
+                                                       const std::function<bool(const hhds::Graph*)>& is_boxed,
+                                                       std::chrono::steady_clock::time_point deadline, bool* timed_out) {
+  if (timed_out != nullptr) {
+    *timed_out = false;
+  }
   int                               cells  = livehd::latch_contract::inline_clock_gate_cells(top, "pass.single_edge", is_boxed);
   int                               folded = 0;
   // Dedupe: the ref and impl def lists share every `--lib` cell model, and a def
@@ -712,6 +724,12 @@ std::pair<int, int> inline_clock_gates_and_fold(hhds::Graph* top, const std::vec
   for (auto* d : defs) {
     if (d == nullptr || !seen.insert(d).second) {
       continue;
+    }
+    if (past(deadline)) {  // between defs: a def is inlined and folded whole or not at all
+      if (timed_out != nullptr) {
+        *timed_out = true;
+      }
+      break;
     }
     // STRICTLY ADDITIVE: a def that already holds a latch or a negedge flop is
     // one the def scan refuses TODAY, and that refusal is load-bearing (it is
@@ -819,6 +837,21 @@ size_t inline_instances_missing_from_other_side(const absl::flat_hash_map<hhds::
   if (timed_out != nullptr) {
     *timed_out = false;
   }
+  // Every walk below (the runaway guard's node count, each host's worklist
+  // scan) is linear in a side that can be a whole netlist: none starts once
+  // the run's deadline has passed.
+  auto expired = [&] {
+    if (!past(deadline)) {
+      return false;
+    }
+    if (timed_out != nullptr) {
+      *timed_out = true;
+    }
+    return true;
+  };
+  if (expired()) {
+    return 0;
+  }
   // The defs the other side still has, by full name AND by entity tail (a
   // Pyrope graph keeps `file.entity`; the tail covers a flat Verilog side).
   absl::flat_hash_set<std::string> other_defs;
@@ -910,7 +943,7 @@ size_t inline_instances_missing_from_other_side(const absl::flat_hash_map<hhds::
 
   size_t done = 0;
   for (auto* host : hosts) {
-    if (timed_out != nullptr && *timed_out) {
+    if ((timed_out != nullptr && *timed_out) || expired()) {
       break;
     }
     const size_t                 done_before = done;
@@ -944,7 +977,7 @@ size_t inline_instances_missing_from_other_side(const absl::flat_hash_map<hhds::
     if (work.empty()) {
       continue;
     }
-    livehd::graph_util::Host_inliner inliner(host, "pass.lec");
+    livehd::graph_util::Host_inliner inliner(host, "pass.lec", deadline);
     std::vector<hhds::Node_class>    cloned;
     while (!work.empty()) {
       const auto inst = work.front();
@@ -952,10 +985,10 @@ size_t inline_instances_missing_from_other_side(const absl::flat_hash_map<hhds::
       if (!inst.is_valid()) {
         continue;
       }
-      // formal.timeout covers the whole run, setup included: a splice is
-      // linear in the callee, so checking between splices bounds the overrun
-      // by the largest single definition.
-      if (deadline != std::chrono::steady_clock::time_point{} && std::chrono::steady_clock::now() >= deadline) {
+      // formal.timeout covers the whole run, setup included: checked between
+      // splices here and, for one huge definition, inside the splice itself
+      // (Host_inliner stops it part-way and reports timed_out()).
+      if (past(deadline)) {
         if (timed_out != nullptr) {
           *timed_out = true;
         }
@@ -982,6 +1015,12 @@ size_t inline_instances_missing_from_other_side(const absl::flat_hash_map<hhds::
       const std::string def_name{inst.get_subnode_io()->get_name()};  // `inst` is gone after the splice
       cloned.clear();
       if (!inliner.splice(inst, &cloned)) {
+        if (inliner.timed_out()) {  // stopped part-way: the host is partial
+          if (timed_out != nullptr) {
+            *timed_out = true;
+          }
+          break;
+        }
         continue;
       }
       ++done;
@@ -999,6 +1038,14 @@ size_t inline_instances_missing_from_other_side(const absl::flat_hash_map<hhds::
       break;  // the caller reports TIMEOUT-time and never reads these graphs
     }
     icg_defs.erase(host);  // this definition's body changed (should a later host instantiate it)
+    if (done != done_before && past(deadline)) {
+      // The repair below walks the whole (now larger) host: on a netlist top
+      // that absorbed thousands of regions it is not free either.
+      if (timed_out != nullptr) {
+        *timed_out = true;
+      }
+      break;
+    }
     if (done != done_before) {
       // A splice connects the host's packing cells straight to the callee's
       // body, so a field select that used to stop at the instance boundary can
@@ -1025,7 +1072,8 @@ namespace {
 // cell (recognized as a Clock_cell already). One splice per collection: a
 // splice invalidates every other handle into `host`. Returns the number of
 // instances spliced. Only run when a P>1 time base cannot be built otherwise.
-size_t inline_instances_for_divider(hhds::Graph* host, const std::function<bool(const hhds::Graph*)>& is_boxed) {
+size_t inline_instances_for_divider(hhds::Graph* host, const std::function<bool(const hhds::Graph*)>& is_boxed,
+                                    std::chrono::steady_clock::time_point deadline, bool& timed_out) {
   if (host == nullptr) {
     return 0;
   }
@@ -1056,14 +1104,22 @@ size_t inline_instances_for_divider(hhds::Graph* host, const std::function<bool(
       work.push_back(n);
     }
   }
-  livehd::graph_util::Host_inliner inliner(host, "pass.lec");
+  livehd::graph_util::Host_inliner inliner(host, "pass.lec", deadline);
   std::vector<hhds::Node_class>    cloned;
   size_t                           done = 0;
   while (!work.empty() && done < 100000) {
+    if (past(deadline)) {
+      timed_out = true;
+      break;
+    }
     const auto n = work.front();
     work.pop_front();
     cloned.clear();
     if (!n.is_valid() || !inliner.splice(n, &cloned)) {
+      if (inliner.timed_out()) {
+        timed_out = true;
+        break;
+      }
       continue;
     }
     ++done;
@@ -1081,8 +1137,21 @@ size_t inline_instances_for_divider(hhds::Graph* host, const std::function<bool(
 
 Time_base prepare_time_base(const Cell_models& sub_lib, hhds::Graph* ref, std::vector<hhds::Graph*>& ref_defs, hhds::Graph* impl,
                             std::vector<hhds::Graph*>& impl_defs, bool quiet_decline,
-                            const std::function<bool(const hhds::Graph*)>& is_boxed) {
+                            const std::function<bool(const hhds::Graph*)>& is_boxed,
+                            std::chrono::steady_clock::time_point          deadline) {
   Time_base tb;
+
+  // formal.timeout bounds the whole run: every step below walks each side's
+  // top and defs, and on a large netlist (cva6) the steps add up. Checked
+  // between steps and between the graphs a step walks; once it is reached the
+  // sides may be partially rewritten and the caller must not query them.
+  auto stop = [&](std::string_view stage) {
+    if (!tb.timed_out && past(deadline)) {
+      tb.timed_out     = true;
+      tb.timeout_stage = std::string{stage};
+    }
+    return tb.timed_out;
+  };
 
   // Either input may be a mapped netlist. Expand explicit state/clock models
   // symmetrically before collecting cuts, including cells inside retained defs.
@@ -1096,11 +1165,17 @@ Time_base prepare_time_base(const Cell_models& sub_lib, hhds::Graph* ref, std::v
       }
       return inline_clock_lib_cells(sub_lib, g);
     };
+    if (stop("--lib cell inlining")) {
+      return {};
+    }
     if (auto e = one(top); !e.empty()) {
       return e;
     }
     for (auto* d : defs) {
       if (d != nullptr && d != top && sub_lib.find(d->get_gid()) == sub_lib.end()) {
+        if (stop("--lib cell inlining")) {
+          return {};
+        }
         if (auto e = one(d); !e.empty()) {
           return e;
         }
@@ -1117,17 +1192,29 @@ Time_base prepare_time_base(const Cell_models& sub_lib, hhds::Graph* ref, std::v
   // total order between the two roots, although the source -- whose gate is a
   // Clock_cell -- needs no microsteps at all. Idempotent: the post-inline M9
   // pass below still catches gates the inlining exposes.
-  int pre_ref_cells  = materialize_clock_cells_all(ref, ref_defs, &sub_lib);
+  if (stop("clock-gate recognition")) {
+    return tb;
+  }
+  int pre_ref_cells = materialize_clock_cells_all(ref, ref_defs, &sub_lib);
+  if (stop("clock-gate recognition")) {
+    return tb;
+  }
   int pre_impl_cells = materialize_clock_cells_all(impl, impl_defs, &sub_lib);
   // The same gate spelled INLINE (RTL `always_latch if (!clk) en_l = en;
   // assign gclk = clk & en_l;`) becomes the same Clock_cell, on both sides and
   // in every def, so an RTL ICG and an instantiated (or Pyrope `Clock()`) one
   // reach the schedule in one form. See materialize_inline_clock_gates.
-  auto inline_gates = [](hhds::Graph* top, const std::vector<hhds::Graph*>& defs) {
+  auto inline_gates = [&stop](hhds::Graph* top, const std::vector<hhds::Graph*>& defs) {
+    if (stop("inline clock-gate recognition")) {
+      return 0;
+    }
     int                               n = livehd::latch_contract::materialize_inline_clock_gates(top, "pass.single_edge");
     absl::flat_hash_set<hhds::Graph*> seen{top};
     for (auto* d : defs) {
       if (d != nullptr && seen.insert(d).second) {
+        if (stop("inline clock-gate recognition")) {
+          break;
+        }
         n += livehd::latch_contract::materialize_inline_clock_gates(d, "pass.single_edge");
       }
     }
@@ -1138,6 +1225,9 @@ Time_base prepare_time_base(const Cell_models& sub_lib, hhds::Graph* ref, std::v
   auto      lib_error      = inline_lib_cells(ref, ref_defs);
   if (lib_error.empty()) {
     lib_error = inline_lib_cells(impl, impl_defs);
+  }
+  if (tb.timed_out) {
+    return tb;
   }
   if (!lib_error.empty()) {
     tb.error      = std::move(lib_error);
@@ -1160,17 +1250,35 @@ Time_base prepare_time_base(const Cell_models& sub_lib, hhds::Graph* ref, std::v
   };
   // M9 recognition runs FIRST and on BOTH sides, since a gate recognized on one
   // side only would compare a Clock_cell against a Sub.
+  if (stop("clock-gate recognition")) {
+    return tb;
+  }
   if (const int mr = pre_ref_cells + materialize_clock_cells_all(ref, ref_defs); mr > 0) {
     tb.recipe_steps.emplace_back(std::format("pass.single_edge recognized {} ref clock gate(s) as Clock_cell", mr));
+  }
+  if (stop("clock-gate recognition")) {
+    return tb;
   }
   if (const int mi = pre_impl_cells + materialize_clock_cells_all(impl, impl_defs); mi > 0) {
     tb.recipe_steps.emplace_back(std::format("pass.single_edge recognized {} impl clock gate(s) as Clock_cell", mi));
   }
-  note_gates("ref", inline_clock_gates_and_fold(ref, ref_defs, &unfolded, is_boxed));
-  note_gates("impl", inline_clock_gates_and_fold(impl, impl_defs, &unfolded, is_boxed));
+  for (auto [which, top, defs] : {std::tuple{"ref", ref, &ref_defs}, std::tuple{"impl", impl, &impl_defs}}) {
+    bool fold_timed_out = false;
+    if (!stop("clock-gate folding")) {
+      note_gates(which, inline_clock_gates_and_fold(top, *defs, &unfolded, is_boxed, deadline, &fold_timed_out));
+    }
+    if (fold_timed_out || stop("clock-gate folding")) {
+      tb.timed_out     = true;
+      tb.timeout_stage = "clock-gate folding";
+      return tb;
+    }
+  }
   absl::flat_hash_set<hhds::Graph*> exposed;
   for (auto* top : {ref, impl}) {
     if (exposed.insert(top).second) {
+      if (stop("clock output exposure")) {
+        return tb;
+      }
       expose_clock_outputs(top);
       recover_latch_resets(top);
     }
@@ -1178,6 +1286,9 @@ Time_base prepare_time_base(const Cell_models& sub_lib, hhds::Graph* ref, std::v
   for (const auto* defs : {&ref_defs, &impl_defs}) {
     for (auto* def : *defs) {
       if (def != nullptr && (!is_boxed || !is_boxed(def)) && exposed.insert(def).second) {
+        if (stop("clock output exposure")) {
+          return tb;
+        }
         expose_clock_outputs(def);
         recover_latch_resets(def);
       }
@@ -1201,7 +1312,13 @@ Time_base prepare_time_base(const Cell_models& sub_lib, hhds::Graph* ref, std::v
     po.quiet   = quiet_decline;
     return normalize(side, defs, po);
   };
+  if (stop("edge-normalization probe")) {
+    return tb;
+  }
   const auto pr = probe_side(ref, ref_defs);
+  if (stop("edge-normalization probe")) {
+    return tb;
+  }
   const auto pi = probe_side(impl, impl_defs);
   if (pr.error || pi.error) {
     tb.declined       = true;
@@ -1244,8 +1361,15 @@ Time_base prepare_time_base(const Cell_models& sub_lib, hhds::Graph* ref, std::v
     fo.quiet   = true;
     auto probe_forced = [&](hhds::Graph* side, std::vector<hhds::Graph*>& defs, const char* which) {
       auto res = normalize(side, defs, fo);
-      if (res.error) {
-        if (const auto n = inline_instances_for_divider(side, is_boxed); n > 0) {
+      if (res.error && !stop("flattening for the phase divider")) {
+        bool       flat_timed_out = false;
+        const auto n              = inline_instances_for_divider(side, is_boxed, deadline, flat_timed_out);
+        if (flat_timed_out) {
+          tb.timed_out     = true;
+          tb.timeout_stage = "flattening for the phase divider";
+          return res;
+        }
+        if (n > 0 && !stop("flattening for the phase divider")) {
           tb.recipe_steps.emplace_back(std::format("pass.single_edge flattened {} {} instance(s) for P={}",
                                                    n,
                                                    which,
@@ -1256,7 +1380,13 @@ Time_base prepare_time_base(const Cell_models& sub_lib, hhds::Graph* ref, std::v
       return res;
     };
     const auto fr = probe_forced(ref, ref_defs, "ref");
+    if (tb.timed_out) {
+      return tb;
+    }
     const auto fi = ref == impl ? fr : probe_forced(impl, impl_defs, "impl");
+    if (tb.timed_out) {
+      return tb;
+    }
     if (fr.error || fi.error) {
       tb.error = std::format("lec: edge normalization cannot put both sides in one P={} time base ({})",
                              ao.force_slots,
@@ -1265,12 +1395,18 @@ Time_base prepare_time_base(const Cell_models& sub_lib, hhds::Graph* ref, std::v
       return tb;
     }
   }
+  if (stop("edge normalization")) {
+    return tb;
+  }
   const auto rn         = normalize(ref, ref_defs, ao);
   // SAME GRAPH OBJECT on both sides (`--impl X --ref X`, the vacuity-guard
   // idiom): normalizing again would find nothing left to lower and report
   // "skipped" with no slot count and no reference clock, which the agreement
   // checks below would misread as a disagreement.
   const bool same_graph = ref == impl;
+  if (!same_graph && stop("edge normalization")) {
+    return tb;
+  }
   const auto in         = same_graph ? rn : normalize(impl, impl_defs, ao);
   if (rn.error || in.error) {
     tb.error = std::format("lec: edge normalization failed after planning ({})", rn.error ? rn.reason : in.reason);

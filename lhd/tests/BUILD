@@ -235,6 +235,16 @@ sh_test(
     data = ["//lhd"],
 )
 
+# Two imported units (and the testbench itself) that each define `pub comb top`:
+# the sim driver must bind every import to its own unit's class, not collapse
+# them onto the shared entity name and compare a module with itself.
+sh_test(
+    name = "lhd_sim_import_same_entity_test",
+    size = "large",
+    srcs = ["lhd_sim_import_same_entity_test.sh"],
+    data = ["//lhd"],
+)
+
 # Incremental regeneration of the sim tree: a no-op re-setup and a comment-only
 # Pyrope edit must rewrite NO generated C++, and a body-only edit must rewrite
 # the module's .cpp but NOT its .hpp (else every parent's object is needlessly

@@ -1683,6 +1683,12 @@ bool Cprop::scalar_mux(hhds::Node_class& node, Inp_pins& inp_edges_ordered, bool
   // an enable, and the latch contract exempts Q only as a direct Mux arm. A
   // Sum is not guarded: a + mux(s, 0, x) moves the select ahead of the carry
   // chain, which is a loss when the select is the late signal.
+  //
+  // Only inside the caller's guard scope (set_guard_scope: a lifted loop
+  // body, or the cells a synthesis loop expansion minted). A hand-written or
+  // translator-unrolled run of guarded updates (br_enc_onehot2bin) keeps its
+  // MUX chain: the loop lowering must not change what loop-free code compiles
+  // to, and that form is the one the mappers were tuned on.
   auto guard_accumulation = [&](size_t updated_idx, size_t hold_idx) {
     const auto sel     = inp_edges_ordered[0].get_driver_pin();
     const auto updated = inp_edges_ordered[updated_idx].get_driver_pin();
@@ -1699,7 +1705,7 @@ bool Cprop::scalar_mux(hhds::Node_class& node, Inp_pins& inp_edges_ordered, bool
     const auto op   = type_op_of(cell);
     if ((op != Ntype_op::Or && op != Ntype_op::Xor && op != Ntype_op::And) || cell == node || livehd::graph_util::has_color(cell)
         || livehd::graph_util::has_runtime_check(cell) || livehd::graph_util::has_name(cell)
-        || !livehd::graph_util::pin_name_of(updated).empty() || !has_single_consumer(cell)) {
+        || !livehd::graph_util::pin_name_of(updated).empty() || !has_single_consumer(cell) || !guard_scope_(cell)) {
       return false;
     }
     hhds::Pin_class              held_sink;
@@ -1745,7 +1751,8 @@ bool Cprop::scalar_mux(hhds::Node_class& node, Inp_pins& inp_edges_ordered, bool
     inp_edges_ordered = ordered_inp_edges(node);
     return true;
   };
-  if (may_emit_unstamped() && is_two_arm_mux(inp_edges_ordered) && (guard_accumulation(2, 1) || guard_accumulation(1, 2))) {
+  if (may_emit_unstamped() && guard_scope_ && guard_scope_(node) && is_two_arm_mux(inp_edges_ordered)
+      && (guard_accumulation(2, 1) || guard_accumulation(1, 2))) {
     return false;  // retyped: scalar_node continues it as the operator
   }
 

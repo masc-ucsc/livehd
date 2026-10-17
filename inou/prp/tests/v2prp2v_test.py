@@ -191,7 +191,13 @@ def main():
     # A `:lec_expect: refuted` pair is a MUTATED golden: its round trip must
     # still differ from the handwritten Pyrope. The Verilog leg below compares
     # the golden with its OWN round trip, so it must prove either way.
-    expect = (_header(ref_prp, "lec_expect") or "proven").lower()
+    # `:v2prp_native_expect:` overrides it for this leg alone: the native leg
+    # runs the handwritten Pyrope as the REFERENCE against the round trip of the
+    # golden, the reverse of the equiv test's direction. A Pyrope twin that
+    # REFINES its golden (power-on contents the golden leaves undefined) proves
+    # there but must refute here: a defined reference against an uninitialized
+    # implementation is REFUTED-cex (LEC initial-state ruling 2026-10-16).
+    expect = (_header(ref_prp, "v2prp_native_expect") or _header(ref_prp, "lec_expect") or "proven").lower()
     if expect == "refuted":
         native_failed = verdict(native) != "refuted"  # REFUTED-cex, exit 10
     else:

@@ -7,6 +7,7 @@
 #include <iostream>
 #include <memory>
 #include <string>
+#include <tuple>
 #include <vector>
 
 #include "attrs.hpp"
@@ -545,4 +546,37 @@ TEST(ProofPrep, OneSidedInlineHonoursTheDeadline) {
                                                          &timed_out),
             static_cast<size_t>(3 * 4 + 2 + 6));
   EXPECT_FALSE(timed_out);
+}
+
+// ...and so does the rest of proof preparation: a deadline already passed
+// stops prepare_time_base before its first step (TIMEOUT-time, no query, the
+// sides untouched), and one in the future changes nothing about what it does.
+TEST(ProofPrep, TimeBasePreparationHonoursTheDeadline) {
+  auto prepare = [](std::chrono::steady_clock::time_point deadline) {
+    auto                      ref  = build(2, 3);
+    auto                      impl = build(2, 3);
+    std::vector<hhds::Graph*> ref_defs, impl_defs;
+    for (size_t i = 1; i < ref.graphs.size(); ++i) {
+      ref_defs.push_back(ref.graphs[i].get());
+      impl_defs.push_back(impl.graphs[i].get());
+    }
+    const auto before = dump(*ref.top) + dump(*impl.top);
+    const auto tb     = se::prepare_time_base({}, ref.top.get(), ref_defs, impl.top.get(), impl_defs, true, {}, deadline);
+    return std::tuple{tb, before, dump(*ref.top) + dump(*impl.top)};
+  };
+  const auto [late, late_before, late_after] = prepare(std::chrono::steady_clock::now() - std::chrono::seconds(1));
+  EXPECT_TRUE(late.timed_out);
+  EXPECT_FALSE(late.timeout_stage.empty());
+  EXPECT_FALSE(late.applied);
+  EXPECT_EQ(late_before, late_after) << "stopped before the first step: nothing rewritten";
+
+  const auto [none, none_before, none_after]       = prepare({});
+  const auto [on_time, on_time_before, on_time_after] = prepare(std::chrono::steady_clock::now() + std::chrono::hours(1));
+  EXPECT_FALSE(none.timed_out);
+  EXPECT_FALSE(on_time.timed_out);
+  EXPECT_EQ(on_time.applied, none.applied);
+  EXPECT_EQ(on_time.declined, none.declined);
+  EXPECT_EQ(on_time.error, none.error);
+  EXPECT_EQ(on_time.recipe_steps, none.recipe_steps);
+  EXPECT_EQ(on_time_after, none_after);
 }

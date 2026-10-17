@@ -3491,28 +3491,32 @@ private:
     while (!stk.empty()) {
       const auto sink = stk.back();
       stk.pop_back();
-      const auto drv = sink.get_driver_pin();
-      if (drv.is_invalid() || !live_drivers.insert(drv.get_class_index()).second) {
-        continue;
-      }
-      if (graph_util::is_graph_input_pin(drv) || drv.is_const()) {
-        continue;
-      }
-      const auto m = drv.get_master_node();
-      if (!live_nodes.insert(m.get_class_index()).second) {
-        continue;
-      }
-      const absl::flat_hash_set<hhds::Port_id>* child_dead = nullptr;
-      if (graph_util::type_op_of(m) == Ntype_op::Sub && !m.is_loop_subnode()) {
-        if (auto cg = m.get_subnode_graph(); cg) {
-          child_dead = &of(cg.get());
+      // EVERY driver: a sink may legitimately have several (a compact loop's
+      // carry-in -- its external seed plus its own carry-out), and
+      // get_driver_pin() asserts on exactly one. Each is live.
+      for (const auto& drv : sink.get_driver_pins()) {
+        if (drv.is_invalid() || !live_drivers.insert(drv.get_class_index()).second) {
+          continue;
         }
-      }
-      for (auto in : m.inp_sorted_pins()) {
-        if (child_dead != nullptr && child_dead->contains(in.get_port_id())) {
-          continue;  // the nested body proves this input reaches none of its outputs
+        if (graph_util::is_graph_input_pin(drv) || drv.is_const()) {
+          continue;
         }
-        stk.push_back(in);
+        const auto m = drv.get_master_node();
+        if (!live_nodes.insert(m.get_class_index()).second) {
+          continue;
+        }
+        const absl::flat_hash_set<hhds::Port_id>* child_dead = nullptr;
+        if (graph_util::type_op_of(m) == Ntype_op::Sub && !m.is_loop_subnode()) {
+          if (auto cg = m.get_subnode_graph(); cg) {
+            child_dead = &of(cg.get());
+          }
+        }
+        for (auto in : m.inp_sorted_pins()) {
+          if (child_dead != nullptr && child_dead->contains(in.get_port_id())) {
+            continue;  // the nested body proves this input reaches none of its outputs
+          }
+          stk.push_back(in);
+        }
       }
     }
     absl::flat_hash_set<hhds::Port_id> dead;
@@ -4810,19 +4814,33 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
   // miters correctly and keeps the SAT assignment, so witness extraction is
   // safe — but it has no theory of arrays, so restrict it to array-free queries.
   // Memory cuts (M4) introduce array symbols; those keep the default solver.
-  bool has_mem = false;
+  bool has_mem       = false;
+  bool has_small_mem = false;
   for (auto* g : {ref, impl}) {
     // Hierarchical: a memory one level down still introduces ARRAY symbols, and
     // the eager bit-blaster this gates has no array theory.
     for (auto node : g->occurrences(collapse_gids_ptr).nodes(hhds::Node_order::forward)) {
       if (graph_util::type_op_of(node) == Ntype_op::Memory) {
         has_mem = true;
-        break;
+        if (const auto sig = read_mem_sig(node); sig.bits > 0 && sig.size > 0 && sig.addr_w > 0
+                                                            && static_cast<uint32_t>(sig.addr_w) <= kArray_blast_index_bits) {
+          has_small_mem = true;
+          break;
+        }
       }
     }
-    if (has_mem) {
+    if (has_small_mem) {
       break;
     }
+  }
+  // Memories of at most 2^kArray_blast_index_bits entries reach cvc5 as
+  // per-entry bit-vectors, not arrays (array_blast.hpp): the lazy array solver
+  // case-splits on every pair of symbolic addresses across the unrolling,
+  // which made a two-lane 4x8 design under the reference's unknown-state
+  // tracking take 21 s at BMC bound 2 and time out at bound 3. When no larger
+  // array remains, the query is solved as QF_BV.
+  if (has_small_mem) {
+    solver.set_array_blast(kArray_blast_index_bits);
   }
   solver.set_profile(opts.profile,
                      {.has_mem         = has_mem,
@@ -5624,6 +5642,13 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
     absl::flat_hash_set<std::string>  bank_hold_keys;        // reset-less bank flops: hold across the reset prologue
     absl::flat_hash_set<std::string>  ref_power_init_keys;   // ref keys with an explicit power-on value
     size_t                            unpaired_state_n = 0;  // state cuts with no counterpart (disclosed in the verdict)
+    // Refinement of an uninitialized reference register (owner ruling
+    // 2026-10-16): candidates whose REFERENCE flop has neither a power-on value
+    // nor a reset pin, paired by key with an equally wide implementation flop
+    // (no bit-blast/window bridge), and the keys whose implementation flop has
+    // a reset pin. See `adopt_flops` below.
+    absl::flat_hash_set<std::string>  ref_uninit_flops;
+    absl::flat_hash_set<std::string>  impl_reset_pin_flops;
     {
       Io_name_map<int>                 fw;
       Io_name_map<bool>                fsgn;  // sign of the NARROWEST decl (the value semantics of the shared init)
@@ -5638,6 +5663,9 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
       // Keys with a reset pin on either side: the reset-prologue power-on
       // policy below.
       absl::flat_hash_set<std::string> reset_state_keys;
+      // Per side: flops with a constant `initial` (reset or power-on value)
+      // and flops with a reset pin.
+      absl::flat_hash_set<std::string> side_initial[2], side_reset[2];
       int                              side_ix       = 0;
       auto                             collect_flops = [&](hhds::Graph* g) {
         // NOT fast_hier, despite the opaque scope now being honored by both: `fw` is
@@ -5712,6 +5740,14 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
           }
           if (nop == Ntype_op::Flop && has_reset_pin) {
             reset_state_keys.insert(key);
+          }
+          if (nop == Ntype_op::Flop) {
+            if (has_reset_pin) {
+              side_reset[side_ix].insert(key);
+            }
+            if (auto iv = gu::get_driver_of_sink_name(node, "initial"); !iv.is_invalid() && iv.is_const()) {
+              side_initial[side_ix].insert(key);
+            }
           }
         }
       };
@@ -5914,6 +5950,39 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
       }
       for (const auto& [key, value] : power_init[1]) {
         impl_state[key] = value;
+      }
+      // Candidates for the refinement rule: an uninitialized reference flop
+      // (no `initial`, no reset pin) paired by key with an equally wide
+      // implementation flop. A bridged key (bit-blast, packed/scalar, state
+      // window) keeps its bridge's own seeding.
+      if (opts.gold_x != "zero") {
+        for (const auto& [key, rw] : fw_side[0]) {
+          auto iw = fw_side[1].find(key);
+          if (iw == fw_side[1].end() || iw->second != rw || side_initial[0].contains(key) || side_reset[0].contains(key)
+              || bitblast.contains(key) || bitblast_bits.contains(key) || state_windows.contains(key)) {
+            continue;
+          }
+          ref_uninit_flops.insert(key);
+        }
+        impl_reset_pin_flops = side_reset[1];
+      }
+      // An uninitialized reference register against an implementation one with
+      // a power-on value: the reference's power-on value is X, any value is
+      // allowed, and the implementation's is one of them -- a refinement (owner
+      // ruling 2026-10-16). Start the reference at the implementation's value
+      // (an exact instance of its X, so nothing is masked) instead of the
+      // shared free symbol the implementation no longer holds. The opposite
+      // direction (initialized reference, uninitialized implementation) keeps
+      // the shared symbol and refutes.
+      for (const auto& key : ref_uninit_flops) {
+        auto pit = power_init[1].find(key);
+        auto rit = ref_state.find(key);
+        if (pit == power_init[1].end() || rit == ref_state.end() || rit->second.width != pit->second.width) {
+          continue;
+        }
+        Val v          = pit->second;
+        v.is_signed    = rit->second.is_signed;
+        ref_state[key] = v;
       }
       // Bit slices of a bit-blasted register (see the pairing above): the impl's
       // one-bit cut for bit i IS bit i of the ref's N-bit symbol, so the two
@@ -6256,9 +6325,20 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
     // Encoder::encode applies `init` directly for ROMs and reset operations,
     // but an ordinary writable memory must consume it exactly once here at
     // state[0]; subsequent cycles thread each side's next_mem normally. Two
-    // explicit initializers remain independently observable. If exactly one
-    // side is initialized, pair the other side's unspecified hardware state to
-    // it instead of creating an unrelated adversarial initial array.
+    // explicit initializers remain independently observable. With exactly one
+    // initialized side, memories follow the flop convention (owner ruling
+    // 2026-10-16):
+    //   * only the IMPLEMENTATION is initialized: the reference's power-on
+    //     contents are X, and choosing them equal to the implementation's is
+    //     one instance of that X -- a refinement, so the pair is tied;
+    //   * only the REFERENCE is initialized: the implementation's contents are
+    //     arbitrary hardware state that the reference does not allow. It keeps
+    //     its own (free) array, so a read of an entry neither side wrote
+    //     refutes, exactly like an initialized reference register against an
+    //     uninitialized implementation one. (Tying the two here was a false
+    //     PROVEN-full: `initial mem[i] = 8'h5a` against no initializer.)
+    // A `$readmem` image is not an initializer here (collect_memory_inits):
+    // it is external state on the shared array.
     auto apply_memory_init = [&](cvc5::Term arr, const Mem_sig& sig, const std::string& bin) {
       const int  width = sig.size * sig.bits;
       cvc5::Term bus   = tm.mkBitVector(static_cast<uint32_t>(width), bin, 2);
@@ -6339,23 +6419,54 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
         rs->second = apply_memory_init(rs->second, rg->second, ri->second);
         is->second = apply_memory_init(is->second, ig->second, ii->second);
       } else if (ri != ref_mem_init.end() && rs != ref_mem.end() && rg != ref_mem_sig.end()) {
-        auto paired = apply_memory_init(rs->second, rg->second, ri->second);
-        rs->second  = paired;
-        if (unspecified_writable_pair) {
-          // A writable implementation memory with no initializer has arbitrary
-          // hardware power-on state. Choose the correspondence relation that
-          // pairs it with the reference's specified contents instead of an
-          // unrelated adversarial array. Do not apply this to ROMs: their
-          // contents can arrive through a different encoding channel, and a
-          // one-sided ROM init must remain observable (lec_mem_init_test).
-          is->second = paired;
-        }
+        // The implementation's array stays the free (shared) one: see above.
+        rs->second = apply_memory_init(rs->second, rg->second, ri->second);
       } else if (ii != impl_mem_init.end() && is != impl_mem.end() && ig != impl_mem_sig.end()) {
+        // Do not apply the tie to ROMs: their contents can arrive through a
+        // different encoding channel, and a one-sided ROM init must remain
+        // observable (lec_mem_init_test).
         auto paired = apply_memory_init(is->second, ig->second, ii->second);
         is->second  = paired;
         if (unspecified_writable_pair) {
           rs->second = paired;
         }
+      }
+    }
+
+    // The memory twin of `adopt_flops` (see the reset probe below): a writable
+    // reference memory with no power-on contents, no reset arm and no image,
+    // against the same-keyed implementation memory that a reset arm defines.
+    // The reference's contents after the reset sequence are X, so the checked
+    // window starts it at the implementation's contents (owner ruling
+    // 2026-10-16). The opposite direction (reset or initialized reference,
+    // uninitialized implementation) is untouched and refutes.
+    absl::flat_hash_set<std::string> adopt_mems;
+    if (phase_run && reset_hold > 0 && !reset_negset.empty() && P == 1 && opts.gold_x != "zero") {
+      auto reset_arms = [&](hhds::Graph* g) {
+        absl::flat_hash_set<std::string> out;
+        for (auto node : g->occurrences(collapse_gids_ptr).nodes(hhds::Node_order::forward)) {
+          if (graph_util::type_op_of(node) == Ntype_op::Memory && node.has_out_edges()
+              && !graph_util::get_driver_of_sink_name(node, "reset").is_invalid()) {
+            out.insert(mem_cut_key(g, node));
+          }
+        }
+        return out;
+      };
+      const auto ref_rst  = reset_arms(ref);
+      const auto impl_rst = reset_arms(impl);
+      for (const auto& key : impl_rst) {
+        // The arrays themselves may not exist yet: an uncollapsed pair's
+        // private arrays are minted by the first encode and threaded from
+        // there, so the shapes decide here and the step loop checks the sorts.
+        auto rg = ref_mem_sig.find(key);
+        auto ig = impl_mem_sig.find(key);
+        if (rg == ref_mem_sig.end() || ig == impl_mem_sig.end() || rg->second.size != ig->second.size
+            || rg->second.bits != ig->second.bits || rg->second.addr_w != ig->second.addr_w || rg->second.n_wr <= 0 || ref_rst.contains(key)
+            || ref_mem_init.contains(key) || memory_image_keys.contains(key) || !ref_mem_type.contains(key)
+            || ref_mem_type.at(key) == 2 || !impl_mem_type.contains(key) || impl_mem_type.at(key) == 2) {
+          continue;
+        }
+        adopt_mems.insert(key);  // reset-free write ports are checked by the reset probe below
       }
     }
 
@@ -6451,6 +6562,18 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
     // it on that first cycle is hardware-undefined. Detection is a pure rewrite
     // (no solver query, nothing asserted), and a constant next-state IS a total
     // write, so a miss only keeps the shared s0 relation.
+    //
+    // The same probe of the IMPLEMENTATION's first reset cycle (plus the
+    // reset-pin census) tells which state the implementation's reset defines.
+    // An uninitialized reference register (no power-on value, no reset pin, no
+    // reset-written next-state) against an implementation register that reset
+    // defines is a refinement (owner ruling 2026-10-16): the reference's value
+    // after the reset sequence is X and any value is allowed, the
+    // implementation's included. `adopt_flops` start the checked window at the
+    // implementation's value -- an exact instance of that X, so nothing is
+    // masked afterwards. The opposite direction (reset-defined reference,
+    // uninitialized implementation) is untouched and refutes.
+    absl::flat_hash_set<std::string> adopt_flops;
     if (phase_run && !reset_negset.empty() && P == 1 && opts.gold_x != "zero") {
       Io_name_map<Val> dry;
       for (const auto& [name, info] : ins) {
@@ -6477,9 +6600,6 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
           dry[ln] = lv;
         }
       }
-      for (const auto& [k, v] : ref_state) {
-        dry[k] = Val{v.term, v.width, v.is_signed};  // value only: the probe asks what reset writes
-      }
       Io_name_map<Val> dry_bbox;
       for (const auto& [bk, bv] : shared_bbox) {
         // A proven child's constant output (box_const_outputs) stays constant.
@@ -6488,35 +6608,168 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
                   ? bv
                   : Val{tm.mkConst(tm.mkBitVectorSort(static_cast<uint32_t>(bv.width)), "rdry_bb:" + bk), bv.width, bv.is_signed};
       }
-      enc.set_shared_bbox(&dry_bbox);
-      enc.set_emit_props(false);
-      enc.set_x_dontcare(false);
-      enc.set_box_keys(&ref_box_keys);
-      enc.set_mem_keys(&ref_mem_cut_keys);
-      const bool dry_use_plan = use_plan && (use_phase || ref_plan.needs_plan());
-      enc.set_phase_plan(dry_use_plan ? &ref_plan : nullptr, steps[0]);
-      enc.set_memory_x_state(nullptr);
-      Encoded dre = enc.encode(ref, &dry, "rdry_", &ref_mem, &ref_reads);
-      enc.set_shared_bbox(&shared_bbox);
-      if (dre.ok) {
+      // Keys whose first-reset-cycle next-state rewrites to a constant.
+      auto reset_written = [&](hhds::Graph*                    g,
+                               const Io_name_map<Val>&         state,
+                               const Io_name_map<std::string>& box_keys,
+                               const Io_name_map<std::string>& mem_cut_keys,
+                               const Phase_plan&               plan,
+                               const Io_name_map<cvc5::Term>&  mems,
+                               const Io_name_map<Val>&         reads,
+                               const char*                     prefix) {
+        absl::flat_hash_set<std::string> out;
+        Io_name_map<Val>                 side_dry = dry;
+        for (const auto& [k, v] : state) {
+          side_dry[k] = Val{v.term, v.width, v.is_signed};  // value only: the probe asks what reset writes
+        }
+        enc.set_shared_bbox(&dry_bbox);
+        enc.set_emit_props(false);
+        enc.set_x_dontcare(false);
+        enc.set_box_keys(&box_keys);
+        enc.set_mem_keys(&mem_cut_keys);
+        const bool dry_use_plan = use_plan && (use_phase || plan.needs_plan());
+        enc.set_phase_plan(dry_use_plan ? &plan : nullptr, steps[0]);
+        enc.set_memory_x_state(nullptr);
+        Encoded dre = enc.encode(g, &side_dry, prefix, &mems, &reads);
+        enc.set_shared_bbox(&shared_bbox);
+        if (!dre.ok) {
+          return out;
+        }
         for (const auto& [name, nv] : dre.outputs) {
           if (name.rfind("\x01nxt:", 0) != 0) {
             continue;
           }
           const std::string key = name.substr(5);
-          if (key.empty() || key[0] == '\x01' || ref_power_init_keys.contains(key)) {
-            continue;  // box state cut, or an explicit power-on value (already known)
+          if (key.empty() || key[0] == '\x01') {
+            continue;  // box state cut
           }
-          auto it = ref_state.find(key);
-          if (it == ref_state.end() || !it->second.x_mask.isNull()) {
-            continue;
+          if (solver.simplify(nv.term).isBitVectorValue()) {
+            out.insert(key);
           }
-          if (!solver.simplify(nv.term).isBitVectorValue()) {
-            continue;
+        }
+        return out;
+      };
+      const auto ref_written = reset_written(ref, ref_state, ref_box_keys, ref_mem_cut_keys, ref_plan, ref_mem, ref_reads, "rdry_");
+      for (const auto& key : ref_written) {
+        if (ref_power_init_keys.contains(key)) {
+          continue;  // an explicit power-on value (already known)
+        }
+        auto it = ref_state.find(key);
+        if (it == ref_state.end() || !it->second.x_mask.isNull()) {
+          continue;
+        }
+        it->second.x_mask = tm.mkTerm(cvc5::Kind::BITVECTOR_NOT, {tm.mkBitVector(static_cast<uint32_t>(it->second.width), 0)});
+        if (std::getenv("LEC_DUMP_FLOPS") != nullptr) {
+          std::fprintf(stderr, "[LEC_RESET_WRITTEN] %s: pre-reset value tracked as X on the reference\n", key.c_str());
+        }
+      }
+      // A reference register or memory is uninitialized only when reset does
+      // not reach its next state at all: `r <= rst ? init_in : d` is reset to a
+      // (non-constant) value, and a memory cleared through its write ports
+      // under reset is reset too. Probe the same first cycle once more with
+      // every reset input a fresh symbol, and keep the candidates whose
+      // next-state (flop) or write ports (memory) do not depend on one.
+      if (!ref_uninit_flops.empty() || !adopt_mems.empty()) {
+        Io_name_map<Val>               rst_probe = dry;
+        std::unordered_set<cvc5::Term> reset_syms;
+        for (const auto& [name, info] : ins) {
+          if (bundle_in_leaves.count(name) == 0 && reset_negset.contains(name)) {
+            cvc5::Term t = mint_top_in(tm, info, "rprb_" + std::string(name));
+            rst_probe[name] = Val{t, info.w, info.sgn};
+            reset_syms.insert(t);
           }
-          it->second.x_mask = tm.mkTerm(cvc5::Kind::BITVECTOR_NOT, {tm.mkBitVector(static_cast<uint32_t>(it->second.width), 0)});
-          if (std::getenv("LEC_DUMP_FLOPS") != nullptr) {
-            std::fprintf(stderr, "[LEC_RESET_WRITTEN] %s: pre-reset value tracked as X on the reference\n", key.c_str());
+        }
+        for (const auto& [k, v] : ref_state) {
+          rst_probe[k] = Val{v.term, v.width, v.is_signed};
+        }
+        enc.set_shared_bbox(&dry_bbox);
+        enc.set_emit_props(false);
+        enc.set_x_dontcare(false);
+        enc.set_box_keys(&ref_box_keys);
+        enc.set_mem_keys(&ref_mem_cut_keys);
+        const bool probe_use_plan = use_plan && (use_phase || ref_plan.needs_plan());
+        enc.set_phase_plan(probe_use_plan ? &ref_plan : nullptr, steps[0]);
+        enc.set_memory_x_state(nullptr);
+        Encoded pre = enc.encode(ref, &rst_probe, "rprb_", &ref_mem, &ref_reads);
+        enc.set_shared_bbox(&shared_bbox);
+        std::unordered_map<cvc5::Term, bool> memo;  // term -> reaches a reset symbol
+        auto reaches_reset = [&](const cvc5::Term& root) {
+          if (root.isNull()) {
+            return false;
+          }
+          std::vector<std::pair<cvc5::Term, bool>> stk{{root, false}};
+          while (!stk.empty()) {
+            auto [t, expanded] = stk.back();
+            stk.pop_back();
+            if (memo.contains(t)) {
+              continue;
+            }
+            if (reset_syms.contains(t)) {
+              memo.emplace(t, true);
+              continue;
+            }
+            if (!expanded) {
+              stk.emplace_back(t, true);
+              for (size_t i = 0; i < t.getNumChildren(); ++i) {
+                if (!memo.contains(t[i])) {
+                  stk.emplace_back(t[i], false);
+                }
+              }
+              continue;
+            }
+            bool hit = false;
+            for (size_t i = 0; i < t.getNumChildren() && !hit; ++i) {
+              hit = memo.at(t[i]);
+            }
+            memo.emplace(t, hit);
+          }
+          return memo.at(root);
+        };
+        absl::flat_hash_set<std::string> keep_flops, keep_mems;
+        if (pre.ok) {
+          for (const auto& key : ref_uninit_flops) {
+            auto it = pre.outputs.find("\x01nxt:" + key);
+            if (it != pre.outputs.end() && !reaches_reset(it->second.term)) {
+              keep_flops.insert(key);
+            }
+          }
+          for (const auto& key : adopt_mems) {
+            auto it = pre.mem_wr.find(key);
+            if (it == pre.mem_wr.end() || it->second.empty()) {
+              continue;  // its writes were not found: keep the conservative pairing
+            }
+            bool reset_free = true;
+            for (const auto& wp : it->second) {
+              reset_free = reset_free && !reaches_reset(wp.addr) && !reaches_reset(wp.wmask) && !reaches_reset(wp.din);
+            }
+            if (reset_free) {
+              keep_mems.insert(key);
+            }
+          }
+        }
+        ref_uninit_flops = std::move(keep_flops);
+        adopt_mems       = std::move(keep_mems);
+        if (std::getenv("LEC_DUMP_MEMS") != nullptr) {
+          for (const auto& key : adopt_mems) {
+            std::fprintf(stderr,
+                         "[LEC_RESET_REFINE] memory %s: uninitialized on the reference, reset on the implementation; the "
+                         "checked window starts at the implementation's contents\n",
+                         key.c_str());
+          }
+        }
+      }
+      if (!ref_uninit_flops.empty()) {
+        const auto impl_written
+            = reset_written(impl, impl_state, impl_box_keys, impl_mem_cut_keys, impl_plan, impl_mem, impl_reads, "idry_");
+        for (const auto& key : ref_uninit_flops) {
+          if (!ref_written.contains(key) && (impl_reset_pin_flops.contains(key) || impl_written.contains(key))) {
+            adopt_flops.insert(key);
+            if (std::getenv("LEC_DUMP_FLOPS") != nullptr) {
+              std::fprintf(stderr,
+                           "[LEC_RESET_REFINE] %s: uninitialized on the reference, reset on the implementation; the checked "
+                           "window starts at the implementation's value\n",
+                           key.c_str());
+            }
           }
         }
       }
@@ -6581,6 +6834,29 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
         pin_mem(impl_mem, nm_impl);
         ref_mem  = std::move(nm_ref);
         impl_mem = std::move(nm_impl);
+
+        // First checked cycle: the reference's uninitialized state that the
+        // implementation's reset defined starts at the implementation's value
+        // (adopt_flops / adopt_mems above).
+        if (step == reset_hold * P) {
+          for (const auto& key : adopt_flops) {
+            auto rit = ref_state.find(key);
+            auto iit = impl_state.find(key);
+            if (rit == ref_state.end() || iit == impl_state.end() || rit->second.width != iit->second.width) {
+              continue;
+            }
+            rit->second = Val{iit->second.term, iit->second.width, rit->second.is_signed};
+          }
+          for (const auto& key : adopt_mems) {
+            auto rit = ref_mem.find(key);
+            auto iit = impl_mem.find(key);
+            if (rit == ref_mem.end() || iit == impl_mem.end() || rit->second.getSort() != iit->second.getSort()) {
+              continue;
+            }
+            rit->second = iit->second;
+            ref_mem_x.erase(key);
+          }
+        }
       }
 
       const std::string in_tag = P == 1 ? ("c" + std::to_string(cyc) + "_")
@@ -7657,22 +7933,48 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
   // so two writable memories whose explicit power-on contents differ have no
   // inductive base and the step proves nothing about them. BMC seeds each
   // side's own contents at state[0] (see apply_memory_init) and decides. A ROM
-  // is not affected (the encoder reads its contents directly), and a one-sided
-  // initializer keeps the BMC pairing policy: the unspecified side is chosen
-  // equal.
+  // is not affected (the encoder reads its contents directly). A one-sided
+  // initializer follows the BMC policy: an initialized IMPLEMENTATION against
+  // an uninitialized reference is a refinement (the reference's X is chosen
+  // equal), but an initialized REFERENCE against an implementation with no
+  // initializer has no base either -- the implementation's power-on contents
+  // are arbitrary, so assuming them equal proved `initial mem[i] = 8'h5a`
+  // against no initializer (a false PROVEN-full).
   {
     const auto               ref_inits  = collect_memory_inits(ref, true);
     const auto               impl_inits = collect_memory_inits(impl, true);
+    // Every writable impl memory (initialized or not), same filter as above.
+    absl::flat_hash_set<std::string> impl_writable;
+    for (auto node : impl->occurrences(collapse_gids_ptr).nodes(hhds::Node_order::forward)) {
+      if (graph_util::type_op_of(node) != Ntype_op::Memory || !node.has_out_edges()) {
+        continue;
+      }
+      const Mem_sig sig = read_mem_sig(node);
+      if (sig.bits <= 0 || sig.size <= 0) {
+        continue;
+      }
+      if (auto tpin = graph_util::get_driver_of_sink_name(node, "type");
+          tpin.is_const() && graph_util::const_of(tpin).to_just_i64() == 2) {
+        continue;
+      }
+      if (sig.n_wr <= 0 && graph_util::get_driver_of_sink_name(node, "update").is_invalid()) {
+        continue;
+      }
+      impl_writable.insert(mem_cut_key(impl, node));
+    }
     std::vector<std::string> diverged;
     for (const auto& [key, bin] : ref_inits) {
-      if (auto it = impl_inits.find(key); it != impl_inits.end() && it->second != bin && shared_mems.contains(key)) {
+      if (!shared_mems.contains(key)) {
+        continue;
+      }
+      if (auto it = impl_inits.find(key); it != impl_inits.end() ? it->second != bin : impl_writable.contains(key)) {
         diverged.push_back(key);
       }
     }
     if (!diverged.empty()) {
       std::sort(diverged.begin(), diverged.end());
       res.verdict  = Verdict::Undecided;
-      res.detail  += "; power-on contents differ on memory ";
+      res.detail  += "; power-on contents differ (or only the reference has any) on memory ";
       for (size_t i = 0; i < diverged.size(); ++i) {
         res.detail += (i != 0 ? "," : "") + diverged[i];
       }

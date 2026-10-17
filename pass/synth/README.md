@@ -57,21 +57,16 @@ Remaining native synthesis work is tracked in [2u-usyn](../../todo/livehd/2u-usy
    a region); one O(V + E) pass. The blaster lowers an n-ary And/Or/Xor as a
    balanced pairwise tree. `pass.usyn` keeps the chains: its XAG flow measured
    neutral to worse on balanced loop chains (lhdtrack `br_arb_lru` +8% delay).
-   `LIVEHD_SYNTH_REASSOC=0` disables the merge for A/B measurement (no cache
-   key covers it: use a fresh workdir) and `LIVEHD_SYNTH_REASSOC_DEBUG=1`
-   prints how many links merged. Two experiments stay opt-in, for the same
-   reason, each measured on 34 lhdtrack designs (asap7, abc and usyn):
-   `LIVEHD_SYNTH_ARRIVAL=1` lets `blast_reduce_assoc` combine the two
-   earliest-arriving operands first when that gives a strictly shallower root
-   (a wash for ABC, a small loss for usyn: RAW levels see only the region's
-   own logic), and `LIVEHD_SYNTH_RECOLOR=1` re-runs the source's `pass.color`
-   on the copy once carried loops are expanded. pass.color sees a compact loop
-   as one opaque instance, so every iteration lands in one region, where the
-   written-out loop splits into data and control cones -- that, not the
-   chain, is most of a rolled loop's ABC delay gap (`br_mux_bin_array` 264 vs
-   214 ps, `br_apb_demux_select_onehot` 170 vs 127, both closed by the
-   recolor) -- but recoloring the written-out design loses as often as it
-   wins elsewhere (`br_arb_lru` 273 -> 368 ps, `br_multi_xfer_distributor_rr`
+   `--set pass.abc.reassoc=false` hands ABC the chains as expanded (A/B
+   runs; the region cache compares the prepared bodies, so each setting reuses
+   only its own rows), and `--stats` reports what merged on the
+   `pass.abc loops:` line. Two alternatives were measured on 34 lhdtrack
+   designs (asap7, abc and usyn) and dropped: an arrival-aware n-ary
+   reduction in the blaster (a wash for ABC, a small loss for usyn: RAW levels
+   see only the region's own logic), and re-running the source's
+   `pass.color` on the copy once carried loops are expanded (it closes the
+   `br_mux_bin_array` / `br_apb_demux_select_onehot` delay gaps but loses as
+   often elsewhere: `br_arb_lru` 273 -> 368 ps, `br_multi_xfer_distributor_rr`
    +65% area), as `compile.unroll=true` does.
 3. **Regions.** `pass/partition` cuts the colored source into region bodies;
    `region_driver.cpp` (`Region_driver`) maps them: per-region options
@@ -174,7 +169,7 @@ engine salt from its caller, so an edit here invalidates every backend's rows.
 
 `lnet_test` (Lnet, `Lnet_ops`, STRASH), `arith_test`, `lane_scheduler_test`,
 `reassoc_test` (chain merging, guarded links, region/width/clock-gate/scope
-guards, arrival-aware reduction) and `region_cache_test` are unit tests here (satopt's are in `pass/satopt`). The pipeline
+guards) and `region_cache_test` are unit tests here (satopt's are in `pass/satopt`). The pipeline
 end to end runs through `pass.abc` and `pass.usyn`: `//pass/abc:*`,
 `//lhd/tests:lhd_abc_*` and the `prp-synth-*` fixtures of
 `//inou/prp:integration`, each proved with `lhd lec`.
