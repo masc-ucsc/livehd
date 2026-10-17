@@ -19,7 +19,7 @@ they are different obligations:
 Nothing here weakens a predicate, erases a memory or claims support. It reports.
 -/
 import LeanSemanticPrimitives.Projection.CertLoad
-import LeanSemanticPrimitives.Compiler.CertIOFacade
+import LeanSemanticPrimitives.Compiler.CertIORoute   -- DCERT2 + DCERT1, routed by magic (Mathlib-free)
 
 open Compiler Projection Projection.Hw
 

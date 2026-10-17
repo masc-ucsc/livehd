@@ -46,6 +46,31 @@ MODULES=(
   Projection/ProjectedStep
   Projection/CertLoad
   Projection/CertLoadAny
+  # the memory route (dcert2_memroute), gate first, DirectCheck before the traversal
+  Projection/AxiomGate
+  Projection/MemImage
+  Projection/HardwareMem
+  Projection/HardwareMemSource
+  Projection/HardwareMemOp
+  Projection/HardwareMemSlots
+  Compiler/DirectCheck
+  Projection/HardwareMemTraversal
+  Projection/HardwareMemShapes
+  Projection/HardwareMemNodes
+  Projection/HardwareMemFold
+  Projection/HardwareMemCommit
+  Projection/HardwareMemOutFlop
+  Projection/HardwareMemMain
+  Projection/HardwareMemWidth
+  Projection/HardwareMemAdmit
+  Projection/HardwareMemSlotTy
+  Projection/HardwareMemRuntime
+  Projection/HardwareMemFixture
+  Projection/HardwareMemWrite
+  Projection/MemSupport
+  Projection/MemProjection
+  Projection/HardwareMemWriteAdmit
+  Projection/ResidualIO
   Projection/Proto/PartialEvaluatorFast
   Projection/Proto/InterpreterVariant
   Projection/Proto/VariantTransport

@@ -3,7 +3,7 @@
 # olean cache, so neither `.olean-dev` nor `.native-dev` -- which hold the
 # binaries of in-flight experiments -- is touched.
 #
-#   OPT=-O2 ROOT=/abs/path bash scripts/build-opt.sh scripts/total_probe.lean
+#   OPT=-O2 ROOT=/abs/path bash scripts/build-opt.sh scripts/total_probe.lean [more.lean ...]
 # OPT may carry several flags, e.g. OPT="-O2 -g -fno-omit-frame-pointer"
 # for a profiling build that keeps -O2 but can be unwound.
 set -uo pipefail
@@ -36,6 +36,21 @@ MODULES=(
   Projection/HardwareInterpreter Projection/HardwareAdequacy
   Projection/ProjectionCorrect Projection/ResidualFragment
   Projection/ProjectedStep Projection/CertLoad Projection/CertLoadAny
+  # The memory route, for the DCERT2 memory-route driver (dcert2_memroute):
+  # the axiom gate first (the memory modules audit their theorems with it),
+  # then the chain in dependency order, Compiler/DirectCheck before the
+  # traversal that uses it.
+  Projection/AxiomGate
+  Projection/MemImage Projection/HardwareMem Projection/HardwareMemSource
+  Projection/HardwareMemOp Projection/HardwareMemSlots Compiler/DirectCheck
+  Projection/HardwareMemTraversal Projection/HardwareMemShapes
+  Projection/HardwareMemNodes Projection/HardwareMemFold Projection/HardwareMemCommit
+  Projection/HardwareMemOutFlop Projection/HardwareMemMain Projection/HardwareMemWidth
+  Projection/HardwareMemAdmit Projection/HardwareMemSlotTy Projection/HardwareMemRuntime
+  Projection/HardwareMemFixture Projection/HardwareMemWrite Projection/MemSupport
+  Projection/MemProjection Projection/HardwareMemWriteAdmit
+  # residual serialization (gen_probe_v2 save:, gen_readiness_v2 load:)
+  Projection/ResidualIO
   Projection/Proto/PartialEvaluatorFast Projection/Proto/PartialEvaluatorSummary
   Projection/Proto/PartialEvaluatorShift
   Projection/Proto/InterpreterVariant
@@ -51,8 +66,13 @@ for m in "${MODULES[@]}"; do
   leanc $OPT -c -o "$NAT/$flat.o" "$NAT/$flat.c" || exit 1
   OBJS+=("$NAT/$flat.o")
 done
-PROBE=${1:?probe source}; pb=$(basename "$PROBE" .lean)
-lean -o "$NAT/$pb.olean" -c "$NAT/$pb.c" "$PROBE" || exit 1
-leanc $OPT -c -o "$NAT/$pb.o" "$NAT/$pb.c" || exit 1
-leanc $OPT -o "$NAT/$pb" "$NAT/$pb.o" "${OBJS[@]}" || exit 1
-echo "built $NAT/$pb at $OPT"
+# One or more probes, all linked against the modules built above (so several
+# drivers cost one module build, not one each).
+[ $# -ge 1 ] || { echo "usage: OPT=.. ROOT=.. build-opt.sh probe.lean [probe.lean ...]" >&2; exit 2; }
+for PROBE in "$@"; do
+  pb=$(basename "$PROBE" .lean)
+  lean -o "$NAT/$pb.olean" -c "$NAT/$pb.c" "$PROBE" || exit 1
+  leanc $OPT -c -o "$NAT/$pb.o" "$NAT/$pb.c" || exit 1
+  leanc $OPT -o "$NAT/$pb" "$NAT/$pb.o" "${OBJS[@]}" || exit 1
+  echo "built $NAT/$pb at $OPT"
+done

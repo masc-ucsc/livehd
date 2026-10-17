@@ -101,6 +101,8 @@ MODULES=(
   Projection/Proto/ShiftBridge
   # The bridge: exact edges + certWfError imply every route's edge premise.
   Projection/EdgePolicy
+  # Residual serialization: a proved codec (decodeProgram_encodeProgram).
+  Projection/ResidualIO
   Projection/Scaling
   # The central audit: `#audit_axioms` FAILS this build on any axiom outside
   # propext/Classical.choice/Quot.sound. The memory-route modules above audit

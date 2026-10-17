@@ -76,7 +76,7 @@ state, input or edge vector / 8 parse/load failure.
 import LeanSemanticPrimitives.Projection.MemProjection
 import LeanSemanticPrimitives.Projection.HardwareMemWriteAdmit
 import LeanSemanticPrimitives.Projection.Proto.RunnerSupport
-import LeanSemanticPrimitives.Compiler.CertIOFacade
+import LeanSemanticPrimitives.Compiler.CertIORoute   -- DCERT2 + DCERT1, routed by magic (Mathlib-free)
 import LeanSemanticPrimitives.Compiler.RunAdmission   -- C3 edges / C4 reset polarity
 
 open Compiler Projection Projection.Hw Projection.HwMem Projection.MemProjection

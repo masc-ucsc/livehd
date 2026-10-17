@@ -47,8 +47,9 @@ requested budget.
 -/
 import LeanSemanticPrimitives.Projection.Proto.RunnerSupport
 import LeanSemanticPrimitives.Projection.CertLoad
-import LeanSemanticPrimitives.Compiler.CertIOFacade
+import LeanSemanticPrimitives.Compiler.CertIORoute   -- DCERT2 + DCERT1, routed by magic (Mathlib-free)
 import LeanSemanticPrimitives.Compiler.RunAdmission   -- C3 edges / C4 reset polarity
+import LeanSemanticPrimitives.Projection.ResidualIO   -- load:<file> (B10)
 
 open Compiler Projection Projection.Hw Projection.Runner Projection.ProtoVar
 
@@ -118,11 +119,37 @@ ops {sr.ops} arities {sr.arities} flopClocks {sr.flopClocks} | ALL {okAll}"
         IO.println "  RESULT: READINESS REFUSED (unsupported)"
         return 2
       IO.println s!"  backend: PROVED mixDriver + hwAPVarT (TOTAL variant), fuel {sf}/{wf}"
-      IO.println "  RE-SPECIALIZING: gen_probe_v2 serializes nothing, so no retained \
-Program exists to load. This is a NEW attempt, not a timing replay."
-      (← IO.getStdout).flush
+      -- optional `load:<file>`: a residual gen_probe_v2 saved (Projection/ResidualIO).
+      -- Its header must name THIS certificate (fnv1a), backend and fuel, or the
+      -- file is refused; `checkResidual` is re-run on the decoded program below.
+      let loadFrom := rest.findSome? (fun t => (t.dropPrefix? "load:").map (·.toString))
+      let mut loaded : Option Program := none
       let t3 ← IO.monoMsNow
-      let res ← IO.lazyPure (fun _ => mixDriver sf wf hwAPVarT [encDesign D])
+      if let some f := loadFrom then
+        let (h, R) ← try ResidualIO.readResidual f
+          catch e => do
+            IO.eprintln s!"  REFUSING the residual file: {e}"
+            IO.println "  RESULT: READINESS REFUSED (residual file)"
+            return (2 : UInt32)
+        let digest := toString (ResidualIO.fnv1a (← IO.FS.readBinFile path))
+        if h.certDigest != digest || h.backend != "hwAPVarT" || h.stepFuel != sf || h.workFuel != wf then
+          IO.eprintln s!"  REFUSING the residual file {f}: its header (cert {h.certDigest}, \
+{h.backend}, fuel {h.stepFuel}/{h.workFuel}) does not match this run (cert {digest}, \
+hwAPVarT, fuel {sf}/{wf})"
+          IO.println "  RESULT: READINESS REFUSED (residual header mismatch)"
+          return 2
+        IO.println s!"  LOADED residual {f} (producer {h.producer}, cert fnv1a {digest}): \
+NO re-specialization; checkResidual is re-run on the decoded program"
+        loaded := some R
+      else
+        IO.println "  RE-SPECIALIZING: no residual file was given (load:<file>), so this \
+is a NEW specialization, not a timing replay."
+      (← IO.getStdout).flush
+      -- the timed phase is a residual LOAD when a file was given, else a specialization
+      let phase := if loaded.isSome then "residual-load" else "specialize"
+      let res ← match loaded with
+        | some R => pure (.ok R)
+        | none   => IO.lazyPure (fun _ => mixDriver sf wf hwAPVarT [encDesign D])
       match res with
       | .error .outOfFuel => do
           let t5 ← IO.monoMsNow
@@ -142,7 +169,7 @@ Program exists to load. This is a NEW attempt, not a timing replay."
           | none => do
               let t5 ← IO.monoMsNow
               IO.eprintln "  checkResidual REJECTED -- failing closed; no execution at a fallback bound"
-              IO.println s!"  ms: load {t1 - t0}  support {t2 - t1}  specialize {t4 - t3}  check {t5 - t4}"
+              IO.println s!"  ms: load {t1 - t0}  support {t2 - t1}  {phase} {t4 - t3}  check {t5 - t4}"
               IO.println "  RESULT: READINESS CHECK REJECTED"
               return 1
           | some bound => do
@@ -172,7 +199,7 @@ Program exists to load. This is a NEW attempt, not a timing replay."
                   states := st :: states
               | _ => bad := true
             let t7 ← IO.monoMsNow
-            IO.println s!"  ms: load {t1 - t0}  support {t2 - t1}  specialize {t4 - t3}  \
+            IO.println s!"  ms: load {t1 - t0}  support {t2 - t1}  {phase} {t4 - t3}  \
 check {t5 - t4}  execute {t7 - t6}"
             IO.println s!"  step outcomes: {String.intercalate "," tags.reverse}"
             IO.println s!"  distinct flop-state vectors {distinct (states.map (·.flops))} \
@@ -186,5 +213,5 @@ of {states.length} (1 means the state never changed)"
 NOT acceptance, NOT a reference comparison, NOT native linking)"
             return 0
   | _ => do
-      IO.eprintln "usage: gen_readiness_v2 <cert.dcert> <stepFuel> <workFuel> [cycles]"
+      IO.eprintln "usage: gen_readiness_v2 <cert.dcert> <stepFuel> <workFuel> [cycles] [load:<residual.fpres>]"
       return 2
