@@ -245,6 +245,10 @@ livehd::placement::Options placement_options(const Options& opts) {
   } catch (const std::invalid_argument& error) {
     throw Lhd_error{"usage", "invalid synth.place.macro parameter", error.what()};
   }
+  out.tech_rc_file = synth_set(opts, "place.tech_rc", "");
+  if (!out.tech_rc_file.empty()) {
+    check_inputs_exist({out.tech_rc_file});
+  }
   const auto rc = synth_set(opts, "place.wire_rc", "");
   if (!rc.empty()) {
     char* end             = nullptr;
@@ -982,6 +986,9 @@ void synth_command(Options& opts, Result& res) {
     placed.graph->get_io()->get_library()->save(net_dir);
     for (const auto& path : place_options.lefs) {
       res.inputs.push_back(path);
+    }
+    if (!place_options.tech_rc_file.empty()) {
+      res.inputs.push_back(place_options.tech_rc_file);
     }
     if (!place_options.floorplan.empty()) {
       res.inputs.push_back(place_options.floorplan);

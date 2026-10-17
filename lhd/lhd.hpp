@@ -852,6 +852,7 @@ inline constexpr Synth_set_option kSynthSetOptions[] = {
 #undef H2D_STRING
     {"place.floorplan", "", Synth_set_option::Kind::file, "optional DEF with contiguous N/FS rows and FIXED pins/macros"},
     {"place.wire_rc", "", Synth_set_option::Kind::file, "wire RC override: ohm/um,fF/um; empty derives it from LEF"},
+    {"place.tech_rc", "", Synth_set_option::Kind::file, "characterized technology RC file: literal set_wire_rc/set_layer_rc data"},
     {"place.iterations",
      "1500",
      Synth_set_option::Kind::integer,

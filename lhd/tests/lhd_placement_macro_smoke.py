@@ -257,7 +257,9 @@ while i<len(base):
    i+=2;continue
  clean.append(base[i]);i+=1
 base=clean
-run('default_three_pass',['--emit-dir',f'def:{root}/staged_def','--set','lhd.incremental=false','--set','synth.place.iterations=40','--set','synth.place.fp.iterations=40','--set','synth.place.io_iterations=10','--set','synth.place.snapshots=true'])
+tech_rc=root/'tech_rc.tcl'
+tech_rc.write_text('set_cmd_units -resistance kohm -capacitance ff\nset_wire_rc -signal -resistance .0323151 -capacitance .173323\n')
+run('default_three_pass',['--set',f'synth.place.tech_rc={tech_rc}','--emit-dir',f'def:{root}/staged_def','--set','lhd.incremental=false','--set','synth.place.iterations=40','--set','synth.place.fp.iterations=40','--set','synth.place.io_iterations=10','--set','synth.place.snapshots=true'])
 p=root/'W/synth/place'
 flow=json.loads((p/'flow.json').read_text())
 fp=json.loads((p/'macro/fp_place.json').read_text())
@@ -266,6 +268,8 @@ assert flow['centroid_snap'] and flow['macro_snap'] and not flow['final_centroid
 assert flow['fixed_macros']==24 and fp['bins']==64 and fp['minimum_equivalent_cells']==3000,fp
 assert len(fp['candidates'])==4 and fp['minimum_copies_per_parent']==4 and fp['refinement_iterations']>0,fp
 assert alignment['snap'] and fp['fixed_targets_enabled'],(alignment,fp)
+rc=json.loads((p/'wire_rc.json').read_text())
+assert rc['source']==str(tech_rc) and abs(rc['horizontal_r']-32.3151)<1e-9 and abs(rc['horizontal_c']-.173323)<1e-9,rc
 pattern=r'^- (\S+) test_sram \+ FIXED \( (-?\d+) (-?\d+) \) (\S+) ;$'
 expected=re.findall(pattern,(p/'macro/fixed.def').read_text(),re.M)
 # Final driver exports have precisely the same locked SRAM frames.

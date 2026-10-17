@@ -21,6 +21,7 @@
 #include "rapidjson/stringbuffer.h"
 #include "rapidjson/writer.h"
 #include "steiner_repair.hpp"
+#include "technology_rc.hpp"
 
 namespace livehd::placement {
 namespace {
@@ -152,26 +153,9 @@ std::set<std::string> protected_buffers(hhds::Graph& graph, const Inventory& cel
   return protected_names;
 }
 std::pair<double, double> wire_rc(const Options& options, const physical::Technology& tech) {
-  if (options.resistance_ohm_um >= 0 && options.capacitance_ff_um >= 0) {
-    return {options.resistance_ohm_um, options.capacitance_ff_um};
-  }
-  double r = 0, c = 0;
-  bool   horizontal = false;
-  for (const auto& name : tech.routing_layers) {
-    const auto& layer = tech.layers.at(name);
-    if (!(layer.width > 0 && layer.resistance > 0 && (layer.capacitance > 0 || layer.edge_cap > 0))) {
-      continue;
-    }
-    if ((!horizontal && layer.direction == "HORIZONTAL") || (horizontal && layer.direction == "VERTICAL")) {
-      r = std::max(r, layer.resistance / layer.width);
-      c = std::max(c, (layer.capacitance * layer.width + 2 * layer.edge_cap) * 1000);
-      if (horizontal) {
-        return {r, c};
-      }
-      horizontal = true;
-    }
-  }
-  throw std::runtime_error("Steiner repair requires characterized horizontal/vertical wire RC");
+  const auto rc
+      = technology_wire_rc(tech, options.liberty, options.tech_rc_file, options.resistance_ohm_um, options.capacitance_ff_um);
+  return {std::max(rc.horizontal_r, rc.vertical_r), std::max(rc.horizontal_c, rc.vertical_c)};
 }
 double wire_limit(const Buffer& b, double r, double c) {
   if (!(r > 0 && c > 0 && b.intrinsic_ps > 0)) {

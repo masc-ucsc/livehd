@@ -15,7 +15,7 @@ namespace livehd::placement {
 struct Options {
   std::vector<std::string>              lefs;
   std::string                           floorplan, output_dir, cache_dir;
-  std::string                           liberty;
+  std::string                           liberty, tech_rc_file;
   std::string                           macro_mode = "none";
   bool                                  fp_place = true, fp_snap_enabled = true;
   int                                   fp_iterations = 1500, fp_min_copies = 4;

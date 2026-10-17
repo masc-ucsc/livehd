@@ -24,6 +24,7 @@
 
 #include "h2d.hpp"
 #include "memory_proxy.hpp"
+#include "technology_rc.hpp"
 #if defined(__APPLE__)
 #include <mach-o/dyld.h>
 #endif
@@ -124,6 +125,9 @@ std::string environment_key(const Options& o, const ph::Technology& tech) {
   }
   if (!o.floorplan.empty()) {
     h = hash_text(file_text(o.floorplan), h);
+  }
+  if (!o.tech_rc_file.empty()) {
+    h = hash_text(file_text(o.tech_rc_file), h);
   }
   h = hash_text(std::format("{}:{}:{}:{}:{}:{}:{}:{}:{}:{}",
                             o.utilization,
@@ -877,30 +881,36 @@ std::shared_ptr<ph::Parasitics> estimate_rc(const View& v, const ph::Technology&
                                             std::map<std::string, std::pair<double, double>>& pin_locations) {
   auto result         = std::make_shared<ph::Parasitics>();
   result->approximate = !options.full;
-  double horizontal_r = options.resistance_ohm_um, horizontal_c = options.capacitance_ff_um;
-  double vertical_r = horizontal_r, vertical_c = horizontal_c;
-  if (horizontal_r < 0 || horizontal_c < 0) {
-    const ph::Layer* horizontal = nullptr;
-    const ph::Layer* vertical   = nullptr;
-    for (const auto& name : tech.routing_layers) {
-      const auto& layer = tech.layers.at(name);
-      if (!(layer.width > 0 && layer.resistance > 0 && (layer.capacitance > 0 || layer.edge_cap > 0))) {
-        continue;
-      }
-      if (!horizontal && layer.direction == "HORIZONTAL") {
-        horizontal = &layer;
-      } else if (horizontal && layer.direction == "VERTICAL") {
-        vertical = &layer;
-        break;
-      }
+  const auto wire
+      = technology_wire_rc(tech, options.liberty, options.tech_rc_file, options.resistance_ohm_um, options.capacitance_ff_um);
+  const double horizontal_r = wire.horizontal_r, horizontal_c = wire.horizontal_c;
+  const double vertical_r = wire.vertical_r, vertical_c = wire.vertical_c;
+  {
+    rapidjson::StringBuffer                    buffer;
+    rapidjson::Writer<rapidjson::StringBuffer> json(buffer);
+    json.StartObject();
+    json.Key("model");
+    json.String("estimated_FLUTE_Steiner_RC");
+    json.Key("source");
+    json.String(wire.source.c_str());
+    json.Key("resistance_units");
+    json.String("ohm_per_um");
+    json.Key("capacitance_units");
+    json.String("fF_per_um");
+    for (auto [key, value] : {
+             std::pair{"horizontal_r", horizontal_r},
+             {"horizontal_c", horizontal_c},
+             {  "vertical_r",   vertical_r},
+             {  "vertical_c",   vertical_c}
+    }) {
+      json.Key(key);
+      json.Double(value);
     }
-    if (!horizontal || !vertical) {
-      throw std::runtime_error("LEF needs horizontal/vertical wire RC; set synth.place.wire_rc=ohm_per_um,fF_per_um");
+    json.EndObject();
+    std::ofstream out(options.output_dir + "/wire_rc.json");
+    if (!(out << buffer.GetString() << '\n')) {
+      throw std::runtime_error("cannot write technology RC provenance");
     }
-    horizontal_r = horizontal->resistance / horizontal->width;
-    horizontal_c = (horizontal->capacitance * horizontal->width + 2 * horizontal->edge_cap) * 1000;
-    vertical_r   = vertical->resistance / vertical->width;
-    vertical_c   = (vertical->capacitance * vertical->width + 2 * vertical->edge_cap) * 1000;
   }
   init_flute();
   uint64_t hash

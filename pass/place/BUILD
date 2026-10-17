@@ -16,6 +16,8 @@ filegroup(
         "steiner_repair.cpp",
         "steiner_repair.hpp",
         "timing_place.cpp",
+        "technology_rc.cpp",
+        "technology_rc.hpp",
     ],
     visibility = ["//visibility:public"],
 )
@@ -56,6 +58,7 @@ cc_library(
         "resynthesize.cpp",
         "steiner_repair.cpp",
         "timing_place.cpp",
+        "technology_rc.cpp",
     ],
     hdrs = [
         "h2d.hpp",
@@ -63,6 +66,7 @@ cc_library(
         "place.hpp",
         "repair.hpp",
         "steiner_repair.hpp",
+        "technology_rc.hpp",
         ":place_salt",
     ],
     copts = COPTS,
@@ -107,6 +111,16 @@ cc_test(
         ":place",
         "//pass/abc:pass_abc",
         "//pass/opentimer:pass_opentimer",
+        "@googletest//:gtest_main",
+    ],
+)
+
+cc_test(
+    name = "technology_rc_test",
+    srcs = ["technology_rc_test.cpp"],
+    copts = COPTS,
+    deps = [
+        ":place",
         "@googletest//:gtest_main",
     ],
 )
