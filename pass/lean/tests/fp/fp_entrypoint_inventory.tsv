@@ -3,9 +3,12 @@
 # a hash of the working tree. master_sha256 is the installed file. An
 # earlier version of this table hashed master and called it the pin, which
 # was wrong for the nine adapted files.
-# THE PIN IS NOT REACHABLE FROM THIS REPOSITORY. 9bb41a09d is the head of branch
-# `projection` in /WORKROOT/projects/livehd-futamura/livehd, and every
-# pinned_sha256 below was read there:
+# The pin IS present in this repository as refs/remotes/origin/projection
+# (9bb41a09d); the LOCAL branch `projection` (aa2f8134a) is an older ref and is
+# NOT the pin.  (An earlier note here said the pin was unreachable; it was
+# not.)  The pinned_sha256 values were read in the FP checkout
+# (livehd-futamura/livehd, branch `projection`) and re-read from here with
+# `git show 9bb41a09d:<path> | sha256sum` gives the same values:
 #   git -C /WORKROOT/projects/livehd-futamura/livehd show 9bb41a09d:<path> | sha256sum
 # All 18 rows were re-verified against that repository: pinned_sha256 matches the
 # object, master_sha256 matches the working tree, and `adapted` matches whether the

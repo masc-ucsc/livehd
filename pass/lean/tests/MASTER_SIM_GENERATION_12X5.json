@@ -3030,7 +3030,7 @@
  "optimization_schedule": "after coverage table runs",
  "environment_record": "HELD OUTSIDE THE REPOSITORY: the machine profile (CPU model, NUMA/cache topology, RAM, kernel, mounts) was moved to a local directory and is deliberately not published",
  "observed_environment_sha256": "ad186ee1424e15afa052bfa000fa50843bd954354d0f10e49256e711632edd8a",
- "provisional": "INCOMPLETE/PROVISIONAL, APPROACH-MAJOR. Legacy 1 YES / 11 NO. Verified compiler 3 YES / 9 BLOCKED. IR-as-semantics 1 YES (PicoRV32, readiness EXECUTED interpreted) / 2 RUNNING / 9 BLOCKED. Translation validation and Futamura follow.",
+ "provisional": "INCOMPLETE/PROVISIONAL, APPROACH-MAJOR. Legacy 1 YES / 11 NO. Verified compiler 3 YES / 9 BLOCKED. IR-as-semantics 3 YES / 9 BLOCKED. Translation validation 3 YES / 9 BLOCKED. Futamura projection 4 YES / 8 BLOCKED. Whole table 14 YES / 11 NO / 35 BLOCKED. Several BLOCKED rows have moved upstream since their cells were written (B01 emits a certificate, B02/B04/B06/B08 compile, B03 emitted); a cell changes only when its row is re-run.",
  "environment_binding": {
   "bazel_wrapper": "/HOMEROOT/.local/bin/bazel (Bazelisk), sha256 prefix 5a408715e932c025",
   "version_selector": ".bazelversion in the cwd-resolved workspace",

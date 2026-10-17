@@ -5967,6 +5967,11 @@ is the law that lets `shifted k₁ (shifted k₂ v)` collapse to
 `shifted (k₁ + k₂) v`; the existing file had `shift_zero`, `shiftGo_eq` and the
 `@[csimp]` `k = 0` fast path, but **no additivity**.
 
+*Correction (2026-10-17): that is wrong.  The additivity laws already existed
+at the pin -- `PVal.shift_add` (`PartialEvaluatorCorrect.lean:1991`) and
+`PEnv.shiftBy_add` (`:2017`) -- so `Proto/ShiftBridge.lean` duplicates them and
+does not advance step 1 of the bridge; the representation map is not started.*
+
 It claims nothing further. It is not a representation function, it does not
 relate `ProtoShift` to `PartialEvaluator`, and it says nothing about the
 specializer being correct. Steps 2 to 5 remain open, and until step 5 exists the

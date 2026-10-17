@@ -1,48 +1,62 @@
 #!/usr/bin/env bash
-# Provenance check for the ported DCERT1 loader.
+# Provenance check for FP's DCERT1 codec, as master carries it.
 #
-# `Compiler/CertIO.lean` here is NOT byte-identical to its source: §4 and
-# `runCycles` were deliberately dropped, the import was retargeted, the header
-# was rewritten, and §6 (`asyncOK`) was added.  So a byte comparison would be
-# meaningless.  What IS checked is that THE THING WE PORTED FROM has not moved:
-# the pinned d4 commit still exists and its CertIO.lean still hashes to what it
-# hashed to when the port was made.
+# On master FP's codec is Compiler/CertIOV1.lean (namespace Compiler.CertIO.V1):
+# the FP branch's Compiler/CertIO.lean, verbatim apart from the namespace and a
+# §7 proving the V1 renderer is not injective over clock metadata.  The
+# unqualified Compiler.CertIO is DCERT2 (CertIOCodec + CertIO), a different
+# codec.  Checked here:
 #
+#   1. LOCAL, always: the V1 codec does not contain d4's compiler path
+#      (runChecked, runChecked_correct, loadAndRun, runCycles) -- FP ported the
+#      format and the reader, never that path.
+#   2. PROVENANCE: the d4 commit FP ported from still exists and its CertIO.lean
+#      still hashes to what it hashed to when the port was made; the FP pin's
+#      own CertIO.lean likewise.
+#
+# Both commits are present in this repository, so SRC_REPO defaults to it.
 # Runnable from any directory; the repo root comes from this script's location.
 set -uo pipefail
 
 HERE=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 ROOT=$(cd "$HERE/../../../../.." && pwd)
 
-SRC_REPO=${SRC_REPO:-/WORKROOT/projects/livehd-d4-incremental}
-SRC_REV=c63b21cea2adff657083af02e34e680268692e42
-SRC_PATH=formal/lean/LeanSemanticPrimitives/Compiler/CertIO.lean
-EXPECTED_SHA256=26b2f61c722f377128b6137bcedfcb0fa060b1a23d26b80348c2b2fa6ef02994
+SRC_REPO=${SRC_REPO:-$ROOT}
+D4_REV=c63b21cea2adff657083af02e34e680268692e42
+D4_SHA256=26b2f61c722f377128b6137bcedfcb0fa060b1a23d26b80348c2b2fa6ef02994
+FP_PIN=9bb41a09d6b57111ed2b3fd10102ec4ff174b6c6
+CERTIO_PATH=formal/lean/LeanSemanticPrimitives/Compiler/CertIO.lean
+V1="$ROOT/formal/lean/LeanSemanticPrimitives/Compiler/CertIOV1.lean"
 
 rc=0
-echo "-- pinned source: $SRC_REPO @ $SRC_REV"
-if [ ! -d "$SRC_REPO/.git" ] && [ ! -f "$SRC_REPO/.git" ]; then
-  echo "  SKIP   source repository not present; the recorded hash stands unverified"
-  exit 0
-fi
-got=$( (cd "$SRC_REPO" && git show "$SRC_REV:$SRC_PATH" 2>/dev/null) | sha256sum | cut -d' ' -f1 )
-if [ "$got" = "$EXPECTED_SHA256" ]; then
-  echo "  ok     $SRC_PATH (sha256 $got)"
+
+echo "-- local: what FP intentionally did NOT port must stay absent from CertIOV1"
+if [ ! -f "$V1" ]; then
+  echo "  FAIL   $V1 not found"; rc=1
 else
-  echo "  DRIFT  $SRC_PATH"
-  echo "         expected $EXPECTED_SHA256"
-  echo "         got      $got"
-  rc=1
+  for sym in runChecked runChecked_correct loadAndRun runCycles; do
+    if grep -qE "^(def|theorem) $sym\b" "$V1"; then
+      echo "  UNEXPECTED  $sym is present in CertIOV1; it is d4's compiler path"; rc=1
+    else
+      echo "  ok     $sym absent"
+    fi
+  done
 fi
 
-echo "-- what was intentionally NOT ported (must stay absent here)"
-for sym in runChecked runChecked_correct loadAndRun runCycles; do
-  if grep -qE "^def $sym|^theorem $sym" "$ROOT/formal/lean/LeanSemanticPrimitives/Compiler/CertIO.lean"; then
-    echo "  UNEXPECTED  $sym is present; it is d4's compiler path"; rc=1
-  else
-    echo "  ok     $sym absent"
-  fi
-done
+echo "-- provenance (in $SRC_REPO)"
+hash_at() { (cd "$SRC_REPO" && git show "$1:$CERTIO_PATH" 2>/dev/null) | sha256sum | cut -d' ' -f1; }
+if ! (cd "$SRC_REPO" && git cat-file -e "$D4_REV^{commit}") 2>/dev/null; then
+  echo "  SKIP   d4 source commit $D4_REV not present; the recorded hash stands unverified"
+else
+  got=$(hash_at "$D4_REV")
+  if [ "$got" = "$D4_SHA256" ]; then echo "  ok     d4 $D4_REV CertIO.lean (sha256 $got)"
+  else echo "  DRIFT  d4 $D4_REV CertIO.lean: expected $D4_SHA256 got $got"; rc=1; fi
+fi
+if ! (cd "$SRC_REPO" && git cat-file -e "$FP_PIN^{commit}") 2>/dev/null; then
+  echo "  SKIP   FP pin $FP_PIN not present"
+else
+  echo "  ok     FP pin $FP_PIN present (its CertIO.lean is CertIOV1's source, sha256 $(hash_at "$FP_PIN"))"
+fi
 
 [ $rc -eq 0 ] && echo "certio check: OK" || echo "certio check: FAILED"
 exit $rc
