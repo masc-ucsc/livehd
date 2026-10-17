@@ -25,10 +25,19 @@ protected:
   Options                      options;
   unsigned                     serial = 0;
   void                         SetUp() override {
-    options.lefs       = {"inou/lefdef/tests/data/sky130hd.tlef", "inou/lefdef/tests/data/sky130hd.lef"};
-    options.liberty    = "inou/lefdef/tests/data/sky130hd.lib";
-    options.iterations = 10;
-    options.bins       = 8;
+    // Repair fixtures use a controlled plain frame, independent of the
+    // production floorplan/macro pipeline and its density policy.
+    options.fp_place = options.final_cells = options.macro_snap = false;
+    options.scale_macro_density = options.exact_macro_density = options.adaptive_density = options.routability = false;
+    options.macro_overlap_weight = options.macro_jitter = 0;
+    options.io_iterations = options.schedule_iterations = 0;
+    options.halo_x = options.halo_y = 0;
+    options.utilization             = .5;
+    options.density                 = .8;
+    options.lefs                    = {"inou/lefdef/tests/data/sky130hd.tlef", "inou/lefdef/tests/data/sky130hd.lef"};
+    options.liberty                 = "inou/lefdef/tests/data/sky130hd.lib";
+    options.iterations              = 10;
+    options.bins                    = 8;
     options.output_dir
         = std::string(std::getenv("TEST_TMPDIR")) + "/" + ::testing::UnitTest::GetInstance()->current_test_info()->name();
     const auto io = source.create_io("top");
@@ -110,9 +119,11 @@ protected:
   }
 };
 TEST_F(Buffer_repair, SingleCellLegalizationKeepsEveryExistingNeighborFixed) {
-  options.utilization = 0.25;
-  auto b              = gate("sky130_fd_sc_hd__buf_1", "b", graph->get_input_pin("a"));
-  auto p              = gate("sky130_fd_sc_hd__inv_1", "invert", b);
+  // The production stage selection must also preserve an explicit ECO frame.
+  options.fp_place = options.final_cells = true;
+  options.utilization                    = 0.25;
+  auto b                                 = gate("sky130_fd_sc_hd__buf_1", "b", graph->get_input_pin("a"));
+  auto p                                 = gate("sky130_fd_sc_hd__inv_1", "invert", b);
   graph->get_output_pin("y").connect_driver(p);
   const auto before = place(*graph, flat, options);
   auto       added  = gate("sky130_fd_sc_hd__buf_1", "added", p);

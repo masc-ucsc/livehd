@@ -124,26 +124,31 @@ livehd::placement::Options placement_options(const Options& opts) {
   if (out.cohesion < 0) {
     throw Lhd_error{"usage", "synth.place.cohesion must be nonnegative", ""};
   }
-  out.utilization          = number("place.utilization", "0.5");
-  out.aspect               = number("place.aspect", "1");
-  out.density              = number("place.density", "0.8");
-  out.iterations           = integer("place.iterations", "500");
-  out.bins                 = integer("place.bins", "32");
-  out.scale_macro_density  = truthy(synth_set(opts, "place.scale_macro_density", "false"));
-  out.automatic_bins       = truthy(synth_set(opts, "place.auto_bins", "false"));
-  out.exact_macro_density  = truthy(synth_set(opts, "place.exact_macro_density", "false"));
-  out.adaptive_density     = truthy(synth_set(opts, "place.adaptive_density", "false"));
-  out.routability          = truthy(synth_set(opts, "place.routability", "false"));
-  out.macro_overlap_weight = number("place.macro_overlap", "0");
-  out.macro_jitter         = number("place.macro_jitter", "0");
-  out.io_iterations        = integer("place.io_iterations", "0");
-  out.schedule_iterations  = integer("place.schedule_iterations", "0");
+  out.utilization  = number("place.utilization", "0.30");
+  out.aspect       = number("place.aspect", "1");
+  out.density      = number("place.density", "0.5");
+  out.iterations   = integer("place.iterations", "1500");
+  out.bins         = integer("place.bins", "64");
+  out.filler_width = number("place.filler_width", "0");
+  if (out.filler_width < 0) {
+    throw Lhd_error{"usage", "synth.place.filler_width must be nonnegative", ""};
+  }
+  out.scale_macro_density             = truthy(synth_set(opts, "place.scale_macro_density", "true"));
+  out.automatic_bins                  = truthy(synth_set(opts, "place.auto_bins", "false"));
+  out.exact_macro_density             = truthy(synth_set(opts, "place.exact_macro_density", "true"));
+  out.adaptive_density                = truthy(synth_set(opts, "place.adaptive_density", "true"));
+  out.routability                     = truthy(synth_set(opts, "place.routability", "true"));
+  out.routability_charge_compensation = truthy(synth_set(opts, "place.routability_charge_compensation", "true"));
+  out.macro_overlap_weight            = number("place.macro_overlap", "50");
+  out.macro_jitter                    = number("place.macro_jitter", "0.01");
+  out.io_iterations                   = integer("place.io_iterations", "500");
+  out.schedule_iterations             = integer("place.schedule_iterations", "500");
   if (out.macro_overlap_weight < 0 || out.macro_jitter < 0 || out.macro_jitter > .1 || out.schedule_iterations < 0
       || out.io_iterations < 0) {
     throw Lhd_error{"usage", "invalid synth.place repulsion controls", ""};
   }
   out.threads         = integer("place.threads", "1");
-  const auto halo     = synth_set(opts, "place.halo", "0");
+  const auto halo     = synth_set(opts, "place.halo", "5");
   char*      halo_end = nullptr;
   out.halo_x          = std::strtod(halo.c_str(), &halo_end);
   if (halo_end == halo.c_str()) {
@@ -160,9 +165,57 @@ livehd::placement::Options placement_options(const Options& opts) {
   if (*halo_end != '\0' || !std::isfinite(out.halo_x) || !std::isfinite(out.halo_y) || out.halo_x < 0 || out.halo_y < 0) {
     throw Lhd_error{"usage", "invalid synth.place.halo", "expected nonnegative microns: H or X,Y"};
   }
+  out.final_cells                 = truthy(synth_set(opts, "place.final", "true"));
+  out.final_iterations            = integer("place.final.iterations", "0");
+  out.fp_place                    = truthy(synth_set(opts, "place.fp", "true"));
+  out.fp_snap_enabled             = truthy(synth_set(opts, "place.fp.snap", "true"));
+  out.fp_iterations               = integer("place.fp.iterations", "1500");
+  out.fp_minimum                  = number("place.fp.minimum", "3000");
+  out.fp_min_copies               = integer("place.fp.min_copies", "4");
+  out.fp_attraction               = number("place.fp.attraction", "0.25");
+  out.fp_repulsion                = number("place.fp.repulsion", "5");
+  out.fp_anchor                   = number("place.fp.anchor", "0.25");
+  out.fp_snap.alignment_tolerance = number("place.fp.alignment", "1");
+  out.fp_snap.spacing_tolerance   = number("place.fp.spacing_tolerance", "0.25");
+  out.fp_snap.spacing_penalty     = number("place.fp.spacing_penalty", "0.02");
+  out.fp_snap.symmetry_tolerance  = number("place.fp.symmetry", "1");
+  out.fp_snap.max_displacement    = number("place.fp.max_displacement", "1");
+  if (out.fp_min_copies < 2) {
+    throw Lhd_error{"usage", "synth.place.fp.min_copies must be at least 2", "copies are counted separately per hierarchy parent"};
+  }
+  if (out.fp_minimum < 0 || out.fp_attraction <= 0 || out.fp_repulsion <= 0 || out.fp_anchor < 0
+      || out.fp_snap.alignment_tolerance < 0 || out.fp_snap.spacing_tolerance < 0 || out.fp_snap.spacing_penalty < 0
+      || out.fp_snap.symmetry_tolerance < 0 || out.fp_snap.max_displacement < 0) {
+    throw Lhd_error{"usage",
+                    "invalid synth.place.fp controls",
+                    "expected nonnegative values; attraction/repulsion must be positive"};
+  }
   out.macro_mode = synth_set(opts, "place.macro", "none");
-  if (out.macro_mode != "none" && out.macro_mode != "h2d") {
-    throw Lhd_error{"usage", "synth.place.macro must be none or h2d", ""};
+  if (out.fp_place && out.macro_mode == "h2d") {
+    throw Lhd_error{"usage", "synth.place.fp requires the native plain placer", "use synth.place.macro=none"};
+  }
+  if (out.macro_mode != "none" && out.macro_mode != "h2d" && out.macro_mode != "r8h2" && out.macro_mode != "r8h3") {
+    throw Lhd_error{"usage", "synth.place.macro must be none, h2d, r8h2 or r8h3", ""};
+  }
+  out.macro_align_weight        = number("place.macro.align_weight", "0");
+  out.macro_align_sigma         = number("place.macro.align_sigma", "0");
+  out.macro_align_overlap_boost = number("place.macro.align_overlap_boost", "0");
+  out.macro_align_start         = integer("place.macro.align_start", "100");
+  out.macro_align_full          = integer("place.macro.align_full", "500");
+  out.macro_align_nearest       = truthy(synth_set(opts, "place.macro.align_nearest", "false"));
+  out.macro_snap                = truthy(synth_set(opts, "place.macro.snap", out.full ? "true" : "false"));
+  out.macro_snap_tolerance      = number("place.macro.snap_tolerance", "0.25");
+  out.macro_snap_weight         = integer("place.macro.snap_weight", "100");
+  if (out.macro_align_weight < 0 || out.macro_align_sigma < 0 || out.macro_align_overlap_boost < 0
+      || (out.macro_align_weight > 0 && out.macro_align_start >= out.macro_align_full) || out.macro_snap_tolerance < 0
+      || out.macro_snap_weight == 0) {
+    throw Lhd_error{"usage", "invalid synth.place.macro alignment/snap controls", "alignment requires start < full"};
+  }
+  if ((out.macro_align_weight > 0 || out.macro_snap) && out.macro_mode == "h2d") {
+    throw Lhd_error{"usage", "macro alignment/snap requires synth.place.macro=none, r8h2 or r8h3", ""};
+  }
+  if (out.macro_snap && !out.full) {
+    throw Lhd_error{"usage", "macro snapping requires full placement", "use synth.place.mode=full"};
   }
   if (out.macro_mode == "h2d" && !out.full) {
     throw Lhd_error{"usage", "H2D requires synth.place.mode=full", "macro realization includes legal cell placement"};

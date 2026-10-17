@@ -18,13 +18,32 @@
 #include "rapidjson/document.h"
 namespace livehd::placement {
 namespace gu = graph_util;
+namespace {
+// Fixtures for the independent plain/H2D/ECO paths pin their original controls.
+Options plain_options() {
+  Options o;
+  o.fp_place    = false;
+  o.final_cells = false;
+  o.macro_snap  = false;
+  o.utilization = .5;
+  o.density     = .8;
+  o.halo_x = o.halo_y   = 0;
+  o.iterations          = 500;
+  o.bins                = 32;
+  o.scale_macro_density = o.exact_macro_density = o.adaptive_density = o.routability = false;
+  o.macro_overlap_weight = o.macro_jitter = 0;
+  o.schedule_iterations = o.io_iterations = 0;
+  return o;
+}
+}  // namespace
+
 TEST(Placement, RepulsionControlsRejectUnsupportedH2dCombination) {
   hhds::GraphLibrary source, scratch;
-  auto               io    = source.create_io("repulsion_validation");
-  auto               graph = io->create_graph();
-  Options            options;
-  options.macro_mode     = "h2d";
-  options.automatic_bins = true;
+  auto               io      = source.create_io("repulsion_validation");
+  auto               graph   = io->create_graph();
+  auto               options = plain_options();
+  options.macro_mode         = "h2d";
+  options.automatic_bins     = true;
   EXPECT_THROW((void)place(*graph, scratch, options), std::invalid_argument);
 }
 TEST(Placement, AlwaysTransparentLatchAliasesPreservePackedInputsAndSource) {
@@ -70,7 +89,7 @@ TEST(Placement, AlwaysTransparentLatchAliasesPreservePackedInputsAndSource) {
     auto y = cell.create_driver_pin("Y");
     gu::set_bits(y, 1);
     graph->get_output_pin("y").connect_driver(y);
-    Options options;
+    auto options       = plain_options();
     options.lefs       = {"inou/lefdef/tests/data/sky130hd.tlef", "inou/lefdef/tests/data/sky130hd.lef"};
     options.output_dir = std::string(std::getenv("TEST_TMPDIR")) + "/transparent_" + std::to_string(mode);
     options.iterations = 0;
@@ -139,7 +158,7 @@ TEST(Placement, MappedBusGraphLegalityRcAndReuse) {
   auto y = b.create_driver_pin("Y");
   gu::set_bits(y, 1);
   graph->get_output_pin("y").connect_driver(y);
-  Options options;
+  auto options       = plain_options();
   options.lefs       = {"inou/lefdef/tests/data/sky130hd.tlef", "inou/lefdef/tests/data/sky130hd.lef"};
   const auto root    = std::filesystem::path(std::getenv("TEST_TMPDIR"));
   options.output_dir = (root / "place").string();
@@ -150,6 +169,18 @@ TEST(Placement, MappedBusGraphLegalityRcAndReuse) {
   const auto         placed = place(*graph, first, options);
   EXPECT_EQ(placed.floorplan.components.size(), 2);
   EXPECT_EQ(placed.floorplan.terminals.size(), 3);
+  {
+    auto explicit_fillers = options;
+    explicit_fillers.cache_dir.clear();
+    explicit_fillers.output_dir   = (root / "explicit_fillers").string();
+    explicit_fillers.filler_width = 4.6;
+    hhds::GraphLibrary check;
+    const auto         filled = place(*graph, check, explicit_fillers);
+    EXPECT_NO_THROW(check_legality(livehd::physical::read_lef(options.lefs), filled.floorplan));
+    explicit_fillers.filler_width = -1;
+    hhds::GraphLibrary rejected;
+    EXPECT_THROW(place(*graph, rejected, explicit_fillers), std::invalid_argument);
+  }
   {
     auto core_only   = options;
     core_only.halo_x = core_only.halo_y = 1000;
@@ -287,7 +318,7 @@ TEST(Placement, SignedWiringExtendsMsb) {
   auto z = n.create_driver_pin("Y");
   gu::set_bits(z, 1);
   graph->get_output_pin("z").connect_driver(z);
-  Options options;
+  auto options       = plain_options();
   options.lefs       = {"inou/lefdef/tests/data/sky130hd.tlef", "inou/lefdef/tests/data/sky130hd.lef"};
   options.output_dir = (std::filesystem::path(std::getenv("TEST_TMPDIR")) / "signed").string();
   options.iterations = 30;
@@ -381,7 +412,7 @@ static Options tie_options(const std::string& label, const std::vector<Tie_fixtu
   }
   lib << "}\n";
   lef << "END LIBRARY\n";
-  Options options;
+  auto options       = plain_options();
   options.lefs       = {"inou/lefdef/tests/data/sky130hd.tlef", "inou/lefdef/tests/data/sky130hd.lef", (dir / "ties.lef").string()};
   options.liberty    = (dir / "ties.lib").string();
   options.output_dir = (dir / "out").string();
@@ -569,13 +600,13 @@ TEST(Placement, ConstantDriverWithoutSymmetryXAvoidsFlippedRows) {
 }
 TEST(Placement, ReplaceReusesTieCellForConstantOutput) {
   hhds::GraphLibrary source;
-  auto               graph = tie_graph(source);
-  Options            options;
-  options.liberty    = "inou/lefdef/tests/data/sky130hd.lib";
-  options.lefs       = {"inou/lefdef/tests/data/sky130hd.tlef", "inou/lefdef/tests/data/sky130hd.lef"};
-  options.output_dir = std::string(std::getenv("TEST_TMPDIR")) + "/tie";
-  options.iterations = 20;
-  options.bins       = 8;
+  auto               graph   = tie_graph(source);
+  auto               options = plain_options();
+  options.liberty            = "inou/lefdef/tests/data/sky130hd.lib";
+  options.lefs               = {"inou/lefdef/tests/data/sky130hd.tlef", "inou/lefdef/tests/data/sky130hd.lef"};
+  options.output_dir         = std::string(std::getenv("TEST_TMPDIR")) + "/tie";
+  options.iterations         = 20;
+  options.bins               = 8;
   hhds::GraphLibrary first;
   const auto         placed = place(*graph, first, options);
   // Timing/repair/resynth rounds re-place the placed graph, which already
@@ -613,13 +644,13 @@ TEST(Placement, ReplaceReusesTieCellForConstantOutput) {
 }
 TEST(Placement, PreviousFrameKeepsIoPositionsAndSlotsNewOnes) {
   hhds::GraphLibrary source;
-  auto               graph = tie_graph(source);
-  Options            options;
-  options.liberty    = "inou/lefdef/tests/data/sky130hd.lib";
-  options.lefs       = {"inou/lefdef/tests/data/sky130hd.tlef", "inou/lefdef/tests/data/sky130hd.lef"};
-  options.output_dir = std::string(std::getenv("TEST_TMPDIR")) + "/io_frame";
-  options.iterations = 20;
-  options.bins       = 8;
+  auto               graph   = tie_graph(source);
+  auto               options = plain_options();
+  options.liberty            = "inou/lefdef/tests/data/sky130hd.lib";
+  options.lefs               = {"inou/lefdef/tests/data/sky130hd.tlef", "inou/lefdef/tests/data/sky130hd.lef"};
+  options.output_dir         = std::string(std::getenv("TEST_TMPDIR")) + "/io_frame";
+  options.iterations         = 20;
+  options.bins               = 8;
   hhds::GraphLibrary first;
   const auto         placed = place(*graph, first, options);
   // Previous frame (as a resynth trial passes it): swap two PLACED pins and drop
@@ -710,7 +741,7 @@ END LIBRARY
     gu::set_bits(signal, 1);
   }
   graph->get_output_pin("y").connect_driver(signal);
-  Options options;
+  auto options = plain_options();
   options.lefs = {"inou/lefdef/tests/data/sky130hd.tlef", "inou/lefdef/tests/data/sky130hd.lef", (dir / "macros.lef").string()};
   options.output_dir  = (dir / "out").string();
   options.cache_dir   = (dir / "cache").string();
@@ -784,7 +815,7 @@ END LIBRARY
     gu::set_bits(signal, 1);
   }
   graph->get_output_pin("y").connect_driver(signal);
-  Options o;
+  auto o           = plain_options();
   o.lefs           = {"inou/lefdef/tests/data/sky130hd.tlef", "inou/lefdef/tests/data/sky130hd.lef", (dir / "ram.lef").string()};
   o.output_dir     = (dir / "out").string();
   o.cache_dir      = (dir / "cache").string();
@@ -917,7 +948,7 @@ TEST(Placement, IncrementalWindowKeepsDistantBlocksAndSeedsNewCells) {
     graph->get_output_pin("y" + std::to_string(i)).connect_driver(out);
     outputs.push_back(out);
   }
-  Options options;
+  auto options       = plain_options();
   options.lefs       = {"inou/lefdef/tests/data/sky130hd.tlef", "inou/lefdef/tests/data/sky130hd.lef"};
   options.output_dir = std::string(std::getenv("TEST_TMPDIR")) + "/eco";
   options.cache_dir  = options.output_dir + "/cache";
@@ -996,7 +1027,7 @@ TEST(Placement, IncrementalNewMemoryUnlocksCachedCellsUnderItsProxy) {
     gu::set_bits(chain, 1);
   }
   graph->get_output_pin("y").connect_driver(chain);
-  Options options;
+  auto options       = plain_options();
   options.lefs       = {"inou/lefdef/tests/data/sky130hd.tlef", "inou/lefdef/tests/data/sky130hd.lef"};
   options.liberty    = "inou/lefdef/tests/data/sky130hd.lib";
   options.output_dir = std::string(std::getenv("TEST_TMPDIR")) + "/eco_mem";
@@ -1057,7 +1088,7 @@ TEST(Placement, HighFanoutRcFallbackRemainsATreeAndIsMarkedApproximate) {
       graph->get_output_pin("y").connect_driver(out);
     }
   }
-  Options options;
+  auto options       = plain_options();
   options.lefs       = {"inou/lefdef/tests/data/sky130hd.tlef", "inou/lefdef/tests/data/sky130hd.lef"};
   options.iterations = 0;
   options.bins       = 8;
@@ -1114,7 +1145,7 @@ TEST(Placement, ThreePortMemorySquareGeometryAndClockBoundaryTiming) {
   auto r = mem.create_driver_pin(2);
   gu::set_bits(r, 4);
   graph->get_output_pin("z").connect_driver(r);
-  Options options;
+  auto options       = plain_options();
   options.lefs       = {"inou/lefdef/tests/data/sky130hd.tlef", "inou/lefdef/tests/data/sky130hd.lef"};
   options.liberty    = "inou/lefdef/tests/data/sky130hd.lib";
   options.output_dir = std::string(std::getenv("TEST_TMPDIR")) + "/memory";
@@ -1231,7 +1262,7 @@ TEST(Placement, MemoryReadWiderThanPortExtends) {
   gu::set_bits(r, 4);
   gu::set_sign(r);
   graph->get_output_pin("z").connect_driver(r);
-  Options options;
+  auto options       = plain_options();
   options.lefs       = {"inou/lefdef/tests/data/sky130hd.tlef", "inou/lefdef/tests/data/sky130hd.lef"};
   options.liberty    = "inou/lefdef/tests/data/sky130hd.lib";
   options.output_dir = std::string(std::getenv("TEST_TMPDIR")) + "/wide_read";
@@ -1320,7 +1351,7 @@ END LIBRARY
     gu::set_bits(signal, 1);
   }
   graph->get_output_pin("z").connect_driver(signal);
-  Options options;
+  auto options        = plain_options();
   options.lefs        = {"inou/lefdef/tests/data/sky130hd.tlef", "inou/lefdef/tests/data/sky130hd.lef", (dir / "ram.lef").string()};
   options.liberty     = "inou/lefdef/tests/data/sky130hd.lib";
   options.output_dir  = (dir / "out").string();
@@ -1373,6 +1404,42 @@ END LIBRARY
   report.Parse(read("macro_topology.json").c_str());
   ASSERT_FALSE(report.HasParseError());
   EXPECT_FALSE(report["cache_hit"].GetBool());
+  // The plain flow keeps each hierarchy instance's color separate even when
+  // both instances use the same SRAM master and local color number.
+  for (auto node : body->body().nodes()) {
+    if (gu::type_op_of(node) == Ntype_op::Sub) {
+      node.attr(livehd::attrs::synth_color_group).set(std::string("bank:color:1"));
+    }
+  }
+  options.macro_mode         = "none";
+  options.cache_dir          = (dir / "plain_cache").string();
+  options.macro_align_weight = 25;
+  options.macro_align_sigma  = .25;
+  options.macro_align_start  = 0;
+  options.macro_align_full   = 20;
+  options.macro_snap         = true;
+  options.iterations         = 40;
+  options.io_iterations      = 10;
+  hhds::GraphLibrary aligned_flat;
+  const auto         aligned = place(*graph, aligned_flat, options);
+  EXPECT_NO_THROW(check_legality(tech, aligned.floorplan, 1, 1));
+  report.Parse(read("alignment.json").c_str());
+  ASSERT_FALSE(report.HasParseError());
+  ASSERT_EQ(report["macros"].Size(), 4);
+  std::map<int, unsigned>    classes;
+  std::map<int, std::string> colors;
+  for (const auto& macro : report["macros"].GetArray()) {
+    const int id = macro["class"].GetInt();
+    ASSERT_GE(id, 0);
+    ++classes[id];
+    colors[id] = macro["color"].GetString();
+  }
+  ASSERT_EQ(classes.size(), 2);
+  for (const auto& [id, count] : classes) {
+    (void)id;
+    EXPECT_EQ(count, 2);
+  }
+  EXPECT_NE(colors.begin()->second, colors.rbegin()->second);
 }
 
 }  // namespace livehd::placement
