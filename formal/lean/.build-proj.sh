@@ -49,6 +49,10 @@ MODULES=(
   Projection/SurfaceSemantics
   Projection/BTA
   Projection/PartialEvaluator
+  # S3 (deferred shifting) and its proof; the @[csimp] lemma must be in scope
+  # wherever mixDriver is compiled, so this precedes HardwareInterpreter.
+  Projection/PartialEvaluatorS3
+  Projection/S3Correct
   Projection/MixProgram
   Projection/Demo
   Projection/Gate0

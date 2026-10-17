@@ -62,6 +62,9 @@
 
 import LeanSemanticPrimitives.Projection.OperatorBridge
 import LeanSemanticPrimitives.Projection.PartialEvaluator
+-- `@[csimp] mixDriver_eq_S3`: every mixDriver call compiled from here on (this
+-- file's projectDesign, the memory route, the drivers) runs S3.
+import LeanSemanticPrimitives.Projection.S3Correct
 import LeanSemanticPrimitives.Projection.BTA
 import LeanSemanticPrimitives.Projection.Surface
 

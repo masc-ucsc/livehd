@@ -30,6 +30,7 @@ MODULES=(
   Projection/ObjectLanguage Projection/ObjectLanguageSemantics
   Projection/BindingTime Projection/Encoding Projection/Surface
   Projection/SurfaceSemantics Projection/BTA Projection/PartialEvaluator
+  Projection/PartialEvaluatorS3 Projection/S3Correct
   Projection/MixProgram Projection/PartialEvaluatorCorrect
   Projection/SecondProjection Projection/SimulatorContract
   Projection/DesignEncoding Projection/RuntimeEncoding Projection/OperatorBridge

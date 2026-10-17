@@ -32,6 +32,8 @@ MODULES=(
   Projection/SurfaceSemantics
   Projection/BTA
   Projection/PartialEvaluator
+  Projection/PartialEvaluatorS3
+  Projection/S3Correct
   Projection/MixProgram
   Projection/PartialEvaluatorCorrect
   Projection/SecondProjection

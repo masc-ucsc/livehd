@@ -60,6 +60,14 @@ namespace Projection
 -- native specialization run even though no other theorem mentions them.
 #audit_axioms PVal.shift_eq_shiftFast
 #audit_axioms PEnv.shiftBy_eq_shiftByFast
+-- ... and S3: the compiled mixDriver is S3.mixDriver by this equality.
+#audit_axioms S3Correct.mixDriver_eq_S3
+#audit_axioms S3Correct.mixDriver_eq
+#audit_axioms S3Correct.mixTerm_sim
+#audit_axioms S3Correct.mixPArgs_sim
+#audit_axioms S3Correct.nthSummaryEnv_rep
+#audit_axioms S3Correct.prepare_rep
+#audit_axioms S3Correct.toCodeAt_rep
 #audit_axioms Compat_shift
 #audit_axioms Compat_fields_dyn
 #audit_axioms Compat_fields_stat
