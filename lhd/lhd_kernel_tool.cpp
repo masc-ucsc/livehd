@@ -282,7 +282,14 @@ bool tool_match_all(const Tool_record& r, const std::vector<Tool_filter>& filter
   return true;
 }
 
-std::string tool_endpoint_name(const hhds::Pin_class& pin) {
+// A SINK endpoint is always spelled `<node>.p<port_id>`.
+//
+// `pin_name_of` on a sink pin returns the DRIVER's name, so spelling both ends
+// the same way printed the driver twice and lost which operand position the
+// edge actually lands on -- the one thing an edge record exists to say. An
+// operand-order bug then reads as a correct dump. The driver side keeps the
+// name when it has one, because there the name IS the pin's own.
+std::string tool_endpoint_name(const hhds::Pin_class& pin, bool is_sink) {
   namespace gu = livehd::graph_util;
   if (pin.is_const()) {
     return gu::const_of(pin).to_pyrope();
@@ -291,7 +298,10 @@ std::string tool_endpoint_name(const hhds::Pin_class& pin) {
     return std::format("${}", pin.get_pin_name());
   }
   auto node = pin.get_master_node();
-  auto pn   = gu::pin_name_of(pin);
+  if (is_sink) {
+    return std::format("{}.p{}", gu::debug_name(node), pin.get_port_id());
+  }
+  auto pn = gu::pin_name_of(pin);
   if (pn.empty()) {
     return std::format("{}.p{}", gu::debug_name(node), pin.get_port_id());
   }
@@ -331,6 +341,109 @@ std::string tool_pin_label(const hhds::Pin_class& pin) {
   return pn.empty() ? std::format("p{}", pin.get_port_id()) : std::string{pn};
 }
 
+// Width of a constant driver, as `tool cat` states it.
+//
+// Mirrors pass.lean's `pin_width` / `intrinsic_const_width`: a declared width
+// wins; an unsized constant takes its width from its value, and a negative
+// literal counts its sign bit.
+//
+// The canonical pair is `intrinsic_const_width` / `minimal_unsigned_const_width`
+// in `pass/lean/graph_access.hpp`. They are NOT called here: that header comes
+// from `//pass/lean:lean_graph_scan`, which `//lhd:lhd_lib` reaches only
+// transitively through `:pass_lean`, so including it would depend on lax header
+// visibility. This is therefore a deliberate second copy, kept line-for-line
+// equivalent to those two functions -- `lhd/tests/lhd_tool_test.sh` pins the
+// agreement on the cases that distinguish them.
+//
+// "?" means the dump cannot state the width exactly: unknown bits, or a
+// declared width too narrow for its own value (which pass.lean calls "a lie"
+// and refuses rather than guess). A consumer MUST fail closed on "?".
+std::string tool_const_width_str(const hhds::Pin_class& pin) {
+  namespace gu = livehd::graph_util;
+  auto v = gu::const_of(pin);
+  if (v.has_unknowns()) {
+    return "?";
+  }
+  auto minimal_unsigned = [](int64_t iv) -> uint32_t {
+    if (iv <= 0) {
+      return 1;
+    }
+    auto     uv   = static_cast<uint64_t>(iv);
+    uint32_t bits = 0;
+    while (uv != 0) {
+      ++bits;
+      uv >>= 1;
+    }
+    return std::max<uint32_t>(1, bits);
+  };
+  // `intrinsic_const_width` for EVERY value shape, not only the i64 one: a
+  // value too wide for int64 takes `get_signed_bits()`, and so does a negative
+  // literal (whose sign bit get_signed_bits() already counts).
+  auto intrinsic = [&]() -> uint32_t {
+    if (!v.is_just_i64()) {
+      return std::max<uint32_t>(1, static_cast<uint32_t>(v.get_signed_bits()));
+    }
+    const int64_t iv = v.to_just_i64();
+    if (iv < 0) {
+      return std::max<uint32_t>(1, static_cast<uint32_t>(v.get_signed_bits()));
+    }
+    return minimal_unsigned(iv);
+  };
+  const int32_t declared = gu::bits_of(pin);
+  if (declared > 0) {
+    // The "declared width is a lie" check, with pin_width's own guard, which
+    // is NOT restricted to i64 -- so a 200-bit positive value on a width-1 pin
+    // is "?" and not 1.
+    if (!v.is_negative() && intrinsic() > static_cast<uint32_t>(declared)) {
+      return "?";
+    }
+    return std::to_string(declared);
+  }
+  return std::to_string(intrinsic());
+}
+
+// Every CONSTANT feeding a node's sink pins: `consts` as `<pin>=<value>` and
+// `const_bits` as `<pin>=<width>`.
+//
+// A constant driver lives in the const pool, which the node iterators SKIP --
+// so it has no node record and appears in no edge record, and the dump showed
+// the shape of a design but none of its literals. For a packed bit-field cycle
+// that is the whole question: `sra`/`shl` shift amounts and a `get_mask` mask
+// ARE the field intervals, and without them one can see that two words feed
+// each other but not whether they touch the same bits.
+//
+// ONE traversal produces BOTH columns, positionally aligned by construction.
+// Two functions each walking `inp_edges()` would be two orders, and a consumer
+// cannot detect a permutation: a variadic sink carries several constants under
+// ONE label (`p0=1,p0=2`), so comparing labels entry by entry passes while the
+// widths belong to the wrong values. Emitting both from one loop removes the
+// possibility rather than checking for it.
+struct Tool_consts {
+  std::string values;  // `consts`:     p0=3,p2=-1
+  std::string widths;  // `const_bits`: p0=2,p2=1
+};
+
+Tool_consts tool_node_consts(const hhds::Node_class& node) {
+  namespace gu = livehd::graph_util;
+  Tool_consts out;
+  for (const auto& sd : gu::inp_sink_drivers(node)) {
+    if (sd.driver.is_invalid() || !sd.driver.is_const()) {
+      continue;
+    }
+    // By pid, for the reason spelled out above tool_endpoint_name: on a sink
+    // pin, `pin_name_of` can return the node's OUTPUT name, which would label
+    // two different constant operands identically.
+    const auto label = std::format("p{}", sd.sink.get_port_id());
+    if (!out.values.empty()) {
+      out.values += ",";
+      out.widths += ",";
+    }
+    out.values += label + "=" + gu::const_of(sd.driver).to_pyrope();
+    out.widths += label + "=" + tool_const_width_str(sd.driver);
+  }
+  return out;
+}
+
 Tool_record tool_node_record(hhds::Graph* g, const hhds::Node_class& node) {
   namespace gu = livehd::graph_util;
   Tool_record r;
@@ -345,6 +458,9 @@ Tool_record tool_node_record(hhds::Graph* g, const hhds::Node_class& node) {
   r.cols.emplace_back("match", tool_match_str(node));
   r.cols.emplace_back("src", tool_node_src(g, node));
   r.cols.emplace_back("partitionable", livehd::color::is_partitionable(node) ? "1" : "0");
+  auto cs = tool_node_consts(node);
+  r.cols.emplace_back("consts", cs.values.empty() ? std::string{"nil"} : cs.values);
+  r.cols.emplace_back("const_bits", cs.widths.empty() ? std::string{"nil"} : cs.widths);
   return r;
 }
 
@@ -363,7 +479,7 @@ void tool_pin_records(const hhds::Node_class& node, std::vector<Tool_record>& ou
     }
     Tool_record r;
     r.type  = 'p';
-    r.ident = tool_endpoint_name(pin);
+    r.ident = tool_endpoint_name(pin, /*is_sink=*/false);
     r.cols.emplace_back("nid", std::to_string(static_cast<uint64_t>(node.get_debug_nid())));
     r.cols.emplace_back("name", pn.empty() ? std::string{"nil"} : std::string{pn});
     int32_t b = gu::bits_of(pin);
@@ -374,20 +490,37 @@ void tool_pin_records(const hhds::Node_class& node, std::vector<Tool_record>& ou
   }
 }
 
+void tool_edge_record(const hhds::Pin_class& driver, const hhds::Pin_class& sink, std::vector<Tool_record>& out) {
+  namespace gu     = livehd::graph_util;
+  std::string from = tool_endpoint_name(driver, /*is_sink=*/false);
+  std::string to   = tool_endpoint_name(sink, /*is_sink=*/true);
+  int32_t     b    = gu::bits_of(driver);
+  Tool_record r;
+  r.type  = 'e';
+  r.ident = std::format("{} -> {}  ({}b)", from, to, b);
+  r.cols.emplace_back("from", from);
+  r.cols.emplace_back("to", to);
+  r.cols.emplace_back("bits", b != 0 ? std::to_string(b) : std::string{"nil"});
+  out.push_back(std::move(r));
+}
+
 void tool_edge_records(const hhds::Node_class& node, std::vector<Tool_record>& out) {
   namespace gu = livehd::graph_util;
   for (const auto& dpin : node.out_sorted_pins()) {
     for (const auto& e : dpin.out_edges()) {
-      std::string from = tool_endpoint_name(e.driver);
-      std::string to   = tool_endpoint_name(e.sink);
-      int32_t     b    = gu::bits_of(e.driver);
-      Tool_record r;
-      r.type  = 'e';
-      r.ident = std::format("{} -> {}  ({}b)", from, to, b);
-      r.cols.emplace_back("from", from);
-      r.cols.emplace_back("to", to);
-      r.cols.emplace_back("bits", b != 0 ? std::to_string(b) : std::string{"nil"});
-      out.push_back(std::move(r));
+      tool_edge_record(e.driver, e.sink, out);
+    }
+  }
+  // Edges driven by a GRAPH INPUT are not reachable from any node's out-edges:
+  // the driver is the graph's own input pin, which is not a node in the walk.
+  // Without this they are simply absent from the dump, and a consumer that
+  // rebuilds the graph from `tool cat` silently loses every primary input.
+  //
+  // The in-edge shape is a sink/driver pin walk -- `inp_sink_drivers` yields
+  // one entry per operand EDGE, ascending by sink pid (graph/node_util.hpp).
+  for (const auto& sd : gu::inp_sink_drivers(node)) {
+    if (!sd.driver.is_invalid() && gu::is_graph_input_pin(sd.driver)) {
+      tool_edge_record(sd.driver, sd.sink, out);
     }
   }
 }
@@ -425,10 +558,10 @@ std::vector<std::string> tool_display_cols(const Options& opts, Tool_target tgt)
     return tool_split_csv(opts.tool_attr);
   }
   switch (tgt) {
-    case Tool_target::node: return {"color", "match", "src"};
+    case Tool_target::node: return {"color", "match", "src", "consts", "const_bits"};
     case Tool_target::pin : return {"bits", "signed", "match"};
     case Tool_target::edge: return {"bits"};
-    default               : return {"color", "match", "src", "bits", "signed"};  // target=all flat (grep)
+    default               : return {"color", "match", "src", "consts", "const_bits", "bits", "signed"};  // target=all flat (grep)
   }
 }
 
@@ -557,7 +690,7 @@ void tool_cat_all_pretty(hhds::Graph* g, const std::vector<Tool_filter>& filters
                               tool_pin_label(sink),
                               b != 0 ? std::to_string(b) : std::string{"nil"},
                               gu::is_unsign(drv) ? "" : " signed",
-                              tool_endpoint_name(drv)))) {
+                              tool_endpoint_name(drv, /*is_sink=*/false)))) {
           return;
         }
       }
@@ -569,7 +702,7 @@ void tool_cat_all_pretty(hhds::Graph* g, const std::vector<Tool_filter>& filters
                               tool_pin_label(e.driver),
                               b != 0 ? std::to_string(b) : std::string{"nil"},
                               gu::is_unsign(e.driver) ? "" : " signed",
-                              tool_endpoint_name(e.sink)))) {
+                              tool_endpoint_name(e.sink, /*is_sink=*/true)))) {
           return;
         }
       }
