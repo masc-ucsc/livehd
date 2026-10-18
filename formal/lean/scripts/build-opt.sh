@@ -58,6 +58,12 @@ MODULES=(
   Projection/Proto/VariantTransport Projection/Proto/RewriteTotal
   Projection/Proto/VariantAdequacy Projection/Proto/VariantExec
   Projection/Proto/RunnerSupport
+  # M3: verified symbolic interpretation and k-induction (sym_verify)
+  Projection/Sym/Kit Projection/Sym/Bridge Projection/Sym/Val Projection/Sym/Prim
+  Projection/Sym/Mem Projection/Sym/Dispatch Projection/Sym/Eval Projection/Sym/Asg
+  Projection/Sym/Sat Projection/Sym/Layout Projection/Sym/Step Projection/Sym/Trace
+  Projection/Sym/Shape Projection/Sym/Unroll Projection/Sym/Oblig Projection/Sym/KInd
+  Projection/Sym/Refine
 )
 OBJS=()
 for m in "${MODULES[@]}"; do

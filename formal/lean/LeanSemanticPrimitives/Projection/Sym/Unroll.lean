@@ -68,7 +68,7 @@ theorem eval_not (σ : Asg) (a : BVLogicalExpr) :
 structure PropSpec where
   out : Nat
   nz  : Bool := true
-  deriving Repr, Inhabited
+  deriving Repr, Inhabited, DecidableEq
 
 def propBit (outs : Array BV) (p : PropSpec) : Bool :=
   match outs[p.out]? with
