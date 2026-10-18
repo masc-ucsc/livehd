@@ -169,6 +169,19 @@ def ctorView : SVal → Option (Nat × List SVal)
   | .conc (.ctor k vs) => some (k, vs.map .conc)
   | _                 => none
 
+/-- Whether a `let`'s value needs cutting. A variable read or a `tl` yields a
+value whose leaves are those of a value already bound -- and so already cut --
+so cutting it again only rebuilds the structure: on a residual that walks a
+long list with one `let x = tl y` per step, that rebuild is quadratic. -/
+def noCut : Term → Bool
+  | .var _ => true
+  | .prim .tl [_] => true
+  | _ => false
+
+/-- The cut a `let` makes: none for `noCut` values, `cutS` otherwise. -/
+def cutLet (st : SymSt) (e : Term) (s : SVal) : SVal × SymSt :=
+  if noCut e then (s, st) else cutS st s
+
 mutual
 
 def symEval : Nat → SymSt → List SVal → Term → Except String (SVal × SymSt)
@@ -182,7 +195,7 @@ def symEval : Nat → SymSt → List SVal → Term → Except String (SVal × Sy
         | none   => .error s!"unbound de Bruijn index {i}"
     | .letIn e b =>
         match symEval n st env e with
-        | .ok (s, st1) => symEval n (cutS st1 s).2 ((cutS st1 s).1 :: env) b
+        | .ok (s, st1) => symEval n (cutLet st1 e s).2 ((cutLet st1 e s).1 :: env) b
         | .error m     => .error m
     | .ite c a b =>
         match symEval n st env c with
@@ -310,6 +323,18 @@ theorem cutS_extends : ∀ (st : SymSt) (s : SVal), st.Extends (cutS st s).2 := 
   · intro st; exact .refl _
   · intro st s ss _ ih1 ih2; simp only [cutL]; exact ih1.trans ih2
 
+theorem cutLet_extends (st : SymSt) (e : Term) (s : SVal) : st.Extends (cutLet st e s).2 := by
+  unfold cutLet; split
+  · exact .refl _
+  · exact cutS_extends st s
+
+theorem cutLet_sound {σ : Asg} {stF : SymSt} (hc : stF.Consistent σ) (st : SymSt) (e : Term)
+    (s : SVal) {v : Val} (hr : SRel σ s v) (hx : (cutLet st e s).2.Extends stF) :
+    SRel σ (cutLet st e s).1 v ∧ st.Extends (cutLet st e s).2 := by
+  unfold cutLet at hx ⊢; split
+  · exact ⟨hr, .refl _⟩
+  · rename_i h; rw [if_neg h] at hx; exact cutS_sound hc st s hr hx
+
 theorem symEvalList_extends_of {n : Nat}
     (A : ∀ st env t s st', symEval n st env t = .ok (s, st') → st.Extends st') :
     ∀ ts st env ss st', symEvalList n st env ts = .ok (ss, st') → st.Extends st'
@@ -348,7 +373,7 @@ theorem symEval_extends :
     case letIn e b =>
         split at h
         · rename_i s1 st1 h1
-          exact (ih _ _ _ _ _ h1).trans ((cutS_extends st1 s1).trans (ih _ _ _ _ _ h))
+          exact (ih _ _ _ _ _ h1).trans ((cutLet_extends st1 e s1).trans (ih _ _ _ _ _ h))
         · cases h
     case ite c a b =>
         split at h
@@ -454,9 +479,9 @@ theorem symEval_sound (hc : stF.Consistent σ) :
       · rename_i s1 st1 h1
         cases hev with
         | letIn e1 e2 =>
-          have hcx : (cutS st1 s1).2.Extends stF := (symEval_extends m _ _ _ _ _ h).trans hx
-          have r1 := ih _ _ _ _ _ h1 ((cutS_extends st1 s1).trans hcx) _ _ henv e1
-          have rc := (cutS_sound hc st1 s1 r1 hcx).1
+          have hcx : (cutLet st1 e s1).2.Extends stF := (symEval_extends m _ _ _ _ _ h).trans hx
+          have r1 := ih _ _ _ _ _ h1 ((cutLet_extends st1 e s1).trans hcx) _ _ henv e1
+          have rc := (cutLet_sound hc st1 e s1 r1 hcx).1
           exact ih _ _ _ _ _ h hx _ _ (.cons rc henv) e2
       · cases h
     case ite c a b =>
