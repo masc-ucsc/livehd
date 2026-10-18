@@ -17,7 +17,7 @@ set -uo pipefail
 #   1. invariants: trap and mem_valid stay 0 while resetn is held low (both)
 #   2. base refines base, every output paired, next states equal (stateq)
 #   3. two_cycle_cmp refines base up to stuttering (adv:sym_adv), memory
-#      interface + observers paired, k = 1, 2, 3
+#      interface + observers paired, k = $STUTTER_K (default 1,2,3)
 # Run 3 is the variant refinement the user will drive to a proof; this script
 # records whatever verdict the machinery reaches (PROVED, NOT K-INDUCTIVE, or
 # a base counterexample) with its resources. Results: <OUT>/results.tsv.
@@ -93,7 +93,7 @@ for s in "${STEPS[@]}"; do
       run refl_base sym_refine "$CB" "$CB" $PAIRS_ALL stateq k:1 ;;
     stutter)
       # shellcheck disable=SC2086
-      run stutter_two_base sym_refine "$CT" "$CB" $PAIRS_MEM adv:sym_adv k:1,2,3 ;;
+      run stutter_two_base sym_refine "$CT" "$CB" $PAIRS_MEM adv:sym_adv "k:${STUTTER_K:-1,2,3}" ;;
     *) echo "unknown step $s (certs inv refl stutter)"; exit 2 ;;
   esac
 done
