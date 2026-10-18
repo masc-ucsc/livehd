@@ -15,6 +15,7 @@
 #include <mutex>
 #include <numeric>
 #include <optional>
+#include <print>
 #include <set>
 #include <sstream>
 #include <stdexcept>
@@ -1534,10 +1535,10 @@ void check_legality(const ph::Technology& tech, const ph::Floorplan& fp, double 
     throw std::invalid_argument("invalid macro halo");
   }
   if ((halo_x > 0 || halo_y > 0) && !fp.rows.empty()) {
-    auto        padded = fp;
-    const auto& site   = tech.sites.at(fp.rows.front().site);
-    const auto  sw = fp.rows.front().step, rh = std::llround(site.height * tech.dbu);
-    const auto  x = macro_halo(halo_x, tech.dbu, sw), y = macro_halo(halo_y, tech.dbu, rh);
+    auto          padded = fp;
+    const auto&   site   = tech.sites.at(fp.rows.front().site);
+    const int64_t sw = fp.rows.front().step, rh = std::llround(site.height * tech.dbu);
+    const auto    x = macro_halo(halo_x, tech.dbu, sw), y = macro_halo(halo_y, tech.dbu, rh);
     for (auto& c : padded.components) {
       if (!tech.macros.at(c.macro).klass.starts_with("CORE")) {
         c.place.x      -= static_cast<int64_t>(x);
