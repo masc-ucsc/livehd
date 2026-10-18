@@ -2058,6 +2058,18 @@ void graph_pipeline_and_emits(Options& opts, Result& res, Eprp_var& var, const s
       }
       Eprp_var::Eprp_dict labels;
       merge_sets(opts, set_name, labels);
+      if (method == "pass.aegraph") {
+        // The engine shares the compile.cprop knobs (one spelling each, copied
+        // above) and adds its own compile.aegraph set. engine_slots is the
+        // kernel's own slot selector, not a pass label.
+        labels.erase("engine_slots");
+        merge_sets(opts, "compile.aegraph", labels);
+      } else if (method == "pass.cprop" && labels.contains("engine")) {
+        // The kernel did the dispatch: this step is the classic engine, whatever
+        // compile.cprop.engine says for the other steps (a default compile sets
+        // no label, so its recipe is unchanged).
+        labels["engine"] = "classic";
+      }
       if (needs_loop_check && method == "pass.enableopt") {
         delayed_enableopt = true;
         continue;
@@ -2066,7 +2078,7 @@ void graph_pipeline_and_emits(Options& opts, Result& res, Eprp_var& var, const s
       // per-body transform, bitwidth -- which reads a callee only through its
       // declared interface). cprop's loop-invariant hoist edits a loop body and
       // its parents together, so it waits for the cprop after legalize.
-      if ((!legalized || needs_loop_check) && method == "pass.cprop") {
+      if ((!legalized || needs_loop_check) && (method == "pass.cprop" || method == "pass.aegraph")) {
         labels["loop_hoist"] = "false";
       }
       run_step(method, *active, labels, opts, res);

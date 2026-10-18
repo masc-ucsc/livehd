@@ -1,0 +1,10 @@
+/*
+:name: runtime_index_store_lanes_3
+:set: compile.cprop.engine=aegraph
+*/
+// HEADER-ONLY variant: runtime_index_store_lanes.prp compiled by the acyclic
+// e-graph engine (pass.aegraph) against the classic compile of the base. A
+// runtime-indexed store into a zero-initialized array followed by constant lane
+// reads is Set_mask / Get_mask / Concat traffic over one packed word: the
+// engine must hash-cons it and fold its constants without ever minting a second
+// '?' literal or merging two lanes that only look alike.

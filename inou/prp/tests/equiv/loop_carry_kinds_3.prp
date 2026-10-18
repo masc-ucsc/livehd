@@ -1,0 +1,16 @@
+/*
+:name: loop_carry_kinds_3
+:set: compile.cprop.engine=aegraph
+:lec_expect: proven
+*/
+// HEADER-ONLY variant: the source is loop_carry_kinds.prp, compiled by the
+// acyclic e-graph engine (pass.aegraph) instead of classic cprop. The base side
+// stays on the default engine, so this pair proves "aegraph == classic" for the
+// three loop carry shapes at once.
+//
+// The loops stay ROLLED (compile.unroll defaults false), so the aegraph meets
+// compact-loop Subs (Subnode_loop): each Sub is a skeleton leaf whose carry
+// self-edge must survive forwarding, and the loop body definition is optimized
+// as its own graph. With no rewrite rules the engine only shares and folds, so
+// the claim is that hash-consing, constant folding and the loop-carry guard
+// preserve every carry.

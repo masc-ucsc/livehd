@@ -1456,6 +1456,31 @@ void check_known_set_passes(const Options& opts) {
         }
       }
     }
+    if (pass == "compile.aegraph" && (flag == "low_lanes" || flag == "loop_hoist" || flag == "engine" || flag == "engine_slots")) {
+      // pass.aegraph registers the shared labels as INTERNAL: every knob has ONE
+      // user-facing spelling, the compile.cprop one, and the kernel copies it.
+      throw Lhd_error{"usage",
+                      std::format("--set/--config '{}' has one spelling", key),
+                      std::format("use --set compile.cprop.{}={} instead (the aegraph and classic engines share the knob)",
+                                  flag,
+                                  value)};
+    }
+    if (pass == "compile.cprop" && flag == "engine") {
+      // Validated eagerly: a typo must not wait for the pass to run. There is no
+      // "none": at least one engine always runs.
+      if (value != "classic" && value != "aegraph" && value != "aegraph+classic") {
+        throw Lhd_error{"usage",
+                        std::format("--set/--config compile.cprop.engine expects classic|aegraph|aegraph+classic, got '{}'", value),
+                        "classic is the default; aegraph+classic runs the e-graph engine and then classic in each slot"};
+      }
+    }
+    if (pass == "compile.cprop" && flag == "engine_slots") {
+      if (value != "both" && value != "first" && value != "second") {
+        throw Lhd_error{"usage",
+                        std::format("--set/--config compile.cprop.engine_slots expects both|first|second, got '{}'", value),
+                        "first = the cprop before pass.legalize, second = the one after enableopt"};
+      }
+    }
     if (is_kernel_label(flag)) {
       throw Lhd_error{"usage",
                       std::format("--set/--config flag '{}' is kernel-managed, not a pass option", key),
@@ -1667,29 +1692,67 @@ void apply_lhd_settings(Options& opts) {
   livehd::Job_manager::global().configure(opts.jobs);
 }
 
-// The standard compile pipeline, in (set-name, EPRP method) order.
+Cprop_engine resolve_cprop_engine(const Options& opts) {
+  Cprop_engine choice;
+  for (const auto& [key, value] : opts.sets) {
+    if (key == "compile.cprop.engine") {
+      choice.engine = value;
+    } else if (key == "compile.cprop.engine_slots") {
+      choice.slots = value;
+    }
+  }
+  return choice;
+}
+
+std::vector<std::string> cprop_slot_methods(const Cprop_engine& choice, int slot) {
+  const bool follows = choice.slots == "both" || (choice.slots == "first" && slot == 0) || (choice.slots == "second" && slot == 1);
+  if (!follows || choice.engine == "classic") {
+    return {"pass.cprop"};
+  }
+  if (choice.engine == "aegraph") {
+    return {"pass.aegraph"};
+  }
+  // aegraph+classic: the aegraph, then classic on its result, to measure what
+  // classic still removes.
+  return {"pass.aegraph", "pass.cprop"};
+}
+
+std::string cprop_engine_descriptor(const Options& opts) {
+  const auto choice = resolve_cprop_engine(opts);
+  if (choice.engine == "classic") {
+    return "classic";
+  }
+  return std::format("{}:{}", choice.engine, choice.slots);
+}
+
+// The standard compile pipeline, in (set-name, EPRP method) order. The two
+// cprop slots follow compile.cprop.engine; the set name stays compile.cprop
+// for every engine (the driver merges compile.aegraph into a pass.aegraph step).
 std::vector<std::pair<std::string, std::string>> compile_graph_passes(const Options& opts) {
   // Strip derived annotations immediately after graph lowering. Cprop must
   // preserve integer semantics without them; the normal bitwidth pass recovers
   // widths afterward. Bitfuzz itself performs no inference or repair.
-  std::vector<std::pair<std::string, std::string>> fuzz;
+  std::vector<std::pair<std::string, std::string>> steps;
   for (const auto& [key, value] : opts.sets) {
     if (key == "compile.bitfuzz.mode" && value != "off") {
-      fuzz.emplace_back("compile.bitfuzz", "pass.bitfuzz");
+      steps.emplace_back("compile.bitfuzz", "pass.bitfuzz");
       break;
     }
   }
 
-  std::vector<std::pair<std::string, std::string>> steps{
-      {"compile.cprop", "pass.cprop"}
+  const auto choice = resolve_cprop_engine(opts);
+  const auto cprop  = [&](int slot) {
+    for (auto& method : cprop_slot_methods(choice, slot)) {
+      steps.emplace_back("compile.cprop", std::move(method));
+    }
   };
-  steps.insert(steps.begin(), fuzz.begin(), fuzz.end());
+  cprop(0);
   steps.emplace_back("compile.bitwidth", "pass.bitwidth");
   steps.emplace_back("compile.enableopt", "pass.enableopt");
   // Inference can resolve values that cprop could not know yet (notably
   // reads of procedurally built constant tables). Fold their consumers and
   // infer widths on the resulting graph before coloring or emission.
-  steps.emplace_back("compile.cprop", "pass.cprop");
+  cprop(1);
   steps.emplace_back("compile.bitwidth", "pass.bitwidth");
   return steps;
 }

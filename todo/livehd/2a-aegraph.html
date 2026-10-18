@@ -564,13 +564,12 @@ assumption set.</li>
 
 <h3>Knobs and which callers follow them</h3>
 <ul>
-<li><strong>Selector: <code>compile.cprop.engine=classic|aegraph|aegraph+classic|none</code></strong>
-(default <code>classic</code>).
+<li><strong>Selector: <code>compile.cprop.engine=classic|aegraph|aegraph+classic</code></strong>
+(default <code>classic</code>). There is no <code>none</code> value (user ruling
+2026-10-18): at least one engine always runs.
   <ul>
   <li><code>aegraph+classic</code> runs the aegraph then classic in each slot, to
   measure what classic still removes.</li>
-  <li><code>none</code> skips the engine. It isolates the input for timing and gives
-  the failure baseline.</li>
   <li>It is registered as a <code>pass.cprop</code> label
   (<code>pass/cprop/pass_cprop.cpp:17-30</code>), so <code>lhd describe</code> and
   unknown-flag checking work.</li>
@@ -1123,8 +1122,8 @@ is immutable and is not edited.</li>
     <li><code>pass/aegraph/</code> with a BUILD modeled on <code>pass/cprop/BUILD</code>:
     <code>alwayslink</code>, COPTS, no <code>-Wno-*</code>;</li>
     <li><code>pass.aegraph</code> with its INTERNAL shared labels;</li>
-    <li><code>compile.cprop.engine</code> (all four values) and
-    <code>engine_slots</code>, both validated;</li>
+    <li><code>compile.cprop.engine</code> (all three values: no <code>none</code>)
+    and <code>engine_slots</code>, both validated;</li>
     <li>the dispatch, the driver merge, and the <code>:1808</code> gate;</li>
     <li>the <code>kSetPasses</code> row, the <code>compile_salt</code> entry, and
     the engine name in the cache descriptor;</li>
@@ -1155,12 +1154,96 @@ is immutable and is not edited.</li>
     </ul></li>
   <li>Exit:
     <ul>
-    <li>the set of failing fixtures under <code>aegraph</code> is a subset of the
-    set under <code>none</code>;</li>
+    <li>the set of failing fixtures under <code>aegraph</code> is recorded and
+    contains no REFUTED and no crash (there is no <code>none</code> baseline;
+    <code>classic</code> is the reference, with 0 failures);</li>
     <li>0 REFUTED and 0 crashes;</li>
     <li>both failure lists are recorded in this file.</li>
     </ul>
   The full 0-failure bar moves to G2.</li>
+  <li><span class="status landed">landed 2026-10-18 (uncommitted)</span> What exists and what was measured:
+    <ul>
+    <li>Plumbing as listed: <code>pass/aegraph/</code>, <code>pass.aegraph</code>
+    with INTERNAL shared labels, the eager <code>engine</code> /
+    <code>engine_slots</code> checks, the dispatch in
+    <code>compile_graph_passes</code> (the set name stays <code>compile.cprop</code>
+    for every engine; <code>aegraph+classic</code> is two steps per slot), the
+    driver merge of <code>compile.aegraph</code> and the
+    <code>loop_hoist=false</code> gate for both methods, the
+    <code>kSetPasses</code> row, <code>compile_salt</code> and the engine name in
+    the cache descriptor (<code>pipeline=cprop[aegraph:both],bitwidth</code>).
+    <code>check_known_set_passes</code> rejects
+    <code>compile.aegraph.{low_lanes,loop_hoist,engine,engine_slots}</code>
+    with the <code>compile.cprop.X</code> hint.</li>
+    <li>Engine: pre-pass Tarjan SCC (members opaque; a Mux with a known selector
+    contributes only its chosen arm, so a ring closed through constant-selected
+    routers is acyclic, re-examined once the acyclic part is built because the
+    selector can itself be a computed constant). The classic scalar rewrites
+    (<code>Cprop::do_scalar</code>) get one chance on the members of every SCC
+    before the build, which cuts the algebraic false cycles
+    (<code>module_cycle_context_5</code>: <code>x = ~x ^ ~x ^ a</code>). Build in
+    producers-first order with hash-consing, a three-valued constant analysis that
+    folds only fully known results (P7), and forwarding folds that are the
+    constant analysis, not rules: constant-selector Mux, a shift by 0, a window
+    covering a whole <code>?</code> literal, equal connected Mux arms (Q1),
+    exclusive-Hotmux equal arms or constant controls. Cost-free extraction and
+    diff-elaboration (loop-carry guard, parallel-edge refusal, named-twin policy,
+    width-stamp carry, dead pure node sweep). The post steps are the classic
+    region passes (<code>Cprop::do_post</code>, shared with <code>do_trans</code>
+    through <code>Cprop::region_passes</code>) and low-lane narrowing, then
+    <code>hoist_loop_invariants</code>.</li>
+    <li>Not done (rules, D and later): partial constant merging
+    (<code>x + 3 + 4</code>), strength reduction, boolean canonicalization
+    (<code>Mux(s,1,0)</code> to <code>EQ(s,0)</code>), the muxctx-before-sharing
+    order, the choice rules. Out of the e-graph on purpose: false-cycle algebra
+    beyond the classic call above, packed-slice resolution beyond
+    <code>do_post</code>.</li>
+    <li>Harness: <code>PrpRunner.compile_sets</code> rides only the compile and
+    sim commands of the design under test (never <code>lhd lec</code> and never a
+    golden Verilog compile). <code>pyrope_test.py --aegraph</code> and
+    <code>LHD_PRP_COMPILE_SETS="k=v ..."</code> feed it; in a Pyrope-vs-Pyrope
+    LEC the variant side gets the sets and the base stays classic. Manual twins:
+    <code>//inou/prp:prp-aegraph-sim</code>, <code>//inou/prp:prp-aegraph-lec</code>.
+    Three header-only equiv variants: <code>loop_carry_kinds_3</code> (compact
+    loops), <code>runtime_index_store_lanes_3</code> (packed lanes),
+    <code>hotmux_unique_1</code> (exclusive Hotmux). Tests:
+    <code>//pass/aegraph:aegraph_test</code> (round trip incl. a
+    <code>Subnode_loop</code> body and a non-exclusive Hotmux, CSE keys, folds,
+    P7, cycles, determinism, LEC soundness),
+    <code>//lhd/tests:lhd_aegraph_test</code> (<code>tool diff --structural</code>
+    on two runs, LEC equal to classic, cache keyed on the engine),
+    <code>lhd_options_test</code>, <code>lhd_config_test</code>,
+    <code>lhd_list_options_test</code>.</li>
+    <li>Command that forces the engine over the existing inou/prp tests, no BUILD
+    edit: <code>bazel test -c opt //inou/prp:all
+    --test_tag_filters=-manual,-external-simulator,-fixme
+    --test_env=LHD_PRP_COMPILE_SETS=compile.cprop.engine=aegraph</code> (use
+    <code>aegraph+classic</code> for the third engine).</li>
+    <li><strong>Failing fixtures, <code>-c opt</code>, 2825 targets of
+    <code>//inou/prp:all</code> (non-manual, non-fixme), 2026-10-18:</strong>
+      <ul>
+      <li><code>classic</code>: 0 failures.</li>
+      <li><code>aegraph+classic</code>: 0 failures.</li>
+      <li><code>aegraph</code>: 2 failures, 0 REFUTED, 0 crashes. Both pin classic's
+      structure rather than the design's behaviour:
+      <code>lec-transparent_hier_1</code> (<code>:lec_grep: 'top' MATCHED (semdiff</code>:
+      classic canonicalizes <code>rst ? 0 : 1</code> to <code>EQ(rst,0)</code>, the
+      aegraph keeps the Mux, so the pair needs a solver) and
+      <code>prp-lec-loop_roll_mixed_1</code> (<code>:lec_grep: 0 via solver</code>:
+      classic flattens the nested <code>Sum</code> in the loop body
+      <code>acc_step</code> (<code>collapse_forward_same_op</code>), the aegraph
+      keeps it, so that def needs a solver). The pairs are still proven. Both
+      disappear when the flattening and boolean-canonicalization rules land
+      (D).</li>
+      </ul></li>
+    <li>Bugs the corpus found and fixed on the way (kept as regression tests in
+    <code>aegraph_test</code>): a class-table realloc invalidating operand value
+    pointers; consumers keyed on a leaf instead of the producer's class; the
+    latch whose enable is an exhaustive Hotmux of constants
+    (<code>latch_match_exhaustive</code>: without the Hotmux collapse the latch
+    survives and LEC refutes it); feedback rings closed through constant-selected
+    Muxes (<code>module_cycle_context*</code>).</li>
+    </ul></li>
   </ul></li>
 <li><strong>C — A/B harness</strong> <span class="status">phase 1</span>
   <ul>

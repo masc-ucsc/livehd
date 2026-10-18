@@ -321,6 +321,7 @@ inline std::string_view retired_set_hint(std::string_view method, std::string_vi
 inline constexpr Set_pass kSetPasses[] = {
     {     "compile.upass",        "pass.upass",      Set_pass::List::all},
     {     "compile.cprop",        "pass.cprop",      Set_pass::List::all},
+    {   "compile.aegraph",      "pass.aegraph",      Set_pass::List::all},
     {  "compile.bitwidth",     "pass.bitwidth",      Set_pass::List::all},
     {   "compile.bitfuzz",      "pass.bitfuzz",      Set_pass::List::all},
     {    "compile.formal",       "pass.formal", Set_pass::List::specific},
@@ -466,6 +467,21 @@ bool              compile_cache_enabled(const Options& opts);
 void              apply_log_settings(const Options& opts);
 void              apply_lhd_settings(Options& opts);
 std::vector<std::pair<std::string, std::string>> compile_graph_passes(const Options& opts);
+// `compile.cprop.engine` (classic|aegraph|aegraph+classic, default classic) and
+// `compile.cprop.engine_slots` (both|first|second, default both), resolved from
+// the --set entries (last wins). At least one engine always runs: there is no
+// "none" value. Validated eagerly by check_known_set_passes.
+struct Cprop_engine {
+  std::string engine = "classic";
+  std::string slots  = "both";
+};
+Cprop_engine             resolve_cprop_engine(const Options& opts);
+// The EPRP methods that run in compile cprop slot `slot` (0 = before
+// pass.legalize, 1 = after enableopt), in order.
+std::vector<std::string> cprop_slot_methods(const Cprop_engine& choice, int slot);
+// The engine identity the compile-cache descriptor names ("classic" or
+// "aegraph+classic:first", ...): what the resolved schedule actually runs.
+std::string              cprop_engine_descriptor(const Options& opts);
 
 void save_ln_dir(Options& opts, Result& res, const std::vector<std::shared_ptr<Lnast>>& units, const std::string& dir);
 std::vector<std::shared_ptr<Lnast>> load_ln_dir(const std::string& dir);

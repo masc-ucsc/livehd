@@ -44,6 +44,37 @@ grep -q 'pass.bitwidth' "$W/r3.json" || fail "compile did not run pass.bitwidth"
 "$LHD" compile "$PRP" --config "$W/sane.toml" --emit-dir ln:"$W/lns/" --workdir "$W/w4" -q --result-json "$W/r4.json" \
   || fail "compile --emit-dir ln: with a config exited non-zero: $(cat "$W/r4.json" 2>/dev/null)"
 
+# compile.cprop.engine swaps the method in the cprop slots (the kernel
+# dispatches): classic runs pass.cprop only, aegraph pass.aegraph only,
+# aegraph+classic runs both, and engine_slots limits which slot follows. At
+# least one engine always runs, so pass.cprop or pass.aegraph is always there.
+count_steps() { grep -o '"recipe":\[[^]]*\]' "$1" | grep -o "\"pass\.$2[ \"]" | wc -l; }
+run_engine() {
+  local tag=$1; shift
+  "$LHD" compile "$PRP" --config "$W/sane.toml" "$@" --emit verilog:"$W/e_$tag.v" --workdir "$W/e_$tag" -q --result-json "$W/e_$tag.json" \
+    || fail "engine=$tag compile failed: $(cat "$W/e_$tag.json" 2>/dev/null)"
+}
+run_engine classic
+[ "$(count_steps "$W/e_classic.json" cprop)" -eq 2 ] || fail "classic must run pass.cprop twice: $(cat "$W/e_classic.json")"
+[ "$(count_steps "$W/e_classic.json" aegraph)" -eq 0 ] || fail "classic must not run pass.aegraph"
+run_engine aegraph --set compile.cprop.engine=aegraph
+[ "$(count_steps "$W/e_aegraph.json" aegraph)" -eq 2 ] || fail "aegraph must run pass.aegraph in both slots: $(cat "$W/e_aegraph.json")"
+[ "$(count_steps "$W/e_aegraph.json" cprop)" -eq 0 ] || fail "aegraph must not run pass.cprop: $(cat "$W/e_aegraph.json")"
+run_engine both --set compile.cprop.engine=aegraph+classic
+[ "$(count_steps "$W/e_both.json" aegraph)" -eq 2 ] && [ "$(count_steps "$W/e_both.json" cprop)" -eq 2 ] \
+  || fail "aegraph+classic must run both engines in both slots: $(cat "$W/e_both.json")"
+run_engine first --set compile.cprop.engine=aegraph --set compile.cprop.engine_slots=first
+[ "$(count_steps "$W/e_first.json" aegraph)" -eq 1 ] && [ "$(count_steps "$W/e_first.json" cprop)" -eq 1 ] \
+  || fail "engine_slots=first must swap only the first slot: $(cat "$W/e_first.json")"
+run_engine second --set compile.cprop.engine=aegraph --set compile.cprop.engine_slots=second
+[ "$(count_steps "$W/e_second.json" aegraph)" -eq 1 ] && [ "$(count_steps "$W/e_second.json" cprop)" -eq 1 ] \
+  || fail "engine_slots=second must swap only the second slot: $(cat "$W/e_second.json")"
+# A [compile.cprop] config table selects the engine like --set does.
+printf '[compile.cprop]\nengine = "aegraph"\n' > "$W/engine.toml"
+"$LHD" compile "$PRP" --config "$W/engine.toml" --emit verilog:"$W/e_cfg.v" --workdir "$W/e_cfg" -q --result-json "$W/e_cfg.json" \
+  || fail "config engine compile failed: $(cat "$W/e_cfg.json" 2>/dev/null)"
+[ "$(count_steps "$W/e_cfg.json" aegraph)" -eq 2 ] || fail "[compile.cprop] engine must reach the dispatch: $(cat "$W/e_cfg.json")"
+
 # Optimization-level selection has been removed from both CLI and config.
 out=$("$LHD" compile "$PRP" --recipe O2 -q 2>/dev/null)
 [ $? -ne 0 ] || fail "removed --recipe flag must error"
@@ -71,4 +102,4 @@ out=$("$LHD" compile "$PRP" --config "$W/nope.toml" --emit verilog:"$W/x.v" -q 2
 [ $? -ne 0 ] || fail "missing config file must error"
 grep -q '"class":"missing_file"' <<<"$out" || fail "expected error.class=missing_file: $out"
 
-echo "PASS: --config defaults, CLI precedence, fixed compile pipeline, and strict junk rejection"
+echo "PASS: --config defaults, CLI precedence, fixed compile pipeline, engine dispatch, and strict junk rejection"

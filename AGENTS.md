@@ -54,6 +54,7 @@ LiveHD depends on several sibling repos. **Always look in these exact paths — 
 - `inou/yosys/`: Yosys integration (`lgyosys_tolg.cpp` = Yosys→LGraph, `inou_yosys_read.ys` = Yosys script)
 - `inou/cgen/`: Verilog code generation from LGraph
 - `pass/cprop/`: Constant propagation pass
+- `pass/aegraph/`: `pass.aegraph`, the acyclic e-graph alternative to cprop, selected with `--set compile.cprop.engine=aegraph|aegraph+classic` (default `classic`); see `pass/aegraph/README.md`
 - `pass/synth/`: the shared, ABC-free synthesis pipeline (private copy, ware/memory modules, region driver, `Lnet` translation, region cache, read-back); see `pass/synth/README.md`
 - `pass/satopt/`: `pass.satopt`, bounded proof-backed simplification with selectable stages, run only by the compile step (`--set pass.satopt=true`; off by default for every command, including `lhd synth`/`lhd lec`) and `lhd pass satopt`; see `pass/satopt/README.md`
 - `pass/abc/`: the ABC backend and `pass.abc` — the only synthesis code that includes or calls ABC

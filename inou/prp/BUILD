@@ -559,6 +559,35 @@ _SIM_FIXME = [
     for prp_file in glob(["tests/sim/*.prp"])
 ]
 
+# -aegraph TWIN (manual): the same `tests/sim` fixtures with the design under
+# test compiled by the acyclic e-graph engine (`--aegraph` ==
+# compile.cprop.engine=aegraph on the compile/sim commands only; see
+# tests/prplib.py `compile_sets`). Kept out of the default suite, which pins
+# the classic engine; every fixture's own result line names a failure. To run any
+# EXISTING target this way with no BUILD edit, force the set through the
+# environment: `bazel test -c opt //inou/prp:all --test_tag_filters=-manual,
+# -external-simulator,-fixme --test_env=LHD_PRP_COMPILE_SETS=compile.cprop.engine=aegraph`.
+sh_test(
+    name = "prp-aegraph-sim",
+    srcs = ["tests/pyrope_test.py"],
+    args = [
+        arg
+        for prp_file in glob(["tests/sim/*.prp"])
+        if prp_file.split("/")[-1].split(".")[0] not in _SIM_FIXME
+        for arg in ["-i", "$(location //inou/prp:%s)" % prp_file]
+    ] + ["--aegraph"],
+    data = [
+        "//inou/prp:tests/lec.py",
+        "//inou/prp:tests/prplib.py",
+        "//inou/prp:tests/prpsim.py",
+        "//inou/prp:tests/pyrope_test.py",
+        "//inou/prp:sim_runtime_hdrs",
+        "//lhd",
+    ] + ["//inou/prp:%s" % prp_file for prp_file in glob(["tests/sim/*.prp"])],
+    tags = ["manual"],
+    timeout = "eternal",
+)
+
 # VERILATOR DIFFERENTIALS. A `tests/sim/` fixture that also carries
 # `:verilator: <name>_vtb.cpp` gets a second target that emits its Verilog
 # (`inou.cgen.verilog`, NOT `inou.cgen.sim`) and runs the hand-written C++ twin
@@ -742,6 +771,32 @@ _PRPLEC_GROUPED = [
     for variant in _PRPLEC_VARIANTS
     if variant.rsplit("_", 1)[0] not in _PRPLEC_GROUPED
 ]
+
+# -aegraph TWIN (manual) of the grouped Pyrope<->Pyrope LEC claims: every
+# `<base>_<N>.prp` of each _PRPLEC_GROUPED base, with the VARIANT side compiled by
+# the e-graph engine (`--aegraph`, the base stays classic).
+sh_test(
+    name = "prp-aegraph-lec",
+    srcs = ["tests/pyrope_test.py"],
+    args = [
+        arg
+        for base in _PRPLEC_GROUPED
+        for arg in ["-i", "$(location //inou/prp:tests/equiv/%s.prp)" % base]
+    ] + [
+        "--mode",
+        "lec",
+        "--aegraph",
+    ],
+    data = [
+        "//inou/prp:tests/lec.py",
+        "//inou/prp:tests/prplec.py",
+        "//inou/prp:tests/prplib.py",
+        "//inou/prp:tests/pyrope_test.py",
+        "//lhd",
+    ] + ["//inou/prp:%s" % prp_file for prp_file in glob(["tests/equiv/*.prp"])],
+    tags = ["manual"],
+    timeout = "eternal",
+)
 
 # Equivalence pairs (tests/equiv/<name>.prp + golden <name>.v): the harness
 # lowers the .prp to Verilog (tolg path) and formally LECs it against the

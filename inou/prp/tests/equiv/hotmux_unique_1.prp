@@ -1,0 +1,12 @@
+/*
+:name: hotmux_unique_1
+:type: lec
+:lec_top: dec
+:set: compile.cprop.engine=aegraph
+*/
+// HEADER-ONLY variant: hotmux_unique.prp compiled by the acyclic e-graph engine
+// (pass.aegraph) against the classic compile of the base. `unique if` lowers to
+// ONE exclusive Hotmux whose proven code is part of the engine's hash-cons key,
+// so an exclusive Hotmux is shared only with an identical, equally proven twin
+// and a non-exclusive one stays a skeleton leaf (its overlap obligation must
+// survive). The pair must still prove equal.

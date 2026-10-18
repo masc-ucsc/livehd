@@ -59,8 +59,18 @@ class PrpRunner:
     LiveHD Pyrope Compilation Runner
     """
 
-    def __init__(self, bitfuzz=False):
+    def __init__(self, bitfuzz=False, aegraph=False):
         self.equiv_sets = ["compile.bitfuzz.mode=wires"] if bitfuzz else []
+        # `compile_sets` ride ONLY the compile (and sim) of the design under test.
+        # Unlike `equiv_sets` they are never appended to `lhd lec` and never to the
+        # compile of a golden Verilog, so an A/B run puts exactly the DUT through
+        # the selected engine: the reference side stays the classic compile.
+        # `--aegraph` selects the e-graph engine for the whole fixture;
+        # LHD_PRP_COMPILE_SETS="k=v k2=v2" forces any compile sets on every fixture
+        # of an existing target (`bazel test --test_env=LHD_PRP_COMPILE_SETS=
+        # compile.cprop.engine=aegraph //inou/prp:all`), with no BUILD edit.
+        self.compile_sets = ["compile.cprop.engine=aegraph"] if aegraph else []
+        self.compile_sets += os.environ.get('LHD_PRP_COMPILE_SETS', '').split()
         # Tests drive the lhd kernel (one stateless invocation per mode); the
         # lgshell REPL is no longer involved.
         if os.path.exists("./bazel-bin/lhd/lhd"):
@@ -117,6 +127,7 @@ class PrpRunner:
         cmd += ['--set', 'upass.verifier=false', '--set', 'upass.tolg=false']
         cmd += self._extra_sets(test)
         cmd += self.equiv_set_args()
+        cmd += self.compile_set_args()
         return cmd
 
     @staticmethod
@@ -237,6 +248,10 @@ class PrpRunner:
     def equiv_set_args(self):
         return [arg for setting in self.equiv_sets for arg in ('--set', setting)]
 
+    def compile_set_args(self):
+        """The `--set` flags that apply to the DUT compile only (see __init__)."""
+        return [arg for setting in self.compile_sets for arg in ('--set', setting)]
+
     @staticmethod
     def lec_satopt_args():
         # LEC re-reads both Verilog sides with every satopt stage on (shared
@@ -266,6 +281,7 @@ class PrpRunner:
         # repo), so a later `bazel build //...` here never sweeps it.
         cmd = [self.lhd, 'sim', '--set', 'lhd.jobs=2']
         cmd += test.params['files']
+        cmd += self.compile_set_args()
         return cmd
 
     @staticmethod
@@ -1084,7 +1100,7 @@ class PrpRunner:
         replay = test.params.get('verify_replay', '')
         if replay:
             tb = simfail_tests[0] if simfail_tests else os.path.join(tmp_dir, wd, 'simfail_missing.prp')
-            rcmd = [self.lhd, 'sim', test.params['files'][0], tb, '--workdir', wd + '_sim', '--set', 'lhd.jobs=2']
+            rcmd = [self.lhd, 'sim', test.params['files'][0], tb, '--workdir', wd + '_sim', '--set', 'lhd.jobs=2'] + self.compile_set_args()
             rproc = subprocess.Popen(rcmd, cwd=tmp_dir, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
             try:
                 rlog_b, _ = rproc.communicate()

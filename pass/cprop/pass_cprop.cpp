@@ -27,6 +27,16 @@ void Pass_cprop::setup() {
                         "form is preserved; the values never change",
                         "true");
 
+  m1.add_label_optional("engine",
+                        "classic|aegraph|aegraph+classic: the constant-propagation engine the compile schedule runs in place of "
+                        "(or before) pass.cprop. classic is the default and always remains the reference. At least one engine "
+                        "always runs. The kernel dispatches (compile_graph_passes), so this method only ever sees classic",
+                        "classic");
+  m1.add_label_optional("engine_slots",
+                        "both|first|second: which of the two compile cprop slots (the first, before pass.legalize, and the "
+                        "second, after enableopt) follow compile.cprop.engine; the other slot stays classic",
+                        "both");
+
   register_pass(m1);
 }
 
@@ -63,6 +73,15 @@ static absl::flat_hash_set<hhds::Gid> lifted_loop_bodies(const std::vector<std::
 
 void Pass_cprop::optimize(Eprp_var& var) {
   Pass_cprop pcp(var);
+  // The kernel swaps the method for the other engines (compile_graph_passes),
+  // so a non-classic value reaching here means a caller bypassed the dispatch:
+  // running classic silently would make an A/B comparison compare nothing.
+  if (const auto engine = var.get("engine", "classic"); engine != "classic") {
+    livehd::diag::err("pass.cprop", "bad-option", "io")
+        .msg("pass.cprop runs only the classic engine, got engine='{}'; compile.cprop.engine is dispatched by the lhd kernel", engine)
+        .fatal();
+    return;
+  }
   const auto low_lanes = var.get("low_lanes", "true") != "false";
   // The accumulation guard is a rolled-loop rewrite (Cprop::set_guard_scope):
   // every cell of a lifted loop body, nothing else.

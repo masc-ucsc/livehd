@@ -2094,6 +2094,14 @@ sh_test(
     data = _FLOW_DATA,
 )
 
+# pass.aegraph (compile.cprop.engine=aegraph) through the kernel: determinism
+# (tool diff --structural), summary line, LEC equality with classic, cache key.
+sh_test(
+    name = "lhd_aegraph_test",
+    srcs = ["lhd_aegraph_test.sh"],
+    data = _FLOW_DATA,
+)
+
 # ECMA-426 source-map egress ([[1f]]-G): .v.map sidecar with sourcesContent,
 # in-process and lg:-reload (hash-validated disk recovery + drift rejection).
 sh_test(

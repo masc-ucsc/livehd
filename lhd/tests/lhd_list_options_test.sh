@@ -54,6 +54,37 @@ echo "$out" | grep -q '"name":"pass.abc.unroll_carry","method":"pass.abc","defau
   || fail "ABC carry expansion default missing: $out"
 # Compile-only passes live under compile.*; lec/pass passes keep their own namespace.
 echo "$out" | grep -q '"name":"compile.bitwidth.max_iterations"' || fail "compile.bitwidth.* missing: $out"
+# compile.cprop.engine: the engine selector. Default classic, a registered
+# pass.cprop label; the aegraph shares the knobs (one spelling each), so
+# pass.aegraph's low_lanes/loop_hoist/engine labels are INTERNAL (unlisted) and
+# the spelling compile.aegraph.<shared> is rejected with the compile.cprop one.
+echo "$out" | grep -q '"name":"compile.cprop.engine","method":"pass.cprop","default":"classic"' \
+  || fail "compile.cprop.engine must default classic: $out"
+echo "$out" | grep -q '"name":"compile.cprop.engine_slots","method":"pass.cprop","default":"both"' \
+  || fail "compile.cprop.engine_slots must default both: $out"
+echo "$out" | grep -Eq '"name":"compile.aegraph.(low_lanes|loop_hoist|engine|engine_slots)"' \
+  && fail "the shared labels must stay INTERNAL on pass.aegraph (one spelling: compile.cprop.*): $out"
+for engine in classic aegraph aegraph+classic; do
+  "$LHD" compile "$PRP" --set "compile.cprop.engine=$engine" --workdir "$W/engine_$engine" -q >"$W/engine_$engine.json" 2>&1 \
+    || fail "compile.cprop.engine=$engine must be accepted: $(cat "$W/engine_$engine.json")"
+done
+for bad in none Classic aeg "aegraph,classic" ""; do
+  "$LHD" compile "$PRP" --set "compile.cprop.engine=$bad" --workdir "$W/engine_bad" -q >"$W/engine_bad.json" 2>&1 \
+    && fail "compile.cprop.engine='$bad' must be rejected (classic|aegraph|aegraph+classic only; at least one engine runs)"
+  grep -q 'classic|aegraph|aegraph+classic' "$W/engine_bad.json" || fail "engine='$bad' diagnostic must list the values: $(cat "$W/engine_bad.json")"
+done
+for slots in both first second; do
+  "$LHD" compile "$PRP" --set compile.cprop.engine=aegraph --set "compile.cprop.engine_slots=$slots" --workdir "$W/slots_$slots" -q \
+    >"$W/slots_$slots.json" 2>&1 || fail "engine_slots=$slots must be accepted: $(cat "$W/slots_$slots.json")"
+done
+"$LHD" compile "$PRP" --set compile.cprop.engine_slots=third --workdir "$W/slots_bad" -q >"$W/slots_bad.json" 2>&1 \
+  && fail "engine_slots=third must be rejected"
+grep -q 'both|first|second' "$W/slots_bad.json" || fail "engine_slots diagnostic must list the values: $(cat "$W/slots_bad.json")"
+for shared in low_lanes loop_hoist engine engine_slots; do
+  "$LHD" compile "$PRP" --set "compile.aegraph.$shared=true" --workdir "$W/dup_$shared" -q >"$W/dup_$shared.json" 2>&1 \
+    && fail "compile.aegraph.$shared must be rejected: each flag has one spelling"
+  grep -q "compile.cprop.$shared" "$W/dup_$shared.json" || fail "compile.aegraph.$shared must name compile.cprop.$shared: $(cat "$W/dup_$shared.json")"
+done
 # hier standardization: the vestigial per-def toggles are deleted, the real
 # hier options all spell it `hier` and default true.
 echo "$out" | grep -q '"name":"compile.cprop.hier"' && fail "compile.cprop.hier must be gone (vestigial): $out"
