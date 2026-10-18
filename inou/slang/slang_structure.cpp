@@ -437,7 +437,7 @@ void definite_blocking_writes(const slang::ast::Statement& stmt, absl::flat_hash
       }
       const auto& a = e.as<slang::ast::AssignmentExpression>();
       if (a.isNonBlocking() != nonblocking) {
-        return;  // a nonblocking write in a level-sensitive block is the M1 latch idiom (see Read_collector's caller)
+        return;  // a `<=` in a level-sensitive block is the M1 latch idiom unless collect_state_vars proves it logic
       }
       std::function<void(const slang::ast::Expression&)> note = [&](const slang::ast::Expression& lhs) {
         if (lhs.kind == ExpressionKind::Concatenation) {
@@ -4300,8 +4300,8 @@ bool Slang_context::inout_port_driven(const slang::ast::PortSymbol& port) {
   bool        driven = false;
   const auto* net    = port.internalSymbol;
   if (net != nullptr && slang::ast::ValueSymbol::isKind(net->kind)) {
-    const auto* sym = &net->as<slang::ast::ValueSymbol>();
-    Dep_collector dc;
+    const auto*                                   sym = &net->as<slang::ast::ValueSymbol>();
+    Dep_collector                                 dc;
     std::function<void(const slang::ast::Scope&)> walk = [&](const slang::ast::Scope& scope) {
       for (const auto& member : scope.members()) {
         if (dc.writes.contains(sym)) {
