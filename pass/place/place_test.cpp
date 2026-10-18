@@ -613,6 +613,51 @@ TEST(Placement, ConstantDriversUseLibertyPolarityAndPhysicalCandidates) {
   }
   EXPECT_FALSE(source.find_io("a_high"));  // Only the private physical library changes.
 }
+// An unknown (X) constant that reaches a mapped cell input is a synthesis don't-care
+// (`assign y = 'x` in the RTL). The default refuses it by name; unknown_const_zero ties it
+// low (a legal refinement) through the usual tie cell and counts what it tied.
+TEST(Placement, UnknownConstantIsRefusedUnlessTiedLowByOption) {
+  const auto build = [](hhds::GraphLibrary& source) {
+    auto io = source.create_io("x_top");
+    io->add_input("a", 0);
+    io->set_bits("a", 1);
+    io->add_output("y", 0);
+    io->set_bits("y", 1);
+    auto graph = io->create_graph();
+    auto inv   = source.create_io("sky130_fd_sc_hd__inv_1");
+    inv->add_input("A", 0);
+    inv->add_output("Y", 0);
+    auto n = gu::create_typed_node(*graph, Ntype_op::Sub);
+    n.set_subnode(inv);
+    n.set_name("inv");
+    n.create_sink_pin("A").connect_driver(gu::create_const(*graph, *Dlop::from_pyrope("0ub?")));
+    auto y = n.create_driver_pin("Y");
+    gu::set_bits(y, 1);
+    graph->get_output_pin("y").connect_driver(y);
+    return graph;
+  };
+  const auto options = tie_options("unknown", {{"tie_lo", {{"lo", false}}}, {"tie_hi", {{"hi", true}}}});
+  {
+    hhds::GraphLibrary source, flat;
+    const auto         graph = build(source);
+    try {
+      (void)place(*graph, flat, options);
+      FAIL() << "an unknown constant reached a physical net without the opt-in";
+    } catch (const std::runtime_error& e) {
+      EXPECT_NE(std::string(e.what()).find("unknown constant"), std::string::npos) << e.what();
+    }
+  }
+  hhds::GraphLibrary source, flat;
+  const auto         graph = build(source);
+  auto               tied  = options;
+  tied.unknown_const_zero  = true;
+  const auto placed        = place(*graph, flat, tied);
+  EXPECT_EQ(placed.unknown_const_tied, 1);
+  EXPECT_EQ(std::count_if(placed.floorplan.components.begin(),
+                          placed.floorplan.components.end(),
+                          [](const auto& c) { return c.name == "__place_tielo"; }),
+            1);
+}
 TEST(Placement, DualConstantDriverDeclaresAndPreservesAllLibraryOutputs) {
   hhds::GraphLibrary source, flat;
   const auto         graph   = both_constants(source);

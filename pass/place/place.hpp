@@ -1,5 +1,6 @@
 // This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 #pragma once
+#include <cstddef>
 #include <functional>
 #include <map>
 #include <memory>
@@ -78,9 +79,15 @@ struct Options {
   bool   retain_placement           = false;
   // Try nearest-whitespace placement of edited/new cells before windowed GP.
   bool   legalize_cells             = false;
+  // Opt-in: an unknown (X) constant bit that reaches a physical net is a synthesis
+  // don't-care (`assign y = 'x`), so any value is a legal refinement; tie it low
+  // instead of refusing the placement. Off keeps the refusal.
+  bool   unknown_const_zero         = false;
 };
 struct Result {
   unsigned                                         fp_resized_cells = 0, fp_repair_edits = 0;
+  // Unknown constant bits tied low under Options::unknown_const_zero (zero otherwise).
+  size_t                                           unknown_const_tied = 0;
   // Own the last FP topology trial; declared before graph so it outlives it.
   std::map<std::string, std::string>               fp_buffer_origins;
   std::shared_ptr<hhds::GraphLibrary>              fp_library;

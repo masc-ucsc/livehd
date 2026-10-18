@@ -161,6 +161,11 @@ livehd::placement::Options placement_options(const Options& opts) {
   out.automatic_bins                  = truthy(synth_set(opts, "place.auto_bins", "false"));
   out.exact_macro_density             = truthy(synth_set(opts, "place.exact_macro_density", "true"));
   out.adaptive_density                = truthy(synth_set(opts, "place.adaptive_density", "true"));
+  const auto unknown_const = synth_set(opts, "place.unknown_const", "error");
+  if (unknown_const != "error" && unknown_const != "zero") {
+    throw Lhd_error{"usage", "synth.place.unknown_const must be error or zero", ""};
+  }
+  out.unknown_const_zero              = unknown_const == "zero";
   out.routability                     = truthy(synth_set(opts, "place.routability", "true"));
   out.routability_charge_compensation = truthy(synth_set(opts, "place.routability_charge_compensation", "true"));
   out.macro_overlap_weight            = number("place.macro_overlap", "50");
@@ -917,6 +922,16 @@ void synth_command(Options& opts, Result& res) {
       set_crash_context(phase_step, phase_log);
       return livehd::placement::timing_feedback(slurp_json(report));
     };
+    // `synth.place.unknown_const=zero` is a refinement of a don't-care, so say how many bits it touched.
+    const auto note_unknown_tied = [](const livehd::placement::Result& r) {
+      if (r.unknown_const_tied > 0) {
+        livehd::diag::warn("synth", "unknown-const-tied-low", "unsupported")
+            .msg("{} physical net bit(s) driven by an unknown (X) constant were tied low (synth.place.unknown_const=zero)",
+                 r.unknown_const_tied)
+            .hint("the RTL assigns 'x on a path that reaches mapped logic; any value is a legal refinement")
+            .emit();
+      }
+    };
     hhds::GraphLibrary seed_library;
     auto               placement_input = *found;
     if (run_timing_place && place_options.fp_timing_interval > 0) {
@@ -945,6 +960,7 @@ void synth_command(Options& opts, Result& res) {
       phase_step.clear();
       phase_log.clear();
       set_crash_context({}, {});
+      note_unknown_tied(seed);
       const auto timing         = evaluate(seed);
       place_options.net_weights = livehd::placement::timing_weights(*seed.parasitics,
                                                                     timing,
@@ -973,6 +989,9 @@ void synth_command(Options& opts, Result& res) {
     phase_step.clear();
     phase_log.clear();
     set_crash_context({}, {});
+    if (!run_timing_place) {
+      note_unknown_tied(placed);  // the seed (above) already reported it when it ran
+    }
     res.recipe_steps.emplace_back("pass.place");
     if (run_resize || run_timing_place || run_resynth) {
       // Every round/trial below re-runs placement (and resynth a fresh ABC frame

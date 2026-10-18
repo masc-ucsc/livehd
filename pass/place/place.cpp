@@ -239,6 +239,9 @@ std::string environment_key(const Options& o, const ph::Technology& tech) {
   if (o.cohesion > 0) {
     h = hash_text(std::format("cohesion:{}", o.cohesion), h);
   }
+  if (o.unknown_const_zero) {
+    h = hash_text("unknown-const-zero", h);
+  }
   if (o.macro_mode == "h2d") {
     h = hash_text(mp::parameter_key(o.macro_parameters), h);
   }
@@ -326,11 +329,17 @@ struct Endpoint {
 class Resolver {
   std::map<std::pair<uint64_t, int>, Endpoint> memo;
   std::set<std::pair<uint64_t, int>>           busy;
+  size_t                                       tied_unknown = 0;
   const ph::Technology&                        tech;
   const std::map<uint64_t, std::string>&       memories;
+  bool                                         unknown_as_zero;
 
 public:
-  explicit Resolver(const ph::Technology& t, const std::map<uint64_t, std::string>& m) : tech(t), memories(m) {}
+  // unknown_as_zero: tie an unknown constant bit low (a legal refinement of a don't-care)
+  // instead of refusing the net; the number of bits tied this way is unknown_tied().
+  explicit Resolver(const ph::Technology& t, const std::map<uint64_t, std::string>& m, bool unknown_zero = false)
+      : tech(t), memories(m), unknown_as_zero(unknown_zero) {}
+  size_t unknown_tied() const { return tied_unknown; }
   Endpoint bit(Pin p, int b, int depth = 0) {
     if (p.is_invalid() || b < 0) {
       throw std::runtime_error("invalid physical wiring operand");
@@ -341,7 +350,11 @@ public:
     if (p.is_const()) {
       const auto& c = gu::const_of(p);
       if (c.unknown_bit_test(b)) {
-        throw std::runtime_error("physical net has an unknown constant");
+        if (!unknown_as_zero) {
+          throw std::runtime_error("physical net has an unknown constant (synth.place.unknown_const=zero ties it low)");
+        }
+        ++tied_unknown;
+        return {{}, {}, 0};
       }
       return {{}, {}, c.bit_test(b) ? 1 : 0};
     }
@@ -2053,7 +2066,7 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
   v.fp.design           = std::string(source.get_name());
   v.fp.dbu              = tech.dbu;
   const auto  memories  = memory_proxies(graph, tech, options.liberty);
-  Resolver    resolver(tech, memories);
+  Resolver    resolver(tech, memories, options.unknown_const_zero);
   double      area      = 0;
   int64_t     max_width = 0, max_height = 0;
   std::string site_name;
@@ -3997,6 +4010,7 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
     std::error_code ec;
     fs::remove(def, ec);
   }
+  result.unknown_const_tied = resolver.unknown_tied();
   result.qor = std::format(
       R"({{"schema_version":1,"kind":"placement","mode":"{}","legal":{},"gp_converged":{},"gp_overflow":{},"hpwl_um":{},"initial_hpwl_um":{},"cells":{},"nets":{},"estimated_macros":{},"virtual_fillers":false,"density_constraint":"soft","timing_model":"placement_rc","timing_approximate":{},"rc_identity":"{}","incremental":{{"enabled":{},"hit":{},"reused_blocks":{},"changed_blocks":{}}}}})",
       options.retain_placement ? "timing_snapshot"
