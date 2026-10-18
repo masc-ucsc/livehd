@@ -278,7 +278,8 @@ namespace {
 // enable = !clk (open while clk == 0); din = Mux(clk, arm0, arm1).
 // `x_on_true_arm` puts the don't-care on the sel==1 arm, i.e. on clk == 1 --
 // the phase the latch is CLOSED, which is the real ICG shape.
-hhds::Node_class build_xhold(hhds::Graph& g, bool x_on_true_arm, hhds::Pin_class& d_out) {
+hhds::Node_class build_xhold(hhds::Graph& g, bool x_on_true_arm, hhds::Pin_class& d_out,
+                             const char* hold_const = "0ub?") {
   auto notn = gu::create_typed_node(g, Ntype_op::Not);
   g.get_input_pin("clk").connect_sink(notn.create_sink_pin(0));
   auto nclk = notn.create_driver_pin(0);
@@ -288,7 +289,7 @@ hhds::Node_class build_xhold(hhds::Graph& g, bool x_on_true_arm, hhds::Pin_class
   auto l   = add_latch(g, "l", nclk, /*active_low=*/false);
   auto mux = gu::create_typed_node(g, Ntype_op::Mux);
   g.get_input_pin("clk").connect_sink(gu::setup_sink_pid(mux, 0));  // selector
-  auto xk = gu::create_const(g, *Dlop::from_pyrope("0ub?"));
+  auto xk = gu::create_const(g, *Dlop::from_pyrope(hold_const));
   auto dv = g.get_input_pin("d");
   gu::set_ubits(dv, 1);  // a graph-IO pin carries no width attr until a pass stamps one
   // pid 1 is the sel==0 arm, pid 2 the sel==1 arm (cgen: `if (sel) a2 else a1`).
@@ -317,6 +318,42 @@ TEST(LatchContract, DontCareOnTheClosedPhaseIsAHoldArm) {
   EXPECT_EQ(arm.get_class_index(), dv.get_class_index())
       << "enable !clk with the don't-care on the clk==1 arm is the real ICG shape: "
          "the latch passes `d` while open, so the arm is `d`";
+}
+
+// The setundef=zero spelling: the reader's don't-care arrives as a KNOWN 0.
+// Selected only while the latch is shut, it is still the hold arm.
+TEST(LatchContract, KnownZeroOnTheClosedPhaseIsAHoldArm) {
+  auto& lib = livehd::Hhds_graph_library::instance("lgdb_lcontract_khold_ok");
+  auto  gio = lib.create_io("khold_ok");
+  gio->add_input("clk", 1);
+  gio->add_input("d", 2);
+  gio->set_bits("d", 1);
+  auto g = gio->create_graph();
+
+  hhds::Pin_class dv;
+  auto            l   = build_xhold(*g, /*x_on_true_arm=*/true, dv, "0");
+  const auto      arm = livehd::latch_contract::latch_transparent_arm(l);
+  ASSERT_FALSE(arm.is_invalid()) << "the setundef=zero hold mux must be peeled";
+  EXPECT_EQ(arm.get_class_index(), dv.get_class_index())
+      << "`Mux(clk, d, 0)` under enable !clk: the 0 is reached only while the latch is shut, so the "
+         "latch passes `d` -- leaving the mux makes every gate bypass read the CLOCK as data";
+}
+
+// ...and a known constant reached while the latch is OPEN is a value it passes.
+TEST(LatchContract, KnownZeroOnTheOpenPhaseIsNotAHoldArm) {
+  auto& lib = livehd::Hhds_graph_library::instance("lgdb_lcontract_khold_bad");
+  auto  gio = lib.create_io("khold_bad");
+  gio->add_input("clk", 1);
+  gio->add_input("d", 2);
+  gio->set_bits("d", 1);
+  auto g = gio->create_graph();
+
+  hhds::Pin_class dv;
+  auto            l   = build_xhold(*g, /*x_on_true_arm=*/false, dv, "0");
+  const auto      arm = livehd::latch_contract::latch_transparent_arm(l);
+  EXPECT_NE(arm.get_class_index(), dv.get_class_index())
+      << "a constant selected while the latch is OPEN is a value the latch passes; peeling it to `d` "
+         "would invent a value the design never passes";
 }
 
 TEST(LatchContract, DontCareOnTheOpenPhaseIsNotAHoldArm) {

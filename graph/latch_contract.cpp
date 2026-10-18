@@ -591,6 +591,18 @@ std::string Commit_class::net_key() const {
 // The two overloads had already drifted apart once -- the don't-care spelling
 // was taught to the flat one alone -- so they share this now rather than
 // carrying two subtly different loops.
+// THE setundef=zero SPELLING. `yosys.setundef=zero` -- which every CORE-ET and
+// CVA6 row is compiled with -- turns the reader's don't-care hold arm `1'sb?`
+// into a KNOWN constant, so prim_clk_gate's enable latch arrives as
+// `Mux(Ror(clk), 0, en)`. What made the X arm safe to peel was never its value:
+// it is selected only on the phase the latch is SHUT, and a shut latch does not
+// read its input. The same holds for any constant there. So a mux with no X arm,
+// exactly one KNOWN-constant arm and one non-constant arm offers that constant
+// as the hold-arm candidate (`x_index`/`x_drv`), and `x_arm_is_the_hold_arm`
+// still has to prove the phase before anything is peeled -- a constant reached
+// while the latch is OPEN keeps value semantics exactly as before. Left a value
+// mux, the arm handed to a gate bypass and to a retyped latch's din read the
+// CLOCK as data (`we & (clk ? 0 : en)` on a memory write enable).
 template <typename Pin>
 struct Mux_arms {
   bool ok        = false;  // exactly two arms, each with exactly one driver
@@ -606,6 +618,11 @@ template <typename Node, typename Pin>
 [[nodiscard]] Mux_arms<Pin> classify_mux_arms(const Node& mux, const Pin& q) {
   Mux_arms<Pin> r;
   int           n_sel_drv = 0;
+  int           n_known   = 0;  // arms driven by a KNOWN constant
+  int           n_value   = 0;  // arms driven by anything else (not Q, not X)
+  int           k_index   = -1;
+  Pin           k_drv;
+  Pin           v_drv;
   for (auto sink : mux.inp_sorted_pins()) {  // read-only walk
     const auto pid = static_cast<int>(sink.get_port_id());
     int        n_drv = 0;
@@ -635,11 +652,26 @@ template <typename Node, typename Pin>
       r.x_drv   = only;
       continue;
     }
+    if (only.is_const()) {
+      ++n_known;
+      k_index = pid - 1;
+      k_drv   = only;
+    } else {
+      ++n_value;
+      v_drv = only;
+    }
     if (r.other.is_invalid()) {
       r.other = only;
     }
   }
   r.ok = r.n_arms == 2 && n_sel_drv == 1 && !r.sel.is_invalid();
+  // The setundef=zero spelling (see above): only when there is NO X arm and
+  // NO Q arm, so every shape the X/Q logic already decides is untouched.
+  if (r.ok && r.x_index == -1 && !r.has_q_arm && n_known == 1 && n_value == 1) {
+    r.x_index = k_index;
+    r.x_drv   = k_drv;
+    r.other   = v_drv;
+  }
   return r;
 }
 
