@@ -74,11 +74,15 @@ sh_test(
     name = "nonblocking_comb_latch_class",
     srcs = ["tests/nonblocking_comb_latch_class.sh"],
     data = [
+        "tests/nonblocking_latch_class/partial_and_readback.v",
         "tests/sv/nonblocking_comb_always.v",
         "tests/sv/nonblocking_latch_kept.v",
         "//lhd",
     ],
-    env = {"FIXTURES": "inou/slang/tests/sv"},
+    env = {
+        "CLASS_FIXTURES": "inou/slang/tests/nonblocking_latch_class",
+        "FIXTURES": "inou/slang/tests/sv",
+    },
 )
 
 # Run-time severity tasks are not hardware: ignored with one warning per call.

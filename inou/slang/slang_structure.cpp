@@ -386,9 +386,12 @@ struct Read_collector : public slang::ast::ASTVisitor<Read_collector, slang::ast
 // unmodelled anyway, and `return` needs a function body, never descended into).
 void definite_blocking_writes(const slang::ast::Statement& stmt, absl::flat_hash_set<const slang::ast::ValueSymbol*>& out,
                               const std::function<bool(const slang::ast::CaseStatement&)>& exhaustive, bool strict = false,
-                              bool nonblocking = false) {
+                              bool nonblocking = false, bool whole_only = false) {
   using slang::ast::StatementKind;
   auto all_writes_below = [&](const slang::ast::Statement& s) {
+    if (whole_only) {
+      return;  // an unmodelled statement kind proves no whole-symbol write
+    }
     Write_collector wc;
     s.visit(wc);
     const auto& writes = nonblocking ? wc.nonblocking : wc.blocking;
@@ -399,10 +402,10 @@ void definite_blocking_writes(const slang::ast::Statement& stmt, absl::flat_hash
       return;
     }
     absl::flat_hash_set<const slang::ast::ValueSymbol*> acc;
-    definite_blocking_writes(*arms.front(), acc, exhaustive, strict, nonblocking);
+    definite_blocking_writes(*arms.front(), acc, exhaustive, strict, nonblocking, whole_only);
     for (size_t i = 1; i < arms.size(); ++i) {
       absl::flat_hash_set<const slang::ast::ValueSymbol*> other;
-      definite_blocking_writes(*arms[i], other, exhaustive, strict, nonblocking);
+      definite_blocking_writes(*arms[i], other, exhaustive, strict, nonblocking, whole_only);
       absl::flat_hash_set<const slang::ast::ValueSymbol*> keep;
       for (const auto* sym : acc) {
         if (other.contains(sym)) {
@@ -418,14 +421,14 @@ void definite_blocking_writes(const slang::ast::Statement& stmt, absl::flat_hash
     case StatementKind::Empty: return;
     case StatementKind::List:
       for (const auto* s : stmt.as<slang::ast::StatementList>().list) {
-        definite_blocking_writes(*s, out, exhaustive, strict, nonblocking);  // sequential: a later write still counts
+        definite_blocking_writes(*s, out, exhaustive, strict, nonblocking, whole_only);  // sequential: a later write still counts
       }
       return;
     case StatementKind::Block:
-      definite_blocking_writes(stmt.as<slang::ast::BlockStatement>().body, out, exhaustive, strict, nonblocking);
+      definite_blocking_writes(stmt.as<slang::ast::BlockStatement>().body, out, exhaustive, strict, nonblocking, whole_only);
       return;
     case StatementKind::Timed:
-      definite_blocking_writes(stmt.as<slang::ast::TimedStatement>().stmt, out, exhaustive, strict, nonblocking);
+      definite_blocking_writes(stmt.as<slang::ast::TimedStatement>().stmt, out, exhaustive, strict, nonblocking, whole_only);
       return;
     case StatementKind::ExpressionStatement: {
       const auto& e = stmt.as<slang::ast::ExpressionStatement>().expr;
@@ -441,6 +444,14 @@ void definite_blocking_writes(const slang::ast::Statement& stmt, absl::flat_hash
           for (const auto* op : lhs.as<slang::ast::ConcatenationExpression>().operands()) {
             note(*op);
           }
+          return;
+        }
+        // `whole_only` counts a write only when it covers the whole symbol (`q <= d`, not `q[0] <= d`).
+        const slang::ast::Expression* bare = &lhs;
+        while (bare->kind == ExpressionKind::Conversion) {
+          bare = &bare->as<slang::ast::ConversionExpression>().operand();
+        }
+        if (whole_only && bare->kind != ExpressionKind::NamedValue) {
           return;
         }
         if (const auto* sym = lhs_base_symbol(lhs)) {
@@ -1985,10 +1996,10 @@ void Slang_context::collect_state_vars(const slang::ast::Scope& body) {
     // case with a default) holds no value: it is combinational logic, exactly as
     // yosys' proc pass decides (completeness, not the `<=` spelling, makes a
     // latch). Only an incomplete path is the M1 latch idiom. Conservative: a
-    // block that also writes the symbol with `=`, or reads a symbol it writes
-    // with `<=` (where the nonblocking old-value read and the settled value
-    // differ), keeps the latch classification. `always_latch` is a latch by
-    // declaration.
+    // block that also writes the symbol with `=`, never writes all of it on
+    // every path (only `q[0] <= d`), or reads a symbol it writes with `<=`
+    // (where the nonblocking old-value read and the settled value differ),
+    // keeps the latch classification. `always_latch` is a latch by declaration.
     absl::flat_hash_set<const slang::ast::ValueSymbol*> comb_nonblocking;
     if (is_latch_block && pbs.procedureKind == slang::ast::ProceduralBlockKind::Always && !wc.nonblocking.empty()) {
       absl::flat_hash_set<const slang::ast::ValueSymbol*> definite;
@@ -1998,10 +2009,20 @@ void Slang_context::collect_state_vars(const slang::ast::Scope& body) {
           [this](const auto& c) { return case_is_exhaustive(c); },
           /*strict=*/false,
           /*nonblocking=*/true);
+      // The Migen/LiteX per-bit form `x <= 0; x[0] <= a; x[1] <= b;` is complete because a WHOLE
+      // default write dominates every path; partial writes alone leave the other bits holding.
+      absl::flat_hash_set<const slang::ast::ValueSymbol*> definite_whole;
+      definite_blocking_writes(
+          pbs.getBody(),
+          definite_whole,
+          [this](const auto& c) { return case_is_exhaustive(c); },
+          /*strict=*/false,
+          /*nonblocking=*/true,
+          /*whole_only=*/true);
       Read_collector rc;
       pbs.getBody().visit(rc);
       for (const auto* sym : wc.nonblocking) {
-        if (definite.contains(sym) && !wc.blocking.contains(sym) && !rc.reads.contains(sym)) {
+        if (definite.contains(sym) && definite_whole.contains(sym) && !wc.blocking.contains(sym) && !rc.reads.contains(sym)) {
           comb_nonblocking.insert(sym);
         }
       }

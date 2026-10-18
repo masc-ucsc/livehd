@@ -9,16 +9,24 @@ module nonblocking_comb_always (
     input  [7:0] b,
     output [7:0] y_o,
     output [7:0] z_o,
-    output [7:0] w_o
+    output [7:0] w_o,
+    output [3:0] v_o
 );
-  // Migen declares its variables with a power-on value; that initial value is
-  // what kept the (degenerate) latch alive and made the chain a rule C pair.
+  // Migen declares its variables with a power-on value, as here.
   reg [7:0] y = 8'd0;
   reg [7:0] z = 8'd0;
   reg [7:0] w = 8'd0;
   assign y_o = y;
   assign z_o = z;
   assign w_o = w;
+  // Migen's per-bit form: a whole default write dominates, bit writes override it.
+  reg [3:0] v = 4'd0;
+  assign v_o = v;
+  always @(*) begin
+    v <= 4'd0;
+    v[0] <= a[0] & c;
+    v[3] <= b[7] | sel[1];
+  end
   always @(*) begin
     y <= 8'd0;
     if (c) y <= a;

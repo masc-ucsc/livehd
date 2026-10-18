@@ -1,6 +1,6 @@
 // :test: lec
 // An incomplete level-sensitive nonblocking block still holds its value: it
-// stays the M1 latch idiom even though a sibling block of the same style is
+// stays the M1 latch idiom even though a sibling block of the same style (r) is
 // combinational.
 module nonblocking_latch_kept (
     input        en,
