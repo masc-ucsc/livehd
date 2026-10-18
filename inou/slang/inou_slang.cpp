@@ -108,6 +108,9 @@ void Inou_slang::setup() {
   m1.add_label_optional("flat_top_io",
                         "true to keep ONLY the top module's struct ports packed (for generated-vs-original Verilog equivalence, "
                         "where the top interface must match)");
+  m1.add_label_optional("inout_as_driven",
+                        "true to lower an inout port as an output when its module drives it (a z drive is a don't-care) and as an "
+                        "input otherwise; the external value of a bidirectional pad is not modeled (default: inout is refused)");
   m1.add_label_optional("slang_flags",
                         "raw slang driver args ('\\x1f'-separated, e.g. -F filelist.f); supplied by `lhd --reader slang -- ...`");
 
@@ -131,6 +134,9 @@ void Inou_slang::setup() {
   m2.add_label_optional("flat_top_io",
                         "true to keep ONLY the top module's struct ports packed (for generated-vs-original Verilog equivalence, "
                         "where the top interface must match)");
+  m2.add_label_optional("inout_as_driven",
+                        "true to lower an inout port as an output when its module drives it (a z drive is a don't-care) and as an "
+                        "input otherwise; the external value of a bidirectional pad is not modeled (default: inout is refused)");
   m2.add_label_optional("slang_flags",
                         "raw slang driver args ('\\x1f'-separated, e.g. -F filelist.f); supplied by `lhd --reader slang -- ...`");
 
@@ -281,6 +287,7 @@ void Inou_slang::work(Eprp_var& var) {
   // flat_top_io: keep ONLY the top module's ports packed (Verilog-vs-Verilog
   // equivalence needs the emitted top interface to match the source module's).
   opts.flat_top_io               = var.has_label("flat_top_io") && var.get("flat_top_io") == "true";
+  opts.inout_as_driven           = var.has_label("inout_as_driven") && var.get("inout_as_driven") == "true";
   if (var.has_label("unroll_limit")) {
     if (int v = atoi(std::string(var.get("unroll_limit")).c_str()); v > 0) {
       opts.unroll_limit = v;

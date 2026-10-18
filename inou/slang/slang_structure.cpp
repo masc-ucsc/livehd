@@ -1510,15 +1510,16 @@ void Slang_context::emit_module_io(const slang::ast::InstanceSymbol& symbol, con
     if (p->kind == SymbolKind::Port) {
       const auto& port = p->as<slang::ast::PortSymbol>();
 
-      if (port.direction == slang::ast::ArgumentDirection::InOut || port.direction == slang::ast::ArgumentDirection::Ref) {
+      if (!port_direction_supported(port)) {
         emit_unsupported(port.location,
                          "unsupported-inout-port",
-                         std::string("port '") + std::string(port.name) + "' is inout/ref, which --reader slang cannot lower");
+                         std::string("port '") + std::string(port.name) + "' is inout/ref, which --reader slang cannot lower",
+                         "inout can be lowered as the direction the module uses with --set compile.slang.inout_as_driven=true");
         continue;
       }
 
       const auto& type   = port.getType();
-      const bool  is_out = port.direction == slang::ast::ArgumentDirection::Out;
+      const bool  is_out = port_is_output(port);
 
       // Unpacked-array port `T arr[N-1:0]` -> flat packed [N*elem_bits-1:0] IO.
       // Yosys places the declaration's rightmost element in the packed bus LSB,
@@ -4253,6 +4254,78 @@ struct Dep_collector : public slang::ast::ASTVisitor<Dep_collector, slang::ast::
 
 }  // namespace
 
+bool Slang_context::port_direction_supported(const slang::ast::PortSymbol& port) const {
+  if (port.direction == slang::ast::ArgumentDirection::InOut) {
+    return options_.inout_as_driven;
+  }
+  return port.direction != slang::ast::ArgumentDirection::Ref;
+}
+
+bool Slang_context::port_is_output(const slang::ast::PortSymbol& port) {
+  if (port.direction == slang::ast::ArgumentDirection::InOut && options_.inout_as_driven) {
+    return inout_port_driven(port);
+  }
+  return port.direction == slang::ast::ArgumentDirection::Out;
+}
+
+// Does the module body that owns `port` drive its internal net? Continuous
+// assigns, procedural writes and the output side of child instances count, with
+// the same write notion (Dep_collector) the driver ordering uses; a child's own
+// inout is an output exactly when that child drives it.
+bool Slang_context::inout_port_driven(const slang::ast::PortSymbol& port) {
+  if (const auto it = inout_driven_.find(&port); it != inout_driven_.end()) {
+    return it->second;
+  }
+  bool        driven = false;
+  const auto* net    = port.internalSymbol;
+  if (net != nullptr && slang::ast::ValueSymbol::isKind(net->kind)) {
+    const auto* sym = &net->as<slang::ast::ValueSymbol>();
+    Dep_collector dc;
+    std::function<void(const slang::ast::Scope&)> walk = [&](const slang::ast::Scope& scope) {
+      for (const auto& member : scope.members()) {
+        if (dc.writes.contains(sym)) {
+          return;
+        }
+        switch (member.kind) {
+          case SymbolKind::ContinuousAssign: member.as<slang::ast::ContinuousAssignSymbol>().getAssignment().visit(dc); break;
+          case SymbolKind::ProceduralBlock : member.as<slang::ast::ProceduralBlockSymbol>().getBody().visit(dc); break;
+          case SymbolKind::Instance:
+            for (const auto* conn : member.as<slang::ast::InstanceSymbol>().getPortConnections()) {
+              const auto* expr = conn->getExpression();
+              if (expr == nullptr || conn->port.kind != SymbolKind::Port
+                  || !port_is_output(conn->port.as<slang::ast::PortSymbol>())) {
+                continue;
+              }
+              if (const auto* assign = expr->as_if<slang::ast::AssignmentExpression>()) {
+                expr = &assign->left();
+              }
+              dc.note_lhs(*expr);
+            }
+            break;
+          case SymbolKind::GenerateBlock:
+            if (!member.as<slang::ast::GenerateBlockSymbol>().isUninstantiated) {
+              walk(member.as<slang::ast::GenerateBlockSymbol>());
+            }
+            break;
+          case SymbolKind::GenerateBlockArray:
+            for (const auto* entry : member.as<slang::ast::GenerateBlockArraySymbol>().entries) {
+              if (!entry->isUninstantiated) {
+                walk(*entry);
+              }
+            }
+            break;
+          case SymbolKind::InstanceArray: walk(member.as<slang::ast::InstanceArraySymbol>()); break;
+          default                       : break;
+        }
+      }
+    };
+    walk(*port.getParentScope());
+    driven = dc.writes.contains(sym);
+  }
+  inout_driven_.emplace(&port, driven);
+  return driven;
+}
+
 // External nets connected to an instance's PURELY-STATE output ports — an
 // output whose internal driver is a submodule flop/latch q (so it is
 // combinationally independent of every input at the module boundary, exactly
@@ -4510,7 +4583,7 @@ void Slang_context::lower_members(const slang::ast::Scope& scope) {
               continue;
             }
             Dep_collector dc;
-            if (conn->port.as<slang::ast::PortSymbol>().direction == slang::ast::ArgumentDirection::Out) {
+            if (port_is_output(conn->port.as<slang::ast::PortSymbol>())) {
               const auto* target = expr;
               if (const auto* assign = target->as_if<slang::ast::AssignmentExpression>()) {
                 target = &assign->left();
@@ -4794,7 +4867,8 @@ void Slang_context::lower_members(const slang::ast::Scope& scope) {
         if (conn->port.kind != SymbolKind::Port || conn->getExpression() == nullptr) {
           continue;
         }
-        auto direction = conn->port.as<slang::ast::PortSymbol>().direction;
+        const auto& conn_port = conn->port.as<slang::ast::PortSymbol>();
+        auto        direction = port_is_output(conn_port) ? slang::ast::ArgumentDirection::Out : conn_port.direction;
         if (direction == slang::ast::ArgumentDirection::Out) {
           collect_packed_target(*conn->getExpression());
         } else if (direction != slang::ast::ArgumentDirection::In) {
@@ -5345,8 +5419,7 @@ void Slang_context::lower_members(const slang::ast::Scope& scope) {
         // see instance connections).
         for (const auto* conn : d.member->as<slang::ast::InstanceSymbol>().getPortConnections()) {
           const auto* expr = conn->getExpression();
-          if (expr == nullptr || conn->port.kind != SymbolKind::Port
-              || conn->port.as<slang::ast::PortSymbol>().direction != slang::ast::ArgumentDirection::Out) {
+          if (expr == nullptr || conn->port.kind != SymbolKind::Port || !port_is_output(conn->port.as<slang::ast::PortSymbol>())) {
             continue;
           }
           const auto* t = expr;
@@ -8159,7 +8232,7 @@ void Slang_context::lower_instance(const slang::ast::InstanceSymbol& inst) {
     }
     const auto& port   = conn->port.as<slang::ast::PortSymbol>();
     const auto* expr   = conn->getExpression();
-    const bool  is_out = port.direction == slang::ast::ArgumentDirection::Out;
+    const bool  is_out = port_is_output(port);
     if (liberty_memory && !is_out && expr != nullptr) {
       const auto* actual = expr;
       while (actual->kind == ExpressionKind::Conversion && actual->as<slang::ast::ConversionExpression>().isImplicit()) {
@@ -8175,11 +8248,12 @@ void Slang_context::lower_instance(const slang::ast::InstanceSymbol& inst) {
         return;
       }
     }
-    if (port.direction == slang::ast::ArgumentDirection::InOut || port.direction == slang::ast::ArgumentDirection::Ref) {
+    if (!port_direction_supported(port)) {
       emit_unsupported(
           inst.location,
           "unsupported-inout-port",
-          std::string("instance '") + std::string(inst.name) + "' connects inout port '" + std::string(port.name) + "'");
+          std::string("instance '") + std::string(inst.name) + "' connects inout port '" + std::string(port.name) + "'",
+          "inout can be lowered as the direction the module uses with --set compile.slang.inout_as_driven=true");
       end_input_phase();
       return;
     }

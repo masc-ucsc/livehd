@@ -92,6 +92,13 @@ sh_test(
     env = {"FIXTURES": "inou/slang/tests/sv"},
 )
 
+# `inout` is refused unless compile.slang.inout_as_driven lowers it by direction of use.
+sh_test(
+    name = "inout_as_driven",
+    srcs = ["tests/inout_as_driven.sh"],
+    data = ["//lhd"],
+)
+
 sh_test(
     name = "automatic_packed_local",
     srcs = ["tests/automatic_packed_local.sh"],

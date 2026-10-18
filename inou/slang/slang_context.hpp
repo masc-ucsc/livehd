@@ -307,6 +307,8 @@ struct Slang_module_state {
   // here carry their range in mem_info_ but route through bit-slice get/set
   // instead of store/tuple_get.
   absl::flat_hash_set<const slang::ast::Symbol*>                           flat_port_syms_;
+  // Memo of inout_port_driven: a walk of the port's module body, asked once per port.
+  absl::flat_hash_map<const slang::ast::PortSymbol*, bool>                 inout_driven_;
   // PACKED 2-D reg arrays (`reg [N-1:0][W-1:0]`, W>1) that are RUNTIME-indexed
   // somewhere — a firtool-style register file. These memory-ize (one `__memory`
   // node) instead of flattening to a single N*W-bit flop, so they LEC against an
@@ -484,6 +486,15 @@ public:
     // port list, and only the top's: submodule interfaces are internal to each
     // netlist. Off by default — LiveHD's own representation is the bundle.
     bool flat_top_io               = false;
+    // Opt-in `inout` lowering (compile.slang.inout_as_driven). LiveHD has no
+    // tri-state cell, so an `inout` port is lowered as the direction its module
+    // actually uses: OUTPUT when the module (or a child instance wired to the
+    // port) drives it, INPUT otherwise. A `1'bz` drive is a don't-care, so the
+    // driven value wins, and reads of the port see that driven value: the
+    // external value of a genuinely bidirectional pad is NOT modeled, which is
+    // what ASIC synthesis flows do to a pad cell. Off by default: the reader
+    // refuses `inout` with `unsupported-inout-port`.
+    bool inout_as_driven           = false;
   };
 
   Slang_context() = default;
@@ -726,6 +737,14 @@ private:
   // Full qualification of a port at def AND call sites (option + plain name +
   // type rule). Deterministic: consults no body uses.
   bool                             bundle_port_qualifies(const slang::ast::PortSymbol& port, std::string_view owner_def = {}) const;
+  // Direction after the opt-in inout lowering: an `inout` port is an output
+  // when its own module body drives it (see Options::inout_as_driven), an input
+  // otherwise. Def and call sites ask the same question of the same body, so
+  // they agree. Without the option it is just `direction == Out`.
+  bool                             port_is_output(const slang::ast::PortSymbol& port);
+  bool                             inout_port_driven(const slang::ast::PortSymbol& port);
+  // True for a direction the reader can lower: in/out, plus inout under the option.
+  bool                             port_direction_supported(const slang::ast::PortSymbol& port) const;
   // Definition names of the elaboration roots (slang's root.topInstances).
   // `flat_top_io` packs the IO of exactly these.
   absl::flat_hash_set<std::string> top_defs_;

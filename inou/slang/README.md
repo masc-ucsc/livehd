@@ -76,6 +76,14 @@ Two limitations of that header are real and currently unchecked:
   a mixed `=`/`<=` writer, a read-back and `always_latch` keep the latch classification (the
   prim_clk_gate idiom `always @(clk or ...) if (!clk) en_latch <= ...`). Chains of
   degenerate latches used to trip the latch contract (rule C) on LiteX output.
+- **`inout`.** LiveHD has no tri-state cell, so an `inout` port is refused with
+  `unsupported-inout-port` unless `--set compile.slang.inout_as_driven=true` selects the pad
+  model used by ASIC flows: the port is lowered as the direction its module uses, an OUTPUT
+  when the module (or a child instance wired to the port) drives it and an INPUT when it only
+  reads it. A `1'bz` drive is a don't-care, so the driven value wins and a read of the port
+  sees what the module drives (the external value of a genuinely bidirectional pad is not
+  modeled). A Lattice `TRELLIS_IO` (`assign B = T ? 1'bz : I; assign O = B;`) becomes an
+  output `B` carrying `I`, and the bus it drives is an output of the parent.
 
 ## Passing raw slang driver args (`-- ...`)
 
