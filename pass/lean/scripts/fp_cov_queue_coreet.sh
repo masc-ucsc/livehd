@@ -19,6 +19,8 @@ B=$COV/$ROW/attempt-$ATTEMPT
 mkdir -p "$COV/tmp" "$(dirname "$B")"
 mkdir "$B" 2>/dev/null || { echo "$ROW: ATTEMPT COLLISION, $B exists; refusing to reuse"; exit 3; }
 export TMPDIR=$COV/tmp TMP=$COV/tmp TEMP=$COV/tmp COREET_ROOT=${COREET_ROOT:?set COREET_ROOT to the pinned core-et checkout}
+# FP_SINGLE_EDGE_SET: one `--set` for pass.single_edge, e.g. multi_clock=true for
+# a design with genuinely unrelated clocks (B05); recorded in BINDING.txt.
 # No wall-clock cap by default (FP_TIMEOUT=0 disables GNU timeout); the memory
 # ceiling (FP_MEMMAX, default 48G) stays, for host safety only.
 CR="bash $R/pass/lean/scripts/fp_cov_run.sh"
@@ -58,7 +60,8 @@ printf '// Empty anchor. Real CORE-ET sources arrive via yosys.filelist_file.\n'
   echo "lhd=$LOPT sha256=$(sha256sum "$LOPT" | cut -d' ' -f1)"
   echo "coreet_root=$COREET_ROOT rev=$(git -C $COREET_ROOT rev-parse HEAD)"
   echo "max_width=1048576 (default 1024 refusal preserved)"
-  echo "adapter_filelist=${FP_FILELIST:-none} include=${INC:-none}"; } > "$B/BINDING.txt"
+  echo "adapter_filelist=${FP_FILELIST:-none} include=${INC:-none}"
+  echo "single_edge_set=${FP_SINGLE_EDGE_SET:-none}"; } > "$B/BINDING.txt"
 
 $CR "$ROW" s1_compile_lg "$B/s1_compile" "${FP_MEMMAX:-48G}" "${FP_TIMEOUT:-0}" -- \
   "$LOPT" compile verilog "$ANCHOR" --reader yosys-slang --top "$UNIT" \
@@ -71,7 +74,7 @@ s1=$(cat "$B/s1_compile/exit" 2>/dev/null || echo 99)
   || { echo "$ROW/$ATTEMPT: STOP after s1 (exit $s1)"; exit 1; }
 
 $CR "$ROW" s2_single_edge "$B/s2_single_edge" "${FP_MEMMAX:-48G}" "${FP_TIMEOUT:-0}" -- \
-  "$LOPT" pass single_edge --top "$UNIT" lg:"$B/s1_compile/lg" \
+  "$LOPT" pass single_edge --top "$UNIT" lg:"$B/s1_compile/lg" ${FP_SINGLE_EDGE_SET:+--set "$FP_SINGLE_EDGE_SET"} \
   --emit-dir lg:"$B/s2_single_edge/lg" --workdir "$B/s2_single_edge/work" \
   --result-json "$B/s2_single_edge/result.json"
 s2=$(cat "$B/s2_single_edge/exit" 2>/dev/null || echo 99)

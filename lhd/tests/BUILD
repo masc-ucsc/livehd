@@ -1028,6 +1028,21 @@ sh_test(
     data = ["//lhd"],
 )
 
+# A GATED memory write clock with no phase divider (P=1): the gate folds into the
+# write enable and the port's clock rebinds to the root, so pass.lean emits a
+# certificate (it refuses a gate left on a memory clock). With LHD_EXTERNAL_SIM=1
+# an Icarus differential against the source, and against a GATE-LESS source as
+# the negative control.
+sh_test(
+    name = "single_edge_memory_gate_p1_test",
+    size = "large",
+    srcs = ["single_edge_memory_gate_p1_test.sh"],
+    data = [
+        "//lhd",
+        "//ware:cgen_memory_rtl",
+    ],
+)
+
 # LIVE test for todo/livehd/2f-latch M8 steps 3b + 3g: all FOUR commit classes
 # (posedge, negedge, transparent-high, transparent-low) in ONE module.
 # Discrimination is checked through `lhd lec` (collapsing any two classes must

@@ -232,7 +232,27 @@ struct Mem_gate_plan {
   // the graph untouched (`opts.dry_run` returns before any rewrite and promises
   // exactly that). The AND cone over them is built in the rewrite.
   std::vector<hhds::Pin_class> gate_ops;
+  // The clock_pin to rebind to once the gate is folded: invalid means the
+  // reference pin; a port on a SECOND clock domain (multi_clock) keeps its own
+  // resolved root, because it is exported, not lowered.
+  hhds::Pin_class own_root;
 };
+
+// Does a write port of `n` sit behind a clock GATE? Such a port owes the fold
+// below even without a phase divider: the exporter refuses a gate left on
+// clock_pin, since dropping it would commit unconditionally.
+bool mem_has_gated_write_port(const hhds::Node_class& n, const lc::Design_clocks& clocks) {
+  const auto ms = mem_shape_of(n);
+  if (!ms.parsed) {
+    return false;  // judged by name where the scan runs; not a reason to start one
+  }
+  for (const auto& port : ms.ports) {
+    if (!port.rdport && !port.clock.is_invalid() && lc::resolve_icg(port.clock, clocks)) {
+      return true;
+    }
+  }
+  return false;
+}
 
 // A cell with no committing port: an immutable asynchronous ROM.  `update`,
 // `update_enable` and whole-array reset cells all carry a write port and are
@@ -1395,7 +1415,13 @@ Result normalize(hhds::Graph* g, const std::vector<hhds::Graph*>& defs, const Op
       refuse(quiet, "fflop-unsupported", std::format("{}: {}", g->get_name(), r.reason), "");
       return r;
     }
-    if (op == Ntype_op::Memory && plan.slots > 1) {
+    // WITHOUT a divider a memory owes this pass something only when a write
+    // port is GATED: the gate must still fold into the write enable (ported
+    // from d2, 90583be13 -- the Phase-A fold rode inside P>1, so a gated memory
+    // in a design that needed no divider kept its gated clock and the exporter
+    // refused it: B05's async-FIFO `u_ar_fifo.mem_1`).
+    const bool mem_fold_only = op == Ntype_op::Memory && plan.slots <= 1 && mem_has_gated_write_port(n, clocks);
+    if (op == Ntype_op::Memory && (plan.slots > 1 || mem_fold_only)) {
       // The blanket refusal this replaces fired on EVERY Memory at P>1.  What
       // actually mis-times under a phase divider is a port that COMMITS on a
       // sub-step it does not own, so the shape and the CLOCK decide.
@@ -1430,7 +1456,7 @@ Result normalize(hhds::Graph* g, const std::vector<hhds::Graph*>& defs, const Op
       if (mem_is_immutable_rom(ms)) {
         continue;  // nothing commits: an immutable asynchronous ROM
       }
-      if (ms.sync_read) {
+      if (ms.sync_read && plan.slots > 1) {  // a divider-only hazard: at P=1 there are no sub-steps
         r.error  = true;
         r.reason = "memory `" + label_of(n) + "` has a synchronous read port; its read register would commit on every sub-step";
         refuse(quiet, "memory-unsupported", std::format("{}: {}", g->get_name(), r.reason),
@@ -1476,19 +1502,29 @@ Result normalize(hhds::Graph* g, const std::vector<hhds::Graph*>& defs, const Op
                  "the committing edge must be classified before the port can be slotted");
           return r;
         }
+        // A SECOND CLOCK DOMAIN (multi_clock): a POSEDGE port on another root
+        // is exported as its own domain -- no slot gate, its gate (if any)
+        // folds, its clock rebinds to ITS root. Anything else off the reference
+        // is refused as before.
+        bool port_off_ref = false;
         if (!cc->implicit_clock && cc->net_key() != plan.ref_net) {
-          r.error  = true;
-          r.reason = "memory `" + label_of(n) + "` write port " + std::to_string(port.port)
-                     + " commits on a net that is not the reference clock";
-          refuse(quiet, "memory-unsupported", std::format("{}: {}", g->get_name(), r.reason),
-                 "an off-reference memory clock is not rebound by this pass");
-          return r;
+          if (opts.multi_clock && cc->rising) {
+            port_off_ref = true;
+          } else {
+            r.error  = true;
+            r.reason = "memory `" + label_of(n) + "` write port " + std::to_string(port.port)
+                       + " commits on a net that is not the reference clock";
+            refuse(quiet, "memory-unsupported", std::format("{}: {}", g->get_name(), r.reason),
+                   opts.multi_clock ? "only a posedge memory may live off the reference clock"
+                                    : "an off-reference memory clock is not rebound by this pass (see multi_clock)");
+            return r;
+          }
         }
         // TWO BITS OF ONE CLOCK BUS ARE DIFFERENT CLOCKS.  `build_plan` already
         // tracks this with `clock_bit_on`/`ref_clk_bit`; comparing `net_key()`
         // alone would accept a memory clocked by a DIFFERENT bit of the same
         // multi-bit input and then gate it against the reference bit's phase.
-        if (!cc->implicit_clock && !cc->net.is_invalid() && gu::is_graph_input_pin(cc->net)
+        if (!port_off_ref && !cc->implicit_clock && !cc->net.is_invalid() && gu::is_graph_input_pin(cc->net)
             && gu::bits_of(cc->net) > 1) {
           const auto bit = clock_bit_on(clk_pin, cc->net, 0, 0);
           if (!bit || (plan.ref_clk_bit >= 0 && *bit != plan.ref_clk_bit)) {
@@ -1606,13 +1642,20 @@ Result normalize(hhds::Graph* g, const std::vector<hhds::Graph*>& defs, const Op
         // THE SLOT, decided here and FROZEN.  There is no fallback: the class
         // resolved, is on the reference net and bit, and is rising, so either
         // the key is in `slot_of_key` or the rise/fall map gives it.
-        int slot = 0;
-        if (auto it = plan.slot_of_key.find(cc->key()); it != plan.slot_of_key.end()) {
-          slot = it->second;
-        } else {
-          slot = cc->rising ? 0 : 1;  // the same map build_plan uses
+        // -1 = NO slot gate: no divider, or a port on a second domain.
+        int slot = -1;
+        if (plan.slots > 1 && !port_off_ref) {
+          if (auto it = plan.slot_of_key.find(cc->key()); it != plan.slot_of_key.end()) {
+            slot = it->second;
+          } else {
+            slot = cc->rising ? 0 : 1;  // the same map build_plan uses
+          }
         }
-        mem_gate_plans.push_back({n, port.port, port.enable, ms.wensize, slot, port_gate_ops});
+        if (slot < 0 && port_gate_ops.empty()) {
+          continue;  // neither a slot nor a gate: this port is left exactly as it is
+        }
+        mem_gate_plans.push_back({n, port.port, port.enable, ms.wensize, slot, port_gate_ops,
+                                  port_off_ref ? cc->net : hhds::Pin_class{}});
       }
       // everything else is handled by the slot gate below
     }
@@ -1869,9 +1912,14 @@ Result normalize(hhds::Graph* g, const std::vector<hhds::Graph*>& defs, const Op
     // the AND is a 1-bit AND and the Sext + Get_mask below widens the PAIR to
     // `wensize` -- the gate therefore reaches every lane, and no wide constant
     // is minted for it either.
-    auto pred = slot_pred[mp.slot];
+    // No slot (P=1, or a second domain): the gate ALONE is the predicate.
+    hhds::Pin_class pred = mp.slot >= 0 ? slot_pred[mp.slot] : hhds::Pin_class{};
     for (const auto& gop : mp.gate_ops) {
       if (gop.is_invalid()) {
+        continue;
+      }
+      if (pred.is_invalid()) {
+        pred = gop;
         continue;
       }
       auto gandn = gu::create_typed_node(*g, Ntype_op::And);
@@ -1880,6 +1928,9 @@ Result normalize(hhds::Graph* g, const std::vector<hhds::Graph*>& defs, const Op
       pred = gandn.create_driver_pin(0);
       gu::set_bits(pred, 1);
       gu::set_unsign(pred);
+    }
+    if (pred.is_invalid()) {
+      continue;  // unreachable: a port with neither slot nor gate is never planned
     }
     auto sx = gu::create_typed_node(*g, Ntype_op::Sext);
     pred.connect_sink(sx.create_sink_pin(0));
@@ -1916,7 +1967,8 @@ Result normalize(hhds::Graph* g, const std::vector<hhds::Graph*>& defs, const Op
     // a DERIVED clock in a design this pass exists to make single-edge -- the
     // encoder refuses one, so the cell would come back UNKNOWN after a
     // successful lowering. Rebind to the root the gate resolved to.
-    if (!mp.gate_ops.empty() && !plan.ref_clk_pin.is_invalid()) {
+    const auto rebind_to = mp.own_root.is_invalid() ? plan.ref_clk_pin : mp.own_root;
+    if (!mp.gate_ops.empty() && !rebind_to.is_invalid()) {
       // REBIND TO THE VALIDATED REFERENCE PIN, not to the gate's bare root.
       // When the reference edge is on bit k>0 of a bus, `plan.ref_clk_pin` has
       // already been replaced by the SELECTED bit above -- every rebound
@@ -1926,16 +1978,20 @@ Result normalize(hhds::Graph* g, const std::vector<hhds::Graph*>& defs, const Op
       // this port is on the reference bit by construction and the selected pin
       // is the right one.
       mem_drop_port_sink(mp.node, "clock_pin", mp.port);
-      plan.ref_clk_pin.connect_sink(
+      rebind_to.connect_sink(
           mp.node.create_sink_pin(Ntype::get_sink_pid(Ntype_op::Memory, "clock_pin") + mp.port * stride));
       ++r.mem_ports_ungated;
     }
-    ++r.mem_ports_slotted;
+    if (mp.slot >= 0) {
+      ++r.mem_ports_slotted;
+    } else {
+      ++r.icg_folded;  // a gate folded with no slot (P=1, or a second domain)
+    }
   }
   {
     absl::flat_hash_set<hhds::Class_index> seen;
     for (const auto& mp : mem_gate_plans) {
-      if (seen.insert(mp.node.get_class_index()).second) {
+      if (mp.slot >= 0 && seen.insert(mp.node.get_class_index()).second) {
         ++r.mems_slotted;
       }
     }
