@@ -10,7 +10,11 @@ Lean proofs.
 Lean: `formal/lean/LeanSemanticPrimitives/Projection/Sym/` (17 modules,
 Mathlib-free, built by `formal/lean/.build-proj.sh`, every theorem under the
 failing axiom gate). Drivers: `formal/lean/scripts/sym_verify.lean`,
-`sym_refine.lean`. Scripts: `pass/lean/scripts/sym_*.sh`, `sym_observe.py`.
+`sym_refine.lean`. Scripts: `pass/lean/scripts/sym_selftest.sh` (small
+fixtures only), `sym_observe.py`.
+
+This repository holds the machinery only. Properties of a particular RTL
+design, and their proof artifacts, live with that design, not here.
 
 ## Which residual
 
@@ -169,116 +173,6 @@ The copy then goes through the normal flow (yosys-slang -> LGraph ->
 function is unchanged. `--decl` adds sequential observers: a register and
 its `always` block, read by a port.
 
-## Results
-
-### 12-row table (`sym_bench12.sh`, one process per row)
-
-Property: a candidate output stays 0 while the functional resets (B05: also
-`dft_i`) are held asserted. The other inputs are free.
-
-All 11 rows that have a certificate are proved, every one on the fused route
-at k = 1, native -O2, one process per row. Evidence:
-`pass/lean/specialization/tests/m3_bench12_results.tsv`.
-
-| row | design | invariant | k | verdict | route | specialize s | symbolic eval s | step clauses | solver s | check s | wall s | peak GB |
-|---|---|---|---|---|---|---|---|---|---|---|---|---|
-| B01 | CORE-ET DCache | `s3_core_resp_valid_o = 0` while `rst_ni=0` | 1 | INVARIANT PROVED (k=1) | fused | 25.4 | 225.5 | 48.8M | 32.5 | 137.7 | 650 | 24.7 |
-| B02 | CVA6 HPDcache | `dcache_miss_o = 0` while `rst_ni=0` | 1 | INVARIANT PROVED (k=1) | fused | 23.3 | 28.7 | 63.0M | 32.9 | 450.8 | 592 | 33.1 |
-| B03 | CORE-ET I-cache | `f0_l2_miss_req_valid_o = 0` while `rst_ni=0` | 1 | INVARIANT PROVED (k=1) | fused | 22.3 | 46.1 | 144.6M | 90.3 | 725.7 | 1370 | 71.7 |
-| B04 | CVA6 MMU/TLB/PTW | `dtlb_miss_o = 0` while `rst_ni=0` | 1 | INVARIANT PROVED (k=1) | fused | 7.4 | 32.0 | 61.9M | 35.9 | 456.9 | 594 | 32.4 |
-| B05 | CORE-ET ET-Link->AXI | `axi_ar_valid_o = 0` while `rst_ni=0, noc_rst_ni=0, dft_i=0` | 1 | INVARIANT PROVED (k=1) | fused | 5.2 | 11.5 | 256.0M | 158.0 | 1232.4 | 2058 | 138.4 |
-| B06 | CVA6 LSU | `load_valid_o = 0` while `rst_ni=0` | 1 | INVARIANT PROVED (k=1) | fused | 11.7 | 62.5 | 71.6M | 40.7 | 467.8 | 660 | 36.5 |
-| B07 | CORE-ET VPU | - | - | no certificate (legalization decision open) | | | | | | | | |
-| B08 | CORE-ET IntPipe | `ex_dcache_req_valid = 0` while `rst_ni=0, rst_d_ni=0, rst_w_ni=0` | 1 | INVARIANT PROVED (k=1) | fused | 51.2 | 38.1 | 22.1M | 12.2 | 47.2 | 170 | 12.9 |
-| B09 | CVA6 issue/scoreboard | `alu_valid_o = 0` while `rst_ni=0` | 1 | INVARIANT PROVED (k=1) | fused | 3.3 | 13.3 | 290.6M | 154.9 | 1398.3 | 2011 | 142.6 |
-| B10 | CVA6 frontend | `fetch_entry_valid_o = 0` while `rst_ni=0` | 1 | INVARIANT PROVED (k=1) | fused | 3.1 | 6.2 | 59.6M | 35.0 | 452.4 | 576 | 30.1 |
-| B11 | CORE-ET TLB | `ptw_req_valid_o = 0` while `rst_ni=0` | 1 | INVARIANT PROVED (k=1) | fused | 0.1 | 0.0 | 0.3M | 0.2 | 0.5 | 1 | 0.2 |
-| B12 | PicoRV32 | `mem_valid = 0` while `resetn=0` | 1 | INVARIANT PROVED (k=1) | fused | 0.4 | 0.4 | 0.9M | 0.5 | 1.6 | 4 | 0.5 |
-
-Columns:
-- "solver" is cadical on both obligations together.
-- "check" is Lean's verified LRAT check through `runInvKOf_of_obls`.
-- "symbolic eval" builds both obligations (1 + 2 steps).
-
-The BASE obligation is trivial (2 clauses) on every row, because the reset is
-held from the all-zero state.
-
-Earlier routes for comparison:
-- B09 on the `var` route: symbolic evaluation 2868 s, wall 5945 s.
-- B12 on the `plain` route: wall 743 s.
-
-B08 and B09 ran with `cutLet` (a `let` that binds a variable read or a `tl`
-is not re-cut). The other rows ran before it; their symbolic evaluation was
-not the bottleneck. Without it, B08's did not finish in 30 min; with it,
-38 s.
-
-### PicoRV32 pipeline variants (`sym_pico_variants.sh`)
-
-`base` (TWO_CYCLE_COMPARE=0) and `two_cycle_cmp` (TWO_CYCLE_COMPARE=1: the
-branch compare is registered, adding one EXEC cycle per branch). Observers:
-- `obs_pc = reg_pc` and `obs_state = cpu_state` on both;
-- on `two_cycle_cmp`, the stutter witness
-  `sym_adv = !(cpu_state == EXEC && alu_wait)`.
-
-Fused route, native -O2. Evidence: `pass/lean/specialization/tests/m3_pico_variants_results.tsv`, and the replayed counterexample in `m3_pico_stutter_cex.txt`.
-
-| run | statement | verdict | wall s (plain route) | peak GB |
-|---|---|---|---|---|
-| inv_base | `base`: `trap = 0` while `resetn = 0` | INVARIANT PROVED, k=1 | 3.9 (720) | 0.5 |
-| inv_two | `two_cycle_cmp`: `trap = 0` while `resetn = 0` | INVARIANT PROVED, k=1 | 3.6 (779) | 0.5 |
-| refl_base | `base` refines `base`: 13 output pairs and equal next states (`stateq`) | REFINEMENT PROVED, k=1 | 63 (1545) | 3.3 |
-| stutter_two_base | `two_cycle_cmp` refines `base`, witness `sym_adv`, memory interface + `trap` + `obs_pc` + `obs_state` paired | NOT K-INDUCTIVE at k = 1..7; COUNTEREXAMPLE at k = 8 | 560 (k = 1..6, 8), 290 (k = 7, 8 with replay) | 7.2 |
-
-The k = 8 counterexample, decoded and replayed on both simulators
-(`sym_refine`):
-- cycle 3 fetches `0x98614363`, a BLT;
-- the implementation enters its extra compare cycle (EXEC with `alu_wait`);
-- `resetn` drops at cycle 6, on that stutter cycle, where `sym_adv = 0`, so
-  the specification holds and never sees the reset;
-- at cycle 7 the implementation is back in FETCH (`mem_valid = 0`,
-  `obs_state = 64`) while the specification is still in EXEC
-  (`mem_valid = 1`, `obs_state = 8`).
-
-The relation needs a witness that also advances the specification on
-reset, for example `sym_adv = !(cpu_state == EXEC && alu_wait) || !resetn`,
-and then the strengthening below.
-
-### Driving the variant refinement to a proof
-
-The stutter refinement (`two_cycle_cmp` refines `base` with witness
-`sym_adv`) checks one relation: the memory interface, `trap`, `obs_pc` and
-`obs_state` agree on every witnessed cycle.
-
-- **BASE holds up to k = 7.** There is no counterexample from the all-zero
-  state within 7 cycles. At k = 8 there is the reset counterexample above.
-- **STEP fails.** The step obligation starts from an ARBITRARY pair of
-  states whose paired outputs agreed for k witnessed cycles. Everything the
-  relation does not mention is unconstrained: the register file, `reg_op1`,
-  `reg_op2`, `reg_out`, the `latched_*` flags, the decoder's `instr_*` and
-  `decoded_*`, `mem_state` and `mem_do_*`, and the implementation-only
-  `alu_wait` / `alu_out_0_q`. So the two machines can diverge in the next
-  step. A larger k alone does not fix this, since memory handshakes can
-  stall indefinitely.
-
-Strengthening the relation means exposing and pairing more state with
-`sym_observe.py`. One observer can carry a whole bank, for example
-`obs_regs:1024={cpuregs[31], …, cpuregs[1], 32'b0}`.
-
-Facts that hold only in the implementation (for example `alu_wait` implies
-EXEC) are handled in two steps:
-1. Prove the fact as an invariant with `sym_verify`.
-2. Use it in `sym_refine` as an assumption (`asm:<observer>`).
-
-`runRefKOf_sound_ref` gives the refinement on every cycle whose assumptions
-held. A proved invariant holds on every run from the all-zero state, so the
-two statements compose into the refinement on every such run.
-
-Commands:
-
-    STUTTER_K=1,2,3,4 SYM_NAT=<nat> sym_pico_variants.sh certs stutter
-    <nat>/sym_refine <impl.dcert> <spec.dcert> pair:...  adv:sym_adv [asm:<obs>] k:<n>,...
-
-
 ## Scale and limits
 
 - **Initial state.** Runs start from the all-zero state, and resets are
@@ -294,5 +188,3 @@ Commands:
 - **No kernel control.** See "Trust per verdict".
 - **Out of scope.** Liveness. Stuttering is bounded by k: a witness that holds
   the specification for more than k consecutive cycles needs a larger k.
-- **B07** (CORE-ET VPU) has no certificate while its legalization decision
-  is open.
