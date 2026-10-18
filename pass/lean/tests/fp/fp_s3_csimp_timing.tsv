@@ -1,9 +1,0 @@
-# S2 -> S3 by @[csimp] mixDriver_eq_S3 (B7/D4): the SAME driver source (gen_probe_v2),
-# built native -O2 twice -- S2 = before the csimp (sha256 9a8cb2e20cdf4dfa098e6a109161fd504a90ebe1bdf9f4a5ab7175515580fd15),
-# S3 = with it (sha256 aa33e53ec39310eda2e7839776b3e9d0e0d6585320f69ea8cffd8f956a76104f). Interleaved ABBA, 3 repeats for alu/decoder
-# (d4 DCERT1, fuel 200000/2000), 1 for B10 frontend (DCERT2, fuel 20000/200).
-# residual identity = the save: files (Projection/ResidualIO) compared byte for byte.
-block	S2_specialize_ms	S3_specialize_ms	speedup_median	S2_peak_rss_kb	S3_peak_rss_kb	repeats	residual_bytes_identical
-rt_alu_gate	27907,32960,28638	3382,3948,3392	8.4	100528	123640	3	yes 3/3
-rt_decoder_gate	59533,53079,59974	8329,7607,7711	7.7	109852	110972	3	yes 3/3
-frontend_gate	47302	9531	5.0	700128	699612	1	yes 1/1
