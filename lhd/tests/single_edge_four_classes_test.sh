@@ -204,7 +204,13 @@ module tb;
   integer errs = 0, p;
 
   always #10      clk_s = ~clk_s;   // source:     rise 10+20p, fall 20+20p
-  always #(`HALF) clk_n = ~clk_n;   // normalized: slot0 15+20p, slot1 25+20p
+  // normalized: slot0 15+20p, slot1 25+20p. The phase divider is NOT reset by
+  // `reset`: it is `initial 0` and toggles on every clock, so the FIRST posedge
+  // is slot 0 and the clock must START there. A free-running `always #5` puts
+  // that first posedge at t=5, i.e. slot 0 at 5+20p -- before the source's rise
+  // and before the stimulus change at 6+20p -- and every normalized value lands
+  // exactly one period late (the errs=78 offset recorded in 089555b0e).
+  initial begin #10; forever #(`HALF) clk_n = ~clk_n; end
 
   four8   src(.clk(clk_s), .d(d), .qp(sp), .qn(sn), .qh(sh), .ql(sl), .reset(reset));
   four8_n nrm(.clk(clk_n), .d(d), .qp(np), .qn(nn), .qh(nh), .ql(nl), .reset(reset));
