@@ -68,6 +68,19 @@ sh_test(
     data = ["//lhd"],
 )
 
+# A level-sensitive `always @(*)` of nonblocking assignments is combinational when
+# every path assigns (Migen/LiteX output), a latch only when one path holds.
+sh_test(
+    name = "nonblocking_comb_latch_class",
+    srcs = ["tests/nonblocking_comb_latch_class.sh"],
+    data = [
+        "tests/sv/nonblocking_comb_always.v",
+        "tests/sv/nonblocking_latch_kept.v",
+        "//lhd",
+    ],
+    env = {"FIXTURES": "inou/slang/tests/sv"},
+)
+
 # Run-time severity tasks are not hardware: ignored with one warning per call.
 sh_test(
     name = "severity_task_warning",

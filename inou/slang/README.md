@@ -68,6 +68,14 @@ Two limitations of that header are real and currently unchecked:
   warning per call instead of failing the design (FlooNoC carries a `$warning` in an `always`
   outside `TARGET_SYNTHESIS`). The elaboration forms in a module or generate scope are slang's
   own diagnostics (`InfoTask`, ...) and are unchanged: a taken `$error` still fails.
+- **Nonblocking assignments in a level-sensitive `always @(*)`.** The Migen/LiteX style
+  `x <= 0; if (c) x <= y;` assigns on every path, so `x` is combinational, as in yosys: a
+  latch comes from an incomplete path, not from the `<=` spelling. Such a variable is plain
+  logic when the block writes it only with `<=` on every path and never reads it back (a
+  nonblocking read of the old value and the settled value would differ). An incomplete path,
+  a mixed `=`/`<=` writer, a read-back and `always_latch` keep the latch classification (the
+  prim_clk_gate idiom `always @(clk or ...) if (!clk) en_latch <= ...`). Chains of
+  degenerate latches used to trip the latch contract (rule C) on LiteX output.
 
 ## Passing raw slang driver args (`-- ...`)
 

@@ -320,6 +320,43 @@ struct Loop_control_usage : public slang::ast::ASTVisitor<Loop_control_usage, sl
   }
 };
 
+// Symbols a statement subtree READS: rvalues, conditions and the selector
+// indices of an lvalue (`q[i] <= d` reads `i`, not `q`).
+struct Read_collector : public slang::ast::ASTVisitor<Read_collector, slang::ast::VisitFlags::AllGood> {
+  absl::flat_hash_set<const slang::ast::ValueSymbol*> reads;
+
+  void lhs_selectors(const slang::ast::Expression& e) {
+    switch (e.kind) {
+      case ExpressionKind::Conversion   : lhs_selectors(e.as<slang::ast::ConversionExpression>().operand()); return;
+      case ExpressionKind::MemberAccess : lhs_selectors(e.as<slang::ast::MemberAccessExpression>().value()); return;
+      case ExpressionKind::Concatenation:
+        for (const auto* op : e.as<slang::ast::ConcatenationExpression>().operands()) {
+          lhs_selectors(*op);
+        }
+        return;
+      case ExpressionKind::ElementSelect: {
+        const auto& es = e.as<slang::ast::ElementSelectExpression>();
+        es.selector().visit(*this);
+        lhs_selectors(es.value());
+        return;
+      }
+      case ExpressionKind::RangeSelect: {
+        const auto& rs = e.as<slang::ast::RangeSelectExpression>();
+        rs.left().visit(*this);
+        rs.right().visit(*this);
+        lhs_selectors(rs.value());
+        return;
+      }
+      default: return;
+    }
+  }
+  void handle(const slang::ast::AssignmentExpression& expr) {
+    lhs_selectors(expr.left());
+    expr.right().visit(*this);
+  }
+  void handle(const slang::ast::ValueExpressionBase& expr) { reads.insert(&expr.symbol); }
+};
+
 // Symbols DEFINITELY assigned (blocking) on EVERY path through `stmt`.
 //
 // This is what decides an INFERRED LATCH: in a level-sensitive process, a
@@ -348,22 +385,24 @@ struct Loop_control_usage : public slang::ast::ASTVisitor<Loop_control_usage, sl
 // skip a write inside a modelled shape (`break`/`continue` need a loop, which is
 // unmodelled anyway, and `return` needs a function body, never descended into).
 void definite_blocking_writes(const slang::ast::Statement& stmt, absl::flat_hash_set<const slang::ast::ValueSymbol*>& out,
-                              const std::function<bool(const slang::ast::CaseStatement&)>& exhaustive, bool strict = false) {
+                              const std::function<bool(const slang::ast::CaseStatement&)>& exhaustive, bool strict = false,
+                              bool nonblocking = false) {
   using slang::ast::StatementKind;
   auto all_writes_below = [&](const slang::ast::Statement& s) {
     Write_collector wc;
     s.visit(wc);
-    out.insert(wc.blocking.begin(), wc.blocking.end());
+    const auto& writes = nonblocking ? wc.nonblocking : wc.blocking;
+    out.insert(writes.begin(), writes.end());
   };
   auto intersect_into = [&](const std::vector<const slang::ast::Statement*>& arms) {
     if (arms.empty()) {
       return;
     }
     absl::flat_hash_set<const slang::ast::ValueSymbol*> acc;
-    definite_blocking_writes(*arms.front(), acc, exhaustive, strict);
+    definite_blocking_writes(*arms.front(), acc, exhaustive, strict, nonblocking);
     for (size_t i = 1; i < arms.size(); ++i) {
       absl::flat_hash_set<const slang::ast::ValueSymbol*> other;
-      definite_blocking_writes(*arms[i], other, exhaustive, strict);
+      definite_blocking_writes(*arms[i], other, exhaustive, strict, nonblocking);
       absl::flat_hash_set<const slang::ast::ValueSymbol*> keep;
       for (const auto* sym : acc) {
         if (other.contains(sym)) {
@@ -379,14 +418,14 @@ void definite_blocking_writes(const slang::ast::Statement& stmt, absl::flat_hash
     case StatementKind::Empty: return;
     case StatementKind::List:
       for (const auto* s : stmt.as<slang::ast::StatementList>().list) {
-        definite_blocking_writes(*s, out, exhaustive, strict);  // sequential: a later write still counts
+        definite_blocking_writes(*s, out, exhaustive, strict, nonblocking);  // sequential: a later write still counts
       }
       return;
     case StatementKind::Block:
-      definite_blocking_writes(stmt.as<slang::ast::BlockStatement>().body, out, exhaustive, strict);
+      definite_blocking_writes(stmt.as<slang::ast::BlockStatement>().body, out, exhaustive, strict, nonblocking);
       return;
     case StatementKind::Timed:
-      definite_blocking_writes(stmt.as<slang::ast::TimedStatement>().stmt, out, exhaustive, strict);
+      definite_blocking_writes(stmt.as<slang::ast::TimedStatement>().stmt, out, exhaustive, strict, nonblocking);
       return;
     case StatementKind::ExpressionStatement: {
       const auto& e = stmt.as<slang::ast::ExpressionStatement>().expr;
@@ -394,8 +433,8 @@ void definite_blocking_writes(const slang::ast::Statement& stmt, absl::flat_hash
         return;
       }
       const auto& a = e.as<slang::ast::AssignmentExpression>();
-      if (a.isNonBlocking()) {
-        return;  // a nonblocking write in a level-sensitive block is the M1 latch idiom
+      if (a.isNonBlocking() != nonblocking) {
+        return;  // a nonblocking write in a level-sensitive block is the M1 latch idiom (see Read_collector's caller)
       }
       std::function<void(const slang::ast::Expression&)> note = [&](const slang::ast::Expression& lhs) {
         if (lhs.kind == ExpressionKind::Concatenation) {
@@ -1940,7 +1979,36 @@ void Slang_context::collect_state_vars(const slang::ast::Scope& body) {
         }
       }
     }
+    // A level-sensitive `always @(*)` whose nonblocking writes reach every
+    // output on every path (the Migen/LiteX shape `x <= 0; if (c) x <= y;`, or a
+    // case with a default) holds no value: it is combinational logic, exactly as
+    // yosys' proc pass decides (completeness, not the `<=` spelling, makes a
+    // latch). Only an incomplete path is the M1 latch idiom. Conservative: a
+    // block that also writes the symbol with `=`, or reads a symbol it writes
+    // with `<=` (where the nonblocking old-value read and the settled value
+    // differ), keeps the latch classification. `always_latch` is a latch by
+    // declaration.
+    absl::flat_hash_set<const slang::ast::ValueSymbol*> comb_nonblocking;
+    if (is_latch_block && pbs.procedureKind == slang::ast::ProceduralBlockKind::Always && !wc.nonblocking.empty()) {
+      absl::flat_hash_set<const slang::ast::ValueSymbol*> definite;
+      definite_blocking_writes(
+          pbs.getBody(),
+          definite,
+          [this](const auto& c) { return case_is_exhaustive(c); },
+          /*strict=*/false,
+          /*nonblocking=*/true);
+      Read_collector rc;
+      pbs.getBody().visit(rc);
+      for (const auto* sym : wc.nonblocking) {
+        if (definite.contains(sym) && !wc.blocking.contains(sym) && !rc.reads.contains(sym)) {
+          comb_nonblocking.insert(sym);
+        }
+      }
+    }
     for (const auto* sym : wc.nonblocking) {
+      if (comb_nonblocking.contains(sym)) {
+        continue;
+      }
       reg_syms_.insert(sym);
       if (is_latch_block) {
         latch_syms_.insert(sym);
