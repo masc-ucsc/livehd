@@ -970,6 +970,11 @@ inline constexpr Synth_set_option kSynthSetOptions[] = {
      "",
      Synth_set_option::Kind::integer,
      "timing budget in ps for every region (= pass.abc.delay); source pins override it"},
+    {"delay_frac",
+     "",
+     Synth_set_option::Kind::file,
+     "timing budget as a fraction of the smallest create_clock period of synth.sdc (e.g. 0.4); used only when no "
+     "synth.delay or pass.abc.delay is set, so one value can be shared by designs with different clocks"},
     {"stop_mux",
      "",
      Synth_set_option::Kind::boolean,
