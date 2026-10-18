@@ -890,12 +890,25 @@ Plan build_plan(hhds::Graph* g, const lc::Design_clocks& clocks, bool multi_cloc
 
   // 2. Reference clock = the clock net carrying the most state. Ties break on
   //    the KEY (a string), never on traversal order, so both miter sides agree.
+  //    Under multi_clock a net whose state commits on the FALL needs the phase
+  //    divider, and only the reference gets one, so such a net is preferred:
+  //    counting cells alone made an 8-bit latch (8 cells) on a second clock
+  //    outweigh the clock that carried the negedge state.
+  absl::flat_hash_set<std::string> needs_divider;
+  for (const auto& e : plan.elems) {
+    if (e.cc.role == lc::Net_role::Clock && !e.cc.implicit_clock && !e.cc.rising) {
+      needs_divider.insert(e.cc.net_key());
+    }
+  }
   std::string ref_net;
-  int         best = -1;
+  int         best     = -1;
+  bool        best_div = false;
   for (const auto& [k, cnt] : per_net) {
-    if (cnt > best || (cnt == best && k < ref_net)) {
-      best    = cnt;
-      ref_net = k;
+    const bool div = needs_divider.contains(k);
+    if (std::tuple{div, cnt} > std::tuple{best_div, best} || (div == best_div && cnt == best && k < ref_net)) {
+      best     = cnt;
+      best_div = div;
+      ref_net  = k;
     }
   }
   if (per_net.size() >= 2) {
@@ -971,16 +984,21 @@ Plan build_plan(hhds::Graph* g, const lc::Design_clocks& clocks, bool multi_cloc
         plan.why  = "state element `" + label_of(e.node) + "` commits on a net that is not the reference clock";
         return plan;
       }
-      // A second domain is EXPORTED, not lowered: only a plain POSEDGE flop can
-      // be left as it is. A latch or a negedge element there would need a phase
-      // divider of its own -- the reference divider counts the wrong clock --
-      // and leaving it in place would be the partial lowering this pass exists
-      // never to emit.
-      if (e.is_latch || !e.cc.rising) {
+      // A second domain is EXPORTED, not divided: everything on it must commit
+      // on its clock's RISE. A posedge flop is left as it is. A latch that
+      // CLOSES on the rise (open while its clock is low -- a gate's enable
+      // latch, CORE-ET B05's `u_noc_clk_gate.en_latch`) is lowered exactly as
+      // the reference domain lowers one at P=1: retyped to a posedge flop on
+      // its own root (commit at the closing edge), with rule 4 and the
+      // cross-domain read rule below as its preconditions. A negedge element or
+      // a latch closing on the FALL would need a phase divider of its own --
+      // the reference divider counts the wrong clock -- so it is refused, never
+      // left as a partial lowering.
+      if (!e.cc.rising) {
         plan.code = "off-reference-clock";
-        plan.why  = std::format("{} `{}` commits on `{}` ({}), a clock domain other than the reference `{}`; only "
-                                "plain posedge state may live off the reference clock (a second domain would need its "
-                                "own phase divider)",
+        plan.why  = std::format("{} `{}` commits on `{}` ({}), a clock domain other than the reference `{}`; off the "
+                                "reference clock only state committing on the rise is supported (a second domain "
+                                "would need its own phase divider)",
                                 e.is_latch ? "latch" : "negedge flop",
                                 label_of(e.node),
                                 e.cc.net_key(),
@@ -1127,6 +1145,82 @@ Plan build_plan(hhds::Graph* g, const lc::Design_clocks& clocks, bool multi_cloc
                 plan.why  = std::format("memory `{}` write port {} on clock `{}` reads a latch of the reference "
                                         "domain `{}` combinationally (through `{}`)",
                                         label_of(n), mp.port, mcc->net_key(), ref_net, field);
+                return plan;
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+
+  // ...and the REVERSE: a latch left on a second domain, read combinationally by
+  // state of ANOTHER domain. An edge of that domain can fall inside the latch's
+  // window, where the hardware reads its D and the model its held Q -- the same
+  // hazard, from the other side. Within its own domain rule 4 decides.
+  {
+    absl::flat_hash_map<hhds::Class_index, std::string> off_latch_root;
+    for (const auto& e : plan.elems) {
+      if (e.is_latch && e.off_ref) {
+        off_latch_root.emplace(e.node.get_class_index(), e.cc.net_key());
+      }
+    }
+    if (!off_latch_root.empty()) {
+      const auto reads_other = [&](const hhds::Pin_class& p, const std::string& my_root) -> const hhds::Node_class* {
+        absl::flat_hash_set<hhds::Class_index> hit;
+        comb_state_reach(p, hit);
+        for (const auto& l : plan.elems) {
+          if (hit.contains(l.node.get_class_index())) {
+            if (auto it = off_latch_root.find(l.node.get_class_index()); it != off_latch_root.end() && it->second != my_root) {
+              return &l.node;
+            }
+          }
+        }
+        return nullptr;
+      };
+      for (const auto& e : plan.elems) {
+        const std::string my_root = e.off_ref ? e.cc.net_key() : ref_net;
+        std::vector<hhds::Pin_class> cones{sink_driver(e.node, "din"), sink_driver(e.node, "enable")};
+        if (e.icg) {
+          cones.insert(cones.end(), e.icg->enables.begin(), e.icg->enables.end());
+        }
+        for (const auto& c : cones) {
+          if (c.is_invalid()) {
+            continue;
+          }
+          if (const auto* l = reads_other(c, my_root)) {
+            plan.code = "cross-domain-latch-read";
+            plan.why  = std::format("state element `{}` on clock `{}` reads latch `{}` of the domain `{}` "
+                                    "combinationally; an edge of `{}` can fall inside that latch's window, where the "
+                                    "hardware reads its D and the commit-at-closing-edge model its held Q",
+                                    label_of(e.node), my_root, label_of(*l), off_latch_root.at(l->get_class_index()),
+                                    my_root);
+            return plan;
+          }
+        }
+      }
+      if (g != nullptr) {
+        for (auto n : g->body().nodes()) {
+          if (gu::type_op_of(n) != Ntype_op::Memory) {
+            continue;
+          }
+          const auto ms = mem_shape_of(n);
+          if (!ms.parsed) {
+            continue;
+          }
+          for (const auto& mp : ms.ports) {
+            if (mp.rdport) {
+              continue;
+            }
+            const auto mcc = mp.clock.is_invalid() ? std::nullopt : lc::commit_class_of_clock(mp.clock, ms.rising, &clocks);
+            const std::string my_root = (!mcc || mcc->implicit_clock) ? ref_net : mcc->net_key();
+            for (const char* field : {"addr", "din", "enable"}) {
+              if (const auto* l = reads_other(mem_port_driver(n, field, mp.port), my_root)) {
+                plan.code = "cross-domain-latch-read";
+                plan.why  = std::format("memory `{}` write port {} on clock `{}` reads latch `{}` of the domain `{}` "
+                                        "combinationally (through `{}`)",
+                                        label_of(n), mp.port, my_root, label_of(*l),
+                                        off_latch_root.at(l->get_class_index()), field);
                 return plan;
               }
             }

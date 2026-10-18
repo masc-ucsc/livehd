@@ -116,12 +116,27 @@ variant() { # <name> <sed-expr>
   "$LHD" pass single_edge --top mclk "lg:$W/lg_$1" --emit-dir "lg:$W/lg_$1_n" --set multi_clock=true \
     --workdir "$W/pw_$1" >"$W/p_$1.log" 2>&1
 }
-# A LATCH on the second clock: it would need a divider of its own.
+# A LATCH on the second clock that CLOSES ON THE FALL (open while clk_b is high):
+# it would need a divider of its own.
 variant mc_latch 's/always @(posedge clk_b or posedge reset) if (reset) b <= 8'"'"'d0; else b <= d + 8'"'"'d1;/always_latch if (clk_b) b = d + 8'"'"'d1;/'
 [ $? -ne 0 ] || fail "a latch on the second clock was ACCEPTED under multi_clock"
 grep -q "off-reference-clock" "$W/p_mc_latch.log" \
   || { grep -o '"message":"[^"]*' "$W/p_mc_latch.log" | head -1; fail "the second-clock latch was refused for the wrong reason"; }
 echo "ok: a latch on the second clock is refused by name (off-reference-clock)"
+# ...but a latch that CLOSES ON THE RISE (open while clk_b is low -- a gate's
+# enable latch, CORE-ET B05's noc clock gate) is a posedge flop on its own root at
+# P=1, lowered exactly as the reference domain lowers one.
+variant mc_llatch 's/always @(posedge clk_b or posedge reset) if (reset) b <= 8'"'"'d0; else b <= d + 8'"'"'d1;/always_latch if (!clk_b) b = d + 8'"'"'d1;/'
+[ $? -eq 0 ] || { grep -o '"message":"[^"]*' "$W/p_mc_llatch.log" | head -1; fail "a latch closing on the second clock's rise was refused"; }
+grep -q "2 clock domain(s) exported" "$W/p_mc_llatch.log" || fail "the rise-closing latch variant did not export two domains"
+echo "ok: a latch closing on the second clock's rise is lowered on its own root (2 domains)"
+# The REVERSE cross-domain read: a reference-domain flop reading that latch. A
+# clk_a edge can fall inside its window.
+variant mc_rxlatch 's/always @(posedge clk_b or posedge reset) if (reset) b <= 8'"'"'d0; else b <= d + 8'"'"'d1;/always_latch if (!clk_b) b = d + 8'"'"'d1;/; s/if (reset) a <= 8'"'"'d0; else a <= d;/if (reset) a <= 8'"'"'d0; else a <= d ^ b;/'
+[ $? -ne 0 ] || fail "a reference-domain flop reading a second-domain latch was ACCEPTED"
+grep -q "cross-domain-latch-read" "$W/p_mc_rxlatch.log" \
+  || { grep -o '"message":"[^"]*' "$W/p_mc_rxlatch.log" | head -1; fail "the reverse cross-domain latch read was refused for the wrong reason"; }
+echo "ok: a reference-domain flop reading a second-domain latch is refused (cross-domain-latch-read)"
 # The second domain READING a reference-domain LATCH: a clk_b edge can fall inside
 # the latch's window, where the hardware reads D and the model the held Q.
 variant mc_xlatch 's/reg \[7:0\] a, n, b;/reg [7:0] a, n, b, la;/; s/assign qp = a;/always_latch if (clk_a) la = d; assign qp = a ^ la;/; s/else b <= d + 8'"'"'d1;/else b <= la + 8'"'"'d1;/'
