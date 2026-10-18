@@ -109,6 +109,12 @@ MODULES=(
   # Residual serialization: a proved codec (decodeProgram_encodeProgram).
   Projection/ResidualIO
   Projection/Scaling
+  # M3: verified symbolic interpretation of a residual (Projection/Sym/*).
+  Projection/Sym/Kit
+  Projection/Sym/Bridge
+  Projection/Sym/Val
+  Projection/Sym/Prim
+  Projection/Sym/Eval
   # The central audit: `#audit_axioms` FAILS this build on any axiom outside
   # propext/Classical.choice/Quot.sound. The memory-route modules above audit
   # their own theorems in place with the same command.
