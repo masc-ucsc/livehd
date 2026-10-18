@@ -124,21 +124,24 @@ int mark_full_cases(RTLIL::CaseRule* root) {
     for (auto* arm : sw->cases) {
       marked += mark_full_cases(arm);
     }
-    if (sw->get_bool_attribute(ID::full_case) || !labels_cover_selector(sw)) {
+    if (!labels_cover_selector(sw)) {
       continue;
     }
     // A `default` arm after complete labels never matches. Left in place it would also stop proc_mux from
-    // seeing the switch as assigning every bit in every arm (it intersects over all arms).
+    // seeing the switch as assigning every bit in every arm (it intersects over all arms): a `unique casez`
+    // that lists every value and ends in an empty `default` already carries full_case, yet keeps the hold.
+    bool changed = !sw->get_bool_attribute(ID::full_case);
     for (size_t i = 0; i < sw->cases.size();) {
       if (sw->cases[i]->compare.empty()) {
         delete sw->cases[i];
         sw->cases.erase(sw->cases.begin() + static_cast<std::ptrdiff_t>(i));
+        changed = true;
       } else {
         ++i;
       }
     }
     sw->set_bool_attribute(ID::full_case);
-    ++marked;
+    marked += changed ? 1 : 0;
   }
   return marked;
 }

@@ -9,7 +9,8 @@
 #
 #   * full_case_hold.sv: nested, 32-bit-label and empty-default exhaustive cases compile through the
 #     yosys-slang reader and are equivalent to the source read by the native reader;
-#   * full_case_dontcare.sv: exhaustive casez/casex compile (no equivalence check, see the fixture);
+#   * full_case_dontcare.sv: exhaustive casez/casex and a `unique casez` with an empty default compile (no
+#     equivalence check, see the fixture);
 #   * full_case_incomplete.sv: a case that misses a selector value is NOT marked and keeps its latch.
 set -u
 W="${TEST_TMPDIR:-/tmp/yosys_full_case_$$}"
@@ -33,8 +34,8 @@ grep -q 'Marked 3 exhaustive' "$W"/hold/logs/*yosys_tolg*.log \
 "$LHD" compile "$T/full_case_dontcare.sv" --reader yosys-slang --top full_case_dontcare --workdir "$W/dontcare" \
   -q >"$W/dontcare.log" 2>&1 \
   || { cat "$W/dontcare.log" >&2; fail "exhaustive casez/casex were rejected (false combinational loop)"; }
-grep -q 'Marked 2 exhaustive' "$W"/dontcare/logs/*yosys_tolg*.log \
-  || fail "lhd_full_case did not mark the two don't-care case statements of full_case_dontcare.sv"
+grep -q 'Marked 3 exhaustive' "$W"/dontcare/logs/*yosys_tolg*.log \
+  || fail "lhd_full_case did not mark the three don't-care case statements of full_case_dontcare.sv"
 
 "$LHD" compile "$T/full_case_incomplete.sv" --reader yosys-slang --top full_case_incomplete --workdir "$W/incomplete" \
   --emit "verilog:$W/incomplete.v" -q >"$W/incomplete.log" 2>&1 \
