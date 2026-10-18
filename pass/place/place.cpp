@@ -3020,11 +3020,11 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
           const double bin_y = (physical.layout.yh - physical.layout.yl) / options.bins;
           for (size_t i = 0; i < v.cells.size(); ++i) {
             if (auto old = timed_positions.find(v.cells[i].name); old != timed_positions.end() && int(i) < physical.num_movable) {
-              const double area  = physical.node_size_x[i] * physical.node_size_y[i];
-              movement          += area
-                                   * (std::pow((physical.node_x[i] - old->second.first) / bin_x, 2)
-                                      + std::pow((physical.node_y[i] - old->second.second) / bin_y, 2));
-              total_area        += area;
+              const double cell_area = physical.node_size_x[i] * physical.node_size_y[i];
+              movement              += cell_area
+                                       * (std::pow((physical.node_x[i] - old->second.first) / bin_x, 2)
+                                          + std::pow((physical.node_y[i] - old->second.second) / bin_y, 2));
+              total_area            += cell_area;
             }
           }
           movement            = total_area ? std::sqrt(movement / total_area) : 0;

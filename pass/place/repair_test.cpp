@@ -701,7 +701,7 @@ TEST_F(Buffer_repair, FloorplanTimingCheckpointsAreScopedAndResizeRunsStaTwice) 
     ASSERT_FALSE(placed.net_weights.empty());
     EXPECT_GT(std::max_element(placed.net_weights.begin(),
                                placed.net_weights.end(),
-                               [](const auto& a, const auto& b) { return a.second < b.second; })
+                               [](const auto& lhs, const auto& rhs) { return lhs.second < rhs.second; })
                   ->second,
               1);
     equivalent(placed);
