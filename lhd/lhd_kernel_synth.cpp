@@ -45,6 +45,7 @@
 #include <iterator>
 #include <map>
 #include <set>
+#include <sstream>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -143,6 +144,32 @@ livehd::placement::Options placement_options(const Options& opts) {
   }
   out.utilization                = number("place.utilization", "0.30");
   out.aspect                     = number("place.aspect", "1");
+  for (const auto& [key, frame] : {std::pair<const char*, std::vector<double>*>{"place.die", &out.die},
+                                   std::pair<const char*, std::vector<double>*>{"place.core", &out.core}}) {
+    const auto text = synth_set(opts, key, "");
+    if (text.empty()) {
+      continue;
+    }
+    std::string spaced = text;
+    std::replace(spaced.begin(), spaced.end(), ',', ' ');
+    std::istringstream words(spaced);
+    for (std::string word; words >> word;) {
+      char*        end   = nullptr;
+      const double value = std::strtod(word.c_str(), &end);
+      if (end != word.c_str() + word.size() || !std::isfinite(value)) {
+        throw Lhd_error{"usage", "invalid synth." + std::string(key) + ": " + text, "expected xl,yl,xh,yh in microns"};
+      }
+      frame->push_back(value);
+    }
+    if (frame->size() != 4 || (*frame)[2] <= (*frame)[0] || (*frame)[3] <= (*frame)[1] || (*frame)[0] < 0 || (*frame)[1] < 0) {
+      throw Lhd_error{"usage",
+                      "invalid synth." + std::string(key) + ": " + text,
+                      "expected xl,yl,xh,yh in microns with xh>xl, yh>yl"};
+    }
+  }
+  if (!out.floorplan.empty() && (!out.die.empty() || !out.core.empty())) {
+    throw Lhd_error{"usage", "synth.place.die/core cannot be combined with synth.place.floorplan", "supply one frame source"};
+  }
   out.density                    = number("place.density", "0.5");
   out.iterations                 = integer("place.iterations", "1500");
   out.min_iterations             = integer("place.min_iterations", "40");

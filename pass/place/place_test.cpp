@@ -863,6 +863,52 @@ TEST(Placement, PreviousFrameKeepsIoPositionsAndSlotsNewOnes) {
     }
   }
 }
+TEST(Placement, FixedDieAndCoreSnapInwardAndKeepPinsOnTheDie) {
+  hhds::GraphLibrary source;
+  auto               graph   = tie_graph(source);
+  auto               options = plain_options();
+  options.liberty            = "inou/lefdef/tests/data/sky130hd.lib";
+  options.lefs               = {"inou/lefdef/tests/data/sky130hd.tlef", "inou/lefdef/tests/data/sky130hd.lef"};
+  options.output_dir         = std::string(std::getenv("TEST_TMPDIR")) + "/fixed_frame";
+  options.iterations         = 20;
+  options.bins               = 8;
+  // utilization/aspect are ignored once a frame is given: the 0.46 x 2.72 um site grid snaps the
+  // 2..38.01 x 2..37.9 um core inward to x 2.3..37.72 (77 sites) and y 2.72..35.36 (12 rows).
+  options.die                = {0, 0, 40, 40};
+  options.core               = {2, 2, 38.01, 37.9};
+  hhds::GraphLibrary first;
+  const auto         placed = place(*graph, first, options);
+  const auto&        fp     = placed.floorplan;
+  EXPECT_EQ(fp.die.xl, 0);
+  EXPECT_EQ(fp.die.yl, 0);
+  EXPECT_EQ(fp.die.xh, 40000);
+  EXPECT_EQ(fp.die.yh, 40000);
+  ASSERT_EQ(fp.rows.size(), 12);
+  EXPECT_EQ(fp.rows.front().x, 2300);
+  EXPECT_EQ(fp.rows.front().y, 2720);
+  EXPECT_EQ(fp.rows.front().count, 77);
+  EXPECT_EQ(fp.rows.back().y, 2720 + 11 * 2720);
+  ASSERT_EQ(fp.terminals.size(), 4);
+  for (const auto& t : fp.terminals) {
+    EXPECT_TRUE(t.x == fp.die.xl || t.x == fp.die.xh || t.y == fp.die.yl || t.y == fp.die.yh) << t.name;
+  }
+  // A lone die doubles as the core; the same cells fit, so only the frame changes.
+  options.core.clear();
+  options.output_dir = std::string(std::getenv("TEST_TMPDIR")) + "/fixed_die_only";
+  hhds::GraphLibrary second;
+  const auto         die_only = place(*graph, second, options);
+  EXPECT_EQ(die_only.floorplan.rows.front().x, 0);
+  EXPECT_EQ(die_only.floorplan.rows.front().count, 86);
+  EXPECT_EQ(die_only.floorplan.rows.size(), 14);
+  // The frame is validated up front: a core outside the die and a core too small for the cells.
+  options.die  = {0, 0, 40, 40};
+  options.core = {2, 2, 60, 38};
+  hhds::GraphLibrary third;
+  EXPECT_ANY_THROW(place(*graph, third, options));
+  options.core = {2, 2, 3, 3};
+  hhds::GraphLibrary fourth;
+  EXPECT_ANY_THROW(place(*graph, fourth, options));
+}
 TEST(Placement, TimingSnapshotRetainsUnlegalizedGeometryAndPhysicalRc) {
   hhds::GraphLibrary source, first, imported;
   auto               graph   = tie_graph(source);

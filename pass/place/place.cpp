@@ -145,6 +145,15 @@ std::string environment_key(const Options& o, const ph::Technology& tech) {
                             o.halo_y),
                 h);
   h = hash_text(o.macro_mode, h);
+  if (!o.die.empty() || !o.core.empty()) {
+    h = hash_text("fixed-frame", h);
+    for (const auto v : o.die) {
+      h = hash_text(std::format(":d{}", v), h);
+    }
+    for (const auto v : o.core) {
+      h = hash_text(std::format(":c{}", v), h);
+    }
+  }
   if (o.timing_max_weight != 5 || o.timing_smoothing != .5) {
     h = hash_text(std::format("timing-force:{}:{}", o.timing_max_weight, o.timing_smoothing), h);
   }
@@ -1972,6 +1981,16 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
   if (!std::isfinite(options.halo_x) || !std::isfinite(options.halo_y) || options.halo_x < 0 || options.halo_y < 0) {
     throw std::invalid_argument("invalid macro halo");
   }
+  for (const auto* frame : {&options.die, &options.core}) {
+    if (!frame->empty()
+        && (frame->size() != 4 || !std::all_of(frame->begin(), frame->end(), [](double x) { return std::isfinite(x) && x >= 0; })
+            || (*frame)[2] <= (*frame)[0] || (*frame)[3] <= (*frame)[1])) {
+      throw std::invalid_argument("synth.place.die/core expect nonnegative xl,yl,xh,yh microns with xh>xl and yh>yl");
+    }
+  }
+  if (!options.floorplan.empty() && (!options.die.empty() || !options.core.empty())) {
+    throw std::invalid_argument("synth.place.die/core cannot be combined with an imported synth.place.floorplan");
+  }
   if (options.macro_mode != "none" && options.macro_mode != "h2d" && options.macro_mode != "r8h2" && options.macro_mode != "r8h3") {
     throw std::invalid_argument("macro placement mode must be none, h2d, r8h2 or r8h3");
   }
@@ -2182,17 +2201,60 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
     v.fp = *previous;
     validate_rows(tech, v.fp);
   } else if (options.floorplan.empty()) {
-    const double core_area = area / options.utilization;
-    const auto   columns   = std::max<int64_t>(std::ceil(std::sqrt(core_area * options.aspect) / sw), (max_width + sw - 1) / sw);
-    const auto   rows
-        = std::max<int64_t>({2, static_cast<int64_t>(std::ceil(core_area / (columns * sw * rh))), (max_height + rh - 1) / rh});
-    v.fp.die = {0, 0, double(columns * sw), double(rows * rh)};
+    int64_t columns = 0, rows = 0, origin_x = 0, origin_y = 0;
+    if (options.die.empty() && options.core.empty()) {
+      const double core_area = area / options.utilization;
+      columns = std::max<int64_t>(std::ceil(std::sqrt(core_area * options.aspect) / sw), (max_width + sw - 1) / sw);
+      rows
+          = std::max<int64_t>({2, static_cast<int64_t>(std::ceil(core_area / (columns * sw * rh))), (max_height + rh - 1) / rh});
+      v.fp.die = {0, 0, double(columns * sw), double(rows * rh)};
+    } else {
+      // A benchmark-fixed frame (ORFS DIE_AREA/CORE_AREA, microns). The core snaps inward to the
+      // site/row grid like OpenROAD's initialize_floorplan; utilization and aspect do not apply.
+      const auto& die_um  = options.die.empty() ? options.core : options.die;
+      const auto& core_um = options.core.empty() ? options.die : options.core;
+      const auto  dbu     = [&](double um) { return um * tech.dbu; };
+      v.fp.die            = {std::round(dbu(die_um[0])),
+                             std::round(dbu(die_um[1])),
+                             std::round(dbu(die_um[2])),
+                             std::round(dbu(die_um[3]))};
+      const auto lo_x     = static_cast<int64_t>(std::ceil(dbu(core_um[0]) / sw - 1e-9));
+      const auto lo_y     = static_cast<int64_t>(std::ceil(dbu(core_um[1]) / rh - 1e-9));
+      const auto hi_x     = static_cast<int64_t>(std::floor(dbu(core_um[2]) / sw + 1e-9));
+      const auto hi_y     = static_cast<int64_t>(std::floor(dbu(core_um[3]) / rh + 1e-9));
+      origin_x            = lo_x * sw;
+      origin_y            = lo_y * rh;
+      columns             = hi_x - lo_x;
+      rows                = hi_y - lo_y;
+      if (columns < 1 || rows < 1) {
+        throw std::runtime_error("synth.place.core holds no complete site/row");
+      }
+      if (origin_x < v.fp.die.xl || origin_y < v.fp.die.yl || (origin_x + columns * sw) > v.fp.die.xh
+          || (origin_y + rows * rh) > v.fp.die.yh) {
+        throw std::runtime_error("synth.place.core must lie inside synth.place.die");
+      }
+      if (area > double(columns * sw) * double(rows * rh)) {
+        throw std::runtime_error(std::format("fixed core {} x {} um holds {:.1f} um2 of cells in {:.1f} um2",
+                                             double(columns * sw) / tech.dbu,
+                                             double(rows * rh) / tech.dbu,
+                                             area / tech.dbu / tech.dbu,
+                                             double(columns * sw) * double(rows * rh) / tech.dbu / tech.dbu));
+      }
+      if (max_width > columns * sw || max_height > rows * rh) {
+        throw std::runtime_error("a mapped cell or macro halo does not fit in the fixed core");
+      }
+    }
     // Alternating N/FS rows require X-symmetric cells, as in sky130HD.
     const bool flip
         = std::all_of(v.cells.begin(), v.cells.end(), [&](const auto& c) { return tech.macros.at(c.macro).symmetry_x; });
     for (int64_t row = 0; row < rows; ++row) {
-      v.fp.rows.push_back(
-          {"ROW_" + std::to_string(row), site_name, 0, row * rh, columns, sw, flip && row % 2 ? Orientation::FS : Orientation::N});
+      v.fp.rows.push_back({"ROW_" + std::to_string(row),
+                           site_name,
+                           origin_x,
+                           origin_y + row * rh,
+                           columns,
+                           sw,
+                           flip && row % 2 ? Orientation::FS : Orientation::N});
     }
   } else {
     v.fp = ph::read_def(options.floorplan);

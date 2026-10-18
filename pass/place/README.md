@@ -563,6 +563,16 @@ placement. LiveHD disables virtual GP fillers in all native placement calls.
 Density is a soft spreading target, not a requirement to fill the core. Imported
 floorplans keep their supplied area even when actual utilization differs from
 the target. Generated floorplans use `synth.place.utilization` for initial area.
+
+A benchmark that fixes its frame (ORFS `DIE_AREA` / `CORE_AREA`) gives it in microns as
+`synth.place.die=xl,yl,xh,yh` and `synth.place.core=xl,yl,xh,yh` (default empty: derive
+the frame from utilization and aspect). The core snaps INWARD to the site/row grid (lower
+left rounds up, upper right rounds down, like OpenROAD's `initialize_floorplan`), so
+`CORE_AREA 2 2 248 248` on ASAP7 is the 2.052..247.968 x 2.160..247.860 um core
+OpenROAD reports; rows start at that origin, and IO pins are placed on the DIE boundary.
+Giving only one of the two uses it for both. Utilization and aspect then do not apply;
+the run refuses a core that lies outside the die, holds no complete row, or is smaller
+than the mapped cells, and the options cannot be combined with `synth.place.floorplan`.
 Physical filler insertion, if a downstream implementation tool requires it, is
 outside LiveHD placement. The experimental `synth.place.filler_width` option was
 removed with virtual filler insertion.

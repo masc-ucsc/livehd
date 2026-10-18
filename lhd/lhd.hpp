@@ -779,6 +779,16 @@ inline constexpr Synth_set_option kSynthSetOptions[] = {
      "full: legalize/detail and emit DEF; gp: approximate global placement, no DEF"},
     {"place.utilization", "0.30", Synth_set_option::Kind::file, "cell area / generated core area, in (0,1)"},
     {"place.aspect", "1", Synth_set_option::Kind::file, "generated core width / height"},
+    {"place.die",
+     "",
+     Synth_set_option::Kind::file,
+     "fixed generated die as xl,yl,xh,yh microns (ORFS DIE_AREA); empty derives it from utilization/aspect; "
+     "without place.core the core equals the die"},
+    {"place.core",
+     "",
+     Synth_set_option::Kind::file,
+     "fixed generated core as xl,yl,xh,yh microns (ORFS CORE_AREA), snapped inward to the site/row grid; "
+     "utilization and aspect then do not apply"},
     {"place.density", "0.5", Synth_set_option::Kind::file, "global-placement target density, at least utilization"},
     {"place.snapshots", "false", Synth_set_option::Kind::boolean, "save physical GP coordinates before legalization"},
     {"place.cohesion",
