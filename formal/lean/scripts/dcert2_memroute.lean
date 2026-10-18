@@ -535,11 +535,13 @@ structure Cfg where
   overwritten before the end. -/
   trace : Bool := false
   /-- run the EXTENDED route, which additionally admits ordinary `Op_MemWrite`.
-  OFF by default: the default route is the original one, unchanged, and it
-  still refuses a plain write.  When on, admission is `admitsWB` and the bundle
+  ON by default since D6 Tier 1; `no-plain-write` selects the original route,
+  which refuses a plain write.  When on, admission is `admitsWB` and the bundle
   is built by `mkMemSimOfW`; the specialization function, the production
-  residual checker and the execution function are the SAME ones. -/
-  plainWrite : Bool := false
+  residual checker and the execution function are the SAME ones, and on a
+  design with no plain write `runRoute` checks on every run that the two
+  admissions agree. -/
+  plainWrite : Bool := true
   /-- which clocks fire on each cycle (RunnerSupport `scheduleEdges`): `auto`
   keeps the one-clock schedule for a one-clock design and fires domains
   INDEPENDENTLY when the certificate declares more than one clock. -/
@@ -585,7 +587,7 @@ nextImgs {mr.nextImgs} | ADMITTED {mr.admitOK}"
     (fun n c => if c.op == .Op_MemWrite then n + 1 else n) 0
   let admW := HwMem.admitsWB D
   if cfg.plainWrite then
-    say s!"  EXTENDED route requested: Op_MemWrite nodes {plainN}, \
+    say s!"  EXTENDED route (default): Op_MemWrite nodes {plainN}, \
 admitsB {HwMem.admitsB D}, admitsWB {admW}"
     if plainN == 0 && HwMem.admitsB D != admW then
       IO.eprintln "  the extension changed an answer on a design with NO plain write"
@@ -857,7 +859,9 @@ contents or use init=zero, which is a legal-state witness only."
     let tl := more.drop 2
     let cmp := !(tl.contains "nocompare")
     let sup := tl.contains "support-only"
-    let pw  := tl.contains "plain-write"
+    -- `plain-write` is still accepted (it is the default); only the opt-out
+    -- changes anything
+    let pw  := !(tl.contains "no-plain-write")
     let tr  := tl.contains "trace"
     let stimTok := tl.find? (fun t => t.startsWith "stim:")
     let prov := match stimTok with
