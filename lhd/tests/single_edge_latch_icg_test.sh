@@ -109,10 +109,22 @@ grep -q "0 window-held" <<<"$out" \
   || { echo "$out" | tail -3; fail "the same-phase gate was folded as WINDOW-HELD: its window follows the live enable, not a held one"; }
 echo "ok: a same-phase gate keeps the bypass path (accepted, not window-held)"
 
+# Rule 4's hazard -- a flop committing on the edge the latch CLOSES on samples
+# its transparent D, not the held Q. By default it is REFUSED by name ...
 out="$(normalize wce_l1)"
-[ $? -ne 0 ] || fail "a reader committing at the latch's own closing edge was ACCEPTED (rule 4)"
+[ $? -ne 0 ] || fail "a reader committing at the latch's own closing edge was ACCEPTED by default (rule 4)"
 grep -q "coincident-commit-edge" <<<"$out" || { echo "$out" | tail -3; fail "the same-edge reader was refused for the wrong reason"; }
-echo "ok: a reader on the latch's own closing edge is still refused (rule 4)"
+echo "ok: by default a reader on the latch's own closing edge is refused (rule 4)"
+# ... and with forward_same_edge=true it is admitted by GUARDED READER
+# FORWARDING (decision 3A): that reader alone reads `E ? D : Q`. The
+# differential below checks it against the source.
+rm -rf "$W/lg_wce_l1_n"
+out="$("$LHD" pass single_edge --top "$TOP" "lg:$W/lg_wce_l1" --emit-dir "lg:$W/lg_wce_l1_n" --workdir "$W/pw_wce_l1f" \
+        --set forward_same_edge=true 2>&1)"
+[ $? -eq 0 ] || { echo "$out" | grep -o '"message":"[^"]*' | head -2; fail "a flop on the latch's own closing edge was refused instead of forwarded"; }
+grep -q "same-edge reader input(s) forwarded" <<<"$out" \
+  || { echo "$out" | grep -o 'P=[0-9]* slots[^"]*' | head -1; fail "the same-edge reader was accepted WITHOUT forwarding"; }
+echo "ok: a flop on the latch's own closing edge is forwarded the latch's value at the edge (3A)"
 
 # ---- lhd lec: real verdicts, both directions --------------------------------------
 lec_verdict() { # <impl> <ref> <tag>
@@ -282,6 +294,28 @@ echo "ok: reading the enable latch's live input instead of its held Q FAILS (the
 out="$(run_sim p1 "$W/norm.v" -DNHALF=10 -DNSTART=10)"
 grep -q "WCE_DIFF_FAIL" <<<"$out" || fail "the harness still passed in the P=1 time base -- it cannot see the phase divider"
 echo "ok: clocking the normalized side once per period FAILS (the harness discriminates)"
+
+# ---- the FORWARDED same-edge reader (3A), against the same harness --------------------
+emit "$W/lg_wce_l1" "$W/v_l1src"
+emit "$W/lg_wce_l1_n" "$W/v_l1norm"
+cat "$W"/v_l1src/*.v > "$W/l1src.v"
+sed 's/^module wce(/module wce_n(/' "$W"/v_l1norm/*.v > "$W/l1norm.v"
+grep -q "always_latch" "$W/l1norm.v" && fail "the NORMALIZED same-edge design still holds a latch"
+SRC_V="$W/l1src.v"
+out="$(run_sim l1pos "$W/l1norm.v")"
+grep -q "WCE_DIFF_OK" <<<"$out" \
+  || { echo "$out" | grep -E 'MISMATCH|WCE' | head -6; fail "the forwarded same-edge reader does not match its source under $SIM"; }
+echo "ok: the forwarded same-edge reader agrees with its source over 60 periods under $SIM"
+# NEGATIVE CONTROL: the forwarding REMOVED -- the reader's cloned `qo + 1`
+# rewired back to the latch's held Q (what the lowering gave it before 3A).
+# Derived from the emission and asserted to have applied.
+sed -E "s/\\\$unsigned\(mux_[0-9]+ \+ \(9'h1\)\)/\$unsigned(qo + (9'h1))/" "$W/l1norm.v" > "$W/l1norm_stale.v"
+cmp -s "$W/l1norm.v" "$W/l1norm_stale.v" \
+  && { grep -n 'unsigned' "$W/l1norm.v" | head -3; fail "the stale-read mutation did not apply"; }
+out="$(run_sim l1stale "$W/l1norm_stale.v")"
+grep -q "WCE_DIFF_FAIL" <<<"$out" || fail "the reader reading the latch's HELD Q still passed -- the forwarding is not load-bearing"
+echo "ok: the same reader reading the latch's held Q instead FAILS (the forwarding is load-bearing)"
+SRC_V="$W/src.v"
 
 # ---- the NESTED gate, against the same simulator ------------------------------------
 TOP=nwce

@@ -67,6 +67,9 @@ struct Result {
   // GATED LATCHES whose gate is steady over their whole open window (the
   // enable latch shut on that phase): they read the enable latch's held Q.
   int  icg_window_held = 0;
+  // Decision 3A: same-edge readers given the latch's value AT the edge (see
+  // apply_reader_forwards) instead of a rule-4 refusal.
+  int  reader_forwards = 0;
   // Identity of the REFERENCE clock the slots are expressed against (a graph
   // input's name when there is one; "" when the design has no clock at all).
   // A miter whose two sides normalize against DIFFERENT reference clocks is
@@ -107,6 +110,11 @@ struct Options {
   // latch's D and the commit-at-closing-edge model its held Q). Off by default:
   // pass/lec and sim model a second domain themselves.
   bool multi_clock = false;
+  // Decision 3A: admit rule 4's same-edge (latch, flop) pairs by GUARDED READER
+  // FORWARDING -- the reader alone is given the latch's value AT the edge,
+  // `reset ? RV : (E ? D : Q)` -- instead of refusing them. Off by default: with
+  // it off rule 4 refuses exactly as before, which pass/lec's fallback relies on.
+  bool forward_same_edge = false;
 };
 
 // Normalize `g` in place. `defs` (may be empty) are the resolution-library
