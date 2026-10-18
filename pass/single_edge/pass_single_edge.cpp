@@ -80,36 +80,6 @@ struct Element {
 
 // Backward combinational reach to STATE elements (stops at any register), so a
 // data-gated latch can inherit the slot of whatever drives its enable.
-// A bit-blasted wide latch's open value: its bit-select chain (latch_hold_path)
-// rebuilt over the open arm -- clones of the wrappers, bottom-up, each reading
-// the clone below it (the arm at the bottom) and the original's constant
-// operands, with the original's width and sign.
-hhds::Pin_class rebuild_hold_chain(hhds::Graph& g, const lc::Latch_hold_path& hp) {
-  hhds::Pin_class below = hp.value;
-  for (auto it = hp.chain.rbegin(); it != hp.chain.rend(); ++it) {
-    const auto& orig  = *it;
-    auto        clone = gu::create_typed_node(g, gu::type_op_of(orig));
-    bool        value = true;  // ascending pid: the first sink is the value operand
-    for (auto sink : orig.inp_sorted_pins()) {
-      const auto pid = static_cast<int>(sink.get_port_id());
-      for (const auto& drv : sink.get_driver_pins()) {
-        (value ? below : drv).connect_sink(livehd::graph_util::setup_sink_pid(clone, pid));
-      }
-      value = false;
-    }
-    const auto od = orig.get_driver_pin(0);
-    auto       cd = clone.create_driver_pin(0);
-    gu::set_bits(cd, gu::bits_of(od));
-    if (gu::is_unsign(od)) {
-      gu::set_unsign(cd);
-    } else {
-      gu::set_sign(cd);
-    }
-    below = cd;
-  }
-  return below;
-}
-
 // Is an instance's definition purely combinational (no state anywhere below
 // it)? A body-less def is unknown and counted as combinational: the walk below
 // is a REFUSAL test, so the conservative answer is the one that keeps walking.
@@ -828,11 +798,16 @@ Plan build_plan(hhds::Graph* g, const lc::Design_clocks& clocks, bool multi_cloc
               others.push_back(o);
             }
           }
+          // ...and "open while this latch is shut" conditions the same way: an
+          // enable latch ON the gated clock (`if (clock) en_2p = ...`, B08's
+          // prim_mul_div with clock = clk & en_q) is open at clk=1 only while
+          // the outer gate is on -- the only time this latch can commit.
           const bool held_for_window
               = e.is_latch
                 && (lc::gated_latch_closed_at(dn, e.icg->clock, /*closed_level=*/window_level)
                     || lc::gated_latch_closed_assuming(dn, e.icg->clock, /*closed_level=*/window_level, others))
-                && lc::latch_open_at(dn, e.icg->clock, /*level=*/!window_level);
+                && (lc::latch_open_at(dn, e.icg->clock, /*level=*/!window_level)
+                    || lc::latch_open_assuming(dn, e.icg->clock, /*level=*/!window_level, others));
           if (opposite_for_other_edge && !opposite_here) {
             e.icg_hold = true;
           }
@@ -2278,7 +2253,7 @@ Result normalize(hhds::Graph* g, const std::vector<hhds::Graph*>& defs, const Op
         // A bit-blasted WIDE latch: din is a bit select of the hold mux, which
         // latch_transparent_arm returns unchanged; its open value is the same
         // bit select of the open arm (CORE-ET B08's mpcnd_1p[k]).
-        const auto open_value = hold_path ? rebuild_hold_chain(*g, *hold_path) : through;
+        const auto open_value = hold_path ? lc::rebuild_bit_select(*g, hold_path->chain, hold_path->value) : through;
         if (open_value.is_invalid()) {
           r.error  = true;
           r.reason = "clock-gated latch `" + label_of(e.node) + "` has a hold mux with no transparent arm";
@@ -2753,6 +2728,13 @@ void Pass_single_edge::work(Eprp_var& var) {
   if (const int nc = lc::inline_clock_gate_cells(g, "pass.single_edge"); nc > 0) {
     livehd::diag::info("pass.single_edge", "clock-gate-inlined", "progress")
         .msg("pass.single_edge: inlined {} clock-gate cell(s) into `{}`", nc, g->get_name())
+        .emit();
+  }
+  // ...and lift a LEVEL-RESET latch's reset out of its window (see
+  // lift_latch_level_resets): `rst | gate` matches no gate shape, `gate` does.
+  if (const int nl = lc::lift_latch_level_resets(g); nl > 0) {
+    livehd::diag::info("pass.single_edge", "latch-reset-lifted", "progress")
+        .msg("pass.single_edge: lifted the level reset of {} latch(es) in `{}` onto reset_pin", nl, g->get_name())
         .emit();
   }
   livehd::single_edge::Options opts;

@@ -321,6 +321,30 @@ struct Latch_hold_path {
 };
 [[nodiscard]] std::optional<Latch_hold_path> latch_hold_path(const hhds::Node_class& latch);
 
+// A bit-select `chain` (as latch_hold_path returns it, din's driver first)
+// rebuilt over `bottom`: clones of the wrappers, bottom-up, each reading the
+// clone below it and the original's constant operands, with the original's
+// width and sign. Returns the top of the rebuilt chain (`bottom` when empty).
+[[nodiscard]] hhds::Pin_class rebuild_bit_select(hhds::Graph& g, const std::vector<hhds::Node_class>& chain,
+                                                 hhds::Pin_class bottom);
+
+// THE LEVEL-RESET LATCH, lifted. CORE-ET's prim_write_commit_rst_en,
+//     always_latch if (rst) q <= RV; else if (clk && en_1p) q <= d;
+// arrives (yosys-slang) with the reset folded into the window and the data:
+// `enable = Mux(rst, gate, 1)`, `din = <bit select of> Mux(rst, V, RV)`. Its
+// window is `rst | gate`, which no clock-phase or gate shape matches, so it is
+// a DATA-gated latch that reads the clock -- refused as
+// `latch-window-reads-clock` (B08's CSR file). Lifted, it is the latch-with-
+// reset cell M7 already defines (`if (rst) q = initial; else if (en) q =
+// din`): `reset_pin = rst` (`negreset` for the active-low mirror), `async = 1`
+// (a latch reset has no edge), `initial` = this bit's slice of RV (folded with
+// LiveHD's own constant semantics), `enable = gate`, `din` = the bit select
+// rebuilt over V. Exactly the same latch, now with a gate window. Only the
+// Mux spelling with ONE selector shared by window and data, a constant RV and a
+// nonzero constant on the window's reset arm is matched; anything else is left
+// untouched (and refused downstream). Returns the latches lifted.
+int lift_latch_level_resets(hhds::Graph* g);
+
 // Is a CLOCK-GATED latch's window provably CLOSED for the whole clock phase in
 // which the commit-at-closing-edge model says it holds, whatever the gate's
 // enables are? `root` is the reference clock the window resolves to and
@@ -373,6 +397,14 @@ struct Latch_hold_path {
 // transparent arm only when it is open for the whole phase before the gated
 // edge and shut for the whole phase after it.
 [[nodiscard]] bool latch_open_at(const hhds::Node_class& latch, const hhds::Pin_class& root, bool level);
+
+// latch_open_at conditioned on `assume_true` being 1 -- the dual of
+// gated_latch_closed_assuming, for the same NESTED gate. An enable latch on a
+// gated clock (`if (clock) en_2p = ...` with clock = clk & en_q) is open at
+// clk=1 only while the outer gate is on; that is also the only time the latch
+// it gates can commit, so its window rule may condition on it.
+[[nodiscard]] bool latch_open_assuming(const hhds::Node_class& latch, const hhds::Pin_class& root, bool level,
+                                       const std::vector<hhds::Pin_class>& assume_true);
 
 // Inline every instance whose output drives a state element's `clock_pin` and
 // whose def contains a Latch — i.e. an INTEGRATED CLOCK GATE CELL.

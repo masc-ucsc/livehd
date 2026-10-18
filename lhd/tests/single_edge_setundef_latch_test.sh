@@ -17,8 +17,9 @@
 #   sul        prim_write_commit_en + prim_write_preview_en at widths 1 and 4
 #              (a wide latch is bit-blasted: each bit's din is a BIT SELECT
 #              of one hold mux), prim_clk_gate + prim_rf_single_1r1w_par_preview,
-#              and prim_phase_pair's tied enable latch on the gated clock
-#              (both hold-mux arms constant)
+#              prim_phase_pair's tied enable latch on the gated clock (both
+#              hold-mux arms constant), and prim_write_commit_rst_en at width
+#              4 (a LEVEL reset folded into the window, lifted onto reset_pin)
 #   sul_open   the preview latch also drives an output: transparent while
 #              gated off and OBSERVED -- refused (gated-latch-open-when-off)
 #   sul_rise   its reader on the gated clock's RISING edge, where the latch
@@ -48,9 +49,9 @@ fail() {
 }
 
 cat > "$W/sul.sv" <<'EOF'
-module sul(input clk, input en, input en_g, input nxt, input [7:0] d,
+module sul(input clk, input en, input en_g, input nxt, input rst, input [7:0] d,
            output qa, output ra, output qb, output [7:0] rq,
-           output [3:0] qw, output [3:0] qv, output qk);
+           output [3:0] qw, output [3:0] qv, output qk, output [3:0] qr, output qm);
   logic en_1p;                                  // prim_write_commit_en: enable latch shut while clk is high
   always_latch if (!clk) en_1p <= en;
   logic qa_l;                                   // ... data latch open while clk && en_1p
@@ -78,6 +79,16 @@ module sul(input clk, input en, input en_g, input nxt, input [7:0] d,
   always_latch if (!gclk) hk <= 1'b1;           // (`Ror(gclk) ? 0 : 1`, both arms constant)
   logic qk_l;                                   // read only through the gate itself
   always_latch if (gclk && hk) qk_l <= d[2];
+  logic [3:0] qr_l;                             // prim_write_commit_rst_en: a LEVEL reset folded into
+  always_latch                                  // the window (`rst | gate`) until it is lifted
+    if (rst) qr_l <= 4'h5;
+    else if (clk && en_1p) qr_l <= d[3:0];
+  logic m_en2;                                  // prim_mul_div's mpcnd pair ON THE GATED CLOCK: an
+  always_latch if (gclk) m_en2 <= en;           // enable latch open while gclk is high,
+  logic m_x;                                    // a data latch open while `!gclk && m_en2` -- open
+  always_latch if (!gclk && m_en2) m_x <= d[5]; // for the whole period while gated off --
+  logic m_y;                                    // read only by the next stage, shut while gclk is low
+  always_latch if (gclk && hk) m_y <= m_x;
   assign qa = qa_l;
   assign ra = ra_l;
   assign qb = qb_l;
@@ -85,6 +96,8 @@ module sul(input clk, input en, input en_g, input nxt, input [7:0] d,
   assign qw = qw_l;
   assign qv = qv_l;
   assign qk = qk_l;
+  assign qr = qr_l;
+  assign qm = m_y;
 endmodule
 EOF
 sed -e 's/^module sul(/module sul_open(/' -e "s/^  assign rq = rf;/  assign rq = rf ^ {7'b0, pl};/" "$W/sul.sv" > "$W/sul_open.sv"
@@ -92,6 +105,8 @@ grep -q "rf ^ {7'b0, pl}" "$W/sul_open.sv" || fail "the observed-latch variant d
 sed -e 's/^module sul(/module sul_rise(/' -e 's/always_ff @(negedge gclk) if (pl) dq <= d;/always_ff @(posedge gclk) if (pl) dq <= d;/' \
   "$W/sul.sv" > "$W/sul_rise.sv"
 grep -q 'always_ff @(posedge gclk) if (pl) dq <= d;' "$W/sul_rise.sv" || fail "the rising-reader variant did not apply"
+sed -e 's/^module sul(/module sul_mopen(/' -e 's/^  assign qm = m_y;/  assign qm = m_y ^ m_x;/' "$W/sul.sv" > "$W/sul_mopen.sv"
+grep -q 'assign qm = m_y ^ m_x;' "$W/sul_mopen.sv" || fail "the observed-mpcnd variant did not apply"
 
 # Compiled exactly as the CORE-ET rows are, which also runs the latch contract.
 build() { # <name>
@@ -100,8 +115,8 @@ build() { # <name>
     --workdir "$W/cw_$1" >"$W/c_$1.log" 2>&1 \
     || { grep -o '"message":"[^"]*' "$W/c_$1.log" | head -3; fail "compile of $1.sv failed"; }
 }
-for m in sul sul_open sul_rise; do build "$m"; done
-echo "ok: the three designs compile (the latch contract accepts them)"
+for m in sul sul_open sul_rise sul_mopen; do build "$m"; done
+echo "ok: the designs compile (the latch contract accepts them)"
 
 normalize() { # <name>  -> pass output on stdout, rc as the pass's
   rm -rf "$W/lgn_$1"
@@ -132,6 +147,12 @@ out="$(normalize sul_rise)"
 grep -q '"code":"gated-latch-open-when-off"' <<<"$out" \
   || { echo "$out" | grep -o '"message":"[^"]*' | head -2; fail "the rising-edge reader was refused for the wrong reason"; }
 echo "ok: a reader on the gated clock's rising edge is not a masked read (refused)"
+
+out="$(normalize sul_mopen)"
+[ $? -ne 0 ] || fail "a \`!gclk && en\` latch OBSERVED while gated off was accepted"
+grep -q '"code":"gated-latch-open-when-off"' <<<"$out" \
+  || { echo "$out" | grep -o '"message":"[^"]*' | head -2; fail "the observed mpcnd latch was refused for the wrong reason"; }
+echo "ok: the mpcnd-shaped latch read by an output is refused (open while gated off)"
 
 # ---- the transformation itself, against an independent simulator ------------------
 if [ -z "${LHD_EXTERNAL_SIM:-}" ]; then
@@ -164,18 +185,19 @@ cat > "$W/tb.v" <<'EOF'
 `define NHALF 5
 `endif
 module tb;
-  reg clk_s = 0, clk_n = 0, en = 1, en_g = 1, nxt = 1;
+  reg clk_s = 0, clk_n = 0, en = 1, en_g = 1, nxt = 1, rst = 0;
   reg [7:0] d = 8'd3;
   wire qas, ras, qbs, qan, ran, qbn, qks, qkn;
   wire [7:0] rqs, rqn;
-  wire [3:0] qws, qwn, qvs, qvn;
+  wire [3:0] qws, qwn, qvs, qvn, qrs, qrn;
+  wire qms, qmn;
   integer p, errs = 0, checks = 0;
   always #10 clk_s = ~clk_s;
   initial begin #(`NSTART); forever #(`NHALF) clk_n = ~clk_n; end
-  sul   s(.clk(clk_s), .en(en), .en_g(en_g), .nxt(nxt), .d(d), .qa(qas), .ra(ras), .qb(qbs), .rq(rqs),
-          .qw(qws), .qv(qvs), .qk(qks));
-  sul_n n(.clk(clk_n), .en(en), .en_g(en_g), .nxt(nxt), .d(d), .qa(qan), .ra(ran), .qb(qbn), .rq(rqn),
-          .qw(qwn), .qv(qvn), .qk(qkn));
+  sul   s(.clk(clk_s), .en(en), .en_g(en_g), .nxt(nxt), .rst(rst), .d(d), .qa(qas), .ra(ras), .qb(qbs), .rq(rqs),
+          .qw(qws), .qv(qvs), .qk(qks), .qr(qrs), .qm(qms));
+  sul_n n(.clk(clk_n), .en(en), .en_g(en_g), .nxt(nxt), .rst(rst), .d(d), .qa(qan), .ra(ran), .qb(qbn), .rq(rqn),
+          .qw(qwn), .qv(qvn), .qk(qkn), .qr(qrn), .qm(qmn));
   task chk(input [15:0] nm, input [7:0] a, input [7:0] b);
     begin
       checks = checks + 1;
@@ -189,6 +211,7 @@ module tb;
       en   = (p < 3) || ((p % 3) != 2);
       en_g = (p < 3) || ((p % 4) != 3);
       nxt  = ((p * 5) % 7) < 4;
+      rst  = (p % 9) == 4 || (p % 13) == 7;   // a level reset, held for whole periods
       d    = (8'd37 * p + 8'd9) & 8'hff;
       #(6 + 20*p - $time);              // LOW: ... and keep following
       if (p % 2) nxt = !nxt;
@@ -198,6 +221,8 @@ module tb;
       chk("rq", rqs, rqn);
       chk("qw", {4'b0, qws}, {4'b0, qwn});
       chk("qk", {7'b0, qks}, {7'b0, qkn});
+      chk("qr", {4'b0, qrs}, {4'b0, qrn});
+      chk("qm", {7'b0, qms}, {7'b0, qmn});
       #(13 + 20*p - $time);             // HIGH: qa follows d; pl follows nxt while gated off
       d    = (8'd29 * p + 8'd11) & 8'hff;
       nxt  = ((p * 3) % 5) < 2;
@@ -237,5 +262,13 @@ echo "ok: clocking the normalized side once per period FAILS"
 out="$(run_iv nogate "$W/sul_nogate.sv")"
 grep -q "SUL_DIFF_FAIL" <<<"$out" || fail "the harness also passed against a gate-less source -- it cannot see the gate"
 echo "ok: the same comparison against a gate-less source FAILS (the gate is load-bearing)"
+
+# NEGATIVE CONTROL 3: a source whose LEVEL reset never acts -- the lifted
+# reset must be load-bearing, not a no-op.
+sed "s/^    if (rst) qr_l <= 4'h5;/    if (1'b0) qr_l <= 4'h5;/" "$W/sul.sv" > "$W/sul_norst.sv"
+cmp -s "$W/sul.sv" "$W/sul_norst.sv" && fail "the reset-less variant did not apply"
+out="$(run_iv norst "$W/sul_norst.sv")"
+grep -q "SUL_DIFF_FAIL" <<<"$out" || fail "the harness also passed against a reset-less source -- it cannot see the lifted reset"
+echo "ok: the same comparison against a source whose level reset never acts FAILS (the lift is load-bearing)"
 
 echo "PASS: single_edge_setundef_latch_test"
