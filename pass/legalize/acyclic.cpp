@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <format>
 #include <functional>
+#include <bit>
 #include <optional>
 #include <climits>
 #include <map>
@@ -1060,18 +1061,25 @@ std::string instance_label(const hhds::Node_class& m) {
 // 2-state input -- which is the Lean model's domain.
 //
 // The condition is decided EXHAUSTIVELY over the selectors' support, with a
-// deliberately narrow, exact value model (EQ against an in-range constant,
-// one-bit And/Or/Not, Ror, in-range bit extracts, one-bit wrappers, two-arm
-// Mux); every other node is an enumerated variable, and a support wider than
+// deliberately narrow, exact value model (EQ against an in-range constant or
+// between two same-width values, bitwise And/Or/Xor/Not at one width, Ror,
+// in-range bit extracts, one-bit wrappers, two-arm Mux); every other node is
+// an enumerated variable, and a support wider than
 // 20 bits, a cycle through a selector, or any other mux kind fails closed --
 // the cycle is then reported exactly as before.
 constexpr int kMaxCondBits = 20;
 
 struct Cond_model {
+  // A VARIABLE is a base pin plus the bits of it the conditions READ (a full
+  // read sets every bit; a Get_mask slice of a would-be variable sets its
+  // range). Enumerating exactly those bits of ONE variable per base keeps two
+  // slices of one selector correlated: `sel[1:0] == 2` and `sel[1]` cannot
+  // disagree. Unread bits are 0 in every assignment, and nothing reads them.
   std::vector<hhds::Pin_class>                 vars;
+  std::vector<uint64_t>                        used;  // per var: the bits read
   absl::flat_hash_map<hhds::Class_index, int>  var_of;
   absl::flat_hash_map<hhds::Class_index, bool> evaluable;  // per pin: modelled as an op (true) or a var (false)
-  int                                          bits = 0;
+  int                                          bits = 0;   // total bits enumerated
   bool                                         ok   = true;
 };
 
@@ -1088,22 +1096,30 @@ std::optional<int64_t> small_const(const hhds::Pin_class& p) {
   return c.to_just_i64();
 }
 
-void add_var(const hhds::Pin_class& p, Cond_model& m) {
-  if (m.var_of.contains(p.get_class_index())) {
-    return;
-  }
+uint64_t mask_w(int w);
+
+// Make `p` a variable (or widen its read bits by `bits_read`).
+void add_var(const hhds::Pin_class& p, Cond_model& m, uint64_t bits_read) {
   const int w = pin_w(p);
-  if (w <= 0 || w > kMaxCondBits) {
+  if (w <= 0 || w > 62) {
     m.ok = false;
     return;
   }
-  m.var_of.emplace(p.get_class_index(), static_cast<int>(m.vars.size()));
-  m.vars.push_back(p);
-  m.bits += w;
+  bits_read &= mask_w(w);
+  auto it = m.var_of.find(p.get_class_index());
+  if (it == m.var_of.end()) {
+    it = m.var_of.emplace(p.get_class_index(), static_cast<int>(m.vars.size())).first;
+    m.vars.push_back(p);
+    m.used.push_back(0);
+  }
+  auto& u = m.used[static_cast<size_t>(it->second)];
+  m.bits += std::popcount(bits_read & ~u);
+  u |= bits_read;
   if (m.bits > kMaxCondBits) {
     m.ok = false;
   }
 }
+void add_var(const hhds::Pin_class& p, Cond_model& m) { add_var(p, m, ~uint64_t{0}); }
 
 // Register `p` in the model: as an operation over modelled operands, or as a
 // variable. Fails the model (m.ok = false) on what cannot be either.
@@ -1141,18 +1157,29 @@ void model_pin(const hhds::Pin_class& p, Cond_model& m, int depth) {
       if (as_op) {
         model_pin(x, m, depth + 1);
       }
+    } else if (!c0 && !c1) {
+      // two VALUES of one width: unsigned equality is exact
+      as_op = w == 1 && pin_w(ins[0].driver) == pin_w(ins[1].driver) && pin_w(ins[0].driver) > 0
+              && pin_w(ins[0].driver) <= 62;
+      if (as_op) {
+        model_pin(ins[0].driver, m, depth + 1);
+        model_pin(ins[1].driver, m, depth + 1);
+      }
     }
-  } else if ((op == Ntype_op::Or || op == Ntype_op::And) && w == 1 && !ins.empty()) {
-    as_op = std::ranges::all_of(ins, [](const auto& in) {
+  } else if ((op == Ntype_op::Or || op == Ntype_op::And || op == Ntype_op::Xor) && w > 0 && w <= 62 && !ins.empty()) {
+    // Bitwise at the OUTPUT width: every value operand of that width, every
+    // constant within it (or -1, all ones). Exact unsigned bit-vector logic --
+    // the casez match `(sel & 2'b10) == 2'b10` is one of these.
+    as_op = std::ranges::all_of(ins, [&](const auto& in) {
       const auto c = small_const(in.driver);
-      return c ? (*c == 0 || *c == 1) : pin_w(in.driver) == 1;
+      return c ? (*c == -1 || (*c >= 0 && *c < (int64_t{1} << w))) : pin_w(in.driver) == w;
     });
     if (as_op) {
       for (const auto& in : ins) {
         model_pin(in.driver, m, depth + 1);
       }
     }
-  } else if (op == Ntype_op::Not && w == 1 && ins.size() == 1 && pin_w(ins[0].driver) == 1) {
+  } else if (op == Ntype_op::Not && w > 0 && w <= 62 && ins.size() == 1 && pin_w(ins[0].driver) == w) {
     as_op = true;
     model_pin(ins[0].driver, m, depth + 1);
   } else if (op == Ntype_op::Ror && w == 1 && ins.size() == 1 && pin_w(ins[0].driver) > 0 && pin_w(ins[0].driver) <= 62) {
@@ -1168,14 +1195,17 @@ void model_pin(const hhds::Pin_class& p, Cond_model& m, int depth) {
     // slice, not the word. Any pin may be a free variable -- that only adds
     // assignments, so an UNSAT verdict stays a proof -- and slicing keeps a
     // 19-bit flop read one bit at a time inside the enumeration budget.
-    if (as_op && (gu::is_graph_input_pin(a) || a.is_const() || gu::is_type_register(a.get_master_node())
-                  || !m.evaluable.contains(a.get_class_index()))) {
+    if (as_op && !small_const(a) && !m.evaluable.contains(a.get_class_index())) {
       const auto ao = gu::is_graph_input_pin(a) || a.is_const() ? Ntype_op::Invalid : gu::type_op_of(a.get_master_node());
-      const bool a_evaluable_kind = ao == Ntype_op::EQ || ao == Ntype_op::Or || ao == Ntype_op::And || ao == Ntype_op::Not
-                                    || ao == Ntype_op::Ror || ao == Ntype_op::Get_mask || ao == Ntype_op::Sext
-                                    || ao == Ntype_op::Mux;
-      if (!a_evaluable_kind && !small_const(a)) {
-        as_op = false;  // falls through to add_var(p): the slice is the variable
+      const bool a_evaluable_kind = !gu::is_graph_input_pin(a) && !gu::is_type_register(a.get_master_node())
+                                    && (ao == Ntype_op::EQ || ao == Ntype_op::Or || ao == Ntype_op::And
+                                        || ao == Ntype_op::Xor || ao == Ntype_op::Not || ao == Ntype_op::Ror
+                                        || ao == Ntype_op::Get_mask || ao == Ntype_op::Sext || ao == Ntype_op::Mux);
+      if (!a_evaluable_kind) {
+        // the operand is a variable: read only this slice of it
+        add_var(a, m, mask_w(rng->second) & ~mask_w(rng->first));
+        m.evaluable[p.get_class_index()] = true;
+        return;
       }
     }
     if (as_op) {
@@ -1222,18 +1252,23 @@ uint64_t eval_pin(const hhds::Pin_class& p, const Cond_model& m, const std::vect
   const int  w   = pin_w(p);
   uint64_t   r   = 0;
   if (op == Ntype_op::EQ) {
-    const auto c0 = small_const(ins[0].driver);
-    const auto& x = c0 ? ins[1].driver : ins[0].driver;
-    const auto  c = static_cast<uint64_t>(c0 ? *c0 : *small_const(ins[1].driver));
-    r             = (eval_pin(x, m, asg, memo) & mask_w(pin_w(x))) == c ? 1 : 0;
-  } else if (op == Ntype_op::Or || op == Ntype_op::And) {
-    r = op == Ntype_op::And ? 1 : 0;
+    const auto c0 = small_const(ins[0].driver), c1 = small_const(ins[1].driver);
+    if (c0 || c1) {
+      const auto& x = c0 ? ins[1].driver : ins[0].driver;
+      const auto  c = static_cast<uint64_t>(c0 ? *c0 : *c1);
+      r             = (eval_pin(x, m, asg, memo) & mask_w(pin_w(x))) == c ? 1 : 0;
+    } else {
+      const auto mw = mask_w(pin_w(ins[0].driver));
+      r = (eval_pin(ins[0].driver, m, asg, memo) & mw) == (eval_pin(ins[1].driver, m, asg, memo) & mw) ? 1 : 0;
+    }
+  } else if (op == Ntype_op::Or || op == Ntype_op::And || op == Ntype_op::Xor) {
+    r = op == Ntype_op::And ? mask_w(w) : 0;
     for (const auto& in : ins) {
-      const auto v = eval_pin(in.driver, m, asg, memo) & 1;
-      r            = op == Ntype_op::And ? (r & v) : (r | v);
+      const auto v = eval_pin(in.driver, m, asg, memo) & mask_w(w);
+      r            = op == Ntype_op::And ? (r & v) : op == Ntype_op::Or ? (r | v) : (r ^ v);
     }
   } else if (op == Ntype_op::Not) {
-    r = (~eval_pin(ins[0].driver, m, asg, memo)) & 1;
+    r = (~eval_pin(ins[0].driver, m, asg, memo)) & mask_w(w);
   } else if (op == Ntype_op::Ror) {
     r = (eval_pin(ins[0].driver, m, asg, memo) & mask_w(pin_w(ins[0].driver))) != 0 ? 1 : 0;
   } else if (op == Ntype_op::Get_mask) {
@@ -1262,9 +1297,14 @@ bool conds_satisfiable(const std::vector<std::pair<hhds::Pin_class, bool>>& cond
   for (uint64_t k = 0; k < total; ++k) {
     uint64_t rest = k;
     for (size_t i = 0; i < m.vars.size(); ++i) {
-      const int w = pin_w(m.vars[i]);
-      asg[i]      = rest & mask_w(w);
-      rest >>= w;
+      uint64_t v = 0;  // deposit the next popcount(used) enumeration bits on the read positions
+      for (uint64_t u = m.used[i]; u != 0; u &= u - 1) {
+        if (rest & 1) {
+          v |= u & (~u + 1);
+        }
+        rest >>= 1;
+      }
+      asg[i] = v;
     }
     absl::flat_hash_map<hhds::Class_index, uint64_t> memo;
     bool                                             all = true;

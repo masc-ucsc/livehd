@@ -10,7 +10,8 @@
 # the cycle's activation condition UNSATISFIABLE by exhaustive enumeration over
 # the selectors' support and unrolls it once (exact for every 2-state input).
 #
-#   fc   two full cases (2-bit and 1-bit selectors): compiles, both unrolled
+#   fc   three full cases (2-bit, 1-bit, and a casez with a wildcard item):
+#        compiles, every hold-arm cycle unrolled
 #   ic   a SPARSE case -- its hold arm IS reachable (the RTL holds): still
 #        refused as `comb-loop`, never unrolled
 #
@@ -39,7 +40,7 @@ fail() {
 
 cat > "$W/fc.sv" <<'VEOF'
 module fc(input [1:0] x, input s, input [7:0] a, input [7:0] b, input [7:0] c, input [7:0] d,
-          output logic [7:0] y, output logic [7:0] z);
+          output logic [7:0] y, output logic [7:0] z, output logic [7:0] v);
   always_comb begin
     case (x)
       2'd0: y = a;
@@ -52,6 +53,13 @@ module fc(input [1:0] x, input s, input [7:0] a, input [7:0] b, input [7:0] c, i
     case (s)
       1'b0: z = a ^ b;
       1'b1: z = c + d;
+    endcase
+  end
+  always_comb begin
+    casez (x)                       // a WILDCARD item: `2'b1?` is read as sel[1],
+      2'b00: v = a;                 // `2'b00`/`2'b01` as sel[1:0] -- two slices of
+      2'b01: v = b;                 // one selector that must stay correlated
+      2'b1?: v = c ^ d;
     endcase
   end
 endmodule
@@ -75,9 +83,9 @@ compile() { # <name>  -> compile output, rc as lhd's
 
 out="$(compile fc)"
 [ $? -eq 0 ] || { echo "$out" | grep -o '"message":"[^"]*' | head -3; fail "the full-case design did not compile"; }
-grep -q 'unrolled 2 combinational cycle(s)' <<<"$out" \
-  || { echo "$out" | grep -o '"message":"[^"]*' | head -3; fail "the two full-case hold arms were not reported unrolled"; }
-echo "ok: two full cases compile; both hold-arm cycles proven inactive and unrolled"
+grep -qE 'unrolled [0-9]+ combinational cycle\(s\)' <<<"$out" \
+  || { echo "$out" | grep -o '"message":"[^"]*' | head -3; fail "the full-case hold arms were not reported unrolled"; }
+echo "ok: three full cases (one casez with a wildcard) compile; their hold-arm cycles proven inactive and unrolled"
 
 out="$(compile ic)"
 [ $? -ne 0 ] || fail "a SPARSE case (reachable hold) compiled -- its cycle was unrolled"
@@ -103,15 +111,15 @@ cmp -s "$W/fc.sv" "$W/fc_bad.sv" && fail "the swapped-arm control did not apply"
 cat > "$W/tb.v" <<'VEOF'
 `timescale 1ns/1ps
 module tb;
-  reg [1:0] x; reg s; reg [7:0] a, b, c, d; wire [7:0] y0, z0, y1, z1;
+  reg [1:0] x; reg s; reg [7:0] a, b, c, d; wire [7:0] y0, z0, v0, y1, z1, v1;
   integer i, errs = 0;
-  fc   r(.x(x), .s(s), .a(a), .b(b), .c(c), .d(d), .y(y0), .z(z0));
-  fc_n n(.x(x), .s(s), .a(a), .b(b), .c(c), .d(d), .y(y1), .z(z1));
+  fc   r(.x(x), .s(s), .a(a), .b(b), .c(c), .d(d), .y(y0), .z(z0), .v(v0));
+  fc_n n(.x(x), .s(s), .a(a), .b(b), .c(c), .d(d), .y(y1), .z(z1), .v(v1));
   initial begin
     for (i = 0; i < 2000; i = i + 1) begin
       x = i % 4; s = (i / 4) % 2; a = $random; b = $random; c = $random; d = $random;
       #1;
-      if (y0 !== y1 || z0 !== z1) begin errs = errs + 1; if (errs < 5) $display("MISMATCH i=%0d", i); end
+      if (y0 !== y1 || z0 !== z1 || v0 !== v1) begin errs = errs + 1; if (errs < 5) $display("MISMATCH i=%0d", i); end
     end
     if (errs == 0) $display("FC_OK"); else $display("FC_FAIL %0d", errs);
     $finish;
