@@ -34,7 +34,7 @@ MODULES=(
   Projection/MixProgram Projection/PartialEvaluatorCorrect
   Projection/SecondProjection Projection/SimulatorContract
   Projection/DesignEncoding Projection/RuntimeEncoding Projection/OperatorBridge
-  Projection/HardwareInterpreter Projection/HardwareAdequacy
+  Projection/HardwareInterpreter Projection/SetMaskLoop Projection/HardwareAdequacy
   Projection/ProjectionCorrect Projection/ResidualFragment
   Projection/ProjectedStep Projection/CertLoad Projection/CertLoadAny
   # The memory route, for the DCERT2 memory-route driver (dcert2_memroute):

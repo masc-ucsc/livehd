@@ -302,7 +302,7 @@ theorem mixed_fold_checked (i : RuntimeInput) (st : StateM)
       PrefixRelM mixedDesign i st mixedG
         (mixedDesign.sources.size + mixedDesign.nodes.size) ss'
       ∧ Eval hwMemP []
-          (.call 47
+          (.call 57
              ([ encListG encNode mixedDesign.nodes.toList
               , objEnv ((mixedDesign.sources.toList.map (srcSlotV i st)).map SlotV.enc)
               , Val.int (Int.ofNat mixedDesign.sources.size) ].map Term.lit))
@@ -319,7 +319,7 @@ theorem twoMem_fold_checked (i : RuntimeInput) :
       PrefixRelM twoMemDesign i twoMemState twoMemG
         (twoMemDesign.sources.size + twoMemDesign.nodes.size) ss'
       ∧ Eval hwMemP []
-          (.call 47
+          (.call 57
              ([ encListG encNode twoMemDesign.nodes.toList
               , objEnv ((twoMemDesign.sources.toList.map (srcSlotV i twoMemState)).map
                           SlotV.enc)

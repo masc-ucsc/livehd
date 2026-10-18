@@ -42,6 +42,7 @@ MODULES=(
   Projection/RuntimeEncoding
   Projection/OperatorBridge
   Projection/HardwareInterpreter
+  Projection/SetMaskLoop
   Projection/HardwareAdequacy
   Projection/ProjectionCorrect
   Projection/ResidualFragment

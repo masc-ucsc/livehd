@@ -309,7 +309,7 @@ one relabelled. -/
 
 theorem hwMemS_entry : hwMemS.entry = "mainM" := rfl
 
-theorem mainM_id : idOf "mainM" = some 50 := rfl
+theorem mainM_id : idOf "mainM" = some 60 := rfl
 
 theorem main_ne_mainM : idOf "main" ≠ idOf "mainM" := by decide
 

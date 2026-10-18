@@ -336,6 +336,18 @@ namespace Projection
 #audit_axioms Hw.list_len_one
 #audit_axioms Hw.list_len_two
 #audit_axioms Hw.list_len_three
+-- D6 Tier 1: Mult, UDiv/SDiv, SetMask (the last through `SetMaskLoop`)
+#audit_axioms Hw.multAll_agree
+#audit_axioms Hw.opMult_agree
+#audit_axioms Hw.opUDiv_agree
+#audit_axioms Hw.truncDiv_obj
+#audit_axioms Hw.opSDiv_agree
+#audit_axioms SetMaskLoop.zip_fold
+#audit_axioms SetMaskLoop.resize_set_bit_high
+#audit_axioms SetMaskLoop.set_mask_eq_smRun
+#audit_axioms Hw.setBitV_agree
+#audit_axioms Hw.smLoop_agree
+#audit_axioms Hw.opSetMask_agree
 #audit_axioms Hw.applyOp_agree
 
 -- Adequacy helper group 4: the node fold, against `evalGraphG` itself.

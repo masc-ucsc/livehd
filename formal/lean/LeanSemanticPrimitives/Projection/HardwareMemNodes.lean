@@ -304,7 +304,7 @@ theorem NodeAdmittedW_ne_sub {c : DenseNodeCert} (h : NodeAdmittedW c) :
 
 #guard nodeAdmittedWB { op := .Op_MemWrite, width := 32, deps := #[0,1,2,3], origin := 0 } = true
 #guard nodeAdmittedWB { op := .Op_Sub, width := 32, deps := #[0,1], origin := 0 } = false
-#guard nodeAdmittedWB { op := .Op_UDiv, width := 32, deps := #[0,1], origin := 0 } = false
+#guard nodeAdmittedWB { op := .Op_Div, width := 32, deps := #[0,1], origin := 0 } = false  -- Op_Div: still refused (UDiv is admitted since D6 Tier 1)
 /- and the ORIGINAL predicate still refuses the plain write -/
 #guard nodeAdmittedB { op := .Op_MemWrite, width := 32, deps := #[0,1,2,3], origin := 0 } = false
 

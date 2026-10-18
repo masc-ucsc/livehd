@@ -415,7 +415,7 @@ theorem resolve_call_lits {fns scope : List String} {f : String} {k : Nat}
 
 /-- `srcValM` sits where `resolveProgram` put it.  Checked by reduction, not
 assumed, and it is the SAME id `HardwareMemChecks` executes. -/
-theorem srcValM_id : idOf "srcValM" = some 43 := rfl
+theorem srcValM_id : idOf "srcValM" = some 53 := rfl
 
 /-- **The source layer, on the resolved program, unconditionally.**  No
 `resolve` hypothesis is left to the caller: the argument list is literals, so
@@ -423,7 +423,7 @@ the resolved term is pinned here. -/
 theorem srcValM_agree_resolved (sd : SourceDesc) (i : RuntimeInput) (st : StateM)
     (hin : SourceInputBound sd i.size) (hst : SourceFlopBound sd st.flops.size) :
     ∃ v, Eval hwMemP []
-            (.call 43
+            (.call 53
                ([encSource sd, encInput i, encBVs st.flops,
                  encListG MemImg.encMemImg st.mems.toList].map Term.lit)) v
        ∧ SrcRel v (sourceValue i (StateM.denote st) sd) := by

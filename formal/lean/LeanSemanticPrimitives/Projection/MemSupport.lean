@@ -106,7 +106,7 @@ different indices.  So "the memory route" is a different entry of the same
 program, not a replacement of the scalar one. -/
 
 theorem entry_name : hwMemS.entry = "mainM" := hwMemS_entry
-theorem entry_index : idOf "mainM" = some 50 := mainM_id
+theorem entry_index : idOf "mainM" = some 60 := mainM_id
 theorem entry_distinct : idOf "main" ≠ idOf "mainM" := main_ne_mainM
 
 /-- **The answer the report is worth.**  A design the memory route admits, run

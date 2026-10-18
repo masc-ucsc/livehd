@@ -803,7 +803,7 @@ left to the caller. -/
 
 /-- `evalNodesM` sits where `resolveProgram` put it — the same id the executed
 checks call. -/
-theorem evalNodesM_id : idOf "evalNodesM" = some 47 := rfl
+theorem evalNodesM_id : idOf "evalNodesM" = some 57 := rfl
 
 theorem sourcesThenNodes_resolved {D : DesignCert} {i : RuntimeInput} {st : StateM}
     {G : Nat → Option Nat}
@@ -818,7 +818,7 @@ theorem sourcesThenNodes_resolved {D : DesignCert} {i : RuntimeInput} {st : Stat
     ∃ ss' : List SlotV,
       PrefixRelM D i st G (D.sources.size + D.nodes.size) ss'
       ∧ Eval hwMemP []
-          (.call 47
+          (.call 57
              ([ encListG encNode D.nodes.toList
               , objEnv ((D.sources.toList.map (srcSlotV i st)).map SlotV.enc)
               , Val.int (Int.ofNat D.sources.size) ].map Term.lit))
@@ -953,7 +953,7 @@ theorem mixed_fold_resolved (i : RuntimeInput) (st : StateM)
       PrefixRelM mixedDesign i st mixedG
         (mixedDesign.sources.size + mixedDesign.nodes.size) ss'
       ∧ Eval hwMemP []
-          (.call 47
+          (.call 57
              ([ encListG encNode mixedDesign.nodes.toList
               , objEnv ((mixedDesign.sources.toList.map (srcSlotV i st)).map SlotV.enc)
               , Val.int (Int.ofNat mixedDesign.sources.size) ].map Term.lit))
@@ -969,7 +969,7 @@ theorem mixed_fold_resolved_zero (i : RuntimeInput) :
       PrefixRelM mixedDesign i zeroState mixedG
         (mixedDesign.sources.size + mixedDesign.nodes.size) ss'
       ∧ Eval hwMemP []
-          (.call 47
+          (.call 57
              ([ encListG encNode mixedDesign.nodes.toList
               , objEnv ((mixedDesign.sources.toList.map (srcSlotV i zeroState)).map SlotV.enc)
               , Val.int (Int.ofNat mixedDesign.sources.size) ].map Term.lit))
@@ -981,7 +981,7 @@ theorem mixed_fold_resolved_init (i : RuntimeInput) :
       PrefixRelM mixedDesign i initState mixedG
         (mixedDesign.sources.size + mixedDesign.nodes.size) ss'
       ∧ Eval hwMemP []
-          (.call 47
+          (.call 57
              ([ encListG encNode mixedDesign.nodes.toList
               , objEnv ((mixedDesign.sources.toList.map (srcSlotV i initState)).map SlotV.enc)
               , Val.int (Int.ofNat mixedDesign.sources.size) ].map Term.lit))

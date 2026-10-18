@@ -1549,12 +1549,13 @@ def plainWriteDesign : DesignCert :=
                          else some (.tbl 1 8)) plainWriteDesign.nodes[0]!
        = none
 
-/- The extension is EXACTLY the plain write: the five refused scalar operators
-   are still refused by the extended typing too. -/
+/- The extension is EXACTLY the plain write: the refused scalar operators are
+   still refused by the extended typing too (`Op_Div`; UDiv/SDiv/Mult are
+   supported since D6 Tier 1). -/
 #guard nodeTyW (fun _ => some (.bv 8))
          { op := .Op_Sub, width := 8, deps := #[1,2], origin := 0 } = none
 #guard nodeTyW (fun _ => some (.bv 8))
-         { op := .Op_UDiv, width := 8, deps := #[1,2], origin := 0 } = none
+         { op := .Op_Div, width := 8, deps := #[1,2], origin := 0 } = none
 
 /- …and an admitted scalar operator types identically on both routes. -/
 #guard nodeTyW (fun _ => some (.bv 8))

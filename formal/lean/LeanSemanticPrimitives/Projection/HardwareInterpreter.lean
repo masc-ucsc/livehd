@@ -98,6 +98,12 @@ private def sltCode     : Int := Int.ofNat (opCode .Op_SLT)
 private def sgtCode     : Int := Int.ofNat (opCode .Op_SGT)
 private def sextCode    : Int := Int.ofNat (opCode .Op_Sext)
 private def shlCode     : Int := Int.ofNat (opCode .Op_SHL)
+-- D6 Tier 1: appended AFTER every earlier operator in `applyOp`'s chain, so no
+-- existing branch moves and a residual for an earlier operator is unchanged.
+private def multCode    : Int := Int.ofNat (opCode .Op_Mult)
+private def udivCode    : Int := Int.ofNat (opCode .Op_UDiv)
+private def sdivCode    : Int := Int.ofNat (opCode .Op_SDiv)
+private def setMaskCode : Int := Int.ofNat (opCode .Op_SetMask)
 
 def hwS : SProgram where
   entry := "main"
@@ -232,7 +238,15 @@ def hwS : SProgram where
                   (C "opSext" [R "w", R "deps", R "env", R "n"])
                 (.ite (P .eqI [R "code", .lit (.int shlCode)])
                   (C "opShl" [R "w", R "deps", R "env", R "n"])
-                  (P .bvMk [R "w", int 0])))))))))))))))))) ] },
+                (.ite (P .eqI [R "code", .lit (.int multCode)])
+                  (C "opMult" [R "w", R "deps", R "env", R "n"])
+                (.ite (P .eqI [R "code", .lit (.int udivCode)])
+                  (C "opUDiv" [R "w", R "deps", R "env", R "n"])
+                (.ite (P .eqI [R "code", .lit (.int sdivCode)])
+                  (C "opSDiv" [R "w", R "deps", R "env", R "n"])
+                (.ite (P .eqI [R "code", .lit (.int setMaskCode)])
+                  (C "opSetMask" [R "w", R "deps", R "env", R "n"])
+                  (P .bvMk [R "w", int 0])))))))))))))))))))))) ] },
 
   -- Op_And: resize the FIRST operand to the node width, fold the rest in
   -- unchanged.  Mirrors `eval_op` exactly; see `OperatorBridge.evalOp_And_cons`.
@@ -511,7 +525,88 @@ def hwS : SProgram where
 
   { name := "enabled", params := ["en", "env", "n"], inline := true
   , body := .ite (P .isNil [R "en"]) (bool true)
-              (C "nz" [C "slot" [R "env", R "n", P .hd [R "en"]]]) }
+              (C "nz" [C "slot" [R "env", R "n", P .hd [R "en"]]]) },
+
+  -- D6 Tier 1 helpers, APPENDED so every earlier function keeps its id (the
+  -- memory program resolves calls by id; HardwareMemSource pins them).
+  -- Op_Mult: the PRODUCT of every operand through `bv_uint`, the node width
+  -- applied ONCE at the end -- `eval_op`'s `mk_bv w (args.map bv_uint).prod`,
+  -- so the truncation is of the product, not of each factor.  An empty
+  -- operand list is the empty product, 1.
+  { name := "opMult", params := ["w", "deps", "env", "n"], inline := true
+  , body := P .bvMk [R "w", C "multAll" [R "deps", R "env", R "n"]] },
+
+  { name := "multAll", params := ["deps", "env", "n"], inline := true
+  , body := .ite (P .isNil [R "deps"]) (int 1)
+              (P .mulI
+                 [ P .bvUint [C "slot" [R "env", R "n", P .hd [R "deps"]]]
+                 , C "multAll" [P .tl [R "deps"], R "env", R "n"] ]) },
+
+  -- Op_UDiv: `divI` is guarded exactly as `eval_op` is -- 0 when the divisor
+  -- is 0 -- and both operands are `bv_uint`, so this IS the reference.
+  { name := "opUDiv", params := ["w", "deps", "env", "n"], inline := true
+  , body := P .bvMk
+              [ R "w"
+              , P .divI [ P .bvUint [C "slot" [R "env", R "n", P .hd [R "deps"]]]
+                        , P .bvUint [C "slot" [R "env", R "n", P .hd [P .tl [R "deps"]]]] ] ] },
+
+  -- Op_SDiv: `bv_sdiv` -- 0 when the divisor's VALUE is 0, else
+  -- `trunc_div_int` of the signed readings: the quotient of the absolute
+  -- values, negated when exactly one operand is negative.
+  { name := "opSDiv", params := ["w", "deps", "env", "n"], inline := true
+  , body := C "sdivCore"
+              [ R "w"
+              , P .bvUint [C "slot" [R "env", R "n", P .hd [P .tl [R "deps"]]]]
+              , P .bvSint [C "slot" [R "env", R "n", P .hd [R "deps"]]]
+              , P .bvSint [C "slot" [R "env", R "n", P .hd [P .tl [R "deps"]]]] ] },
+
+  { name := "sdivCore", params := ["w", "bu", "a", "b"], inline := true
+  , body := .ite (P .eqI [R "bu", int 0]) (P .bvMk [R "w", int 0])
+              (P .bvMk [R "w", C "signFix" [R "a", R "b", P .divI [C "absI" [R "a"], C "absI" [R "b"]]]]) },
+
+  { name := "signFix", params := ["a", "b", "q"], inline := true
+  , body := .ite (P .ltI [R "a", int 0])
+              (.ite (P .ltI [R "b", int 0]) (R "q") (P .subI [int 0, R "q"]))
+              (.ite (P .ltI [R "b", int 0]) (P .subI [int 0, R "q"]) (R "q")) },
+
+  { name := "absI", params := ["x"], inline := true
+  , body := .ite (P .ltI [R "x", int 0]) (P .subI [int 0, R "x"]) (R "x") },
+
+  -- Op_SetMask: `bv_set_mask` as `SetMaskLoop.smRun` -- walk the positions
+  -- 0 … w-1; where the MASK has a bit set, write the value's next bit (`k`)
+  -- into the accumulator.  The bound is the node width `w`, which is STATIC,
+  -- so the walk unrolls during specialization, and `set_mask_eq_smRun` proves
+  -- a set bit at or above `w` cannot reach the `w`-bit result.  `p` carries
+  -- 2^i, static too.  Every dynamic intermediate is `let`-bound, so the
+  -- unrolled residual grows linearly in `w`, never by duplicating `acc`.
+  { name := "opSetMask", params := ["w", "deps", "env", "n"], inline := true
+  , body := P .bvResize
+              [ R "w"
+              , C "smLoop"
+                  [ C "slot" [R "env", R "n", P .hd [R "deps"]]
+                  , C "slot" [R "env", R "n", P .hd [P .tl [R "deps"]]]
+                  , C "slot" [R "env", R "n", P .hd [P .tl [P .tl [R "deps"]]]]
+                  , int 0, int 1, int 0, R "w" ] ] },
+
+  { name := "smLoop", params := ["acc", "m", "v", "i", "p", "k", "w"], inline := true
+  , body := .ite (P .ltI [R "i", R "w"])
+              (.letN "bm" (P .bvBit [R "m", R "i"])
+              (.letN "acc2" (.ite (R "bm")
+                               (C "setBitV" [R "acc", R "i", R "p", P .bvBit [R "v", R "k"]])
+                               (R "acc"))
+              (.letN "k2" (.ite (R "bm") (P .addI [R "k", int 1]) (R "k"))
+                (C "smLoop" [R "acc2", R "m", R "v", P .addI [R "i", int 1],
+                             P .addI [R "p", R "p"], R "k2", R "w"]))))
+              (R "acc") },
+
+  -- `bv_set_bit x i b` with `p` = 2^i: the accumulator's own width, the bit
+  -- added or removed only when it changes.
+  { name := "setBitV", params := ["x", "i", "p", "b"], inline := true
+  , body := .letN "u" (P .bvUint [R "x"])
+              (P .bvMk [ P .bvWidth [R "x"]
+                       , .ite (R "b")
+                           (.ite (P .bvBit [R "x", R "i"]) (R "u") (P .addI [R "u", R "p"]))
+                           (.ite (P .bvBit [R "x", R "i"]) (P .subI [R "u", R "p"]) (R "u")) ]) }
   ]
 
 /-! ## Resolution and binding-time analysis -/
@@ -874,6 +969,81 @@ private def shl0D : DesignCert where
 #guard (interpretDesign (binD .Op_SRA) (allEdges (binD .Op_SRA))
           (binIn 8 1) tinySt).outputs != #[mk_bv 4 4]
 
+/-! ### D6 Tier 1: `Op_Mult`, `Op_UDiv`, `Op_SDiv`
+
+The projection's simulator against `interpretDesign` on every corner the
+reference distinguishes: a zero divisor (0, not an error), operands with the
+sign bit set (8..15 are -8..-1 at width 4), truncation toward zero, a product
+that wraps, and `-8 / -1`, whose true quotient 8 is not representable. -/
+
+private def tier1Ops : List LGraphOp := [.Op_Mult, .Op_UDiv, .Op_SDiv]
+
+#guard tier1Ops.all (fun o =>
+  [(3,5),(7,7),(15,15),(8,1),(1,8),(9,0),(0,9),(15,2),(14,3),(9,2),(7,15),(8,15),(0,0)].all
+    (fun q => binOK o q.1 q.2))
+
+private def t1Out (o : LGraphOp) (a b : Int) : Array BV :=
+  (interpretDesign (binD o) (allEdges (binD o)) (binIn a b) tinySt).outputs
+
+#guard t1Out .Op_Mult 3 5  == #[mk_bv 4 15]
+#guard t1Out .Op_Mult 7 7  == #[mk_bv 4 1]    -- 49 wraps to 1: the PRODUCT is truncated once
+#guard t1Out .Op_UDiv 9 0  == #[mk_bv 4 0]    -- a zero divisor gives 0
+#guard t1Out .Op_UDiv 15 2 == #[mk_bv 4 7]    -- unsigned: 15 / 2
+#guard t1Out .Op_SDiv 15 2 == #[mk_bv 4 0]    -- -1 / 2 truncates toward zero
+#guard t1Out .Op_SDiv 9 2  == #[mk_bv 4 13]   -- -7 / 2 = -3, which is 13
+#guard t1Out .Op_SDiv 7 15 == #[mk_bv 4 9]    -- 7 / -1 = -7, which is 9
+#guard t1Out .Op_SDiv 8 15 == #[mk_bv 4 8]    -- -8 / -1 = 8 wraps back to 0b1000
+#guard t1Out .Op_SDiv 9 0  == #[mk_bv 4 0]    -- a zero divisor gives 0, signed too
+
+/-- `Op_Mult` is n-ary: three operands, and zero operands (the empty product). -/
+private def mul3D : DesignCert where
+  sources  := #[.input 0 4, .input 1 4, .input 2 4]
+  nodes    := #[{ op := .Op_Mult, width := 4, deps := #[0, 1, 2] }]
+  outputs  := #[{ slot := 3, width := 4 }]
+  flops    := #[]
+  memories := #[]
+
+private def mul0D : DesignCert where
+  sources  := #[.input 0 4]
+  nodes    := #[{ op := .Op_Mult, width := 4, deps := #[] }]
+  outputs  := #[{ slot := 1, width := 4 }]
+  flops    := #[]
+  memories := #[]
+
+#guard [(2,3,5),(15,15,15),(0,7,9),(3,3,3)].all (fun t =>
+  runHw mul3D (allEdges mul3D) #[mk_bv 4 t.1, mk_bv 4 t.2.1, mk_bv 4 t.2.2] tinySt
+    == refOf mul3D (allEdges mul3D) #[mk_bv 4 t.1, mk_bv 4 t.2.1, mk_bv 4 t.2.2] tinySt)
+#guard (interpretDesign mul3D (allEdges mul3D) #[mk_bv 4 2, mk_bv 4 3, mk_bv 4 5] tinySt).outputs
+         == #[mk_bv 4 14]                      -- 30 wraps to 14
+#guard runHw mul0D (allEdges mul0D) #[mk_bv 4 5] tinySt == refOf mul0D (allEdges mul0D) #[mk_bv 4 5] tinySt
+#guard (interpretDesign mul0D (allEdges mul0D) #[mk_bv 4 5] tinySt).outputs == #[mk_bv 4 1]
+
+/-- `Op_SetMask` with every operand an input: the accumulator `a` (6 bits), the
+mask `m` (8 bits -- WIDER than the 5-bit node, so a set bit at or above the
+node width is exercised) and the value `v` (3 bits). -/
+private def smD : DesignCert where
+  sources  := #[.input 0 6, .input 1 8, .input 2 3]
+  nodes    := #[{ op := .Op_SetMask, width := 5, deps := #[0, 1, 2] }]
+  outputs  := #[{ slot := 3, width := 5 }]
+  flops    := #[]
+  memories := #[]
+
+private def smIn (a m v : Int) : RuntimeInput := #[mk_bv 6 a, mk_bv 8 m, mk_bv 3 v]
+
+private def smOut (a m v : Int) : Array BV :=
+  (interpretDesign smD (allEdges smD) (smIn a m v) tinySt).outputs
+
+-- contiguous, scattered, empty, full, above-the-node-width, and more set bits
+-- than the value has
+#guard [(0,0b00110,0b011),(63,0b00110,0b000),(0b101010,0b10101,0b101),(21,0,7),(0,255,7),
+        (31,0b11100000,0b111),(0b111111,0b11111111,0b010),(9,0b01001,0b110)].all (fun t =>
+  runHw smD (allEdges smD) (smIn t.1 t.2.1 t.2.2) tinySt
+    == refOf smD (allEdges smD) (smIn t.1 t.2.1 t.2.2) tinySt)
+#guard smOut 0 0b00110 0b011 == #[mk_bv 5 0b00110]   -- v's bits 0,1 land at 1,2
+#guard smOut 63 0b00110 0b000 == #[mk_bv 5 0b11001]  -- clearing, then the node width
+#guard smOut 0 0b10101 0b101 == #[mk_bv 5 0b10001]   -- scattered: v1 = 0 lands at bit 2
+#guard smOut 0 255 7 == #[mk_bv 5 0b00111]           -- a 3-bit value fills bits 0..2 only
+
 end Acceptance
 
 /-! ## The first projection, on hardware
@@ -943,6 +1113,8 @@ def OpSupported : LGraphOp → Bool
   | .Op_EQ      | .Op_Ror  | .Op_MuxBool | .Op_MuxN         => true
   | .Op_SHL     | .Op_SRA  | .Op_Sext | .Op_GetMask         => true
   | .Op_ULT     | .Op_UGT  | .Op_SLT   | .Op_SGT            => true
+  -- D6 Tier 1
+  | .Op_Mult    | .Op_UDiv | .Op_SDiv | .Op_SetMask         => true
   | _                                                       => false
 
 /-! ### Operand counts
@@ -975,7 +1147,10 @@ def RequiredArity : LGraphOp → Option Nat
   | .Op_UGT     => some 2
   | .Op_SLT     => some 2
   | .Op_SGT     => some 2
-  -- Op_And, Op_Or, Op_Xor, Op_Ror, Op_EQ, Op_SHL, Op_Sum, Op_MuxN fold over
+  | .Op_UDiv    => some 2
+  | .Op_SDiv    => some 2
+  | .Op_SetMask => some 3
+  -- Op_And, Op_Or, Op_Xor, Op_Ror, Op_EQ, Op_SHL, Op_Sum, Op_MuxN, Op_Mult fold over
   -- however many operands they are given, on BOTH sides, so they impose
   -- nothing.  Everything `OpSupported` rejects is irrelevant here.
   | _           => none
@@ -1161,9 +1336,10 @@ private def romD : DesignCert :=
 #guard romD.memories == #[]
 example : ¬ (∀ sd ∈ romD.sources.toList, SourceSupported sd = true) := by decide
 
--- NEGATIVE CONTROL 2: an operator with no `applyOp` case
+-- NEGATIVE CONTROL 2: an operator with no `applyOp` case (`Op_Div`: the
+-- exporter emits UDiv/SDiv, which ARE supported since D6 Tier 1)
 private def divD : DesignCert :=
-  { tinyD with nodes := #[{ op := .Op_UDiv, width := 4, deps := #[0, 1] }] }
+  { tinyD with nodes := #[{ op := .Op_Div, width := 4, deps := #[0, 1] }] }
 
 example : ¬ (∀ c ∈ divD.nodes.toList, OpSupported c.op = true) := by decide
 
@@ -1183,11 +1359,15 @@ catch-all and answers 0; `applyOp` reads the first operand and answers
 theorem not_arity_bites :
     eval_op .Op_Not 4 [mk_bv 4 0, mk_bv 4 0] ≠ bv_not 4 (mk_bv 4 0) := by decide
 
--- …and the supported operators really are the seventeen, no more
+-- …and the supported operators really are the twenty-one (seventeen, plus D6
+-- Tier 1's Mult/UDiv/SDiv/SetMask), no more
 example : OpSupported .Op_GetMask = true := by decide
 example : OpSupported (.Op_Const 0) = false := by decide
 example : OpSupported .Op_Sub = false := by decide
 example : OpSupported .Op_MemRead = false := by decide
+example : OpSupported .Op_Mult = true ∧ OpSupported .Op_UDiv = true ∧ OpSupported .Op_SDiv = true := by decide
+example : OpSupported .Op_SetMask = true := by decide
+example : OpSupported .Op_Div = false := by decide
 
 end SupportCheck
 
