@@ -4,8 +4,10 @@
 # Direct slang front-end (SV -> LNAST) test driver (todo/ 2s subtask E).
 #
 # Ladder mode (the bazel slang_compile-* targets):
-#   slang_compile.sh <tier> <file.v>
-# with tier one of:
+#   slang_compile.sh <tier> <file.v>...
+# (one or more files; each runs at the tier, every failure names its fixture
+# as FAIL(<top>), and the exit status is non-zero if any file failed) with tier
+# one of:
 #   lec      - compile --reader slang to verilog AND lhd lec (LEC) it against
 #              the source itself, with a five-second internal budget and ten-second watchdog. Timeouts
 #              pass with an explicit unproven result; refutations still fail.
@@ -44,9 +46,6 @@
 # Per-tier expectations are an acceptance gate both ways: a regression fails
 # its tier, and an `error` entry that starts compiling also FAILS so the
 # ladder gets promoted explicitly in slang_ladder.bzl.
-#
-# Legacy mode (no tier argument): every inou/slang/tests/verilog/*.v at the
-# `error` tier (the sky130 cell-instance set pins the unknown-module policy).
 
 set -u
 
@@ -321,15 +320,14 @@ CHECK
 }
 
 if [ $# -ge 2 ]; then
-  run_one "$1" "$2"
-  exit $?
+  tier=$1
+  shift
+  rc=0
+  for f in "$@"; do
+    run_one "$tier" "$f" || rc=1
+  done
+  exit $rc
 fi
 
-# Legacy default mode: the sky130 cell-instance set. These instantiate
-# liberty cells with no module sources, so they pin the unknown-module
-# (blackbox) diagnostic policy: a clean located error, never a crash.
-fail=0
-for f in inou/slang/tests/verilog/*.v; do
-  run_one error "$f" || fail=1
-done
-exit $fail
+echo "usage: slang_compile.sh <tier> <file>..." >&2
+exit 1

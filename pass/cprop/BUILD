@@ -23,64 +23,22 @@ cc_library(
 
 cc_test(
     name = "cprop_test",
-    srcs = ["cprop_test.cpp"],
+    srcs = [
+        "cprop_lowlane_test.cpp",
+        "cprop_muxctx_test.cpp",
+        "cprop_opshare_test.cpp",
+        "cprop_test.cpp",
+        "loop_hoist_test.cpp",
+    ],
     copts = COPTS,
     deps = [
         ":pass_cprop",
+        "//core",
+        "//graph",
+        "//pass/bitwidth:pass_bitwidth",
         "//pass/enableopt:pass_enableopt",
-        "//pass/bitwidth:pass_bitwidth",
-        "//core",
-        "//graph",
+        "//pass/lec:lec_query",
         "@abseil-cpp//absl/container:flat_hash_set",
-        "@googletest//:gtest_main",
-    ],
-)
-
-cc_test(
-    name = "cprop_lowlane_test",
-    srcs = ["cprop_lowlane_test.cpp"],
-    copts = COPTS,
-    deps = [
-        ":pass_cprop",
-        "//core",
-        "//graph",
-        "@googletest//:gtest_main",
-    ],
-)
-
-cc_test(
-    name = "cprop_opshare_test",
-    srcs = ["cprop_opshare_test.cpp"],
-    copts = COPTS,
-    deps = [
-        ":pass_cprop",
-        "//graph",
-        "//pass/bitwidth:pass_bitwidth",
-        "//pass/lec:lec_query",
-        "@googletest//:gtest_main",
-    ],
-)
-
-cc_test(
-    name = "cprop_muxctx_test",
-    srcs = ["cprop_muxctx_test.cpp"],
-    copts = COPTS,
-    deps = [
-        ":pass_cprop",
-        "//graph",
-        "//pass/lec:lec_query",
-        "@googletest//:gtest_main",
-    ],
-)
-
-cc_test(
-    name = "loop_hoist_test",
-    srcs = ["loop_hoist_test.cpp"],
-    copts = COPTS,
-    deps = [
-        ":pass_cprop",
-        "//core",
-        "//graph",
         "@googletest//:gtest_main",
         "@hhds//hhds:graph",
     ],

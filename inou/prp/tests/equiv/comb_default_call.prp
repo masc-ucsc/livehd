@@ -7,7 +7,7 @@
 // User ruling 2026-09-28 (39): a `comb` input default computed through a CALL
 // (`b:U8 = g(a=a)`) is re-emitted by the Pyrope writer (pass.prp_writer,
 // `--emit pyrope`) as that call expression in the regenerated signature. The
-// `prp-p2p-comb_default_call` target round-trips this file through the writer,
+// `prp-p2p-misc` target (this fixture's group) round-trips this file through the writer,
 // recompiles the emitted Pyrope and proves it against the golden. Before, the
 // writer failed "cannot emit Pyrope for 'comb_default_call.f': unimplemented
 // construct(s): the default of input `b` is not an expression over the inputs".

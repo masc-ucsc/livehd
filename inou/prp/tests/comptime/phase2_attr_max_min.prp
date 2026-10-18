@@ -1,10 +1,12 @@
 /*
 :name: phase2_attr_max_min
 :type: parsing lnast comptime
-:verifier_pass: 9
+:verifier_pass: 62
 :verifier_fail: 0
 */
 
+// ---- phase2_attr_max_min ----
+{
 // Phase 2 — basic attribute reads of the bitwidth bounds. uN/sN width types
 // are syntax sugar for max/min, so reads should return consistent answers
 // regardless of how the bounds were declared. (`:[range=…]` sugar was
@@ -28,3 +30,155 @@ cassert(d.[min] == 0)
 
 mut e:Signed(min=-10, max=10) = nil
 cassert(e.[max] == 10)
+}
+
+// ---- phase2_attr_bits ----
+{
+// Phase 2 — `.[bits]` reads under the typesystem redesign (entry 1v).
+// Declaration-driven: typed `:UN`/`:SN` → fixed envelope. An untyped COMPTIME
+// integer is as wide as its value (user ruling 2026-09-27, docs 04b "Integer
+// Bitwidth"); an untyped runtime value reads nil. `.[ubits]`/`.[sbits]` have
+// been removed.
+
+mut a:U8 = 0
+cassert(a.[bits] == 8)
+a = 200
+cassert(a.[bits] == 8)        // bits is declared, not value-derived
+
+const c:S4 = -1
+cassert(c.[bits] == 4)
+cassert(c.[min] == -8)
+cassert(c.[max] == 7)
+
+const e = 0                   // untyped comptime → its value's width
+cassert(e.[bits] == 1)
+}
+
+// ---- phase8_size_attrs_basic ----
+{
+// Phase 8 — `bits`/`max`/`min` are the attributes that describe the
+// numeric envelope. Signedness is encoded by the value of `min`
+// (negative ⇒ signed). These attributes are populated only when a
+// concrete type pins them; otherwise they read nil.
+
+const a:Signed  = 3
+cassert(a.[bits] == nil)        // `Signed` is unbounded
+cassert(a.[max]  == nil)
+cassert(a.[min]  == nil)
+
+const b:U4   = 3
+cassert(b.[bits] == 4)
+cassert(b.[min]  == 0)
+cassert(b.[max]  == 15)
+
+const c:Bool = true
+cassert(c.[bits] == 1)
+cassert(c.[min]  == 0)          // bool is the hardware U1 envelope {0,1}
+cassert(c.[max]  == 1)
+
+mut   d:S5   = 3
+cassert(d.[bits] == 5)
+cassert(d.[min]  == -16)
+cassert(d.[max]  == 15)
+
+comptime const e:S5 = 3
+cassert(e.[bits] == 5)
+cassert(e.[min]  == -16)
+cassert(e.[max]  == 15)
+cassert(e.[`comptime`])
+
+comptime mut f:String = "foo"
+cassert(f.[bits] == nil)        // string has no numeric envelope
+cassert(f.[max]  == nil)
+cassert(f.[min]  == nil)
+cassert(f.[`comptime`])
+}
+
+// ---- phase8_size_attrs_partial ----
+{
+// Phase 8 — partial pinning. Only the attributes the type explicitly
+// constrains become readable; the rest stay nil. The bounds are pinned with
+// the type-call `:Signed(max=N[, min=M])` (the `:[max=N]` size-attribute form is
+// gone — `attr_set` of max/min/bits/size is rejected by lnastfmt; sizing is
+// only through the type).
+
+const x:Signed(max=3) = 2
+cassert(x.[max]  == 3)
+cassert(x.[min]  == nil)
+cassert(x.[bits] == nil)
+
+// Fully-bounded range: `Signed(min=-8, max=7)` is exactly `S4`, so the width is
+// derivable and `.[bits]` reports it. (Contrast the half-bounded `Signed(max=3)`
+// above, whose envelope is incomplete, so its `.[bits]` stays nil.)
+const y:Signed(min=-8, max=7) = 0
+cassert(y.[min]  == -8)
+cassert(y.[max]  == 7)
+cassert(y.[bits] == 4)
+}
+
+// ---- phase8_size_attrs_untyped ----
+{
+// Phase 8 — an untyped literal has a known value but no envelope: `.[max]`
+// and `.[min]` read nil until a concrete type pins them (e.g. via a typed
+// copy). `.[bits]` of an untyped COMPTIME integer is its value's width (user
+// ruling 2026-09-27, docs 04b "Integer Bitwidth": 3 -> 2 bits).
+
+const k = 3
+cassert(k.[bits] == 2)
+cassert(k.[max]  == nil)
+cassert(k.[min]  == nil)
+cassert(k == 3)
+
+const k2:U8 = k
+cassert(k2.[bits] == 8)
+cassert(k2.[min]  == 0)
+cassert(k2.[max]  == 255)
+}
+
+// ---- phase8_size_vs_bits ----
+{
+// Phase 8 — `size` is the entry count for tuples/arrays. It is NOT a bit
+// width. `bits` is the concat width (for a tuple) or the per-element
+// width (for an array).
+
+const t = (const a:U4=3, const b:U4=5, const c:U4=7)
+cassert(t.[size] == 0)               // zero unnamed entries
+cassert(t.[bits] == nil)             // no bits for structs
+cassert(t.a.[bits] == 4)
+
+const arr:[]U8 = (1, 2, 3, 4)
+cassert(arr.[size] == 4)             // four elements
+cassert(arr.[bits] == nil)           // no bits for arrays
+cassert(arr[0].[bits] == 8)
+}
+
+// ---- phase3_aggregate_bits ----
+{
+// Phase 3 — under the typesystem redesign aggregates have no `.[bits]`
+// (only scalars do). Per-field `.[bits]` reads require an annotated
+// field; untyped fields read as nil.
+
+const t = (const a:U3=5, const b:U2=2, const c:U7=100)
+cassert(t.a.[bits] == 3)
+cassert(t.b.[bits] == 2)
+cassert(t.c.[bits] == 7)
+cassert(t.[bits] == nil)
+}
+
+// ---- sign_attr ----
+{
+// Typesystem redesign: `.[sign]` is a derived read (signed ⇔ declared min < 0),
+// computed from the type — never a stored attribute.
+
+const a:U8 = 5
+cassert(!a.[sign])      // unsigned → not signed
+
+const b:S4 = -1
+cassert(b.[sign])        // signed → signed
+
+const c:Bool = true
+cassert(!c.[sign])       // a bool is the hardware U1 (true == 1) → not signed
+
+const d:U3 = 2
+cassert(!d.[sign])
+}

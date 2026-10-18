@@ -1,0 +1,318 @@
+/*
+:name: testbench_evaluator_values
+:type: simulation
+*/
+// Merged fixture: each section below is the original tests/sim fixture listed in its banner,
+// body unchanged (module and test names are unique across the sections).
+
+// ============================================================
+// from test_bare_step_multi_input.prp
+// ============================================================
+// A bare `step` (no enclosing `tick`) after poking TWO OR MORE inputs of a
+// comb instance, then reading its output. Before, the pokes made the handle
+// `d` look like a tuple of its INPUTS, so `d.out` failed "unknown field `out`
+// on tuple `d`" -- while the same test with ONE poked input passed by luck
+// (a one-field bundle was read through the scalar fallback). An instance
+// handle is not a tuple: its fields are the unit's ports.
+
+comb add3(a:U8, b:U8, c:U8) -> (out:U8) {
+  wrap out = a + b + c
+}
+
+test add3.bare_step {
+  mut d = add3
+  d.a = 3
+  d.b = 4
+  d.c = 5
+  step
+  assert(d.out == 12)
+  d.c = 250
+  step
+  const got = d.out
+  assert(got == 1)     // 3 + 4 + 250 wraps at 8 bits
+}
+
+// ============================================================
+// from test_compound_assign.prp
+// ============================================================
+// A compound assignment on a TEST-LOCAL variable must fold `x = x op e`.
+// The driver emitter (inou/prp/prp_sim.cpp gen_assignment) used to take the
+// rvalue alone, so `s += r * r` became `s = r * r` and a four-term accumulator
+// ended holding only its last term (16, not 30) — in every placement: at the
+// tick's top level, inside an `if`, inside an `elif`. `s = s + e` was always
+// right, which is why no fixture caught it. Each test below is one placement.
+
+mod pass_through(x:S8) -> (y:S8@[0]) { y = x }
+
+test compound.plus_eq_in_elif {
+  mut dut = pass_through
+  mut s:S20 = 0
+  tick 4 {
+    if clock > 10 {
+      dut.x = 0
+    } elif clock < 4 {
+      const r = clock + 1
+      dut.x = r
+      s += r * r
+    } else {
+      dut.x = 0
+    }
+    step
+  }
+  assert(s == 30, "1+4+9+16 via += in elif")
+}
+
+test compound.plus_eq_toplevel {
+  mut dut = pass_through
+  mut s:S20 = 0
+  tick 4 {
+    const r = clock + 1
+    dut.x = r
+    s += r * r
+    step
+  }
+  assert(s == 30, "1+4+9+16 via += at tick top level")
+}
+
+test compound.plus_eq_in_if_no_const {
+  mut dut = pass_through
+  mut s:S20 = 0
+  tick 4 {
+    dut.x = 0
+    if clock < 4 {
+      s += (clock + 1) * (clock + 1)
+    }
+    step
+  }
+  assert(s == 30, "1+4+9+16 via += in if, no local const")
+}
+
+test compound.other_ops {
+  mut dut = pass_through
+  mut a:S20 = 100
+  mut o:U8  = 0
+  mut m:S20 = 1
+  mut sh:U16 = 1
+  tick 4 {
+    dut.x = 0
+    a  -= clock + 1            // 100 - (1+2+3+4) = 90
+    o  |= 1 << clock           // 0b1111
+    m  *= 2                    // 16
+    sh <<= 1                   // 16
+    step
+  }
+  assert(a == 90, "-=")
+  assert(o == 15, "|=")
+  assert(m == 16, "*=")
+  assert(sh == 16, "<<=")
+}
+
+test compound.untyped_local_keeps_width {
+  mut dut = pass_through
+  mut s = 0
+  tick 40 {
+    dut.x = 0
+    s += 1000000               // 40M needs 27 bits; the local is not sized from `1000000` alone
+    step
+  }
+  assert(s == 40000000, "an untyped accumulator does not truncate")
+}
+
+// ============================================================
+// from test_local_string_interp.prp
+// ============================================================
+// docs 02-basics "Strings": a "..." string decodes its escapes and formats
+// its `{expr}` holes. A string assigned to a test local used to be pasted
+// into the driver as raw C++ text: `"v={v}"` kept its holes verbatim and
+// `\u{41}` was not decoded. The driver now formats it through the same hole
+// scanner `puts` uses, at the point of the assignment.
+
+mod str_dut(a:U8) -> (q:U8@[0]) { q = a }
+
+test str_dut.interp {
+  mut d = str_dut
+  const v = 5
+  d.a = 2
+  step
+  const s = "v={v} q={d.q:x}"
+  puts("s={s}")
+  assert(s == "v=5 q=2")
+  const e = "x\u{41}y{{ 100%"
+  assert(e == "xAy{{ 100%")
+  const r = 'raw\n'
+  assert(r != "raw\n")
+}
+
+// ============================================================
+// from testbench_slice_ranges.prp
+// ============================================================
+
+// A bit select written in a `test` block goes through the testbench
+// evaluator (inou/prp/prp_sim.cpp eval_bit_select), not through the design
+// lowering. It knew `lo..=hi` and `lo..<hi` but read `lo..+n` (n bits
+// starting at lo) as `lo..=n`: `v#[0..+4]` returned 5 bits, `v#[4..+4]` one
+// bit, and `v#[8..+4]` failed the driver generation with "bit select range
+// must be ascending and non-negative". Every spelling below must select
+// exactly the bits the source means, on a DUT output and on a test-local
+// value alike. The `..<`, `..=` and single-bit selects are controls.
+//
+// Whether the select is a range is decided by its RANGE OPERATOR, as in the
+// design lowering: `x#[2 + 1]` is bit 3 (its operands were taken as two range
+// bounds), and literal arithmetic folds in a bound. `..=hi` / `..<hi` start
+// at bit 0.
+mod slice_src(a:U16) -> (o:U16@[0]) {
+  o = a
+}
+
+test slice_src.plus_ranges_are_exact {
+  mut x    = slice_src
+  mut seen = 0
+  tick 4 {
+    // bit 4 and bit 12 set in every value, so an extra bit shows up
+    const av:U16 = 0x5A3C + clock * 0x0101
+    x.a = av
+    step
+    seen += 1
+    assert(x.o#[0..+4] == (av & 0xF), "o#[0..+4] is bits 0..=3")
+    assert(x.o#[4..+4] == ((av >> 4) & 0xF), "o#[4..+4] is bits 4..=7")
+    assert(x.o#[8..+4] == ((av >> 8) & 0xF), "o#[8..+4] is bits 8..=11")
+    assert(x.o#[12..+4] == ((av >> 12) & 0xF), "o#[12..+4] is bits 12..=15")
+    assert(x.o#[2..+1] == ((av >> 2) & 1), "o#[2..+1] is bit 2")
+    assert(av#[4..+8] == ((av >> 4) & 0xFF), "a test-local value slices the same way")
+    // controls (already right)
+    assert(x.o#[4..<8] == ((av >> 4) & 0xF))
+    assert(x.o#[4..=7] == ((av >> 4) & 0xF))
+    assert(x.o#[5] == ((av >> 5) & 1))
+    assert(x.o#[2 + 1] == ((av >> 3) & 1), "o#[2 + 1] is bit 3")
+    assert(x.o#[(2 * 2)..+4] == ((av >> 4) & 0xF), "a folded lower bound")
+    assert(x.o#[..=3] == (av & 0xF), "o#[..=3] is bits 0..=3")
+    assert(x.o#[..<4] == (av & 0xF), "o#[..<4] is bits 0..=3")
+  }
+  assert(seen == 4, "the comparisons ran")
+}
+
+// ============================================================
+// from testbench_unsigned_cast.prp
+// ============================================================
+
+mod cast_source(d:U8) -> (q:U8@[0]) {
+  q = d
+}
+
+test cast_source.width_casts_keep_unsigned_values {
+  mut dut = cast_source
+  tick 4 {
+    dut.d = 128 + clock
+    step
+    assert(dut.q == U8(128 + clock))
+    assert(U1(clock < 2) == if clock < 2 { 1 } else { 0 })
+    assert(U8(255) == 255)
+    assert(U8(0x180) == 128)
+    assert(U8(-1) == 255)
+    assert(U8(255) + 1 == 256)
+    assert(U97(1 << 96) == 1 << 96)
+    assert(U97(-1) == (1 << 97) - 1)
+  }
+}
+
+// ============================================================
+// from wide_values.prp
+// ============================================================
+// WIDE testbench values — a `test` block driving and reading past 64 bits.
+//
+// The driver's value plane is `Slop<N>`, the same arbitrary-precision type the
+// generated design uses, so a testbench value is exact at whatever width it
+// needs. It used to be a C++ `long`, and everything here was silently wrong:
+// a 97-bit port read kept its low 64 bits, a wide constant expression was
+// handed to the host compiler where `1 << 96` is undefined (folding to 0), and
+// a compare against either one then passed or failed on the truncated value
+// with no diagnostic at all.
+//
+// Every check below is a value that does NOT fit 64 bits, so each one fails on
+// the old plane and passes on this one.
+
+pub mod wide_reg(clk:Clock, din:U97, we:Bool) -> (dout:U97@[0], low:U32@[0]) {
+  reg r:U97 = 0
+  dout = r
+  low  = r@[0]#[0..=31]
+  if we { r = din }
+}
+
+// A 97-bit value driven in, read back whole, and compared whole. The stimulus
+// has bits set both above and below bit 63, so a 64-bit plane cannot carry it
+// (it would read back only the low half) and cannot compare it either.
+test wide_reg.roundtrip {
+  mut acc = wide_reg
+  mut got:U97 = 0
+  tick 4 {
+    acc.we  = true
+    acc.din = 0x1_0000_0000_0000_0000_0000_1234
+    step
+    got = acc.dout
+  }
+  assert(got == 0x1_0000_0000_0000_0000_0000_1234, "97-bit value survives the round trip")
+  // the same value, reached by ARITHMETIC rather than as one literal: the
+  // shifted term alone overflows a 64-bit expression
+  assert(got == (1 << 96) | 0x1234, "wide constant expression is exact")
+  puts("wide: dout={acc.dout} hex={acc.dout:x} low={acc.low}")
+}
+
+// Widths come from the values, so an expression grows as its operators say:
+// a shift moves bits ABOVE 64 and they are still there afterwards.
+test wide_reg.arithmetic {
+  mut acc = wide_reg
+  mut shifted:U97 = 0
+  mut summed:U97  = 0
+  tick 2 {
+    acc.we  = true
+    acc.din = 1
+    step
+    shifted = acc.dout << 80          // bit 80 of a value read back as 1
+    summed  = shifted + 0xFFFF
+  }
+  assert(shifted == (1 << 80), "a shift past 64 keeps its bits")
+  assert(summed == (1 << 80) + 0xFFFF, "arithmetic on a wide value is exact")
+  assert(shifted > 0xFFFF_FFFF_FFFF_FFFF, "the wide value compares above the 64-bit range")
+}
+
+// A narrow port next to a wide one: the low 32 bits of the same register read
+// through their own port must agree with the wide read's low bits, i.e. the
+// plane is not quietly widening or narrowing either one.
+test wide_reg.mixed_widths {
+  mut acc = wide_reg
+  mut lo = 0
+  mut hi:U97 = 0
+  tick 2 {
+    acc.we  = true
+    acc.din = 0x1_0000_0000_0000_0000_ABCD_0001  // bit 96 is the top bit of U97
+    step
+    lo = acc.low
+    hi = acc.dout
+  }
+  assert(lo == 0xABCD0001, "the narrow port reads the low word")
+  assert((hi & 0xFFFF_FFFF) == lo, "wide and narrow reads agree on the low bits")
+  assert((hi >> 96) == 1, "the bits above 64 are the ones that were driven")
+}
+
+// Bit selects on a wide value. Between them, the two halves of this used to be
+// unreachable: a testbench could not read a >64-bit port whole (it truncated)
+// and could not slice one either (`#[]` emitted literal Pyrope range syntax
+// into the C++ driver, which then failed to compile). Both work on the Slop
+// plane, including a field that straddles bit 64.
+test wide_reg.bit_select {
+  mut acc = wide_reg
+  mut top = 0
+  mut mid = 0
+  mut bit = 0
+  tick 2 {
+    acc.we  = true
+    acc.din = 0x1_DEAD_BEEF_0000_0000_0000_0007
+    step
+    top = acc.dout#[96..=96]     // the top bit of U97
+    mid = acc.dout#[64..=79]     // a field straddling the old 64-bit boundary
+    bit = acc.dout#[2]           // a single bit, no range
+  }
+  assert(top == 1, "the top bit of a 97-bit port is reachable")
+  assert(mid == 0xBEEF, "a slice above bit 64 reads the right field")
+  assert(bit == 1, "a single-bit select works")
+}

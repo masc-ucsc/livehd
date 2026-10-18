@@ -1,6 +1,0 @@
-/*
-:name: enum_explicit
-:type: parsing lnast upass
-*/
-
-enum X = (v0, v3=3, v4)

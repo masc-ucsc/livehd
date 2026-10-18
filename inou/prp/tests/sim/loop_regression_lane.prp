@@ -1,0 +1,225 @@
+/*
+:name: loop_regression_lane
+:type: simulation
+*/
+// Merged fixture: each section below is the original tests/sim fixture listed in its banner,
+// body unchanged (module and test names are unique across the sections).
+
+// ============================================================
+// from loop_comptime_break_under_runtime_if.prp
+// ============================================================
+// A COMPTIME `break` (`i == 3`) inside a loop that is itself nested in a
+// RUNTIME `if`. Unrolling handles this fine — the break condition folds — and
+// the enclosing runtime guard is irrelevant to it.
+//
+// Regression fixture for the `loop-runtime-break` diagnostic: an early version
+// keyed on "is any active scope uncertain", which is true here because of the
+// enclosing `if c`, and rejected this valid program. The check compares the
+// uncertain-scope count against the count at loop-iteration entry instead, so
+// only uncertainty the BODY introduces counts.
+
+mod loop_comptime_break_under_runtime_if(c:Bool, x:U8) -> (z:U12@[0]) {
+  mut acc:U12 = 0
+  if c {
+    for i in 0..<8 {
+      if i == 3 { break }
+      acc = acc + x
+    }
+  }
+  z = acc
+}
+
+test loop_comptime_break_under_runtime_if.guarded {
+  mut dut = loop_comptime_break_under_runtime_if
+
+  tick 2 {
+    dut.x = 5
+    if clock == 0 {
+      dut.c = true
+    } else {
+      dut.c = false
+    }
+
+    step
+
+    if clock == 0 {
+      assert(dut.z == 15, "three iterations run before the comptime break: 3*5")
+    } else {
+      assert(dut.z == 0, "the runtime guard skips the whole loop")
+    }
+  }
+}
+
+// ============================================================
+// from loop_elem_store_iteration_fit.prp
+// ============================================================
+// User ruling 16 judges an array element store against the element type. In a
+// `for` loop it must judge each ITERATION, like the hand-unrolled code does:
+// `m[i] = (i*5) - (i*2)` stores 0, 3, 6, 9, which all fit a U4. A rolled body
+// sees `i` as its whole domain at once ([-6, 15]) and used to reject the
+// program; such a loop is unrolled instead, as for a scalar typed write.
+pub mod loop_elem_store_iteration_fit(s:U2, a:U4) -> (q:U4@[0]) {
+  mut m:[4]U4 = 0
+  for i in 0..<4 {
+    m[i] = (i * 5) - (i * 2) + (a & 0)
+  }
+  q = m[s]
+}
+
+test loop_elem_store_iteration_fit.t {
+  mut dut = loop_elem_store_iteration_fit
+  mut bad = 0
+  tick 4 {
+    dut.s = clock
+    dut.a = 7
+    step
+    if dut.q != clock * 3 { bad += 1 }
+  }
+  assert(bad == 0, "3*i in lane i")
+}
+
+// ============================================================
+// from loop_ref_arg.prp
+// ============================================================
+// A loop body whose only write to an outer variable is a call writing it back
+// through `ref` (`addby(ref m, ...)`), or its UFCS form on a `ref self` comb
+// (`n.bump(...)`). The rolled loop got no carry for `m`, so `s` simulated as a
+// constant 0. Such a loop now stays unrolled (see equiv/loop_ref_arg, whose
+// _1 variant proves rolled == unrolled).
+comb addby(ref x:U8, by:U8) -> () {
+  wrap x = x + by
+}
+comb bump(ref self:U8, by:U8) -> () {
+  wrap self = self + by
+}
+mod loop_ref_arg(a:U4, b:U4) -> (s:U8@[0], t:U8@[0]) {
+  mut m:U8 = 0
+  for i in 0..<4 {
+    addby(ref m, by=U8(a#[i]))
+  }
+  s = m
+  mut n:U8 = 3
+  for i in 0..<4 {
+    n.bump(by=U8(b#[i]) << i)
+  }
+  t = n
+}
+
+test loop_ref_arg.sum {
+  mut dut = loop_ref_arg
+  mut ok  = true
+  tick 16 {
+    dut.a = clock
+    dut.b = 15 - clock
+    step
+    const ones = (clock & 1) + ((clock >> 1) & 1) + ((clock >> 2) & 1) + ((clock >> 3) & 1)
+    if dut.s != ones or dut.t != 18 - clock { ok = false }
+  }
+  assert(ok, "a `ref` write inside a loop body must reach the variable")
+}
+
+// ============================================================
+// from loop_ring_through_own_carry.prp
+// ============================================================
+
+// Sibling of loop_ring_nested_outer_index.prp (lhdtrack suggestions 1.3): here
+// the wire ring closes through the SAME rolled loop's own carry
+// (`pv` carry-out -> `w` -> `wc` -> an invariant input of the same loop).
+// Bit-level it is acyclic: lane i's `lr` reads `wc`, and `pv` never does.
+//
+// Both `lhd compile` (pass.formal) and `lhd sim` (inou.cgen.sim occurrence
+// materialization) used to stop with
+//   error[internal]: Subnode_group::validate: carry input needs one self-edge
+//   and one external initial driver
+// The roll planner now sees the ring and unrolls the loop (the shapes it
+// cannot see stay rolled: loop_ring_hidden_from_planner.prp). A rolled `i`
+// loop would still exercise the loop_ring_nested_outer_index.prp binding: its
+// nested `j` loop reads the OUTER index.
+//
+// `const wc = w` and `::[timecheck=false]`: see loop_ring_nested_outer_index.prp.
+// The ruling-5 unroll keys on a DIRECT wire read in the loop body, not on
+// dataflow through `wc`. The fix may either materialize this ring or refuse
+// to roll the loop, so there is deliberately no `:expect_instances:` pin.
+// This fixture runs only `lhd sim`; equiv/loop_ring_own_carry.prp pins the
+// `lhd compile` path (pass.formal), which fails with the same error.
+// Same values as `--set compile.unroll=true` (which passes today).
+pub mod roc::[timecheck=false](b:U16, sel:U8) -> (o:U4@[0]) {
+  wire w:U16 = nil
+  const wc = w
+  mut r:U4 = 0
+  mut pv:U16 = 0
+  for i in 0..<4 {
+    mut lr:U4 = 0
+    for j in 0..<4 {
+      lr#[j] = wc#[j * 4 + i]
+    }
+    r#[i] = lr#[sel#[(i * 2)..+2]]
+    pv#[(i * 4)..+4] = b#[(i * 4)..+4] ^ 0x5
+  }
+  w = pv
+  o = r
+}
+
+test roc.values {
+  mut x    = roc
+  mut bad  = 0
+  mut seen = 0
+  tick 16 {
+    const bv:U16 = (clock * 40503 + 12345) & 0xFFFF
+    const sv:U8  = (clock * 97 + 5) & 0xFF
+    x.b   = bv
+    x.sel = sv
+    step
+    // w == b ^ 0x5555; lane i picks bit (sel_i*4 + i) of it
+    const av:U16 = bv ^ 0x5555
+    const st0 = sv & 3
+    const st1 = (sv >> 2) & 3
+    const st2 = (sv >> 4) & 3
+    const st3 = (sv >> 6) & 3
+    const e0:U1 = (av >> (st0 * 4 + 0)) & 1
+    const e1:U1 = (av >> (st1 * 4 + 1)) & 1
+    const e2:U1 = (av >> (st2 * 4 + 2)) & 1
+    const e3:U1 = (av >> (st3 * 4 + 3)) & 1
+    const oexp:U4 = (e3 << 3) | (e2 << 2) | (e1 << 1) | e0
+    seen += 1
+    if x.o != oexp { bad += 1 }
+  }
+  assert(seen == 16, "the comparisons ran")
+  assert(bad == 0, "the ring through the loop's own carry is not a combinational loop")
+}
+
+// ============================================================
+// from loop_roll_half_open_carry.prp
+// ============================================================
+// lhdtrack suggestions 1.1/1.2 (planner guard): a `for` loop kept ROLLED (the
+// default, `compile.unroll=false`) is outlined into a `__loop` definition that
+// is compiled on its own, so every boundary port needs a BOUNDED type. A carry
+// declared with one open bound (`Signed(max=65535)`: no `min`) used to become a
+// `prim_type_int(65535, nil)` boundary port; with one side open no width is
+// derived for the port, and the generated sim driver did not even compile. The
+// roller now declines such a loop (it unrolls), so the value is right.
+mod loop_roll_half_open_carry(a:U16, sel:U4) -> (o:U16@[0]) {
+  mut acc:Signed(max=65535) = 0
+  for i in 0..<4 {
+    if sel#[i] == 1 { acc |= a#[(i * 4)..+4] << (i * 4) }
+  }
+  o = acc#[0..<16]    // explicit width: `acc` has no lower bound
+}
+
+test loop_roll_half_open_carry.lanes {
+  mut d = loop_roll_half_open_carry
+  tick 2 {
+    d.a = 0xA5C3
+    if clock == 0 {
+      d.sel = 0xf
+    } else {
+      d.sel = 0ub1010
+    }
+    step
+    if clock == 0 {
+      assert(d.o == 0xA5C3, "every nibble selected")
+    } else {
+      assert(d.o == 0xA0C0, "nibbles 1 and 3 selected")
+    }
+  }
+}

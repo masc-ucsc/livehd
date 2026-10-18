@@ -1,44 +1,184 @@
 /*
 :name: spec_lexical_cont_binary_op
 :type: comptime
-:verifier_pass: 11
+:verifier_pass: 34
 :verifier_fail: 0
 */
+// Line-continuation rules of docs 02-basics "Newlines and spaces" / qa.md appendix 3,
+// all at FILE SCOPE (outside any bracket). Merged from the former
+// spec_lexical_cont_{binary_op,bitsel,case,case_in_match,colon,has,paren_new_stmt,
+// whole_word}, lead_word_op_cont and spec_parsers_paren_after_typed_decl fixtures;
+// every statement and cassert is kept, only the declared names got a section prefix
+// (the whole_word section keeps its names: a line STARTING with `order`, `index`...
+// is the point of that test).
+
+// ===== binary operator continues (was spec_lexical_cont_binary_op) =====
 // qa.md appendix 3: "A new line starting with a binary operator ...
 // continues the previous statement." docs 02-basics "Newlines and spaces":
 // "A line that starts with a binary operator (`+`, `-`, `*`, `/`, `%`, `|`,
 // `==`, `.`, ...) ... continues the previous statement."
-const a = 1
+const bo_a = 1
   + 3
-cassert(a == 4)
-const b = 10
+cassert(bo_a == 4)
+const bo_b = 10
   - 3
-cassert(b == 7)
-const c = 3
+cassert(bo_b == 7)
+const bo_c = 3
   * 4
-cassert(c == 12)
-const d = 17
+cassert(bo_c == 12)
+const bo_d = 17
   % 5
-cassert(d == 2)
-const e = 0x0F
+cassert(bo_d == 2)
+const bo_e = 0x0F
   | 0xF0
-cassert(e == 0xFF)
-const f = 2
+cassert(bo_e == 0xFF)
+const bo_f = 2
   == 2
-cassert(f)
-const g = 1
+cassert(bo_f)
+const bo_g = 1
   << 3
-cassert(g == 8)
-const h = 6
+cassert(bo_g == 8)
+const bo_h = 6
   & 3
-cassert(h == 2)
-const t = (const x=5)
-const i = t
+cassert(bo_h == 2)
+const bo_t = (const x=5)
+const bo_i = bo_t
   .x
-cassert(i == 5)
-const j = 1
+cassert(bo_i == 5)
+const bo_j = 1
   != 2
-cassert(j)
-const k = 3
+cassert(bo_j)
+const bo_k = 3
   <= 3
-cassert(k)
+cassert(bo_k)
+
+// ===== bit selector continues (was spec_lexical_cont_bitsel) =====
+// "... `#[`/`#`-selector (bit select) ... continues the previous statement."
+const bs_e = 0xF5
+const bs_lo = bs_e
+  #[0..=3]
+cassert(bs_lo == 5)
+const bs_r = bs_e
+  #|[..]
+cassert(bs_r == 1)
+
+// ===== `case` always continues (was spec_lexical_cont_case) =====
+const cs_t = (const a=1, const b=3)
+const cs_r = cs_t
+  case (a=1)
+cassert(cs_r)
+const cs_s = cs_t
+  case (a=2)
+cassert(not cs_s)
+
+// ===== `case` continues inside a match arm body (was spec_lexical_cont_case_in_match) =====
+// `case` always continues, even though it is also the `match` arm keyword.
+const cm_t = (const a=1, const b=3)
+match cm_t {
+  case (a=1) {
+    const q = cm_t
+      case (b=3)
+    cassert(q)
+  }
+  else { }
+}
+
+// ===== `:` type annotation continues (was spec_lexical_cont_colon) =====
+// `mut e` NEWLINE `:U8 = 0xF5` is "same statement: `mut e:U8 = 0xF5`".
+mut co_e
+  :U8 = 0xF5
+cassert(co_e == 0xF5)
+mut co_f
+:U4 = 3
+cassert(co_f == 3)
+
+// ===== `has` continues (was spec_lexical_cont_has) =====
+// (`has` is not covered by the word-operator section below.)
+const ha_ok = (const x=1, const y=2)
+         has "x"
+cassert(ha_ok)
+
+// ===== a `(` line is a new statement (was spec_lexical_cont_paren_new_stmt) =====
+mut (pn_a,pn_b,pn_c,pn_d) = (0,0,0,0)
+pn_a = 1
+  + 3
+(pn_b,pn_c) = (1,3)
+cassert(pn_a == 4 and pn_b == 1 and pn_c == 3)
+const pn_g = 7
+pn_d = pn_g
+(pn_b,pn_c) = (5,6)
+cassert(pn_d == 7 and pn_b == 5 and pn_c == 6)
+
+// ===== the match is whole-word (was spec_lexical_cont_whole_word) =====
+mut order = 0
+mut andy = 0
+mut cases = 0
+mut hash = 0
+mut index = 0
+mut doesnt = 0
+mut orx = 0
+mut equalsx = 0
+const ww_a = 1
+order = 2
+andy = 3
+cases = 4
+hash = 5
+index = 6
+doesnt = 7
+orx = 8
+equalsx = 9
+cassert(ww_a == 1 and order == 2 and andy == 3 and cases == 4)
+cassert(hash == 5 and index == 6 and doesnt == 7 and orx == 8 and equalsx == 9)
+
+// ===== word operators at the start of a line (was lead_word_op_cont) =====
+// A continuation line that BEGINS with a binary word-operator (`or`, `and`,
+// `implies`, `in`, `does`, `equals`) must continue the previous expression —
+// just like a line beginning with a symbolic operator (`+`, `|`, `==`).
+const r_or = false
+          or true
+cassert(r_or == true)
+
+const r_or3 = false
+           or false
+           or true
+cassert(r_or3 == true)
+
+const r_and = true
+           and false
+cassert(r_and == false)
+
+const r_and3 = true
+            and true
+            and false
+cassert(r_and3 == false)
+
+const r_mix = (1 == 1 and 2 == 3)
+           or (4 == 4 and 5 == 5)
+cassert(r_mix == true)
+
+const r_impl = true
+            implies false
+cassert(r_impl == false)
+
+const r_in_t = 3
+            in (1, 2, 3)
+cassert(r_in_t == true)
+
+const r_in_f = 9
+            in (1, 2, 3)
+cassert(r_in_f == false)
+
+const r_does = U8
+            does U4
+cassert(r_does == true)
+
+const r_eq = 5
+          equals 5
+cassert(r_eq == true)
+
+// ===== `(` after a typed declaration is a destructuring statement (was
+// spec_parsers_paren_after_typed_decl) =====
+mut pt_r = 0
+mut pt_x:U8
+(pt_r, pt_x) = (1, 2)
+cassert(pt_r == 1 and pt_x == 2)

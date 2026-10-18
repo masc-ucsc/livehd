@@ -90,12 +90,39 @@ _YOSYS_TEST_PREFIX = "tests/"
 
 _YOSYS_TEST_SUFFIX = ".v"
 
+# Fixtures that stay in verilog_tests (the slang ladder still compiles each one)
+# but get no yosys_compile target of their own: each is a strict sub-case of a
+# kept yosys_compile fixture, or only regresses the native slang reader.
+_YOSYS_COMPILE_SKIP = [
+    # Identical operator cells to a kept, richer fixture. Only shift: the slang
+    # ladder keeps its slang_compile twin, while trivial_and/compare/reduce/
+    # simple_add/trivial keep their yosys_compile target because the slang
+    # ladder dropped theirs.
+    "tests/shift.v",
+    # Regressions for the native slang reader; yosys elaborates them away.
+    "tests/fn_ret_bool.v",
+    "tests/generate_reverse_tree.v",
+    "tests/hier_generate_slice.v",
+    "tests/empty_task.v",
+    "tests/inc_after_nb.v",
+    # inou_yosys_read.ys flattens the hierarchy, leaving a subset of a kept case.
+    "tests/submodule.v",
+    "tests/submodule2.v",
+    "tests/params_submodule.v",
+    "tests/trivial2.v",
+    # Weaker member of a pair of overlapping small cases.
+    "tests/simple_flop.v",
+    "tests/trivial_offset.v",
+    "tests/simple_weird2.v",
+]
+
 YOSYS_COMPILE_TESTS = [
     (
         t[len(_YOSYS_TEST_PREFIX):-len(_YOSYS_TEST_SUFFIX)],
         t,
     )
     for t in VERILOG_TESTS
+    if t not in _YOSYS_COMPILE_SKIP
 ]
 
 [sh_test(
@@ -127,23 +154,11 @@ filegroup(
 
 # State-name recovery and budget scheduling belong to the external solver;
 # the lhd CLI equivalence test covers the default CVC5 driver separately.
-[sh_test(
-    name = "lgcheck_state_test" + suffix,
+sh_test(
+    name = "lgcheck_state_test",
     srcs = ["tests/yosys_state_match_test.sh"],
-    args = [group],
     data = [":scripts"],
-) for suffix, group in [
-    ("", "temporary"),
-    ("_packed", "packed"),
-    ("_encoding", "encoding"),
-    ("_memory", "memory"),
-    ("_rtl", "rtl"),
-    ("_bank", "bank"),
-    ("_loop", "loop"),
-    ("_init_names", "init_names"),
-    ("_poweron", "poweron"),
-    ("_budget", "budget"),
-]]
+)
 
 sh_test(
     name = "lgcheck_memory_poweron_smoke",

@@ -227,7 +227,7 @@ echo "ok: a data-gated latch feeding a flop is still accepted (rule 4 is keyed o
 # A clock port the testbench drives as data has no integer ratio to the
 # reference, so slotting it would silently change what the design means. It must
 # be SKIPPED rather than refused: pass/lec's detected-edge branch REFUTES
-# two-clock-vs-one-clock today and sim/multiclock_two_domain.prp pins the value
+# two-clock-vs-one-clock today and sim/flop_sim_secondary_negedge.prp pins the value
 # semantics, and turning a correct verdict into an unsupported exit is a
 # regression, not fail-closed.
 cat > "$W/twoclk.prp" <<'EOF'

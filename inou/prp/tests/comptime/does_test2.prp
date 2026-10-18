@@ -1,10 +1,12 @@
 /*
 :name: does_test2
 :type: parsing lnast comptime
-:verifier_pass: 24
+:verifier_pass: 42
 :verifier_fail: 0
 */
 
+// ---- does_test2 ----
+{
 // Task 1g — type-aware `does`/`equals`/`case`: envelope rule, bool literals,
 // primitive type-name operands, typed equals/case, and the `nil` rule.
 
@@ -49,3 +51,66 @@ cassert(x does nil)
 cassert(true does nil)
 const yy = 3
 cassert(yy does nil)
+}
+
+// ---- adv_does_op_08 ----
+{
+// named-vs-positional matching. Fully named tuples: order independent.
+const fn1 = (const a=1, const b=2)
+const fn2 = (const b=2, const a=1)
+cassert(fn1 does fn2)         // both fully named, order independent
+cassert(fn2 does fn1)
+// mixed named/unnamed: unnamed entries are ordered AMONG THEMSELVES; named
+// fields occupy no positional slot and match by name. So `(1, b=2)` and
+// `(b=2, 1)` both have unnamed[0]==1 and b==2 -> structurally equal, hence
+// `does` holds (and `==` would too: `==` true implies `does` true).
+cassert((1, b=2) does (b=2, 1))
+cassert((1, b=2) does (1, b=2))      // exact position + name match
+// extra named field, still superset
+cassert((a=1, b=2, c=3) does (a=1, b=2))
+cassert(not ((a=1, b=2) does (a=1, b=2, c=3)))
+}
+
+// ---- adv_equals_is_has_in_09 ----
+{
+// does on tuples: structural superset; extra fields allowed.
+const small = (const a=1, const b=2)
+const big = (const a=10, const b=20, const c=30)
+cassert(big does small)
+cassert(not (small does big))
+
+// fully-named tuples ignore field order in does
+const m3 = (const b=2, const a=0)
+cassert(small does m3)
+cassert(m3 does small)
+
+// per-field type matters (07-typesystem.md lines 185-186): a string-typed
+// field is NOT a superset of an int-valued field of the same name.
+cassert((const a:String=nil, const b:Signed=nil) does (const a="hello", const b=33))
+cassert(not ((const b:String=nil, const a:Signed=nil) does (const a="hello", const b=33)))
+
+// nil rule: a non-tuple x does nil is true
+mut z:U8 = 5
+cassert(z does nil)
+}
+
+// ---- spec_types_does_envelope ----
+{
+// SPEC docs 04-variables "Integer or Signed": "So `U32 does U16` is true (U32s range covers U16s) but
+// `U16 does U32` is false."
+cassert(U32 does U16)
+cassert(!(U16 does U32))
+}
+
+// ---- spec_clock_does_bool ----
+{
+// SPEC (clock lane): `Clock` and `Reset` are distinct basic types; `Clock does
+// Bool` is false.
+//   qa.md Appendix 6: "Clock and Reset are distinct basic types (`Clock does
+//     Bool` is false)."
+//   docs 07-typesystem: "`Clock` and `Reset` are distinct basic types (`Clock
+//     does Bool` is false)."
+cassert(!(Clock does Bool))
+cassert(!(Clock does Reset))
+cassert(!(Reset does Clock))
+}

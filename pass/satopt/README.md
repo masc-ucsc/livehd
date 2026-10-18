@@ -169,8 +169,8 @@ line).
 
 ## Tests
 
-Unit: `satopt_stages_test`, `satopt_sim_test`, `satopt_test`, `satopt_sweep_test`,
-`satopt_memory_test`, `satopt_ctrl_test`, `satopt_muxtree_test`, `satopt_share_test`, and `//pass/abc:abc_satopt_test` (ABC mux facts). End to
+Unit: `satopt_test` (one binary running all `pass/satopt/*_test.cpp`), and
+`//pass/abc:abc_satopt_test` (ABC mux facts). End to
 end: `//lhd/tests:lhd_satopt_test` (compile opt-in and standalone LEC,
 idempotence, stages, budgets, cache across edits, reports, synthesis from a
 source vs an lg: input),

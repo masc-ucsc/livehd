@@ -6,12 +6,12 @@
 */
 
 // RTL coverage for the `concat(a, b, c)` builtin (docs/pyrope/10-internals.md,
-// "Bit selection and concatenation"). The comptime tier is covered by
-// ../pyrope/concat_two_lanes.prp and the rejection rules by ../errors/concat_*;
-// this pair is the one that proves the LOWERED datapath against an independent
-// Verilog statement of the same layout, over scalar lanes AND over the fields
-// of a BUNDLE input port. concat_tuple_lanes independently covers direct dotted
-// lanes and proves that their explicit order controls the packed layout.
+// "Bit selection and concatenation"). The rejection rules are covered by
+// ../errors/concat_*; this pair is the one that proves the LOWERED datapath
+// against an independent Verilog statement of the same layout, over scalar
+// lanes AND over the fields of a BUNDLE input port. concat_tuple_lanes
+// independently covers direct dotted lanes and proves that their explicit
+// order controls the packed layout.
 //
 // Each output pins one claim:
 //

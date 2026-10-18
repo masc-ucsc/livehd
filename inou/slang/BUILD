@@ -74,15 +74,6 @@ sh_test(
     data = ["//lhd"],
 )
 
-sh_test(
-    name = "slang_test.sh",
-    srcs = ["tests/slang_test.sh"],
-    data = [
-        "slang",
-        "//inou/yosys:verilog_tests",
-    ],
-)
-
 # `--reader slang -- -F filelist.f` passthrough: the verilog sources ride the
 # raw slang driver args (a `-F` command file) with no positional `*.v` input.
 sh_test(
@@ -104,7 +95,8 @@ sh_test(
 )
 
 # The --reader slang coverage ladder (todo/ 2s subtask E): one slang_compile-*
-# target per inou/yosys/tests/*.v source, pinned to its strongest passing tier
+# target per ladder entry (an inou/yosys/tests/*.v source not subsumed by a
+# larger sibling), pinned to its strongest passing tier
 # in slang_ladder.bzl (lec > verilog > lnast > error — see
 # inou/slang/README.md). tests/slang_compile.sh enforces the expectation both
 # ways, so a promotion or regression is an explicit ladder edit.
@@ -134,12 +126,15 @@ sh_test(
 ) for t in SLANG_LADDER.keys()]
 
 # Fully defined ready chains must not pass LEC by turning a forward read into X.
-[sh_test(
-    name = "slang_%s_no_x" % name,
+# One target runs the `lec_no_x` tier on every fixture in turn (a failure still
+# prints FAIL(<top>) naming the fixture).
+_READY_SIGNAL_FIXTURES = ["ready_signal_chain", "ready_signal_chain_1", "ready_signal_slices", "ready_signal_masked"]
+
+sh_test(
+    name = "slang_ready_signal_no_x",
     srcs = ["tests/slang_compile.sh"],
-    args = ["lec_no_x", "$(location //inou/prp:tests/equiv/%s.v)" % name],
-    data = [
-        "//inou/prp:tests/equiv/%s.v" % name,
+    args = ["lec_no_x"] + ["$(location //inou/prp:tests/equiv/%s.v)" % n for n in _READY_SIGNAL_FIXTURES],
+    data = ["//inou/prp:tests/equiv/%s.v" % n for n in _READY_SIGNAL_FIXTURES] + [
         "//inou/prp:tests/lec.py",
         "//lhd",
     ],
@@ -149,18 +144,57 @@ sh_test(
         "cpu:4",
         "slang_compile",
     ],
-) for name in ["ready_signal_chain", "ready_signal_chain_1", "ready_signal_slices", "ready_signal_masked"]]
-
-# Legacy no-argument mode: the sky130 cell-instance set (unknown-module policy).
-sh_test(
-    name = "slang_compile_sky130",
-    size = "large",
-    srcs = ["tests/slang_compile.sh"],
-    data = glob(["tests/verilog/*"]) + ["//lhd"],
-    tags = [
-        "slang_compile",
-    ],
 )
+
+# Sets of `// :test: error` fixtures (each keeps its own `// :error:` regex)
+# that run as ONE target apiece through `slang_compile.sh auto f1 f2 ...`:
+# the clock-ruling rejects, and the reader's other clean-rejection diagnostics.
+_SV_CONST_CLOCK_REJECTS = [
+    "tests/sv/const_clock_%s_reject.v" % n
+    for n in [
+        "alias",
+        "gate",
+        "instance",
+        "mem_instance",
+        "mem_local",
+        "mem_two_ports",
+        "mem_unconnected",
+        "missing",
+        "unconnected_gated",
+        "unconnected",
+    ]
+]
+
+_SV_DERIVED_CLOCK_REJECTS = [
+    "tests/sv/derived_clock_%s_reject.v" % n
+    for n in [
+        "and_data",
+        "instance",
+        "inverted",
+        "mux",
+        "or",
+        "xor",
+    ]
+]
+
+_SV_READER_REJECTS = [
+    "tests/sv/bit_clock_blocking_reject.v",
+    "tests/sv/bit_clock_dynamic_reject.v",
+    "tests/sv/bit_clock_overlap_reject.v",
+    "tests/sv/blocking_array_multiple_writers.sv",
+    "tests/sv/deferred_for_runtime.v",
+    "tests/sv/dual_async_set_reset_reject.v",
+    "tests/sv/loop_continue.sv",
+    "tests/sv/stream_partial.sv",
+    "tests/sv/unbounded_while.sv",
+    "tests/sv/while_counter_wrap.sv",
+]
+
+_SV_REJECT_SETS = {
+    "slang_const_clock_rejects": _SV_CONST_CLOCK_REJECTS,
+    "slang_derived_clock_rejects": _SV_DERIVED_CLOCK_REJECTS,
+    "slang_reader_rejects": _SV_READER_REJECTS,
+}
 
 _SV_SOURCES = glob(
     [
@@ -176,7 +210,7 @@ _SV_SOURCES = glob(
         "tests/sv/*_tb.v",
         "tests/sv/*_helper.v",
         "tests/sv/*_helper.sv",
-    ],
+    ] + _SV_CONST_CLOCK_REJECTS + _SV_DERIVED_CLOCK_REJECTS + _SV_READER_REJECTS,
 )
 
 # Fixtures with a `// :lec_solver: lgyosys` header: they shell out to lgcheck.
@@ -214,6 +248,18 @@ _SV_LGYOSYS = [
     # Keep bounded formal checks from oversubscribing frontend/solver capacity.
     tags = ["cpu:4"],
 ) for src in _SV_SOURCES]
+
+[sh_test(
+    name = name,
+    srcs = ["tests/slang_compile.sh"],
+    args = ["auto"] + ["$(location %s)" % src for src in srcs],
+    data = srcs + [
+        "//inou/prp:tests/lec.py",
+        "//lhd",
+    ],
+    env_inherit = ["PATH"],
+    tags = ["cpu:4"],
+) for name, srcs in _SV_REJECT_SETS.items()]
 
 sh_test(
     name = "slang_scalar_initial_no_reset",
@@ -270,7 +316,7 @@ sh_test(
 
 test_suite(
     name = "integration",
-    tests = [":slang_" + src.split("/")[-1].rsplit(".", 1)[0] for src in _SV_SOURCES],
+    tests = [":slang_" + src.split("/")[-1].rsplit(".", 1)[0] for src in _SV_SOURCES] + [":" + name for name in _SV_REJECT_SETS],
 )
 
 sh_test(

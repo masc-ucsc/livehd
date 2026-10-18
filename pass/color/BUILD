@@ -27,9 +27,19 @@ cc_library(
     alwayslink = True,  # static Pass_plugin registration
 )
 
-[cc_test(
-    name = test_name,
-    srcs = [test_name + ".cpp"],
+cc_test(
+    name = "color_test",
+    srcs = [
+        "color_acyclic_test.cpp",
+        "color_cgen_test.cpp",
+        "color_flat_test.cpp",
+        "color_mincut_test.cpp",
+        "color_path_test.cpp",
+        "color_reduce_test.cpp",
+        "color_size_test.cpp",
+        "color_synth_cones_test.cpp",
+        "color_synth_test.cpp",
+    ],
     copts = COPTS,
     deps = [
         ":pass_color",
@@ -37,14 +47,4 @@ cc_library(
         "//graph",
         "@googletest//:gtest_main",
     ],
-) for test_name in [
-    "color_acyclic_test",
-    "color_cgen_test",
-    "color_synth_test",
-    "color_synth_cones_test",
-    "color_path_test",
-    "color_mincut_test",
-    "color_flat_test",
-    "color_size_test",
-    "color_reduce_test",
-]]
+)

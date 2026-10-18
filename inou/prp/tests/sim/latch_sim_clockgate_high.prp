@@ -22,8 +22,8 @@
 // over `clock_pin`, and node_util.hpp's `is_type_flop` excludes Latch.
 //
 // WHY NO EXISTING FIXTURE CATCHES IT. Every latch sim fixture avoids this
-// shape: latch_sim_master_slave.prp makes `clk` a DATA input the testbench
-// toggles by hand, and latch_sim_{hold,low,reset,negedge_enable}.prp all use
+// shape: latch_sim_basic_lane.prp makes `clk` a DATA input the testbench
+// toggles by hand, and its other latch tests (hold, low, reset, negedge_enable) all use
 // data gates. Nothing in the corpus lets the gate be the real clock net.
 //
 // EXPECTED VALUES are from Icarus on the always_latch netlist LiveHD itself

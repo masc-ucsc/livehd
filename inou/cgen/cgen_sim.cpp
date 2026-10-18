@@ -3666,7 +3666,8 @@ std::string Cgen_sim::clock_input_of(hhds::Graph* g) {
       // (clock & r) | (clock & e), not one `clock & en` cone: look for an input
       // literally named `clock` (the flop name fallback's convention) in the
       // enable's small combinational cone. Only that name: a `clk` the
-      // testbench pokes as data (tests/sim/latch_sim_master_slave) stays data.
+      // testbench pokes as data (the master/slave test of
+      // tests/sim/latch_sim_basic_lane.prp) stays data.
       std::vector<std::pair<hhds::Pin_class, int>> work{{enable, 0}};
       absl::flat_hash_set<hhds::Class_index>       seen;
       while (!work.empty()) {
@@ -5511,7 +5512,8 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
         //    children commit per gated period on a `gclk` PORT through the
         //    `<port>__tick` channel, never by a toggling port value;
         //  * a conventionally spelled reference (clk, clock, clk_i, rf_clk_i,
-        //    ...) is never edge-detected -- conditional_state_named_clock pins
+        //    ...) is never edge-detected -- conditional_call_lane.prp (its
+        //    conditional_state_named_clock section) pins
         //    that a sole explicit `clk_i` commits once per tick. The spelling
         //    test is the shared Design_clocks::name_looks_like_clock notion,
         //    not a private list.
@@ -16013,7 +16015,7 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
     // default-constructed 0, not the reset/drawn Q. Whether the two share a
     // color is decided by the coarsener's live-word budget, so the values
     // depended on sim.tune.live_words
-    // (tests/sim/conditional_internal_icg_call.prp at live_words=1). Treat such
+    // (tests/sim/conditional_icg_sliced_guard.prp at live_words=1). Treat such
     // a reader like any other cross-color consumer: the latch's `_din` is an
     // external write, so its update runs in the unconditional domain (its hold
     // mux keeps a de-asserted enable holding) exactly as the same-color case

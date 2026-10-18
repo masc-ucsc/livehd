@@ -205,8 +205,9 @@ file lists, determinism, and other behavior a value comparison cannot check.
 
 ## The coverage ladder (todo/ 2s subtask E)
 
-`slang_ladder.bzl` pins EVERY `inou/yosys/tests/*.v` source to its
-strongest passing tier; `tests/slang_compile.sh <tier> <file>` enforces it
+`slang_ladder.bzl` pins each listed `inou/yosys/tests/*.v` source (those not
+subsumed by a larger sibling fixture) to its strongest passing tier;
+`tests/slang_compile.sh <tier> <file>...` enforces it
 both ways (a regression fails, and an outgrown `error` entry fails until the
 ladder is promoted). Tiers:
 
@@ -225,12 +226,12 @@ ladder is promoted). Tiers:
 Run one: `bazel test //inou/slang:slang_compile-<name>`; all:
 `bazel test //inou/slang:all`.
 
-Current tally (2026-06-17, 116 sources): **86 lec**, 7 verilog, 2 lnast,
+Current tally (2026-06-17, 116 sources): **86 lec**, 6 verilog, 2 lnast,
 21 error (9 of those are non-LRM sources slang correctly rejects, e.g.
 procedural writes to nets; the rest are tracked feature gaps: instance arrays,
 hierarchical punch-through references, `'bx` golden arms, dynamic
-mem-element part-selects). The 7 `verilog`-capped entries are LEC-slow or
-genuine gaps: three big-memory / wide-arith tests (`long_mem`, `long_mem3`,
+mem-element part-selects). The 6 `verilog`-capped entries are LEC-slow or
+genuine gaps: two big-memory / wide-arith tests (`long_mem3`,
 `long_nocheck_iwls_square`) and `fixme_sha256`'s wide
 reduction are deliberately capped because LEC is slow there (the small-array
 coverage simple_rf1/rf2, tuplish, fixme_array carries the memory guarantee);
@@ -242,8 +243,9 @@ port/temp ranges (`add1`, `issue_047`, …) are now LEC-verified — a signed
 operand in an unsigned expression zero-extends, and `materialize_conversion`
 plus `int_min_str`/`int_max_str` carry the 1800 §11.8.2 sign rules.
 
-The `tests/verilog/` sky130 cell samples run at the `error` tier through the
-legacy no-argument `slang_compile.sh` mode (`slang_compile_sky130` target).
+The unknown-module (liberty cell instance) policy is pinned by the
+`slang_blackbox` target; `tests/verilog/sky130_test.lib` is kept as the sky130
+liberty sample.
 
 ## Which Verilog constructs to support (triage rule)
 
@@ -321,7 +323,12 @@ only the native slang reader can.
 
 Run the automatically discovered SV corpus with
 `bazel test -c opt //inou/slang:integration`. Each fixture remains an individual
-Bazel test, so failures identify the source and runtimes stay bounded.
+Bazel test, so failures identify the source and runtimes stay bounded, except the
+`// :test: error` clean-rejection sets that run as one target apiece through
+`slang_compile.sh auto FILE...` (`slang_const_clock_rejects`,
+`slang_derived_clock_rejects`, `slang_reader_rejects`; each failure still prints
+`FAIL(<top>)` naming the fixture). A new fixture is grouped by adding it to the
+matching `_SV_*_REJECTS` list in `BUILD`.
 
 `// :test: roundtrip_sim` emits and recompiles Pyrope, then checks the
 re-emitted Verilog without LEC. This profile covers behavior the formal encoder

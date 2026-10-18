@@ -112,8 +112,8 @@ endmodule
 EOF
 
 # The conditional fixture is the design of inou/prp/tests/sim/
-# conditional_internal_icg_call.prp with the Verilog gate cell. Every test
-# counts its own cycles (`i`).
+# conditional_icg_sliced_guard.prp (with a plain Bool guard instead of the
+# sliced one) and the Verilog gate cell. Every test counts its own cycles (`i`).
 cat >"$work/lw_all.prp" <<'EOF'
 const lw_icg_cell = import("lg:lw_icg_cell")
 const lwc_icg_top = import("lg:lwc_icg_top")

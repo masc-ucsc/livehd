@@ -7,7 +7,7 @@
 // 2026-10-08): a ring through one that is a cycle only while the instance is
 // atomic is no combinational loop, so each loop counts once in `u_loop*`.
 
-// Siblings of loop_ring_through_own_carry.prp (lhdtrack suggestions 1.3a-x):
+// Siblings of the loop_ring_through_own_carry test in loop_regression_lane.prp (lhdtrack suggestions 1.3a-x):
 // a `wire` ring that closes through a ROLLED loop's own output. The roll
 // planner unrolls such a loop when it can see the ring in the loop's own
 // definition (uPass_runner::plan_loop_roll, loop_output_rings_back); these two

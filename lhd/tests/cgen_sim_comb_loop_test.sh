@@ -16,7 +16,7 @@
 # Stage 1 (flatten_false_loop_subs in cgen_sim.cpp) RESOLVES the common case: a
 # single PURE-COMB sub-instance whose output feeds back into its OWN input is
 # inlined into the parent before scheduling, so forward_class orders the now-flat
-# DAG and the sim is correct (verified end-to-end by prp-simfail/simeq-
+# DAG and the sim is correct (verified end-to-end by prp-simfail-
 # sim_lg_atomic_feedback, the same design). Still an ERROR: a GENUINE comb loop
 # (flattens to a real bit-level cycle) and a cross-coupled MUTUAL false loop
 # through TWO subs (the detector stops at the sibling instance). This test guards

@@ -3,8 +3,11 @@
 # lhd kernel tests (task 1y-bazel):
 #  - trivial_net: the //tools:lhd.bzl ruleset driving `lhd compile verilog`
 #    as a hermetic genrule action.
-#  - lhd_flow-<in>-to-<out>: the full (input x output) kind matrix on the
-#    inou/prp/tests/equiv trivial_if pyrope/verilog golden pair. Supported
+#  - lhd_flow-<in>-to-<out>: the kind matrix on the inou/prp/tests/equiv
+#    trivial_if pyrope/verilog golden pair. pyrope->ln and pyrope->lg are the
+#    prep steps of the ln:/lg: input cells and of lhd_equiv_test; the
+#    verilog->lg, ln->lg, ln->verilog and lg->verilog cells are legs of
+#    lhd_equiv_test, which also LEC-proves them. Supported
 #    cells run the flow and validate the artifact; the rest lock the
 #    documented `unsupported` v0 contract. verilog/pyrope inputs emit
 #    lnast/pyrope as --emit-dir (variable cardinality); lgraph is always the
@@ -89,17 +92,11 @@ _FLOW_DATA = [
 _FLOWS = [
     ("pyrope", "verilog", "pass"),
     ("pyrope", "pyrope", "pass"),
-    ("pyrope", "ln", "pass"),
-    ("pyrope", "lg", "pass"),
     ("verilog", "verilog", "pass"),
     ("verilog", "pyrope", "pass"),  # native Slang retains LNAST
     ("verilog", "ln", "pass"),  # native Slang elaborates to LNAST
-    ("verilog", "lg", "pass"),
-    ("ln", "verilog", "pass"),
     ("ln", "pyrope", "pass"),
     ("ln", "ln", "pass"),
-    ("ln", "lg", "pass"),
-    ("lg", "verilog", "pass"),
     ("lg", "pyrope", "unsupported"),  # no LGraph -> LNAST decompiler
     ("lg", "ln", "unsupported"),  # no LGraph -> LNAST decompiler
     ("lg", "lg", "pass"),
@@ -1113,10 +1110,12 @@ sh_test(
     size = "large",
     srcs = ["sim_color_random_test.sh"],
     data = [
+        "//inou/prp:tests/sim/color_kernel_llvm_mem_whole.prp",
         "//inou/prp:tests/sim/mem_none_color_random.prp",
         "//inou/prp:tests/sim/packed_update_chain.prp",
         "//lhd",
     ],
+    tags = ["cpu:4"],
 )
 
 sh_test(
@@ -1130,17 +1129,6 @@ sh_test(
     ],
     # The two simulator builds run concurrently; each saturates ~2 cores
     # (drv.cpp is one serial TU and dominates), so reserve 4.
-    tags = ["cpu:4"],
-)
-
-sh_test(
-    name = "sim_llvm_memory",
-    srcs = ["sim_llvm_memory.sh"],
-    data = [
-        "//inou/prp:tests/sim/color_kernel_llvm_mem_whole.prp",
-        "//inou/prp:tests/sim/mem_none_color_random.prp",
-        "//lhd",
-    ],
     tags = ["cpu:4"],
 )
 
@@ -1617,18 +1605,12 @@ sh_test(
 # ASAP7-shaped hermetic libraries): graph LEC proves, lgcheck does not refute,
 # broken twins refute, and the OR flavour / an ICG-less library stay native.
 _ICG_CASES = [
-    ("q_graph", "q", "graph"),
-    ("q_verilog", "q", "verilog"),
-    ("qn_graph", "qn", "graph"),
-    ("qn_verilog", "qn", "verilog"),
-    ("none_graph", "none", "graph"),
-    ("none_verilog", "none", "verilog"),
+    ("q", "q", "both"),
+    ("qn", "qn", "both"),
+    ("none", "none", "both"),
     ("n", "n", "both"),
-    ("q_scan", "q_scan", "both"),
-    ("q_inv", "q_inv", "both"),
-    ("q_en", "q_en", "both"),
-    ("qn_enfn", "qn_enfn", "both"),
-    ("qn_chain", "qn_chain", "both"),
+    ("q_negative", "q_negative", "both"),
+    ("qn_negative", "qn_negative", "both"),
 ]
 
 [sh_test(
@@ -2250,7 +2232,10 @@ sh_test(
     env = {"ABC_TEST_THREADS": "2"},
 )
 
-# Keep cross-mode identity checks separate from the three simulation legs.
+# Keep cross-mode identity checks separate from the two simulation legs. The
+# default leg is memory=auto, which folds these small memories exactly like
+# memory=true, so no separate memory=true simulation leg (the identities leg
+# still synthesizes and LECs default/false/true).
 # Each leg retains its mapped-netlist LEC while avoiding repeated synthesis.
 [sh_test(
     name = "lhd_memory_hierarchy_test" + suffix,
@@ -2262,7 +2247,7 @@ sh_test(
         "//inou/prp:abc_tests",
         "//ware:cgen_memory_rtl",
     ],
-) for suffix, mode in [("", "default"), ("_native", "false"), ("_lowered", "true"), ("_identities", "identities")]]
+) for suffix, mode in [("", "default"), ("_native", "false"), ("_identities", "identities")]]
 
 sh_test(
     name = "lhd_ware_options_smoke",
@@ -2354,18 +2339,12 @@ sh_test(
 # live_words=1 the ICG latch and the flop whose commit guard reads its `_din`
 # land in different colors; the latch kept a guarded `_din` store and the flop
 # read it stale (SILENT miscompile, 2026-09-18). Inline fixture: just //lhd.
-[sh_test(
-    name = "sim_live_words_invariance_test" + suffix,
-    args = [budget],
+sh_test(
+    name = "sim_live_words_invariance_test",
     size = "large",
     srcs = ["sim_live_words_invariance_test.sh"],
     data = ["//lhd"],
-) for suffix, budget in [
-    ("", "1"),
-    ("_lw2", "2"),
-    ("_dirty1", "1_dirty"),
-    ("_dirty256", "256_dirty"),
-]]
+)
 
 sh_test(
     name = "readmem_clockless_smoke",

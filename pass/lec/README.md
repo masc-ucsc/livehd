@@ -186,10 +186,11 @@ trace per reset, so the ordinary bounded check runs instead.
 The single-design `lhd formal verify` accepts the uncapped `verify` preset;
 the sampled presets are for `lhd lec` comparisons.
 
-Tests: `//pass/lec:effort_test` (levels, sampler accounting, simulated traces,
-decoded fields, rare-mismatch search, timeout); `//pass/lec:term_sim_test`
-(native evaluation against cvc5 on random QF_BV terms, memories, constraints,
-reduce() equisatisfiability); `//pass/lec:lec_effort_sampling_test` (an
+Tests: `//pass/lec:lec_unit_test` (one binary; `tests/effort_test.cpp`: levels,
+sampler accounting, simulated traces, decoded fields, rare-mismatch search,
+timeout; `tests/term_sim_test.cpp`: native evaluation against cvc5 on random
+QF_BV terms, memories, constraints, reduce() equisatisfiability);
+`//pass/lec:lec_effort_sampling_test` (an
 opcode bug REFUTED at the default effort); `//lhd/tests:lhd_effort_smoke`
 (immediate sampling, proof-only verdicts, level reporting, cache separation,
 diagnostics, sampled and rare failures).

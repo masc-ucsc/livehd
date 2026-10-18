@@ -13,7 +13,7 @@
 // also a compile error"). `en=false` stops `cca_mid`'s gate, whose output
 // clocks `cca_leaf`'s `r` through an alias. The by-type `Clock`-bind check
 // does not apply (`en` is a `Bool`), so the reach-based tracing catches it.
-// (errors/const_clock_alias.prp and friends fail earlier, at the by-type
+// (errors/child_clock_const_bind.prp and friends fail earlier, at the by-type
 // check, because they bind a constant to a `Clock` port.)
 mod cca_leaf(ck:Clock, d:U4) -> (q:U4@[1]) {
   reg r:U4:[clock_pin=ck] = 0

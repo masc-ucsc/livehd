@@ -1,7 +1,7 @@
 /*
 :name: cast_bool_kinds
 :type: comptime
-:verifier_pass: 9
+:verifier_pass: 22
 :verifier_fail: 0
 */
 
@@ -10,6 +10,9 @@
 //   * to an UNSIGNED target (`uint`, `UN`) → the unsigned magnitude bit: true = 1.
 // (The runtime hardware lowering matches this exactly — see
 // inou/prp/tests/equiv/rt_typecast.prp.)
+// Merged with the former cast_to_bool, type_bool_cast, adv_int_true_neg and
+// spec_types_cast_{signed_bool,unsigned_sized_bool,u1_bool,bool_from_int}: only
+// textually identical casserts were folded (e.g. Signed(true) == -1 was in four).
 cassert(Signed(true)   == -1)
 cassert(Signed(false)  ==  0)
 cassert(S8(true)    == -1)
@@ -19,3 +22,29 @@ cassert(Unsigned(false) ==  0)
 cassert(U8(true)    ==  1)
 cassert(U8(false)   ==  0)
 cassert(U1(true)    ==  1)
+cassert(U1(false)   ==  0)                 // was spec_types_cast_u1_bool
+cassert(1 == (Signed(false) + 1))          // was spec_types_cast_signed_bool
+cassert(String(Signed(true)) == "-1")      // was adv_int_true_neg: decimal text of the -1
+
+// `Bool(x)` on an integer is `x != 0` (NOT restricted to 0/1 —
+// 04-variables.md `Bool(33)` is true); a bool operand is identity. An
+// undefined/nil operand is a compile error (see errors/cast_bool_undefined).
+// (was cast_to_bool)
+cassert(Bool(33)   == true)
+cassert(Bool(0)    == false)
+cassert(Bool(-1)   == true)
+cassert(Bool(1) == true)
+cassert(Bool(true) == true)
+// one bit of a value as a bool (was spec_types_cast_bool_from_int)
+cassert(Bool(0x8#[3]) and 0x8#[3] == 1)
+
+// Ruling 52 (2026-09-29, supersedes ruling 37): `Bool` is both the type name
+// and the cast `Bool(x)`; the old `bool`/`boolean` spellings are banned words
+// (errors/typeword_renamed_bool.prp, typeword_renamed_boolean.prp).
+// (was type_bool_cast)
+const t:Bool = Bool(1)
+const f:Bool = Bool(0)
+cassert(t)
+cassert(not f)
+cassert(Bool(33) or false)
+cassert(U1(t) == 1)

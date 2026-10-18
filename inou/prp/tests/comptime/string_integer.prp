@@ -1,10 +1,12 @@
 /*
 :name: string_integer
 :type: parsing lnast comptime
-:verifier_pass: 8
+:verifier_pass: 31
 :verifier_fail: 0
 */
 
+// ---- string_integer ----
+{
 // String->number parsing now rides on the sized casts (`UN`/`SN`); `int`/`uint`
 // were removed (`Signed`/`Unsigned` are sign reinterprets and need bit-typed input).
 cassert(3 == S8("3"))
@@ -21,3 +23,77 @@ cassert(S8("-1") == -1)
 cassert(String("hello ", "world ", 4) == String(String("hello"), String(" world "), String(4)) == "hello world 4")
 
 cassert(U8("0xFF") == 255)
+}
+
+// ---- adv_string_basic_18 ----
+{
+// Documented string<->integer conversion (02-basics.md). The implicit
+// annotation form (`mut b:U8 = a`) no longer parses a string at lowering, so
+// the explicit casts the doc names as equivalent are used (`U8(a)`,
+// `String(b)`); 127 fits U8 and is positive, preserving the original behavior:
+//   mut a:String = "127"
+//   mut b = U8(a)           // string -> integer
+//   mut c = String(b)       // integer -> string
+//   cassert(a == c)
+//   cassert(b == 0x7F)
+mut a:String = "127"
+mut b = U8(a)
+mut c = String(b)
+cassert(a == c)
+cassert(b == 0x7F)
+cassert(b == 127)
+cassert(a == "127")
+}
+
+// ---- adv_casts_23 ----
+{
+// From the 02-basics string->int example (doc lines 139-144).
+// FINDING: b parses to 127 (b == 127 holds, and 127 == 0x7F holds) but
+// b == 0x7F folds to false. A string-parsed integer mis-compares against a
+// hex literal even though the decimal comparison is correct.
+mut a:String = "127"
+mut b = U8(a)        // string parsed to its integer value
+cassert(b == 127)
+cassert(127 == 0x7F)
+cassert(b == 127 == 0x7F)
+cassert(b == 0x7F)
+}
+
+// ---- adv_string_bool ----
+{
+// String(bool) renders the literal word; String(integer) is decimal text.
+cassert(String(true)  == "true")
+cassert(String(false) == "false")
+cassert(String(1)  == "1")      // control: integer string is decimal (works)
+cassert(String(-1) == "-1")
+}
+
+// ---- spec_types_cast_string ----
+{
+// SPEC docs 04-variables "String": "Use `String(value)` to render an integer as decimal text."
+const value = 123
+cassert(String(value) == "123")
+}
+
+// ---- spec_types_cast_int_from_string ----
+{
+// SPEC docs 04-variables "Integer or Signed": "Integer typecast accepts strings as input. The string must be a
+// valid formatted Pryope number or an assertion is raised."
+cassert(U8("12") == 12)
+}
+
+// ---- spec_types_cast_bool_from_string ----
+{
+// SPEC docs 04-variables "Boolean": "String input typecase is valid, but anything different than ("0", "1",
+// "-1", "true", "TRUE", "t", "false", "FALSE", "f") raises an assertion failure." Rule: each listed string casts
+// to the Bool it spells.
+cassert(Bool("1"))
+cassert(Bool("-1"))
+cassert(Bool("true"))
+cassert(Bool("TRUE"))
+cassert(Bool("t"))
+cassert(not Bool("0"))
+cassert(not Bool("false"))
+cassert(not Bool("FALSE"))
+cassert(not Bool("f"))
+}

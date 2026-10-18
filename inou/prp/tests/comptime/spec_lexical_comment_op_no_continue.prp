@@ -1,18 +1,58 @@
 /*
 :name: spec_lexical_comment_op_no_continue
 :type: comptime
-:verifier_pass: 4
+:verifier_pass: 12
 :verifier_fail: 0
 */
-// docs 02-basics "Comments": "Nothing inside a comment affects parsing: an
-// operator inside a comment does not continue a statement". qa.md appendix 3:
-// "Nothing inside a comment ever affects parsing (continuation, strings,
-// interpolation holes)."
-const a = 1 // trailing +
-const b = 2 /* trailing + */
-const c = 3
-/* + */ const d = 4
-cassert(a == 1)
-cassert(b == 2)
-cassert(c == 3)
-cassert(d == 4)
+// docs 02-basics "Comments": "Nothing inside a comment affects parsing". qa.md
+// appendix 3: "Nothing inside a comment ever affects parsing (continuation,
+// strings, interpolation holes)." All at FILE SCOPE; merged from the former
+// spec_lexical_comment_{op_no_continue,quote_brace_inert,openers_in_comments,
+// line_keeps_continuation} and spec_lexical_nested_comment fixtures (every
+// statement and cassert kept, only the declared names got a section prefix).
+
+// ===== an operator inside a comment does not continue a statement (was
+// spec_lexical_comment_op_no_continue) =====
+const on_a = 1 // trailing +
+const on_b = 2 /* trailing + */
+const on_c = 3
+/* + */ const on_d = 4
+cassert(on_a == 1)
+cassert(on_b == 2)
+cassert(on_c == 3)
+cassert(on_d == 4)
+
+// ===== quotes or braces inside a comment do not open a string or an
+// interpolation (was spec_lexical_comment_quote_brace_inert) =====
+const qb_a = 1 // an " unterminated double quote and a { brace
+const qb_b = 2 /* a ' single quote, a ` backtick and a } brace */
+const qb_c = 3
+cassert(qb_a == 1)
+cassert(qb_b == 2)
+cassert(qb_c == 3)
+
+// ===== comment openers inside comments (was spec_lexical_comment_openers_in_comments) =====
+// a line-comment opener inside a block comment does not hide the block close,
+// and a block opener inside a line comment opens nothing.
+mut oc_v = 1 /* // */ + 1
+// /*
+mut oc_w = 2
+cassert(oc_v == 2)
+cassert(oc_w == 2)
+
+// ===== block comments nest (was spec_lexical_nested_comment) =====
+// If the inner close ended the comment, `nc_v = 2 */` below would be live code.
+mut nc_v = 1
+/* outer /* inner */ nc_v = 2 */
+cassert(nc_v == 1)
+
+// ===== a comment line between a statement and its continuation is
+// transparent (was spec_lexical_comment_line_keeps_continuation) =====
+const lk_a = 10
+// a comment line between the statement and its continuation
+  / 2
+cassert(lk_a == 5)
+const lk_b = 10
+/* a /* nested */ block comment line */
+  - 4
+cassert(lk_b == 6)

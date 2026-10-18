@@ -1,7 +1,8 @@
 # This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 #
-# The --reader slang coverage ladder (todo/ 2s subtask E): EVERY
-# inou/yosys/tests/*.v source appears here with its strongest passing tier
+# The --reader slang coverage ladder (todo/ 2s subtask E): each listed
+# inou/yosys/tests/*.v source (those not subsumed by a larger sibling fixture)
+# appears here with its strongest passing tier
 # (lec > verilog > lnast > error). tests/slang_compile.sh enforces the
 # expectation BOTH ways, so promotions/regressions are explicit edits.
 # Comments on non-lec entries say why (see inou/slang/README.md).
@@ -22,7 +23,6 @@ SLANG_LADDER = {
     "assigns": "lec",
     "async_localdecl": "lec",  # async-reset always_ff w/ a block-local temp before the if/else
     "common_sub": "lec",
-    "compare": "lec",
     "compare2": "lec",
     "consts": "lec",
     "cprop": "lec",
@@ -59,7 +59,6 @@ SLANG_LADDER = {
     "fixme_paramods": "verilog",
     "fixme_sha256": "verilog",  # compiles to verilog (1-bit-cond + bool-net fixes); LEC gap on the wide reduction
     "fn_ret_bool": "lec",  # logic-returning fn whose body returns a bool, then compared to a literal
-    "fixme_with_tuples": "error",  # non-LRM: procedural write to a net (yosys-only laxness); slang rejects per 1800
     "flop": "lec",
     "gates": "lec",
     "graphtest": "lec",
@@ -78,27 +77,22 @@ SLANG_LADDER = {
     "long_gcd_small": "error",  # duplicate definition; slang rejects per 1800
     "long_iwls_adder": "lec",
     "long_kogg_stone_64": "lec",
-    "long_mem": "verilog",  # LEC-capable but memory LEC is slow on big arrays; small-array coverage rides simple_rf1/rf2/tuplish
-    "long_mem3": "verilog",  # capped: slow memory LEC (see long_mem)
+    "long_mem3": "verilog",  # capped: memory LEC is slow on big arrays; small-array coverage rides simple_rf1/rf2/tuplish
     "long_nocheck_iwls_square": "lec",  # attempt LEC; explicit timeout is accepted, equivalence remains unproven
-    "long_regfile1r1w": "lec",  # `output reg` port: procedural <= is a legal NBA-to-variable
-    "long_regfile2r1w": "lec",  # ports are `output reg` (variables), so the procedural <= is a legal NBA-to-variable (unlike long_regfile1r1w's net `output`)
+    "long_regfile2r1w": "lec",  # ports are `output reg` (variables), so the procedural <= is a legal NBA-to-variable
     # PROMOTED (was "error", "nested dynamic lvalue (mem element part-select)"):
     # a constant `mem[addr][hi:lo] <= …` the chunk model cannot express is now a
     # read-modify-write of the addressed word, and a whole-word write port on a
     # wensize>1 memory replicates its enable across every chunk instead of
     # writing only chunk 0.
     "long_shared_ports": "lec",
-    "loop_in_lg": "lec",
     "loop_in_lg2": "lec",
     "mem_neg_offset": "lec",  # [-3:4] index range at a signed index: out-of-range writes are dropped, never aliased
     "mem_offset": "lec",  # [5:36] index range + 7-bit addresses: out-of-range writes are dropped, never aliased
     "mem_reset": "lec",
     "mem_sync_init": "verilog",  # initial-block ROM contents lower correctly in LNAST (init tuple) but the read-only `mut` array zero-fills in tolg instead of becoming a Memory with INIT
     "mismatch": "lec",
-    "mt_basic_test": "lec",
     "multiassign": "lec",  # ordinary concurrent slice assigns are resolved together; only generated-loop cross-iteration drivers are refused
-    "mux": "lec",
     "nshift": "lec",  # Verilog shift count is unsigned; negative-constant count masks to unsigned (no nil/error)
     # Per-BIT dependency tracking through an unpacked array of packed wires: a
     # word-granular reader sees each generate level depend on itself and reports
@@ -112,10 +106,7 @@ SLANG_LADDER = {
     "nocheck_async_reset_clock_demote": "lec",  # nonconstant async load keeps the actual clock
     "nocheck_async_reset_peel": "error",  # gate 1: no demote after a rung already peeled
     "nocheck_async_reset_unreadable": "error",  # gate 2: demoted reset must be readable
-    "nocheck_blackboxing2": "error",  # fail-unknown-module
     "nocheck_chunk_FetchTargetQueue": "verilog",  # printing tasks ignored; large sequential LEC remains unverified
-    "nocheck_cpp_api": "error",  # fail-unknown-module
-    "nocheck_gcd_large": "error",  # duplicate definition; slang rejects per 1800
     "nocheck_join_fadd": "error",  # non-LRM: procedural write to a net (yosys-only laxness); slang rejects per 1800
     "nocheck_slang_foreach": "verilog",  # foreach lowers to an async-read memory; memory LEC inconclusive
     # A constant-bound `for` inside a `function automatic` called from a
@@ -130,17 +121,13 @@ SLANG_LADDER = {
     "not_vslogicnot": "lec",
     "null_port": "lec",
     "offset": "lec",
-    "offset_input": "lec",
     "operators": "lec",
-    "params": "lec",
     "params_submodule": "lec",
     "pick": "lec",
     "punch": "lec",
-    "punch.gld": "lec",
     "punching": "lec",
     "punching_3": "lec",
     "random_delay": "lec",
-    "reduce": "lec",
     "sample_stage1": "lec",
     "satlarge": "lec",
     "satpick": "lec",
@@ -149,24 +136,19 @@ SLANG_LADDER = {
     "shiftx": "lec",
     "shiftx_simple": "lec",
     "signs": "lec",
-    "simple_add": "lec",
-    "simple_flop": "lec",
     "simple_hier_test": "lec",
     "simple_rf1": "lec",
     "simple_rf2": "lec",
     "simple_weird": "lec",
-    "simple_weird2": "lec",
     "srasll": "lec",
     "submodule": "lec",
     "submodule2": "lec",
     "submodule_offset": "lec",
     "test": "lec",
-    "trivial": "lec",
     "trivial1": "lec",
     "trivial2": "lec",
     "trivial2a": "lec",
     "trivial3": "lec",
-    "trivial_and": "lec",
     "trivial_join": "lec",
     "trivial_offset": "lec",
     "trivial_reduce": "lec",

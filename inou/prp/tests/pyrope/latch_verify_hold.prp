@@ -8,7 +8,7 @@
 */
 
 // todo/livehd/2f-latch tracker (fixme) — BMC twin of the sim fixture
-// tests/fixme/latch_sim_hold.prp: the SAME window-capture-and-hold property,
+// tests/sim/latch_sim_basic_lane.prp: the SAME window-capture-and-hold property,
 // self-checking (a cycle counter drives the stimulus, so there are no free
 // data inputs for the solver to abuse), stated as design-body asserts for
 // `lhd formal verify`. TODAY the shared encoder refuses the Latch cell

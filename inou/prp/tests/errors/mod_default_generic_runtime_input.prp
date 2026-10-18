@@ -7,7 +7,7 @@
 
 // User ruling 2026-09-28 (34): a `mod`/`pipe` default over a GENERIC folds per
 // specialization, but one that also reads another input's VALUE is still not
-// a compile-time constant (errors/mod_default_runtime_input.prp is the
+// a compile-time constant (errors/io_default_not_comptime.prp is the
 // generic-less form). Before, the generic sent the default to the body
 // prologue ahead of the check, so it compiled silently whenever every call
 // passed `b` (and failed with a misleading overflow when the value was wide).

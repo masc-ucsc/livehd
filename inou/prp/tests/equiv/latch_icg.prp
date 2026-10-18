@@ -21,7 +21,7 @@
 //     PROVES a gated-clock flop equivalent to an ungated one — tracked by
 //     lhd/tests/lec_clock_blindness_test.sh;
 //   * sim computes the gate expression as DEAD CODE and advances the flop every
-//     cycle anyway — tracked by tests/fixme/flop_sim_gated_clock.prp.
+//     cycle anyway — now fixed, pinned by tests/sim/icg_enable_sampling.prp.
 // Under 2f-latch M4 the ICG is folded into a clock-enable on the driven flops as
 // a BOTH-SIDES normalization (never a one-sided abstraction). Nobody proves ICGs
 // in industry practice; they normalize them away.

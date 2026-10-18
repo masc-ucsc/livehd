@@ -126,18 +126,13 @@ cc_library(
     ],
 )
 
+# Symbol_table and Bundle unit tests (one binary; the suites are disjoint).
 cc_test(
-    name = "symbol_table_test",
-    srcs = ["tests/symbol_table_test.cpp"],
-    deps = [
-        ":upass",
-        "@googletest//:gtest_main",
+    name = "upass_core_test",
+    srcs = [
+        "tests/bundle_test.cpp",
+        "tests/symbol_table_test.cpp",
     ],
-)
-
-cc_test(
-    name = "bundle_test",
-    srcs = ["tests/bundle_test.cpp"],
     deps = [
         ":upass",
         "@googletest//:gtest_main",

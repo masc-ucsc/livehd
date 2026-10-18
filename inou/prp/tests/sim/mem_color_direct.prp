@@ -5,7 +5,7 @@
 
 // Live 3d-sim-color memory gate: the occurrence-wide scheduler must preserve
 // committed old-value reads and same-cycle forwarding without treating the
-// array object as a scalar state-Q boundary. The existing mem_ordering_sim
+// array object as a scalar state-Q boundary. The existing mem_ordering_and_reset_lane
 // fixture retains the harder program-order read-modify-write fallback until
 // read ports become independent plan sites.
 pub mod memcolor(wa:U2, wd:U8) -> (qo:U8@[0], qf:U8@[0]) {

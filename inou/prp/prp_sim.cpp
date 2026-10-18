@@ -3463,7 +3463,7 @@ private:
       // error under the Clock type); how a Pyrope test drives a SECOND Clock
       // is pending (ruling 57, lane sim-multiclock), so multi-clock designs
       // simulate through Verilog-origin input for now. Re-cite
-      // tests/sim/multiclock_two_domain.prp once it leaves _SIM_FIXME.
+      // tests/sim/flop_sim_secondary_negedge.prp once it leaves _SIM_FIXME.
       if (std::string_view(what) == "clock") {
         fail("a `tick` has ONE loop counter, so `clocks=(...)` takes ONE entry (got " + std::to_string(seen)
              + "). A register can only name a `Clock` input in `clock_pin=`; driving a second Clock from a "

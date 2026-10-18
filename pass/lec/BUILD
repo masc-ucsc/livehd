@@ -201,42 +201,31 @@ cc_test(
     ],
 )
 
-# Packed toggle coverage, legal traces, and bounded effort.
+# One binary for the cvc5-side unit suites:
+#  - effort_test: packed toggle coverage, legal traces, and bounded effort;
+#  - term_sim_test: the sampled-effort simulator (native evaluation of random
+#    QF_ABV terms must match cvc5's own evaluation, and reduce() must keep the
+#    formula equisatisfiable);
+#  - observe_test: bit-demand (observability) transfer functions behind the
+#    inductive miter's unobservable-state reduction (observe.cpp);
+#  - solver_profile_test: the solver-profile helpers;
+#  - array_blast_test: small-array elimination (array_blast.hpp), whose
+#    per-entry bit-vector rewrite must agree with cvc5's array theory and whose
+#    models must read back through it.
 cc_test(
-    name = "effort_test",
-    size = "small",
-    srcs = ["tests/effort_test.cpp"],
-    copts = COPTS,
-    deps = [
-        ":lec_query",
-        "@cvc5",
-        "@googletest//:gtest_main",
+    name = "lec_unit_test",
+    size = "medium",
+    srcs = [
+        "tests/array_blast_test.cpp",
+        "tests/effort_test.cpp",
+        "tests/observe_test.cpp",
+        "tests/solver_profile_test.cpp",
+        "tests/term_sim_test.cpp",
     ],
-)
-
-# The sampled-effort simulator: native evaluation of random QF_ABV terms must
-# match cvc5's own evaluation, and reduce() must keep the formula equisatisfiable.
-cc_test(
-    name = "term_sim_test",
-    size = "small",
-    srcs = ["tests/term_sim_test.cpp"],
     copts = COPTS,
     deps = [
         ":lec_query",
-        "@cvc5",
-        "@googletest//:gtest_main",
-    ],
-)
-
-# Bit-demand (observability) transfer functions behind the inductive miter's
-# unobservable-state reduction (observe.cpp).
-cc_test(
-    name = "observe_test",
-    size = "small",
-    srcs = ["tests/observe_test.cpp"],
-    copts = COPTS,
-    deps = [
-        ":lec_query",
+        ":solver_profile",
         "@cvc5",
         "@googletest//:gtest_main",
     ],
@@ -741,23 +730,6 @@ cc_test(
         "//:without_abc": ["@platforms//:incompatible"],
         "//conditions:default": [],
     }),
-)
-
-cc_test(
-    name = "solver_profile_test",
-    srcs = ["tests/solver_profile_test.cpp"],
-    copts = COPTS,
-    deps = [":solver_profile", ":lec_query", "@googletest//:gtest_main"],
-)
-
-# Small-array elimination (array_blast.hpp): the per-entry bit-vector rewrite
-# must agree with cvc5's array theory, and models must read back through it.
-cc_test(
-    name = "array_blast_test",
-    size = "small",
-    srcs = ["tests/array_blast_test.cpp"],
-    copts = COPTS,
-    deps = [":solver_profile", "@googletest//:gtest_main"],
 )
 
 # Manual experiments, bounded per query; never run as part of bazel test.

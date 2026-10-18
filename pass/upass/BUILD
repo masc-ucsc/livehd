@@ -39,39 +39,18 @@ cc_library(
 )
 
 # Driven through the lhd kernel (--set upass.flag=value; uPass diagnostics
-# come from the per-step log under --workdir).
-_LNAST_UPASS_TESTS = [
-    "upass_dependency_test.sh",
-    "upass_noop_first_iter_test.sh",
-    "upass_cycle_cmd_test.sh",
-]
-
-[
-    sh_test(
-        name = t,
-        srcs = ["tests/%s" % t],
-        data = [
-            "//inou/prp:tests/pyrope/simple.prp",
-            "//lhd",
-        ],
-    )
-    for t in _LNAST_UPASS_TESTS
-]
-
-
+# come from the per-step log under --workdir). One target runs the five
+# scripts in tests/ back to back, each with its own TEST_TMPDIR.
 sh_test(
-    name = "upass_func_extract_test.sh",
-    srcs = ["tests/upass_func_extract_test.sh"],
+    name = "upass_lhd_test",
+    srcs = ["tests/upass_lhd_test.sh"],
     data = [
+        "tests/upass_coalescer_dse_test.sh",
+        "tests/upass_cycle_cmd_test.sh",
+        "tests/upass_dependency_test.sh",
+        "tests/upass_func_extract_test.sh",
+        "tests/upass_noop_first_iter_test.sh",
         "//inou/prp:tests/pyrope/simple.prp",
-        "//lhd",
-    ],
-)
-
-sh_test(
-    name = "upass_coalescer_dse_test.sh",
-    srcs = ["tests/upass_coalescer_dse_test.sh"],
-    data = [
         "//lhd",
     ],
 )
@@ -80,10 +59,6 @@ test_suite(
     name = "upass_smoke_suite",
     tests = [
         "//upass/runner:upass_runner_test",
-        ":upass_dependency_test.sh",
-        ":upass_noop_first_iter_test.sh",
-        ":upass_cycle_cmd_test.sh",
-        ":upass_func_extract_test.sh",
-        ":upass_coalescer_dse_test.sh",
+        ":upass_lhd_test",
     ],
 )

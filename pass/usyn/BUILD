@@ -95,30 +95,36 @@ cc_library(
     visibility = ["//visibility:public"],
 )
 
-[cc_test(
-    name = name,
-    srcs = [name + ".cpp"],
+cc_test(
+    name = "endpoint_test",
+    srcs = [
+        "endpoint_pairs_test.cpp",
+        "endpoint_test.cpp",
+        "joint_endpoint_test.cpp",
+        "residual_test.cpp",
+    ],
     copts = COPTS,
     deps = [
         ":usyn_logic",
         "@googletest//:gtest_main",
     ],
-) for name in [
-    "decomposition_test",
-    "endpoint_test",
-    "endpoint_pairs_test",
-    "function_test",
-    "joint_endpoint_test",
-    "residual_test",
-    "npn4_test",
-    "sop_factor_test",
-    "unate_test",
-    "xag_test",
-    "xag_balance_test",
-    "xag_choice_test",
-    "xag_representations_test",
-    "xag_sweep_test",
-]]
+)
+
+cc_test(
+    name = "function_test",
+    srcs = [
+        "decomposition_test.cpp",
+        "function_test.cpp",
+        "npn4_test.cpp",
+        "sop_factor_test.cpp",
+        "unate_test.cpp",
+    ],
+    copts = COPTS,
+    deps = [
+        ":usyn_logic",
+        "@googletest//:gtest_main",
+    ],
+)
 
 cc_library(
     name = "native_cost",
@@ -130,17 +136,6 @@ cc_library(
     deps = [
         ":usyn_logic",
         "//pass/liberty:liberty_dff",
-    ],
-)
-
-cc_test(
-    name = "native_cost_test",
-    srcs = ["native_cost_test.cpp"],
-    copts = COPTS,
-    deps = [
-        ":native_cost",
-        ":usyn_logic",
-        "@googletest//:gtest_main",
     ],
 )
 
@@ -158,12 +153,21 @@ cc_library(
 )
 
 cc_test(
-    name = "xag_opt_test",
-    srcs = ["xag_opt_test.cpp"],
+    name = "xag_test",
+    srcs = [
+        "native_cost_test.cpp",
+        "xag_balance_test.cpp",
+        "xag_choice_test.cpp",
+        "xag_opt_test.cpp",
+        "xag_representations_test.cpp",
+        "xag_sweep_test.cpp",
+        "xag_test.cpp",
+    ],
     copts = COPTS,
     deps = [
-        ":xag_opt",
+        ":native_cost",
         ":usyn_logic",
+        ":xag_opt",
         "@googletest//:gtest_main",
     ],
 )
@@ -514,11 +518,16 @@ cc_library(
 # Legacy-cover utility tests remain independent of the optional ABC provider.
 # ---------------------------------------------------------------------------
 
-[cc_test(
-    name = name,
-    srcs = [name + ".cpp"],
+cc_test(
+    name = "usyn_support_test",
+    srcs = [
+        "evidence_test.cpp",
+        "metrics_test.cpp",
+        "provenance_test.cpp",
+        "resource_budget_test.cpp",
+        "usyn_region_test.cpp",
+    ],
     copts = COPTS,
-    data = data,
     deps = [
         ":pass_usyn",
         ":usyn_legacy",
@@ -526,13 +535,7 @@ cc_library(
         "@googletest//:gtest_main",
         "@rapidjson",
     ],
-) for name, data in [
-    ("usyn_region_test", []),
-    ("evidence_test", []),
-    ("metrics_test", []),
-    ("provenance_test", []),
-    ("resource_budget_test", []),
-]]
+)
 
 cc_test(
     name = "lut_cover_test",

@@ -16,6 +16,11 @@ construct gap surfaces here as a hard failure, not a false pass.
 The fixture must prove equivalent; timeouts and refusals fail.
 
   python3 inou/prp/tests/p2p_test.py -i inou/prp/tests/equiv/mod_call_pipe.prp
+
+`-i` takes several fixtures (and may repeat): bazel runs a group of them as one
+target (`prp-p2p-<group>`), and every fixture still runs both steps and prints its
+own `<name> - p2p - success|FAILED` line. A failing fixture does not stop the rest;
+the exit status is 1 if any failed.
 """
 
 import argparse
@@ -39,17 +44,7 @@ def _v_top(vpath):
     return m.group(1) if m else None
 
 
-def main():
-    ap = argparse.ArgumentParser()
-    ap.add_argument("-i", "--input", required=True, help="Pyrope source .prp (golden <name>.v alongside)")
-    args = ap.parse_args()
-
-    lhd = "./bazel-bin/lhd/lhd" if os.path.exists("./bazel-bin/lhd/lhd") else "./lhd/lhd"
-    if not os.path.exists(lhd):
-        print("missing lhd binary")
-        return 3
-
-    prp = args.input
+def run_one(lhd, prp):
     name = os.path.splitext(os.path.basename(prp))[0]
     v = os.path.join(os.path.dirname(prp), name + ".v")
     if not os.path.exists(v):
@@ -102,6 +97,26 @@ def main():
     print("{} - p2p - FAILED: not equivalent (top:{})".format(name, top))
     print(chk.stdout.decode("utf-8", "ignore"))
     return 1
+
+
+def main():
+    ap = argparse.ArgumentParser()
+    ap.add_argument("-i", "--input", required=True, nargs="+", action="extend",
+                    help="Pyrope source .prp, golden <name>.v alongside (several allowed; each runs on its own)")
+    args = ap.parse_args()
+
+    lhd = "./bazel-bin/lhd/lhd" if os.path.exists("./bazel-bin/lhd/lhd") else "./lhd/lhd"
+    if not os.path.exists(lhd):
+        print("missing lhd binary")
+        return 3
+
+    rc = 0
+    for prp in args.input:
+        # Never stop at the first failure: report every fixture, fail at the end.
+        if run_one(lhd, prp) != 0:
+            rc = 1
+        sys.stdout.flush()
+    return rc
 
 
 if __name__ == "__main__":

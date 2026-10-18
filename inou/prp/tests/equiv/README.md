@@ -5,7 +5,7 @@ Two axes live here, and a design can sit on both:
 | axis | files | target |
 | --- | --- | --- |
 | Pyrope ↔ **Verilog** | `foo.prp` + hand-written `foo.v` | `prp-equiv-foo` |
-| Pyrope ↔ **Pyrope** | `foo.prp` + `foo_1.prp`, `foo_2.prp`, … | `prp-lec-foo_1`, … |
+| Pyrope ↔ **Pyrope** | `foo.prp` + `foo_1.prp`, `foo_2.prp`, … | `prp-lec-foo_1`, … (`prp-lec-foo` if grouped) |
 
 For the Verilog axis, `prp-equiv-foo` lowers the Pyrope to Verilog and proves the
 two equivalent with the default `lhd lec` solver and native Slang reader, then
@@ -16,8 +16,8 @@ of what the design must compute.
 
 A pair whose `:type:` also carries `simulation` has its own `test` block. When
 its stem is on `_EQUIV_SIM` in `inou/prp/BUILD` (matched_filter), that block runs
-in its own target, `prp-sim-equiv-foo`, and `prp-equiv-foo` (and its `-bitfuzz`
-twin) runs only the equivalence (`--mode equiv`), so no target pays for both
+in its own target, `prp-sim-equiv-foo`, and `prp-equiv-foo` (and its `--bitfuzz`
+leg) runs only the equivalence (`--mode equiv`), so no target pays for both
 the simulation host build and the proof. (`prp-simeq-*` is a different family:
 the differential-simulation testbenches of `README_simeq.md`.)
 
@@ -78,7 +78,7 @@ state matching — because it is far faster and it is the engine under test.
 
 Measured over the whole corpus (2026-09-21, 326 pairs, 10s budget): **287
 proven by yosys, 29 inconclusive, 1 setup-failed, 0 refuted** — and the
-`-bitfuzz` companions land on exactly the same three buckets, which is the
+`--bitfuzz` legs land on exactly the same three buckets, which is the
 stronger half of the result: there the native check reads BOTH sides through
 the fuzzed path, while yosys reads the two Verilog texts and cannot be fooled
 symmetrically. A pair yosys cannot decide is usually a memory or a rolled loop;
@@ -91,9 +91,9 @@ The oracle never runs twice on the same bytes. A pair whose own `:set:` already
 asks `lhd lec` for `formal.solver=lgyosys` (lgcheck through yosys' `read_slang`,
 and it must agree) skips the separate leg; it trades the leg's `read_verilog`
 front end for `read_slang`, still an independent lowering and still strict. A
-`-bitfuzz` companion whose emitted netlist is byte-identical to the plain
+`--bitfuzz` leg whose emitted netlist is byte-identical to the plain
 compile's (proved by redoing the plain compile) skips every lgcheck run:
-lgcheck reads only the two Verilog texts, so the plain target already checked
+lgcheck reads only the two Verilog texts, so the plain leg already checked
 those exact inputs.
 
 Because a one-sided check is exactly the kind of thing that silently becomes a
@@ -103,15 +103,17 @@ proves an equivalent pair, REFUTES an off-by-one one, and honors the opt-out.
 
 ## Bitfuzz coverage
 
-Each `prp-equiv-*` and `prp-lec-*` target also has a `-bitfuzz` companion.
-The companion enables `compile.bitfuzz.mode=wires` for explicit compilation
+Each `prp-equiv-*` and `prp-lec-*` target runs two legs: the plain run, then
+the same fixture again with `--with-bitfuzz`, one target for both so a pair
+is not duplicated as a `-bitfuzz` twin target. The second leg enables
+`compile.bitfuzz.mode=wires` for explicit compilation
 and the source compilations inside `lhd lec`. It strips internal combinational
 width/sign annotations after lowering, before cprop. IO, constants, register
 and memory outputs, and instance boundaries are preserved. Cprop must preserve
 integer semantics without consulting annotations; the ordinary bitwidth pass
 recovers them. The fuzz pass does not infer or restore missing annotations.
-Both configurations run under `bazel test //...` with the same equivalence
-expectations. A bitfuzz failure remains a failing test.
+Both legs run under `bazel test //...` with the same equivalence
+expectations. A bitfuzz-leg failure fails the target.
 
 Run one manually with:
 
@@ -155,7 +157,11 @@ foo_2.prp    another variant, also against foo.prp (never against foo_1)
 ```
 
 Each variant gets one `prp-lec-<variant>` target: no script, no BUILD edit, so a
-new claim about `foo` is one new file. `foo.prp` keeps its `prp-equiv-foo` /
+new claim about `foo` is one new file. A multi-variant base listed in
+`_PRPLEC_GROUPED` (`inou/prp/BUILD`) runs instead as ONE `prp-lec-<base>` target
+that LECs every `<base>_<N>.prp` against the base, each with its own header
+tags; the log names the failing variant, and a new variant of such a base joins
+its group automatically. `foo.prp` keeps its `prp-equiv-foo` /
 `prp-statematch-foo` targets if it has a golden `.v` — the axes are independent.
 
 A variant that is **header-only** (tags, no Pyrope code) means *the base source
@@ -218,8 +224,13 @@ so its state pairs where the other side holds it -- a wrapped memory pairs
 memory-to-memory. A design with no registers and no memories has nothing to
 correspond, so it is EXCLUDED from the axis by `_STATEMATCH_COMB` in
 `inou/prp/BUILD` rather than run as a silent pass (measured 2026-09-21: 190 of
-319 pairs were vacuous this way). A pair whose claim IS that no state appears
-stays out of that exclude list so it keeps running. A side `lhd compile` will not lower is a
+319 pairs were vacuous this way; 47 more blank ones were added 2026-10-17). A
+pair whose claim IS that no state appears stays out of that exclude list so it
+keeps running. A state-bearing pair whose name pairing a kept pair already
+asserts (the `mem` array fixtures that differ only in `ordering=` / reset /
+`initial=` attributes, init constants or store logic) is excluded the same way
+by `_STATEMATCH_REDUNDANT`; its `prp-equiv-*` / `prp-v2prp2v-*` targets stay.
+A side `lhd compile` will not lower is a
 FAILURE, not a skip — the equivalence proof goes through yosys/lgcheck and can
 stay green while `lhd compile` refuses the very same file, which is exactly the
 hole this check exists to expose. (A refusal that is the WHOLE point of a

@@ -41,3 +41,6 @@ added/removed above it. This mirrors `locate_error_here` in `tests/errors/`.
 discarded). The front-end (`inou/prp/prp2lnast.cpp`) skips the warning when the
 expression has an observable side effect (a function call, an assignment, an
 `::[attr=…]` write, an embedded scope / if / match / loop).
+`unused_add.prp` holds one lambda per shape (`foo`, `foo_cmp`, `foo_ident`,
+`foo_block`), each with its own `locate_warning_here` marker; the harness
+requires a warning on every marked line.

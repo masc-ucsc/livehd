@@ -17,7 +17,7 @@
 // transparent-low -> commits at RISE; slave transparent-high -> commits at
 // FALL), and the pair reconstructs ONE-cycle flop latency from commit classes
 // alone. The one-cycle-latency claim is tested by the SIM fixture
-// tests/fixme/latch_sim_master_slave.prp (2f-latch M5) — sim today emits
+// tests/sim/latch_sim_basic_lane.prp, master/slave test (2f-latch M5) — sim today emits
 // nothing for a Latch; a naive "latch = flop" model without commit classes
 // would give 2 cycles instead of 1, silently. Neither fix may model
 // transparency — opposite-phase commit classes are what make it correct.

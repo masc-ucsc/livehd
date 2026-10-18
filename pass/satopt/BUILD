@@ -79,96 +79,22 @@ cc_library(
 
 cc_test(
     name = "satopt_test",
-    srcs = ["satopt_test.cpp"],
-    copts = COPTS,
-    deps = [
-        ":satopt",
-        "//graph",
-        "//pass/formal:formal",
-        "@googletest//:gtest_main",
+    srcs = [
+        "satopt_ctrl_test.cpp",
+        "satopt_memory_test.cpp",
+        "satopt_muxtree_test.cpp",
+        "satopt_share_test.cpp",
+        "satopt_sim_test.cpp",
+        "satopt_stages_test.cpp",
+        "satopt_sweep_test.cpp",
+        "satopt_test.cpp",
     ],
-)
-
-cc_test(
-    name = "satopt_memory_test",
-    srcs = ["satopt_memory_test.cpp"],
-    copts = COPTS,
-    deps = [
-        ":satopt",
-        "//graph",
-        "//pass/formal:formal",
-        "//pass/lec:lec_query",
-        "@googletest//:gtest_main",
-    ],
-)
-
-cc_test(
-    name = "satopt_stages_test",
-    srcs = ["satopt_stages_test.cpp"],
-    copts = COPTS,
-    deps = [
-        ":satopt",
-        "//graph",
-        "@googletest//:gtest_main",
-    ],
-)
-
-cc_test(
-    name = "satopt_sim_test",
-    srcs = ["satopt_sim_test.cpp"],
-    copts = COPTS,
-    deps = [
-        ":satopt",
-        "//graph",
-        "//pass/formal:formal",
-        "@googletest//:gtest_main",
-    ],
-)
-
-cc_test(
-    name = "satopt_sweep_test",
-    srcs = ["satopt_sweep_test.cpp"],
-    copts = COPTS,
-    deps = [
-        ":satopt",
-        "//graph",
-        "@googletest//:gtest_main",
-    ],
-)
-
-cc_test(
-    name = "satopt_ctrl_test",
-    srcs = ["satopt_ctrl_test.cpp"],
-    copts = COPTS,
-    deps = [
-        ":satopt",
-        "//graph",
-        "//pass/formal:formal",
-        "@googletest//:gtest_main",
-    ],
-)
-
-cc_test(
-    name = "satopt_muxtree_test",
-    srcs = ["satopt_muxtree_test.cpp"],
     copts = COPTS,
     deps = [
         ":satopt",
         "//graph",
         "//pass/cprop:pass_cprop",
         "//pass/formal:formal",
-        "//pass/lec:lec_query",
-        "@googletest//:gtest_main",
-    ],
-)
-
-cc_test(
-    name = "satopt_share_test",
-    srcs = ["satopt_share_test.cpp"],
-    copts = COPTS,
-    deps = [
-        ":satopt",
-        "//graph",
         "//pass/lec:lec_query",
         "@googletest//:gtest_main",
     ],

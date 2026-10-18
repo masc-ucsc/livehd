@@ -1,7 +1,7 @@
 /*
 :name: adv_tuple_destruct_14
 :type: comptime
-:verifier_pass: 4
+:verifier_pass: 15
 :verifier_fail: 0
 */
 
@@ -9,23 +9,59 @@
 // (`comb f(x) -> (x) { x = x + 1 }`). "In the lambda body, reads before the
 // output assignment use the input value and the assignment binds the output
 // field." So next_value(x=41) must yield 42 (single-field auto-unwrap).
-// Observed: the body read of `x` sees 0, not the input, so the result is 1.
-
-comb next_value(x) -> (x) {
-  x = x + 1
+// Merged from the former adv_arg_naming_18, adv_comb_basic_06, adv_multi_out_05
+// and adv_tuple_destruct_14 (all four pin this one rule; every cassert is kept).
+// All lambdas come first: a file-scope const named like a lambda input/output
+// that is already visible is a shadowing error.
+comb next_value(x) -> (x) { x = x + 1 }
+comb twice(x) -> (x) { x = x + x }
+comb inc(a) -> (r) {
+  r = a + 1
+}
+comb shift_pair(x, y) -> (x, sum) {
+  x = x + y
+  sum = x + 1
 }
 
+// -- was adv_arg_naming_18: single-arg unnamed call, chained, explicit named
+cassert(next_value(0) == 1)            // single-arg unnamed, output unwraps
+cassert(next_value(-1) == 0)
+cassert(twice(next_value(3)) == 8)     // chained: (3+1)*2
+cassert(next_value(x = 41) == 42)      // explicit named also fine
+
+// -- was adv_comb_basic_06
+const na = next_value(x=41)
+cassert(na == 42)
+
+const nb = next_value(x=-1)
+cassert(nb == 0)
+
+// Chained: reads of x inside use input value, then bind output.
+const nc = next_value(x=next_value(x=98))
+cassert(nc == 100)
+
+// Auto-unwrap on the shared name output.
+const nd = next_value(x=0)
+cassert(nd == 1 and nd.x == 1)
+
+// -- was adv_multi_out_05: two outputs, one shares an input name
+const ma = next_value(x=41)
+cassert(ma == 42)
+
+// -- was adv_tuple_destruct_14
 const rv = next_value(x = 41)
 cassert(rv == 42)
 cassert(rv.x == 42)
 
-// A non-shared-name control in the same file (this part is correct). The
-// result above is not named `r`: a file-scope `const r` would be visible in
-// `inc`, and its output `r` would shadow it (user ruling 2026-09-28 (35)).
-comb inc(a) -> (r) {
-  r = a + 1
-}
-
+// A non-shared-name control in the same file (this part is correct).
 const c = inc(a = 41)
 cassert(c == 42)
 cassert(c.r == 42)
+
+// -- was adv_multi_out_05 (cont.): two outputs, one shares an input name. After
+// `x = x + y`, x is the output binding, so `sum = x + 1` reads the freshly-written
+// output. Two outputs MUST destructure by the output names; kept last so the
+// file-scope x/sum are not visible to the lambdas above.
+const (x, sum) = shift_pair(x=2, y=3)
+cassert(x == 5)
+cassert(sum == 6)

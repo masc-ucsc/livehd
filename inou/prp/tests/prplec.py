@@ -82,9 +82,10 @@ def variant_of(prp_file):
 def group_of(prp_file, root=''):
     """(base, [variants]) for a fixture that is either the base or a variant.
 
-    Naming a VARIANT selects just that one (this is what each `prp-lec-*` BUILD
-    target does — one target per claim). Naming the BASE selects every variant
-    staged beside it, which is what a manual run wants.
+    Naming a VARIANT selects just that one (this is what each ungrouped
+    `prp-lec-<variant>` BUILD target does — one target per claim). Naming the
+    BASE selects every variant staged beside it, which is what a manual run and
+    a grouped `prp-lec-<base>` / `lec-group-*` target want.
     """
     join = lambda p: p if os.path.isabs(p) or not root else os.path.join(root, p)
 

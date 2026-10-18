@@ -5,8 +5,7 @@
 
 // todo_sim_pipeline.md Phase 0 (step 1 + step 2 anchor) — THE REAL ICG:
 // a transparent-LOW enable latch feeding the AND gate, which is exactly
-// minion's `prim_clk_gate` (its `en_latch`, prim_clk_gate.sv:33-37) and the
-// shape flop_sim_gated_clock.prp deliberately sidesteps.
+// minion's `prim_clk_gate` (its `en_latch`, prim_clk_gate.sv:33-37).
 //
 // WHY THE LATCH IS THE WHOLE POINT. The gate's enable latch must be ABSORBED
 // into the flop's commit guard, not scheduled as a state element of its own.
