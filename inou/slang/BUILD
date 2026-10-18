@@ -68,6 +68,17 @@ sh_test(
     data = ["//lhd"],
 )
 
+# Run-time severity tasks are not hardware: ignored with one warning per call.
+sh_test(
+    name = "severity_task_warning",
+    srcs = ["tests/severity_task_warning.sh"],
+    data = [
+        "tests/sv/severity_tasks_ignored.sv",
+        "//lhd",
+    ],
+    env = {"FIXTURES": "inou/slang/tests/sv"},
+)
+
 sh_test(
     name = "automatic_packed_local",
     srcs = ["tests/automatic_packed_local.sh"],

@@ -150,7 +150,19 @@ void Slang_context::lower_statement(const slang::ast::Statement& stmt) {
           // Keep the existing quiet synthesis behavior for common printers.
           if (name == "$display" || name == "$write" || name == "$monitor" || name == "$strobe" || name == "$time"
               || name == "$displayb" || name == "$displayh" || name == "$displayo" || name == "$dumpfile" || name == "$dumpvars"
-              || name == "$finish" || name == "$stop" || name == "$fatal") {
+              || name == "$finish" || name == "$stop") {
+            return;
+          }
+          // Run-time severity tasks (IEEE 1800 20.10) only report to the simulator log
+          // (and `$fatal` ends the run); they drive no hardware, which is exactly what yosys
+          // does with them. The elaboration-time forms (module/generate scope) are handled by
+          // slang itself. Say so instead of failing the whole design.
+          if (name == "$info" || name == "$warning" || name == "$error" || name == "$fatal") {
+            emit_warning(stmt.sourceRange,
+                         "severity-task-ignored",
+                         "unsupported",
+                         std::string("run-time severity task '") + std::string(name)
+                             + "' is ignored (synthesis semantics); it reports to the simulator only");
             return;
           }
           emit_unsupported(stmt.sourceRange,

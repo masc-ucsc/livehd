@@ -61,6 +61,14 @@ Two limitations of that header are real and currently unchecked:
   `hhds::Source_locator::find_file`, via the scratch-locator `base_` chain the
   loop grows).
 
+## Constructs that look like state but are not (or the reverse)
+
+- **Run-time severity tasks.** `$info`/`$warning`/`$error`/`$fatal` inside a process drive no
+  hardware, exactly like `$display`; they are ignored with one `severity-task-ignored`
+  warning per call instead of failing the design (FlooNoC carries a `$warning` in an `always`
+  outside `TARGET_SYNTHESIS`). The elaboration forms in a module or generate scope are slang's
+  own diagnostics (`InfoTask`, ...) and are unchanged: a taken `$error` still fails.
+
 ## Passing raw slang driver args (`-- ...`)
 
 Everything after a `--` on the `lhd` command line rides straight to the slang
