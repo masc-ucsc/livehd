@@ -19,7 +19,8 @@ set -euo pipefail
 #   acc2 refines acc1             a two-phase accumulator adds every other cycle
 #                                 (witness `adv`): NOT K-INDUCTIVE at k=1,
 #                                 PROVED at k=2 (also as one run over k=1,2);
-#                                 in LOCKSTEP a COUNTEREXAMPLE
+#                                 in LOCKSTEP a COUNTEREXAMPLE, decoded and
+#                                 replayed on both simulators
 # Every PROVED is the verified check (Sym.runInvKOf / Sym.runRefKOf, by
 # default through *_of_obls over the obligations already built)
 # accepting LRAT proofs from the untrusted solver. A run with several
@@ -121,4 +122,5 @@ run sym_refine "REFINEMENT PROVED"   "$A2" "$A1" pair:acc_o=acc_o adv:adv k:2 re
 run sym_refine "REFINEMENT PROVED"   "$A2" "$A1" pair:acc_o=acc_o adv:adv k:1,2
 grep -q '\[k=1\] RESULT: NOT K-INDUCTIVE' "$OUT/run_$N.log" || { echo "FAIL: k list"; exit 1; }
 run sym_refine "COUNTEREXAMPLE"      "$A2" "$A1" pair:acc_o=acc_o k:4
+grep -q "COUNTEREXAMPLE (base, replayed)" "$OUT/run_$N.log" || { tail -5 "$OUT/run_$N.log"; echo "FAIL: refinement counterexample not replayed"; exit 1; }
 echo "PASS: sym_selftest"

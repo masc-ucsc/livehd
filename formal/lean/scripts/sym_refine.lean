@@ -71,7 +71,7 @@ def resolvePort (cert : String) (kind : String) (tok : String) : IO (Option Nat)
           if let .ok n := (o.getObjValD "ordinal").getNat? then return some n
       return none
 
-inductive SatAnswer | unsat (proof : ByteArray) | sat | failed (why : String)
+inductive SatAnswer | unsat (proof : ByteArray) | sat (model : String) | failed (why : String)
 
 /-- Write `φ`'s CNF, run the solver, return its LRAT proof bytes. -/
 def solve (solver : String) (work : System.FilePath) (tag : String) (φ : BVLogicalExpr) :
@@ -93,11 +93,80 @@ def solve (solver : String) (work : System.FilePath) (tag : String) (φ : BVLogi
   if out.stdout.startsWith "s UNSATISFIABLE" then
     return (.unsat (← IO.FS.readBinFile lratPath), t1 - t0, t2 - t1, nClauses)
   else if out.stdout.startsWith "s SATISFIABLE" then
-    return (.sat, t1 - t0, t2 - t1, nClauses)
+    return (.sat out.stdout, t1 - t0, t2 - t1, nClauses)
   else
     return (.failed s!"solver exit {out.exitCode}: {out.stdout.take 200}{out.stderr.take 200}",
             t1 - t0, t2 - t1, nClauses)
 
+
+
+/-! ## Counterexample replay
+
+The BASE obligation's variables `j * nIn + t` are cycle `j`'s implementation
+input `t` (the layout `refBaseRun` builds). A model is decoded into the input
+sequence and REPLAYED on both residual simulators: the implementation every
+cycle, the specification only on witnessed cycles (as `stutM`). -/
+
+/-- cadical's `v` lines: DIMACS variable → value. -/
+def parseModel (stdout : String) : Std.HashMap Nat Bool := Id.run do
+  let mut m : Std.HashMap Nat Bool := {}
+  for line in stdout.splitOn "\n" do
+    if line.startsWith "v " then
+      for tok in (line.drop 2).toString.splitOn " " do
+        if let some z := tok.toInt? then
+          if z ≠ 0 then m := m.insert z.natAbs (0 < z)
+  return m
+
+def modelValue (map : Std.HashMap BVBit Nat) (aigSize : Nat) (model : Std.HashMap Nat Bool)
+    (var w : Nat) : Nat := Id.run do
+  let mut v := 0
+  for b in List.range w do
+    if h : b < w then
+      let bit : BVBit := { var, w, idx := ⟨b, h⟩ }
+      match map[bit]? with
+      | some c => if model.getD (c + aigSize + 1) false then v := v ||| (1 <<< b)
+      | none   => pure ()
+  return v
+
+def decodeInputs (φ : BVLogicalExpr) (model : Std.HashMap Nat Bool) (inW : List Nat) (k : Nat) :
+    Array RuntimeInput := Id.run do
+  let entry := φ.bitblast
+  let (_, map) := entry.relabelNat'
+  let aigSize := entry.aig.decls.size
+  let nIn := inW.length
+  let mut out := #[]
+  for j in List.range k do
+    out := out.push ((inW.zipIdx.map fun (w, t) =>
+      mk_bv w (Int.ofNat (modelValue map aigSize model (j * nIn + t) w))).toArray)
+  return out
+
+/-- The first cycle whose assumptions held so far and whose refinement verdict
+fails, with each disagreeing pair `(implOut, specOut, implValue, specValue)`;
+`stateDiff` when only the next states differ. -/
+def replayRef (sy : RefSys) (RI RS : Program) (sp : RefSpec) (ins : Array RuntimeInput) :
+    Option (Nat × Bool × List (Nat × Nat × Int × Int) × Bool) := Id.run do
+  let some simI := mkMemSimOfW sy.DI RI | return none
+  let some simS := mkMemSimOfW sy.DS RS | return none
+  let mut stI := sy.sI0
+  let mut stS := sy.sS0
+  let mut asmOK := true
+  for j in List.range ins.size do
+    let some rI := runMemSim simI (edgesAll sy.DI) ins[j]! stI | return none
+    let some rS := runMemSim simS (edgesAll sy.DS) (mapInputs ins[j]! sy.inMap) stS | return none
+    asmOK := asmOK && asmBit rI.outputs ins[j]! sp.asmOut sp.asmIn
+    let adv := advBit rI.outputs sy.adv
+    let stS' := if adv then rS.nextState else stS
+    let outsBad := !refBit rI.outputs rS.outputs sp.adv sp.pairs
+    let stateBad := sp.stateEq && !veqB (StateM.encStateM rI.nextState) (StateM.encStateM stS')
+    if asmOK && (outsBad || stateBad) then
+      let diffs := sp.pairs.filterMap fun (a, b) =>
+        match rI.outputs[a]?, rS.outputs[b]? with
+        | some x, some y => if bv_uint x == bv_uint y then none else some (a, b, bv_uint x, bv_uint y)
+        | _, _ => some (a, b, -1, -1)
+      return some (j, adv, diffs, stateBad)
+    stI := rI.nextState
+    stS := stS'
+  return none
 
 def portNames (cert : String) (kind : String) : IO (List (String × Nat)) := do
   let dir := (System.FilePath.mk cert).parent.getD "."
@@ -225,13 +294,31 @@ def main (args : List String) : IO UInt32 := do
       say s!"  {pre}base: {ncB} clauses; bit-blast+CNF+write {bbB} ms, solver {satB} ms"
       let pfB ← match aB with
         | .unsat p => pure p
-        | .sat => do say s!"  {pre}RESULT: COUNTEREXAMPLE (base): refinement fails within {kd} cycle(s)"; return 1
+        | .sat model => do
+            let ins := decodeInputs φB (parseModel model) sp.inW kd
+            let implOuts ← portNames ci "outputs"
+            let specOuts ← portNames cs "outputs"
+            let implIns ← portNames ci "inputs"
+            let nm (l : List (String × Nat)) (k : Nat) : String :=
+              ((l.find? (·.2 == k)).map (·.1)).getD (toString k)
+            match replayRef sy RI RS sp ins with
+            | some (j, adv, diffs, stateBad) =>
+                say s!"  {pre}counterexample inputs (cycle: name=value):"
+                for (row, c) in (ins.toList.take (j + 1)).zipIdx do
+                  say s!"    cycle {c}: {", ".intercalate (row.toList.zipIdx.map fun (x, t) => s!"{nm implIns t}={bv_uint x}")}"
+                say s!"  {pre}cycle {j} (witness {adv}): {", ".intercalate (diffs.map fun (a, b, x, y) =>
+                  s!"{nm implOuts a}={x} vs {nm specOuts b}={y}")}{if stateBad then "; next states differ" else ""}"
+                say s!"  {pre}RESULT: COUNTEREXAMPLE (base, replayed): the refinement fails at cycle {j} from the all-zero states with assumptions holding"
+                return 1
+            | none =>
+                say s!"  {pre}RESULT: COUNTEREXAMPLE NOT REPLAYED (base): the solver's model did not reproduce on the simulators"
+                return 7
         | .failed w => do say s!"  {pre}RESULT: SOLVER FAILED (base): {w}"; return 5
       let (aS, bbS, satS, ncS) ← solve solver work s!"rstep_k{kd}" φS
       say s!"  {pre}step: {ncS} clauses; bit-blast+CNF+write {bbS} ms, solver {satS} ms"
       let pfS ← match aS with
         | .unsat p => pure p
-        | .sat => do
+        | .sat _ => do
             say s!"  {pre}RESULT: NOT K-INDUCTIVE (step) at k = {kd}"
             last := 1
             continue

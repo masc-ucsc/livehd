@@ -161,7 +161,7 @@ def decodeInputs (φ : BVLogicalExpr) (model : Std.HashMap Nat Bool) (inW : List
 cycle whose assumptions held so far and whose property fails. -/
 def replay (D : DesignCert) (R : Program) (sp : InvSpec) (s0 : StateM) (ins : Array RuntimeInput) :
     Option Nat := Id.run do
-  let some sim := mkMemSimOf D R | return none
+  let some sim := mkMemSimOfW D R | return none
   let mut st := s0
   let mut asmOK := true
   for j in List.range ins.size do
