@@ -9,12 +9,17 @@ set -euo pipefail
 #     c <= 9                      PROVED (k=1)
 #     c != 9                      NOT K-INDUCTIVE at k=1; COUNTEREXAMPLE at k=10
 #     c == 0 while reset held     PROVED (k=1); NOT K-INDUCTIVE without the assumption
-#   cnt10 refines cnt10           PROVED (identity refinement, lockstep, k=1)
+#     candidates c != 9, c <= 9   one specialization; the first is not
+#                                 1-inductive, the second PROVED
+#   cnt10 refines cnt10           PROVED (identity refinement, lockstep, k=1),
+#                                 also with equal next states (`stateq`)
 #   acc2 refines acc1             a two-phase accumulator adds every other cycle
 #                                 (witness `adv`): NOT K-INDUCTIVE at k=1,
-#                                 PROVED at k=2; in LOCKSTEP a COUNTEREXAMPLE
-# Every PROVED is the verified closed check (Sym.runInvK / Sym.runRefKOf)
-# accepting LRAT proofs from the untrusted solver.
+#                                 PROVED at k=2 (also as one run over k=1,2);
+#                                 in LOCKSTEP a COUNTEREXAMPLE
+# Every PROVED is the verified check (Sym.runInvKOf / Sym.runRefKOf)
+# accepting LRAT proofs from the untrusted solver. A run with several
+# attempts is judged by its LAST verdict line.
 #
 # SYM_NAT=<dir with native sym_verify and sym_refine> uses those; otherwise the
 # drivers run interpreted against formal/lean/.olean-dev (build it with
@@ -76,7 +81,7 @@ run() { # <driver> <expect> args...
       > "$log" 2>&1 || true
   fi
   local got
-  got=$(grep -o 'RESULT: [A-Z -]*' "$log" | head -1 | sed 's/RESULT: //; s/ *$//')
+  got=$(grep -o 'RESULT: [A-Z -]*' "$log" | tail -1 | sed 's/RESULT: //; s/ *$//')
   if [[ "$got" != "$expect"* ]]; then
     tail -6 "$log"; echo "FAIL: $drv $* -- expected $expect, got '$got'"; exit 1
   fi
@@ -91,8 +96,13 @@ run sym_verify "NOT K-INDUCTIVE"     "$C" ok_bad k:1
 run sym_verify "COUNTEREXAMPLE"      "$C" ok_bad k:10
 run sym_verify "INVARIANT PROVED"    "$C" '!c_o' in:rst=1 k:1
 run sym_verify "NOT K-INDUCTIVE"     "$C" '!c_o' k:1
+run sym_verify "INVARIANT PROVED"    "$C" ok_bad,ok_good k:1
+grep -q 'SUMMARY: ok_good PROVED at k=1 after 2 attempt' "$OUT/run_$N.log" || { echo "FAIL: candidate summary"; exit 1; }
 run sym_refine "REFINEMENT PROVED"   "$C" "$C" pair:c_o=c_o pair:ok_good=ok_good pair:ok_bad=ok_bad k:1
+run sym_refine "REFINEMENT PROVED"   "$C" "$C" pair:c_o=c_o stateq k:1
 run sym_refine "NOT K-INDUCTIVE"     "$A2" "$A1" pair:acc_o=acc_o adv:adv k:1
 run sym_refine "REFINEMENT PROVED"   "$A2" "$A1" pair:acc_o=acc_o adv:adv k:2
+run sym_refine "REFINEMENT PROVED"   "$A2" "$A1" pair:acc_o=acc_o adv:adv k:1,2
+grep -q '\[k=1\] RESULT: NOT K-INDUCTIVE' "$OUT/run_$N.log" || { echo "FAIL: k list"; exit 1; }
 run sym_refine "COUNTEREXAMPLE"      "$A2" "$A1" pair:acc_o=acc_o k:4
 echo "PASS: sym_selftest"

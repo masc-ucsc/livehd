@@ -342,10 +342,27 @@ def runInvK (sf wf : Nat) (D : DesignCert) (sp : InvSpec) (s0 : StateM) (pfB pfS
     | .ok R    => runInvKOf D R sp s0 pfB pfS
     | .error _ => false
 
-/-- **The unbounded invariant, in the shared reference semantics.** If the
-checker accepts, then for EVERY input sequence of the declared widths, at
-every cycle `n` whose assumptions up to `n` all held, the property output of
-`interpretDesign` (iterated from `denote s0`, every clock firing) is nonzero. -/
+/-- **The unbounded invariant, in the shared reference semantics**, for a
+residual `R` obtained from the specializer run. If the checker accepts, then for
+EVERY input sequence of the declared widths, at every cycle `n` whose
+assumptions up to `n` all held, the property output of `interpretDesign`
+(iterated from `denote s0`, every clock firing) is nonzero. -/
+theorem runInvKOf_sound_ref {sf wf : Nat} {D : DesignCert} {R : Program} {sp : InvSpec}
+    {s0 : StateM} {pfB pfS : ByteArray} (hproj : projectMemDesignAt sf wf D = .ok R)
+    (hA : admitsB D = true) (hr : runInvKOf D R sp s0 pfB pfS = true)
+    (ins : Nat → RuntimeInput) (hins : ∀ n, (ins n).toList.map BV.width = sp.inW) :
+    ∀ n, (∀ j, j ≤ n → asmBit (refOut D (StateM.denote s0) ins j) (ins j) sp.asmOut sp.asmIn = true) →
+      propBit (refOut D (StateM.denote s0) ins n) sp.prop = true := by
+  have hside := (obl_parts hr).1
+  have hinv := inv_all hproj hA hr hins
+  have hR : ∀ n, runtimeFullOKB D (ins n) (traceM D s0 ins n) (edgesAll D) = true :=
+    fun n => runtime_of_inv hside (hinv n).1 (hinv n).2 (hins n)
+  have hden := traceM_denote hA hR
+  intro n hasm
+  rw [← (hden n).2]
+  exact runInvKOf_sound hproj hA hr hins n (fun j hj => by rw [(hden j).2]; exact hasm j hj)
+
+/-- The same, closed: the check specializes `D` itself. -/
 theorem runInvK_sound {sf wf : Nat} {D : DesignCert} {sp : InvSpec} {s0 : StateM}
     {pfB pfS : ByteArray} (h : runInvK sf wf D sp s0 pfB pfS = true)
     (ins : Nat → RuntimeInput) (hins : ∀ n, (ins n).toList.map BV.width = sp.inW) :
@@ -356,14 +373,7 @@ theorem runInvK_sound {sf wf : Nat} {D : DesignCert} {sp : InvSpec} {s0 : StateM
   obtain ⟨hA, hr⟩ := h
   split at hr
   · rename_i R hproj
-    have hside := (obl_parts hr).1
-    have hinv := inv_all hproj hA hr hins
-    have hR : ∀ n, runtimeFullOKB D (ins n) (traceM D s0 ins n) (edgesAll D) = true :=
-      fun n => runtime_of_inv hside (hinv n).1 (hinv n).2 (hins n)
-    have hden := traceM_denote hA hR
-    intro n hasm
-    rw [← (hden n).2]
-    exact runInvKOf_sound hproj hA hr hins n (fun j hj => by rw [(hden j).2]; exact hasm j hj)
+    exact runInvKOf_sound_ref hproj hA hr ins hins
   · cases hr
 
 #audit_axioms extendSt_consistent
@@ -376,6 +386,7 @@ theorem runInvK_sound {sf wf : Nat} {D : DesignCert} {sp : InvSpec} {s0 : StateM
 #audit_axioms eval_defsE
 #audit_axioms inv_all
 #audit_axioms runInvKOf_sound
+#audit_axioms runInvKOf_sound_ref
 #audit_axioms runInvK_sound
 
 end Projection.Sym

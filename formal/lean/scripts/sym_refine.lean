@@ -4,15 +4,20 @@ design up to stuttering, by k-induction on their projection residuals (M3 S6).
 
     sym_refine <impl.dcert> <spec.dcert> pair:<implOut>=<specOut>... [adv:[!]<implOut>]
                [map:<specInput>=<implInput>]... [asm:[!]<implOut>] [in:<implInput>=<value>]...
-               [k:<n>] [sf:<n>] [wf:<n>] [solver:<cadical>] [work:<dir>]
+               [stateq] [k:<n>[,<n>...]] [sf:<n>] [wf:<n>] [solver:<cadical>] [work:<dir>]
 
 The implementation steps every cycle; the specification steps only on cycles
 where the witness output `adv` fires (no `adv`: lockstep) and holds
-otherwise. Specification input `s` is implementation input `i` for every
-`map:s=i` (unmapped specification inputs default to the implementation input
-of the same NAME). On every witnessed cycle each `pair:` must agree. Both
-designs start all-zero. Verdict: the verified closed check `Sym.runRefKOf`
-(`runRefKOf_sound`) against LRAT proofs from the untrusted solver.
+otherwise. `stateq` also requires the two next states equal (normalized) on
+every cycle -- the strengthening an identity refinement needs. Specification
+input `s` is implementation input `i` for every `map:s=i` (unmapped
+specification inputs default to the implementation input of the same NAME).
+On every witnessed cycle each `pair:` must agree. Both designs start
+all-zero. Both are specialized ONCE (one certificate file: once in all); each
+k of the list is then tried in order until one proves. Verdict: the verified
+check `Sym.runRefKOf` against LRAT proofs from the untrusted solver;
+acceptance is `runRefKOf_sound_ref` (the refinement over `interpretDesign`)
+given the specializer runs (the D1 trusted native run of every FP route).
 -/
 import LeanSemanticPrimitives.Projection.Sym.Refine
 import LeanSemanticPrimitives.Projection.CertLoadAny
@@ -107,7 +112,8 @@ def main (args : List String) : IO UInt32 := do
   | ci :: cs :: rest =>
     let opt (k : String) : Option String := rest.findSome? (fun t => (t.dropPrefix? (k ++ ":")).map (·.toString))
     let opts (k : String) : List String := rest.filterMap (fun t => (t.dropPrefix? (k ++ ":")).map (·.toString))
-    let kd := ((opt "k").bind (·.toNat?)).getD 1
+    let ks := (((opt "k").getD "1").splitOn ",").filterMap (·.toNat?)
+    if ks.isEmpty then IO.eprintln "k:<n>[,<n>...]"; return 2
     let sf := ((opt "sf").bind (·.toNat?)).getD 20000
     let wf := ((opt "wf").bind (·.toNat?)).getD 200
     let solver ← match opt "solver" with
@@ -162,56 +168,69 @@ def main (args : List String) : IO UInt32 := do
       inMap := inMap ++ [ti]
     let _ := implIns
     say s!"impl {ci}\nspec {cs}"
-    say s!"  pairs {pairs}, adv {repr adv}, input map {inMap}, k = {kd}; both start all-zero"
+    say s!"  pairs {pairs}, adv {repr adv}, input map {inMap}{if rest.contains "stateq" then ", next states equal" else ""}, k in {ks}; both start all-zero"
     unless admitsB DI && admitsB DS do
       say "  RESULT: REFUSED (the memory route does not admit a certificate)"; return 4
     let t0 ← IO.monoMsNow
     let RI ← match projectMemDesignAt sf wf DI with
       | .ok R => pure R | .error e => do say s!"  RESULT: REFUSED (impl specialization: {repr e})"; return 4
-    let RS ← match projectMemDesignAt sf wf DS with
+    -- an identity refinement (one certificate file) specializes once
+    let RS ← if ci == cs then pure RI else match projectMemDesignAt sf wf DS with
       | .ok R => pure R | .error e => do say s!"  RESULT: REFUSED (spec specialization: {repr e})"; return 4
     let some bI := Hw.checkResidual RI | say "  RESULT: REFUSED (impl residual check)"; return 4
     let some bS := Hw.checkResidual RS | say "  RESULT: REFUSED (spec residual check)"; return 4
     let t1 ← IO.monoMsNow
     say s!"  residuals specialized and checked in {t1 - t0} ms"
     let sy : RefSys := { DI, DS, sI0 := zeroState DI, sS0 := zeroState DS, inMap, adv }
-    let sp : RefSpec :=
-      { pairs, adv, inMap, asmOut, asmIn, k := kd, fuelI := bI + 16, fuelS := bS + 16
-      , inW := (List.range (inputCount DI)).map (inputWidthOf DI), LI := shapeOf DI, LS := shapeOf DS }
-    unless refSideOK sy sp do
-      say "  RESULT: REFUSED (side checks)"; return 4
-    let φB ← match refBaseObl sy RI RS sp with
-      | some φ => pure φ
-      | none => do
-          let why := match refBaseRun sy RI RS sp with | .error m => m | .ok _ => "definitions not scoped"
-          say s!"  RESULT: REFUSED (base obligation: {why})"; return 4
-    let φS ← match refStepObl sy RI RS sp with
-      | some φ => pure φ
-      | none => do
-          let why := match refStepRun sy RI RS sp with
-            | .error m => m | .ok _ => "scope or the next states leave the layouts"
-          say s!"  RESULT: REFUSED (step obligation: {why})"; return 4
-    let (aB, _, satB, ncB) ← solve solver work "rbase" φB
-    say s!"  base: {ncB} clauses, solver {satB} ms"
-    let pfB ← match aB with
-      | .unsat p => pure p
-      | .sat => do say s!"  RESULT: COUNTEREXAMPLE (base): refinement fails within {kd} cycle(s)"; return 1
-      | .failed w => do say s!"  RESULT: SOLVER FAILED (base): {w}"; return 5
-    let (aS, _, satS, ncS) ← solve solver work "rstep" φS
-    say s!"  step: {ncS} clauses, solver {satS} ms"
-    let pfS ← match aS with
-      | .unsat p => pure p
-      | .sat => do say s!"  RESULT: NOT K-INDUCTIVE (step) at k = {kd}"; return 1
-      | .failed w => do say s!"  RESULT: SOLVER FAILED (step): {w}"; return 5
-    let t2 ← IO.monoMsNow
-    let ok ← IO.lazyPure (fun _ => runRefKOf sy RI RS sp pfB pfS)
-    let t3 ← IO.monoMsNow
-    say s!"  verified check (runRefKOf) in {t3 - t2} ms"
-    if ok then
-      say s!"  RESULT: REFINEMENT PROVED (k={kd}) -- runRefKOf_sound: on every run, every witnessed cycle relates the outputs"
-      return 0
-    else
-      say "  RESULT: CHECK REJECTED"; return 6
+    let single := ks.length == 1
+    let mut last : UInt32 := 2
+    for kd in ks do
+      let pre := if single then "" else s!"[k={kd}] "
+      let sp : RefSpec :=
+        { pairs, adv, inMap, asmOut, asmIn, k := kd, fuelI := bI + 16, fuelS := bS + 16
+        , inW := (List.range (inputCount DI)).map (inputWidthOf DI), LI := shapeOf DI, LS := shapeOf DS
+        , stateEq := rest.contains "stateq" }
+      unless refSideOK sy sp do
+        say s!"  {pre}RESULT: REFUSED (side checks)"; return 4
+      let t2 ← IO.monoMsNow
+      let φB ← match refBaseObl sy RI RS sp with
+        | some φ => pure φ
+        | none => do
+            let why := match refBaseRun sy RI RS sp with | .error m => m | .ok _ => "definitions not scoped"
+            say s!"  {pre}RESULT: REFUSED (base obligation: {why})"; return 4
+      let φS ← match refStepObl sy RI RS sp with
+        | some φ => pure φ
+        | none => do
+            let why := match refStepRun sy RI RS sp with
+              | .error m => m | .ok _ => "scope or the next states leave the layouts"
+            say s!"  {pre}RESULT: REFUSED (step obligation: {why})"; return 4
+      let t3 ← IO.monoMsNow
+      say s!"  {pre}obligations built in {t3 - t2} ms (symbolic evaluation of {kd} + {kd + 1} paired steps)"
+      let (aB, bbB, satB, ncB) ← solve solver work s!"rbase_k{kd}" φB
+      say s!"  {pre}base: {ncB} clauses; bit-blast+CNF {bbB} ms, solver {satB} ms"
+      let pfB ← match aB with
+        | .unsat p => pure p
+        | .sat => do say s!"  {pre}RESULT: COUNTEREXAMPLE (base): refinement fails within {kd} cycle(s)"; return 1
+        | .failed w => do say s!"  {pre}RESULT: SOLVER FAILED (base): {w}"; return 5
+      let (aS, bbS, satS, ncS) ← solve solver work s!"rstep_k{kd}" φS
+      say s!"  {pre}step: {ncS} clauses; bit-blast+CNF {bbS} ms, solver {satS} ms"
+      let pfS ← match aS with
+        | .unsat p => pure p
+        | .sat => do
+            say s!"  {pre}RESULT: NOT K-INDUCTIVE (step) at k = {kd}"
+            last := 1
+            continue
+        | .failed w => do say s!"  {pre}RESULT: SOLVER FAILED (step): {w}"; return 5
+      let t4 ← IO.monoMsNow
+      let ok ← IO.lazyPure (fun _ => runRefKOf sy RI RS sp pfB pfS)
+      let t5 ← IO.monoMsNow
+      say s!"  {pre}verified check (runRefKOf: re-build, LRAT-check both) in {t5 - t4} ms"
+      if ok then
+        say s!"  {pre}RESULT: REFINEMENT PROVED (k={kd}) -- runRefKOf_sound_ref: on every run, every witnessed cycle relates the implementation's interpretDesign outputs to the stuttered specification's"
+        return 0
+      else
+        say s!"  {pre}RESULT: CHECK REJECTED"; return 6
+    return last
   | _ =>
-    IO.eprintln "usage: sym_refine <impl.dcert> <spec.dcert> pair:<i>=<s>... [adv:[!]<o>] [map:<s>=<i>]... [k:<n>]"
+    IO.eprintln "usage: sym_refine <impl.dcert> <spec.dcert> pair:<i>=<s>... [adv:[!]<o>] [map:<s>=<i>]... [asm:[!]<o>] [in:<i>=<v>]... [stateq] [k:<n>[,<n>...]]"
     return 2

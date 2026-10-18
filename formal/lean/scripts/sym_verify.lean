@@ -2,8 +2,8 @@
 `sym_verify` -- prove an unbounded invariant of a design on its projection
 residual (M3).
 
-    sym_verify <cert> [!]<output> [asm:[!]<output>] [in:<input>=<value>]... [k:<n>]
-               [sf:<n>] [wf:<n>] [solver:<cadical>] [work:<dir>]
+    sym_verify <cert> [!]<output>[,[!]<output>...] [asm:[!]<output>] [in:<input>=<value>]...
+               [k:<n>[,<n>...]] [closed] [emit:<file>] [sf:<n>] [wf:<n>] [solver:<cadical>] [work:<dir>]
 
 Outputs and inputs are named by ordinal or by name (names come from the
 `<top>_io.json` next to the certificate). The property holds at a cycle when
@@ -13,16 +13,23 @@ count: an output (`asm:`), and inputs held at fixed values (`in:`, e.g.
 words, defaults).
 
 Steps: load and admit the certificate; specialize the memory interpreter to
-it (`projectMemDesignAt`); build the BASE and STEP obligations of k-induction
+it ONCE (`projectMemDesignAt`); then, per candidate property and k (k-major,
+first proved wins), build the BASE and STEP obligations of k-induction
 (`Sym.baseObl`, `Sym.stepObl`); write each as DIMACS (`Sym.cnfOf`, the CNF
 the checker checks); run the UNTRUSTED solver for a binary LRAT proof; then
-evaluate the VERIFIED closed check `Sym.runInvK`, whose acceptance is
-`Sym.runInvK_sound`. A satisfiable BASE obligation is a counterexample from
-the initial state; a satisfiable STEP obligation only says the property is
-not k-inductive.
+evaluate the VERIFIED check `Sym.runInvKOf` on that residual, whose acceptance
+is `Sym.runInvKOf_sound_ref` given the specializer run (the same trusted native
+run, D1, as every FP route). `closed` evaluates the closed `Sym.runInvK`
+instead, which re-specializes (`runInvK_sound`; doubles the specialization
+cost). A satisfiable BASE obligation is a counterexample from the initial
+state, replayed on the projection's simulator; a satisfiable STEP obligation
+only says the property is not k-inductive.
 
 RESULT lines: `INVARIANT PROVED (k=…)`, `COUNTEREXAMPLE (base)`,
-`NOT K-INDUCTIVE (step)`, or a refusal with its reason.
+`NOT K-INDUCTIVE (step)`, or a refusal with its reason. With several
+candidates or k values each attempt's line is prefixed `[<out> k=<k>]` and a
+`SUMMARY:` line follows. `emit:<file>` writes the F2 theorem form of the
+proved attempt (stated over the closed `runInvK`).
 -/
 import LeanSemanticPrimitives.Projection.Sym.KInd
 import LeanSemanticPrimitives.Projection.CertLoadAny
@@ -212,11 +219,83 @@ end SymF2.{name}
 "
   IO.FS.writeFile path src
 
+/-- One k-induction attempt for one property, on the residual `R` specialized
+once for all attempts. Returns the exit code and the verdict. -/
+def attempt (cert : String) (solver : String) (work : System.FilePath) (sf wf : Nat)
+    (D : DesignCert) (R : Program) (bound : Nat) (s0 : StateM) (tag : String) (prop : PropSpec)
+    (asmOut : Option PropSpec) (asmIn : List (Nat × Int)) (kd : Nat) (closed : Bool)
+    (emit : Option String) : IO (UInt32 × String) := do
+  let pre := if tag.isEmpty then "" else s!"[{tag} k={kd}] "
+  let fin (code : UInt32) (v : String) : IO (UInt32 × String) := do
+    say s!"  {pre}RESULT: {v}"; return (code, v)
+  let nIn := inputCount D
+  let sp : InvSpec :=
+    { prop, asmOut, asmIn, k := kd, fuel := bound + 16
+    , inW := (List.range nIn).map (inputWidthOf D), L := shapeOf D }
+  unless sideOK D sp s0 do
+    return ← fin 4 "REFUSED (side checks: shape, input bound, flop bound, edges, or an input value out of range)"
+  let t2 ← IO.monoMsNow
+  let φB ← match baseObl D R sp s0 with
+    | some φ => pure φ
+    | none => do
+        let why := match baseRun D R sp s0 with
+          | .error m => m | .ok (_, st) => if scopedB st then "?" else "definitions not scoped"
+        return ← fin 4 s!"REFUSED (base obligation: {why})"
+  let φS ← match stepObl D R sp with
+    | some φ => pure φ
+    | none => do
+        let why := match stepRun D R sp with
+          | .error m => m
+          | .ok ([], _) => "no step"
+          | .ok (s :: _, st) =>
+              if !scopedB st then "definitions not scoped"
+              else if stateShapeOf s.2.2 != some sp.L then "the next state leaves the layout" else "?"
+        return ← fin 4 s!"REFUSED (step obligation: {why})"
+  let t3 ← IO.monoMsNow
+  say s!"  {pre}obligations built in {t3 - t2} ms (symbolic evaluation of {kd} + {kd + 1} steps)"
+  let wtag := if tag.isEmpty then "" else s!"{tag.map fun c => if c.isAlphanum then c else '_'}_k{kd}_"
+  let (aB, bbB, satB, ncB) ← solve solver work s!"{wtag}base" φB
+  say s!"  {pre}base: {ncB} clauses; bit-blast+CNF {bbB} ms, solver {satB} ms"
+  let pfB ← match aB with
+    | .unsat p => pure p
+    | .sat model => do
+        let ins := decodeInputs φB (parseModel model) sp.inW kd
+        match replay D R sp s0 ins with
+        | some j =>
+            say s!"  {pre}counterexample inputs (cycle: ordinal values): {(ins.toList.take (j + 1)).zipIdx.map fun (i, c) => (c, i.toList.map bv_uint)}"
+            return ← fin 1 s!"COUNTEREXAMPLE (base, replayed): the projection's simulator from the initial state fails the property at cycle {j} with assumptions holding"
+        | none =>
+            return ← fin 7 "COUNTEREXAMPLE NOT REPLAYED (base): the solver's model did not reproduce on the simulator"
+    | .failed w => return ← fin 5 s!"SOLVER FAILED (base): {w}"
+  let (aS, bbS, satS, ncS) ← solve solver work s!"{wtag}step" φS
+  say s!"  {pre}step: {ncS} clauses; bit-blast+CNF {bbS} ms, solver {satS} ms"
+  let pfS ← match aS with
+    | .unsat p => pure p
+    | .sat _ => return ← fin 1 s!"NOT K-INDUCTIVE (step) at k = {kd}: a larger k or a stronger property is needed"
+    | .failed w => return ← fin 5 s!"SOLVER FAILED (step): {w}"
+  let t4 ← IO.monoMsNow
+  -- `admitsB D` held before specializing, and `R` is this process's run of
+  -- `projectMemDesignAt sf wf D` (the D1 trusted native run every FP route
+  -- makes); `runInvKOf_sound_ref` takes exactly those two facts. `closed` instead
+  -- evaluates the closed `runInvK`, which re-specializes.
+  let ok ← if closed then IO.lazyPure (fun _ => runInvK sf wf D sp s0 pfB pfS)
+           else IO.lazyPure (fun _ => runInvKOf D R sp s0 pfB pfS)
+  let t5 ← IO.monoMsNow
+  say s!"  {pre}verified check ({if closed then "closed runInvK: re-specialize, " else "runInvKOf: "}re-build, LRAT-check both) in {t5 - t4} ms"
+  if ok then
+    if let some ef := emit then
+      let name := ((System.FilePath.mk ef).fileStem.getD "F2").map fun c => if c.isAlphanum then c else '_'
+      emitF2 ef name (← IO.FS.readFile cert) sf wf sp pfB pfS
+      say s!"  {pre}theorem form written to {ef} (runInvK_sound via native_decide)"
+    fin 0 s!"INVARIANT PROVED (k={kd}) -- runInvKOf_sound_ref: on every run from the all-zero state, the property holds at every cycle whose assumptions held"
+  else
+    fin 6 "CHECK REJECTED (the verified checker did not accept the proofs)"
+
 def main (args : List String) : IO UInt32 := do
   match args with
-  | cert :: prop :: rest =>
+  | cert :: props :: rest =>
     let opt (k : String) : Option String := rest.findSome? (fun t => (t.dropPrefix? (k ++ ":")).map (·.toString))
-    let kd := ((opt "k").bind (·.toNat?)).getD 1
+    let ks := (((opt "k").getD "1").splitOn ",").filterMap (·.toNat?)
     let sf := ((opt "sf").bind (·.toNat?)).getD 20000
     let wf := ((opt "wf").bind (·.toNat?)).getD 200
     let solver ← match opt "solver" with
@@ -230,8 +309,11 @@ def main (args : List String) : IO UInt32 := do
     let propOfTok (tok : String) : IO (Option PropSpec) := do
       let (nz, name) := if tok.startsWith "!" then (false, (tok.drop 1).toString) else (true, tok)
       return (← resolvePort cert "outputs" name).map fun n => { out := n, nz }
-    let some prop ← propOfTok prop
-      | IO.eprintln s!"no output {repr prop}"; return 2
+    let mut cands : List (String × PropSpec) := []
+    for tok in props.splitOn "," do
+      let some p ← propOfTok tok | IO.eprintln s!"no output {repr tok}"; return 2
+      cands := cands ++ [(tok, p)]
+    if ks.isEmpty then IO.eprintln "k:<n>[,<n>...]"; return 2
     let asmOut ← match opt "asm" with
       | none => pure none
       | some a => do
@@ -249,8 +331,10 @@ def main (args : List String) : IO UInt32 := do
     say s!"  shape: sources {D.sources.size} nodes {D.nodes.size} outputs {D.outputs.size} \
 flops {D.flops.size} memories {D.memories.size} clocks {D.clocks.size}"
     let pstr (p : PropSpec) : String := s!"output {p.out} {if p.nz then "nonzero" else "zero"}"
-    say s!"  property: {pstr prop}{match asmOut with | some a => s!", assuming {pstr a}" | none => ""}\
-{if asmIn.isEmpty then "" else s!", assuming inputs {asmIn}"}; k = {kd}; initial state all-zero"
+    say s!"  propert{if cands.length == 1 then "y" else "ies (first proved wins)"}: \
+{", ".intercalate (cands.map fun (t, p) => s!"{t} = {pstr p}")}\
+{match asmOut with | some a => s!", assuming {pstr a}" | none => ""}\
+{if asmIn.isEmpty then "" else s!", assuming inputs {asmIn}"}; k in {ks}; initial state all-zero"
     unless admitsB D do
       say "  RESULT: REFUSED (the memory route does not admit this certificate)"; return 4
     let t0 ← IO.monoMsNow
@@ -262,68 +346,25 @@ flops {D.flops.size} memories {D.memories.size} clocks {D.clocks.size}"
       | say "  RESULT: REFUSED (checkResidual rejected the residual)"; return 4
     let t1 ← IO.monoMsNow
     say s!"  residual specialized and checked in {t1 - t0} ms (bound {bound})"
-    let nIn := inputCount D
-    let sp : InvSpec :=
-      { prop, asmOut, asmIn, k := kd, fuel := bound + 16
-      , inW := (List.range nIn).map (inputWidthOf D), L := shapeOf D }
     let s0 := zeroState D
-    unless sideOK D sp s0 do
-      say "  RESULT: REFUSED (side checks: shape, input bound, flop bound, edges, or an input value out of range)"; return 4
-    -- base
-    let t2 ← IO.monoMsNow
-    let φB ← match baseObl D R sp s0 with
-      | some φ => pure φ
-      | none => do
-          let why := match baseRun D R sp s0 with
-            | .error m => m | .ok (_, st) => if scopedB st then "?" else "definitions not scoped"
-          say s!"  RESULT: REFUSED (base obligation: {why})"; return 4
-    let φS ← match stepObl D R sp with
-      | some φ => pure φ
-      | none => do
-          let why := match stepRun D R sp with
-            | .error m => m
-            | .ok ([], _) => "no step"
-            | .ok (s :: _, st) =>
-                if !scopedB st then "definitions not scoped"
-                else if stateShapeOf s.2.2 != some sp.L then "the next state leaves the layout" else "?"
-          say s!"  RESULT: REFUSED (step obligation: {why})"; return 4
-    let t3 ← IO.monoMsNow
-    say s!"  obligations built in {t3 - t2} ms (symbolic evaluation of {kd} + {kd + 1} steps)"
-    let (aB, bbB, satB, ncB) ← solve solver work "base" φB
-    say s!"  base: {ncB} clauses; bit-blast+CNF {bbB} ms, solver {satB} ms"
-    let pfB ← match aB with
-      | .unsat p => pure p
-      | .sat model => do
-          let ins := decodeInputs φB (parseModel model) sp.inW kd
-          match replay D R sp s0 ins with
-          | some j =>
-              say s!"  counterexample inputs (cycle: ordinal values): {(ins.toList.take (j + 1)).zipIdx.map fun (i, c) => (c, i.toList.map bv_uint)}"
-              say s!"  RESULT: COUNTEREXAMPLE (base, replayed): the projection's simulator from the initial state fails the property at cycle {j} with assumptions holding"
-              return 1
-          | none =>
-              say "  RESULT: COUNTEREXAMPLE NOT REPLAYED (base): the solver's model did not reproduce on the simulator"
-              return 7
-      | .failed w => do say s!"  RESULT: SOLVER FAILED (base): {w}"; return 5
-    let (aS, bbS, satS, ncS) ← solve solver work "step" φS
-    say s!"  step: {ncS} clauses; bit-blast+CNF {bbS} ms, solver {satS} ms"
-    let pfS ← match aS with
-      | .unsat p => pure p
-      | .sat _ => do say s!"  RESULT: NOT K-INDUCTIVE (step) at k = {kd}: a larger k or a stronger property is needed"; return 1
-      | .failed w => do say s!"  RESULT: SOLVER FAILED (step): {w}"; return 5
-    let t4 ← IO.monoMsNow
-    let ok ← IO.lazyPure (fun _ => runInvK sf wf D sp s0 pfB pfS)
-    let t5 ← IO.monoMsNow
-    say s!"  verified check (runInvK: re-specialize, re-build, LRAT-check both) in {t5 - t4} ms"
-    if ok then
-      if let some ef := opt "emit" then
-        let name := ((System.FilePath.mk ef).fileStem.getD "F2").map fun c => if c.isAlphanum then c else '_'
-        emitF2 ef name (← IO.FS.readFile cert) sf wf sp pfB pfS
-        say s!"  theorem form written to {ef} (runInvK_sound via native_decide)"
-      say s!"  RESULT: INVARIANT PROVED (k={kd}) -- runInvK_sound: on every run from the all-zero state, the property holds at every cycle whose assumptions held"
-      return 0
-    else
-      say "  RESULT: CHECK REJECTED (the verified checker did not accept the proofs)"
-      return 6
+    let single := cands.length == 1 && ks.length == 1
+    let mut last : UInt32 := 2
+    let mut verdicts : List String := []
+    for kd in ks do
+      for (tok, prop) in cands do
+        let (code, v) ← attempt cert solver work sf wf D R bound s0 (if single then "" else tok) prop
+          asmOut asmIn kd (rest.contains "closed") (opt "emit")
+        verdicts := verdicts ++ [s!"{tok} k={kd}: {(v.splitOn " --").head!}"]
+        last := code
+        if code == 0 then
+          unless single do say s!"  SUMMARY: {tok} PROVED at k={kd} after {verdicts.length} attempt(s)"
+          return 0
+        -- a refusal or a solver failure not tied to the property repeats for every candidate
+        if code == 4 || code == 5 then
+          unless single do say s!"  SUMMARY: stopped ({v})"
+          return code
+    unless single do say s!"  SUMMARY: none proved: {verdicts}"
+    return last
   | _ =>
-    IO.eprintln "usage: sym_verify <cert> <property> [asm:<output>] [k:<n>] [sf:<n>] [wf:<n>] [solver:<cadical>] [work:<dir>]"
+    IO.eprintln "usage: sym_verify <cert> [!]<out>[,[!]<out>...] [asm:<output>] [in:<input>=<value>]... [k:<n>[,<n>...]] [closed] [emit:<file>] [sf:<n>] [wf:<n>] [solver:<cadical>] [work:<dir>]"
     return 2

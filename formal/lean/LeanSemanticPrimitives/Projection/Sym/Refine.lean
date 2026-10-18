@@ -232,6 +232,135 @@ theorem expandS_sound {σ : Asg} : ∀ (s : SVal) {v : Val}, SRel σ s v → SRe
     obtain ⟨_, _, rfl, r1, r2⟩ := SRelL_cons_inv hr
     rw [expandSL]; exact .cons (ih1 r1) (ih2 r2)
 
+/-! ## State equality (normalized), symbolically -/
+
+mutual
+/-- Two values are equal up to bit-vector normalization. -/
+def veqB : Val → Val → Bool
+  | .cons a1 a2, .cons b1 b2 => veqB a1 b1 && veqB a2 b2
+  | .ctor k vs, .ctor k' ws =>
+      match asBV (.ctor k vs), asBV (.ctor k' ws) with
+      | some x, some y => decide (bv_uint x = bv_uint y)
+      | _, _ => k == k' && veqBL vs ws
+  | .int x, .int y => x == y
+  | .bool x, .bool y => x == y
+  | .nil, .nil => true
+  | _, _ => false
+
+def veqBL : List Val → List Val → Bool
+  | [], [] => true
+  | a :: as, b :: bs => veqB a b && veqBL as bs
+  | _, _ => false
+end
+
+def eqLeaf (x y : SVal) : Option BVLogicalExpr :=
+  match asSBV x, asSBV y with
+  | some p, some q => some (eqBvE p q)
+  | _, _ =>
+    match x, y with
+    | .conc u, .conc v => some (.const (veqB u v))
+    | _, _ => none
+
+mutual
+def eqS : SVal → SVal → Option BVLogicalExpr
+  | .cons a1 a2, .cons b1 b2 => do
+      let p ← eqS a1 b1
+      let q ← eqS a2 b2
+      pure (.gate .and p q)
+  | .ctor k fs, .ctor k' gs => if k = k' ∧ k ≠ bvTag then eqSL fs gs else none
+  | x, y => eqLeaf x y
+
+def eqSL : List SVal → List SVal → Option BVLogicalExpr
+  | [], [] => some (.const true)
+  | a :: as, b :: bs => do
+      let p ← eqS a b
+      let q ← eqSL as bs
+      pure (.gate .and p q)
+  | _, _ => none
+end
+
+theorem asBV_none_of_tag {k : Nat} {vs : List Val} (hk : k ≠ bvTag) : asBV (.ctor k vs) = none := by
+  unfold asBV; split <;> simp_all
+
+theorem eqLeaf_sound {σ : Asg} {x y : SVal} {u v : Val} (hx : SRel σ x u) (hy : SRel σ y v)
+    {φ : BVLogicalExpr} (h : eqLeaf x y = some φ) : φ.eval σ = veqB u v := by
+  unfold eqLeaf at h
+  split at h
+  · rename_i p q hp hq
+    simp only [Option.some.injEq] at h; subst h
+    obtain ⟨w1, e1⟩ := p
+    obtain ⟨w2, e2⟩ := q
+    obtain ⟨bu, hbu, _, huu⟩ := asSBV_sound hx hp
+    obtain ⟨bv, hbv, _, huv⟩ := asSBV_sound hy hq
+    rw [eval_eqBvE huu huv]
+    -- both are bit vectors, so `veqB` compares their normalized values
+    have hu : ∃ k vs, u = .ctor k vs := by
+      unfold asBV at hbu; split at hbu
+      · exact ⟨_, _, rfl⟩
+      · cases hbu
+    have hv : ∃ k vs, v = .ctor k vs := by
+      unfold asBV at hbv; split at hbv
+      · exact ⟨_, _, rfl⟩
+      · cases hbv
+    obtain ⟨k1, vs1, rfl⟩ := hu
+    obtain ⟨k2, vs2, rfl⟩ := hv
+    simp only [veqB, hbu, hbv]
+  · split at h
+    · rename_i u' v'
+      simp only [Option.some.injEq] at h; subst h
+      rw [SRel_conc_inv hx, SRel_conc_inv hy]; rfl
+    · cases h
+
+theorem eqS_sound {σ : Asg} : ∀ (a b : SVal) {u v : Val} {φ : BVLogicalExpr},
+    SRel σ a u → SRel σ b v → eqS a b = some φ → φ.eval σ = veqB u v := by
+  refine eqS.mutual_induct
+    (motive_1 := fun a b => ∀ {u v : Val} {φ : BVLogicalExpr},
+      SRel σ a u → SRel σ b v → eqS a b = some φ → φ.eval σ = veqB u v)
+    (motive_2 := fun as bs => ∀ {us vs : List Val} {φ : BVLogicalExpr},
+      SRelL σ as us → SRelL σ bs vs → eqSL as bs = some φ → φ.eval σ = veqBL us vs)
+    ?_ ?_ ?_ ?_ ?_ ?_ ?_ |>.1
+  · intro a1 a2 b1 b2 ih1 ih2 u v φ ha hb h
+    simp only [eqS, Option.bind_eq_bind, Option.bind_eq_some_iff, Option.pure_def,
+      Option.some.injEq] at h
+    obtain ⟨p, hp, q, hq, rfl⟩ := h
+    obtain ⟨u1, u2, rfl, ru1, ru2⟩ := SRel_cons_inv ha
+    obtain ⟨v1, v2, rfl, rv1, rv2⟩ := SRel_cons_inv hb
+    show (BVLogicalExpr.eval σ p && BVLogicalExpr.eval σ q) = _
+    rw [ih1 ru1 rv1 hp, ih2 ru2 rv2 hq]
+    rfl
+  · intro k fs k' gs hk ih u v φ ha hb h
+    simp only [eqS] at h
+    rw [if_pos hk] at h
+    obtain ⟨us, rfl, rus⟩ := SRel_ctor_inv ha
+    obtain ⟨vs, rfl, rvs⟩ := SRel_ctor_inv hb
+    rw [ih rus rvs h]
+    simp only [veqB, asBV_none_of_tag (hk.1 ▸ hk.2), hk.1, beq_self_eq_true,
+      Bool.true_and]
+  · intro k fs k' gs hk u v φ ha hb h
+    simp [eqS, hk] at h
+  · intro x y h1 h2 u v φ hx hy h
+    have : eqS x y = eqLeaf x y := by
+      cases x <;> cases y <;> first
+        | rfl
+        | (exfalso; exact h1 _ _ _ _ rfl rfl)
+        | (exfalso; exact h2 _ _ _ _ rfl rfl)
+    rw [this] at h
+    exact eqLeaf_sound hx hy h
+  · intro us vs φ ha hb h
+    simp [eqSL] at h; subst h
+    rw [SRelL_nil ha, SRelL_nil hb]; rfl
+  · intro a as b bs ih1 ih2 us vs φ ha hb h
+    simp only [eqSL, Option.bind_eq_bind, Option.bind_eq_some_iff, Option.pure_def,
+      Option.some.injEq] at h
+    obtain ⟨p, hp, q, hq, rfl⟩ := h
+    obtain ⟨u, us', rfl, ru, rus⟩ := SRelL_cons_inv ha
+    obtain ⟨v, vs', rfl, rv, rvs⟩ := SRelL_cons_inv hb
+    show (BVLogicalExpr.eval σ p && BVLogicalExpr.eval σ q) = _
+    rw [ih1 ru rv hp, ih2 rus rvs hq]
+    rfl
+  · intro as bs h1 h2 us vs φ ha hb h
+    cases as <;> cases bs <;> simp_all [eqSL]
+
 /-! ## The pair unroll -/
 
 structure RefSpec where
@@ -250,6 +379,9 @@ structure RefSpec where
   inW    : List Nat
   LI     : Shape
   LS     : Shape
+  /-- also require the two NEXT states equal (normalized): the strengthening an
+  identity refinement needs -/
+  stateEq : Bool := false
 
 /-- A pair step: the refinement formula, the assumption, the next states. -/
 abbrev PStep := BVLogicalExpr × BVLogicalExpr × SVal × SVal
@@ -296,9 +428,12 @@ def punroll (DI DS : DesignCert) (RI RS : Program) (sp : RefSpec) :
     match merge c (expandS nS) (expandS sS) with
     | none => .error "the specification's stepped and held states differ in shape"
     | some sS' =>
+    match (if sp.stateEq then eqS (expandS nI) (expandS sS') else some (.const true)) with
+    | none => .error "the two next states differ in shape"
+    | some se =>
     match punroll DI DS RI RS sp j (inB + sp.inW.length) nI sS' st2 with
     | .error m => .error m
-    | .ok (rest, st3) => .ok ((.gate .or (.not (advLit c)) peq, asm, nI, sS') :: rest, st3)
+    | .ok (rest, st3) => .ok ((.gate .and (.gate .or (.not (advLit c)) peq) se, asm, nI, sS') :: rest, st3)
 
 theorem punroll_extends {DI DS : DesignCert} {RI RS : Program} {sp : RefSpec} :
     ∀ (k inB : Nat) (sI sS : SVal) (st : SymSt) (steps : List PStep) (st' : SymSt),
@@ -319,15 +454,23 @@ theorem punroll_extends {DI DS : DesignCert} {RI RS : Program} {sp : RefSpec} :
       split at h; · cases h
       split at h; · cases h
       split at h; · cases h
+      split at h; · cases h
       rename_i rest st3 h3
       simp only [Except.ok.injEq, Prod.mk.injEq] at h
       obtain ⟨rfl, rfl⟩ := h
       have ⟨x3, l3⟩ := punroll_extends j _ _ _ _ _ _ h3
       exact ⟨(symStep_extends h1).trans ((symStep_extends h2).trans x3), by simp [l3]⟩
 
+/-- The verdict of cycle `n`: the output relation on a witnessed cycle and, when
+asked, equal next states. -/
+noncomputable def refOK (sy : RefSys) (sp : RefSpec) (ins : Nat → RuntimeInput) (n : Nat) : Bool :=
+  refBit (outM sy.DI sy.sI0 ins n) (outS sy ins n) sp.adv sp.pairs
+    && (!sp.stateEq || veqB (StateM.encStateM (traceM sy.DI sy.sI0 ins (n + 1)))
+                           (StateM.encStateM (stutM sy ins (n + 1))))
+
 /-- What a pair step denotes. -/
 def PFacts (σ : Asg) (sy : RefSys) (sp : RefSpec) (ins : Nat → RuntimeInput) (n : Nat) (s : PStep) : Prop :=
-  s.1.eval σ = refBit (outM sy.DI sy.sI0 ins n) (outS sy ins n) sp.adv sp.pairs
+  s.1.eval σ = refOK sy sp ins n
     ∧ s.2.1.eval σ = asmBit (outM sy.DI sy.sI0 ins n) (ins n) sp.asmOut sp.asmIn
     ∧ SRel σ s.2.2.1 (StateM.encStateM (traceM sy.DI sy.sI0 ins (n + 1)))
     ∧ SRel σ s.2.2.2 (StateM.encStateM (stutM sy ins (n + 1)))
@@ -374,6 +517,8 @@ theorem punroll_sound {sf wf : Nat} {sy : RefSys} {RI RS : Program} {sp : RefSpe
       split at h; · cases h
       rename_i sS' hmg
       split at h; · cases h
+      rename_i se hse
+      split at h; · cases h
       rename_i rest st3 h3
       simp only [Except.ok.injEq, Prod.mk.injEq] at h
       obtain ⟨rfl, rfl⟩ := h
@@ -401,11 +546,21 @@ theorem punroll_sound {sf wf : Nat} {sy : RefSys} {RI RS : Program} {sp : RefSpe
           exact merge_f (by rw [hcb]; exact hb) _ _ (expandS_sound _ hSS) hmg
         · simp only [if_true]
           exact merge_t (by rw [hcb]; exact hb) _ _ (expandS_sound _ rnS) hmg
-      have f0 : PFacts σ sy sp ins m (.gate .or (.not (advLit c)) peq, asm, nI, sS') := by
+      have f0 : PFacts σ sy sp ins m (.gate .and (.gate .or (.not (advLit c)) peq) se, asm, nI, sS') := by
         refine ⟨?_, asmOf_sound roI (hins m) hin0 hrange hasm, rnI, hS'⟩
-        show (!(advLit c).eval σ || peq.eval σ) = _
+        show ((!(advLit c).eval σ || peq.eval σ) && se.eval σ) = _
         rw [eval_advLit, hcb, pairsE_sound roI roS sp.pairs peq hpeq]
-        rfl
+        unfold refOK
+        congr 1
+        cases hst : sp.stateEq
+        · rw [hst] at hse
+          simp only [Bool.false_eq_true, if_false, Option.some.injEq] at hse
+          cases hse; rfl
+        · rw [hst] at hse
+          simp only [if_true] at hse
+          rw [eqS_sound _ _ (expandS_sound _ rnI) (expandS_sound _ hS') hse]
+          simp only [Bool.not_true, Bool.false_or]
+          rfl
       cases j with
       | zero => simpa using f0
       | succ j =>
@@ -601,7 +756,7 @@ theorem runRefKOf_sound (hpI : projectMemDesignAt sf wf sy.DI = .ok RI) (hAI : a
     (hpS : projectMemDesignAt sf wf sy.DS = .ok RS) (hAS : admitsB sy.DS = true)
     (hchk : runRefKOf sy RI RS sp pfB pfS = true) (hins : ∀ n, (ins n).toList.map BV.width = sp.inW) :
     ∀ n, (∀ j, j ≤ n → asmBit (outM sy.DI sy.sI0 ins j) (ins j) sp.asmOut sp.asmIn = true) →
-      refBit (outM sy.DI sy.sI0 ins n) (outS sy ins n) sp.adv sp.pairs = true := by
+      refOK sy sp ins n = true := by
   obtain ⟨hside, ⟨stepsB, stB, hrunB, hscB, hunsB⟩, ⟨s, steps, stS, hrunS, hscS, -, -, hunsS⟩⟩ :=
     refObl_parts hchk
   obtain ⟨hk, _, _, _, _, _, _, _, _, _, _, hrange, hmap, hadv, hmapEq⟩ := refSideOK_parts hside
@@ -611,7 +766,7 @@ theorem runRefKOf_sound (hpI : projectMemDesignAt sf wf sy.DI = .ok RI) (hAI : a
   induction n using Nat.strongRecOn with
   | ind n ih =>
   intro hasm
-  cases hokf : refBit (outM sy.DI sy.sI0 ins n) (outS sy ins n) sp.adv sp.pairs
+  cases hokf : refOK sy sp ins n
   case true => rfl
   case false =>
   exfalso
@@ -670,8 +825,80 @@ theorem runRefKOf_sound (hpI : projectMemDesignAt sf wf sy.DI = .ok RI) (hAI : a
 
 end
 
+/-! ## The refinement, in the shared reference semantics -/
+
+/-- The specification's REFERENCE state: `interpretDesign` of `DS` from
+`denote sS0`, stepping only on the cycles the implementation's reference
+outputs witness. -/
+def refStut (sy : RefSys) (ins : Nat → RuntimeInput) : Nat → RuntimeState
+  | 0 => StateM.denote sy.sS0
+  | n + 1 =>
+      if advBit (refOut sy.DI (StateM.denote sy.sI0) ins n) sy.adv then
+        (interpretDesign sy.DS (edgesAll sy.DS) (mapInputs (ins n) sy.inMap) (refStut sy ins n)).nextState
+      else refStut sy ins n
+
+def refOutS (sy : RefSys) (ins : Nat → RuntimeInput) (n : Nat) : Array BV :=
+  (interpretDesign sy.DS (edgesAll sy.DS) (mapInputs (ins n) sy.inMap) (refStut sy ins n)).outputs
+
+section
+variable {sf wf : Nat} {sy : RefSys} {RI RS : Program} {sp : RefSpec} {pfB pfS : ByteArray}
+  {ins : Nat → RuntimeInput}
+
+/-- While both machines' steps are admissible, the stuttered specification
+trace DENOTES the reference one. -/
+theorem stutM_denote (hAI : admitsB sy.DI = true) (hAS : admitsB sy.DS = true)
+    (rt : ∀ n, PRt sy ins n) :
+    ∀ n, StateM.denote (stutM sy ins n) = refStut sy ins n ∧ outS sy ins n = refOutS sy ins n := by
+  have hI := traceM_denote hAI (fun n => (rt n).1)
+  intro n
+  induction n with
+  | zero =>
+      have hd := (resM_spec hAS (rt 0).2).2.1
+      refine ⟨rfl, ?_⟩
+      have := congrArg RuntimeResult.outputs hd
+      simpa [outS, refOutS, refStut, stutM, StateM.ResultM.denote] using this
+  | succ m ih =>
+      have hn : StateM.denote (stutM sy ins (m + 1)) = refStut sy ins (m + 1) := by
+        simp only [stutM, refStut, ← (hI m).2]
+        split
+        · have hd := (resM_spec hAS (rt m).2).2.1
+          have := congrArg RuntimeResult.nextState hd
+          simp only [StateM.ResultM.denote] at this
+          rw [this, ih.1]
+        · exact ih.1
+      refine ⟨hn, ?_⟩
+      have hd' := (resM_spec hAS (rt (m + 1)).2).2.1
+      have := congrArg RuntimeResult.outputs hd'
+      simp only [StateM.ResultM.denote] at this
+      simp only [outS, refOutS, this, hn]
+
+/-- **Refinement with stuttering, in the shared reference semantics.** If the
+checker accepts the residuals the specializer produced, then for EVERY input
+sequence of the declared widths, at every cycle `n` whose assumptions up to
+`n` held, a witnessed cycle relates the implementation's `interpretDesign`
+outputs to the stuttered specification's `interpretDesign` outputs. -/
+theorem runRefKOf_sound_ref (hpI : projectMemDesignAt sf wf sy.DI = .ok RI) (hAI : admitsB sy.DI = true)
+    (hpS : projectMemDesignAt sf wf sy.DS = .ok RS) (hAS : admitsB sy.DS = true)
+    (hchk : runRefKOf sy RI RS sp pfB pfS = true) (hins : ∀ n, (ins n).toList.map BV.width = sp.inW) :
+    ∀ n, (∀ j, j ≤ n → asmBit (refOut sy.DI (StateM.denote sy.sI0) ins j) (ins j) sp.asmOut sp.asmIn = true) →
+      refBit (refOut sy.DI (StateM.denote sy.sI0) ins n) (refOutS sy ins n) sp.adv sp.pairs = true := by
+  have hside := (refObl_parts hchk).1
+  have hinv := refInv_all hpI hAI hpS hAS hchk hins
+  have rt : ∀ n, PRt sy ins n := fun n => prt_of_inv hside hins (hinv n)
+  have hI := traceM_denote hAI (fun n => (rt n).1)
+  have hS := stutM_denote hAI hAS rt
+  intro n hasm
+  have h := runRefKOf_sound hpI hAI hpS hAS hchk hins n (fun j hj => by rw [(hI j).2]; exact hasm j hj)
+  unfold refOK at h
+  rw [Bool.and_eq_true] at h
+  rw [← (hI n).2, ← (hS n).2]
+  exact h.1
+
+end
+
 #audit_axioms punroll_sound
 #audit_axioms refInv_all
 #audit_axioms runRefKOf_sound
+#audit_axioms runRefKOf_sound_ref
 
 end Projection.Sym
