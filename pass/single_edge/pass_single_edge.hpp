@@ -75,6 +75,9 @@ struct Result {
   // clock as "commits every step" and so cannot tell one clock from another.
   std::string ref_clock;
   std::string reason;  // why it was skipped / refused / what it did (for recipe_steps)
+  // Distinct clock roots state commits on AFTER the rewrite: 1 unless
+  // `Options::multi_clock` exported another domain.
+  int clock_domains = 1;
 };
 
 struct Options {
@@ -90,6 +93,20 @@ struct Options {
   int force_slots = 0;
   // Suppress the refusal diagnostics (probe callers report their own).
   bool quiet = false;
+  // EXPORT unrelated clock DOMAINS instead of refusing them (ported from the d2
+  // branch, 90583be13). The reference domain -- the root carrying the most
+  // state -- is normalized exactly as before; an element on another root is
+  // left as the plain posedge flop it is (a gated clock on it still folds into
+  // its enable, relative to ITS root), and the consumer -- the verified-compiler
+  // certificate, which carries a clock ordinal per element and whose Lean step
+  // takes an edge vector -- reads which domain it commits on. Refused by name:
+  // a latch or negedge element off the reference clock (it would need a divider
+  // of its own), a data-gated latch whose enable reads another domain, and a
+  // second-domain element that reads a reference-domain LATCH combinationally
+  // (its edge may fall inside the latch's window, where the hardware reads the
+  // latch's D and the commit-at-closing-edge model its held Q). Off by default:
+  // pass/lec and sim model a second domain themselves.
+  bool multi_clock = false;
 };
 
 // Normalize `g` in place. `defs` (may be empty) are the resolution-library
