@@ -12,6 +12,7 @@ OPT=${OPT:--O2}
 ROOT=${ROOT:?set ROOT to an absolute, project-local build directory}
 OUT="$ROOT/olean"; NAT="$ROOT/nat"
 mkdir -p "$OUT/LeanSemanticPrimitives/Projection/Proto" \
+         "$OUT/LeanSemanticPrimitives/Projection/Sym" \
          "$OUT/LeanSemanticPrimitives/Compiler" \
          "$OUT/LeanSemanticPrimitives/Translation" "$NAT"
 export LEAN_PATH="$OUT"
