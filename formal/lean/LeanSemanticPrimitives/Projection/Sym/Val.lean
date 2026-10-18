@@ -308,4 +308,35 @@ theorem merge_f {σ : Asg} {c : BVExpr 1} (hc : bitOf (c.eval σ) = false) (a b 
   · intro as bs h1 h2 vs ms hy h
     cases as <;> cases bs <;> simp_all [mergeList]
 
+/-! ### Inversions -/
+
+theorem SRel_cons_inv {σ : Asg} {h t : SVal} {v : Val} (hr : SRel σ (.cons h t) v) :
+    ∃ h' t', v = .cons h' t' ∧ SRel σ h h' ∧ SRel σ t t' := by
+  cases hr; exact ⟨_, _, rfl, by assumption, by assumption⟩
+
+theorem SRel_ctor_inv {σ : Asg} {k : Nat} {fs : List SVal} {v : Val} (hr : SRel σ (.ctor k fs) v) :
+    ∃ vs, v = .ctor k vs ∧ SRelL σ fs vs := by
+  cases hr; exact ⟨_, rfl, by assumption⟩
+
+theorem SRelL_cons_inv {σ : Asg} {s : SVal} {ss : List SVal} {vs : List Val}
+    (hr : SRelL σ (s :: ss) vs) : ∃ v vs', vs = v :: vs' ∧ SRel σ s v ∧ SRelL σ ss vs' := by
+  cases hr; exact ⟨_, _, rfl, by assumption, by assumption⟩
+
+theorem SRel_int_inv {σ : Asg} {i : SInt} {v : Val} (hr : SRel σ (.int i) v) :
+    ∃ z, v = .int z ∧ i.val σ = z := by
+  cases hr; exact ⟨_, rfl, by assumption⟩
+
+theorem SRel_bool_inv {σ : Asg} {e : BVExpr 1} {v : Val} (hr : SRel σ (.bool e) v) :
+    ∃ b, v = .bool b ∧ bitOf (e.eval σ) = b := by
+  cases hr; exact ⟨_, rfl, by assumption⟩
+
+theorem SRel_bv_inv {σ : Asg} {w : Nat} {e : BVExpr w} {v : Val} (hr : SRel σ (.bv w e) v) :
+    ∃ b, asBV v = some b ∧ b.width = w ∧ bv_uint b = ((e.eval σ).toNat : Int) := by
+  cases hr; exact ⟨_, by assumption, by assumption, by assumption⟩
+
+/-- A list with a concrete spine. -/
+def sListOf : List SVal → SVal
+  | []      => .conc .nil
+  | s :: ss => .cons s (sListOf ss)
+
 end Projection.Sym

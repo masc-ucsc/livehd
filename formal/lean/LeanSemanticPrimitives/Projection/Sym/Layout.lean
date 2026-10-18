@@ -19,10 +19,6 @@ open Std.Tactic.BVDecide Compiler
 
 /-! ## Lists with a concrete spine -/
 
-def sListOf : List SVal → SVal
-  | []      => .conc .nil
-  | s :: ss => .cons s (sListOf ss)
-
 /-- `ss` and `xs` correspond element by element through `f`. -/
 inductive SRelLF (σ : Asg) {α : Type} (f : α → Val) : List SVal → List α → Prop where
   | nil  : SRelLF σ f [] []

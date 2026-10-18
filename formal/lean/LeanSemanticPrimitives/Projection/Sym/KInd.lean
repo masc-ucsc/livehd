@@ -117,10 +117,12 @@ theorem extendSt_agree {xs : List PBV} {st : SymSt} (hb : xs.length = st.base) (
 /-! ## The checker -/
 
 structure InvSpec where
-  /-- the property output -/
-  okIdx  : Nat
-  /-- the assumption output, if any -/
-  asmIdx : Option Nat
+  /-- the property: an output, nonzero or zero -/
+  prop   : PropSpec
+  /-- an assumption on an output, if any -/
+  asmOut : Option PropSpec
+  /-- assumptions on inputs: input `k` has value `c` at every cycle -/
+  asmIn  : List (Nat × Int)
   /-- the induction depth, `≥ 1` -/
   k      : Nat
   /-- symbolic-evaluation fuel (the residual checker's bound suffices) -/
@@ -132,11 +134,11 @@ structure InvSpec where
 
 def baseRun (D : DesignCert) (R : Program) (sp : InvSpec) (s0 : StateM) :
     Except String (List StepS × SymSt) :=
-  unroll D R sp.fuel sp.okIdx sp.asmIdx sp.inW sp.k 0 (.conc (StateM.encStateM s0))
+  unroll D R sp.fuel sp.prop sp.asmOut sp.asmIn sp.inW sp.k 0 (.conc (StateM.encStateM s0))
     ⟨sp.k * sp.inW.length, #[]⟩
 
 def stepRun (D : DesignCert) (R : Program) (sp : InvSpec) : Except String (List StepS × SymSt) :=
-  unroll D R sp.fuel sp.okIdx sp.asmIdx sp.inW (sp.k + 1) (layoutSize sp.L) (stateVar sp.L 0)
+  unroll D R sp.fuel sp.prop sp.asmOut sp.asmIn sp.inW (sp.k + 1) (layoutSize sp.L) (stateVar sp.L 0)
     ⟨layoutSize sp.L + (sp.k + 1) * sp.inW.length, #[]⟩
 
 /-- The base obligation, when the run succeeds and its definitions are scoped. -/
@@ -157,7 +159,7 @@ def stepObl (D : DesignCert) (R : Program) (sp : InvSpec) : Option BVLogicalExpr
 
 def sideOK (D : DesignCert) (sp : InvSpec) (s0 : StateM) : Bool :=
   decide (0 < sp.k) && stMatchesB sp.L s0 && stateFullOKB D s0 && inputOKB D sp.inW.length
-    && flopBoundOKB D sp.L.fws.length && edgesOKB D (edgesAll D)
+    && flopBoundOKB D sp.L.fws.length && edgesOKB D (edgesAll D) && inAsmRangeOK sp.inW sp.asmIn
 
 def runInvKOf (D : DesignCert) (R : Program) (sp : InvSpec) (s0 : StateM) (pfB pfS : ByteArray) : Bool :=
   sideOK D sp s0
@@ -170,12 +172,18 @@ section
 variable {sf wf : Nat} {D : DesignCert} {R : Program} {sp : InvSpec} {s0 : StateM}
   {pfB pfS : ByteArray} {ins : Nat → RuntimeInput}
 
+theorem sideOK_parts (h : sideOK D sp s0 = true) :
+    0 < sp.k ∧ stMatchesB sp.L s0 = true ∧ stateFullOKB D s0 = true ∧ inputOKB D sp.inW.length = true
+    ∧ flopBoundOKB D sp.L.fws.length = true ∧ edgesOKB D (edgesAll D) = true
+    ∧ inAsmRangeOK sp.inW sp.asmIn = true := by
+  unfold sideOK at h
+  simp only [Bool.and_eq_true, decide_eq_true_eq] at h
+  exact ⟨h.1.1.1.1.1.1, h.1.1.1.1.1.2, h.1.1.1.1.2, h.1.1.1.2, h.1.1.2, h.1.2, h.2⟩
+
 theorem runtime_of_inv (hside : sideOK D sp s0 = true) {st : StateM} {i : RuntimeInput}
     (hm : StMatches sp.L st) (hf : stateFullOKB D st = true) (hi : i.toList.map BV.width = sp.inW) :
     runtimeFullOKB D i st (edgesAll D) = true := by
-  unfold sideOK at hside
-  simp only [Bool.and_eq_true, decide_eq_true_eq] at hside
-  obtain ⟨⟨⟨⟨⟨_, _⟩, _⟩, hin⟩, hfb⟩, hed⟩ := hside
+  obtain ⟨_, _, _, hin, hfb, hed, _⟩ := sideOK_parts hside
   unfold stateFullOKB at hf
   simp only [Bool.and_eq_true] at hf
   have hsz : i.size = sp.inW.length := by rw [← hi]; simp
@@ -224,7 +232,7 @@ theorem obl_parts (hchk : runInvKOf D R sp s0 pfB pfS = true) :
       · cases hos
 
 theorem run_base {steps : List StepS} {st st0 : SymSt} {k inB : Nat} {sS : SVal}
-    (h : unroll D R sp.fuel sp.okIdx sp.asmIdx sp.inW k inB sS st0 = .ok (steps, st)) :
+    (h : unroll D R sp.fuel sp.prop sp.asmOut sp.asmIn sp.inW k inB sS st0 = .ok (steps, st)) :
     st.base = st0.base ∧ steps.length = k := by
   have ⟨x, l⟩ := unroll_extends k inB sS st0 steps st h
   exact ⟨x.1.symm, l⟩
@@ -237,10 +245,8 @@ theorem inv_all (hproj : projectMemDesignAt sf wf D = .ok R) (hA : admitsB D = t
   intro n
   induction n with
   | zero =>
-      have h := hside
-      unfold sideOK at h
-      simp only [Bool.and_eq_true, decide_eq_true_eq] at h
-      exact ⟨stMatchesB_sound h.1.1.1.1.2, h.1.1.1.2⟩
+      obtain ⟨_, hm, hf, _⟩ := sideOK_parts hside
+      exact ⟨stMatchesB_sound hm, hf⟩
   | succ n ih =>
       have rt := runtime_of_inv hside ih.1 ih.2 (hins n)
       refine ⟨?_, (resM_spec hA rt).2.2⟩
@@ -252,7 +258,8 @@ theorem inv_all (hproj : projectMemDesignAt sf wf D = .ok R) (hA : admitsB D = t
       obtain ⟨hc, hag⟩ := extendSt_agree hxl hsc
       rw [AgreeAt_append, stateVals_length ih.1, Nat.zero_add] at hag
       have hS := stateVar_rel ih.1 hag.1
-      have facts := unroll_sound hproj hA hins hc (sp.k + 1) n _ _ _ _ _ hrun (.refl _)
+      have facts := unroll_sound (sideOK_parts hside).2.2.2.2.2.2 hproj hA hins hc (sp.k + 1) n _ _ _ _ _
+        hrun (.refl _)
         (insVals_agree hins (sp.k + 1) hag.2) hS 0 (by simp)
         (fun i hi => by
           have : i = 0 := by omega
@@ -262,21 +269,20 @@ theorem inv_all (hproj : projectMemDesignAt sf wf D = .ok R) (hA : admitsB D = t
 /-- **k-induction is sound.** -/
 theorem runInvKOf_sound (hproj : projectMemDesignAt sf wf D = .ok R) (hA : admitsB D = true)
     (hchk : runInvKOf D R sp s0 pfB pfS = true) (hins : ∀ n, (ins n).toList.map BV.width = sp.inW) :
-    ∀ n, (∀ j, j ≤ n → asmBit (outM D s0 ins j) sp.asmIdx = true) →
-      okBit (outM D s0 ins n) sp.okIdx = true := by
+    ∀ n, (∀ j, j ≤ n → asmBit (outM D s0 ins j) (ins j) sp.asmOut sp.asmIn = true) →
+      propBit (outM D s0 ins n) sp.prop = true := by
   obtain ⟨hside, ⟨stepsB, stB, hrunB, hscB, hunsB⟩, ⟨s, steps, stS, hrunS, hscS, -, hunsS⟩⟩ :=
     obl_parts hchk
   have hinv := inv_all hproj hA hchk hins
   have rt : ∀ n, runtimeFullOKB D (ins n) (traceM D s0 ins n) (edgesAll D) = true :=
     fun n => runtime_of_inv hside (hinv n).1 (hinv n).2 (hins n)
   have hk : 0 < sp.k := by
-    unfold sideOK at hside; simp only [Bool.and_eq_true, decide_eq_true_eq] at hside
-    exact hside.1.1.1.1.1
+    exact (sideOK_parts hside).1
   intro n
   induction n using Nat.strongRecOn with
   | ind n ih =>
   intro hasm
-  cases hokf : okBit (outM D s0 ins n) sp.okIdx
+  cases hokf : propBit (outM D s0 ins n) sp.prop
   case true => rfl
   case false =>
   exfalso
@@ -286,7 +292,8 @@ theorem runInvKOf_sound (hproj : projectMemDesignAt sf wf D = .ok R) (hA : admit
     let xs := insVals ins 0 sp.k
     have hxl : xs.length = stB.base := by rw [hbB, insVals_length hins]
     obtain ⟨hc, hag⟩ := extendSt_agree hxl hscB
-    have facts := unroll_sound hproj hA hins hc sp.k 0 0 _ _ _ _ hrunB (.refl _)
+    have facts := unroll_sound (sideOK_parts hside).2.2.2.2.2.2 hproj hA hins hc sp.k 0 0 _ _ _ _ hrunB
+      (.refl _)
       (fun j hj => by simpa using insVals_agree hins sp.k hag j hj) .conc
     have hev : BVLogicalExpr.eval (extendSt xs.toArray stB) (BoolExpr.gate .and (defsE stB) (baseBad stepsB)) = true := by
       rw [eval_and, eval_defsE hc, Bool.true_and]
@@ -306,7 +313,8 @@ theorem runInvKOf_sound (hproj : projectMemDesignAt sf wf D = .ok R) (hA : admit
     obtain ⟨hc, hag⟩ := extendSt_agree hxl hscS
     rw [AgreeAt_append, stateVals_length (hinv m).1, Nat.zero_add] at hag
     have hS := stateVar_rel (hinv m).1 hag.1
-    have facts := unroll_sound hproj hA hins hc (sp.k + 1) m _ _ _ _ _ hrunS (.refl _)
+    have facts := unroll_sound (sideOK_parts hside).2.2.2.2.2.2 hproj hA hins hc (sp.k + 1) m _ _ _ _ _
+      hrunS (.refl _)
       (insVals_agree hins (sp.k + 1) hag.2) hS
     have hev : BVLogicalExpr.eval (extendSt xs.toArray stS)
         (BoolExpr.gate .and (defsE stS) (conjE (stepConj (s :: steps)))) = true := by
@@ -341,8 +349,8 @@ every cycle `n` whose assumptions up to `n` all held, the property output of
 theorem runInvK_sound {sf wf : Nat} {D : DesignCert} {sp : InvSpec} {s0 : StateM}
     {pfB pfS : ByteArray} (h : runInvK sf wf D sp s0 pfB pfS = true)
     (ins : Nat → RuntimeInput) (hins : ∀ n, (ins n).toList.map BV.width = sp.inW) :
-    ∀ n, (∀ j, j ≤ n → asmBit (refOut D (StateM.denote s0) ins j) sp.asmIdx = true) →
-      okBit (refOut D (StateM.denote s0) ins n) sp.okIdx = true := by
+    ∀ n, (∀ j, j ≤ n → asmBit (refOut D (StateM.denote s0) ins j) (ins j) sp.asmOut sp.asmIn = true) →
+      propBit (refOut D (StateM.denote s0) ins n) sp.prop = true := by
   unfold runInvK at h
   simp only [Bool.and_eq_true] at h
   obtain ⟨hA, hr⟩ := h

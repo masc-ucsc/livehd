@@ -14,35 +14,6 @@ import LeanSemanticPrimitives.Projection.Sym.Unroll
 namespace Projection.Sym
 open Std.Tactic.BVDecide
 
-def conjE : List BVLogicalExpr → BVLogicalExpr
-  | []      => .const true
-  | a :: as => .gate .and a (conjE as)
-
-def disjE : List BVLogicalExpr → BVLogicalExpr
-  | []      => .const false
-  | a :: as => .gate .or a (disjE as)
-
-theorem eval_conjE (σ : Asg) : ∀ as : List BVLogicalExpr, (conjE as).eval σ = as.all (·.eval σ)
-  | [] => rfl
-  | a :: as => by
-      show (a.eval σ && (conjE as).eval σ) = _
-      rw [eval_conjE σ as, List.all_cons]
-
-theorem eval_disjE (σ : Asg) : ∀ as : List BVLogicalExpr, (disjE as).eval σ = as.any (·.eval σ)
-  | [] => rfl
-  | a :: as => by
-      show (a.eval σ || (disjE as).eval σ) = _
-      rw [eval_disjE σ as, List.any_cons]
-
-theorem eval_and (σ : Asg) (a b : BVLogicalExpr) :
-    BVLogicalExpr.eval σ (.gate .and a b) = (a.eval σ && b.eval σ) := rfl
-
-theorem eval_or (σ : Asg) (a b : BVLogicalExpr) :
-    BVLogicalExpr.eval σ (.gate .or a b) = (a.eval σ || b.eval σ) := rfl
-
-theorem eval_not (σ : Asg) (a : BVLogicalExpr) :
-    BVLogicalExpr.eval σ (.not a) = !a.eval σ := rfl
-
 /-! ## The definitions -/
 
 def defLit (base : Nat) (p : (Σ w, BVExpr w) × Nat) : BVLogicalExpr :=
@@ -75,7 +46,7 @@ theorem eval_defsE {σ : Asg} {st : SymSt} (hc : st.Consistent σ) : (defsE st).
 /-- `j`-th disjunct: the assumptions of steps `0 … j` and the property false at `j`. -/
 def baseBadAux : List BVLogicalExpr → List StepS → List BVLogicalExpr
   | _,   []      => []
-  | pre, s :: ss => conjE (pre ++ [s.2.1, .not (nzE s.1)]) :: baseBadAux (pre ++ [s.2.1]) ss
+  | pre, s :: ss => conjE (pre ++ [s.2.1, .not s.1]) :: baseBadAux (pre ++ [s.2.1]) ss
 
 def baseBad (steps : List StepS) : BVLogicalExpr := disjE (baseBadAux [] steps)
 
@@ -85,12 +56,12 @@ theorem baseBad_true {σ : Asg} :
     ∀ (pre : List BVLogicalExpr) (steps : List StepS) (j : Nat) (hj : j < steps.length),
       pre.all (·.eval σ) = true →
       (∀ i (hi : i < steps.length), i ≤ j → (steps[i]'hi).2.1.eval σ = true) →
-      (nzE (steps[j]'hj).1).eval σ = false →
+      (steps[j]'hj).1.eval σ = false →
       (disjE (baseBadAux pre steps)).eval σ = true
   | _, [], _, hj, _, _, _ => by simp at hj
   | pre, s :: ss, 0, _, hpre, hasm, hok => by
       rw [baseBadAux, disjE, eval_or]
-      have : (conjE (pre ++ [s.2.1, .not (nzE s.1)])).eval σ = true := by
+      have : (conjE (pre ++ [s.2.1, .not s.1])).eval σ = true := by
         rw [eval_conjE, List.all_append, hpre]
         have h0 := hasm 0 (by simp) (Nat.le_refl 0)
         simp only [List.getElem_cons_zero] at h0 hok
@@ -113,14 +84,14 @@ def stepConj : List StepS → List BVLogicalExpr
   | []      => []
   | s :: ss =>
       match ss with
-      | []     => [s.2.1, .not (nzE s.1)]
-      | _ :: _ => s.2.1 :: nzE s.1 :: stepConj ss
+      | []     => [s.2.1, .not s.1]
+      | _ :: _ => s.2.1 :: s.1 :: stepConj ss
 
 theorem stepConj_true {σ : Asg} :
     ∀ (steps : List StepS) (hne : 0 < steps.length),
       (∀ i (hi : i < steps.length), (steps[i]'hi).2.1.eval σ = true) →
-      (∀ i (hi : i < steps.length), i + 1 < steps.length → (nzE (steps[i]'hi).1).eval σ = true) →
-      (nzE (steps[steps.length - 1]'(by omega)).1).eval σ = false →
+      (∀ i (hi : i < steps.length), i + 1 < steps.length → (steps[i]'hi).1.eval σ = true) →
+      (steps[steps.length - 1]'(by omega)).1.eval σ = false →
       (conjE (stepConj steps)).eval σ = true
   | [], hne, _, _, _ => by simp at hne
   | [s], _, hasm, _, hlast => by
