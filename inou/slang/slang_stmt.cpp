@@ -217,8 +217,15 @@ void Slang_context::lower_statement(const slang::ast::Statement& stmt) {
                        "event controls inside a process body are not supported by --reader slang");
       return;
     }
-    case StatementKind::ImmediateAssertion: lower_immediate_assertion(stmt.as<slang::ast::ImmediateAssertionStatement>()); return;
+    case StatementKind::ImmediateAssertion:
+      if (!options_.ignore_assertions) {
+        lower_immediate_assertion(stmt.as<slang::ast::ImmediateAssertionStatement>());
+      }
+      return;
     case StatementKind::ConcurrentAssertion:
+      if (options_.ignore_assertions) {
+        return;
+      }
       // Same contract as the module-level form (slang_structure.cpp): lower the
       // per-cycle boolean case, refuse the temporal one LOUDLY. Never drop it —
       // a dropped assume/restrict invents a counterexample, a dropped assert

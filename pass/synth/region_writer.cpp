@@ -990,7 +990,8 @@ bool Region_writer::write(const livehd::partition::Region_body& rb, const Region
   };
   // resetless power-on init: such a bit must keep a native flop so the value
   // survives (a plain DFF cell has no init pin)
-  auto needs_native = [&](int k) -> bool { return source_init_bit(k).has_value(); };
+  // (pass.abc.drop_init maps it to a plain DFF cell and drops the value instead.)
+  auto needs_native = [&](int k) -> bool { return !registers.drop_init && source_init_bit(k).has_value(); };
   // The asynchronous-reset register latch k belongs to (Seq_flop::async_reset),
   // or null. Only reachable with the latch count preserved: the guard in pass
   // 1c refuses a reshaped set that carries one.

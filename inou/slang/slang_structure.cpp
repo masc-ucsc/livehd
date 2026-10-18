@@ -6131,8 +6131,15 @@ void Slang_context::lower_process(const slang::ast::ProceduralBlockSymbol& pbs) 
     std::function<void(const slang::ast::Statement&)> lower_assertions = [&](const slang::ast::Statement& s) {
       switch (s.kind) {
         case StatementKind::Empty             : return;
-        case StatementKind::ImmediateAssertion: lower_immediate_assertion(s.as<slang::ast::ImmediateAssertionStatement>()); return;
+        case StatementKind::ImmediateAssertion:
+          if (!options_.ignore_assertions) {
+            lower_immediate_assertion(s.as<slang::ast::ImmediateAssertionStatement>());
+          }
+          return;
         case StatementKind::ConcurrentAssertion:
+          if (options_.ignore_assertions) {
+            return;
+          }
           if (!lower_concurrent_assertion(s.as<slang::ast::ConcurrentAssertionStatement>())) {
             emit_unsupported(s.sourceRange,
                              "unsupported-property",

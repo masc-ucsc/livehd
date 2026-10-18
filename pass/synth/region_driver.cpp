@@ -1642,8 +1642,9 @@ void Region_driver::map_region(const livehd::partition::Region_body& rb) {
 
   // --- read back: the mapped cells -> the region body ---
   Region_writer::Counts counts{qor_.back().gates, qor_.back().area, qor_.back().bypassed};
-  const Region_writer::Registers
+  Region_writer::Registers
       registers{opts_.map_register, &dff_, &dff_ladder_, &areset_ladder_[0], &areset_ladder_[1], &icg_ladder_, &latch_ladder_, opts_.icg_fanout, design_state_bits_ >= opts_.input_clock_min, &derived_ports_};
+  registers.drop_init = opts_.drop_init;
   writer_.set_outlib(outlib_);
   writer_.set_flat(flat_);
   if (!writer_.write(rb, blast, *cells, backend_->cells(), registers, counts, trace_stage)) {

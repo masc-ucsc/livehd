@@ -102,6 +102,11 @@ struct Driver_options {
   // blocks put thousands of state bits in one color; 0 (the default) disables
   // the per-region guard: a bit-blasted 64x64 memory alone is 4096 bits.
   uint64_t                              register_max_bits = 0;
+  // Map a resetless register that carries a power-on `initial` value to a plain
+  // DFF cell and drop the value (the Yosys/ORFS ASIC behavior), instead of
+  // rebuilding it as a native flop that physical synthesis cannot place. The
+  // default keeps the value (pass.abc.drop_init=false).
+  bool                                  drop_init         = false;
   // Optional explicit DFF cell name for register mapping (empty => auto-detect a
   // plain posedge D-flop from the Liberty).
   std::string                           dff_cell;

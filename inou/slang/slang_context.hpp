@@ -458,6 +458,9 @@ public:
     // at the slang level so the reader owns the policy): lower unknown-module
     // instances as blackbox sub-instances instead of a clean error.
     bool blackbox_unknown          = false;
+    // The USER passed --ignore-assertions: assertions are neither lowered nor
+    // refused (synthesis only).
+    bool ignore_assertions         = false;
     // Keep a package parameter reference as a symbolic `pkg.PARAM` (emitting a
     // `pub comptime const` package unit) instead of folding it to its literal —
     // for readable, provenance-preserving Pyrope emission. OFF by default: it

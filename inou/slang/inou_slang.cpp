@@ -242,6 +242,9 @@ void Inou_slang::work(Eprp_var& var) {
   // Raw slang driver args (e.g. `-F filelist.f`) passed through verbatim from
   // `lhd --reader slang -- <args>` (already split into `user_flags` above).
   for (const auto& f : user_flags) {
+    if (f == "--ignore-assertions") {
+      continue;  // LiveHD policy below, not a slang driver option
+    }
     argv.push_back(strdup(f.c_str()));
   }
 
@@ -263,6 +266,11 @@ void Inou_slang::work(Eprp_var& var) {
   // blackbox sub-instances; the copy injected above (so slang itself never
   // hard-errors and the reader owns the diagnostic) does not.
   opts.blackbox_unknown          = user_has("--ignore-unknown-modules");
+  // Explicit opt-in for synthesis (yosys-slang spells it the same way): drop
+  // every immediate and concurrent assertion/assume/cover instead of lowering
+  // it or refusing a temporal SVA property. Never the default, because a
+  // dropped assertion proves nothing in a verification flow.
+  opts.ignore_assertions         = user_has("--ignore-assertions");
   // Keep package-parameter references symbolic (`pkg.PARAM` + `pub comptime
   // const` package units) for provenance-preserving Pyrope emission.
   opts.preserve_param_provenance = var.has_label("preserve_param_provenance") && var.get("preserve_param_provenance") == "true";

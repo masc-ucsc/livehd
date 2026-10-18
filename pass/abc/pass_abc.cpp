@@ -177,6 +177,11 @@ void Pass_abc::add_mapping_labels(Eprp_method& m) {
                        "true|false map flops to Liberty DFF cells (true, falls back to native flops when the library has no "
                        "DFF cell) vs keep them native as `always @(posedge)` (false)",
                        "true");
+  m.add_label_optional("drop_init",
+                       "true|false map a resetless register with a power-on `initial` value to a plain DFF cell and drop the "
+                       "value (what Yosys does for an ASIC), instead of keeping it on a native flop that cannot be placed "
+                       "(false, the default)",
+                       "false");
   m.add_label_optional("register_max_bits",
                        "with register=true, keep a region's flops native when their total Q width exceeds this many bits "
                        "(0, the default, disables the guard: every flop maps, a bit-blasted 64x64 memory alone is 4096 "
@@ -783,6 +788,7 @@ void Pass_abc::map_with(Eprp_var& var, const std::function<void(livehd::abc::Map
   auto large_flow          = std::string{var.get("large_flow", "")};
   auto large_ge_s          = std::string{var.get("large_ge", "200000")};
   bool map_register        = truthy(var.get("register", "true"));
+  bool drop_init           = truthy(var.get("drop_init", "false"));
   auto memory_s            = std::string{var.get("memory", "auto")};
   auto memory_max_bits_s   = std::string{var.get("memory_max_bits", "1024")};
   auto register_max_bits_s = std::string{var.get("register_max_bits", "0")};
@@ -1050,6 +1056,7 @@ void Pass_abc::map_with(Eprp_var& var, const std::function<void(livehd::abc::Map
   opts.large_ge          = large_ge;
   opts.ware_max_cells    = ware_max_cells;
   opts.map_register      = map_register;
+  opts.drop_init         = drop_init;
   opts.memory_fold       = *memory_fold;
   opts.memory_max_bits   = memory_max_bits;
   opts.register_max_bits = register_max_bits;
@@ -1205,7 +1212,7 @@ void Pass_abc::map_with(Eprp_var& var, const std::function<void(livehd::abc::Map
                                                           opts.map_register,
                                                           opts.memory_fold,
                                                           opts.memory_max_bits,
-                                                          livehd::liberty::dff_selection_descriptor(dff_sel, opts.dff_cell));
+                                                          livehd::liberty::dff_selection_descriptor(dff_sel, opts.dff_cell) + (opts.drop_init ? "+drop_init" : ""));
   if (!cache_dir.empty()) {
     std::error_code ec;
     const auto      canon_cache = std::filesystem::weakly_canonical(cache_dir, ec);
@@ -1220,7 +1227,7 @@ void Pass_abc::map_with(Eprp_var& var, const std::function<void(livehd::abc::Map
     // Salt on the RESOLVED cell: an unresolved pick (no DFF in the library, or
     // an unknown `dff_cell` name) falls back to the raw option so the two
     // failure shapes stay distinct keys too.
-    const std::string dff_desc = livehd::liberty::dff_selection_descriptor(dff_sel, opts.dff_cell);
+    const std::string dff_desc = livehd::liberty::dff_selection_descriptor(dff_sel, opts.dff_cell) + (opts.drop_init ? "+drop_init" : "");
     incr                       = std::make_shared<livehd::synth::Region_cache>(cache_dir,
                                                          livehd::synth::Region_cache::make_salt(livehd::abc::kAbcSrcSalt,
                                                                                                 opts.library,
