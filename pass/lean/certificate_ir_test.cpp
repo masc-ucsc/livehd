@@ -242,8 +242,87 @@ TEST(CertificateIR, AsyncResetSourceAndFlopControlsRemainDistinct) {
   EXPECT_TRUE(c.flops[0].reset_active_low);
   EXPECT_TRUE(c.sources[0].async_reset);
   EXPECT_TRUE(c.sources[0].reset_active_low);
+  // A reset computed from STATE (another flop's Q) is still refused: an
+  // override node is exact only for a reset fixed within the step.
+  Flop g;
+  g.id    = 11;
+  g.width = 1;
+  g.din   = constant("1", 1);
+  d.flops.push_back(g);
   d.flops[0].reset_input.reset();
+  d.flops[0].reset = PinRef{PinKind::Flop, 11, 0, 1, 0, {}};
   EXPECT_THROW(build_certificate(d, {}), std::runtime_error);
+}
+// Decision 2B: an asynchronous reset that is a combinational function of
+// primary inputs (CORE-ET B05's `scanmode ? scan_reset_n : rst_ni`). The reader
+// gets `MuxBool(reset, Q, resetValue)` -- arms swapped for an active-low reset
+// -- whose selector is the slot `FlopDesc.resetPin` names; the source itself is
+// the plain stored value, and the cone is lowered before the reader even though
+// the reader comes first in the scan's order.
+TEST(CertificateIR, InputDerivedAsyncResetReadsThroughAnOverride) {
+  DesignScan d;
+  d.name   = "async_mux";
+  d.inputs = {
+      {"scanmode", 2000000000, 1, std::nullopt},
+      {"scan_rst", 2000000001, 1, std::nullopt},
+      {   "rst_ni", 2000000002, 1, std::nullopt}
+  };
+  Flop f;
+  f.id           = 10;
+  f.width        = 8;
+  f.din          = constant("12", 4);
+  f.reset        = PinRef{PinKind::Node, 30, 0, 1, 0, {}};
+  f.asynchronous = true;
+  f.active_low   = true;
+  f.initial      = "7";
+  d.flops.push_back(f);
+  // The READER first: q + 1, which the scan orders before the reset mux.
+  DesignNode reader;
+  reader.id       = 20;
+  reader.op       = ScanOp::Sum;
+  reader.width    = 8;
+  reader.operands = {
+      {0, 0, PinRef{PinKind::Flop, 10, 0, 8, 0, {}}},
+      {2, 0, constant("1", 8)}
+  };
+  DesignNode rmux;
+  rmux.id       = 30;
+  rmux.op       = ScanOp::Mux;
+  rmux.width    = 1;
+  rmux.operands = {
+      {0, 0, input(2000000000, 1)},
+      {1, 1, input(2000000002, 1)},
+      {2, 2, input(2000000001, 1)}
+  };
+  d.nodes = {reader, rmux};
+  d.outputs.push_back({"q", 0, 8, PinRef{PinKind::Node, 20, 0, 8, 0, {}}});
+  const auto c = build_certificate(d, {});
+  ASSERT_EQ(c.flops.size(), 1);
+  EXPECT_EQ(c.flops[0].reset_pin, 30);
+  EXPECT_TRUE(c.flops[0].async_reset);
+  EXPECT_TRUE(c.flops[0].reset_active_low);
+  // The reset mux is lowered first, then the override, then the reader.
+  ASSERT_EQ(c.nodes.size(), 3);
+  EXPECT_EQ(c.nodes[0].id, 30);
+  const auto& ov = c.nodes[1];
+  EXPECT_EQ(ov.op.kind, Operation::MuxBool);
+  ASSERT_EQ(ov.deps.size(), 3);
+  EXPECT_EQ(ov.deps[0], 30);  // the selector IS the reset slot
+  EXPECT_EQ(ov.deps[2], 10);  // active LOW: reset=1 means NOT asserted, so Q on the true arm
+  EXPECT_EQ(c.nodes[2].id, 20);
+  EXPECT_EQ(c.nodes[2].deps[0], ov.id);  // the reader reads the override, never the raw Q
+  bool raw_q = false;
+  for (const auto& src : c.sources) {
+    if (src.id == 10) {
+      raw_q = true;
+      EXPECT_FALSE(src.async_reset);  // a plain flopQ: the stored value
+    }
+    if (src.id == ov.deps[1]) {
+      EXPECT_EQ(src.kind, SourceKind::Const);
+      EXPECT_EQ(src.const_int, "7");
+    }
+  }
+  EXPECT_TRUE(raw_q);
 }
 TEST(CertificateIR, EmitterAndAtomicFailureNeedNoGraph) {
   const auto         c = build_certificate(binary(ScanOp::Or, 8, constant("3", 2), constant("-1", 1)), {});

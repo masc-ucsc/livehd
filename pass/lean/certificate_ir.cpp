@@ -1,5 +1,6 @@
 // This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 #include <algorithm>
+#include <set>
 #include <stdexcept>
 
 #include "certificate_builder.hpp"
@@ -74,11 +75,20 @@ uint32_t detail::CertificateBuilder::dep(const PinRef& pin, uint32_t width) {
     source.reset_active_low = f.active_low;
     if (f.asynchronous) {
       if (!f.reset_input) {
-        // `SourceDesc.flopQAsync` reads the reset out of RuntimeInput, so an
-        // asynchronous reset computed inside the design cannot be expressed.
-        // Name what stopped the transparent walk: an unhandled resize wrapper
-        // is a tracing gap to close, while real logic is a modelling limit.
-        fail("flop n_" + std::to_string(f.id) + " has an ASYNCHRONOUS reset that is not driven by a primary input"
+        if (input_reset_flops.contains(f.id)) {
+          // 2B: the reset is a function of primary inputs; the source is the
+          // STORED value and readers get the override node.
+          source.async_reset = false;
+          sources[source.id] = source;
+          return async_read(f);
+        }
+        // `SourceDesc.flopQAsync` reads the reset out of RuntimeInput, and an
+        // override node is exact only for a reset fixed within a step; a reset
+        // computed from STATE is neither. Name what stopped the transparent
+        // walk: an unhandled resize wrapper is a tracing gap to close, while
+        // real logic is a modelling limit.
+        fail("flop n_" + std::to_string(f.id)
+             + " has an ASYNCHRONOUS reset that is not a combinational function of primary inputs"
              + (f.reset_block.empty() ? "" : "; the reset cone stops at " + f.reset_block));
       }
       source.reset_input = input_ordinals.at(*f.reset_input);
@@ -86,6 +96,31 @@ uint32_t detail::CertificateBuilder::dep(const PinRef& pin, uint32_t width) {
   }
   sources[source.id] = source;
   return source.id;
+}
+// The read side of a 2B flop: `MuxBool(reset, Q, resetValue)` (operands
+// swapped for an active-LOW reset), emitted on first reference. Its selector is
+// the same slot as `FlopDesc.resetPin`, with the same polarity, so read and
+// commit agree by construction; the reset cone was lowered ahead of every other
+// node (build_certificate), so it already has a slot here.
+uint32_t detail::CertificateBuilder::async_read(const Flop& f) {
+  if (auto it = async_override.find(f.id); it != async_override.end()) {
+    return it->second;
+  }
+  if (pin_width(*f.reset) != 1) {
+    fail("flop n_" + std::to_string(f.id) + " has a " + std::to_string(pin_width(*f.reset))
+         + "-bit input-derived ASYNCHRONOUS reset; only a 1-bit reset is lowered");
+  }
+  const auto rst = dep(*f.reset, 1);
+  PinRef     rv;
+  rv.kind        = PinKind::Constant;
+  rv.width       = f.width;
+  rv.value       = f.initial;
+  const auto rvs = dep(rv, f.width);
+  Op         op;
+  op.kind       = Operation::MuxBool;
+  const auto id = emit(op, f.width, f.active_low ? std::vector<uint32_t>{rst, rvs, f.id} : std::vector<uint32_t>{rst, f.id, rvs});
+  async_override.emplace(f.id, id);
+  return id;
 }
 uint32_t detail::CertificateBuilder::emit(Op op, uint32_t width, std::vector<uint32_t> deps) {
   const auto id = next_id++;
@@ -96,7 +131,70 @@ uint32_t detail::CertificateBuilder::emit(Op op, uint32_t width, std::vector<uin
 CertificateIR build_certificate(const DesignScan& design, const CertificateOptions&) {
   detail::CertificateBuilder b(design);
   std::vector<uint32_t>      lowered_memories;
-  for (const auto& n : design.nodes) {
+  // 2B: an asynchronous flop whose reset cone reaches only PRIMARY INPUTS and
+  // constants (CORE-ET B05's `dft_i.scanmode ? dft_i.scan_reset_n : rst_wr_ni`)
+  // is read through an override node (see async_read). That node needs the
+  // reset's slot before the flop's first reader, but nothing orders a reader
+  // after an unrelated reset cone -- so the cones are lowered FIRST. An
+  // input-only cone depends on no other node, so moving it ahead of everything
+  // keeps the order topological.
+  std::vector<const DesignNode*> order;
+  {
+    std::map<uint32_t, size_t> index_of;
+    for (size_t i = 0; i < design.nodes.size(); ++i) {
+      if (design.nodes[i].op != ScanOp::Memory) {
+        index_of.emplace(design.nodes[i].id, i);
+      }
+    }
+    std::set<uint32_t> cone_ids;
+    for (const auto& [fid, fp] : b.flops) {
+      const Flop& f = *fp;
+      if (!f.asynchronous || f.reset_input || !f.reset) {
+        continue;
+      }
+      std::set<uint32_t>  cone;
+      bool                input_only = true;
+      std::vector<PinRef> work{*f.reset};
+      while (!work.empty() && input_only) {
+        const PinRef p = work.back();
+        work.pop_back();
+        if (p.kind == PinKind::Input || p.kind == PinKind::Constant) {
+          continue;
+        }
+        if (p.kind != PinKind::Node) {
+          input_only = false;  // a flop or a memory read: state, not an input
+          break;
+        }
+        if (!cone.insert(p.id).second) {
+          continue;
+        }
+        const auto it = index_of.find(p.id);
+        if (it == index_of.end()) {
+          input_only = false;
+          break;
+        }
+        for (const auto& op : design.nodes[it->second].operands) {
+          work.push_back(op.driver);
+        }
+      }
+      if (input_only) {
+        b.input_reset_flops.insert(f.id);
+        cone_ids.insert(cone.begin(), cone.end());
+      }
+    }
+    for (const auto& n : design.nodes) {
+      if (n.op != ScanOp::Memory && cone_ids.contains(n.id)) {
+        order.push_back(&n);
+      }
+    }
+    for (const auto& n : design.nodes) {
+      if (n.op == ScanOp::Memory || !cone_ids.contains(n.id)) {
+        order.push_back(&n);
+      }
+    }
+  }
+  for (const auto* np : order) {
+    const auto& n = *np;
     if (n.op == ScanOp::Memory) {
       b.lowering_context = "memory n_" + std::to_string(n.id) + " read port " + std::to_string(n.memory_read);
       detail::lower_memory_read(b, design.memories.at(n.id), n.memory_read);
