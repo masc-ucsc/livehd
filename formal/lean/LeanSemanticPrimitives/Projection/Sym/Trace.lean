@@ -2,13 +2,15 @@
 `Sym.Trace` -- the concrete runs the unbounded rules talk about (M3 S3).
 
 `resM D e i st` is THE memory-route result of one step (chosen; unique by
-`Eval_det`), and `resM_residual` says the projection's residual evaluates to
+`Eval_det`), on the plain-write route (`admitsWB`, which agrees with
+`admitsB` on every design without a plain `Op_MemWrite`), and `resM_residual` says the projection's residual evaluates to
 it. `traceM` iterates it from an initial `StateM` with every clock firing,
 and `traceM_denote` ties the trace to the shared reference semantics:
 `denote (traceM n)` is the `interpretDesign` state after `n` cycles and
 `outM n` its outputs at cycle `n`.
 -/
 import LeanSemanticPrimitives.Projection.Sym.Step
+import LeanSemanticPrimitives.Projection.MemVariant
 
 namespace Projection.Sym
 open Std.Tactic.BVDecide Projection.MemProjection Projection.Hw Projection.HwMem Compiler
@@ -19,26 +21,26 @@ def edgesAll (D : DesignCert) : ClockEdges := allEdges D.clocks.size
 /-- One step's result, when the step is admissible. -/
 noncomputable def resM (D : DesignCert) (e : ClockEdges) (i : RuntimeInput) (st : StateM) :
     StateM.ResultM :=
-  if h : admitsB D = true ∧ runtimeFullOKB D i st e = true then
-    Classical.choose (admits_run_full h.1 h.2)
+  if h : admitsWB D = true ∧ runtimeFullOKB D i st e = true then
+    Classical.choose (admits_runW_full h.1 h.2)
   else default
 
 theorem resM_spec {D : DesignCert} {e : ClockEdges} {i : RuntimeInput} {st : StateM}
-    (hA : admitsB D = true) (hR : runtimeFullOKB D i st e = true) :
+    (hA : admitsWB D = true) (hR : runtimeFullOKB D i st e = true) :
     Eval hwMemP [] (.call hwMemP.entry
         ([encDesign D, encEdges e, encInput i, StateM.encStateM st].map Term.lit))
       (StateM.encResultM (resM D e i st))
     ∧ (resM D e i st).denote = interpretDesign D e i (StateM.denote st)
     ∧ stateFullOKB D (resM D e i st).nextState = true := by
-  have h : admitsB D = true ∧ runtimeFullOKB D i st e = true := ⟨hA, hR⟩
+  have h : admitsWB D = true ∧ runtimeFullOKB D i st e = true := ⟨hA, hR⟩
   unfold resM
   rw [dif_pos h]
-  exact Classical.choose_spec (admits_run_full h.1 h.2)
+  exact Classical.choose_spec (admits_runW_full h.1 h.2)
 
 /-- The projection's residual evaluates to `resM`. -/
 theorem resM_residual {sf wf : Nat} {D : DesignCert} {R : Program}
     {e : ClockEdges} {i : RuntimeInput} {st : StateM}
-    (hproj : projectMemDesignAt sf wf D = .ok R) (hA : admitsB D = true)
+    (hproj : projectMemDesignAt sf wf D = .ok R) (hA : admitsWB D = true)
     (hR : runtimeFullOKB D i st e = true) :
     Eval R [] (.call R.entry ([encEdges e, encInput i, StateM.encStateM st].map Term.lit))
       (StateM.encResultM (resM D e i st)) := by
@@ -48,6 +50,34 @@ theorem resM_residual {sf wf : Nat} {D : DesignCert} {R : Program}
         ↔ v = StateM.encResultM (resM D e i st) :=
     fun v => ⟨fun hv => Surface.Eval_det hv hev, fun hv => hv ▸ hev⟩
   exact (specializeFour_correct_of hwMemAP_entry hwMemAP_erases hiff hproj _).mpr rfl
+
+/-- `R` computes the memory route's step on every admissible input. This is
+the one fact every theorem below needs of a residual, and both projections
+supply it: `of_proj` (the memory interpreter `hwMemAP`) and `of_projVar` (its
+`env0`-inlined variant, `MemVariant`). -/
+def MemResidual (D : DesignCert) (R : Program) : Prop :=
+  ∀ {e : ClockEdges} {i : RuntimeInput} {st : StateM},
+    admitsWB D = true → runtimeFullOKB D i st e = true →
+    Eval R [] (.call R.entry ([encEdges e, encInput i, StateM.encStateM st].map Term.lit))
+      (StateM.encResultM (resM D e i st))
+
+theorem MemResidual.of_proj {sf wf : Nat} {D : DesignCert} {R : Program}
+    (hproj : projectMemDesignAt sf wf D = .ok R) : MemResidual D R :=
+  fun hA hR => resM_residual hproj hA hR
+
+theorem MemResidual.of_projVar {sf wf : Nat} {D : DesignCert} {R : Program}
+    (hproj : MemVariant.projectMemVarDesignAt sf wf D = .ok R) : MemResidual D R := by
+  intro e i st hA hR
+  have hev := (resM_spec hA hR).1
+  have hR0 : runtimeOKB D i st e = true := by
+    unfold runtimeFullOKB at hR; simp only [Bool.and_eq_true] at hR; exact hR.1
+  have hiff : ∀ v, Eval MemVariant.hwMemPVar [] (.call MemVariant.hwMemPVar.entry
+      ([encDesign D, encEdges e, encInput i, StateM.encStateM st].map Term.lit)) v
+        ↔ v = StateM.encResultM (resM D e i st) :=
+    fun v => (MemVariant.memVar_iffW hA hR0 v).trans
+      ⟨fun hv => Surface.Eval_det hv hev, fun hv => hv ▸ hev⟩
+  exact (specializeFour_correct_of MemVariant.hwMemAPVar_entry MemVariant.hwMemAPVar_erases
+    hiff hproj _).mpr rfl
 
 /-- `symStep` against ANY value the residual evaluates to. -/
 theorem symStep_eval {R : Program} {e : ClockEdges} {i : RuntimeInput} {stM : StateM} {v : Val}
@@ -93,7 +123,7 @@ def refOut (D : DesignCert) (r0 : RuntimeState) (ins : Nat → RuntimeInput) (n 
 /-- While every step is admissible, the finite-memory trace DENOTES the
 reference trace, and its outputs are the reference outputs. -/
 theorem traceM_denote {D : DesignCert} {s0 : StateM} {ins : Nat → RuntimeInput}
-    (hA : admitsB D = true)
+    (hA : admitsWB D = true)
     (hR : ∀ n, runtimeFullOKB D (ins n) (traceM D s0 ins n) (edgesAll D) = true) :
     ∀ n, StateM.denote (traceM D s0 ins n) = refState D (StateM.denote s0) ins n
       ∧ outM D s0 ins n = refOut D (StateM.denote s0) ins n := by

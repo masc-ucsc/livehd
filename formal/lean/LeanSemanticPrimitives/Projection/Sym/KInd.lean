@@ -248,7 +248,7 @@ theorem run_base {steps : List StepS} {st st0 : SymSt} {k inB : Nat} {sS : SVal}
   exact ⟨x.1.symm, l⟩
 
 /-- The layout and the memory route's runtime shape hold at EVERY cycle. -/
-theorem inv_all (hproj : projectMemDesignAt sf wf D = .ok R) (hA : admitsB D = true)
+theorem inv_all (hres : MemResidual D R) (hA : admitsWB D = true)
     (hchk : runInvKOf D R sp s0 pfB pfS = true) (hins : ∀ n, (ins n).toList.map BV.width = sp.inW) :
     ∀ n, StMatches sp.L (traceM D s0 ins n) ∧ stateFullOKB D (traceM D s0 ins n) = true := by
   obtain ⟨hside, -, ⟨s, steps, stS, hrun, hsc, hshape, -⟩⟩ := obl_parts hchk
@@ -268,7 +268,7 @@ theorem inv_all (hproj : projectMemDesignAt sf wf D = .ok R) (hA : admitsB D = t
       obtain ⟨hc, hag⟩ := extendSt_agree hxl hsc
       rw [AgreeAt_append, stateVals_length ih.1, Nat.zero_add] at hag
       have hS := stateVar_rel ih.1 hag.1
-      have facts := unroll_sound (sideOK_parts hside).2.2.2.2.2.2 hproj hA hins hc (sp.k + 1) n _ _ _ _ _
+      have facts := unroll_sound (sideOK_parts hside).2.2.2.2.2.2 hres hA hins hc (sp.k + 1) n _ _ _ _ _
         hrun (.refl _)
         (insVals_agree hins (sp.k + 1) hag.2) hS 0 (by simp)
         (fun i hi => by
@@ -277,13 +277,13 @@ theorem inv_all (hproj : projectMemDesignAt sf wf D = .ok R) (hA : admitsB D = t
       exact stateShapeOf_sound facts.2.2 hshape
 
 /-- **k-induction is sound.** -/
-theorem runInvKOf_sound (hproj : projectMemDesignAt sf wf D = .ok R) (hA : admitsB D = true)
+theorem runInvKOf_sound (hres : MemResidual D R) (hA : admitsWB D = true)
     (hchk : runInvKOf D R sp s0 pfB pfS = true) (hins : ∀ n, (ins n).toList.map BV.width = sp.inW) :
     ∀ n, (∀ j, j ≤ n → asmBit (outM D s0 ins j) (ins j) sp.asmOut sp.asmIn = true) →
       propBit (outM D s0 ins n) sp.prop = true := by
   obtain ⟨hside, ⟨stepsB, stB, hrunB, hscB, hunsB⟩, ⟨s, steps, stS, hrunS, hscS, -, hunsS⟩⟩ :=
     obl_parts hchk
-  have hinv := inv_all hproj hA hchk hins
+  have hinv := inv_all hres hA hchk hins
   have rt : ∀ n, runtimeFullOKB D (ins n) (traceM D s0 ins n) (edgesAll D) = true :=
     fun n => runtime_of_inv hside (hinv n).1 (hinv n).2 (hins n)
   have hk : 0 < sp.k := by
@@ -302,7 +302,7 @@ theorem runInvKOf_sound (hproj : projectMemDesignAt sf wf D = .ok R) (hA : admit
     let xs := insVals ins 0 sp.k
     have hxl : xs.length = stB.base := by rw [hbB, insVals_length hins]
     obtain ⟨hc, hag⟩ := extendSt_agree hxl hscB
-    have facts := unroll_sound (sideOK_parts hside).2.2.2.2.2.2 hproj hA hins hc sp.k 0 0 _ _ _ _ hrunB
+    have facts := unroll_sound (sideOK_parts hside).2.2.2.2.2.2 hres hA hins hc sp.k 0 0 _ _ _ _ hrunB
       (.refl _)
       (fun j hj => by simpa using insVals_agree hins sp.k hag j hj) .conc
     have hev : BVLogicalExpr.eval (extendSt xs.toArray stB) (BoolExpr.gate .and (defsE stB) (baseBad stepsB)) = true := by
@@ -323,7 +323,7 @@ theorem runInvKOf_sound (hproj : projectMemDesignAt sf wf D = .ok R) (hA : admit
     obtain ⟨hc, hag⟩ := extendSt_agree hxl hscS
     rw [AgreeAt_append, stateVals_length (hinv m).1, Nat.zero_add] at hag
     have hS := stateVar_rel (hinv m).1 hag.1
-    have facts := unroll_sound (sideOK_parts hside).2.2.2.2.2.2 hproj hA hins hc (sp.k + 1) m _ _ _ _ _
+    have facts := unroll_sound (sideOK_parts hside).2.2.2.2.2.2 hres hA hins hc (sp.k + 1) m _ _ _ _ _
       hrunS (.refl _)
       (insVals_agree hins (sp.k + 1) hag.2) hS
     have hev : BVLogicalExpr.eval (extendSt xs.toArray stS)
@@ -347,7 +347,7 @@ end
 
 /-- Specialize the memory interpreter to `D`, then check. -/
 def runInvK (sf wf : Nat) (D : DesignCert) (sp : InvSpec) (s0 : StateM) (pfB pfS : ByteArray) : Bool :=
-  admitsB D &&
+  admitsWB D &&
     match projectMemDesignAt sf wf D with
     | .ok R    => runInvKOf D R sp s0 pfB pfS
     | .error _ => false
@@ -357,20 +357,20 @@ residual `R` obtained from the specializer run. If the checker accepts, then for
 EVERY input sequence of the declared widths, at every cycle `n` whose
 assumptions up to `n` all held, the property output of `interpretDesign`
 (iterated from `denote s0`, every clock firing) is nonzero. -/
-theorem runInvKOf_sound_ref {sf wf : Nat} {D : DesignCert} {R : Program} {sp : InvSpec}
-    {s0 : StateM} {pfB pfS : ByteArray} (hproj : projectMemDesignAt sf wf D = .ok R)
-    (hA : admitsB D = true) (hr : runInvKOf D R sp s0 pfB pfS = true)
+theorem runInvKOf_sound_ref {D : DesignCert} {R : Program} {sp : InvSpec}
+    {s0 : StateM} {pfB pfS : ByteArray} (hres : MemResidual D R)
+    (hA : admitsWB D = true) (hr : runInvKOf D R sp s0 pfB pfS = true)
     (ins : Nat → RuntimeInput) (hins : ∀ n, (ins n).toList.map BV.width = sp.inW) :
     ∀ n, (∀ j, j ≤ n → asmBit (refOut D (StateM.denote s0) ins j) (ins j) sp.asmOut sp.asmIn = true) →
       propBit (refOut D (StateM.denote s0) ins n) sp.prop = true := by
   have hside := (obl_parts hr).1
-  have hinv := inv_all hproj hA hr hins
+  have hinv := inv_all hres hA hr hins
   have hR : ∀ n, runtimeFullOKB D (ins n) (traceM D s0 ins n) (edgesAll D) = true :=
     fun n => runtime_of_inv hside (hinv n).1 (hinv n).2 (hins n)
   have hden := traceM_denote hA hR
   intro n hasm
   rw [← (hden n).2]
-  exact runInvKOf_sound hproj hA hr hins n (fun j hj => by rw [(hden j).2]; exact hasm j hj)
+  exact runInvKOf_sound hres hA hr hins n (fun j hj => by rw [(hden j).2]; exact hasm j hj)
 
 /-- The same, closed: the check specializes `D` itself. -/
 theorem runInvK_sound {sf wf : Nat} {D : DesignCert} {sp : InvSpec} {s0 : StateM}
@@ -383,7 +383,28 @@ theorem runInvK_sound {sf wf : Nat} {D : DesignCert} {sp : InvSpec} {s0 : StateM
   obtain ⟨hA, hr⟩ := h
   split at hr
   · rename_i R hproj
-    exact runInvKOf_sound_ref hproj hA hr ins hins
+    exact runInvKOf_sound_ref (MemResidual.of_proj hproj) hA hr ins hins
+  · cases hr
+
+/-- The closed checker through the `env0`-inlined memory interpreter
+(`MemVariant`): same check, the faster specializer. -/
+def runInvKV (sf wf : Nat) (D : DesignCert) (sp : InvSpec) (s0 : StateM) (pfB pfS : ByteArray) : Bool :=
+  admitsWB D &&
+    match MemVariant.projectMemVarDesignAt sf wf D with
+    | .ok R    => runInvKOf D R sp s0 pfB pfS
+    | .error _ => false
+
+theorem runInvKV_sound {sf wf : Nat} {D : DesignCert} {sp : InvSpec} {s0 : StateM}
+    {pfB pfS : ByteArray} (h : runInvKV sf wf D sp s0 pfB pfS = true)
+    (ins : Nat → RuntimeInput) (hins : ∀ n, (ins n).toList.map BV.width = sp.inW) :
+    ∀ n, (∀ j, j ≤ n → asmBit (refOut D (StateM.denote s0) ins j) (ins j) sp.asmOut sp.asmIn = true) →
+      propBit (refOut D (StateM.denote s0) ins n) sp.prop = true := by
+  unfold runInvKV at h
+  simp only [Bool.and_eq_true] at h
+  obtain ⟨hA, hr⟩ := h
+  split at hr
+  · rename_i R hproj
+    exact runInvKOf_sound_ref (MemResidual.of_projVar hproj) hA hr ins hins
   · cases hr
 
 #audit_axioms extendSt_consistent
@@ -399,5 +420,6 @@ theorem runInvK_sound {sf wf : Nat} {D : DesignCert} {sp : InvSpec} {s0 : StateM
 #audit_axioms runInvKOf_of_obls
 #audit_axioms runInvKOf_sound_ref
 #audit_axioms runInvK_sound
+#audit_axioms runInvKV_sound
 
 end Projection.Sym

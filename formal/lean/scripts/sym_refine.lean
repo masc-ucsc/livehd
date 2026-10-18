@@ -4,7 +4,7 @@ design up to stuttering, by k-induction on their projection residuals (M3 S6).
 
     sym_refine <impl.dcert> <spec.dcert> pair:<implOut>=<specOut>... [adv:[!]<implOut>]
                [map:<specInput>=<implInput>]... [asm:[!]<implOut>] [in:<implInput>=<value>]...
-               [stateq] [rebuild] [k:<n>[,<n>...]] [sf:<n>] [wf:<n>] [solver:<cadical>] [work:<dir>]
+               [stateq] [rebuild] [route:var|plain] [k:<n>[,<n>...]] [sf:<n>] [wf:<n>] [solver:<cadical>] [work:<dir>]
 
 The implementation steps every cycle; the specification steps only on cycles
 where the witness output `adv` fires (no `adv`: lockstep) and holds
@@ -176,18 +176,22 @@ def main (args : List String) : IO UInt32 := do
     let _ := implIns
     say s!"impl {ci}\nspec {cs}"
     say s!"  pairs {pairs}, adv {repr adv}, input map {inMap}{if rest.contains "stateq" then ", next states equal" else ""}, k in {ks}; both start all-zero"
-    unless admitsB DI && admitsB DS do
+    unless HwMem.admitsWB DI && HwMem.admitsWB DS do
       say "  RESULT: REFUSED (the memory route does not admit a certificate)"; return 4
     let t0 ← IO.monoMsNow
-    let RI ← match projectMemDesignAt sf wf DI with
+    -- `MemVariant.projectMemVarDesignAt` (env0 inlined; `MemResidual.of_projVar`) unless
+    -- `route:plain` (`projectMemDesignAt`, `MemResidual.of_proj`)
+    let plain := (opt "route") == some "plain"
+    let proj := fun D => if plain then projectMemDesignAt sf wf D else MemVariant.projectMemVarDesignAt sf wf D
+    let RI ← match proj DI with
       | .ok R => pure R | .error e => do say s!"  RESULT: REFUSED (impl specialization: {repr e})"; return 4
     -- an identity refinement (one certificate file) specializes once
-    let RS ← if ci == cs then pure RI else match projectMemDesignAt sf wf DS with
+    let RS ← if ci == cs then pure RI else match proj DS with
       | .ok R => pure R | .error e => do say s!"  RESULT: REFUSED (spec specialization: {repr e})"; return 4
     let some bI := Hw.checkResidual RI | say "  RESULT: REFUSED (impl residual check)"; return 4
     let some bS := Hw.checkResidual RS | say "  RESULT: REFUSED (spec residual check)"; return 4
     let t1 ← IO.monoMsNow
-    say s!"  residuals specialized and checked in {t1 - t0} ms"
+    say s!"  residuals specialized ({if plain then "projectMemDesignAt" else "projectMemVarDesignAt, env0 inlined"}) and checked in {t1 - t0} ms"
     let sy : RefSys := { DI, DS, sI0 := zeroState DI, sS0 := zeroState DS, inMap, adv }
     let single := ks.length == 1
     let mut last : UInt32 := 2

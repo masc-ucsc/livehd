@@ -253,10 +253,10 @@ theorem asmOf_sound {σ : Asg} {so : SVal} {outs : Array BV} {asmOut : Option Pr
   | some p => exact propOf_sound hr ha'
 
 /-- **The unroll is sound.** -/
-theorem unroll_sound {sf wf : Nat} {D : DesignCert} {R : Program} {fuel : Nat}
+theorem unroll_sound {D : DesignCert} {R : Program} {fuel : Nat}
     {prop : PropSpec} {asmOut : Option PropSpec} {asmIn : List (Nat × Int)} {inW : List Nat}
     (hrange : inAsmRangeOK inW asmIn = true)
-    (hproj : projectMemDesignAt sf wf D = .ok R) (hA : admitsB D = true)
+    (hres : MemResidual D R) (hA : admitsWB D = true)
     {s0 : StateM} {ins : Nat → RuntimeInput} (hins : ∀ n, (ins n).toList.map BV.width = inW)
     {σ : Asg} {stF : SymSt} (hc : stF.Consistent σ) :
     ∀ (k m inB : Nat) (sS : SVal) (st : SymSt) (steps : List StepS) (st' : SymSt),
@@ -293,7 +293,7 @@ theorem unroll_sound {sf wf : Nat} {D : DesignCert} {R : Program} {fuel : Nat}
                 have x2 := (unroll_extends k _ _ _ _ _ h2).1.trans hx
                 intro j hj hwf
                 -- the first step
-                have hev := resM_residual hproj hA (hwf 0 (by omega))
+                have hev := hres hA (hwf 0 (by omega))
                 have rres := symStep_eval hev h1 hc x2 .conc
                   (inputVar_rel (hins (m + 0)) (by simpa using hin 0 (by omega))) hS
                 obtain ⟨rn, ro⟩ := splitResult_sound rres hsplit
@@ -305,7 +305,7 @@ theorem unroll_sound {sf wf : Nat} {D : DesignCert} {R : Program} {fuel : Nat}
                 | zero => simpa using f0
                 | succ j =>
                     -- the rest, from cycle m + 1
-                    have ih := unroll_sound hrange hproj hA hins hc k (m + 1) (inB + inW.length) sn st1 rest st2 h2 hx
+                    have ih := unroll_sound hrange hres hA hins hc k (m + 1) (inB + inW.length) sn st1 rest st2 h2 hx
                       (fun j hj => by
                         have := hin (j + 1) (by omega)
                         rwa [show inB + inW.length + j * inW.length = inB + (j + 1) * inW.length by

@@ -480,9 +480,9 @@ def PRt (sy : RefSys) (ins : Nat → RuntimeInput) (n : Nat) : Prop :=
   runtimeFullOKB sy.DI (ins n) (traceM sy.DI sy.sI0 ins n) (edgesAll sy.DI) = true
     ∧ runtimeFullOKB sy.DS (mapInputs (ins n) sy.inMap) (stutM sy ins n) (edgesAll sy.DS) = true
 
-theorem punroll_sound {sf wf : Nat} {sy : RefSys} {RI RS : Program} {sp : RefSpec}
-    (hpI : projectMemDesignAt sf wf sy.DI = .ok RI) (hAI : admitsB sy.DI = true)
-    (hpS : projectMemDesignAt sf wf sy.DS = .ok RS) (hAS : admitsB sy.DS = true)
+theorem punroll_sound {sy : RefSys} {RI RS : Program} {sp : RefSpec}
+    (hrI : MemResidual sy.DI RI) (hAI : admitsWB sy.DI = true)
+    (hrS : MemResidual sy.DS RS) (hAS : admitsWB sy.DS = true)
     (hadv : sp.adv = sy.adv) (hmapEq : sp.inMap = sy.inMap)
     (hmap : sp.inMap.all (· < sp.inW.length) = true) (hrange : inAsmRangeOK sp.inW sp.asmIn = true)
     {ins : Nat → RuntimeInput} (hins : ∀ n, (ins n).toList.map BV.width = sp.inW)
@@ -528,10 +528,10 @@ theorem punroll_sound {sf wf : Nat} {sy : RefSys} {RI RS : Program} {sp : RefSpe
       -- cycle m
       have hrt0 := hrt 0 (by omega)
       have hin0 : AgreeAt σ inB (inputVals (ins m)) := by simpa using hin 0 (by omega)
-      have rrI := symStep_eval (resM_residual hpI hAI (by simpa using hrt0.1)) h1 hc x2 .conc
+      have rrI := symStep_eval (hrI hAI (by simpa using hrt0.1)) h1 hc x2 .conc
         (inputVar_rel (hins m) hin0) hSI
       obtain ⟨rnI, roI⟩ := splitResult_sound rrI hspI
-      have rrS := symStep_eval (resM_residual hpS hAS (by simpa using hrt0.2)) h2 hc x3 .conc
+      have rrS := symStep_eval (hrS hAS (by simpa using hrt0.2)) h2 hc x3 .conc
         (by rw [← hmapEq]; exact mapInputVar_rel (hins m) hin0 hmap) hSS
       obtain ⟨rnS, roS⟩ := splitResult_sound rrS hspS
       have hcb := advE_sound roI hc'
@@ -564,7 +564,7 @@ theorem punroll_sound {sf wf : Nat} {sy : RefSys} {RI RS : Program} {sp : RefSpe
       cases j with
       | zero => simpa using f0
       | succ j =>
-          have ih := punroll_sound hpI hAI hpS hAS hadv hmapEq hmap hrange hins hc k (m + 1)
+          have ih := punroll_sound hrI hAI hrS hAS hadv hmapEq hmap hrange hins hc k (m + 1)
             (inB + sp.inW.length) nI sS' st2 rest st3 h3 hx
             (fun j hj => by
               have := hin (j + 1) (by omega)
@@ -720,8 +720,8 @@ theorem prun_base {steps : List PStep} {st st0 : SymSt} {k inB : Nat} {sI sS : S
   exact ⟨x.1.symm, l⟩
 
 /-- Both layouts and both runtime shapes hold at every cycle. -/
-theorem refInv_all (hpI : projectMemDesignAt sf wf sy.DI = .ok RI) (hAI : admitsB sy.DI = true)
-    (hpS : projectMemDesignAt sf wf sy.DS = .ok RS) (hAS : admitsB sy.DS = true)
+theorem refInv_all (hrI : MemResidual sy.DI RI) (hAI : admitsWB sy.DI = true)
+    (hrS : MemResidual sy.DS RS) (hAS : admitsWB sy.DS = true)
     (hchk : runRefKOf sy RI RS sp pfB pfS = true) (hins : ∀ n, (ins n).toList.map BV.width = sp.inW) :
     ∀ n, StMatches sp.LI (traceM sy.DI sy.sI0 ins n) ∧ stateFullOKB sy.DI (traceM sy.DI sy.sI0 ins n) = true
       ∧ StMatches sp.LS (stutM sy ins n) ∧ stateFullOKB sy.DS (stutM sy ins n) = true := by
@@ -742,7 +742,7 @@ theorem refInv_all (hpI : projectMemDesignAt sf wf sy.DI = .ok RI) (hAI : admits
       simp only [List.length_append, stateVals_length ih.1, stateVals_length ih.2.2.1, Nat.zero_add] at hag
       have hSI := stateVar_rel ih.1 hag.1.1
       have hSS := stateVar_rel ih.2.2.1 hag.1.2
-      have facts := punroll_sound hpI hAI hpS hAS hadv hmapEq hmap hrange hins hc (sp.k + 1) n _ _ _ _ _ _
+      have facts := punroll_sound hrI hAI hrS hAS hadv hmapEq hmap hrange hins hc (sp.k + 1) n _ _ _ _ _ _
         hrun (.refl _) (insVals_agree hins (sp.k + 1) hag.2) hSI hSS 0 (by simp)
         (fun i hi => by have : i = 0 := by omega
                         subst this; simpa using rt)
@@ -759,15 +759,15 @@ every run (implementation inputs of the declared widths, the specification
 fed through the input map and stepping only on witnessed cycles), at every
 cycle whose assumptions up to it all held: if the cycle is witnessed, every
 related implementation output equals its specification output. -/
-theorem runRefKOf_sound (hpI : projectMemDesignAt sf wf sy.DI = .ok RI) (hAI : admitsB sy.DI = true)
-    (hpS : projectMemDesignAt sf wf sy.DS = .ok RS) (hAS : admitsB sy.DS = true)
+theorem runRefKOf_sound (hrI : MemResidual sy.DI RI) (hAI : admitsWB sy.DI = true)
+    (hrS : MemResidual sy.DS RS) (hAS : admitsWB sy.DS = true)
     (hchk : runRefKOf sy RI RS sp pfB pfS = true) (hins : ∀ n, (ins n).toList.map BV.width = sp.inW) :
     ∀ n, (∀ j, j ≤ n → asmBit (outM sy.DI sy.sI0 ins j) (ins j) sp.asmOut sp.asmIn = true) →
       refOK sy sp ins n = true := by
   obtain ⟨hside, ⟨stepsB, stB, hrunB, hscB, hunsB⟩, ⟨s, steps, stS, hrunS, hscS, -, -, hunsS⟩⟩ :=
     refObl_parts hchk
   obtain ⟨hk, _, _, _, _, _, _, _, _, _, _, hrange, hmap, hadv, hmapEq⟩ := refSideOK_parts hside
-  have hinv := refInv_all hpI hAI hpS hAS hchk hins
+  have hinv := refInv_all hrI hAI hrS hAS hchk hins
   have rt : ∀ n, PRt sy ins n := fun n => prt_of_inv hside hins (hinv n)
   intro n
   induction n using Nat.strongRecOn with
@@ -782,7 +782,7 @@ theorem runRefKOf_sound (hpI : projectMemDesignAt sf wf sy.DI = .ok RI) (hAI : a
     let xs := insVals ins 0 sp.k
     have hxl : xs.length = stB.base := by rw [hbB, insVals_length hins]
     obtain ⟨hc, hag⟩ := extendSt_agree hxl hscB
-    have facts := punroll_sound hpI hAI hpS hAS hadv hmapEq hmap hrange hins hc sp.k 0 0 _ _ _ _ _ hrunB
+    have facts := punroll_sound hrI hAI hrS hAS hadv hmapEq hmap hrange hins hc sp.k 0 0 _ _ _ _ _ hrunB
       (.refl _) (fun j hj => by simpa using insVals_agree hins sp.k hag j hj) .conc .conc
     have hev : BVLogicalExpr.eval (extendSt xs.toArray stB)
         (BoolExpr.gate .and (defsE stB) (baseBad (toSteps stepsB))) = true := by
@@ -807,7 +807,7 @@ theorem runRefKOf_sound (hpI : projectMemDesignAt sf wf sy.DI = .ok RI) (hAI : a
       Nat.zero_add] at hag
     have hSI := stateVar_rel (hinv m).1 hag.1.1
     have hSS := stateVar_rel (hinv m).2.2.1 hag.1.2
-    have facts := punroll_sound hpI hAI hpS hAS hadv hmapEq hmap hrange hins hc (sp.k + 1) m _ _ _ _ _ _
+    have facts := punroll_sound hrI hAI hrS hAS hadv hmapEq hmap hrange hins hc (sp.k + 1) m _ _ _ _ _ _
       hrunS (.refl _) (insVals_agree hins (sp.k + 1) hag.2) hSI hSS
     have hlen : (s :: steps).length = sp.k + 1 := hlS
     have hev : BVLogicalExpr.eval (extendSt xs.toArray stS)
@@ -853,7 +853,7 @@ variable {sf wf : Nat} {sy : RefSys} {RI RS : Program} {sp : RefSpec} {pfB pfS :
 
 /-- While both machines' steps are admissible, the stuttered specification
 trace DENOTES the reference one. -/
-theorem stutM_denote (hAI : admitsB sy.DI = true) (hAS : admitsB sy.DS = true)
+theorem stutM_denote (hAI : admitsWB sy.DI = true) (hAS : admitsWB sy.DS = true)
     (rt : ∀ n, PRt sy ins n) :
     ∀ n, StateM.denote (stutM sy ins n) = refStut sy ins n ∧ outS sy ins n = refOutS sy ins n := by
   have hI := traceM_denote hAI (fun n => (rt n).1)
@@ -884,18 +884,18 @@ checker accepts the residuals the specializer produced, then for EVERY input
 sequence of the declared widths, at every cycle `n` whose assumptions up to
 `n` held, a witnessed cycle relates the implementation's `interpretDesign`
 outputs to the stuttered specification's `interpretDesign` outputs. -/
-theorem runRefKOf_sound_ref (hpI : projectMemDesignAt sf wf sy.DI = .ok RI) (hAI : admitsB sy.DI = true)
-    (hpS : projectMemDesignAt sf wf sy.DS = .ok RS) (hAS : admitsB sy.DS = true)
+theorem runRefKOf_sound_ref (hrI : MemResidual sy.DI RI) (hAI : admitsWB sy.DI = true)
+    (hrS : MemResidual sy.DS RS) (hAS : admitsWB sy.DS = true)
     (hchk : runRefKOf sy RI RS sp pfB pfS = true) (hins : ∀ n, (ins n).toList.map BV.width = sp.inW) :
     ∀ n, (∀ j, j ≤ n → asmBit (refOut sy.DI (StateM.denote sy.sI0) ins j) (ins j) sp.asmOut sp.asmIn = true) →
       refBit (refOut sy.DI (StateM.denote sy.sI0) ins n) (refOutS sy ins n) sp.adv sp.pairs = true := by
   have hside := (refObl_parts hchk).1
-  have hinv := refInv_all hpI hAI hpS hAS hchk hins
+  have hinv := refInv_all hrI hAI hrS hAS hchk hins
   have rt : ∀ n, PRt sy ins n := fun n => prt_of_inv hside hins (hinv n)
   have hI := traceM_denote hAI (fun n => (rt n).1)
   have hS := stutM_denote hAI hAS rt
   intro n hasm
-  have h := runRefKOf_sound hpI hAI hpS hAS hchk hins n (fun j hj => by rw [(hI j).2]; exact hasm j hj)
+  have h := runRefKOf_sound hrI hAI hrS hAS hchk hins n (fun j hj => by rw [(hI j).2]; exact hasm j hj)
   unfold refOK at h
   rw [Bool.and_eq_true] at h
   rw [← (hI n).2, ← (hS n).2]

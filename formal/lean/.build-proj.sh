@@ -99,6 +99,13 @@ MODULES=(
   Projection/MemSupport
   Projection/MemProjection
   Projection/HardwareMemWriteAdmit
+  # The memory entry with `env0` inlined (the scalar route's TOTAL-variant
+  # rewrite, applied to mainM): memVar_iff(W), projectMemVarDesignAt(W)_correct.
+  Projection/Proto/InterpreterVariant
+  Projection/Proto/VariantTransport
+  Projection/Proto/RewriteTotal
+  Projection/MemVariant
+  Projection/MemVariantSim
   Projection/MemLog
   Projection/MemPrimChecks
   # host vs object specializer on the three memory primitives

@@ -59,6 +59,8 @@ MODULES=(
   Projection/Proto/VariantTransport Projection/Proto/RewriteTotal
   Projection/Proto/VariantAdequacy Projection/Proto/VariantExec
   Projection/Proto/RunnerSupport
+  # the memory entry with env0 inlined (projectMemVarDesignAt)
+  Projection/MemVariant Projection/MemVariantSim
   # M3: verified symbolic interpretation and k-induction (sym_verify)
   Projection/Sym/Kit Projection/Sym/Bridge Projection/Sym/Val Projection/Sym/Prim
   Projection/Sym/Mem Projection/Sym/Dispatch Projection/Sym/Eval Projection/Sym/Asg

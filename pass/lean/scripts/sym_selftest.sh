@@ -7,7 +7,9 @@ set -euo pipefail
 # DCERT2), then:
 #   cnt10  mod-10 counter
 #     c <= 9                      PROVED (k=1); also with the check re-building
-#                                 the obligations (`rebuild`) and closed (`closed`)
+#                                 the obligations (`rebuild`), closed (`closed`),
+#                                 on the plain memory interpreter (`route:plain`),
+#                                 and as the F2 theorem file (`emit:`), compiled
 #     c != 9                      NOT K-INDUCTIVE at k=1; COUNTEREXAMPLE at k=10
 #     c == 0 while reset held     PROVED (k=1); NOT K-INDUCTIVE without the assumption
 #     candidates c != 9, c <= 9   one specialization; the first is not
@@ -96,6 +98,14 @@ A2="$OUT/acc2_lean/acc2.dcert"
 run sym_verify "INVARIANT PROVED"    "$C" ok_good k:1
 run sym_verify "INVARIANT PROVED"    "$C" ok_good k:1 rebuild
 run sym_verify "INVARIANT PROVED"    "$C" ok_good k:1 closed
+run sym_verify "INVARIANT PROVED"    "$C" ok_good k:1 route:plain
+run sym_verify "INVARIANT PROVED"    "$C" ok_good k:1 "emit:$OUT/F2cnt10.lean"
+# the theorem form compiles, and its only non-standard axiom is the native one
+(cd "$ROOT/formal/lean" && LEAN_PATH="$PWD/.olean-dev" lean "$OUT/F2cnt10.lean") > "$OUT/F2cnt10.out" 2>&1 \
+  || { tail -5 "$OUT/F2cnt10.out"; echo "FAIL: F2 theorem file"; exit 1; }
+tr '\n' ' ' < "$OUT/F2cnt10.out" | grep -Eq "'SymF2.F2cnt10.invariant' depends on axioms: \[propext, +Classical.choice, +Quot.sound, +[^],]*native_decide[^],]*\]" \
+  || { cat "$OUT/F2cnt10.out"; echo "FAIL: F2 axioms"; exit 1; }
+echo "ok: F2 theorem file compiles; axioms: $(tr '\n' ' ' < "$OUT/F2cnt10.out" | grep -o "invariant' depends on axioms: [^]]*]" | tr -s ' ')"
 run sym_verify "NOT K-INDUCTIVE"     "$C" ok_bad k:1
 run sym_verify "COUNTEREXAMPLE"      "$C" ok_bad k:10
 run sym_verify "INVARIANT PROVED"    "$C" '!c_o' in:rst=1 k:1
@@ -104,6 +114,7 @@ run sym_verify "INVARIANT PROVED"    "$C" ok_bad,ok_good k:1
 grep -q 'SUMMARY: ok_good PROVED at k=1 after 2 attempt' "$OUT/run_$N.log" || { echo "FAIL: candidate summary"; exit 1; }
 run sym_refine "REFINEMENT PROVED"   "$C" "$C" pair:c_o=c_o pair:ok_good=ok_good pair:ok_bad=ok_bad k:1
 run sym_refine "REFINEMENT PROVED"   "$C" "$C" pair:c_o=c_o stateq k:1
+run sym_refine "REFINEMENT PROVED"   "$C" "$C" pair:c_o=c_o stateq k:1 route:plain
 run sym_refine "NOT K-INDUCTIVE"     "$A2" "$A1" pair:acc_o=acc_o adv:adv k:1
 run sym_refine "REFINEMENT PROVED"   "$A2" "$A1" pair:acc_o=acc_o adv:adv k:2
 run sym_refine "REFINEMENT PROVED"   "$A2" "$A1" pair:acc_o=acc_o adv:adv k:2 rebuild
