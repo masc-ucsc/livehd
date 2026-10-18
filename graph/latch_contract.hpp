@@ -326,6 +326,12 @@ struct Icg_def_match {
 // is forced to 0, so what the latch holds or passes through then is
 // unobservable; once G fires again the latch has been transparent for the
 // whole low phase before the edge in both the real circuit and the hold model.
+// A reader may also be a flop on G's FALLING edge (din or enable), reached
+// directly or through combinational logic: G does not fall while gated off, and
+// when it falls the latch has been shut since G rose. minion's preview register
+// file reads its `!(clk & en)` latch that way. Every path out of Q has to end in
+// one of these readers; a primary output, other state, or a cone larger than
+// the walk's bound answers false.
 [[nodiscard]] bool gated_latch_masked_off(const hhds::Node_class& latch);
 [[nodiscard]] bool gated_latch_masked_off(const hhds::Occurrence_node& latch);
 

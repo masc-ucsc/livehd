@@ -257,6 +257,27 @@ Phase_t<Pin> resolve_phase(Pin p, bool stop_at_clock_cell = false) {
       continue;
     }
 
+    if (op == Ntype_op::Ror) {
+      // Reduce-OR of ONE bit is that bit. The yosys-slang reader spells `!clk`
+      // as `Mux(Ror(clk), 1, 0)` and `(Ror(clk) == 0)`, and stopping here made
+      // the Ror node the root -- so `always_latch if (!clk_i) q <= d` was filed
+      // as a DATA-gated latch whose enable and din kept reading the clock after
+      // normalization (CORE-ET B01's enable latches; values_with_root already
+      // carried this rule for the same reason). A wider operand genuinely
+      // reduces, so it stays the root.
+      Pin a;
+      int cnt = 0;
+      for (const auto& in : gu::inp_sink_drivers(n)) {
+        a = in.driver;
+        ++cnt;
+      }
+      if (cnt != 1 || a.is_invalid() || gu::bits_of(a) != 1) {
+        break;
+      }
+      ph.net = a;
+      continue;
+    }
+
     if (op == Ntype_op::Clock_cell) {
       if (stop_at_clock_cell) {
         break;  // the cell IS the root for this caller (see the parameter note)
@@ -1103,31 +1124,92 @@ bool gated_latch_masked_off_impl(const Node& latch) {
   if (gop != Ntype_op::And && gop != Ntype_op::Clock_cell) {
     return false;
   }
-  const Pin  q      = latch.get_driver_pin(0);
-  const auto en_pid = Ntype::get_sink_pid(Ntype_op::Clock_cell, "en");
-  for (const auto& e : q.out_edges()) {
-    const auto sn = e.sink.get_master_node();
+  const Pin  q        = latch.get_driver_pin(0);
+  const auto en_pid   = Ntype::get_sink_pid(Ntype_op::Clock_cell, "en");
+  const auto din_pid  = Ntype::get_sink_pid(Ntype_op::Flop, "din");
+  const auto fen_pid  = Ntype::get_sink_pid(Ntype_op::Flop, "enable");
+  // A reader is MASKED when its value cannot depend on the latch while G is low.
+  // `sink` is one edge out of Q, or out of the combinational cone Q feeds.
+  auto masked_sink = [&](const Pin& from, const auto& sink) -> int {  // 1 masked, 0 not, -1 walk on
+    const auto sn = sink.get_master_node();
     const auto op = gu::type_op_of(sn);
-    bool       masked = false;
     if (op == Ntype_op::And) {
       for (const auto& in : gu::inp_sink_drivers(sn)) {
-        if (in.driver == q) {
+        if (in.driver == from) {
           continue;
         }
         const auto r = resolve_phase(in.driver, /*stop_at_clock_cell=*/true);
         if (!r.inverted && r.net == g) {
-          masked = true;
-          break;
+          return 1;
         }
       }
-    } else if (op == Ntype_op::Clock_cell && e.sink.get_port_id() == en_pid) {
+      return -1;  // an And without G is ordinary logic: follow it
+    }
+    if (op == Ntype_op::Clock_cell) {
+      if (sink.get_port_id() != en_pid) {
+        return 0;
+      }
       const auto inv = sink_driver_hier(sn, "invert");
       const auto d   = sink_driver_hier(sn, "div");
       const auto r   = resolve_phase(sink_driver_hier(sn, "clk_ref"), /*stop_at_clock_cell=*/true);
-      masked = (inv.is_invalid() || inv.is_known_false()) && (d.is_invalid() || const_is(d, 1)) && !r.inverted && r.net == g;
+      return (inv.is_invalid() || inv.is_known_false()) && (d.is_invalid() || const_is(d, 1)) && !r.inverted && r.net == g
+                 ? 1
+                 : 0;
     }
-    if (!masked) {
-      return false;
+    if (op == Ntype_op::Flop) {
+      // A FLOP ON G's FALLING EDGE, read through its din or enable. G does not
+      // fall while gated off, so the flop does not sample then; and when it
+      // does, the latch has been shut since G rose, so it reads the value
+      // captured at that rise -- exactly what commit-at-closing-edge holds.
+      // minion's preview register file reads its `!(clk & en)` latch this way
+      // (`always_ff @(negedge rf_clk_i) if (wr_data_en_1p_q) ...`, CORE-ET B01).
+      // A flop on G's RISING edge samples as the latch closes: that is the
+      // same-edge reader hazard, not a masked read, so it is not accepted here.
+      const auto pid = sink.get_port_id();
+      if (pid != din_pid && pid != fen_pid) {
+        return 0;
+      }
+      const auto r       = resolve_phase(sink_driver_hier(sn, "clock_pin"), /*stop_at_clock_cell=*/true);
+      const bool falling = r.inverted != sink_driver_hier(sn, "posclk").is_known_false();
+      return !r.net.is_invalid() && r.net == g && falling ? 1 : 0;
+    }
+    if (op == Ntype_op::Latch || op == Ntype_op::Fflop || op == Ntype_op::Memory || op == Ntype_op::Sub
+        || gu::is_graph_output_pin(sink)) {
+      return 0;  // state, an instance or a primary output observes Q directly
+    }
+    return -1;  // combinational: what it computes is masked iff all its readers are
+  };
+  // Bounded forward walk over the combinational cone: every path out of Q has to
+  // end in a masked reader. Exceeding the bound fails closed.
+  // (Flat graphs dedupe by node; an occurrence walk counts visits instead, since
+  // one class node stands for many instances there.)
+  constexpr int                 kMaxCone = 4096;
+  std::vector<Pin>              work{q};
+  absl::flat_hash_set<uint64_t> seen;
+  int                           visits = 0;
+  while (!work.empty()) {
+    const Pin from = work.back();
+    work.pop_back();
+    for (const auto& e : from.out_edges()) {
+      const int m = masked_sink(from, e.sink);
+      if (m == 1) {
+        continue;
+      }
+      if (m == 0) {
+        return false;
+      }
+      const auto sn = e.sink.get_master_node();
+      if constexpr (std::is_same_v<Node, hhds::Node_class>) {
+        if (!seen.insert(static_cast<uint64_t>(sn.get_class_index().value)).second) {
+          continue;
+        }
+      }
+      if (++visits > kMaxCone) {
+        return false;
+      }
+      for (const auto& dp : sn.out_sorted_pins()) {
+        work.push_back(dp);
+      }
     }
   }
   return true;
@@ -3275,9 +3357,22 @@ bool check(hhds::Graph* g) {
     // Transparent self-update — a real latch would oscillate/settle inside the
     // window, which is exactly the timing the abstraction discards. The hold
     // mux tolg synthesizes is exempted (see comb_reach).
+    //
+    // B and C ask what the latch passes WHILE OPEN, so they walk its transparent
+    // arm. A hold mux in either reader spelling -- the don't-care `'x`, or the
+    // KNOWN constant `yosys.setundef=zero` leaves -- selects its hold arm only on
+    // the shut phase (latch_transparent_arm proves that before it peels), so its
+    // selector reads nothing the open latch passes. Walked raw, the selector of
+    // a preview latch on a gated clock (`Ror(clk & el) ? 0 : nxt`) reached the
+    // gate's enable latch `el`, which shares its commit edge, and rule C refused
+    // CORE-ET's prim_clk_gate + preview register file at compile.
     {
       absl::flat_hash_set<hhds::Class_index> hit;
-      comb_reach(gu::get_driver_of_sink_name(l, "din"), l, hit);
+      auto                                   d_open = latch_transparent_arm(l);
+      if (d_open.is_invalid()) {
+        d_open = gu::get_driver_of_sink_name(l, "din");
+      }
+      comb_reach(d_open, l, hit);
       if (hit.contains(self_ix)) {
         reject("rule B, transparent self-update",
                "latch `" + latch_label(l) + "` has a combinational path from its Q back to its own D",

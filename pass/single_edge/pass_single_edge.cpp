@@ -1152,7 +1152,18 @@ bool check_rule4(const Plan& plan, hhds::Graph* g, const lc::Design_clocks& cloc
         continue;
       }
       absl::flat_hash_set<hhds::Class_index> hit;
-      comb_state_reach(sink_driver(s.node, "din"), hit);
+      // A CLOCK-gated latch reader samples its TRANSPARENT arm: the rewrite peels
+      // its hold mux, whose selector is the gate (`Ror(clk & en_l) ? 0 : d`), so
+      // walking the raw din would charge it with reading the gate's own enable
+      // latch -- a read the lowering does not make. Same arm the fold uses, as
+      // for the memory gate cones above.
+      auto s_din = sink_driver(s.node, "din");
+      if (s.is_latch && s.cc.role == lc::Net_role::Clock) {
+        if (auto arm = lc::latch_transparent_arm(s.node); !arm.is_invalid()) {
+          s_din = arm;
+        }
+      }
+      comb_state_reach(s_din, hit);
       if (!hit.contains(l.node.get_class_index())) {
         continue;
       }
@@ -2001,6 +2012,12 @@ Result normalize(hhds::Graph* g, const std::vector<hhds::Graph*>& defs, const Op
   std::vector<hhds::Pin_class> orphaned_clocks;  // old clock_pin drivers the rebind below disconnects
   for (const auto& e : plan.elems) {
     if (e.is_latch) {
+      // The value a CLOCK-gated latch passes through, read BEFORE anything below
+      // rewires its enable: latch_transparent_arm proves a hold arm against the
+      // window as written (enable + polarity pin), and the active-low lowering
+      // next inverts the enable while the pin is still on the cell.
+      const auto through
+          = e.cc.role == lc::Net_role::Clock ? lc::latch_transparent_arm(e.node) : hhds::Pin_class{};
       // `posclk` on a Latch is the ENABLE POLARITY, not an edge. Carrying it
       // onto a Flop would silently re-read it as "negedge" — the exact
       // double-negation this task exists to prevent. Move the polarity into the
@@ -2032,31 +2049,30 @@ Result normalize(hhds::Graph* g, const std::vector<hhds::Graph*>& defs, const Op
       // commit-at-closing-edge commits. A DATA gate is left completely alone —
       // it is real logic, and collapsing the two cases is what would blind the
       // transparent-low polarity canary.
+      //
+      // The hold arm comes in THREE spellings and all of them are peeled: tolg's
+      // Q feedback (`gate ? d : q`), the reader's don't-care (`gate ? d : 'x`),
+      // and -- under `yosys.setundef=zero`, which every CORE-ET and CVA6 row is
+      // compiled with -- a KNOWN constant (`Ror(clk) ? 0 : en`). Peeling only the
+      // Q spelling left the other two in din, so the normalized design kept
+      // reading the clock as data on exactly the latches the gate removed:
+      // CORE-ET B01's `if (!clk_i) en_1p <= en_i` enable latches, live state in
+      // the certificate. latch_transparent_arm proves the constant/X arm is the
+      // SHUT phase's before it peels; anything it cannot prove comes back as din
+      // itself, which is the value mux it really is.
       if (e.cc.role == lc::Net_role::Clock) {
-        if (has_hold_mux(e.node)) {
-          auto            q   = e.node.get_driver_pin(0);
-          auto            mux = sink_driver(e.node, "din").get_master_node();
-          hhds::Pin_class transparent;
-          for (auto msink : mux.inp_sorted_pins()) {
-            if (msink.get_port_id() == 0) {
-              continue;  // the selector (the gate itself)
-            }
-            const auto mdrv = msink.get_driver_pin();
-            if (!mdrv.is_invalid() && mdrv.get_class_index() != q.get_class_index()) {
-              transparent = mdrv;
-            }
-          }
-          if (transparent.is_invalid()) {
-            r.error  = true;
-            r.reason = "clock-gated latch `" + label_of(e.node) + "` has a hold mux with no transparent arm";
-            refuse(quiet, "latch-shape-unsupported", std::format("{}: {}", g->get_name(), r.reason), "");
-            return r;
-          }
-          drop_sink(e.node, "din");
-          transparent.connect_sink(gu::setup_sink_by_name(e.node, "din"));
+        if (through.is_invalid()) {
+          r.error  = true;
+          r.reason = "clock-gated latch `" + label_of(e.node) + "` has a hold mux with no transparent arm";
+          refuse(quiet, "latch-shape-unsupported", std::format("{}: {}", g->get_name(), r.reason), "");
+          return r;
         }
-        // No hold mux (the yosys raw-D shape): `din` is already the transparent
-        // value, so only the gate has to go.
+        if (auto din = sink_driver(e.node, "din"); din.is_invalid() || din.get_class_index() != through.get_class_index()) {
+          drop_sink(e.node, "din");
+          through.connect_sink(gu::setup_sink_by_name(e.node, "din"));
+        }
+        // The yosys raw-D shape has no hold arm at all: `din` is already the
+        // transparent value, so only the gate has to go.
         drop_sink(e.node, "enable");
       }
       drop_sink(e.node, "posclk");

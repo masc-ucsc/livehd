@@ -1043,6 +1043,18 @@ sh_test(
     ],
 )
 
+# CORE-ET's latch primitives read as the CORE-ET rows are (yosys-slang,
+# setundef=zero): the `Ror(clk)` phase spelling and the known-constant hold arm
+# normalize without the clock read as data, the preview latch on a gated clock is
+# admitted only for a falling-edge reader, and with LHD_EXTERNAL_SIM=1 an Icarus
+# differential against the RTL (P=1 and gate-less negative controls).
+sh_test(
+    name = "single_edge_setundef_latch_test",
+    size = "large",
+    srcs = ["single_edge_setundef_latch_test.sh"],
+    data = ["//lhd"],
+)
+
 # LIVE test for todo/livehd/2f-latch M8 steps 3b + 3g: all FOUR commit classes
 # (posedge, negedge, transparent-high, transparent-low) in ONE module.
 # Discrimination is checked through `lhd lec` (collapsing any two classes must
