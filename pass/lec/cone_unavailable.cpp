@@ -17,4 +17,6 @@ std::vector<Cone_verdict> abc_prove_unsat_batch(const std::vector<cvc5::Term>& d
   }
   return std::vector<Cone_verdict>(diffs.size(), Cone_verdict::Unsupported);
 }
+
+std::vector<Seq_answer> abc_seq_bmc(const Seq_model& m, int64_t) { return std::vector<Seq_answer>(m.props.size()); }
 }  // namespace livehd::lec

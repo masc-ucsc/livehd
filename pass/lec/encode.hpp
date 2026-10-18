@@ -112,6 +112,9 @@ struct Encoded {
   // Graph-input names each property's cone reaches. For a monitor graph these
   // are the bind idents, so the caller can continue the walk in the design.
   absl::flat_hash_map<int, std::vector<std::string>> prop_cone_inputs;
+  // Structural digest of each property's cone (see cone_digest_of). Internal
+  // names and source lines are left out, so renames and comment edits keep it.
+  absl::flat_hash_map<int, std::string> prop_cone_digest;
   // Signal name (port or flop state key) -> the pin that drives it, so a
   // caller can seed a COI walk from a name.
   absl::flat_hash_map<std::string, hhds::Occurrence_pin> cone_seed;
@@ -365,6 +368,8 @@ std::string flop_state_key(const hhds::Graph& g, const hhds::Node_class& node);
 // COI over a set of seed pins: one shared walk, so logic common to two seeds
 // is counted once.
 Encoded::Cone_stats cone_over(const std::vector<hhds::Occurrence_pin>& seeds);
+// Structural digest of the cone behind `starts` (names ignored, see encode.cpp).
+std::string cone_digest_over(const std::vector<hhds::Occurrence_pin>& starts);
 
 // Canonicalize a flop's hierarchical name so a HIERARCHICAL stage register on
 // one side pairs with a FLATTENED reimplementation on the other. CIRCT/firtool
@@ -647,6 +652,9 @@ private:
   };
   const hhds::OccurrenceNodeRange& forward_nodes(hhds::Graph* g, const ankerl::unordered_dense::set<hhds::Gid>& opaque);
   std::deque<Fwd_view>             fwd_cache_;
+  // Cone digest per (graph, property occ): the same in every cycle's encode.
+  absl::flat_hash_map<std::string, std::string> digest_memo_;
+
   // Fit `v` to exactly `width` bits: sign/zero-extend (per v.is_signed) when
   // widening, low-bit Extract when narrowing.
   cvc5::Term                       fit(const Val& v, int width);

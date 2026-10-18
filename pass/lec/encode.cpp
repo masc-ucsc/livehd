@@ -3,6 +3,7 @@
 #include "encode.hpp"
 
 #include <algorithm>
+#include <tuple>
 #include <cctype>
 #include <concepts>
 #include <cstdint>
@@ -1316,6 +1317,119 @@ static Encoded::Cone_stats cone_of(const hhds::Occurrence_pin& start, std::vecto
     }
   }
   return cs;
+}
+
+// 128-bit FNV-1a, two lanes; stable across runs and builds.
+static std::string digest128(std::string_view data) {
+  uint64_t a = 0xcbf29ce484222325ULL, b = 0x84222325cbf29ce4ULL;
+  for (unsigned char c : data) {
+    a = (a ^ c) * 0x100000001b3ULL;
+    b = (b ^ (c + 0x9e)) * 0x100000001b3ULL;
+  }
+  return std::format("{:016x}{:016x}", a, b);
+}
+
+// Structural digest of the cone behind `starts`: Weisfeiler-Lehman refinement
+// over the occurrence graph. A node's label is its op plus, per input port,
+// the labels of its drivers; graph inputs keep their port name and constants
+// their value. Internal names never enter, so a rename keeps the digest, and
+// any change to logic, constants, widths or wiring inside the cone moves it.
+std::string cone_digest_over(const std::vector<hhds::Occurrence_pin>& starts) {
+  std::vector<hhds::Occurrence_node>    nodes;
+  absl::flat_hash_map<std::string, int> index;
+  std::vector<hhds::Occurrence_pin>     work(starts.begin(), starts.end());
+  auto pin_token = [](const hhds::Occurrence_pin& pin) -> std::string {
+    if (gu::is_graph_input_pin(pin)) {
+      return std::format("in:{}:{}", pin.get_pin_name(), gu::bits_of(pin));
+    }
+    if (pin.is_const()) {
+      return std::format("k:{}:{}", gu::const_of(pin).to_verilog(), gu::bits_of(pin));
+    }
+    return {};
+  };
+  while (!work.empty()) {
+    auto pin = work.back();
+    work.pop_back();
+    if (pin.is_invalid() || !pin_token(pin).empty()) {
+      continue;
+    }
+    auto node = pin.get_master_node();
+    if (node.is_invalid()) {
+      continue;
+    }
+    if (!index.emplace(box_node_key(node), static_cast<int>(nodes.size())).second) {
+      continue;
+    }
+    nodes.push_back(node);
+    for (const auto& sink : node.inp_sorted_pins()) {
+      for (const auto& drv : sink.get_driver_pins()) {
+        work.push_back(drv);
+      }
+    }
+  }
+  // Per node, per input port: (port, [driver token or node index + driver port + width]).
+  struct In {
+    int                                              port;
+    std::vector<std::tuple<std::string, int, int, int>> drv;  // token, node idx (-1), drv port, bits
+  };
+  std::vector<std::vector<In>> ins(nodes.size());
+  std::vector<std::string>     lab(nodes.size());
+  for (size_t i = 0; i < nodes.size(); ++i) {
+    for (const auto& sink : nodes[i].inp_sorted_pins()) {
+      In in{static_cast<int>(sink.get_port_id()), {}};
+      for (const auto& drv : sink.get_driver_pins()) {
+        std::string tok = pin_token(drv);
+        int         j   = -1;
+        if (tok.empty() && !drv.is_invalid() && !drv.get_master_node().is_invalid()) {
+          j = index.at(box_node_key(drv.get_master_node()));
+        }
+        in.drv.emplace_back(std::move(tok), j, static_cast<int>(drv.get_port_id()), gu::bits_of(drv));
+      }
+      ins[i].push_back(std::move(in));
+    }
+    lab[i] = digest128(std::format("op:{}", static_cast<int>(gu::type_op_of(nodes[i]))));
+  }
+  const std::vector<std::string> base = lab;
+  size_t                         prev = 0;
+  for (int round = 0; round < 64; ++round) {
+    std::vector<std::string> next(nodes.size());
+    for (size_t i = 0; i < nodes.size(); ++i) {
+      std::string s = base[i];
+      for (const auto& in : ins[i]) {
+        s += std::format("|p{}", in.port);
+        for (const auto& [tok, j, dport, bits] : in.drv) {
+          s += j < 0 ? std::format(",{}", tok) : std::format(",n{}.{}:{}", lab[static_cast<size_t>(j)], dport, bits);
+        }
+      }
+      next[i] = digest128(s);
+    }
+    lab = std::move(next);
+    absl::flat_hash_set<std::string> distinct(lab.begin(), lab.end());
+    if (distinct.size() == prev) {
+      break;
+    }
+    prev = distinct.size();
+  }
+  std::vector<std::string> roots;
+  for (const auto& start : starts) {
+    std::string root = pin_token(start);
+    if (root.empty() && !start.is_invalid() && !start.get_master_node().is_invalid()) {
+      root = std::format("{}.{}", lab[static_cast<size_t>(index.at(box_node_key(start.get_master_node())))],
+                         static_cast<int>(start.get_port_id()));
+    }
+    roots.push_back(std::move(root));
+  }
+  std::sort(roots.begin(), roots.end());
+  std::vector<std::string> sorted = lab;
+  std::sort(sorted.begin(), sorted.end());
+  std::string all = "root:";
+  for (const auto& r : roots) {
+    all += r + ";";
+  }
+  for (const auto& l : sorted) {
+    all += "," + l;
+  }
+  return digest128(all);
 }
 
 Encoded::Cone_stats cone_over(const std::vector<hhds::Occurrence_pin>& seeds) {
@@ -4156,6 +4270,12 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
         std::vector<std::string> reached;
         out.prop_cone[occ]        = cone_of(cond_drv, reached);
         out.prop_cone_inputs[occ] = std::move(reached);
+        const auto mk = std::to_string(reinterpret_cast<uintptr_t>(g)) + ":" + std::to_string(occ);
+        auto [dit, fresh] = digest_memo_.try_emplace(mk);
+        if (fresh) {
+          dit->second = cone_digest_over({cond_drv});
+        }
+        out.prop_cone_digest[occ] = dit->second;
       }
       // Which assumes are ACTIVE hypotheses (see Encoded::prop_active_assume).
       // Record the decision by occ so the design-assumption asserter never has to

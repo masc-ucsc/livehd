@@ -464,6 +464,9 @@ struct Past_collector : public slang::ast::ASTVisitor<Past_collector, slang::ast
   absl::flat_hash_map<const slang::ast::ValueSymbol*, int> depth;  // symbol -> deepest n
   bool                                                     saw_unsupported = false;
 
+  // A child instance keeps its own history flops; do not collect them here.
+  void handle(const slang::ast::InstanceSymbol&) {}
+
   void handle(const slang::ast::CallExpression& e) {
     // $rose/$fell/$stable/$changed are one cycle of history each, so they need
     // a chain just as much as $past does. Collecting only $past left a design
@@ -2602,9 +2605,13 @@ bool Slang_context::lower_module(const slang::ast::InstanceSymbol& symbol) {
   // NOT get the poison store — the wire is single-driver, and a split wire's
   // accumulator carries the poison as its declare init instead).
 
+  // History flops belong to this body only: a parent's chains must not be
+  // updated inside a child lowered after (or during) it.
+  auto outer_past = std::exchange(past_chain_, {});
   declare_past_chains(*body);
   lower_members(*body);
   emit_past_chain_updates();
+  past_chain_ = std::move(outer_past);
   finalize_pending_async_resets();
   for (const auto* sym : emit_ordered(reg_init_applied_)) {
     if (reset_attr_syms_.contains(sym)) {

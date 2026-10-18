@@ -687,6 +687,50 @@ sh_test(
     data = ["//lhd"],
 )
 
+# The induction step reads past(x, n) from n frames back, as the BMC unroll
+# does; reading the current frame proved a toggling register frozen.
+sh_test(
+    name = "lhd_formal_past_induction_test",
+    srcs = ["lhd_formal_past_induction_test.sh"],
+    data = ["//lhd"],
+    tags = ["no-sandbox"],
+)
+
+# Per-property cone cache: a formal block whose cone did not change keeps its
+# proof across edits on one --workdir; a changed cone is re-proved.
+sh_test(
+    name = "lhd_formal_cone_cache_test",
+    srcs = ["lhd_formal_cone_cache_test.sh"],
+    data = ["//lhd"],
+    tags = ["no-sandbox"],
+)
+
+# Cross-version reuse in the ABC pre-pass: equivalence, counterexample replay,
+# PDR invariant (Houdini-filtered).
+# Same-cycle env assumes constrain asserts that come earlier in occurrence order.
+sh_test(
+    name = "lhd_formal_assume_order_test",
+    srcs = ["lhd_formal_assume_order_test.sh"],
+    data = ["//lhd"],
+    tags = ["no-sandbox"],
+)
+
+sh_test(
+    name = "lhd_formal_reuse_test",
+    srcs = ["lhd_formal_reuse_test.sh"],
+    data = ["//lhd"],
+    tags = ["no-sandbox"],
+)
+
+# ABC bmc3 pre-pass: same verdicts, depths, failing cycles and witnesses as the
+# cvc5-only run.
+sh_test(
+    name = "lhd_formal_abc_bmc_test",
+    srcs = ["lhd_formal_abc_bmc_test.sh"],
+    data = ["//lhd"],
+    tags = ["no-sandbox"],
+)
+
 sh_test(
     name = "lhd_formal_cache_split_test",
     srcs = ["lhd_formal_cache_split_test.sh"],
