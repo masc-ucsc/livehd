@@ -80,6 +80,79 @@ struct Element {
 
 // Backward combinational reach to STATE elements (stops at any register), so a
 // data-gated latch can inherit the slot of whatever drives its enable.
+// Is an instance's definition purely combinational (no state anywhere below
+// it)? A body-less def is unknown and counted as combinational: the walk below
+// is a REFUSAL test, so the conservative answer is the one that keeps walking.
+bool def_is_comb(const std::shared_ptr<hhds::Graph>& def, absl::flat_hash_map<const hhds::Graph*, bool>& memo, int depth) {
+  if (!def) {
+    return true;
+  }
+  if (auto it = memo.find(def.get()); it != memo.end()) {
+    return it->second;
+  }
+  memo[def.get()] = false;  // a def reached again while open is a cycle: not provably combinational
+  bool comb = depth < 16;
+  for (auto dn : def->body().nodes()) {
+    if (!comb) {
+      break;
+    }
+    const auto op = gu::type_op_of(dn);
+    if (gu::is_type_register(dn)) {
+      comb = false;
+    } else if (op == Ntype_op::Sub) {
+      comb = def_is_comb(dn.get_subnode_graph(), memo, depth + 1);
+    }
+  }
+  memo[def.get()] = comb;
+  return comb;
+}
+
+// The clock input a DATA-gated latch's window still reads, or invalid. Such a
+// latch keeps its enable through the rewrite and evaluates it on every
+// sub-step, so a clock in that cone is read AS DATA after normalization: the
+// window follows the free sub-step clock, not the source phase. Every shape the
+// pass understands (a clock-phase window, a gate cone) is classified as
+// Clock-role before it gets here; what is left reads the clock through logic
+// the classifier could not resolve -- a gate inside an instance (a mapped
+// netlist's AND2 cell under a wrapper module), a reduction it does not
+// model. Walks the combinational cone INTO combinational instances (an
+// instance output is taken to depend on every input) and through Clock_cells,
+// stopping at state.
+hhds::Pin_class window_clock_read(const hhds::Pin_class& start, const lc::Design_clocks& clocks) {
+  absl::flat_hash_set<hhds::Class_index>        seen;
+  absl::flat_hash_map<const hhds::Graph*, bool> comb_def;
+  std::vector<hhds::Pin_class>                  work{start};
+  while (!work.empty()) {
+    auto p = work.back();
+    work.pop_back();
+    if (p.is_invalid() || p.is_const()) {
+      continue;
+    }
+    if (gu::is_graph_input_pin(p)) {
+      if (clocks.is_clock(p)) {
+        return p;
+      }
+      continue;
+    }
+    if (!seen.insert(p.get_class_index()).second) {
+      continue;
+    }
+    auto n = p.get_master_node();
+    if (gu::is_type_register(n)) {
+      continue;  // state: a value the window may read
+    }
+    if (gu::type_op_of(n) == Ntype_op::Sub && !def_is_comb(n.get_subnode_graph(), comb_def, 0)) {
+      continue;  // a stateful instance: its outputs are state, not a path from its clock input
+    }
+    for (auto sink : n.inp_sorted_pins()) {  // read-only pin walk
+      for (const auto& drv : sink.get_driver_pins()) {
+        work.push_back(drv);
+      }
+    }
+  }
+  return {};
+}
+
 void comb_state_reach(const hhds::Pin_class& start, absl::flat_hash_set<hhds::Class_index>& hit) {
   if (start.is_invalid()) {
     return;
@@ -927,6 +1000,19 @@ Plan build_plan(hhds::Graph* g, const lc::Design_clocks& clocks, bool multi_cloc
   for (auto& e : plan.elems) {
     if (e.cc.role == lc::Net_role::Clock) {
       continue;
+    }
+    // A data-gated window that still reads a CLOCK is not data: lowering it
+    // keeps the clock as data in the enable, a silent full-cycle error.
+    // Decline instead (B08's rule: refuse the shape whenever its conditions
+    // cannot be checked). Measured: `lhd_abc_latch_test_usyn`'s mapped
+    // `abc_latch_gated`, whose gate is an AND2 cell inside a wrapper module,
+    // normalized this way and REFUTED against its correctly normalized RTL.
+    if (const auto ck = window_clock_read(sink_driver(e.node, "enable"), clocks); !ck.is_invalid()) {
+      plan.code = "latch-window-reads-clock";
+      plan.why  = "latch `" + label_of(e.node) + "` has a window that reads clock `" + std::string{gu::pin_name_of(ck)}
+                 + "` through logic this pass cannot resolve to a clock phase or a gate, so its lowered enable would "
+                   "read the clock as data";
+      return plan;
     }
     // Data-gated: the window closes when the enable deasserts, and the enable
     // is a function of state, so it closes on THAT state's commit edge.

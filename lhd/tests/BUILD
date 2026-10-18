@@ -1043,6 +1043,17 @@ sh_test(
     ],
 )
 
+# A DATA-gated latch whose window still reads a clock through logic the pass
+# cannot resolve (a gate inside an instance) is refused, not lowered with the
+# clock read as data; the same gate written in the top folds, and a window from
+# a stateful instance is accepted.
+sh_test(
+    name = "single_edge_opaque_gate_test",
+    size = "medium",
+    srcs = ["single_edge_opaque_gate_test.sh"],
+    data = ["//lhd"],
+)
+
 # CORE-ET's latch primitives read as the CORE-ET rows are (yosys-slang,
 # setundef=zero): the `Ror(clk)` phase spelling and the known-constant hold arm
 # normalize without the clock read as data, the preview latch on a gated clock is
