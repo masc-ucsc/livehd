@@ -615,6 +615,13 @@ def runRefKOf (sy : RefSys) (RI RS : Program) (sp : RefSpec) (pfB pfS : ByteArra
     && (match refBaseObl sy RI RS sp with | some φ => checkUnsat φ pfB | none => false)
     && (match refStepObl sy RI RS sp with | some φ => checkUnsat φ pfS | none => false)
 
+/-- `runRefKOf` from obligations ALREADY BUILT (see `runInvKOf_of_obls`). -/
+theorem runRefKOf_of_obls {sy : RefSys} {RI RS : Program} {sp : RefSpec} {pfB pfS : ByteArray}
+    {φB φS : BVLogicalExpr} (hs : refSideOK sy sp = true) (hB : refBaseObl sy RI RS sp = some φB)
+    (hS : refStepObl sy RI RS sp = some φS) (cB : checkUnsat φB pfB = true)
+    (cS : checkUnsat φS pfS = true) : runRefKOf sy RI RS sp pfB pfS = true := by
+  simp [runRefKOf, hs, hB, hS, cB, cS]
+
 /-! ## Soundness -/
 
 section
@@ -899,6 +906,7 @@ end
 #audit_axioms punroll_sound
 #audit_axioms refInv_all
 #audit_axioms runRefKOf_sound
+#audit_axioms runRefKOf_of_obls
 #audit_axioms runRefKOf_sound_ref
 
 end Projection.Sym

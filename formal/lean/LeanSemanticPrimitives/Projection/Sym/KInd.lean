@@ -166,6 +166,16 @@ def runInvKOf (D : DesignCert) (R : Program) (sp : InvSpec) (s0 : StateM) (pfB p
     && (match baseObl D R sp s0 with | some φ => checkUnsat φ pfB | none => false)
     && (match stepObl D R sp with | some φ => checkUnsat φ pfS | none => false)
 
+/-- `runInvKOf` from obligations ALREADY BUILT: a driver that computed
+`baseObl` and `stepObl` (to hand them to the solver) evaluates this unfolding
+over those values instead of re-running the symbolic evaluation. -/
+theorem runInvKOf_of_obls {D : DesignCert} {R : Program} {sp : InvSpec} {s0 : StateM}
+    {pfB pfS : ByteArray} {φB φS : BVLogicalExpr}
+    (hs : sideOK D sp s0 = true) (hB : baseObl D R sp s0 = some φB) (hS : stepObl D R sp = some φS)
+    (cB : checkUnsat φB pfB = true) (cS : checkUnsat φS pfS = true) :
+    runInvKOf D R sp s0 pfB pfS = true := by
+  simp [runInvKOf, hs, hB, hS, cB, cS]
+
 /-! ## Soundness -/
 
 section
@@ -386,6 +396,7 @@ theorem runInvK_sound {sf wf : Nat} {D : DesignCert} {sp : InvSpec} {s0 : StateM
 #audit_axioms eval_defsE
 #audit_axioms inv_all
 #audit_axioms runInvKOf_sound
+#audit_axioms runInvKOf_of_obls
 #audit_axioms runInvKOf_sound_ref
 #audit_axioms runInvK_sound
 

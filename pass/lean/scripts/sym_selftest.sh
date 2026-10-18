@@ -6,7 +6,8 @@ set -euo pipefail
 # Small RTL fixtures, each through the real flow (yosys-slang -> LGraph ->
 # DCERT2), then:
 #   cnt10  mod-10 counter
-#     c <= 9                      PROVED (k=1)
+#     c <= 9                      PROVED (k=1); also with the check re-building
+#                                 the obligations (`rebuild`) and closed (`closed`)
 #     c != 9                      NOT K-INDUCTIVE at k=1; COUNTEREXAMPLE at k=10
 #     c == 0 while reset held     PROVED (k=1); NOT K-INDUCTIVE without the assumption
 #     candidates c != 9, c <= 9   one specialization; the first is not
@@ -17,7 +18,8 @@ set -euo pipefail
 #                                 (witness `adv`): NOT K-INDUCTIVE at k=1,
 #                                 PROVED at k=2 (also as one run over k=1,2);
 #                                 in LOCKSTEP a COUNTEREXAMPLE
-# Every PROVED is the verified check (Sym.runInvKOf / Sym.runRefKOf)
+# Every PROVED is the verified check (Sym.runInvKOf / Sym.runRefKOf, by
+# default through *_of_obls over the obligations already built)
 # accepting LRAT proofs from the untrusted solver. A run with several
 # attempts is judged by its LAST verdict line.
 #
@@ -92,6 +94,8 @@ C="$OUT/cnt10_lean/cnt10.dcert"
 A1="$OUT/acc1_lean/acc1.dcert"
 A2="$OUT/acc2_lean/acc2.dcert"
 run sym_verify "INVARIANT PROVED"    "$C" ok_good k:1
+run sym_verify "INVARIANT PROVED"    "$C" ok_good k:1 rebuild
+run sym_verify "INVARIANT PROVED"    "$C" ok_good k:1 closed
 run sym_verify "NOT K-INDUCTIVE"     "$C" ok_bad k:1
 run sym_verify "COUNTEREXAMPLE"      "$C" ok_bad k:10
 run sym_verify "INVARIANT PROVED"    "$C" '!c_o' in:rst=1 k:1
@@ -102,6 +106,7 @@ run sym_refine "REFINEMENT PROVED"   "$C" "$C" pair:c_o=c_o pair:ok_good=ok_good
 run sym_refine "REFINEMENT PROVED"   "$C" "$C" pair:c_o=c_o stateq k:1
 run sym_refine "NOT K-INDUCTIVE"     "$A2" "$A1" pair:acc_o=acc_o adv:adv k:1
 run sym_refine "REFINEMENT PROVED"   "$A2" "$A1" pair:acc_o=acc_o adv:adv k:2
+run sym_refine "REFINEMENT PROVED"   "$A2" "$A1" pair:acc_o=acc_o adv:adv k:2 rebuild
 run sym_refine "REFINEMENT PROVED"   "$A2" "$A1" pair:acc_o=acc_o adv:adv k:1,2
 grep -q '\[k=1\] RESULT: NOT K-INDUCTIVE' "$OUT/run_$N.log" || { echo "FAIL: k list"; exit 1; }
 run sym_refine "COUNTEREXAMPLE"      "$A2" "$A1" pair:acc_o=acc_o k:4

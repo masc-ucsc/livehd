@@ -4,7 +4,7 @@ design up to stuttering, by k-induction on their projection residuals (M3 S6).
 
     sym_refine <impl.dcert> <spec.dcert> pair:<implOut>=<specOut>... [adv:[!]<implOut>]
                [map:<specInput>=<implInput>]... [asm:[!]<implOut>] [in:<implInput>=<value>]...
-               [stateq] [k:<n>[,<n>...]] [sf:<n>] [wf:<n>] [solver:<cadical>] [work:<dir>]
+               [stateq] [rebuild] [k:<n>[,<n>...]] [sf:<n>] [wf:<n>] [solver:<cadical>] [work:<dir>]
 
 The implementation steps every cycle; the specification steps only on cycles
 where the witness output `adv` fires (no `adv`: lockstep) and holds
@@ -15,7 +15,9 @@ specification inputs default to the implementation input of the same NAME).
 On every witnessed cycle each `pair:` must agree. Both designs start
 all-zero. Both are specialized ONCE (one certificate file: once in all); each
 k of the list is then tried in order until one proves. Verdict: the verified
-check `Sym.runRefKOf` against LRAT proofs from the untrusted solver;
+check `Sym.runRefKOf` (through `runRefKOf_of_obls`, over the obligations
+already built; `rebuild` re-builds them) against LRAT proofs from the
+untrusted solver;
 acceptance is `runRefKOf_sound_ref` (the refinement over `interpretDesign`)
 given the specializer runs (the D1 trusted native run of every FP route).
 -/
@@ -227,9 +229,13 @@ def main (args : List String) : IO UInt32 := do
             continue
         | .failed w => do say s!"  {pre}RESULT: SOLVER FAILED (step): {w}"; return 5
       let t4 ← IO.monoMsNow
-      let ok ← IO.lazyPure (fun _ => runRefKOf sy RI RS sp pfB pfS)
+      -- through `runRefKOf_of_obls` over the obligations built above; `rebuild`
+      -- evaluates `runRefKOf` itself (repeats the symbolic evaluation)
+      let rebuild := rest.contains "rebuild"
+      let ok ← if rebuild then IO.lazyPure (fun _ => runRefKOf sy RI RS sp pfB pfS)
+               else IO.lazyPure (fun _ => refSideOK sy sp && checkUnsat φB pfB && checkUnsat φS pfS)
       let t5 ← IO.monoMsNow
-      say s!"  {pre}verified check (runRefKOf: re-build, LRAT-check both) in {t5 - t4} ms"
+      say s!"  {pre}verified check ({if rebuild then "runRefKOf: re-build, " else "runRefKOf via runRefKOf_of_obls: "}LRAT-check both) in {t5 - t4} ms"
       if ok then
         say s!"  {pre}RESULT: REFINEMENT PROVED (k={kd}) -- runRefKOf_sound_ref: on every run, every witnessed cycle relates the implementation's interpretDesign outputs to the stuttered specification's"
         return 0

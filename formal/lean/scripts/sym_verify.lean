@@ -3,7 +3,7 @@
 residual (M3).
 
     sym_verify <cert> [!]<output>[,[!]<output>...] [asm:[!]<output>] [in:<input>=<value>]...
-               [k:<n>[,<n>...]] [closed] [emit:<file>] [sf:<n>] [wf:<n>] [solver:<cadical>] [work:<dir>]
+               [k:<n>[,<n>...]] [closed|rebuild] [emit:<file>] [sf:<n>] [wf:<n>] [solver:<cadical>] [work:<dir>]
 
 Outputs and inputs are named by ordinal or by name (names come from the
 `<top>_io.json` next to the certificate). The property holds at a cycle when
@@ -19,9 +19,10 @@ first proved wins), build the BASE and STEP obligations of k-induction
 the checker checks); run the UNTRUSTED solver for a binary LRAT proof; then
 evaluate the VERIFIED check `Sym.runInvKOf` on that residual, whose acceptance
 is `Sym.runInvKOf_sound_ref` given the specializer run (the same trusted native
-run, D1, as every FP route). `closed` evaluates the closed `Sym.runInvK`
-instead, which re-specializes (`runInvK_sound`; doubles the specialization
-cost). A satisfiable BASE obligation is a counterexample from the initial
+run, D1, as every FP route). The check is evaluated through
+`Sym.runInvKOf_of_obls` over the obligations already built; `rebuild`
+evaluates `runInvKOf` itself (repeats the symbolic evaluation), `closed` the
+closed `Sym.runInvK` (also re-specializes; `runInvK_sound`). A satisfiable BASE obligation is a counterexample from the initial
 state, replayed on the projection's simulator; a satisfiable STEP obligation
 only says the property is not k-inductive.
 
@@ -228,7 +229,7 @@ end SymF2.{name}
 once for all attempts. Returns the exit code and the verdict. -/
 def attempt (cert : String) (solver : String) (work : System.FilePath) (sf wf : Nat)
     (D : DesignCert) (R : Program) (bound : Nat) (s0 : StateM) (tag : String) (prop : PropSpec)
-    (asmOut : Option PropSpec) (asmIn : List (Nat × Int)) (kd : Nat) (closed : Bool)
+    (asmOut : Option PropSpec) (asmIn : List (Nat × Int)) (kd : Nat) (closed rebuild : Bool)
     (emit : Option String) : IO (UInt32 × String) := do
   let pre := if tag.isEmpty then "" else s!"[{tag} k={kd}] "
   let fin (code : UInt32) (v : String) : IO (UInt32 × String) := do
@@ -281,12 +282,18 @@ def attempt (cert : String) (solver : String) (work : System.FilePath) (sf wf : 
   let t4 ← IO.monoMsNow
   -- `admitsB D` held before specializing, and `R` is this process's run of
   -- `projectMemDesignAt sf wf D` (the D1 trusted native run every FP route
-  -- makes); `runInvKOf_sound_ref` takes exactly those two facts. `closed` instead
-  -- evaluates the closed `runInvK`, which re-specializes.
+  -- makes); `runInvKOf_sound_ref` takes exactly those two facts. By default
+  -- `runInvKOf` is evaluated through `runInvKOf_of_obls`: over the `baseObl` /
+  -- `stepObl` values built above, so the symbolic evaluation is not repeated.
+  -- `rebuild` evaluates `runInvKOf` itself; `closed` the closed `runInvK`,
+  -- which also re-specializes.
+  let mode := if closed then "closed runInvK: re-specialize, re-build, "
+    else if rebuild then "runInvKOf: re-build, " else "runInvKOf via runInvKOf_of_obls: "
   let ok ← if closed then IO.lazyPure (fun _ => runInvK sf wf D sp s0 pfB pfS)
-           else IO.lazyPure (fun _ => runInvKOf D R sp s0 pfB pfS)
+           else if rebuild then IO.lazyPure (fun _ => runInvKOf D R sp s0 pfB pfS)
+           else IO.lazyPure (fun _ => sideOK D sp s0 && checkUnsat φB pfB && checkUnsat φS pfS)
   let t5 ← IO.monoMsNow
-  say s!"  {pre}verified check ({if closed then "closed runInvK: re-specialize, " else "runInvKOf: "}re-build, LRAT-check both) in {t5 - t4} ms"
+  say s!"  {pre}verified check ({mode}LRAT-check both) in {t5 - t4} ms"
   if ok then
     if let some ef := emit then
       let name := ((System.FilePath.mk ef).fileStem.getD "F2").map fun c => if c.isAlphanum then c else '_'
@@ -358,7 +365,7 @@ flops {D.flops.size} memories {D.memories.size} clocks {D.clocks.size}"
     for kd in ks do
       for (tok, prop) in cands do
         let (code, v) ← attempt cert solver work sf wf D R bound s0 (if single then "" else tok) prop
-          asmOut asmIn kd (rest.contains "closed") (opt "emit")
+          asmOut asmIn kd (rest.contains "closed") (rest.contains "rebuild") (opt "emit")
         verdicts := verdicts ++ [s!"{tok} k={kd}: {(v.splitOn " --").head!}"]
         last := code
         if code == 0 then
@@ -371,5 +378,5 @@ flops {D.flops.size} memories {D.memories.size} clocks {D.clocks.size}"
     unless single do say s!"  SUMMARY: none proved: {verdicts}"
     return last
   | _ =>
-    IO.eprintln "usage: sym_verify <cert> [!]<out>[,[!]<out>...] [asm:<output>] [in:<input>=<value>]... [k:<n>[,<n>...]] [closed] [emit:<file>] [sf:<n>] [wf:<n>] [solver:<cadical>] [work:<dir>]"
+    IO.eprintln "usage: sym_verify <cert> [!]<out>[,[!]<out>...] [asm:<output>] [in:<input>=<value>]... [k:<n>[,<n>...]] [closed|rebuild] [emit:<file>] [sf:<n>] [wf:<n>] [solver:<cadical>] [work:<dir>]"
     return 2
