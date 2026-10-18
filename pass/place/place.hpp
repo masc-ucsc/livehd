@@ -45,6 +45,7 @@ struct Options {
   double                                                     utilization = 0.30, aspect = 1, density = 0.5;
   // Fixed generated frame in microns, {xl, yl, xh, yh}; empty means derive it from utilization/aspect.
   // `core` is snapped inward to the site/row grid; with only one of the two given the other equals it.
+  // An imported `floorplan` (also what the staged macro/cell passes feed themselves) wins over both.
   std::vector<double>                                        die, core;
   double                                                     stop_overflow = .1, initial_density_weight = .01;
   double                                                     halo_x = 5, halo_y = 5;  // microns per side, non-CORE macros only

@@ -892,6 +892,22 @@ TEST(Placement, FixedDieAndCoreSnapInwardAndKeepPinsOnTheDie) {
   for (const auto& t : fp.terminals) {
     EXPECT_TRUE(t.x == fp.die.xl || t.x == fp.die.xh || t.y == fp.die.yl || t.y == fp.die.yh) << t.name;
   }
+  {  // The staged macro/cell passes feed their own frame back as an imported floorplan while the
+     // original die/core options stay set: the imported frame wins and the run must not refuse.
+    auto frame = fp;
+    frame.components.clear();
+    frame.terminals.clear();
+    frame.nets.clear();
+    const auto def = std::filesystem::path(std::getenv("TEST_TMPDIR")) / "fixed_frame_import.def";
+    physical::write_def(frame, def.string());
+    auto staged         = options;
+    staged.floorplan    = def.string();
+    staged.output_dir   = std::string(std::getenv("TEST_TMPDIR")) + "/fixed_frame_staged";
+    hhds::GraphLibrary again;
+    const auto         restaged = place(*graph, again, staged);
+    EXPECT_EQ(restaged.floorplan.rows.size(), fp.rows.size());
+    EXPECT_EQ(restaged.floorplan.rows.front().x, fp.rows.front().x);
+  }
   // A lone die doubles as the core; the same cells fit, so only the frame changes.
   options.core.clear();
   options.output_dir = std::string(std::getenv("TEST_TMPDIR")) + "/fixed_die_only";

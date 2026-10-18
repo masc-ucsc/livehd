@@ -1988,9 +1988,6 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
       throw std::invalid_argument("synth.place.die/core expect nonnegative xl,yl,xh,yh microns with xh>xl and yh>yl");
     }
   }
-  if (!options.floorplan.empty() && (!options.die.empty() || !options.core.empty())) {
-    throw std::invalid_argument("synth.place.die/core cannot be combined with an imported synth.place.floorplan");
-  }
   if (options.macro_mode != "none" && options.macro_mode != "h2d" && options.macro_mode != "r8h2" && options.macro_mode != "r8h3") {
     throw std::invalid_argument("macro placement mode must be none, h2d, r8h2 or r8h3");
   }
