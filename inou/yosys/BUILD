@@ -186,6 +186,22 @@ sh_test(
     deps = [":scripts"],
 )
 
+# A case that lists every selector value has no unmatched path. read_slang --no-proc leaves the block's "hold
+# the previous value" start in front of it and proc_mux wires that into the dead path, which was a false
+# combinational loop (Vortex FPU/ALU). lhd_full_case marks such cases full_case before proc; cases that miss a
+# value are left alone and keep their latch.
+sh_test(
+    name = "yosys_full_case_test",
+    srcs = ["tests/yosys_full_case_test.sh"],
+    data = [
+        "tests/full_case_dontcare.sv",
+        "tests/full_case_hold.sv",
+        "tests/full_case_incomplete.sv",
+        "//lhd",
+    ],
+    deps = [":scripts"],
+)
+
 # Bounded-check reset protocol: the reset window must clock the design and
 # un-reset power-on state is X (a don't-care on gold), so a QN-flop netlist of
 # a synchronous-reset design is not falsely refuted while real post-reset
