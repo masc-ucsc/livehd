@@ -1691,6 +1691,19 @@ sh_test(
     ],
 )
 
+# A register clocked by the output of a module instance (NVDLA's `slcg` wrapper
+# around a flop-based clock gate) maps to a DFF cell clocked by that instance's
+# output instead of staying a native flop (derived-clock-native).
+sh_test(
+    name = "lhd_abc_instance_clock_test",
+    size = "small",
+    srcs = ["lhd_abc_instance_clock_test.sh"],
+    data = _FLOW_DATA + [
+        "abc_instance_clock.v",
+        "//inou/prp:abc_tests",
+    ],
+)
+
 # A Pyrope `Clock()` gate (a Clock_cell) is spelled `clk & latch` before
 # mapping, so abc maps it onto the ICG cell and no Clock_cell reaches STA.
 sh_test(

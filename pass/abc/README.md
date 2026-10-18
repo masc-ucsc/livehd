@@ -302,7 +302,12 @@ clock fanout tree buffers it like an ICG output. It needs a DFF cell and a flow
 that keeps every latch as crossed, like the ICG and async cells; a negedge
 register (the cells are posedge-only) and a multi-bit clock stay native. Use it
 when a physical flow follows (placement refuses a native flop) and the Liberty
-has no usable ICG cell, e.g. ASAP7 with `ICG*` dont_use. Latch
+has no usable ICG cell, e.g. ASAP7 with `ICG*` dont_use. A register
+clocked by the OUTPUT OF A MODULE INSTANCE in its own region (a clock-gate wrapper
+whose body maps in a child region, next to a flattened sibling block) is not a
+derived clock in this sense and needs no option: the instance is a native boundary
+box, so the register still crosses as a latch and its DFF clock pin is wired to the
+rebuilt instance's output (`lhd/tests/lhd_abc_instance_clock_test.sh`). Latch
 init comes from a resetless power-on constant only (a reset-backed latch is a don't-care to ABC:
 the cell it maps to powers on X). On read-back, latches rebuild into native
 flops or plain Liberty DFF cells according to the `register` option:

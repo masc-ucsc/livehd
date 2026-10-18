@@ -1196,6 +1196,11 @@ bool Region_writer::write(const livehd::partition::Region_body& rb, const Region
       if (d.is_const()) {
         return gu::create_const(*body, gu::const_of(d));
       }
+      // The output of a native boundary instance (a module instance clocking
+      // the register): the rebuilt instance's driver pin.
+      if (auto it = native_boundary_driver.find(d); it != native_boundary_driver.end()) {
+        return it->second;
+      }
       return {};
     };
     // A register on a recognized clock gate takes that gate's ICG cell output
