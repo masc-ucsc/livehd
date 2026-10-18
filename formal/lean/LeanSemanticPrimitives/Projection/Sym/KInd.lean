@@ -407,6 +407,26 @@ theorem runInvKV_sound {sf wf : Nat} {D : DesignCert} {sp : InvSpec} {s0 : State
     exact runInvKOf_sound_ref (MemResidual.of_projVar hproj) hA hr ins hins
   · cases hr
 
+/-- The closed checker through the fused memory interpreter (`MemFused`). -/
+def runInvKF (sf wf : Nat) (D : DesignCert) (sp : InvSpec) (s0 : StateM) (pfB pfS : ByteArray) : Bool :=
+  admitsWB D &&
+    match MemFused.projectMemFDesignAt sf wf D with
+    | .ok R    => runInvKOf D R sp s0 pfB pfS
+    | .error _ => false
+
+theorem runInvKF_sound {sf wf : Nat} {D : DesignCert} {sp : InvSpec} {s0 : StateM}
+    {pfB pfS : ByteArray} (h : runInvKF sf wf D sp s0 pfB pfS = true)
+    (ins : Nat → RuntimeInput) (hins : ∀ n, (ins n).toList.map BV.width = sp.inW) :
+    ∀ n, (∀ j, j ≤ n → asmBit (refOut D (StateM.denote s0) ins j) (ins j) sp.asmOut sp.asmIn = true) →
+      propBit (refOut D (StateM.denote s0) ins n) sp.prop = true := by
+  unfold runInvKF at h
+  simp only [Bool.and_eq_true] at h
+  obtain ⟨hA, hr⟩ := h
+  split at hr
+  · rename_i R hproj
+    exact runInvKOf_sound_ref (MemResidual.of_projF hproj) hA hr ins hins
+  · cases hr
+
 #audit_axioms extendSt_consistent
 #audit_axioms checkUnsat_sound
 #audit_axioms symStep_sound
@@ -421,5 +441,6 @@ theorem runInvKV_sound {sf wf : Nat} {D : DesignCert} {sp : InvSpec} {s0 : State
 #audit_axioms runInvKOf_sound_ref
 #audit_axioms runInvK_sound
 #audit_axioms runInvKV_sound
+#audit_axioms runInvKF_sound
 
 end Projection.Sym

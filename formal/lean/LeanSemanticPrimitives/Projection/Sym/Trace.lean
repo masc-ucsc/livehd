@@ -10,7 +10,7 @@ and `traceM_denote` ties the trace to the shared reference semantics:
 `outM n` its outputs at cycle `n`.
 -/
 import LeanSemanticPrimitives.Projection.Sym.Step
-import LeanSemanticPrimitives.Projection.MemVariant
+import LeanSemanticPrimitives.Projection.MemFused
 
 namespace Projection.Sym
 open Std.Tactic.BVDecide Projection.MemProjection Projection.Hw Projection.HwMem Compiler
@@ -52,9 +52,10 @@ theorem resM_residual {sf wf : Nat} {D : DesignCert} {R : Program}
   exact (specializeFour_correct_of hwMemAP_entry hwMemAP_erases hiff hproj _).mpr rfl
 
 /-- `R` computes the memory route's step on every admissible input. This is
-the one fact every theorem below needs of a residual, and both projections
-supply it: `of_proj` (the memory interpreter `hwMemAP`) and `of_projVar` (its
-`env0`-inlined variant, `MemVariant`). -/
+the one fact every theorem below needs of a residual, and every projection
+supplies it: `of_proj` (the memory interpreter `hwMemAP`), `of_projVar` (its
+`env0`-inlined variant, `MemVariant`) and `of_projF` (the node fold fused into
+its readers, `MemFused`). -/
 def MemResidual (D : DesignCert) (R : Program) : Prop :=
   ∀ {e : ClockEdges} {i : RuntimeInput} {st : StateM},
     admitsWB D = true → runtimeFullOKB D i st e = true →
@@ -77,6 +78,20 @@ theorem MemResidual.of_projVar {sf wf : Nat} {D : DesignCert} {R : Program}
     fun v => (MemVariant.memVar_iffW hA hR0 v).trans
       ⟨fun hv => Surface.Eval_det hv hev, fun hv => hv ▸ hev⟩
   exact (specializeFour_correct_of MemVariant.hwMemAPVar_entry MemVariant.hwMemAPVar_erases
+    hiff hproj _).mpr rfl
+
+theorem MemResidual.of_projF {sf wf : Nat} {D : DesignCert} {R : Program}
+    (hproj : MemFused.projectMemFDesignAt sf wf D = .ok R) : MemResidual D R := by
+  intro e i st hA hR
+  have hev := (resM_spec hA hR).1
+  have hR0 : runtimeOKB D i st e = true := by
+    unfold runtimeFullOKB at hR; simp only [Bool.and_eq_true] at hR; exact hR.1
+  have hiff : ∀ v, Eval MemFused.hwMemPF [] (.call MemFused.hwMemPF.entry
+      ([encDesign D, encEdges e, encInput i, StateM.encStateM st].map Term.lit)) v
+        ↔ v = StateM.encResultM (resM D e i st) :=
+    fun v => (MemFused.memF_iffW hA hR0 v).trans
+      ⟨fun hv => Surface.Eval_det hv hev, fun hv => hv ▸ hev⟩
+  exact (specializeFour_correct_of MemFused.hwMemAPF_entry MemFused.hwMemAPF_erases
     hiff hproj _).mpr rfl
 
 /-- `symStep` against ANY value the residual evaluates to. -/

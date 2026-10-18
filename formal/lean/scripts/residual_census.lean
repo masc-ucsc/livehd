@@ -1,10 +1,11 @@
 /-
 `residual_census` -- M3 stage S0: what a projection residual is made of.
 
-    lean --run scripts/residual_census.lean <cert> <stepFuel> <workFuel> [route:scalar|mem]
+    lean --run scripts/residual_census.lean <cert> <stepFuel> <workFuel> [route:scalar|mem|var|fused]
 
 Specializes the certificate on the chosen route (scalar: `mixDriver` on
-`hwAPVarT`; mem: `projectMemDesignAt`) and walks the residual ITERATIVELY
+`hwAPVarT`; mem: `projectMemDesignAt`; var: `MemVariant.projectMemVarDesignAt`;
+fused: `MemFused.projectMemFDesignAt`) and walks the residual ITERATIVELY
 (an explicit stack: residuals reach millions of terms). Reports what a
 symbolic interpreter of the residual has to handle:
 
@@ -21,6 +22,7 @@ It runs the SPECIALIZER only; nothing is executed.
 -/
 import LeanSemanticPrimitives.Projection.CertLoadAny
 import LeanSemanticPrimitives.Projection.MemProjection
+import LeanSemanticPrimitives.Projection.MemFused
 import LeanSemanticPrimitives.Projection.Proto.RunnerSupport
 
 open Compiler Projection Projection.Hw Projection.MemProjection Projection.ProtoVar
@@ -92,19 +94,23 @@ def main (args : List String) : IO UInt32 := do
   | cert :: sfS :: wfS :: rest =>
     let some sf := sfS.toNat? | IO.eprintln "stepFuel"; return 2
     let some wf := wfS.toNat? | IO.eprintln "workFuel"; return 2
-    let mem := rest.contains "route:mem"
+    let var := rest.contains "route:var"
+    let fused := rest.contains "route:fused"
+    let mem := rest.contains "route:mem" || var || fused
     let (_, D) ← Projection.CertLoadAny.loadAny cert
     IO.println s!"{cert}"
     IO.println s!"  shape: sources {D.sources.size} nodes {D.nodes.size} outputs {D.outputs.size} \
 flops {D.flops.size} memories {D.memories.size} clocks {D.clocks.size}"
     let t0 ← IO.monoMsNow
     let res ← IO.lazyPure (fun _ =>
-      if mem then projectMemDesignAt sf wf D else mixDriver sf wf hwAPVarT [encDesign D])
+      if fused then MemFused.projectMemFDesignAt sf wf D
+      else if var then MemVariant.projectMemVarDesignAt sf wf D
+      else if mem then projectMemDesignAt sf wf D else mixDriver sf wf hwAPVarT [encDesign D])
     let t1 ← IO.monoMsNow
     match res with
     | .error e => IO.eprintln s!"  specialization failed: {repr e}"; return 3
     | .ok R =>
-      IO.println s!"  route {if mem then "mem (hwMemAP)" else "scalar (hwAPVarT)"}, specialize {t1 - t0} ms, \
+      IO.println s!"  route {if fused then "fused (hwMemAPF)" else if var then "var (hwMemAPVar)" else if mem then "mem (hwMemAP)" else "scalar (hwAPVarT)"}, specialize {t1 - t0} ms, \
 {R.funs.length} function(s), arities {R.funs.map (·.arity)}"
       for (fd, k) in R.funs.zipIdx do
         let c := census fd.body
@@ -119,5 +125,5 @@ prim {c.prim} ctorT {c.ctorT} caseT {c.caseT} call {c.call}"
         IO.println s!"    caseT tags {c.caseTags.toList}  ctorT tags {c.ctorTags.toList}"
       return 0
   | _ =>
-    IO.eprintln "usage: residual_census <cert> <stepFuel> <workFuel> [route:scalar|mem]"
+    IO.eprintln "usage: residual_census <cert> <stepFuel> <workFuel> [route:scalar|mem|var|fused]"
     return 2

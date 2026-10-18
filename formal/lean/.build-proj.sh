@@ -106,6 +106,8 @@ MODULES=(
   Projection/Proto/RewriteTotal
   Projection/MemVariant
   Projection/MemVariantSim
+  # ... and the node fold fused into its readers (MemFused): the default route
+  Projection/MemFused
   Projection/MemLog
   Projection/MemPrimChecks
   # host vs object specializer on the three memory primitives
