@@ -206,6 +206,7 @@ _SV_SOURCES = glob(
         # These retain checks that a source/round-trip comparison cannot express.
         "tests/sv/scalar_initial_no_reset.v",
         "tests/sv/mem_struct_slice_write.v",
+        "tests/sv/ignored_assertion_past.sv",
         "tests/sv/packed_array_loop_reg_sroa.v",
         "tests/sv/*_tb.v",
         "tests/sv/*_helper.v",
@@ -268,6 +269,15 @@ sh_test(
     data = [
         "tests/sv/scalar_initial_no_reset.v",
         "//inou/prp:tests/lec.py",
+        "//lhd",
+    ],
+)
+
+sh_test(
+    name = "slang_ignored_assertion_past",
+    srcs = ["tests/ignored_assertion_past_test.sh"],
+    data = [
+        "tests/sv/ignored_assertion_past.sv",
         "//lhd",
     ],
 )

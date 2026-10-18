@@ -463,6 +463,20 @@ void definite_blocking_writes(const slang::ast::Statement& stmt, absl::flat_hash
 struct Past_collector : public slang::ast::ASTVisitor<Past_collector, slang::ast::VisitFlags::AllGood> {
   absl::flat_hash_map<const slang::ast::ValueSymbol*, int> depth;  // symbol -> deepest n
   bool                                                     saw_unsupported = false;
+  // --ignore-assertions: an assertion is neither lowered nor refused, so a `$past`/`$rose`
+  // inside one must not mint a history flop (and its shift-chain update) that nothing reads.
+  bool                                                     skip_assertions = false;
+
+  void handle(const slang::ast::ConcurrentAssertionStatement& s) {
+    if (!skip_assertions) {
+      visitDefault(s);
+    }
+  }
+  void handle(const slang::ast::ImmediateAssertionStatement& s) {
+    if (!skip_assertions) {
+      visitDefault(s);
+    }
+  }
 
   // A child instance keeps its own history flops; do not collect them here.
   void handle(const slang::ast::InstanceSymbol&) {}
@@ -7159,6 +7173,7 @@ void Slang_context::emit_reg_reset_attrs(const slang::ast::ValueSymbol& sym, std
 // BEFORE the body is lowered, because the body reads these names.
 void Slang_context::declare_past_chains(const slang::ast::Symbol& body) {
   Past_collector pc;
+  pc.skip_assertions = options_.ignore_assertions;
   body.visit(pc);
   for (const auto& [sym, deepest] : pc.depth) {
     if (deepest <= 0) {
