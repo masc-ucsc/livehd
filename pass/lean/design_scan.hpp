@@ -16,6 +16,11 @@ namespace lean_export {
 struct ScanOptions {
   bool   strict    = true;
   size_t max_width = 1024;
+  // Hard cap on the scanned combinational cone's node count. 0 = unlimited,
+  // and that is the DEFAULT on purpose: a budget that fires out of the box
+  // could refuse a design that emits fine today, and the traversal's own push
+  // ceiling already guards against a runaway.
+  size_t max_nodes = 0;
 };
 
 // Decimal integers are owned data, never Lean expressions.
