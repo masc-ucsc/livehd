@@ -27,7 +27,8 @@ semantics, NOT the specializer and NOT the residual -- from the SAME pre-state
 (the residual's own threaded state), edges and inputs, and the residual's result
 must equal it: every output and the whole next state, by `encResult`.  A
 disagreement fails closed (exit 1).  The stimulus is the deterministic generator
-`mkInputFor D k` / `edgeSchedule D k` from `mkStateFor D 0`; its exact sequence
+`mkInputFor D k` / `scheduleEdges` (edges:auto -- independent domains when the
+certificate declares more than one clock) from `mkStateFor D 0`; its exact sequence
 is RECORDED as an fnv1a digest over the edges and input values of every cycle.
 The reference runs are timed separately and are not part of `execute`.
 
@@ -135,6 +136,13 @@ ops {sr.ops} arities {sr.arities} flopClocks {sr.flopClocks} | ALL {okAll}"
       -- file is refused; `checkResidual` is re-run on the decoded program below.
       let loadFrom := rest.findSome? (fun t => (t.dropPrefix? "load:").map (·.toString))
       let compare := !(rest.contains "nocompare")
+      -- `edges:<auto|all|indep>`: which clocks fire on each cycle (RunnerSupport
+      -- `scheduleEdges`). `auto` -- the default -- keeps the one-clock schedule
+      -- for a one-clock design and fires domains INDEPENDENTLY when the
+      -- certificate declares more than one clock. An unknown mode is refused.
+      let edgeTok := rest.findSome? (fun t => (t.dropPrefix? "edges:").map (·.toString))
+      let some edgeMode := (edgeTok.map EdgeMode.parse?).getD (some .auto) | do
+        IO.eprintln s!"REFUSING: edges:{edgeTok.getD ""} is not one of auto | all | indep"; return 2
       let mut loaded : Option Program := none
       let t3 ← IO.monoMsNow
       if let some f := loadFrom then
@@ -192,8 +200,8 @@ is a NEW specialization, not a timing replay."
             IO.println s!"  EXECUTING {cycles} cycle(s) of Hw.stepOf at the checked bound \
 -- the projection's own simulator; reference comparison against interpretDesign \
 {if compare then "ON (every cycle: outputs and next state)" else "OFF (nocompare)"}"
-            IO.println "  stimulus: generated -- inputs mkInputFor D k, edges edgeSchedule D k \
-(every third cycle quiet), initial state mkStateFor D 0"
+            IO.println s!"  stimulus: generated -- inputs mkInputFor D k, edges {edgeMode.describe D}, \
+initial state mkStateFor D 0"
             (← IO.getStdout).flush
             let t6 ← IO.monoMsNow
             let mut st := mkStateFor D 0
@@ -202,22 +210,25 @@ is a NEW specialization, not a timing replay."
             let mut tags : List String := []
             let mut bad := false
             let mut tRef : Nat := 0
+            let mut tStep : Nat := 0
             let mut firstDisagree : Option Nat := none
             let mut compared : Nat := 0
             let mut stimText : String := ""
             for k in List.range cycles do
-              let e := edgeSchedule D k
+              let e := scheduleEdges edgeMode D k
               if let some rc := (← RunAdmission.refuseEdges? D k e) then return rc
               let i := mkInputFor D k
               stimText := stimText ++ s!"{k}:" ++
                 String.intercalate "," (e.toList.map (fun b => if b then "1" else "0")) ++ "|" ++
                 String.intercalate "," (i.toList.map (fun v => s!"{v.width}'{v.value}")) ++ ";"
-              let o := runStep sim D e i st
+              let s0 ← IO.monoMsNow
+              let o ← IO.lazyPure (fun _ => runStep sim D e i st)
+              let s1 ← IO.monoMsNow
+              tStep := tStep + (s1 - s0)
               tags := o.tag :: tags
               if compare then
                 let r0 ← IO.monoMsNow
-                let want := interpretDesign D e i st
-                let agrees := Outcome.agree o (Outcome.ok want)
+                let agrees ← IO.lazyPure (fun _ => Outcome.agree o (Outcome.ok (interpretDesign D e i st)))
                 let r1 ← IO.monoMsNow
                 tRef := tRef + (r1 - r0)
                 compared := compared + 1
@@ -230,7 +241,7 @@ is a NEW specialization, not a timing replay."
               | _ => bad := true
             let t7 ← IO.monoMsNow
             IO.println s!"  ms: load {t1 - t0}  support {t2 - t1}  {phase} {t4 - t3}  \
-check {t5 - t4}  execute {t7 - t6 - tRef}  reference {tRef}"
+check {t5 - t4}  execute {tStep}  reference {tRef}  loop {t7 - t6}"
             IO.println s!"  stimulus digest fnv1a {ResidualIO.fnv1a stimText.toUTF8} over {cycles} cycle(s)"
             IO.println s!"  step outcomes: {String.intercalate "," tags.reverse}"
             let cmpLabel :=
@@ -258,5 +269,5 @@ reference comparison COMPLETE against interpretDesign)"
 reference comparison DISABLED -- does NOT earn comparison credit)"
             return 0
   | _ => do
-      IO.eprintln "usage: gen_readiness_v2 <cert.dcert> <stepFuel> <workFuel> [cycles] [load:<residual.fpres>] [nocompare]"
+      IO.eprintln "usage: gen_readiness_v2 <cert.dcert> <stepFuel> <workFuel> [cycles] [load:<residual.fpres>] [nocompare] [edges:auto|all|indep]"
       return 2

@@ -540,6 +540,10 @@ structure Cfg where
   is built by `mkMemSimOfW`; the specialization function, the production
   residual checker and the execution function are the SAME ones. -/
   plainWrite : Bool := false
+  /-- which clocks fire on each cycle (RunnerSupport `scheduleEdges`): `auto`
+  keeps the one-clock schedule for a one-clock design and fires domains
+  INDEPENDENTLY when the certificate declares more than one clock. -/
+  edgeMode : EdgeMode := .auto
 
 def say (s : String) : IO Unit := IO.println s
 
@@ -661,6 +665,7 @@ unchanged -- refusing rather than running on a state the encoder altered"
         | some ws => say s!"  TRACE slots write {ws.write} addr {ws.addr} datum {ws.datum} \
 effEn {ws.effEn} origEn {ws.origEn} mask {ws.mask} pred {ws.pred} phaseSrc {ws.phaseSrc}"
       say s!"  stimulus: {cfg.stimProv}"
+      say s!"  edges: {cfg.edgeMode.describe D}"
       say s!"  executing {cfg.cycles} cycle(s) of the residual at the checked bound"
       (← IO.getStdout).flush
       let t5 ← IO.monoMsNow
@@ -673,7 +678,7 @@ effEn {ws.effEn} origEn {ws.origEn} mask {ws.mask} pred {ws.pred} phaseSrc {ws.p
       let mut policyBad := false
       let mut cmp : CmpStatus := if cfg.compare then .complete else .disabled
       for k in List.range cfg.cycles do
-        let e := edgeSchedule D k
+        let e := scheduleEdges cfg.edgeMode D k
         if let some rc := (← RunAdmission.refuseEdges? D k e) then return rc
         let i := match cfg.stim with
                  | some spec => stimInput D spec cfg.react cfg.ats prevOuts k
@@ -858,7 +863,10 @@ contents or use init=zero, which is a legal-state witness only."
     let prov := match stimTok with
                 | some t => s!"PENDING {t}"
                 | none   => "generated: mkInputFor (synthetic, width-derived)"
-    .ok ⟨sf, wf, cyc, im, cmp, none, [], [], prov, sup, tr, pw⟩
+    let edgeTok := tl.findSome? (fun t => (t.dropPrefix? "edges:").map (·.toString))
+    let some em := (edgeTok.map EdgeMode.parse?).getD (some .auto)
+      | .error s!"edges:{edgeTok.getD ""} is not one of auto | all | indep"
+    .ok ⟨sf, wf, cyc, im, cmp, none, [], [], prov, sup, tr, pw, em⟩
   | _ => .error usage
 
 /-! ## Comparison self-test
