@@ -1,0 +1,13 @@
+row	cert	property	assumptions	k	verdict	specialize_ms	obligations_ms	base_clauses	step_clauses	solver_ms	check_ms	run_wall_s	run_cpu_s	run_maxrss_kib
+B01	minion_dcache_top.dcert	!s3_core_resp_valid_o	in:rst_ni=0	1	INVARIANT PROVED (k=1)	25374	225496	2	48830096	32549	137667	650.09	426.66	25891020
+B02	cva6_hpdcache_subsystem_gate.dcert	!dcache_miss_o	in:rst_ni=0	1	INVARIANT PROVED (k=1)	23335	28701	2	63013596	32932	450836	592.37	293.31	34657636
+B03	icache_top.dcert	!f0_l2_miss_req_valid_o	in:rst_ni=0	1	INVARIANT PROVED (k=1)	22259	46097	2	144564864	90320	725729	1370.50	793.75	75144728
+B04	cva6_mmu_gate.dcert	!dtlb_miss_o	in:rst_ni=0	1	INVARIANT PROVED (k=1)	7402	31957	2	61883998	35943	456945	593.80	304.27	33946116
+B05	shirecache_mesh_master.dcert	!axi_ar_valid_o	in:rst_ni=0 in:noc_rst_ni=0 in:dft_i=0	1	INVARIANT PROVED (k=1)	5170	11542	2	255981388	157967	1232354	2057.51	1418.91	145071520
+B06	load_store_unit_gate.dcert	!load_valid_o	in:rst_ni=0	1	INVARIANT PROVED (k=1)	11697	62512	2	71566999	40669	467791	660.19	364.46	38318088
+B07	-	-	-	-	NO CERTIFICATE (legalization decision open)	-	-	-	-	-	-	-	-	-
+B08	intpipe_top.dcert	!ex_dcache_req_valid	in:rst_ni=0 in:rst_d_ni=0 in:rst_w_ni=0	1	INVARIANT PROVED (k=1)	51157	38144	2	22120908	12187	47151	169.83	165.02	13502788
+B09	issue_stage_gate.dcert	!alu_valid_o	in:rst_ni=0	1	INVARIANT PROVED (k=1)	3345	13251	2	290649049	154853	1398261	2011.38	1682.73	149572700
+B10	frontend_gate.dcert	!fetch_entry_valid_o	in:rst_ni=0	1	INVARIANT PROVED (k=1)	3075	6217	2	59622930	35029	452361	576.29	263.24	31552252
+B11	minion_tlb.dcert	!ptw_req_valid_o	in:rst_ni=0	1	INVARIANT PROVED (k=1)	57	15	2	325590	198	476	1.03	0.90	229684
+B12	picorv32.dcert	!mem_valid	in:resetn=0	1	INVARIANT PROVED (k=1)	423	370	2	928237	514	1557	3.76	3.37	543600

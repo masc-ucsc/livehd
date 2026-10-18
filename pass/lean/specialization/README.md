@@ -18,6 +18,7 @@ the drivers in `formal/lean/scripts/` (`gen_probe_v2`, `gen_readiness_v2`,
 |---|---|
 | `FUTAMURA_PROJECTIONS.md` | design report: first/second projection over the LiveHD-to-Lean flow |
 | `FP_PROJECTION_GAP_AUDIT.md` | gaps against the projection branch, part B (closed by M1) and parts C/D |
+| `M3_UNBOUNDED_PROOFS.md` | M3: unbounded invariants and refinement with stuttering on the projection residual (`Projection/Sym/*`), the `MemVariant`/`MemFused` memory interpreters, the 12-row campaign and the PicoRV32 variants |
 
 ## Runner and measurement scripts
 
@@ -28,6 +29,15 @@ the drivers in `formal/lean/scripts/` (`gen_probe_v2`, `gen_readiness_v2`,
 | `fp_gen_build.sh`, `fp_gen_sample.sh`, `fp_gen_measure.sh`, `fp_gen_counterbalanced.sh` | generation-latency builds and counterbalanced measurements |
 | `fp_install.py` | installs the projection-branch probes onto master (`tests/fp_install_map.tsv`) |
 | `fp_replay.py` | replays historical FP rows into a fresh outdir |
+
+## M3 scripts (in `pass/lean/scripts/`)
+
+| file | role |
+|---|---|
+| `sym_selftest.sh` | fixtures through the real flow: invariants, counterexample replay, refinement with stuttering, F2 theorem file |
+| `sym_bench12.sh` | one unbounded invariant per row of the 12x5 table |
+| `sym_pico_variants.sh` | PicoRV32 base vs TWO_CYCLE_COMPARE: invariants, identity refinement, stutter refinement |
+| `sym_observe.py` | observer outputs (witnesses, internal state) on a copy of the RTL |
 
 ## tests/
 

@@ -1,0 +1,23 @@
+impl picorv32_two_cycle_cmp_lean/picorv32_two_cycle_cmp.dcert
+spec picorv32_base_lean/picorv32_base.dcert
+  pairs [(8, 8), (2, 2), (1, 1), (9, 9), (10, 10), (20, 19), (11, 11), (12, 12)], adv some { out := 17, nz := true }, input map [0, 1, 2, 3, 4, 5, 6, 7, 8], k in [7, 8]; both start all-zero
+  residuals specialized (route fused) and checked in 897 ms
+  [k=7] obligations built in 6243 ms (symbolic evaluation of 7 + 8 paired steps)
+  [k=7] base: 17006150 clauses; bit-blast+CNF+write 13167 ms, solver 29523 ms
+  [k=7] step: 25624751 clauses; bit-blast+CNF+write 22144 ms, solver 99980 ms
+  [k=7] RESULT: NOT K-INDUCTIVE (step) at k = 7
+  [k=8] obligations built in 7662 ms (symbolic evaluation of 8 + 9 paired steps)
+  [k=8] base: 20147350 clauses; bit-blast+CNF+write 16426 ms, solver 80124 ms
+  [k=8] counterexample inputs (cycle: name=value):
+    cycle 0: clk=0, irq=0, mem_rdata=0, mem_ready=0, pcpi_rd=0, pcpi_ready=0, pcpi_wait=0, pcpi_wr=0, resetn=0
+    cycle 1: clk=0, irq=0, mem_rdata=32, mem_ready=1, pcpi_rd=0, pcpi_ready=0, pcpi_wait=0, pcpi_wr=0, resetn=1
+    cycle 2: clk=0, irq=0, mem_rdata=0, mem_ready=1, pcpi_rd=0, pcpi_ready=0, pcpi_wait=0, pcpi_wr=0, resetn=1
+    cycle 3: clk=0, irq=0, mem_rdata=2556511075, mem_ready=1, pcpi_rd=0, pcpi_ready=0, pcpi_wait=0, pcpi_wr=0, resetn=1
+    cycle 4: clk=0, irq=0, mem_rdata=1, mem_ready=0, pcpi_rd=0, pcpi_ready=0, pcpi_wait=0, pcpi_wr=0, resetn=1
+    cycle 5: clk=0, irq=0, mem_rdata=0, mem_ready=1, pcpi_rd=0, pcpi_ready=0, pcpi_wait=0, pcpi_wr=0, resetn=1
+    cycle 6: clk=0, irq=0, mem_rdata=0, mem_ready=0, pcpi_rd=0, pcpi_ready=0, pcpi_wait=0, pcpi_wr=0, resetn=0
+    cycle 7: clk=0, irq=0, mem_rdata=3489669235, mem_ready=1, pcpi_rd=0, pcpi_ready=0, pcpi_wait=0, pcpi_wr=0, resetn=1
+  [k=8] cycle 7 (witness true): mem_valid=0 vs mem_valid=1, obs_state=64 vs obs_state=8
+  [k=8] RESULT: COUNTEREXAMPLE (base, replayed): the refinement fails at cycle 7 from the all-zero states with assumptions holding
+Command exited with non-zero status 1
+290.43 s 7179052 KiB
