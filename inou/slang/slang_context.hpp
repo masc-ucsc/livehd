@@ -129,6 +129,10 @@ struct Slang_module_state {
   // emission, a driver that WRITES the net has sym_lname_ swapped to the tmp (so
   // its writes AND its own RMW reads hit the mut); other drivers read the wire.
   absl::flat_hash_map<const slang::ast::Symbol*, std::string>              wire_split_tmp_;
+  // While a driver that writes split wires is being emitted: (net, resolved-wire lname) for each net whose
+  // sym_lname_ is redirected to its accumulator. lower_instance reads its input connections through the resolved
+  // names, because the instance runs only after its inputs are read (see there).
+  const std::vector<std::pair<const slang::ast::Symbol*, std::string>>*    split_redirects_ = nullptr;
   // Concurrent packed drivers: one single-assignment wire per physical bit.
   absl::flat_hash_map<const slang::ast::Symbol*, std::vector<std::string>> packed_wire_bits_;
   // Subset of wire_split_tmp_ keys that are FLATTENED-AGGREGATE splits: a

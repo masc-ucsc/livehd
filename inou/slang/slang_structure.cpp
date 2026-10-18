@@ -5816,6 +5816,7 @@ void Slang_context::lower_members(const slang::ast::Scope& scope) {
         sym_lname_[w] = it->second;
       }
     }
+    split_redirects_ = &restore;
     switch (d.member->kind) {
       case SymbolKind::Net: {
         const auto& ns = d.member->as<slang::ast::NetSymbol>();
@@ -5922,7 +5923,8 @@ void Slang_context::lower_members(const slang::ast::Scope& scope) {
         break;
       default: break;
     }
-    genblk_prefix_ = saved_prefix;
+    genblk_prefix_   = saved_prefix;
+    split_redirects_ = nullptr;
     bundle_proc_writes_.clear();
     for (auto& [w, name] : restore) {
       sym_lname_[w] = name;  // → back to the resolved wire for other drivers
@@ -8058,8 +8060,30 @@ void Slang_context::lower_instance(const slang::ast::InstanceSymbol& inst) {
     }
   };
 
+  // The instance runs only after every input is read. A net it also drives through an output connection
+  // (`.yumi_i(rdy[i] & v_o[i])` next to `.v_o(v_o[i])`, a handshake feeding its own output back) is redirected
+  // to its mut accumulator while this driver emits; reading that here would see the accumulator's poison
+  // initializer instead of the net, so inputs read the resolved wire. The output bindings below write the
+  // accumulator again.
+  std::vector<std::pair<const slang::ast::Symbol*, std::string>> input_phase;  // (net, accumulator lname)
+  if (split_redirects_ != nullptr) {
+    for (const auto& [net, resolved] : *split_redirects_) {
+      if (auto it = wire_split_tmp_.find(net); it != wire_split_tmp_.end() && sym_lname_[net] == it->second) {
+        input_phase.emplace_back(net, it->second);
+        sym_lname_[net] = resolved;
+      }
+    }
+  }
+  const auto end_input_phase = [&]() {
+    for (const auto& [net, accumulator] : input_phase) {
+      sym_lname_[net] = accumulator;
+    }
+    input_phase.clear();
+  };
+
   for (const auto* conn : inst.getPortConnections()) {
     if (conn->port.kind != SymbolKind::Port) {
+      end_input_phase();
       emit_unsupported(inst.location,
                        "unsupported-port-conn",
                        std::string("instance '") + std::string(inst.name) + "' connects an unsupported port kind");
@@ -8079,6 +8103,7 @@ void Slang_context::lower_instance(const slang::ast::InstanceSymbol& inst) {
                          "liberty-memory-port-truncation",
                          "Liberty memory '" + callee + "' input '" + std::string(port.name) + "' would discard address/data bits",
                          "use a matching macro interface or explicit, semantically validated banking logic");
+        end_input_phase();
         return;
       }
     }
@@ -8087,6 +8112,7 @@ void Slang_context::lower_instance(const slang::ast::InstanceSymbol& inst) {
           inst.location,
           "unsupported-inout-port",
           std::string("instance '") + std::string(inst.name) + "' connects inout port '" + std::string(port.name) + "'");
+      end_input_phase();
       return;
     }
     // M7: the SAME type-only rule the child def used — parents and children
@@ -8137,6 +8163,7 @@ void Slang_context::lower_instance(const slang::ast::InstanceSymbol& inst) {
       in_args.emplace_back(ref_name_of_raw(port.name), v);
     }
   }
+  end_input_phase();
 
   auto& ln = *builder_.lnast;
   set_pending_loc(inst.location);
