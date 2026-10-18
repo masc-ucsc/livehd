@@ -69,6 +69,9 @@ struct Element {
   // the GATE GUARD (and only the gate guard) is sampled in the rising slot and
   // held; see apply_icg's hold path.
   bool                        icg_hold = false;
+  // Enable latches this GATED LATCH reads by their held Q (the window rule in
+  // build_plan): the gate is steady over its whole open phase, so no bypass.
+  int                         icg_window_held = 0;
 };
 
 // Backward combinational reach to STATE elements (stops at any register), so a
@@ -533,6 +536,10 @@ Plan build_plan(hhds::Graph* g, const lc::Design_clocks& clocks) {
 
   // 1. Collect every state element with its commit class.
   absl::flat_hash_map<std::string, int> per_net;  // net_key -> #elements on it (clock role only)
+  // One state element per clock net, for the multi-clock refusal: "3 clock
+  // nets" alone does not say WHICH nets, and a derived net the walk could not
+  // trace to its root reads exactly like a genuine second domain.
+  absl::flat_hash_map<std::string, std::string> example_on_net;
   // Multi-bit clock inputs: net_key -> the distinct bits used ("?<elem>" = not
   // decidable), and the bit itself when decided.
   absl::flat_hash_map<std::string, std::set<std::string>> bus_bits;
@@ -647,18 +654,50 @@ Plan build_plan(hhds::Graph* g, const lc::Design_clocks& clocks) {
           // lowering question, not a refusal.
           //
           // FLOPS ONLY. A latch behind a gate has its own window and its own
-          // commit rules, and a sampled enable is the wrong instrument for it.
+          // commit rules, and a sampled enable is the wrong instrument for it
+          // (its rule is `held_for_window`, below).
           const bool opposite_for_other_edge = !e.cc.rising && !e.is_latch
                                                && lc::gated_latch_closed_at(dn, e.icg->clock, /*closed_level=*/true)
                                                && lc::latch_open_at(dn, e.icg->clock, /*level=*/false);
+          // A GATED LATCH has its own rule, and it is NOT the flop rule above.
+          // A flop samples at one edge, so its gate must be steady ACROSS that
+          // edge. A latch is open for a whole PHASE and commits when it closes,
+          // so its gate must be steady for the WHOLE WINDOW: the enable latch
+          // shut while the gated latch is open, open while it is shut. That is
+          // the textbook glitch-free gate in front of a latch -- CORE-ET's
+          // tech_generic/prim_write_commit_en:
+          //
+          //     always_latch if (!clk)          en_1p <= en_i;   // shut while clk is high
+          //     always_latch if (clk && en_1p)  q_o   <= d_i;    // open while clk is high
+          //
+          // The flop rule asks the wrong question here (closed after the
+          // FALLING commit edge = open while clk is high, which would be the
+          // glitchy gate) and refused it as `clock-gate-latch-phase`.
+          //
+          // NO BYPASS on this path. The gated latch closes half a period after
+          // the enable latch did, so what gates its window -- and so what the
+          // commit-at-closing-edge model must read -- is the enable latch's
+          // HELD Q, captured when it shut. Its transparent arm is the value
+          // passing through at the OTHER edge: reading it would let `en_i`
+          // change mid-window and decide a commit the hardware had already
+          // decided. (The enable latch is itself retyped to a flop committing
+          // at its own closing edge, so its Q stays a valid read.)
+          const bool window_level = !e.cc.rising;  // a latch committing at FALL is open while the clock is HIGH
+          const bool held_for_window
+              = e.is_latch && lc::gated_latch_closed_at(dn, e.icg->clock, /*closed_level=*/window_level)
+                && lc::latch_open_at(dn, e.icg->clock, /*level=*/!window_level);
           if (opposite_for_other_edge && !opposite_here) {
             e.icg_hold = true;
           }
-          if (!opposite_here && !opposite_for_other_edge) {
+          if (!opposite_here && !opposite_for_other_edge && !held_for_window) {
             plan.code = "clock-gate-latch-phase";
             plan.why  = "state element `" + label_of(n) + "` is clocked through a gate whose enable latch `" + label_of(dn)
                         + "` is not transparent exactly on the phase opposite the gated edge";
             return plan;
+          }
+          if (held_for_window && !opposite_here) {
+            ++e.icg_window_held;
+            continue;  // the held Q, deliberately: see above
           }
           if (auto arm = lc::latch_transparent_arm(dn); !arm.is_invalid()) {
             en = arm;
@@ -686,6 +725,7 @@ Plan build_plan(hhds::Graph* g, const lc::Design_clocks& clocks) {
     plan.elems.push_back(e);
     if (cc->role == lc::Net_role::Clock) {
       ++per_net[cc->net_key()];
+      example_on_net.try_emplace(cc->net_key(), label_of(n));
       // A clock that is ONE BIT of a multi-bit input: record WHICH bit. The
       // commit class is keyed by the whole input (control_root follows every
       // Get_mask to it), so clks[0] and clks[1] would otherwise share one slot
@@ -748,6 +788,18 @@ Plan build_plan(hhds::Graph* g, const lc::Design_clocks& clocks) {
     // detected-edge branch and sim's M6 model both still handle it honestly.
     plan.code = "multi-clock-no-ratio";
     plan.why  = std::format("{} clock nets and no known integer ratio between them", per_net.size());
+    std::vector<std::string> keys;
+    for (const auto& [k, cnt] : per_net) {
+      keys.push_back(k);
+    }
+    std::sort(keys.begin(), keys.end());  // deterministic: keys are structural
+    for (size_t i = 0; i < keys.size(); ++i) {
+      plan.why += std::format("{} `{}` ({} element(s), e.g. `{}`)",
+                              i == 0 ? ": " : "; ",
+                              keys[i],
+                              per_net[keys[i]],
+                              example_on_net[keys[i]]);
+    }
     return plan;
   }
   // The reference clock is the RESOLVED ROOT of the class, not the raw
@@ -1918,6 +1970,7 @@ Result normalize(hhds::Graph* g, const std::vector<hhds::Graph*>& defs, const Op
         acc.connect_sink(gu::setup_sink_by_name(e.node, "enable"));
       }
       ++r.icg_folded;
+      r.icg_window_held += e.icg_window_held > 0 ? 1 : 0;
     }
 
     // ---- every element now commits on the REFERENCE clock ----------------
@@ -2155,12 +2208,13 @@ Result normalize(hhds::Graph* g, const std::vector<hhds::Graph*>& defs, const Op
   r.slots     = plan.slots;
   r.ref_clock = plan.ref_clock_name;
   r.reason    = std::format(
-      "P={} slots, {} latch(es) retyped, {} gated clock(s) folded into an enable ({} sampled-held), {} element(s) "
-      "slotted, {} memory(ies) slotted over {} write port(s) ({})",
+      "P={} slots, {} latch(es) retyped, {} gated clock(s) folded into an enable ({} sampled-held, {} "
+      "window-held), {} element(s) slotted, {} memory(ies) slotted over {} write port(s) ({})",
       r.slots,
       r.latches_retyped,
       r.icg_folded,
       r.icg_held,
+      r.icg_window_held,
       r.flops_slotted,
       r.mems_slotted,
       r.mem_ports_slotted,

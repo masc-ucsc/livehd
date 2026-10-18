@@ -64,6 +64,9 @@ struct Result {
   // low-transparent ICG, whose gate condition is the value held across the high
   // phase rather than the live arm. One guard is shared per gate.
   int  icg_held        = 0;
+  // GATED LATCHES whose gate is steady over their whole open window (the
+  // enable latch shut on that phase): they read the enable latch's held Q.
+  int  icg_window_held = 0;
   // Identity of the REFERENCE clock the slots are expressed against (a graph
   // input's name when there is one; "" when the design has no clock at all).
   // A miter whose two sides normalize against DIFFERENT reference clocks is

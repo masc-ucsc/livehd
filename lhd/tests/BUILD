@@ -1016,6 +1016,18 @@ sh_test(
     data = ["//lhd"],
 )
 
+# A clock gate in front of a LATCH (CORE-ET prim_write_commit_en): accepted as
+# window-held at P=2, reading the enable latch's HELD Q (no bypass); the same-
+# phase gate keeps the bypass path and rule 4 still refuses a same-edge reader.
+# LHD_EXTERNAL_SIM=1 adds a source-vs-normalized differential (iverilog, else
+# Verilator) with bypass and P=1 negative controls.
+sh_test(
+    name = "single_edge_latch_icg_test",
+    size = "large",
+    srcs = ["single_edge_latch_icg_test.sh"],
+    data = ["//lhd"],
+)
+
 # LIVE test for todo/livehd/2f-latch M8 steps 3b + 3g: all FOUR commit classes
 # (posedge, negedge, transparent-high, transparent-low) in ONE module.
 # Discrimination is checked through `lhd lec` (collapsing any two classes must
