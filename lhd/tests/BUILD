@@ -1679,6 +1679,18 @@ _ICG_CASES = [
     tests = [":lhd_abc_icg_test" + suffix + "_" + tag for tag, _case, _check in _ICG_CASES],
 ) for suffix, _mapper in _MAPPERS]
 
+# pass.abc.derived_clock: registers on a clock computed inside their region map to
+# DFF cells driven by the mapped clock logic; the default keeps them native.
+sh_test(
+    name = "lhd_abc_derived_clock_test",
+    size = "small",
+    srcs = ["lhd_abc_derived_clock_test.sh"],
+    data = _FLOW_DATA + [
+        "abc_arst_q.lib",
+        "abc_derived_clock.v",
+    ],
+)
+
 # A Pyrope `Clock()` gate (a Clock_cell) is spelled `clk & latch` before
 # mapping, so abc maps it onto the ICG cell and no Clock_cell reaches STA.
 sh_test(

@@ -1353,6 +1353,9 @@ void Region_driver::map_region(const livehd::partition::Region_body& rb) {
       += std::format("|source={}/{}/{}/{}", opts_.source_adder, opts_.source_multiplier, opts_.source_barrel, opts_.source_block);
   // The clock tree is written after mapping and cached with the body.
   recipe += std::format("|clktree={}/{}", opts_.icg_fanout, design_state_bits_ >= opts_.input_clock_min ? 1 : 0);
+  if (opts_.derived_clock) {
+    recipe += "|dclk=1";
+  }
   for (const auto& port : rb.inputs) {  // module ports a parent's gate drives
     if (!port.src_driver.is_invalid() && gu::is_graph_input_pin(port.src_driver)
         && derived_ports_.contains({rb.src->get_gid(), std::string{port.src_driver.get_pin_name()}})) {
@@ -1530,6 +1533,9 @@ void Region_driver::map_region(const livehd::partition::Region_body& rb) {
   // per-latch attribution reason as the async cells.
   blast_options.icg            = dff_.has_value() && plan.preserves_latches && !icg_ladder_.empty();
   blast_options.icg_flow_ok    = plan.preserves_latches;
+  // pass.abc.derived_clock: a register on any other derived clock maps to a DFF cell too (needs a DFF cell
+  // and the same latch-preserving flow as the ICG/async cells).
+  blast_options.derived_clock  = opts_.derived_clock && dff_.has_value() && plan.preserves_latches;
   // Level-sensitive latches never cross ABC (they stay boundaries), so any
   // flow may map them onto the Liberty's latch cells.
   for (int low = 0; low < 2; ++low) {

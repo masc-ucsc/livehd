@@ -846,6 +846,9 @@ Region_blast blast_region(const livehd::partition::Region_body& rb, const Blast_
       if (!options.logical_state && !f.clk_drv.is_invalid() && !f.clk_drv.is_const() && !region_in_name.contains(f.clk_drv)) {
         if (auto it = icg_of_gclk.find(f.clk_drv); it != icg_of_gclk.end()) {
           f.icg = it->second;
+        } else if (options.derived_clock && options.icg_flow_ok && !f.neg_clock && real_width(f.clk_drv) == 1) {
+          // pass.abc.derived_clock: keep the register mapped; its clock crosses as an ABC PO below.
+          f.clk_derived = true;
         } else {
           auto why = icg_rejected.find(f.clk_drv);
           clk_demoted_by[why != icg_rejected.end() ? why->second : std::string{icg_unavailable}].insert(n);
@@ -2120,6 +2123,27 @@ Region_blast blast_region(const livehd::partition::Region_body& rb, const Blast_
     result.latch_pos = lnet.outputs().size() - first;
   }
   trace_stage("latch-pos");
+
+  // --- registers on a derived (gated) clock -> one ABC PO per clock net ---
+  // (after the latch-cell POs) The mapped logic computes the clock and the
+  // read-back wires it to the DFF cell's clock pin in pass 2b, like an
+  // internally computed async reset.
+  {
+    absl::flat_hash_map<hhds::Pin_class, int32_t> dclk_index;
+    const size_t                                  first = lnet.outputs().size();
+    for (auto& f : flops) {
+      if (!f.clk_derived) {
+        continue;
+      }
+      auto [it, fresh] = dclk_index.try_emplace(f.clk_drv, static_cast<int32_t>(lnet.outputs().size()));
+      if (fresh) {
+        lnet.add_output(abc_bit(f.clk_drv, 0), std::format("__dclk{}", it->second));
+      }
+      f.clk_po = it->second;
+    }
+    result.dclk_pos = lnet.outputs().size() - first;
+  }
+  trace_stage("dclk-pos");
 
   // Logical-state controls are live consumers, independent of a library's
   // clock/reset cell choices. Preserve raw bits and source polarity, including
