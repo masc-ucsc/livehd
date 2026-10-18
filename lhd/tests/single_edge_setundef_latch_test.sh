@@ -14,8 +14,11 @@
 # while a GATED clock is low, read only by a flop on that gated clock's falling
 # edge -- is now admitted as masked while gated off.
 #
-#   sul        prim_write_commit_en + prim_write_preview_en at width 1, and
-#              prim_clk_gate + prim_rf_single_1r1w_par_preview
+#   sul        prim_write_commit_en + prim_write_preview_en at widths 1 and 4
+#              (a wide latch is bit-blasted: each bit's din is a BIT SELECT
+#              of one hold mux), prim_clk_gate + prim_rf_single_1r1w_par_preview,
+#              and prim_phase_pair's tied enable latch on the gated clock
+#              (both hold-mux arms constant)
 #   sul_open   the preview latch also drives an output: transparent while
 #              gated off and OBSERVED -- refused (gated-latch-open-when-off)
 #   sul_rise   its reader on the gated clock's RISING edge, where the latch
@@ -46,7 +49,8 @@ fail() {
 
 cat > "$W/sul.sv" <<'EOF'
 module sul(input clk, input en, input en_g, input nxt, input [7:0] d,
-           output qa, output ra, output qb, output [7:0] rq);
+           output qa, output ra, output qb, output [7:0] rq,
+           output [3:0] qw, output [3:0] qv, output qk);
   logic en_1p;                                  // prim_write_commit_en: enable latch shut while clk is high
   always_latch if (!clk) en_1p <= en;
   logic qa_l;                                   // ... data latch open while clk && en_1p
@@ -66,10 +70,21 @@ module sul(input clk, input en, input en_g, input nxt, input [7:0] d,
   always_ff @(negedge gclk) if (pl) dq <= d;
   logic [7:0] rf;
   always_ff @(posedge gclk) rf <= dq;
+  logic [3:0] qw_l;                             // the commit pair at WIDTH 4: the reader bit-blasts it,
+  always_latch if (clk && en_1p) qw_l <= d[7:4];  // each bit's din a bit select of one hold mux
+  logic [3:0] qv_l;                             // the preview pair at width 4
+  always_latch if (!clk && en_2p) qv_l <= d[7:4];
+  logic hk;                                     // prim_phase_pair on a GATED clock: a TIED enable
+  always_latch if (!gclk) hk <= 1'b1;           // (`Ror(gclk) ? 0 : 1`, both arms constant)
+  logic qk_l;                                   // read only through the gate itself
+  always_latch if (gclk && hk) qk_l <= d[2];
   assign qa = qa_l;
   assign ra = ra_l;
   assign qb = qb_l;
   assign rq = rf;
+  assign qw = qw_l;
+  assign qv = qv_l;
+  assign qk = qk_l;
 endmodule
 EOF
 sed -e 's/^module sul(/module sul_open(/' -e "s/^  assign rq = rf;/  assign rq = rf ^ {7'b0, pl};/" "$W/sul.sv" > "$W/sul_open.sv"
@@ -151,13 +166,16 @@ cat > "$W/tb.v" <<'EOF'
 module tb;
   reg clk_s = 0, clk_n = 0, en = 1, en_g = 1, nxt = 1;
   reg [7:0] d = 8'd3;
-  wire qas, ras, qbs, qan, ran, qbn;
+  wire qas, ras, qbs, qan, ran, qbn, qks, qkn;
   wire [7:0] rqs, rqn;
+  wire [3:0] qws, qwn, qvs, qvn;
   integer p, errs = 0, checks = 0;
   always #10 clk_s = ~clk_s;
   initial begin #(`NSTART); forever #(`NHALF) clk_n = ~clk_n; end
-  sul   s(.clk(clk_s), .en(en), .en_g(en_g), .nxt(nxt), .d(d), .qa(qas), .ra(ras), .qb(qbs), .rq(rqs));
-  sul_n n(.clk(clk_n), .en(en), .en_g(en_g), .nxt(nxt), .d(d), .qa(qan), .ra(ran), .qb(qbn), .rq(rqn));
+  sul   s(.clk(clk_s), .en(en), .en_g(en_g), .nxt(nxt), .d(d), .qa(qas), .ra(ras), .qb(qbs), .rq(rqs),
+          .qw(qws), .qv(qvs), .qk(qks));
+  sul_n n(.clk(clk_n), .en(en), .en_g(en_g), .nxt(nxt), .d(d), .qa(qan), .ra(ran), .qb(qbn), .rq(rqn),
+          .qw(qwn), .qv(qvn), .qk(qkn));
   task chk(input [15:0] nm, input [7:0] a, input [7:0] b);
     begin
       checks = checks + 1;
@@ -178,6 +196,8 @@ module tb;
       #(8 + 20*p - $time);              // LOW: qa is shut since the fall
       chk("qa", {7'b0, qas}, {7'b0, qan});
       chk("rq", rqs, rqn);
+      chk("qw", {4'b0, qws}, {4'b0, qwn});
+      chk("qk", {7'b0, qks}, {7'b0, qkn});
       #(13 + 20*p - $time);             // HIGH: qa follows d; pl follows nxt while gated off
       d    = (8'd29 * p + 8'd11) & 8'hff;
       nxt  = ((p * 3) % 5) < 2;
@@ -187,6 +207,7 @@ module tb;
       #(18 + 20*p - $time);             // HIGH: ra and qb are shut since the rise
       chk("ra", {7'b0, ras}, {7'b0, ran});
       chk("qb", {7'b0, qbs}, {7'b0, qbn});
+      chk("qv", {4'b0, qvs}, {4'b0, qvn});
       chk("rq", rqs, rqn);
     end
     if (errs == 0) $display("SUL_DIFF_OK checks=%0d", checks); else $display("SUL_DIFF_FAIL errs=%0d", errs);

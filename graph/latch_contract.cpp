@@ -633,6 +633,11 @@ struct Mux_arms {
   Pin  sel;
   Pin  x_drv;
   Pin  other;
+  // BOTH arms known constants (`Ror(clk) ? 0 : 1`: a latch whose input is a
+  // tied constant, under setundef=zero). Constness cannot say which is the
+  // hold arm; the window phase can -- see hold_arm_of.
+  bool both_known = false;
+  Pin  arm[2];
 };
 
 template <typename Node, typename Pin>
@@ -660,6 +665,9 @@ template <typename Node, typename Pin>
       continue;
     }
     ++r.n_arms;
+    if ((pid == 1 || pid == 2) && n_drv == 1) {
+      r.arm[pid - 1] = only;
+    }
     if (n_drv != 1 || only.is_invalid()) {
       r.x_index = -2;  // a multiply-driven or empty arm is not a single value
       continue;
@@ -693,6 +701,7 @@ template <typename Node, typename Pin>
     r.x_drv   = k_drv;
     r.other   = v_drv;
   }
+  r.both_known = r.ok && r.x_index == -1 && !r.has_q_arm && n_known == 2 && !r.arm[0].is_invalid() && !r.arm[1].is_invalid();
   return r;
 }
 
@@ -715,6 +724,28 @@ template <typename Node, typename Pin>
   // `sel` is 1 at root level L iff (L != sr.inverted).
   const int  sel_at_close = (closed_level != sr.inverted) ? 1 : 0;
   return x_index == sel_at_close;
+}
+
+// The open arm of a hold mux on `latch`'s din, or invalid. A Q arm, a
+// don't-care arm, or ONE known-constant arm is the hold arm when the window
+// proves it (x_arm_is_the_hold_arm); with TWO constant arms, the one selected on
+// the shut phase is the hold and the other is the open value.
+template <typename Node, typename Pin>
+[[nodiscard]] Pin open_arm_of(const Node& latch, const Mux_arms<Pin>& arms) {
+  if (arms.has_q_arm) {
+    return arms.other;
+  }
+  if (arms.ok && arms.x_index >= 0 && !arms.x_drv.is_invalid() && x_arm_is_the_hold_arm(latch, arms.sel, arms.x_index)) {
+    return arms.other;
+  }
+  if (arms.both_known) {
+    for (int idx = 0; idx < 2; ++idx) {
+      if (x_arm_is_the_hold_arm(latch, arms.sel, idx)) {
+        return arms.arm[1 - idx];
+      }
+    }
+  }
+  return Pin{};
 }
 
 hhds::Pin_class latch_transparent_arm(const hhds::Node_class& n) {
@@ -789,14 +820,9 @@ hhds::Pin_class latch_transparent_arm(const hhds::Node_class& n) {
       // phase's; a don't-care reached while the latch is OPEN is a value the
       // latch really passes, and a mapped netlist is full of ordinary
       // don't-care muxes that must keep their semantics.
-      const auto      arms      = classify_mux_arms(mux, q);
-      bool            has_q_arm = arms.has_q_arm;
-      hhds::Pin_class other     = arms.other;
-      if (!has_q_arm && arms.ok && arms.x_index >= 0 && !arms.x_drv.is_invalid()
-          && x_arm_is_the_hold_arm(n, arms.sel, arms.x_index)) {
-        has_q_arm = true;
-      }
-      if (has_q_arm) {
+      const auto            arms  = classify_mux_arms(mux, q);
+      const hhds::Pin_class other = open_arm_of(n, arms);
+      if (arms.has_q_arm || !other.is_invalid()) {
         // When the mux was reached THROUGH wrappers, the arm replaces a 1-bit
         // din, so it has to be 1 bit itself. The intermediate width is
         // irrelevant (bit 0 of a mux is bit 0 of the arm it selects), but a
@@ -812,6 +838,61 @@ hhds::Pin_class latch_transparent_arm(const hhds::Node_class& n) {
   // condition lives on `enable`, so din -- including a graph input, a const, a
   // Get_mask, or a residual value mux -- IS the value the latch passes through.
   return din;
+}
+
+std::optional<Latch_hold_path> latch_hold_path(const hhds::Node_class& n) {
+  if (gu::type_op_of(n) != Ntype_op::Latch) {
+    return std::nullopt;
+  }
+  const auto q   = n.get_driver_pin(0);
+  const auto din = gu::get_driver_of_sink_name(n, "din");
+  if (q.is_invalid() || din.is_invalid()) {
+    return std::nullopt;
+  }
+  Latch_hold_path path;
+  auto            probe = din;
+  for (int hop = 0; hop < 8; ++hop) {
+    if (probe.is_invalid() || probe.is_const() || gu::is_graph_input_pin(probe)) {
+      return std::nullopt;
+    }
+    const auto pn = probe.get_master_node();
+    const auto po = gu::type_op_of(pn);
+    if (po == Ntype_op::Mux) {
+      if (path.chain.empty()) {
+        return std::nullopt;  // a mux read directly is latch_transparent_arm's case
+      }
+      const auto arms  = classify_mux_arms(pn, q);
+      const auto value = open_arm_of(n, arms);
+      if (value.is_invalid()) {
+        return std::nullopt;
+      }
+      path.value   = value;
+      path.mux_out = probe;
+      return path;
+    }
+    // A bit-select wrapper: its VALUE is its lowest-pid operand and every other
+    // operand (the range, the shift, the sign position) is a constant.
+    if (po != Ntype_op::Get_mask && po != Ntype_op::Sext && po != Ntype_op::SRA) {
+      return std::nullopt;
+    }
+    const auto inner = gu::first_value_driver(pn);
+    if (inner.is_invalid()) {
+      return std::nullopt;
+    }
+    bool first = true;
+    for (const auto& in : gu::inp_sink_drivers(pn)) {
+      if (first) {
+        first = false;  // ascending pid: the value operand
+        continue;
+      }
+      if (!in.driver.is_const()) {
+        return std::nullopt;
+      }
+    }
+    path.chain.push_back(pn);
+    probe = inner;
+  }
+  return std::nullopt;
 }
 
 hhds::Occurrence_pin latch_transparent_arm(const hhds::Occurrence_node& n) {
@@ -872,14 +953,9 @@ hhds::Occurrence_pin latch_transparent_arm(const hhds::Occurrence_node& n) {
       // and the same shared classifier. These two answer the same question and
       // had drifted apart once already, so neither the wrapper walk nor the
       // don't-care spelling lives in only one of them any more.
-      const auto           arms      = classify_mux_arms(mux, q);
-      bool                 has_q_arm = arms.has_q_arm;
-      hhds::Occurrence_pin other     = arms.other;
-      if (!has_q_arm && arms.ok && arms.x_index >= 0 && !arms.x_drv.is_invalid()
-          && x_arm_is_the_hold_arm(n, arms.sel, arms.x_index)) {
-        has_q_arm = true;
-      }
-      if (has_q_arm) {
+      const auto                 arms  = classify_mux_arms(mux, q);
+      const hhds::Occurrence_pin other = open_arm_of(n, arms);
+      if (arms.has_q_arm || !other.is_invalid()) {
         // Same width rule as the flat overload: when the mux was reached
         // THROUGH wrappers the arm replaces a 1-bit din, so it must be 1 bit.
         if (probe.get_class_index() != din.get_class_index() && !other.is_invalid() && gu::bits_of(other) != 1) {
@@ -3371,6 +3447,12 @@ bool check(hhds::Graph* g) {
       auto                                   d_open = latch_transparent_arm(l);
       if (d_open.is_invalid()) {
         d_open = gu::get_driver_of_sink_name(l, "din");
+      }
+      // A bit-blasted WIDE latch: its bit of the word is the open arm under the
+      // same bit-select wrappers, whose other operands are constants -- so the
+      // arm's cone is the bit's cone.
+      if (const auto hp = latch_hold_path(l)) {
+        d_open = hp->value;
       }
       comb_reach(d_open, l, hit);
       if (hit.contains(self_ix)) {

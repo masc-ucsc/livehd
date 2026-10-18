@@ -80,6 +80,36 @@ struct Element {
 
 // Backward combinational reach to STATE elements (stops at any register), so a
 // data-gated latch can inherit the slot of whatever drives its enable.
+// A bit-blasted wide latch's open value: its bit-select chain (latch_hold_path)
+// rebuilt over the open arm -- clones of the wrappers, bottom-up, each reading
+// the clone below it (the arm at the bottom) and the original's constant
+// operands, with the original's width and sign.
+hhds::Pin_class rebuild_hold_chain(hhds::Graph& g, const lc::Latch_hold_path& hp) {
+  hhds::Pin_class below = hp.value;
+  for (auto it = hp.chain.rbegin(); it != hp.chain.rend(); ++it) {
+    const auto& orig  = *it;
+    auto        clone = gu::create_typed_node(g, gu::type_op_of(orig));
+    bool        value = true;  // ascending pid: the first sink is the value operand
+    for (auto sink : orig.inp_sorted_pins()) {
+      const auto pid = static_cast<int>(sink.get_port_id());
+      for (const auto& drv : sink.get_driver_pins()) {
+        (value ? below : drv).connect_sink(livehd::graph_util::setup_sink_pid(clone, pid));
+      }
+      value = false;
+    }
+    const auto od = orig.get_driver_pin(0);
+    auto       cd = clone.create_driver_pin(0);
+    gu::set_bits(cd, gu::bits_of(od));
+    if (gu::is_unsign(od)) {
+      gu::set_unsign(cd);
+    } else {
+      gu::set_sign(cd);
+    }
+    below = cd;
+  }
+  return below;
+}
+
 // Is an instance's definition purely combinational (no state anywhere below
 // it)? A body-less def is unknown and counted as combinational: the walk below
 // is a REFUSAL test, so the conservative answer is the one that keeps walking.
@@ -1339,7 +1369,9 @@ bool check_rule4(const Plan& plan, hhds::Graph* g, const lc::Design_clocks& cloc
       // for the memory gate cones above.
       auto s_din = sink_driver(s.node, "din");
       if (s.is_latch && s.cc.role == lc::Net_role::Clock) {
-        if (auto arm = lc::latch_transparent_arm(s.node); !arm.is_invalid()) {
+        if (const auto hp = lc::latch_hold_path(s.node)) {
+          s_din = hp->value;  // a bit-blasted wide latch: its bit of the open arm
+        } else if (auto arm = lc::latch_transparent_arm(s.node); !arm.is_invalid()) {
           s_din = arm;
         }
       }
@@ -2198,6 +2230,8 @@ Result normalize(hhds::Graph* g, const std::vector<hhds::Graph*>& defs, const Op
       // next inverts the enable while the pin is still on the cell.
       const auto through
           = e.cc.role == lc::Net_role::Clock ? lc::latch_transparent_arm(e.node) : hhds::Pin_class{};
+      const auto hold_path
+          = e.cc.role == lc::Net_role::Clock ? lc::latch_hold_path(e.node) : std::optional<lc::Latch_hold_path>{};
       // `posclk` on a Latch is the ENABLE POLARITY, not an edge. Carrying it
       // onto a Flop would silently re-read it as "negedge" — the exact
       // double-negation this task exists to prevent. Move the polarity into the
@@ -2241,15 +2275,20 @@ Result normalize(hhds::Graph* g, const std::vector<hhds::Graph*>& defs, const Op
       // SHUT phase's before it peels; anything it cannot prove comes back as din
       // itself, which is the value mux it really is.
       if (e.cc.role == lc::Net_role::Clock) {
-        if (through.is_invalid()) {
+        // A bit-blasted WIDE latch: din is a bit select of the hold mux, which
+        // latch_transparent_arm returns unchanged; its open value is the same
+        // bit select of the open arm (CORE-ET B08's mpcnd_1p[k]).
+        const auto open_value = hold_path ? rebuild_hold_chain(*g, *hold_path) : through;
+        if (open_value.is_invalid()) {
           r.error  = true;
           r.reason = "clock-gated latch `" + label_of(e.node) + "` has a hold mux with no transparent arm";
           refuse(quiet, "latch-shape-unsupported", std::format("{}: {}", g->get_name(), r.reason), "");
           return r;
         }
-        if (auto din = sink_driver(e.node, "din"); din.is_invalid() || din.get_class_index() != through.get_class_index()) {
+        if (auto din = sink_driver(e.node, "din");
+            din.is_invalid() || din.get_class_index() != open_value.get_class_index()) {
           drop_sink(e.node, "din");
-          through.connect_sink(gu::setup_sink_by_name(e.node, "din"));
+          open_value.connect_sink(gu::setup_sink_by_name(e.node, "din"));
         }
         // The yosys raw-D shape has no hold arm at all: `din` is already the
         // transparent value, so only the gate has to go.

@@ -300,6 +300,27 @@ struct Icg_def_match {
 [[nodiscard]] hhds::Pin_class      latch_transparent_arm(const hhds::Node_class& n);
 [[nodiscard]] hhds::Occurrence_pin latch_transparent_arm(const hhds::Occurrence_node& n);
 
+// A WIDE latch the reader bit-blasted: every bit is its own 1-bit latch whose
+// din is a BIT SELECT of one wide hold mux --
+// `Sext(Get_mask(Sra(Mux(win, 0, d), k), [0,1)), 1)` for bit k. That selector
+// reads the window (the clock), and latch_transparent_arm cannot peel it: the
+// arm under the wrappers is the whole word, not this latch's bit. This finds
+// the mux beneath a chain of bit-select wrappers (Get_mask, Sext, Sra, each
+// with constant parameters), proves its hold arm the same way
+// latch_transparent_arm does, and returns the open arm plus the chain, so a
+// caller can walk the arm (rules B/C, rule 4) or REBUILD the chain over it
+// (pass.single_edge's retype) -- returning the inner arm alone would drop the
+// wrappers' width and bit-position semantics. `chain` runs from din's driver
+// (front) to the wrapper that reads the mux (back); nullopt when din has no
+// provable hold mux beneath at least one wrapper (latch_transparent_arm covers
+// a mux read directly).
+struct Latch_hold_path {
+  hhds::Pin_class               value;  // the arm the latch passes while open
+  hhds::Pin_class               mux_out;
+  std::vector<hhds::Node_class> chain;
+};
+[[nodiscard]] std::optional<Latch_hold_path> latch_hold_path(const hhds::Node_class& latch);
+
 // Is a CLOCK-GATED latch's window provably CLOSED for the whole clock phase in
 // which the commit-at-closing-edge model says it holds, whatever the gate's
 // enables are? `root` is the reference clock the window resolves to and
