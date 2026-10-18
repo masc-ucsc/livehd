@@ -81,16 +81,17 @@ cmp -s "$W/wce.sv" "$W/wce_glitch.sv" && fail "the glitchy-gate variant did not 
 sed "s/always_latch if (!clk) lo = qo + 8'd1;/always @(negedge clk) lo <= qo + 8'd1;/" "$W/wce.sv" > "$W/wce_l1.sv"
 cmp -s "$W/wce.sv" "$W/wce_l1.sv" && fail "the same-edge reader variant did not apply"
 
+TOP=wce   # the nested-gate section below switches it to nwce
 build() { # <name>
   rm -rf "$W/lg_$1"
-  "$LHD" compile "$W/$1.sv" --reader slang --top wce --emit-dir "lg:$W/lg_$1" --workdir "$W/cw_$1" \
+  "$LHD" compile "$W/$1.sv" --reader slang --top "$TOP" --emit-dir "lg:$W/lg_$1" --workdir "$W/cw_$1" \
     >"$W/c_$1.log" 2>&1 || { tail -5 "$W/c_$1.log"; fail "compile of $1.sv failed"; }
 }
 for m in wce wce_eq wce_bad wce_glitch wce_l1; do build "$m"; done
 
 normalize() { # <name> -> output on stdout, rc as the pass's
   rm -rf "$W/lg_$1_n"
-  "$LHD" pass single_edge --top wce "lg:$W/lg_$1" --emit-dir "lg:$W/lg_$1_n" --workdir "$W/pw_$1" 2>&1
+  "$LHD" pass single_edge --top "$TOP" "lg:$W/lg_$1" --emit-dir "lg:$W/lg_$1_n" --workdir "$W/pw_$1" 2>&1
 }
 
 # ---- the gate is ACCEPTED, as a window-held gate, at P=2 ----------------------
@@ -133,6 +134,42 @@ v=$(lec_verdict wce_bad wce bad)
 [ "$v" = REFUTED ] || { tail -5 "$W/lec_bad.log"; fail "a real difference behind the gate was not REFUTED (got $v) -- the gate masks it"; }
 echo "ok: lec REFUTES a real difference behind the gate (not vacuous)"
 
+# ---- NESTED GATES: a gate whose clock is itself a gated clock ----------------------
+# CORE-ET's CSR file: prim_write_commit_en pairs clocked by `clock_wb`, the output
+# of a prim_clk_gate that CSR flops also clock on -- so `clock_wb` is a clock ROOT
+# and the gate walk used to stop there, counting a second clock (B08: "3 clock
+# nets" for one). resolve_icg now flattens a gate of a gated clock, and the inner
+# enable latch -- shut at clk=1 only while the outer gate is on, which is the only
+# time the data latch is open -- passes the window rule conditioned on the cone's
+# other enables.
+cat > "$W/nwce.sv" <<'NWCE_EOF'
+module nwce(input clk, input en_wb, input en, input [7:0] d, output [7:0] q, output [7:0] r, output [7:0] f);
+  reg g;                                      // the OUTER gate's enable latch (prim_clk_gate)
+  always_latch if (!clk) g = en_wb;
+  wire gclk = clk & g;                        // the gated clock ...
+  reg [7:0] fr;                               // ... that a flop clocks on, which makes it a clock ROOT
+  always @(posedge gclk) fr <= d;
+  reg en_1p;                                  // the INNER gate's enable latch, on the GATED clock
+  always_latch if (!gclk) en_1p = en;
+  reg [7:0] qo;                               // the data latch: open while gclk && en_1p
+  always_latch if (gclk && en_1p) qo = d;
+  reg [7:0] lo;                               // race-free reader on the opposite phase
+  always_latch if (!clk) lo = qo + 8'd1;
+  assign q = qo;
+  assign r = lo;
+  assign f = fr;
+endmodule
+NWCE_EOF
+TOP=nwce
+build nwce
+out="$(normalize nwce)"
+[ $? -eq 0 ] || { echo "$out" | tail -3; fail "a latch pair on an already-gated clock was refused (the gate walk stopped at the inner gate)"; }
+grep -q "clock nets" <<<"$out" && { echo "$out" | tail -3; fail "the nested gate was counted as a second clock"; }
+grep -q "P=2 slots" <<<"$out" && grep -q "1 window-held" <<<"$out" \
+  || { echo "$out" | tail -3; fail "the nested gate did not normalize as ONE clock at P=2 with the latch window-held"; }
+echo "ok: a gate of a gated clock is one clock (P=2, window-held through both gates)"
+TOP=wce
+
 # ---- the transformation itself, against an independent simulator ------------------
 if [ -z "${LHD_EXTERNAL_SIM:-}" ]; then
   echo "note: external-simulator leg skipped (set LHD_EXTERNAL_SIM=1)"
@@ -150,7 +187,7 @@ fi
 
 emit() { # <lgdir> <outdir>
   rm -rf "$2"
-  "$LHD" compile "lg:$1" --top wce.wce --emit-dir "verilog:$2" --workdir "$W/vw_$(basename "$2")" \
+  "$LHD" compile "lg:$1" --top "$TOP.$TOP" --emit-dir "verilog:$2" --workdir "$W/vw_$(basename "$2")" \
     >"$W/e_$(basename "$2").log" 2>&1 || { tail -5 "$W/e_$(basename "$2").log"; fail "verilog emission from $1 failed"; }
 }
 emit "$W/lg_wce" "$W/v_src"
@@ -207,16 +244,18 @@ module tb;
 endmodule
 EOF
 
-run_sim() { # <label> <normalized.v> [defines...]
+SRC_V="$W/src.v"
+TB_V="$W/tb.v"
+run_sim() { # <label> <normalized.v> [defines...]   (reads SRC_V / TB_V)
   local label=$1 norm=$2
   shift 2
   if [ "$SIM" = iverilog ]; then
-    iverilog -g2012 "$@" -o "$W/$label.vvp" "$W/src.v" "$norm" "$W/tb.v" >"$W/sim_$label.log" 2>&1 \
+    iverilog -g2012 "$@" -o "$W/$label.vvp" "$SRC_V" "$norm" "$TB_V" >"$W/sim_$label.log" 2>&1 \
       || { cat "$W/sim_$label.log"; fail "iverilog failed to elaborate ($label)"; }
     vvp "$W/$label.vvp" 2>&1
   else
     verilator --binary --timing -Wno-fatal -Wno-lint -Wno-style --top-module tb "$@" -Mdir "$W/obj_$label" \
-      "$W/src.v" "$norm" "$W/tb.v" >"$W/sim_$label.log" 2>&1 \
+      "$SRC_V" "$norm" "$TB_V" >"$W/sim_$label.log" 2>&1 \
       || { tail -5 "$W/sim_$label.log"; fail "verilator failed to build ($label)"; }
     "$W/obj_$label/Vtb" 2>&1
   fi
@@ -243,5 +282,76 @@ echo "ok: reading the enable latch's live input instead of its held Q FAILS (the
 out="$(run_sim p1 "$W/norm.v" -DNHALF=10 -DNSTART=10)"
 grep -q "WCE_DIFF_FAIL" <<<"$out" || fail "the harness still passed in the P=1 time base -- it cannot see the phase divider"
 echo "ok: clocking the normalized side once per period FAILS (the harness discriminates)"
+
+# ---- the NESTED gate, against the same simulator ------------------------------------
+TOP=nwce
+emit "$W/lg_nwce" "$W/v_nsrc"
+emit "$W/lg_nwce_n" "$W/v_nnorm"
+cat "$W"/v_nsrc/*.v > "$W/nsrc.v"
+sed 's/^module nwce(/module nwce_n(/' "$W"/v_nnorm/*.v > "$W/nnorm.v"
+grep -q "always_latch" "$W/nnorm.v" && fail "the NORMALIZED nested design still holds a latch"
+cat > "$W/ntb.v" <<'NTB_EOF'
+`timescale 1ns/1ps
+`ifndef NSTART
+`define NSTART 5
+`endif
+`ifndef NHALF
+`define NHALF 5
+`endif
+module tb;
+  reg clk_s = 0, clk_n = 0, en = 1, en_wb = 1;
+  reg [7:0] d = 8'd3;
+  wire [7:0] qs, rs, fs, qn, rn, fn;
+  integer p, errs = 0, checks = 0;
+  always #10 clk_s = ~clk_s;
+  initial begin #(`NSTART); forever #(`NHALF) clk_n = ~clk_n; end
+  nwce   s(.clk(clk_s), .en_wb(en_wb), .en(en), .d(d), .q(qs), .r(rs), .f(fs));
+  nwce_n n(.clk(clk_n), .en_wb(en_wb), .en(en), .d(d), .q(qn), .r(rn), .f(fn));
+  task chk(input [7:0] nm, input [7:0] a, input [7:0] b);
+    begin
+      checks = checks + 1;
+      if (p >= 3 && a !== b) begin errs = errs + 1; if (errs < 6) $display("MISMATCH %s p=%0d src=%0d norm=%0d", nm, p, a, b); end
+    end
+  endtask
+  initial begin
+    for (p = 0; p < 80; p = p + 1) begin
+      #(4 + 20*p - $time);              // LOW: what both enable latches hold at the rise
+      en_wb = (p % 4) != 1;
+      en    = (p % 3) != 0;
+      d     = (8'd17 * p + 8'd5) & 8'hff;
+      #(12 + 20*p - $time);             // HIGH: the low reader is opaque; the flop has sampled
+      chk("r", rs, rn);
+      chk("f", fs, fn);
+      #(13 + 20*p - $time);             // HIGH: the data latch follows d ...
+      d     = (8'd29 * p + 8'd11) & 8'hff;
+      #(15 + 20*p - $time);             // ... while BOTH enables move with their latches shut
+      if (p % 2 == 0) en = !en;
+      if (p % 5 == 0) en_wb = !en_wb;
+      #(22 + 20*p - $time);             // LOW: the data latch is opaque
+      chk("q", qs, qn);
+    end
+    if (errs == 0) $display("WCE_DIFF_OK checks=%0d", checks); else $display("WCE_DIFF_FAIL errs=%0d", errs);
+    $finish;
+  end
+endmodule
+NTB_EOF
+SRC_V="$W/nsrc.v"
+TB_V="$W/ntb.v"
+out="$(run_sim npos "$W/nnorm.v")"
+grep -q "WCE_DIFF_OK" <<<"$out" \
+  || { echo "$out" | grep -E 'MISMATCH|WCE' | head -6; fail "the normalized NESTED design does not match its source under $SIM"; }
+echo "ok: a latch pair behind a gate of a gated clock agrees with its source over 80 periods under $SIM"
+grep -q "if ((single_edge_phase & g & en_1p)) begin" "$W/nnorm.v" \
+  || { grep -n "single_edge_phase" "$W/nnorm.v" | head; fail "the nested slot-1 commit is not spelled as expected; its controls cannot be derived"; }
+# NEGATIVE CONTROLS: each held read replaced by its gate latch's live input.
+sed 's/if ((single_edge_phase & g & en_1p)) begin/if ((single_edge_phase \& g \& en)) begin/' "$W/nnorm.v" > "$W/nnorm_inner.v"
+sed 's/if ((single_edge_phase & g & en_1p)) begin/if ((single_edge_phase \& en_wb \& en_1p)) begin/' "$W/nnorm.v" > "$W/nnorm_outer.v"
+cmp -s "$W/nnorm.v" "$W/nnorm_inner.v" && fail "the inner-bypass mutation did not apply"
+cmp -s "$W/nnorm.v" "$W/nnorm_outer.v" && fail "the outer-bypass mutation did not apply"
+out="$(run_sim ninner "$W/nnorm_inner.v")"
+grep -q "WCE_DIFF_FAIL" <<<"$out" || fail "reading the INNER enable latch's live input still passed"
+out="$(run_sim nouter "$W/nnorm_outer.v")"
+grep -q "WCE_DIFF_FAIL" <<<"$out" || fail "reading the OUTER enable latch's live input still passed"
+echo "ok: replacing either held enable by its live input FAILS (both held reads are load-bearing)"
 
 echo "PASS: single_edge_latch_icg_test ($SIM)"

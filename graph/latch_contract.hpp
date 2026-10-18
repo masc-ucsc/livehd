@@ -329,6 +329,18 @@ struct Icg_def_match {
 [[nodiscard]] bool gated_latch_masked_off(const hhds::Node_class& latch);
 [[nodiscard]] bool gated_latch_masked_off(const hhds::Occurrence_node& latch);
 
+// `gated_latch_closed_at`, CONDITIONED on `assume_true` all holding. For a
+// latch that is one enable of a GATED latch's cone, the question is whether it
+// stays shut whenever that gated latch is open -- and the gated latch is open
+// only while the clock is at its level AND every OTHER enable of its cone is 1.
+// That is a pointwise implication, so conditioning on those enables is exact,
+// not a relaxation: minion's `en_1p` (window `!(clk & en_q)`) is shut at clk=1
+// only while the outer gate `en_q` is on, which is the only time the latch it
+// gates is open. Unconditioned, the walk answers "either" and the caller
+// refuses.
+[[nodiscard]] bool gated_latch_closed_assuming(const hhds::Node_class& latch, const hhds::Pin_class& root,
+                                               bool closed_level, const std::vector<hhds::Pin_class>& assume_true);
+
 // The dual: is the latch's window provably OPEN whenever `root` is at `level`,
 // whatever every other input is? An ICG's enable latch may be bypassed to its
 // transparent arm only when it is open for the whole phase before the gated

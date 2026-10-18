@@ -878,7 +878,11 @@ uint8_t or_vals(uint8_t a, uint8_t b) {
 }
 
 template <typename Pin>
-uint8_t values_with_root(const Pin& p, const Pin& root, bool level, int depth) {
+// `assume`, when given, holds pins the caller conditions on being TRUE (an
+// element's other gate enables: its window is open only while they all are).
+// A leaf resolving to one of their nets takes that net's implied value; nothing
+// else changes, so with no assumption the answer is exactly what it was.
+uint8_t values_with_root(const Pin& p, const Pin& root, bool level, int depth, const std::vector<Pin>* assume = nullptr) {
   if (p.is_invalid() || depth > 24) {
     return kAny;
   }
@@ -886,6 +890,14 @@ uint8_t values_with_root(const Pin& p, const Pin& root, bool level, int depth) {
   auto       val = [&]() -> uint8_t {
     if (ph.net.is_invalid()) {
       return kAny;
+    }
+    if (assume != nullptr) {
+      for (const auto& a : *assume) {
+        const auto ra = resolve_phase(a, /*stop_at_clock_cell=*/true);
+        if (!ra.net.is_invalid() && ra.net == ph.net) {
+          return ra.inverted ? kCan0 : kCan1;  // `a` is true, so its net is !inverted
+        }
+      }
     }
     if (ph.net == root) {
       return level ? kCan1 : kCan0;
@@ -907,8 +919,8 @@ uint8_t values_with_root(const Pin& p, const Pin& root, bool level, int depth) {
       uint8_t    acc    = is_and ? kCan1 : kCan0;  // the operation's identity
       int        n_ops  = 0;
       for (const auto& in : gu::inp_sink_drivers(n)) {
-        acc = is_and ? and_vals(acc, values_with_root(in.driver, root, level, depth + 1))
-                     : or_vals(acc, values_with_root(in.driver, root, level, depth + 1));
+        acc = is_and ? and_vals(acc, values_with_root(in.driver, root, level, depth + 1, assume))
+                     : or_vals(acc, values_with_root(in.driver, root, level, depth + 1, assume));
         ++n_ops;
       }
       if (n_ops == 0) {
@@ -950,7 +962,7 @@ uint8_t values_with_root(const Pin& p, const Pin& root, bool level, int depth) {
       // they are not a pass-through and are left to kAny.
       const auto a = gu::get_driver_of_sink_name(n, "a");
       if (!a.is_invalid() && gu::bits_of(a) == 1) {
-        return values_with_root(a, root, level, depth + 1);
+        return values_with_root(a, root, level, depth + 1, assume);
       }
       return kAny;
     }
@@ -990,12 +1002,12 @@ uint8_t values_with_root(const Pin& p, const Pin& root, bool level, int depth) {
       if (sel.is_invalid() || n_sel != 1 || arms.size() != 2) {
         return kAny;
       }
-      const uint8_t sv = values_with_root(sel, root, level, depth + 1);
+      const uint8_t sv = values_with_root(sel, root, level, depth + 1, assume);
       if (sv == kCan0) {
-        return values_with_root(arms[0], root, level, depth + 1);
+        return values_with_root(arms[0], root, level, depth + 1, assume);
       }
       if (sv == kCan1) {
-        return values_with_root(arms[1], root, level, depth + 1);
+        return values_with_root(arms[1], root, level, depth + 1, assume);
       }
       return kAny;  // the selector is not decided at this level
     }
@@ -1012,8 +1024,8 @@ uint8_t values_with_root(const Pin& p, const Pin& root, bool level, int depth) {
       }
       const bool    invert = !inv.is_invalid() && !inv.is_known_false();
       const auto    en     = sink_driver_hier(n, "en");
-      const uint8_t ev     = en.is_invalid() ? kCan1 : values_with_root(en, root, level, depth + 1);
-      const uint8_t rv     = values_with_root(sink_driver_hier(n, "clk_ref"), root, level, depth + 1);
+      const uint8_t ev     = en.is_invalid() ? kCan1 : values_with_root(en, root, level, depth + 1, assume);
+      const uint8_t rv     = values_with_root(sink_driver_hier(n, "clk_ref"), root, level, depth + 1, assume);
       return invert ? or_vals(rv, flip_vals(ev)) : and_vals(rv, ev);
     }
     return kAny;
@@ -1023,7 +1035,7 @@ uint8_t values_with_root(const Pin& p, const Pin& root, bool level, int depth) {
 
 // The set of values of a latch's WINDOW (1 = transparent) with `root` at `level`.
 template <typename Node, typename Pin>
-uint8_t latch_window_at(const Node& latch, const Pin& root, bool level) {
+uint8_t latch_window_at(const Node& latch, const Pin& root, bool level, const std::vector<Pin>* assume = nullptr) {
   if (latch.is_invalid() || root.is_invalid() || gu::type_op_of(latch) != Ntype_op::Latch) {
     return kAny;
   }
@@ -1031,7 +1043,7 @@ uint8_t latch_window_at(const Node& latch, const Pin& root, bool level) {
   if (en.is_invalid()) {
     return kCan1;  // no enable: permanently transparent
   }
-  uint8_t win = values_with_root(en, root, level, 0);
+  uint8_t win = values_with_root(en, root, level, 0, assume);
   if (sink_driver_hier(latch, "posclk").is_known_false()) {
     win = flip_vals(win);  // active-LOW enable: the window is open while it is 0
   }
@@ -1105,6 +1117,11 @@ bool gated_latch_closed_at(const hhds::Node_class& latch, const hhds::Pin_class&
 
 bool gated_latch_closed_at(const hhds::Occurrence_node& latch, const hhds::Occurrence_pin& root, bool closed_level) {
   return latch_window_at(latch, root, closed_level) == kCan0;
+}
+
+bool gated_latch_closed_assuming(const hhds::Node_class& latch, const hhds::Pin_class& root, bool closed_level,
+                                 const std::vector<hhds::Pin_class>& assume_true) {
+  return latch_window_at(latch, root, closed_level, &assume_true) == kCan0;
 }
 
 bool latch_open_at(const hhds::Node_class& latch, const hhds::Pin_class& root, bool level) {
@@ -1559,6 +1576,25 @@ std::optional<Icg_cone> resolve_icg_depth(const hhds::Pin_class& clock_pin, cons
       // `~clk & en` gates the FALLING edge; an inversion on the way down to the
       // And (a latch's `Mux(cone,0,1)` shaping, or an explicit `!`) flips it too.
       icg.clock_inverted = ph.inverted != outer.inverted;
+      // A GATE WHOSE CLOCK IS ITSELF A GATED CLOCK THAT `is_clock` ACCEPTS.
+      // The branch below handles an inner gate output that is NOT a clock root;
+      // this is the other half. When flops clock directly on the inner gate's
+      // output, Design_clocks roots it there, so it arrives HERE and the walk
+      // used to stop at it: CORE-ET's CSR file holds prim_write_commit_en latch
+      // pairs on `clock_wb & en_1p` with `clock_wb = clk_i & en_q` (a
+      // prim_clk_gate output that the CSR flops clock on), and B08
+      // (intpipe_top) was refused as "3 clock nets" -- clk_i, clock_wb and
+      // prim_mul_div's gated `clock` -- for one real clock. A gate of a gate is
+      // one gate: the inner cell's clock and inversion compose, and its enables
+      // join this cone's. Ported from the d2 branch (90583be13), where it
+      // resolved the same four CORE-ET tops. A graph input is a true root and
+      // ends the chain; the depth bound is the runaway guard shared with the
+      // non-clock branch.
+      if (!gu::is_graph_input_pin(ph.net) && depth < kMaxGateChain) {
+        if (auto inner = resolve_icg_depth(ph.net, clocks, depth + 1)) {
+          absorb_chain(icg, *inner, icg.clock_inverted);
+        }
+      }
       continue;
     }
     // A GATE ON AN ALREADY GATED CLOCK. `is_clock` cannot see this operand as a

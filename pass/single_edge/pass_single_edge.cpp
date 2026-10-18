@@ -623,6 +623,9 @@ Plan build_plan(hhds::Graph* g, const lc::Design_clocks& clocks) {
         // suppress glitches: the latch closes exactly when the flop samples, so
         // the flop sees what the latch was passing THROUGH. Reading its Q
         // instead is the classic L1 error.
+        // The gate's enables AS WRITTEN, before any arm bypass below rewrites
+        // one: the window rule conditions on the OTHER enables of this cone.
+        const std::vector<hhds::Pin_class> gate_enables = e.icg->enables;
         for (auto& en : e.icg->enables) {
           if (en.is_invalid() || en.is_const() || gu::is_graph_input_pin(en)) {
             continue;
@@ -683,8 +686,23 @@ Plan build_plan(hhds::Graph* g, const lc::Design_clocks& clocks) {
           // decided. (The enable latch is itself retyped to a flop committing
           // at its own closing edge, so its Q stays a valid read.)
           const bool window_level = !e.cc.rising;  // a latch committing at FALL is open while the clock is HIGH
+          //
+          // NESTED GATES. After resolve_icg flattens a gate of a gated clock,
+          // the inner enable latch is `en_1p` with window `!(clk & en_q)`: shut
+          // at clk=1 only while the OUTER enable `en_q` is on. That is the only
+          // time this latch is open (its window needs every enable of the cone),
+          // so "shut whenever this latch is open" holds pointwise -- the check
+          // conditions on the cone's other enables being 1.
+          std::vector<hhds::Pin_class> others;
+          for (const auto& o : gate_enables) {
+            if (!o.is_invalid() && o != en) {
+              others.push_back(o);
+            }
+          }
           const bool held_for_window
-              = e.is_latch && lc::gated_latch_closed_at(dn, e.icg->clock, /*closed_level=*/window_level)
+              = e.is_latch
+                && (lc::gated_latch_closed_at(dn, e.icg->clock, /*closed_level=*/window_level)
+                    || lc::gated_latch_closed_assuming(dn, e.icg->clock, /*closed_level=*/window_level, others))
                 && lc::latch_open_at(dn, e.icg->clock, /*level=*/!window_level);
           if (opposite_for_other_edge && !opposite_here) {
             e.icg_hold = true;
