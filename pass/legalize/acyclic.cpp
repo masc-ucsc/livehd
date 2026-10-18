@@ -1036,6 +1036,377 @@ std::string instance_label(const hhds::Node_class& m) {
   return callee ? std::string{callee->get_name()} : std::string{"-"};
 }
 
+
+// ---------------------------------------------------------------------------
+// FALSE CYCLES: a full case's "no branch matched" hold arm.
+//
+// The yosys reader runs `proc -ifx`, which skips proc_rmdead, so a full case
+// (`case (nshc) 1'b0: y = a; 1'b1: y = b; endcase` -- CORE-ET's txfma family,
+// B07) keeps the arm taken when NO item matched, and pmuxtree builds it as
+// `y = s1 ? a : (s2 ? b : y)`: a combinational cycle the RTL does not have
+// (Verilator lints the VPU with no UNOPTFLAT). Turning -ifx off globally is not
+// safe (measured on the d2 branch: one module's process lowering never
+// terminates, two fail the latch contract), so the cycle is broken HERE, and
+// only when it is provably never active.
+//
+// A simple cycle through two-arm muxes is ACTIVE under an input iff every mux
+// on it selects its cycle arm. If that conjunction is UNSATISFIABLE, every
+// input breaks the cycle at some mux taking its other arm. Then unrolling it
+// once at a mux M is exact: M's cycle arm is fed by a CLONE of the path around
+// the cycle in which M's own output is replaced by a constant. Whenever M takes
+// that arm, some other mux on the clone takes its non-cycle arm (same selector,
+// same drivers), so the clone delivers the original value; when M takes its
+// other arm the cycle arm is not read. The function is unchanged for every
+// 2-state input -- which is the Lean model's domain.
+//
+// The condition is decided EXHAUSTIVELY over the selectors' support, with a
+// deliberately narrow, exact value model (EQ against an in-range constant,
+// one-bit And/Or/Not, Ror, in-range bit extracts, one-bit wrappers, two-arm
+// Mux); every other node is an enumerated variable, and a support wider than
+// 20 bits, a cycle through a selector, or any other mux kind fails closed --
+// the cycle is then reported exactly as before.
+constexpr int kMaxCondBits = 20;
+
+struct Cond_model {
+  std::vector<hhds::Pin_class>                 vars;
+  absl::flat_hash_map<hhds::Class_index, int>  var_of;
+  absl::flat_hash_map<hhds::Class_index, bool> evaluable;  // per pin: modelled as an op (true) or a var (false)
+  int                                          bits = 0;
+  bool                                         ok   = true;
+};
+
+int pin_w(const hhds::Pin_class& p) { return static_cast<int>(gu::bits_of(p)); }
+
+std::optional<int64_t> small_const(const hhds::Pin_class& p) {
+  if (!p.is_const()) {
+    return std::nullopt;
+  }
+  const auto& c = gu::const_of(p);
+  if (c.has_unknowns() || !c.is_just_i64()) {
+    return std::nullopt;
+  }
+  return c.to_just_i64();
+}
+
+void add_var(const hhds::Pin_class& p, Cond_model& m) {
+  if (m.var_of.contains(p.get_class_index())) {
+    return;
+  }
+  const int w = pin_w(p);
+  if (w <= 0 || w > kMaxCondBits) {
+    m.ok = false;
+    return;
+  }
+  m.var_of.emplace(p.get_class_index(), static_cast<int>(m.vars.size()));
+  m.vars.push_back(p);
+  m.bits += w;
+  if (m.bits > kMaxCondBits) {
+    m.ok = false;
+  }
+}
+
+// Register `p` in the model: as an operation over modelled operands, or as a
+// variable. Fails the model (m.ok = false) on what cannot be either.
+void model_pin(const hhds::Pin_class& p, Cond_model& m, int depth) {
+  if (!m.ok || p.is_invalid()) {
+    m.ok = false;
+    return;
+  }
+  if (small_const(p)) {
+    return;
+  }
+  if (p.is_const() || depth > 32) {
+    m.ok = false;
+    return;
+  }
+  if (m.evaluable.contains(p.get_class_index()) || m.var_of.contains(p.get_class_index())) {
+    return;
+  }
+  if (gu::is_graph_input_pin(p)) {
+    add_var(p, m);
+    return;
+  }
+  const auto n   = p.get_master_node();
+  const auto op  = gu::type_op_of(n);
+  const auto ins = gu::inp_sink_drivers(n);
+  const int  w   = pin_w(p);
+  bool       as_op = false;
+  if (op == Ntype_op::EQ && ins.size() == 2) {
+    const auto c0 = small_const(ins[0].driver), c1 = small_const(ins[1].driver);
+    if (static_cast<bool>(c0) != static_cast<bool>(c1)) {
+      const auto& x  = c0 ? ins[1].driver : ins[0].driver;
+      const auto  c  = c0 ? *c0 : *c1;
+      const int   xw = pin_w(x);
+      as_op          = w == 1 && xw > 0 && xw <= 62 && c >= 0 && c < (int64_t{1} << xw);
+      if (as_op) {
+        model_pin(x, m, depth + 1);
+      }
+    }
+  } else if ((op == Ntype_op::Or || op == Ntype_op::And) && w == 1 && !ins.empty()) {
+    as_op = std::ranges::all_of(ins, [](const auto& in) {
+      const auto c = small_const(in.driver);
+      return c ? (*c == 0 || *c == 1) : pin_w(in.driver) == 1;
+    });
+    if (as_op) {
+      for (const auto& in : ins) {
+        model_pin(in.driver, m, depth + 1);
+      }
+    }
+  } else if (op == Ntype_op::Not && w == 1 && ins.size() == 1 && pin_w(ins[0].driver) == 1) {
+    as_op = true;
+    model_pin(ins[0].driver, m, depth + 1);
+  } else if (op == Ntype_op::Ror && w == 1 && ins.size() == 1 && pin_w(ins[0].driver) > 0 && pin_w(ins[0].driver) <= 62) {
+    as_op = true;
+    model_pin(ins[0].driver, m, depth + 1);
+  } else if (op == Ntype_op::Get_mask) {
+    const auto rng = gu::bit_range(n);
+    const auto a   = gu::get_driver_of_sink_name(n, "a");
+    as_op = rng && !a.is_invalid() && rng->first >= 0 && rng->second > rng->first && rng->second <= pin_w(a) && pin_w(a) <= 62
+            && w == rng->second - rng->first;
+    // A bit slice of something that would only be a VARIABLE (an input, state,
+    // an op this model does not evaluate) is itself the variable: enumerate the
+    // slice, not the word. Any pin may be a free variable -- that only adds
+    // assignments, so an UNSAT verdict stays a proof -- and slicing keeps a
+    // 19-bit flop read one bit at a time inside the enumeration budget.
+    if (as_op && (gu::is_graph_input_pin(a) || a.is_const() || gu::is_type_register(a.get_master_node())
+                  || !m.evaluable.contains(a.get_class_index()))) {
+      const auto ao = gu::is_graph_input_pin(a) || a.is_const() ? Ntype_op::Invalid : gu::type_op_of(a.get_master_node());
+      const bool a_evaluable_kind = ao == Ntype_op::EQ || ao == Ntype_op::Or || ao == Ntype_op::And || ao == Ntype_op::Not
+                                    || ao == Ntype_op::Ror || ao == Ntype_op::Get_mask || ao == Ntype_op::Sext
+                                    || ao == Ntype_op::Mux;
+      if (!a_evaluable_kind && !small_const(a)) {
+        as_op = false;  // falls through to add_var(p): the slice is the variable
+      }
+    }
+    if (as_op) {
+      model_pin(a, m, depth + 1);
+    }
+  } else if (op == Ntype_op::Sext && w == 1) {
+    const auto a = gu::first_value_driver(n);
+    as_op        = !a.is_invalid() && pin_w(a) == 1;
+    if (as_op) {
+      model_pin(a, m, depth + 1);
+    }
+  } else if (op == Ntype_op::Mux && ins.size() == 3 && w > 0 && w <= 62) {
+    as_op = pin_w(ins[0].driver) > 0 && pin_w(ins[0].driver) <= 62
+            && std::ranges::all_of(ins, [&](const auto& in) { return in.get_port_id() == 0 || small_const(in.driver) || pin_w(in.driver) == w; });
+    if (as_op) {
+      for (const auto& in : ins) {
+        model_pin(in.driver, m, depth + 1);
+      }
+    }
+  }
+  if (as_op) {
+    m.evaluable[p.get_class_index()] = true;
+  } else {
+    add_var(p, m);
+  }
+}
+
+uint64_t mask_w(int w) { return w >= 64 ? ~uint64_t{0} : ((uint64_t{1} << w) - 1); }
+
+uint64_t eval_pin(const hhds::Pin_class& p, const Cond_model& m, const std::vector<uint64_t>& asg,
+                  absl::flat_hash_map<hhds::Class_index, uint64_t>& memo) {
+  if (const auto c = small_const(p)) {
+    return static_cast<uint64_t>(*c);
+  }
+  if (auto v = m.var_of.find(p.get_class_index()); v != m.var_of.end()) {
+    return asg[static_cast<size_t>(v->second)];
+  }
+  if (auto it = memo.find(p.get_class_index()); it != memo.end()) {
+    return it->second;
+  }
+  const auto n   = p.get_master_node();
+  const auto op  = gu::type_op_of(n);
+  const auto ins = gu::inp_sink_drivers(n);
+  const int  w   = pin_w(p);
+  uint64_t   r   = 0;
+  if (op == Ntype_op::EQ) {
+    const auto c0 = small_const(ins[0].driver);
+    const auto& x = c0 ? ins[1].driver : ins[0].driver;
+    const auto  c = static_cast<uint64_t>(c0 ? *c0 : *small_const(ins[1].driver));
+    r             = (eval_pin(x, m, asg, memo) & mask_w(pin_w(x))) == c ? 1 : 0;
+  } else if (op == Ntype_op::Or || op == Ntype_op::And) {
+    r = op == Ntype_op::And ? 1 : 0;
+    for (const auto& in : ins) {
+      const auto v = eval_pin(in.driver, m, asg, memo) & 1;
+      r            = op == Ntype_op::And ? (r & v) : (r | v);
+    }
+  } else if (op == Ntype_op::Not) {
+    r = (~eval_pin(ins[0].driver, m, asg, memo)) & 1;
+  } else if (op == Ntype_op::Ror) {
+    r = (eval_pin(ins[0].driver, m, asg, memo) & mask_w(pin_w(ins[0].driver))) != 0 ? 1 : 0;
+  } else if (op == Ntype_op::Get_mask) {
+    const auto rng = gu::bit_range(n);
+    const auto a   = gu::get_driver_of_sink_name(n, "a");
+    r              = ((eval_pin(a, m, asg, memo) & mask_w(pin_w(a))) >> rng->first) & mask_w(w);
+  } else if (op == Ntype_op::Sext) {
+    r = eval_pin(gu::first_value_driver(n), m, asg, memo) & 1;
+  } else if (op == Ntype_op::Mux) {
+    hhds::Pin_class sel, a0, a1;
+    for (const auto& in : ins) {
+      (in.get_port_id() == 0 ? sel : in.get_port_id() == 1 ? a0 : a1) = in.driver;
+    }
+    const bool t = (eval_pin(sel, m, asg, memo) & mask_w(pin_w(sel))) != 0;
+    r            = eval_pin(t ? a1 : a0, m, asg, memo) & mask_w(w);
+  }
+  memo.emplace(p.get_class_index(), r);
+  return r;
+}
+
+// Is there an assignment of the model's variables under which every
+// (selector, wanted-truth) holds? Exhaustive.
+bool conds_satisfiable(const std::vector<std::pair<hhds::Pin_class, bool>>& conds, const Cond_model& m) {
+  std::vector<uint64_t> asg(m.vars.size(), 0);
+  const uint64_t        total = uint64_t{1} << m.bits;
+  for (uint64_t k = 0; k < total; ++k) {
+    uint64_t rest = k;
+    for (size_t i = 0; i < m.vars.size(); ++i) {
+      const int w = pin_w(m.vars[i]);
+      asg[i]      = rest & mask_w(w);
+      rest >>= w;
+    }
+    absl::flat_hash_map<hhds::Class_index, uint64_t> memo;
+    bool                                             all = true;
+    for (const auto& [sel, want] : conds) {
+      const bool t = (eval_pin(sel, m, asg, memo) & mask_w(pin_w(sel))) != 0;
+      if (t != want) {
+        all = false;
+        break;
+      }
+    }
+    if (all) {
+      return true;
+    }
+  }
+  return false;
+}
+
+// One simple cycle inside the component `inside`, through `start` (a two-arm
+// Mux's output): the path [(sink entering node_i, driver leaving node_i)],
+// ending at the sink of `start`'s node the cycle re-enters. nullopt if none.
+struct Cycle_hop {
+  hhds::Pin_class sink, drv;
+};
+std::optional<std::vector<Cycle_hop>> simple_cycle(const hhds::Pin_class& start,
+                                                   const absl::flat_hash_set<hhds::Class_index>& inside) {
+  const auto start_node = start.get_master_node();
+  absl::flat_hash_map<hhds::Class_index, std::pair<hhds::Pin_class, hhds::Pin_class>> parent;  // drv -> (prev drv, sink)
+  std::vector<hhds::Pin_class> frontier{start};
+  absl::flat_hash_set<hhds::Class_index> seen{start.get_class_index()};
+  while (!frontier.empty()) {
+    std::vector<hhds::Pin_class> next;
+    for (const auto& d : frontier) {
+      for (const auto& e : d.out_edges()) {
+        const auto sn = e.sink.get_master_node();
+        if (sn.get_class_index() == start_node.get_class_index()) {
+          // closed: rebuild the path back to start
+          std::vector<Cycle_hop> path;
+          path.push_back({e.sink, start});
+          auto cur = d;
+          while (cur.get_class_index() != start.get_class_index()) {
+            const auto& [prev, sink] = parent.at(cur.get_class_index());
+            path.push_back({sink, cur});
+            cur = prev;
+          }
+          std::reverse(path.begin(), path.end());
+          return path;  // path[i].sink enters path[i].drv's node; the last hop re-enters start's node
+        }
+        for (auto nd : sn.out_sorted_pins()) {
+          if (!inside.contains(nd.get_class_index()) || !seen.insert(nd.get_class_index()).second) {
+            continue;
+          }
+          parent.emplace(nd.get_class_index(), std::make_pair(d, e.sink));
+          next.push_back(nd);
+        }
+      }
+    }
+    frontier = std::move(next);
+  }
+  return std::nullopt;
+}
+
+// Try to break ONE provably inactive cycle in the component. True if rewired.
+bool break_false_cycle(hhds::Graph* g, const std::vector<hhds::Pin_class>& members) {
+  absl::flat_hash_set<hhds::Class_index> inside;
+  for (const auto& p : members) {
+    inside.insert(p.get_class_index());
+  }
+  for (const auto& start : members) {
+    const auto sn = start.get_master_node();
+    if (gu::type_op_of(sn) != Ntype_op::Mux || gu::inp_sink_drivers(sn).size() != 3) {
+      continue;
+    }
+    const auto cyc = simple_cycle(start, inside);
+    if (!cyc) {
+      continue;
+    }
+    // path[k]: hop into node(path[k].drv) via path[k].sink; the LAST hop's drv
+    // is `start` and its sink is the cycle arm of start's node.
+    std::vector<std::pair<hhds::Pin_class, bool>> conds;
+    bool                                          ok = true;
+    for (const auto& h : *cyc) {
+      const auto n  = h.sink.get_master_node();
+      const auto op = gu::type_op_of(n);
+      if (op == Ntype_op::Mux) {
+        const auto pid = h.sink.get_port_id();
+        if (pid == 0 || gu::inp_sink_drivers(n).size() != 3) {
+          ok = false;  // through a selector, or not a two-arm mux
+          break;
+        }
+        hhds::Pin_class sel;
+        for (const auto& in : gu::inp_sink_drivers(n)) {
+          if (in.get_port_id() == 0) {
+            sel = in.driver;
+          }
+        }
+        conds.emplace_back(sel, pid == 2);
+      } else if (op == Ntype_op::Hotmux || op == Ntype_op::Sub || gu::is_type_register(n)) {
+        ok = false;
+        break;
+      }
+    }
+    if (!ok || conds.empty()) {
+      continue;
+    }
+    Cond_model m;
+    for (const auto& [sel, want] : conds) {
+      model_pin(sel, m, 0);
+    }
+    if (!m.ok || conds_satisfiable(conds, m)) {
+      continue;  // possibly active (or not decidable here): a real loop, reported as before
+    }
+    // UNROLL at start: clone the path from start's output around to the driver
+    // of start's cycle arm, with start's output replaced by a constant.
+    const auto&     arm_hop = cyc->back();
+    hhds::Pin_class prev    = gu::create_const(*g, *Dlop::create_integer(0));
+    for (size_t k = 0; k + 1 < cyc->size(); ++k) {
+      const auto& h   = (*cyc)[k];
+      const auto  n   = h.sink.get_master_node();
+      auto        neo = gu::create_typed_node(*g, gu::type_op_of(n));
+      for (auto sink : n.inp_sorted_pins()) {
+        const auto pid = static_cast<int>(sink.get_port_id());
+        for (const auto& drv : sink.get_driver_pins()) {
+          (sink.get_class_index() == h.sink.get_class_index() ? prev : drv)
+              .connect_sink(gu::setup_sink_pid(neo, pid));
+        }
+      }
+      auto out = neo.create_driver_pin(h.drv.get_port_id());
+      gu::set_bits(out, gu::bits_of(h.drv));
+      if (gu::is_unsign(h.drv)) {
+        gu::set_unsign(out);
+      } else {
+        gu::set_sign(out);
+      }
+      prev = out;
+    }
+    const auto arm_pid = static_cast<int>(arm_hop.sink.get_port_id());
+    arm_hop.sink.del_sink();
+    prev.connect_sink(gu::setup_sink_pid(sn, arm_pid));
+    return true;
+  }
+  return false;
+}
 }  // namespace
 
 Acyclic_result make_acyclic(const std::vector<std::shared_ptr<hhds::Graph>>& graphs, [[maybe_unused]] Split_state& state) {  // loops are never split now: nothing is recorded
@@ -1103,6 +1474,30 @@ Acyclic_result make_acyclic(const std::vector<std::shared_ptr<hhds::Graph>>& gra
     if (!found.cycles.empty() || found.refined_away) {
       result.slices_rewired += gu::split_packed_cycle_slices(g);
       found = scan(g, ctx);
+    }
+    // A cycle no input can activate (a full case's hold arm under `proc -ifx`)
+    // is unrolled once and the scan repeated; what is left is reported.
+    const int false_before = result.false_cycles;
+    for (int round = 0; round < 4096 && !found.cycles.empty(); ++round) {
+      bool broke = false;
+      for (const auto& members : found.cycles) {
+        if (break_false_cycle(g, members)) {
+          ++result.false_cycles;
+          broke = true;
+        }
+      }
+      if (!broke) {
+        break;
+      }
+      found = scan(g, ctx);
+    }
+    if (result.false_cycles > false_before) {
+      diag::info(kAcyclicPass, "false-cycle-unrolled", "progress")
+          .msg("unrolled {} combinational cycle(s) in '{}' that no input can activate (a full case's hold arm under "
+               "`proc -ifx`)",
+               result.false_cycles - false_before,
+               name)
+          .emit();
     }
     for (const auto& members : found.cycles) {
       std::string hops;

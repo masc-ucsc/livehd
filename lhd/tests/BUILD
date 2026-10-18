@@ -1043,6 +1043,17 @@ sh_test(
     ],
 )
 
+# A full case's "no branch matched" hold arm (yosys `proc -ifx`) is a FALSE
+# combinational cycle: pass.legalize proves it never active and unrolls it; a
+# sparse case's reachable hold is still refused. With LHD_EXTERNAL_SIM=1 an
+# Icarus differential against the RTL and a swapped-arm control.
+sh_test(
+    name = "legalize_false_cycle_test",
+    size = "medium",
+    srcs = ["legalize_false_cycle_test.sh"],
+    data = ["//lhd"],
+)
+
 # A DATA-gated latch whose window still reads a clock through logic the pass
 # cannot resolve (a gate inside an instance) is refused, not lowered with the
 # clock read as data; the same gate written in the top folds, and a window from

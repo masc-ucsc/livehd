@@ -39,6 +39,7 @@ struct Acyclic_result {
   int instances_inlined = 0;
   int loops_split       = 0;
   int slices_rewired    = 0;
+  int false_cycles      = 0;  // cycles proven never active and unrolled (see break_false_cycle)
   int loops             = 0;  // true loops left (each a diag error)
   // per graph: callee names of the instances inlined into it
   absl::flat_hash_map<const hhds::Graph*, std::vector<std::string>> inlined;
