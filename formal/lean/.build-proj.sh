@@ -115,6 +115,15 @@ MODULES=(
   Projection/Sym/Val
   Projection/Sym/Prim
   Projection/Sym/Eval
+  Projection/Sym/Asg
+  Projection/Sym/Sat
+  Projection/Sym/Layout
+  Projection/Sym/Step
+  Projection/Sym/Trace
+  Projection/Sym/Shape
+  Projection/Sym/Unroll
+  Projection/Sym/Oblig
+  Projection/Sym/KInd
   # The central audit: `#audit_axioms` FAILS this build on any axiom outside
   # propext/Classical.choice/Quot.sound. The memory-route modules above audit
   # their own theorems in place with the same command.
