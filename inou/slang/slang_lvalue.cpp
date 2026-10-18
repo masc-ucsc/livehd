@@ -811,7 +811,9 @@ void Slang_context::assign_to(const slang::ast::Expression& lhs, const std::stri
                 }
                 const int   ov_bits = static_cast<int>(ov_hi - ov_lo + 1);
                 std::string part  = ov_lo == *lo ? val : to_int_value(builder_.create_sra_stmts(val, std::to_string(ov_lo - *lo)));
-                part              = to_pattern(part, ov_bits, false);
+                // The field takes the LOW ov_bits of its shifted piece (1800 11.5.1): state that
+                // precision boundary (as emit_packed_rmw does) so set_mask sees a window-wide value.
+                part              = trunc_to(to_pattern(part, ov_bits, false), ov_bits);
                 const int64_t rel = ov_lo - f.off;  // LSB position within the field leaf
                 builder_.create_set_mask_stmts(absl::StrCat(lname_of(bsym), ".", f.name),
                                                part,
@@ -1260,7 +1262,13 @@ void Slang_context::emit_leaf_split_rmw(const Packed_lv& lv, const std::string& 
                            f.bits,
                            f.is_signed));
     } else {
-      builder_.create_set_mask_stmts(absl::StrCat(base, ".", f.name), part, std::to_string(rel), std::to_string(rel + ov_bits));
+      // The slice takes the LOW bits of the value (1800 11.5.1): state that precision boundary
+      // here, as emit_packed_rmw does, so a field-wide piece of a wider RHS reaches set_mask
+      // already fitted to its window.
+      builder_.create_set_mask_stmts(absl::StrCat(base, ".", f.name),
+                                     trunc_to(part, ov_bits),
+                                     std::to_string(rel),
+                                     std::to_string(rel + ov_bits));
     }
   }
 }
