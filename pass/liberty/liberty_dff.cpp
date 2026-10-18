@@ -1106,8 +1106,8 @@ std::optional<double> positive_number(const std::string& value) {
              : std::nullopt;
 }
 struct Electrical_units {
-  double                time = 1000, cap = 1000;
-  std::optional<double> slew, fanout;
+  double                             time = 1000, cap = 1000;
+  std::optional<double>              slew, fanout;
   // lu_table_template name -> body: variable_1/variable_2 say which axis is the load.
   std::map<std::string, std::string> templates;
 };
@@ -1163,7 +1163,7 @@ void repair_timing(Comb_cell& cell, const std::string& body, const Electrical_un
       if (rows.empty() || rows.front().empty()) {
         continue;
       }
-      cell.intrinsic_ps = std::max(cell.intrinsic_ps, std::max(0.0, rows.front().front() * units.time));
+      cell.intrinsic_ps     = std::max(cell.intrinsic_ps, std::max(0.0, rows.front().front() * units.time));
       // The load axis comes from the template (osu018 puts it in variable_1).
       // An undeclared template keeps the common variable_2 = load layout.
       std::string load_axis = "index_2";
@@ -1179,7 +1179,7 @@ void repair_timing(Comb_cell& cell, const std::string& body, const Electrical_un
       if (index == std::string::npos) {
         continue;
       }
-      const auto loads = table_values("values" + table.substr(index + 7));
+      const auto          loads = table_values("values" + table.substr(index + 7));
       // Delay along the load axis at the first entry of the other axis: row 0
       // for a variable_2 load (or a 1-D table), column 0 for a 2-D variable_1 load.
       std::vector<double> values;
@@ -1201,6 +1201,93 @@ void repair_timing(Comb_cell& cell, const std::string& body, const Electrical_un
   }
 }
 }  // namespace
+
+std::vector<Output_drive> scan_output_drives_text(const std::string& contents) {
+  const auto                text     = strip_comments(contents);
+  const auto                units    = electrical_units(text);
+  const auto                memories = scan_memory_cells_text(text);
+  std::vector<Output_drive> result;
+  std::string               args;
+  for (auto open = find_group(text, "cell", 0, args); open != std::string::npos; open = find_group(text, "cell", open + 1, args)) {
+    const auto close = match_brace(text, open);
+    if (close == std::string::npos) {
+      break;
+    }
+    const auto       name = unquote_trim(args);
+    const auto       body = text.substr(open + 1, close - open - 1);
+    Electrical_units unit;
+    if (const auto it = units.upper_bound(open); it != units.begin()) {
+      unit = std::prev(it)->second;
+    }
+    std::vector<const Memory_pin*> memory_outputs;
+    for (const auto& memory : memories) {
+      if (memory.name == name) {
+        for (const auto& port : memory.pins) {
+          if (port.direction == "output") {
+            memory_outputs.push_back(&port);
+          }
+        }
+      }
+    }
+    for (const auto* kind : {"pin", "bus"}) {
+      std::string pin_args;
+      for (auto pin = find_group(body, kind, 0, pin_args); pin != std::string::npos;
+           pin      = find_group(body, kind, pin + 1, pin_args)) {
+        const auto end = match_brace(body, pin);
+        if (end == std::string::npos) {
+          break;
+        }
+        const auto pin_body = body.substr(pin + 1, end - pin - 1);
+        const auto attrs    = top_level_only(pin_body);
+        const auto output   = unquote_trim(pin_args);
+        if (scalar_attr(attrs, "direction") != "output" || !scalar_attr(attrs, "three_state").empty() || !is_bare_ident(output)) {
+          continue;
+        }
+        const auto port = std::ranges::find_if(memory_outputs, [&](const auto* p) { return p->name == output; });
+        const bool bus  = std::string_view(kind) == "bus";
+        if (bus && (port == memory_outputs.end() || !(*port)->bus)) {
+          continue;
+        }
+        Output_drive drive;
+        std::string  state_args;
+        for (const auto* state_kind : {"ff", "ff_bank", "latch", "latch_bank", "statetable"}) {
+          drive.sequential |= find_group(body, state_kind, 0, state_args) != std::string::npos;
+        }
+        drive.sequential         |= port != memory_outputs.end();
+        drive.name                = name;
+        drive.output              = output;
+        drive.max_capacitance_ff  = positive_number(scalar_attr(attrs, "max_capacitance"));
+        if (drive.max_capacitance_ff) {
+          *drive.max_capacitance_ff *= unit.cap;
+        }
+        drive.max_transition_ps = unit.slew;
+        if (const auto slew = positive_number(scalar_attr(attrs, "max_transition"))) {
+          drive.max_transition_ps = *slew * unit.time;
+        }
+        drive.max_fanout = unit.fanout;
+        if (const auto fanout = positive_number(scalar_attr(attrs, "max_fanout"))) {
+          drive.max_fanout = fanout;
+        }
+        Comb_cell estimate;
+        repair_timing(estimate, pin_body, unit);
+        drive.intrinsic_ps   = estimate.intrinsic_ps;
+        drive.resistance_ohm = estimate.resistance_ohm;
+        if (bus) {
+          for (int bit = std::min((*port)->msb, (*port)->lsb); bit <= std::max((*port)->msb, (*port)->lsb); ++bit) {
+            drive.output = output + "[" + std::to_string(bit) + "]";
+            result.push_back(drive);
+          }
+        } else {
+          result.push_back(std::move(drive));
+        }
+      }
+    }
+  }
+  return result;
+}
+std::vector<Output_drive> scan_output_drives(const std::string& lib_files) {
+  return scan_output_drives_text(read_files(lib_files));
+}
 
 std::vector<Comb_cell> scan_comb_cells_text(const std::string& contents) {
   const auto             text  = strip_comments(contents);
@@ -1743,7 +1830,11 @@ void emit_dff_model(hhds::GraphLibrary& outlib, const Dff_cell& dff) {
 }
 
 std::vector<Memory_cell> scan_memory_cells(const std::string& lib_files, std::vector<Memory_skip>* skipped) {
-  const auto               text = strip_comments(read_files(lib_files));
+  return scan_memory_cells_text(read_files(lib_files), skipped);
+}
+
+std::vector<Memory_cell> scan_memory_cells_text(const std::string& contents, std::vector<Memory_skip>* skipped) {
+  const auto               text = strip_comments(contents);
   std::vector<Memory_cell> cells;
   const auto               integer = [](const std::string& value) -> std::optional<int> {
     int number              = 0;
@@ -1857,9 +1948,10 @@ std::vector<Memory_cell> scan_memory_cells(const std::string& lib_files, std::ve
           result.area         = parse_area(cell);
           result.address_bits = *address_bits;
           result.word_bits    = *word_bits;
-          const auto local    = bus_types(cell);
+          std::vector<std::string> address_names;
+          const auto               local  = bus_types(cell);
           // Preserve declaration order across scalar pins and buses.
-          size_t cursor = 0;
+          size_t                   cursor = 0;
           for (;;) {
             std::string pargs, bargs;
             const auto  pin  = find_group(cell, "pin", cursor, pargs);
@@ -1879,9 +1971,25 @@ std::vector<Memory_cell> scan_memory_cells(const std::string& lib_files, std::ve
             const auto pin_body = cell.substr(next + 1, pend - next - 1);
             const auto header   = top_level_only(pin_body);
             Memory_pin port;
-            port.name      = unquote_trim(next == pin ? pargs : bargs);
-            port.direction = scalar_attr(header, "direction");
-            port.bus       = next == bus;
+            port.name        = unquote_trim(next == pin ? pargs : bargs);
+            port.direction   = scalar_attr(header, "direction");
+            port.bus         = next == bus;
+            port.clock_input = scalar_attr(header, "clock") == "true";
+            for (const auto* operation : {"memory_read", "memory_write"}) {
+              std::string memory_args;
+              for (auto m = find_group(pin_body, operation, 0, memory_args); m != std::string::npos;
+                   m      = find_group(pin_body, operation, m + 1, memory_args)) {
+                const auto memory_end = match_brace(pin_body, m);
+                if (memory_end == std::string::npos) {
+                  throw std::runtime_error("unclosed Liberty memory port: " + name);
+                }
+                const auto address = scalar_attr(top_level_only(pin_body.substr(m + 1, memory_end - m - 1)), "address");
+                if (!address.empty()) {
+                  address_names.push_back(address);
+                }
+                port.address_data_input |= port.direction == "input" && std::string_view(operation) == "memory_write";
+              }
+            }
             if (port.direction == "internal") {
               continue;  // an internal node, not part of the cell's port list
             }
@@ -1897,11 +2005,11 @@ std::vector<Memory_cell> scan_memory_cells(const std::string& lib_files, std::ve
                 if (timing_end == std::string::npos) {
                   throw std::runtime_error("unclosed Liberty memory timing: " + name);
                 }
-                const auto timing  = top_level_only(pin_body.substr(t + 1, timing_end - t - 1));
-                const auto type    = scalar_attr(timing, "timing_type");
-                const bool edge    = (type == "rising_edge" || type == "falling_edge") && !scalar_attr(timing, "related_pin").empty();
-                saw_edge          |= edge;
-                only_edges        &= edge;
+                const auto timing = top_level_only(pin_body.substr(t + 1, timing_end - t - 1));
+                const auto type   = scalar_attr(timing, "timing_type");
+                const bool edge  = (type == "rising_edge" || type == "falling_edge") && !scalar_attr(timing, "related_pin").empty();
+                saw_edge        |= edge;
+                only_edges      &= edge;
               }
               port.clocked = saw_edge && only_edges;
             }
@@ -1928,6 +2036,10 @@ std::vector<Memory_cell> scan_memory_cells(const std::string& lib_files, std::ve
           }
           if (result.pins.empty()) {
             return "Liberty RAM has no pins";
+          }
+          for (auto& p : result.pins) {
+            p.address_data_input = p.direction == "input" && !p.clock_input
+                                   && (p.address_data_input || std::ranges::find(address_names, p.name) != address_names.end());
           }
           return {};
         }();

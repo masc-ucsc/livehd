@@ -1,4 +1,23 @@
-# Simulator coloring
+# Code generation
+
+## Verilog export
+
+Graphs containing only module instances, ordinary RAM wrappers, and fixed
+wiring operations export as structural Verilog: plain input/output and wire
+declarations, continuous assignments, sized bit literals and explicit bit
+connections for extension, truncation, slices and concatenations. This path
+avoids procedural alias blocks, signed declarations and expression casts so
+limited structural readers such as OpenSTA can read mapped netlists. Module
+input connections use the callee port width explicitly. Native memories still
+retain their RTL wrappers; a timing-only black-box view requires the matching
+Liberty memory interface.
+
+General behavioral graphs keep the existing emitter for arithmetic, arrays,
+compact loops and runtime properties that require richer HDL constructs.
+The focused `//inou/cgen:structural_verilog` regression checks emitted wiring
+against an independent reference using `formal.effort=test`.
+
+## Simulator coloring
 
 With `compile.upass.inline=false`, ordinary combinational instances remain
 in the graph and the occurrence color planner merges their logic with the

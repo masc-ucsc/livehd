@@ -34,6 +34,39 @@ Color_opts flat_opts() {
 
 }  // namespace
 
+TEST(ColorSynth, AsynchronousMemoryCutsEverySynthesisMode) {
+  for (const auto* mode : {"pipe", "synth", "cones"}) {
+    for (bool liberty_memory : {false, true}) {
+      const std::string name = std::string("async_memory_") + mode + (liberty_memory ? "_liberty" : "_native");
+      auto&             lib  = livehd::Hhds_graph_library::instance("lgdb_" + name);
+      auto              ram  = lib.create_io("opaque_ram");
+      ram->add_input("A", 1);
+      ram->add_output("Q", 2, false);
+      auto io = lib.create_io(name);
+      io->add_input("a", 1);
+      io->add_output("out", 1);
+      auto g      = io->create_graph();
+      auto before = create_typed_node(*g, Ntype_op::Not, 1);
+      g->get_input_pin("a").connect_sink(livehd::graph_util::setup_sink_pid(before, 0));
+      auto memory = liberty_memory ? g->create_node() : create_typed_node(*g, Ntype_op::Memory, 1);
+      if (liberty_memory) {
+        memory.set_subnode(ram);
+        ASSERT_FALSE(memory.is_loop_break());
+      }
+      before.create_driver_pin(0).connect_sink(memory.create_sink_pin(liberty_memory ? 1 : 0));
+      auto after = create_typed_node(*g, Ntype_op::Not, 1);
+      memory.create_driver_pin(liberty_memory ? 2 : 0).connect_sink(livehd::graph_util::setup_sink_pid(after, 0));
+      after.create_driver_pin(0).connect_sink(g->get_output_pin("out"));
+      auto opts                        = flat_opts();
+      opts.library_ports["opaque_ram"] = {.memory = true, .data = {"A"}};
+      Color_synth(opts, mode).label(g.get());
+      EXPECT_NE(node_color_of(before), node_color_of(memory)) << name;
+      EXPECT_NE(node_color_of(memory), node_color_of(after)) << name;
+      EXPECT_NE(node_color_of(before), node_color_of(after)) << name;
+    }
+  }
+}
+
 // In pipe mode every combinational node is clustered (nonzero), and a forward
 // chain shares a single cluster id.
 TEST(ColorSynth, ChainSharesCluster) {

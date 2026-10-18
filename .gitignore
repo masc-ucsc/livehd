@@ -113,3 +113,6 @@ generated/master_port/
 # Measurement/reproduction bundles: large, regenerable, kept out of the repository
 # (files already tracked under repros/ stay tracked).
 /repros/
+
+# Results belong under /repros/; prevent older report scripts from adding them here.
+/todo/livehd/placement-results/

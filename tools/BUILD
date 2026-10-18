@@ -11,6 +11,24 @@ cc_binary(
     deps = ["@dreamplace//dreamplace/native:placer"],
 )
 
+cc_binary(
+    name = "timing_probe",
+    srcs = ["timing_probe.cpp"],
+    deps = ["//pass/opentimer:pass_opentimer", "@rapidjson"],
+)
+
+cc_binary(
+    name = "physical_repair",
+    srcs = ["physical_repair.cpp"],
+    deps = [
+        "//graph",
+        "//inou/lefdef:inou_lefdef",
+        "//pass/opentimer:pass_opentimer",
+        "//pass/place",
+        "@rapidjson",
+    ],
+)
+
 # An empty Xcode version list selects apple_support's Command Line Tools
 # toolchain, without discovering an unrelated /Applications/Xcode.app.
 xcode_config(

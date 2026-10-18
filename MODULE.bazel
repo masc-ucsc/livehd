@@ -72,21 +72,20 @@ bazel_dep(name = "googletest", version = "1.18.0.bcr.1")
 # taskflow versions in one binary are an ODR violation that corrupts
 # tf::Executor at runtime (different tf:: layouts behind one set of weak inline
 # symbols). Do not add a standalone Taskflow archive while OpenTimer is linked
-# in; see packages/opentimer.BUILD.
+# in; see ../OpenTimer/BUILD.bazel.
 
 #### Flex/Bison
 bazel_dep(name = "bison", version = "3.8.2.bcr.11")
 bazel_dep(name = "flex", version = "2.6.4.bcr.8")
 
 bazel_dep(name = "rapidjson", version = "1.1.0.bcr.20250205")
-# Native CPU placement; the archive uses LiveHD's HHDS/HLOP repositories.
-http_archive(
+# Native CPU placement; the repository uses LiveHD's HHDS/HLOP repositories.
+git_repository(
     name = "dreamplace",
-    urls = ["https://github.com/masc-ucsc/DREAMPlace/archive/fa11983f5c3ba29280afc4b804f8dd6c261a8a33.tar.gz"],
-    sha256 = "d1627167528165474e5cc13a5487e9a9becd821da80094eb4f4b6f9ee63ac9b3",
-    strip_prefix = "DREAMPlace-fa11983f5c3ba29280afc4b804f8dd6c261a8a33",
+    commit = "23c8be721abc64b08069f2348549390b3b210f29",
+    remote = "https://github.com/masc-ucsc/DREAMPlace.git",
 )
-# For local co-development swap the http_archive above for:
+# For local co-development swap the git_repository above for:
 # local_repository(name = "dreamplace", path = "../DREAMPlace")
 bazel_dep(name = "openmp", version = "21.1.5.bcr.3")
 # Plain-repository fetch: Bzlmod root-only overrides would break LiveHD consumers.
@@ -259,17 +258,14 @@ http_archive(
 #     path = "../tree-sitter-pyrope",
 # )
 
-# OpenTimer
-http_archive(
+# OpenTimer: the masc-ucsc fork provides its own BUILD.bazel.
+git_repository(
     name = "opentimer",
-    build_file = "//packages:opentimer.BUILD",
-    patches = ["//packages:opentimer.patch", "//packages:opentimer-placement.patch"],
-    sha256 = "52791ebff1a4d18d1bb55da5328cf201c41736e278d5f1a4ce0f7410de128b6f",
-    strip_prefix = "OpenTimer-5e0d5bba4b9d5725c932a7b42815f7231813b6a5",
-    urls = [
-        "https://github.com/masc-ucsc/OpenTimer/archive/5e0d5bba4b9d5725c932a7b42815f7231813b6a5.zip",
-    ],
+    commit = "bc3c36e9da311ca1aa7e710e72436fac2a8abfe9",
+    remote = "https://github.com/masc-ucsc/OpenTimer.git",
 )
+# For local co-development swap the git_repository above for:
+# local_repository(name = "opentimer", path = "../OpenTimer")
 
 # Perfetto
 http_archive(

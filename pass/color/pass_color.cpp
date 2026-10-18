@@ -24,6 +24,7 @@
 #include "color_synth.hpp"
 #include "diag.hpp"
 #include "flatten.hpp"
+#include "liberty_dff.hpp"
 #include "node_util.hpp"
 #include "str_tools.hpp"
 #include "synth_groups.hpp"
@@ -42,6 +43,7 @@ void Pass_color::setup() {
   // `top` label), not a per-pass --set option.
   m.add_label_optional("hier", "color every unique def in the hierarchy (else only the top)", "true");
   m.add_label_optional("verbose", "print per-graph coloring statistics", "false");
+  m.add_label_optional("liberty", "selected Liberty for memory/clock pin roles; lhd synth supplies synth.liberty", "");
   m.add_label_optional("stats",
                        "print the partition report (count, max/min/avg/median size, singletons, uncolored) to stderr. "
                        "A partition is one (def, color) -- the unit pass.partition emits as `<def>__c<id>`. "
@@ -79,6 +81,9 @@ void Pass_color::setup() {
                        "cones mode: merge overlapping mux/select and enable cones together, separately from data and "
                        "within max_gate; false disables. Default: true under mapper=abc, false under mapper=usyn",
                        "");
+  m.add_label_optional("memory_color_first",
+                       "cones: seed memory address/data inputs first, then grow memory cones round-robin under max_gate",
+                       "false");
   m.add_label_optional("stop_mux",
                        "cones: stop data colors at muxes and place muxes with control; false puts muxes in data colors "
                        "and allows their data cones to merge. Select/enable logic stays separate with ctrl_cones=true. "
@@ -263,9 +268,9 @@ std::string params_json(std::string_view alg, const Color_opts& opts, const Eprp
   s                        += std::format("\"keep_colored\":{}", opts.keep_colored);
   const char* ware_default  = var.get("mapper", "abc") == "usyn" ? "false" : "true";  // the mapper profile (setup())
   s                        += std::format(",\"ware_arith\":{},\"ware_cmp\":{},\"ware_shift\":{}",
-                   parse_bool(var.get("ware_arith", ware_default)),
-                   parse_bool(var.get("ware_cmp", ware_default)),
-                   parse_bool(var.get("ware_shift", ware_default)));
+                                          parse_bool(var.get("ware_arith", ware_default)),
+                                          parse_bool(var.get("ware_cmp", ware_default)),
+                                          parse_bool(var.get("ware_shift", ware_default)));
 
   if (alg == "acyclic") {
     s += std::format(",\"cutoff\":{},\"merge\":{}", var.get("cutoff", "1"), parse_bool(var.get("merge", "false")));
@@ -274,10 +279,10 @@ std::string params_json(std::string_view alg, const Color_opts& opts, const Eprp
     // min/max under `acyclic` would claim a bound nothing enforced.
     const auto salg  = std::string{var.get("mode", "cones")};
     s               += std::format(",\"mode\":\"{}\",\"min_ge\":{},\"max_ge\":{},\"name_weight\":{}",
-                     salg,
-                     opts.min_ge,
-                     opts.max_ge,
-                     opts.name_weight);
+                                   salg,
+                                   opts.min_ge,
+                                   opts.max_ge,
+                                   opts.name_weight);
     // The marker pass.partition / pass.abc key `flatten=auto` off: these colors
     // describe the FLAT design and only mean what they say once the hierarchy is
     // inlined again downstream. Recorded only when the flat coloring ACTUALLY
@@ -306,7 +311,10 @@ std::string params_json(std::string_view alg, const Color_opts& opts, const Eprp
                        opts.flop_to_flop,
                        opts.forward.empty() ? "false" : opts.forward,
                        opts.min_nodes);
-      s += std::format(",\"min_gate\":{},\"boundary_wiring\":{}", opts.min_gate, opts.boundary_wiring);
+      s += std::format(",\"min_gate\":{},\"boundary_wiring\":{},\"memory_color_first\":{}",
+                       opts.min_gate,
+                       opts.boundary_wiring,
+                       opts.memory_color_first);
       // Only the control walk reads it; without ctrl_cones there is no mux
       // policy to report, and printing one would claim a decision nothing made.
       if (opts.ctrl_cones) {
@@ -526,14 +534,37 @@ void Pass_color::color(Eprp_var& var) {
   }
   const char* stop_default = mapper == "usyn" ? "false" : "true";
   opts.ctrl_cones          = parse_bool(var.get("ctrl_cones", stop_default));
-  opts.mux_in_data         = !parse_bool(var.get("stop_mux", stop_default));
-  opts.stop_arith          = parse_bool(var.get("stop_arith", stop_default));
-  opts.stop_cmp            = parse_bool(var.get("stop_cmp", stop_default));
-  opts.stop_shift          = parse_bool(var.get("stop_shift", stop_default));
-  opts.flop_to_flop        = parse_bool(var.get("flop_to_flop", mapper == "usyn" ? "true" : "false"));
-  opts.ctrl_max_gate       = parse_ge_bound(var, "ctrl_max_gate", "0");
-  opts.ctrl_min_gate       = parse_ge_bound(var, "ctrl_min_gate", "0");
-  opts.min_nodes           = static_cast<uint32_t>(std::min<uint64_t>(parse_count(var, "min_color_nodes", "12"), UINT32_MAX));
+  opts.memory_color_first  = parse_bool(var.get("memory_color_first", "false"));
+  if (const std::string library{var.get("liberty", "")}; !library.empty()) {
+    for (const auto& cell : livehd::liberty::scan_memory_cells(library)) {
+      auto& ports  = opts.library_ports[cell.name];
+      ports.memory = true;
+      for (const auto& pin : cell.pins) {
+        if (pin.address_data_input) {
+          ports.data.push_back(pin.name);
+        }
+        if (pin.clock_input) {
+          ports.clock.push_back(pin.name);
+        }
+      }
+    }
+    for (const auto& cell : livehd::liberty::scan_icg_cells(library)) {
+      auto& ports      = opts.library_ports[cell.name];
+      ports.clock_gate = true;
+      ports.clock      = {cell.clk_pin, cell.en_pin};
+      if (!cell.test_pin.empty()) {
+        ports.clock.push_back(cell.test_pin);
+      }
+    }
+  }
+  opts.mux_in_data   = !parse_bool(var.get("stop_mux", stop_default));
+  opts.stop_arith    = parse_bool(var.get("stop_arith", stop_default));
+  opts.stop_cmp      = parse_bool(var.get("stop_cmp", stop_default));
+  opts.stop_shift    = parse_bool(var.get("stop_shift", stop_default));
+  opts.flop_to_flop  = parse_bool(var.get("flop_to_flop", mapper == "usyn" ? "true" : "false"));
+  opts.ctrl_max_gate = parse_ge_bound(var, "ctrl_max_gate", "0");
+  opts.ctrl_min_gate = parse_ge_bound(var, "ctrl_min_gate", "0");
+  opts.min_nodes     = static_cast<uint32_t>(std::min<uint64_t>(parse_count(var, "min_color_nodes", "12"), UINT32_MAX));
   if (opts.ctrl_cones && (alg != "synth" || synth_mode != "cones")) {
     opts.ctrl_cones = false;
   }
@@ -784,9 +815,9 @@ void Pass_color::color(Eprp_var& var) {
     size_t coarse = 0, fine = 0;
     for (auto n : g->body().nodes()) {
       if (auto a = n.attr(livehd::attrs::synth_policy); a.has()) {
-        const auto part = livehd::synth_attr::get(livehd::synth_attr::read(a.get()), "partition");
-        coarse += part == "coarse";
-        fine   += part == "fine";
+        const auto part  = livehd::synth_attr::get(livehd::synth_attr::read(a.get()), "partition");
+        coarse          += part == "coarse";
+        fine            += part == "fine";
       }
     }
     // The graph-wide traits (ctrl_cones, flop_to_flop) follow the scope only when

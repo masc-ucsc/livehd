@@ -326,6 +326,208 @@ TEST(ColorSynthCones, ClockResetNeverSeed) {
   EXPECT_EQ(uncolored_count(g.get()), 0u);
 }
 
+TEST(ColorSynthCones, ClockResetClosuresStaySeparateThroughSmallColorAndForwardMerges) {
+  auto& lib = livehd::Hhds_graph_library::instance("lgdb_cones_infrastructure");
+  auto  io  = lib.create_io("clock_reset_closures");
+  for (const auto* name : {"a", "b", "clk", "en", "rst"}) {
+    io->add_input(name, 1);
+  }
+  auto g = io->create_graph();
+  for (const auto* name : {"a", "b", "clk", "en", "rst"}) {
+    set_bits(g->get_input_pin(name), 1);
+  }
+  const auto binary = [&](Ntype_op op, const char* a, const char* b) {
+    auto n = create_typed_node(*g, op, 1);
+    g->get_input_pin(a).connect_sink(livehd::graph_util::setup_sink_pid(n, 0));
+    g->get_input_pin(b).connect_sink(livehd::graph_util::setup_sink_pid(n, 0));
+    return n;
+  };
+  auto data  = binary(Ntype_op::Xor, "a", "b");
+  auto clock = binary(Ntype_op::And, "clk", "en");
+  auto reset = binary(Ntype_op::Or, "rst", "a");
+  auto f     = make_flop(*g, data.create_driver_pin(0), 1);
+  clock.create_driver_pin(0).connect_sink(livehd::graph_util::setup_sink_pid(f, 2));
+  reset.create_driver_pin(0).connect_sink(livehd::graph_util::setup_sink_pid(f, 7));
+  auto m = create_typed_node(*g, Ntype_op::Memory, 1);
+  clock.create_driver_pin(0).connect_sink(livehd::graph_util::setup_sink_pid(m, 18));
+  reset.create_driver_pin(0).connect_sink(livehd::graph_util::setup_sink_pid(m, 14));
+  data.create_driver_pin(0).connect_sink(livehd::graph_util::setup_sink_pid(m, 19));
+  // A flop carrying a reset signal is still state, even when its data is a
+  // control-group output and it has no other ordinary data neighbour.
+  auto reset_reg = make_flop(*g, reset.create_driver_pin(0), 1);
+  auto o         = fwd_opts(100, "all");
+  o.ctrl_cones   = true;
+  o.min_nodes    = 12;
+  Color_synth(o, "cones").label(g.get());
+  EXPECT_NE(node_color_of(clock), node_color_of(reset));
+  for (auto control : {clock, reset}) {
+    for (auto state_or_data : {f, m, reset_reg, data}) {
+      EXPECT_NE(node_color_of(control), node_color_of(state_or_data));
+    }
+    EXPECT_TRUE(control.attr(livehd::attrs::ctrl_members).has());
+  }
+  EXPECT_EQ(uncolored_count(g.get()), 0u);
+}
+
+TEST(ColorSynthCones, ClockCellAndEnableLogicHaveAProtectedColor) {
+  auto& lib = livehd::Hhds_graph_library::instance("lgdb_cones_clock_cell_color");
+  auto  io  = lib.create_io("clock_cell_color");
+  io->add_input("clk", 1);
+  io->add_input("enable", 1);
+  io->add_input("data", 1);
+  auto g      = io->create_graph();
+  auto enable = create_typed_node(*g, Ntype_op::Not, 1);
+  g->get_input_pin("enable").connect_sink(livehd::graph_util::setup_sink_pid(enable, 0));
+  auto gate = create_typed_node(*g, Ntype_op::Clock_cell, 1);
+  g->get_input_pin("clk").connect_sink(livehd::graph_util::setup_sink_pid(gate, 2));
+  enable.create_driver_pin(0).connect_sink(livehd::graph_util::setup_sink_pid(gate, 4));
+  auto f = make_flop(*g, g->get_input_pin("data"), 1);
+  gate.create_driver_pin(0).connect_sink(livehd::graph_util::setup_sink_pid(f, 2));
+  auto o       = fwd_opts(100, "all");
+  o.ctrl_cones = true;
+  o.min_nodes  = 12;
+  Color_synth(o, "cones").label(g.get());
+  EXPECT_EQ(node_color_of(gate), node_color_of(enable));
+  EXPECT_NE(node_color_of(gate), node_color_of(f));
+  EXPECT_EQ(uncolored_count(g.get()), 0u);
+}
+
+TEST(ColorSynthCones, MemoryFirstSharesIdenticalAddressDataButExcludesClocksAndReset) {
+  auto& lib = livehd::Hhds_graph_library::instance("lgdb_memory_first_identical");
+  auto  io  = lib.create_io("memory_first_identical");
+  for (const auto* name : {"a", "b", "c", "clk", "rst"}) {
+    io->add_input(name, 1);
+  }
+  auto       g    = io->create_graph();
+  const auto gate = [&](const char* a, const char* b) {
+    auto n = create_typed_node(*g, Ntype_op::And, 1);
+    g->get_input_pin(a).connect_sink(livehd::graph_util::setup_sink_pid(n, 0));
+    g->get_input_pin(b).connect_sink(livehd::graph_util::setup_sink_pid(n, 0));
+    return n;
+  };
+  auto       data   = gate("a", "b");
+  auto       clock  = gate("clk", "c");
+  auto       reset  = gate("rst", "c");
+  const auto memory = [&](hhds::Pin_class address) {
+    auto n = create_typed_node(*g, Ntype_op::Memory, 1);
+    address.connect_sink(livehd::graph_util::setup_sink_pid(n, 0));
+    data.create_driver_pin(0).connect_sink(livehd::graph_util::setup_sink_pid(n, 19));  // second-port data
+    clock.create_driver_pin(0).connect_sink(livehd::graph_util::setup_sink_pid(n, 18));
+    reset.create_driver_pin(0).connect_sink(livehd::graph_util::setup_sink_pid(n, 14));
+    return n;
+  };
+  auto a               = memory(g->get_input_pin("a"));
+  auto b               = memory(g->get_input_pin("a"));
+  auto c               = memory(g->get_input_pin("c"));
+  auto o               = raw_opts();
+  o.ctrl_cones         = true;
+  o.memory_color_first = true;
+  Color_synth(o, "cones").label(g.get());
+  EXPECT_EQ(node_color_of(a), node_color_of(b));
+  EXPECT_EQ(node_color_of(a), node_color_of(data));
+  EXPECT_NE(node_color_of(a), node_color_of(c));
+  EXPECT_NE(node_color_of(a), node_color_of(clock));
+  EXPECT_NE(node_color_of(a), node_color_of(reset));
+  EXPECT_EQ(uncolored_count(g.get()), 0u);
+}
+
+TEST(ColorSynthCones, AsynchronousLibertyMemoryIsAlwaysAWalkBoundary) {
+  for (bool memory_first : {false, true}) {
+    auto& lib = livehd::Hhds_graph_library::instance(memory_first ? "lgdb_async_ram_first" : "lgdb_async_ram_default");
+    auto  ram = lib.create_io("opaque_ram");
+    ram->add_input("A", 1);
+    ram->add_output("Q", 2, false);  // asynchronous output: no HHDS loop-break marker
+    auto io = lib.create_io("async_boundary");
+    io->add_input("a", 8);
+    io->add_input("b", 8);
+    io->add_output("out", 8);
+    auto g      = io->create_graph();
+    auto before = create_typed_node(*g, Ntype_op::Xor, 8);
+    g->get_input_pin("a").connect_sink(livehd::graph_util::setup_sink_pid(before, 0));
+    g->get_input_pin("b").connect_sink(livehd::graph_util::setup_sink_pid(before, 0));
+    auto memory = g->create_node();
+    memory.set_subnode(ram);
+    before.create_driver_pin(0).connect_sink(memory.create_sink_pin(1));
+    auto after = create_typed_node(*g, Ntype_op::Or, 8);
+    memory.create_driver_pin(2).connect_sink(livehd::graph_util::setup_sink_pid(after, 0));
+    g->get_input_pin("a").connect_sink(livehd::graph_util::setup_sink_pid(after, 0));
+    after.create_driver_pin(0).connect_sink(g->get_output_pin("out"));
+    auto o                        = raw_opts();
+    o.memory_color_first          = memory_first;
+    o.library_ports["opaque_ram"] = {.memory = true, .data = {"A"}};
+    Color_synth(o, "cones").label(g.get());
+    EXPECT_NE(node_color_of(before), node_color_of(after));
+    EXPECT_NE(node_color_of(memory), node_color_of(after));
+    EXPECT_EQ(uncolored_count(g.get()), 0u);
+  }
+}
+
+TEST(ColorSynthCones, MemoryFirstMergesSharedLogicUnderTheExistingCap) {
+  const auto run = [](const char* path, uint64_t cap, bool merge) {
+    auto& lib = livehd::Hhds_graph_library::instance(path);
+    auto  io  = lib.create_io("memory_shared_logic");
+    io->add_input("a", 8);
+    io->add_input("b", 8);
+    auto g = io->create_graph();
+    set_bits(g->get_input_pin("a"), 8);
+    set_bits(g->get_input_pin("b"), 8);
+    auto common = create_typed_node(*g, Ntype_op::And, 8);
+    g->get_input_pin("a").connect_sink(livehd::graph_util::setup_sink_pid(common, 0));
+    g->get_input_pin("b").connect_sink(livehd::graph_util::setup_sink_pid(common, 0));
+    auto branch = create_typed_node(*g, Ntype_op::Xor, 8);
+    common.create_driver_pin(0).connect_sink(livehd::graph_util::setup_sink_pid(branch, 0));
+    g->get_input_pin("b").connect_sink(livehd::graph_util::setup_sink_pid(branch, 0));
+    auto a = create_typed_node(*g, Ntype_op::Memory, 8);
+    auto b = create_typed_node(*g, Ntype_op::Memory, 8);
+    common.create_driver_pin(0).connect_sink(livehd::graph_util::setup_sink_pid(a, 0));
+    branch.create_driver_pin(0).connect_sink(livehd::graph_util::setup_sink_pid(b, 0));
+    auto o               = fwd_opts(cap, "all");
+    o.ctrl_cones         = true;
+    o.min_nodes          = 12;
+    o.memory_color_first = true;
+    Color_synth(o, "cones").label(g.get());
+    EXPECT_EQ(node_color_of(a) == node_color_of(b), merge);
+    EXPECT_EQ(uncolored_count(g.get()), 0u);
+  };
+  run("lgdb_memory_shared_fits", 32, true);  // And(8) + Xor(24)
+  run("lgdb_memory_shared_over_cap", 24, false);
+}
+
+TEST(ColorSynthCones, MemoryFirstRevisitsMergedGroupsUntilNoOverlapFits) {
+  auto& lib = livehd::Hhds_graph_library::instance("lgdb_memory_first_rounds");
+  auto  io  = lib.create_io("memory_first_rounds");
+  io->add_input("a", 8);
+  io->add_input("b", 8);
+  auto g      = io->create_graph();
+  auto common = create_typed_node(*g, Ntype_op::And, 8);
+  g->get_input_pin("a").connect_sink(livehd::graph_util::setup_sink_pid(common, 0));
+  g->get_input_pin("b").connect_sink(livehd::graph_util::setup_sink_pid(common, 0));
+  auto first = create_typed_node(*g, Ntype_op::Memory, 8);
+  common.create_driver_pin(0).connect_sink(livehd::graph_util::setup_sink_pid(first, 0));
+  std::vector<hhds::Node_class> memories{first};
+  for (int i = 0; i < 2; ++i) {
+    auto branch = create_typed_node(*g, Ntype_op::Xor, 8);
+    common.create_driver_pin(0).connect_sink(livehd::graph_util::setup_sink_pid(branch, 0));
+    g->get_input_pin(i ? "b" : "a").connect_sink(livehd::graph_util::setup_sink_pid(branch, 0));
+    auto memory = create_typed_node(*g, Ntype_op::Memory, 8);
+    branch.create_driver_pin(0).connect_sink(livehd::graph_util::setup_sink_pid(memory, 0));
+    memories.push_back(memory);
+  }
+  auto o               = fwd_opts(56, "all");  // And(8) + two Xor(24); all three fit exactly.
+  o.ctrl_cones         = true;
+  o.memory_color_first = true;
+  Color_synth(o, "cones").label(g.get());
+  for (const auto& memory : memories) {
+    EXPECT_EQ(node_color_of(first), node_color_of(memory));
+  }
+  // Round one consumes one peer. The survivor cannot consume the third memory
+  // until round two; the final empty round proves a fixed point was reached.
+  const auto report = g->get_input_node().attr(livehd::attrs::ctrl_stats);
+  ASSERT_TRUE(report.has());
+  EXPECT_NE(std::string(report.get()).find("\"memory_merges_per_round\":[1,1,0]"), std::string::npos);
+  EXPECT_EQ(uncolored_count(g.get()), 0u);
+}
+
 // Ruling 1, second half. A cone stops expanding once its traversed predicted
 // score passes max_gate; the tail it never reached is a sink of the uncolored
 // subgraph and the leftover sweep roots it. Nothing is left at NO_COLOR.
@@ -1731,13 +1933,12 @@ TEST(ColorSynthCones, SmallColorJoinsItsMostOverlappingNeighbourPastMaxGate) {
   }
 }
 
-
 TEST(ColorSynthCones, PredictedFloorAbsorbsHeavyFewNodeTailPastSoftMaximum) {
   for (const uint64_t floor : {0ULL, 256ULL}) {
-    auto f = absorb_fixture(std::format("lg_cones_pred_floor_{}", floor).c_str(), 64);
-    auto opts = capped_opts(f.chain_pred + 4);
+    auto f         = absorb_fixture(std::format("lg_cones_pred_floor_{}", floor).c_str(), 64);
+    auto opts      = capped_opts(f.chain_pred + 4);
     opts.min_nodes = 0;
-    opts.min_gate = floor;
+    opts.min_gate  = floor;
     ASSERT_GT(f.tail_pred, opts.max_gate / 64);
     ASSERT_GT(opts.max_gate, floor);
     Color_synth(opts, "cones").label(f.g.get());
@@ -1748,7 +1949,7 @@ TEST(ColorSynthCones, PredictedFloorAbsorbsHeavyFewNodeTailPastSoftMaximum) {
 
 TEST(ColorSynthCones, BudgetCutCannotHideWordLookupStrideOrObservedSlice) {
   auto& lib = livehd::Hhds_graph_library::instance("lg_cones_affine_lookup");
-  auto io = lib.create_io("affine_lookup");
+  auto  io  = lib.create_io("affine_lookup");
   io->add_input("data", 1024);
   io->add_input("index", 4);
   auto g = io->create_graph();
@@ -1777,9 +1978,9 @@ TEST(ColorSynthCones, BudgetCutCannotHideWordLookupStrideOrObservedSlice) {
   auto slice_out = slice.create_driver_pin(0);
   set_bits(slice_out, 64);
   make_flop(*g, slice_out, 64);
-  auto opts = capped_opts(1024);
+  auto opts       = capped_opts(1024);
   opts.stop_arith = false;
-  opts.stop_cmp = false;
+  opts.stop_cmp   = false;
   opts.stop_shift = false;
   Color_synth(opts, "cones").label(g.get());
   EXPECT_EQ(node_color_of(shift), node_color_of(amount));

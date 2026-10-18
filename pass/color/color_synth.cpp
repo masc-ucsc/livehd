@@ -1,11 +1,11 @@
 // This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 
 #include "color_synth.hpp"
-#include "synth_groups.hpp"
 
 #include <print>
 
 #include "iassert.hpp"
+#include "synth_groups.hpp"
 
 namespace livehd::color {
 
@@ -87,7 +87,7 @@ bool Color_synth::is_arith_cut(const hhds::Node_class& node) {
 // to it did exactly that -- disabling control grouping silently re-armed the
 // barrel-shifter cut and produced MORE colors than leaving it on.
 bool Color_synth::is_arith_boundary(const hhds::Node_class& node) const {
-  const auto op = type_op_of(node);
+  const auto  op  = type_op_of(node);
   // A source `synth.stop_*` attribute on this cell beats the global option in
   // both directions: false keeps it in its region, true cuts it even when the
   // mapper profile would not (the size/width conditions of is_arith_cut still
@@ -123,7 +123,17 @@ bool Color_synth::is_arith_boundary(const hhds::Node_class& node) const {
 }
 
 bool Color_synth::is_cut(const hhds::Node_class& node) const {
-  if (node.is_loop_break()) {
+  // An asynchronous RAM need not mark its output as a sequential loop break.
+  // It is nevertheless a coloring boundary: its address/data logic must never
+  // propagate through the RAM into consumers of the read port.
+  bool liberty_memory = false;
+  if (!opts.library_ports.empty()) {
+    if (const auto io = node.get_subnode_io()) {
+      const auto cell = opts.library_ports.find(std::string(io->get_name()));
+      liberty_memory  = cell != opts.library_ports.end() && cell->second.memory;
+    }
+  }
+  if (node.is_loop_break() || type_op_of(node) == Ntype_op::Memory || liberty_memory) {
     return true;  // flop/mem/latch/stateful sub: the pipeline-stage boundary
   }
   if (mode == Mode::pipe) {
@@ -240,8 +250,8 @@ void Color_synth::preserve_arith_cuts() {
       if (!flat_node2id.contains(producer) || is_seeded(producer) || is_arith_boundary(producer) || producer.is_loop_break()) {
         return;
       }
-      const auto pop = type_op_of(producer);
-      bool       wiring = false;
+      const auto      pop    = type_op_of(producer);
+      bool            wiring = false;
       hhds::Pin_class next_driver;
       if (pop == Ntype_op::Sum) {
         // `x + constant` on a narrow amount (a base offset into the shifted bus):
@@ -275,7 +285,7 @@ void Color_synth::preserve_arith_cuts() {
       }
       flat_node2id[producer] = cut_id;
       consumer               = producer;
-      driver = pop == Ntype_op::Sum ? next_driver : livehd::graph_util::get_driver_of_sink_name(producer, "a");
+      driver                 = pop == Ntype_op::Sum ? next_driver : livehd::graph_util::get_driver_of_sink_name(producer, "a");
     }
   };
   for (auto n : cuts) {
@@ -343,7 +353,10 @@ void Color_synth::keep_clock_gates_whole(hhds::Graph* g) {
 }
 
 void Color_synth::label(hhds::Graph* g) {
-  if (livehd::synth_attr::seed_groups(g)) { opts.ctrl_cones=false; opts.boundary_wiring=false; }
+  if (livehd::synth_attr::seed_groups(g)) {
+    opts.ctrl_cones      = false;
+    opts.boundary_wiring = false;
+  }
   last_free_id = 1;
   flat_node2id.clear();
   uf     = Int_union_find{};

@@ -1,0 +1,1602 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>TODO 2a-aegraph — acyclic e-graph cprop alternative</title>
+<link rel="stylesheet" href="../todo.css">
+</head>
+<body>
+<nav><span class="brand">LiveHD TODO</span><a href="../index.html">← All tasks</a></nav>
+<main>
+<h1><strong class="item-id">2a-aegraph</strong> Acyclic e-graph cprop alternative</h1>
+<p>Build a second constant-propagation and peephole engine for LGraph. It is a
+Cranelift-style acyclic e-graph ("aegraph"): hash-consing, eager rewrites at
+insertion, union nodes, no rebuild, cost-based extraction, and elaboration back
+into the graph. It sits next to <code>pass.cprop</code> behind one knob,
+<code>compile.cprop.engine</code>, so the two engines run on the same compile
+schedule and can be compared on compile time, memory, node counts, synthesis area
+and delay, simulation speed, and LEC equivalence. A second goal carries the same
+weight: adding an optimization should take one short declarative rule (plus a
+fixture when the rule needs one). From that rule the build generates the matcher,
+its knob and counters, a differential fuzz test, a "fires on its example" test and
+a bounded proof obligation. Classic cprop stays the default and is not deleted.
+The work is split into Phase 1 (milestones A–I, which end at a decision point
+with an A/B table) and Phase 2 (J–O, planned only if Phase 1 passes gate G3).</p>
+
+<h2>Depends on</h2>
+<ul>
+<li>No new infrastructure. The plan builds on:
+  <ul>
+  <li>the compile schedule (<code>compile_graph_passes</code>,
+  <code>lhd/lhd_kernel_common.cpp:1563-1587</code>);</li>
+  <li>EPRP labels and the <code>--set</code> plumbing (<code>merge_sets</code>
+  <code>:818-833</code>, <code>check_known_set_passes</code> <code>:967</code>,
+  <code>kSetPasses</code> <code>lhd/lhd_kernel_internal.hpp:313-339</code>);</li>
+  <li><code>//pass/lec:lec_query</code> (<code>prove_equal</code>);</li>
+  <li>the prplec equiv corpus (<code>inou/prp/tests/equiv/</code>);</li>
+  <li>hlop <code>Dlop</code> arithmetic.</li>
+  </ul></li>
+<li>Milestone A (classic cprop fixes) runs first, because those fixes change the
+classic QoR used as the A/B reference. Fix P7 (classic splits <code>?</code>
+literals) in both <code>pass/cprop</code> and <code>pass/bitwidth</code>; it is a
+hard prerequisite for J. Bitwidth always follows the engine, so without P7 a strict
+<code>?</code> check would fail on the reference no matter which engine ran.</li>
+<li>Rulings Q1–Q5 were decided on 2026-10-15 (see "Rulings"); no open question
+blocks a milestone.</li>
+</ul>
+
+<h2>Rulings</h2>
+<h3>Decided (authoritative)</h3>
+<ol>
+<li><strong>Width-agnostic algebra.</strong> LNAST and LGraph operations work
+over unbounded integers. Width matters only through explicit operations:
+<code>Get_mask</code>, <code>Set_mask</code>, <code>Sext</code>, and the frozen
+Concat width pairs. Every rule is written and checked over unbounded integers and
+needs no width information. Widths affect only the cost model and the elaborator's
+realization stamps.</li>
+<li><strong><code>?</code> is a don't-care that the optimizer resolves, one
+literal at a time.</strong>
+  <ul>
+  <li><code>x*?</code> may become <code>0</code> or <code>x</code>, so
+  <code>x - (x*?)</code> may become <code>0</code>.</li>
+  <li>With <code>c=?</code> and then <code>a*c</code> and <code>b-c</code>, the
+  value of <code>c</code> is picked once and is the same at both uses.</li>
+  <li><code>c=?</code> and <code>d=?</code> are independent literals.</li>
+  <li>Once a value is fixed (for example <code>a = x*?</code> resolves to
+  <code>x</code>), every later use (<code>a+c</code>) sees that choice. Nothing
+  picks again unless the value is still kept as <code>?</code>.</li>
+  <li>No pass may split one literal into several, because that adds freedom.
+  Merging two literals is a legal refinement, but it is an extraction decision and
+  never a rule.</li>
+  <li>LEC's <code>formal.lec.gold_x=ignore</code> smears unknowns through every
+  non-mux op (<code>pass/lec/encode.cpp:3436-3448</code>), and the value plane
+  masks <code>?</code> bits to 0 on both sides (<code>encode.cpp:1199-1228</code>).
+  So LEC cannot detect an inconsistent choice. The engine writes a <em>choice
+  certificate</em> (literal → chosen value or expression). LEC substitutes it into
+  the reference for a strict check, and every literal becomes one shared symbolic
+  variable (J, K).</li>
+  </ul></li>
+<li><strong>Cost depends on the target.</strong> In hardware, <code>x &lt;&lt; k</code>
+is free wiring and always beats <code>x*2^k</code>; in software that is not
+obviously true. The same holds for a mux chain vs. a Hotmux vs. a collapsed mux.
+Extraction uses selectable cost profiles, at least <code>synth</code> and
+<code>sim</code>. Rules never encode a preference.</li>
+<li><strong>Architecture.</strong>
+  <ul>
+  <li>An aegraph on <strong>LGraph</strong>, as an alternative path to
+  <code>pass/cprop</code>, selected by a knob, so the two engines can be compared
+  on speed and QoR.</li>
+  <li>Rule tags:
+    <ul>
+    <li><code>simplify</code>: always better; it subsumes the original.</li>
+    <li><code>alt</code>: the result is unioned with the original, and extraction
+    decides.</li>
+    <li><code>choice</code>: an <code>alt</code> tagged with the <code>?</code>
+    assumption it relies on; extraction enforces consistency.</li>
+    </ul></li>
+  <li>These side passes stay outside the e-graph:
+    <ul>
+    <li>false-cycle cutting (a pre-pass);</li>
+    <li>muxctx path facts;</li>
+    <li>vector-mux window narrowing;</li>
+    <li>flop-enable folding and enableopt;</li>
+    <li>loop_hoist;</li>
+    <li>bitwidth's cyclic fixed point.</li>
+    </ul></li>
+  <li>An optional simplify-only pre-pass on upass/LNAST is a later follow-up that
+  needs its own measurement first. It is not part of this plan's milestones.</li>
+  </ul></li>
+<li><strong>Clean rule API.</strong> Adding a transformation must be simple,
+declarative and self-testing (see "Rule API").</li>
+</ol>
+
+<h3>Decided by the user, 2026-10-15 (were open questions Q1–Q5)</h3>
+<ol start="6">
+<li><strong>Q1 — An out-of-range or disconnected Mux selection is
+<code>?</code>.</strong> <code>?</code> gives the most freedom, and every
+concrete value is a valid choice for it.
+  <ul>
+  <li>For <code>Mux(s, p1..pn)</code>, a constant <code>s ≥ n</code>, or a
+  selection that names a disconnected arm, yields a <code>?</code> owned by that
+  Mux node: one implicit literal per Mux, not shared with any other literal.</li>
+  <li>This removes the conflict between classic's two rules. The equal-arms
+  collapse (<code>cprop.cpp:911-922</code>) is valid, because <code>?</code> may
+  be that arm. The fold to <code>0</code> (<code>:961-983</code>,
+  <code>:1323-1345</code>) is also valid, but only as one refinement. The aegraph
+  writes the out-of-range case as a <code>choice</code> ("any arm, or
+  <code>0</code>"), and extraction decides.</li>
+  </ul></li>
+<li><strong>Q2 — Div and Rem are for runtime verification only, unless the
+divisor is a constant.</strong>
+  <ul>
+  <li><code>a/b</code> and <code>a%b</code> with a non-constant <code>b</code> are
+  not synthesizable. They are legal for simulation and runtime checks. The engine
+  does not try to optimize them, except where the division disappears:
+    <ul>
+    <li><code>b</code> is a power of two, as a constant or as
+    <code>1&lt;&lt;k</code>;</li>
+    <li><code>b/b → 1</code>. Dlop already makes <code>x/0</code> all-unknown
+    (<code>../hlop/hlop/dlop.cpp</code> <code>div_op</code>, "Division by zero is
+    X"), so <code>0/0</code> is a <code>?</code> that may be <code>1</code>.</li>
+    </ul></li>
+  <li>Division and remainder by a <strong>constant</strong> are synthesizable,
+  and lowering them to simpler logic is an aegraph goal (rule group
+  <code>rules/div.rules</code>, milestone G):
+    <ul>
+    <li><code>a/2^k</code> becomes a shift and <code>a%2^k</code> a mask. These
+    hold over unbounded integers only for <code>a ≥ 0</code>: Dlop
+    <code>rem_op</code> truncates (the sign follows the dividend), so a negative
+    dividend needs the rounding correction or a <code>range</code> guard.</li>
+    <li>A general constant divisor uses multiply-and-shift by a magic constant.
+    That needs a bound on <code>a</code>, so it is an <code>alt</code> guarded by
+    the <code>range</code> analysis. It is width-dependent only through that
+    guard.</li>
+    </ul></li>
+  <li>Div and Rem are pure, so they are hash-consed and CSE'd like any other
+  op. <code>is_computed_comb_op</code> (<code>cprop.cpp:266-268</code>) and
+  opshare (<code>cprop_opshare.cpp:68-73</code>) must agree on that.</li>
+  <li>Dlop makes both <code>x/0</code> and <code>x%0</code> all-unknown
+  (<code>../hlop/hlop/dlop.cpp</code> <code>div_op</code>/<code>rem_op</code>,
+  hlop <code>b0a6142</code>), as Verilog does, so both are a <code>?</code> the
+  engine may resolve. In LGraph an <em>invalid</em>/nil value is also treated
+  as all-unknown. Only LNAST constant propagation differs: there, any use of nil
+  is a compile error, because it is likely a source bug.</li>
+  </ul></li>
+<li><strong>Q3 — No type distinctions in LGraph. Every constant is a Dlop, and
+rules use Dlop semantics.</strong>
+  <ul>
+  <li>In LNAST a string is a valid type, but all inputs of one Mux must then be
+  strings. Mixing them is a compile error before LGraph.</li>
+  <li>In LGraph, strings, integers and booleans are all Dlop constants that
+  operate on each other (<code>../hlop/hlop/dlop.hpp</code>). Rules never
+  special-case a type. A test such as "is this arm zero" calls
+  <code>Dlop::is_known_zero</code>.</li>
+  <li>Consequence: classic's <code>false_path_zero = v.is_known_zero() ||
+  v.is_string()</code> (<code>cprop.cpp:1732</code>) is wrong. It rewrites
+  <code>Mux(s,"str",s)</code> (that is, <code>s ? s : "str"</code>) to
+  <code>s</code>. This is P10.</li>
+  </ul></li>
+<li><strong>Q4 — A <code>?</code> may resolve to a signal.</strong>
+<code>Mux(s, a, ?) → a</code> is legal because <code>?</code> may be
+<code>a</code>, and <code>Mux(s, a, a) == a</code>. Expression choices
+(<code>?q := a</code>) therefore ship with constant choices in J, under three
+constraints:
+  <ul>
+  <li>one value or expression per literal, at every use;</li>
+  <li>the expression's cone does not contain the literal, so the result stays
+  acyclic (checked at extraction);</li>
+  <li>for a partial literal (<code>0ub1?</code>), the range/known-bits analysis
+  must prove the expression is within the literal's value set, or the arm is
+  rejected.</li>
+  </ul></li>
+<li><strong>Q5 — A literal is one Dlop constant node.</strong> In LGraph it is a
+const node. In LNAST it is a <code>const foo</code> tree entry.
+  <ul>
+  <li>Identity is therefore the const node in its graph. Whatever produces const
+  nodes defines the literals. Today tolg interns every <code>?</code> with the
+  same spelling and width in a graph into one node
+  (<code>upass/tolg/upass_tolg.cpp:1200-1217</code>, pool
+  <code>../hhds/hhds/graph.cpp:3033-3066</code>). Same-spelling
+  <code>?</code>s in one graph are thus one literal. That is a legal merge.</li>
+  <li>Making one const node into several (P7, or any per-consumer
+  <code>create_const</code>) is a split, and it is forbidden.</li>
+  <li>Plan assumption: a per-instance copy made by inlining, specialization or
+  loop_hoist (<code>inline_sub.cpp:382..</code>, <code>loop_hoist.cpp:212</code>)
+  becomes that instance's own literal, because each instance is separate
+  hardware. Within one instance a literal never splits. The certificate is
+  keyed by (graph, const node).</li>
+  <li>Optional, measured in J: exempt <code>?</code>-bearing Dlops from interning
+  in tolg, so two LNAST <code>const</code> entries stay independent and
+  extraction gets more freedom. This is not required for correctness.</li>
+  </ul></li>
+</ol>
+
+<h2>Pre-existing cprop issues found</h2>
+<p><span class="status landed">landed 2026-10-15 (uncommitted)</span> P1–P10 are fixed
+in the worktree, each with a test (P1/P3 documented and pinned under Q1). Extra bugs
+found and fixed on the way: <code>Ror(0ub????)</code> folded to 0, the sim runtime drew
+one <code>?</code> literal twice at two widths (<code>inou/cgen/sim_tune_rt.hpp</code>),
+bitwidth sized a gapped Mux selector by edge count, and both sim backends gave
+<code>b</code> for a Div/Rem with only <code>b</code> connected. Still open: cgen Verilog
+emits a Get_mask of a <code>?</code> constant as a separate literal
+(<code>inou/cgen/cgen_verilog.cpp</code> ~2361).</p>
+<p>These defects are in classic cprop and exist whether or not the aegraph is
+built. Milestone A fixes them in <code>pass/cprop</code> (P7 also in
+<code>pass/bitwidth</code>), each with its own gtest or equiv fixture. Each fix also
+cleans up the A/B reference. All citations were re-checked against the current
+tree.</p>
+<ul>
+<li><strong>P1 — Out-of-range Mux selections fold to <code>0</code>
+(legal, but suboptimal under Q1).</strong>
+  <ul>
+  <li><code>try_collapse_forward</code> collapses <code>Mux(s, a, a, a)</code> to
+  <code>a</code> for any <code>s</code> (<code>cprop.cpp:911-922</code>).</li>
+  <li>It compares only the <em>connected</em> arms, so a disconnected arm (read as
+  0) is ignored too.</li>
+  <li>The constant-selector fold maps an out-of-range or disconnected selection to
+  <code>0</code> (<code>:961-983</code>).</li>
+  <li>Under Q1 an out-of-range or disconnected selection is <code>?</code>, so
+  both rules are valid. The collapse is a correct choice, and <code>0</code> is
+  one refinement. Classic is not wrong, only less free.</li>
+  <li>Fix: document the Q1 semantics at both sites. The constant-selector fold may
+  pick any connected arm instead of creating a fresh <code>0</code>. The aegraph
+  expresses it as a <code>choice</code>.</li>
+  </ul></li>
+<li><strong>P2 — Arity checks count edges, not port ids.</strong>
+  <ul>
+  <li><code>scalar_mux</code> tests <code>inp_edges_ordered.size() != 3</code>
+  (<code>:1529</code>). The same-driver collapse right after it and the Set_mask
+  lane factoring inside it (<code>factor_set_mask_pair</code>, <code>:1541ff</code>)
+  read <code>[1]</code> and <code>[2]</code> as the two arms.</li>
+  <li>An n-ary Mux with pins 0, 2 and 3 (arm 1 unconnected) passes as binary
+  and is rewritten as <code>s ? p3 : p2</code>. Selector 1 must give
+  <code>p2</code>, but it gets <code>p3</code>. Q1 does not excuse this, because
+  the selection is in range and connected. (The pins 0, 1, 3 case is legal under
+  Q1, since selector 1 names the disconnected arm, which is <code>?</code>.)</li>
+  <li>Fix: use <code>is_two_arm_mux</code>.</li>
+  </ul></li>
+<li><strong>P3 — The <code>Sext(x,1)</code> selector bypass also applies to n-ary
+Muxes.</strong>
+  <ul>
+  <li><code>scalar_sext</code> rewires every Mux port-0 consumer from
+  <code>Sext(x,1)</code> to a bool01 <code>x</code> (<code>:1767-1776</code>).</li>
+  <li>That keeps truthiness, which is enough for a two-arm Mux. For an n-ary Mux,
+  selector <code>-1</code> (out of range) becomes <code>1</code> (arm 2).</li>
+  <li>Under Q1 this is legal (out of range is <code>?</code>, and arm 2 is a valid
+  pick), so P3 is downgraded to a note. Keep a test that pins the Q1
+  reading.</li>
+  </ul></li>
+<li><strong>P4 — A single-input Div is forwarded.</strong>
+  <ul>
+  <li><code>try_collapse_forward</code> forwards the lone driver of a one-input
+  <code>Div</code> (<code>:884-895</code>), whichever pin it sits on. A Div with
+  only <code>b</code> connected becomes <code>b</code>.</li>
+  <li>Fix: drop Div from that list, or forward only when the lone pin is
+  <code>a</code> and a missing <code>b</code> has a defined meaning.</li>
+  </ul></li>
+<li><strong>P5 — muxctx overwrites the proven code, so the CSE key changes
+between the two cprop slots.</strong>
+  <ul>
+  <li>Path pruning calls <code>gu::set_proven(c.node, gu::kFormalOnehot)</code> on
+  a Hotmux (<code>cprop_muxctx.cpp:247-250</code>).</li>
+  <li>It only reaches Hotmuxes that are already exclusive (<code>:141</code>), so
+  no obligation is discharged. But it overwrites any existing code (for example
+  <code>kFormalAssumeUnchecked</code>), and it stamps structurally exclusive
+  Hotmuxes that were unproven.</li>
+  <li>The Hotmux CSE key includes <code>has_proven</code>/<code>proven_of</code>
+  (<code>cprop.cpp:3301</code>). <code>cse_pass</code> runs before
+  <code>muxctx::prune</code> in one <code>do_trans</code> (<code>:3553</code>,
+  <code>:3561</code>), so the second compile slot keys identical Hotmuxes
+  differently.</li>
+  <li>Fix: set the code only when none is present, and keep existing codes.</li>
+  </ul></li>
+<li><strong>P6 — Wrong strength-reduction formulas in
+<code>pass/cprop/TODO</code>.</strong>
+  <ul>
+  <li><code>a*(2^p+2^q) → (a+a&lt;&lt;q)&gt;&gt;(p-q)</code> and the
+  <code>2^p-2^q</code> twin (<code>TODO:77-84</code>) shift right where they must
+  shift left.</li>
+  <li>The correct forms are <code>((a&lt;&lt;(p-q)) ± a) &lt;&lt; q</code>.</li>
+  <li>Fix the text before anyone ports it.</li>
+  </ul></li>
+<li><strong>P7 — Folds split <code>?</code> literals (cprop and
+bitwidth).</strong>
+  <ul>
+  <li>For any fold result, including one with unknown bits,
+  <code>replace_node</code> and <code>replace_logic_node</code> (<code>cprop.cpp:1503-1530</code>)
+  make a new constant. Examples:
+    <ul>
+    <li><code>Get_mask(0ub????,[0,2)) → 0ub??</code> (<code>:1441-1448</code>);</li>
+    <li>the SHL, Ror, Rxor/Popcount, Set_mask, Sum, Or, And and Concat folds in
+    <code>replace_all_inputs_const</code> (<code>:1203-1499</code>).</li>
+    </ul></li>
+  <li>Bitwidth does the same:
+    <ul>
+    <li><code>bitwidth_rewrite.cpp:79</code> builds
+    <code>create_const(get_mask_op_opt(0,bits))</code> on a <code>?</code> constant,
+    one new spelling per consumer window;</li>
+    <li><code>bitwidth.cpp:290-299</code> can do it through a min==max range.</li>
+    </ul></li>
+  <li>Sim draws the new spelling independently of its source. One literal then
+  reads two unrelated values, for example an output and its own low slice.</li>
+  <li>Fix: fold only when the result is fully known, or when its unknown bits are
+  exactly one whole source literal; otherwise keep the op. Picking a value for the
+  source literal at <em>every</em> use is also legal (decision 2), but it is a
+  choice, and it belongs to the aegraph's J, not to classic.</li>
+  </ul></li>
+<li><strong>P8 — Missing cheap rules</strong> (also aegraph parity targets):
+  <ul>
+  <li><code>Not(Not x) → x</code>. The only Not fold is the all-constant case
+  (<code>:1376-1380</code>). The Not handling at <code>:3075</code> is a mask
+  rewrite, not a double-negation fold.</li>
+  <li><code>EQ(x,x) → 1</code>, <code>LT(x,x) → 0</code> and
+  <code>GT(x,x) → 0</code> for a non-constant <code>x</code> without
+  <code>?</code> bits. <code>scalar_eq</code> (<code>:1833ff</code>) only handles
+  constant comparands, and the EQ arm in the collapse path is still a FIXME
+  (<code>:1004-1005</code>).</li>
+  <li>A constant fold for <code>Sext</code>. <code>replace_all_inputs_const</code>
+  has no Sext case, and <code>scalar_sext</code> (<code>:1750</code>) never folds a
+  constant <code>a</code>.</li>
+  </ul></li>
+<li><strong>P10 — <code>scalar_mux</code> treats a string arm as zero
+(Q3).</strong>
+  <ul>
+  <li><code>false_path_zero = v.is_known_zero() || v.is_string()</code>
+  (<code>cprop.cpp:1732</code>) lets <code>Mux(s, "str", s)</code>, that is
+  <code>s ? s : "str"</code>, collapse to <code>s</code>. When <code>s</code> is
+  0 the result must be <code>"str"</code>.</li>
+  <li>Fix: drop the <code>is_string()</code> term and use Dlop semantics only. Any
+  other type special-casing in cprop is suspect for the same reason.</li>
+  </ul></li>
+<li><strong>P9 — A stale comment.</strong> <code>simplify_after_inline</code> in
+<code>lhd/lhd_kernel_formal.cpp</code> (around <code>:5182-5188</code>) mentions a
+"normal cprop entry assertion" that no longer exists.</li>
+</ul>
+
+<h2>Architecture</h2>
+<h3>Pipeline (one graph, same worker pool as cprop)</h3>
+<pre>
+ LGraph body (in place)
+   │
+   ├─ 0. pre-pass     false-cycle cut: comb SCC detection; packed-slice
+   │                   resolution (reuse classic Get_mask(Concat)/Set_mask slice
+   │                   folds, P7-clean); remaining SCC members = OPAQUE leaves
+   ├─ 1. build        forward walk; skeleton driver pins -&gt; leaf classes:
+   │                   IO, Flop/Latch/Fflop/Memory, Sub (loop + marker Subs),
+   │                   AttrSet, Clock_cell, LUT, runtime_check nodes,
+   │                   non-exclusive Hotmux, '?' literal pins
+   │                   pure node -&gt; normalize -&gt; hash-cons -&gt; eager rules
+   │     ├─ analyses  const (3-valued, "no value" bottom), bool01, range,
+   │     │            known bits, lane layout, (base,polarity), exclusivity
+   │     │            -- facts come from UNTAGGED members only
+   │     └─ rules     simplify: subsume | alt: union | choice: tagged union
+   ├─ 2. extract      profile cost (synth|sim), width- and sharing-aware,
+   │                   deterministic tie-break; one assignment per '?' literal;
+   │                   root constraints (Latch din hold Mux, enableopt holds)
+   ├─ 3. elaborate    diff against the original: reuse matching nodes; create
+   │                   only new e-nodes; carry name/color/synth_policy/proven/
+   │                   srcid; stamp widths; rewrite every use of a chosen
+   │                   literal; keep loop-carry guard; delete dead pure nodes
+   ├─ 4. post         vector-mux window narrowing; flop-enable folding;
+   │                   muxctx (classic implementation, unchanged)
+   └─ 5. library      loop_hoist (livehd::cprop::hoist_loop_invariants), serial
+ -&gt; pass.bitwidth (always follows in the engine-selectable compile slots)
+</pre>
+<p>Order change: classic runs muxctx <em>before</em> mux_op_share, mux_share and
+the bit-reduction vectorizer (<code>cprop.cpp:3560-3564</code>). Here muxctx runs
+after extraction, so after the union producers of L. H and L measure the effect.</p>
+
+<h3>Core data structures (<code>pass/aegraph/aegraph.{hpp,cpp}</code>)</h3>
+<ul>
+<li><strong>E-node.</strong>
+  <ul>
+  <li>Contents: <code>op</code>, arity, inline operand class ids (up to 3; n-ary
+  banks stored out of line), a 32-bit hash, a union link, the creating rule's id,
+  and an optional <em>assumption set</em> of <code>(literal, value)</code>
+  pairs.</li>
+  <li>Target size: 32–48 B per e-node. LGraph spends about 64–100 B per binary
+  node (a 32 B <code>NodeEntry</code> plus about one 32 B <code>PinEntry</code>,
+  <code>../hhds/hhds/graph.hpp:1531-1708</code>).</li>
+  <li>The e-graph is freed after each graph.</li>
+  </ul></li>
+<li><strong>Normalization before the hash lookup.</strong> Bank operands are
+sorted by class id, so commutativity costs nothing. Multiplicity is preserved:
+<code>Sum(a,a)=2a</code> and <code>Xor(a,a)=0</code> keep both operands
+(<code>cprop.cpp:3219-3222</code>). Known constants are merged per op:
+  <table>
+  <tr><th>Op</th><th>Constant merge at insertion</th></tr>
+  <tr><td>Sum, LT, GT</td><td>add <code>as</code> constants, subtract
+  <code>bs</code> constants; one net constant on one side. A lone <code>bs</code>
+  operand stays a negation and is never forwarded (<code>cprop.cpp:886-893</code>).</td></tr>
+  <tr><td>Mult</td><td>product</td></tr>
+  <tr><td>And / Or / Xor</td><td>bitwise. And/Or idempotence is a rule, not
+  normalization.</td></tr>
+  <tr><td>EQ ("all operands equal")</td><td>distinct constants fold the node to 0;
+  equal constants dedup to one</td></tr>
+  <tr><td>Ror</td><td>any nonzero constant folds the node to 1; zeros drop</td></tr>
+  <tr><td>Concat</td><td>width pins are frozen comptime widths; no rule or analysis
+  rewrites them (<code>graph/cell.hpp:59-81</code>)</td></tr>
+  </table>
+  A constant with <code>?</code> bits is never merged; it stays a separate literal
+  operand. A node whose operands are all constant is folded by the constant
+  analysis only when the result is fully known (the P7 contract).</li>
+<li><strong>Hash key.</strong>
+  <ul>
+  <li>The key is op + operands + color + <code>synth_policy</code> +
+  <code>proven</code> (for Hotmux).</li>
+  <li><code>synth_policy</code> is new and stricter than classic, whose CSE
+  ignores it (<code>cprop.cpp:3229-3330</code>).</li>
+  <li><code>proven</code> has to be in the key because <code>muxctx::exclusive</code>
+  reads <code>proven_of == kFormalOnehot</code> (<code>cprop_muxctx.cpp:41-50</code>).
+  Merging a proven Hotmux with an unproven twin would lose or forge an
+  obligation.</li>
+  <li>LUT nodes, <code>runtime_check</code> nodes and non-exclusive Hotmuxes are
+  not keyed. They are skeleton leaves (below), as classic excludes them from CSE
+  (<code>:3256-3258</code>).</li>
+  <li>Names are <em>not</em> in the key, so rules still match through named nodes.
+  The naming policy is applied at elaboration: keep the named twin, and when two
+  named pins land in one class, keep both nodes (classic's skip,
+  <code>:3318-3323</code>).</li>
+  </ul></li>
+<li><strong>Literal identity.</strong>
+  <ul>
+  <li>A <code>?</code> literal is one Dlop const node (Q5). Because the pool is
+  value-interned, that node's identity is (graph, spelling, width).</li>
+  <li>Its class is a leaf that is never merged by value.</li>
+  <li>The engine never calls <code>create_const</code> on a <code>?</code>-bearing
+  <code>Dlop</code>. Interning would silently alias a new spelling with an
+  unrelated literal, which is a merge nobody chose and makes certificate keys
+  collide. This is enforced by a rulegen lint and by a runtime
+  <code>I()</code> in the elaborator.</li>
+  </ul></li>
+<li><strong>No rebuild.</strong> The engine rewrites in one forward pass; once a
+node is inserted it is never re-canonicalized. Cranelift's limits bound the
+rewriting, and each is a knob:
+  <ul>
+  <li><code>rewrite_depth=5</code></li>
+  <li><code>matches_limit=5</code></li>
+  <li><code>eclass_limit=5</code></li>
+  <li><code>extractor_fuel=500</code></li>
+  <li>a per-graph budget proportional to the number of input edges, which keeps
+  cprop's O(V+E) contract (<code>cprop.cpp:3545-3552</code>).</li>
+  </ul></li>
+<li><strong>Hotmux obligations.</strong>
+  <ul>
+  <li>A Hotmux that is non-exclusive (<code>muxctx::exclusive</code> false) or has
+  <code>runtime_check</code> is a <em>skeleton node</em>.</li>
+  <li>The original node is kept: never merged, never deleted, its operands rewired
+  to the extracted representatives. Consumers see it as a leaf.</li>
+  <li>It needs no new op. Two active controls give nil
+  (<code>../hlop/hlop/dlop.hpp:760-770</code>), so the node is not a pure
+  value.</li>
+  <li>This keeps the observable obligation (<code>UnusedOverlapSurvivesForFormal</code>).</li>
+  </ul></li>
+</ul>
+
+<h3>Tagged unions (<code>choice</code>) — soundness rules</h3>
+<ul>
+<li>A tagged member contributes <strong>no facts</strong> to its class's analyses.
+Facts are computed only from untagged members.</li>
+<li>A <code>simplify</code> rule may never subsume a class through a tagged
+member.</li>
+<li>An e-node built by a rule whose match went through tagged members carries the
+<strong>union</strong> of their assumption sets. A member whose set is
+inconsistent (one literal, two values) is dropped when it is created.</li>
+<li>Worked example: <code>x - (x*?q)</code> becomes <code>0</code>. This is
+<code>sum_cancel</code> matched through the <code>x [q:=1]</code> member of
+<code>Mult(x,?q)</code>, so the resulting <code>0</code> carries
+<code>{q:=1}</code>.</li>
+<li>The union-invariant fuzz checks tagged members for equality only under their
+assumption set.</li>
+</ul>
+
+<h3>Extraction and elaboration</h3>
+<ul>
+<li><strong>Cost profiles</strong> live in <code>pass/aegraph/cost/{synth,sim}.cost</code>.
+  <ul>
+  <li>Width <code>W</code> comes from the driver stamp when one is present, else
+  from the range analysis, else from a profile default.</li>
+  <li>Cost is sharing-aware: a class with several parents is counted once.
+  Without this, extraction would undo low_lane, mux_share and opshare, which add
+  nodes on purpose to narrow bits.</li>
+  </ul></li>
+<li><strong><code>?</code> consistency.</strong>
+  <ul>
+  <li>Each literal gets exactly one value across the whole extracted DAG.
+  Candidate values come from the tags (usually three or fewer); extraction picks
+  the assignment with the lowest total cost, then extracts with it fixed.</li>
+  <li>A literal with no chosen value stays its single <code>?</code> pin.</li>
+  <li>Once literal L := v is chosen, the elaborator replaces <strong>every</strong>
+  sink of L's pin with v. That includes comb sinks and skeleton sinks
+  (Flop/Latch <code>initial</code>, Memory, Sub, IO, AttrSet). No use of a chosen
+  literal may remain <code>?</code>.</li>
+  </ul></li>
+<li><strong>Root constraints.</strong>
+  <ul>
+  <li>A Latch <code>din</code> keeps its hold Mux (<code>cprop.cpp:1689-1700</code>,
+  latch contract).</li>
+  <li>Hold regions that enableopt can see stay intact.</li>
+  <li>Concat is preferred where the pre-pass cut a false cycle.</li>
+  </ul></li>
+<li><strong>Determinism.</strong>
+  <ul>
+  <li>Class ids follow forward-walk order. Ties break by cost, then by the
+  creating rule's priority, then by class id.</li>
+  <li>No decision that affects the output may iterate an unordered or absl
+  container. This covers extraction order, union order, rule firing, elaboration
+  order and certificate order; absl seeds its hashing per process.</li>
+  <li>LEC structural identity and every cache hash the output.</li>
+  </ul></li>
+<li><strong>Diff-elaboration, not a fresh body.</strong>
+  <ul>
+  <li>Rebuilding the body with <code>GraphLibrary::replace_body_from</code>
+  (<code>graph.hpp:3543-3560</code>) would renumber every nid and attribute.</li>
+  <li>Reusing the original nodes that match keeps nids, names and srcids.
+  Specialize's <code>inherit_colors</code> (<code>pass/specialize/specialize.cpp:298-300</code>)
+  and the caches depend on that.</li>
+  <li>It also limits <code>create_node</code> calls. Each one bumps a library-wide
+  atomic (<code>graph.hpp:3818-3820</code>, <code>:4340-4352</code>).</li>
+  <li>The elaborator uses the hhds idiom: snapshot <code>out_edges()</code>, call
+  <code>connect_sink</code> for each sink, then <code>del_node</code>
+  (<code>cprop.cpp:820-856</code>). It always creates a fresh operand pid and never
+  shares a sink.</li>
+  <li>Before connecting a consumer sink to a representative, it checks
+  <code>closes_loop_self_edge</code> (<code>cprop.cpp:824-828</code>). On a hit it
+  keeps the original node for that sink, because forwarding there would create a
+  false compact-loop carry.</li>
+  </ul></li>
+<li><strong>Width stamps.</strong>
+  <ul>
+  <li>Class members are equal as unbounded integers. So when a new representative
+  replaces an original class root, the root's <code>bits</code>/<code>pin_signed</code>
+  stamp is a valid realization, and the elaborator copies it.</li>
+  <li>An interior node the elaborator creates is stamped from the range analysis
+  when that bounds it. Otherwise it is left unstamped, as classic
+  <code>make_node</code> leaves it, which is legal only where bitwidth follows.</li>
+  <li>This matters because an unstamped non-Mux output is read as one bit by the
+  LEC encoder and cgen (<code>cprop_opshare.cpp:468-473</code>).</li>
+  <li>The elaborator never changes the stamps on skeleton pins (IO and register
+  widths are declared, not derived).</li>
+  <li>In preflight mode (G) any unstamped interior node is refused.</li>
+  </ul></li>
+</ul>
+
+<h3>Knobs and which callers follow them</h3>
+<ul>
+<li><strong>Selector: <code>compile.cprop.engine=classic|aegraph|aegraph+classic|none</code></strong>
+(default <code>classic</code>).
+  <ul>
+  <li><code>aegraph+classic</code> runs the aegraph then classic in each slot, to
+  measure what classic still removes.</li>
+  <li><code>none</code> skips the engine. It isolates the input for timing and gives
+  the failure baseline.</li>
+  <li>It is registered as a <code>pass.cprop</code> label
+  (<code>pass/cprop/pass_cprop.cpp:17-30</code>), so <code>lhd describe</code> and
+  unknown-flag checking work.</li>
+  <li>An eager value check sits next to the satopt <code>stages</code> check
+  (<code>lhd_kernel_common.cpp:978-984</code>).</li>
+  <li><code>compile_graph_passes</code> swaps the method in both slots
+  (<code>:1575-1586</code>).</li>
+  <li>A second flag, <code>compile.cprop.engine_slots=both|first|second</code>,
+  swaps only one slot, which separates the pre-legalize run from the
+  post-legalize run.</li>
+  <li><code>Pass_cprop::optimize</code> refuses any non-<code>classic</code> value
+  that reaches it, because the kernel does the dispatch.</li>
+  </ul></li>
+<li><strong>Method <code>pass.aegraph</code></strong> in <code>pass/aegraph/</code>.
+  <ul>
+  <li>Add a <code>kSetPasses</code> row
+  <code>{"compile.aegraph","pass.aegraph",List::all}</code>.</li>
+  <li>The driver (<code>lhd/lhd_kernel_compile.cpp:1802</code>) merges the
+  <code>compile.cprop</code> set and then the <code>compile.aegraph</code> set.</li>
+  <li>The pre-legalize <code>loop_hoist=false</code> gate (<code>:1808</code>)
+  becomes <code>method == "pass.cprop" || method == "pass.aegraph"</code>.</li>
+  <li><code>pass.aegraph</code> registers <code>low_lanes</code>,
+  <code>loop_hoist</code> and <code>engine</code> with <code>INTERNAL</code> help,
+  so they are hidden from <code>lhd list options</code>.
+  <code>check_known_set_passes</code> rejects
+  <code>compile.aegraph.{low_lanes,loop_hoist,engine}</code> with "use
+  compile.cprop.X". Each flag has one spelling.</li>
+  </ul></li>
+<li><strong>Engine flags.</strong> Each <code>pass.aegraph</code> label is a single
+token after <code>compile.aegraph.</code>; there are no nested namespaces, because
+<code>merge_sets</code> splits at the last dot (<code>:818-833</code>).
+  <table>
+  <tr><th>Flag</th><th>Meaning</th></tr>
+  <tr><td><code>cost=synth|sim</code></td><td>Extraction profile; default
+  <code>synth</code>. There is no <code>auto</code> in Phase 1: <code>lhd sim</code>
+  and <code>lhd synth</code> must compile the same LGraphs so they share the
+  compile cache.</td></tr>
+  <tr><td><code>rules_disable=a+b+group:mux</code>, <code>rules_only=</code></td><td>Turn
+  rules off, or keep only some. The separator is <code>+</code>, not a comma,
+  because <code>:lec_sweep:</code> splits on commas.</td></tr>
+  <tr><td><code>max_rewrites=N</code>, <code>bisect_graph=NAME</code></td><td>A
+  DebugCounter-style cutoff, counted per graph in forward-walk order. When
+  <code>max_rewrites</code> is set the pass runs with one worker, and
+  <code>bisect_graph</code> limits the cutoff to one graph. The log line names the
+  last rule applied and its e-node id.</td></tr>
+  <tr><td><code>explain=RULE</code></td><td>Prints the rule chain behind each
+  extracted node created by RULE.</td></tr>
+  <tr><td><code>check=off|unions|full</code></td><td>Runtime union check. Defaults
+  to <code>unions</code> in dbg builds and <code>off</code> in opt.
+  <code>unions</code> evaluates both members of each union on 8 random vectors
+  with the shared Dlop evaluator, over a cone of depth at most
+  <code>rewrite_depth</code>, and aborts with the rule name on a mismatch.
+  <code>full</code> also simulates the elaborated body against a copy taken at the
+  pre-pass (64 vectors, <code>?</code> literals pinned consistently).</td></tr>
+  <tr><td><code>rewrite_depth</code>, <code>matches_limit</code>, <code>eclass_limit</code>,
+  <code>extractor_fuel</code>, <code>edge_budget</code></td><td>The limits
+  above.</td></tr>
+  <tr><td><code>choices=off|const|expr</code></td><td>Whether <code>?</code> choice
+  rules are active (J, K). Default <code>off</code> until J ships.</td></tr>
+  </table>
+  Statistics are keyed on <code>lhd.stats</code>/<code>--stats</code>
+  (<code>lhd/lhd_options.cpp:474-475</code>); there is no separate stats flag.</li>
+<li><strong>Which callers follow the selector.</strong>
+  <ul>
+  <li>Followers: the two compile slots (site A), and through them both LEC sides
+  compiled from source (<code>load_side_graphs</code> →
+  <code>graph_pipeline_and_emits</code>).</li>
+  <li>Classic stays until milestone O for:
+    <ul>
+    <li>the LEC preflight <code>simplify_after_inline</code>
+    (<code>lhd_kernel_formal.cpp</code> around <code>:5176-5190</code>), which is
+    load-bearing for false-cycle removal (br_amba_axi_demux);</li>
+    <li>the mixed-loop structural identity (<code>:132-133</code>);</li>
+    <li>satopt cleanup (<code>pass/satopt/pass_satopt.cpp:74-86</code>);</li>
+    <li>specialize (<code>specialize.cpp:69</code>, <code>:281</code>,
+    <code>:295</code>; low_lanes off);</li>
+    <li>synth loop cleanup (<code>pass/synth/loop_cleanup.cpp:237-239</code>);</li>
+    <li>memory import (<code>pass/synth/memory_module.cpp:499-502</code>).</li>
+    </ul></li>
+  <li>The preflight gets its own internal switch in G (see G).</li>
+  </ul></li>
+<li><strong>Coexistence.</strong>
+  <ul>
+  <li><code>pass/aegraph</code> depends on <code>//pass/cprop:pass_cprop</code>
+  for <code>loop_hoist</code>, <code>muxctx</code> and the slice folds. There is
+  no cycle.</li>
+  <li><code>Bitwidth_rewrite : private Cprop</code>
+  (<code>pass/bitwidth/bitwidth_rewrite.hpp:8</code>), enableopt
+  (<code>Cprop::Inp_pins</code>, <code>share_mux_regions</code>), and satopt
+  (<code>share_mux_regions</code>, <code>low_lane_bits</code>, <code>cprop_opshare.hpp</code>)
+  all stay on classic internals.</li>
+  <li>This plan cannot delete classic cprop.</li>
+  </ul></li>
+<li><strong>Salts, linking and cache.</strong>
+  <ul>
+  <li>Add <code>//pass/aegraph:pass_aegraph</code> (each library, if it is split)
+  and the generated rule <code>.cpp</code> files to <code>//lhd:compile_salt</code>
+  (<code>lhd/BUILD</code>, next to <code>//pass/cprop:pass_cprop</code>). A
+  <code>cc_library</code> in a genrule hashes only its own archive.</li>
+  <li>Add it to <code>//pass/synth:synth_salt</code> and <code>//lhd:formal_salt</code>
+  only once a synth or formal caller can use the engine (G, K, O).</li>
+  <li>Link with <code>alwayslink = True</code> into <code>lhd_lib</code>; the
+  static <code>Pass_plugin</code> registration needs it.</li>
+  <li>The compile-cache descriptor already includes every <code>--set</code>
+  (<code>lhd/lhd_compile_cache.cpp:874-904</code>). Change its literal
+  <code>pipeline=cprop,bitwidth</code> (<code>:875</code>) to name the resolved
+  engine.</li>
+  </ul></li>
+</ul>
+
+<h2>Rule API — the clean way to add a transformation</h2>
+<h3>Layers</h3>
+<ol>
+<li><strong>Runtime</strong> (<code>pass/aegraph/runtime/match.hpp</code>):
+  <ul>
+  <li>combinators in the style of LLVM PatternMatch (<code>m_Sum</code>,
+  <code>m_as</code>, <code>m_k</code>, <code>m_rest</code>, ...);</li>
+  <li><code>Ctx</code>;</li>
+  <li><code>Results.subsume/add/choice</code>;</li>
+  <li>fuel-limited iteration over class members.</li>
+  </ul>
+  Generated code calls this layer. Native rules call it directly.</li>
+<li><strong>Rule files</strong> (<code>pass/aegraph/rules/*.rules</code>,
+S-expressions). These are the normal way to add a rule. The rule group is the file
+name.</li>
+<li><strong><code>rulegen</code></strong>, a C++ host <code>cc_binary</code> that
+links <code>//graph:cell</code> and hlop.
+  <ul>
+  <li>It checks op and pin names against the Ntype tables and folds constant
+  expressions with <code>Dlop</code>.</li>
+  <li>The Bazel macro <code>aeg_rules()</code> in <code>tools/aegraph.bzl</code>
+  turns the rule files into C++ (with <code>#line</code> back to the
+  <code>.rules</code> file), a registry, tests and proof obligations.</li>
+  <li>It is C++, not Python, so the build path stays off the Python/PATH traps.</li>
+  </ul></li>
+</ol>
+
+<h3>Syntax</h3>
+<pre>
+(simplify NAME [PRIO] LHS [:let (v EXPR)...] [:when GUARD...] =&gt; RHS [OPTS])
+(alt      NAME [PRIO] LHS [:let ...] [:when ...] =&gt; RHS [OPTS])
+(choice   NAME [PRIO] LHS [:let ...] [:when ...] =&gt; RHS1 [?q := C1] | RHS2 [?q := C2] [OPTS])
+OPTS := :example TERM | :expect (PROFILE lhs|rhs)... | :fuel N | :proof bv|int|lean|none | :doc "..."
+</pre>
+<p><strong>Patterns</strong></p>
+<table>
+<tr><th>Pattern</th><th>Meaning</th></tr>
+<tr><td><code>x</code></td><td>Binds an e-class; a repeated <code>x</code> must be
+the same class.</td></tr>
+<tr><td><code>_</code></td><td>Wildcard.</td></tr>
+<tr><td><code>0</code>, <code>-1</code></td><td>Literal constants.</td></tr>
+<tr><td><code>(k c)</code></td><td>Binds a fully known constant.</td></tr>
+<tr><td><code>?q</code></td><td>Binds a <code>?</code> literal leaf, with its
+identity.</td></tr>
+<tr><td><code>(Op p...)</code></td><td>Positional, with exact arity, so
+<code>(Mux s f t)</code> never matches an n-ary Mux.</td></tr>
+<tr><td><code>(Op lo: p)</code></td><td>By pin name.</td></tr>
+<tr><td><code>(as p.. ..r)</code>, <code>(bs ..)</code></td><td>Bank multiset;
+<code>..r</code> binds the rest. A bank not written in the pattern must be
+<strong>empty</strong>, so <code>(Sum (as x))</code> does not match
+<code>Sum(as x)(bs y)</code>.</td></tr>
+<tr><td><code>{attr}</code></td><td>On a right-hand-side constructor, sets a
+registered contract attribute.</td></tr>
+</table>
+<p>Guard and constant-expression builtins: <code>+ - * min max log2 pow2? popcount
+mask_of &lt; &lt;= = and or not</code>. Each builtin has three implementations in
+one rulegen table (runtime Dlop, SMT, Lean), so a guard means the same thing
+everywhere.</p>
+
+<h3>Examples</h3>
+<pre>
+;; rules/arith.rules
+(simplify sum_drop_zero (Sum (as 0 ..r) (bs ..s)) =&gt; (Sum (as ..r) (bs ..s)))
+(simplify sum_cancel    (Sum (as x ..r) (bs x ..s)) =&gt; (Sum (as ..r) (bs ..s)))  ; a - a + c -&gt; c
+(simplify not_not       (Not (Not x)) =&gt; x :example (Not (Not $x)))             ; P8
+(alt mult_pow2_shl (Mult (as x (k c))) :when (pow2? c) =&gt; (SHL x (k (log2 c)))
+     :expect (synth rhs) :example (Mult $x 8))
+
+;; rules/mask.rules   Get_mask(a,lo,hi) = bits [lo,hi) of a, unsigned
+(simplify getmask_getmask
+  (Get_mask (Get_mask x (k l1) (k h1)) (k l2) (k h2))
+  :let (lo (+ l1 l2)) (hi (min h1 (+ l1 h2))) :when (&lt; lo hi)
+  =&gt; (Get_mask x (k lo) (k hi)))
+(simplify getmask_getmask_empty
+  (Get_mask (Get_mask _ (k l1) (k h1)) (k l2) (k h2))
+  :when (&gt;= (+ l1 l2) (min h1 (+ l1 h2))) =&gt; 0)
+
+;; rules/mux.rules    Mux s p1 p2 = s ? p2 : p1
+(alt mux_chain_hotmux (Mux s (Mux t c b) a) :when (bool01 s) (bool01 t)
+  =&gt; (Hotmux{proven} s a (And (as (Not s) t)) b c) :expect (synth rhs))
+
+;; rules/choice.rules ('?' literal = optimizer's choice; implicit (admits ?q C))
+(choice mult_unknown    (Mult (as x ?q)) =&gt; 0 [?q := 0] | x [?q := 1])
+(choice mux_unknown_sel (Mux ?q f t)     =&gt; f [?q := 0] | t [?q := NONZERO])
+(choice mux_unknown_arm (Mux s a ?q)     =&gt; a [?q := a])        ; Q4: Mux(s,a,a) == a
+
+;; rules/div.rules    Q2: only constant divisors are worth optimizing
+(simplify div_self      (Div x x) =&gt; 1)                          ; 0/0 is ?, so 1 is legal
+(simplify div_pow2      (Div x (k c)) :when (pow2? c) (nonneg x) =&gt; (SRA x (k (log2 c))))
+(simplify rem_pow2      (Rem x (k c)) :when (pow2? c) (nonneg x) =&gt; (Get_mask x (k 0) (k (log2 c))))
+(alt      div_const_mul (Div x (k c)) :when (range_bounded x)
+     :let (m (magic c (range_hi x))) (sh (magic_shift c (range_hi x)))
+     =&gt; (SRA (Mult (as x (k m))) (k sh)) :expect (synth rhs))
+</pre>
+<ul>
+<li><code>{proven}</code> carries a contract (pairwise-exclusive controls).
+rulegen emits an extra obligation for it: <code>And(s, And(Not s, t)) == 0</code>
+under the guards.</li>
+<li><code>NONZERO</code> lets <code>admits</code> pick any nonzero value the
+literal allows. For a two-arm Mux any nonzero value selects <code>t</code>
+(<code>cprop.cpp:964-965</code>), so <code>0ub1?</code> admits 2.</li>
+</ul>
+
+<h3>Tags, priorities and limits</h3>
+<ul>
+<li><strong><code>simplify</code></strong> (Cranelift's <code>subsume</code>): the
+first match in priority order replaces the class representative.
+  <ul>
+  <li>Until H the lint is structural: the right-hand side must have no more nodes
+  than the left, and no right-hand-side op may be priced above the left-hand root
+  by any profile table.</li>
+  <li>From H the lint uses each profile's cost; a failure says "make it
+  <code>alt</code>".</li>
+  <li>This is the Cranelift lesson: its eager-rewrite misses came from rules that
+  went against cost.</li>
+  </ul></li>
+<li><strong><code>alt</code></strong>: every match up to
+<code>matches_limit</code> is unioned with the original, and extraction picks
+one.</li>
+<li><strong><code>choice</code></strong>: an <code>alt</code> whose members carry
+<code>(literal, value)</code>, under the tagged-union rules above.
+  <ul>
+  <li>rulegen adds an implicit <code>(admits ?q C)</code> guard to each arm.</li>
+  <li>A right-hand side may not contain a fresh <code>?</code>, because that
+  would split a literal.</li>
+  <li>Merging literals is never a rule.</li>
+  <li>Expression assignments (<code>?q := x</code>) are allowed (Q4), under the
+  three constraints in the Rulings.</li>
+  </ul></li>
+<li><strong>Priorities</strong>: an integer, default 0, higher tried first. Ties
+break by file order, then by group order fixed in BUILD, so the order is
+deterministic by construction. rulegen warns when two rules at the same priority
+overlap.</li>
+</ul>
+
+<h3>Analyses (C++, each declared with a spec)</h3>
+<pre>
+;; rules/analyses.decl
+(analysis bool01 (x) :type bool  :spec (and (&lt;= 0 x) (&lt;= x 1)))
+(analysis range  (x) :type Range :spec (and (&lt;= LO x) (&lt;= x HI)))
+(analysis known  (x) :type Known_bits :spec (= (And x MASK) VAL))
+(pred known_zero_outside (x m) :uses known :spec (= (And x (Not m)) 0))
+(pred nonneg        (x) :uses range :spec (&lt;= 0 x))
+(pred range_bounded (x) :uses range :spec (and (&lt;= LO x) (&lt;= x HI)))   ; finite LO/HI
+(simplify ror_bool01    (Ror (as x)) :when (bool01 x) =&gt; x)
+(simplify and_redundant (And (as x (k m))) :when (known_zero_outside x m) =&gt; x)
+</pre>
+<ul>
+<li>Implementations live in <code>pass/aegraph/analyses/&lt;name&gt;.cpp</code>
+and register with <code>AEG_ANALYSIS(name, Fact, make, meet)</code>.</li>
+<li>Merging the facts of a class's untagged members is a meet: ranges intersect
+and known bits union.</li>
+<li>The <code>:spec</code> serves two uses: it is the hypothesis of each proof
+obligation, and it is the fuzz sampler. bool01 samples {0, 1}; range samples
+inside [LO, HI].</li>
+<li>A generated soundness fuzz checks, on evaluated values, that an
+implementation returning true implies its spec.</li>
+</ul>
+
+<h3>Native rules</h3>
+<p>Region producers such as low_lane, mux_share and opshare cannot be written as
+patterns. They use <code>AEG_NATIVE_RULE(name, tag, root_op, prio) { ... }</code>
+on the same runtime. They get counters, knobs, the union-invariant fuzz and the
+example test, but no automatic proof obligation, so they need an equiv
+fixture.</p>
+
+<h3>Cost profiles</h3>
+<pre>
+;; cost/synth.cost                        ;; cost/sim.cost
+(cost synth (SHL _ (k _)) 0)              (cost sim (SHL _ (k _)) 1)
+(cost synth (Get_mask _ _ _) 0)           (cost sim (Mult _ _) 3)
+(cost synth (Mult _ (k _)) (* 2 W))       (cost sim (Hotmux ..) (* 2 (arity)))
+(cost synth (Mult _ _) (* W W))
+(cost synth (Mux _ ..a) (* W (arity)))
+</pre>
+<p>Profiles use the same pattern compiler. The only link from a rule to cost is its
+<code>:expect</code> assertion. If someone retunes a table and silently undoes a
+rule's purpose, that assertion's generated test fails.</p>
+
+<h3>What one rule produces with no hand edits</h3>
+<ul>
+<li><strong>Registry.</strong> A <code>Rule_id</code> enum and
+<code>rule_table[]</code> (name, tag, priority, file:line, proof tier), plus
+dispatch per root <code>Ntype_op</code>. The dispatch is a switch now; a decision
+trie comes later if profiling asks for one.</li>
+<li><strong>Knobs.</strong> <code>rules_disable</code>, <code>rules_only</code>,
+<code>max_rewrites</code> and <code>explain</code> accept the rule name with no
+list edit.</li>
+<li><strong>Counters per rule.</strong> tried, matched, applied, subsumed,
+limit-rejected and extracted. "Extracted" comes from the creating-rule id and is
+the key QoR signal for <code>alt</code> rules. Counters live in thread-local arrays
+and are merged after the workers join.</li>
+<li><strong>Census.</strong>
+  <ul>
+  <li>With <code>lhd.stats=true</code>, an <code>aegraph-rule</code> diag record per
+  rule (the sweep script parses it the way prplib parses
+  <code>bitfuzz-summary</code>).</li>
+  <li>A generated <code>pass/aegraph/RULES.md</code> table, kept fresh by the
+  rulegen staleness test.</li>
+  <li><code>lhd describe</code> renders only static labels, so it does not show the
+  census.</li>
+  </ul></li>
+<li><strong><code>aeg_fuzz_&lt;group&gt;_smoke</code></strong> (about 1000 samples
+per rule, fixed seed, <code>AEG_FUZZ_SEED</code> to override, the seed echoed on
+failure, well under 1 s in <code>-c opt</code>):
+  <ul>
+  <li>LHS/RHS equality under the Dlop evaluator on unbounded values up to about
+  130 bits, negatives included;</li>
+  <li><code>?</code> refinement mode: every known LHS bit is kept, and no new
+  <code>?</code> appears;</li>
+  <li>choice arms with their assignment substituted;</li>
+  <li>"example fires";</li>
+  <li>the <code>:expect</code> checks (from H).</li>
+  </ul></li>
+<li><strong>Union-invariant fuzz</strong> (<code>aeg_union_smoke</code>,
+independent of the rules, so it also covers native rules). Random depth-3 trees are
+inserted with one rule enabled, and every member of a class must evaluate equal (a
+tagged member only under its assumption set). A companion check compares Dlop with
+the LEC encoder on random single ops, so the two semantics cannot drift.</li>
+<li><strong><code>aeg_prove_&lt;group&gt;_smoke</code></strong>, the
+<code>bv</code> tier.
+  <ul>
+  <li>The LHS and RHS become micro-LGraphs proven equal by
+  <code>lec::prove_equal</code>.</li>
+  <li>Inputs at width w ∈ {1, 2, 3, 8, 16, 65}, sign- or zero-extended. Both
+  sides are evaluated and compared at width ≥ 2w + max_const_bits + 2 with no
+  truncation. Otherwise a rule that only holds modulo 2^w would pass.</li>
+  <li>Guards are miter assumptions.</li>
+  <li>At most 8 instances per rule by default, picked by a fixed per-rule hash;
+  <code>AEG_PROVE_FULL=1</code> runs the full sweep.</li>
+  <li>Per-group wall time is asserted under 25 s in opt.</li>
+  <li>Per the test ruling, timeout or Unknown is PASS, and Refuted is FAIL with
+  the counterexample printed as a rule instance.</li>
+  <li>This is bounded evidence, not a proof for all widths. The census records
+  <code>bv-swept</code>, <code>int-proven</code> (N) or
+  <code>native-unverified</code>.</li>
+  </ul></li>
+<li><strong>Lints that fail generation:</strong>
+  <ul>
+  <li>an unknown op or pin;</li>
+  <li>an unbound right-hand-side variable;</li>
+  <li>a <code>simplify</code> that does not reduce cost;</li>
+  <li>a fresh <code>?</code>, or a <code>create_const</code> of a
+  <code>?</code>-bearing value;</li>
+  <li>a choice arm without an assignment;</li>
+  <li>an unregistered <code>{attr}</code> contract;</li>
+  <li>an unknown profile.</li>
+  </ul></li>
+</ul>
+
+<h3>How to add a rule (checklist)</h3>
+<ol>
+<li>Add one entry to <code>pass/aegraph/rules/&lt;family&gt;.rules</code> with
+an <code>:example</code>. Add <code>:expect</code> if it is an <code>alt</code>
+meant for one target.</li>
+<li>For an analysis-guarded or native rule, also add an equiv fixture to the
+existing <code>prp-lec-*</code> tier:
+  <ul>
+  <li>a base file <code>inou/prp/tests/equiv/aeg_&lt;rule&gt;.prp</code>;</li>
+  <li>a header-only variant <code>aeg_&lt;rule&gt;_1.prp</code> with
+  <code>:set: compile.cprop.engine=aegraph</code> and
+  <code>:compile_grep: aegraph-rule &lt;rule&gt; .*extracted=[1-9]</code>.</li>
+  </ul>
+  No BUILD edit is needed, because the group is wired by file name. For a plain
+  pattern rule the fixture is optional; the in-process example test already shows
+  it fires.</li>
+<li>Run <code>bazel test -c opt //pass/aegraph/...</code>. That covers the lints,
+the example test, the fuzz, the union invariant, the bv tier and any fixture.</li>
+<li>If the rule needs a fact that no analysis provides, add an analysis with a
+<code>:spec</code> rather than writing C++ inside the rule.</li>
+<li>Never edit enums, knob lists or documentation tables by hand.</li>
+</ol>
+
+<h2>Comparison and measurement</h2>
+<h3>Metrics</h3>
+<table>
+<tr><th>Metric</th><th>Source</th></tr>
+<tr><td>Wall time per step</td><td><code>--result-json</code>
+<code>phases[]</code> (<code>Phase_timer</code>, <code>lhd/lhd_kernel_internal.hpp:366-391</code>).
+<code>pass.cprop</code> and <code>pass.aegraph</code> each appear twice; add
+them.</td></tr>
+<tr><td>Time per graph and phase</td><td><code>LHD_CPROP_PROFILE=1</code>
+(<code>pass/cprop/cprop_profile.hpp</code>). The new <code>LHD_AEGRAPH_PROFILE=1</code>
+uses the same record shape with phases prepass, build, rules, extract, elaborate
+and post.</td></tr>
+<tr><td>Engine summary</td><td>A <code>[pass.aegraph]</code> line in
+<code>&lt;workdir&gt;/logs/NNN_lhd_pass.aegraph.log</code>. With
+<code>lhd.stats</code>, <strong>both</strong> engines emit a
+<code>cprop-summary</code> diag record: <code>{graph, nodes_in, nodes_out, by_op,
+ms, rules_fired, creates, aeg_bytes, lg_bytes}</code>.</td></tr>
+<tr><td>Memory</td><td><code>aeg_bytes</code> is the sum of the container
+capacities of the e-node, bank, union and analysis tables at their peak.
+<code>lg_bytes</code> is <code>body_node_count</code> (<code>graph/node_util.hpp:1602</code>)
+× 32 B plus pins. Process RSS comes from <code>/usr/bin/time -l</code> per run;
+<code>process_peak_rss_bytes()</code> is process-wide and cannot attribute memory
+across 16 workers.</td></tr>
+<tr><td>Nodes per op</td><td><code>lhd tool cat lg:DIR --target node --diag-fmt json</code>
+after the full schedule (cprop→bitwidth→enableopt→cprop→bitwidth), plus
+<code>pred_aig</code> (<code>graph/predict_abc_size.hpp:189</code>). Classic's
+low_lane, opshare and mux_share add nodes on purpose, so node count alone is
+misleading.</td></tr>
+<tr><td>Synth QoR</td><td><code>lhd synth ... --set synth.liberty=inou/prp/tests/abc/test.lib
+--set synth.opentimer=false</code> gives <code>qor.abc.total.{gates,area,max_delay,pred_aig}</code>.
+The ABC-free variant uses <code>synth.mapper=usyn</code>.</td></tr>
+<tr><td>Sim speed</td><td><code>lhd sim --set sim.tune.profile=off</code> gives
+<code>sim.run</code> and <code>tests[].{sim_cycles,sim_ns,instructions,out_digest}</code>.
+<code>instructions</code> is the low-noise signal.</td></tr>
+<tr><td>Parity gap</td><td>With <code>engine=aegraph+classic</code>, the nodes and
+ops that classic still removes after the aegraph, per fixture and per op. This list
+drives the porting order.</td></tr>
+<tr><td>Determinism</td><td>Compile B twice, then
+<code>lhd tool diff lg:B1 lg:B2 --structural</code>.</td></tr>
+</table>
+<p>Both engines use <code>min(graphs, hw, 16)</code> workers
+(<code>pass_cprop.cpp:52-55</code>), which <code>lhd.jobs</code> does not control.
+Report wall time and the per-graph sum separately. Run with
+<code>lhd.incremental=false</code> so runs are cold.</p>
+
+<h3>Correctness</h3>
+<ul>
+<li><strong>A vs B:</strong> <code>lhd lec --impl lg:B --ref lg:A --top T --set
+formal.effort=proof --set formal.timeout=60 --set lhd.incremental=false</code>.
+Exit codes: 0 means proven, tested or timeout; 10 means REFUTED with a
+counterexample; 7 means REFUTED otherwise.</li>
+<li><strong>B vs source:</strong> <code>--ref foo.prp|.v</code>. Never pass the
+engine knob to this command, or the reference also goes through the aegraph.</li>
+<li><strong>Strict <code>?</code> mode</strong> (J, K):
+  <ul>
+  <li>The new <code>formal.lec.gold_x=symbolic</code> makes every literal identity
+  one fresh BV variable, shared by every use on <strong>both</strong> sides, and
+  constrains a partial literal's known bits.</li>
+  <li><code>formal.lec.choice_certificate</code> substitutes each chosen literal's
+  variable on the reference with the certificate's value or expression.</li>
+  <li>Masking unknowns to 0 would check only one concretization, so it would not
+  catch a split.</li>
+  </ul></li>
+<li><strong>Interpreting results:</strong> equal <code>out_digest</code> in sim is
+a free semantic cross-check. <code>end_digest</code> may differ when
+<code>?</code> is resolved differently.</li>
+<li><strong>Emitted Verilog:</strong> <code>cgen_verilog.cpp</code> writes a
+<code>?</code> literal inline at each use, so external tools see independent x
+values. Strict consistency covers sim and LEC only, unless a later change hoists a
+shared x wire.</li>
+</ul>
+
+<h3>Harnesses and corpora</h3>
+<ul>
+<li><strong>In-repo, in the default <code>//...</code>:</strong>
+  <ul>
+  <li>Header-only equiv variants <code>inou/prp/tests/equiv/&lt;base&gt;_N.prp</code>
+  with <code>:set: compile.cprop.engine=aegraph</code>
+  (<code>inou/prp/tests/equiv/README.md:155-168</code>). Each side compiles to its
+  own <code>lg:</code>; one file per claim, no BUILD edit.</li>
+  <li>The <code>pass/aegraph</code> gtests and generated smoke tests.</li>
+  <li><code>aeg_parity_smoke</code>: <code>TEST_P</code> over {classic, aegraph}
+  for <code>optimize_state</code> (<code>cprop_test.cpp:21-27</code>) and the
+  roughly 30 value-oracle cprop tests. Those are <code>mux_eval</code>, the lowlane
+  Dlop evaluator, and the opshare/muxctx <code>prove_equal</code> tests. The
+  evaluators move into a test-only header in <code>pass/cprop</code>, so the
+  <code>pass/cprop</code> tests gain no aegraph dependency. Shape-pin tests stay
+  classic-only.</li>
+  </ul></li>
+<li><strong>Manual, tagged <code>manual</code>:</strong> a <code>-aegraph</code>
+twin group next to <code>-bitfuzz</code> (<code>inou/prp/BUILD:600-603</code>,
+<code>:748-751</code>).
+  <ul>
+  <li>Its set rides only the compile command, through a new prplib
+  <code>compile_sets</code> list kept separate from <code>equiv_sets</code>
+  (<code>prplib.py:62-63</code>).</li>
+  <li>Today <code>equiv_sets</code> is also appended to <code>lhd lec</code>
+  (<code>prplib.py:672</code>, <code>:957</code>), which would send the golden
+  through the aegraph too.</li>
+  </ul></li>
+<li><strong>Random-DAG differential fuzzer</strong> (<code>aeg_diff_smoke</code>,
+under 4 s in opt; <code>AEG_FUZZ_ITERS</code> raises the count).
+  <ul>
+  <li>It generates random unbounded-integer DAGs over the comb vocabulary,
+  including <code>?</code> literals.</li>
+  <li>It copies each DAG with <code>livehd::copy_with_callees</code>, then runs
+  classic on one copy and the aegraph on the other.</li>
+  <li>On every iteration it runs the shared Dlop vector oracle. Each
+  <code>?</code> literal is enumerated as one value at all its uses.</li>
+  <li>It calls <code>prove_equal</code> only to confirm a vector mismatch, plus once
+  per run on one random iteration.</li>
+  </ul></li>
+<li><strong>Width-agnostic axis.</strong> Cross
+<code>compile.bitfuzz.mode=wires</code> with the engine knob to test decision 1.
+The set must ride every command it affects.</li>
+<li><strong>Numbers table.</strong> <code>scripts/cprop_engine_sweep.py</code>,
+modeled on <code>scripts/bitfuzz_sweep.py</code>.
+  <ul>
+  <li>Per fixture it records ms, RSS, nodes per op, <code>pred_aig</code>,
+  gates/area/delay, cps and instructions, digest equality, LEC A≡B, LEC B≡source,
+  determinism, and the parity gap.</li>
+  <li>A script is justified here because the output is a table of numbers, not a
+  verdict.</li>
+  </ul></li>
+<li><strong>Manual sibling sweeps</strong> (never in <code>//...</code>):
+  <ul>
+  <li><code>../lhdtrack</code>: a <code>syn_lhd_pyrope_aegraph.py</code> flow
+  wrapper, modeled on <code>flows/syn_lhd_verilog_no_satopt.py</code>.</li>
+  <li><code>../lhdsuite</code>: <code>BENCH_PYROPE_SETS="compile.cprop.engine=aegraph"</code>
+  and <code>CORE_SIM_SETS</code> for minion, dino, xs_*, matched_filter, cva6 and
+  rocket.</li>
+  <li><code>../logikbench</code>, for the mux and arith classes.</li>
+  </ul></li>
+<li><strong>Caveat.</strong> <code>benchmark/constprop_gen.py</code> folds to
+constants in upass, so an LGraph engine sees almost nothing. An input-driven variant
+needs a new generator mode or file. <code>benchmark/constprop_contract.py</code>
+is immutable and is not edited.</li>
+</ul>
+
+<h2>Subtasks — pending</h2>
+<h3>Phase 1 (decision point after I)</h3>
+<ul class="subtasks">
+<li><strong>A — Classic cprop fixes</strong> <span class="status">phase 1</span>
+  <ul>
+  <li>Land these immediately: P2, P4, P6, P8, P9 and P10 (bugs), plus P5 (keep
+  existing proven codes) and P7 (cprop and bitwidth sites). P7 is a hard
+  prerequisite for J. P1 and P3 are now legal under Q1: document them and add a
+  test that pins the semantics.</li>
+  <li>Each fix comes with a <code>cprop_test</code>/<code>bitwidth_test</code> case
+  or an equiv fixture:
+    <ul>
+    <li>an n-ary Mux with a disconnected arm (P1, P2);</li>
+    <li>an n-ary Mux selected by <code>Sext(b,1)</code> (P3);</li>
+    <li>a <code>b</code>-only Div (P4);</li>
+    <li>a Hotmux carrying <code>kFormalAssumeUnchecked</code> through both slots
+    (P5);</li>
+    <li>a <code>c=0ub????</code> feeding an output and <code>Get_mask[0,2)</code>,
+    where sim shows one draw (P7).</li>
+    </ul></li>
+  <li>Exit: no new <code>//...</code> failures. C records the A/B baseline after
+  A, and records it again whenever a later P-fix lands.</li>
+  </ul></li>
+<li><strong>B — Knob, skeleton engine, round trip</strong> <span class="status">phase 1</span>
+  <ul>
+  <li>Plumbing:
+    <ul>
+    <li><code>pass/aegraph/</code> with a BUILD modeled on <code>pass/cprop/BUILD</code>:
+    <code>alwayslink</code>, COPTS, no <code>-Wno-*</code>;</li>
+    <li><code>pass.aegraph</code> with its INTERNAL shared labels;</li>
+    <li><code>compile.cprop.engine</code> (all four values) and
+    <code>engine_slots</code>, both validated;</li>
+    <li>the dispatch, the driver merge, and the <code>:1808</code> gate;</li>
+    <li>the <code>kSetPasses</code> row, the <code>compile_salt</code> entry, and
+    the engine name in the cache descriptor;</li>
+    <li>updated <code>lhd_config_test</code> and
+    <code>lhd_list_options_test</code> expectations.</li>
+    </ul></li>
+  <li>Engine:
+    <ul>
+    <li>pre-pass SCC detection that marks members opaque;</li>
+    <li>build with hash-consing and the attribute key;</li>
+    <li>the per-op bank normalization table;</li>
+    <li>a constant analysis with a "no value" bottom and 3-valued EQ/LT/GT;</li>
+    <li>folding of all-constant nodes only when the result is fully known;</li>
+    <li>skeleton handling for Hotmux obligations, LUT and
+    <code>runtime_check</code>;</li>
+    <li>diff-elaboration with the loop-carry guard and width-stamp carry;</li>
+    <li>the existing <code>hoist_loop_invariants</code>.</li>
+    </ul></li>
+  <li>Prplib harness: the <code>compile_sets</code> list, and the manual
+  <code>-aegraph</code> twin.</li>
+  <li>Tests:
+    <ul>
+    <li><code>aegraph_test.cpp</code>: with no rules, elaboration gives a
+    structurally identical graph, including on a <code>Subnode_loop</code> body and
+    a non-exclusive Hotmux (<code>UnusedOverlapSurvivesForFormal</code>);</li>
+    <li>three equiv header variants;</li>
+    <li>a determinism check (two runs, <code>tool diff --structural</code>).</li>
+    </ul></li>
+  <li>Exit:
+    <ul>
+    <li>the set of failing fixtures under <code>aegraph</code> is a subset of the
+    set under <code>none</code>;</li>
+    <li>0 REFUTED and 0 crashes;</li>
+    <li>both failure lists are recorded in this file.</li>
+    </ul>
+  The full 0-failure bar moves to G2.</li>
+  </ul></li>
+<li><strong>C — A/B harness</strong> <span class="status">phase 1</span>
+  <ul>
+  <li>Deliverables:
+    <ul>
+    <li><code>LHD_AEGRAPH_PROFILE</code>, and the <code>cprop-summary</code> record
+    from both engines (including <code>aeg_bytes</code>, <code>lg_bytes</code> and
+    the create count);</li>
+    <li><code>aeg_parity_smoke</code> with the shared test-only evaluator
+    header;</li>
+    <li><code>aeg_diff_smoke</code>;</li>
+    <li><code>scripts/cprop_engine_sweep.py</code>, including the
+    <code>aegraph+classic</code> parity-gap report;</li>
+    <li>the lhdtrack wrapper.</li>
+    </ul></li>
+  <li>Exit: one command produces the full A/B table on the in-repo corpora. The
+  baseline table and parity-gap list are recorded in this file.</li>
+  </ul></li>
+<li><strong>D — Rule runtime (S0) and local folds</strong> <span class="status">phase 1</span>
+  <ul>
+  <li>The runtime:
+    <ul>
+    <li><code>runtime/match.hpp</code>, <code>AEG_RULE</code>/<code>AEG_NATIVE_RULE</code>
+    and the registry;</li>
+    <li>counters per rule;</li>
+    <li>the <code>rules_disable</code>, <code>rules_only</code>,
+    <code>max_rewrites</code>/<code>bisect_graph</code> and <code>explain</code>
+    knobs;</li>
+    <li>the runtime <code>check=off|unions|full</code>.</li>
+    </ul></li>
+  <li>About 15–25 hand-written rules, in the order the parity-gap list gives:
+    <ul>
+    <li>Sum/Mult/And/Or/Xor identities and cancellation;</li>
+    <li>shift composition;</li>
+    <li>Sext algebra and the Sext constant fold;</li>
+    <li><code>Not(Not x)</code>;</li>
+    <li><code>EQ/LT/GT(x,x)</code>.</li>
+    </ul></li>
+  <li>The <code>?</code> rule: no fold produces a new partial-<code>?</code>
+  spelling.</li>
+  <li>Tests:
+    <ul>
+    <li><code>aeg_union_smoke</code>;</li>
+    <li><code>aeg_diff_smoke</code>;</li>
+    <li><code>aeg_parity_smoke</code>;</li>
+    <li>the equiv twin run in dbg with <code>check=unions</code>.</li>
+    </ul></li>
+  </ul></li>
+<li><strong>E — rulegen DSL (S1) and the bv proof tier</strong> <span class="status">phase 1</span>
+  <ul>
+  <li>Deliverables:
+    <ul>
+    <li>the <code>rulegen</code> binary and the <code>aeg_rules()</code> macro;</li>
+    <li>the generated registry and dispatch;</li>
+    <li><code>aeg_fuzz_&lt;group&gt;_smoke</code> and the example tests;</li>
+    <li><code>aeg_prove_&lt;group&gt;_smoke</code> (bv tier only);</li>
+    <li>the lints, with the structural form of the cost lint;</li>
+    <li>a staleness test for <code>RULES.md</code> and any checked-in generated
+    files;</li>
+    <li>the <code>:compile_grep:</code> tag in <code>inou/prp/tests/prplec.py</code>,
+    with a README row.</li>
+    </ul></li>
+  <li><code>:expect</code> is parsed and stored, but its tests are emitted only
+  once H lands.</li>
+  <li>D's pattern rules move into <code>rules/*.rules</code>.</li>
+  <li>Exit: the checklist works end to end on a new rule (<code>shl_shl</code>),
+  with no hand edits outside the <code>.rules</code> file. Each generated test
+  stays under 25 s in opt and 90 s in dbg.</li>
+  </ul></li>
+<li><strong>F — CSE parity and obligation handling</strong> <span class="status">phase 1</span>
+  <ul>
+  <li>Deliverables:
+    <ul>
+    <li>the full CSE policy: the naming twin at elaboration, the color barrier,
+    <code>synth_policy</code>, Hotmux <code>proven</code>;</li>
+    <li>LUT, <code>runtime_check</code> and non-exclusive Hotmux as skeleton
+    leaves;</li>
+    <li>constants with equal value but a different repr or type tag (the pool keys
+    on <code>same_repr</code> plus the tag) folded into one class;</li>
+    <li>roots for IO, state, loop_last and obligations, so dead-code removal comes
+    for free.</li>
+    </ul></li>
+  <li><strong>Gate G1 (go/no-go):</strong>
+    <ul>
+    <li>LEC: 0 REFUTED on the equiv, sim and abc corpora;</li>
+    <li>determinism: 100%;</li>
+    <li>width-agnostic: the aegraph result with <code>compile.bitfuzz.mode=wires</code>
+    is LEC-equal to the result without it;</li>
+    <li>compile time: <code>pass.aegraph</code> within 1.5x of classic
+    <code>pass.cprop</code> summed over the corpus. It must also hold on
+    <code>../lhdsuite</code> minion and the largest XS module (a manual run, with
+    the numbers recorded here), with no single graph over 2x;</li>
+    <li>memory: <code>max(aeg_bytes/lg_bytes) ≤ 0.5</code> per graph, and compile
+    peak RSS (<code>/usr/bin/time -l</code>) within 1.2x of classic on those
+    designs;</li>
+    <li>if G1 fails, profile before porting more rules.</li>
+    </ul></li>
+  </ul></li>
+<li><strong>G — Analyses and mask/lane rules</strong> <span class="status">phase 1</span>
+  <ul>
+  <li>Analyses:
+    <ul>
+    <li>bool01, range and known bits;</li>
+    <li>(base, polarity) and exclusivity;</li>
+    <li>the persistent lane layout (an interval per class) for
+    Get_mask/Set_mask/Concat;</li>
+    <li>low-lane as an analysis.</li>
+    </ul></li>
+  <li>Rules:
+    <ul>
+    <li>getmask_getmask;</li>
+    <li><code>Get_mask(Concat)</code>;</li>
+    <li>the Set_mask/Get_mask window rules;</li>
+    <li><code>Get_mask(SHL)</code> (<code>bitwidth_rewrite.cpp:122-144</code>);</li>
+    <li>partial-constant Get_mask/Set_mask/Concat/LT/GT;</li>
+    <li><code>Ror(bool01 x) → x</code>.</li>
+    </ul></li>
+  <li>Move the false-cycle slice resolution into the pre-pass.</li>
+  <li>Add an internal switch <code>formal.lec.preflight_engine=classic|aegraph</code>,
+  default <code>classic</code>, salted into <code>formal_salt</code>.
+    <ul>
+    <li>Its stamping contract is whatever classic <code>Cprop{false}</code>
+    guarantees today, and in preflight mode the elaborator refuses unstamped
+    interior nodes.</li>
+    <li>A gtest runs both engines on br_amba_axi_demux.</li>
+    </ul></li>
+  <li>Tests:
+    <ul>
+    <li>the analysis-soundness fuzz;</li>
+    <li>equiv fixtures for packed slices in the style of br_amba_axi_demux.</li>
+    </ul></li>
+  <li>Div/Rem (Q2): both are pure and CSE'd. Add <code>rules/div.rules</code>
+  with power-of-two divisors (shift and mask, guarded on <code>a ≥ 0</code> or
+  with the truncation correction), <code>b/b → 1</code>, and constant-divisor
+  multiply-shift as an <code>alt</code> under a <code>range</code> guard.
+  Variable divisors are left alone. Fixtures cover a negative dividend and
+  <code>x/0</code>, <code>x%0</code>.</li>
+  </ul></li>
+<li><strong>H — Mux simplification</strong> <span class="status">phase 1</span>
+  <ul>
+  <li>Deliverables:
+    <ul>
+    <li>equivalents of <code>scalar_mux</code>, <code>scalar_eq</code> and
+    <code>scalar_bool</code>, with the Q1 out-of-range <code>choice</code> and
+    the Q3 Dlop-only semantics (no P10 string shortcut);</li>
+    <li>the per-lane rules of <code>vectorize_bit_reductions</code> and
+    <code>vectorize_bit_muxes</code>, plus hash-consing;</li>
+    <li>the Latch-din root constraint;</li>
+    <li>vector-mux window narrowing as a post pass;</li>
+    <li>flop-enable folding as a skeleton post rule (<code>fold_constant_flop_enables</code>,
+    <code>cprop.cpp:3486ff</code>);</li>
+    <li>muxctx run unchanged after elaboration (measure the order change).</li>
+    </ul></li>
+  <li><strong>Gate G2 (structural parity):</strong>
+    <ul>
+    <li>after the full schedule, total nodes and <code>pred_aig</code> within 2% of
+    classic (geomean), with no fixture over 10%;</li>
+    <li>no op class regresses by more than 5% summed;</li>
+    <li>the in-repo corpus has 0 failures under <code>aegraph</code>;</li>
+    <li>G1 still holds.</li>
+    </ul>
+  G2 must pass before any QoR-directed work.</li>
+  </ul></li>
+<li><strong>I — Cost profiles, alternatives, extraction</strong> <span class="status">phase 1</span>
+  <ul>
+  <li>Deliverables:
+    <ul>
+    <li><code>cost/{synth,sim}.cost</code>, width-aware and sharing-aware;</li>
+    <li><code>compile.aegraph.cost=synth|sim</code>, with the resolved profile in
+    the cache descriptor;</li>
+    <li><code>alt</code> rules: <code>Mult(2^k) → SHL</code>; mux chain ↔ Hotmux ↔
+    collapsed; Mux→And/Or (<code>cprop.cpp:1680-1726</code>); Set_mask pair
+    factoring (<code>factor_set_mask_pair</code>, <code>:1541ff</code>);</li>
+    <li>the per-profile cost lint;</li>
+    <li>the <code>:expect</code> tests.</li>
+    </ul></li>
+  <li><strong>Gate G3 (QoR):</strong>
+    <ul>
+    <li>with <code>synth</code>, ABC area and delay geomean ≤ classic on the abc
+    corpus plus lhdtrack;</li>
+    <li>with <code>sim</code>, <code>instructions</code>/cps within 5% of classic on
+    lhdsuite;</li>
+    <li>on failure, tune the profiles; never edit rules to encode cost.</li>
+    </ul></li>
+  <li><strong>Decision point:</strong> report the A/B table (time, memory, nodes,
+  QoR, sim, rule census) to the user. Phase 2 is planned only if G3 holds.</li>
+  </ul></li>
+</ul>
+
+<h3>Phase 2 (only if Phase 1 meets G3)</h3>
+<ul class="subtasks">
+<li><strong>J — <code>?</code> constant choices and certificate (I1)</strong> <span class="status">phase 2</span>
+  <ul>
+  <li>Requires: P7 landed. Literal identity is the const node (Q5).</li>
+  <li>Deliverables:
+    <ul>
+    <li><code>choice</code> rules: <code>mult_unknown</code>,
+    <code>mux_unknown_sel</code>, <code>mux_unknown_arm</code>
+    (<code>Mux(s,a,?) → a</code>, Q4), the Q1 out-of-range selection, and And/Or
+    with <code>?</code>;</li>
+    <li>the tagged-union rules (no facts from tagged members, propagated assumption
+    sets);</li>
+    <li>a per-literal assignment search at extraction;</li>
+    <li>rewriting every use of a chosen literal;</li>
+    <li><code>compile.aegraph.choices=const|expr</code> (both allowed by Q4;
+    <code>expr</code> is the default once its fixtures pass);</li>
+    <li>a measurement of exempting <code>?</code> Dlops from tolg interning
+    (Q5, optional).</li>
+    </ul></li>
+  <li>The certificate:
+    <ul>
+    <li>Entries accumulate across both slots; a later slot may only add entries
+    for literals still unchosen.</li>
+    <li>Keys are re-keyed through the constant moves done by legalize and
+    loop_hoist.</li>
+    <li>It is stored <em>inside</em> the lg library (<code>&lt;lgdir&gt;/aegraph_choices.json</code>),
+    so it is cached with the graphs and an <code>lg:</code> side finds it.</li>
+    </ul></li>
+  <li>An in-process checker: a gtest evaluates the reference with the certificate
+  substituted, using the Dlop evaluator.</li>
+  <li>Fixtures:
+    <ul>
+    <li><code>c=?</code>; <code>a*c</code>; <code>b-c</code> (same pick at both
+    uses);</li>
+    <li><code>c=?</code>, <code>d=?</code>: independent when they are different
+    const nodes. With today's interning, same-spelling literals in one graph are
+    one node, so the fixture uses different spellings, or the interning
+    exemption;</li>
+    <li><code>Mux(s, a, c)</code> with <code>c=?</code> also feeding
+    <code>b-c</code>: picking <code>c := a</code> forces <code>b-a</code>;</li>
+    <li><code>a=x*?</code> then <code>a+c</code> (stays consistent after the value
+    materializes);</li>
+    <li><code>c=?</code> feeding a register's <code>initial</code> and
+    <code>a*c</code> (a skeleton use is rewritten);</li>
+    <li>a negative test where a forged inconsistent certificate fails the
+    checker.</li>
+    </ul></li>
+  </ul></li>
+<li><strong>K — Strict LEC integration (I2)</strong> <span class="status">phase 2</span>
+  <ul>
+  <li>Deliverables:
+    <ul>
+    <li><code>formal.lec.gold_x=symbolic</code>: one shared BV variable per literal
+    on both sides;</li>
+    <li><code>formal.lec.choice_certificate</code>;</li>
+    <li>the <code>pass_lec</code> labels;</li>
+    <li>a <code>formal_salt</code> entry.</li>
+    </ul></li>
+  <li>The literal key, (graph, const node), has to line up after flattening.
+  Per-instance copies are separate literals (Q5 assumption).</li>
+  <li>Expression choices (<code>choices=expr</code>, Q4) substitute the
+  expression for the reference's literal variable.</li>
+  <li>Tests: the J fixtures under strict LEC, plus the negative fixture, which must
+  be REFUTED.</li>
+  </ul></li>
+<li><strong>L — Union producers</strong> <span class="status">phase 2</span>
+  <ul>
+  <li>Port opshare, mux_share and low_lane Sum/Xor/Mux/EQ as native
+  <code>alt</code> rules that union region results.</li>
+  <li>Extraction counts shared nodes once and prices bits and variable
+  shifts.</li>
+  <li>Each port gets an equiv fixture.</li>
+  <li>Exit: G3 still holds, and the extracted counts of these rules are
+  reported.</li>
+  </ul></li>
+<li><strong>M — Remaining side passes and full parity</strong> <span class="status">phase 2</span>
+  <ul>
+  <li>Close the parity-gap list. Re-check the muxctx order against
+  L.</li>
+  <li><strong>Gate G4:</strong>
+    <ul>
+    <li>G1–G3 hold on all in-repo and lhdsuite designs;</li>
+    <li>the XS backend compile peak RSS (19.6 GB baseline) rises by no more than
+    10%.</li>
+    </ul></li>
+  <li>Decision point: report to the user whether to flip the default. This plan
+  does not flip it.</li>
+  </ul></li>
+<li><strong>N — Unbounded proof tiers</strong> <span class="status">phase 2</span>
+  <ul>
+  <li><code>int</code> tier: SMT over unbounded Int for the ring fragment (Sum,
+  Mult, truncated Div/Rem, LT/GT/EQ, Mux, SHL by a constant). This is new cvc5
+  code: about 100 lines plus a semantics table.</li>
+  <li>Optional <code>:proof lean</code> statements in a fresh Int-level op semantics
+  file. <code>formal/lean/.../Translation/LGraphModel.lean</code> still models
+  Get_mask as <code>[a, m]</code>. These are checked by <code>lake build</code>,
+  not by the default <code>bazel test</code>.</li>
+  <li>Can start any time after E.</li>
+  </ul></li>
+<li><strong>O — More callers (only after G4)</strong> <span class="status">phase 2</span>
+  <ul>
+  <li>A <code>livehd::fold_body(graph, Engine, low_lanes)</code> dispatch for:
+    <ul>
+    <li>satopt cleanup;</li>
+    <li>specialize (low_lanes=false, as a deliberate decision);</li>
+    <li>synth loop cleanup and memory import, with a <code>synth_salt</code>
+    entry.</li>
+    </ul></li>
+  <li>Flip <code>formal.lec.preflight_engine</code> and the mixed-loop identity,
+  together with the <code>formal_salt</code> entry.</li>
+  </ul></li>
+</ul>
+
+<h2>Risks and mitigations</h2>
+<ul>
+<li><strong>False unions turn local inconsistencies into global
+miscompiles.</strong> Classic's two out-of-range Mux rules were the live
+example, until the Q1 ruling turned both into one <code>choice</code>.
+  <ul>
+  <li>Q1–Q3 are decided. Encode Q1 as a <code>choice</code> and never as two
+  <code>simplify</code> rules. Fix P2, P4 and P10 in classic first.</li>
+  <li>The union-invariant fuzz, the dbg <code>check=unions</code> mode, and
+  deterministic <code>max_rewrites</code> bisection catch the rest.</li>
+  </ul></li>
+<li><strong>A tagged member leaks into facts or a subsume.</strong> That would be a
+silent <code>?</code> split. Mitigation: tagged members feed no facts and allow no
+subsume, assumption sets propagate, and the fuzz checks equality under each
+member's assumption set.</li>
+<li><strong>The cost model undoes narrowing.</strong> A node-count extractor would
+discard low_lane, mux_share and opshare. Mitigation: width- and sharing-aware cost
+from I on, <code>pred_aig</code> in G2, extraction counters per rule, and G3.</li>
+<li><strong>LEC cannot check <code>?</code> consistency by default.</strong> It
+smears unknowns and masks them to 0. Mitigation: <code>gold_x=symbolic</code> plus
+the certificate (K), and the refinement-mode fuzz from E.</li>
+<li><strong>Interning merges same-spelling literals, and classic and bitwidth
+split literals (P7).</strong> The merge is legal (Q5), but it loses freedom. The
+split is a bug. Mitigation: P7 in A, the
+no-<code>create_const</code>-of-<code>?</code> lint, and the optional interning
+exemption measured in J.</li>
+<li><strong>Elaboration churn.</strong> New nids break specialize's assumptions,
+and atomic contention in <code>create_node</code> slows parallel workers.
+Mitigation: diff-elaboration that reuses original nodes, and the create count in
+the profile record.</li>
+<li><strong>Compile time and memory at XS scale.</strong> XSCore has 17.6M nodes
+summed over definitions, and the 190 MB Verilog compile peaks at 19.6 GB.
+Mitigation:
+  <ul>
+  <li>Cranelift limits and a per-graph edge budget;</li>
+  <li>32–48 B e-nodes, with the e-graph freed after each graph;</li>
+  <li>large designs already in G1, not first seen at G4.</li>
+  </ul></li>
+<li><strong>Nondeterminism.</strong> Mitigation: ordered class ids, a total
+tie-break order, no output-affecting iteration over hash containers, and the
+determinism check in every sweep.</li>
+<li><strong>LEC difficulty changes even when outputs are equivalent</strong>, for
+example when a false cycle is removed. Mitigation: classic stays in the LEC
+preflight until O, and per the test ruling a timeout or Unknown at a small budget
+counts as PASS.</li>
+<li><strong>Test time.</strong> Mitigation: fuzz and proof tests split per rule
+group, a bounded instance count, prove-on-mismatch in the differential fuzzer, and
+high iteration counts behind environment variables. Targets: under 30 s in opt
+(goal under 4 s) and 90 s in dbg.</li>
+<li><strong>Knob spelling traps.</strong> Nested flags would be silently dropped by
+<code>merge_sets</code>. Mitigation: flat labels only, one spelling per flag, and
+eager value checks.</li>
+</ul>
+
+<h2>Non-goals</h2>
+<ul>
+<li>No upass/LNAST pass in this plan. A simplify-only LNAST pre-pass is a later
+follow-up, and only if the A/B numbers justify it.</li>
+<li>Classic cprop is not deleted or replaced as the default here. Even at parity,
+<code>Bitwidth_rewrite</code>, enableopt and satopt keep using its internals.</li>
+<li>No full equality saturation, no rebuild, and no cyclic e-graph through state.
+Bitwidth's fixed point stays in bitwidth.</li>
+<li>muxctx, loop_hoist, enableopt and flop-enable folding are not reimplemented
+inside the e-graph.</li>
+<li>No consistency guarantee for <code>?</code> in emitted Verilog.</li>
+</ul>
+
+<h2>References</h2>
+<ul>
+<li>Cranelift aegraph RFC:
+<a href="https://github.com/bytecodealliance/rfcs/blob/main/accepted/cranelift-egraph.md">rfcs/accepted/cranelift-egraph.md</a></li>
+<li>Fallin, "aegraphs: Acyclic E-graphs for Efficient Optimization in a Production
+Compiler", EGRAPHS'23 keynote
+(<a href="https://pldi23.sigplan.org/details/egraphs-2023-papers/2/">talk</a>,
+<a href="https://cfallin.org/pubs/egraphs2023_aegraphs_slides.pdf">slides</a>);
+<a href="https://cfallin.org/blog/2026/04/09/aegraph/">blog</a>.</li>
+<li>Cranelift limits <code>cranelift/codegen/src/egraph/mod.rs</code>; mid-end rules
+<code>opts/arithmetic.isle</code>, <code>opts/cprop.isle</code>,
+<code>prelude_opt.isle</code> (wasmtime repo).</li>
+<li>ISLE language reference:
+<a href="https://github.com/bytecodealliance/wasmtime/blob/main/cranelift/isle/docs/language-reference.md">language-reference.md</a></li>
+<li>Crocus/VeriISLE, ASPLOS'24:
+<a href="https://cs.wellesley.edu/~avh/veri-isle-preprint.pdf">preprint</a></li>
+<li>Zucker, smart-constructor view of aegraphs:
+<a href="https://philipzucker.com/smart_constructor_aegraph/">blog</a></li>
+<li>Alive (PLDI'15) and Alive2 (refinement):
+<a href="https://www.cs.utah.edu/~regehr/papers/pldi15.pdf">Alive</a>,
+<a href="https://github.com/AliveToolkit/alive2">Alive2</a></li>
+<li>Rule-language precedents: the Go SSA <code>_gen/*.rules</code> generator, GCC
+<code>match.pd</code>, LLVM PatternMatch, MLIR PDLL, egg, egglog (arXiv
+2304.04332).</li>
+<li>Hardware e-graphs:
+  <ul>
+  <li>Coward et al., ARITH'22 (arXiv 2204.11478)</li>
+  <li>ROVER, TCAD'24 (arXiv 2406.12421)</li>
+  <li>Constraint-aware datapath, DAC'23 (arXiv 2303.01839)</li>
+  <li>E-Syn, DAC'24 (arXiv 2403.14242)</li>
+  <li>E-morphic (arXiv 2504.11574)</li>
+  <li>BoolE, DAC'25 (arXiv 2504.05577)</li>
+  <li>SmoothE, ASPLOS'25</li>
+  <li>SEER, ASPLOS'24 (arXiv 2308.07654)</li>
+  <li>LATTE'24 position paper (arXiv 2404.00786)</li>
+  <li>SmaRTLy (arXiv 2510.17251; mux trees, not e-graphs)</li>
+  </ul></li>
+<li>Internal references:
+  <ul>
+  <li><a href="../../pass/cprop/cprop.cpp"><code>pass/cprop/cprop.cpp</code></a>:
+  folds <code>:870-2160</code>, CSE <code>:3229-3335</code>, <code>do_trans</code>
+  <code>:3533-3576</code>;</li>
+  <li><a href="../../pass/cprop/pass_cprop.cpp"><code>pass/cprop/pass_cprop.cpp</code></a>,
+  <code>pass/cprop/cprop_profile.hpp</code>, <code>pass/cprop/cprop_muxctx.cpp</code>,
+  <code>pass/cprop/TODO</code>;</li>
+  <li><code>lhd/lhd_kernel_common.cpp:818-833,967,1563-1587</code>,
+  <code>lhd/lhd_kernel_compile.cpp:1798-1817</code>,
+  <code>lhd/lhd_kernel_internal.hpp:313-391</code>,
+  <code>lhd/lhd_compile_cache.cpp:874-904</code>, <code>lhd/BUILD</code>
+  (<code>compile_salt</code>, <code>formal_salt</code>);</li>
+  <li><code>graph/cell.hpp:30-330</code>, <code>graph/cell.cpp:127-400</code>,
+  <code>graph/attrs.hpp</code>, <code>graph/attr_carry.hpp:83-127</code>,
+  <code>../hhds/hhds/graph.{hpp,cpp}</code>;</li>
+  <li><code>upass/tolg/upass_tolg.cpp:1200-1217</code>,
+  <code>inou/cgen/cgen_sim.cpp:1286-1299</code>,
+  <code>pass/lec/encode.cpp:1199-1228,3436-3448</code>,
+  <code>pass/lec/query.hpp</code>;</li>
+  <li><code>inou/prp/tests/equiv/README.md:155-171</code>,
+  <code>inou/prp/tests/prplec.py</code>, <code>inou/prp/tests/prplib.py</code>,
+  <code>scripts/bitfuzz_sweep.py</code>.</li>
+  </ul></li>
+<li>Related plan: <a class="xref" href="2s-satopt.html">2s-satopt</a>. Satopt runs
+after cprop and reuses <code>share_mux_regions</code>, <code>low_lane_bits</code>
+and the opshare helpers, which stay on classic.</li>
+</ul>
+</main>
+<footer>LiveHD TODO · 2a-aegraph</footer>
+</body>
+</html>

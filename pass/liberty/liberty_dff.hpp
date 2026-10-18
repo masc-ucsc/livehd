@@ -25,6 +25,8 @@ struct Memory_pin {
   int         msb = 0, lsb = 0;
   bool        bus                                 = false;
   bool        clocked                             = false;  // output arcs are exclusively clock-edge triggered
+  bool        clock_input                         = false;
+  bool        address_data_input                  = false;  // memory_{read,write} interface metadata
   bool        operator==(const Memory_pin&) const = default;
 };
 struct Memory_cell {
@@ -42,6 +44,7 @@ struct Memory_skip {
   std::string name, reason;
 };
 std::vector<Memory_cell> scan_memory_cells(const std::string& lib_files, std::vector<Memory_skip>* skipped = nullptr);
+std::vector<Memory_cell> scan_memory_cells_text(const std::string& contents, std::vector<Memory_skip>* skipped = nullptr);
 std::string              memory_cell_declarations(const std::vector<Memory_cell>& cells);
 // Declare each RAM as a body-less GraphIO. A body-less declaration already in
 // `library` (a reused lg: dir) is kept when it matches and replaced when the
@@ -67,6 +70,18 @@ struct Comb_cell {
   std::optional<double>    max_capacitance_ff, max_transition_ps, max_fanout;
   double                   intrinsic_ps = 0, resistance_ohm = 0;
 };
+// Read-only drive estimates for instantiated outputs, including RAM bus bits and FFs
+// and multi-output cells. This does not make state cells combinational or
+// eligible for gate resizing. Limits remain absent when not characterized.
+struct Output_drive {
+  bool                  sequential = false;
+  std::string           name, output;
+  std::optional<double> max_capacitance_ff, max_transition_ps, max_fanout;
+  double                intrinsic_ps = 0, resistance_ohm = 0;
+};
+std::vector<Output_drive> scan_output_drives_text(const std::string& contents);
+std::vector<Output_drive> scan_output_drives(const std::string& lib_files);
+
 // Exact scalar truth table in the declared input order, repeated to 64 bits.
 // Reject unsupported syntax, absent pins and cells with more than six inputs.
 std::optional<uint64_t> cell_truth(const Comb_cell& cell);

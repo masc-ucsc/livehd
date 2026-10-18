@@ -118,16 +118,44 @@ livehd::placement::Options placement_options(const Options& opts) {
   if (mode != "full" && mode != "gp") {
     throw Lhd_error{"usage", "synth.place.mode must be full or gp", ""};
   }
-  out.full      = mode == "full";
+  out.full                    = mode == "full";
+  out.fp_timing_interval      = static_cast<int>(integer("place.fp.timing_interval", "50"));
+  out.fp_timing_movement      = number("place.fp.timing_movement", "0");
+  out.fp_timing_after_density = truthy(synth_set(opts, "place.fp.timing_after_density", "false"));
+  out.timing_fraction         = number("place.timing_fraction", "0.2");
+  out.timing_max_weight       = number("place.timing_max_weight", "5");
+  out.timing_smoothing        = number("place.timing_smoothing", "0.5");
+  out.fp_timing_max_updates   = integer("place.fp.timing_max_updates", "10");
+  out.stop_overflow           = number("place.stop_overflow", "0.1");
+  out.initial_density_weight  = number("place.initial_density_weight", "0.01");
+  if (out.timing_max_weight < 1 || out.timing_max_weight > livehd::placement::max_net_weight || out.timing_smoothing < 0
+      || out.timing_smoothing > 1 || out.fp_timing_max_updates < 2 || out.stop_overflow < 0 || out.stop_overflow > 1
+      || out.initial_density_weight <= 0) {
+    throw Lhd_error{"usage", "invalid synth.place timing/density tuning controls", "check lhd describe synth for allowed values"};
+  }
+  if (out.timing_fraction <= 0 || out.timing_fraction > 1) {
+    throw Lhd_error{"usage", "synth.place.timing_fraction expects a fraction in (0,1]", "use 0.1 for 10% or 0.29 for 29%"};
+  }
   out.snapshots = truthy(synth_set(opts, "place.snapshots", "false"));
   out.cohesion  = number("place.cohesion", "0");
   if (out.cohesion < 0) {
     throw Lhd_error{"usage", "synth.place.cohesion must be nonnegative", ""};
   }
-  out.utilization                     = number("place.utilization", "0.30");
-  out.aspect                          = number("place.aspect", "1");
-  out.density                         = number("place.density", "0.5");
-  out.iterations                      = integer("place.iterations", "1500");
+  out.utilization                = number("place.utilization", "0.30");
+  out.aspect                     = number("place.aspect", "1");
+  out.density                    = number("place.density", "0.5");
+  out.iterations                 = integer("place.iterations", "1500");
+  out.min_iterations             = integer("place.min_iterations", "40");
+  out.post_density_factor        = integer("place.post_density_factor", "4");
+  out.convergence_tolerance      = number("place.convergence_tolerance", "0.01");
+  out.detailed_iterations        = integer("place.detailed_iterations", "2");
+  out.density_upper_bound        = truthy(synth_set(opts, "place.density_upper_bound", "false"));
+  out.fixed_macro_overlap_weight = number("place.fixed_macro_overlap", "0");
+  if (out.min_iterations < 0 || out.post_density_factor < 0 || out.post_density_factor > 100 || out.convergence_tolerance < 0
+      || out.convergence_tolerance > 1 || out.detailed_iterations < 1 || out.detailed_iterations > 100
+      || out.fixed_macro_overlap_weight < 0) {
+    throw Lhd_error{"usage", "invalid synth.place cell-placement controls", ""};
+  }
   out.bins                            = integer("place.bins", "64");
   out.scale_macro_density             = truthy(synth_set(opts, "place.scale_macro_density", "true"));
   out.automatic_bins                  = truthy(synth_set(opts, "place.auto_bins", "false"));
@@ -463,17 +491,19 @@ void synth_command(Options& opts, Result& res) {
   // ---- the synth.* knobs --------------------------------------------------
   // (`pass.abc.library` is refused for every command by check_known_set_passes:
   // synth.liberty is the one spelling, so no two Liberty readers can disagree.)
-  const auto*       mapper           = find_mapper(synth_set(opts, "mapper", "abc"));  // validated by check_known_set_passes
-  const auto        mapper_method    = std::string{mapper->method};
-  const bool        mapped_output    = mapper_maps_cells(opts, mapper_method);
-  const std::string liberty          = mapped_output ? resolve_liberty(opts) : std::string{};
-  const bool        run_sta          = mapped_output && truthy(synth_set(opts, "opentimer", "true"));
-  const bool        run_place        = truthy(synth_set(opts, "place", "false"));
-  auto              place_options    = run_place ? placement_options(opts) : livehd::placement::Options{};
-  const bool        run_resynth      = truthy(synth_set(opts, "place.resynth", "false"));
-  const bool        run_resize       = truthy(synth_set(opts, "place.resize", "false"));
-  const bool        run_timing_place = truthy(synth_set(opts, "place.timing_driven", "false"));
-  const int         timing_rounds    = std::stoi(synth_set(opts, "place.timing_rounds", "3"));
+  const auto*       mapper        = find_mapper(synth_set(opts, "mapper", "abc"));  // validated by check_known_set_passes
+  const auto        mapper_method = std::string{mapper->method};
+  const bool        mapped_output = mapper_maps_cells(opts, mapper_method);
+  const std::string liberty       = mapped_output ? resolve_liberty(opts) : std::string{};
+  const bool        run_sta       = mapped_output && truthy(synth_set(opts, "opentimer", "true"));
+  const bool        run_place     = truthy(synth_set(opts, "place", "false"));
+  auto              place_options = run_place ? placement_options(opts) : livehd::placement::Options{};
+  const bool        run_resynth   = truthy(synth_set(opts, "place.resynth", "false"));
+  const bool        run_resize    = truthy(synth_set(opts, "place.resize", "false"));
+  // Timing weights are the normal full-placement objective. Synthesis-only
+  // and GP-only commands do not enter the full-placement refinement loop.
+  const bool run_timing_place = truthy(synth_set(opts, "place.timing_driven", run_place && place_options.full ? "true" : "false"));
+  const int  timing_rounds    = std::stoi(synth_set(opts, "place.timing_rounds", "3"));
   if (timing_rounds < 1 || timing_rounds > 8) {
     throw Lhd_error{"usage", "synth.place.timing_rounds expects 1..8", ""};
   }
@@ -678,6 +708,7 @@ void synth_command(Options& opts, Result& res) {
                            : partition == "fine" ? std::string{"abc"}
                                                  : std::string{mapper->color_profile};
     merge_color_sets(opts, labels);
+    labels["liberty"] = liberty;
     if (labels["alg"] != "synth") {
       throw Lhd_error{"usage",
                       std::format("synth always colors with `synth` (got --set color.alg={})", labels["alg"]),
@@ -865,8 +896,9 @@ void synth_command(Options& opts, Result& res) {
       place_options.cache_dir = opts.workdir + "/place_cache";
     }
     unsigned    trial = 0;
-    // The placement phase that drives evaluate(): its run_step clears the crash
-    // context, which then names that phase again for the next placement call.
+    // The placement phase currently driving evaluate(): FP checkpoints call it
+    // from inside place(), and its run_step clears the crash context, which
+    // then names that phase again for the rest of the placement call.
     std::string phase_step;
     std::string phase_log;
     const auto  evaluate = [&](const livehd::placement::Result& state) {
@@ -887,6 +919,10 @@ void synth_command(Options& opts, Result& res) {
     };
     hhds::GraphLibrary seed_library;
     auto               placement_input = *found;
+    if (run_timing_place && place_options.fp_timing_interval > 0) {
+      place_options.fp_evaluate = evaluate;
+      place_options.fp_resize   = run_resize;
+    }
     if (run_timing_place) {
       auto seed_options        = place_options;
       seed_options.timing_seed = true;
@@ -896,7 +932,9 @@ void synth_command(Options& opts, Result& res) {
       // Like pass.place below: DREAMPlace prints to stdout, which is reserved
       // for the result protocol, and a refusal is a placement failure.
       const auto  seed_log = next_log_path(opts, "pass.place.post_synth_timing");
-      set_crash_context("pass.place.post_synth_timing", seed_log);
+      phase_step = "pass.place.post_synth_timing";
+      phase_log  = seed_log;
+      set_crash_context(phase_step, phase_log);
       livehd::placement::Result seed;
       try {
         Stdout_to_log redirect(seed_log);
@@ -904,9 +942,14 @@ void synth_command(Options& opts, Result& res) {
       } catch (const std::exception& e) {
         throw Lhd_error{"unsupported", std::string("timing seed placement failed: ") + e.what(), "see " + seed_log};
       }
+      phase_step.clear();
+      phase_log.clear();
       set_crash_context({}, {});
       const auto timing         = evaluate(seed);
-      place_options.net_weights = livehd::placement::timing_weights(*seed.parasitics, timing);
+      place_options.net_weights = livehd::placement::timing_weights(*seed.parasitics,
+                                                                    timing,
+                                                                    place_options.timing_fraction,
+                                                                    place_options.timing_max_weight);
       if (place_options.net_weights.empty()) {
         throw Lhd_error{"unsupported",
                         "post-synthesis timing has no constrained data nets for placement weighting",
@@ -916,7 +959,9 @@ void synth_command(Options& opts, Result& res) {
       res.recipe_steps.emplace_back("pass.place.post_synth_timing");
     }
     const auto log = next_log_path(opts, "pass.place");
-    set_crash_context("pass.place", log);
+    phase_step = "pass.place";
+    phase_log  = log;
+    set_crash_context(phase_step, phase_log);
     livehd::placement::Result placed;
     try {
       Phase_timer   phase(res, "pass.place");
@@ -925,6 +970,8 @@ void synth_command(Options& opts, Result& res) {
     } catch (const std::exception& e) {
       throw Lhd_error{"unsupported", std::string("placement failed: ") + e.what(), "see " + log};
     }
+    phase_step.clear();
+    phase_log.clear();
     set_crash_context({}, {});
     res.recipe_steps.emplace_back("pass.place");
     if (run_resize || run_timing_place || run_resynth) {
@@ -946,7 +993,8 @@ void synth_command(Options& opts, Result& res) {
           repaired = livehd::placement::repair_buffers(std::move(placed),
                                                        place_options,
                                                        evaluate,
-                                                       livehd::placement::Repair_scope::sizing);
+                                                       livehd::placement::Repair_scope::sizing,
+                                                       std::move(timed_placement.timing));
           placed   = std::move(repaired.placed);
           res.recipe_steps.emplace_back("pass.place.resize");
         }
@@ -955,7 +1003,8 @@ void synth_command(Options& opts, Result& res) {
           design_repaired = livehd::placement::repair_buffers(std::move(placed),
                                                               place_options,
                                                               evaluate,
-                                                              livehd::placement::Repair_scope::design);
+                                                              livehd::placement::Repair_scope::design,
+                                                              std::move(repaired.timing));
           placed          = std::move(design_repaired.placed);
           res.recipe_steps.emplace_back("pass.place.repair");
         }

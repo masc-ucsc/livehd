@@ -6,6 +6,7 @@
 #include <filesystem>
 #include <format>
 #include <fstream>
+#include <limits>
 #include <map>
 #include <set>
 
@@ -37,6 +38,32 @@ Options plain_options() {
 }
 }  // namespace
 
+TEST(Placement, RowLegalityAcceptsOnlyTechnologyPermittedHorizontalMirrors) {
+  auto                tech = physical::read_lef({"inou/lefdef/tests/data/sky130hd.tlef", "inou/lefdef/tests/data/sky130hd.lef"});
+  physical::Floorplan fp;
+  const auto          sw    = std::llround(tech.sites.at("unithd").width * tech.dbu);
+  const auto          rh    = std::llround(tech.sites.at("unithd").height * tech.dbu);
+  const auto          width = std::llround(tech.macros.at("sky130_fd_sc_hd__inv_1").width * tech.dbu);
+  fp.rows.push_back({"r0", "unithd", 0, 0, 10, sw, Ann_place::Orientation::N});
+  fp.rows.push_back({"r1", "unithd", 0, rh, 10, sw, Ann_place::Orientation::FS});
+  for (int i = 0; i < 2; ++i) {
+    physical::Component c;
+    c.name              = "c" + std::to_string(i);
+    c.macro             = "sky130_fd_sc_hd__inv_1";
+    c.place             = Ann_place(0, i * rh, width, rh);
+    c.place.status      = Ann_place::Status::PLACED;
+    c.place.orientation = i ? Ann_place::Orientation::S : Ann_place::Orientation::FN;
+    fp.components.push_back(c);
+  }
+  EXPECT_NO_THROW(check_legality(tech, fp));
+  tech.macros.at("sky130_fd_sc_hd__inv_1").symmetry_y = false;
+  EXPECT_THROW(check_legality(tech, fp), std::runtime_error);
+  tech.macros.at("sky130_fd_sc_hd__inv_1").symmetry_y = true;
+  fp.components[0].place.orientation                  = Ann_place::Orientation::FS;
+  EXPECT_THROW(check_legality(tech, fp), std::runtime_error);
+  fp.components[0].place.orientation = Ann_place::Orientation::W;
+  EXPECT_THROW(check_legality(tech, fp), std::runtime_error);
+}
 TEST(Placement, RepulsionControlsRejectUnsupportedH2dCombination) {
   hhds::GraphLibrary source, scratch;
   auto               io      = source.create_io("repulsion_validation");
@@ -45,6 +72,81 @@ TEST(Placement, RepulsionControlsRejectUnsupportedH2dCombination) {
   options.macro_mode         = "h2d";
   options.automatic_bins     = true;
   EXPECT_THROW((void)place(*graph, scratch, options), std::invalid_argument);
+}
+TEST(Placement, TimingMaxWeightAboveNetWeightLimitIsRejectedUpFront) {
+  hhds::GraphLibrary source, scratch;
+  auto               io      = source.create_io("timing_weight_validation");
+  auto               graph   = io->create_graph();
+  auto               options = plain_options();
+  options.timing_max_weight  = max_net_weight + 1;
+  EXPECT_THROW((void)place(*graph, scratch, options), std::invalid_argument);
+}
+TEST(Placement, TechnologyClockPinsAreExcludedOnlyFromPlacementCost) {
+  const auto root = std::filesystem::path(std::getenv("TEST_TMPDIR")) / "clock_cost";
+  std::filesystem::create_directories(root);
+  std::ifstream input("inou/lefdef/tests/data/sky130hd.lef");
+  std::string   lef{std::istreambuf_iterator<char>(input), {}};
+  const auto    pin = lef.find("PIN A");
+  ASSERT_NE(pin, std::string::npos);
+  const auto use = lef.find("USE SIGNAL", pin);
+  ASSERT_NE(use, std::string::npos);
+  lef.replace(use, std::string("USE SIGNAL").size(), "USE CLOCK");
+  const auto path = (root / "clock.lef").string();
+  std::ofstream(path) << lef;
+  const auto tech = physical::read_lef({"inou/lefdef/tests/data/sky130hd.tlef", path});
+  ASSERT_EQ(tech.macros.at("sky130_fd_sc_hd__inv_1").pins.at("A").use, "CLOCK");
+  hhds::GraphLibrary source, flat;
+  auto               io = source.create_io("clock_cost");
+  io->add_input("clk", 0);
+  io->set_bits("clk", 1);
+  io->add_output("y", 0);
+  io->set_bits("y", 1);
+  auto graph = io->create_graph();
+  auto inv   = source.create_io("sky130_fd_sc_hd__inv_1");
+  inv->add_input("A", 0);
+  inv->add_output("Y", 0);
+  auto node = gu::create_typed_node(*graph, Ntype_op::Sub);
+  node.set_name("cell");
+  node.set_subnode(inv);
+  gu::set_bits(graph->get_input_pin("clk"), 1);
+  node.create_sink_pin("A").connect_driver(graph->get_input_pin("clk"));
+  auto y = node.create_driver_pin("Y");
+  gu::set_bits(y, 1);
+  graph->get_output_pin("y").connect_driver(y);
+  physical::Floorplan fp;
+  fp.design = "clock_cost";
+  fp.dbu    = tech.dbu;
+  fp.die    = {0, 0, 4600, 2720};
+  fp.rows.push_back({"row", tech.sites.begin()->first, 0, 0, 10, 460, Ann_place::Orientation::N});
+  Ann_place cell(1380, 0, 1380, 2720);
+  cell.status = Ann_place::Status::FIXED;
+  fp.components.push_back({"cell", "sky130_fd_sc_hd__inv_1", cell});
+  fp.terminals.push_back({"clk", "clk", "INPUT", 0, 1360, Ann_place::Orientation::N, Ann_place::Status::FIXED, {}});
+  fp.terminals.push_back({"y", "y", "OUTPUT", 4600, 1360, Ann_place::Orientation::N, Ann_place::Status::FIXED, {}});
+  physical::write_def(fp, (root / "input.def").string());
+  auto options        = plain_options();
+  options.lefs        = {"inou/lefdef/tests/data/sky130hd.tlef", path};
+  options.floorplan   = (root / "input.def").string();
+  options.output_dir  = (root / "placed").string();
+  options.iterations  = 0;
+  const auto   result = place(*graph, flat, options);
+  const auto&  rect   = tech.macros.at("sky130_fd_sc_hd__inv_1").pins.at("Y").shapes.front().rect;
+  const double expected
+      = (std::abs(4600 - (1380 + (rect.xl + rect.xh) * .5 * tech.dbu)) + std::abs(1360 - (rect.yl + rect.yh) * .5 * tech.dbu))
+        / tech.dbu;
+  rapidjson::Document qor;
+  qor.Parse(result.qor.c_str());
+  EXPECT_NEAR(qor["hpwl_um"].GetDouble(), expected, 1e-6);
+  bool preserved = false;
+  for (const auto& net : result.parasitics->nets) {
+    if (net.driver == "clk") {
+      for (const auto& point : net.nodes) {
+        preserved |= point.pin == "cell:A";
+      }
+    }
+  }
+  EXPECT_TRUE(preserved);
+  EXPECT_EQ(result.floorplan.nets.size(), 2);
 }
 TEST(Placement, AlwaysTransparentLatchAliasesPreservePackedInputsAndSource) {
   // Missing gate, active-high true and active-low false all store no state.
@@ -716,6 +818,43 @@ TEST(Placement, PreviousFrameKeepsIoPositionsAndSlotsNewOnes) {
     }
   }
 }
+TEST(Placement, TimingSnapshotRetainsUnlegalizedGeometryAndPhysicalRc) {
+  hhds::GraphLibrary source, first, imported;
+  auto               graph   = tie_graph(source);
+  auto               options = plain_options();
+  options.liberty            = "inou/lefdef/tests/data/sky130hd.lib";
+  options.lefs               = {"inou/lefdef/tests/data/sky130hd.tlef", "inou/lefdef/tests/data/sky130hd.lef"};
+  options.output_dir         = std::string(std::getenv("TEST_TMPDIR")) + "/timing_snapshot";
+  options.iterations         = 20;
+  options.bins               = 8;
+  const auto placed          = place(*graph, first, options);
+  auto       frame           = placed.floorplan;
+  ASSERT_GT(frame.components.size(), 1);
+  frame.components[1].place.x  = frame.components[0].place.x;
+  frame.components[1].place.y  = frame.components[0].place.y;
+  frame.components[0].place.x += 1;  // Deliberately off-grid: timing never repairs it.
+  options.previous             = std::make_shared<physical::Floorplan>(frame);
+  options.retain_placement     = true;
+  const auto snapshot          = place(*placed.graph, imported, options);
+  ASSERT_EQ(snapshot.floorplan.components.size(), frame.components.size());
+  for (const auto& cell : snapshot.floorplan.components) {
+    const auto old
+        = std::find_if(frame.components.begin(), frame.components.end(), [&](const auto& c) { return c.name == cell.name; });
+    ASSERT_NE(old, frame.components.end());
+    EXPECT_EQ(cell.macro, old->macro);
+    EXPECT_EQ(cell.place, old->place);
+  }
+  EXPECT_NE(snapshot.qor.find("\"mode\":\"timing_snapshot\""), std::string::npos);
+  EXPECT_NE(snapshot.qor.find("\"legal\":false"), std::string::npos);
+  ASSERT_TRUE(snapshot.parasitics);
+  EXPECT_TRUE(std::any_of(snapshot.parasitics->nets.begin(), snapshot.parasitics->nets.end(), [](const auto& net) {
+    return std::any_of(net.nodes.begin(), net.nodes.end(), [](const auto& node) { return node.capacitance_ff > 0; });
+  }));
+  options.previous.reset();
+  hhds::GraphLibrary invalid;
+  EXPECT_THROW((void)place(*placed.graph, invalid, options), std::invalid_argument);
+}
+
 TEST(Placement, MovableHardMacrosPreserveNonintegralDimensionsAndPins) {
   const auto dir = std::filesystem::path(std::getenv("TEST_TMPDIR")) / "mixed_hard_macros";
   std::filesystem::create_directories(dir);
@@ -915,6 +1054,100 @@ END LIBRARY
   const auto         eco = place(*graph, eco_library, o);
   check(eco);
 }
+TEST(Placement, MultiCellEcoGapSearchMatchesExhaustiveSites) {
+  hhds::GraphLibrary source, flat;
+  auto               io = source.create_io("eco_gap_search");
+  io->add_input("a", 0);
+  io->add_output("y", 0);
+  io->set_bits("a", 1);
+  io->set_bits("y", 1);
+  auto graph = io->create_graph();
+  auto inv   = source.create_io("sky130_fd_sc_hd__inv_1");
+  inv->add_input("A", 0);
+  inv->add_output("Y", 0);
+  auto signal = graph->get_input_pin("a");
+  gu::set_bits(signal, 1);
+  physical::Floorplan frame;
+  frame.design         = "eco_gap_search";
+  frame.dbu            = 1000;
+  constexpr int64_t sw = 460, rh = 2720, width = 3 * sw;
+  frame.die           = {0, 0, 30 * sw, 6 * rh};
+  const auto add_cell = [&](const std::string& name, const Ann_place& p) {
+    auto n = gu::create_typed_node(*graph, Ntype_op::Sub);
+    n.set_name(name);
+    n.set_subnode(inv);
+    n.attr(attrs::place).set(p);
+    n.create_sink_pin("A").connect_driver(signal);
+    signal = n.create_driver_pin("Y");
+    gu::set_bits(signal, 1);
+  };
+  std::vector<Ann_place> obstacles;
+  for (int row = 0; row < 6; ++row) {
+    const auto orientation = row % 2 ? Ann_place::Orientation::FS : Ann_place::Orientation::N;
+    frame.rows.push_back({"R" + std::to_string(row), "unithd", 0, row * rh, 30, sw, orientation});
+    for (int column : {0, 8, 16}) {
+      const auto name = std::format("old_{}_{}", row, column);
+      Ann_place  p(column * sw, row * rh, width, rh);
+      p.orientation = orientation;
+      p.status      = Ann_place::Status::PLACED;
+      add_cell(name, p);
+      frame.components.push_back({name, "sky130_fd_sc_hd__inv_1", p});
+      obstacles.push_back(p);
+    }
+  }
+  std::map<std::string, Ann_place> expected;
+  for (int i = 0; i < 7; ++i) {
+    const auto name = "new_" + std::to_string(i);
+    Ann_place  seed(8 * sw, 2 * rh + (i % 2 ? rh / 2 : 0), width, rh);
+    seed.status = Ann_place::Status::PLACED;
+    add_cell(name, seed);
+    // Independent oracle: enumerate every legal site, rather than gaps.
+    double    best = std::numeric_limits<double>::infinity();
+    Ann_place chosen;
+    for (const auto& row : frame.rows) {
+      for (int64_t x = row.x; x + width <= row.x + row.count * sw; x += sw) {
+        if (std::any_of(obstacles.begin(), obstacles.end(), [&](const auto& p) {
+              return x < p.x + p.width && x + width > p.x && row.y < p.y + p.height && row.y + rh > p.y;
+            })) {
+          continue;
+        }
+        const double distance = std::abs(double(x - seed.x)) + std::abs(double(row.y - seed.y));
+        if (distance < best) {
+          best               = distance;
+          chosen             = seed;
+          chosen.x           = x;
+          chosen.y           = row.y;
+          chosen.orientation = row.orientation;
+        }
+      }
+    }
+    ASSERT_TRUE(std::isfinite(best));
+    expected.emplace(name, chosen);
+    obstacles.push_back(chosen);
+  }
+  graph->get_output_pin("y").connect_driver(signal);
+  auto options           = plain_options();
+  options.lefs           = {"inou/lefdef/tests/data/sky130hd.tlef", "inou/lefdef/tests/data/sky130hd.lef"};
+  options.output_dir     = std::string(std::getenv("TEST_TMPDIR")) + "/eco_gap_search";
+  options.previous       = std::make_shared<physical::Floorplan>(frame);
+  options.legalize_cells = true;
+  options.iterations     = 10;
+  options.bins           = 8;
+  const auto result      = place(*graph, flat, options);
+  EXPECT_NO_THROW(check_legality(physical::read_lef(options.lefs), result.floorplan));
+  EXPECT_NE(result.qor.find("\"single_cell\":true"), std::string::npos);
+  for (const auto& c : result.floorplan.components) {
+    if (const auto it = expected.find(c.name); it != expected.end()) {
+      EXPECT_EQ(c.place, it->second) << c.name;
+    } else {
+      const auto original
+          = std::find_if(frame.components.begin(), frame.components.end(), [&](const auto& p) { return p.name == c.name; });
+      ASSERT_NE(original, frame.components.end());
+      EXPECT_EQ(c.place, original->place) << c.name;
+    }
+  }
+}
+
 TEST(Placement, LegalityRejectsOverlapAndOffGrid) {
   auto                tech = physical::read_lef({"inou/lefdef/tests/data/sky130hd.tlef", "inou/lefdef/tests/data/sky130hd.lef"});
   physical::Floorplan fp;

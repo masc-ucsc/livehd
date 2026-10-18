@@ -14,7 +14,8 @@ cc_test(
 # change to how this pass builds the timing graph, walks it, or renders the
 # report invalidates every cached analysis; unrelated lhd rebuilds leave the
 # cache warm. `pass/partition` is in the hash because `hier=true` times the
-# design its flattener produces, and MODULE.bazel because it pins @opentimer.
+# design its flattener produces, and @opentimer//:srcs because the timing engine is the
+# ../OpenTimer fork built in place.
 #
 # Same shape and rationale as //pass/abc:abc_salt. `sta_salt.hpp` is excluded
 # from the glob because it is this rule's own OUTPUT.
@@ -37,9 +38,9 @@ genrule(
     srcs = [
         ":timer_srcs",
         "//pass/partition:partition_srcs",
+        "//pass/liberty:liberty_dff_srcs",
         "//:MODULE.bazel",
-        "//packages:opentimer.patch",
-        "//packages:opentimer-placement.patch",
+        "@opentimer//:srcs",
     ],
     outs = ["sta_salt.hpp"],
     cmd = "h=$$(cat $(SRCS) | (shasum -a 256 2>/dev/null || sha256sum) | cut -c1-16); " +
@@ -66,6 +67,7 @@ cc_library(
     deps = [
         "//core",
         "//graph",
+        "//pass/liberty:liberty_dff",
         "//pass/common:pass",
         "//pass/partition:pass_partition",
         "//pass/semdiff:semdiff",

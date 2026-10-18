@@ -39,11 +39,8 @@ genrule(
         "@dreamplace//:macro_report",
         "@dreamplace//:macro_render",
         "@dreamplace//dreamplace/native:placer_srcs",
+        "@dreamplace//dreamplace/ops:native_kernels",
         "@dreamplace//dreamplace/native/macro:h2d_srcs",
-        "//packages:dreamplace-lemon.patch",
-        "//packages:dreamplace-zero-area.patch",
-        "//packages:dreamplace-instantiate.patch",
-        "//packages:dreamplace-mixed-size.patch",
     ],
     outs = ["place_salt.hpp"],
     cmd = "h=$$(cat $(SRCS) | (shasum -a 256 2>/dev/null || sha256sum) | cut -c1-16); " +

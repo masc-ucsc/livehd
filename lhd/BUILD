@@ -214,7 +214,7 @@ cc_library(
         "//pass/upass:pass_upass",
         "//upass/tolg:upass_tolg",
         "@hhds//hhds:tree_edit_distance",
-        "@opentimer//:taskflow",  # the OT-bundled copy — see packages/opentimer.BUILD for the ODR rule
+        "@opentimer//:taskflow",  # the OT-bundled copy — see ../OpenTimer/BUILD.bazel for the ODR rule
         "@rapidjson",
     ] + select({
         "//:without_abc": [],

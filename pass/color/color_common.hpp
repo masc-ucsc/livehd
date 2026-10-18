@@ -5,8 +5,8 @@
 #include <optional>
 #include <string_view>
 
-#include "hhds/graph.hpp"
 #include "attrs.hpp"
+#include "hhds/graph.hpp"
 #include "synth_policy.hpp"
 
 // Shared helpers for the pass/color algorithms (the revived pass/label, 2c).
@@ -168,11 +168,18 @@ struct Def_color_sizes {
 // `continuous` splits each color into one id per maximal
 // connected same-color region. `keep_colored` preserves pre-existing colors on
 // nodes the algorithm leaves uncolored (the 2p iterative flow).
+// Port roles from Liberty metadata. No memory/clock inference from cell names.
+struct Color_cell_ports {
+  bool                     memory = false, clock_gate = false;
+  std::vector<std::string> data, clock;
+};
+
 struct Color_opts {
-  bool hier         = true;
-  bool verbose      = false;
-  bool continuous   = false;
-  bool keep_colored = false;
+  absl::flat_hash_map<std::string, Color_cell_ports> library_ports;
+  bool                                               hier         = true;
+  bool                                               verbose      = false;
+  bool                                               continuous   = false;
+  bool                                               keep_colored = false;
 
   // Size window, in synthesis gate equivalents (synthesis_ge_weight:
   // a Sub instance counts ~1, everything else ge_weight), honored by the
@@ -210,22 +217,24 @@ struct Color_opts {
   // 0 is INERT, the same contract min_ge/max_ge carry: RAW cones, no walk budget
   // and no merge at all. The shipped policy (30000) lives on the pass.color
   // label so a direct caller or unit test still gets what it asked for.
-  uint64_t max_gate      = 0;
+  uint64_t max_gate           = 0;
   // Soft lower bound in the same predicted-AIG unit. Unlike a node-count
   // floor, this also catches a few wide operators. Zero preserves the old policy.
-  uint64_t min_gate      = 0;
-  bool     boundary_wiring = false;  // copy constant bit wiring into consuming regions
+  uint64_t min_gate           = 0;
+  bool     boundary_wiring    = false;  // copy constant bit wiring into consuming regions
   // cones mode: every cone walks to the register boundary and every pair of
   // overlapping cones merges, whatever max_gate says, so each combinational
   // path lies inside one color (flop-to-flop colors, the synth/domino mapper's
   // contract). max_gate then only bounds the forward merge across registers.
-  bool     flop_to_flop  = false;
+  bool     flop_to_flop       = false;
   // Raw callers keep the base coloring; the CLI enables shared mux/enable groups.
-  bool     ctrl_cones    = false;
+  bool     ctrl_cones         = false;
+  // Opt-in memory-seeded cones, grown one best-overlap merge per memory/round.
+  bool     memory_color_first = false;
   // Select/enable logic remains control; optionally let mux data paths merge.
-  bool     mux_in_data   = false;
+  bool     mux_in_data        = false;
   // Keep large adders/multipliers/dividers at color boundaries unless disabled.
-  bool     stop_arith    = true;
+  bool     stop_arith         = true;
   // The same policy, spelled per operation family, because the three families
   // behave nothing alike under ABC and a design tuning one rarely wants the
   // others moved. `stop_arith` covers Sum/Mult/Div, `stop_cmp` the wide
@@ -233,17 +242,17 @@ struct Color_opts {
   // RUNTIME shifters (SHL/SRA with a non-constant amount -- a barrel). All
   // three are independent of `ctrl_cones`: turning control grouping off must
   // never introduce a boundary that having it on did not have.
-  bool     stop_cmp      = true;
-  bool     stop_shift    = true;
+  bool     stop_cmp           = true;
+  bool     stop_shift         = true;
   // A nonzero bound further limits control merging; otherwise use max_gate.
-  uint64_t ctrl_max_gate = 0;
-  uint64_t ctrl_min_gate = 0;
+  uint64_t ctrl_max_gate      = 0;
+  uint64_t ctrl_min_gate      = 0;
   // cones mode: no emitted color below this many nodes. A smaller control group
   // is left to the data walks; a smaller data color is folded into the data
   // color it overlaps most, even past max_gate (a soft target). 0, the raw API
   // default, keeps every color; the pass.color CLI label `min_color_nodes`
   // defaults to 12.
-  uint32_t min_nodes     = 0;
+  uint32_t min_nodes          = 0;
 
   // cones mode's PHASE-2 forward merge across the register: "", "pair" or
   // "all". Empty (the raw API default, INERT like max_gate) leaves the backward

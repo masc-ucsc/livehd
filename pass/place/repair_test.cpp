@@ -2,9 +2,11 @@
 #include "repair.hpp"
 
 #include <algorithm>
+#include <cmath>
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
+#include <limits>
 #include <regex>
 #include <set>
 
@@ -66,6 +68,28 @@ protected:
     gu::set_bits(out, 1);
     return out;
   }
+  void enable_floorplan() {
+    std::filesystem::create_directories(options.output_dir);
+    std::ifstream input(options.lefs[1]);
+    std::string   lef{std::istreambuf_iterator<char>(input), {}};
+    const auto    start = lef.find("MACRO sky130_fd_sc_hd__inv_1\n");
+    ASSERT_NE(start, std::string::npos);
+    const auto klass = lef.find("CLASS CORE", start);
+    ASSERT_NE(klass, std::string::npos);
+    lef.replace(klass, std::string("CLASS CORE").size(), "CLASS BLOCK");
+    options.lefs[1] = options.output_dir + "/macro.lef";
+    std::ofstream(options.lefs[1]) << lef;
+    options.fp_place = options.final_cells = options.fp_colors = options.fp_resize = true;
+    options.fp_minimum                                                             = 0;
+    options.fp_iterations                                                          = 120;
+    options.iterations                                                             = 40;
+    options.fp_timing_interval                                                     = 50;
+    options.halo_x = options.halo_y = .46;
+    options.utilization             = .1;
+    for (auto n : graph->body().nodes()) {
+      n.attr(attrs::synth_color_group).set(std::string("bank:color:1"));
+    }
+  }
   unsigned count(const Result& r, std::string_view prefix) {
     unsigned value = 0;
     for (auto n : r.graph->body().nodes()) {
@@ -96,7 +120,7 @@ protected:
   // Independent identity/inversion interpretation of the repaired netlist.
   // Every primary output must still be an inverter of a, through any number
   // of non-inverting buffers; catches disconnected branches and cycles.
-  void equivalent(const Result& state) {
+  void equivalent(const Result& state, unsigned expected_inversions = 1) {
     for (const auto& decl : state.graph->get_io()->get_output_pin_decls()) {
       auto               driver     = state.graph->get_output_pin(decl.name).get_driver_pin();
       unsigned           inversions = 0;
@@ -113,7 +137,7 @@ protected:
         ASSERT_EQ(p.size(), 1);
         driver = p.front();
       }
-      EXPECT_EQ(inversions % 2, 1);
+      EXPECT_EQ(inversions % 2, expected_inversions);
       EXPECT_EQ(driver.get_pin_name(), "a");
     }
   }
@@ -212,6 +236,292 @@ TEST(SteinerRepair, CoincidentPinsAndAlreadySmallNets) {
   EXPECT_TRUE(small.buffers.empty());
   EXPECT_EQ(small.root.size(), 2);
 }
+TEST(SteinerRepair, LargeSpatialNetExceedsOldTerminalAndBufferLimits) {
+  std::vector<Point> pins;
+  for (unsigned i = 0; i < 5000; ++i) {
+    pins.emplace_back(10 * (i % 100), 10 * (i / 100));
+  }
+  const auto plan = plan_buffers({-10, -10}, pins, std::vector<double>(pins.size(), 1), .25, 4, 4, 100, 0);
+  EXPECT_GT(plan.buffers.size(), 256);
+  std::vector<unsigned> seen(pins.size()), parents(plan.buffers.size());
+  const auto            check = [&](Point xy, const std::vector<Buffer_tree::Load>& loads) {
+    EXPECT_LE(loads.size(), 4);
+    double cap = 0;
+    for (const auto& load : loads) {
+      const auto target = load.buffer ? plan.buffers.at(load.index).position : pins.at(load.index);
+      EXPECT_LE(std::abs(xy.first - target.first) + std::abs(xy.second - target.second), 100 + 1e-6);
+      if (load.buffer) {
+        ++parents.at(load.index);
+        cap += .25;
+      } else {
+        ++seen.at(load.index);
+        cap += 1;
+      }
+    }
+    EXPECT_LE(cap, 4 + 1e-6);
+  };
+  for (size_t i = 0; i < plan.buffers.size(); ++i) {
+    for (const auto& load : plan.buffers[i].loads) {
+      if (load.buffer) {
+        EXPECT_LT(load.index, i);
+      }
+    }
+    check(plan.buffers[i].position, plan.buffers[i].loads);
+  }
+  check({-10, -10}, plan.root);
+  for (const auto n : seen) {
+    EXPECT_EQ(n, 1);
+  }
+  for (const auto n : parents) {
+    EXPECT_EQ(n, 1);
+  }
+}
+TEST(SteinerRepair, StrongSourceCanKeepDirectConnectionBeyondBufferSpacing) {
+  const Buffer_drive repeater{1, 20, 20, 4, 20, 1000, 1};
+  const Buffer_drive source{1, 100, 1000, 32, 1, 10, 1};
+  const auto         plan = plan_buffer_choices(
+      {
+          0,
+          0
+  },
+      {{100, 0}, {0, 100}},
+      {1, 1},
+      {100, 100},
+      {repeater},
+      source,
+      .01,
+      .001);
+  EXPECT_TRUE(plan.buffers.empty());
+  ASSERT_EQ(plan.root.size(), 2);
+  EXPECT_FALSE(plan.root[0].buffer);
+  EXPECT_FALSE(plan.root[1].buffer);
+}
+TEST(SteinerRepair, DriveChoiceRespectsRootAndLargeSinkCapacitance) {
+  const Buffer_drive weak{.1, 4, 1000, 4, 1, 1000, 1};
+  const Buffer_drive strong{.5, 64, 1000, 32, 2, 50, 2};
+  auto               driver = weak;
+  driver.max_cap_ff         = .6;
+  const auto plan           = plan_buffer_choices(
+      {
+          0,
+          0
+  },
+      {{100, 0}, {0, 100}},
+      {20, 1},
+      {10, 100},
+      {weak, strong},
+      driver,
+      .1,
+      .001);
+  ASSERT_FALSE(plan.buffers.empty());
+  EXPECT_EQ(plan.root.size(), 1);
+  EXPECT_TRUE(plan.root.front().buffer);
+  bool drives_heavy = false;
+  for (const auto& branch : plan.buffers) {
+    for (const auto& load : branch.loads) {
+      if (!load.buffer && load.index == 0) {
+        EXPECT_EQ(branch.drive, 1);
+        drives_heavy = true;
+      }
+    }
+  }
+  EXPECT_TRUE(drives_heavy);
+  EXPECT_THROW(plan_buffer_choices(
+                   {
+                       0,
+                       0
+  },
+                   {{1, 0}},
+                   {100},
+                   {0},
+                   {weak, strong},
+                   driver,
+                   .1,
+                   .001),
+               std::runtime_error);
+}
+TEST_F(Buffer_repair, FloorplanSizesAllStressedDriversIncludingEqualAreaDrives) {
+  std::filesystem::create_directories(options.output_dir);
+  const std::string from = "sky130_fd_sc_hd__buf_1", to = "sky130_fd_sc_hd__buf_2", overloaded = "sky130_fd_sc_hd__buf_4";
+  options.liberty = options.output_dir + "/drives.lib";
+  std::ofstream lib(options.liberty);
+  lib << "library(test) { time_unit : \"1ps\"; capacitive_load_unit(1,ff);\n";
+  for (const auto& name : {from, to, overloaded}) {
+    lib << "cell(" << name
+        << ") { area: 1; cell_footprint: buf; pin(A) {direction: input; capacitance: " << (name == overloaded ? 10 : .1) << ";} "
+        << "pin(X) {direction: output; function: \"A\"; max_capacitance: 100; timing() { related_pin: \"A\"; "
+        << "cell_rise(t) { index_1(\"1\"); index_2(\"1,21\"); values(\"1,"
+        << (name == from ? 21
+            : name == to ? 3
+                         : 1)
+        << "\"); } } } }\n";
+  }
+  lib << "}\n";
+  lib.close();
+  std::ifstream lef_input(options.lefs.back());
+  std::string   lef{std::istreambuf_iterator<char>(lef_input), {}};
+  const auto    begin = lef.find("MACRO " + from), end = lef.find("END " + from, begin) + 4 + from.size();
+  options.lefs.push_back(options.output_dir + "/drives.lef");
+  std::ofstream added_lef(options.lefs.back());
+  added_lef << "VERSION 5.8 ;\n";
+  for (const auto& name : {to, overloaded}) {
+    auto macro = lef.substr(begin, end - begin);
+    for (auto pos = macro.find(from); pos != std::string::npos; pos = macro.find(from, pos + name.size())) {
+      macro.replace(pos, from.size(), name);
+    }
+    added_lef << macro << "\n";
+  }
+  added_lef << "END LIBRARY\n";
+  added_lef.close();
+  for (unsigned i = 0; i < 32; ++i) {
+    const auto name = "b" + std::to_string(i);
+    auto       out  = gate(from, name, graph->get_input_pin("a"));
+    const auto port = i ? "y" + std::to_string(i) : "y";
+    if (i) {
+      graph->get_io()->add_output(port, i);
+      graph->get_io()->set_bits(port, 1);
+    }
+    graph->get_output_pin(port).connect_driver(out);
+  }
+  auto state = place(*graph, flat, options);
+  for (auto& net : state.parasitics->nets) {
+    for (auto& edge : net.edges) {
+      edge.resistance_ohm = 10000;
+    }
+  }
+  Timing_feedback before;
+  before.delay = 20;
+  before.area  = 32;
+  for (unsigned i = 0; i < 32; ++i) {
+    auto& pin   = before.pins["b" + std::to_string(i) + ":X"];
+    pin.load_ff = 20;
+    pin.slack   = -1;
+  }
+  unsigned   evaluations = 0;
+  const auto result      = resize_floorplan(
+      state,
+      options,
+      before,
+      [&](const Result& trial) {
+        ++evaluations;
+        for (const auto& cell : trial.floorplan.components) {
+          EXPECT_EQ(cell.macro, to);
+        }
+        auto after  = before;
+        after.delay = 5;
+        return after;
+      },
+      [](Result&) {});
+  EXPECT_EQ(result.proposed, 32);
+  EXPECT_EQ(result.accepted, 32);
+  EXPECT_EQ(evaluations, 1);
+  // A global batch containing b0 must roll back, while disjoint useful edits
+  // survive bisection. This catches both the old two-driver starvation and
+  // accidental publication of partially accepted graph/geometry changes.
+  hhds::GraphLibrary owner;
+  auto               legal = place(*graph, owner, options);
+  for (auto& net : legal.parasitics->nets) {
+    for (auto& edge : net.edges) {
+      edge.resistance_ohm = 10000;
+    }
+  }
+  const auto evaluate = [&](const Result& trial) {
+    auto     feedback = before;
+    unsigned weak = 0, present = 0;
+    bool     bad = false;
+    for (const auto& cell : trial.floorplan.components) {
+      ++present;
+      weak += cell.macro == from;
+      bad  |= cell.name == "b0" && cell.macro == to;
+    }
+    feedback.delay             = present != 32 ? 40 : bad ? 30 : weak == 32 ? 20 : 5;
+    feedback.violations        = weak;
+    feedback.electrical_excess = weak;
+    return feedback;
+  };
+  const auto          repaired = repair_buffers(std::move(legal), options, evaluate, Repair_scope::sizing);
+  rapidjson::Document trace;
+  trace.Parse(repaired.report.c_str());
+  unsigned visited_batches         = 0;
+  bool     covered_disjoint_subset = false;
+  for (const auto& trial : trace["trials"].GetArray()) {
+    if (std::string_view(trial["action"].GetString()) != "sizing_sweep") {
+      continue;
+    }
+    if (++visited_batches > 3) {
+      break;
+    }
+    covered_disjoint_subset |= trial["accepted"].GetBool();
+  }
+  EXPECT_TRUE(covered_disjoint_subset);  // one bad subset cannot starve the rest
+  unsigned stronger = 0;
+  for (const auto& cell : repaired.placed.floorplan.components) {
+    stronger += cell.macro == to;
+    if (cell.name == "b0") {
+      EXPECT_EQ(cell.macro, from);
+    }
+  }
+  EXPECT_EQ(stronger, 31);
+  equivalent(repaired.placed, 0);
+  // Scattered bad changes defeat a bounded binary subdivision. Pin feedback
+  // must keep the independent useful changes in one retry, without weakening
+  // the electrical acceptance gate. Reuse the already measured initial state.
+  hhds::GraphLibrary guided_owner;
+  auto               guided = place(*graph, guided_owner, options);
+  for (auto& net : guided.parasitics->nets) {
+    for (auto& edge : net.edges) {
+      edge.resistance_ohm = 10000;
+    }
+  }
+  auto guided_before                    = before;
+  guided_before.electrical_pin_feedback = true;
+  guided_before.wns                     = -1;
+  guided_before.tns                     = -32;
+  unsigned   guided_calls               = 0;
+  const auto guided_evaluate            = [&](const Result& trial) {
+    ++guided_calls;
+    auto feedback  = guided_before;
+    feedback.delay = 5;
+    for (const auto& cell : trial.floorplan.components) {
+      const auto i = std::stoul(cell.name.substr(1));
+      if (cell.macro == to && i % 4 == 0) {
+        auto& pin = feedback.pins[cell.name + ":X"];
+        if (i % 8 == 0) {
+          pin.violations        = 1;
+          pin.electrical_excess = .5;
+          ++feedback.violations;
+          feedback.electrical_excess += .5;
+        } else {
+          pin.slack      = -2;
+          feedback.wns   = -2;
+          *feedback.tns -= 1;
+        }
+      }
+    }
+    return feedback;
+  };
+  const auto pruned = repair_buffers(std::move(guided), options, guided_evaluate, Repair_scope::sizing, guided_before);
+  EXPECT_EQ(guided_calls, 2);
+  ASSERT_TRUE(pruned.timing);
+  EXPECT_EQ(pruned.timing->violations, 0);
+  EXPECT_EQ(pruned.timing->delay, 5);
+  EXPECT_EQ(pruned.timing->wns, guided_before.wns);
+  EXPECT_EQ(pruned.timing->tns, guided_before.tns);
+  unsigned useful = 0;
+  for (const auto& cell : pruned.placed.floorplan.components) {
+    useful += cell.macro == to;
+    if (std::stoul(cell.name.substr(1)) % 4 == 0) {
+      EXPECT_EQ(cell.macro, from);
+    }
+  }
+  EXPECT_EQ(useful, 24);
+  equivalent(pruned.placed, 0);
+  for (auto node : graph->body().nodes()) {
+    if (node.get_subnode_io()) {
+      EXPECT_EQ(node.get_subnode_io()->get_name(), from);
+    }
+  }
+}
 TEST_F(Buffer_repair, RealTimingRemovesBufferChainAndPreservesFunction) {
   auto p = graph->get_input_pin("a");
   for (unsigned i = 0; i < 3; ++i) {
@@ -236,6 +546,35 @@ TEST_F(Buffer_repair, RealTimingRemovesBufferChainAndPreservesFunction) {
     }
   }
   EXPECT_EQ(original, 4);
+}
+TEST_F(Buffer_repair, ConstantTopOutputBitsUsePhysicalTieSourcesForTiming) {
+  auto p = gate("sky130_fd_sc_hd__inv_1", "logic", graph->get_input_pin("a"));
+  graph->get_output_pin("y").connect_driver(p);
+  graph->get_io()->add_output("bus", 1);
+  graph->get_io()->set_bits("bus", 3);
+  auto       concat = gu::create_typed_node(*graph, Ntype_op::Concat);
+  const auto one    = gu::create_const(*graph, *Dlop::create_integer(1));
+  const auto zero   = gu::create_const(*graph, *Dlop::create_integer(0));
+  concat.create_sink_pin(0).connect_driver(graph->get_input_pin("a"));
+  concat.create_sink_pin(1).connect_driver(one);
+  concat.create_sink_pin(2).connect_driver(one);
+  concat.create_sink_pin(3).connect_driver(one);
+  concat.create_sink_pin(4).connect_driver(zero);
+  concat.create_sink_pin(5).connect_driver(one);
+  auto out = concat.create_driver_pin(0);
+  gu::set_bits(out, 3);
+  gu::set_unsign(out);
+  graph->get_output_pin("bus").connect_driver(out);
+  options.timing_seed = true;
+  const auto initial  = place(*graph, flat, options);
+  const auto before   = timing(initial);  // rejects a physical/STA endpoint mismatch
+  EXPECT_TRUE(std::isfinite(before.delay));
+  hhds::GraphLibrary warm;
+  const auto         again = place(*initial.graph, warm, options);
+  const auto         after = timing(again);
+  EXPECT_FLOAT_EQ(before.delay, after.delay);
+  EXPECT_EQ(initial.floorplan.components.size(), again.floorplan.components.size());
+  EXPECT_EQ(count(initial, "__place_tie"), 2U);
 }
 TEST_F(Buffer_repair, PostSynthesisWeightsSeedFirstPlacementThenUsePlacedRc) {
   auto p = gate("sky130_fd_sc_hd__buf_1", "buffer", graph->get_input_pin("a"));
@@ -266,6 +605,260 @@ TEST_F(Buffer_repair, PostSynthesisWeightsSeedFirstPlacementThenUsePlacedRc) {
   const auto result = timing_place(std::move(initial), options, [&](const Result& r) { return timing(r); }, 2);
   equivalent(result.placed);
 }
+
+TEST_F(Buffer_repair, FloorplanTimingCheckpointsAreScopedAndResizeRunsStaTwice) {
+  auto b = gate("sky130_fd_sc_hd__buf_1", "buffer", graph->get_input_pin("a"));
+  auto p = gate("sky130_fd_sc_hd__inv_1", "macro", b);
+  graph->get_output_pin("y").connect_driver(p);
+  for (auto n : graph->body().nodes()) {
+    n.attr(attrs::synth_color_group).set(std::string("bank:color:1"));
+  }
+  // A real Liberty cell with macro LEF geometry avoids a second timing library.
+  std::ifstream input(options.lefs[1]);
+  std::string   lef{std::istreambuf_iterator<char>(input), {}};
+  const auto    start = lef.find("MACRO sky130_fd_sc_hd__inv_1\n");
+  ASSERT_NE(start, std::string::npos);
+  const auto klass = lef.find("CLASS CORE", start);
+  ASSERT_NE(klass, std::string::npos);
+  const auto directory = options.output_dir;
+  std::filesystem::create_directories(directory);
+  const auto macro_lef = directory + "/macro.lef";
+  lef.replace(klass, std::string("CLASS CORE").size(), "CLASS BLOCK");
+  std::ofstream(macro_lef) << lef;
+  options.lefs[1]        = macro_lef;
+  // Add an equivalent wider drive variant, absent from the base tiny library.
+  const std::string from = "sky130_fd_sc_hd__buf_1", to = "sky130_fd_sc_hd__buf_2";
+  std::ifstream     base_lib(options.liberty);
+  std::string       lib{std::istreambuf_iterator<char>(base_lib), {}};
+  const auto        cell_start = lib.find("cell (\"" + from + "\")");
+  ASSERT_NE(cell_start, std::string::npos);
+  auto cell_end = lib.find('{', cell_start);
+  int  depth    = 1;
+  for (++cell_end; depth && cell_end < lib.size(); ++cell_end) {
+    if (lib[cell_end] == '{') {
+      ++depth;
+    } else if (lib[cell_end] == '}') {
+      --depth;
+    }
+  }
+  auto variant = lib.substr(cell_start, cell_end - cell_start);
+  variant.replace(variant.find(from), from.size(), to);
+  variant = std::regex_replace(variant, std::regex(R"(area\s*:\s*[0-9.]+)"), "area : 7.5072");
+  lib.insert(lib.rfind('}'), variant);
+  options.liberty = directory + "/sizing.lib";
+  std::ofstream(options.liberty) << lib;
+  const auto begin  = lef.find("MACRO " + from);
+  const auto end    = lef.find("END " + from, begin) + 4 + from.size();
+  auto       larger = lef.substr(begin, end - begin);
+  for (auto pos = larger.find(from); pos != std::string::npos; pos = larger.find(from, pos + to.size())) {
+    larger.replace(pos, from.size(), to);
+  }
+  larger = std::regex_replace(larger, std::regex(R"(SIZE\s+[0-9.]+)"), "SIZE 2.760");
+  options.lefs.push_back(directory + "/sizing.lef");
+  std::ofstream(options.lefs.back()) << "VERSION 5.8 ;\n" << larger << "\nEND LIBRARY\n";
+  options.fp_place = options.final_cells = options.fp_colors = true;
+  options.fp_minimum                                         = 0;
+  options.fp_iterations                                      = 120;
+  options.iterations                                         = 40;
+  options.fp_timing_interval                                 = 50;
+  for (unsigned mode = 0; mode < 3; ++mode) {
+    const bool resize = mode != 0, accept = mode == 1;
+    unsigned   calls    = 0;
+    options.fp_resize   = resize;
+    options.output_dir  = directory + (resize ? (accept ? "/resize" : "/reject") : "/weights");
+    options.fp_evaluate = [&](const Result& snapshot) {
+      ++calls;
+      EXPECT_TRUE(snapshot.parasitics->approximate);
+      auto score = timing(snapshot);  // real STA validates the snapshot and RC
+      if (resize) {
+        // Force acceptance independently of this fixture's positive slack.
+        bool stronger = false, present = false;
+        for (auto n : snapshot.graph->body().nodes()) {
+          if (n.get_name() == "buffer") {
+            present  = true;
+            stronger = n.get_subnode_io()->get_name() == "sky130_fd_sc_hd__buf_2";
+          }
+        }
+        score.delay = !present ? 4 : stronger ? (accept ? 1 : 3) : 2;
+        score.wns = score.tns   = -1;
+        score.hold_wns          = 0;
+        score.violations        = 0;
+        score.electrical_excess = 0;
+        for (auto& [name, pin] : score.pins) {
+          (void)name;
+          pin.slack = -1;
+        }
+      }
+      return score;
+    };
+    hhds::GraphLibrary owner;
+    const auto         placed = place(*graph, owner, options);
+    if (resize) {
+      EXPECT_GE(calls, 4U);
+    } else {
+      EXPECT_EQ(calls, 2U);
+    }
+    ASSERT_FALSE(placed.net_weights.empty());
+    EXPECT_GT(std::max_element(placed.net_weights.begin(),
+                               placed.net_weights.end(),
+                               [](const auto& a, const auto& b) { return a.second < b.second; })
+                  ->second,
+              1);
+    equivalent(placed);
+    std::ifstream       report(options.output_dir + "/macro/fp_place.json");
+    const std::string   text{std::istreambuf_iterator<char>(report), {}};
+    rapidjson::Document doc;
+    doc.Parse(text.c_str());
+    ASSERT_FALSE(doc.HasParseError());
+    EXPECT_EQ(doc["timing_checkpoints"].GetUint(), 2U);
+    EXPECT_EQ(doc["timing_sta_calls"].GetUint(), calls);
+    EXPECT_EQ(doc["timing_resized_cells"].GetUint(), accept ? 1U : 0U);
+    if (resize) {
+      const auto sized = std::find_if(placed.floorplan.components.begin(), placed.floorplan.components.end(), [](const auto& c) {
+        return c.name == "buffer";
+      });
+      ASSERT_NE(sized, placed.floorplan.components.end());
+      EXPECT_EQ(sized->macro, accept ? "sky130_fd_sc_hd__buf_2" : "sky130_fd_sc_hd__buf_1");
+      for (auto n : placed.graph->body().nodes()) {
+        if (n.get_name() == "buffer") {
+          EXPECT_EQ(n.get_subnode_io()->get_name(), sized->macro);
+        }
+      }
+      EXPECT_EQ(placed.fp_resized_cells, accept ? 1U : 0U);
+    }
+    // Disabling the interval suppresses both timing and sizing, in FP only.
+    options.fp_timing_interval = 0;
+    calls                      = 0;
+    hhds::GraphLibrary disabled;
+    (void)place(*graph, disabled, options);
+    EXPECT_EQ(calls, 0U);
+    options.fp_timing_interval = 50;
+  }
+}
+TEST_F(Buffer_repair, FloorplanMovementCoalescesStationaryTimingAndSamplesTheCap) {
+  auto b = gate("sky130_fd_sc_hd__buf_1", "buffer", graph->get_input_pin("a"));
+  graph->get_output_pin("y").connect_driver(gate("sky130_fd_sc_hd__inv_1", "macro", b));
+  enable_floorplan();
+  options.fp_resize          = false;
+  options.fp_timing_movement = 1e9;  // isolate initial/final calls despite normal GP motion
+  unsigned calls             = 0;
+  options.fp_evaluate        = [&](const Result& state) {
+    ++calls;
+    return timing(state);
+  };
+  const auto placed = place(*graph, flat, options);
+  equivalent(placed);
+  std::ifstream            trace(options.output_dir + "/macro/fp_timing.jsonl");
+  std::string              line;
+  std::vector<int>         iterations;
+  std::vector<std::string> reasons;
+  while (std::getline(trace, line)) {
+    rapidjson::Document d;
+    d.Parse(line.c_str());
+    ASSERT_FALSE(d.HasParseError());
+    iterations.push_back(d["iteration"].GetInt());
+    reasons.push_back(d["trigger"].GetString());
+  }
+  EXPECT_EQ(iterations, std::vector<int>({50, 120}));
+  EXPECT_EQ(reasons, std::vector<std::string>({"initial", "final"}));
+  EXPECT_EQ(calls, 2U);
+}
+TEST_F(Buffer_repair, FloorplanDensityGateDefersTimingAndRepairUntilTheCap) {
+  auto b = gate("sky130_fd_sc_hd__buf_1", "buffer", graph->get_input_pin("a"));
+  graph->get_output_pin("y").connect_driver(gate("sky130_fd_sc_hd__inv_1", "macro", b));
+  enable_floorplan();
+  options.density                 = .0001;  // Deliberately impossible for this fixed area.
+  options.fp_timing_after_density = true;
+  options.fp_timing_movement      = 1e9;
+  unsigned calls                  = 0;
+  options.fp_evaluate             = [&](const Result& state) {
+    ++calls;
+    return timing(state);
+  };
+  const auto placed = place(*graph, flat, options);
+  equivalent(placed);
+  std::ifstream       report(options.output_dir + "/macro/fp_place.json");
+  const std::string   text{std::istreambuf_iterator<char>(report), {}};
+  rapidjson::Document doc;
+  doc.Parse(text.c_str());
+  ASSERT_FALSE(doc.HasParseError());
+  ASSERT_EQ(doc["timing_checkpoints"].GetUint(), 1U);
+  EXPECT_GE(calls, 2U);  // The final callback still evaluates the resize sweep.
+  EXPECT_EQ(doc["timing_sta_calls"].GetUint(), calls);
+  const auto& schedule = doc["timing_density_schedule"];
+  ASSERT_EQ(schedule.Size(), 3U);
+  EXPECT_FALSE(schedule[0]["invoked"].GetBool());
+  EXPECT_FALSE(schedule[1]["invoked"].GetBool());
+  EXPECT_TRUE(schedule[2]["forced"].GetBool());
+  EXPECT_TRUE(schedule[2]["invoked"].GetBool());
+  EXPECT_EQ(schedule[2]["iteration"].GetInt(), 120);
+}
+TEST_F(Buffer_repair, FloorplanRemovesBuffersAndRollsBackRejectedTopology) {
+  auto b = gate("sky130_fd_sc_hd__buf_1", "buffer", graph->get_input_pin("a"));
+  graph->get_output_pin("y").connect_driver(gate("sky130_fd_sc_hd__inv_1", "macro", b));
+  enable_floorplan();
+  const auto directory = options.output_dir;
+  for (bool accept : {false, true}) {
+    options.output_dir  = directory + (accept ? "/accepted" : "/rejected");
+    options.fp_evaluate = [&](const Result& state) {
+      auto       score   = timing(state);  // validates real graph, cell/pin geometry and RC
+      const auto buffers = count(state, "buffer");
+      score.delay        = buffers ? 2 : accept ? 1 : 3;
+      score.wns = score.tns   = -1;
+      score.hold_wns          = 0;
+      score.violations        = 0;
+      score.electrical_excess = 0;
+      return score;
+    };
+    hhds::GraphLibrary owner;
+    const auto         placed = place(*graph, owner, options);
+    EXPECT_EQ(count(placed, "buffer"), accept ? 0U : 1U);
+    EXPECT_EQ(placed.fp_repair_edits, accept ? 1U : 0U);
+    equivalent(placed);
+    EXPECT_EQ(count(Result{.graph = graph}, "buffer"), 1U);  // source stays read-only
+    check_legality(physical::read_lef(options.lefs), placed.floorplan, options.halo_x, options.halo_y);
+  }
+}
+TEST_F(Buffer_repair, FloorplanRebuildsFanoutWithSteinerSeedsAndOwnerColors) {
+  auto root = gate("sky130_fd_sc_hd__buf_1", "root", graph->get_input_pin("a"));
+  for (unsigned i = 0; i < 6; ++i) {
+    const auto name = i ? "y" + std::to_string(i) : std::string("y");
+    if (i) {
+      graph->get_io()->add_output(name, i);
+      graph->get_io()->set_bits(name, 1);
+    }
+    graph->get_output_pin(name).connect_driver(gate("sky130_fd_sc_hd__inv_1", "macro" + std::to_string(i), root));
+  }
+  enable_floorplan();
+  unsigned saw_tree   = 0;
+  options.fp_evaluate = [&](const Result& state) {
+    auto       score     = timing(state);
+    const auto inserted  = count(state, "__place_rebuffer");
+    saw_tree            += inserted > 0;
+    for (auto n : state.graph->body().nodes()) {
+      if (n.get_name().starts_with("__place_rebuffer")) {
+        EXPECT_TRUE(n.attr(attrs::place).has());
+        EXPECT_TRUE(n.attr(attrs::synth_color_group).has());
+        if (n.attr(attrs::synth_color_group).has()) {
+          EXPECT_EQ(n.attr(attrs::synth_color_group).get(), "bank:color:1");
+        }
+      }
+    }
+    score.delay = inserted ? 1 : count(state, "root") ? 2 : 3;
+    score.area  = inserted ? 0 : 100;
+    score.wns = score.tns   = -1;
+    score.hold_wns          = 0;
+    score.violations        = 0;
+    score.electrical_excess = 0;
+    return score;
+  };
+  const auto placed = place(*graph, flat, options);
+  EXPECT_GT(saw_tree, 0U);
+  EXPECT_GT(placed.fp_repair_edits, 0U);
+  EXPECT_GT(count(placed, "__place_rebuffer"), 0U);
+  equivalent(placed);
+  check_legality(physical::read_lef(options.lefs), placed.floorplan, options.halo_x, options.halo_y);
+}
 TEST_F(Buffer_repair, TimingPlacementUsesSlackWeightsAndRejectsRegressions) {
   auto p = graph->get_input_pin("a");
   for (unsigned i = 0; i < 3; ++i) {
@@ -295,14 +888,67 @@ TEST_F(Buffer_repair, TimingPlacementUsesSlackWeightsAndRejectsRegressions) {
   }
   equivalent(result.placed);
 }
+TEST(Timing_weights, ConfigurableFractionPreservesDefaultAndExcludesUntimedClocks) {
+  physical::Parasitics rc;
+  Timing_feedback      timing;
+  for (int i = 0; i < 100; ++i) {
+    const auto driver = "d" + std::to_string(i), sink = "s" + std::to_string(i);
+    rc.nets.push_back({
+        driver,
+        {{driver, 0}, {sink, 0}},
+        {}
+    });
+    timing.pins[driver].slack = 1000;
+    timing.pins[sink].slack   = i - 100.;
+  }
+  rc.nets.push_back({"clock", {{"clock", 0}}, {}});
+  timing.pins["clock"].slack = -1000;
+  timing.pins["clock"].clock = true;
+  rc.nets.push_back({"untimed", {{"untimed", 0}}, {}});
+  const auto original = timing_weights(rc, timing);
+  EXPECT_EQ(original.size(), 20U);
+  EXPECT_EQ(original, timing_weights(rc, timing, .2));
+  EXPECT_EQ(original.at("d0"), 5);
+  EXPECT_EQ(original.at("d19"), 1);
+  EXPECT_FALSE(original.contains("clock"));
+  EXPECT_FALSE(original.contains("untimed"));
+  for (auto [fraction, count] : {
+           std::pair{  .1,  10U},
+           { .14,  14U},
+           { .29,  29U},
+           {.101,  11U},
+           {.001,   1U},
+           {  1., 100U}
+  }) {
+    const auto weights = timing_weights(rc, timing, fraction);
+    EXPECT_EQ(weights.size(), count);
+    EXPECT_EQ(weights.at("d0"), 5);
+    EXPECT_TRUE(weights.contains("d" + std::to_string(count - 1)));
+    EXPECT_FALSE(weights.contains("d" + std::to_string(count)));
+  }
+  for (double bad : {0., -.1, 1.01, std::numeric_limits<double>::infinity(), std::numeric_limits<double>::quiet_NaN()}) {
+    EXPECT_THROW(timing_weights(rc, timing, bad), std::invalid_argument);
+  }
+  const auto weaker = timing_weights(rc, timing, .29, 3);
+  EXPECT_EQ(weaker.at("d0"), 3);
+  EXPECT_EQ(weaker.at("d28"), 1);
+  for (const auto& [name, weight] : timing_weights(rc, timing, .29, 1)) {
+    (void)name;
+    EXPECT_EQ(weight, 1);
+  }
+  EXPECT_THROW(timing_weights(rc, timing, .2, .5), std::invalid_argument);
+  EXPECT_THROW(timing_weights(rc, timing, .2, std::numeric_limits<double>::infinity()), std::invalid_argument);
+}
 TEST_F(Buffer_repair, TimingWeightsExcludeClockNetsAndRevertWorsePlacements) {
   auto b = gate("sky130_fd_sc_hd__buf_1", "clock_buffer", graph->get_input_pin("a"));
   auto p = gate("sky130_fd_sc_hd__inv_1", "invert", b);
   graph->get_output_pin("y").connect_driver(p);
-  auto       placed      = place(*graph, flat, options);
-  const auto identity    = placed.parasitics->identity;
-  unsigned   evaluations = 0;
-  const auto result      = timing_place(
+  auto       placed         = place(*graph, flat, options);
+  const auto identity       = placed.parasitics->identity;
+  options.timing_max_weight = 3;
+  options.timing_smoothing  = .25;
+  unsigned   evaluations    = 0;
+  const auto result         = timing_place(
       std::move(placed),
       options,
       [&](const Result& r) {
@@ -317,6 +963,13 @@ TEST_F(Buffer_repair, TimingWeightsExcludeClockNetsAndRevertWorsePlacements) {
   rapidjson::Document report;
   report.Parse(result.report.c_str());
   ASSERT_EQ(report["rounds"].Size(), 2);
+  EXPECT_EQ(report["timing_max_weight"].GetDouble(), 3);
+  EXPECT_EQ(report["timing_smoothing"].GetDouble(), .25);
+  double peak = 1;
+  for (const auto& weight : report["rounds"][0]["weights"].GetObject()) {
+    peak = std::max(peak, weight.value.GetDouble());
+  }
+  EXPECT_DOUBLE_EQ(peak, 1.5);  // 0.75 * old unit weight + 0.25 * target 3.
   for (const auto& round : report["rounds"].GetArray()) {
     EXPECT_EQ(round["weights"]["clock_buffer:X"].GetDouble(), 1);
     EXPECT_FALSE(round["accepted"].GetBool());
@@ -343,9 +996,13 @@ TEST_F(Buffer_repair, ProtectsClockLogicThroughAliasesAndBuffers) {
   graph->get_output_pin("y").connect_driver(q);
   auto       placed = place(*graph, flat, options);
   const auto result = repair_buffers(std::move(placed), options, [&](const Result& r) {
-    Timing_feedback f;
-    f.delay = count(r, "clock_buffer") ? 10 : 1;
-    f.area  = 1;
+    auto f = timing(r);
+    f.wns = f.tns       = -1;
+    f.hold_wns          = 0;
+    f.violations        = 0;
+    f.electrical_excess = 0;
+    f.delay             = count(r, "clock_buffer") ? 10 : 1;
+    f.area              = 1;
     return f;
   });
   EXPECT_EQ(count(result.placed, "clock_buffer"), 1);
@@ -425,6 +1082,15 @@ TEST_F(Buffer_repair, RealTimingSteinerRepairReducesLongWireViolations) {
   auto               placed = place(*graph, stretched, options);
   const auto         before = timing(placed);
   ASSERT_GT(before.violations, 0);
+  ASSERT_TRUE(before.electrical_pin_feedback);
+  unsigned pin_violations = 0;
+  double   pin_excess     = 0;
+  for (const auto& [name, pin] : before.pins) {
+    pin_violations += pin.violations;
+    pin_excess     += pin.electrical_excess;
+  }
+  EXPECT_EQ(pin_violations, before.violations);
+  EXPECT_NEAR(pin_excess, before.electrical_excess, before.electrical_excess * 1e-7);
   const auto result = repair_buffers(std::move(placed), options, [&](const Result& r) { return timing(r); }, Repair_scope::design);
   const auto after  = timing(result.placed);
   SCOPED_TRACE(result.report);
@@ -516,6 +1182,377 @@ TEST_F(Buffer_repair, SteinerRepairSplitsAliasesAndPreservesOtherPackedBits) {
     }
   }
   EXPECT_NE(repaired.report.find("flute_steiner"), std::string::npos);
+}
+TEST_F(Buffer_repair, BuffersPrimaryInputBusBitsWithoutChangingOtherBits) {
+  graph->get_io()->set_bits("a", 2);
+  auto a = graph->get_input_pin("a");
+  gu::set_bits(a, 2);
+  auto bit0 = gu::create_get_mask(*graph, a, 0).get_driver_pin(0);
+  auto bit1 = gu::create_get_mask(*graph, a, 1).get_driver_pin(0);
+  for (unsigned i = 0; i < 6; ++i) {
+    const auto port = i ? "y" + std::to_string(i) : "y";
+    if (i) {
+      graph->get_io()->add_output(port, i);
+      graph->get_io()->set_bits(port, 1);
+    }
+    graph->get_output_pin(port).connect_driver(gate("sky130_fd_sc_hd__inv_1", "leaf" + std::to_string(i), bit0));
+  }
+  graph->get_io()->add_output("guard", 6);
+  graph->get_io()->set_bits("guard", 1);
+  graph->get_output_pin("guard").connect_driver(bit1);
+  auto       initial = place(*graph, flat, options);
+  const auto result  = repair_buffers(
+      std::move(initial),
+      options,
+      [&](const Result& trial) {
+        auto       score = timing(trial);  // real STA verifies every new connection/RC endpoint
+        const bool split = count(trial, "__place_rebuffer") > 0;
+        score.delay      = split ? 1 : 2;
+        score.area       = split ? 0 : 100;
+        score.wns = score.tns   = -1;
+        score.hold_wns          = 0;
+        score.violations        = 0;
+        score.electrical_excess = 0;
+        return score;
+      },
+      Repair_scope::design);
+  ASSERT_GT(count(result.placed, "__place_rebuffer"), 0) << result.report;
+  const auto value = [&](auto&& self, hhds::Pin_class p, unsigned bit, unsigned pattern, unsigned depth) -> bool {
+    if (depth > 512 || p.is_invalid()) {
+      throw std::runtime_error("broken bus repair");
+    }
+    const auto n = p.get_master_node();
+    if (n.is_input_node()) {
+      return (pattern >> bit) & 1;
+    }
+    if (const auto io = n.get_subnode_io()) {
+      return self(self, n.get_sink_pin("A").get_driver_pin(), 0, pattern, depth + 1) ^ (io->get_name() == "sky130_fd_sc_hd__inv_1");
+    }
+    if (gu::type_op_of(n) == Ntype_op::Get_mask) {
+      return self(self, gu::get_driver_of_sink_name(n, "a"), bit + gu::bit_range(n)->first, pattern, depth + 1);
+    }
+    throw std::runtime_error("unexpected bus repair operation");
+  };
+  for (unsigned pattern = 0; pattern < 4; ++pattern) {
+    for (const auto& port : result.placed.graph->get_io()->get_output_pin_decls()) {
+      EXPECT_EQ(value(value, result.placed.graph->get_output_pin(port.name).get_driver_pin(), 0, pattern, 0),
+                port.name == "guard" ? bool(pattern & 2) : !(pattern & 1));
+    }
+  }
+  EXPECT_EQ(count(Result{.graph = graph}, "__place_rebuffer"), 0);
+  check_legality(physical::read_lef(options.lefs), result.placed.floorplan);
+}
+TEST_F(Buffer_repair, HealthyCharacterizedStateOutputDoesNotRequestAFanoutTree) {
+  std::ifstream input(options.liberty);
+  std::string   lib{std::istreambuf_iterator<char>(input), {}};
+  const auto    begin = lib.find("cell (\"sky130_fd_sc_hd__buf_1\") {");
+  ASSERT_NE(begin, std::string::npos);
+  const auto open  = lib.find('{', begin);
+  size_t     end   = open + 1;
+  int        depth = 1;
+  for (; end < lib.size() && depth; ++end) {
+    depth += (lib[end] == '{') - (lib[end] == '}');
+  }
+  ASSERT_EQ(depth, 0);
+  auto cell                = lib.substr(open + 1, end - open - 2);
+  // A one-pin state element (data and clock share A) reuses this small LEF.
+  // Synthetic timing below isolates eligibility; it is not a clock model test.
+  cell                     = std::regex_replace(cell, std::regex(R"rx(function\s*:\s*"\(A\)")rx"), "function : \"IQ\"");
+  const std::string master = "test__buf_state";
+  lib.insert(lib.rfind('}'), "cell (\"" + master + "\") {ff(IQ,IQN) {next_state : \"A\"; clocked_on : \"A\";}\n" + cell + "}\n");
+  std::filesystem::create_directories(options.output_dir);
+  options.liberty = options.output_dir + "/state.lib";
+  std::ofstream(options.liberty) << lib;
+  std::ifstream     lef_input(options.lefs.back());
+  std::string       lef{std::istreambuf_iterator<char>(lef_input), {}};
+  const std::string original    = "sky130_fd_sc_hd__buf_1";
+  const auto        macro_begin = lef.find("MACRO " + original);
+  const auto        macro_end   = lef.find("END " + original, macro_begin) + 4 + original.size();
+  auto              macro       = lef.substr(macro_begin, macro_end - macro_begin);
+  for (size_t at = macro.find(original); at != std::string::npos; at = macro.find(original, at + master.size())) {
+    macro.replace(at, original.size(), master);
+  }
+  options.lefs.push_back(options.output_dir + "/state.lef");
+  std::ofstream(options.lefs.back()) << "VERSION 5.8 ;\n" << macro << "\nEND LIBRARY\n";
+  auto root = gate(master, "state", graph->get_input_pin("a"));
+  for (unsigned i = 0; i < 6; ++i) {
+    const auto port = i ? "y" + std::to_string(i) : "y";
+    if (i) {
+      graph->get_io()->add_output(port, i);
+      graph->get_io()->set_bits(port, 1);
+    }
+    graph->get_output_pin(port).connect_driver(root);
+  }
+  auto       initial  = place(*graph, flat, options);
+  const auto evaluate = [&](const Result& state) {
+    Timing_feedback f;
+    f.delay = 1;
+    f.area  = state.floorplan.components.size();
+    f.wns   = 100;
+    f.tns   = 0;
+    for (const auto& net : state.parasitics->nets) {
+      for (const auto& point : net.nodes) {
+        if (point.pin.empty()) {
+          continue;
+        }
+        auto& pin          = f.pins[point.pin];
+        pin.slack          = 100;
+        pin.slew           = .001;
+        pin.load_ff        = .01;
+        pin.capacitance_ff = .01;
+      }
+    }
+    return f;
+  };
+  const auto          result = repair_buffers(initial, options, evaluate, Repair_scope::forest);
+  rapidjson::Document report;
+  report.Parse(result.report.c_str());
+  ASSERT_TRUE(report.IsObject()) << result.report;
+  EXPECT_TRUE(report["trials"].Empty()) << result.report;
+  EXPECT_EQ(count(result.placed, "__place_rebuffer"), 0);
+  const auto stressed = repair_buffers(
+      initial,
+      options,
+      [&](const Result& r) {
+        auto f                    = evaluate(r);
+        f.pins.at("state:X").slew = 1e6;
+        return f;
+      },
+      Repair_scope::forest);
+  report.Parse(stressed.report.c_str());
+  EXPECT_FALSE(report["trials"].Empty()) << stressed.report;
+}
+TEST_F(Buffer_repair, HealthyPositiveSlackGateDoesNotGetAnArtificialFanoutFourTree) {
+  auto root = gate("sky130_fd_sc_hd__inv_1", "driver", graph->get_input_pin("a"));
+  for (unsigned i = 0; i < 6; ++i) {
+    const auto port = i ? "y" + std::to_string(i) : "y";
+    if (i) {
+      graph->get_io()->add_output(port, i);
+      graph->get_io()->set_bits(port, 1);
+    }
+    graph->get_output_pin(port).connect_driver(root);
+  }
+  auto initial = place(*graph, flat, options);
+  auto result  = repair_buffers(
+      std::move(initial),
+      options,
+      [&](const Result& trial) {
+        auto score = timing(trial);
+        for (auto& [name, pin] : score.pins) {
+          (void)name;
+          pin.slack   = 1;
+          pin.slew    = .001;
+          pin.load_ff = .01;
+        }
+        return score;
+      },
+      Repair_scope::design);
+  EXPECT_EQ(count(result.placed, "__place_rebuffer"), 0) << result.report;
+  // Rejected-by-STA trials also leave no buffer behind: no tree may even be proposed.
+  rapidjson::Document report;
+  report.Parse(result.report.c_str());
+  ASSERT_TRUE(report.IsObject()) << result.report;
+  for (const auto& trial : report["trials"].GetArray()) {
+    EXPECT_FALSE(trial.HasMember("action") && std::string(trial["action"].GetString()) == "forest_sweep") << result.report;
+  }
+  equivalent(result.placed);
+}
+TEST_F(Buffer_repair, KeepsDistributionForksWhileRemovingLinearBufferChains) {
+  auto root  = gate("sky130_fd_sc_hd__inv_1", "driver", graph->get_input_pin("a"));
+  auto chain = gate("sky130_fd_sc_hd__buf_1", "old_linear", root);
+  auto fork  = gate("sky130_fd_sc_hd__buf_1", "distribution_fork", chain);
+  for (unsigned i = 0; i < 6; ++i) {
+    const auto port = i ? "y" + std::to_string(i) : "y";
+    if (i) {
+      graph->get_io()->add_output(port, i);
+      graph->get_io()->set_bits(port, 1);
+    }
+    graph->get_output_pin(port).connect_driver(gate("sky130_fd_sc_hd__buf_1", "leaf_chain" + std::to_string(i), fork));
+  }
+  auto       original = place(*graph, flat, options);
+  const auto result   = repair_buffers(
+      std::move(original),
+      options,
+      [&](const Result& trial) {
+        auto score  = timing(trial);
+        score.delay = count(trial, "old_linear") ? 2 : 1;
+        score.area  = count(trial, "leaf_chain");
+        score.wns = score.tns   = -1;
+        score.hold_wns          = 0;
+        score.violations        = 0;
+        score.electrical_excess = 0;
+        return score;
+      },
+      Repair_scope::design);
+  EXPECT_EQ(count(result.placed, "old_linear"), 0) << result.report;
+  EXPECT_EQ(count(result.placed, "leaf_chain"), 0) << result.report;
+  EXPECT_EQ(count(result.placed, "distribution_fork"), 1) << result.report;
+  equivalent(result.placed);
+  check_legality(physical::read_lef(options.lefs), result.placed.floorplan);
+}
+TEST_F(Buffer_repair, RepairsDownstreamForestOfFixedMacroWithoutMovingIt) {
+  std::filesystem::create_directories(options.output_dir);
+  std::ifstream input(options.lefs.back());
+  std::string   lef{std::istreambuf_iterator<char>(input), {}};
+  const auto    start = lef.find("MACRO sky130_fd_sc_hd__inv_1\n"), klass = lef.find("CLASS CORE", start);
+  ASSERT_NE(start, std::string::npos);
+  ASSERT_NE(klass, std::string::npos);
+  lef.replace(klass, std::string("CLASS CORE").size(), "CLASS BLOCK");
+  options.lefs.back() = options.output_dir + "/macro.lef";
+  std::ofstream(options.lefs.back()) << lef;
+  auto root = gate("sky130_fd_sc_hd__inv_1", "macro", graph->get_input_pin("a"));
+  for (unsigned i = 0; i < 6; ++i) {
+    const auto port = i ? "y" + std::to_string(i) : "y";
+    if (i) {
+      graph->get_io()->add_output(port, i);
+      graph->get_io()->set_bits(port, 1);
+    }
+    graph->get_output_pin(port).connect_driver(gate("sky130_fd_sc_hd__buf_1", "old_buffer" + std::to_string(i), root));
+  }
+  const auto original = place(*graph, flat, options);
+  auto       frame    = std::make_shared<physical::Floorplan>(original.floorplan);
+  Ann_place  macro_position;
+  for (auto& cell : frame->components) {
+    if (cell.name == "macro") {
+      cell.place.status = Ann_place::Status::FIXED;
+      macro_position    = cell.place;
+    }
+  }
+  options.previous = frame;
+  hhds::GraphLibrary fixed_owner;
+  auto               fixed_placement = place(*graph, fixed_owner, options);
+  const auto         result          = repair_buffers(
+      std::move(fixed_placement),
+      options,
+      [&](const Result& trial) {
+        auto       score = timing(trial);
+        const bool split = count(trial, "__place_rebuffer") > 0;
+        score.delay      = split ? 1 : 2;
+        score.area       = split ? 0 : 100;
+        score.wns = score.tns   = -1;
+        score.hold_wns          = 0;
+        score.violations        = 0;
+        score.electrical_excess = 0;
+        return score;
+      },
+      Repair_scope::design);
+  ASSERT_GT(count(result.placed, "__place_rebuffer"), 0) << result.report;
+  EXPECT_EQ(count(result.placed, "old_buffer"), 0);
+  for (const auto& cell : result.placed.floorplan.components) {
+    if (cell.name == "macro") {
+      EXPECT_EQ(cell.place, macro_position);
+    }
+  }
+  equivalent(result.placed);
+  check_legality(physical::read_lef(options.lefs), result.placed.floorplan);
+}
+TEST_F(Buffer_repair, BuffersEveryBitOfFixedMacroOutput) {
+  std::filesystem::create_directories(options.output_dir);
+  options.lefs.push_back(options.output_dir + "/bus_macro.lef");
+  std::ofstream lef(options.lefs.back());
+  lef << "VERSION 5.8 ;\nMACRO BUS_SOURCE\n CLASS BLOCK ;\n ORIGIN 0 0 ;\n SIZE 10 BY 10 ;\n SYMMETRY X Y ;\n";
+  for (unsigned bit = 0; bit < 2; ++bit) {
+    for (const auto& pin : {std::string("D"), std::string("Q")}) {
+      lef << " PIN " << pin << '[' << bit << "]\n DIRECTION " << (pin == "D" ? "INPUT" : "OUTPUT")
+          << " ;\n PORT\n LAYER li1 ;\n RECT " << bit + 1 << " 1 " << bit + 1.1 << " 1.1 ;\n END\n END " << pin << '[' << bit
+          << "]\n";
+    }
+  }
+  lef << "END BUS_SOURCE\nEND LIBRARY\n";
+  lef.close();
+  graph->get_io()->set_bits("a", 2);
+  auto a = graph->get_input_pin("a");
+  gu::set_bits(a, 2);
+  auto io = source.create_io("BUS_SOURCE");
+  io->add_input("D", 0);
+  io->add_output("Q", 0);
+  io->set_bits("D", 2);
+  io->set_bits("Q", 2);
+  auto macro = gu::create_typed_node(*graph, Ntype_op::Sub);
+  macro.set_subnode(io);
+  macro.set_name("macro");
+  macro.create_sink_pin("D").connect_driver(a);
+  auto q = macro.create_driver_pin("Q");
+  gu::set_bits(q, 2);
+  for (unsigned bit = 0; bit < 2; ++bit) {
+    for (unsigned leaf = 0; leaf < 6; ++leaf) {
+      const auto port = bit == 0 && leaf == 0 ? std::string("y") : "y" + std::to_string(bit) + "_" + std::to_string(leaf);
+      if (port != "y") {
+        graph->get_io()->add_output(port, 1 + bit * 6 + leaf);
+        graph->get_io()->set_bits(port, 1);
+      }
+      const auto value = gu::create_get_mask(*graph, q, bit).get_driver_pin(0);
+      graph->get_output_pin(port).connect_driver(
+          gate("sky130_fd_sc_hd__inv_1", "leaf" + std::to_string(bit) + "_" + std::to_string(leaf), value));
+    }
+  }
+  const auto first = place(*graph, flat, options);
+  auto       frame = std::make_shared<physical::Floorplan>(first.floorplan);
+  Ann_place  fixed_position;
+  for (auto& cell : frame->components) {
+    if (cell.name == "macro") {
+      cell.place.status = Ann_place::Status::FIXED;
+      fixed_position    = cell.place;
+    }
+  }
+  options.previous = frame;
+  hhds::GraphLibrary fixed_owner;
+  auto               fixed    = place(*graph, fixed_owner, options);
+  const auto         repaired = repair_buffers(
+      std::move(fixed),
+      options,
+      [&](const Result& trial) {
+        Timing_feedback score;
+        score.delay = count(trial, "__place_rebuffer") ? 1 : 2;
+        score.area  = count(trial, "__place_rebuffer") ? 0 : 100;
+        for (const auto& [name, xy] : trial.pin_locations) {
+          (void)xy;
+          auto& pin          = score.pins[name];
+          pin.capacitance_ff = 1;
+          pin.required       = 1;
+        }
+        return score;
+      },
+      Repair_scope::design);
+  ASSERT_GE(count(repaired.placed, "__place_rebuffer"), 2) << repaired.report;
+  bool               through_buffer = false;
+  std::set<unsigned> buffered_bits;
+  const auto         value = [&](auto&& self, hhds::Pin_class p, unsigned bit, unsigned pattern, unsigned depth) -> bool {
+    if (depth > 512 || p.is_invalid()) {
+      throw std::runtime_error("broken macro bus repair");
+    }
+    const auto n = p.get_master_node();
+    if (const auto cell = n.get_subnode_io()) {
+      if (cell->get_name() == "BUS_SOURCE") {
+        if (through_buffer) {
+          buffered_bits.insert(bit);
+        }
+        return (pattern >> bit) & 1;
+      }
+      through_buffer |= n.get_name().starts_with("__place_rebuffer");
+      return self(self, n.get_sink_pin("A").get_driver_pin(), 0, pattern, depth + 1)
+             ^ (cell->get_name() == "sky130_fd_sc_hd__inv_1");
+    }
+    if (gu::type_op_of(n) == Ntype_op::Get_mask) {
+      return self(self, gu::get_driver_of_sink_name(n, "a"), bit + gu::bit_range(n)->first, pattern, depth + 1);
+    }
+    throw std::runtime_error("unexpected macro bus repair operation");
+  };
+  for (unsigned pattern = 0; pattern < 4; ++pattern) {
+    for (const auto& port : repaired.placed.graph->get_io()->get_output_pin_decls()) {
+      const auto bit = port.name.starts_with("y1_") ? 1u : 0u;
+      through_buffer = false;
+      EXPECT_EQ(value(value, repaired.placed.graph->get_output_pin(port.name).get_driver_pin(), 0, pattern, 0),
+                !((pattern >> bit) & 1));
+    }
+  }
+  EXPECT_EQ(buffered_bits, (std::set<unsigned>{0, 1}));
+  for (const auto& cell : repaired.placed.floorplan.components) {
+    if (cell.name == "macro") {
+      EXPECT_EQ(cell.place, fixed_position);
+    }
+  }
+  check_legality(physical::read_lef(options.lefs), repaired.placed.floorplan);
 }
 TEST_F(Buffer_repair, ResizesAcrossEquivalentDriveCellsAndKeepsPortConnectivity) {
   const auto read = [](const std::string& path) {

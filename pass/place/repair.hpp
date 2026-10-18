@@ -10,31 +10,51 @@ namespace livehd::placement {
 struct Timing_feedback {
   struct Pin {
     std::optional<double> arrival, required, slew, load_ff, slack, capacitance_ff;
-    bool                  clock = false;
+    unsigned              violations        = 0;
+    double                electrical_excess = 0;
+    bool                  clock             = false;
   };
   double                     time_unit_ps = 1000;
   std::map<std::string, Pin> pins;
   double                     delay = 0, area = 0, electrical_excess = 0;
-  unsigned                   violations = 0;
+  unsigned                   violations              = 0;
+  bool                       electrical_pin_feedback = false;
+  // Optional provenance of the accepted analysis; never used to decide QoR.
+  std::string                source_report;
   std::optional<double>      wns, tns, hold_wns;
   std::vector<std::string>   path;
 };
 Timing_feedback               timing_feedback(std::string_view json);
-std::map<std::string, double> timing_weights(const physical::Parasitics& nets, const Timing_feedback& timing);
+std::map<std::string, double> timing_weights(const physical::Parasitics& nets, const Timing_feedback& timing, double fraction = .2,
+                                             double max_weight = 5);
 struct Repair_result {
-  Result                                           placed;
-  // Accepted graphs live in independent libraries; rejected trials are discarded.
+  // Own independent accepted graphs; libraries outlive the placed graph.
   std::vector<std::unique_ptr<hhds::GraphLibrary>> libraries;
+  Result                                           placed;
   std::string                                      report;
+  std::optional<Timing_feedback>                   timing;
 };
-using Evaluate = std::function<Timing_feedback(const Result&)>;
-// Bounded gate sizing, buffer bypass and Steiner tree rebuilding. Every
-// candidate gets fresh legal placement, parasitics and timing before acceptance.
-bool          timing_improves(const Timing_feedback& before, const Timing_feedback& after);
-Repair_result timing_place(Result initial, const Options& options, const Evaluate& evaluate, unsigned rounds);
-enum class Repair_scope { all, sizing, design };
+struct Floorplan_resize {
+  Timing_feedback timing;
+  unsigned        proposed = 0, accepted = 0, repair_proposed = 0, repair_accepted = 0;
+  std::string     report;
+};
+// Load-ranked size-only sweep at overlapping GP coordinates. refresh rebuilds physical
+// geometry/RC; no legalization, topology edits or macro movement are permitted.
+Floorplan_resize resize_floorplan(Result& state, const Options& options, const Timing_feedback& before, const Evaluate& evaluate,
+                                  const std::function<void(Result&)>& refresh);
+// Size plus whole-forest repair (with bounded fallback trials) at current GP coordinates.
+// refresh must rebuild the physical view after topology changes without legalization.
+Floorplan_resize repair_floorplan(Result& state, const Options& options, const Timing_feedback& before, const Evaluate& evaluate,
+                                  const std::function<void(Result&)>& refresh);
+// Design-wide sizing/forest sweeps with transactional bisection and a bounded
+// fallback search. Every accepted batch has fresh legal placement, RC and STA.
+bool             timing_improves(const Timing_feedback& before, const Timing_feedback& after);
+Repair_result    timing_place(Result initial, const Options& options, const Evaluate& evaluate, unsigned rounds);
+enum class Repair_scope { all, sizing, design, forest };  // forest skips sizing/area recovery
+// prior must describe exactly initial under the same timing constraints/model.
 Repair_result repair_buffers(Result initial, const Options& options, const Evaluate& evaluate,
-                             Repair_scope scope = Repair_scope::all);
+                             Repair_scope scope = Repair_scope::all, std::optional<Timing_feedback> prior = std::nullopt);
 // Up to four 32-cell/12-input combinational cuts. Exact exhaustive equivalence
 // precedes splicing, and each proved candidate gets local placement + fresh STA.
 Repair_result resynthesize_cones(Result initial, const Options& options, const Evaluate& evaluate,

@@ -66,8 +66,8 @@ Buffer_tree plan_buffers(Point root, const std::vector<Point>& loads, const std:
     if (p.size() > max_fanout || total_cap(p) > max_cap_ff * (1 + 1e-9)) {
       throw std::runtime_error("buffer output exceeds selected drive limits");
     }
-    if (result.buffers.size() == 256) {
-      throw std::runtime_error("Steiner repair exceeds 256 buffers");
+    if (result.buffers.size() == 1000000) {
+      throw std::runtime_error("Steiner repair exceeds one million buffers (resource limit)");
     }
     Buffer_tree::Branch b{point, {}};
     for (const auto& i : p) {
@@ -82,16 +82,19 @@ Buffer_tree plan_buffers(Point root, const std::vector<Point>& loads, const std:
   const auto compact = [&](Packet p, Point point) {
     while (p.size() > max_fanout || total_cap(p) > max_cap_ff * (1 + 1e-9)) {
       Packet next, group;
+      double group_cap = 0;
       for (const auto& i : p) {
         if (i.cap > max_cap_ff * (1 + 1e-9)) {
           throw std::runtime_error("sink load exceeds selected buffer drive");
         }
-        if (!group.empty() && (group.size() == max_fanout || total_cap(group) + i.cap > max_cap_ff)) {
+        if (!group.empty() && (group.size() == max_fanout || group_cap + i.cap > max_cap_ff)) {
           auto b = buffer(std::move(group), point);
           next.push_back(b.front());
           group.clear();
+          group_cap = 0;
         }
         group.push_back(i);
+        group_cap += i.cap;
       }
       if (!group.empty()) {
         auto b = buffer(std::move(group), point);
@@ -151,5 +154,151 @@ Buffer_tree plan_buffers(Point root, const std::vector<Point>& loads, const std:
     up.insert(up.end(), p.begin(), p.end());
   }
   return result;
+}
+
+Buffer_tree plan_buffer_choices(Point root, const std::vector<Point>& loads, const std::vector<double>& capacitances,
+                                const std::vector<double>& required_ps, const std::vector<Buffer_drive>& drives,
+                                const Buffer_drive& driver, double wire_r_ohm_dbu, double wire_c_ff_dbu) {
+  if (drives.empty() || loads.size() != required_ps.size() || loads.size() != capacitances.size() || !std::isfinite(wire_r_ohm_dbu)
+      || wire_r_ohm_dbu < 0) {
+    throw std::invalid_argument("invalid buffer-choice model");
+  }
+  for (const auto t : required_ps) {
+    if (!std::isfinite(t)) {
+      throw std::invalid_argument("invalid sink required time");
+    }
+  }
+  Buffer_tree               best;
+  double                    best_required = -std::numeric_limits<double>::infinity(), best_area = best_required;
+  bool                      found = false;
+  std::vector<Buffer_drive> topologies;
+  for (const auto& drive : drives) {
+    std::vector<unsigned> fanouts{std::min(4u, drive.max_fanout), std::min(16u, drive.max_fanout), drive.max_fanout};
+    std::sort(fanouts.begin(), fanouts.end());
+    fanouts.erase(std::unique(fanouts.begin(), fanouts.end()), fanouts.end());
+    for (const auto fanout : fanouts) {
+      auto topology       = drive;
+      topology.max_fanout = fanout;
+      topologies.push_back(topology);
+    }
+  }
+  // Include the original direct connection. Buffer-specific repeater spacing
+  // must not force a tree when the actual source can drive the loads faster.
+  for (size_t candidate = 0; candidate <= topologies.size(); ++candidate) {
+    Buffer_tree plan;
+    try {
+      if (candidate == 0) {
+        for (unsigned i = 0; i < loads.size(); ++i) {
+          plan.root.push_back({false, i});
+        }
+      } else {
+        const auto& topology = topologies[candidate - 1];
+        plan                 = plan_buffers(root,
+                                            loads,
+                                            capacitances,
+                                            topology.input_ff,
+                                            topology.max_cap_ff,
+                                            topology.max_fanout,
+                                            topology.max_distance_dbu,
+                                            wire_c_ff_dbu);
+      }
+    } catch (const std::runtime_error&) {
+      continue;
+    }
+    struct State {
+      double cap, required, area;
+    };
+    std::vector<State> states;
+    const auto         aggregate = [&](Point origin, const std::vector<Buffer_tree::Load>& children) {
+      State              result{0, std::numeric_limits<double>::infinity(), 0};
+      double             longest = 0;
+      std::vector<Point> endpoints{origin};
+      for (const auto& child : children) {
+        const auto xy = child.buffer ? plan.buffers.at(child.index).position : loads.at(child.index);
+        const auto state
+            = child.buffer ? states.at(child.index) : State{capacitances.at(child.index), required_ps.at(child.index), 0};
+        const double length     = std::abs(xy.first - origin.first) + std::abs(xy.second - origin.second);
+        const double wire_cap   = length * wire_c_ff_dbu;
+        const double wire_delay = length * wire_r_ohm_dbu * (state.cap + .5 * wire_cap) * 1e-3;
+        endpoints.push_back(xy);
+        result.cap      += state.cap;
+        result.required  = std::min(result.required, state.required - wire_delay);
+        result.area     += state.area;
+        longest          = std::max(longest, length);
+      }
+      const auto wires = steiner_tree(endpoints);
+      for (const auto& [a, b] : wires.edges) {
+        const auto p = wires.points[a], q = wires.points[b];
+        result.cap += (std::abs(p.first - q.first) + std::abs(p.second - q.second)) * wire_c_ff_dbu;
+      }
+      return std::pair{result, longest};
+    };
+    bool viable = true;
+    // Complete the tree at the root if its original driver cannot drive the
+    // packet. In particular, a strong uniform buffer must not leave a weak
+    // logic gate driving the same large cap that triggered repair.
+    for (size_t i = 0; i <= plan.buffers.size(); ++i) {
+      if (i == plan.buffers.size()) {
+        const auto [packet, longest] = aggregate(root, plan.root);
+        if (packet.cap <= driver.max_cap_ff + (2 * plan.root.size() + 2) * wire_c_ff_dbu && plan.root.size() <= driver.max_fanout
+            && longest <= driver.max_distance_dbu + 2) {
+          break;
+        }
+        if (plan.root.size() == 1 && plan.root.front().buffer && plan.buffers[plan.root.front().index].position == root) {
+          viable = false;
+          break;
+        }
+        const auto children = std::move(plan.root);
+        plan.buffers.push_back({root, children, 0});
+        plan.root = {
+            {true, static_cast<unsigned>(i)}
+        };
+      }
+      auto& branch                 = plan.buffers[i];
+      const auto [packet, longest] = aggregate(branch.position, branch.loads);
+      double   best_input_required = -std::numeric_limits<double>::infinity();
+      unsigned choice              = 0;
+      bool     selected            = false;
+      for (unsigned j = 0; j < drives.size(); ++j) {
+        const auto& b = drives[j];
+        if (packet.cap > b.max_cap_ff * (1 + 1e-9) + (2 * branch.loads.size() + 2) * wire_c_ff_dbu
+            || branch.loads.size() > b.max_fanout || longest > b.max_distance_dbu + 2) {
+          continue;
+        }
+        const double input_required = packet.required - b.intrinsic_ps - b.resistance_ohm * packet.cap * 1e-3;
+        // Account for the cost of presenting this cell's input cap upstream.
+        const double score          = input_required - driver.resistance_ohm * b.input_ff * 1e-3;
+        if (!selected || score > best_input_required + 1e-6
+            || (std::abs(score - best_input_required) <= 1e-6 && b.area < drives[choice].area)) {
+          selected            = true;
+          choice              = j;
+          best_input_required = score;
+        }
+      }
+      if (!selected) {
+        viable = false;
+        break;
+      }
+      branch.drive  = choice;
+      const auto& b = drives[choice];
+      states.push_back({b.input_ff, packet.required - b.intrinsic_ps - b.resistance_ohm * packet.cap * 1e-3, packet.area + b.area});
+    }
+    if (!viable) {
+      continue;
+    }
+    const auto [packet, longest] = aggregate(root, plan.root);
+    (void)longest;
+    const double required = packet.required - driver.intrinsic_ps - driver.resistance_ohm * packet.cap * 1e-3;
+    if (!found || required > best_required + 1e-6 || (std::abs(required - best_required) <= 1e-6 && packet.area < best_area)) {
+      best          = std::move(plan);
+      best_required = required;
+      best_area     = packet.area;
+      found         = true;
+    }
+  }
+  if (!found) {
+    throw std::runtime_error("no buffer-tree alternative meets driver/load limits");
+  }
+  return best;
 }
 }  // namespace livehd::placement

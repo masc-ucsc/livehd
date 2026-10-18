@@ -1,5 +1,6 @@
 // This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 #pragma once
+#include <functional>
 #include <map>
 #include <memory>
 #include <string>
@@ -12,6 +13,10 @@
 #include "inou/lefdef/physical.hpp"
 
 namespace livehd::placement {
+inline constexpr double max_net_weight = 100;  // physical net weight ceiling shared by option checks and the placement database
+struct Result;
+struct Timing_feedback;
+using Evaluate = std::function<Timing_feedback(const Result&)>;
 struct Options {
   std::vector<std::string>              lefs;
   std::string                           floorplan, output_dir, cache_dir;
@@ -20,6 +25,14 @@ struct Options {
   bool                                  fp_place = true, fp_snap_enabled = true;
   bool                                  fp_colors     = false;  // uncovered single-color candidates, never centroid-snapped
   int                                   fp_iterations = 1500, fp_min_copies = 4;
+  int                                   fp_timing_interval      = 50;
+  double                                fp_timing_movement      = 0;  // RMS bin movement; 0 keeps fixed cadence
+  bool                                  fp_timing_after_density = false;
+  double                                timing_fraction         = .2;  // worst-slack fraction of timed non-clock nets
+  double                                timing_max_weight = 5, timing_smoothing = .5;
+  int                                   fp_timing_max_updates = 10;
+  bool                                  fp_resize             = false;
+  Evaluate                              fp_evaluate;
   double                                fp_minimum = 3000, fp_attraction = .25, fp_repulsion = 5, fp_anchor = .25;
   DreamPlace::native::FloorplanOptions  fp_snap;
   DreamPlace::native::macro::Parameters macro_parameters;
@@ -29,6 +42,7 @@ struct Options {
   std::vector<std::string>                                   changed_cells;
   std::map<std::string, double>                              net_weights;
   double                                                     utilization = 0.30, aspect = 1, density = 0.5;
+  double                                                     stop_overflow = .1, initial_density_weight = .01;
   double                                                     halo_x = 5, halo_y = 5;  // microns per side, non-CORE macros only
   bool                                                       scale_macro_density = true;
   bool   automatic_bins = false, exact_macro_density = true, adaptive_density = true, routability = true;
@@ -43,18 +57,33 @@ struct Options {
   double cohesion          = 0;
   double resistance_ohm_um = -1, capacitance_ff_um = -1;
   int    iterations = 1500, bins = 64, threads = 1;
-  bool   full             = true;
-  bool   final_cells      = true;
-  int    final_iterations = 0;  // zero inherits iterations; only after fp in full mode
+  double fixed_macro_overlap_weight = 0;
+  double wirelength_gamma_end       = .05;  // experimental; existing smoothing schedule by default
+  int    detailed_iterations        = 2;
+  bool   exact_cell_density         = false;
+  bool   density_upper_bound        = false;  // experimental filler-free upper-bound penalty
+  int    min_iterations             = 40;
+  int    post_density_factor        = 4;  // bounded continuation after geometry/density settle; zero disables
+  double convergence_tolerance      = .01;
+  bool   full                       = true;
+  bool   final_cells                = true;
+  int    final_iterations           = 0;  // zero inherits iterations; only after fp in full mode
   // Diagnostic physical GP coordinates, before macro/cell legalization.
-  bool   snapshots        = false;
+  bool   snapshots                  = false;
   // Internal post-synthesis STA snapshot: mapped pins and zero wire RC, no GP
   // or legalization, and no placement-cache publication.
-  bool   timing_seed      = false;
+  bool   timing_seed                = false;
+  // Timing-only import of a complete saved placement. Preserve every location;
+  // do not legalize, optimize or certify the imported placement's legality.
+  bool   retain_placement           = false;
   // Try nearest-whitespace placement of edited/new cells before windowed GP.
-  bool   legalize_cells   = false;
+  bool   legalize_cells             = false;
 };
 struct Result {
+  unsigned                                         fp_resized_cells = 0, fp_repair_edits = 0;
+  // Own the last FP topology trial; declared before graph so it outlives it.
+  std::map<std::string, std::string>               fp_buffer_origins;
+  std::shared_ptr<hhds::GraphLibrary>              fp_library;
   std::map<std::string, std::pair<double, double>> pin_locations;
   std::map<std::string, double>                    net_weights;
   std::shared_ptr<hhds::Graph>                     graph;

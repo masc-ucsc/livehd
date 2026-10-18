@@ -842,6 +842,48 @@ TEST(LibertyFunction, RepairElectricalUnitsAndNldmEstimate) {
   EXPECT_FALSE(cells[1].max_transition_ps);
 }
 
+TEST(LibertyFunction, ExistingSequentialOutputDriveUsesItsOwnTablesAndUnits) {
+  const std::string text   = R"(
+    library (ns) { time_unit : "1ns"; capacitive_load_unit (1, "pf"); default_max_transition : 0.5;
+      cell (FF) { area : 1; dont_use : true;
+        ff(IQ, IQN) { next_state : "D"; clocked_on : "CLK"; }
+        pin(CLK) { direction : input; clock : true; }
+        pin(D) { direction : input; }
+        pin(Q) { direction : output; function : "IQ"; max_capacitance : 0.2; max_fanout : 20;
+          timing() { related_pin : "CLK"; timing_type : rising_edge;
+            cell_rise(t) { index_2("0.01,0.11"); values("0.02,0.12"); } } }
+        pin(QN) { direction : output; function : "IQN"; max_capacitance : 0.1;
+          timing() { related_pin : "CLK"; timing_type : rising_edge;
+            cell_fall(t) { index_2("0.01,0.11"); values("0.03,0.23"); } } }
+        pin(Z) { direction : output; three_state : "D"; }
+      }
+    }
+    library (ps) { time_unit : "1ps"; capacitive_load_unit (1, "ff");
+      cell (OTHER) { pin(Y) { direction : output; max_capacitance : 8;
+        timing() { cell_rise(t) { index_2("1,3"); values("2,6"); } } } }
+    }
+  )";
+  const auto        drives = livehd::liberty::scan_output_drives_text(text);
+  ASSERT_EQ(drives.size(), 3);
+  EXPECT_EQ(drives[0].name, "FF");
+  EXPECT_TRUE(drives[0].sequential);
+  EXPECT_EQ(drives[0].output, "Q");
+  EXPECT_DOUBLE_EQ(drives[0].max_capacitance_ff.value(), 200);
+  EXPECT_DOUBLE_EQ(drives[0].max_transition_ps.value(), 500);
+  EXPECT_DOUBLE_EQ(drives[0].max_fanout.value(), 20);
+  EXPECT_DOUBLE_EQ(drives[0].intrinsic_ps, 20);
+  EXPECT_NEAR(drives[0].resistance_ohm, 1000, 1e-8);
+  EXPECT_EQ(drives[1].output, "QN");
+  EXPECT_NEAR(drives[1].resistance_ohm, 2000, 1e-8);
+  EXPECT_FALSE(drives[1].max_fanout);
+  EXPECT_EQ(drives[2].name, "OTHER");
+  EXPECT_FALSE(drives[2].sequential);
+  EXPECT_DOUBLE_EQ(drives[2].max_capacitance_ff.value(), 8);
+  EXPECT_DOUBLE_EQ(drives[2].intrinsic_ps, 2);
+  EXPECT_NEAR(drives[2].resistance_ohm, 2000, 1e-8);
+  EXPECT_TRUE(livehd::liberty::scan_comb_cells_text(text).empty());
+}
+
 TEST(LibertyFunction, RepairNldmLoadAxisFollowsTemplate) {
   // osu018 shape: variable_1 is the load, so index_2 holds slews and the load
   // sweep is column 0. A template with no load axis gives no estimate.
@@ -934,11 +976,34 @@ TEST(LibertyMemory, OpaqueTypedInterfaceAndScopedBusTypes) {
   EXPECT_THROW(livehd::liberty::declare_memory_cells(design, cells), std::runtime_error);
 }
 
+TEST(LibertyMemory, AddressDataAndClockRolesComeFromMetadata) {
+  const auto file  = write_lib("memory_roles.lib", R"(
+ library(one) {
+   cell(arbitrary_ram_name) {
+     memory() { type: ram; address_width: 1; word_width: 1; }
+     pin(P) { direction: input; clock: true; }
+     pin(X) { direction: input; }
+     pin(Y) { direction: input; memory_write() { address: X; } }
+     pin(E) { direction: input; }
+     pin(Z) { direction: output; memory_read() { address: X; } }
+   }
+ })");
+  const auto cells = livehd::liberty::scan_memory_cells(file);
+  ASSERT_EQ(cells.size(), 1U);
+  ASSERT_EQ(cells[0].pins.size(), 5U);
+  EXPECT_TRUE(cells[0].pins[0].clock_input);
+  EXPECT_FALSE(cells[0].pins[0].address_data_input);
+  EXPECT_TRUE(cells[0].pins[1].address_data_input);
+  EXPECT_TRUE(cells[0].pins[2].address_data_input);
+  EXPECT_FALSE(cells[0].pins[3].address_data_input);
+  EXPECT_FALSE(cells[0].pins[4].address_data_input);
+}
+
 TEST(LibertyMemory, UnsupportedMemoryCellsAreSkippedNotFatal) {
   // A ROM, an inout-pin RAM, an untyped bus and a malformed standard-cell type
   // group must not fail a design that never instantiates them; a bus typed at
   // cell scope (legal Liberty) resolves, and an internal pin is not a port.
-  const auto file = write_lib("memory_tolerant.lib", R"(
+  const auto                                file = write_lib("memory_tolerant.lib", R"(
  library(mixed) {
    type(BAD) { bit_width: 4; }
    type(DATA) { bit_width: 8; bit_from: 7; bit_to: 0; }
@@ -992,4 +1057,47 @@ TEST(LibertyMemory, InvalidAndConflictingInterfacesAreRefused) {
       bus(D) { direction: input; bus_type: DATA; } }
   })");
   EXPECT_THROW(livehd::liberty::scan_memory_cells(invalid), std::runtime_error);
+}
+
+TEST(LibertyFunction, ClockedMemoryBusDriveKeepsConstantDelayAndElectricalLimits) {
+  const std::string contents = R"(
+    library (ram) { time_unit : "1ns"; capacitive_load_unit (1, "pf");
+      type(data) { base_type : array; data_type : bit; bit_width : 2; bit_from : 3; bit_to : 2; }
+      type(addr) { base_type : array; data_type : bit; bit_width : 4; bit_from : 3; bit_to : 0; }
+      cell(RAM) { memory() { type : ram; address_width : 4; word_width : 2; }
+        pin(CLK) { direction : input; clock : true; }
+        bus(A) { bus_type : addr; direction : input; }
+        bus(Q) { bus_type : data; direction : output; max_capacitance : 0.5;
+          memory_read() { address : A; }
+          timing() { related_pin : "CLK"; timing_type : rising_edge;
+            cell_rise(t) { index_2("0.005,0.5"); values("0.218,0.218"); } }
+        }
+      }
+    }
+  )";
+  const auto        drives   = livehd::liberty::scan_output_drives_text(contents);
+  ASSERT_EQ(drives.size(), 2);
+  for (size_t i = 0; i < drives.size(); ++i) {
+    EXPECT_EQ(drives[i].name, "RAM");
+    EXPECT_EQ(drives[i].output, "Q[" + std::to_string(i + 2) + "]");
+    EXPECT_TRUE(drives[i].sequential);
+    EXPECT_DOUBLE_EQ(drives[i].max_capacitance_ff.value(), 500);
+    EXPECT_DOUBLE_EQ(drives[i].intrinsic_ps, 218);
+    EXPECT_DOUBLE_EQ(drives[i].resistance_ohm, 0);
+    EXPECT_FALSE(drives[i].max_fanout);
+  }
+  auto              async_contents = contents;
+  const std::string edge           = "related_pin : \"CLK\"; timing_type : rising_edge;";
+  const auto        at             = async_contents.find(edge);
+  ASSERT_NE(at, std::string::npos);
+  async_contents.replace(at, edge.size(), "related_pin : \"A\"; timing_type : combinational;");
+  const auto async_drives = livehd::liberty::scan_output_drives_text(async_contents);
+  ASSERT_EQ(async_drives.size(), 2);
+  EXPECT_TRUE(async_drives[0].sequential);  // storage cell, even with an asynchronous output
+  EXPECT_DOUBLE_EQ(async_drives[0].intrinsic_ps, 218);
+  EXPECT_FALSE(livehd::liberty::scan_memory_cells_text(async_contents)[0].pins.back().clocked);
+  EXPECT_TRUE(livehd::liberty::scan_comb_cells_text(R"(
+    library(ram) { cell(RAM) { memory() { type : ram; } } }
+  )")
+                  .empty());
 }

@@ -28,8 +28,11 @@ base = ['lhd/lhd', 'synth', str(source), '--top', 'ram', '--workdir', str(root/'
         '--set', 'synth.place.bins=8', '--emit-dir', f'def:{root}/physical', '-q']
 def synth(name, extra=()):
     report = root / f'{name}.json'
-    p = subprocess.run(base + list(extra) + ['--result-json', str(report)],
+    # geometric/cache control by default; the timed leg opts in
+    timing = [] if any(str(v).startswith('synth.place.timing_driven=') for v in extra) else ['--set', 'synth.place.timing_driven=false']
+    p = subprocess.run(base + timing + list(extra) + ['--result-json', str(report)],
                        capture_output=True, text=True, timeout=15)
+    assert report.is_file(), (name, p.returncode, p.stdout, p.stderr)
     data = json.loads(report.read_text())
     assert p.returncode == 0, (data, p.stdout, p.stderr)
     return data

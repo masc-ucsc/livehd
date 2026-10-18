@@ -2555,6 +2555,14 @@ sh_test(
 )
 
 sh_test(
+    name = "lhd_placement_timing_defaults_smoke",
+    size = "small",
+    timeout = "short",
+    srcs = ["lhd_placement_timing_defaults_smoke.py"],
+    data = ["//lhd", "//inou/lefdef:test_data"],
+)
+
+sh_test(
     name = "lhd_placement_smoke",
     size = "small",
     timeout = "short",

@@ -547,6 +547,7 @@ void Pass_opentimer::time_work(Eprp_var& var) {
   pass.setup_hier(g);
   pass.build_circuit(g);  // ensure_libs() runs here: a cache hit above never parses a Liberty
   pass.read_sdc_spef();
+  pass.apply_case_analysis();
   pass.apply_physical_rc(g);
   pass.prepare_critical_targets();
   pass.apply_physical_captures();
@@ -697,6 +698,15 @@ void Pass_opentimer::read_sdc_spef() {
   for (const auto& f : sdc_file_list) {
     read_sdc(f);
   }
+  // SDC clocks are ideal until explicitly propagated. Clock-to-Q data arcs
+  // and all data-net RC remain timed; only the traced clock network is ideal.
+  std::vector<std::string> ideal;
+  for (const auto& [name, target] : timing_targets_) {
+    if (!target.ports.empty() && !propagated_clocks_.contains(name)) {
+      ideal.push_back(name);
+    }
+  }
+  timer.set_ideal_clocks(std::move(ideal), {physical_clock_endpoints_.begin(), physical_clock_endpoints_.end()});
   for (const auto& f : spef_file_list) {
     // The reader currently cannot certify annotation coverage on a remapped
     // netlist. Keep reporting timing, but do not certify a complete QoR gate.
@@ -1911,15 +1921,14 @@ void Pass_opentimer::build_circuit(const std::shared_ptr<hhds::Graph>& g) {
     if (livehd::graph_util::is_property_marker(node)) {
       continue;
     }
-    // A Sub that DRIVES NOTHING is on no timing path, whatever it is: with no
-    // output pin there is no arc to annotate and no arrival to propagate. That
+    // A non-Liberty Sub that drives nothing is on no timing path. That
     // is exactly the shape of a property marker whose module declaration went
     // missing (pass.partition rebuilds the instance but does not clone the
     // `lgassert`/`fproperty` decl, so the Sub arrives here unbound and its type
     // name reads empty) -- and refusing the WHOLE design over an assertion is
-    // the wrong answer either way. A genuine black box that matters for timing
-    // has outputs and still reaches the refusal below.
-    if (node.out_edges().empty()) {
+    // the wrong answer either way. A characterized cell must still be inserted:
+    // its input pins load upstream nets even if all its outputs are unused.
+    if (node.out_edges().empty() && !is_liberty_cell(node)) {
       continue;
     }
 
@@ -2019,6 +2028,10 @@ void Pass_opentimer::build_circuit(const std::shared_ptr<hhds::Graph>& g) {
             }
           }
           timer.connect_pin(absl::StrCat(instance_name, ":", pins[bit]), wire);
+          if (is_resolved_const(driver) && bit < 64 && const_of(driver).is_just_i64()) {
+            timing_constant_pins_[absl::StrCat(instance_name, ":", pins[bit])]
+                = (static_cast<uint64_t>(const_of(driver).to_just_i64()) >> bit) & 1U;
+          }
         }
       }
     }
@@ -2128,6 +2141,47 @@ std::string Pass_opentimer::clock_qor_json() {
   return result + "}";
 }
 
+double Pass_opentimer::endpoint_tns(ot::Split split) {
+  timer.update_timing();
+  std::map<std::string, float> endpoints;
+  const auto                   add = [&](const std::string& name, std::optional<float> slack) {
+    if (!slack || !std::isfinite(*slack)) {
+      return;
+    }
+    auto [it, inserted] = endpoints.emplace(name, *slack);
+    if (!inserted) {
+      it->second = std::min(it->second, *slack);
+    }
+  };
+  for (const auto& [name, output] : timer.primary_outputs()) {
+    for (auto tran : {ot::RISE, ot::FALL}) {
+      add(name, output.slack(split, tran));
+    }
+  }
+  for (const auto& test : timer.tests()) {
+    for (auto tran : {ot::RISE, ot::FALL}) {
+      add(test.constrained_pin().name(), test.slack(split, tran));
+    }
+  }
+  // OpenSTA counts the worst check/transition once per endpoint. OpenTimer's
+  // report_tns sums transitions and tests, which double-counts many endpoints.
+  double total        = 0;
+  negative_endpoints_ = "[";
+  bool comma          = false;
+  for (const auto& [name, slack] : endpoints) {
+    total += std::min(0.0f, slack);
+    if (slack < 0) {
+      if (comma) {
+        negative_endpoints_ += ',';
+      }
+      negative_endpoints_ += std::format("[\"{}\",{:.9g}]", jesc(name), slack);
+      comma                = true;
+    }
+  }
+  negative_endpoints_ += ']';
+  return total;
+}
+
 void Pass_opentimer::compute_timing(const std::shared_ptr<hhds::Graph>& g) {
   TRACE_EVENT("pass", "OPENTIMER_compute_timing");
 
@@ -2226,7 +2280,8 @@ void Pass_opentimer::compute_timing(const std::shared_ptr<hhds::Graph>& g) {
       auto pin_name = absl::StrCat(instance_name, ":", driver_pin_name_of(node, dpin));
 
       auto it = pins.find(pin_name);
-      if (it == pins.end()) {
+      if (it == pins.end() || it->second.is_ideal_clock()) {
+        del_delay(dpin);
         continue;
       }
 
@@ -2268,7 +2323,7 @@ void Pass_opentimer::compute_timing(const std::shared_ptr<hhds::Graph>& g) {
     for (const auto& [name, terminal] : timer.primary_outputs()) {
       (void)terminal;
       const auto it = pins.find(name);
-      if (it == pins.end() || physical_clock_endpoints_.contains(name)) {
+      if (it == pins.end() || physical_clock_endpoints_.contains(name) || it->second.is_ideal_clock()) {
         continue;
       }
       float delay = -1;
@@ -2460,7 +2515,14 @@ void Pass_opentimer::compute_timing(const std::shared_ptr<hhds::Graph>& g) {
         .fatal();
   }
   j += clock_qor_json();
+  std::unordered_map<std::string, std::pair<unsigned, double>> electrical_pins;
   if (physical_rc_) {
+    j += std::format(
+        ",\"case_analysis\":{{\"constant_nets\":{},\"disabled_arcs\":{},\"narrowed_arcs\":{},\"disabled_conditional_arcs\":{}}}",
+        case_constants_,
+        case_disabled_,
+        case_narrowed_,
+        case_conditions_);
     j += std::format(",\"parasitics\":{{\"model\":\"placement_flute\",\"identity\":\"{}\",\"approximate\":{},\"nets\":{}}}",
                      physical_rc_->identity,
                      physical_rc_->approximate,
@@ -2468,9 +2530,8 @@ void Pass_opentimer::compute_timing(const std::shared_ptr<hhds::Graph>& g) {
     if (const auto wns = timer.report_wns(ot::MAX); wns && std::isfinite(*wns)) {
       j += std::format(",\"wns\":{:.9g}", *wns);
     }
-    if (const auto tns = timer.report_tns(ot::MAX); tns && std::isfinite(*tns)) {
-      j += std::format(",\"tns\":{:.9g}", *tns);
-    }
+    j += std::format(",\"tns\":{:.12g},\"tns_model\":\"worst_per_endpoint\"", endpoint_tns(ot::MAX));
+    j += ",\"negative_setup_endpoints\":" + negative_endpoints_;
     if (const auto hold = timer.report_wns(ot::MIN); hold && std::isfinite(*hold)) {
       j += std::format(",\"hold_wns\":{:.9g}", *hold);
     }
@@ -2482,6 +2543,9 @@ void Pass_opentimer::compute_timing(const std::shared_ptr<hhds::Graph>& g) {
     unsigned violations = 0;
     double   excess     = 0;
     for (const auto& [name, pin] : timer.pins()) {
+      if (pin.is_ideal_clock()) {
+        continue;
+      }
       for (const auto split : {ot::MIN, ot::MAX}) {
         const auto* cp = pin.cellpin(split);
         if (!cp) {
@@ -2490,7 +2554,10 @@ void Pass_opentimer::compute_timing(const std::shared_ptr<hhds::Graph>& g) {
         const auto check = [&](double actual, const std::optional<float>& limit) {
           if (limit && *limit > 0 && actual > *limit * (1 + 1e-6)) {
             ++violations;
-            excess += actual / *limit - 1;
+            excess       += actual / *limit - 1;
+            auto& detail  = electrical_pins[name];
+            ++detail.first;
+            detail.second += actual / *limit - 1;
           }
         };
         for (const auto tran : {ot::RISE, ot::FALL}) {
@@ -2509,6 +2576,7 @@ void Pass_opentimer::compute_timing(const std::shared_ptr<hhds::Graph>& g) {
       }
     }
     j += std::format(",\"electrical\":{{\"violations\":{},\"excess\":{:.9g}}}", violations, excess);
+    j += ",\"electrical_pin_feedback\":true";
   }
   if (physical_rc_) {
     const double cap_scale  = timer.capacitance_unit() ? timer.capacitance_unit()->value() / 1e-15 : 1;
@@ -2526,7 +2594,10 @@ void Pass_opentimer::compute_timing(const std::shared_ptr<hhds::Graph>& g) {
       }
       comma               = true;
       j                  += std::format("{{\"pin\":\"{}\",\"timer_pin\":\"{}\"", jesc(physical), jesc(name));
-      const auto extreme  = [&](auto getter, bool largest) {
+      if (const auto electrical = electrical_pins.find(name); electrical != electrical_pins.end()) {
+        j += std::format(",\"violations\":{},\"electrical_excess\":{:.9g}", electrical->second.first, electrical->second.second);
+      }
+      const auto extreme = [&](auto getter, bool largest) {
         std::optional<float> value;
         for (const auto tran : {ot::RISE, ot::FALL}) {
           if (const auto v = getter(tran); v && std::isfinite(*v)) {
@@ -2549,7 +2620,7 @@ void Pass_opentimer::compute_timing(const std::shared_ptr<hhds::Graph>& g) {
       }
       const auto* cp = pin.cellpin(ot::MAX);
       field("capacitance_ff", cp ? cp->capacitance : std::optional<float>{}, cap_scale);
-      bool clock = cp && cp->is_clock.value_or(false);
+      bool clock = pin.is_ideal_clock() || (cp && cp->is_clock.value_or(false));
       for (const auto& [clock_name, target] : timing_targets_) {
         (void)clock_name;
         clock |= std::find(target.ports.begin(), target.ports.end(), name) != target.ports.end();

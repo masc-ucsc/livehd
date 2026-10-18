@@ -10,7 +10,7 @@
 <nav><span class="brand">LiveHD TODO</span><a href="../index.html">← All tasks</a></nav>
 <main>
 <h1><strong class="item-id">3p</strong> Placement feedback for synthesis</h1>
-<p>Pending placement work, reviewed 2026-10-16. Prioritize independent validation and
+<p>Pending placement work, reviewed 2026-10-17. Prioritize independent validation and
 repair quality before widening optimization bounds; the current flow and its limits
 are documented in <a href="../../pass/place/README.md">pass/place/README.md</a>.</p>
 
@@ -25,12 +25,12 @@ selected-grid GP target and preserve all 1040 SRAM positions, masters and
 orientations plus IO locations. HPWL becomes 4.644/4.740 m. R8 and R4 also finish legal and below overflow 0.1,
 with HPWL 4.936/11.809 m; retain the R4 regression as a measured outcome.
 Downstream CTS/routing is still in progress; no routed-completion claim yet.
-The <a href="placement-results/eyeriss-cts-route-20261016/comparison.html">comparison report</a>
+The <a href="../../repros/placement-results/eyeriss-cts-route-20261016/comparison.html">comparison report</a>
 includes selectable boxes and SRAM highlights for all four ClusterGroups and
 36 ProcessingElements. These are visualization envelopes only; no placement
 algorithm, geometry or bounds change. Live artifacts remain in
 <code>repros/eyeriss_cts_route_20261016/comparison.html</code>.</p>
-<p>The LiveHD-only <a href="placement-results/eyeriss-cluster-template-20261016/comparison.html">quarter-area ClusterGroup SRAM-template experiment</a>
+<p>The LiveHD-only <a href="../../repros/placement-results/eyeriss-cluster-template-20261016/comparison.html">quarter-area ClusterGroup SRAM-template experiment</a>
 finishes legal at 4.816 m native HPWL versus 4.934 m for existing R8 (−2.40%).
 It places one representative in a quarter core, copies only its 258 SRAM locations
 into four quadrants, then re-places the full design with 1032 SRAMs fixed and all
@@ -43,7 +43,7 @@ partly offset by more top-level/inter-cluster wiring.</p>
 including the IO pilot, macro-source pass and fixed-macro cell pass. Earlier
 mixed-grid tables are historical. The rejected R8H template implementation is
 removed; R8H2 is also a rejected experiment and is not a comparison target.</p>
-<p>The <a href="placement-results/eyeriss-r8h3-repulsion-20261016/comparison.html">stronger R8H3 comparison</a>
+<p>The <a href="../../repros/placement-results/eyeriss-r8h3-repulsion-20261016/comparison.html">stronger R8H3 comparison</a>
 uses &gt;1 repeated copy, &gt;2 macros and &gt;1000 equivalent cells of physical area,
 with the same unit for eligibility and circle sizing. GP starts from scratch;
 all candidate/color standard cells and macros receive weak pulls toward each of
@@ -71,7 +71,7 @@ with maximum relative penetration 11.15%, all among smaller candidates. The larg
 ClusterGroup circles remain separated. Evaluate this before relative-shape reuse;
 GP target convergence does not establish stationary wirelength or routed benefit.
 No new STA/routing claim. R8H3 stays opt-in; every GP stage remains 64×64.</p>
-<p>The opt-in <a href="placement-results/eyeriss-fp-snap-20261016/comparison.html">floorplan snap evaluation</a>
+<p>The opt-in <a href="../../repros/placement-results/eyeriss-fp-snap-20261016/comparison.html">floorplan snap evaluation</a>
 separates floorplan GP, circle-target snapping and frozen-target refinement, then
 uses the ordinary fixed-macro cell pass. All stages use 64×64. Mesh, staggered
 triangle and tree examples pass; all 204 Eyeriss target circles separate, with
@@ -84,7 +84,7 @@ unchanged. <strong>Pending:</strong> investigate target/actual-mean consistency 
 shared color membership, preserve separation through refinement, and isolate snap
 from the additional GP stage before considering promotion. No routed/timing benefit
 is established.</p>
-<p>The <a href="placement-results/eyeriss-fp-3k-20261016/comparison.html">3K candidate controls and hierarchy-local snap evaluation</a>
+<p>The <a href="../../repros/placement-results/eyeriss-fp-3k-20261016/comparison.html">3K candidate controls and hierarchy-local snap evaluation</a>
 reruns the recent R8H3 flows with explicit <code>synth.place.fp.minimum=3000</code>
 and 64×64 bins throughout. All 204 candidates remain: the smallest selected scope
 is 4.578K equivalent cells, so the threshold increase alone changes no placement.
@@ -101,7 +101,7 @@ points remain distinct from weakly anchored measured means: four of six large
 ClusterGroup circle pairs overlap after the local-snap final cell pass. Preserve
 separation through refinement before promoting this experimental flow. The 1K
 reports are preserved; no new routing/timing claim.</p>
-<p>The <a href="placement-results/eyeriss-macro-snap-controls-20261016/comparison.html">SRAM snap before locking comparison</a>
+<p>The <a href="../../repros/placement-results/eyeriss-macro-snap-controls-20261016/comparison.html">SRAM snap before locking comparison</a>
 adds exactly two runs, both with explicit <code>synth.place.macro.snap=true</code>
 before locking SRAMs. Two design-GP passes (skip centroid snap/refinement) give
 4.644 m final HPWL; three passes with hierarchy-local centroid snap/refinement give
@@ -124,7 +124,7 @@ paths/counts in reports. The configured area threshold remains separate (3K in
 the current experiments). Four focused native/LiveHD checks pass. A discovery-only
 native replay of saved Eyeriss data gives 76 candidates: four ClusterGroups,
 36 input-activation SRAM banks and 36 PEs, with four/nine/nine copies per parent.
-The <a href="placement-results/eyeriss-parent4-20261016/comparison.html">76-candidate placement rerun</a>
+The <a href="../../repros/placement-results/eyeriss-parent4-20261016/comparison.html">76-candidate placement rerun</a>
 keeps SRAM snapping on before locking, 3K minimum and 64×64 bins. Two passes reach
 <strong>4.559 m</strong> final legal HPWL (−1.83% versus the recorded 204-candidate
 snap-on control), with 28.42 s synthesis / 222.81 s placement-export. Three passes
@@ -135,7 +135,7 @@ stop threshold; density stopping does not establish stationary wirelength.
 Independent physical/halo/connectivity/IO and fixed-SRAM audits pass. The report
 includes stage PNGs, hierarchy overlays, centroid before/after-snap PNGs, stage
 HPWL and phase times. The preceding 204-candidate tables remain unchanged.</p>
-<p><strong>Committed source defaults:</strong> LiveHD <code>c0451c7b0</code> and native RAPIDPlace/DREAMPlace <code>875d328</code> (local commits only) enable the three-pass floorplan/macro/cell flow, centroid and SRAM snapping, 3K/four-per-parent eligibility, 64×64 bins and the evaluated repulsion/routability settings. The final pass fixes only macros/IO and removes centroid anchors. Reports and documentation remain uncommitted. A <a href="placement-results/asap7-defaults-20261016/comparison.html">four-design ASAP7 comparison</a> against HighTide/OpenROAD, including CTS/routing and OpenSTA scoring, is in progress. LFSR completes both routed flows with shared physical inputs. The initial Eyeriss RTLMP failure is repaired by a validated one-level macro-placement setup; its complete baseline rebuild is pending. The integrated LiveHD final pass exposed the native automatic-filler allocation limit; a bounded automatic-sizing change awaits explicit approval. Technology-file RC input (<code>synth.place.tech_rc</code>, commit <code>e551bc0ab</code>) is implemented and verified on the platform setRC file.</p>
+<p><strong>Committed source defaults:</strong> LiveHD <code>c0451c7b0</code> and native RAPIDPlace/DREAMPlace <code>875d328</code> (local commits only) enable the three-pass floorplan/macro/cell flow, centroid and SRAM snapping, 3K/four-per-parent eligibility, 64×64 bins and the evaluated repulsion/routability settings. The final pass fixes only macros/IO and removes centroid anchors. Reports and documentation remain uncommitted. A <a href="../../repros/placement-results/asap7-defaults-20261016/comparison.html">four-design ASAP7 comparison</a> against HighTide/OpenROAD, including CTS/routing and OpenSTA scoring, is in progress. LFSR completes both routed flows with shared physical inputs. The initial Eyeriss RTLMP failure is repaired by a validated one-level macro-placement setup; its complete baseline rebuild is pending. The integrated LiveHD final pass exposed the native automatic-filler allocation limit; a bounded automatic-sizing change awaits explicit approval. Technology-file RC input (<code>synth.place.tech_rc</code>, commit <code>e551bc0ab</code>) is implemented and verified on the platform setRC file.</p>
 <p>Try mixed-size placement with all supplied SRAM macros movable before selecting
 a separate macro-placement stage. The first trial omitted halos and blockages;
 the 5 µm halo rerun is also legal. Iterate through legal post-placement results before
@@ -174,11 +174,11 @@ for the historical 256-bin case. The large-grid result above is retained as
 historical evidence, not the current grid recommendation. Keep density and
 stopping calibration open: the 64-bin final frame measures 0.1425 overflow on
 the common 256-bin evaluation grid despite meeting its selected-grid target.
-See the committed <a href="placement-results/eyeriss-20261016/comparison.html">grid
+See the local <a href="../../repros/placement-results/eyeriss-20261016/comparison.html">grid
 comparison with PNGs and per-run settings</a>. H2D remains off for these runs.</p>
 <p><strong>Macro alignment and soft snapping:</strong> both are implemented as
 independent opt-in controls. The twelve-case
-<a href="placement-results/eyeriss-alignment-20261016/comparison.html">alignment/snap
+<a href="../../repros/placement-results/eyeriss-alignment-20261016/comparison.html">alignment/snap
 comparison</a> includes before/after legalization PNGs, synthesis and placement
 times, native phase breakdowns, HPWL, independent halo checks and matched external
 OpenSTA/congestion probes. It evaluates R7 and the earlier inflation-only model
@@ -352,21 +352,25 @@ placed graph and in-memory OpenTimer RC/STA.</p>
   </li>
   <li><strong>C — Improve bounded Steiner repair quality and coverage.</strong>
     <ul>
-      <li>Improve buffer selection and branch/repeater placement using actual driver
-      strength, sink loads and available Liberty limits. Compare alternative topologies
-      and drive ladders before considering optimal Steiner dynamic programming. The
-      constructive heuristic can insert many buffers without improving the objective.</li>
+      <li>Reduce buffer count and residual slew violations beyond the new multi-drive,
+      required-time/RC constructive heuristic. The CNN repair-only control inserts
+      98,642 buffers versus 44,757 new instances in OpenROAD repair and retains
+      26,356 slew violations versus 5,148. Compare Pareto pruning, branch placement
+      and actual slew models while preserving fresh-timing acceptance.</li>
       <li>Preflight row capacity and local whitespace for repair candidates. A larger
       buffer trial failed legalization in the fixed frame; prefer feasible alternatives
       and explicit refusals over silently growing an imported floorplan or moving FIXED
       objects.</li>
-      <li>Address repair's 1000-distinct-location FLUTE limit and 256-new-buffer candidate
-      limit with bounded partitioning or staged repair. Simply raising limits is not a
-      scalability solution. Preserve shared trunks, packed-bit connectivity, protected
-      clock/reset networks and fixed-cell behavior.</li>
-      <li>Improve residual-violation reporting and candidate prioritization under the
-      24-trial/eight-accept budget per sizing or repair phase. Distinguish exhausted
-      search, missing characterization, unsupported geometry and timing rejection.
+      <li>Broaden validation of the spatial median-tree fallback beyond FLUTE's
+      1000-location degree. The focused 5000-sink check and full CNN repair run pass;
+      measure shared trunks, runtime and buffer count on additional designs. Preserve
+      packed bits, clock/reset protection and fixed-cell behavior.</li>
+      <li>Resolve remaining coverage refusals: missing physical nets on small buffer
+      branches and trees with no feasible driver/load alternative. The 24-evaluation
+      budget bounds batches, with fair bisection on rejection; eligibility failures
+      are separate from timing evaluations.
+      Distinguish exhausted search, missing characterization, unsupported geometry and
+      timing rejection.
       Missing Liberty limits must not be treated as verified electrical closure.</li>
       <li>Keep whole-core legality and fresh RC/STA as acceptance gates. Preserve the
       existing delay, setup, hold-violation and electrical no-regression checks; a lower
@@ -396,16 +400,145 @@ placed graph and in-memory OpenTimer RC/STA.</p>
   </li>
   <li><strong>M2 — Timing optimizer refinements.</strong>
     <ul>
-      <li>Integrate the native progress observer and continuation state with timing
-      checkpoints and evaluate retaining Nesterov state between timing-weight updates.
-      The current post-synthesis seed and
-      placed-RC rounds restart the solver; compare total work and final QoR before
-      replacing that baseline.</li>
-      <li>Evaluate slacks after virtual buffering, following the
-      <code>findResizeSlacks</code> approach. Journal and restore temporary edits so
-      weight estimation cannot leak unaccepted buffers or timing state into the graph.</li>
+      <li>Close the final cell placement and repair gap with identical fixed SRAMs in
+      the <a href="../../repros/placement-results/cnn-openroad-fixed-macros-20261017/comparison.html">CNN fixed-macro control</a>.
+      The 170,327-cell HighTide input, 65 SRAM frames and all IOs are audited exactly.
+      Corrected driver models and distribution-tree preservation bring native
+      timing and area close to the matched OpenROAD result. Corrected serial
+      detailed swapping brings CNN placement HPWL to 2.534 m versus 2.503 m
+      (+1.25%). After repair it gives 2.849 m, −3.712 ns WNS, −0.490 µs TNS and
+      26,233 µm² standard-cell area, versus 2.660 m, −4.359 ns, −0.686 µs and
+      24,407 µm² for OpenROAD. Remaining wirelength/area overhead is about 7%.
+      Continue the <a href="../../repros/placement-results/fixed-macro-validation-20261017/comparison.html">LFSR/Eyeriss fixed-frame controls</a>
+      to distinguish cell-GP, legalization and repair effects. Eyeriss replay uses
+      the saved placed netlist; its recovered original pre-placement checkpoint
+      has only 56 fewer cells. Keep these stages identified. All native GP grids
+      remain 64×64; density/stopping/obstacle experiments remain opt-in.</li>
+      <li>Complete the matched OpenROAD reference for the Eyeriss detailed-swap evaluation:
+      clamp against the inner site interval at off-grid SRAM edges, and search
+      the current bin for cells wholly inside it. Both defects have reproducing
+      native tests. On identical saved CNN GP coordinates, common HPWL improves
+      from 3.345 m to 3.004 m with slightly better OpenSTA WNS/TNS. Eyeriss now
+      accepts a legal swap result. Its corrected full native flow reaches
+      9.155 m before repair, then 9.916 m, −1.310 ns WNS and −1.109 µs TNS
+      after repair; all improve over the earlier native flow. The matched
+      timing-driven OpenROAD GP hit its three-hour guard in the second virtual
+      buffering/STA event and has no completed matched score; do not
+      substitute the saved placement made with different GP options. LFSR's
+      corrected full flow retains positive setup/hold slack and zero TNS.</li>
+      <li>Retain a live OpenTimer instance across placement and ECO timing
+      callbacks. Current callbacks construct a fresh Pass_opentimer/ot::Timer
+      and serialize a full timing report per evaluation. The result cache and
+      OpenTimer's incremental propagation API do not provide cross-callback
+      session reuse by themselves. Validate resize, buffer insertion/removal,
+      changed RC and rollback updates against fresh timing before using it.</li>
+      <li>Measure and reduce unproductive outer timing-weight refinement work.
+      The fixed-frame LFSR, CNN and Eyeriss runs accept refinement one and reject
+      refinements two and three. Each still pays full GP, legalization and detailed
+      placement; the two rejected CNN rounds spend 147.8 s in detail kernels alone
+      (Eyeriss: 129.3 s). Evaluate movement/objective-aware scheduling and a cheaper
+      candidate screen while retaining final legal placement and fresh timing checks.
+      Do not infer that blindly reducing the iteration budget preserves QoR.</li>
+      <li>Improve size proposal accuracy beyond feedback-guided retry filtering.
+      Rejected sizing batches now exclude edits near regressed setup/electrical
+      pins and retry the remaining subset, with the original delay/WNS/TNS/hold/
+      electrical checks unchanged. Accepted timing is reused across unchanged
+      pass boundaries. The <a href="../../repros/placement-results/cnn-openroad-fixed-macros-20261017/comparison.html#guided-repair">CNN evaluation</a>
+      reduces repair from 18 to 5 timing calls and 202.6 to 70.9 s; standard-cell
+      area falls 7.2%, TNS improves 1.1%, HPWL changes −0.03%, and common OpenSTA
+      WNS is 3.4 ps worse. Eyeriss repair also uses 5 instead of 18 calls
+      (218.7 instead of 634.4 s), reduces standard-cell area 21.0%, improves
+      OpenSTA WNS from −1.310 to −1.252 ns and TNS 10.3%, with HPWL −0.04%.
+      Detailed common timing is recorded in the
+      <a href="../../repros/placement-results/fixed-macro-validation-20261017/comparison.html#guided-repair">fixed-frame report</a>.
+      Whole-batch proposals still use one timing snapshot and first-slew Liberty
+      drive estimates. Investigate propagation-aware forward sizing and actual
+      transition-dependent delay tables; do not relax the acceptance checks.
+      Keep virtual GP edits, committed edits, repeated operations and unique
+      surviving instances separate; the reference committed pass is repair_design,
+      not repair_timing. No CLI default or trial-budget changes in this fix.</li>
+      <li>Investigate the SRAM-frame timing tradeoff before routed validation.
+      The completed <a href="../../repros/placement-results/cnn-livehd-macro-frame-20261018/comparison.html">four-way CNN comparison</a>
+      preserves 65 SRAMs, 365 signal IOs and placement-only connectivity.
+      On the default LiveHD SRAM frame, native/OpenROAD committed repair reaches
+      WNS −1.368/−8.316 ns and TNS −642.745/−1159.077 ns. Native worst slack improves
+      relative to the reference frame, but TNS worsens for both cell placers.
+      Prioritize WNS/TNS; HPWL and common RUDY remain proxy diagnostics.
+      Current flat-CNN defaults select zero centroid candidates. The source
+      macro checkpoint excludes two source-only estimated FIFO masters from the
+      65-SRAM geometry transfer onto the common mapped netlist. The new bounded
+      GP stop permits up to four additional iteration multiples after eligible
+      density convergence; its tests pass, and the refreshed old-frame native
+      scored metrics exactly match the prior result. CTS/routed timing, full
+      independent-netlist interchange and resynthesis-on comparisons remain pending.</li>
+      <li>Extend native sizing to compatible sequential-cell drive variants.
+      The CNN structural repair audit finds 10 FF drive changes in OpenROAD;
+      native output models cover FF timing/electrical limits, but sizing
+      candidates currently cover combinational gates. Require matching clock,
+      next-state, reset/preset and output semantics before changing a FF master.</li>
+      <li>Implement and validate native effective-capacitance/waveform wire timing.
+      The <a href="../../repros/placement-results/cnn-timing-match-20261017/comparison.html">same-placement CNN timing audit</a>
+      preserves all 436,599 cells and 67 macros and matches 437,268 RC nets exactly.
+      Zero-wire and capacitance-only setup WNS agree with OpenSTA within 0.001 ps;
+      the full identical-RC comparison still gives −3.267 ns native versus
+      −2.648 ns OpenSTA. Native total-capacitance/Elmore/moment propagation differs
+      from OpenSTA's DMP calculator. Validate the next model on small RC trees and
+      full designs, keeping RC-estimator error separate from calculator error.
+      Extend calibration to the
+      <a href="../../repros/placement-results/cnn-timing-resize-rerun-20261017/comparison.html">fresh CNN three-pass timing/resize run</a>:
+      its final native WNS is −4.097 ns versus −9.877 ns with common OpenSTA.
+      A matching AO22x2 output reports about 9.95 ps native slew versus 8733 ps
+      on the OpenSTA worst path. Inputs and RC differ, so reproduce this case
+      with identical RC before attributing the discrepancy. The good-layout
+      audit alone does not establish calibration on the new layout.</li>
+      <li>Close the remaining native sizing/buffer-repair QoR gap in the
+      <a href="../../repros/placement-results/cnn-livehd-netlist-openroad-20261017/comparison.html">CNN same-netlist OpenROAD comparison</a>.
+      New load-ranked sweeps, upstream input-loading costs, equal-area drive choices,
+      multi-drive tree proposals and physical input/macro roots improve common
+      OpenSTA WNS from −141.941 to −7.883 ns and HPWL from 6.799 to 6.556 Mµm.
+      The legal OpenROAD repair-only control reaches −5.911 ns and 5.409 Mµm.
+      Both controls preserve all 67 macro frames and skip GP; OpenROAD uses an
+      explicit 1950 µm legalization search after its default search failed.
+      Native sizing/buffering take 386.65/75.20 s with 17 fresh STA evaluations.
+      Isolate the remaining GP/repair gap on fresh runs and additional designs.
+      The fresh CNN run reaches 9.426 Mµm / −9.877 ns versus the saved OpenROAD
+      reference's 3.396 Mµm / −2.653 ns; starting physical netlists differ.
+      Its macro-pass legalization increases HPWL from 15.491 to 25.108 Mµm,
+      and final cell legalization from 12.581 to 14.404 Mµm. Keep displacement
+      costs separate from density convergence. Retained OpenTimer state remains
+      pending; native code has no OpenDB dependency.</li>
+      <li>Evaluate a less disruptive FP repair policy after the new timing
+      discrepancy is calibrated: alternate eligible repair checkpoints while
+      retaining every timing/weight update, or test delayed/budgeted/virtual
+      repair. No such algorithm change was made in the fresh comparison.
+      Three FP checkpoints made nine STA calls and accepted 545,558 master-change
+      events; logical nodes rose from 417,053 to 1,744,653, fell to 932,940,
+      then reached 510,040 final physical instances including two memory proxies.
+      The saved OpenROAD flow logs 130,223 buffer insertions and 113,627 removals;
+      its GP repairs occur after macro placement and are non-virtual. These are
+      different scopes and schedules. Native gate sizing takes 1273 s for twelve
+      trials and one accepted batch; tree repair takes 201 s. Track net and gross
+      counts separately and do not confuse driver-tree events with inserted buffers.</li>
+      <li>Refine FP timing scheduling without losing QoR. The
+      <a href="../../repros/placement-results/cnn-fp-density-timing-20261018/comparison.html">CNN
+      density/movement scheduling comparison</a> combines
+      <code>synth.place.fp.timing_after_density=true</code> with
+      <code>synth.place.fp.timing_movement=0.5</code>. It cuts FP wall time from
+      841 to 342 s and STA updates from 30 to 10, but native post-repair common
+      OpenSTA WNS worsens from −1.998 to −2.122 ns, TNS from −266.9 to −298.1 ns,
+      and HPWL rises 19.6%. Keep fixed cadence as the default. The density gate
+      blocks one interval; movement/quota filtering drives most of the reduction.
+      The movement budget is now exposed as
+      <code>synth.place.fp.timing_max_updates=10</code>, including a forced cap
+      sample. Try a less aggressive schedule before changing defaults; separately
+      evaluate in-FP repair churn because this source experiment uses resize=false.</li>
       <li>Evaluate adaptive weight selection, smoothing and early stopping using the
-      ablations in E. A rejected round is useful evidence; do not force acceptance or
+      ablations in E. The current timing-net fraction, maximum target weight and
+      update smoothing are exposed as <code>synth.place.timing_fraction=0.2</code>,
+      <code>synth.place.timing_max_weight=5</code> and
+      <code>synth.place.timing_smoothing=0.5</code>; density controls retain
+      <code>stop_overflow=0.1</code> and <code>initial_density_weight=0.01</code>.
+      A rejected round is useful evidence; do not force acceptance or
       increase weights merely to make every round change placement.</li>
       <li>Evaluate cheaper GP-only exploration followed by full legalization and fresh
       RC/STA before retaining any candidate. Approximate overlapping placement cannot
@@ -414,9 +547,26 @@ placed graph and in-memory OpenTimer RC/STA.</p>
   </li>
   <li><strong>D — Incremental update and displacement refinements.</strong>
     <ul>
-      <li>Add insert/delete/rewire observer hooks and affected-net RC/STA invalidation
-      to avoid rebuilding every private trial. Keep graph, physical pin identities,
-      geometry and timing synchronized; preserve rejection rollback.</li>
+      <li>Complete SDC exception/generated-clock coverage and broader clock validation.
+      Input driving cells, slew-threshold conversion, early/late pin-capacitance
+      ranges, unused-cell loads, constant/conditional arc sensitization and endpoint
+      TNS normalization are implemented. The CNN zero-wire audit now reports the
+      same 335 failing endpoints as OpenSTA, with maximum endpoint slack error
+      0.425 ps and matching worst setup/hold within 0.001 ps. Preserve conservative
+      coverage flags for unsupported constraints. Validate additional clocks and
+      keep post-CTS propagated timing separate.</li>
+      <li>Retain an OpenTimer session across FP resize/repair evaluations. The current
+      callback constructs a fresh timer for each trial, so calling
+      <code>update_timing()</code> does not reuse the preceding trial's timing state.
+      Apply gate replacements, insert/delete/rewire edits and changed-net RC to the
+      retained timer, then use incremental timing propagation. Validate accepted
+      and rejected edit sequences against a fresh full analysis; rejected trials
+      must restore graph, connectivity, pin identity, parasitics and constraints.</li>
+      <li>Broaden ECO row-index performance validation beyond the completed CNN
+      repair run. Sorted row intervals and exact vertical lower-bound pruning retain
+      the displacement objective and tie breaks; an exhaustive-site oracle includes
+      half-row ties. Measure dense layouts and large edits without relaxing legality
+      or moving fixed macros.</li>
       <li>Evaluate an explicit per-cell displacement radius in addition to expanding
       ECO windows. Single-cell whitespace search keeps unchanged neighbors fixed,
       but its search covers the core; a selected window alone is not a per-cell bound.</li>

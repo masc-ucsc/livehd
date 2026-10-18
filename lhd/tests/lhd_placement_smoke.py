@@ -23,7 +23,10 @@ base = ['lhd/lhd', 'synth', str(source), '--top', 'dut',
 
 def run(name, extra, success=True):
     result = root / f'{name}.json'
-    completed = subprocess.run(base + extra + ['--result-json', str(result)],
+    # Cache/geometry legs opt out; the timed leg supplies its own single value.
+    timing = [] if any(v.startswith('synth.place.timing_driven=') for v in extra) else [
+        '--set', 'synth.place.timing_driven=false']
+    completed = subprocess.run(base + timing + extra + ['--result-json', str(result)],
                                capture_output=True, text=True, timeout=15)
     assert result.is_file(), (name, completed.returncode, completed.stdout, completed.stderr)
     data = json.loads(result.read_text())

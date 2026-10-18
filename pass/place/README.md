@@ -42,9 +42,24 @@ approximate timing and removes the stage's DEF. `synth/place/qor.json` reports
 legality separately from GP convergence/overflow, plus HPWL and placed WNS/TNS
 when STA supplies them. `--emit-dir report:` exports this as `placement.json`.
 An unmet GP overflow target is reported even when legalization succeeds.
+
+GP also waits for timing-weighted HPWL and routability after geometry/density
+settle. `synth.place.post_density_factor=4` allows up to four times the first
+eligible iteration count as **additional** iterations (40 becomes a deadline
+of 200); the configured iteration cap still applies. Set it to zero to replay
+the previous density-only stop. Two consecutive 20-iteration samples must have
+relative weighted-HPWL and inflation changes at most
+`synth.place.convergence_tolerance=0.01`, and current RUDY overflow must be zero
+when routability is enabled. FP's measured OpenTimer setup violation, when
+available, must also be zero. Other phases use weighted HPWL as a timing proxy;
+they do not claim measured timing closure. New net weights or topology reset
+the stability window but never extend the continuation deadline. Satisfied
+density does not keep increasing the density penalty during this continuation.
+The GP/FP JSON records the deadline, budget exhaustion, and whether timing was
+observed; a legal placement stopped by the budget is not reported as converged.
 For the small full-sky130 trial, `synth.place.bins=16` and
-`synth.place.iterations=1500` reached the overflow target; the default 32/500
-settings legalized but did not converge in GP. This is fixture evidence, not a
+`synth.place.iterations=1500` reached the overflow target; the earlier 32-bin/500-iteration
+trial legalized but did not converge in GP. This is fixture evidence, not a
 universal tuning recommendation.
 
 Parasitics use FLUTE with the first horizontal routing layer and the following
@@ -97,7 +112,7 @@ them.
 
 `synth.place.halo=H` reserves H microns per side around every non-CORE LEF
 macro, including native-memory BLOCK proxies. `synth.place.halo=X,Y` selects
-horizontal and vertical clearance separately; the default is zero. Clearance
+horizontal and vertical clearance separately; the default is 5 µm per side. Clearance
 rounds up to the technology's site width and row height. CORE standard cells
 receive no halo. Physical dimensions, pin offsets and reported physical area
 remain unchanged; private padded occupancy participates in density, legalization
@@ -193,7 +208,12 @@ QoR reports `estimated_macros`; OpenTimer reports
 zero and data/address captures at the clock boundary, with external wire RC and
 no internal memory delay. This does not provide characterized memory timing.
 
-`synth.place.timing_driven=true` enables slack-weighted placement. OpenTimer
+Full placement uses slack-weighted placement by default
+(`synth.place.timing_driven=true`). Set it to `false` for geometric/debug
+experiments, including runs with `synth.opentimer=false`. Synthesis-only and
+GP-only commands do not enter this refinement loop by default. Full timing-driven
+placement requires OpenTimer and constrained data nets (normally from
+`synth.sdc`). OpenTimer
 first analyzes the mapped netlist with zero wire RC to seed the first placement's
 net weights. It exports physical pin names with arrival, required time, slack,
 slew and load. The seed prepares native memories and tie cells without running
@@ -202,11 +222,112 @@ The worst 20% of data nets get linear weights from 1 to 5 with 0.5 weight
 smoothing; clock nets are excluded. `synth.place.timing_rounds` chooses 1–8
 refinement checkpoints after the first placement (default 3). Each checkpoint
 starts a fresh GP/LG/DP call with fixed IO, then recomputes RC and STA. This is
-staged weighting, not an observer inside
-one uninterrupted Nesterov solve or virtual-buffer timing. Reports are in
+outer staged weighting, separate from the FP-only checkpoints below, and does
+not use virtual-buffer timing. Reports are in
 `synth/place/timing_driven.json` and placement QoR; `initial_weights` and
 `initial_timing_source` identify the post-synthesis seed. Missing constrained data
 nets are reported as an error when timing-driven placement is requested.
+
+The initial weights are copied into floorplan GP, macro GP and final cell GP.
+`synth.place.timing_fraction=0.2` selects the worst 20% of constrained non-clock
+nets, rounded up to at least one net. It applies to the initial zero-wire weights,
+FP updates and post-placement refinement. Values must be in `(0,1]`; for example,
+use `0.1` for 10% or `0.29` for 29%. A smaller fraction concentrates on the worst
+nets, while a larger fraction covers more endpoints; measure WNS/TNS to choose.
+For selected nets, let `s` be a net's worst
+pin slack, `s_worst` the worst selected slack, and `s_cutoff` the last selected
+slack. With `W = synth.place.timing_max_weight` (default 5), the target is
+`1 + (W - 1) * (s_cutoff - s)/(s_cutoff - s_worst)`; tied selected slacks get
+weight W. Other nets target weight 1. `synth.place.timing_smoothing` (default 0.5)
+is the new-target share at updates: `(1-alpha)*old + alpha*target`. Initial
+zero-wire weights use the target directly. These weights multiply both
+the smooth wirelength cost and its gradient before GP preconditioning. They do
+not directly change the configured centroid or density coefficients, or size
+cells. The native RUDY estimator also uses net weights, so critical nets count
+more toward routing demand. Detailed placement also runs with timing weights: k_reorder,
+independent_set_matching and global_swap score moves with weighted HPWL (net
+weight times net HPWL), and a pass is kept only if weighted HPWL does not
+increase and the placement stays legal.
+
+The placer reads numerical setup slack for physical driver/sink pins, taking
+the minimum available rise/fall slack per pin and then the minimum across each
+net. It does not consume legacy arrival-margin criticality colors or the
+`attrs::critical` annotation, and does not enumerate a few printed timing paths.
+This ranking is relative: the selected fraction can receive extra weight even when
+all constrained nets have positive slack. Synthesis/centroid color membership
+is preserved by the weighting path. Centroid forces remain normalized against
+the current combined wirelength/density force, so their effective scale can
+change indirectly even though their option values are unchanged.
+
+With timing-driven placement enabled, `synth.place.fp.timing_interval=50`
+recomputes placement RC and runs OpenTimer every 50 completed FP GP iterations.
+It uses the same `timing_weights()` rule and configured smoothing. Set the
+interval to `0` to disable FP timing and sizing checkpoints. No checkpoints run
+in the IO prototype, macro GP, or final-cell GP; those stages inherit the last
+available weights. Designs with no FP candidates have no FP pass/checkpoints.
+
+Set `synth.place.fp.timing_after_density=true` to defer FP timing and repair
+while the actual GP overflow exceeds `synth.place.stop_overflow` (default 0.1). This uses the
+native halo-padded density model and rechecks at each timing interval; the
+initial synthesis timing weights remain active. GP cannot declare convergence
+before the first eligible callback, and the iteration/continuation cap always
+requests one final callback, even if density never settles. The default is
+false for a controlled comparison. `fp_place.json` records every density-gate
+decision in `timing_density_schedule`, including overflow and forced callbacks.
+`timing_interval=0` still disables all FP timing and repair.
+
+Set `synth.place.fp.timing_movement` to a positive RMS movement threshold in
+bin units (for example `0.5`) to coalesce the interval checks. The first sample
+runs at the first eligible interval; later samples require area-weighted cell/macro motion
+since the last timed placement, with a progress-based budget controlled by
+`synth.place.fp.timing_max_updates` (default 10, at least 2). One update is reserved
+for the iteration/continuation cap; the default allows nine earlier updates.
+The budget applies only to movement-based scheduling, not fixed cadence;
+repair trials require additional STA calls within each update. Zero preserves
+fixed cadence; `timing_interval=0` disables both modes. Motion from centroid
+forces counts even after density settles. The CNN scheduling comparison enables `0.5`
+explicitly; the existing fixed-cadence default is unchanged.
+
+QoR tuning controls preserve the existing numerical defaults:
+
+| Option (`synth.place.` prefix) | Default | Meaning |
+| --- | ---: | --- |
+| `timing_fraction` | 0.2 | Worst-slack share of timed non-clock nets, `(0,1]` |
+| `timing_max_weight` | 5 | Worst selected net's target weight, finite, `[1,100]` |
+| `timing_smoothing` | 0.5 | New-target share `[0,1]`; zero holds prior weights |
+| `stop_overflow` | 0.1 | GP overflow threshold `[0,1]`, also used by FP timing gating |
+| `initial_density_weight` | 0.01 | Positive density-force multiplier before native gradient normalization |
+
+The density controls apply to the IO prototype and normal FP/macro/cell GP calls.
+Use `synth.place.density` separately for the requested density. Existing controls
+already expose centroid attraction/repulsion, macro overlap, alignment/snap and
+routability. Numerical epsilons and repair acceptance criteria remain internal.
+
+When `synth.place.resize=true`, each FP timing update also performs equivalent
+gate sizing, buffer removal, fanout-tree buffering and FLUTE Steiner repair.
+It uses the same Liberty interface/truth-table checks, clock/reset protection,
+fanout/capacitance/slew limits and timing/electrical acceptance as the post-place
+repair. A load-ranked sizing sweep is followed by a whole-forest repair batch,
+with at most eight individual topology fallback trials (at most four accepted).
+Each evaluated batch/trial gets fresh RC and OpenTimer. Even an empty
+sizing batch gets a second STA call. Each evaluation currently constructs a fresh
+OpenTimer instance; it does not yet retain incremental timing state between trials.
+Trials use the current overlapping GP coordinates; no legalization or macro locking
+happens during these checkpoints.
+Rejected edits restore graph, physical pins, RC and centroid membership together.
+Accepted Steiner buffers inherit their owner's scoped synthesis color and
+candidate membership, including uncolored hierarchy members.
+
+FP continues in the same native solve, preserving centroid groups, repulsion
+state and density history. A changed objective, geometry or topology resets
+Nesterov/BB momentum. Stable node identities preserve surviving positions and
+RUDY inflation; added buffers start at Steiner seeds. Resized/inserted cells
+update density charge and centroid area accounting. Accepted masters, wiring and
+weights carry through macro and final-cell placement. Per-update records are in
+`synth/place/macro/fp_timing.jsonl`; `fp_repair_<iteration>.json` records topology
+trials, and `fp_place.json` records timing/resize/repair counts. These are
+approximate placement-RC timing decisions, with legal post-placement validation
+still performed by the existing outer flow.
 
 `synth.place.resize=true` enables bounded sizing and buffer optimization after
 legal placement. Equivalent scalar logic cells must have the same ordered pin
@@ -218,18 +339,55 @@ available slew/cap/fanout limits and placement wire RC to plan candidates. Resol
 physical pins preserve individual packed-bus bits through wiring aliases.
 
 New or resized cells first search row/site-aligned whitespace while all unchanged
-cells remain fixed. If this fails, expanding local ECO placement is the fallback;
+cells remain fixed. Obstacles are indexed as sorted intervals per row, including
+all rows intersected by macro halos. Each inserted cell updates those intervals;
+rows are visited by vertical displacement and pruned only when that lower bound
+exceeds the best full displacement. The minimum-displacement objective and original
+row/site tie breaks remain unchanged and are checked against exhaustive sites. If this
+fails, expanding local ECO placement is the fallback;
 every candidate receives a whole-core legality check and fresh RC/STA. QoR marks
 the fast path as `eco.single_cell=true`. Fixed cells and clock/reset networks are
-protected and special power-domain cells are excluded. Each of the two passes
-is limited to 24 trials and eight accepted edits. `synth/place/resize.json` and
+protected and special power-domain cells are excluded. Each pass first proposes
+a design-wide sweep: one load-ranked size change per
+stressed driver, then non-overlapping buffer forests in the design-repair pass.
+Equal-area stronger variants are eligible. Drive scoring includes the effect of
+changed input capacitance on upstream cell resistance and the physical RC-tree
+path; a faster local cell can otherwise slow the whole path. Batches share physical/name indices
+and receive fresh legalization/RC/STA. Rejected sizing batches use per-pin electrical
+and setup feedback to exclude changes on newly stressed pins and their immediate
+driver/load neighbors, then retry the remaining edits. This is a proposal filter;
+the full delay, WNS, TNS, hold and electrical acceptance checks still apply.
+When feedback cannot isolate a useful subset, retries bisect the batch and visit
+disjoint subsets before descending further. Forest batches keep this bisection
+fallback. The budget is
+24 batch evaluations (at most 12 for each sweep when combined), rather than 24
+master alternatives on the first few cells. Ineligible trees are reported without
+consuming timing evaluations. Physical repair removes and rebuilds buffers jointly in the forest sweep.
+Aggregate-only diagnostic callers retain the bounded individual fallback; it
+interleaves alternatives across drivers and stops at eight accepted edits. `synth/place/resize.json` and
 `synth/place/repair.json` record their trials.
 
-Steiner repair is a constructive heuristic, not optimal dynamic programming.
-Each candidate is bounded to 256 new buffers and 1000 distinct FLUTE locations;
-oversized or unsupported candidates are refused. Its electrical estimates guide
-planning; fresh OpenTimer results control acceptance. These bounds do not
-guarantee that every design violation is repaired.
+Steiner repair uses FLUTE for at most 1000 distinct locations and a deterministic
+spatial median tree above that degree. The old 4096-leaf/256-buffer exclusions are
+removed; a one-million-buffer resource guard prevents runaway allocation. Library
+drive alternatives and several fanout partitions generate topology proposals;
+fanout four is an alternative, not a hard limit on every buffer. The actual
+Liberty cap/fanout limits constrain each selected buffer. Bottom-up selection uses sink
+required times, input capacitance, intrinsic/RC delay, output limits and upstream
+loading. Drives can differ along a tree. Root-drive limits are checked as well. Physical
+roots include primary-input bits and fixed macro outputs; fixed root cells are
+retained, while their downstream trees can change. Packed source and sink bits
+are preserved independently. A port tree inherits a scoped color/candidate only
+when its related logic has one common scoped color.
+This is a bounded constructive heuristic, not OpenROAD's full Pareto rebuffering
+algorithm. The estimates propose edits; fresh OpenTimer timing after legalization
+controls acceptance and does not guarantee timing or electrical closure.
+
+SDC clocks stay ideal before CTS unless `set_propagated_clock` requests propagation.
+The OpenTimer adapter traces source-to-clock-sink paths, preserves inversion and
+clock-to-Q timing, and retains all data-net placement RC. Ideal clock pins do not
+contribute data-net criticality or electrical repair violations. Each batch still
+constructs a fresh OpenTimer; retained incremental timing is pending.
 
 `synth.place.resynth=true` enables up to four critical-cone trials through the
 optional ABC provider. A cut walks backward through scalar combinational cells,
@@ -333,7 +491,7 @@ no Torch or Python. The focused integration check is
 `bazel test -c opt @dreamplace//dreamplace/native/... //pass/place:all
 //inou/lefdef:physical_test //pass/partition:flatten_test
 //lhd/tests:lhd_placement_macro_smoke`. Eyeriss inputs remain external; see
-the [grid comparison](../../todo/livehd/placement-results/eyeriss-20261016/comparison.html)
+the [grid comparison](../../repros/placement-results/eyeriss-20261016/comparison.html)
 for per-run settings, timing and pre/post legalization PNGs.
 
 ### Same-master/color macro alignment and snapping (opt-in)
@@ -383,7 +541,7 @@ reproduces its saved GP snapshot and final DEF byte for byte.
 R4c is the separately named corrected 256-bin rerun; it already uses the
 same charge accounting as R7. Grid size also changes native wirelength
 smoothing and RUDY resolution. See the
-[alignment/snap comparison](../../todo/livehd/placement-results/eyeriss-alignment-20261016/comparison.html)
+[alignment/snap comparison](../../repros/placement-results/eyeriss-alignment-20261016/comparison.html)
 for the twelve-case 64-bin study, pre/post legalization PNGs, phase times,
 independent halo audits and external timing/congestion measurements. R7
 snap-only preserves baseline GP and improves regularity/congestion with
@@ -436,7 +594,7 @@ iteration 0 state and `gp.json` records GP before legalization. Cache reuse is l
 No template selection/copying/release/mirroring, new hard bounds or default changes
 are introduced.
 
-The [all 64-bin Eyeriss comparison](../../todo/livehd/placement-results/eyeriss-r8h2-20261016/comparison.html)
+The [all 64-bin Eyeriss comparison](../../repros/placement-results/eyeriss-r8h2-20261016/comparison.html)
 records the from-scratch full-color experiment:204 candidates in 9 families, colors
 with up to 8 anchors, and exact replay of the disabled 64-bin baseline. Final native
 HPWL is 11.527 m versus 11.149 m (+3.39%). Both flows pass independent legality/halo
@@ -473,7 +631,7 @@ unit, density, circle radii, membership, centroids and force runtime. The subseq
 fixed-macro cell flow is unchanged. The R8H3 evaluation compares only with the
 all-64-bin R8 baseline; R8H2 is a rejected historical experiment.
 
-The [initial fixed-penalty R8H3 evaluation](../../todo/livehd/placement-results/eyeriss-r8h3-20261016/comparison.html)
+The [initial fixed-penalty R8H3 evaluation](../../repros/placement-results/eyeriss-r8h3-20261016/comparison.html)
 finishes legal at 6.799 m versus 11.149 m final HPWL (-39.02%), with the same
 64-bin reference replayed byte for byte. Total synthesis/placement-export time
 is 28.51/220.28 s versus 28.12/252.78 s. All 18 focused checks pass, and all 1040
@@ -488,7 +646,7 @@ Circle separation and wirelength settling remain open; density-target
 convergence does not establish either. No new STA/routing benefit is claimed.
 
 
-The [stronger R8H3 evaluation](../../todo/livehd/placement-results/eyeriss-r8h3-repulsion-20261016/comparison.html)
+The [stronger R8H3 evaluation](../../repros/placement-results/eyeriss-r8h3-repulsion-20261016/comparison.html)
 keeps the circle radii and r_i+r_j cutoff, increases the penalty adaptively and
 checks separation before GP can stop. With radius 304.692 µm, the large
 ClusterGroup circles require 609.385 µm center spacing. Their minimum spacing is
@@ -578,7 +736,7 @@ phase times. `fp_candidates.json` / `fp_membership.tsv` retain the candidate/col
 census. With snapshots, `fp_start.json` / `fp_gp.json` describe floorplan GP and
 `gp_start.json` / `gp.json` describe the subsequent frozen-target GP.
 
-The [64×64 Eyeriss evaluation](../../todo/livehd/placement-results/eyeriss-fp-snap-20261016/comparison.html)
+The [64×64 Eyeriss evaluation](../../repros/placement-results/eyeriss-fp-snap-20261016/comparison.html)
 fits all 204 target circles legally in 1.15 s, with 123 alignment, 36 shared-spacing
 and 32 symmetry relationships. The four large target circles form an exact
 rectangle. Mesh, staggered triangle and tree examples also center correctly.
@@ -602,7 +760,7 @@ the default at 1K. In this Eyeriss netlist all 204 selected scopes exceed 4.57K,
 so this threshold increase does not remove candidates. The hierarchy-local snap
 change is evaluated separately from that unchanged scope census.
 
-The [3K control evaluation](../../todo/livehd/placement-results/eyeriss-fp-3k-20261016/comparison.html)
+The [3K control evaluation](../../repros/placement-results/eyeriss-fp-3k-20261016/comparison.html)
 retains the 1K results and reruns direct locking, snapped refinement, unsnapped
 refinement and an independent direct-lock repeat. Direct locking gives 4.595 m
 final legal HPWL; unsnapped refinement gives 7.395 m. Hierarchy-local snapping
@@ -624,7 +782,7 @@ Both final cell invocations import SRAMs/IOs as FIXED and disable `fp` and
 their measurements are retained as controls. This explicit evaluation protocol
 does not change the global option defaults.
 
-The [SRAM-snap control comparison](../../todo/livehd/placement-results/eyeriss-macro-snap-controls-20261016/comparison.html)
+The [SRAM-snap control comparison](../../repros/placement-results/eyeriss-macro-snap-controls-20261016/comparison.html)
 runs exactly two new evaluations with this protocol. Two design-GP passes give
 4.644 m final legal HPWL; three passes with local centroid snap/refinement give
 4.769 m. Macro snapping changes the matching two-pass control by +1.05% and the
@@ -675,7 +833,7 @@ copies retains **76 candidates in three families**: four ClusterGroups, 36 input
 activation SRAM banks (nine per GLB parent), and 36 PE instances (nine per PE-cluster
 parent). The earlier 204-candidate tables used the previous whole-design rule.
 Their layouts/HPWL remain historical measurements. The
-[four-copies-per-parent evaluation](../../todo/livehd/placement-results/eyeriss-parent4-20261016/comparison.html)
+[four-copies-per-parent evaluation](../../repros/placement-results/eyeriss-parent4-20261016/comparison.html)
 reruns exactly the two requested flows with 76 candidates, 3K minimum, 64×64 bins
 and SRAM snapping before locking. Two passes give **4.559 m** final legal HPWL
 (−1.83% versus the recorded 204-candidate snap-on control); three passes give
@@ -687,3 +845,44 @@ not establish stationary wirelength. Both source/final layouts pass independent
 physical/halo/connectivity/IO checks, and all SRAM frames stay fixed through the
 last pass. The report includes stage PNGs, hierarchy overlays, small centroid
 before/after-snap PNGs, independently recomputed stage HPWL and phase times.
+
+`bazel build -c opt //tools:physical_repair` builds a native repair-only diagnostic.
+It accepts one JSON configuration containing `lg`, `top`, `def`, `liberty`,
+`tech_rc`, `sdc`, `lefs` (array), `output`, and optional `halo` (microns).
+Supply LEFs for every master in the DEF, including inferred memory proxies.
+It fills DEF cell dimensions from LEF and verifies that initial master names,
+positions and orientations are unchanged, then runs sizing and design repair
+without synthesis or GP. The output retains per-evaluation timing, both repair
+traces, phase runtimes, the final DEF and the repaired graph library.
+
+`timing_calls.jsonl` separates each diagnostic timing callback into engine/report
+generation and feedback parsing, with report byte counts. Sizing/forest trial
+records include preparation, placement/RC and timing durations, upsize/downsize
+operation counts, and the metrics that rejected a transaction. Trial operations
+include rolled-back proposals; compare final instance/master inventories to count
+surviving edits. These measurements preserve the existing acceptance checks.
+`feedback_pruned` counts edits excluded from a rejected sizing batch's next retry.
+Placement refinement and repair return their accepted timing feedback. Callers can
+move that feedback into the next repair pass only when graph, placement, RC and
+constraints are unchanged; rejected-trial timing is never reused as the baseline.
+This avoids duplicate analyses between passes, but each changed-state callback
+still builds a fresh OpenTimer instance. The diagnostic tool publishes the accepted
+analysis as `final_timing.json`; the last numbered trial can be a rejected state.
+
+### Fixed-macro cell-placement experiments
+
+The following opt-in `synth.place.*` controls preserve the existing defaults:
+
+| Option | Default | Meaning |
+| --- | --- | --- |
+| `density_upper_bound` | `false` | Underfull density bins contribute no Poisson charge. Useful with a supplied core and fixed macro obstacles. |
+| `min_iterations` | `40` | Minimum GP iterations before density convergence may stop a call. Experiments use 500 to finish wirelength smoothing. |
+| `fixed_macro_overlap` | `0` | Exact cell versus fixed-macro overlap penalty. Its Huber force points toward the nearest feasible edge and is bounded by this coefficient. The main GP ramps it quadratically over `schedule_iterations`; the IO pilot leaves it disabled. No force acts between separate objects or on fixed macros. GP sees halo-padded boxes where applicable. |
+| `detailed_iterations` | `2` | Iteration cap for each existing k-reorder, independent-set matching and global-swap kernel. |
+
+The obstacle pass hashes fixed macro footprints into the existing bin grid; it
+adds no finer density grid or cell-to-cell pair enumeration. All comparisons use
+64×64 native bins. These controls do not insert fillers or change the supplied
+core, SRAM frame, IO frame, cell masters or net connectivity during placement.
+The density/obstacle controls remain experimental; timing and legalizer movement
+must be checked on each design before adopting a different default.

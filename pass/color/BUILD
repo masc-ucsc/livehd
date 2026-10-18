@@ -16,6 +16,7 @@ cc_library(
     deps = [
         "//core",
         "//graph",
+        "//pass/liberty:liberty_dff",
         # Virtual flattening: the synth algorithms color the FLAT view of the
         # hierarchy so a region can cross module boundaries.
         "//pass/partition:flatten",

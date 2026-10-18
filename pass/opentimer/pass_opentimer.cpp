@@ -2,11 +2,15 @@
 
 #include "pass_opentimer.hpp"
 
+#include <cctype>
 #include <cmath>
 #include <cstdlib>
 #include <format>
 #include <fstream>
 #include <iostream>
+#include <map>
+#include <regex>
+#include <stdexcept>
 #include <string>
 #include <vector>
 
@@ -240,6 +244,173 @@ bool sdc_number(const std::string& t, float& out) {
   return true;
 }
 
+// Restricted Tcl substitutions used by ordinary generated SDCs. Port selectors
+// remain symbolic for the timing reader; arbitrary Tcl commands are not executed.
+class Sdc_expression {
+  // Tcl `/` on two integers floors; track integer-ness so `[expr 5/2]` is 2.
+  struct Num {
+    double v;
+    bool   is_int;
+  };
+  const char* cursor;
+  unsigned    depth = 0;
+  void        space() {
+    while (std::isspace(static_cast<unsigned char>(*cursor))) {
+      ++cursor;
+    }
+  }
+  Num atom() {
+    space();
+    if (++depth > 64) {
+      throw std::runtime_error("SDC expression nesting exceeds 64");
+    }
+    Num value{0, false};
+    if (*cursor == '+' || *cursor == '-') {
+      const bool minus = *cursor++ == '-';
+      value            = atom();
+      if (minus) {
+        value.v = -value.v;
+      }
+    } else if (*cursor == '(') {
+      ++cursor;
+      value = sum();
+      space();
+      if (*cursor++ != ')') {
+        throw std::runtime_error("unclosed SDC expression");
+      }
+    } else {
+      char* end = nullptr;
+      value.v   = std::strtod(cursor, &end);
+      if (cursor == end) {
+        throw std::runtime_error("unsupported SDC expression operand");
+      }
+      std::string_view token(cursor, static_cast<size_t>(end - cursor));
+      const bool       hex = token.size() > 2 && token[0] == '0' && (token[1] == 'x' || token[1] == 'X');
+      if (hex) {
+        token.remove_prefix(2);
+      }
+      value.is_int = !token.empty() && token.find_first_not_of(hex ? "0123456789abcdefABCDEF" : "0123456789") == std::string_view::npos;
+      cursor = end;
+    }
+    --depth;
+    return value;
+  }
+  Num product() {
+    Num value = atom();
+    space();
+    while (*cursor == '*' || *cursor == '/') {
+      const char op  = *cursor++;
+      const Num  rhs = atom();
+      if (op == '/' && rhs.v == 0) {
+        throw std::runtime_error("division by zero in SDC expression");
+      }
+      const bool both_int = value.is_int && rhs.is_int;
+      value.v             = op == '*' ? value.v * rhs.v : both_int ? std::floor(value.v / rhs.v) : value.v / rhs.v;
+      value.is_int        = both_int;
+      space();
+    }
+    return value;
+  }
+  Num sum() {
+    Num value = product();
+    space();
+    while (*cursor == '+' || *cursor == '-') {
+      const char op  = *cursor++;
+      const Num  rhs = product();
+      value.v        = op == '+' ? value.v + rhs.v : value.v - rhs.v;
+      value.is_int   = value.is_int && rhs.is_int;
+      space();
+    }
+    return value;
+  }
+
+public:
+  explicit Sdc_expression(const std::string& text) : cursor(text.c_str()) {}
+  double value() {
+    const double v = sum().v;
+    space();
+    if (*cursor || !std::isfinite(v)) {
+      throw std::runtime_error("unsupported or nonfinite SDC expression");
+    }
+    return v;
+  }
+};
+std::string sdc_expand(std::string_view line, const std::map<std::string, std::string>& variables) {
+  std::string text;
+  // Tcl does not substitute inside {...}; only expr's own braced argument is
+  // evaluated with substitution (`[expr {4.0 * $cap}]`).
+  unsigned depth      = 0;
+  bool     expr_group = false;
+  for (size_t i = 0; i < line.size();) {
+    if (line[i] == '{' && depth++ == 0) {
+      const auto last = text.find_last_not_of(" \t\r");
+      expr_group      = last != std::string::npos && last >= 4 && last + 1 < text.size() && text.compare(last - 3, 4, "expr") == 0
+                   && text[last - 4] == '[';
+    } else if (line[i] == '}' && depth > 0 && --depth == 0) {
+      expr_group = false;
+    }
+    if (line[i] != '$' || (depth > 0 && !expr_group)) {
+      text += line[i++];
+      continue;
+    }
+    const bool braces = i + 1 < line.size() && line[i + 1] == '{';
+    const auto begin  = i + (braces ? 2 : 1);
+    auto       end    = begin;
+    while (end < line.size() && (std::isalnum(static_cast<unsigned char>(line[end])) || line[end] == '_')) {
+      ++end;
+    }
+    if (end == begin || (braces && (end == line.size() || line[end] != '}'))) {
+      throw std::runtime_error("unsupported SDC variable reference");
+    }
+    const std::string name(line.substr(begin, end - begin));
+    const auto        value = variables.find(name);
+    if (value == variables.end()) {
+      throw std::runtime_error("undefined SDC variable '" + name + "'");
+    }
+    text += value->second;
+    i     = end + (braces ? 1 : 0);
+    if (text.size() > 1024 * 1024) {
+      throw std::runtime_error("SDC substitution exceeds one megabyte");
+    }
+  }
+  for (size_t at = text.find("[expr "); at != std::string::npos; at = text.find("[expr ", at)) {
+    const auto end = text.find(']', at);
+    if (end == std::string::npos) {
+      throw std::runtime_error("unclosed SDC expr command");
+    }
+    auto       expression = text.substr(at + 6, end - at - 6);
+    const auto first      = expression.find_first_not_of(" \t\r");
+    const auto last       = expression.find_last_not_of(" \t\r");
+    if (first == std::string::npos) {
+      throw std::runtime_error("empty SDC expression");
+    }
+    expression = expression.substr(first, last - first + 1);
+    if ((expression.front() == '{' && expression.back() == '}') || (expression.front() == '"' && expression.back() == '"')) {
+      expression = expression.substr(1, expression.size() - 2);
+    }
+    text.replace(at, end - at + 1, std::format("{:.9g}", Sdc_expression(expression).value()));
+  }
+  // HighTide/ORFS excludes the clock input using this exact Tcl list-search
+  // idiom. Preserve an exact exclusion selector rather than evaluating Tcl or
+  // silently replacing a general list search with all_inputs -no_clocks.
+  static const std::regex exclusion(
+      R"(\[lsearch\s+((?:-[a-z]+\s+){4})\[all_inputs\]\s+(?:\[get_ports\s+([^\s\[\]{}]+)\]|([^\s\[\]{}]+))\s*\])");
+  for (size_t at = text.find("[lsearch "); at != std::string::npos; at = text.find("[lsearch ", at)) {
+    std::smatch match;
+    if (!std::regex_search(text.cbegin() + at, text.cend(), match, exclusion, std::regex_constants::match_continuous)) {
+      throw std::runtime_error("unsupported SDC list-search expression");
+    }
+    std::vector<std::string> flags = absl::StrSplit(match[1].str(), absl::ByAnyChar(" \t\r"), absl::SkipWhitespace());
+    std::sort(flags.begin(), flags.end());
+    if (flags != std::vector<std::string>{"-all", "-exact", "-inline", "-not"}) {
+      throw std::runtime_error("SDC list search requires -inline -all -not -exact");
+    }
+    const auto port = match[2].matched ? match[2].str() : match[3].str();
+    text.replace(at, match.length(), "[all_inputs -exclude_exact " + port + "]");
+  }
+  return text;
+}
+
 }  // namespace
 
 void Pass_opentimer::read_sdc(std::string_view sdc_file) {
@@ -252,8 +423,9 @@ void Pass_opentimer::read_sdc(std::string_view sdc_file) {
     return;
   }
 
-  std::string line;
-  size_t      lineno = 0;
+  std::string                        line;
+  size_t                             lineno = 0;
+  std::map<std::string, std::string> variables;
 
   // Ports named by a create_clock, so `[all_inputs -no_clocks]` can exclude
   // them. Both spellings are recorded: the clock's -name and its [get_ports].
@@ -265,14 +437,116 @@ void Pass_opentimer::read_sdc(std::string_view sdc_file) {
     livehd::diag::err("pass.opentimer", code, "io").msg("{}:{}: {}", sdc_file, lineno, what).hint(std::string{line}).fatal();
   };
 
+  // A command this pass cannot honor: fatal when annotations are critical,
+  // else flag the report incomplete and say so once per command.
+  const auto warn_ignored = [&](const std::string& directive, std::string_view why) {
+    if (critical_) {
+      fail("critical-constraints", std::format("critical annotations cannot honor unsupported SDC command '{}'", directive));
+    }
+    constraints_complete_ = false;
+    // Recognized SDC, not modelled here. Say so once: a dropped exception or
+    // load changes the number this pass reports.
+    if (reported_ignored.insert(directive).second) {
+      livehd::diag::warn("pass.opentimer", "sdc-ignored", "unsupported")
+          .msg("{}:{}: SDC command '{}' {} and was ignored", sdc_file, lineno, directive, why)
+          .emit();
+    }
+  };
+  // Directives whose lines this reader models: a bad Tcl substitution there is a hard error.
+  static const absl::flat_hash_set<std::string> modelled{"create_clock",   "set_input_delay", "set_input_transition",
+                                                         "set_output_delay", "set_load",        "set_driving_cell",
+                                                         "set_false_path",  "set_propagated_clock", "current_design"};
+
   while (std::getline(file, line)) {
     ++lineno;
-    const std::vector<std::string> tok = absl::StrSplit(line, absl::ByAnyChar(" \t\r"), absl::SkipWhitespace());
+    const auto first = line.find_first_not_of(" \t\r");
+    if (first == std::string::npos || line[first] == '#') {
+      continue;
+    }
+    std::string expanded;
+    try {
+      expanded = sdc_expand(line, variables);
+    } catch (const std::exception& e) {
+      const std::string d = line.substr(first, line.find_first_of(" \t\r", first) - first);
+      if (modelled.contains(d)) {
+        fail("sdc-syntax", e.what());
+      }
+      warn_ignored(d, std::format("uses a Tcl construct pass.opentimer cannot expand ({})", e.what()));
+      continue;
+    }
+    const std::vector<std::string> tok = absl::StrSplit(expanded, absl::ByAnyChar(" \t\r"), absl::SkipWhitespace());
     if (tok.empty() || tok[0].front() == '#') {
       continue;  // blank line or Tcl comment
     }
     const std::string& directive = tok[0];
+    if (directive == "set") {
+      if (tok.size() < 3) {
+        fail("sdc-syntax", "set requires a variable and value");
+      }
+      const auto begin = expanded.find(tok[1], expanded.find("set") + 3) + tok[1].size();
+      const auto start = expanded.find_first_not_of(" \t\r", begin);
+      auto       value = expanded.substr(start);
+      const auto end   = value.find_last_not_of(" \t\r");
+      value.resize(end + 1);
+      if (value.size() >= 2 && ((value.front() == '"' && value.back() == '"') || (value.front() == '{' && value.back() == '}'))) {
+        value = value.substr(1, value.size() - 2);
+      }
+      variables[tok[1]] = std::move(value);
+      continue;
+    }
+    if (directive == "current_design") {
+      continue;  // the selected timing graph is already bound by lhd
+    }
 
+    if (directive == "set_false_path") {
+      // Exact primary-input launch exclusion has no path-history state: removing
+      // its arrival removes only paths launched from that port. General
+      // through/to, edge- or corner-specific exceptions remain unsupported.
+      static const std::regex input_false_path(R"(\s*set_false_path\s+-from\s+\[get_ports\s+([^\s\[\]{}]+)\]\s*)");
+      std::smatch             match;
+      if (std::regex_match(expanded, match, input_false_path)) {
+        const auto name = match[1].str();
+        if (timer.primary_inputs().contains(name) && !native_start_clocks_.contains(name) && !clock_ports.contains(name)) {
+          false_start_ports_.insert(name);
+          continue;
+        }
+      }
+    }
+    if (directive == "set_propagated_clock") {
+      if (expanded.find("[all_clocks]") != std::string::npos) {
+        for (const auto& [name, target] : timing_targets_) {
+          (void)target;
+          propagated_clocks_.insert(name);
+        }
+      } else if (expanded.find("[get_clocks ") != std::string::npos) {
+        const auto begin = expanded.find("[get_clocks ") + 12, end = expanded.find(']', begin);
+        if (end == std::string::npos) {
+          fail("sdc-syntax", "set_propagated_clock requires a known clock");
+        }
+        // `[get_clocks {clk}]`, `"clk"` and `{a b}` name clocks like a bare word does.
+        const std::vector<std::string> names
+            = absl::StrSplit(expanded.substr(begin, end - begin), absl::ByAnyChar(" \t\r"), absl::SkipWhitespace());
+        bool any = false;
+        for (auto name : names) {
+          name.erase(0, name.find_first_not_of("{}\""));
+          name.erase(name.find_last_not_of("{}\"") + 1);
+          if (name.empty()) {
+            continue;
+          }
+          if (!timing_targets_.contains(name)) {
+            fail("sdc-syntax", "set_propagated_clock requires a known clock");
+          }
+          propagated_clocks_.insert(name);
+          any = true;
+        }
+        if (!any) {
+          fail("sdc-syntax", "set_propagated_clock requires a known clock");
+        }
+      } else {
+        constraints_complete_ = false;
+      }
+      continue;
+    }
     if (directive == "create_clock") {
       ++sdc_clocks_;
       bool                     supported = true, have_period = false, have_name = false;
@@ -340,38 +614,57 @@ void Pass_opentimer::read_sdc(std::string_view sdc_file) {
       } else {
         constraints_complete_ = false;
       }
-      timer.create_clock(pname, period);
-      continue;
-    }
-
-    const bool is_at   = directive == "set_input_delay";
-    const bool is_slew = directive == "set_input_transition";
-    const bool is_rat  = directive == "set_output_delay";
-    if (!is_at && !is_slew && !is_rat) {
-      if (critical_) {
-        fail("critical-constraints", std::format("critical annotations cannot honor unsupported SDC command '{}'", directive));
-      }
-      constraints_complete_ = false;
-      // Recognized SDC, not modelled here. Say so once: a dropped exception or
-      // load changes the number this pass reports.
-      if (reported_ignored.insert(directive).second) {
-        livehd::diag::warn("pass.opentimer", "sdc-ignored", "unsupported")
-            .msg("{}:{}: SDC command '{}' is not modelled by pass.opentimer and was ignored", sdc_file, lineno, directive)
-            .emit();
+      if (supported && source_ports.size() == 1 && timer.primary_inputs().contains(source_ports.front())) {
+        timer.create_clock(pname, source_ports.front(), period);
+      } else {
+        timer.create_clock(pname, period);
       }
       continue;
     }
 
-    float                    value      = 0;
-    bool                     have_value = false;
-    bool                     want_min = false, want_max = false, want_rise = false, want_fall = false;
-    bool                     all_inputs = false, all_outputs = false, no_clocks = false;
-    std::vector<std::string> ports;
-    std::string              reference_clock;
+    const bool is_at    = directive == "set_input_delay";
+    const bool is_slew  = directive == "set_input_transition";
+    const bool is_rat   = directive == "set_output_delay";
+    const bool is_load  = directive == "set_load";
+    const bool is_drive = directive == "set_driving_cell";
+    if (!is_at && !is_slew && !is_rat && !is_load && !is_drive) {
+      warn_ignored(directive, "is not modelled by pass.opentimer");
+      continue;
+    }
+
+    float                            value      = 0;
+    bool                             have_value = is_drive;
+    bool                             want_min = false, want_max = false, want_rise = false, want_fall = false;
+    bool                             all_inputs = false, all_outputs = false, no_clocks = false;
+    std::vector<std::string>         ports;
+    absl::flat_hash_set<std::string> excluded_inputs;
+    std::string                      reference_clock;
+    std::string                      drive_cell, drive_pin, drive_from;
+    std::array<float, 2>             drive_slew{0, 0};
+    bool                             skipped = false;
 
     for (std::size_t i = 1; i < tok.size(); i++) {
       const std::string& t = tok[i];
-      if (t == "-min") {
+      if (is_drive
+          && (t == "-lib_cell" || t == "-pin" || t == "-from_pin" || t == "-input_transition_rise"
+              || t == "-input_transition_fall")) {
+        if (++i >= tok.size()) {
+          fail("sdc-syntax", std::format("{} {} needs a value", directive, t));
+        }
+        if (t == "-lib_cell") {
+          drive_cell = sdc_strip(tok[i]);
+        } else if (t == "-pin") {
+          drive_pin = sdc_strip(tok[i]);
+        } else if (t == "-from_pin") {
+          drive_from = sdc_strip(tok[i]);
+        } else {
+          float transition = 0;
+          if (!sdc_number(tok[i], transition) || transition < 0) {
+            fail("sdc-syntax", "driving-cell input transition must be nonnegative");
+          }
+          drive_slew[t == "-input_transition_rise" ? ot::RISE : ot::FALL] = transition;
+        }
+      } else if (t == "-min") {
         want_min = true;
       } else if (t == "-max") {
         want_max = true;
@@ -383,7 +676,7 @@ void Pass_opentimer::read_sdc(std::string_view sdc_file) {
         if (i + 1 >= tok.size()) {
           fail("sdc-syntax", std::format("{} {} needs a value", directive, t));
         }
-        if (t == "-reference_pin" || !reference_clock.empty() || is_slew) {
+        if (t == "-reference_pin" || !reference_clock.empty() || is_slew || is_load) {
           if (critical_) {
             fail("critical-constraints", std::format("unsupported or repeated clock reference '{}'", t));
           }
@@ -411,6 +704,11 @@ void Pass_opentimer::read_sdc(std::string_view sdc_file) {
           const std::string arg = sdc_strip(tok[j]);
           if (arg == "-no_clocks" && bare == "all_inputs") {
             no_clocks = true;
+          } else if (arg == "-exclude_exact" && bare == "all_inputs") {
+            if (++j >= tok.size()) {
+              fail("sdc-syntax", "input exclusion needs a port name");
+            }
+            excluded_inputs.insert(sdc_strip(tok[j]));
           } else if (bare == "get_ports" && !arg.empty()) {
             ports.push_back(arg);
           } else if (!arg.empty()) {
@@ -432,9 +730,18 @@ void Pass_opentimer::read_sdc(std::string_view sdc_file) {
         }
       } else if (!have_value && sdc_number(t, value)) {
         have_value = true;
+      } else if (is_load || is_drive) {
+        // Options (-pin_load, -library, ...) and selectors (get_nets) not modelled:
+        // skip the whole command, as before these directives were parsed.
+        warn_ignored(directive, "uses an option or selector pass.opentimer does not model");
+        skipped = true;
+        break;
       } else {
         fail("sdc-unsupported", std::format("{} does not understand '{}'", directive, t));
       }
+    }
+    if (skipped) {
+      continue;
     }
 
     if (!have_value) {
@@ -445,7 +752,8 @@ void Pass_opentimer::read_sdc(std::string_view sdc_file) {
     }
     if (all_inputs) {
       for (const auto& [pname, _] : timer.primary_inputs()) {
-        if (!native_start_clocks_.contains(pname) && (!no_clocks || !clock_ports.contains(pname))) {
+        if (!native_start_clocks_.contains(pname) && !excluded_inputs.contains(pname)
+            && (!no_clocks || !clock_ports.contains(pname))) {
           ports.push_back(pname);
         }
       }
@@ -473,8 +781,25 @@ void Pass_opentimer::read_sdc(std::string_view sdc_file) {
     const bool do_max  = want_max || !want_min;
     const bool do_rise = want_rise || !want_fall;
     const bool do_fall = want_fall || !want_rise;
+    if (!critical_ && (is_load || is_drive)) {
+      // Validate before touching the timer so a skipped command leaves no partial state.
+      bool applicable = true;
+      for (const auto& pname : ports) {
+        applicable &= is_load ? timer.primary_outputs().contains(pname) : timer.primary_inputs().contains(pname);
+      }
+      for (const auto split : {ot::MIN, ot::MAX}) {
+        if (is_drive && applicable && ((split == ot::MIN && do_min) || (split == ot::MAX && do_max))) {
+          const auto& library = timer.celllib(split);
+          applicable &= library && library->cell(drive_cell);
+        }
+      }
+      if (!applicable) {
+        warn_ignored(directive, "names ports or a library cell this design does not have");
+        continue;
+      }
+    }
     for (const auto& pname : ports) {
-      if ((is_at || is_slew) ? !timer.primary_inputs().contains(pname) : !timer.primary_outputs().contains(pname)) {
+      if ((is_at || is_slew || is_drive) ? !timer.primary_inputs().contains(pname) : !timer.primary_outputs().contains(pname)) {
         if (critical_) {
           fail("critical-constraints", std::format("SDC port '{}' does not exist", pname));
         }
@@ -507,23 +832,76 @@ void Pass_opentimer::read_sdc(std::string_view sdc_file) {
           if (clocked && (is_at || is_rat)) {
             (is_at ? clock_inputs_ : clock_outputs_)[pname] |= bit;
           }
-          if (is_at) {
+          if (is_drive) {
+            if (!timer.primary_inputs().contains(pname)) {
+              fail("sdc-unsupported", "set_driving_cell requires primary inputs");
+            }
+            const auto& library = timer.celllib(split);
+            const auto* cell    = library ? library->cell(drive_cell) : nullptr;
+            if (!cell) {
+              fail("sdc-unsupported", "set_driving_cell needs a known -lib_cell");
+            }
+            auto output = drive_pin;
+            if (output.empty()) {
+              for (const auto& [name, pin] : cell->cellpins) {
+                if (pin.direction == ot::CellpinDirection::OUTPUT) {
+                  if (!output.empty()) {
+                    fail("sdc-unsupported", "set_driving_cell requires -pin for multiple outputs");
+                  }
+                  output = name;
+                }
+              }
+            }
+            const auto* pin = cell->cellpin(output);
+            if (!pin || pin->direction != ot::CellpinDirection::OUTPUT) {
+              fail("sdc-unsupported", "set_driving_cell requires a characterized output pin");
+            }
+            bool characterized = false;
+            for (const auto& arc : pin->timings) {
+              if (arc.is_constraint() || (!drive_from.empty() && arc.related_pin != drive_from)) {
+                continue;
+              }
+              for (auto input_tran : {ot::RISE, ot::FALL}) {
+                characterized |= arc.delay(input_tran, tran, drive_slew[input_tran], 0).has_value()
+                                 && arc.slew(input_tran, tran, drive_slew[input_tran], 0).has_value();
+              }
+            }
+            if (!characterized) {
+              fail("sdc-unsupported", "set_driving_cell output has no matching delay/slew arc");
+            }
+            timer.set_input_driver(pname, drive_cell, drive_from, output, split, tran, drive_slew);
+          } else if (is_at) {
             timer.set_at(pname, split, tran, value);
           } else if (is_slew) {
             timer.set_slew(pname, split, tran, value);
+          } else if (is_load) {
+            if (value < 0) {
+              fail("sdc-syntax", "set_load requires nonnegative capacitance");
+            }
+            if (!timer.primary_outputs().contains(pname)) {
+              fail("sdc-unsupported", "set_load requires primary outputs");
+            }
+            timer.set_load(pname, split, tran, value);
           } else {
             if (split == ot::MAX) {
               output_max_constraints_[pname] |= static_cast<uint8_t>(1U << tran);
             }
             // Setup captures at the next rising edge; hold captures at this
             // edge. SDC output delay subtracts from the required arrival.
-            const bool  resolved = (critical_ || !target_overrides_.empty()) && timing_targets_.contains(reference_clock);
+            const bool  resolved = timing_targets_.contains(reference_clock);
             const float required = resolved  ? (split == ot::MAX ? timing_targets_.at(reference_clock).period - value : -value)
                                    : clocked ? (split == ot::MAX ? virtual_clock_period_ - value : -value)
                                              : value;
             timer.set_rat(pname, split, tran, required);
           }
         }
+      }
+    }
+  }
+  for (const auto& name : false_start_ports_) {
+    for (auto split : {ot::MIN, ot::MAX}) {
+      for (auto tran : {ot::RISE, ot::FALL}) {
+        timer.set_at(name, split, tran, std::nullopt);
       }
     }
   }

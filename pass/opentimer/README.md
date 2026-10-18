@@ -120,7 +120,7 @@ top, Merkle-folded through every region body — plus the timing environment: th
 Liberty/SDC/SPEF/VCD file *content*, `--top`, `hier`, `margin`, critical options,
 `--stats`, and
 `kStaSrcSalt` (a build-time content hash of `pass/opentimer` + `pass/partition`
-+ the `@opentimer` pin, so a timing-engine change drops every record with no
++ the `@opentimer` sources (the `../OpenTimer` fork), so a timing-engine change drops every record with no
 human in the loop). Keying on the netlist rather than on the upstream sources is
 what makes it sound: `pass.abc`'s intra-run cross-name reuse means a cold and a
 warm run can legitimately produce slightly different netlists, and only the
@@ -185,8 +185,8 @@ cache hit is 0. Pretty mode renders each object on one `sta[stats]` line.
   memory read port becomes a virtual primary input arriving at 0, so
   state-to-state segments are scored; din/en/addr cones end at their driving
   gate pins. A latch is a hard timing break: transparency and time borrowing
-  are intentionally not modeled. Clock trees are not modeled. `min period ≈
-  max_delay` up to setup/clock-skew terms.
+  are intentionally not modeled. SDC clocks are ideal unless `set_propagated_clock`
+  (see SDC below). `min period ≈ max_delay` up to setup/clock-skew terms.
 - Liberty-mapped registers use clock-to-Q and setup tables. Critical marking
   rejects missing setup coverage instead of dropping capture paths.
 - ABC's builtin tie cells (`_const0_`/`_const1_`) contribute no arrival.
@@ -249,7 +249,7 @@ required-arrival interpretation and cannot certify a QoR replacement.
 - The legacy `margin` numeric coloring still back-walks only a single worst
   edge and is not restored on cache hits. Use `critical=true` for persistent
   path annotations and `lhd tool sta` queries.
-- SDC support is the small subset listed above; no SPEF-less wire-load model
+- SDC support is the restricted subset described above; no SPEF-less wire-load model
   (zero wire delay without SPEF).
 
 ## ODR warning (taskflow)
@@ -257,4 +257,77 @@ required-arrival interpretation and cannot certify a QoR replacement.
 OpenTimer bundles its own taskflow (`ot/taskflow`). Everything else in the
 `lhd` binary must use `@opentimer//:taskflow` — linking a second taskflow
 version alongside corrupts `tf::Executor` at runtime. See
-`packages/opentimer.BUILD`.
+`../OpenTimer/BUILD.bazel`.
+
+The OpenTimer dependency reads every `library(...)` group in a concatenated
+Liberty input. Each group keeps its own bus declarations, templates and defaults;
+time and capacitance are rebased independently by the timer before merging. This
+allows a picosecond/femtofarad logic library and nanosecond/picofarad SRAM models
+to share the mapping file without dropping SRAM cells or mis-scaling their arcs.
+Each LUT owns its template axes, including across library copies and colliding
+template names. Per-library input/output thresholds, slew bounds and derates
+remain attached to cells; net propagation converts slew and arrival to the
+receiving library's convention, including primary ports in the first library.
+The positional one/two-file maximum/minimum-corner convention remains unchanged.
+
+The native SDC reader supports scalar `set` variables, variable-held port
+selectors, `${name}` references, and numeric `[expr ...]` with `+ - * /` and
+parentheses. It also applies output `set_load` in Liberty capacitance units and
+binds single-source physical clocks to their input pin. Output required times
+subtract the output delay from the referenced clock period. This remains a
+restricted SDC reader: arbitrary Tcl and generated clocks
+are not modeled; unsupported constraints are reported, and physical-clock
+coverage remains conservative. `$name` is substituted outside braces, as in
+Tcl, and inside `[expr {...}]`; `[expr]` divides two integers with flooring
+integer division (`[expr 5/2]` is 2, `[expr 5/2.0]` is 2.5). A line whose
+command is not modelled, or that cannot be expanded (`$::env(X)`), warns once
+and marks the report incomplete; a modelled command with a bad substitution is
+an error. `set_load` and `set_driving_cell` with an unmodelled option
+(`-pin_load`, `-library`, ...), a selector such as `[get_nets]`, a port of the
+wrong direction or an unknown `-lib_cell` are skipped whole the same way
+(fatal only with `critical=true`).
+
+SDC clocks bound to a source port are ideal in every flow, including
+`pass.opentimer.power`: the clock port, clock buffers and ICG outputs get zero
+delay and zero slew, and `set_input_transition` on the clock port has no
+effect. Clock-to-Q arcs, ICG enable checks and data-net RC stay timed.
+`set_propagated_clock [all_clocks]` or `[get_clocks {a b}]` (names may be
+braced, quoted or listed) opts those clocks back into propagated timing.
+`set_false_path -from [get_ports X]` and `current_design` are also handled.
+
+`set_driving_cell` supports `-lib_cell`, `-pin`, `-from_pin`, min/max and rise/fall
+selection, and `-input_transition_rise`/`-input_transition_fall`. It adds the
+loaded-minus-unloaded driver delay to the external input delay and recomputes
+loaded slew whenever net capacitance changes. It includes sequential output
+arcs when a register is the specified external driver. A later
+`set_input_transition` replaces the driving-cell waveform for its selected
+corners/edges. This model does not insert a physical input buffer.
+
+Early and late timing use the corresponding `rise_capacitance_range` and
+`fall_capacitance_range` values when provided. Scalar combinational Liberty
+functions with up to six inputs propagate constants and restrict timing arcs
+to sensitizable transitions. Constant cells, buffers and controlling inputs
+keep their physical capacitance while impossible paths are removed. Known
+Liberty `when` conditions select conditional arcs and suppress their default
+fallbacks; unknown conditions remain conservative. Sequential state functions
+and three-state outputs are excluded from this combinational evaluation.
+
+Physical timing reports sum TNS once per endpoint, choosing its worst check and
+transition. `tns_model=worst_per_endpoint` and `negative_setup_endpoints` expose
+that convention; OpenTimer's underlying `report_tns()` API retains its original
+per-transition behavior. `case_analysis` reports propagated constants and arc
+restrictions. Cells with unused outputs remain present as upstream pin loads.
+
+Timing-engine comparisons should import a complete mapped placement, preserve
+masters/coordinates/orientations, and use identical Liberty, SDC and parasitics.
+The native `physical_repair` diagnostic accepts `timing_only=true` and
+`source_def=true` to import mapped DEF connectivity without HDL optimization or
+legalization. `rc_file` supplies serialized native parasitics; `zero_wire=true`
+removes wire R/C while retaining characterized pin loads. This path does not
+certify the imported layout's legality. The smaller `timing_probe` diagnostic
+times a structural Verilog/Liberty/SDC/SPEF reproducer through the same adapter.
+
+The native wire model still uses total capacitance and an Elmore/moment response.
+It differs from OpenSTA's effective-capacitance waveform calculator even with
+identical RC. Keep this modeling difference separate from Liberty/constraint
+errors and from differences between placement RC estimators.

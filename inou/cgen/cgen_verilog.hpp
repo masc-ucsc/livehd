@@ -26,7 +26,8 @@ class Cgen_verilog {
 private:
   std::string_view  odir;
   const bool        srcmap;  // emit an ECMA-426 .map sidecar
-  static inline int trace_module_cnt = 0;
+  bool              structural_wiring_ = false;
+  static inline int trace_module_cnt   = 0;
 
   // Re-keyed onto hhds::Class_index — the migration moved cgen off
   // Lgraph::Node_pin::Compact_class / Node::Compact_class.
@@ -71,6 +72,9 @@ private:
   // its operand signed so the implicit widening sign-extends), so a consumer
   // that needs to know how the net will re-read has to ask what was declared.
   absl::flat_hash_set<pin_key_t>                        pin2var_unsigned_;
+  // Width each graph-IO port was declared with (create_module_io); decl_bits_of
+  // falls back to it for IO pins that carry no `bits` attr.
+  absl::flat_hash_map<pin_key_t, int32_t>               io_decl_bits_;
   absl::flat_hash_map<node_key_t, std::string>          mux2vector;
   absl::flat_hash_map<std::string, int>                 declared_name_counts;
   // Chosen instance name per Sub node, computed once (in reserve_instance_names)
@@ -171,7 +175,7 @@ private:
   // Width the net for `dpin` was DECLARED with (see add_to_pin2var); 0 when
   // there is no net (constant / invalid pin) and 1 when it is a scalar `reg`
   // that cannot legally be indexed.
-  static int32_t decl_bits_of(const hhds::Pin_class& dpin);
+  int32_t decl_bits_of(const hhds::Pin_class& dpin) const;
 
   std::string        build_simple_expr(std::shared_ptr<File_output> fout, const hhds::Node_class& node);
   void               process_flop(std::shared_ptr<File_output> fout, const hhds::Node_class& node);
@@ -202,13 +206,17 @@ private:
   std::string memory_instance_name(const hhds::Node_class& node);
   std::string loop_instance_name(const hhds::Node_class& node, const hhds::Subnode_occurrence& occurrence);
 
-  void create_module_io(std::shared_ptr<File_output> fout, hhds::Graph* graph);
-  void create_memories(std::shared_ptr<File_output> fout, hhds::Graph* graph);
-  void create_subs(std::shared_ptr<File_output> fout, hhds::Graph* graph);
-  void create_clock_cells(std::shared_ptr<File_output> fout, hhds::Graph* graph);
-  void create_combinational(std::shared_ptr<File_output> fout, hhds::Graph* graph);
-  void create_outputs(std::shared_ptr<File_output> fout, hhds::Graph* graph);
-  void create_registers(std::shared_ptr<File_output> fout, hhds::Graph* graph);
+  void        create_module_io(std::shared_ptr<File_output> fout, hhds::Graph* graph);
+  void        create_memories(std::shared_ptr<File_output> fout, hhds::Graph* graph);
+  void        create_subs(std::shared_ptr<File_output> fout, hhds::Graph* graph);
+  void        create_clock_cells(std::shared_ptr<File_output> fout, hhds::Graph* graph);
+  void        create_combinational(std::shared_ptr<File_output> fout, hhds::Graph* graph);
+  void        create_outputs(std::shared_ptr<File_output> fout, hhds::Graph* graph);
+  static bool structural_wiring_graph(hhds::Graph* graph);
+  std::string structural_bit(const hhds::Pin_class& pin, int64_t bit) const;
+  std::string structural_range(const hhds::Pin_class& pin, int width, int64_t low = 0, bool sized_hex = false) const;
+  void        create_structural_wiring(std::shared_ptr<File_output> fout, hhds::Graph* graph);
+  void        create_registers(std::shared_ptr<File_output> fout, hhds::Graph* graph);
 
   void add_to_pin2var(std::shared_ptr<File_output> fout, const hhds::Pin_class& dpin, std::string_view name, bool out_unsigned);
   void create_locals(std::shared_ptr<File_output> fout, hhds::Graph* graph);
