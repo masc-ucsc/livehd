@@ -1,6 +1,7 @@
 // This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 #include "certificate_ir.hpp"
 
+#include <algorithm>
 #include <filesystem>
 #include <fstream>
 #include <sstream>
@@ -117,6 +118,64 @@ TEST(CertificateIR, ComparisonAndSextWidths) {
   c                = build_certificate(d, {});
   EXPECT_EQ(c.nodes[0].op.kind, Operation::Sext);
   EXPECT_EQ(c.sources[0].width, 9);
+}
+TEST(CertificateIR, DivSignednessIsPerOperandNotTheQuotients) {
+  auto signed_input = [](uint32_t id, uint32_t width) {
+    auto p      = input(id, width);
+    p.is_signed = true;
+    return p;
+  };
+  auto const_source = [](const CertificateIR& c) {
+    const auto it = std::find_if(c.sources.begin(), c.sources.end(), [](const Source& s) { return s.kind == SourceKind::Const; });
+    EXPECT_NE(it, c.sources.end());
+    return it == c.sources.end() ? Source{} : *it;
+  };
+  // Both unsigned: Op_UDiv, even when the quotient pin is signed.
+  auto d               = binary(ScanOp::Div, 8, input(2000000000, 8), input(2000000001, 4));
+  d.nodes[0].is_signed = true;
+  auto c               = build_certificate(d, {});
+  ASSERT_EQ(c.nodes.size(), 1);
+  EXPECT_EQ(c.nodes[0].op.kind, Operation::UDiv);
+  EXPECT_EQ(c.nodes[0].deps, (std::vector<uint32_t>{2000000000, 2000000001}));
+  // A signed dividend over an unsigned divisor: Op_SDiv, and the unsigned
+  // divisor gains a zero bit first so its two's-complement value is its value.
+  d                    = binary(ScanOp::Div, 8, signed_input(2000000000, 8), input(2000000001, 4));
+  c                    = build_certificate(d, {});
+  ASSERT_EQ(c.nodes.size(), 2);
+  EXPECT_EQ(c.nodes[0].op.kind, Operation::Or);
+  EXPECT_EQ(c.nodes[0].width, 5);
+  EXPECT_EQ(c.nodes[0].deps, (std::vector<uint32_t>{2000000001}));
+  EXPECT_EQ(c.nodes[1].op.kind, Operation::SDiv);
+  EXPECT_EQ(c.nodes[1].deps, (std::vector<uint32_t>{2000000000, c.nodes[0].id}));
+  // Both signed: no resize.
+  d = binary(ScanOp::Div, 8, signed_input(2000000000, 8), signed_input(2000000001, 4));
+  c = build_certificate(d, {});
+  ASSERT_EQ(c.nodes.size(), 1);
+  EXPECT_EQ(c.nodes[0].op.kind, Operation::SDiv);
+  // A negative constant makes the division signed; a non-negative constant
+  // under signed math carries a zero sign bit.
+  d = binary(ScanOp::Div, 8, input(2000000000, 8), constant("-3", 3));
+  c = build_certificate(d, {});
+  EXPECT_EQ(c.nodes.back().op.kind, Operation::SDiv);
+  EXPECT_EQ(const_source(c).width, 3);
+  EXPECT_EQ(const_source(c).const_int, "-3");
+  EXPECT_EQ(c.nodes.front().op.kind, Operation::Or);
+  EXPECT_EQ(c.nodes.front().width, 9);
+  d = binary(ScanOp::Div, 8, signed_input(2000000000, 8), constant("7", 3));
+  c = build_certificate(d, {});
+  EXPECT_EQ(c.nodes.back().op.kind, Operation::SDiv);
+  EXPECT_EQ(const_source(c).width, 4);
+}
+TEST(CertificateIR, DivConstantKeepsItsValueUnderANarrowQuotient) {
+  // `a / 200` with an 8-bit `a` has a 1-bit quotient. Materializing the divisor
+  // at the quotient width would make it 200 mod 2 = 0.
+  const auto d = binary(ScanOp::Div, 1, input(2000000000, 8), constant("200", 8));
+  const auto c = build_certificate(d, {});
+  EXPECT_EQ(c.nodes[0].op.kind, Operation::UDiv);
+  ASSERT_EQ(c.sources.size(), 2);
+  const auto& k = c.sources[0].kind == SourceKind::Const ? c.sources[0] : c.sources[1];
+  EXPECT_EQ(k.width, 8);
+  EXPECT_EQ(k.const_int, "200");
 }
 TEST(CertificateIR, MuxKeepsFalseBeforeTrue) {
   auto d = binary(ScanOp::Mux, 8, input(2000000000, 1), constant("11", 4));

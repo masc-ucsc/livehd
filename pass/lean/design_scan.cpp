@@ -56,6 +56,9 @@ PinRef capture_pin(const LeanCtx& ctx, const Node_pin& pin) {
   } else if (node_is_memory(node)) {
     result.kind = PinKind::Memory;
   }
+  if (result.kind != PinKind::Constant) {
+    result.is_signed = !livehd::graph_util::is_unsign(pin);
+  }
   return result;
 }
 

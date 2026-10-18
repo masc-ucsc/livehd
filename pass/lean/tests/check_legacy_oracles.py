@@ -27,7 +27,7 @@ def check(row):
     file = legacy / row['group'] / top / 'export' / (top + '_Lgraph.lean')
     text = file.read_text()
     vtext = (verified / row['group'] / top / 'export' / (top + '_Lgraph.lean')).read_text()
-    compiler_refusal = any(op in vtext for op in ('LGraphOp.Op_UDiv', 'LGraphOp.Op_SetMask', 'LGraphOp.Op_Const'))
+    compiler_refusal = any(op in vtext for op in ('LGraphOp.Op_UDiv', 'LGraphOp.Op_SDiv', 'LGraphOp.Op_SetMask', 'LGraphOp.Op_Const'))
     if compiler_refusal:
         # These are intentional CompileOp refusals on the baseline branch.
         # Retain its DesignCert and use interpretDesign as the independent oracle.

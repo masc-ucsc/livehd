@@ -238,10 +238,44 @@ CertificateIR build_certificate(const DesignScan& design, const CertificateOptio
         c.op.kind = Operation::Mult;
         all(n.width);
         break;
-      case ScanOp::Div:
-        c.op.kind = Operation::UDiv;
-        all(n.width);
+      case ScanOp::Div: {
+        // LGraph divides the operands' INTEGER values, truncating toward zero,
+        // and fits the quotient to the node width (cgen_sim.cpp's Div case,
+        // pass/lec/encode.cpp). Signedness is per OPERAND -- the importer keeps
+        // a signed RTLIL port's own pin and wraps an unsigned one in Get_mask --
+        // and the quotient's sign never selects the operation: two negative
+        // operands can give a proven non-negative quotient.
+        //   all unsigned -> Op_UDiv, which reads every dep unsigned;
+        //   any signed   -> Op_SDiv, which reads every dep as two's complement
+        //                   at the dep's OWN width, so an unsigned operand first
+        //                   gains a zero bit (an Or resize) and keeps its value.
+        // A constant is materialized at a width that holds its value. At the
+        // quotient width, `c / 200` under a 1-bit quotient divided by
+        // 200 mod 2 = 0.
+        const auto constant = [](const PinRef& p) { return p.kind == PinKind::Constant; };
+        const auto negative = [&](const PinRef& p) { return constant(p) && p.value.starts_with('-'); };
+        bool       signed_math = false;
+        for (const auto& p : n.operands) {
+          signed_math = signed_math || negative(p.driver) || (!constant(p.driver) && p.driver.is_signed);
+        }
+        c.op.kind = signed_math ? Operation::SDiv : Operation::UDiv;
+        for (const auto& p : n.operands) {
+          const auto& d = p.driver;
+          if (constant(d)) {
+            auto w = std::max(b.pin_width(d), d.intrinsic_width);
+            if (signed_math && !negative(d)) {
+              w = std::max(w, d.intrinsic_width + 1);
+            }
+            add(p, w);
+          } else if (signed_math && !d.is_signed) {
+            const auto w = b.pin_width(d);
+            c.deps.push_back(b.emit({Operation::Or, 0, {}}, w + 1, {b.dep(d, w)}));
+          } else {
+            add(p, n.width);
+          }
+        }
         break;
+      }
       case ScanOp::And:
         c.op.kind = Operation::And;
         all(n.width);

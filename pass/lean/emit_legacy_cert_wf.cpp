@@ -37,6 +37,7 @@ bool simple_shape(const CertNode& n) {
     case Operation::MemWriteBE: return arity == 4;
     case Operation::Mult      :
     case Operation::UDiv      :
+    case Operation::SDiv      :
     case Operation::SetMask   : return false;  // no simpleOpCertWfBool lemma for these shapes
   }
   return false;

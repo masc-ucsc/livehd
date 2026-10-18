@@ -33,6 +33,9 @@ struct PinRef {
   uint32_t    intrinsic_width = 0;
   std::string value;
   uint32_t    minimum_shift_width = 0;
+  // The driver pin is SIGNED (not `is_unsign`): its bits are read as two's
+  // complement at `width`. Constants leave it false; their sign is the value's.
+  bool        is_signed = false;
 };
 enum class ScanOp { Constant, Sum, Mult, Div, And, Or, Xor, Ror, EQ, Not, LT, GT, SHL, SRA, Mux, Sext, GetMask, SetMask, Memory };
 struct Operand {

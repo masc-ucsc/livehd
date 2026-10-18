@@ -306,6 +306,7 @@ std::string format_op(const Op& op) {
     case Operation::Sum       : return std::string("LGraphOp.Op_Sum") + " " + std::to_string(op.parameter);
     case Operation::Mult      : return std::string("LGraphOp.Op_Mult");
     case Operation::UDiv      : return std::string("LGraphOp.Op_UDiv");
+    case Operation::SDiv      : return std::string("LGraphOp.Op_SDiv");
     case Operation::And       : return std::string("LGraphOp.Op_And");
     case Operation::Or        : return std::string("LGraphOp.Op_Or");
     case Operation::Xor       : return std::string("LGraphOp.Op_Xor");
