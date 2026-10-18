@@ -293,7 +293,16 @@ through the shared clock inverter) and any other reader of the gated clock
 keeps working. Anything else (the active-low `clk | ~latch` flavour, a latch
 with a reset or open on the wrong phase, a Liberty without such a cell) stays
 native with the precise reason (`derived-clock-native`, `icg-native`); pass.color
-keeps a gate's latch in its AND's color so the two meet in one region. Latch
+keeps a gate's latch in its AND's color so the two meet in one region.
+`pass.abc.derived_clock=true` (default false) maps those registers to ordinary
+DFF / clear / preset cells instead, clocked by the mapped clock logic: the clock
+net crosses ABC as one PO per net (`__dclk<n>`, after the latch-cell POs), the
+read-back wires every cell's clock pin to that mapped net in pass 2b and the
+clock fanout tree buffers it like an ICG output. It needs a DFF cell and a flow
+that keeps every latch as crossed, like the ICG and async cells; a negedge
+register (the cells are posedge-only) and a multi-bit clock stay native. Use it
+when a physical flow follows (placement refuses a native flop) and the Liberty
+has no usable ICG cell, e.g. ASAP7 with `ICG*` dont_use. Latch
 init comes from a resetless power-on constant only (a reset-backed latch is a don't-care to ABC:
 the cell it maps to powers on X). On read-back, latches rebuild into native
 flops or plain Liberty DFF cells according to the `register` option:
