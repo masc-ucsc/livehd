@@ -38,7 +38,10 @@ import Lean.Data.Json
 open Compiler Projection Projection.Sym Projection.MemProjection Projection.HwMem
 open Std.Tactic.BVDecide
 
-def say (s : String) : IO Unit := IO.println s
+def say (s : String) : IO Unit := do
+  IO.println s
+  -- a log file is block-buffered: flush so a long run shows its progress
+  (← IO.getStdout).flush
 
 /-- The declared width of input ordinal `i` (from its `SourceDesc.input`), or 1. -/
 def inputWidthOf (D : DesignCert) (i : Nat) : Nat :=
@@ -84,17 +87,19 @@ inductive SatAnswer | unsat (proof : ByteArray) | sat (model : String) | failed 
 def solve (solver : String) (work : System.FilePath) (tag : String) (φ : BVLogicalExpr) :
     IO (SatAnswer × Nat × Nat × Nat) := do
   let t0 ← IO.monoMsNow
-  let cnf := cnfOf φ
-  let dimacs := Std.Sat.CNF.dimacs cnf
-  let t1 ← IO.monoMsNow
   let cnfPath := work / s!"{tag}.cnf"
   let lratPath := work / s!"{tag}.lrat"
+  -- forced HERE (a plain `let` is floated into its use, which put the
+  -- bit-blast in the solver's time): bit-blast + CNF + DIMACS + write
+  let (dimacs, nClauses) ← IO.lazyPure fun _ =>
+    let cnf := cnfOf φ
+    (Std.Sat.CNF.dimacs cnf, cnf.clauses.size)
   IO.FS.writeFile cnfPath dimacs
+  let t1 ← IO.monoMsNow
   let out ← IO.Process.output
     { cmd := solver, args := #[cnfPath.toString, lratPath.toString, "--lrat", "--binary=true",
                                "--quiet", "--shrink=0"] }
   let t2 ← IO.monoMsNow
-  let nClauses := cnf.clauses.size
   if out.stdout.startsWith "s UNSATISFIABLE" then
     return (.unsat (← IO.FS.readBinFile lratPath), t1 - t0, t2 - t1, nClauses)
   else if out.stdout.startsWith "s SATISFIABLE" then
@@ -255,7 +260,7 @@ def attempt (cert : String) (solver : String) (work : System.FilePath) (sf wf : 
   say s!"  {pre}obligations built in {t3 - t2} ms (symbolic evaluation of {kd} + {kd + 1} steps)"
   let wtag := if tag.isEmpty then "" else s!"{tag.map fun c => if c.isAlphanum then c else '_'}_k{kd}_"
   let (aB, bbB, satB, ncB) ← solve solver work s!"{wtag}base" φB
-  say s!"  {pre}base: {ncB} clauses; bit-blast+CNF {bbB} ms, solver {satB} ms"
+  say s!"  {pre}base: {ncB} clauses; bit-blast+CNF+write {bbB} ms, solver {satB} ms"
   let pfB ← match aB with
     | .unsat p => pure p
     | .sat model => do
@@ -268,7 +273,7 @@ def attempt (cert : String) (solver : String) (work : System.FilePath) (sf wf : 
             return ← fin 7 "COUNTEREXAMPLE NOT REPLAYED (base): the solver's model did not reproduce on the simulator"
     | .failed w => return ← fin 5 s!"SOLVER FAILED (base): {w}"
   let (aS, bbS, satS, ncS) ← solve solver work s!"{wtag}step" φS
-  say s!"  {pre}step: {ncS} clauses; bit-blast+CNF {bbS} ms, solver {satS} ms"
+  say s!"  {pre}step: {ncS} clauses; bit-blast+CNF+write {bbS} ms, solver {satS} ms"
   let pfS ← match aS with
     | .unsat p => pure p
     | .sat _ => return ← fin 1 s!"NOT K-INDUCTIVE (step) at k = {kd}: a larger k or a stronger property is needed"
