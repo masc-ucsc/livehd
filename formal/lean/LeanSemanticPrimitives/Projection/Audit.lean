@@ -14,7 +14,7 @@
   `Quot.sound`.  This is the last module the build script compiles, so a
   `sorry` or a native axiom anywhere under an audited theorem stops the build
   instead of scrolling past in its output.  The gate's own negative controls
-  are `pass/lean/tests/fp/axiom_gate_controls.lean`. -/
+  are `pass/lean/specialization/tests/axiom_gate_controls.lean`. -/
 
 import LeanSemanticPrimitives.Projection.AxiomGate
 import LeanSemanticPrimitives.Projection.Encoding

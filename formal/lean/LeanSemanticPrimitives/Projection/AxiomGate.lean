@@ -21,7 +21,7 @@
   used for a theorem stated over all designs.
 
   The negative controls (a `sorry`, a `native_decide`, an explicit axiom) live
-  in `pass/lean/tests/fp/axiom_gate_controls.lean`, outside the library, so the
+  in `pass/lean/specialization/tests/axiom_gate_controls.lean`, outside the library, so the
   library itself declares no axiom and uses no `sorry`.
 -/
 

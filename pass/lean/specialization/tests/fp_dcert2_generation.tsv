@@ -1,0 +1,31 @@
+# FUTAMURA / DCERT2 route, INTERPRETED (`lean --run`).  These numbers are NOT
+# comparable to fp_generation_latency.tsv: that table is the NATIVE -O2 binary on
+# DCERT1 certificates at fuel 200000/2000.  This one is the interpreter, on DCERT2
+# certificates, at the fuel each row names.  Route and configuration differences,
+# not an optimization result and not a regression.
+#
+# PHASES ARE DIFFERENT CLAIMS:
+#   decode     the bytes are admitted under the format's own policy. Evaluates NO
+#              support predicate.
+#   support    the six SupportedByProjection conjuncts, with concrete offenders.
+#   generate   specialize + Hw.checkResidual -> an IN-MEMORY Program. NO residual
+#              step is executed, so this is generation-and-check, not readiness.
+#   readiness  Hw.stepOf at the checked bound (separate driver, separate table).
+#
+# INTERPRETER STACK: the default `lean --run` stack aborts with "deep recursion
+# ... at 'interpreter'" inside Projection.mixTerms. `--tstack=262144` alone did
+# NOT help; `ulimit -s unlimited` with `--tstack=1048576` does. Recorded as a
+# route requirement. No further stack experiments were run.
+#
+# RSS is raw KiB as GNU time's %M reports it; GiB = KiB / 1048576.
+# szOf is measured OUTSIDE the generation interval and reads 0 ms every time --
+# the earlier claim that it was the dominant difference from total_probe is refuted.
+#
+module	bench_row	fuel_step	fuel_work	decode	support_all	generate_result	exit	load_ms	support_ms	specialize_whnf_ms	check_ms	measured_total_ms	proc_wall_s	proc_user_s	proc_sys_s	maxrss_kib	maxrss_gib	checker_bound	szof_terms	szof_ms	attempt
+picorv32	B12_picorv32	20000	200	v2 admitted	false	GENERATION REFUSED (unsupported)	2	105	7	NOT_REACHED	NOT_REACHED	112	23.10	4.89	9.80	6452072	6.15	NOT_REACHED	NOT_REACHED	NOT_REACHED	genv2/pico
+frontend_gate	B10_cva6_frontend	20000	200	v2 admitted	true	interpreter deep recursion in Projection.mixTerms (default stack)	1	NOT_REACHED	NOT_REACHED	NOT_REACHED	NOT_REACHED	NOT_REACHED	12.43	4.41	4.97	6508564	6.21	NOT_REACHED	NOT_REACHED	NOT_REACHED	genv2/frontend
+frontend_gate	B10_cva6_frontend	20000	200	v2 admitted	true	interpreter deep recursion (--tstack=262144, no ulimit change)	1	NOT_REACHED	NOT_REACHED	NOT_REACHED	NOT_REACHED	NOT_REACHED	13.85	4.49	5.90	6509012	6.21	NOT_REACHED	NOT_REACHED	NOT_REACHED	genv2/frontend_ts
+frontend_gate	B10_cva6_frontend	20000	200	v2 admitted	true	GENERATION OK	0	340	20	340149	1260	341773	385.39	345.46	11.15	6707152	6.40	31753	2213885	0	genv2/frontend_ul
+issue_stage_gate	B09_cva6_issue_scoreboard	20000	200	v2 admitted	true	interpreter deep recursion in Projection.mixTerms (default stack)	1	NOT_REACHED	NOT_REACHED	NOT_REACHED	NOT_REACHED	NOT_REACHED	12.53	4.72	5.11	6509188	6.21	NOT_REACHED	NOT_REACHED	NOT_REACHED	genv2/issue
+issue_stage_gate	B09_cva6_issue_scoreboard	20000	200	v2 admitted	true	GENERATION OUT OF FUEL at this budget	3	606	20	233	NOT_REACHED	859	60.65	5.88	10.74	6592540	6.29	NOT_REACHED	NOT_REACHED	NOT_REACHED	genv2/issue_ul
+issue_stage_gate	B09_cva6_issue_scoreboard	200000	5000	v2 admitted	true	GENERATION OK	0	681	19	381666	1698	384065	429.62	388.62	12.00	6809596	6.50	32369	2926014	0	genv2/issue_ul2

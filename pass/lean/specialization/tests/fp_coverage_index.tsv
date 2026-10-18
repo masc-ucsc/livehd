@@ -1,0 +1,55 @@
+# Coverage index over all 38 Projection modules. INVENTORY, not acceptance:
+# a row here says what exists and what carries an axiom report, and that is
+# not the same as the module's original obligations being discharged.
+#
+# COUNTING: declarations and attributes are counted on a body with block AND
+# line comments stripped, and `csimp_active` requires the attribute to be
+# attached to a `theorem`. Counting raw textual mentions gave 6 csimp where
+# there are 4 active, because the attribute is also discussed in prose.
+#
+# `audited` = theorems whose exact name appears in an axiom report from
+# Audit.lean (311) or Proto/ProtoAudit.lean (46).
+# `guards` are COMPILED-EVALUATOR checks, not kernel results.
+# `partial_defs`: a `partial def` has no kernel UNFOLDING EQUATIONS, so a
+# proof cannot reduce through its body and the usual equational reasoning is
+# unavailable. That is a limit on how it can be reasoned about, NOT a claim
+# that no theorem can mention or constrain it.
+module	theorems	audited	defs	partial_defs	csimp_active	implemented_by	guards	axiom_directives	unaudited_theorems
+Audit.lean	0	0	0	0	0	0	0	311	
+BTA.lean	8	3	26	0	0	0	0	0	erase_annAlts;erase_annArgs;erase_annFuns;erase_annTs;erase_coerce
+BindingTime.lean	0	0	20	0	0	0	0	0	
+CertLoad.lean	2	2	16	2	0	0	13	0	
+Demo.lean	0	0	33	0	0	0	28	0	
+DesignEncoding.lean	18	12	45	0	0	0	0	0	canonical_listG_aux;decBool_encBool;decInt_encInt;decMemory_encMemory;decONat_encONat;decOutput_encOutput
+Encoding.lean	23	9	54	0	0	0	0	0	decEnv_encEnv;decFunDef_encFunDef;decFunDefs_encFunDefs;decNat_encNat;decPrim_encPrim;decVals_encVals
+Gate0.lean	0	0	15	0	0	0	16	0	
+HardwareAdequacy.lean	79	74	9	0	0	0	0	0	bv_uint_ofNat_toNat;flopNextsFrom_length;prefixVals_length;prefixVals_succ;prim_bvResize_int
+HardwareInterpreter.lean	7	4	75	3	0	0	126	0	RuntimeSized.flopsSized_of_runtimeWF;RuntimeSized.of_runtimeWF;RuntimeSized_allEdges_edges
+MixProgram.lean	0	0	69	0	0	0	0	0	
+ObjectLanguage.lean	5	1	10	0	0	0	0	0	Val.beqList_refl;Val.beq_iff;Val.beq_refl;Val.eqList_of_beqList
+ObjectLanguageSemantics.lean	7	4	11	0	0	0	0	0	asBV_ofBV;evalFuelList_complete;evalFuelList_mono_of
+OperatorBridge.lean	75	50	0	0	0	0	0	0	bv_nonzero_eq;evalOp_And_cons;evalOp_And_nil;evalOp_Or_nil;evalOp_Sext_shape;p2mono
+PartialEvaluator.lean	6	2	51	0	2	0	0	0	PEnv.shiftByGo_eq;PEnv.shiftBy_zero;PVal.shiftGo_eq;PVal.shift_zero
+PartialEvaluatorCorrect.lean	156	60	24	0	0	0	0	0	Compat_pval_lookup;Compat_shift1;EvalLetsAt_append;EvalLetsAt_getElem;EvalLetsAt_length;EvalLetsAt_mono
+ProjectedStep.lean	15	13	4	0	0	0	8	0	seq_runtimeOK;tiny_runtimeOK
+ProjectionCorrect.lean	18	12	0	0	0	0	0	0	hwAP_entry_params;hwA_isOk;seq_sized;seq_wf;tiny_sized;tiny_wf
+Proto/InterpreterVariant.lean	0	0	27	7	0	0	0	0	
+Proto/LookupMirrorCheck.lean	0	0	8	0	0	0	12	0	
+Proto/MixProgramSummary.lean	0	0	69	0	0	0	0	0	
+Proto/PartialEvaluatorFast.lean	0	0	43	0	0	0	0	0	
+Proto/PartialEvaluatorShift.lean	0	0	51	1	0	0	0	0	
+Proto/PartialEvaluatorSummary.lean	6	2	54	0	2	0	0	0	PEnv.shiftByGo_eq;PEnv.shiftBy_zero;PVal.shiftGo_eq;PVal.shift_zero
+Proto/ProtoAudit.lean	0	0	0	0	0	0	0	46	
+Proto/RewriteTotal.lean	8	8	25	0	0	0	4	0	
+Proto/RunnerSupport.lean	0	0	12	0	0	0	0	0	
+Proto/S2aMirrorCheck.lean	0	0	8	0	0	0	13	0	
+Proto/VariantAdequacy.lean	23	22	2	0	0	0	0	0	hwSVarT_entry
+Proto/VariantExec.lean	0	0	10	0	0	0	22	0	
+Proto/VariantTransport.lean	16	16	5	0	0	0	0	0	
+ResidualFragment.lean	11	11	10	0	0	0	8	0	
+RuntimeEncoding.lean	31	16	22	0	0	0	7	0	EdgesRel_functional;InputRel_encInput;InputRel_functional;asBV_encBV;decBVs_encBVs;encBV_eq_mkBV
+Scaling.lean	0	0	14	3	0	0	31	0	
+SecondProjection.lean	2	2	0	0	0	0	0	0	
+SimulatorContract.lean	5	5	15	0	0	0	18	0	
+Surface.lean	0	0	13	0	0	0	0	0	
+SurfaceSemantics.lean	36	24	4	0	0	0	0	0	EvalList_lits;EvalList_lits_inj;SEval_call5;SEval_call6;SEval_call7;SEval_call8

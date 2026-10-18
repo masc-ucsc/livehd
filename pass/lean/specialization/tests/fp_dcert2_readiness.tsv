@@ -1,0 +1,21 @@
+# FP READINESS: the generated residual is EXECUTED through Hw.stepOf at the bound
+# checkResidual itself computed -- the projection's own checked simulator, not
+# interpretDesign, not the variant control interpreter, not a generic design
+# interpreter standing in for the residual.
+#
+# THIS IS NOT the generation metric.  Readiness RE-SPECIALIZES, because
+# gen_probe_v2 serializes nothing and its Program is ephemeral; that is a stated
+# reason and makes each row a NEW attempt with its own cost.  Its specialize_ms
+# must never be entered as a second measurement of generation latency.
+#
+# NOT equivalence, NOT acceptance, NOT a reference comparison, NOT kernel
+# certification, and INTERPRETED -- native linking is a separate readiness mode
+# and is not implied by any row here.
+#
+# distinct_flop_vectors counts DISTINCT recorded states (1 would mean the state
+# never changed); distinct_output_vectors likewise. They are counted, not asserted.
+# RSS is raw KiB from GNU time %M; GiB = KiB / 1048576.
+#
+module	bench_row	fuel_step	fuel_work	cycles	step_outcomes	distinct_flop_vectors	states_recorded	distinct_output_vectors	outputs_recorded	load_ms	support_ms	specialize_ms	check_ms	execute_ms	proc_wall_s	proc_user_s	proc_sys_s	maxrss_kib	maxrss_gib	exit	driver_sha256	attempt
+frontend_gate	B10_cva6_frontend	20000	200	8	ok x8	5	9	8	8	378	20	346966	1281	70500	460.89	424.18	11.58	6707540	6.40	0	dc7ec7d59dbb6ab8c0791839a30dab6c6a6b37b1209d25a4ebad17bf6f62593f	readiness/frontend
+issue_stage_gate	B09_cva6_issue_scoreboard	200000	5000	8	ok x8	5	9	8	8	614	20	381876	1685	298048	703.49	685.74	11.23	6830964	6.51	0	93761c103096fc5d38cbb5473cde2039cc742e9d53c546a3b795055ce5621484	readiness/issue
