@@ -364,6 +364,16 @@ test_suite(
     tests = [":slang_" + src.split("/")[-1].rsplit(".", 1)[0] for src in _SV_SOURCES] + [":" + name for name in _SV_REJECT_SETS],
 )
 
+# Opt-in vendor-bundle compatibility labels: `compile.slang.translate_off` and
+# `compile.slang.ignore_uninstantiated_modules` (NVDLA's generated vmod tree).
+sh_test(
+    name = "slang_vendor_bundle_options",
+    size = "small",
+    timeout = "short",
+    srcs = ["tests/vendor_bundle_options.sh"],
+    data = ["//lhd"],
+)
+
 sh_test(
     name = "slang_reachable_modules",
     size = "small",

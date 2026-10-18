@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <cstdlib>
 #include <filesystem>
+#include <format>
 #include <optional>
 
 #include "absl/strings/str_split.h"
@@ -113,6 +114,12 @@ void Inou_slang::setup() {
                         "input otherwise; the external value of a bidirectional pad is not modeled (default: inout is refused)");
   m1.add_label_optional("slang_flags",
                         "raw slang driver args ('\\x1f'-separated, e.g. -F filelist.f); supplied by `lhd --reader slang -- ...`");
+  m1.add_label_optional("ignore_uninstantiated_modules",
+                        "true to skip semantic elaboration of modules outside the --top hierarchy (same as the slang flag "
+                        "--ignore-uninstantiated-modules; syntax errors are still reported everywhere)");
+  m1.add_label_optional("translate_off",
+                        "true to drop the source text between `// synopsys translate_off` and `// synopsys translate_on` (and the "
+                        "`synthesis` spelling), as DC, Yosys and Vivado do (same as slang --translate-off-format)");
 
   register_pass(m1);
 
@@ -139,6 +146,12 @@ void Inou_slang::setup() {
                         "input otherwise; the external value of a bidirectional pad is not modeled (default: inout is refused)");
   m2.add_label_optional("slang_flags",
                         "raw slang driver args ('\\x1f'-separated, e.g. -F filelist.f); supplied by `lhd --reader slang -- ...`");
+  m2.add_label_optional("ignore_uninstantiated_modules",
+                        "true to skip semantic elaboration of modules outside the --top hierarchy (same as the slang flag "
+                        "--ignore-uninstantiated-modules; syntax errors are still reported everywhere)");
+  m2.add_label_optional("translate_off",
+                        "true to drop the source text between `// synopsys translate_off` and `// synopsys translate_on` (and the "
+                        "`synthesis` spelling), as DC, Yosys and Vivado do (same as slang --translate-off-format)");
 
   m2.add_label_optional("liberty", "Selected Liberty: typed, opaque memory-cell interfaces", "");
   register_pass(m2);
@@ -187,6 +200,26 @@ void Inou_slang::work(Eprp_var& var) {
   if (!user_has("--max-parse-depth")) {
     argv.push_back(strdup("--max-parse-depth"));
     argv.push_back(strdup("8192"));
+  }
+
+  // Opt-in vendor-bundle compatibility, spelled as `--set compile.slang.<label>=true`
+  // so a flow that cannot append raw slang args can still enable them. Both
+  // are plain slang driver policies; a raw flag of the same name wins (slang
+  // rejects a repeated optional flag).
+  const auto label_true = [&](std::string_view label) {
+    return var.has_label(label) && (var.get(label) == "true" || var.get(label) == "1");
+  };
+  const auto user_has_prefix = [&](std::string_view prefix) {
+    return std::any_of(user_flags.begin(), user_flags.end(), [&](const std::string& f) { return f.starts_with(prefix); });
+  };
+  if (label_true("ignore_uninstantiated_modules") && !user_has("--ignore-uninstantiated-modules")) {
+    argv.push_back(strdup("--ignore-uninstantiated-modules"));
+  }
+  if (label_true("translate_off") && !user_has_prefix("--translate-off-format")) {
+    for (const char* common : {"synopsys", "synthesis"}) {
+      argv.push_back(strdup("--translate-off-format"));
+      argv.push_back(strdup(std::format("{},translate_off,translate_on", common).c_str()));
+    }
   }
 
   // Forward lhd's `--top` so slang elaborates ONLY that module's hierarchy.

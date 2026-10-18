@@ -381,9 +381,14 @@ frontend/solver jobs do not exhaust the fixed LEC watchdog through resource
 contention. Synthesis integration cases in `//inou/prp:integration` run exclusively.
 
 For source bundles containing unfinished modules outside an explicit top hierarchy,
-pass `-- --ignore-uninstantiated-modules`. This opts into Slang's existing
+pass `-- --ignore-uninstantiated-modules` or `--set compile.slang.ignore_uninstantiated_modules=true`
+(the form a flow that cannot append raw slang arguments uses). This opts into Slang's existing
 `IgnoreUninstantiatedModules` policy; syntax errors and semantic errors within the
-selected hierarchy remain errors. The separate upstream argument
+selected hierarchy remain errors. Vendor RTL that hides simulation-only code between
+`// synopsys translate_off` and `// synopsys translate_on` (the `synthesis` spelling too,
+with or without a space after `//`) needs `--set compile.slang.translate_off=true`, which
+enables slang's `--translate-off-format` for both spellings; an unclosed region is still an
+error. Both are covered by `//inou/slang:slang_vendor_bundle_options`. The separate upstream argument
 `--allow-use-before-declare` supports legacy declaration ordering. Both are explicit
 compatibility choices; the frontend's strict defaults are unchanged.
 Unfinished reference RTL that must not even be parsed belongs inside a Verilog
