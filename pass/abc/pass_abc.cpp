@@ -1240,6 +1240,22 @@ void Pass_abc::map_with(Eprp_var& var, const std::function<void(livehd::abc::Map
   }
   resolve_graphs.insert(resolve_graphs.end(), ware_modules.begin(), ware_modules.end());
   resolve_graphs.insert(resolve_graphs.end(), memory_modules.begin(), memory_modules.end());
+  if (truthy(var.get("state_sweep", "false")) && !memory_modules.empty()) {
+    // A lowered memory is flops behind a read mux: a column no reader looks at is unobserved state like any other,
+    // and only now is it visible (the first sweep ran before the memories became modules).
+    if (const auto swept = livehd::synth::sweep_unobserved_state(resolve_graphs, top, nullptr);
+        swept && swept->registers_removed + swept->registers_trimmed + swept->registers_split + swept->cells_removed > 0) {
+      livehd::diag::info("pass.abc", "state-swept-memory", "progress")
+          .msg("pass.abc: state sweep of the lowered memories removed {} unobserved register(s) and {} cell(s), narrowed {} and "
+               "split {} register(s), dropping {} unobserved register bit(s)",
+               swept->registers_removed,
+               swept->cells_removed,
+               swept->registers_trimmed,
+               swept->registers_split,
+               swept->trimmed_bits)
+          .emit();
+    }
+  }
 
   auto& outlib = livehd::Hhds_graph_library::instance(out);
 
