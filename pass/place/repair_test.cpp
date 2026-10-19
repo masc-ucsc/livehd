@@ -39,6 +39,7 @@ protected:
     options.lefs                    = {"inou/lefdef/tests/data/sky130hd.tlef", "inou/lefdef/tests/data/sky130hd.lef"};
     options.liberty                 = "inou/lefdef/tests/data/sky130hd.lib";
     options.iterations              = 10;
+    options.macro_timing_interval   = 0;  // Existing repair fixtures isolate FP or post-placement repair.
     options.bins                    = 8;
     options.output_dir
         = std::string(std::getenv("TEST_TMPDIR")) + "/" + ::testing::UnitTest::GetInstance()->current_test_info()->name();
@@ -763,6 +764,54 @@ TEST_F(Buffer_repair, FloorplanMovementCoalescesStationaryTimingAndSamplesTheCap
   EXPECT_EQ(reasons, std::vector<std::string>({"initial", "final"}));
   EXPECT_EQ(calls, 2U);
 }
+TEST_F(Buffer_repair, FloorplanAndMacroTimingApplyCriticalityCurve) {
+  auto b = gate("sky130_fd_sc_hd__buf_1", "buffer", graph->get_input_pin("a"));
+  graph->get_output_pin("y").connect_driver(gate("sky130_fd_sc_hd__inv_1", "macro", b));
+  enable_floorplan();
+  options.fp_resize             = false;
+  options.macro_timing_interval = 10;
+  options.iterations            = 60;
+  options.timing_fraction       = 1;
+  options.timing_exponent       = 3;
+  options.timing_smoothing      = 1;
+  unsigned calls                = 0;
+  options.fp_evaluate           = [&](const Result& snapshot) {
+    ++calls;
+    auto score = timing(snapshot);  // Validate actual RC/STA in both stages.
+    if (calls == 3) {
+      // First macro checkpoint inherits the cubic FP objective.
+      EXPECT_DOUBLE_EQ(snapshot.net_weights.at("a"), 5);
+      EXPECT_DOUBLE_EQ(snapshot.net_weights.at("buffer:X"), 1.5);
+      EXPECT_DOUBLE_EQ(snapshot.net_weights.at("macro:Y"), 1);
+    }
+    for (auto& [name, pin] : score.pins) {
+      (void)name;
+      pin.slack = 1000;
+    }
+    // Simulate criticality changing with the macro placement. The later solve
+    // must reweight the opposite end of this path, not keep its FP weights.
+    score.pins["a"].slack        = calls <= 2 ? -100 : 0;
+    score.pins["buffer:X"].slack = -50;
+    score.pins["macro:Y"].slack  = calls <= 2 ? 0 : -100;
+    score.wns                    = 0;
+    return score;
+  };
+  const auto placed = place(*graph, flat, options);
+  EXPECT_GT(calls, 3U);
+  EXPECT_DOUBLE_EQ(placed.net_weights.at("a"), 1);
+  EXPECT_DOUBLE_EQ(placed.net_weights.at("buffer:X"), 1.5);
+  EXPECT_DOUBLE_EQ(placed.net_weights.at("macro:Y"), 5);
+  equivalent(placed);
+  for (const auto* stage : {"fp", "macro"}) {
+    std::ifstream trace(options.output_dir + "/macro/" + stage + "_timing.jsonl");
+    std::string   line;
+    ASSERT_TRUE(bool(std::getline(trace, line)));
+    rapidjson::Document d;
+    d.Parse(line.c_str());
+    ASSERT_FALSE(d.HasParseError());
+    EXPECT_EQ(d["timing_exponent"].GetDouble(), 3);
+  }
+}
 TEST_F(Buffer_repair, FloorplanDensityGateDefersTimingAndRepairUntilTheCap) {
   auto b = gate("sky130_fd_sc_hd__buf_1", "buffer", graph->get_input_pin("a"));
   graph->get_output_pin("y").connect_driver(gate("sky130_fd_sc_hd__inv_1", "macro", b));
@@ -960,6 +1009,15 @@ TEST(Timing_weights, ConfigurableFractionPreservesDefaultAndExcludesUntimedClock
   }
   EXPECT_THROW(timing_weights(rc, timing, .2, .5), std::invalid_argument);
   EXPECT_THROW(timing_weights(rc, timing, .2, std::numeric_limits<double>::infinity()), std::invalid_argument);
+  const auto cubic = timing_weights(rc, timing, .2, 5, 3);
+  EXPECT_EQ(cubic.size(), original.size());
+  EXPECT_DOUBLE_EQ(cubic.at("d0"), 5);
+  EXPECT_DOUBLE_EQ(cubic.at("d19"), 1);
+  EXPECT_NEAR(cubic.at("d10"), 1 + 4 * std::pow(9. / 19., 3), 1e-12);
+  EXPECT_GT((cubic.at("d1") - 1) / (cubic.at("d10") - 1), 7.9);
+  for (double bad : {0., .5, std::numeric_limits<double>::infinity(), std::numeric_limits<double>::quiet_NaN()}) {
+    EXPECT_THROW(timing_weights(rc, timing, .2, 5, bad), std::invalid_argument);
+  }
 }
 TEST_F(Buffer_repair, TimingWeightsExcludeClockNetsAndRevertWorsePlacements) {
   auto b = gate("sky130_fd_sc_hd__buf_1", "clock_buffer", graph->get_input_pin("a"));

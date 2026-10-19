@@ -26,7 +26,7 @@ struct Timing_feedback {
 };
 Timing_feedback               timing_feedback(std::string_view json);
 std::map<std::string, double> timing_weights(const physical::Parasitics& nets, const Timing_feedback& timing, double fraction = .2,
-                                             double max_weight = 5);
+                                             double max_weight = 5, double exponent = 1);
 struct Repair_result {
   // Own independent accepted graphs; libraries outlive the placed graph.
   std::vector<std::unique_ptr<hhds::GraphLibrary>> libraries;

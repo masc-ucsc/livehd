@@ -159,6 +159,17 @@ std::string environment_key(const Options& o, const ph::Technology& tech) {
   if (o.timing_max_weight != 5 || o.timing_smoothing != .5) {
     h = hash_text(std::format("timing-force:{}:{}", o.timing_max_weight, o.timing_smoothing), h);
   }
+  if (o.timing_exponent != 1) {
+    h = hash_text(std::format("timing-exponent:{}", o.timing_exponent), h);
+  }
+  if (o.fp_evaluate && o.macro_timing_interval > 0) {
+    h = hash_text(std::format("macro-timing:{}:{}:{}:{}",
+                              o.macro_timing_interval,
+                              o.fp_timing_movement,
+                              o.fp_timing_after_density,
+                              o.fp_timing_max_updates),
+                  h);
+  }
   if (o.stop_overflow != .1 || o.initial_density_weight != .01) {
     h = hash_text(std::format("density-controls:{}:{}", o.stop_overflow, o.initial_density_weight), h);
   }
@@ -273,6 +284,12 @@ std::string environment_key(const Options& o, const ph::Technology& tech) {
   if (o.routability && !o.routability_charge_compensation) {
     h = hash_text("inflation-only-charge", h);
   }
+  if (o.routability) {
+    h = hash_text("opaque-macro-routing-v1", h);
+    if (o.routability_macro_weight > 0) {
+      h = hash_text(std::format("macro-route-pressure:{}:{}", o.routability_macro_weight, o.routability_macro_range), h);
+    }
+  }
   if (o.cohesion > 0) {
     h = hash_text(std::format("cohesion:{}", o.cohesion), h);
   }
@@ -378,7 +395,7 @@ public:
   // instead of refusing the net; the number of bits tied this way is unknown_tied().
   explicit Resolver(const ph::Technology& t, const std::map<uint64_t, std::string>& m, bool unknown_zero = false)
       : tech(t), memories(m), unknown_as_zero(unknown_zero) {}
-  size_t unknown_tied() const { return tied_unknown.size(); }
+  size_t   unknown_tied() const { return tied_unknown.size(); }
   Endpoint bit(Pin p, int b, int depth = 0) {
     if (p.is_invalid() || b < 0) {
       throw std::runtime_error("invalid physical wiring operand");
@@ -2194,6 +2211,36 @@ Steiner_tree steiner_tree(const std::vector<Point>& points) {
   std::free(tree.branch);
   return result;
 }
+// Area-weighted RMS movement, in density bins, of the movable cells since the
+// previous timing checkpoint. Shared by the FP and macro GP checkpoints.
+static double checkpoint_movement(const dp::Design& physical, const std::vector<Cell>& cells,
+                                  const std::map<std::string, Point>& previous, int bins) {
+  double       movement = 0, area = 0;
+  const double bin_x = (physical.layout.xh - physical.layout.xl) / bins;
+  const double bin_y = (physical.layout.yh - physical.layout.yl) / bins;
+  const size_t count = std::min(cells.size(), static_cast<size_t>(std::max(0, physical.num_movable)));
+  for (size_t i = 0; i < count; ++i) {
+    if (auto old = previous.find(cells[i].name); old != previous.end()) {
+      const double cell_area  = physical.node_size_x[i] * physical.node_size_y[i];
+      movement               += cell_area
+                                * (std::pow((physical.node_x[i] - old->second.first) / bin_x, 2)
+                                   + std::pow((physical.node_y[i] - old->second.second) / bin_y, 2));
+      area                   += cell_area;
+    }
+  }
+  return area ? std::sqrt(movement / area) : 0;
+}
+// Movement/budget gate shared by the FP and macro GP timing checkpoints. One
+// budgeted update stays reserved for the final coordinates; rapid early motion
+// is coalesced so the whole solve, not just its start, is timed.
+static bool defer_timing_checkpoint(const Options& options, unsigned done, bool final, int iteration, int max_iterations,
+                                    double movement) {
+  if (options.fp_timing_movement <= 0 || !done || final) {
+    return false;
+  }
+  const unsigned quota = std::max(1, int(std::ceil(double(options.fp_timing_max_updates - 1) * iteration / max_iterations)));
+  return done >= quota || movement < options.fp_timing_movement;
+}
 static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, const Options& options) {
   if (options.retain_placement && (!options.previous || options.timing_seed || options.fp_place || options.macro_mode != "none")) {
     throw std::invalid_argument("timing snapshot requires an explicit previous placement and no placement stages");
@@ -2217,8 +2264,14 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
   }
   if (!std::isfinite(options.timing_max_weight) || options.timing_max_weight < 1 || options.timing_max_weight > max_net_weight
       || !std::isfinite(options.timing_smoothing) || options.timing_smoothing < 0 || options.timing_smoothing > 1
-      || options.fp_timing_max_updates < 2) {
+      || options.fp_timing_max_updates < 2 || !std::isfinite(options.timing_exponent) || options.timing_exponent < 1
+      || options.macro_timing_interval < 0) {
     throw std::invalid_argument("invalid timing weight/smoothing/update budget");
+  }
+  if (!std::isfinite(options.routability_macro_weight) || options.routability_macro_weight < 0
+      || !std::isfinite(options.routability_macro_range) || options.routability_macro_range <= 0
+      || options.routability_macro_range > 16) {
+    throw std::invalid_argument("invalid macro routing pressure controls");
   }
   if (!std::isfinite(options.stop_overflow) || options.stop_overflow < 0 || options.stop_overflow > 1
       || !std::isfinite(options.initial_density_weight) || options.initial_density_weight <= 0) {
@@ -2465,9 +2518,8 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
     int64_t columns = 0, rows = 0, origin_x = 0, origin_y = 0;
     if (options.die.empty() && options.core.empty()) {
       const double core_area = area / options.utilization;
-      columns = std::max<int64_t>(std::ceil(std::sqrt(core_area * options.aspect) / sw), (max_width + sw - 1) / sw);
-      rows
-          = std::max<int64_t>({2, static_cast<int64_t>(std::ceil(core_area / (columns * sw * rh))), (max_height + rh - 1) / rh});
+      columns                = std::max<int64_t>(std::ceil(std::sqrt(core_area * options.aspect) / sw), (max_width + sw - 1) / sw);
+      rows = std::max<int64_t>({2, static_cast<int64_t>(std::ceil(core_area / (columns * sw * rh))), (max_height + rh - 1) / rh});
       v.fp.die = {0, 0, double(columns * sw), double(rows * rh)};
     } else {
       // A benchmark-fixed frame (ORFS DIE_AREA/CORE_AREA, microns). The core snaps inward to the
@@ -2475,18 +2527,15 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
       const auto& die_um  = options.die.empty() ? options.core : options.die;
       const auto& core_um = options.core.empty() ? options.die : options.core;
       const auto  dbu     = [&](double um) { return um * tech.dbu; };
-      v.fp.die            = {std::round(dbu(die_um[0])),
-                             std::round(dbu(die_um[1])),
-                             std::round(dbu(die_um[2])),
-                             std::round(dbu(die_um[3]))};
-      const auto lo_x     = static_cast<int64_t>(std::ceil(dbu(core_um[0]) / sw - 1e-9));
-      const auto lo_y     = static_cast<int64_t>(std::ceil(dbu(core_um[1]) / rh - 1e-9));
-      const auto hi_x     = static_cast<int64_t>(std::floor(dbu(core_um[2]) / sw + 1e-9));
-      const auto hi_y     = static_cast<int64_t>(std::floor(dbu(core_um[3]) / rh + 1e-9));
-      origin_x            = lo_x * sw;
-      origin_y            = lo_y * rh;
-      columns             = hi_x - lo_x;
-      rows                = hi_y - lo_y;
+      v.fp.die = {std::round(dbu(die_um[0])), std::round(dbu(die_um[1])), std::round(dbu(die_um[2])), std::round(dbu(die_um[3]))};
+      const auto lo_x = static_cast<int64_t>(std::ceil(dbu(core_um[0]) / sw - 1e-9));
+      const auto lo_y = static_cast<int64_t>(std::ceil(dbu(core_um[1]) / rh - 1e-9));
+      const auto hi_x = static_cast<int64_t>(std::floor(dbu(core_um[2]) / sw + 1e-9));
+      const auto hi_y = static_cast<int64_t>(std::floor(dbu(core_um[3]) / rh + 1e-9));
+      origin_x        = lo_x * sw;
+      origin_y        = lo_y * rh;
+      columns         = hi_x - lo_x;
+      rows            = hi_y - lo_y;
       if (columns < 1 || rows < 1) {
         throw std::runtime_error("synth.place.core holds no complete site/row");
       }
@@ -2700,7 +2749,11 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
             }
           }
           throw std::runtime_error(std::format("physical input pin absent from LEF: {}/{} (instance {}, sink port {}, declared{})",
-                                               cell.macro, name, cell.name, sink.get_port_id(), declared));
+                                               cell.macro,
+                                               name,
+                                               cell.name,
+                                               sink.get_port_id(),
+                                               declared));
         }
       }
     }
@@ -3158,6 +3211,8 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
   control.schedule_iterations        = options.schedule_iterations;
   control.routability = control.improved_routability = options.routability;
   control.routability_charge_compensation            = options.routability_charge_compensation;
+  control.routability_macro_weight                   = options.routability_macro_weight;
+  control.routability_macro_range                    = options.routability_macro_range;
   if (options.routability) {
     control.route_capacity_h = control.route_capacity_v = 0;
     for (const auto& name : tech.routing_layers) {
@@ -3198,6 +3253,10 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
           s.align_pairs,
           s.align_residual,
           s.align_ramp);
+      line += std::format(",\"route_peak_utilization\":{},\"macro_routing_force\":{},\"macro_routing_channels\":{}",
+                          s.route_peak_utilization,
+                          s.macro_routing_force,
+                          s.macro_routing_channels);
       if (s.centroid_repulsion_weight > 0) {
         line += std::format(",\"centroid_overlap_pairs\":{},\"centroid_max_overlap\":{},\"centroid_repulsion_weight\":{}",
                             s.centroid_overlaps,
@@ -3458,27 +3517,11 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
         fp_control.checkpoint_after_density = options.fp_timing_after_density;
         fp_control.checkpoint_observer      = [&](const dp::GpCheckpointSample& sample) { fp_checkpoint_forced = sample.forced; };
         fp_control.checkpoint               = [&](const dp::Design& physical, int iteration) {
-          double       movement = 0, total_area = 0;
-          const double bin_x = (physical.layout.xh - physical.layout.xl) / options.bins;
-          const double bin_y = (physical.layout.yh - physical.layout.yl) / options.bins;
-          for (size_t i = 0; i < v.cells.size(); ++i) {
-            if (auto old = timed_positions.find(v.cells[i].name); old != timed_positions.end() && int(i) < physical.num_movable) {
-              const double cell_area = physical.node_size_x[i] * physical.node_size_y[i];
-              movement              += cell_area
-                                       * (std::pow((physical.node_x[i] - old->second.first) / bin_x, 2)
-                                          + std::pow((physical.node_y[i] - old->second.second) / bin_y, 2));
-              total_area            += cell_area;
-            }
-          }
-          movement            = total_area ? std::sqrt(movement / total_area) : 0;
-          const bool  final   = iteration == fp_control.max_iterations || fp_checkpoint_forced;
-          const char* trigger = options.fp_timing_after_density ? (final ? "final" : "density-ready") : "interval";
+          const double movement = checkpoint_movement(physical, v.cells, timed_positions, options.bins);
+          const bool   final    = iteration == fp_control.max_iterations || fp_checkpoint_forced;
+          const char*  trigger  = options.fp_timing_after_density ? (final ? "final" : "density-ready") : "interval";
           if (options.fp_timing_movement > 0) {
-            // Reserve one budgeted update for the final coordinates. Coalesce
-            // rapid early motion so the whole solve, not just its start, is timed.
-            const unsigned quota
-                = std::max(1, int(std::ceil(double(options.fp_timing_max_updates - 1) * iteration / fp_control.max_iterations)));
-            if (fp_checkpoints && !final && (fp_checkpoints >= quota || movement < options.fp_timing_movement)) {
+            if (defer_timing_checkpoint(options, fp_checkpoints, final, iteration, fp_control.max_iterations, movement)) {
               return dp::GpUpdate{};
             }
             trigger = final ? "final" : fp_checkpoints ? "movement" : "initial";
@@ -3494,6 +3537,7 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
           }
           Result checkpoint;
           checkpoint.graph             = result.graph;
+          checkpoint.net_weights       = v.weights;
           checkpoint.fp_library        = result.fp_library;
           checkpoint.fp_buffer_origins = result.fp_buffer_origins;
           checkpoint.floorplan         = v.fp;
@@ -3544,7 +3588,11 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
             result.fp_library        = checkpoint.fp_library;
             result.fp_buffer_origins = checkpoint.fp_buffer_origins;
           }
-          const auto target = timing_weights(*checkpoint.parasitics, after, options.timing_fraction, options.timing_max_weight);
+          const auto target = timing_weights(*checkpoint.parasitics,
+                                             after,
+                                             options.timing_fraction,
+                                             options.timing_max_weight,
+                                             options.timing_exponent);
           if (target.empty()) {
             throw std::runtime_error("FP timing has no constrained data nets for weighting");
           }
@@ -3564,7 +3612,7 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
           fs::create_directories(options.output_dir);
           std::ofstream trace(options.output_dir + "/fp_timing.jsonl", fp_checkpoints == 1 ? std::ios::trunc : std::ios::app);
           trace << std::format(
-              R"({{"iteration":{},"trigger":"{}","movement_bins":{},"timing_seconds":{},"weighted_nets":{},"sta_calls":{},"resize_proposed":{},"resize_accepted":{},"repair_accepted":{},"before_delay":{},"after_delay":{},"time_unit_ps":{}}})",
+              R"({{"iteration":{},"trigger":"{}","movement_bins":{},"timing_seconds":{},"weighted_nets":{},"sta_calls":{},"resize_proposed":{},"resize_accepted":{},"repair_accepted":{},"before_delay":{},"after_delay":{},"time_unit_ps":{},"timing_exponent":{}}})",
               iteration,
               trigger,
               movement,
@@ -3576,7 +3624,8 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
               repairs,
               before.delay,
               after.delay,
-              after.time_unit_ps)
+              after.time_unit_ps,
+              options.timing_exponent)
                 << '\n';
           if (!trace) {
             throw std::runtime_error("cannot write FP timing checkpoint report");
@@ -3645,6 +3694,101 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
                    fp_snap->maximum_overlap);
       }
     }
+    // The second mixed-size solve must refresh its own RC/criticalities. FP
+    // weights alone become stale as macros settle around the frozen centroids.
+    // This callback changes only the objective: macro geometry, centroid targets
+    // and graph topology stay owned by the native solver. Resizing remains FP-only.
+    std::map<std::string, Point> macro_timed_positions;
+    unsigned                     macro_checkpoints       = 0;
+    bool                         macro_checkpoint_forced = false;
+    bool                         movable_macros          = false;
+    for (int i = 0; i < v.design.num_movable; ++i) {
+      movable_macros |= !v.design.node_macro.empty() && v.design.node_macro[i];
+    }
+    if (movable_macros && options.fp_evaluate && options.macro_timing_interval > 0 && control.max_iterations > 0) {
+      control.checkpoint_interval      = options.macro_timing_interval;
+      control.checkpoint_final         = true;
+      control.checkpoint_after_density = options.fp_timing_after_density;
+      control.checkpoint_observer      = [&](const dp::GpCheckpointSample& sample) { macro_checkpoint_forced = sample.forced; };
+      control.checkpoint               = [&](const dp::Design& physical, int iteration) {
+        const auto   started  = std::chrono::steady_clock::now();
+        const bool   final    = macro_checkpoint_forced || iteration == control.max_iterations;
+        const double movement = checkpoint_movement(physical, v.cells, macro_timed_positions, options.bins);
+        if (defer_timing_checkpoint(options, macro_checkpoints, final, iteration, control.max_iterations, movement)) {
+          return dp::GpUpdate{};
+        }
+        auto view   = v;
+        view.design = physical;
+        for (size_t i = 0; i < view.cells.size(); ++i) {
+          view.cells[i].place.x = std::llround(physical.node_x[i]);
+          view.cells[i].place.y = std::llround(physical.node_y[i]);
+          // STA checks graph placement against the RC provenance. Keep the
+          // private physical graph at this checkpoint's coordinates as in FP.
+          view.cells[i].node.attr(attrs::place).set(view.cells[i].place);
+        }
+        Result checkpoint;
+        checkpoint.graph       = result.graph;
+        checkpoint.net_weights = v.weights;
+        checkpoint.fp_library  = result.fp_library;
+        checkpoint.floorplan   = view.fp;
+        checkpoint.floorplan.components.clear();
+        auto rc_options = options;
+        rc_options.full = false;
+        fs::create_directories(options.output_dir);
+        checkpoint.parasitics = estimate_rc(view, tech, rc_options, checkpoint.pin_locations);
+        for (const auto& c : view.cells) {
+          checkpoint.floorplan.components.push_back({c.name, c.macro, c.place});
+          checkpoint.parasitics->cells.push_back(
+              {c.name, c.place.x, c.place.y, static_cast<unsigned>(c.place.orientation), c.macro, c.place.width, c.place.height});
+        }
+        for (const auto& t : view.fp.terminals) {
+          checkpoint.parasitics->terminals.push_back({t.name, t.x, t.y});
+        }
+        const auto timing = options.fp_evaluate(checkpoint);
+        const auto target = timing_weights(*checkpoint.parasitics,
+                                           timing,
+                                           options.timing_fraction,
+                                           options.timing_max_weight,
+                                           options.timing_exponent);
+        if (target.empty()) {
+          throw std::runtime_error("macro timing has no constrained data nets for weighting");
+        }
+        dp::GpUpdate update;
+        for (const auto& driver : v.drivers) {
+          const auto name   = driver.instance == "PIN" ? driver.pin : driver.instance + ":" + driver.pin;
+          const auto old    = v.weights.contains(name) ? v.weights.at(name) : 1.;
+          const auto next   = target.contains(name) ? target.at(name) : 1.;
+          const auto weight = (1 - options.timing_smoothing) * old + options.timing_smoothing * next;
+          v.weights[name]   = weight;
+          update.net_weights.push_back(weight);
+        }
+        if (timing.wns) {
+          update.timing_violation = std::max(0., -*timing.wns);
+        }
+        macro_timed_positions.clear();
+        for (size_t i = 0; i < v.cells.size(); ++i) {
+          macro_timed_positions.emplace(v.cells[i].name, Point{physical.node_x[i], physical.node_y[i]});
+        }
+        ++macro_checkpoints;
+        std::ofstream trace(options.output_dir + "/macro_timing.jsonl", macro_checkpoints == 1 ? std::ios::trunc : std::ios::app);
+        trace << std::format(
+            R"({{"stage":"macro","iteration":{},"forced":{},"movement_bins":{},"timing_seconds":{},"weighted_nets":{},"timing_exponent":{},"max_applied_weight":{},"delay":{},"time_unit_ps":{}}})",
+            iteration,
+            final,
+            movement,
+            std::chrono::duration<double>(std::chrono::steady_clock::now() - started).count(),
+            target.size(),
+            options.timing_exponent,
+            *std::max_element(update.net_weights.begin(), update.net_weights.end()),
+            timing.delay,
+            timing.time_unit_ps)
+              << '\n';
+        if (!trace) {
+          throw std::runtime_error("cannot write macro timing checkpoint report");
+        }
+        return update;
+      };
+    }
     try {
       metrics = dp::place(v.design, control);
     } catch (const std::runtime_error&) {
@@ -3658,6 +3802,10 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
       }
       cache = {0, hashes.size(), false};
       make_arrays(v, tech);
+      // The retry is a fresh solve: restart the macro timing budget and trace.
+      macro_checkpoints       = 0;
+      macro_checkpoint_forced = false;
+      macro_timed_positions.clear();
       metrics = dp::place(v.design, control);
     }
     capture(v, tech, options.full);
@@ -3735,10 +3883,31 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
     json.Double(fp_metrics.global_placement_seconds);
     json.Key("fp_poisson_seconds");
     json.Double(fp_metrics.poisson_seconds);
+    json.Key("fp_macro_routing_seconds");
+    json.Double(fp_metrics.macro_routing_seconds);
     json.Key("fp_overflow");
     json.Double(fp_metrics.overflow);
     json.Key("fp_converged");
     json.Bool(fp_metrics.converged);
+    json.Key("routability_macro_weight");
+    json.Double(options.routability_macro_weight);
+    json.Key("routability_macro_range");
+    json.Double(options.routability_macro_range);
+    json.Key("fp_routing_history");
+    json.StartArray();
+    for (const auto& sample : fp_metrics.history) {
+      json.StartObject();
+      json.Key("iteration");
+      json.Int(sample.iteration);
+      json.Key("route_peak_utilization");
+      json.Double(sample.route_peak_utilization);
+      json.Key("macro_routing_force");
+      json.Double(sample.macro_routing_force);
+      json.Key("macro_routing_channels");
+      json.Uint64(sample.macro_routing_channels);
+      json.EndObject();
+    }
+    json.EndArray();
     json.Key("fp_density_ready_iteration");
     json.Int(fp_metrics.density_iteration);
     json.Key("fp_continuation_deadline");
@@ -3753,6 +3922,8 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
     json.Int(options.fp_timing_interval);
     json.Key("timing_fraction");
     json.Double(options.timing_fraction);
+    json.Key("timing_exponent");
+    json.Double(options.timing_exponent);
     json.Key("timing_max_weight");
     json.Double(options.timing_max_weight);
     json.Key("timing_smoothing");
@@ -4264,6 +4435,12 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
     json.StartObject();
     json.Key("bins_x");
     json.Int(metrics.bins_x);
+    json.Key("routability_macro_weight");
+    json.Double(options.routability_macro_weight);
+    json.Key("routability_macro_range");
+    json.Double(options.routability_macro_range);
+    json.Key("macro_routing_seconds");
+    json.Double(metrics.macro_routing_seconds);
     json.Key("bins_y");
     json.Int(metrics.bins_y);
     json.Key("stop_overflow");
@@ -4335,6 +4512,12 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
       json.Double(s.density_weight);
       json.Key("route_overflow");
       json.Double(s.route_overflow);
+      json.Key("route_peak_utilization");
+      json.Double(s.route_peak_utilization);
+      json.Key("macro_routing_force");
+      json.Double(s.macro_routing_force);
+      json.Key("macro_routing_channels");
+      json.Uint64(s.macro_routing_channels);
       json.Key("inflation_area_ratio");
       json.Double(s.inflation_area_ratio);
       json.Key("model_density");
@@ -4641,7 +4824,7 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
     fs::remove(def, ec);
   }
   result.unknown_const_tied = resolver.unknown_tied();
-  result.qor = std::format(
+  result.qor                = std::format(
       R"({{"schema_version":1,"kind":"placement","mode":"{}","legal":{},"gp_converged":{},"gp_overflow":{},"hpwl_um":{},"initial_hpwl_um":{},"cells":{},"nets":{},"estimated_macros":{},"virtual_fillers":false,"density_constraint":"soft","timing_model":"placement_rc","timing_approximate":{},"rc_identity":"{}","incremental":{{"enabled":{},"hit":{},"reused_blocks":{},"changed_blocks":{}}}}})",
       options.retain_placement ? "timing_snapshot"
       : options.timing_seed    ? "post_synthesis_zero_wire"

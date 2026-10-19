@@ -85,13 +85,13 @@ int main(int argc, char** argv) {
       std::vector<double> utilization;
       size_t              congested = 0;
       std::ofstream       map(std::string(argv[2]) + (enhanced ? "_enhanced.tsv" : "_base.tsv"));
-      map << "x\ty\thorizontal\tvertical\tpin_access\tmaximum\n" << std::setprecision(17);
+      map << "x\ty\thorizontal\tvertical\tpin_access\tmaximum\tblocked_fraction\n" << std::setprecision(17);
       for (size_t i = 0; i < r.horizontal.size(); ++i) {
         const double u = std::max({r.horizontal[i], r.vertical[i], r.pin_utilization[i]});
         utilization.push_back(u);
         congested += u > 1;
         map << i / options.bins_y << '\t' << i % options.bins_y << '\t' << r.horizontal[i] << '\t' << r.vertical[i] << '\t'
-            << r.pin_utilization[i] << '\t' << u << '\n';
+            << r.pin_utilization[i] << '\t' << u << '\t' << (r.blocked_fraction.empty() ? 0 : r.blocked_fraction[i]) << '\n';
       }
       std::sort(utilization.begin(), utilization.end());
       out << (enhanced ? ",\"enhanced\":{" : ",\"base\":{") << "\"overflow\":" << r.overflow
@@ -102,7 +102,9 @@ int main(int argc, char** argv) {
           << ",\"peak_horizontal\":" << *std::max_element(r.horizontal.begin(), r.horizontal.end())
           << ",\"peak_vertical\":" << *std::max_element(r.vertical.begin(), r.vertical.end())
           << ",\"peak_pin_access\":" << *std::max_element(r.pin_utilization.begin(), r.pin_utilization.end())
-          << ",\"measured_nets\":" << r.measured_nets << ",\"degenerate_nets\":" << r.degenerate_nets << '}';
+          << ",\"measured_nets\":" << r.measured_nets << ",\"degenerate_nets\":" << r.degenerate_nets
+          << ",\"unroutable_nets\":" << r.unroutable_nets << ",\"blocked_pins\":" << r.blocked_pins
+          << ",\"detour_wirelength_dbu\":" << r.detour_wirelength << '}';
     }
     out << "}\n";
     if (!out) {

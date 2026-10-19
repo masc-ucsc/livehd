@@ -125,13 +125,15 @@ livehd::placement::Options placement_options(const Options& opts) {
   out.fp_timing_after_density = truthy(synth_set(opts, "place.fp.timing_after_density", "false"));
   out.timing_fraction         = number("place.timing_fraction", "0.2");
   out.timing_max_weight       = number("place.timing_max_weight", "5");
+  out.timing_exponent         = number("place.timing_exponent", "1");
+  out.macro_timing_interval   = static_cast<int>(integer("place.macro.timing_interval", "50"));
   out.timing_smoothing        = number("place.timing_smoothing", "0.5");
   out.fp_timing_max_updates   = integer("place.fp.timing_max_updates", "10");
   out.stop_overflow           = number("place.stop_overflow", "0.1");
   out.initial_density_weight  = number("place.initial_density_weight", "0.01");
   if (out.timing_max_weight < 1 || out.timing_max_weight > livehd::placement::max_net_weight || out.timing_smoothing < 0
       || out.timing_smoothing > 1 || out.fp_timing_max_updates < 2 || out.stop_overflow < 0 || out.stop_overflow > 1
-      || out.initial_density_weight <= 0) {
+      || out.initial_density_weight <= 0 || out.timing_exponent < 1 || out.macro_timing_interval < 0) {
     throw Lhd_error{"usage", "invalid synth.place timing/density tuning controls", "check lhd describe synth for allowed values"};
   }
   if (out.timing_fraction <= 0 || out.timing_fraction > 1) {
@@ -142,10 +144,12 @@ livehd::placement::Options placement_options(const Options& opts) {
   if (out.cohesion < 0) {
     throw Lhd_error{"usage", "synth.place.cohesion must be nonnegative", ""};
   }
-  out.utilization                = number("place.utilization", "0.30");
-  out.aspect                     = number("place.aspect", "1");
-  for (const auto& [key, frame] : {std::pair<const char*, std::vector<double>*>{"place.die", &out.die},
-                                   std::pair<const char*, std::vector<double>*>{"place.core", &out.core}}) {
+  out.utilization = number("place.utilization", "0.30");
+  out.aspect      = number("place.aspect", "1");
+  for (const auto& [key, frame] : {
+           std::pair<const char*, std::vector<double>*>{ "place.die",  &out.die},
+           std::pair<const char*, std::vector<double>*>{"place.core", &out.core}
+  }) {
     const auto text = synth_set(opts, key, "");
     if (text.empty()) {
       continue;
@@ -183,11 +187,11 @@ livehd::placement::Options placement_options(const Options& opts) {
       || out.fixed_macro_overlap_weight < 0) {
     throw Lhd_error{"usage", "invalid synth.place cell-placement controls", ""};
   }
-  out.bins                            = integer("place.bins", "64");
-  out.scale_macro_density             = truthy(synth_set(opts, "place.scale_macro_density", "true"));
-  out.automatic_bins                  = truthy(synth_set(opts, "place.auto_bins", "false"));
-  out.exact_macro_density             = truthy(synth_set(opts, "place.exact_macro_density", "true"));
-  out.adaptive_density                = truthy(synth_set(opts, "place.adaptive_density", "true"));
+  out.bins                 = integer("place.bins", "64");
+  out.scale_macro_density  = truthy(synth_set(opts, "place.scale_macro_density", "true"));
+  out.automatic_bins       = truthy(synth_set(opts, "place.auto_bins", "false"));
+  out.exact_macro_density  = truthy(synth_set(opts, "place.exact_macro_density", "true"));
+  out.adaptive_density     = truthy(synth_set(opts, "place.adaptive_density", "true"));
   const auto unknown_const = synth_set(opts, "place.unknown_const", "error");
   if (unknown_const != "error" && unknown_const != "zero") {
     throw Lhd_error{"usage", "synth.place.unknown_const must be error or zero", ""};
@@ -195,10 +199,15 @@ livehd::placement::Options placement_options(const Options& opts) {
   out.unknown_const_zero              = unknown_const == "zero";
   out.routability                     = truthy(synth_set(opts, "place.routability", "true"));
   out.routability_charge_compensation = truthy(synth_set(opts, "place.routability_charge_compensation", "true"));
-  out.macro_overlap_weight            = number("place.macro_overlap", "50");
-  out.macro_jitter                    = number("place.macro_jitter", "0.01");
-  out.io_iterations                   = integer("place.io_iterations", "500");
-  out.schedule_iterations             = integer("place.schedule_iterations", "500");
+  out.routability_macro_weight        = number("place.routability_macro_weight", "1");
+  out.routability_macro_range         = number("place.routability_macro_range", "2");
+  if (out.routability_macro_weight < 0 || out.routability_macro_range <= 0 || out.routability_macro_range > 16) {
+    throw Lhd_error{"usage", "invalid synth.place macro routing pressure controls", "weight >= 0; range in (0,16]"};
+  }
+  out.macro_overlap_weight = number("place.macro_overlap", "50");
+  out.macro_jitter         = number("place.macro_jitter", "0.01");
+  out.io_iterations        = integer("place.io_iterations", "500");
+  out.schedule_iterations  = integer("place.schedule_iterations", "500");
   if (out.macro_overlap_weight < 0 || out.macro_jitter < 0 || out.macro_jitter > .1 || out.schedule_iterations < 0
       || out.io_iterations < 0) {
     throw Lhd_error{"usage", "invalid synth.place repulsion controls", ""};
@@ -989,7 +998,7 @@ void synth_command(Options& opts, Result& res) {
     };
     hhds::GraphLibrary seed_library;
     auto               placement_input = *found;
-    if (run_timing_place && place_options.fp_timing_interval > 0) {
+    if (run_timing_place && (place_options.fp_timing_interval > 0 || place_options.macro_timing_interval > 0)) {
       place_options.fp_evaluate = evaluate;
       place_options.fp_resize   = run_resize;
     }
@@ -1020,7 +1029,8 @@ void synth_command(Options& opts, Result& res) {
       place_options.net_weights = livehd::placement::timing_weights(*seed.parasitics,
                                                                     timing,
                                                                     place_options.timing_fraction,
-                                                                    place_options.timing_max_weight);
+                                                                    place_options.timing_max_weight,
+                                                                    place_options.timing_exponent);
       if (place_options.net_weights.empty()) {
         throw Lhd_error{"unsupported",
                         "post-synthesis timing has no constrained data nets for placement weighting",

@@ -38,9 +38,11 @@ struct Options {
   bool                                  fp_timing_after_density = false;
   double                                timing_fraction         = .2;  // worst-slack fraction of timed non-clock nets
   double                                timing_max_weight = 5, timing_smoothing = .5;
+  double                                timing_exponent       = 1;  // convex criticality curve; 1 preserves linear weights
+  int                                   macro_timing_interval = 50;
   int                                   fp_timing_max_updates = 10;
   bool                                  fp_resize             = false;
-  bool                                  repair_reset          = false;  // size/buffer reset-pin cones too (default: protected like clocks)
+  bool                                  repair_reset = false;  // size/buffer reset-pin cones too (default: protected like clocks)
   Evaluate                              fp_evaluate;
   double                                fp_minimum = 3000, fp_attraction = .25, fp_repulsion = 5, fp_anchor = .25;
   bool                                  fp_distance_attraction = true;
@@ -62,6 +64,7 @@ struct Options {
   bool                                                       scale_macro_density = true;
   bool        automatic_bins = false, exact_macro_density = true, adaptive_density = true, routability = true;
   bool        routability_charge_compensation = true;
+  double      routability_macro_weight = 1, routability_macro_range = 2;  // direct channel pressure; range in bins
   double      macro_overlap_weight = 50, macro_jitter = .01;
   double      macro_align_weight = 0, macro_align_sigma = 0, macro_align_overlap_boost = 0;
   int         macro_align_start = 100, macro_align_full = 500;
@@ -94,11 +97,11 @@ struct Options {
   // do not legalize, optimize or certify the imported placement's legality.
   bool   retain_placement      = false;
   // Try nearest-whitespace placement of edited/new cells before windowed GP.
-  bool   legalize_cells             = false;
+  bool   legalize_cells        = false;
   // Opt-in: an unknown (X) constant bit that reaches a physical net is a synthesis
   // don't-care (`assign y = 'x`), so any value is a legal refinement; tie it low
   // instead of refusing the placement. Off keeps the refusal.
-  bool   unknown_const_zero         = false;
+  bool   unknown_const_zero    = false;
 };
 struct Result {
   unsigned                                         fp_resized_cells = 0, fp_repair_edits = 0;

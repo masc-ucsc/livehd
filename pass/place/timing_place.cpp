@@ -12,12 +12,15 @@
 #include "repair.hpp"
 namespace livehd::placement {
 std::map<std::string, double> timing_weights(const physical::Parasitics& nets, const Timing_feedback& timing, double fraction,
-                                             double max_weight) {
+                                             double max_weight, double exponent) {
   if (!std::isfinite(fraction) || fraction <= 0 || fraction > 1) {
     throw std::invalid_argument("timing fraction must be in (0, 1]");
   }
   if (!std::isfinite(max_weight) || max_weight < 1 || max_weight > max_net_weight) {
     throw std::invalid_argument("maximum timing weight must be finite and in [1, 100]");
+  }
+  if (!std::isfinite(exponent) || exponent < 1) {
+    throw std::invalid_argument("timing criticality exponent must be finite and at least 1");
   }
   std::vector<std::pair<double, std::string>> ranked;
   for (const auto& net : nets.nets) {
@@ -48,7 +51,7 @@ std::map<std::string, double> timing_weights(const physical::Parasitics& nets, c
   std::map<std::string, double> target;
   for (size_t i = 0; i < selected; ++i) {
     const double priority    = cutoff > worst + 1e-12 ? (cutoff - ranked[i].first) / (cutoff - worst) : 1;
-    target[ranked[i].second] = 1 + (max_weight - 1) * priority;
+    target[ranked[i].second] = 1 + (max_weight - 1) * std::pow(priority, exponent);
   }
   return target;
 }
@@ -68,6 +71,8 @@ Repair_result timing_place(Result initial, const Options& options, const Evaluat
   w.Double(options.timing_fraction);
   w.Key("timing_max_weight");
   w.Double(options.timing_max_weight);
+  w.Key("timing_exponent");
+  w.Double(options.timing_exponent);
   w.Key("timing_smoothing");
   w.Double(options.timing_smoothing);
   w.Key("initial_weights");
@@ -88,7 +93,11 @@ Repair_result timing_place(Result initial, const Options& options, const Evaluat
   const auto                    directory = options.output_dir + "/timing_place";
   std::filesystem::create_directories(directory);
   for (unsigned round = 0; round < rounds; ++round) {
-    auto target = timing_weights(*result.placed.parasitics, best, options.timing_fraction, options.timing_max_weight);
+    auto target = timing_weights(*result.placed.parasitics,
+                                 best,
+                                 options.timing_fraction,
+                                 options.timing_max_weight,
+                                 options.timing_exponent);
     if (target.empty()) {
       break;
     }

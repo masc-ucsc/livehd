@@ -151,7 +151,7 @@ std::shared_ptr<hhds::Graph> mapped_def(hhds::GraphLibrary& library, const ph::F
 
 // Geometry-only export for the native RUDY evaluator and placement PNGs. It
 // uses the same LEF pin centers, ideal-clock masks and layer capacities as GP.
-void physical_snapshot(const ph::Technology& tech, const ph::Floorplan& fp, const std::string& root, double halo) {
+void physical_snapshot(const ph::Technology& tech, const ph::Floorplan& fp, const std::string& root) {
   if (fp.rows.empty() || fp.dbu != tech.dbu) {
     throw std::invalid_argument("physical snapshot requires rows and matching LEF/DEF units");
   }
@@ -191,11 +191,11 @@ void physical_snapshot(const ph::Technology& tech, const ph::Floorplan& fp, cons
         }
       }
     }
-    const double hx = macro ? std::ceil(halo * tech.dbu / sw) * sw : 0;
-    const double hy = macro ? std::ceil(halo * tech.dbu / rh) * rh : 0;
     cells.emplace(c.name, i);
-    out << c.place.x - hx << ' ' << c.place.y - hy << ' ' << c.place.width + 2 * hx << ' ' << c.place.height + 2 * hy << ' '
-        << macro << ' ' << bh << ' ' << bv << '\n';
+    // Placement halos reserve whitespace for access/routing; only the physical
+    // macro body is an opaque routing obstacle.
+    out << c.place.x << ' ' << c.place.y << ' ' << c.place.width << ' ' << c.place.height << ' ' << macro << ' ' << bh << ' ' << bv
+        << '\n';
     boxes << c.name << '\t' << c.macro << '\t' << c.place.x << '\t' << c.place.y << '\t' << c.place.width << '\t' << c.place.height
           << '\t' << macro << '\n';
   }
@@ -280,6 +280,18 @@ int main(int argc, char** argv) {
     if (config.HasMember("timing_max_weight")) {
       options.timing_max_weight = config["timing_max_weight"].GetDouble();
     }
+    if (config.HasMember("timing_exponent")) {
+      options.timing_exponent = config["timing_exponent"].GetDouble();
+    }
+    if (config.HasMember("routability_macro_weight")) {
+      options.routability_macro_weight = config["routability_macro_weight"].GetDouble();
+    }
+    if (config.HasMember("routability_macro_range")) {
+      options.routability_macro_range = config["routability_macro_range"].GetDouble();
+    }
+    if (config.HasMember("macro_timing_interval")) {
+      options.macro_timing_interval = config["macro_timing_interval"].GetInt();
+    }
     if (config.HasMember("timing_smoothing")) {
       options.timing_smoothing = config["timing_smoothing"].GetDouble();
     }
@@ -324,7 +336,7 @@ int main(int argc, char** argv) {
       options.halo_x = options.halo_y = config["halo"].GetDouble();
     }
     if (config.HasMember("snapshot_only") && config["snapshot_only"].GetBool()) {
-      physical_snapshot(tech, *options.previous, root, config.HasMember("halo") ? config["halo"].GetDouble() : 0);
+      physical_snapshot(tech, *options.previous, root);
       return 0;
     }
     std::cout << "loading mapped graph" << std::endl;
@@ -436,8 +448,30 @@ int main(int argc, char** argv) {
       auto               seed          = pl::place(*source, seed_library, seed_options);
       const auto         seed_timing   = evaluate(seed);
       const bool         timing_driven = !config.HasMember("timing_driven") || config["timing_driven"].GetBool();
-      if (timing_driven) {
-        options.net_weights = pl::timing_weights(*seed.parasitics, seed_timing, options.timing_fraction, options.timing_max_weight);
+      // A separately invoked fixed-macro cell pass can carry the macro pass's
+      // last timing weights, exactly as the in-process staged placer does.
+      if (!config.HasMember("net_weights")) {
+        if (timing_driven) {
+          options.net_weights = pl::timing_weights(*seed.parasitics,
+                                                   seed_timing,
+                                                   options.timing_fraction,
+                                                   options.timing_max_weight,
+                                                   options.timing_exponent);
+        }
+      } else {
+        rapidjson::Document weights;
+        weights.Parse(read(text("net_weights")).c_str());
+        if (weights.HasParseError() || !weights.IsObject()) {
+          throw std::invalid_argument("invalid net_weights file");
+        }
+        options.net_weights.clear();
+        for (const auto& item : weights.GetObject()) {
+          if (!item.value.IsNumber() || !std::isfinite(item.value.GetDouble()) || item.value.GetDouble() < 1
+              || item.value.GetDouble() > pl::max_net_weight) {
+            throw std::invalid_argument("invalid net weight");
+          }
+          options.net_weights.emplace(item.name.GetString(), item.value.GetDouble());
+        }
       }
       if (floorplan_mode && timing_driven) {
         options.fp_evaluate = raw_evaluate;
@@ -472,6 +506,17 @@ int main(int argc, char** argv) {
       std::ofstream(root + "/timing_place.json") << refined.report;
       auto& result = refined.placed;
       raw_evaluate(result);
+      rapidjson::StringBuffer weights_json;
+      rapidjson::Writer<rapidjson::StringBuffer> weights_writer(weights_json);
+      weights_writer.StartObject();
+      for (const auto& [name, weight] : result.net_weights) {
+        weights_writer.Key(name.c_str());
+        weights_writer.Double(weight);
+      }
+      weights_writer.EndObject();
+      if (!(std::ofstream(root + "/net_weights.json") << weights_json.GetString() << '\n')) {
+        throw std::runtime_error("cannot write net_weights");
+      }
       std::map<std::string, const ph::Component*> originals;
       for (const auto& cell : (floorplan_mode ? seed.floorplan.components : input->components)) {
         originals.emplace(cell.name, &cell);
