@@ -2419,12 +2419,12 @@ Seq_answer seq_bmc_one(const Seq_model& m, size_t pix, int timeout_s) {
       }
       if (!p.store.empty() && (p.reuse & kReuseCex)) {  // the trace, for replay on the next version
         std::string tr;
-        Abc_Obj_t*  po;
+        Abc_Obj_t*  tr_pi;
         int         k2;
         for (int f = 0; f <= cex->iFrame; ++f) {
-          Abc_NtkForEachPi(ntk, po, k2) {
+          Abc_NtkForEachPi(ntk, tr_pi, k2) {
             if (is_1(cex->nRegs + f * cex->nPis + k2)) {
-              tr += esc_name(Abc_ObjName(po)) + " ";
+              tr += esc_name(Abc_ObjName(tr_pi)) + " ";
             }
           }
           tr += "\n";
