@@ -2626,6 +2626,16 @@ sh_test(
     data = ["//lhd", "//inou/lefdef:test_data"],
 )
 
+# An x constant on a physical net (an undriven RTL signal that mapping kept) is refused unless
+# synth.place.unknown_const=zero ties it low.
+sh_test(
+    name = "lhd_placement_unknown_const_smoke",
+    size = "small",
+    timeout = "short",
+    srcs = ["lhd_placement_unknown_const_smoke.py"],
+    data = ["//lhd", "//inou/lefdef:test_data"],
+)
+
 sh_test(
     name = "lhd_placement_smoke_usyn",
     size = "small",

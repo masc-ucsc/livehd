@@ -753,7 +753,7 @@ void make_arrays(View& v, const ph::Technology& tech) {
 }
 // Rebuild a topology trial at the current overlapping GP coordinates. Stable
 // names carry all surviving positions; inserted buffers have Steiner seeds.
-void refresh_floorplan_view(View& v, const View& baseline, Result& state, const ph::Technology& tech) {
+void refresh_floorplan_view(View& v, const View& baseline, Result& state, const ph::Technology& tech, bool unknown_zero) {
   v = baseline;
   std::map<std::string, Cell> previous;
   for (const auto& cell : baseline.cells) {
@@ -824,7 +824,7 @@ void refresh_floorplan_view(View& v, const View& baseline, Result& state, const 
     }
     v.cells.push_back(std::move(cell));
   }
-  Resolver   resolve(tech, memories);
+  Resolver   resolve(tech, memories, unknown_zero);
   const auto endpoint = [&](Pin p, int bit) {
     auto e = resolve.bit(p, bit);
     if (e.constant >= 0) {
@@ -3074,7 +3074,7 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
           const auto baseline       = v;
           const auto baseline_owner = result.fp_library;
           const auto refresh        = [&](Result& state) {
-            refresh_floorplan_view(v, baseline, state, tech);
+            refresh_floorplan_view(v, baseline, state, tech, options.unknown_const_zero);
             state.pin_locations.clear();
             auto rc_options  = options;
             rc_options.full  = false;
