@@ -108,4 +108,29 @@ if lec.get('verdict') not in ('proven-full', 'proven-bounded') or (lec.get('boun
     raise SystemExit('FAIL: expected a LEC proof of the merged twins, got {}'.format(lec))
 CHECK
 
+# A lowered memory is registers behind a read mux: with the sweep, the columns no reader looks at go too
+# (4 entries x 32 bits -> the 8 bits of the byte read). The removed columns have no counterpart left to pair, so
+# the LEC proof is a bounded one.
+MEM_SRC="$PWD/lhd/tests/state_sweep_mem.v"
+for mode in false true; do
+  d="$W/mem_$mode"
+  mkdir -p "$d"
+  "$LHD" synth --result-json "$d/r.json" --reader slang --top sweep_mem --workdir "$d/W" --emit-dir lg:"$d/net" \
+    --emit-dir verilog:"$d/netv" --set synth.liberty="$LIB" --set synth.memory=flops --set synth.state_sweep="$mode" \
+    -- "$MEM_SRC" > "$d/synth.log" 2>&1 || fail "mem $mode: synth -> $(cat "$d/r.json" 2>/dev/null)"
+  cat "$d/netv/"*.v > "$d/net.v"
+done
+[ "$(count "$W/mem_false/net.v" '^DFF')" = 128 ] || fail "mem off: expected 128 register bits, got $(count "$W/mem_false/net.v" '^DFF')"
+[ "$(count "$W/mem_true/net.v" '^DFF')" = 32 ] || fail "mem on: expected 32 register bits, got $(count "$W/mem_true/net.v" '^DFF')"
+grep -q '"state-swept-memory"' "$W/mem_true/synth.log" || fail "mem on: the sweep of the lowered memory did not report"
+"$LHD" lec --set formal.effort=proof --impl lg:"$W/mem_true/net" --ref lg:"$W/mem_true/W/synth/lg" --lib lg:"$W/models" \
+  --top sweep_mem --workdir "$W/mem_true/lec" -q --result-json "$W/mem_true/lec.json" > "$W/mem_true/lec.log" 2>&1 \
+  || fail "mem on: LEC -> $(cat "$W/mem_true/lec.json" 2>/dev/null)"
+python3 - "$W/mem_true/lec.json" <<'CHECK' || exit 1
+import json, sys
+lec = json.load(open(sys.argv[1])).get('lec', {})
+if lec.get('verdict') not in ('proven-full', 'proven-bounded') or (lec.get('bounded') and lec.get('bound', 0) < 4):
+    raise SystemExit('FAIL: expected a LEC proof of the narrowed memory, got {}'.format(lec))
+CHECK
+
 echo "PASS: synth.state_sweep drops unobserved registers and register bits, proven against the source"

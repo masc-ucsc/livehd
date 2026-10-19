@@ -1745,6 +1745,7 @@ sh_test(
         "abc_arst_q.lib",
         "reg_merge.v",
         "state_sweep.v",
+        "state_sweep_mem.v",
     ],
 )
 
