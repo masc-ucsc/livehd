@@ -804,6 +804,20 @@ Region_blast blast_region(const livehd::partition::Region_body& rb, const Blast_
       f.rst_drv  = gu::get_driver_of_sink_name(n, "reset_pin");
       f.rval_drv = gu::get_driver_of_sink_name(n, "initial");
       f.clk_drv  = gu::get_driver_of_sink_name(n, "clock_pin");
+      // A reset tied INACTIVE never fires (a specialized module whose reset input is
+      // tied off: BUFG_GT's `clr_active` with CLR/CLRMASK open). The register then has
+      // no reset at all, and its `initial` was only the reset value, so it powers on X
+      // like the source. Without this an asynchronous one stays a native flop
+      // ("the reset is a constant"), which the placer cannot place.
+      if (!f.rst_drv.is_invalid() && f.rst_drv.is_const() && !gu::const_of(f.rst_drv).has_unknowns()) {
+        const auto neg      = gu::get_driver_of_sink_name(n, "negreset");
+        const bool low      = neg.is_const() && gu::const_of(neg).bit_test(0);
+        const bool nonzero  = !gu::const_of(f.rst_drv).is_known_false();
+        if (low ? nonzero : !nonzero) {  // active-low reset held high, or active-high held low
+          f.rst_drv  = {};
+          f.rval_drv = {};
+        }
+      }
       if (auto edge = gu::get_driver_of_sink_name(n, "posclk"); edge.is_const()) {
         f.neg_clock = gu::const_of(edge).is_known_false();
       }

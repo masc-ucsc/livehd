@@ -156,4 +156,18 @@ lhd('array_rtl', ['compile', str(array), '--top', 'arr', '--set', 'compile.slang
 lhd('golden_rtl', ['compile', str(golden), '--top', 'arr', '--workdir', str(root / 'goldenW'), '--emit-dir', f'verilog:{root}/golden-rtl'])
 lec = lhd('lec', ['lec', '--impl', f'verilog:{root}/array-rtl/arr.v', '--ref', f'verilog:{root}/golden-rtl/arr.v', '--top', 'arr'])
 
+# ---- a constant-inactive asynchronous reset maps to a plain DFF cell ----------------------------------
+reset = root / 'reset.v'
+reset.write_text('''module ff(input clk, input rst, input d, output reg q);
+  always @(posedge clk or posedge rst) if (rst) q <= 1'b0; else q <= d;
+endmodule
+module top(input clk, input d, output q);
+  ff u(.clk(clk), .rst(1'b0), .d(d), .q(q));
+endmodule
+''')
+diag = lhd('reset', ['synth', str(reset), '--top', 'top', '--set', f'synth.liberty={lib}', '--set', 'synth.opentimer=false',
+                     '--set', 'compile.specialize_modules=true', '--workdir', str(root / 'resetW'),
+                     '--emit-dir', f'verilog:{root}/reset-net'])
+net = verilog('reset-net')
+assert 'reset-native' not in diag and 'sky130_fd_sc_hd__dfxtp_1' in net and 'always @' not in net, (diag, net)
 print('Macro and vendor-stub bring-up behaviors pass')
