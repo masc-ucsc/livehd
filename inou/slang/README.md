@@ -421,3 +421,4 @@ replaces whatever the sources say about it. Each is `--set compile.slang.<flag>=
 | flag | effect |
 | --- | --- |
 | `liberty_macro_precedence` | a `synth.liberty` RAM macro WINS over a same-named design module, like `read_liberty -overwrite`: the declarations go into a slang library of the highest priority, every instantiation of that name binds to the macro pins, and the shadowed source module (a vendor behavioral model, a wrapper that re-instantiates the macro under its own name) is never elaborated |
+| `liberty_allow_truncation` | a wider actual on a narrower macro input keeps the low bits, as Verilog does, and `liberty-memory-port-truncation` becomes a warning instead of an error. The upper address/data bits are really discarded: use it only when the reference design does the same |

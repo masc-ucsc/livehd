@@ -108,6 +108,16 @@ failure = invoke('truncation', ['synth', str(bad), '--top', 'top', '--set', f'sy
                      '--emit', f'diagnostics:{diag}'], success=False)
 assert diag.is_file(), failure
 assert 'liberty-memory-port-truncation' in diag.read_text(), diag.read_text()
+# Opt-in (compile.slang.liberty_allow_truncation): Verilog keeps the low bits; a warning remains.
+diag = root/'truncate.diagnostics.jsonl'
+invoke('truncate', ['synth', str(bad), '--top', 'top', '--set', f'synth.liberty={library}',
+                    '--set', 'compile.slang.liberty_allow_truncation=true', '--set', 'synth.opentimer=false',
+                    '--workdir', str(root/'truncateW'), '--emit-dir', f'verilog:{root}/truncate-net',
+                    '--emit', f'diagnostics:{diag}'])
+assert '"severity":"warning","code":"liberty-memory-port-truncation"' in diag.read_text(), diag.read_text()
+text = '\n'.join(p.read_text() for p in (root/'truncate-net').glob('*.v'))
+assert text.count('test_sram ') == 2, text
+
 unknown = root/'unknown.v'
 unknown.write_text(source.read_text().replace('test_sram ', 'mistyped_sram '))
 diag = root/'unknown.diagnostics.jsonl'

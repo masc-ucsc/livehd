@@ -8265,12 +8265,21 @@ void Slang_context::lower_instance(const slang::ast::InstanceSymbol& inst) {
       }
       const auto width = flat_or_tinfo(port.getType()).bits;
       if (flat_or_tinfo(*actual->type).bits > width && value_width(*actual).value_or(width + 1) > width) {
-        emit_unsupported(inst.location,
-                         "liberty-memory-port-truncation",
-                         "Liberty memory '" + callee + "' input '" + std::string(port.name) + "' would discard address/data bits",
-                         "use a matching macro interface or explicit, semantically validated banking logic");
-        end_input_phase();
-        return;
+        if (!options_.liberty_allow_truncation) {
+          emit_unsupported(inst.location,
+                           "liberty-memory-port-truncation",
+                           "Liberty cell '" + callee + "' input '" + std::string(port.name) + "' would discard address/data bits",
+                           "use a matching macro interface or explicit, semantically validated banking logic, or opt in to "
+                           "Verilog truncation with --set compile.slang.liberty_allow_truncation=true");
+          end_input_phase();
+          return;
+        }
+        emit_warning(slang::SourceRange(inst.location, inst.location),
+                     "liberty-memory-port-truncation",
+                     "unsupported",
+                     "Liberty cell '" + callee + "' input '" + std::string(port.name) + "' truncates a wider actual to "
+                         + std::to_string(width) + " bits (liberty_allow_truncation)",
+                     "the upper bits are discarded, as Verilog and Yosys do");
       }
     }
     if (!port_direction_supported(port)) {

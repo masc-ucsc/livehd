@@ -452,6 +452,11 @@ public:
     // the macro blackbox. Default off: such a collision is refused
     // (`liberty-memory-name-collision`) rather than silently picking one side.
     bool                             liberty_macro_precedence  = false;
+    // Opt-in (compile.slang.liberty_allow_truncation): connecting a wider actual
+    // to a narrower synth.liberty RAM input keeps the low bits, as Verilog and
+    // Yosys do, with a `liberty-memory-port-truncation` WARNING instead of the
+    // default error (which refuses to discard address/data bits).
+    bool                             liberty_allow_truncation  = false;
     int                              unroll_limit              = 4000;  // slang-side loop unroll cap (yosys-slang default)
     // Emit a canonical procedural `for` as an LNAST/Pyrope LOOP instead of
     // unrolling it here. LNAST already owns loops with `break`/`continue`
