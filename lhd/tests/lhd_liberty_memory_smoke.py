@@ -80,6 +80,26 @@ for name, extra, code in [('collide', [], 'DuplicateDefinition'),
                   '--workdir', str(root/(name+'W')), '--emit', f'diagnostics:{diag}', *extra], success=False)
     assert f'"code":"{code}"' in diag.read_text(), diag.read_text()
 
+# Opt-in (compile.slang.liberty_macro_precedence): the macro wins over the same-named
+# behavioral model, as in the Yosys/ORFS flow where the Liberty cell replaces the Verilog
+# definition. The model is never elaborated, so its wider address port is irrelevant.
+invoke('precedence', ['synth', str(collide), '--top', 'top', '--set', f'synth.liberty={library}',
+                      '--set', 'compile.slang.liberty_macro_precedence=true', '--set', 'synth.opentimer=false',
+                      '--workdir', str(root/'precedenceW'), '--emit-dir', f'verilog:{root}/precedence-net'])
+text = '\n'.join(p.read_text() for p in (root/'precedence-net').glob('*.v'))
+assert text.count('test_sram ') == 2 and 'module test_sram' not in text and 'always' not in text, text
+# The wrapper that re-instantiates the macro under its own name (liteeth's macros.v) is not recursive.
+wrapper = root/'wrapper.v'
+wrapper.write_text(source.read_text() + '''module test_sram(input clk,we,input [2:0] a,input [4:0] d,output [4:0] q);
+ test_sram inner(.CLK(clk),.WE(we),.A(a),.D(d),.Q(q),.FLAG());
+endmodule
+''')
+invoke('wrapper', ['synth', str(wrapper), '--top', 'top', '--set', f'synth.liberty={library}',
+                   '--set', 'compile.slang.liberty_macro_precedence=true', '--set', 'synth.opentimer=false',
+                   '--workdir', str(root/'wrapperW'), '--emit-dir', f'verilog:{root}/wrapper-net'])
+text = '\n'.join(p.read_text() for p in (root/'wrapper-net').glob('*.v'))
+assert text.count('test_sram ') == 2 and 'module test_sram' not in text, text
+
 bad = root/'bad.v'
 bad.write_text(source.read_text().replace('[2:0] a,b', '[5:0] a,b'))
 diag = root/'bad.diagnostics.jsonl'
@@ -88,6 +108,28 @@ failure = invoke('truncation', ['synth', str(bad), '--top', 'top', '--set', f'sy
                      '--emit', f'diagnostics:{diag}'], success=False)
 assert diag.is_file(), failure
 assert 'liberty-memory-port-truncation' in diag.read_text(), diag.read_text()
+# Opt-in (compile.slang.liberty_allow_truncation): Verilog keeps the low bits; a warning remains.
+diag = root/'truncate.diagnostics.jsonl'
+invoke('truncate', ['synth', str(bad), '--top', 'top', '--set', f'synth.liberty={library}',
+                    '--set', 'compile.slang.liberty_allow_truncation=true', '--set', 'synth.opentimer=false',
+                    '--workdir', str(root/'truncateW'), '--emit-dir', f'verilog:{root}/truncate-net',
+                    '--emit', f'diagnostics:{diag}'])
+assert '"severity":"warning","code":"liberty-memory-port-truncation"' in diag.read_text(), diag.read_text()
+text = '\n'.join(p.read_text() for p in (root/'truncate-net').glob('*.v'))
+assert text.count('test_sram ') == 2, text
+
+# Opt-in (compile.slang.ignore_uninstantiated_modules): an unused module outside the top's
+# hierarchy is not elaborated, so its error cannot fail a read that also binds Liberty macros.
+junk = root/'junk.v'
+junk.write_text(source.read_text() + 'module unused_junk(output y);\n assign y = not_declared_anywhere;\nendmodule\n')
+diag = root/'junk.diagnostics.jsonl'
+invoke('junk', ['compile', str(junk), '--top', 'top', '--set', f'synth.liberty={library}',
+                '--workdir', str(root/'junkW'), '--emit', f'diagnostics:{diag}'], success=False)
+assert 'not_declared_anywhere' in diag.read_text(), diag.read_text()
+invoke('junk_ok', ['compile', str(junk), '--top', 'top', '--set', f'synth.liberty={library}',
+                   '--set', 'compile.slang.ignore_uninstantiated_modules=true',
+                   '--workdir', str(root/'junkOkW'), '--emit-dir', f'lg:{root}/junk-ok'])
+
 unknown = root/'unknown.v'
 unknown.write_text(source.read_text().replace('test_sram ', 'mistyped_sram '))
 diag = root/'unknown.diagnostics.jsonl'

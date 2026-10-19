@@ -129,6 +129,10 @@ struct Slang_module_state {
   // emission, a driver that WRITES the net has sym_lname_ swapped to the tmp (so
   // its writes AND its own RMW reads hit the mut); other drivers read the wire.
   absl::flat_hash_map<const slang::ast::Symbol*, std::string>              wire_split_tmp_;
+  // While a driver that writes split wires is being emitted: (net, resolved-wire lname) for each net whose
+  // sym_lname_ is redirected to its accumulator. lower_instance reads its input connections through the resolved
+  // names, because the instance runs only after its inputs are read (see there).
+  const std::vector<std::pair<const slang::ast::Symbol*, std::string>>*    split_redirects_ = nullptr;
   // Concurrent packed drivers: one single-assignment wire per physical bit.
   absl::flat_hash_map<const slang::ast::Symbol*, std::vector<std::string>> packed_wire_bits_;
   // Subset of wire_split_tmp_ keys that are FLATTENED-AGGREGATE splits: a
@@ -303,6 +307,8 @@ struct Slang_module_state {
   // here carry their range in mem_info_ but route through bit-slice get/set
   // instead of store/tuple_get.
   absl::flat_hash_set<const slang::ast::Symbol*>                           flat_port_syms_;
+  // Memo of inout_port_driven: a walk of the port's module body, asked once per port.
+  absl::flat_hash_map<const slang::ast::PortSymbol*, bool>                 inout_driven_;
   // PACKED 2-D reg arrays (`reg [N-1:0][W-1:0]`, W>1) that are RUNTIME-indexed
   // somewhere — a firtool-style register file. These memory-ize (one `__memory`
   // node) instead of flattening to a single N*W-bit flop, so they LEC against an
@@ -440,6 +446,43 @@ public:
     // and collision semantics are deliberately not synthesized or invented.
     absl::flat_hash_set<std::string> liberty_memories;
     std::string                      liberty_declarations;
+    // Opt-in (compile.slang.liberty_macro_precedence): a synth.liberty RAM macro
+    // WINS over a same-named module in the design sources, as in the Yosys/ORFS
+    // flow where `read_liberty -overwrite` replaces the Verilog definition with
+    // the macro blackbox. Default off: such a collision is refused
+    // (`liberty-memory-name-collision`) rather than silently picking one side.
+    bool                             liberty_macro_precedence  = false;
+    // Opt-in (compile.slang.liberty_allow_truncation): connecting a wider actual
+    // to a narrower synth.liberty RAM input keeps the low bits, as Verilog and
+    // Yosys do, with a `liberty-memory-port-truncation` WARNING instead of the
+    // default error (which refuses to discard address/data bits).
+    bool                             liberty_allow_truncation  = false;
+    // Opt-in (compile.slang.liberty_cells): a module instantiated by name that no
+    // source defines but the selected Liberty does (a standard cell such as
+    // `BUFx2_ASAP7_75t_R`, as in Xilinx-primitive stubs for ASIC flows) is bound
+    // as a typed, opaque cell with the pins and directions the Liberty states,
+    // exactly like a RAM macro. `liberty_files` is the selected library list.
+    bool                             liberty_cells = false;
+    std::string                      liberty_files;
+    // Opt-in (compile.slang.blackbox_attribute): a module carrying the Yosys attribute `(* blackbox *)` is
+    // an interface only (a hard-macro or vendor-primitive stub whose body is the LEF/Liberty macro).
+    // Its ports are declared, no body is built and every instance stays an opaque Sub. Without it the
+    // module lowers as written: an empty body whose outputs read as unknown.
+    bool                             blackbox_attribute = false;
+    // Opt-in (compile.slang.flatten_state_arrays): a one-dimensional unpacked state array without power-on
+    // contents is one packed register vector (constant selectors are element offsets, a runtime selector a
+    // shift/mask), not a Memory with one port per access site. The default keeps the aggregate identity
+    // (read_all/update, Pyrope state correspondence); a design that touches an array through hundreds of
+    // constant-index sites (NyuziProcessor's pending_stores: 375 read and 360 write ports) otherwise spends
+    // hours bit-blasting that Memory.
+    bool                             flatten_state_arrays = false;
+    // Opt-in (compile.slang.unconnected_input = zero|one): an input port left unconnected
+    // on an instance reads that constant instead of the default unknown 'x. Verilog leaves
+    // such a port floating (z, read as x); a synthesis tool is free to pick any value, and
+    // Yosys picks whichever simplifies the logic. A vendor primitive stub whose control
+    // inputs are left open (BUFG_GT's CE/CLR) keeps its whole enable cone as logic on a
+    // clock net when the value stays unknown; a constant folds it away. 'x stays the default.
+    char                             unconnected_input = 'x';  // 'x', '0' or '1'
     int                              unroll_limit              = 4000;  // slang-side loop unroll cap (yosys-slang default)
     // Emit a canonical procedural `for` as an LNAST/Pyrope LOOP instead of
     // unrolling it here. LNAST already owns loops with `break`/`continue`
@@ -458,6 +501,9 @@ public:
     // at the slang level so the reader owns the policy): lower unknown-module
     // instances as blackbox sub-instances instead of a clean error.
     bool blackbox_unknown          = false;
+    // The USER passed --ignore-assertions: assertions are neither lowered nor
+    // refused (synthesis only).
+    bool ignore_assertions         = false;
     // Keep a package parameter reference as a symbolic `pkg.PARAM` (emitting a
     // `pub comptime const` package unit) instead of folding it to its literal —
     // for readable, provenance-preserving Pyrope emission. OFF by default: it
@@ -477,6 +523,15 @@ public:
     // port list, and only the top's: submodule interfaces are internal to each
     // netlist. Off by default — LiveHD's own representation is the bundle.
     bool flat_top_io               = false;
+    // Opt-in `inout` lowering (compile.slang.inout_as_driven). LiveHD has no
+    // tri-state cell, so an `inout` port is lowered as the direction its module
+    // actually uses: OUTPUT when the module (or a child instance wired to the
+    // port) drives it, INPUT otherwise. A `1'bz` drive is a don't-care, so the
+    // driven value wins, and reads of the port see that driven value: the
+    // external value of a genuinely bidirectional pad is NOT modeled, which is
+    // what ASIC synthesis flows do to a pad cell. Off by default: the reader
+    // refuses `inout` with `unsupported-inout-port`.
+    bool inout_as_driven           = false;
   };
 
   Slang_context() = default;
@@ -719,6 +774,14 @@ private:
   // Full qualification of a port at def AND call sites (option + plain name +
   // type rule). Deterministic: consults no body uses.
   bool                             bundle_port_qualifies(const slang::ast::PortSymbol& port, std::string_view owner_def = {}) const;
+  // Direction after the opt-in inout lowering: an `inout` port is an output
+  // when its own module body drives it (see Options::inout_as_driven), an input
+  // otherwise. Def and call sites ask the same question of the same body, so
+  // they agree. Without the option it is just `direction == Out`.
+  bool                             port_is_output(const slang::ast::PortSymbol& port);
+  bool                             inout_port_driven(const slang::ast::PortSymbol& port);
+  // True for a direction the reader can lower: in/out, plus inout under the option.
+  bool                             port_direction_supported(const slang::ast::PortSymbol& port) const;
   // Definition names of the elaboration roots (slang's root.topInstances).
   // `flat_top_io` packs the IO of exactly these.
   absl::flat_hash_set<std::string> top_defs_;

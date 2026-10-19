@@ -28,6 +28,16 @@
 #include "str_tools.hpp"
 
 namespace {
+
+// A field spelled like a type is quoted (`U0`). Inside a dotted leaf name the
+// quotes are dropped (unless it holds whitespace), so every reader agrees.
+std::string_view unquote_field(std::string_view f) {
+  if (f.size() >= 2 && f.front() == '`' && f.back() == '`'
+      && std::none_of(f.begin(), f.end(), [](unsigned char c) { return std::isspace(c) != 0; })) {
+    return f.substr(1, f.size() - 2);
+  }
+  return f;
+}
 // Returns true for LNAST statement types whose first child is the write
 // destination (LHS) and whose remaining children are read operands (RHS).
 // This range covers: dp_assign, declare, store, delay_assign, all arithmetic/
@@ -786,6 +796,9 @@ void uPass_ssa::run(const std::shared_ptr<Lnast>& lnast, const std::vector<std::
     if (!prefix.empty() && leaf_name.size() > 5 && leaf_name.starts_with("__pos")
         && std::all_of(leaf_name.begin() + 5, leaf_name.end(), [](char c) { return c >= '0' && c <= '9'; })) {
       leaf_name = leaf_name.substr(5);
+    }
+    if (!prefix.empty()) {
+      leaf_name = std::string(unquote_field(leaf_name));
     }
     auto full      = prefix.empty() ? leaf_name : prefix + "." + leaf_name;
 
@@ -1734,7 +1747,7 @@ void uPass_ssa::run(const std::shared_ptr<Lnast>& lnast, const std::vector<std::
         return false;  // runtime index — not a static tuple-port field access
       }
       path.push_back('.');
-      path.append(lnast->get_name(kids[i]));
+      path.append(unquote_field(lnast->get_name(kids[i])));
     }
     auto dst = std::string(lnast->get_name(kids[0]));
     if (port_in_leaf.contains(path) || port_out_leaf.contains(path)) {
@@ -1775,7 +1788,7 @@ void uPass_ssa::run(const std::shared_ptr<Lnast>& lnast, const std::vector<std::
         return false;
       }
       path.push_back('.');
-      path.append(lnast->get_name(kids[i]));
+      path.append(unquote_field(lnast->get_name(kids[i])));
     }
     if (!port_out_leaf.contains(path)) {
       return false;  // not a known tuple-output leaf

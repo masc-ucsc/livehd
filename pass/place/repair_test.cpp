@@ -701,7 +701,7 @@ TEST_F(Buffer_repair, FloorplanTimingCheckpointsAreScopedAndResizeRunsStaTwice) 
     ASSERT_FALSE(placed.net_weights.empty());
     EXPECT_GT(std::max_element(placed.net_weights.begin(),
                                placed.net_weights.end(),
-                               [](const auto& a, const auto& b) { return a.second < b.second; })
+                               [](const auto& lhs, const auto& rhs) { return lhs.second < rhs.second; })
                   ->second,
               1);
     equivalent(placed);
@@ -1031,6 +1031,107 @@ TEST_F(Buffer_repair, ProtectsClockLogicThroughAliasesAndBuffers) {
   rapidjson::Document report;
   report.Parse(result.report.c_str());
   EXPECT_EQ(report["attempts"].GetUint(), 0);
+}
+TEST_F(Buffer_repair, ResetLogicIsProtectedUnlessRepairResetIsEnabled) {
+  // A buffer chain whose only load is the reset pin of a state cell: the cone is
+  // protected like clock logic, so a high-fanout reset net would never be sized
+  // or buffered. synth.place.repair.reset lifts that for reset sinks only (the
+  // clock cone of the same cell stays protected).
+  std::filesystem::create_directories(options.output_dir);
+  const auto slurp = [](const std::string& path) {
+    std::ifstream input(path);
+    return std::string{std::istreambuf_iterator<char>(input), {}};
+  };
+  const auto clone_cell = [](std::string text, const std::string& open, const std::string& close, const std::string& extra,
+                             const std::string& extra_anchor) {
+    const auto start = text.find(open);
+    EXPECT_NE(start, std::string::npos);
+    const auto end = text.find(close, start);
+    EXPECT_NE(end, std::string::npos);
+    std::string clone = text.substr(start, end - start + close.size());
+    for (size_t at = clone.find("dfxtp_1"); at != std::string::npos; at = clone.find("dfxtp_1", at)) {
+      clone.replace(at, 7, "dfrtp_1");
+    }
+    const auto anchor = clone.find(extra_anchor);
+    EXPECT_NE(anchor, std::string::npos);
+    clone.insert(anchor, extra);
+    text.insert(end + close.size(), "\n" + clone + "\n");
+    return text;
+  };
+  // A reset-pin clone of the plain flop: same geometry and timing plus RESET_B.
+  auto lef = clone_cell(slurp(options.lefs[1]),
+                        "MACRO sky130_fd_sc_hd__dfxtp_1\n",
+                        "END sky130_fd_sc_hd__dfxtp_1\n",
+                        "  PIN RESET_B\n    DIRECTION INPUT ;\n    USE SIGNAL ;\n    PORT\n      LAYER li1 ;\n"
+                        "        RECT 3.370 0.715 3.650 1.665 ;\n    END\n  END RESET_B\n",
+                        "  PIN VGND\n");
+  auto lib = slurp(options.liberty);
+  const auto cell_start = lib.find("cell (\"sky130_fd_sc_hd__dfxtp_1\") {");
+  ASSERT_NE(cell_start, std::string::npos);
+  size_t depth = 0, cell_end = cell_start;
+  for (size_t at = lib.find('{', cell_start); at < lib.size(); ++at) {
+    depth += lib[at] == '{';
+    depth -= lib[at] == '}';
+    if (depth == 0) {
+      cell_end = at + 1;
+      break;
+    }
+  }
+  std::string clone = lib.substr(cell_start, cell_end - cell_start);
+  for (size_t at = clone.find("dfxtp_1"); at != std::string::npos; at = clone.find("dfxtp_1", at)) {
+    clone.replace(at, 7, "dfrtp_1");
+  }
+  const auto pin_at = clone.find("pin (\"CLK\")");
+  ASSERT_NE(pin_at, std::string::npos);
+  clone.insert(pin_at,
+               "pin (\"RESET_B\") {\n capacitance : 0.0016780000;\n clock : \"false\";\n direction : \"input\";\n"
+               " max_transition : 1.5000000000;\n related_ground_pin : \"VGND\";\n related_power_pin : \"VPWR\";\n }\n");
+  lib.insert(cell_end, "\n" + clone + "\n");
+  options.lefs[1]  = options.output_dir + "/reset.lef";
+  options.liberty  = options.output_dir + "/reset.lib";
+  std::ofstream(options.lefs[1]) << lef;
+  std::ofstream(options.liberty) << lib;
+
+  auto p  = gate("sky130_fd_sc_hd__buf_1", "reset_buffer", graph->get_input_pin("a"));
+  p       = gate("sky130_fd_sc_hd__inv_1", "reset_inverter", p);
+  auto io = source.create_io("sky130_fd_sc_hd__dfrtp_1");
+  io->add_input("D", 1);
+  io->add_input("CLK", 2);
+  io->add_input("RESET_B", 3);
+  io->add_output("Q", 4);
+  for (const auto& name : {"D", "CLK", "RESET_B", "Q"}) {
+    io->set_bits(name, 1);
+  }
+  auto n = gu::create_typed_node(*graph, Ntype_op::Sub);
+  n.set_subnode(io);
+  n.set_name("state");
+  n.create_sink_pin("D").connect_driver(graph->get_input_pin("a"));
+  n.create_sink_pin("CLK").connect_driver(graph->get_input_pin("a"));
+  n.create_sink_pin("RESET_B").connect_driver(p);
+  auto q = n.create_driver_pin("Q");
+  gu::set_bits(q, 1);
+  graph->get_output_pin("y").connect_driver(q);
+
+  // A controlled objective isolates the protection rule from the timing heuristic:
+  // only dropping the reset buffer is an improvement.
+  const auto evaluate = [&](const Result& r) {
+    Timing_feedback f;
+    f.delay = count(r, "reset_buffer") ? 10 : 1;
+    f.area  = r.floorplan.components.size();
+    return f;
+  };
+  auto       placed    = place(*graph, flat, options);
+  const auto protected_ = repair_buffers(std::move(placed), options, evaluate);
+  EXPECT_EQ(count(protected_.placed, "reset_buffer"), 1);
+  rapidjson::Document report;
+  report.Parse(protected_.report.c_str());
+  EXPECT_EQ(report["attempts"].GetUint(), 0);
+
+  options.repair_reset = true;
+  auto       replaced  = place(*graph, flat, options);
+  const auto repaired  = repair_buffers(std::move(replaced), options, evaluate);
+  EXPECT_EQ(count(repaired.placed, "reset_buffer"), 0);
+  EXPECT_EQ(count(repaired.placed, "reset_inverter"), 1);
 }
 TEST_F(Buffer_repair, RejectsWorseTrialsAndRebuildsEveryFanoutBranch) {
   auto root = gate("sky130_fd_sc_hd__buf_1", "root", graph->get_input_pin("a"));

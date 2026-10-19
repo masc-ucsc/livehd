@@ -139,6 +139,59 @@ set_output_delay 20 -clock virtual [all_outputs]
   EXPECT_FLOAT_EQ(pass.timer.report_slack("y", ot::MAX, ot::RISE).value(), 70);
   EXPECT_TRUE(pass.complete());
 }
+TEST_F(SdcClock, NestedListSearchExcludesEveryNamedInputAndBackslashJoinsLines) {
+  Sdc_probe pass(var);
+  pass.timer.insert_primary_input("clk_p").insert_primary_input("clk_n");
+  // The litepci/HighTide idiom: one nested search per excluded port, continued over two lines.
+  pass.read_sdc(write(R"sdc(
+set non_clock_inputs [lsearch -inline -all -not \
+    [lsearch -inline -all -not [all_inputs] clk_p] clk_n]
+create_clock -name virtual -period 100
+set_input_delay 10 -clock virtual $non_clock_inputs
+set_output_delay 20 -clock virtual [all_outputs]
+)sdc"));
+  EXPECT_FLOAT_EQ(pass.timer.report_at("a", ot::MAX, ot::RISE).value(), 10);
+  EXPECT_FALSE(pass.timer.report_at("clk_p", ot::MAX, ot::RISE));
+  EXPECT_FALSE(pass.timer.report_at("clk_n", ot::MAX, ot::RISE));
+  EXPECT_FLOAT_EQ(pass.timer.report_slack("y", ot::MAX, ot::RISE).value(), 70);
+  EXPECT_TRUE(pass.complete());
+}
+TEST_F(SdcClock, ClockOnAnInternalPinIsCreatedAndAMissingPinOnlyWarns) {
+  Sdc_probe pass(var);
+  // `a` is a pin of the timing graph; `inst/pin` would be spelled `inst:pin` there. Both forms of
+  // create_clock define the clock, and neither is a hard error (the SDC also names generated clocks).
+  pass.read_sdc(write(R"sdc(
+create_clock -name on_pin -period 100 [get_pins a]
+create_clock -name nowhere -period 50 [get_pins macro/clk_out]
+)sdc"));
+  pass.timer.update_timing();
+  ASSERT_TRUE(pass.timer.clocks().contains("on_pin"));
+  EXPECT_FLOAT_EQ(pass.timer.clocks().at("on_pin").period(), 100);
+  ASSERT_TRUE(pass.timer.clocks().contains("nowhere"));
+  EXPECT_FLOAT_EQ(pass.timer.clocks().at("nowhere").period(), 50);
+}
+TEST_F(SdcClock, TclControlStructureBodyIsSkippedAsOneUnit) {
+  Sdc_probe pass(var);
+  // HighTide's NyuziProcessor SDC loops over the JTAG ports. The body lines mean nothing without the loop
+  // variables, so reading them one by one failed on `$port`; the whole braced command is skipped instead.
+  pass.read_sdc(write(R"sdc(
+create_clock -name virtual -period 100
+set_input_delay 10 -clock virtual [all_inputs]
+foreach {port bit} {
+    a 1 b 0
+} {
+    set pin [get_pins -hierarchical -regexp [format {^x\[%d\]$} $bit]]
+    if {[llength $pin] != 1} {
+        error "expected one pin for $port"
+    }
+    set_false_path -from [get_ports $port] -to $pin
+}
+unset port bit pin
+set_output_delay 20 -clock virtual [all_outputs]
+)sdc"));
+  EXPECT_FLOAT_EQ(pass.timer.report_at("a", ot::MAX, ot::RISE).value(), 10);
+  EXPECT_FLOAT_EQ(pass.timer.report_slack("y", ot::MAX, ot::RISE).value(), 70);
+}
 TEST_F(SdcClock, ExprDividesIntegersLikeTcl) {
   Sdc_probe pass(var);
   const std::string clock = "create_clock -name virtual -period 100\n";

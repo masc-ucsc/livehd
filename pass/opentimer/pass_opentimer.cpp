@@ -335,6 +335,24 @@ public:
     return v;
   }
 };
+// Net `{` minus `}` of one Tcl line, ignoring braces that are backslash-escaped or inside double quotes.
+int brace_delta(std::string_view line) {
+  int  delta = 0;
+  bool quote = false;
+  for (size_t i = 0; i < line.size(); ++i) {
+    const char c = line[i];
+    if (c == '\\') {
+      ++i;
+    } else if (c == '"') {
+      quote = !quote;
+    } else if (!quote && c == '{') {
+      ++delta;
+    } else if (!quote && c == '}') {
+      --delta;
+    }
+  }
+  return delta;
+}
 std::string sdc_expand(std::string_view line, const std::map<std::string, std::string>& variables) {
   std::string text;
   // Tcl does not substitute inside {...}; only expr's own braced argument is
@@ -390,23 +408,33 @@ std::string sdc_expand(std::string_view line, const std::map<std::string, std::s
     }
     text.replace(at, end - at + 1, std::format("{:.9g}", Sdc_expression(expression).value()));
   }
-  // HighTide/ORFS excludes the clock input using this exact Tcl list-search
-  // idiom. Preserve an exact exclusion selector rather than evaluating Tcl or
-  // silently replacing a general list search with all_inputs -no_clocks.
+  // HighTide/ORFS excludes the clock inputs using this Tcl list-search idiom,
+  // alone or nested once per excluded port:
+  //   [lsearch -inline -all -not [lsearch -inline -all -not [all_inputs] a] b]
+  // Preserve an exact exclusion selector rather than evaluating Tcl or silently
+  // replacing a general list search with all_inputs -no_clocks. Tcl's default
+  // pattern is a glob, so without -exact the name must have no glob characters
+  // to be the same thing. The innermost search is rewritten first, so an outer
+  // one then sees the `[all_inputs -exclude_exact ...]` it extends.
   static const std::regex exclusion(
-      R"(\[lsearch\s+((?:-[a-z]+\s+){4})\[all_inputs\]\s+(?:\[get_ports\s+([^\s\[\]{}]+)\]|([^\s\[\]{}]+))\s*\])");
-  for (size_t at = text.find("[lsearch "); at != std::string::npos; at = text.find("[lsearch ", at)) {
+      R"(\[lsearch\s+((?:-[a-z]+\s+){3,4})(\[all_inputs(?:\s+-exclude_exact\s+[^\s\[\]{}]+)*)\]\s+(?:\[get_ports\s+([^\s\[\]{}]+)\]|([^\s\[\]{}]+))\s*\])");
+  for (size_t at = text.rfind("[lsearch "); at != std::string::npos; at = at == 0 ? std::string::npos : text.rfind("[lsearch ", at - 1)) {
     std::smatch match;
     if (!std::regex_search(text.cbegin() + at, text.cend(), match, exclusion, std::regex_constants::match_continuous)) {
       throw std::runtime_error("unsupported SDC list-search expression");
     }
     std::vector<std::string> flags = absl::StrSplit(match[1].str(), absl::ByAnyChar(" \t\r"), absl::SkipWhitespace());
     std::sort(flags.begin(), flags.end());
-    if (flags != std::vector<std::string>{"-all", "-exact", "-inline", "-not"}) {
-      throw std::runtime_error("SDC list search requires -inline -all -not -exact");
+    const bool exact = flags.size() == 4;
+    if (flags != (exact ? std::vector<std::string>{"-all", "-exact", "-inline", "-not"}
+                        : std::vector<std::string>{"-all", "-inline", "-not"})) {
+      throw std::runtime_error("SDC list search requires -inline -all -not [-exact]");
     }
-    const auto port = match[2].matched ? match[2].str() : match[3].str();
-    text.replace(at, match.length(), "[all_inputs -exclude_exact " + port + "]");
+    const auto port = match[3].matched ? match[3].str() : match[4].str();
+    if (!exact && port.find_first_of("*?\\") != std::string::npos) {
+      throw std::runtime_error("SDC list search with a glob pattern needs an exact port name");
+    }
+    text.replace(at, match.length(), match[2].str() + " -exclude_exact " + port + "]");
   }
   return text;
 }
@@ -459,9 +487,36 @@ void Pass_opentimer::read_sdc(std::string_view sdc_file) {
 
   while (std::getline(file, line)) {
     ++lineno;
+    // Tcl joins a backslash-newline into one space: a command continued over several lines is one command.
+    while (!line.empty() && (line.back() == '\\' || (line.back() == '\r' && line.size() > 1 && line[line.size() - 2] == '\\'))) {
+      line.resize(line.find_last_of('\\'));
+      std::string more;
+      if (!std::getline(file, more)) {
+        break;
+      }
+      ++lineno;
+      line += ' ' + more;
+    }
     const auto first = line.find_first_not_of(" \t\r");
     if (first == std::string::npos || line[first] == '#') {
       continue;
+    }
+    // A Tcl control structure (`foreach {a b} {...} { ... }`) is not interpreted here, and the lines of its
+    // body mean nothing without the variables it binds: skip the whole braced command as one unit rather
+    // than reading its body line by line (an undefined loop variable would fail a constraint that is fine).
+    {
+      static const absl::flat_hash_set<std::string> control{"foreach", "for", "while", "if", "switch", "proc", "catch"};
+      const std::string word = line.substr(first, line.find_first_of(" \t\r{", first) - first);
+      if (control.contains(word)) {
+        int         depth = brace_delta(line);
+        std::string more;
+        while (depth > 0 && std::getline(file, more)) {
+          ++lineno;
+          depth += brace_delta(more);
+        }
+        warn_ignored(word, "is a Tcl control structure pass.opentimer does not interpret; its body was skipped");
+        continue;
+      }
     }
     std::string expanded;
     try {
@@ -552,7 +607,7 @@ void Pass_opentimer::read_sdc(std::string_view sdc_file) {
       bool                     supported = true, have_period = false, have_name = false;
       float                    period = 1000;
       std::string              pname  = "clock";
-      std::vector<std::string> source_ports;
+      std::vector<std::string> source_ports, source_pins;
       for (std::size_t i = 1; i < tok.size(); i++) {
         if (tok[i] == "-period" || tok[i] == "-name") {
           if (i + 1 >= tok.size()) {
@@ -586,12 +641,85 @@ void Pass_opentimer::read_sdc(std::string_view sdc_file) {
             }
           }
           supported &= closed;
+        } else if (sdc_strip(tok[i]) == "get_pins") {
+          // A clock on an INTERNAL pin: the output of a hard macro that generates the design clock
+          // (litepci's `pcie_us/user_clk`). SDC spells the pin `instance/pin`, OpenTimer `instance:pin`.
+          bool closed = false;
+          for (std::size_t j = i + 1; j < tok.size(); ++j) {
+            source_pins.push_back(sdc_strip(tok[j]));
+            if (sdc_closes(tok[j])) {
+              i      = j;
+              closed = true;
+              break;
+            }
+          }
+          supported &= closed;
         } else {
           supported = false;  // Waveforms, generated clocks and Tcl expressions are not guessed.
         }
       }
       if (!have_name && source_ports.size() == 1) {
         pname = source_ports.front();
+      }
+      // The one pin the clock is attached to, as OpenTimer names it; empty unless a single plain pin of
+      // the timing graph is given (a missing or wildcard pin leaves a virtual clock, reported incomplete).
+      std::string clock_pin;
+      if (supported && source_ports.empty() && source_pins.size() == 1 && source_pins.front().find_first_of("*?[") == std::string::npos) {
+        auto candidate = source_pins.front();
+        if (const auto slash = candidate.rfind('/'); slash != std::string::npos) {
+          candidate[slash] = ':';
+        }
+        if (timer.pins().contains(candidate)) {
+          clock_pin = std::move(candidate);
+        } else if (const auto colon = candidate.rfind(':'); colon != std::string::npos) {
+          // The mapped netlist is flattened out of region modules, so an instance carries a hierarchy
+          // prefix and a uniquifier (`sub_16.pcie_us__n6780`). Accept exactly one pin on an instance
+          // that is the SDC's name once those are removed.
+          const std::string wanted = candidate.substr(0, colon), pin = candidate.substr(colon);
+          std::vector<std::string> match;
+          for (const auto& [key, pin_data] : timer.pins()) {
+            (void)pin_data;
+            const auto at = key.rfind(':');
+            if (at == std::string::npos || key.compare(at, std::string::npos, pin) != 0) {
+              continue;
+            }
+            std::string_view instance(key.data(), at);
+            if (const auto tail = instance.rfind("__n"); tail != std::string_view::npos && tail + 3 < instance.size()
+                && instance.find_first_not_of("0123456789", tail + 3) == std::string_view::npos) {
+              instance = instance.substr(0, tail);
+            }
+            if (instance == wanted
+                || (instance.size() > wanted.size() && instance.ends_with(wanted) && instance[instance.size() - wanted.size() - 1] == '.')) {
+              match.push_back(key);
+            }
+          }
+          if (match.size() == 1) {
+            clock_pin = match.front();
+          }
+        }
+      }
+      if (!source_pins.empty() && clock_pin.empty()) {
+        supported = false;
+        std::string similar;
+        // Say what the graph does have under that instance (or pin) name, to make a typo or a hierarchy
+        // prefix obvious.
+        const auto  slash = source_pins.front().rfind('/');
+        const auto  leaf  = slash == std::string::npos ? source_pins.front() : source_pins.front().substr(0, slash);
+        size_t      shown = 0;
+        for (const auto& [key, pin_data] : timer.pins()) {
+          (void)pin_data;
+          if (shown < 4 && key.find(leaf) != std::string::npos) {
+            similar += (shown++ ? ", " : "") + key;
+          }
+        }
+        livehd::diag::warn("pass.opentimer", "sdc-clock-pin-missing", "unsupported")
+            .msg("{}:{}: create_clock {} names no single pin of the timing graph; the clock stays virtual{}",
+                 sdc_file,
+                 lineno,
+                 pname,
+                 similar.empty() ? std::format(" (the graph has {} pins, none containing '{}')", timer.num_pins(), leaf)
+                                 : " (pins containing '" + leaf + "': " + similar + ")")
+            .emit();
       }
       if ((critical_ || !target_overrides_.empty()) && (!supported || !have_period || period <= 0)) {
         fail("critical-constraints", "critical annotations require a positive create_clock period without unsupported modifiers");
@@ -607,8 +735,11 @@ void Pass_opentimer::read_sdc(std::string_view sdc_file) {
           }
         }
       }
-      timing_targets_[pname] = {period, source_ports};
-      if (supported && source_ports.empty() && have_period && have_name && !pname.empty() && sdc_clocks_ == 1) {
+      if ((critical_ || !target_overrides_.empty()) && !clock_pin.empty()) {
+        fail("critical-constraints", "critical annotations cannot honor a clock created on an internal pin");
+      }
+      timing_targets_[pname] = {period, source_ports, clock_pin};
+      if (supported && source_ports.empty() && clock_pin.empty() && have_period && have_name && !pname.empty() && sdc_clocks_ == 1) {
         virtual_clock_name_   = pname;
         virtual_clock_period_ = period;
       } else {
@@ -616,6 +747,8 @@ void Pass_opentimer::read_sdc(std::string_view sdc_file) {
       }
       if (supported && source_ports.size() == 1 && timer.primary_inputs().contains(source_ports.front())) {
         timer.create_clock(pname, source_ports.front(), period);
+      } else if (!clock_pin.empty()) {
+        timer.create_clock(pname, clock_pin, period);
       } else {
         timer.create_clock(pname, period);
       }

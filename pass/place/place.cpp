@@ -147,6 +147,15 @@ std::string environment_key(const Options& o, const ph::Technology& tech) {
                             o.halo_y),
                 h);
   h = hash_text(o.macro_mode, h);
+  if (!o.die.empty() || !o.core.empty()) {
+    h = hash_text("fixed-frame", h);
+    for (const auto v : o.die) {
+      h = hash_text(std::format(":d{}", v), h);
+    }
+    for (const auto v : o.core) {
+      h = hash_text(std::format(":c{}", v), h);
+    }
+  }
   if (o.timing_max_weight != 5 || o.timing_smoothing != .5) {
     h = hash_text(std::format("timing-force:{}:{}", o.timing_max_weight, o.timing_smoothing), h);
   }
@@ -185,6 +194,9 @@ std::string environment_key(const Options& o, const ph::Technology& tech) {
   }
   if (o.fp_place) {
     h = hash_text(std::format("fp-timing:{}:{}:{}", o.fp_timing_interval, bool(o.fp_evaluate), o.fp_resize), h);
+    if (o.repair_reset) {
+      h = hash_text("repair-reset", h);  // FP resize may then touch reset cones
+    }
     h = hash_text(std::format("fp-movement:{}", o.fp_timing_movement), h);
     if (o.fp_timing_after_density) {
       h = hash_text("fp-timing-after-density", h);
@@ -263,6 +275,9 @@ std::string environment_key(const Options& o, const ph::Technology& tech) {
   }
   if (o.cohesion > 0) {
     h = hash_text(std::format("cohesion:{}", o.cohesion), h);
+  }
+  if (o.unknown_const_zero) {
+    h = hash_text("unknown-const-zero", h);
   }
   if (o.macro_mode == "h2d") {
     h = hash_text(mp::parameter_key(o.macro_parameters), h);
@@ -351,11 +366,19 @@ struct Endpoint {
 class Resolver {
   std::map<std::pair<uint64_t, int>, Endpoint> memo;
   std::set<std::pair<uint64_t, int>>           busy;
+  // Distinct unknown constant bits tied low: a top output's driver is resolved twice (the net,
+  // then the rewrite to its tie cell), so count the (driver, bit) once, not each lookup.
+  std::set<std::pair<uint64_t, int>>           tied_unknown;
   const ph::Technology&                        tech;
   const std::map<uint64_t, std::string>&       memories;
+  bool                                         unknown_as_zero;
 
 public:
-  explicit Resolver(const ph::Technology& t, const std::map<uint64_t, std::string>& m) : tech(t), memories(m) {}
+  // unknown_as_zero: tie an unknown constant bit low (a legal refinement of a don't-care)
+  // instead of refusing the net; the number of bits tied this way is unknown_tied().
+  explicit Resolver(const ph::Technology& t, const std::map<uint64_t, std::string>& m, bool unknown_zero = false)
+      : tech(t), memories(m), unknown_as_zero(unknown_zero) {}
+  size_t unknown_tied() const { return tied_unknown.size(); }
   Endpoint bit(Pin p, int b, int depth = 0) {
     if (p.is_invalid() || b < 0) {
       throw std::runtime_error("invalid physical wiring operand");
@@ -366,7 +389,11 @@ public:
     if (p.is_const()) {
       const auto& c = gu::const_of(p);
       if (c.unknown_bit_test(b)) {
-        throw std::runtime_error("physical net has an unknown constant");
+        if (!unknown_as_zero) {
+          throw std::runtime_error("physical net has an unknown constant (synth.place.unknown_const=zero ties it low)");
+        }
+        tied_unknown.emplace(static_cast<uint64_t>(p.get_debug_pid()), b);
+        return {{}, {}, 0};
       }
       return {{}, {}, c.bit_test(b) ? 1 : 0};
     }
@@ -956,7 +983,7 @@ void make_arrays(View& v, const ph::Technology& tech) {
 }
 // Rebuild a topology trial at the current overlapping GP coordinates. Stable
 // names carry all surviving positions; inserted buffers have Steiner seeds.
-void refresh_floorplan_view(View& v, const View& baseline, Result& state, const ph::Technology& tech) {
+void refresh_floorplan_view(View& v, const View& baseline, Result& state, const ph::Technology& tech, bool unknown_zero) {
   v = baseline;
   std::map<std::string, Cell> previous;
   for (const auto& cell : baseline.cells) {
@@ -1030,7 +1057,7 @@ void refresh_floorplan_view(View& v, const View& baseline, Result& state, const 
     }
     v.cells.push_back(std::move(cell));
   }
-  Resolver   resolve(tech, memories);
+  Resolver   resolve(tech, memories, unknown_zero);
   const auto endpoint = [&](Pin p, int bit) {
     auto e = resolve.bit(p, bit);
     if (e.constant >= 0) {
@@ -2178,6 +2205,13 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
   if (!std::isfinite(options.halo_x) || !std::isfinite(options.halo_y) || options.halo_x < 0 || options.halo_y < 0) {
     throw std::invalid_argument("invalid macro halo");
   }
+  for (const auto* frame : {&options.die, &options.core}) {
+    if (!frame->empty()
+        && (frame->size() != 4 || !std::all_of(frame->begin(), frame->end(), [](double x) { return std::isfinite(x) && x >= 0; })
+            || (*frame)[2] <= (*frame)[0] || (*frame)[3] <= (*frame)[1])) {
+      throw std::invalid_argument("synth.place.die/core expect nonnegative xl,yl,xh,yh microns with xh>xl and yh>yl");
+    }
+  }
   if (options.macro_mode != "none" && options.macro_mode != "h2d") {
     throw std::invalid_argument("macro placement mode must be none or h2d");
   }
@@ -2312,7 +2346,7 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
   v.fp.design           = std::string(source.get_name());
   v.fp.dbu              = tech.dbu;
   const auto  memories  = memory_proxies(graph, tech, options.liberty);
-  Resolver    resolver(tech, memories);
+  Resolver    resolver(tech, memories, options.unknown_const_zero);
   double      area      = 0;
   int64_t     max_width = 0, max_height = 0;
   std::string site_name;
@@ -2428,17 +2462,60 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
     v.fp = *previous;
     validate_rows(tech, v.fp);
   } else if (options.floorplan.empty()) {
-    const double core_area = area / options.utilization;
-    const auto   columns   = std::max<int64_t>(std::ceil(std::sqrt(core_area * options.aspect) / sw), (max_width + sw - 1) / sw);
-    const auto   rows
-        = std::max<int64_t>({2, static_cast<int64_t>(std::ceil(core_area / (columns * sw * rh))), (max_height + rh - 1) / rh});
-    v.fp.die = {0, 0, double(columns * sw), double(rows * rh)};
+    int64_t columns = 0, rows = 0, origin_x = 0, origin_y = 0;
+    if (options.die.empty() && options.core.empty()) {
+      const double core_area = area / options.utilization;
+      columns = std::max<int64_t>(std::ceil(std::sqrt(core_area * options.aspect) / sw), (max_width + sw - 1) / sw);
+      rows
+          = std::max<int64_t>({2, static_cast<int64_t>(std::ceil(core_area / (columns * sw * rh))), (max_height + rh - 1) / rh});
+      v.fp.die = {0, 0, double(columns * sw), double(rows * rh)};
+    } else {
+      // A benchmark-fixed frame (ORFS DIE_AREA/CORE_AREA, microns). The core snaps inward to the
+      // site/row grid like OpenROAD's initialize_floorplan; utilization and aspect do not apply.
+      const auto& die_um  = options.die.empty() ? options.core : options.die;
+      const auto& core_um = options.core.empty() ? options.die : options.core;
+      const auto  dbu     = [&](double um) { return um * tech.dbu; };
+      v.fp.die            = {std::round(dbu(die_um[0])),
+                             std::round(dbu(die_um[1])),
+                             std::round(dbu(die_um[2])),
+                             std::round(dbu(die_um[3]))};
+      const auto lo_x     = static_cast<int64_t>(std::ceil(dbu(core_um[0]) / sw - 1e-9));
+      const auto lo_y     = static_cast<int64_t>(std::ceil(dbu(core_um[1]) / rh - 1e-9));
+      const auto hi_x     = static_cast<int64_t>(std::floor(dbu(core_um[2]) / sw + 1e-9));
+      const auto hi_y     = static_cast<int64_t>(std::floor(dbu(core_um[3]) / rh + 1e-9));
+      origin_x            = lo_x * sw;
+      origin_y            = lo_y * rh;
+      columns             = hi_x - lo_x;
+      rows                = hi_y - lo_y;
+      if (columns < 1 || rows < 1) {
+        throw std::runtime_error("synth.place.core holds no complete site/row");
+      }
+      if (origin_x < v.fp.die.xl || origin_y < v.fp.die.yl || (origin_x + columns * sw) > v.fp.die.xh
+          || (origin_y + rows * rh) > v.fp.die.yh) {
+        throw std::runtime_error("synth.place.core must lie inside synth.place.die");
+      }
+      if (area > double(columns * sw) * double(rows * rh)) {
+        throw std::runtime_error(std::format("fixed core {} x {} um holds {:.1f} um2 of cells in {:.1f} um2",
+                                             double(columns * sw) / tech.dbu,
+                                             double(rows * rh) / tech.dbu,
+                                             area / tech.dbu / tech.dbu,
+                                             double(columns * sw) * double(rows * rh) / tech.dbu / tech.dbu));
+      }
+      if (max_width > columns * sw || max_height > rows * rh) {
+        throw std::runtime_error("a mapped cell or macro halo does not fit in the fixed core");
+      }
+    }
     // Alternating N/FS rows require X-symmetric cells, as in sky130HD.
     const bool flip
         = std::all_of(v.cells.begin(), v.cells.end(), [&](const auto& c) { return tech.macros.at(c.macro).symmetry_x; });
     for (int64_t row = 0; row < rows; ++row) {
-      v.fp.rows.push_back(
-          {"ROW_" + std::to_string(row), site_name, 0, row * rh, columns, sw, flip && row % 2 ? Orientation::FS : Orientation::N});
+      v.fp.rows.push_back({"ROW_" + std::to_string(row),
+                           site_name,
+                           origin_x,
+                           origin_y + row * rh,
+                           columns,
+                           sw,
+                           flip && row % 2 ? Orientation::FS : Orientation::N});
     }
   } else {
     v.fp = ph::read_def(options.floorplan);
@@ -2624,7 +2701,17 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
           found = true;
         }
         if (!found) {
-          throw std::runtime_error("physical input pin absent from LEF: " + cell.macro + "/" + name);
+          std::string declared;
+          if (auto cell_io = cell.node.get_subnode_io()) {
+            for (const auto& d : cell_io->get_input_pin_decls()) {
+              declared += std::format(" in {}={}", d.name, d.port_id);
+            }
+            for (const auto& d : cell_io->get_output_pin_decls()) {
+              declared += std::format(" out {}={}", d.name, d.port_id);
+            }
+          }
+          throw std::runtime_error(std::format("physical input pin absent from LEF: {}/{} (instance {}, sink port {}, declared{})",
+                                               cell.macro, name, cell.name, sink.get_port_id(), declared));
         }
       }
     }
@@ -3368,11 +3455,11 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
           const double bin_y = (physical.layout.yh - physical.layout.yl) / options.bins;
           for (size_t i = 0; i < v.cells.size(); ++i) {
             if (auto old = timed_positions.find(v.cells[i].name); old != timed_positions.end() && int(i) < physical.num_movable) {
-              const double area  = physical.node_size_x[i] * physical.node_size_y[i];
-              movement          += area
-                                   * (std::pow((physical.node_x[i] - old->second.first) / bin_x, 2)
-                                      + std::pow((physical.node_y[i] - old->second.second) / bin_y, 2));
-              total_area        += area;
+              const double cell_area = physical.node_size_x[i] * physical.node_size_y[i];
+              movement              += cell_area
+                                       * (std::pow((physical.node_x[i] - old->second.first) / bin_x, 2)
+                                          + std::pow((physical.node_y[i] - old->second.second) / bin_y, 2));
+              total_area            += cell_area;
             }
           }
           movement            = total_area ? std::sqrt(movement / total_area) : 0;
@@ -3409,7 +3496,7 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
           const auto baseline       = v;
           const auto baseline_owner = result.fp_library;
           const auto refresh        = [&](Result& state) {
-            refresh_floorplan_view(v, baseline, state, tech);
+            refresh_floorplan_view(v, baseline, state, tech, options.unknown_const_zero);
             state.pin_locations.clear();
             auto rc_options  = options;
             rc_options.full  = false;
@@ -4545,6 +4632,7 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
     std::error_code ec;
     fs::remove(def, ec);
   }
+  result.unknown_const_tied = resolver.unknown_tied();
   result.qor = std::format(
       R"({{"schema_version":1,"kind":"placement","mode":"{}","legal":{},"gp_converged":{},"gp_overflow":{},"hpwl_um":{},"initial_hpwl_um":{},"cells":{},"nets":{},"estimated_macros":{},"virtual_fillers":false,"density_constraint":"soft","timing_model":"placement_rc","timing_approximate":{},"rc_identity":"{}","incremental":{{"enabled":{},"hit":{},"reused_blocks":{},"changed_blocks":{}}}}})",
       options.retain_placement ? "timing_snapshot"

@@ -320,6 +320,43 @@ struct Loop_control_usage : public slang::ast::ASTVisitor<Loop_control_usage, sl
   }
 };
 
+// Symbols a statement subtree READS: rvalues, conditions and the selector
+// indices of an lvalue (`q[i] <= d` reads `i`, not `q`).
+struct Read_collector : public slang::ast::ASTVisitor<Read_collector, slang::ast::VisitFlags::AllGood> {
+  absl::flat_hash_set<const slang::ast::ValueSymbol*> reads;
+
+  void lhs_selectors(const slang::ast::Expression& e) {
+    switch (e.kind) {
+      case ExpressionKind::Conversion   : lhs_selectors(e.as<slang::ast::ConversionExpression>().operand()); return;
+      case ExpressionKind::MemberAccess : lhs_selectors(e.as<slang::ast::MemberAccessExpression>().value()); return;
+      case ExpressionKind::Concatenation:
+        for (const auto* op : e.as<slang::ast::ConcatenationExpression>().operands()) {
+          lhs_selectors(*op);
+        }
+        return;
+      case ExpressionKind::ElementSelect: {
+        const auto& es = e.as<slang::ast::ElementSelectExpression>();
+        es.selector().visit(*this);
+        lhs_selectors(es.value());
+        return;
+      }
+      case ExpressionKind::RangeSelect: {
+        const auto& rs = e.as<slang::ast::RangeSelectExpression>();
+        rs.left().visit(*this);
+        rs.right().visit(*this);
+        lhs_selectors(rs.value());
+        return;
+      }
+      default: return;
+    }
+  }
+  void handle(const slang::ast::AssignmentExpression& expr) {
+    lhs_selectors(expr.left());
+    expr.right().visit(*this);
+  }
+  void handle(const slang::ast::ValueExpressionBase& expr) { reads.insert(&expr.symbol); }
+};
+
 // Symbols DEFINITELY assigned (blocking) on EVERY path through `stmt`.
 //
 // This is what decides an INFERRED LATCH: in a level-sensitive process, a
@@ -348,22 +385,27 @@ struct Loop_control_usage : public slang::ast::ASTVisitor<Loop_control_usage, sl
 // skip a write inside a modelled shape (`break`/`continue` need a loop, which is
 // unmodelled anyway, and `return` needs a function body, never descended into).
 void definite_blocking_writes(const slang::ast::Statement& stmt, absl::flat_hash_set<const slang::ast::ValueSymbol*>& out,
-                              const std::function<bool(const slang::ast::CaseStatement&)>& exhaustive, bool strict = false) {
+                              const std::function<bool(const slang::ast::CaseStatement&)>& exhaustive, bool strict = false,
+                              bool nonblocking = false, bool whole_only = false) {
   using slang::ast::StatementKind;
   auto all_writes_below = [&](const slang::ast::Statement& s) {
+    if (whole_only) {
+      return;  // an unmodelled statement kind proves no whole-symbol write
+    }
     Write_collector wc;
     s.visit(wc);
-    out.insert(wc.blocking.begin(), wc.blocking.end());
+    const auto& writes = nonblocking ? wc.nonblocking : wc.blocking;
+    out.insert(writes.begin(), writes.end());
   };
   auto intersect_into = [&](const std::vector<const slang::ast::Statement*>& arms) {
     if (arms.empty()) {
       return;
     }
     absl::flat_hash_set<const slang::ast::ValueSymbol*> acc;
-    definite_blocking_writes(*arms.front(), acc, exhaustive, strict);
+    definite_blocking_writes(*arms.front(), acc, exhaustive, strict, nonblocking, whole_only);
     for (size_t i = 1; i < arms.size(); ++i) {
       absl::flat_hash_set<const slang::ast::ValueSymbol*> other;
-      definite_blocking_writes(*arms[i], other, exhaustive, strict);
+      definite_blocking_writes(*arms[i], other, exhaustive, strict, nonblocking, whole_only);
       absl::flat_hash_set<const slang::ast::ValueSymbol*> keep;
       for (const auto* sym : acc) {
         if (other.contains(sym)) {
@@ -379,14 +421,14 @@ void definite_blocking_writes(const slang::ast::Statement& stmt, absl::flat_hash
     case StatementKind::Empty: return;
     case StatementKind::List:
       for (const auto* s : stmt.as<slang::ast::StatementList>().list) {
-        definite_blocking_writes(*s, out, exhaustive, strict);  // sequential: a later write still counts
+        definite_blocking_writes(*s, out, exhaustive, strict, nonblocking, whole_only);  // sequential: a later write still counts
       }
       return;
     case StatementKind::Block:
-      definite_blocking_writes(stmt.as<slang::ast::BlockStatement>().body, out, exhaustive, strict);
+      definite_blocking_writes(stmt.as<slang::ast::BlockStatement>().body, out, exhaustive, strict, nonblocking, whole_only);
       return;
     case StatementKind::Timed:
-      definite_blocking_writes(stmt.as<slang::ast::TimedStatement>().stmt, out, exhaustive, strict);
+      definite_blocking_writes(stmt.as<slang::ast::TimedStatement>().stmt, out, exhaustive, strict, nonblocking, whole_only);
       return;
     case StatementKind::ExpressionStatement: {
       const auto& e = stmt.as<slang::ast::ExpressionStatement>().expr;
@@ -394,14 +436,22 @@ void definite_blocking_writes(const slang::ast::Statement& stmt, absl::flat_hash
         return;
       }
       const auto& a = e.as<slang::ast::AssignmentExpression>();
-      if (a.isNonBlocking()) {
-        return;  // a nonblocking write in a level-sensitive block is the M1 latch idiom
+      if (a.isNonBlocking() != nonblocking) {
+        return;  // a `<=` in a level-sensitive block is the M1 latch idiom unless collect_state_vars proves it logic
       }
       std::function<void(const slang::ast::Expression&)> note = [&](const slang::ast::Expression& lhs) {
         if (lhs.kind == ExpressionKind::Concatenation) {
           for (const auto* op : lhs.as<slang::ast::ConcatenationExpression>().operands()) {
             note(*op);
           }
+          return;
+        }
+        // `whole_only` counts a write only when it covers the whole symbol (`q <= d`, not `q[0] <= d`).
+        const slang::ast::Expression* bare = &lhs;
+        while (bare->kind == ExpressionKind::Conversion) {
+          bare = &bare->as<slang::ast::ConversionExpression>().operand();
+        }
+        if (whole_only && bare->kind != ExpressionKind::NamedValue) {
           return;
         }
         if (const auto* sym = lhs_base_symbol(lhs)) {
@@ -463,6 +513,23 @@ void definite_blocking_writes(const slang::ast::Statement& stmt, absl::flat_hash
 struct Past_collector : public slang::ast::ASTVisitor<Past_collector, slang::ast::VisitFlags::AllGood> {
   absl::flat_hash_map<const slang::ast::ValueSymbol*, int> depth;  // symbol -> deepest n
   bool                                                     saw_unsupported = false;
+  // --ignore-assertions: an assertion is neither lowered nor refused, so a `$past`/`$rose`
+  // inside one must not mint a history flop (and its shift-chain update) that nothing reads.
+  bool                                                     skip_assertions = false;
+
+  void handle(const slang::ast::ConcurrentAssertionStatement& s) {
+    if (!skip_assertions) {
+      visitDefault(s);
+    }
+  }
+  void handle(const slang::ast::ImmediateAssertionStatement& s) {
+    if (!skip_assertions) {
+      visitDefault(s);
+    }
+  }
+
+  // A child instance keeps its own history flops; do not collect them here.
+  void handle(const slang::ast::InstanceSymbol&) {}
 
   void handle(const slang::ast::CallExpression& e) {
     // $rose/$fell/$stable/$changed are one cycle of history each, so they need
@@ -1450,19 +1517,28 @@ void Slang_context::emit_module_io(const slang::ast::InstanceSymbol& symbol, con
   // ("reg names clock_pin 'RW0_clk_s1' but module has no such input/wire").
   const auto* canon = symbol.getCanonicalBody();
   const auto& body  = canon != nullptr ? *canon : symbol.body;
+  // `--compat=vcs` downgrades slang's `Redefinition` error to a warning, so a port declared TWICE
+  // (the Xilinx GTHE4_CHANNEL stub lists some of its ports twice) reaches this loop as two
+  // PortSymbols of one name. Like VCS, the first declaration is the port; the later ones name the
+  // same signal and must not become a second IO of that name.
+  absl::flat_hash_set<std::string_view> seen_port_names;
   for (const auto& p : body.getPortList()) {
     if (p->kind == SymbolKind::Port) {
       const auto& port = p->as<slang::ast::PortSymbol>();
+      if (!port.name.empty() && !seen_port_names.insert(port.name).second) {
+        continue;
+      }
 
-      if (port.direction == slang::ast::ArgumentDirection::InOut || port.direction == slang::ast::ArgumentDirection::Ref) {
+      if (!port_direction_supported(port)) {
         emit_unsupported(port.location,
                          "unsupported-inout-port",
-                         std::string("port '") + std::string(port.name) + "' is inout/ref, which --reader slang cannot lower");
+                         std::string("port '") + std::string(port.name) + "' is inout/ref, which --reader slang cannot lower",
+                         "inout can be lowered as the direction the module uses with --set compile.slang.inout_as_driven=true");
         continue;
       }
 
       const auto& type   = port.getType();
-      const bool  is_out = port.direction == slang::ast::ArgumentDirection::Out;
+      const bool  is_out = port_is_output(port);
 
       // Unpacked-array port `T arr[N-1:0]` -> flat packed [N*elem_bits-1:0] IO.
       // Yosys places the declaration's rightmost element in the packed bus LSB,
@@ -1923,7 +1999,46 @@ void Slang_context::collect_state_vars(const slang::ast::Scope& body) {
         }
       }
     }
+    // A level-sensitive `always @(*)` whose nonblocking writes reach every
+    // output on every path (the Migen/LiteX shape `x <= 0; if (c) x <= y;`, or a
+    // case with a default) holds no value: it is combinational logic, exactly as
+    // yosys' proc pass decides (completeness, not the `<=` spelling, makes a
+    // latch). Only an incomplete path is the M1 latch idiom. Conservative: a
+    // block that also writes the symbol with `=`, never writes all of it on
+    // every path (only `q[0] <= d`), or reads a symbol it writes with `<=`
+    // (where the nonblocking old-value read and the settled value differ),
+    // keeps the latch classification. `always_latch` is a latch by declaration.
+    absl::flat_hash_set<const slang::ast::ValueSymbol*> comb_nonblocking;
+    if (is_latch_block && pbs.procedureKind == slang::ast::ProceduralBlockKind::Always && !wc.nonblocking.empty()) {
+      absl::flat_hash_set<const slang::ast::ValueSymbol*> definite;
+      definite_blocking_writes(
+          pbs.getBody(),
+          definite,
+          [this](const auto& c) { return case_is_exhaustive(c); },
+          /*strict=*/false,
+          /*nonblocking=*/true);
+      // The Migen/LiteX per-bit form `x <= 0; x[0] <= a; x[1] <= b;` is complete because a WHOLE
+      // default write dominates every path; partial writes alone leave the other bits holding.
+      absl::flat_hash_set<const slang::ast::ValueSymbol*> definite_whole;
+      definite_blocking_writes(
+          pbs.getBody(),
+          definite_whole,
+          [this](const auto& c) { return case_is_exhaustive(c); },
+          /*strict=*/false,
+          /*nonblocking=*/true,
+          /*whole_only=*/true);
+      Read_collector rc;
+      pbs.getBody().visit(rc);
+      for (const auto* sym : wc.nonblocking) {
+        if (definite.contains(sym) && definite_whole.contains(sym) && !wc.blocking.contains(sym) && !rc.reads.contains(sym)) {
+          comb_nonblocking.insert(sym);
+        }
+      }
+    }
     for (const auto* sym : wc.nonblocking) {
+      if (comb_nonblocking.contains(sym)) {
+        continue;
+      }
       reg_syms_.insert(sym);
       if (is_latch_block) {
         latch_syms_.insert(sym);
@@ -2043,6 +2158,22 @@ bool Slang_context::lower_module(const slang::ast::InstanceSymbol& symbol) {
   }
 
   emit_module_io(symbol, in_tup, out_tup);
+  // compile.slang.blackbox_attribute: a `(* blackbox *)` module (a hard macro or vendor primitive stub: Yosys'
+  // own convention for "this is the interface, the body lives elsewhere") is its ports only. Lowering its
+  // empty body would turn every output into an unknown constant; flag the unit so tolg declares the
+  // interface and builds no body.
+  for (const auto* attr : options_.blackbox_attribute ? body->getCompilation().getAttributes(body->getDefinition())
+                                                      : std::span<const slang::ast::AttributeSymbol* const>{}) {
+    if (attr->name == "blackbox") {
+      builder_.lnast->set_blackbox(true);
+      if (module_failed_) {
+        return false;
+      }
+      lowered_[body] = builder_.lnast;
+      ordered_lnasts_.push_back(builder_.lnast);
+      return true;
+    }
+  }
   prepare_plusargs(*body);
   // Every classification pre-scan runs BEFORE the first expression lowers:
   // is_scalar_struct_var memoizes over the port/reg sets and struct_use_.
@@ -2602,9 +2733,13 @@ bool Slang_context::lower_module(const slang::ast::InstanceSymbol& symbol) {
   // NOT get the poison store — the wire is single-driver, and a split wire's
   // accumulator carries the poison as its declare init instead).
 
+  // History flops belong to this body only: a parent's chains must not be
+  // updated inside a child lowered after (or during) it.
+  auto outer_past = std::exchange(past_chain_, {});
   declare_past_chains(*body);
   lower_members(*body);
   emit_past_chain_updates();
+  past_chain_ = std::move(outer_past);
   finalize_pending_async_resets();
   for (const auto* sym : emit_ordered(reg_init_applied_)) {
     if (reset_attr_syms_.contains(sym)) {
@@ -2901,7 +3036,8 @@ bool Slang_context::declare_unpacked(const slang::ast::ValueSymbol& sym, bool is
     emit_unsupported(sym.location, "readmem-array-port", "file preload requires a local memory, not a flattened array port");
     return false;
   }
-  if (dims.size() == 1 && (flat_io_port || (!is_reg && !has_init)) && flat_bits > 0 && flat_bits <= 65536) {
+  const bool static_state = is_reg && !has_init && options_.flatten_state_arrays;
+  if (dims.size() == 1 && (flat_io_port || static_state || (!is_reg && !has_init)) && flat_bits > 0 && flat_bits <= 65536) {
     if (has_init) {
       // The flat branch has no INIT representation (the Memory branch below is
       // the only one that emits mem_init_vals_). A flat IO port reaches here
@@ -4164,6 +4300,78 @@ struct Dep_collector : public slang::ast::ASTVisitor<Dep_collector, slang::ast::
 
 }  // namespace
 
+bool Slang_context::port_direction_supported(const slang::ast::PortSymbol& port) const {
+  if (port.direction == slang::ast::ArgumentDirection::InOut) {
+    return options_.inout_as_driven;
+  }
+  return port.direction != slang::ast::ArgumentDirection::Ref;
+}
+
+bool Slang_context::port_is_output(const slang::ast::PortSymbol& port) {
+  if (port.direction == slang::ast::ArgumentDirection::InOut && options_.inout_as_driven) {
+    return inout_port_driven(port);
+  }
+  return port.direction == slang::ast::ArgumentDirection::Out;
+}
+
+// Does the module body that owns `port` drive its internal net? Continuous
+// assigns, procedural writes and the output side of child instances count, with
+// the same write notion (Dep_collector) the driver ordering uses; a child's own
+// inout is an output exactly when that child drives it.
+bool Slang_context::inout_port_driven(const slang::ast::PortSymbol& port) {
+  if (const auto it = inout_driven_.find(&port); it != inout_driven_.end()) {
+    return it->second;
+  }
+  bool        driven = false;
+  const auto* net    = port.internalSymbol;
+  if (net != nullptr && slang::ast::ValueSymbol::isKind(net->kind)) {
+    const auto*                                   sym = &net->as<slang::ast::ValueSymbol>();
+    Dep_collector                                 dc;
+    std::function<void(const slang::ast::Scope&)> walk = [&](const slang::ast::Scope& scope) {
+      for (const auto& member : scope.members()) {
+        if (dc.writes.contains(sym)) {
+          return;
+        }
+        switch (member.kind) {
+          case SymbolKind::ContinuousAssign: member.as<slang::ast::ContinuousAssignSymbol>().getAssignment().visit(dc); break;
+          case SymbolKind::ProceduralBlock : member.as<slang::ast::ProceduralBlockSymbol>().getBody().visit(dc); break;
+          case SymbolKind::Instance:
+            for (const auto* conn : member.as<slang::ast::InstanceSymbol>().getPortConnections()) {
+              const auto* expr = conn->getExpression();
+              if (expr == nullptr || conn->port.kind != SymbolKind::Port
+                  || !port_is_output(conn->port.as<slang::ast::PortSymbol>())) {
+                continue;
+              }
+              if (const auto* assign = expr->as_if<slang::ast::AssignmentExpression>()) {
+                expr = &assign->left();
+              }
+              dc.note_lhs(*expr);
+            }
+            break;
+          case SymbolKind::GenerateBlock:
+            if (!member.as<slang::ast::GenerateBlockSymbol>().isUninstantiated) {
+              walk(member.as<slang::ast::GenerateBlockSymbol>());
+            }
+            break;
+          case SymbolKind::GenerateBlockArray:
+            for (const auto* entry : member.as<slang::ast::GenerateBlockArraySymbol>().entries) {
+              if (!entry->isUninstantiated) {
+                walk(*entry);
+              }
+            }
+            break;
+          case SymbolKind::InstanceArray: walk(member.as<slang::ast::InstanceArraySymbol>()); break;
+          default                       : break;
+        }
+      }
+    };
+    walk(*port.getParentScope());
+    driven = dc.writes.contains(sym);
+  }
+  inout_driven_.emplace(&port, driven);
+  return driven;
+}
+
 // External nets connected to an instance's PURELY-STATE output ports — an
 // output whose internal driver is a submodule flop/latch q (so it is
 // combinationally independent of every input at the module boundary, exactly
@@ -4421,7 +4629,7 @@ void Slang_context::lower_members(const slang::ast::Scope& scope) {
               continue;
             }
             Dep_collector dc;
-            if (conn->port.as<slang::ast::PortSymbol>().direction == slang::ast::ArgumentDirection::Out) {
+            if (port_is_output(conn->port.as<slang::ast::PortSymbol>())) {
               const auto* target = expr;
               if (const auto* assign = target->as_if<slang::ast::AssignmentExpression>()) {
                 target = &assign->left();
@@ -4705,7 +4913,8 @@ void Slang_context::lower_members(const slang::ast::Scope& scope) {
         if (conn->port.kind != SymbolKind::Port || conn->getExpression() == nullptr) {
           continue;
         }
-        auto direction = conn->port.as<slang::ast::PortSymbol>().direction;
+        const auto& conn_port = conn->port.as<slang::ast::PortSymbol>();
+        auto        direction = port_is_output(conn_port) ? slang::ast::ArgumentDirection::Out : conn_port.direction;
         if (direction == slang::ast::ArgumentDirection::Out) {
           collect_packed_target(*conn->getExpression());
         } else if (direction != slang::ast::ArgumentDirection::In) {
@@ -5256,8 +5465,7 @@ void Slang_context::lower_members(const slang::ast::Scope& scope) {
         // see instance connections).
         for (const auto* conn : d.member->as<slang::ast::InstanceSymbol>().getPortConnections()) {
           const auto* expr = conn->getExpression();
-          if (expr == nullptr || conn->port.kind != SymbolKind::Port
-              || conn->port.as<slang::ast::PortSymbol>().direction != slang::ast::ArgumentDirection::Out) {
+          if (expr == nullptr || conn->port.kind != SymbolKind::Port || !port_is_output(conn->port.as<slang::ast::PortSymbol>())) {
             continue;
           }
           const auto* t = expr;
@@ -5795,6 +6003,7 @@ void Slang_context::lower_members(const slang::ast::Scope& scope) {
         sym_lname_[w] = it->second;
       }
     }
+    split_redirects_ = &restore;
     switch (d.member->kind) {
       case SymbolKind::Net: {
         const auto& ns = d.member->as<slang::ast::NetSymbol>();
@@ -5901,7 +6110,8 @@ void Slang_context::lower_members(const slang::ast::Scope& scope) {
         break;
       default: break;
     }
-    genblk_prefix_ = saved_prefix;
+    genblk_prefix_   = saved_prefix;
+    split_redirects_ = nullptr;
     bundle_proc_writes_.clear();
     for (auto& [w, name] : restore) {
       sym_lname_[w] = name;  // → back to the resolved wire for other drivers
@@ -6124,8 +6334,15 @@ void Slang_context::lower_process(const slang::ast::ProceduralBlockSymbol& pbs) 
     std::function<void(const slang::ast::Statement&)> lower_assertions = [&](const slang::ast::Statement& s) {
       switch (s.kind) {
         case StatementKind::Empty             : return;
-        case StatementKind::ImmediateAssertion: lower_immediate_assertion(s.as<slang::ast::ImmediateAssertionStatement>()); return;
+        case StatementKind::ImmediateAssertion:
+          if (!options_.ignore_assertions) {
+            lower_immediate_assertion(s.as<slang::ast::ImmediateAssertionStatement>());
+          }
+          return;
         case StatementKind::ConcurrentAssertion:
+          if (options_.ignore_assertions) {
+            return;
+          }
           if (!lower_concurrent_assertion(s.as<slang::ast::ConcurrentAssertionStatement>())) {
             emit_unsupported(s.sourceRange,
                              "unsupported-property",
@@ -7145,6 +7362,7 @@ void Slang_context::emit_reg_reset_attrs(const slang::ast::ValueSymbol& sym, std
 // BEFORE the body is lowered, because the body reads these names.
 void Slang_context::declare_past_chains(const slang::ast::Symbol& body) {
   Past_collector pc;
+  pc.skip_assertions = options_.ignore_assertions;
   body.visit(pc);
   for (const auto& [sym, deepest] : pc.depth) {
     if (deepest <= 0) {
@@ -7840,7 +8058,11 @@ void Slang_context::lower_instance(const slang::ast::InstanceSymbol& inst) {
     // silently drops the other: the RTL body (macro picked) or the Liberty pins
     // the graph IO is declared from (RTL picked, e.g. via a liblist).
     const bool  from_liberty = is_liberty_interface_definition(sm_, definition);
-    const auto* other        = from_liberty ? other_root_declaration(body_->getCompilation(), definition, definition.name) : nullptr;
+    // liberty_macro_precedence put the macro in a library slang resolves first, so a design
+    // source of the same name is shadowed on purpose (never elaborated): not a collision.
+    const auto* other = from_liberty && !options_.liberty_macro_precedence
+                            ? other_root_declaration(body_->getCompilation(), definition, definition.name)
+                            : nullptr;
     if (!from_liberty || other != nullptr) {
       const auto where = other != nullptr ? other->header->name.range() : slang::SourceRange(definition.location, definition.location);
       emit_error(where,
@@ -8029,16 +8251,42 @@ void Slang_context::lower_instance(const slang::ast::InstanceSymbol& inst) {
     }
   };
 
+  // The instance runs only after every input is read. A net it also drives through an output connection
+  // (`.yumi_i(rdy[i] & v_o[i])` next to `.v_o(v_o[i])`, a handshake feeding its own output back) is redirected
+  // to its mut accumulator while this driver emits; reading that here would see the accumulator's poison
+  // initializer instead of the net, so inputs read the resolved wire. The output bindings below write the
+  // accumulator again.
+  std::vector<std::pair<const slang::ast::Symbol*, std::string>> input_phase;  // (net, accumulator lname)
+  if (split_redirects_ != nullptr) {
+    for (const auto& [net, resolved] : *split_redirects_) {
+      if (auto it = wire_split_tmp_.find(net); it != wire_split_tmp_.end() && sym_lname_[net] == it->second) {
+        input_phase.emplace_back(net, it->second);
+        sym_lname_[net] = resolved;
+      }
+    }
+  }
+  const auto end_input_phase = [&]() {
+    for (const auto& [net, accumulator] : input_phase) {
+      sym_lname_[net] = accumulator;
+    }
+    input_phase.clear();
+  };
+
+  absl::flat_hash_set<std::string_view> seen_port_names;  // a port listed twice under --compat=vcs: the first wins
   for (const auto* conn : inst.getPortConnections()) {
     if (conn->port.kind != SymbolKind::Port) {
+      end_input_phase();
       emit_unsupported(inst.location,
                        "unsupported-port-conn",
                        std::string("instance '") + std::string(inst.name) + "' connects an unsupported port kind");
       return;
     }
     const auto& port   = conn->port.as<slang::ast::PortSymbol>();
+    if (!port.name.empty() && !seen_port_names.insert(port.name).second) {
+      continue;
+    }
     const auto* expr   = conn->getExpression();
-    const bool  is_out = port.direction == slang::ast::ArgumentDirection::Out;
+    const bool  is_out = port_is_output(port);
     if (liberty_memory && !is_out && expr != nullptr) {
       const auto* actual = expr;
       while (actual->kind == ExpressionKind::Conversion && actual->as<slang::ast::ConversionExpression>().isImplicit()) {
@@ -8046,18 +8294,30 @@ void Slang_context::lower_instance(const slang::ast::InstanceSymbol& inst) {
       }
       const auto width = flat_or_tinfo(port.getType()).bits;
       if (flat_or_tinfo(*actual->type).bits > width && value_width(*actual).value_or(width + 1) > width) {
-        emit_unsupported(inst.location,
-                         "liberty-memory-port-truncation",
-                         "Liberty memory '" + callee + "' input '" + std::string(port.name) + "' would discard address/data bits",
-                         "use a matching macro interface or explicit, semantically validated banking logic");
-        return;
+        if (!options_.liberty_allow_truncation) {
+          emit_unsupported(inst.location,
+                           "liberty-memory-port-truncation",
+                           "Liberty cell '" + callee + "' input '" + std::string(port.name) + "' would discard address/data bits",
+                           "use a matching macro interface or explicit, semantically validated banking logic, or opt in to "
+                           "Verilog truncation with --set compile.slang.liberty_allow_truncation=true");
+          end_input_phase();
+          return;
+        }
+        emit_warning(slang::SourceRange(inst.location, inst.location),
+                     "liberty-memory-port-truncation",
+                     "unsupported",
+                     "Liberty cell '" + callee + "' input '" + std::string(port.name) + "' truncates a wider actual to "
+                         + std::to_string(width) + " bits (liberty_allow_truncation)",
+                     "the upper bits are discarded, as Verilog and Yosys do");
       }
     }
-    if (port.direction == slang::ast::ArgumentDirection::InOut || port.direction == slang::ast::ArgumentDirection::Ref) {
+    if (!port_direction_supported(port)) {
       emit_unsupported(
           inst.location,
           "unsupported-inout-port",
-          std::string("instance '") + std::string(inst.name) + "' connects inout port '" + std::string(port.name) + "'");
+          std::string("instance '") + std::string(inst.name) + "' connects inout port '" + std::string(port.name) + "'",
+          "inout can be lowered as the direction the module uses with --set compile.slang.inout_as_driven=true");
+      end_input_phase();
       return;
     }
     // M7: the SAME type-only rule the child def used — parents and children
@@ -8076,8 +8336,8 @@ void Slang_context::lower_instance(const slang::ast::InstanceSymbol& inst) {
           clear_pending_loc();
         } else {
           auto        ti = flat_or_tinfo(port.getType());
-          // unconnected input reads x
-          std::string qmarks(static_cast<size_t>(ti.bits), '?');
+          // unconnected input reads x (compile.slang.unconnected_input=zero|one: that constant)
+          std::string qmarks(static_cast<size_t>(ti.bits), options_.unconnected_input == 'x' ? '?' : options_.unconnected_input);
           // A Verilog escaped identifier may contain dots (`\\io_in.field `).
           // Keep that as ONE literal named argument, matching the backticked
           // formal emitted above; an unquoted dotted ref is parsed by upass as
@@ -8108,6 +8368,7 @@ void Slang_context::lower_instance(const slang::ast::InstanceSymbol& inst) {
       in_args.emplace_back(ref_name_of_raw(port.name), v);
     }
   }
+  end_input_phase();
 
   auto& ln = *builder_.lnast;
   set_pending_loc(inst.location);

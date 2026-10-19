@@ -80,6 +80,16 @@ horizontal/vertical values. The RC file participates in input provenance/cache
 identity. Missing technology characterization is an error rather than a guessed
 material constant.
 
+An unknown (X) constant that reaches a mapped net is refused by name by default: a
+physical net must carry a value, and the RTL left it unspecified (`assign y = 'x`,
+an `'x` default no branch overrides, an unconnected cell input, an undriven top-level
+output or a struct field nothing writes). `synth.place.unknown_const=zero` is the
+opt-in refinement: every such bit is tied low through the same tie cell as a logical
+0 (any value is a legal refinement of a don't-care; yosys `setundef -zero`, which the
+OpenROAD flow applies before its tie cells, makes the same choice), and a
+`unknown-const-tied-low` warning reports how many bits it touched. It is part of the
+placement cache identity.
+
 Nets beyond FLUTE's 1000-location degree limit use an explicitly approximate
 Manhattan star until fanout repair can split them. Placed timing includes the
 last wire segment into primary outputs and native memory captures.
@@ -330,7 +340,13 @@ approximate placement-RC timing decisions, with legal post-placement validation
 still performed by the existing outer flow.
 
 `synth.place.resize=true` enables bounded sizing and buffer optimization after
-legal placement. Equivalent scalar logic cells must have the same ordered pin
+legal placement. Logic upstream of a clock or reset pin is protected from every edit by
+default, so a reset net that fans out to thousands of registers (a reset synchronizer's
+mux driving all of a block's asynchronous resets) is left as mapped, one weak gate driving
+the whole net. `synth.place.repair.reset=true` lifts the protection for RESET pins and
+reset-named pins only (clock cones stay protected), letting the same sizing and fanout
+splitting treat the reset net like any data net, as a conventional pre-CTS flow does; it is
+part of the placement cache identity when floorplan resizing is on. Equivalent scalar logic cells must have the same ordered pin
 interface, footprint and exact Liberty truth table (up to six inputs). Drive
 variants may have different widths. Sizing and redundant-buffer bypass run first,
 followed by a separate design-repair pass that splits fanout on FLUTE Steiner
@@ -555,6 +571,16 @@ placement. LiveHD disables virtual GP fillers in all native placement calls.
 Density is a soft spreading target, not a requirement to fill the core. Imported
 floorplans keep their supplied area even when actual utilization differs from
 the target. Generated floorplans use `synth.place.utilization` for initial area.
+
+A benchmark that fixes its frame (ORFS `DIE_AREA` / `CORE_AREA`) gives it in microns as
+`synth.place.die=xl,yl,xh,yh` and `synth.place.core=xl,yl,xh,yh` (default empty: derive
+the frame from utilization and aspect). The core snaps INWARD to the site/row grid (lower
+left rounds up, upper right rounds down, like OpenROAD's `initialize_floorplan`), so
+`CORE_AREA 2 2 248 248` on ASAP7 is the 2.052..247.968 x 2.160..247.860 um core
+OpenROAD reports; rows start at that origin, and IO pins are placed on the DIE boundary.
+Giving only one of the two uses it for both. Utilization and aspect then do not apply;
+the run refuses a core that lies outside the die, holds no complete row, or is smaller
+than the mapped cells, and the options cannot be combined with `synth.place.floorplan`.
 Physical filler insertion, if a downstream implementation tool requires it, is
 outside LiveHD placement. The experimental `synth.place.filler_width` option was
 removed with virtual filler insertion.

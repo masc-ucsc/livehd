@@ -501,7 +501,8 @@ TEST(Placement, SignedWiringExtendsMsb) {
 // nand(a[0], 1) -> inv -> y, plus a constant output k: the tie cell drives both
 // a cell input and a top output that keeps its logical constant. Without
 // constants, the same top uses a[1] for both instead (no tie cell needed).
-static std::shared_ptr<hhds::Graph> tie_graph(hhds::GraphLibrary& source, bool constants = true) {
+// With unknown_k the output k is an undriven (unknown, `0ub?`) constant instead of a 1.
+static std::shared_ptr<hhds::Graph> tie_graph(hhds::GraphLibrary& source, bool constants = true, bool unknown_k = false) {
   auto io = source.create_io("tie_top");
   io->add_input("a", 0);
   io->set_bits("a", 2);
@@ -536,7 +537,7 @@ static std::shared_ptr<hhds::Graph> tie_graph(hhds::GraphLibrary& source, bool c
   auto y = b.create_driver_pin("Y");
   gu::set_bits(y, 1);
   graph->get_output_pin("y").connect_driver(y);
-  graph->get_output_pin("k").connect_driver(one());
+  graph->get_output_pin("k").connect_driver(unknown_k ? gu::create_const(*graph, *Dlop::from_pyrope("0ub?")) : one());
   return graph;
 }
 struct Tie_fixture {
@@ -643,6 +644,79 @@ TEST(Placement, ConstantDriversUseLibertyPolarityAndPhysicalCandidates) {
     }
   }
   EXPECT_FALSE(source.find_io("a_high"));  // Only the private physical library changes.
+}
+// An unknown (X) constant that reaches a mapped cell input is a synthesis don't-care
+// (`assign y = 'x` in the RTL). The default refuses it by name; unknown_const_zero ties it
+// low (a legal refinement) through the usual tie cell and counts what it tied.
+TEST(Placement, UnknownConstantIsRefusedUnlessTiedLowByOption) {
+  const auto build = [](hhds::GraphLibrary& source) {
+    auto io = source.create_io("x_top");
+    io->add_input("a", 0);
+    io->set_bits("a", 1);
+    io->add_output("y", 0);
+    io->set_bits("y", 1);
+    auto graph = io->create_graph();
+    auto inv   = source.create_io("sky130_fd_sc_hd__inv_1");
+    inv->add_input("A", 0);
+    inv->add_output("Y", 0);
+    auto n = gu::create_typed_node(*graph, Ntype_op::Sub);
+    n.set_subnode(inv);
+    n.set_name("inv");
+    n.create_sink_pin("A").connect_driver(gu::create_const(*graph, *Dlop::from_pyrope("0ub?")));
+    auto y = n.create_driver_pin("Y");
+    gu::set_bits(y, 1);
+    graph->get_output_pin("y").connect_driver(y);
+    return graph;
+  };
+  const auto options = tie_options("unknown", {{"tie_lo", {{"lo", false}}}, {"tie_hi", {{"hi", true}}}});
+  {
+    hhds::GraphLibrary source, flat;
+    const auto         graph = build(source);
+    try {
+      (void)place(*graph, flat, options);
+      FAIL() << "an unknown constant reached a physical net without the opt-in";
+    } catch (const std::runtime_error& e) {
+      EXPECT_NE(std::string(e.what()).find("unknown constant"), std::string::npos) << e.what();
+    }
+  }
+  hhds::GraphLibrary source, flat;
+  const auto         graph = build(source);
+  auto               tied  = options;
+  tied.unknown_const_zero  = true;
+  const auto placed        = place(*graph, flat, tied);
+  EXPECT_EQ(placed.unknown_const_tied, 1);
+  EXPECT_EQ(std::count_if(placed.floorplan.components.begin(),
+                          placed.floorplan.components.end(),
+                          [](const auto& c) { return c.name == "__place_tielo"; }),
+            1);
+}
+// The same don't-care on a TOP-LEVEL output rather than a cell input: an undriven output port
+// (the OpenROAD flow resolves it with `setundef -zero` before its tie cells). It is refused by
+// default and gets the low tie cell under unknown_const_zero.
+TEST(Placement, UnknownConstantOnATopOutputIsRefusedUnlessTiedLow) {
+  hhds::GraphLibrary source;
+  auto               graph   = tie_graph(source, true, true);
+  auto               options = plain_options();
+  options.liberty            = "inou/lefdef/tests/data/sky130hd.lib";
+  options.lefs               = {"inou/lefdef/tests/data/sky130hd.tlef", "inou/lefdef/tests/data/sky130hd.lef"};
+  options.output_dir         = std::string(std::getenv("TEST_TMPDIR")) + "/unknown_constant_output";
+  options.iterations         = 20;
+  options.bins               = 8;
+  hhds::GraphLibrary refused;
+  try {
+    (void)place(*graph, refused, options);
+    ADD_FAILURE() << "an unknown constant on a physical net was accepted";
+  } catch (const std::runtime_error& e) {
+    EXPECT_NE(std::string(e.what()).find("unknown constant"), std::string::npos) << e.what();
+  }
+  options.unknown_const_zero = true;
+  hhds::GraphLibrary tied;
+  const auto         placed = place(*graph, tied, options);
+  EXPECT_EQ(placed.unknown_const_tied, 1);
+  const bool low = std::any_of(placed.floorplan.components.begin(), placed.floorplan.components.end(), [](const auto& c) {
+    return c.name == "__place_tielo";
+  });
+  EXPECT_TRUE(low) << "the unknown output bit should be driven by the low tie cell";
 }
 TEST(Placement, DualConstantDriverDeclaresAndPreservesAllLibraryOutputs) {
   hhds::GraphLibrary source, flat;
@@ -848,6 +922,68 @@ TEST(Placement, PreviousFrameKeepsIoPositionsAndSlotsNewOnes) {
       EXPECT_FALSE(p.x == t.x && p.y == t.y) << "new pin k on top of " << p.name;
     }
   }
+}
+TEST(Placement, FixedDieAndCoreSnapInwardAndKeepPinsOnTheDie) {
+  hhds::GraphLibrary source;
+  auto               graph   = tie_graph(source);
+  auto               options = plain_options();
+  options.liberty            = "inou/lefdef/tests/data/sky130hd.lib";
+  options.lefs               = {"inou/lefdef/tests/data/sky130hd.tlef", "inou/lefdef/tests/data/sky130hd.lef"};
+  options.output_dir         = std::string(std::getenv("TEST_TMPDIR")) + "/fixed_frame";
+  options.iterations         = 20;
+  options.bins               = 8;
+  // utilization/aspect are ignored once a frame is given: the 0.46 x 2.72 um site grid snaps the
+  // 2..38.01 x 2..37.9 um core inward to x 2.3..37.72 (77 sites) and y 2.72..35.36 (12 rows).
+  options.die                = {0, 0, 40, 40};
+  options.core               = {2, 2, 38.01, 37.9};
+  hhds::GraphLibrary first;
+  const auto         placed = place(*graph, first, options);
+  const auto&        fp     = placed.floorplan;
+  EXPECT_EQ(fp.die.xl, 0);
+  EXPECT_EQ(fp.die.yl, 0);
+  EXPECT_EQ(fp.die.xh, 40000);
+  EXPECT_EQ(fp.die.yh, 40000);
+  ASSERT_EQ(fp.rows.size(), 12);
+  EXPECT_EQ(fp.rows.front().x, 2300);
+  EXPECT_EQ(fp.rows.front().y, 2720);
+  EXPECT_EQ(fp.rows.front().count, 77);
+  EXPECT_EQ(fp.rows.back().y, 2720 + 11 * 2720);
+  ASSERT_EQ(fp.terminals.size(), 4);
+  for (const auto& t : fp.terminals) {
+    EXPECT_TRUE(t.x == fp.die.xl || t.x == fp.die.xh || t.y == fp.die.yl || t.y == fp.die.yh) << t.name;
+  }
+  {  // The staged macro/cell passes feed their own frame back as an imported floorplan while the
+     // original die/core options stay set: the imported frame wins and the run must not refuse.
+    auto frame = fp;
+    frame.components.clear();
+    frame.terminals.clear();
+    frame.nets.clear();
+    const auto def = std::filesystem::path(std::getenv("TEST_TMPDIR")) / "fixed_frame_import.def";
+    physical::write_def(frame, def.string());
+    auto staged         = options;
+    staged.floorplan    = def.string();
+    staged.output_dir   = std::string(std::getenv("TEST_TMPDIR")) + "/fixed_frame_staged";
+    hhds::GraphLibrary again;
+    const auto         restaged = place(*graph, again, staged);
+    EXPECT_EQ(restaged.floorplan.rows.size(), fp.rows.size());
+    EXPECT_EQ(restaged.floorplan.rows.front().x, fp.rows.front().x);
+  }
+  // A lone die doubles as the core; the same cells fit, so only the frame changes.
+  options.core.clear();
+  options.output_dir = std::string(std::getenv("TEST_TMPDIR")) + "/fixed_die_only";
+  hhds::GraphLibrary second;
+  const auto         die_only = place(*graph, second, options);
+  EXPECT_EQ(die_only.floorplan.rows.front().x, 0);
+  EXPECT_EQ(die_only.floorplan.rows.front().count, 86);
+  EXPECT_EQ(die_only.floorplan.rows.size(), 14);
+  // The frame is validated up front: a core outside the die and a core too small for the cells.
+  options.die  = {0, 0, 40, 40};
+  options.core = {2, 2, 60, 38};
+  hhds::GraphLibrary third;
+  EXPECT_ANY_THROW(place(*graph, third, options));
+  options.core = {2, 2, 3, 3};
+  hhds::GraphLibrary fourth;
+  EXPECT_ANY_THROW(place(*graph, fourth, options));
 }
 TEST(Placement, TimingSnapshotRetainsUnlegalizedGeometryAndPhysicalRc) {
   hhds::GraphLibrary source, first, imported;

@@ -20084,8 +20084,14 @@ void uPass_runner::bake_decl_pre_step(bool is_declare) {
         const auto vt = lm->current_text();
         if (vt.find('?') != std::string_view::npos) {
           if (auto v = Dlop::from_pyrope(vt); v && v->has_unknowns() && v->get_signed_bits() > 1) {
-            const bool sgn  = vt.size() > 1 && vt[1] == 's';
-            const auto bits = static_cast<uint32_t>(sgn ? v->get_signed_bits() : v->get_payload_bits());
+            const bool sgn = vt.size() > 1 && vt[1] == 's';
+            // A SIGN-UNKNOWN signed pattern (`0sb?`, the width-taking wildcard) states no width:
+            // Dlop bounds every such value at 65 bits (see resolve_x_fill), so stamping that as the
+            // declared envelope would make an untyped signed accumulator a fake 65-bit signed
+            // variable, which upass.bitwidth then judges as a too-WIDE value at every merge.
+            const auto first_digit  = vt.find_first_not_of('_', 3);
+            const bool sign_unknown = sgn && first_digit != std::string_view::npos && vt[first_digit] == '?';
+            const auto bits         = static_cast<uint32_t>(sign_unknown ? 0 : sgn ? v->get_signed_bits() : v->get_payload_bits());
             if (bits > 0) {
               decl_max = upass::max_from_bits(bits, sgn);
               decl_min = upass::min_from_bits(bits, sgn);

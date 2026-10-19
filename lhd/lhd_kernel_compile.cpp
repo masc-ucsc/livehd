@@ -2507,8 +2507,23 @@ void compile_sources(Options& opts, Result& res, const Ir_inputs& ir) {
       std::string lib_path = lg_out ? lg_out->path : workdir(opts) + "/lgdb";
       const auto  liberty  = synth_set(opts, "liberty", "");
       if (!liberty.empty()) {
-        livehd::liberty::declare_memory_cells(livehd::Hhds_graph_library::instance(lib_path),
-                                              livehd::liberty::scan_memory_cells(liberty));
+        auto& glib = livehd::Hhds_graph_library::instance(lib_path);
+        livehd::liberty::declare_memory_cells(glib, livehd::liberty::scan_memory_cells(liberty));
+        // compile.slang.liberty_cells: the reader bound modules only the Liberty defines (standard
+        // cells instantiated by name) as external instances; declare exactly those, typed.
+        bool liberty_cells = false;
+        for (const auto& [key, value] : opts.sets) {
+          if (key == "compile.slang.liberty_cells") {
+            liberty_cells = value == "true";
+          }
+        }
+        if (liberty_cells) {
+          std::set<std::string> instantiated;
+          for (const auto& ln : var.lnasts) {
+            instantiated.insert(ln->get_external_modules().begin(), ln->get_external_modules().end());
+          }
+          livehd::liberty::declare_memory_cells(glib, livehd::liberty::scan_logic_cells(liberty, instantiated));
+        }
       }
       // Bare `lhd compile FILE.sv` (no emit) still lowers for max diagnostics.
       lower_lnasts(opts, res, var, lib_path, emits_need_graphs(opts) || force_diag_graphs(opts));

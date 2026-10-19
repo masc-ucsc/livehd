@@ -32,6 +32,10 @@ resolves named SRAM instances without `--ignore-unknown-modules`; unrelated
 unknown modules remain errors. Mapping keeps those instances, with no generated
 memory RTL, flop array, or fabricated functional model. Implicit truncation of
 an SRAM input is refused rather than silently discarding address or data bits.
+Two opt-ins (`--set compile.slang.<flag>=true`, default off) match a Yosys/ORFS reference:
+`liberty_macro_precedence` lets the macro win over a same-named source module, and
+`liberty_allow_truncation` keeps the low bits (with a warning) as Verilog does. See
+`inou/slang/README.md`.
 
 This is binding of an explicitly instantiated macro, not automatic substitution
 of an inferred array based on dimensions. A Liberty `memory()` group and its

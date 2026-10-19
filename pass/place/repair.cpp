@@ -83,10 +83,13 @@ Inventory inventory(const Options& options, const physical::Technology& tech) {
 }
 // Protect all combinational logic upstream of clock/reset sinks, including a whole tree
 // when it branches into both a protected net and a data net. Conservative name
-// matching covers uncharacterized macros and primary clocks too.
+// matching covers uncharacterized macros and primary clocks too. With
+// `protect_reset` false (synth.place.repair.reset) reset sinks and reset-named
+// pins stop protecting their cones, so a high-fanout reset net is sized and
+// buffered like any data net; clock sinks stay protected.
 using Special_pins = std::map<std::string, std::set<std::string>>;
 // Liberty parses are expensive and independent of the graph: floorplan repair scans once.
-Special_pins scan_special_pins(const std::string& libs) {
+Special_pins scan_special_pins(const std::string& libs, bool protect_reset) {
   Special_pins special;
   auto         state = liberty::scan_dff_cells(libs);
   const auto   async = liberty::scan_async_dff_cells(libs);
@@ -94,14 +97,17 @@ Special_pins scan_special_pins(const std::string& libs) {
   const auto latch = liberty::scan_latch_cells(libs);
   state.insert(state.end(), latch.begin(), latch.end());
   for (const auto& c : state) {
-    special[c.name] = {c.clk_pin, c.reset0_pin, c.reset1_pin};
+    special[c.name] = {c.clk_pin};
+    if (protect_reset) {
+      special[c.name].insert({c.reset0_pin, c.reset1_pin});
+    }
   }
   for (const auto& c : liberty::scan_icg_cells(libs)) {
     special[c.name] = {c.clk_pin, c.en_pin, c.test_pin};
   }
   return special;
 }
-std::set<std::string> protected_buffers(hhds::Graph& graph, const Inventory& cells, const Special_pins& special) {
+std::set<std::string> protected_buffers(hhds::Graph& graph, const Inventory& cells, const Special_pins& special, bool protect_reset) {
   std::set<std::string> protected_names;
   std::set<uint64_t>    visited;
   const auto protect = [&](auto&& self, Pin driver) -> void {
@@ -146,10 +152,10 @@ std::set<std::string> protected_buffers(hhds::Graph& graph, const Inventory& cel
       if ((op == Ntype_op::Memory && (off == 2 || off == 14))
           || ((op == Ntype_op::Flop || op == Ntype_op::Latch)
               && (Ntype::get_sink_name(op, sink.get_port_id()) == "clock_pin"
-                  || Ntype::get_sink_name(op, sink.get_port_id()) == "reset_pin"))
+                  || (protect_reset && Ntype::get_sink_name(op, sink.get_port_id()) == "reset_pin")))
           || (io && special.contains(std::string(io->get_name())) && special.at(std::string(io->get_name())).contains(name)) || lower.find("clock") != std::string::npos
-          || lower.find("clk") != std::string::npos || lower.find("reset") != std::string::npos
-          || lower.find("rst") != std::string::npos) {
+          || lower.find("clk") != std::string::npos || (protect_reset && lower.find("reset") != std::string::npos)
+          || (protect_reset && lower.find("rst") != std::string::npos)) {
         for (auto driver : sink.get_driver_pins()) {
           protect(protect, driver);
         }
@@ -158,9 +164,9 @@ std::set<std::string> protected_buffers(hhds::Graph& graph, const Inventory& cel
   }
   return protected_names;
 }
-std::set<std::string> protected_buffers(hhds::Graph& graph, const Inventory& cells, const std::string& libs) {
-  auto special = scan_special_pins(libs);
-  return protected_buffers(graph, cells, special);
+std::set<std::string> protected_buffers(hhds::Graph& graph, const Inventory& cells, const std::string& libs, bool protect_reset) {
+  auto special = scan_special_pins(libs, protect_reset);
+  return protected_buffers(graph, cells, special, protect_reset);
 }
 std::pair<double, double> wire_rc(const Options& options, const physical::Technology& tech) {
   const auto rc
@@ -1198,7 +1204,7 @@ static Floorplan_library read_floorplan_library(const Options& options) {
   Floorplan_library library;
   library.tech    = physical::read_lef(options.lefs);
   library.cells   = inventory(options, library.tech);
-  library.special = scan_special_pins(options.liberty);
+  library.special = scan_special_pins(options.liberty, !options.repair_reset);
   library.drives  = liberty::scan_output_drives(options.liberty);
   return library;
 }
@@ -1207,7 +1213,7 @@ static Floorplan_resize resize_floorplan(Result& state, const Options& options, 
                                          const Floorplan_library& library) {
   const auto& tech           = library.tech;
   const auto& cells          = library.cells;
-  const auto  protected_names = protected_buffers(*state.graph, cells, library.special);
+  const auto  protected_names = protected_buffers(*state.graph, cells, library.special, !options.repair_reset);
   const auto  candidates      = edits(*state.graph, cells, before, protected_names, state, options, tech, &library.drives);
   const auto saved           = state.floorplan;
   struct Change {
@@ -1330,7 +1336,7 @@ Floorplan_resize repair_floorplan(Result& state, const Options& options, const T
       if (!graph) {
         throw std::runtime_error("cannot clone FP electrical sweep");
       }
-      const auto protected_names = protected_buffers(*state.graph, cells, scanned.special);
+      const auto protected_names = protected_buffers(*state.graph, cells, scanned.special, !options.repair_reset);
       auto       candidates = edits(*state.graph, cells, result.timing, protected_names, state, options, tech, &scanned.drives);
       Apply_index           index(*graph, state);
       std::set<std::string> visited;
@@ -1395,7 +1401,7 @@ Floorplan_resize repair_floorplan(Result& state, const Options& options, const T
   unsigned individual          = 0;  // the forest batch above is not charged against the individual trials
   unsigned individual_accepted = 0;
   while (individual < 8 && individual_accepted < 4) {
-    const auto protected_names = protected_buffers(*state.graph, cells, scanned.special);
+    const auto protected_names = protected_buffers(*state.graph, cells, scanned.special, !options.repair_reset);
     const auto candidates = edits(*state.graph, cells, result.timing, protected_names, state, options, tech, &scanned.drives);
     bool       progress   = false;
     for (const auto& edit : candidates) {
@@ -1486,7 +1492,7 @@ Repair_result repair_buffers(Result initial, const Options& options, const Evalu
   const auto                                 tech            = physical::read_lef(options.lefs);
   const auto                                 cells           = inventory(options, tech);
   auto                                       score           = prior_timing ? std::move(*prior_timing) : evaluate(result.placed);
-  const auto                                 protected_names = protected_buffers(*result.placed.graph, cells, options.liberty);
+  const auto                                 protected_names = protected_buffers(*result.placed.graph, cells, options.liberty, !options.repair_reset);
   std::set<std::string>                      tried;
   rapidjson::StringBuffer                    trace;
   rapidjson::Writer<rapidjson::StringBuffer> w(trace);

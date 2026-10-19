@@ -68,6 +68,41 @@ sh_test(
     data = ["//lhd"],
 )
 
+# A level-sensitive `always @(*)` of nonblocking assignments is combinational when
+# every path assigns (Migen/LiteX output), a latch only when one path holds.
+sh_test(
+    name = "nonblocking_comb_latch_class",
+    srcs = ["tests/nonblocking_comb_latch_class.sh"],
+    data = [
+        "tests/nonblocking_latch_class/partial_and_readback.v",
+        "tests/sv/nonblocking_comb_always.v",
+        "tests/sv/nonblocking_latch_kept.v",
+        "//lhd",
+    ],
+    env = {
+        "CLASS_FIXTURES": "inou/slang/tests/nonblocking_latch_class",
+        "FIXTURES": "inou/slang/tests/sv",
+    },
+)
+
+# Run-time severity tasks are not hardware: ignored with one warning per call.
+sh_test(
+    name = "severity_task_warning",
+    srcs = ["tests/severity_task_warning.sh"],
+    data = [
+        "tests/sv/severity_tasks_ignored.sv",
+        "//lhd",
+    ],
+    env = {"FIXTURES": "inou/slang/tests/sv"},
+)
+
+# `inout` is refused unless compile.slang.inout_as_driven lowers it by direction of use.
+sh_test(
+    name = "inout_as_driven",
+    srcs = ["tests/inout_as_driven.sh"],
+    data = ["//lhd"],
+)
+
 sh_test(
     name = "automatic_packed_local",
     srcs = ["tests/automatic_packed_local.sh"],
@@ -206,6 +241,7 @@ _SV_SOURCES = glob(
         # These retain checks that a source/round-trip comparison cannot express.
         "tests/sv/scalar_initial_no_reset.v",
         "tests/sv/mem_struct_slice_write.v",
+        "tests/sv/ignored_assertion_past.sv",
         "tests/sv/packed_array_loop_reg_sroa.v",
         "tests/sv/*_tb.v",
         "tests/sv/*_helper.v",
@@ -273,6 +309,15 @@ sh_test(
 )
 
 sh_test(
+    name = "slang_ignored_assertion_past",
+    srcs = ["tests/ignored_assertion_past_test.sh"],
+    data = [
+        "tests/sv/ignored_assertion_past.sv",
+        "//lhd",
+    ],
+)
+
+sh_test(
     name = "slang_deep_fold_chain",
     srcs = ["tests/deep_fold_chain_test.sh"],
     data = [
@@ -317,6 +362,16 @@ sh_test(
 test_suite(
     name = "integration",
     tests = [":slang_" + src.split("/")[-1].rsplit(".", 1)[0] for src in _SV_SOURCES] + [":" + name for name in _SV_REJECT_SETS],
+)
+
+# Opt-in vendor-bundle compatibility labels: `compile.slang.translate_off` and
+# `compile.slang.ignore_uninstantiated_modules` (NVDLA's generated vmod tree).
+sh_test(
+    name = "slang_vendor_bundle_options",
+    size = "small",
+    timeout = "short",
+    srcs = ["tests/vendor_bundle_options.sh"],
+    data = ["//lhd"],
 )
 
 sh_test(

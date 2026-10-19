@@ -990,7 +990,8 @@ bool Region_writer::write(const livehd::partition::Region_body& rb, const Region
   };
   // resetless power-on init: such a bit must keep a native flop so the value
   // survives (a plain DFF cell has no init pin)
-  auto needs_native = [&](int k) -> bool { return source_init_bit(k).has_value(); };
+  // (pass.abc.drop_init maps it to a plain DFF cell and drops the value instead.)
+  auto needs_native = [&](int k) -> bool { return !registers.drop_init && source_init_bit(k).has_value(); };
   // The asynchronous-reset register latch k belongs to (Seq_flop::async_reset),
   // or null. Only reachable with the latch count preserved: the guard in pass
   // 1c refuses a reshaped set that carries one.
@@ -1172,6 +1173,10 @@ bool Region_writer::write(const livehd::partition::Region_body& rb, const Region
     int32_t          po;
   };
   std::vector<Pending_reset> pending_resets;
+  // A register on a derived clock (Seq_flop::clk_po) takes its clock pin from the mapped net of that PO, which
+  // may be driven by a cell or register minted later in this pass: (cell Sub or native flop, pin, PO), wired in
+  // pass 2b before the clock fanout tree sees the sinks.
+  std::vector<Pending_reset> pending_clocks;
   int                        clock_inv_cells = 0;
   int                        reset_inv_cells = 0;
   bool                       init_dropped    = false;  // a concrete power-on init lost to a plain DFF cell
@@ -1190,6 +1195,11 @@ bool Region_writer::write(const livehd::partition::Region_body& rb, const Region
       }
       if (d.is_const()) {
         return gu::create_const(*body, gu::const_of(d));
+      }
+      // The output of a native boundary instance (a module instance clocking
+      // the register): the rebuilt instance's driver pin.
+      if (auto it = native_boundary_driver.find(d); it != native_boundary_driver.end()) {
+        return it->second;
       }
       return {};
     };
@@ -1216,6 +1226,10 @@ bool Region_writer::write(const livehd::partition::Region_body& rb, const Region
 
     auto owner_clk = [&](int k) -> hhds::Pin_class {
       return k < static_cast<int>(latch_owner.size()) ? body_pin_for_src(latch_owner[k]->clk_drv) : region_clk;
+    };
+    // The derived-clock PO of latch k's register, or -1 (Seq_flop::clk_po).
+    auto owner_clk_po = [&](int k) -> int32_t {
+      return k < static_cast<int>(latch_owner.size()) ? latch_owner[k]->clk_po : flops.front().clk_po;
     };
     auto owner_negedge
         = [&](int k) { return k < static_cast<int>(latch_owner.size()) ? latch_owner[k]->neg_clock : flops.front().neg_clock; };
@@ -1263,6 +1277,18 @@ bool Region_writer::write(const livehd::partition::Region_body& rb, const Region
         s += f.bits;
       }
     }
+    if (spans.empty() && std::any_of(flops.begin(), flops.end(), [](const Seq_flop& f) { return f.clk_po >= 0; })) {
+      // Seq_flop::clk_po crosses only under a latch-preserving flow (Blast_options::derived_clock needs
+      // icg_flow_ok); without the per-latch owner there is no telling which derived clock a register takes.
+      livehd::diag::err("pass.abc", "abc-readback", "internal")
+          .msg("pass.abc region '{}': the latch set was reshaped ({} latches for {} register bits) with a register on a "
+               "derived clock crossed -- its clock cannot be attributed",
+               rb.module_name,
+               m,
+               crossed_bits)
+          .fatal();
+      return false;
+    }
     // Nothing enforces wire-name uniqueness across a region's registers; two
     // same-named rebuilt flops would cgen as two `reg` declarations of one name.
     //
@@ -1299,7 +1325,7 @@ bool Region_writer::write(const livehd::partition::Region_body& rb, const Region
     // already in the D cone, so the rebuilt flop carries neither a reset_pin
     // nor the reset value as an init -- the plain `always @(posedge)` with the
     // mux on D is the same machine (proven by cvc5/lgyosys in lhd_abc_seq_test).
-    auto build_native_flop = [&](const std::string& name, const hhds::Pin_class& clk, const std::vector<int>& idx) {
+    auto build_native_flop = [&](const std::string& name, const hhds::Pin_class& clk, const std::vector<int>& idx, int32_t clk_po = -1) {
       int  k = static_cast<int>(idx.size());
       auto F = gu::create_typed_node(*body, Ntype_op::Flop);
       F.attr(hhds::attrs::name).set(name);
@@ -1308,6 +1334,8 @@ bool Region_writer::write(const livehd::partition::Region_body& rb, const Region
       gu::set_unsign(Fq);
       if (!clk.is_invalid()) {
         clk.connect_sink(gu::setup_sink_by_name(F, "clock_pin"));
+      } else if (clk_po >= 0) {
+        pending_clocks.push_back({F, "clock_pin", clk_po});  // a derived clock: wired in pass 2b
       }
       if (!idx.empty() && owner_negedge(idx.front())) {
         gu::create_const(*body, *Dlop::create_integer(0)).connect_sink(gu::setup_sink_by_name(F, "posclk"));
@@ -1490,6 +1518,8 @@ bool Region_writer::write(const livehd::partition::Region_body& rb, const Region
           auto csink = sub.create_sink_pin(cell.clk_pin);
           lclk.connect_sink(csink);
           clock_sinks[lclk].push_back(csink);
+        } else if (const auto po = owner_clk_po(k); po >= 0) {
+          pending_clocks.push_back({sub, cell.clk_pin, po});  // a derived clock: wired in pass 2b
         }
         if (af != nullptr) {
           // The pin that loads this bit's reset value takes the register's
@@ -1523,7 +1553,7 @@ bool Region_writer::write(const livehd::partition::Region_body& rb, const Region
       };
       auto native_single = [&](int k) {
         init_dropped = true;
-        build_native_flop(unique_flop_name(std::format("{}__rinit{}", rb.module_name, k)), owner_clk(k), {k});
+        build_native_flop(unique_flop_name(std::format("{}__rinit{}", rb.module_name, k)), owner_clk(k), {k}, owner_clk_po(k));
       };
       // Distinguishes two registers that were blasted in the same region; the
       // matcher only requires every lane of ONE group to agree on it.
@@ -1542,7 +1572,7 @@ bool Region_writer::write(const livehd::partition::Region_body& rb, const Region
             init_dropped = true;
             std::vector<int> idx(sp.f->bits);
             std::iota(idx.begin(), idx.end(), sp.start);
-            build_native_flop(unique_flop_name(sp.f->root), body_pin_for_src(sp.f->clk_drv), idx);
+            build_native_flop(unique_flop_name(sp.f->root), body_pin_for_src(sp.f->clk_drv), idx, sp.f->clk_po);
           } else {
             // init-less or sync-reset register -> per-bit DFF cells; a mixed
             // register (should not occur: init is stamped per register)
@@ -1577,7 +1607,7 @@ bool Region_writer::write(const livehd::partition::Region_body& rb, const Region
         for (const auto& sp : spans) {
           std::vector<int> idx(sp.f->bits);
           std::iota(idx.begin(), idx.end(), sp.start);
-          build_native_flop(unique_flop_name(sp.f->root), body_pin_for_src(sp.f->clk_drv), idx);
+          build_native_flop(unique_flop_name(sp.f->root), body_pin_for_src(sp.f->clk_drv), idx, sp.f->clk_po);
         }
       } else {
         absl::flat_hash_set<std::string> roots;
@@ -1686,6 +1716,26 @@ bool Region_writer::write(const livehd::partition::Region_body& rb, const Region
       qn_inv_area += inv_area;
     }
     d.connect_sink(rd.sub.create_sink_pin(rd.cell->d_pin));
+  }
+  // Registers on a derived clock: the clock pin reads the mapped net of the clock's PO (pass.abc.derived_clock).
+  // Wired before the fanout tree below so a gated clock feeding thousands of registers is buffered like an ICG
+  // output.
+  for (const auto& pc : pending_clocks) {
+    auto drv = pc.po < static_cast<int32_t>(mapped.outputs.size()) ? get_net_driver(mapped.outputs[static_cast<size_t>(pc.po)])
+                                                                   : hhds::Pin_class{};
+    if (drv.is_invalid()) {
+      livehd::diag::err("pass.abc", "abc-readback", "internal")
+          .msg("pass.abc region '{}': derived-clock PO {} has no read-back driver", rb.module_name, pc.po)
+          .fatal();
+      return false;
+    }
+    if (gu::type_op_of(pc.sub) == Ntype_op::Flop) {
+      drv.connect_sink(gu::setup_sink_by_name(pc.sub, pc.pin));  // a native flop: not part of the cell fanout tree
+    } else {
+      auto csink = pc.sub.create_sink_pin(pc.pin);
+      drv.connect_sink(csink);
+      clock_sinks[drv].push_back(csink);
+    }
   }
   // Clock fanout tree. A net clocking thousands of register cells (a region
   // input, or a clock gate's output) is one unbuffered net, and in a gate-level
@@ -1804,19 +1854,20 @@ bool Region_writer::write(const livehd::partition::Region_body& rb, const Region
     out_bits[po].resize(w);
   }
   if (mapped.outputs.size()
-      != po_order.size() + bbox_po.size() + blast.arst_pos + blast.icg_pos + blast.latch_pos + (has_dummy_po ? 1 : 0)) {
+      != po_order.size() + bbox_po.size() + blast.arst_pos + blast.icg_pos + blast.latch_pos + blast.dclk_pos + (has_dummy_po ? 1 : 0)) {
     livehd::diag::warn("pass.abc", "abc-readback", "internal")
         .msg(
             "pass.abc: region '{}': mapped PO count {} != created {} (region {} + bbox {} + async reset {} + clock-gate "
-            "enable {} + latch cell {}) — read-back misaligned",
+            "enable {} + latch cell {} + derived clock {}) — read-back misaligned",
             rb.module_name,
             mapped.outputs.size(),
-            po_order.size() + bbox_po.size() + blast.arst_pos + blast.icg_pos + blast.latch_pos,
+            po_order.size() + bbox_po.size() + blast.arst_pos + blast.icg_pos + blast.latch_pos + blast.dclk_pos,
             po_order.size(),
             bbox_po.size(),
             blast.arst_pos,
             blast.icg_pos,
-            blast.latch_pos)
+            blast.latch_pos,
+            blast.dclk_pos)
         .emit();
   }
   for (int i = 0; i < static_cast<int>(mapped.outputs.size()); ++i) {

@@ -812,6 +812,12 @@ void Slang_context::assign_to(const slang::ast::Expression& lhs, const std::stri
                 const int   ov_bits = static_cast<int>(ov_hi - ov_lo + 1);
                 std::string part  = ov_lo == *lo ? val : to_int_value(builder_.create_sra_stmts(val, std::to_string(ov_lo - *lo)));
                 part              = to_pattern(part, ov_bits, false);
+                if (width > ov_bits) {
+                  // The field takes the LOW ov_bits of its shifted piece (1800 11.5.1): state that
+                  // precision boundary (as emit_packed_rmw does) so the ov_bits wide set_mask lane
+                  // sees a window-wide value.
+                  part = trunc_to(part, ov_bits);
+                }
                 const int64_t rel = ov_lo - f.off;  // LSB position within the field leaf
                 builder_.create_set_mask_stmts(absl::StrCat(lname_of(bsym), ".", f.name),
                                                part,
@@ -1239,14 +1245,16 @@ void Slang_context::emit_leaf_split_rmw(const Packed_lv& lv, const std::string& 
     const int   ov_bits = static_cast<int>(ov_hi - ov_lo + 1);
     std::string part    = ov_lo == lo ? val : to_int_value(builder_.create_sra_stmts(val, std::to_string(ov_lo - lo)));
     part                = to_pattern(part, ov_bits, false);
-    const int64_t rel   = ov_lo - f.off;  // LSB position within the field leaf
+    if (lv.width > ov_bits) {
+      // The slice takes the LOW ov_bits of the value (1800 11.5.1). When splitting a wider packed value, select
+      // them as the explicit precision-changing part of that split (as emit_packed_rmw does): a leaf store keeps
+      // the leaf's exact width, and a set_mask/splice lane narrower than the shifted remainder would otherwise be
+      // fed a wider value.
+      part = trunc_to(part, ov_bits);
+    }
+    const int64_t rel = ov_lo - f.off;  // LSB position within the field leaf
     if (rel == 0 && ov_bits == f.bits) {
-      // A direct full-leaf store already has the leaf's exact width and needs
-      // no mask. When splitting a wider packed value, select the low field as
-      // the explicit precision-changing part of that split.
-      if (lv.width > ov_bits) {
-        part = trunc_to(part, ov_bits);
-      }
+      // A direct full-leaf store already has the leaf's exact width and needs no mask.
       store_field(f, f.is_signed ? builder_.create_sext_stmts(part, std::to_string(f.bits - 1)) : part);
       continue;
     }

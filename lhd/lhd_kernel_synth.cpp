@@ -45,6 +45,7 @@
 #include <iterator>
 #include <map>
 #include <set>
+#include <sstream>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -143,6 +144,32 @@ livehd::placement::Options placement_options(const Options& opts) {
   }
   out.utilization                = number("place.utilization", "0.30");
   out.aspect                     = number("place.aspect", "1");
+  for (const auto& [key, frame] : {std::pair<const char*, std::vector<double>*>{"place.die", &out.die},
+                                   std::pair<const char*, std::vector<double>*>{"place.core", &out.core}}) {
+    const auto text = synth_set(opts, key, "");
+    if (text.empty()) {
+      continue;
+    }
+    std::string spaced = text;
+    std::replace(spaced.begin(), spaced.end(), ',', ' ');
+    std::istringstream words(spaced);
+    for (std::string word; words >> word;) {
+      char*        end   = nullptr;
+      const double value = std::strtod(word.c_str(), &end);
+      if (end != word.c_str() + word.size() || !std::isfinite(value)) {
+        throw Lhd_error{"usage", "invalid synth." + std::string(key) + ": " + text, "expected xl,yl,xh,yh in microns"};
+      }
+      frame->push_back(value);
+    }
+    if (frame->size() != 4 || (*frame)[2] <= (*frame)[0] || (*frame)[3] <= (*frame)[1] || (*frame)[0] < 0 || (*frame)[1] < 0) {
+      throw Lhd_error{"usage",
+                      "invalid synth." + std::string(key) + ": " + text,
+                      "expected xl,yl,xh,yh in microns with xh>xl, yh>yl"};
+    }
+  }
+  if (!out.floorplan.empty() && (!out.die.empty() || !out.core.empty())) {
+    throw Lhd_error{"usage", "synth.place.die/core cannot be combined with synth.place.floorplan", "supply one frame source"};
+  }
   out.density                    = number("place.density", "0.5");
   out.iterations                 = integer("place.iterations", "1500");
   out.min_iterations             = integer("place.min_iterations", "40");
@@ -161,6 +188,11 @@ livehd::placement::Options placement_options(const Options& opts) {
   out.automatic_bins                  = truthy(synth_set(opts, "place.auto_bins", "false"));
   out.exact_macro_density             = truthy(synth_set(opts, "place.exact_macro_density", "true"));
   out.adaptive_density                = truthy(synth_set(opts, "place.adaptive_density", "true"));
+  const auto unknown_const = synth_set(opts, "place.unknown_const", "error");
+  if (unknown_const != "error" && unknown_const != "zero") {
+    throw Lhd_error{"usage", "synth.place.unknown_const must be error or zero", ""};
+  }
+  out.unknown_const_zero              = unknown_const == "zero";
   out.routability                     = truthy(synth_set(opts, "place.routability", "true"));
   out.routability_charge_compensation = truthy(synth_set(opts, "place.routability_charge_compensation", "true"));
   out.macro_overlap_weight            = number("place.macro_overlap", "50");
@@ -206,6 +238,7 @@ livehd::placement::Options placement_options(const Options& opts) {
       || out.fp_pin_step <= 0 || out.fp_pin_step > .5 || out.fp_pin_improvement < 0 || out.fp_pin_improvement >= 1) {
     throw Lhd_error{"usage", "invalid FP color/pin adjustment settings", ""};
   }
+  out.repair_reset                = truthy(synth_set(opts, "place.repair.reset", "false"));
   out.fp_iterations               = integer("place.fp.iterations", "1500");
   out.fp_minimum                  = number("place.fp.minimum", "3000");
   out.fp_min_copies               = integer("place.fp.min_copies", "4");
@@ -944,6 +977,16 @@ void synth_command(Options& opts, Result& res) {
       set_crash_context(phase_step, phase_log);
       return livehd::placement::timing_feedback(slurp_json(report));
     };
+    // `synth.place.unknown_const=zero` is a refinement of a don't-care, so say how many bits it touched.
+    const auto note_unknown_tied = [](const livehd::placement::Result& r) {
+      if (r.unknown_const_tied > 0) {
+        livehd::diag::warn("synth", "unknown-const-tied-low", "unsupported")
+            .msg("{} physical net bit(s) driven by an unknown (X) constant were tied low (synth.place.unknown_const=zero)",
+                 r.unknown_const_tied)
+            .hint("the RTL assigns 'x on a path that reaches mapped logic; any value is a legal refinement")
+            .emit();
+      }
+    };
     hhds::GraphLibrary seed_library;
     auto               placement_input = *found;
     if (run_timing_place && place_options.fp_timing_interval > 0) {
@@ -972,6 +1015,7 @@ void synth_command(Options& opts, Result& res) {
       phase_step.clear();
       phase_log.clear();
       set_crash_context({}, {});
+      note_unknown_tied(seed);
       const auto timing         = evaluate(seed);
       place_options.net_weights = livehd::placement::timing_weights(*seed.parasitics,
                                                                     timing,
@@ -1000,6 +1044,9 @@ void synth_command(Options& opts, Result& res) {
     phase_step.clear();
     phase_log.clear();
     set_crash_context({}, {});
+    if (!run_timing_place) {
+      note_unknown_tied(placed);  // the seed (above) already reported it when it ran
+    }
     res.recipe_steps.emplace_back("pass.place");
     if (run_resize || run_timing_place || run_resynth) {
       // Every round/trial below re-runs placement (and resynth a fresh ABC frame

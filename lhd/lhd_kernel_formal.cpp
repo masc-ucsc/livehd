@@ -41,6 +41,7 @@
 #include "pass.hpp"
 #include "pass_single_edge.hpp"
 #include "proof_prep.hpp"
+#include "cone_abc.hpp"
 #include "query.hpp"
 #include "semdiff.hpp"
 #include "solve_stats.hpp"
@@ -7516,7 +7517,7 @@ static void emit_formal_report(const std::string& path, const std::string& desig
         "\"block\": \"{}\", \"instance\": \"{}\", \"aclass\": \"{}\", \"verdict\": \"{}\", {}\"unbounded\": {}, \"proven_to\": {}, "
         "\"refuted_at\": {}, \"undecided_at\": {}, \"undecided_why\": {}, \"solve_ms\": {}, "
         "\"in_timeout_core\": {}, \"guarded\": {}, \"vacuous_guard\": {}, "
-        "\"cone_nodes\": {}, \"cone_state\": {}, \"witness\": {}}}{}\n",
+        "\"cone_nodes\": {}, \"cone_state\": {}, \"cone_digest\": \"{}\", \"cone_reused\": {}, \"reuse_by\": \"{}\", \"witness\": {}}}{}\n",
         json_esc(prop_id(p)),
         json_esc(p.kind),
         json_esc(file),
@@ -7538,6 +7539,9 @@ static void emit_formal_report(const std::string& path, const std::string& desig
         p.vacuous_guard ? "true" : "false",
         p.cone_nodes,
         p.cone_state,
+        p.cone_digest,
+        p.cone_reused ? "true" : "false",
+        json_esc(p.reuse_by),
         p.witness.empty() ? std::string{"null"} : "\"" + json_esc(p.witness) + "\"",
         i + 1 < r.props.size() ? "," : "");
   }
@@ -7886,6 +7890,38 @@ void formal_verify_command(Options& opts, Result& res) {
   o.hard_timeout_mult   = std::atoi(label("hard_timeout_mult", "3").c_str());
   o.spec_mining_timeout = std::atoi(label("spec_mining_timeout", "0").c_str());
   o.mine                = label("mine", "");  // P3 mining tier ("" = inductive only | speculative)
+  // Cross-version reuse: which techniques (hash is the cone-key verdict cache).
+  bool reuse_hash = false;
+  {
+    std::string_view rs = std::string_view{label("reuse", "hash")};
+    const std::string all = std::string{rs};
+    for (size_t at = 0; at <= all.size();) {
+      const size_t      nx = std::min(all.find(',', at), all.size());
+      const std::string t  = all.substr(at, nx - at);
+      if (t == "hash" || t == "all") {
+        reuse_hash = true;
+      }
+      if (t == "equiv" || t == "all") {
+        o.seq_reuse |= livehd::lec::kReuseEquiv;
+      }
+      if (t == "cex" || t == "all") {
+        o.seq_reuse |= livehd::lec::kReuseCex;
+      }
+      if (t == "inv" || t == "all") {
+        o.seq_reuse |= livehd::lec::kReuseInv;
+      }
+      if (!t.empty() && t != "hash" && t != "equiv" && t != "cex" && t != "inv" && t != "all" && t != "none") {
+        throw Lhd_error{"usage", "formal.reuse: unknown technique '" + t + "'", "use hash, equiv, cex, inv, all or none"};
+      }
+      at = nx + 1;
+    }
+  }
+  o.abc          = label("abc", "false") == "true";
+  o.pdr          = label("pdr", "false") == "true";
+  o.abc_mem      = label("abc_mem", "false") == "true";
+  o.pdr_s        = std::max(1, std::atoi(label("pdr_timeout", "20").c_str()));
+  o.sec_s        = std::max(1, std::atoi(label("sec_timeout", "3").c_str()));
+  o.abc_budget_s = std::max(0, std::atoi(label("abc_budget", "0").c_str()));
   // Statistics are selected once by --stats / lhd.stats.
   o.stats               = opts.stats;
   if (label("effort", "") == "proof" && o.timeout > 0) {
@@ -7903,9 +7939,15 @@ void formal_verify_command(Options& opts, Result& res) {
     // the formal path creates --workdir, and only `save()` ever needed it to
     // already exist.
     ensure_dir(opts.workdir);
-    vcache                = std::make_unique<livehd::formal::Verdict_cache>(opts.workdir, livehd::kFormalSrcSalt);
-    o.verify_cache_lookup = [&vcache](std::string_view key) { return vcache->lookup(std::string{key}).has_value(); };
-    o.verify_cache_store  = [&vcache](std::string key) { vcache->insert(key, {"bmc", "serialized verify obligation UNSAT", 0}); };
+    if (reuse_hash) {
+      vcache                = std::make_unique<livehd::formal::Verdict_cache>(opts.workdir, livehd::kFormalSrcSalt);
+      o.verify_cache_lookup = [&vcache](std::string_view key) { return vcache->lookup(std::string{key}).has_value(); };
+      o.verify_cache_store  = [&vcache](std::string key) { vcache->insert(key, {"bmc", "serialized verify obligation UNSAT", 0}); };
+    }
+    if (o.seq_reuse != 0 || o.pdr) {
+      o.reuse_dir = (std::filesystem::path(opts.workdir) / "reuse").string();
+      o.reuse_run = std::to_string(getpid()) + "-" + std::to_string(std::chrono::steady_clock::now().time_since_epoch().count());
+    }
   }
   if (auto e = livehd::lec::lec_options_range_error(o); !e.empty()) {
     throw Lhd_error{"usage", e, "the BMC engine unrolls one SMT copy of the design per cycle"};
@@ -8905,7 +8947,8 @@ void formal_verify_command(Options& opts, Result& res) {
     std::string msg   = p.msg.empty() ? std::string{} : " \"" + p.msg + "\"";
     // COI of this property, when the encoder measured it.
     std::string coi = p.cone_nodes < 0 ? std::string{}
-                                       : std::format("  [COI {} node(s), {} state]", p.cone_nodes, p.cone_state);
+                                       : std::format("  [COI {} node(s), {} state{}]", p.cone_nodes, p.cone_state,
+                                                     p.cone_reused ? ", reused from cone cache" : "");
     if (!p.block.empty()) {
       msg += " [" + p.block + "]";  // block (+@instance) attribution
     } else if (!p.instance.empty()) {

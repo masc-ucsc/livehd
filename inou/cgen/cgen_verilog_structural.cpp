@@ -92,6 +92,17 @@ std::string Cgen_verilog::structural_range(const hhds::Pin_class& pin, int width
   if (width == 1) {
     return structural_bit(pin, low);
   }
+  if (!pin.is_const()) {
+    // Structural nets are all declared unsigned, so the assignment context
+    // zero-extends a bare net and a contiguous in-range slice is one part-select.
+    const auto declared = std::max(1, decl_bits_of(pin));
+    if (low == 0 && width > declared && gu::is_unsign(pin)) {
+      return pin2var.at(pin.get_class_index());
+    }
+    if (declared > 1 && low + width <= declared) {
+      return absl::StrCat(pin2var.at(pin.get_class_index()), "[", low + width - 1, ":", low, "]");
+    }
+  }
   std::string result = "{";
   for (int bit = width - 1; bit >= 0; --bit) {
     if (bit != width - 1) {

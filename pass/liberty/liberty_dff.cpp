@@ -13,6 +13,7 @@
 #include <iterator>
 #include <limits>
 #include <map>
+#include <set>
 #include <sstream>
 #include <stdexcept>
 #include <tuple>
@@ -1833,7 +1834,13 @@ std::vector<Memory_cell> scan_memory_cells(const std::string& lib_files, std::ve
   return scan_memory_cells_text(read_files(lib_files), skipped);
 }
 
-std::vector<Memory_cell> scan_memory_cells_text(const std::string& contents, std::vector<Memory_skip>* skipped) {
+namespace {
+// `wanted == nullptr` is the RAM inventory: every cell with a `memory()` group.
+// Otherwise the interface of exactly the NAMED cells that have no `memory()`
+// group (standard cells a design instantiates by name): pins and buses, their
+// directions, and which outputs are clock-edge registered. No behavior is read.
+std::vector<Memory_cell> scan_interface_cells_text(const std::string& contents, std::vector<Memory_skip>* skipped,
+                                                   const std::set<std::string>* wanted) {
   const auto               text = strip_comments(contents);
   std::vector<Memory_cell> cells;
   const auto               integer = [](const std::string& value) -> std::optional<int> {
@@ -1915,13 +1922,27 @@ std::vector<Memory_cell> scan_memory_cells_text(const std::string& contents, std
       if (close == std::string::npos) {
         throw std::runtime_error("unclosed Liberty cell");
       }
-      const auto  name = unquote_trim(args);
+      const auto name = unquote_trim(args);
+      if (wanted != nullptr && !wanted->contains(name)) {
+        at = find_group(body, "cell", close + 1, args);
+        continue;  // only the named cells are parsed
+      }
       const auto  cell = body.substr(at + 1, close - at - 1);
       std::string group;
-      const auto  memory = find_group(cell, "memory", 0, group);
+      auto        memory = find_group(cell, "memory", 0, group);
+      if (wanted != nullptr) {
+        if (memory != std::string::npos) {
+          if (skipped != nullptr) {
+            skipped->push_back(Memory_skip{name, "a Liberty RAM is declared by the memory inventory"});
+          }
+          at = find_group(body, "cell", close + 1, args);
+          continue;
+        }
+        memory = 0;  // no memory() group: the logic-cell branch below
+      }
       if (memory != std::string::npos) {
-        const auto mend = match_brace(cell, memory);
-        if (mend == std::string::npos) {
+        const auto mend = wanted != nullptr ? std::string::npos : match_brace(cell, memory);
+        if (mend == std::string::npos && wanted == nullptr) {
           throw std::runtime_error("unclosed Liberty memory");
         }
         // A memory cell this inventory cannot represent (a ROM, an inout pin,
@@ -1931,23 +1952,25 @@ std::vector<Memory_cell> scan_memory_cells_text(const std::string& contents, std
         // unknown-module error. Contradictions inside an accepted RAM still throw.
         Memory_cell result;
         const auto  reason = [&]() -> std::string {
-          const auto info = top_level_only(cell.substr(memory + 1, mend - memory - 1));
-          const auto kind = scalar_attr(info, "type");
-          if (kind != "ram") {
-            return "unsupported Liberty memory type '" + kind + "'";
+          result.name = name;
+          result.area = parse_area(cell);
+          if (wanted == nullptr) {
+            const auto info = top_level_only(cell.substr(memory + 1, mend - memory - 1));
+            const auto kind = scalar_attr(info, "type");
+            if (kind != "ram") {
+              return "unsupported Liberty memory type '" + kind + "'";
+            }
+            const auto address_bits = integer(scalar_attr(info, "address_width"));
+            const auto word_bits    = integer(scalar_attr(info, "word_width"));
+            if (!address_bits || !word_bits) {
+              return "invalid Liberty memory address_width/word_width";
+            }
+            if (*address_bits == 0 || *word_bits == 0) {
+              return "empty Liberty RAM";
+            }
+            result.address_bits = *address_bits;
+            result.word_bits    = *word_bits;
           }
-          const auto address_bits = integer(scalar_attr(info, "address_width"));
-          const auto word_bits    = integer(scalar_attr(info, "word_width"));
-          if (!address_bits || !word_bits) {
-            return "invalid Liberty memory address_width/word_width";
-          }
-          if (*address_bits == 0 || *word_bits == 0) {
-            return "empty Liberty RAM";
-          }
-          result.name         = name;
-          result.area         = parse_area(cell);
-          result.address_bits = *address_bits;
-          result.word_bits    = *word_bits;
           std::vector<std::string> address_names;
           const auto               local  = bus_types(cell);
           // Preserve declaration order across scalar pins and buses.
@@ -2037,6 +2060,12 @@ std::vector<Memory_cell> scan_memory_cells_text(const std::string& contents, std
           if (result.pins.empty()) {
             return "Liberty RAM has no pins";
           }
+          if (wanted != nullptr) {
+            // Inputs first, then outputs: the port-id order pass.abc declares for a mapped cell of the
+            // same name (declare_cell), so a standard cell the design instantiated and one the mapper
+            // re-instantiates share one interface, whatever order the Liberty lists the pins in.
+            std::stable_partition(result.pins.begin(), result.pins.end(), [](const auto& p) { return p.direction == "input"; });
+          }
           for (auto& p : result.pins) {
             p.address_data_input = p.direction == "input" && !p.clock_input
                                    && (p.address_data_input || std::ranges::find(address_names, p.name) != address_names.end());
@@ -2060,6 +2089,19 @@ std::vector<Memory_cell> scan_memory_cells_text(const std::string& contents, std
     lib = find_group(text, "library", end + 1, args);
   }
   return cells;
+}
+}  // namespace
+
+std::vector<Memory_cell> scan_memory_cells_text(const std::string& contents, std::vector<Memory_skip>* skipped) {
+  return scan_interface_cells_text(contents, skipped, nullptr);
+}
+
+std::vector<Memory_cell> scan_logic_cells(const std::string& lib_files, const std::set<std::string>& names,
+                                          std::vector<Memory_skip>* skipped) {
+  if (names.empty()) {
+    return {};
+  }
+  return scan_interface_cells_text(read_files(lib_files), skipped, &names);
 }
 
 std::string memory_cell_declarations(const std::vector<Memory_cell>& cells) {

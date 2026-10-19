@@ -16,11 +16,15 @@
 #include <fstream>
 #include <iostream>
 #include <map>
+#include <optional>
 #include <regex>
 #include <set>
 #include <sstream>
 
+#include "absl/container/flat_hash_map.h"
 #include "absl/container/flat_hash_set.h"
+#include "absl/strings/ascii.h"
+#include "absl/strings/str_split.h"
 #include "cgen_verilog.hpp"
 #include "color_common.hpp"
 #include "diag.hpp"
@@ -850,16 +854,114 @@ void merge_color_sets(const Options& opts, Eprp_var::Eprp_dict& labels) {
   merge_sets(opts, "pass.color.synth", labels);
 }
 
+// The smallest `create_clock -period` of an SDC in picoseconds, or nullopt when no
+// period can be resolved. Handles `set VAR number` and `$VAR` / `${VAR}` periods
+// (the usual HighTide/ORFS spelling); a Tcl expression is not guessed. The SDC
+// time unit is the Liberty time unit, read from the first `time_unit` attribute.
+static std::optional<double> sdc_min_clock_period_ps(const std::string& sdc_path, const std::string& liberty_path) {
+  std::ifstream     in(sdc_path);
+  const std::string text{std::istreambuf_iterator<char>(in), {}};
+  if (text.empty()) {
+    return std::nullopt;
+  }
+  double to_ps = 1.0;
+  if (!liberty_path.empty()) {
+    std::ifstream lib(liberty_path);
+    std::string   head(1 << 16, '\0');
+    lib.read(head.data(), static_cast<std::streamsize>(head.size()));
+    head.resize(static_cast<size_t>(lib.gcount()));
+    static const std::regex unit_re(R"(time_unit\s*:\s*"?\s*([0-9.]+)\s*(fs|ps|ns|us)\s*"?)");
+    if (std::smatch m; std::regex_search(head, m, unit_re)) {
+      const double scale = std::strtod(m[1].str().c_str(), nullptr);
+      const auto   u     = m[2].str();
+      to_ps              = scale * (u == "fs" ? 1e-3 : u == "ps" ? 1.0 : u == "ns" ? 1e3 : 1e6);
+    }
+  }
+  absl::flat_hash_map<std::string, double> vars;
+  const auto number = [&](std::string tok, double& out) {
+    while (!tok.empty() && (tok.front() == '"' || tok.front() == '{')) {
+      tok.erase(0, 1);
+    }
+    while (!tok.empty() && (tok.back() == '"' || tok.back() == '}' || tok.back() == ';')) {
+      tok.pop_back();
+    }
+    if (!tok.empty() && tok.front() == '$') {
+      tok.erase(0, 1);
+      if (!tok.empty() && tok.front() == '{') {
+        tok.erase(0, 1);
+      }
+      const auto it = vars.find(tok);
+      if (it == vars.end()) {
+        return false;
+      }
+      out = it->second;
+      return true;
+    }
+    char* end = nullptr;
+    out       = std::strtod(tok.c_str(), &end);
+    return end != tok.c_str() && *end == '\0';
+  };
+  std::optional<double> best;
+  for (const auto line_sv : absl::StrSplit(text, absl::ByAnyChar("\n;"))) {
+    const std::vector<std::string> tok = absl::StrSplit(absl::StripAsciiWhitespace(line_sv), absl::ByAnyChar(" \t"), absl::SkipEmpty());
+    if (tok.size() >= 3 && tok[0] == "set") {
+      if (double v = 0; number(tok[2], v) && tok.size() == 3) {
+        vars[tok[1]] = v;
+      }
+    } else if (!tok.empty() && tok[0] == "create_clock") {
+      for (size_t i = 1; i + 1 < tok.size(); ++i) {
+        if (tok[i] == "-period") {
+          if (double v = 0; number(tok[i + 1], v) && v > 0 && (!best || v < *best)) {
+            best = v;
+          }
+        }
+      }
+    }
+  }
+  if (best) {
+    *best *= to_ps;
+  }
+  return best;
+}
+
 void merge_mapper_sets(const Options& opts, std::string_view method, Eprp_var::Eprp_dict& labels) {
   // synth.delay / synth.memory are the run-wide spellings of source attributes;
   // the pass's own namespace (merged below) wins over them.
+  bool have_delay = false;
   for (const auto& [k, v] : opts.sets) {
     if (k == "synth.delay" && !v.empty()) {
       labels["delay"] = v;
+      have_delay      = true;
     } else if (k == "synth.abc_pre" && method == "pass.abc" && !v.empty()) {
       labels["pre"] = v;
     } else if (k == "synth.memory" && method == "pass.abc") {
       labels["memory"] = v == "flops" ? "true" : v == "macro" ? "false" : "auto";
+    }
+  }
+  // synth.delay_frac: a budget relative to the clock, below an explicit synth.delay
+  // and the pass's own namespace (merged afterwards).
+  if (!have_delay) {
+    std::string frac, sdc, liberty;
+    for (const auto& [k, v] : opts.sets) {
+      if (k == "synth.delay_frac") {
+        frac = v;
+      } else if (k == "synth.sdc") {
+        sdc = v;
+      } else if (k == "synth.liberty") {
+        liberty = v;
+      }
+    }
+    if (!frac.empty()) {
+      char*        end = nullptr;
+      const double f   = std::strtod(frac.c_str(), &end);
+      if (end == frac.c_str() || *end != '\0' || !(f > 0.0)) {
+        throw Lhd_error{"usage", std::format("synth.delay_frac expects a positive number, got '{}'", frac), ""};
+      }
+      const auto period = sdc.empty() ? std::nullopt : sdc_min_clock_period_ps(sdc, liberty);
+      if (!period) {
+        throw Lhd_error{"usage", "synth.delay_frac needs a synth.sdc with a resolvable create_clock -period", "set synth.sdc or use synth.delay"};
+      }
+      labels["delay"] = std::format("{:.3f}", f * *period);
     }
   }
   if (const auto* mapper = mapper_of_method(method); mapper != nullptr && mapper->inherits_abc) {
@@ -1660,7 +1762,7 @@ void write_unit_meta(std::ofstream& ofs, const Lnast& ln) {
   // Deferred templates are still source bodies. Their generic signature and
   // template flag must survive independently of the tree, just as they do in
   // the compile cache; otherwise reload lowers an unspecialized body as hardware.
-  ofs << ",\"template\":" << (ln.is_template() ? "true" : "false")
+  ofs << ",\"template\":" << (ln.is_template() ? "true" : "false") << ",\"blackbox\":" << (ln.is_blackbox() ? "true" : "false")
       << ",\"skip_timecheck\":" << (ln.get_skip_timecheck() ? "true" : "false") << ",\"lg_name\":\""
       << json_escape_min(ln.get_lg_name()) << "\"";
   const auto write_strings = [&](std::string_view key, const std::vector<std::string>& values) {
@@ -1906,6 +2008,9 @@ void save_ln_dir(Options& opts, Result& res, const std::vector<std::shared_ptr<L
 void restore_unit_meta(const rapidjson::Value& u, Lnast& ln) {
   if (u.HasMember("template") && u["template"].IsBool()) {
     ln.set_template(u["template"].GetBool());
+  }
+  if (u.HasMember("blackbox") && u["blackbox"].IsBool()) {
+    ln.set_blackbox(u["blackbox"].GetBool());
   }
   if (u.HasMember("skip_timecheck") && u["skip_timecheck"].IsBool()) {
     ln.set_skip_timecheck(u["skip_timecheck"].GetBool());

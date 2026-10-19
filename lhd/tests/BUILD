@@ -687,6 +687,50 @@ sh_test(
     data = ["//lhd"],
 )
 
+# The induction step reads past(x, n) from n frames back, as the BMC unroll
+# does; reading the current frame proved a toggling register frozen.
+sh_test(
+    name = "lhd_formal_past_induction_test",
+    srcs = ["lhd_formal_past_induction_test.sh"],
+    data = ["//lhd"],
+    tags = ["no-sandbox"],
+)
+
+# Per-property cone cache: a formal block whose cone did not change keeps its
+# proof across edits on one --workdir; a changed cone is re-proved.
+sh_test(
+    name = "lhd_formal_cone_cache_test",
+    srcs = ["lhd_formal_cone_cache_test.sh"],
+    data = ["//lhd"],
+    tags = ["no-sandbox"],
+)
+
+# Cross-version reuse in the ABC pre-pass: equivalence, counterexample replay,
+# PDR invariant (Houdini-filtered).
+# Same-cycle env assumes constrain asserts that come earlier in occurrence order.
+sh_test(
+    name = "lhd_formal_assume_order_test",
+    srcs = ["lhd_formal_assume_order_test.sh"],
+    data = ["//lhd"],
+    tags = ["no-sandbox"],
+)
+
+sh_test(
+    name = "lhd_formal_reuse_test",
+    srcs = ["lhd_formal_reuse_test.sh"],
+    data = ["//lhd"],
+    tags = ["no-sandbox"],
+)
+
+# ABC bmc3 pre-pass: same verdicts, depths, failing cycles and witnesses as the
+# cvc5-only run.
+sh_test(
+    name = "lhd_formal_abc_bmc_test",
+    srcs = ["lhd_formal_abc_bmc_test.sh"],
+    data = ["//lhd"],
+    tags = ["no-sandbox"],
+)
+
 sh_test(
     name = "lhd_formal_cache_split_test",
     srcs = ["lhd_formal_cache_split_test.sh"],
@@ -1635,6 +1679,32 @@ _ICG_CASES = [
     tests = [":lhd_abc_icg_test" + suffix + "_" + tag for tag, _case, _check in _ICG_CASES],
 ) for suffix, _mapper in _MAPPERS]
 
+# pass.abc.derived_clock: registers on a clock computed inside their region map to
+# DFF cells driven by the mapped clock logic; the default keeps them native.
+sh_test(
+    name = "lhd_abc_derived_clock_test",
+    size = "small",
+    srcs = ["lhd_abc_derived_clock_test.sh"],
+    data = _FLOW_DATA + [
+        "abc_arst_q.lib",
+        "abc_derived_clock.v",
+    ],
+)
+
+# With pass.abc.derived_clock=true, a register clocked by the output of a module
+# instance (NVDLA's `slcg` wrapper around a flop-based clock gate) maps to a DFF cell
+# clocked by that instance's output; by default it stays a native flop
+# (derived-clock-native).
+sh_test(
+    name = "lhd_abc_instance_clock_test",
+    size = "small",
+    srcs = ["lhd_abc_instance_clock_test.sh"],
+    data = _FLOW_DATA + [
+        "abc_instance_clock.v",
+        "//inou/prp:abc_tests",
+    ],
+)
+
 # A Pyrope `Clock()` gate (a Clock_cell) is spelled `clk & latch` before
 # mapping, so abc maps it onto the ICG cell and no Clock_cell reaches STA.
 sh_test(
@@ -2570,6 +2640,16 @@ sh_test(
     data = ["//lhd", "//inou/lefdef:test_data"],
 )
 
+# An x constant on a physical net (an undriven RTL signal that mapping kept) is refused unless
+# synth.place.unknown_const=zero ties it low.
+sh_test(
+    name = "lhd_placement_unknown_const_smoke",
+    size = "small",
+    timeout = "short",
+    srcs = ["lhd_placement_unknown_const_smoke.py"],
+    data = ["//lhd", "//inou/lefdef:test_data"],
+)
+
 sh_test(
     name = "lhd_placement_smoke_usyn",
     size = "small",
@@ -2614,6 +2694,14 @@ sh_test(
     size = "small",
     timeout = "short",
     srcs = ["lhd_liberty_memory_smoke.py"],
+    data = ["//lhd", "//inou/lefdef:test_data"],
+)
+
+sh_test(
+    name = "lhd_macro_bringup_smoke",
+    size = "small",
+    timeout = "short",
+    srcs = ["lhd_macro_bringup_smoke.py"],
     data = ["//lhd", "//inou/lefdef:test_data"],
 )
 

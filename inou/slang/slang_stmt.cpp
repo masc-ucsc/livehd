@@ -15,6 +15,7 @@
 #include "slang/ast/expressions/CallExpression.h"
 #include "slang/ast/symbols/AttributeSymbol.h"
 #include "slang/ast/symbols/SubroutineSymbols.h"
+#include "slang/syntax/AllSyntax.h"
 #include "slang_context.hpp"
 
 using slang::ast::StatementKind;
@@ -149,7 +150,19 @@ void Slang_context::lower_statement(const slang::ast::Statement& stmt) {
           // Keep the existing quiet synthesis behavior for common printers.
           if (name == "$display" || name == "$write" || name == "$monitor" || name == "$strobe" || name == "$time"
               || name == "$displayb" || name == "$displayh" || name == "$displayo" || name == "$dumpfile" || name == "$dumpvars"
-              || name == "$finish" || name == "$stop" || name == "$fatal") {
+              || name == "$finish" || name == "$stop") {
+            return;
+          }
+          // Run-time severity tasks (IEEE 1800 20.10) only report to the simulator log
+          // (and `$fatal` ends the run); they drive no hardware, which is exactly what yosys
+          // does with them. The elaboration-time forms (module/generate scope) are handled by
+          // slang itself. Say so instead of failing the whole design.
+          if (name == "$info" || name == "$warning" || name == "$error" || name == "$fatal") {
+            emit_warning(stmt.sourceRange,
+                         "severity-task-ignored",
+                         "unsupported",
+                         std::string("run-time severity task '") + std::string(name)
+                             + "' is ignored (synthesis semantics); it reports to the simulator only");
             return;
           }
           emit_unsupported(stmt.sourceRange,
@@ -216,8 +229,15 @@ void Slang_context::lower_statement(const slang::ast::Statement& stmt) {
                        "event controls inside a process body are not supported by --reader slang");
       return;
     }
-    case StatementKind::ImmediateAssertion: lower_immediate_assertion(stmt.as<slang::ast::ImmediateAssertionStatement>()); return;
+    case StatementKind::ImmediateAssertion:
+      if (!options_.ignore_assertions) {
+        lower_immediate_assertion(stmt.as<slang::ast::ImmediateAssertionStatement>());
+      }
+      return;
     case StatementKind::ConcurrentAssertion:
+      if (options_.ignore_assertions) {
+        return;
+      }
       // Same contract as the module-level form (slang_structure.cpp): lower the
       // per-cycle boolean case, refuse the temporal one LOUDLY. Never drop it —
       // a dropped assume/restrict invents a counterexample, a dropped assert
@@ -417,16 +437,34 @@ bool Slang_context::lower_concurrent_assertion(const slang::ast::ConcurrentAsser
       peeled = true;
     }
   }
-  if (spec->kind != AssertionExprKind::Simple) {
-    return false;  // sequence / implication / delay — caller refuses
+  // A boolean operand: a plain expression with no `[*n]`.
+  auto as_bool = [](const slang::ast::AssertionExpr& e) -> const slang::ast::Expression* {
+    if (e.kind != AssertionExprKind::Simple) {
+      return nullptr;
+    }
+    const auto& s = e.as<slang::ast::SimpleAssertionExpr>();
+    return s.repetition.has_value() ? nullptr : &s.expr;
+  };
+  // `a |-> b` with boolean a and b is same-cycle, so it is `!a || b`.
+  const slang::ast::Expression* ante = nullptr;
+  const slang::ast::Expression* body = as_bool(*spec);
+  if (spec->kind == AssertionExprKind::Binary) {
+    const auto& bin = spec->as<slang::ast::BinaryAssertionExpr>();
+    if (bin.op == slang::ast::BinaryAssertionOperator::OverlappedImplication) {
+      ante = as_bool(bin.left);
+      body = ante ? as_bool(bin.right) : nullptr;
+    }
   }
-  const auto& simple = spec->as<slang::ast::SimpleAssertionExpr>();
-  if (simple.repetition.has_value()) {
-    return false;  // `[*n]` is temporal
+  if (body == nullptr) {
+    return false;  // sequence / `|=>` / delay — caller refuses
   }
 
   set_pending_loc(stmt.sourceRange);
-  auto cond = booleanize(lower_rvalue(simple.expr));
+  auto cond = booleanize(lower_rvalue(*body));
+  if (ante != nullptr) {
+    auto not_a = mark_bool(builder_.create_log_not_stmts(booleanize(lower_rvalue(*ante))));
+    cond       = mark_bool(builder_.create_log_or_stmts(not_a, cond));
+  }
   // `disable iff (d)` : the obligation is `!d implies cond`, spelled as the
   // disjunction so it reuses the ordinary boolean path. `!d implies cond` is
   // `!(!d) || cond`, i.e. `d || cond` -- the implication ALREADY supplies the
@@ -452,6 +490,14 @@ bool Slang_context::lower_concurrent_assertion(const slang::ast::ConcurrentAsser
     // environment constraints, and SV cannot spell `assume_nocheck`, so a
     // CHECKED assume would refute over free inputs and be dropped.
     builder_.add_child(idx, Lnast_node::create_const("__fkind__assume_nocheck"));
+  }
+  // The statement label (`name: assert property ...`) is the message: a name
+  // that survives edits elsewhere in the file, unlike the line number.
+  if (stmt.syntax != nullptr && slang::syntax::StatementSyntax::isKind(stmt.syntax->kind)) {
+    const auto* lbl = stmt.syntax->as<slang::syntax::StatementSyntax>().label;
+    if (lbl != nullptr && !lbl->name.valueText().empty()) {
+      builder_.add_child(idx, Lnast_node::create_const("'" + std::string{lbl->name.valueText()} + "'"));
+    }
   }
   clear_pending_loc();
   return true;

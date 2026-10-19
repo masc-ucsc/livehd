@@ -57,6 +57,9 @@ struct Set_pass {
 // `formal.<flag>`. Everything else on pass.lec is ref/impl-pairing machinery:
 // canonical spelling `formal.lec.<flag>`.
 inline constexpr std::string_view kFormalCommonFlags[] = {
+    "abc",
+    "abc_budget",
+    "abc_mem",
     "assume_check",
     "bound",
     "engine",
@@ -68,11 +71,15 @@ inline constexpr std::string_view kFormalCommonFlags[] = {
     "mine",
     "min_timeout",
     "partitions",
+    "pdr",
+    "pdr_timeout",
     "phase",
     "report",
     "reset",
     "reset_cycles",
     "retry",
+    "reuse",
+    "sec_timeout",
     "solver",
     "spec_mining_timeout",
     "simfail",

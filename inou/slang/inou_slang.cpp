@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <cstdlib>
 #include <filesystem>
+#include <format>
 #include <optional>
 
 #include "absl/strings/str_split.h"
@@ -108,8 +109,31 @@ void Inou_slang::setup() {
   m1.add_label_optional("flat_top_io",
                         "true to keep ONLY the top module's struct ports packed (for generated-vs-original Verilog equivalence, "
                         "where the top interface must match)");
+  m1.add_label_optional("inout_as_driven",
+                        "true to lower an inout port as an output when its module drives it (a z drive is a don't-care) and as an "
+                        "input otherwise; the external value of a bidirectional pad is not modeled (default: inout is refused)");
   m1.add_label_optional("slang_flags",
                         "raw slang driver args ('\\x1f'-separated, e.g. -F filelist.f); supplied by `lhd --reader slang -- ...`");
+  m1.add_label_optional("ignore_uninstantiated_modules",
+                        "true to skip semantic elaboration of modules outside the --top hierarchy (same as the slang flag "
+                        "--ignore-uninstantiated-modules; syntax errors are still reported everywhere)");
+  m1.add_label_optional("translate_off",
+                        "true to drop the source text between `// synopsys translate_off` and `// synopsys translate_on` (and the "
+                        "`synthesis` spelling), as DC, Yosys and Vivado do (same as slang --translate-off-format)");
+  m1.add_label_optional("liberty_macro_precedence",
+                        "true to let a synth.liberty RAM macro win over a same-named design-source module (default: refuse the collision)");
+  m1.add_label_optional("liberty_allow_truncation",
+                        "true to keep the low bits when a wider actual drives a narrower synth.liberty RAM input, with a warning "
+                        "(default: refuse; Verilog/Yosys truncate silently)");
+  m1.add_label_optional("liberty_cells",
+                        "true to bind a module that only the selected synth.liberty defines (a standard cell instantiated by "
+                        "name) as a typed, opaque cell instance");
+  m1.add_label_optional("unconnected_input",
+                        "zero|one to read an unconnected instance input as that constant instead of the unknown 'x (default: x)");
+  m1.add_label_optional("blackbox_attribute",
+                        "true to treat a module marked (* blackbox *) as an interface only: ports declared, no body, instances stay opaque");
+  m1.add_label_optional("flatten_state_arrays",
+                        "true to lower a one-dimensional unpacked state array as one register vector instead of a Memory with a port per access");
 
   register_pass(m1);
 
@@ -131,8 +155,31 @@ void Inou_slang::setup() {
   m2.add_label_optional("flat_top_io",
                         "true to keep ONLY the top module's struct ports packed (for generated-vs-original Verilog equivalence, "
                         "where the top interface must match)");
+  m2.add_label_optional("inout_as_driven",
+                        "true to lower an inout port as an output when its module drives it (a z drive is a don't-care) and as an "
+                        "input otherwise; the external value of a bidirectional pad is not modeled (default: inout is refused)");
   m2.add_label_optional("slang_flags",
                         "raw slang driver args ('\\x1f'-separated, e.g. -F filelist.f); supplied by `lhd --reader slang -- ...`");
+  m2.add_label_optional("ignore_uninstantiated_modules",
+                        "true to skip semantic elaboration of modules outside the --top hierarchy (same as the slang flag "
+                        "--ignore-uninstantiated-modules; syntax errors are still reported everywhere)");
+  m2.add_label_optional("translate_off",
+                        "true to drop the source text between `// synopsys translate_off` and `// synopsys translate_on` (and the "
+                        "`synthesis` spelling), as DC, Yosys and Vivado do (same as slang --translate-off-format)");
+  m2.add_label_optional("liberty_macro_precedence",
+                        "true to let a synth.liberty RAM macro win over a same-named design-source module (default: refuse the collision)");
+  m2.add_label_optional("liberty_allow_truncation",
+                        "true to keep the low bits when a wider actual drives a narrower synth.liberty RAM input, with a warning "
+                        "(default: refuse; Verilog/Yosys truncate silently)");
+  m2.add_label_optional("liberty_cells",
+                        "true to bind a module that only the selected synth.liberty defines (a standard cell instantiated by "
+                        "name) as a typed, opaque cell instance");
+  m2.add_label_optional("unconnected_input",
+                        "zero|one to read an unconnected instance input as that constant instead of the unknown 'x (default: x)");
+  m2.add_label_optional("blackbox_attribute",
+                        "true to treat a module marked (* blackbox *) as an interface only: ports declared, no body, instances stay opaque");
+  m2.add_label_optional("flatten_state_arrays",
+                        "true to lower a one-dimensional unpacked state array as one register vector instead of a Memory with a port per access");
 
   m2.add_label_optional("liberty", "Selected Liberty: typed, opaque memory-cell interfaces", "");
   register_pass(m2);
@@ -181,6 +228,26 @@ void Inou_slang::work(Eprp_var& var) {
   if (!user_has("--max-parse-depth")) {
     argv.push_back(strdup("--max-parse-depth"));
     argv.push_back(strdup("8192"));
+  }
+
+  // Opt-in vendor-bundle compatibility, spelled as `--set compile.slang.<label>=true`
+  // so a flow that cannot append raw slang args can still enable them. Both
+  // are plain slang driver policies; a raw flag of the same name wins (slang
+  // rejects a repeated optional flag).
+  const auto label_true = [&](std::string_view label) {
+    return var.has_label(label) && (var.get(label) == "true" || var.get(label) == "1");
+  };
+  const auto user_has_prefix = [&](std::string_view prefix) {
+    return std::any_of(user_flags.begin(), user_flags.end(), [&](const std::string& f) { return f.starts_with(prefix); });
+  };
+  if (label_true("ignore_uninstantiated_modules") && !user_has("--ignore-uninstantiated-modules")) {
+    argv.push_back(strdup("--ignore-uninstantiated-modules"));
+  }
+  if (label_true("translate_off") && !user_has_prefix("--translate-off-format")) {
+    for (const char* common : {"synopsys", "synthesis"}) {
+      argv.push_back(strdup("--translate-off-format"));
+      argv.push_back(strdup(std::format("{},translate_off,translate_on", common).c_str()));
+    }
   }
 
   // Forward lhd's `--top` so slang elaborates ONLY that module's hierarchy.
@@ -242,6 +309,9 @@ void Inou_slang::work(Eprp_var& var) {
   // Raw slang driver args (e.g. `-F filelist.f`) passed through verbatim from
   // `lhd --reader slang -- <args>` (already split into `user_flags` above).
   for (const auto& f : user_flags) {
+    if (f == "--ignore-assertions") {
+      continue;  // LiveHD policy below, not a slang driver option
+    }
     argv.push_back(strdup(f.c_str()));
   }
 
@@ -258,11 +328,37 @@ void Inou_slang::work(Eprp_var& var) {
       opts.liberty_memories.insert(cell.name);
     }
   }
+  const auto flag_true = [&](std::string_view name) { return var.has_label(name) && var.get(name) == "true"; };
+  opts.liberty_macro_precedence      = flag_true("liberty_macro_precedence");
+  opts.liberty_allow_truncation      = flag_true("liberty_allow_truncation");
+  opts.liberty_cells                 = flag_true("liberty_cells");
+  opts.blackbox_attribute            = flag_true("blackbox_attribute");
+  opts.flatten_state_arrays          = flag_true("flatten_state_arrays");
+  if (var.has_label("unconnected_input")) {
+    const auto value = std::string(var.get("unconnected_input"));
+    if (value == "zero") {
+      opts.unconnected_input = '0';
+    } else if (value == "one") {
+      opts.unconnected_input = '1';
+    } else if (!value.empty() && value != "x") {
+      livehd::diag::err("inou.slang", "bad-unconnected-input", "usage")
+          .msg("compile.slang.unconnected_input must be zero|one|x, got '{}'", value)
+          .fatal();
+    }
+  }
+  if (var.has_label("liberty")) {
+    opts.liberty_files = std::string(var.get("liberty"));
+  }
   opts.keep_timecheck            = keep_timecheck;
   // Only a USER-supplied --ignore-unknown-modules turns unknown modules into
   // blackbox sub-instances; the copy injected above (so slang itself never
   // hard-errors and the reader owns the diagnostic) does not.
   opts.blackbox_unknown          = user_has("--ignore-unknown-modules");
+  // Explicit opt-in for synthesis (yosys-slang spells it the same way): drop
+  // every immediate and concurrent assertion/assume/cover instead of lowering
+  // it or refusing a temporal SVA property. Never the default, because a
+  // dropped assertion proves nothing in a verification flow.
+  opts.ignore_assertions         = user_has("--ignore-assertions");
   // Keep package-parameter references symbolic (`pkg.PARAM` + `pub comptime
   // const` package units) for provenance-preserving Pyrope emission.
   opts.preserve_param_provenance = var.has_label("preserve_param_provenance") && var.get("preserve_param_provenance") == "true";
@@ -273,6 +369,7 @@ void Inou_slang::work(Eprp_var& var) {
   // flat_top_io: keep ONLY the top module's ports packed (Verilog-vs-Verilog
   // equivalence needs the emitted top interface to match the source module's).
   opts.flat_top_io               = var.has_label("flat_top_io") && var.get("flat_top_io") == "true";
+  opts.inout_as_driven           = var.has_label("inout_as_driven") && var.get("inout_as_driven") == "true";
   if (var.has_label("unroll_limit")) {
     if (int v = atoi(std::string(var.get("unroll_limit")).c_str()); v > 0) {
       opts.unroll_limit = v;

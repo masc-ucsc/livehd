@@ -1,5 +1,6 @@
 // This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 #pragma once
+#include <cstddef>
 #include <functional>
 #include <map>
 #include <memory>
@@ -39,6 +40,7 @@ struct Options {
   double                                timing_max_weight = 5, timing_smoothing = .5;
   int                                   fp_timing_max_updates = 10;
   bool                                  fp_resize             = false;
+  bool                                  repair_reset          = false;  // size/buffer reset-pin cones too (default: protected like clocks)
   Evaluate                              fp_evaluate;
   double                                fp_minimum = 3000, fp_attraction = .25, fp_repulsion = 5, fp_anchor = .25;
   bool                                  fp_distance_attraction = true;
@@ -51,6 +53,10 @@ struct Options {
   std::vector<std::string>                                   changed_cells;
   std::map<std::string, double>                              net_weights;
   double                                                     utilization = 0.30, aspect = 1, density = 0.5;
+  // Fixed generated frame in microns, {xl, yl, xh, yh}; empty means derive it from utilization/aspect.
+  // `core` is snapped inward to the site/row grid; with only one of the two given the other equals it.
+  // An imported `floorplan` (also what the staged macro/cell passes feed themselves) wins over both.
+  std::vector<double>                                        die, core;
   double                                                     stop_overflow = .1, initial_density_weight = .01;
   double                                                     halo_x = 5, halo_y = 5;  // microns per side, non-CORE macros only
   bool                                                       scale_macro_density = true;
@@ -88,10 +94,16 @@ struct Options {
   // do not legalize, optimize or certify the imported placement's legality.
   bool   retain_placement      = false;
   // Try nearest-whitespace placement of edited/new cells before windowed GP.
-  bool   legalize_cells        = false;
+  bool   legalize_cells             = false;
+  // Opt-in: an unknown (X) constant bit that reaches a physical net is a synthesis
+  // don't-care (`assign y = 'x`), so any value is a legal refinement; tie it low
+  // instead of refusing the placement. Off keeps the refusal.
+  bool   unknown_const_zero         = false;
 };
 struct Result {
   unsigned                                         fp_resized_cells = 0, fp_repair_edits = 0;
+  // Unknown constant bits tied low under Options::unknown_const_zero (zero otherwise).
+  size_t                                           unknown_const_tied = 0;
   // Own the last FP topology trial; declared before graph so it outlives it.
   std::map<std::string, std::string>               fp_buffer_origins;
   std::shared_ptr<hhds::GraphLibrary>              fp_library;

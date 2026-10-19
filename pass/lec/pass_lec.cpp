@@ -201,6 +201,21 @@ void Pass_lec::setup() {
                        "invariants, also emitted as a paste-ready formal block (formal_mined.prp) | speculative "
                        "(additionally report base-proven candidates the induction step dropped)",
                        "");
+  m.add_label_optional("reuse",
+                       "`lhd formal verify --workdir` cross-version reuse, a comma list: hash (default; per-property "
+                       "cone-key verdict cache) | equiv (old property model sequentially equivalent: keep its answer) | "
+                       "cex (replay the old counterexample) | inv (old PDR invariant, Houdini-filtered) | all | none",
+                       "hash");
+  m.add_label_optional("abc", "`lhd formal verify`: ABC bmc3 pre-pass before cvc5 (true|false)", "false");
+  m.add_label_optional("pdr", "`lhd formal verify`: also try an all-cycles PDR (IC3) proof in the ABC pre-pass (true|false)",
+                       "false");
+  m.add_label_optional("pdr_timeout", "`lhd formal verify`: PDR seconds per property", "20");
+  m.add_label_optional("sec_timeout", "`lhd formal verify`: reuse=equiv seconds per property", "3");
+  m.add_label_optional("abc_mem",
+                       "`lhd formal verify`: let a design with memories into the ABC pre-pass, memory reads "
+                       "abstracted (proofs only; refutes stay with cvc5) (true|false)",
+                       "false");
+  m.add_label_optional("abc_budget", "`lhd formal verify`: ABC pre-pass seconds in total (0 = a quarter of timeout)", "0");
   m.add_label_optional("split",
                        "case-split control input: auto (default; pick the small-width input feeding the widest "
                        "variable shift-amount / mux-selector pins) | <input-name> (force) | none (disable)",

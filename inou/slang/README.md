@@ -61,6 +61,30 @@ Two limitations of that header are real and currently unchecked:
   `hhds::Source_locator::find_file`, via the scratch-locator `base_` chain the
   loop grows).
 
+## Constructs that look like state but are not (or the reverse)
+
+- **Run-time severity tasks.** `$info`/`$warning`/`$error`/`$fatal` inside a process drive no
+  hardware, exactly like `$display`; they are ignored with one `severity-task-ignored`
+  warning per call instead of failing the design (FlooNoC carries a `$warning` in an `always`
+  outside `TARGET_SYNTHESIS`). The elaboration forms in a module or generate scope are slang's
+  own diagnostics (`InfoTask`, ...) and are unchanged: a taken `$error` still fails.
+- **Nonblocking assignments in a level-sensitive `always @(*)`.** The Migen/LiteX style
+  `x <= 0; if (c) x <= y;` assigns on every path, so `x` is combinational, as in yosys: a
+  latch comes from an incomplete path, not from the `<=` spelling. Such a variable is plain
+  logic when the block writes it only with `<=` on every path and never reads it back (a
+  nonblocking read of the old value and the settled value would differ). An incomplete path,
+  a mixed `=`/`<=` writer, a read-back and `always_latch` keep the latch classification (the
+  prim_clk_gate idiom `always @(clk or ...) if (!clk) en_latch <= ...`). Chains of
+  degenerate latches used to trip the latch contract (rule C) on LiteX output.
+- **`inout`.** LiveHD has no tri-state cell, so an `inout` port is refused with
+  `unsupported-inout-port` unless `--set compile.slang.inout_as_driven=true` selects the pad
+  model used by ASIC flows: the port is lowered as the direction its module uses, an OUTPUT
+  when the module (or a child instance wired to the port) drives it and an INPUT when it only
+  reads it. A `1'bz` drive is a don't-care, so the driven value wins and a read of the port
+  sees what the module drives (the external value of a genuinely bidirectional pad is not
+  modeled). A Lattice `TRELLIS_IO` (`assign B = T ? 1'bz : I; assign O = B;`) becomes an
+  output `B` carrying `I`, and the bus it drives is an output of the parent.
+
 ## Passing raw slang driver args (`-- ...`)
 
 Everything after a `--` on the `lhd` command line rides straight to the slang
@@ -357,9 +381,14 @@ frontend/solver jobs do not exhaust the fixed LEC watchdog through resource
 contention. Synthesis integration cases in `//inou/prp:integration` run exclusively.
 
 For source bundles containing unfinished modules outside an explicit top hierarchy,
-pass `-- --ignore-uninstantiated-modules`. This opts into Slang's existing
+pass `-- --ignore-uninstantiated-modules` or `--set compile.slang.ignore_uninstantiated_modules=true`
+(the form a flow that cannot append raw slang arguments uses). This opts into Slang's existing
 `IgnoreUninstantiatedModules` policy; syntax errors and semantic errors within the
-selected hierarchy remain errors. The separate upstream argument
+selected hierarchy remain errors. Vendor RTL that hides simulation-only code between
+`// synopsys translate_off` and `// synopsys translate_on` (the `synthesis` spelling too,
+with or without a space after `//`) needs `--set compile.slang.translate_off=true`, which
+enables slang's `--translate-off-format` for both spellings; an unclosed region is still an
+error. Both are covered by `//inou/slang:slang_vendor_bundle_options`. The separate upstream argument
 `--allow-use-before-declare` supports legacy declaration ordering. Both are explicit
 compatibility choices; the frontend's strict defaults are unchanged.
 Unfinished reference RTL that must not even be parsed belongs inside a Verilog
@@ -382,3 +411,22 @@ fails the read: slang reports `DuplicateDefinition`, and with that diagnostic
 silenced the reader still refuses it as `liberty-memory-name-collision` rather
 than silently picking the macro pins or the RTL body. Remove the model from the
 synthesis sources.
+
+### Hard macros, vendor stubs and Yosys-style netlists (opt-ins)
+
+These serve flows whose reference is Yosys/ORFS, where the Liberty/LEF view of a macro
+replaces whatever the sources say about it. Each is `--set compile.slang.<flag>=true`
+(or the value shown) and every one is off by default.
+
+| flag | effect |
+| --- | --- |
+| `liberty_macro_precedence` | a `synth.liberty` RAM macro WINS over a same-named design module, like `read_liberty -overwrite`: the declarations go into a slang library of the highest priority, every instantiation of that name binds to the macro pins, and the shadowed source module (a vendor behavioral model, a wrapper that re-instantiates the macro under its own name) is never elaborated |
+| `liberty_allow_truncation` | a wider actual on a narrower macro input keeps the low bits, as Verilog does, and `liberty-memory-port-truncation` becomes a warning instead of an error. The upper address/data bits are really discarded: use it only when the reference design does the same |
+| `liberty_cells` | a module that no source defines but the selected Liberty does (a standard cell such as `BUFx2_ASAP7_75t_R` instantiated by a vendor-primitive stub) is bound as a typed, opaque cell instance with the Liberty's pins and directions, like a RAM macro. A source definition of the name always wins |
+| `blackbox_attribute` | a module marked `(* blackbox *)` is its interface only: ports are declared, no body is built, and every instance stays an opaque `Sub` (the LEF/Liberty macro) instead of an empty module whose outputs read as unknown |
+| `unconnected_input=zero\|one` | an instance input left open reads that constant instead of `x`. Yosys folds a vendor primitive whose controls are open (BUFG_GT's CE/CLR) into its enabled state; an unknown select keeps the whole enable cone as logic on a clock net |
+| `flatten_state_arrays` | a one-dimensional unpacked state array without power-on contents is one packed register vector (constant selectors are element offsets, a runtime selector a shift/mask) instead of a Memory with one port per access site. NyuziProcessor's `pending_stores` has 375 read and 360 write ports, which otherwise take hours to bit-blast |
+
+A port listed twice in a module header (`input a, input a`) is accepted by `--compat=vcs`
+(`Redefinition` becomes a warning); the first declaration is the port, the later ones add
+neither an IO nor an instance connection.

@@ -1955,6 +1955,19 @@ std::string Slang_context::lower_call(const slang::ast::CallExpression& expr) {
       }
       return acc;
     }
+    // $onehot0(x): at most one bit set, i.e. (x & (x - 1)) == 0.
+    // $onehot(x): exactly one bit set, i.e. that and x != 0.
+    if ((name == "$onehot" || name == "$onehot0") && args.size() == 1) {
+      const auto& a   = *args[0];
+      auto        ai  = tinfo(*a.type);
+      auto        v   = trunc_to(to_int_value(lower_rvalue(a)), ai.bits);
+      auto        dec = trunc_to(builder_.create_minus_stmts(v, "1"), ai.bits);
+      auto        ok  = mark_bool(builder_.create_eq_stmts(builder_.create_bit_and_stmts(v, dec), "0"));
+      if (name == "$onehot") {
+        ok = mark_bool(builder_.create_log_and_stmts(ok, mark_bool(builder_.create_ne_stmts(v, "0"))));
+      }
+      return to_int_value(ok);
+    }
     // constant system calls ($clog2, $bits, ...) fold in tier 1
     emit_unsupported(expr.sourceRange,
                      "unsupported-system-call",

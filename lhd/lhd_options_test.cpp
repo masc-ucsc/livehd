@@ -1,6 +1,7 @@
 // This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 
 #include <algorithm>
+#include <fstream>
 #include <regex>
 #include <string>
 #include <utility>
@@ -226,4 +227,63 @@ TEST(LhdOptions, SynthAttributesAreOptions) {
   opts.command = "synth";
   opts.sets.emplace_back("synth.color", "x");
   EXPECT_THROW(lhd::check_known_set_passes(opts), lhd::Lhd_error);
+}
+
+// synth.delay_frac turns a fraction of the SDC clock period into the ABC budget, so
+// one setting serves designs with different clocks. An explicit synth.delay wins;
+// a missing or unresolvable period is a usage error, never a silent default.
+TEST(LhdOptions, SynthDelayFractionScalesTheSdcClockPeriod) {
+  const auto dir = ::testing::TempDir();
+  {
+    std::ofstream(dir + "/frac.sdc") << "current_design top\nset clk_period 900\nset clk_name clk\n"
+                                     << "create_clock -name $clk_name -period $clk_period [get_ports clk]\n"
+                                     << "create_clock -name slow -period 2000 [get_ports clk2]\n";
+    std::ofstream(dir + "/frac_ps.lib") << "library (x) {\n  time_unit : \"1ps\";\n}\n";
+    std::ofstream(dir + "/frac_ns.lib") << "library (x) {\n  time_unit : \"1ns\";\n}\n";
+    std::ofstream(dir + "/frac_ns.sdc") << "create_clock -name clk -period 0.9 [get_ports clk]\n";
+    std::ofstream(dir + "/frac_bad.sdc") << "create_clock -name clk -period [expr {1 + 2}] [get_ports clk]\n";
+  }
+  const auto merged = [&](std::vector<std::pair<std::string, std::string>> sets) {
+    lhd::Options opts;
+    for (auto& [k, v] : sets) {
+      opts.sets.emplace_back(std::move(k), std::move(v));
+    }
+    Eprp_var::Eprp_dict labels;
+    lhd::merge_mapper_sets(opts, "pass.abc", labels);
+    return labels;
+  };
+  EXPECT_EQ(merged({
+                {"synth.sdc",       dir + "/frac.sdc"},
+                {"synth.liberty", dir + "/frac_ps.lib"},
+                {"synth.delay_frac",           "0.4"}
+  }).at("delay"),
+            "360.000");
+  // The SDC unit is the Liberty unit: 0.9 ns is 900 ps.
+  EXPECT_EQ(merged({
+                {"synth.sdc",      dir + "/frac_ns.sdc"},
+                {"synth.liberty", dir + "/frac_ns.lib"},
+                {"synth.delay_frac",            "0.5"}
+  }).at("delay"),
+            "450.000");
+  EXPECT_EQ(merged({
+                {"synth.sdc",       dir + "/frac.sdc"},
+                {"synth.liberty", dir + "/frac_ps.lib"},
+                {"synth.delay_frac",           "0.4"},
+                {"synth.delay",                "123"}
+  }).at("delay"),
+            "123");
+  EXPECT_THROW(merged({
+                   {"synth.delay_frac", "0.4"}
+  }),
+               lhd::Lhd_error);
+  EXPECT_THROW(merged({
+                   {"synth.sdc",   dir + "/frac_bad.sdc"},
+                   {"synth.delay_frac",           "0.4"}
+  }),
+               lhd::Lhd_error);
+  EXPECT_THROW(merged({
+                   {"synth.sdc",       dir + "/frac.sdc"},
+                   {"synth.delay_frac",            "-1"}
+  }),
+               lhd::Lhd_error);
 }
