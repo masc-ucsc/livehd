@@ -198,6 +198,9 @@ bool read_options(const Eprp_var& var, Options& options) {
   if (!read("max_fanout", "16", mapping.max_fanout)) {
     return invalid_option("max_fanout", "an integer in [0, 4294967295]; 0 disables the `buffer -N` tail");
   }
+  if (!read("reset_fanout", "0", mapping.reset_fanout) || mapping.reset_fanout == 1) {
+    return invalid_option("reset_fanout", "0 (off) or an integer >= 2: asynchronous clear/preset pins per reset-tree buffer");
+  }
   mapping.pre = std::string(var.get_stage("tmap_pre", "&dch -f -C 500"));
   {
     // Allow-listed GIA commands only: the mapper never runs an arbitrary string.
@@ -453,6 +456,11 @@ void Pass_usyn::setup() {
   m.add_label_optional("max_fanout",
                        "tmap fanout cap: `buffer -N <n>` plus down-sizing to the budget after mapping (0 disables)",
                        "16");
+  m.add_label_optional("reset_fanout",
+                       "tmap asynchronous-reset buffer tree: a reset net driving more clear/preset pins than this in a region is "
+                       "dealt out through the library's smallest buffer, this many pins per buffer (0 disables; same as "
+                       "pass.abc.reset_fanout)",
+                       "0");
   m.add_label_optional("tmap_pre",
                        "`;`-separated ABC GIA commands run on the logic handed to the mapper just before `&nf` (default: "
                        "structural choices, so `&nf` can pick among equivalent structures). Empty maps the network as is. "

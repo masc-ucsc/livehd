@@ -63,6 +63,7 @@ synth::Tmap_result map_design(const std::shared_ptr<hhds::Graph>& top, const syn
   // Physical techniques only: buffering, gate sizing to the budget, boundary
   // environment/re-size and the mapping-only slack-to-area re-map.
   options.max_fanout       = request.max_fanout;
+  options.reset_fanout     = request.reset_fanout;
   options.boundary         = request.boundary;
   options.boundary_buffer  = request.boundary_buffer;
   options.boundary_drive   = request.boundary_drive;
@@ -85,7 +86,8 @@ synth::Tmap_result map_design(const std::shared_ptr<hhds::Graph>& top, const syn
       request.reg_margin,
       request.area_relax_pct,
       request.pre);
-  options.region_hook_recipe = "logical-tmap-v2/sharing-" + std::to_string(request.sharing_fanout) + "/" + physical;
+  options.region_hook_recipe = "logical-tmap-v2/sharing-" + std::to_string(request.sharing_fanout) + "/" + physical
+                               + (request.reset_fanout ? "|reset_fanout=" + std::to_string(request.reset_fanout) : "");
   // Every region, including output-only logic, takes the existing mapping-only
   // branch. No failed candidate or embedded region flow can select ABC synthesis.
   options.region_hook        = [](const synth::Lnet& net, const synth::Region_ctx&) {

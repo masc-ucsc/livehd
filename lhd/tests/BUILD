@@ -1644,6 +1644,20 @@ sh_test(
     env = {"MAPPER": mapper},
 ) for suffix, mapper in _MAPPERS]
 
+# pass.abc.reset_fanout deals an asynchronous-reset net with many clear/preset pins out through
+# a buffer tree (default off): every reset net is bounded, the netlist is proven by the graph
+# LEC and lgyosys, a flipped reset value refutes, and a cap of 1 is refused.
+[sh_test(
+    name = "lhd_abc_reset_tree_test" + suffix,
+    srcs = ["lhd_abc_reset_tree_test.sh"],
+    data = _FLOW_DATA + [
+        "abc_arst_q.lib",
+        "abc_arst_qn.lib",
+        "abc_rst_tree.v",
+    ],
+    env = {"MAPPER": mapper},
+) for suffix, mapper in _MAPPERS]
+
 # Latch-based clock gates map onto the Liberty's integrated clock-gate cell and
 # their registers onto DFF / clear / preset cells clocked by it (sky130- and
 # ASAP7-shaped hermetic libraries): graph LEC proves, lgcheck does not refute,

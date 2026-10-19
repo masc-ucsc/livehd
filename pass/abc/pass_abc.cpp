@@ -124,6 +124,13 @@ void Pass_abc::add_mapping_labels(Eprp_method& m) {
                        "icg_fanout buffer tree. The primary clock port is an ideal driver in a timer, so below this a tree "
                        "only adds launch latency (0 = always buffer it)",
                        "8192");
+  m.add_label_optional("reset_fanout",
+                       "max asynchronous clear/preset pins one reset net drives inside a region (a region input, a reset "
+                       "polarity inverter or a mapped reset cone): past it the net is dealt out through a tree of the "
+                       "library's smallest buffer, this many pins per buffer, level by level. The pins never enter the "
+                       "logic network, so max_fanout cannot bound them; one weak gate on thousands of flops is a "
+                       "multi-nanosecond recovery violation (0 disables, the default)",
+                       "0");
   m.add_label_optional("max_fanout",
                        "cap the fanout of every net ABC maps, by appending `buffer -N <n>; dnsize {B}` to the "
                        "built-in flows (0 disables the tail, sizing included). A custom `flow` places `{F}` -- the bare "
@@ -916,6 +923,18 @@ void Pass_abc::map_with(Eprp_var& var, const std::function<void(livehd::abc::Map
           .fatal();
     }
   }
+  // Same contract as icg_fanout: 0 (off) or a tree that can shrink, never a silent fallback.
+  uint64_t reset_fanout = 0;
+  if (auto s = std::string{var.get("reset_fanout", "0")}; !s.empty()) {
+    const char* b = s.data();
+    const char* e = s.data() + s.size();
+    auto [p, ec]  = std::from_chars(b, e, reset_fanout);
+    if (ec != std::errc{} || p != e || reset_fanout == 1 || reset_fanout > std::numeric_limits<uint32_t>::max()) {
+      livehd::diag::err("pass.abc", "bad-reset-fanout", "syntax")
+          .msg("pass.abc.reset_fanout '{}' must be 0 (off) or an integer >= 2", s)
+          .fatal();
+    }
+  }
   uint64_t input_clock_min = 8192;
   if (auto s = std::string{var.get("icg_input_min", "8192")}; !s.empty()) {
     const char* b = s.data();
@@ -1056,6 +1075,7 @@ void Pass_abc::map_with(Eprp_var& var, const std::function<void(livehd::abc::Map
   opts.max_fanout        = static_cast<uint32_t>(max_fanout);
   opts.icg_fanout        = static_cast<uint32_t>(icg_fanout);
   opts.input_clock_min   = static_cast<uint32_t>(input_clock_min);
+  opts.reset_fanout      = static_cast<uint32_t>(reset_fanout);
   opts.area_relax_pct    = static_cast<uint32_t>(area_relax_pct);
   opts.area_flow         = area_flow;
   opts.reg_margin        = reg_margin;

@@ -276,7 +276,27 @@ level the pin wants, so mapped logic drives it. The register stays a native
 boundary (`reset-native`, naming the precise reason) only when the Liberty has
 no clear (or preset) cell for a needed value, the reset value is not a
 constant, the reset is multi-bit, or a user `flow` may reshape latches; its
-surrounding data logic is still mapped. A register on a **latch-based clock
+surrounding data logic is still mapped.
+
+**Asynchronous-reset fanout tree (`reset_fanout`).** The clear/preset pins never
+enter ABC's logic network, so `max_fanout` (`buffer -N`) cannot bound them: one
+region input, one polarity inverter (`abc_reset_inv_<n>`, a minimum INVx1) or one mapped
+reset cone drives every asynchronous flop of the region. A weak gate on thousands of pins
+is a multi-nanosecond slew and an equally large recovery violation (NVDLA
+partition_m: one AO21x1 on 439 SETN pins, 4.1 ns slew, WNS -1016 ps; coralnpu: one INVx1 on
+5,348 pins, 62.8 ns slew). With `--set pass.abc.reset_fanout=N` (N >= 2; 0, the default, is off)
+the read-back collects the clear/preset pins by driver and, for a driver with more than N
+of them, deals them out in blocks of N through the library's smallest identity
+buffer (`<region>__rstbuf<level>_<n>`), level by level until the root drives at most N loads --
+the clock tree's mechanism, so a tree is logic-preserving by construction (LEC-proven by
+`lhd_abc_reset_tree_test`). The tree is region-local: a reset that fans out to several regions
+(a synchronizer in one, flops in six) gets one tree per consuming region, and each region
+input then loads the shared driver with only its tree roots. The buffers count in the
+region's `gates`/`area` and are part of the region-cache identity (`|rsttree=N`, absent when
+off). 16 to 32 pins per buffer is the typical range (ORFS's own repair uses 25 to 53);
+the smallest tree that meets timing is the cheapest in cells.
+
+A register on a **latch-based clock
 gate** (`always_latch if (!clk) en_l = en; assign gclk = clk & en_l;`, minion's
 `prim_clk_gate`) maps too: the gate itself becomes the Liberty's **integrated
 clock-gate cell** (`Dff_selection::icg_ladder`: a `clock_gating_integrated_cell
@@ -583,6 +603,7 @@ The option namespace matches the command path (`lhd pass abc`); after the
 | `boundary` | size every region against what lies beyond its partition (see "Partition boundaries" above): the static estimate while it maps, the exact re-size once every region exists | `true` |
 | `boundary_buffer` | tree every region input's fanout inside the region when it exceeds `max_fanout` -- the design's primary inputs and the sink side of crossing nets alike -- by declaring `boundary_drive` as ABC's driving cell (its `buffer` only trees an input that has a driver); independent of `boundary`; false leaves inputs unbuffered and relies on the exact re-size to upsize the driver | `true` |
 | `boundary_drive` | stand-in Liberty cell driving a region input whose real driver is not a mapped cell (a primary input, a flop, a memory or child output, every input under the estimate): empty = the library's smallest ordinary buffer, `none` = an ideal driver | `` |
+| `reset_fanout` | cap on the asynchronous clear/preset pins one reset net drives inside a region (a region input, a reset-polarity inverter or a mapped reset cone): past it the net is dealt out through a tree of the library's smallest buffer, this many pins per buffer, level by level, exactly like the `icg_fanout` clock tree (see "Asynchronous-reset fanout tree"). `0` disables; `1` is refused (a level could never shrink) | `0` |
 | `boundary_rounds` | rounds of the exact re-size (a path through k regions needs k rounds) | `1` |
 | `io_load` | load in fF on a primary output of `--top` (and on a port whose sink cannot be resolved); negative = one typical input pin of the library | `-1` |
 | `verbose` | extra per-region prints (assume constraints, …) | `false` |

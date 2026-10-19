@@ -611,6 +611,7 @@ All options below use the `pass.usyn.` prefix.
 | `flatten` | auto; follows coloring, or explicitly true/false |
 | `delay` | 0; optional tmap timing budget in ps, passed to the provider whenever set. Untimed mapped reports give `logic_depth` levels and `"delay": null`, never a level count as ps |
 | `max_fanout`, `area_relax`, `reg_margin` | 16, 200, auto; physical-only tmap knobs with pass.abc's meanings: `buffer -N` cap plus sizing to the budget, mapping-only `&nf -R` slack-to-area re-map, register overhead off the budget |
+| `reset_fanout` | 0 (off); tmap asynchronous-reset buffer tree with pass.abc's meaning: a reset net driving more than this many clear/preset pins in a region is dealt out through the library's smallest buffer, this many pins per buffer, level by level (0 or >= 2). Enters the tmap cache identity |
 | `boundary`, `boundary_buffer`, `boundary_drive`, `boundary_rounds`, `io_load` | true, true, empty, 1, -1; tmap partition-boundary environment, exact boundary re-size (needs `delay` and an NLDM Liberty), and input buffering, as in pass.abc. All enter the tmap cache identity |
 | `memory_budget_mb`, `time_budget_ms` | 16384, 0; memory-growth and elapsed-time admission. A memory refusal is named `TIMEOUT-memory:` and an elapsed-time refusal `TIMEOUT-time:`; an allocation that still fails (`std::bad_alloc`, e.g. at the RLIMIT_AS backstop) ends the pass with a `memory-exhausted` TIMEOUT-memory error, never a crash. There is no override option |
 

@@ -538,6 +538,7 @@ std::string mapping_report(const synth::Mapped_design& design, std::string_view 
   w.Key("physical");
   w.StartObject();
   number(w, "max_fanout", options.max_fanout);
+  number(w, "reset_fanout", options.reset_fanout);
   flag(w, "boundary", options.boundary);
   flag(w, "boundary_buffer", options.boundary_buffer);
   w.Key("boundary_drive");
