@@ -37,7 +37,11 @@ each bit's next state under that hypothesis, with the other bits' constants
 included. The select of a Mux, the controls of a Hotmux and the enable of a flop
 are folded the same way, and the reset net a group of flops shares is taken as
 inactive while their next states are evaluated (when it is active they hold the
-reset value, which is the claim). A bit whose next state is not provably its
+reset value, which is the claim). A group is a reset net *and* its polarity: two
+flops that read one net with opposite `negreset` are evaluated at their own
+inactive level, and a flop whose `negreset` is not a constant is not a candidate.
+Every reset net is taken to be asserted at least once (a bit proven constant from
+the reset value of one flop may read the reset value of another). A bit whose next state is not provably its
 constant falls out of the hypothesis; repeat until nothing falls out. What
 remains is an inductive invariant, so a ring of FIFOs whose `full` bits keep each
 other at 0 is proven at once; a pessimistic per-flop test would never see it.

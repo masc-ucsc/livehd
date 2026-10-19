@@ -23,6 +23,7 @@
 #include <format>
 #include <optional>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "absl/container/flat_hash_map.h"
@@ -74,6 +75,45 @@ Val tri_xor(const Val& a, const Val& b) {
 }
 
 using Vec = std::vector<Val>;
+
+// The width operand of a Concat lane: a small non-negative constant.
+bool lane_width_ok(const hhds::Pin_class& pin) {
+  return pin.is_const() && !gu::const_of(pin).has_unknowns() && gu::const_of(pin).is_just_i64() && gu::const_of(pin).to_just_i64() >= 0
+         && gu::const_of(pin).to_just_i64() <= (1 << 24);
+}
+
+// Whether value `cand` of a narrow unsigned operand agrees with the bits already known.
+bool consistent_with(uint64_t cand, const std::vector<Val>& known) {
+  for (size_t t = 0; t < known.size(); ++t) {
+    if (known[t].known() && known[t].is_one() != (((cand >> t) & 1U) != 0)) {
+      return false;
+    }
+  }
+  return true;
+}
+
+// The amounts of a word-select shift, `index*scale + bias`, for every value of its narrow index
+// that agrees with the bits `known` already pins. The index must be unsigned (the enumeration
+// walks bit patterns as non-negative values) and at most `max_bits` wide. False when the set is
+// not small and explicit; on success `known` has one entry per index bit.
+bool affine_amounts(const livehd::synth::Affine_chain& chain, int max_bits, std::vector<Val>& known, std::vector<int64_t>& out) {
+  const int iw = gu::bits_of(chain.index);
+  if (!gu::is_unsign(chain.index) || iw <= 0 || iw > max_bits) {
+    return false;
+  }
+  known.resize(static_cast<size_t>(iw), Val::anything());
+  for (uint64_t cand = 0; cand < (uint64_t{1} << iw); ++cand) {
+    if (!consistent_with(cand, known)) {
+      continue;
+    }
+    const auto amount = chain.eval(cand);
+    if (!amount || *amount > (1U << 24)) {
+      return false;
+    }
+    out.push_back(static_cast<int64_t>(*amount));
+  }
+  return !out.empty();
+}
 
 // One flop under analysis.
 struct Flop_info {
@@ -288,18 +328,15 @@ private:
   }
 
   Vec get_mask(const hhds::Node_class& node, int w, int depth) {
-    const auto a  = gu::get_driver_of_sink_name(node, "a");
-    const auto lo = gu::get_driver_of_sink_name(node, "lo");
-    const auto hi = gu::get_driver_of_sink_name(node, "hi");
-    if (a.is_invalid() || lo.is_invalid() || hi.is_invalid() || !lo.is_const() || !hi.is_const() || !gu::const_of(lo).is_just_i64()
-        || !gu::const_of(hi).is_just_i64()) {
+    const auto a     = gu::get_driver_of_sink_name(node, "a");
+    const auto range = gu::bit_range(node);  // the half-open window [lo, hi), lo >= 0
+    if (a.is_invalid() || !range) {
       return all_unknown(w);
     }
-    const auto base  = static_cast<int>(gu::const_of(lo).to_just_i64());
-    const auto limit = static_cast<int>(gu::const_of(hi).to_just_i64()) - base;  // the window width
-    Vec        v(static_cast<size_t>(w));
+    const auto [base, end] = *range;
+    Vec v(static_cast<size_t>(w));
     for (int i = 0; i < w; ++i) {
-      v[static_cast<size_t>(i)] = i < limit ? bit(a, base + i, depth) : Val::zero();  // a Get_mask is non-negative
+      v[static_cast<size_t>(i)] = i < end - base ? bit(a, base + i, depth) : Val::zero();  // a Get_mask is non-negative
     }
     return v;
   }
@@ -316,7 +353,7 @@ private:
       if (sink.get_port_id() % 2 == 0) {
         pending = d.front();
       } else {
-        if (!d.front().is_const() || !gu::const_of(d.front()).is_just_i64()) {
+        if (!lane_width_ok(d.front())) {
           return all_unknown(w);
         }
         lanes.emplace_back(pending, static_cast<int>(gu::const_of(d.front()).to_just_i64()));
@@ -383,20 +420,12 @@ private:
       amounts.push_back(c.to_just_i64());
     } else if (gu::bits_of(b) > 0 && gu::bits_of(b) <= 12 && gu::is_unsign(b)) {
       // a narrow amount: every value consistent with the bits already known
-      const int        bw = gu::bits_of(b);
-      std::vector<Val> bits(static_cast<size_t>(bw));
-      for (int t = 0; t < bw; ++t) {
-        bits[static_cast<size_t>(t)] = bit(b, t, depth);
+      std::vector<Val> bits(static_cast<size_t>(gu::bits_of(b)));
+      for (size_t t = 0; t < bits.size(); ++t) {
+        bits[t] = bit(b, static_cast<int>(t), depth);
       }
-      for (uint64_t cand = 0; cand < (uint64_t{1} << bw); ++cand) {
-        bool ok = true;
-        for (int t = 0; t < bw && ok; ++t) {
-          const auto& x = bits[static_cast<size_t>(t)];
-          if (x.known() && x.is_one() != (((cand >> t) & 1U) != 0)) {
-            ok = false;
-          }
-        }
-        if (ok) {
+      for (uint64_t cand = 0; cand < (uint64_t{1} << bits.size()); ++cand) {
+        if (consistent_with(cand, bits)) {
           amounts.push_back(static_cast<int64_t>(cand));
         }
       }
@@ -408,32 +437,11 @@ private:
       if (!chain) {
         return v;
       }
-      const int iw = gu::bits_of(chain->index);
-      if (iw <= 0 || iw > 12) {
-        return v;
+      std::vector<Val> idx(static_cast<size_t>(std::max(gu::bits_of(chain->index), 0)));
+      for (size_t t = 0; t < idx.size(); ++t) {
+        idx[t] = bit(chain->index, static_cast<int>(t), depth);
       }
-      std::vector<Val> idx(static_cast<size_t>(iw));
-      for (int t = 0; t < iw; ++t) {
-        idx[static_cast<size_t>(t)] = bit(chain->index, t, depth);
-      }
-      for (uint64_t cand = 0; cand < (uint64_t{1} << iw); ++cand) {
-        bool ok = true;
-        for (int t = 0; t < iw && ok; ++t) {
-          const auto& x = idx[static_cast<size_t>(t)];
-          if (x.known() && x.is_one() != (((cand >> t) & 1U) != 0)) {
-            ok = false;
-          }
-        }
-        if (!ok) {
-          continue;
-        }
-        const auto amount = chain->eval(cand);
-        if (!amount || *amount > (1U << 24)) {
-          return v;
-        }
-        amounts.push_back(static_cast<int64_t>(*amount));
-      }
-      if (amounts.empty()) {
+      if (!affine_amounts(*chain, 12, idx, amounts)) {
         return v;
       }
     }
@@ -686,12 +694,14 @@ struct State_sweeper {
   absl::flat_hash_map<hhds::Class_index, int32_t> flop_of;
   // The nets that reset flops. While a group's next states are evaluated its reset is
   // inactive: when it is active the flops hold their reset value, which is the claim.
+  // A group is a (net, polarity): two flops can read one net with opposite `negreset`, and each
+  // is evaluated with the net at ITS inactive level.
   struct Reset_group {
     hhds::Class_index reset_net;
     Val               inactive;
   };
-  std::vector<Reset_group>                        groups;
-  absl::flat_hash_map<hhds::Class_index, int32_t> group_of_reset;
+  std::vector<Reset_group>                                      groups;
+  absl::flat_hash_map<std::pair<hhds::Class_index, bool>, int32_t> group_of_reset;
 
   // ------------------------------------------------------------ collection
   void collect() {
@@ -717,10 +727,14 @@ struct State_sweeper {
       const auto initial = gu::get_driver_of_sink_name(node, "initial");
       info.has_reset     = !rst.is_invalid();
       if (info.has_reset) {
-        auto [it, inserted] = group_of_reset.emplace(rst.get_class_index(), static_cast<int32_t>(groups.size() + 1));
+        // the inactive level of the reset net must be known to evaluate the next state at it
+        const auto neg = gu::get_driver_of_sink_name(node, "negreset");
+        if (!neg.is_invalid() && (!neg.is_const() || gu::const_of(neg).has_unknowns())) {
+          continue;
+        }
+        const bool negated  = !neg.is_invalid() && gu::const_of(neg).is_known_true();
+        auto [it, inserted] = group_of_reset.emplace(std::pair{rst.get_class_index(), negated}, static_cast<int32_t>(groups.size() + 1));
         if (inserted) {
-          const auto neg     = gu::get_driver_of_sink_name(node, "negreset");
-          const bool negated = !neg.is_invalid() && neg.is_const() && gu::const_of(neg).is_known_true();
           groups.push_back({.reset_net = rst.get_class_index(), .inactive = negated ? Val::one() : Val::zero()});
         }
         info.group = it->second;
@@ -1060,21 +1074,8 @@ struct State_sweeper {
       return true;
     }
     const auto chain = livehd::synth::affine_chain(b);
-    if (!chain) {
-      return false;
-    }
-    const int iw = gu::bits_of(chain->index);
-    if (iw <= 0 || iw > 10) {
-      return false;
-    }
-    for (uint64_t v = 0; v < (uint64_t{1} << iw); ++v) {
-      const auto amount = chain->eval(v);
-      if (!amount || *amount > (1U << 24)) {
-        return false;
-      }
-      out.push_back(static_cast<int64_t>(*amount));
-    }
-    return true;
+    std::vector<Val> unconstrained;
+    return chain && affine_amounts(*chain, 10, unconstrained, out);
   }
 
   void process(const hhds::Node_class& n) {
@@ -1117,53 +1118,49 @@ struct State_sweeper {
         }
         return;
       case Ntype_op::Hotmux: {
-        size_t total = 0;
+        // interleaved (control, value) pairs and an optional trailing default value
+        std::vector<std::vector<hhds::Pin_class>> sinks;
         for (const auto& sink : n.inp_sorted_pins()) {
-          (void)sink;
-          ++total;
-        }
-        size_t idx = 0;
-        for (const auto& sink : n.inp_sorted_pins()) {
-          const bool is_value = (idx % 2 == 1) || (total % 2 == 1 && idx == total - 1);
+          auto& drivers = sinks.emplace_back();
           for (const auto& d : sink.get_driver_pins()) {
+            drivers.push_back(d);
+          }
+        }
+        for (size_t idx = 0; idx < sinks.size(); ++idx) {
+          const bool is_value = (idx % 2 == 1) || (sinks.size() % 2 == 1 && idx + 1 == sinks.size());
+          for (const auto& d : sinks[idx]) {
             if (is_value) {
               need_same(d, out);
             } else {
               need_all(d);
             }
           }
-          ++idx;
         }
         return;
       }
       case Ntype_op::Get_mask: {
-        const auto a  = gu::get_driver_of_sink_name(n, "a");
-        const auto lo = gu::get_driver_of_sink_name(n, "lo");
-        const auto hi = gu::get_driver_of_sink_name(n, "hi");
-        if (!lo.is_const() || !gu::const_of(lo).is_just_i64()) {
+        const auto a     = gu::get_driver_of_sink_name(n, "a");
+        const auto range = gu::bit_range(n);
+        if (!range) {
           need_all_inputs(n);
           return;
         }
-        const int base = static_cast<int>(gu::const_of(lo).to_just_i64());
-        for (int j = 0; j < w; ++j) {
+        for (int j = 0; j < w && j < range->second - range->first; ++j) {  // bits past the window read 0
           if (is_demanded(out, j)) {
-            need(a, base + j, base + j + 1);
+            need(a, range->first + j, range->first + j + 1);
           }
         }
-        (void)hi;
         return;
       }
       case Ntype_op::Set_mask: {
         const auto a     = gu::get_driver_of_sink_name(n, "a");
         const auto value = gu::get_driver_of_sink_name(n, "value");
-        const auto lo    = gu::get_driver_of_sink_name(n, "lo");
-        const auto hi    = gu::get_driver_of_sink_name(n, "hi");
-        if (!lo.is_const() || !hi.is_const() || !gu::const_of(lo).is_just_i64() || !gu::const_of(hi).is_just_i64()) {
+        const auto range = gu::bit_range(n);
+        if (!range) {
           need_all_inputs(n);
           return;
         }
-        const int l = static_cast<int>(gu::const_of(lo).to_just_i64());
-        const int h = static_cast<int>(gu::const_of(hi).to_just_i64());
+        const auto [l, h] = *range;
         for (int j = 0; j < w; ++j) {
           if (!is_demanded(out, j)) {
             continue;
@@ -1184,7 +1181,7 @@ struct State_sweeper {
           const auto d = sink.get_driver_pin();
           if (sink.get_port_id() % 2 == 0) {
             pending = d;
-          } else if (d.is_const() && gu::const_of(d).is_just_i64()) {
+          } else if (lane_width_ok(d)) {
             lanes.emplace_back(pending, static_cast<int>(gu::const_of(d).to_just_i64()));
           } else {
             ok = false;
@@ -1231,10 +1228,10 @@ struct State_sweeper {
           }
           for (const auto k : amounts) {
             const int64_t src = left ? j - k : j + k;
-            if (src >= 0 && src < (1 << 24)) {
+            // a left shift reads nothing below bit 0; a right shift past the top reads the sign bit,
+            // which need() resolves
+            if (src >= 0) {
               need(a, static_cast<int>(src), static_cast<int>(src) + 1);
-            } else if (!left) {
-              need(a, 0, 1);  // nothing sensible: keep the bottom bit alive
             }
           }
         }

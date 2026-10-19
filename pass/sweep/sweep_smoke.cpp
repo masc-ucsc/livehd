@@ -213,6 +213,48 @@ TEST(SweepState, RegisterThatLoadsAnInputIsLeftAlone) {
   EXPECT_EQ(count_op(*graph, Ntype_op::Flop), 1u);
 }
 
+TEST(SweepState, FlopsSharingAResetNetWithOppositePolarityAreEvaluatedAtTheirOwnInactiveLevel) {
+  auto graph = make_graph("lgdb_sweep_polarity", "polarity", 1);
+  // `a` resets on rst low (its inactive level is 1) and loads an input: never constant.
+  auto a = make_flop(*graph, 1, 0, graph->get_input_pin("d"));
+  a.get_driver_pin(0).connect_sink(graph->get_output_pin("q"));
+  // `b` resets on rst HIGH (inactive level 0) to 0 and loads ~rst: while rst is inactive
+  // it loads 1, so it is not constant. Evaluated at a's inactive level (rst = 1) its
+  // next state would read 0, the reset value, and b would be dropped as a constant.
+  auto inv = gu::create_typed_node(*graph, Ntype_op::Not);
+  graph->get_input_pin("rst").connect_sink(inv.create_sink_pin(0));
+  auto inv_out = inv.create_driver_pin(0);
+  gu::set_ubits(inv_out, 1);
+  auto b = make_flop(*graph, 1, 0, inv_out);
+  gu::setup_sink_by_name(b, "negreset").del_sink();
+  gu::setup_sink_by_name(b, "negreset").connect_driver(constant(*graph, 0));
+  b.get_driver_pin(0).connect_sink(graph->get_output_pin("r"));
+
+  const auto stats = livehd::sweep::sweep_state(*graph);
+  EXPECT_EQ(stats.const_bits, 0u);
+  EXPECT_EQ(count_op(*graph, Ntype_op::Flop), 2u);
+}
+
+TEST(SweepState, FlopWithAResetPolarityThatIsNotConstantIsLeftAlone) {
+  auto graph = make_graph("lgdb_sweep_dynpolarity", "dynpolarity", 1);
+  // din = rst reads as the reset value 0 only if rst is taken to be low; with an
+  // active-low reset (the other polarity) the flop loads 1 whenever it is not in reset
+  auto copy = gu::create_typed_node(*graph, Ntype_op::And);
+  gu::setup_sink_by_name(copy, "as").connect_driver(graph->get_input_pin("rst"));
+  gu::setup_sink_by_name(copy, "as").connect_driver(graph->get_input_pin("rst"));
+  auto copy_out = copy.create_driver_pin(0);
+  gu::set_ubits(copy_out, 1);
+  auto flop = make_flop(*graph, 1, 0, copy_out);
+  gu::setup_sink_by_name(flop, "negreset").del_sink();
+  gu::setup_sink_by_name(flop, "negreset").connect_driver(graph->get_input_pin("en"));
+  flop.get_driver_pin(0).connect_sink(graph->get_output_pin("q"));
+  constant(*graph, 0).connect_sink(graph->get_output_pin("r"));
+
+  const auto stats = livehd::sweep::sweep_state(*graph);
+  EXPECT_EQ(stats.const_bits, 0u);
+  EXPECT_EQ(count_op(*graph, Ntype_op::Flop), 1u);
+}
+
 TEST(SweepState, StateNothingObservesIsRemovedAndObservedStateKept) {
   auto graph = make_graph("lgdb_sweep_dead", "dead", 4);
   // dead: Q feeds only its own hold mux; live: Q reaches an output

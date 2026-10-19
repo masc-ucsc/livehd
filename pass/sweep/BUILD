@@ -35,8 +35,6 @@ cc_library(
     deps = [
         "//core",
         "//graph",
-        "//pass/bitwidth:pass_bitwidth",
-        "//pass/cprop:pass_cprop",
         "//pass/synth:affine_amount",
         "@abseil-cpp//absl/container:flat_hash_map",
         "@abseil-cpp//absl/container:flat_hash_set",
@@ -52,8 +50,6 @@ cc_test(
     deps = [
         ":sweep",
         "//graph",
-        "//pass/bitwidth:pass_bitwidth",
-        "//pass/cprop:pass_cprop",
         "@googletest//:gtest_main",
         "@hhds//hhds:graph",
     ],
