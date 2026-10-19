@@ -241,8 +241,14 @@ bool read_options(const Eprp_var& var, Options& options) {
   }
   options.design.max_source_nodes = logical.max_nodes;
   options.design.specialize       = std::string(var.get_stage("specialize", "true")) != "false";
-  options.design.state_sweep      = std::string(var.get_stage("state_sweep", "false")) == "true";
-  options.design.merge_registers  = std::string(var.get_stage("merge_registers", "false")) == "true";
+  for (const auto& [switch_name, switch_value] : {std::pair{"state_sweep", &options.design.state_sweep},
+                                              std::pair{"merge_registers", &options.design.merge_registers}}) {
+    const auto text = std::string(var.get_stage(switch_name, "false"));
+    if (text != "true" && text != "false") {
+      return invalid_option(switch_name, "true|false");
+    }
+    *switch_value = text == "true";
+  }
   {
     const auto text = std::string(var.get_stage("unroll_carry", "true"));
     if (text != "true" && text != "false") {

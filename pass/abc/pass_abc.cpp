@@ -807,6 +807,14 @@ void Pass_abc::map_with(Eprp_var& var, const std::function<void(livehd::abc::Map
     livehd::diag::err("pass.abc", "bad-reassoc", "syntax").msg("pass.abc.reassoc expects true|false, got '{}'", reassoc_text).emit();
     return;
   }
+  for (const char* name : {"state_sweep", "merge_registers"}) {
+    // A misspelt switch must not silently leave the dead state in the netlist.
+    const auto text = var.get(name, "false");
+    if (text != "true" && text != "false") {
+      livehd::diag::err("pass.abc", "bad-register-cleanup", "syntax").msg("pass.abc.{} expects true|false, got '{}'", name, text).emit();
+      return;
+    }
+  }
   auto prepared
       = livehd::synth::prepare_design(var.graphs,
                                       unroll_carry_text == "true" || unroll_carry_text == "1" || unroll_carry_text == "on",
@@ -814,8 +822,8 @@ void Pass_abc::map_with(Eprp_var& var, const std::function<void(livehd::abc::Map
                                       nullptr,
                                       var.get("specialize", "true") != "false",
                                       reassoc_text == "true",
-                                      livehd::synth::State_options{.state_sweep     = truthy(var.get("state_sweep", "false")),
-                                                                   .merge_registers = truthy(var.get("merge_registers", "false")),
+                                      livehd::synth::State_options{.state_sweep     = var.get("state_sweep", "false") == "true",
+                                                                   .merge_registers = var.get("merge_registers", "false") == "true",
                                                                    .top             = var.get("top", "")});
   if (!prepared) {
     return;
@@ -1252,7 +1260,7 @@ void Pass_abc::map_with(Eprp_var& var, const std::function<void(livehd::abc::Map
   }
   resolve_graphs.insert(resolve_graphs.end(), ware_modules.begin(), ware_modules.end());
   resolve_graphs.insert(resolve_graphs.end(), memory_modules.begin(), memory_modules.end());
-  if (truthy(var.get("state_sweep", "false")) && !memory_modules.empty()) {
+  if (var.get("state_sweep", "false") == "true" && !memory_modules.empty()) {
     // A lowered memory is flops behind a read mux: a column no reader looks at is unobserved state like any other,
     // and only now is it visible (the first sweep ran before the memories became modules).
     if (const auto swept = livehd::synth::sweep_unobserved_state(resolve_graphs, top, nullptr);

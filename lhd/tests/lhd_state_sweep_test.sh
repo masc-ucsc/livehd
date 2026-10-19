@@ -97,6 +97,14 @@ usyn on true
 [ "$(count "$W/usyn_off/net.v" '^always @')" = 184 ] || fail "usyn off: expected 184 registers, got $(count "$W/usyn_off/net.v" '^always @')"
 [ "$(count "$W/usyn_on/net.v" '^always @')" = 99 ] || fail "usyn on: expected 99 registers, got $(count "$W/usyn_on/net.v" '^always @')"
 
+# A misspelt pass-level switch is an error, not a silent "off" that keeps the dead state.
+for spelling in pass.usyn.state_sweep pass.usyn.merge_registers; do
+  if "$LHD" synth --result-json "$W/bad.json" --reader slang --top sweep --workdir "$W/bad" --emit verilog:"$W/bad.v" \
+    --set synth.mapper=usyn --set pass.usyn.tmap=none --set "$spelling=maybe" -- "$SRC" > "$W/bad.log" 2>&1; then
+    fail "$spelling=maybe was accepted"
+  fi
+done
+
 # synth.merge_registers: twin registers (same clock, enable, reset and D) merge, and the registers fed by
 # them merge in turn; a register with another enable stays. 5 x 8 bits become 3 x 8. The twin of a merged
 # register has no counterpart left in the netlist, so the LEC proof is a bounded one.
