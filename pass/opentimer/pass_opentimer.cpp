@@ -390,23 +390,33 @@ std::string sdc_expand(std::string_view line, const std::map<std::string, std::s
     }
     text.replace(at, end - at + 1, std::format("{:.9g}", Sdc_expression(expression).value()));
   }
-  // HighTide/ORFS excludes the clock input using this exact Tcl list-search
-  // idiom. Preserve an exact exclusion selector rather than evaluating Tcl or
-  // silently replacing a general list search with all_inputs -no_clocks.
+  // HighTide/ORFS excludes the clock inputs using this Tcl list-search idiom,
+  // alone or nested once per excluded port:
+  //   [lsearch -inline -all -not [lsearch -inline -all -not [all_inputs] a] b]
+  // Preserve an exact exclusion selector rather than evaluating Tcl or silently
+  // replacing a general list search with all_inputs -no_clocks. Tcl's default
+  // pattern is a glob, so without -exact the name must have no glob characters
+  // to be the same thing. The innermost search is rewritten first, so an outer
+  // one then sees the `[all_inputs -exclude_exact ...]` it extends.
   static const std::regex exclusion(
-      R"(\[lsearch\s+((?:-[a-z]+\s+){4})\[all_inputs\]\s+(?:\[get_ports\s+([^\s\[\]{}]+)\]|([^\s\[\]{}]+))\s*\])");
-  for (size_t at = text.find("[lsearch "); at != std::string::npos; at = text.find("[lsearch ", at)) {
+      R"(\[lsearch\s+((?:-[a-z]+\s+){3,4})(\[all_inputs(?:\s+-exclude_exact\s+[^\s\[\]{}]+)*)\]\s+(?:\[get_ports\s+([^\s\[\]{}]+)\]|([^\s\[\]{}]+))\s*\])");
+  for (size_t at = text.rfind("[lsearch "); at != std::string::npos; at = at == 0 ? std::string::npos : text.rfind("[lsearch ", at - 1)) {
     std::smatch match;
     if (!std::regex_search(text.cbegin() + at, text.cend(), match, exclusion, std::regex_constants::match_continuous)) {
       throw std::runtime_error("unsupported SDC list-search expression");
     }
     std::vector<std::string> flags = absl::StrSplit(match[1].str(), absl::ByAnyChar(" \t\r"), absl::SkipWhitespace());
     std::sort(flags.begin(), flags.end());
-    if (flags != std::vector<std::string>{"-all", "-exact", "-inline", "-not"}) {
-      throw std::runtime_error("SDC list search requires -inline -all -not -exact");
+    const bool exact = flags.size() == 4;
+    if (flags != (exact ? std::vector<std::string>{"-all", "-exact", "-inline", "-not"}
+                        : std::vector<std::string>{"-all", "-inline", "-not"})) {
+      throw std::runtime_error("SDC list search requires -inline -all -not [-exact]");
     }
-    const auto port = match[2].matched ? match[2].str() : match[3].str();
-    text.replace(at, match.length(), "[all_inputs -exclude_exact " + port + "]");
+    const auto port = match[3].matched ? match[3].str() : match[4].str();
+    if (!exact && port.find_first_of("*?\\") != std::string::npos) {
+      throw std::runtime_error("SDC list search with a glob pattern needs an exact port name");
+    }
+    text.replace(at, match.length(), match[2].str() + " -exclude_exact " + port + "]");
   }
   return text;
 }
@@ -459,6 +469,16 @@ void Pass_opentimer::read_sdc(std::string_view sdc_file) {
 
   while (std::getline(file, line)) {
     ++lineno;
+    // Tcl joins a backslash-newline into one space: a command continued over several lines is one command.
+    while (!line.empty() && (line.back() == '\\' || (line.back() == '\r' && line.size() > 1 && line[line.size() - 2] == '\\'))) {
+      line.resize(line.find_last_of('\\'));
+      std::string more;
+      if (!std::getline(file, more)) {
+        break;
+      }
+      ++lineno;
+      line += ' ' + more;
+    }
     const auto first = line.find_first_not_of(" \t\r");
     if (first == std::string::npos || line[first] == '#') {
       continue;

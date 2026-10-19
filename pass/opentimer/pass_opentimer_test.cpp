@@ -139,6 +139,23 @@ set_output_delay 20 -clock virtual [all_outputs]
   EXPECT_FLOAT_EQ(pass.timer.report_slack("y", ot::MAX, ot::RISE).value(), 70);
   EXPECT_TRUE(pass.complete());
 }
+TEST_F(SdcClock, NestedListSearchExcludesEveryNamedInputAndBackslashJoinsLines) {
+  Sdc_probe pass(var);
+  pass.timer.insert_primary_input("clk_p").insert_primary_input("clk_n");
+  // The litepci/HighTide idiom: one nested search per excluded port, continued over two lines.
+  pass.read_sdc(write(R"sdc(
+set non_clock_inputs [lsearch -inline -all -not \
+    [lsearch -inline -all -not [all_inputs] clk_p] clk_n]
+create_clock -name virtual -period 100
+set_input_delay 10 -clock virtual $non_clock_inputs
+set_output_delay 20 -clock virtual [all_outputs]
+)sdc"));
+  EXPECT_FLOAT_EQ(pass.timer.report_at("a", ot::MAX, ot::RISE).value(), 10);
+  EXPECT_FALSE(pass.timer.report_at("clk_p", ot::MAX, ot::RISE));
+  EXPECT_FALSE(pass.timer.report_at("clk_n", ot::MAX, ot::RISE));
+  EXPECT_FLOAT_EQ(pass.timer.report_slack("y", ot::MAX, ot::RISE).value(), 70);
+  EXPECT_TRUE(pass.complete());
+}
 TEST_F(SdcClock, ExprDividesIntegersLikeTcl) {
   Sdc_probe pass(var);
   const std::string clock = "create_clock -name virtual -period 100\n";
