@@ -56,3 +56,14 @@ module zb_lanes (
   end
   assign r = mem[raddr];
 endmodule
+
+// zb_select: a word select by a full 32-bit index (the `of_operand1[~lane * 32 +: 32]`
+// of a lane read), not the narrow affine form: the amount is `idx * 32`, whose five low
+// bits are 0. As an opaque module input those barrel stages are built anyway.
+module zb_select (
+  input  logic [511:0] v,
+  input  logic [31:0]  idx,
+  output logic [31:0]  o
+);
+  assign o = v[idx * 32 +: 32];
+endmodule

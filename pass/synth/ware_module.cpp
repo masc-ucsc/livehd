@@ -218,12 +218,19 @@ std::shared_ptr<hhds::Graph> enclose(hhds::Graph& parent, const hhds::Node_class
   if (zero_bits && (kind == "shl" || kind == "sra")) {
     for (size_t i = 0; i < edges.size(); ++i) {
       const auto drv = edges[i].get_driver_pin();
-      if (edges[i].get_port_id() != Ntype::get_sink_pid(gu::type_op_of(node), "a") || drv.is_const() || is_affine_edge(edges[i])) {
+      const bool data   = edges[i].get_port_id() == Ntype::get_sink_pid(gu::type_op_of(node), "a");
+      const bool amount = edges[i].get_port_id() == Ntype::get_sink_pid(gu::type_op_of(node), "b");
+      if ((!data && !amount) || drv.is_const() || is_affine_edge(edges[i])) {
         continue;
       }
       const int  width = std::max(gu::bits_of(drv), 1);
       const auto zero  = bit_facts::known_zero_bits(drv, width);
-      if (std::ranges::any_of(zero, [](bool z) { return z; })) {
+      // Data operand: only a vector with a real share of constant bits (a few zero bits among
+      // live ones do not simplify the barrel and only perturb the mapping). Amount operand:
+      // every provably-zero bit removes a whole barrel stage (the `idx * 32` of a word select
+      // has five low zeros).
+      const auto zeros = static_cast<size_t>(std::ranges::count(zero, true));
+      if ((amount ? zeros > 0 : zeros * 8 >= zero.size() && zeros > 0)) {
         std::vector<bool> keep(zero.size());
         for (size_t b = 0; b < zero.size(); ++b) {
           keep[b] = !zero[b];

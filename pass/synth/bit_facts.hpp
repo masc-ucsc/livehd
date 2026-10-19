@@ -13,9 +13,10 @@ namespace livehd::synth::bit_facts {
 // Which bits of the value `pin` drives are provably constant 0 (true = known
 // zero), for a value read `width` bits wide. Structural and best effort: it
 // looks through constants, Mux/Hotmux arms, And/Or, Concat lane layouts, a
-// constant Get_mask window, a constant left shift and the `cond * K` that cprop
-// spells `cond ? K : 0` as; every other shape is unknown (false), so a miss
-// costs nothing but a missed fold.
+// constant Get_mask window, a constant left shift, the low zeros of a sum or of a
+// product with a constant (`idx * 32 + 32`) and the `cond * K` that cprop spells
+// `cond ? K : 0` as; every other shape is unknown (false), so a miss costs
+// nothing but a missed fold.
 [[nodiscard]] std::vector<bool> known_zero_bits(const hhds::Pin_class& pin, int width, int depth = 0);
 
 // `driver & mask` as a new And cell in `g`, where bit i of the constant mask is

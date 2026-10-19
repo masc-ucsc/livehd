@@ -96,6 +96,37 @@ std::vector<bool> known_zero_bits_core(const hhds::Pin_class& pin, int width, in
         }
       }
     }
+    // A product is a multiple of every constant factor, so its low bits below the
+    // factor's trailing zeros are 0 (a word select `idx * 32` has five).
+    int low_zero = 0;
+    for (const auto& d : in) {
+      if (d.is_const() && !gu::const_of(d).has_unknowns() && gu::const_of(d).is_integer() && !gu::const_of(d).is_negative()
+          && !gu::const_of(d).is_known_zero()) {
+        low_zero += gu::const_of(d).get_trailing_zeroes();
+      }
+    }
+    for (int i = 0; i < std::min(low_zero, width); ++i) {
+      zero[static_cast<size_t>(i)] = true;
+    }
+    return zero;
+  }
+  if (op == Ntype_op::Sum) {
+    // A sum has the low zero bits every operand has (a carry only comes from below): the
+    // `idx * 32 + 32` of a word select keeps its five low zeros.
+    int low_zero = width;
+    for (const auto& sink : node.inp_sorted_pins()) {
+      for (const auto& d : sink.get_driver_pins()) {
+        const auto z = known_zero_bits(d, width, depth + 1);
+        int        n = 0;
+        while (n < width && z[static_cast<size_t>(n)]) {
+          ++n;
+        }
+        low_zero = std::min(low_zero, n);
+      }
+    }
+    for (int i = 0; i < low_zero; ++i) {
+      zero[static_cast<size_t>(i)] = true;
+    }
     return zero;
   }
   if (op == Ntype_op::Mux) {  // pid 0 is the select; the arms are the rest

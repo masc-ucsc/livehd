@@ -219,8 +219,9 @@ void Pass_abc::add_mapping_labels(Eprp_method& m) {
   m.add_label_optional("ware_zero_bits",
                        "true|false clear, inside an extracted ware shifter, the data-operand bits its parent provably drives "
                        "with 0 (a lane placed by a constant left shift, a value narrower than the port), so the mapper sees the "
-                       "constants the module boundary hides. The cleared-bit pattern is part of the module identity (false, the "
-                       "default)",
+                       "constants the module boundary hides; a data operand only when at least an eighth of its bits are provably 0, "
+                       "the shift amount whenever any bit is (each is a whole barrel stage). The cleared-bit pattern is part "
+                       "of the module identity (false, the default)",
                        "false");
   m.add_label_optional("dff_cell",
                        "explicit Liberty DFF cell name for register=true (empty => auto-detect a plain posedge D-flop)",

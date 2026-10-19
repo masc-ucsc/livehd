@@ -61,8 +61,17 @@ whole.
 
 ## Measured
 
-`floonoc_mesh_top` (HighTide asap7, 4x4 FlooNoC mesh with black-box cluster
-stubs): 2,629,820 logic cells + 352,780 flops after `lhd synth`, which does not
-finish placement in 64 GiB / 7200 s; with `compile.flatten`, `compile.unknown_zero`,
-`compile.sweep` and `pass.abc.ware_zero_bits` the mapped design is ~222k logic
-cells + ~21.7k flops (see the track report for the harness numbers).
+`floonoc_mesh_top` (HighTide asap7, 4x4 FlooNoC mesh with black-box cluster stubs
+whose outputs are undriven), `lhd synth` without placement:
+
+| options | flops | logic cells |
+|---|---:|---:|
+| default | 352,780 | 2,629,820 |
+| `compile.flatten` + `compile.unknown_zero` + `compile.sweep` + `pass.abc.ware_zero_bits` + `pass.abc.memory_prune_reads` | 6,188 | 81,682 |
+
+The default flow does not finish placement in 64 GiB / 7200 s; with the options
+the whole harness flow runs in 5271 s (peak 5.9 GiB) and places 87,872 cells
+against 91,026 for the OpenROAD reference. Yosys `flatten; opt` with `setundef
+-zero` first leaves ~4.3k flops and ~24k logic cells on the same source; the
+remaining difference is hbm_ni meta-buffer state and router control bits the
+evaluator's shape coverage does not yet fold.
