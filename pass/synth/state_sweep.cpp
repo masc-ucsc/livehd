@@ -557,6 +557,44 @@ private:
         }
         return;
       }
+      case Ntype_op::Sext: {
+        // Sext(a, b) keeps a's low b bits and repeats bit b-1 above them.
+        const auto keep = const_i64(gu::get_driver_of_sink_name(node, "b"));
+        if (!keep || *keep < 1) {
+          demand_all_inputs(def, node);
+          return;
+        }
+        Mask wanted = m.window(0, *keep);
+        if (top >= *keep) {
+          wanted.set(*keep - 1);
+        }
+        add_demand(def, gu::get_driver_of_sink_name(node, "a"), wanted);
+        add_all(def, gu::get_driver_of_sink_name(node, "b"));
+        return;
+      }
+      case Ntype_op::SRA: {
+        // Result bit i is operand bit i + amount (the sign above the operand), for a constant amount.
+        const auto amount = const_i64(gu::get_driver_of_sink_name(node, "b"));
+        if (amount && *amount >= 0 && top != std::numeric_limits<int64_t>::max()) {
+          add_demand(def, gu::get_driver_of_sink_name(node, "a"), m.clipped(top + 1).shifted_up(*amount));
+          add_all(def, gu::get_driver_of_sink_name(node, "b"));
+        } else {
+          demand_all_inputs(def, node);
+        }
+        return;
+      }
+      case Ntype_op::Rxor:
+      case Ntype_op::Popcount: {
+        // Only the low b bits of a take part.
+        const auto count = const_i64(gu::get_driver_of_sink_name(node, "b"));
+        if (count && *count >= 0) {
+          add_demand(def, gu::get_driver_of_sink_name(node, "a"), Mask::prefix(*count));
+          add_all(def, gu::get_driver_of_sink_name(node, "b"));
+        } else {
+          demand_all_inputs(def, node);
+        }
+        return;
+      }
       case Ntype_op::Flop:
       case Ntype_op::Latch: {
         // Bit i of the next value is bit i of D (or of the reset value); every
@@ -666,6 +704,7 @@ private:
           return std::nullopt;
         }
         const auto op = gu::type_op_of(node);
+        trace_node(def, node);
         if (gu::is_builtin_node(node) || keeps_unobserved(op)) {
           continue;
         }
@@ -756,28 +795,41 @@ private:
       return;
     }
     int shown = 0;
-    for (auto edge : q.out_edges()) {
-      const auto reader = edge.sink.get_master_node();
-      if (reader.is_invalid() || gu::is_builtin_node(reader)) {
-        if (gu::is_graph_output_pin(edge.sink)) {
-          std::print(stderr, "{:{}}-> output port {}\n", "", depth * 2 + 2, edge.sink.get_port_id());
+    for (auto pin : node.out_sorted_pins()) {
+      if (op == Ntype_op::Sub) {
+        const auto it = def.demand.find(pin.get_class_index());
+        std::print(stderr, "{:{}}output {} demand={}\n", "", depth * 2 + 1, pin.get_port_id(),
+                   it == def.demand.end() ? std::string{} : ranges(it->second, std::max<int64_t>(gu::bits_of(pin), 1)));
+      }
+      for (auto edge : pin.out_edges()) {
+        const auto reader = edge.sink.get_master_node();
+        if (reader.is_invalid() || gu::is_builtin_node(reader)) {
+          if (gu::is_graph_output_pin(edge.sink)) {
+            std::print(stderr, "{:{}}-> output port {}\n", "", depth * 2 + 2, edge.sink.get_port_id());
+          }
+          continue;
         }
-        continue;
+        if (!output_demand(def, reader).any() && !keeps_unobserved(gu::type_op_of(reader))) {
+          continue;
+        }
+        if (++shown > 4) {
+          std::print(stderr, "{:{}}...\n", "", depth * 2 + 2);
+          return;
+        }
+        explain(def, reader, depth + 1, seen);
       }
-      if (!output_demand(def, reader).any() && !keeps_unobserved(gu::type_op_of(reader))) {
-        continue;
-      }
-      if (++shown > 4) {
-        std::print(stderr, "{:{}}...\n", "", depth * 2 + 2);
-        break;
-      }
-      explain(def, reader, depth + 1, seen);
     }
   }
 
-  void trace_register(Def& def, const hhds::Node_class& node) {
-    const char* want = std::getenv("LIVEHD_STATE_SWEEP_TRACE");
-    if (want == nullptr || gu::node_name_of(node).find(want) == std::string_view::npos) {
+  // LIVEHD_STATE_SWEEP_TRACE=<part of a cell or register name>, or =<whole name>: why do the matching cells stay observed?
+  void trace_node(Def& def, const hhds::Node_class& node) {
+    static const char* want = std::getenv("LIVEHD_STATE_SWEEP_TRACE");
+    if (want == nullptr) {
+      return;
+    }
+    const std::string_view pattern{want};  // "=name" matches the whole name, otherwise any part of it
+    const auto             name = gu::node_name_of(node);
+    if (pattern.starts_with('=') ? name != pattern.substr(1) : name.find(pattern) == std::string_view::npos) {
       return;
     }
     absl::flat_hash_set<hhds::Class_index> seen;
@@ -909,7 +961,6 @@ private:
   }
 
   void trim(Def& def, const hhds::Node_class& node, State_sweep_stats& stats) {
-    trace_register(def, node);
     auto          q     = node.create_driver_pin(0);
     const int64_t width = gu::bits_of(q);
     if (width <= 1) {

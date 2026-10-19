@@ -339,6 +339,67 @@ TEST(StateSweep, AMuxSelectIsObservedInFullButItsArmsOnlyWhereTheOutputIs) {
   EXPECT_EQ(widths, (std::vector<int>{4, 4, 8}));  // the select keeps its 8 bits, each arm 4
 }
 
+TEST(StateSweep, SignExtensionKeepsTheDemandOfTheBitsItPassesThrough) {
+  hhds::GraphLibrary library;
+  auto               m   = make_module(library, "top", 32, 8);
+  auto&              g   = *m.graph;
+  auto               reg = make_reg(g, g.get_input_pin("d"), g.get_input_pin("clk"), 32, "word");
+  auto               ext = gu::create_typed_node(g, Ntype_op::Sext);
+  reg.create_driver_pin(0).connect_sink(gu::setup_sink_by_name(ext, "a"));
+  gu::create_const(g, *Dlop::create_integer(32)).connect_sink(gu::setup_sink_by_name(ext, "b"));
+  gu::set_sbits(ext.create_driver_pin(0), 40);
+  slice(g, ext.create_driver_pin(0), 8, 16).connect_sink(g.get_output_pin("o"));
+
+  const auto stats = sweep({m.graph}, "top");
+  ASSERT_TRUE(stats);
+  EXPECT_EQ(stats->registers_split, 1U);
+  EXPECT_EQ(stats->split_bits, 8U);
+  EXPECT_EQ(nodes_of(g, Ntype_op::Flop).size(), 8U);
+}
+
+TEST(StateSweep, SignExtensionAboveTheKeptBitsDemandsTheSignBit) {
+  hhds::GraphLibrary library;
+  auto               m   = make_module(library, "top", 32, 8);
+  auto&              g   = *m.graph;
+  auto               reg = make_reg(g, g.get_input_pin("d"), g.get_input_pin("clk"), 32, "word");
+  auto               ext = gu::create_typed_node(g, Ntype_op::Sext);
+  reg.create_driver_pin(0).connect_sink(gu::setup_sink_by_name(ext, "a"));
+  gu::create_const(g, *Dlop::create_integer(16)).connect_sink(gu::setup_sink_by_name(ext, "b"));
+  gu::set_sbits(ext.create_driver_pin(0), 32);
+  slice(g, ext.create_driver_pin(0), 24, 32).connect_sink(g.get_output_pin("o"));  // all copies of bit 15
+
+  const auto stats = sweep({m.graph}, "top");
+  ASSERT_TRUE(stats);
+  // Every result bit read is a copy of bit 15 of the kept window: that bit alone survives.
+  ASSERT_EQ(nodes_of(g, Ntype_op::Flop).size(), 1U);
+  EXPECT_EQ(gu::bits_of(nodes_of(g, Ntype_op::Flop)[0].create_driver_pin(0)), 1);
+  EXPECT_EQ(gu::node_name_of(nodes_of(g, Ntype_op::Flop)[0]), "word[15]");
+}
+
+TEST(StateSweep, ConstantArithmeticShiftsMoveTheDemandUp) {
+  hhds::GraphLibrary library;
+  auto               m   = make_module(library, "top", 32, 8);
+  auto&              g   = *m.graph;
+  auto               reg = make_reg(g, g.get_input_pin("d"), g.get_input_pin("clk"), 32, "word");
+  auto               sra = gu::create_typed_node(g, Ntype_op::SRA);
+  reg.create_driver_pin(0).connect_sink(gu::setup_sink_by_name(sra, "a"));
+  gu::create_const(g, *Dlop::create_integer(8)).connect_sink(gu::setup_sink_by_name(sra, "b"));
+  gu::set_ubits(sra.create_driver_pin(0), 24);
+  slice(g, sra.create_driver_pin(0), 0, 8).connect_sink(g.get_output_pin("o"));  // register bits 8..15
+
+  const auto stats = sweep({m.graph}, "top");
+  ASSERT_TRUE(stats);
+  EXPECT_EQ(stats->registers_split, 1U);
+  EXPECT_EQ(stats->split_bits, 8U);
+  std::vector<std::string> names;
+  for (const auto& flop : nodes_of(g, Ntype_op::Flop)) {
+    names.emplace_back(gu::node_name_of(flop));
+  }
+  std::ranges::sort(names);
+  const std::vector<std::string> expected{"word[10]", "word[11]", "word[12]", "word[13]", "word[14]", "word[15]", "word[8]", "word[9]"};
+  EXPECT_EQ(names, expected);
+}
+
 TEST(StateSweep, AnAdmissionRefusalIsReported) {
   hhds::GraphLibrary library;
   auto               m = make_module(library, "top", 8, 8);
