@@ -280,6 +280,65 @@ TEST(StateSweep, EveryOutputOfADefinitionNobodyInstantiatesIsObserved) {
   EXPECT_EQ(gu::bits_of(nodes_of(g, Ntype_op::Flop)[0].create_driver_pin(0)), 8);
 }
 
+TEST(StateSweep, ACounterReadAtItsLowBitsKeepsOnlyThoseBits) {
+  hhds::GraphLibrary library;
+  auto               m   = make_module(library, "top", 8, 4);
+  auto&              g   = *m.graph;
+  auto               sum = gu::create_typed_node(g, Ntype_op::Sum, 17);
+  auto               reg = make_reg(g, sum.create_driver_pin(0), g.get_input_pin("clk"), 16, "count");
+  reg.create_driver_pin(0).connect_sink(gu::setup_sink_by_name(sum, "as"));
+  gu::create_const(g, *Dlop::create_integer(1)).connect_sink(gu::setup_sink_by_name(sum, "as"));
+  slice(g, reg.create_driver_pin(0), 0, 4).connect_sink(g.get_output_pin("o"));
+
+  const auto stats = sweep({m.graph}, "top");
+  ASSERT_TRUE(stats);
+  EXPECT_EQ(stats->registers_trimmed, 1U);
+  ASSERT_EQ(nodes_of(g, Ntype_op::Flop).size(), 1U);
+  EXPECT_EQ(gu::bits_of(nodes_of(g, Ntype_op::Flop)[0].create_driver_pin(0)), 4);
+}
+
+TEST(StateSweep, AWordTheSetMaskOverwritesIsNotObserved) {
+  hhds::GraphLibrary library;
+  auto               m   = make_module(library, "top", 8, 8);
+  auto&              g   = *m.graph;
+  auto               reg = make_reg(g, g.get_input_pin("d"), g.get_input_pin("clk"), 32, "base");
+  // o = Set_mask(base, d, 8, 16)[15:8]: the window is all of the result that is read.
+  auto set = gu::create_set_mask(g, reg.create_driver_pin(0), g.get_input_pin("d"), 8, 16);
+  gu::set_ubits(set.create_driver_pin(0), 32);
+  slice(g, set.create_driver_pin(0), 8, 16).connect_sink(g.get_output_pin("o"));
+
+  const auto stats = sweep({m.graph}, "top");
+  ASSERT_TRUE(stats);
+  EXPECT_EQ(stats->registers_removed, 1U);
+  EXPECT_TRUE(nodes_of(g, Ntype_op::Flop).empty());
+  // The base operand of the Set_mask is tied low, not left undriven.
+  ASSERT_EQ(nodes_of(g, Ntype_op::Set_mask).size(), 1U);
+  EXPECT_TRUE(gu::get_driver_of_sink_name(nodes_of(g, Ntype_op::Set_mask)[0], "a").is_const());
+}
+
+TEST(StateSweep, AMuxSelectIsObservedInFullButItsArmsOnlyWhereTheOutputIs) {
+  hhds::GraphLibrary library;
+  auto               m = make_module(library, "top", 32, 4);
+  auto&              g = *m.graph;
+  auto               sel = make_reg(g, g.get_input_pin("d"), g.get_input_pin("clk"), 8, "sel");
+  auto               arm0 = make_reg(g, g.get_input_pin("d"), g.get_input_pin("clk"), 32, "arm0");
+  auto               arm1 = make_reg(g, g.get_input_pin("d"), g.get_input_pin("clk"), 32, "arm1");
+  auto               mux  = gu::create_typed_node(g, Ntype_op::Mux, 32);
+  sel.create_driver_pin(0).connect_sink(gu::setup_sink_pid(mux, 0));
+  arm0.create_driver_pin(0).connect_sink(gu::setup_sink_pid(mux, 1));
+  arm1.create_driver_pin(0).connect_sink(gu::setup_sink_pid(mux, 2));
+  slice(g, mux.create_driver_pin(0), 0, 4).connect_sink(g.get_output_pin("o"));
+
+  const auto stats = sweep({m.graph}, "top");
+  ASSERT_TRUE(stats);
+  std::vector<int> widths;
+  for (const auto& flop : nodes_of(g, Ntype_op::Flop)) {
+    widths.push_back(gu::bits_of(flop.create_driver_pin(0)));
+  }
+  std::ranges::sort(widths);
+  EXPECT_EQ(widths, (std::vector<int>{4, 4, 8}));  // the select keeps its 8 bits, each arm 4
+}
+
 TEST(StateSweep, AnAdmissionRefusalIsReported) {
   hhds::GraphLibrary library;
   auto               m = make_module(library, "top", 8, 8);
