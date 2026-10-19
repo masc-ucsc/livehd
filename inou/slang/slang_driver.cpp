@@ -11,6 +11,7 @@
 // SPDX-FileCopyrightText: Michael Popoloski (upstream driver this derives from)
 // SPDX-License-Identifier: MIT
 //------------------------------------------------------------------------------
+#include <limits>
 #include <memory>
 #include <optional>
 
@@ -28,7 +29,9 @@ using namespace slang::driver;
 template <typename TArgs>
 static int driverMain(int argc, TArgs argv, Slang_context& slang_tree) {
   SLANG_TRY {
-    Driver driver;
+    // Declared before the driver so it outlives every tree and definition that points at it.
+    SourceLibrary macro_library("lhd-liberty-memories", std::numeric_limits<int>::min());
+    Driver        driver;
     driver.addStandardArgs();
 
     // --quiet is a driver-frontend flag (not part of addStandardArgs); keep it
@@ -90,9 +93,18 @@ static int driverMain(int argc, TArgs argv, Slang_context& slang_tree) {
     bool ok = driver.parseAllSources();
 
     if (!slang_tree.get_options().liberty_declarations.empty()) {
-      auto interfaces           = slang::syntax::SyntaxTree::fromText(slang_tree.get_options().liberty_declarations,
-                                                                      driver.sourceManager,
-                                                                      "<liberty-memory-interfaces>");
+      // Normally the declarations share the design's default library, so a same-named
+      // source module collides with the macro and is refused by the reader. With
+      // liberty_macro_precedence they sit in their own library of the highest priority:
+      // slang then resolves every instantiation of that name to the macro and the source
+      // module is never elaborated (Yosys `read_liberty -overwrite` semantics).
+      const bool macro_first = slang_tree.get_options().liberty_macro_precedence;
+      auto       interfaces  = slang::syntax::SyntaxTree::fromText(slang_tree.get_options().liberty_declarations,
+                                                                   driver.sourceManager,
+                                                                   "<liberty-memory-interfaces>",
+                                                                   "",
+                                                                   {},
+                                                                   macro_first ? &macro_library : nullptr);
       interfaces->isLibraryUnit = true;
       driver.syntaxTrees.push_back(std::move(interfaces));
     }

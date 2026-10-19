@@ -8033,7 +8033,11 @@ void Slang_context::lower_instance(const slang::ast::InstanceSymbol& inst) {
     // silently drops the other: the RTL body (macro picked) or the Liberty pins
     // the graph IO is declared from (RTL picked, e.g. via a liblist).
     const bool  from_liberty = is_liberty_interface_definition(sm_, definition);
-    const auto* other        = from_liberty ? other_root_declaration(body_->getCompilation(), definition, definition.name) : nullptr;
+    // liberty_macro_precedence put the macro in a library slang resolves first, so a design
+    // source of the same name is shadowed on purpose (never elaborated): not a collision.
+    const auto* other = from_liberty && !options_.liberty_macro_precedence
+                            ? other_root_declaration(body_->getCompilation(), definition, definition.name)
+                            : nullptr;
     if (!from_liberty || other != nullptr) {
       const auto where = other != nullptr ? other->header->name.range() : slang::SourceRange(definition.location, definition.location);
       emit_error(where,

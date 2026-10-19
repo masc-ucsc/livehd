@@ -411,3 +411,13 @@ fails the read: slang reports `DuplicateDefinition`, and with that diagnostic
 silenced the reader still refuses it as `liberty-memory-name-collision` rather
 than silently picking the macro pins or the RTL body. Remove the model from the
 synthesis sources.
+
+### Hard macros, vendor stubs and Yosys-style netlists (opt-ins)
+
+These serve flows whose reference is Yosys/ORFS, where the Liberty/LEF view of a macro
+replaces whatever the sources say about it. Each is `--set compile.slang.<flag>=true`
+(or the value shown) and every one is off by default.
+
+| flag | effect |
+| --- | --- |
+| `liberty_macro_precedence` | a `synth.liberty` RAM macro WINS over a same-named design module, like `read_liberty -overwrite`: the declarations go into a slang library of the highest priority, every instantiation of that name binds to the macro pins, and the shadowed source module (a vendor behavioral model, a wrapper that re-instantiates the macro under its own name) is never elaborated |

@@ -80,6 +80,26 @@ for name, extra, code in [('collide', [], 'DuplicateDefinition'),
                   '--workdir', str(root/(name+'W')), '--emit', f'diagnostics:{diag}', *extra], success=False)
     assert f'"code":"{code}"' in diag.read_text(), diag.read_text()
 
+# Opt-in (compile.slang.liberty_macro_precedence): the macro wins over the same-named
+# behavioral model, as in the Yosys/ORFS flow where the Liberty cell replaces the Verilog
+# definition. The model is never elaborated, so its wider address port is irrelevant.
+invoke('precedence', ['synth', str(collide), '--top', 'top', '--set', f'synth.liberty={library}',
+                      '--set', 'compile.slang.liberty_macro_precedence=true', '--set', 'synth.opentimer=false',
+                      '--workdir', str(root/'precedenceW'), '--emit-dir', f'verilog:{root}/precedence-net'])
+text = '\n'.join(p.read_text() for p in (root/'precedence-net').glob('*.v'))
+assert text.count('test_sram ') == 2 and 'module test_sram' not in text and 'always' not in text, text
+# The wrapper that re-instantiates the macro under its own name (liteeth's macros.v) is not recursive.
+wrapper = root/'wrapper.v'
+wrapper.write_text(source.read_text() + '''module test_sram(input clk,we,input [2:0] a,input [4:0] d,output [4:0] q);
+ test_sram inner(.CLK(clk),.WE(we),.A(a),.D(d),.Q(q),.FLAG());
+endmodule
+''')
+invoke('wrapper', ['synth', str(wrapper), '--top', 'top', '--set', f'synth.liberty={library}',
+                   '--set', 'compile.slang.liberty_macro_precedence=true', '--set', 'synth.opentimer=false',
+                   '--workdir', str(root/'wrapperW'), '--emit-dir', f'verilog:{root}/wrapper-net'])
+text = '\n'.join(p.read_text() for p in (root/'wrapper-net').glob('*.v'))
+assert text.count('test_sram ') == 2 and 'module test_sram' not in text, text
+
 bad = root/'bad.v'
 bad.write_text(source.read_text().replace('[2:0] a,b', '[5:0] a,b'))
 diag = root/'bad.diagnostics.jsonl'
