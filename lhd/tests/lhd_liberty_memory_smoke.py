@@ -118,6 +118,18 @@ assert '"severity":"warning","code":"liberty-memory-port-truncation"' in diag.re
 text = '\n'.join(p.read_text() for p in (root/'truncate-net').glob('*.v'))
 assert text.count('test_sram ') == 2, text
 
+# Opt-in (compile.slang.ignore_uninstantiated_modules): an unused module outside the top's
+# hierarchy is not elaborated, so its error cannot fail a read that also binds Liberty macros.
+junk = root/'junk.v'
+junk.write_text(source.read_text() + 'module unused_junk(output y);\n assign y = not_declared_anywhere;\nendmodule\n')
+diag = root/'junk.diagnostics.jsonl'
+invoke('junk', ['compile', str(junk), '--top', 'top', '--set', f'synth.liberty={library}',
+                '--workdir', str(root/'junkW'), '--emit', f'diagnostics:{diag}'], success=False)
+assert 'not_declared_anywhere' in diag.read_text(), diag.read_text()
+invoke('junk_ok', ['compile', str(junk), '--top', 'top', '--set', f'synth.liberty={library}',
+                   '--set', 'compile.slang.ignore_uninstantiated_modules=true',
+                   '--workdir', str(root/'junkOkW'), '--emit-dir', f'lg:{root}/junk-ok'])
+
 unknown = root/'unknown.v'
 unknown.write_text(source.read_text().replace('test_sram ', 'mistyped_sram '))
 diag = root/'unknown.diagnostics.jsonl'
