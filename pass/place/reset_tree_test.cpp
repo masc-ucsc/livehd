@@ -58,7 +58,7 @@ protected:
   std::shared_ptr<hhds::Graph> graph;
   physical::Technology         tech;
   std::string                  liberty;
-  Pin                          reset, clock;
+  Pin                          reset, clock, tie;
   void                         SetUp() override {
     const auto dir = std::filesystem::path(std::getenv("TEST_TMPDIR")) / ::testing::UnitTest::GetInstance()->current_test_info()->name();
     std::filesystem::create_directories(dir);
@@ -68,15 +68,17 @@ protected:
     tech.macros["INVx1"]      = core_macro({"A", "Y"});
     tech.macros["DFFASRNx1"]  = core_macro({"CLK", "D", "RESETN", "SETN", "QN"});
     const auto io = library.create_io("top");
-    for (const auto* name : {"clk", "rst"}) {
+    for (const auto* name : {"clk", "rst", "tie"}) {
       io->add_input(name, io->get_input_pin_decls().size());
       io->set_bits(name, 1);
     }
     graph = io->create_graph();
     clock = graph->get_input_pin("clk");
     reset = graph->get_input_pin("rst");
+    tie   = graph->get_input_pin("tie");
     gu::set_bits(clock, 1);
     gu::set_bits(reset, 1);
+    gu::set_bits(tie, 1);
   }
   std::shared_ptr<hhds::GraphIO> io_of(const std::string& master, std::initializer_list<const char*> inputs, const char* output) {
     auto io = library.find_io(master);
@@ -198,6 +200,17 @@ TEST_F(Reset_tree, SmallNetsAndOffAreUntouched) {
   EXPECT_EQ(buffer_reset_nets(*graph, tech, liberty, 1).buffers, 0u);
   EXPECT_EQ(buffer_reset_nets(*graph, tech, liberty, 12).buffers, 0u);  // 12 pins fit one driver
   EXPECT_EQ(fanout(reset), 12u);
+}
+
+TEST_F(Reset_tree, LeavesADriverThatResolvesToAConstant) {
+  for (int i = 0; i < 20; ++i) {
+    flop("r" + std::to_string(i), reset);
+    flop("t" + std::to_string(i), tie);  // the tied inactive pins of clear+preset flops: a wiring alias of a constant
+  }
+  const auto stats = buffer_reset_nets(*graph, tech, liberty, 8, [&](const Pin& driver) { return driver == tie; });
+  EXPECT_EQ(stats.nets, 1u);
+  EXPECT_EQ(fanout(tie), 40u);  // untouched
+  EXPECT_LE(fanout(reset), 8u);
 }
 
 TEST_F(Reset_tree, NeedsAPlaceableBuffer) {

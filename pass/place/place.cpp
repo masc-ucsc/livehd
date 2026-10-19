@@ -2078,8 +2078,6 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
   }
   auto& graph = *result.graph;
   remove_transparent_latches(graph);
-  // Opt-in: the flat reset nets are bounded before the first cell is read, so the buffers place like any cell.
-  const auto reset_tree = options.reset_fanout ? buffer_reset_nets(graph, tech, options.liberty, options.reset_fanout) : Reset_tree_stats{};
   View v;
   v.native_orientations = macro_active;
   // ECO starts from the supplied physical frame; centroid initialization is a
@@ -2094,6 +2092,20 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
   v.fp.dbu              = tech.dbu;
   const auto  memories  = memory_proxies(graph, tech, options.liberty);
   Resolver    resolver(tech, memories, options.unknown_const_zero);
+  // Opt-in: the flat reset nets are bounded before the first cell is read, so the buffers place like any cell.
+  // A driver that resolves to a constant (the tied inactive pin of a clear+preset flop) is not a reset net.
+  const auto reset_tree = options.reset_fanout ? buffer_reset_nets(graph,
+                                                                   tech,
+                                                                   options.liberty,
+                                                                   options.reset_fanout,
+                                                                   [&](const Pin& driver) {
+                                                                     try {
+                                                                       return resolver.bit(driver, 0).constant >= 0;
+                                                                     } catch (const std::exception&) {
+                                                                       return true;  // unknown constant: left to the tie logic
+                                                                     }
+                                                                   })
+                                                : Reset_tree_stats{};
   double      area      = 0;
   int64_t     max_width = 0, max_height = 0;
   std::string site_name;

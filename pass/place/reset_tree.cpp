@@ -62,7 +62,8 @@ bool is_core_cell(Node n, const physical::Technology& tech) {
 }
 }  // namespace
 
-Reset_tree_stats buffer_reset_nets(hhds::Graph& graph, const physical::Technology& tech, const std::string& liberty, unsigned cap) {
+Reset_tree_stats buffer_reset_nets(hhds::Graph& graph, const physical::Technology& tech, const std::string& liberty, unsigned cap,
+                                   const Constant_test& is_constant) {
   Reset_tree_stats stats;
   if (cap < 2) {
     return stats;
@@ -104,6 +105,9 @@ Reset_tree_stats buffer_reset_nets(hhds::Graph& graph, const physical::Technolog
       const auto drv = pin.get_driver_pins();
       if (drv.size() != 1 || drv.front().is_invalid() || drv.front().is_const() || gu::bits_of(drv.front()) != 1) {
         continue;
+      }
+      if (is_constant && is_constant(drv.front())) {
+        continue;  // the tied inactive pin of a clear+preset flop
       }
       const auto key = std::make_pair<uint64_t, uint64_t>(drv.front().get_master_node().get_debug_nid(), drv.front().get_port_id());
       if (seen.insert(key).second) {

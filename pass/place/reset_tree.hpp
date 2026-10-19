@@ -1,5 +1,6 @@
 // This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 #pragma once
+#include <functional>
 #include <string>
 
 #include "hhds/graph.hpp"
@@ -19,5 +20,9 @@ struct Reset_tree_stats {
 // Pins are grouped by instance-name order, which follows the source hierarchy, so a buffer serves
 // neighbouring registers. Pure fanout restructuring: every pin keeps its logical driver (a chain
 // of identity buffers), `cap` below 2 or a library without a flop/buffer does nothing. Idempotent.
-Reset_tree_stats buffer_reset_nets(hhds::Graph& graph, const physical::Technology& tech, const std::string& liberty, unsigned cap);
+// `is_constant(driver)` says a driver resolves to a constant through bus wiring: the inactive pin of a
+// clear+preset flop is tied by such an alias, and a tree behind a tie cell would only add cells.
+using Constant_test = std::function<bool(const hhds::Pin_class&)>;
+Reset_tree_stats buffer_reset_nets(hhds::Graph& graph, const physical::Technology& tech, const std::string& liberty, unsigned cap,
+                                   const Constant_test& is_constant = {});
 }  // namespace livehd::placement
