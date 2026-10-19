@@ -1,5 +1,6 @@
 // This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 #pragma once
+#include <string>
 #include <vector>
 
 #include "hhds/graph.hpp"
@@ -16,8 +17,9 @@ namespace livehd::synth::bit_facts {
 // constant Get_mask window, a constant left shift, the low zeros of a sum or of a
 // product with a constant (`idx * 32 + 32`) and the `cond * K` that cprop spells
 // `cond ? K : 0` as; every other shape is unknown (false), so a miss costs
-// nothing but a missed fold.
-[[nodiscard]] std::vector<bool> known_zero_bits(const hhds::Pin_class& pin, int width, int depth = 0);
+// nothing but a missed fold. A query inspects a bounded number of pins (the walk is not
+// memoized), after which the remaining shapes are unknown too.
+[[nodiscard]] std::vector<bool> known_zero_bits(const hhds::Pin_class& pin, int width);
 
 // `driver & mask` as a new And cell in `g`, where bit i of the constant mask is
 // `keep[i]`; stamped with the width and sign of `driver`. Every kept bit equals

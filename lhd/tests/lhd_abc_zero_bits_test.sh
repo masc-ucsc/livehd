@@ -13,6 +13,7 @@
 #      zero bits, each a whole barrel stage the opaque module input would still build.
 #   3. zb_lanes: a write-masked memory (two partial writes of one entry). The write-enable
 #      lane vector of each port reaches the lowered module as its one condition bit.
+#   5. zb_shared: two write ports sharing one enable cell (the parent's cell is dropped once).
 #   2. zb_mem: a lowered memory whose two read ports each observe a narrow window of
 #      the word. With memory_prune_reads the bits no reader observes are cleared at
 #      the memory module's output, so the read mux of those bits is not built.
@@ -86,6 +87,7 @@ map_design "$W/select_off" zb_select
 map_design "$W/select_on" zb_select --set pass.abc.ware_zero_bits=true
 map_design "$W/lanes_off" zb_lanes --set pass.abc.memory=true
 map_design "$W/lanes_on" zb_lanes --set pass.abc.memory=true --set pass.abc.memory_prune_reads=true
+map_design "$W/shared_on" zb_shared --set pass.abc.memory=true --set pass.abc.memory_prune_reads=true
 
 off=$(cells "$W/shift_off/netv")
 on=$(cells "$W/shift_on/netv")
@@ -114,3 +116,8 @@ on=$(cells "$W/select_on/netv")
 [ "$on" -lt "$off" ] || fail "zb_select: ware_zero_bits did not reduce the cells (off=$off on=$on)"
 lec_both "$W/select_on" zb_select
 echo "PASS: ware_zero_bits maps the 32-bit-index word select to $on cells instead of $off, LEC-equivalent"
+
+on=$(cells "$W/shared_on/netv")
+[ "$on" -gt 0 ] || fail "zb_shared: no mapped cells"
+lec_both "$W/shared_on" zb_shared
+echo "PASS: memory_prune_reads maps two write ports that share one enable cell to $on cells, LEC-equivalent"

@@ -67,3 +67,26 @@ module zb_select (
 );
   assign o = v[idx * 32 +: 32];
 endmodule
+
+// zb_shared: two write ports with the SAME condition on the SAME lanes, so the one
+// `we * lanes` enable cell feeds both ports. The memory module takes the condition bit
+// for each port and the parent's enable cell, now dead, must be dropped exactly once.
+module zb_shared (
+  input  logic        clk,
+  input  logic        we,
+  input  logic [2:0]  waddr0,
+  input  logic [2:0]  waddr1,
+  input  logic [5:0]  wdata0,
+  input  logic [5:0]  wdata1,
+  input  logic [2:0]  raddr,
+  output logic [15:0] r
+);
+  logic [15:0] mem[8];
+  always_ff @(posedge clk) begin
+    if (we) begin
+      mem[waddr0][6:1] <= wdata0;
+      mem[waddr1][6:1] <= wdata1;
+    end
+  end
+  assign r = mem[raddr];
+endmodule

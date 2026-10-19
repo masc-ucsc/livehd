@@ -213,8 +213,11 @@ void Pass_abc::add_mapping_labels(Eprp_method& m) {
   m.add_label_optional("memory_prune_reads",
                        "true|false with a lowered (bit-blasted) memory, clear at the memory module's output every bit of a "
                        "read port that no reader observes (all readers take constant Get_mask windows of the word, or "
-                       "there is no reader), so the read mux logic of the unobserved bits is dropped. The mapped function "
-                       "of every observed bit is unchanged (false, the default)",
+                       "there is no reader), feed constants for the input bits the parent provably drives with 0 (a lane "
+                       "enable of `cond ? K : 0`, a narrow address), and pass a lane-enable vector that is one condition on "
+                       "a constant lane pattern as that one bit, so the read and write logic of those bits is dropped. The "
+                       "mapped function of every observed bit is unchanged. Memory modules are then built before ware "
+                       "modules (false, the default)",
                        "false");
   m.add_label_optional("ware_zero_bits",
                        "true|false clear, inside an extracted ware shifter, the data-operand bits its parent provably drives "

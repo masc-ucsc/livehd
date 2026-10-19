@@ -14,13 +14,13 @@
 #include <vector>
 
 #include "attr_carry.hpp"
+#include "bit_facts.hpp"
 #include "bus_name.hpp"
 #include "diag.hpp"
 #include "file_utils.hpp"
 #include "graph_library_singleton.hpp"
 #include "node_util.hpp"
 #include "pass.hpp"
-#include "bit_facts.hpp"
 #include "synth_policy.hpp"
 
 namespace gu = livehd::graph_util;
@@ -543,7 +543,11 @@ std::shared_ptr<hhds::Graph> enclose(hhds::Graph& parent, const hhds::Node_class
         input_pins[pname] = pin;
         inputs.push_back({pname, lanes ? lanes->cond : in_drv});
         if (lanes) {
-          maybe_dead.push_back(in_drv.get_master_node());
+          // two ports can share one enable cell (cprop merges equal `cond * K`): list it once
+          const auto cell = in_drv.get_master_node();
+          if (std::ranges::find(maybe_dead, cell) == maybe_dead.end()) {
+            maybe_dead.push_back(cell);
+          }
         }
       }
       // Specialize constant-address ports without deleting their interface.

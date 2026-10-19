@@ -16,11 +16,22 @@ void shape(const hhds::Pin_class& from, const hhds::Pin_class& to) {
   gu::is_unsign(from) ? gu::set_unsign(to) : gu::set_sign(to);
 }
 
-std::vector<bool> known_zero_bits_core(const hhds::Pin_class& pin, int width, int depth);
+// Pins one query may inspect. The walk is a tree over a DAG (no memo), and a wide Hotmux or a
+// stack of Mux levels would otherwise visit a shared cone once per path.
+constexpr int kVisitBudget = 4096;
+
+std::vector<bool> facts(const hhds::Pin_class& pin, int width, int depth, int& budget);
+std::vector<bool> facts_core(const hhds::Pin_class& pin, int width, int depth, int& budget);
 }  // namespace
 
-std::vector<bool> known_zero_bits(const hhds::Pin_class& pin, int width, int depth) {
-  auto zero = known_zero_bits_core(pin, width, depth);
+std::vector<bool> known_zero_bits(const hhds::Pin_class& pin, int width) {
+  int budget = kVisitBudget;
+  return facts(pin, width, 0, budget);
+}
+
+namespace {
+std::vector<bool> facts(const hhds::Pin_class& pin, int width, int depth, int& budget) {
+  auto zero = facts_core(pin, width, depth, budget);
   // An unsigned value of declared width b is zero above bit b.
   if (!pin.is_invalid() && !pin.is_const()) {
     const int b = gu::bits_of(pin);
@@ -33,12 +44,12 @@ std::vector<bool> known_zero_bits(const hhds::Pin_class& pin, int width, int dep
   return zero;
 }
 
-namespace {
-std::vector<bool> known_zero_bits_core(const hhds::Pin_class& pin, int width, int depth) {
+std::vector<bool> facts_core(const hhds::Pin_class& pin, int width, int depth, int& budget) {
   std::vector<bool> zero(static_cast<size_t>(std::max(width, 0)), false);
-  if (pin.is_invalid() || width <= 0 || depth > 8) {
+  if (pin.is_invalid() || width <= 0 || depth > 8 || budget <= 0) {
     return zero;
   }
+  --budget;
   if (pin.is_const()) {
     const auto& c = gu::const_of(pin);
     if (c.has_unknowns() || !c.is_integer()) {
@@ -55,7 +66,7 @@ std::vector<bool> known_zero_bits_core(const hhds::Pin_class& pin, int width, in
     // and_mode: zero if ANY input is zero at the bit; else zero if ALL are.
     std::vector<bool> acc(zero.size(), and_mode ? false : true);
     for (const auto& in : inputs) {
-      const auto z = known_zero_bits(in, width, depth + 1);
+      const auto z = facts(in, width, depth + 1, budget);
       for (size_t i = 0; i < acc.size(); ++i) {
         acc[i] = and_mode ? (acc[i] || z[i]) : (acc[i] && z[i]);
       }
@@ -116,7 +127,7 @@ std::vector<bool> known_zero_bits_core(const hhds::Pin_class& pin, int width, in
     int low_zero = width;
     for (const auto& sink : node.inp_sorted_pins()) {
       for (const auto& d : sink.get_driver_pins()) {
-        const auto z = known_zero_bits(d, width, depth + 1);
+        const auto z = facts(d, width, depth + 1, budget);
         int        n = 0;
         while (n < width && z[static_cast<size_t>(n)]) {
           ++n;
@@ -139,20 +150,17 @@ std::vector<bool> known_zero_bits_core(const hhds::Pin_class& pin, int width, in
     return all_of_inputs(false, arms);
   }
   if (op == Ntype_op::Hotmux) {  // interleaved (control, value) pairs, optional trailing default
+    std::vector<hhds::Pin_class> pins;
+    for (const auto& sink : node.inp_sorted_pins()) {
+      pins.push_back(sink.get_driver_pin());
+    }
     std::vector<hhds::Pin_class> vals;
-    const auto                   sinks = node.inp_sorted_pins();
-    size_t                       n     = 0;
-    for (const auto& sink : sinks) {
-      (void)sink;
-      ++n;
-    }
-    size_t idx = 0;
-    for (const auto& sink : sinks) {
-      if ((idx % 2 == 1) || (n % 2 == 1 && idx == n - 1)) {
-        vals.push_back(sink.get_driver_pin());
+    for (size_t idx = 0; idx < pins.size(); ++idx) {
+      if ((idx % 2 == 1) || (pins.size() % 2 == 1 && idx + 1 == pins.size())) {
+        vals.push_back(pins[idx]);
       }
-      ++idx;
     }
+    // no control active and no default reads 0, so a missing default is one more zero arm
     return all_of_inputs(false, vals);
   }
   if (op == Ntype_op::Concat) {
@@ -164,7 +172,8 @@ std::vector<bool> known_zero_bits_core(const hhds::Pin_class& pin, int width, in
         pending = sink.get_driver_pin();
       } else {
         const auto w = sink.get_driver_pin();
-        if (!w.is_const() || !gu::const_of(w).is_just_i64()) {
+        if (!w.is_const() || !gu::const_of(w).is_just_i64() || gu::const_of(w).to_just_i64() < 0
+            || gu::const_of(w).to_just_i64() > (int64_t{1} << 24)) {
           return zero;
         }
         lanes.emplace_back(pending, static_cast<int>(gu::const_of(w).to_just_i64()));
@@ -172,7 +181,7 @@ std::vector<bool> known_zero_bits_core(const hhds::Pin_class& pin, int width, in
     }
     int offset = 0;
     for (auto it = lanes.rbegin(); it != lanes.rend(); ++it) {
-      const auto z = known_zero_bits(it->first, it->second, depth + 1);
+      const auto z = facts(it->first, it->second, depth + 1, budget);
       for (int i = 0; i < it->second && offset + i < width; ++i) {
         zero[static_cast<size_t>(offset + i)] = z[static_cast<size_t>(i)];
       }
@@ -190,7 +199,7 @@ std::vector<bool> known_zero_bits_core(const hhds::Pin_class& pin, int width, in
     if (!a.is_invalid() && !b.is_invalid() && b.is_const() && gu::const_of(b).is_just_i64() && gu::const_of(b).to_just_i64() >= 0
         && gu::const_of(b).to_just_i64() < (1 << 20)) {
       const int  sh = static_cast<int>(gu::const_of(b).to_just_i64());
-      const auto za = known_zero_bits(a, std::max(width - sh, 0), depth + 1);
+      const auto za = facts(a, std::max(width - sh, 0), depth + 1, budget);
       for (int i = 0; i < width; ++i) {
         zero[static_cast<size_t>(i)] = i < sh || za[static_cast<size_t>(i - sh)];
       }
@@ -198,15 +207,14 @@ std::vector<bool> known_zero_bits_core(const hhds::Pin_class& pin, int width, in
     return zero;
   }
   if (op == Ntype_op::Get_mask) {
-    const auto a  = gu::get_driver_of_sink_name(node, "a");
-    const auto lo = gu::get_driver_of_sink_name(node, "lo");
-    const auto hi = gu::get_driver_of_sink_name(node, "hi");
-    if (!a.is_invalid() && lo.is_const() && hi.is_const() && gu::const_of(lo).is_just_i64() && gu::const_of(hi).is_just_i64()) {
-      const int l  = static_cast<int>(gu::const_of(lo).to_just_i64());
-      const int h  = static_cast<int>(gu::const_of(hi).to_just_i64());
-      const auto za = known_zero_bits(a, h, depth + 1);
+    // the half-open window [lo, hi) of a, as a non-negative value
+    const auto a     = gu::get_driver_of_sink_name(node, "a");
+    const auto range = gu::bit_range(node);
+    if (!a.is_invalid() && range && range->second <= (1 << 24)) {
+      const auto [l, h] = *range;
+      const auto za     = facts(a, h, depth + 1, budget);
       for (int i = 0; i < width; ++i) {
-        zero[static_cast<size_t>(i)] = l + i >= h || (l + i >= 0 && za[static_cast<size_t>(l + i)]);  // a Get_mask is non-negative
+        zero[static_cast<size_t>(i)] = l + i >= h || za[static_cast<size_t>(l + i)];
       }
     }
     return zero;

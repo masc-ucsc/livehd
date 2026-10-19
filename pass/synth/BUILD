@@ -285,6 +285,19 @@ cc_test(
     ],
 )
 
+# Which bits of a word-level value are provably 0 (ware_zero_bits / memory_prune_reads).
+cc_test(
+    name = "bit_facts_smoke",
+    srcs = ["bit_facts_smoke.cpp"],
+    copts = COPTS,
+    deps = [
+        ":synth",
+        "//graph",
+        "@googletest//:gtest_main",
+        "@hhds//hhds:graph",
+    ],
+)
+
 cc_test(
     name = "sharing_hint_test",
     srcs = ["sharing_hint_test.cpp"],
