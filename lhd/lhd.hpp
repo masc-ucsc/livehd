@@ -1094,6 +1094,11 @@ inline constexpr Synth_set_option kSynthSetOptions[] = {
      "opt in to the observability sweep of the mapper's private copy: delete the registers and cells that no output, memory or "
      "body-less cell can observe and narrow each register to its highest observed bit, tracking the demand per bit across the "
      "instance hierarchy (what Yosys gets from flattening and opt_clean). Off by default"},
+    {"merge_registers",
+     "false",
+     Synth_set_option::Kind::boolean,
+     "opt in to merging registers that are the same machine (same clock, enable, reset, reset value, width and D driver) on the "
+     "mapper's private copy, repeating until nothing merges: Yosys's opt_merge on flops. Off by default"},
     {"sdc", "", Synth_set_option::Kind::file, "PATH -- optional .sdc timing constraints handed to pass.opentimer"},
     {"spef", "", Synth_set_option::Kind::file, "PATH -- optional .spef parasitics handed to pass.opentimer"},
 };

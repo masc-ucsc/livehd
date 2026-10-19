@@ -74,6 +74,11 @@ void Pass_abc::add_mapping_labels(Eprp_method& m) {
                        "(default false; the synth.state_sweep spelling). Yosys does the same by flattening and opt_clean; "
                        "pass/synth/state_sweep.hpp tracks the demand per bit across the instance hierarchy",
                        "false");
+  m.add_label_optional("merge_registers",
+                       "true|false: merge registers that are the same machine (same clock, enable, reset, reset value, width and "
+                       "D driver) on the private copy, repeating until nothing merges (default false; the synth.merge_registers "
+                       "spelling). Yosys's opt_merge on flops; pass/synth/register_merge.hpp",
+                       "false");
   m.add_label_optional("reassoc",
                        "true|false: merge the And/Or/Xor chains an expanded carried loop leaves (`acc |= x` per "
                        "iteration, also the guarded `if c { acc |= x }`) into balanced n-ary cells before blasting "
@@ -798,8 +803,9 @@ void Pass_abc::map_with(Eprp_var& var, const std::function<void(livehd::abc::Map
                                       nullptr,
                                       var.get("specialize", "true") != "false",
                                       reassoc_text == "true",
-                                      truthy(var.get("state_sweep", "false")),
-                                      var.get("top", ""));
+                                      livehd::synth::State_options{.state_sweep     = truthy(var.get("state_sweep", "false")),
+                                                                   .merge_registers = truthy(var.get("merge_registers", "false")),
+                                                                   .top             = var.get("top", "")});
   if (!prepared) {
     return;
   }

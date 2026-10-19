@@ -42,6 +42,7 @@ struct Design_options {
   uint64_t                                 max_source_nodes = 2000000;
   bool                                     specialize       = true;  // pass.specialize on the private copy
   bool                                     state_sweep      = false;  // delete unobserved state (synth.state_sweep)
+  bool                                     merge_registers  = false;  // merge duplicate registers (synth.merge_registers)
   bool                                     unroll_carry     = true;  // expand carry-dependent compact loops per ordinal
   partition::Flatten_mode                  flatten          = partition::Flatten_mode::automatic;
   Logical_cache_options                    cache{};

@@ -100,7 +100,7 @@ std::optional<uint64_t> expand_plain_clock_cells(hhds::Graph* g, Preparation_bud
 
 std::unique_ptr<Prepared_design> prepare_design(std::span<const std::shared_ptr<hhds::Graph>> sources, bool unroll_carry,
                                                 std::string_view from_pass, Preparation_budget* budget, bool specialize,
-                                                bool reassociate_loops, bool state_sweep, std::string_view top) {
+                                                bool reassociate_loops, const State_options& state) {
   if (!admit_preparation(budget, "begin", 0)) {
     return {};
   }
@@ -251,8 +251,21 @@ std::unique_ptr<Prepared_design> prepare_design(std::span<const std::shared_ptr<
   // instance of a body-less cell or memory can ever observe, and the unread
   // upper bits of the rest. Before the loops are prepared: a compact loop and its
   // body are left alone, so the sweep never sees an expansion half done.
-  if (state_sweep) {
-    const auto swept = sweep_unobserved_state(result->definitions, top, budget);
+  if (state.merge_registers) {
+    const auto merged = merge_equal_registers(result->definitions, budget);
+    if (!merged) {
+      return {};
+    }
+    result->merged = *merged;
+    if (merged->registers > 0) {
+      livehd::diag::info(from_pass, "registers-merged", "progress")
+          .msg("{}: merged {} duplicate register(s) ({} bit(s)) in {} round(s)", from_pass, merged->registers, merged->bits,
+               merged->rounds)
+          .emit();
+    }
+  }
+  if (state.state_sweep) {
+    const auto swept = sweep_unobserved_state(result->definitions, state.top, budget);
     if (!swept) {
       return {};
     }

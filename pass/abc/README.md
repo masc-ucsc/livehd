@@ -616,6 +616,7 @@ The option namespace matches the command path (`lhd pass abc`); after the
 | `qor` | write the QoR JSON (below) to this file | empty (`lhd pass abc` defaults it to `<workdir>/qor.json` under `--workdir`) |
 | `region_opts` | per-region (color-keyed) overrides, JSON — see below | empty |
 | `state_sweep` | delete the registers (and the cells behind them) that no top output, memory or body-less cell can observe, and keep of the other registers only the bits something reads, on the private copy, tracking the demand per bit across the instance hierarchy (`pass/synth/state_sweep.hpp`). Also spelled `synth.state_sweep`; `pass.usyn` takes it too. Opt-in: Yosys gets the same from flattening and `opt_clean`, LiveHD kept dead counters, unread status words and the unused upper half of wide output registers | `false` |
+| `merge_registers` | merge registers that are the same machine (same clock, enable, reset and reset value, width, sign and D driver) on the private copy, repeating until nothing merges (`pass/synth/register_merge.hpp`): Yosys's `opt_merge` on flops. Also spelled `synth.merge_registers`; `pass.usyn` takes it too. Opt-in: NVDLA's SRAM wrappers hold twin read-data registers LiveHD kept (528 flops in partition_a) | `false` |
 
 The Liberty `.lib` handed to `read_lib` is **not** a `pass.abc` option: there is
 one Liberty spelling for the whole CLI, `--set synth.liberty=…` (empty resolves

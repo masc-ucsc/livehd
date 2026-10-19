@@ -1743,6 +1743,7 @@ sh_test(
     srcs = ["lhd_state_sweep_test.sh"],
     data = _FLOW_DATA + [
         "abc_arst_q.lib",
+        "reg_merge.v",
         "state_sweep.v",
     ],
 )

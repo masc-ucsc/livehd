@@ -6,6 +6,7 @@
 # bits become single-bit registers named after the source bits), across the instance
 # hierarchy; the graph-native LEC proves the mapped netlist against the source. The
 # default (off) maps every register as before. synth.mapper=usyn honors the option too.
+# synth.merge_registers merges twin registers.
 set -u
 
 LHD="${LHD:-lhd/lhd}"
@@ -81,5 +82,30 @@ usyn off false
 usyn on true
 [ "$(count "$W/usyn_off/net.v" '^always @')" = 184 ] || fail "usyn off: expected 184 registers, got $(count "$W/usyn_off/net.v" '^always @')"
 [ "$(count "$W/usyn_on/net.v" '^always @')" = 99 ] || fail "usyn on: expected 99 registers, got $(count "$W/usyn_on/net.v" '^always @')"
+
+# synth.merge_registers: twin registers (same clock, enable, reset and D) merge, and the registers fed by
+# them merge in turn; a register with another enable stays. 5 x 8 bits become 3 x 8. The twin of a merged
+# register has no counterpart left in the netlist, so the LEC proof is a bounded one.
+MERGE_SRC="$PWD/lhd/tests/reg_merge.v"
+for mode in false true; do
+  d="$W/merge_$mode"
+  mkdir -p "$d"
+  "$LHD" synth --result-json "$d/r.json" --reader slang --top reg_merge --workdir "$d/W" --emit-dir lg:"$d/net" \
+    --emit-dir verilog:"$d/netv" --set synth.liberty="$LIB" --set synth.merge_registers="$mode" -- "$MERGE_SRC" > "$d/synth.log" 2>&1 \
+    || fail "merge $mode: synth -> $(cat "$d/r.json" 2>/dev/null)"
+  cat "$d/netv/"*.v > "$d/net.v"
+done
+[ "$(count "$W/merge_false/net.v" '^DFF')" = 40 ] || fail "merge off: expected 40 register bits, got $(count "$W/merge_false/net.v" '^DFF')"
+[ "$(count "$W/merge_true/net.v" '^DFF')" = 24 ] || fail "merge on: expected 24 register bits, got $(count "$W/merge_true/net.v" '^DFF')"
+grep -q '"registers-merged"' "$W/merge_true/synth.log" || fail "merge on: the merge did not report what it did"
+"$LHD" lec --set formal.effort=proof --impl lg:"$W/merge_true/net" --ref lg:"$W/merge_true/W/synth/lg" --lib lg:"$W/models" \
+  --top reg_merge --workdir "$W/merge_true/lec" -q --result-json "$W/merge_true/lec.json" > "$W/merge_true/lec.log" 2>&1 \
+  || fail "merge on: LEC -> $(cat "$W/merge_true/lec.json" 2>/dev/null)"
+python3 - "$W/merge_true/lec.json" <<'CHECK' || exit 1
+import json, sys
+lec = json.load(open(sys.argv[1])).get('lec', {})
+if lec.get('verdict') not in ('proven-full', 'proven-bounded') or (lec.get('bounded') and lec.get('bound', 0) < 4):
+    raise SystemExit('FAIL: expected a LEC proof of the merged twins, got {}'.format(lec))
+CHECK
 
 echo "PASS: synth.state_sweep drops unobserved registers and register bits, proven against the source"

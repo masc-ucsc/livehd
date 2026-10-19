@@ -10,6 +10,7 @@
 #include "loop_cleanup.hpp"
 #include "preparation_budget.hpp"
 #include "reassoc.hpp"
+#include "register_merge.hpp"
 #include "state_sweep.hpp"
 
 namespace livehd::synth {
@@ -24,6 +25,7 @@ struct Prepared_design {
   std::vector<std::shared_ptr<hhds::Graph>> resolve_graphs;
   Loop_preparation                          loops;
   Reassoc_stats                             reassoc;  // what `reassociate_loops` merged
+  Register_merge_stats                      merged;   // what `merge_registers` merged
   State_sweep_stats                         sweep;    // what `state_sweep` removed
 };
 
@@ -39,13 +41,19 @@ struct Prepared_design {
 // maps the structure it is handed and does not rebalance a 16-link chain.
 // pass.usyn does not: its XAG flow measured neutral to worse on balanced
 // loop chains (lhdtrack br_arb_lru +8% delay).
-// `state_sweep` (synth.state_sweep, default false) deletes the registers and
-// cells nothing observes and narrows registers to their highest observed bit
-// (state_sweep.hpp), after specialization and before the loops are prepared;
-// `top` names the definition whose outputs it must keep in full.
+// `state` runs the register clean-ups of the private copy, after specialization and before
+// the loops are prepared: `merge_registers` (synth.merge_registers, default false) merges
+// registers that are the same machine (register_merge.hpp), then `state_sweep`
+// (synth.state_sweep, default false) deletes the registers and cells nothing observes and
+// narrows registers to their highest observed bit (state_sweep.hpp).
+struct State_options {
+  bool             state_sweep     = false;
+  bool             merge_registers = false;
+  std::string_view top;  // the definition whose outputs the sweep must keep in full
+};
 std::unique_ptr<Prepared_design> prepare_design(std::span<const std::shared_ptr<hhds::Graph>> sources, bool unroll_carry,
                                                 std::string_view from_pass, Preparation_budget* budget = nullptr,
-                                                bool specialize = true, bool reassociate_loops = false, bool state_sweep = false,
-                                                std::string_view top = {});
+                                                bool specialize = true, bool reassociate_loops = false,
+                                                const State_options& state = {});
 
 }  // namespace livehd::synth

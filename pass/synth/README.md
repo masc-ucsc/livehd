@@ -59,6 +59,14 @@ Remaining native synthesis work is tracked in [2u-usyn](../../todo/livehd/2u-usy
    output demand and `LIVEHD_STATE_SWEEP_TRACE=<register name part>` prints why a
    register stays observed. Covered by `//pass/synth:state_sweep_test` and, with an
    unbounded LEC proof of the mapped result, `//lhd/tests:lhd_state_sweep_test`.
+   **Register merge** (`synth.merge_registers`, default false; `register_merge.cpp`), just
+   before the sweep: a Flop with the same clock, enable, reset, polarities, reset value,
+   width, sign and D driver as another in its definition holds the same value every cycle,
+   so its readers move to the survivor and it goes, repeated until nothing merges (a
+   register fed by merged twins becomes a twin itself). Yosys's `opt_merge` on flops; the
+   twin read-data registers of NVDLA's SRAM wrappers are 528 of partition_a's flops. The
+   survivor keeps its own name; the LEC proof of the merged netlist is a bounded one (the
+   twin has no counterpart left to pair), see `//lhd/tests:lhd_state_sweep_test`.
 2. **Modules.** `ware_module.cpp` extracts width-specialized arithmetic
    modules, `memory_module.cpp` lowers small or many-ported memories, and
    `loop_cleanup.cpp` prepares compact loops. An expanded iteration takes its
