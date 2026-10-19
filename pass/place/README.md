@@ -82,11 +82,13 @@ material constant.
 
 An unknown (X) constant that reaches a mapped net is refused by name by default: a
 physical net must carry a value, and the RTL left it unspecified (`assign y = 'x`,
-an `'x` default no branch overrides, an unconnected cell input or a struct field
-nothing writes). `synth.place.unknown_const=zero` is the
+an `'x` default no branch overrides, an unconnected cell input, an undriven top-level
+output or a struct field nothing writes). `synth.place.unknown_const=zero` is the
 opt-in refinement: every such bit is tied low through the same tie cell as a logical
-0 (any value is a legal refinement of a don't-care), and a `unknown-const-tied-low`
-warning reports how many bits it touched. It is part of the placement cache identity.
+0 (any value is a legal refinement of a don't-care; yosys `setundef -zero`, which the
+OpenROAD flow applies before its tie cells, makes the same choice), and a
+`unknown-const-tied-low` warning reports how many bits it touched. It is part of the
+placement cache identity.
 
 Nets beyond FLUTE's 1000-location degree limit use an explicitly approximate
 Manhattan star until fanout repair can split them. Placed timing includes the

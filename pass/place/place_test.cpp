@@ -470,7 +470,8 @@ TEST(Placement, SignedWiringExtendsMsb) {
 // nand(a[0], 1) -> inv -> y, plus a constant output k: the tie cell drives both
 // a cell input and a top output that keeps its logical constant. Without
 // constants, the same top uses a[1] for both instead (no tie cell needed).
-static std::shared_ptr<hhds::Graph> tie_graph(hhds::GraphLibrary& source, bool constants = true) {
+// With unknown_k the output k is an undriven (unknown, `0ub?`) constant instead of a 1.
+static std::shared_ptr<hhds::Graph> tie_graph(hhds::GraphLibrary& source, bool constants = true, bool unknown_k = false) {
   auto io = source.create_io("tie_top");
   io->add_input("a", 0);
   io->set_bits("a", 2);
@@ -505,7 +506,7 @@ static std::shared_ptr<hhds::Graph> tie_graph(hhds::GraphLibrary& source, bool c
   auto y = b.create_driver_pin("Y");
   gu::set_bits(y, 1);
   graph->get_output_pin("y").connect_driver(y);
-  graph->get_output_pin("k").connect_driver(one());
+  graph->get_output_pin("k").connect_driver(unknown_k ? gu::create_const(*graph, *Dlop::from_pyrope("0ub?")) : one());
   return graph;
 }
 struct Tie_fixture {
@@ -657,6 +658,34 @@ TEST(Placement, UnknownConstantIsRefusedUnlessTiedLowByOption) {
                           placed.floorplan.components.end(),
                           [](const auto& c) { return c.name == "__place_tielo"; }),
             1);
+}
+// The same don't-care on a TOP-LEVEL output rather than a cell input: an undriven output port
+// (the OpenROAD flow resolves it with `setundef -zero` before its tie cells). It is refused by
+// default and gets the low tie cell under unknown_const_zero.
+TEST(Placement, UnknownConstantOnATopOutputIsRefusedUnlessTiedLow) {
+  hhds::GraphLibrary source;
+  auto               graph   = tie_graph(source, true, true);
+  auto               options = plain_options();
+  options.liberty            = "inou/lefdef/tests/data/sky130hd.lib";
+  options.lefs               = {"inou/lefdef/tests/data/sky130hd.tlef", "inou/lefdef/tests/data/sky130hd.lef"};
+  options.output_dir         = std::string(std::getenv("TEST_TMPDIR")) + "/unknown_constant_output";
+  options.iterations         = 20;
+  options.bins               = 8;
+  hhds::GraphLibrary refused;
+  try {
+    (void)place(*graph, refused, options);
+    ADD_FAILURE() << "an unknown constant on a physical net was accepted";
+  } catch (const std::runtime_error& e) {
+    EXPECT_NE(std::string(e.what()).find("unknown constant"), std::string::npos) << e.what();
+  }
+  options.unknown_const_zero = true;
+  hhds::GraphLibrary tied;
+  const auto         placed = place(*graph, tied, options);
+  EXPECT_EQ(placed.unknown_const_tied, 1);
+  const bool low = std::any_of(placed.floorplan.components.begin(), placed.floorplan.components.end(), [](const auto& c) {
+    return c.name == "__place_tielo";
+  });
+  EXPECT_TRUE(low) << "the unknown output bit should be driven by the low tie cell";
 }
 TEST(Placement, DualConstantDriverDeclaresAndPreservesAllLibraryOutputs) {
   hhds::GraphLibrary source, flat;
