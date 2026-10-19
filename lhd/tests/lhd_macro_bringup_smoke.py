@@ -170,4 +170,37 @@ diag = lhd('reset', ['synth', str(reset), '--top', 'top', '--set', f'synth.liber
                      '--emit-dir', f'verilog:{root}/reset-net'])
 net = verilog('reset-net')
 assert 'reset-native' not in diag and 'sky130_fd_sc_hd__dfxtp_1' in net and 'always @' not in net, (diag, net)
+# ---- an interface-only Liberty macro (no arcs, no area) keeps timing complete ------------------------
+# litepci's pcie_us placeholder states pins and capacitances only. Timing-driven placement refuses
+# a design whose cells lack timing or area, so such a macro must not make the report incomplete.
+macro_lib = root / 'macro.lib'
+text = lib.read_text().rstrip()
+assert text.endswith('}')
+macro_lib.write_text(text[:-1] + '''
+ cell ("pcie_stub") {
+  pin ("din") { direction : input; capacitance : 0.001; }
+  pin ("dout") { direction : output; }
+ }
+}
+''')
+macro = root / 'macro.v'
+macro.write_text('''(* blackbox *)
+module pcie_stub(input din, output dout);
+endmodule
+module top(input clk, input a, output y);
+  wire w;
+  pcie_stub u(.din(a), .dout(w));
+  reg q;
+  always @(posedge clk) q <= w;
+  assign y = q;
+endmodule
+''')
+sdc = root / 'macro.sdc'
+sdc.write_text('create_clock -name clk -period 10 [get_ports clk]\nset_input_delay 0 -clock clk [all_inputs]\n'
+               'set_output_delay 0 -clock clk [all_outputs]\n')
+lhd('macro_timing', ['synth', str(macro), '--top', 'top', '--set', f'synth.liberty={macro_lib}', '--set', f'synth.sdc={sdc}',
+                     '--set', 'compile.slang.blackbox_attribute=true', '--workdir', str(root / 'macroW')])
+sta = result('macro_timing')['qor']['sta']['designs'][0]
+assert sta['timing_cells_complete'] is True and 'area' in sta, sta
+
 print('Macro and vendor-stub bring-up behaviors pass')

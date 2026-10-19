@@ -2447,6 +2447,8 @@ void Pass_opentimer::compute_timing(const std::shared_ptr<hhds::Graph>& g) {
   bool        timing_cells_complete = true;
   std::string incomplete_cell;
   bool        area_cells_complete = true;
+  bool        macro_area_missing  = false;  // an interface-only macro without an `area` attribute
+  double      known_area          = 0;
   for (const auto corner : {ot::MIN, ot::MAX}) {
     const auto& celllib = timer.celllib(corner);
     for (const auto& [name, gate] : timer.gates()) {
@@ -2457,14 +2459,31 @@ void Pass_opentimer::compute_timing(const std::shared_ptr<hhds::Graph>& g) {
         area_cells_complete   = false;
         continue;
       }
-      if (!cell->area || !std::isfinite(*cell->area) || *cell->area < 0) {
+      const bool interface_only = std::none_of(cell->cellpins.begin(), cell->cellpins.end(), [](const auto& entry) {
+        return !entry.second.timings.empty();
+      });
+      if (!cell->area && interface_only) {
+        macro_area_missing = true;  // a placeholder macro states no area: it counts as 0 (see the sum below)
+      } else if (!cell->area || !std::isfinite(*cell->area) || *cell->area < 0) {
         area_cells_complete = false;
+      } else if (corner == ot::MIN) {
+        known_area += *cell->area;
       }
       const bool has_inputs = std::any_of(cell->cellpins.begin(), cell->cellpins.end(), [](const auto& entry) {
         return entry.second.direction == ot::CellpinDirection::INPUT;
       });
       if (!has_inputs) {
         continue;  // a constant cell has no data arc
+      }
+      // An interface-only macro: a Liberty cell with pins and capacitances but not one timing group (a
+      // hard-IP placeholder such as litepci's `pcie_us`, whose outputs only start paths). It has no arc to
+      // lack, so it does not make the design's timing incomplete; a cell with SOME arcs still must have
+      // every output covered.
+      const bool any_arc = std::any_of(cell->cellpins.begin(), cell->cellpins.end(), [](const auto& entry) {
+        return !entry.second.timings.empty();
+      });
+      if (!any_arc) {
+        continue;
       }
       for (const auto& [pin_name, pin] : cell->cellpins) {
         (void)pin_name;
@@ -2635,6 +2654,10 @@ void Pass_opentimer::compute_timing(const std::shared_ptr<hhds::Graph>& g) {
   }
   if (const auto area = timer.report_area(); area_cells_complete && area && std::isfinite(*area) && *area >= 0) {
     j += std::format(",\"area\":{:.9g}", *area);
+  } else if (area_cells_complete && macro_area_missing) {
+    // OpenTimer refuses the whole sum when one cell has no area; the placeholder macros that state none
+    // are constant across placement trials, so the other cells' area is the comparable total.
+    j += std::format(",\"area\":{:.9g}", known_area);
   }
   j += std::format(
       ",\"cells\":{},\"opaque_logic_nodes\":{},\"native_state_nodes\":{},\"constraints_complete\":{},\"timing_cells_complete\":{}",
