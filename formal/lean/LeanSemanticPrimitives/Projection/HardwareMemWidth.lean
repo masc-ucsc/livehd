@@ -20,6 +20,7 @@ so the admission layer and the fixtures that instantiate it can import it
 without a cycle.
 -/
 import LeanSemanticPrimitives.Projection.HardwareMemMain
+import LeanSemanticPrimitives.Projection.AxiomGate
 
 namespace Projection
 namespace HwMem
@@ -114,10 +115,10 @@ theorem eval_op_cert_width_memRead (w : Nat) (m : Int → BV) (a en : BV) :
   simp only [sourceValue, CertVal.asBV, apply_ite BV.width, mk_bv_width,
              bv_resize_width, ite_self]
 
-#print axioms eval_op_width
-#print axioms cert_mem_read_width
-#print axioms eval_op_cert_width_of_supported
-#print axioms sourceValue_width_flopQAsync
+#audit_axioms eval_op_width
+#audit_axioms cert_mem_read_width
+#audit_axioms eval_op_cert_width_of_supported
+#audit_axioms sourceValue_width_flopQAsync
 
 end HwMem
 end Projection

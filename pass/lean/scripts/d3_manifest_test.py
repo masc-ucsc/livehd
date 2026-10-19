@@ -45,9 +45,8 @@ def make_corpus(tmp: pathlib.Path, blocks, suffix="_gate", body_salt=""):
 
 
 def make_plan(tmp: pathlib.Path, blocks) -> pathlib.Path:
-    p = tmp / "plan.md"
-    body = "### TOP LEVEL  (1)\n\n" + "".join(f"- `{b}` [x.sv]\n" for b in blocks) + "\n## next\n"
-    p.write_text("# plan\n\n" + body)
+    p = tmp / "blocks.list"
+    p.write_text("# authoritative blocks\n" + "".join(f"{b}\n" for b in blocks))
     return p
 
 

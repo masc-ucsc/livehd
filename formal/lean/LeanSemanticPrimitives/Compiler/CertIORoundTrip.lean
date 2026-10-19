@@ -7,12 +7,14 @@ on clock names.
 WHAT THIS DOES AND DOES NOT ESTABLISH.  It verifies the Lean renderer/parser
 pair: bytes produced by `renderCert` are read back as the same certificate, with
 no restriction on widths, array lengths, Int magnitudes, clock-name bytes or
-which constructors appear.  It says NOTHING about the C++ exporter.  As of this
-module there is NO C++ DCERT2 serializer on master and no differential parity
-test: `pass/lean` emits the Lean literal, and `//pass/lean:dcert_parity` does
-not exist.  So the translation-validation link from the design the C++ pass
-walked to a `DesignCert` is at present UNSUPPORTED by this file, and the runtime
-input path rests on the literal emitter, not on this codec.  What this theorem
+which constructors appear.  It says NOTHING about the C++ exporter.  When this
+module was written there was no C++ DCERT2 serializer on master; there is now
+(`pass/lean/emit_dcert.cpp`, 2daa01c94), and `pass/lean/scripts/dcert_parity.py`
+compares its bytes with `renderCert` of the elaborated Lean literal -- equal
+bytes mean equal certificates, by `renderCert_injective`.  There is still no
+bazel target for it (`//pass/lean:dcert_parity` does not exist).  What neither
+this theorem nor that harness covers is the C++ pass's transcription of the
+LGraph into its `CertificateIR`.  What this theorem
 removes is the possibility of the Lean reader and the Lean writer disagreeing
 with each other, which is what `parseCert` being `partial` and unverified
 previously left open.  It also does not say that a certificate which parses is

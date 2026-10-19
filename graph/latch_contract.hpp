@@ -300,6 +300,51 @@ struct Icg_def_match {
 [[nodiscard]] hhds::Pin_class      latch_transparent_arm(const hhds::Node_class& n);
 [[nodiscard]] hhds::Occurrence_pin latch_transparent_arm(const hhds::Occurrence_node& n);
 
+// A WIDE latch the reader bit-blasted: every bit is its own 1-bit latch whose
+// din is a BIT SELECT of one wide hold mux --
+// `Sext(Get_mask(Sra(Mux(win, 0, d), k), [0,1)), 1)` for bit k. That selector
+// reads the window (the clock), and latch_transparent_arm cannot peel it: the
+// arm under the wrappers is the whole word, not this latch's bit. This finds
+// the mux beneath a chain of bit-select wrappers (Get_mask, Sext, Sra, each
+// with constant parameters), proves its hold arm the same way
+// latch_transparent_arm does, and returns the open arm plus the chain, so a
+// caller can walk the arm (rules B/C, rule 4) or REBUILD the chain over it
+// (pass.single_edge's retype) -- returning the inner arm alone would drop the
+// wrappers' width and bit-position semantics. `chain` runs from din's driver
+// (front) to the wrapper that reads the mux (back); nullopt when din has no
+// provable hold mux beneath at least one wrapper (latch_transparent_arm covers
+// a mux read directly).
+struct Latch_hold_path {
+  hhds::Pin_class               value;  // the arm the latch passes while open
+  hhds::Pin_class               mux_out;
+  std::vector<hhds::Node_class> chain;
+};
+[[nodiscard]] std::optional<Latch_hold_path> latch_hold_path(const hhds::Node_class& latch);
+
+// A bit-select `chain` (as latch_hold_path returns it, din's driver first)
+// rebuilt over `bottom`: clones of the wrappers, bottom-up, each reading the
+// clone below it and the original's constant operands, with the original's
+// width and sign. Returns the top of the rebuilt chain (`bottom` when empty).
+[[nodiscard]] hhds::Pin_class rebuild_bit_select(hhds::Graph& g, const std::vector<hhds::Node_class>& chain,
+                                                 hhds::Pin_class bottom);
+
+// THE LEVEL-RESET LATCH, lifted. CORE-ET's prim_write_commit_rst_en,
+//     always_latch if (rst) q <= RV; else if (clk && en_1p) q <= d;
+// arrives (yosys-slang) with the reset folded into the window and the data:
+// `enable = Mux(rst, gate, 1)`, `din = <bit select of> Mux(rst, V, RV)`. Its
+// window is `rst | gate`, which no clock-phase or gate shape matches, so it is
+// a DATA-gated latch that reads the clock -- refused as
+// `latch-window-reads-clock` (B08's CSR file). Lifted, it is the latch-with-
+// reset cell M7 already defines (`if (rst) q = initial; else if (en) q =
+// din`): `reset_pin = rst` (`negreset` for the active-low mirror), `async = 1`
+// (a latch reset has no edge), `initial` = this bit's slice of RV (folded with
+// LiveHD's own constant semantics), `enable = gate`, `din` = the bit select
+// rebuilt over V. Exactly the same latch, now with a gate window. Only the
+// Mux spelling with ONE selector shared by window and data, a constant RV and a
+// nonzero constant on the window's reset arm is matched; anything else is left
+// untouched (and refused downstream). Returns the latches lifted.
+int lift_latch_level_resets(hhds::Graph* g);
+
 // Is a CLOCK-GATED latch's window provably CLOSED for the whole clock phase in
 // which the commit-at-closing-edge model says it holds, whatever the gate's
 // enables are? `root` is the reference clock the window resolves to and
@@ -326,14 +371,40 @@ struct Icg_def_match {
 // is forced to 0, so what the latch holds or passes through then is
 // unobservable; once G fires again the latch has been transparent for the
 // whole low phase before the edge in both the real circuit and the hold model.
+// A reader may also be a flop on G's FALLING edge (din or enable), reached
+// directly or through combinational logic: G does not fall while gated off, and
+// when it falls the latch has been shut since G rose. minion's preview register
+// file reads its `!(clk & en)` latch that way. Every path out of Q has to end in
+// one of these readers; a primary output, other state, or a cone larger than
+// the walk's bound answers false.
 [[nodiscard]] bool gated_latch_masked_off(const hhds::Node_class& latch);
 [[nodiscard]] bool gated_latch_masked_off(const hhds::Occurrence_node& latch);
+
+// `gated_latch_closed_at`, CONDITIONED on `assume_true` all holding. For a
+// latch that is one enable of a GATED latch's cone, the question is whether it
+// stays shut whenever that gated latch is open -- and the gated latch is open
+// only while the clock is at its level AND every OTHER enable of its cone is 1.
+// That is a pointwise implication, so conditioning on those enables is exact,
+// not a relaxation: minion's `en_1p` (window `!(clk & en_q)`) is shut at clk=1
+// only while the outer gate `en_q` is on, which is the only time the latch it
+// gates is open. Unconditioned, the walk answers "either" and the caller
+// refuses.
+[[nodiscard]] bool gated_latch_closed_assuming(const hhds::Node_class& latch, const hhds::Pin_class& root,
+                                               bool closed_level, const std::vector<hhds::Pin_class>& assume_true);
 
 // The dual: is the latch's window provably OPEN whenever `root` is at `level`,
 // whatever every other input is? An ICG's enable latch may be bypassed to its
 // transparent arm only when it is open for the whole phase before the gated
 // edge and shut for the whole phase after it.
 [[nodiscard]] bool latch_open_at(const hhds::Node_class& latch, const hhds::Pin_class& root, bool level);
+
+// latch_open_at conditioned on `assume_true` being 1 -- the dual of
+// gated_latch_closed_assuming, for the same NESTED gate. An enable latch on a
+// gated clock (`if (clock) en_2p = ...` with clock = clk & en_q) is open at
+// clk=1 only while the outer gate is on; that is also the only time the latch
+// it gates can commit, so its window rule may condition on it.
+[[nodiscard]] bool latch_open_assuming(const hhds::Node_class& latch, const hhds::Pin_class& root, bool level,
+                                       const std::vector<hhds::Pin_class>& assume_true);
 
 // Inline every instance whose output drives a state element's `clock_pin` and
 // whose def contains a Latch — i.e. an INTEGRATED CLOCK GATE CELL.

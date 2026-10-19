@@ -1,5 +1,6 @@
 // This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 #include <algorithm>
+#include <set>
 #include <stdexcept>
 
 #include "certificate_builder.hpp"
@@ -74,11 +75,20 @@ uint32_t detail::CertificateBuilder::dep(const PinRef& pin, uint32_t width) {
     source.reset_active_low = f.active_low;
     if (f.asynchronous) {
       if (!f.reset_input) {
-        // `SourceDesc.flopQAsync` reads the reset out of RuntimeInput, so an
-        // asynchronous reset computed inside the design cannot be expressed.
-        // Name what stopped the transparent walk: an unhandled resize wrapper
-        // is a tracing gap to close, while real logic is a modelling limit.
-        fail("flop n_" + std::to_string(f.id) + " has an ASYNCHRONOUS reset that is not driven by a primary input"
+        if (input_reset_flops.contains(f.id)) {
+          // 2B: the reset is a function of primary inputs; the source is the
+          // STORED value and readers get the override node.
+          source.async_reset = false;
+          sources[source.id] = source;
+          return async_read(f);
+        }
+        // `SourceDesc.flopQAsync` reads the reset out of RuntimeInput, and an
+        // override node is exact only for a reset fixed within a step; a reset
+        // computed from STATE is neither. Name what stopped the transparent
+        // walk: an unhandled resize wrapper is a tracing gap to close, while
+        // real logic is a modelling limit.
+        fail("flop n_" + std::to_string(f.id)
+             + " has an ASYNCHRONOUS reset that is not a combinational function of primary inputs"
              + (f.reset_block.empty() ? "" : "; the reset cone stops at " + f.reset_block));
       }
       source.reset_input = input_ordinals.at(*f.reset_input);
@@ -87,16 +97,140 @@ uint32_t detail::CertificateBuilder::dep(const PinRef& pin, uint32_t width) {
   sources[source.id] = source;
   return source.id;
 }
+// The read side of a 2B flop: `MuxBool(reset, Q, resetValue)` (operands
+// swapped for an active-LOW reset), emitted on first reference. Its selector is
+// the same slot as `FlopDesc.resetPin`, with the same polarity, so read and
+// commit agree by construction; the reset cone was lowered ahead of every other
+// node (build_certificate), so it already has a slot here.
+uint32_t detail::CertificateBuilder::async_read(const Flop& f) {
+  if (auto it = async_override.find(f.id); it != async_override.end()) {
+    return it->second;
+  }
+  if (pin_width(*f.reset) != 1) {
+    fail("flop n_" + std::to_string(f.id) + " has a " + std::to_string(pin_width(*f.reset))
+         + "-bit input-derived ASYNCHRONOUS reset; only a 1-bit reset is lowered");
+  }
+  const auto rst = dep(*f.reset, 1);
+  PinRef     rv;
+  rv.kind        = PinKind::Constant;
+  rv.width       = f.width;
+  rv.value       = f.initial;
+  const auto rvs = dep(rv, f.width);
+  Op         op;
+  op.kind       = Operation::MuxBool;
+  const auto id = emit(op, f.width, f.active_low ? std::vector<uint32_t>{rst, rvs, f.id} : std::vector<uint32_t>{rst, f.id, rvs});
+  async_override.emplace(f.id, id);
+  return id;
+}
 uint32_t detail::CertificateBuilder::emit(Op op, uint32_t width, std::vector<uint32_t> deps) {
   const auto id = next_id++;
   result.nodes.push_back({id, std::move(op), width, std::move(deps)});
   return id;
 }
+uint32_t detail::CertificateBuilder::const_dep(uint32_t value) {
+  PinRef c;
+  c.kind  = PinKind::Constant;
+  c.value = std::to_string(value);
+  uint32_t bits = 1;
+  while (bits < 32 && (uint64_t{1} << bits) <= value) {
+    ++bits;
+  }
+  c.intrinsic_width = bits;
+  c.width           = bits + 1;  // read unsigned or two's complement, the value is the same
+  return dep(c, c.width);
+}
+uint32_t detail::CertificateBuilder::value_dep(const PinRef& pin, uint32_t width) {
+  if (pin.kind != PinKind::Constant && pin.is_signed) {
+    const auto own = pin_width(pin);
+    if (own < width) {
+      // Op_Sext with amount = own width: the sign bit is the operand's top bit.
+      return emit({Operation::Sext, 0, {}}, width, {dep(pin, own), const_dep(own)});
+    }
+  }
+  return dep(pin, width);
+}
+uint32_t detail::CertificateBuilder::signed_dep(const PinRef& pin) {
+  if (pin.kind == PinKind::Constant) {
+    auto w = std::max(pin_width(pin), pin.intrinsic_width);
+    if (!pin.value.starts_with('-')) {
+      w = std::max(w, pin.intrinsic_width + 1);
+    }
+    return dep(pin, w);
+  }
+  const auto own = pin_width(pin);
+  if (!pin.is_signed) {
+    return emit({Operation::Or, 0, {}}, own + 1, {dep(pin, own)});
+  }
+  return dep(pin, own);
+}
 
 CertificateIR build_certificate(const DesignScan& design, const CertificateOptions&) {
   detail::CertificateBuilder b(design);
   std::vector<uint32_t>      lowered_memories;
-  for (const auto& n : design.nodes) {
+  // 2B: an asynchronous flop whose reset cone reaches only PRIMARY INPUTS and
+  // constants (CORE-ET B05's `dft_i.scanmode ? dft_i.scan_reset_n : rst_wr_ni`)
+  // is read through an override node (see async_read). That node needs the
+  // reset's slot before the flop's first reader, but nothing orders a reader
+  // after an unrelated reset cone -- so the cones are lowered FIRST. An
+  // input-only cone depends on no other node, so moving it ahead of everything
+  // keeps the order topological.
+  std::vector<const DesignNode*> order;
+  {
+    std::map<uint32_t, size_t> index_of;
+    for (size_t i = 0; i < design.nodes.size(); ++i) {
+      if (design.nodes[i].op != ScanOp::Memory) {
+        index_of.emplace(design.nodes[i].id, i);
+      }
+    }
+    std::set<uint32_t> cone_ids;
+    for (const auto& [fid, fp] : b.flops) {
+      const Flop& f = *fp;
+      if (!f.asynchronous || f.reset_input || !f.reset) {
+        continue;
+      }
+      std::set<uint32_t>  cone;
+      bool                input_only = true;
+      std::vector<PinRef> work{*f.reset};
+      while (!work.empty() && input_only) {
+        const PinRef p = work.back();
+        work.pop_back();
+        if (p.kind == PinKind::Input || p.kind == PinKind::Constant) {
+          continue;
+        }
+        if (p.kind != PinKind::Node) {
+          input_only = false;  // a flop or a memory read: state, not an input
+          break;
+        }
+        if (!cone.insert(p.id).second) {
+          continue;
+        }
+        const auto it = index_of.find(p.id);
+        if (it == index_of.end()) {
+          input_only = false;
+          break;
+        }
+        for (const auto& op : design.nodes[it->second].operands) {
+          work.push_back(op.driver);
+        }
+      }
+      if (input_only) {
+        b.input_reset_flops.insert(f.id);
+        cone_ids.insert(cone.begin(), cone.end());
+      }
+    }
+    for (const auto& n : design.nodes) {
+      if (n.op != ScanOp::Memory && cone_ids.contains(n.id)) {
+        order.push_back(&n);
+      }
+    }
+    for (const auto& n : design.nodes) {
+      if (n.op == ScanOp::Memory || !cone_ids.contains(n.id)) {
+        order.push_back(&n);
+      }
+    }
+  }
+  for (const auto* np : order) {
+    const auto& n = *np;
     if (n.op == ScanOp::Memory) {
       b.lowering_context = "memory n_" + std::to_string(n.id) + " read port " + std::to_string(n.memory_read);
       detail::lower_memory_read(b, design.memories.at(n.id), n.memory_read);
@@ -115,6 +249,13 @@ CertificateIR build_certificate(const DesignScan& design, const CertificateOptio
         add(p, w);
       }
     };
+    // value operands of zero-extending reads: see CertificateBuilder::value_dep
+    auto vadd = [&](const Operand& p, uint32_t w) { c.deps.push_back(b.value_dep(p.driver, w)); };
+    auto vall = [&](uint32_t w) {
+      for (const auto& p : n.operands) {
+        vadd(p, w);
+      }
+    };
     switch (n.op) {
       case ScanOp::Constant: fail("constant unexpectedly appeared in topological nodes");
       case ScanOp::Sum:
@@ -126,35 +267,69 @@ CertificateIR build_certificate(const DesignScan& design, const CertificateOptio
         c.op.kind = Operation::Sum;
         for (const auto& p : n.operands) {
           if (p.bank == 0) {
-            add(p, n.width);
+            vadd(p, n.width);
             ++c.op.parameter;
           }
         }
         for (const auto& p : n.operands) {
           if (p.bank == 1) {
-            add(p, n.width);
+            vadd(p, n.width);
           }
         }
         break;
       case ScanOp::Mult:
         c.op.kind = Operation::Mult;
-        all(n.width);
+        vall(n.width);
         break;
-      case ScanOp::Div:
-        c.op.kind = Operation::UDiv;
-        all(n.width);
+      case ScanOp::Div: {
+        // LGraph divides the operands' INTEGER values, truncating toward zero,
+        // and fits the quotient to the node width (cgen_sim.cpp's Div case,
+        // pass/lec/encode.cpp). Signedness is per OPERAND -- the importer keeps
+        // a signed RTLIL port's own pin and wraps an unsigned one in Get_mask --
+        // and the quotient's sign never selects the operation: two negative
+        // operands can give a proven non-negative quotient.
+        //   all unsigned -> Op_UDiv, which reads every dep unsigned;
+        //   any signed   -> Op_SDiv, which reads every dep as two's complement
+        //                   at the dep's OWN width, so an unsigned operand first
+        //                   gains a zero bit (an Or resize) and keeps its value.
+        // A constant is materialized at a width that holds its value. At the
+        // quotient width, `c / 200` under a 1-bit quotient divided by
+        // 200 mod 2 = 0.
+        const auto constant = [](const PinRef& p) { return p.kind == PinKind::Constant; };
+        const auto negative = [&](const PinRef& p) { return constant(p) && p.value.starts_with('-'); };
+        bool       signed_math = false;
+        for (const auto& p : n.operands) {
+          signed_math = signed_math || negative(p.driver) || (!constant(p.driver) && p.driver.is_signed);
+        }
+        c.op.kind = signed_math ? Operation::SDiv : Operation::UDiv;
+        for (const auto& p : n.operands) {
+          const auto& d = p.driver;
+          if (constant(d)) {
+            auto w = std::max(b.pin_width(d), d.intrinsic_width);
+            if (signed_math && !negative(d)) {
+              w = std::max(w, d.intrinsic_width + 1);
+            }
+            add(p, w);
+          } else if (signed_math && !d.is_signed) {
+            const auto w = b.pin_width(d);
+            c.deps.push_back(b.emit({Operation::Or, 0, {}}, w + 1, {b.dep(d, w)}));
+          } else {
+            add(p, n.width);
+          }
+        }
         break;
+      }
       case ScanOp::And:
         c.op.kind = Operation::And;
-        all(n.width);
+        vall(n.width);
         break;
       case ScanOp::Or:
         c.op.kind = Operation::Or;
-        all(n.width);
+        vall(n.width);
         break;
       case ScanOp::Xor:
         c.op.kind = Operation::Xor;
-        all(n.width);
+        vall(n.width);
         break;
       case ScanOp::Ror:
         c.op.kind = Operation::Ror;
@@ -162,25 +337,58 @@ CertificateIR build_certificate(const DesignScan& design, const CertificateOptio
         break;
       case ScanOp::Not:
         c.op.kind = Operation::Not;
-        all(n.width);
+        vall(n.width);
         break;
       case ScanOp::EQ: {
-        c.op.kind      = Operation::EQ;
-        uint32_t width = 1;
+        // Integer equality. Every operand is read UNSIGNED at its dep's width,
+        // so a signed operand is sign-extended to one common width, and where
+        // signed and unsigned operands meet that width gains a bit: there a
+        // negative value reads at or above 2^(w-1), which no unsigned operand
+        // of the narrower width reaches.
+        c.op.kind         = Operation::EQ;
+        uint32_t width    = 1;
+        bool     any_sign = false, any_unsign = false;
         for (const auto& p : n.operands) {
-          width = std::max(width, b.pin_width(p.driver));
+          const auto& d = p.driver;
+          const bool  s = d.kind == PinKind::Constant ? d.value.starts_with('-') : d.is_signed;
+          (s ? any_sign : any_unsign) = true;
+          width = std::max(width, b.pin_width(d));
         }
-        all(width);
+        const uint32_t common = width + (any_sign && any_unsign ? 1 : 0);
+        for (const auto& p : n.operands) {
+          const auto& d = p.driver;
+          if (d.kind == PinKind::Constant) {
+            c.deps.push_back(b.dep(d, std::max(common, b.pin_width(d))));
+          } else {
+            c.deps.push_back(b.value_dep(d, common));
+          }
+        }
         break;
       }
       case ScanOp::LT:
       case ScanOp::GT: {
-        c.op.kind = n.op == ScanOp::LT ? (n.is_signed ? Operation::SLT : Operation::ULT)
-                                       : (n.is_signed ? Operation::SGT : Operation::UGT);
+        // Signedness is per OPERAND (as for Div), never the result pin's: the
+        // 1-bit result of `$signed(a) < $signed(b)` is an unsigned pin.
+        //   all unsigned -> ULT/UGT, which read every dep unsigned;
+        //   any signed   -> SLT/SGT, which read every dep as two's complement at
+        //                   the dep's OWN width (see signed_dep).
+        bool signed_math = false;
+        for (const auto& p : n.operands) {
+          const auto& d = p.driver;
+          signed_math   = signed_math || (d.kind == PinKind::Constant ? d.value.starts_with('-') : d.is_signed);
+        }
+        c.op.kind = n.op == ScanOp::LT ? (signed_math ? Operation::SLT : Operation::ULT)
+                                       : (signed_math ? Operation::SGT : Operation::UGT);
         // Two-banked ("as" is the left operand, "bs" the right), but the
         // comparison operations are BINARY, and the scan refuses any other
         // arity, so ascending pid order is exactly {left, right} here.
-        all(std::max(b.pin_width(n.operands[0].driver), b.pin_width(n.operands[1].driver)));
+        if (signed_math) {
+          for (const auto& p : n.operands) {
+            c.deps.push_back(b.signed_dep(p.driver));
+          }
+        } else {
+          all(std::max(b.pin_width(n.operands[0].driver), b.pin_width(n.operands[1].driver)));
+        }
         break;
       }
       case ScanOp::SHL:
@@ -201,7 +409,18 @@ CertificateIR build_certificate(const DesignScan& design, const CertificateOptio
               width = std::max(width, n.width);
             }
           }
-          add(p, width);
+          if (i == 0 && n.op == ScanOp::SRA) {
+            // bv_sra reads the value as two's complement at its own width: an
+            // UNSIGNED value gains a zero bit, so the shift fills with zeros.
+            c.deps.push_back(p.driver.kind == PinKind::Constant ? b.dep(p.driver, width) : b.signed_dep(p.driver));
+          } else if (i == 0) {
+            // SHL reads the value unsigned at the result width; Op_Sext reads its
+            // bits up to the sign position. A narrower SIGNED value is first
+            // sign-extended to the width read.
+            vadd(p, std::max(width, n.width));
+          } else {
+            add(p, width);
+          }
         }
         break;
       case ScanOp::Mux: {
@@ -218,7 +437,7 @@ CertificateIR build_certificate(const DesignScan& design, const CertificateOptio
         }
         for (const auto& p : n.operands) {
           if (p.bank != 0) {
-            add(p, n.width);
+            vadd(p, n.width);  // bv_resize zero-extends: a narrower signed option is sign-extended
             ++count;
           }
         }
@@ -261,6 +480,12 @@ CertificateIR build_certificate(const DesignScan& design, const CertificateOptio
             if (val.kind == PinKind::Constant && val.value.starts_with('-') && w < mask_width) {
               w = mask_width;
             }
+            // A SIGNED node or source has the same need: above its width the
+            // window must read its sign, so it is sign-extended to the carrier.
+            if (val.kind != PinKind::Constant && val.is_signed && w < mask_width) {
+              vadd(n.operands[i], mask_width);
+              continue;
+            }
             add(n.operands[i], w);
             continue;
           }
@@ -293,8 +518,17 @@ CertificateIR build_certificate(const DesignScan& design, const CertificateOptio
       }
       case ScanOp::SetMask:
         c.op.kind = Operation::SetMask;
-        for (const auto& p : n.operands) {
-          add(p, b.pin_width(p.driver));
+        for (size_t i = 0; i < n.operands.size(); ++i) {
+          const auto& p = n.operands[i];
+          if (i == 1) {
+            add(p, b.pin_width(p.driver));  // the mask
+          } else if (p.driver.kind == PinKind::Constant) {
+            add(p, b.pin_width(p.driver));
+          } else {
+            // the base and the inserted value are read by bit position: a narrower
+            // SIGNED node or source is sign-extended to the result width first
+            vadd(p, std::max(b.pin_width(p.driver), n.width));
+          }
         }
         break;
       case ScanOp::Memory: break;
@@ -311,7 +545,7 @@ CertificateIR build_certificate(const DesignScan& design, const CertificateOptio
   b.lowering_context.clear();
   for (const auto& o : design.outputs) {
     if (o.driver) {
-      b.result.outputs.push_back({b.dep(*o.driver, o.width), o.width});
+      b.result.outputs.push_back({b.value_dep(*o.driver, o.width), o.width});
     }
   }
   // The emitted clock table is the scan's, in the scan's ordinal order. Only
@@ -332,7 +566,7 @@ CertificateIR build_certificate(const DesignScan& design, const CertificateOptio
     if (!f.din) {
       fail("flop n_" + std::to_string(f.id) + " has no `din` driver.");
     }
-    driver.din = b.dep(*f.din, f.width);
+    driver.din = b.value_dep(*f.din, f.width);
     if (f.reset) {
       driver.reset_pin = b.dep(*f.reset, 1);
     }

@@ -805,6 +805,11 @@ example : bv_uint ((reset_fixture_step #[mk_bv 1 0, mk_bv 1 1, mk_bv 1 1]
 // This is the "do not loosen the primary-input reset restriction" half of the
 // repair. Without it the positive case above could be satisfied by a rule that
 // follows any Sext at all.
+//
+// Since decision 2B such a reset is a combinational function of primary inputs
+// and lowers through an override node whose selector is the Sext ITSELF, so
+// the condition is exact. What must still never happen is the shortcut this
+// test guards: resolving to the raw input (a `flopQAsync` reading `rst`).
 TEST(DesignScan, NonTransparentSextResetWrapperIsStillRefused) {
   struct Shape {
     const char* name;
@@ -854,7 +859,19 @@ TEST(DesignScan, NonTransparentSextResetWrapperIsStillRefused) {
     ASSERT_EQ(design.flops.size(), 1u) << shape.name;
     EXPECT_FALSE(design.flops[0].reset_input.has_value())
         << shape.name << ": a non-transparent Sext must not resolve to a primary input";
-    EXPECT_THROW((void)build_certificate(design, {}), std::runtime_error) << shape.name;
+    const auto c = build_certificate(design, {});
+    for (const auto& src : c.sources) {
+      EXPECT_FALSE(src.async_reset) << shape.name << ": no source may read the raw input as the reset";
+    }
+    ASSERT_EQ(c.flops.size(), 1u) << shape.name;
+    ASSERT_TRUE(c.flops[0].reset_pin.has_value()) << shape.name;
+    bool overridden = false;
+    for (const auto& n : c.nodes) {
+      if (n.op.kind == Operation::MuxBool && !n.deps.empty() && n.deps[0] == *c.flops[0].reset_pin) {
+        overridden = true;
+      }
+    }
+    EXPECT_TRUE(overridden) << shape.name << ": the read side must select on the Sext's own slot";
   }
 }
 

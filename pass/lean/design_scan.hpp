@@ -16,6 +16,11 @@ namespace lean_export {
 struct ScanOptions {
   bool   strict    = true;
   size_t max_width = 1024;
+  // Hard cap on the scanned combinational cone's node count. 0 = unlimited,
+  // and that is the DEFAULT on purpose: a budget that fires out of the box
+  // could refuse a design that emits fine today, and the traversal's own push
+  // ceiling already guards against a runaway.
+  size_t max_nodes = 0;
 };
 
 // Decimal integers are owned data, never Lean expressions.
@@ -28,6 +33,9 @@ struct PinRef {
   uint32_t    intrinsic_width = 0;
   std::string value;
   uint32_t    minimum_shift_width = 0;
+  // The driver pin is SIGNED (not `is_unsign`): its bits are read as two's
+  // complement at `width`. Constants leave it false; their sign is the value's.
+  bool        is_signed = false;
 };
 enum class ScanOp { Constant, Sum, Mult, Div, And, Or, Xor, Ror, EQ, Not, LT, GT, SHL, SRA, Mux, Sext, GetMask, SetMask, Memory };
 struct Operand {

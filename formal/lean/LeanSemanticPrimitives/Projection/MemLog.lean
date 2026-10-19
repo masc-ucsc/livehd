@@ -62,6 +62,7 @@ memory image that `Val` can carry, with its denotation pinned to the reference
 semantics.
 -/
 import LeanSemanticPrimitives.Projection.RuntimeEncoding
+import LeanSemanticPrimitives.Projection.AxiomGate
 
 namespace Projection
 open Compiler
@@ -266,13 +267,13 @@ What matters is what is ABSENT: no `sorryAx`, no `Classical.choice`, and no
 `native_decide` precisely so the last of those stays absent. -/
 section Audit
 
-#print axioms Projection.MemLog.denote_writeEn
-#print axioms Projection.MemLog.denote_writeBE
-#print axioms Projection.MemLog.readEn_eq
-#print axioms Projection.MemLog.denote_writeEn_same
-#print axioms Projection.MemLog.denote_writeEn_other
-#print axioms Projection.MemLog.decMemLog_encMemLog
-#print axioms Projection.MemLog.MemRel_functional
+#audit_axioms Projection.MemLog.denote_writeEn
+#audit_axioms Projection.MemLog.denote_writeBE
+#audit_axioms Projection.MemLog.readEn_eq
+#audit_axioms Projection.MemLog.denote_writeEn_same
+#audit_axioms Projection.MemLog.denote_writeEn_other
+#audit_axioms Projection.MemLog.decMemLog_encMemLog
+#audit_axioms Projection.MemLog.MemRel_functional
 
 /-! ### Non-vacuity at PicoRV32's actual memory shape
 

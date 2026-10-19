@@ -1,0 +1,28 @@
+# EVIDENCE INDEX for the generation-latency work.  Everything below is retained
+# on disk; /generated/ is gitignored, so this index is how a reviewer finds it.
+#
+# RUNNABLE SOURCES, committed (an ephemeral job script is not a deliverable):
+#   formal/lean/scripts/gen_probe.lean                  the generation-only driver
+#   pass/lean/specialization/fp_gen_build.sh                   builds it on both sides, isolated roots
+#   pass/lean/specialization/fp_gen_measure.sh                 interleaved matched timing
+#   pass/lean/specialization/fp_gen_counterbalanced.sh         A-B/B-A, affinity, wall+cpu, cgroup
+#   pass/lean/specialization/fp_gen_sample.sh                  gdb-attach sampling profiler
+#   formal/lean/LeanSemanticPrimitives/Projection/Proto/ShiftBridge.lean   the first bridge lemma
+#
+kind	path	what it holds
+frozen rows	generated/master_port/fp/genprobe/frozen_rows.json	the 33 rows, certificate paths and sha256, frozen before any run
+driver source	generated/master_port/fp/genprobe/gen_probe.master.lean	b6dff38b6885b0d8559096374670bd907b84c883580624bef8acb27f22099f2c -- THE BYTES THE MEASURED BINARY WAS BUILT FROM; formal/lean/scripts/gen_probe.lean is now 36608266836d74b2f09c041d8de961f6cf64b133f83c6e6f3da1e7776c0c214b after a COMMENT-ONLY correction (the refuted szOf cost attribution). No code changed, so the procedure is the same, but the retained copy is the one that matches the binary.
+driver source	generated/master_port/fp/genprobe/gen_probe.pin.lean	26b88f106c5f097b4ebef802e4b578cd0b6fcae8965299e7f4c14d3dac0db2bd
+pin tree	generated/master_port/fp/genprobe/pin_tree/	formal/lean extracted at 9bb41a09d, 100 files
+build	generated/master_port/fp/genprobe/root-master/	olean+nat, binary sha256 b7abe8e056b589cb439b0cf65a657d7d57d0f049f1ed942897a74909e4e2d01f
+build	generated/master_port/fp/genprobe/root-pin/	olean+nat, binary sha256 eeada8cf4405dc36ddce6bcb1c01384860d8a174c6e37ae846b1601f6e78044e
+timing	generated/master_port/fp/genprobe/runs/alu/	3 interleaved reps, unpinned
+timing	generated/master_port/fp/genprobe/runs/slow6/	2 reps, the six slow blocks, unpinned
+timing	generated/master_port/fp/genprobe/runs/rest26/	1 rep, the remaining rows, unpinned
+timing	generated/master_port/fp/genprobe/runs/cb3/	COUNTERBALANCED: 8 paired reps x 3 blocks, cpu80, wall+cpu, per-run .guard
+context	generated/master_port/fp/genprobe/runs/cb3/CPU_CONTEXT.txt	cpu80 SMT sibling is cpu32; governor powersave; why absolute numbers inflate
+predeclaration	generated/master_port/fp/genprobe/runs/cb3/PREDECLARED.txt	reps, warmup, affinity, order, fuel -- written before the batch ran
+defect record	generated/master_port/fp/genprobe/runs/cb3_stale_queue_wrapper.log	the self-matching pgrep waiter that silently never started the batch
+profile	generated/master_port/fp/genprobe/profiles/alu.master.samples.txt	25 gdb samples
+profile	generated/master_port/fp/genprobe/profiles/alu.pin.samples.txt	25 gdb samples
+profile	generated/master_port/fp/genprobe/profiles/csr_regfile.master.samples.txt	60 gdb samples

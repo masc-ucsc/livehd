@@ -39,9 +39,8 @@ The certificates THIS worktree emitted, collected by
   refused; and
 * the emitted trailer is post-D2.
 
-That gives 76 of 122 CORE-ET targets and 21 of the frozen 30 CVA6 targets. The
-remaining 46 and 9 have no certificate and occupy a row that cannot be credited,
-which is the whole point of writing the manifest at the denominator.
+A target without such a certificate still occupies a row, one that cannot be
+credited, which is the whole point of writing the manifest at the denominator.
 
 ## What is unchanged
 

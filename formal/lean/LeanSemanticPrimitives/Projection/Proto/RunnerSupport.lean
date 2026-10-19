@@ -62,6 +62,42 @@ def mkStateFor (D : DesignCert) (seed : Nat) : RuntimeState :=
 def edgeSchedule (D : DesignCert) (k : Nat) : ClockEdges :=
   if k % 3 == 2 then Array.replicate D.clocks.size false else allEdges D
 
+/-- Clock domains fire INDEPENDENTLY: domain `j` fires on cycle `k` iff
+`(k + j) % (j + 2) ≠ 0`.  `edgeSchedule` fires every domain or none, so on a
+multi-clock design it never shows one domain stepping while another holds --
+the case the edge-vector semantics exists for.  Over any six cycles two domains
+see every combination: one alone, the other alone, both, neither. -/
+def indepEdges (D : DesignCert) (k : Nat) : ClockEdges :=
+  (List.range D.clocks.size).toArray.map (fun j => (k + j) % (j + 2) != 0)
+
+/-- Which schedule a driver runs.  `auto` keeps `edgeSchedule` for a one-clock
+design -- so no existing single-clock result changes -- and uses `indepEdges`
+when the certificate declares more than one clock.  `edges:all` / `edges:indep`
+force either. -/
+inductive EdgeMode where
+  | auto | all | indep
+  deriving Inhabited, BEq
+
+def EdgeMode.parse? : String → Option EdgeMode
+  | "auto"  => some .auto
+  | "all"   => some .all
+  | "indep" => some .indep
+  | _       => none
+
+def scheduleEdges (m : EdgeMode) (D : DesignCert) (k : Nat) : ClockEdges :=
+  match m with
+  | .all   => edgeSchedule D k
+  | .indep => indepEdges D k
+  | .auto  => if D.clocks.size > 1 then indepEdges D k else edgeSchedule D k
+
+def EdgeMode.describe (m : EdgeMode) (D : DesignCert) : String :=
+  match m with
+  | .all   => "edgeSchedule D k (every domain fires; every third cycle quiet)"
+  | .indep => "indepEdges D k (domain j fires iff (k+j) % (j+2) != 0)"
+  | .auto  => if D.clocks.size > 1
+      then s!"indepEdges D k ({D.clocks.size} clock domains fire independently: domain j iff (k+j) % (j+2) != 0)"
+      else "edgeSchedule D k (one clock; every third cycle quiet)"
+
 /-! ## Outcomes that KEEP the failure kind -/
 
 inductive Outcome where

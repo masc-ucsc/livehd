@@ -20,20 +20,14 @@ Specifically:
 The router cannot mis-route: `magics_are_exclusive` proves no buffer satisfies
 both magics.
 -/
-import LeanSemanticPrimitives.Compiler.CertIOV1
+import LeanSemanticPrimitives.Compiler.CertIORoute
 import LeanSemanticPrimitives.Compiler.CertIOParity
 
 namespace Compiler
 namespace CertIO
 
-/-- Which codec a buffer belongs to. -/
-inductive Format where
-  | /-- DCERT1: FP's format. No clocks section, no commit-side async flag. -/
-    v1
-  | /-- DCERT2: carries the clock table, `FlopDesc.clock`/`asyncReset` and
-    `MemoryDesc.clock`. What the C++ pass emits. -/
-    v2
-deriving Repr, DecidableEq, Inhabited
+-- `Format`, `detect`, `parseAny` and the admissions live in
+-- `Compiler/CertIORoute.lean` (Mathlib-free, same namespace).
 
 /-- No buffer is both. The magics differ in their last byte -- `'2'` (50)
 against `'1'` (49) -- so routing on them is total and unambiguous. -/
@@ -48,43 +42,6 @@ theorem magics_are_exclusive (b : ByteArray) : ¬ (hasMagic b ∧ V1.hasMagic b)
   simp only [beq_iff_eq] at e1 e2
   rw [e1] at e2
   exact absurd e2 (by decide)
-
-def detect (b : ByteArray) : Option Format :=
-  if hasMagic b then some .v2
-  else if V1.hasMagic b then some .v1
-  else none
-
-/-- Parse either version, and SAY WHICH. The caller is told the format rather
-than left to infer it from the record, because a DCERT1 file parses to a
-certificate that is indistinguishable from a genuinely one-clock DCERT2 one --
-and they do not mean the same thing. -/
-def parseAny (b : ByteArray) : Except String (Format × DesignCert) :=
-  match detect b with
-  | some .v2 => (parseCert b).map (fun D => (Format.v2, D))
-  | some .v1 => (V1.parseCert b).map (fun D => (Format.v1, D))
-  | none     => .error "unrecognised certificate: expected DCERT2 or DCERT1"
-
-/-- D4's admission, unchanged. -/
-def admitV2 (b : ByteArray) : Except String DesignCert := readCertChecked b
-
-/-- FP's admission, unchanged: parse, then the transport constraint the format
-forces. `asyncOK` is the one field whose loss FP could not ignore -- a DCERT1
-file whose `flopQAsync` sources disagree with the flops it parses to describes
-a DIFFERENT design from the one its exporter meant. -/
-def admitV1 (b : ByteArray) : Except String DesignCert :=
-  match V1.parseCert b with
-  | .error e => .error s!"parse: {e}"
-  | .ok D    =>
-    if V1.asyncOK D then .ok D
-    else .error "refused: a flopQAsync source names a flop the file records as \
-                 synchronous; DCERT1 cannot carry the commit-side flag"
-
-/-- Admit by version, each under its own policy. -/
-def admitAny (b : ByteArray) : Except String (Format × DesignCert) :=
-  match detect b with
-  | some .v2 => (admitV2 b).map (fun D => (Format.v2, D))
-  | some .v1 => (admitV1 b).map (fun D => (Format.v1, D))
-  | none     => .error "unrecognised certificate: expected DCERT2 or DCERT1"
 
 /-- Routing does not change what DCERT2 means: a rendered certificate comes
 back through the facade exactly as `parseCert` returns it, tagged `v2`. -/

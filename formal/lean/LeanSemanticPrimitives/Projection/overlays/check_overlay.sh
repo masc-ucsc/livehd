@@ -1,75 +1,83 @@
 #!/usr/bin/env bash
-# Drift check for the shared semantics, INCLUDING the one local overlay.
+# Drift check for the shared semantics the projection consumes on master.
 #
-# Seven of the eight pinned files must be byte-identical to the semantic base.
-# `Translation/LGraphModel.lean` is that base PLUS `bv_shl_step.patch`, and is
-# checked two independent ways: against a recorded hash, and by regenerating it
-# from the base.  The hash arm still means something when the base repository is
-# unreachable, so the record does not depend on anything outside this repo.
+#   check_overlay.sh [--semantic]
 #
-# Runnable from ANY directory: the repo root is derived from this script's own
-# location, never from `git rev-parse`.
+# Six files must be byte-identical to the semantic base 90583be (present in
+# this repository; BASE_REPO overrides).  Two are MASTER-ADAPTED --
+# Translation/LGraphModel.lean (the SHL/SRA/Sext boundary repairs) and
+# Translation/OpBridge.lean (the bridges re-proved for them) -- and are checked
+# against recorded sha256 values.  Changing either is legitimate, but must
+# update the record here in the same commit (see SHARED_SEMANTICS.md).
 #
-# Scratch space is PROJECT-LOCAL by default ($ROOT/.runtime/overlay_check) and
-# never /tmp.  $TMPDIR is honoured if set, including to a path inside this
-# worktree -- regeneration uses patch(1) rather than `git apply`, so there is no
-# parent-repository discovery to be confused by a scratch dir inside the tree.
+# --semantic additionally re-checks the bridge THEOREMS rather than trusting the
+# record: it rebuilds Projection/OperatorBridge (no Mathlib) and, under lake,
+# Translation/OpBridge (Mathlib).
+#
+# overlays/bv_shl_step.patch is the FP branch's historical overlay; master did
+# not apply it (its body is the unguarded 2^k), so it is no longer regenerated.
+#
+# Runnable from ANY directory: the repo root comes from this script's location.
 set -uo pipefail
 
 HERE=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 ROOT=$(cd "$HERE/../../../../.." && pwd)
 
 BASE_REV=90583be1349acbd25f740b176a406aa8bbe1251c
-BASE_REPO=${BASE_REPO:-/WORKROOT/projects/livehd-d2-ir-semantics}
+BASE_REPO=${BASE_REPO:-$ROOT}
 SRC=$ROOT/formal/lean/LeanSemanticPrimitives
-PATCHFILE=$HERE/bv_shl_step.patch
-EXPECTED_LGRAPHMODEL_SHA256=8a4fc7ea4132b3d845a8871c614bd36fa6d710ce1c63c2d783b81525813d6c4b
+
+# master-adapted files: path, recorded sha256
+EXPECTED_LGRAPHMODEL_SHA256=432bb98394892ad67d156923197ed90945f57cfbf86f3e6d2b602eead0f173ba
+EXPECTED_OPBRIDGE_SHA256=fc9366004cb12f1d96ae8624aaea4187960939d67c5b2b0c0b3bd3455d853b77
+
+SEMANTIC=0
+[ "${1:-}" = "--semantic" ] && SEMANTIC=1
 
 rc=0
 
-echo "-- seven pinned files, expected byte-identical to $BASE_REV"
-for f in Translation/GraphRefine.lean Translation/OpBridge.lean \
-         Compiler/DesignCert.lean Compiler/Runtime.lean \
-         Compiler/DesignCertWF.lean Compiler/DesignSemantics.lean \
-         SemanticPrimitives.lean; do
-  if (cd "$BASE_REPO" && git show "$BASE_REV:formal/lean/LeanSemanticPrimitives/$f") \
-       | cmp -s - "$SRC/$f"; then echo "  ok     $f"; else echo "  DRIFT  $f"; rc=1; fi
-done
-
-echo "-- one overlaid file"
-got=$(sha256sum "$SRC/Translation/LGraphModel.lean" | cut -d' ' -f1)
-if [ "$got" = "$EXPECTED_LGRAPHMODEL_SHA256" ]; then
-  echo "  ok     Translation/LGraphModel.lean (hash)"
+echo "-- six files, expected byte-identical to $BASE_REV"
+if ! (cd "$BASE_REPO" && git cat-file -e "$BASE_REV^{commit}") 2>/dev/null; then
+  echo "  FAIL   base $BASE_REV not found in $BASE_REPO"; rc=1
 else
-  echo "  DRIFT  Translation/LGraphModel.lean (hash)"
-  echo "         expected $EXPECTED_LGRAPHMODEL_SHA256"
-  echo "         got      $got"
-  rc=1
+  for f in Translation/GraphRefine.lean \
+           Compiler/DesignCert.lean Compiler/Runtime.lean \
+           Compiler/DesignCertWF.lean Compiler/DesignSemantics.lean \
+           SemanticPrimitives.lean; do
+    if (cd "$BASE_REPO" && git show "$BASE_REV:formal/lean/LeanSemanticPrimitives/$f") \
+         | cmp -s - "$SRC/$f"; then echo "  ok     $f"; else echo "  DRIFT  $f"; rc=1; fi
+  done
 fi
 
-if ! command -v patch >/dev/null 2>&1; then
-  echo "  skip   regeneration: patch(1) not found; hash check above still applies"
-else
-  WORK=${TMPDIR:-$ROOT/.runtime/overlay_check}
-  mkdir -p "$WORK" || { echo "  DRIFT  cannot create $WORK"; exit 1; }
-  tmp=$(mktemp -d "$WORK/overlay-check.XXXXXX") || exit 1
-  trap 'rm -rf "$tmp"' EXIT
-  if (cd "$BASE_REPO" && git show "$BASE_REV:formal/lean/LeanSemanticPrimitives/Translation/LGraphModel.lean") \
-       > "$tmp/LGraphModel.lean" 2>/dev/null; then
-    mkdir -p "$tmp/w/formal/lean/LeanSemanticPrimitives/Translation"
-    cp "$tmp/LGraphModel.lean" "$tmp/w/formal/lean/LeanSemanticPrimitives/Translation/LGraphModel.lean"
-    # patch(1), NOT `git apply`: no repository discovery, so $tmp may live
-    # anywhere, including inside this worktree
-    if patch -p1 -s -d "$tmp/w" < "$PATCHFILE" \
-         && cmp -s "$tmp/w/formal/lean/LeanSemanticPrimitives/Translation/LGraphModel.lean" \
-                   "$SRC/Translation/LGraphModel.lean"; then
-      echo "  ok     Translation/LGraphModel.lean (base + bv_shl_step.patch)"
-    else
-      echo "  DRIFT  Translation/LGraphModel.lean (base + bv_shl_step.patch)"
-      rc=1
-    fi
+echo "-- two master-adapted files, against recorded hashes"
+check_hash() {   # path expected
+  local got; got=$(sha256sum "$SRC/$1" | cut -d' ' -f1)
+  if [ "$got" = "$2" ]; then
+    echo "  ok     $1"
   else
-    echo "  skip   base unreachable at $BASE_REPO; hash check above still applies"
+    echo "  DRIFT  $1"
+    echo "         expected $2"
+    echo "         got      $got"
+    rc=1
+  fi
+}
+check_hash Translation/LGraphModel.lean "$EXPECTED_LGRAPHMODEL_SHA256"
+check_hash Translation/OpBridge.lean    "$EXPECTED_OPBRIDGE_SHA256"
+
+if [ $SEMANTIC -eq 1 ]; then
+  echo "-- the bridge theorems, rebuilt"
+  if (cd "$ROOT/formal/lean" && bash .build-proj.sh SemanticPrimitives Translation/LGraphModel \
+        Translation/GraphRefine Compiler/DesignCert Compiler/Runtime Compiler/DesignCertWF \
+        Compiler/DesignSemantics Projection/ObjectLanguage Projection/ObjectLanguageSemantics \
+        Projection/OperatorBridge) | grep -q 'Projection/OperatorBridge *ok'; then
+    echo "  ok     Projection/OperatorBridge (bv_shl_step_unfolds, evalOp_SHL/denoteOp_SHL_unchanged_by_overlay, evalOp_Sext)"
+  else
+    echo "  FAIL   Projection/OperatorBridge did not build"; rc=1
+  fi
+  if (cd "$ROOT/formal/lean" && lake build LeanSemanticPrimitives.Translation.OpBridge >/dev/null 2>&1); then
+    echo "  ok     Translation/OpBridge (bv_sra_guard_eq and the per-operator bridges)"
+  else
+    echo "  FAIL   Translation/OpBridge did not build under lake"; rc=1
   fi
 fi
 

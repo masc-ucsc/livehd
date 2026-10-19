@@ -64,6 +64,12 @@ struct Result {
   // low-transparent ICG, whose gate condition is the value held across the high
   // phase rather than the live arm. One guard is shared per gate.
   int  icg_held        = 0;
+  // GATED LATCHES whose gate is steady over their whole open window (the
+  // enable latch shut on that phase): they read the enable latch's held Q.
+  int  icg_window_held = 0;
+  // Decision 3A: same-edge readers given the latch's value AT the edge (see
+  // apply_reader_forwards) instead of a rule-4 refusal.
+  int  reader_forwards = 0;
   // Identity of the REFERENCE clock the slots are expressed against (a graph
   // input's name when there is one; "" when the design has no clock at all).
   // A miter whose two sides normalize against DIFFERENT reference clocks is
@@ -72,6 +78,9 @@ struct Result {
   // clock as "commits every step" and so cannot tell one clock from another.
   std::string ref_clock;
   std::string reason;  // why it was skipped / refused / what it did (for recipe_steps)
+  // Distinct clock roots state commits on AFTER the rewrite: 1 unless
+  // `Options::multi_clock` exported another domain.
+  int clock_domains = 1;
 };
 
 struct Options {
@@ -87,6 +96,25 @@ struct Options {
   int force_slots = 0;
   // Suppress the refusal diagnostics (probe callers report their own).
   bool quiet = false;
+  // EXPORT unrelated clock DOMAINS instead of refusing them (ported from the d2
+  // branch, 90583be13). The reference domain -- the root carrying the most
+  // state -- is normalized exactly as before; an element on another root is
+  // left as the plain posedge flop it is (a gated clock on it still folds into
+  // its enable, relative to ITS root), and the consumer -- the verified-compiler
+  // certificate, which carries a clock ordinal per element and whose Lean step
+  // takes an edge vector -- reads which domain it commits on. Refused by name:
+  // a latch or negedge element off the reference clock (it would need a divider
+  // of its own), a data-gated latch whose enable reads another domain, and a
+  // second-domain element that reads a reference-domain LATCH combinationally
+  // (its edge may fall inside the latch's window, where the hardware reads the
+  // latch's D and the commit-at-closing-edge model its held Q). Off by default:
+  // pass/lec and sim model a second domain themselves.
+  bool multi_clock = false;
+  // Decision 3A: admit rule 4's same-edge (latch, flop) pairs by GUARDED READER
+  // FORWARDING -- the reader alone is given the latch's value AT the edge,
+  // `reset ? RV : (E ? D : Q)` -- instead of refusing them. Off by default: with
+  // it off rule 4 refuses exactly as before, which pass/lec's fallback relies on.
+  bool forward_same_edge = false;
 };
 
 // Normalize `g` in place. `defs` (may be empty) are the resolution-library

@@ -76,6 +76,17 @@ FastExpr lower_fast_expr(const CertificateIR& c, const CertNode& n) {
         e.text         = cw == w ? div : cast(div, w);
       }
       break;
+    case Operation::SDiv:
+      if (arity(2)) {
+        // `bv_sdiv`: each dep's two's-complement value at ITS OWN width, the
+        // quotient truncated toward zero, then fitted to `w`; a zero divisor
+        // gives 0.
+        const auto a = "(BitVec.toInt " + dep(0) + ")";
+        const auto b = "(BitVec.toInt " + dep(1) + ")";
+        e.text       = "(if " + b + " = 0 then " + lit_zero(w) + " else BitVec.ofInt " + std::to_string(w) + " (trunc_div_int " + a
+                 + " " + b + "))";
+      }
+      break;
     case Operation::And: e.text = fold("&&&", terms, lit_zero(w)); break;
     case Operation::Or : e.text = fold("|||", terms, lit_zero(w)); break;
     case Operation::Xor: e.text = fold("^^^", terms, lit_zero(w)); break;

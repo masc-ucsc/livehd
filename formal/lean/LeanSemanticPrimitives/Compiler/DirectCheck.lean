@@ -43,17 +43,21 @@ the exporter actually implements it (`pass/lean/pass_lean.cpp`,
   Op_MemRead      3            any               `cert_memory_expand`
   Op_MemWriteBE b 4 (b=1)      any               `cert_memory_expand`
 
-Three operators the exporter CAN emit were not observed in the census but are
+Operators the exporter CAN emit that were not observed in the census are
 grounded by their exporter site, so they are accepted rather than refused:
 
   * `Op_Const` — `cert_node_expr` emits it for `Ntype_op::Nconst`; the dense
     `DesignCert` path turns constants into SOURCES, so it has zero node
     occurrences, but `eval_op Op_Const w _ = mk_bv w c` is total and grounded.
-  * `Op_UDiv` — `cert_node_expr` maps `Ntype_op::Div` to it.
+  * `Op_UDiv` — `cert_node_expr` maps an `Ntype_op::Div` whose operands are
+    all unsigned to it.
+  * `Op_SDiv` — and an `Ntype_op::Div` with a SIGNED operand (an unsigned
+    operand gains a zero bit first), so `bv_sdiv`'s two's-complement reading
+    of each operand at its own width is the exporter's meaning.
   * `Op_SetMask` — `cert_node_expr` emits it for `Ntype_op::Set_mask`.
   * `Op_MemWrite` — the non-byte-enabled write `cert_memory_expand` can emit.
 
-Five are REFUSED, and this is where Direction 2's table differs from a copy of
+Four are REFUSED, and this is where Direction 2's table differs from a copy of
 anyone's list — each is refused for a stated reason, not because it happens to
 be unreachable:
 
@@ -62,8 +66,13 @@ be unreachable:
     signed or unsigned variant from `node_output_is_signed`), and `eval_op`
     defines both as UNSIGNED comparisons, which is an ungrounded equation: if a
     signed `Op_LT` ever appeared it would silently compare unsigned.
-  * `Op_Div`, `Op_SDiv` — no exporter site.  `eval_op Op_Div` is likewise an
-    unsigned division whose signedness is ungrounded.
+  * `Op_Div` — no exporter site.  `eval_op Op_Div` is likewise an unsigned
+    division whose signedness is ungrounded.
+
+Accepting an operator here does not make the direct compiler LOWER it:
+`compileOp` refuses `Op_UDiv`, `Op_SDiv` and `Op_SetMask` itself, while the
+projection's memory route admits through this checker and executes the
+operators its own `OpSupported` names.
 
 Refusing an operator whose Lean equation is not grounded in the exporter is the
 whole point of a fail-closed checker; accepting it because the equation happens
@@ -329,11 +338,10 @@ theorem slotIsMem_lt {D : DesignCert} {r : Nat} {b : Bool} (h : slotIsMem D r = 
 --------------------------------------------------------------------------------
 
 /-- Is this operator in the accepted fragment at all?  See the header for why
-each of the five refusals is refused. -/
+each of the four refusals is refused. -/
 def opAccepted : LGraphOp → Bool
   | .Op_Sub  => false
   | .Op_Div  => false
-  | .Op_SDiv => false
   | .Op_LT   => false
   | .Op_GT   => false
   | _        => true
@@ -345,6 +353,7 @@ def opArity : LGraphOp → Nat → Bool
   | .Op_Sum k,        n => 0 < n && k ≤ n
   | .Op_Mult,         n => 0 < n
   | .Op_UDiv,         n => n == 2        -- *
+  | .Op_SDiv,         n => n == 2        -- *
   | .Op_And,          _ => true
   | .Op_Or,           _ => true
   | .Op_Xor,          _ => true
@@ -365,10 +374,9 @@ def opArity : LGraphOp → Nat → Bool
   | .Op_MemRead,      n => n == 3        -- *
   | .Op_MemWrite,     n => n == 4        -- *
   | .Op_MemWriteBE b, n => n == 4 && 0 < b   -- * (b = 0 would divide by zero)
-  -- the five refusals never reach here; `opAccepted` rejects them first
+  -- the four refusals never reach here; `opAccepted` rejects them first
   | .Op_Sub,  _ => false
   | .Op_Div,  _ => false
-  | .Op_SDiv, _ => false
   | .Op_LT,   _ => false
   | .Op_GT,   _ => false
 
@@ -930,6 +938,8 @@ theorem sem_mult (l : List BV) : eval_op .Op_Mult w l = mk_bv w (l.map bv_uint).
 theorem sem_udiv (a b : BV) :
     eval_op .Op_UDiv w [a, b] =
       mk_bv w (if bv_uint b = 0 then 0 else bv_uint a / bv_uint b) := rfl
+
+theorem sem_sdiv (a b : BV) : eval_op .Op_SDiv w [a, b] = bv_sdiv w a b := rfl
 
 theorem sem_and_nil : eval_op .Op_And w [] = mk_bv w 0 := rfl
 

@@ -104,6 +104,52 @@ grep -q "2 clock domain(s) exported" "$W/pass.log" \
   || { grep -o "P=[0-9]* slots[^\"]*" "$W/pass.log" | head -1; fail "the pass did not report the second clock domain as exported"; }
 echo "ok: with multi_clock=true the pass fires: P=2 on the reference, 2 clock domains exported"
 
+# ---- (1b): what the second domain may and may not be -------------------------------
+# Derived from mclk.v, each one line apart, and asserted to have applied.
+variant() { # <name> <sed-expr>
+  sed "$2" "$W/mclk.v" > "$W/$1.v"
+  cmp -s "$W/mclk.v" "$W/$1.v" && fail "the $1 variant did not apply"
+  rm -rf "$W/lg_$1"
+  "$LHD" compile "$W/$1.v" --reader yosys-slang --top mclk --emit-dir "lg:$W/lg_$1" --workdir "$W/cw_$1" \
+    >"$W/c_$1.log" 2>&1 || { tail -6 "$W/c_$1.log"; fail "compile of $1.v failed"; }
+  rm -rf "$W/lg_$1_n"
+  "$LHD" pass single_edge --top mclk "lg:$W/lg_$1" --emit-dir "lg:$W/lg_$1_n" --set multi_clock=true \
+    --workdir "$W/pw_$1" >"$W/p_$1.log" 2>&1
+}
+# A LATCH on the second clock that CLOSES ON THE FALL (open while clk_b is high):
+# it would need a divider of its own.
+variant mc_latch 's/always @(posedge clk_b or posedge reset) if (reset) b <= 8'"'"'d0; else b <= d + 8'"'"'d1;/always_latch if (clk_b) b = d + 8'"'"'d1;/'
+[ $? -ne 0 ] || fail "a latch on the second clock was ACCEPTED under multi_clock"
+grep -q "off-reference-clock" "$W/p_mc_latch.log" \
+  || { grep -o '"message":"[^"]*' "$W/p_mc_latch.log" | head -1; fail "the second-clock latch was refused for the wrong reason"; }
+echo "ok: a latch on the second clock is refused by name (off-reference-clock)"
+# ...but a latch that CLOSES ON THE RISE (open while clk_b is low -- a gate's
+# enable latch, CORE-ET B05's noc clock gate) is a posedge flop on its own root at
+# P=1, lowered exactly as the reference domain lowers one.
+variant mc_llatch 's/always @(posedge clk_b or posedge reset) if (reset) b <= 8'"'"'d0; else b <= d + 8'"'"'d1;/always_latch if (!clk_b) b = d + 8'"'"'d1;/'
+[ $? -eq 0 ] || { grep -o '"message":"[^"]*' "$W/p_mc_llatch.log" | head -1; fail "a latch closing on the second clock's rise was refused"; }
+grep -q "2 clock domain(s) exported" "$W/p_mc_llatch.log" || fail "the rise-closing latch variant did not export two domains"
+echo "ok: a latch closing on the second clock's rise is lowered on its own root (2 domains)"
+# The REVERSE cross-domain read: a reference-domain flop reading that latch. A
+# clk_a edge can fall inside its window.
+variant mc_rxlatch 's/always @(posedge clk_b or posedge reset) if (reset) b <= 8'"'"'d0; else b <= d + 8'"'"'d1;/always_latch if (!clk_b) b = d + 8'"'"'d1;/; s/if (reset) a <= 8'"'"'d0; else a <= d;/if (reset) a <= 8'"'"'d0; else a <= d ^ b;/'
+[ $? -ne 0 ] || fail "a reference-domain flop reading a second-domain latch was ACCEPTED"
+grep -q "cross-domain-latch-read" "$W/p_mc_rxlatch.log" \
+  || { grep -o '"message":"[^"]*' "$W/p_mc_rxlatch.log" | head -1; fail "the reverse cross-domain latch read was refused for the wrong reason"; }
+echo "ok: a reference-domain flop reading a second-domain latch is refused (cross-domain-latch-read)"
+# The second domain READING a reference-domain LATCH: a clk_b edge can fall inside
+# the latch's window, where the hardware reads D and the model the held Q.
+variant mc_xlatch 's/reg \[7:0\] a, n, b;/reg [7:0] a, n, b, la;/; s/assign qp = a;/always_latch if (clk_a) la = d; assign qp = a ^ la;/; s/else b <= d + 8'"'"'d1;/else b <= la + 8'"'"'d1;/'
+[ $? -ne 0 ] || fail "a second-domain flop reading a reference-domain latch was ACCEPTED"
+grep -q "cross-domain-latch-read" "$W/p_mc_xlatch.log" \
+  || { grep -o '"message":"[^"]*' "$W/p_mc_xlatch.log" | head -1; fail "the cross-domain latch read was refused for the wrong reason"; }
+echo "ok: a second-domain flop reading a reference-domain latch is refused (cross-domain-latch-read)"
+# ...but reading a reference-domain FLOP is a plain CDC sample of a held value.
+variant mc_xflop 's/else b <= d + 8'"'"'d1;/else b <= a + 8'"'"'d1;/'
+[ $? -eq 0 ] || { grep -o '"message":"[^"]*' "$W/p_mc_xflop.log" | head -1; fail "a second-domain flop reading a reference-domain FLOP was refused -- the cross-domain check is too broad"; }
+grep -q "2 clock domain(s) exported" "$W/p_mc_xflop.log" || fail "the flop-reading variant did not export two domains"
+echo "ok: a second-domain flop reading a reference-domain flop is accepted (2 domains)"
+
 emit() { # <lgdir> <outdir>
   rm -rf "$2"
   "$LHD" compile "lg:$1" --top mclk --emit-dir "verilog:$2" --workdir "$W/vw_$(basename "$2")" \
@@ -163,7 +209,11 @@ module tb;
   integer errs = 0, p;
 
   always #10      clk_s = ~clk_s;   // source clk_a:     rise 10+20p, fall 20+20p
-  always #(\`HALF) clk_n = ~clk_n;   // normalized clk_a: slot0 15+20p, slot1 25+20p
+  // normalized clk_a: slot0 15+20p, slot1 25+20p. The divider is \`initial 0\` and
+  // is not reset by \`reset\`, so its FIRST posedge is slot 0 and the clock must
+  // START there; free-running from t=0 it put slot 0 at 5+20p and every value one
+  // period late (errs=78, the same offset single_edge_four_classes_test had).
+  initial begin #10; forever #(\`HALF) clk_n = ~clk_n; end
   always #20      clk_b = ~clk_b;   // clk_b, IDENTICAL on both sides: rise 20+40k
 
   mclk   src(.clk_a(clk_s), .clk_b(clk_b), .reset(reset), .d(d), .qp(s_qp), .qn(s_qn), .qb(s_qb));

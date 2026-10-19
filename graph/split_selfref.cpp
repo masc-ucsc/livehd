@@ -602,12 +602,23 @@ static int split_selfref_pass(hhds::Graph* g, int& unresolved_out, unsigned& sto
         const auto& bc = gu::const_of(bd);
         if (!bc.has_unknowns() && !bc.is_negative() && bc.is_just_i64() && bc.to_just_i64() >= 1
             && bc.to_just_i64() <= (1 << 28)) {
-          const int b = static_cast<int>(bc.to_just_i64());
-          if (hi <= b) {
-            res = self(self, drv_at(m, 0), lo, hi, depth + 1);  // wholly inside the kept bits
+          const int  b   = static_cast<int>(bc.to_just_i64());
+          const auto src = drv_at(m, 0);
+          // The operand's OWN width also bounds the pass-through. `b` is the
+          // kept bit COUNT and may exceed bits(a): Op_Sext with n > a.width is
+          // a real shape -- LGraphModel's `eval_op` carries an arm for exactly
+          // it -- and there it ZERO-fills, because `mk_bv n (bv_uint a)` is
+          // unsigned. Resolving the slice against a signed operand pin would
+          // sign-replicate instead, so the two sides would disagree on the fill
+          // for a slice landing in [bits(a), b). Staying inside the operand's
+          // width makes the question moot; a slice past it falls through to the
+          // straddle case and stays unresolved, which is the safe answer.
+          const int aw = src.is_invalid() ? 0 : static_cast<int>(gu::bits_of(src));
+          if (hi <= b && hi <= aw) {
+            res = self(self, src, lo, hi, depth + 1);  // wholly inside the kept bits
           } else if (lo >= b) {
             // wholly above the sign: every requested bit IS bit b-1 of `a`
-            auto sgn = self(self, drv_at(m, 0), b - 1, b, depth + 1);
+            auto sgn = self(self, src, b - 1, b, depth + 1);
             if (!sgn.is_invalid()) {
               if (w == 1) {
                 res = sgn;

@@ -68,6 +68,7 @@ obligations at the end.  Wiring any bound into `Hw.checkResidual` is separately
 open and is not assumed here.
 -/
 import LeanSemanticPrimitives.Projection.RuntimeEncoding
+import LeanSemanticPrimitives.Projection.AxiomGate
 
 namespace Projection
 open Compiler
@@ -1746,45 +1747,45 @@ private def readBack (st : StateM) (a : BV) : Option Val :=
 end Hardware
 
 section Audit
-#print axioms Projection.MemImg.memGet_sound
-#print axioms Projection.StateM.StateRelR_functional
-#print axioms Projection.StateM.ResultRelR_functional
-#print axioms Projection.StateM.StateRelR_encStateM
-#print axioms Projection.StateM.ResultRelR_encResultM
-#print axioms Projection.StateM.StateRelR_memFree
-#print axioms Projection.StateM.decResultM_encResultM
-#print axioms Projection.Hardware.srcMemImg_denote
-#print axioms Projection.Hardware.ofMemConst_denote
-#print axioms Projection.Hardware.memCommit_denote
-#print axioms Projection.Hardware.stepMems_quiet
-#print axioms Projection.MemImg.valMemWriteBE_eq
-#print axioms Projection.MemImg.valMemWriteBE_disabled
-#print axioms Projection.MemImg.valMemWriteBE_refuses_outOfRange
-#print axioms Projection.MemImg.evalPrim_memWriteBE
-#print axioms Projection.MemImg.valMemSet_encListG
-#print axioms Projection.MemImg.valAllBV_encListG
-#print axioms Projection.MemImg.valMemRead_refuses_badWords
-#print axioms Projection.MemImg.valMemWalk_eq
-#print axioms Projection.MemImg.valMemRead_eq
-#print axioms Projection.MemImg.evalPrim_memRead
-#print axioms Projection.MemImg.memSet_sound
-#print axioms Projection.MemImg.writeChecked_sound
-#print axioms Projection.MemImg.writeAdmissible_iff
-#print axioms Projection.MemImg.setGo_body
-#print axioms Projection.MemImg.cons_set_step
-#print axioms Projection.MemImg.getGo_body
-#print axioms Projection.MemImg.getGo_sound
-#print axioms Projection.MemImg.cons_index_step
-#print axioms Projection.MemImg.denote_writeEn
-#print axioms Projection.MemImg.denote_writeBE
-#print axioms Projection.MemImg.setAt_outOfRange
-#print axioms Projection.MemImg.zeroImg_inRange
-#print axioms Projection.MemImg.ofMemConst_above
-#print axioms Projection.MemImg.decMemImg_encMemImg
-#print axioms Projection.StateM.decStateM_encStateM
-#print axioms Projection.StateM.denote_memFree
-#print axioms Projection.StateM.StateRelM_functional
-#print axioms Projection.StateM.StateRelM_denote_functional
+#audit_axioms Projection.MemImg.memGet_sound
+#audit_axioms Projection.StateM.StateRelR_functional
+#audit_axioms Projection.StateM.ResultRelR_functional
+#audit_axioms Projection.StateM.StateRelR_encStateM
+#audit_axioms Projection.StateM.ResultRelR_encResultM
+#audit_axioms Projection.StateM.StateRelR_memFree
+#audit_axioms Projection.StateM.decResultM_encResultM
+#audit_axioms Projection.Hardware.srcMemImg_denote
+#audit_axioms Projection.Hardware.ofMemConst_denote
+#audit_axioms Projection.Hardware.memCommit_denote
+#audit_axioms Projection.Hardware.stepMems_quiet
+#audit_axioms Projection.MemImg.valMemWriteBE_eq
+#audit_axioms Projection.MemImg.valMemWriteBE_disabled
+#audit_axioms Projection.MemImg.valMemWriteBE_refuses_outOfRange
+#audit_axioms Projection.MemImg.evalPrim_memWriteBE
+#audit_axioms Projection.MemImg.valMemSet_encListG
+#audit_axioms Projection.MemImg.valAllBV_encListG
+#audit_axioms Projection.MemImg.valMemRead_refuses_badWords
+#audit_axioms Projection.MemImg.valMemWalk_eq
+#audit_axioms Projection.MemImg.valMemRead_eq
+#audit_axioms Projection.MemImg.evalPrim_memRead
+#audit_axioms Projection.MemImg.memSet_sound
+#audit_axioms Projection.MemImg.writeChecked_sound
+#audit_axioms Projection.MemImg.writeAdmissible_iff
+#audit_axioms Projection.MemImg.setGo_body
+#audit_axioms Projection.MemImg.cons_set_step
+#audit_axioms Projection.MemImg.getGo_body
+#audit_axioms Projection.MemImg.getGo_sound
+#audit_axioms Projection.MemImg.cons_index_step
+#audit_axioms Projection.MemImg.denote_writeEn
+#audit_axioms Projection.MemImg.denote_writeBE
+#audit_axioms Projection.MemImg.setAt_outOfRange
+#audit_axioms Projection.MemImg.zeroImg_inRange
+#audit_axioms Projection.MemImg.ofMemConst_above
+#audit_axioms Projection.MemImg.decMemImg_encMemImg
+#audit_axioms Projection.StateM.decStateM_encStateM
+#audit_axioms Projection.StateM.denote_memFree
+#audit_axioms Projection.StateM.StateRelM_functional
+#audit_axioms Projection.StateM.StateRelM_denote_functional
 end Audit
 
 end Projection

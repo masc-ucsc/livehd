@@ -5,6 +5,7 @@ Stage 1: the annotated program.
 -/
 import LeanSemanticPrimitives.Projection.ResidualFragment
 import LeanSemanticPrimitives.Projection.MemSupport
+import LeanSemanticPrimitives.Projection.AxiomGate
 
 namespace Projection
 namespace MemProjection
@@ -368,14 +369,14 @@ private def mQuiet : ClockEdges   := #[false]
         | some sim => sim.prog.funs.map FunDef.arity == [3]
         | none     => false)
 
-#print axioms hwMemAP_erases
-#print axioms specializeFour_correct_of
-#print axioms memEntry_unique
-#print axioms projectMemDesignAt_correct
-#print axioms mkMemSimAt_design
-#print axioms mkMemSimOf_wf
-#print axioms projectMemDesign_correct
-#print axioms runMemSim_correct
+#audit_axioms hwMemAP_erases
+#audit_axioms specializeFour_correct_of
+#audit_axioms memEntry_unique
+#audit_axioms projectMemDesignAt_correct
+#audit_axioms mkMemSimAt_design
+#audit_axioms mkMemSimOf_wf
+#audit_axioms projectMemDesign_correct
+#audit_axioms runMemSim_correct
 
 end MemProjection
 end Projection

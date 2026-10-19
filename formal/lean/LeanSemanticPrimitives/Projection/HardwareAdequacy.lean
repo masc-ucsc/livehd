@@ -21,6 +21,7 @@ or to the verified compiler.
 
 import LeanSemanticPrimitives.Projection.HardwareInterpreter
 import LeanSemanticPrimitives.Projection.SurfaceSemantics
+import LeanSemanticPrimitives.Projection.SetMaskLoop
 
 namespace Projection
 namespace Hw
@@ -1080,6 +1081,245 @@ theorem list_len_three {α : Type} :
     ∀ {l : List α}, l.length = 3 → ∃ a b c, l = [a, b, c]
   | [a, b, c], _ => ⟨a, b, c, rfl⟩
 
+/-! ### D6 Tier 1: `Op_Mult`, `Op_UDiv`, `Op_SDiv`
+
+All three are built from integer primitives the object language already has
+(`mulI`, `divI`, `ltI`, `subI`) over `bv_uint` / `bv_sint`, so each agreement
+is arithmetic about those primitives -- no new primitive, so the specializer,
+its proof and the primitive tables are untouched. -/
+
+theorem multAll_agree {vals : List Val} {arg : Nat → BV} (hsv : SlotVals vals arg) :
+    ∀ (deps : List Nat) (σ : SEnv) (ed ee en : SExp),
+      (∀ d ∈ deps, d < vals.length) →
+      SEval hwS σ ed (encListG encNat deps) →
+      SEval hwS σ ee (objEnv vals) →
+      SEval hwS σ en (.int (Int.ofNat vals.length)) →
+      SEval hwS σ (.call "multAll" [ed, ee, en])
+        (.int (((deps.map arg).map bv_uint).prod))
+  | [],      _, _, _, _, _,  hdv, henv, hlen => by
+      refine SEval_call3 hdv henv hlen rfl rfl ?_
+      refine SEval.iteT (SEval_prim1 (.ref rfl) rfl) ?_
+      simp only [List.map_nil, List.prod_nil]
+      exact .lit
+  | d :: ds, _, _, _, _, hb, hdv, henv, hlen => by
+      refine SEval_call3 hdv henv hlen rfl rfl ?_
+      refine SEval.iteF (SEval_prim1 (.ref rfl) rfl) ?_
+      refine SEval_prim2
+        (SEval_prim1 (slot_read hsv (hb d List.mem_cons_self) (.ref rfl) (.ref rfl)
+          (SEval_hd (.ref rfl))) rfl)
+        (multAll_agree hsv ds _ _ _ _ (fun x hx => hb x (List.mem_cons_of_mem _ hx))
+          (SEval_tl (.ref rfl)) (.ref rfl) (.ref rfl)) ?_
+      simp [evalPrim, List.prod_cons]
+
+theorem opMult_agree {vals : List Val} {arg : Nat → BV} (hsv : SlotVals vals arg)
+    {w : Nat} {deps : List Nat} {σ : SEnv} {ew ed ee en : SExp}
+    (hb : ∀ d ∈ deps, d < vals.length)
+    (hw : SEval hwS σ ew (.int (Int.ofNat w)))
+    (hdv : SEval hwS σ ed (encListG encNat deps))
+    (henv : SEval hwS σ ee (objEnv vals))
+    (hlen : SEval hwS σ en (.int (Int.ofNat vals.length))) :
+    SEval hwS σ (.call "opMult" [ew, ed, ee, en])
+      (encBV (eval_op .Op_Mult w (deps.map arg))) := by
+  refine SEval_call4 hw hdv henv hlen rfl rfl ?_
+  exact SEval_prim2 (.ref rfl)
+    (multAll_agree hsv deps _ _ _ _ hb (.ref rfl) (.ref rfl) (.ref rfl)) rfl
+
+theorem opUDiv_agree {vals : List Val} {arg : Nat → BV} (hsv : SlotVals vals arg)
+    {w : Nat} {d0 d1 : Nat} {σ : SEnv} {ew ed ee en : SExp}
+    (hb0 : d0 < vals.length) (hb1 : d1 < vals.length)
+    (hw : SEval hwS σ ew (.int (Int.ofNat w)))
+    (hdv : SEval hwS σ ed (encListG encNat [d0, d1]))
+    (henv : SEval hwS σ ee (objEnv vals))
+    (hlen : SEval hwS σ en (.int (Int.ofNat vals.length))) :
+    SEval hwS σ (.call "opUDiv" [ew, ed, ee, en])
+      (encBV (eval_op .Op_UDiv w ([d0, d1].map arg))) := by
+  refine SEval_call4 hw hdv henv hlen rfl rfl ?_
+  exact SEval_prim2 (.ref rfl)
+    (SEval_prim2
+      (SEval_prim1 (slot_read hsv hb0 (.ref rfl) (.ref rfl) (SEval_hd (.ref rfl))) rfl)
+      (SEval_prim1 (slot_read hsv hb1 (.ref rfl) (.ref rfl) (SEval_hd (SEval_tl (.ref rfl)))) rfl)
+      rfl)
+    rfl
+
+theorem absI_agree {σ : SEnv} {ex : SExp} {x : Int} (hx : SEval hwS σ ex (.int x)) :
+    SEval hwS σ (.call "absI" [ex]) (.int (intAbs x)) := by
+  refine SEval_call1 hx rfl rfl ?_
+  by_cases h : x < 0
+  · exact SEval.iteT (SEval_prim2 (.ref rfl) .lit (by simp [evalPrim, h]))
+      (SEval_prim2 .lit (.ref rfl) (by simp [evalPrim, intAbs, h]))
+  · exact SEval.iteF (SEval_prim2 (.ref rfl) .lit (by simp [evalPrim, h]))
+      (by rw [show intAbs x = x by simp [intAbs, h]]; exact .ref rfl)
+
+theorem signFix_agree {σ : SEnv} {ea eb eq : SExp} {a b q : Int}
+    (ha : SEval hwS σ ea (.int a)) (hb : SEval hwS σ eb (.int b)) (hq : SEval hwS σ eq (.int q)) :
+    SEval hwS σ (.call "signFix" [ea, eb, eq])
+      (.int (if (a < 0) ≠ (b < 0) then -q else q)) := by
+  refine SEval_call3 ha hb hq rfl rfl ?_
+  by_cases h1 : a < 0 <;> by_cases h2 : b < 0
+  · exact SEval.iteT (SEval_prim2 (.ref rfl) .lit (by simp [evalPrim, h1]))
+      (SEval.iteT (SEval_prim2 (.ref rfl) .lit (by simp [evalPrim, h2]))
+        (by rw [show (if (a < 0) ≠ (b < 0) then -q else q) = q by simp [h1, h2]]; exact .ref rfl))
+  · exact SEval.iteT (SEval_prim2 (.ref rfl) .lit (by simp [evalPrim, h1]))
+      (SEval.iteF (SEval_prim2 (.ref rfl) .lit (by simp [evalPrim, h2]))
+        (SEval_prim2 .lit (.ref rfl) (by simp [evalPrim, h1, h2])))
+  · exact SEval.iteF (SEval_prim2 (.ref rfl) .lit (by simp [evalPrim, h1]))
+      (SEval.iteT (SEval_prim2 (.ref rfl) .lit (by simp [evalPrim, h2]))
+        (SEval_prim2 .lit (.ref rfl) (by simp [evalPrim, h1, h2])))
+  · exact SEval.iteF (SEval_prim2 (.ref rfl) .lit (by simp [evalPrim, h1]))
+      (SEval.iteF (SEval_prim2 (.ref rfl) .lit (by simp [evalPrim, h2]))
+        (by rw [show (if (a < 0) ≠ (b < 0) then -q else q) = q by simp [h1, h2]]; exact .ref rfl))
+
+theorem intAbs_nonneg (x : Int) : 0 ≤ intAbs x := by
+  unfold intAbs; split <;> omega
+
+/-- The object quotient of the absolute values IS `trunc_div_int`'s `q`: the
+Int quotient of two non-negatives is the cast Nat quotient, and the divisor's
+`toNat` is zero exactly when it is. -/
+theorem truncDiv_q (a b : Int) :
+    (if intAbs b = 0 then 0 else intAbs a / intAbs b)
+      = (if (intAbs b).toNat = 0 then 0 else (((intAbs a).toNat / (intAbs b).toNat : Nat) : Int)) := by
+  have ha := intAbs_nonneg a
+  have hb := intAbs_nonneg b
+  have hza : ((intAbs a).toNat : Int) = intAbs a := Int.toNat_of_nonneg ha
+  have hzb : ((intAbs b).toNat : Int) = intAbs b := Int.toNat_of_nonneg hb
+  by_cases h0 : intAbs b = 0
+  · have : (intAbs b).toNat = 0 := by omega
+    simp [h0]
+  · have : (intAbs b).toNat ≠ 0 := by omega
+    simp only [h0, this, if_false]
+    rw [Int.natCast_ediv, hza, hzb]
+
+/-- The object's signed quotient IS `trunc_div_int`. -/
+theorem truncDiv_obj (a b : Int) :
+    (if (a < 0) ≠ (b < 0) then -(if intAbs b = 0 then 0 else intAbs a / intAbs b)
+     else (if intAbs b = 0 then 0 else intAbs a / intAbs b)) = trunc_div_int a b := by
+  unfold trunc_div_int
+  simp only [truncDiv_q]
+  by_cases h : (intAbs b).toNat = 0 <;> simp [h]
+
+theorem opSDiv_agree {vals : List Val} {arg : Nat → BV} (hsv : SlotVals vals arg)
+    {w : Nat} {d0 d1 : Nat} {σ : SEnv} {ew ed ee en : SExp}
+    (hb0 : d0 < vals.length) (hb1 : d1 < vals.length)
+    (hw : SEval hwS σ ew (.int (Int.ofNat w)))
+    (hdv : SEval hwS σ ed (encListG encNat [d0, d1]))
+    (henv : SEval hwS σ ee (objEnv vals))
+    (hlen : SEval hwS σ en (.int (Int.ofNat vals.length))) :
+    SEval hwS σ (.call "opSDiv" [ew, ed, ee, en])
+      (encBV (eval_op .Op_SDiv w ([d0, d1].map arg))) := by
+  refine SEval_call4 hw hdv henv hlen rfl rfl ?_
+  refine SEval_call4 (.ref rfl)
+    (SEval_prim1 (slot_read hsv hb1 (.ref rfl) (.ref rfl) (SEval_hd (SEval_tl (.ref rfl)))) rfl)
+    (SEval_prim1 (slot_read hsv hb0 (.ref rfl) (.ref rfl) (SEval_hd (.ref rfl))) rfl)
+    (SEval_prim1 (slot_read hsv hb1 (.ref rfl) (.ref rfl) (SEval_hd (SEval_tl (.ref rfl)))) rfl)
+    rfl rfl ?_
+  show SEval hwS _ _ (encBV (bv_sdiv w (arg d0) (arg d1)))
+  unfold bv_sdiv
+  by_cases h0 : bv_uint (arg d1) = 0
+  · refine SEval.iteT (SEval_prim2 (.ref rfl) .lit (by simp [evalPrim, h0])) ?_
+    simp only [h0, if_true]
+    exact SEval_prim2 (.ref rfl) .lit rfl
+  · refine SEval.iteF (SEval_prim2 (.ref rfl) .lit (by simp [evalPrim, h0])) ?_
+    simp only [h0, if_false]
+    refine SEval_prim2 (.ref rfl)
+      (signFix_agree (.ref rfl) (.ref rfl)
+        (SEval_prim2 (absI_agree (.ref rfl)) (absI_agree (.ref rfl)) rfl)) ?_
+    rw [truncDiv_obj]
+    rfl
+
+/-! ### D6 Tier 1: `Op_SetMask`
+
+The object program walks the positions `0 … w-1` (`smLoop`); `SetMaskLoop`
+proves that bounded walk IS `bv_set_mask`.  Here: the walk computes
+`SetMaskLoop.smRun`, step by step. -/
+
+/-- `bv_set_bit`, with its two `+ 0` / `- 0` arms folded away -- the shape the
+object code tests. -/
+theorem bv_set_bit_split (x : BV) (i : Nat) (b : Bool) :
+    bv_set_bit x i b
+      = mk_bv x.width
+          (if b then (if bv_bit x i then bv_uint x else bv_uint x + 2 ^ i)
+           else (if bv_bit x i then bv_uint x - 2 ^ i else bv_uint x)) := by
+  unfold bv_set_bit
+  cases b <;> cases bv_bit x i <;> simp
+
+theorem setBitV_agree {σ : SEnv} {ex ei ep eb : SExp} {x : BV} {i : Nat} {b : Bool}
+    (hx : SEval hwS σ ex (encBV x)) (hi : SEval hwS σ ei (.int (Int.ofNat i)))
+    (hp : SEval hwS σ ep (.int ((2 : Int) ^ i))) (hb : SEval hwS σ eb (.bool b)) :
+    SEval hwS σ (.call "setBitV" [ex, ei, ep, eb]) (encBV (bv_set_bit x i b)) := by
+  refine SEval_call4 hx hi hp hb rfl rfl ?_
+  refine SEval.letN (SEval_prim1 (.ref rfl) (prim_bvUint x)) ?_
+  rw [bv_set_bit_split]
+  refine SEval_prim2 (SEval_prim1 (.ref rfl) (prim_bvWidth x)) ?_ (prim_bvMk x.width _)
+  cases b <;> cases hbit : bv_bit x i
+  · exact SEval.iteF (.ref rfl)
+      (SEval.iteF (SEval_prim2 (.ref rfl) (.ref rfl) (by rw [prim_bvBit, hbit])) (.ref rfl))
+  · exact SEval.iteF (.ref rfl)
+      (SEval.iteT (SEval_prim2 (.ref rfl) (.ref rfl) (by rw [prim_bvBit, hbit]))
+        (SEval_prim2 (.ref rfl) (.ref rfl) rfl))
+  · exact SEval.iteT (.ref rfl)
+      (SEval.iteF (SEval_prim2 (.ref rfl) (.ref rfl) (by rw [prim_bvBit, hbit]))
+        (SEval_prim2 (.ref rfl) (.ref rfl) rfl))
+  · exact SEval.iteT (.ref rfl)
+      (SEval.iteT (SEval_prim2 (.ref rfl) (.ref rfl) (by rw [prim_bvBit, hbit])) (.ref rfl))
+
+theorem smLoop_agree {m v : BV} {w : Nat} :
+    ∀ (n i : Nat) (acc : BV) (k : Nat) {σ : SEnv} {ea em ev ei ep ek ew : SExp},
+      i + n = w →
+      SEval hwS σ ea (encBV acc) → SEval hwS σ em (encBV m) → SEval hwS σ ev (encBV v) →
+      SEval hwS σ ei (.int (Int.ofNat i)) → SEval hwS σ ep (.int ((2 : Int) ^ i)) →
+      SEval hwS σ ek (.int (Int.ofNat k)) → SEval hwS σ ew (.int (Int.ofNat w)) →
+      SEval hwS σ (.call "smLoop" [ea, em, ev, ei, ep, ek, ew])
+        (encBV (SetMaskLoop.smRun m v n i acc k))
+  | 0, i, acc, k, _, _, _, _, _, _, _, _, hn, ha, hm, hv, hi, hp, hk, hw => by
+      refine .call (.cons ha (.cons hm (.cons hv (.cons hi (.cons hp (.cons hk (.cons hw .nil)))))))
+        rfl rfl ?_
+      exact SEval.iteF (SEval_prim2 (.ref rfl) (.ref rfl) (by simp [evalPrim]; omega)) (.ref rfl)
+  | n + 1, i, acc, k, _, _, _, _, _, _, _, _, hn, ha, hm, hv, hi, hp, hk, hw => by
+      refine .call (.cons ha (.cons hm (.cons hv (.cons hi (.cons hp (.cons hk (.cons hw .nil)))))))
+        rfl rfl ?_
+      refine SEval.iteT (SEval_prim2 (.ref rfl) (.ref rfl) (by simp [evalPrim]; omega)) ?_
+      have hi' : evalPrim .addI [.int (Int.ofNat i), .int 1] = .ok (.int (Int.ofNat (i + 1))) := by
+        simp [evalPrim]
+      have hp' : evalPrim .addI [.int ((2 : Int) ^ i), .int ((2 : Int) ^ i)]
+          = .ok (.int ((2 : Int) ^ (i + 1))) := by
+        simp [evalPrim, Int.pow_succ]; omega
+      have hk' : evalPrim .addI [.int (Int.ofNat k), .int 1] = .ok (.int (Int.ofNat (k + 1))) := by
+        simp [evalPrim]
+      cases hbit : bv_bit m i
+      · refine SEval.letN (SEval_prim2 (.ref rfl) (.ref rfl) (by rw [prim_bvBit, hbit])) ?_
+        refine SEval.letN (SEval.iteF (.ref rfl) (.ref rfl)) ?_
+        refine SEval.letN (SEval.iteF (.ref rfl) (.ref rfl)) ?_
+        simp only [SetMaskLoop.smRun, hbit, Bool.false_eq_true, ↓reduceIte]
+        exact smLoop_agree n (i + 1) acc k (by omega) (.ref rfl) (.ref rfl) (.ref rfl)
+          (SEval_prim2 (.ref rfl) .lit hi') (SEval_prim2 (.ref rfl) (.ref rfl) hp') (.ref rfl) (.ref rfl)
+      · refine SEval.letN (SEval_prim2 (.ref rfl) (.ref rfl) (by rw [prim_bvBit, hbit])) ?_
+        refine SEval.letN (SEval.iteT (.ref rfl)
+          (setBitV_agree (.ref rfl) (.ref rfl) (.ref rfl) (SEval_prim2 (.ref rfl) (.ref rfl) rfl))) ?_
+        refine SEval.letN (SEval.iteT (.ref rfl) (SEval_prim2 (.ref rfl) .lit hk')) ?_
+        simp only [SetMaskLoop.smRun, hbit, ↓reduceIte]
+        exact smLoop_agree n (i + 1) _ (k + 1) (by omega) (.ref rfl) (.ref rfl) (.ref rfl)
+          (SEval_prim2 (.ref rfl) .lit hi') (SEval_prim2 (.ref rfl) (.ref rfl) hp') (.ref rfl) (.ref rfl)
+
+theorem opSetMask_agree {vals : List Val} {arg : Nat → BV} (hsv : SlotVals vals arg)
+    {w : Nat} {d0 d1 d2 : Nat} {σ : SEnv} {ew ed ee en : SExp}
+    (hb0 : d0 < vals.length) (hb1 : d1 < vals.length) (hb2 : d2 < vals.length)
+    (hw : SEval hwS σ ew (.int (Int.ofNat w)))
+    (hdv : SEval hwS σ ed (encListG encNat [d0, d1, d2]))
+    (henv : SEval hwS σ ee (objEnv vals))
+    (hlen : SEval hwS σ en (.int (Int.ofNat vals.length))) :
+    SEval hwS σ (.call "opSetMask" [ew, ed, ee, en])
+      (encBV (eval_op .Op_SetMask w ([d0, d1, d2].map arg))) := by
+  refine SEval_call4 hw hdv henv hlen rfl rfl ?_
+  show SEval hwS _ _ (encBV (bv_set_mask w (arg d0) (arg d1) (arg d2)))
+  rw [SetMaskLoop.set_mask_eq_smRun]
+  exact SEval_prim2 (.ref rfl)
+    (smLoop_agree w 0 (arg d0) 0 (by omega)
+      (slot_read hsv hb0 (.ref rfl) (.ref rfl) (SEval_hd (.ref rfl)))
+      (slot_read hsv hb1 (.ref rfl) (.ref rfl) (SEval_hd (SEval_tl (.ref rfl))))
+      (slot_read hsv hb2 (.ref rfl) (.ref rfl) (SEval_hd (SEval_tl (SEval_tl (.ref rfl)))))
+      .lit .lit .lit (.ref rfl))
+    rfl
+
 theorem applyOp_agree {vals : List Val} {arg : Nat → BV} (hsv : SlotVals vals arg)
     {op : LGraphOp} {w : Nat} {deps : List Nat} {σ : SEnv} {eo ew ed ee en : SExp}
     (hsup : OpSupported op = true) (harity : ArityOK op deps)
@@ -1292,13 +1532,99 @@ theorem applyOp_agree {vals : List Val} {arg : Nat → BV} (hsv : SlotVals vals 
               (opShl_agree hsv hb (.ref rfl) (.ref rfl) (.ref rfl) (.ref rfl))))))))))))))))))
   | Op_Const c => exact absurd hsup (by simp [OpSupported])
   | Op_Sub => exact absurd hsup (by simp [OpSupported])
-  | Op_Mult => exact absurd hsup (by simp [OpSupported])
+  | Op_Mult =>
+      exact SEval.iteF (SEval_prim2 (.ref rfl) .lit rfl)
+              (SEval.iteF (SEval_prim2 (.ref rfl) .lit rfl)
+              (SEval.iteF (SEval_prim2 (.ref rfl) .lit rfl)
+              (SEval.iteF (SEval_prim2 (.ref rfl) .lit rfl)
+              (SEval.iteF (SEval_prim2 (.ref rfl) .lit rfl)
+              (SEval.iteF (SEval_prim2 (.ref rfl) .lit rfl)
+              (SEval.iteF (SEval_prim2 (.ref rfl) .lit rfl)
+              (SEval.iteF (SEval_prim2 (.ref rfl) .lit rfl)
+              (SEval.iteF (SEval_prim2 (.ref rfl) .lit rfl)
+              (SEval.iteF (SEval_prim2 (.ref rfl) .lit rfl)
+              (SEval.iteF (SEval_prim2 (.ref rfl) .lit rfl)
+              (SEval.iteF (SEval_prim2 (.ref rfl) .lit rfl)
+              (SEval.iteF (SEval_prim2 (.ref rfl) .lit rfl)
+              (SEval.iteF (SEval_prim2 (.ref rfl) .lit rfl)
+              (SEval.iteF (SEval_prim2 (.ref rfl) .lit rfl)
+              (SEval.iteF (SEval_prim2 (.ref rfl) .lit rfl)
+              (SEval.iteF (SEval_prim2 (.ref rfl) .lit rfl)
+              (SEval.iteT (SEval_prim2 (.ref rfl) .lit rfl)
+              (opMult_agree hsv hb (.ref rfl) (.ref rfl) (.ref rfl) (.ref rfl)))))))))))))))))))
   | Op_Div => exact absurd hsup (by simp [OpSupported])
-  | Op_UDiv => exact absurd hsup (by simp [OpSupported])
-  | Op_SDiv => exact absurd hsup (by simp [OpSupported])
+  | Op_UDiv =>
+      obtain ⟨d0, d1, rfl⟩ := list_len_two harity
+      exact SEval.iteF (SEval_prim2 (.ref rfl) .lit rfl)
+              (SEval.iteF (SEval_prim2 (.ref rfl) .lit rfl)
+              (SEval.iteF (SEval_prim2 (.ref rfl) .lit rfl)
+              (SEval.iteF (SEval_prim2 (.ref rfl) .lit rfl)
+              (SEval.iteF (SEval_prim2 (.ref rfl) .lit rfl)
+              (SEval.iteF (SEval_prim2 (.ref rfl) .lit rfl)
+              (SEval.iteF (SEval_prim2 (.ref rfl) .lit rfl)
+              (SEval.iteF (SEval_prim2 (.ref rfl) .lit rfl)
+              (SEval.iteF (SEval_prim2 (.ref rfl) .lit rfl)
+              (SEval.iteF (SEval_prim2 (.ref rfl) .lit rfl)
+              (SEval.iteF (SEval_prim2 (.ref rfl) .lit rfl)
+              (SEval.iteF (SEval_prim2 (.ref rfl) .lit rfl)
+              (SEval.iteF (SEval_prim2 (.ref rfl) .lit rfl)
+              (SEval.iteF (SEval_prim2 (.ref rfl) .lit rfl)
+              (SEval.iteF (SEval_prim2 (.ref rfl) .lit rfl)
+              (SEval.iteF (SEval_prim2 (.ref rfl) .lit rfl)
+              (SEval.iteF (SEval_prim2 (.ref rfl) .lit rfl)
+              (SEval.iteF (SEval_prim2 (.ref rfl) .lit rfl)
+              (SEval.iteT (SEval_prim2 (.ref rfl) .lit rfl)
+              (opUDiv_agree hsv (hb d0 (by simp)) (hb d1 (by simp)) (.ref rfl) (.ref rfl) (.ref rfl) (.ref rfl))))))))))))))))))))
+  | Op_SDiv =>
+      obtain ⟨d0, d1, rfl⟩ := list_len_two harity
+      exact SEval.iteF (SEval_prim2 (.ref rfl) .lit rfl)
+              (SEval.iteF (SEval_prim2 (.ref rfl) .lit rfl)
+              (SEval.iteF (SEval_prim2 (.ref rfl) .lit rfl)
+              (SEval.iteF (SEval_prim2 (.ref rfl) .lit rfl)
+              (SEval.iteF (SEval_prim2 (.ref rfl) .lit rfl)
+              (SEval.iteF (SEval_prim2 (.ref rfl) .lit rfl)
+              (SEval.iteF (SEval_prim2 (.ref rfl) .lit rfl)
+              (SEval.iteF (SEval_prim2 (.ref rfl) .lit rfl)
+              (SEval.iteF (SEval_prim2 (.ref rfl) .lit rfl)
+              (SEval.iteF (SEval_prim2 (.ref rfl) .lit rfl)
+              (SEval.iteF (SEval_prim2 (.ref rfl) .lit rfl)
+              (SEval.iteF (SEval_prim2 (.ref rfl) .lit rfl)
+              (SEval.iteF (SEval_prim2 (.ref rfl) .lit rfl)
+              (SEval.iteF (SEval_prim2 (.ref rfl) .lit rfl)
+              (SEval.iteF (SEval_prim2 (.ref rfl) .lit rfl)
+              (SEval.iteF (SEval_prim2 (.ref rfl) .lit rfl)
+              (SEval.iteF (SEval_prim2 (.ref rfl) .lit rfl)
+              (SEval.iteF (SEval_prim2 (.ref rfl) .lit rfl)
+              (SEval.iteF (SEval_prim2 (.ref rfl) .lit rfl)
+              (SEval.iteT (SEval_prim2 (.ref rfl) .lit rfl)
+              (opSDiv_agree hsv (hb d0 (by simp)) (hb d1 (by simp)) (.ref rfl) (.ref rfl) (.ref rfl) (.ref rfl)))))))))))))))))))))
   | Op_LT => exact absurd hsup (by simp [OpSupported])
   | Op_GT => exact absurd hsup (by simp [OpSupported])
-  | Op_SetMask => exact absurd hsup (by simp [OpSupported])
+  | Op_SetMask =>
+      obtain ⟨d0, d1, d2, rfl⟩ := list_len_three harity
+      exact SEval.iteF (SEval_prim2 (.ref rfl) .lit rfl)
+              (SEval.iteF (SEval_prim2 (.ref rfl) .lit rfl)
+              (SEval.iteF (SEval_prim2 (.ref rfl) .lit rfl)
+              (SEval.iteF (SEval_prim2 (.ref rfl) .lit rfl)
+              (SEval.iteF (SEval_prim2 (.ref rfl) .lit rfl)
+              (SEval.iteF (SEval_prim2 (.ref rfl) .lit rfl)
+              (SEval.iteF (SEval_prim2 (.ref rfl) .lit rfl)
+              (SEval.iteF (SEval_prim2 (.ref rfl) .lit rfl)
+              (SEval.iteF (SEval_prim2 (.ref rfl) .lit rfl)
+              (SEval.iteF (SEval_prim2 (.ref rfl) .lit rfl)
+              (SEval.iteF (SEval_prim2 (.ref rfl) .lit rfl)
+              (SEval.iteF (SEval_prim2 (.ref rfl) .lit rfl)
+              (SEval.iteF (SEval_prim2 (.ref rfl) .lit rfl)
+              (SEval.iteF (SEval_prim2 (.ref rfl) .lit rfl)
+              (SEval.iteF (SEval_prim2 (.ref rfl) .lit rfl)
+              (SEval.iteF (SEval_prim2 (.ref rfl) .lit rfl)
+              (SEval.iteF (SEval_prim2 (.ref rfl) .lit rfl)
+              (SEval.iteF (SEval_prim2 (.ref rfl) .lit rfl)
+              (SEval.iteF (SEval_prim2 (.ref rfl) .lit rfl)
+              (SEval.iteF (SEval_prim2 (.ref rfl) .lit rfl)
+              (SEval.iteT (SEval_prim2 (.ref rfl) .lit rfl)
+              (opSetMask_agree hsv (hb d0 (by simp)) (hb d1 (by simp)) (hb d2 (by simp))
+                (.ref rfl) (.ref rfl) (.ref rfl) (.ref rfl))))))))))))))))))))))
   | Op_MemRead => exact absurd hsup (by simp [OpSupported])
   | Op_MemWrite => exact absurd hsup (by simp [OpSupported])
   | Op_MemWriteBE b => exact absurd hsup (by simp [OpSupported])

@@ -169,11 +169,11 @@ def badZeroWidth : DesignCert :=
     nodes := #[ { op := .Op_Sum 2, width := 0, deps := #[0, 1] }
               , { op := .Op_And,   width := 4, deps := #[3, 2] } ] }
 
-/-- `Op_SDiv` is outside the accepted fragment: no exporter site, and `eval_op`'s
-equation for it is ungrounded. -/
+/-- `Op_Div` is outside the accepted fragment: no exporter site, and `eval_op`'s
+unsigned equation for it is ungrounded. -/
 def badUnsupportedOp : DesignCert :=
   { combAddMask with
-    nodes := #[ { op := .Op_SDiv, width := 4, deps := #[0, 1] }
+    nodes := #[ { op := .Op_Div,  width := 4, deps := #[0, 1] }
               , { op := .Op_And,  width := 4, deps := #[3, 2] } ] }
 
 /-- An `Op_EQ` at width 4: the LGraph comparison cells are one bit. -/

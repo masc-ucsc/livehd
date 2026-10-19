@@ -16,9 +16,12 @@ WHAT IT DOES, in the order the phases are reported.
   2. SUPPORT.  The SCALAR report, verbatim from `CertLoad.supportReport`, with
      the fields that actually failed named by `MemSupport.scalarFailures` --
      never inferred.  Then the memory route's own report.
-  3. BTA + SPECIALIZE.  `mixDriver` at the requested budget on `hwMemAP`, whose
-     entry division is `[.stat, .dyn, .dyn, .dyn]`: the design STATIC, and
-     exactly the edge vector, the input vector and the state DYNAMIC.
+  3. BTA + SPECIALIZE.  `mixDriver` at the requested budget on `hwMemAPF`
+     (`MemFused`: the memory interpreter with `mainM`'s `env0` binding inlined
+     and the node fold fused into its readers, `memF_iff`; `route:var` selects
+     `MemVariant`'s `hwMemAPVar`, `route:plain` the original `hwMemAP`),
+     whose entry division is `[.stat, .dyn, .dyn, .dyn]`: the design STATIC,
+     and exactly the edge vector, the input vector and the state DYNAMIC.
   4. CHECK.  The existing production checker `Projection.Hw.checkResidual`,
      unchanged, and its RETURNED bound.  There is no fallback bound.
   5. EXECUTE.  Gated by `HwMem.runtimeFullOKB`; the residual is evaluated at the
@@ -75,8 +78,11 @@ state, input or edge vector / 8 parse/load failure.
 -/
 import LeanSemanticPrimitives.Projection.MemProjection
 import LeanSemanticPrimitives.Projection.HardwareMemWriteAdmit
+import LeanSemanticPrimitives.Projection.MemVariantSim
+import LeanSemanticPrimitives.Projection.MemFused
 import LeanSemanticPrimitives.Projection.Proto.RunnerSupport
-import LeanSemanticPrimitives.Compiler.CertIOFacade
+import LeanSemanticPrimitives.Compiler.CertIORoute   -- DCERT2 + DCERT1, routed by magic (Mathlib-free)
+import LeanSemanticPrimitives.Compiler.RunAdmission   -- C3 edges / C4 reset polarity
 
 open Compiler Projection Projection.Hw Projection.HwMem Projection.MemProjection
 open Projection.Runner
@@ -534,11 +540,23 @@ structure Cfg where
   overwritten before the end. -/
   trace : Bool := false
   /-- run the EXTENDED route, which additionally admits ordinary `Op_MemWrite`.
-  OFF by default: the default route is the original one, unchanged, and it
-  still refuses a plain write.  When on, admission is `admitsWB` and the bundle
+  ON by default since D6 Tier 1; `no-plain-write` selects the original route,
+  which refuses a plain write.  When on, admission is `admitsWB` and the bundle
   is built by `mkMemSimOfW`; the specialization function, the production
-  residual checker and the execution function are the SAME ones. -/
-  plainWrite : Bool := false
+  residual checker and the execution function are the SAME ones, and on a
+  design with no plain write `runRoute` checks on every run that the two
+  admissions agree. -/
+  plainWrite : Bool := true
+  /-- which clocks fire on each cycle (RunnerSupport `scheduleEdges`): `auto`
+  keeps the one-clock schedule for a one-clock design and fires domains
+  INDEPENDENTLY when the certificate declares more than one clock. -/
+  edgeMode : EdgeMode := .auto
+  /-- which memory interpreter is specialized: `fused` (default:
+  `MemFused.projectMemFDesignAt`, `env0` inlined and the node fold fused into
+  its readers, `runMemSim(W)F_correct`), `var` (`MemVariant`, `env0` inlined
+  only, `runMemSim(W)V_correct`) or `plain` (`projectMemDesignAt`,
+  `runMemSim(W)_correct`). All three conclusions are the same. -/
+  route : String := "fused"
 
 def say (s : String) : IO Unit := IO.println s
 
@@ -549,6 +567,7 @@ def runRoute (label : String) (certHash : String) (D : DesignCert) (cfg : Cfg)
   say s!"  certificate fnv1a {certHash}"
   say s!"  shape: sources {D.sources.size} nodes {D.nodes.size} outputs {D.outputs.size} \
 flops {D.flops.size} memories {D.memories.size} clocks {D.clocks.size}"
+  if let some rc := (← RunAdmission.refuseDesign? D) then return rc
   -- 1. retained metadata
   say s!"  clocks: {String.intercalate ", " (D.clocks.toList.map (fun c => c.name))}"
   -- every flop's metadata is RETAINED; the per-flop dump is capped so a
@@ -579,7 +598,7 @@ nextImgs {mr.nextImgs} | ADMITTED {mr.admitOK}"
     (fun n c => if c.op == .Op_MemWrite then n + 1 else n) 0
   let admW := HwMem.admitsWB D
   if cfg.plainWrite then
-    say s!"  EXTENDED route requested: Op_MemWrite nodes {plainN}, \
+    say s!"  EXTENDED route (default): Op_MemWrite nodes {plainN}, \
 admitsB {HwMem.admitsB D}, admitsWB {admW}"
     if plainN == 0 && HwMem.admitsB D != admW then
       IO.eprintln "  the extension changed an answer on a design with NO plain write"
@@ -596,11 +615,20 @@ admitsB {HwMem.admitsB D}, admitsWB {admW}"
     say "  RESULT: MEMROUTE SUPPORT ONLY (admitted; no generation attempted)"
     return 0
   -- 3/4. specialize at the requested budget, then the production checker
-  say s!"  specializing hwMemAP (division [.stat,.dyn,.dyn,.dyn]: design static; \
-edges, input, state dynamic) at fuel {cfg.stepFuel}/{cfg.workFuel}"
+  say s!"  specializing {if cfg.route == "plain" then "hwMemAP" else if cfg.route == "var"
+      then "hwMemAPVar (env0 inlined; MemVariant)" else "hwMemAPF (fold fused; MemFused)"} \
+(division [.stat,.dyn,.dyn,.dyn]: design static; edges, input, state dynamic) at fuel \
+{cfg.stepFuel}/{cfg.workFuel}"
   (← IO.getStdout).flush
   let t2 ← IO.monoMsNow
-  let res ← IO.lazyPure (fun _ => projectMemDesignAt cfg.stepFuel cfg.workFuel D)
+  -- the bundle is honest by `mkMemSimOf(W)_wfF` / `_wfV` / `_wf` and runs
+  -- correctly by `runMemSim(W)F_correct` / `V_correct` / `_correct` (fused / var /
+  -- plain). `runMemSim`, `mkMemSimOf(W)` and `checkResidual` are the same
+  -- functions on all three.
+  let res ← IO.lazyPure (fun _ =>
+    if cfg.route == "plain" then projectMemDesignAt cfg.stepFuel cfg.workFuel D
+    else if cfg.route == "var" then MemVariant.projectMemVarDesignAt cfg.stepFuel cfg.workFuel D
+    else MemFused.projectMemFDesignAt cfg.stepFuel cfg.workFuel D)
   match res with
   | .error .outOfFuel =>
       let t3 ← IO.monoMsNow
@@ -659,6 +687,7 @@ unchanged -- refusing rather than running on a state the encoder altered"
         | some ws => say s!"  TRACE slots write {ws.write} addr {ws.addr} datum {ws.datum} \
 effEn {ws.effEn} origEn {ws.origEn} mask {ws.mask} pred {ws.pred} phaseSrc {ws.phaseSrc}"
       say s!"  stimulus: {cfg.stimProv}"
+      say s!"  edges: {cfg.edgeMode.describe D}"
       say s!"  executing {cfg.cycles} cycle(s) of the residual at the checked bound"
       (← IO.getStdout).flush
       let t5 ← IO.monoMsNow
@@ -671,7 +700,8 @@ effEn {ws.effEn} origEn {ws.origEn} mask {ws.mask} pred {ws.pred} phaseSrc {ws.p
       let mut policyBad := false
       let mut cmp : CmpStatus := if cfg.compare then .complete else .disabled
       for k in List.range cfg.cycles do
-        let e := edgeSchedule D k
+        let e := scheduleEdges cfg.edgeMode D k
+        if let some rc := (← RunAdmission.refuseEdges? D k e) then return rc
         let i := match cfg.stim with
                  | some spec => stimInput D spec cfg.react cfg.ats prevOuts k
                  | none      => mkInputFor D k
@@ -828,7 +858,7 @@ def buildState (D : DesignCert) (im : InitMode) : IO (Except String (StateM × S
 
 def usage : String :=
   "usage: dcert2_memroute (<cert.dcert>|--fixture <name>|--selftest) <stepFuel> \
-<workFuel> [cycles] [init] [nocompare]\n  fixtures: full mixed twomem lane\n\
+<workFuel> [cycles] [init] [nocompare] [trace] [no-plain-write] [route:fused|var|plain]\n  fixtures: full mixed twomem lane\n\
   fixtures (negative): romwrite\n  init: zero | ramp | narrow | file:<path>"
 
 def parseCfg (rest : List String) : Except String Cfg := do
@@ -849,13 +879,21 @@ contents or use init=zero, which is a legal-state witness only."
     let tl := more.drop 2
     let cmp := !(tl.contains "nocompare")
     let sup := tl.contains "support-only"
-    let pw  := tl.contains "plain-write"
+    -- `plain-write` is still accepted (it is the default); only the opt-out
+    -- changes anything
+    let pw  := !(tl.contains "no-plain-write")
     let tr  := tl.contains "trace"
     let stimTok := tl.find? (fun t => t.startsWith "stim:")
     let prov := match stimTok with
                 | some t => s!"PENDING {t}"
                 | none   => "generated: mkInputFor (synthetic, width-derived)"
-    .ok ⟨sf, wf, cyc, im, cmp, none, [], [], prov, sup, tr, pw⟩
+    let edgeTok := tl.findSome? (fun t => (t.dropPrefix? "edges:").map (·.toString))
+    let some em := (edgeTok.map EdgeMode.parse?).getD (some .auto)
+      | .error s!"edges:{edgeTok.getD ""} is not one of auto | all | indep"
+    let route := (tl.findSome? (fun t => (t.dropPrefix? "route:").map (·.toString))).getD "fused"
+    unless ["fused", "var", "plain"].contains route do
+      .error s!"route:{route} is not one of fused | var | plain"
+    .ok ⟨sf, wf, cyc, im, cmp, none, [], [], prov, sup, tr, pw, em, route⟩
   | _ => .error usage
 
 /-! ## Comparison self-test

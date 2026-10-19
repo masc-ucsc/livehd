@@ -164,12 +164,14 @@ private def primTable : List (Int × SExp) :=
   , (27, .prim .ctorFieldsP [pA])
   , (28, .prim .bvSra [pA, pB, pC]), (29, .prim .bvGetMask [pA, pB, pC])
   , (30, .prim .bvSint [pA]), (31, .prim .bvShl [pA, pB, pC])
-  -- The memory read's MIRROR.  Without this entry a STATIC application of the
-  -- primitive has no term to fold to and the specializer answers typeError;
-  -- a DYNAMIC application still residualises generically.  Both paths are
-  -- validated in MemImage.lean rather than assumed.
+  -- The memory primitives' MIRRORS.  Without an entry a STATIC application of
+  -- the primitive has no term to fold to and the object specializer answers
+  -- typeError, while the host folds it; a DYNAMIC application still
+  -- residualises generically.  Both paths, for all three, are checked against
+  -- the host specializer in MemMixMirrorCheck.lean.
   , (32, .prim .memRead [pA, pB, pC, pD])
-  , (33, .prim .memWriteBE [pA, pB, pC, pD, pE, pF]) ]
+  , (33, .prim .memWriteBE [pA, pB, pC, pD, pE, pF])
+  , (34, .prim .memWrite [pA, pB, pC, pD]) ]
 
 /-- An unrecognised code falls through to `hd nil`, a `typeError`. -/
 private def evalPrimBody : SExp :=

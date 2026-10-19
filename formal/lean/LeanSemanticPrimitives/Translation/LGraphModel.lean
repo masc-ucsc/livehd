@@ -100,19 +100,20 @@ MASTER-ADAPTED OVERLAY.  The pinned Futamura branch carries
 `Op_SHL` fold so `Projection/ObjectLanguageSemantics`, `OperatorBridge` and
 `HardwareAdequacy` can name it.  That patch does not apply here and must not be
 applied verbatim: its body is the UNGUARDED `2 ^ k` formula, and master's fold
-saturates at the result width -- see the comment on `Op_SHL` in `eval_op`,
-which says in as many words that the bound is the bridge's and is NOT claimed
-equal to the unguarded formula on every input.
+saturates at the result width -- see the comment on `Op_SHL` in `eval_op`.
 
 So the name is master's step, guard included.  Taking FP's body instead would
 delete a boundary repair this branch proved, which is the regression recorded
 as R46.
 
 Definition only: the `eval_op` call site is left spelled out, so nothing that
-already reasons about that fold changes.  A consequence worth stating plainly
--- FP's `bv_shl_step_unfolds`, which asserts this equals the unguarded formula
-by `rfl`, is FALSE here and is expected to fail. That failure is a real
-finding about the operator bridge, not something to engineer around. -/
+already reasons about that fold changes.  The guard changes no VALUE: FP's
+`bv_shl_step_unfolds` -- this equals the unguarded `mk_bv w (u * 2^k)` -- holds
+for every input and is PROVED in `Projection/OperatorBridge.lean`
+(`shl_step_eq`: `2^w` divides `u * 2^k` whenever `k ≥ w`).  It is not `rfl`:
+the guard is there so the term EVALUATES at huge `k`, which is exactly why the
+two are not definitionally equal.  (An earlier version of this comment called
+that lemma false; it was a failed `rfl`, not a false statement.) -/
 def bv_shl_step (w : Nat) (a b : BV) : BV :=
   mk_bv w (if (bv_uint b).toNat ≥ w then 0
            else bv_uint a * (2 : Int) ^ (bv_uint b).toNat)
@@ -140,10 +141,12 @@ without it carry 33-bit amount operands, so `k` reaches ~8.6e9 and the power is
 unconstructible while the mathematical answer is immediate.
 
 This comment used to say "the guard is not a semantic change".  That is a
-claim of EQUIVALENCE to the unguarded formula on every input, and nothing here
-proves it -- the unguarded formula does not even evaluate at the amounts that
-motivated the guard.  Treat it as: the guard matches the bridge, and whether
-the two agree everywhere else is open.  See PORT_LEDGER_D3_D4_FP.md §27.2 for
+claim of EQUIVALENCE to the unguarded formula on every input.  What is proved:
+on bit-vectors in canonical form -- `bvenc`, which is what both bridges apply it
+to -- the guarded `bv_sra` equals the unguarded formula
+(`Translation/OpBridge.lean`, `bv_sra_guard_eq`).  What is still open: an
+arbitrary, possibly unnormalised `BV`, where the unguarded formula does not even
+evaluate at the amounts that motivated the guard.  See PORT_LEDGER_D3_D4_FP.md §27.2 for
 19 CORE-ET digests that changed across a run whose binary, library and emitter
 all changed too, with the cause unresolved. -/
 def bv_sra (w : Nat) (x shamt : BV) : BV :=

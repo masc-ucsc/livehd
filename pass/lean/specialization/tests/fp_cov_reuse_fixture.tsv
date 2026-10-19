@@ -1,0 +1,32 @@
+# FIXTURE-ONLY verification of fp_cov_dcert2.sh's IDENTITY binding, reuse
+# decision and attempt immutability.  Produced by
+# pass/lean/specialization/fp_cov_dcert2_reuse_test.sh, which EXTRACTS the live
+# identity_of/reusable/phase functions from the dispatcher so it cannot drift
+# from them, and drives them with a stub `lean` that exits 0.  No Lean, no
+# certificate, no generation, no simulation, no benchmark; under a second, and
+# the scratch directory is PROJECT-LOCAL.
+#
+# THREE AUDITED COUNTEREXAMPLES, all now refused:
+#   1  exit=0 with GNU time reporting exit 1 -- reused as a pass, and the reuse
+#      verdict was written over the retained DISPOSITION.txt
+#   9  the lean EXECUTABLE replaced at the same path and version -- identity
+#      stayed byte-identical, so a different compiler could be reused as the same
+#  10  a dependency .olean edited at the same LEAN_PATH -- identity stayed
+#      byte-identical, so different imported bytes could be reused as the same
+#
+# retained_unchanged compares a sha256 manifest of every file in the retained
+# attempt before and after.  It is YES in EVERY case, including reuse: a reuse
+# decision is written to <phase>/decisions/, never into the attempt.
+#
+case	fixture	force	decision	retained_unchanged	new_attempt_dirs	result
+1	exit=0 but producer exit=1 (COUNTEREXAMPLE)	0	RUN	YES	1	PASS
+2	identity differs (timeout 600 vs 5)	0	RUN	YES	1	PASS
+3	no time.txt -- producer status lost	0	RUN	YES	1	PASS
+4	disposition CAP, not OK	0	RUN	YES	1	PASS
+5	no IDENTITY.txt at all	0	RUN	YES	1	PASS
+6	retained exit=3 (out of fuel)	0	RUN	YES	1	PASS
+7	VALID retained attempt	0	REUSE	YES	0	PASS
+8	--force over a VALID retained attempt	1	RUN	YES	1	PASS
+9	lean EXECUTABLE bytes changed, same path/version (COUNTEREXAMPLE)	0	RUN	YES	1	PASS
+10	dependency .olean changed at the same LEAN_PATH (COUNTEREXAMPLE)	0	RUN	YES	1	PASS
+11	argv array: ('20000' '200') vs ('20000 200') must differ	-	-	-	-	PASS

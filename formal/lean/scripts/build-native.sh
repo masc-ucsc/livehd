@@ -20,6 +20,10 @@ MODULES=(
   Compiler/DesignCertWF
   Compiler/DesignSemantics
   Compiler/CertIOV1
+  Compiler/CertIOCodec
+  Compiler/CertIORoute
+  Compiler/ResetPolarity
+  Compiler/RunAdmission
   Projection/ObjectLanguage
   Projection/ObjectLanguageSemantics
   Projection/BindingTime
@@ -28,6 +32,8 @@ MODULES=(
   Projection/SurfaceSemantics
   Projection/BTA
   Projection/PartialEvaluator
+  Projection/PartialEvaluatorS3
+  Projection/S3Correct
   Projection/MixProgram
   Projection/PartialEvaluatorCorrect
   Projection/SecondProjection
@@ -36,11 +42,38 @@ MODULES=(
   Projection/RuntimeEncoding
   Projection/OperatorBridge
   Projection/HardwareInterpreter
+  Projection/SetMaskLoop
   Projection/HardwareAdequacy
   Projection/ProjectionCorrect
   Projection/ResidualFragment
   Projection/ProjectedStep
   Projection/CertLoad
+  Projection/CertLoadAny
+  # the memory route (dcert2_memroute), gate first, DirectCheck before the traversal
+  Projection/AxiomGate
+  Projection/MemImage
+  Projection/HardwareMem
+  Projection/HardwareMemSource
+  Projection/HardwareMemOp
+  Projection/HardwareMemSlots
+  Compiler/DirectCheck
+  Projection/HardwareMemTraversal
+  Projection/HardwareMemShapes
+  Projection/HardwareMemNodes
+  Projection/HardwareMemFold
+  Projection/HardwareMemCommit
+  Projection/HardwareMemOutFlop
+  Projection/HardwareMemMain
+  Projection/HardwareMemWidth
+  Projection/HardwareMemAdmit
+  Projection/HardwareMemSlotTy
+  Projection/HardwareMemRuntime
+  Projection/HardwareMemFixture
+  Projection/HardwareMemWrite
+  Projection/MemSupport
+  Projection/MemProjection
+  Projection/HardwareMemWriteAdmit
+  Projection/ResidualIO
   Projection/Proto/PartialEvaluatorFast
   Projection/Proto/InterpreterVariant
   Projection/Proto/VariantTransport

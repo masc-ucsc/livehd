@@ -45,6 +45,7 @@ not over a hand-written copy of its functions -- that
 -/
 import LeanSemanticPrimitives.Projection.HardwareMem
 import LeanSemanticPrimitives.Projection.HardwareAdequacy
+import LeanSemanticPrimitives.Projection.AxiomGate
 
 namespace Projection
 namespace HwMem
@@ -414,7 +415,7 @@ theorem resolve_call_lits {fns scope : List String} {f : String} {k : Nat}
 
 /-- `srcValM` sits where `resolveProgram` put it.  Checked by reduction, not
 assumed, and it is the SAME id `HardwareMemChecks` executes. -/
-theorem srcValM_id : idOf "srcValM" = some 43 := rfl
+theorem srcValM_id : idOf "srcValM" = some 53 := rfl
 
 /-- **The source layer, on the resolved program, unconditionally.**  No
 `resolve` hypothesis is left to the caller: the argument list is literals, so
@@ -422,7 +423,7 @@ the resolved term is pinned here. -/
 theorem srcValM_agree_resolved (sd : SourceDesc) (i : RuntimeInput) (st : StateM)
     (hin : SourceInputBound sd i.size) (hst : SourceFlopBound sd st.flops.size) :
     ∃ v, Eval hwMemP []
-            (.call 43
+            (.call 53
                ([encSource sd, encInput i, encBVs st.flops,
                  encListG MemImg.encMemImg st.mems.toList].map Term.lit)) v
        ∧ SrcRel v (sourceValue i (StateM.denote st) sd) := by
@@ -524,24 +525,24 @@ private def runSrcM (sd : SourceDesc) : EvalResult :=
 `List`, `Int` and `Array`.  What is checked here is that NO new unsafe axiom
 appears: no `sorryAx`, no `Lean.ofReduceBool`, no `Lean.trustCompiler`. -/
 
-#print axioms hwMemResolved_ok
-#print axioms hwMemP_resolves
-#print axioms sFn_of_prefix
-#print axioms sFn_lift
-#print axioms SEval_mono
-#print axioms lift
-#print axioms memAt_sound
-#print axioms romWords_sound
-#print axioms romWords_length
-#print axioms srcValM_memImg
-#print axioms srcValM_memConst
-#print axioms srcValM_scalar
-#print axioms srcValM_agree
-#print axioms srcValM_agree_Eval
-#print axioms srcValM_agree_lits
-#print axioms srcValM_id
-#print axioms resolve_call_lits
-#print axioms srcValM_agree_resolved
+#audit_axioms hwMemResolved_ok
+#audit_axioms hwMemP_resolves
+#audit_axioms sFn_of_prefix
+#audit_axioms sFn_lift
+#audit_axioms SEval_mono
+#audit_axioms lift
+#audit_axioms memAt_sound
+#audit_axioms romWords_sound
+#audit_axioms romWords_length
+#audit_axioms srcValM_memImg
+#audit_axioms srcValM_memConst
+#audit_axioms srcValM_scalar
+#audit_axioms srcValM_agree
+#audit_axioms srcValM_agree_Eval
+#audit_axioms srcValM_agree_lits
+#audit_axioms srcValM_id
+#audit_axioms resolve_call_lits
+#audit_axioms srcValM_agree_resolved
 
 end HwMem
 end Projection

@@ -85,7 +85,6 @@ generated/master_port/
 /generated/validation-tools/
 
 # Analysis staging for the D3/D4/Futamura ports (file inventories, diffs).
-# The LEDGER is tracked under pass/lean/; its working notes are not.
 /generated/port_staging/
 
 # Derived trees, never source. `generated/` is run output and the imported
@@ -114,5 +113,39 @@ generated/master_port/
 # (files already tracked under repros/ stay tracked).
 /repros/
 
+# Plans, progress ledgers, audits, bug-hunt logs and status snapshots for the
+# Lean/Isabelle proof flows stay local. The repository carries only usage and
+# introduction documents, and states which benchmarks are covered -- never which
+# ones are planned, queued or still to run. The patterns catch new documents;
+# the explicit paths are the ones already written under other names.
+# <doc>.plans.md, beside <doc>, holds the passages cut from that tracked doc.
+*.plans.md
+/pass/lean/**/*_PLAN.md
+/pass/lean/**/*_AUDIT.md
+/pass/lean/**/*_LEDGER*.md
+/pass/lean/**/*_STATUS.md
+/pass/lean/**/*_BUGS.md
+/pass/lean/**/*_PROVENANCE.md
+/pass/lean/**/*_REFACTOR.md
+/pass/lean/**/*_LOG.md
+/pass/isabelle/**/*_BUGS.md
+/formal/**/*_PLAN.md
+/formal/**/*_NOTES.md
+/formal/**/*_PERF.md
+/formal/**/*_HANDOFF.md
+/formal/**/*_OBLIGATIONS.md
+/docs/cva6_isabelle_stress.md
+/pass/lean/GROUNDING_SRA_GETMASK_SEXT.md
+/pass/lean/LEGACY_PROOF_COVERAGE.md
+/pass/lean/LEGACY_PROOF_REPLAY.md
+/pass/lean/MASTER_INTEGRATION.md
+/pass/lean/specialization/FUTAMURA_PROJECTIONS.md
+# Plan-shaped data: target matrices, schedules and requested-unit manifests.
+/pass/lean/tests/MASTER_SIM_*
+/pass/lean/tests/MASTER_BENCHMARK_MANIFEST.json
+/pass/lean/tests/MASTER_D2_PORT_PLAN_AUDIT.json
+/pass/lean/specialization/tests/FP_SUPPORT_MANIFEST.tsv
+/pass/lean/specialization/tests/fp_obligation_inventory.tsv
+/todo/livehd/simulator-generation-matrix.html
 # Results belong under /repros/; prevent older report scripts from adding them here.
 /todo/livehd/placement-results/

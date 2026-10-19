@@ -1,6 +1,7 @@
 // This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 
 #include "latch_contract.hpp"
+#include "mask_eval.hpp"
 
 #include <algorithm>
 #include <string>
@@ -251,6 +252,27 @@ Phase_t<Pin> resolve_phase(Pin p, bool stop_at_clock_cell = false) {
       // for phase purposes. Follow the VALUE operand (port 'a'/first edge).
       auto a = gu::first_value_driver(n);
       if (a.is_invalid()) {
+        break;
+      }
+      ph.net = a;
+      continue;
+    }
+
+    if (op == Ntype_op::Ror) {
+      // Reduce-OR of ONE bit is that bit. The yosys-slang reader spells `!clk`
+      // as `Mux(Ror(clk), 1, 0)` and `(Ror(clk) == 0)`, and stopping here made
+      // the Ror node the root -- so `always_latch if (!clk_i) q <= d` was filed
+      // as a DATA-gated latch whose enable and din kept reading the clock after
+      // normalization (CORE-ET B01's enable latches; values_with_root already
+      // carried this rule for the same reason). A wider operand genuinely
+      // reduces, so it stays the root.
+      Pin a;
+      int cnt = 0;
+      for (const auto& in : gu::inp_sink_drivers(n)) {
+        a = in.driver;
+        ++cnt;
+      }
+      if (cnt != 1 || a.is_invalid() || gu::bits_of(a) != 1) {
         break;
       }
       ph.net = a;
@@ -591,6 +613,18 @@ std::string Commit_class::net_key() const {
 // The two overloads had already drifted apart once -- the don't-care spelling
 // was taught to the flat one alone -- so they share this now rather than
 // carrying two subtly different loops.
+// THE setundef=zero SPELLING. `yosys.setundef=zero` -- which every CORE-ET and
+// CVA6 row is compiled with -- turns the reader's don't-care hold arm `1'sb?`
+// into a KNOWN constant, so prim_clk_gate's enable latch arrives as
+// `Mux(Ror(clk), 0, en)`. What made the X arm safe to peel was never its value:
+// it is selected only on the phase the latch is SHUT, and a shut latch does not
+// read its input. The same holds for any constant there. So a mux with no X arm,
+// exactly one KNOWN-constant arm and one non-constant arm offers that constant
+// as the hold-arm candidate (`x_index`/`x_drv`), and `x_arm_is_the_hold_arm`
+// still has to prove the phase before anything is peeled -- a constant reached
+// while the latch is OPEN keeps value semantics exactly as before. Left a value
+// mux, the arm handed to a gate bypass and to a retyped latch's din read the
+// CLOCK as data (`we & (clk ? 0 : en)` on a memory write enable).
 template <typename Pin>
 struct Mux_arms {
   bool ok        = false;  // exactly two arms, each with exactly one driver
@@ -600,12 +634,22 @@ struct Mux_arms {
   Pin  sel;
   Pin  x_drv;
   Pin  other;
+  // BOTH arms known constants (`Ror(clk) ? 0 : 1`: a latch whose input is a
+  // tied constant, under setundef=zero). Constness cannot say which is the
+  // hold arm; the window phase can -- see hold_arm_of.
+  bool both_known = false;
+  Pin  arm[2];
 };
 
 template <typename Node, typename Pin>
 [[nodiscard]] Mux_arms<Pin> classify_mux_arms(const Node& mux, const Pin& q) {
   Mux_arms<Pin> r;
   int           n_sel_drv = 0;
+  int           n_known   = 0;  // arms driven by a KNOWN constant
+  int           n_value   = 0;  // arms driven by anything else (not Q, not X)
+  int           k_index   = -1;
+  Pin           k_drv;
+  Pin           v_drv;
   for (auto sink : mux.inp_sorted_pins()) {  // read-only walk
     const auto pid = static_cast<int>(sink.get_port_id());
     int        n_drv = 0;
@@ -622,6 +666,9 @@ template <typename Node, typename Pin>
       continue;
     }
     ++r.n_arms;
+    if ((pid == 1 || pid == 2) && n_drv == 1) {
+      r.arm[pid - 1] = only;
+    }
     if (n_drv != 1 || only.is_invalid()) {
       r.x_index = -2;  // a multiply-driven or empty arm is not a single value
       continue;
@@ -635,11 +682,27 @@ template <typename Node, typename Pin>
       r.x_drv   = only;
       continue;
     }
+    if (only.is_const()) {
+      ++n_known;
+      k_index = pid - 1;
+      k_drv   = only;
+    } else {
+      ++n_value;
+      v_drv = only;
+    }
     if (r.other.is_invalid()) {
       r.other = only;
     }
   }
   r.ok = r.n_arms == 2 && n_sel_drv == 1 && !r.sel.is_invalid();
+  // The setundef=zero spelling (see above): only when there is NO X arm and
+  // NO Q arm, so every shape the X/Q logic already decides is untouched.
+  if (r.ok && r.x_index == -1 && !r.has_q_arm && n_known == 1 && n_value == 1) {
+    r.x_index = k_index;
+    r.x_drv   = k_drv;
+    r.other   = v_drv;
+  }
+  r.both_known = r.ok && r.x_index == -1 && !r.has_q_arm && n_known == 2 && !r.arm[0].is_invalid() && !r.arm[1].is_invalid();
   return r;
 }
 
@@ -662,6 +725,28 @@ template <typename Node, typename Pin>
   // `sel` is 1 at root level L iff (L != sr.inverted).
   const int  sel_at_close = (closed_level != sr.inverted) ? 1 : 0;
   return x_index == sel_at_close;
+}
+
+// The open arm of a hold mux on `latch`'s din, or invalid. A Q arm, a
+// don't-care arm, or ONE known-constant arm is the hold arm when the window
+// proves it (x_arm_is_the_hold_arm); with TWO constant arms, the one selected on
+// the shut phase is the hold and the other is the open value.
+template <typename Node, typename Pin>
+[[nodiscard]] Pin open_arm_of(const Node& latch, const Mux_arms<Pin>& arms) {
+  if (arms.has_q_arm) {
+    return arms.other;
+  }
+  if (arms.ok && arms.x_index >= 0 && !arms.x_drv.is_invalid() && x_arm_is_the_hold_arm(latch, arms.sel, arms.x_index)) {
+    return arms.other;
+  }
+  if (arms.both_known) {
+    for (int idx = 0; idx < 2; ++idx) {
+      if (x_arm_is_the_hold_arm(latch, arms.sel, idx)) {
+        return arms.arm[1 - idx];
+      }
+    }
+  }
+  return Pin{};
 }
 
 hhds::Pin_class latch_transparent_arm(const hhds::Node_class& n) {
@@ -736,14 +821,9 @@ hhds::Pin_class latch_transparent_arm(const hhds::Node_class& n) {
       // phase's; a don't-care reached while the latch is OPEN is a value the
       // latch really passes, and a mapped netlist is full of ordinary
       // don't-care muxes that must keep their semantics.
-      const auto      arms      = classify_mux_arms(mux, q);
-      bool            has_q_arm = arms.has_q_arm;
-      hhds::Pin_class other     = arms.other;
-      if (!has_q_arm && arms.ok && arms.x_index >= 0 && !arms.x_drv.is_invalid()
-          && x_arm_is_the_hold_arm(n, arms.sel, arms.x_index)) {
-        has_q_arm = true;
-      }
-      if (has_q_arm) {
+      const auto            arms  = classify_mux_arms(mux, q);
+      const hhds::Pin_class other = open_arm_of(n, arms);
+      if (arms.has_q_arm || !other.is_invalid()) {
         // When the mux was reached THROUGH wrappers, the arm replaces a 1-bit
         // din, so it has to be 1 bit itself. The intermediate width is
         // irrelevant (bit 0 of a mux is bit 0 of the arm it selects), but a
@@ -759,6 +839,259 @@ hhds::Pin_class latch_transparent_arm(const hhds::Node_class& n) {
   // condition lives on `enable`, so din -- including a graph input, a const, a
   // Get_mask, or a residual value mux -- IS the value the latch passes through.
   return din;
+}
+
+std::optional<Latch_hold_path> latch_hold_path(const hhds::Node_class& n) {
+  if (gu::type_op_of(n) != Ntype_op::Latch) {
+    return std::nullopt;
+  }
+  const auto q   = n.get_driver_pin(0);
+  const auto din = gu::get_driver_of_sink_name(n, "din");
+  if (q.is_invalid() || din.is_invalid()) {
+    return std::nullopt;
+  }
+  Latch_hold_path path;
+  auto            probe = din;
+  for (int hop = 0; hop < 8; ++hop) {
+    if (probe.is_invalid() || probe.is_const() || gu::is_graph_input_pin(probe)) {
+      return std::nullopt;
+    }
+    const auto pn = probe.get_master_node();
+    const auto po = gu::type_op_of(pn);
+    if (po == Ntype_op::Mux) {
+      if (path.chain.empty()) {
+        return std::nullopt;  // a mux read directly is latch_transparent_arm's case
+      }
+      const auto arms  = classify_mux_arms(pn, q);
+      const auto value = open_arm_of(n, arms);
+      if (value.is_invalid()) {
+        return std::nullopt;
+      }
+      path.value   = value;
+      path.mux_out = probe;
+      return path;
+    }
+    // A bit-select wrapper: its VALUE is its lowest-pid operand and every other
+    // operand (the range, the shift, the sign position) is a constant.
+    if (po != Ntype_op::Get_mask && po != Ntype_op::Sext && po != Ntype_op::SRA) {
+      return std::nullopt;
+    }
+    const auto inner = gu::first_value_driver(pn);
+    if (inner.is_invalid()) {
+      return std::nullopt;
+    }
+    bool first = true;
+    for (const auto& in : gu::inp_sink_drivers(pn)) {
+      if (first) {
+        first = false;  // ascending pid: the value operand
+        continue;
+      }
+      if (!in.driver.is_const()) {
+        return std::nullopt;
+      }
+    }
+    path.chain.push_back(pn);
+    probe = inner;
+  }
+  return std::nullopt;
+}
+
+hhds::Pin_class rebuild_bit_select(hhds::Graph& g, const std::vector<hhds::Node_class>& chain, hhds::Pin_class bottom) {
+  hhds::Pin_class below = bottom;
+  for (auto it = chain.rbegin(); it != chain.rend(); ++it) {
+    const auto& orig  = *it;
+    auto        clone = gu::create_typed_node(g, gu::type_op_of(orig));
+    bool        value = true;  // ascending pid: the first sink is the value operand
+    for (auto sink : orig.inp_sorted_pins()) {
+      const auto pid = static_cast<int>(sink.get_port_id());
+      for (const auto& drv : sink.get_driver_pins()) {
+        (value ? below : drv).connect_sink(gu::setup_sink_pid(clone, pid));
+      }
+      value = false;
+    }
+    const auto od = orig.get_driver_pin(0);
+    auto       cd = clone.create_driver_pin(0);
+    gu::set_bits(cd, gu::bits_of(od));
+    if (gu::is_unsign(od)) {
+      gu::set_unsign(cd);
+    } else {
+      gu::set_sign(cd);
+    }
+    below = cd;
+  }
+  return below;
+}
+
+namespace {
+struct Two_arm_mux {
+  hhds::Pin_class sel, arm[2];
+};
+std::optional<Two_arm_mux> two_arm_mux(const hhds::Pin_class& p) {
+  if (p.is_invalid() || p.is_const() || gu::is_graph_input_pin(p) || gu::type_op_of(p.get_master_node()) != Ntype_op::Mux) {
+    return std::nullopt;
+  }
+  Two_arm_mux m;
+  int         n = 0;
+  for (const auto& in : gu::inp_sink_drivers(p.get_master_node())) {
+    const auto pid = in.get_port_id();
+    if (pid > 2) {
+      return std::nullopt;
+    }
+    (pid == 0 ? m.sel : m.arm[pid - 1]) = in.driver;
+    ++n;
+  }
+  if (n != 3 || m.sel.is_invalid() || m.arm[0].is_invalid() || m.arm[1].is_invalid()) {
+    return std::nullopt;
+  }
+  return m;
+}
+
+void drop_named_sink(const hhds::Node_class& n, std::string_view pin) {
+  const auto pid = Ntype::get_sink_pid(gu::type_op_of(n), pin);
+  if (pid == hhds::Port_invalid) {
+    return;
+  }
+  absl::InlinedVector<hhds::Pin_class, 4> doomed;  // snapshot, then delete
+  for (auto sink : n.inp_sorted_pins()) {
+    if (sink.get_port_id() == pid) {
+      doomed.push_back(sink);
+    }
+  }
+  for (const auto& sink : doomed) {
+    sink.del_sink();
+  }
+}
+
+bool known_nonzero(const hhds::Pin_class& p) {
+  if (!p.is_const()) {
+    return false;
+  }
+  const auto& c = gu::const_of(p);
+  return !c.has_unknowns() && c.is_just_i64() && c.to_just_i64() != 0;
+}
+}  // namespace
+
+int lift_latch_level_resets(hhds::Graph* g) {
+  if (g == nullptr) {
+    return 0;
+  }
+  struct Lift {
+    hhds::Node_class latch;
+    hhds::Pin_class  rst, gate, open_value;
+    bool             active_low = false;
+    Dlop             reset_value;
+    std::vector<hhds::Node_class> chain;
+  };
+  std::vector<Lift> lifts;
+  for (auto n : g->body().nodes()) {
+    if (gu::type_op_of(n) != Ntype_op::Latch || !gu::get_driver_of_sink_name(n, "reset_pin").is_invalid()) {
+      continue;
+    }
+    // The WINDOW: `Mux(rst, gate, K)` with K a nonzero constant on the reset arm.
+    // resolve_phase walks exactly the identity shapes (1-bit masks, Sext,
+    // a one-operand Or, ...) the rest of the pass trusts; an INVERTED result
+    // would make the window the mux's complement, which is not this shape.
+    const auto wph = resolve_phase(gu::get_driver_of_sink_name(n, "enable"), /*stop_at_clock_cell=*/true);
+    if (wph.inverted || gu::get_driver_of_sink_name(n, "posclk").is_known_false()) {
+      continue;
+    }
+    const auto em = two_arm_mux(wph.net);
+    if (!em) {
+      continue;
+    }
+    int rst_arm = -1;  // the arm taken while the reset is ASSERTED: 1 = sel nonzero, 0 = sel zero
+    if (known_nonzero(em->arm[1]) && !em->arm[0].is_const()) {
+      rst_arm = 1;
+    } else if (known_nonzero(em->arm[0]) && !em->arm[1].is_const()) {
+      rst_arm = 0;
+    }
+    if (rst_arm < 0) {
+      continue;
+    }
+    const auto gate = em->arm[1 - rst_arm];
+    // The DATA: a bit select of `Mux(rst, V, RV)` -- the SAME selector pin, RV a
+    // known constant on the same (reset) arm.
+    std::vector<hhds::Node_class> chain;
+    auto                          probe = gu::get_driver_of_sink_name(n, "din");
+    std::optional<Two_arm_mux>    dm;
+    for (int hop = 0; hop < 8; ++hop) {
+      if (probe.is_invalid() || probe.is_const() || gu::is_graph_input_pin(probe)) {
+        break;
+      }
+      const auto pn = probe.get_master_node();
+      const auto po = gu::type_op_of(pn);
+      if (po == Ntype_op::Mux) {
+        dm = two_arm_mux(probe);
+        break;
+      }
+      if (po != Ntype_op::Get_mask && po != Ntype_op::Sext && po != Ntype_op::SRA) {
+        break;
+      }
+      bool first = true, ok = true;
+      for (const auto& in : gu::inp_sink_drivers(pn)) {
+        if (!first && !in.driver.is_const()) {
+          ok = false;
+        }
+        first = false;
+      }
+      if (!ok) {
+        break;
+      }
+      chain.push_back(pn);
+      probe = gu::first_value_driver(pn);
+    }
+    if (!dm || dm->sel != em->sel) {
+      continue;
+    }
+    const auto rv_pin = dm->arm[rst_arm];
+    const auto v_pin  = dm->arm[1 - rst_arm];
+    if (!rv_pin.is_const() || gu::const_of(rv_pin).has_unknowns() || v_pin.is_invalid()) {
+      continue;
+    }
+    // This bit's reset value: RV through the same bit select, folded exactly as
+    // cprop folds the three wrappers.
+    Dlop rv   = gu::const_of(rv_pin);
+    bool fold = true;
+    for (auto it = chain.rbegin(); it != chain.rend() && fold; ++it) {
+      const auto op = gu::type_op_of(*it);
+      if (op == Ntype_op::Get_mask) {
+        const auto rng = gu::bit_range(*it);
+        if (!rng) {
+          fold = false;
+          break;
+        }
+        rv = livehd::eval_get_mask(rv, rng->first, rng->second);
+      } else {
+        const auto b = gu::get_driver_of_sink_name(*it, "b");
+        if (!b.is_const() || gu::const_of(b).has_unknowns()) {
+          fold = false;
+          break;
+        }
+        rv = op == Ntype_op::Sext ? *rv.sext_op(gu::const_of(b)) : *rv.sra_op(gu::const_of(b));
+      }
+      if (rv.has_unknowns() || rv.is_invalid() || rv.is_nil()) {
+        fold = false;
+      }
+    }
+    if (!fold) {
+      continue;
+    }
+    lifts.push_back({n, em->sel, gate, v_pin, rst_arm == 0, rv, chain});
+  }
+  for (auto& l : lifts) {  // never mutate while iterating the body
+    const auto din = rebuild_bit_select(*g, l.chain, l.open_value);
+    drop_named_sink(l.latch, "din");
+    din.connect_sink(gu::setup_sink_by_name(l.latch, "din"));
+    drop_named_sink(l.latch, "enable");
+    l.gate.connect_sink(gu::setup_sink_by_name(l.latch, "enable"));
+    l.rst.connect_sink(gu::setup_sink_by_name(l.latch, "reset_pin"));
+    gu::create_const(*g, l.reset_value).connect_sink(gu::setup_sink_by_name(l.latch, "initial"));
+    gu::create_const(*g, *Dlop::create_integer(1)).connect_sink(gu::setup_sink_by_name(l.latch, "async"));
+    if (l.active_low) {
+      gu::create_const(*g, *Dlop::create_integer(1)).connect_sink(gu::setup_sink_by_name(l.latch, "negreset"));
+    }
+  }
+  return static_cast<int>(lifts.size());
 }
 
 hhds::Occurrence_pin latch_transparent_arm(const hhds::Occurrence_node& n) {
@@ -819,14 +1152,9 @@ hhds::Occurrence_pin latch_transparent_arm(const hhds::Occurrence_node& n) {
       // and the same shared classifier. These two answer the same question and
       // had drifted apart once already, so neither the wrapper walk nor the
       // don't-care spelling lives in only one of them any more.
-      const auto           arms      = classify_mux_arms(mux, q);
-      bool                 has_q_arm = arms.has_q_arm;
-      hhds::Occurrence_pin other     = arms.other;
-      if (!has_q_arm && arms.ok && arms.x_index >= 0 && !arms.x_drv.is_invalid()
-          && x_arm_is_the_hold_arm(n, arms.sel, arms.x_index)) {
-        has_q_arm = true;
-      }
-      if (has_q_arm) {
+      const auto                 arms  = classify_mux_arms(mux, q);
+      const hhds::Occurrence_pin other = open_arm_of(n, arms);
+      if (arms.has_q_arm || !other.is_invalid()) {
         // Same width rule as the flat overload: when the mux was reached
         // THROUGH wrappers the arm replaces a 1-bit din, so it must be 1 bit.
         if (probe.get_class_index() != din.get_class_index() && !other.is_invalid() && gu::bits_of(other) != 1) {
@@ -878,7 +1206,11 @@ uint8_t or_vals(uint8_t a, uint8_t b) {
 }
 
 template <typename Pin>
-uint8_t values_with_root(const Pin& p, const Pin& root, bool level, int depth) {
+// `assume`, when given, holds pins the caller conditions on being TRUE (an
+// element's other gate enables: its window is open only while they all are).
+// A leaf resolving to one of their nets takes that net's implied value; nothing
+// else changes, so with no assumption the answer is exactly what it was.
+uint8_t values_with_root(const Pin& p, const Pin& root, bool level, int depth, const std::vector<Pin>* assume = nullptr) {
   if (p.is_invalid() || depth > 24) {
     return kAny;
   }
@@ -886,6 +1218,14 @@ uint8_t values_with_root(const Pin& p, const Pin& root, bool level, int depth) {
   auto       val = [&]() -> uint8_t {
     if (ph.net.is_invalid()) {
       return kAny;
+    }
+    if (assume != nullptr) {
+      for (const auto& a : *assume) {
+        const auto ra = resolve_phase(a, /*stop_at_clock_cell=*/true);
+        if (!ra.net.is_invalid() && ra.net == ph.net) {
+          return ra.inverted ? kCan0 : kCan1;  // `a` is true, so its net is !inverted
+        }
+      }
     }
     if (ph.net == root) {
       return level ? kCan1 : kCan0;
@@ -907,8 +1247,8 @@ uint8_t values_with_root(const Pin& p, const Pin& root, bool level, int depth) {
       uint8_t    acc    = is_and ? kCan1 : kCan0;  // the operation's identity
       int        n_ops  = 0;
       for (const auto& in : gu::inp_sink_drivers(n)) {
-        acc = is_and ? and_vals(acc, values_with_root(in.driver, root, level, depth + 1))
-                     : or_vals(acc, values_with_root(in.driver, root, level, depth + 1));
+        acc = is_and ? and_vals(acc, values_with_root(in.driver, root, level, depth + 1, assume))
+                     : or_vals(acc, values_with_root(in.driver, root, level, depth + 1, assume));
         ++n_ops;
       }
       if (n_ops == 0) {
@@ -962,7 +1302,7 @@ uint8_t values_with_root(const Pin& p, const Pin& root, bool level, int depth) {
         ++n_ops;
       }
       if (n_ops == 1 && !a.is_invalid() && gu::bits_of(a) == 1) {
-        return values_with_root(a, root, level, depth + 1);
+        return values_with_root(a, root, level, depth + 1, assume);
       }
       return kAny;
     }
@@ -1002,12 +1342,12 @@ uint8_t values_with_root(const Pin& p, const Pin& root, bool level, int depth) {
       if (sel.is_invalid() || n_sel != 1 || arms.size() != 2) {
         return kAny;
       }
-      const uint8_t sv = values_with_root(sel, root, level, depth + 1);
+      const uint8_t sv = values_with_root(sel, root, level, depth + 1, assume);
       if (sv == kCan0) {
-        return values_with_root(arms[0], root, level, depth + 1);
+        return values_with_root(arms[0], root, level, depth + 1, assume);
       }
       if (sv == kCan1) {
-        return values_with_root(arms[1], root, level, depth + 1);
+        return values_with_root(arms[1], root, level, depth + 1, assume);
       }
       return kAny;  // the selector is not decided at this level
     }
@@ -1024,8 +1364,8 @@ uint8_t values_with_root(const Pin& p, const Pin& root, bool level, int depth) {
       }
       const bool    invert = !inv.is_invalid() && !inv.is_known_false();
       const auto    en     = sink_driver_hier(n, "en");
-      const uint8_t ev     = en.is_invalid() ? kCan1 : values_with_root(en, root, level, depth + 1);
-      const uint8_t rv     = values_with_root(sink_driver_hier(n, "clk_ref"), root, level, depth + 1);
+      const uint8_t ev     = en.is_invalid() ? kCan1 : values_with_root(en, root, level, depth + 1, assume);
+      const uint8_t rv     = values_with_root(sink_driver_hier(n, "clk_ref"), root, level, depth + 1, assume);
       return invert ? or_vals(rv, flip_vals(ev)) : and_vals(rv, ev);
     }
     return kAny;
@@ -1035,7 +1375,7 @@ uint8_t values_with_root(const Pin& p, const Pin& root, bool level, int depth) {
 
 // The set of values of a latch's WINDOW (1 = transparent) with `root` at `level`.
 template <typename Node, typename Pin>
-uint8_t latch_window_at(const Node& latch, const Pin& root, bool level) {
+uint8_t latch_window_at(const Node& latch, const Pin& root, bool level, const std::vector<Pin>* assume = nullptr) {
   if (latch.is_invalid() || root.is_invalid() || gu::type_op_of(latch) != Ntype_op::Latch) {
     return kAny;
   }
@@ -1043,15 +1383,15 @@ uint8_t latch_window_at(const Node& latch, const Pin& root, bool level) {
   if (en.is_invalid()) {
     return kCan1;  // no enable: permanently transparent
   }
-  uint8_t win = values_with_root(en, root, level, 0);
+  uint8_t win = values_with_root(en, root, level, 0, assume);
   if (sink_driver_hier(latch, "posclk").is_known_false()) {
     win = flip_vals(win);  // active-LOW enable: the window is open while it is 0
   }
   return win;
 }
 
-// Window exactly `!G` for a gate output G, and every reader of Q AND-ed with G
-// itself (an And operand, or the `en` of a Clock_cell on G). See the header.
+// Window `!G` -- or `!G & rest`, a gate-complement window with data enables --
+// for a gate output G, and every reader of Q masked by G itself. See the header.
 template <typename Node, typename Pin>
 bool gated_latch_masked_off_impl(const Node& latch) {
   if (latch.is_invalid() || gu::type_op_of(latch) != Ntype_op::Latch) {
@@ -1063,39 +1403,131 @@ bool gated_latch_masked_off_impl(const Node& latch) {
   }
   const auto cr        = resolve_phase(en, /*stop_at_clock_cell=*/true);
   const bool active_lo = sink_driver_hier(latch, "posclk").is_known_false();
-  if (cr.net.is_invalid() || cr.net.is_const() || gu::is_graph_input_pin(cr.net) || cr.inverted == active_lo) {
-    return false;  // the window is not `!G` for an internal gate net G
-  }
-  const Pin  g  = cr.net;
-  const auto gop = gu::type_op_of(g.get_master_node());
-  if (gop != Ntype_op::And && gop != Ntype_op::Clock_cell) {
+  if (cr.net.is_invalid() || cr.net.is_const() || gu::is_graph_input_pin(cr.net)) {
     return false;
   }
-  const Pin  q      = latch.get_driver_pin(0);
-  const auto en_pid = Ntype::get_sink_pid(Ntype_op::Clock_cell, "en");
-  for (const auto& e : q.out_edges()) {
-    const auto sn = e.sink.get_master_node();
+  const auto is_gate = [](const Pin& p) {
+    if (p.is_invalid() || p.is_const() || gu::is_graph_input_pin(p)) {
+      return false;
+    }
+    const auto op = gu::type_op_of(p.get_master_node());
+    return op == Ntype_op::And || op == Ntype_op::Clock_cell;
+  };
+  Pin g;
+  if (cr.inverted != active_lo) {
+    g = cr.net;  // the window IS `!G`
+  } else if (gu::type_op_of(cr.net.get_master_node()) == Ntype_op::And) {
+    // `!G & rest` (B08's `if (!clock && mpcnd_en_2p)` on the gated clock): gated
+    // off, the window is `rest`, so it may stay open -- the same question,
+    // answered by the same masking. Exactly ONE operand may be an inverted gate.
+    for (const auto& in : gu::inp_sink_drivers(cr.net.get_master_node())) {
+      const auto r = resolve_phase(in.driver, /*stop_at_clock_cell=*/true);
+      if (r.inverted && is_gate(r.net)) {
+        if (!g.is_invalid()) {
+          return false;  // two gate complements: not one gate's window
+        }
+        g = r.net;
+      }
+    }
+  }
+  if (!is_gate(g)) {
+    return false;  // the window is not `!G` (or `!G & rest`) for an internal gate net G
+  }
+  const Pin  q        = latch.get_driver_pin(0);
+  const auto en_pid   = Ntype::get_sink_pid(Ntype_op::Clock_cell, "en");
+  const auto din_pid  = Ntype::get_sink_pid(Ntype_op::Flop, "din");
+  const auto fen_pid  = Ntype::get_sink_pid(Ntype_op::Flop, "enable");
+  // A reader is MASKED when its value cannot depend on the latch while G is low.
+  // `sink` is one edge out of Q, or out of the combinational cone Q feeds.
+  auto masked_sink = [&](const Pin& from, const auto& sink) -> int {  // 1 masked, 0 not, -1 walk on
+    const auto sn = sink.get_master_node();
     const auto op = gu::type_op_of(sn);
-    bool       masked = false;
     if (op == Ntype_op::And) {
       for (const auto& in : gu::inp_sink_drivers(sn)) {
-        if (in.driver == q) {
+        if (in.driver == from) {
           continue;
         }
         const auto r = resolve_phase(in.driver, /*stop_at_clock_cell=*/true);
         if (!r.inverted && r.net == g) {
-          masked = true;
-          break;
+          return 1;
         }
       }
-    } else if (op == Ntype_op::Clock_cell && e.sink.get_port_id() == en_pid) {
+      return -1;  // an And without G is ordinary logic: follow it
+    }
+    if (op == Ntype_op::Clock_cell) {
+      if (sink.get_port_id() != en_pid) {
+        return 0;
+      }
       const auto inv = sink_driver_hier(sn, "invert");
       const auto d   = sink_driver_hier(sn, "div");
       const auto r   = resolve_phase(sink_driver_hier(sn, "clk_ref"), /*stop_at_clock_cell=*/true);
-      masked = (inv.is_invalid() || inv.is_known_false()) && (d.is_invalid() || const_is(d, 1)) && !r.inverted && r.net == g;
+      return (inv.is_invalid() || inv.is_known_false()) && (d.is_invalid() || const_is(d, 1)) && !r.inverted && r.net == g
+                 ? 1
+                 : 0;
     }
-    if (!masked) {
-      return false;
+    if (op == Ntype_op::Flop) {
+      // A FLOP ON G's FALLING EDGE, read through its din or enable. G does not
+      // fall while gated off, so the flop does not sample then; and when it
+      // does, the latch has been shut since G rose, so it reads the value
+      // captured at that rise -- exactly what commit-at-closing-edge holds.
+      // minion's preview register file reads its `!(clk & en)` latch this way
+      // (`always_ff @(negedge rf_clk_i) if (wr_data_en_1p_q) ...`, CORE-ET B01).
+      // A flop on G's RISING edge samples as the latch closes: that is the
+      // same-edge reader hazard, not a masked read, so it is not accepted here.
+      const auto pid = sink.get_port_id();
+      if (pid != din_pid && pid != fen_pid) {
+        return 0;
+      }
+      const auto r       = resolve_phase(sink_driver_hier(sn, "clock_pin"), /*stop_at_clock_cell=*/true);
+      const bool falling = r.inverted != sink_driver_hier(sn, "posclk").is_known_false();
+      return !r.net.is_invalid() && r.net == g && falling ? 1 : 0;
+    }
+    if (op == Ntype_op::Latch) {
+      // A LATCH SHUT WHENEVER G IS LOW (the next master/slave stage on the
+      // gated clock, `if (clock && en) x = f(q)`): it reads nothing while
+      // gated off, and when G rises it opens on what this latch captured.
+      const auto pid = sink.get_port_id();
+      if (pid != din_pid && pid != fen_pid) {
+        return 0;
+      }
+      return latch_window_at(sn, g, /*level=*/false) == kCan0 ? 1 : 0;
+    }
+    if (op == Ntype_op::Fflop || op == Ntype_op::Memory || op == Ntype_op::Sub || gu::is_graph_output_pin(sink)) {
+      return 0;  // state, an instance or a primary output observes Q directly
+    }
+    return -1;  // combinational: what it computes is masked iff all its readers are
+  };
+  // Bounded forward walk over the combinational cone: every path out of Q has to
+  // end in a masked reader. Exceeding the bound fails closed.
+  // (Flat graphs dedupe by node; an occurrence walk counts visits instead, since
+  // one class node stands for many instances there.)
+  constexpr int                 kMaxCone = 4096;
+  std::vector<Pin>              work{q};
+  absl::flat_hash_set<uint64_t> seen;
+  int                           visits = 0;
+  while (!work.empty()) {
+    const Pin from = work.back();
+    work.pop_back();
+    for (const auto& e : from.out_edges()) {
+      const int m = masked_sink(from, e.sink);
+      if (m == 1) {
+        continue;
+      }
+      if (m == 0) {
+        return false;
+      }
+      const auto sn = e.sink.get_master_node();
+      if constexpr (std::is_same_v<Node, hhds::Node_class>) {
+        if (!seen.insert(static_cast<uint64_t>(sn.get_class_index().value)).second) {
+          continue;
+        }
+      }
+      if (++visits > kMaxCone) {
+        return false;
+      }
+      for (const auto& dp : sn.out_sorted_pins()) {
+        work.push_back(dp);
+      }
     }
   }
   return true;
@@ -1119,8 +1551,18 @@ bool gated_latch_closed_at(const hhds::Occurrence_node& latch, const hhds::Occur
   return latch_window_at(latch, root, closed_level) == kCan0;
 }
 
+bool gated_latch_closed_assuming(const hhds::Node_class& latch, const hhds::Pin_class& root, bool closed_level,
+                                 const std::vector<hhds::Pin_class>& assume_true) {
+  return latch_window_at(latch, root, closed_level, &assume_true) == kCan0;
+}
+
 bool latch_open_at(const hhds::Node_class& latch, const hhds::Pin_class& root, bool level) {
   return latch_window_at(latch, root, level) == kCan1;
+}
+
+bool latch_open_assuming(const hhds::Node_class& latch, const hhds::Pin_class& root, bool level,
+                         const std::vector<hhds::Pin_class>& assume_true) {
+  return latch_window_at(latch, root, level, &assume_true) == kCan1;
 }
 
 namespace {
@@ -1571,6 +2013,25 @@ std::optional<Icg_cone> resolve_icg_depth(const hhds::Pin_class& clock_pin, cons
       // `~clk & en` gates the FALLING edge; an inversion on the way down to the
       // And (a latch's `Mux(cone,0,1)` shaping, or an explicit `!`) flips it too.
       icg.clock_inverted = ph.inverted != outer.inverted;
+      // A GATE WHOSE CLOCK IS ITSELF A GATED CLOCK THAT `is_clock` ACCEPTS.
+      // The branch below handles an inner gate output that is NOT a clock root;
+      // this is the other half. When flops clock directly on the inner gate's
+      // output, Design_clocks roots it there, so it arrives HERE and the walk
+      // used to stop at it: CORE-ET's CSR file holds prim_write_commit_en latch
+      // pairs on `clock_wb & en_1p` with `clock_wb = clk_i & en_q` (a
+      // prim_clk_gate output that the CSR flops clock on), and B08
+      // (intpipe_top) was refused as "3 clock nets" -- clk_i, clock_wb and
+      // prim_mul_div's gated `clock` -- for one real clock. A gate of a gate is
+      // one gate: the inner cell's clock and inversion compose, and its enables
+      // join this cone's. Ported from the d2 branch (90583be13), where it
+      // resolved the same four CORE-ET tops. A graph input is a true root and
+      // ends the chain; the depth bound is the runaway guard shared with the
+      // non-clock branch.
+      if (!gu::is_graph_input_pin(ph.net) && depth < kMaxGateChain) {
+        if (auto inner = resolve_icg_depth(ph.net, clocks, depth + 1)) {
+          absorb_chain(icg, *inner, icg.clock_inverted);
+        }
+      }
       continue;
     }
     // A GATE ON AN ALREADY GATED CLOCK. `is_clock` cannot see this operand as a
@@ -3219,9 +3680,28 @@ bool check(hhds::Graph* g) {
     // Transparent self-update — a real latch would oscillate/settle inside the
     // window, which is exactly the timing the abstraction discards. The hold
     // mux tolg synthesizes is exempted (see comb_reach).
+    //
+    // B and C ask what the latch passes WHILE OPEN, so they walk its transparent
+    // arm. A hold mux in either reader spelling -- the don't-care `'x`, or the
+    // KNOWN constant `yosys.setundef=zero` leaves -- selects its hold arm only on
+    // the shut phase (latch_transparent_arm proves that before it peels), so its
+    // selector reads nothing the open latch passes. Walked raw, the selector of
+    // a preview latch on a gated clock (`Ror(clk & el) ? 0 : nxt`) reached the
+    // gate's enable latch `el`, which shares its commit edge, and rule C refused
+    // CORE-ET's prim_clk_gate + preview register file at compile.
     {
       absl::flat_hash_set<hhds::Class_index> hit;
-      comb_reach(gu::get_driver_of_sink_name(l, "din"), l, hit);
+      auto                                   d_open = latch_transparent_arm(l);
+      if (d_open.is_invalid()) {
+        d_open = gu::get_driver_of_sink_name(l, "din");
+      }
+      // A bit-blasted WIDE latch: its bit of the word is the open arm under the
+      // same bit-select wrappers, whose other operands are constants -- so the
+      // arm's cone is the bit's cone.
+      if (const auto hp = latch_hold_path(l)) {
+        d_open = hp->value;
+      }
+      comb_reach(d_open, l, hit);
       if (hit.contains(self_ix)) {
         reject("rule B, transparent self-update",
                "latch `" + latch_label(l) + "` has a combinational path from its Q back to its own D",

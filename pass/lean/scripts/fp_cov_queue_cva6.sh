@@ -7,10 +7,10 @@
 # scripts/gen_cva6_wrappers.py from slang's elaborated AST.
 #   fp_cov_queue_cva6.sh <row-id> <block>
 set -uo pipefail
-R=/WORKROOT/projects/livehd-pass-lean-master
+R="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"   # the repo root, from this script's location
 COV=$R/generated/master_port/cov12x5
 FND=$R/generated/master_port/cva6_foundation
-LOPT=/var/tmp/bazel_USER/_bazel_USER/8036432c6fc5c16a245c44de062c5637/execroot/_main/bazel-out/k8-opt/bin/lhd/lhd
+LOPT=${FP_LHD:-$(readlink -f "$R/bazel-bin/lhd/lhd")}   # bound by realpath; its sha256 is recorded below
 FL=$FND/cva6_filelists/cv64a6_imafdc_sv39_hpdcache_wb.flistplus.f
 ROW=${1:?row}; BLK=${2:?block}; APP=${3:?approach: legacy|verified_compiler}
 case "$APP" in legacy|verified_compiler) ;; *) echo "unknown approach: $APP"; exit 2 ;; esac
@@ -27,6 +27,8 @@ B=$COV/$ROW/attempt-$ATTEMPT
 # colliding ATTEMPT is refused rather than silently reused (mkdir -p would).
 mkdir -p "$COV/tmp" "$(dirname "$B")"
 mkdir "$B" 2>/dev/null || { echo "$ROW: ATTEMPT COLLISION, $B exists; refusing to reuse"; exit 3; }; export TMPDIR=$COV/tmp TMP=$COV/tmp TEMP=$COV/tmp
+# No wall-clock cap by default (FP_TIMEOUT=0 disables GNU timeout); the memory
+# ceiling (FP_MEMMAX, default 48G) stays, for host safety only.
 CR="bash $R/pass/lean/scripts/fp_cov_run.sh"
 # Parse the TOP-LEVEL status field, not any "pass" substring anywhere in the
 # record (a phase name or a diagnostic can contain it).
@@ -43,7 +45,7 @@ json_status() { python3 -I -c "import json,sys;print((json.load(open(sys.argv[1]
   echo "max_width=1048576 (scripts/run_cva6_module_lean_stress.sh:175; the DEFAULT 1024 refusal is preserved and recorded)";
 } > "$B/BINDING.txt"
 
-$CR "$ROW" s1_compile_lg "$B/s1_compile" 48G 5400 -- \
+$CR "$ROW" s1_compile_lg "$B/s1_compile" "${FP_MEMMAX:-48G}" "${FP_TIMEOUT:-0}" -- \
   "$LOPT" compile verilog "$WRAP" --reader yosys-slang --top "$TOP" \
   --workdir "$B/s1_compile/work" --result-json "$B/s1_compile/result.json" \
   --emit-dir lg:"$B/s1_compile/lg" --set yosys.filelist_file="$FL" \
@@ -57,7 +59,7 @@ ok1=0
   && [ -s "$B/s1_compile/lg/library.txt" ] && has_top "$B/s1_compile/lg" "$TOP" && ok1=1
 [ "$ok1" = 1 ] || { echo "$ROW/$ATTEMPT: STOP after s1 (exit $s1)"; exit 1; }
 
-$CR "$ROW" s2_single_edge "$B/s2_single_edge" 48G 5400 -- \
+$CR "$ROW" s2_single_edge "$B/s2_single_edge" "${FP_MEMMAX:-48G}" "${FP_TIMEOUT:-0}" -- \
   "$LOPT" pass single_edge --top "$TOP" lg:"$B/s1_compile/lg" \
   --emit-dir lg:"$B/s2_single_edge/lg" --workdir "$B/s2_single_edge/work" \
   --result-json "$B/s2_single_edge/result.json"
@@ -68,7 +70,7 @@ ok2=0
 [ "$ok2" = 1 ] || { echo "$ROW/$ATTEMPT: STOP after single_edge (exit $s2)"; exit 1; }
 
 if [ "$APP" = verified_compiler ]; then
-$CR "$ROW" verified_compiler "$B/verified_compiler" 48G 5400 -- \
+$CR "$ROW" verified_compiler "$B/verified_compiler" "${FP_MEMMAX:-48G}" "${FP_TIMEOUT:-0}" -- \
   "$LOPT" compile lg:"$B/s2_single_edge/lg" --top "$TOP" \
   --workdir "$B/verified_compiler/work" --result-json "$B/verified_compiler/result.json" \
   --emit-dir lean:"$B/verified_compiler/lean" --set formal.lean.mode=verified_compiler \
@@ -82,7 +84,7 @@ fi
 fi
 
 if [ "$APP" = legacy ]; then
-$CR "$ROW" legacy "$B/legacy" 48G 5400 -- \
+$CR "$ROW" legacy "$B/legacy" "${FP_MEMMAX:-48G}" "${FP_TIMEOUT:-0}" -- \
   "$LOPT" compile lg:"$B/s2_single_edge/lg" --top "$TOP" \
   --workdir "$B/legacy/work" --result-json "$B/legacy/result.json" \
   --emit-dir lean:"$B/legacy/lean" --set formal.lean.emit_cert=true \

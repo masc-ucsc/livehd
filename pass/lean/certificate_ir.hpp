@@ -10,6 +10,7 @@ enum class Operation {
   Sum,
   Mult,
   UDiv,
+  SDiv,
   And,
   Or,
   Xor,

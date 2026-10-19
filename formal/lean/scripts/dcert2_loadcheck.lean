@@ -13,7 +13,7 @@ transitively `import Mathlib` through `CompileDesign`), and separating the two
 is the point -- this file answers "can the DCERT2 bytes be admitted at all",
 not "can the projection consume them".
 -/
-import LeanSemanticPrimitives.Compiler.CertIOFacade
+import LeanSemanticPrimitives.Compiler.CertIORoute   -- DCERT2 + DCERT1, routed by magic (Mathlib-free)
 
 open Compiler
 

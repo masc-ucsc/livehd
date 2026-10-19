@@ -96,4 +96,6 @@ LeanOptions::LeanOptions(const Eprp_var& var) {
   }
 
   max_width = parse_max_width(var.get("max_width"));
+  // DEFAULT unlimited -- see ScanOptions::max_nodes.
+  max_nodes = parse_max_width(var.get("max_nodes"), 0);
 }
