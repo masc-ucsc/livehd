@@ -1,0 +1,22 @@
+/*
+:name: aeg_pack_rdy_vld
+:type: lec
+*/
+// PYROPE-vs-PYROPE group, in the style of br_amba_axi_demux: a ready/valid network whose packed ready vector
+// feeds the packed valid vector that feeds the packed ready vector. Every BIT is a DAG (v0 -> r1 -> v1 -> r2 -> v2)
+// but the two words form a combinational cycle at word level; only the slice reads of the packs (a lane of a
+// Concat / Set_mask) delete the false edges. This is the REFERENCE, compiled by the classic engine;
+// `aeg_pack_rdy_vld_1.prp` is the same source compiled by the e-graph engine, whose pre-pass has to resolve the
+// slices (no opaque member) and prove equal.
+pub comb top(req:U3, env:U3) -> (valid:U3, ready:U3) {
+  wire v:U3 = nil
+  wire r:U3 = nil
+  v#[0] = req#[0] & r#[0]
+  v#[1] = req#[1] & r#[1]
+  v#[2] = req#[2] & r#[2]
+  r#[0] = env#[0]
+  r#[1] = env#[1] ^ v#[0]
+  r#[2] = env#[2] ^ v#[1]
+  valid = v
+  ready = r
+}

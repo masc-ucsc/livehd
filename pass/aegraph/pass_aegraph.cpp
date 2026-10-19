@@ -28,6 +28,9 @@ void Pass_aegraph::setup() {
   m1.add_label_optional("low_lanes", "INTERNAL shared with pass.cprop: see compile.cprop.low_lanes", "true");
   m1.add_label_optional("loop_hoist", "INTERNAL shared with pass.cprop: see compile.cprop.loop_hoist", "true");
   m1.add_label_optional("engine", "INTERNAL shared with pass.cprop: see compile.cprop.engine", "aegraph");
+  m1.add_label_optional("after_bitwidth",
+                        "INTERNAL set by the kernel for the slot that runs after pass.bitwidth: low-lane narrowing stays off there",
+                        "false");
   m1.add_label_optional("stats", "INTERNAL set by the kernel from lhd.stats: emit one cprop-summary diagnostic per graph", "false");
 
   // The rewrite-rule runtime (compile.aegraph.*). The rule names are in the table of
@@ -50,12 +53,14 @@ void Pass_aegraph::setup() {
   m1.add_label_optional("rewrite_depth", "nested rule-built e-nodes that still meet rules (Cranelift rewrite depth)", "5");
   m1.add_label_optional("matches_limit", "alt-rule results unioned per e-node", "5");
   m1.add_label_optional("eclass_limit", "members of one e-class (the size of a union)", "5");
-  m1.add_label_optional("extractor_fuel", "tree-cost saturation of the extractor (a tie keeps the original)", "500");
+  m1.add_label_optional("extractor_fuel", "cost saturation of the extractor, in units of 1024 (a tie keeps the original)", "500");
   m1.add_label_optional("edge_budget",
                         "rule work (operands scanned) allowed per input edge of a graph; 0 = unlimited. Keeps the pass O(V+E)",
                         "32");
   m1.add_label_optional("cost",
-                        "synth|sim: the extraction cost profile label (the profiles arrive with the cost milestone)",
+                        "synth|sim|auto: the extraction cost profile (pass/aegraph/cost/<name>.cost). synth: gates, width-aware, "
+                        "wiring free (default). sim: instructions of the LLVM-emitted simulator, word-quantized. auto: sim under "
+                        "`lhd sim`, else synth. An alt rule's result is kept only when the profile prices it strictly lower",
                         "synth");
   m1.add_label_optional("choices", "off|const|expr: whether '?' choice rules are active (no choice rules exist yet)", "off");
 
@@ -83,12 +88,24 @@ absl::flat_hash_set<hhds::Gid> lifted_loop_bodies(const std::vector<std::shared_
   return bodies;
 }
 
+// The engine options of one graph: the accumulation guard is a rolled-loop rule (a lifted loop body) that only runs
+// where bitwidth follows and sizes the new cells (the pre-bitwidth slot, Cprop's low_lanes).
+livehd::aegraph::Options graph_options(livehd::aegraph::Options options, bool loop_body, bool before_bitwidth) {
+  options.guard_scope  = loop_body;
+  options.unstamped_ok = before_bitwidth;
+  return options;
+}
+
 }  // namespace
 
 namespace livehd::aegraph {
 Stats optimize_body(Cprop& cp, const std::shared_ptr<hhds::Graph>& g, const Options& options) {
   const auto stats = optimize(g, [&](const std::vector<hhds::Node_class>& cyclic) { cp.do_scalar(g, cyclic); }, options);
   livehd::aegraph_profile::Timer post(livehd::aegraph_profile::post);
+  if (stats.refused != 0) {
+    cp.do_trans(g);  // preflight: the engine would have created a cell it cannot stamp; classic does this graph
+    return stats;
+  }
   cp.do_post(g);
   return stats;
 }
@@ -96,7 +113,12 @@ Stats optimize_body(Cprop& cp, const std::shared_ptr<hhds::Graph>& g, const Opti
 
 void Pass_aegraph::optimize(Eprp_var& var) {
   Pass_aegraph pa(var);
-  const auto   low_lanes   = var.get("low_lanes", "true") != "false";
+  // Low-lane narrowing and the slice repacking it triggers (Cprop::normalize_emitted)
+  // belong BEFORE bitwidth. After it, a Get_mask of a pack becomes a Concat that
+  // declares its full window while bitwidth has already dropped the masks the
+  // tighter, unpacked range justified: a lane driver then comes out wider than its
+  // window (XiangShan fpsqrt_r16_block, an internal "Concat lane" error).
+  const auto   low_lanes   = var.get("low_lanes", "true") != "false" && var.get("after_bitwidth", "false") != "true";
   const auto   loop_bodies = lifted_loop_bodies(var.graphs);
   const auto   want_stats  = var.get("stats", "false") == "true";
   const auto   options     = livehd::aegraph::make_options(var.get("rules_disable", ""),
@@ -130,9 +152,10 @@ void Pass_aegraph::optimize(Eprp_var& var) {
     const auto name = g->get_io() ? std::string{g->get_io()->get_name()} : std::string{};
     livehd::aegraph_profile::Invocation profile(name);
     livehd::cprop_summary::Probe        probe(*g, want_stats);
-    const auto                          stats = livehd::aegraph::optimize_body(cp, g, options);
+    const auto                          per_graph = graph_options(options, loop_bodies.contains(g->get_gid()), low_lanes);
+    const auto                          stats     = livehd::aegraph::optimize_body(cp, g, per_graph);
     if (want_stats) {
-      records[index] = probe.finish(*g, name, stats.rules_fired, stats.aeg_bytes);
+      records[index] = probe.finish(*g, name, stats.rules_fired, stats.aeg_bytes, stats.aeg_cap_bytes);
     }
     const std::lock_guard<std::mutex> lock(stats_mutex);
     total += stats;

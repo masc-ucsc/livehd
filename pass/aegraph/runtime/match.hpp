@@ -83,6 +83,12 @@ public:
   // True when `cls` has exactly one reader in the graph being built, so
   // absorbing it into its reader cannot duplicate logic.
   [[nodiscard]] virtual bool single_use(Class_id cls) const = 0;
+  // True when the one reader of the original node behind `cls` is a cell of the
+  // same op and attrs: that reader will absorb `cls` (see the flatten rule), so
+  // absorbing a chain link by link would only leave dead intermediate banks.
+  [[nodiscard]] virtual bool chain_inner(Class_id /*cls*/) const { return false; }
+  // True when the graph is a lifted loop body whose new cells bitwidth will size (Options::guard_scope).
+  [[nodiscard]] virtual bool guard_scope() const { return false; }
 };
 
 class Ctx {
@@ -103,6 +109,8 @@ public:
   // operand stays a Sum).
   Class_id make_bank(Ntype_op op, std::vector<Operand> ops);
   [[nodiscard]] bool single_use(Class_id cls) const { return builder_.single_use(cls); }
+  [[nodiscard]] bool chain_inner(Class_id cls) const { return builder_.chain_inner(cls); }
+  [[nodiscard]] bool guard_scope() const { return builder_.guard_scope(); }
 
   // ---- reading ----
   // Calls fn(member_class) for each non-union member of `cls` until fn returns
@@ -124,7 +132,7 @@ public:
   // literal, a node with a three-valued value, a leaf).
   [[nodiscard]] const Dlop* known(Class_id cls) const {
     const auto& c = eg_.cls(cls);
-    return c.kind == Egraph::Kind::konst ? &*c.value : nullptr;
+    return c.kind == Egraph::Kind::konst ? eg_.value_of(cls) : nullptr;
   }
   [[nodiscard]] bool is_int(Class_id cls, int64_t v) const {
     const auto* k = known(cls);

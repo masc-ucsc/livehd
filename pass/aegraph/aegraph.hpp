@@ -16,7 +16,8 @@
 //                 is NEW in the e-graph then meets the rewrite rules of its root
 //                 op (runtime/match.hpp, rules/*.cpp): a `simplify` rule replaces
 //                 the class (subsume), an `alt` rule unions its result with it
-//   3. extract    the cheapest member of each union class (tree size, ties keep
+//   3. extract    the cheapest member of each union class under the cost profile
+//                 (cost/synth.cost or cost/sim.cost: width- and sharing-aware, ties keep
 //                 the original); a class without unions is its first member
 //   4. elaborate  diff against the original graph: matching nodes are reused
 //                 (nids, names and srcids survive), duplicates are retired,
@@ -28,6 +29,7 @@
 // is the library-wide classic pass. pass.aegraph (pass_aegraph.cpp) wires the
 // stages together.
 
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <functional>
@@ -39,6 +41,8 @@
 #include <vector>
 
 #include "absl/container/flat_hash_map.h"
+#include "absl/container/flat_hash_set.h"
+#include "absl/container/inlined_vector.h"
 #include "cell.hpp"
 #include "hhds/graph.hpp"
 #include "hlop/dlop.hpp"
@@ -49,6 +53,10 @@ using Class_id = uint32_t;
 using Enode_id = uint32_t;
 inline constexpr Class_id kNoClass = UINT32_MAX;
 inline constexpr Enode_id kNoEnode = UINT32_MAX;
+
+namespace rt {
+struct Analysis_cache;  // runtime/analyses.hpp: the lazy facts and lane layouts of the classes
+}
 
 // Per-rule counters (thread-local to one engine run, merged after the workers
 // join). `tried` = the rule body ran; `matched` = it produced at least one result;
@@ -98,9 +106,22 @@ struct Options {
   uint32_t    eclass_limit   = 5;      // members of one class (a union's size)
   uint32_t    extractor_fuel = 500;    // tree-cost saturation of the extractor
   uint32_t    edge_budget    = 32;     // rule work (operands scanned) allowed per input edge of the graph
-  Cost        cost           = Cost::synth;  // extraction profile label (profiles arrive with the cost milestone)
+  Cost        cost           = Cost::synth;  // the extraction cost profile (cost/<name>.cost)
   bool        choices        = false;  // `?` choice rules (off until they ship)
+  // The LEC preflight (formal.lec.preflight_engine=aegraph): no pass.bitwidth follows, so every cell the
+  // elaborator creates has to carry a width stamp -- the contract of classic Cprop{false}. A new interior cell
+  // is stamped from the range analysis; when a cell cannot be stamped the engine REFUSES the graph (leaves
+  // it as the pre-pass produced it, Stats::refused = 1) and the caller falls back to classic.
+  bool        preflight      = false;
+  // classic scalar_mux's accumulation guard (`mux(s, a, a OP x)` -> `a OP mux(s, id, x)`) is a rolled-loop rule: it
+  // runs only inside a lifted loop body (guard_scope) and only where bitwidth follows and may size the new Mux
+  // (unstamped_ok, the pre-bitwidth slot: Cprop's low_lanes).
+  bool        guard_scope    = false;
+  bool        unstamped_ok   = false;
 };
+
+// The registered name of a cost profile (the file cost/<name>.cost).
+[[nodiscard]] constexpr const char* profile_name(Options::Cost cost) { return cost == Options::Cost::sim ? "sim" : "synth"; }
 
 // What one engine run did to one graph body.
 struct Stats {
@@ -117,13 +138,16 @@ struct Stats {
   size_t dead_removed   = 0;  // dead pure nodes deleted
   size_t consts_created = 0;  // constants the elaborator had to create
   size_t rules_fired    = 0;  // rewrite-rule firings (applied results)
-  size_t aeg_bytes      = 0;  // peak capacity of the e-graph tables (Egraph::bytes)
+  size_t aeg_bytes      = 0;  // bytes in use by the e-graph tables (Egraph::bytes), the peak
+  size_t aeg_cap_bytes  = 0;  // the same tables at capacity (Egraph::capacity_bytes)
   size_t rewritten      = 0;  // original nodes rebuilt or replaced by a rule's result
   size_t unions         = 0;  // union classes made by alt rules
   size_t depth_limited  = 0;  // e-nodes that skipped the rules at rewrite_depth
   size_t budget_hit     = 0;  // bodies whose edge_budget ran out
   size_t checks         = 0;  // check=: vector comparisons done
   size_t check_skipped  = 0;  // check=: comparisons skipped (a '?' or an unevaluable cone)
+  size_t refused        = 0;  // preflight: graphs left unelaborated because a new cell could not be stamped
+  size_t stamped        = 0;  // preflight: new interior cells stamped from the range analysis
   std::vector<Rule_counters> rule_counts;  // indexed by Rule_id (slot 0 unused)
 
   Stats& operator+=(const Stats& o) {
@@ -141,12 +165,15 @@ struct Stats {
     consts_created += o.consts_created;
     rules_fired    += o.rules_fired;
     aeg_bytes      += o.aeg_bytes;
+    aeg_cap_bytes  += o.aeg_cap_bytes;
     rewritten      += o.rewritten;
     unions         += o.unions;
     depth_limited  += o.depth_limited;
     budget_hit     += o.budget_hit;
     checks         += o.checks;
     check_skipped  += o.check_skipped;
+    refused        += o.refused;
+    stamped        += o.stamped;
     if (rule_counts.size() < o.rule_counts.size()) {
       rule_counts.resize(o.rule_counts.size());
     }
@@ -180,21 +207,28 @@ struct Enode_attrs {
   friend bool operator==(const Enode_attrs&, const Enode_attrs&) = default;
 };
 
+// 20 bytes: the attrs are an index into Egraph::attrs() (almost every e-node
+// has the default ones) and the hash-cons table is a flat array of Enode_id.
 struct Enode {
-  Ntype_op    op = Ntype_op::Invalid;
-  Enode_attrs attrs;
-  uint32_t    first_operand = 0;  // offset into the operand pool
-  uint32_t    n_operands    = 0;
-  Class_id    cls           = kNoClass;
-  uint64_t    hash          = 0;
-  Enode_id    chain         = kNoEnode;  // hash-cons bucket chain
-  uint16_t    rule          = 0;         // creating Rule_id; 0 = the original node
+  uint32_t first_operand = 0;  // offset into the operand pool
+  uint32_t n_operands    = 0;
+  Class_id cls           = kNoClass;
+  uint32_t attr          = 0;  // Egraph::attrs() index
+  Ntype_op op            = Ntype_op::Invalid;
+  uint16_t rule          = 0;  // creating Rule_id; 0 = the original node
 };
 
 // Pure data: no LGraph handles. Classes are created in forward-walk order, so
 // class ids are deterministic.
 class Egraph {
 public:
+  Egraph();
+  ~Egraph();
+  Egraph(const Egraph&)            = delete;
+  Egraph& operator=(const Egraph&) = delete;
+  Egraph(Egraph&&)                 = delete;
+  Egraph& operator=(Egraph&&)      = delete;
+
   enum class Kind : uint8_t {
     leaf,     // a skeleton driver pin, or any value the engine cannot see through
     literal,  // a '?'-bearing constant: ONE const node (Q5), never merged by value
@@ -203,18 +237,26 @@ public:
     uni,      // a union of two classes (an `alt` rule's result with the class it extends)
   };
 
+  // 20 bytes. `first` (node) and `alt_a` (uni) never coexist; the three-valued
+  // analysis value lives in Egraph::values_ (absent = a non-constant class).
   struct Eclass {
-    Kind                 kind       = Kind::leaf;
-    Enode_id             first      = kNoEnode;  // the e-node of a node class
-    std::optional<Dlop>  value;                  // three-valued; absent = no value (non-constant)
-    Class_id             alt_a      = kNoClass;  // uni: the extended class (the original side)
-    Class_id             alt_b      = kNoClass;  // uni: the rule's result
-    Class_id             alias      = kNoClass;  // set once a rewrite replaced or extended this class
-    uint16_t             members    = 1;         // e-nodes the class stands for (a union sums its sides)
+    union {
+      Enode_id first = kNoEnode;  // the e-node of a node class
+      Class_id alt_a;             // uni: the extended class (the original side)
+    };
+    Class_id alt_b = kNoClass;    // uni: the rule's result
+    Class_id alias = kNoClass;    // set once a rewrite replaced or extended this class
+    uint32_t value = UINT32_MAX;  // index into Egraph::values_
+    uint16_t members = 1;         // e-nodes the class stands for (a union sums its sides)
+    Kind     kind    = Kind::leaf;
   };
 
   // A fresh class that is never merged with anything.
   Class_id add_leaf();
+  // A leaf that is the output of a state element (Flop, Latch, Memory, Sub, ...): rules that move logic around a
+  // held value must not touch it (the latch contract, enableopt's hold regions).
+  void               mark_state(Class_id cls) { state_.insert(cls); }
+  [[nodiscard]] bool is_state(Class_id cls) const { return state_.contains(cls); }
   // A '?'-bearing constant: a fresh class per const node.
   Class_id add_literal(const Dlop& value);
   // A fully known constant, interned by value (same_repr).
@@ -272,10 +314,15 @@ public:
     }
   }
   uint32_t policy_id(std::string_view policy);
-  // Sum of the container capacities (classes, e-nodes, operand pool, hash-cons
-  // and constant tables): the e-graph's memory footprint. Tables only grow, so
-  // the value after the build is the peak.
+  // The attrs of an e-node, and the (deduplicated) index a new e-node stores.
+  [[nodiscard]] const Enode_attrs& attrs_of(const Enode& n) const { return attrs_[n.attr]; }
+  // Bytes in use by the tables (classes, e-nodes, operand pool, hash-cons and
+  // constant tables): sizes, not capacities. Tables only grow, so the value
+  // after the build is the peak.
   [[nodiscard]] size_t bytes() const;
+  // The same tables at their CAPACITY: what the allocator handed out (a vector
+  // doubles on growth, so this is up to 2x bytes()). The resident bound.
+  [[nodiscard]] size_t capacity_bytes() const;
 
   [[nodiscard]] const Eclass&             cls(Class_id id) const { return classes_[id]; }
   [[nodiscard]] size_t                    num_classes() const { return classes_.size(); }
@@ -283,20 +330,31 @@ public:
   [[nodiscard]] const Enode&              enode(Enode_id id) const { return enodes_[id]; }
   [[nodiscard]] std::span<const Operand>  operands(const Enode& n) const { return {pool_.data() + n.first_operand, n.n_operands}; }
   [[nodiscard]] const std::vector<std::string>& policies() const { return policies_; }
+  // The lazily filled analysis facts (runtime/analyses.cpp). A fact about a class stays true when the
+  // class later gains union members (they are equal to it), so the cache is never invalidated.
+  [[nodiscard]] rt::Analysis_cache& analysis_cache() const;
   [[nodiscard]] const Dlop*               value_of(Class_id id) const {
-    return classes_[id].value ? &*classes_[id].value : nullptr;
+    const auto idx = classes_[id].value;
+    return idx == UINT32_MAX ? nullptr : &values_[idx];
   }
 
 private:
-  static uint64_t hash_of(Ntype_op op, const Enode_attrs& attrs, std::span<const Operand> operands);
+  absl::flat_hash_set<Class_id> state_;
+  static uint64_t hash_of(Ntype_op op, uint32_t attr, std::span<const Operand> operands);
+  uint32_t        attr_id(const Enode_attrs& attrs);
+  void            grow_table();
 
   std::vector<Eclass>                    classes_;
   std::vector<Enode>                     enodes_;
   std::vector<Operand>                   pool_;
-  absl::flat_hash_map<uint64_t, Enode_id> buckets_;       // hash -> first enode of the chain
-  absl::flat_hash_map<uint64_t, std::vector<Class_id>> consts_;  // Dlop::hash -> known-constant classes
+  std::vector<Dlop>                      values_;         // analysis values, shared by index
+  std::vector<Enode_id>                  table_;          // hash-cons: open addressing over enodes_, kNoEnode = empty
+  std::vector<Enode_attrs>               attrs_{Enode_attrs{}};
+  absl::flat_hash_map<std::array<uint32_t, 5>, uint32_t> attr_ids_;
+  absl::flat_hash_map<uint64_t, absl::InlinedVector<Class_id, 1>> consts_;  // Dlop::hash -> known-constant classes
   std::vector<std::string>               policies_{std::string{}};
   absl::flat_hash_map<std::string, uint32_t> policy_ids_;
+  mutable std::unique_ptr<rt::Analysis_cache> analysis_;
 };
 
 // One operand of eval_op: the sink port it occupies, its bank, and its value.

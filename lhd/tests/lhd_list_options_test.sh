@@ -64,6 +64,10 @@ echo "$out" | grep -q '"name":"compile.cprop.engine_slots","method":"pass.cprop"
   || fail "compile.cprop.engine_slots must default both: $out"
 echo "$out" | grep -Eq '"name":"compile.aegraph.(low_lanes|loop_hoist|engine|engine_slots)"' \
   && fail "the shared labels must stay INTERNAL on pass.aegraph (one spelling: compile.cprop.*): $out"
+echo "$out" | grep -q '"name":"compile.aegraph.after_bitwidth"' \
+  && fail "after_bitwidth must stay INTERNAL (kernel bookkeeping, not listed): $out"
+"$LHD" compile "$PRP" --set compile.aegraph.after_bitwidth=true --workdir "$W/dup_after_bitwidth" -q >"$W/dup_after_bitwidth.json" 2>&1 \
+  && fail "compile.aegraph.after_bitwidth must be rejected: kernel-managed"
 for engine in classic aegraph aegraph+classic; do
   "$LHD" compile "$PRP" --set "compile.cprop.engine=$engine" --workdir "$W/engine_$engine" -q >"$W/engine_$engine.json" 2>&1 \
     || fail "compile.cprop.engine=$engine must be accepted: $(cat "$W/engine_$engine.json")"

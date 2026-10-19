@@ -27,15 +27,17 @@
 #include <cstdint>
 #include <memory>
 #include <optional>
+#include <set>
 #include <string>
 #include <string_view>
 #include <vector>
 
 #include "cell.hpp"
+#include "cost_model.hpp"
 
 namespace livehd::aegraph::rulegen {
 
-using Diags = std::vector<std::string>;  // "file:line: error: message"
+using Diags = cost::Diags;  // "file:line: error: message"
 
 // A `:let` / `:when` / `(k EXPR)` expression: numbers, names and builtin calls.
 struct Expr {
@@ -120,6 +122,7 @@ struct Analysis {
   std::string              name;
   bool                     is_pred = false;  // (pred ...) vs (analysis ...)
   std::vector<std::string> params;
+  std::vector<bool>        is_const;  // per parameter: written `(k n)` in the declaration, a constant, not a class
   std::string              uses;
   std::string              type;
   std::optional<Expr>      spec;
@@ -130,6 +133,10 @@ struct Analyses {
   std::string           path;
   std::string           text;
   std::vector<Analysis> list;
+  // The AEG_ANALYSIS implementations rulegen scanned in the runtime sources; when none was scanned
+  // (`impl_known` false: a unit test parsing inline text) no implementation is demanded.
+  std::set<std::string> impl;
+  bool                  impl_known = false;
   [[nodiscard]] const Analysis* find(std::string_view name) const;
 };
 
@@ -150,8 +157,12 @@ struct Native_rule {
 [[nodiscard]] Analyses   parse_analyses(std::string_view text, std::string_view path, Diags& diags);
 [[nodiscard]] std::vector<Native_rule> scan_native(std::string_view cpp_text, std::string_view path);
 
-// The lints that fail generation (all diagnostics, not just the first).
+// The lints that fail generation (all diagnostics, not just the first). With `profiles` (the cost files), a
+// `simplify` is linted against each profile's prices and `:expect` names must be one of them; without, the
+// structural form (a rule may not grow the graph or build an op dearer than its root).
 void lint(const std::vector<Rules_file>& files, const Analyses& analyses, const std::vector<Native_rule>& natives, Diags& diags);
+void lint(const std::vector<Rules_file>& files, const Analyses& analyses, const std::vector<Native_rule>& natives,
+          const std::vector<cost::Profile>& profiles, Diags& diags);
 
 // ---- shared helpers -------------------------------------------------------------
 
@@ -179,15 +190,16 @@ struct Op_shape {
 
 // ---- emitters -------------------------------------------------------------------
 
+// The registration of one cost profile: its source text, parsed by the runtime on first use.
+[[nodiscard]] std::string emit_cost_cpp(const cost::Profile& profile, std::string_view text);
 [[nodiscard]] std::string emit_rules_cpp(const Rules_file& file, const Analyses& analyses);
 [[nodiscard]] std::string emit_fuzz_test(const Rules_file& file, const Analyses& analyses);
 [[nodiscard]] std::string emit_prove_test(const Rules_file& file, const Analyses& analyses);
 [[nodiscard]] std::string emit_rules_md(const std::vector<Rules_file>& files, const Analyses& analyses,
                                         const std::vector<Native_rule>& natives);
 
-// The C++ spelling of a runtime-implemented analysis predicate, with `%0`, `%1`... for the
-// argument classes; null when the analysis has no runtime implementation yet.
-[[nodiscard]] const char* analysis_cxx(std::string_view name);
+// The names of the AEG_ANALYSIS(name, ...) implementations in a runtime source.
+[[nodiscard]] std::vector<std::string> scan_analysis_impls(std::string_view cpp_text);
 
 // The proof-tier label of a rule: "bv-swept" for a pattern rule, "native-unverified" otherwise.
 [[nodiscard]] std::string proof_tier(const Rule& r);

@@ -1,5 +1,6 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
-#include "match.hpp"
+#include "runtime/match.hpp"
+#include "runtime/analyses.hpp"
 
 #include <algorithm>
 #include <cstring>
@@ -28,6 +29,9 @@ bool Ctx::bool01(Class_id cls, int depth) {
   }
   if (const auto* k = known(cls); k != nullptr) {
     return k->is_integer() && k->is_just_i64() && (k->to_just_i64() == 0 || k->to_just_i64() == 1);
+  }
+  if (const auto f = facts_of(eg_, cls); f.lo >= 0 && f.hi <= 1) {
+    return true;  // the interval [0, 1]
   }
   return each_member(cls, [&](Class_id member) {
     const Enode* n = node_of(member);

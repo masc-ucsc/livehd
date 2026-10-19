@@ -1,0 +1,35 @@
+/*
+:name: aeg_loop_guard_accum
+:type: lec
+:lec_set: formal.engine=ind
+*/
+// PYROPE-vs-PYROPE group, the fixture of the aegraph accumulation guard (pass/aegraph/rules/mux.cpp
+// mux_guard_accumulation): inside a ROLLED loop body `if s { acc OP= x }` is Mux(s, acc, acc OP x) and the engine
+// moves the Mux onto the term, acc OP Mux(s, id, x), so the carry is one associative reduction. This is the
+// REFERENCE, compiled by the classic engine; `aeg_loop_guard_accum_1.prp` is the same source compiled by the
+// e-graph engine.
+pub mod top(x:U8, y:U8, z:U8) -> (o:U8@[0], p:U8@[0], q:U8@[0]) {
+  mut a:U8 = 0
+  for i in 0..<8 {
+    if x#[i] != 0 {
+      a |= y ^ z
+    }
+  }
+  o = a
+
+  mut b:U8 = 0
+  for i in 0..<8 {
+    if x#[i] != 0 {
+      b ^= y
+    }
+  }
+  p = b
+
+  mut c:U8 = 255
+  for i in 0..<8 {
+    if x#[i] != 0 {
+      c &= y | z
+    }
+  }
+  q = c
+}

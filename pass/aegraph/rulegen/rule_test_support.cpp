@@ -21,6 +21,8 @@
 #include "node_util.hpp"
 #include "query.hpp"
 #include "rulegen/rule_expr.hpp"
+#include "mask_eval.hpp"
+#include "runtime/analyses.hpp"
 #include "runtime/match.hpp"
 
 namespace livehd::aegraph::rulegen::testing {
@@ -155,13 +157,22 @@ Num eval_expr(const Expr& e, const Env& env, const Analyses& analyses) {
     }
     return rt::ex::call(e.name, args);
   }
-  // An analysis predicate: its :spec decides, over the argument values.
+  // An analysis predicate: its :spec decides, over the argument values (a class argument by its value, a
+  // constant argument by its expression).
   const auto* an = analyses.find(e.name);
   if (an == nullptr || !an->spec || an->params.size() != e.args.size()) {
     return Num{};
   }
   Env local;
   for (size_t i = 0; i < e.args.size(); ++i) {
+    if (an->is_const[i]) {
+      const auto n = eval_expr(e.args[i], env, analyses);
+      if (!n.ok) {
+        return rt::ex::flag(false);
+      }
+      local.num[an->params[i]] = n;
+      continue;
+    }
     const auto it = env.cls.find(e.args[i].name);
     const auto n  = it == env.cls.end() ? std::nullopt : to_num(it->second);
     if (!n) {
@@ -189,6 +200,8 @@ std::optional<Dlop> apply(Ntype_op op, std::vector<Eval_arg> args) {
   }
   return eval_op(op, args);
 }
+
+void collect_k_names(const Pat& p, std::vector<std::string>& out);
 
 class Instantiator {
 public:
@@ -319,6 +332,53 @@ public:
     return apply(p.op, std::move(args));
   }
 
+  // Bind every named `(k c)` of the pattern before the pattern is walked, then solve the equalities a :when
+  // states between them: `(= w (- h m))` sets w from h and m, so a rule that needs related constants
+  // (adjacent windows and their widths) meets its guard instead of sampling it at random.
+  void presample_ks(const Rule& rule) {
+    std::vector<std::string> names;
+    collect_k_names(rule.lhs, names);
+    for (const auto& n : names) {
+      if (env_.cls.contains(n)) {
+        continue;
+      }
+      const auto k = sample_k(rng_);
+      env_.num[n]  = rt::ex::num(k);
+      env_.cls.emplace(n, D(k));
+    }
+    std::function<void(const Expr&)> solve = [&](const Expr& e) {
+      if (e.kind != Expr::Kind::call) {
+        return;
+      }
+      if (e.name == "and") {
+        for (const auto& a : e.args) {
+          solve(a);
+        }
+        return;
+      }
+      if (e.name != "=" || e.args.size() != 2) {
+        return;
+      }
+      for (int side = 0; side < 2; ++side) {
+        const auto& target = e.args[side];
+        if (target.kind != Expr::Kind::var || std::ranges::find(names, target.name) == names.end()) {
+          continue;
+        }
+        const auto v = eval_expr(e.args[1 - side], env_, analyses_);
+        if (v.ok) {
+          env_.num[target.name] = v;
+          env_.cls[target.name] = D(v.v);
+          return;
+        }
+      }
+    };
+    for (int pass = 0; pass < 3; ++pass) {
+      for (const auto& w : rule.whens) {
+        solve(w);
+      }
+    }
+  }
+
   // A `?` literal value: some bits unknown.
   Dlop unknown_value() {
     const auto base = D(sample_k(rng_));
@@ -329,18 +389,35 @@ public:
   }
 
 private:
+  // Values for a class variable a :when constrains through an analysis. A predicate over one class and no
+  // constants is filtered here; every other one (constant arguments, several classes) is met by rejection in
+  // the caller, so the generator only leans towards the shapes those predicates accept: small non-negative
+  // values, shifted values (low zeros) and the generic mix.
   Dlop sample_class(const std::string& name) {
     const auto it = constraints_.find(name);
     for (int tries = 0; tries < 80; ++tries) {
       auto v = sample_value(rng_);
+      if (it != constraints_.end() && tries % 3 == 0) {
+        // A constrained variable is a bound-style fact (a range, a bit mask): keep the generic mix below 2^12
+        // so a shift amount built from it never asks Dlop for a gigantic result.
+        v = D(static_cast<int64_t>(rng_.below(int64_t{1} << 13)) - (int64_t{1} << 12));
+      }
       if (tries >= 4) {  // the generic mix rarely hits a narrow spec: bias towards small values
         v = D(static_cast<int64_t>(rng_.below(4)) - 1);
+      }
+      if (it != constraints_.end() && tries % 3 == 1) {
+        v = D(static_cast<int64_t>(rng_.below(16)));
+      } else if (it != constraints_.end() && tries % 3 == 2) {
+        v = D(static_cast<int64_t>(rng_.below(8)) << rng_.below(9));
       }
       if (it == constraints_.end()) {
         return v;
       }
       bool ok = true;
       for (const auto* an : it->second) {
+        if (an->params.size() != 1) {
+          continue;
+        }
         Env local;
         local.cls["x"] = v;
         Expr call;
@@ -365,15 +442,29 @@ private:
   std::map<std::string, std::vector<const Analysis*>>    constraints_;
 };
 
+void collect_k_names(const Pat& p, std::vector<std::string>& out) {
+  if (p.kind == Pat::Kind::konst && !p.name.empty() && p.name != "_" && std::ranges::find(out, p.name) == out.end()) {
+    out.push_back(p.name);
+  }
+  for (const auto& a : p.args) {
+    collect_k_names(a, out);
+  }
+  for (const auto& b : p.banks) {
+    for (const auto& e : b.elems) {
+      collect_k_names(e, out);
+    }
+  }
+}
+
 // Which class variables a :when constrains through an analysis predicate.
 void collect_constraints(const Expr& e, const Analyses& analyses, std::map<std::string, std::vector<const Analysis*>>& out) {
   if (e.kind != Expr::Kind::call) {
     return;
   }
   if (const auto* an = analyses.find(e.name); an != nullptr) {
-    for (const auto& a : e.args) {
-      if (a.kind == Expr::Kind::var) {
-        out[a.name].push_back(an);
+    for (size_t i = 0; i < e.args.size() && i < an->is_const.size(); ++i) {
+      if (!an->is_const[i] && e.args[i].kind == Expr::Kind::var) {
+        out[e.args[i].name].push_back(an);
       }
     }
     return;
@@ -448,6 +539,7 @@ Fuzz_report fuzz_equal(const Rule& rule, const Analyses& analyses, uint64_t seed
           env.lit[arm.lit] = D(arm.nonzero ? static_cast<int64_t>(1 + rng.below(40)) : arm.value.value_or(0));
         }
         Instantiator inst(rng, analyses, env, constraints);
+        inst.presample_ks(rule);
         const auto   lhs = inst.lhs(rule.lhs);
         if (!lhs) {
           continue;
@@ -474,7 +566,9 @@ Fuzz_report fuzz_equal(const Rule& rule, const Analyses& analyses, uint64_t seed
                  + ")\n  rule: " + rule_text(rule) + "\n  lhs value: " + lhs->to_pyrope() + "\n  rhs value: " + rhs->to_pyrope()
                  + "\n  bindings:\n" + env_text(env);
         };
-        if (refine) {
+        if (refine || lhs->has_unknowns()) {
+          // A left-hand side that is the all-unknown value (x / 0) or carries a `?` literal: the right-hand
+          // side has to be one of its refinements -- every known left-hand bit kept, no new `?`.
           if (rhs->has_unknowns() && !lhs->has_unknowns()) {
             report.failure = describe("a new ? appears on the right-hand side");
             break;
@@ -486,8 +580,9 @@ Fuzz_report fuzz_equal(const Rule& rule, const Analyses& analyses, uint64_t seed
             }
           }
         } else {
-          if (lhs->has_unknowns() || rhs->has_unknowns()) {
-            continue;  // unknown results: not an equality sample (the ? rules go through refinement)
+          if (rhs->has_unknowns()) {
+            report.failure = describe("a ? appears on the right-hand side");
+            break;
           }
           if (!lhs->eq_op(*rhs)->is_known_true()) {
             report.failure = describe("the two sides differ");
@@ -664,6 +759,27 @@ private:
         const auto lo = const_value(p.args[1]), hi = const_value(p.args[2]);
         return (lo && hi && *hi > *lo && *hi - *lo < kMaxBits) ? static_cast<int>(*hi - *lo + 1) : -1;
       }
+      case Ntype_op::Set_mask: {
+        if (kids.size() != 4 || p.args.size() != 4) {
+          return -1;
+        }
+        const auto lo = const_value(p.args[1]), hi = const_value(p.args[2]);
+        return (lo && hi && *hi > *lo && *hi < kMaxBits) ? std::max(kids[0].second.bits, static_cast<int>(*hi)) + 1 : -1;
+      }
+      case Ntype_op::Concat: {
+        if (kids.size() % 2 != 0 || kids.empty()) {
+          return -1;
+        }
+        int64_t total = 0;
+        for (size_t i = 1; i < p.args.size(); i += 2) {
+          const auto w = const_value(p.args[i]);
+          if (!w || *w <= 0 || *w >= kMaxBits) {
+            return -1;
+          }
+          total += *w;
+        }
+        return total < kMaxBits ? static_cast<int>(total) + 1 : -1;
+      }
       default: return -1;
     }
   }
@@ -690,18 +806,18 @@ void collect_inputs(const Pat& p, std::vector<std::string>& names) {
   }
 }
 
-}  // namespace
-
-std::string example_fires(const Rules_file& file, const Rule& rule) {
-  (void)file;
+// Build the rule's :example as a micro-LGraph (8-bit unsigned inputs and output) and run the engine on it with
+// only that rule enabled. Returns why it could not, or empty with `stats` filled and `id` the rule's id.
+std::string run_example(const Rule& rule, Options opts, Stats& stats, rt::Rule_id& id) {
   if (!rule.example) {
     return "no :example";
   }
   auto&      reg = rt::Registry::instance();
-  const auto id  = reg.find(rule.name);
-  if (!id) {
+  const auto found = reg.find(rule.name);
+  if (!found) {
     return "rule `" + rule.name + "` is not in the registry (is the generated file linked into pass_aegraph?)";
   }
+  id = *found;
   std::vector<std::string> inputs;
   collect_inputs(*rule.example, inputs);
 
@@ -733,19 +849,60 @@ std::string example_fires(const Rules_file& file, const Rule& rule) {
   }
   root.pin.connect_sink(g->get_output_pin("o"));
 
-  Options opts;
-  opts.rules_only  = rule.name;
-  opts.check       = Options::Check::full;
-  opts.choices     = rule.tag == Rule::Tag::choice;
-  const auto stats = optimize(g, {}, opts);
-  if (*id >= stats.rule_counts.size()) {
+  opts.rules_only = rule.name;
+  opts.choices    = rule.tag == Rule::Tag::choice;
+  stats           = optimize(g, {}, opts);
+  if (id >= stats.rule_counts.size()) {
     return "the engine reported no counters for the rule";
   }
-  const auto& c     = stats.rule_counts[*id];
+  return {};
+}
+
+}  // namespace
+
+std::string example_fires(const Rules_file& file, const Rule& rule) {
+  (void)file;
+  Options     opts;
+  opts.check = Options::Check::full;
+  Stats       stats;
+  rt::Rule_id id = 0;
+  if (auto why = run_example(rule, opts, stats, id); !why.empty()) {
+    return why;
+  }
+  const auto& c     = stats.rule_counts[id];
   const auto  fired = rule.tag == Rule::Tag::choice ? c.matched : c.applied;
   if (fired == 0) {
     return "the :example never made `" + rule.name + "` fire (tried " + std::to_string(c.tried) + ", matched "
            + std::to_string(c.matched) + "): " + pat_text(*rule.example);
+  }
+  return {};
+}
+
+std::string expect_side(const Rules_file& file, const Rule& rule, const std::string& profile, const std::string& side) {
+  (void)file;
+  Options opts;
+  opts.check = Options::Check::full;
+  if (profile == "sim") {
+    opts.cost = Options::Cost::sim;
+  } else if (profile != "synth") {
+    return "unknown cost profile `" + profile + "`";
+  }
+  Stats       stats;
+  rt::Rule_id id = 0;
+  if (auto why = run_example(rule, opts, stats, id); !why.empty()) {
+    return why;
+  }
+  const auto& c = stats.rule_counts[id];
+  if (c.applied == 0) {
+    return "the :example never made `" + rule.name + "` fire, so there is nothing to extract: " + pat_text(*rule.example);
+  }
+  // `extracted` counts the e-nodes the rule built that the extraction kept and the elaborator realized.
+  const bool took_rhs = c.extracted != 0;
+  if (side == "rhs" && !took_rhs) {
+    return "profile `" + profile + "` keeps the left-hand side of `" + rule.name + "`, :expect says it takes the right-hand side";
+  }
+  if (side == "lhs" && took_rhs) {
+    return "profile `" + profile + "` takes the right-hand side of `" + rule.name + "`, :expect says it keeps the left-hand side";
   }
   return {};
 }
@@ -957,8 +1114,57 @@ std::string dump_graph(const std::shared_ptr<hhds::Graph>& g) {
   return t;
 }
 
+// The width of an UNSIGNED input that satisfies every analysis the :when asks of it for all its values, or 0
+// when there is none (an analysis over several classes, or a spec no width meets). bool01 gives 1; fits(x, n)
+// gives min(n, width); nonneg any width.
+uint32_t narrow_width(const std::string& var, const std::vector<const Analysis*>& list, const Rule& rule, const Analyses& analyses,
+                      const Env& env, uint32_t max_width) {
+  // The guards of the rule that call an analysis on `var`, with their constant arguments.
+  std::vector<const Expr*> calls;
+  std::function<void(const Expr&)> find = [&](const Expr& e) {
+    if (e.kind != Expr::Kind::call) {
+      return;
+    }
+    if (const auto* an = analyses.find(e.name); an != nullptr) {
+      if (std::ranges::find(list, an) != list.end()) {
+        for (size_t i = 0; i < e.args.size(); ++i) {
+          if (!an->is_const[i] && e.args[i].kind == Expr::Kind::var && e.args[i].name == var) {
+            calls.push_back(&e);
+          }
+        }
+      }
+      return;
+    }
+    for (const auto& a : e.args) {
+      find(a);
+    }
+  };
+  for (const auto& w : rule.whens) {
+    find(w);
+  }
+  for (const auto* an : list) {
+    if (std::ranges::count_if(an->is_const, [](bool c) { return !c; }) != 1) {
+      return 0;
+    }
+  }
+  for (uint32_t w = std::min<uint32_t>(max_width, 62); w >= 1; --w) {
+    bool ok = true;
+    for (const auto* call : calls) {
+      for (const int64_t probe : {int64_t{0}, int64_t{1}, (int64_t{1} << (w - 1)), (int64_t{1} << w) - 1}) {
+        Env local = env;
+        local.cls[var] = D(probe);
+        ok             = ok && rt::ex::holds(eval_expr(*call, local, analyses));
+      }
+    }
+    if (ok) {
+      return w;
+    }
+  }
+  return 0;
+}
+
 Proof_result prove_instance(const Rule& rule, const Analyses& analyses, const Skeleton& sk, const Instance& inst,
-                            const std::set<std::string>& narrow, int timeout_s) {
+                            const std::map<std::string, std::vector<const Analysis*>>& narrow, int timeout_s) {
   Env env;
   if (!bind_instance(rule, analyses, inst, env)) {
     return {Proof_result::Kind::illegal, "guard"};
@@ -967,8 +1173,15 @@ Proof_result prove_instance(const Rule& rule, const Analyses& analyses, const Sk
   size_t          idx     = 0;
   const auto      unsign = [&](size_t i) { return inst.sign_mode == 1 || (inst.sign_mode == 2 && i % 2 == 1); };
   for (const auto& v : sk.vars) {
-    const bool n = narrow.contains(v);
-    ins.push_back({"v_" + v, n ? 1U : inst.width, n || unsign(idx)});
+    const auto it = narrow.find(v);
+    uint32_t   nw = 0;
+    if (it != narrow.end()) {
+      nw = narrow_width(v, it->second, rule, analyses, env, inst.width);
+      if (nw == 0) {
+        return {Proof_result::Kind::illegal, "no input width meets the analysis guard"};
+      }
+    }
+    ins.push_back({"v_" + v, it != narrow.end() ? nw : inst.width, it != narrow.end() || unsign(idx)});
     ++idx;
   }
   for (int w = 0; w < sk.wilds; ++w) {
@@ -1035,10 +1248,10 @@ Prove_report prove_bv(const Rule& rule, const Analyses& analyses, bool full, dou
   for (const auto& w : rule.whens) {
     collect_constraints(w, analyses, constraints);
   }
-  std::set<std::string> narrow;
+  std::map<std::string, std::vector<const Analysis*>> narrow;
   for (const auto& [name, list] : constraints) {
     if (std::ranges::find(sk.vars, name) != sk.vars.end()) {
-      narrow.insert(name);
+      narrow.emplace(name, list);
     }
   }
 
@@ -1105,8 +1318,8 @@ Prove_report prove_bv(const Rule& rule, const Analyses& analyses, bool full, dou
 
   const auto start = std::chrono::steady_clock::now();
   for (const auto i : order) {
-    if (std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count() > limit_seconds) {
-      ++report.skipped;
+    if (std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count() > limit_seconds || report.undecided >= 2) {
+      ++report.skipped;  // out of time, or the solver already gave up twice on this rule (division, wide multiplies)
       continue;
     }
     ++report.instances;
@@ -1217,6 +1430,18 @@ void Rule_check::example_fires(const char* path, const char* rules, const char* 
   EXPECT_TRUE(why.empty()) << why;
 }
 
+void Rule_check::expect(const char* path, const char* rules, const char* analyses, const char* rule, const char* profile,
+                        const char* side) {
+  (void)group_start();
+  const auto p = parse_all(path, rules, analyses);
+  const auto* r = find_rule(p, rule);
+  if (r == nullptr) {
+    return;
+  }
+  const auto why = livehd::aegraph::rulegen::testing::expect_side(p.file, *r, profile, side);
+  EXPECT_TRUE(why.empty()) << why;
+}
+
 void Rule_check::prove_bv(const char* path, const char* rules, const char* analyses, const char* rule) {
   (void)group_start();
   const auto p = parse_all(path, rules, analyses);
@@ -1239,6 +1464,423 @@ void Rule_check::wall_time(const char* what) {
   if (env_u64("AEG_PROVE_FULL", 0) == 0) {
     EXPECT_LT(elapsed, kWallBudget) << what << " took " << elapsed << " s (budget " << kWallBudget << " s)";
   }
+}
+
+// ---------------------------------------------------------------------------
+// The analysis soundness fuzz
+// ---------------------------------------------------------------------------
+
+namespace {
+
+struct Stub_builder final : rt::Builder {
+  Class_id make(Ntype_op, std::span<const Operand>) override { return kNoClass; }
+  Class_id konst(const Dlop&) override { return kNoClass; }
+  [[nodiscard]] bool single_use(Class_id) const override { return false; }
+};
+
+// A random DAG of raw e-nodes (no engine, no rules): analyses see exactly the shapes it builds.
+struct Random_graph {
+  Egraph                eg;
+  std::vector<Class_id> classes;
+  struct Spec {
+    Ntype_op             op = Ntype_op::Invalid;  // Invalid: a leaf or a constant
+    std::vector<Operand> ops;
+    Class_id             alt_a = kNoClass, alt_b = kNoClass;  // a union class (op Invalid): its two equal sides
+  };
+  std::vector<Spec> specs;  // indexed by class id
+  struct Declared {
+    Class_id cls;
+    int      bits;
+    bool     is_unsigned;
+  };
+  std::vector<Declared> declared;  // leaves seeded with rt::seed_leaf
+
+  Class_id add_spec(Class_id cls, Spec spec) {
+    if (specs.size() <= cls) {
+      specs.resize(cls + 1);
+    }
+    if (specs[cls].op == Ntype_op::Invalid && spec.op != Ntype_op::Invalid) {
+      specs[cls] = std::move(spec);
+    }
+    if (std::ranges::find(classes, cls) == classes.end()) {
+      classes.push_back(cls);
+    }
+    return cls;
+  }
+  Class_id leaf() { return add_spec(eg.add_leaf(), {}); }
+  // A class equal to both `a` and `b` (the caller guarantees it): the meet path of the analyses.
+  Class_id alt(Class_id a, Class_id b) {
+    const auto cls = eg.add_union(a, b);
+    if (specs.size() <= cls) {
+      specs.resize(cls + 1);
+    }
+    specs[cls].alt_a = a;
+    specs[cls].alt_b = b;
+    if (std::ranges::find(classes, cls) == classes.end()) {
+      classes.push_back(cls);
+    }
+    return cls;
+  }
+  Class_id konst(int64_t v) { return add_spec(eg.add_const(D(v)), {}); }
+  Class_id node(Ntype_op op, std::vector<Operand> ops) {
+    std::ranges::sort(ops);
+    bool created = false;
+    const auto cls = eg.intern(op, Enode_attrs{}, ops, created);
+    return add_spec(cls, {op, std::move(ops)});
+  }
+  [[nodiscard]] std::string dump() const {
+    std::string t;
+    for (const auto c : classes) {
+      t += "  c" + std::to_string(c) + " = ";
+      if (specs[c].alt_a != kNoClass) {
+        t += "union(c" + std::to_string(specs[c].alt_a) + " c" + std::to_string(specs[c].alt_b) + ")";
+      } else if (specs[c].op == Ntype_op::Invalid) {
+        const auto* v = eg.value_of(c);
+        t += v != nullptr ? "const " + v->to_pyrope() : std::string{"leaf"};
+      } else {
+        t += std::string{Ntype::get_name(specs[c].op)} + "(";
+        for (const auto& o : specs[c].ops) {
+          t += " b" + std::to_string(o.bank) + ":c" + std::to_string(o.cls);
+        }
+        t += " )";
+      }
+      t += "\n";
+    }
+    return t;
+  }
+};
+
+void random_graph(Rng& rng, Random_graph& g) {
+  const int    leaves = 2 + static_cast<int>(rng.below(3));
+  for (int i = 0; i < leaves; ++i) {
+    const auto l = g.leaf();
+    if (rng.below(2) != 0) {  // a declared width: the leaf's value domain is a fact about the class
+      const int  bits = 1 + static_cast<int>(rng.below(40));
+      const bool uns  = rng.below(2) != 0;
+      rt::seed_leaf(g.eg, l, bits, uns);
+      g.declared.push_back({l, bits, uns});
+    }
+  }
+  for (const int64_t k : {0, 1, 2, 3, 4, 7, 8, 15, 16, 255, -1}) {
+    g.konst(k);
+  }
+  const auto pick = [&]() { return g.classes[rng.below(g.classes.size())]; };
+  const auto small_k = [&](uint64_t n) { return g.konst(static_cast<int64_t>(rng.below(n))); };
+  const int  nodes = 14 + static_cast<int>(rng.below(18));
+  for (int i = 0; i < nodes; ++i) {
+    switch (rng.below(23)) {
+      case 0: {
+        std::vector<Operand> ops{{0, pick()}};
+        for (uint64_t j = rng.below(3); j > 0; --j) {
+          ops.push_back({static_cast<uint32_t>(rng.below(2)), pick()});
+        }
+        g.node(Ntype_op::Sum, ops);
+        break;
+      }
+      case 1: g.node(Ntype_op::Mult, {{0, pick()}, {0, pick()}}); break;
+      case 2:
+      case 3:
+      case 4: {
+        std::vector<Operand> ops{{0, pick()}, {0, pick()}};
+        if (rng.below(3) == 0) {
+          ops.push_back({0, pick()});
+        }
+        g.node(rng.below(3) == 0 ? Ntype_op::And : (rng.below(2) != 0 ? Ntype_op::Or : Ntype_op::Xor), ops);
+        break;
+      }
+      case 5: g.node(Ntype_op::Not, {{0, pick()}}); break;
+      case 6: g.node(Ntype_op::SHL, {{0, pick()}, {1, small_k(70)}}); break;
+      case 7: g.node(Ntype_op::SRA, {{0, pick()}, {1, small_k(70)}}); break;
+      case 8: g.node(Ntype_op::Sext, {{0, pick()}, {1, g.konst(1 + static_cast<int64_t>(rng.below(70)))}}); break;
+      case 9:
+      case 10: {
+        const auto lo = static_cast<int64_t>(rng.below(40));
+        g.node(Ntype_op::Get_mask, {{0, pick()}, {2, g.konst(lo)}, {3, g.konst(lo + 1 + static_cast<int64_t>(rng.below(40)))}});
+        break;
+      }
+      case 11: {
+        const auto lo = static_cast<int64_t>(rng.below(40));
+        g.node(Ntype_op::Set_mask,
+               {{0, pick()}, {2, g.konst(lo)}, {3, g.konst(lo + 1 + static_cast<int64_t>(rng.below(24)))}, {4, pick()}});
+        break;
+      }
+      case 12: {
+        std::vector<Operand> ops;
+        const auto           lanes = 1 + rng.below(3);
+        for (uint64_t j = 0; j < lanes; ++j) {
+          const auto w    = 1 + static_cast<int64_t>(rng.below(24));
+          const auto lane = g.node(Ntype_op::Get_mask, {{0, pick()}, {2, g.konst(0)}, {3, g.konst(w)}});
+          ops.push_back({static_cast<uint32_t>(2 * j), lane});
+          ops.push_back({static_cast<uint32_t>(2 * j + 1), g.konst(w)});
+        }
+        g.node(Ntype_op::Concat, ops);
+        break;
+      }
+      case 13: {
+        // 1 to 4 arms; the selector is any class, so it is often outside the arm range (value '?', skipped)
+        const auto           arms = 1 + rng.below(4);
+        std::vector<Operand> ops{{0, rng.below(2) != 0 ? g.node(Ntype_op::Get_mask, {{0, pick()}, {2, g.konst(0)}, {3, g.konst(2)}}) : pick()}};
+        for (uint64_t j = 1; j <= arms; ++j) {
+          ops.push_back({static_cast<uint32_t>(j), pick()});
+        }
+        g.node(Ntype_op::Mux, ops);
+        break;
+      }
+      case 14: g.node(Ntype_op::EQ, {{0, pick()}, {0, rng.below(2) != 0 ? g.konst(static_cast<int64_t>(rng.below(2))) : pick()}}); break;
+      case 15: g.node(rng.below(2) != 0 ? Ntype_op::LT : Ntype_op::GT, {{0, pick()}, {1, pick()}}); break;
+      case 16: g.node(Ntype_op::Ror, {{0, pick()}}); break;
+      case 17: g.node(rng.below(2) != 0 ? Ntype_op::Div : Ntype_op::Rem, {{0, pick()}, {1, g.konst(static_cast<int64_t>(rng.below(20)) - 2)}}); break;
+      case 19: g.node(Ntype_op::Popcount, {{0, pick()}, {1, g.konst(1 + static_cast<int64_t>(rng.below(40)))}}); break;
+      case 20:
+      case 21: {  // a variable, non-negative shift amount
+        const auto amount = g.node(Ntype_op::Get_mask, {{0, pick()}, {2, g.konst(0)}, {3, g.konst(1 + static_cast<int64_t>(rng.below(6)))}});
+        g.node(rng.below(2) != 0 ? Ntype_op::SHL : Ntype_op::SRA, {{0, pick()}, {1, amount}});
+        break;
+      }
+      case 22: {  // a union class: two forms of the same value, so the facts of both sides are met
+        const auto x = pick();
+        switch (rng.below(5)) {
+          case 0: g.alt(x, g.node(Ntype_op::Sum, {{0, x}, {0, g.konst(0)}})); break;
+          case 1: g.alt(x, g.node(Ntype_op::Not, {{0, g.node(Ntype_op::Not, {{0, x}})}})); break;
+          case 2: g.alt(g.node(Ntype_op::Get_mask, {{0, x}, {2, g.konst(0)}, {3, g.konst(8)}}), g.node(Ntype_op::And, {{0, x}, {0, g.konst(255)}})); break;
+          case 3: g.alt(g.node(Ntype_op::SHL, {{0, x}, {1, g.konst(1)}}), g.node(Ntype_op::Mult, {{0, x}, {0, g.konst(2)}})); break;
+          default: g.alt(g.node(Ntype_op::And, {{0, x}, {0, x}}), g.node(Ntype_op::Or, {{0, x}, {0, x}})); break;
+        }
+        break;
+      }
+      default: {
+        // The packed-word shapes the lane layout reads: Or / Sum of a low field and a shifted high one.
+        const auto k   = 1 + static_cast<int64_t>(rng.below(20));
+        const auto low = g.node(Ntype_op::Get_mask, {{0, pick()}, {2, g.konst(0)}, {3, g.konst(k)}});
+        const auto high = g.node(Ntype_op::SHL, {{0, pick()}, {1, g.konst(k)}});
+        g.node(rng.below(2) != 0 ? Ntype_op::Or : Ntype_op::Sum, {{0, low}, {0, high}});
+        break;
+      }
+    }
+  }
+}
+
+// The concrete value of every class under one leaf assignment.
+std::vector<std::optional<Dlop>> evaluate(const Random_graph& g, Rng& rng) {
+  std::vector<std::optional<Dlop>> value(g.specs.size());
+  for (const auto c : g.classes) {
+    const auto& spec = g.specs[c];
+    if (spec.alt_a != kNoClass) {
+      value[c] = value[spec.alt_a];  // both sides are the same value by construction
+      continue;
+    }
+    if (spec.op == Ntype_op::Invalid) {
+      if (const auto* k = g.eg.value_of(c); k != nullptr) {
+        value[c] = *k;
+      } else if (const auto d = std::ranges::find(g.declared, c, &Random_graph::Declared::cls); d != g.declared.end()) {
+        // inside the declared range, biased to its edges
+        const auto m = (int64_t{1} << d->bits) - 1;
+        auto       v = static_cast<int64_t>(rng.next()) & m;
+        if (rng.below(4) == 0) {
+          v = rng.below(2) != 0 ? m : 0;
+        }
+        value[c] = D(d->is_unsigned ? v : (v << (64 - d->bits)) >> (64 - d->bits));  // sign-extend from `bits`
+      } else {
+        value[c] = sample_value(rng);
+      }
+      continue;
+    }
+    std::vector<Eval_arg> args;
+    bool                  ok     = true;
+    const bool            banked = Ntype::is_banked_sink_op(spec.op);
+    for (size_t i = 0; i < spec.ops.size(); ++i) {
+      const auto& v = value[spec.ops[i].cls];
+      if (!v) {
+        ok = false;
+        break;
+      }
+      args.push_back({banked ? static_cast<hhds::Port_id>(i) : static_cast<hhds::Port_id>(spec.ops[i].bank), spec.ops[i].bank, *v});
+    }
+    if (!ok) {
+      continue;
+    }
+    // Concat asserts that a lane fits its window; the generator wraps lanes in Get_mask, so they do.
+    const auto r = eval_op(spec.op, args);
+    if (r && !r->has_unknowns() && r->is_integer()) {
+      value[c] = *r;
+    }
+  }
+  return value;
+}
+
+}  // namespace
+
+std::string analyses_sound(const Analyses& analyses, uint64_t seed, size_t graphs, size_t trials, size_t* checked) {
+  auto&  registry = rt::Analysis_registry::instance();
+  size_t count    = 0;
+  std::map<std::string, size_t> per;
+  // The declaration and the runtime agree: every declared analysis is implemented with the same arity.
+  for (const auto& an : analyses.list) {
+    const auto* info = registry.find(an.name);
+    if (info == nullptr) {
+      return "analysis `" + an.name + "` is declared in analyses.decl but has no AEG_ANALYSIS";
+    }
+    size_t n_const = 0;
+    for (const bool c : an.is_const) {
+      n_const += c ? 1 : 0;
+    }
+    if (info->n_const != n_const || info->n_class != an.params.size() - n_const) {
+      return "analysis `" + an.name + "` takes " + std::to_string(an.params.size() - n_const) + " classes and " + std::to_string(n_const)
+             + " constants in analyses.decl but " + std::to_string(info->n_class) + " + " + std::to_string(info->n_const)
+             + " in AEG_ANALYSIS";
+    }
+  }
+  for (const auto& info : registry.all()) {
+    if (analyses.find(info.name) == nullptr) {
+      return "AEG_ANALYSIS `" + std::string{info.name} + "` has no declaration in analyses.decl";
+    }
+  }
+
+  Rng rng(seed);
+  Stub_builder stub;
+  for (size_t gi = 0; gi < graphs; ++gi) {
+    Random_graph g;
+    random_graph(rng, g);
+    rt::Ctx ctx(g.eg, stub, 1U << 20);
+    for (size_t trial = 0; trial < trials; ++trial) {
+      const auto value = evaluate(g, rng);
+      std::vector<Class_id> with_value;
+      for (const auto c : g.classes) {
+        if (value[c]) {
+          with_value.push_back(c);
+        }
+      }
+      if (with_value.empty()) {
+        continue;
+      }
+      const auto fail = [&](const std::string& what) {
+        return what + "\n  seed " + std::to_string(seed) + " graph " + std::to_string(gi) + " trial " + std::to_string(trial) + "\n"
+               + g.dump();
+      };
+      // ---- the predicates ----
+      for (const auto& info : registry.all()) {
+        const auto* an = analyses.find(info.name);
+        for (const auto c : with_value) {
+          for (int combo = 0; combo < 12; ++combo) {
+            std::vector<Class_id> cls{c};
+            if (info.n_class == 2) {
+              cls.push_back(with_value[rng.below(with_value.size())]);
+            }
+            std::vector<int64_t> consts;
+            const auto           v = to_num(*value[c]);
+            for (size_t i = 0; i < info.n_const; ++i) {
+              switch (rng.below(5)) {
+                case 0: consts.push_back(static_cast<int64_t>(rng.below(70))); break;
+                case 1: consts.push_back(v ? v->v + static_cast<int64_t>(rng.below(5)) - 2 : 0); break;
+                case 2: consts.push_back(static_cast<int64_t>(rng.below(1 << 16))); break;
+                case 3: consts.push_back((int64_t{1} << rng.below(40)) - 1); break;
+                default: consts.push_back(static_cast<int64_t>(rng.below(16)) - 3); break;
+              }
+            }
+            if (!info.fn(ctx, cls, consts)) {
+              continue;
+            }
+            // The runtime claims the fact; the spec must hold on the concrete values.
+            Env local;
+            bool decidable = true;
+            size_t ci = 0, ki = 0;
+            for (size_t i = 0; i < an->params.size(); ++i) {
+              if (an->is_const[i]) {
+                local.num[an->params[i]] = rt::ex::num(consts[ki++]);
+              } else {
+                const auto n = to_num(*value[cls[ci++]]);
+                if (!n) {
+                  decidable = false;
+                  break;
+                }
+                local.num[an->params[i]] = *n;
+              }
+            }
+            if (!decidable) {
+              continue;
+            }
+            const auto verdict = eval_expr(*an->spec, local, Analyses{});
+            if (!verdict.ok) {
+              continue;  // the spec itself is undefined here (a mask above 62 bits)
+            }
+            ++count;
+            ++per[info.name];
+            if (!rt::ex::holds(verdict)) {
+              std::string args;
+              for (const auto cl : cls) {
+                args += " c" + std::to_string(cl) + "=" + value[cl]->to_pyrope();
+              }
+              for (const auto k : consts) {
+                args += " k=" + std::to_string(k);
+              }
+              return fail("UNSOUND analysis `" + std::string{info.name} + "`: the runtime says it holds but the spec " + expr_text(*an->spec)
+                          + " is false for" + args);
+            }
+          }
+        }
+      }
+      // ---- the lane layout: a lane's source window equals the class's window ----
+      for (const auto c : with_value) {
+        const auto layout = rt::layout_of(g.eg, c);
+        for (int w = 0; w < 6; ++w) {
+          const int64_t lo = static_cast<int64_t>(rng.below(60));
+          const int64_t hi = lo + 1 + static_cast<int64_t>(rng.below(24));
+          const auto*   lane = rt::find_lane(*layout, lo, hi);
+          if (lane == nullptr) {
+            continue;
+          }
+          const auto want = livehd::eval_get_mask(*value[c], static_cast<int>(lo), static_cast<int>(hi));
+          Dlop got;
+          if (lane->zero) {
+            got = D(0);
+          } else {
+            if (!value[lane->src]) {
+              continue;
+            }
+            const auto s = lane->off + (lo - lane->lo);
+            got          = livehd::eval_get_mask(*value[lane->src], static_cast<int>(s), static_cast<int>(s + (hi - lo)));
+          }
+          ++count;
+          ++per["(lane layout)"];
+          if (!want.eq_op(got)->is_known_true()) {
+            return fail("UNSOUND lane layout of c" + std::to_string(c) + " window [" + std::to_string(lo) + "," + std::to_string(hi)
+                        + "): the class reads " + want.to_pyrope() + " but its lane (src c" + std::to_string(lane->src) + " off "
+                        + std::to_string(lane->off) + (lane->zero ? " zero" : "") + ") reads " + got.to_pyrope());
+          }
+        }
+      }
+      // ---- (base, polarity) ----
+      for (const auto c : with_value) {
+        const auto pol = rt::polarity_of(g.eg, c);
+        if (!pol.valid || !value[pol.base]) {
+          continue;
+        }
+        const auto want = pol.inverted ? D(1) : D(0);
+        Dlop       expect;
+        if (pol.inverted) {
+          expect = D(1).sub_op(*value[pol.base]);
+        } else {
+          expect = *value[pol.base];
+        }
+        (void)want;
+        ++count;
+        ++per["(polarity)"];
+        if (!value[c]->eq_op(expect)->is_known_true()) {
+          return fail("UNSOUND polarity of c" + std::to_string(c) + ": base c" + std::to_string(pol.base) + (pol.inverted ? " inverted" : "")
+                      + " but the values are " + value[c]->to_pyrope() + " and " + value[pol.base]->to_pyrope());
+        }
+      }
+    }
+  }
+  if (checked != nullptr) {
+    *checked = count;
+  }
+  if (std::getenv("AEG_ANALYSES_VERBOSE") != nullptr) {
+    for (const auto& [name, n] : per) {
+      std::printf("[ analyses ]   %-14s %zu positive claims\n", name.c_str(), n);
+    }
+  }
+  return {};
 }
 
 }  // namespace livehd::aegraph::rulegen::testing

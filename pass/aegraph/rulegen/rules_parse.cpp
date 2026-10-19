@@ -1,10 +1,12 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 #include <algorithm>
+#include <array>
 #include <cctype>
 #include <cstdlib>
 #include <map>
 #include <set>
 
+#include "cost_model.hpp"
 #include "rule_expr.hpp"
 #include "rules.hpp"
 #include "sexp.hpp"
@@ -666,7 +668,15 @@ public:
     }
     a.name = s.items[1].text;
     for (const auto& p : s.items[2].items) {
-      a.params.push_back(p.text);
+      if (p.is_list() && p.head() == "k" && p.items.size() == 2 && p.items[1].is_atom()) {
+        a.params.push_back(p.items[1].text);  // (k n): a constant parameter
+        a.is_const.push_back(true);
+      } else if (p.is_atom()) {
+        a.params.push_back(p.text);
+        a.is_const.push_back(false);
+      } else {
+        err(p.line, "an analysis parameter is a name (a class) or (k name) (a constant)");
+      }
     }
     for (size_t i = 3; i < s.items.size(); ++i) {
       const auto& k = s.items[i];
@@ -732,6 +742,23 @@ Analyses parse_analyses(std::string_view text, std::string_view path, Diags& dia
 // ---------------------------------------------------------------------------
 // Hand-written rules (so RULES.md lists them and the lints see their names)
 // ---------------------------------------------------------------------------
+
+std::vector<std::string> scan_analysis_impls(std::string_view cpp) {
+  std::vector<std::string> out;
+  for (size_t pos = 0; pos < cpp.size();) {
+    const auto nl   = cpp.find('\n', pos);
+    auto       line = cpp.substr(pos, nl == std::string_view::npos ? std::string_view::npos : nl - pos);
+    pos             = nl == std::string_view::npos ? cpp.size() : nl + 1;
+    if (!line.starts_with("AEG_ANALYSIS(")) {
+      continue;
+    }
+    const auto comma = line.find(',');
+    if (comma != std::string_view::npos) {
+      out.emplace_back(line.substr(13, comma - 13));
+    }
+  }
+  return out;
+}
 
 std::vector<Native_rule> scan_native(std::string_view cpp, std::string_view path) {
   std::vector<Native_rule> out;
@@ -862,9 +889,146 @@ int max_price(const Pat& p) {
   return m;
 }
 
+
+// ---- per-profile cost of a rule (the cost lint) -------------------------------------------------------------------
+
+using Binding = std::map<std::string, int64_t>;
+
+// Evaluate a rule expression over sampled constants. `unknown` is set when it names something the lint cannot
+// sample (an analysis predicate, a class): the caller then treats a guard as satisfied.
+rt::ex::Num eval_sample(const Expr& e, const Binding& env, bool& unknown) {
+  switch (e.kind) {
+    case Expr::Kind::num: return rt::ex::num(e.num);
+    case Expr::Kind::var: {
+      const auto it = env.find(e.name);
+      if (it == env.end()) {
+        unknown = true;
+        return rt::ex::flag(true);
+      }
+      return rt::ex::num(it->second);
+    }
+    case Expr::Kind::call: break;
+  }
+  const auto* b = rt::ex::find_builtin(e.name);
+  if (b == nullptr) {
+    unknown = true;
+    return rt::ex::flag(true);
+  }
+  std::vector<rt::ex::Num> vals;
+  for (const auto& a : e.args) {
+    vals.push_back(eval_sample(a, env, unknown));
+    if (!vals.back().ok) {
+      return {};
+    }
+  }
+  return rt::ex::call(e.name, vals);
+}
+
+int64_t bits_of_value(int64_t v) {
+  uint64_t m = v < 0 ? ~static_cast<uint64_t>(v) : static_cast<uint64_t>(v);
+  int64_t  n = 1;
+  while (m > 1) {
+    m >>= 1;
+    ++n;
+  }
+  return n + (v < 0 ? 1 : 0);
+}
+
+struct Priced {
+  int64_t width    = 0;
+  int64_t total    = 0;
+  bool    is_const = false;
+  int64_t value    = 0;
+  bool    ok       = true;  // false: a constant the sample could not evaluate
+};
+
+// The tree price of a pattern or term: every operator node once per occurrence, variables are leaves of width
+// `w` and cost nothing (both sides of a rule share them), `(k c)` is the sampled constant.
+Priced price_pat(const cost::Profile& prof, const Pat& p, int64_t w, const Binding& env) {
+  Priced out;
+  switch (p.kind) {
+    case Pat::Kind::wild:
+    case Pat::Kind::var:
+    case Pat::Kind::lit: out.width = w; return out;
+    case Pat::Kind::num:
+      out.width = bits_of_value(p.num);
+      out.is_const = true;
+      out.value = p.num;
+      return out;
+    case Pat::Kind::konst: {
+      out.is_const = true;
+      if (p.expr) {
+        bool       unknown = false;
+        const auto v = eval_sample(*p.expr, env, unknown);
+        out.ok = v.ok && !unknown;
+        out.value = v.v;
+      } else if (!p.name.empty() && p.name != "_") {
+        const auto it = env.find(p.name);
+        out.ok = it != env.end();
+        out.value = out.ok ? it->second : 0;
+      } else {
+        out.value = 2;
+      }
+      out.width = bits_of_value(out.value);
+      return out;
+    }
+    case Pat::Kind::op: break;
+  }
+  std::vector<cost::Operand> ops;
+  const auto add = [&](const Pat& a, uint32_t bank) {
+    const auto k = price_pat(prof, a, w, env);
+    out.total += k.total;
+    out.ok = out.ok && k.ok;
+    ops.push_back(cost::Operand{bank, k.width, k.is_const, k.value});
+  };
+  uint32_t i = 0;
+  for (const auto& a : p.args) {
+    add(a, i < p.pids.size() ? p.pids[i] : i);
+    ++i;
+  }
+  for (const auto& b : p.banks) {
+    for (const auto& e : b.elems) {
+      add(e, b.id);
+    }
+  }
+  int64_t width = w;
+  switch (p.op) {
+    case Ntype_op::EQ:
+    case Ntype_op::LT:
+    case Ntype_op::GT:
+    case Ntype_op::Ror:
+    case Ntype_op::Rxor: width = 1; break;
+    case Ntype_op::Get_mask:
+      if (ops.size() == 3 && ops[1].is_const && ops[2].is_const && ops[2].value > ops[1].value) {
+        width = std::min<int64_t>(w, ops[2].value - ops[1].value);
+      }
+      break;
+    default: break;
+  }
+  out.width = width;
+  out.total += cost::price(prof, p.op, width, ops);
+  return out;
+}
+
+void collect_binders(const Pat& p, std::vector<std::string>& names) {
+  if (p.kind == Pat::Kind::konst && !p.name.empty() && p.name != "_" && (!p.expr || p.expr->kind == Expr::Kind::var)
+      && std::ranges::find(names, p.name) == names.end()) {
+    names.push_back(p.name);
+  }
+  for (const auto& a : p.args) {
+    collect_binders(a, names);
+  }
+  for (const auto& b : p.banks) {
+    for (const auto& e : b.elems) {
+      collect_binders(e, names);
+    }
+  }
+}
+
 class Linter {
 public:
-  Linter(const Analyses& an, Diags& diags) : analyses_(an), diags_(diags) {}
+  Linter(const Analyses& an, Diags& diags, const std::vector<cost::Profile>* profiles = nullptr)
+      : analyses_(an), diags_(diags), profiles_(profiles) {}
 
   void err(const std::string& path, int line, const std::string& msg) {
     diags_.push_back(path + ":" + std::to_string(line) + ": error: " + msg);
@@ -981,15 +1145,21 @@ public:
           break;
         }
         if (const auto* an = analyses_.find(e.name); an != nullptr) {
-          if (analysis_cxx(an->name) == nullptr) {
-            err(path_, e.line, "analysis `" + e.name + "` has no runtime implementation yet (milestone G)");
+          if (analyses_.impl_known && !analyses_.impl.contains(an->name)) {
+            err(path_, e.line, "analysis `" + e.name + "` has no runtime implementation (AEG_ANALYSIS in runtime/analyses.cpp)");
           }
           if (an->params.size() != e.args.size()) {
             err(path_, e.line, "analysis `" + e.name + "` takes " + std::to_string(an->params.size()) + " arguments");
+            break;
           }
-          for (const auto& a : e.args) {
+          for (size_t i = 0; i < e.args.size(); ++i) {
+            const auto& a = e.args[i];
+            if (an->is_const[i]) {
+              expr(a, sc);  // a constant parameter takes any constant expression
+              continue;
+            }
             if (a.kind != Expr::Kind::var) {
-              err(path_, a.line, "an analysis argument is a variable");
+              err(path_, a.line, "a class argument of an analysis is a variable");
               continue;
             }
             const auto it = sc.find(a.name);
@@ -1098,6 +1268,90 @@ public:
     }
   }
 
+  [[nodiscard]] bool known_profile(const std::string& name) const {
+    if (profiles_ == nullptr || profiles_->empty()) {
+      return name == "synth" || name == "sim";
+    }
+    return std::ranges::any_of(*profiles_, [&](const cost::Profile& p) { return p.name == name; });
+  }
+  [[nodiscard]] std::string profile_names() const {
+    if (profiles_ == nullptr || profiles_->empty()) {
+      return "synth or sim";
+    }
+    std::string t;
+    for (const auto& p : *profiles_) {
+      t += (t.empty() ? "" : " or ") + p.name;
+    }
+    return t;
+  }
+
+  // A `simplify` replaces the class without asking the extractor, so it has to be at least as cheap in EVERY
+  // profile: sampled over the constants its guards admit and a few widths, the right-hand side may not cost more
+  // than the left. A rule that is cheaper in one profile and dearer in another is an `alt`.
+  void cost_lint(const Rule& r) {
+    std::vector<std::string> binders;
+    collect_binders(r.lhs, binders);
+    static constexpr std::array<int64_t, 14> kPool{0, 1, 2, 3, 4, 5, 7, 8, 16, 31, 32, 63, 64, 100};
+    std::vector<Binding> instances;
+    std::vector<size_t>  idx(binders.size(), 0);
+    for (size_t tries = 0; tries < 20000 && instances.size() < 6; ++tries) {
+      Binding env;
+      bool    ok = true;
+      for (size_t i = 0; i < binders.size(); ++i) {
+        env[binders[i]] = kPool[idx[i]];
+      }
+      for (const auto& [n, e] : r.lets) {
+        bool       unknown = false;
+        const auto v       = eval_sample(e, env, unknown);
+        if (!v.ok || unknown) {
+          ok = false;
+          break;
+        }
+        env[n] = v.v;
+      }
+      for (const auto& w : r.whens) {
+        if (!ok) {
+          break;
+        }
+        bool       unknown = false;
+        const auto v       = eval_sample(w, env, unknown);
+        ok                 = v.ok && (unknown || v.v != 0);
+      }
+      if (ok) {
+        instances.push_back(std::move(env));
+      }
+      // odometer
+      size_t d = 0;
+      for (; d < idx.size(); ++d) {
+        if (++idx[d] < kPool.size()) {
+          break;
+        }
+        idx[d] = 0;
+      }
+      if (d == idx.size()) {
+        break;
+      }
+    }
+    for (const auto& prof : *profiles_) {
+      for (const auto& env : instances) {
+        for (const int64_t w : {int64_t{1}, int64_t{8}, int64_t{70}}) {
+          const auto l = price_pat(prof, r.lhs, w, env);
+          const auto h = price_pat(prof, r.arms[0].rhs, w, env);
+          if (l.ok && h.ok && h.total > l.total) {
+            std::string at;
+            for (const auto& [n, v] : env) {
+              at += (at.empty() ? " with " : ", ") + n + "=" + std::to_string(v);
+            }
+            err(path_, r.line,
+                "simplify `" + r.name + "` costs more than it replaces under profile `" + prof.name + "` (" + std::to_string(h.total)
+                    + " against " + std::to_string(l.total) + " at width " + std::to_string(w) + at + "): make it alt");
+            return;
+          }
+        }
+      }
+    }
+  }
+
   void rule(const Rules_file& file, const Rule& r) {
     path_ = file.path;
     if (!is_rule_name(r.name)) {
@@ -1160,8 +1414,12 @@ public:
         err(path_, r.line,
             "simplify `" + r.name + "` grows the graph (" + std::to_string(rhs_nodes) + " nodes against "
                 + std::to_string(lhs_nodes) + "): make it alt");
-      } else if (max_price(r.arms[0].rhs) > price(r.lhs.op)) {
-        err(path_, r.line, "simplify `" + r.name + "` builds an op priced above its left-hand root: make it alt");
+      } else if (profiles_ == nullptr || profiles_->empty()) {
+        if (max_price(r.arms[0].rhs) > price(r.lhs.op)) {
+          err(path_, r.line, "simplify `" + r.name + "` builds an op priced above its left-hand root: make it alt");
+        }
+      } else {
+        cost_lint(r);
       }
     }
     if (!r.example) {
@@ -1170,8 +1428,8 @@ public:
       example(*r.example);
     }
     for (const auto& e : r.expects) {
-      if (e.profile != "synth" && e.profile != "sim") {
-        err(path_, e.line, "unknown cost profile `" + e.profile + "` (synth or sim)");
+      if (!known_profile(e.profile)) {
+        err(path_, e.line, "unknown cost profile `" + e.profile + "` (" + profile_names() + ")");
       }
       if (e.side != "lhs" && e.side != "rhs") {
         err(path_, e.line, ":expect side is lhs or rhs, not `" + e.side + "`");
@@ -1220,17 +1478,23 @@ public:
   }
 
 private:
-  const Analyses& analyses_;
-  Diags&          diags_;
-  std::string     path_;
+  const Analyses&                  analyses_;
+  Diags&                           diags_;
+  const std::vector<cost::Profile>* profiles_;
+  std::string                      path_;
 };
 
 }  // namespace
 
 void lint(const std::vector<Rules_file>& files, const Analyses& analyses, const std::vector<Native_rule>& natives, Diags& diags) {
+  lint(files, analyses, natives, {}, diags);
+}
+
+void lint(const std::vector<Rules_file>& files, const Analyses& analyses, const std::vector<Native_rule>& natives,
+          const std::vector<cost::Profile>& profiles, Diags& diags) {
   // An analysis :spec is documentation, hypothesis and sampler; it may name the fact's own parameters (LO, HI,
   // MASK) and operators, so it is not linted as a guard.
-  Linter l(analyses, diags);
+  Linter l(analyses, diags, &profiles);
   l.run(files, natives);
 }
 

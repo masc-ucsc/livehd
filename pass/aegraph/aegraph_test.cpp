@@ -3,15 +3,21 @@
 #include "aegraph.hpp"
 
 #include <algorithm>
+#include <chrono>
+#include <mutex>
 #include <functional>
 #include <string>
 #include <vector>
 
 #include "cprop.hpp"
+#include "cprop_summary.hpp"
 #include "graph_library_singleton.hpp"
 #include "gtest/gtest.h"
 #include "node_util.hpp"
+#include "pass.hpp"
+#include "pass_aegraph.hpp"
 #include "query.hpp"
+#include "runtime/match.hpp"
 
 namespace {
 namespace gu = livehd::graph_util;
@@ -295,6 +301,22 @@ TEST(Aegraph, SumBanksStayDistinct) {
   EXPECT_FALSE(out_driver(g, "o0") == out_driver(g, "o1"));
 }
 
+// A Boolean and an Integer of the same value are one constant class, so their
+// users are CSE twins; a String of the same spelling stays apart.
+TEST(Aegraph, ConstantsOfEqualValueAndDifferentTagShareAClass) {
+  hhds::GraphLibrary lib;
+  auto               g  = io_graph(lib, "cse_const_tag", 1, 2);
+  auto               a  = g->get_input_pin("i0");
+  auto               s1 = binop(g, Ntype_op::Sum, a, gu::create_const(*g, *Dlop::create_bool(true)));
+  auto               s2 = binop(g, Ntype_op::Sum, a, gu::create_const(*g, *Dlop::create_integer(1)));
+  s1.connect_sink(g->get_output_pin("o0"));
+  s2.connect_sink(g->get_output_pin("o1"));
+  const auto stats = livehd::aegraph::optimize(g, {}, checked());
+  EXPECT_EQ(stats.cse_merged, 1u);
+  EXPECT_EQ(count_op(g, Ntype_op::Sum), 1u);
+  EXPECT_TRUE(out_driver(g, "o0") == out_driver(g, "o1"));
+}
+
 TEST(Aegraph, ColorAndSynthPolicyAreBarriers) {
   hhds::GraphLibrary lib;
   auto               g = io_graph(lib, "cse_color", 2, 4);
@@ -576,6 +598,160 @@ TEST(Aegraph, ElaboratedGraphIsEquivalentToTheInput) {
   EXPECT_EQ(result.verdict, livehd::lec::Verdict::Proven) << result.detail;
 }
 
+// A chain of single-reader Ors ends as ONE banked cell with every input wired
+// once, exactly as classic cprop leaves it (no cap on the width): the top of the
+// chain absorbs every link below it in one firing and the links leave the work to
+// it, so no quadratic pile of dead intermediate banks is built.
+std::shared_ptr<hhds::Graph> wide_chain(hhds::GraphLibrary& lib, int inputs, Ntype_op op) {
+  auto g   = io_graph(lib, "wide_chain", inputs, 1);
+  auto acc = g->get_input_pin("i0");
+  for (int i = 1; i < inputs; ++i) {
+    acc = binop(g, op, acc, g->get_input_pin("i" + std::to_string(i)));
+  }
+  acc.connect_sink(g->get_output_pin("o0"));
+  return g;
+}
+
+size_t sink_count(const hhds::Node_class& node) {
+  size_t width = 0;
+  for ([[maybe_unused]] auto sink : node.inp_sorted_pins()) {
+    ++width;
+  }
+  return width;
+}
+
+TEST(Aegraph, WideChainFlattensIntoOneBank) {
+  constexpr int kInputs = 150;
+  for (const auto op : {Ntype_op::Or, Ntype_op::And, Ntype_op::Xor, Ntype_op::Sum, Ntype_op::Mult}) {
+    hhds::GraphLibrary lib_ref, lib_impl;
+    auto               ref  = wide_chain(lib_ref, kInputs, op);
+    auto               impl = wide_chain(lib_impl, kInputs, op);
+    livehd::aegraph::optimize(impl, {}, checked());
+    ASSERT_EQ(count_op(impl, op), 1u) << Ntype::get_name(op) << ": classic leaves one banked cell, so must the e-graph";
+    for (auto node : impl->body().nodes()) {
+      if (gu::type_op_of(node) == op) {
+        EXPECT_EQ(sink_count(node), static_cast<size_t>(kInputs));
+      }
+    }
+    if (op == Ntype_op::Mult) {
+      continue;  // the 8-bit product of 150 inputs is not worth a proof
+    }
+    livehd::lec::Lec_options options;
+    options.cones   = "false";
+    options.timeout = 10;
+    const auto result = livehd::lec::prove_equal(ref.get(), impl.get(), options);
+    EXPECT_NE(result.verdict, livehd::lec::Verdict::Refuted) << result.detail;
+  }
+}
+
+// The work bound of the same chain at 5000 operands: a link-by-link flatten (or a
+// per-operand rescan in rewire) leaves O(k^2) = 12M pool entries (~100 MB) behind;
+// the linear flatten stays within a few hundred KB of e-graph tables.
+TEST(Aegraph, VeryWideChainDoesWorkLinearInTheWidth) {
+  constexpr int      kInputs = 5000;
+  hhds::GraphLibrary lib;
+  auto               g     = wide_chain(lib, kInputs, Ntype_op::Or);
+  const auto         start = std::chrono::steady_clock::now();
+  const auto         stats = livehd::aegraph::optimize(g, {});
+  const auto         secs  = std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count();
+  EXPECT_EQ(count_op(g, Ntype_op::Or), 1u);
+  EXPECT_LT(stats.aeg_bytes, size_t{2} << 20) << "pool entries must stay linear in the chain width";
+  EXPECT_LT(secs, 20.0);
+}
+
+// A link shared with another reader is not absorbed (it would be copied), and the
+// links above it still merge into one cell.
+TEST(Aegraph, SharedChainLinkStopsTheFlatten) {
+  hhds::GraphLibrary lib_ref, lib_impl;
+  const auto         build = [](hhds::GraphLibrary& lib) {
+    auto g   = io_graph(lib, "shared_link", 6, 2);
+    auto acc = binop(g, Ntype_op::Or, g->get_input_pin("i0"), g->get_input_pin("i1"));
+    acc.connect_sink(g->get_output_pin("o1"));  // the shared link has a second reader
+    for (int i = 2; i < 6; ++i) {
+      acc = binop(g, Ntype_op::Or, acc, g->get_input_pin("i" + std::to_string(i)));
+    }
+    acc.connect_sink(g->get_output_pin("o0"));
+    return g;
+  };
+  auto ref  = build(lib_ref);
+  auto impl = build(lib_impl);
+  livehd::aegraph::optimize(impl, {}, checked());
+  EXPECT_EQ(count_op(impl, Ntype_op::Or), 2u) << "the shared Or(i0,i1) and one bank over it plus i2..i5";
+  livehd::lec::Lec_options options;
+  options.cones   = "false";
+  options.timeout = 10;
+  const auto result = livehd::lec::prove_equal(ref.get(), impl.get(), options);
+  EXPECT_EQ(result.verdict, livehd::lec::Verdict::Proven) << result.detail;
+}
+
+// ---- the cprop-summary probe: what it reports, and in which units -----------------
+
+size_t driven_edges(const std::shared_ptr<hhds::Graph>& g) {
+  size_t edges = 0;
+  for (auto node : g->body().nodes()) {
+    for (auto sink : node.inp_sorted_pins()) {
+      edges += sink.get_driver_pins().size();
+    }
+  }
+  return edges;
+}
+
+// lg_bytes is the footprint at the body's LARGEST (input or output), so an engine
+// that shrinks the body still reports what it was handed; aeg_bytes is bytes in
+// use and never exceeds the capacity-based number next to it.
+TEST(Aegraph, ProbeReportsTheLargestFootprintAndInUseBytes) {
+  using livehd::cprop_summary::Probe;
+  hhds::GraphLibrary lib;
+  auto               g        = busy_graph(lib);
+  const auto         nodes_in = [&] {
+    size_t n = 0;
+    for ([[maybe_unused]] auto node : g->body().nodes()) {
+      ++n;
+    }
+    return n;
+  }();
+  const auto edges_in = driven_edges(g);
+  Probe      probe(*g, true);
+  const auto stats  = livehd::aegraph::optimize(g, {});
+  const auto record = probe.finish(*g, "busy", stats.rules_fired, stats.aeg_bytes, stats.aeg_cap_bytes);
+  ASSERT_LT(record.nodes_out, nodes_in) << "the fixture must shrink";
+  EXPECT_EQ(record.nodes_in, nodes_in);
+  EXPECT_EQ(record.lg_bytes, Probe::footprint(nodes_in, edges_in)) << "max(input, output), not the output";
+  EXPECT_EQ(record.lg_bytes_v1, record.nodes_out * 32 + driven_edges(g) * 16);
+  EXPECT_GT(record.aeg_bytes, 0u);
+  EXPECT_LE(record.aeg_bytes, record.aeg_cap_bytes);
+}
+
+// ---- pass.aegraph's after_bitwidth label ------------------------------------------
+
+// Sum(a << 4, b): low-lane narrowing (Cprop{true}) rewrites it into
+// Or(Shl(Sum(a, b >> 4), 4), Get_mask(b)), which the post-bitwidth slot must not do.
+std::string run_pass_aegraph(const Eprp_var::Eprp_dict& labels) {
+  static std::once_flag once;
+  std::call_once(once, [] { Pass_aegraph::setup(); });
+  static int         serial = 0;
+  hhds::GraphLibrary lib;
+  auto               g   = io_graph(lib, "lanes" + std::to_string(serial++), 2, 1);
+  auto               shl = gu::create_typed_node(*g, Ntype_op::SHL);
+  gu::setup_sink_by_name(shl, "a").connect_driver(g->get_input_pin("i0"));
+  gu::setup_sink_by_name(shl, "b").connect_driver(konst(g, 4));
+  gu::set_ubits(shl.create_driver_pin(0), 8);
+  binop(g, Ntype_op::Sum, shl.create_driver_pin(0), g->get_input_pin("i1")).connect_sink(g->get_output_pin("o0"));
+  Eprp_var var;
+  var.graphs.push_back(g);
+  Pass::eprp.run_method_now("pass.aegraph", var, labels);
+  return std::to_string(count_op(g, Ntype_op::Get_mask)) + "/" + std::to_string(count_op(g, Ntype_op::Or)) + "/"
+         + std::to_string(count_op(g, Ntype_op::Sum));
+}
+
+TEST(PassAegraph, AfterBitwidthKeepsLowLaneNarrowingOff) {
+  const auto narrowed = run_pass_aegraph({{"low_lanes", "true"}, {"after_bitwidth", "false"}});
+  const auto plain    = run_pass_aegraph({{"low_lanes", "false"}});
+  const auto after    = run_pass_aegraph({{"low_lanes", "true"}, {"after_bitwidth", "true"}});
+  EXPECT_NE(narrowed, plain) << "low_lanes=true before bitwidth must narrow the fixture";
+  EXPECT_EQ(after, plain) << "after_bitwidth=true must behave as low_lanes=false";
+}
+
 // The engine followed by the classic post steps (Cprop::do_post) is still sound
 // on the shapes that reach muxctx and flop-enable folding.
 TEST(Aegraph, PostStepsKeepTheGraphEquivalent) {
@@ -608,6 +784,393 @@ TEST(Aegraph, PostStepsKeepTheGraphEquivalent) {
   options.timeout = 10;
   const auto result = livehd::lec::prove_equal(ref.get(), impl.get(), options);
   EXPECT_NE(result.verdict, livehd::lec::Verdict::Refuted) << result.detail;
+}
+
+
+// ---- milestone G: the packed ready/valid shape of br_amba_axi_demux ---------------
+
+// Test-only rule for the preflight tests (rules_only selects it): the low bit of x as the second bit of
+// 2x, Rxor(x, 1) = Get_mask(Mult(x, 2), 1, 2). Value-preserving; the interior Mult is unbounded over a
+// leaf, so it cannot be stamped.
+AEG_RULE_GROUP(aegraph_test);
+AEG_NATIVE_RULE(test_rxor_via_mult, simplify, 50, Ntype_op::Rxor) {
+  if (root.ops.size() != 2 || root.ops[0].bank != 0 || root.ops[1].bank != 1 || !ctx.is_int(root.ops[1].cls, 1)) {
+    return;
+  }
+  using livehd::aegraph::Operand;
+  const auto twice = ctx.make(Ntype_op::Mult, {Operand{0, root.ops[0].cls}, Operand{0, ctx.konst(2)}});
+  out.subsume(ctx.make(Ntype_op::Get_mask, {Operand{0, twice}, Operand{2, ctx.konst(1)}, Operand{3, ctx.konst(2)}}));
+}
+
+hhds::Pin_class bit_of(const std::shared_ptr<hhds::Graph>& g, const hhds::Pin_class& word, int bit) {
+  auto n = gu::create_get_mask(*g, word, bit, bit + 1);
+  gu::set_ubits(n.create_driver_pin(0), 1);
+  return n.create_driver_pin(0);
+}
+
+// The word-level cycle of a ready/valid network built from packed vectors: valid[i] reads ready[i], ready[i]
+// reads valid[i-1], so every bit is a DAG (v0 -> r1 -> v1 -> r2 -> v2) but the packed ready word feeds the packed
+// valid word that feeds the packed ready word.
+std::shared_ptr<hhds::Graph> packed_ring(hhds::GraphLibrary& lib, const char* name) {
+  auto g = io_graph(lib, name, 3, 2);
+  // Forward references: the Concat nodes are created first and wired last.
+  auto vpack = gu::create_typed_node(*g, Ntype_op::Concat);
+  auto rpack = gu::create_typed_node(*g, Ntype_op::Concat);
+  gu::set_ubits(vpack.create_driver_pin(0), 3);
+  gu::set_ubits(rpack.create_driver_pin(0), 3);
+  std::vector<hhds::Pin_class> v(3), r(3);
+  for (int i = 0; i < 3; ++i) {
+    const auto req = bit_of(g, g->get_input_pin("i" + std::to_string(i)), 0);
+    auto       a   = gu::create_typed_node(*g, Ntype_op::And);
+    req.connect_sink(gu::setup_sink_by_name(a, "as"));
+    bit_of(g, rpack.create_driver_pin(0), i).connect_sink(gu::setup_sink_by_name(a, "as"));
+    gu::set_ubits(a.create_driver_pin(0), 1);
+    v[i] = a.create_driver_pin(0);
+  }
+  for (int i = 0; i < 3; ++i) {
+    const auto env = bit_of(g, g->get_input_pin("i" + std::to_string((i + 1) % 3)), 1);
+    if (i == 0) {
+      r[i] = env;
+      continue;
+    }
+    auto x = gu::create_typed_node(*g, Ntype_op::Xor);
+    env.connect_sink(gu::setup_sink_by_name(x, "as"));
+    bit_of(g, vpack.create_driver_pin(0), i - 1).connect_sink(gu::setup_sink_by_name(x, "as"));
+    gu::set_ubits(x.create_driver_pin(0), 1);
+    r[i] = x.create_driver_pin(0);
+  }
+  for (int i = 0; i < 3; ++i) {
+    v[2 - i].connect_sink(vpack.create_sink_pin(static_cast<hhds::Port_id>(2 * i)));
+    konst(g, 1).connect_sink(vpack.create_sink_pin(static_cast<hhds::Port_id>(2 * i + 1)));
+    r[2 - i].connect_sink(rpack.create_sink_pin(static_cast<hhds::Port_id>(2 * i)));
+    konst(g, 1).connect_sink(rpack.create_sink_pin(static_cast<hhds::Port_id>(2 * i + 1)));
+  }
+  vpack.create_driver_pin(0).connect_sink(g->get_output_pin("o0"));
+  rpack.create_driver_pin(0).connect_sink(g->get_output_pin("o1"));
+  return g;
+}
+
+// The pre-pass resolves the packed slices that make the ring a FALSE cycle: no member is left opaque, both
+// engines' results prove equal to each other, and the engine's own packed-slice rules finish the job.
+TEST(Aegraph, PackedFalseCycleIsResolvedInThePrePass) {
+  hhds::GraphLibrary lib_classic, lib_aeg;
+  auto               classic = packed_ring(lib_classic, "ring_classic");
+  auto               aeg     = packed_ring(lib_aeg, "ring_aeg");
+  Cprop{}.do_trans(classic);
+  Cprop cp;
+  const auto stats = livehd::aegraph::optimize_body(cp, aeg, checked());
+  EXPECT_EQ(stats.opaque, 0u) << "the false cycle is cut before the build";
+  for (const auto& g : {classic, aeg}) {
+    // No Get_mask reads a Concat any more: every slice of a pack was resolved to its lane.
+    for (auto node : g->body().nodes()) {
+      if (gu::type_op_of(node) != Ntype_op::Get_mask) {
+        continue;
+      }
+      const auto source = node.try_get_sink_pin(0).get_driver_pin();
+      EXPECT_TRUE(source.is_const() || gu::type_op_of(source.get_master_node()) != Ntype_op::Concat)
+          << "a slice of a Concat survived: " << gu::node_name_of(node);
+    }
+  }
+  livehd::lec::Lec_options options;
+  options.cones   = "false";
+  options.timeout = 20;
+  const auto result = livehd::lec::prove_equal(classic.get(), aeg.get(), options);
+  EXPECT_EQ(result.verdict, livehd::lec::Verdict::Proven) << result.detail;
+}
+
+// formal.lec.preflight_engine=aegraph runs the engine the way the LEC preflight does (no bitwidth follows):
+// the same ring, optimized with Options::preflight, stays equal to the classic result and leaves no unstamped
+// cell behind.
+TEST(Aegraph, PreflightEngineOnTheDemuxShapeIsStampedAndEquivalent) {
+  hhds::GraphLibrary lib_classic, lib_aeg;
+  auto               classic = packed_ring(lib_classic, "pf_classic");
+  auto               aeg     = packed_ring(lib_aeg, "pf_aeg");
+  Cprop{}.do_trans(classic);
+  Cprop                   cp;
+  livehd::aegraph::Options options = checked();
+  options.preflight                 = true;
+  const auto stats                  = livehd::aegraph::optimize_body(cp, aeg, options);
+  EXPECT_EQ(stats.refused, 0u);
+  for (auto node : aeg->body().nodes()) {
+    const auto op = gu::type_op_of(node);
+    if (gu::is_builtin_node(node) || !Ntype::is_comb(op) || op == Ntype_op::Mux || !node.has_out_edges()) {
+      continue;
+    }
+    EXPECT_NE(gu::bits_of(node.create_driver_pin(0)), 0) << "an unstamped " << Ntype::get_name(op) << " cell reaches the LEC encoder";
+  }
+  livehd::lec::Lec_options lec;
+  lec.cones   = "false";
+  lec.timeout = 20;
+  const auto result = livehd::lec::prove_equal(classic.get(), aeg.get(), lec);
+  EXPECT_EQ(result.verdict, livehd::lec::Verdict::Proven) << result.detail;
+}
+
+// A new interior cell is stamped from the range analysis when one bounds it, and the engine REFUSES the graph
+// (leaves it, reports refused) when a new cell has no bound.
+TEST(Aegraph, PreflightStampsBoundedNewCellsAndRefusesUnboundedOnes) {
+  const auto build = [](hhds::GraphLibrary& lib, const char* name, bool declared) {
+    auto io = lib.create_io(name);
+    io->add_input("i0", 0);
+    if (declared) {
+      io->set_bits("i0", 8);
+      io->set_unsign("i0", true);
+    }
+    io->add_output("o0", 1);
+    io->set_bits("o0", 8);
+    io->set_unsign("o0", true);
+    auto g = io->create_graph();
+    auto r = gu::create_typed_node(*g, Ntype_op::Rxor);
+    g->get_input_pin("i0").connect_sink(gu::setup_sink_pid(r, 0));
+    konst(g, 1).connect_sink(gu::setup_sink_pid(r, 1));
+    gu::set_ubits(r.create_driver_pin(0), 1);
+    r.create_driver_pin(0).connect_sink(g->get_output_pin("o0"));
+    return g;
+  };
+  livehd::aegraph::Options options = checked();
+  options.rules_only               = "test_rxor_via_mult";
+
+  // Without preflight a new cell is left to bitwidth.
+  hhds::GraphLibrary lib_off;
+  auto               plain = build(lib_off, "pf_plain", false);
+  const auto         off   = livehd::aegraph::optimize(plain, {}, options);
+  EXPECT_EQ(off.refused, 0u);
+  EXPECT_EQ(count_op(plain, Ntype_op::Rxor), 0u);
+  ASSERT_EQ(count_op(plain, Ntype_op::Mult), 1u);
+  for (auto node : plain->body().nodes()) {
+    if (gu::type_op_of(node) == Ntype_op::Mult) {
+      EXPECT_EQ(gu::bits_of(node.create_driver_pin(0)), 0) << "outside preflight a new cell is left to bitwidth";
+    }
+  }
+
+  options.preflight = true;
+  // A declared 8-bit input bounds Mult(i0, 2) to [0, 510]: stamped unsigned 9 bits.
+  hhds::GraphLibrary lib_declared;
+  auto               declared = build(lib_declared, "pf_declared", true);
+  Cprop              cp;
+  const auto         ok = livehd::aegraph::optimize_body(cp, declared, options);
+  EXPECT_EQ(ok.refused, 0u);
+  EXPECT_GE(ok.stamped, 1u);
+  for (auto node : declared->body().nodes()) {
+    if (gu::type_op_of(node) == Ntype_op::Mult) {
+      EXPECT_EQ(gu::bits_of(node.create_driver_pin(0)), 9);
+      EXPECT_TRUE(gu::is_unsign(node.create_driver_pin(0)));
+    }
+  }
+
+  // An undeclared input has no bound: the engine REFUSES the graph and classic keeps it.
+  hhds::GraphLibrary lib_refuse;
+  auto               stamped = build(lib_refuse, "pf_refuse", false);
+  const auto         on      = livehd::aegraph::optimize_body(cp, stamped, options);
+  EXPECT_EQ(on.refused, 1u) << "Mult(i0, 2) over an undeclared input is unbounded: nothing can stamp it";
+  EXPECT_EQ(count_op(stamped, Ntype_op::Mult), 0u) << "the refused graph is not elaborated";
+}
+
+// ---- milestone H -------------------------------------------------------------
+
+// The readers of a node are counted over its whole structural twin group before the walk: A = i0 + i1 feeds
+// C = A + i2 while a twin A' = i0 + i1 (created later, read by an output) arrives AFTER C was inserted. Absorbing A
+// into C (flatten) would leave A' as a second i0 + i1; the twin group has two readers, so the sum stays shared.
+TEST(Aegraph, TwinReadersBlockFlattenOfASharedSum) {
+  hhds::GraphLibrary lib;
+  auto               g  = io_graph(lib, "twin_readers", 3, 2);
+  auto               a  = binop(g, Ntype_op::Sum, g->get_input_pin("i0"), g->get_input_pin("i1"));
+  auto               c  = binop(g, Ntype_op::Sum, a, g->get_input_pin("i2"));
+  auto               a2 = binop(g, Ntype_op::Sum, g->get_input_pin("i0"), g->get_input_pin("i1"));
+  c.connect_sink(g->get_output_pin("o0"));
+  a2.connect_sink(g->get_output_pin("o1"));
+
+  livehd::aegraph::optimize(g, {}, checked());
+  EXPECT_EQ(count_op(g, Ntype_op::Sum), 2u) << "i0 + i1 is built once and read by the output and by the outer sum";
+  const auto outer = out_driver(g, "o0").get_master_node();
+  size_t     n     = 0;
+  for ([[maybe_unused]] auto sink : outer.inp_sorted_pins()) {
+    ++n;
+  }
+  EXPECT_EQ(n, 2u) << "the outer sum reads the shared sum and i2, not three flat operands";
+}
+
+// Mux(s, base, Set_mask(base, w, v)) keeps the Mux on the lane: Set_mask(base, w, Mux(s, Get_mask(base, w), v)). A
+// latch's own hold mux is a root of the extraction (latch contract rule B: Q reaches D only as a direct Mux arm),
+// so the same shape over a latch's Q is left alone, while a flop's din is rewritten.
+TEST(Aegraph, LatchHoldMuxIsARootAndAFlopHoldIsLaneFactored) {
+  const auto build = [](hhds::GraphLibrary& lib, std::string_view name, Ntype_op state) {
+    auto g    = io_graph(lib, name, 3, 1);
+    auto reg  = gu::create_typed_node(*g, state);
+    auto q    = reg.create_driver_pin(0);
+    auto sm   = gu::create_set_mask(*g, q, g->get_input_pin("i1"), 2, 3);
+    auto mux  = gu::create_typed_node(*g, Ntype_op::Mux);
+    g->get_input_pin("i0").connect_sink(mux.create_sink_pin(0));
+    q.connect_sink(mux.create_sink_pin(1));
+    sm.create_driver_pin(0).connect_sink(mux.create_sink_pin(2));
+    gu::setup_sink_by_name(reg, "din").connect_driver(mux.create_driver_pin(0));
+    q.connect_sink(g->get_output_pin("o0"));
+    return std::pair{g, reg};
+  };
+  hhds::GraphLibrary lib_latch, lib_flop;
+  auto [latch_g, latch] = build(lib_latch, "latch_hold", Ntype_op::Latch);
+  auto [flop_g, flop]   = build(lib_flop, "flop_hold", Ntype_op::Flop);
+  livehd::aegraph::optimize(latch_g, {}, checked());
+  livehd::aegraph::optimize(flop_g, {}, checked());
+  const auto latch_din = gu::get_driver_of_sink_name(latch, "din").get_master_node();
+  const auto flop_din  = gu::get_driver_of_sink_name(flop, "din").get_master_node();
+  EXPECT_EQ(gu::type_op_of(latch_din), Ntype_op::Mux) << "the latch hold mux is a root: no rule rewrites it";
+  EXPECT_EQ(gu::type_op_of(flop_din), Ntype_op::Set_mask) << "a flop's din is lane-factored";
+}
+
+// A packed array read is a shift by the lane offset; the lane layout of a Set_mask chain (and of a Concat window
+// that spans lanes) resolves it without the word.
+TEST(Aegraph, PackedLaneReadsResolveThroughTheLayout) {
+  hhds::GraphLibrary lib;
+  auto               g   = io_graph(lib, "lane_reads", 2, 3);
+  auto               low = gu::create_set_mask(*g, konst(g, 0), g->get_input_pin("i0"), 0, 8);
+  auto               top = gu::create_set_mask(*g, low.create_driver_pin(0), g->get_input_pin("i1"), 8, 16);
+  auto               sra = gu::create_typed_node(*g, Ntype_op::SRA);
+  gu::setup_sink_by_name(sra, "a").connect_driver(top.create_driver_pin(0));
+  gu::setup_sink_by_name(sra, "b").connect_driver(konst(g, 8));
+  sra.create_driver_pin(0).connect_sink(g->get_output_pin("o0"));
+  // A window across both lanes of a pack nobody else reads.
+  auto low2     = gu::create_set_mask(*g, konst(g, 0), g->get_input_pin("i1"), 0, 8);
+  auto top2     = gu::create_set_mask(*g, low2.create_driver_pin(0), g->get_input_pin("i0"), 8, 16);
+  auto straddle = gu::create_get_mask(*g, top2.create_driver_pin(0), 4, 12);
+  straddle.create_driver_pin(0).connect_sink(g->get_output_pin("o1"));
+  // A write that covers the top lane of a pack and extends past it: [4, 12) over a pack of two 4-bit lanes.
+  auto w0 = gu::create_set_mask(*g, konst(g, 0), g->get_input_pin("i0"), 0, 4);
+  auto w1 = gu::create_set_mask(*g, w0.create_driver_pin(0), g->get_input_pin("i1"), 4, 8);
+  auto w2 = gu::create_set_mask(*g, w1.create_driver_pin(0), g->get_input_pin("i0"), 4, 12);
+  w2.create_driver_pin(0).connect_sink(g->get_output_pin("o2"));
+
+  livehd::aegraph::optimize(g, {}, checked());
+  EXPECT_EQ(count_op(g, Ntype_op::SRA), 0u) << "sra_lane + getmask_lane read the lane directly";
+  const auto o0 = out_driver(g, "o0");
+  EXPECT_NE(gu::type_op_of(o0.get_master_node()), Ntype_op::Set_mask);
+  EXPECT_EQ(count_op(g, Ntype_op::Set_mask), 0u) << "the chain is a pack (setmask_to_concat) and then dead";
+  EXPECT_EQ(gu::type_op_of(out_driver(g, "o1").get_master_node()), Ntype_op::Concat)
+      << "a window across two lanes of a private pack is the narrower pack";
+}
+
+// Q1: a constant selector that names a disconnected arm (or lies outside the arms) of an n-ary Mux is a '?' the
+// Mux owns; 0 is one legal resolution and the extraction takes it (a constant is cheaper than the Mux). A selector
+// that names a connected arm is that arm.
+TEST(Aegraph, NaryMuxOutOfRangeSelectionIsAnAltOfZero) {
+  hhds::GraphLibrary lib;
+  auto               g = io_graph(lib, "mux_oob", 3, 3);
+  const auto         nary = [&](int64_t sel, std::initializer_list<hhds::Port_id> ports) {
+    auto mux = gu::create_typed_node(*g, Ntype_op::Mux);
+    konst(g, sel).connect_sink(mux.create_sink_pin(0));
+    int n = 0;
+    for (auto pid : ports) {
+      g->get_input_pin("i" + std::to_string(n++)).connect_sink(mux.create_sink_pin(pid));
+    }
+    return mux.create_driver_pin(0);
+  };
+  nary(1, {1, 3}).connect_sink(g->get_output_pin("o0"));  // arm 2 is disconnected: '?'
+  nary(7, {1, 2, 3}).connect_sink(g->get_output_pin("o1"));  // out of range: '?'
+  nary(2, {1, 2, 3}).connect_sink(g->get_output_pin("o2"));  // arm 3 = i2: connected
+  livehd::aegraph::optimize(g, {}, checked());
+  ASSERT_TRUE(out_driver(g, "o0").is_const());
+  EXPECT_TRUE(gu::const_of(out_driver(g, "o0")).is_known_zero());
+  ASSERT_TRUE(out_driver(g, "o1").is_const());
+  EXPECT_TRUE(gu::const_of(out_driver(g, "o1")).is_known_zero());
+  EXPECT_TRUE(out_driver(g, "o2") == g->get_input_pin("i2"));
+}
+
+// Guarded accumulation: `if s { acc |= x }` is Mux(s, acc, acc | x); inside a lifted loop body it becomes
+// acc | Mux(s, 0, x). Outside a loop body (or with a held STATE output) it stays a Mux.
+TEST(Aegraph, GuardedAccumulationMovesTheMuxOffTheAccumulatorInALoopBody) {
+  const auto build = [](hhds::GraphLibrary& lib, std::string_view name, bool state_hold) {
+    auto g    = io_graph(lib, name, 3, 1);
+    auto hold = g->get_input_pin("i1");
+    if (state_hold) {
+      auto flop = gu::create_typed_node(*g, Ntype_op::Flop);
+      hold      = flop.create_driver_pin(0);
+    }
+    auto update = binop(g, Ntype_op::Or, hold, g->get_input_pin("i2"));
+    auto mux    = gu::create_typed_node(*g, Ntype_op::Mux);
+    g->get_input_pin("i0").connect_sink(mux.create_sink_pin(0));
+    hold.connect_sink(mux.create_sink_pin(1));
+    update.connect_sink(mux.create_sink_pin(2));
+    mux.create_driver_pin(0).connect_sink(g->get_output_pin("o0"));
+    return g;
+  };
+  auto options         = checked();
+  options.guard_scope  = true;
+  options.unstamped_ok = true;
+  hhds::GraphLibrary lib_on, lib_off, lib_state;
+  auto               on = build(lib_on, "guard_on", false);
+  livehd::aegraph::optimize(on, {}, options);
+  EXPECT_EQ(gu::type_op_of(out_driver(on, "o0").get_master_node()), Ntype_op::Or) << "the accumulator is the Or's operand";
+  EXPECT_EQ(count_op(on, Ntype_op::Mux), 1u);
+
+  auto off = build(lib_off, "guard_off", false);
+  livehd::aegraph::optimize(off, {}, checked());
+  EXPECT_EQ(gu::type_op_of(out_driver(off, "o0").get_master_node()), Ntype_op::Mux) << "not a loop body: the Mux stays";
+
+  auto state = build(lib_state, "guard_state", true);
+  livehd::aegraph::optimize(state, {}, options);
+  EXPECT_EQ(gu::type_op_of(out_driver(state, "o0").get_master_node()), Ntype_op::Mux) << "a held state output keeps its Mux";
+}
+
+// The per-lane form of the bit-reduction vectorizer: four adjacent single bits of one word under an And (Or) are one
+// window test. Under the `sim` profile (a bit select is a shift and a mask, so four of them cost far more than one
+// window and a compare) the extraction takes it; under `synth` bit selects are wires and an and-tree of four bits costs
+// the same as the window compare, a tie, so the original stays.
+namespace {
+std::shared_ptr<hhds::Graph> bit_run_graph(hhds::GraphLibrary& lib, const char* name) {
+  auto       g    = io_graph(lib, name, 2, 2);
+  const auto bits = [&](Ntype_op op) {
+    auto n = gu::create_typed_node(*g, op);
+    for (int k : {2, 5, 3, 4}) {  // any order
+      auto bit = gu::create_get_mask(*g, g->get_input_pin("i0"), k);
+      bit.create_driver_pin(0).connect_sink(gu::setup_sink_by_name(n, "as"));
+    }
+    auto rest = gu::create_get_mask(*g, g->get_input_pin("i1"), 0);
+    rest.create_driver_pin(0).connect_sink(gu::setup_sink_by_name(n, "as"));
+    return n.create_driver_pin(0);
+  };
+  bits(Ntype_op::And).connect_sink(g->get_output_pin("o0"));
+  bits(Ntype_op::Or).connect_sink(g->get_output_pin("o1"));
+  return g;
+}
+}  // namespace
+
+TEST(Aegraph, AdjacentBitRunsOfAReductionBecomeAWindowTestUnderTheSimProfile) {
+  hhds::GraphLibrary lib;
+  auto               g = bit_run_graph(lib, "bit_runs_sim");
+  auto               options = checked();
+  options.cost               = livehd::aegraph::Options::Cost::sim;
+  livehd::aegraph::optimize(g, {}, options);
+  EXPECT_EQ(count_op(g, Ntype_op::EQ), 1u) << "And of bits 2..5 = (window == 15)";
+  EXPECT_EQ(count_op(g, Ntype_op::Ror), 1u) << "Or of bits 2..5 = Ror(window)";
+  EXPECT_EQ(count_op(g, Ntype_op::Get_mask), 2u) << "the window is built once and shared by both reductions, plus the one rest bit";
+}
+
+TEST(Aegraph, AdjacentBitRunsOfAReductionTieUnderTheSynthProfileAndStayAsTheyAre) {
+  hhds::GraphLibrary lib;
+  auto               g = bit_run_graph(lib, "bit_runs_synth");
+  livehd::aegraph::optimize(g, {}, checked());
+  EXPECT_EQ(count_op(g, Ntype_op::EQ), 0u);
+  EXPECT_EQ(count_op(g, Ntype_op::Ror), 0u);
+  EXPECT_EQ(count_op(g, Ntype_op::And), 1u);
+  EXPECT_EQ(count_op(g, Ntype_op::Or), 1u);
+}
+
+// Q3 / P10: LGraph has no types, a string is a Dlop constant like any other. Mux(s, "str", s) is `s ? s : "str"`;
+// it is NOT `s` (classic once read a string arm as zero). The same Mux with a literal 0 arm is `s`.
+TEST(Aegraph, MuxWithAStringArmIsNotCollapsedToTheSelector) {
+  hhds::GraphLibrary lib;
+  auto               g = io_graph(lib, "string_arm", 1, 2);
+  const auto         mux = [&](const hhds::Pin_class& false_arm) {
+    auto m = gu::create_typed_node(*g, Ntype_op::Mux);
+    g->get_input_pin("i0").connect_sink(m.create_sink_pin(0));
+    false_arm.connect_sink(m.create_sink_pin(1));
+    g->get_input_pin("i0").connect_sink(m.create_sink_pin(2));
+    return m.create_driver_pin(0);
+  };
+  mux(gu::create_const(*g, *Dlop::create_string("str"))).connect_sink(g->get_output_pin("o0"));
+  mux(konst(g, 0)).connect_sink(g->get_output_pin("o1"));
+  livehd::aegraph::optimize(g, {}, checked());
+  EXPECT_EQ(gu::type_op_of(out_driver(g, "o0").get_master_node()), Ntype_op::Mux) << "a string arm is not zero";
+  EXPECT_TRUE(out_driver(g, "o1") == g->get_input_pin("i0")) << "Mux(s, 0, s) = s";
 }
 
 }  // namespace

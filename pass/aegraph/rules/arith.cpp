@@ -211,16 +211,34 @@ AEG_NATIVE_RULE(sum_cancel, simplify, 60, Ntype_op::Sum) {
 
 // And(And(a, b), c) = And(a, b, c) when the inner cell has no other reader
 // (absorbing a shared cell would only copy its operands). A SUBTRACTED inner
-// Sum flips the banks of what it brings in.
+// Sum flips the banks of what it brings in. An aegraph never frees an e-node, so
+// flattening a k-long chain one link at a time would leave O(k^2) dead operands
+// behind (a 900-wide Or cost 400k pool entries). Instead a link whose only reader
+// is a cell of the same op (Ctx::chain_inner) leaves the work to that reader, and
+// the top of the chain absorbs every single-use link below it in ONE firing:
+// linear, and a wide chain ends as one banked cell, as in classic cprop.
 AEG_NATIVE_RULE(flatten, simplify, 50, Ntype_op::Sum, Ntype_op::Mult, Ntype_op::And, Ntype_op::Or, Ntype_op::Xor) {
-  std::vector<Operand> merged;
-  bool                 any = false;
-  for (const auto& o : root.ops) {
+  if (ctx.chain_inner(root.cls)) {
+    return;
+  }
+  const auto absorbable = [&](const Operand& o) -> const Enode* {
     const Enode* inner = ctx.eg().enode_of(o.cls);
-    if (inner != nullptr && inner->op == root.op && inner->attrs == root.attrs && o.cls != root.cls && ctx.single_use(o.cls)) {
+    if (inner != nullptr && inner->op == root.op && ctx.eg().attrs_of(*inner) == root.attrs && o.cls != root.cls
+        && ctx.single_use(o.cls)) {
+      return inner;
+    }
+    return nullptr;
+  };
+  std::vector<Operand> merged;
+  std::vector<Operand> pending(root.ops.begin(), root.ops.end());
+  bool                 any = false;
+  while (!pending.empty()) {
+    const Operand o = pending.back();
+    pending.pop_back();
+    if (const Enode* inner = absorbable(o)) {
       any = true;
       for (const auto& io : ctx.operands_of(*inner)) {
-        merged.push_back({root.op == Ntype_op::Sum ? (o.bank ^ io.bank) : 0U, io.cls});
+        pending.push_back({root.op == Ntype_op::Sum ? (o.bank ^ io.bank) : 0U, io.cls});
       }
     } else {
       merged.push_back(o);

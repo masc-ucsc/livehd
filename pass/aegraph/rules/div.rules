@@ -1,0 +1,95 @@
+;; rules/div.rules: Div and Rem (Q2). Div and Rem are pure, hash-consed and CSE'd like any other op. Dlop makes
+;; x / 0 and x % 0 the all-unknown value, so the division disappears only where it is exact: a power-of-two
+;; divisor (a shift or a mask) for a dividend known non-negative (Dlop truncates toward zero, the remainder
+;; follows the dividend's sign, so a negative dividend needs the rounding correction, an alt), b / b = 1 (the
+;; 0 / 0 case is the unknown value, which may be 1), and a constant divisor through multiply-and-shift, an
+;; alt guarded by a bound on the dividend. A variable divisor that is no power of two is left alone: it is
+;; for simulation and runtime checks only.
+
+(simplify div_one 30
+  (Div x 1)
+  => x
+  :example (Div $x 1)
+  :doc "x / 1 = x for every x.")
+
+(simplify rem_one 30
+  (Rem x 1)
+  => 0
+  :example (Rem $x 1)
+  :doc "x % 1 = 0 for every x.")
+
+(simplify div_self 30
+  (Div x x)
+  => 1
+  :example (Div $x $x)
+  :doc "b / b = 1. For b = 0 the quotient is the all-unknown value, and 1 is one of its refinements.")
+
+(simplify rem_self 30
+  (Rem x x)
+  => 0
+  :example (Rem $x $x)
+  :doc "b % b = 0. For b = 0 the remainder is the all-unknown value, and 0 is one of its refinements.")
+
+(simplify div_pow2 30
+  (Div x (k c))
+  :when (pow2? c) (> c 1) (nonneg x)
+  => (SRA x (k (log2 c)))
+  :example (Div (Get_mask $x 0 8) 4)
+  :doc "x / 2^k = x >> k for x >= 0 (truncation and floor agree on non-negative values).")
+
+(simplify rem_pow2 30
+  (Rem x (k c))
+  :when (pow2? c) (> c 1) (nonneg x)
+  => (Get_mask x 0 (k (log2 c)))
+  :example (Rem (Get_mask $x 0 8) 4)
+  :doc "x % 2^k = the low k bits of x for x >= 0.")
+
+(simplify div_shl_pow2 30
+  (Div x (SHL 1 y))
+  :when (nonneg x) (nonneg y)
+  => (SRA x y)
+  :example (Div (Get_mask $x 0 8) (SHL 1 (Get_mask $y 0 3)))
+  :doc "x / (1 << y) = x >> y for x >= 0 and y >= 0.")
+
+(alt div_pow2_trunc 20
+  (Div x (k c))
+  :when (pow2? c) (> c 1)
+  => (SRA (Sum (as x (Mux (LT x 0) 0 (k (- c 1))))) (k (log2 c)))
+  :expect (synth lhs) (sim lhs)
+  :example (Div $x 8)
+  :doc "Truncating division by 2^k for any sign of x: (x + (x < 0 ? 2^k - 1 : 0)) >> k. An alt: both profiles keep the Div (a constant power-of-two divide is cheap in each: a shift in hardware, a shift pair in the simulator).")
+
+(alt div_mulshift8 20
+  (Div x (k c))
+  :let (s (+ 8 (clog2 c))) (m (div (+ (pow2 s) (- c 1)) c))
+  :when (> c 2) (not (pow2? c)) (<= c 1073741824) (<= s 62) (fits x 8)
+  => (SRA (Mult x (k m)) (k s))
+  :expect (synth lhs) (sim rhs)
+  :example (Div (Get_mask $x 0 8) 10)
+  :doc "x / c for 0 <= x < 2^8 and a constant c that is no power of two: floor(x * m / 2^s) with s = 8 + ceil(log2 c) and m = ceil(2^s / c) is exact (Granlund-Montgomery). The bound is the range guard. An alt: `sim` prices the multiply by an immediate plus a shift below the divide, `synth` keeps the Div (the divider array specializes on a constant divisor and measured smaller than the multiplier of the magic constant: aeg_div_rem, area 4182 against 4637).")
+
+(alt div_mulshift16 20
+  (Div x (k c))
+  :let (s (+ 16 (clog2 c))) (m (div (+ (pow2 s) (- c 1)) c))
+  :when (> c 2) (not (pow2? c)) (<= c 1073741824) (<= s 62) (fits x 16)
+  => (SRA (Mult x (k m)) (k s))
+  :expect (synth lhs) (sim rhs)
+  :example (Div (Get_mask $x 0 16) 10)
+  :doc "The same for 0 <= x < 2^16.")
+
+(alt div_mulshift31 20
+  (Div x (k c))
+  :let (s (+ 31 (clog2 c))) (m (div (+ (pow2 s) (- c 1)) c))
+  :when (> c 2) (not (pow2? c)) (<= c 1073741824) (<= s 62) (fits x 31)
+  => (SRA (Mult x (k m)) (k s))
+  :expect (synth lhs) (sim rhs)
+  :example (Div (Get_mask $x 0 31) 10)
+  :doc "The same for 0 <= x < 2^31.")
+
+(alt rem_via_div 20
+  (Rem x (k c))
+  :when (> c 1) (nonneg x) (fits x 31)
+  => (Get_mask (Sum (as x) (bs (Mult (Div x (k c)) (k c)))) 0 (k (clog2 c)))
+  :expect (synth lhs) (sim lhs)
+  :example (Rem (Get_mask $x 0 8) 10)
+  :doc "x % c = x - (x / c) * c; with the Div alts this is the multiply-shift remainder of a dividend bounded below 2^31. The bound is required: the difference carries no width stamp of its own, so it is wrapped in a mask of clog2(c) bits (x % c < c), which gives bitwidth the bound the Rem had; and a dividend without a provable bound (bitfuzz clears the pins) is refused. An alt.")

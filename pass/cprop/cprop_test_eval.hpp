@@ -117,7 +117,8 @@ inline int64_t mux_eval(Test_pin pin, Test_values& values) {
     const auto [lo, hi] = *gu::bit_range(node);
     EXPECT_GE(lo, 0);
     const auto value = mux_eval(gu::get_driver_of_sink_name(node, "a"), values);
-    result           = (value >> lo) & ((int64_t{1} << (hi - lo)) - 1);
+    const auto mask  = hi - lo >= 64 ? ~uint64_t{0} : ((uint64_t{1} << (hi - lo)) - 1);  // a 64-bit window is the whole word
+    result           = static_cast<int64_t>(static_cast<uint64_t>(value >> lo) & mask);
   } else if (op == Ntype_op::SHL || op == Ntype_op::SRA) {
     // Non-negative test values only, so SRA is a logical shift here.
     const auto value  = mux_eval(gu::get_driver_of_sink_name(node, "a"), values);

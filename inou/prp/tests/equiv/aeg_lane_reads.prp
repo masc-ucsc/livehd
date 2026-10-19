@@ -1,0 +1,28 @@
+/*
+:name: aeg_lane_reads
+:type: lec
+*/
+// PYROPE-vs-PYROPE group, the fixture of the aegraph packed-read rules (pass/aegraph/rules/mask.cpp sra_lane,
+// getmask_concat_straddle; rules/mask.rules getmask_not_getmask): an array element is a shift of the packed
+// word by its lane offset, a window across two lanes of a pack is a narrower pack, and the low window of a
+// complement does not need the mask under the complement. The sums at the end share a sub-sum with a later sum
+// (the twin x + y is built AFTER the sum that reads it). This is the REFERENCE, compiled by the classic engine;
+// `aeg_lane_reads_1.prp` is the same source compiled by the e-graph engine.
+pub comb top(a:U4, b:U4, x:U8, y:U8, z:U8) -> (hi:U4, lo:U4, mid:U6, nt:U4, s2:U9, s3:U10) {
+  mut v:[4]U4 = 0
+  v[0] = a
+  v[3] = b
+  hi = v[3]
+  lo = v[0] ^ v[3]
+
+  mut p:U12 = 0
+  p#[0..<4] = a
+  p#[4..<8] = b
+  p#[8..<12] = a ^ b
+  mid = p#[2..<8]
+
+  nt = (~x#[0..<8])#[0..<4]
+
+  s3 = x + y + z
+  s2 = x + y
+}

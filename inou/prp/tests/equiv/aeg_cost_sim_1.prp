@@ -1,0 +1,8 @@
+/*
+:name: aeg_cost_sim_1
+:type: lec
+:set: compile.cprop.engine=aegraph
+:compile_grep: aegraph-rule div_mulshift(8|16|31) tried=[0-9]+ matched=[1-9][0-9]* applied=[1-9][0-9]* extracted=0
+*/
+// HEADER-ONLY variant: aeg_cost_sim.prp compiled by the e-graph engine under the default `synth` profile, which
+// keeps the Div (the multiply-shift alternatives are built, matched and applied, and never extracted).

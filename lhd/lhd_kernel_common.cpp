@@ -1456,6 +1456,12 @@ void check_known_set_passes(const Options& opts) {
         }
       }
     }
+    if (pass == "compile.aegraph" && flag == "after_bitwidth") {
+      // Kernel bookkeeping (which slot runs after pass.bitwidth), not a user knob.
+      throw Lhd_error{"usage",
+                      std::format("--set/--config '{}' is kernel-managed, not a pass option", key),
+                      "the kernel sets it on the pass.aegraph slot that runs after pass.bitwidth"};
+    }
     if (pass == "compile.aegraph" && (flag == "low_lanes" || flag == "loop_hoist" || flag == "engine" || flag == "engine_slots")) {
       // pass.aegraph registers the shared labels as INTERNAL: every knob has ONE
       // user-facing spelling, the compile.cprop one, and the kernel copies it.
@@ -1472,6 +1478,13 @@ void check_known_set_passes(const Options& opts) {
         throw Lhd_error{"usage",
                         std::format("--set/--config compile.cprop.engine expects classic|aegraph|aegraph+classic, got '{}'", value),
                         "classic is the default; aegraph+classic runs the e-graph engine and then classic in each slot"};
+      }
+    }
+    if (pass == "compile.aegraph" && flag == "cost") {
+      if (value != "synth" && value != "sim" && value != "auto") {
+        throw Lhd_error{"usage",
+                        std::format("--set/--config compile.aegraph.cost expects synth|sim|auto, got '{}'", value),
+                        "synth is the default; sim prices the LLVM simulator backend; auto is sim under `lhd sim`, else synth"};
       }
     }
     if (pass == "compile.cprop" && flag == "engine_slots") {
@@ -1717,12 +1730,25 @@ std::vector<std::string> cprop_slot_methods(const Cprop_engine& choice, int slot
   return {"pass.aegraph", "pass.cprop"};
 }
 
+std::string resolve_aegraph_cost(const Options& opts) {
+  std::string cost = "synth";
+  for (const auto& [key, value] : opts.sets) {
+    if (key == "compile.aegraph.cost") {
+      cost = value;
+    }
+  }
+  if (cost == "auto") {
+    return opts.command == "sim" ? "sim" : "synth";
+  }
+  return cost;
+}
+
 std::string cprop_engine_descriptor(const Options& opts) {
   const auto choice = resolve_cprop_engine(opts);
   if (choice.engine == "classic") {
     return "classic";
   }
-  return std::format("{}:{}", choice.engine, choice.slots);
+  return std::format("{}:{}:cost={}", choice.engine, choice.slots, resolve_aegraph_cost(opts));
 }
 
 // The standard compile pipeline, in (set-name, EPRP method) order. The two

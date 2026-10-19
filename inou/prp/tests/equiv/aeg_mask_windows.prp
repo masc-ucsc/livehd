@@ -1,0 +1,20 @@
+/*
+:name: aeg_mask_windows
+:type: lec
+*/
+// PYROPE-vs-PYROPE group, the fixture of the aegraph window rules (pass/aegraph/rules/mask.rules and
+// rules/mask.cpp): a window of a window, of a left shift, of a Set_mask (a field write) and of a Concat-like
+// pack. Each output is one of those shapes read at a window that lands inside, outside or across the
+// piece it reads. This is the REFERENCE, compiled by the classic engine; `aeg_mask_windows_1.prp` is
+// the same source compiled by the e-graph engine.
+pub comb top(a:U16, b:U8, c:U4) -> (w1:U4, w2:U6, w3:U8, w4:U8, w5:U4, w6:U12, w7:U1) {
+  w1 = a#[4..<12]#[2..<6]
+  w2 = (a << 3)#[1..<7]
+  w3 = (b << 4)#[2..<10]
+  mut m:U16 = a
+  m#[4..<8] = c
+  w4 = m#[0..<8]
+  w5 = m#[5..<9]
+  w6 = ((c << 8) | b)#[0..<12]
+  w7 = (a >> 3)#[1..=1]
+}

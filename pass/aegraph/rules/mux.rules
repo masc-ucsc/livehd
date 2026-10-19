@@ -13,3 +13,14 @@
   => (Mux c t f)
   :example (Mux (EQ (EQ $a 0) 0) $f $t)
   :doc "Mux(EQ(c, 0), f, t) = Mux(c, t, f) for a 0/1 value c: the selector reads the condition itself and the arms swap.")
+
+;; ---- the per-lane form of vectorize_bit_muxes ----
+
+(alt mux_lane_vector 20
+  (Mux s (Get_mask x (k a) (k h)) (Get_mask y (k b) (k j)))
+  :let (o (band a 63)) (a0 (- a o)) (b0 (- b o))
+  :when (>= a 0) (>= b 0) (= h (+ a 1)) (= j (+ b 1)) (>= b0 0)
+  => (Get_mask (Mux s (Get_mask x (k a0) (k (+ a0 64))) (Get_mask y (k b0) (k (+ b0 64)))) (k o) (k (+ o 1)))
+  :expect (synth lhs) (sim lhs)
+  :example (Mux $s (Get_mask $x 5 6) (Get_mask $y 13 14))
+  :doc "One lane of a bit-sliced mux. Mux(s, x[a], y[b]) is bit (a mod 64) of the 64-bit-aligned word mux Mux(s, x[a0 +: 64], y[b0 +: 64]), with the same alignment offset on both arms. Every lane of a run that shares s, x, y and the offset b - a builds the SAME word mux, so hash-consing shares it among the lanes (classic vectorize_bit_muxes does this on the extracted graph; this is the alternative the extraction can pick once a cost profile prices the sharing). An alt: a lane alone is cheaper as the scalar mux.")

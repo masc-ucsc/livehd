@@ -3,12 +3,49 @@
 ;;   (analysis NAME (params) :type T :spec S)
 ;;   (pred     NAME (params) :uses A :spec S)
 ;;
-;; The :spec is a boolean expression over the parameters and the builtins. It is the hypothesis of every
-;; proof obligation and the sampler of the generated fuzz: `(bool01 x)` samples x in {0, 1}. A guard on an
-;; analysis compiles to a call of the runtime implementation (rulegen's analysis table); rulegen refuses a
-;; guard whose analysis the runtime does not implement yet.
+;; A parameter is a CLASS (a bare name) or a CONSTANT written (k name): the guard passes a class variable for
+;; the first kind and any constant expression for the second. The :spec is a boolean expression over the
+;; parameters and the builtins (rulegen/rule_expr.hpp): it is the hypothesis of every proof obligation, the
+;; sampler of the generated rule fuzz (`(bool01 x)` samples x in {0, 1}), and the oracle of the analysis
+;; soundness fuzz (aeg_analyses_smoke: whenever the runtime says an analysis holds for a class, the spec must
+;; hold on the class's value under random leaf values). Each analysis is implemented with AEG_ANALYSIS in
+;; pass/aegraph/runtime/analyses.cpp; rulegen refuses a guard whose analysis has no implementation.
 ;;
-;; Milestone G adds range, known bits, nonneg, range_bounded and known_zero_outside here, each with its
-;; implementation in pass/aegraph/analyses/.
+;; The facts are lazy and memoized per class in the e-graph. Leaves (IO and state) carry no width in the
+;; e-graph, as in classic cprop, so the bounds come from constants and from the ops that bound their result
+;; (Get_mask, Sext, comparisons, Concat, masks, shifts of bounded values).
 
+;; 0 or 1.
 (analysis bool01 (x) :type bool :spec (and (<= 0 x) (<= x 1)))
+
+;; lo <= x <= hi: an interval per class.
+(analysis range (x (k lo) (k hi)) :type Range :spec (and (<= lo x) (<= x hi)))
+(pred nonneg (x) :uses range :spec (>= x 0))
+(pred fits (x (k n)) :uses range :spec (and (>= n 0) (>= x 0) (<= x (mask_of n))))
+(pred sfits (x (k n)) :uses range :spec (and (>= n 1) (<= x (mask_of (- n 1))) (>= x (- -1 (mask_of (- n 1))))))
+
+;; Known bits of the low 64: every bit of the non-negative mask m is a known 0 / known 1.
+(analysis known_zero (x (k m)) :type Known_bits :spec (and (>= m 0) (= (band x m) 0)))
+(analysis known_one (x (k m)) :type Known_bits :spec (and (>= m 0) (= (band x m) m)))
+
+;; The low n bits are structurally zero (shifts, multiples, a packed word with an empty low field).
+(analysis low_zero (x (k n)) :type Low_lane :spec (and (>= n 0) (= (band x (mask_of n)) 0)))
+
+;; No bit position is 1 in both (disjoint fields, a boolean and its complement, EQ against two constants).
+(analysis exclusive (x y) :type Exclusivity :spec (= (band x y) 0))
+
+;; (base, polarity): y is the complement of the boolean x (one is the base, the other EQ(base, 0)).
+(analysis opposite (x y) :type Polarity :spec (and (>= x 0) (<= x 1) (= y (- 1 x))))
+
+;; The persistent lane layout of a Concat / Set_mask / SHL / packed Or: the window [lo, hi) of x lies in one
+;; lane whose source is another class (or is zero). The layout itself is tested by aeg_analyses_smoke; as a
+;; guard it carries no value fact, hence the tautological spec.
+(analysis has_lane (x (k lo) (k hi)) :type Layout :spec (<= 0 1))
+
+;; Facts that relate two classes or decide one. They are claims about the values themselves, so the spec is
+;; the claim.
+(analysis lt_always (x y) :type Range :spec (< x y))
+(analysis ge_always (x y) :type Range :spec (>= x y))
+(analysis distinct (x y) :type Known_bits :spec (not (= x y)))
+(analysis nonzero (x) :type Known_bits :spec (not (= x 0)))
+(analysis zero (x) :type Known_bits :spec (= x 0))

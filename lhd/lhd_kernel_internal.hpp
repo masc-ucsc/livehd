@@ -467,6 +467,18 @@ bool              compile_cache_enabled(const Options& opts);
 void              apply_log_settings(const Options& opts);
 void              apply_lhd_settings(Options& opts);
 std::vector<std::pair<std::string, std::string>> compile_graph_passes(const Options& opts);
+// Per step of `passes` (compile_graph_passes): true when a pass.bitwidth step
+// precedes it. pass.aegraph gets the INTERNAL after_bitwidth label exactly there,
+// so its low-lane narrowing stays off once bitwidth has run.
+inline std::vector<bool> follows_bitwidth(const std::vector<std::pair<std::string, std::string>>& passes) {
+  std::vector<bool> after;
+  bool              seen = false;
+  for (const auto& [set_name, method] : passes) {
+    after.push_back(seen);
+    seen = seen || method == "pass.bitwidth";
+  }
+  return after;
+}
 // `compile.cprop.engine` (classic|aegraph|aegraph+classic, default classic) and
 // `compile.cprop.engine_slots` (both|first|second, default both), resolved from
 // the --set entries (last wins). At least one engine always runs: there is no
@@ -479,8 +491,13 @@ Cprop_engine             resolve_cprop_engine(const Options& opts);
 // The EPRP methods that run in compile cprop slot `slot` (0 = before
 // pass.legalize, 1 = after enableopt), in order.
 std::vector<std::string> cprop_slot_methods(const Cprop_engine& choice, int slot);
+// `compile.aegraph.cost` (synth|sim|auto, default synth) resolved to the profile pass.aegraph runs:
+// `auto` is `sim` under `lhd sim` and `synth` everywhere else. The default stays `synth` for every command
+// (a documented default), so `auto` is the opt-in that follows the command.
+std::string              resolve_aegraph_cost(const Options& opts);
 // The engine identity the compile-cache descriptor names ("classic" or
-// "aegraph+classic:first", ...): what the resolved schedule actually runs.
+// "aegraph+classic:first:cost=sim", ...): what the resolved schedule actually runs, including the resolved
+// extraction cost profile whenever an aegraph step is scheduled.
 std::string              cprop_engine_descriptor(const Options& opts);
 
 void save_ln_dir(Options& opts, Result& res, const std::vector<std::shared_ptr<Lnast>>& units, const std::string& dir);

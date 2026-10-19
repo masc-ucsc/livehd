@@ -39,6 +39,7 @@ def aeg_rules(
         fuzz_deps,
         prove_deps,
         analyses = "rules/analyses.decl",
+        costs = [],
         native_srcs = [],
         md = "RULES.md"):
     """Generate rule code, tests and RULES.md for `rules/<group>.rules`.
@@ -50,6 +51,8 @@ def aeg_rules(
       fuzz_deps: deps of the generated fuzz tests (the rule runtime, the test support, gtest_main).
       prove_deps: deps of the generated bv-proof tests (the same plus the LEC engine).
       analyses: the analyses.decl file.
+      costs: cost profile names; each reads `cost/<name>.cost`, is linted against the rules and registered
+          through `gen/cost_<name>.gen.cpp` (part of `<name>_cpp`).
       native_srcs: the hand-written rule sources, listed in RULES.md and checked for name clashes.
       md: the checked-in generated table that the staleness test compares against.
     """
@@ -63,17 +66,22 @@ def aeg_rules(
             "gen/aeg_prove_%s_smoke.gen.cpp" % g,
         ]
         cpp.append("gen/%s_rules.gen.cpp" % g)
+    for c in costs:
+        outs.append("gen/cost_%s.gen.cpp" % c)
+        cpp.append("gen/cost_%s.gen.cpp" % c)
     outs.append("gen/RULES.generated.md")
 
     cmd = "$(location %s) --out-dir $(RULEDIR)/gen --analyses $(location %s)" % (rulegen, analyses)
     for g in groups:
         cmd += " --group %s=$(location rules/%s.rules)" % (g, g)
+    for c in costs:
+        cmd += " --cost %s=$(location cost/%s.cost)" % (c, c)
     for f in native_srcs:
         cmd += " --native $(location %s)" % f
 
     native.genrule(
         name = gen,
-        srcs = [analyses] + ["rules/%s.rules" % g for g in groups] + native_srcs + [rulegen],
+        srcs = [analyses] + ["rules/%s.rules" % g for g in groups] + ["cost/%s.cost" % c for c in costs] + native_srcs + [rulegen],
         outs = outs,
         cmd = cmd,
     )

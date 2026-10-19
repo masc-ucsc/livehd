@@ -16,6 +16,7 @@
 #include <array>
 #include <bit>
 #include <cstdint>
+#include <climits>
 #include <span>
 #include <string_view>
 
@@ -55,6 +56,18 @@ struct Num {
 [[nodiscard]] constexpr Num popcount(Num a) { return (a.ok && a.v >= 0) ? num(std::popcount(static_cast<uint64_t>(a.v))) : Num{}; }
 // 2^a - 1 for 0 <= a <= 62.
 [[nodiscard]] constexpr Num mask_of(Num a) { return (a.ok && a.v >= 0 && a.v <= 62) ? num((int64_t{1} << a.v) - 1) : Num{}; }
+// 2^a for 0 <= a <= 62.
+[[nodiscard]] constexpr Num pow2(Num a) { return (a.ok && a.v >= 0 && a.v <= 62) ? num(int64_t{1} << a.v) : Num{}; }
+// ceil(log2 a) for a >= 1.
+[[nodiscard]] constexpr Num clog2(Num a) {
+  return (a.ok && a.v >= 1) ? num(a.v == 1 ? 0 : 64 - std::countl_zero(static_cast<uint64_t>(a.v - 1))) : Num{};
+}
+// Bitwise and of the two's complement values.
+[[nodiscard]] constexpr Num band(Num a, Num b) { return (a.ok && b.ok) ? num(a.v & b.v) : Num{}; }
+// a / b truncated toward zero (b != 0).
+[[nodiscard]] constexpr Num div(Num a, Num b) {
+  return (a.ok && b.ok && b.v != 0 && !(a.v == INT64_MIN && b.v == -1)) ? num(a.v / b.v) : Num{};
+}
 [[nodiscard]] constexpr Num lt(Num a, Num b) { return (a.ok && b.ok) ? flag(a.v < b.v) : Num{}; }
 [[nodiscard]] constexpr Num le(Num a, Num b) { return (a.ok && b.ok) ? flag(a.v <= b.v) : Num{}; }
 [[nodiscard]] constexpr Num gt(Num a, Num b) { return (a.ok && b.ok) ? flag(a.v > b.v) : Num{}; }
@@ -76,7 +89,7 @@ struct Builtin {
   std::string_view cxx_unary; // `-` only: the one-argument spelling
 };
 
-inline constexpr std::array<Builtin, 18> kBuiltins{{
+inline constexpr std::array<Builtin, 22> kBuiltins{{
     {"+", 2, -1, false, "add", ""},
     {"-", 1, 2, false, "sub", "neg"},
     {"*", 2, -1, false, "mul", ""},
@@ -95,6 +108,10 @@ inline constexpr std::array<Builtin, 18> kBuiltins{{
     {"or", 2, -1, true, "lor", ""},
     {"not", 1, 1, true, "lnot", ""},
     {"abs", 1, 1, false, "abs_", ""},
+    {"pow2", 1, 1, false, "pow2", ""},
+    {"clog2", 1, 1, false, "clog2", ""},
+    {"band", 2, 2, false, "band", ""},
+    {"div", 2, 2, false, "div", ""},
 }};
 
 [[nodiscard]] constexpr Num abs_(Num a) { return a.ok ? (a.v < 0 ? neg(a) : a) : Num{}; }
@@ -170,6 +187,18 @@ inline constexpr std::array<Builtin, 18> kBuiltins{{
   }
   if (name == "abs") {
     return abs_(args[0]);
+  }
+  if (name == "pow2") {
+    return pow2(args[0]);
+  }
+  if (name == "clog2") {
+    return clog2(args[0]);
+  }
+  if (name == "band") {
+    return band(args[0], args[1]);
+  }
+  if (name == "div") {
+    return div(args[0], args[1]);
   }
   return Num{};
 }

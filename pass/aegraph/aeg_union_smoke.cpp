@@ -209,6 +209,10 @@ TEST(AegUnion, OptionStringsAreValidated) {
   EXPECT_EQ(o.extractor_fuel, 100u);
   EXPECT_EQ(o.edge_budget, 9u);
   EXPECT_EQ(o.cost, Options::Cost::sim);
+  EXPECT_EQ(make_options("", "", "", "", "", "", "", "", "", "", "", "auto", "").cost, Options::Cost::synth)
+      << "auto is resolved by the kernel (sim under `lhd sim`); a bare pass.aegraph reads it as synth";
+  EXPECT_EQ(Options{}.cost, Options::Cost::synth) << "the documented default";
+  EXPECT_THROW(make_options("", "", "", "", "", "", "", "", "", "", "", "fast", ""), std::runtime_error);
   EXPECT_FALSE(o.choices);
   // The defaults are the Cranelift limits.
   const Options d;
@@ -282,16 +286,27 @@ TEST(AegUnion, AnAltThatLosesLeavesTheGraphAlone) {
   EXPECT_EQ(stats.rules_fired, 1u);
 }
 
-// Sum(SHL(x,1), x) alt Mult(x, 3): the alternative is smaller, so it is extracted.
-TEST(AegUnion, AnAltThatWinsIsExtracted) {
-  hhds::GraphLibrary lib;
-  auto               g   = io_graph(lib, "alt_wins", 1, 1);
-  auto               x   = g->get_input_pin("i0");
-  auto               shl = shift(g, Ntype_op::SHL, x, 1);
-  auto               sum = binop(g, Ntype_op::Sum, shl, x);
+// Sum(SHL(x,1), x) alt Mult(x, 3). The profiles disagree, which is the point of having two: `sim` prices a multiply by an
+// immediate at one instruction (cost/sim.cost), so the alternative is strictly cheaper than the shift plus the add and is
+// extracted; `synth` prices both at one adder, a tie, and a tie keeps the original.
+namespace {
+std::shared_ptr<hhds::Graph> sum_shl_graph(hhds::GraphLibrary& lib, const char* name) {
+  auto g   = io_graph(lib, name, 1, 1);
+  auto x   = g->get_input_pin("i0");
+  auto shl = shift(g, Ntype_op::SHL, x, 1);
+  auto sum = binop(g, Ntype_op::Sum, shl, x);
   sum.get_master_node().set_name("keep_my_name");
   sum.connect_sink(g->get_output_pin("o0"));
-  const auto stats = optimize(g, {}, scoped("ut_sum_shl_alt"));
+  return g;
+}
+}  // namespace
+
+TEST(AegUnion, AnAltThatWinsUnderTheSimProfileIsExtracted) {
+  hhds::GraphLibrary lib;
+  auto               g = sum_shl_graph(lib, "alt_wins");
+  auto               o = scoped("ut_sum_shl_alt");
+  o.cost               = Options::Cost::sim;
+  const auto stats     = optimize(g, {}, o);
   EXPECT_EQ(count_op(g, Ntype_op::Mult), 1u);
   EXPECT_EQ(count_op(g, Ntype_op::Sum), 0u);
   EXPECT_EQ(count_op(g, Ntype_op::SHL), 0u) << "the dead SHL is swept";
@@ -303,6 +318,39 @@ TEST(AegUnion, AnAltThatWinsIsExtracted) {
   const auto driver = out_driver(g, "o0");
   EXPECT_EQ(gu::type_op_of(driver.get_master_node()), Ntype_op::Mult);
   EXPECT_EQ(gu::node_name_of(driver.get_master_node()), "keep_my_name");
+}
+
+TEST(AegUnion, TheSameAltTiesUnderTheSynthProfileAndTheOriginalStays) {
+  hhds::GraphLibrary lib;
+  auto               g     = sum_shl_graph(lib, "alt_ties");
+  const auto         stats = optimize(g, {}, scoped("ut_sum_shl_alt"));
+  EXPECT_EQ(count_op(g, Ntype_op::Mult), 0u);
+  EXPECT_EQ(count_op(g, Ntype_op::Sum), 1u);
+  EXPECT_EQ(count_op(g, Ntype_op::SHL), 1u);
+  EXPECT_EQ(stats.unions, 1u);
+  EXPECT_EQ(stats.rule_counts[id_of("ut_sum_shl_alt")].extracted, 0u);
+  EXPECT_EQ(gu::node_name_of(out_driver(g, "o0").get_master_node()), "keep_my_name");
+}
+
+// The extraction is SHARING-AWARE: an operand another cell also reads is needed whichever member is taken, so it does
+// not make a member dearer. Same alt as above under `sim`, but the SHL also feeds a second output: the original
+// Sum(SHL, x) costs one add (the SHL is free here), the Mult alternative one multiply, a tie, and the original stays.
+TEST(AegUnion, TheExtractionIsSharingAware) {
+  hhds::GraphLibrary lib;
+  auto               g   = io_graph(lib, "alt_shared", 1, 2);
+  auto               x   = g->get_input_pin("i0");
+  auto               shl = shift(g, Ntype_op::SHL, x, 1);
+  auto               sum = binop(g, Ntype_op::Sum, shl, x);
+  sum.connect_sink(g->get_output_pin("o0"));
+  shl.connect_sink(g->get_output_pin("o1"));
+  auto o = scoped("ut_sum_shl_alt");
+  o.cost = Options::Cost::sim;
+  const auto stats = optimize(g, {}, o);
+  EXPECT_EQ(stats.unions, 1u);
+  EXPECT_EQ(stats.rule_counts[id_of("ut_sum_shl_alt")].extracted, 0u) << "the shared SHL makes the Sum as cheap as the Mult";
+  EXPECT_EQ(count_op(g, Ntype_op::Mult), 0u);
+  EXPECT_EQ(count_op(g, Ntype_op::Sum), 1u);
+  EXPECT_EQ(count_op(g, Ntype_op::SHL), 1u);
 }
 
 TEST(AegUnion, TheUnionLimitsAreCountedAsRejections) {
@@ -674,6 +722,7 @@ TEST(AegUnion, EveryHandRuleHasAnExampleThatFiresIt) {
     ex.build(g).connect_sink(g->get_output_pin("o0"));
     Options o;
     o.check          = Options::Check::full;
+    o.rules_only     = ex.rule;  // the example is for THIS rule: another rule with the same effect must not steal it
     const auto stats = optimize(g, {}, o);
     const auto id    = id_of(ex.rule);
     EXPECT_GE(stats.rule_counts[id].applied, 1u) << ex.rule << " did not fire on its example";

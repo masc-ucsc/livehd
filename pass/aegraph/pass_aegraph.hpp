@@ -26,6 +26,8 @@ namespace livehd::aegraph {
 // rewrites as its false-cycle cutter), then the classic region passes
 // (Cprop::do_post) over what it elaborated. The loop-invariant hoist is the
 // library-wide step the caller runs afterwards. Tests drive the engine through
-// this so they exercise exactly the production per-body path.
+// this so they exercise exactly the production per-body path. With
+// Options::preflight an engine that would create a cell it cannot stamp leaves
+// the graph to classic (Cprop::do_trans) and reports Stats::refused.
 Stats optimize_body(Cprop& cp, const std::shared_ptr<hhds::Graph>& g, const Options& options = {});
 }  // namespace livehd::aegraph

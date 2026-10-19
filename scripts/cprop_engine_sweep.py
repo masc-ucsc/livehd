@@ -29,6 +29,15 @@ USAGE (from the livehd repo; build once first: bazel build -c opt //lhd:lhd)
   # the width-agnostic axis: cross the engine with bitfuzz (the set rides every design-under-test command)
   scripts/cprop_engine_sweep.py --set compile.bitfuzz.mode=wires --lec
 
+  # gate G1, width-agnostic leg: aegraph with compile.bitfuzz.mode=wires is LEC-equal to aegraph without it
+  scripts/cprop_engine_sweep.py --engines classic,aegraph --width-agnostic
+
+  # the sibling lhdtrack designs (manual): tests/<name>/pyrope/<top>.prp, top from design.toml; the in-repo test.lib
+  scripts/cprop_engine_sweep.py --corpus lhdtrack:../lhdtrack --synth --engines classic,aegraph -j 8
+
+  # the extraction cost profile of the aegraph legs (default synth for --synth, sim for --sim)
+  scripts/cprop_engine_sweep.py --corpus sim --sim --engines classic,aegraph --sim-cost sim
+
   # machine-readable output next to the table; any directory is a corpus
   scripts/cprop_engine_sweep.py --corpus path:/some/dir --json sweep.json
 
@@ -45,6 +54,8 @@ SIBLING BENCHMARK REPOS (manual, never in //...): the same engine selector, simu
     any sim flow       LHDTRACK_CPROP_ENGINE=aegraph lhdtrack run ...          (every sim_lhd_* flow, both lhd sim legs)
     free-form sets     LHDTRACK_SIM_SET="compile.cprop.engine=aegraph compile.cprop.engine_slots=first"  (sim)
                        LHDTRACK_LHD_SET="compile.cprop.engine=aegraph"                                   (synth/lec)
+                       COST PROFILE for a simulation row: add compile.aegraph.cost=sim (or =auto, which is sim under `lhd sim`) to
+                       LHDTRACK_SIM_SET / BENCH_PYROPE_SETS / CORE_SIM_SETS; the default profile is synth for every command
     LEC of the netlist is the existing lec_netlist flow: it proves the engine's mapped design against the
     source, so run it with the same LHDTRACK_EXTRA_FLOWS to get the B==source leg for the synthesis row.
 
@@ -79,6 +90,19 @@ HOW IT MEASURES (the A/B contract of the design doc)
     ms (both compile cprop slots). Both engines use min(graphs, cores, 16) workers, so
     the per-graph sum and the wall time are different numbers: report both.
   * RSS is the peak resident size of the compile process (wait4 ru_maxrss).
+  * the GATE G2 table (printed under "gate G2") counts the nodes of the lg the full schedule
+    leaves (`lhd tool cat lg:DIR --target node`, fields final_nodes / final_by_op), and with --synth
+    the pred_aig of the mapped design: geomean and worst fixture of aegraph/classic, the op classes
+    more than 5% above classic, and the failures. The cprop-summary numbers are mid-pipeline
+    (bitwidth and the emitters run after the last slot).
+  * the GATE G3 table (printed under "gate G3 (synthesis)" with --synth): per fixture aegraph/classic of the ABC gates, area,
+    max_delay and pred_aig (qor.abc.total of `lhd synth` with the in-repo test.lib), geomean / worst / better / worse / sums.
+    Corpora: equiv|sim|lgraph|path:DIR, and lhdtrack:DIR for the sibling ../lhdtrack designs (tests/<name>/pyrope/<top>.prp,
+    top from design.toml). `--synth-cost` / `--sim-cost` pick compile.aegraph.cost of the legs (default synth / sim).
+  * `--sim` records `static instr`: the machine instructions of the compiled design (objdump of the
+    `sim/*.llvm.o` color kernels and `sim/obj/*.o`, minus the driver and tuning stubs). A color kernel is
+    straight-line code run once per cycle, so this is the per-cycle budget; it stands in for the perf
+    `instructions` counter, which reads 0 on hosts with perf_event_paranoid > 1.
   * `nodes by op` is the by_op of the LAST cprop slot (after enableopt), the schedule's
     final node mix. Classic's low_lane/opshare/mux_share ADD nodes on purpose, so node
     count alone is misleading: read the per-op table next to it.
@@ -180,10 +204,50 @@ def read_header(path):
     return tags, sets
 
 
+def design_toml_top(prp):
+    """The `top` of the lhdtrack test a pyrope file belongs to (tests/<name>/design.toml), or ""."""
+    toml = os.path.join(os.path.dirname(os.path.dirname(prp)), "design.toml")
+    try:
+        with open(toml) as f:
+            for line in f:
+                m = re.match(r'^top\s*=\s*"([^"]+)"', line)
+                if m:
+                    return m.group(1)
+    except OSError:
+        pass
+    return ""
+
+
+def declared_stem_top(prp):
+    """The file stem when the file declares a module of that name (`mod stem`, `comb stem`): the top of the tests/abc and
+    tests/pyrope abc_* fixtures, which carry no :top: tag."""
+    stem = os.path.basename(prp)[:-4]
+    try:
+        with open(prp) as f:
+            text = f.read()
+    except OSError:
+        return ""
+    return stem if re.search(r"^\s*(pub\s+)?(mod|comb|pipe|flow)\s+" + re.escape(stem) + r"\b", text, re.M) else ""
+
+
 def corpus_files(corpus):
-    root = CORPORA.get(corpus) or (corpus[5:] if corpus.startswith("path:") else None)
+    if corpus.startswith("lhdtrack:"):
+        # ../lhdtrack (a sibling repo, manual): every tests/<name>/pyrope/<top>.prp, top from design.toml
+        root = os.path.join(corpus[9:], "tests")
+        out = []
+        for name in sorted(os.listdir(root)) if os.path.isdir(root) else []:
+            toml = os.path.join(root, name, "design.toml")
+            prp_dir = os.path.join(root, name, "pyrope")
+            if not os.path.isfile(toml) or not os.path.isdir(prp_dir):
+                continue
+            top = design_toml_top(os.path.join(prp_dir, "x.prp"))
+            prp = os.path.join(prp_dir, top + ".prp")
+            if top and os.path.isfile(prp):
+                out.append(prp)
+        return out
+    root = CORPORA.get(corpus) or (os.path.abspath(corpus[5:]) if corpus.startswith("path:") else None)
     if root is None or not os.path.isdir(root):
-        sys.exit(f"unknown corpus '{corpus}' (equiv|sim|lgraph|path:DIR)")
+        sys.exit(f"unknown corpus '{corpus}' (equiv|sim|lgraph|path:DIR|lhdtrack:DIR)")
     names = sorted(f for f in os.listdir(root) if f.endswith(".prp"))
     stems = {n[:-4] for n in names}
     out = []
@@ -227,6 +291,8 @@ def read_summaries(diag_path):
                             "creates": int(a.get("creates", 0)),
                             "aeg_bytes": int(a.get("aeg_bytes", 0)),
                             "lg_bytes": int(a.get("lg_bytes", 0)),
+                            "aeg_cap_bytes": int(a.get("aeg_cap_bytes", 0)),
+                            "lg_bytes_v1": int(a.get("lg_bytes_v1", 0)),
                         }
                     )
     except OSError:
@@ -281,6 +347,8 @@ def summarize(records, engine):
         "creates": sum(r["creates"] for r in records),
         "aeg_bytes": max((r["aeg_bytes"] for r in records), default=0),
         "lg_bytes": 0,
+        "aeg_cap_bytes": max((r["aeg_cap_bytes"] for r in records), default=0),
+        "g1": [],  # per graph (aeg, aeg_cap, lg, lg_v1) bytes, for the gate-G1 ratios
         "nodes_in": 0,
         "nodes_out": 0,
         "by_op": {},
@@ -293,6 +361,8 @@ def summarize(records, engine):
         s["nodes_out"] += rs[-1]["nodes_out"]
         add_ops(s["by_op"], rs[-1]["by_op"])
         lg_peak += max(r["lg_bytes"] for r in rs)
+        s["g1"].append((max(r["aeg_bytes"] for r in rs), max(r["aeg_cap_bytes"] for r in rs),
+                        max(r["lg_bytes"] for r in rs), max(r["lg_bytes_v1"] for r in rs)))
         if engine == "aegraph+classic":
             # records alternate aegraph, classic per slot: the classic record's input
             # is what the aegraph left; its by_op difference is what classic removed.
@@ -322,7 +392,7 @@ def one(fixture, args, workroot):
     shutil.rmtree(wd, ignore_errors=True)
     os.makedirs(wd, exist_ok=True)
     tags, sets = read_header(fixture)
-    top = tags.get("pyrope_top") or tags.get("lec_top") or tags.get("top") or ""
+    top = tags.get("pyrope_top") or tags.get("lec_top") or tags.get("top") or design_toml_top(fixture) or declared_stem_top(fixture)
     base_sets = [x for s in sets + list(args.extra_sets) if not s.startswith("compile.cprop.engine") for x in ("--set", s)]
     top_args = ["--top", top] if top else []
     res = {"fixture": name, "top": top, "status": "ok", "detail": "", "engines": {}}
@@ -344,6 +414,7 @@ def one(fixture, args, workroot):
             row.update(summarize(read_summaries(f"{wd}/diag_{engine}.jsonl"), engine))
             if engine != "classic":
                 row["rules"] = read_rule_census(f"{wd}/diag_{engine}.jsonl")
+            row["final_nodes"], row["final_by_op"] = final_nodes(wd, engine, args.timeout)
         res["engines"][engine] = row
 
     classic = res["engines"].get("classic")
@@ -378,6 +449,15 @@ def one(fixture, args, workroot):
                 row["lec_ab"] = lec_leg(wd, f"ab_{engine}", f"lg:{wd}/lg_{engine}", f"lg:{wd}/lg_classic", top_lec, tail, args)
             row["lec_src"] = lec_leg(wd, f"src_{engine}", f"lg:{wd}/lg_{engine}", fixture, top_lec, tail, args)
 
+    if args.width_agnostic and top and "aegraph" in args.engines and res["engines"]["aegraph"]["rc"] == 0:
+        # G1: the aegraph result with compile.bitfuzz.mode=wires is LEC-equal to the result without it.
+        rc, out, _, _ = run_timed(compile_cmd("aegraph", "aegraph_wires", ["--set", "compile.bitfuzz.mode=wires"]), wd, args.timeout)
+        if rc != 0:
+            res["engines"]["aegraph"]["lec_wa"] = "ERR compile: " + last_line(out)
+        else:
+            tail = ["--set", "formal.effort=proof", "--set", f"formal.timeout={args.lec_timeout}", "--set", "lhd.incremental=false"]
+            res["engines"]["aegraph"]["lec_wa"] = lec_leg(wd, "wa", f"lg:{wd}/lg_aegraph_wires", f"lg:{wd}/lg_aegraph", ["--top", top], tail, args)
+
     if args.synth:
         for engine in args.engines:
             if res["engines"][engine]["rc"] != 0:
@@ -385,6 +465,7 @@ def one(fixture, args, workroot):
             rj = f"{wd}/synth_{engine}.json"
             cmd = (
                 [LHD, "synth", fixture, *top_args, "--workdir", f"{wd}/sw_{engine}", "--set", "lhd.incremental=false", "--set", f"synth.liberty={TEST_LIB}", "--set", "synth.opentimer=false", "--set", f"compile.cprop.engine={engine}", "--result-json", rj]
+                + cost_sets(args.synth_cost, base_sets)
                 + base_sets
             )
             rc, out, ms, _ = run_timed(cmd, wd, args.timeout)
@@ -400,14 +481,17 @@ def one(fixture, args, workroot):
             if res["engines"][engine]["rc"] != 0:
                 continue
             rj = f"{wd}/sim_{engine}.json"
-            cmd = [LHD, "sim", fixture, "--workdir", f"{wd}/simw_{engine}", "--set", "sim.tune.profile=off", "--set", "sim.ninja=false", "--set", "lhd.incremental=false", "--set", "lhd.jobs=2", "--set", f"compile.cprop.engine={engine}", "--result-json", rj, "-q"] + base_sets
+            cmd = [LHD, "sim", fixture, "--workdir", f"{wd}/simw_{engine}", "--set", "sim.tune.profile=off", "--set", "sim.ninja=false", "--set", "lhd.incremental=false", "--set", "lhd.jobs=2", "--set", f"compile.cprop.engine={engine}", "--result-json", rj, "-q"] + cost_sets(args.sim_cost, base_sets) + base_sets
             rc, out, ms, _ = run_timed(cmd, wd, args.timeout)
             row = res["engines"][engine]
             if rc != 0:
                 row["sim"] = {"rc": rc, "detail": last_line(out)}
                 continue
             tests = lhd_json(rj).get("tests", [])
+            static, kernel = static_instructions(f"{wd}/simw_{engine}")
             row["sim"] = {
+                "static_instr": static,
+                "kernel_instr": kernel,
                 "tests": len(tests),
                 "pass": sum(1 for t in tests if t.get("status") == "pass"),
                 "instructions": sum(t.get("instructions", 0) for t in tests),
@@ -416,6 +500,47 @@ def one(fixture, args, workroot):
                 "digest": ",".join(f"{t.get('test')}:{t.get('out_digest')}" for t in tests),
             }
     return finish(res, wd)
+
+
+def final_nodes(wd, engine, timeout):
+    """The nodes of the lg: the full schedule left (`lhd tool cat lg:DIR --target node`): (total, {op: count}).
+    The cprop-summary of the last slot is a mid-pipeline number (bitwidth and the emitters still run after it)."""
+    rc, out, _, _ = run_timed([LHD, "tool", "cat", f"lg:{wd}/lg_{engine}", "--target", "node", "--max", "0"], wd, timeout)
+    by_op = {}
+    if rc == 0:
+        for line in out.splitlines():
+            if not line.startswith("{"):
+                continue
+            try:
+                d = json.loads(line)
+            except ValueError:
+                continue
+            if d.get("t") == "node":
+                by_op[d.get("kind", "?")] = by_op.get(d.get("kind", "?"), 0) + 1
+    return sum(by_op.values()), by_op
+
+
+def static_instructions(workdir):
+    """Machine instructions of the compiled design in a `lhd sim` workdir: the LLVM color kernels
+    (`sim/*.llvm.o`) plus the per-module objects (`sim/obj/*.o`, minus the driver and the tuning stubs).
+    A color kernel is straight-line code that runs once per cycle, so this is the per-cycle instruction
+    budget -- the deterministic stand-in for the `instructions` perf counter, which hosts with
+    perf_event_paranoid > 1 do not give (the `instructions` column then reads 0)."""
+    objs = []
+    for root, _, files in os.walk(os.path.join(workdir, "sim")):
+        for f in files:
+            if f.endswith(".o") and not f.startswith("drv") and ".tune" not in f:
+                objs.append(os.path.join(root, f))
+    total = kernel = 0
+    for o in sorted(objs):
+        try:
+            out = subprocess.run(["objdump", "-d", "--no-show-raw-insn", o], capture_output=True, text=True, timeout=120).stdout
+        except (OSError, subprocess.TimeoutExpired):
+            return None, None
+        n = sum(1 for line in out.splitlines() if re.match(r"^\s+[0-9a-f]+:\t", line))
+        total += n
+        kernel += n if o.endswith(".llvm.o") else 0
+    return total, kernel
 
 
 def lec_leg(wd, tag, impl, ref, top_lec, tail, args):
@@ -442,6 +567,13 @@ def finish(res, wd):
 
 def fmt(x, spec="{:.0f}"):
     return "-" if x is None else spec.format(x)
+
+
+def cost_sets(profile, base_sets):
+    """--set compile.aegraph.cost=PROFILE for the leg, unless the caller passed their own --set for it."""
+    if not profile or any("compile.aegraph.cost=" in str(x) for x in base_sets):
+        return []
+    return ["--set", f"compile.aegraph.cost={profile}"]
 
 
 def geomean(xs):
@@ -484,6 +616,72 @@ def report(results, args):
     print("## totals over the fixtures all engines compiled\n")
     print(md_table(["engine", "fixtures", "wall ms", "cprop ms (sum of graphs)", "peak RSS MB", "nodes in", "nodes out", "creates", "peak aeg KiB", "lg KiB"], rows))
     print()
+
+    # Gate G1 memory: aeg/lg per graph under BOTH aeg measures (in use, capacity) and BOTH lg
+    # yardsticks (v2: nodes*64+edges*48 at the largest; v1: nodes*32+edges*16 at the output).
+    g1 = [g for e in engines if e != "classic" for r in common for g in r["engines"][e].get("g1", [])]
+    g1 = [g for g in g1 if g[2] >= 50 * 1024]
+    if g1:
+        def pct(vals, q):
+            vals = sorted(vals)
+            return vals[min(len(vals) - 1, int(q * len(vals)))]
+        rows = []
+        for label, num, den in (("in-use / lg v2", 0, 2), ("capacity / lg v2", 1, 2), ("in-use / lg v1", 0, 3), ("capacity / lg v1", 1, 3)):
+            ratios = [g[num] / g[den] for g in g1 if g[den]]
+            if ratios:
+                rows.append([label, len(ratios), fmt(pct(ratios, 0.5), "{:.2f}"), fmt(pct(ratios, 0.9), "{:.2f}"), fmt(max(ratios), "{:.2f}"),
+                             sum(1 for x in ratios if x > 0.5)])
+        print("## gate G1 memory: aeg/lg per graph (graphs with lg v2 of at least 50 KB)\n")
+        print(md_table(["ratio", "graphs", "median", "p90", "max", "over 0.5"], rows))
+        print()
+
+    # Gate G2 (structural parity): the lg nodes the full schedule leaves, and pred_aig with --synth.
+    if "classic" in engines:
+        for e in engines:
+            if e == "classic":
+                continue
+            ratios, big, pred, pred_big = [], [], [], []
+            for r in common:
+                c, a = r["engines"]["classic"], r["engines"][e]
+                if c.get("final_nodes") and a.get("final_nodes"):
+                    q = a["final_nodes"] / c["final_nodes"]
+                    ratios.append(q)
+                    if q > 1.10:
+                        big.append((q, r["fixture"], c["final_nodes"], a["final_nodes"]))
+                cs, as_ = c.get("synth") or {}, a.get("synth") or {}
+                if cs.get("pred_aig") and as_.get("pred_aig"):
+                    q = as_["pred_aig"] / cs["pred_aig"]
+                    pred.append(q)
+                    if q > 1.10:
+                        pred_big.append((q, r["fixture"], cs["pred_aig"], as_["pred_aig"]))
+            if not ratios:
+                continue
+            per_op = {}
+            for r in common:
+                for op, n in r["engines"]["classic"].get("final_by_op", {}).items():
+                    per_op.setdefault(op, [0, 0])[0] += n
+                for op, n in r["engines"][e].get("final_by_op", {}).items():
+                    per_op.setdefault(op, [0, 0])[1] += n
+            worse = [(op, c, a) for op, (c, a) in per_op.items() if a > c * 1.05 and a - c >= 1]
+            failed = sum(1 for r in results if r["status"] != "ok" or r["engines"][e]["rc"] != 0)
+            print(f"## gate G2: {e} vs classic (structural parity)\n")
+            rows = [["total nodes (lg after the full schedule), geomean", fmt(geomean(ratios), "{:.4f}"), "within 2%: " + ("yes" if geomean(ratios) <= 1.02 else "NO")],
+                    ["total nodes, worst fixture", fmt(max(ratios), "{:.3f}"), "no fixture over 10%: " + ("yes" if not big else f"NO ({len(big)})")]]
+            if pred:
+                rows += [["pred_aig, geomean", fmt(geomean(pred), "{:.4f}"), "within 2%: " + ("yes" if geomean(pred) <= 1.02 else "NO")],
+                         ["pred_aig, worst fixture", fmt(max(pred), "{:.3f}"), "no fixture over 10%: " + ("yes" if not pred_big else f"NO ({len(pred_big)})")]]
+            rows.append(["op classes more than 5% above classic (summed)", len(worse), "none: " + ("yes" if not worse else "NO")])
+            rows.append(["failures", failed, "0: " + ("yes" if not failed else "NO")])
+            print(md_table(["measure", "value", "gate"], rows))
+            print()
+            if worse:
+                print(md_table(["op", "classic", e, "ratio"], [[op, c, a, fmt(a / c if c else float("inf"), "{:.3f}")] for op, c, a in sorted(worse, key=lambda t: -t[2] / max(t[1], 1))]))
+                print()
+            if big or pred_big:
+                print(md_table(["fixture", "measure", "classic", e, "ratio"],
+                               [[f, "nodes", c, a, fmt(q, "{:.2f}")] for q, f, c, a in sorted(big, reverse=True)[:30]]
+                               + [[f, "pred_aig", c, a, fmt(q, "{:.2f}")] for q, f, c, a in sorted(pred_big, reverse=True)[:30]]))
+                print()
 
     # nodes per op
     ops = {}
@@ -541,13 +739,13 @@ def report(results, args):
                 print(f"cprop ms {e}/classic: geomean {geomean(ratios):.2f}x over {len(ratios)} fixtures\n")
 
     # optional legs
-    if args.lec:
+    if args.lec or args.width_agnostic:
         print("## LEC (verdict word of lhd lec; REFUTED must be 0)\n")
         counts = {}
         bad = []
         for r in ok:
             for e, row in r["engines"].items():
-                for leg in ("lec_ab", "lec_src"):
+                for leg in ("lec_ab", "lec_src", "lec_wa"):
                     if leg in row:
                         counts[(e, leg, row[leg])] = counts.get((e, leg, row[leg]), 0) + 1
                         if row[leg].startswith(("REFUTED", "ERR")):
@@ -570,6 +768,41 @@ def report(results, args):
         print("## synthesis QoR (qor.abc.total)\n")
         print(md_table(["fixture", "engine", "gates", "area", "max_delay", "pred_aig"], rows[: args.rows]))
         print()
+        # gate G3, synthesis half: ABC area and delay of the aegraph against classic, per fixture
+        for e in engines:
+            if e == "classic":
+                continue
+            stats = {k: [] for k in ("gates", "area", "max_delay", "pred_aig")}
+            worst = {k: [] for k in stats}
+            tot = {k: [0.0, 0.0] for k in stats}
+            for r in ok:
+                a, c = r["engines"].get(e, {}).get("synth"), r["engines"].get("classic", {}).get("synth")
+                if not a or not c or "rc" in a or "rc" in c:
+                    continue
+                for k in stats:
+                    if a.get(k) and c.get(k):
+                        q = a[k] / c[k]
+                        stats[k].append(q)
+                        worst[k].append((q, r["fixture"], c[k], a[k]))
+                        tot[k][0] += c[k]
+                        tot[k][1] += a[k]
+            if not stats["area"]:
+                continue
+            print(f"## gate G3 (synthesis): {e} (cost={args.synth_cost}) vs classic, ABC with the in-repo test.lib\n")
+            grows = []
+            for k in stats:
+                xs = stats[k]
+                grows.append([k, len(xs), fmt(geomean(xs), "{:.4f}"), fmt(max(xs), "{:.3f}"), sum(1 for q in xs if q < 1.0), sum(1 for q in xs if q > 1.0),
+                              f"{tot[k][1]:.0f} / {tot[k][0]:.0f} = {tot[k][1] / tot[k][0]:.4f}"])
+            print(md_table(["measure", "fixtures", "geomean aegraph/classic", "worst", "better", "worse", "sum aegraph / classic"], grows))
+            ga, gd = geomean(stats["area"]), geomean(stats["max_delay"])
+            print(f"\nG3 area geomean <= 1: {'yes' if ga <= 1.0 else 'NO'}; delay geomean <= 1: {'yes' if gd is not None and gd <= 1.0 else 'NO'}\n")
+            for k in ("area", "max_delay"):
+                top = sorted(worst[k], reverse=True)[:12]
+                top = [t for t in top if t[0] > 1.0]
+                if top:
+                    print(md_table(["fixture", k, "classic", e, "ratio"], [[f, k, c, a, fmt(q, "{:.3f}")] for q, f, c, a in top]))
+                    print()
     if args.sim:
         rows = []
         mism = 0
@@ -584,10 +817,34 @@ def report(results, args):
                 same = "-" if base is None or "rc" in base else ("same" if s["digest"] == base["digest"] else "DIFFERENT")
                 mism += same == "DIFFERENT"
                 cps = s["cycles"] / (s["sim_ns"] / 1e9) if s["sim_ns"] else 0
-                rows.append([r["fixture"], e, f"{s['pass']}/{s['tests']}", s["instructions"], fmt(cps), same])
+                rows.append([r["fixture"], e, f"{s['pass']}/{s['tests']}", s["instructions"], fmt(s.get("static_instr")), fmt(cps), same])
         print(f"## simulation (out_digest vs classic; DIFFERENT={mism})\n")
-        print(md_table(["fixture", "engine", "pass", "instructions", "cycles/s", "out_digest"], rows[: args.rows]))
+        print(md_table(["fixture", "engine", "pass", "instructions (perf)", "static instr (objdump)", "cycles/s", "out_digest"], rows[: args.rows]))
         print()
+        # per-engine static instruction ratios against classic
+        for e in engines:
+            if e == "classic":
+                continue
+            ratios, kworse, kratios = [], [], []
+            for r in ok:
+                a, c = r["engines"].get(e, {}).get("sim"), r["engines"].get("classic", {}).get("sim")
+                if a and c and "rc" not in a and "rc" not in c and a.get("static_instr") and c.get("static_instr"):
+                    ratios.append(a["static_instr"] / c["static_instr"])
+                    if a.get("kernel_instr") and c.get("kernel_instr"):
+                        kq = a["kernel_instr"] / c["kernel_instr"]
+                        kratios.append(kq)
+                        if kq > 1.0:
+                            kworse.append((kq, r["fixture"], c["kernel_instr"], a["kernel_instr"]))
+            if kratios:
+                # primary sim-speed line: kernel-only static instructions (per-cycle cost); static, not weighted by trip counts
+                print(f"static kernel instructions {e}/classic (PRIMARY sim-cost metric; static, not dynamic): geomean {geomean(kratios):.4f} "
+                      f"over {len(kratios)} fixtures, worst {max(kratios):.4f}, better {sum(1 for q in kratios if q < 1.0)}, worse {len(kworse)}")
+            if ratios:
+                print(f"whole-fixture static instructions {e}/classic (includes fixed per-module/runtime code, dilutes regressions; secondary): "
+                      f"geomean {geomean(ratios):.4f} over {len(ratios)} fixtures, worst {max(ratios):.4f}\n")
+            if kworse:
+                print(md_table(["fixture", "classic kernel", e + " kernel", "kernel ratio"], [[f, c, a, fmt(q, "{:.4f}")] for q, f, c, a in sorted(kworse, reverse=True)[:30]]))
+                print()
 
     bad = [r for r in results if r["status"] != "ok"]
     if bad:
@@ -598,7 +855,7 @@ def report(results, args):
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
-    ap.add_argument("--corpus", default="equiv", help="equiv | sim | lgraph | path:DIR (default equiv)")
+    ap.add_argument("--corpus", default="equiv", help="equiv | sim | lgraph | path:DIR | lhdtrack:DIR (default equiv)")
     ap.add_argument("--engines", default=",".join(ENGINES_ALL), help="comma list of classic,aegraph,aegraph+classic")
     ap.add_argument("--filter", default="", help="regex on the fixture name")
     ap.add_argument("--limit", type=int, default=0, help="first N fixtures")
@@ -606,11 +863,14 @@ def main():
     ap.add_argument("--timeout", type=int, default=300, help="seconds per lhd command")
     ap.add_argument("--lec", action="store_true", help="LEC A==B (engine lg vs classic lg) and B==source")
     ap.add_argument("--lec-timeout", type=int, default=60)
+    ap.add_argument("--width-agnostic", action="store_true", help="LEC of the aegraph result with compile.bitfuzz.mode=wires vs without it (gate G1)")
     ap.add_argument("--determinism", action="store_true", help="compile aegraph twice, lhd tool diff --structural")
     ap.add_argument("--synth", action="store_true", help="lhd synth QoR with the in-repo test.lib")
     ap.add_argument("--sim", action="store_true", help="lhd sim per engine: out_digest, instructions, cycles/s")
     ap.add_argument("--set", dest="extra_sets", action="append", default=[], metavar="K=V",
                     help="extra --set for the design under test (compile/synth/sim; never lec), e.g. compile.bitfuzz.mode=wires")
+    ap.add_argument("--synth-cost", default="synth", help="compile.aegraph.cost of the --synth leg (default synth)")
+    ap.add_argument("--sim-cost", default="sim", help="compile.aegraph.cost of the --sim leg (default sim; auto = sim under lhd sim)")
     ap.add_argument("--rows", type=int, default=60, help="cap rows of the synth/sim tables")
     ap.add_argument("--out", default=os.path.join(REPO, "tmp_cprop_engine_sweep"), help="work root")
     ap.add_argument("--json", default="", help="also write the raw results here")

@@ -1,0 +1,481 @@
+//  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
+
+// Hand-written rules, milestone G: window reads through the persistent lane layout
+// (runtime/analyses.hpp) and the n-ary Concat clean-ups. The fixed-shape window rules
+// (Get_mask of Get_mask / SHL / SRA / Set_mask, Set_mask and Concat shapes, comparisons by range) are
+// in mask.rules.
+//
+// Get_mask(x, lo, hi) reads bits [lo, hi) of x as a non-negative number. Concat lanes are (value, width)
+// pairs on pins 2i / 2i+1, most significant lane first.
+
+#include <algorithm>
+#include <vector>
+
+#include "absl/container/flat_hash_map.h"
+
+#include "runtime/analyses.hpp"
+#include "runtime/match.hpp"
+
+using namespace livehd::aegraph;
+using namespace livehd::aegraph::rt;
+
+AEG_RULE_GROUP(mask);
+
+namespace {
+
+// The operands of a three-operand Get_mask root: value, lo, hi (banks 0, 2, 3).
+[[nodiscard]] bool get_mask_window(Ctx& ctx, const Root& root, Class_id& x, int64_t& lo, int64_t& hi) {
+  if (root.ops.size() != 3 || root.ops[0].bank != 0 || root.ops[1].bank != 2 || root.ops[2].bank != 3) {
+    return false;
+  }
+  const auto l = ctx.small_int(root.ops[1].cls), h = ctx.small_int(root.ops[2].cls);
+  if (!l || !h || *l < 0 || *h <= *l) {
+    return false;
+  }
+  x  = root.ops[0].cls;
+  lo = *l;
+  hi = *h;
+  return true;
+}
+
+Class_id make_get_mask(Ctx& ctx, Class_id x, int64_t lo, int64_t hi) {
+  return ctx.make(Ntype_op::Get_mask, {Operand{0, x}, Operand{2, ctx.konst(lo)}, Operand{3, ctx.konst(hi)}});
+}
+
+struct Lane_in {
+  Class_id value;
+  int64_t  width;
+};
+
+[[nodiscard]] bool concat_lanes(Ctx& ctx, const Root& root, std::vector<Lane_in>& lanes) {
+  if (root.ops.size() % 2 != 0 || root.ops.empty()) {
+    return false;
+  }
+  for (size_t i = 0; i < root.ops.size(); i += 2) {
+    if (root.ops[i].bank != i || root.ops[i + 1].bank != i + 1) {
+      return false;
+    }
+    const auto w = ctx.small_int(root.ops[i + 1].cls);
+    if (!w || *w <= 0 || *w > 4096) {
+      return false;
+    }
+    lanes.push_back({root.ops[i].cls, *w});
+  }
+  return true;
+}
+
+// (source, lo, hi) when the lane value is a Get_mask(source, lo, hi) member with a constant window.
+struct Slice {
+  Class_id source = kNoClass;
+  int64_t  lo     = 0;
+  int64_t  hi     = 0;
+};
+[[nodiscard]] std::optional<Slice> slice_of(Ctx& ctx, Class_id value) {
+  std::optional<Slice> found;
+  ctx.each_member(value, [&](Class_id member) {
+    const Enode* n = ctx.node_of(member);
+    if (n == nullptr || n->op != Ntype_op::Get_mask) {
+      return false;
+    }
+    const auto ops = ctx.operands_of(*n);
+    if (ops.size() != 3 || ops[0].bank != 0 || ops[1].bank != 2 || ops[2].bank != 3) {
+      return false;
+    }
+    const auto l = ctx.small_int(ops[1].cls), h = ctx.small_int(ops[2].cls);
+    if (!l || !h || *l < 0 || *h <= *l) {
+      return false;
+    }
+    found = Slice{ops[0].cls, *l, *h};
+    return true;
+  });
+  return found;
+}
+
+}  // namespace
+
+// Get_mask(x, lo, hi) where x's lane layout (a Concat, a Set_mask chain, a SHL, a packed Or/Sum of disjoint
+// shifted fields) holds the whole window in one lane: read the lane's source instead, or zero for an empty
+// lane. The persistent layout is built once per class, so a window read of a deep packed word is a lookup.
+AEG_NATIVE_RULE(getmask_lane, simplify, 40, Ntype_op::Get_mask) {
+  Class_id x = kNoClass;
+  int64_t  lo = 0, hi = 0;
+  if (!get_mask_window(ctx, root, x, lo, hi)) {
+    return;
+  }
+  const auto  layout = layout_of(ctx.eg(), x);
+  const Lane* lane   = find_lane(*layout, lo, hi);
+  if (lane == nullptr) {
+    return;
+  }
+  if (lane->zero) {
+    out.subsume(ctx.konst(0));
+    return;
+  }
+  if (lane->src == x) {
+    return;  // the identity lane of a class without structure
+  }
+  const int64_t s_lo = lane->off + (lo - lane->lo);
+  const int64_t s_hi = s_lo + (hi - lo);
+  if (s_lo == 0) {
+    const auto f = facts_of(ctx.eg(), lane->src);
+    if (f.nonneg() && f.hi < kInf && f.hi <= ((Wide{1} << std::min<int64_t>(s_hi, 99)) - 1)) {
+      out.subsume(lane->src);  // the lane is exactly the window and already fits it
+      return;
+    }
+  }
+  out.subsume(make_get_mask(ctx, lane->src, s_lo, s_hi));
+}
+
+// Get_mask(y, 0, n) = y when 0 <= y < 2^n, with two exceptions that keep the classic shapes the later passes read.
+// The mask of a LEAF (an input or a register output) is kept: it is where the width fact of the value is written in
+// the graph, and the region passes that follow (mux sharing, muxctx) read booleans structurally, so dropping it
+// makes them spell a Ror/EQ to get one back (wire_cond_match grew from 5 to 8 nodes). The mask of a Sum is kept
+// too: a mask between two additions is what stops the chain from merging into one wide Sum, and the low-lane
+// narrowing (which runs before bitwidth deletes the redundant masks, as it does in classic) works on each partial
+// sum (loop_ref_arg: +26% pred_aig when the chain was flattened first).
+AEG_NATIVE_RULE(getmask_fits, simplify, 30, Ntype_op::Get_mask) {
+  Class_id y = kNoClass;
+  int64_t  lo = 0, hi = 0;
+  if (!get_mask_window(ctx, root, y, lo, hi) || lo != 0) {
+    return;
+  }
+  const auto f = facts_of(ctx.eg(), y);
+  if (!(f.nonneg() && f.hi < kInf && f.hi <= ((Wide{1} << std::min<int64_t>(hi, 99)) - 1))) {
+    return;
+  }
+  if (ctx.eg().cls(y).kind == Egraph::Kind::leaf) {
+    return;
+  }
+  bool arith = false;
+  ctx.each_member(y, [&](Class_id member) {
+    const Enode* n = ctx.node_of(member);
+    arith          = arith || (n != nullptr && n->op == Ntype_op::Sum);
+    return arith;
+  });
+  if (arith) {
+    return;
+  }
+  out.subsume(y);
+}
+
+// A window that spans several lanes of a Concat only this Get_mask reads is the Concat of the covered pieces:
+//   Get_mask(Concat(.., v_i, w_i, ..), lo, hi) = Concat(Get_mask(v_i, a_i, b_i), b_i - a_i, ...)
+// over the lanes the window touches (classic indexed_get_mask re-packs a private Concat the same way). The
+// pieces are narrower than the lanes, so what feeds a lane is demanded at the window's width only. A Concat
+// other readers keep alive is left alone: it exists either way and the re-pack would cost its lanes twice.
+AEG_NATIVE_RULE(getmask_concat_straddle, simplify, 35, Ntype_op::Get_mask) {
+  Class_id x = kNoClass;
+  int64_t  lo = 0, hi = 0;
+  if (!get_mask_window(ctx, root, x, lo, hi) || !ctx.single_use(x)) {
+    return;
+  }
+  const Enode* concat = nullptr;
+  ctx.each_member(x, [&](Class_id member) {
+    const Enode* n = ctx.node_of(member);
+    if (n != nullptr && n->op == Ntype_op::Concat) {
+      concat = n;
+      return true;
+    }
+    return false;
+  });
+  if (concat == nullptr) {
+    return;
+  }
+  const auto ops = ctx.operands_of(*concat);
+  if (ops.size() % 2 != 0 || ops.size() < 4 || ops.size() > 128) {
+    return;
+  }
+  std::vector<Lane_in> lanes;
+  int64_t              total = 0;
+  for (size_t i = 0; i < ops.size(); i += 2) {
+    if (ops[i].bank != i || ops[i + 1].bank != i + 1) {
+      return;
+    }
+    const auto w = ctx.small_int(ops[i + 1].cls);
+    if (!w || *w <= 0 || *w > 4096) {
+      return;
+    }
+    lanes.push_back({ops[i].cls, *w});
+    total += *w;
+  }
+  std::vector<Operand> pieces;
+  int64_t              off     = total;  // the lane's lowest bit within the Concat
+  int64_t              touched = 0;
+  for (const auto& lane : lanes) {
+    off -= lane.width;
+    const int64_t a = std::max(lo, off), b = std::min(hi, off + lane.width);
+    if (b <= a) {
+      continue;
+    }
+    ++touched;
+    const bool whole = a == off && b == off + lane.width;
+    const auto k = static_cast<uint32_t>(2 * (touched - 1));
+    pieces.push_back(Operand{k, whole ? lane.value : make_get_mask(ctx, lane.value, a - off, b - off)});
+    pieces.push_back(Operand{k + 1, ctx.konst(b - a)});
+  }
+  // One lane: getmask_lane's. The window must end inside the Concat (above it the value is zero padding, a
+  // Concat of fewer bits than the window would read as narrower than declared).
+  if (touched < 2 || hi > total) {
+    return;
+  }
+  out.subsume(ctx.make(Ntype_op::Concat, std::span<const Operand>(pieces.data(), pieces.size())));
+}
+
+// The per-lane form of classic vectorize_bit_reductions for its simplest family: an And (Or) with a run of at
+// least four operands that are single bits of ONE word at adjacent positions,
+//   And(x[a], x[a+1], .., x[a+n-1], rest)  =  And(EQ(x[a +: n], 2^n - 1), rest)
+//   Or (x[a], x[a+1], .., x[a+n-1], rest)  =  Or (Ror(x[a +: n]), rest)
+// (each operand is a 0/1 value, so the AND is "every bit of the window set" and the OR is "any bit set"). An alt:
+// the extraction keeps whichever is cheaper, and the classic region pass still vectorizes the shapes that need a
+// whole expression over the bits (Or(EQ(request[j], 0), priority[i][j])).
+AEG_NATIVE_RULE(bit_run_reduction, alt, 20, Ntype_op::And, Ntype_op::Or) {
+  constexpr size_t kMinTerms = 4;
+  if (root.ops.size() < kMinTerms || root.ops.size() > 256) {
+    return;
+  }
+  struct Bit {
+    size_t   index;  // operand index
+    int64_t  pos;
+  };
+  absl::flat_hash_map<Class_id, std::vector<Bit>> by_source;
+  std::vector<Class_id>                           order;  // first-seen: deterministic
+  for (size_t i = 0; i < root.ops.size(); ++i) {
+    if (root.ops[i].bank != 0) {
+      return;
+    }
+    const auto s = slice_of(ctx, root.ops[i].cls);
+    if (!s || s->lo < 0 || s->hi != s->lo + 1) {
+      continue;
+    }
+    auto [it, fresh] = by_source.try_emplace(s->source);
+    if (fresh) {
+      order.push_back(s->source);
+    }
+    it->second.push_back({i, s->lo});
+  }
+  for (const Class_id source : order) {
+    auto& bits = by_source[source];
+    if (bits.size() < kMinTerms) {
+      continue;
+    }
+    std::ranges::sort(bits, {}, &Bit::pos);
+    // The first run of strictly consecutive positions that is long enough (a repeated position ends a run).
+    size_t start = 0;
+    while (start < bits.size()) {
+      size_t end = start + 1;
+      while (end < bits.size() && bits[end].pos == bits[end - 1].pos + 1) {
+        ++end;
+      }
+      if (end - start >= kMinTerms && end - start <= 62) {
+        const int64_t        lo = bits[start].pos, n = static_cast<int64_t>(end - start);
+        std::vector<bool>    taken(root.ops.size(), false);
+        for (size_t k = start; k < end; ++k) {
+          taken[bits[k].index] = true;
+        }
+        const Class_id window = make_get_mask(ctx, source, lo, lo + n);
+        const Class_id test   = root.op == Ntype_op::And
+                                    ? ctx.make(Ntype_op::EQ, {Operand{0, window}, Operand{0, ctx.konst((int64_t{1} << n) - 1)}})
+                                    : ctx.make(Ntype_op::Ror, {Operand{0, window}});
+        std::vector<Operand> rest{Operand{0, test}};
+        for (size_t i = 0; i < root.ops.size(); ++i) {
+          if (!taken[i]) {
+            rest.push_back(Operand{0, root.ops[i].cls});
+          }
+        }
+        out.add(ctx.make_bank(root.op, std::move(rest)));
+        return;
+      }
+      start = end;
+    }
+  }
+}
+
+// One lane of a pack being rebuilt: value, bit offset and width.
+struct Pack_lane {
+  Class_id value;
+  int64_t  lo;
+  int64_t  width;
+};
+
+// The lanes (least significant first) a Set_mask base can be read as, or false: constant zero (no lanes), a Concat,
+// or a value that fits the low `low` bits (one lane).
+[[nodiscard]] bool pack_lanes_of(Ctx& ctx, Class_id base, int64_t low, std::vector<Pack_lane>& lanes) {
+  if (ctx.is_int(base, 0)) {
+    return true;
+  }
+  const Enode* concat = nullptr;
+  ctx.each_member(base, [&](Class_id member) {
+    const Enode* n = ctx.node_of(member);
+    if (n != nullptr && n->op == Ntype_op::Concat) {
+      concat = n;
+      return true;
+    }
+    return false;
+  });
+  if (concat != nullptr) {
+    const auto ops = ctx.operands_of(*concat);
+    if (ops.size() % 2 != 0 || ops.empty() || ops.size() > 128) {
+      return false;
+    }
+    int64_t total = 0;
+    for (size_t i = 0; i < ops.size(); i += 2) {
+      const auto w = ctx.small_int(ops[i + 1].cls);
+      if (ops[i].bank != i || ops[i + 1].bank != i + 1 || !w || *w <= 0 || *w > 4096) {
+        return false;
+      }
+      total += *w;
+    }
+    int64_t off = total;
+    for (size_t i = 0; i < ops.size(); i += 2) {
+      const int64_t w = *ctx.small_int(ops[i + 1].cls);
+      off -= w;
+      lanes.insert(lanes.begin(), Pack_lane{ops[i].cls, off, w});
+    }
+    return true;
+  }
+  const auto f = facts_of(ctx.eg(), base);
+  if (low > 0 && f.nonneg() && f.hi < kInf && f.hi <= ((Wide{1} << std::min<int64_t>(low, 99)) - 1)) {
+    lanes.push_back(Pack_lane{base, 0, low});
+    return true;
+  }
+  return false;
+}
+
+// Set_mask(base, lo, hi, v) over a pack (zero, a Concat, a value that fits below the window) whose lanes the
+// window covers whole, or extends, is the pack with that lane replaced: a chain of constant, disjoint lane writes
+// (a packed array or struct built field by field) becomes one Concat, as classic's pack canonicalization makes it.
+// A write that cuts a lane in two, or a base that is anything else, keeps the Set_mask.
+AEG_NATIVE_RULE(setmask_to_concat, simplify, 20, Ntype_op::Set_mask) {
+  if (root.ops.size() != 4 || root.ops[0].bank != 0 || root.ops[1].bank != 2 || root.ops[2].bank != 3 || root.ops[3].bank != 4) {
+    return;
+  }
+  const auto l = ctx.small_int(root.ops[1].cls), h = ctx.small_int(root.ops[2].cls);
+  if (!l || !h || *l < 0 || *h <= *l || *h > 4096) {
+    return;
+  }
+  std::vector<Pack_lane> base;
+  if (!pack_lanes_of(ctx, root.ops[0].cls, *l, base)) {
+    return;
+  }
+  std::vector<Pack_lane> lanes;  // least significant first
+  bool                   placed   = false;
+  int64_t                kept_top = 0;  // the end of the kept lanes below the window
+  for (const auto& lane : base) {
+    const int64_t end = lane.lo + lane.width;
+    if (end <= *l) {
+      lanes.push_back(lane);
+      kept_top = end;
+    } else if (lane.lo >= *h) {
+      if (!placed) {
+        lanes.push_back(Pack_lane{root.ops[3].cls, *l, *h - *l});
+        placed = true;
+      }
+      lanes.push_back(lane);
+    } else if (lane.lo >= *l && end <= *h) {
+      continue;  // covered whole: replaced
+    } else {
+      return;  // the window cuts this lane
+    }
+  }
+  if (!placed) {
+    if (*l > kept_top) {  // the window starts above the pack: zero padding in between
+      lanes.push_back(Pack_lane{ctx.konst(0), kept_top, *l - kept_top});
+    }
+    lanes.push_back(Pack_lane{root.ops[3].cls, *l, *h - *l});
+  }
+  // The window's own lane keeps only the low bits of v when v is wider.
+  std::vector<Operand> ops;
+  for (size_t i = lanes.size(); i-- > 0;) {  // most significant first
+    Class_id value = lanes[i].value;
+    if (lanes[i].value == root.ops[3].cls && lanes[i].lo == *l && lanes[i].width == *h - *l) {
+      const auto f = facts_of(ctx.eg(), value);
+      if (!(f.nonneg() && f.hi < kInf && f.hi <= ((Wide{1} << std::min<int64_t>(lanes[i].width, 99)) - 1))) {
+        value = make_get_mask(ctx, value, 0, lanes[i].width);
+      }
+    }
+    const auto k = static_cast<uint32_t>(ops.size());
+    ops.push_back(Operand{k, value});
+    ops.push_back(Operand{k + 1, ctx.konst(lanes[i].width)});
+  }
+  out.subsume(ctx.make(Ntype_op::Concat, std::span<const Operand>(ops.data(), ops.size())));
+}
+
+// SRA(x, k) of a non-negative value below 2^n is the window Get_mask(x, k, n). It is only rewritten when the
+// lane layout of x holds that window in one lane of another class (or zero): the packed read an array element
+// or a struct field makes (`m[3]` of a Set_mask / Concat word is a shift by the lane offset). A plain right
+// shift of an unstructured value stays a shift, which costs one operation less than shift-and-mask.
+AEG_NATIVE_RULE(sra_lane, simplify, 40, Ntype_op::SRA) {
+  if (root.ops.size() != 2 || root.ops[0].bank != 0 || root.ops[1].bank != 1) {
+    return;
+  }
+  const auto k = ctx.small_int(root.ops[1].cls);
+  if (!k || *k <= 0 || *k > 4096) {
+    return;
+  }
+  const Class_id x = root.ops[0].cls;
+  const auto     f = facts_of(ctx.eg(), x);
+  if (!f.nonneg() || f.hi >= kInf) {
+    return;
+  }
+  int64_t n = 0;
+  while (n < 120 && (Wide{1} << n) <= f.hi) {
+    ++n;
+  }
+  if (n <= *k) {
+    out.subsume(ctx.konst(0));
+    return;
+  }
+  const auto  layout = layout_of(ctx.eg(), x);
+  const Lane* lane   = find_lane(*layout, *k, n);
+  if (lane == nullptr || (!lane->zero && lane->src == x)) {
+    return;
+  }
+  out.subsume(make_get_mask(ctx, x, *k, n));
+}
+
+// Concat clean-ups on the lane list: a leading constant-zero lane adds nothing (a Concat is non-negative and
+// the zero lane only pads); two adjacent constant lanes are one constant lane; two adjacent windows of the
+// same source, reassembled in order, are one wider window. The partial-constant Concat shapes.
+AEG_NATIVE_RULE(concat_lanes, simplify, 30, Ntype_op::Concat) {
+  std::vector<Lane_in> lanes;
+  if (!concat_lanes(ctx, root, lanes)) {
+    return;
+  }
+  bool changed = false;
+  while (lanes.size() > 1 && ctx.is_int(lanes.front().value, 0)) {
+    lanes.erase(lanes.begin());
+    changed = true;
+  }
+  for (size_t i = 0; i + 1 < lanes.size();) {
+    Lane_in&       hi_lane = lanes[i];
+    const Lane_in& lo_lane = lanes[i + 1];
+    const auto     ch = ctx.small_int(hi_lane.value), cl = ctx.small_int(lo_lane.value);
+    if (ch && cl && hi_lane.width + lo_lane.width <= 62) {
+      const int64_t mh = *ch & ((int64_t{1} << hi_lane.width) - 1), ml = *cl & ((int64_t{1} << lo_lane.width) - 1);
+      hi_lane.value = ctx.konst((mh << lo_lane.width) | ml);
+      hi_lane.width += lo_lane.width;
+      lanes.erase(lanes.begin() + static_cast<std::ptrdiff_t>(i) + 1);
+      changed = true;
+      continue;
+    }
+    const auto sh = slice_of(ctx, hi_lane.value), sl = slice_of(ctx, lo_lane.value);
+    if (sh && sl && sh->source == sl->source && sh->lo == sl->hi && sh->hi - sh->lo == hi_lane.width
+        && sl->hi - sl->lo == lo_lane.width) {
+      hi_lane.value = make_get_mask(ctx, sh->source, sl->lo, sh->hi);
+      hi_lane.width += lo_lane.width;
+      lanes.erase(lanes.begin() + static_cast<std::ptrdiff_t>(i) + 1);
+      changed = true;
+      continue;
+    }
+    ++i;
+  }
+  if (!changed) {
+    return;
+  }
+  std::vector<Operand> ops;
+  for (size_t i = 0; i < lanes.size(); ++i) {
+    ops.push_back(Operand{static_cast<uint32_t>(2 * i), lanes[i].value});
+    ops.push_back(Operand{static_cast<uint32_t>(2 * i + 1), ctx.konst(lanes[i].width)});
+  }
+  out.subsume(ctx.make(Ntype_op::Concat, std::span<const Operand>(ops.data(), ops.size())));
+}

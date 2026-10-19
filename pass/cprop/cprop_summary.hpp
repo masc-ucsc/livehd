@@ -16,9 +16,17 @@
 //                has no rule counters)
 //   creates      body nodes whose class index did not exist before the engine ran
 //                (a lower bound: a recycled handle counts as an old node)
-//   aeg_bytes    peak capacity of the e-graph tables (0 for classic)
-//   lg_bytes     nodes_out * 32 + driven sink edges * 16 (an estimate of the body's footprint)
+//   aeg_bytes    bytes in use by the e-graph tables at the end of the build, the peak (0 for classic)
+//   aeg_cap_bytes the same tables at their CAPACITY (a vector doubles on growth, so up to 2x
+//                aeg_bytes): the resident bound (0 for classic)
+//   lg_bytes_v1  the ORIGINAL yardstick, nodes * 32 + driven sink edges * 16 at the output, kept so
+//                the G1 ratio can be compared with the gate as first written
+//   lg_bytes     the body's hhds footprint at its LARGEST (before or after the engine):
+//                nodes * 64 + driven sink edges * 48 (NodeEntry 32 + driver PinEntry 32 per
+//                node; sink PinEntry 32 + edge 16 per driven sink). It is the yardstick of
+//                aeg_bytes: the e-graph is built from the body as it was handed in
 
+#include <algorithm>
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
@@ -44,7 +52,9 @@ struct Record {
   size_t      rules_fired = 0;
   size_t      creates     = 0;
   size_t      aeg_bytes   = 0;
+  size_t      aeg_cap_bytes = 0;
   size_t      lg_bytes    = 0;
+  size_t      lg_bytes_v1 = 0;
 };
 
 // Measures one body transform: construct before the engine runs, call finish()
@@ -53,6 +63,7 @@ class Probe {
   bool                                  enabled_;
   absl::flat_hash_set<uint64_t>         before_;
   size_t                                nodes_in_ = 0;
+  size_t                                edges_in_ = 0;
   std::chrono::steady_clock::time_point start_;
 
 public:
@@ -63,13 +74,18 @@ public:
     for (auto node : g.body().nodes()) {
       before_.insert(static_cast<uint64_t>(node.get_class_index().value));
       ++nodes_in_;
+      for (auto sink : node.inp_sorted_pins()) {
+        edges_in_ += sink.get_driver_pins().size();
+      }
     }
     start_ = std::chrono::steady_clock::now();
   }
 
   [[nodiscard]] bool enabled() const { return enabled_; }
 
-  Record finish(hhds::Graph& g, std::string_view name, size_t rules_fired = 0, size_t aeg_bytes = 0) const {
+  [[nodiscard]] static size_t footprint(size_t nodes, size_t edges) { return nodes * 64 + edges * 48; }
+
+  Record finish(hhds::Graph& g, std::string_view name, size_t rules_fired = 0, size_t aeg_bytes = 0, size_t aeg_cap_bytes = 0) const {
     Record r;
     if (!enabled_) {
       return r;
@@ -79,6 +95,7 @@ public:
     r.nodes_in    = nodes_in_;
     r.rules_fired = rules_fired;
     r.aeg_bytes   = aeg_bytes;
+    r.aeg_cap_bytes = aeg_cap_bytes;
     std::map<std::string, size_t> ops;
     size_t                        edges = 0;
     for (auto node : g.body().nodes()) {
@@ -96,7 +113,8 @@ public:
     for (const auto& [op, n] : ops) {
       r.by_op += (r.by_op.empty() ? "" : ",") + op + "=" + std::to_string(n);
     }
-    r.lg_bytes = r.nodes_out * 32 + edges * 16;
+    r.lg_bytes_v1 = r.nodes_out * 32 + edges * 16;
+    r.lg_bytes = std::max(footprint(nodes_in_, edges_in_), footprint(r.nodes_out, edges));
     return r;
   }
 };
@@ -112,7 +130,9 @@ inline void emit(std::string_view pass, const Record& r) {
       .attr("rules_fired", std::to_string(r.rules_fired))
       .attr("creates", std::to_string(r.creates))
       .attr("aeg_bytes", std::to_string(r.aeg_bytes))
+      .attr("aeg_cap_bytes", std::to_string(r.aeg_cap_bytes))
       .attr("lg_bytes", std::to_string(r.lg_bytes))
+      .attr("lg_bytes_v1", std::to_string(r.lg_bytes_v1))
       .emit();
 }
 

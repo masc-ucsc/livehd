@@ -2052,18 +2052,30 @@ void graph_pipeline_and_emits(Options& opts, Result& res, Eprp_var& var, const s
       }
       set_crash_context({}, {});
     };
-    for (const auto& [set_name, method] : compile_graph_passes(opts)) {
+    const auto graph_passes = compile_graph_passes(opts);
+    const auto after_bw     = follows_bitwidth(graph_passes);
+    size_t     slot         = 0;
+    for (const auto& [set_name, method] : graph_passes) {
+      const bool bitwidth_ran = after_bw[slot++];
       if (active->graphs.empty()) {
         break;  // nothing to optimize (validated below if an emit needs graphs)
       }
       Eprp_var::Eprp_dict labels;
       merge_sets(opts, set_name, labels);
       if (method == "pass.aegraph") {
+        if (bitwidth_ran) {
+          // The second slot: bitwidth already removed the masks that only the
+          // unpacked spelling's tighter ranges justified, so the engine's post
+          // steps must not narrow or repack values again (low-lane narrowing).
+          labels["after_bitwidth"] = "true";
+        }
         // The engine shares the compile.cprop knobs (one spelling each, copied
         // above) and adds its own compile.aegraph set. engine_slots is the
         // kernel's own slot selector, not a pass label.
         labels.erase("engine_slots");
         merge_sets(opts, "compile.aegraph", labels);
+        // The resolved profile (`auto` follows the command), the same one the compile-cache descriptor names.
+        labels["cost"] = resolve_aegraph_cost(opts);
       } else if (method == "pass.cprop" && labels.contains("engine")) {
         // The kernel did the dispatch: this step is the classic engine, whatever
         // compile.cprop.engine says for the other steps (a default compile sets

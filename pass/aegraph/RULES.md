@@ -23,26 +23,85 @@ union-invariant fuzz and an equiv fixture only; `none` = the rule opted out.
 | `idempotent` | simplify | 60 | And, Or | native-unverified | arith.cpp:144 | And(x, x, y) = And(x, y); Or likewise. One '?' literal has one value at all its uses, so a repeated literal is a repeated operand too. |
 | `sum_cancel` | simplify | 60 | Sum | native-unverified | arith.cpp:176 | Sum(x, y) - x = y: an operand in both banks cancels against itself. |
 | `xor_pair_cancel` | simplify | 60 | Xor | native-unverified | arith.cpp:157 | Xor(x, x, y) = y: pairs cancel, the parity of each operand survives. |
-| `flatten` | simplify | 50 | Sum, Mult, And, Or, Xor | native-unverified | arith.cpp:215 | And(And(a, b), c) = And(a, b, c) when the inner cell has no other reader (absorbing a shared cell would only copy its operands). A SUBTRACTED inner Sum flips the banks of what it brings in. |
-| `and_absorb` | simplify | 40 | And | native-unverified | arith.cpp:273 |  |
-| `bool_complement` | simplify | 40 | And, Or | native-unverified | arith.cpp:277 | And(c, EQ(c, 0), ..) = 0 for any c (one of the pair is 0); Or(c, EQ(c, 0), ..) = 1 when every operand is a 0/1 value. |
-| `or_absorb` | simplify | 40 | Or | native-unverified | arith.cpp:272 |  |
-| `cmp_same` | simplify | 30 | EQ, LT, GT | native-unverified | arith.cpp:335 | P8: one driver is one value ('?' literals included), so EQ(x, x, .., x) = 1 and LT(x, x) = GT(x, x) = 0 on exactly the banks {x} vs {x}. |
-| `eq_bool_chain` | simplify | 30 | EQ | native-unverified | arith.cpp:352 | EQ(b, 1) = b and EQ(EQ(y, 0), 0) = y for 0/1 values: the boolean EQ chains a lowered `!x` and to-bool leave behind. |
-| `mult_pow2_shl` | simplify | 30 | Mult | bv-swept | arith.rules:21 | Strength reduction: Mult(x, 2^k) = SHL(x, k), exact for any sign of x. |
+| `flatten` | simplify | 50 | Sum, Mult, And, Or, Xor | native-unverified | arith.cpp:220 | And(And(a, b), c) = And(a, b, c) when the inner cell has no other reader (absorbing a shared cell would only copy its operands). A SUBTRACTED inner Sum flips the banks of what it brings in. An aegraph never frees an e-node, so flattening a k-long chain one link at a time would leave O(k^2) dead operands behind (a 900-wide Or cost 400k pool entries). Instead a link whose only reader is a cell of the same op (Ctx::chain_inner) leaves the work to that reader, and the top of the chain absorbs every single-use link below it in ONE firing: linear, and a wide chain ends as one banked cell, as in classic cprop. |
+| `and_absorb` | simplify | 40 | And | native-unverified | arith.cpp:291 |  |
+| `bool_complement` | simplify | 40 | And, Or | native-unverified | arith.cpp:295 | And(c, EQ(c, 0), ..) = 0 for any c (one of the pair is 0); Or(c, EQ(c, 0), ..) = 1 when every operand is a 0/1 value. |
+| `or_absorb` | simplify | 40 | Or | native-unverified | arith.cpp:290 |  |
+| `cmp_same` | simplify | 30 | EQ, LT, GT | native-unverified | arith.cpp:353 | P8: one driver is one value ('?' literals included), so EQ(x, x, .., x) = 1 and LT(x, x) = GT(x, x) = 0 on exactly the banks {x} vs {x}. |
+| `eq_bool_chain` | simplify | 30 | EQ | native-unverified | arith.cpp:370 | EQ(b, 1) = b and EQ(EQ(y, 0), 0) = y for 0/1 values: the boolean EQ chains a lowered `!x` and to-bool leave behind. |
+| `mult_pow2_shl` | simplify | 30 | Mult | bv-swept | arith.rules:22 | Strength reduction: Mult(x, 2^k) = SHL(x, k), exact for any sign of x. |
 | `not_not` | simplify | 30 | Not | bv-swept | arith.rules:7 | Not(Not x) = x: the double complement of an unlimited integer. |
-| `xor_bool_one` | simplify | 30 | Xor | bv-swept | arith.rules:28 | x ^ 1 = EQ(x, 0) for a 0/1 value x. |
-| `and_mask_get_mask` | simplify | 20 | And | native-unverified | arith.cpp:308 | And(x, 2^n - 1) = Get_mask(x, 0, n) for any sign of x: both keep the low n bits as a non-negative value. Every low-mask truncation gets the ONE canonical Get_mask shape that the slice and width folds key on (classic's canonicalize_and_mask). Only a binary And with exactly one constant operand. |
-| `not_xor_alt` | alt | 5 | Not | bv-swept | arith.rules:15 | Not(x) and Xor(x, -1) share a class; extraction keeps the original on a tie. |
+| `xor_bool_one` | simplify | 30 | Xor | bv-swept | arith.rules:29 | x ^ 1 = EQ(x, 0) for a 0/1 value x. |
+| `and_mask_get_mask` | simplify | 20 | And | native-unverified | arith.cpp:326 | And(x, 2^n - 1) = Get_mask(x, 0, n) for any sign of x: both keep the low n bits as a non-negative value. Every low-mask truncation gets the ONE canonical Get_mask shape that the slice and width folds key on (classic's canonicalize_and_mask). Only a binary And with exactly one constant operand. |
+| `not_xor_alt` | alt | 5 | Not | bv-swept | arith.rules:15 | Not(x) and Xor(x, -1) share a class; extraction keeps the original on a tie. Extraction on the example: synth keeps the left side; sim keeps the left side. |
+
+## Group `div`
+
+| rule | tag | prio | root | proof | source | what it does |
+| --- | --- | ---: | --- | --- | --- | --- |
+| `div_one` | simplify | 30 | Div | bv-swept | div.rules:9 | x / 1 = x for every x. |
+| `div_pow2` | simplify | 30 | Div | bv-swept | div.rules:33 | x / 2^k = x >> k for x >= 0 (truncation and floor agree on non-negative values). |
+| `div_self` | simplify | 30 | Div | bv-swept | div.rules:21 | b / b = 1. For b = 0 the quotient is the all-unknown value, and 1 is one of its refinements. |
+| `div_shl_pow2` | simplify | 30 | Div | bv-swept | div.rules:47 | x / (1 << y) = x >> y for x >= 0 and y >= 0. |
+| `rem_one` | simplify | 30 | Rem | bv-swept | div.rules:15 | x % 1 = 0 for every x. |
+| `rem_pow2` | simplify | 30 | Rem | bv-swept | div.rules:40 | x % 2^k = the low k bits of x for x >= 0. |
+| `rem_self` | simplify | 30 | Rem | bv-swept | div.rules:27 | b % b = 0. For b = 0 the remainder is the all-unknown value, and 0 is one of its refinements. |
+| `div_mulshift16` | alt | 20 | Div | bv-swept | div.rules:71 | The same for 0 <= x < 2^16. Extraction on the example: synth keeps the left side; sim keeps the right side. |
+| `div_mulshift31` | alt | 20 | Div | bv-swept | div.rules:80 | The same for 0 <= x < 2^31. Extraction on the example: synth keeps the left side; sim keeps the right side. |
+| `div_mulshift8` | alt | 20 | Div | bv-swept | div.rules:62 | x / c for 0 <= x < 2^8 and a constant c that is no power of two: floor(x * m / 2^s) with s = 8 + ceil(log2 c) and m = ceil(2^s / c) is exact (Granlund-Montgomery). The bound is the range guard. An alt: `sim` prices the multiply by an immediate plus a shift below the divide, `synth` keeps the Div (the divider array specializes on a constant divisor and measured smaller than the multiplier of the magic constant: aeg_div_rem, area 4182 against 4637). Extraction on the example: synth keeps the left side; sim keeps the right side. |
+| `div_pow2_trunc` | alt | 20 | Div | bv-swept | div.rules:54 | Truncating division by 2^k for any sign of x: (x + (x < 0 ? 2^k - 1 : 0)) >> k. An alt: both profiles keep the Div (a constant power-of-two divide is cheap in each: a shift in hardware, a shift pair in the simulator). Extraction on the example: synth keeps the left side; sim keeps the left side. |
+| `rem_via_div` | alt | 20 | Rem | bv-swept | div.rules:89 | x % c = x - (x / c) * c; with the Div alts this is the multiply-shift remainder of a dividend bounded below 2^31. The bound is required: the difference carries no width stamp of its own, so it is wrapped in a mask of clog2(c) bits (x % c < c), which gives bitwidth the bound the Rem had; and a dividend without a provable bound (bitfuzz clears the pins) is refused. An alt. Extraction on the example: synth keeps the left side; sim keeps the left side. |
+
+## Group `mask`
+
+| rule | tag | prio | root | proof | source | what it does |
+| --- | --- | ---: | --- | --- | --- | --- |
+| `getmask_lane` | simplify | 40 | Get_mask | native-unverified | mask.cpp:99 | Get_mask(x, lo, hi) where x's lane layout (a Concat, a Set_mask chain, a SHL, a packed Or/Sum of disjoint shifted fields) holds the whole window in one lane: read the lane's source instead, or zero for an empty lane. The persistent layout is built once per class, so a window read of a deep packed word is a lookup. |
+| `sra_lane` | simplify | 40 | SRA | native-unverified | mask.cpp:407 | SRA(x, k) of a non-negative value below 2^n is the window Get_mask(x, k, n). It is only rewritten when the lane layout of x holds that window in one lane of another class (or zero): the packed read an array element or a struct field makes (`m[3]` of a Set_mask / Concat word is a shift by the lane offset). A plain right shift of an unstructured value stays a shift, which costs one operation less than shift-and-mask. |
+| `getmask_concat_straddle` | simplify | 35 | Get_mask | native-unverified | mask.cpp:166 | A window that spans several lanes of a Concat only this Get_mask reads is the Concat of the covered pieces: Get_mask(Concat(.., v_i, w_i, ..), lo, hi) = Concat(Get_mask(v_i, a_i, b_i), b_i - a_i, ...) over the lanes the window touches (classic indexed_get_mask re-packs a private Concat the same way). The pieces are narrower than the lanes, so what feeds a lane is demanded at the window's width only. A Concat other readers keep alive is left alone: it exists either way and the re-pack would cost its lanes twice. |
+| `concat_lanes` | simplify | 30 | Concat | native-unverified | mask.cpp:439 | Concat clean-ups on the lane list: a leading constant-zero lane adds nothing (a Concat is non-negative and the zero lane only pads); two adjacent constant lanes are one constant lane; two adjacent windows of the same source, reassembled in order, are one wider window. The partial-constant Concat shapes. |
+| `concat_merge_slices` | simplify | 30 | Concat | bv-swept | mask.rules:123 | Two adjacent windows of the same value, reassembled in order, are the one wider window (merge_concat_slices). |
+| `concat_single_fits` | simplify | 30 | Concat | bv-swept | mask.rules:109 | A one-lane Concat of a value that already fits its window is the value. |
+| `concat_zero_top` | simplify | 30 | Concat | bv-swept | mask.rules:116 | A zero most-significant lane over a value that fits its lane adds nothing. |
+| `eq_distinct` | simplify | 30 | EQ | bv-swept | mask.rules:160 | Two values with disjoint ranges, or a known bit that differs, are never equal. |
+| `getmask_above` | simplify | 30 | Get_mask | bv-swept | mask.rules:58 | A window above the highest bit a value can have is zero: 0 <= y < 2^lo. |
+| `getmask_fits` | simplify | 30 | Get_mask | native-unverified | mask.cpp:136 | Get_mask(y, 0, n) = y when 0 <= y < 2^n, with two exceptions that keep the classic shapes the later passes read. The mask of a LEAF (an input or a register output) is kept: it is where the width fact of the value is written in the graph, and the region passes that follow (mux sharing, muxctx) read booleans structurally, so dropping it makes them spell a Ror/EQ to get one back (wire_cond_match grew from 5 to 8 nodes). The mask of a Sum is kept too: a mask between two additions is what stops the chain from merging into one wide Sum, and the low-lane narrowing (which runs before bitwidth deletes the redundant masks, as it does in classic) works on each partial sum (loop_ref_arg: +26% pred_aig when the chain was flattened first). |
+| `getmask_getmask` | simplify | 30 | Get_mask | bv-swept | mask.rules:12 | Get_mask(Get_mask(y, a, b), c, d) = Get_mask(y, a + c, min(a + d, b)): the inner window is zero above its width, so the outer one reads the same bits of y, clipped at b. |
+| `getmask_getmask_zero` | simplify | 30 | Get_mask | bv-swept | mask.rules:19 | A window that starts at or above the inner window's width reads only its zero padding. |
+| `getmask_not_getmask` | simplify | 30 | Get_mask | bv-swept | mask.rules:199 | Bit i of Not(w) is the complement of bit i of w, and Get_mask(y, 0, n) leaves the low n bits of y alone: a window of the complement inside the low n bits does not need the inner mask (classic scalar_get_mask's low window of a complement). |
+| `getmask_setmask_inside` | simplify | 30 | Get_mask | bv-swept | mask.rules:74 | A window inside the written one reads the value: bit slo + i of the result is bit i of v. |
+| `getmask_setmask_outside` | simplify | 30 | Get_mask | bv-swept | mask.rules:67 | A window disjoint from the written one reads the base. |
+| `getmask_shl_low` | simplify | 30 | Get_mask | bv-swept | mask.rules:40 | A window inside the s low zero bits of SHL(x, s) is zero. |
+| `getmask_shl_up` | simplify | 30 | Get_mask | bv-swept | mask.rules:26 | Get_mask(SHL(x, s), lo, hi) = Get_mask(x, lo - s, hi - s) when the window is above the s zero bits. |
+| `getmask_sra` | simplify | 30 | Get_mask | bv-swept | mask.rules:47 | Bit i of SRA(x, s) is bit i + s of x (sign bits included), so a window moves up by s. |
+| `gt_always` | simplify | 30 | GT | bv-swept | mask.rules:146 | x > y whenever the largest y is below the smallest x. |
+| `gt_never` | simplify | 30 | GT | bv-swept | mask.rules:153 | x > y is false whenever the smallest y is not below the largest x. |
+| `lt_always` | simplify | 30 | LT | bv-swept | mask.rules:132 | x < y whenever the largest x is below the smallest y. |
+| `lt_never` | simplify | 30 | LT | bv-swept | mask.rules:139 | x < y is false whenever the smallest x is not below the largest y. |
+| `mux_nonzero_sel` | simplify | 30 | Mux | bv-swept | mask.rules:183 | A selector that is provably nonzero picks the true arm. |
+| `mux_zero_sel` | simplify | 30 | Mux | bv-swept | mask.rules:190 | A selector that is provably zero picks the false arm. |
+| `ror_bool` | simplify | 30 | Ror | bv-swept | mask.rules:169 | The OR-reduction of a 0/1 value is the value. |
+| `setmask_overwrite` | simplify | 30 | Set_mask | bv-swept | mask.rules:86 | A write that covers an earlier write to the same base overwrites it: the inner Set_mask is dead. |
+| `setmask_own_bits` | simplify | 30 | Set_mask | bv-swept | mask.rules:93 | Writing a's own bits back into the window they came from changes nothing. |
+| `setmask_zero_noop` | simplify | 30 | Set_mask | bv-swept | mask.rules:100 | Writing zeros over bits that are already known zero changes nothing. |
+| `sext_fits` | simplify | 30 | Sext | bv-swept | mask.rules:176 | Sext(x, b) = x when -2^(b-1) <= x < 2^(b-1): the sign extension adds nothing. |
+| `bit_run_reduction` | alt | 20 | And, Or | native-unverified | mask.cpp:231 | The per-lane form of classic vectorize_bit_reductions for its simplest family: an And (Or) with a run of at least four operands that are single bits of ONE word at adjacent positions, And(x[a], x[a+1], .., x[a+n-1], rest)  =  And(EQ(x[a +: n], 2^n - 1), rest) Or (x[a], x[a+1], .., x[a+n-1], rest)  =  Or (Ror(x[a +: n]), rest) (each operand is a 0/1 value, so the AND is "every bit of the window set" and the OR is "any bit set"). An alt: the extraction keeps whichever is cheaper, and the classic region pass still vectorizes the shapes that need a whole expression over the bits (Or(EQ(request[j], 0), priority[i][j])). |
+| `getmask_shl_straddle` | alt | 20 | Get_mask | bv-swept | mask.rules:33 | A window that straddles the shift: the zero bits below, x's low hi - s bits above (the bitwidth_rewrite Get_mask(SHL) rule). An alt: both spellings are two nodes, so extraction keeps the original until a cost profile prefers the narrower Get_mask. |
+| `setmask_to_concat` | simplify | 20 | Set_mask | native-unverified | mask.cpp:348 | Set_mask(base, lo, hi, v) over a pack (zero, a Concat, a value that fits below the window) whose lanes the window covers whole, or extends, is the pack with that lane replaced: a chain of constant, disjoint lane writes (a packed array or struct built field by field) becomes one Concat, as classic's pack canonicalization makes it. A write that cuts a lane in two, or a base that is anything else, keeps the Set_mask. |
 
 ## Group `mux`
 
 | rule | tag | prio | root | proof | source | what it does |
 | --- | --- | ---: | --- | --- | --- | --- |
+| `mux_setmask_pair` | alt | 35 | Mux | native-unverified | mux.cpp:109 | Both arms rewrite the same lane of the same word: select only the lane value, Mux(s, Set_mask(b, w, v0), Set_mask(b, w, v1)) = Set_mask(b, w, Mux(s, v0, v1)) (classic scalar_mux factor_set_mask_pair). It removes the word-wide Mux of a nested `if (reset) bit = R; else if (enable) bit = D;` update. An alt since milestone I: the lane Mux is narrower (hardware pays per bit, so `synth` takes it whenever the window is narrower than the word) but a simulator word is a word, and the factored form adds a Get_mask, so `sim` keeps the word Mux of a register of at most 64 bits. |
+| `mux_setmask_arm` | alt | 34 | Mux | native-unverified | mux.cpp:127 | A conditional write of one lane keeps the Mux narrow: Mux(s, b, Set_mask(b, w, v)) = Set_mask(b, w, Mux(s, Get_mask(b, w), v))      (and the swapped arms) Slang emits this for every conditional assignment to one bit of a packed register; leaving the Mux outside makes the mapper select the ENTIRE packed word once per written bit (classic scalar_mux factor_set_mask_arm). An alt since milestone I, for the reason mux_setmask_pair gives. |
 | `mux_bool_const_arms` | simplify | 30 | Mux | native-unverified | mux.cpp:25 | Mux(s, 1, 0) = EQ(s, 0), and Mux(s, 0, 1) = s for a 0/1 selector (a wider selector must keep the Mux: it reads any nonzero value as true). |
 | `mux_const_arm_logic` | simplify | 30 | Mux | native-unverified | mux.cpp:41 | One constant 0/1 arm over a 0/1 value is plain logic: s ? 1 : f = s \| f      s ? 0 : f = !s & f      s ? t : 0 = s & t      s ? t : 1 = !s \| t Only over a computed (e-node) value: a latch Q is a leaf here, and `s \| q` on a latch's hold arm would be a Q -> D path through logic. |
 | `mux_sel_arm` | simplify | 30 | Mux | bv-swept | mux.rules:4 | Mux(s, 0, s) = s: s ? s : 0. |
 | `mux_sel_not` | simplify | 30 | Mux | bv-swept | mux.rules:10 | Mux(EQ(c, 0), f, t) = Mux(c, t, f) for a 0/1 value c: the selector reads the condition itself and the arms swap. |
+| `mux_guard_accumulation` | simplify | 25 | Mux | native-unverified | mux.cpp:178 | Guarded accumulation (classic scalar_mux guard_accumulation), a ROLLED-LOOP rule: `if s { acc OP= x }` is Mux(s, a, a OP x) = a OP Mux(s, id, x)      (id = 0 for Or/Xor, -1 for And; and the swapped arms) bit for bit the same logic, but the Mux no longer sits on the accumulator, so an unrolled run of guarded updates becomes one chain of ONE associative operator that flattens into a single n-ary cell instead of a serial mux chain. It runs only in a lifted loop body (Ctx::guard_scope), where bitwidth follows and sizes the new Mux; the update cell must be private to this Mux and plain (no color, no policy); a held STATE output stays a Mux (the latch contract exempts Q only as a direct Mux arm, and enableopt turns a Q hold into an enable). A Sum is not guarded: a + Mux(s, 0, x) puts the select ahead of the carry chain. |
+| `mux_lane_vector` | alt | 20 | Mux | bv-swept | mux.rules:19 | One lane of a bit-sliced mux. Mux(s, x[a], y[b]) is bit (a mod 64) of the 64-bit-aligned word mux Mux(s, x[a0 +: 64], y[b0 +: 64]), with the same alignment offset on both arms. Every lane of a run that shares s, x, y and the offset b - a builds the SAME word mux, so hash-consing shares it among the lanes (classic vectorize_bit_muxes does this on the extracted graph; this is the alternative the extraction can pick once a cost profile prices the sharing). An alt: a lane alone is cheaper as the scalar mux. Extraction on the example: synth keeps the left side; sim keeps the left side. |
+| `mux_oob_sel` | alt | 20 | Mux | native-unverified | mux.cpp:152 | Q1: an out-of-range or disconnected selection of an n-ary Mux is a '?' owned by that Mux, so any value is a legal resolution of it: a constant selector that names no connected arm may be read as 0 (classic folds exactly this to 0). Written as an alt, not a simplify: the engine never picks a refinement on its own, the extraction does, and a '?' that is one value to the Mux class stays one value at every reader (the literal is the Mux's own). |
 
 ## Group `shift`
 
@@ -55,14 +114,29 @@ union-invariant fuzz and an equiv fixture only; `none` = the rule opted out.
 | `shl_shl` | simplify | 30 | SHL | bv-swept | shift.rules:19 | SHL(SHL(x, a), b) = SHL(x, a + b): shifts never drop bits, so chained left shifts add (up to the 2^28 amount cap). |
 | `sra_sra` | simplify | 30 | SRA | bv-swept | shift.rules:26 | SRA(SRA(x, a), b) = SRA(x, a + b): floor division by 2^a then 2^b is floor division by 2^(a+b). |
 
-Total: 28 rules.
+Total: 77 rules.
 
 ## Analyses
 
 | name | kind | parameters | runtime | spec |
 | --- | --- | --- | --- | --- |
 | `bool01` | analysis | x | implemented | `(and (<= 0 x) (<= x 1))` |
+| `range` | analysis | x (k lo) (k hi) | implemented | `(and (<= lo x) (<= x hi))` |
+| `nonneg` | pred | x | implemented | `(>= x 0)` |
+| `fits` | pred | x (k n) | implemented | `(and (>= n 0) (>= x 0) (<= x (mask_of n)))` |
+| `sfits` | pred | x (k n) | implemented | `(and (>= n 1) (<= x (mask_of (- n 1))) (>= x (- -1 (mask_of (- n 1)))))` |
+| `known_zero` | analysis | x (k m) | implemented | `(and (>= m 0) (= (band x m) 0))` |
+| `known_one` | analysis | x (k m) | implemented | `(and (>= m 0) (= (band x m) m))` |
+| `low_zero` | analysis | x (k n) | implemented | `(and (>= n 0) (= (band x (mask_of n)) 0))` |
+| `exclusive` | analysis | x y | implemented | `(= (band x y) 0)` |
+| `opposite` | analysis | x y | implemented | `(and (>= x 0) (<= x 1) (= y (- 1 x)))` |
+| `has_lane` | analysis | x (k lo) (k hi) | implemented | `(<= 0 1)` |
+| `lt_always` | analysis | x y | implemented | `(< x y)` |
+| `ge_always` | analysis | x y | implemented | `(>= x y)` |
+| `distinct` | analysis | x y | implemented | `(not (= x y))` |
+| `nonzero` | analysis | x | implemented | `(not (= x 0))` |
+| `zero` | analysis | x | implemented | `(= x 0)` |
 
 ## Guard and constant-expression builtins
 
-`+` `-` `*` `min` `max` `log2` `pow2?` `popcount` `mask_of` `<` `<=` `>` `>=` `=` `and` `or` `not` `abs` 
+`+` `-` `*` `min` `max` `log2` `pow2?` `popcount` `mask_of` `<` `<=` `>` `>=` `=` `and` `or` `not` `abs` `pow2` `clog2` `band` `div` 

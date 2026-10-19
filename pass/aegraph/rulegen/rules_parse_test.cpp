@@ -31,6 +31,9 @@ tst::Parsed parse_text(const std::string& text) { return tst::parse_all("t/group
 Diags lint_text(const std::string& text) {
   auto p = parse_text(text);
   Diags diags = p.diags;
+  // bool01 is implemented in the runtime; the other inline declarations are declared only.
+  p.analyses.impl       = {"bool01"};
+  p.analyses.impl_known = true;
   if (diags.empty()) {
     lint({p.file}, p.analyses, {}, diags);
   }

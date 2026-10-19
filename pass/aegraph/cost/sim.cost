@@ -1,0 +1,67 @@
+;; cost/sim.cost: the simulation profile for `lhd sim`'s default LLVM backend (inou/cgen/cgen_llvm.cpp). A price is
+;; the machine instructions the node costs in the straight-line color kernel, with the latency of the slow ones
+;; folded in. The engine of that cost is the HOST ISA, not gates, so:
+;;
+;;   * a value is quantized to 64-bit words, not bits: a 1-bit and a 63-bit And cost the same (N, Nmax);
+;;   * wiring is NOT free: a bit select is a shift plus a mask, a window write a clear, a shift and an or;
+;;   * a shift by a constant and a multiply by a constant are one instruction (LLVM strength-reduces both),
+;;     a shift by a variable is a compare, a shift and a select (the cgen guards an amount past the width);
+;;   * a two-arm Mux is a select per word (the selector is nearly always a compare LLVM folds into the select); an
+;;     n-ary Mux is a compare and a select per arm; a Hotmux is the same chain over its controls (the first active
+;;     control wins);
+;;   * a divide by a constant is a multiply-high, a divide by a variable is a slow divide plus a zero trap;
+;;   * bit operations on a value wider than 64 bits repeat per word.
+;;
+;; Sharing-aware like every profile: a class several nodes read is counted once.
+
+(profile sim
+  :default-width 64
+  :doc "Host instructions of the LLVM-emitted color kernel; word-quantized; wiring costs instructions.")
+
+;; ---- bit selection and window writes
+(cost sim (Get_mask _ (k lo) _) (* N (+ 1 (min 1 lo))) :doc "lshr + and (just the and at bit 0)")
+(cost sim Get_mask (* 3 N))
+(cost sim Set_mask (* 4 N) :doc "clear, shift, or, mask")
+(cost sim Sext (* 2 N) :doc "shl + ashr")
+(cost sim Concat (* A N) :doc "shl + or per lane (A counts value and width of each lane)")
+
+;; ---- shifts
+(cost sim (SHL _ (k)) N)
+(cost sim (SRA _ (k)) N)
+(cost sim SHL (* 4 N) :doc "compare, shift, select")
+(cost sim SRA (* 4 N))
+
+;; ---- bitwise
+(cost sim Not Nmax)
+(cost sim And (* (- A 1) Nmax))
+(cost sim Or (* (- A 1) Nmax))
+(cost sim Xor (* (- A 1) Nmax))
+(cost sim Ror (+ Nmax 1))
+(cost sim Rxor (+ Nmax 1))
+(cost sim Popcount (+ Nmax 1))
+
+;; ---- arithmetic
+(cost sim (Sum (k) ..) :when (< A 3) N)
+(cost sim Sum (* (- A 1) (- (* 3 N) 2)) :doc "an add per extra operand; a multi-word add carries")
+(cost sim (Mult (k c) ..) :when (pow2? (abs c)) N :doc "LLVM turns it into a shift")
+(cost sim (Mult (k) ..) N :doc "imul by an immediate: one instruction (LLVM also turns x*3 and x*5 into an lea)")
+(cost sim Mult (* 3 N N) :doc "imul (latency 3); multi-word is quadratic")
+(cost sim (Div _ (k c)) :when (pow2? c) (* 2 N))
+(cost sim (Rem _ (k c)) :when (pow2? c) (* 2 N))
+(cost sim (Div _ (k)) (* 4 N) :doc "multiply-high by the reciprocal")
+(cost sim (Rem _ (k)) (* 5 N))
+(cost sim Div (* 12 N N N) :doc "divide plus the zero trap; multi-word is a bit-serial loop")
+(cost sim Rem (* 12 N N N))
+
+;; ---- compare
+(cost sim (EQ (k)  _) 1 :doc "icmp against an immediate: it fuses into the select or branch that reads it, a Xor does not")
+(cost sim EQ (+ 1 (* (- A 1) (- (* 2 Nmax) 1))))
+(cost sim LT (+ 1 (* 2 Nmax)))
+(cost sim GT (+ 1 (* 2 Nmax)))
+
+;; ---- selection
+(cost sim (Mux _ _ _) N :doc "one select per word: the selector is nearly always the result of a compare, which LLVM folds into the select")
+(cost sim Mux (* (- A 1) (+ N 1)) :doc "indexed: a compare and a select per arm")
+(cost sim Hotmux (* (div A 2) (+ N 1)) :doc "a compare and a select per control")
+
+(cost sim _ N)

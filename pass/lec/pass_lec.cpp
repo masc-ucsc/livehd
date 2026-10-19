@@ -256,6 +256,11 @@ void Pass_lec::setup() {
                        "iand | sum | bitwise | bv = force that cvc5 mode from the first solve. Verdicts stay "
                        "sound (the translation is equisatisfiable); only the main lec solve path is affected",
                        "auto");
+  m.add_label_optional("preflight_engine",
+                       "INTERNAL cprop engine of the LEC preflight (the value-preserving re-simplify after hierarchy "
+                       "inlining): classic (default) | aegraph. aegraph stamps every cell it creates or the preflight "
+                       "falls back to classic for that graph. Salted into //lhd:formal_salt",
+                       "classic");
   m.add_label_optional("phase_sched",
                        "encode a latch / negedge / gated-clock design over FOUR ordered microsteps per source "
                        "period (close-low, rise, close-high, fall) instead of rewriting it with pass.single_edge "

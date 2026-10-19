@@ -18,11 +18,13 @@ cc_library(
 cc_library(
     name = "rulegen_lib",
     srcs = [
+        "rulegen/cost_model.cpp",
         "rulegen/rules_emit.cpp",
         "rulegen/rules_parse.cpp",
         "rulegen/sexp.cpp",
     ],
     hdrs = [
+        "rulegen/cost_model.hpp",
         "rulegen/rules.hpp",
         "rulegen/sexp.hpp",
     ],
@@ -66,6 +68,7 @@ cc_library(
     visibility = ["//visibility:public"],
     deps = [
         ":rule_expr",
+        ":rulegen_lib",
         "//graph",
         "//core",
         "//pass/common:pass",
@@ -84,12 +87,18 @@ aeg_rules(
         ":rule_test_support",
         "@googletest//:gtest_main",
     ],
+    costs = [
+        "synth",
+        "sim",
+    ],
     groups = [
         "arith",
+        "div",
+        "mask",
         "mux",
         "shift",
     ],
-    native_srcs = glob(["rules/*.cpp"]),
+    native_srcs = glob(["rules/*.cpp"]) + ["runtime/analyses.cpp"],
     prove_deps = [
         ":pass_aegraph",
         ":rule_test_support",
@@ -121,6 +130,18 @@ cc_library(
 )
 
 cc_test(
+    name = "cost_model_test",
+    srcs = ["rulegen/cost_model_test.cpp"],
+    copts = COPTS,
+    deps = [
+        ":pass_aegraph",
+        ":rule_test_support",
+        ":rulegen_lib",
+        "@googletest//:gtest_main",
+    ],
+)
+
+cc_test(
     name = "rules_parse_test",
     srcs = ["rulegen/rules_parse_test.cpp"],
     copts = COPTS,
@@ -143,6 +164,19 @@ cc_test(
         "//pass/lec:lec_query",
         "@googletest//:gtest_main",
         "@hhds//hhds:graph",
+    ],
+)
+
+cc_test(
+    name = "aeg_analyses_smoke",
+    srcs = ["aeg_analyses_smoke.cpp"],
+    copts = COPTS,
+    data = ["rules/analyses.decl"],
+    deps = [
+        ":pass_aegraph",
+        ":rule_test_support",
+        ":rulegen_lib",
+        "@googletest//:gtest_main",
     ],
 )
 

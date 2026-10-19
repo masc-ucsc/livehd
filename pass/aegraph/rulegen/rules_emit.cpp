@@ -5,6 +5,7 @@
 // of its inputs: no timestamps, no addresses, no hash-map iteration order.
 
 #include <algorithm>
+#include <functional>
 #include <map>
 #include <set>
 #include <sstream>
@@ -14,25 +15,7 @@
 
 namespace livehd::aegraph::rulegen {
 
-const char* analysis_cxx(std::string_view name) {
-  // The analyses the runtime implements. Milestone G adds the range and known-bits ones.
-  if (name == "bool01") {
-    return "ctx.bool01(%0)";
-  }
-  return nullptr;
-}
-
 namespace {
-
-std::string subst(std::string tpl, const std::vector<std::string>& args) {
-  for (size_t i = 0; i < args.size(); ++i) {
-    const auto key = "%" + std::to_string(i);
-    for (size_t pos = tpl.find(key); pos != std::string::npos; pos = tpl.find(key, pos + args[i].size())) {
-      tpl.replace(pos, key.size(), args[i]);
-    }
-  }
-  return tpl;
-}
 
 // ---------------------------------------------------------------------------
 // One rule -> C++
@@ -40,7 +23,7 @@ std::string subst(std::string tpl, const std::vector<std::string>& args) {
 
 class Rule_emitter {
 public:
-  Rule_emitter(const Rules_file& f, const Rule& r) : file_(f), rule_(r) {}
+  Rule_emitter(const Rules_file& f, const Rule& r, const Analyses& a) : file_(f), rule_(r), analyses_(a) {}
 
   std::string run() {
     collect(rule_.lhs);
@@ -340,12 +323,25 @@ private:
       }
       return acc;
     }
-    // An analysis predicate over class arguments.
-    std::vector<std::string> args;
-    for (const auto& a : e.args) {
-      args.push_back(class_cxx(a.name));
+    // An analysis predicate: class arguments by class, constant arguments through their ex::Num (a constant
+    // that does not evaluate makes the guard false).
+    const auto* an = analyses_.find(e.name);
+    if (an == nullptr || an->params.size() != e.args.size()) {
+      return "ex::flag(false)";
     }
-    return "ex::flag(" + subst(analysis_cxx(e.name) != nullptr ? analysis_cxx(e.name) : "false", args) + ")";
+    std::string pre, classes, consts;
+    size_t      n_class = 0, n_const = 0;
+    for (size_t i = 0; i < e.args.size(); ++i) {
+      if (an->is_const[i]) {
+        const auto id = "a" + std::to_string(i);
+        pre += "const ex::Num " + id + " = " + expr_cxx(e.args[i]) + "; if (!" + id + ".ok) return false; ";
+        consts += (n_const++ != 0 ? ", " : "") + id + ".v";
+      } else {
+        classes += (n_class++ != 0 ? ", " : "") + class_cxx(e.args[i].name);
+      }
+    }
+    return "ex::flag([&]() -> bool { " + pre + "return an::" + e.name + "(ctx, std::array<Class_id, " + std::to_string(n_class)
+           + ">{" + classes + "}, std::array<int64_t, " + std::to_string(n_const) + ">{" + consts + "}); }())";
   }
 
   // The (k EXPR) temporaries of a term, in evaluation order.
@@ -441,6 +437,7 @@ private:
 
   const Rules_file&           file_;
   const Rule&                 rule_;
+  const Analyses&             analyses_;
   std::string                 out_;
   int                         ind_ = 0;
   int                         uid_ = 0;
@@ -457,14 +454,36 @@ std::string header(const Rules_file& f, const char* what) {
 
 }  // namespace
 
-std::string emit_rules_cpp(const Rules_file& f, const Analyses&) {
+std::string emit_rules_cpp(const Rules_file& f, const Analyses& analyses) {
   std::string out = header(f, "rule code");
-  out += "\n#include <cstdint>\n#include <span>\n#include <vector>\n\n";
-  out += "#include \"rulegen/rule_expr.hpp\"\n#include \"runtime/match.hpp\"\n\n";
+  out += "\n#include <array>\n#include <cstdint>\n#include <span>\n#include <vector>\n\n";
+  out += "#include \"rulegen/rule_expr.hpp\"\n#include \"runtime/analyses.hpp\"\n#include \"runtime/match.hpp\"\n\n";
+  // The analyses this group's guards call (defined by AEG_ANALYSIS in runtime/analyses.cpp).
+  std::set<std::string> used;
+  std::function<void(const Expr&)> scan = [&](const Expr& e) {
+    if (e.kind == Expr::Kind::call && analyses.find(e.name) != nullptr) {
+      used.insert(e.name);
+    }
+    for (const auto& a : e.args) {
+      scan(a);
+    }
+  };
+  for (const auto& r : f.rules) {
+    for (const auto& w : r.whens) {
+      scan(w);
+    }
+  }
+  if (!used.empty()) {
+    out += "namespace livehd::aegraph::rt::an {\n";
+    for (const auto& name : used) {
+      out += "bool " + name + "(Ctx&, std::span<const Class_id>, std::span<const int64_t>);\n";
+    }
+    out += "}  // namespace livehd::aegraph::rt::an\n\n";
+  }
   out += "using namespace livehd::aegraph;\nusing namespace livehd::aegraph::rt;\n\n";
   out += "AEG_RULE_GROUP(" + f.group + ");\n\n";
   for (const auto& r : f.rules) {
-    out += Rule_emitter(f, r).run();
+    out += Rule_emitter(f, r, analyses).run();
     out += "\n";
   }
   return out;
@@ -488,6 +507,16 @@ std::string test_prelude(const Rules_file& f, const Analyses& a, const char* wha
 
 }  // namespace
 
+std::string emit_cost_cpp(const cost::Profile& profile, std::string_view text) {
+  std::string out = "//  This file is distributed under the BSD 3-Clause License. See LICENSE for details.\n// GENERATED by rulegen from "
+                    + profile.path + " (cost profile). Do not edit.\n\n";
+  out += "#include \"runtime/cost.hpp\"\n\nnamespace {\n";
+  out += "const livehd::aegraph::rt::Cost_registrar kProfile_" + profile.name + "(\"" + profile.name + "\", \"" + profile.path
+         + "\", R\"AEGCOST(" + std::string{text} + ")AEGCOST\");\n";
+  out += "}  // namespace\n";
+  return out;
+}
+
 std::string emit_fuzz_test(const Rules_file& f, const Analyses& a) {
   std::string out = test_prelude(f, a, "fuzz and example tests");
   out += "using livehd::aegraph::rulegen::testing::Rule_check;\n\n";
@@ -498,6 +527,10 @@ std::string emit_fuzz_test(const Rules_file& f, const Analyses& a) {
            + "\"); }\n";
     out += "TEST(AegFuzz, " + f.group + "_" + r.name + "_example_fires) {\n";
     out += "  Rule_check::example_fires(kRulesPath, kRules, kAnalyses, \"" + r.name + "\");\n}\n";
+    for (const auto& e : r.expects) {
+      out += "TEST(AegFuzz, " + f.group + "_" + r.name + "_expect_" + e.profile + "_" + e.side + ") {\n";
+      out += "  Rule_check::expect(kRulesPath, kRules, kAnalyses, \"" + r.name + "\", \"" + e.profile + "\", \"" + e.side + "\");\n}\n";
+    }
   }
   out += "\nTEST(AegFuzz, " + f.group + "_zz_wall_time) { Rule_check::wall_time(\"fuzz_" + f.group + "\"); }\n";
   return out;
@@ -586,6 +619,14 @@ std::string emit_rules_md(const std::vector<Rules_file>& files, const Analyses& 
         row.source = base_name(f.path) + ":" + std::to_string(r.line);
         const auto rhs = r.arms.empty() ? std::string{} : pat_text(r.arms[0].rhs);
         row.what       = r.doc.empty() ? "`" + pat_text(r.lhs) + " => " + rhs + "`" : r.doc;
+        if (!r.expects.empty()) {
+          row.what += " Extraction on the example:";
+          for (const auto& e : r.expects) {
+            row.what += " " + e.profile + " keeps the " + (e.side == "lhs" ? "left" : "right") + " side;";
+          }
+          row.what.pop_back();
+          row.what += ".";
+        }
         rows.push_back(std::move(row));
       }
     }
@@ -627,10 +668,10 @@ std::string emit_rules_md(const std::vector<Rules_file>& files, const Analyses& 
   for (const auto& a : analyses.list) {
     std::string params;
     for (size_t i = 0; i < a.params.size(); ++i) {
-      params += (i != 0 ? " " : "") + a.params[i];
+      params += (i != 0 ? " " : "") + (a.is_const[i] ? "(k " + a.params[i] + ")" : a.params[i]);
     }
     o << "| `" << a.name << "` | " << (a.is_pred ? "pred" : "analysis") << " | " << params << " | "
-      << (analysis_cxx(a.name) != nullptr ? "implemented" : "declared") << " | `"
+      << (!analyses.impl_known || analyses.impl.contains(a.name) ? "implemented" : "declared") << " | `"
       << (a.spec ? md_escape(expr_text(*a.spec)) : std::string{}) << "` |\n";
   }
   o << "\n## Guard and constant-expression builtins\n\n";

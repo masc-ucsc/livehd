@@ -15,6 +15,7 @@
 (alt not_xor_alt 5
   (Not x)
   => (Xor x -1)
+  :expect (synth lhs) (sim lhs)
   :example (Not $x)
   :doc "Not(x) and Xor(x, -1) share a class; extraction keeps the original on a tie.")
 

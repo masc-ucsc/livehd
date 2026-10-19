@@ -36,6 +36,7 @@ genrule(
         "//graph:node_util.hpp",  # logical hierarchy names are proof/cache identity
         "//graph:split_selfref.cpp",
         "//graph:split_selfref.hpp",
+        "//pass/aegraph:pass_aegraph",  # formal.lec.preflight_engine=aegraph runs the e-graph engine in the post-inline re-simplify (archive)
         "//pass/cprop:pass_cprop",  # post-inline folds + mixed-loop normalization (archive)
         "//pass/lec:formal_srcs",
         "//pass/semdiff:formal_srcs",
