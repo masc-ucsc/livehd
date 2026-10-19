@@ -43,13 +43,17 @@ std::optional<Register_merge_stats> merge_equal_registers(std::span<const std::s
                                                           Preparation_budget*                           budget) {
   Register_merge_stats stats;
   constexpr uint64_t   kMaxRounds = 16;
+  // New twins appear only where a register just merged (its readers moved), so a definition is rescanned only after it merged.
+  std::vector<bool> dirty(definitions.size(), true);
   for (bool again = true; again && stats.rounds < kMaxRounds;) {
     again = false;
     ++stats.rounds;
-    for (const auto& graph : definitions) {
-      if (!graph) {
+    for (size_t index = 0; index < definitions.size(); ++index) {
+      const auto& graph = definitions[index];
+      if (!graph || !dirty[index]) {
         continue;
       }
+      dirty[index] = false;
       absl::flat_hash_map<std::string, hhds::Node_class> survivors;
       std::vector<std::pair<hhds::Node_class, hhds::Node_class>> merges;  // duplicate, survivor
       for (auto node : graph->body().nodes()) {
@@ -86,7 +90,8 @@ std::optional<Register_merge_stats> merge_equal_registers(std::span<const std::s
         stats.bits += static_cast<uint64_t>(gu::bits_of(dup_q));
         gu::drop_drivers(duplicate);
         duplicate.del_node();
-        again = true;
+        dirty[index] = true;
+        again        = true;
       }
     }
   }
