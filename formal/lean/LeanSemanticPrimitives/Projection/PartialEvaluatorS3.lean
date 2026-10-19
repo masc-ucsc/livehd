@@ -2,13 +2,22 @@
 # S3: the proved specializer with DEFERRED binder shifting
 
 A copy of `Projection/PartialEvaluator.lean` (the PROVED specializer, S2), in
-namespace `Projection.S3`, with ONE representation change: `PVal` gains
-`shifted k v`, a binder adjustment composed rather than applied
-(certio/PHASE6_PERF.md 38-39: S3 removes the shift quadratic).  Every place the
-proved specializer pattern-matches a partial value goes through `hnf`; every
-other line is the proved code.  The request/error types and the request
-bookkeeping are SHARED with `Projection` (not copied), so `S3.mixDriver` has
-exactly `Projection.mixDriver`'s type.
+namespace `Projection.S3`, with TWO representation changes to `PVal`:
+
+* `shifted k v`, a binder adjustment composed rather than applied
+  (certio/PHASE6_PERF.md 38-39: S3 removes the shift quadratic);
+* `dyns cs t`, the ARRAY SPINE (plan M6): a run of dynamic leaves held in a
+  short list of arrays, so the `nthD` lookup summary indexes a spine in
+  O(log n) instead of walking `n` cons cells.  The interpreter's slot
+  environment is exactly such a spine -- one let-bound node value consed onto
+  it per node -- and its walk was 99% of specialization time on the large
+  certificates (`walkHeadAt` below).
+
+Every place the proved specializer pattern-matches a partial value goes through
+`hnf`; spines are built by `PVal.mkCons` (in `prepare`) and a variable holding
+a spine reads back AS STORED; every other line is the proved code.  The
+request/error types and the request bookkeeping are SHARED with `Projection`
+(not copied), so `S3.mixDriver` has exactly `Projection.mixDriver`'s type.
 
 `S3Correct.lean` proves `@Projection.mixDriver = @S3.mixDriver` -- equal on
 every input, residuals, errors and fuel alike -- and registers it `@[csimp]`, so
@@ -24,17 +33,37 @@ namespace S3
 
 instance : BEq SpecRequest := ⟨SpecRequest.beq⟩
 
-/-- A partial value, as in `Projection.PVal`, plus ONE representation change:
+/-- A run of dynamic leaves held in an array (the array spine, `PVal.dyns`):
+the leaves `.dyn (arr[start] + sh)`, `.dyn (arr[start + 1] + sh)`, ..., up to
+the end of `arr`.  Any three fields are a valid chunk -- `start` past the end
+is the empty run -- so the representation carries no invariant: `S3Correct`'s
+`rep` reads every chunk, and nothing has to be kept consistent with anything. -/
+structure DChunk where
+  sh    : Nat
+  arr   : Array Nat
+  start : Nat
+  deriving Inhabited, Repr
+
+/-- The number of leaves in a chunk. -/
+def DChunk.size (c : DChunk) : Nat := c.arr.size - c.start
+
+/-- A partial value, as in `Projection.PVal`, plus TWO representation changes.
+
 `shifted k v` is `v` with every residual index moved out by `k`, NOT yet applied
 (certio/PHASE6_PERF.md 38).  Entering `k` binders costs O(1); the offset is
 applied once, at the point something inspects the value (`hnf`) or reifies it
 (`toCodeAt`, `toPResAt`).  `S3Correct.lean` relates it to the proved `PVal` by
-`rep (.shifted k v) = Projection.PVal.shift k (rep v)`. -/
+`rep (.shifted k v) = Projection.PVal.shift k (rep v)`.
+
+`dyns cs t` is the spine whose first leaves are the chunks' dynamic leaves, in
+order, followed by the spine `t`:
+`rep (.dyns cs t) = cons (dyn x₀) (cons (dyn x₁) (… (rep t)))`. -/
 inductive PVal where
   | stat    : Val → PVal
   | dyn     : Nat → PVal
   | cons    : PVal → PVal → PVal
   | shifted : Nat → PVal → PVal
+  | dyns    : List DChunk → PVal → PVal
   deriving Inhabited, Repr
 
 abbrev PEnv := List PVal
@@ -47,17 +76,95 @@ def PVal.shift (k : Nat) (v : PVal) : PVal :=
   | .dyn i        => .dyn (i + k)
   | .shifted k' w => .shifted (k + k') w
   | .cons a b     => .shifted k (.cons a b)
+  | .dyns cs t    => .shifted k (.dyns cs t)
 
 def PEnv.shiftBy (k : Nat) (env : PEnv) : PEnv :=
   if k = 0 then env else env.map (PVal.shift k)
 
-/-- Head-normal form at an accumulated offset: never returns `shifted`; a
-cons's children carry the offset, still deferred.  O(1) per wrapper. -/
+/-! ## The array spine (plan M6)
+
+The slot environment of `I_hw` is a spine built newest-first, one let-bound
+node value at a time, and every slot read is an `nthD` at a static depth --
+which the lookup summary answered by walking that many cons cells: O(N^2) cells
+per specialization, 99% of its time on the contract-3 certificates.
+
+A `dyns` spine holds its dynamic leaves in a list of array CHUNKS kept as a
+binary counter (`insertChunk`): pushing a leaf adds a one-leaf chunk and merges
+while the next chunk is no larger, so a spine of n leaves has O(log n) chunks
+and each leaf is copied O(log n) times over the spine's whole life.  The
+structure is persistent -- an older spine is never mutated, merging builds
+fresh arrays -- which is what lets every environment that still holds an older
+spine keep it.  An index is answered chunk by chunk (`chunksAt`), O(log n);
+the head is popped in O(1) by advancing `start` (`popChunks`).
+
+The offsets compose as before: a `shifted` wrapper around a `dyns` is pushed
+into the chunks' `sh` only when a leaf is consed onto it (`mkCons`), which
+touches each of the O(log n) chunks once. -/
+
+/-- Add `k` to every leaf of a chunk. -/
+def DChunk.addSh (k : Nat) (c : DChunk) : DChunk := { c with sh := c.sh + k }
+
+/-- The leaves of a chunk, offset applied, as one array.  (Through a list
+rather than `Array.extract`, whose `toList` lemma needs `Classical.choice`;
+it runs only when chunks merge, O(n log n) leaves over a spine's life.) -/
+def DChunk.vals (c : DChunk) : Array Nat := (c.arr.toList.drop c.start).toArray.map (· + c.sh)
+
+/-- `c1`'s leaves, then `c2`'s, in one fresh array. -/
+def DChunk.merge (c1 c2 : DChunk) : DChunk := ⟨0, c1.vals ++ c2.vals, 0⟩
+
+/-- Put a chunk in front, merging while the next chunk is no larger. -/
+def insertChunk (c : DChunk) : List DChunk → List DChunk
+  | []         => [c]
+  | c2 :: rest => if c2.size ≤ c.size then insertChunk (c.merge c2) rest else c :: c2 :: rest
+
+/-- The first leaf of a chunk list (offset applied) and the chunks after it. -/
+def popChunks : List DChunk → Option (Nat × List DChunk)
+  | []      => none
+  | c :: cs =>
+    if c.start < c.arr.size then
+      some (c.arr.getD c.start 0 + c.sh, { c with start := c.start + 1 } :: cs)
+    else popChunks cs
+
+/-- The leaf at index `n` of a chunk list (offset applied), or, past its end,
+the index that is left over for the spine after it. -/
+def chunksAt : List DChunk → Nat → Sum Nat Nat
+  | [],      n => .inr n
+  | c :: cs, n =>
+    if n < c.size then .inl (c.arr.getD (c.start + n) 0 + c.sh) else chunksAt cs (n - c.size)
+
+/-- The total offset of the `shifted` wrappers on top of a value, and what is
+under them. -/
+def PVal.peelShift : PVal → Nat × PVal
+  | .shifted k v =>
+    match PVal.peelShift v with
+    | (k', w) => (k + k', w)
+  | v => (0, v)
+
+/-- `cons h t`, keeping a dynamic leaf in an array spine: onto a `dyns` spine
+(under any shift) the leaf is pushed; a dynamic leaf onto anything else starts
+one; any other head is a plain `cons`. -/
+def PVal.mkCons (h t : PVal) : PVal :=
+  match h with
+  | .dyn j =>
+    match PVal.peelShift t with
+    | (k, .dyns cs u) =>
+      .dyns (insertChunk ⟨0, #[j], 0⟩ (if k = 0 then cs else cs.map (DChunk.addSh k)))
+            (PVal.shift k u)
+    | _ => .dyns [⟨0, #[j], 0⟩] t
+  | _ => .cons h t
+
+/-- Head-normal form at an accumulated offset: never returns `shifted` or
+`dyns`; a cons's children carry the offset, still deferred.  O(1) per wrapper
+(and per empty chunk). -/
 def PVal.hnfAt (acc : Nat) : PVal → PVal
   | .shifted k v => PVal.hnfAt (acc + k) v
   | .stat x      => .stat x
   | .dyn i       => .dyn (i + acc)
   | .cons a b    => .cons (PVal.shift acc a) (PVal.shift acc b)
+  | .dyns cs t   =>
+    match popChunks cs with
+    | some (x, cs') => .cons (.dyn (x + acc)) (PVal.shift acc (.dyns cs' t))
+    | none          => PVal.hnfAt acc t
 
 def PVal.hnf (v : PVal) : PVal := PVal.hnfAt 0 v
 
@@ -91,12 +198,17 @@ inductive PRes where
   | val  : PVal → PRes
   deriving Inhabited, Repr
 
+/-- An array spine's leaves as the `consP` chain they stand for, onto `tl`. -/
+def chunksCode (acc : Nat) (cs : List DChunk) (tl : Term) : Term :=
+  cs.foldr (fun c r => c.vals.foldr (fun x r => .prim .consP [.var (x + acc), r]) r) tl
+
 /-- Reify, applying accumulated offsets during the traversal it already does. -/
 def PVal.toCodeAt (acc : Nat) : PVal → Term
   | .shifted k v => PVal.toCodeAt (acc + k) v
   | .stat v      => .lit v
   | .dyn k       => .var (k + acc)
   | .cons a b    => .prim .consP [PVal.toCodeAt acc a, PVal.toCodeAt acc b]
+  | .dyns cs t   => chunksCode acc cs (PVal.toCodeAt acc t)
 
 def PVal.toCode (v : PVal) : Term := PVal.toCodeAt 0 v
 
@@ -112,11 +224,16 @@ def PRes.toCode : PRes → Term
   | .lets bs r => wrapLets bs (PRes.toCode r)
   | .val v     => PVal.toCode v
 
+/-- An array spine's leaves as the `cons` chain of results they stand for. -/
+def chunksPRes (acc : Nat) (cs : List DChunk) (tl : PRes) : PRes :=
+  cs.foldr (fun c r => c.vals.foldr (fun x r => .cons (.code (.var (x + acc))) r) r) tl
+
 def PVal.toPResAt (acc : Nat) : PVal → PRes
   | .shifted k v => PVal.toPResAt (acc + k) v
   | .stat v      => .stat v
   | .dyn k       => .code (.var (k + acc))
   | .cons a b    => .cons (PVal.toPResAt acc a) (PVal.toPResAt acc b)
+  | .dyns cs t   => chunksPRes acc cs (PVal.toPResAt acc t)
 
 def PVal.toPRes (v : PVal) : PRes := PVal.toPResAt 0 v
 
@@ -126,6 +243,7 @@ def PRes.ofPVal (v : PVal) : PRes :=
   | .dyn k        => .code (.var k)
   | .cons a b     => .val (.cons a b)
   | .shifted _ _  => .val v          -- unreachable: `hnf` never returns `shifted`
+  | .dyns _ _     => .val v          -- unreachable: nor `dyns`
 
 /-- Can this result's residual code fail to produce a value?
 
@@ -224,8 +342,9 @@ def prepare : PRes → Prepared
   | .code t        => ⟨[t], .dyn 0⟩
   | .cons a b =>
     match prepare a, prepare b with
-    | ⟨[], va⟩, ⟨bb, vb⟩ => ⟨bb, .cons (PVal.shift bb.length va) vb⟩
-    | ⟨ba, va⟩, ⟨[], vb⟩ => ⟨ba, .cons va (PVal.shift ba.length vb)⟩
+    -- `mkCons` is `cons` (`S3Correct.rep_mkCons`), kept as an array spine
+    | ⟨[], va⟩, ⟨bb, vb⟩ => ⟨bb, PVal.mkCons (PVal.shift bb.length va) vb⟩
+    | ⟨ba, va⟩, ⟨[], vb⟩ => ⟨ba, PVal.mkCons va (PVal.shift ba.length vb)⟩
     | _,        _        => ⟨[PRes.toCode (.cons a b)], .dyn 0⟩
   | .lets bs r =>
     let p := prepare r
@@ -372,11 +491,16 @@ and scope are `mixPArgs`' own.  Proved in `PartialEvaluatorCorrect.lean`:
 `isNthD_spec`, `nthD_source`, `walkHead_ok`, `nthSummaryEnv_scoped`, and the
 `ucall` cases of `mixTerm_scoped`, `mixTerm_complete` and `mixTerm_sound`. -/
 
-/-- Walk a known spine, carrying the offset down instead of pushing it. -/
+/-- Walk a known spine, carrying the offset down instead of pushing it.  An
+array spine is indexed chunk by chunk, not walked: O(log n) for its leaves. -/
 def walkHeadAt (acc : Nat) : PVal → Nat → Option PVal
   | .shifted k v, n     => walkHeadAt (acc + k) v n
   | .cons a _,    0     => some (PVal.shift acc a)
   | .cons _ b,    n + 1 => walkHeadAt acc b n
+  | .dyns cs t,   n     =>
+    match chunksAt cs n with
+    | .inl x => some (.dyn (x + acc))
+    | .inr m => walkHeadAt acc t m
   | _,            _     => none
 
 def walkHead (v : PVal) (n : Nat) : Option PVal := walkHeadAt 0 v n
@@ -412,12 +536,16 @@ def mixTerm : Nat → AProgram → (SpecRequest → Option Nat) → Div → PEnv
     match t with
     | .lit v => .ok (.stat v, [])
     | .var i =>
-      match Δ[i]?, (env[i]?).map PVal.hnf with
-      | some .stat, some (.stat v)   => .ok (.stat v, [])
-      | some .dyn,  some (.dyn k)    => .ok (.code (.var k), [])
-      -- a preserved spine reads back structurally rather than being flattened
-      | some .dyn,  some (.cons a b) => .ok (.val (.cons a b), [])
-      | some _,     some _           => .error (.illAnnotated "var: division disagrees with the environment")
+      match Δ[i]?, env[i]? with
+      | some b, some pv =>
+        match b, PVal.hnf pv with
+        | .stat, .stat v   => .ok (.stat v, [])
+        | .dyn,  .dyn k    => .ok (.code (.var k), [])
+        -- a preserved spine reads back structurally rather than being flattened,
+        -- and AS STORED: peeling its head here would turn an array spine into
+        -- a cons cell in front of one, and the next `mkCons` could not push
+        | .dyn,  .cons _ _ => .ok (.val pv, [])
+        | _,     _         => .error (.illAnnotated "var: division disagrees with the environment")
       | _,          _              => .error (.unboundVar i)
     | .lift e =>
       match mixTerm n A idx Δ env e with

@@ -68,6 +68,9 @@ namespace Projection
 #audit_axioms S3Correct.nthSummaryEnv_rep
 #audit_axioms S3Correct.prepare_rep
 #audit_axioms S3Correct.toCodeAt_rep
+-- M6: the array spine (S3's `dyns`): its cons and its indexed walk
+#audit_axioms S3Correct.rep_mkCons
+#audit_axioms S3Correct.walkHeadAt_rep
 #audit_axioms Compat_shift
 #audit_axioms Compat_fields_dyn
 #audit_axioms Compat_fields_stat
