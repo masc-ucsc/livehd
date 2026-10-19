@@ -241,6 +241,7 @@ bool read_options(const Eprp_var& var, Options& options) {
   }
   options.design.max_source_nodes = logical.max_nodes;
   options.design.specialize       = std::string(var.get_stage("specialize", "true")) != "false";
+  options.design.state_sweep      = std::string(var.get_stage("state_sweep", "false")) == "true";
   {
     const auto text = std::string(var.get_stage("unroll_carry", "true"));
     if (text != "true" && text != "false") {
@@ -349,6 +350,11 @@ void Pass_usyn::setup() {
                        "true|false: run pass.specialize (constant instance inputs folded into state-free callees) on the "
                        "private copy after pass.color (default true; the synth.specialize spelling)",
                        "true");
+  m.add_label_optional("state_sweep",
+                       "true|false: delete the registers and cells that no output, memory or body-less cell can observe, and "
+                       "narrow each register to its highest observed bit, on the private copy (default false; the "
+                       "synth.state_sweep spelling)",
+                       "false");
   m.add_label_optional("adder",
                        "Native arithmetic: auto (Brent-Kung wide sums, comparisons and multiplier carry), rca, cska, cla, prefix or brent",
                        "auto");

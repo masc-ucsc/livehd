@@ -225,6 +225,18 @@ cc_test(
 )
 
 cc_test(
+    name = "state_sweep_test",
+    srcs = ["state_sweep_test.cpp"],
+    copts = COPTS,
+    deps = [
+        ":synth",
+        "//graph",
+        "@googletest//:gtest_main",
+        "@hhds//hhds:graph",
+    ],
+)
+
+cc_test(
     name = "arith_test",
     srcs = [
         "arith.hpp",

@@ -100,7 +100,7 @@ std::optional<uint64_t> expand_plain_clock_cells(hhds::Graph* g, Preparation_bud
 
 std::unique_ptr<Prepared_design> prepare_design(std::span<const std::shared_ptr<hhds::Graph>> sources, bool unroll_carry,
                                                 std::string_view from_pass, Preparation_budget* budget, bool specialize,
-                                                bool reassociate_loops) {
+                                                bool reassociate_loops, bool state_sweep, std::string_view top) {
   if (!admit_preparation(budget, "begin", 0)) {
     return {};
   }
@@ -246,6 +246,30 @@ std::unique_ptr<Prepared_design> prepare_design(std::span<const std::shared_ptr<
     livehd::diag::info(from_pass, "constant-specialized", "progress")
         .msg("{}: {} constant-specialized instance definition(s)", from_pass, specialized)
         .emit();
+  }
+  // synth.state_sweep: registers (and the cells behind them) that no output,
+  // instance of a body-less cell or memory can ever observe, and the unread
+  // upper bits of the rest. Before the loops are prepared: a compact loop and its
+  // body are left alone, so the sweep never sees an expansion half done.
+  if (state_sweep) {
+    const auto swept = sweep_unobserved_state(result->definitions, top, budget);
+    if (!swept) {
+      return {};
+    }
+    result->sweep = *swept;
+    if (swept->registers_removed + swept->registers_trimmed + swept->registers_split + swept->cells_removed > 0) {
+      livehd::diag::info(from_pass, "state-swept", "progress")
+          .msg("{}: state sweep removed {} unobserved register(s) ({} bit(s)) and {} cell(s), narrowed {} and split {} "
+               "register(s), dropping {} unobserved register bit(s)",
+               from_pass,
+               swept->registers_removed,
+               swept->register_bits,
+               swept->cells_removed,
+               swept->registers_trimmed,
+               swept->registers_split,
+               swept->trimmed_bits)
+          .emit();
+    }
   }
   // The cells each definition holds before its carried loops are expanded:
   // reassociation works only on what the expansion mints (reassoc.hpp). Only

@@ -68,6 +68,12 @@ void Pass_abc::add_mapping_labels(Eprp_method& m) {
                        "true|false: run pass.specialize (constant instance inputs folded into state-free callees) on "
                        "the private copy after pass.color (default true; the synth.specialize spelling)",
                        "true");
+  m.add_label_optional("state_sweep",
+                       "true|false: delete the registers and cells that no output, memory or body-less cell can observe, and "
+                       "narrow each register to its highest observed bit, on the private copy after pass.specialize "
+                       "(default false; the synth.state_sweep spelling). Yosys does the same by flattening and opt_clean; "
+                       "pass/synth/state_sweep.hpp tracks the demand per bit across the instance hierarchy",
+                       "false");
   m.add_label_optional("reassoc",
                        "true|false: merge the And/Or/Xor chains an expanded carried loop leaves (`acc |= x` per "
                        "iteration, also the guarded `if c { acc |= x }`) into balanced n-ary cells before blasting "
@@ -791,7 +797,9 @@ void Pass_abc::map_with(Eprp_var& var, const std::function<void(livehd::abc::Map
                                       "pass.abc",
                                       nullptr,
                                       var.get("specialize", "true") != "false",
-                                      reassoc_text == "true");
+                                      reassoc_text == "true",
+                                      truthy(var.get("state_sweep", "false")),
+                                      var.get("top", ""));
   if (!prepared) {
     return;
   }

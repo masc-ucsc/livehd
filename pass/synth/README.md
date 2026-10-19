@@ -35,6 +35,30 @@ Remaining native synthesis work is tracked in [2u-usyn](../../todo/livehd/2u-usy
    ([`pass/satopt`](../satopt/README.md)) already ran in the compile step when
    explicitly enabled (`pass.satopt` defaults off for every command); the mapper maps what
    compile produced.
+   **State sweep** (`synth.state_sweep`, default false; `state_sweep.cpp`). On the
+   private copy, after `pass.specialize` and before the loops are prepared, a
+   register that no top output, no instance of a body-less cell (a Liberty cell,
+   a macro), no memory and no attribute cell can observe is deleted with the cells
+   behind it, and a register is kept only as far as its observed bits reach: the
+   demand is a per-bit set per driver pin, pushed backwards through the bitwise
+   cells, muxes, slices (`Get_mask`/`Set_mask`), concatenations, adds/multiplies
+   (low prefix) and constant left shifts -- every other cell demands all its operand
+   bits -- and across the instance hierarchy (a child output bit no instance reads
+   demands nothing inside the child; a child input bit the body never reads demands
+   nothing of its driver), to a fixpoint. A register whose highest observed bit is
+   below its width is narrowed to that bit (its Q pin restamped unsigned); one with
+   at least 8 unobserved bits below that bit becomes one single-bit register per
+   observed bit, named `reg[i]` as the bus-expansion standard names the bit of a bus
+   (so the mapped names, the LEC state pairing and the placement names stay those of
+   the source), and a Concat rebuilds the narrow value its readers saw. Definitions
+   instantiated by a compact loop are never touched. This is what Yosys gets from
+   flattening and `opt_clean` bit-wise; without it LiveHD maps and places dead
+   counters, unread CSR words and the unused upper half of wide primitive outputs
+   (liteeth: 18% of the mapped cells). `lhd synth --stats`/the step log report what
+   went (`state-swept`), `LIVEHD_STATE_SWEEP_DEBUG=1` dumps the per-definition
+   output demand and `LIVEHD_STATE_SWEEP_TRACE=<register name part>` prints why a
+   register stays observed. Covered by `//pass/synth:state_sweep_test` and, with an
+   unbounded LEC proof of the mapped result, `//lhd/tests:lhd_state_sweep_test`.
 2. **Modules.** `ware_module.cpp` extracts width-specialized arithmetic
    modules, `memory_module.cpp` lowers small or many-ported memories, and
    `loop_cleanup.cpp` prepares compact loops. An expanded iteration takes its

@@ -1088,6 +1088,12 @@ inline constexpr Synth_set_option kSynthSetOptions[] = {
      "run pass.specialize on the mapper's private copy after pass.color: a constant instance input is folded into a "
      "content-named copy of its state-free callee, and a constant a callee returns reaches its parent. false keeps "
      "every instance boundary as compiled"},
+    {"state_sweep",
+     "false",
+     Synth_set_option::Kind::boolean,
+     "opt in to the observability sweep of the mapper's private copy: delete the registers and cells that no output, memory or "
+     "body-less cell can observe and narrow each register to its highest observed bit, tracking the demand per bit across the "
+     "instance hierarchy (what Yosys gets from flattening and opt_clean). Off by default"},
     {"sdc", "", Synth_set_option::Kind::file, "PATH -- optional .sdc timing constraints handed to pass.opentimer"},
     {"spef", "", Synth_set_option::Kind::file, "PATH -- optional .spef parasitics handed to pass.opentimer"},
 };

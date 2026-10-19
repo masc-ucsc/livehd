@@ -1735,6 +1735,18 @@ sh_test(
     ],
 )
 
+# synth.state_sweep: unobserved registers and register bits leave the mapper's private
+# copy (across the hierarchy), proven equivalent to the source by the graph-native LEC.
+sh_test(
+    name = "lhd_state_sweep_test",
+    size = "small",
+    srcs = ["lhd_state_sweep_test.sh"],
+    data = _FLOW_DATA + [
+        "abc_arst_q.lib",
+        "state_sweep.v",
+    ],
+)
+
 # With pass.abc.derived_clock=true, a register clocked by the output of a module
 # instance (NVDLA's `slcg` wrapper around a flop-based clock gate) maps to a DFF cell
 # clocked by that instance's output; by default it stays a native flop
