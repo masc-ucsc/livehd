@@ -9,7 +9,7 @@
 namespace lean_export::detail {
 namespace {
 uint32_t resize(CertificateBuilder& b, const PinRef& pin, uint32_t width) {
-  const auto id = b.dep(pin, width);
+  const auto id = b.value_dep(pin, width);  // a narrower SIGNED value is sign-extended
   return b.emit({Operation::Or, 0, {}}, width, {id});
 }
 

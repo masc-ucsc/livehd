@@ -13086,3 +13086,86 @@ not relaxed and no acceptance gate is substituted.
   than relabelled "ca84bb0ec clean", which was a post-hoc equivalence.
 
 B01 remains BLOCKED: no certificate, no FP credit.
+
+## §63.89 — operand signedness in the exporter: compares, right shifts, narrow signed operands
+
+### 1. What was wrong
+LiveHD reads every pin as an INTEGER: two's complement at its width when the pin
+carries `pin_signed`, unsigned otherwise. An operator works on those integers.
+The certificate's operators (`LGraphModel.denote_op`) read their operands
+UNSIGNED and widen them by zero extension -- Sum, Mult, EQ, ULT/UGT, SHL,
+And/Or/Xor/Not, MuxBool/MuxN (`bv_resize`), flop and memory commits -- except
+SLT/SGT/SRA/SDiv, which read two's complement at the dep's own width. The
+exporter bridged that only for Div (b6d917c25). Everywhere else:
+
+1. **Compares** took SLT vs ULT from the comparison's own RESULT pin
+   (`node_output_is_signed`). The 1-bit result of `$signed(a) < $signed(b)` is an
+   unsigned pin, so a signed compare was certified as an unsigned one.
+2. **Right shifts.** LGraph has one shift-right op, SRA; on an UNSIGNED value it
+   is a logical shift (the value is non-negative). The exporter emitted Op_SRA on
+   the raw value, so `a >> k` with bit 31 set filled with ones.
+3. **Narrow signed operands** under a zero-extending read. LiveHD rewrites
+   `4'b1100` as the signed 3-bit -4; a 5-bit mux then read `100` as `00100`.
+
+Found from the contract-3 relation work. `sym_verify` refuted on the
+certificate a relation that yosys + cadical proved inductive on the same
+Verilog, and also on LiveHD's own Verilog emission of the same LGraph. Per-module
+equality designs (RTL copy vs gate copy, `ok` = outputs equal, checked by
+`sym_verify` with replayed counterexamples) localized it to `pico_isa`, then to
+the three shapes above.
+
+### 2. The fix (`certificate_ir.cpp`, `certificate_builder.hpp`, `memory_lowering.cpp`)
+- `value_dep(pin, w)` for every zero-extending read: a SIGNED node or source
+  narrower than `w` is first sign-extended (Op_Sext with amount = its own
+  width). Used for Sum, Mult, And/Or/Xor/Not, mux options, the SHL value, the
+  LiveHD Sext value, GetMask/SetMask values, flop `din`, outputs and memory
+  data/addresses (`resize`).
+- `signed_dep(pin)` for two's-complement reads: an unsigned operand gains a zero
+  bit (a one-dep Or resize) and a non-negative constant a sign bit, as Div
+  already did.
+- LT/GT: signedness from the OPERANDS (any signed operand or negative constant
+  -> SLT/SGT with `signed_dep` deps; else ULT/UGT unchanged).
+- EQ: every operand at one common width, plus a bit where signed and unsigned
+  operands meet; signed ones sign-extended to it.
+- SRA: an unsigned value goes through `signed_dep` (zero bit), so the shift
+  fills with zeros.
+- Constants keep their previous widths everywhere (their Int value already
+  carries the sign).
+
+### 3. Evidence
+- `certificate_ir_test`: 22 tests, 5 new (`CompareSignednessFollowsTheOperands
+  NotTheResult`, `SraOfAnUnsignedValueShiftsInZeros`,
+  `NarrowSignedOperandIsSignExtendedForAZeroExtendingRead`,
+  `EqualityOfMixedSignednessUsesOneWiderWidth`,
+  `MuxOptionSignedNarrowerIsSignExtended`). `ComparisonAndSextWidths` and two
+  `legacy_model_test` fixtures had encoded the old rule (`is_signed` on the
+  compare NODE); they now mark the operands. design_scan, legacy_model and
+  emit_dcert tests pass.
+- New RTL differential `scripts/sign_oracle.sh`: iverilog vs the certificate's
+  `interpretDesign`, 96 steps, every output identical. Controls differ: the same
+  certificate with SLT/SGT rewritten to ULT/UGT (the old export) on 79 of 96
+  steps; the RTL without `signed` on 75 of 96.
+- Existing oracles all PASS on the new binary: sdiv, setmask, reset_expr, row
+  (10), mem (29), be (28), clock (11), collide (28), hotmux (21, with
+  `TEST_BIN`), reset (44).
+- `sym_verify` equality designs (base case over all inputs, k=1), on the new
+  binary:
+  - operator matrix: 26 outputs, every combination of signed/unsigned and
+    narrow/wide operand;
+  - micro module: 14 outputs;
+  - the relation modules `pico_isa`, `pico_view`, `pico_view_c1`.
+
+  All PROVED. Before the fix, the matrix refuted 8 outputs and `pico_isa` 8.
+- `sym_selftest.sh` PASS; `dcert2_memroute --selftest` PASS.
+
+### 4. Impact
+Certificates change for every design with signed compares, logical right shifts
+of values with the top bit set, or narrow signed operands under a wider read.
+That covers essentially every word-level RTL row. Any FP/M2 comparison and M3
+invariant over an RTL-sourced certificate was about a certificate that could
+differ from the RTL in those places; those rows need re-running. Certificates
+read from bit-level AIGER netlists (only AND/NOT) are unaffected.
+
+Also found: the symbolic evaluator refuses a multiply of two symbolic operands
+(`Projection.Prim.mulI: unsupported operand shapes`). It is a separate M3 tool
+gap, not an exporter issue.

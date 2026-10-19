@@ -108,11 +108,15 @@ TEST(CertificateIR, GetMaskPositiveConstantValueKeepsItsOwnNarrowWidth) {
   EXPECT_EQ(value.width, 3);
 }
 TEST(CertificateIR, ComparisonAndSextWidths) {
-  auto d               = binary(ScanOp::LT, 1, input(2000000000, 8), constant("256", 9));
-  d.nodes[0].is_signed = true;
+  // A signed OPERAND makes the comparison signed; a non-negative constant then
+  // carries a zero sign bit (256 needs 9 bits, so 10).
+  auto signed_a        = input(2000000000, 8);
+  signed_a.is_signed   = true;
+  auto d               = binary(ScanOp::LT, 1, signed_a, constant("256", 9));
   auto c               = build_certificate(d, {});
   EXPECT_EQ(c.nodes[0].op.kind, Operation::SLT);
-  EXPECT_EQ(c.sources[0].width, 9);
+  EXPECT_EQ(c.sources[0].width, 10);
+  d                = binary(ScanOp::LT, 1, input(2000000000, 8), constant("256", 9));
   d.nodes[0].op    = ScanOp::Sext;
   d.nodes[0].width = 16;
   c                = build_certificate(d, {});
@@ -409,4 +413,105 @@ TEST(CertificateIR, EmitterAndAtomicFailureNeedNoGraph) {
   std::filesystem::remove(path);
 }
 }  // namespace
+
+// ---- operand signedness (the certificate's operators read unsigned and
+// zero-extend, except SLT/SGT/SRA/SDiv; LiveHD reads each pin as the integer
+// its own signedness gives)
+PinRef signed_in(uint32_t id, uint32_t width) {
+  auto p      = input(id, width);
+  p.is_signed = true;
+  return p;
+}
+TEST(CertificateIR, CompareSignednessFollowsTheOperandsNotTheResult) {
+  // `$signed(a) < $signed(b)` has an UNSIGNED 1-bit result: the result pin's
+  // signedness used to pick ULT.
+  auto d               = binary(ScanOp::LT, 1, signed_in(2000000000, 32), signed_in(2000000001, 32));
+  d.nodes[0].is_signed = false;
+  auto c               = build_certificate(d, {});
+  ASSERT_EQ(c.nodes.size(), 1);
+  EXPECT_EQ(c.nodes[0].op.kind, Operation::SLT);
+  // unsigned operands under a signed-looking result: still unsigned
+  d                    = binary(ScanOp::GT, 1, input(2000000000, 32), input(2000000001, 32));
+  d.nodes[0].is_signed = true;
+  c                    = build_certificate(d, {});
+  ASSERT_EQ(c.nodes.size(), 1);
+  EXPECT_EQ(c.nodes[0].op.kind, Operation::UGT);
+  // mixed: SLT, the unsigned operand gains a zero bit
+  d = binary(ScanOp::LT, 1, signed_in(2000000000, 8), input(2000000001, 4));
+  c = build_certificate(d, {});
+  ASSERT_EQ(c.nodes.size(), 2);
+  EXPECT_EQ(c.nodes[0].op.kind, Operation::Or);
+  EXPECT_EQ(c.nodes[0].width, 5);
+  EXPECT_EQ(c.nodes[1].op.kind, Operation::SLT);
+  EXPECT_EQ(c.nodes[1].deps, (std::vector<uint32_t>{2000000000, c.nodes[0].id}));
+}
+TEST(CertificateIR, SraOfAnUnsignedValueShiftsInZeros) {
+  // `a >> k` of an unsigned 32-bit `a` is an LGraph SRA whose value is
+  // non-negative: bv_sra must not read bit 31 as a sign.
+  auto d = binary(ScanOp::SRA, 32, input(2000000000, 32), input(2000000001, 5));
+  auto c = build_certificate(d, {});
+  ASSERT_EQ(c.nodes.size(), 2);
+  EXPECT_EQ(c.nodes[0].op.kind, Operation::Or);
+  EXPECT_EQ(c.nodes[0].width, 33);
+  EXPECT_EQ(c.nodes[1].op.kind, Operation::SRA);
+  EXPECT_EQ(c.nodes[1].deps, (std::vector<uint32_t>{c.nodes[0].id, 2000000001}));
+  // a signed value keeps its own width
+  d = binary(ScanOp::SRA, 32, signed_in(2000000000, 32), input(2000000001, 5));
+  c = build_certificate(d, {});
+  ASSERT_EQ(c.nodes.size(), 1);
+  EXPECT_EQ(c.nodes[0].deps, (std::vector<uint32_t>{2000000000, 2000000001}));
+}
+TEST(CertificateIR, NarrowSignedOperandIsSignExtendedForAZeroExtendingRead) {
+  // Sum reads its operands unsigned at the result width: a 3-bit signed -4
+  // (100) must read 11111100, not 00000100.
+  auto d = binary(ScanOp::Sum, 8, signed_in(2000000000, 3), input(2000000001, 8));
+  auto c = build_certificate(d, {});
+  ASSERT_EQ(c.nodes.size(), 2);
+  EXPECT_EQ(c.nodes[0].op.kind, Operation::Sext);
+  EXPECT_EQ(c.nodes[0].width, 8);
+  ASSERT_EQ(c.nodes[0].deps.size(), 2);
+  EXPECT_EQ(c.nodes[0].deps[0], 2000000000);
+  const auto amount = std::find_if(c.sources.begin(), c.sources.end(), [](const Source& s) { return s.kind == SourceKind::Const; });
+  ASSERT_NE(amount, c.sources.end());
+  EXPECT_EQ(amount->const_int, "3") << "sign position: the operand's own top bit";
+  EXPECT_EQ(c.nodes[1].op.kind, Operation::Sum);
+  EXPECT_EQ(c.nodes[1].deps, (std::vector<uint32_t>{c.nodes[0].id, 2000000001}));
+  // as wide as the read: no extension
+  d = binary(ScanOp::Sum, 8, signed_in(2000000000, 8), input(2000000001, 8));
+  c = build_certificate(d, {});
+  EXPECT_EQ(c.nodes.size(), 1);
+}
+TEST(CertificateIR, EqualityOfMixedSignednessUsesOneWiderWidth) {
+  // signed 3-bit -4 (100) against unsigned 3-bit 4 (100): different integers,
+  // the same bits. One extra bit separates them.
+  auto d = binary(ScanOp::EQ, 1, signed_in(2000000000, 3), input(2000000001, 3));
+  auto c = build_certificate(d, {});
+  ASSERT_EQ(c.nodes.size(), 2);
+  EXPECT_EQ(c.nodes[0].op.kind, Operation::Sext);
+  EXPECT_EQ(c.nodes[0].width, 4);
+  EXPECT_EQ(c.nodes[1].op.kind, Operation::EQ);
+}
+TEST(CertificateIR, MuxOptionSignedNarrowerIsSignExtended) {
+  // LiveHD rewrites 4'b1100 as the signed 3-bit -4; a 5-bit mux must read it
+  // as 11100 (bv_resize zero-extends).
+  DesignScan d;
+  d.name   = "tiny";
+  d.inputs = {
+      {"s", 2000000000, 1, std::nullopt},
+      {"a", 2000000001, 3, std::nullopt},
+      {"b", 2000000002, 5, std::nullopt}
+  };
+  d.nodes = {
+      {10, ScanOp::Mux, 5, false, {{0, 0, input(2000000000, 1)}, {1, 1, signed_in(2000000001, 3)}, {2, 2, input(2000000002, 5)}}}
+  };
+  d.outputs = {
+      {"y", 0, 5, PinRef{PinKind::Node, 10, 0, 5, 0, {}}}
+  };
+  auto c = build_certificate(d, {});
+  ASSERT_EQ(c.nodes.size(), 2);
+  EXPECT_EQ(c.nodes[0].op.kind, Operation::Sext);
+  EXPECT_EQ(c.nodes[0].width, 5);
+  EXPECT_EQ(c.nodes[1].op.kind, Operation::MuxBool);
+  EXPECT_EQ(c.nodes[1].deps, (std::vector<uint32_t>{2000000000, c.nodes[0].id, 2000000002}));
+}
 }  // namespace lean_export

@@ -41,5 +41,19 @@ struct CertificateBuilder {
   uint32_t                           dep(const PinRef& pin, uint32_t width);
   uint32_t                           pin_width(const PinRef& pin) const;
   uint32_t                           emit(Op op, uint32_t width, std::vector<uint32_t> deps);
+  // OPERAND SIGNEDNESS. LiveHD reads a pin as an INTEGER: two's complement at
+  // its width when the pin is signed, unsigned otherwise; an operator works on
+  // those integers. The certificate's operators read their operands UNSIGNED and
+  // widen them by zero extension (LGraphModel.denote_op: Sum, Mult, EQ, ULT,
+  // SHL, And/Or/Xor/Not, MuxBool/MuxN, flop and memory commits), except
+  // SLT/SGT/SRA/SDiv, which read two's complement at the operand's own width.
+  // `value_dep` presents an operand to a zero-extending read at `width`: a
+  // signed operand narrower than that is sign-extended first (Op_Sext), so the
+  // bits read are its value mod 2^width. `signed_dep` presents an operand to a
+  // two's-complement read: an unsigned operand gains a zero bit (an Or resize)
+  // and a non-negative constant a sign bit, so the value read is unchanged.
+  uint32_t                           value_dep(const PinRef& pin, uint32_t width);
+  uint32_t                           signed_dep(const PinRef& pin);
+  uint32_t                           const_dep(uint32_t value);
 };
 }  // namespace lean_export::detail
