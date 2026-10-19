@@ -624,6 +624,21 @@ protected:
     std::string         contents{std::istreambuf_iterator<char>(file), {}};
     rapidjson::Document json;
     json.Parse(contents.c_str());
+    if (!critical) {
+      livehd::opentimer::Physical_session session(var);
+      const auto                          feedback = session.evaluate(graph, rc);
+      const auto                          repeated = session.evaluate(graph, rc);
+      EXPECT_EQ(session.statistics().builds, 1u);
+      EXPECT_EQ(feedback.pins.size(), repeated.pins.size());
+      for (const auto& p : json["designs"][0]["physical_pins"].GetArray()) {
+        const auto& pin = feedback.pins.at(p["pin"].GetString());
+        EXPECT_EQ(pin.clock, p["clock"].GetBool());
+        EXPECT_EQ(pin.required.has_value(), p.HasMember("required"));
+        if (pin.required) {
+          EXPECT_NEAR(*pin.required, p["required"].GetDouble(), 1e-5);
+        }
+      }
+    }
     return json;
   }
   // Every addr/din/enable capture has a required time; clock pins have none.

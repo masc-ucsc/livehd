@@ -315,4 +315,36 @@ TEST(ColorCentroids, ColorLeafInheritsParentSnapTranslationOnly) {
     }
   }
 }
+
+TEST(ColorCentroids, WholeCirclesFitCoreAfterParentTranslation) {
+  const dp::Layout                       layout{0, 0, 100, 100, 1, 1};
+  const std::vector<dp::FloorplanCircle> circles = {
+      {"parent0",  2, 30, 10, 100, 0, -1},
+      {"parent1",  5, 70, 10, 100, 0, -1},
+      {  "child", 90, 40,  8,  64, 1,  0},
+      {  "color", 98, 95,  5,  25, 2,  0},
+  };
+  const auto result = snap_centroid_targets(circles, 3, layout, {});
+  ASSERT_TRUE(result.feasible);
+  EXPECT_EQ(result.maximum_boundary_violation, 0);
+  for (const auto& c : result.circles) {
+    EXPECT_GE(c.x - c.radius, layout.xl);
+    EXPECT_LE(c.x + c.radius, layout.xh);
+    EXPECT_GE(c.y - c.radius, layout.yl);
+    EXPECT_LE(c.y + c.radius, layout.yh);
+  }
+  for (const auto& relation : result.relations) {
+    for (int node : relation.nodes) {
+      EXPECT_LT(node, 3);
+    }
+  }
+  EXPECT_THROW(snap_centroid_targets(
+                   {
+                       {"large", 50, 50, 60, 3600, 0, -1}
+  },
+                   1,
+                   layout,
+                   {}),
+               std::runtime_error);
+}
 }  // namespace livehd::placement

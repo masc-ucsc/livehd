@@ -283,6 +283,14 @@ TEST(Placement, MappedBusGraphLegalityRcAndReuse) {
     pins.fp_colors                                        = false;
     pins.fp_pin_interval                                  = 5;
     pins.io_iterations = pins.fp_iterations = pins.iterations = 20;
+    // Automatic imported PLACED terminals must remain movable when opted in.
+    const auto pin_input                                      = root / "movable_pins.def";
+    physical::write_def(placed.floorplan, pin_input.string());
+    pins.floorplan          = pin_input.string();
+    auto forbidden          = pins;
+    forbidden.fp_pin_adjust = false;
+    hhds::GraphLibrary rejected_library;
+    EXPECT_THROW(place(*graph, rejected_library, forbidden), std::runtime_error);
     hhds::GraphLibrary  pin_library;
     const auto          result = place(*graph, pin_library, pins);
     std::ifstream       report_file(pins.output_dir + "/macro/fp_place.json");
@@ -2000,16 +2008,19 @@ TEST(Placement, PlacementColorsUseLibertyRolesAndPinsMoveWithoutSta) {
   o.liberty    = (dir / "ram.lib").string();
   o.output_dir = (dir / "out").string();
   o.fp_place = o.fp_colors = o.fp_pin_adjust = true;
+  o.macro_pin_adjust                         = true;
+  o.macro_pin_interval                       = 5;
   for (const auto* color_source : {"placement", "memory_first"}) {
-    o.fp_color_source  = color_source;
-    o.fp_color_minimum = 0;
-    o.fp_iterations    = 40;
-    o.iterations       = 20;
-    o.io_iterations    = 10;
-    o.fp_pin_interval  = 5;
-    o.bins             = 8;
-    o.utilization      = .05;
-    const auto result  = place(*graph, flat, o);
+    o.fp_anchor_macros_only = true;
+    o.fp_color_source       = color_source;
+    o.fp_color_minimum      = 0;
+    o.fp_iterations         = 40;
+    o.iterations            = 20;
+    o.io_iterations         = 10;
+    o.fp_pin_interval       = 5;
+    o.bins                  = 8;
+    o.utilization           = .05;
+    const auto result       = place(*graph, flat, o);
     EXPECT_NO_THROW(check_legality(physical::read_lef(o.lefs), result.floorplan));
     const auto read_json = [&](const std::string& name) {
       std::ifstream       file(dir / "out" / name);
@@ -2028,11 +2039,13 @@ TEST(Placement, PlacementColorsUseLibertyRolesAndPinsMoveWithoutSta) {
     auto report = read_json("fp_place.json");
     ASSERT_FALSE(report.HasParseError());
     EXPECT_TRUE(report["distance_attraction"].GetBool());
+    EXPECT_TRUE(report["fixed_anchor_macros_only"].GetBool());
     EXPECT_EQ(report["attraction_outside"].GetDouble(), 4);
     EXPECT_GT(report["fp_attraction_coefficient"].GetDouble(), 0);
     EXPECT_GT(report["macro_attraction_coefficient"].GetDouble(), 0);
     EXPECT_EQ(report["macro_attraction_calibration_iteration"].GetInt(), 0);
     EXPECT_GE(report["pin_updates"].GetUint64(), 2);
+    EXPECT_GE(report["macro_pin_updates"].GetUint64(), 1);
     EXPECT_GT(report["fp_iterations"].GetInt(), 0);
     for (auto node : graph->body().nodes()) {
       if (auto a = node.attr(attrs::synth_color_group); a.has()) {
@@ -2048,11 +2061,43 @@ TEST(Placement, PlacementColorsUseLibertyRolesAndPinsMoveWithoutSta) {
       EXPECT_EQ(it->y, t.y);
     }
   }
-  o.analyze_colors_only = true;
-  o.final_cells         = false;
-  o.fp_evaluate         = [](const Result&) -> Timing_feedback { throw std::runtime_error("analysis invoked STA"); };
-  o.output_dir          = (dir / "analysis").string();
-  const auto analysis   = place(*graph, flat, o);
+  // Without FP, macro GP still owns IO movement. A fixed macro/IO handoff
+  // suppresses that callback in the final cell solve, even with the flag set.
+  o.fp_place = o.fp_colors = o.fp_pin_adjust = false;
+  o.output_dir                               = (dir / "macro_only").string();
+  o.floorplan                                = (dir / "out/out.def").string();
+  const auto macro_only                      = place(*graph, flat, o);
+  EXPECT_TRUE(std::filesystem::exists(dir / "macro_only/macro_pins.jsonl"));
+  EXPECT_FALSE(std::filesystem::exists(dir / "macro_only/fp_pins.jsonl"));
+  auto       frame = macro_only.floorplan;
+  const auto tech  = physical::read_lef(o.lefs);
+  for (auto& c : frame.components) {
+    if (!tech.macros.at(c.macro).klass.starts_with("CORE")) {
+      c.place.status = physical::Status::FIXED;
+    }
+  }
+  for (auto& t : frame.terminals) {
+    t.status = physical::Status::FIXED;
+  }
+  o.floorplan = (dir / "fixed.def").string();
+  physical::write_def(frame, o.floorplan);
+  o.output_dir     = (dir / "final").string();
+  const auto final = place(*graph, flat, o);
+  EXPECT_FALSE(std::filesystem::exists(dir / "final/macro_pins.jsonl"));
+  for (const auto& t : final.floorplan.terminals) {
+    const auto it = std::find_if(frame.terminals.begin(), frame.terminals.end(), [&](const auto& p) { return p.name == t.name; });
+    ASSERT_NE(it, frame.terminals.end());
+    EXPECT_EQ(t.x, it->x);
+    EXPECT_EQ(t.y, it->y);
+    EXPECT_EQ(t.status, physical::Status::FIXED);
+  }
+  o.floorplan.clear();
+  o.fp_place = o.fp_colors = true;
+  o.analyze_colors_only    = true;
+  o.final_cells            = false;
+  o.fp_evaluate            = [](const Result&) -> Timing_feedback { throw std::runtime_error("analysis invoked STA"); };
+  o.output_dir             = (dir / "analysis").string();
+  const auto analysis      = place(*graph, flat, o);
   EXPECT_TRUE(std::filesystem::exists(dir / "analysis/fp_placement_colors.json"));
   EXPECT_FALSE(std::filesystem::exists(dir / "analysis/fp_gp.json"));
   EXPECT_FALSE(std::filesystem::exists(dir / "analysis/gp_history.json"));

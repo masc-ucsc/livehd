@@ -1,6 +1,7 @@
 // This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 // Native repair-only diagnostic: retain a supplied placement and compare fresh
 // placement-RC timing before/after repair, without synthesis or global placement.
+#include <algorithm>
 #include <chrono>
 #include <cmath>
 #include <filesystem>
@@ -28,44 +29,15 @@ std::string read(const std::string& path) {
   return {std::istreambuf_iterator<char>(file), {}};
 }
 
-// Keep callback cost separate from placement and repair wall time. The engine
-// interval includes report generation; feedback measures reading/parsing it.
-pl::Timing_feedback evaluate_timing(const pl::Result& placed, const std::string& root, unsigned& serial, const std::string& liberty,
-                                    const std::string& sdc, const std::string& top) {
-  const auto start  = std::chrono::steady_clock::now();
-  const auto call   = serial++;
-  const auto report = root + "/timing_" + std::to_string(call) + ".json";
-  Eprp_var   analysis;
-  analysis.graphs      = {placed.graph};
-  analysis.physical_rc = placed.parasitics;
-  analysis.dict        = {
-      {"files", liberty + "," + sdc},
-      {  "top",                 top},
-      { "hier",             "false"},
-      {  "qor",              report}
-  };
-  analysis.set_stage_labels(analysis.dict);
-  Pass_opentimer::time_work(analysis);
-  const auto timed                                = std::chrono::steady_clock::now();
-  auto       feedback                             = pl::timing_feedback(read(report));
-  feedback.source_report                          = report;
-  const auto                                 done = std::chrono::steady_clock::now();
-  rapidjson::StringBuffer                    json;
-  rapidjson::Writer<rapidjson::StringBuffer> w(json);
-  w.StartObject();
-  w.Key("call");
-  w.Uint(call);
-  w.Key("engine_and_report_s");
-  w.Double(std::chrono::duration<double>(timed - start).count());
-  w.Key("feedback_parse_s");
-  w.Double(std::chrono::duration<double>(done - timed).count());
-  w.Key("total_s");
-  w.Double(std::chrono::duration<double>(done - start).count());
-  w.Key("report_bytes");
-  w.Uint64(std::filesystem::file_size(report));
-  w.EndObject();
-  std::ofstream(root + "/timing_calls.jsonl", call ? std::ios::app : std::ios::trunc) << json.GetString() << '\n';
-  return feedback;
+Eprp_var timing_options(const std::string& liberty, const std::string& sdc, const std::string& top) {
+  Eprp_var options;
+  options.dict = {{"files", liberty + (sdc.empty() ? "" : "," + sdc)}, {"top", top}, {"hier", "false"}};
+  options.set_stage_labels(options.dict);
+  return options;
+}
+pl::Timing_feedback evaluate_timing(const pl::Result& placed, livehd::opentimer::Physical_session& session, unsigned& serial) {
+  ++serial;
+  return session.evaluate(placed.graph, placed.parasitics);
 }
 
 // Import the mapped DEF connectivity directly: no HDL optimization may delete
@@ -403,6 +375,9 @@ int main(int argc, char** argv) {
         if (config.HasMember("fp_colors")) {
           options.fp_colors = config["fp_colors"].GetBool();
         }
+        if (config.HasMember("fp_anchor_macros_only")) {
+          options.fp_anchor_macros_only = config["fp_anchor_macros_only"].GetBool();
+        }
         if (config.HasMember("fp_distance_attraction")) {
           options.fp_distance_attraction = config["fp_distance_attraction"].GetBool();
         }
@@ -423,6 +398,39 @@ int main(int argc, char** argv) {
         }
         if (config.HasMember("fp_pin_interval")) {
           options.fp_pin_interval = config["fp_pin_interval"].GetInt();
+        }
+        if (config.HasMember("macro_pin_adjust")) {
+          options.macro_pin_adjust = config["macro_pin_adjust"].GetBool();
+        }
+        if (config.HasMember("macro_pin_interval")) {
+          options.macro_pin_interval = config["macro_pin_interval"].GetInt();
+        }
+        if (config.HasMember("macro_pin_step")) {
+          options.macro_pin_step = config["macro_pin_step"].GetDouble();
+        }
+        if (config.HasMember("macro_pin_improvement")) {
+          options.macro_pin_improvement = config["macro_pin_improvement"].GetDouble();
+        }
+        if (config.HasMember("final_cells")) {
+          options.final_cells = config["final_cells"].GetBool();
+        }
+        if (config.HasMember("fp_parent_weight")) {
+          options.fp_parent_weight = config["fp_parent_weight"].GetDouble();
+        }
+        if (config.HasMember("fp_parent_outside")) {
+          options.fp_parent_outside = config["fp_parent_outside"].GetDouble();
+        }
+        if (config.HasMember("fp_align_weight")) {
+          options.fp_align_weight = config["fp_align_weight"].GetDouble();
+        }
+        if (config.HasMember("fp_align_sigma")) {
+          options.fp_align_sigma = config["fp_align_sigma"].GetDouble();
+        }
+        if (config.HasMember("fp_align_start")) {
+          options.fp_align_start = config["fp_align_start"].GetInt();
+        }
+        if (config.HasMember("fp_align_full")) {
+          options.fp_align_full = config["fp_align_full"].GetInt();
         }
         if (config.HasMember("fp_iterations")) {
           options.fp_iterations = config["fp_iterations"].GetInt();
@@ -451,9 +459,10 @@ int main(int argc, char** argv) {
         std::ofstream(root + "/qor.json") << analysis.qor;
         return 0;
       }
+      livehd::opentimer::Physical_session timing_session(timing_options(options.liberty, sdc, top));
       unsigned   serial = 0;
       const auto raw_evaluate
-          = [&](const pl::Result& placed) { return evaluate_timing(placed, root, serial, options.liberty, sdc, top); };
+          = [&](const pl::Result& placed) { return evaluate_timing(placed, timing_session, serial); };
       pl::Evaluate evaluate     = raw_evaluate;
       const auto   start        = std::chrono::steady_clock::now();
       auto         seed_options = options;
@@ -511,6 +520,7 @@ int main(int argc, char** argv) {
         };
       }
       const auto        timing_rounds = config.HasMember("timing_rounds") ? config["timing_rounds"].GetUint() : 0;
+      const bool        run_resize    = config.HasMember("resize") && config["resize"].GetBool();
       pl::Repair_result refined;
       if (timing_rounds) {
         refined = pl::timing_place(std::move(state), options, evaluate, timing_rounds);
@@ -519,8 +529,23 @@ int main(int argc, char** argv) {
         refined.report = "{\"model\":\"placement_only\",\"rounds\":[],\"accepted\":0}";
       }
       std::ofstream(root + "/timing_place.json") << refined.report;
-      auto& result = refined.placed;
+      const auto        timing_placed = std::chrono::steady_clock::now();
+      pl::Repair_result sized, repaired;
+      if (run_resize) {
+        sized
+            = pl::repair_buffers(std::move(refined.placed), options, evaluate, pl::Repair_scope::sizing, std::move(refined.timing));
+        std::ofstream(root + "/resize.json") << sized.report;
+      }
+      const auto sized_at = std::chrono::steady_clock::now();
+      if (run_resize) {
+        repaired
+            = pl::repair_buffers(std::move(sized.placed), options, evaluate, pl::Repair_scope::design, std::move(sized.timing));
+        std::ofstream(root + "/repair.json") << repaired.report;
+      }
+      const auto repaired_at = std::chrono::steady_clock::now();
+      auto&      result      = run_resize ? repaired.placed : refined.placed;
       raw_evaluate(result);
+      const auto                                 timed_at = std::chrono::steady_clock::now();
       rapidjson::StringBuffer                    weights_json;
       rapidjson::Writer<rapidjson::StringBuffer> weights_writer(weights_json);
       weights_writer.StartObject();
@@ -536,36 +561,69 @@ int main(int argc, char** argv) {
       for (const auto& cell : (floorplan_mode ? seed.floorplan.components : input->components)) {
         originals.emplace(cell.name, &cell);
       }
-      if (options.fp_resize) {
-        originals.clear();
-      }
-      if (!options.fp_resize && result.floorplan.components.size() != originals.size()) {
+      const bool editable = options.fp_resize || run_resize;
+      if (!editable && result.floorplan.components.size() != originals.size()) {
         throw std::runtime_error("cell placement changed component count");
       }
       unsigned fixed = 0;
       for (const auto& cell : result.floorplan.components) {
-        if (options.fp_resize) {
+        const auto original = originals.find(cell.name);
+        if (original == originals.end()) {
+          if (!editable) {
+            throw std::runtime_error("unexpected placement component: " + cell.name);
+          }
           continue;
         }
-        const auto& old = *originals.at(cell.name);
-        if (cell.macro != old.macro) {
+        const auto& old = *original->second;
+        if (!editable && cell.macro != old.macro) {
           throw std::runtime_error("cell placement changed master: " + cell.name);
         }
         if (old.place.status == ph::Status::FIXED || old.place.status == ph::Status::LOCKED) {
           ++fixed;
-          if (cell.place.x != old.place.x || cell.place.y != old.place.y || cell.place.orientation != old.place.orientation) {
+          if (cell.macro != old.macro || cell.place.x != old.place.x || cell.place.y != old.place.y
+              || cell.place.orientation != old.place.orientation) {
             throw std::runtime_error("cell placement moved fixed component: " + cell.name);
           }
         }
       }
+      const auto expected_fixed = std::count_if(originals.begin(), originals.end(), [](const auto& entry) {
+        const auto status = entry.second->place.status;
+        return status == ph::Status::FIXED || status == ph::Status::LOCKED;
+      });
+      if (static_cast<std::ptrdiff_t>(fixed) != expected_fixed) {
+        throw std::runtime_error("cell placement removed a fixed component");
+      }
       std::ofstream(root + "/qor.json") << result.qor << '\n';
       ph::write_def(result.floorplan, root + "/out.def");
+      // Physical repair can change masters and topology. Preserve that exact
+      // graph for a separately invoked fixed-macro cell stage.
+      if (editable) {
+        hhds::GraphLibrary output;
+        if (!livehd::copy_with_callees(output, *result.graph->get_io()->get_library(), top)) {
+          throw std::runtime_error("cannot save placed graph");
+        }
+        output.save(root + "/lg");
+      }
       const auto done = std::chrono::steady_clock::now();
       std::ofstream(root + "/runtime.json") << "{\"seed_s\":" << std::chrono::duration<double>(seeded - start).count()
                                             << ",\"place_s\":" << std::chrono::duration<double>(placed - seeded).count()
+                                            << ",\"timing_place_s\":"
+                                            << std::chrono::duration<double>(timing_placed - placed).count()
+                                            << ",\"sizing_s\":" << std::chrono::duration<double>(sized_at - timing_placed).count()
+                                            << ",\"repair_s\":" << std::chrono::duration<double>(repaired_at - sized_at).count()
+                                            << ",\"endpoint_sta_s\":"
+                                            << std::chrono::duration<double>(timed_at - repaired_at).count()
+                                            << ",\"export_s\":" << std::chrono::duration<double>(done - timed_at).count()
                                             << ",\"timing_refine_s\":" << std::chrono::duration<double>(done - placed).count()
-                                            << ",\"fixed_components\":" << fixed << ",\"timing_evaluations\":" << serial << "}\n";
+                                            << ",\"fixed_components\":" << fixed << ",\"timing_evaluations\":" << serial
+                                            << ",\"timing_engine_s\":" << timing_session.statistics().seconds
+                                            << ",\"timing_builds\":" << timing_session.statistics().builds
+                                            << ",\"timing_repowered_gates\":" << timing_session.statistics().repowered_gates
+                                            << ",\"timing_inserted_gates\":" << timing_session.statistics().inserted_gates
+                                            << ",\"timing_removed_gates\":" << timing_session.statistics().removed_gates
+                                            << ",\"timing_updated_rc_nets\":" << timing_session.statistics().updated_nets << "}\n";
       std::cout << (floorplan_mode ? "Floorplan/macro/cell placement completed"
+                    : editable     ? "Cell placement and repair completed; fixed components unchanged"
                                    : "Cell placement completed; component masters and fixed positions unchanged")
                 << std::endl;
       return 0;
@@ -607,8 +665,9 @@ int main(int argc, char** argv) {
       state.parasitics = std::move(rc);
     }
     unsigned   serial = 0;
+    livehd::opentimer::Physical_session timing_session(timing_options(options.liberty, sdc, top));
     const auto evaluate
-        = [&](const pl::Result& placed) { return evaluate_timing(placed, root, serial, options.liberty, sdc, top); };
+        = [&](const pl::Result& placed) { return evaluate_timing(placed, timing_session, serial); };
     if (options.retain_placement) {
       std::ofstream(root + "/parasitics.json") << ph::serialize_parasitics(*state.parasitics);
     }
@@ -635,9 +694,14 @@ int main(int argc, char** argv) {
                                            std::move(sizing.timing));
     std::ofstream(root + (repair_first ? "/resize.json" : "/repair.json")) << repair.report;
     const auto repaired = std::chrono::steady_clock::now();
-    std::filesystem::copy_file(repair.timing->source_report,
-                               root + "/final_timing.json",
-                               std::filesystem::copy_options::overwrite_existing);
+    // The diagnostic's final report is an output artifact, not feedback.
+    // The optimizer never reads it or writes reports for candidate trials.
+    auto report = timing_options(options.liberty, sdc, top);
+    report.graphs = {repair.placed.graph};
+    report.physical_rc = repair.placed.parasitics;
+    report.dict["qor"] = root + "/final_timing.json";
+    report.set_stage_labels(report.dict);
+    Pass_opentimer::time_work(report);
     ph::write_def(repair.placed.floorplan, root + "/out.def");
     std::ofstream colors(root + "/colors.tsv");
     for (auto node : repair.placed.graph->body().nodes()) {
@@ -658,7 +722,13 @@ int main(int argc, char** argv) {
                                           << std::chrono::duration<double>(repair_first ? repaired - sized : sized - start).count()
                                           << ",\"repair_s\":"
                                           << std::chrono::duration<double>(repair_first ? sized - start : repaired - sized).count()
-                                          << ",\"timing_evaluations\":" << serial << "}\n";
+                                          << ",\"timing_evaluations\":" << serial
+                                          << ",\"timing_engine_s\":" << timing_session.statistics().seconds
+                                          << ",\"timing_builds\":" << timing_session.statistics().builds
+                                          << ",\"timing_repowered_gates\":" << timing_session.statistics().repowered_gates
+                                          << ",\"timing_inserted_gates\":" << timing_session.statistics().inserted_gates
+                                          << ",\"timing_removed_gates\":" << timing_session.statistics().removed_gates
+                                          << ",\"timing_updated_rc_nets\":" << timing_session.statistics().updated_nets << "}\n";
     return 0;
   } catch (const std::exception& error) {
     std::cerr << error.what() << '\n';

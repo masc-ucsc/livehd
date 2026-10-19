@@ -22,11 +22,11 @@ namespace {
 namespace gu = graph_util;
 class Buffer_repair : public ::testing::Test {
 protected:
-  hhds::GraphLibrary           source, flat;
-  std::shared_ptr<hhds::Graph> graph;
-  Options                      options;
-  unsigned                     serial = 0;
-  void                         SetUp() override {
+  hhds::GraphLibrary                                   source, flat;
+  std::shared_ptr<hhds::Graph>                         graph;
+  Options                                              options;
+  std::unique_ptr<livehd::opentimer::Physical_session> timing_session;
+  void                                                 SetUp() override {
     // Repair fixtures use a controlled plain frame, independent of the
     // production floorplan/macro pipeline and its density policy.
     options.fp_place = options.final_cells = options.macro_snap = false;
@@ -101,22 +101,20 @@ protected:
     return value;
   }
   Timing_feedback timing(const Result& state) {
-    const auto path = options.output_dir + "/timing_" + std::to_string(serial++) + ".json";
-    const auto sdc  = options.output_dir + "/clock.sdc";
-    std::ofstream(sdc) << "create_clock -name virtual -period 10\nset_input_delay -clock virtual 0 [all_inputs]\nset_output_delay "
-                          "-clock virtual 0 [all_outputs]\n";
-    Eprp_var var;
-    var.graphs        = {state.graph};
-    var.physical_rc   = state.parasitics;
-    var.dict["files"] = options.liberty + "," + sdc;
-    var.dict["top"]   = "top";
-    var.dict["hier"]  = "false";
-    var.dict["qor"]   = path;
-    var.set_stage_labels(var.dict);
-    Pass_opentimer::time_work(var);
-    std::ifstream     input(path);
-    const std::string text{std::istreambuf_iterator<char>(input), {}};
-    return timing_feedback(text);
+    if (!timing_session) {
+      const auto sdc = options.output_dir + "/clock.sdc";
+      std::ofstream(sdc) << "create_clock -name virtual -period 10\nset_input_delay -clock virtual 0 "
+                            "[all_inputs]\nset_output_delay -clock virtual 0 [all_outputs]\n";
+      Eprp_var var;
+      var.dict = {
+          {"files", options.liberty + "," + sdc},
+          {  "top",                       "top"},
+          { "hier",                     "false"}
+      };
+      var.set_stage_labels(var.dict);
+      timing_session = std::make_unique<livehd::opentimer::Physical_session>(var);
+    }
+    return timing_session->evaluate(state.graph, state.parasitics);
   }
   // Independent identity/inversion interpretation of the repaired netlist.
   // Every primary output must still be an inverter of a, through any number
@@ -662,6 +660,7 @@ TEST_F(Buffer_repair, FloorplanTimingCheckpointsAreScopedAndResizeRunsStaTwice) 
   options.fp_iterations                                      = 120;
   options.iterations                                         = 40;
   options.fp_timing_interval                                 = 50;
+  options.utilization                                        = .1;  // The full centroid circle must fit inside the core.
   for (unsigned mode = 0; mode < 3; ++mode) {
     const bool resize = mode != 0, accept = mode == 1;
     unsigned   calls    = 0;
@@ -816,7 +815,8 @@ TEST_F(Buffer_repair, FloorplanDensityGateDefersTimingAndRepairUntilTheCap) {
   auto b = gate("sky130_fd_sc_hd__buf_1", "buffer", graph->get_input_pin("a"));
   graph->get_output_pin("y").connect_driver(gate("sky130_fd_sc_hd__inv_1", "macro", b));
   enable_floorplan();
-  options.density                 = .0001;  // Deliberately impossible for this fixed area.
+  options.density = .0001;                             // Deliberately tight for the coarse 8x8 density map.
+  options.die = options.core      = {0, 0, 500, 500};  // Keep the area/density centroid circle feasible.
   options.fp_timing_after_density = true;
   options.fp_timing_movement      = 1e9;
   unsigned calls                  = 0;

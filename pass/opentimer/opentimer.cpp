@@ -2170,7 +2170,7 @@ double Pass_opentimer::endpoint_tns(ot::Split split) {
   bool comma          = false;
   for (const auto& [name, slack] : endpoints) {
     total += std::min(0.0f, slack);
-    if (slack < 0) {
+    if (slack < 0 && !feedback_) {
       if (comma) {
         negative_endpoints_ += ',';
       }
@@ -2246,7 +2246,8 @@ void Pass_opentimer::compute_timing(const std::shared_ptr<hhds::Graph>& g) {
       continue;
     }
 
-    auto instance_name = inst_of(node, hier_mode_);
+    const auto physical_name = physical_instances_.empty() ? physical_instances_.end() : physical_instances_.find(std::string(node.get_name()));
+    auto       instance_name = physical_name != physical_instances_.end() ? physical_name->second : inst_of(node, hier_mode_);
     inst2node.emplace(instance_name, node);
 
     Color_qor* color_row = nullptr;
@@ -2343,7 +2344,7 @@ void Pass_opentimer::compute_timing(const std::shared_ptr<hhds::Graph>& g) {
       }
     }
   }
-  if (!max_pin.empty()) {
+  if (!max_pin.empty() && !feedback_) {
     if (margin) {
       margin_delay = (max_delay / 100.0) * (100 - margin);
       std::print("slowest delay:{} pin:{} margin:{}% (margin_delay:{})\n", max_delay, max_pin, margin, margin_delay);
@@ -2352,7 +2353,8 @@ void Pass_opentimer::compute_timing(const std::shared_ptr<hhds::Graph>& g) {
     }
   }
 
-  if (qor_path.empty()) {
+  const bool render = !qor_path.empty();
+  if (!render && !feedback_) {
     return;
   }
 
@@ -2443,7 +2445,9 @@ void Pass_opentimer::compute_timing(const std::shared_ptr<hhds::Graph>& g) {
   std::sort(arrivals.begin(), arrivals.end(), [](const Arrival& a, const Arrival& b) { return a.delay > b.delay; });
   constexpr size_t kMaxEndpoints = 10;
 
-  std::string j = std::format("{{\"module\":\"{}\"", jesc(report_module_.empty() ? std::string{g->get_name()} : report_module_));
+  std::string j
+      = render ? std::format("{{\"module\":\"{}\"", jesc(report_module_.empty() ? std::string{g->get_name()} : report_module_))
+               : std::string{};
   bool        timing_cells_complete = true;
   std::string incomplete_cell;
   bool        area_cells_complete = true;
@@ -2457,6 +2461,9 @@ void Pass_opentimer::compute_timing(const std::shared_ptr<hhds::Graph>& g) {
       if (!cell) {
         timing_cells_complete = false;
         area_cells_complete   = false;
+        if (incomplete_cell.empty()) {
+          incomplete_cell = gate.cell_name() + " (not in Liberty)";
+        }
         continue;
       }
       const bool interface_only = std::none_of(cell->cellpins.begin(), cell->cellpins.end(), [](const auto& entry) {
@@ -2533,29 +2540,48 @@ void Pass_opentimer::compute_timing(const std::shared_ptr<hhds::Graph>& g) {
         .msg("critical annotations require complete cell timing tables in the supplied Liberty corners: {}", incomplete_cell)
         .fatal();
   }
-  j += clock_qor_json();
+  if (feedback_) {
+    if (!timing_cells_complete || !area_cells_complete) {
+      throw std::runtime_error("physical timing requires complete cell timing and area feedback (e.g. " + incomplete_cell
+                               + ")");
+    }
+    feedback_->delay = max_delay;
+    feedback_->area  = known_area;
+    if (const auto wns = timer.report_wns(ot::MAX); wns && std::isfinite(*wns)) {
+      feedback_->wns = *wns;
+    }
+    feedback_->tns = endpoint_tns(ot::MAX);
+    if (const auto hold = timer.report_wns(ot::MIN); hold && std::isfinite(*hold)) {
+      feedback_->hold_wns = *hold;
+    }
+  }
+  if (render) {
+    j += clock_qor_json();
+  }
   std::unordered_map<std::string, std::pair<unsigned, double>> electrical_pins;
   if (physical_rc_) {
-    j += std::format(
-        ",\"case_analysis\":{{\"constant_nets\":{},\"disabled_arcs\":{},\"narrowed_arcs\":{},\"disabled_conditional_arcs\":{}}}",
-        case_constants_,
-        case_disabled_,
-        case_narrowed_,
-        case_conditions_);
-    j += std::format(",\"parasitics\":{{\"model\":\"placement_flute\",\"identity\":\"{}\",\"approximate\":{},\"nets\":{}}}",
-                     physical_rc_->identity,
-                     physical_rc_->approximate,
-                     physical_rc_->nets.size());
-    if (const auto wns = timer.report_wns(ot::MAX); wns && std::isfinite(*wns)) {
-      j += std::format(",\"wns\":{:.9g}", *wns);
-    }
-    j += std::format(",\"tns\":{:.12g},\"tns_model\":\"worst_per_endpoint\"", endpoint_tns(ot::MAX));
-    j += ",\"negative_setup_endpoints\":" + negative_endpoints_;
-    if (const auto hold = timer.report_wns(ot::MIN); hold && std::isfinite(*hold)) {
-      j += std::format(",\"hold_wns\":{:.9g}", *hold);
-    }
-    if (!physical_native_pins_.empty()) {
-      j += ",\"memory_timing_model\":\"clock_boundary_zero_internal_delay\"";
+    if (render) {
+      j += std::format(
+          ",\"case_analysis\":{{\"constant_nets\":{},\"disabled_arcs\":{},\"narrowed_arcs\":{},\"disabled_conditional_arcs\":{}}}",
+          case_constants_,
+          case_disabled_,
+          case_narrowed_,
+          case_conditions_);
+      j += std::format(",\"parasitics\":{{\"model\":\"placement_flute\",\"identity\":\"{}\",\"approximate\":{},\"nets\":{}}}",
+                       physical_rc_->identity,
+                       physical_rc_->approximate,
+                       physical_rc_->nets.size());
+      if (const auto wns = timer.report_wns(ot::MAX); wns && std::isfinite(*wns)) {
+        j += std::format(",\"wns\":{:.9g}", *wns);
+      }
+      j += std::format(",\"tns\":{:.12g},\"tns_model\":\"worst_per_endpoint\"", endpoint_tns(ot::MAX));
+      j += ",\"negative_setup_endpoints\":" + negative_endpoints_;
+      if (const auto hold = timer.report_wns(ot::MIN); hold && std::isfinite(*hold)) {
+        j += std::format(",\"hold_wns\":{:.9g}", *hold);
+      }
+      if (!physical_native_pins_.empty()) {
+        j += ",\"memory_timing_model\":\"clock_boundary_zero_internal_delay\"";
+      }
     }
     // Normalize electrical violations into counts and a dimensionless excess.
     // The optimizer must not trade a new slew/cap/fanout violation for slack.
@@ -2594,27 +2620,36 @@ void Pass_opentimer::compute_timing(const std::shared_ptr<hhds::Graph>& g) {
         }
       }
     }
-    j += std::format(",\"electrical\":{{\"violations\":{},\"excess\":{:.9g}}}", violations, excess);
-    j += ",\"electrical_pin_feedback\":true";
+    if (feedback_) {
+      feedback_->violations              = violations;
+      feedback_->electrical_excess       = excess;
+      feedback_->electrical_pin_feedback = true;
+    }
+    if (render) {
+      j += std::format(",\"electrical\":{{\"violations\":{},\"excess\":{:.9g}}}", violations, excess);
+      j += ",\"electrical_pin_feedback\":true";
+    }
   }
   if (physical_rc_) {
-    const double cap_scale  = timer.capacitance_unit() ? timer.capacitance_unit()->value() / 1e-15 : 1;
-    const double unit_ps    = timer.time_unit() ? timer.time_unit()->value() * 1e12 : 1000;
-    j                      += std::format(",\"time_unit_ps\":{},\"physical_pins\":[", unit_ps);
-    bool comma              = false;
+    const double cap_scale = timer.capacitance_unit() ? timer.capacitance_unit()->value() / 1e-15 : 1;
+    const double unit_ps   = timer.time_unit() ? timer.time_unit()->value() * 1e12 : 1000;
+    if (feedback_) {
+      feedback_->time_unit_ps = unit_ps;
+    }
+    if (render) {
+      j += std::format(",\"time_unit_ps\":{},\"physical_pins\":[", unit_ps);
+    }
+    bool comma = false;
     for (const auto& [physical, name] : physical_timing_pins_) {
       const auto it = pins.find(name);
       if (it == pins.end()) {
         continue;
       }
-      const auto& pin = it->second;
-      if (comma) {
-        j += ",";
-      }
-      comma               = true;
-      j                  += std::format("{{\"pin\":\"{}\",\"timer_pin\":\"{}\"", jesc(physical), jesc(name));
+      const auto&                   pin = it->second;
+      livehd::timing::Feedback::Pin value;
       if (const auto electrical = electrical_pins.find(name); electrical != electrical_pins.end()) {
-        j += std::format(",\"violations\":{},\"electrical_excess\":{:.9g}", electrical->second.first, electrical->second.second);
+        value.violations        = electrical->second.first;
+        value.electrical_excess = electrical->second.second;
       }
       const auto extreme = [&](auto getter, bool largest) {
         std::optional<float> value;
@@ -2625,20 +2660,19 @@ void Pass_opentimer::compute_timing(const std::shared_ptr<hhds::Graph>& g) {
         }
         return value;
       };
-      const auto field = [&](const char* key, const std::optional<float>& value, double scale = 1) {
-        if (value) {
-          j += std::format(",\"{}\":{:.9g}", key, *value * scale);
-        }
-      };
-      field("arrival", extreme([&](ot::Tran t) { return pin.at(ot::MAX, t); }, true));
-      field("required", extreme([&](ot::Tran t) { return pin.rat(ot::MAX, t); }, false));
-      field("slack", extreme([&](ot::Tran t) { return pin.slack(ot::MAX, t); }, false));
-      field("slew", extreme([&](ot::Tran t) { return pin.slew(ot::MAX, t); }, true));
+      value.arrival  = extreme([&](ot::Tran t) { return pin.at(ot::MAX, t); }, true);
+      value.required = extreme([&](ot::Tran t) { return pin.rat(ot::MAX, t); }, false);
+      value.slack    = extreme([&](ot::Tran t) { return pin.slack(ot::MAX, t); }, false);
+      value.slew     = extreme([&](ot::Tran t) { return pin.slew(ot::MAX, t); }, true);
       if (pin.net() && (pin.is_output() || pin.primary_input())) {
-        field("load_ff", extreme([&](ot::Tran t) { return timer.report_load(pin.net()->name(), ot::MAX, t); }, true), cap_scale);
+        if (auto load = extreme([&](ot::Tran t) { return timer.report_load(pin.net()->name(), ot::MAX, t); }, true)) {
+          value.load_ff = *load * cap_scale;
+        }
       }
       const auto* cp = pin.cellpin(ot::MAX);
-      field("capacitance_ff", cp ? cp->capacitance : std::optional<float>{}, cap_scale);
+      if (cp && cp->capacitance && std::isfinite(*cp->capacitance)) {
+        value.capacitance_ff = *cp->capacitance * cap_scale;
+      }
       bool clock = pin.is_ideal_clock() || (cp && cp->is_clock.value_or(false));
       for (const auto& [clock_name, target] : timing_targets_) {
         (void)clock_name;
@@ -2648,9 +2682,49 @@ void Pass_opentimer::compute_timing(const std::shared_ptr<hhds::Graph>& g) {
         const auto pid  = std::stoul(physical.substr(colon + 4));
         clock          |= pid % Ntype::Memory_port_stride == 2;
       }
-      j += std::format(",\"clock\":{}}}", clock);
+      value.clock = clock;
+      if (feedback_) {
+        feedback_->pins.emplace(physical, value);
+      }
+      if (render) {
+        if (comma) {
+          j += ",";
+        }
+        comma  = true;
+        j     += std::format("{{\"pin\":\"{}\",\"timer_pin\":\"{}\"", jesc(physical), jesc(name));
+        if (value.violations) {
+          j += std::format(",\"violations\":{},\"electrical_excess\":{:.9g}", value.violations, value.electrical_excess);
+        }
+        const auto field = [&](const char* key, std::optional<double> n) {
+          if (n) {
+            j += std::format(",\"{}\":{:.9g}", key, *n);
+          }
+        };
+        field("arrival", value.arrival);
+        field("required", value.required);
+        field("slack", value.slack);
+        field("slew", value.slew);
+        field("load_ff", value.load_ff);
+        field("capacitance_ff", value.capacitance_ff);
+        j += std::format(",\"clock\":{}}}", clock);
+      }
     }
-    j += "]";
+    if (render) {
+      j += "]";
+    }
+  }
+  if (feedback_) {
+    std::map<std::string, std::string> physical;
+    for (const auto& [name, timer_name] : physical_timing_pins_) {
+      physical.emplace(timer_name, name);
+    }
+    for (const auto& point : path_pts) {
+      auto it = physical.find(point.pin);
+      feedback_->path.push_back(it == physical.end() ? point.pin : it->second);
+    }
+  }
+  if (!render) {
+    return;
   }
   if (const auto area = timer.report_area(); area_cells_complete && area && std::isfinite(*area) && *area >= 0) {
     j += std::format(",\"area\":{:.9g}", *area);

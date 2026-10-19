@@ -229,8 +229,17 @@ std::string environment_key(const Options& o, const ph::Technology& tech) {
                               o.fp_snap.max_displacement),
                   h);
   }
+  if (o.fp_place && o.fp_anchor_macros_only) {
+    h = hash_text("fp:macro-only-frozen-anchors", h);
+  }
   if (o.fp_place && o.fp_distance_attraction) {
     h = hash_text(std::format("fp:distance-attraction:{}", o.fp_attraction_outside), h);
+  }
+  if (o.fp_place && o.fp_snap_enabled) {
+    h = hash_text("fp:circle-core-bounds", h);
+  }
+  if (o.fp_place && o.fp_parent_weight > 0) {
+    h = hash_text(std::format("fp:parent-spring:{}:{}", o.fp_parent_weight, o.fp_parent_outside), h);
   }
   if (o.fp_place && !o.fp_snap_enabled) {
     h = hash_text("fp:no_snap", h);
@@ -246,6 +255,9 @@ std::string environment_key(const Options& o, const ph::Technology& tech) {
   }
   if (o.fp_place && o.fp_pin_adjust) {
     h = hash_text(std::format("fp-pins:{}:{}:{}", o.fp_pin_interval, o.fp_pin_step, o.fp_pin_improvement), h);
+  }
+  if (o.macro_pin_adjust) {
+    h = hash_text(std::format("macro-pins:{}:{}:{}", o.macro_pin_interval, o.macro_pin_step, o.macro_pin_improvement), h);
   }
   if (o.scale_macro_density || o.automatic_bins || o.exact_macro_density || o.adaptive_density || o.routability
       || o.macro_overlap_weight || o.macro_jitter || o.schedule_iterations || o.io_iterations) {
@@ -271,6 +283,11 @@ std::string environment_key(const Options& o, const ph::Technology& tech) {
                                           p.symmetry_tolerance,
                                           p.max_displacement),
                               h);
+  }
+  if (o.fp_align_weight > 0) {
+    h = hash_text(
+        std::format("centroid-alignment:{}:{}:{}:{}", o.fp_align_weight, o.fp_align_sigma, o.fp_align_start, o.fp_align_full),
+        h);
   }
   if (o.macro_align_weight > 0 && o.macro_align_global) {
     h = hash_text("global-master-strip-alignment-v1", h);
@@ -2313,8 +2330,15 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
       || !std::isfinite(options.fp_pin_improvement) || options.fp_pin_improvement < 0 || options.fp_pin_improvement >= 1) {
     throw std::invalid_argument("invalid FP color/pin adjustment controls");
   }
+  if (options.macro_pin_interval < 1 || !std::isfinite(options.macro_pin_step) || options.macro_pin_step <= 0
+      || options.macro_pin_step > .5 || !std::isfinite(options.macro_pin_improvement) || options.macro_pin_improvement < 0
+      || options.macro_pin_improvement >= 1) {
+    throw std::invalid_argument("invalid macro pin adjustment controls");
+  }
   for (double x : {options.fp_minimum,
                    options.fp_attraction,
+                   options.fp_parent_weight,
+                   options.fp_parent_outside,
                    options.fp_repulsion,
                    options.fp_anchor,
                    options.fp_snap.alignment_tolerance,
@@ -2338,6 +2362,11 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
       throw std::invalid_argument("invalid macro regularity control");
     }
   }
+  if (!std::isfinite(options.fp_align_weight) || options.fp_align_weight < 0 || !std::isfinite(options.fp_align_sigma)
+      || options.fp_align_sigma < 0
+      || (options.fp_align_weight > 0 && (options.fp_align_start < 0 || options.fp_align_start >= options.fp_align_full))) {
+    throw std::invalid_argument("invalid FP centroid alignment controls");
+  }
   const bool macro_active = options.macro_mode == "h2d" && !options.timing_seed;
   if (macro_active
       && (options.automatic_bins || options.exact_macro_density || options.scale_macro_density || options.adaptive_density
@@ -2351,8 +2380,8 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
   if (macro_active && !options.full) {
     throw std::invalid_argument("H2D requires full placement mode");
   }
-  if ((options.macro_align_weight > 0 || options.macro_snap) && macro_active) {
-    throw std::invalid_argument("alignment/snap require plain macro placement mode");
+  if ((options.macro_align_weight > 0 || options.macro_snap || options.macro_pin_adjust) && macro_active) {
+    throw std::invalid_argument("alignment/snap/pin adjustment require plain macro placement mode");
   }
   for (double value :
        {options.macro_align_weight, options.macro_align_sigma, options.macro_align_overlap_boost, options.macro_snap_tolerance}) {
@@ -2688,8 +2717,10 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
         {-half, -half, half, half}
     });
     if (const auto it = imported_terms.find(name); it != imported_terms.end()) {
-      if (it->second.status != Status::FIXED && !previous) {
-        throw std::runtime_error("floorplan PINS must be FIXED: " + name);
+      const bool adjustable
+          = it->second.status == Status::PLACED && ((options.fp_place && options.fp_pin_adjust) || options.macro_pin_adjust);
+      if (it->second.status != Status::FIXED && !previous && !adjustable) {
+        throw std::runtime_error("floorplan PINS must be FIXED unless IO adjustment is enabled: " + name);
       }
       t           = it->second;
       t.direction = direction;
@@ -3307,12 +3338,17 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
   std::vector<CentroidSample>                   centroid_initial, centroid_gp;
   dp::Result                                    metrics, fp_metrics;
   std::optional<dp::FloorplanSnap>              fp_snap;
-  std::vector<std::pair<int, Pin_adjust_stats>> fp_pin_history;
-  const bool                                    adjustable_io
+  std::vector<std::pair<int, Pin_adjust_stats>> fp_pin_history, macro_pin_history;
+  bool                                          movable_macros = false;
+  for (int i = 0; i < v.design.num_movable; ++i) {
+    movable_macros |= !v.design.node_macro.empty() && v.design.node_macro[i];
+  }
+  const bool macro_pin_adjust = options.macro_pin_adjust && movable_macros;
+  const bool adjustable_io
       = options.fp_place && options.fp_pin_adjust
         && std::any_of(v.fp.terminals.begin(), v.fp.terminals.end(), [](const auto& t) { return t.status != Status::FIXED; });
   double io_pitch = 1;
-  if (options.fp_place && options.fp_pin_adjust) {
+  if ((options.fp_place && options.fp_pin_adjust) || macro_pin_adjust) {
     for (const auto& t : v.fp.terminals) {
       for (const auto& shape : t.shapes) {
         const auto&  layer  = tech.layers.at(shape.layer);
@@ -3321,15 +3357,26 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
       }
     }
   }
-  const auto adjust_pins = [&](dp::Design& d, int iteration, bool initialize) {
-    const auto stats
-        = adjust_fp_pins(d, v.fp, v.io_buses, v.io_bits, io_pitch, options.fp_pin_step, options.fp_pin_improvement, initialize);
-    fp_pin_history.emplace_back(iteration, stats);
+  const auto adjust_pins = [&](dp::Design& d, int iteration, bool initialize, bool macro) {
+    const auto stats   = adjust_fp_pins(d,
+                                        v.fp,
+                                        v.io_buses,
+                                        v.io_bits,
+                                        io_pitch,
+                                        macro ? options.macro_pin_step : options.fp_pin_step,
+                                        macro ? options.macro_pin_improvement : options.fp_pin_improvement,
+                                        initialize);
+    auto&      history = macro ? macro_pin_history : fp_pin_history;
+    const auto stage   = macro ? "macro" : "fp";
+    const bool first   = history.empty();
+    history.emplace_back(iteration, stats);
     fs::create_directories(options.output_dir);
-    std::ofstream           trace(options.output_dir + "/fp_pins.jsonl", initialize ? std::ios::trunc : std::ios::app);
+    std::ofstream           trace(options.output_dir + "/" + stage + "_pins.jsonl", first ? std::ios::trunc : std::ios::app);
     rapidjson::StringBuffer buffer;
     rapidjson::Writer<rapidjson::StringBuffer> json(buffer);
     json.StartObject();
+    json.Key("stage");
+    json.String(stage);
     json.Key("iteration");
     json.Int(iteration);
     json.Key("initialize");
@@ -3366,8 +3413,21 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
     json.EndArray();
     json.EndObject();
     if (!(trace << buffer.GetString() << '\n')) {
-      throw std::runtime_error("cannot write FP IO movement report");
+      throw std::runtime_error("cannot write IO movement report");
     }
+  };
+  const auto pin_updater = [&](bool macro) {
+    return [&, macro](const dp::Design& snapshot, int iteration) {
+      auto adjusted = snapshot;
+      adjust_pins(adjusted, iteration, false, macro);
+      std::vector<dp::TerminalPosition> updates;
+      for (size_t i = v.cells.size(); i < snapshot.node_x.size(); ++i) {
+        if (adjusted.node_x[i] != snapshot.node_x[i] || adjusted.node_y[i] != snapshot.node_y[i]) {
+          updates.push_back({static_cast<int>(i), adjusted.node_x[i], adjusted.node_y[i]});
+        }
+      }
+      return updates;
+    };
   };
   std::vector<dp::FloorplanCircle> fp_before;
   std::vector<CentroidSample>      fp_gp, fp_final;
@@ -3447,8 +3507,8 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
       prototype.centroid_adaptive_repulsion = false;
       metrics                               = dp::place(v.design, prototype);
       capture(v, tech, false);
-      if (options.fp_place && options.fp_pin_adjust) {
-        adjust_pins(v.design, 0, true);
+      if ((options.fp_place && options.fp_pin_adjust) || macro_pin_adjust) {
+        adjust_pins(v.design, 0, true, !(options.fp_place && options.fp_pin_adjust));
       } else {
         assign_io(v);
       }
@@ -3495,14 +3555,41 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
       }
       fp_control.legalize = fp_control.detailed_place = false;
       fp_control.centroid_weight                      = options.fp_attraction;
+      fp_control.centroid_align_weight                = options.fp_align_weight;
+      fp_control.centroid_align_sigma                 = options.fp_align_sigma;
+      fp_control.centroid_align_start                 = options.fp_align_start;
+      fp_control.centroid_align_full                  = options.fp_align_full;
+      fp_control.centroid_parent_weight               = options.fp_parent_weight;
+      fp_control.centroid_parent_outside              = options.fp_parent_outside;
       fp_control.centroid_repulsion_weight            = options.fp_repulsion;
       fp_control.centroid_adaptive_repulsion          = true;
       fp_control.max_iterations                       = options.fp_iterations ? options.fp_iterations : options.iterations;
       fp_control.observer_interval                    = fp_control.max_iterations + 1;
       // The FP stage has its own history and physical before-snap snapshot.
-      fp_control.progress_observer                    = {};
-      const auto observer                             = control.observer;
-      fp_control.observer                             = [&](const dp::Design& snapshot, dp::PlacementStage stage, int iteration) {
+      fs::create_directories(options.output_dir);
+      std::ofstream fp_progress(options.output_dir + "/fp_history.jsonl");
+      if (!fp_progress) {
+        throw std::runtime_error("cannot write floorplan progress history");
+      }
+      fp_control.progress_observer = [&](const dp::GpSample& sample) {
+        fp_progress << std::format(
+            R"({{"iteration":{},"overflow":{},"hpwl_dbu":{},"centroid_max_overlap":{},"centroid_align_pairs":{},"centroid_align_residual":{},"centroid_align_ramp":{},"centroid_align_force":{},"centroid_parent_edges":{},"centroid_parent_max_distance":{},"centroid_parent_force":{}}})",
+            sample.iteration,
+            sample.overflow,
+            sample.hpwl,
+            sample.centroid_max_overlap,
+            sample.centroid_align_pairs,
+            sample.centroid_align_residual,
+            sample.centroid_align_ramp,
+            sample.centroid_align_force,
+            sample.centroid_parent_edges,
+            sample.centroid_parent_max_distance,
+            sample.centroid_parent_force)
+                    << '\n';
+        fp_progress.flush();
+      };
+      const auto observer = control.observer;
+      fp_control.observer = [&](const dp::Design& snapshot, dp::PlacementStage stage, int iteration) {
         if (stage != dp::PlacementStage::centroid_start && stage != dp::PlacementStage::global_placement) {
           return;
         }
@@ -3523,17 +3610,7 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
       };
       if (options.fp_pin_adjust) {
         fp_control.terminal_interval = options.fp_pin_interval;
-        fp_control.terminal_update   = [&](const dp::Design& snapshot, int iteration) {
-          auto adjusted = snapshot;
-          adjust_pins(adjusted, iteration, false);
-          std::vector<dp::TerminalPosition> updates;
-          for (size_t i = v.cells.size(); i < snapshot.node_x.size(); ++i) {
-            if (adjusted.node_x[i] != snapshot.node_x[i] || adjusted.node_y[i] != snapshot.node_y[i]) {
-              updates.push_back({static_cast<int>(i), adjusted.node_x[i], adjusted.node_y[i]});
-            }
-          }
-          return updates;
-        };
+        fp_control.terminal_update   = pin_updater(false);
       }
       std::map<std::string, Point> timed_positions;
       bool                         fp_checkpoint_forced = false;
@@ -3715,6 +3792,7 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
       }
       // Warm-start the next mixed-size GP at the FP positions, with fixed
       // targets and NO centroid repulsion. Cells/macros are still movable.
+      control.centroid_anchor_macros_only = options.fp_anchor_macros_only && !v.design.centroid_targets.empty();
       control.centroid_weight             = options.fp_anchor;
       control.centroid_repulsion_weight   = 0;
       control.centroid_adaptive_repulsion = false;
@@ -3742,9 +3820,9 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
     std::map<std::string, Point> macro_timed_positions;
     unsigned                     macro_checkpoints       = 0;
     bool                         macro_checkpoint_forced = false;
-    bool                         movable_macros          = false;
-    for (int i = 0; i < v.design.num_movable; ++i) {
-      movable_macros |= !v.design.node_macro.empty() && v.design.node_macro[i];
+    if (macro_pin_adjust) {
+      control.terminal_interval = options.macro_pin_interval;
+      control.terminal_update   = pin_updater(true);
     }
     if (movable_macros && options.fp_evaluate && options.macro_timing_interval > 0 && control.max_iterations > 0) {
       control.checkpoint_interval      = options.macro_timing_interval;
@@ -3890,6 +3968,10 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
     json.Double(io_pitch);
     json.Key("pin_updates");
     json.Uint64(fp_pin_history.size());
+    json.Key("macro_pin_adjust_enabled");
+    json.Bool(options.macro_pin_adjust);
+    json.Key("macro_pin_updates");
+    json.Uint64(macro_pin_history.size());
     json.Key("minimum_copies_per_parent");
     json.Int(options.fp_min_copies);
     json.Key("copy_scope");
@@ -3900,12 +3982,34 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
     json.Double(options.fp_attraction);
     json.Key("initial_repulsion_weight");
     json.Double(options.fp_repulsion);
+    json.Key("fixed_anchor_macros_only");
+    json.Bool(options.fp_anchor_macros_only);
     json.Key("fixed_anchor_weight");
     json.Double(options.fp_anchor);
     json.Key("distance_attraction");
     json.Bool(options.fp_distance_attraction);
     json.Key("attraction_outside");
     json.Double(options.fp_attraction_outside);
+    json.Key("centroid_parent_weight");
+    json.Double(options.fp_parent_weight);
+    json.Key("centroid_parent_outside");
+    json.Double(options.fp_parent_outside);
+    json.Key("centroid_parent_seconds");
+    json.Double(fp_metrics.centroid.parent_seconds);
+    json.Key("macro_centroid_parent_seconds");
+    json.Double(metrics.centroid.parent_seconds);
+    json.Key("centroid_align_weight");
+    json.Double(options.fp_align_weight);
+    json.Key("centroid_align_sigma");
+    json.Double(options.fp_align_sigma);
+    json.Key("centroid_align_start");
+    json.Int(options.fp_align_start);
+    json.Key("centroid_align_full");
+    json.Int(options.fp_align_full);
+    json.Key("centroid_align_seconds");
+    json.Double(fp_metrics.centroid.alignment_seconds);
+    json.Key("macro_centroid_align_seconds");
+    json.Double(metrics.centroid.alignment_seconds);
     json.Key("fp_attraction_coefficient");
     json.Double(fp_metrics.centroid.attraction_coefficient);
     json.Key("fp_attraction_calibration_iteration");
@@ -3926,6 +4030,10 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
     json.Double(fp_metrics.poisson_seconds);
     json.Key("fp_macro_routing_seconds");
     json.Double(fp_metrics.macro_routing_seconds);
+    json.Key("fp_rudy_seconds");
+    json.Double(fp_metrics.rudy_seconds);
+    json.Key("fp_rudy_calls");
+    json.Int(fp_metrics.rudy_calls);
     json.Key("fp_overflow");
     json.Double(fp_metrics.overflow);
     json.Key("fp_converged");
@@ -4020,6 +4128,8 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
     json.Int(fp_snap ? fp_snap->infeasible_families : 0);
     json.Key("snap_max_overlap");
     json.Double(fp_snap ? fp_snap->maximum_overlap : 0);
+    json.Key("snap_max_boundary_violation_dbu");
+    json.Double(fp_snap ? fp_snap->maximum_boundary_violation : 0);
     json.Key("snap_max_displacement");
     json.Double(fp_snap ? fp_snap->maximum_displacement : 0);
     json.Key("candidates");
@@ -4097,6 +4207,20 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
       json.Double(s.hpwl);
       json.Key("centroid_max_overlap");
       json.Double(s.centroid_max_overlap);
+      json.Key("centroid_parent_edges");
+      json.Uint64(s.centroid_parent_edges);
+      json.Key("centroid_parent_max_distance");
+      json.Double(s.centroid_parent_max_distance);
+      json.Key("centroid_parent_force");
+      json.Double(s.centroid_parent_force);
+      json.Key("centroid_align_pairs");
+      json.Uint64(s.centroid_align_pairs);
+      json.Key("centroid_align_residual");
+      json.Double(s.centroid_align_residual);
+      json.Key("centroid_align_ramp");
+      json.Double(s.centroid_align_ramp);
+      json.Key("centroid_align_force");
+      json.Double(s.centroid_align_force);
       json.EndObject();
     }
     json.EndArray();
@@ -4482,6 +4606,10 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
     json.Double(options.routability_macro_range);
     json.Key("macro_routing_seconds");
     json.Double(metrics.macro_routing_seconds);
+    json.Key("rudy_seconds");
+    json.Double(metrics.rudy_seconds);
+    json.Key("rudy_calls");
+    json.Int(metrics.rudy_calls);
     json.Key("bins_y");
     json.Int(metrics.bins_y);
     json.Key("stop_overflow");
@@ -5022,6 +5150,8 @@ Result place(hhds::Graph& source, hhds::GraphLibrary& library, const Options& op
   auto cell_options               = options;
   cell_options.net_weights        = macro.net_weights;
   cell_options.fp_place           = false;
+  cell_options.fp_pin_adjust      = false;
+  cell_options.macro_pin_adjust   = false;
   cell_options.final_cells        = false;
   cell_options.macro_mode         = "none";
   cell_options.macro_snap         = false;

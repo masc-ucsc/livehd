@@ -8,6 +8,7 @@
 #include <vector>
 
 #include "core/physical_rc.hpp"
+#include "core/timing_feedback.hpp"
 #include "dreamplace/native/floorplan.hpp"
 #include "dreamplace/native/macro/topology.hpp"
 #include "hhds/graph.hpp"
@@ -16,7 +17,7 @@
 namespace livehd::placement {
 inline constexpr double max_net_weight = 100;  // physical net weight ceiling shared by option checks and the placement database
 struct Result;
-struct Timing_feedback;
+using Timing_feedback = livehd::timing::Feedback;
 using Evaluate = std::function<Timing_feedback(const Result&)>;
 struct Options {
   std::vector<std::string>              lefs;
@@ -32,6 +33,9 @@ struct Options {
   bool                                  fp_pin_adjust       = false;
   int                                   fp_pin_interval     = 50;
   double                                fp_pin_step = .01, fp_pin_improvement = .001;  // perimeter fraction, relative gain
+  bool                                  macro_pin_adjust   = false;
+  int                                   macro_pin_interval = 50;
+  double                                macro_pin_step = .01, macro_pin_improvement = .001;
   int                                   fp_iterations = 1500, fp_min_copies = 4;
   int                                   fp_timing_interval      = 50;
   double                                fp_timing_movement      = 0;  // RMS bin movement; 0 keeps fixed cadence
@@ -48,7 +52,11 @@ struct Options {
   Evaluate                              fp_evaluate;
   double                                fp_minimum = 3000, fp_attraction = .25, fp_repulsion = 5, fp_anchor = .25;
   bool                                  fp_distance_attraction = true;
-  double                                fp_attraction_outside  = 4;  // additional stiffness beyond the centroid circle
+  bool                                  fp_anchor_macros_only  = false;  // frozen targets; retain all-member normalization
+  double                                fp_attraction_outside  = 4;      // additional stiffness beyond the centroid circle
+  double                                fp_align_weight = 0, fp_align_sigma = .25;
+  int                                   fp_align_start = 100, fp_align_full = 500;
+  double                                fp_parent_weight = 0, fp_parent_outside = 4;
   DreamPlace::native::FloorplanOptions  fp_snap;
   DreamPlace::native::macro::Parameters macro_parameters;
   std::shared_ptr<const DreamPlace::native::macro::Topology> macro_topology;

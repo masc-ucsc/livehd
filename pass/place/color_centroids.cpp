@@ -201,7 +201,9 @@ dp::FloorplanSnap snap_centroid_targets(const std::vector<dp::FloorplanCircle>& 
     throw std::invalid_argument("invalid hierarchy centroid count");
   }
   const std::vector<dp::FloorplanCircle> hierarchy(circles.begin(), circles.begin() + hierarchy_count);
-  auto result = dp::snap_floorplan(hierarchy, layout.xl, layout.yl, layout.xh, layout.yh, options);
+  auto                                   bounded_options = options;
+  bounded_options.contain_circles                        = true;
+  auto result = dp::snap_floorplan(hierarchy, layout.xl, layout.yl, layout.xh, layout.yh, bounded_options);
   result.circles.insert(result.circles.end(), circles.begin() + hierarchy_count, circles.end());
   for (size_t i = hierarchy_count; i < circles.size(); ++i) {
     const int parent = circles[i].parent;
@@ -209,6 +211,18 @@ dp::FloorplanSnap snap_centroid_targets(const std::vector<dp::FloorplanCircle>& 
       result.circles[i].x += result.circles.at(parent).x - circles.at(parent).x;
       result.circles[i].y += result.circles.at(parent).y - circles.at(parent).y;
     }
+    auto& c = result.circles[i];
+    if (2 * c.radius > std::min(layout.xh - layout.xl, layout.yh - layout.yl)) {
+      throw std::invalid_argument("floorplan centroid circle cannot fit inside the core");
+    }
+    // Unique colors do not acquire alignment/spacing relations. Core
+    // containment still applies, including inherited parent translations.
+    c.x                         = std::clamp(c.x, layout.xl + c.radius, layout.xh - c.radius);
+    c.y                         = std::clamp(c.y, layout.yl + c.radius, layout.yh - c.radius);
+    result.maximum_displacement = std::max(result.maximum_displacement, std::hypot(c.x - circles[i].x, c.y - circles[i].y));
+  }
+  if (result.maximum_boundary_violation > 1e-7 * std::max(layout.xh - layout.xl, layout.yh - layout.yl)) {
+    throw std::runtime_error("floorplan snap could not contain centroid circles inside the core");
   }
   return result;
 }
