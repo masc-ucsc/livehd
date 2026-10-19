@@ -515,14 +515,17 @@ synth::Region_plan Abc_backend::plan(const synth::Region_ctx& ctx) {
   // The `*_flow selected` lines are the only external evidence that a tier fired
   // (lhd/tests/lhd_abc_test.sh greps for them); keep them on every branch that
   // substitutes a recipe.
+  bool large_tier = false;  // the region runs the size tier's flow
   if (region_.flow.empty() && region_.large_ge && !region_.large_flow.empty() && ctx.input_ge >= region_.large_ge) {
     region_.flow = resolve_flow(region_.large_flow);
+    large_tier   = true;
     if (region_.verbose) {
       std::print("[pass.abc] region '{}': large_flow selected ({} GE >= {})\n", ctx.rb.module_name, ctx.input_ge, region_.large_ge);
     }
   }
   if (ctx.flow) {
     region_.flow = *ctx.flow;
+    large_tier   = false;
     if (!ctx.ware_trial && !ctx.flow->empty()) {
       tool_owned_flow_ = false;
     }
@@ -553,7 +556,9 @@ synth::Region_plan Abc_backend::plan(const synth::Region_ctx& ctx) {
   }
 
   synth::Region_plan plan;
-  plan.preserves_latches  = builtin_flow_;
+  // pass.abc.large_flow_latches: the tool's default size-tier flow is combinational too.
+  const bool keeps_latches = builtin_flow_ || (large_tier && region_.large_flow_latches && !custom_area);
+  plan.preserves_latches   = keeps_latches;
   plan.recipe             = resolve_recipe(ctx);
   plan.recipe            += ctx.rb.ctrl ? "|ctrl=1" : "|ctrl=0";
   // The frame's driving cell (resolve_boundary_defaults) makes `buffer` tree
@@ -565,6 +570,7 @@ synth::Region_plan Abc_backend::plan(const synth::Region_ctx& ctx) {
   plan.recipe            += (region_.boundary_buffer && region_.max_fanout != 0)
                                 ? (region_.boundary_drive.empty() ? "auto" : region_.boundary_drive)
                                 : "none";
+  plan.recipe            += keeps_latches && !builtin_flow_ ? "|tier_latches=1" : "";
   plan.recipe            += region_.map_register ? "\n# livehd-register=abc" : "\n# livehd-register=native";
   return plan;
 }

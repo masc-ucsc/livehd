@@ -42,6 +42,11 @@
 
 static Pass_plugin sample("pass_abc", Pass_abc::setup);
 
+namespace {
+// The size tier's own flow: strash and map, nothing sequential. Also the `large_flow` label's default.
+constexpr std::string_view kDefaultLargeFlow = "strash; &get -n; &nf {D}; &put";
+}  // namespace
+
 Pass_abc::Pass_abc(const Eprp_var& var) : Pass("pass.abc", var) {}
 
 void Pass_abc::setup() {
@@ -182,7 +187,13 @@ void Pass_abc::add_mapping_labels(Eprp_method& m) {
   m.add_label_optional("large_flow",
                        "ABC command string for indivisible over-large regions at or above large_ge; empty disables the tier. "
                        "An explicit global flow or region_opts flow wins",
-                       "strash; &get -n; &nf {D}; &put");
+                       kDefaultLargeFlow);
+  m.add_label_optional("large_flow_latches",
+                       "true|false: treat a region mapped by the tool's own default large_flow like the built-in flow: it only "
+                       "strashes and maps, so clock-gated, derived-clock and asynchronously reset registers map to cells instead "
+                       "of staying native flops (which cannot be placed). False (default) keeps the size tier's regions on the "
+                       "\"user command list may reshape latches\" rule. A user-supplied large_flow always keeps that rule",
+                       "false");
   m.add_label_optional("large_ge",
                        "inclusive synthesis-GE threshold for large_flow (0 disables it); default protects wide indivisible "
                        "operations from unbounded &dch choice synthesis",
@@ -1112,6 +1123,7 @@ void Pass_abc::map_with(Eprp_var& var, const std::function<void(livehd::abc::Map
   opts.area_flow         = area_flow;
   opts.reg_margin        = reg_margin;
   opts.large_flow        = large_flow;
+  opts.large_flow_latches = truthy(var.get("large_flow_latches", "false")) && large_flow == kDefaultLargeFlow;
   opts.large_ge          = large_ge;
   opts.ware_max_cells    = ware_max_cells;
   opts.map_register      = map_register;
