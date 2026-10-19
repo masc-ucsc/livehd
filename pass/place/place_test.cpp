@@ -645,6 +645,36 @@ TEST(Placement, ConstantDriversUseLibertyPolarityAndPhysicalCandidates) {
   }
   EXPECT_FALSE(source.find_io("a_high"));  // Only the private physical library changes.
 }
+TEST(Placement, RetainedOriginalNetlistRecreatesSavedTieCells) {
+  hhds::GraphLibrary source, flat;
+  const auto         graph   = both_constants(source);
+  auto               options = tie_options("retain_ties",
+                                           {
+                                               {"tie_lo", {{"lo", false}}},
+                                               {"tie_hi",  {{"hi", true}}}
+  });
+  const auto         placed  = place(*graph, flat, options);
+  options.previous           = std::make_shared<physical::Floorplan>(placed.floorplan);
+  options.retain_placement   = true;
+  hhds::GraphLibrary retained;
+  const auto         result = place(*graph, retained, options);
+  ASSERT_EQ(result.floorplan.components.size(), placed.floorplan.components.size());
+  for (const auto& cell : result.floorplan.components) {
+    const auto old = std::find_if(placed.floorplan.components.begin(), placed.floorplan.components.end(), [&](const auto& c) {
+      return c.name == cell.name;
+    });
+    ASSERT_NE(old, placed.floorplan.components.end());
+    EXPECT_EQ(cell.macro, old->macro);
+    EXPECT_EQ(cell.place.x, old->place.x);
+    EXPECT_EQ(cell.place.y, old->place.y);
+    EXPECT_EQ(cell.place.orientation, old->place.orientation);
+  }
+  auto missing = std::make_shared<physical::Floorplan>(placed.floorplan);
+  std::erase_if(missing->components, [](const auto& cell) { return cell.name == "__place_tiehi"; });
+  options.previous = missing;
+  hhds::GraphLibrary rejected;
+  EXPECT_THROW(place(*graph, rejected, options), std::runtime_error);
+}
 // An unknown (X) constant that reaches a mapped cell input is a synthesis don't-care
 // (`assign y = 'x` in the RTL). The default refuses it by name; unknown_const_zero ties it
 // low (a legal refinement) through the usual tie cell and counts what it tied.

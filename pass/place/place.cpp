@@ -2552,17 +2552,6 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
     for (const auto& c : previous->components) {
       old.emplace(c.name, &c);
     }
-    if (options.retain_placement) {
-      if (old.size() != v.cells.size()) {
-        throw std::runtime_error("timing snapshot component count differs from netlist");
-      }
-      for (const auto& c : v.cells) {
-        const auto it = old.find(c.name);
-        if (it == old.end() || it->second->macro != c.macro || it->second->place.status == Status::UNPLACED) {
-          throw std::runtime_error("timing snapshot requires every mapped cell placed with its original master: " + c.name);
-        }
-      }
-    }
     for (auto& c : v.cells) {
       if (const auto it = old.find(c.name); it != old.end()) {
         const auto source_orientation = c.place.orientation;
@@ -2952,6 +2941,25 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
       gu::set_bits(out, width);
       gu::set_unsign(out);
       target.connect_driver(out);
+    }
+  }
+  // A saved DEF includes the physical tie cells materialized above. Validate
+  // the complete inventory only now, so re-importing the original mapped graph
+  // does not mistake those generated cells for extra netlist components.
+  if (options.retain_placement) {
+    std::map<std::string, const ph::Component*> old;
+    for (const auto& c : previous->components) {
+      old.emplace(c.name, &c);
+    }
+    if (old.size() != v.cells.size()) {
+      throw std::runtime_error("timing snapshot component count differs from netlist");
+    }
+    for (const auto& c : v.cells) {
+      const auto it = old.find(c.name);
+      if (it == old.end() || it->second->macro != c.macro || it->second->place.status == Status::UNPLACED
+          || c.place.status == Status::UNPLACED) {
+        throw std::runtime_error("timing snapshot requires every mapped cell placed with its original master: " + c.name);
+      }
     }
   }
   for (auto& c : v.cells) {
