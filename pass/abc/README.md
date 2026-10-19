@@ -294,7 +294,10 @@ the clock tree's mechanism, so a tree is logic-preserving by construction (LEC-p
 input then loads the shared driver with only its tree roots. The buffers count in the
 region's `gates`/`area` and are part of the region-cache identity (`|rsttree=N`, absent when
 off). 16 to 32 pins per buffer is the typical range (ORFS's own repair uses 25 to 53);
-the smallest tree that meets timing is the cheapest in cells.
+the smallest tree that meets timing is the cheapest in cells. A region tree cannot see the sum a reset
+reaches across many small regions (partition_a: 225 loads on one AO21x1 spread over fourteen regions, each
+below the cap); `synth.place.reset_fanout` (pass/place/README.md) bounds the flat net instead, before
+placement, and the two compose.
 
 A register on a **latch-based clock
 gate** (`always_latch if (!clk) en_l = en; assign gclk = clk & en_l;`, minion's
