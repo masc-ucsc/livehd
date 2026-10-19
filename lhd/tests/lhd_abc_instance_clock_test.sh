@@ -3,17 +3,19 @@
 #
 # A register clocked by the OUTPUT OF A MODULE INSTANCE (NVDLA's `slcg` clock-gate
 # wrapper, whose output clocks a sibling block's registers once that block is
-# flattened into the same region) used to stay a native flop with the
-# derived-clock-native warning, because only a region input or a recognized
-# latch+AND clock gate was an admissible clock source. A native flop is not a
-# physical cell, so the placer refused the whole design. The instance is a native
-# boundary box of the region: its rebuilt output pin now clocks the Liberty DFF
+# flattened into the same region) stays a native flop with the derived-clock-native
+# warning by default, because only a region input or a recognized latch+AND clock
+# gate is an admissible clock source. A native flop is not a physical cell, so the
+# placer refuses the whole design. With pass.abc.derived_clock=true the instance is
+# a native boundary box of the region: its rebuilt output pin clocks the Liberty DFF
 # cells directly.
 #
 # Fixture lhd/tests/abc_instance_clock.v: two instances of a flop-based clock gate
 # (negedge-sampled enable ANDed with the clock) whose outputs clock two plain
 # registers of the parent. Checked on the hermetic test.lib:
-#   - no derived-clock-native diagnostic, no native `always @` in the netlist;
+#   - default: the derived-clock-native diagnostic and native `always @` flops remain;
+#   - pass.abc.derived_clock=true: no derived-clock-native diagnostic, no native
+#     `always @` in the netlist;
 #   - every bit of `ra` is a DFF whose CLK is instance ga's gclk net, every bit
 #     of `rb` is clocked by gb's (and the two nets differ);
 #   - the independent yosys checker (lgcheck, original RTL vs the Verilog
@@ -63,10 +65,20 @@ dff_clk() {
   awk -v name="\\\\$2" '$1 == "DFFx1" && $2 == name { f = 1; next } f && /\.CLK\(/ { sub(/.*\.CLK\(/, ""); sub(/\).*/, ""); print; exit }' "$1"
 }
 
+# Default: the registers stay native on their instance-driven clocks.
+D0="$W/off"
+mkdir -p "$D0"
+"$LHD" synth --result-json "$D0/r.json" --reader slang --top "$TOP" --workdir "$D0/W" --emit-dir verilog:"$D0/netv" \
+  --set synth.mapper=abc --set synth.liberty="$LIB" -- "$SRC" > "$D0/synth.log" 2>&1 \
+  || fail "default synth -> $(cat "$D0/r.json" 2>/dev/null)"
+cat "$D0/netv/"*.v > "$D0/net.v"
+grep -q '"derived-clock-native"' "$D0/synth.log" || fail "default: the derived-clock-native diagnostic is missing"
+grep -q 'always @' "$D0/net.v" || fail "default: expected native flops on the instance-driven clocks"
+
 D="$W/run"
 mkdir -p "$D"
 "$LHD" synth --result-json "$D/r.json" --reader slang --top "$TOP" --workdir "$D/W" --emit-dir verilog:"$D/netv" \
-  --set synth.mapper=abc --set synth.liberty="$LIB" -- "$SRC" > "$D/synth.log" 2>&1 \
+  --set synth.mapper=abc --set synth.liberty="$LIB" --set pass.abc.derived_clock=true -- "$SRC" > "$D/synth.log" 2>&1 \
   || fail "synth -> $(cat "$D/r.json" 2>/dev/null)"
 cat "$D/netv/"*.v > "$D/net.v"
 

@@ -1691,9 +1691,10 @@ sh_test(
     ],
 )
 
-# A register clocked by the output of a module instance (NVDLA's `slcg` wrapper
-# around a flop-based clock gate) maps to a DFF cell clocked by that instance's
-# output instead of staying a native flop (derived-clock-native).
+# With pass.abc.derived_clock=true, a register clocked by the output of a module
+# instance (NVDLA's `slcg` wrapper around a flop-based clock gate) maps to a DFF cell
+# clocked by that instance's output; by default it stays a native flop
+# (derived-clock-native).
 sh_test(
     name = "lhd_abc_instance_clock_test",
     size = "small",

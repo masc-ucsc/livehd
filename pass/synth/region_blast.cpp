@@ -838,8 +838,8 @@ Region_blast blast_region(const livehd::partition::Region_body& rb, const Blast_
       // A clock driven by region-INTERNAL logic (a genuinely gated/derived
       // clock -- a shape whole-design flatten makes reachable, since everything
       // is one region) cannot cross as a latch unless it is a recognized
-      // clock gate (icg_of_gclk) or the output of a native boundary instance:
-      // the read-back has no native source for the DFF/flop clock pin and used
+      // clock gate (icg_of_gclk) or pass.abc.derived_clock keeps it mapped: the
+      // read-back has no native source for the DFF/flop clock pin and used
       // to silently drop the connection. Demote the register to a boundary box
       // (the register=false machinery): it stays a native flop and its clock
       // cone is technology-mapped and reconnected like any comb-driven
@@ -847,14 +847,16 @@ Region_blast blast_region(const livehd::partition::Region_body& rb, const Blast_
       //
       // A clock that is the output pin of a module instance (the common
       // `slcg`/`clock_gate` wrapper whose body the child region maps) is a
-      // boundary box's output: the read-back rebuilds that instance and wires
-      // the DFF clock pin straight to the rebuilt output (native_boundary_driver
-      // in region_writer), exactly as a region input would be.
+      // boundary box's output: with pass.abc.derived_clock the read-back rebuilds
+      // that instance and wires the DFF clock pin straight to the rebuilt output
+      // (native_boundary_driver in region_writer), exactly as a region input
+      // would be, with no ABC clock PO.
       if (!options.logical_state && !f.clk_drv.is_invalid() && !f.clk_drv.is_const() && !region_in_name.contains(f.clk_drv)) {
         if (auto it = icg_of_gclk.find(f.clk_drv); it != icg_of_gclk.end()) {
           f.icg = it->second;
-        } else if (gu::type_op_of(f.clk_drv.get_master_node()) == Ntype_op::Sub) {
-          // keep the register mapped: clk_drv resolves to the instance's output
+        } else if (options.derived_clock && options.icg_flow_ok && real_width(f.clk_drv) == 1
+                   && gu::type_op_of(f.clk_drv.get_master_node()) == Ntype_op::Sub) {
+          // pass.abc.derived_clock: keep the register mapped; clk_drv resolves to the instance's output pin.
         } else if (options.derived_clock && options.icg_flow_ok && !f.neg_clock && real_width(f.clk_drv) == 1) {
           // pass.abc.derived_clock: keep the register mapped; its clock crosses as an ABC PO below.
           f.clk_derived = true;
