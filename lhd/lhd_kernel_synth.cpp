@@ -189,17 +189,31 @@ livehd::placement::Options placement_options(const Options& opts) {
   if (*halo_end != '\0' || !std::isfinite(out.halo_x) || !std::isfinite(out.halo_y) || out.halo_x < 0 || out.halo_y < 0) {
     throw Lhd_error{"usage", "invalid synth.place.halo", "expected nonnegative microns: H or X,Y"};
   }
-  out.final_cells                 = truthy(synth_set(opts, "place.final", "true"));
-  out.final_iterations            = integer("place.final.iterations", "0");
-  out.fp_place                    = truthy(synth_set(opts, "place.fp", "true"));
-  out.fp_snap_enabled             = truthy(synth_set(opts, "place.fp.snap", "true"));
-  out.fp_colors                   = truthy(synth_set(opts, "place.fp.colors", "false"));
+  out.final_cells        = truthy(synth_set(opts, "place.final", "true"));
+  out.final_iterations   = integer("place.final.iterations", "0");
+  out.fp_place           = truthy(synth_set(opts, "place.fp", "false"));
+  out.fp_snap_enabled    = truthy(synth_set(opts, "place.fp.snap", "true"));
+  out.fp_colors          = truthy(synth_set(opts, "place.fp.colors", "false"));
+  out.fp_color_source    = synth_set(opts, "place.fp.color_source", "synthesis");
+  out.fp_color_minimum   = number("place.fp.color_minimum", "-1");
+  out.fp_color_maximum   = number("place.fp.color_maximum", "30000");
+  out.fp_pin_adjust      = truthy(synth_set(opts, "place.fp.pin_adjust", "false"));
+  out.fp_pin_interval    = integer("place.fp.pin_interval", "50");
+  out.fp_pin_step        = number("place.fp.pin_step", "0.01");
+  out.fp_pin_improvement = number("place.fp.pin_improvement", "0.001");
+  if ((out.fp_color_source != "synthesis" && out.fp_color_source != "placement" && out.fp_color_source != "memory_first")
+      || (out.fp_color_minimum < 0 && out.fp_color_minimum != -1) || out.fp_color_maximum <= 0 || out.fp_pin_interval < 1
+      || out.fp_pin_step <= 0 || out.fp_pin_step > .5 || out.fp_pin_improvement < 0 || out.fp_pin_improvement >= 1) {
+    throw Lhd_error{"usage", "invalid FP color/pin adjustment settings", ""};
+  }
   out.fp_iterations               = integer("place.fp.iterations", "1500");
   out.fp_minimum                  = number("place.fp.minimum", "3000");
   out.fp_min_copies               = integer("place.fp.min_copies", "4");
   out.fp_attraction               = number("place.fp.attraction", "0.25");
   out.fp_repulsion                = number("place.fp.repulsion", "5");
   out.fp_anchor                   = number("place.fp.anchor", "0.25");
+  out.fp_distance_attraction      = truthy(synth_set(opts, "place.fp.distance_attraction", "true"));
+  out.fp_attraction_outside       = number("place.fp.attraction_outside", "4");
   out.fp_snap.alignment_tolerance = number("place.fp.alignment", "1");
   out.fp_snap.spacing_tolerance   = number("place.fp.spacing_tolerance", "0.25");
   out.fp_snap.spacing_penalty     = number("place.fp.spacing_penalty", "0.02");
@@ -208,7 +222,7 @@ livehd::placement::Options placement_options(const Options& opts) {
   if (out.fp_min_copies < 2) {
     throw Lhd_error{"usage", "synth.place.fp.min_copies must be at least 2", "copies are counted separately per hierarchy parent"};
   }
-  if (out.fp_minimum < 0 || out.fp_attraction <= 0 || out.fp_repulsion <= 0 || out.fp_anchor < 0
+  if (out.fp_minimum < 0 || out.fp_attraction <= 0 || out.fp_repulsion <= 0 || out.fp_anchor < 0 || out.fp_attraction_outside < 0
       || out.fp_snap.alignment_tolerance < 0 || out.fp_snap.spacing_tolerance < 0 || out.fp_snap.spacing_penalty < 0
       || out.fp_snap.symmetry_tolerance < 0 || out.fp_snap.max_displacement < 0) {
     throw Lhd_error{"usage",
@@ -219,8 +233,8 @@ livehd::placement::Options placement_options(const Options& opts) {
   if (out.fp_place && out.macro_mode == "h2d") {
     throw Lhd_error{"usage", "synth.place.fp requires the native plain placer", "use synth.place.macro=none"};
   }
-  if (out.macro_mode != "none" && out.macro_mode != "h2d" && out.macro_mode != "r8h2" && out.macro_mode != "r8h3") {
-    throw Lhd_error{"usage", "synth.place.macro must be none, h2d, r8h2 or r8h3", ""};
+  if (out.macro_mode != "none" && out.macro_mode != "h2d") {
+    throw Lhd_error{"usage", "synth.place.macro must be none or h2d", ""};
   }
   out.macro_align_weight        = number("place.macro.align_weight", "0");
   out.macro_align_sigma         = number("place.macro.align_sigma", "0");
@@ -237,7 +251,7 @@ livehd::placement::Options placement_options(const Options& opts) {
     throw Lhd_error{"usage", "invalid synth.place.macro alignment/snap controls", "alignment requires start < full"};
   }
   if ((out.macro_align_weight > 0 || out.macro_snap) && out.macro_mode == "h2d") {
-    throw Lhd_error{"usage", "macro alignment/snap requires synth.place.macro=none, r8h2 or r8h3", ""};
+    throw Lhd_error{"usage", "macro alignment/snap requires synth.place.macro=none", ""};
   }
   if (out.macro_snap && !out.full) {
     throw Lhd_error{"usage", "macro snapping requires full placement", "use synth.place.mode=full"};
@@ -932,8 +946,8 @@ void synth_command(Options& opts, Result& res) {
       // Like pass.place below: DREAMPlace prints to stdout, which is reserved
       // for the result protocol, and a refusal is a placement failure.
       const auto  seed_log = next_log_path(opts, "pass.place.post_synth_timing");
-      phase_step = "pass.place.post_synth_timing";
-      phase_log  = seed_log;
+      phase_step           = "pass.place.post_synth_timing";
+      phase_log            = seed_log;
       set_crash_context(phase_step, phase_log);
       livehd::placement::Result seed;
       try {
@@ -959,8 +973,8 @@ void synth_command(Options& opts, Result& res) {
       res.recipe_steps.emplace_back("pass.place.post_synth_timing");
     }
     const auto log = next_log_path(opts, "pass.place");
-    phase_step = "pass.place";
-    phase_log  = log;
+    phase_step     = "pass.place";
+    phase_log      = log;
     set_crash_context(phase_step, phase_log);
     livehd::placement::Result placed;
     try {

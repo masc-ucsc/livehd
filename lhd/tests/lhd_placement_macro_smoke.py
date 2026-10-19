@@ -102,10 +102,8 @@ outputs.mkdir(parents=True,exist_ok=True)
 for name in ['macro_topology.json','h2d.png','out.def']:
  (outputs/name).write_bytes((root/'W/synth/place'/name).read_bytes())
 (outputs/'cold_macro_topology.json').write_text(json.dumps(cold,indent=2)+'\n')
-run('r8h2_empty',['--set','synth.place.macro=r8h2','--set','lhd.incremental=false'])
-report2=json.loads((root/'W/synth/place/r8h2.json').read_text())
-assert report2['mode']=='r8h2-moving-centroids' and not report2['instances'],report2
-run('removed_r8h',['--set','synth.place.macro=r8h'],False)
+for mode in ['r8h','r8h2','r8h3']:
+ run('removed_'+mode,['--set','synth.place.macro='+mode],False)
 # Ordinary cell GP must preserve mirrored imported FIXED SRAMs in snapshots.
 def_text=(root/'W/synth/place/out.def').read_text()
 ram_name=re.search(r'^- (\S+) test_sram ',def_text,re.M)[1]
@@ -135,48 +133,6 @@ endmodule
 common=['--set','synth.place.fp.minimum=1000','--set','synth.place.fp.min_copies=2','--set','lhd.incremental=false','--set','synth.place.iterations=40','--set','synth.place.bins=64','--set','synth.place.io_iterations=10','--set','synth.place.snapshots=true']
 run('centroid_baseline',common+['--set','synth.place.macro=none'])
 baseline_frame=json.loads((root/'W/synth/place/gp.json').read_text())
-run('r8h2',common+['--set','synth.place.macro=r8h2'])
-report2=json.loads((root/'W/synth/place/r8h2.json').read_text())
-assert report2['started'] and report2['completed'] and report2['iterations']<=40 and report2['start_iteration']==0 and report2['from_scratch'],report2
-assert report2['minimum_copies_per_parent']==2 and report2['copy_scope']=='immediate_hierarchy_parent',report2
-assert len(report2['instances'])==2 and all(g['macros']==3 and g['equivalent_cells']>2000 for g in report2['instances']),report2
-initial=json.loads((root/'W/synth/place/gp_start.json').read_text())
-assert initial['iteration']==0 and initial['nodes']!=baseline_frame['nodes'],'R8H2 incorrectly starts from converged macro GP'
-# The IO pilot must not seed the macro GP: initial x/y are the deterministic name hash.
-rows=re.findall(r'^ROW \S+ \S+ (-?\d+) (-?\d+) \S+ DO (\d+) BY 1 STEP (\d+) 0 ;$',(root/'W/synth/place/out.def').read_text(),re.M)
-assert rows
-widths={'test_sram':160000}
-for name,x,y,o in initial['nodes']:
- if 'ram' not in name:continue
- h=14695981039346656037
- for byte in name.encode():h=((h^byte)*1099511628211)&((1<<64)-1)
- row=rows[(h>>32)%len(rows)];rx,ry,count,step=map(int,row)
- expected_x=rx+(h%max(1,count-widths['test_sram']//step+1))*step
- # Native halo projection can clamp a seed on the core edge.
- expected_x=max(500,min(rx+count*step-widths['test_sram']-500,expected_x))
- assert abs(x-expected_x)<5000 and abs(y-ry)<5000,(name,x,y,expected_x,ry)
-for g in report2['instances']:
- assert g['initial'] is not None and g['gp'] is not None and g['final'] is not None,g
-print('H2D cache, imported macro mirrors and opt-in R8H2 centroid candidates/phases pass')
-# R8H3 lowers eligibility to 1K in the SAME area unit used for circle size.
-# Pick SRAM dimensions that put both bank scopes between 1K and 2K.
-import math
-side=math.sqrt(1400*report2['equivalent_cell_area_dbu2']/3)/1000
-lef.write_text(lef.read_text().replace('SIZE 160 BY 160',f'SIZE {side:.6f} BY {side:.6f}'))
-run('r8h2_small',common+['--set','synth.place.macro=r8h2'])
-assert not json.loads((root/'W/synth/place/r8h2.json').read_text())['instances']
-run('r8h3',common+['--set','synth.place.macro=r8h3'])
-report3=json.loads((root/'W/synth/place/r8h3.json').read_text())
-assert report3['mode']=='r8h3-repelling-centroids' and report3['repulsion_weight']>0 and report3['minimum_equivalent_cells']==1000,report3
-assert report3['adaptive_repulsion'] and report3['circle_overlap_tolerance']==.001,report3
-assert report3['started'] and report3['completed'] and report3['start_iteration']==0 and report3['from_scratch'],report3
-assert len(report3['instances'])==2 and all(1000<g['equivalent_cells']<2000 for g in report3['instances']),report3
-assert len({g['family'] for g in report3['instances']})==1
-for g in report3['instances']:
- assert abs(math.pi*g['repulsion_radius_dbu']**2*report3['target_density']/g['anchor_area_dbu2']-1)<1e-12,g
- assert abs(g['anchor_equivalent_cells']*report3['equivalent_cell_area_dbu2']/g['anchor_area_dbu2']-1)<1e-12,g
- assert all(g[k] is not None for k in ['initial','gp','final']),g
-print('R8H3 1K eligibility, equivalent-cell unit and density-adjusted repulsion circles pass')
 # Floorplan GP and snap are independent of the legacy macro experiment mode.
 run('fp_snap',common+['--set','synth.place.macro=none','--set','synth.place.fp=true','--set','synth.place.fp.iterations=40'])
 fp=json.loads((root/'W/synth/place/fp_place.json').read_text())
@@ -263,7 +219,7 @@ while i<len(base):
 base=clean
 tech_rc=root/'tech_rc.tcl'
 tech_rc.write_text('set_cmd_units -resistance kohm -capacitance ff\nset_wire_rc -signal -resistance .0323151 -capacitance .173323\n')
-run('default_three_pass',['--set',f'synth.place.tech_rc={tech_rc}','--emit-dir',f'def:{root}/staged_def','--set','lhd.incremental=false','--set','synth.place.iterations=40','--set','synth.place.fp.iterations=40','--set','synth.place.io_iterations=10','--set','synth.place.snapshots=true'])
+run('opt_in_three_pass',['--set','synth.place.fp=true','--set',f'synth.place.tech_rc={tech_rc}','--emit-dir',f'def:{root}/staged_def','--set','lhd.incremental=false','--set','synth.place.iterations=40','--set','synth.place.fp.iterations=40','--set','synth.place.io_iterations=10','--set','synth.place.snapshots=true'])
 p=root/'W/synth/place'
 flow=json.loads((p/'flow.json').read_text())
 fp=json.loads((p/'macro/fp_place.json').read_text())
@@ -280,4 +236,12 @@ expected=re.findall(pattern,(p/'macro/fixed.def').read_text(),re.M)
 text=next((root/'staged_def').glob('*.def')).read_text()
 assert len(expected)==24 and re.findall(pattern,text,re.M)==expected
 assert not re.search(r'^- \S+ sky130_fd_sc_\S+ \+ FIXED',text,re.M)
-print('Default 3-pass flow, both snaps, 3K/four-per-parent/64 bins and fixed macro frames pass')
+print('Opt-in 3-pass flow, both snaps, 3K/four-per-parent/64 bins and fixed macro frames pass')
+
+base[base.index(str(root/'W'))]=str(root/'default_W')
+run('default_single_pass',['--set',f'synth.place.tech_rc={tech_rc}','--set','lhd.incremental=false','--set','synth.place.iterations=40','--set','synth.place.io_iterations=10','--set','synth.place.snapshots=true'])
+p=root/'default_W/synth/place'
+assert (p/'gp.json').is_file() and (p/'out.def').is_file()
+assert not (p/'flow.json').exists() and not (p/'macro').exists()
+assert json.loads((p/'alignment.json').read_text())['snap']
+print('Default single mixed-size pass retains macro snap without FP anchors')

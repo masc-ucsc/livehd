@@ -22,8 +22,15 @@ struct Options {
   std::string                           floorplan, output_dir, cache_dir;
   std::string                           liberty, tech_rc_file;
   std::string                           macro_mode = "none";
-  bool                                  fp_place = true, fp_snap_enabled = true;
-  bool                                  fp_colors     = false;  // uncovered single-color candidates, never centroid-snapped
+  bool                                  fp_place = false, fp_snap_enabled = true;
+  bool                                  fp_colors           = false;  // eligible color leaves; never independently centroid-snapped
+  std::string                           fp_color_source     = "synthesis";
+  bool                                  analyze_colors_only = false;  // diagnostic: no GP/LG/STA or cache
+  double                                fp_color_maximum    = 30000;  // memory-first logic area in equivalent cells
+  double                                fp_color_minimum    = -1;     // inherit fp_minimum; physical member area only
+  bool                                  fp_pin_adjust       = false;
+  int                                   fp_pin_interval     = 50;
+  double                                fp_pin_step = .01, fp_pin_improvement = .001;  // perimeter fraction, relative gain
   int                                   fp_iterations = 1500, fp_min_copies = 4;
   int                                   fp_timing_interval      = 50;
   double                                fp_timing_movement      = 0;  // RMS bin movement; 0 keeps fixed cadence
@@ -34,6 +41,8 @@ struct Options {
   bool                                  fp_resize             = false;
   Evaluate                              fp_evaluate;
   double                                fp_minimum = 3000, fp_attraction = .25, fp_repulsion = 5, fp_anchor = .25;
+  bool                                  fp_distance_attraction = true;
+  double                                fp_attraction_outside  = 4;  // additional stiffness beyond the centroid circle
   DreamPlace::native::FloorplanOptions  fp_snap;
   DreamPlace::native::macro::Parameters macro_parameters;
   std::shared_ptr<const DreamPlace::native::macro::Topology> macro_topology;

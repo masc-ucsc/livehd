@@ -26,6 +26,7 @@
 #include "color_centroids.hpp"
 #include "h2d.hpp"
 #include "memory_proxy.hpp"
+#include "pin_adjust.hpp"
 #include "repair.hpp"
 #include "technology_rc.hpp"
 #if defined(__APPLE__)
@@ -178,7 +179,7 @@ std::string environment_key(const Options& o, const ph::Technology& tech) {
   if (o.density_upper_bound) {
     h = hash_text("density-upper-bound", h);
   }
-  if (o.fp_place || o.macro_mode == "r8h2" || o.macro_mode == "r8h3") {
+  if (o.fp_place) {
     h = hash_text(std::format("centroid-copies:per-parent:{}", o.fp_min_copies), h);
   }
   if (o.fp_place) {
@@ -200,11 +201,23 @@ std::string environment_key(const Options& o, const ph::Technology& tech) {
                               o.fp_snap.max_displacement),
                   h);
   }
+  if (o.fp_place && o.fp_distance_attraction) {
+    h = hash_text(std::format("fp:distance-attraction:{}", o.fp_attraction_outside), h);
+  }
   if (o.fp_place && !o.fp_snap_enabled) {
     h = hash_text("fp:no_snap", h);
   }
   if (o.fp_place && o.fp_colors) {
     h = hash_text("fp:uncovered-colors", h);
+    if (o.fp_color_source != "synthesis" || o.fp_color_minimum != -1) {
+      h = hash_text(std::format("fp-colors:{}:{}", o.fp_color_source, o.fp_color_minimum), h);
+      if (o.fp_color_source == "memory_first") {
+        h = hash_text(std::format("memory-first:{}", o.fp_color_maximum), h);
+      }
+    }
+  }
+  if (o.fp_place && o.fp_pin_adjust) {
+    h = hash_text(std::format("fp-pins:{}:{}:{}", o.fp_pin_interval, o.fp_pin_step, o.fp_pin_improvement), h);
   }
   if (o.scale_macro_density || o.automatic_bins || o.exact_macro_density || o.adaptive_density || o.routability
       || o.macro_overlap_weight || o.macro_jitter || o.schedule_iterations || o.io_iterations) {
@@ -472,21 +485,85 @@ struct Cell {
   Ann_place   place;
   bool        locked = false;
 };
+struct FloorplanPorts {
+  color::Floorplan_kind kind            = color::Floorplan_kind::logic;
+  bool                  input_allowlist = false;
+  bool                  constant        = false;
+  std::set<std::string> data, controls;
+};
+std::map<std::string, FloorplanPorts> floorplan_ports(const std::string& library) {
+  std::map<std::string, FloorplanPorts> ports;
+  for (const auto& c : liberty::scan_output_drives(library)) {
+    if (c.sequential) {
+      ports[c.name].kind = color::Floorplan_kind::barrier;
+    }
+  }
+  auto flops = liberty::scan_dff_cells(library);
+  for (const auto& c : liberty::scan_async_dff_cells(library)) {
+    flops.push_back(c);
+  }
+  for (const auto& c : liberty::scan_latch_cells(library)) {
+    flops.push_back(c);
+  }
+  for (const auto& c : flops) {
+    auto& p           = ports[c.name];
+    p.kind            = color::Floorplan_kind::state;
+    p.input_allowlist = true;
+    p.data.insert(c.d_pin);
+    p.controls.insert(c.clk_pin);
+    if (!c.reset0_pin.empty()) {
+      p.controls.insert(c.reset0_pin);
+    }
+    if (!c.reset1_pin.empty()) {
+      p.controls.insert(c.reset1_pin);
+    }
+  }
+  for (const auto& c : liberty::scan_memory_cells(library)) {
+    auto& p           = ports[c.name];
+    p.kind            = color::Floorplan_kind::macro;
+    p.input_allowlist = true;
+    for (const auto& pin : c.pins) {
+      if (pin.address_data_input) {
+        p.data.insert(pin.name);
+      }
+      if (pin.clock_input) {
+        p.controls.insert(pin.name);
+      }
+    }
+  }
+  for (const auto& c : liberty::scan_icg_cells(library)) {
+    ports[c.name].kind = color::Floorplan_kind::barrier;
+  }
+  for (const auto& c : liberty::scan_constant_cells(library)) {
+    ports[c.name].kind     = color::Floorplan_kind::barrier;
+    ports[c.name].constant = true;
+  }
+  return ports;
+}
 struct View {
   dp::Design                                    design;
   bool                                          native_orientations = false;
   bool                                          align_macros        = false;
   bool                                          centroids           = false;
   bool                                          color_centroids     = false;
+  bool                                          placement_colors    = false;
+  bool                                          memory_colors       = false;
+  double                                        color_maximum       = 30000;
+  double                                        color_minimum       = 0;
+  std::map<std::string, FloorplanPorts>         fp_ports;
+  color::Floorplan_coloring                     fp_coloring;
   size_t                                        hierarchy_centroids = 0;
   std::optional<std::vector<dp::CentroidGroup>> frozen_centroids;
   size_t                                        frozen_hierarchy_centroids = 0;
   std::vector<std::vector<std::string>>         frozen_members;
   std::vector<std::string>                      frozen_color_names;
+  std::map<std::string, int>                    frozen_placement_owner;
   double                                        centroid_minimum    = 2000;
   int                                           centroid_min_copies = 4;
   int64_t                                       halo_x = 0, halo_y = 0;
   ph::Floorplan                                 fp;
+  std::vector<std::string>                      io_buses;
+  std::vector<int>                              io_bits;
   std::vector<Cell>                             cells;
   std::vector<Endpoint>                         pins;
   std::vector<Endpoint>                         drivers;
@@ -507,6 +584,126 @@ std::pair<double, double> offset(const ph::Macro& macro, const std::string& name
   auto [x, y]
       = ph::orient_point((r.xl + r.xh) / 2 + macro.origin_x, (r.yl + r.yh) / 2 + macro.origin_y, macro.width, macro.height, o);
   return {x * dbu, y * dbu};
+}
+color::Floorplan_coloring analyze_floorplan_colors(const View& v, const ph::Technology& tech, const std::vector<int>& scopes) {
+  using Kind = color::Floorplan_kind;
+  std::vector<color::Floorplan_node> nodes(v.design.node_x.size());
+  std::vector<FloorplanPorts>        roles(v.cells.size());
+  for (size_t i = 0; i < nodes.size(); ++i) {
+    nodes[i].kind = Kind::barrier;
+  }
+  for (size_t i = 0; i < v.cells.size(); ++i) {
+    const auto& cell = v.cells[i];
+    if (auto found = v.fp_ports.find(cell.macro); found != v.fp_ports.end()) {
+      roles[i] = found->second;
+    }
+    if (gu::type_op_of(cell.node) == Ntype_op::Memory) {
+      roles[i].input_allowlist = true;
+      for (auto pin : cell.node.inp_sorted_pins()) {
+        const auto offset = pin.get_port_id() % Ntype::Memory_port_stride;
+        if (offset == 0 || offset == 3 || offset == 12) {  // address, data, whole-array data
+          roles[i].data.insert(std::format("in_{}", pin.get_port_id()));
+        } else if (offset == 2 || offset == 14) {  // clock and synchronous reset
+          roles[i].controls.insert(std::format("in_{}", pin.get_port_id()));
+        }
+      }
+    }
+    nodes[i] = {cell.name, v.design.node_macro[i] ? Kind::macro : roles[i].kind, double(cell.place.width) * cell.place.height};
+  }
+  std::vector<std::pair<int, int>>              edges;
+  std::vector<std::vector<std::pair<int, int>>> input_nets(nodes.size());
+  int                                           net_id = 0;
+  std::vector<std::vector<int>>                 backward(nodes.size()), forward(nodes.size());
+  std::vector<int>                              controls;
+  const auto                                    pin_base = [](const std::string& pin) { return pin.substr(0, pin.find('[')); };
+  const auto                                    index
+      = [&](const Endpoint& p) { return int(p.instance == "PIN" ? v.cells.size() + v.terminal.at(p.pin) : v.cell.at(p.instance)); };
+  for (const auto& [driver, sinks] : v.nets) {
+    const int from = index(driver);
+    ++net_id;
+    for (const auto& sink : sinks) {
+      const int to = index(sink);
+      backward[to].push_back(from);
+      forward[from].push_back(to);
+      if (sink.instance == "PIN") {
+        continue;
+      }
+      const auto& p        = roles[to];
+      const auto  base     = pin_base(sink.pin);
+      const auto& physical = tech.macros.at(v.cells[to].macro).pins.at(sink.pin);
+      if (physical.use == "CLOCK" || p.controls.contains(base) || p.controls.contains(sink.pin)
+          || (nodes[to].kind == Kind::barrier && p.kind == Kind::barrier)) {
+        controls.push_back(from);
+        continue;
+      }
+      if (!p.input_allowlist || p.data.contains(base) || p.data.contains(sink.pin)) {
+        edges.emplace_back(from, to);
+        if (nodes[to].kind == Kind::macro) {
+          input_nets[to].emplace_back(from, net_id);
+        }
+      }
+    }
+  }
+  // Constant ties may feed buffers or other combinational gates. Such paths
+  // must not become shared-cone evidence merely because a buffer was retained.
+  // Stop this propagation at every state element and macro: constant inputs
+  // do not establish the value of stored state.
+  std::vector<size_t> remaining;
+  std::vector<int>    constant;
+  for (size_t n = 0; n < nodes.size(); ++n) {
+    remaining.push_back(backward[n].size());
+    if (n < roles.size() && roles[n].constant) {
+      constant.push_back(n);
+    }
+  }
+  while (!constant.empty()) {
+    const int n = constant.back();
+    constant.pop_back();
+    for (int next : forward[n]) {
+      if (--remaining[next] == 0 && nodes[next].kind == Kind::logic) {
+        nodes[next].kind = Kind::barrier;
+        constant.push_back(next);
+      }
+    }
+  }
+  std::vector<bool> seen(nodes.size());
+  while (!controls.empty()) {
+    const int n = controls.back();
+    controls.pop_back();
+    if (seen[n] || nodes[n].kind != Kind::logic) {
+      continue;
+    }
+    seen[n]       = true;
+    nodes[n].kind = Kind::barrier;
+    controls.insert(controls.end(), backward[n].begin(), backward[n].end());
+  }
+  for (size_t n = 0; n < nodes.size(); ++n) {
+    for (const auto& [from, id] : input_nets[n]) {
+      if (size_t(from) >= v.cells.size() || nodes[from].kind != Kind::barrier) {
+        nodes[n].input_nets.push_back(id);
+      }
+    }
+  }
+  color::Floorplan_coloring preserved;
+  if (v.frozen_centroids && v.placement_colors) {
+    preserved.initial_memory_groups = v.fp_coloring.initial_memory_groups;
+    preserved.merges_per_round      = v.fp_coloring.merges_per_round;
+    preserved.truncated_cones       = v.fp_coloring.truncated_cones;
+    preserved.owner.assign(nodes.size(), -1);
+    for (const auto& name : v.frozen_color_names) {
+      preserved.colors.push_back({name, {}, 0, 0});
+    }
+    for (size_t i = 0; i < v.cells.size(); ++i) {
+      if (auto it = v.frozen_placement_owner.find(v.cells[i].name);
+          it != v.frozen_placement_owner.end() && (nodes[i].kind == Kind::logic || nodes[i].kind == Kind::macro)) {
+        preserved.owner[i] = it->second;
+      }
+    }
+  }
+  return color::floorplan_color(nodes,
+                                edges,
+                                v.frozen_centroids && v.placement_colors ? &preserved : nullptr,
+                                {v.memory_colors, v.color_maximum * dp::detail::centroid_cell_area(v.design), scopes});
 }
 void make_arrays(View& v, const ph::Technology& tech) {
   v.design             = {};
@@ -693,7 +890,7 @@ void make_arrays(View& v, const ph::Technology& tech) {
         colors.emplace(d.centroid_color_names[i], i);
       }
     }
-    for (size_t i = 0; i < v.cells.size(); ++i) {
+    for (size_t i = 0; !v.placement_colors && i < v.cells.size(); ++i) {
       if (auto attr = v.cells[i].node.attr(attrs::synth_color_group); attr.has()) {
         auto key               = std::string(attr.get());
         const auto [it, added] = colors.try_emplace(key, colors.size());
@@ -718,9 +915,21 @@ void make_arrays(View& v, const ph::Technology& tech) {
     } else {
       d.centroid_groups     = dp::detail::centroid_candidates(d, paths, masters, v.centroid_minimum, v.centroid_min_copies);
       v.hierarchy_centroids = d.centroid_groups.size();
-      if (v.color_centroids) {
-        add_color_centroids(d, v.centroid_minimum);
+      if (v.color_centroids && !v.placement_colors) {
+        add_color_centroids(d, v.color_minimum);
       }
+    }
+    if (v.placement_colors) {
+      v.fp_coloring = analyze_floorplan_colors(v, tech, v.frozen_centroids ? std::vector<int>{} : centroid_node_scopes(d, paths));
+      d.node_centroid_color = v.fp_coloring.owner;
+      d.centroid_color_names.clear();
+      for (const auto& c : v.fp_coloring.colors) {
+        d.centroid_color_names.push_back(c.name);
+      }
+      placement_color_centroids(d, paths, v.fp_coloring, v.color_minimum, v.frozen_centroids.has_value());
+      v.hierarchy_centroids = std::count_if(d.centroid_groups.begin(), d.centroid_groups.end(), [](const auto& g) {
+        return !g.name.starts_with("@placement:");
+      });
     }
   }
   if (v.native_orientations) {
@@ -779,6 +988,9 @@ void refresh_floorplan_view(View& v, const View& baseline, Result& state, const 
       std::set<std::string> visited;
       while (!previous.contains(origin) && state.fp_buffer_origins.contains(origin) && visited.insert(origin).second) {
         origin = state.fp_buffer_origins.at(origin);
+      }
+      if (auto it = v.frozen_placement_owner.find(origin); it != v.frozen_placement_owner.end()) {
+        v.frozen_placement_owner[name] = it->second;
       }
       for (auto& members : v.frozen_members) {
         if (std::find(members.begin(), members.end(), origin) != members.end()) {
@@ -1959,12 +2171,12 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
   if (!std::isfinite(options.halo_x) || !std::isfinite(options.halo_y) || options.halo_x < 0 || options.halo_y < 0) {
     throw std::invalid_argument("invalid macro halo");
   }
-  if (options.macro_mode != "none" && options.macro_mode != "h2d" && options.macro_mode != "r8h2" && options.macro_mode != "r8h3") {
-    throw std::invalid_argument("macro placement mode must be none, h2d, r8h2 or r8h3");
+  if (options.macro_mode != "none" && options.macro_mode != "h2d") {
+    throw std::invalid_argument("macro placement mode must be none or h2d");
   }
   if (!std::isfinite(options.timing_max_weight) || options.timing_max_weight < 1 || options.timing_max_weight > max_net_weight
-      || !std::isfinite(options.timing_smoothing)
-      || options.timing_smoothing < 0 || options.timing_smoothing > 1 || options.fp_timing_max_updates < 2) {
+      || !std::isfinite(options.timing_smoothing) || options.timing_smoothing < 0 || options.timing_smoothing > 1
+      || options.fp_timing_max_updates < 2) {
     throw std::invalid_argument("invalid timing weight/smoothing/update budget");
   }
   if (!std::isfinite(options.stop_overflow) || options.stop_overflow < 0 || options.stop_overflow > 1
@@ -1977,9 +2189,26 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
   if (!std::isfinite(options.timing_fraction) || options.timing_fraction <= 0 || options.timing_fraction > 1) {
     throw std::invalid_argument("timing fraction must be in (0, 1]");
   }
+  if (!std::isfinite(options.fp_attraction_outside) || options.fp_attraction_outside < 0) {
+    throw std::invalid_argument("invalid floorplan outside-circle attraction stiffness");
+  }
   if (options.fp_iterations < 0 || options.fp_timing_interval < 0 || options.fp_min_copies < 2 || options.fp_attraction <= 0
       || options.fp_repulsion <= 0 || (options.fp_place && options.macro_mode == "h2d")) {
     throw std::invalid_argument("invalid floorplan stage settings or incompatible H2D mode");
+  }
+  if (options.analyze_colors_only
+      && (!options.fp_place || !options.fp_colors || options.fp_color_source == "synthesis" || options.final_cells
+          || options.previous || options.timing_seed || options.retain_placement || !options.cache_dir.empty()
+          || options.macro_mode != "none")) {
+    throw std::invalid_argument("color analysis requires uncached physical FP colors without other placement modes");
+  }
+  if ((options.fp_color_source != "synthesis" && options.fp_color_source != "placement"
+       && options.fp_color_source != "memory_first")
+      || !std::isfinite(options.fp_color_minimum) || (options.fp_color_minimum < 0 && options.fp_color_minimum != -1)
+      || !std::isfinite(options.fp_color_maximum) || options.fp_color_maximum <= 0 || options.fp_pin_interval < 1
+      || !std::isfinite(options.fp_pin_step) || options.fp_pin_step <= 0 || options.fp_pin_step > .5
+      || !std::isfinite(options.fp_pin_improvement) || options.fp_pin_improvement < 0 || options.fp_pin_improvement >= 1) {
+    throw std::invalid_argument("invalid FP color/pin adjustment controls");
   }
   for (double x : {options.fp_minimum,
                    options.fp_attraction,
@@ -2044,9 +2273,19 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
   v.native_orientations = macro_active;
   // ECO starts from the supplied physical frame; centroid initialization is a
   // fresh-placement stage and must not overwrite its unchanged neighbors.
-  v.centroids           = !options.previous && (options.fp_place || options.macro_mode == "r8h2" || options.macro_mode == "r8h3");
-  v.color_centroids     = options.fp_place && options.fp_colors;
-  v.centroid_minimum    = options.fp_place ? options.fp_minimum : (options.macro_mode == "r8h3" ? 1000 : 2000);
+  v.centroids           = !options.previous && !options.timing_seed && options.fp_place;
+  v.color_centroids     = v.centroids && options.fp_place && options.fp_colors;
+  v.placement_colors    = v.color_centroids && options.fp_color_source != "synthesis";
+  v.memory_colors       = options.fp_color_source == "memory_first";
+  v.color_maximum       = options.fp_color_maximum;
+  v.color_minimum       = options.fp_color_minimum < 0 ? options.fp_minimum : options.fp_color_minimum;
+  if (v.placement_colors) {
+    if (options.liberty.empty()) {
+      throw std::invalid_argument("placement colors require Liberty pin-role metadata");
+    }
+    v.fp_ports = floorplan_ports(options.liberty);
+  }
+  v.centroid_minimum    = options.fp_minimum;
   v.centroid_min_copies = options.fp_min_copies;
   v.align_macros        = options.macro_align_weight > 0 || options.macro_snap;
   v.weights             = options.net_weights;
@@ -2271,7 +2510,7 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
   // Terminals whose position came from the floorplan/previous frame; only the
   // rest get the default spread (and, on the ECO path, a slot from assign_io).
   std::unordered_set<std::string> imported_pos;
-  auto                            add_terminal = [&](Pin p, const std::string& name, const std::string& direction) {
+  auto add_terminal = [&](Pin p, const std::string& name, const std::string& direction, const std::string& bus, int bit) {
     ph::Terminal t;
     t.name      = name;
     t.direction = direction;
@@ -2299,12 +2538,14 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
     }
     top_pins.emplace(name, p);
     v.fp.terminals.push_back(std::move(t));
+    v.io_buses.push_back(bus);
+    v.io_bits.push_back(bit);
   };
   auto io = graph.get_io();
   for (const auto& d : io->get_input_pin_decls()) {
     const auto p = graph.get_input_pin(d.name);
     for (int b = 0; b < std::max(1, static_cast<int>(d.bits)); ++b) {
-      add_terminal(p, bit_name(d.name, std::max(1, static_cast<int>(d.bits)), b), "INPUT");
+      add_terminal(p, bit_name(d.name, std::max(1, static_cast<int>(d.bits)), b), "INPUT", d.name, b);
     }
   }
   for (const auto& d : io->get_output_pin_decls()) {
@@ -2315,7 +2556,7 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
     }
     for (int b = 0; b < std::max(1, static_cast<int>(d.bits)); ++b) {
       auto name = bit_name(d.name, std::max(1, static_cast<int>(d.bits)), b);
-      add_terminal(p, name, "OUTPUT");
+      add_terminal(p, name, "OUTPUT", d.name, b);
       v.nets[resolver.bit(drivers.front(), b)].push_back({"PIN", name, -1});
     }
   }
@@ -2763,10 +3004,8 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
       = (macro_solved || options.fp_place) ? CacheInfo{0, hashes.size(), false} : restore_cache(v, tech, cache_path, env, hashes);
   make_arrays(v, tech);
   dp::Options control;
-  control.max_iterations              = options.iterations;
-  control.centroid_weight             = v.centroids ? .25 : 0;
-  control.centroid_repulsion_weight   = options.macro_mode == "r8h3" ? 5 : 0;
-  control.centroid_adaptive_repulsion = options.macro_mode == "r8h3";
+  control.max_iterations  = options.iterations;
+  control.centroid_weight = v.centroids ? .25 : 0;
   control.bins_x = control.bins_y    = options.bins;
   control.num_threads                = options.threads;
   control.target_density             = options.density;
@@ -2852,9 +3091,71 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
       progress->flush();
     };
   }
-  std::vector<CentroidSample>      centroid_initial, centroid_gp;
-  dp::Result                       metrics, fp_metrics;
-  std::optional<dp::FloorplanSnap> fp_snap;
+  std::vector<CentroidSample>                   centroid_initial, centroid_gp;
+  dp::Result                                    metrics, fp_metrics;
+  std::optional<dp::FloorplanSnap>              fp_snap;
+  std::vector<std::pair<int, Pin_adjust_stats>> fp_pin_history;
+  const bool                                    adjustable_io
+      = options.fp_place && options.fp_pin_adjust
+        && std::any_of(v.fp.terminals.begin(), v.fp.terminals.end(), [](const auto& t) { return t.status != Status::FIXED; });
+  double io_pitch = 1;
+  if (options.fp_place && options.fp_pin_adjust) {
+    for (const auto& t : v.fp.terminals) {
+      for (const auto& shape : t.shapes) {
+        const auto&  layer  = tech.layers.at(shape.layer);
+        const double extent = std::max(shape.rect.xh - shape.rect.xl, shape.rect.yh - shape.rect.yl);
+        io_pitch            = std::max(io_pitch, std::ceil(extent + std::max(layer.pitch_x, layer.pitch_y) * tech.dbu));
+      }
+    }
+  }
+  const auto adjust_pins = [&](dp::Design& d, int iteration, bool initialize) {
+    const auto stats
+        = adjust_fp_pins(d, v.fp, v.io_buses, v.io_bits, io_pitch, options.fp_pin_step, options.fp_pin_improvement, initialize);
+    fp_pin_history.emplace_back(iteration, stats);
+    fs::create_directories(options.output_dir);
+    std::ofstream           trace(options.output_dir + "/fp_pins.jsonl", initialize ? std::ios::trunc : std::ios::app);
+    rapidjson::StringBuffer buffer;
+    rapidjson::Writer<rapidjson::StringBuffer> json(buffer);
+    json.StartObject();
+    json.Key("iteration");
+    json.Int(iteration);
+    json.Key("initialize");
+    json.Bool(initialize);
+    json.Key("moved");
+    json.Uint(stats.moved);
+    json.Key("reversals");
+    json.Uint(stats.reversals);
+    json.Key("travel_dbu");
+    json.Double(stats.travel);
+    json.Key("weighted_hpwl_before_dbu");
+    json.Double(stats.before);
+    json.Key("weighted_hpwl_after_dbu");
+    json.Double(stats.after);
+    json.Key("pins");
+    json.StartArray();
+    for (size_t i = 0; i < v.fp.terminals.size(); ++i) {
+      const auto& t = v.fp.terminals[i];
+      json.StartObject();
+      json.Key("name");
+      json.String(t.name.c_str());
+      json.Key("bus");
+      json.String(v.io_buses[i].c_str());
+      json.Key("bit");
+      json.Int(v.io_bits[i]);
+      json.Key("fixed");
+      json.Bool(t.status == Status::FIXED);
+      json.Key("x");
+      json.Int64(t.x);
+      json.Key("y");
+      json.Int64(t.y);
+      json.EndObject();
+    }
+    json.EndArray();
+    json.EndObject();
+    if (!(trace << buffer.GetString() << '\n')) {
+      throw std::runtime_error("cannot write FP IO movement report");
+    }
+  };
   std::vector<dp::FloorplanCircle> fp_before;
   std::vector<CentroidSample>      fp_gp, fp_final;
   unsigned                         fp_checkpoints = 0, fp_sta_calls = 0, fp_resized = 0, fp_repairs = 0;
@@ -2865,7 +3166,7 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
     return dp::hpwl(d);
   }();
   Eco_stats eco;
-  if (options.timing_seed || options.retain_placement) {
+  if (options.timing_seed || options.retain_placement || options.analyze_colors_only) {
     metrics.legal = false;
   } else if (macro_solved && !cache.reused) {
     metrics       = macro_run->result.placement;
@@ -2933,7 +3234,11 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
       prototype.centroid_adaptive_repulsion = false;
       metrics                               = dp::place(v.design, prototype);
       capture(v, tech, false);
-      assign_io(v);
+      if (options.fp_place && options.fp_pin_adjust) {
+        adjust_pins(v.design, 0, true);
+      } else {
+        assign_io(v);
+      }
       if (v.centroids) {
         v.cells = scratch_cells;
       }
@@ -2967,8 +3272,10 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
                           iteration);
       };
     }
-    if (options.fp_place && !v.design.centroid_groups.empty()) {
-      auto fp_control     = control;
+    if (options.fp_place && (!v.design.centroid_groups.empty() || adjustable_io)) {
+      control.centroid_distance_attraction = options.fp_distance_attraction;
+      control.centroid_attraction_outside  = options.fp_attraction_outside;
+      auto fp_control                      = control;
       fp_control.legalize = fp_control.detailed_place = false;
       fp_control.centroid_weight                      = options.fp_attraction;
       fp_control.centroid_repulsion_weight            = options.fp_repulsion;
@@ -2997,12 +3304,31 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
                           options.output_dir + (stage == dp::PlacementStage::centroid_start ? "/fp_start.json" : "/fp_gp.json"),
                           iteration);
       };
+      if (options.fp_pin_adjust) {
+        fp_control.terminal_interval = options.fp_pin_interval;
+        fp_control.terminal_update   = [&](const dp::Design& snapshot, int iteration) {
+          auto adjusted = snapshot;
+          adjust_pins(adjusted, iteration, false);
+          std::vector<dp::TerminalPosition> updates;
+          for (size_t i = v.cells.size(); i < snapshot.node_x.size(); ++i) {
+            if (adjusted.node_x[i] != snapshot.node_x[i] || adjusted.node_y[i] != snapshot.node_y[i]) {
+              updates.push_back({static_cast<int>(i), adjusted.node_x[i], adjusted.node_y[i]});
+            }
+          }
+          return updates;
+        };
+      }
       std::map<std::string, Point> timed_positions;
       bool                         fp_checkpoint_forced = false;
       if (options.fp_evaluate && options.fp_timing_interval > 0) {
         v.frozen_centroids           = v.design.centroid_groups;
         v.frozen_hierarchy_centroids = v.hierarchy_centroids;
         v.frozen_color_names         = v.design.centroid_color_names;
+        if (v.placement_colors) {
+          for (size_t i = 0; i < v.cells.size(); ++i) {
+            v.frozen_placement_owner[v.cells[i].name] = v.fp_coloring.owner[i];
+          }
+        }
         for (const auto& group : v.design.centroid_groups) {
           std::vector<std::string> names;
           for (int i : group.nodes) {
@@ -3158,7 +3484,13 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
       for (size_t i = 0; i < fp_gp.size(); ++i) {
         const auto& g = v.design.centroid_groups[i];
         const auto& p = fp_gp[i];
-        fp_before.push_back({g.name, p.x, p.y, std::sqrt(p.area / (std::acos(-1.) * options.density)), p.area, g.family, g.parent});
+        fp_before.push_back({g.name,
+                             p.x,
+                             p.y,
+                             std::sqrt((g.repulsion_area < 0 ? p.area : g.repulsion_area) / (std::acos(-1.) * options.density)),
+                             p.area,
+                             g.family,
+                             g.parent});
       }
       const auto& l = v.design.layout;
       if (options.fp_snap_enabled) {
@@ -3239,7 +3571,19 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
     json.Key("minimum_equivalent_cells");
     json.Double(options.fp_minimum);
     json.Key("color_candidates_enabled");
-    json.Bool(options.fp_colors);
+    json.Bool(v.color_centroids);
+    json.Key("color_source");
+    json.String(options.fp_color_source.c_str());
+    json.Key("color_minimum_equivalent_cells");
+    json.Double(v.color_minimum);
+    json.Key("pin_adjust_enabled");
+    json.Bool(options.fp_pin_adjust);
+    json.Key("pin_interval");
+    json.Int(options.fp_pin_interval);
+    json.Key("pin_pitch_dbu");
+    json.Double(io_pitch);
+    json.Key("pin_updates");
+    json.Uint64(fp_pin_history.size());
     json.Key("minimum_copies_per_parent");
     json.Int(options.fp_min_copies);
     json.Key("copy_scope");
@@ -3252,6 +3596,18 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
     json.Double(options.fp_repulsion);
     json.Key("fixed_anchor_weight");
     json.Double(options.fp_anchor);
+    json.Key("distance_attraction");
+    json.Bool(options.fp_distance_attraction);
+    json.Key("attraction_outside");
+    json.Double(options.fp_attraction_outside);
+    json.Key("fp_attraction_coefficient");
+    json.Double(fp_metrics.centroid.attraction_coefficient);
+    json.Key("fp_attraction_calibration_iteration");
+    json.Int(fp_metrics.centroid.attraction_calibration_iteration);
+    json.Key("macro_attraction_coefficient");
+    json.Double(metrics.centroid.attraction_coefficient);
+    json.Key("macro_attraction_calibration_iteration");
+    json.Int(metrics.centroid.attraction_calibration_iteration);
     json.Key("refinement_repulsion_weight");
     json.Double(control.centroid_repulsion_weight);
     json.Key("placement_cache_reused");
@@ -3362,6 +3718,8 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
       json.Double(p.radius);
       json.Key("area");
       json.Double(p.area);
+      json.Key("repulsion_area_dbu2");
+      json.Double(v.design.centroid_groups[i].repulsion_area < 0 ? p.area : v.design.centroid_groups[i].repulsion_area);
       for (auto [key, x, y] : {
                std::tuple{       "before",              p.x,              p.y},
                std::tuple{       "target",              t.x,              t.y},
@@ -3419,6 +3777,109 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
       throw std::runtime_error("cannot write floorplan snap report");
     }
   }
+  if (v.placement_colors) {
+    const auto&      colors = v.fp_coloring;
+    std::vector<int> candidate(colors.colors.size(), -1);
+    for (size_t g = v.hierarchy_centroids; g < v.design.centroid_groups.size(); ++g) {
+      for (int c : v.design.centroid_groups[g].colors) {
+        candidate[c] = g;
+      }
+    }
+    std::vector<double> reserved(colors.colors.size());
+    double              physical = 0, uncolored = 0, unassigned = 0;
+    std::ofstream       membership(options.output_dir + "/fp_placement_colors.tsv");
+    membership << "node\tcolor\tphysical_area_dbu2\treservation_recipients\n";
+    for (size_t n = 0; n < v.cells.size(); ++n) {
+      const double node_area  = v.design.centroid_node_area[n];
+      physical               += node_area;
+      std::vector<int> recipients;
+      if (colors.owner[n] < 0) {
+        uncolored += node_area;
+        for (int c : colors.recipients[n]) {
+          if (candidate[c] >= 0) {
+            recipients.push_back(c);
+          }
+        }
+        if (recipients.empty()) {
+          unassigned += node_area;
+        }
+        for (int c : recipients) {
+          reserved[c] += node_area / recipients.size();
+        }
+      }
+      membership << v.cells[n].name << '\t' << colors.owner[n] << '\t' << node_area << '\t';
+      for (size_t k = 0; k < recipients.size(); ++k) {
+        membership << (k ? "," : "") << recipients[k];
+      }
+      membership << '\n';
+    }
+    rapidjson::StringBuffer                    buffer;
+    rapidjson::Writer<rapidjson::StringBuffer> json(buffer);
+    json.StartObject();
+    json.Key("source");
+    json.String(options.fp_color_source.c_str());
+    json.Key("hierarchy_scoped");
+    json.Bool(true);
+    json.Key("maximum_logic_equivalent_cells");
+    json.Double(v.memory_colors ? v.color_maximum : 0);
+    json.Key("initial_memory_groups");
+    json.Int(colors.initial_memory_groups);
+    json.Key("truncated_cones");
+    json.Int(colors.truncated_cones);
+    json.Key("merges_per_round");
+    json.StartArray();
+    for (int count : colors.merges_per_round) {
+      json.Int(count);
+    }
+    json.EndArray();
+    json.Key("physical_area_dbu2");
+    json.Double(physical);
+    json.Key("uncolored_area_dbu2");
+    json.Double(uncolored);
+    json.Key("reserved_area_dbu2");
+    json.Double(uncolored - unassigned);
+    json.Key("unassigned_area_dbu2");
+    json.Double(unassigned);
+    json.Key("equivalent_cell_area_dbu2");
+    json.Double(dp::detail::centroid_cell_area(v.design));
+    json.Key("minimum_equivalent_cells");
+    json.Double(v.color_minimum);
+    json.Key("membership_frozen_during_repair");
+    json.Bool(v.frozen_centroids.has_value());
+    json.Key("colors");
+    json.StartArray();
+    for (size_t c = 0; c < colors.colors.size(); ++c) {
+      const auto& color = colors.colors[c];
+      json.StartObject();
+      json.Key("id");
+      json.Uint64(c);
+      json.Key("seed");
+      json.String(color.name.c_str());
+      json.Key("macros");
+      json.Int(color.macros);
+      json.Key("members");
+      json.Uint64(color.members.size());
+      json.Key("merged_seeds");
+      json.Int(std::max(0, color.macros - 1));
+      json.Key("candidate");
+      json.Int(candidate[c]);
+      json.Key("physical_area_dbu2");
+      json.Double(color.area);
+      json.Key("reserved_area_dbu2");
+      json.Double(reserved[c]);
+      json.Key("allocated_member_area_dbu2");
+      json.Double(candidate[c] >= 0 ? v.design.centroid_groups[candidate[c]].repulsion_area - reserved[c] : 0);
+      json.Key("repulsion_area_dbu2");
+      json.Double(candidate[c] >= 0 ? v.design.centroid_groups[candidate[c]].repulsion_area : 0);
+      json.EndObject();
+    }
+    json.EndArray();
+    json.EndObject();
+    std::ofstream out(options.output_dir + "/fp_placement_colors.json");
+    if (!membership || !(out << buffer.GetString() << '\n')) {
+      throw std::runtime_error("cannot write FP placement color report");
+    }
+  }
   if (v.centroids) {
     const auto                                 final                = summarize_centroids(v.design);
     const double                               equivalent_cell_area = dp::detail::centroid_cell_area(v.design);
@@ -3426,10 +3887,8 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
     rapidjson::Writer<rapidjson::StringBuffer> json(buffer);
     json.StartObject();
     json.Key("mode");
-    json.String(options.fp_place ? (options.iterations == 0
-                                        ? "fp-direct-macro-frame"
-                                        : (options.fp_snap_enabled ? "fp-snap-frozen-targets" : "fp-unsnapped-frozen-targets"))
-                                 : (options.macro_mode == "r8h3" ? "r8h3-repelling-centroids" : "r8h2-moving-centroids"));
+    json.String(options.iterations == 0 ? "fp-direct-macro-frame"
+                                        : (options.fp_snap_enabled ? "fp-snap-frozen-targets" : "fp-unsnapped-frozen-targets"));
     json.Key("coordinate_units");
     json.String("DBU");
     json.Key("weight");
@@ -3459,7 +3918,7 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
     json.Key("completed");
     json.Bool(metrics.centroid.completed);
     json.Key("from_scratch");
-    json.Bool(!options.fp_place);
+    json.Bool(false);
     json.Key("start_iteration");
     json.Int(metrics.centroid.start_iteration);
     json.Key("iterations");
@@ -3506,7 +3965,9 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
       json.Key("anchor_equivalent_cells");
       json.Double(final[i].area / equivalent_cell_area);
       json.Key("repulsion_radius_dbu");
-      json.Double(std::sqrt(final[i].area / (std::acos(-1.) * control.target_density)));
+      json.Double(std::sqrt((g.repulsion_area < 0 ? final[i].area : g.repulsion_area) / (std::acos(-1.) * control.target_density)));
+      json.Key("repulsion_area_dbu2");
+      json.Double(g.repulsion_area < 0 ? final[i].area : g.repulsion_area);
       json.Key("colors");
       json.StartArray();
       for (int c : g.colors) {
@@ -3571,13 +4032,21 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
     }
     json.EndArray();
     json.EndObject();
-    std::ofstream membership(options.output_dir + "/" + (options.fp_place ? std::string("fp") : options.macro_mode)
-                             + "_membership.tsv");
+    std::ofstream membership(options.output_dir + "/fp_membership.tsv");
     for (size_t n = 0; n < v.cells.size(); ++n) {
       membership << v.cells[n].name << '\t' << v.design.node_centroid_color[n] << '\n';
     }
-    std::ofstream out(options.output_dir + "/" + (options.fp_place ? std::string("fp_candidates") : options.macro_mode) + ".json");
+    std::ofstream out(options.output_dir + "/fp_candidates.json");
     out << buffer.GetString() << '\n';
+  }
+  if (options.analyze_colors_only) {
+    result.floorplan = v.fp;
+    for (const auto& c : v.cells) {
+      result.floorplan.components.push_back({c.name, c.macro, c.place});
+    }
+    result.qor = std::format(R"({{"schema_version":1,"kind":"floorplan_color_analysis","legal":false,"colors":{}}})",
+                             v.fp_coloring.colors.size());
+    return result;
   }
   for (auto& c : v.cells) {
     c.node.attr(attrs::place).set(c.place);

@@ -5,6 +5,7 @@
 #include <cmath>
 #include <filesystem>
 #include <fstream>
+#include <iomanip>
 #include <iostream>
 #include <stdexcept>
 
@@ -148,6 +149,102 @@ std::shared_ptr<hhds::Graph> mapped_def(hhds::GraphLibrary& library, const ph::F
   return graph;
 }
 
+// Geometry-only export for the native RUDY evaluator and placement PNGs. It
+// uses the same LEF pin centers, ideal-clock masks and layer capacities as GP.
+void physical_snapshot(const ph::Technology& tech, const ph::Floorplan& fp, const std::string& root, double halo) {
+  if (fp.rows.empty() || fp.dbu != tech.dbu) {
+    throw std::invalid_argument("physical snapshot requires rows and matching LEF/DEF units");
+  }
+  const auto&  row = fp.rows.front();
+  const double sw = row.step, rh = std::llround(tech.sites.at(row.site).height * tech.dbu);
+  double       capacity_h = 0, capacity_v = 0;
+  for (const auto& name : tech.routing_layers) {
+    const auto& l = tech.layers.at(name);
+    if (l.direction == "HORIZONTAL" && l.pitch_y > 0) {
+      capacity_h += 1 / (l.pitch_y * tech.dbu);
+    }
+    if (l.direction == "VERTICAL" && l.pitch_x > 0) {
+      capacity_v += 1 / (l.pitch_x * tech.dbu);
+    }
+  }
+  std::ofstream out(root + "/physical_snapshot.txt"), boxes(root + "/boxes.tsv");
+  out << std::setprecision(17) << row.x << ' ' << row.y << ' ' << row.x + row.count * row.step << ' ' << fp.rows.back().y + rh
+      << ' ' << sw << ' ' << rh << ' ' << capacity_h << ' ' << capacity_v << " 64\n"
+      << fp.components.size() + fp.terminals.size() << '\n';
+  std::map<std::string, int> cells, terminals;
+  for (size_t i = 0; i < fp.components.size(); ++i) {
+    const auto& c     = fp.components[i];
+    const auto& m     = tech.macros.at(c.macro);
+    const bool  macro = !m.klass.starts_with("CORE");
+    double      bh = 0, bv = 0;
+    if (macro) {
+      for (const auto& name : m.blocked_layers) {
+        const auto l = tech.layers.find(name);
+        if (l == tech.layers.end()) {
+          continue;
+        }
+        if (l->second.direction == "HORIZONTAL" && l->second.pitch_y > 0) {
+          bh += 1 / (l->second.pitch_y * tech.dbu);
+        }
+        if (l->second.direction == "VERTICAL" && l->second.pitch_x > 0) {
+          bv += 1 / (l->second.pitch_x * tech.dbu);
+        }
+      }
+    }
+    const double hx = macro ? std::ceil(halo * tech.dbu / sw) * sw : 0;
+    const double hy = macro ? std::ceil(halo * tech.dbu / rh) * rh : 0;
+    cells.emplace(c.name, i);
+    out << c.place.x - hx << ' ' << c.place.y - hy << ' ' << c.place.width + 2 * hx << ' ' << c.place.height + 2 * hy << ' '
+        << macro << ' ' << bh << ' ' << bv << '\n';
+    boxes << c.name << '\t' << c.macro << '\t' << c.place.x << '\t' << c.place.y << '\t' << c.place.width << '\t' << c.place.height
+          << '\t' << macro << '\n';
+  }
+  for (size_t i = 0; i < fp.terminals.size(); ++i) {
+    const auto& t = fp.terminals[i];
+    terminals.emplace(t.name, i);
+    out << t.x << ' ' << t.y << " 0 0 0 0 0\n";
+  }
+  const auto measured = [&](const ph::Net& net) {
+    return net.connections.size() >= 2 && std::none_of(net.connections.begin(), net.connections.end(), [&](const auto& c) {
+             return c.instance != "PIN"
+                    && tech.macros.at(fp.components.at(cells.at(c.instance)).macro).pins.at(c.pin).use == "CLOCK";
+           });
+  };
+  out << std::count_if(fp.nets.begin(), fp.nets.end(), measured) << '\n';
+  for (const auto& net : fp.nets) {
+    if (!measured(net)) {
+      continue;
+    }
+    out << net.connections.size();
+    for (const auto& endpoint : net.connections) {
+      if (endpoint.instance == "PIN") {
+        const auto  i = terminals.at(endpoint.pin);
+        const auto& t = fp.terminals[i];
+        out << ' ' << fp.components.size() + i << ' ' << t.x << ' ' << t.y;
+      } else {
+        const auto  i   = cells.at(endpoint.instance);
+        const auto& c   = fp.components[i];
+        const auto& m   = tech.macros.at(c.macro);
+        const auto& pin = m.pins.at(endpoint.pin);
+        if (pin.shapes.empty()) {
+          throw std::runtime_error("physical snapshot pin has no LEF geometry");
+        }
+        const auto& rect  = pin.shapes.front().rect;
+        const auto [x, y] = ph::orient_point((rect.xl + rect.xh) / 2 + m.origin_x,
+                                             (rect.yl + rect.yh) / 2 + m.origin_y,
+                                             m.width,
+                                             m.height,
+                                             c.place.orientation);
+        out << ' ' << i << ' ' << c.place.x + x * tech.dbu << ' ' << c.place.y + y * tech.dbu;
+      }
+    }
+    out << '\n';
+  }
+  if (!out || !boxes) {
+    throw std::runtime_error("cannot write physical snapshot");
+  }
+}
+
 int main(int argc, char** argv) {
   try {
     if (argc != 2) {
@@ -166,6 +263,7 @@ int main(int argc, char** argv) {
     };
     const auto root = text("output"), top = text("top"), sdc = text("sdc");
     std::filesystem::create_directories(root);
+    const bool  floorplan_mode = config.HasMember("floorplan_place") && config["floorplan_place"].GetBool();
     pl::Options options;
     options.fp_place = options.final_cells = options.macro_snap = false;
     options.legalize_cells                                      = true;
@@ -225,6 +323,10 @@ int main(int argc, char** argv) {
     if (config.HasMember("halo")) {
       options.halo_x = options.halo_y = config["halo"].GetDouble();
     }
+    if (config.HasMember("snapshot_only") && config["snapshot_only"].GetBool()) {
+      physical_snapshot(tech, *options.previous, root, config.HasMember("halo") ? config["halo"].GetDouble() : 0);
+      return 0;
+    }
     std::cout << "loading mapped graph" << std::endl;
     hhds::GraphLibrary           source_library;
     std::shared_ptr<hhds::Graph> source;
@@ -250,7 +352,7 @@ int main(int argc, char** argv) {
       }
     }
     hhds::GraphLibrary placed_library;
-    if (config.HasMember("cell_place") && config["cell_place"].GetBool()) {
+    if (floorplan_mode || (config.HasMember("cell_place") && config["cell_place"].GetBool())) {
       // Controlled full cell-GP import, not the ECO/retained-placement path.
       const auto input = options.previous;
       options.previous.reset();
@@ -259,6 +361,65 @@ int main(int argc, char** argv) {
       options.density   = .5;
       if (config.HasMember("iterations")) {
         options.iterations = config["iterations"].GetInt();
+      }
+      if (floorplan_mode) {
+        options.fp_place = options.final_cells = options.macro_snap = true;
+        options.fp_colors                                           = true;
+        // Diagnostic comparisons use the same mapped inputs/timing policy
+        // while selecting the production FP/color switches independently.
+        if (config.HasMember("fp_place")) {
+          options.fp_place = config["fp_place"].GetBool();
+        }
+        if (config.HasMember("fp_colors")) {
+          options.fp_colors = config["fp_colors"].GetBool();
+        }
+        if (config.HasMember("fp_distance_attraction")) {
+          options.fp_distance_attraction = config["fp_distance_attraction"].GetBool();
+        }
+        if (config.HasMember("fp_attraction_outside")) {
+          options.fp_attraction_outside = config["fp_attraction_outside"].GetDouble();
+        }
+        if (config.HasMember("fp_color_source")) {
+          options.fp_color_source = text("fp_color_source");
+        }
+        if (config.HasMember("fp_color_maximum")) {
+          options.fp_color_maximum = config["fp_color_maximum"].GetDouble();
+        }
+        if (config.HasMember("fp_color_minimum")) {
+          options.fp_color_minimum = config["fp_color_minimum"].GetDouble();
+        }
+        if (config.HasMember("fp_pin_adjust")) {
+          options.fp_pin_adjust = config["fp_pin_adjust"].GetBool();
+        }
+        if (config.HasMember("fp_pin_interval")) {
+          options.fp_pin_interval = config["fp_pin_interval"].GetInt();
+        }
+        if (config.HasMember("fp_iterations")) {
+          options.fp_iterations = config["fp_iterations"].GetInt();
+        }
+        if (config.HasMember("fp_timing_interval")) {
+          options.fp_timing_interval = config["fp_timing_interval"].GetInt();
+        }
+        if (config.HasMember("fp_timing_after_density")) {
+          options.fp_timing_after_density = config["fp_timing_after_density"].GetBool();
+        }
+        if (config.HasMember("fp_timing_movement")) {
+          options.fp_timing_movement = config["fp_timing_movement"].GetDouble();
+        }
+        if (config.HasMember("fp_resize")) {
+          options.fp_resize = config["fp_resize"].GetBool();
+        }
+      }
+      if (config.HasMember("color_analysis_only") && config["color_analysis_only"].GetBool()) {
+        if (!floorplan_mode) {
+          throw std::runtime_error("color_analysis_only requires floorplan_place");
+        }
+        options.analyze_colors_only = true;
+        options.final_cells         = false;
+        options.output_dir          = root + "/analysis";
+        auto analysis               = pl::place(*source, placed_library, options);
+        std::ofstream(root + "/qor.json") << analysis.qor;
+        return 0;
       }
       unsigned   serial = 0;
       const auto raw_evaluate
@@ -274,6 +435,9 @@ int main(int argc, char** argv) {
       const bool         timing_driven = !config.HasMember("timing_driven") || config["timing_driven"].GetBool();
       if (timing_driven) {
         options.net_weights = pl::timing_weights(*seed.parasitics, seed_timing, options.timing_fraction, options.timing_max_weight);
+      }
+      if (floorplan_mode && timing_driven) {
+        options.fp_evaluate = raw_evaluate;
       }
       const auto seeded = std::chrono::steady_clock::now();
       auto       state  = pl::place(*source, placed_library, options);
@@ -306,14 +470,20 @@ int main(int argc, char** argv) {
       auto& result = refined.placed;
       raw_evaluate(result);
       std::map<std::string, const ph::Component*> originals;
-      for (const auto& cell : input->components) {
+      for (const auto& cell : (floorplan_mode ? seed.floorplan.components : input->components)) {
         originals.emplace(cell.name, &cell);
       }
-      if (result.floorplan.components.size() != originals.size()) {
+      if (options.fp_resize) {
+        originals.clear();
+      }
+      if (!options.fp_resize && result.floorplan.components.size() != originals.size()) {
         throw std::runtime_error("cell placement changed component count");
       }
       unsigned fixed = 0;
       for (const auto& cell : result.floorplan.components) {
+        if (options.fp_resize) {
+          continue;
+        }
         const auto& old = *originals.at(cell.name);
         if (cell.macro != old.macro) {
           throw std::runtime_error("cell placement changed master: " + cell.name);
@@ -325,13 +495,16 @@ int main(int argc, char** argv) {
           }
         }
       }
+      std::ofstream(root + "/qor.json") << result.qor << '\n';
       ph::write_def(result.floorplan, root + "/out.def");
       const auto done = std::chrono::steady_clock::now();
       std::ofstream(root + "/runtime.json") << "{\"seed_s\":" << std::chrono::duration<double>(seeded - start).count()
                                             << ",\"place_s\":" << std::chrono::duration<double>(placed - seeded).count()
                                             << ",\"timing_refine_s\":" << std::chrono::duration<double>(done - placed).count()
                                             << ",\"fixed_components\":" << fixed << ",\"timing_evaluations\":" << serial << "}\n";
-      std::cout << "Cell placement completed; component masters and fixed positions unchanged" << std::endl;
+      std::cout << (floorplan_mode ? "Floorplan/macro/cell placement completed"
+                                   : "Cell placement completed; component masters and fixed positions unchanged")
+                << std::endl;
       return 0;
     }
     std::cout << "reconstructing retained placement and RC" << std::endl;

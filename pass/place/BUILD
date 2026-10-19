@@ -10,6 +10,8 @@ filegroup(
         "h2d.hpp",
         "memory_proxy.cpp",
         "memory_proxy.hpp",
+        "pin_adjust.cpp",
+        "pin_adjust.hpp",
         "place.cpp",
         "place.hpp",
         "repair.cpp",
@@ -17,9 +19,9 @@ filegroup(
         "resynthesize.cpp",
         "steiner_repair.cpp",
         "steiner_repair.hpp",
-        "timing_place.cpp",
         "technology_rc.cpp",
         "technology_rc.hpp",
+        "timing_place.cpp",
     ],
     visibility = ["//visibility:public"],
 )
@@ -32,6 +34,7 @@ genrule(
         "//graph",
         "//inou/lefdef:inou_lefdef",
         "//pass/liberty:liberty_dff",
+        "//pass/color:floorplan_color_srcs",
         "//pass/partition:partition_srcs",
         "@dreamplace",
         "@dreamplace//:macro_place",
@@ -53,17 +56,19 @@ cc_library(
         "color_centroids.cpp",
         "h2d.cpp",
         "memory_proxy.cpp",
+        "pin_adjust.cpp",
         "place.cpp",
         "repair.cpp",
         "resynthesize.cpp",
         "steiner_repair.cpp",
-        "timing_place.cpp",
         "technology_rc.cpp",
+        "timing_place.cpp",
     ],
     hdrs = [
         "color_centroids.hpp",
         "h2d.hpp",
         "memory_proxy.hpp",
+        "pin_adjust.hpp",
         "place.hpp",
         "repair.hpp",
         "steiner_repair.hpp",
@@ -76,6 +81,7 @@ cc_library(
         "//core",
         "//graph",
         "//inou/lefdef:inou_lefdef",
+        "//pass/color:floorplan_color",
         "//pass/liberty:liberty_dff",
         "//pass/partition:flatten",
         "//pass/synth",
@@ -129,6 +135,16 @@ cc_test(
 cc_test(
     name = "technology_rc_test",
     srcs = ["technology_rc_test.cpp"],
+    copts = COPTS,
+    deps = [
+        ":place",
+        "@googletest//:gtest_main",
+    ],
+)
+
+cc_test(
+    name = "pin_adjust_test",
+    srcs = ["pin_adjust_test.cpp"],
     copts = COPTS,
     deps = [
         ":place",

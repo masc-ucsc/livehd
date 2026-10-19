@@ -798,25 +798,29 @@ TEST_F(Buffer_repair, FloorplanRemovesBuffersAndRollsBackRejectedTopology) {
   graph->get_output_pin("y").connect_driver(gate("sky130_fd_sc_hd__inv_1", "macro", b));
   enable_floorplan();
   const auto directory = options.output_dir;
-  for (bool accept : {false, true}) {
-    options.output_dir  = directory + (accept ? "/accepted" : "/rejected");
-    options.fp_evaluate = [&](const Result& state) {
-      auto       score   = timing(state);  // validates real graph, cell/pin geometry and RC
-      const auto buffers = count(state, "buffer");
-      score.delay        = buffers ? 2 : accept ? 1 : 3;
-      score.wns = score.tns   = -1;
-      score.hold_wns          = 0;
-      score.violations        = 0;
-      score.electrical_excess = 0;
-      return score;
-    };
-    hhds::GraphLibrary owner;
-    const auto         placed = place(*graph, owner, options);
-    EXPECT_EQ(count(placed, "buffer"), accept ? 0U : 1U);
-    EXPECT_EQ(placed.fp_repair_edits, accept ? 1U : 0U);
-    equivalent(placed);
-    EXPECT_EQ(count(Result{.graph = graph}, "buffer"), 1U);  // source stays read-only
-    check_legality(physical::read_lef(options.lefs), placed.floorplan, options.halo_x, options.halo_y);
+  for (const auto* source_name : {"synthesis", "placement", "memory_first"}) {
+    options.fp_color_source = source_name;
+    options.fp_pin_adjust   = options.fp_color_source != "synthesis";
+    for (bool accept : {false, true}) {
+      options.output_dir  = directory + "/" + source_name + (accept ? "/accepted" : "/rejected");
+      options.fp_evaluate = [&](const Result& state) {
+        auto       score   = timing(state);  // validates real graph, cell/pin geometry and RC
+        const auto buffers = count(state, "buffer");
+        score.delay        = buffers ? 2 : accept ? 1 : 3;
+        score.wns = score.tns   = -1;
+        score.hold_wns          = 0;
+        score.violations        = 0;
+        score.electrical_excess = 0;
+        return score;
+      };
+      hhds::GraphLibrary owner;
+      const auto         placed = place(*graph, owner, options);
+      EXPECT_EQ(count(placed, "buffer"), accept ? 0U : 1U);
+      EXPECT_EQ(placed.fp_repair_edits, accept ? 1U : 0U);
+      equivalent(placed);
+      EXPECT_EQ(count(Result{.graph = graph}, "buffer"), 1U);  // source stays read-only
+      check_legality(physical::read_lef(options.lefs), placed.floorplan, options.halo_x, options.halo_y);
+    }
   }
 }
 TEST_F(Buffer_repair, FloorplanRebuildsFanoutWithSteinerSeedsAndOwnerColors) {
@@ -830,34 +834,52 @@ TEST_F(Buffer_repair, FloorplanRebuildsFanoutWithSteinerSeedsAndOwnerColors) {
     graph->get_output_pin(name).connect_driver(gate("sky130_fd_sc_hd__inv_1", "macro" + std::to_string(i), root));
   }
   enable_floorplan();
-  unsigned saw_tree   = 0;
-  options.fp_evaluate = [&](const Result& state) {
-    auto       score     = timing(state);
-    const auto inserted  = count(state, "__place_rebuffer");
-    saw_tree            += inserted > 0;
-    for (auto n : state.graph->body().nodes()) {
-      if (n.get_name().starts_with("__place_rebuffer")) {
-        EXPECT_TRUE(n.attr(attrs::place).has());
-        EXPECT_TRUE(n.attr(attrs::synth_color_group).has());
-        if (n.attr(attrs::synth_color_group).has()) {
-          EXPECT_EQ(n.attr(attrs::synth_color_group).get(), "bank:color:1");
+  const auto directory = options.output_dir;
+  for (const auto* source_name : {"synthesis", "placement", "memory_first"}) {
+    options.fp_color_source = source_name;
+    options.fp_pin_adjust   = options.fp_color_source != "synthesis";
+    options.output_dir      = directory + "/" + source_name;
+    unsigned saw_tree       = 0;
+    options.fp_evaluate     = [&](const Result& state) {
+      auto       score     = timing(state);
+      const auto inserted  = count(state, "__place_rebuffer");
+      saw_tree            += inserted > 0;
+      for (auto n : state.graph->body().nodes()) {
+        if (n.get_name().starts_with("__place_rebuffer")) {
+          EXPECT_TRUE(n.attr(attrs::place).has());
+          EXPECT_TRUE(n.attr(attrs::synth_color_group).has());
+          if (n.attr(attrs::synth_color_group).has()) {
+            EXPECT_EQ(n.attr(attrs::synth_color_group).get(), "bank:color:1");
+          }
         }
       }
+      score.delay = inserted ? 1 : count(state, "root") ? 2 : 3;
+      score.area  = inserted ? 0 : 100;
+      score.wns = score.tns   = -1;
+      score.hold_wns          = 0;
+      score.violations        = 0;
+      score.electrical_excess = 0;
+      return score;
+    };
+    hhds::GraphLibrary owner;
+    const auto         placed = place(*graph, owner, options);
+    EXPECT_GT(saw_tree, 0U);
+    EXPECT_GT(placed.fp_repair_edits, 0U);
+    EXPECT_GT(count(placed, "__place_rebuffer"), 0U);
+    equivalent(placed);
+    check_legality(physical::read_lef(options.lefs), placed.floorplan, options.halo_x, options.halo_y);
+    if (options.fp_color_source != "synthesis") {
+      std::ifstream       f(options.output_dir + "/macro/fp_placement_colors.json");
+      const std::string   text{std::istreambuf_iterator<char>(f), {}};
+      rapidjson::Document report;
+      report.Parse(text.c_str());
+      ASSERT_FALSE(report.HasParseError());
+      EXPECT_TRUE(report["membership_frozen_during_repair"].GetBool());
+      ASSERT_EQ(report["colors"].Size(), 1);
+      EXPECT_EQ(report["colors"][0]["macros"].GetInt(), 6);
+      EXPECT_GT(report["colors"][0]["members"].GetUint64(), 6);
     }
-    score.delay = inserted ? 1 : count(state, "root") ? 2 : 3;
-    score.area  = inserted ? 0 : 100;
-    score.wns = score.tns   = -1;
-    score.hold_wns          = 0;
-    score.violations        = 0;
-    score.electrical_excess = 0;
-    return score;
-  };
-  const auto placed = place(*graph, flat, options);
-  EXPECT_GT(saw_tree, 0U);
-  EXPECT_GT(placed.fp_repair_edits, 0U);
-  EXPECT_GT(count(placed, "__place_rebuffer"), 0U);
-  equivalent(placed);
-  check_legality(physical::read_lef(options.lefs), placed.floorplan, options.halo_x, options.halo_y);
+  }
 }
 TEST_F(Buffer_repair, TimingPlacementUsesSlackWeightsAndRejectsRegressions) {
   auto p = graph->get_input_pin("a");

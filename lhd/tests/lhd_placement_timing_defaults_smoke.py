@@ -66,7 +66,7 @@ macro_lef.write_text(lef)
 base[base.index(f'synth.lef={lib}/sky130hd.tlef,{lib}/sky130hd.lef')] = f'synth.lef={lib}/sky130hd.tlef,{macro_lef}'
 ram = run('fp_macro', ['--set', 'synth.place=true',
                      '--set', 'synth.place.halo=0',
-                     '--set', 'synth.place.fp.colors=true', '--set', 'synth.place.fp.minimum=0',
+                     '--set', 'synth.place.fp=true', '--set', 'synth.place.fp.colors=true', '--set', 'synth.place.fp.minimum=0',
                      '--set', 'synth.place.fp.iterations=120', '--set', 'synth.place.utilization=0.1'])
 assert ram['qor']['place']['legal'], ram
 fp = json.loads((root/'fp_macro/synth/place/macro/fp_place.json').read_text())
@@ -77,7 +77,7 @@ assert fp['fp_timing_observed'], fp
 assert 'fp_continuation_deadline' in fp and 'fp_timing_satisfied_at_last_checkpoint' in fp, fp
 assert not fp['timing_after_density'] and fp['timing_density_schedule'] == [], fp
 gated_result = run('fp_gated', ['--set', 'synth.place=true', '--set', 'synth.place.halo=0',
-                 '--set', 'synth.place.fp.colors=true', '--set', 'synth.place.fp.minimum=0',
+                 '--set', 'synth.place.fp=true', '--set', 'synth.place.fp.colors=true', '--set', 'synth.place.fp.minimum=0',
                  '--set', 'synth.place.fp.iterations=120', '--set', 'synth.place.utilization=0.1',
                  '--set', 'synth.place.fp.timing_after_density=true',
                  '--set', 'synth.place.timing_fraction=0.29',
