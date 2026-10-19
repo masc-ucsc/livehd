@@ -125,6 +125,9 @@ void Inou_slang::setup() {
   m1.add_label_optional("liberty_allow_truncation",
                         "true to keep the low bits when a wider actual drives a narrower synth.liberty RAM input, with a warning "
                         "(default: refuse; Verilog/Yosys truncate silently)");
+  m1.add_label_optional("liberty_cells",
+                        "true to bind a module that only the selected synth.liberty defines (a standard cell instantiated by "
+                        "name) as a typed, opaque cell instance");
 
   register_pass(m1);
 
@@ -162,6 +165,9 @@ void Inou_slang::setup() {
   m2.add_label_optional("liberty_allow_truncation",
                         "true to keep the low bits when a wider actual drives a narrower synth.liberty RAM input, with a warning "
                         "(default: refuse; Verilog/Yosys truncate silently)");
+  m2.add_label_optional("liberty_cells",
+                        "true to bind a module that only the selected synth.liberty defines (a standard cell instantiated by "
+                        "name) as a typed, opaque cell instance");
 
   m2.add_label_optional("liberty", "Selected Liberty: typed, opaque memory-cell interfaces", "");
   register_pass(m2);
@@ -313,6 +319,10 @@ void Inou_slang::work(Eprp_var& var) {
   const auto flag_true = [&](std::string_view name) { return var.has_label(name) && var.get(name) == "true"; };
   opts.liberty_macro_precedence      = flag_true("liberty_macro_precedence");
   opts.liberty_allow_truncation      = flag_true("liberty_allow_truncation");
+  opts.liberty_cells                 = flag_true("liberty_cells");
+  if (var.has_label("liberty")) {
+    opts.liberty_files = std::string(var.get("liberty"));
+  }
   opts.keep_timecheck            = keep_timecheck;
   // Only a USER-supplied --ignore-unknown-modules turns unknown modules into
   // blackbox sub-instances; the copy injected above (so slang itself never

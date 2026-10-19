@@ -4,6 +4,7 @@
 #include <cstdint>
 #include <memory>
 #include <optional>
+#include <set>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -46,6 +47,13 @@ struct Memory_skip {
 std::vector<Memory_cell> scan_memory_cells(const std::string& lib_files, std::vector<Memory_skip>* skipped = nullptr);
 std::vector<Memory_cell> scan_memory_cells_text(const std::string& contents, std::vector<Memory_skip>* skipped = nullptr);
 std::string              memory_cell_declarations(const std::vector<Memory_cell>& cells);
+// The pin/bus interface of exactly the NAMED non-RAM cells (standard cells a
+// design instantiates by name), in the same typed form so they reuse
+// memory_cell_declarations/declare_memory_cells. Names that are absent, are RAMs
+// (the memory inventory owns those) or cannot be represented are left out, the
+// latter two reported in `skipped`. Nothing about the cell's behavior is read.
+std::vector<Memory_cell> scan_logic_cells(const std::string& lib_files, const std::set<std::string>& names,
+                                          std::vector<Memory_skip>* skipped = nullptr);
 // Declare each RAM as a body-less GraphIO. A body-less declaration already in
 // `library` (a reused lg: dir) is kept when it matches and replaced when the
 // Liberty changed; a same-named module WITH a body is refused.

@@ -46,4 +46,24 @@ body = net[net.index('module twice('):]
 body = body[:body.index('endmodule')]
 assert body.count('input a') == 1 and '.a(a)' in net, net  # one port, one connection
 
+# ---- compile.slang.liberty_cells: a standard cell instantiated by name -------------------------------
+cell = root / 'cell.v'
+cell.write_text('''module cellmod(input a, output y);
+  sky130_fd_sc_hd__buf_1 b(.A(a), .X(y));
+endmodule
+''')
+synth = ['synth', str(cell), '--top', 'cellmod', '--set', f'synth.liberty={lib}', '--set', 'synth.opentimer=false']
+diag = lhd('cell_default', [*synth, '--workdir', str(root / 'cellW0')], success=False)
+assert 'unknown-module' in diag, diag
+lhd('cell_opt_in', [*synth, '--set', 'compile.slang.liberty_cells=true', '--workdir', str(root / 'cellW1'),
+                    '--emit-dir', f'verilog:{root}/cell-net'])
+net = verilog('cell-net')
+assert 'sky130_fd_sc_hd__buf_1 b(' in net and '.A(a)' in net and 'module sky130_fd_sc_hd__buf_1' not in net, net
+
+# A module the sources define always wins over the Liberty cell of the same name.
+own = root / 'own.v'
+own.write_text(cell.read_text() + 'module sky130_fd_sc_hd__buf_1(input A, output X);\n  assign X = A;\nendmodule\n')
+lhd('cell_own', ['synth', str(own), '--top', 'cellmod', '--set', f'synth.liberty={lib}', '--set', 'synth.opentimer=false',
+                 '--set', 'compile.slang.liberty_cells=true', '--workdir', str(root / 'ownW')])
+
 print('Macro and vendor-stub bring-up behaviors pass')

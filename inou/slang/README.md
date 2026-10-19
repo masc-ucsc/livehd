@@ -422,6 +422,7 @@ replaces whatever the sources say about it. Each is `--set compile.slang.<flag>=
 | --- | --- |
 | `liberty_macro_precedence` | a `synth.liberty` RAM macro WINS over a same-named design module, like `read_liberty -overwrite`: the declarations go into a slang library of the highest priority, every instantiation of that name binds to the macro pins, and the shadowed source module (a vendor behavioral model, a wrapper that re-instantiates the macro under its own name) is never elaborated |
 | `liberty_allow_truncation` | a wider actual on a narrower macro input keeps the low bits, as Verilog does, and `liberty-memory-port-truncation` becomes a warning instead of an error. The upper address/data bits are really discarded: use it only when the reference design does the same |
+| `liberty_cells` | a module that no source defines but the selected Liberty does (a standard cell such as `BUFx2_ASAP7_75t_R` instantiated by a vendor-primitive stub) is bound as a typed, opaque cell instance with the Liberty's pins and directions, like a RAM macro. A source definition of the name always wins |
 
 A port listed twice in a module header (`input a, input a`) is accepted by `--compat=vcs`
 (`Redefinition` becomes a warning); the first declaration is the port, the later ones add

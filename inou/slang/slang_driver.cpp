@@ -14,17 +14,37 @@
 #include <limits>
 #include <memory>
 #include <optional>
+#include <set>
+#include <string>
 
 #include "slang/analysis/AnalysisManager.h"  // complete type for runAnalysis's unique_ptr
 #include "slang/ast/Compilation.h"
 #include "slang/diagnostics/ExpressionsDiags.h"  // CannotIndexScalar
 #include "slang/driver/Driver.h"
+#include "slang/syntax/AllSyntax.h"
 #include "slang/syntax/SyntaxTree.h"
+#include "slang/syntax/SyntaxVisitor.h"
+#include "liberty_dff.hpp"
 #include "slang_context.hpp"
 #include "slang_diag.hpp"
 
 using namespace slang;
 using namespace slang::driver;
+
+namespace {
+// Module names the parsed sources instantiate and declare (post-preprocessing).
+struct Module_names : slang::syntax::SyntaxVisitor<Module_names> {
+  std::set<std::string> instantiated, declared;
+  void                  handle(const slang::syntax::HierarchyInstantiationSyntax& node) {
+    instantiated.emplace(node.type.valueText());
+    visitDefault(node);
+  }
+  void handle(const slang::syntax::ModuleDeclarationSyntax& node) {
+    declared.emplace(node.header->name.valueText());
+    visitDefault(node);
+  }
+};
+}  // namespace
 
 template <typename TArgs>
 static int driverMain(int argc, TArgs argv, Slang_context& slang_tree) {
@@ -92,14 +112,39 @@ static int driverMain(int argc, TArgs argv, Slang_context& slang_tree) {
 
     bool ok = driver.parseAllSources();
 
-    if (!slang_tree.get_options().liberty_declarations.empty()) {
+    std::string liberty_declarations = slang_tree.get_options().liberty_declarations;
+    if (slang_tree.get_options().liberty_cells && !slang_tree.get_options().liberty_files.empty()) {
+      // Standard cells a source instantiates by name but defines nowhere: declare exactly those the
+      // selected Liberty has, with its pin directions. A source definition of the name always wins
+      // (the design is then self-contained), so this only fills in modules that would be unknown.
+      Module_names names;
+      for (const auto& tree : driver.syntaxTrees) {
+        tree->root().visit(names);
+      }
+      auto options = slang_tree.get_options();
+      std::set<std::string> wanted;
+      for (const auto& name : names.instantiated) {
+        if (!names.declared.contains(name) && !options.liberty_memories.contains(name)) {
+          wanted.insert(name);
+        }
+      }
+      const auto cells = livehd::liberty::scan_logic_cells(options.liberty_files, wanted);
+      if (!cells.empty()) {
+        liberty_declarations += livehd::liberty::memory_cell_declarations(cells);
+        for (const auto& cell : cells) {
+          options.liberty_memories.insert(cell.name);
+        }
+        slang_tree.set_options(options);
+      }
+    }
+    if (!liberty_declarations.empty()) {
       // Normally the declarations share the design's default library, so a same-named
       // source module collides with the macro and is refused by the reader. With
       // liberty_macro_precedence they sit in their own library of the highest priority:
       // slang then resolves every instantiation of that name to the macro and the source
       // module is never elaborated (Yosys `read_liberty -overwrite` semantics).
       const bool macro_first = slang_tree.get_options().liberty_macro_precedence;
-      auto       interfaces  = slang::syntax::SyntaxTree::fromText(slang_tree.get_options().liberty_declarations,
+      auto       interfaces  = slang::syntax::SyntaxTree::fromText(liberty_declarations,
                                                                    driver.sourceManager,
                                                                    "<liberty-memory-interfaces>",
                                                                    "",

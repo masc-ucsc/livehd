@@ -457,6 +457,13 @@ public:
     // Yosys do, with a `liberty-memory-port-truncation` WARNING instead of the
     // default error (which refuses to discard address/data bits).
     bool                             liberty_allow_truncation  = false;
+    // Opt-in (compile.slang.liberty_cells): a module instantiated by name that no
+    // source defines but the selected Liberty does (a standard cell such as
+    // `BUFx2_ASAP7_75t_R`, as in Xilinx-primitive stubs for ASIC flows) is bound
+    // as a typed, opaque cell with the pins and directions the Liberty states,
+    // exactly like a RAM macro. `liberty_files` is the selected library list.
+    bool                             liberty_cells = false;
+    std::string                      liberty_files;
     int                              unroll_limit              = 4000;  // slang-side loop unroll cap (yosys-slang default)
     // Emit a canonical procedural `for` as an LNAST/Pyrope LOOP instead of
     // unrolling it here. LNAST already owns loops with `break`/`continue`
