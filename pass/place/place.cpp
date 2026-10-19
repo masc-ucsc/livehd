@@ -27,6 +27,7 @@
 #include "h2d.hpp"
 #include "memory_proxy.hpp"
 #include "repair.hpp"
+#include "reset_tree.hpp"
 #include "technology_rc.hpp"
 #if defined(__APPLE__)
 #include <mach-o/dyld.h>
@@ -38,7 +39,6 @@
 #include "node_util.hpp"
 #include "pass/liberty/liberty_dff.hpp"
 #include "pass/partition/flatten.hpp"
-#include "reset_tree.hpp"
 #include "pass/place/place_salt.hpp"
 #include "rapidjson/document.h"
 #include "rapidjson/stringbuffer.h"

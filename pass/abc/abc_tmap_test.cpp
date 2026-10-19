@@ -293,6 +293,7 @@ TEST_F(AbcTmap, PhysicalOptionsEnterCacheIdentityAndUntimedDelayIsNotPs) {
   // body mapped under another setting.
   const std::vector<std::function<void()>> changes{
       [&] { options.max_fanout = 4; },
+      [&] { options.reset_fanout = 4; },
       [&] { options.boundary = false; },
       [&] { options.boundary_buffer = false; },
       [&] { options.boundary_drive = "none"; },
