@@ -257,7 +257,7 @@ public:
 
   std::optional<State_sweep_stats> run() {
     State_sweep_stats folded;
-    if (!fold_constant_registers(folded)) {
+    if (!mark_loop_bodies() || !fold_constant_registers(folded)) {
       return std::nullopt;
     }
     auto stats = run_demand();
@@ -373,6 +373,9 @@ private:
 
   bool fold_constant_registers(State_sweep_stats& stats) {
     for (auto& def : defs_) {
+      if (def.skip) {
+        continue;
+      }
       std::optional<absl::flat_hash_set<uint64_t>> existed;
       for (int round = 0; round < 8; ++round) {
         std::vector<std::pair<hhds::Node_class, Dlop>> constants;
@@ -467,27 +470,22 @@ private:
   }
 
   // ---- linking ------------------------------------------------------------
-  bool link() {
+  // A definition a compact loop instantiates, and whatever that holds, is neither swept nor folded nor narrowed: the loop keeps
+  // its carries, ordinals and cut bits.
+  bool mark_loop_bodies() {
     for (auto& def : defs_) {
       for (auto node : def.graph->body().nodes()) {
-        if (!admit("state-sweep-link")) {
+        if (!admit("state-sweep-loops")) {
           return false;
         }
-        if (gu::type_op_of(node) != Ntype_op::Sub) {
+        if (gu::type_op_of(node) != Ntype_op::Sub || !node.is_loop_subnode()) {
           continue;
         }
-        auto* child = node.get_subnode_graph() ? find(node.get_subnode_graph()->get_gid()) : nullptr;
-        if (child == nullptr) {
-          continue;
+        if (auto* child = node.get_subnode_graph() ? find(node.get_subnode_graph()->get_gid()) : nullptr; child != nullptr) {
+          child->skip = true;
         }
-        if (node.is_loop_subnode()) {
-          child->skip = true;  // compact loops keep their carries, ordinals and cut bits
-          continue;
-        }
-        child->instances.push_back({&def, node});
       }
     }
-    // A loop body is neither swept nor narrowed, and neither is whatever it holds.
     for (bool again = true; again;) {
       again = false;
       for (auto& def : defs_) {
@@ -502,6 +500,24 @@ private:
               again       = true;
             }
           }
+        }
+      }
+    }
+    return true;
+  }
+
+  // The instances of every definition, after the constant registers are folded (a refold must not leave a stale handle).
+  bool link() {
+    for (auto& def : defs_) {
+      for (auto node : def.graph->body().nodes()) {
+        if (!admit("state-sweep-link")) {
+          return false;
+        }
+        if (gu::type_op_of(node) != Ntype_op::Sub || node.is_loop_subnode()) {
+          continue;
+        }
+        if (auto* child = node.get_subnode_graph() ? find(node.get_subnode_graph()->get_gid()) : nullptr; child != nullptr) {
+          child->instances.push_back({&def, node});
         }
       }
     }
