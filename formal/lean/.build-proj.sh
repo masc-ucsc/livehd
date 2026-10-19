@@ -125,6 +125,7 @@ MODULES=(
   Projection/Sym/Prim
   Projection/Sym/Mem
   Projection/Sym/Dispatch
+  Projection/Sym/Wire
   Projection/Sym/Eval
   Projection/Sym/Asg
   Projection/Sym/Sat

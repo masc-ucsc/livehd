@@ -17,6 +17,7 @@ structurally hashed bit-blaster cache from walking a DAG as a tree.
 environment yields a value the symbolic answer denotes.
 -/
 import LeanSemanticPrimitives.Projection.Sym.Dispatch
+import LeanSemanticPrimitives.Projection.Sym.Wire
 import LeanSemanticPrimitives.Projection.AxiomGate
 
 namespace Projection.Sym
@@ -59,20 +60,28 @@ theorem SymSt.Consistent.of_extends {σ : Asg} {a b : SymSt} (hc : b.Consistent 
   rw [he k hk] at this
   rw [hb]; exact this
 
-/-- Record `e` as a new cut variable. Variables and constants stay as they are. -/
+/-- Record `e` as a new cut variable. Variables and constants stay as they are,
+and so does WIRING (`Sym.Wire`: every bit a constant or a variable's bit), in
+its compact form: it costs no gate, while its cut would cost a `var == e`
+definition of its full width. -/
 def cutE (st : SymSt) {w : Nat} (e : BVExpr w) : BVExpr w × SymSt :=
   match e with
   | .var _   => (e, st)
   | .const _ => (e, st)
-  | _        => (.var (st.base + st.defs.size), { st with defs := st.defs.push ⟨w, e⟩ })
+  | _        =>
+    match norm e with
+    | some e' => (e', st)
+    | none    => (.var (st.base + st.defs.size), { st with defs := st.defs.push ⟨w, e⟩ })
 
 theorem cutE_extends (st : SymSt) {w : Nat} (e : BVExpr w) : st.Extends (cutE st e).2 := by
   unfold cutE
   split
   · exact .refl _
   · exact .refl _
-  · refine ⟨rfl, by simp, fun k h => ?_⟩
-    simp [Array.getElem_push_lt h]
+  · split
+    · exact .refl _
+    · refine ⟨rfl, by simp, fun k h => ?_⟩
+      simp [Array.getElem_push_lt h]
 
 /-- A cut expression evaluates as the original, under any assignment that is
 consistent with any extension of the state the cut produced. -/
@@ -80,13 +89,18 @@ theorem cutE_eval {σ : Asg} (st : SymSt) {w : Nat} (e : BVExpr w) {stF : SymSt}
     (hc : stF.Consistent σ) (hx : (cutE st e).2.Extends stF) :
     (cutE st e).1.eval σ = e.eval σ := by
   have hc' := hc.of_extends hx
-  cases e with
-  | var => rfl
-  | const => rfl
-  | _ =>
-    have := hc' st.defs.size (by simp [cutE])
-    simp only [cutE, Array.getElem_push_eq] at this
-    exact this
+  unfold cutE at hc' ⊢
+  split
+  · rfl
+  · rfl
+  · split
+    · rename_i e' hn
+      exact eval_norm σ hn
+    · rename_i hn
+      simp only [hn] at hc'
+      have := hc' st.defs.size (by simp)
+      simp only [Array.getElem_push_eq] at this
+      exact this
 
 mutual
 
