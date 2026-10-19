@@ -469,6 +469,13 @@ public:
     // Its ports are declared, no body is built and every instance stays an opaque Sub. Without it the
     // module lowers as written: an empty body whose outputs read as unknown.
     bool                             blackbox_attribute = false;
+    // Opt-in (compile.slang.flatten_state_arrays): a one-dimensional unpacked state array without power-on
+    // contents is one packed register vector (constant selectors are element offsets, a runtime selector a
+    // shift/mask), not a Memory with one port per access site. The default keeps the aggregate identity
+    // (read_all/update, Pyrope state correspondence); a design that touches an array through hundreds of
+    // constant-index sites (NyuziProcessor's pending_stores: 375 read and 360 write ports) otherwise spends
+    // hours bit-blasting that Memory.
+    bool                             flatten_state_arrays = false;
     // Opt-in (compile.slang.unconnected_input = zero|one): an input port left unconnected
     // on an instance reads that constant instead of the default unknown 'x. Verilog leaves
     // such a port floating (z, read as x); a synthesis tool is free to pick any value, and

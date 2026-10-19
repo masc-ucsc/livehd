@@ -425,6 +425,7 @@ replaces whatever the sources say about it. Each is `--set compile.slang.<flag>=
 | `liberty_cells` | a module that no source defines but the selected Liberty does (a standard cell such as `BUFx2_ASAP7_75t_R` instantiated by a vendor-primitive stub) is bound as a typed, opaque cell instance with the Liberty's pins and directions, like a RAM macro. A source definition of the name always wins |
 | `blackbox_attribute` | a module marked `(* blackbox *)` is its interface only: ports are declared, no body is built, and every instance stays an opaque `Sub` (the LEF/Liberty macro) instead of an empty module whose outputs read as unknown |
 | `unconnected_input=zero\|one` | an instance input left open reads that constant instead of `x`. Yosys folds a vendor primitive whose controls are open (BUFG_GT's CE/CLR) into its enabled state; an unknown select keeps the whole enable cone as logic on a clock net |
+| `flatten_state_arrays` | a one-dimensional unpacked state array without power-on contents is one packed register vector (constant selectors are element offsets, a runtime selector a shift/mask) instead of a Memory with one port per access site. NyuziProcessor's `pending_stores` has 375 read and 360 write ports, which otherwise take hours to bit-blast |
 
 A port listed twice in a module header (`input a, input a`) is accepted by `--compat=vcs`
 (`Redefinition` becomes a warning); the first declaration is the port, the later ones add

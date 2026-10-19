@@ -3036,7 +3036,8 @@ bool Slang_context::declare_unpacked(const slang::ast::ValueSymbol& sym, bool is
     emit_unsupported(sym.location, "readmem-array-port", "file preload requires a local memory, not a flattened array port");
     return false;
   }
-  if (dims.size() == 1 && (flat_io_port || (!is_reg && !has_init)) && flat_bits > 0 && flat_bits <= 65536) {
+  const bool static_state = is_reg && !has_init && options_.flatten_state_arrays;
+  if (dims.size() == 1 && (flat_io_port || static_state || (!is_reg && !has_init)) && flat_bits > 0 && flat_bits <= 65536) {
     if (has_init) {
       // The flat branch has no INIT representation (the Memory branch below is
       // the only one that emits mem_init_vals_). A flat IO port reaches here

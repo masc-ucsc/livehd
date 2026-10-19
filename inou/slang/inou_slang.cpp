@@ -132,6 +132,8 @@ void Inou_slang::setup() {
                         "zero|one to read an unconnected instance input as that constant instead of the unknown 'x (default: x)");
   m1.add_label_optional("blackbox_attribute",
                         "true to treat a module marked (* blackbox *) as an interface only: ports declared, no body, instances stay opaque");
+  m1.add_label_optional("flatten_state_arrays",
+                        "true to lower a one-dimensional unpacked state array as one register vector instead of a Memory with a port per access");
 
   register_pass(m1);
 
@@ -176,6 +178,8 @@ void Inou_slang::setup() {
                         "zero|one to read an unconnected instance input as that constant instead of the unknown 'x (default: x)");
   m2.add_label_optional("blackbox_attribute",
                         "true to treat a module marked (* blackbox *) as an interface only: ports declared, no body, instances stay opaque");
+  m2.add_label_optional("flatten_state_arrays",
+                        "true to lower a one-dimensional unpacked state array as one register vector instead of a Memory with a port per access");
 
   m2.add_label_optional("liberty", "Selected Liberty: typed, opaque memory-cell interfaces", "");
   register_pass(m2);
@@ -329,6 +333,7 @@ void Inou_slang::work(Eprp_var& var) {
   opts.liberty_allow_truncation      = flag_true("liberty_allow_truncation");
   opts.liberty_cells                 = flag_true("liberty_cells");
   opts.blackbox_attribute            = flag_true("blackbox_attribute");
+  opts.flatten_state_arrays          = flag_true("flatten_state_arrays");
   if (var.has_label("unconnected_input")) {
     const auto value = std::string(var.get("unconnected_input"));
     if (value == "zero") {

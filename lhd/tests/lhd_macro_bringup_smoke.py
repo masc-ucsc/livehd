@@ -109,4 +109,51 @@ lhd('stub_from_ln', ['compile', f'ln:{root}/stub-ln', '--top', 'top', '--workdir
 net = verilog('stub-from-ln')
 assert 'module hardmac' not in net and 'hardmac m(' in net, net
 
+# ---- compile.slang.flatten_state_arrays ---------------------------------------------------------------
+# Constant-index element and partial writes plus a runtime read of one unpacked state array. A
+# Memory (one port per access site) is the default; the flag makes it four registers' worth of
+# bits, proven equal to hand-written registers.
+array = root / 'array.v'
+array.write_text('''module arr(input clk, input [1:0] sel, input [1:0] ws, input [7:0] d, input [3:0] we, input wen,
+           output [3:0] vs, output [7:0] q, output [7:0] dyn);
+  reg [15:0] st [0:3];
+  genvar i;
+  generate for (i = 0; i < 4; i = i + 1) begin : g
+    always @(posedge clk) if (we[i]) begin st[i][7:0] <= d; st[i][15] <= 1'b1; end
+    assign vs[i] = st[i][15];
+  end endgenerate
+  always @(posedge clk) if (wen) st[ws][14:8] <= d[6:0];
+  assign dyn = st[sel][7:0];
+  assign q = st[0][7:0] ^ st[1][7:0] ^ st[2][7:0] ^ st[3][7:0];
+endmodule
+''')
+golden = root / 'golden.v'
+golden.write_text('''module arr(input clk, input [1:0] sel, input [1:0] ws, input [7:0] d, input [3:0] we, input wen,
+           output [3:0] vs, output [7:0] q, output [7:0] dyn);
+  reg [15:0] r0, r1, r2, r3;
+  always @(posedge clk) begin
+    if (we[0]) begin r0[7:0] <= d; r0[15] <= 1'b1; end
+    if (we[1]) begin r1[7:0] <= d; r1[15] <= 1'b1; end
+    if (we[2]) begin r2[7:0] <= d; r2[15] <= 1'b1; end
+    if (we[3]) begin r3[7:0] <= d; r3[15] <= 1'b1; end
+    if (wen && ws == 2'd0) r0[14:8] <= d[6:0];
+    if (wen && ws == 2'd1) r1[14:8] <= d[6:0];
+    if (wen && ws == 2'd2) r2[14:8] <= d[6:0];
+    if (wen && ws == 2'd3) r3[14:8] <= d[6:0];
+  end
+  assign vs = {r3[15], r2[15], r1[15], r0[15]};
+  assign dyn = sel == 2'd0 ? r0[7:0] : sel == 2'd1 ? r1[7:0] : sel == 2'd2 ? r2[7:0] : r3[7:0];
+  assign q = r0[7:0] ^ r1[7:0] ^ r2[7:0] ^ r3[7:0];
+endmodule
+''')
+for name, flag in [('array_mem', 'false'), ('array_flat', 'true')]:
+    lhd(name, ['synth', str(array), '--top', 'arr', '--set', f'synth.liberty={lib}', '--set', 'synth.opentimer=false',
+               '--set', 'synth.memory=flops', '--set', f'compile.slang.flatten_state_arrays={flag}',
+               '--workdir', str(root / (name + 'W')), '--emit-dir', f'verilog:{root}/{name}-net'])
+    assert ('cgen_memory' in verilog(name + '-net')) == (flag == 'false'), (name, verilog(name + '-net'))
+lhd('array_rtl', ['compile', str(array), '--top', 'arr', '--set', 'compile.slang.flatten_state_arrays=true',
+                  '--workdir', str(root / 'arrayW'), '--emit-dir', f'verilog:{root}/array-rtl'])
+lhd('golden_rtl', ['compile', str(golden), '--top', 'arr', '--workdir', str(root / 'goldenW'), '--emit-dir', f'verilog:{root}/golden-rtl'])
+lec = lhd('lec', ['lec', '--impl', f'verilog:{root}/array-rtl/arr.v', '--ref', f'verilog:{root}/golden-rtl/arr.v', '--top', 'arr'])
+
 print('Macro and vendor-stub bring-up behaviors pass')
