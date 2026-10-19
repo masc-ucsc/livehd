@@ -114,12 +114,8 @@ Reset_tree_stats buffer_reset_nets(hhds::Graph& graph, const physical::Technolog
 
   const auto            io = buffer_io(graph, *buffer);
   std::set<std::string> names;  // a rerun over a graph that already holds trees must not reuse a minted name
-  for (auto n : graph.body().nodes()) {
-    if (const auto name = std::string(n.get_name()); name.find("__place_rsttree") != std::string::npos) {
-      names.insert(name);
-    }
-  }
-  unsigned serial = 0;
+  bool                  names_read = false;
+  unsigned              serial     = 0;
   for (const auto& driver : drivers) {
     // The cell pins this net feeds. A graph output, a bus-wiring alias or a macro keeps its direct
     // connection to the driver; only a pin whose single driver is this net can move.
@@ -135,11 +131,25 @@ Reset_tree_stats buffer_reset_nets(hhds::Graph& graph, const physical::Technolog
     if (loads.size() <= cap || total <= cap) {
       continue;
     }
-    std::sort(loads.begin(), loads.end(), [](const Pin& a, const Pin& b) {
-      const auto na = std::string(a.get_master_node().get_name());
-      const auto nb = std::string(b.get_master_node().get_name());
-      return std::make_pair(na, a.get_port_id()) < std::make_pair(nb, b.get_port_id());
-    });
+    {
+      std::vector<std::pair<std::pair<std::string, uint64_t>, Pin>> keyed;
+      keyed.reserve(loads.size());
+      for (const auto& load : loads) {
+        keyed.push_back({{std::string(load.get_master_node().get_name()), load.get_port_id()}, load});
+      }
+      std::stable_sort(keyed.begin(), keyed.end(), [](const auto& a, const auto& b) { return a.first < b.first; });
+      for (size_t i = 0; i < keyed.size(); ++i) {
+        loads[i] = keyed[i].second;
+      }
+    }
+    if (!names_read) {
+      names_read = true;
+      for (auto n : graph.body().nodes()) {
+        if (const auto name = std::string(n.get_name()); name.find("__place_rsttree") != std::string::npos) {
+          names.insert(name);
+        }
+      }
+    }
     ++stats.nets;
     stats.sinks += static_cast<unsigned>(loads.size());
     unsigned level = 0;
