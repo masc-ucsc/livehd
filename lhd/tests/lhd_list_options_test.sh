@@ -36,6 +36,11 @@ echo "$out" | grep -q '"name":"compile.unroll","method":"compile","default":"fal
   || fail "compile.unroll must default false: $out"
 echo "$out" | grep -Eq '"name":"compile.upass.(roll|roll_arrays|roll_cap|unroll)"' \
   && fail "internal or removed loop options must not be listed: $out"
+# pass.abc zero-bit facts: opt-in
+for abc_opt in memory_prune_reads ware_zero_bits; do
+  echo "$out" | grep -q "\"name\":\"pass.abc.$abc_opt\",\"method\":\"pass.abc\",\"default\":\"false\"" \
+    || fail "pass.abc.$abc_opt must be listed and default false: $out"
+done
 for obsolete in roll roll_arrays roll_cap unroll; do
   "$LHD" compile "$PRP" --set "compile.upass.$obsolete=true" --workdir "$W/removed_$obsolete" -q \
     >"$W/removed_$obsolete.json" 2>&1 && fail "compile.upass.$obsolete must be rejected"

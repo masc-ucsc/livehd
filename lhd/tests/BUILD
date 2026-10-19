@@ -1605,6 +1605,20 @@ sh_test(
     env = {"MAPPER": mapper},
 ) for suffix, mapper in _MAPPERS]
 
+# pass.abc.ware_zero_bits / pass.abc.memory_prune_reads: a barrel shifter over a vector
+# with one live lane and a lowered memory with narrow read windows map to fewer cells
+# when the module boundary no longer hides what the parent knows, and the mapped
+# netlists are LEC-equivalent to the source.
+sh_test(
+    name = "lhd_abc_zero_bits_test",
+    size = "large",
+    srcs = ["lhd_abc_zero_bits_test.sh"],
+    data = _FLOW_DATA + [
+        "abc_zero_bits.sv",
+        "//inou/prp:abc_tests",
+    ],
+)
+
 # 2i-abc_arith: every selectable adder architecture (rca/cska/cla + block_size)
 # tech-maps the arithmetic fixture and is LEC-equivalent to the original logic
 # (MAPPER=abc; the _usyn twin proves native USYN mapped, residual-off and

@@ -29,7 +29,14 @@ Ware_policy                               ware_policy(const hhds::Graph& graph, 
 // `option_colors` -- the CLI region_opts keys): color numbers shift when an
 // edit adds or removes a region, and naming every width specialization after
 // one would rename the callee of every unrelated instance.
+//
+// `zero_bits` (pass.abc.ware_zero_bits): a shifter's data operand whose parent
+// provably drives some bits with 0 (a lane placed by a constant left shift, a
+// value narrower than the port) is cleared on those bits INSIDE the module, so
+// the mapper sees the constants the module boundary would otherwise hide. The
+// cleared-bit pattern is part of the module's identity.
 std::vector<std::shared_ptr<hhds::Graph>> build_ware_modules(const std::vector<std::shared_ptr<hhds::Graph>>& graphs,
                                                              Ware_policy                                      fallback      = {},
-                                                             const std::set<int>&                             option_colors = {});
+                                                             const std::set<int>&                             option_colors = {},
+                                                             bool                                             zero_bits     = false);
 }  // namespace livehd::synth

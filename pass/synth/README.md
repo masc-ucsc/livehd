@@ -68,6 +68,17 @@ Remaining native synthesis work is tracked in [2u-usyn](../../todo/livehd/2u-usy
    `br_mux_bin_array` / `br_apb_demux_select_onehot` delay gaps but loses as
    often elsewhere: `br_arb_lru` 273 -> 368 ps, `br_multi_xfer_distributor_rr`
    +65% area), as `compile.unroll=true` does.
+   `bit_facts.cpp` answers "which bits of this value are provably 0" for the two
+   module boundaries that would otherwise hide the answer from the mapper, both
+   opt-in: `pass.abc.ware_zero_bits` clears, inside an extracted ware shifter, the
+   data-operand bits its parent drives with 0 (one live lane of a word-select
+   vector), and `pass.abc.memory_prune_reads` clears at a lowered memory's output
+   the read-port bits no reader observes, feeds the bits a parent drives with 0
+   to the module as constants, and passes a write-enable lane vector that is one
+   condition on a constant lane pattern (`cond * K`) as that one bit, so the
+   module's lanes share one net instead of costing an enable product per lane.
+   The mask cell takes the color of the logic it feeds (a different color is a
+   different region, and the constant would not cross it).
    Explicit SRAM cells declared by the selected Liberty remain opaque `Sub`
    instances. They bypass native-array lowering; their physical geometry is
    supplied by the corresponding LEF. The library interface alone does not

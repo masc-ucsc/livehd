@@ -350,6 +350,8 @@ today, for the record:
 | `pass.abc.register` | `true` (flops map to Liberty DFF cells) | `pass_abc.cpp` (`register`) |
 | `pass.abc.memory` | `auto` (fold a memory within `memory_max_bits`, or over 3 ports whatever the size) | `pass_abc.cpp` (`memory`) |
 | `pass.abc.memory_max_bits` | `1024` | `pass_abc.cpp` (`memory_max_bits`) |
+| `pass.abc.memory_prune_reads` | `false` (clear unobserved read-port bits and feed provably-zero input bits as constants in a lowered memory) | `pass_abc.cpp` (`memory_prune_reads`), `memory_module.cpp`, `bit_facts.cpp` |
+| `pass.abc.ware_zero_bits` | `false` (clear provably-zero data bits of a ware shifter inside its module) | `pass_abc.cpp` (`ware_zero_bits`), `ware_module.cpp`, `bit_facts.cpp` |
 | `pass.color.synth.mode` | **`cones`** (`cones` \| `synth` \| `pipe`) | `pass_color.cpp` (`mode`) |
 | `pass.color.synth.mapper` | `abc` (`lhd synth` sets it from `synth.mapper`); picks the `stop_*` default profile | `pass_color.cpp` (`mapper`) |
 | `pass.color.synth.stop_{mux,arith,cmp,shift}` | `true` under `mapper=abc`, `false` under `mapper=usyn`; an explicit value wins | `pass_color.cpp` (`stop_*`) |

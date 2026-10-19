@@ -210,6 +210,18 @@ void Pass_abc::add_mapping_labels(Eprp_method& m) {
                        "larger one native, saying which (0 = no size limit, fold every memory). memory=true/false do not "
                        "consult it",
                        "1024");
+  m.add_label_optional("memory_prune_reads",
+                       "true|false with a lowered (bit-blasted) memory, clear at the memory module's output every bit of a "
+                       "read port that no reader observes (all readers take constant Get_mask windows of the word, or "
+                       "there is no reader), so the read mux logic of the unobserved bits is dropped. The mapped function "
+                       "of every observed bit is unchanged (false, the default)",
+                       "false");
+  m.add_label_optional("ware_zero_bits",
+                       "true|false clear, inside an extracted ware shifter, the data-operand bits its parent provably drives "
+                       "with 0 (a lane placed by a constant left shift, a value narrower than the port), so the mapper sees the "
+                       "constants the module boundary hides. The cleared-bit pattern is part of the module identity (false, the "
+                       "default)",
+                       "false");
   m.add_label_optional("dff_cell",
                        "explicit Liberty DFF cell name for register=true (empty => auto-detect a plain posedge D-flop)",
                        "");
@@ -803,6 +815,8 @@ void Pass_abc::map_with(Eprp_var& var, const std::function<void(livehd::abc::Map
   bool map_register        = truthy(var.get("register", "true"));
   bool drop_init           = truthy(var.get("drop_init", "false"));
   bool derived_clock       = truthy(var.get("derived_clock", "false"));
+  const bool memory_prune_reads = truthy(var.get("memory_prune_reads", "false"));
+  const bool ware_zero_bits     = truthy(var.get("ware_zero_bits", "false"));
   auto memory_s            = std::string{var.get("memory", "auto")};
   auto memory_max_bits_s   = std::string{var.get("memory_max_bits", "1024")};
   auto register_max_bits_s = std::string{var.get("register_max_bits", "0")};
@@ -1193,10 +1207,20 @@ void Pass_abc::map_with(Eprp_var& var, const std::function<void(livehd::abc::Map
   for (const auto& [color, ro] : region_opts) {
     option_colors.insert(color);
   }
-  auto ware_modules = livehd::synth::build_ware_modules(scratch_graphs, ware_policy, option_colors);
+  // Order matters only for memory_prune_reads: it reads the shapes that feed a
+  // memory's ports (a cprop `cond * lanes` enable, a constant lane pattern),
+  // which a ware extraction would turn into an opaque instance. Without it the
+  // historical order (ware first) is unchanged.
+  std::vector<livehd::synth::Memory_row>      memory_table;
+  std::vector<std::shared_ptr<hhds::Graph>>   memory_modules, ware_modules;
+  if (memory_prune_reads) {
+    memory_modules = livehd::synth::build_memory_modules(scratch_graphs, opts.memory_fold, opts.memory_max_bits, &memory_table, true);
+    ware_modules   = livehd::synth::build_ware_modules(scratch_graphs, ware_policy, option_colors, ware_zero_bits);
+  } else {
+    ware_modules   = livehd::synth::build_ware_modules(scratch_graphs, ware_policy, option_colors, ware_zero_bits);
+    memory_modules = livehd::synth::build_memory_modules(scratch_graphs, opts.memory_fold, opts.memory_max_bits, &memory_table);
+  }
   resolve_graphs.insert(resolve_graphs.end(), ware_modules.begin(), ware_modules.end());
-  std::vector<livehd::synth::Memory_row> memory_table;
-  auto memory_modules = livehd::synth::build_memory_modules(scratch_graphs, opts.memory_fold, opts.memory_max_bits, &memory_table);
   resolve_graphs.insert(resolve_graphs.end(), memory_modules.begin(), memory_modules.end());
 
   auto& outlib = livehd::Hhds_graph_library::instance(out);

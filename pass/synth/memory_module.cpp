@@ -20,6 +20,7 @@
 #include "graph_library_singleton.hpp"
 #include "node_util.hpp"
 #include "pass.hpp"
+#include "bit_facts.hpp"
 #include "synth_policy.hpp"
 
 namespace gu = livehd::graph_util;
@@ -314,8 +315,115 @@ void merge_entry_lanes(hhds::Graph& g, int64_t mem_bits) {
   }
 }
 
+// The bits of a Memory read port's `dout` the parent actually observes, or
+// nullopt when any reader may see every bit. A reader that is a Get_mask of a
+// constant window `[lo, hi)` of the port observes just that window; a port
+// nobody reads observes no bit at all. Any other reader (a mux arm, a
+// Sub/graph output, a compare, ...) is conservatively a whole-word use.
+std::optional<std::vector<bool>> observed_bits(const hhds::Pin_class& dout, int width) {
+  std::vector<bool> seen(static_cast<size_t>(std::max(width, 0)), false);
+  for (const auto& edge : dout.out_edges()) {
+    const auto sink = edge.sink;
+    const auto node = sink.get_master_node();
+    if (gu::type_op_of(node) != Ntype_op::Get_mask || Ntype::get_sink_name(Ntype_op::Get_mask, sink.get_port_id()) != "a") {
+      return std::nullopt;
+    }
+    const auto lo = gu::get_driver_of_sink_name(node, "lo");
+    const auto hi = gu::get_driver_of_sink_name(node, "hi");
+    if (lo.is_invalid() || hi.is_invalid() || !lo.is_const() || !hi.is_const() || !gu::const_of(lo).is_just_i64()
+        || !gu::const_of(hi).is_just_i64()) {
+      return std::nullopt;
+    }
+    const auto l = gu::const_of(lo).to_just_i64();
+    const auto h = gu::const_of(hi).to_just_i64();
+    if (l < 0 || h <= l) {
+      return std::nullopt;
+    }
+    for (int64_t b = l; b < h && b < width; ++b) {
+      seen[static_cast<size_t>(b)] = true;
+    }
+    if (h > width) {
+      return std::nullopt;  // a window past the port reads the sign extension: keep every bit
+    }
+  }
+  return seen;
+}
+
+// Replace the driver of graph output `out` by its masked form.
+void mask_output(hhds::Graph& g, const hhds::Pin_class& out, const std::vector<bool>& keep) {
+  const auto driver = out.get_driver_pin();
+  if (driver.is_invalid()) {
+    return;
+  }
+  const auto masked = bit_facts::mask_pin(g, driver, keep);
+  out.del_sink();
+  masked.connect_sink(out);
+}
+
+// A write-enable lane vector that is `cond` on the lanes of a constant pattern and 0
+// elsewhere: the `cond * K` cprop spells `cond ? K : 0` as, or that Mux itself. The
+// lowered memory is handed the one-bit `cond` and rebuilds the vector inside, so every
+// lane shares ONE net; as an independent input bit per lane, the mapper builds the
+// `lane_enable & word_decode` product once per (port, word, lane) instead of once per
+// (port, word).
+struct Lane_enable {
+  hhds::Pin_class cond;
+  Dlop            lanes;
+};
+
+std::optional<Lane_enable> lane_enable_of(const hhds::Pin_class& pin) {
+  if (pin.is_invalid() || pin.is_const() || gu::is_graph_input_pin(pin)) {
+    return std::nullopt;
+  }
+  const auto node = pin.get_master_node();
+  const auto op   = gu::type_op_of(node);
+  const auto good_const = [](const hhds::Pin_class& c) {
+    return c.is_const() && !gu::const_of(c).has_unknowns() && gu::const_of(c).is_integer() && !gu::const_of(c).is_negative();
+  };
+  const auto one_bit = [](const hhds::Pin_class& v) { return !v.is_const() && gu::bits_of(v) == 1 && gu::is_unsign(v); };
+  if (op == Ntype_op::Mult) {
+    std::vector<hhds::Pin_class> in;
+    for (const auto& sink : node.inp_sorted_pins()) {
+      for (const auto& d : sink.get_driver_pins()) {
+        in.push_back(d);
+      }
+    }
+    if (in.size() == 2) {
+      for (int k = 0; k < 2; ++k) {
+        if (good_const(in[static_cast<size_t>(k)]) && one_bit(in[static_cast<size_t>(1 - k)])) {
+          return Lane_enable{in[static_cast<size_t>(1 - k)], gu::const_of(in[static_cast<size_t>(k)])};
+        }
+      }
+    }
+  } else if (op == Ntype_op::Mux) {  // Y = sel ? p2 : p1
+    const auto sel = node.get_sink_pin(0).get_driver_pin();
+    const auto off = node.get_sink_pin(1).get_driver_pin();
+    const auto on  = node.get_sink_pin(2).get_driver_pin();
+    if (!sel.is_invalid() && !off.is_invalid() && !on.is_invalid() && one_bit(sel) && off.is_const() && !gu::const_of(off).has_unknowns()
+        && gu::const_of(off).is_known_zero() && good_const(on)) {
+      return Lane_enable{sel, gu::const_of(on)};
+    }
+  }
+  return std::nullopt;
+}
+
+// `{lanes[w-1] ? cond : 1'b0, ..., lanes[0] ? cond : 1'b0}`: one one-bit lane per bit, all
+// reading the same `cond` net.
+hhds::Pin_class replicate_enable(hhds::Graph& g, const hhds::Pin_class& cond, const Dlop& lanes, int width) {
+  auto cat = gu::create_typed_node(g, Ntype_op::Concat);
+  for (int bit = 0; bit < width; ++bit) {  // descending pid: lane `bit` is p(2*bit), MSB at p0
+    const auto pid = static_cast<hhds::Port_id>(2 * (width - 1 - bit));
+    gu::create_const(g, *Dlop::create_integer(1)).connect_sink(cat.create_sink_pin(pid + 1));
+    (lanes.bit_test(bit) ? cond : gu::create_const(g, *Dlop::create_integer(0))).connect_sink(cat.create_sink_pin(pid));
+  }
+  auto out = cat.create_driver_pin(0);
+  gu::set_bits(out, width);
+  gu::set_unsign(out);
+  return out;
+}
+
 std::shared_ptr<hhds::Graph> enclose(hhds::Graph& parent, const hhds::Node_class& mem, bool lower, const fs::path& scratch,
-                                     const fs::path& rtl_dir) {
+                                     const fs::path& rtl_dir, bool prune_reads) {
   std::map<int, bool>        read;
   std::map<int, std::string> port_names;
   hhds::Pin_class            clock;
@@ -373,6 +481,7 @@ std::shared_ptr<hhds::Graph> enclose(hhds::Graph& parent, const hhds::Node_class
     inner.attr(attrs::memory_async_reset).set(a.get());
   }
   std::vector<Connection>                inputs, outputs;
+  std::vector<hhds::Node_class>          maybe_dead;  // lane-enable cells the module now rebuilds itself
   std::map<std::string, hhds::Pin_class> input_pins;
   hhds::Port_id                          next_pid = 1;
   // Whole-array reset of a LOWERED memory: kept as a module input and
@@ -410,17 +519,52 @@ std::shared_ptr<hhds::Graph> enclose(hhds::Graph& parent, const hhds::Node_class
       } else {
         pname = std::format("memory_{}", pid);
       }
+      // A write-enable lane vector that is one condition on a constant lane pattern
+      // enters the module as that one bit (see lane_enable_of).
+      std::optional<Lane_enable> lanes;
+      if (prune_reads && lower && off == 4 && !in_drv.is_const()) {
+        lanes = lane_enable_of(in_drv);
+      }
       if (!input_pins.contains(pname)) {
         io->add_input(pname, next_pid++);
-        io->set_bits(pname, std::max(gu::bits_of(in_drv), 1));
-        io->set_unsign(pname, gu::is_unsign(in_drv));
+        if (lanes) {
+          io->set_bits(pname, 1);
+          io->set_unsign(pname, true);
+        } else {
+          io->set_bits(pname, std::max(gu::bits_of(in_drv), 1));
+          io->set_unsign(pname, gu::is_unsign(in_drv));
+        }
         auto pin = body->get_input_pin(pname);
-        shape(in_drv, pin);
+        if (lanes) {
+          shape(lanes->cond, pin);
+        } else {
+          shape(in_drv, pin);
+        }
         input_pins[pname] = pin;
-        inputs.push_back({pname, in_drv});
+        inputs.push_back({pname, lanes ? lanes->cond : in_drv});
+        if (lanes) {
+          maybe_dead.push_back(in_drv.get_master_node());
+        }
       }
       // Specialize constant-address ports without deleting their interface.
       driver = in_drv.is_const() ? gu::create_const(*body, gu::const_of(in_drv)) : input_pins.at(pname);
+      if (lanes) {
+        driver = replicate_enable(*body, driver, lanes->lanes, std::max(gu::bits_of(in_drv), 1));
+      } else if (prune_reads && lower && !in_drv.is_const() && (off == 0 || off == 3 || off == 4)) {
+        // Bits the parent provably drives with 0 (a write-enable lane vector is
+        // `cond ? lanes : 0` with a constant lane pattern, an address is
+        // narrower than its port, ...) are fed to the memory as constants, so
+        // the lowering drops the per-bit write logic they would have kept.
+        const int  width = std::max(gu::bits_of(in_drv), 1);
+        const auto zero  = bit_facts::known_zero_bits(in_drv, width);
+        if (std::ranges::any_of(zero, [](bool z) { return z; })) {
+          std::vector<bool> keep(zero.size());
+          for (size_t i = 0; i < zero.size(); ++i) {
+            keep[i] = !zero[i];
+          }
+          driver = bit_facts::mask_pin(*body, driver, keep);
+        }
+      }
     }
     if (lower && off == 14 && !config) {
       // The whole-array `reset` (every `reg m:[N]T = <const>` with a reset)
@@ -446,8 +590,16 @@ std::shared_ptr<hhds::Graph> enclose(hhds::Graph& parent, const hhds::Node_class
   for (const auto& out_pin : mem.out_sorted_pins()) {
     douts.emplace(out_pin.get_port_id(), out_pin);
   }
+  // Read-port outputs whose parent readers observe only part of the word (see
+  // observed_bits): the lowered module clears the rest.
+  std::map<std::string, std::vector<bool>> observed;
   for (const auto& [pid, pin] : douts) {
     auto pname = pid == Ntype::Memory_readall_pid ? std::string("read_all") : std::format("rd_dout_{}", int(pid) - nw);
+    if (prune_reads && lower && pid != Ntype::Memory_readall_pid) {
+      if (auto bits = observed_bits(pin, std::max(gu::bits_of(pin), 1)); bits) {
+        observed.emplace(pname, std::move(*bits));
+      }
+    }
     io->add_output(pname, next_pid++);
     io->set_bits(pname, std::max(gu::bits_of(pin), 1));
     io->set_unsign(pname, gu::is_unsign(pin));
@@ -602,6 +754,18 @@ std::shared_ptr<hhds::Graph> enclose(hhds::Graph& parent, const hhds::Node_class
         }
       }
     }
+    for (const auto& [pname, keep] : observed) {
+      if (std::ranges::all_of(keep, [](bool b) { return b; })) {
+        continue;
+      }
+      if (const auto out = result->get_graph()->get_output_pin(pname); !out.is_invalid()) {
+        mask_output(*result->get_graph(), out, keep);
+      }
+    }
+    if (!observed.empty()) {
+      Pass::eprp.run_method_now("pass.cprop", parsed, {});
+      Pass::eprp.run_method_now("pass.bitwidth", parsed, {});
+    }
     if (!lib->copy_from(imported, name)) {
       diag::err("pass.abc", "memory-copy", "internal").msg("could not copy lowered memory {}", name).fatal();
     }
@@ -634,6 +798,11 @@ std::shared_ptr<hhds::Graph> enclose(hhds::Graph& parent, const hhds::Node_class
     }
   }
   mem.del_node();
+  for (auto node : maybe_dead) {
+    if (!node.is_invalid() && !node.has_out_edges()) {
+      node.del_node();
+    }
+  }
   return child;
 }
 
@@ -674,7 +843,7 @@ size_t write_clock_count(const hhds::Node_class& mem) {
 
 std::vector<std::shared_ptr<hhds::Graph>> build_memory_modules(const std::vector<std::shared_ptr<hhds::Graph>>& graphs,
                                                                Memory_fold pass_mode, uint64_t max_bits,
-                                                               std::vector<Memory_row>* report) {
+                                                               std::vector<Memory_row>* report, bool prune_reads) {
   std::vector<std::shared_ptr<hhds::Graph>> modules;
   std::unique_ptr<Scratch>                  scratch;
   fs::path                                  rtl;
@@ -782,7 +951,7 @@ std::vector<std::shared_ptr<hhds::Graph>> build_memory_modules(const std::vector
         if (!inline_array) {
           continue;
         }
-        modules.push_back(enclose(*graph, mem, false, fs::path{}, rtl));
+        modules.push_back(enclose(*graph, mem, false, fs::path{}, rtl, prune_reads));
         continue;
       }
       // The division form never overflows; an unknown `bits` is not oversized.
@@ -857,7 +1026,7 @@ std::vector<std::shared_ptr<hhds::Graph>> build_memory_modules(const std::vector
         fs::create_directory_symlink(memory_rtl_dir(), scratch->path / "rtl");
         rtl = scratch->path / "rtl";
       }
-      modules.push_back(enclose(*graph, mem, map, scratch ? scratch->path : fs::path{}, rtl));
+      modules.push_back(enclose(*graph, mem, map, scratch ? scratch->path : fs::path{}, rtl, prune_reads));
     }
   }
   return modules;
