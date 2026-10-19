@@ -702,7 +702,7 @@ void Pass_opentimer::read_sdc_spef() {
   // and all data-net RC remain timed; only the traced clock network is ideal.
   std::vector<std::string> ideal;
   for (const auto& [name, target] : timing_targets_) {
-    if (!target.ports.empty() && !propagated_clocks_.contains(name)) {
+    if ((!target.ports.empty() || !target.pin.empty()) && !propagated_clocks_.contains(name)) {
       ideal.push_back(name);
     }
   }

@@ -156,6 +156,20 @@ set_output_delay 20 -clock virtual [all_outputs]
   EXPECT_FLOAT_EQ(pass.timer.report_slack("y", ot::MAX, ot::RISE).value(), 70);
   EXPECT_TRUE(pass.complete());
 }
+TEST_F(SdcClock, ClockOnAnInternalPinIsCreatedAndAMissingPinOnlyWarns) {
+  Sdc_probe pass(var);
+  // `a` is a pin of the timing graph; `inst/pin` would be spelled `inst:pin` there. Both forms of
+  // create_clock define the clock, and neither is a hard error (the SDC also names generated clocks).
+  pass.read_sdc(write(R"sdc(
+create_clock -name on_pin -period 100 [get_pins a]
+create_clock -name nowhere -period 50 [get_pins macro/clk_out]
+)sdc"));
+  pass.timer.update_timing();
+  ASSERT_TRUE(pass.timer.clocks().contains("on_pin"));
+  EXPECT_FLOAT_EQ(pass.timer.clocks().at("on_pin").period(), 100);
+  ASSERT_TRUE(pass.timer.clocks().contains("nowhere"));
+  EXPECT_FLOAT_EQ(pass.timer.clocks().at("nowhere").period(), 50);
+}
 TEST_F(SdcClock, ExprDividesIntegersLikeTcl) {
   Sdc_probe pass(var);
   const std::string clock = "create_clock -name virtual -period 100\n";

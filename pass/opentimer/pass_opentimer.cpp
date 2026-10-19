@@ -572,7 +572,7 @@ void Pass_opentimer::read_sdc(std::string_view sdc_file) {
       bool                     supported = true, have_period = false, have_name = false;
       float                    period = 1000;
       std::string              pname  = "clock";
-      std::vector<std::string> source_ports;
+      std::vector<std::string> source_ports, source_pins;
       for (std::size_t i = 1; i < tok.size(); i++) {
         if (tok[i] == "-period" || tok[i] == "-name") {
           if (i + 1 >= tok.size()) {
@@ -606,12 +606,85 @@ void Pass_opentimer::read_sdc(std::string_view sdc_file) {
             }
           }
           supported &= closed;
+        } else if (sdc_strip(tok[i]) == "get_pins") {
+          // A clock on an INTERNAL pin: the output of a hard macro that generates the design clock
+          // (litepci's `pcie_us/user_clk`). SDC spells the pin `instance/pin`, OpenTimer `instance:pin`.
+          bool closed = false;
+          for (std::size_t j = i + 1; j < tok.size(); ++j) {
+            source_pins.push_back(sdc_strip(tok[j]));
+            if (sdc_closes(tok[j])) {
+              i      = j;
+              closed = true;
+              break;
+            }
+          }
+          supported &= closed;
         } else {
           supported = false;  // Waveforms, generated clocks and Tcl expressions are not guessed.
         }
       }
       if (!have_name && source_ports.size() == 1) {
         pname = source_ports.front();
+      }
+      // The one pin the clock is attached to, as OpenTimer names it; empty unless a single plain pin of
+      // the timing graph is given (a missing or wildcard pin leaves a virtual clock, reported incomplete).
+      std::string clock_pin;
+      if (supported && source_ports.empty() && source_pins.size() == 1 && source_pins.front().find_first_of("*?[") == std::string::npos) {
+        auto candidate = source_pins.front();
+        if (const auto slash = candidate.rfind('/'); slash != std::string::npos) {
+          candidate[slash] = ':';
+        }
+        if (timer.pins().contains(candidate)) {
+          clock_pin = std::move(candidate);
+        } else if (const auto colon = candidate.rfind(':'); colon != std::string::npos) {
+          // The mapped netlist is flattened out of region modules, so an instance carries a hierarchy
+          // prefix and a uniquifier (`sub_16.pcie_us__n6780`). Accept exactly one pin on an instance
+          // that is the SDC's name once those are removed.
+          const std::string wanted = candidate.substr(0, colon), pin = candidate.substr(colon);
+          std::vector<std::string> match;
+          for (const auto& [key, pin_data] : timer.pins()) {
+            (void)pin_data;
+            const auto at = key.rfind(':');
+            if (at == std::string::npos || key.compare(at, std::string::npos, pin) != 0) {
+              continue;
+            }
+            std::string_view instance(key.data(), at);
+            if (const auto tail = instance.rfind("__n"); tail != std::string_view::npos && tail + 3 < instance.size()
+                && instance.find_first_not_of("0123456789", tail + 3) == std::string_view::npos) {
+              instance = instance.substr(0, tail);
+            }
+            if (instance == wanted
+                || (instance.size() > wanted.size() && instance.ends_with(wanted) && instance[instance.size() - wanted.size() - 1] == '.')) {
+              match.push_back(key);
+            }
+          }
+          if (match.size() == 1) {
+            clock_pin = match.front();
+          }
+        }
+      }
+      if (!source_pins.empty() && clock_pin.empty()) {
+        supported = false;
+        std::string similar;
+        // Say what the graph does have under that instance (or pin) name, to make a typo or a hierarchy
+        // prefix obvious.
+        const auto  slash = source_pins.front().rfind('/');
+        const auto  leaf  = slash == std::string::npos ? source_pins.front() : source_pins.front().substr(0, slash);
+        size_t      shown = 0;
+        for (const auto& [key, pin_data] : timer.pins()) {
+          (void)pin_data;
+          if (shown < 4 && key.find(leaf) != std::string::npos) {
+            similar += (shown++ ? ", " : "") + key;
+          }
+        }
+        livehd::diag::warn("pass.opentimer", "sdc-clock-pin-missing", "unsupported")
+            .msg("{}:{}: create_clock {} names no single pin of the timing graph; the clock stays virtual{}",
+                 sdc_file,
+                 lineno,
+                 pname,
+                 similar.empty() ? std::format(" (the graph has {} pins, none containing '{}')", timer.num_pins(), leaf)
+                                 : " (pins containing '" + leaf + "': " + similar + ")")
+            .emit();
       }
       if ((critical_ || !target_overrides_.empty()) && (!supported || !have_period || period <= 0)) {
         fail("critical-constraints", "critical annotations require a positive create_clock period without unsupported modifiers");
@@ -627,8 +700,11 @@ void Pass_opentimer::read_sdc(std::string_view sdc_file) {
           }
         }
       }
-      timing_targets_[pname] = {period, source_ports};
-      if (supported && source_ports.empty() && have_period && have_name && !pname.empty() && sdc_clocks_ == 1) {
+      if ((critical_ || !target_overrides_.empty()) && !clock_pin.empty()) {
+        fail("critical-constraints", "critical annotations cannot honor a clock created on an internal pin");
+      }
+      timing_targets_[pname] = {period, source_ports, clock_pin};
+      if (supported && source_ports.empty() && clock_pin.empty() && have_period && have_name && !pname.empty() && sdc_clocks_ == 1) {
         virtual_clock_name_   = pname;
         virtual_clock_period_ = period;
       } else {
@@ -636,6 +712,8 @@ void Pass_opentimer::read_sdc(std::string_view sdc_file) {
       }
       if (supported && source_ports.size() == 1 && timer.primary_inputs().contains(source_ports.front())) {
         timer.create_clock(pname, source_ports.front(), period);
+      } else if (!clock_pin.empty()) {
+        timer.create_clock(pname, clock_pin, period);
       } else {
         timer.create_clock(pname, period);
       }

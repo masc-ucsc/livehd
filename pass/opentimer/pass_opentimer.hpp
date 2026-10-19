@@ -62,6 +62,7 @@ protected:
   struct Timing_target {
     float                    period = 0;
     std::vector<std::string> ports;
+    std::string              pin;  // `inst:pin` of a clock created on an internal pin (a macro's clock output)
   };
   std::map<std::string, Timing_target>                            timing_targets_;
   std::map<std::string, std::string>                              target_overrides_;
