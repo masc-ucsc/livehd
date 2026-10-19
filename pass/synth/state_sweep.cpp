@@ -308,6 +308,36 @@ private:
         return std::nullopt;
       }
     }
+    // A reset tied to a constant (a specialized module whose reset input is tied off, or on): tied inactive it is no
+    // reset at all, tied active the register holds its reset value whatever D says.
+    enum class Tie { none, active, inactive };
+    Tie        tie   = Tie::none;
+    const auto reset = gu::get_driver_of_sink_name(flop, "reset_pin");
+    if (!reset.is_invalid() && reset.is_const() && !gu::const_of(reset).has_unknowns()) {
+      const auto negreset = gu::get_driver_of_sink_name(flop, "negreset");
+      const bool low      = negreset.is_const() && gu::const_of(negreset).bit_test(0);
+      const bool nonzero  = !gu::const_of(reset).is_known_false();
+      tie                 = (low ? !nonzero : nonzero) ? Tie::active : Tie::inactive;
+    }
+    const auto initial = gu::get_driver_of_sink_name(flop, "initial");
+    if (tie == Tie::active) {
+      int64_t reset_value = 0;  // no value: the register resets to zero
+      if (!initial.is_invalid()) {
+        if (!initial.is_const() || gu::const_of(initial).has_unknowns() || !gu::const_of(initial).is_just_i64()) {
+          return std::nullopt;
+        }
+        reset_value = gu::const_of(initial).to_just_i64();
+      }
+      if (width < 63) {
+        reset_value &= (int64_t{1} << width) - 1;
+        if (!gu::is_unsign(q) && ((reset_value >> (width - 1)) & 1) != 0) {
+          reset_value -= int64_t{1} << width;
+        }
+      } else if (reset_value != 0) {
+        return std::nullopt;
+      }
+      return *Dlop::create_integer(reset_value);
+    }
     const auto din = gu::get_driver_of_sink_name(flop, "din");
     if (din.is_invalid() || !din.is_const() || gu::const_of(din).has_unknowns() || !gu::const_of(din).is_just_i64()) {
       return std::nullopt;
@@ -322,9 +352,10 @@ private:
     } else if (raw != 0) {
       return std::nullopt;
     }
-    const auto initial   = gu::get_driver_of_sink_name(flop, "initial");
-    const auto reset     = gu::get_driver_of_sink_name(flop, "reset_pin");
-    int64_t    held      = 0;  // the reset value when there is a reset and no value: zero
+    int64_t held = 0;  // the reset value when there is a reset and no value: zero
+    if (tie == Tie::inactive) {
+      return *Dlop::create_integer(value);  // no reset left, and with it no reset value to disagree
+    }
     if (!initial.is_invalid()) {
       if (!initial.is_const() || gu::const_of(initial).has_unknowns() || !gu::const_of(initial).is_just_i64()) {
         return std::nullopt;

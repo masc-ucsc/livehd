@@ -458,6 +458,38 @@ TEST(StateSweep, HotmuxControlsAreObservedInFullAndItsValuesWhereTheOutputIs) {
   EXPECT_EQ(widths, (std::vector<int>{1, 1, 4, 4}));
 }
 
+TEST(StateSweep, ARegisterWhoseResetIsTiedActiveIsItsResetValue) {
+  hhds::GraphLibrary library;
+  auto               m   = make_module(library, "top", 8, 8);
+  auto&              g   = *m.graph;
+  auto               reg = make_reg(g, g.get_input_pin("d"), g.get_input_pin("clk"), 8, "stuck");
+  const auto         pid = [](const char* name) { return static_cast<hhds::Port_id>(Ntype::get_sink_pid(Ntype_op::Flop, name)); };
+  gu::create_const(g, *Dlop::create_integer(1)).connect_sink(gu::setup_sink_pid(reg, pid("reset_pin")));  // active high, held
+  gu::create_const(g, *Dlop::create_integer(9)).connect_sink(gu::setup_sink_pid(reg, pid("initial")));
+  reg.create_driver_pin(0).connect_sink(g.get_output_pin("o"));
+
+  const auto stats = sweep({m.graph}, "top");
+  ASSERT_TRUE(stats);
+  EXPECT_EQ(stats->registers_constant, 1U);
+  EXPECT_TRUE(nodes_of(g, Ntype_op::Flop).empty());
+}
+
+TEST(StateSweep, ARegisterWhoseResetIsTiedInactiveKeepsLoadingItsInput) {
+  hhds::GraphLibrary library;
+  auto               m   = make_module(library, "top", 8, 8);
+  auto&              g   = *m.graph;
+  auto               reg = make_reg(g, g.get_input_pin("d"), g.get_input_pin("clk"), 8, "live");
+  const auto         pid = [](const char* name) { return static_cast<hhds::Port_id>(Ntype::get_sink_pid(Ntype_op::Flop, name)); };
+  gu::create_const(g, *Dlop::create_integer(0)).connect_sink(gu::setup_sink_pid(reg, pid("reset_pin")));  // active high, never
+  gu::create_const(g, *Dlop::create_integer(9)).connect_sink(gu::setup_sink_pid(reg, pid("initial")));
+  reg.create_driver_pin(0).connect_sink(g.get_output_pin("o"));
+
+  const auto stats = sweep({m.graph}, "top");
+  ASSERT_TRUE(stats);
+  EXPECT_EQ(stats->registers_constant, 0U);  // D is the input d: not a constant
+  EXPECT_EQ(nodes_of(g, Ntype_op::Flop).size(), 1U);
+}
+
 TEST(StateSweep, AnAdmissionRefusalIsReported) {
   hhds::GraphLibrary library;
   auto               m = make_module(library, "top", 8, 8);
