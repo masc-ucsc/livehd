@@ -14,6 +14,7 @@
 
 #include "absl/container/flat_hash_map.h"
 #include "absl/container/flat_hash_set.h"
+#include "attrs.hpp"
 #include "cell.hpp"
 #include "diag.hpp"
 #include "hhds/graph.hpp"
@@ -425,6 +426,36 @@ void Pass_formal::work(Eprp_var& var) {
         if (auto gid = node.get_subnode_gid(); gid != hhds::Gid_invalid) {
           instantiated_gids.insert(gid);
         }
+      }
+    }
+  }
+  // A def whose instances pass.legalize inlined (false hierarchy loop) has no
+  // Sub left, but it is still a submodule: its body now runs inside the caller.
+  {
+    absl::flat_hash_set<std::string> inlined;
+    for (auto& gp2 : var.graphs) {
+      if (gp2 == nullptr) {
+        continue;
+      }
+      auto attr = gp2->get_input_node().attr(livehd::attrs::legalize_inlined);
+      if (!attr.has()) {
+        continue;
+      }
+      std::string_view encoded = attr.get();
+      while (!encoded.empty()) {
+        const auto end = encoded.find('\n');
+        if (auto name = encoded.substr(0, end); !name.empty()) {
+          inlined.emplace(name);
+        }
+        if (end == std::string_view::npos) {
+          break;
+        }
+        encoded.remove_prefix(end + 1);
+      }
+    }
+    for (auto& gp2 : var.graphs) {
+      if (gp2 != nullptr && inlined.contains(std::string(gp2->get_name()))) {
+        instantiated_gids.insert(gp2->get_gid());
       }
     }
   }
