@@ -226,6 +226,7 @@ livehd::placement::Options placement_options(const Options& opts) {
   out.fp_place                    = truthy(synth_set(opts, "place.fp", "true"));
   out.fp_snap_enabled             = truthy(synth_set(opts, "place.fp.snap", "true"));
   out.fp_colors                   = truthy(synth_set(opts, "place.fp.colors", "false"));
+  out.repair_reset                = truthy(synth_set(opts, "place.repair.reset", "false"));
   out.fp_iterations               = integer("place.fp.iterations", "1500");
   out.fp_minimum                  = number("place.fp.minimum", "3000");
   out.fp_min_copies               = integer("place.fp.min_copies", "4");

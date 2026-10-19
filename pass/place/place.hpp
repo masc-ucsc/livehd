@@ -33,6 +33,7 @@ struct Options {
   double                                timing_max_weight = 5, timing_smoothing = .5;
   int                                   fp_timing_max_updates = 10;
   bool                                  fp_resize             = false;
+  bool                                  repair_reset          = false;  // size/buffer reset-pin cones too (default: protected like clocks)
   Evaluate                              fp_evaluate;
   double                                fp_minimum = 3000, fp_attraction = .25, fp_repulsion = 5, fp_anchor = .25;
   DreamPlace::native::FloorplanOptions  fp_snap;

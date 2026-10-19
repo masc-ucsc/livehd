@@ -192,6 +192,9 @@ std::string environment_key(const Options& o, const ph::Technology& tech) {
   }
   if (o.fp_place) {
     h = hash_text(std::format("fp-timing:{}:{}:{}", o.fp_timing_interval, bool(o.fp_evaluate), o.fp_resize), h);
+    if (o.repair_reset) {
+      h = hash_text("repair-reset", h);  // FP resize may then touch reset cones
+    }
     h = hash_text(std::format("fp-movement:{}", o.fp_timing_movement), h);
     if (o.fp_timing_after_density) {
       h = hash_text("fp-timing-after-density", h);

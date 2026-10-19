@@ -340,7 +340,13 @@ approximate placement-RC timing decisions, with legal post-placement validation
 still performed by the existing outer flow.
 
 `synth.place.resize=true` enables bounded sizing and buffer optimization after
-legal placement. Equivalent scalar logic cells must have the same ordered pin
+legal placement. Logic upstream of a clock or reset pin is protected from every edit by
+default, so a reset net that fans out to thousands of registers (a reset synchronizer's
+mux driving all of a block's asynchronous resets) is left as mapped, one weak gate driving
+the whole net. `synth.place.repair.reset=true` lifts the protection for RESET pins and
+reset-named pins only (clock cones stay protected), letting the same sizing and fanout
+splitting treat the reset net like any data net, as a conventional pre-CTS flow does; it is
+part of the placement cache identity when floorplan resizing is on. Equivalent scalar logic cells must have the same ordered pin
 interface, footprint and exact Liberty truth table (up to six inputs). Drive
 variants may have different widths. Sizing and redundant-buffer bypass run first,
 followed by a separate design-repair pass that splits fanout on FLUTE Steiner
