@@ -896,7 +896,7 @@ inline constexpr Synth_set_option kSynthSetOptions[] = {
     {"place.macro.snap",
      "true",
      Synth_set_option::Kind::boolean,
-     "soft snap of nearby same-master/color SRAMs during macro legalization"},
+     "soft snap of equal-size macros within hierarchy scopes during macro legalization"},
     {"place.macro.snap_mode",
      "alignment",
      Synth_set_option::Kind::file,

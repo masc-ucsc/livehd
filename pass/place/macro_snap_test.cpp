@@ -1,6 +1,8 @@
 // This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 #include "macro_snap.hpp"
 
+#include <limits>
+
 #include "gtest/gtest.h"
 using namespace livehd::placement;
 TEST(MacroSnap, ScopeAndSizeSurviveFlattening) {
@@ -44,4 +46,26 @@ TEST(MacroSnap, FlatWrapperSiblingsAndNestedBanks) {
   EXPECT_NE(classes[0], classes[2]);
   EXPECT_NE(classes[2], classes[4]);
   EXPECT_THROW(hierarchy_macro_classes({"a"}, {}, {1}, 1), std::invalid_argument);
+}
+TEST(MacroSnap, RejectInvalidGeometryBeforeGrouping) {
+  for (double invalid : {0., -1., std::numeric_limits<double>::infinity(), std::numeric_limits<double>::quiet_NaN()}) {
+    EXPECT_THROW(hierarchy_macro_classes(
+                     {
+                         "a",
+                         "b"
+    },
+                     {{invalid, 4}, {4, 4}},
+                     {1, 1},
+                     2),
+                 std::invalid_argument);
+    EXPECT_THROW(hierarchy_macro_classes(
+                     {
+                         "a",
+                         "b"
+    },
+                     {{4, invalid}, {4, 4}},
+                     {1, 1},
+                     2),
+                 std::invalid_argument);
+  }
 }

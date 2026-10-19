@@ -2,6 +2,7 @@
 #include "macro_snap.hpp"
 
 #include <algorithm>
+#include <cmath>
 #include <map>
 #include <sstream>
 #include <stdexcept>
@@ -37,8 +38,9 @@ std::vector<int> hierarchy_macro_classes(const std::vector<std::string>& names, 
     if (!macros[i]) {
       continue;
     }
-    if (names[i].empty() || sizes[i].first <= 0 || sizes[i].second <= 0) {
-      throw std::invalid_argument("unnamed macro hierarchy member");
+    if (names[i].empty() || !std::isfinite(sizes[i].first) || !std::isfinite(sizes[i].second) || sizes[i].first <= 0
+        || sizes[i].second <= 0) {
+      throw std::invalid_argument("macro hierarchy members need names and finite positive dimensions");
     }
     scopes[i] = parent(original_hierarchy_path(names[i]));
     for (auto scope = scopes[i];; scope = parent(scope)) {
