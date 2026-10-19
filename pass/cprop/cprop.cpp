@@ -40,6 +40,13 @@ using livehd::graph_util::type_op_of;
 
 namespace {
 
+// A constant a fold may absorb into a new merged constant: fully known. A
+// '?'-bearing constant is a literal (one const node, Q5); folding it into a
+// new constant would split it (P7), so the folds treat it like a signal.
+[[nodiscard]] bool is_known_const(const hhds::Pin_class& pin) {
+  return pin.is_const() && !livehd::graph_util::const_of(pin).has_unknowns();
+}
+
 // This node's operands, in ascending sink-port order, as a SNAPSHOT.
 //
 // SNAPSHOT, not a lazy view: every caller rewrites the graph while holding the
@@ -425,9 +432,12 @@ void emit_concat(hhds::Graph& g, hhds::Node_class& node, const std::vector<Pack_
     const int32_t w     = l.hi - l.lo;
     auto          value = l.value;
     if (!fits_unsigned_window(value, w)) {
-      auto mask = Dlop::get_mask_value(w);
-      if (value.is_const()) {
-        value = create_const(g, *const_of(value).and_op(*mask));
+      auto       mask   = Dlop::get_mask_value(w);
+      // P7: a constant lane is re-minted only when its window is fully known;
+      // a window holding '?' bits stays a Get_mask over that literal.
+      const auto masked = value.is_const() ? std::optional<Dlop>(*const_of(value).and_op(*mask)) : std::nullopt;
+      if (masked && !masked->has_unknowns()) {
+        value = livehd::cprop_value::create_folded_const(g, *masked);
       } else {
         auto get = make_node(g, Ntype_op::Get_mask);
         livehd::graph_util::connect_mask_operands(get,
@@ -479,7 +489,9 @@ bool canonicalize_set_mask_pack(hhds::Graph& g, hhds::Node_class& node) {
   using Slice_key = std::tuple<hhds::Class_index, int64_t, int64_t>;
   absl::flat_hash_set<Slice_key> slices;
   for (const auto& piece : *pieces) {
-    if (!piece.source.is_const() && (piece.source_lo != 0 || !fits_unsigned_window(piece.source, piece.hi - piece.lo))) {
+    // A '?' constant piece costs a Get_mask like a signal (P7: never re-minted).
+    if ((!piece.source.is_const() || const_of(piece.source).has_unknowns())
+        && (piece.source_lo != 0 || !fits_unsigned_window(piece.source, piece.hi - piece.lo))) {
       slices.emplace(piece.source.get_class_index(), piece.source_lo, piece.hi - piece.lo);
     }
   }
@@ -497,10 +509,18 @@ bool canonicalize_set_mask_pack(hhds::Graph& g, hhds::Node_class& node) {
   std::vector<Pack_lane>                          lanes;
   absl::flat_hash_map<Slice_key, hhds::Pin_class> emitted;
   for (const auto& piece : *pieces) {
-    auto      value = piece.source;
-    const int bits  = piece.hi - piece.lo;
-    if (value.is_const()) {
-      value = create_const(g, *const_of(value).get_mask_op_opt(piece.source_lo, piece.source_lo + bits));
+    auto       value       = piece.source;
+    const int  bits        = piece.hi - piece.lo;
+    // P7: a constant piece is re-minted only when fully known. A '?' piece is
+    // the literal itself when the window covers it, and otherwise a Get_mask
+    // over the literal (a new constant for it would split the literal).
+    const auto const_piece = value.is_const()
+                                 ? std::optional<Dlop>(*const_of(value).get_mask_op_opt(piece.source_lo, piece.source_lo + bits))
+                                 : std::nullopt;
+    if (const_piece && !const_piece->has_unknowns()) {
+      value = livehd::cprop_value::create_folded_const(g, *const_piece);
+    } else if (const_piece && const_piece->same_repr(const_of(value))) {
+      // the whole literal: keep its pin
     } else if (piece.source_lo != 0 || !fits_unsigned_window(value, bits)) {
       const Slice_key key{value.get_class_index(), piece.source_lo, bits};
       if (auto it = emitted.find(key); it != emitted.end()) {
@@ -805,7 +825,367 @@ namespace {
   }
   return livehd::graph_util::const_of(a).same_repr(livehd::graph_util::const_of(b));
 }
+
+// P7 follow-up: the three-valued value of a small cone whose leaves are all
+// constants. A fold may not mint a constant that carries an operand literal's
+// '?' bits (it would split that literal), so a cone such as an array written
+// lane by lane over a '?' initial value stays as nodes while a word still
+// holds an unwritten lane. Dlop's bitwise, lane and shift ops are three-valued
+// (a '?' operand bit gives '?' unless another operand decides it, and a shift
+// moves both bit planes), and every '?' is read as an INDEPENDENT unknown, so
+// a known result bit holds under every resolution of every literal: folding a
+// FULLY KNOWN cone value is exact and creates no '?' constant. Only lane,
+// bitwise and constant-amount shift ops, and a node budget keeps it local.
+//
+// Inner ops: any op whose value Cone_eval can compute three-valued.
+[[nodiscard]] bool is_cone_op(Ntype_op op) {
+  return op == Ntype_op::And || op == Ntype_op::Or || op == Ntype_op::Xor || op == Ntype_op::Not || op == Ntype_op::Get_mask
+         || op == Ntype_op::Concat || op == Ntype_op::Set_mask || op == Ntype_op::SHL || op == Ntype_op::SRA || op == Ntype_op::Sext
+         || op == Ntype_op::Mux;
+}
+
+// Roots: the ops that can DROP '?' bits (an And with 0, an Or with 1, a
+// window, an overwrite, a right shift, a sign-extend, a selection, and the
+// reductions). Xor/Not/Concat/SHL only move or keep every '?' bit, so a known
+// result there means a known operand, which that operand's own visit folds.
+// EQ/LT/GT stay out: the passes that read a multi-operand compare bank
+// disagree on what it means (see the LT/GT all-constant fold).
+[[nodiscard]] bool is_cone_root_op(Ntype_op op) {
+  return op == Ntype_op::And || op == Ntype_op::Or || op == Ntype_op::Get_mask || op == Ntype_op::Set_mask || op == Ntype_op::SRA
+         || op == Ntype_op::Sext || op == Ntype_op::Mux || op == Ntype_op::Ror || op == Ntype_op::Rxor || op == Ntype_op::Popcount;
+}
+
+// A constant, fully known, in-range integer operand (shift amount, Sext keep,
+// reduction count). Shift amounts are capped so a stray huge constant cannot
+// build a giant Dlop.
+[[nodiscard]] std::optional<int64_t> small_const_operand(const hhds::Pin_class& dpin, int64_t lo, int64_t hi) {
+  if (dpin.is_invalid() || !dpin.is_const()) {
+    return std::nullopt;
+  }
+  const auto& v = livehd::graph_util::const_of(dpin);
+  if (!v.is_integer() || v.has_unknowns() || !v.is_just_i64() || v.to_just_i64() < lo || v.to_just_i64() > hi) {
+    return std::nullopt;
+  }
+  return v.to_just_i64();
+}
+
+class Cone_eval {
+public:
+  using Dead_set = absl::flat_hash_set<hhds::Class_index>;
+
+  explicit Cone_eval(Dead_set* dead) : dead_(dead) {}
+
+  // Phase 1, before any Dlop work: does every operand of node reach only
+  // constant leaves through cone ops? A Mux needs only its selector here (the
+  // selected arm is checked when it is evaluated). Most roots fail this on a
+  // signal leaf, so it marks those pins dead without computing a value.
+  [[nodiscard]] bool operands_const_leaved(const hhds::Node_class& node) {
+    const bool mux = livehd::graph_util::type_op_of(node) == Ntype_op::Mux;
+    for (const auto& sink : node.inp_sorted_pins()) {
+      if (mux && sink.get_port_id() != 0) {
+        continue;
+      }
+      if (!const_leaved(sink.get_driver_pin())) {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  [[nodiscard]] std::optional<Dlop> node_value(const hhds::Node_class& node) {
+    namespace gu  = livehd::graph_util;
+    const auto op = gu::type_op_of(node);
+    Dlop       result;
+    if (op == Ntype_op::And || op == Ntype_op::Or || op == Ntype_op::Xor) {
+      result = Dlop::create_integer(op == Ntype_op::And ? -1 : 0);
+      for (const auto& e : node.inp_pins_snapshot()) {
+        const auto v = value(e.get_driver_pin());
+        if (!v) {
+          return std::nullopt;
+        }
+        result = op == Ntype_op::And ? result.and_op(*v) : (op == Ntype_op::Or ? result.or_op(*v) : result.xor_op(*v));
+      }
+    } else if (op == Ntype_op::Not) {
+      const auto inputs = node.inp_pins_snapshot();
+      if (inputs.size() != 1) {
+        return std::nullopt;
+      }
+      const auto v = value(inputs.front().get_driver_pin());
+      if (!v) {
+        return std::nullopt;
+      }
+      result = v->not_op();
+    } else if (op == Ntype_op::Get_mask) {
+      const auto range = gu::bit_range(node);
+      if (!range.has_value()) {
+        return std::nullopt;
+      }
+      const auto v = value(gu::get_driver_of_sink_name(node, "a"));
+      if (!v) {
+        return std::nullopt;
+      }
+      result = livehd::eval_get_mask(*v, range->first, range->second);
+    } else if (op == Ntype_op::Concat) {
+      const auto lanes = gu::concat_lanes(node);
+      if (lanes.empty()) {
+        return std::nullopt;
+      }
+      std::vector<Dlop> values(lanes.size());  // fixed size: Concat_lane holds raw pointers
+      for (size_t i = 0; i < lanes.size(); ++i) {
+        const auto v = value(lanes[i].value);
+        if (!v || v->get_payload_bits() > lanes[i].width) {
+          return std::nullopt;  // same over-wide-lane refusal as the all-constant fold
+        }
+        values[i] = *v;
+      }
+      std::vector<Dlop::Concat_lane> hl;
+      hl.reserve(lanes.size());
+      for (size_t i = 0; i < lanes.size(); ++i) {
+        hl.push_back(Dlop::Concat_lane{&values[i], lanes[i].width});
+      }
+      result = *Dlop::concat_op(std::span<const Dlop::Concat_lane>(hl.data(), hl.size()));
+    } else if (op == Ntype_op::Set_mask) {
+      // Same reading as the all-constant fold: no window or no value writes
+      // nothing, so the result is a.
+      const auto a = value(gu::get_driver_of_sink_name(node, "a"));
+      if (!a) {
+        return std::nullopt;
+      }
+      const auto range     = gu::bit_range(node);
+      const auto value_pin = gu::get_driver_of_sink_name(node, "value");
+      if (!range.has_value() || value_pin.is_invalid()) {
+        result = *a;
+      } else {
+        const auto v = value(value_pin);
+        if (!v) {
+          return std::nullopt;
+        }
+        result = livehd::eval_set_mask(*a, *v, range->first, range->second);
+      }
+    } else if (op == Ntype_op::SHL || op == Ntype_op::SRA) {
+      const auto amount = small_const_operand(gu::get_driver_of_sink_name(node, "b"), 0, int64_t{1} << 16);
+      if (!amount) {
+        return std::nullopt;
+      }
+      const auto a = value(gu::get_driver_of_sink_name(node, "a"));
+      if (!a) {
+        return std::nullopt;
+      }
+      const auto amt = Dlop::create_integer(*amount);
+      result         = op == Ntype_op::SHL ? *a->shl_op(*amt) : *a->sra_op(*amt);
+    } else if (op == Ntype_op::Sext) {
+      // b is the kept bit COUNT (sign bit at b-1), as in the all-constant fold.
+      const auto keep = small_const_operand(gu::get_driver_of_sink_name(node, "b"), 1, int64_t{1} << 30);
+      if (!keep) {
+        return std::nullopt;
+      }
+      const auto a = value(gu::get_driver_of_sink_name(node, "a"));
+      if (!a) {
+        return std::nullopt;
+      }
+      result = *a->sext_op(*Dlop::create_integer(*keep - 1));
+    } else if (op == Ntype_op::Mux) {
+      // A known selector reads the arm it names, by PORT ID (binary: 0 -> pin
+      // 1, nonzero -> pin 2, like the all-constant fold). A '?' selector, an
+      // out-of-range or a disconnected selection has no single value here.
+      const auto inputs = node.inp_pins_snapshot();
+      if (inputs.empty() || inputs.front().get_port_id() != 0) {
+        return std::nullopt;
+      }
+      const auto sel = value(inputs.front().get_driver_pin());
+      if (!sel || sel->has_unknowns() || !sel->is_just_i64()) {
+        return std::nullopt;
+      }
+      const bool    binary = inputs.size() == 3 && inputs[1].get_port_id() == 1 && inputs[2].get_port_id() == 2;
+      const int64_t sel_v  = binary ? (sel->is_known_zero() ? 0 : 1) : sel->to_just_i64();
+      if (sel_v < 0) {
+        return std::nullopt;
+      }
+      hhds::Pin_class arm;
+      for (size_t i = 1; i < inputs.size(); ++i) {
+        if (static_cast<int64_t>(inputs[i].get_port_id()) == sel_v + 1) {
+          arm = inputs[i].get_driver_pin();
+          break;
+        }
+      }
+      if (arm.is_invalid()) {
+        return std::nullopt;
+      }
+      const auto v = value(arm);
+      if (!v) {
+        return std::nullopt;
+      }
+      result = *v;
+    } else if (op == Ntype_op::Ror) {
+      // Unary three-valued OR-reduce per operand, as in the all-constant fold.
+      bool any_true = false;
+      bool any_unk  = false;
+      for (const auto& e : node.inp_pins_snapshot()) {
+        const auto v = value(e.get_driver_pin());
+        if (!v) {
+          return std::nullopt;
+        }
+        const auto r = v->ror_op();
+        if (r->is_invalid() || r->is_nil()) {
+          return std::nullopt;
+        }
+        any_true = any_true || r->is_known_true();
+        any_unk  = any_unk || r->has_unknowns();
+      }
+      if (!any_true && any_unk) {
+        return std::nullopt;
+      }
+      result = Dlop::create_integer(any_true ? 1 : 0);
+    } else if (op == Ntype_op::Rxor || op == Ntype_op::Popcount) {
+      const auto count = small_const_operand(gu::get_driver_of_sink_name(node, "b"), 0, std::numeric_limits<int>::max());
+      if (!count) {
+        return std::nullopt;
+      }
+      const auto a = value(gu::get_driver_of_sink_name(node, "a"));
+      if (!a) {
+        return std::nullopt;
+      }
+      const auto selected = a->get_mask_op_opt(0, static_cast<int>(*count));
+      const auto r        = op == Ntype_op::Rxor ? selected->rxor_op() : selected->popcount_op();
+      if (r->is_invalid() || r->is_nil() || r->has_unknowns()) {
+        return std::nullopt;
+      }
+      // Rxor's Boolean is the hardware u1 (true = 1).
+      result = op == Ntype_op::Rxor ? *Dlop::create_integer(r->is_known_true() ? 1 : 0) : *r;
+    } else {
+      return std::nullopt;
+    }
+    if (!result.is_integer()) {
+      return std::nullopt;  // invalid/nil/non-numeric: not a value
+    }
+    return result;
+  }
+
+private:
+  int                                           budget_    = 64;
+  bool                                          exhausted_ = false;
+  Dead_set*                                     dead_      = nullptr;
+  std::vector<std::pair<hhds::Pin_class, Dlop>> memo_;
+
+  [[nodiscard]] std::optional<Dlop> value(const hhds::Pin_class& dpin) {
+    if (dpin.is_invalid()) {
+      return std::nullopt;
+    }
+    if (dpin.is_const()) {
+      return livehd::graph_util::const_of(dpin);
+    }
+    for (const auto& [pin, v] : memo_) {
+      if (pin == dpin) {
+        return v;
+      }
+    }
+    if (dpin.get_port_id() != 0) {
+      return std::nullopt;
+    }
+    if (dead_ != nullptr && dead_->contains(dpin.get_class_index())) {
+      return std::nullopt;
+    }
+    if (--budget_ < 0) {
+      exhausted_ = true;
+      return std::nullopt;
+    }
+    const auto node = dpin.get_master_node();
+    if (!is_cone_op(livehd::graph_util::type_op_of(node))) {
+      remember_dead(dpin);
+      return std::nullopt;
+    }
+    auto v = node_value(node);
+    if (v) {
+      memo_.emplace_back(dpin, *v);
+    } else {
+      remember_dead(dpin);
+    }
+    return v;
+  }
+
+  int                          shape_budget_ = 64;
+  std::vector<hhds::Pin_class> shape_ok_;
+
+  [[nodiscard]] bool const_leaved(const hhds::Pin_class& dpin) {
+    if (dpin.is_invalid()) {
+      return false;
+    }
+    if (dpin.is_const()) {
+      return true;
+    }
+    if (dpin.get_port_id() != 0) {
+      return false;
+    }
+    if (dead_ != nullptr && dead_->contains(dpin.get_class_index())) {
+      return false;
+    }
+    if (std::ranges::find(shape_ok_, dpin) != shape_ok_.end()) {
+      return true;
+    }
+    if (--shape_budget_ < 0) {
+      exhausted_ = true;
+      return false;
+    }
+    const auto node = dpin.get_master_node();
+    if (!is_cone_op(livehd::graph_util::type_op_of(node)) || !operands_const_leaved(node)) {
+      remember_dead(dpin);
+      return false;
+    }
+    shape_ok_.push_back(dpin);
+    return true;
+  }
+
+  // A pin whose cone reaches a non-constant leaf (or a refused op) stays
+  // unfoldable for the rest of the sweep, so later roots stop at it instead
+  // of re-walking it. A failure after the budget ran out says nothing about
+  // the pin, so nothing is recorded once it did. A stale entry (a later
+  // rewrite made the cone constant, or a recycled index) only misses a fold
+  // until the next sweep clears the set.
+  void remember_dead(const hhds::Pin_class& dpin) {
+    if (dead_ != nullptr && !exhausted_) {
+      dead_->insert(dpin.get_class_index());
+    }
+  }
+};
 }  // namespace
+
+bool Cprop::fold_known_cone(hhds::Node_class& node, const Inp_pins& inp_edges_ordered) {
+  const auto op = type_op_of(node);
+  // Only the ops that can DROP '?' bits (is_cone_root_op). Every operand must
+  // be a constant or a cone op (a cheap filter before the walk), and at least
+  // one a node -- an all-constant node takes the ordinary fold in
+  // try_constant_prop.
+  if (!is_cone_root_op(op)) {
+    return false;
+  }
+  bool any_node = false;
+  for (const auto& e : inp_edges_ordered) {
+    const auto d = e.get_driver_pin();
+    if (d.is_invalid()) {
+      return false;
+    }
+    if (d.is_const()) {
+      continue;
+    }
+    if (d.get_port_id() != 0 || !is_cone_op(type_op_of(d.get_master_node())) || cone_dead.contains(d.get_class_index())) {
+      return false;
+    }
+    any_node = true;
+  }
+  if (!any_node) {
+    return false;
+  }
+  Cone_eval eval(&cone_dead);
+  if (!eval.operands_const_leaved(node)) {
+    return false;
+  }
+  const auto v = eval.node_value(node);
+  if (!v || v->has_unknowns()) {
+    return false;
+  }
+  replace_node(node, *v);
+  return true;
+}
 
 bool Cprop::collapse_forward_for_pin(hhds::Node_class& node, hhds::Pin_class new_dpin) {
   // SNAPSHOT ONCE. out_edges() is a lazy VIEW over live edge storage, and the
@@ -878,6 +1258,30 @@ bool Cprop::try_constant_prop(hhds::Node_class& node, Inp_pins& inp_edges_ordere
   return false;
 }
 
+// P4 (todo/livehd/2a-aegraph.html): a Div/Rem with ONE operand disconnected.
+// A missing operand is an invalid value, and LGraph reads an invalid value as
+// all-unknown '?' owned by this node -- the same '?' that x/0 and x%0 give
+// (Q2, hlop Dlop::div_op/rem_op). Each rewrite below is a legal refinement
+// under that reading, and also under the older "a missing pin reads 0" one:
+//   a / missing -> a   ('?' may be 1; a/0 is '?', which may be a)
+//   a % missing -> a   ('?' may exceed |a|; a%0 is '?', which may be a)
+//   missing / b -> 0   ('?' may be 0, and 0/b is 0; 0/0 is '?', which may be 0)
+//   missing % b -> 0   (likewise)
+// Forwarding the lone driver whatever its pin (the old Div rule) turned
+// `missing / b` into b, a refinement of neither reading.
+bool Cprop::collapse_single_input_divrem(hhds::Node_class& node, Inp_pins& inp_edges_ordered) {
+  const auto op = type_op_of(node);
+  if ((op != Ntype_op::Div && op != Ntype_op::Rem) || inp_edges_ordered.size() != 1) {
+    return false;
+  }
+  if (inp_edges_ordered[0].get_port_id() == 0) {
+    collapse_forward_always_pin0(node, inp_edges_ordered);
+  } else {
+    replace_node(node, *Dlop::create_integer(0));
+  }
+  return true;
+}
+
 void Cprop::try_collapse_forward(hhds::Node_class& node, Inp_pins& inp_edges_ordered) {
   auto op = type_op_of(node);
 
@@ -888,8 +1292,12 @@ void Cprop::try_collapse_forward(hhds::Node_class& node, Inp_pins& inp_edges_ord
     // UNCHANGED, which would drop the sign (turning -x into +x). Leave the Sum
     // node so cgen renders it as -(x).
     const bool sum_subtract = op == Ntype_op::Sum && sink_pin_name(inp_edges_ordered[0]) == "bs";
-    if ((op == Ntype_op::Sum || op == Ntype_op::Mult || op == Ntype_op::Div || op == Ntype_op::And || op == Ntype_op::Or
-         || op == Ntype_op::Xor)
+    // Div/Rem are positional (a, b): which pin the lone driver sits on decides
+    // the result, so they are not in the forward-whatever-is-left list below.
+    if (collapse_single_input_divrem(node, inp_edges_ordered)) {
+      return;
+    }
+    if ((op == Ntype_op::Sum || op == Ntype_op::Mult || op == Ntype_op::And || op == Ntype_op::Or || op == Ntype_op::Xor)
         && !sum_subtract) {
       collapse_forward_always_pin0(node, inp_edges_ordered);
       return;
@@ -912,6 +1320,10 @@ void Cprop::try_collapse_forward(hhds::Node_class& node, Inp_pins& inp_edges_ord
       return;
     }
     if (op == Ntype_op::Mux) {
+      // Q1 (todo/livehd/2a-aegraph.html): an out-of-range or disconnected
+      // selection is '?', so comparing only the CONNECTED arms is sound --
+      // Mux(s, a, a, a) and Mux(s, a, <unconnected>, a) are both `a`, because
+      // the '?' of every other selection may resolve to `a`.
       auto a_pin = inp_edges_ordered[1].get_driver_pin();
       for (auto i = 2u; i < inp_edges_ordered.size(); ++i) {
         if (!same_driver_value(a_pin, inp_edges_ordered[i].get_driver_pin())) {
@@ -975,6 +1387,10 @@ void Cprop::replace_part_inputs_const(hhds::Node_class& node, Inp_pins& inp_edge
       }
     }
 
+    // Q1: an out-of-range or disconnected selection is '?'. Zero is one legal
+    // refinement of it (any connected arm would be another). A two-arm Mux
+    // reads its selector as a condition, which also refines the out-of-range
+    // selections (s >= 2, s < 0) of the indexed reading to arm 2.
     if (a_pin.is_invalid()) {
 #ifndef NDEBUG
       Pass::info("WARNING: mux selector:{} for a disconnected pin in mux. Using zero\n", sel);
@@ -1023,7 +1439,9 @@ void Cprop::replace_part_inputs_const(hhds::Node_class& node, Inp_pins& inp_edge
     }
     Cprop::Inp_pins edge_it2;
     for (auto& i : inp_edges_ordered) {
-      if (!i.get_driver_pin().is_const()) {
+      // P7: a '?' literal is never merged into a folded constant (the new
+      // constant would split it); it stays an operand like a signal.
+      if (!is_known_const(i.get_driver_pin())) {
         if (npending == 0) {
           edge_it2.push_back(i);
         }
@@ -1134,7 +1552,9 @@ void Cprop::replace_part_inputs_const(hhds::Node_class& node, Inp_pins& inp_edge
     }
     Cprop::Inp_pins edge_it2;
     for (auto& i : inp_edges_ordered) {
-      if (!i.get_driver_pin().is_const()) {
+      // P7: a '?' literal is never merged into a folded constant (the new
+      // constant would split it); it stays an operand like a signal.
+      if (!is_known_const(i.get_driver_pin())) {
         if (npending == 0) {
           edge_it2.push_back(i);
         }
@@ -1150,7 +1570,12 @@ void Cprop::replace_part_inputs_const(hhds::Node_class& node, Inp_pins& inp_edge
         i.del_sink();
       }
     }
-    I(nconstants >= 1 && npending >= 1);  // try_constant_prop routes all-const to replace_all
+    // try_constant_prop routes all-const to replace_all, which comes back here
+    // only for '?' operands -- those count as pending, and may be all of them.
+    I(npending >= 1);
+    if (nconstants == 0) {
+      return;
+    }
 
     if (result.is_known_zero()) {
       replace_node(node, result);  // x * 0 == 0: annihilator (width-adjusts per consumer)
@@ -1185,6 +1610,18 @@ void Cprop::replace_part_inputs_const(hhds::Node_class& node, Inp_pins& inp_edge
       first_const_edge.del_sink();
       setup_sink_by_name(node, "as").connect_driver(create_const(*current_graph, result));
     }
+  } else if (op == Ntype_op::Div || op == Ntype_op::Rem) {
+    // Q2: x/0 and x%0 are all-unknown '?' for every x (Dlop div_op/rem_op),
+    // the same fold replace_all_inputs_const makes for a constant x. Only a
+    // KNOWN zero divisor: one that merely may be zero is an operand literal,
+    // and the result's '?' would split it.
+    if (inp_edges_ordered.size() != 2 || inp_edges_ordered[1].get_port_id() != 1) {
+      return;
+    }
+    const auto b_pin = inp_edges_ordered[1].get_driver_pin();
+    if (b_pin.is_const() && const_of(b_pin).is_known_zero()) {
+      replace_node_fresh_unknown(node, *Dlop::unknown());
+    }
   } else if (op == Ntype_op::SRA) {
     auto amt_pin = inp_edges_ordered[1].get_driver_pin();
     if (amt_pin.is_known_false()) {
@@ -1211,6 +1648,10 @@ void Cprop::replace_all_inputs_const(hhds::Node_class& node, Inp_pins& inp_edges
     }
     Dlop val = const_of(a_pin);
     Dlop amt = const_of(b_pin);
+    if (amt.is_known_zero() && val.is_integer()) {
+      forward_to_const_pin(node, a_pin);  // a << 0 is exactly a's literal (P7)
+      return;
+    }
 
     Dlop result;
     result = Dlop::create_integer(0);
@@ -1218,14 +1659,25 @@ void Cprop::replace_all_inputs_const(hhds::Node_class& node, Inp_pins& inp_edges
     replace_node(node, result);
 
   } else if (op == Ntype_op::Ror) {
-    Dlop result;
-    result = Dlop::create_integer(0);
+    // OR-reduce each operand with the unary Dlop::ror_op, which is three-valued
+    // (known 1 when a bit is set, known 0 when all are zero, else '?'). The
+    // binary ror_op(other) reads a '?' operand as 0, so `Ror(0ub????)` folded
+    // to a definite 0: a resolution of that literal at this one use only (P7).
+    bool any_true = false;
+    bool any_unk  = false;
     for (auto& i : inp_edges_ordered) {
-      const auto& c = const_of(i.get_driver_pin());
-      result        = result.ror_op(c);
+      const auto r = const_of(i.get_driver_pin()).ror_op();
+      if (r->is_invalid() || r->is_nil()) {
+        return;  // a non-numeric operand: not a value
+      }
+      any_true = any_true || r->is_known_true();
+      any_unk  = any_unk || r->has_unknowns();
+    }
+    if (!any_true && any_unk) {
+      return;  // undecided on '?' bits: keep the node
     }
 
-    replace_node(node, result);
+    replace_node(node, *Dlop::create_integer(any_true ? 1 : 0));
   } else if (op == Ntype_op::Rxor || op == Ntype_op::Popcount) {
     const auto input    = livehd::graph_util::get_driver_of_sink_name(node, "a");
     const auto selected = const_of(input).get_mask_op_opt(0, livehd::graph_util::reduction_count(node));
@@ -1244,7 +1696,7 @@ void Cprop::replace_all_inputs_const(hhds::Node_class& node, Inp_pins& inp_edges
       const auto& value = const_of(value_pin);
       replace_node(node, livehd::eval_set_mask(val, value, mask_pin->first, mask_pin->second));
     } else {
-      replace_node(node, val);
+      forward_to_const_pin(node, a_pin);  // nothing written: exactly a's literal (P7)
     }
   } else if (op == Ntype_op::Sum) {
     Dlop result;
@@ -1259,6 +1711,11 @@ void Cprop::replace_all_inputs_const(hhds::Node_class& node, Inp_pins& inp_edges
       }
     }
 
+    if (result.has_unknowns()) {
+      // P7: merge only the KNOWN constants; each '?' literal stays an operand.
+      replace_part_inputs_const(node, inp_edges_ordered);
+      return;
+    }
     replace_node(node, result);
   } else if (op == Ntype_op::Or) {
     Dlop result;
@@ -1268,6 +1725,11 @@ void Cprop::replace_all_inputs_const(hhds::Node_class& node, Inp_pins& inp_edges
       result        = result.or_op(c);
     }
 
+    if (result.has_unknowns()) {
+      // P7: merge only the KNOWN constants; each '?' literal stays an operand.
+      replace_part_inputs_const(node, inp_edges_ordered);
+      return;
+    }
     replace_logic_node(node, result);
 
   } else if (op == Ntype_op::And) {
@@ -1278,6 +1740,11 @@ void Cprop::replace_all_inputs_const(hhds::Node_class& node, Inp_pins& inp_edges
       result        = result.and_op(c);
     }
 
+    if (result.has_unknowns()) {
+      // P7: merge only the KNOWN constants; each '?' literal stays an operand.
+      replace_part_inputs_const(node, inp_edges_ordered);
+      return;
+    }
     replace_node(node, result);
 
   } else if (op == Ntype_op::EQ) {
@@ -1327,25 +1794,32 @@ void Cprop::replace_all_inputs_const(hhds::Node_class& node, Inp_pins& inp_edges
 
     size_t sel = binary ? !sel_const.is_known_zero() : sel_const.to_just_i64();
 
-    Dlop result;
+    // The selected arm's own pin is forwarded, never a re-minted copy of its
+    // value: a '?' arm is a literal (P7), and replace_node keeps any '?'
+    // result. hhds interning would hand a same-repr copy that same pin, so the
+    // forward is the explicit form of that, not a different result.
+    hhds::Pin_class selected;
     for (auto& e : inp_edges_ordered) {
       if (e.get_port_id() == 0) {
         continue;
       }
       if (e.get_port_id() == static_cast<hhds::Port_id>(sel + 1)) {
-        result = const_of(e.get_driver_pin());
+        selected = e.get_driver_pin();
         break;
       }
     }
 
-    if (result.get_signed_bits() == 0) {
-      result = Dlop::create_integer(0);
+    // Q1: an out-of-range or disconnected selection is '?'; 0 is one legal
+    // refinement (see replace_part_inputs_const).
+    if (selected.is_invalid()) {
 #ifndef NDEBUG
       Pass::info("WARNING: mux:{} selector:{} goes for disconnected pin in mux. Using zero\n", debug_name(node), sel);
 #endif
+      replace_node(node, *Dlop::create_integer(0));
+      return;
     }
 
-    replace_node(node, result);
+    forward_to_const_pin(node, selected);
   } else if (op == Ntype_op::Hotmux) {
     replace_part_inputs_const(node, inp_edges_ordered);
   } else if (op == Ntype_op::Mult) {
@@ -1356,28 +1830,73 @@ void Cprop::replace_all_inputs_const(hhds::Node_class& node, Inp_pins& inp_edges
       result        = result.mult_op(c);
     }
 
+    if (result.has_unknowns()) {
+      // P7: merge only the KNOWN constants; each '?' literal stays an operand.
+      replace_part_inputs_const(node, inp_edges_ordered);
+      return;
+    }
     replace_node(node, result);
-  } else if (op == Ntype_op::Div) {
-    I(inp_edges_ordered.size() == 2);
-    Dlop a = const_of(inp_edges_ordered[0].get_driver_pin());
-    Dlop b = const_of(inp_edges_ordered[1].get_driver_pin());
+  } else if (op == Ntype_op::Div || op == Ntype_op::Rem) {
+    if (inp_edges_ordered.size() != 2) {
+      (void)collapse_single_input_divrem(node, inp_edges_ordered);  // P4: a lone constant operand
+      return;
+    }
+    const Dlop& a = const_of(inp_edges_ordered[0].get_driver_pin());
+    const Dlop& b = const_of(inp_edges_ordered[1].get_driver_pin());
 
-    auto result = a.div_op(b);
-
-    replace_node(node, result);
-  } else if (op == Ntype_op::Rem) {
-    I(inp_edges_ordered.size() == 2);
-    Dlop a = const_of(inp_edges_ordered[0].get_driver_pin());
-    Dlop b = const_of(inp_edges_ordered[1].get_driver_pin());
-
-    auto result = a.rem_op(b);  // truncated remainder; invalid on rem-by-zero
-
+    // Truncated remainder (sign follows the dividend), like Verilog `%`.
+    auto result = op == Ntype_op::Div ? a.div_op(b) : a.rem_op(b);
+    // Q2: x/0 and x%0 are all-unknown '?' (Dlop), a fresh '?' owned by this
+    // node, so folding it is legal for any dividend. Any OTHER unknown result
+    // takes its '?' bits from an operand literal (a '?' dividend, or a divisor
+    // that only MAY be zero); a new constant for it would split that literal
+    // (P7), so keep the node.
+    if (result->has_unknowns()) {
+      if (b.is_known_zero()) {
+        replace_node_fresh_unknown(node, *result);
+      }
+      return;
+    }
     replace_node(node, result);
   } else if (op == Ntype_op::Not) {
     if (inp_edges_ordered.size() != 1) {
       return;
     }
     replace_node(node, const_of(inp_edges_ordered[0].get_driver_pin()).not_op());
+  } else if (op == Ntype_op::Sext) {
+    // P8: Sext(a, b) keeps a's low b bits and sign-extends from bit b-1. The
+    // cell's b is the kept bit COUNT while Dlop::sext_op takes the sign-bit
+    // POSITION -- the same keep-1 that cgen_verilog, cgen_sim and the LEC
+    // encoder use. A count below 1 has no agreed reading (cgen forwards a, LEC
+    // rejects it), so it stays.
+    auto a_pin = livehd::graph_util::get_driver_of_sink_name(node, "a");
+    auto b_pin = livehd::graph_util::get_driver_of_sink_name(node, "b");
+    if (a_pin.is_invalid() || b_pin.is_invalid()) {
+      return;
+    }
+    const auto& keep = const_of(b_pin);
+    if (!keep.is_numeric() || keep.has_unknowns() || !keep.is_just_i64() || keep.to_just_i64() < 1
+        || keep.to_just_i64() > (int64_t{1} << 30)) {
+      return;
+    }
+    auto result = const_of(a_pin).sext_op(*Dlop::create_integer(keep.to_just_i64() - 1));
+    // Fold only a fully known result (P7): the kept window holding one of a's
+    // '?' bits would make the new constant a split of a's literal. A '?' above
+    // the window is dropped, so that fold is exact. A window that keeps all of
+    // a is a's literal, but only when a's sign bit at keep-1 is KNOWN: same_repr
+    // compares bit planes and cannot tell sign copies from independent '?'
+    // bits, so 0sb??01 keep 3 spells exactly like a while Sext(a,3) is only
+    // {1,-3} and a may also be 5 or -7. With a known sign bit every '?' sits
+    // below keep-1 and passes through unchanged.
+    if (result->has_unknowns()) {
+      const auto  k = keep.to_just_i64();
+      const auto& a = const_of(a_pin);
+      if (result->same_repr(a) && !a.get_mask_op_opt(static_cast<int>(k - 1), static_cast<int>(k))->has_unknowns()) {
+        forward_to_const_pin(node, a_pin);
+      }
+      return;
+    }
+    replace_node(node, result);
   } else if (op == Ntype_op::Xor) {
     Dlop result;
     result = Dlop::create_integer(0);
@@ -1391,6 +1910,11 @@ void Cprop::replace_all_inputs_const(hhds::Node_class& node, Inp_pins& inp_edges
       }
       std::fprintf(stderr, " = %s\n", result.to_pyrope().c_str());
     }
+    if (result.has_unknowns()) {
+      // P7: merge only the KNOWN constants; each '?' literal stays an operand.
+      replace_part_inputs_const(node, inp_edges_ordered);
+      return;
+    }
     replace_logic_node(node, result);
   } else if (op == Ntype_op::SRA) {
     auto a_pin = livehd::graph_util::get_driver_of_sink_name(node, "a");
@@ -1401,6 +1925,10 @@ void Cprop::replace_all_inputs_const(hhds::Node_class& node, Inp_pins& inp_edges
     Dlop amt = const_of(b_pin);
     // is_just_i64 also rejects >62-bit amounts, whose sra_op yields nil.
     if (amt.has_unknowns() || amt.is_negative() || !amt.is_just_i64()) {
+      return;
+    }
+    if (amt.is_known_zero() && const_of(a_pin).is_integer()) {
+      forward_to_const_pin(node, a_pin);  // a >> 0 is exactly a's literal (P7)
       return;
     }
     replace_node(node, const_of(a_pin).sra_op(amt));
@@ -1444,8 +1972,15 @@ void Cprop::replace_all_inputs_const(hhds::Node_class& node, Inp_pins& inp_edges
     if (a_pin.is_invalid() || !mask_pin.has_value()) {
       return;
     }
-    const Dlop& a = const_of(a_pin);
-    replace_node(node, livehd::eval_get_mask(a, mask_pin->first, mask_pin->second));
+    const Dlop& a      = const_of(a_pin);
+    const Dlop  result = livehd::eval_get_mask(a, mask_pin->first, mask_pin->second);
+    // A window that covers the whole '?' literal is exactly that literal:
+    // forward its pin. Any narrower window keeps the Get_mask (P7).
+    if (result.has_unknowns() && result.same_repr(a)) {
+      forward_to_const_pin(node, a_pin);
+      return;
+    }
+    replace_node(node, result);
   } else if (op == Ntype_op::Concat) {
     // Every lane VALUE is constant, so the whole assembly is one non-negative
     // sum(w_i)-bit constant.
@@ -1492,6 +2027,11 @@ void Cprop::replace_all_inputs_const(hhds::Node_class& node, Inp_pins& inp_edges
     if (!result->is_integer()) {
       return;  // nil: a non-numeric lane has no bit window -- do not fold
     }
+    // A single lane wide enough for its whole '?' literal is that literal (P7).
+    if (result->has_unknowns() && lanes.size() == 1 && result->same_repr(values[0])) {
+      forward_to_const_pin(node, lanes[0].value);
+      return;
+    }
     replace_node(node, *result);
   } else {
 #ifndef NDEBUG
@@ -1502,22 +2042,33 @@ void Cprop::replace_all_inputs_const(hhds::Node_class& node, Inp_pins& inp_edges
 
 void Cprop::replace_node(hhds::Node_class& node, const Dlop& result) {
   if (result.is_invalid() || result.is_nil()) {
-    // Invalid/Nil are not values (division by zero, illegal shifts, etc.).
+    // Invalid/Nil are not values (a non-numeric operand, illegal shifts, etc.).
+    // Division and remainder by zero are NOT here: Dlop makes them all-unknown
+    // '?', which is a value (Q2).
     return;
   }
-  auto dpin = create_const(*current_graph, result);
-  livehd::cprop_value::forwarded(node, dpin);
-  for (const auto& sink : consumer_sinks(node)) {
-    livehd::graph_util::connect_folded_const(*current_graph, dpin, sink);
+  if (result.has_unknowns()) {
+    // P7: the '?' bits came from an operand literal (Get_mask(0ub????,[0,2)),
+    // SHL/Concat/Sum/... of a '?' literal). A new constant for them would be
+    // a second literal resolving independently of its source, a split of
+    // that literal. Keep the op; a fold that is exactly a whole operand
+    // literal forwards its pin through forward_to_const_pin instead.
+    return;
   }
-  livehd::cprop_value::retire(node);
+  forward_to_const_pin(node, livehd::cprop_value::create_folded_const(*current_graph, result));
 }
 
-void Cprop::replace_logic_node(hhds::Node_class& node, const Dlop& result) {
+void Cprop::replace_logic_node(hhds::Node_class& node, const Dlop& result) { replace_node(node, result); }
+
+void Cprop::replace_node_fresh_unknown(hhds::Node_class& node, const Dlop& result) {
   if (result.is_invalid() || result.is_nil()) {
     return;
   }
-  auto dpin = create_const(*current_graph, result);
+  forward_to_const_pin(node, create_const(*current_graph, result));
+}
+
+void Cprop::forward_to_const_pin(hhds::Node_class& node, hhds::Pin_class dpin) {
+  I(dpin.is_const());
   livehd::cprop_value::forwarded(node, dpin);
   for (const auto& sink : consumer_sinks(node)) {
     livehd::graph_util::connect_folded_const(*current_graph, dpin, sink);
@@ -1526,7 +2077,12 @@ void Cprop::replace_logic_node(hhds::Node_class& node, const Dlop& result) {
 }
 
 bool Cprop::scalar_mux(hhds::Node_class& node, Inp_pins& inp_edges_ordered, bool factor_packs) {
-  if (inp_edges_ordered.size() != 3) {
+  // Every rule below reads edges [1],[2] as the false/true arms of a two-arm
+  // Mux, so require ports 0,1,2 exactly. Counting edges is not enough: an
+  // n-ary Mux with arms on ports 0,2,3 (port 1 unconnected) also has three
+  // edges, and rewriting it as `s ? p3 : p2` makes selector 1 pick p3 instead
+  // of p2 -- an in-range, connected selection that Q1 does not excuse.
+  if (!is_two_arm_mux(inp_edges_ordered)) {
     return false;
   }
 
@@ -1683,6 +2239,12 @@ bool Cprop::scalar_mux(hhds::Node_class& node, Inp_pins& inp_edges_ordered, bool
   // an enable, and the latch contract exempts Q only as a direct Mux arm. A
   // Sum is not guarded: a + mux(s, 0, x) moves the select ahead of the carry
   // chain, which is a loss when the select is the late signal.
+  //
+  // Only inside the caller's guard scope (set_guard_scope: a lifted loop
+  // body, or the cells a synthesis loop expansion minted). A hand-written or
+  // translator-unrolled run of guarded updates (br_enc_onehot2bin) keeps its
+  // MUX chain: the loop lowering must not change what loop-free code compiles
+  // to, and that form is the one the mappers were tuned on.
   auto guard_accumulation = [&](size_t updated_idx, size_t hold_idx) {
     const auto sel     = inp_edges_ordered[0].get_driver_pin();
     const auto updated = inp_edges_ordered[updated_idx].get_driver_pin();
@@ -1699,7 +2261,7 @@ bool Cprop::scalar_mux(hhds::Node_class& node, Inp_pins& inp_edges_ordered, bool
     const auto op   = type_op_of(cell);
     if ((op != Ntype_op::Or && op != Ntype_op::Xor && op != Ntype_op::And) || cell == node || livehd::graph_util::has_color(cell)
         || livehd::graph_util::has_runtime_check(cell) || livehd::graph_util::has_name(cell)
-        || !livehd::graph_util::pin_name_of(updated).empty() || !has_single_consumer(cell)) {
+        || !livehd::graph_util::pin_name_of(updated).empty() || !has_single_consumer(cell) || !guard_scope_(cell)) {
       return false;
     }
     hhds::Pin_class              held_sink;
@@ -1745,7 +2307,8 @@ bool Cprop::scalar_mux(hhds::Node_class& node, Inp_pins& inp_edges_ordered, bool
     inp_edges_ordered = ordered_inp_edges(node);
     return true;
   };
-  if (may_emit_unstamped() && is_two_arm_mux(inp_edges_ordered) && (guard_accumulation(2, 1) || guard_accumulation(1, 2))) {
+  if (may_emit_unstamped() && guard_scope_ && guard_scope_(node) && is_two_arm_mux(inp_edges_ordered)
+      && (guard_accumulation(2, 1) || guard_accumulation(1, 2))) {
     return false;  // retyped: scalar_node continues it as the operator
   }
 
@@ -1821,7 +2384,9 @@ bool Cprop::scalar_mux(hhds::Node_class& node, Inp_pins& inp_edges_ordered, bool
   bool false_path_zero = false;
   if (inp_edges_ordered[1].get_driver_pin().is_const()) {
     const auto& v   = const_of(inp_edges_ordered[1].get_driver_pin());
-    false_path_zero = v.is_known_zero() || v.is_string();
+    // Dlop semantics only (LGraph has no types): a string arm is a constant
+    // like any other, NOT zero, so Mux(s, "str", s) must keep its mux.
+    false_path_zero = v.is_known_zero();
   }
 
   bool true_path_sel = inp_edges_ordered[0].get_driver_pin() == inp_edges_ordered[2].get_driver_pin();
@@ -1858,6 +2423,9 @@ void Cprop::scalar_sext(hhds::Node_class& node, Inp_pins& inp_edges_ordered) {
 
   // Sext(X,1) maps boolean 1 to -1. It preserves truthiness only, so bypass
   // it on a selector with a proven boolean input, never on a Mux data arm.
+  // An n-ary Mux reads -1 as an OUT-OF-RANGE selection, which is '?' under Q1
+  // (todo/livehd/2a-aegraph.html), so resolving it to arm 2 (selector 1) is a
+  // legal refinement there too.
   if (self_pos == 1 && is_bool01(wire_dpin)) {
     for (auto sink : consumer_sinks(node)) {
       if (type_op_of(sink.get_master_node()) == Ntype_op::Mux && sink.get_port_id() == 0) {
@@ -1950,6 +2518,67 @@ bool Cprop::scalar_eq(hhds::Node_class& node, Inp_pins& inp_edges_ordered) {
     return false;
   }
   return collapse_forward_for_pin(node, y_pin);  // inner EQ dies via DCE when unused
+}
+
+// P8: a compare whose operands are ONE driver pin. One driver is one value,
+// a '?' literal included (one literal has one value at all its uses, Q5), so
+// for every x:
+//   EQ(x, x, ..., x) -> 1   EQ is "all operands equal" (one bank), so EVERY
+//                           operand must be x; EQ(x, x, y) stays.
+//   LT(x, x), GT(x, x) -> 0 only on the exact banks {x} vs {x}. A bank with
+//                           several operands has no agreed reading (see the
+//                           LT/GT constant fold), so it stays.
+// Pin identity is the test. For constants it agrees with value equality: a
+// const pin is one literal, and hhds Graph::create_constant interns by
+// same_repr (only the type tag keeps entries apart), so one spelling is one
+// pin. same_pin also covers non-constant drivers, whose values are not known.
+bool Cprop::scalar_same_operand_compare(hhds::Node_class& node, Inp_pins& inp_edges_ordered) {
+  const auto op = type_op_of(node);
+  if (inp_edges_ordered.size() < 2) {
+    return false;
+  }
+  const auto x = inp_edges_ordered[0].get_driver_pin();
+  if (x.is_invalid()) {
+    return false;
+  }
+  if (op == Ntype_op::EQ) {
+    for (const auto& e : inp_edges_ordered) {
+      if (!same_pin(e.get_driver_pin(), x)) {
+        return false;
+      }
+    }
+  } else if (op == Ntype_op::LT || op == Ntype_op::GT) {
+    if (inp_edges_ordered.size() != 2
+        || Ntype::sink_bank(op, inp_edges_ordered[0].get_port_id()) == Ntype::sink_bank(op, inp_edges_ordered[1].get_port_id())
+        || !same_pin(inp_edges_ordered[1].get_driver_pin(), x)) {
+      return false;
+    }
+  } else {
+    return false;
+  }
+  replace_node(node, *Dlop::create_integer(op == Ntype_op::EQ ? 1 : 0));
+  return true;
+}
+
+// P8: Not(Not(x)) -> x. Not is the bitwise complement of the unlimited
+// integer, so the double complement is the identity at any width.
+bool Cprop::scalar_not(hhds::Node_class& node, Inp_pins& inp_edges_ordered) {
+  if (inp_edges_ordered.size() != 1) {
+    return false;
+  }
+  const auto inner_pin = inp_edges_ordered[0].get_driver_pin();
+  if (inner_pin.is_invalid() || inner_pin.is_const() || is_graph_input_pin(inner_pin)) {
+    return false;
+  }
+  auto inner = inner_pin.get_master_node();
+  if (inner.is_invalid() || type_op_of(inner) != Ntype_op::Not || inner.get_class_index() == node.get_class_index()) {
+    return false;
+  }
+  const auto x = drv_at(inner, 0);
+  if (x.is_invalid() || (!x.is_const() && x.get_master_node().get_class_index() == node.get_class_index())) {
+    return false;  // a self-feeding pair must stay
+  }
+  return collapse_forward_for_pin(node, x);  // bwd_del_node drops a now-dead inner Not
 }
 
 // Boolean hygiene for the 0/1 logic a lowered `if` chain leaves behind: path
@@ -2990,8 +3619,9 @@ bool Cprop::indexed_get_mask(hhds::Node_class& node, hhds::Pin_class source, int
     for (const auto& piece : *pieces) {
       repack += 1 + words(piece.hi - piece.lo);
     }
-    const auto   pack  = source.get_master_node();
-    const size_t lanes = type_op_of(pack) == Ntype_op::Concat ? livehd::graph_util::concat_lanes(pack).size() : kKeepPackMaxLanes + 1;
+    const auto   pack = source.get_master_node();
+    const size_t lanes
+        = type_op_of(pack) == Ntype_op::Concat ? livehd::graph_util::concat_lanes(pack).size() : kKeepPackMaxLanes + 1;
     if (repack > 2 * words(hi - lo) && lanes <= kKeepPackMaxLanes) {
       return false;
     }
@@ -3008,7 +3638,15 @@ bool Cprop::indexed_get_mask(hhds::Node_class& node, hhds::Pin_class source, int
       }
     }
     if (pin.is_const()) {
-      return create_const(*current_graph, *const_of(pin).get_mask_op_opt(begin, begin + width));
+      // P7: mint only a fully known slice; the whole '?' literal is its own
+      // pin, and any other '?' slice is a Get_mask over the literal.
+      const auto sliced = const_of(pin).get_mask_op_opt(begin, begin + width);
+      if (!sliced->has_unknowns()) {
+        return livehd::cprop_value::create_folded_const(*current_graph, *sliced);
+      }
+      if (sliced->same_repr(const_of(pin))) {
+        return pin;
+      }
     }
     if (begin == 0 && fits_unsigned_window(pin, width)) {
       return pin;
@@ -3326,8 +3964,9 @@ void Cprop::cse_pass(const std::vector<hhds::Node_class>& order) {
     uint64_t         generation;
   };
   absl::flat_hash_map<Key, Entry> seen;
-  auto&                           facts      = *livehd::cprop_value::active;
-  const auto                      generation = [&](const hhds::Node_class& node) {
+  cone_dead.clear();  // fold_known_cone's unfoldable pins are per sweep
+  auto&      facts      = *livehd::cprop_value::active;
+  const auto generation = [&](const hhds::Node_class& node) {
     auto it = facts.generations.find(node.get_class_index());
     return it == facts.generations.end() ? uint64_t{0} : it->second;
   };
@@ -3481,6 +4120,19 @@ void Cprop::scalar_node(hhds::Node_class& node) {
   // same-arm collapse); Concat sits ABOVE the boundary band by encoding
   // accident and is handled too (all-const lane fold) -- see
   // is_computed_comb_op.
+  //
+  // Rem stays out of the generic scalar rules and CSE (is_computed_comb_op),
+  // but its own folds run here: the P4 lone operand (collapse_single_input_divrem),
+  // Q2 x%0, and the all-constant fold. Without this they were unreachable.
+  if (op == Ntype_op::Rem) {
+    if (node.has_out_edges()) {
+      auto inputs = ordered_inp_edges(node);
+      if (!collapse_single_input_divrem(node, inputs)) {
+        (void)try_constant_prop(node, inputs);
+      }
+    }
+    return;
+  }
   if (!is_computed_comb_op(op)) {
     return;
   }
@@ -3496,6 +4148,10 @@ void Cprop::scalar_node(hhds::Node_class& node) {
     if (node.is_invalid()) {
       return;
     }
+  }
+
+  if (fold_known_cone(node, inp_edges_ordered)) {
+    return;
   }
 
   if (op == Ntype_op::Sext) {
@@ -3518,7 +4174,15 @@ void Cprop::scalar_node(hhds::Node_class& node) {
       }
     }
   } else if (op == Ntype_op::EQ) {
-    if (scalar_eq(node, inp_edges_ordered)) {
+    if (scalar_same_operand_compare(node, inp_edges_ordered) || scalar_eq(node, inp_edges_ordered)) {
+      return;
+    }
+  } else if (op == Ntype_op::LT || op == Ntype_op::GT) {
+    if (scalar_same_operand_compare(node, inp_edges_ordered)) {
+      return;
+    }
+  } else if (op == Ntype_op::Not) {
+    if (scalar_not(node, inp_edges_ordered)) {
       return;
     }
   } else if (op == Ntype_op::SHL || op == Ntype_op::SRA) {
@@ -3600,9 +4264,8 @@ static void fold_constant_flop_enables(hhds::Graph* graph) {
     }
     bool depth_one = true;
     for (auto name : {"pipe_min", "pipe_max"}) {
-      auto p = livehd::graph_util::get_driver_of_sink_name(flop, name);
-      depth_one = depth_one
-                  && (p.is_invalid() || (p.is_const() && const_of(p).is_just_i64() && const_of(p).to_just_i64() == 1));
+      auto p    = livehd::graph_util::get_driver_of_sink_name(flop, name);
+      depth_one = depth_one && (p.is_invalid() || (p.is_const() && const_of(p).is_just_i64() && const_of(p).to_just_i64() == 1));
     }
     if (!depth_one) {
       continue;

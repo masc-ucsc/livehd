@@ -1,0 +1,22 @@
+/*
+:name: module_cycle_context
+:type: equiv
+:pyrope_top: module_cycle_context
+:verilog_top: module_cycle_context
+:set: compile.specialize_modules=false
+*/
+// Feedback-shaped wiring is acyclic under each instance's constant selector.
+// Like the Verilog reader, defer the early wire-ring timing check to graph
+// legalization; its final combinational-loop check remains mandatory.
+comb cycle_router::[timecheck=false](select_peer:Bool, local_data:U1, peer_data:U1) -> (value:U1) {
+  value = if select_peer { peer_data } else { local_data }
+}
+
+pub comb module_cycle_context::[timecheck=false](a:U1, b:U1) -> (x:U1, y:U1) {
+  wire feedback:U1 = nil
+  const first = cycle_router(select_peer=false, local_data=a, peer_data=feedback)
+  const second = cycle_router(select_peer=true, local_data=b, peer_data=first.value)
+  feedback = second.value
+  x = first.value
+  y = second.value
+}

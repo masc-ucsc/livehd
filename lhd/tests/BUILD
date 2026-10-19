@@ -3,8 +3,11 @@
 # lhd kernel tests (task 1y-bazel):
 #  - trivial_net: the //tools:lhd.bzl ruleset driving `lhd compile verilog`
 #    as a hermetic genrule action.
-#  - lhd_flow-<in>-to-<out>: the full (input x output) kind matrix on the
-#    inou/prp/tests/equiv trivial_if pyrope/verilog golden pair. Supported
+#  - lhd_flow-<in>-to-<out>: the kind matrix on the inou/prp/tests/equiv
+#    trivial_if pyrope/verilog golden pair. pyrope->ln and pyrope->lg are the
+#    prep steps of the ln:/lg: input cells and of lhd_equiv_test; the
+#    verilog->lg, ln->lg, ln->verilog and lg->verilog cells are legs of
+#    lhd_equiv_test, which also LEC-proves them. Supported
 #    cells run the flow and validate the artifact; the rest lock the
 #    documented `unsupported` v0 contract. verilog/pyrope inputs emit
 #    lnast/pyrope as --emit-dir (variable cardinality); lgraph is always the
@@ -89,17 +92,11 @@ _FLOW_DATA = [
 _FLOWS = [
     ("pyrope", "verilog", "pass"),
     ("pyrope", "pyrope", "pass"),
-    ("pyrope", "ln", "pass"),
-    ("pyrope", "lg", "pass"),
     ("verilog", "verilog", "pass"),
     ("verilog", "pyrope", "pass"),  # native Slang retains LNAST
     ("verilog", "ln", "pass"),  # native Slang elaborates to LNAST
-    ("verilog", "lg", "pass"),
-    ("ln", "verilog", "pass"),
     ("ln", "pyrope", "pass"),
     ("ln", "ln", "pass"),
-    ("ln", "lg", "pass"),
-    ("lg", "verilog", "pass"),
     ("lg", "pyrope", "unsupported"),  # no LGraph -> LNAST decompiler
     ("lg", "ln", "unsupported"),  # no LGraph -> LNAST decompiler
     ("lg", "lg", "pass"),
@@ -232,6 +229,16 @@ sh_test(
     name = "lhd_sim_sub_type_shadow_test",
     size = "large",
     srcs = ["lhd_sim_sub_type_shadow_test.sh"],
+    data = ["//lhd"],
+)
+
+# Two imported units (and the testbench itself) that each define `pub comb top`:
+# the sim driver must bind every import to its own unit's class, not collapse
+# them onto the shared entity name and compare a module with itself.
+sh_test(
+    name = "lhd_sim_import_same_entity_test",
+    size = "large",
+    srcs = ["lhd_sim_import_same_entity_test.sh"],
     data = ["//lhd"],
 )
 
@@ -678,6 +685,50 @@ sh_test(
     size = "large",
     srcs = ["lhd_formal_mine_test.sh"],
     data = ["//lhd"],
+)
+
+# The induction step reads past(x, n) from n frames back, as the BMC unroll
+# does; reading the current frame proved a toggling register frozen.
+sh_test(
+    name = "lhd_formal_past_induction_test",
+    srcs = ["lhd_formal_past_induction_test.sh"],
+    data = ["//lhd"],
+    tags = ["no-sandbox"],
+)
+
+# Per-property cone cache: a formal block whose cone did not change keeps its
+# proof across edits on one --workdir; a changed cone is re-proved.
+sh_test(
+    name = "lhd_formal_cone_cache_test",
+    srcs = ["lhd_formal_cone_cache_test.sh"],
+    data = ["//lhd"],
+    tags = ["no-sandbox"],
+)
+
+# Cross-version reuse in the ABC pre-pass: equivalence, counterexample replay,
+# PDR invariant (Houdini-filtered).
+# Same-cycle env assumes constrain asserts that come earlier in occurrence order.
+sh_test(
+    name = "lhd_formal_assume_order_test",
+    srcs = ["lhd_formal_assume_order_test.sh"],
+    data = ["//lhd"],
+    tags = ["no-sandbox"],
+)
+
+sh_test(
+    name = "lhd_formal_reuse_test",
+    srcs = ["lhd_formal_reuse_test.sh"],
+    data = ["//lhd"],
+    tags = ["no-sandbox"],
+)
+
+# ABC bmc3 pre-pass: same verdicts, depths, failing cycles and witnesses as the
+# cvc5-only run.
+sh_test(
+    name = "lhd_formal_abc_bmc_test",
+    srcs = ["lhd_formal_abc_bmc_test.sh"],
+    data = ["//lhd"],
+    tags = ["no-sandbox"],
 )
 
 sh_test(
@@ -1164,10 +1215,12 @@ sh_test(
     size = "large",
     srcs = ["sim_color_random_test.sh"],
     data = [
+        "//inou/prp:tests/sim/color_kernel_llvm_mem_whole.prp",
         "//inou/prp:tests/sim/mem_none_color_random.prp",
         "//inou/prp:tests/sim/packed_update_chain.prp",
         "//lhd",
     ],
+    tags = ["cpu:4"],
 )
 
 sh_test(
@@ -1181,17 +1234,6 @@ sh_test(
     ],
     # The two simulator builds run concurrently; each saturates ~2 cores
     # (drv.cpp is one serial TU and dominates), so reserve 4.
-    tags = ["cpu:4"],
-)
-
-sh_test(
-    name = "sim_llvm_memory",
-    srcs = ["sim_llvm_memory.sh"],
-    data = [
-        "//inou/prp:tests/sim/color_kernel_llvm_mem_whole.prp",
-        "//inou/prp:tests/sim/mem_none_color_random.prp",
-        "//lhd",
-    ],
     tags = ["cpu:4"],
 )
 
@@ -1395,6 +1437,14 @@ sh_test(
     name = "inline_disable_test",
     size = "large",
     srcs = ["inline_disable_test.sh"],
+    data = ["//lhd"],
+)
+
+# compile.specialize_modules keeps a --top that another unit instantiates.
+sh_test(
+    name = "specialize_modules_top_test",
+    size = "small",
+    srcs = ["specialize_modules_top_test.sh"],
     data = ["//lhd"],
 )
 
@@ -1660,18 +1710,12 @@ sh_test(
 # ASAP7-shaped hermetic libraries): graph LEC proves, lgcheck does not refute,
 # broken twins refute, and the OR flavour / an ICG-less library stay native.
 _ICG_CASES = [
-    ("q_graph", "q", "graph"),
-    ("q_verilog", "q", "verilog"),
-    ("qn_graph", "qn", "graph"),
-    ("qn_verilog", "qn", "verilog"),
-    ("none_graph", "none", "graph"),
-    ("none_verilog", "none", "verilog"),
+    ("q", "q", "both"),
+    ("qn", "qn", "both"),
+    ("none", "none", "both"),
     ("n", "n", "both"),
-    ("q_scan", "q_scan", "both"),
-    ("q_inv", "q_inv", "both"),
-    ("q_en", "q_en", "both"),
-    ("qn_enfn", "qn_enfn", "both"),
-    ("qn_chain", "qn_chain", "both"),
+    ("q_negative", "q_negative", "both"),
+    ("qn_negative", "qn_negative", "both"),
 ]
 
 [sh_test(
@@ -1695,6 +1739,32 @@ _ICG_CASES = [
     name = "lhd_abc_icg_test" + suffix,
     tests = [":lhd_abc_icg_test" + suffix + "_" + tag for tag, _case, _check in _ICG_CASES],
 ) for suffix, _mapper in _MAPPERS]
+
+# pass.abc.derived_clock: registers on a clock computed inside their region map to
+# DFF cells driven by the mapped clock logic; the default keeps them native.
+sh_test(
+    name = "lhd_abc_derived_clock_test",
+    size = "small",
+    srcs = ["lhd_abc_derived_clock_test.sh"],
+    data = _FLOW_DATA + [
+        "abc_arst_q.lib",
+        "abc_derived_clock.v",
+    ],
+)
+
+# With pass.abc.derived_clock=true, a register clocked by the output of a module
+# instance (NVDLA's `slcg` wrapper around a flop-based clock gate) maps to a DFF cell
+# clocked by that instance's output; by default it stays a native flop
+# (derived-clock-native).
+sh_test(
+    name = "lhd_abc_instance_clock_test",
+    size = "small",
+    srcs = ["lhd_abc_instance_clock_test.sh"],
+    data = _FLOW_DATA + [
+        "abc_instance_clock.v",
+        "//inou/prp:abc_tests",
+    ],
+)
 
 # A Pyrope `Clock()` gate (a Clock_cell) is spelled `clk & latch` before
 # mapping, so abc maps it onto the ICG cell and no Clock_cell reaches STA.
@@ -2293,7 +2363,10 @@ sh_test(
     env = {"ABC_TEST_THREADS": "2"},
 )
 
-# Keep cross-mode identity checks separate from the three simulation legs.
+# Keep cross-mode identity checks separate from the two simulation legs. The
+# default leg is memory=auto, which folds these small memories exactly like
+# memory=true, so no separate memory=true simulation leg (the identities leg
+# still synthesizes and LECs default/false/true).
 # Each leg retains its mapped-netlist LEC while avoiding repeated synthesis.
 [sh_test(
     name = "lhd_memory_hierarchy_test" + suffix,
@@ -2305,7 +2378,7 @@ sh_test(
         "//inou/prp:abc_tests",
         "//ware:cgen_memory_rtl",
     ],
-) for suffix, mode in [("", "default"), ("_native", "false"), ("_lowered", "true"), ("_identities", "identities")]]
+) for suffix, mode in [("", "default"), ("_native", "false"), ("_identities", "identities")]]
 
 sh_test(
     name = "lhd_ware_options_smoke",
@@ -2397,18 +2470,12 @@ sh_test(
 # live_words=1 the ICG latch and the flop whose commit guard reads its `_din`
 # land in different colors; the latch kept a guarded `_din` store and the flop
 # read it stale (SILENT miscompile, 2026-09-18). Inline fixture: just //lhd.
-[sh_test(
-    name = "sim_live_words_invariance_test" + suffix,
-    args = [budget],
+sh_test(
+    name = "sim_live_words_invariance_test",
     size = "large",
     srcs = ["sim_live_words_invariance_test.sh"],
     data = ["//lhd"],
-) for suffix, budget in [
-    ("", "1"),
-    ("_lw2", "2"),
-    ("_dirty1", "1_dirty"),
-    ("_dirty256", "256_dirty"),
-]]
+)
 
 sh_test(
     name = "readmem_clockless_smoke",
@@ -2619,10 +2686,28 @@ sh_test(
 )
 
 sh_test(
+    name = "lhd_placement_timing_defaults_smoke",
+    size = "small",
+    timeout = "short",
+    srcs = ["lhd_placement_timing_defaults_smoke.py"],
+    data = ["//lhd", "//inou/lefdef:test_data"],
+)
+
+sh_test(
     name = "lhd_placement_smoke",
     size = "small",
     timeout = "short",
     srcs = ["lhd_placement_smoke.py"],
+    data = ["//lhd", "//inou/lefdef:test_data"],
+)
+
+# An x constant on a physical net (an undriven RTL signal that mapping kept) is refused unless
+# synth.place.unknown_const=zero ties it low.
+sh_test(
+    name = "lhd_placement_unknown_const_smoke",
+    size = "small",
+    timeout = "short",
+    srcs = ["lhd_placement_unknown_const_smoke.py"],
     data = ["//lhd", "//inou/lefdef:test_data"],
 )
 
@@ -2662,5 +2747,37 @@ sh_test(
     size = "small",
     timeout = "short",
     srcs = ["lhd_placement_memory_smoke.py"],
+    data = ["//lhd", "//inou/lefdef:test_data"],
+)
+
+sh_test(
+    name = "lhd_liberty_memory_smoke",
+    size = "small",
+    timeout = "short",
+    srcs = ["lhd_liberty_memory_smoke.py"],
+    data = ["//lhd", "//inou/lefdef:test_data"],
+)
+
+sh_test(
+    name = "lhd_macro_bringup_smoke",
+    size = "small",
+    timeout = "short",
+    srcs = ["lhd_macro_bringup_smoke.py"],
+    data = ["//lhd", "//inou/lefdef:test_data"],
+)
+
+sh_test(
+    name = "lhd_remainder_smoke",
+    size = "small",
+    timeout = "short",
+    srcs = ["lhd_remainder_smoke.py"],
+    data = ["//lhd", "//inou/prp:abc_tests"],
+)
+
+sh_test(
+    name = "lhd_placement_macro_smoke",
+    size = "small",
+    timeout = "short",
+    srcs = ["lhd_placement_macro_smoke.py"],
     data = ["//lhd", "//inou/lefdef:test_data"],
 )

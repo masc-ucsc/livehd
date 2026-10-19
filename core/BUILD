@@ -137,37 +137,37 @@ sh_test(
     ],
 )
 
+# Stateless pure-function unit tests in one binary (disjoint gtest suites):
+#   - worker_pool_test: livehd::run_workers
+#   - util_smoke:       str_tools / json_util / hash_util / canonical_entity_name
+#   - bus_name_test:    the bus-expansion naming standard (`x[i]`, `m[i][j]`) and
+#                       its parser, which semdiff / LEC state pairing use to
+#                       regroup per-bit cells into a bus
+#   - file_name_test:   livehd::shorten_file_name (links :file_name, not :core)
+cc_test(
+    name = "core_unit_test",
+    srcs = [
+        "tests/bus_name_test.cpp",
+        "tests/file_name_test.cpp",
+        "tests/util_smoke.cpp",
+        "tests/worker_pool_test.cpp",
+    ],
+    deps = [
+        ":core",
+        ":file_name",
+        "@googletest//:gtest_main",
+    ],
+)
+
 # File_output is write-if-different: an unchanged emission must leave the file
 # AND its mtime alone, because that mtime is what the generated build.ninja keys
 # on. A false "same" would leave a stale artifact behind a green run, so both
 # directions are pinned, including payloads that straddle the 64 KiB compare
 # buffer.
 cc_test(
-    name = "file_name_test",
-    srcs = [
-        "tests/file_name_test.cpp",
-    ],
-    deps = [
-        ":file_name",
-        "@googletest//:gtest_main",
-    ],
-)
-
-cc_test(
     name = "file_output_test",
     srcs = [
         "tests/file_output_test.cpp",
-    ],
-    deps = [
-        ":core",
-        "@googletest//:gtest_main",
-    ],
-)
-
-cc_test(
-    name = "worker_pool_test",
-    srcs = [
-        "tests/worker_pool_test.cpp",
     ],
     deps = [
         ":core",
@@ -202,26 +202,6 @@ cc_test(
     srcs = [
         "tests/log_test.cpp",
     ],
-    deps = [
-        ":core",
-        "@googletest//:gtest_main",
-    ],
-)
-
-# The bus-expansion naming standard (`x[i]`, `m[i][j]`) and its parser, which
-# semdiff / LEC state pairing use to regroup per-bit cells into a bus.
-cc_test(
-    name = "bus_name_test",
-    srcs = ["tests/bus_name_test.cpp"],
-    deps = [
-        ":core",
-        "@googletest//:gtest_main",
-    ],
-)
-
-cc_test(
-    name = "util_smoke",
-    srcs = ["tests/util_smoke.cpp"],
     deps = [
         ":core",
         "@googletest//:gtest_main",

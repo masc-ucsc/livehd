@@ -84,4 +84,9 @@ if first == other_seed:
     raise SystemExit("changing --seed did not change the ordering-none trace")
 PY
 
-echo "PASS: runtime-random colors are deterministic in the serial scheduler"
+# Signed-carrier storage (sim.slop_u=false) of a whole-memory kernel on the
+# llvm backend.
+"$LHD" sim inou/prp/tests/sim/color_kernel_llvm_mem_whole.prp \
+  --set sim.tune.backend=llvm --set sim.slop_u=false --set lhd.jobs=4 --workdir "$work/signed" -q
+
+echo "PASS: runtime-random colors are deterministic in the serial scheduler; signed-carrier whole-memory kernel runs on llvm"

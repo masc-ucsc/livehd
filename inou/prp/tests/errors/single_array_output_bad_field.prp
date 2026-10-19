@@ -6,7 +6,7 @@
 :help: the instance's fields are its outputs: v
 */
 
-// `x[3]` reads a lane of a child's single ARRAY output (sim/array_output_port_index.prp),
+// `x[3]` reads a lane of a child's single ARRAY output (sim/array_output_port_lanes.prp),
 // but `x.w` names an output the child does not have. It used to be read as an
 // array index ("Pyrope array index w is outside [0, 4)"), then failed only in
 // lnast.tolg ("instance result has no output named 'w'"); ruling 24 makes it

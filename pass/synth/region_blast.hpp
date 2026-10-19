@@ -78,6 +78,13 @@ struct Seq_flop {
   // its cell from that gate's ICG cell output (clk_drv is then the gate's
   // source-side output pin, not a region input). -1 otherwise.
   int32_t                 icg = -1;
+  // pass.abc.derived_clock: the register's clock is computed inside the region by
+  // logic that is not a recognized clock gate (clk_drv is that logic's
+  // source-side output pin). The clock crosses ABC as one PO (`clk_po`, an index
+  // into the Lnet outputs, after the latch-cell POs) and the read-back drives the
+  // DFF cell's clock pin from the mapped net. -1 otherwise.
+  bool                    clk_derived = false;
+  int32_t                 clk_po      = -1;
   // The `initial` (power-on / reset) value, SNAPSHOT at crossing time. The
   // read-back below runs after map_region has rewritten the region, so the
   // source const node behind `rval_drv` may already be gone -- re-reading the
@@ -205,6 +212,7 @@ struct Region_blast {
   std::vector<Icg_gate>                             icgs;                  // recognized clock gates (Seq_flop::icg)
   size_t                                            icg_pos    = 0;        // ICG enable POs, after the async-reset POs
   size_t                                            latch_pos  = 0;        // latch-cell enable/reset/D POs, after the ICG POs
+  size_t                                            dclk_pos   = 0;        // derived-clock POs (Seq_flop::clk_po), after the latch POs
   uint64_t                                          rss_before = 0;        // the admission baseline (0: no admission)
 };
 

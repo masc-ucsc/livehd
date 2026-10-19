@@ -7,8 +7,8 @@
 :verify_refuted: 0
 */
 
-// todo/livehd/2f-latch tracker (fixme) — BMC twin of tests/fixme/latch_sim_low
-// .prp: transparent-LOW latch (open while the gate is 0, commits at the RISE
+// todo/livehd/2f-latch tracker (fixme) — BMC twin of the latch_sim_low test in
+// tests/sim/latch_sim_basic_lane.prp: transparent-LOW latch (open while the gate is 0, commits at the RISE
 // of the gate — the ICG-enable / master-half polarity), same self-checking
 // window-capture-and-hold property as latch_verify_hold. See that file's
 // header for the dual-fixture conventions (property stated twice, `implies`

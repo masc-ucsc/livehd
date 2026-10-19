@@ -1,0 +1,298 @@
+/*
+:name: latch_sim_basic_lane
+:type: simulation
+*/
+// Merged fixture: each section below is the original tests/sim fixture listed in its banner,
+// body unchanged (module and test names are unique across the sections).
+
+// ============================================================
+// from latch_sim_hold.prp
+// ============================================================
+
+// todo/livehd/2f-latch — LIVE (promoted at M5). Simulation of a transparent-HIGH latch:
+// open a window, close it with d stable, then wiggle d while closed and check
+// the latch HOLDS. Flips green at M5 (latch commit classes in cgen_sim); M0
+// only changes the failure mode (today `lhd sim` dies with a misleading
+// `combinational-loop` error naming an internal node — M0 replaces that with a
+// real "latch unsupported in sim" diagnostic, and this test keeps failing until
+// M5 actually simulates the latch).
+//
+// ASSERT-VISIBILITY RULE (2f-latch): asserts observe q only in ticks where the
+// latch is CLOSED (gate deasserted) and never straddle a closing edge with a
+// changing d. In those ticks the real-transparency semantics (Icarus on the
+// golden), the commit-at-closing-edge model, and a flop-with-enable encoding
+// all agree, so this fixture does not pin an implementation choice. The
+// schedule was validated against iverilog (always_latch golden, per-frame
+// sampling): q = 5,5,5,5,42,42.
+pub mod lhold8(en:Bool, d:U8) -> (q:U8@[0]) {
+  reg l:U8:[latch=true]
+  q = l
+  if en {
+    l = d
+  }
+}
+
+test lhold8.window_capture_and_hold {
+  mut acc = lhold8
+  tick 6 {
+    // c0: open on d=5; c1: close with d STABLE; c2-c3: wiggle d while closed;
+    // c4: reopen on d=42; c5: close with d stable
+    acc.en = (clock == 0) or (clock == 4)
+    mut dv:U8 = 42
+    if clock <= 1 {
+      dv = 5
+    } elif clock == 2 {
+      dv = 99
+    } elif clock == 3 {
+      dv = 77
+    }
+    acc.d = dv
+    step
+    if (clock >= 1) and (clock <= 3) {
+      assert(acc.q == 5, "latch captured 5 at the closing edge and holds it")
+    }
+    if clock == 5 {
+      assert(acc.q == 42, "second window captured 42")
+    }
+  }
+}
+
+// ============================================================
+// from latch_sim_low.prp
+// ============================================================
+
+// todo/livehd/2f-latch — LIVE (promoted at M5). Simulation of a transparent-LOW latch
+// (open while the gate is 0, commits at the RISE of the gate) — the polarity
+// of every ICG enable latch and every master half of a master/slave pair.
+// Mirror of latch_sim_hold; same assert-visibility rule (observe q only while
+// CLOSED, keep d stable across the closing edge). Flips green at M5.
+pub mod llow8(g:Bool, d:U8) -> (q:U8@[0]) {
+  reg l:U8:[latch=true]
+  q = l
+  if !g {
+    l = d
+  }
+}
+
+test llow8.window_capture_and_hold {
+  mut acc = llow8
+  tick 6 {
+    // c0: gate LOW -> open on d=5; c1: gate rises with d STABLE -> capture;
+    // c2-c3: wiggle d while closed; c4: reopen on d=42; c5: close, d stable
+    acc.g = not ((clock == 0) or (clock == 4))
+    mut dv:U8 = 42
+    if clock <= 1 {
+      dv = 5
+    } elif clock == 2 {
+      dv = 99
+    } elif clock == 3 {
+      dv = 77
+    }
+    acc.d = dv
+    step
+    if (clock >= 1) and (clock <= 3) {
+      assert(acc.q == 5, "latch captured 5 at the rising gate and holds it")
+    }
+    if clock == 5 {
+      assert(acc.q == 42, "second window captured 42")
+    }
+  }
+}
+
+// ============================================================
+// from latch_sim_reset.prp
+// ============================================================
+
+// todo/livehd/2f-latch M7 — SIMULATION of a latch with an asynchronous reset,
+// the sim twin of the equiv pair tests/equiv/latch_reset.prp.
+//
+// A latch's reset is inherently ASYNCHRONOUS (there is no clock edge to
+// synchronize to), so it wins over the transparency test: while reset is
+// asserted the latch shows its reset value regardless of the gate. Latches ride
+// the ordinary flop commit path in sim (M5), and that path already applies
+// reset ahead of the enable — so this needed no scheduler change once tolg
+// stopped refusing the reset family and cgen learned to emit it.
+//
+// SCHEDULE VALIDATED AGAINST IVERILOG (always_latch golden with the same
+// reset-first shape):
+//     k :  0   1   2   3   4
+//     q :  3  41  41  43  43
+// i.e. reset at k=0 forces 3; the gate opens at k=1 (captures 41) and k=3
+// (captures 43); the closed ticks in between HOLD. Asserts observe q only at
+// closed ticks per the observation-visibility rule, except k=0 where reset —
+// not transparency — determines the value.
+pub mod lrst8(en:Bool, d:U8) -> (q:U8@[0]) {
+  reg l:U8:[latch=true] = 3
+  q = l
+  if en {
+    l = d
+  }
+}
+
+test lrst8.async_reset_wins {
+  mut acc = lrst8
+  tick 5 {
+    acc.reset = clock == 0
+    acc.en    = (clock == 1) or (clock == 3)
+    acc.d     = 40 + clock
+    step
+    assert((clock == 0) implies (acc.q == 3), "reset wins over the gate")
+    assert(((clock == 1) or (clock == 2)) implies (acc.q == 41), "captured 41, then HOLDS while closed")
+    assert((clock >= 3) implies (acc.q == 43), "second window captured 43 and holds")
+  }
+}
+
+// ============================================================
+// from latch_sim_master_slave.prp
+// ============================================================
+
+// todo/livehd/2f-latch — LIVE (promoted at M5). THE ONE-CYCLE-LATENCY TEST. A
+// master/slave latch pair on opposite phases of `clk` IS a posedge flop: d
+// presented while clk is low must appear on q ONE full clk period later, not
+// two. Under the no-time-borrowing scope ruling this must come out right from
+// opposite-phase COMMIT CLASSES alone (master transparent-low commits at the
+// RISE, slave transparent-high commits at the FALL) — a naive "latch = flop"
+// model without commit classes gives TWO cycles, silently. Flips green at M5
+// (and depends on M3's classifier). Must NOT be fixed by modeling transparency.
+//
+// HOW M5 ACTUALLY SATISFIES THIS (the header's warning above stands, but the
+// resolution is subtler than "add commit classes to the scheduler"): a latch
+// rides the ordinary flop commit path, because tolg has ALREADY baked the hold
+// mux into din (`din = en ? d : q`) and wired `enable = en`. So
+// `q_next = en ? din : q = en ? d : q`, which IS transparency observed at the
+// end of the tick. The one-cycle latency then falls out of the OPPOSITE PHASES
+// rather than from any scheduler machinery: `m` is enabled while `!clk` and `s`
+// while `clk`, so only ONE of the two updates in any tick, and the simultaneous
+// commit-from-pre-tick-state gives exactly the iverilog schedule below. The
+// "naive latch = flop gives two cycles" failure is the model that IGNORES the
+// enable; honoring it is what makes commit classes unnecessary here.
+//
+// `clk` here is a DATA input toggled by the test (one poke per half-period, so
+// one full clk cycle = two ticks). Asserts observe q only while the slave is
+// CLOSED (clk == 0): at slave-open ticks real transparency shows the master
+// value early (Icarus: q=77 already at c3) while a commit-class model may hold
+// the previous commit — both are acceptable, so those ticks are not observed.
+// Schedule validated against iverilog (always_latch pair golden): q at end of
+// c0..c4 = x,5,5,77,77; asserts only at c2 and c4.
+pub mod ms8(clk:Bool, d:U8) -> (q:U8@[0]) {
+  reg m:U8:[latch=true]
+  reg s:U8:[latch=true]
+  q = s
+  if !clk {
+    m = d
+  }
+  if clk {
+    s = m
+  }
+}
+
+test ms8.one_cycle_latency {
+  mut acc = ms8
+  tick 5 {
+    // c0: clk=0 master opens on d=5; c1: clk=1 master commits 5, slave opens;
+    // c2: clk=0 slave commits 5 (assert), master opens on 77; c3: clk=1 master
+    // commits 77, slave opens; c4: clk=0 slave commits 77 (assert)
+    acc.clk = (clock == 1) or (clock == 3)
+    mut dv:U8 = 33
+    if clock <= 1 {
+      dv = 5
+    } elif (clock == 2) or (clock == 3) {
+      dv = 77
+    }
+    acc.d = dv
+    step
+    if clock == 2 {
+      assert(acc.q == 5, "one full clk period after presenting d=5 (not two)")
+    }
+    if clock == 4 {
+      assert(acc.q == 77, "second value also arrives after one period")
+    }
+  }
+}
+
+// ============================================================
+// from latch_sim_negedge_enable.prp
+// ============================================================
+
+// todo/livehd/2f-latch — LIVE (promoted at M5, regression added after the
+// PHASE-2 operand fix). A transparent latch QUALIFYING a negedge flop's
+// ENABLE — the register-file write-strobe shape, and the one that slipped
+// through every other latch/negedge tracker.
+//
+// The two-phase tick drops the pin2var binding of everything reachable from a
+// posedge Q and re-emits that cone so negedge state observes post-rise values.
+// It used to re-ready only the negedge flop's `din`. Here the enable is
+// `lat and armed`: that AND is in the posedge cone (via `armed`), so its
+// binding was erased and never rebuilt, and operand() substituted a silent
+// constant 0 into the commit guard — `nf` never loaded and q stayed 0, with
+// NO diagnostic. cgen_sim.cpp now re-readies every pin the negedge emission
+// reads (din, enable, reset_pin, initial, the ICG guards, any secondary
+// clock), and fails closed if one is still unresolved after phase 2.
+//
+// Note the enable must sit behind a comb node that is ALSO in the posedge
+// cone: wiring the latch Q straight to `enable` binds it to the latch's own
+// member and hides the bug.
+//
+// Values verified against Icarus (see the header of the equivalent .v used
+// offline): the latch and the flop each gate one cycle, so q holds at BOTH
+// c=2 (enable drops via the LATCH) and c=3 (via the FLOP).
+pub mod negen8(clk:Clock, g:Bool, wen:Bool, arm:Bool, d:U8) -> (q:U8@[0]) {
+  reg lat:Bool:[latch=true]                        // transparent: open while g is 0
+  if !g {
+    lat = wen
+  }
+  reg armed:Bool = false                           // POSEDGE flop: puts the AND in `stale`
+  armed = arm
+  wire en:Bool = nil
+  en = lat and armed                               // the cone phase 2 used to drop
+  reg nf:U8:[clock_pin=clk, posclk=false] = 0  // NEGEDGE flop, latch-qualified
+  if en {
+    nf = d
+  }
+  q = nf
+}
+
+test negen8.latch_qualified_negedge_enable {
+  mut acc = negen8
+  tick 5 {
+    // c0: latch open on wen=1, flop armed        -> load 42
+    // c1: latch CLOSED still holding 1, armed    -> load 99
+    // c2: latch reopens on wen=0                 -> enable drops via the LATCH
+    // c3: latch open on wen=1 but disarmed       -> enable drops via the FLOP
+    // c4: both high again                        -> load 13
+    mut gv:Bool = false
+    mut wv:Bool = true
+    mut av:Bool = true
+    mut dv:U8   = 42
+    if clock == 1 {
+      gv = true
+      wv = false
+      dv = 99
+    } elif clock == 2 {
+      wv = false
+      dv = 7
+    } elif clock == 3 {
+      av = false
+      dv = 55
+    } elif clock == 4 {
+      dv = 13
+    }
+    acc.g   = gv
+    acc.wen = wv
+    acc.arm = av
+    acc.d   = dv
+    step
+    if clock == 0 {
+      assert(acc.q == 42, "latch-qualified enable loaded the negedge flop")
+    }
+    if clock == 1 {
+      assert(acc.q == 99, "closed latch still holds the enable high")
+    }
+    if (clock == 2) or (clock == 3) {
+      assert(acc.q == 99, "enable dropped (latch at c2, flop at c3): q holds")
+    }
+    if clock == 4 {
+      assert(acc.q == 13, "enable re-asserted: q loads again")
+    }
+  }
+}

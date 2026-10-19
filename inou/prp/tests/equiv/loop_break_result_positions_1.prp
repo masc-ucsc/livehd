@@ -1,0 +1,19 @@
+/*
+:name: loop_break_result_positions_1
+*/
+// The same value from a ROLLED loop with a `break`: it may leave after ANY
+// iteration, so its result ranges over every iteration's carry-out ([0, 12]),
+// not just the last one's ([0, 0]). Each consumer below sizes or folds its
+// position from that range; with the last iteration's alone the rolled design
+// was REFUTED-cex against the reference.
+pub comb loop_break_result_positions(x:U4, a:U16) -> (o:U16, p:U1, q:U4, r:S8) {
+  mut acc:U4 = 0
+  for i in 0..<4 {
+    acc = 12 - i * 4
+    if x#[i] == 1 { break }
+  }
+  o = a >> acc
+  p = a#[acc]
+  q = a#[acc..+4]
+  r = a#sext[0..=acc]
+}

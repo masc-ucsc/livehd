@@ -80,6 +80,21 @@ Node make_node(Args&&... args) {
   forget(node.create_driver_pin(0));  // an allocator-recycled pin is a NEW fact
   return node;
 }
+// P7 (todo/livehd/2a-aegraph.html): a literal is ONE const node (Q5), and its
+// '?' bits are resolved once per literal (sim draws once per literal). A fold
+// result that still carries an operand literal's '?' bits, minted as a NEW
+// constant, is a second literal that resolves independently of its source --
+// a split, which is forbidden. Value interning (hhds Graph::create_constant)
+// can also alias that new spelling to an unrelated literal. So a fold or slice
+// mints a constant only for a FULLY KNOWN value. A fold equal to a whole
+// source literal forwards that literal's own pin; any other '?'-bearing fold
+// keeps its op (Get_mask over the literal, ...). The check is debug-only.
+inline Pin create_folded_const(hhds::Graph& g, const Dlop& value) {
+#ifndef NDEBUG
+  I(!value.has_unknowns(), "P7: a fold must not mint a '?'-bearing constant (it splits the source literal)");
+#endif
+  return graph_util::create_const(g, value);
+}
 template <typename... Args>
 Node make_get_mask(Args&&... args) {
   auto node = graph_util::create_get_mask(std::forward<Args>(args)...);

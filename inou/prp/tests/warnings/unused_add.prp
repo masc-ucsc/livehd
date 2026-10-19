@@ -10,3 +10,27 @@ comb foo(a:U8, b:U8) -> (z:U8) {
   a + 1    // locate_warning_here  (result discarded — useless)
   wrap z = a + b
 }
+
+// A comparison whose boolean result is dropped is almost always a typo for an
+// assignment or a `cassert(...)`.
+comb foo_cmp(a:U8, b:U8) -> (z:Bool) {
+  a == b    // locate_warning_here  (did you mean `z = a == b` or `cassert`?)
+  z = a != b
+}
+
+// Reading a variable and discarding the value has no effect.
+comb foo_ident(a:U8) -> (z:U8) {
+  a    // locate_warning_here  (bare read, value discarded)
+  z = a
+}
+
+// Inside a code-block expression only the LAST expression is the block's value.
+// A non-final bare expression is discarded, so it warns; the trailing `t + 1`
+// is the block value and is NOT flagged.
+comb foo_block(a:U8) -> (z:U8) {
+  wrap z = {
+    mut t = a
+    t * 2    // locate_warning_here  (discarded; not the block value)
+    t + 1
+  }
+}

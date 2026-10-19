@@ -130,7 +130,10 @@ void Pass_opentimer::apply_physical_rc(const std::shared_ptr<hhds::Graph>& graph
         physical_timing_pins_[node.pin] = label;
         const auto pin                  = timer.pins().find(label);
         if (pin == timer.pins().end() || !pin->second.net() || pin->second.net()->name() != name) {
-          throw std::runtime_error("placement RC endpoint differs from STA connectivity: " + label + " on " + name);
+          throw std::runtime_error("placement RC endpoint differs from STA connectivity: " + label + " on " + name + ", actual "
+                                   + (pin == timer.pins().end() ? std::string("missing pin")
+                                      : pin->second.net()       ? pin->second.net()->name()
+                                                                : std::string("no net")));
         }
       }
       if (!std::isfinite(node.capacitance_ff) || node.capacitance_ff < 0) {

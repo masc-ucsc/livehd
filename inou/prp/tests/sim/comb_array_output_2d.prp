@@ -2,9 +2,9 @@
 :name: comb_array_output_2d
 :type: simulation
 */
-// MULTI-DIMENSIONAL array ports (the 2-D twin of comb_array_output and
-// array_output_port_index). An io entry described an array port by its outer
-// dimension alone (`[2][4]U8` = 2 lanes of one packed 32-bit row), so:
+// MULTI-DIMENSIONAL array ports (the 2-D twin of comb_array_output and the
+// array_output_port_index test of array_output_port_lanes). An io entry
+// described an array port by its outer dimension alone (`[2][4]U8` = 2 lanes of one packed 32-bit row), so:
 //   * an inlined comb's `-> (r:[2][4]U8)` output reached its caller as two
 //     32-bit lanes: `t[1][2]` and the runtime `t[i][j]` had no element to pick
 //     ("scalar-replaced array ... currently supports one element index");

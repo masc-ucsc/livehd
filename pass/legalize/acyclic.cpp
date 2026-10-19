@@ -619,6 +619,9 @@ private:
         continue;
       }
       if (op == Ntype_op::Sub) {
+        if (port_reach::state_output(m, p)) {
+          continue;  // e.g. a synchronous Liberty SRAM output without a body
+        }
         const auto nested = m.get_subnode_graph();
         const std::vector<port_reach::In_atom>* sub = nullptr;
         if (nested && !m.is_loop_subnode()) {
@@ -1447,28 +1450,87 @@ bool break_false_cycle(hhds::Graph* g, const std::vector<hhds::Pin_class>& membe
   }
   return false;
 }
+
+void report_cycles(const std::string& name, const std::vector<std::vector<hhds::Pin_class>>& cycles) {
+  for (const auto& members : cycles) {
+    std::string hops;
+    bool        loop_sub = false;
+    for (size_t i = 0; i < members.size(); ++i) {
+      const auto m  = members[i].get_master_node();
+      loop_sub     |= gu::type_op_of(m) == Ntype_op::Sub && m.is_loop_subnode();
+      if (i < 16) {
+        hops += (i == 0 ? "" : " -> ") + pin_name(members[i]);
+      }
+    }
+    if (loop_sub) {
+      diag::err(kAcyclicPass, "comb-loop-through-loop", "time")
+          .msg("combinational loop through a rolled loop instance in '{}': {}{}", name, hops, members.size() > 16 ? " ..." : "")
+          .hint("a value computed in one iteration feeds the same loop's inputs combinationally; break it with a register")
+          .emit();
+    } else {
+      diag::err(kAcyclicPass, "comb-loop", "time")
+          .msg("combinational loop in '{}': {}{}", name, hops, members.size() > 16 ? " ..." : "")
+          .hint("a value depends on itself with no register, latch or registered memory read on the path; insert a register")
+          .emit();
+    }
+  }
+}
+
 }  // namespace
 
-Acyclic_result make_acyclic(const std::vector<std::shared_ptr<hhds::Graph>>& graphs, [[maybe_unused]] Split_state& state) {  // loops are never split now: nothing is recorded
-  Acyclic_result result;
-  Scan_ctx       ctx;
+Acyclic_result make_acyclic(const std::vector<std::shared_ptr<hhds::Graph>>& graphs, Split_state& state, bool defer_inlined_loops,
+                            const std::vector<std::shared_ptr<hhds::Graph>>& roots) {
+  Acyclic_result                          result;
+  Scan_ctx                                ctx;
+  absl::flat_hash_set<const hhds::Graph*> instantiated;
+  for (const auto& graph : graphs) {
+    if (!graph || !graph->get_io()) {
+      continue;
+    }
+    for (auto node : graph->body().nodes()) {
+      if (gu::is_type_sub(node)) {
+        if (auto callee = node.get_subnode_graph()) {
+          instantiated.insert(callee.get());
+        }
+      }
+    }
+  }
+  for (const auto& root : roots) {
+    instantiated.erase(root.get());
+  }
+  absl::flat_hash_set<const hhds::Graph*>   unresolved;
+  std::vector<std::shared_ptr<hhds::Graph>> candidates;
   for (const auto& gp : callee_first(graphs)) {
     auto*                 g    = gp.get();
     const auto            name = std::string{g->get_name()};
     auto&                 done = result.inlined[g];
-    std::set<std::string> through_module;  // instances inlined off an arc-level cycle
-    auto                  found = scan(g, ctx);
+    std::set<std::string> through_module;
+    auto                  found   = scan(g, ctx);
+    bool                  changed = false;
     for (int round = 0; round < 64; ++round) {
-      // Every non-loop instance with a body on an arc-level cycle is inlined:
-      // the path really leaves and re-enters its ports, so its boundary goes.
       std::vector<hhds::Node_class>         subs = found.state_free;
       absl::flat_hash_set<hhds::Node_class> seen(subs.begin(), subs.end());
+      // A child's internal candidate need not form an external SCC in its
+      // caller. Inline just that child so the caller's bindings can resolve it.
+      if (defer_inlined_loops) {
+        for (auto node : g->body().nodes()) {
+          if (!gu::is_type_sub(node) || node.is_loop_subnode()) {
+            continue;
+          }
+          if (auto callee = node.get_subnode_graph(); callee && unresolved.contains(callee.get()) && seen.insert(node).second) {
+            subs.push_back(node);
+            through_module.insert(instance_label(node));
+          }
+        }
+      }
       for (const auto& members : found.cycles) {
         for (const auto& p : members) {
           const auto m = p.get_master_node();
-          if (gu::type_op_of(m) == Ntype_op::Sub && m.get_subnode_graph() && !m.is_loop_subnode() && seen.insert(m).second) {
-            subs.push_back(m);
+          if (gu::is_type_sub(m) && m.get_subnode_graph() && !m.is_loop_subnode()) {
             through_module.insert(instance_label(m));
+            if (seen.insert(m).second) {
+              subs.push_back(m);
+            }
           }
         }
       }
@@ -1477,12 +1539,12 @@ Acyclic_result make_acyclic(const std::vector<std::shared_ptr<hhds::Graph>>& gra
       }
       std::ranges::sort(subs, [](const auto& a, const auto& b) { return a.get_debug_nid() < b.get_debug_nid(); });
       bool progress = false;
-      for (const auto& s : subs) {
-        if (s.is_invalid()) {
+      for (const auto& sub : subs) {
+        if (sub.is_invalid()) {
           continue;
         }
-        const auto callee = std::string{s.get_subnode_graph()->get_name()};
-        if (gu::inline_sub_instance(g, s, kAcyclicPass)) {
+        const auto callee = std::string{sub.get_subnode_graph()->get_name()};
+        if (gu::inline_sub_instance(g, sub, kAcyclicPass)) {
           done.push_back(callee);
           ++result.instances_inlined;
           progress = true;
@@ -1491,18 +1553,57 @@ Acyclic_result make_acyclic(const std::vector<std::shared_ptr<hhds::Graph>>& gra
       if (!progress) {
         break;
       }
-      found = scan(g, ctx);
+      changed = true;
+      found   = scan(g, ctx);
     }
     if (!through_module.empty()) {
       std::string list;
-      for (const auto& s : through_module) {
-        list += (list.empty() ? "" : ", ") + s;
+      for (const auto& instance : through_module) {
+        list += (list.empty() ? "" : ", ") + instance;
       }
       diag::warn(kAcyclicPass, "comb-loop-through-module", "time")
-          .msg("combinational path loops through module port(s) in '{}'; inlined {} -- ideally split the bus/module in the RTL",
-               name,
-               list)
+          .msg("candidate combinational loop in '{}'; inlined {} for constant cleanup", name, list)
           .emit();
+    }
+    if (defer_inlined_loops && changed) {
+      // The caller's configuration can come from another module's constant
+      // output (a stateful controller, for example). Expose those literals to
+      // the scheduled cleanup without specializing or inlining that module.
+      std::vector<hhds::Node_class> instances;
+      for (auto node : g->body().nodes()) {
+        if (gu::is_type_sub(node) && !node.is_loop_subnode()) {
+          instances.push_back(node);
+        }
+      }
+      for (const auto& node : instances) {
+        const auto callee = node.get_subnode_graph();
+        if (!callee) {
+          continue;
+        }
+        const auto io = callee->get_io();
+        for (const auto& port : io->get_output_pin_decls()) {
+          const auto output       = node.get_driver_pin(port.port_id);
+          const auto child_output = callee->get_output_pin(port.name);
+          if (output.is_invalid() || child_output.is_invalid()) {
+            continue;
+          }
+          const auto value = child_output.get_driver_pin();
+          if (value.is_invalid() || !value.is_const() || gu::const_of(value).has_unknowns()) {
+            continue;
+          }
+          auto fitted = gu::fit_to_port(*g,
+                                        gu::create_const(*g, gu::const_of(value)),
+                                        gu::sub_port_width(child_output, *io, port.name),
+                                        !io->is_unsign(port.name));
+          fitted      = gu::fit_to_port(*g, fitted, gu::sub_port_width(output, *io, port.name), !gu::is_unsign(output));
+          const gu::Edge_vec readers(output.out_edges().begin(), output.out_edges().end());
+          for (const auto& edge : readers) {
+            edge.sink.del_sink(output);
+            fitted.connect_sink(edge.sink);
+          }
+        }
+      }
+      found = scan(g, ctx);
     }
     // What is left has no inlinable instance on it: packed slices inside this
     // body (false), a real path through a rolled loop, or a true loop. A
@@ -1512,11 +1613,14 @@ Acyclic_result make_acyclic(const std::vector<std::shared_ptr<hhds::Graph>>& gra
     // component with stateful instances), so split there too; the
     // splitter is a no-op on a body with no word-level cycle.
     if (!found.cycles.empty() || found.refined_away) {
-      result.slices_rewired += gu::split_packed_cycle_slices(g);
-      found = scan(g, ctx);
+      const int rewired      = gu::split_packed_cycle_slices(g);
+      result.slices_rewired += rewired;
+      changed               |= rewired != 0;
+      found                  = scan(g, ctx);
     }
-    // A cycle no input can activate (a full case's hold arm under `proc -ifx`)
-    // is unrolled once and the scan repeated; what is left is reported.
+    // A cycle no input can activate (a hold arm whose selectors are exhaustive
+    // across several switches, which lhd_full_case cannot see) is unrolled once
+    // and the scan repeated; what is left is deferred or reported.
     const int false_before = result.false_cycles;
     for (int round = 0; round < 4096 && !found.cycles.empty(); ++round) {
       bool broke = false;
@@ -1532,6 +1636,7 @@ Acyclic_result make_acyclic(const std::vector<std::shared_ptr<hhds::Graph>>& gra
       found = scan(g, ctx);
     }
     if (result.false_cycles > false_before) {
+      changed = true;
       diag::info(kAcyclicPass, "false-cycle-unrolled", "progress")
           .msg("unrolled {} combinational cycle(s) in '{}' that no input can activate (a full case's hold arm under "
                "`proc -ifx`)",
@@ -1539,31 +1644,92 @@ Acyclic_result make_acyclic(const std::vector<std::shared_ptr<hhds::Graph>>& gra
                name)
           .emit();
     }
-    for (const auto& members : found.cycles) {
-      std::string hops;
-      bool        loop_sub = false;
-      for (size_t i = 0; i < members.size(); ++i) {
-        const auto m  = members[i].get_master_node();
-        loop_sub     |= gu::type_op_of(m) == Ntype_op::Sub && m.is_loop_subnode();
-        if (i < 16) {
-          hops += (i == 0 ? "" : " -> ") + pin_name(members[i]);
+    result.loops += static_cast<int>(found.cycles.size());
+    if (found.cycles.empty()) {
+      continue;
+    }
+    if (defer_inlined_loops && (changed || instantiated.contains(g))) {
+      unresolved.insert(g);
+      candidates.push_back(gp);
+    } else {
+      report_cycles(name, found.cycles);
+    }
+  }
+  if (defer_inlined_loops && !candidates.empty()) {
+    // Keep the original roots. A cyclic generic body whose occurrences were
+    // all inlined is no longer part of the instantiated design to validate.
+    absl::flat_hash_set<const hhds::Graph*>   reachable;
+    std::vector<std::shared_ptr<hhds::Graph>> pending;
+    for (const auto& graph : graphs) {
+      if (graph && graph->get_io() && !instantiated.contains(graph.get())) {
+        pending.push_back(graph);
+      }
+    }
+    while (!pending.empty()) {
+      auto graph = pending.back();
+      pending.pop_back();
+      if (!reachable.insert(graph.get()).second) {
+        continue;
+      }
+      for (auto node : graph->body().nodes()) {
+        if (gu::is_type_sub(node)) {
+          if (auto callee = node.get_subnode_graph()) {
+            pending.push_back(callee);
+          }
         }
       }
-      ++result.loops;
-      if (loop_sub) {
-        diag::err(kAcyclicPass, "comb-loop-through-loop", "time")
-            .msg("combinational loop through a rolled loop instance in '{}': {}{}", name, hops, members.size() > 16 ? " ..." : "")
-            .hint("a value computed in one iteration feeds the same loop's inputs combinationally; break it with a register")
-            .emit();
+    }
+    for (const auto& graph : candidates) {
+      if (reachable.contains(graph.get())) {
+        if (result.instances_inlined != 0 || result.slices_rewired != 0) {
+          result.needs_loop_check = true;
+        } else {
+          report_cycles(std::string{graph->get_name()}, scan(graph.get(), ctx).cycles);
+        }
       } else {
-        diag::err(kAcyclicPass, "comb-loop", "time")
-            .msg("combinational loop in '{}': {}{}", name, hops, members.size() > 16 ? " ..." : "")
-            .hint("a value depends on itself with no register, latch or registered memory read on the path; insert a register")
-            .emit();
+        pending.push_back(graph);
+      }
+    }
+    // Keep unrelated acyclic definitions available. An unused caller of a
+    // discarded candidate must go with it, so no surviving Sub dangles.
+    absl::flat_hash_map<const hhds::Graph*, std::vector<std::shared_ptr<hhds::Graph>>> callers;
+    for (const auto& graph : graphs) {
+      if (!graph || !graph->get_io()) {
+        continue;
+      }
+      for (auto node : graph->body().nodes()) {
+        if (gu::is_type_sub(node)) {
+          if (auto callee = node.get_subnode_graph()) {
+            callers[callee.get()].push_back(graph);
+          }
+        }
+      }
+    }
+    absl::flat_hash_set<const hhds::Graph*> removed;
+    while (!pending.empty()) {
+      const auto graph = pending.back();
+      pending.pop_back();
+      if (reachable.contains(graph.get()) || !removed.insert(graph.get()).second) {
+        continue;
+      }
+      state.removed.push_back(graph);
+      if (auto it = callers.find(graph.get()); it != callers.end()) {
+        pending.insert(pending.end(), it->second.begin(), it->second.end());
       }
     }
   }
   return result;
+}
+
+int check_comb_cycles(const std::vector<std::shared_ptr<hhds::Graph>>& graphs) {
+  Scan_ctx ctx;
+  int      cycles = 0;
+  for (const auto& graph : callee_first(graphs)) {
+    const auto found  = scan(graph.get(), ctx);
+    cycles           += static_cast<int>(found.cycles.size());
+    report_cycles(std::string{graph->get_name()}, found.cycles);
+  }
+  return cycles;
 }
 
 int count_comb_cycles(const std::vector<std::shared_ptr<hhds::Graph>>& graphs, std::vector<std::string>* where) {

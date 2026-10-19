@@ -61,6 +61,30 @@ Two limitations of that header are real and currently unchecked:
   `hhds::Source_locator::find_file`, via the scratch-locator `base_` chain the
   loop grows).
 
+## Constructs that look like state but are not (or the reverse)
+
+- **Run-time severity tasks.** `$info`/`$warning`/`$error`/`$fatal` inside a process drive no
+  hardware, exactly like `$display`; they are ignored with one `severity-task-ignored`
+  warning per call instead of failing the design (FlooNoC carries a `$warning` in an `always`
+  outside `TARGET_SYNTHESIS`). The elaboration forms in a module or generate scope are slang's
+  own diagnostics (`InfoTask`, ...) and are unchanged: a taken `$error` still fails.
+- **Nonblocking assignments in a level-sensitive `always @(*)`.** The Migen/LiteX style
+  `x <= 0; if (c) x <= y;` assigns on every path, so `x` is combinational, as in yosys: a
+  latch comes from an incomplete path, not from the `<=` spelling. Such a variable is plain
+  logic when the block writes it only with `<=` on every path and never reads it back (a
+  nonblocking read of the old value and the settled value would differ). An incomplete path,
+  a mixed `=`/`<=` writer, a read-back and `always_latch` keep the latch classification (the
+  prim_clk_gate idiom `always @(clk or ...) if (!clk) en_latch <= ...`). Chains of
+  degenerate latches used to trip the latch contract (rule C) on LiteX output.
+- **`inout`.** LiveHD has no tri-state cell, so an `inout` port is refused with
+  `unsupported-inout-port` unless `--set compile.slang.inout_as_driven=true` selects the pad
+  model used by ASIC flows: the port is lowered as the direction its module uses, an OUTPUT
+  when the module (or a child instance wired to the port) drives it and an INPUT when it only
+  reads it. A `1'bz` drive is a don't-care, so the driven value wins and a read of the port
+  sees what the module drives (the external value of a genuinely bidirectional pad is not
+  modeled). A Lattice `TRELLIS_IO` (`assign B = T ? 1'bz : I; assign O = B;`) becomes an
+  output `B` carrying `I`, and the bus it drives is an output of the parent.
+
 ## Passing raw slang driver args (`-- ...`)
 
 Everything after a `--` on the `lhd` command line rides straight to the slang
@@ -205,8 +229,9 @@ file lists, determinism, and other behavior a value comparison cannot check.
 
 ## The coverage ladder (todo/ 2s subtask E)
 
-`slang_ladder.bzl` pins EVERY `inou/yosys/tests/*.v` source to its
-strongest passing tier; `tests/slang_compile.sh <tier> <file>` enforces it
+`slang_ladder.bzl` pins each listed `inou/yosys/tests/*.v` source (those not
+subsumed by a larger sibling fixture) to its strongest passing tier;
+`tests/slang_compile.sh <tier> <file>...` enforces it
 both ways (a regression fails, and an outgrown `error` entry fails until the
 ladder is promoted). Tiers:
 
@@ -225,12 +250,12 @@ ladder is promoted). Tiers:
 Run one: `bazel test //inou/slang:slang_compile-<name>`; all:
 `bazel test //inou/slang:all`.
 
-Current tally (2026-06-17, 116 sources): **86 lec**, 7 verilog, 2 lnast,
+Current tally (2026-06-17, 116 sources): **86 lec**, 6 verilog, 2 lnast,
 21 error (9 of those are non-LRM sources slang correctly rejects, e.g.
 procedural writes to nets; the rest are tracked feature gaps: instance arrays,
 hierarchical punch-through references, `'bx` golden arms, dynamic
-mem-element part-selects). The 7 `verilog`-capped entries are LEC-slow or
-genuine gaps: three big-memory / wide-arith tests (`long_mem`, `long_mem3`,
+mem-element part-selects). The 6 `verilog`-capped entries are LEC-slow or
+genuine gaps: two big-memory / wide-arith tests (`long_mem3`,
 `long_nocheck_iwls_square`) and `fixme_sha256`'s wide
 reduction are deliberately capped because LEC is slow there (the small-array
 coverage simple_rf1/rf2, tuplish, fixme_array carries the memory guarantee);
@@ -242,8 +267,9 @@ port/temp ranges (`add1`, `issue_047`, …) are now LEC-verified — a signed
 operand in an unsigned expression zero-extends, and `materialize_conversion`
 plus `int_min_str`/`int_max_str` carry the 1800 §11.8.2 sign rules.
 
-The `tests/verilog/` sky130 cell samples run at the `error` tier through the
-legacy no-argument `slang_compile.sh` mode (`slang_compile_sky130` target).
+The unknown-module (liberty cell instance) policy is pinned by the
+`slang_blackbox` target; `tests/verilog/sky130_test.lib` is kept as the sky130
+liberty sample.
 
 ## Which Verilog constructs to support (triage rule)
 
@@ -321,7 +347,12 @@ only the native slang reader can.
 
 Run the automatically discovered SV corpus with
 `bazel test -c opt //inou/slang:integration`. Each fixture remains an individual
-Bazel test, so failures identify the source and runtimes stay bounded.
+Bazel test, so failures identify the source and runtimes stay bounded, except the
+`// :test: error` clean-rejection sets that run as one target apiece through
+`slang_compile.sh auto FILE...` (`slang_const_clock_rejects`,
+`slang_derived_clock_rejects`, `slang_reader_rejects`; each failure still prints
+`FAIL(<top>)` naming the fixture). A new fixture is grouped by adding it to the
+matching `_SV_*_REJECTS` list in `BUILD`.
 
 `// :test: roundtrip_sim` emits and recompiles Pyrope, then checks the
 re-emitted Verilog without LEC. This profile covers behavior the formal encoder
@@ -348,3 +379,54 @@ accept an unsupported LEC verdict. Ordinary roundtrips still use LEC.
 The discovered integration cases reserve four Bazel CPUs each so concurrent
 frontend/solver jobs do not exhaust the fixed LEC watchdog through resource
 contention. Synthesis integration cases in `//inou/prp:integration` run exclusively.
+
+For source bundles containing unfinished modules outside an explicit top hierarchy,
+pass `-- --ignore-uninstantiated-modules` or `--set compile.slang.ignore_uninstantiated_modules=true`
+(the form a flow that cannot append raw slang arguments uses). This opts into Slang's existing
+`IgnoreUninstantiatedModules` policy; syntax errors and semantic errors within the
+selected hierarchy remain errors. Vendor RTL that hides simulation-only code between
+`// synopsys translate_off` and `// synopsys translate_on` (the `synthesis` spelling too,
+with or without a space after `//`) needs `--set compile.slang.translate_off=true`, which
+enables slang's `--translate-off-format` for both spellings; an unclosed region is still an
+error. Both are covered by `//inou/slang:slang_vendor_bundle_options`. The separate upstream argument
+`--allow-use-before-declare` supports legacy declaration ordering. Both are explicit
+compatibility choices; the frontend's strict defaults are unchanged.
+Unfinished reference RTL that must not even be parsed belongs inside a Verilog
+`` `ifndef SYNTHESIS `` guard. Define it explicitly with `-- -DSYNTHESIS=1`.
+The HighTide run uses both that define and `--ignore-uninstantiated-modules`.
+
+`--set compile.specialize_modules=true` opts into the existing cross-instance
+specializer before legalization. It folds constants per instance binding (up to 64 contexts per definition,
+including a stateful definition), retains the original design roots,
+and drops unused generic definitions. Loop legalization independently inlines
+affected instances and defers their loop verdict until the existing cprop/bitwidth
+cleanup, so a constant-configured router
+does not require this optimization flag. Dynamic feedback still fails cycle
+checking. The default remains false.
+
+A `synth.liberty` RAM cell is bound as an opaque macro only when the instance
+resolves to the injected Liberty declaration. A module of the same name in the
+design sources (for example a behavioral SRAM model shipped next to the `.lib`)
+fails the read: slang reports `DuplicateDefinition`, and with that diagnostic
+silenced the reader still refuses it as `liberty-memory-name-collision` rather
+than silently picking the macro pins or the RTL body. Remove the model from the
+synthesis sources.
+
+### Hard macros, vendor stubs and Yosys-style netlists (opt-ins)
+
+These serve flows whose reference is Yosys/ORFS, where the Liberty/LEF view of a macro
+replaces whatever the sources say about it. Each is `--set compile.slang.<flag>=true`
+(or the value shown) and every one is off by default.
+
+| flag | effect |
+| --- | --- |
+| `liberty_macro_precedence` | a `synth.liberty` RAM macro WINS over a same-named design module, like `read_liberty -overwrite`: the declarations go into a slang library of the highest priority, every instantiation of that name binds to the macro pins, and the shadowed source module (a vendor behavioral model, a wrapper that re-instantiates the macro under its own name) is never elaborated |
+| `liberty_allow_truncation` | a wider actual on a narrower macro input keeps the low bits, as Verilog does, and `liberty-memory-port-truncation` becomes a warning instead of an error. The upper address/data bits are really discarded: use it only when the reference design does the same |
+| `liberty_cells` | a module that no source defines but the selected Liberty does (a standard cell such as `BUFx2_ASAP7_75t_R` instantiated by a vendor-primitive stub) is bound as a typed, opaque cell instance with the Liberty's pins and directions, like a RAM macro. A source definition of the name always wins |
+| `blackbox_attribute` | a module marked `(* blackbox *)` is its interface only: ports are declared, no body is built, and every instance stays an opaque `Sub` (the LEF/Liberty macro) instead of an empty module whose outputs read as unknown |
+| `unconnected_input=zero\|one` | an instance input left open reads that constant instead of `x`. Yosys folds a vendor primitive whose controls are open (BUFG_GT's CE/CLR) into its enabled state; an unknown select keeps the whole enable cone as logic on a clock net |
+| `flatten_state_arrays` | a one-dimensional unpacked state array without power-on contents is one packed register vector (constant selectors are element offsets, a runtime selector a shift/mask) instead of a Memory with one port per access site. NyuziProcessor's `pending_stores` has 375 read and 360 write ports, which otherwise take hours to bit-blast |
+
+A port listed twice in a module header (`input a, input a`) is accepted by `--compat=vcs`
+(`Redefinition` becomes a warning); the first declaration is the port, the later ones add
+neither an IO nor an instance connection.

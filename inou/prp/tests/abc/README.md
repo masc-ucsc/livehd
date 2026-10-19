@@ -3,12 +3,16 @@
 Run `bazel test -c opt //inou/prp:integration` for the combined writer, synthesis,
 and LEC fixture suites. Each `.prp`, `.v`, or `.sv` source here automatically
 adds `//inou/prp:prp-synth-<stem>`; adding a design needs no runner or BUILD edit.
+Each target runs the ABC mapper and then the `usyn` mapper (`synth.mapper=usyn`)
+on the same compiled graph, and both legs run even if the first one fails; a new
+mapper is one more item in the BUILD `_SYNTH_MAPPERS` list.
 Small `.json` profiles reuse existing corpus inputs without copying the HDL.
 The Liberty models are local test data. Synthesis tests run exclusively.
 
-The shared `../integration.py synth FILE` flow compiles the source, synthesizes
-its graph, emits a nonempty mapped netlist, generates behavioral cell models,
-and compares the mapped graph with the original. A sibling `<stem>_ref.v`
+The shared `../integration.py synth FILE [abc,usyn]` flow (optional comma list of
+mappers, default `abc`) compiles the source once per reader, then for each mapper
+synthesizes its graph, emits a nonempty mapped netlist, generates behavioral
+cell models, and compares the mapped graph with the original. A sibling `<stem>_ref.v`
 provides a handwritten reference instead. The emitted mapped Verilog is re-read
 and checked by a second LEC run against the same reference. Reference sidecars
 (`<stem>_ref.v`) do not become separate synthesis targets.

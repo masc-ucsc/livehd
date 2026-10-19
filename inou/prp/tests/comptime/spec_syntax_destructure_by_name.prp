@@ -1,13 +1,37 @@
 /*
 :name: spec_syntax_destructure_by_name
 :type: comptime
-:verifier_pass: 4
+:verifier_pass: 33
 :verifier_fail: 0
 */
+
+// Destructuring rules (qa.md Appendix 7/8, docs 03-bundle.md): by name, `slot=field` renames,
+// declarations, unnamed (positional) tuples, variables vs literals, bare and prefixed output
+// names, whole-result bind. Merged from ten fixtures; every cassert is kept inside its own
+// block (names are block-local). The lambdas they shared are declared ONCE up front, before
+// any const, because a visible const named like a lambda output would be shadowing.
+
+comb dox(a) -> (b, c) { b = a + 1; c = a + 2 }
+comb deep(a) -> (payload, code) { payload = (const inner = (const value = a + 1)); code = a + 10 }
+comb f() -> (xx, yy) { xx = 1; yy = 2 }
+comb two(a) -> (p1, p2) { p1 = a; p2 = a + 1 }
+comb safe_div(x, y) -> (q, ok) {
+  q = 0
+  ok = false
+  if y == 0 { return }
+  q = x / y
+  ok = true
+}
+comb divmod(n, d) -> (q, r) {
+  q = n / d
+  r = n % d
+}
+
+// ---- spec_syntax_destructure_by_name ----
+{
 // qa.md Appendix §8: "destructuring a NAMED tuple binds each bare slot by name match (slot
 // name == field name) or `slot=field`; destructuring an UNNAMED tuple binds by position".
 // docs 03-bundle.md "Named-tuple destructuring": `(c, b) = dox(a=3)` is the same as `(b, c) = ...`.
-comb dox(a) -> (b, c) { b = a + 1; c = a + 2 }
 
 mut b = 0
 mut c = 0
@@ -20,3 +44,141 @@ cassert(b == 11 and c == 12)
 cassert(p == 2 and q == 1)
 cassert(e == 2)
 cassert(d == 3)
+}
+
+// ---- spec_calls_destructure_bind ----
+{
+// qa.md Appendix §8 (assistant reading): "destructuring a NAMED tuple binds
+// each bare slot by name match (slot name == field name) or `slot=field`;
+// destructuring an UNNAMED tuple binds by position".
+// docs 03-bundle.md: `(c, b) = dox(a=3)  // same: order doesn't matter`;
+// `mut (b, a) = (2, 3)  // a=3, b=2 (still positional)`.
+
+const x = (const f1=10, const f2=4)
+const (f2, f1) = x                    // by name: order is irrelevant
+cassert(f1 == 10 and f2 == 4)
+
+mut (q, p) = (2, 3)                   // unnamed RHS: positional
+cassert(q == 2 and p == 3)
+
+const (c, b) = dox(a=3)
+cassert(b == 4 and c == 5)
+const (u=dox.b, v=dox.c) = dox(a=10)
+cassert(u == 11 and v == 12)
+}
+
+// ---- spec_syntax_destructure_decl ----
+{
+// qa.md Appendix §7: "Destructuring: legal = ... declarations `const (a=f.xx, b=f.yy) = f()`,
+// `const (p1, p2) = two(...)`." (Q29 item 2).
+
+const (a=f.xx, b=f.yy) = f()
+const (p1, p2) = two(a=5)
+
+cassert(a == 1 and b == 2)
+cassert(p1 == 5 and p2 == 6)
+}
+
+// ---- spec_syntax_destructure_rename ----
+{
+// qa.md Appendix §7: "Destructuring: legal = ... rename slots `(x=dox.b, y=dox.c) = dox(a=3)`,
+// `(v=deep.payload.inner.value) = deep(a=3)`" (Q29 item 1).
+
+mut x = 0
+mut y = 0
+(x=dox.b, y=dox.c) = dox(a=3)
+mut v = 0
+(v=deep.payload.inner.value) = deep(a=3)
+
+cassert(x == 4 and y == 5)
+cassert(v == 4)
+}
+
+// ---- spec_syntax_destructure_rename_named_var ----
+{
+// qa.md Appendix §8: "destructuring a NAMED tuple binds each bare slot by name match (slot
+// name == field name) or `slot=field`; destructuring an UNNAMED tuple binds by position".
+// docs 03-bundle.md: "An explicit `local = source.path` slot binds the selected RHS field
+// path to local `local`." A named tuple held in a variable (not a call) is a named RHS too.
+const t = (const a = 1, const b = (const c = 5))
+const (x=a, y=b.c) = t
+
+cassert(x == 1)
+cassert(y == 5)
+}
+
+// ---- spec_syntax_destructure_unnamed_var ----
+{
+// qa.md Appendix §8: "destructuring a NAMED tuple binds each bare slot by name match ... ;
+// destructuring an UNNAMED tuple binds by position". Named-vs-unnamed is a property of the
+// right-hand side VALUE, not of its spelling: an unnamed tuple held in a variable still has
+// no names to match, so its slots bind by position like the literal `(1, 2)` does.
+const t = (1, 2)
+const (a, b) = t
+
+cassert(a == 1)
+cassert(b == 2)
+}
+
+// ---- adv_tuple_destruct_04 ----
+{
+// Per 03-bundle.md "Named-tuple destructuring": when the RHS is a named tuple
+// (a lambda return OR ANY TUPLE LITERAL WITH NAMED FIELDS), destructuring on
+// the LHS matches BY NAME. A named tuple literal bound to a const should
+// destructure by field name, exactly like a lambda return.
+
+const lit = (const foo = 8, const bar = 9)
+
+const (foo, bar) = lit
+cassert(foo == 8)
+cassert(bar == 9)
+
+// Three named fields, every field bound by name (boundary values).
+const lit3 = (const x = -1, const y = 0, const z = 1)
+const (x, y, z) = lit3
+cassert(x == -1 and y == 0 and z == 1)
+cassert(x + y + z == 0)
+}
+
+// ---- destructure_bare_field ----
+{
+// 2i-import (A8/5b): a single call on the RHS is unambiguous, so the rename
+// source may be a BARE output name (no callee prefix). `(r = q) = f(...)` binds
+// r to f's `q` output — same result as the verbose `(r = f.q) = f(...)` form.
+
+const (a_q = q, a_ok = ok) = safe_div(x=20, y=4)
+cassert(a_q == 5)
+cassert(a_ok == true)
+
+const (b_q = q, b_ok = ok) = safe_div(x=20, y=0)
+cassert(b_q == 0)
+cassert(b_ok == false)
+}
+
+// ---- adv_multi_out_07 ----
+{
+// Conditional early return via bare `return`; outputs keep prior assignment.
+// Two outputs MUST destructure by name; remap to distinct names per call site.
+
+const (a_q = safe_div.q, a_ok = safe_div.ok) = safe_div(x=20, y=4)
+cassert(a_q == 5)
+cassert(a_ok == true)
+
+const (b_q = safe_div.q, b_ok = safe_div.ok) = safe_div(x=20, y=0)
+cassert(b_q == 0)
+cassert(b_ok == false)
+
+// Destructure the early-return case by the output names directly.
+const (q, ok) = safe_div(x=99, y=0)
+cassert(q == 0 and ok == false)
+}
+
+// ---- multi_output_one_var ----
+{
+const dm = divmod(n=17, d=5)
+cassert(dm.q == 3)
+cassert(dm.r == 2)
+const (q, r) = divmod(n=17, d=5)
+cassert(q == dm.q)
+cassert(r == dm.r)
+}

@@ -109,9 +109,10 @@ struct Region_qor {
   double      delay_flow_area    = -1.0;
   float       area_flow_delay    = -1.0f;
   double      area_flow_area     = -1.0;
-  // Blackboxed div/mod nodes in this region: their cones are NOT mapped, so
-  // gates/area/delay under-report — the score is partial until the div is
-  // strength-reduced away. Surfaced so an agent never trusts a blind score.
+  // Div/mod nodes left native (unmapped) in this region: their cones are NOT
+  // mapped, so gates/area/delay under-report and the score is partial. The
+  // blaster maps Div and Rem, so only one preserved in a combinational-cycle
+  // remainder counts. Surfaced so an agent never trusts a blind score.
   int         div_blackbox       = 0;
   // Where this region's wall time went, and whether the incremental cache was
   // able to take it. Without these two, "the cache hit 199 of 264 regions" says

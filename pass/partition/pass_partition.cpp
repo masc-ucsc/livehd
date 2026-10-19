@@ -695,6 +695,9 @@ private:
 
 void Partitioner::carry_node_attrs(const hhds::Node_class& orig, const hhds::Node_class& neo, hhds::GraphLibrary* dst_lib) {
   admit("carry_node_attrs");
+  if (auto a = orig.attr(livehd::attrs::synth_color_group); a.has()) {
+    neo.attr(livehd::attrs::synth_color_group).set(std::string(a.get()));
+  }
   if (auto a = orig.attr(livehd::attrs::synth_policy); a.has()) {
     neo.attr(livehd::attrs::synth_policy).set(std::string(a.get()));
   }

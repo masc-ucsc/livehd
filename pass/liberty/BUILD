@@ -13,7 +13,7 @@ filegroup(
         "liberty_dff.cpp",
         "liberty_dff.hpp",
     ],
-    visibility = ["//pass/synth:__pkg__"],
+    visibility = ["//pass/synth:__pkg__", "//pass/opentimer:__pkg__"],
 )
 
 # Liberty DFF-cell scan + model, shared with pass.abc (no Pass_plugin so it can be

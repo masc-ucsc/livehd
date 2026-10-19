@@ -1,6 +1,7 @@
 // This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 #include "loop_cleanup.hpp"
 
+#include <algorithm>
 #include <functional>
 
 #include "absl/container/flat_hash_set.h"
@@ -193,6 +194,15 @@ bool cleanup_loop_bodies(const std::vector<std::shared_ptr<hhds::Graph>>& graphs
         instances.push_back(node);
       }
     }
+    // The cells this definition holds before any expansion: the accumulation
+    // guard below (Cprop::set_guard_scope) is a loop rule, so it may touch only
+    // what an expansion mints, never the definition's own loop-free logic.
+    absl::flat_hash_set<uint64_t> before_expansion;
+    if (std::ranges::any_of(instances, [&](const auto& inst) { return expanded_instances.contains(inst); })) {
+      for (const auto node : graph->body().nodes()) {
+        before_expansion.insert(static_cast<uint64_t>(node.get_debug_nid()));
+      }
+    }
     bool changed = false;
     for (const auto& inst : instances) {
       if (!admit_preparation(budget, "loop-instance")) {
@@ -248,9 +258,12 @@ bool cleanup_loop_bodies(const std::vector<std::shared_ptr<hhds::Graph>>& graphs
         if (!admit_preparation(budget, "loop-specialize", 0)) {
           return false;
         }
-        Cprop{true}.do_trans(graph);
+        Cprop cprop{true};
+        cprop.set_guard_scope(
+            [&](const hhds::Node_class& node) { return !before_expansion.contains(static_cast<uint64_t>(node.get_debug_nid())); });
+        cprop.do_trans(graph);
         Bitwidth{3}.do_trans(graph);
-        Cprop{true}.do_trans(graph);
+        cprop.do_trans(graph);
         Bitwidth{3}.do_trans(graph);
         if (!admit_preparation(budget, "loop-specialized", 0)) {
           return false;

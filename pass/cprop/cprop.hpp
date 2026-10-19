@@ -7,6 +7,7 @@
 #include <memory>
 #include <vector>
 
+#include "absl/container/flat_hash_set.h"
 #include "absl/container/inlined_vector.h"
 #include "hhds/graph.hpp"
 #include "hlop/dlop.hpp"
@@ -48,15 +49,39 @@ protected:
 
   void replace_part_inputs_const(hhds::Node_class& node, Inp_pins& inp_edges_ordered);
   void replace_all_inputs_const(hhds::Node_class& node, Inp_pins& inp_edges_ordered);
+  // P7: replace node by a constant fold result. A result with '?' bits keeps
+  // the node (a new constant would split an operand literal); a fully known
+  // result becomes a constant.
   void replace_node(hhds::Node_class& node, const Dlop& result);
   void replace_node(hhds::Node_class& node, const spool_ptr<Dlop>& result) { replace_node(node, *result); }
   void replace_logic_node(hhds::Node_class& node, const Dlop& result);
   void replace_logic_node(hhds::Node_class& node, const spool_ptr<Dlop>& result) { replace_logic_node(node, *result); }
+  // Q2: a '?' that the node itself owns (x/0, x%0), not one taken from an
+  // operand literal. Creating it is one new literal, not a split.
+  void replace_node_fresh_unknown(hhds::Node_class& node, const Dlop& result);
+  // Redirect node's consumers to an existing constant pin (a fold whose result
+  // is exactly one operand literal forwards that literal's pin) and retire it.
+  void forward_to_const_pin(hhds::Node_class& node, hhds::Pin_class dpin);
+  // P7 follow-up: a '?'-dropping op (And/Or/Get_mask/Set_mask/SRA/Sext/Mux/
+  // Ror/Rxor/Popcount) over a small all-constant cone whose
+  // intermediate values hold '?' bits (kept as nodes, see replace_node) folds
+  // when its three-valued value is FULLY KNOWN. true = node replaced.
+  bool fold_known_cone(hhds::Node_class& node, const Inp_pins& inp_edges_ordered);
+  // Driver pins whose cone reaches a non-constant leaf: fold_known_cone stops
+  // there instead of re-walking it from every root. Cleared per cse_pass sweep.
+  absl::flat_hash_set<hhds::Class_index> cone_dead;
 
   bool scalar_mux(hhds::Node_class& node, Inp_pins& inp_edges_ordered, bool factor_packs = true);
   void scalar_sext(hhds::Node_class& node, Inp_pins& inp_edges_ordered);
   // EQ(EQ(x,0),0) -> x / EQ(b,1) -> b boolean-chain folds. true = node deleted.
   bool scalar_eq(hhds::Node_class& node, Inp_pins& inp_edges_ordered);
+  // EQ(x,x) -> 1, LT(x,x) / GT(x,x) -> 0 for one driver pin x. true = node deleted.
+  bool scalar_same_operand_compare(hhds::Node_class& node, Inp_pins& inp_edges_ordered);
+  // Not(Not(x)) -> x. true = node deleted.
+  bool scalar_not(hhds::Node_class& node, Inp_pins& inp_edges_ordered);
+  // A Div/Rem with one operand disconnected (P4): a-only -> a, b-only -> 0.
+  // true = handled (node deleted or kept by a refused forward).
+  bool collapse_single_input_divrem(hhds::Node_class& node, Inp_pins& inp_edges_ordered);
   // 0/1 hygiene on Xor/And/Or: x^1 -> EQ(x,0), complementary literals,
   // absorption, duplicate operands. true = node deleted or rewired (the caller
   // re-reads its type and operands).
@@ -114,11 +139,34 @@ protected:
   void scalar_node(hhds::Node_class& node);
 
 public:
+  // The cells a rewrite may touch; see set_guard_scope.
+  using Node_scope = std::function<bool(const hhds::Node_class&)>;
+
+private:
+  Node_scope guard_scope_;
+
+public:
   Cprop() = default;
-  // `low_lanes`: also narrow operations over known low lanes and move
-  // accumulation guards onto their terms. Both create cells with no width
-  // stamp, so only callers that run bitwidth afterwards set it.
+  // `low_lanes`: also narrow operations over known low lanes (and, inside
+  // set_guard_scope, move accumulation guards onto their terms). Both create
+  // cells with no width stamp, so only callers that run bitwidth afterwards
+  // set it.
   explicit Cprop(bool low_lanes) : low_lanes_(low_lanes) {}
+  // The accumulation-guard rewrite in scalar_mux (`mux(s, a, a OP x)` ->
+  // `a OP mux(s, id, x)`) is a ROLLED-LOOP rule: it turns a loop body's
+  // guarded update into an associative reduction of its carry, which is what
+  // the loop consumers (loop_split's assoc_reduction, synthesis' parallel-data
+  // extraction and chain merge) exploit. It runs only on the Muxes and update
+  // cells `scope` admits, and only with `low_lanes`. Empty (the default):
+  // nowhere, so straight-line code -- including a hand-unrolled
+  // `if c { acc |= x }` run -- compiles exactly as it did before rolled loops
+  // existed. pass.cprop admits every cell of a lifted loop body (a callee of a
+  // compact-loop Sub); synthesis' loop cleanup admits the cells an expansion
+  // minted.
+  void set_guard_scope(Node_scope scope) { guard_scope_ = std::move(scope); }
+  [[nodiscard]] static Node_scope whole_graph() {
+    return [](const hhds::Node_class&) { return true; };
+  }
   // Rewrites unlimited-precision values without consulting width/sign hints.
   void do_trans(const std::shared_ptr<hhds::Graph>& g);
 };

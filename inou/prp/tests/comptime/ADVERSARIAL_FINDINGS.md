@@ -1,5 +1,10 @@
 # Adversarial Pyrope comptime findings
 
+Fixture names below are the names at the time of the fix pass. Several of those
+files have since been merged into a survivor whose header lists the former
+names (e.g. `adv_shifts_06`, `adv_tuple_destruct_14`, `adv_enum_hier_encoding`,
+`loop_break_continue`, `wrap_checks`, `overload_named_first`, `does_test2`).
+
 ## Status after the 2026-06-13 fix pass
 
 `bazel test //inou/prp/...` went from **395 pass / 58 fail → 422 pass / 31 fail**
@@ -85,7 +90,7 @@ Plus two non-adversarial, separately-tracked: `slang_compile-long_BTBsa`
 * **`mut x:[] = nil` + `++=` array-builder** (05b-statements.md:282-301,364-370) rejected as `nil-shape-infer`.
 * **K/M/G/T scaled literals** (`1K==1024`, 02-basics.md:29-36): comptime decoder
   (`hlop/dlop.cpp` `Dlop::init_from_pyrope`) has no suffix handling — throws "1K encoding could not use K",
-  folds wrong, or makes the value non-integer. (`doc_basic1.prp` is `:type: parsing lnast` so never caught it.)
+  folds wrong, or makes the value non-integer. (the former `doc_basic1.prp`, now merged into `adv_mix_deep_fold_13.prp`, was `:type: parsing lnast` so never caught it.)
 
 ## Notes / caveats for review
 

@@ -1,6 +1,7 @@
 # This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 # buildifier: disable=load
 load("@rules_cc//cc:defs.bzl", "cc_library", "cc_test")
+load("@rules_shell//shell:sh_test.bzl", "sh_test")
 load("//tools:copt_default.bzl", "COPTS")
 
 cc_library(
@@ -37,3 +38,13 @@ cc_test(
     ],
 )
 
+# upass must stay O(N): the loop roll planner walks a body once per class of
+# names, never once per name or per loop (tests/loop_roll_linear_test.sh:
+# pass.upass grows linearly from K to 4K invariants, untyped invariants,
+# final-only outputs, and loops in a row).
+sh_test(
+    name = "loop_roll_linear_test",
+    size = "medium",
+    srcs = ["tests/loop_roll_linear_test.sh"],
+    data = ["//lhd"],
+)

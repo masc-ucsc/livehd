@@ -19,7 +19,7 @@
 //     earlier input (`a.[bits]`), and `if` expressions over a `comptime const`
 //     and over a generic (`gif`).
 // A default over a RUNTIME input's value (`b:U8 = a + 1`) stays an error
-// (errors/mod_default_runtime_input.prp), and so does one that does not fold
+// (errors/io_default_not_comptime.prp), and so does one that does not fold
 // (errors/mod_default_not_comptime_call.prp). Before, every spelling but a
 // literal, a `comptime const` expression and an `enum` statement entry failed
 // "the default of `b` must be a literal or a compile-time integer", and a

@@ -12,6 +12,15 @@ process status, and requires a nonempty `sim_tests.json` containing only passing
 uniquely named tests. A failed host build or missing runtime cannot pass.
 The `prp-simeq-*` differential fixtures use the same runner.
 
+Small single-test probes of one lane are merged into one lane file (for example
+`spec_clock_type_binding.prp`, `latch_sim_basic_lane.prp`,
+`mem_ordering_and_reset_lane.prp`). Each section starts with a
+`// from <original>.prp` banner and keeps its modules and `test` names, which
+stay unique across the file; add a new probe of such a lane as another section
+rather than a new file. A fixture stays in its own file when it needs per-file
+header tags (`:set:`, `:sim_sweep:`, `:expect_instances:`, `:args:`), is
+exported to `lhd/tests`, or has a Verilator twin.
+
 Use repeatable `:set: key=value` headers for a fixed configuration. For a small
 configuration comparison, use `:sim_sweep: sim.tune.backend=slop,llvm` (or another
 option with comma-separated values). Every combination runs in a fresh workdir
@@ -78,8 +87,8 @@ writes, it is one cycle behind. Put such reads below the `step`.
 | `loop_roll_inferred_bool.prp` | inferred boolean carry | `loop_roll_inferred_bool.bool_carry` | boolean boundary inference without guessing an integer width |
 | `loop_roll_later_comptime.prp` | carry used by a later loop domain | `loop_roll_later_comptime.preserved` | planner keeps the first loop unrolled so the later domain remains comptime |
 | `loop_roll_external_reg.prp` | enclosing register carry | `loop_roll_external_reg.shared_reg` | explicit unrolled fallback until `ref` is legal across a `mod` boundary |
-| `loop_comptime_break_under_runtime_if.prp` | guarded loop with a comptime break | `loop_comptime_break_under_runtime_if.guarded` | regression for `loop-runtime-break`: an enclosing RUNTIME `if` must not make a comptime `break` illegal |
-| `conditional_state_named_clock.prp` | stateful conditional child on `clk_i`/`rst_ni` | `named_clock_parent.holds_and_resets` | structural clock/reset discovery; inactive child holds, active-low reset still reaches it |
+| `loop_regression_lane.prp` (section `loop_comptime_break_under_runtime_if`) | guarded loop with a comptime break | `loop_comptime_break_under_runtime_if.guarded` | regression for `loop-runtime-break`: an enclosing RUNTIME `if` must not make a comptime `break` illegal |
+| `conditional_call_lane.prp` (section `conditional_state_named_clock`) | stateful conditional child on `clk_i`/`rst_ni` | `named_clock_parent.holds_and_resets` | structural clock/reset discovery; inactive child holds, active-low reset still reaches it |
 
 ## Header tags used by these fixtures
 

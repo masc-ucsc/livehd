@@ -1,0 +1,191 @@
+/*
+:name: spec_clock_reset_semantics
+:type: simulation
+*/
+// Merged fixture: each section below is the original tests/sim fixture listed in its banner,
+// body unchanged (module and test names are unique across the sections).
+
+// ============================================================
+// from spec_clock_mint_reset_in_test.prp
+// ============================================================
+// SPEC (clock lane): a module with registers and no Clock/Reset input gets
+// `clock:Clock` / `reset:Reset` MINTED, and a test drives the minted Reset
+// with a Bool expression (no cast).
+//   qa.md Appendix 6: "A module with registers and no `Clock` (or `Reset`) input
+//     gets one MINTED: `clock:Clock` / `reset:Reset`."
+//   qa.md Appendix 6: "a Bool expression is assignable/bindable to a Reset
+//     without a cast (`acc.reset = clock < 2`)."
+// The reset pulses at cycles 0,1 and again at 9 (a `clock < 2` folded as
+// always-true would hold the counter at 0 forever).
+pub mod spec_clock_mint_reset_in_test(en:Bool) -> (q:U8@[0]) {
+  reg c:U8 = 0
+  if en { wrap c = c + 1 }
+  q = c
+}
+
+test spec_clock_mint_reset_in_test.minted {
+  mut t   = spec_clock_mint_reset_in_test
+  mut g   = 0
+  mut bad = 0
+  tick 14 {
+    const r = clock < 2 or clock == 9
+    t.reset = r
+    t.en    = true
+    if r { g = 0 } else { g += 1 }
+    step
+    if t.q != g { bad += 1 }
+  }
+  puts("minted: g={g} bad={bad}")
+  assert(bad == 0)
+  assert(g == 4)
+}
+
+// ============================================================
+// from spec_clock_reset_false_child.prp
+// ============================================================
+// SPEC (clock lane): the constant `false` bound to a `Reset` means "no reset".
+//   qa.md Appendix 6: "Reset is Bool-like: ... the constant `false` means
+//     \"no reset\""
+//   docs 04b: "A `Reset` is Bool-like. It can be computed ..., the constant
+//     `false` means no reset"
+// Child `a` is auto-wired to the caller's reset, child `b` gets `r=false`: when
+// the caller resets at cycle 5, only `a` clears.
+mod cnt(c:Clock, r:Reset, en:Bool) -> (q:U8@[0]) {
+  reg n:U8 = 0
+  if en { wrap n = n + 1 }
+  q = n
+}
+pub mod spec_clock_reset_false_child(clk:Clock, rst:Reset, en:Bool) -> (qa:U8@[0], qb:U8@[0]) {
+  const a = cnt(en=en)
+  const b = cnt(r=false, en=en)
+  qa = a.q
+  qb = b.q
+}
+
+test spec_clock_reset_false_child.no_reset {
+  mut t   = spec_clock_reset_false_child
+  mut ga  = 0
+  mut gb  = 0
+  mut bad = 0
+  tick 10 {
+    const r = clock == 5
+    t.rst = r
+    t.en  = true
+    if r { ga = 0 } else { ga += 1 }
+    gb += 1
+    step
+    if t.qa != ga { bad += 1 }
+    if t.qb != gb { bad += 1 }
+  }
+  puts("reset_false: ga={ga} gb={gb} bad={bad}")
+  assert(bad == 0)
+  assert(gb == 10)
+}
+
+// ============================================================
+// from spec_clock_reset_n_active_high.prp
+// ============================================================
+// SPEC (clock lane): reset polarity comes ONLY from `negreset=true`; a `_n`
+// name suffix means nothing, so `rst_n:Reset` without `negreset` is
+// ACTIVE-HIGH.
+//   qa.md Q23 answer: "No, only negreset"
+//   qa.md Appendix 6: "Reset polarity comes ONLY from `negreset=true`; a `_n`
+//     name suffix has no meaning."
+//   docs 04b: "The reset's name carries no polarity (`rst_n` is active-high
+//     without `negreset=true`)"
+// `rst_n` is driven HIGH at cycles 0,1 and 7 (reset) and low otherwise
+// (counting). An active-low reading would hold the counter at 0 almost always.
+pub mod spec_clock_reset_n_active_high(clk:Clock, rst_n:Reset, en:Bool) -> (q:U8@[0]) {
+  reg c:U8 = 0
+  if en { wrap c = c + 1 }
+  q = c
+}
+
+test spec_clock_reset_n_active_high.high_resets {
+  mut t   = spec_clock_reset_n_active_high
+  mut g   = 0
+  mut bad = 0
+  tick 12 {
+    const r = clock < 2 or clock == 7
+    t.rst_n = r
+    t.en    = true
+    if r { g = 0 } else { g += 1 }
+    step
+    if t.q != g { bad += 1 }
+  }
+  puts("reset_n: g={g} bad={bad}")
+  assert(bad == 0)
+  assert(g == 4)
+}
+
+// ============================================================
+// from spec_clock_reset_pin_bool.prp
+// ============================================================
+// SPEC (clock lane): a Reset is Bool-like -- a `Bool` expression binds to
+// `reset_pin` without a cast.
+//   qa.md Appendix 6: "Reset is Bool-like: it can be computed (`rst or
+//     soft_rst`, synchronizers), ... and a Bool expression is
+//     assignable/bindable to a Reset without a cast"
+//   docs 04b: "a `Bool` expression binds to a `Reset` input or to `reset_pin`
+//     without a cast."
+//   docs 04b register attributes: "`reset_pin`: the reset signal
+//     (`reset_pin=rst2`, a `Reset` or a `Bool` expression)"
+// `c` is reset by the Bool data input `soft` (not by the module Reset `rst`).
+pub mod spec_clock_reset_pin_bool(clk:Clock, rst:Reset, soft:Bool, en:Bool) -> (q:U8@[0]) {
+  reg c:U8:[reset_pin=soft] = 0
+  if en { wrap c = c + 1 }
+  q = c
+}
+
+test spec_clock_reset_pin_bool.soft_resets {
+  mut t   = spec_clock_reset_pin_bool
+  mut g   = 0
+  mut bad = 0
+  tick 12 {
+    const s = clock < 2 or clock == 6
+    t.rst  = false
+    t.soft = s
+    t.en   = true
+    if s { g = 0 } else { g += 1 }
+    step
+    if t.q != g { bad += 1 }
+  }
+  puts("reset_pin_bool: g={g} bad={bad}")
+  assert(bad == 0)
+  assert(g == 5)
+}
+
+// ============================================================
+// from spec_clock_reset_pin_expr.prp
+// ============================================================
+// SPEC (clock lane): a Reset can be COMPUTED -- a Bool expression over a
+// `Reset` and data (`rst or soft_rst`), NAMED first: `reset_pin` names a
+// signal, never an expression (user ruling 2026-10-01).
+//   qa.md Appendix 6: "Reset is Bool-like: it can be computed (`rst or
+//     soft_rst`, synchronizers)"
+//   docs 07-typesystem: "A `Reset` is Bool-like: it can be computed (`rst or
+//     soft_rst`, a synchronizer)"
+pub mod spec_clock_reset_pin_expr(clk:Clock, rst:Reset, soft:Bool, en:Bool) -> (q:U8@[0]) {
+  const any_rst = rst or soft
+  reg c:U8:[reset_pin=any_rst] = 0
+  if en { wrap c = c + 1 }
+  q = c
+}
+
+test spec_clock_reset_pin_expr.either_resets {
+  mut t   = spec_clock_reset_pin_expr
+  mut g   = 0
+  mut bad = 0
+  tick 12 {
+    const r = clock < 2
+    const s = clock == 6
+    t.rst  = r
+    t.soft = s
+    t.en   = true
+    if r or s { g = 0 } else { g += 1 }
+    step
+    if t.q != g { bad += 1 }
+  }
+  assert(bad == 0)
+  assert(g == 5)
+}

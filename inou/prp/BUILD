@@ -174,6 +174,71 @@ cc_test(
     ],
 )
 
+# Error fixtures that are adjacent edges of ONE diagnostic site (a row of the same
+# table, a branch of the same lexer/parser function) share a single target
+# `prp-errors-<group>` instead of one `prp-<stem>` each: the harness takes a
+# repeated `-i`, runs every listed fixture in order, prints each fixture's own
+# `<name>.prp - error - success/FAILED` line, and fails if any of them does. The
+# fixtures stay ordinary `tests/errors/*.prp` files with their own
+# `:error:`/`:help:`/`locate_error_here` checks; they are only excluded from the
+# per-file glob below. To add a fixture to a group, list its stem here; run one by
+# hand with `tests/pyrope_test.py -i inou/prp/tests/errors/<stem>.prp`.
+_ERR_MERGED = {
+    # Rows of the `mistakes[]` table in prp2lnast.cpp (not a Pyrope attribute name).
+    "attribute-names": [
+        "attribute_bit_singular",
+        "attribute_clk_renamed",
+        "attribute_file_removed",
+        "attribute_init_read_renamed",
+        "attribute_init_renamed",
+        "attribute_loc_removed",
+        "attribute_saturate_removed",
+        "attribute_width_renamed",
+    ],
+    # Lexer::escape_end/bad_escape and Parser::check_format_spec edges.
+    "string-lexer": [
+        "spec_lexical_str_escape_u_digits",
+        "spec_lexical_str_escape_u_empty",
+        "spec_lexical_str_escape_u_nobrace",
+        "spec_lexical_str_escape_u_range",
+        "spec_lexical_str_escape_x_digits",
+        "spec_lexical_str_escape_lbrace",
+        "spec_lexical_str_escape_unknown",
+        "spec_lexical_ident_escape_unknown",
+        "spec_lexical_str_spec_backslash",
+        "spec_lexical_str_spec_brace",
+        "spec_lexical_str_spec_empty",
+        "spec_lexical_str_spec_no_expr",
+    ],
+    # One call site per role of prpparse error_type_word_name.
+    "typeword-names": [
+        "typeword_reserved_name",
+        "typeword_reserved_port",
+        "spec_types_reserved_field_read_dot",
+        "spec_types_reserved_field_decl",
+        "spec_types_reserved_lambda_name",
+        "spec_types_reserved_type_alias",
+        "spec_types_reserved_enum_member",
+        "spec_types_reserved_loop_var",
+        "spec_types_reserved_named_arg",
+    ],
+    # prpparse require_plain_name / error_reserved_name: one per binding site and
+    # per keyword-table row.
+    "reserved-word-names": [
+        "spec_syntax_reserved_step",
+        "spec_syntax_reserved_tick",
+        "spec_syntax_tick_step_dot_field",
+        "spec_syntax_tick_step_lambda_name",
+        "spec_syntax_tick_step_tuple_field",
+        "uniform_name_argument",
+        "uniform_name_attribute",
+        "uniform_name_enum",
+        "uniform_name_generic_bind",
+        "keyword_as_identifier",
+        "nil_as_name",
+    ],
+}
+
 [
     sh_test(
         name = "prp-%s" % prp_file.split("/")[-1].split(".")[0],
@@ -190,12 +255,32 @@ cc_test(
             "//lhd",
         ],
     )
-    for prp_file in glob([
-        "tests/pyrope/*.prp",
-        "tests/comptime/*.prp",
-        "tests/verification/*.prp",
-        "tests/errors/*.prp",
-    ])
+    for prp_file in glob(
+        [
+            "tests/pyrope/*.prp",
+            "tests/comptime/*.prp",
+            "tests/verification/*.prp",
+            "tests/errors/*.prp",
+        ],
+        exclude = ["tests/errors/%s.prp" % n for names in _ERR_MERGED.values() for n in names] +
+                  # Compiled (stricter, plus a Verilog check) by prp-memory-multiclock-verilog.
+                  ["tests/pyrope/memory_multiclock_ports.prp"],
+    )
+]
+
+[
+    sh_test(
+        name = "prp-errors-%s" % group,
+        srcs = ["tests/pyrope_test.py"],
+        args = [x for n in names for x in ["-i", "$(location //inou/prp:tests/errors/%s.prp)" % n]],
+        data = [
+            "//inou/prp:tests/lec.py",
+            "//inou/prp:tests/prplib.py",
+            "//inou/prp:tests/pyrope_test.py",
+            "//lhd",
+        ] + ["//inou/prp:tests/errors/%s.prp" % n for n in names],
+    )
+    for group, names in _ERR_MERGED.items()
 ]
 
 # sim.tune DRIVER contract (prp_sim_rt.hpp, sim_profile.md §6): run-time
@@ -263,9 +348,10 @@ sh_test(
     data = ["//lhd"],
 )
 
-# Fast R5 regression: the ordinary pyrope glob above catches the pre-fix tolg
-# failure; this companion checks that accepting the clock tuple did not merely
-# collapse it to one shared clock in emitted Verilog.
+# Fast R5 regression: the fixture is excluded from the ordinary pyrope glob
+# above, so this target covers both halves: the default pipeline must accept the
+# clock tuple (the pre-fix tolg failure), and the emitted Verilog must not have
+# collapsed it to one shared clock.
 sh_test(
     name = "prp-memory-multiclock-verilog",
     srcs = ["tests/memory_multiclock_test.py"],
@@ -574,16 +660,73 @@ _PRPLEC_SKIP = ["tests/equiv/%s.prp" % s for s in _PRPLEC_VARIANTS] + [
     if s.rsplit("_", 1)[0] not in _EQUIV_V_STEMS
 ]
 
+# Bases whose variants are each a few seconds of solver work run as ONE
+# `prp-lec-<base>` target instead of one per variant: naming the base makes
+# `--mode lec` LEC every `<base>_<N>.prp` against it, each with its own header
+# tags, and OR the failures (the failing variant is named in the log). The
+# `--with-bitfuzz` leg repeats the whole group. A base that is not listed keeps
+# one `prp-lec-<variant>` target per variant, so a new variant of an unlisted
+# base still needs no BUILD edit. Never list a base or variant that carries
+# `:expect_instances:`, `:ln_files:` or `:files:` -- those apply to the NAMED
+# file only, which a base-named run would silently reinterpret.
+_PRPLEC_GROUPED = [
+    "array_bit_assign_rolled",
+    "backtick_typecall",
+    "clock_identity",
+    "dynbit_write",
+    "generic_array_top_port",
+    "generic_array_xfill_elem",
+    "generic_top_default",
+    "loop_carry_kinds",
+    "loop_lec_index",
+    "loop_roll_flat",
+    "mem_pair_by_name",
+    "obs_dead_bits",
+    "obs_live_bits",
+    "onehot_step_cex",
+    "runtime_index_store_lanes",
+    "struct_top_port",
+]
+
 [
     sh_test(
-        name = "prp-lec-%s%s" % (variant, suffix),
+        name = "prp-lec-%s" % base,
+        srcs = ["tests/pyrope_test.py"],
+        args = [
+            "-i",
+            "$(location //inou/prp:tests/equiv/%s.prp)" % base,
+            "--mode",
+            "lec",
+            # The plain run of every variant, then the whole group again
+            # under --bitfuzz.
+            "--with-bitfuzz",
+        ],
+        data = [
+            "//inou/prp:tests/lec.py",
+            "//inou/prp:tests/prplec.py",
+            "//inou/prp:tests/prplib.py",
+            "//inou/prp:tests/pyrope_test.py",
+            "//inou/prp:tests/equiv/%s.prp" % base,
+            "//lhd",
+        ] + ["//inou/prp:tests/equiv/%s.prp" % v for v in _PRPLEC_VARIANTS if v.rsplit("_", 1)[0] == base],
+        # Reserve frontend/solver capacity for wall-clock-bounded formal checks.
+        tags = ["cpu:4"],
+    )
+    for base in _PRPLEC_GROUPED
+]
+
+[
+    sh_test(
+        name = "prp-lec-%s" % variant,
         srcs = ["tests/pyrope_test.py"],
         args = [
             "-i",
             "$(location //inou/prp:tests/equiv/%s.prp)" % variant,
             "--mode",
             "lec",
-        ] + (["--bitfuzz"] if suffix else []),
+            # The plain run, then the same variant again under --bitfuzz.
+            "--with-bitfuzz",
+        ],
         data = [
             "//inou/prp:tests/lec.py",
             "//inou/prp:tests/prplec.py",
@@ -597,10 +740,7 @@ _PRPLEC_SKIP = ["tests/equiv/%s.prp" % s for s in _PRPLEC_VARIANTS] + [
         tags = ["cpu:4"],
     )
     for variant in _PRPLEC_VARIANTS
-    for suffix in [
-        "",
-        "-bitfuzz",
-    ]
+    if variant.rsplit("_", 1)[0] not in _PRPLEC_GROUPED
 ]
 
 # Equivalence pairs (tests/equiv/<name>.prp + golden <name>.v): the harness
@@ -622,22 +762,21 @@ _PRPLEC_SKIP = ["tests/equiv/%s.prp" % s for s in _PRPLEC_VARIANTS] + [
 # prp-equiv-* targets run only the equivalence (`--mode equiv`) and
 # prp-sim-equiv-<stem> below runs the simulation, so no target pays for both
 # (matched_filter: ~2.5 s of sim host build next to ~1.5 s of lec + lgcheck),
-# and the -bitfuzz twin never reruns a simulation it does not change.
+# and the --bitfuzz leg never reruns a simulation it does not change.
 _EQUIV_SIM = [
     "matched_filter",
 ]
 
 [
     sh_test(
-        name = "prp-equiv-%s%s" % (
-            prp_file.split("/")[-1].split(".")[0],
-            suffix,
-        ),
+        name = "prp-equiv-%s" % prp_file.split("/")[-1].split(".")[0],
         srcs = ["tests/pyrope_test.py"],
         args = [
             "-i",
             "$(location //inou/prp:%s)" % prp_file,
-        ] + (["--bitfuzz"] if suffix else []) + (
+            # The plain run, then the same pair again under --bitfuzz.
+            "--with-bitfuzz",
+        ] + (
             ["--mode", "equiv"] if prp_file.split("/")[-1].split(".")[0] in _EQUIV_SIM else []
         ),
         data = [
@@ -745,10 +884,6 @@ _EQUIV_SIM = [
             # same default native Slang LEC path as every other pair.
         ] + _PRPLEC_SKIP,
     )
-    for suffix in [
-        "",
-        "-bitfuzz",
-    ]
 ]
 
 # The simulation leg of each _EQUIV_SIM pair (see above).
@@ -821,6 +956,7 @@ sh_test(
 # a new equiv fixture then defaults to COVERED rather than silently uncovered.
 # A pair whose claim IS that no state appears stays OUT of this list.
 _STATEMATCH_COMB = [
+    "module_cycle_context",
     "and_zero_annihilator",
     "arr2d_dyn_sel",
     "arr_comb_mux_const",
@@ -1000,7 +1136,6 @@ _STATEMATCH_COMB = [
     "selfref_thru_comb_sub",
     "selfref_wire",
     "shift_combo_i8",
-    "shift_combo_i8b",
     "shift_nested_sra",
     "shift_sra_unsigned",
     "short_circuit",
@@ -1050,8 +1185,6 @@ _STATEMATCH_COMB = [
     "tuple_field_bits",
     "tuple_field_cast",
     "tuple_field_instance_collision",
-    "tuple_in_port",
-    "tuple_out_port",
     "tuple_value_cond",
     "type_alias_array",
     "type_bound_generic_port",
@@ -1073,6 +1206,55 @@ _STATEMATCH_COMB = [
     "writer_bad_char",
     "writer_undefined_mux",
     "xor_neg_one_unsigned_ctx",
+    # 2026-10-17: 47 more pairs whose `--mode statematch` log was blank (no
+    # registers or memories on either side), found by the same measurement.
+    "array_inferred_sibling_scopes",
+    "bitnot_roundtrip",
+    "bitnot_unsigned",
+    "comb_shorthand_arg_instance",
+    "concat_bundle_lanes",
+    "dyn_bit_write_blocking",
+    "dyn_tuple_const",
+    "fn_bitloop_struct_bound",
+    "fn_name_value_port",
+    "generic_array_elem_bitwrite",
+    "generic_depth_default_import",
+    "generic_lambda_forward_param",
+    "generic_lambda_in_generic",
+    "generic_loop_default_import",
+    "guard_sub_range",
+    "instance_cond_rebind",
+    "loop_array_port_ssa_rebuild",
+    "loop_index_range_overflow",
+    "loop_instance_field",
+    "loop_ref_arg",
+    "loop_sext_index",
+    "loop_triangle_share",
+    "mem_rom",
+    "mod_varargs_add",
+    "nested_capture_scoping",
+    "out_bitassign_loop_in_if",
+    "overload_shorthand_dispatch",
+    "partsel_clip_write",
+    "rolled_inline_call_keys",
+    "selfref_concat_assign",
+    "selfref_rows",
+    "sext_scalar_net",
+    "signed_mux_arm_sum",
+    "signed_one_bit_cmp",
+    "spec_calls_gate_runtime",
+    "spec_memory_generic_array_port",
+    "spec_memory_untyped_elem_array",
+    "spec_types_cast_runtime",
+    "std_clog2_widths",
+    "struct_dyn_write_blocking",
+    "synth_tuple_carrier",
+    "tuple_wire_port_leaf_name",
+    "typed_comb_default_port",
+    "untyped_dyn_bit_writes",
+    "untyped_range_write_wide_index",
+    "verilog_bitnot_context",
+    "wrap_typed_local",
 ]
 
 # State-name pairing cannot apply to these pairs BY DESIGN (README "gap class 4",
@@ -1088,6 +1270,32 @@ _STATEMATCH_BY_DESIGN = [
     "state_window_delay",
     "state_window_valid_next",
     "state_window_valid_next_mut",
+]
+
+# State-bearing pairs whose `prp-statematch-*` asserts a name pairing another
+# kept pair already asserts (2026-10-17). Every member is one array register
+# `mem` (or `arr`/`t`) in the Pyrope against the same-named array in the golden:
+# the members differ only in `ordering=` / reset_pin / negreset / initial=
+# attributes, the init constant, the inferred size or the store/write-port logic,
+# none of which touches the name the memory cell carries. Representatives that
+# stay: mem_init, mem_init_scalar, mem_ordering_old, mem_two_wr_prio,
+# mem_whole_reg, mem_byte_enable_loop, async_mem_reset_demoted and
+# spec_memory_{inferred_size,reset_pin}. The fixtures stay: their prp-equiv-*,
+# prp-v2prp2v-* and prp-simeq-* targets carry the behaviour.
+_STATEMATCH_REDUNDANT = [
+    "mem_init_tuple",
+    "mem_partial_write_ordering_old",
+    "mem_whole_coexist",
+    "mem_whole_cond_const",
+    "mem_wr_seq_same",
+    "spec_memory_bulk_then_lane",
+    "spec_memory_default_program",
+    "spec_memory_initial_poweron_only",
+    "spec_memory_initial_same_ok",
+    "spec_memory_negreset",
+    "spec_memory_poweron_not_reset",
+    "spec_memory_reset_by_type",
+    "spec_memory_reset_priority",
 ]
 
 
@@ -1120,7 +1328,7 @@ _STATEMATCH_BY_DESIGN = [
             "tests/equiv/*_tb.prp",
             # no header, no golden .v
             "tests/equiv/accum.prp",
-        ] + _PRPLEC_SKIP + ["tests/equiv/%s.prp" % s for s in _STATEMATCH_COMB + _STATEMATCH_BY_DESIGN],
+        ] + _PRPLEC_SKIP + ["tests/equiv/%s.prp" % s for s in _STATEMATCH_COMB + _STATEMATCH_BY_DESIGN + _STATEMATCH_REDUNDANT],
     )
 ]
 
@@ -1277,11 +1485,12 @@ _V2PRP2V_VERILOG_FIXME = [
     # wrapped 8 to 0. Cgen_verilog::shift_amount_expr now pads it. The new
     # bitrange_dyn_narrow pair gates the same hole on the NATIVE `#[lo..=hi]`
     # path, which bitrange_dyn's own widths happened to hide.
-    # tup_in_port / tuple_in_port were PROMOTED out of this list (2026-07-29):
-    # they tracked the DIRECT slang -> lg -> cgen path leaving `res` UNDRIVEN
-    # (x) where the golden drives a value. Routing this harness through Pyrope
-    # (v -> prp -> v) proves both — the writer/recompile legs reconstruct the
-    # struct port binding the direct path dropped.
+    # tup_in_port was PROMOTED out of this list (2026-07-29; its byte-identical
+    # twin tuple_in_port has since been removed): it tracked the DIRECT slang ->
+    # lg -> cgen path leaving `res` UNDRIVEN (x) where the golden drives a
+    # value. Routing this harness through Pyrope (v -> prp -> v) proves it — the
+    # writer/recompile legs reconstruct the struct port binding the direct path
+    # dropped.
     # arr_comb_tmp was PROMOTED out of this list (2026-07-27): the `t = d` drop
     # was upass.ssa leaving a tuple_set store's VALUE operand on its stale base
     # name, not a slang front-end drop — see the equiv note above.
@@ -1310,6 +1519,38 @@ _V2PRP2V_VERILOG_FIXME = [
     # The LEC-REFUTED trackers (mem_write_during_reset, async_mem_reset_demoted,
     # async_reset_pin_wire, reg_decl_init_dropped, selfref_concat_assign) were
     # all PROMOTED out (2026-10-04); see the equiv-glob note above.
+]
+
+# Goldens that are alpha-equivalent to a kept pair's golden (identical token
+# stream once identifiers are renamed; for the const-only pairs, once the sized
+# literal VALUES are masked), so every Verilog-driven leg of v2prp2v (slang -> lg,
+# lg -> Pyrope, Pyrope -> Verilog and both LECs) repeats a kept target's flow.
+# Only the hand-written .prp (the native reference of step 1b) differs, and
+# prp-equiv-<stem> still proves that .prp against the same golden, so the fixtures
+# and every other target stay. 2026-10-17; the representative that stays follows
+# each name.
+_V2PRP2V_DUP = [
+    "bitsel_idx",  # bitsel_dyn
+    "dyn_tuple_mut_ro",  # dyn_tuple_const
+    "hotmux_unique",  # dyn_tuple_sel
+    "imported_comb_alias_vs_caller_comb",  # imported_comb_alias_shadow
+    "imported_comb_entity_alias_scope",  # imported_comb_alias_shadow
+    "imported_comb_helper_scope",  # imported_comb_alias_shadow
+    "imported_comb_overload_set_file",  # imported_comb_overload_set
+    "imported_generic_helper_scope_noinline",  # imported_comb_alias_shadow
+    "loop_invariant_version_stream",  # loop_invariant_version
+    "mod_template",  # mod_call_mod
+    "nested_lambda_file_const",  # nested_comb_in_comb_capture
+    "overload_dispatch",  # imported_comb_overload_set
+    "pipe3_mul",  # mod_call_pipe
+    "pipe_bare",  # pipe1_pass
+    "rt_wrap_sub",  # rt_wrap_reassign
+    "short_circuit",  # mod_passthru
+    "tup_port_mod",  # tup_port_comb
+    "type_bound_generic_port",  # mod_passthru (same `assign y = a` as short_circuit)
+    "typed_comb_default_port",  # lg_rename
+    "wire_comb",  # overload_return_dispatch
+    "wire_cond_driver",  # const_nil_cond_bind
 ]
 
 [
@@ -1352,7 +1593,7 @@ _V2PRP2V_VERILOG_FIXME = [
                 # v2prp directions.
                 "tests/equiv/async_negreset_compound.v",
                 "tests/equiv/async_reset_enable.v",
-            ],
+            ] + ["tests/equiv/%s.v" % s for s in _V2PRP2V_DUP],
         )
     ]
 ]
@@ -1378,118 +1619,28 @@ _V2PRP2V_VERILOG_FIXME = [
             "//lhd",
         ],
         # sim_lg_atomic_feedback now compiles: cgen_sim flattens the false-loop
-        # pure-comb sub-instance (flatten_false_loop_subs). sim_prp_packed_selfref
-        # now compiles too: cgen_sim splits the false WORD-level packed-wire cycle
-        # (split_packed_selfref_wires). The rest are still gaps.
+        # pure-comb sub-instance (flatten_false_loop_subs). The packed-word and
+        # sub-feedback comb-loop pairs that used to be tracked here (prp-emit
+        # mode, compile-only) are covered by their prp-simeq-<name> twins, which
+        # compile the same tests/equiv/<name>.prp and also check values.
         # cpu:4 -- the v2prp-sim mode builds its two simulator sides (and their
         # comparison drivers) concurrently; the others build one side at a time.
         tags = (["cpu:4"] if mode == "v2prp-sim" else []) if name in (
             "sim_lg_atomic_feedback",
-            "sim_prp_packed_selfref",
-            # 2026-07-03: the generalized slice-resolution engine in
-            # split_packed_selfref_wires (footprint 1-bit/And-const/Mux rules +
-            # recursive resolve: bitwise distribute, SHL/SRA re-basing, offset
-            # Get_mask descent, Sum-as-disjoint-Or, And(SRA(w,k),m) readers)
-            # fixed the whole packed-word false-loop family. Each pair is also
-            # in _SIMEQ (iverilog-vs-lhd-sim value check).
-            "sim_packed_selfref_1bit",
-            "sim_loop_sticky_ripple",
-            "sim_loop_pack_shiftand",
-            "sim_loop_packed_bus_group",
-            "sim_loop_mux1h_selfslice",
-            "sim_loop_sbox_bit_selfref",
-            "sim_loop_mem_prefetch",
-            # class-B sub-feedback: nested pure-comb closures now FLATTEN
-            # recursively, and a stateful MOORE callee (no comb in->out path)
-            # gets peek()-pre-bound outputs + a deferred cycle(in) call.
-            "sim_sub_stateful_feedback",
-            "sim_sub_nested_comb_feedback",
             # 2026-07-03: instance-output dual identity fixed — assign_to
             # splits the bound value onto the struct's bundle leaves, so the
             # emitted .prp recompiles to the same sim (v2prp-sim mode green).
             "instance_out_struct_ident",
-            # 2026-07-03: resolve() distributes a slice through Mux arms
-            # (GM(mux(s,x,y),m) == mux(s, GM(x,m), GM(y,m)); an on-cycle
-            # selector resolves as its own full-width slice).
-            "sim_loop_mux_arm",
-            # 2026-07-03: per-OUTPUT-cone deferral (Stage-2) — a stateful
-            # MEALY callee whose FED-BACK outputs are all pure state reads
-            # gets those outputs peek()-pre-bound; the atomic cycle(in) call
-            # orders normally with its input cone emitted on demand.
-            "sim_sub_mealy_feedback",
         ) else ["fixme"],
         deps = ["//inou/yosys:scripts"],
     )
     for name, mode in {
-        "sim_prp_packed_selfref": "prp-emit",
         "sim_lg_atomic_feedback": "lg-emit",
         # SIM-side pin of the fp-convert fail family (FCVT/FPCVT/FP_INCVT/
         # CVT32ModuleS0/ByteMaskTailGen — instance-output struct dual
         # identity). FIXED 2026-07-03 (assign_to splits the bound value onto
         # the bundle leaves); green together with its prp-v2prp2v companion.
         "instance_out_struct_ident": "v2prp-sim",
-        # ---- 2026-07-03 lhd-sim failure-class synthetics (verification.html
-        # sim column, ~63 comb-loop errors + 3 sub-feedback + 2 segv). Each
-        # pins ONE distinct gap; all pairs are bit-level acyclic and LEC-proven
-        # (lgyosys) — the loop exists only at cgen.sim's word/instance
-        # granularity. Promote into _SIMEQ (differential sim) when fixed.
-        #
-        # split_packed_selfref_wires gaps (inou/cgen/cgen_sim.cpp):
-        # 1-bit fed-back packed field: footprint() bails on any single-bit Or
-        # operand (signed -1/0 "unbounded", ~685; generic bound needs bits>1,
-        # ~698) — one bail vetoes ALL rewires. BusyTable/BranchUnit/EnqEntry/
-        # EnqPolicy/OthersEntry valid-bit families (~40 modules).
-        "sim_packed_selfref_1bit": "prp-emit",
-        # same footprint-1bit bail exercised as a bit k -> k+1 RIPPLE chain
-        # (FloatFMA sticky vecs): every bit of the pack reads the previous
-        # bit's slice, so the fix must redirect a CHAIN of slice-reads.
-        "sim_loop_sticky_ripple": "prp-emit",
-        # reader-form regression: readers spelled `(w>>k)&m` are SRA+And nodes;
-        # the splitter now recognizes them alongside const-mask Get_mask reads
-        # (CSRPermitModule/Debug/DecodeUnit family).
-        "sim_loop_pack_shiftand": "prp-emit",
-        # hierarchically GROUPED pack: the covering operand `(group)<<k` is
-        # itself a still-cyclic sub-pack, and the one-shot redirect cannot
-        # recurse — this is the family whose back-edge label is `shl_*`
-        # (RegCacheDataModule_1/OldestArbiter/DataPath).
-        "sim_loop_packed_bus_group": "prp-emit",
-        # And-masked Mux1H arms: trace_to_or fails when the packed word's
-        # driver is an And / Or-of-Ands with bit-replicated one-hot masks
-        # (fpsqrt_r16_block nxt_rt speculation words, FDivSqrt/ExeUnitImp_10).
-        "sim_loop_mux1h_selfslice": "prp-emit",
-        # `wire` whole-vector direct self-read across TWO nets (riscv-crypto
-        # sbox linear layer, BlockCipherModule o_36/t_36): mutual word-level
-        # false loop, no Or-of-disjoint pack to trace at all.
-        "sim_loop_sbox_bit_selfref": "prp-emit",
-        # packed-wire false cycle feeding a comb-array READ ADDRESS: pins the
-        # BusyTable_1/Dispatch class-C SIGSEGV (ensure_ready_impl unbounded
-        # recursion — crash itself fixed by the prefetch_seen guard; the
-        # residual loud comb-loop error keeps this fixme until the splitter
-        # handles the Sum-packed word).
-        "sim_loop_mem_prefetch": "prp-emit",
-        # flatten_false_loop_subs gaps (comb-loop-through-instance survivors):
-        # STATEFUL callee — the fed-back output is a pure register read, but
-        # callee_is_pure_comb() rejects any callee holding a Flop
-        # (DivUnit/SRT16DividerDataModule, ExeUnitImp_2).
-        "sim_sub_stateful_feedback": "prp-emit",
-        # NESTED pure-comb callee — zero flops anywhere, but the callee holds
-        # a comb Sub and callee_is_pure_comb() rejects Ntype_op::Sub; the
-        # flatten is single-level non-recursive (ExeUnitImp_4/Alu).
-        "sim_sub_nested_comb_feedback": "prp-emit",
-        # ---- 2026-07-03b: the last two NON-latch sim-engine gaps, BOTH FIXED
-        # the same day (untagged above; each also in _SIMEQ):
-        # Mux-arm slice distribution: a packed word driven by a MUX whose arms
-        # pack a field computed from a slice of the same word (the
-        # BlockCipherModule/round-chaining residual: Bku/CryptoModule/
-        # ExeUnitImp_6/ExuBlock). resolve() distributes
-        # GM(mux(s,x,y),m) == mux(s, GM(x,m), GM(y,m)).
-        "sim_loop_mux_arm": "prp-emit",
-        # per-OUTPUT-cone deferral (Stage-2): a stateful MEALY callee (one
-        # reg-read output on the feedback, one comb in->out output) defeats
-        # the whole-callee Moore check (CSR/NewCSR::MipModule, DivUnit/SRT16).
-        # Pre-binding ONLY the input-independent outputs un-cycles the
-        # schedule; the atomic call orders normally.
-        "sim_sub_mealy_feedback": "prp-emit",
     }.items()
 ]
 
@@ -1523,23 +1674,30 @@ _V2PRP2V_VERILOG_FIXME = [
 # prp->verilog->prp round trip (the random Pyrope round-trip fuzz direction):
 # the emitted Verilog AND the Pyrope regenerated from it must both prove
 # equivalent to the source. Every tests/p2v2p/ fixture is a minimized fuzz find.
+#
+# The fixtures run as THREE shards (`prp-p2v2p-shard0..2`, round-robin over the
+# sorted fixture list) instead of one bazel target each (2026-10-17): p2v2p_test.py
+# takes several `-i` fixtures, runs every one of them (both LEC legs each, never
+# stopping at the first failure) and prints one `<name> - p2v2p - success|FAILED`
+# line per fixture, so a failure still names the fixture in the log. A new fuzz find
+# dropped into tests/p2v2p/ joins a shard through the glob; no BUILD edit.
+_P2V2P_FIXTURES = sorted(glob(["tests/p2v2p/*.prp"]))
+
+_P2V2P_SHARDS = 3
+
 [
     sh_test(
-        name = "prp-p2v2p-%s" % f[len("tests/p2v2p/"):-len(".prp")],
+        name = "prp-p2v2p-shard%d" % i,
         srcs = ["tests/p2v2p_test.py"],
-        args = [
-            "-i",
-            "$(location //inou/prp:%s)" % f,
-        ],
+        args = ["-i"] + ["$(location //inou/prp:%s)" % f for f in _P2V2P_FIXTURES[i::_P2V2P_SHARDS]],
         data = [
             "//inou/prp:tests/lec.py",
             "//inou/prp:tests/p2v2p_test.py",
-            "//inou/prp:%s" % f,
             "//lhd",
-        ],
+        ] + ["//inou/prp:%s" % f for f in _P2V2P_FIXTURES[i::_P2V2P_SHARDS]],
         deps = ["//inou/yosys:scripts"],
     )
-    for f in glob(["tests/p2v2p/*.prp"])
+    for i in range(_P2V2P_SHARDS)
 ]
 
 # prp->prp round-trip: a Pyrope source re-emitted through pass.prp_writer must
@@ -1550,24 +1708,15 @@ _V2PRP2V_VERILOG_FIXME = [
 # that is not yet logically equivalent, and a handful hit unimplemented nodes
 # the safety net now hard-fails — both tracked in todo/livehd/2w-prp_writer).
 # Add a name here once its prp->prp round-trip LEC-passes.
-[
-    sh_test(
-        name = "prp-p2p-%s" % base,
-        srcs = ["tests/p2p_test.py"],
-        args = [
-            "-i",
-            "$(location //inou/prp:tests/equiv/%s.prp)" % base,
-        ],
-        data = [
-            "//inou/prp:tests/lec.py",
-            "//inou/prp:tests/p2p_test.py",
-            "//inou/prp:tests/equiv/%s.prp" % base,
-            "//inou/prp:tests/equiv/%s.v" % base,
-            "//lhd",
-        ],
-        deps = ["//inou/yosys:scripts"],
-    )
-    for base in [
+#
+# The stems run in GROUPS, one `prp-p2p-<group>` target each (2026-10-17):
+# p2p_test.py takes several `-i` fixtures, runs every one of them (never
+# stopping at the first failure) and prints one `<name> - p2p - success|FAILED`
+# line per fixture, so a failure still names the fixture in the log. The memory
+# partial-write / splice stems are kept apart from the cheap ones so their LEC
+# budgets (20 s each) do not stack in one target.
+_P2P_GROUPS = {
+    "pipeline": [
         "mod_mul_add",  # top discovers its two emitted sibling pipes
         "mod_twopaths",  # registered-output timing regression (R8 A)
         "mod_varargs_add",  # monomorphized sibling uses a bare import alias
@@ -1581,22 +1730,49 @@ _V2PRP2V_VERILOG_FIXME = [
         "pipe_state_acc",  # pipe with feedback state
         "mod_delay3",  # @[N] landing-cycle on a mod output
         "reg_out_feedforward",  # feedforward reg output
+    ],
+    "misc": [
         "concat_array_lane",  # runtime array `concat` lane -> per-entry shift/or
         "bitnot_unsigned",  # ruling 26 typed `~`: the writer spells each flip width
         "verilog_bitnot_context",  # Verilog context-widened `~` through a Pyrope re-emit
         "bitnot_roundtrip",  # untyped names, template inputs, runtime-position selects
         "comb_default_call",  # ruling 39: a comb input default computed through a call
         "bitnot_alias_typed",  # rulings 38/44: a `const` alias of a typed value keeps its type for `~`
+        "dyn_bit_write_var",  # a runtime-position `w#[b] = v` into a variable re-emits as one
+        "mem_replay_crossref",  # replayed same-cycle reads feeding later writes of other memories
+        "mem_replay_whole_copy",  # a whole-array copy of a replayed (and of an "old") memory
+    ],
+    "mem-partial": [
         "mem_partial_write_ordering_old",  # a memory partial write re-emits as `mem[i]#[..] = v`
         "mem_partial_write_mixed",  # ... at a computed index, re-lowered once per read and store
         "mem_partial_write_update",  # ... next to a reset value and a whole-array clear
         "mem_bulk_vs_entry_order",  # whole-array stores keep their program order against entry writes
+    ],
+    "mem-splice": [
         "mem_dynamic_splice_after_write",  # a runtime-position `mem[i]#[b] = v` re-emits as one
-        "dyn_bit_write_var",  # ... and so does a runtime-position `w#[b] = v` into a variable
-        "mem_replay_crossref",  # replayed same-cycle reads feeding later writes of other memories
-        "mem_replay_whole_copy",  # a whole-array copy of a replayed (and of an "old") memory
         "mem_dynamic_splice_bounds",  # runtime part selects clipped to the word on both sides
-    ]
+    ],
+}
+
+[
+    sh_test(
+        name = "prp-p2p-%s" % group,
+        srcs = ["tests/p2p_test.py"],
+        args = ["-i"] + ["$(location //inou/prp:tests/equiv/%s.prp)" % base for base in bases],
+        data = [
+            "//inou/prp:tests/lec.py",
+            "//inou/prp:tests/p2p_test.py",
+            "//lhd",
+        ] + [
+            "//inou/prp:tests/equiv/%s.prp" % base
+            for base in bases
+        ] + [
+            "//inou/prp:tests/equiv/%s.v" % base
+            for base in bases
+        ],
+        deps = ["//inou/yosys:scripts"],
+    )
+    for group, bases in _P2P_GROUPS.items()
 ]
 
 # Differential simulation equivalence (prp-simeq-<name>): for each equiv pair a
@@ -1621,7 +1797,6 @@ _SIMEQ = [
     "bit_sel_sext",
     "bitrange_dyn",
     "bitrange_open",
-    "bitsel_dyn",
     "bitsel_idx",
     "bitset_gap",
     "bitset_imm",
@@ -1634,15 +1809,10 @@ _SIMEQ = [
     "cond_modified_read",
     "condout_const_arms",
     "condout_mixed_arms",
-    "condout_seed_uncertain",
     "dyn_tuple_const",
     "dyn_tuple_idxexpr",
-    "dyn_tuple_mixed",
-    "dyn_tuple_mut_ro",
     "dyn_tuple_pair",
-    "dyn_tuple_sel",
     "flop_reset_matrix",
-    "gen_type_cast",
     "generic_mod",
     "hier_value",
     "hotmux_match",
@@ -1662,23 +1832,19 @@ _SIMEQ = [
     "mem_init_scalar",
     "mem_init_tuple",
     "mem_pending_sync_init",
-    "mem_rom",
     "mem_whole_cond_const",
     "mem_write_only",
     "mod_acc_state",
     "mod_call_mod",
     "mod_call_pipe",
-    "mod_call_pipe2",
     "mod_comp",
     "mod_counter",
     "mod_delay3",
     "mod_lower",
     "mod_mixed_out",
     "mod_mul_add",
-    "mod_mut_delay",
     "mod_mux_aligned",
     "mod_passthru",
-    "mod_template",
     "mod_three",
     "mod_twopaths",
     "mod_varargs_add",
@@ -1690,14 +1856,11 @@ _SIMEQ = [
     "pipe1_pass",
     "pipe2_two_out",
     "pipe3_mul",
-    "pipe_bare",
     "pipe_range",
     "pipe_stage_reg",
     "pipe_state_acc",
     "pipe_varargs_add",
     "const_bit_select",
-    "mem_comptime_init",
-    "mem_comptime_init_inferred",
     "mem_multidim_init",
     "mem_multidim_rw",
     "mem_mut_array",
@@ -1709,8 +1872,6 @@ _SIMEQ = [
     "reduce_or",
     "reduce_popcount",
     "reduce_xor",
-    "reg_async_flag",
-    "reg_attr_override",
     "reg_delay_init",
     "reg_hold_empty_elif",
     "reg_hold_match",
@@ -1722,15 +1883,10 @@ _SIMEQ = [
     "rt_sat_s",
     "rt_sat_u",
     "rt_typecast",
-    "rt_wrap_noop",
-    "rt_wrap_reassign",
-    "rt_wrap_s",
     "rt_wrap_sub",
     "rt_wrap_sum",
     "rt_wrap_u",
     "shift_combo_i8",
-    "shift_combo_i8b",
-    "sim_lg_atomic_feedback",
     "sim_prp_packed_selfref",
     "sim_packed_selfref_1bit",
     "sim_loop_sticky_ripple",
@@ -1749,7 +1905,6 @@ _SIMEQ = [
     "splice_merge",
     "trivial_if",
     "varargs_add",
-    "wire_comb",
     "wire_reg",
     "wire_reset",
     "wire_ring",
@@ -1762,7 +1917,9 @@ _SIMEQ = [
 #   * sim_lg_atomic_feedback : a false combinational loop through an ATOMIC comb
 #       Sub instance (its output feeds back into one of its own inputs via parent
 #       logic). Needs Stage-1 selective flatten of the offending instance before
-#       cgen.sim. Tracked in cgen_sim_false_comb_loop.
+#       cgen.sim. Tracked in cgen_sim_false_comb_loop. (Fixed since; its flat-form
+#       simeq twin was dropped -- same function as sim_sub_nested_comb_feedback --
+#       and prp-simfail-sim_lg_atomic_feedback pins the hierarchical form.)
 #   * sim_prp_packed_selfref (NOW FIXED, promoted to _SIMEQ): a false WORD-level
 #       cycle -- a packed value whose read slice and written slice are independent,
 #       but the sim scheduled the whole packed word as one object. cgen_sim now
@@ -1773,9 +1930,10 @@ _SIMEQ = [
 #       to a synchronous reset (async-reset-as-sync), and the _tb.prp import
 #       binding no longer collides with the `pipe` keyword (gen_equiv_tb.py
 #       PRP_KEYWORDS guard -> `pipe_`).
-#   * gen_type_cast (NOW FIXED, promoted to _SIMEQ): the generic `T(a)`
-#       constructor cast now binds+lowers (todo 3g subtask A).
-# Run one: bazel test //inou/prp:prp-simeq-sim_lg_atomic_feedback --test_tag_filters=
+#   * gen_type_cast (NOW FIXED, promoted to _SIMEQ, since dropped from _SIMEQ as a
+#       duplicate bench -- prp-equiv-gen_type_cast still proves the binding): the
+#       generic `T(a)` constructor cast now binds+lowers (todo 3g subtask A).
+# Run one: bazel test //inou/prp:prp-simeq-<name> --test_tag_filters=
 _SIMEQ_FIXME = []
 
 [
@@ -1832,6 +1990,36 @@ _SYNTH_SOURCES = glob(
     exclude = ["tests/abc/*_ref.v"],
 )
 
+# Several cheap, independent bases may share ONE `lec-group-<name>` target: its
+# `prplec.py` call names each base, which LECs every numbered sibling of it
+# (`reset_capture.v` -> `_1`, `_2`, `_3`) with that variant's own header tags,
+# and ORs the failures. A base listed here no longer gets per-variant `lec-*`
+# targets; an unlisted base keeps one target per variant, so a brand-new fixture
+# still needs no BUILD edit (a new variant of a grouped base is picked up
+# automatically).
+_LEC_GROUPS = {
+    "muxopt_misc": [
+        "muxopt_context.v",
+        "muxopt_hier_tree.sv",
+        "muxopt_lru_select.v",
+        "muxopt_width.v",
+        "pack_local.prp",
+        "psigned.v",
+        "pstruct.v",
+        "signed_mem_din.prp",
+        "streaming.v",
+    ],
+    "reset_seq": [
+        "reset_capture.v",
+        "unreset_prologue.v",
+        "reset_bank_split.v",
+        "seqbox.v",
+        "seqbox_stall.v",
+    ],
+}
+
+_LEC_GROUPED_BASES = ["tests/equiv/lec/" + base for bases in _LEC_GROUPS.values() for base in bases]
+
 _LEC_SOURCES = [
     src
     for src in glob(
@@ -1842,7 +2030,8 @@ _LEC_SOURCES = [
         ],
         allow_empty = True,
     )
-    if "_" in src.rsplit(".", 1)[0] and src.rsplit(".", 1)[0].rsplit("_", 1)[1].isdigit()
+    if "_" in src.rsplit(".", 1)[0] and src.rsplit(".", 1)[0].rsplit("_", 1)[1].isdigit() and
+       (src.rsplit(".", 1)[0].rsplit("_", 1)[0] + "." + src.rsplit(".", 1)[1]) not in _LEC_GROUPED_BASES
 ]
 
 # Integration fixtures, not one-off scripts. Each new source adds a target.
@@ -1861,22 +2050,20 @@ _LEC_SOURCES = [
     tags = ["cpu:4"],
 ) for src in _ROUNDTRIP_SOURCES]
 
-# One fixture list x both technology mappers: `prp-synth-<stem>` maps with ABC
-# and `prp-synth-<stem>-usyn` with pass.usyn (`--set synth.mapper=usyn`).
-# Adding a design still needs no runner or BUILD edit, and a new mapper is one
-# entry in _SYNTH_MAPPERS -- the equivalence claim is the mapper-agnostic part.
-_SYNTH_MAPPERS = [
-    ("", "abc"),
-    ("-usyn", "usyn"),
-]
+# One target per fixture runs every technology mapper in turn: `prp-synth-<stem>`
+# maps with ABC and then with pass.usyn (`--set synth.mapper=usyn`), compiling
+# the source once. Adding a design still needs no runner or BUILD edit, and a
+# new mapper is one more comma item in _SYNTH_MAPPERS -- the equivalence claim
+# is the mapper-agnostic part.
+_SYNTH_MAPPERS = "abc,usyn"
 
 [sh_test(
-    name = "prp-synth-%s%s" % (src.split("/")[-1].rsplit(".", 1)[0], suffix),
+    name = "prp-synth-%s" % src.split("/")[-1].rsplit(".", 1)[0],
     srcs = ["tests/integration.py"],
     args = [
         "synth",
         "$(location %s)" % src,
-        mapper,
+        _SYNTH_MAPPERS,
     ],
     data = [
         "tests/lec.py",
@@ -1885,7 +2072,7 @@ _SYNTH_MAPPERS = [
     ] + glob(["tests/abc/*"]),
     env_inherit = ["PATH"],
     tags = ["exclusive"],  # Serialize synthesis-bearing process trees.
-) for src in _SYNTH_SOURCES for suffix, mapper in _SYNTH_MAPPERS]
+) for src in _SYNTH_SOURCES]
 
 # Verilog/Pyrope LEC soundness cases use the same numbered-variant harness.
 [
@@ -1903,14 +2090,31 @@ _SYNTH_MAPPERS = [
     for src in _LEC_SOURCES
 ]
 
+# One target per `_LEC_GROUPS` entry: same script and data as `lec-<variant>`,
+# with each grouped base named so all of its variants run.
+[
+    sh_test(
+        name = "lec-group-%s" % group,
+        srcs = ["tests/prplec.py"],
+        args = ["$(location tests/equiv/lec/%s)" % base for base in bases],
+        data = [
+            "tests/lec.py",
+            "tests/prplib.py",
+            "//lhd",
+        ] + glob(["tests/equiv/lec/*"]),
+        tags = ["cpu:4"],
+    )
+    for group, bases in _LEC_GROUPS.items()
+]
+
 # The suite expands automatically as new fixtures arrive. Synthesis cases run
 # exclusively; ordinary proof and writer targets retain per-fixture isolation.
 test_suite(
     name = "integration",
     tests = [":prp-roundtrip-" + src.split("/")[-1][:-4] for src in _ROUNDTRIP_SOURCES] +
-            [":prp-synth-" + src.split("/")[-1].rsplit(".", 1)[0] + suffix
-             for src in _SYNTH_SOURCES
-             for suffix, _ in _SYNTH_MAPPERS] +
+            [":prp-synth-" + src.split("/")[-1].rsplit(".", 1)[0] for src in _SYNTH_SOURCES] +
             [":lec-" + src.split("/")[-1].rsplit(".", 1)[0] for src in _LEC_SOURCES] +
-            [":prp-lec-" + variant for variant in _PRPLEC_VARIANTS] + [":lec_harness"],
+            [":lec-group-" + group for group in _LEC_GROUPS] +
+            [":prp-lec-" + variant for variant in _PRPLEC_VARIANTS if variant.rsplit("_", 1)[0] not in _PRPLEC_GROUPED] +
+            [":prp-lec-" + base for base in _PRPLEC_GROUPED] + [":lec_harness"],
 )

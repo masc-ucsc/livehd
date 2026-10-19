@@ -73,12 +73,14 @@ run() {  # run <impl> [extra --set ...]; sets OUT and RC
 }
 ck() { if eval "$2"; then echo "ok: $1"; else echo "FAIL: $1 (rc=$RC)"; echo "$OUT" | grep "^lec" | tail -3; fail=1; fi; }
 
-run alt.v
+LEC_SAMPLE_TRACE=1 run alt.v
 ck "equivalent: TESTED-sampled, exit 0" '[ "$RC" -eq 0 ] && echo "$OUT" | grep -q "^lec: .m. TESTED-sampled("'
 n=$(echo "$OUT" | sed -n "s/^lec: .m. TESTED-sampled(\([0-9]*\)).*/\1/p" | head -1)
 ck "equivalent: the test level's 2048 vectors" '[ -n "$n" ] && [ "$n" -ge 2048 ]'
 ck "equivalent: traces simulated natively" 'echo "$OUT" | grep -q "trace(s) simulated over [0-9]* term node(s)"'
-ck "equivalent: the opcode field is decoded" 'echo "$OUT" | grep -qE "[1-9][0-9]* decoded input field\(s\)"'
+# Register-file addressing also exposes the rs/rd fields. Check the actual
+# opcode slice and its decoded values rather than an incidental field count.
+ck "equivalent: the opcode field is decoded" 'echo "$OUT" | grep -Fq "bits [0,+16): ff 1234 5a5a"'
 
 run bug.v
 ck "opcode bug at the default effort: REFUTED-cex, exit 10" '[ "$RC" -eq 10 ] && echo "$OUT" | grep -q "^lec: .m. REFUTED-cex"'

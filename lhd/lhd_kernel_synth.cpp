@@ -45,6 +45,7 @@
 #include <iterator>
 #include <map>
 #include <set>
+#include <sstream>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -118,14 +119,195 @@ livehd::placement::Options placement_options(const Options& opts) {
   if (mode != "full" && mode != "gp") {
     throw Lhd_error{"usage", "synth.place.mode must be full or gp", ""};
   }
-  out.full        = mode == "full";
-  out.utilization = number("place.utilization", "0.5");
-  out.aspect      = number("place.aspect", "1");
-  out.density     = number("place.density", "0.8");
-  out.iterations  = integer("place.iterations", "500");
-  out.bins        = integer("place.bins", "32");
-  out.threads     = integer("place.threads", "1");
-  const auto rc   = synth_set(opts, "place.wire_rc", "");
+  out.full                    = mode == "full";
+  out.fp_timing_interval      = static_cast<int>(integer("place.fp.timing_interval", "50"));
+  out.fp_timing_movement      = number("place.fp.timing_movement", "0");
+  out.fp_timing_after_density = truthy(synth_set(opts, "place.fp.timing_after_density", "false"));
+  out.timing_fraction         = number("place.timing_fraction", "0.2");
+  out.timing_max_weight       = number("place.timing_max_weight", "5");
+  out.timing_smoothing        = number("place.timing_smoothing", "0.5");
+  out.fp_timing_max_updates   = integer("place.fp.timing_max_updates", "10");
+  out.stop_overflow           = number("place.stop_overflow", "0.1");
+  out.initial_density_weight  = number("place.initial_density_weight", "0.01");
+  if (out.timing_max_weight < 1 || out.timing_max_weight > livehd::placement::max_net_weight || out.timing_smoothing < 0
+      || out.timing_smoothing > 1 || out.fp_timing_max_updates < 2 || out.stop_overflow < 0 || out.stop_overflow > 1
+      || out.initial_density_weight <= 0) {
+    throw Lhd_error{"usage", "invalid synth.place timing/density tuning controls", "check lhd describe synth for allowed values"};
+  }
+  if (out.timing_fraction <= 0 || out.timing_fraction > 1) {
+    throw Lhd_error{"usage", "synth.place.timing_fraction expects a fraction in (0,1]", "use 0.1 for 10% or 0.29 for 29%"};
+  }
+  out.snapshots = truthy(synth_set(opts, "place.snapshots", "false"));
+  out.cohesion  = number("place.cohesion", "0");
+  if (out.cohesion < 0) {
+    throw Lhd_error{"usage", "synth.place.cohesion must be nonnegative", ""};
+  }
+  out.utilization                = number("place.utilization", "0.30");
+  out.aspect                     = number("place.aspect", "1");
+  for (const auto& [key, frame] : {std::pair<const char*, std::vector<double>*>{"place.die", &out.die},
+                                   std::pair<const char*, std::vector<double>*>{"place.core", &out.core}}) {
+    const auto text = synth_set(opts, key, "");
+    if (text.empty()) {
+      continue;
+    }
+    std::string spaced = text;
+    std::replace(spaced.begin(), spaced.end(), ',', ' ');
+    std::istringstream words(spaced);
+    for (std::string word; words >> word;) {
+      char*        end   = nullptr;
+      const double value = std::strtod(word.c_str(), &end);
+      if (end != word.c_str() + word.size() || !std::isfinite(value)) {
+        throw Lhd_error{"usage", "invalid synth." + std::string(key) + ": " + text, "expected xl,yl,xh,yh in microns"};
+      }
+      frame->push_back(value);
+    }
+    if (frame->size() != 4 || (*frame)[2] <= (*frame)[0] || (*frame)[3] <= (*frame)[1] || (*frame)[0] < 0 || (*frame)[1] < 0) {
+      throw Lhd_error{"usage",
+                      "invalid synth." + std::string(key) + ": " + text,
+                      "expected xl,yl,xh,yh in microns with xh>xl, yh>yl"};
+    }
+  }
+  if (!out.floorplan.empty() && (!out.die.empty() || !out.core.empty())) {
+    throw Lhd_error{"usage", "synth.place.die/core cannot be combined with synth.place.floorplan", "supply one frame source"};
+  }
+  out.density                    = number("place.density", "0.5");
+  out.iterations                 = integer("place.iterations", "1500");
+  out.min_iterations             = integer("place.min_iterations", "40");
+  out.post_density_factor        = integer("place.post_density_factor", "4");
+  out.convergence_tolerance      = number("place.convergence_tolerance", "0.01");
+  out.detailed_iterations        = integer("place.detailed_iterations", "2");
+  out.density_upper_bound        = truthy(synth_set(opts, "place.density_upper_bound", "false"));
+  out.fixed_macro_overlap_weight = number("place.fixed_macro_overlap", "0");
+  if (out.min_iterations < 0 || out.post_density_factor < 0 || out.post_density_factor > 100 || out.convergence_tolerance < 0
+      || out.convergence_tolerance > 1 || out.detailed_iterations < 1 || out.detailed_iterations > 100
+      || out.fixed_macro_overlap_weight < 0) {
+    throw Lhd_error{"usage", "invalid synth.place cell-placement controls", ""};
+  }
+  out.bins                            = integer("place.bins", "64");
+  out.scale_macro_density             = truthy(synth_set(opts, "place.scale_macro_density", "true"));
+  out.automatic_bins                  = truthy(synth_set(opts, "place.auto_bins", "false"));
+  out.exact_macro_density             = truthy(synth_set(opts, "place.exact_macro_density", "true"));
+  out.adaptive_density                = truthy(synth_set(opts, "place.adaptive_density", "true"));
+  const auto unknown_const = synth_set(opts, "place.unknown_const", "error");
+  if (unknown_const != "error" && unknown_const != "zero") {
+    throw Lhd_error{"usage", "synth.place.unknown_const must be error or zero", ""};
+  }
+  out.unknown_const_zero              = unknown_const == "zero";
+  out.routability                     = truthy(synth_set(opts, "place.routability", "true"));
+  out.routability_charge_compensation = truthy(synth_set(opts, "place.routability_charge_compensation", "true"));
+  out.macro_overlap_weight            = number("place.macro_overlap", "50");
+  out.macro_jitter                    = number("place.macro_jitter", "0.01");
+  out.io_iterations                   = integer("place.io_iterations", "500");
+  out.schedule_iterations             = integer("place.schedule_iterations", "500");
+  if (out.macro_overlap_weight < 0 || out.macro_jitter < 0 || out.macro_jitter > .1 || out.schedule_iterations < 0
+      || out.io_iterations < 0) {
+    throw Lhd_error{"usage", "invalid synth.place repulsion controls", ""};
+  }
+  out.threads         = integer("place.threads", "1");
+  const auto halo     = synth_set(opts, "place.halo", "5");
+  char*      halo_end = nullptr;
+  out.halo_x          = std::strtod(halo.c_str(), &halo_end);
+  if (halo_end == halo.c_str()) {
+    throw Lhd_error{"usage", "invalid synth.place.halo", "expected nonnegative microns: H or X,Y"};
+  }
+  out.halo_y = out.halo_x;
+  if (*halo_end == ',') {
+    const auto* y = halo_end + 1;
+    out.halo_y    = std::strtod(y, &halo_end);
+    if (halo_end == y) {
+      throw Lhd_error{"usage", "invalid synth.place.halo", "expected nonnegative microns: H or X,Y"};
+    }
+  }
+  if (*halo_end != '\0' || !std::isfinite(out.halo_x) || !std::isfinite(out.halo_y) || out.halo_x < 0 || out.halo_y < 0) {
+    throw Lhd_error{"usage", "invalid synth.place.halo", "expected nonnegative microns: H or X,Y"};
+  }
+  out.final_cells                 = truthy(synth_set(opts, "place.final", "true"));
+  out.final_iterations            = integer("place.final.iterations", "0");
+  out.fp_place                    = truthy(synth_set(opts, "place.fp", "true"));
+  out.fp_snap_enabled             = truthy(synth_set(opts, "place.fp.snap", "true"));
+  out.fp_colors                   = truthy(synth_set(opts, "place.fp.colors", "false"));
+  out.repair_reset                = truthy(synth_set(opts, "place.repair.reset", "false"));
+  out.fp_iterations               = integer("place.fp.iterations", "1500");
+  out.fp_minimum                  = number("place.fp.minimum", "3000");
+  out.fp_min_copies               = integer("place.fp.min_copies", "4");
+  out.fp_attraction               = number("place.fp.attraction", "0.25");
+  out.fp_repulsion                = number("place.fp.repulsion", "5");
+  out.fp_anchor                   = number("place.fp.anchor", "0.25");
+  out.fp_snap.alignment_tolerance = number("place.fp.alignment", "1");
+  out.fp_snap.spacing_tolerance   = number("place.fp.spacing_tolerance", "0.25");
+  out.fp_snap.spacing_penalty     = number("place.fp.spacing_penalty", "0.02");
+  out.fp_snap.symmetry_tolerance  = number("place.fp.symmetry", "1");
+  out.fp_snap.max_displacement    = number("place.fp.max_displacement", "1");
+  if (out.fp_min_copies < 2) {
+    throw Lhd_error{"usage", "synth.place.fp.min_copies must be at least 2", "copies are counted separately per hierarchy parent"};
+  }
+  if (out.fp_minimum < 0 || out.fp_attraction <= 0 || out.fp_repulsion <= 0 || out.fp_anchor < 0
+      || out.fp_snap.alignment_tolerance < 0 || out.fp_snap.spacing_tolerance < 0 || out.fp_snap.spacing_penalty < 0
+      || out.fp_snap.symmetry_tolerance < 0 || out.fp_snap.max_displacement < 0) {
+    throw Lhd_error{"usage",
+                    "invalid synth.place.fp controls",
+                    "expected nonnegative values; attraction/repulsion must be positive"};
+  }
+  out.macro_mode = synth_set(opts, "place.macro", "none");
+  if (out.fp_place && out.macro_mode == "h2d") {
+    throw Lhd_error{"usage", "synth.place.fp requires the native plain placer", "use synth.place.macro=none"};
+  }
+  if (out.macro_mode != "none" && out.macro_mode != "h2d" && out.macro_mode != "r8h2" && out.macro_mode != "r8h3") {
+    throw Lhd_error{"usage", "synth.place.macro must be none, h2d, r8h2 or r8h3", ""};
+  }
+  out.macro_align_weight        = number("place.macro.align_weight", "0");
+  out.macro_align_sigma         = number("place.macro.align_sigma", "0");
+  out.macro_align_overlap_boost = number("place.macro.align_overlap_boost", "0");
+  out.macro_align_start         = integer("place.macro.align_start", "100");
+  out.macro_align_full          = integer("place.macro.align_full", "500");
+  out.macro_align_nearest       = truthy(synth_set(opts, "place.macro.align_nearest", "false"));
+  out.macro_snap                = truthy(synth_set(opts, "place.macro.snap", out.full ? "true" : "false"));
+  out.macro_snap_tolerance      = number("place.macro.snap_tolerance", "0.25");
+  out.macro_snap_weight         = integer("place.macro.snap_weight", "100");
+  if (out.macro_align_weight < 0 || out.macro_align_sigma < 0 || out.macro_align_overlap_boost < 0
+      || (out.macro_align_weight > 0 && out.macro_align_start >= out.macro_align_full) || out.macro_snap_tolerance < 0
+      || out.macro_snap_weight == 0) {
+    throw Lhd_error{"usage", "invalid synth.place.macro alignment/snap controls", "alignment requires start < full"};
+  }
+  if ((out.macro_align_weight > 0 || out.macro_snap) && out.macro_mode == "h2d") {
+    throw Lhd_error{"usage", "macro alignment/snap requires synth.place.macro=none, r8h2 or r8h3", ""};
+  }
+  if (out.macro_snap && !out.full) {
+    throw Lhd_error{"usage", "macro snapping requires full placement", "use synth.place.mode=full"};
+  }
+  if (out.macro_mode == "h2d" && !out.full) {
+    throw Lhd_error{"usage", "H2D requires synth.place.mode=full", "macro realization includes legal cell placement"};
+  }
+  namespace mp = DreamPlace::native::macro;
+  try {
+    for (const auto& spec : mp::parameter_specs()) {
+      const std::string key   = "place.macro." + std::string(spec.name);
+      auto              value = synth_set(opts, key, spec.default_value);
+      if (spec.kind == mp::ParameterKind::boolean) {
+        if (value != "true" && value != "false" && value != "1" && value != "0" && value != "on" && value != "off") {
+          throw std::invalid_argument("expected boolean for " + key);
+        }
+        value = truthy(value) ? "true" : "false";
+      }
+      mp::set_parameter(out.macro_parameters, spec.name, value);
+    }
+    // Explicit global placement grid/worker settings are inherited unless a
+    // corresponding H2D-specific setting was supplied.
+    if (!std::any_of(opts.sets.begin(), opts.sets.end(), [](const auto& s) { return s.first == "synth.place.macro.bins"; })) {
+      out.macro_parameters.bins = out.bins;
+    }
+    if (!std::any_of(opts.sets.begin(), opts.sets.end(), [](const auto& s) { return s.first == "synth.place.macro.threads"; })) {
+      out.macro_parameters.threads = out.threads;
+    }
+    out.macro_parameters.validate();
+  } catch (const std::invalid_argument& error) {
+    throw Lhd_error{"usage", "invalid synth.place.macro parameter", error.what()};
+  }
+  out.tech_rc_file = synth_set(opts, "place.tech_rc", "");
+  if (!out.tech_rc_file.empty()) {
+    check_inputs_exist({out.tech_rc_file});
+  }
+  const auto rc = synth_set(opts, "place.wire_rc", "");
   if (!rc.empty()) {
     char* end             = nullptr;
     out.resistance_ohm_um = std::strtod(rc.c_str(), &end);
@@ -342,17 +524,19 @@ void synth_command(Options& opts, Result& res) {
   // ---- the synth.* knobs --------------------------------------------------
   // (`pass.abc.library` is refused for every command by check_known_set_passes:
   // synth.liberty is the one spelling, so no two Liberty readers can disagree.)
-  const auto*       mapper           = find_mapper(synth_set(opts, "mapper", "abc"));  // validated by check_known_set_passes
-  const auto        mapper_method    = std::string{mapper->method};
-  const bool        mapped_output    = mapper_maps_cells(opts, mapper_method);
-  const std::string liberty          = mapped_output ? resolve_liberty(opts) : std::string{};
-  const bool        run_sta          = mapped_output && truthy(synth_set(opts, "opentimer", "true"));
-  const bool        run_place        = truthy(synth_set(opts, "place", "false"));
-  auto              place_options    = run_place ? placement_options(opts) : livehd::placement::Options{};
-  const bool        run_resynth      = truthy(synth_set(opts, "place.resynth", "false"));
-  const bool        run_resize       = truthy(synth_set(opts, "place.resize", "false"));
-  const bool        run_timing_place = truthy(synth_set(opts, "place.timing_driven", "false"));
-  const int         timing_rounds    = std::stoi(synth_set(opts, "place.timing_rounds", "3"));
+  const auto*       mapper        = find_mapper(synth_set(opts, "mapper", "abc"));  // validated by check_known_set_passes
+  const auto        mapper_method = std::string{mapper->method};
+  const bool        mapped_output = mapper_maps_cells(opts, mapper_method);
+  const std::string liberty       = mapped_output ? resolve_liberty(opts) : std::string{};
+  const bool        run_sta       = mapped_output && truthy(synth_set(opts, "opentimer", "true"));
+  const bool        run_place     = truthy(synth_set(opts, "place", "false"));
+  auto              place_options = run_place ? placement_options(opts) : livehd::placement::Options{};
+  const bool        run_resynth   = truthy(synth_set(opts, "place.resynth", "false"));
+  const bool        run_resize    = truthy(synth_set(opts, "place.resize", "false"));
+  // Timing weights are the normal full-placement objective. Synthesis-only
+  // and GP-only commands do not enter the full-placement refinement loop.
+  const bool run_timing_place = truthy(synth_set(opts, "place.timing_driven", run_place && place_options.full ? "true" : "false"));
+  const int  timing_rounds    = std::stoi(synth_set(opts, "place.timing_rounds", "3"));
   if (timing_rounds < 1 || timing_rounds > 8) {
     throw Lhd_error{"usage", "synth.place.timing_rounds expects 1..8", ""};
   }
@@ -454,10 +638,23 @@ void synth_command(Options& opts, Result& res) {
   const std::vector<Typed_path> user_emits     = opts.emits;
   const std::vector<Typed_path> user_emit_dirs = opts.emit_dirs;
   opts.emits.clear();
+  for (const auto& emit : user_emits) {
+    if (emit.kind == "diagnostics") {
+      opts.emits.push_back(emit);
+    }
+  }
   opts.emit_dirs = {
       Typed_path{"lg", lg_dir}
   };
-  compile_command(opts, res);
+  try {
+    compile_command(opts, res);
+  } catch (...) {
+    // Frontend failures still owe the caller its requested diagnostics emit.
+    // The temporary compile outputs must not hide that slot during unwinding.
+    opts.emits     = user_emits;
+    opts.emit_dirs = user_emit_dirs;
+    throw;
+  }
   opts.emits     = user_emits;
   opts.emit_dirs = user_emit_dirs;
   if (res.status != "pass") {
@@ -544,6 +741,7 @@ void synth_command(Options& opts, Result& res) {
                            : partition == "fine" ? std::string{"abc"}
                                                  : std::string{mapper->color_profile};
     merge_color_sets(opts, labels);
+    labels["liberty"] = liberty;
     if (labels["alg"] != "synth") {
       throw Lhd_error{"usage",
                       std::format("synth always colors with `synth` (got --set color.alg={})", labels["alg"]),
@@ -731,8 +929,9 @@ void synth_command(Options& opts, Result& res) {
       place_options.cache_dir = opts.workdir + "/place_cache";
     }
     unsigned    trial = 0;
-    // The placement phase that drives evaluate(): its run_step clears the crash
-    // context, which then names that phase again for the next placement call.
+    // The placement phase currently driving evaluate(): FP checkpoints call it
+    // from inside place(), and its run_step clears the crash context, which
+    // then names that phase again for the rest of the placement call.
     std::string phase_step;
     std::string phase_log;
     const auto  evaluate = [&](const livehd::placement::Result& state) {
@@ -751,8 +950,22 @@ void synth_command(Options& opts, Result& res) {
       set_crash_context(phase_step, phase_log);
       return livehd::placement::timing_feedback(slurp_json(report));
     };
+    // `synth.place.unknown_const=zero` is a refinement of a don't-care, so say how many bits it touched.
+    const auto note_unknown_tied = [](const livehd::placement::Result& r) {
+      if (r.unknown_const_tied > 0) {
+        livehd::diag::warn("synth", "unknown-const-tied-low", "unsupported")
+            .msg("{} physical net bit(s) driven by an unknown (X) constant were tied low (synth.place.unknown_const=zero)",
+                 r.unknown_const_tied)
+            .hint("the RTL assigns 'x on a path that reaches mapped logic; any value is a legal refinement")
+            .emit();
+      }
+    };
     hhds::GraphLibrary seed_library;
     auto               placement_input = *found;
+    if (run_timing_place && place_options.fp_timing_interval > 0) {
+      place_options.fp_evaluate = evaluate;
+      place_options.fp_resize   = run_resize;
+    }
     if (run_timing_place) {
       auto seed_options        = place_options;
       seed_options.timing_seed = true;
@@ -762,7 +975,9 @@ void synth_command(Options& opts, Result& res) {
       // Like pass.place below: DREAMPlace prints to stdout, which is reserved
       // for the result protocol, and a refusal is a placement failure.
       const auto  seed_log = next_log_path(opts, "pass.place.post_synth_timing");
-      set_crash_context("pass.place.post_synth_timing", seed_log);
+      phase_step = "pass.place.post_synth_timing";
+      phase_log  = seed_log;
+      set_crash_context(phase_step, phase_log);
       livehd::placement::Result seed;
       try {
         Stdout_to_log redirect(seed_log);
@@ -770,9 +985,15 @@ void synth_command(Options& opts, Result& res) {
       } catch (const std::exception& e) {
         throw Lhd_error{"unsupported", std::string("timing seed placement failed: ") + e.what(), "see " + seed_log};
       }
+      phase_step.clear();
+      phase_log.clear();
       set_crash_context({}, {});
+      note_unknown_tied(seed);
       const auto timing         = evaluate(seed);
-      place_options.net_weights = livehd::placement::timing_weights(*seed.parasitics, timing);
+      place_options.net_weights = livehd::placement::timing_weights(*seed.parasitics,
+                                                                    timing,
+                                                                    place_options.timing_fraction,
+                                                                    place_options.timing_max_weight);
       if (place_options.net_weights.empty()) {
         throw Lhd_error{"unsupported",
                         "post-synthesis timing has no constrained data nets for placement weighting",
@@ -782,7 +1003,9 @@ void synth_command(Options& opts, Result& res) {
       res.recipe_steps.emplace_back("pass.place.post_synth_timing");
     }
     const auto log = next_log_path(opts, "pass.place");
-    set_crash_context("pass.place", log);
+    phase_step = "pass.place";
+    phase_log  = log;
+    set_crash_context(phase_step, phase_log);
     livehd::placement::Result placed;
     try {
       Phase_timer   phase(res, "pass.place");
@@ -791,7 +1014,12 @@ void synth_command(Options& opts, Result& res) {
     } catch (const std::exception& e) {
       throw Lhd_error{"unsupported", std::string("placement failed: ") + e.what(), "see " + log};
     }
+    phase_step.clear();
+    phase_log.clear();
     set_crash_context({}, {});
+    if (!run_timing_place) {
+      note_unknown_tied(placed);  // the seed (above) already reported it when it ran
+    }
     res.recipe_steps.emplace_back("pass.place");
     if (run_resize || run_timing_place || run_resynth) {
       // Every round/trial below re-runs placement (and resynth a fresh ABC frame
@@ -812,7 +1040,8 @@ void synth_command(Options& opts, Result& res) {
           repaired = livehd::placement::repair_buffers(std::move(placed),
                                                        place_options,
                                                        evaluate,
-                                                       livehd::placement::Repair_scope::sizing);
+                                                       livehd::placement::Repair_scope::sizing,
+                                                       std::move(timed_placement.timing));
           placed   = std::move(repaired.placed);
           res.recipe_steps.emplace_back("pass.place.resize");
         }
@@ -821,7 +1050,8 @@ void synth_command(Options& opts, Result& res) {
           design_repaired = livehd::placement::repair_buffers(std::move(placed),
                                                               place_options,
                                                               evaluate,
-                                                              livehd::placement::Repair_scope::design);
+                                                              livehd::placement::Repair_scope::design,
+                                                              std::move(repaired.timing));
           placed          = std::move(design_repaired.placed);
           res.recipe_steps.emplace_back("pass.place.repair");
         }
@@ -849,6 +1079,9 @@ void synth_command(Options& opts, Result& res) {
     placed.graph->get_io()->get_library()->save(net_dir);
     for (const auto& path : place_options.lefs) {
       res.inputs.push_back(path);
+    }
+    if (!place_options.tech_rc_file.empty()) {
+      res.inputs.push_back(place_options.tech_rc_file);
     }
     if (!place_options.floorplan.empty()) {
       res.inputs.push_back(place_options.floorplan);

@@ -107,4 +107,76 @@ std::string cone_digest(const cvc5::Term& t);
 
 std::string_view cone_verdict_name(Cone_verdict v);
 
+// Sequential BMC on ABC (bmc3), a pre-pass for formal verify. One design cycle
+// is given as cvc5 terms: each register's free `cur` symbol and its `next`
+// term, plus Boolean property and environment terms over the same frame. ABC
+// unrolls it. The result is only used to SKIP cvc5 work: a property that cannot
+// fail in any of `frames` cycles is proven; one that first fails at cycle c
+// cannot fail before c. Free symbols other than `cur` and pinned inputs become
+// fresh inputs every cycle, and abstracted subterms only add behaviors, so both
+// answers stay sound.
+struct Seq_reg {
+  cvc5::Term cur;                    // the frame's free state symbol
+  cvc5::Term next;                   // next-state term over the frame
+  cvc5::Term init;                   // cycle-0 value: a bit-vector constant, or null = free
+  bool       hold_in_reset = false;  // keeps its value during the reset prologue
+};
+struct Seq_pin {  // an input driven by the reset prologue
+  cvc5::Term sym;
+  cvc5::Term in_reset;     // constant while reset is held
+  cvc5::Term after_reset;  // constant afterwards
+};
+struct Seq_prop {
+  cvc5::Term       holds;           // Boolean
+  std::vector<int> envs;            // indices into Seq_model::envs in force for it
+  bool             always = false;  // also checked during the reset prologue
+  // 0: first cycle where `holds` can fail (env held so far).
+  // 1: is there a trace whose envs hold in EVERY cycle (assume consistency)?
+  // 2: is there a trace failing `holds` at cycle `at` whose envs hold in every
+  //    cycle? If so it is returned as a witness.
+  int mode = 0;
+  int at   = -1;
+  // Cross-version reuse (mode 0; mode 2 saves the trace). `store` is this
+  // property's directory, kept from run to run; "" = none.
+  std::string store;
+  unsigned    reuse = 0;      // kReuseEquiv | kReuseCex | kReuseInv
+  bool        pdr   = false;  // also try an all-cycles proof (PDR)
+  std::string name;           // the property's label (debug replay)
+};
+constexpr unsigned kReuseEquiv = 1;  // old model sequentially equivalent: keep its answer
+constexpr unsigned kReuseCex   = 2;  // old counterexample still fails: refuted
+constexpr unsigned kReuseInv   = 4;  // old PDR invariant, still inductive: proven / seeds PDR
+struct Seq_mem {  // a small memory, blasted into one register per entry bit
+  cvc5::Term cur;   // the frame's array symbol (free initial contents)
+  cvc5::Term next;  // next-state array term over the frame
+};
+struct Seq_model {
+  std::vector<Seq_reg>    regs;
+  std::vector<Seq_mem>    mems;
+  std::vector<std::pair<cvc5::Term, cvc5::Term>> binds;  // symbol := term (asynchronous memory reads)
+  std::vector<Seq_pin>    pins;
+  std::vector<cvc5::Term> envs;  // Boolean, assumed every cycle
+  std::vector<Seq_prop>   props;
+  std::vector<cvc5::Term> watch;  // input symbols reported in a mode-2 witness
+  int                     reset_hold = 0;
+  int                     frames     = 0;
+  bool                    inexact    = false;  // some state is left free (memories): traces are not real
+  std::string             run_id;              // answers stored by this same run are not reused
+  int                     pdr_s      = 20;  // per-property PDR limit (seconds)
+  int                     sec_s      = 3;   // per-property equivalence limit (seconds)
+};
+struct Seq_answer {
+  int  frame = -2;     // kSeqUnknown; mode 0: first failing cycle or kSeqClean; modes 1/2: >= 0 found, kSeqClean none
+  bool exact = false;  // no abstracted subterm: a found trace is a real one
+  // mode 2: per cycle 0..at, per watch symbol, its value as MSB-first binary
+  std::vector<std::vector<std::string>> values;
+  bool        unbounded = false;  // mode 0 clean for every cycle (PDR, or reused)
+  std::string how;                // "" | equiv | cex | inv | pdr: what settled it
+};
+constexpr int kSeqClean   = -1;  // no failure in any of the frames
+constexpr int kSeqUnknown = -2;  // unsupported term, ABC limit, or deadline
+// One answer per property (see Seq_prop::mode).
+// Runs in a forked child under `deadline_ms` (<= 0: no clock).
+std::vector<Seq_answer> abc_seq_bmc(const Seq_model& m, int64_t deadline_ms);
+
 }  // namespace livehd::lec

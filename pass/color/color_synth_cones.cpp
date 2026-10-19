@@ -40,6 +40,7 @@
 #include <algorithm>
 #include <cstdint>
 #include <functional>
+#include <map>
 #include <print>
 #include <queue>
 #include <sstream>
@@ -103,14 +104,16 @@ constexpr uint32_t kPidUpdateEn = 13;
 enum class Forward_mode : uint8_t { off, pair, all };
 
 struct Cone_stats {
-  uint64_t roots = 0, r_din = 0, r_en = 0, r_mem = 0, r_sub = 0, r_cut = 0, r_out = 0, r_sweep = 0;
-  uint64_t truncated = 0;  // roots whose walk hit the max_gate budget
-  uint64_t merges = 0, refused = 0;
-  uint64_t max_pred = 0, over_max = 0;
-  uint64_t fwd_merges = 0, fwd_refused = 0, fwd_max_chain = 0;
-  uint64_t dead       = 0;                                  // dead combinational nodes (shape no region)
-  uint64_t ctrl_small = 0;                                  // control groups under min_nodes left to data
-  uint64_t absorbed = 0, absorb_left = 0, absorb_ctrl = 0;  // small data colors folded / left alone / into control
+  uint64_t              roots = 0, r_din = 0, r_en = 0, r_mem = 0, r_sub = 0, r_cut = 0, r_out = 0, r_sweep = 0;
+  uint64_t              truncated = 0;  // roots whose walk hit the max_gate budget
+  uint64_t              merges = 0, refused = 0;
+  uint64_t              max_pred = 0, over_max = 0;
+  uint64_t              fwd_merges = 0, fwd_refused = 0, fwd_max_chain = 0;
+  uint64_t              dead       = 0;                                  // dead combinational nodes (shape no region)
+  uint64_t              ctrl_small = 0;                                  // control groups under min_nodes left to data
+  uint64_t              absorbed = 0, absorb_left = 0, absorb_ctrl = 0;  // small data colors folded / left alone / into control
+  uint64_t              memory_rounds = 0, memory_merges = 0;
+  std::vector<uint64_t> memory_merges_per_round;
 };
 
 // One def's cone state. Every array is indexed by idx_of(); every phase after
@@ -122,25 +125,41 @@ struct Cones {
   bool         flop_to_flop = false;  // walks and the overlap merge ignore max_gate
   Forward_mode forward      = Forward_mode::off;
 
-  bool                  ctrl_cones    = false;
-  bool                  mux_in_data   = false;
+  bool                                                 ctrl_cones         = false;
+  bool                                                 memory_color_first = false;
+  bool                                                 mux_in_data        = false;
   // Per-cell overrides from `synth.stop_*` source attributes: -1 = the global
   // option applies. ov_mux: 1 = mux stays in the data cone (stop_mux=false),
   // 0 = mux is control-grouped (stop_mux=true). ov_arith: 1 = a wall, 0 = not.
-  std::vector<int8_t>   ov_mux;
-  std::vector<int8_t>   ov_arith;
-  bool                  any_mux_ctrl = false;  // some mux is control-grouped (global or per cell)
-  bool                  stop_arith    = true;
-  uint64_t              ctrl_max_gate = 0, ctrl_min_gate = 0;
-  uint32_t              min_nodes  = 0;  // no emitted color below this many nodes (0: no floor)
-  uint32_t              ctrl_count = 0, ctrl_mux_groups = 0, ctrl_enable_groups = 0;
-  uint64_t              ctrl_roots = 0, ctrl_empty = 0, ctrl_nodes = 0;
-  uint64_t              ctrl_largest = 0, ctrl_pred = 0;
+  std::vector<int8_t>                                  ov_mux;
+  std::vector<int8_t>                                  ov_arith;
+  bool                                                 any_mux_ctrl  = false;  // some mux is control-grouped (global or per cell)
+  bool                                                 stop_arith    = true;
+  uint64_t                                             ctrl_max_gate = 0, ctrl_min_gate = 0;
+  uint32_t                                             min_nodes  = 0;  // no emitted color below this many nodes (0: no floor)
+  uint32_t                                             ctrl_count = 0, ctrl_mux_groups = 0, ctrl_enable_groups = 0;
+  uint32_t                                             infrastructure_count = 0, clock_groups = 0, reset_groups = 0;
+  uint32_t                                             memory_last = 0;
+  std::vector<uint32_t>                                memory_colors;
+  std::vector<uint8_t>                                 memory_node, clock_node;
+  absl::flat_hash_map<uint32_t, std::vector<uint32_t>> memory_pids, clock_pids;
+  uint64_t                                             ctrl_roots = 0, ctrl_empty = 0, ctrl_nodes = 0;
+  uint64_t                                             ctrl_largest = 0, ctrl_pred = 0;
   // The control color a node belongs to, 0 when it belongs to none. A node has
   // at most one: the mint loop claims each index exactly once.
-  std::vector<uint32_t> ctrl_member;
+  std::vector<uint32_t>                                ctrl_member;
 
-  bool     is_ctrl(uint32_t c) const { return c != 0 && c <= ctrl_count; }
+  bool is_ctrl(uint32_t c) const { return c != 0 && c <= ctrl_count; }
+  bool is_infrastructure(uint32_t c) const { return c != 0 && c <= infrastructure_count; }
+  bool is_memory_color(uint32_t c) const { return memory_color_first && c > ctrl_count && c <= memory_last; }
+  bool memory_data_pin(uint32_t n, uint32_t pid) const {
+    if (static_cast<Ntype_op>(op[n]) == Ntype_op::Memory) {
+      const auto off = pid % Ntype::Memory_port_stride;
+      return off == kPidAddr || off == kPidDin || off == kPidUpdate;
+    }
+    const auto it = memory_pids.find(n);
+    return it != memory_pids.end() && std::ranges::find(it->second, pid) != it->second.end();
+  }
   // A color is SMALL when it has fewer than min_nodes nodes AND predicts at
   // most this much AIG. A few-node color can hold one heavy operation (a wide
   // multiplier a truncated walk left behind): it is a real region, and folding
@@ -150,10 +169,8 @@ struct Cones {
   bool     is_mux(uint32_t n) const {
     return n < op.size() && (static_cast<Ntype_op>(op[n]) == Ntype_op::Mux || static_cast<Ntype_op>(op[n]) == Ntype_op::Hotmux);
   }
-  [[nodiscard]] bool mux_data(uint32_t n) const {
-    return n < ov_mux.size() && ov_mux[n] >= 0 ? ov_mux[n] == 1 : mux_in_data;
-  }
-  bool control_cut(uint32_t n) const {
+  [[nodiscard]] bool mux_data(uint32_t n) const { return n < ov_mux.size() && ov_mux[n] >= 0 ? ov_mux[n] == 1 : mux_in_data; }
+  bool               control_cut(uint32_t n) const {
     const bool stop = n < ov_arith.size() && ov_arith[n] >= 0 ? ov_arith[n] == 1 : stop_arith;
     if (!stop) {
       return false;
@@ -359,6 +376,21 @@ struct Cones {
     return o == Ntype_op::Flop || o == Ntype_op::Latch || o == Ntype_op::Fflop;
   }
 
+  [[nodiscard]] uint8_t infrastructure_role(uint32_t n, uint32_t pid) const {
+    const auto o = static_cast<Ntype_op>(op[n]);
+    if ((is_register(n) && pid == 2) || (o == Ntype_op::Clock_cell && (pid == 2 || pid == 4))
+        || (o == Ntype_op::Memory && pid % Ntype::Memory_port_stride == 2)) {
+      return 1;
+    }
+    if ((is_register(n) && pid == 7) || (o == Ntype_op::Memory && pid % Ntype::Memory_port_stride == 14)) {
+      return 2;
+    }
+    if (const auto it = clock_pids.find(n); it != clock_pids.end() && std::ranges::find(it->second, pid) != it->second.end()) {
+      return 1;
+    }
+    return 0;
+  }
+
   // Is `m` a consumer of `n` that the FORWARD merge may follow? "merge forward
   // between Q and Din (not enable)": into a register, ONLY its `din` (pid 3)
   // qualifies -- enable, clock, reset, async and initial are the control pins
@@ -368,7 +400,8 @@ struct Cones {
   // any pin.
   [[nodiscard]] bool forward_edge_ok(uint32_t n, uint32_t m) const {
     for (uint32_t k = fin_start[m]; k < fin_start[m] + fin_cnt[m]; ++k) {
-      if (fin_drv[k] == n && (!is_register(m) || fin_pid[k] == kPidDin) && (!ctrl_cones || !control_pin(m, fin_pid[k]))) {
+      if (fin_drv[k] == n && (!is_register(m) || fin_pid[k] == kPidDin)
+          && (!ctrl_cones || (!control_pin(m, fin_pid[k]) && !infrastructure_role(m, fin_pid[k])))) {
         return true;  // reached through din
       }
     }
@@ -397,6 +430,103 @@ struct Cones {
 // Each family visits a node's fanin once. A later root meeting it unions with
 // its existing component instead of walking/copying the same closure again.
 // Mux and enable roots share one overlap graph. Control never joins data.
+void collect_infrastructure_roots(Cones& cn) {
+  if (!cn.ctrl_cones) {
+    return;
+  }
+  // Clock/reset roles come from state/control pin semantics, not signal names.
+  // Walk backward only: driven registers and memories never enter a group.
+  std::vector<uint32_t> member(cn.flag.size(), 0), parent{0};
+  std::vector<uint8_t>  kind{0};
+  const auto            find = [&](uint32_t c) {
+    while (parent[c] != c) {
+      parent[c] = parent[parent[c]];
+      c         = parent[c];
+    }
+    return c;
+  };
+  // A closure fed by a latch is a (possible) latch-based clock gate. It stays
+  // with its latch for clock-gate mapping (keep_clock_gates_whole and pass.abc
+  // gate recognition), so it is not claimed as a standalone clock/reset color.
+  std::vector<uint8_t> latch_fed(cn.flag.size(), 0);
+  for (auto i : cn.forward_idx) {
+    for (uint32_t k = cn.fin_start[i]; k < cn.fin_start[i] + cn.fin_cnt[i]; ++k) {
+      const auto d = cn.fin_drv[k];
+      if (static_cast<Ntype_op>(cn.op[d]) == Ntype_op::Latch || (!(cn.flag[d] & kLoopBreak) && latch_fed[d])) {
+        latch_fed[i] = 1;
+        break;
+      }
+    }
+  }
+  const auto walk = [&](uint32_t root, uint8_t role) {
+    if (!cn.traversable(root) || member[root] || latch_fed[root]) {
+      return;
+    }
+    const auto c = static_cast<uint32_t>(parent.size());
+    parent.push_back(c);
+    kind.push_back(role);
+    cn.work.assign(1, root);
+    while (!cn.work.empty()) {
+      const auto i = cn.work.back();
+      cn.work.pop_back();
+      if (!cn.traversable(i) || ((cn.flag[i] & kLoopBreak) && !cn.clock_node[i])) {
+        continue;
+      }
+      if (member[i]) {
+        const auto other = find(member[i]);
+        if (kind[other] == role) {
+          const auto self               = find(c);
+          parent[std::max(self, other)] = std::min(self, other);
+        }
+        continue;
+      }
+      member[i] = c;
+      for (uint32_t k = cn.fin_start[i]; k < cn.fin_start[i] + cn.fin_cnt[i]; ++k) {
+        if (!cn.fin_const[k]) {
+          cn.work.push_back(cn.fin_drv[k]);
+        }
+      }
+    }
+  };
+  for (uint8_t role : {uint8_t{1}, uint8_t{2}}) {
+    for (auto sink : cn.forward_idx) {
+      if (role == 1 && cn.clock_node[sink]) {
+        walk(sink, role);
+      }
+      for (uint32_t k = cn.fin_start[sink]; k < cn.fin_start[sink] + cn.fin_cnt[sink]; ++k) {
+        if (cn.infrastructure_role(sink, cn.fin_pid[k]) == role && !cn.fin_const[k]) {
+          walk(cn.fin_drv[k], role);
+        }
+      }
+    }
+  }
+  std::vector<uint32_t> colors(parent.size(), 0);
+  std::vector<uint64_t> weights(parent.size(), 0);
+  for (auto i : cn.forward_idx) {
+    if (!member[i]) {
+      continue;
+    }
+    const auto component = find(member[i]);
+    auto&      c         = colors[component];
+    auto&      weight    = weights[component];
+    const auto limit = cn.ctrl_max_gate ? (cn.max_gate ? std::min(cn.ctrl_max_gate, cn.max_gate) : cn.ctrl_max_gate) : cn.max_gate;
+    if (!c || (limit && weight && graph_util::sat_add(weight, cn.pred[i]) > limit)) {
+      c      = cn.begin_root(0);
+      weight = 0;
+      ++cn.ctrl_count;
+      ++(kind[component] == 1 ? cn.clock_groups : cn.reset_groups);
+    }
+    weight             = graph_util::sat_add(weight, cn.pred[i]);
+    cn.ctrl_largest    = std::max(cn.ctrl_largest, weight);
+    cn.ctrl_member[i]  = c;
+    cn.owner[i]        = c;
+    cn.flag[i]        &= ~kArithCut;
+    ++cn.ctrl_nodes;
+    cn.ctrl_pred = graph_util::sat_add(cn.ctrl_pred, cn.pred[i]);
+  }
+  cn.infrastructure_count = cn.ctrl_count;
+}
+
 void collect_control_roots(Cones& cn) {
   if (!cn.ctrl_cones) {
     return;
@@ -424,7 +554,8 @@ void collect_control_roots(Cones& cn) {
     while (!cn.work.empty()) {
       const auto i = cn.work.back();
       cn.work.pop_back();
-      if (!cn.traversable(i) || (cn.flag[i] & kLoopBreak) || cn.control_cut(i) || (cn.is_mux(i) && cn.mux_data(i))) {
+      if (!cn.traversable(i) || cn.is_ctrl(cn.owner[i]) || (cn.flag[i] & kLoopBreak) || cn.control_cut(i)
+          || (cn.is_mux(i) && cn.mux_data(i))) {
         continue;
       }
       if (member[i]) {
@@ -459,7 +590,7 @@ void collect_control_roots(Cones& cn) {
     }
   };
   for (auto sink : cn.forward_idx) {
-    if (cn.flag[sink] & kDead) {
+    if ((cn.flag[sink] & kDead) || cn.is_ctrl(cn.owner[sink])) {
       continue;  // a dead mux or register-less cone controls nothing
     }
     if (cn.is_mux(sink) && !cn.mux_data(sink) && cn.traversable(sink)) {
@@ -508,7 +639,7 @@ void collect_control_roots(Cones& cn) {
     // PI-driven data arms remain boundaries; no new groups are joined here.
     auto origin = member;
     for (auto i : cn.forward_idx) {
-      if (member[i] || !cn.traversable(i) || (cn.flag[i] & kLoopBreak)) {
+      if (member[i] || cn.is_infrastructure(cn.owner[i]) || !cn.traversable(i) || (cn.flag[i] & kLoopBreak)) {
         continue;
       }
       const auto op      = static_cast<Ntype_op>(cn.op[i]);
@@ -702,11 +833,52 @@ void collect_control_roots(Cones& cn) {
   }
 }
 
+void collect_memory_roots(Cones& cn) {
+  if (!cn.memory_color_first) {
+    return;
+  }
+  // Identical driver-pin bundles share one cone. Distinct primary inputs do
+  // not alias just because both cones contain no combinational gates.
+  std::map<std::vector<uint64_t>, uint32_t> identical;
+  for (auto i : cn.forward_idx) {
+    if (!cn.memory_node[i] || !cn.traversable(i)) {
+      continue;
+    }
+    std::vector<uint64_t> signature;
+    for (uint32_t k = cn.fin_start[i]; k < cn.fin_start[i] + cn.fin_cnt[i]; ++k) {
+      if (cn.memory_data_pin(i, cn.fin_pid[k])) {
+        signature.push_back(cn.fin_dpid[k]);
+      }
+    }
+    std::sort(signature.begin(), signature.end());
+    signature.erase(std::unique(signature.begin(), signature.end()), signature.end());
+    if (!signature.empty()) {
+      if (const auto it = identical.find(signature); it != identical.end()) {
+        cn.owner[i] = it->second;
+        continue;
+      }
+    }
+    const auto c = cn.begin_root(0);
+    cn.owner[i]  = c;
+    cn.memory_colors.push_back(c);
+    ++cn.st.r_mem;
+    if (!signature.empty()) {
+      identical.emplace(std::move(signature), c);
+    }
+    for (uint32_t k = cn.fin_start[i]; k < cn.fin_start[i] + cn.fin_cnt[i]; ++k) {
+      if (cn.memory_data_pin(i, cn.fin_pid[k])) {
+        cn.push_seed(cn.fin_drv[k]);
+      }
+    }
+  }
+  cn.memory_last = static_cast<uint32_t>(cn.root_start.size());
+}
+
 void collect_roots(Cones& cn) {
   const auto stride = static_cast<uint32_t>(Ntype::Memory_port_stride);
 
   for (uint32_t i : cn.forward_idx) {
-    if (!cn.traversable(i)) {
+    if (!cn.traversable(i) || cn.is_ctrl(cn.owner[i]) || (cn.memory_color_first && cn.memory_node[i])) {
       continue;
     }
     // An arithmetic cut owns its color OUTRIGHT and is pre-owned before any walk
@@ -994,6 +1166,9 @@ void merge_forward(Cones& cn, Region_graph& rg, Int_union_find& cuf) {
   // the register's own color removed. Recomputed on every pop: merges move ids.
   const auto targets = [&](uint32_t reg, std::vector<int>& out) {
     out.clear();
+    if (cn.is_memory_color(static_cast<uint32_t>(cuf.find(static_cast<int>(cn.owner[reg]))))) {
+      return;  // memory groups grow only in the round-robin stage
+    }
     const int self = rg.find(static_cast<int>(cn.owner[reg]) - 1);
     for (uint32_t k = cn.fout_start[reg]; k < cn.fout_start[reg] + cn.fout_cnt[reg]; ++k) {
       const uint32_t m = cn.fout[k];
@@ -1001,6 +1176,9 @@ void merge_forward(Cones& cn, Region_graph& rg, Int_union_find& cuf) {
         continue;
       }
       const int c = rg.find(static_cast<int>(cn.owner[m]) - 1);
+      if (cn.is_memory_color(static_cast<uint32_t>(cuf.find(static_cast<int>(cn.owner[m]))))) {
+        continue;
+      }
       if (c != self && std::find(out.begin(), out.end(), c) == out.end()) {
         out.emplace_back(c);
       }
@@ -1146,13 +1324,69 @@ void merge_colors(Cones& cn, uint32_t n_colors, Int_union_find& cuf) {
   }
   Region_graph rg(std::move(weight), {}, std::move(adj));
 
+  if (cn.memory_color_first) {
+    std::vector<uint64_t> served(n_colors, 0);
+    bool                  changed = true;
+    while (changed) {
+      changed = false;
+      ++cn.st.memory_rounds;
+      cn.st.memory_merges_per_round.push_back(0);
+      for (auto root : cn.memory_colors) {
+        const int a = rg.find(static_cast<int>(root) - 1);
+        if (served[a] == cn.st.memory_rounds) {
+          continue;
+        }
+        served[a]        = cn.st.memory_rounds;
+        int      best    = -1;
+        uint64_t overlap = 0, best_size = 0;
+        for (const auto& [b, ov] : rg.neighbours(a)) {
+          if (!ov || served[b] == cn.st.memory_rounds) {
+            continue;  // no shared AIG, or that memory group already had its turn
+          }
+          const auto size = graph_util::sat_add(rg.weight(a), rg.weight(b));
+          if ((!cn.flop_to_flop && size > cn.max_gate) || cn.is_ctrl(static_cast<uint32_t>(cuf.find(b + 1)))) {
+            continue;
+          }
+          if (best < 0 || ov > overlap || (ov == overlap && std::pair(size, b) < std::pair(best_size, best))) {
+            best      = b;
+            overlap   = ov;
+            best_size = size;
+          }
+        }
+        if (best < 0) {
+          continue;
+        }
+        const auto survivor = rg.merge(a, best);
+        cuf.merge(a + 1, best + 1);
+        served[survivor] = cn.st.memory_rounds;
+        ++cn.st.merges;
+        ++cn.st.memory_merges;
+        ++cn.st.memory_merges_per_round.back();
+        changed = true;
+      }
+    }
+  }
+
   std::priority_queue<Heap_entry, std::vector<Heap_entry>, Heap_cmp> heap;
   absl::flat_hash_map<uint64_t, uint32_t>                            ver;
   const auto pair_key = [](uint32_t a, uint32_t b) { return (static_cast<uint64_t>(a) << 32) | b; };
-  for (const auto& [key, ov] : cn.pair_w) {
-    const uint32_t a = static_cast<uint32_t>(key >> 32) - 1;
-    const uint32_t b = static_cast<uint32_t>(key & 0xffffffffU) - 1;
-    heap.push({ov, a, b, 0});
+  if (cn.memory_color_first) {
+    for (uint32_t a = 0; a < n_colors; ++a) {
+      if (!rg.alive(a) || cn.is_memory_color(static_cast<uint32_t>(cuf.find(a + 1)))) {
+        continue;
+      }
+      for (const auto& [b, ov] : rg.neighbours(a)) {
+        if (a < static_cast<uint32_t>(b) && !cn.is_memory_color(static_cast<uint32_t>(cuf.find(b + 1)))) {
+          heap.push({ov, a, static_cast<uint32_t>(b), 0});
+        }
+      }
+    }
+  } else {
+    for (const auto& [key, ov] : cn.pair_w) {
+      const uint32_t a = static_cast<uint32_t>(key >> 32) - 1;
+      const uint32_t b = static_cast<uint32_t>(key & 0xffffffffU) - 1;
+      heap.push({ov, a, b, 0});
+    }
   }
 
   std::vector<int> touched;
@@ -1171,6 +1405,9 @@ void merge_colors(Cones& cn, uint32_t n_colors, Int_union_find& cuf) {
     }
     const int a = static_cast<int>(e.a);
     const int b = static_cast<int>(e.b);
+    if (cn.is_memory_color(static_cast<uint32_t>(cuf.find(a + 1))) || cn.is_memory_color(static_cast<uint32_t>(cuf.find(b + 1)))) {
+      continue;
+    }
     if (!cn.flop_to_flop && graph_util::sat_add(rg.weight(a), rg.weight(b)) > cn.max_gate) {
       // Discard for good. Sizes only ever grow, so this pair can never fit
       // later; re-pushing it after an unrelated merge would only re-refuse it.
@@ -1264,8 +1501,8 @@ void absorb_small(Cones& cn, Int_union_find& cuf) {
     }
   }
   const auto small = [&](uint32_t c) {
-    return nodes[c] != 0 && ((cn.min_gate != 0 && pred[c] < cn.min_gate)
-                            || (nodes[c] < cn.min_nodes && pred[c] <= cn.small_limit()));
+    return nodes[c] != 0
+           && ((cn.min_gate != 0 && pred[c] < cn.min_gate) || (nodes[c] < cn.min_nodes && pred[c] <= cn.small_limit()));
   };
   // Contact between classes: (shared sub-cone weight, connecting edges). Keyed
   // by the class ids of the moment; a later merge is resolved through cuf.
@@ -1276,7 +1513,7 @@ void absorb_small(Cones& cn, Int_union_find& cuf) {
   for (const auto& [key, ov] : cn.pair_w) {
     const auto a = cls(static_cast<uint32_t>(key >> 32));
     const auto b = cls(static_cast<uint32_t>(key & 0xffffffffU));
-    if (a != b && data(a) && data(b)) {
+    if (a != b && data(a) && data(b) && !cn.is_memory_color(a) && !cn.is_memory_color(b)) {
       adj[a][b].overlap = graph_util::sat_add(adj[a][b].overlap, ov);
       adj[b][a].overlap = graph_util::sat_add(adj[b][a].overlap, ov);
     }
@@ -1292,7 +1529,8 @@ void absorb_small(Cones& cn, Int_union_find& cuf) {
         continue;
       }
       const auto b = cls(cn.owner[d]);
-      if (a != b && (data(a) || data(b))) {  // data-data, and data-control for the fallback
+      if (a != b && !cn.is_infrastructure(a) && !cn.is_infrastructure(b) && !cn.is_memory_color(a) && !cn.is_memory_color(b)
+          && (data(a) || data(b))) {
         ++adj[a][b].edges;
         ++adj[b][a].edges;
       }
@@ -1302,7 +1540,7 @@ void absorb_small(Cones& cn, Int_union_find& cuf) {
   using Entry = std::pair<uint32_t, uint32_t>;  // (nodes, class): smallest first, then lowest id
   std::priority_queue<Entry, std::vector<Entry>, std::greater<>> queue;
   for (uint32_t c = cn.ctrl_count + 1; c <= n_roots; ++c) {
-    if (cls(c) == c && small(c)) {
+    if (cls(c) == c && !cn.is_memory_color(c) && small(c)) {
       queue.emplace(nodes[c], c);
     }
   }
@@ -1372,18 +1610,19 @@ void absorb_small(Cones& cn, Int_union_find& cuf) {
 
 void Color_synth::label_cones(hhds::Graph* g) {
   Cones cn;
-  cn.g             = g;
-  cn.ctrl_cones    = opts.ctrl_cones;
-  cn.mux_in_data   = opts.mux_in_data;
-  cn.any_mux_ctrl  = !opts.mux_in_data;
-  cn.stop_arith    = opts.stop_arith;
-  cn.ctrl_max_gate = opts.ctrl_max_gate;
-  cn.ctrl_min_gate = opts.ctrl_min_gate;
-  cn.min_nodes     = opts.min_nodes;
-  cn.max_gate      = opts.max_gate;
-  cn.min_gate      = opts.min_gate;
-  cn.flop_to_flop  = opts.flop_to_flop;
-  cn.forward       = opts.forward == "pair" ? Forward_mode::pair : (opts.forward == "all" ? Forward_mode::all : Forward_mode::off);
+  cn.g                  = g;
+  cn.ctrl_cones         = opts.ctrl_cones;
+  cn.memory_color_first = opts.memory_color_first;
+  cn.mux_in_data        = opts.mux_in_data;
+  cn.any_mux_ctrl       = !opts.mux_in_data;
+  cn.stop_arith         = opts.stop_arith;
+  cn.ctrl_max_gate      = opts.ctrl_max_gate;
+  cn.ctrl_min_gate      = opts.ctrl_min_gate;
+  cn.min_nodes          = opts.min_nodes;
+  cn.max_gate           = opts.max_gate;
+  cn.min_gate           = opts.min_gate;
+  cn.flop_to_flop       = opts.flop_to_flop;
+  cn.forward = opts.forward == "pair" ? Forward_mode::pair : (opts.forward == "all" ? Forward_mode::all : Forward_mode::off);
 
   // ---- A1: preparation, one pass over the body ----------------------------
   uint32_t nmax = 4;
@@ -1394,7 +1633,9 @@ void Color_synth::label_cones(hhds::Graph* g) {
   }
   const size_t n = static_cast<size_t>(nmax) + 1;
   cn.flag.assign(n, 0);
-  if (cn.ctrl_cones) {
+  cn.memory_node.assign(n, 0);
+  cn.clock_node.assign(n, 0);
+  if (cn.ctrl_cones || cn.memory_color_first) {
     cn.ctrl_member.assign(n, 0);
   }
   cn.op.assign(n, static_cast<uint8_t>(Ntype_op::Invalid));
@@ -1421,8 +1662,31 @@ void Color_synth::label_cones(hhds::Graph* g) {
       } else if (is_arith_boundary(node)) {
         f |= kArithCut;
       }
-      const auto op = type_op_of(node);
-      cn.op[i]      = static_cast<uint8_t>(op);
+      const auto op     = type_op_of(node);
+      cn.op[i]          = static_cast<uint8_t>(op);
+      cn.memory_node[i] = op == Ntype_op::Memory;
+      cn.clock_node[i]  = op == Ntype_op::Clock_cell;
+      if (const auto io = node.get_subnode_io(); io) {
+        if (const auto it = opts.library_ports.find(std::string(io->get_name())); it != opts.library_ports.end()) {
+          cn.memory_node[i] = it->second.memory;
+          cn.clock_node[i]  = it->second.clock_gate;
+          for (const auto& name : it->second.data) {
+            const auto pid = io->get_input_port_id(name);
+            if (pid != hhds::Port_invalid) {
+              cn.memory_pids[i].push_back(static_cast<uint32_t>(pid));
+            }
+          }
+          for (const auto& name : it->second.clock) {
+            const auto pid = io->get_input_port_id(name);
+            if (pid != hhds::Port_invalid) {
+              cn.clock_pids[i].push_back(static_cast<uint32_t>(pid));
+            }
+          }
+        }
+      }
+      if (cn.memory_node[i]) {
+        f |= kLoopBreak;  // includes asynchronous-read Liberty RAMs
+      }
       if (node.attr(livehd::attrs::synth_policy).has()) {
         if (cn.ov_mux.empty()) {
           cn.ov_mux.assign(n, -1);
@@ -1430,14 +1694,13 @@ void Color_synth::label_cones(hhds::Graph* g) {
         }
         if (op == Ntype_op::Mux || op == Ntype_op::Hotmux) {
           if (const auto v = stop_override(node, "stop_mux"); v.has_value()) {
-            cn.ov_mux[i] = *v ? 0 : 1;
+            cn.ov_mux[i]    = *v ? 0 : 1;
             cn.any_mux_ctrl = cn.any_mux_ctrl || *v;
           }
-        } else if (const auto v = stop_override(
-                       node,
-                       (op == Ntype_op::LT || op == Ntype_op::GT)   ? "stop_cmp"
-                       : (op == Ntype_op::SHL || op == Ntype_op::SRA) ? "stop_shift"
-                                                                      : "stop_arith");
+        } else if (const auto v = stop_override(node,
+                                                (op == Ntype_op::LT || op == Ntype_op::GT)     ? "stop_cmp"
+                                                : (op == Ntype_op::SHL || op == Ntype_op::SRA) ? "stop_shift"
+                                                                                               : "stop_arith");
                    v.has_value()) {
           cn.ov_arith[i] = *v ? 1 : 0;
         }
@@ -1486,7 +1749,7 @@ void Color_synth::label_cones(hhds::Graph* g) {
       continue;
     }
     std::vector<uint32_t> group{i};
-    bool allowed = true;
+    bool                  allowed = true;
     for (const auto& [link, output] : chain->links) {
       (void)output;
       const auto j = idx_of(link);
@@ -1568,7 +1831,9 @@ void Color_synth::label_cones(hhds::Graph* g) {
   }
 
   // ---- A2/A3/A4 -----------------------------------------------------------
+  collect_infrastructure_roots(cn);
   collect_control_roots(cn);
+  collect_memory_roots(cn);
   collect_roots(cn);
   const uint32_t n_primary = static_cast<uint32_t>(cn.root_start.size());
   for (uint32_t c = cn.ctrl_count + 1; c <= n_primary; ++c) {
@@ -1585,7 +1850,9 @@ void Color_synth::label_cones(hhds::Graph* g) {
       continue;
     }
     if (std::ranges::any_of(group, [&](uint32_t member) {
-          return cn.owner[member] != 0 && cn.is_ctrl(cn.owner[member]) != cn.is_ctrl(cn.owner[shift]);
+          return cn.is_infrastructure(cn.owner[member])
+                 || (cn.owner[member] && cn.is_memory_color(static_cast<uint32_t>(cuf.find(static_cast<int>(cn.owner[member])))))
+                 || (cn.owner[member] != 0 && cn.is_ctrl(cn.owner[member]) != cn.is_ctrl(cn.owner[shift]));
         })) {
       continue;
     }
@@ -1597,6 +1864,8 @@ void Color_synth::label_cones(hhds::Graph* g) {
     for (uint32_t k = cn.fout_start[shift]; k < cn.fout_start[shift] + cn.fout_cnt[shift]; ++k) {
       const auto consumer = cn.fout[k];
       if (cn.traversable(consumer) && (cn.flag[consumer] & kConstMaskGet) != 0 && cn.owner[consumer] != 0
+          && !cn.is_infrastructure(cn.owner[consumer])
+          && !cn.is_memory_color(static_cast<uint32_t>(cuf.find(static_cast<int>(cn.owner[consumer]))))
           && cn.is_ctrl(cn.owner[consumer]) == cn.is_ctrl(cn.owner[shift])) {
         cuf.merge(static_cast<int>(cn.owner[shift]), static_cast<int>(cn.owner[consumer]));
       }
@@ -1692,7 +1961,7 @@ void Color_synth::label_cones(hhds::Graph* g) {
   keep_clock_gates_whole(g);
   const int n_colors = apply_coloring(g, flat_node2id, o, o.sizes);
 
-  if (cn.ctrl_cones) {
+  if (cn.ctrl_cones || cn.memory_color_first) {
     int base = 0;
     for (auto node : g->body().nodes()) {
       const auto i = idx_of(node);
@@ -1719,8 +1988,9 @@ void Color_synth::label_cones(hhds::Graph* g) {
       total_pred = graph_util::sat_add(total_pred, p);
     }
     auto info = std::format(
-        "\"ctrl_cones\":true,\"ctrl_colors\":[{}],\"ctrl_stats\":{{\"roots\":{},\"empty_roots\":{},\"nodes\":{},\"largest_pred_"
+        "\"ctrl_cones\":{},\"ctrl_colors\":[{}],\"ctrl_stats\":{{\"roots\":{},\"empty_roots\":{},\"nodes\":{},\"largest_pred_"
         "aig\":{},\"owned_pred_aig\":{},\"total_pred_aig\":{}}}",
+        cn.ctrl_cones,
         ids,
         cn.ctrl_roots,
         cn.ctrl_empty,
@@ -1734,6 +2004,22 @@ void Color_synth::label_cones(hhds::Graph* g) {
         cn.stop_arith,
         cn.ctrl_mux_groups,
         cn.ctrl_enable_groups);
+    info += std::format(",\"clock_groups\":{},\"reset_groups\":{}", cn.clock_groups, cn.reset_groups);
+    info += std::format(
+        ",\"memory_color_first\":{},\"memory_instances\":{},\"memory_input_cones\":{},\"memory_rounds\":{},\"memory_merges\":{}",
+        cn.memory_color_first,
+        std::count(cn.memory_node.begin(), cn.memory_node.end(), uint8_t{1}),
+        cn.memory_colors.size(),
+        cn.st.memory_rounds,
+        cn.st.memory_merges);
+    std::string merges_per_round;
+    for (const auto merges : cn.st.memory_merges_per_round) {
+      if (!merges_per_round.empty()) {
+        merges_per_round += ",";
+      }
+      merges_per_round += std::to_string(merges);
+    }
+    info += ",\"memory_merges_per_round\":[" + merges_per_round + "]";
     g->get_input_node().attr(livehd::attrs::ctrl_stats).set(info);
     if (opts.verbose || opts.sizes) {
       std::print(stderr, "[color.ctrl] {} {}\n", g->get_name(), info);

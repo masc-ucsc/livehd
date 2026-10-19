@@ -28,6 +28,10 @@ this file).
   task, grouped by topic (**LiveHD**, **Pyrope**, **Verilog**) and by Group *N*.
 - One file per task at `todo/<topic>/<id>.html`. A task's full design lives in its
   page; cross-task dependencies are visible via shared Group letters.
+- Generated results and reproduction artifacts (reports, plots, metrics, logs,
+  snapshots and benchmark outputs) belong under ignored `repros/`, never under
+  `todo/` or in Git. Task pages may link to these local artifacts; the links are
+  available only in a checkout containing the corresponding results.
 - **Lifecycle:** a task page is deleted the moment the *whole* task lands. This
   layer is strictly current work — it carries no history (git does).
 

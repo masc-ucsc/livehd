@@ -187,12 +187,14 @@ module sn_proc (input logic [3:0] x, output logic [3:0] o);
   src7 u_src (.k(o), .q(fb));
   always_comb begin                     // WRITER, RMW on nxt
     nxt.a = fb;
-    nxt.b = nxt.a ^ x;
+    nxt.b = nxt.a & x;
   end
 endmodule
 EOF
-# snk7 -> src7 -> always_comb -> snk7 is a GENUINE combinational loop (o reads
-# fb = o + 1), so pass.legalize reports it -- the one place loops are handled
+# snk7 -> src7 -> always_comb -> snk7 remains a genuine loop after cleanup:
+# o = fb ^ (fb & x), fb = o + 1. XOR in place of the AND would cancel both
+# copies of fb and reduce o to x, so it would not test loop rejection.
+# pass.legalize reports the real loop -- the one place loops are handled
 # (todo/livehd/legalize_acyclic.md). What must not happen is the wire
 # over-promotion this case guards: a self-loop surfaced as unresolved-cycle.
 proc_rc=0

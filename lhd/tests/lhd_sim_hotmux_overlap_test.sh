@@ -16,9 +16,18 @@ for backend in llvm slop; do
   eval "wait \"\${pid_${backend}}\"" || { echo "FAIL: $backend simulation failed" >&2; exit 1; }
 done
 
-# A crashing driver: trap at the top of the generated main(), then rerun.
-sed -i 's/^int main(int argc, char\*\* argv) {/&\n  __builtin_trap();/' "$W/slop/sim/drv.cpp"
-grep -q '__builtin_trap' "$W/slop/sim/drv.cpp"
+# Raise a deterministic signal: __builtin_trap is SIGTRAP on macOS/ARM and
+# SIGILL on other hosts, so it cannot pin one signal-reporting assertion.
+python3 - "$W/slop/sim/drv.cpp" <<'PYDRIVER'
+from pathlib import Path
+import sys
+path = Path(sys.argv[1])
+source = path.read_text()
+entry = 'int main(int argc, char** argv) {'
+assert entry in source, 'generated driver main was not found'
+source = source.replace(entry, entry + '\n  std::raise(SIGILL);', 1)
+path.write_text('#include <csignal>\n' + source)
+PYDRIVER
 if "$LHD" sim "$F" --workdir "$W/slop" --run-only --set sim.tune.backend=slop --set sim.tune.profile=off \
     --result-json "$W/trap.json" --diag-fmt pretty; then
   echo "FAIL: a trapping driver passed" >&2

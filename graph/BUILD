@@ -71,14 +71,30 @@ cc_library(
     "attr_carry_test",
     "graph_library_singleton_test",
     "inline_sub_test",
-    "cell_test",
     "loop_split_test",
     "node_count_test",
-    "node_util_smoke",
-    "ge_weight_smoke",
     "predict_abc_size_smoke",
-    "const_pool_smoke",
     "latch_contract_test",
     "occurrence_materialize_test",
     "port_reach_test",
 ]]
+
+# Small header-level graph helper checks in one binary (disjoint gtest suites,
+# each test opens its own uniquely named Hhds_graph_library): cell_test (Ntype
+# sink/name metadata), node_util_smoke (hotmux/mask/hier-name helpers),
+# const_pool_smoke (create_const pooling), ge_weight_smoke (node_util ge_weight).
+cc_test(
+    name = "graph_util_test",
+    srcs = [
+        "cell_test.cpp",
+        "const_pool_smoke.cpp",
+        "ge_weight_smoke.cpp",
+        "node_util_smoke.cpp",
+    ],
+    copts = COPTS,
+    deps = [
+        ":graph",
+        "@googletest//:gtest_main",
+        "@hhds//hhds:graph",
+    ],
+)

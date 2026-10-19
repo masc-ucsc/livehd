@@ -1,0 +1,203 @@
+/*
+:name: spec_clock_type_binding
+:type: simulation
+*/
+// Merged fixture: each section below is the original tests/sim fixture listed in its banner,
+// body unchanged (module and test names are unique across the sections).
+
+// ============================================================
+// from spec_clock_bind_any_name.prp
+// ============================================================
+// SPEC (clock lane): Clock/Reset bind by TYPE, whatever the port name.
+//   qa.md Appendix 1: "Clock/Reset bind by TYPE: a port `c:Clock` / `r:Reset` is
+//     the clock/reset; registers bind implicitly to the module's single
+//     Clock/Reset input (any name)."
+//   docs 04b: "Implicit reset: the module's single `Reset` input, whatever its name."
+// `zap:Reset` is the implicit reset of `c`: pulsing it at cycle 10 must clear
+// the counter (a name-based binder would ignore `zap`).
+pub mod spec_clock_bind_any_name(core:Clock, zap:Reset, en:Bool) -> (q:U8@[0]) {
+  reg c:U8 = 0
+  if en { wrap c = c + 1 }
+  q = c
+}
+
+test spec_clock_bind_any_name.reset_by_type {
+  mut t   = spec_clock_bind_any_name
+  mut g   = 0
+  mut bad = 0
+  tick 16 {
+    const r = clock < 2 or clock == 10
+    t.zap = r
+    t.en  = true
+    if r { g = 0 } else { g += 1 }
+    step
+    if t.q != g { bad += 1 }
+  }
+  puts("any_name: g={g} bad={bad}")
+  assert(bad == 0)
+  assert(g == 5)   // cleared at cycle 10, counted 11..15
+}
+
+// ============================================================
+// from spec_clock_clk_bool_is_data.prp
+// ============================================================
+// SPEC (clock lane): an input named `clk` that is not typed `Clock` is plain
+// data; the register is clocked by the minted `clock:Clock` instead.
+//   qa.md Appendix 1: "Name-based binding (clk/clock/rst/reset) is REMOVED."
+//   docs 04b: "an input named `clk`, `clock`, `rst` or `reset` that is not typed
+//     `Clock`/`Reset` (a `Bool`, a `U1`) is plain data."
+//   docs 04b: "A module with registers and no `Clock` (or `Reset`) input gets
+//     one minted: `clock:Clock` (or `reset:Reset`)."
+// `clk` is held false: if it clocked `c` the counter would never move.
+pub mod spec_clock_clk_bool_is_data(clk:Bool, en:Bool) -> (q:U8@[0], p:Bool@[0]) {
+  reg c:U8 = 0
+  if en { wrap c = c + 1 }
+  q = c
+  p = clk
+}
+
+test spec_clock_clk_bool_is_data.minted_clock {
+  mut t = spec_clock_clk_bool_is_data
+  mut last = 0
+  tick 6 {
+    t.clk = false
+    t.en  = true
+    step
+    last = t.q
+  }
+  puts("clk_bool: q={last}")
+  assert(t.p == false)
+  assert(last == 6)
+}
+
+// ============================================================
+// from spec_clock_rst_bool_is_data.prp
+// ============================================================
+// SPEC (clock lane): name-based binding is REMOVED -- an input named `rst`
+// that is not typed `Reset` is plain data and never resets a register.
+//   qa.md Appendix 1: "Name-based binding (clk/clock/rst/reset) is REMOVED."
+//   docs 04b: "There is no name-based binding: an input named `clk`, `clock`,
+//     `rst` or `reset` that is not typed `Clock`/`Reset` (a `Bool`, a `U1`) is
+//     plain data."
+// `rst` is held true the whole run and also read as data (`p`); the counter
+// must still count every cycle (its reset is the minted `reset:Reset`, never
+// driven here).
+pub mod spec_clock_rst_bool_is_data(clk:Clock, rst:Bool, en:Bool) -> (q:U8@[0], p:Bool@[0]) {
+  reg c:U8 = 0
+  if en { wrap c = c + 1 }
+  q = c
+  p = rst
+}
+
+test spec_clock_rst_bool_is_data.not_a_reset {
+  mut t = spec_clock_rst_bool_is_data
+  mut last = 0
+  tick 8 {
+    t.rst = true
+    t.en  = true
+    step
+    last = t.q
+  }
+  puts("rst_bool: q={last}")
+  assert(t.p == true)
+  assert(last == 8)
+}
+
+// ============================================================
+// from spec_clock_drive_clock_port.prp
+// ============================================================
+// SPEC (clock lane): in synthesizable logic a Clock may drive another Clock
+// port -- a child's `Clock` input bound explicitly, or a `Clock` output.
+//   qa.md Appendix 6: "In synthesizable logic a Clock may only drive clock
+//     pins, a Clock_cell (ICG gating with `en`) or another Clock port."
+//   docs 04b: "it only drives clock pins, a `Clock_cell` (clock gating), or
+//     another `Clock` port"
+mod cnt(c:Clock, en:Bool) -> (q:U8@[0]) {
+  reg n:U8 = 0
+  if en { wrap n = n + 1 }
+  q = n
+}
+pub mod spec_clock_drive_clock_port(ck:Clock, en:Bool) -> (q:U8@[0], co:Clock@[0]) {
+  const x = cnt(c=ck, en=en)
+  q  = x.q
+  co = ck
+}
+
+test spec_clock_drive_clock_port.explicit {
+  mut t = spec_clock_drive_clock_port
+  tick 5 {
+    t.en = true
+    step
+  }
+  assert(t.q == 5)
+}
+
+// ============================================================
+// from spec_clock_test_two_clocks_autowire.prp
+// ============================================================
+// SPEC (clock lane): each `tick` block mints ONE `clock:Clock`, and every
+// unbound `Clock` input of a DUT stepped in that tick is auto-wired to it (the
+// test is a caller with a single Clock).
+//   qa.md Appendix 8: "Test clock: each `tick` block gets a MINTED
+//     `clock:Clock` ... the DUT instances stepped inside that tick auto-wire
+//     their single Clock input to it"
+//   qa.md Appendix 7: "an unbound child `Clock`/`Reset` input is auto-wired to
+//     the caller's single Clock/Reset"
+//   docs 05b "Running cycles": "The DUT instances stepped inside the tick
+//     auto-wire their unbound `Clock` input to it, like any instance whose
+//     caller has a single Clock."
+// CONTRADICTION NOTE: the Q38 option text says instead "A DUT with 2+ Clocks
+// needs explicit Clocks declared in the test and bound by name" (then this
+// test must be a compile error). Either way both clocks may not silently stay
+// still. This fixture encodes the docs 05b reading.
+pub mod spec_clock_test_two_clocks_autowire(clk_a:Clock, clk_b:Clock, rst:Reset, a:U8, b:U8) -> (qa:U8@[0], qb:U8@[0]) {
+  reg ra:U8:[clock_pin=clk_a] = 0
+  reg rb:U8:[clock_pin=clk_b] = 0
+  if a != 0 { ra = a }
+  if b != 0 { rb = b }
+  qa = ra
+  qb = rb
+}
+
+test spec_clock_test_two_clocks_autowire.both_tick {
+  mut t   = spec_clock_test_two_clocks_autowire
+  mut bad = 0
+  tick 4 {
+    t.rst = false
+    t.a   = 3 + clock
+    t.b   = 7 + clock
+    step
+    if t.qa != 3 + clock { bad += 1 }
+    if t.qb != 7 + clock { bad += 1 }
+  }
+  assert(bad == 0)
+}
+
+// ============================================================
+// from spec_clock_debug_view_mod.prp
+// ============================================================
+// SPEC (clock lane): the numeric view of a Clock (its simulation cycle count)
+// is legal in debug contexts: `puts` and `assert` inside a `mod` body.
+//   qa.md Appendix 6: "in simulation it is a CYCLE counter (rising edges), so
+//     `clock < 1000` works -- but the numeric view of a Clock is legal ONLY in
+//     debug contexts (test blocks, puts, assert/cassert)."
+//   docs 07-typesystem cnt8 example:
+//     "puts(\"cycle {c}: cnt={cnt}\")           // OK: debug-only cycle count of 'c'"
+//   ruling 55: "`assert(clk < 1000)` / `puts(\"{c}\")` in a mod body are LEGAL."
+pub mod spec_clock_debug_view_mod(c:Clock, r:Reset, en:Bool) -> (q:U8@[0]) {
+  reg cnt:U8 = 0
+  if en { wrap cnt = cnt + 1 }
+  q = cnt
+  puts("cycle {c}: cnt={cnt}")
+  assert(c < 1000)
+}
+
+test spec_clock_debug_view_mod.runs {
+  mut t = spec_clock_debug_view_mod
+  tick 6 {
+    t.r  = clock < 1
+    t.en = true
+    step
+  }
+  assert(t.q == 5)
+}

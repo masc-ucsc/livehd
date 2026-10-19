@@ -143,6 +143,9 @@ int main(int argc, char** argv) {
     // (the graph library's own load() is lazy: see "lec.load", ~0.1 ms). Timed
     // inline rather than with Phase_timer, which lives in the kernel-internal
     // header; init_engine() is pass registration only and stays in the residual.
+    // The phase is also a BUDGET entry: `lhd lec` charges it to formal.timeout
+    // (the whole run's wall budget; lhd_kernel_formal.cpp, run_deadline), so
+    // keep its name and keep it recorded before run_engine_command.
     {
       const auto t0                                      = std::chrono::steady_clock::now();
       res.run_id                                         = lhd::compute_run_id(opts);

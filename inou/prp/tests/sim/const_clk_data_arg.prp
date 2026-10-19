@@ -6,7 +6,7 @@
 // User ruling 2026-09-28 (27), ruling 52 (clocks bind BY TYPE): a value named
 // `clk`/`clock` that is not typed `Clock` is just data. Binding a constant to
 // an input with that name is NOT an error; binding one to a `Clock` input is
-// (errors/clkrst_const_into_clock.prp).
+// (errors/child_clock_const_bind.prp).
 //   * cda_add:  a `comb` that reads its `clk` as a data bit.
 //   * cda_pass: a `mod` whose `clk` input clocks nothing (no regs).
 // Before the fix the cda_pass call failed "clock input `clk` of `cda_pass` is

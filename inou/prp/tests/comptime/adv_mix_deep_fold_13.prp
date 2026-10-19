@@ -1,12 +1,14 @@
 /*
 :name: adv_mix_deep_fold_13
 :type: comptime
-:verifier_pass: 5
+:verifier_pass: 10
 :verifier_fail: 0
 */
 
 // Power-of-two literal modifiers K/M/G/T, per 02-basics.md:
 //   1K == 1024, 1M == 1024*1024, 1G == 1024^3, 1T == 1024^4
+// (merged with the former adv_cmp_bool_19, adv_int_bigprec_04 and doc_basic1:
+// the chained comparison, the explicit decimal values and the 4K case.)
 const a = 1K
 cassert(a == 1024)
 
@@ -22,3 +24,12 @@ cassert(d == 1024 * 1024 * 1024 * 1024)
 // Mixed power-of-two modifiers in one chained expression.
 const e = 2K + 3M + 1G
 cassert(e == ((2 * 1024) + (3 * 1024 * 1024)) + (1024 * 1024 * 1024))
+
+// chained comparison over the modifiers (was adv_cmp_bool_19)
+cassert(1K < 1M < 1G < 1T)
+
+// explicit decimal values and a multiple (was adv_int_bigprec_04)
+cassert(1M == 1048576)
+cassert(1G == 1073741824)
+cassert(1T == 1099511627776)
+cassert(4K == 4096)

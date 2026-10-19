@@ -661,8 +661,8 @@ class PrpRunner:
         # Every equivalence pair uses native Slang and the default LEC solver.
         # A -bitfuzz netlist identical to the plain one leaves nothing new for
         # lgcheck (it reads the two Verilog TEXTS and takes no bitfuzz flag):
-        # the plain target runs every yosys-side check on these same bytes, so
-        # this variant keeps only the fuzzed native proof.
+        # the plain leg runs every yosys-side check on these same bytes, so
+        # the fuzzed leg keeps only the fuzzed native proof.
         plain_twin = self._bitfuzz_matches_plain(tmp_dir, test, impl, safe_name)
         extra_sets = self._extra_sets(test)
         if plain_twin:
@@ -711,10 +711,10 @@ class PrpRunner:
         # The SECOND, independent opinion on the same pair (`:yosys_lec: false`
         # opts a pair out). See run_yosys_lec. Not twice: a pair whose `lhd lec`
         # already ran lgcheck (`:set: formal.solver=lgyosys`, which must agree),
-        # or a -bitfuzz netlist the plain target already cross-checked.
+        # or a -bitfuzz netlist the plain leg already cross-checked.
         if plain_twin:
             print('{} - lgyosys - skipped (bitfuzz impl.v is byte-identical to the plain compile, '
-                  'whose target runs the same cross-check)'.format(name))
+                  'whose leg runs the same cross-check)'.format(name))
         elif 'formal.solver=lgyosys' in self._extra_sets(test):
             print('{} - lgyosys - skipped (formal.solver=lgyosys: lhd lec already ran lgcheck on this pair)'.format(name))
         elif self.run_yosys_lec(test, impl, pyrope_top, gold_abs, verilog_top, odir, expect):

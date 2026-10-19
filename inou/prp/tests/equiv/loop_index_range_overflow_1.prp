@@ -1,0 +1,4 @@
+/*
+:name: loop_index_range_overflow_1
+:set: compile.unroll=true
+*/

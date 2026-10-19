@@ -52,6 +52,7 @@ TEST(AttrCarry, EveryNodeAttributeSurvivesARebuild) {
   src.attr(la::ctrl_stats).set(std::string{"ctrl_stats_blob"});
   src.attr(la::synth_region).set(std::string{"reg_A"});
   src.attr(la::synth_region_id).set(uint32_t{11});
+  src.attr(la::synth_color_group).set(std::string{"color_group_A"});
   src.attr(la::synth_policy).set(std::string{"color=ex0"});
   src.attr(la::resynth).set(la::resynth_t::value_type{});
   src.attr(la::native_comb_boundary).set(la::native_comb_boundary_t::value_type{});
@@ -75,7 +76,7 @@ TEST(AttrCarry, EveryNodeAttributeSurvivesARebuild) {
   src.attr(la::legalize_inlined).set(std::string{"callee.split"});
   src.attr(la::comb_reach).set(std::string{"s 0 1\no 2 0\n"});
   gu::set_match(src, 9);  // the NODE overload of the dual-role `match`
-  static_assert(kNodeTagsStamped == 31, "a node-kind tag was added to LIVEHD_FOR_EACH_ATTR_TAG: stamp and check it here");
+  static_assert(kNodeTagsStamped == 32, "a node-kind tag was added to LIVEHD_FOR_EACH_ATTR_TAG: stamp and check it here");
 
   gu::carry_node_attrs(src, dst);
 
@@ -87,6 +88,7 @@ TEST(AttrCarry, EveryNodeAttributeSurvivesARebuild) {
   EXPECT_EQ(dst.attr(la::ctrl_stats).get(), "ctrl_stats_blob");
   EXPECT_EQ(dst.attr(la::synth_region).get(), "reg_A");
   EXPECT_EQ(dst.attr(la::synth_region_id).get(), 11u);
+  EXPECT_EQ(dst.attr(la::synth_color_group).get(), "color_group_A");
   EXPECT_EQ(dst.attr(la::synth_policy).get(), "color=ex0");
   EXPECT_TRUE(dst.attr(la::resynth).has());
   EXPECT_TRUE(dst.attr(la::native_comb_boundary).has());
@@ -163,6 +165,7 @@ TEST(AttrCarry, AbsentAttributesAreNotMaterialized) {
   EXPECT_EQ(dst.attr(la::color).get(), 4);
   EXPECT_FALSE(dst.attr(la::critical).has());
   EXPECT_FALSE(dst.attr(la::sta).has());
+  EXPECT_FALSE(dst.attr(la::synth_color_group).has());
   EXPECT_FALSE(dst.attr(la::ctrl_members).has());
   EXPECT_FALSE(dst.attr(la::ctrl_stats).has());
   EXPECT_FALSE(dst.attr(hhds::attrs::name).has());

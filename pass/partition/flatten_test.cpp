@@ -1,6 +1,7 @@
 // This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 #include "flatten.hpp"
 
+#include <map>
 #include <stdexcept>
 #include <vector>
 
@@ -59,8 +60,8 @@ protected:
 
 TEST_F(FlattenAdmission, PhysicalNamesRetainTransparentInstanceScopes) {
   invert.set_name("same_leaf");
-  auto root = make_graph(source, "physical_root");
-  auto left = instance(*root, child->get_io());
+  auto root  = make_graph(source, "physical_root");
+  auto left  = instance(*root, child->get_io());
   auto right = instance(*root, child->get_io());
   left.get_master_node().set_name("__flat___left");
   right.get_master_node().set_name("__flat___right");
@@ -76,6 +77,33 @@ TEST_F(FlattenAdmission, PhysicalNamesRetainTransparentInstanceScopes) {
   }
   std::sort(names.begin(), names.end());
   EXPECT_EQ(names, (std::vector<std::string>{"__flat___left.same_leaf", "__flat___right.same_leaf"}));
+}
+
+TEST_F(FlattenAdmission, SynthesisColorGroupsAreScopedPerPhysicalInstance) {
+  for (auto node : child->body().nodes()) {
+    if (!gu::is_builtin_node(node)) {
+      node.attr(livehd::attrs::synth_color_group).set(std::string("unit:color:1"));
+    }
+  }
+  unsigned index = 0;
+  for (auto node : top->body().nodes()) {
+    if (gu::type_op_of(node) == Ntype_op::Sub) {
+      node.set_name(index++ ? "right" : "left");
+    }
+  }
+  hhds::GraphLibrary destination;
+  const auto         flat = flatten_hierarchy(top.get(), &destination, "physical_colors", nullptr, false, {}, {}, true);
+  ASSERT_TRUE(flat);
+  std::map<std::string, unsigned> groups;
+  for (auto node : flat->body().nodes()) {
+    if (auto group = node.attr(livehd::attrs::synth_color_group); group.has()) {
+      ++groups[std::string(group.get())];
+    }
+  }
+  EXPECT_EQ(groups.size(), 2);
+  EXPECT_EQ(groups["left.unit:color:1"], 2);
+  EXPECT_EQ(groups["right.unit:color:1"], 2);
+  EXPECT_EQ(invert.attr(livehd::attrs::synth_color_group).get(), "unit:color:1");
 }
 
 TEST_F(FlattenAdmission, WideInputsKeepTheirPortsAndInstanceIdentity) {

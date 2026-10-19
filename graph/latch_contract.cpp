@@ -1288,8 +1288,20 @@ uint8_t values_with_root(const Pin& p, const Pin& root, bool level, int depth, c
     if (op == Ntype_op::Ror) {
       // Reduce-OR of ONE bit is that bit. Wider operands genuinely reduce, so
       // they are not a pass-through and are left to kAny.
-      const auto a = gu::get_driver_of_sink_name(n, "a");
-      if (!a.is_invalid() && gu::bits_of(a) == 1) {
+      //
+      // Ror's operand is the BANKED sink "as" (graph/cell.hpp: one bank, operand
+      // k at pid k), not "a". Looking "a" up resolved to pid 0 only by the
+      // first-char fast path and tripped get_sink_pid's name assert in dbg.
+      // Read the bank the same way the And/Or rule above does, and pass
+      // through only a single one-bit operand: several operands reduce
+      // together, which is not a pass-through either.
+      Pin a;
+      int n_ops = 0;
+      for (const auto& in : gu::inp_sink_drivers(n)) {
+        a = in.driver;
+        ++n_ops;
+      }
+      if (n_ops == 1 && !a.is_invalid() && gu::bits_of(a) == 1) {
         return values_with_root(a, root, level, depth + 1, assume);
       }
       return kAny;

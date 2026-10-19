@@ -1,0 +1,215 @@
+/*
+:name: conditional_call_lane
+:type: simulation
+*/
+// Merged fixture: each section below is the original tests/sim fixture listed in its banner,
+// body unchanged (module and test names are unique across the sections).
+
+// ============================================================
+// from conditional_latch_call.prp
+// ============================================================
+
+mod conditional_latch_inner(gate:Bool, d:U8) -> (q:U8@[0]) {
+  reg l:U8:[latch=true]
+  q = l
+  if gate {
+    l = d
+  }
+}
+
+pub mod conditional_latch_top(active:Bool, gate:Bool, d:U8) -> (q:U8@[0]) {
+  q = 0
+  if active {
+    q = conditional_latch_inner(gate=gate, d=d)
+  }
+}
+
+test conditional_latch_top.activation_holds_latch {
+  mut dut = conditional_latch_top
+  mut bad = 0
+  tick 5 {
+    dut.active = (clock == 0) or (clock >= 3)
+    dut.gate = true
+    dut.d = 10 + clock
+    step
+    if clock == 0 {
+      if dut.q != 10 { bad = bad + 1 }
+    } elif clock == 1 or clock == 2 {
+      if dut.q != 0 { bad = bad + 1 }
+    } else {
+      if dut.q != 10 + clock { bad = bad + 1 }
+    }
+  }
+  assert(bad == 0, "inactive conditional calls mask output and hold latch state")
+}
+
+// ============================================================
+// from conditional_nil.prp
+// ============================================================
+
+// Give memory a known value before reset: an uninitialized memory must retain
+// it, while the ZERO=true variation must reset it. No random power-on value
+// is assumed, and the same assertions exercise both nil spellings.
+mod explicit_nil(clk:Clock, reset:Reset, address:U2, we:Bool, data:U8) -> (value:U8@[]) {
+  reg memory:[4]U8:[ordering="old"] = nil
+  if we { memory[address] = data }
+  value = memory[address]
+}
+
+mod conditional_memory<ZERO=false>(clk:Clock, reset:Reset, address:U2, we:Bool, data:U8) -> (value:U8@[]) {
+  reg memory:[4]U8:[ordering="old"] = if ZERO { 0 } else { nil }
+  if we { memory[address] = data }
+  value = memory[address]
+}
+
+mod conditional_false(clk:Clock, reset:Reset, address:U2, we:Bool, data:U8) -> (value:U8@[]) {
+  value = conditional_memory<ZERO=false>(clk=clk, reset=reset, address=address, we=we, data=data)
+}
+
+mod conditional_true(clk:Clock, reset:Reset, address:U2, we:Bool, data:U8) -> (value:U8@[]) {
+  value = conditional_memory<ZERO=true>(clk=clk, reset=reset, address=address, we=we, data=data)
+}
+
+// Reset clears one memory address per cycle; hold it for all four addresses.
+test conditional_nil.explicit_holds {
+  mut dut = explicit_nil
+  mut cycle = 0
+  tick 8 {
+    dut.address = 2
+    dut.data = 0xa5
+    dut.we = cycle == 1
+    dut.reset = cycle >= 3 and cycle < 7
+    step
+    if cycle == 1 or cycle == 2 {
+      assert(dut.value == 0xa5, "write before reset")
+    } elif cycle >= 6 {
+      assert(dut.value == 0xa5, "reset and release must respect the initializer")
+    }
+    cycle += 1
+  }
+}
+
+test conditional_nil.disabled_holds {
+  mut dut = conditional_false
+  mut cycle = 0
+  tick 8 {
+    dut.address = 2
+    dut.data = 0xa5
+    dut.we = cycle == 1
+    dut.reset = cycle >= 3 and cycle < 7
+    step
+    if cycle == 1 or cycle == 2 {
+      assert(dut.value == 0xa5, "write before reset")
+    } elif cycle >= 6 {
+      assert(dut.value == 0xa5, "reset and release must respect the initializer")
+    }
+    cycle += 1
+  }
+}
+
+test conditional_nil.enabled_clears {
+  mut dut = conditional_true
+  mut cycle = 0
+  tick 8 {
+    dut.address = 2
+    dut.data = 0xa5
+    dut.we = cycle == 1
+    dut.reset = cycle >= 3 and cycle < 7
+    step
+    if cycle == 1 or cycle == 2 {
+      assert(dut.value == 0xa5, "write before reset")
+    } elif cycle >= 6 {
+      assert(dut.value == 0, "reset and release must respect the initializer")
+    }
+    if cycle == 0 { assert(dut.value == 0, "ZERO=true power-on initialization") }
+    cycle += 1
+  }
+}
+
+// ============================================================
+// from conditional_state_call.prp
+// ============================================================
+
+// A conditional stateful call must not advance the child's state while its
+// arm is inactive, and its raw output must remain hidden by the caller merge.
+mod conditional_state_inner(a:U8) -> (out:U8@[0]) {
+  reg q:U8 = 0
+  q = q ^ a
+  out = q
+}
+
+pub mod conditional_state_top(en:Bool, a:U8) -> (out:U8@[0]) {
+  out = 0
+  if en {
+    out = conditional_state_inner(a)
+  }
+}
+
+test conditional_state_top.hold_and_mask {
+  mut dut = conditional_state_top
+  mut bad = 0
+  tick 4 {
+    dut.en = (clock == 0) or (clock == 3)
+    dut.a  = 1 << clock
+    step
+
+    if clock == 0 {
+      if dut.out != 1 { bad = bad + 1 }
+    } elif clock == 1 or clock == 2 {
+      if dut.out != 0 { bad = bad + 1 }
+    } else {
+      // The two inactive cycles held q=1, so the next active update is 1^8.
+      if dut.out != 9 { bad = bad + 1 }
+    }
+  }
+  assert(bad == 0, "inactive calls mask outputs and hold child state")
+}
+
+// ============================================================
+// from conditional_state_named_clock.prp
+// ============================================================
+
+// A conditional call must gate the ports that STRUCTURALLY clock state, not
+// ports whose spelling happens to be `clock` or `clk` (a `Clock` binds by type,
+// whatever its name).  This is the Minion shape in miniature: the leaf uses
+// `clk_i` and an active-low `rst_ni` (`negreset=true`: the name carries no
+// polarity).
+mod named_clock_leaf(clk_i:Clock, rst_ni:Reset, a:U8) -> (out:U8@[0]) {
+  reg q:U8:[clock_pin=clk_i, reset_pin=rst_ni, negreset=true] = 0
+  wrap q = q + a
+  out = q
+}
+
+pub mod conditional_named_top(clk_i:Clock, rst_ni:Reset, en:Bool, a:U8) ->
+    (out:U8@[0], ctl:U8@[1]) {
+  out = 0
+  if en {
+    out = named_clock_leaf(clk_i=clk_i, rst_ni=rst_ni, a=a)
+  }
+
+  // Non-vacuity control on the same explicit clock/reset domain.
+  reg every:U8:[clock_pin=clk_i, reset_pin=rst_ni, negreset=true] = 0
+  every = a
+  ctl = every
+}
+
+test conditional_named_top.hold_named_clock_and_open_gate_for_reset {
+  mut dut = conditional_named_top
+  mut bad = 0
+  tick 5 {
+    dut.rst_ni = clock != 0
+    dut.en = (clock == 1) or (clock == 4)
+    dut.a = 1 << clock
+    step
+
+    mut want_ctl:U8 = 0
+    if clock != 0 { want_ctl = 1 << clock }
+    if dut.ctl != want_ctl { bad = bad + 1 }
+
+    mut want_out:U8 = 0
+    if clock == 1 { want_out = 2 }
+    if clock == 4 { want_out = 18 }
+    if dut.out != want_out { bad = bad + 1 }
+  }
+  assert(bad == 0, "named clocks hold inactive child state and reset still reaches it")
+}

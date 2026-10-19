@@ -2,10 +2,12 @@
 
 #include "bitwidth.hpp"
 
+#include <algorithm>
 #include <memory>
 #include <string_view>
 #include <tuple>
 #include <utility>
+#include <vector>
 
 #include "diag.hpp"
 #include "graph_library_singleton.hpp"
@@ -1217,4 +1219,97 @@ TEST(BitwidthMemory, WriteDataDoesNotWidenSharedMaskedExpression) {
   Bitwidth(10).do_trans(g);
   EXPECT_EQ(gu::bits_of(mux.create_driver_pin(0)), 8);
   EXPECT_TRUE(gu::concat_lane_violation(gu::concat_lanes(concat)).empty());
+}
+
+// P7: the post-convergence window rewrite pushes Get_mask(And(x, c), [0,2))
+// through the private And. Its constant operand c is the '?' literal
+// 0ub????, also read whole by `all`. The rewrite used to mint `0ub??` for c's
+// window -- one new literal per consumer window, drawn independently of c.
+// c must stay the only '?' constant, and the narrowed And must read it.
+TEST(BitwidthRewrite, WindowOfUnknownLiteralKeepsTheLiteral) {
+  namespace gu = livehd::graph_util;
+  auto& lib    = livehd::Hhds_graph_library::instance("lgdb_bitwidth_literal_window");
+  auto  io     = lib.create_io("literal_window");
+  io->add_input("x", 1);
+  io->set_bits("x", 8);
+  io->add_output("lo", 2);
+  io->set_bits("lo", 2);
+  io->add_output("all", 3);
+  io->set_bits("all", 4);
+  auto       g = io->create_graph();
+  const auto c = gu::create_const(*g, *Dlop::from_pyrope("0ub????"));
+  c.connect_sink(g->get_output_pin("all"));
+  auto conj = gu::create_typed_node(*g, Ntype_op::And);
+  gu::setup_sink_by_name(conj, "as").connect_driver(g->get_input_pin("x"));
+  gu::setup_sink_by_name(conj, "as").connect_driver(c);
+  gu::create_get_mask(*g, conj.create_driver_pin(0), 0, 2).create_driver_pin(0).connect_sink(g->get_output_pin("lo"));
+  Bitwidth(10).do_trans(g);
+
+  EXPECT_TRUE(g->get_output_pin("all").get_driver_pin() == c);
+  std::vector<hhds::Pin_class> unknowns;
+  bool                         c_is_read_by_logic = false;
+  for (auto n : g->body().nodes()) {
+    for (auto sink : n.inp_sorted_pins()) {
+      const auto d = sink.get_driver_pin();
+      if (d == c) {
+        c_is_read_by_logic = true;
+      }
+      if (d.is_const() && gu::const_of(d).has_unknowns() && std::ranges::find(unknowns, d) == unknowns.end()) {
+        unknowns.push_back(d);
+      }
+    }
+  }
+  const auto lo = g->get_output_pin("lo").get_driver_pin();
+  ASSERT_FALSE(lo.is_invalid());
+  ASSERT_FALSE(lo.is_const()) << "the window was minted as " << gu::const_of(lo).to_pyrope();
+  // The window must have been pushed through the private And (not skipped):
+  // the 4-bit literal does not fit 2 bits, so the new And reads Get_mask(c).
+  const auto narrowed = lo.get_master_node();
+  ASSERT_EQ(gu::type_op_of(narrowed), Ntype_op::And) << "the window rewrite did not push Get_mask through the And";
+  EXPECT_EQ(gu::bits_of(lo), 2);
+  bool reads_window_of_c = false;
+  for (auto sink : narrowed.inp_sorted_pins()) {
+    const auto d = sink.get_driver_pin();
+    EXPECT_FALSE(d == c) << "a 4-bit '?' literal must be read through a 2-bit Get_mask";
+    if (d.is_const()) {
+      continue;
+    }
+    const auto m = d.get_master_node();
+    if (!m.is_invalid() && gu::type_op_of(m) == Ntype_op::Get_mask && gu::get_driver_of_sink_name(m, "a") == c) {
+      reads_window_of_c = true;
+    }
+  }
+  EXPECT_TRUE(reads_window_of_c) << "the narrowed And must read Get_mask(c,[0,2)), not a minted 0ub??";
+  ASSERT_EQ(unknowns.size(), 1u) << "a '?' constant was minted for c's window";
+  EXPECT_TRUE(unknowns.front() == c);
+  EXPECT_TRUE(c_is_read_by_logic) << "the narrowed logic must read c itself";
+}
+
+// P2 class: a Mux selector is an INDEX over the data arm PORT IDS, so a
+// gapped Mux on pins 0,2,3 can select pin 3 with selector 2. Sizing the
+// selector by the connected-arm count gave [0..1] -- a 1-bit stamp on a
+// selector that no other driver range widens (here a self-holding flop),
+// which truncates selector 2 to 0 (the disconnected arm).
+TEST(BitwidthInfer, GappedMuxSelectorSpansHighestArmPort) {
+  namespace gu = livehd::graph_util;
+  auto& lib    = livehd::Hhds_graph_library::instance("lgdb_bitwidth_test");
+  auto  gio    = lib.create_io("bw_gapped_mux_selector");
+  gio->add_input("d1", 1);
+  gio->set_bits("d1", 8);
+  gio->add_input("d2", 2);
+  gio->set_bits("d2", 8);
+  gio->add_output("o", 3);
+  auto g = gio->create_graph();
+
+  auto flop = gu::create_typed_node(*g, Ntype_op::Flop);
+  auto q    = flop.create_driver_pin(0);
+  q.connect_sink(gu::setup_sink_by_name(flop, "din"));
+  auto mux = gu::create_typed_node(*g, Ntype_op::Mux);
+  q.connect_sink(gu::setup_sink_pid(mux, 0));
+  g->get_input_pin("d1").connect_sink(gu::setup_sink_pid(mux, 2));
+  g->get_input_pin("d2").connect_sink(gu::setup_sink_pid(mux, 3));
+  mux.create_driver_pin(0).connect_sink(g->get_output_pin("o"));
+
+  Bitwidth(10).do_trans(g);
+  EXPECT_GE(gu::bits_of(flop.create_driver_pin(0)), 2) << "selector 2 (pin 3) must stay representable";
 }

@@ -28,6 +28,10 @@ read_verilog -sv -nomeminit {{input}}
 # silently -- the same synthesis semantics the native --reader slang applies,
 # but note that a simulation-only source loses those side effects here.
 read_slang {{slang_top}} --ignore-timing --no-proc {{slang_flags}} {{files_str}} {{filelist_file_str}}
+# --no-proc keeps the "hold the previous value" start of a combinational block, which proc_mux wires into the
+# unmatched path of every case. A case that lists all values of a narrow selector has no such path; mark it
+# full_case so the hold is not built (otherwise it is a false combinational loop through the mux).
+lhd_full_case
 {{/use_slang}}
 
 # single file, no hierarchy needed

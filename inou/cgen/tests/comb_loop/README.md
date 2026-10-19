@@ -65,7 +65,7 @@ feedback const for the loop_break case).
   `unsupported`, codes `comb-loop-through-instance` at the Sub-input site /
   `combinational-loop` generically); a non-deferred `.emit()` makes `run_step`'s
   `has_halting_errors()` gate block the sim build. Catches `base`, `var_a`,
-  `var_c`; does NOT fire on the no-feedback passthru, `inou/prp/tests/sim/hier.prp`,
+  `var_c`; does NOT fire on the no-feedback passthru, `inou/prp/tests/sim/gated_eval_deep_counter.prp`,
   or any of the 16 existing sim tests. **`var_b` is NOT caught by Stage 0** — its
   bogus value is a cprop-folded *unknown-bits const*, and unknown-bits consts
   occur legitimately in correct designs (`fsm_runner`), so a blanket guard

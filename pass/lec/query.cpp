@@ -16,6 +16,7 @@
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
+#include <filesystem>
 #include <format>
 #include <fstream>
 #include <functional>
@@ -1107,6 +1108,11 @@ std::string serialize_verify(const Verify_result& v) {
     put_str(b, p.undecided_why);
     put_u32(b, static_cast<uint32_t>(p.cone_nodes));
     put_u32(b, static_cast<uint32_t>(p.cone_state));
+    put_str(b, p.cone_digest);
+    put_str(b, p.cone_key);
+    b.push_back(static_cast<char>(p.cone_reused ? 1 : 0));
+    put_str(b, p.reuse_by);
+    b.push_back(static_cast<char>(p.abc_unbounded ? 1 : 0));
     put_str(b, p.witness);
     put_trace(b, p.trace);
   }
@@ -1261,6 +1267,16 @@ bool deserialize_verify(std::string_view b, Verify_result& v) {
     }
     p.cone_nodes = static_cast<int>(cn);  // 0xffffffff -> -1 round-trips
     p.cone_state = static_cast<int>(cst);
+    if (!get_str(b, p.cone_digest) || !get_str(b, p.cone_key) || b.empty()) {
+      return false;
+    }
+    p.cone_reused = b.front() != 0;
+    b.remove_prefix(1);
+    if (!get_str(b, p.reuse_by) || b.empty()) {
+      return false;
+    }
+    p.abc_unbounded = b.front() != 0;
+    b.remove_prefix(1);
     if (!get_str(b, p.witness) || !get_trace(b, p.trace)) {
       return false;
     }
@@ -3491,28 +3507,32 @@ private:
     while (!stk.empty()) {
       const auto sink = stk.back();
       stk.pop_back();
-      const auto drv = sink.get_driver_pin();
-      if (drv.is_invalid() || !live_drivers.insert(drv.get_class_index()).second) {
-        continue;
-      }
-      if (graph_util::is_graph_input_pin(drv) || drv.is_const()) {
-        continue;
-      }
-      const auto m = drv.get_master_node();
-      if (!live_nodes.insert(m.get_class_index()).second) {
-        continue;
-      }
-      const absl::flat_hash_set<hhds::Port_id>* child_dead = nullptr;
-      if (graph_util::type_op_of(m) == Ntype_op::Sub && !m.is_loop_subnode()) {
-        if (auto cg = m.get_subnode_graph(); cg) {
-          child_dead = &of(cg.get());
+      // EVERY driver: a sink may legitimately have several (a compact loop's
+      // carry-in -- its external seed plus its own carry-out), and
+      // get_driver_pin() asserts on exactly one. Each is live.
+      for (const auto& drv : sink.get_driver_pins()) {
+        if (drv.is_invalid() || !live_drivers.insert(drv.get_class_index()).second) {
+          continue;
         }
-      }
-      for (auto in : m.inp_sorted_pins()) {
-        if (child_dead != nullptr && child_dead->contains(in.get_port_id())) {
-          continue;  // the nested body proves this input reaches none of its outputs
+        if (graph_util::is_graph_input_pin(drv) || drv.is_const()) {
+          continue;
         }
-        stk.push_back(in);
+        const auto m = drv.get_master_node();
+        if (!live_nodes.insert(m.get_class_index()).second) {
+          continue;
+        }
+        const absl::flat_hash_set<hhds::Port_id>* child_dead = nullptr;
+        if (graph_util::type_op_of(m) == Ntype_op::Sub && !m.is_loop_subnode()) {
+          if (auto cg = m.get_subnode_graph(); cg) {
+            child_dead = &of(cg.get());
+          }
+        }
+        for (auto in : m.inp_sorted_pins()) {
+          if (child_dead != nullptr && child_dead->contains(in.get_port_id())) {
+            continue;  // the nested body proves this input reaches none of its outputs
+          }
+          stk.push_back(in);
+        }
       }
     }
     absl::flat_hash_set<hhds::Port_id> dead;
@@ -4810,19 +4830,33 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
   // miters correctly and keeps the SAT assignment, so witness extraction is
   // safe — but it has no theory of arrays, so restrict it to array-free queries.
   // Memory cuts (M4) introduce array symbols; those keep the default solver.
-  bool has_mem = false;
+  bool has_mem       = false;
+  bool has_small_mem = false;
   for (auto* g : {ref, impl}) {
     // Hierarchical: a memory one level down still introduces ARRAY symbols, and
     // the eager bit-blaster this gates has no array theory.
     for (auto node : g->occurrences(collapse_gids_ptr).nodes(hhds::Node_order::forward)) {
       if (graph_util::type_op_of(node) == Ntype_op::Memory) {
         has_mem = true;
-        break;
+        if (const auto sig = read_mem_sig(node); sig.bits > 0 && sig.size > 0 && sig.addr_w > 0
+                                                            && static_cast<uint32_t>(sig.addr_w) <= kArray_blast_index_bits) {
+          has_small_mem = true;
+          break;
+        }
       }
     }
-    if (has_mem) {
+    if (has_small_mem) {
       break;
     }
+  }
+  // Memories of at most 2^kArray_blast_index_bits entries reach cvc5 as
+  // per-entry bit-vectors, not arrays (array_blast.hpp): the lazy array solver
+  // case-splits on every pair of symbolic addresses across the unrolling,
+  // which made a two-lane 4x8 design under the reference's unknown-state
+  // tracking take 21 s at BMC bound 2 and time out at bound 3. When no larger
+  // array remains, the query is solved as QF_BV.
+  if (has_small_mem) {
+    solver.set_array_blast(kArray_blast_index_bits);
   }
   solver.set_profile(opts.profile,
                      {.has_mem         = has_mem,
@@ -5624,6 +5658,13 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
     absl::flat_hash_set<std::string>  bank_hold_keys;        // reset-less bank flops: hold across the reset prologue
     absl::flat_hash_set<std::string>  ref_power_init_keys;   // ref keys with an explicit power-on value
     size_t                            unpaired_state_n = 0;  // state cuts with no counterpart (disclosed in the verdict)
+    // Refinement of an uninitialized reference register (owner ruling
+    // 2026-10-16): candidates whose REFERENCE flop has neither a power-on value
+    // nor a reset pin, paired by key with an equally wide implementation flop
+    // (no bit-blast/window bridge), and the keys whose implementation flop has
+    // a reset pin. See `adopt_flops` below.
+    absl::flat_hash_set<std::string>  ref_uninit_flops;
+    absl::flat_hash_set<std::string>  impl_reset_pin_flops;
     {
       Io_name_map<int>                 fw;
       Io_name_map<bool>                fsgn;  // sign of the NARROWEST decl (the value semantics of the shared init)
@@ -5638,6 +5679,9 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
       // Keys with a reset pin on either side: the reset-prologue power-on
       // policy below.
       absl::flat_hash_set<std::string> reset_state_keys;
+      // Per side: flops with a constant `initial` (reset or power-on value)
+      // and flops with a reset pin.
+      absl::flat_hash_set<std::string> side_initial[2], side_reset[2];
       int                              side_ix       = 0;
       auto                             collect_flops = [&](hhds::Graph* g) {
         // NOT fast_hier, despite the opaque scope now being honored by both: `fw` is
@@ -5712,6 +5756,14 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
           }
           if (nop == Ntype_op::Flop && has_reset_pin) {
             reset_state_keys.insert(key);
+          }
+          if (nop == Ntype_op::Flop) {
+            if (has_reset_pin) {
+              side_reset[side_ix].insert(key);
+            }
+            if (auto iv = gu::get_driver_of_sink_name(node, "initial"); !iv.is_invalid() && iv.is_const()) {
+              side_initial[side_ix].insert(key);
+            }
           }
         }
       };
@@ -5914,6 +5966,39 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
       }
       for (const auto& [key, value] : power_init[1]) {
         impl_state[key] = value;
+      }
+      // Candidates for the refinement rule: an uninitialized reference flop
+      // (no `initial`, no reset pin) paired by key with an equally wide
+      // implementation flop. A bridged key (bit-blast, packed/scalar, state
+      // window) keeps its bridge's own seeding.
+      if (opts.gold_x != "zero") {
+        for (const auto& [key, rw] : fw_side[0]) {
+          auto iw = fw_side[1].find(key);
+          if (iw == fw_side[1].end() || iw->second != rw || side_initial[0].contains(key) || side_reset[0].contains(key)
+              || bitblast.contains(key) || bitblast_bits.contains(key) || state_windows.contains(key)) {
+            continue;
+          }
+          ref_uninit_flops.insert(key);
+        }
+        impl_reset_pin_flops = side_reset[1];
+      }
+      // An uninitialized reference register against an implementation one with
+      // a power-on value: the reference's power-on value is X, any value is
+      // allowed, and the implementation's is one of them -- a refinement (owner
+      // ruling 2026-10-16). Start the reference at the implementation's value
+      // (an exact instance of its X, so nothing is masked) instead of the
+      // shared free symbol the implementation no longer holds. The opposite
+      // direction (initialized reference, uninitialized implementation) keeps
+      // the shared symbol and refutes.
+      for (const auto& key : ref_uninit_flops) {
+        auto pit = power_init[1].find(key);
+        auto rit = ref_state.find(key);
+        if (pit == power_init[1].end() || rit == ref_state.end() || rit->second.width != pit->second.width) {
+          continue;
+        }
+        Val v          = pit->second;
+        v.is_signed    = rit->second.is_signed;
+        ref_state[key] = v;
       }
       // Bit slices of a bit-blasted register (see the pairing above): the impl's
       // one-bit cut for bit i IS bit i of the ref's N-bit symbol, so the two
@@ -6256,9 +6341,20 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
     // Encoder::encode applies `init` directly for ROMs and reset operations,
     // but an ordinary writable memory must consume it exactly once here at
     // state[0]; subsequent cycles thread each side's next_mem normally. Two
-    // explicit initializers remain independently observable. If exactly one
-    // side is initialized, pair the other side's unspecified hardware state to
-    // it instead of creating an unrelated adversarial initial array.
+    // explicit initializers remain independently observable. With exactly one
+    // initialized side, memories follow the flop convention (owner ruling
+    // 2026-10-16):
+    //   * only the IMPLEMENTATION is initialized: the reference's power-on
+    //     contents are X, and choosing them equal to the implementation's is
+    //     one instance of that X -- a refinement, so the pair is tied;
+    //   * only the REFERENCE is initialized: the implementation's contents are
+    //     arbitrary hardware state that the reference does not allow. It keeps
+    //     its own (free) array, so a read of an entry neither side wrote
+    //     refutes, exactly like an initialized reference register against an
+    //     uninitialized implementation one. (Tying the two here was a false
+    //     PROVEN-full: `initial mem[i] = 8'h5a` against no initializer.)
+    // A `$readmem` image is not an initializer here (collect_memory_inits):
+    // it is external state on the shared array.
     auto apply_memory_init = [&](cvc5::Term arr, const Mem_sig& sig, const std::string& bin) {
       const int  width = sig.size * sig.bits;
       cvc5::Term bus   = tm.mkBitVector(static_cast<uint32_t>(width), bin, 2);
@@ -6339,23 +6435,54 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
         rs->second = apply_memory_init(rs->second, rg->second, ri->second);
         is->second = apply_memory_init(is->second, ig->second, ii->second);
       } else if (ri != ref_mem_init.end() && rs != ref_mem.end() && rg != ref_mem_sig.end()) {
-        auto paired = apply_memory_init(rs->second, rg->second, ri->second);
-        rs->second  = paired;
-        if (unspecified_writable_pair) {
-          // A writable implementation memory with no initializer has arbitrary
-          // hardware power-on state. Choose the correspondence relation that
-          // pairs it with the reference's specified contents instead of an
-          // unrelated adversarial array. Do not apply this to ROMs: their
-          // contents can arrive through a different encoding channel, and a
-          // one-sided ROM init must remain observable (lec_mem_init_test).
-          is->second = paired;
-        }
+        // The implementation's array stays the free (shared) one: see above.
+        rs->second = apply_memory_init(rs->second, rg->second, ri->second);
       } else if (ii != impl_mem_init.end() && is != impl_mem.end() && ig != impl_mem_sig.end()) {
+        // Do not apply the tie to ROMs: their contents can arrive through a
+        // different encoding channel, and a one-sided ROM init must remain
+        // observable (lec_mem_init_test).
         auto paired = apply_memory_init(is->second, ig->second, ii->second);
         is->second  = paired;
         if (unspecified_writable_pair) {
           rs->second = paired;
         }
+      }
+    }
+
+    // The memory twin of `adopt_flops` (see the reset probe below): a writable
+    // reference memory with no power-on contents, no reset arm and no image,
+    // against the same-keyed implementation memory that a reset arm defines.
+    // The reference's contents after the reset sequence are X, so the checked
+    // window starts it at the implementation's contents (owner ruling
+    // 2026-10-16). The opposite direction (reset or initialized reference,
+    // uninitialized implementation) is untouched and refutes.
+    absl::flat_hash_set<std::string> adopt_mems;
+    if (phase_run && reset_hold > 0 && !reset_negset.empty() && P == 1 && opts.gold_x != "zero") {
+      auto reset_arms = [&](hhds::Graph* g) {
+        absl::flat_hash_set<std::string> out;
+        for (auto node : g->occurrences(collapse_gids_ptr).nodes(hhds::Node_order::forward)) {
+          if (graph_util::type_op_of(node) == Ntype_op::Memory && node.has_out_edges()
+              && !graph_util::get_driver_of_sink_name(node, "reset").is_invalid()) {
+            out.insert(mem_cut_key(g, node));
+          }
+        }
+        return out;
+      };
+      const auto ref_rst  = reset_arms(ref);
+      const auto impl_rst = reset_arms(impl);
+      for (const auto& key : impl_rst) {
+        // The arrays themselves may not exist yet: an uncollapsed pair's
+        // private arrays are minted by the first encode and threaded from
+        // there, so the shapes decide here and the step loop checks the sorts.
+        auto rg = ref_mem_sig.find(key);
+        auto ig = impl_mem_sig.find(key);
+        if (rg == ref_mem_sig.end() || ig == impl_mem_sig.end() || rg->second.size != ig->second.size
+            || rg->second.bits != ig->second.bits || rg->second.addr_w != ig->second.addr_w || rg->second.n_wr <= 0 || ref_rst.contains(key)
+            || ref_mem_init.contains(key) || memory_image_keys.contains(key) || !ref_mem_type.contains(key)
+            || ref_mem_type.at(key) == 2 || !impl_mem_type.contains(key) || impl_mem_type.at(key) == 2) {
+          continue;
+        }
+        adopt_mems.insert(key);  // reset-free write ports are checked by the reset probe below
       }
     }
 
@@ -6451,6 +6578,18 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
     // it on that first cycle is hardware-undefined. Detection is a pure rewrite
     // (no solver query, nothing asserted), and a constant next-state IS a total
     // write, so a miss only keeps the shared s0 relation.
+    //
+    // The same probe of the IMPLEMENTATION's first reset cycle (plus the
+    // reset-pin census) tells which state the implementation's reset defines.
+    // An uninitialized reference register (no power-on value, no reset pin, no
+    // reset-written next-state) against an implementation register that reset
+    // defines is a refinement (owner ruling 2026-10-16): the reference's value
+    // after the reset sequence is X and any value is allowed, the
+    // implementation's included. `adopt_flops` start the checked window at the
+    // implementation's value -- an exact instance of that X, so nothing is
+    // masked afterwards. The opposite direction (reset-defined reference,
+    // uninitialized implementation) is untouched and refutes.
+    absl::flat_hash_set<std::string> adopt_flops;
     if (phase_run && !reset_negset.empty() && P == 1 && opts.gold_x != "zero") {
       Io_name_map<Val> dry;
       for (const auto& [name, info] : ins) {
@@ -6477,9 +6616,6 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
           dry[ln] = lv;
         }
       }
-      for (const auto& [k, v] : ref_state) {
-        dry[k] = Val{v.term, v.width, v.is_signed};  // value only: the probe asks what reset writes
-      }
       Io_name_map<Val> dry_bbox;
       for (const auto& [bk, bv] : shared_bbox) {
         // A proven child's constant output (box_const_outputs) stays constant.
@@ -6488,35 +6624,168 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
                   ? bv
                   : Val{tm.mkConst(tm.mkBitVectorSort(static_cast<uint32_t>(bv.width)), "rdry_bb:" + bk), bv.width, bv.is_signed};
       }
-      enc.set_shared_bbox(&dry_bbox);
-      enc.set_emit_props(false);
-      enc.set_x_dontcare(false);
-      enc.set_box_keys(&ref_box_keys);
-      enc.set_mem_keys(&ref_mem_cut_keys);
-      const bool dry_use_plan = use_plan && (use_phase || ref_plan.needs_plan());
-      enc.set_phase_plan(dry_use_plan ? &ref_plan : nullptr, steps[0]);
-      enc.set_memory_x_state(nullptr);
-      Encoded dre = enc.encode(ref, &dry, "rdry_", &ref_mem, &ref_reads);
-      enc.set_shared_bbox(&shared_bbox);
-      if (dre.ok) {
+      // Keys whose first-reset-cycle next-state rewrites to a constant.
+      auto reset_written = [&](hhds::Graph*                    g,
+                               const Io_name_map<Val>&         state,
+                               const Io_name_map<std::string>& box_keys,
+                               const Io_name_map<std::string>& mem_cut_keys,
+                               const Phase_plan&               plan,
+                               const Io_name_map<cvc5::Term>&  mems,
+                               const Io_name_map<Val>&         reads,
+                               const char*                     prefix) {
+        absl::flat_hash_set<std::string> out;
+        Io_name_map<Val>                 side_dry = dry;
+        for (const auto& [k, v] : state) {
+          side_dry[k] = Val{v.term, v.width, v.is_signed};  // value only: the probe asks what reset writes
+        }
+        enc.set_shared_bbox(&dry_bbox);
+        enc.set_emit_props(false);
+        enc.set_x_dontcare(false);
+        enc.set_box_keys(&box_keys);
+        enc.set_mem_keys(&mem_cut_keys);
+        const bool dry_use_plan = use_plan && (use_phase || plan.needs_plan());
+        enc.set_phase_plan(dry_use_plan ? &plan : nullptr, steps[0]);
+        enc.set_memory_x_state(nullptr);
+        Encoded dre = enc.encode(g, &side_dry, prefix, &mems, &reads);
+        enc.set_shared_bbox(&shared_bbox);
+        if (!dre.ok) {
+          return out;
+        }
         for (const auto& [name, nv] : dre.outputs) {
           if (name.rfind("\x01nxt:", 0) != 0) {
             continue;
           }
           const std::string key = name.substr(5);
-          if (key.empty() || key[0] == '\x01' || ref_power_init_keys.contains(key)) {
-            continue;  // box state cut, or an explicit power-on value (already known)
+          if (key.empty() || key[0] == '\x01') {
+            continue;  // box state cut
           }
-          auto it = ref_state.find(key);
-          if (it == ref_state.end() || !it->second.x_mask.isNull()) {
-            continue;
+          if (solver.simplify(nv.term).isBitVectorValue()) {
+            out.insert(key);
           }
-          if (!solver.simplify(nv.term).isBitVectorValue()) {
-            continue;
+        }
+        return out;
+      };
+      const auto ref_written = reset_written(ref, ref_state, ref_box_keys, ref_mem_cut_keys, ref_plan, ref_mem, ref_reads, "rdry_");
+      for (const auto& key : ref_written) {
+        if (ref_power_init_keys.contains(key)) {
+          continue;  // an explicit power-on value (already known)
+        }
+        auto it = ref_state.find(key);
+        if (it == ref_state.end() || !it->second.x_mask.isNull()) {
+          continue;
+        }
+        it->second.x_mask = tm.mkTerm(cvc5::Kind::BITVECTOR_NOT, {tm.mkBitVector(static_cast<uint32_t>(it->second.width), 0)});
+        if (std::getenv("LEC_DUMP_FLOPS") != nullptr) {
+          std::fprintf(stderr, "[LEC_RESET_WRITTEN] %s: pre-reset value tracked as X on the reference\n", key.c_str());
+        }
+      }
+      // A reference register or memory is uninitialized only when reset does
+      // not reach its next state at all: `r <= rst ? init_in : d` is reset to a
+      // (non-constant) value, and a memory cleared through its write ports
+      // under reset is reset too. Probe the same first cycle once more with
+      // every reset input a fresh symbol, and keep the candidates whose
+      // next-state (flop) or write ports (memory) do not depend on one.
+      if (!ref_uninit_flops.empty() || !adopt_mems.empty()) {
+        Io_name_map<Val>               rst_probe = dry;
+        std::unordered_set<cvc5::Term> reset_syms;
+        for (const auto& [name, info] : ins) {
+          if (bundle_in_leaves.count(name) == 0 && reset_negset.contains(name)) {
+            cvc5::Term t = mint_top_in(tm, info, "rprb_" + std::string(name));
+            rst_probe[name] = Val{t, info.w, info.sgn};
+            reset_syms.insert(t);
           }
-          it->second.x_mask = tm.mkTerm(cvc5::Kind::BITVECTOR_NOT, {tm.mkBitVector(static_cast<uint32_t>(it->second.width), 0)});
-          if (std::getenv("LEC_DUMP_FLOPS") != nullptr) {
-            std::fprintf(stderr, "[LEC_RESET_WRITTEN] %s: pre-reset value tracked as X on the reference\n", key.c_str());
+        }
+        for (const auto& [k, v] : ref_state) {
+          rst_probe[k] = Val{v.term, v.width, v.is_signed};
+        }
+        enc.set_shared_bbox(&dry_bbox);
+        enc.set_emit_props(false);
+        enc.set_x_dontcare(false);
+        enc.set_box_keys(&ref_box_keys);
+        enc.set_mem_keys(&ref_mem_cut_keys);
+        const bool probe_use_plan = use_plan && (use_phase || ref_plan.needs_plan());
+        enc.set_phase_plan(probe_use_plan ? &ref_plan : nullptr, steps[0]);
+        enc.set_memory_x_state(nullptr);
+        Encoded pre = enc.encode(ref, &rst_probe, "rprb_", &ref_mem, &ref_reads);
+        enc.set_shared_bbox(&shared_bbox);
+        std::unordered_map<cvc5::Term, bool> memo;  // term -> reaches a reset symbol
+        auto reaches_reset = [&](const cvc5::Term& root) {
+          if (root.isNull()) {
+            return false;
+          }
+          std::vector<std::pair<cvc5::Term, bool>> stk{{root, false}};
+          while (!stk.empty()) {
+            auto [t, expanded] = stk.back();
+            stk.pop_back();
+            if (memo.contains(t)) {
+              continue;
+            }
+            if (reset_syms.contains(t)) {
+              memo.emplace(t, true);
+              continue;
+            }
+            if (!expanded) {
+              stk.emplace_back(t, true);
+              for (size_t i = 0; i < t.getNumChildren(); ++i) {
+                if (!memo.contains(t[i])) {
+                  stk.emplace_back(t[i], false);
+                }
+              }
+              continue;
+            }
+            bool hit = false;
+            for (size_t i = 0; i < t.getNumChildren() && !hit; ++i) {
+              hit = memo.at(t[i]);
+            }
+            memo.emplace(t, hit);
+          }
+          return memo.at(root);
+        };
+        absl::flat_hash_set<std::string> keep_flops, keep_mems;
+        if (pre.ok) {
+          for (const auto& key : ref_uninit_flops) {
+            auto it = pre.outputs.find("\x01nxt:" + key);
+            if (it != pre.outputs.end() && !reaches_reset(it->second.term)) {
+              keep_flops.insert(key);
+            }
+          }
+          for (const auto& key : adopt_mems) {
+            auto it = pre.mem_wr.find(key);
+            if (it == pre.mem_wr.end() || it->second.empty()) {
+              continue;  // its writes were not found: keep the conservative pairing
+            }
+            bool reset_free = true;
+            for (const auto& wp : it->second) {
+              reset_free = reset_free && !reaches_reset(wp.addr) && !reaches_reset(wp.wmask) && !reaches_reset(wp.din);
+            }
+            if (reset_free) {
+              keep_mems.insert(key);
+            }
+          }
+        }
+        ref_uninit_flops = std::move(keep_flops);
+        adopt_mems       = std::move(keep_mems);
+        if (std::getenv("LEC_DUMP_MEMS") != nullptr) {
+          for (const auto& key : adopt_mems) {
+            std::fprintf(stderr,
+                         "[LEC_RESET_REFINE] memory %s: uninitialized on the reference, reset on the implementation; the "
+                         "checked window starts at the implementation's contents\n",
+                         key.c_str());
+          }
+        }
+      }
+      if (!ref_uninit_flops.empty()) {
+        const auto impl_written
+            = reset_written(impl, impl_state, impl_box_keys, impl_mem_cut_keys, impl_plan, impl_mem, impl_reads, "idry_");
+        for (const auto& key : ref_uninit_flops) {
+          if (!ref_written.contains(key) && (impl_reset_pin_flops.contains(key) || impl_written.contains(key))) {
+            adopt_flops.insert(key);
+            if (std::getenv("LEC_DUMP_FLOPS") != nullptr) {
+              std::fprintf(stderr,
+                           "[LEC_RESET_REFINE] %s: uninitialized on the reference, reset on the implementation; the checked "
+                           "window starts at the implementation's value\n",
+                           key.c_str());
+            }
           }
         }
       }
@@ -6581,6 +6850,29 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
         pin_mem(impl_mem, nm_impl);
         ref_mem  = std::move(nm_ref);
         impl_mem = std::move(nm_impl);
+
+        // First checked cycle: the reference's uninitialized state that the
+        // implementation's reset defined starts at the implementation's value
+        // (adopt_flops / adopt_mems above).
+        if (step == reset_hold * P) {
+          for (const auto& key : adopt_flops) {
+            auto rit = ref_state.find(key);
+            auto iit = impl_state.find(key);
+            if (rit == ref_state.end() || iit == impl_state.end() || rit->second.width != iit->second.width) {
+              continue;
+            }
+            rit->second = Val{iit->second.term, iit->second.width, rit->second.is_signed};
+          }
+          for (const auto& key : adopt_mems) {
+            auto rit = ref_mem.find(key);
+            auto iit = impl_mem.find(key);
+            if (rit == ref_mem.end() || iit == impl_mem.end() || rit->second.getSort() != iit->second.getSort()) {
+              continue;
+            }
+            rit->second = iit->second;
+            ref_mem_x.erase(key);
+          }
+        }
       }
 
       const std::string in_tag = P == 1 ? ("c" + std::to_string(cyc) + "_")
@@ -7657,22 +7949,48 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
   // so two writable memories whose explicit power-on contents differ have no
   // inductive base and the step proves nothing about them. BMC seeds each
   // side's own contents at state[0] (see apply_memory_init) and decides. A ROM
-  // is not affected (the encoder reads its contents directly), and a one-sided
-  // initializer keeps the BMC pairing policy: the unspecified side is chosen
-  // equal.
+  // is not affected (the encoder reads its contents directly). A one-sided
+  // initializer follows the BMC policy: an initialized IMPLEMENTATION against
+  // an uninitialized reference is a refinement (the reference's X is chosen
+  // equal), but an initialized REFERENCE against an implementation with no
+  // initializer has no base either -- the implementation's power-on contents
+  // are arbitrary, so assuming them equal proved `initial mem[i] = 8'h5a`
+  // against no initializer (a false PROVEN-full).
   {
     const auto               ref_inits  = collect_memory_inits(ref, true);
     const auto               impl_inits = collect_memory_inits(impl, true);
+    // Every writable impl memory (initialized or not), same filter as above.
+    absl::flat_hash_set<std::string> impl_writable;
+    for (auto node : impl->occurrences(collapse_gids_ptr).nodes(hhds::Node_order::forward)) {
+      if (graph_util::type_op_of(node) != Ntype_op::Memory || !node.has_out_edges()) {
+        continue;
+      }
+      const Mem_sig sig = read_mem_sig(node);
+      if (sig.bits <= 0 || sig.size <= 0) {
+        continue;
+      }
+      if (auto tpin = graph_util::get_driver_of_sink_name(node, "type");
+          tpin.is_const() && graph_util::const_of(tpin).to_just_i64() == 2) {
+        continue;
+      }
+      if (sig.n_wr <= 0 && graph_util::get_driver_of_sink_name(node, "update").is_invalid()) {
+        continue;
+      }
+      impl_writable.insert(mem_cut_key(impl, node));
+    }
     std::vector<std::string> diverged;
     for (const auto& [key, bin] : ref_inits) {
-      if (auto it = impl_inits.find(key); it != impl_inits.end() && it->second != bin && shared_mems.contains(key)) {
+      if (!shared_mems.contains(key)) {
+        continue;
+      }
+      if (auto it = impl_inits.find(key); it != impl_inits.end() ? it->second != bin : impl_writable.contains(key)) {
         diverged.push_back(key);
       }
     }
     if (!diverged.empty()) {
       std::sort(diverged.begin(), diverged.end());
       res.verdict  = Verdict::Undecided;
-      res.detail  += "; power-on contents differ on memory ";
+      res.detail  += "; power-on contents differ (or only the reference has any) on memory ";
       for (size_t i = 0; i < diverged.size(); ++i) {
         res.detail += (i != 0 ? "," : "") + diverged[i];
       }
@@ -12566,13 +12884,65 @@ static Verify_result prove_properties_impl(hhds::Graph* design, const Lec_option
         }
         return std::move(race.results[0].r);  // a crashed worker = default result (tagged below)
       };
-      A = run_cached(0);  // bmc-first
-      if (trust(0, A)) {
-        winner = 0;
+      // Race both strategies concurrently, as without a cache: running them
+      // back to back made every --workdir run wait for bmc-first's full budget
+      // even when ind-first settles everything at once. Each finished worker
+      // replays its cache hits and stores; a cancelled or killed one ships
+      // nothing, so its proofs are only misses next run, never a verdict.
+      const std::function<Cached_run(int)> work2 = [&](int i) {
+        Cached_run  c;
+        Lec_options o = opts;
+        o.engine      = "bmc";
+        if (i == 1 && o.bound > kIndFirstBound) {
+          o.bound = kIndFirstBound;
+        }
+        if (opts.verify_cache_lookup) {
+          o.verify_cache_lookup = [&c, &opts](std::string_view key) {
+            const bool hit = opts.verify_cache_lookup(key);
+            if (hit) {
+              c.hits.emplace_back(key);
+            }
+            return hit;
+          };
+        }
+        if (opts.verify_cache_store) {
+          o.verify_cache_store = [&c](std::string key) { c.stores.push_back(std::move(key)); };
+        }
+        c.r = prove_properties(design, o, sub_lib, monitors);
+        return c;
+      };
+      const std::function<bool(int, const Cached_run&)> trust2 = [&](int i, const Cached_run& c) { return trust(i, c.r); };
+      auto race2 = fork_race<Cached_run>(2, work2, ser_cached, deser_cached, trust2, verify_deadline);
+      if (race2.forked) {
+        for (int i = 0; i < 2; ++i) {
+          if (race2.timed_out[i]) {
+            timed_out[i]  = true;
+            timeout_note += std::string(i == 0 ? "bmc-first" : "ind-first") + " " + race_timeout_note(race2, opts) + "; ";
+            continue;
+          }
+          if (opts.verify_cache_lookup) {
+            for (const auto& k : race2.results[i].hits) {
+              (void)opts.verify_cache_lookup(k);
+            }
+          }
+          if (opts.verify_cache_store) {
+            for (auto& k : race2.results[i].stores) {
+              opts.verify_cache_store(std::move(k));
+            }
+          }
+        }
+        winner = race2.winner;
+        A      = std::move(race2.results[0].r);
+        B      = std::move(race2.results[1].r);
       } else {
-        B = run_cached(1);  // ind-first
-        if (trust(1, B)) {
-          winner = 1;
+        A = run_cached(0);  // bmc-first
+        if (trust(0, A)) {
+          winner = 0;
+        } else {
+          B = run_cached(1);  // ind-first
+          if (trust(1, B)) {
+            winner = 1;
+          }
         }
       }
       race_bmc_killed = timed_out[0];
@@ -12590,7 +12960,7 @@ static Verify_result prove_properties_impl(hhds::Graph* design, const Lec_option
       both            += B.cvc5;
       Verify_result r  = (winner == 0) ? std::move(A) : std::move(B);
       r.detail = "auto verify: " + std::string(winner == 0 ? "bmc-first" : "ind-first") + " settled every obligation definitively"
-                 + (cache_active ? "" : " (cancelled the other strategy)") + "; " + r.detail;
+                 + " (cancelled the other strategy)" + "; " + r.detail;
       r.elapsed_ms = now_ms(t0);
       r.cvc5       = both;  // assign: the winner's own stats are already inside `both`
       return r;
@@ -12801,7 +13171,17 @@ static Verify_result prove_properties_impl(hhds::Graph* design, const Lec_option
   cvc5::Solver      solver(tm);
   probe.attach(solver);
   Stats_guard stats_guard(solver, probe, acc);
-  solver.setLogic("QF_ABV");
+  // Without memories there are no arrays: QF_BV keeps cvc5 out of theory
+  // combination (shared-term equality propagation dominated the profile).
+  // Hierarchical: a memory in any submodule still brings in arrays.
+  bool has_mem = false;
+  for (auto node : design->occurrences().nodes(hhds::Node_order::forward)) {
+    if (graph_util::type_op_of(node) == Ntype_op::Memory) {
+      has_mem = true;
+      break;
+    }
+  }
+  solver.setLogic(has_mem ? "QF_ABV" : "QF_BV");
   if (opts.timeout > 0) {
     solver.setOption("tlimit-per", std::to_string(static_cast<long long>(opts.timeout) * 1000));
   }
@@ -12814,15 +13194,31 @@ static Verify_result prove_properties_impl(hhds::Graph* design, const Lec_option
   // Same solver-config rules as prove_equal: the eager internal bit-blaster is
   // the trustworthy config (the lazy default has a spurious-SAT history) but has
   // no array theory, so memory designs keep the default solver.
-  bool has_mem = false;
-  for (auto node : design->body().nodes(hhds::Node_order::forward)) {
-    if (graph_util::type_op_of(node) == Ntype_op::Memory) {
-      has_mem = true;
-      break;
+  // Verify uses EAGER bit-blasting to CaDiCaL: the whole problem is bit-blasted
+  // once, with no lazy theory layer (the spurious-SAT history was the LAZY
+  // mode). ~100x faster than bitblast-internal on the multiplier benchmark, with
+  // identical verdicts. LHD_VERIFY_BV_SOLVER (local experiment only) overrides it.
+  if (!has_mem) {
+    const char* bvs = std::getenv("LHD_VERIFY_BV_SOLVER");
+    if (bvs != nullptr && *bvs != '\0') {
+      solver.setOption("bv-solver", bvs);
+    } else {
+      solver.setOption("bv-solver", "bitblast");
+      solver.setOption("bitblast", "eager");
+      solver.setOption("bv-sat-solver", "cadical");
     }
   }
-  if (!has_mem) {
-    solver.setOption("bv-solver", "bitblast-internal");
+  // LHD_VERIFY_CVC5_OPTS="name=value;name=value" (local experiment only).
+  if (const char* xo = std::getenv("LHD_VERIFY_CVC5_OPTS"); xo != nullptr) {
+    std::string_view rest{xo};
+    while (!rest.empty()) {
+      auto semi = rest.find(';');
+      auto item = rest.substr(0, semi);
+      if (auto eq = item.find('='); eq != std::string_view::npos) {
+        solver.setOption(std::string{item.substr(0, eq)}, std::string{item.substr(eq + 1)});
+      }
+      rest = semi == std::string_view::npos ? std::string_view{} : rest.substr(semi + 1);
+    }
   }
   configure_solver(solver,
                    solver_profile("verify"),
@@ -13393,6 +13789,10 @@ static Verify_result prove_properties_impl(hhds::Graph* design, const Lec_option
     cvc5::Term  t;
   };
   std::vector<Wit_in> wit_ins;
+  // Debug (LHD_WITNESS_DUMP=<file>): on a cvc5 refute, every input and every
+  // register value of the trace, per cycle, for replay on the ABC model.
+  const char*                   wdump = std::getenv("LHD_WITNESS_DUMP");
+  std::vector<Io_name_map<Val>> dbg_state;
   // Structured trace up to (and including) the violating cycle — model values
   // are only valid right after the SAT checkSatAssuming, so extract eagerly.
   auto                build_input_trace = [&](int up_to_cyc) -> Witness_trace {
@@ -13458,6 +13858,23 @@ static Verify_result prove_properties_impl(hhds::Graph* design, const Lec_option
   mon_hist.reserve(static_cast<size_t>(total_cyc));
   std::vector<bool> mon_hist_noted(monitors != nullptr ? monitors->size() : 0, false);
 
+  // Per-property cone keys are built once EVERY property is registered: a
+  // monitor that reads `past(x, n)` registers its properties only from cycle n,
+  // and a key must cover every assumption in force.
+  int cone_key_cyc = 0;
+  for (size_t mi = 0; monitors != nullptr && mi < monitors->size(); ++mi) {
+    for (const auto& b : (*monitors)[mi].binds) {
+      cone_key_cyc = std::max(cone_key_cyc, b.delay);
+    }
+  }
+  cone_key_cyc = std::min(cone_key_cyc, std::max(0, total_cyc - 1));
+  std::string vac_base;  // assume cones + setup + depth, for the vacuity memo
+  // ABC bmc3 pre-pass: opt-in (formal.abc, or a reuse/pdr/abc_mem option).
+  // LHD_VERIFY_ABC=0 forces it off.
+  const char* abc_env     = std::getenv("LHD_VERIFY_ABC");
+  const bool  abc_bmc_on  = (abc_env == nullptr || std::string_view{abc_env} != "0")
+                         && (opts.abc || opts.seq_reuse != 0 || opts.pdr || opts.abc_mem);
+  absl::flat_hash_set<std::string> abc_vac_ok;  // scopes whose assumes ABC showed consistent over the window
   for (int cyc = 0; cyc < total_cyc; ++cyc) {
     const bool checking = phase_run ? (cyc >= reset_hold) : true;
 
@@ -13489,6 +13906,9 @@ static Verify_result prove_properties_impl(hhds::Graph* design, const Lec_option
     }
     if (mining_on) {
       cyc_state.push_back(state);  // the state view AT this cycle (base-proof frames)
+    }
+    if (wdump != nullptr) {
+      dbg_state.push_back(state);
     }
 
     Io_name_map<Val> sh;
@@ -13550,6 +13970,113 @@ static Verify_result prove_properties_impl(hhds::Graph* design, const Lec_option
       }
       std::sort(obs.begin(), obs.end(), [](const Ob& a, const Ob& b) { return a.k.occ < b.k.occ; });
 
+      // Unchecked assumes of THIS cycle go in first. Asserts are checked in
+      // occurrence order, so an assert placed before an env assume (Ibex's core
+      // before its ibex_env wrapper) was checked without that cycle's assume,
+      // and could be refuted by a trace that breaks it (SVA: assumes hold in
+      // every cycle, the failing one included).
+      if (!opts.ignore_assumes) {
+        for (const auto& ob : obs) {
+          if (!is_assume_kind(ob.k.kind)) {
+            continue;
+          }
+          const int   occ_key = occ_base + ob.k.occ;
+          std::string aclass;
+          std::string scope = mon != nullptr ? mon->scope : std::string{};
+          if (auto it = prop_ix.find(occ_key); it != prop_ix.end()) {
+            aclass = res.props[it->second].aclass;
+            scope  = res.props[it->second].scope;
+          } else {
+            auto ac = occ_aclass.find(occ_key);
+            aclass  = ac != occ_aclass.end() ? ac->second : std::string{"internal"};
+          }
+          if (!is_unchecked_assume_class(aclass)) {
+            continue;
+          }
+          const int w = ob.cond.width > 0 ? ob.cond.width : 1;
+          assert_scoped(scope, tm.mkTerm(cvc5::Kind::DISTINCT, {fit_to(tm, ob.cond, w), tm.mkBitVector(static_cast<uint32_t>(w), 0)}));
+        }
+      }
+
+      // Batch check, as yosys-smtbmc does: one query for every pending
+      // design-tier obligation of this cycle. UNSAT proves them all at once;
+      // otherwise the per-obligation loop below runs unchanged.
+      // LHD_VERIFY_BATCH=0 turns it off (local experiment knob).
+      absl::flat_hash_set<size_t> batch_done;
+      const char*                 batch_env = std::getenv("LHD_VERIFY_BATCH");
+      if (mon == nullptr && (batch_env == nullptr || std::string_view{batch_env} != "0")) {
+        std::vector<size_t>      bix;
+        std::vector<cvc5::Term>  bads;
+        std::vector<cvc5::Term>  holdv;
+        std::vector<std::string> bkeys;
+        bool                     all_known = true;
+        for (const auto& ob : obs) {
+          auto it = prop_ix.find(occ_base + ob.k.occ);
+          if (it == prop_ix.end()) {
+            all_known = false;  // first cycle: obligations not registered yet
+            break;
+          }
+          const size_t ix = it->second;
+          auto&        pr = res.props[ix];
+          if (pr.kind == "assume" && (opts.ignore_assumes || is_unchecked_assume_class(pr.aclass))) {
+            continue;
+          }
+          const bool now = pr.kind == "assert_always" ? true : checking;
+          if (!now || pr.refuted_at >= 0 || pr.undecided_at >= 0 || (budget_spent() && pr.proven_to >= 0)
+              || !act_of(pr.scope).isNull() || pr.cone_reused || pr.abc_proven || cyc < pr.abc_first_fail) {
+            continue;
+          }
+          const int  w    = ob.cond.width > 0 ? ob.cond.width : 1;
+          cvc5::Term zero = tm.mkBitVector(static_cast<uint32_t>(w), 0);
+          cvc5::Term bad  = tm.mkTerm(cvc5::Kind::EQUAL, {fit_to(tm, ob.cond, w), zero});
+          std::string key;
+          if (opts.verify_cache_lookup) {
+            key = verify_obligation_key(asserted, bad, opts, pr.scope);
+          }
+          bix.push_back(ix);
+          bads.push_back(bad);
+          holdv.push_back(tm.mkTerm(cvc5::Kind::DISTINCT, {fit_to(tm, ob.cond, w), zero}));
+          bkeys.push_back(std::move(key));
+        }
+        if (all_known && !bix.empty()) {
+          // Cache hits are settled here too, so the keys stay consistent run to run.
+          std::vector<size_t> todo;
+          for (size_t i = 0; i < bix.size(); ++i) {
+            if (!bkeys[i].empty() && opts.verify_cache_lookup(bkeys[i])) {
+              res.props[bix[i]].proven_to = cyc;
+              batch_done.insert(bix[i]);
+            } else {
+              todo.push_back(i);
+            }
+          }
+          if (todo.size() >= 2) {
+            std::vector<cvc5::Term> any_bad;
+            for (auto i : todo) {
+              any_bad.push_back(bads[i]);
+            }
+            const auto   tq = std::chrono::steady_clock::now();
+            cvc5::Result r  = budget_check(tm.mkTerm(cvc5::Kind::OR, any_bad));
+            if (r.isUnsat()) {
+              const long long ms = now_ms(tq);
+              for (auto i : todo) {
+                auto& pr      = res.props[bix[i]];
+                pr.proven_to  = cyc;
+                pr.solve_ms  += ms / static_cast<long long>(todo.size());
+                if (opts.verify_cache_store && !bkeys[i].empty()) {
+                  opts.verify_cache_store(std::string{bkeys[i]});
+                }
+                batch_done.insert(bix[i]);
+              }
+            }
+          }
+          for (size_t i = 0; i < bix.size(); ++i) {
+            if (batch_done.contains(bix[i])) {
+              assert_scoped("", holdv[i]);  // frontier fact, as the per-obligation path does
+            }
+          }
+        }
+      }
+
       for (const auto& ob : obs) {
         size_t    ix;
         const int occ_key = occ_base + ob.k.occ;
@@ -13591,6 +14118,9 @@ static Verify_result prove_properties_impl(hhds::Graph* design, const Lec_option
               pr.cone_nodes = cit->second.nodes;
               pr.cone_state = cit->second.state;
             }
+            if (auto dit = eo.prop_cone_digest.find(ob.k.occ); dit != eo.prop_cone_digest.end()) {
+              pr.cone_digest = dit->second;
+            }
           } else if (auto cit = eo.prop_cone_inputs.find(ob.k.occ); cit != eo.prop_cone_inputs.end()) {
             // A sidecar block is its own monitor graph, so its own cone stops
             // at the bind boundary. Continue in the DESIGN: each monitor input
@@ -13614,6 +14144,26 @@ static Verify_result prove_properties_impl(hhds::Graph* design, const Lec_option
             const auto cs = cone_over(seeds);
             pr.cone_nodes = cs.nodes + prim_inputs;
             pr.cone_state = cs.state;
+            // Sidecar digest: the monitor's own cone, the binds it reaches, and
+            // the design cone behind those binds.
+            if (auto dit = eo.prop_cone_digest.find(ob.k.occ); dit != eo.prop_cone_digest.end()) {
+              std::vector<std::string> bind_names;
+              for (const auto& ident : cit->second) {
+                for (const auto& b : mon->binds) {
+                  if (b.ident == ident) {
+                    bind_names.push_back(ident + "=" + b.key);
+                    break;
+                  }
+                }
+              }
+              std::sort(bind_names.begin(), bind_names.end());
+              std::string d = "mon:" + dit->second + "|binds:";
+              for (const auto& bn : bind_names) {
+                d += bn + ",";
+              }
+              d += "|design:" + cone_digest_over(seeds);
+              pr.cone_digest = std::to_string(std::hash<std::string>{}(d)) + "-" + dit->second.substr(0, 8);
+            }
           }
           if (mon != nullptr) {
             pr.block = mon->block;
@@ -13690,6 +14240,17 @@ static Verify_result prove_properties_impl(hhds::Graph* design, const Lec_option
           // constrains cycles where it was just PROVEN (rule A). A refute is a
           // hard error; an unknown assume stops being checked and never
           // constrains anything.
+        }
+        if (batch_done.contains(ix)) {
+          continue;  // settled by the batch check above
+        }
+        if (pr.cone_reused || pr.abc_proven || cyc < pr.abc_first_fail) {
+          if (pr.kind == "assert_always" || checking) {
+            // cone unchanged since a full-depth proof, or ABC showed it cannot fail here
+            pr.proven_to = cyc;
+            assert_scoped(pr.scope, holds);
+          }
+          continue;
         }
         const bool check_now = pr.kind == "assert_always" ? true : checking;
         if (!check_now || pr.refuted_at >= 0 || pr.undecided_at >= 0) {
@@ -13773,6 +14334,33 @@ static Verify_result prove_properties_impl(hhds::Graph* design, const Lec_option
           assert_scoped(pr.scope, holds);
         } else if (sat) {
           pr.refuted_at = cyc;
+          if (wdump != nullptr) {
+            auto esc = [](std::string_view s) {
+              std::string o;
+              for (unsigned char c : s) {
+                o += (c <= ' ' || c == '%' || c > '~') ? std::format("%{:02x}", c) : std::string(1, static_cast<char>(c));
+              }
+              return o;
+            };
+            if (std::FILE* f = std::fopen(wdump, "a"); f != nullptr) {
+              std::fprintf(f, "P %s %d\n", esc(pr.msg).c_str(), cyc);
+              for (const auto& wi : wit_ins) {
+                if (wi.cyc <= cyc) {
+                  if (cvc5::Term v = solver.getValue(wi.t); !v.isNull()) {
+                    std::fprintf(f, "I %d %s %s\n", wi.cyc, esc(wi.name).c_str(), v.getBitVectorValue(2).c_str());
+                  }
+                }
+              }
+              for (size_t c = 0; c < dbg_state.size() && static_cast<int>(c) <= cyc; ++c) {
+                for (const auto& [key, v] : dbg_state[c]) {
+                  if (cvc5::Term x = solver.getValue(v.term); !x.isNull() && x.getSort().isBitVector()) {
+                    std::fprintf(f, "S %zu %s %s\n", c, esc(key).c_str(), x.getBitVectorValue(2).c_str());
+                  }
+                }
+              }
+              std::fclose(f);
+            }
+          }
           pr.trace      = build_input_trace(cyc);  // model valid only until the next assert
           pr.witness    = witness_string(pr.trace);
           any_refuted   = true;
@@ -13893,6 +14481,370 @@ static Verify_result prove_properties_impl(hhds::Graph* design, const Lec_option
       process_props(me, /*occ_base=*/static_cast<int>((mi + 1) * 100000), &mon, /*unanchored=*/-1);
     }
 
+    if (cyc == cone_key_cyc && opts.verify_cache_lookup) {
+      // Per-property cone keys: an assert whose cone, assumption cones and run
+      // setup all match an earlier full-depth proof keeps that proof. Its truth
+      // only depends on those cones, so edits elsewhere cannot change it.
+      std::vector<std::string> adig;
+      for (const auto& pr : res.props) {
+        if (pr.kind == "assume") {
+          adig.push_back(pr.cone_digest.empty() ? std::string{"?"} : pr.cone_digest);
+        }
+      }
+      std::sort(adig.begin(), adig.end());
+      std::vector<std::string> rnames;
+      for (const auto& [nm, neg] : reset_negset) {
+        rnames.push_back(std::format("{}:{}", nm, neg ? 1 : 0));
+      }
+      std::sort(rnames.begin(), rnames.end());
+      std::string setup = std::format("hold={};run={};rst={};ia={};", reset_hold, phase_run ? 1 : 0, phase_reset ? 1 : 0,
+                                      opts.ignore_assumes ? 1 : 0);
+      for (const auto& r : rnames) {
+        setup += r + ",";
+      }
+      for (const auto& a : adig) {
+        setup += "a:" + a + ",";
+      }
+      if (std::find(adig.begin(), adig.end(), "?") == adig.end()) {
+        vac_base = "pvac1:" + std::to_string(std::hash<std::string>{}(setup)) + ":cyc" + std::to_string(total_cyc) + ":";
+      }
+      for (auto& pr : res.props) {
+        if (pr.kind == "assume" || pr.cone_digest.empty()) {
+          continue;
+        }
+        const std::string base = "pcone3:" + pr.kind + ":" + pr.scope + ":" + pr.cone_digest + ":"
+                                 + std::to_string(std::hash<std::string>{}(setup));
+        pr.cone_key     = base + ":cyc" + std::to_string(total_cyc);
+        pr.cone_key_any = base + ":any";
+        // An all-cycles proof covers any depth; a bounded one only its own.
+        if (opts.verify_cache_lookup(pr.cone_key_any)) {
+          pr.cone_reused     = true;
+          pr.cone_reused_any = true;
+        } else if (opts.verify_cache_lookup(pr.cone_key)) {
+          pr.cone_reused = true;
+        }
+        if (pr.cone_reused) {
+          pr.reuse_by = "hash";
+        }
+      }
+    }
+
+    // ABC bmc3 pre-pass: one cycle as an AIG with latches, unrolled by ABC. A
+    // property it shows cannot fail is skipped below; one that first fails at
+    // cycle c is skipped before c, so cvc5 only checks from c (and finds the
+    // trace). Memories, uninterpreted cells and history binds stay with cvc5.
+    // Not when a cvc5-only strategy was asked for (a named case split, invariant mining).
+    const bool split_named = !verify_split.name.empty() && opts.split != "auto";
+    if (cyc == 0 && cone_key_cyc == 0 && (mem.empty() || opts.abc_mem) && abc_bmc_on && !split_named && !mining_on) {
+      const auto       tabc = std::chrono::steady_clock::now();
+      Seq_model        sm;
+      bool             ok = true;
+      Io_name_map<Val> ash, acur;
+      for (const auto& [name, info] : ins) {
+        ash[name] = Val{tm.mkConst(tm.mkBitVectorSort(static_cast<uint32_t>(info.w)), "ab_i_" + name), info.w, info.sgn};
+        if (auto rit = reset_negset.find(name); rit != reset_negset.end()) {
+          const cvc5::Term z  = tm.mkBitVector(static_cast<uint32_t>(info.w), 0);
+          const cvc5::Term o  = tm.mkTerm(cvc5::Kind::BITVECTOR_NOT, {z});
+          const cvc5::Term on = rit->second ? z : o;  // asserted level
+          const cvc5::Term of = rit->second ? o : z;
+          sm.pins.push_back(Seq_pin{ash[name].term, solver.simplify(on), solver.simplify(phase_reset ? on : of)});
+        }
+      }
+      for (const auto& [key, v] : state) {
+        acur[key] = Val{tm.mkConst(tm.mkBitVectorSort(static_cast<uint32_t>(v.width)), "ab_s_" + key), v.width, v.is_signed};
+        ash[key]  = acur[key];
+      }
+      Io_name_map<cvc5::Term> amem;
+      Io_name_map<Val>        areads;
+      Encoded                 ae = enc.encode(design, &ash, "ab_", &amem, &areads);
+      ok                         = ae.ok && (ae.equalities.empty() || opts.abc_mem);
+      sm.inexact                 = !mem.empty() || !ae.equalities.empty() || !reads.empty();
+      if (std::getenv("LHD_REUSE_DEBUG") != nullptr) {
+        for (const auto& [k, t] : mem) {
+          std::fprintf(stderr, "abcmem: mem %s sort=%s kind=%s next=%d\n", k.c_str(), t.getSort().toString().c_str(),
+                       std::format("{}", static_cast<int>(t.getKind())).c_str(), ae.next_mem.contains(k) ? 1 : 0);
+        }
+        for (const auto& [k, v] : reads) {
+          std::fprintf(stderr, "abcmem: read %s w=%d next=%d\n", k.c_str(), v.width, ae.next_read.contains(k) ? 1 : 0);
+        }
+        for (const auto& [l, r] : ae.equalities) {
+          std::fprintf(stderr, "abcmem: eq %s = %s\n", l.toString().substr(0, 60).c_str(), r.toString().substr(0, 100).c_str());
+        }
+      }
+      if (ok && opts.abc_mem) {
+        // Small memories become registers (one per entry bit) and asynchronous
+        // reads are bound to their SELECT, so the model stays exact.
+        for (const auto& [key, nx] : ae.next_mem) {
+          const std::string want = "ab_" + key;
+          cvc5::Term        cur;
+          std::vector<cvc5::Term> st{nx};
+          std::unordered_set<cvc5::Term> seen;
+          while (!st.empty() && cur.isNull()) {
+            auto t = st.back();
+            st.pop_back();
+            if (!seen.insert(t).second) {
+              continue;
+            }
+            if (t.getKind() == cvc5::Kind::CONSTANT && t.getSort().isArray() && t.hasSymbol() && t.getSymbol() == want) {
+              cur = t;
+            }
+            for (const auto& c : t) {
+              st.push_back(c);
+            }
+          }
+          const auto so = nx.getSort();
+          const auto aw = so.getArrayIndexSort().getBitVectorSize();
+          const auto dw = so.getArrayElementSort().getBitVectorSize();
+          if (!cur.isNull() && aw <= 8 && (uint64_t{1} << aw) * dw <= 16384) {
+            sm.mems.push_back(Seq_mem{cur, nx});
+          }
+        }
+        for (const auto& [lhs, rhs] : ae.equalities) {
+          if (lhs.getKind() == cvc5::Kind::CONSTANT && lhs.getSort().isBitVector()) {
+            sm.binds.emplace_back(lhs, rhs);
+          }
+        }
+      }
+      for (const auto& [key, v] : state) {
+        if (!ok) {
+          break;
+        }
+        auto nit = ae.outputs.find("\x01nxt:" + key);
+        sm.regs.push_back(Seq_reg{acur[key].term, nit != ae.outputs.end() ? fit_to(tm, nit->second, v.width) : acur[key].term,
+                                  v.term.getKind() == cvc5::Kind::CONST_BITVECTOR ? v.term : cvc5::Term(),
+                                  phase_run && bank_hold_keys.contains(key)});
+      }
+      std::vector<std::pair<size_t, std::string>> env_scope;  // env index -> scope
+      std::vector<size_t>                         asked;      // Seq_model::props index -> res.props index
+      // Cross-version store: one directory per property identity. Line numbers
+      // move between versions, so the identity is the label (msg), else the
+      // property's position within its instance.
+      std::vector<std::string> store_of(res.props.size());
+      if (opts.seq_reuse != 0 || opts.pdr) {
+        std::map<std::string, int> nth;
+        for (size_t i = 0; i < res.props.size(); ++i) {
+          const auto&       pr   = res.props[i];
+          const std::string base = std::format("{}|{}{}|{}|{}|{}|", pr.kind, phase_run ? 1 : 0, phase_reset ? 1 : 0, pr.scope,
+                                               pr.block, pr.instance);
+          const std::string id   = pr.msg.empty() ? base + "#" + std::to_string(nth[base]++) : base + "m:" + pr.msg;
+          if (!opts.reuse_dir.empty()) {
+            uint64_t h = 1469598103934665603ULL;  // FNV-1a: stable across builds
+            for (unsigned char c : id) {
+              h = (h ^ c) * 1099511628211ULL;
+            }
+            store_of[i] = std::format("{}/{:016x}", opts.reuse_dir, h);
+            std::error_code ec;
+            std::filesystem::create_directories(store_of[i], ec);
+          }
+        }
+      }
+      auto add_props = [&](const Encoded& eo, int occ_base) {
+        std::vector<std::pair<int, Val>> conds;
+        for (const auto& [name, v] : eo.outputs) {
+          if (auto k = parse_prop_key(name)) {
+            conds.emplace_back(occ_base + k->occ, v);
+          }
+        }
+        std::sort(conds.begin(), conds.end(), [](const auto& a, const auto& b) { return a.first < b.first; });
+        for (const auto& [occ, v] : conds) {
+          auto it = prop_ix.find(occ);
+          if (it == prop_ix.end()) {
+            continue;
+          }
+          const auto&      pr    = res.props[it->second];
+          const int        w     = v.width > 0 ? v.width : 1;
+          const cvc5::Term holds = tm.mkTerm(cvc5::Kind::DISTINCT, {fit_to(tm, v, w), tm.mkBitVector(static_cast<uint32_t>(w), 0)});
+          if (pr.kind == "assume") {
+            if (!opts.ignore_assumes && is_unchecked_assume_class(pr.aclass)) {
+              env_scope.emplace_back(sm.envs.size(), pr.scope);
+              sm.envs.push_back(holds);
+            }
+            continue;  // a checked assume is left out: fewer constraints, still sound
+          }
+          if (pr.cone_reused || pr.refuted_at >= 0) {
+            continue;
+          }
+          Seq_prop sp{holds, {}, pr.kind == "assert_always"};
+          sp.name  = pr.msg;
+          sp.store = store_of[it->second];
+          sp.reuse = opts.seq_reuse;
+          sp.pdr   = opts.pdr;
+          sm.props.push_back(std::move(sp));
+          asked.push_back(it->second);
+        }
+      };
+      if (ok) {
+        add_props(ae, 0);
+      }
+      for (size_t mi = 0; ok && monitors != nullptr && mi < monitors->size(); ++mi) {
+        const Monitor& mon = (*monitors)[mi];
+        if (mon.graph == nullptr) {
+          continue;
+        }
+        Io_name_map<Val> msh;
+        for (const auto& b : mon.binds) {
+          const Io_name_map<Val>& src = b.src == Monitor::Bind::Src::input    ? ash
+                                        : b.src == Monitor::Bind::Src::state ? acur
+                                                                               : ae.outputs;
+          auto it = src.find(b.key);
+          if (b.delay != 0 || it == src.end()) {
+            ok = false;
+            break;
+          }
+          msh[b.ident] = it->second;
+        }
+        if (!ok) {
+          break;
+        }
+        Encoded me = enc.encode(mon.graph, &msh, "ab_m" + std::to_string(mi) + "_", nullptr, nullptr);
+        ok         = me.ok && me.equalities.empty();
+        if (ok) {
+          add_props(me, static_cast<int>((mi + 1) * 100000));
+        }
+      }
+      if (ok && !sm.props.empty()) {
+        for (size_t pi = 0; pi < sm.props.size(); ++pi) {
+          const auto& scope = res.props[asked[pi]].scope;
+          for (const auto& [ei, es] : env_scope) {
+            if (es.empty() || es == scope) {
+              sm.props[pi].envs.push_back(static_cast<int>(ei));
+            }
+          }
+        }
+        // Assume consistency over the whole window, per scope (the vacuity check).
+        std::vector<std::string> vscopes;
+        for (const auto& [ei, es] : env_scope) {
+          if (std::find(vscopes.begin(), vscopes.end(), es) == vscopes.end()) {
+            vscopes.push_back(es);
+          }
+        }
+        const size_t n_asked = sm.props.size();
+        for (const auto& vs : vscopes) {
+          Seq_prop vp{tm.mkTrue(), {}, false, 1, -1};
+          for (const auto& [ei, es] : env_scope) {
+            if (es.empty() || es == vs) {
+              vp.envs.push_back(static_cast<int>(ei));
+            }
+          }
+          sm.props.push_back(std::move(vp));
+        }
+        sm.reset_hold        = phase_run ? reset_hold : 0;
+        sm.frames            = total_cyc;
+        sm.pdr_s             = opts.pdr_s;
+        sm.run_id            = opts.reuse_run;
+        sm.sec_s             = opts.sec_s;
+        for (const auto& [name, info] : ins) {  // inputs reported in a trace
+          if (!reset_negset.contains(name)) {
+            sm.watch.push_back(ash[name].term);
+          }
+        }
+        // ABC gets a quarter of the time budget (at least 1 s), shared by both
+        // rounds, so a property it cannot settle still leaves cvc5 most of it.
+        const int64_t abc_ms = opts.abc_budget_s > 0
+                                   ? static_cast<int64_t>(opts.abc_budget_s) * 1000
+                                   : std::max<int64_t>(1000, static_cast<int64_t>(std::max(1, opts.timeout)) * 250);
+        const auto    first  = abc_seq_bmc(sm, abc_ms);
+        int           n_clean = 0, n_fail = 0, n_cex = 0;
+        for (size_t vi = 0; vi < vscopes.size(); ++vi) {
+          const auto& a = first[n_asked + vi];
+          if (a.exact && a.frame >= 0) {
+            abc_vac_ok.insert(vscopes[vi]);
+          }
+        }
+        // Round 2: a failure that also keeps every assume true to the end is a
+        // real counterexample (cvc5's semantics); take its trace from ABC.
+        Seq_model cm = sm;
+        cm.props.clear();
+        std::vector<size_t> cex_of;  // cm.props index -> sm.props index
+        auto bin_to_dec = [](std::string_view b) {
+          std::string d = "0";
+          for (char c : b) {
+            int carry = c == '1' ? 1 : 0;
+            for (size_t k = d.size(); k-- > 0;) {
+              const int v = (d[k] - '0') * 2 + carry;
+              d[k]        = static_cast<char>('0' + v % 10);
+              carry       = v / 10;
+            }
+            if (carry != 0) {
+              d.insert(d.begin(), static_cast<char>('0' + carry));
+            }
+          }
+          return d;
+        };
+        // A trace from ABC (round 2, or a replayed one) makes the property refuted.
+        auto take_trace = [&](Prop_result& pr, int at, const std::vector<std::vector<std::string>>& values) {
+          pr.refuted_at = at;
+          any_refuted   = true;
+          ++n_cex;
+          if (opts.witness) {
+            Witness_trace tr;
+            tr.reset_cycles  = phase_run ? reset_hold : 0;
+            tr.diverge_cycle = at;
+            tr.cycles.resize(static_cast<size_t>(at) + 1);
+            for (int c = 0; c <= at; ++c) {
+              const bool rst                                   = phase_reset || (phase_run && c < reset_hold);
+              tr.cycles[static_cast<size_t>(c)].reset_asserted = rst;
+              size_t wi                                        = 0;
+              for (const auto& [name, info] : ins) {
+                std::string val;
+                if (auto rit = reset_negset.find(name); rit != reset_negset.end()) {
+                  const bool zero_lvl = rst ? rit->second : !rit->second;
+                  val = zero_lvl ? std::string{"0"} : bin_to_dec(std::string(static_cast<size_t>(info.w), '1'));
+                } else {
+                  val = bin_to_dec(values[static_cast<size_t>(c)][wi++]);
+                }
+                tr.cycles[static_cast<size_t>(c)].inputs.push_back(Witness_in{name, val, info.w});
+              }
+              auto& in = tr.cycles[static_cast<size_t>(c)].inputs;
+              std::sort(in.begin(), in.end(), [](const Witness_in& x, const Witness_in& y) { return x.name < y.name; });
+            }
+            pr.trace   = std::move(tr);
+            pr.witness = witness_string(pr.trace);
+          }
+        };
+        for (size_t pi = 0; pi < n_asked; ++pi) {
+          auto& pr = res.props[asked[pi]];
+          if (!first[pi].how.empty() && first[pi].how != "pdr") {
+            pr.reuse_by = first[pi].how;
+          }
+          if (first[pi].frame == kSeqClean) {
+            pr.abc_proven    = true;
+            pr.abc_unbounded = first[pi].unbounded;
+            ++n_clean;
+          } else if (first[pi].frame >= 0 && first[pi].how == "cex" && first[pi].exact
+                     && first[pi].values.size() == static_cast<size_t>(first[pi].frame) + 1) {
+            ++n_fail;
+            take_trace(pr, first[pi].frame, first[pi].values);  // replayed: no second round
+          } else if (first[pi].frame >= 0) {
+            pr.abc_first_fail = first[pi].frame;
+            ++n_fail;
+            if (first[pi].exact) {
+              Seq_prop cp = sm.props[pi];
+              cp.mode     = 2;
+              cp.at       = first[pi].frame;
+              cm.props.push_back(std::move(cp));
+              cex_of.push_back(pi);
+            }
+          }
+        }
+        if (!cm.props.empty()) {
+          const auto second = abc_seq_bmc(cm, std::max<int64_t>(1000, abc_ms - now_ms(tabc)));
+          for (size_t ci = 0; ci < cm.props.size(); ++ci) {
+            const auto& a = second[ci];
+            if (!a.exact || a.frame < 0 || a.values.size() != static_cast<size_t>(cm.props[ci].at) + 1) {
+              continue;  // cvc5 checks it from the first failing cycle on
+            }
+            take_trace(res.props[asked[cex_of[ci]]], cm.props[ci].at, a.values);
+          }
+        }
+        if (solve_budget_on) {
+          solve_spent_ms += now_ms(tabc);  // ABC time comes out of the same total budget
+        }
+        res.detail += std::format("; abc bmc3 pre-pass: {} of {} proven, {} refuted with a trace, {} left to cvc5 ({} ms)",
+                                  n_clean, n_asked, n_cex, n_fail - n_cex, now_ms(tabc));
+      }
+    }
+
     // Thread next state (bank flops HOLD through the reset prologue).
     Io_name_map<Val> nstate;
     for (const auto& [name, v] : e.outputs) {
@@ -13910,6 +14862,14 @@ static Verify_result prove_properties_impl(hhds::Graph* design, const Lec_option
     state = std::move(nstate);
     mem   = std::move(e.next_mem);
     reads = std::move(e.next_read);
+  }
+  if (opts.verify_cache_store) {
+    for (const auto& pr : res.props) {
+      if (!pr.cone_key.empty() && !pr.cone_reused && pr.refuted_at < 0 && pr.undecided_at < 0
+          && pr.proven_to == total_cyc - 1) {
+        opts.verify_cache_store(std::string{pr.cone_key});  // proven to the full bound
+      }
+    }
   }
 
   // ── P3 mining: harvest candidates → base-prove them; the V3 rung below then
@@ -14252,8 +15212,83 @@ static Verify_result prove_properties_impl(hhds::Graph* design, const Lec_option
         cand.push_back(i);
       }
     }
+    // Induction memo: keyed on the cone keys of the whole candidate set and the
+    // time budget. A candidate an earlier run dropped (step counterexample or
+    // out of time) is left out: that only loses an all-cycles upgrade, never
+    // adds a proof.
+    std::string ind_set;
+    if (!cand.empty() && mined_rep.empty() && opts.verify_cache_lookup) {
+      std::vector<std::string> bases;
+      for (size_t ix : cand) {
+        const auto& k = res.props[ix].cone_key_any;
+        if (k.size() <= 4) {
+          bases.clear();
+          break;
+        }
+        bases.push_back(k.substr(0, k.size() - 4));
+      }
+      if (!bases.empty()) {
+        std::sort(bases.begin(), bases.end());
+        std::string all = std::format("t={},{};", opts.timeout, opts.min_timeout);
+        for (const auto& b : bases) {
+          all += b + "|";
+        }
+        ind_set = "pind1:" + std::to_string(std::hash<std::string>{}(all)) + ":";
+        if (opts.verify_cache_lookup(ind_set + "done")) {
+          std::erase_if(cand, [&](size_t ix) {
+            const auto& k = res.props[ix].cone_key_any;
+            return opts.verify_cache_lookup(ind_set + "drop:" + k.substr(0, k.size() - 4));
+          });
+          ind_set.clear();  // already recorded
+        }
+      }
+    }
+    // A reused all-cycles proof is already unbounded: nothing to upgrade. Taken
+    // out after the memo key, so the key sees the same set every run.
+    std::erase_if(cand, [&](size_t ix) { return res.props[ix].cone_reused_any || res.props[ix].abc_unbounded; });
     if (!cand.empty() || mine_budget_left) {
-      solver.push();
+      // Induction gets its own solver unless mined candidates join it: the step
+      // frames never read the unroll, and sharing the solver made the first
+      // eager check bit-blast every unrolled cycle.
+      std::optional<cvc5::Solver> iso;
+      if (mined_rep.empty() && !has_mem) {
+        iso.emplace(tm);
+        iso->setLogic("QF_BV");
+        if (opts.timeout > 0) {
+          iso->setOption("tlimit-per", std::to_string(static_cast<long long>(opts.timeout) * 1000));
+        }
+        if (opts.compile_resource_limit > 0) {
+          iso->setOption("rlimit-per", std::to_string(opts.compile_resource_limit));
+        }
+        if (const char* bvs = std::getenv("LHD_VERIFY_BV_SOLVER"); bvs != nullptr && *bvs != '\0') {
+          iso->setOption("bv-solver", bvs);
+        } else {
+          iso->setOption("bv-solver", "bitblast");
+          iso->setOption("bitblast", "eager");
+          iso->setOption("bv-sat-solver", "cadical");
+        }
+      }
+      cvc5::Solver& rs         = iso ? *iso : solver;
+      auto          rung_check = [&](const cvc5::Term& bad, const cvc5::Term& act) -> cvc5::Result {
+        if (!iso) {
+          return budget_check(bad, act);
+        }
+        if (acc != nullptr) {
+          ++acc->checks;
+        }
+        if (solve_budget_on) {
+          const long long remaining = solve_budget_ms - solve_spent_ms;
+          last_check_floored        = remaining < min_ms;
+          rs.setOption("tlimit-per", std::to_string(std::max<long long>(min_ms, remaining)));
+        }
+        const auto   tq = std::chrono::steady_clock::now();
+        cvc5::Result r  = act.isNull() ? rs.checkSatAssuming(bad) : rs.checkSatAssuming({bad, act});
+        if (solve_budget_on) {
+          solve_spent_ms += now_ms(tq);
+        }
+        return r;
+      };
+      rs.push();
       // Frame-0 free state; frame-1 state pinned to frame-0's next-state.
       // Step-frame inputs are free EXCEPT the primary resets, which are pinned
       // to their DEASSERTED level in the after_reset phase: the step then
@@ -14273,7 +15308,7 @@ static Verify_result prove_properties_impl(hhds::Graph* design, const Lec_option
               cvc5::Term lvl = drive_zero
                                    ? tm.mkBitVector(static_cast<uint32_t>(info.w), 0)
                                    : tm.mkTerm(cvc5::Kind::BITVECTOR_NOT, {tm.mkBitVector(static_cast<uint32_t>(info.w), 0)});
-              solver.assertFormula(tm.mkTerm(cvc5::Kind::EQUAL, {t, lvl}));
+              rs.assertFormula(tm.mkTerm(cvc5::Kind::EQUAL, {t, lvl}));
             }
           }
           s[name] = Val{t, info.w, info.sgn};
@@ -14291,6 +15326,9 @@ static Verify_result prove_properties_impl(hhds::Graph* design, const Lec_option
       Io_name_map<Val>              freads;
       // occ_key -> per-frame cond Val (design + monitor obligations alike).
       absl::flat_hash_map<int, Val> cond_f[2];
+      // Per-frame views, so a `past(x, n)` bind reads frame f - n, exactly as
+      // the BMC unroll above reads cycle cyc - n.
+      Io_name_map<Val>              snap_in[2], snap_state[2], snap_out[2];
       bool                          ind_ok = true;
       for (int f = 0; f < 2 && ind_ok; ++f) {
         Io_name_map<Val> fsh = frame_inputs(f);
@@ -14303,7 +15341,12 @@ static Verify_result prove_properties_impl(hhds::Graph* design, const Lec_option
           break;
         }
         for (const auto& [l, r] : fe.equalities) {
-          solver.assertFormula(tm.mkTerm(cvc5::Kind::EQUAL, {l, r}));
+          rs.assertFormula(tm.mkTerm(cvc5::Kind::EQUAL, {l, r}));
+        }
+        snap_in[f]    = fsh;
+        snap_state[f] = fstate;
+        for (const auto& [name, v] : fe.outputs) {
+          snap_out[f][name] = v;
         }
         auto collect = [&](const Encoded& eo, int occ_base) {
           for (const auto& [name, v] : eo.outputs) {
@@ -14321,17 +15364,23 @@ static Verify_result prove_properties_impl(hhds::Graph* design, const Lec_option
           Io_name_map<Val> msh;
           bool             ok = true;
           for (const auto& b : mon.binds) {
-            const Val* v = nullptr;
+            // A `past(x, n)` bind reads frame f - n. Before frame 0 the step has
+            // no history, so it reads a FRESH free value: the step must then hold
+            // for any history (sound). Reading the current frame instead turned
+            // `x == past(x, 1)` into `x == x` and proved it unbounded.
+            const int  sf = f - b.delay;
+            const int  vf = sf >= 0 ? sf : f;  // frame whose value (or width) is used
+            const Val* v  = nullptr;
             if (b.src == Monitor::Bind::Src::state) {
-              if (auto it = fstate.find(b.key); it != fstate.end()) {
+              if (auto it = snap_state[vf].find(b.key); it != snap_state[vf].end()) {
                 v = &it->second;
               }
             } else if (b.src == Monitor::Bind::Src::input) {
-              if (auto it = fsh.find(b.key); it != fsh.end()) {
+              if (auto it = snap_in[vf].find(b.key); it != snap_in[vf].end()) {
                 v = &it->second;
               }
             } else {
-              if (auto it = fe.outputs.find(b.key); it != fe.outputs.end()) {
+              if (auto it = snap_out[vf].find(b.key); it != snap_out[vf].end()) {
                 v = &it->second;
               }
             }
@@ -14339,7 +15388,14 @@ static Verify_result prove_properties_impl(hhds::Graph* design, const Lec_option
               ok = false;
               break;
             }
-            msh[b.ident] = *v;
+            if (sf >= 0) {
+              msh[b.ident] = *v;
+            } else {
+              const uint32_t w = static_cast<uint32_t>(v->width > 0 ? v->width : 1);
+              msh[b.ident]     = Val{tm.mkConst(tm.mkBitVectorSort(w), std::format("kh{}_m{}_{}_d{}", f, mi, b.ident, b.delay)),
+                                     v->width,
+                                     v->is_signed};
+            }
           }
           if (!ok) {
             continue;  // best-effort: this monitor's props just stay bounded
@@ -14349,7 +15405,7 @@ static Verify_result prove_properties_impl(hhds::Graph* design, const Lec_option
             continue;
           }
           for (const auto& [l, r] : me.equalities) {
-            solver.assertFormula(tm.mkTerm(cvc5::Kind::EQUAL, {l, r}));
+            rs.assertFormula(tm.mkTerm(cvc5::Kind::EQUAL, {l, r}));
           }
           collect(me, static_cast<int>((mi + 1) * 100000));
         }
@@ -14361,7 +15417,7 @@ static Verify_result prove_properties_impl(hhds::Graph* design, const Lec_option
           for (const auto& [name, v] : fe.outputs) {
             if (name.rfind("\x01nxt:", 0) == 0) {
               cvc5::Term s = tm.mkConst(tm.mkBitVectorSort(static_cast<uint32_t>(v.width)), "ks1_" + name.substr(5));
-              solver.assertFormula(tm.mkTerm(cvc5::Kind::EQUAL, {s, fit_to(tm, v, v.width)}));
+              rs.assertFormula(tm.mkTerm(cvc5::Kind::EQUAL, {s, fit_to(tm, v, v.width)}));
               ns[name.substr(5)] = Val{s, v.width, v.is_signed};
             }
           }
@@ -14392,7 +15448,7 @@ static Verify_result prove_properties_impl(hhds::Graph* design, const Lec_option
           for (int f = 0; f < 2; ++f) {
             if (auto it = cond_f[f].find(occ_key); it != cond_f[f].end()) {
               cvc5::Term t = truth(it->second);
-              solver.assertFormula(act.isNull() ? t : tm.mkTerm(cvc5::Kind::IMPLIES, {act, t}));
+              rs.assertFormula(act.isNull() ? t : tm.mkTerm(cvc5::Kind::IMPLIES, {act, t}));
             }
           }
         }
@@ -14400,7 +15456,7 @@ static Verify_result prove_properties_impl(hhds::Graph* design, const Lec_option
         if (acc != nullptr) {  // --stats: raw checkSat, not through budget_check/mine_check
           ++acc->checks;
         }
-        cvc5::Result base = solver.checkSat();
+        cvc5::Result base = rs.checkSat();
         if (base.isSat()) {
           // Houdini fixpoint over the candidate set.
           std::vector<size_t> alive;
@@ -14438,20 +15494,22 @@ static Verify_result prove_properties_impl(hhds::Graph* design, const Lec_option
               malive.push_back(i);
             }
           }
+          std::vector<size_t> ind_drops;  // dropped with a real step counterexample
+          bool                ind_exact = alive.size() == cand.size();
           bool changed = true;
           while (changed && (!alive.empty() || !malive.empty())) {
             changed = false;
-            solver.push();
+            rs.push();
             for (size_t ix : alive) {
               // Hypothesis at frame 0, scoped: block B's candidate may not prop
               // up block C's induction (nor vice versa); design-tier candidates
               // stay unconditional hypotheses for everyone.
               const cvc5::Term hact = act_of(res.props[ix].scope);
               cvc5::Term       h    = truth(cond_f[0].at(occ_of(ix)));
-              solver.assertFormula(hact.isNull() ? h : tm.mkTerm(cvc5::Kind::IMPLIES, {hact, h}));
+              rs.assertFormula(hact.isNull() ? h : tm.mkTerm(cvc5::Kind::IMPLIES, {hact, h}));
             }
             for (size_t i : malive) {
-              solver.assertFormula(mc_f0[i]);  // mined hypothesis at frame 0
+              rs.assertFormula(mc_f0[i]);  // mined hypothesis at frame 0
             }
             std::vector<size_t> keep;
             for (size_t ix : alive) {
@@ -14463,12 +15521,13 @@ static Verify_result prove_properties_impl(hhds::Graph* design, const Lec_option
               // dropped (kept only on a definitive UNSAT) — a budget-out only ever
               // loses an unbounded upgrade, never manufactures one.
               const auto trk = std::chrono::steady_clock::now();
-              const bool ok  = budget_check(bad, act_of(res.props[ix].scope)).isUnsat();
+              const cvc5::Result sr = rung_check(bad, act_of(res.props[ix].scope));
               res.props[ix].solve_ms += now_ms(trk);
-              if (ok) {
+              if (sr.isUnsat()) {
                 keep.push_back(ix);
               } else {
                 changed = true;  // dropped: not inductive relative to the set (or out of budget)
+                ind_drops.push_back(ix);
               }
             }
             std::vector<size_t> mkeep;
@@ -14479,7 +15538,7 @@ static Verify_result prove_properties_impl(hhds::Graph* design, const Lec_option
                 changed = true;  // dropped: not inductive relative to the set (or out of mining budget)
               }
             }
-            solver.pop();
+            rs.pop();
             alive  = std::move(keep);
             malive = std::move(mkeep);
           }
@@ -14489,12 +15548,19 @@ static Verify_result prove_properties_impl(hhds::Graph* design, const Lec_option
           for (size_t i : malive) {
             mined_meta[i].inductive = true;
           }
+          if (!ind_set.empty() && ind_exact && opts.verify_cache_store) {
+            for (size_t ix : ind_drops) {
+              const auto& k = res.props[ix].cone_key_any;
+              opts.verify_cache_store(ind_set + "drop:" + k.substr(0, k.size() - 4));
+            }
+            opts.verify_cache_store(ind_set + "done");
+          }
           if ((!alive.empty() || !malive.empty()) && phase_run && !reset_negset.empty()) {
             res.detail += "; induction step holds reset deasserted (unbounded verdicts assume no mid-trace reset)";
           }
         }
       }
-      solver.pop();
+      rs.pop();
     }
   }
 
@@ -14507,6 +15573,9 @@ static Verify_result prove_properties_impl(hhds::Graph* design, const Lec_option
       if (is_unchecked_assume_class(pr.aclass)) {
         continue;
       }
+    }
+    if (pr.abc_unbounded && pr.refuted_at < 0 && pr.undecided_at < 0) {
+      pr.unbounded = true;  // ABC: PDR proof, or a reused all-cycles answer
     }
     if (pr.refuted_at >= 0) {
       // A reachable violation is REFUTED-cex even when the design holds free
@@ -14579,10 +15648,25 @@ static Verify_result prove_properties_impl(hhds::Graph* design, const Lec_option
         break;  // already voided everything; the per-block answers are moot
       }
       cvc5::Term act = act_of(scope);
+      // Vacuity memo: the answer depends only on the assume cones, the setup
+      // and the depth, all in the key. Only a consistent (SAT) answer is kept.
+      const std::string vkey = vac_base.empty() ? std::string{} : vac_base + scope;
+      if (!vkey.empty() && opts.verify_cache_lookup && opts.verify_cache_lookup(vkey)) {
+        continue;
+      }
+      if (abc_vac_ok.contains(scope)) {  // ABC found a trace keeping every assume true
+        if (!vkey.empty() && opts.verify_cache_store) {
+          opts.verify_cache_store(vkey);
+        }
+        continue;
+      }
       if (acc != nullptr) {  // --stats: raw checkSat, not through budget_check/mine_check
         ++acc->checks;
       }
       cvc5::Result r         = act.isNull() ? solver.checkSat() : solver.checkSatAssuming(act);
+      if (r.isSat() && !vkey.empty() && opts.verify_cache_store) {
+        opts.verify_cache_store(vkey);
+      }
       bool         bad_scope = false;
       std::string  why;  // the demoted proofs' reason (Prop_result::undecided_why)
       if (r.isUnsat()) {
@@ -14661,10 +15745,59 @@ static Verify_result prove_properties_impl(hhds::Graph* design, const Lec_option
   // condition and the scope check above has just computed it, so skip; and
   // because an UNSAT frame can also arise for reasons that check does not cover,
   // confirm the pushed frame is SAT before believing any UNSAT answer from it.
-  if (any_guarded && !res.vacuous) {
-    if (solve_budget_on) {
-      solver.setOption("tlimit-per", std::to_string(solve_budget_ms));
+  // Guard memo: a guard's satisfiability on a free frame depends only on its
+  // property's cone, so a "guard can be true" answer is kept per cone key. When
+  // every guarded property hits, skip the check (and the full bit-blast its
+  // first checkSat would cost on a run that reused every proof).
+  auto guard_key = [&](const Prop_result& pr) {
+    return pr.cone_key_any.size() > 4 ? "pguard1:" + pr.cone_key_any.substr(0, pr.cone_key_any.size() - 4) : std::string{};
+  };
+  bool guards_known = any_guarded && opts.verify_cache_lookup;
+  if (guards_known) {
+    for (const auto& [occ, ix] : prop_ix) {
+      const auto& pr = res.props[ix];
+      if (!pr.guarded || pr.verdict == Verdict::Refuted) {
+        continue;
+      }
+      const auto k = guard_key(pr);
+      if (k.empty() || !opts.verify_cache_lookup(k)) {
+        guards_known = false;
+        break;
+      }
     }
+  }
+  if (any_guarded && !res.vacuous && !guards_known) {
+    // A free frame never reads the unroll: give it its own solver, so its first
+    // check does not bit-blast every unrolled cycle.
+    std::optional<cvc5::Solver> gso;
+    if (!has_mem) {
+      gso.emplace(tm);
+      gso->setLogic("QF_BV");
+      if (const char* bvs = std::getenv("LHD_VERIFY_BV_SOLVER"); bvs != nullptr && *bvs != '\0') {
+        gso->setOption("bv-solver", bvs);
+      } else {
+        gso->setOption("bv-solver", "bitblast");
+        gso->setOption("bitblast", "eager");
+        gso->setOption("bv-sat-solver", "cadical");
+      }
+    }
+    cvc5::Solver& gs = gso ? *gso : solver;
+    if (solve_budget_on) {
+      gs.setOption("tlimit-per", std::to_string(solve_budget_ms));
+    } else if (gso && opts.timeout > 0) {
+      gs.setOption("tlimit-per", std::to_string(static_cast<long long>(opts.timeout) * 1000));
+    }
+    auto guard_check = [&](const cvc5::Term& t) -> cvc5::Result {
+      if (!gso) {
+        return budget_check(t);
+      }
+      const auto   tq = std::chrono::steady_clock::now();
+      cvc5::Result r  = gs.checkSatAssuming(t);
+      if (solve_budget_on) {
+        solve_spent_ms += now_ms(tq);
+      }
+      return r;
+    };
     // One extra frame with FRESH symbols everywhere — the same shape as the P1
     // classification probe, and appended after every verdict is settled, so it
     // cannot perturb anything already decided.
@@ -14691,17 +15824,17 @@ static Verify_result prove_properties_impl(hhds::Graph* design, const Lec_option
       // solver exactly, so the diagnosis is unperturbed no matter where this
       // block sits.
       std::vector<std::pair<int, Val>> vg;
-      solver.push();
+      gs.push();
       for (const auto& [l, r] : ve.equalities) {
-        solver.assertFormula(tm.mkTerm(cvc5::Kind::EQUAL, {l, r}));
+        gs.assertFormula(tm.mkTerm(cvc5::Kind::EQUAL, {l, r}));
       }
       // Baseline: if the frame itself cannot be satisfied, "guard is UNSAT here"
       // says nothing about the guard. Report nothing rather than accuse.
       if (acc != nullptr) {  // --stats: raw checkSat, not through budget_check/mine_check
         ++acc->checks;
       }
-      if (!solver.checkSat().isSat()) {
-        solver.pop();
+      if (!gs.checkSat().isSat()) {
+        gs.pop();
         vg.clear();
       }
       // Deterministic order: sort by occ, since `outputs` is a hash map and the
@@ -14731,11 +15864,16 @@ static Verify_result prove_properties_impl(hhds::Graph* design, const Lec_option
         // so bypassing the accounting let a diagnostic sweep silently multiply
         // the run's wall clock and leave the target/actual report understating
         // what was spent. budget_check also applies the min_timeout floor here.
-        if (budget_check(holds).isUnsat()) {
+        const cvc5::Result gr = guard_check(holds);
+        if (gr.isUnsat()) {
           pr.vacuous_guard = true;
+        } else if (gr.isSat() && opts.verify_cache_store) {
+          if (const auto k = guard_key(pr); !k.empty()) {
+            opts.verify_cache_store(std::string{k});
+          }
         }
       }
-      solver.pop();
+      gs.pop();
       int n_vac = 0;
       for (const auto& pr : res.props) {
         n_vac += pr.vacuous_guard ? 1 : 0;
@@ -15010,6 +16148,21 @@ static Verify_result prove_properties_unchecked(hhds::Graph* design, const Lec_o
 static Verify_result prove_properties_dispatch(hhds::Graph* design, const Lec_options& opts,
                                                const absl::flat_hash_map<hhds::Gid, hhds::Graph*>* sub_lib,
                                                const std::vector<Monitor>*                         monitors);
+// Per-property cone cache, all-cycles tier: runs after prove_properties_impl,
+// once `unbounded` is final (the induction ladder sets it after the BMC loop).
+static void cone_cache_finish(Verify_result& res, const Lec_options& opts) {
+  for (auto& p : res.props) {
+    if (p.cone_reused_any) {
+      p.unbounded = true;  // the saved proof covers every cycle
+      continue;
+    }
+    if (opts.verify_cache_store && !p.cone_key_any.empty() && p.unbounded && p.refuted_at < 0
+        && p.undecided_at < 0) {
+      opts.verify_cache_store(std::string{p.cone_key_any});
+    }
+  }
+}
+
 Verify_result prove_properties(hhds::Graph* design, const Lec_options& opts,
                                const absl::flat_hash_map<hhds::Gid, hhds::Graph*>* sub_lib, const std::vector<Monitor>* monitors) {
   // Out of memory anywhere in this process (the encoder, a solver, the job
@@ -15133,6 +16286,7 @@ static Verify_result prove_properties_unchecked(hhds::Graph* design, const Lec_o
     Cvc5_stats    acc;
     Verify_result res  = prove_properties_impl(scratch_top.get(), opts, sub_lib, monitors, opts.stats ? &acc : nullptr);
     res.cvc5          += acc;
+    cone_cache_finish(res, opts);
     return res;
   }
 
@@ -15141,6 +16295,7 @@ static Verify_result prove_properties_unchecked(hhds::Graph* design, const Lec_o
   // MERGE, never assign: under engine=auto `res` already carries the forked
   // strategy children's deserialized stats while this process built no Solver.
   res.cvc5          += acc;
+  cone_cache_finish(res, opts);
   return res;
 }
 

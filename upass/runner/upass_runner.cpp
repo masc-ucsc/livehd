@@ -10561,100 +10561,102 @@ void collect_body_vars(const Lnast& ln, const Lnast_nid& nid, bool parent_makes_
   }
 }
 
-// True when some `store` OUTSIDE `skip` (the loop body) writes `name`. A carry
-// needs a value entering the loop; a variable written ONLY inside the body has
-// none, and the emitted initial actual would reference an undriven name.
+// The names of `names` whose write REACHES the loop, i.e. some `store` that
+// precedes `loop` in program order writes it. A carry needs a value entering
+// the loop; a variable written ONLY inside the body has none, and the emitted
+// initial actual would reference an undriven name. Order matters: a store that
+// only happens AFTER the loop is not a value entering ordinal 0, and accepting
+// it emits a `<name>__carry_in = ref(<name>)` actual against a name with no
+// driver yet -- exactly what the "written only inside the loop" refusal exists
+// to prevent. Everything under `loop` (including the body) is excluded by
+// construction, and so is everything outside the loop's region (an enclosing
+// scope's writes, a nested lambda's).
 //
-// A KEY store is not a write (see makes_store_keys). That exemption is what
-// makes this guard mean anything for a module port: an io declaration is
+// A KEY store is not a write (Loop_tree_order::stores): an io declaration is
 // `io -> tuple_add -> store(ref(name), const(nil), <type>)`, the same shape,
-// so without it EVERY port name answered true and the refusal never fired for
-// `-> (z:u12)` written only inside the loop.
-bool written_outside(const Lnast& ln, const Lnast_nid& nid, const Lnast_nid& skip, std::string_view name,
-                     bool parent_makes_keys = false) {
-  if (nid.is_invalid() || nid == skip) {
-    return false;
+// so without that exemption EVERY port name answered true and the refusal
+// never fired for `-> (z:u12)` written only inside the loop.
+//
+// Each name visits its stores in source order until one qualifies (O(depth)
+// for the usual first one), never a walk of the definition per loop.
+absl::flat_hash_set<std::string> written_before(const Lnast& ln, const Loop_tree_order& o, const Lnast_nid& loop,
+                                                const absl::flat_hash_set<std::string>& names) {
+  constexpr auto                   kNone = std::numeric_limits<uint32_t>::max();
+  absl::flat_hash_set<std::string> out;
+  const auto                       lit = o.pre.find(loop);
+  if (lit == o.pre.end()) {
+    return out;
   }
-  if (!parent_makes_keys && Lnast_ntype::is_store(ln.get_type(nid))) {
-    auto tgt = ln.get_first_child(nid);
-    if (!tgt.is_invalid() && Lnast_ntype::is_ref(ln.get_type(tgt)) && ln.get_name(tgt) == name) {
-      return true;
+  const uint32_t l   = lit->second;
+  const uint32_t reg = o.region[l];
+  for (const auto& n : names) {
+    const auto sit = o.stores.find(n);
+    if (sit == o.stores.end()) {
+      continue;
     }
-  }
-  const bool child_keys = makes_store_keys(ln, nid);
-  for (auto c : ln.children(nid)) {
-    if (Lnast_ntype::is_func_def(ln.get_type(c))) {
-      continue;  // a nested lambda has its own scope: its writes are not this scope's
-    }
-    if (written_outside(ln, c, skip, name, child_keys)) {
-      return true;
-    }
-  }
-  return false;
-}
-
-// True when a write to `name` REACHES the loop, i.e. some `store` that precedes
-// `loop` in program order writes it. Order matters: a store that only happens
-// AFTER the loop is not a value entering ordinal 0, and accepting it emits a
-// `<name>__carry_in = ref(<name>)` actual against a name with no driver yet --
-// exactly what the "written only inside the loop" refusal exists to prevent.
-// Everything under `loop` (including the body) is excluded by construction.
-bool written_before(const Lnast& ln, const Lnast_nid& loop, std::string_view name) {
-  for (auto node = loop; !node.is_invalid(); node = ln.get_parent(node)) {
-    const auto parent = ln.get_parent(node);
-    if (parent.is_invalid()) {
-      break;
-    }
-    if (Lnast_ntype::is_func_def(ln.get_type(parent))) {
-      break;  // a lambda boundary: an enclosing scope's writes are not this one's
-    }
-    const bool parent_keys = makes_store_keys(ln, parent);
-    // The arms of an if are ALTERNATIVES, not predecessors: in `if c { o = x }
-    // else { for … { o#[i] = … } }` the then-arm's write never reaches the
-    // else-arm's loop (comptime-folded or not), so it must not count as the
-    // value entering ordinal 0 -- the carry-in would read an undriven `o`.
-    const bool parent_if = Lnast_ntype::is_if_like(ln.get_type(parent));
-    for (auto sib : ln.children(parent)) {
-      if (sib == node) {
-        break;  // only the siblings BEFORE this level's ancestor have run
+    for (const uint32_t s : sit->second) {
+      if (s >= l) {
+        break;  // only what precedes the loop has run
       }
-      if (Lnast_ntype::is_func_def(ln.get_type(sib)) || (parent_if && Lnast_ntype::is_stmts(ln.get_type(sib)))) {
+      if (o.region[s] != reg || l <= o.last[s]) {
+        continue;  // another scope (or a store enclosing the loop, which never runs before it)
+      }
+      // The arms of an if are ALTERNATIVES, not predecessors: in `if c { o = x }
+      // else { for … { o#[i] = … } }` the then-arm's write never reaches the
+      // else-arm's loop (comptime-folded or not), so it must not count as the
+      // value entering ordinal 0 -- the carry-in would read an undriven `o`.
+      // The store is under an earlier arm when the deepest common ancestor is
+      // an if and the store's side of it is an arm (`stmts`).
+      uint32_t c = s;
+      while (o.parent[c] != kNone && !(o.parent[c] <= l && l <= o.last[o.parent[c]])) {
+        c = o.parent[c];
+      }
+      if (o.parent[c] == kNone) {
         continue;
       }
-      if (written_outside(ln, sib, Lnast_nid{}, name, parent_keys)) {
-        return true;
+      if (Lnast_ntype::is_if_like(ln.get_type(o.node[o.parent[c]])) && Lnast_ntype::is_stmts(ln.get_type(o.node[c]))) {
+        continue;
       }
+      out.insert(n);
+      break;
     }
   }
-  return false;
+  return out;
 }
 
-// Conservative must-write proof for the final-only class. A straight-line
-// store establishes the value. An if/match does so only when it has an else
-// arm and every arm establishes it. Anything more involved (nested loops,
-// calls returning into the name, partial tuple stores) remains a carry or
-// falls back to source unrolling; guessing here would expose an undriven last
-// occurrence on one control path.
-bool body_must_write(const Lnast& ln, const Lnast_nid& nid, std::string_view name) {
+// Conservative must-write proof for the final-only class: the names `nid`
+// writes on every path. A straight-line whole-value store establishes the
+// value. An if/match does so only when it has an else arm and every arm
+// establishes it. Anything more involved (nested loops, calls returning into
+// the name, partial tuple stores) remains a carry or falls back to source
+// unrolling; guessing here would expose an undriven last occurrence on one
+// control path. One walk for every name (a walk per name was O(names x body)).
+absl::flat_hash_set<std::string> body_must_write(const Lnast& ln, const Lnast_nid& nid) {
+  absl::flat_hash_set<std::string> out;
   if (nid.is_invalid()) {
-    return false;
+    return out;
   }
   const auto type = ln.get_type(nid);
   if (Lnast_ntype::is_store(type)) {
     auto target = ln.get_first_child(nid);
-    if (target.is_invalid() || !Lnast_ntype::is_ref(ln.get_type(target)) || ln.get_name(target) != name) {
-      return false;
+    if (target.is_invalid() || !Lnast_ntype::is_ref(ln.get_type(target))) {
+      return out;
     }
     const auto value = ln.get_sibling_next(target);
-    return !value.is_invalid() && ln.get_sibling_next(value).is_invalid();  // whole-value store, not tuple/bit field
+    if (!value.is_invalid() && ln.get_sibling_next(value).is_invalid()) {  // whole-value store, not tuple/bit field
+      out.emplace(ln.get_name(target));
+    }
+    return out;
   }
   if (Lnast_ntype::is_stmts(type)) {
     for (auto c : ln.children(nid)) {
-      if (body_must_write(ln, c, name)) {
-        return true;
+      auto names = body_must_write(ln, c);
+      if (names.size() > out.size()) {
+        std::swap(names, out);
       }
+      out.insert(names.begin(), names.end());
     }
-    return false;
+    return out;
   }
   if (Lnast_ntype::is_if(type) || Lnast_ntype::is_unique_if(type)) {
     std::vector<Lnast_nid> arms;
@@ -10670,11 +10672,16 @@ bool body_must_write(const Lnast& ln, const Lnast_nid& nid, std::string_view nam
     // Layout is cond,stmts[,cond,stmts]...,stmts(else). Therefore an odd
     // child count ending in stmts is the exhaustive form.
     if (children == 0 || (children % 2) == 0 || !last_is_stmts || arms.empty()) {
-      return false;
+      return out;
     }
-    return std::ranges::all_of(arms, [&](const Lnast_nid& arm) { return body_must_write(ln, arm, name); });
+    out = body_must_write(ln, arms.front());
+    for (size_t k = 1; k < arms.size() && !out.empty(); ++k) {
+      const auto names = body_must_write(ln, arms[k]);
+      absl::erase_if(out, [&](const std::string& n) { return !names.contains(n); });
+    }
+    return out;
   }
-  return false;
+  return out;
 }
 
 // True when the subtree holds a `break` or `continue`. The roller uses this to
@@ -11224,83 +11231,37 @@ absl::flat_hash_map<std::string, std::map<std::string, bool>> constant_field_rea
   return out;
 }
 
-bool later_loop_domain_reads_any(const Lnast& ln, const Lnast_nid& body_stmts, const std::vector<std::string>& names) {
+// Whether a loop domain AFTER the loop (in its region: siblings of every
+// enclosing statement up to the definition, a sibling `if` arm included --
+// over-approximating costs at most a declined roll) reads one of `names`.
+// A `range` statement IS a loop domain in flight: prp2lnast lowers `for j in
+// lo..<n` to `range(%t, lo, n)` emitted BEFORE the for, leaving only `ref(%t)`
+// in the for's own children (see process_for_statement), so a `for` header
+// alone never shows `n`; matching the range node itself also covers a domain
+// built through several tmps. Non-domain ranges (a tuple slice `t[a..<b]`)
+// are matched too; that costs at most a declined roll, never a wrong compile.
+// The domains come from Loop_tree_order (one walk per tree), not a walk of
+// everything after the loop per loop.
+bool later_loop_domain_reads_any(const Lnast& ln, const Loop_tree_order& o, const Lnast_nid& body_stmts,
+                                 const std::vector<std::string>& names) {
   if (names.empty()) {
     return false;
   }
-  absl::flat_hash_set<std::string_view> wanted;
-  for (const auto& name : names) {
-    wanted.insert(name);
-  }
-  const auto reads_wanted = [&](const Lnast_nid& root) {
-    std::function<bool(const Lnast_nid&)> scan = [&](const Lnast_nid& nid) {
-      if (nid.is_invalid()) {
-        return false;
-      }
-      if (Lnast_ntype::is_ref(ln.get_type(nid)) && wanted.contains(ln.get_name(nid))) {
-        return true;
-      }
-      for (auto child : ln.children(nid)) {
-        if (scan(child)) {
-          return true;
-        }
-      }
-      return false;
-    };
-    return scan(root);
-  };
-
   const auto loop = ln.get_parent(body_stmts);
-  if (loop.is_invalid()) {
+  const auto lit  = loop.is_invalid() ? o.pre.end() : o.pre.find(loop);
+  if (lit == o.pre.end()) {
     return false;
   }
-  std::function<bool(const Lnast_nid&)> contains_domain_read = [&](const Lnast_nid& nid) {
-    if (nid.is_invalid() || Lnast_ntype::is_func_def(ln.get_type(nid))) {
-      return false;
+  const uint32_t reg   = o.region[lit->second];
+  const uint32_t after = o.last[lit->second];  // the loop's own subtree is not "later"
+  const uint32_t end   = o.last[reg];
+  for (const auto& n : names) {
+    const auto dit = o.domains.find(n);
+    if (dit == o.domains.end()) {
+      continue;
     }
-    // A `range` statement IS a loop domain in flight: prp2lnast lowers
-    // `for j in lo..<n` to `range(%t, lo, n)` emitted BEFORE the for, leaving
-    // only `ref(%t)` in the for's own children (see process_for_statement,
-    // "emits range/tuple stmts before the for; returns the tmp ref"). Checking
-    // just the for children therefore never sees `n` and the refusal cannot
-    // fire for the ONLY domain spelling that can be non-comptime. Matching the
-    // range node itself also covers a domain built through several tmps.
-    // Non-domain ranges (a tuple slice `t[a..<b]`) are matched too; that costs
-    // at most a declined roll, never a wrong compile.
-    if (Lnast_ntype::is_range(ln.get_type(nid))) {
-      return reads_wanted(nid);
-    }
-    if (Lnast_ntype::is_for(ln.get_type(nid))) {
-      int child_index = 0;
-      for (auto child : ln.children(nid)) {
-        if (child_index++ < 2 && reads_wanted(child)) {
-          return true;
-        }
-        if (contains_domain_read(child)) {
-          return true;  // a nested loop in this loop's body
-        }
-      }
-      return false;
-    }
-    for (auto child : ln.children(nid)) {
-      if (contains_domain_read(child)) {
-        return true;
-      }
-    }
-    return false;
-  };
-  // Walk the ENCLOSING chain, not just this loop's own sibling list: a loop
-  // nested in an `if` (or any other block) has a sibling chain that ends inside
-  // that block, so a later comptime loop in the outer scope would never be
-  // reached and the refusal could not fire. Sibling arms of an enclosing `if`
-  // are scanned too — over-approximating costs at most a declined roll.
-  for (auto node = loop; !node.is_invalid(); node = ln.get_parent(node)) {
-    const auto parent = ln.get_parent(node);
-    if (parent.is_invalid() || Lnast_ntype::is_func_def(ln.get_type(parent))) {
-      break;  // a lambda boundary: the outer scope's statements are not "later" here
-    }
-    for (auto stmt = ln.get_sibling_next(node); !stmt.is_invalid(); stmt = ln.get_sibling_next(stmt)) {
-      if (contains_domain_read(stmt)) {
+    for (auto it = std::upper_bound(dit->second.begin(), dit->second.end(), after); it != dit->second.end() && *it <= end; ++it) {
+      if (o.region[*it] == reg) {
         return true;
       }
     }
@@ -12193,6 +12154,114 @@ uPass_runner::Loop_scope_facts& uPass_runner::loop_scope_facts(const Lnast_nid& 
   return it->second;
 }
 
+const uPass_runner::Decl_sites::Map& uPass_runner::decl_sites_of(const std::shared_ptr<Lnast>& tree) {
+  auto& slot = decl_sites_[tree.get()];
+  if (slot && slot->tree == tree) {
+    return slot->by_name;
+  }
+  slot        = std::make_unique<Decl_sites>(Decl_sites{.tree = tree, .by_name = {}});
+  auto& sites = *slot;
+  const auto&            t = *tree;
+  std::vector<Lnast_nid> stack{t.get_root()};
+  std::vector<Lnast_nid> kids;
+  while (!stack.empty()) {  // preorder, outside nested lambdas
+    const auto nid = stack.back();
+    stack.pop_back();
+    const auto type   = t.get_type(nid);
+    bool       is_site = Lnast_ntype::is_declare(type);
+    if (!is_site && Lnast_ntype::is_store(type)) {  // an io port: io -> tuple_add -> store
+      const auto parent = t.get_parent(nid);
+      const auto grand  = parent.is_invalid() ? parent : t.get_parent(parent);
+      is_site = !grand.is_invalid() && Lnast_ntype::is_tuple_add(t.get_type(parent)) && Lnast_ntype::is_io(t.get_type(grand));
+    }
+    if (is_site) {
+      if (const auto target = t.get_first_child(nid); !target.is_invalid() && Lnast_ntype::is_ref(t.get_type(target))) {
+        sites.by_name[std::string(t.get_name(target))].push_back(nid);
+      }
+    }
+    kids.clear();
+    for (auto c : t.children(nid)) {
+      if (!Lnast_ntype::is_func_def(t.get_type(c))) {
+        kids.push_back(c);
+      }
+    }
+    stack.insert(stack.end(), kids.rbegin(), kids.rend());
+  }
+  return sites.by_name;
+}
+
+const Loop_tree_order& uPass_runner::loop_tree_order(const std::shared_ptr<Lnast>& tree, const Lnast_nid& node) {
+  auto& slot = loop_tree_orders_[tree.get()];
+  if (slot && slot->tree == tree && slot->pre.contains(node)) {
+    return *slot;
+  }
+  slot       = std::make_unique<Loop_tree_order>();
+  auto& o    = *slot;
+  o.tree     = tree;
+  const auto& t = *tree;
+  constexpr auto kNone = std::numeric_limits<uint32_t>::max();
+  absl::flat_hash_set<std::string_view> read;  // the names one domain reads
+  const auto collect_refs = [&](const Lnast_nid& from) {
+    std::vector<Lnast_nid> work{from};
+    while (!work.empty()) {
+      const auto n = work.back();
+      work.pop_back();
+      if (Lnast_ntype::is_ref(t.get_type(n))) {
+        read.insert(t.get_name(n));
+      }
+      for (auto c : t.children(n)) {
+        work.push_back(c);
+      }
+    }
+  };
+  std::vector<std::pair<Lnast_nid, uint32_t>> stack{{t.get_root(), kNone}};
+  std::vector<Lnast_nid>                      kids;
+  while (!stack.empty()) {  // preorder
+    const auto [nid, par] = stack.back();
+    stack.pop_back();
+    const auto id = static_cast<uint32_t>(o.node.size());
+    o.node.push_back(nid);
+    o.pre.emplace(nid, id);
+    o.parent.push_back(par);
+    o.last.push_back(id);
+    o.region.push_back(par == kNone || Lnast_ntype::is_func_def(t.get_type(o.node[par])) ? id : o.region[par]);
+    const auto type = t.get_type(nid);
+    if (Lnast_ntype::is_store(type) && (par == kNone || !makes_store_keys(t, o.node[par]))) {
+      if (const auto tgt = t.get_first_child(nid); !tgt.is_invalid() && Lnast_ntype::is_ref(t.get_type(tgt))) {
+        o.stores[std::string(t.get_name(tgt))].push_back(id);
+      }
+    }
+    if (Lnast_ntype::is_range(type) || Lnast_ntype::is_for(type)) {
+      read.clear();
+      if (Lnast_ntype::is_range(type)) {
+        collect_refs(nid);
+      } else {
+        int k = 0;
+        for (auto c : t.children(nid)) {
+          if (k++ >= 2) {
+            break;
+          }
+          collect_refs(c);  // the index and the iterable
+        }
+      }
+      for (const auto r : read) {
+        o.domains[std::string(r)].push_back(id);
+      }
+    }
+    kids.clear();
+    for (auto c : t.children(nid)) {
+      kids.push_back(c);
+    }
+    for (auto k = kids.rbegin(); k != kids.rend(); ++k) {
+      stack.emplace_back(*k, id);
+    }
+  }
+  for (auto i = static_cast<uint32_t>(o.node.size()); i-- > 1;) {
+    o.last[o.parent[i]] = std::max(o.last[o.parent[i]], o.last[i]);
+  }
+  return o;
+}
+
 bool uPass_runner::plan_loop_roll(const Lnast_nid& body_stmts, const std::string& ivar, int64_t lo, int64_t hi, int64_t step,
                                   Loop_roll_plan& out) {
   const auto refuse = [&](std::string_view why) {
@@ -12246,6 +12315,10 @@ bool uPass_runner::plan_loop_roll(const Lnast_nid& body_stmts, const std::string
   const auto definition = enclosing_definition(ln, loop_nid);
   auto&      facts      = loop_scope_facts(definition);
 
+  // Every written name at once: the tree's preorder index (built once per
+  // tree) and one walk of the body (see written_before/body_must_write).
+  const auto written_in_front = written_before(ln, loop_tree_order(lm->get_lnast(), loop_nid), loop_nid, written);
+  const auto must_written     = out.has_loop_control ? absl::flat_hash_set<std::string>{} : body_must_write(ln, body_stmts);
   for (const auto& n : written) {
     if (is_local(n)) {
       continue;
@@ -12254,8 +12327,8 @@ bool uPass_runner::plan_loop_roll(const Lnast_nid& body_stmts, const std::string
     // cycle has not written it), so it is a carry even when every path writes
     // it: a final would come back as a plain value bound to the register name,
     // leaving the flop's D at Q.
-    const bool has_incoming = written_before(ln, loop_nid, n) || facts.regs.contains(n);
-    if (!read.contains(n) && !has_incoming && !out.has_loop_control && body_must_write(ln, body_stmts, n)) {
+    const bool has_incoming = written_in_front.contains(n) || facts.regs.contains(n);
+    if (!read.contains(n) && !has_incoming && !out.has_loop_control && must_written.contains(n)) {
       out.finals.emplace_back(n);
     } else {
       out.carries.emplace_back(n);
@@ -12289,7 +12362,12 @@ bool uPass_runner::plan_loop_roll(const Lnast_nid& body_stmts, const std::string
         kept.emplace_back(std::move(n));
         continue;
       }
-      const auto&                             actual = out.actual_names.at(n);
+      // A COPY, not a reference: the loop below emplaces each field port into
+      // this same absl::flat_hash_map, and a rehash relocates its values. A
+      // reference left dangling read the moved-from (empty) string in dbg, so
+      // the field path became ".out", had no type, and the loop unrolled only
+      // there (opt happened to read the stale bytes back intact).
+      const std::string                        actual = out.actual_names.at(n);
       std::vector<Loop_roll_plan::Tuple_field> entries;
       bool                                     clash = false;
       for (const auto& [field, dotted] : fields->second) {
@@ -12370,7 +12448,7 @@ bool uPass_runner::plan_loop_roll(const Lnast_nid& body_stmts, const std::string
   produced.reserve(out.carries.size() + out.finals.size());
   produced.insert(produced.end(), out.carries.begin(), out.carries.end());
   produced.insert(produced.end(), out.finals.begin(), out.finals.end());
-  if (later_loop_domain_reads_any(ln, body_stmts, produced)) {
+  if (later_loop_domain_reads_any(ln, loop_tree_order(lm->get_lnast(), loop_nid), body_stmts, produced)) {
     return refuse("a value the loop produces is used by a later comptime loop domain");
   }
   // Loops that stay UNROLLED whatever compile.unroll says (docs
@@ -12541,16 +12619,35 @@ bool uPass_runner::plan_loop_roll(const Lnast_nid& body_stmts, const std::string
       return &tree == &ln && Lnast_ntype::is_if_like(tree.get_type(parent)) && Lnast_ntype::is_stmts(tree.get_type(child))
              && !loop_path.contains(child);
     };
-    const auto resolve_decl_in = [&](const Lnast& tree, std::string_view first_name) {
+    // A declaration site the loop can see: no `if` arm on its path is hidden.
+    const auto visible = [&](const Lnast& tree, const Lnast_nid& site) {
+      if (&tree != &ln) {
+        return true;
+      }
+      for (auto c = site; !c.is_invalid();) {
+        const auto p = tree.get_parent(c);
+        if (p.is_invalid()) {
+          break;
+        }
+        if (hidden_arm(tree, p, c)) {
+          return false;
+        }
+        c = p;
+      }
+      return true;
+    };
+    // The declaration sites of `wanted` come from a per-tree index built once
+    // (decl_sites_of), visited in source order exactly as a scan from the root
+    // would reach them: one root scan per typed name was O(names x tree).
+    const auto resolve_decl_in = [&](const std::shared_ptr<Lnast>& tree_ptr, std::string_view first_name) {
+      const Lnast&                          tree       = *tree_ptr;
+      const auto&                           decl_sites = decl_sites_of(tree_ptr);
       absl::flat_hash_set<std::string>      resolving;
       std::function<bool(std::string_view)> resolve_decl = [&](std::string_view wanted) {
         if (!resolving.emplace(wanted).second) {
           return false;
         }
-        std::function<bool(const Lnast_nid&)> scan = [&](const Lnast_nid& nid) {
-          if (nid.is_invalid()) {
-            return false;
-          }
+        const auto match = [&](const Lnast_nid& nid) -> bool {
           const auto parent      = tree.get_parent(nid);
           const auto grandparent = parent.is_invalid() ? parent : tree.get_parent(parent);
           const bool io_port     = Lnast_ntype::is_store(tree.get_type(nid)) && !parent.is_invalid()
@@ -12654,51 +12751,49 @@ bool uPass_runner::plan_loop_roll(const Lnast_nid& body_stmts, const std::string
               }
             }
           }
-          for (auto c : tree.children(nid)) {
-            if (!Lnast_ntype::is_func_def(tree.get_type(c)) && !hidden_arm(tree, nid, c) && scan(c)) {
-              return true;
-            }
-          }
-          return false;
+          return false;  // nothing under a declaration site declares
         };
-        return scan(tree.get_root());
+        const auto sites = decl_sites.find(wanted);
+        if (sites == decl_sites.end()) {
+          return false;
+        }
+        for (const auto& site : sites->second) {
+          if (visible(tree, site) && match(site)) {
+            return true;
+          }
+        }
+        return false;
       };
       return resolve_decl(first_name);
     };
-    if (resolve_decl_in(ln, n)) {
+    if (resolve_decl_in(lm->get_lnast(), n)) {
       return true;
     }
     // A file-level scalar alias lives in the source-unit shell LNAST, while
     // this runner is walking the extracted module LNAST. Recover the nominal
     // type from the module declaration, then resolve it in that shared shell.
-    std::string                           nominal;
-    std::function<void(const Lnast_nid&)> find_nominal = [&](const Lnast_nid& nid) {
-      if (!nominal.empty() || nid.is_invalid()) {
-        return;
-      }
-      if (Lnast_ntype::is_declare(ln.get_type(nid))) {
-        auto target = ln.get_first_child(nid);
-        auto type_n = target.is_invalid() ? target : ln.get_sibling_next(target);
+    std::string nominal;
+    if (const auto& own = decl_sites_of(lm->get_lnast()); own.contains(n)) {
+      for (const auto& site : own.at(n)) {
+        if (!Lnast_ntype::is_declare(ln.get_type(site)) || !visible(ln, site)) {
+          continue;
+        }
+        const auto target = ln.get_first_child(site);
+        const auto type_n = target.is_invalid() ? target : ln.get_sibling_next(target);
         if (!target.is_invalid() && !type_n.is_invalid() && Lnast_ntype::is_ref(ln.get_type(target)) && ln.get_name(target) == n
             && Lnast_ntype::is_ref(ln.get_type(type_n))) {
           nominal = ln.get_name(type_n);
-          return;
+          break;
         }
       }
-      for (auto child : ln.children(nid)) {
-        if (!Lnast_ntype::is_func_def(ln.get_type(child)) && !hidden_arm(ln, nid, child)) {
-          find_nominal(child);
-        }
-      }
-    };
-    find_nominal(ln.get_root());
+    }
     if (!nominal.empty() && registry_ != nullptr) {
       std::string unit{ln.get_graph_name()};
       if (const auto dot = unit.rfind('.'); dot != std::string::npos) {
         unit.resize(dot);
       }
       if (auto it = reg().function_registry.find(unit);
-          it != reg().function_registry.end() && it->second->get_lambda_kind().empty() && resolve_decl_in(*it->second, nominal)) {
+          it != reg().function_registry.end() && it->second->get_lambda_kind().empty() && resolve_decl_in(it->second, nominal)) {
         return true;
       }
     }
@@ -12742,7 +12837,7 @@ bool uPass_runner::plan_loop_roll(const Lnast_nid& body_stmts, const std::string
     }
     // A non-final variable still needs an ordinal-0 value. Conditional writes,
     // reads-before-write and breakable loops all land here deliberately.
-    if (!out.registers.contains(n) && !written_before(ln, loop_nid, n)) {
+    if (!out.registers.contains(n) && !written_in_front.contains(n)) {
       return refuse(std::format("`{}` is written only inside the loop (no value enters ordinal 0)", n));
     }
     Spec_port sp;
@@ -13751,9 +13846,10 @@ void uPass_runner::emit_rolled_loop_call(const Loop_roll_plan& plan, const Lnast
   // names: a name the body writes is renamed on both sides of its stores, and
   // upass_ssa forces the full SSA rebuild for a stream name written under a
   // `for` (so a carry is never versioned here).
+  const absl::flat_hash_set<std::string_view> invariant_set(plan.invariants.begin(), plan.invariants.end());
   const auto bound_actual = [&](const std::string& n) -> std::string {
     const auto& actual = plan.actual_names.at(n);
-    if (std::ranges::find(plan.invariants, n) == plan.invariants.end()) {
+    if (!invariant_set.contains(n)) {
       return actual;
     }
     return stream_ssa_ref_name(actual);
@@ -13798,11 +13894,19 @@ void uPass_runner::emit_rolled_loop_call(const Loop_roll_plan& plan, const Lnast
   }
   for (const auto& n : plan.invariants) {
     if (const auto fit = field_of.find(n); fit != field_of.end() && !fit->second.second->dotted) {
-      const auto tmp  = absl::StrCat("%", plan.inst, "_", n);
-      auto       pick = staging->add_child(lowered, Lnast_ntype::create_tuple_get());
-      staging->add_child(pick, Lnast_node::create_ref(tmp));
-      staging->add_child(pick, Lnast_node::create_ref(stream_ssa_ref_name(plan.actual_names.at(fit->second.first))));
-      staging->add_child(pick, Lnast_node::create_const(fit->second.second->field));
+      // The read goes through the walk, as the source's own `t.b` in front of
+      // the loop would: an instance output stays `tuple_get(tmp, s, 'sel')`
+      // for tolg, and a tuple LOCAL's field (`mut t = (..)`, a spliced `mut s
+      // = ch(..)` handle, any SSA version of either) resolves to its flattened
+      // field, which the walk keeps live. A raw tuple_get emitted here reached
+      // tolg for a tuple local too, and tolg resolves only instance, memory
+      // and stage results: the port was left undriven ("unresolved reference
+      // '%u_loop_0_t__b'"). The pick lands in the hidden payload, in front of
+      // the call.
+      const auto tmp   = absl::StrCat("%", plan.inst, "_", n);
+      const auto outer = std::exchange(staging_parent, lowered);
+      emit_inline_tuple_pick(tmp, plan.actual_names.at(fit->second.first), fit->second.second->field);
+      staging_parent = outer;
       actuals.emplace_back(port_of(n), Lnast_node::create_ref(tmp));
       continue;
     }
@@ -19980,8 +20084,14 @@ void uPass_runner::bake_decl_pre_step(bool is_declare) {
         const auto vt = lm->current_text();
         if (vt.find('?') != std::string_view::npos) {
           if (auto v = Dlop::from_pyrope(vt); v && v->has_unknowns() && v->get_signed_bits() > 1) {
-            const bool sgn  = vt.size() > 1 && vt[1] == 's';
-            const auto bits = static_cast<uint32_t>(sgn ? v->get_signed_bits() : v->get_payload_bits());
+            const bool sgn = vt.size() > 1 && vt[1] == 's';
+            // A SIGN-UNKNOWN signed pattern (`0sb?`, the width-taking wildcard) states no width:
+            // Dlop bounds every such value at 65 bits (see resolve_x_fill), so stamping that as the
+            // declared envelope would make an untyped signed accumulator a fake 65-bit signed
+            // variable, which upass.bitwidth then judges as a too-WIDE value at every merge.
+            const auto first_digit  = vt.find_first_not_of('_', 3);
+            const bool sign_unknown = sgn && first_digit != std::string_view::npos && vt[first_digit] == '?';
+            const auto bits         = static_cast<uint32_t>(sign_unknown ? 0 : sgn ? v->get_signed_bits() : v->get_payload_bits());
             if (bits > 0) {
               decl_max = upass::max_from_bits(bits, sgn);
               decl_min = upass::min_from_bits(bits, sgn);

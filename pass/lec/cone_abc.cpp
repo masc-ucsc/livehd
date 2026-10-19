@@ -20,7 +20,10 @@
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
+#include <format>
+#include <functional>
 #include <map>
+#include <optional>
 #include <sstream>
 #include <unordered_map>
 #include <unordered_set>
@@ -44,6 +47,15 @@ extern "C" {
 #include "proof/fraig/fraig.h"
 #include "misc/extra/extra.h"
 extern Gia_Man_t* Cec5_ManSimulateTest3(Gia_Man_t*, int, int);
+#include "sat/bmc/bmc.h"
+#include "aig/saig/saig.h"
+#include "proof/pdr/pdr.h"
+#include "proof/fra/fra.h"
+#include "sat/cnf/cnf.h"
+#include "sat/bsat/satSolver.h"
+#include "base/main/mainInt.h"
+int        Abc_NtkDarBmc3(Abc_Ntk_t* pNtk, Saig_ParBmc_t* pPars, int fOrDecomp);
+Aig_Man_t* Abc_NtkToDar(Abc_Ntk_t* pNtk, int fExors, int fRegisters);
 }
 // clang-format on
 
@@ -116,6 +128,28 @@ public:
     return it->second;
   }
 
+  // Sequential use: blast a bit-vector term, and bind a free symbol to given
+  // bits (a register output) before anything reads it.
+  std::vector<Bit> run_bv(const cvc5::Term& t) {
+    walk(t);
+    auto it = bv_.find(t);
+    return (bad_ || it == bv_.end()) ? std::vector<Bit>{} : it->second;
+  }
+  void preset(const cvc5::Term& sym, std::vector<Bit> bits) { sym_pi_[canon(sym)] = std::move(bits); }
+  // A memory as registers: one bit vector per entry (all 2^addr entries).
+  // SELECT / STORE / ITE over it then blast exactly instead of abstracting.
+  using Entries = std::vector<std::vector<Bit>>;
+  void preset_array(const cvc5::Term& sym, Entries e) { arr_[canon(sym)] = std::move(e); }
+  Entries run_arr(const cvc5::Term& t) {
+    walk(t);
+    auto it = arr_.find(t);
+    return (bad_ || it == arr_.end()) ? Entries{} : it->second;
+  }
+  const std::vector<Bit>* sym_bits(const cvc5::Term& sym) const {
+    auto it = sym_pi_.find(canon(sym));
+    return it == sym_pi_.end() ? nullptr : &it->second;
+  }
+
   [[nodiscard]] bool               bad() const { return bad_; }
   [[nodiscard]] const std::string& why() const { return why_; }
   [[nodiscard]] int                pis() const { return npi_; }
@@ -152,9 +186,16 @@ private:
   Bit xor2(Bit a, Bit b) { return Abc_AigXor(man_, a, b); }
   Bit mux(Bit c, Bit t, Bit e) { return Abc_AigMux(man_, c, t, e); }
 
-  Bit new_pi(uint64_t id, uint32_t bit) {
+  // Named after the symbol (or, for an abstracted subterm, its structural
+  // digest) so the same input keeps its name in the next design version.
+  Bit new_pi(const cvc5::Term& rep, uint32_t bit) {
     Abc_Obj_t*  pi   = Abc_NtkCreatePi(ntk_);
-    std::string name = "v" + std::to_string(id) + "_b" + std::to_string(bit);
+    std::string base = rep.hasSymbol() ? rep.getSymbol() : std::string{};
+    if (base.empty()) {
+      const std::string d = cone_digest(rep);
+      base                = d.empty() ? "v" + std::to_string(rep.getId()) : "o" + d;
+    }
+    std::string name = base + "_b" + std::to_string(bit);
     Abc_ObjAssignName(pi, const_cast<char*>(name.c_str()), nullptr);
     ++npi_;
     return pi;
@@ -290,7 +331,27 @@ private:
   }
 
   // ---- traversal -----------------------------------------------------------
-  bool done(const cvc5::Term& t) const { return bv_.count(t) != 0 || bl_.count(t) != 0; }
+  bool done(const cvc5::Term& t) const { return bv_.count(t) != 0 || bl_.count(t) != 0 || arr_.count(t) != 0; }
+
+  // An array term built from preset memories by STORE / ITE (memoized).
+  bool arr_ok(const cvc5::Term& a) {
+    if (arr_.empty() || !a.getSort().isArray()) {
+      return false;
+    }
+    if (auto it = arr_okm_.find(a); it != arr_okm_.end()) {
+      return it->second;
+    }
+    bool ok = false;
+    switch (a.getKind()) {
+      case cvc5::Kind::CONSTANT:
+      case cvc5::Kind::VARIABLE: ok = arr_.contains(canon(a)); break;
+      case cvc5::Kind::STORE: ok = arr_ok(a[0]); break;
+      case cvc5::Kind::ITE: ok = arr_ok(a[1]) && arr_ok(a[2]); break;
+      default: break;
+    }
+    arr_okm_[a] = ok;
+    return ok;
+  }
 
   // A subterm outside the blastable fragment (an array SELECT, a UF
   // application, a divide) but whose OWN sort is BitVector/Boolean is
@@ -304,13 +365,13 @@ private:
   // which is what kept a whole-array register file written from a function of
   // ITSELF (`ex_mask_rf_q <= f(ex_mask_rf_q)`) out of reach: every bulk-update
   // obligation reads the array it is writing.
-  static bool opaque_leaf(const cvc5::Term& t) {
+  bool opaque_leaf(const cvc5::Term& t) {
     const cvc5::Sort srt = t.getSort();
     if (!srt.isBitVector() && !srt.isBoolean()) {
       return false;  // an Array-sorted term is not a value: let supported() refuse it
     }
     switch (t.getKind()) {
-      case cvc5::Kind::SELECT:
+      case cvc5::Kind::SELECT: return !arr_ok(t[0]);
       case cvc5::Kind::APPLY_UF:
       case cvc5::Kind::BITVECTOR_UDIV:
       case cvc5::Kind::BITVECTOR_UREM:
@@ -330,7 +391,7 @@ private:
         const uint32_t   w = t.getSort().getBitVectorSize();
         std::vector<Bit> r(w);
         for (uint32_t i = 0; i < w; ++i) {
-          r[i] = new_pi(rep.getId(), i);
+          r[i] = new_pi(rep, i);
         }
         it = sym_pi_.emplace(rep, std::move(r)).first;
       }
@@ -338,7 +399,7 @@ private:
     } else {
       auto it = sym_bit_.find(rep);
       if (it == sym_bit_.end()) {
-        it = sym_bit_.emplace(rep, new_pi(rep.getId(), 0)).first;
+        it = sym_bit_.emplace(rep, new_pi(rep, 0)).first;
       }
       bl_.emplace(t, it->second);
     }
@@ -346,6 +407,12 @@ private:
 
   bool supported(const cvc5::Term& t) {
     const cvc5::Sort srt = t.getSort();
+    if (srt.isArray() && arr_ok(t)) {
+      return true;
+    }
+    if (t.getKind() == cvc5::Kind::SELECT && arr_ok(t[0])) {
+      return true;
+    }
     if (!srt.isBitVector() && !srt.isBoolean()) {
       fail("sort:" + srt.toString());
       return false;
@@ -445,7 +512,55 @@ private:
     return it->second;
   }
 
+  // index == k, for an index given as bits (LSB first)
+  Bit index_is(const std::vector<Bit>& ix, size_t k) {
+    Bit e = one();
+    for (size_t i = 0; i < ix.size(); ++i) {
+      e = and2(e, ((k >> i) & 1) != 0 ? ix[i] : inv(ix[i]));
+    }
+    return (ix.size() < 64 && (k >> ix.size()) != 0) ? zero() : e;
+  }
+
+  void emit_arr(const cvc5::Term& t) {
+    Entries r;
+    switch (t.getKind()) {
+      case cvc5::Kind::CONSTANT:
+      case cvc5::Kind::VARIABLE: r = arr_.at(canon(t)); break;
+      case cvc5::Kind::STORE: {
+        r              = arr_.at(t[0]);
+        const auto& ix = bits_of(t[1]);
+        const auto& v  = bits_of(t[2]);
+        for (size_t k = 0; k < r.size() && !bad_; ++k) {
+          const Bit hit = index_is(ix, k);
+          for (size_t i = 0; i < r[k].size() && i < v.size(); ++i) {
+            r[k][i] = mux(hit, v[i], r[k][i]);
+          }
+        }
+        break;
+      }
+      case cvc5::Kind::ITE: {
+        const Bit c = bool_of(t[0]);
+        r           = arr_.at(t[1]);
+        const auto& e = arr_.at(t[2]);
+        for (size_t k = 0; k < r.size(); ++k) {
+          for (size_t i = 0; i < r[k].size(); ++i) {
+            r[k][i] = mux(c, r[k][i], e[k][i]);
+          }
+        }
+        break;
+      }
+      default: fail(kind_name(t.getKind())); return;
+    }
+    if (!bad_) {
+      arr_.emplace(t, std::move(r));
+    }
+  }
+
   void emit(const cvc5::Term& t) {
+    if (t.getSort().isArray()) {
+      emit_arr(t);
+      return;
+    }
     if (t.getSort().isBitVector()) {
       auto v = emit_bv(t);
       if (!bad_) {
@@ -482,7 +597,7 @@ private:
         }
         std::vector<Bit> r(w);
         for (uint32_t i = 0; i < w; ++i) {
-          r[i] = new_pi(rep.getId(), i);
+          r[i] = new_pi(rep, i);
         }
         sym_pi_.emplace(rep, r);
         return r;
@@ -602,6 +717,18 @@ private:
         }
         return r;
       }
+      case cvc5::Kind::SELECT: {  // a preset memory: a mux over its entries
+        const auto& e  = arr_.at(t[0]);
+        const auto& ix = bits_of(t[1]);
+        std::vector<Bit> r(w, zero());
+        for (size_t k = 0; k < e.size() && !bad_; ++k) {
+          const Bit hit = index_is(ix, k);
+          for (uint32_t i = 0; i < w && i < e[k].size(); ++i) {
+            r[i] = or2(r[i], and2(hit, e[k][i]));
+          }
+        }
+        return r;
+      }
       default: fail(kind_name(t.getKind())); return {};
     }
   }
@@ -614,7 +741,7 @@ private:
         const cvc5::Term rep = canon(t);
         auto             it  = sym_bit_.find(rep);
         if (it == sym_bit_.end()) {
-          it = sym_bit_.emplace(rep, new_pi(rep.getId(), 0)).first;
+          it = sym_bit_.emplace(rep, new_pi(rep, 0)).first;
         }
         return it->second;
       }
@@ -692,6 +819,8 @@ private:
   std::unordered_map<cvc5::Term, Bit>              bl_;
   std::unordered_map<cvc5::Term, std::vector<Bit>> sym_pi_;   // representative -> its PIs
   std::unordered_map<cvc5::Term, Bit>              sym_bit_;  // representative -> its PI (bool)
+  std::unordered_map<cvc5::Term, Entries>          arr_;      // memory terms, as entries
+  std::unordered_map<cvc5::Term, bool>             arr_okm_;
 };
 
 }  // namespace
@@ -1150,5 +1279,1311 @@ std::vector<Cone_verdict> batch_pass(const std::vector<cvc5::Term>& diffs, int64
   return out;
 }
 }  // namespace
+
+namespace {
+// Constant bits, LSB first; empty if `t` is not a bit-vector constant.
+std::vector<Bit> const_bits(Abc_Ntk_t* ntk, const cvc5::Term& t) {
+  if (t.isNull() || t.getKind() != cvc5::Kind::CONST_BITVECTOR) {
+    return {};
+  }
+  const std::string v   = t.getBitVectorValue(2);
+  Bit               one = Abc_AigConst1(ntk);
+  std::vector<Bit>  r(v.size());
+  for (size_t i = 0; i < v.size(); ++i) {
+    r[i] = v[v.size() - 1 - i] == '1' ? one : Abc_ObjNot(one);
+  }
+  return r;
+}
+
+// ---- Cross-version reuse ---------------------------------------------------
+// A property's sequential AIG reduced to its cone of influence, with inputs
+// and registers named after design signals so a later version can be matched
+// by name. Literal 2*v+c; var 0 is constant 0; then inputs, registers, ANDs.
+struct Lit_model {
+  std::vector<std::string>        pis, regs;  // sorted names
+  std::vector<int>                next;       // per register
+  std::vector<std::array<int, 2>> ands;
+  int                             target = 0;  // bad: assumes held so far, property fails
+  int                             ok     = 1;  // assumes held so far
+  bool                            exact  = false;
+  int  nvars() const { return 1 + static_cast<int>(pis.size() + regs.size() + ands.size()); }
+  int  reg_var(size_t i) const { return 1 + static_cast<int>(pis.size() + i); }
+};
+
+std::string esc_name(std::string_view s) {
+  std::string o;
+  for (unsigned char c : s) {
+    if (c <= ' ' || c == '%' || c > '~') {
+      o += std::format("%{:02x}", c);
+    } else {
+      o += static_cast<char>(c);
+    }
+  }
+  return o;
+}
+
+std::string model_text(const Lit_model& m) {
+  std::string s = std::format("lhdm1 {} {} {} {} {} {}\n", m.pis.size(), m.regs.size(), m.ands.size(), m.target, m.ok,
+                              m.exact ? 1 : 0);
+  for (const auto& p : m.pis) {
+    s += esc_name(p) + "\n";
+  }
+  for (size_t i = 0; i < m.regs.size(); ++i) {
+    s += esc_name(m.regs[i]) + " " + std::to_string(m.next[i]) + "\n";
+  }
+  for (const auto& a : m.ands) {
+    s += std::to_string(a[0]) + " " + std::to_string(a[1]) + "\n";
+  }
+  return s;
+}
+
+bool model_parse(const std::string& s, Lit_model& m) {
+  std::istringstream in{s};
+  std::string        tag;
+  size_t             np = 0, nr = 0, na = 0;
+  int                ex = 0;
+  if (!(in >> tag >> np >> nr >> na >> m.target >> m.ok >> ex) || tag != "lhdm1") {
+    return false;
+  }
+  m.exact = ex != 0;
+  m.pis.resize(np);
+  m.regs.resize(nr);
+  m.next.resize(nr);
+  m.ands.resize(na);
+  for (auto& p : m.pis) {
+    in >> p;
+  }
+  for (size_t i = 0; i < nr; ++i) {
+    in >> m.regs[i] >> m.next[i];
+  }
+  for (auto& a : m.ands) {
+    in >> a[0] >> a[1];
+  }
+  return static_cast<bool>(in);
+}
+
+std::string read_file(const std::string& path) {
+  std::FILE* f = std::fopen(path.c_str(), "rb");
+  if (f == nullptr) {
+    return {};
+  }
+  std::string s;
+  char        buf[65536];
+  size_t      n;
+  while ((n = std::fread(buf, 1, sizeof buf, f)) > 0) {
+    s.append(buf, n);
+  }
+  std::fclose(f);
+  return s;
+}
+
+void write_file(const std::string& path, const std::string& s) {  // atomic: tmp + rename
+  const std::string tmp = path + ".tmp" + std::to_string(getpid());
+  std::FILE*        f   = std::fopen(tmp.c_str(), "wb");
+  if (f == nullptr) {
+    return;
+  }
+  const bool ok = std::fwrite(s.data(), 1, s.size(), f) == s.size();
+  if (std::fclose(f) == 0 && ok) {
+    std::rename(tmp.c_str(), path.c_str());
+  } else {
+    std::remove(tmp.c_str());
+  }
+}
+
+// The cone of `target` (and `ok`) in `ntk`. `reg_name` names each latch
+// output; a name used twice makes the model unusable (empty).
+std::optional<Lit_model> extract_model(Abc_Ntk_t* ntk, Bit target, Bit ok,
+                                       const std::unordered_map<Abc_Obj_t*, std::string>& reg_name, bool exact) {
+  const Abc_Obj_t*                  c1 = Abc_AigConst1(ntk);
+  std::vector<Abc_Obj_t*>           pis, bos, ands;
+  std::unordered_set<Abc_Obj_t*>    seen;
+  std::vector<std::pair<Abc_Obj_t*, bool>> st;  // (object, fanins done)
+  auto push = [&](Bit b) {
+    Abc_Obj_t* o = Abc_ObjRegular(b);
+    if (o != c1 && !seen.contains(o)) {
+      st.emplace_back(o, false);
+    }
+  };
+  push(target);
+  push(ok);
+  while (!st.empty()) {
+    auto [o, done] = st.back();
+    st.pop_back();
+    if (seen.contains(o)) {
+      continue;
+    }
+    if (Abc_ObjIsPi(o)) {
+      seen.insert(o);
+      pis.push_back(o);
+    } else if (Abc_ObjIsBo(o)) {
+      seen.insert(o);
+      bos.push_back(o);
+      push(Abc_ObjChild0(Abc_ObjFanin0(Abc_ObjFanin0(o))));  // bo <- latch <- bi <- next
+    } else if (Abc_ObjIsNode(o)) {
+      if (done) {
+        seen.insert(o);
+        ands.push_back(o);
+      } else {
+        st.emplace_back(o, true);
+        push(Abc_ObjChild0(o));
+        push(Abc_ObjChild1(o));
+      }
+    } else {
+      return std::nullopt;
+    }
+  }
+  Lit_model                               m;
+  std::unordered_map<const Abc_Obj_t*, int> var;
+  std::vector<std::pair<std::string, Abc_Obj_t*>> pn, rn;
+  for (auto* p : pis) {
+    pn.emplace_back(Abc_ObjName(p), p);
+  }
+  for (auto* b : bos) {
+    auto it = reg_name.find(b);
+    if (it == reg_name.end()) {
+      return std::nullopt;
+    }
+    rn.emplace_back(it->second, b);
+  }
+  std::sort(pn.begin(), pn.end());
+  std::sort(rn.begin(), rn.end());
+  for (size_t i = 0; i + 1 < pn.size(); ++i) {
+    if (pn[i].first == pn[i + 1].first) {
+      return std::nullopt;
+    }
+  }
+  for (size_t i = 0; i + 1 < rn.size(); ++i) {
+    if (rn[i].first == rn[i + 1].first) {
+      return std::nullopt;
+    }
+  }
+  int v = 1;
+  for (auto& [n, o] : pn) {
+    m.pis.push_back(n);
+    var[o] = v++;
+  }
+  for (auto& [n, o] : rn) {
+    m.regs.push_back(n);
+    var[o] = v++;
+  }
+  auto lit = [&](Bit b) {
+    const Abc_Obj_t* o = Abc_ObjRegular(b);
+    const int        c = Abc_ObjIsComplement(b) ? 1 : 0;
+    return o == c1 ? 1 ^ c : 2 * var.at(o) + c;
+  };
+  for (auto* a : ands) {  // post-order: fanins first
+    m.ands.push_back({lit(Abc_ObjChild0(a)), lit(Abc_ObjChild1(a))});
+    var[a] = v++;
+  }
+  for (auto& [n, o] : rn) {
+    m.next.push_back(lit(Abc_ObjChild0(Abc_ObjFanin0(Abc_ObjFanin0(o)))));
+  }
+  m.target = lit(target);
+  m.ok     = lit(ok);
+  m.exact  = exact;
+  return m;
+}
+
+// Builds an ABC network from models that share inputs by name. `out` gets the
+// literal-to-AIG map of each model and returns the single output.
+Abc_Ntk_t* build_ntk(const std::vector<const Lit_model*>& ms,
+                     const std::function<Bit(Abc_Aig_t*, const std::vector<std::vector<Bit>>&)>& out) {
+  Abc_Ntk_t* ntk = Abc_NtkAlloc(ABC_NTK_STRASH, ABC_FUNC_AIG, 1);
+  ntk->pName     = Extra_UtilStrsav(const_cast<char*>("lhd_reuse"));
+  auto*      man = static_cast<Abc_Aig_t*>(ntk->pManFunc);
+  const Bit  one = Abc_AigConst1(ntk);
+  std::map<std::string, Bit> pi;
+  for (const auto* m : ms) {
+    for (const auto& n : m->pis) {
+      if (!pi.contains(n)) {
+        Abc_Obj_t* p = Abc_NtkCreatePi(ntk);
+        Abc_ObjAssignName(p, const_cast<char*>(n.c_str()), nullptr);
+        pi[n] = p;
+      }
+    }
+  }
+  std::vector<std::vector<Bit>>        val(ms.size());
+  std::vector<std::vector<Abc_Obj_t*>> bis(ms.size());
+  for (size_t k = 0; k < ms.size(); ++k) {
+    const auto& m = *ms[k];
+    val[k].assign(static_cast<size_t>(m.nvars()), nullptr);
+    val[k][0] = Abc_ObjNot(one);
+    size_t v  = 1;
+    for (const auto& n : m.pis) {
+      val[k][v++] = pi[n];
+    }
+    for (size_t i = 0; i < m.regs.size(); ++i) {
+      Abc_Obj_t*        l  = Abc_NtkCreateLatch(ntk);
+      Abc_Obj_t*        bi = Abc_NtkCreateBi(ntk);
+      Abc_Obj_t*        bo = Abc_NtkCreateBo(ntk);
+      const std::string nm = "m" + std::to_string(k) + ":" + m.regs[i];
+      Abc_ObjAddFanin(l, bi);
+      Abc_ObjAddFanin(bo, l);
+      Abc_LatchSetInit0(l);
+      Abc_ObjAssignName(bo, const_cast<char*>(nm.c_str()), nullptr);
+      Abc_ObjAssignName(l, const_cast<char*>(nm.c_str()), const_cast<char*>("_L"));
+      Abc_ObjAssignName(bi, const_cast<char*>(nm.c_str()), const_cast<char*>("_in"));
+      bis[k].push_back(bi);
+      val[k][v++] = bo;
+    }
+    auto bit = [&](int l) { return Abc_ObjNotCond(val[k][static_cast<size_t>(l >> 1)], l & 1); };
+    for (const auto& a : m.ands) {
+      val[k][v++] = Abc_AigAnd(man, bit(a[0]), bit(a[1]));
+    }
+    for (size_t i = 0; i < m.regs.size(); ++i) {
+      Abc_ObjAddFanin(bis[k][i], bit(m.next[i]));
+    }
+  }
+  Abc_Obj_t* po = Abc_NtkCreatePo(ntk);
+  Abc_ObjAddFanin(po, out(man, val));
+  Abc_ObjAssignName(po, const_cast<char*>("target"), nullptr);
+  Abc_NtkOrderCisCos(ntk);  // ToDar: inputs before latch outputs, outputs before latch inputs
+  if (Abc_NtkCheck(ntk) == 0) {
+    Abc_NtkDelete(ntk);
+    return nullptr;
+  }
+  return ntk;
+}
+
+Bit model_bit(const std::vector<Bit>& val, int l) { return Abc_ObjNotCond(val[static_cast<size_t>(l >> 1)], l & 1); }
+
+// A cube to block: (register index, value). The invariant is "no cube holds".
+using Cube = std::vector<std::pair<int, bool>>;
+
+Bit inv_bit(Abc_Aig_t* man, const std::vector<Bit>& val, const Lit_model& m, const std::vector<Cube>& inv) {
+  const Bit one = Abc_ObjNot(val[0]);  // var 0 is constant 0
+  Bit       all = one;
+  for (const auto& c : inv) {
+    Bit cube = one;
+    for (auto [r, v] : c) {
+      const Bit q = val[static_cast<size_t>(m.reg_var(static_cast<size_t>(r)))];
+      cube        = Abc_AigAnd(man, cube, v ? q : Abc_ObjNot(q));
+    }
+    all = Abc_AigAnd(man, all, Abc_ObjNot(cube));
+  }
+  return all;
+}
+
+Abc_Ntk_t* model_ntk(const Lit_model& m, const std::vector<Cube>& inv = {}) {
+  return build_ntk({&m}, [&](Abc_Aig_t* man, const std::vector<std::vector<Bit>>& val) {
+    const Bit t = model_bit(val[0], m.target);
+    return inv.empty() ? t : Abc_AigAnd(man, t, inv_bit(man, val[0], m, inv));
+  });
+}
+
+std::vector<Cube> inv_parse(const std::string& s, const Lit_model& m) {
+  std::unordered_map<std::string, int> ix;
+  for (size_t i = 0; i < m.regs.size(); ++i) {
+    ix[esc_name(m.regs[i])] = static_cast<int>(i);
+  }
+  std::vector<Cube>  out;
+  std::istringstream in{s};
+  std::string        line;
+  while (std::getline(in, line)) {
+    if (line.starts_with("#")) {
+      continue;
+    }
+    std::istringstream ls{line};
+    std::string        tok;
+    Cube               c;
+    bool               known = true;
+    while (ls >> tok) {
+      auto it = tok.size() > 2 ? ix.find(tok.substr(2)) : ix.end();
+      if (it == ix.end()) {
+        known = false;  // the register is gone: drop the whole cube
+        break;
+      }
+      c.emplace_back(it->second, tok[0] == '1');
+    }
+    if (known && !c.empty()) {
+      out.push_back(std::move(c));
+    }
+  }
+  return out;
+}
+
+std::string inv_text(const std::vector<Cube>& inv, const Lit_model& m) {
+  std::string s = "#inv\n";  // present even when empty: the property needed no strengthening
+  for (const auto& c : inv) {
+    for (auto [r, v] : c) {
+      s += std::string(v ? "1=" : "0=") + esc_name(m.regs[static_cast<size_t>(r)]) + " ";
+    }
+    s += "\n";
+  }
+  return s;
+}
+
+// Houdini: keep the cubes whose blocking clauses hold at reset and are
+// inductive together. Returns true when they also exclude `target`, i.e. the
+// property holds in every cycle.
+bool houdini(const Lit_model& m, std::vector<Cube>& inv) {
+  std::erase_if(inv, [](const Cube& c) {  // reset state is all-zero: a cube of zeros blocks it
+    return std::all_of(c.begin(), c.end(), [](auto rv) { return !rv.second; });
+  });
+  Abc_Ntk_t* ntk = model_ntk(m);
+  if (ntk == nullptr) {
+    return false;
+  }
+  Aig_Man_t* aig = Abc_NtkToDar(ntk, 0, 1);
+  Abc_NtkDelete(ntk);
+  if (aig == nullptr || Aig_ManRegNum(aig) != static_cast<int>(m.regs.size())) {
+    if (aig != nullptr) {
+      Aig_ManStop(aig);
+    }
+    return false;
+  }
+  // One frame as a combinational circuit: latch outputs become inputs and
+  // latch inputs outputs, so each output gets its own variable, none forced.
+  const int nreg = Aig_ManRegNum(aig);
+  const int npi  = Saig_ManPiNum(aig);
+  const int npo  = Saig_ManPoNum(aig);
+  Aig_ManSetRegNum(aig, 0);
+  Cnf_Dat_t*  cnf = Cnf_Derive(aig, Aig_ManCoNum(aig));
+  auto*       s   = static_cast<sat_solver*>(Cnf_DataWriteIntoSolver(cnf, 1, 0));
+  bool        proved = false;
+  if (s != nullptr && nreg == static_cast<int>(m.regs.size())) {
+    auto lo = [&](int r) { return cnf->pVarNums[Aig_ObjId(Aig_ManCi(aig, npi + r))]; };
+    auto li = [&](int r) { return cnf->pVarNums[Aig_ObjId(Aig_ManCo(aig, npo + r))]; };
+    const int base = cnf->nVars;
+    sat_solver_setnvars(s, base + static_cast<int>(inv.size()));
+    for (size_t j = 0; j < inv.size(); ++j) {
+      std::vector<lit> cl{Abc_Var2Lit(base + static_cast<int>(j), 1)};
+      for (auto [r, v] : inv[j]) {
+        cl.push_back(Abc_Var2Lit(lo(r), v ? 1 : 0));  // register differs from the cube
+      }
+      sat_solver_addclause(s, cl.data(), cl.data() + cl.size());
+    }
+    std::vector<char> alive(inv.size(), 1);
+    for (bool changed = true; changed;) {
+      changed = false;
+      for (size_t j = 0; j < inv.size(); ++j) {
+        if (!alive[j]) {
+          continue;
+        }
+        std::vector<lit> as;
+        for (size_t k = 0; k < inv.size(); ++k) {
+          if (alive[k]) {
+            as.push_back(Abc_Var2Lit(base + static_cast<int>(k), 0));
+          }
+        }
+        for (auto [r, v] : inv[j]) {
+          as.push_back(Abc_Var2Lit(li(r), v ? 0 : 1));  // next state inside the cube
+        }
+        if (sat_solver_solve(s, as.data(), as.data() + as.size(), 100000, 0, 0, 0) != l_False) {
+          alive[j] = 0;
+          changed  = true;
+        }
+      }
+    }
+    std::vector<Cube> keep;
+    std::vector<lit>  as;
+    for (size_t k = 0; k < inv.size(); ++k) {
+      if (alive[k]) {
+        keep.push_back(inv[k]);
+        as.push_back(Abc_Var2Lit(base + static_cast<int>(k), 0));
+      }
+    }
+    as.push_back(Abc_Var2Lit(cnf->pVarNums[Aig_ObjId(Aig_ManCo(aig, 0))], 0));
+    proved = sat_solver_solve(s, as.data(), as.data() + as.size(), 100000, 0, 0, 0) == l_False;
+    inv    = std::move(keep);
+  }
+  if (s != nullptr) {
+    sat_solver_delete(s);
+  }
+  Cnf_DataFree(cnf);
+  Aig_ManStop(aig);
+  return proved;
+}
+
+// PDR on the model, strengthened by `inv` (already inductive, so the
+// reachable states are the same). On a proof, `inv` becomes the full invariant.
+bool pdr_prove(const Lit_model& m, std::vector<Cube>& inv, int timeout_s) {
+  Abc_Ntk_t* ntk = model_ntk(m, inv);
+  if (ntk == nullptr) {
+    return false;
+  }
+  Aig_Man_t* aig = Abc_NtkToDar(ntk, 0, 1);
+  Abc_NtkDelete(ntk);
+  if (aig == nullptr) {
+    return false;
+  }
+  Pdr_Par_t pars;
+  Pdr_ManSetDefaultParams(&pars);
+  pars.nTimeOut = std::max(1, timeout_s);
+  pars.fSilent  = 1;
+  Abc_FrameSetInv(nullptr);
+  const int rv = Pdr_ManSolve(aig, &pars);
+  if (rv == 1) {
+    if (Vec_Int_t* v = Abc_FrameGetGlobalFrame()->pAbcWlcInv; v != nullptr && Vec_IntSize(v) > 0) {
+      int* p = Vec_IntArray(v);
+      int  n = p[0], at = 1;
+      for (int c = 0; c < n; ++c) {
+        const int len = p[at++];
+        Cube      cube;
+        for (int i = 0; i < len; ++i, ++at) {
+          if (p[at] >= 0) {
+            cube.emplace_back(Abc_Lit2Var(p[at]), !Abc_LitIsCompl(p[at]));
+          }
+        }
+        if (!cube.empty()) {
+          inv.push_back(std::move(cube));
+        }
+      }
+    }
+  }
+  Aig_ManStop(aig);
+  return rv == 1;
+}
+
+// Same register names, and every next-state function and the target equal
+// as combinational functions of inputs and registers (one SAT call). Same
+// reset state (all zero) and same transitions: sequentially equivalent.
+// Returns 0 (not shown equal), 1 (equal by structure), 2 (equal by CEC).
+int comb_equal(const Lit_model& a, const Lit_model& b) {
+  if (a.target <= 1 && a.target == b.target) {
+    return 1;  // the bad state is structurally impossible in both
+  }
+  if (a.regs != b.regs) {
+    return 0;
+  }
+  // One AIG over shared inputs and registers; CEC (SAT sweeping, Mishchenko
+  // et al.) proves each output pair equal: the targets, then every next state.
+  Gia_Man_t* gia = Gia_ManStart(a.nvars() + b.nvars() + 16);
+  Gia_ManHashAlloc(gia);
+  std::map<std::string, int> in;
+  auto input = [&](const std::string& n) {
+    auto it = in.find(n);
+    if (it == in.end()) {
+      it = in.emplace(n, Gia_ManAppendCi(gia)).first;
+    }
+    return it->second;
+  };
+  auto blast = [&](const Lit_model& m) {
+    std::vector<int> val(static_cast<size_t>(m.nvars()));
+    val[0]   = 0;
+    size_t v = 1;
+    for (const auto& n : m.pis) {
+      val[v++] = input("i:" + n);
+    }
+    for (const auto& n : m.regs) {
+      val[v++] = input("r:" + n);
+    }
+    auto lit = [&](int l) { return Abc_LitNotCond(val[static_cast<size_t>(l >> 1)], l & 1); };
+    for (const auto& x : m.ands) {
+      val[v++] = Gia_ManHashAnd(gia, lit(x[0]), lit(x[1]));
+    }
+    std::vector<int> outs{lit(m.target)};
+    for (int n : m.next) {
+      outs.push_back(lit(n));
+    }
+    return outs;
+  };
+  const auto oa = blast(a);
+  const auto ob = blast(b);
+  bool       same = true;
+  for (size_t i = 0; i < oa.size() && same; ++i) {
+    same = oa[i] == ob[i];  // structural hashing already merged it
+  }
+  int rv = 1;
+  if (!same) {
+    for (size_t i = 0; i < oa.size(); ++i) {
+      Gia_ManAppendCo(gia, oa[i]);
+      Gia_ManAppendCo(gia, ob[i]);
+    }
+    Gia_ManHashStop(gia);
+    Cec_ParCec_t cec;
+    Cec_ManCecSetDefaultParams(&cec);
+    cec.fSilent  = 1;
+    cec.nBTLimit = 1000;
+    rv           = Cec_ManVerify(gia, &cec);
+  }
+  Gia_ManStop(gia);
+  return rv != 1 ? 0 : same ? 1 : 2;
+}
+
+// Sequential equivalence of two models' `target` outputs, inputs matched by
+// name: the structural tier above, then SAT sweeping + induction (ABC's
+// `dsec`, Mishchenko et al.) for register renames and retimed logic.
+// Returns 0 (not shown equal), 1 (structure), 2 (CEC), 3 (dsec).
+int seq_equal(const Lit_model& a, const Lit_model& b, int timeout_s) {
+  if (model_text(a) == model_text(b)) {
+    return 1;
+  }
+  if (const int c = comb_equal(a, b); c != 0) {
+    return c;
+  }
+  // Free initial values are inputs named after their register: if they do not
+  // match, the start states are unrelated and the miter cannot be proven.
+  auto inits = [](const Lit_model& m) {
+    std::vector<std::string> v;
+    for (const auto& n : m.pis) {
+      if (n.starts_with("init:")) {
+        v.push_back(n);
+      }
+    }
+    return v;
+  };
+  if (inits(a) != inits(b)) {
+    return 0;
+  }
+  Abc_Ntk_t* ntk = build_ntk({&a, &b}, [&](Abc_Aig_t* man, const std::vector<std::vector<Bit>>& val) {
+    return Abc_AigXor(man, model_bit(val[0], a.target), model_bit(val[1], b.target));
+  });
+  if (ntk == nullptr) {
+    return 0;
+  }
+  int rv = -1;
+  if (const int cst = Abc_NtkMiterIsConstant(ntk); cst == 1) {
+    rv = 1;
+  } else if (cst == 0) {
+    rv = 0;
+  } else if (Abc_NtkLatchNum(ntk) == 0) {
+    rv = 0;  // combinational and not constant: unequal for some input
+  } else if (Aig_Man_t* aig = Abc_NtkToDar(ntk, 0, 1); aig != nullptr) {
+    Fra_Sec_t sp;
+    Fra_SecSetDefaultParams(&sp);
+    sp.TimeLimit      = std::max(1, timeout_s);
+    sp.fSilent        = 1;
+    sp.fVerbose       = 0;
+    sp.fUsePdr        = 0;  // SAT sweeping + induction only: PDR, interpolation and
+    sp.fInterpolation = 0;  // BDD reachability would re-prove the property itself
+    sp.fReachability  = 0;
+    rv           = Fra_FraigSec(aig, &sp, nullptr);
+    Aig_ManStop(aig);
+  }
+  Abc_NtkDelete(ntk);
+  return rv == 1 ? 3 : 0;
+}
+
+constexpr int kKeepModels = 3;  // past models kept per property for reuse=equiv
+
+// One stored answer: what a run concluded for this model.
+struct Stored_answer {
+  int         frame     = kSeqUnknown;
+  int         frames    = 0;
+  bool        unbounded = false;
+  bool        exact     = false;
+  std::string run;  // the lhd run that stored it
+};
+
+std::optional<Stored_answer> answer_parse(const std::string& s) {
+  std::istringstream in{s};
+  Stored_answer      a;
+  int                u = 0, e = 0;
+  if (!(in >> a.frame >> a.frames >> u >> e)) {
+    return std::nullopt;
+  }
+  in >> a.run;
+  a.unbounded = u != 0;
+  a.exact     = e != 0;
+  return a;
+}
+
+// Input trace of a counterexample: per frame, the inputs that are 1.
+using Trace = std::vector<std::unordered_set<std::string>>;
+
+Trace trace_parse(const std::string& s) {
+  Trace              t;
+  std::istringstream in{s};
+  std::string        line;
+  while (std::getline(in, line)) {
+    std::istringstream ls{line};
+    std::string        tok;
+    t.emplace_back();
+    while (ls >> tok) {
+      t.back().insert(tok);
+    }
+  }
+  return t;
+}
+
+// Simulates the model on `tr`; returns the first frame where target is 1, if
+// the assumes still hold at the last of `frames` frames (cvc5's rule).
+int replay(const Lit_model& m, const Trace& tr, int frames) {
+  std::vector<uint8_t> v(static_cast<size_t>(m.nvars()), 0);
+  std::vector<uint8_t> st(m.regs.size(), 0);
+  std::vector<std::string> pn;
+  for (const auto& p : m.pis) {
+    pn.push_back(esc_name(p));
+  }
+  auto bit = [&](int l) { return static_cast<uint8_t>(v[static_cast<size_t>(l >> 1)] ^ (l & 1)); };
+  int  hit = -1;
+  for (int f = 0; f < frames; ++f) {
+    size_t x = 1;
+    for (const auto& p : pn) {
+      v[x++] = f < static_cast<int>(tr.size()) && tr[static_cast<size_t>(f)].contains(p) ? 1 : 0;
+    }
+    for (auto s : st) {
+      v[x++] = s;
+    }
+    for (const auto& a : m.ands) {
+      v[x++] = bit(a[0]) & bit(a[1]);
+    }
+    if (hit < 0 && bit(m.target) != 0) {
+      hit = f;
+    }
+    if (f == frames - 1 && bit(m.ok) == 0) {
+      return -1;
+    }
+    for (size_t i = 0; i < st.size(); ++i) {
+      st[i] = bit(m.next[i]);
+    }
+  }
+  return hit;
+}
+
+// bmc3 on the model alone: true when target cannot be 1 in `frames` frames.
+bool model_bmc_clean(const Lit_model& m, int frames, int timeout_s) {
+  if (frames <= 0) {
+    return true;
+  }
+  Abc_Ntk_t* ntk = model_ntk(m);
+  if (ntk == nullptr) {
+    return false;
+  }
+  Saig_ParBmc_t pars;
+  Saig_ParBmcSetDefaultParams(&pars);
+  pars.nFramesMax = frames;
+  pars.nTimeOut   = timeout_s;
+  pars.fSilent    = 1;
+  const int rv    = Abc_NtkDarBmc3(ntk, &pars, 0);
+  Abc_NtkDelete(ntk);
+  return rv == 1 || (rv == -1 && pars.iFrame + 1 >= frames);
+}
+
+// Debug (LHD_REPLAY=<file> from LHD_WITNESS_DUMP): simulate a cvc5 trace on
+// this exact model and report, per cycle, assumes / target and the first
+// registers whose value differs from the one cvc5 chose.
+void replay_debug(const Lit_model& m, const char* file, const std::string& name, int frames) {
+  std::istringstream in{read_file(file)};
+  std::string        line, want = esc_name(name);
+  bool               mine = false;
+  int                at   = -1;
+  std::map<std::pair<int, std::string>, char> pi_bit, reg_bit;  // (cycle, escaped bit name) -> '0'/'1'
+  while (std::getline(in, line)) {
+    std::istringstream ls{line};
+    std::string        tag, nm, val;
+    int                c = 0;
+    ls >> tag;
+    if (tag == "P") {
+      ls >> nm >> c;
+      if (mine) {
+        break;
+      }
+      mine = nm == want;
+      at   = c;
+      continue;
+    }
+    if (!mine || !(ls >> c >> nm >> val)) {
+      continue;
+    }
+    for (size_t k = 0; k < val.size(); ++k) {
+      const std::string bit = std::to_string(val.size() - 1 - k);
+      if (tag == "I") {
+        pi_bit[{c, "ab_i_" + nm + "_b" + bit}] = val[k];
+      } else {
+        reg_bit[{c, "ab_s_" + nm + "_b" + bit}] = val[k];
+        if (c == 0) {
+          pi_bit[{0, "init:ab_s_" + nm + "_b" + bit}] = val[k];
+        }
+      }
+    }
+  }
+  if (at < 0) {
+    return;
+  }
+  std::fprintf(stderr, "replay %s: cvc5 refutes at %d\n", name.c_str(), at);
+  std::vector<std::string> pn, rn;
+  for (const auto& p : m.pis) {
+    pn.push_back(esc_name(p));
+  }
+  for (const auto& r : m.regs) {
+    rn.push_back(esc_name(r));
+  }
+  std::vector<uint8_t> v(static_cast<size_t>(m.nvars()), 0), st(m.regs.size(), 0);
+  auto bit = [&](int l) { return static_cast<uint8_t>(v[static_cast<size_t>(l >> 1)] ^ (l & 1)); };
+  int  shown = 0;
+  for (int f = 0; f <= at && f < frames; ++f) {
+    size_t x = 1;
+    for (const auto& p : pn) {
+      auto it = pi_bit.find({f, p});
+      v[x++]  = it != pi_bit.end() && it->second == '1' ? 1 : 0;
+    }
+    std::string diff;
+    int         nd = 0;
+    for (size_t i = 0; i < st.size(); ++i) {
+      v[x++] = st[i];
+      auto it = reg_bit.find({f, rn[i]});
+      if (f > 0 && it != reg_bit.end() && (it->second == '1') != (st[i] != 0)) {
+        if (++nd <= 8) {
+          diff += " " + rn[i] + (st[i] ? "=1(cvc5 0)" : "=0(cvc5 1)");
+        }
+      }
+    }
+    for (const auto& a : m.ands) {
+      v[x++] = bit(a[0]) & bit(a[1]);
+    }
+    std::fprintf(stderr, "replay f%d ok=%d target=%d reg-diffs=%d%s\n", f, bit(m.ok), bit(m.target), nd, diff.c_str());
+    if (nd > 0 && ++shown >= 3) {
+      break;
+    }
+    for (size_t i = 0; i < st.size(); ++i) {
+      st[i] = bit(m.next[i]);
+    }
+  }
+}
+
+// One query: build the sequential AIG and run bmc3.
+Seq_answer seq_bmc_one(const Seq_model& m, size_t pix, int timeout_s) {
+  Seq_answer ans;
+  Abc_Ntk_t* ntk = Abc_NtkAlloc(ABC_NTK_STRASH, ABC_FUNC_AIG, 1);
+  ntk->pName     = Extra_UtilStrsav(const_cast<char*>("lhd_bmc"));
+  auto*     man  = static_cast<Abc_Aig_t*>(ntk->pManFunc);
+  const Bit one  = Abc_AigConst1(ntk);
+  const Bit zero = Abc_ObjNot(one);
+  std::vector<std::pair<Abc_Obj_t*, Bit>> next;  // latch input, its next value
+  std::unordered_map<Abc_Obj_t*, std::string> reg_name;  // latch output -> stable name
+  auto latch = [&](std::string name) {
+    Abc_Obj_t* l  = Abc_NtkCreateLatch(ntk);
+    Abc_Obj_t* bi = Abc_NtkCreateBi(ntk);
+    Abc_Obj_t* bo = Abc_NtkCreateBo(ntk);
+    Abc_ObjAddFanin(l, bi);
+    Abc_ObjAddFanin(bo, l);
+    Abc_LatchSetInit0(l);
+    reg_name[bo] = std::move(name);
+    return std::pair<Abc_Obj_t*, Bit>{bi, bo};
+  };
+  auto pi = [&](const std::string& nm) {
+    Abc_Obj_t* p = Abc_NtkCreatePi(ntk);
+    Abc_ObjAssignName(p, const_cast<char*>(nm.c_str()), nullptr);
+    return p;
+  };
+  auto fail = [&](std::string_view) {  // the reason is for debugging only
+    Abc_NtkDelete(ntk);
+    return ans;
+  };
+  // A saturating counter and "counter < k" / "counter == k" over it.
+  auto counter = [&](int limit, const std::string& nm) {
+    int kb = 1;
+    while ((1 << kb) <= limit) {
+      ++kb;
+    }
+    std::vector<Bit>        cnt;
+    std::vector<Abc_Obj_t*> cnt_bi;
+    for (int i = 0; i < kb; ++i) {
+      auto [bi, bo] = latch(nm + std::to_string(i));
+      cnt_bi.push_back(bi);
+      cnt.push_back(bo);
+    }
+    return std::pair{cnt, cnt_bi};
+  };
+  auto less = [&](const std::vector<Bit>& cnt, int k) {
+    Bit lt = zero;  // unsigned, LSB to MSB
+    for (size_t i = 0; i < cnt.size(); ++i) {
+      const Bit h = ((k >> i) & 1) ? one : zero;
+      lt          = Abc_AigMux(man, Abc_AigXor(man, cnt[i], h), Abc_AigAnd(man, Abc_ObjNot(cnt[i]), h), lt);
+    }
+    return lt;
+  };
+  auto equal = [&](const std::vector<Bit>& cnt, int k) {
+    Bit e = one;
+    for (size_t i = 0; i < cnt.size(); ++i) {
+      e = Abc_AigAnd(man, e, ((k >> i) & 1) ? cnt[i] : Abc_ObjNot(cnt[i]));
+    }
+    return e;
+  };
+  auto step = [&](const std::vector<Bit>& cnt, const std::vector<Abc_Obj_t*>& cnt_bi, Bit inc) {
+    Bit carry = inc;
+    for (size_t i = 0; i < cnt.size(); ++i) {
+      next.emplace_back(cnt_bi[i], Abc_AigXor(man, cnt[i], carry));
+      carry = Abc_AigAnd(man, cnt[i], carry);
+    }
+  };
+
+  // `started` is 0 only in cycle 0, so registers read their init values there.
+  auto [s_bi, started] = latch("_started");
+  next.emplace_back(s_bi, one);
+
+  // Reset-hold counter: in_reset while it is below reset_hold, then it stops.
+  Bit in_reset = zero;
+  if (m.reset_hold > 0) {
+    auto [cnt, cnt_bi] = counter(m.reset_hold, "_rc");
+    in_reset           = less(cnt, m.reset_hold);
+    step(cnt, cnt_bi, in_reset);
+  }
+  const Seq_prop& p = m.props[pix];
+  // Cycle counter for modes 1 and 2 (stops at the last frame).
+  Bit is_last = one, at_now = zero;
+  if (p.mode != 0) {
+    auto [fc, fc_bi] = counter(m.frames, "_fc");
+    is_last          = equal(fc, m.frames - 1);
+    at_now           = p.at >= 0 ? equal(fc, p.at) : zero;
+    step(fc, fc_bi, Abc_ObjNot(is_last));
+  }
+
+  Blaster b(ntk, nullptr);
+  for (const auto& pin : m.pins) {
+    auto r = const_bits(ntk, pin.in_reset);
+    auto a = const_bits(ntk, pin.after_reset);
+    if (r.empty() || r.size() != a.size()) {
+      return fail("reset pin not constant");
+    }
+    for (size_t i = 0; i < r.size(); ++i) {
+      r[i] = Abc_AigMux(man, in_reset, r[i], a[i]);
+    }
+    b.preset(pin.sym, std::move(r));
+  }
+  std::vector<std::vector<Bit>>        cur(m.regs.size());
+  std::vector<std::vector<Abc_Obj_t*>> cur_bi(m.regs.size());
+  for (size_t ri = 0; ri < m.regs.size(); ++ri) {
+    const auto&    r    = m.regs[ri];
+    const uint32_t w    = r.cur.getSort().getBitVectorSize();
+    auto           init = const_bits(ntk, r.init);
+    const std::string rn   = r.cur.hasSymbol() ? r.cur.getSymbol() : "r" + std::to_string(ri);
+    for (uint32_t i = 0; i < w; ++i) {
+      auto [bi, bo] = latch(rn + "_b" + std::to_string(i));
+      const Bit iv  = i < init.size() ? init[i] : pi("init:" + rn + "_b" + std::to_string(i));
+      cur[ri].push_back(Abc_AigMux(man, started, bo, iv));
+      cur_bi[ri].push_back(bi);
+    }
+    b.preset(r.cur, cur[ri]);
+  }
+  // Memories: one latch per entry bit, free initial contents (as in cvc5).
+  std::vector<std::vector<std::vector<Abc_Obj_t*>>> mem_bi(m.mems.size());
+  for (size_t mi = 0; mi < m.mems.size(); ++mi) {
+    const auto&       mm = m.mems[mi];
+    const auto        so = mm.cur.getSort();
+    const uint32_t    aw = so.getArrayIndexSort().getBitVectorSize();
+    const uint32_t    dw = so.getArrayElementSort().getBitVectorSize();
+    const std::string nm = mm.cur.hasSymbol() ? mm.cur.getSymbol() : "mem" + std::to_string(mi);
+    Blaster::Entries  ent(size_t{1} << aw);
+    mem_bi[mi].resize(ent.size());
+    for (size_t k = 0; k < ent.size(); ++k) {
+      for (uint32_t i = 0; i < dw; ++i) {
+        const std::string bn = nm + "[" + std::to_string(k) + "]_b" + std::to_string(i);
+        auto [bi, bo]        = latch(bn);
+        ent[k].push_back(Abc_AigMux(man, started, bo, pi("init:" + bn)));
+        mem_bi[mi][k].push_back(bi);
+      }
+    }
+    b.preset_array(mm.cur, std::move(ent));
+  }
+  for (const auto& [sym, val] : m.binds) {  // asynchronous reads: dout := select(...)
+    auto v = b.run_bv(val);
+    if (b.bad() || v.size() != sym.getSort().getBitVectorSize()) {
+      return fail(b.bad() ? b.why() : "bind width");
+    }
+    b.preset(sym, std::move(v));
+  }
+  for (size_t mi = 0; mi < m.mems.size(); ++mi) {
+    auto e = b.run_arr(m.mems[mi].next);
+    if (b.bad() || e.size() != mem_bi[mi].size()) {
+      return fail(b.bad() ? b.why() : "memory next");
+    }
+    for (size_t k = 0; k < e.size(); ++k) {
+      for (size_t i = 0; i < e[k].size() && i < mem_bi[mi][k].size(); ++i) {
+        next.emplace_back(mem_bi[mi][k][i], e[k][i]);
+      }
+    }
+  }
+  for (size_t ri = 0; ri < m.regs.size(); ++ri) {
+    const auto& r  = m.regs[ri];
+    auto        nb = b.run_bv(r.next);
+    if (b.bad() || nb.size() != cur[ri].size()) {
+      return fail(b.bad() ? b.why() : "next-state width");
+    }
+    for (size_t i = 0; i < nb.size(); ++i) {
+      const Bit v = r.hold_in_reset ? Abc_AigMux(man, in_reset, cur[ri][i], nb[i]) : nb[i];
+      next.emplace_back(cur_bi[ri][i], v);
+    }
+  }
+
+  // Environment: `viol` latches once an assume fails; later cycles do not count.
+  Bit e_now = one;
+  for (int ei : p.envs) {
+    e_now = Abc_AigAnd(man, e_now, b.run(m.envs[static_cast<size_t>(ei)]));
+    if (b.bad()) {
+      return fail(b.why());
+    }
+  }
+  auto [v_bi, viol] = latch("_viol");
+  next.emplace_back(v_bi, Abc_AigOr(man, viol, Abc_ObjNot(e_now)));
+  const Bit ok     = Abc_AigAnd(man, Abc_ObjNot(viol), e_now);
+  const Bit window = p.always ? one : Abc_ObjNot(in_reset);
+  Bit       target = zero;
+  if (p.mode == 1) {
+    target = Abc_AigAnd(man, ok, is_last);
+  } else {
+    const Bit h = b.run(p.holds);
+    if (b.bad() || h == nullptr) {
+      return fail(b.bad() ? b.why() : "property not boolean");
+    }
+    const Bit failing = Abc_AigAnd(man, window, Abc_ObjNot(h));
+    if (p.mode == 0) {
+      target = Abc_AigAnd(man, ok, failing);
+    } else {
+      auto [f_bi, failed] = latch("_failed");  // failed exactly at cycle `at`, envs still holding
+      const Bit hit       = Abc_AigAnd(man, Abc_AigAnd(man, at_now, failing), ok);
+      next.emplace_back(f_bi, Abc_AigOr(man, failed, hit));
+      target = Abc_AigAnd(man, Abc_AigAnd(man, ok, is_last), Abc_AigOr(man, failed, hit));
+    }
+  }
+  Abc_Obj_t* po = Abc_NtkCreatePo(ntk);
+  Abc_ObjAddFanin(po, target);
+  Abc_ObjAssignName(po, const_cast<char*>("target"), nullptr);
+  for (auto& [bi, v] : next) {
+    Abc_ObjAddFanin(bi, v);
+  }
+  // Witness inputs, before CI reordering changes nothing about object identity.
+  std::vector<const std::vector<Bit>*> wbits;
+  for (const auto& w : m.watch) {
+    wbits.push_back(b.sym_bits(w));
+  }
+  ans.exact = !b.abstracted() && !m.inexact;
+  // Memories abstracted make the network inexact, but a property whose cone
+  // reads only real inputs and free initial values still gets real traces.
+  if (!ans.exact) {
+    std::unordered_set<std::string> real;
+    for (const auto& w : m.watch) {
+      if (w.hasSymbol()) {
+        real.insert(w.getSymbol());
+      }
+    }
+    if (auto cm = extract_model(ntk, target, ok, reg_name, false)) {
+      ans.exact = std::all_of(cm->pis.begin(), cm->pis.end(), [&](const std::string& n) {
+        const auto u = n.rfind("_b");
+        return n.starts_with("init:") || (u != std::string::npos && real.contains(n.substr(0, u)));
+      });
+      if (!ans.exact && std::getenv("LHD_REUSE_DEBUG") != nullptr) {
+        for (const auto& n : cm->pis) {
+          const auto u = n.rfind("_b");
+          if (!n.starts_with("init:") && (u == std::string::npos || !real.contains(n.substr(0, u)))) {
+            std::fprintf(stderr, "inexact[%zu] mode%d: %s\n", pix, p.mode, esc_name(n).c_str());
+          }
+        }
+      }
+    }
+  }
+  Abc_NtkOrderCisCos(ntk);  // ToDar wants primary inputs before latch outputs
+  Abc_NtkAddDummyBoxNames(ntk);
+  if (Abc_NtkCheck(ntk) == 0) {
+    return fail("Abc_NtkCheck");
+  }
+
+  // Cross-version reuse and PDR (mode 0), on the property's own cone.
+  std::optional<Lit_model> lm;
+  const bool               dbg = std::getenv("LHD_REUSE_DEBUG") != nullptr;
+  const char* replay_file = std::getenv("LHD_REPLAY");
+  if (p.mode == 0 && (!p.store.empty() || p.pdr || replay_file != nullptr)) {
+    lm = extract_model(ntk, target, ok, reg_name, ans.exact);
+    if (dbg) {
+      std::fprintf(stderr, "reuse[%zu]: model %s pis=%zu regs=%zu ands=%zu store=%s\n", pix, lm ? "ok" : "none",
+                   lm ? lm->pis.size() : 0, lm ? lm->regs.size() : 0, lm ? lm->ands.size() : 0, p.store.c_str());
+    }
+  }
+  if (lm && replay_file != nullptr && !p.name.empty()) {
+    replay_debug(*lm, replay_file, p.name, m.frames);
+  }
+  const std::string& dir = p.store;
+  std::vector<Cube>  seed;  // cubes of the old invariant that are still inductive
+  auto finish = [&](Seq_answer a) {  // keep what this run concluded for the next version
+    if (lm && !dir.empty() && a.frame != kSeqUnknown) {
+      const std::string txt = model_text(*lm);
+      if (read_file(dir + "/model.txt") != txt) {  // a new model: shift the older ones down
+        for (int k = kKeepModels - 1; k > 0; --k) {
+          const std::string from = k == 1 ? "" : std::to_string(k - 1);
+          std::rename((dir + "/model" + from + ".txt").c_str(), (dir + "/model" + std::to_string(k) + ".txt").c_str());
+          std::rename((dir + "/answer" + from + ".txt").c_str(), (dir + "/answer" + std::to_string(k) + ".txt").c_str());
+        }
+      }
+      write_file(dir + "/model.txt", txt);
+      write_file(dir + "/answer.txt", std::format("{} {} {} {} {}\n", a.frame, m.frames, a.unbounded ? 1 : 0, a.exact ? 1 : 0,
+                                                  m.run_id.empty() ? "-" : m.run_id));
+    }
+    Abc_NtkDelete(ntk);
+    return a;
+  };
+  const auto last_ans = lm && !dir.empty() ? answer_parse(read_file(dir + "/answer.txt")) : std::nullopt;
+  const bool same_run = last_ans && !m.run_id.empty() && last_ans->run == m.run_id;  // a sibling strategy, not a version
+  if (lm && !dir.empty() && !same_run) {
+    // 1. Counterexample replay: the old trace still fails (first failure).
+    if ((p.reuse & kReuseCex) && lm->exact) {
+      const Trace tr = trace_parse(read_file(dir + "/cex.txt"));
+      const int   f  = tr.empty() ? -1 : replay(*lm, tr, m.frames);
+      const int   w0 = p.always ? 0 : m.reset_hold;  // nothing can fail earlier
+      if (f >= 0 && (f <= w0 || model_bmc_clean(*lm, f, timeout_s))) {
+        Seq_answer a;
+        a.frame = f;
+        a.exact = true;
+        a.how   = "cex";
+        for (int c = 0; c <= f; ++c) {
+          std::vector<std::string> row;
+          for (const auto& w : m.watch) {
+            const uint32_t    wd = w.getSort().getBitVectorSize();
+            const std::string nm = w.hasSymbol() ? w.getSymbol() : std::string{};
+            std::string       v(wd, '0');
+            for (uint32_t bit = 0; bit < wd && !nm.empty(); ++bit) {
+              if (tr[static_cast<size_t>(c)].contains(esc_name(nm + "_b" + std::to_string(bit)))) {
+                v[wd - 1 - bit] = '1';
+              }
+            }
+            row.push_back(std::move(v));
+          }
+          a.values.push_back(std::move(row));
+        }
+        return finish(a);
+      }
+    }
+    // 2. Equivalence: an old model (the last 3 kept) is sequentially equal, so
+    // its answer holds. The cheap tiers try all; SAT sweeping only the newest.
+    std::optional<Stored_answer> old_ans;
+    int                          tier = 0;  // which check proved it: 1 structure, 2 CEC, 3 dsec
+    for (int k = 0; k < kKeepModels && !old_ans && (p.reuse & kReuseEquiv); ++k) {
+      const std::string sfx = k == 0 ? "" : std::to_string(k);
+      Lit_model         old;
+      auto              oa = answer_parse(read_file(dir + "/answer" + sfx + ".txt"));
+      if (oa && (m.run_id.empty() || oa->run != m.run_id) && model_parse(read_file(dir + "/model" + sfx + ".txt"), old)
+          && (tier = k == 0 ? seq_equal(old, *lm, m.sec_s) : model_text(old) == model_text(*lm) ? 1 : comb_equal(old, *lm)) != 0) {
+        old_ans = oa;
+      }
+    }
+    if (old_ans) {
+      Seq_answer a;
+      a.exact = lm->exact;
+      a.how   = tier == 1 ? "equiv:struct" : tier == 2 ? "equiv:cec" : "equiv:dsec";
+      if (old_ans->unbounded) {
+        a.frame     = kSeqClean;
+        a.unbounded = true;
+      } else if (old_ans->frame >= 0 && old_ans->frame < m.frames) {
+        a.frame = old_ans->frame;
+      } else if (old_ans->frames >= m.frames && (old_ans->frame == kSeqClean || old_ans->frame >= m.frames)) {
+        a.frame = kSeqClean;
+      }
+      if (a.frame != kSeqUnknown) {
+        return finish(a);
+      }
+    }
+    // 3. Invariant: the old PDR invariant, Houdini-filtered, still blocks it.
+    if (p.reuse & kReuseInv) {
+      const std::string it = read_file(dir + "/inv.txt");
+      seed                 = inv_parse(it, *lm);
+      if (!it.empty() && houdini(*lm, seed)) {
+        write_file(dir + "/inv.txt", inv_text(seed, *lm));
+        Seq_answer a;
+        a.frame     = kSeqClean;
+        a.unbounded = true;
+        a.exact     = ans.exact;
+        a.how       = "inv";
+        return finish(a);
+      }
+    }
+  }
+
+  Saig_ParBmc_t pars;
+  Saig_ParBmcSetDefaultParams(&pars);
+  pars.nFramesMax = m.frames;
+  pars.nTimeOut   = timeout_s;
+  pars.fSilent    = 1;
+  const int rv    = Abc_NtkDarBmc3(ntk, &pars, 0);
+  if (rv == 0 && ntk->pSeqModel != nullptr) {
+    const Abc_Cex_t* cex = ntk->pSeqModel;
+    ans.frame            = p.mode == 2 ? p.at : cex->iFrame;
+    if (p.mode == 2) {
+      // Inputs the failure does not depend on read as 0 (as in a cvc5 model).
+      Aig_Man_t* aig  = Abc_NtkToDar(ntk, 0, 1);
+      Abc_Cex_t* care = aig != nullptr ? Bmc_CexCareMinimize(aig, Saig_ManPiNum(aig), const_cast<Abc_Cex_t*>(cex), 4, 0, 0) : nullptr;
+      auto       is_1 = [&](int idx) {
+        return Abc_InfoHasBit(const_cast<unsigned*>(cex->pData), idx) && (care == nullptr || Abc_InfoHasBit(care->pData, idx));
+      };
+      std::unordered_map<Abc_Obj_t*, int>  pi_ix;
+      Abc_Obj_t*                           obj;
+      int                                  k;
+      Abc_NtkForEachPi(ntk, obj, k) { pi_ix[obj] = k; }
+      for (int f = 0; f <= p.at; ++f) {
+        std::vector<std::string> row;
+        for (size_t wi = 0; wi < m.watch.size(); ++wi) {
+          const uint32_t w = m.watch[wi].getSort().getBitVectorSize();
+          std::string    v(w, '0');
+          for (uint32_t bit = 0; wbits[wi] != nullptr && bit < w && bit < wbits[wi]->size(); ++bit) {
+            auto it = pi_ix.find(Abc_ObjRegular((*wbits[wi])[bit]));
+            if (it != pi_ix.end() && is_1(cex->nRegs + f * cex->nPis + it->second)) {
+              v[w - 1 - bit] = Abc_ObjIsComplement((*wbits[wi])[bit]) ? '0' : '1';
+            } else if (it != pi_ix.end()) {
+              v[w - 1 - bit] = Abc_ObjIsComplement((*wbits[wi])[bit]) ? '1' : '0';
+            }
+          }
+          row.push_back(std::move(v));
+        }
+        ans.values.push_back(std::move(row));
+      }
+      if (!p.store.empty() && (p.reuse & kReuseCex)) {  // the trace, for replay on the next version
+        std::string tr;
+        Abc_Obj_t*  tr_pi;
+        int         k2;
+        for (int f = 0; f <= cex->iFrame; ++f) {
+          Abc_NtkForEachPi(ntk, tr_pi, k2) {
+            if (is_1(cex->nRegs + f * cex->nPis + k2)) {
+              tr += esc_name(Abc_ObjName(tr_pi)) + " ";
+            }
+          }
+          tr += "\n";
+        }
+        write_file(p.store + "/cex.txt", tr);
+      }
+      if (care != nullptr) {
+        Abc_CexFree(care);
+      }
+      if (aig != nullptr) {
+        Aig_ManStop(aig);
+      }
+    }
+  } else if (rv == 1 || (rv == -1 && pars.iFrame + 1 >= m.frames)) {
+    ans.frame = kSeqClean;
+  }
+  // 4. PDR: an all-cycles proof, seeded with the surviving old invariant.
+  if (dbg) {
+    std::fprintf(stderr, "reuse[%zu]: bmc3 frame=%d\n", pix, ans.frame);
+  }
+  if (lm && p.pdr && ans.frame == kSeqClean) {
+    std::vector<Cube> inv = seed;
+    if (pdr_prove(*lm, inv, m.pdr_s)) {
+      ans.unbounded = true;
+      ans.how       = seed.empty() ? "pdr" : "pdr+inv";
+      if (!dir.empty()) {
+        write_file(dir + "/inv.txt", inv_text(inv, *lm));
+      }
+    }
+  }
+  return finish(ans);
+}
+
+std::string pack(const Seq_answer& a) {
+  std::string s = std::to_string(a.frame) + " " + (a.exact ? "1" : "0") + " " + std::to_string(a.values.size()) + " "
+                  + (a.unbounded ? "1" : "0") + " " + (a.how.empty() ? std::string{"-"} : a.how) + "\n";
+  for (const auto& row : a.values) {
+    for (const auto& v : row) {
+      s += v + " ";
+    }
+    s += "\n";
+  }
+  return s;
+}
+
+bool unpack(std::string_view s, size_t nwatch, Seq_answer& a) {
+  std::istringstream in{std::string{s}};
+  int                ex = 0, ub = 0;
+  size_t             nrow = 0;
+  if (!(in >> a.frame >> ex >> nrow >> ub >> a.how)) {
+    return false;
+  }
+  a.exact     = ex != 0;
+  a.unbounded = ub != 0;
+  if (a.how == "-") {
+    a.how.clear();
+  }
+  a.values.assign(nrow, std::vector<std::string>(nwatch));
+  for (auto& row : a.values) {
+    for (auto& v : row) {
+      if (!(in >> v)) {
+        return false;
+      }
+    }
+  }
+  return true;
+}
+}  // namespace
+
+std::vector<Seq_answer> abc_seq_bmc(const Seq_model& m, int64_t deadline_ms) {
+  std::vector<Seq_answer> out(m.props.size());
+  if (m.props.empty() || m.frames <= 0) {
+    return out;
+  }
+  ensure_abc_started();
+  int fds[2];
+  if (pipe(fds) != 0) {
+    return out;
+  }
+  const pid_t pid = fork();
+  if (pid < 0) {
+    close(fds[0]);
+    close(fds[1]);
+    return out;
+  }
+  if (pid == 0) {  // child: ABC has no wall clock of its own
+    close(fds[0]);
+    if (int devnull = open("/dev/null", O_WRONLY); devnull >= 0) {
+      dup2(devnull, STDOUT_FILENO);
+      close(devnull);
+    }
+    ensure_abc_started();
+    const int tsec = deadline_ms > 0 ? static_cast<int>(std::max<int64_t>(1, deadline_ms / 1000)) : 0;
+    for (size_t i = 0; i < m.props.size(); ++i) {
+      const std::string body = pack(seq_bmc_one(m, i, tsec));
+      unsigned char     hdr[8];
+      put_u32(hdr, static_cast<uint32_t>(i));
+      put_u32(hdr + 4, static_cast<uint32_t>(body.size()));
+      if (write(fds[1], hdr, sizeof hdr) != static_cast<ssize_t>(sizeof hdr)
+          || write(fds[1], body.data(), body.size()) != static_cast<ssize_t>(body.size())) {
+        break;
+      }
+    }
+    close(fds[1]);
+    _exit(0);
+  }
+  close(fds[1]);
+  const auto  t0 = std::chrono::steady_clock::now();
+  std::string buf;
+  bool        expired = false;
+  for (;;) {
+    while (buf.size() >= 8) {  // complete records
+      const auto idx = get_u32(reinterpret_cast<const unsigned char*>(buf.data()));
+      const auto len = get_u32(reinterpret_cast<const unsigned char*>(buf.data()) + 4);
+      if (buf.size() < 8 + static_cast<size_t>(len)) {
+        break;
+      }
+      Seq_answer a;
+      if (idx < out.size() && unpack(std::string_view{buf}.substr(8, len), m.watch.size(), a)) {
+        out[idx] = std::move(a);
+      }
+      buf.erase(0, 8 + static_cast<size_t>(len));
+    }
+    int wait_ms = -1;
+    if (deadline_ms > 0) {
+      const auto left = deadline_ms
+                        - std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - t0).count();
+      if (left <= 0) {
+        expired = true;
+        break;
+      }
+      wait_ms = static_cast<int>(left);
+    }
+    pollfd    pf{fds[0], POLLIN, 0};
+    const int pr = poll(&pf, 1, wait_ms);
+    if (pr == 0) {
+      continue;
+    }
+    if (pr < 0) {
+      if (errno == EINTR) {
+        continue;
+      }
+      break;
+    }
+    char          chunk[4096];
+    const ssize_t n = read(fds[0], chunk, sizeof chunk);
+    if (n <= 0) {
+      break;
+    }
+    buf.append(chunk, static_cast<size_t>(n));
+  }
+  close(fds[0]);
+  if (expired) {
+    kill(pid, SIGKILL);
+  }
+  int status = 0;
+  while (waitpid(pid, &status, 0) < 0 && errno == EINTR) {
+  }
+  return out;
+}
 
 }  // namespace livehd::lec

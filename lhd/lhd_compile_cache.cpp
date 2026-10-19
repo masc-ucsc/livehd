@@ -1834,6 +1834,9 @@ void save_compact_lnast(const std::shared_ptr<Lnast>& ln, const fs::path& dir, b
     tolg_abi_flags |= 16;
     tolg_abi_flags |= *activation ? 32 : 0;
   }
+  if (ln->is_blackbox()) {
+    tolg_abi_flags |= 64;
+  }
   write_pod<uint8_t>(os, tolg_abi_flags);
   auto write_strings = [&](const std::vector<std::string>& strings) {
     write_pod<uint32_t>(os, static_cast<uint32_t>(strings.size()));
@@ -2021,7 +2024,7 @@ std::shared_ptr<Lnast> load_compact_lnast(const std::string& dir, std::string_vi
     ln->set_tolg_declares_reset_reg((tolg_flags & 8) != 0);
   }
   const auto tolg_abi_flags = read_pod<uint8_t>(is);
-  if ((tolg_abi_flags & ~uint8_t{63}) != 0 || ((tolg_abi_flags & 2) != 0 && (tolg_abi_flags & 1) == 0)
+  if ((tolg_abi_flags & ~uint8_t{127}) != 0 || ((tolg_abi_flags & 2) != 0 && (tolg_abi_flags & 1) == 0)
       || ((tolg_abi_flags & 8) != 0 && (tolg_abi_flags & 4) == 0) || ((tolg_abi_flags & 32) != 0 && (tolg_abi_flags & 16) == 0)) {
     throw Lhd_error{"config", "compact compile-cache LNAST has invalid transitive tolg flags", "the unit will be rebuilt cold"};
   }
@@ -2034,6 +2037,7 @@ std::shared_ptr<Lnast> load_compact_lnast(const std::string& dir, std::string_vi
   if ((tolg_abi_flags & 16) != 0) {
     ln->set_tolg_activation_capable((tolg_abi_flags & 32) != 0);
   }
+  ln->set_blackbox((tolg_abi_flags & 64) != 0);
   auto read_strings = [&]() {
     const auto count = read_pod<uint32_t>(is);
     if (count > (1U << 20)) {

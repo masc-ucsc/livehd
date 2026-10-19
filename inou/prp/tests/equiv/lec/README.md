@@ -2,7 +2,9 @@
 
 `name.v` plus `name_1.v`, `name_2.v`, ... is a group. The same convention works
 for `.prp` and `.sv`. Each numbered variant automatically adds `//inou/prp:lec-<stem>`
-and joins `//inou/prp:integration`. Both sides use the same language extension.
+and joins `//inou/prp:integration`, unless its base is listed in `_LEC_GROUPS` in
+`inou/prp/BUILD`: those bases run together as `//inou/prp:lec-group-<name>` (every
+variant of every listed base, with its own header tags). Both sides use the same language extension.
 A comment-only variant compares the base source with an independent elaboration
 of itself. Use the existing `../../prplec.py` harness rather than writing a new script.
 

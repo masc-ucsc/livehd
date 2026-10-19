@@ -23,7 +23,10 @@ base = ['lhd/lhd', 'synth', str(source), '--top', 'dut',
 
 def run(name, extra, success=True):
     result = root / f'{name}.json'
-    completed = subprocess.run(base + extra + ['--result-json', str(result)],
+    # Cache/geometry legs opt out; the timed leg supplies its own single value.
+    timing = [] if any(v.startswith('synth.place.timing_driven=') for v in extra) else [
+        '--set', 'synth.place.timing_driven=false']
+    completed = subprocess.run(base + timing + extra + ['--result-json', str(result)],
                                capture_output=True, text=True, timeout=15)
     assert result.is_file(), (name, completed.returncode, completed.stdout, completed.stderr)
     data = json.loads(result.read_text())
@@ -97,4 +100,10 @@ assert not (root/'W/synth/place/out.def').exists()
 run('bad_def', ['--set', 'synth.place=true', '--set', 'synth.place.mode=gp', '--emit-dir', f'def:{root}/bad'], False)
 plain = run('plain', [])
 assert 'place' not in plain['qor'], plain['qor']
+# Global scalar and X,Y halo syntax is accepted; CORE-only placement is unchanged.
+for label, halo in [('scalar', '5'), ('xy', '1.1,2.2')]:
+    data = run('halo_' + label, ['--set', 'synth.place=true', '--set', 'synth.place.halo=' + halo])
+    assert data['qor']['place']['halo']['macros'] == 0, data
+for halo in ['-1', '1,-2', 'nan', 'inf', '1,', '1,2,3', 'x']:
+    run('bad_halo_' + halo.replace(',', '_'), ['--set', 'synth.place=true', '--set', 'synth.place.halo=' + halo], False)
 print('placement: legal DEF, bus connectivity, RC timing, warm/cold reuse, GP/default controls passed')

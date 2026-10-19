@@ -53,6 +53,9 @@ public:
     bool                                    primary_clock_tree = false;
     // (module gid, input port) driven from a cell in some parent: a derived clock.
     const std::set<std::pair<hhds::Gid, std::string>>* derived_ports = nullptr;
+    // Resetless power-on init values are dropped (plain DFF cell) instead of kept
+    // on a native flop; pass.abc.drop_init.
+    bool                                    drop_init = false;
   };
 
   void set_outlib(hhds::GraphLibrary* outlib) { outlib_ = outlib; }

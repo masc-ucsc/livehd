@@ -698,6 +698,21 @@ struct Lec_options {
   std::function<bool(std::string_view)> verify_cache_lookup;
   std::function<void(std::string)>      verify_cache_store;
 
+  // Cross-version reuse in the ABC pre-pass (formal.reuse): bits of
+  // kReuseEquiv | kReuseCex | kReuseInv, each property's store under
+  // `reuse_dir` (one directory per property identity). `pdr` adds an
+  // all-cycles PDR proof; `abc_mem` lets designs with memories into the
+  // pre-pass with memory reads abstracted (inexact: refutes go to cvc5).
+  unsigned    seq_reuse    = 0;
+  std::string reuse_dir;
+  bool        abc          = false;  // ABC bmc3 pre-pass (also on with reuse equiv/cex/inv, pdr, abc_mem)
+  bool        pdr          = false;
+  bool        abc_mem      = false;
+  int         pdr_s        = 20;
+  int         sec_s        = 3;
+  int         abc_budget_s = 0;  // 0 = a quarter of `timeout`
+  std::string reuse_run;         // this lhd run (its own stored answers are not reuse)
+
   // P3 mining tier. Mining itself is gated by spec_mining_timeout>0 (it spends that
   // budget, never `timeout`). "" = report only the inductive survivors;
   // "speculative" = also report base-proven candidates the induction step
@@ -956,6 +971,15 @@ struct Prop_result {
   // base case), eligible as an unconditional helper everywhere.
   bool          unbounded     = false;
   int           proven_to     = -1;  // deepest checked cycle proven (every checked cycle <= it is UNSAT)
+  std::string   cone_digest;         // structural digest of the property's cone ("" = not measured)
+  bool          cone_reused = false; // verdict taken from the per-property cone cache this run
+  std::string   cone_key;            // per-property cone cache key for a proof to this depth ("" = not cacheable)
+  std::string   cone_key_any;        // same cone, any depth: stored only for an all-cycles proof
+  bool          cone_reused_any = false;  // reused from an all-cycles proof
+  bool          abc_proven      = false;  // ABC bmc3 pre-pass: cannot fail within the bound
+  bool          abc_unbounded   = false;  // ABC pre-pass: holds in every cycle (PDR or reused)
+  std::string   reuse_by;                 // "" | hash | equiv | cex | inv | pdr+inv: what settled it
+  int           abc_first_fail  = -1;     // ABC bmc3 pre-pass: cannot fail before this cycle
   int           refuted_at    = -1;  // first cycle with a reachable violation (SAT)
   int           undecided_at  = -1;  // first cycle where the solver gave up (a limit / no answer);
                                      // later cycles were not attempted for this property

@@ -7,7 +7,7 @@
 */
 // 2i-import S1 — single-file compile must discover the sibling `lib_add.prp`
 // from THIS file's own directory. NOTE: :files: lists only this file (unlike
-// import_basic, which lists lib_add too) — the importer-directory-relative
+// import_not_pub, which lists lib_add too) — the importer-directory-relative
 // resolver pulls lib_add in transitively.
 const lib = import("lib_add")
 cassert(lib.my_add(a=1, b=2) == 3)

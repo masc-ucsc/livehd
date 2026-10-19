@@ -5,7 +5,7 @@
 
 // todo_sim_pipeline.md Phase 0 (step 1 anchor) — A GATE FEEDING A GATE.
 //
-// WHY THIS SHAPE MATTERS. flop_sim_gated_clock.prp covers ONE flat gate, which
+// WHY THIS SHAPE MATTERS. icg_enable_sampling.prp covers ONE flat gate, which
 // is the only thing cgen_sim's private ICG matcher recognizes: it looks at the
 // flop's `clock_pin` driver, requires it to be a single `And`, and classifies
 // each operand as either the reference clock or an enable. Give it a CHAIN and
@@ -21,10 +21,9 @@
 // DIFFERENT level each time — c2 closes the outer gate, c3 the inner one — so a
 // matcher that folded only the outermost enable passes c2 and fails c3.
 //
-// Enables change only while the clock is LOW, the same discipline
-// flop_sim_gated_clock.prp explains: an enable rise racing the clock rise is
-// the glitch hazard a real ICG interposes a latch for (that case is pinned
-// separately by icg_enable_sampling.prp).
+// Enables change only while the clock is LOW: an enable rise racing the clock
+// rise is the glitch hazard a real ICG interposes a latch for (that case is
+// pinned separately by icg_enable_sampling.prp).
 //
 // GOLDEN, from Icarus on the netlist LiveHD itself emits for this module
 // (`posedge (e2 & (clk & e1))`, inputs changed while clk is low):

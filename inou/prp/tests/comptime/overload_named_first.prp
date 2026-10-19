@@ -1,10 +1,12 @@
 /*
 :name: overload_named_first
 :type: comptime
-:verifier_pass: 3
+:verifier_pass: 15
 :verifier_fail: 0
 */
 
+// ---- overload_named_first ----
+{
 // 2f-overload — named-argument dispatch and tuple-order (first-match) priority.
 
 // Named arguments bind by name; arity still selects the overload.
@@ -22,3 +24,86 @@ comb pick_second(a:Signed, b:Signed) -> (r:Signed) { r = 2 }
 const pick = [pick_first, pick_second]
 
 cassert(pick(a=4, b=5) == 1)   // both match → first wins
+}
+
+// ---- overload_arity ----
+{
+// 2f-overload — a gathered lambda set dispatches a call to the first candidate
+// whose signature accepts it (tuple-order priority). Overloaded and plain calls
+// share the SAME argument rules, so same-kind args are named (`a=...`); the
+// arity then selects the overload.
+
+comb add2(a:Signed, b:Signed) -> (r:Signed) { r = a + b }
+comb add3(a:Signed, b:Signed, c:Signed) -> (r:Signed) { r = a + b + c }
+
+const add = [add2, add3]
+
+cassert(add(a=1, b=2) == 3)         // 2 args → add2
+cassert(add(a=1, b=2, c=3) == 6)    // 3 args → add3
+}
+
+// ---- overload_typed ----
+{
+// 2f-overload — dispatch on argument TYPES, not just arity. A candidate whose
+// declared parameter type cannot accept an actual (wrong scalar kind, or a
+// literal that overflows the declared width) is skipped, and the next is tried.
+
+// (1) kind dispatch: Bool vs int
+comb on_bool(a:Bool) -> (r:Signed) { r = if a { 1 } else { 0 } }
+comb on_int(a:Signed)   -> (r:Signed) { r = a + 100 }
+const k = [on_bool, on_int]
+
+cassert(k(true) == 1)    // bool actual → on_bool (on_int's int param rejects bool)
+cassert(k(7) == 107)     // int actual  → on_int  (on_bool's bool param rejects int)
+
+// (2) range dispatch: U8 vs U16
+comb small(a:U8)  -> (r:U32) { r = a + 1 }
+comb big(a:U16)   -> (r:U32) { r = a + 1 }
+const w = [small, big]
+
+cassert(w(200) == 201)     // 200 fits U8  → small
+cassert(w(5000) == 5001)   // 5000 overflows U8 → big
+}
+
+// ---- adv_overload_13 ----
+{
+// Range-typed candidates with nested, distinguishable windows. The literal
+// must pick the candidate whose declared range contains it. (The old custom
+// `int(min,max)` windows relied on the now-removed 'int' type; power-of-two
+// `UN` ranges are enforced for overload dispatch, so they exercise the same
+// range-based-dispatch behavior.)
+comb lo(a:U7)  -> (r:Signed) { r = a + 1 }   // fits 0..=127
+comb hi(a:U8)  -> (r:Signed) { r = a + 2 }   // 0..=255
+
+const p = [lo, hi]
+
+const at99  = p(99)    // fits lo (U7)
+const at200 = p(200)   // overflows lo (max 127) -> hi (U8)
+const at0   = p(0)     // fits lo
+
+cassert(at99 == 100)
+cassert(at200 == 202)
+cassert(at0 == 1)
+}
+
+// ---- adv_overload_18 ----
+{
+// Tuple-typed param vs scalar param in a gathered set. A tuple actual must
+// pick the tuple candidate; a scalar must pick the scalar one. Tests the
+// kind/shape discrimination of the dispatcher.
+comb on_pair(p:(x:Signed, y:Signed)) -> (r:Signed) { r = p.x * 10 + p.y }
+comb on_scalar(a:Signed)          -> (r:Signed) { r = a + 1 }
+
+const t = [on_pair, on_scalar]
+
+const fromtuple  = t((x=3, y=4))   // tuple actual -> on_pair
+const fromscalar = t(7)            // scalar actual -> on_scalar
+
+cassert(fromtuple == 34)
+cassert(fromscalar == 8)
+
+// Reordering scalar first; a tuple still cannot bind to int -> on_pair.
+const t2 = [on_scalar, on_pair]
+const v = t2((x=1, y=2))
+cassert(v == 12)
+}

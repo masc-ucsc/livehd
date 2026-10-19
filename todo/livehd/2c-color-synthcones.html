@@ -338,8 +338,8 @@ promote the file-local <code>driver_bits</code> helper to a private static membe
 translation units can use it. The existing pipe/synth path is unchanged. Verbose
 line <code>[color.cones] &lt;def&gt; roots R (din D, en E, mem-port P, sub B, cut C, out O, sweep S), truncated T,
 pairs P, merges M, refused U over cap, colors K, max pred X (Y over max_gate)</code>.</li>
-<li><code>pass/color/BUILD</code>: add <code>color_synth_cones_test</code> to the explicit
-<code>cc_test</code> list (the production <code>.cpp</code> is globbed; tests are not).</li>
+<li><code>pass/color/BUILD</code>: add <code>color_synth_cones_test.cpp</code> to the explicit
+<code>color_test</code> <code>srcs</code> list (the production <code>.cpp</code> is globbed; tests are not).</li>
 <li><code>pass/color/color_common.hpp</code>: <code>Color_opts::max_gate = 0</code> (INERT for direct
 callers/tests, same contract as <code>min_ge</code>/<code>max_ge</code>: 0 = no budget, no
 merge, raw cones); <code>Def_color_sizes::color_pred</code> (predicted AIG-size score per written color)

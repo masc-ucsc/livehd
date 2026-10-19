@@ -12,9 +12,13 @@
 //
 // Putting the "can this be synthesized?" question in tolg made every other
 // consumer pay for it: bitwidth, constprop, the LEC encoder and the simulator
-// can all reason about `%` perfectly well, and only the netlist mapper cannot.
-// The restriction now lives in pass.abc (diag `rem-unsupported`), so a design
-// that merely CONTAINS a remainder compiles, simulates and verifies.
+// all reason about `%` directly. The netlist mapper handles every shape too: a
+// non-negative dividend modulo a power of two becomes a mask
+// (pass/synth/region_blast.cpp rewrite_trivial_rems), and every other remainder
+// (runtime divisor, non-power-of-two divisor, possibly-negative dividend) is
+// bit-blasted by the shared restoring-divider network (pass/synth/arith.hpp
+// build_rem). So a design containing `%` compiles, simulates, verifies and
+// synthesizes.
 //
 // SEMANTICS pinned here: TRUNCATED remainder, sign following the DIVIDEND, the
 // same as Verilog `%`, Dlop::rem_op and cvc5 BITVECTOR_SREM. `rs` is the arm

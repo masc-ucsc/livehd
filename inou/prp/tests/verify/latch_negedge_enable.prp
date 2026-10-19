@@ -7,8 +7,8 @@
 :verify_refuted: 0
 */
 
-// todo/livehd/2f-latch — the formal twin of tests/sim/latch_sim_negedge_enable
-// .prp, and THE ONE DESIGN WHERE BOTH M8 HOLES INTERACT: a transparent latch
+// todo/livehd/2f-latch — the formal twin of the latch_sim_negedge_enable test in
+// tests/sim/latch_sim_basic_lane.prp, and THE ONE DESIGN WHERE BOTH M8 HOLES INTERACT: a transparent latch
 // QUALIFYING A NEGEDGE FLOP'S ENABLE (the register-file write-strobe shape).
 // Everything else in the corpus exercises the latch hole or the edge hole; this
 // exercises the seam between them, and it is the fixture the task page carried

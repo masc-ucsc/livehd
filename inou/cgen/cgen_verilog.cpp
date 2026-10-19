@@ -64,6 +64,39 @@ bool unsigned_mask_identity(const hhds::Node_class& node) {
   return m->first == 0 && m->second >= bits_of(a) && bits_of(node.get_driver_pin(0)) == bits_of(a);
 }
 
+// Does get_expression fold this (undeclared, non-constant) driver's text into
+// its reader? Anything else is read by its wire name.
+bool expression_inlines(const hhds::Pin_class& pin) {
+  if (pin.is_invalid()) {
+    return false;
+  }
+  const auto node = pin.get_master_node();
+  if (node.is_invalid()) {
+    return false;
+  }
+  switch (type_op_of(node)) {
+    case Ntype_op::Get_mask: return unsigned_mask_identity(node);
+    case Ntype_op::Sum     :
+    case Ntype_op::Rxor    :
+    case Ntype_op::Popcount:
+    case Ntype_op::Ror     :
+    case Ntype_op::Div     :
+    case Ntype_op::Rem     :
+    case Ntype_op::Not     :
+    case Ntype_op::LT      :
+    case Ntype_op::GT      :
+    case Ntype_op::SHL     :
+    case Ntype_op::SRA     :
+    case Ntype_op::Mult    :
+    case Ntype_op::And     :
+    case Ntype_op::Or      :
+    case Ntype_op::Xor     :
+    case Ntype_op::Concat  :
+    case Ntype_op::EQ      : return true;
+    default                : return false;
+  }
+}
+
 // Emit a constant as Verilog. hlop's Dlop::to_verilog() formats a NEGATIVE
 // value as its bare magnitude ("{n}'sh{mag}", dropping the sign), so it
 // re-reads as +mag (e.g. -6 -> "4'sh6" == +6, a silent miscompile that broke
@@ -502,7 +535,7 @@ std::string Cgen_verilog::flat_module_name(std::string_view full) const {
   return std::string(pos == std::string_view::npos ? full : full.substr(pos + 1));
 }
 
-int32_t Cgen_verilog::decl_bits_of(const hhds::Pin_class& dpin) {
+int32_t Cgen_verilog::decl_bits_of(const hhds::Pin_class& dpin) const {
   // The width the net was declared with. Width hints are literal for both
   // signed and unsigned nets, so this is uniformly bits_of(). A 1-bit net is
   // declared as a scalar `reg` with no range at all, and a
@@ -513,7 +546,19 @@ int32_t Cgen_verilog::decl_bits_of(const hhds::Pin_class& dpin) {
   if (dpin.is_invalid() || dpin.is_const()) {
     return 0;
   }
-  return bits_of(dpin);
+  if (const auto bits = bits_of(dpin); bits != 0) {
+    return bits;
+  }
+  // A graph-IO pin without a `bits` attr is declared with its GraphIO width
+  // (create_module_io). Structural wiring slices by bit, so it must see that same
+  // width instead of reading the port as 1 bit.
+  if (!structural_wiring_) {
+    return 0;
+  }
+  if (const auto it = io_decl_bits_.find(dpin.get_class_index()); it != io_decl_bits_.end()) {
+    return it->second;
+  }
+  return 0;
 }
 
 bool Cgen_verilog::operand_reads_signed(const hhds::Pin_class& dpin) {
@@ -642,36 +687,7 @@ std::string Cgen_verilog::get_expression(const hhds::Pin_class& dpin) {
   const auto ready = [&](const hhds::Pin_class& pin) {
     return pin.is_const() || pin2var.contains(pin.get_class_index()) || pin2expr.contains(pin.get_class_index());
   };
-  const auto inlineable = [](const hhds::Pin_class& pin) {
-    if (pin.is_invalid()) {
-      return false;
-    }
-    const auto node = pin.get_master_node();
-    if (node.is_invalid()) {
-      return false;
-    }
-    switch (type_op_of(node)) {
-      case Ntype_op::Get_mask: return unsigned_mask_identity(node);
-      case Ntype_op::Sum     :
-      case Ntype_op::Rxor    :
-      case Ntype_op::Popcount:
-      case Ntype_op::Ror     :
-      case Ntype_op::Div     :
-      case Ntype_op::Rem     :
-      case Ntype_op::Not     :
-      case Ntype_op::LT      :
-      case Ntype_op::GT      :
-      case Ntype_op::SHL     :
-      case Ntype_op::SRA     :
-      case Ntype_op::Mult    :
-      case Ntype_op::And     :
-      case Ntype_op::Or      :
-      case Ntype_op::Xor     :
-      case Ntype_op::Concat  :
-      case Ntype_op::EQ      : return true;
-      default                : return false;
-    }
-  };
+  const auto inlineable = [](const hhds::Pin_class& pin) { return expression_inlines(pin); };
 
   // The normal forward traversal has already cached producers. For a producer
   // first encountered through a consumer, build its dependency cone with an
@@ -2095,17 +2111,17 @@ std::string Cgen_verilog::build_simple_expr(std::shared_ptr<File_output> fout, c
     // skips constants): beside an unsigned operand the expression was unsigned
     // and `rem - (-1)` zero-extended the -1 into +1023 (random Pyrope
     // round-trip fuzz, 2026-10-08).
-    bool negative_constant = false;
-    bool unsigned_operand  = false;
+    bool        negative_constant = false;
+    bool        unsigned_operand  = false;
     for (const auto& sink : node.inp_sorted_pins()) {
       const auto drv     = sink.get_driver_pin();
       negative_constant |= drv.is_const() && const_of(drv).is_negative();
       unsigned_operand  |= !drv.is_const() && !operand_reads_signed(drv);
     }
-    const bool  mixed_signs       = mixes_operand_signs(node) || (negative_constant && unsigned_operand);
-    const int   result_bits       = bits_of(dpin);
-    const bool  result_uns        = is_unsign(dpin);
-    bool        signed_arithmetic = negative_constant;
+    const bool mixed_signs       = mixes_operand_signs(node) || (negative_constant && unsigned_operand);
+    const int  result_bits       = bits_of(dpin);
+    const bool result_uns        = is_unsign(dpin);
+    bool       signed_arithmetic = negative_constant;
     for (const auto& sink : node.inp_sorted_pins()) {
       const auto drv     = sink.get_driver_pin();
       signed_arithmetic |= operand_reads_signed(drv);
@@ -2115,8 +2131,8 @@ std::string Cgen_verilog::build_simple_expr(std::shared_ptr<File_output> fout, c
       if (!operand_pin.is_const() || result_bits <= 0) {
         return get_expression(operand_pin);
       }
-      saw_context_constant      = true;
-      const auto& c             = const_of(operand_pin);
+      saw_context_constant       = true;
+      const auto& c              = const_of(operand_pin);
       // A Sum is context-determined by its realized result width. Materialize
       // constants in that context instead of retaining Dlop's signed-magnitude
       // carrier width (1 became 2'sh1 and confused a later Verilog->LGraph
@@ -2223,10 +2239,10 @@ std::string Cgen_verilog::build_simple_expr(std::shared_ptr<File_output> fout, c
     }
     final_expr = (n_terms == 1) ? absl::StrCat("|", terms) : absl::StrCat("|{", terms, "}");
   } else if (op == Ntype_op::Div || op == Ntype_op::Rem) {
-    const auto a   = get_driver(find_sink_pin(node, "a"));
-    const auto b   = get_driver(find_sink_pin(node, "b"));
-    auto       lhs = get_expression(a);
-    auto       rhs = get_expression(b);
+    const auto a     = get_driver(find_sink_pin(node, "a"));
+    const auto b     = get_driver(find_sink_pin(node, "b"));
+    auto       lhs   = get_expression(a);
+    auto       rhs   = get_expression(b);
     // Like a comparison, a quotient gives its inlined arithmetic operands no
     // width context of their own: `(a7 + b16) / 6` was evaluated at the 16-bit
     // LHS width and lost the sum's carry (random Pyrope round-trip fuzz,
@@ -2241,8 +2257,8 @@ std::string Cgen_verilog::build_simple_expr(std::shared_ptr<File_output> fout, c
       }
       return expr;
     };
-    lhs = sized(a, std::move(lhs));
-    rhs = sized(b, std::move(rhs));
+    lhs              = sized(a, std::move(lhs));
+    rhs              = sized(b, std::move(rhs));
     // Verilog makes both operands unsigned when either is unsigned. Preserve
     // the LGraph's numeric operand values with a zero-extended signed carrier.
     const bool mixed = mixes_operand_signs(node);
@@ -3066,9 +3082,9 @@ void Cgen_verilog::create_module_io(std::shared_ptr<File_output> fout, hhds::Gra
     // range, so preserve the declared Verilog sign at this physical boundary
     // instead of inserting a Get_mask node into the graph.
     if (is_input) {
-      fout->append(decl->unsign ? "input " : "input signed ");
+      fout->append(structural_wiring_ || decl->unsign ? "input " : "input signed ");
     } else {
-      fout->append(decl->unsign ? "output reg " : "output reg signed ");
+      fout->append(structural_wiring_ ? "output " : decl->unsign ? "output reg " : "output reg signed ");
     }
 
     if (bits > 1) {
@@ -3080,6 +3096,9 @@ void Cgen_verilog::create_module_io(std::shared_ptr<File_output> fout, hhds::Gra
     // Map the corresponding HHDS pin (driver for inputs, sink for outputs) into pin2var.
     if (!pin.is_invalid()) {
       pin2var.emplace(pin.get_class_index(), name);
+      if (bits > 0) {
+        io_decl_bits_[pin.get_class_index()] = bits;
+      }
       if (decl->unsign) {
         pin2var_unsigned_.insert(pin.get_class_index());
       }
@@ -3400,11 +3419,20 @@ void Cgen_verilog::create_subs(std::shared_ptr<File_output> fout, hhds::Graph* g
         // The port name must be escaped like the callee's own port DECLARATION
         // (get_scaped_name): a tuple-typed port flattens to a dotted leaf name
         // (`req.a`), which is only legal Verilog as `.\req.a (...)`.
+        int input_width = static_cast<int>(io.decl->bits);
+        if (structural_wiring_ && io.is_input && sub_io->has_graph()) {
+          const auto target = sub_io->get_graph();
+          const auto port   = target->get_input_pin(io.decl->name);
+          if (!port.is_invalid()) {
+            input_width = livehd::graph_util::bits_of(port, *sub_io, io.decl->name);
+          }
+        }
         fout->append(absl::StrCat(first_entry ? "" : ",",
                                   ".",
                                   get_scaped_name(io.decl->name),
                                   "(",
-                                  io.is_input
+                                  structural_wiring_ && io.is_input ? structural_range(dpin, input_width, 0, true)
+                                  : io.is_input
                                       ? get_wire_or_const(dpin, static_cast<int>(io.decl->bits), sub_io->is_unsign(io.decl->name))
                                       : get_wire_or_const(dpin),
                                   ")\n"));
@@ -3910,8 +3938,10 @@ void Cgen_verilog::add_to_pin2var(std::shared_ptr<File_output> fout, const hhds:
   // output port it drives.  Detect that before asking for a unique name: the
   // port was pre-reserved, so uniquifying first would turn `q` into `q_cgen1`
   // and defeat the direct-output case below.
+  // Structural mode never aliases a port: the node's net has the node's width,
+  // and the output loop assigns the port with the explicit extension/truncation.
   bool redeclares_output = false;
-  if (!dpin.is_invalid()) {
+  if (!structural_wiring_ && !dpin.is_invalid()) {
     for (const auto& e : dpin.out_edges()) {
       if (is_graph_output_pin(e.sink) && get_scaped_name(pin_wire_name(e.sink)) == name) {
         redeclares_output = true;
@@ -3934,6 +3964,9 @@ void Cgen_verilog::add_to_pin2var(std::shared_ptr<File_output> fout, const hhds:
     reg_str = "reg ";
   } else {
     reg_str = "reg signed ";
+  }
+  if (structural_wiring_) {
+    reg_str = "wire ";
   }
 
   // A combinational driver that feeds a module output directly is named after
@@ -4273,6 +4306,9 @@ void Cgen_verilog::create_locals(std::shared_ptr<File_output> fout, hhds::Graph*
               }
               const char* dout_decl
                   = is_array_mem ? (dout_unsigned ? "reg " : "reg signed ") : (dout_unsigned ? "wire " : "wire signed ");
+              if (structural_wiring_) {
+                dout_decl = "wire ";
+              }
               if (bits2 <= 1) {
                 fout->append(dout_decl, name2, ";\n");
               } else {
@@ -4320,9 +4356,13 @@ void Cgen_verilog::create_locals(std::shared_ptr<File_output> fout, hhds::Graph*
             }
             int bits2 = bits_of(cdpin);
             if (bits2 <= 1) {
-              fout->append(out_unsigned ? "wire " : "wire signed ", name2, ";\n");
+              fout->append(structural_wiring_ || out_unsigned ? "wire " : "wire signed ", name2, ";\n");
             } else {
-              fout->append(out_unsigned ? "wire [" : "wire signed [", std::to_string(bits2 - 1), ":0] ", name2, ";\n");
+              fout->append(structural_wiring_ || out_unsigned ? "wire [" : "wire signed [",
+                           std::to_string(bits2 - 1),
+                           ":0] ",
+                           name2,
+                           ";\n");
             }
           }
         }
@@ -4677,6 +4717,121 @@ void Cgen_verilog::create_locals(std::shared_ptr<File_output> fout, hhds::Graph*
       add_to_pin2var(fout, v, get_scaped_name(pin_wire_name(v)), is_unsign(v));
     }
   }
+
+  // Fifth pass — a DUPLICATED inline expression must stay small.
+  //
+  // The first pass leaves a bitwise cell with two readers inline at both
+  // ("cheaper to inline at two uses than to materialize"), which copies its
+  // whole inline cone into two statements. That is cheap only while the cone
+  // is small, and nothing bounded it. A runtime-position bit write lowers to
+  // `(prev & ((1 << pos) - 1)) | (shifted << pos)`, and in a chain of them (a
+  // rolled loop writing `v#[i*K + n]` for n < K) each Or is read by the next
+  // write's shift AND by the next write's low part: Or_k's inline text held
+  // Or_{k-1}'s, every Set_mask line re-spelled the whole chain before it, and
+  // the Verilog grew quadratically (141 MB at K=256).
+  //
+  // Weigh each inline cone as get_expression will spell it -- a cell is one
+  // unit plus its operands; a declared net or wire name is one leaf, a literal
+  // wider than 64 bits one unit per 16 bits -- and give a two-reader bitwise
+  // cell whose cone outweighs the budget a net of its own. Its readers then
+  // name it and the cones above restart from a leaf, so no text is copied more
+  // than a bounded number of times and the output stays linear in the graph.
+  // A cone within the budget keeps the first pass's inlining byte for byte.
+  // The budget (~4 KB of text per copy) is deliberately loose: it cuts only
+  // runaway re-spelling, so designs without such chains emit exactly the
+  // Verilog they did before.
+  // Runs last, so it weighs against the FINAL declarations of the passes above
+  // (each one only cuts cones). The decision at a cell reads only its
+  // operands' settled weights, so it does not depend on visit order.
+  {
+    constexpr int64_t kDupInlineBudget = 256;
+    constexpr int64_t kWeightCap       = int64_t{1} << 40;
+    const auto        is_inline        = [&](const hhds::Pin_class& p) {
+      return !p.is_invalid() && !p.is_const() && !pin2var.contains(p.get_class_index()) && !pin2expr.contains(p.get_class_index())
+             && expression_inlines(p);
+    };
+    // The cells the first pass inlines at two readers: bitwise, unnamed.
+    const auto duplicated = [&](const hhds::Node_class& cell) {
+      const auto op = type_op_of(cell);
+      if (op != Ntype_op::And && op != Ntype_op::Or && op != Ntype_op::Xor) {
+        return false;
+      }
+      if (const auto nname = node_name_of(cell); !nname.empty() && nname.front() != '_') {
+        return false;
+      }
+      int readers = 0;
+      for (const auto& e : cell.out_edges()) {
+        (void)e;
+        if (++readers >= 2) {
+          return true;
+        }
+      }
+      return false;
+    };
+    absl::flat_hash_map<pin_key_t, int64_t>       weight;  // settled inline pins (1 once given a net)
+    absl::flat_hash_set<pin_key_t>                active;
+    std::vector<hhds::Pin_class>                  to_declare;
+    std::vector<std::pair<hhds::Pin_class, bool>> stack;
+    for (auto node : graph->body().nodes()) {
+      if (Ntype::has_multiple_driver_pins(type_op_of(node)) || !node.has_out_edges()) {
+        continue;
+      }
+      const auto root = node.get_driver_pin(0);
+      if (!is_inline(root) || weight.contains(root.get_class_index())) {
+        continue;
+      }
+      // Explicit postorder worklist, like get_expression: a long chain must
+      // not recurse through the host stack.
+      stack.emplace_back(root, false);
+      while (!stack.empty()) {
+        const auto [pin, expanded] = stack.back();
+        stack.pop_back();
+        const auto key = pin.get_class_index();
+        if (weight.contains(key)) {
+          continue;
+        }
+        const auto cell = pin.get_master_node();
+        if (!expanded) {
+          if (!active.insert(key).second) {
+            continue;  // reached again through itself: weighed as a leaf below
+          }
+          stack.emplace_back(pin, true);
+          for (const auto& sink : cell.inp_sorted_pins()) {
+            const auto drv = sink.get_driver_pin();
+            if (is_inline(drv) && !weight.contains(drv.get_class_index()) && !active.contains(drv.get_class_index())) {
+              stack.emplace_back(drv, false);
+            }
+          }
+          continue;
+        }
+        int64_t w = 1;
+        for (const auto& sink : cell.inp_sorted_pins()) {
+          const auto drv = sink.get_driver_pin();
+          int64_t    dw  = 1;
+          if (drv.is_const()) {
+            // A literal wider than 64 bits is spelled bit by bit, at up to the
+            // reader's width (a Sum sizes its constants to the result): that
+            // text is what a copy repeats, so it weighs ~16 bits per unit.
+            const int64_t spelled  = std::max<int64_t>(bits_of(drv), bits_of(pin));
+            dw                    += spelled > 64 ? spelled / 16 : 0;
+          } else if (is_inline(drv)) {
+            const auto it = weight.find(drv.get_class_index());
+            dw            = it == weight.end() ? 1 : it->second;
+          }
+          w = std::min(kWeightCap, w + dw);
+        }
+        if (w > kDupInlineBudget && duplicated(cell)) {
+          to_declare.push_back(pin);
+          w = 1;
+        }
+        weight.emplace(key, w);
+        active.erase(key);
+      }
+    }
+    for (const auto& pin : to_declare) {
+      add_to_pin2var(fout, pin, get_scaped_name(pin_wire_name(pin)), is_unsign(pin));
+    }
+  }
 }
 
 void Cgen_verilog::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
@@ -4697,6 +4852,7 @@ void Cgen_verilog::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
 
   pin2var.clear();
   pin2var_unsigned_.clear();
+  io_decl_bits_.clear();
   pin2expr.clear();
   mux2vector.clear();
   declared_name_counts.clear();
@@ -4743,7 +4899,8 @@ void Cgen_verilog::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
   note_module(fout);
   fout->append("module ", get_scaped_name(flat_module_name(graph->get_name())), "(\n");
 
-  hhds::Graph* g = graph.get();
+  hhds::Graph* g     = graph.get();
+  structural_wiring_ = structural_wiring_graph(g);
   create_module_io(fout, g);
   if (auto program = g->get_input_node().attr(livehd::attrs::simulation_init); program.has() && !program.get().empty()) {
     fout->append("// synthesis translate_off\ninitial ",
@@ -4753,12 +4910,29 @@ void Cgen_verilog::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
 
   reserve_instance_names(g);
   create_locals(fout, g);
+  if (structural_wiring_) {
+    // Materialize every wiring result. Inline expressions can contain casts
+    // and context-dependent widths that structural Verilog readers do not
+    // support; explicit finite nets make those conversions bit connections.
+    for (auto node : g->body().nodes()) {
+      const auto op = type_op_of(node);
+      if (op == Ntype_op::Sub || op == Ntype_op::Memory || !node.has_out_edges()) {
+        continue;
+      }
+      const auto pin = node.get_driver_pin(0);
+      add_to_pin2var(fout, pin, get_scaped_name(pin_wire_name(pin)), is_unsign(pin));
+    }
+  }
   create_memories(fout, g);
   create_subs(fout, g);
   create_clock_cells(fout, g);
 
-  create_combinational(fout, g);
-  create_outputs(fout, g);
+  if (structural_wiring_) {
+    create_structural_wiring(fout, g);
+  } else {
+    create_combinational(fout, g);
+    create_outputs(fout, g);
+  }
   create_registers(fout, g);
 
   note_module(fout);

@@ -12,7 +12,7 @@
 // unresolved reference`). imports/absent_field_one_member_import.prp is the
 // one-member import namespace twin; test-block instance handles
 // (`mut d = dut; d.a = 3; d.o`) are a different thing and stay legal
-// (sim/test_read_after_tick.prp, sim/test_bare_step_multi_input.prp).
+// (sim/backtick_test_names.prp, sim/testbench_evaluator_values.prp).
 pub comb absent_field_one_field_tuple(a:U8) -> (o:U8) {
   const t = (const x = a)
   const q = t.zz  // locate_error_here

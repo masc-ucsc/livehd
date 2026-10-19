@@ -63,10 +63,14 @@ int materialize_clock_cells_all(hhds::Graph* top, const std::vector<hhds::Graph*
 // Inline integrated clock gates across `top` and each def and fold the gated
 // clock into a flop enable where that is a pure P=1 retype. Returns {cells
 // inlined, defs folded}; a def that took a gate but could not fold is added to
-// `unfolded` so the caller keeps it out of the edge-normalization scan.
+// `unfolded` so the caller keeps it out of the edge-normalization scan. A set
+// `deadline` is checked between defs; reaching it stops with `*timed_out` set
+// and the defs after it untouched -- the caller must report TIMEOUT-time and
+// not query.
 std::pair<int, int> inline_clock_gates_and_fold(hhds::Graph* top, const std::vector<hhds::Graph*>& defs,
                                                 absl::flat_hash_set<hhds::Graph*>*             unfolded,
-                                                const std::function<bool(const hhds::Graph*)>& is_boxed = {});
+                                                const std::function<bool(const hhds::Graph*)>& is_boxed = {},
+                                                std::chrono::steady_clock::time_point deadline = {}, bool* timed_out = nullptr);
 
 // One side dropped part of the other's hierarchy (a synthesis partition fuses a
 // flat view into region modules the RTL never had): inline, into each def the
@@ -76,9 +80,10 @@ std::pair<int, int> inline_clock_gates_and_fold(hhds::Graph* top, const std::vec
 // names its top differently. Returns the number of instances spliced, and adds
 // to `absorbed` the name of each definition an instance of which was spliced.
 // Linear in the total spliced size (one worklist per host, no re-scan). A set
-// `deadline` is checked between splices; reaching it stops with `*timed_out`
-// set and the side partially inlined -- the caller must report TIMEOUT-time
-// and not query.
+// `deadline` is checked between splices, inside a long splice (Host_inliner)
+// and before each host's packed-slice repair; reaching it stops with
+// `*timed_out` set and the side partially inlined -- the caller must report
+// TIMEOUT-time and not query.
 size_t inline_instances_missing_from_other_side(const Cell_models&                               sub_lib,
                                                 const std::vector<std::shared_ptr<hhds::Graph>>& side_graphs,
                                                 const std::vector<std::shared_ptr<hhds::Graph>>& other_graphs, hhds::Graph* side_g,
@@ -99,6 +104,11 @@ struct Time_base {
   int                      impl_latches = 0;
   std::string              error;       // hard failure AFTER planning: the caller must not query
   std::string              error_hint;
+  // The `deadline` passed before the preparation finished: both sides may be
+  // partially rewritten, so the caller reports TIMEOUT-time and must not query.
+  // `timeout_stage` names the step that was running (for the report).
+  bool                     timed_out    = false;
+  std::string              timeout_stage;
 };
 
 // Put `ref` and `impl` into one single-edge time base, symmetrically:
@@ -114,8 +124,12 @@ struct Time_base {
 // `quiet_decline` suppresses the refusal diagnostics of the probe: pass it when
 // a decline is recoverable (the encoder's read-only phase schedule takes over).
 // The caller scales a BMC bound by `slots` when `applied`.
+// A set `deadline` (the run's formal.timeout) is checked between the steps
+// above, between the graphs each step walks and between the splices of a
+// flattening; reaching it returns with `timed_out` set (see Time_base).
 Time_base prepare_time_base(const Cell_models& sub_lib, hhds::Graph* ref, std::vector<hhds::Graph*>& ref_defs, hhds::Graph* impl,
                             std::vector<hhds::Graph*>& impl_defs, bool quiet_decline,
-                            const std::function<bool(const hhds::Graph*)>& is_boxed = {});
+                            const std::function<bool(const hhds::Graph*)>& is_boxed = {},
+                            std::chrono::steady_clock::time_point          deadline = {});
 
 }  // namespace livehd::single_edge

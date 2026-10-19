@@ -112,6 +112,9 @@ struct Encoded {
   // Graph-input names each property's cone reaches. For a monitor graph these
   // are the bind idents, so the caller can continue the walk in the design.
   absl::flat_hash_map<int, std::vector<std::string>> prop_cone_inputs;
+  // Structural digest of each property's cone (see cone_digest_of). Internal
+  // names and source lines are left out, so renames and comment edits keep it.
+  absl::flat_hash_map<int, std::string> prop_cone_digest;
   // Signal name (port or flop state key) -> the pin that drives it, so a
   // caller can seed a COI walk from a name.
   absl::flat_hash_map<std::string, hhds::Occurrence_pin> cone_seed;
@@ -356,34 +359,6 @@ Mem_x_state mem_x_write(cvc5::TermManager& tm, const Mem_x_state& s, const cvc5:
 Mem_x_state mem_x_restart(cvc5::TermManager& tm, const Mem_x_state& s, const Mem_sig& sig, const cvc5::Term& cond,
                           const cvc5::Term& fill, const cvc5::Term& entries = cvc5::Term{});
 
-// Power-on contents of a Memory (its `initial` pin), entry by entry: a
-// comptime constant or a `$readmem` image file. A memory whose initial pin is
-// neither has kind `none` (its power-on contents are unspecified hardware
-// state). Entries come out as `bits` binary digits, MSB first; an image entry
-// the file does not load stays "" (unspecified, like an uninitialized
-// memory's). An unknown digit ('?', x, z) reads as 0, the convention of the
-// constant path and of a flop's power-on value.
-// An image is read from its path as the simulator would ($readmem paths are
-// relative to the current directory; Pyrope records an absolute one) and
-// cached by (path, radix, shape). `error` is set, and `entries` left empty,
-// when the file cannot be read or the memory cannot be modelled with it (a
-// reset arm or whole-array update would rewrite contents that only exist at
-// power-on; the Verilog emitter refuses the same shapes). LEC must answer
-// REFUTED-unsupported then: comparing an unread image is never a proof.
-struct Mem_power_on {
-  enum class Kind { none, constant, image };
-  Kind                     kind = Kind::none;
-  std::vector<std::string> entries;  // per entry (index 0 first); "" = not loaded
-  std::string              source;   // image: "$readmemh(<path>)", for diagnostics
-  std::string              error;    // image only: why it cannot be used
-  [[nodiscard]] bool       has_contents() const { return kind != Kind::none && error.empty(); }
-  [[nodiscard]] bool       operator==(const Mem_power_on& o) const { return kind == o.kind && entries == o.entries && error == o.error; }
-};
-Mem_power_on memory_power_on(const hhds::Occurrence_node& node, const Mem_sig& sig);
-// Equal power-on contents: the same entries loaded with the same values. A
-// constant and an image that load the same words compare equal.
-bool         same_power_on(const Mem_power_on& a, const Mem_power_on& b);
-
 // Stable cross-design / cross-front-end correspondence key for a Flop state
 // cell (source span preferred, then pin name). Used by both the encoder (to
 // emit current/next state under one key) and prove_equal (to share the
@@ -393,6 +368,8 @@ std::string flop_state_key(const hhds::Graph& g, const hhds::Node_class& node);
 // COI over a set of seed pins: one shared walk, so logic common to two seeds
 // is counted once.
 Encoded::Cone_stats cone_over(const std::vector<hhds::Occurrence_pin>& seeds);
+// Structural digest of the cone behind `starts` (names ignored, see encode.cpp).
+std::string cone_digest_over(const std::vector<hhds::Occurrence_pin>& starts);
 
 // Canonicalize a flop's hierarchical name so a HIERARCHICAL stage register on
 // one side pairs with a FLATTENED reimplementation on the other. CIRCT/firtool
@@ -675,6 +652,9 @@ private:
   };
   const hhds::OccurrenceNodeRange& forward_nodes(hhds::Graph* g, const ankerl::unordered_dense::set<hhds::Gid>& opaque);
   std::deque<Fwd_view>             fwd_cache_;
+  // Cone digest per (graph, property occ): the same in every cycle's encode.
+  absl::flat_hash_map<std::string, std::string> digest_memo_;
+
   // Fit `v` to exactly `width` bits: sign/zero-extend (per v.is_signed) when
   // widening, low-bit Extract when narrowing.
   cvc5::Term                       fit(const Val& v, int width);

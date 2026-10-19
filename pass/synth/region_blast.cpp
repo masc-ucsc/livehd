@@ -188,17 +188,17 @@ std::string nearest_named_signal(const hhds::Node_class& n, std::string_view& re
 }
 
 // Rewrite the TRIVIALLY convertible remainders in a region into a mask, in
-// place, and report whether any survived.
+// place. General remainders use the restoring-divider bit translation.
 //
 // `a % 2^k` is `a & (2^k - 1)` -- but ONLY for a non-negative dividend. The op
 // is truncated remainder (the sign follows the dividend), so `-9 % 8` is -1,
 // not 7, and masking a negative value is simply a different function.
 //
 // upass/tolg's lower_mod already folds this shape when it lowers Pyrope, so a
-// Rem arriving from THAT path is non-trivial by construction. This pass exists
+// Rem arriving from THAT path can be non-trivial. This shortcut also exists
 // for the readers that build the cell directly -- inou/yosys turns `$mod` into
 // a Rem with whatever divisor the Verilog had, so a perfectly ordinary
-// `x % 8` read from Verilog would otherwise hit the error below despite being
+// `x % 8` read from Verilog can use a mask instead of restoring division, being
 // one AND gate.
 void rewrite_trivial_rems(hhds::Graph* g) {
   std::vector<hhds::Node_class> to_fix;
@@ -216,7 +216,7 @@ void rewrite_trivial_rems(hhds::Graph* g) {
       continue;
     }
     const int64_t bv = bc.to_just_i64();
-    const int64_t ba = bv < 0 ? -bv : bv;
+    const uint64_t ba = bv < 0 ? uint64_t{0} - static_cast<uint64_t>(bv) : static_cast<uint64_t>(bv);
     // A negative-capable dividend cannot use the mask (see above). `is_unsign`
     // is the same non-negativity test lower_mod uses.
     if (ba < 2 || (ba & (ba - 1)) != 0 || !gu::is_unsign(a)) {
@@ -229,7 +229,7 @@ void rewrite_trivial_rems(hhds::Graph* g) {
     auto          b  = gu::get_driver_of_sink_name(n, "b");  // named: gcc -Wdangling-reference on const_of(temporary)
     const auto&   bc = gu::const_of(b);
     const int64_t bv = bc.to_just_i64();
-    const int64_t ba = bv < 0 ? -bv : bv;
+    const uint64_t ba = bv < 0 ? uint64_t{0} - static_cast<uint64_t>(bv) : static_cast<uint64_t>(bv);
 
     auto andn = gu::create_typed_node(*g, Ntype_op::And, gu::bits_of(n.get_driver_pin(0)));
     gu::setup_sink_by_name(andn, "as").connect_driver(a);
@@ -804,6 +804,20 @@ Region_blast blast_region(const livehd::partition::Region_body& rb, const Blast_
       f.rst_drv  = gu::get_driver_of_sink_name(n, "reset_pin");
       f.rval_drv = gu::get_driver_of_sink_name(n, "initial");
       f.clk_drv  = gu::get_driver_of_sink_name(n, "clock_pin");
+      // A reset tied INACTIVE never fires (a specialized module whose reset input is
+      // tied off: BUFG_GT's `clr_active` with CLR/CLRMASK open). The register then has
+      // no reset at all, and its `initial` was only the reset value, so it powers on X
+      // like the source. Without this an asynchronous one stays a native flop
+      // ("the reset is a constant"), which the placer cannot place.
+      if (!f.rst_drv.is_invalid() && f.rst_drv.is_const() && !gu::const_of(f.rst_drv).has_unknowns()) {
+        const auto neg      = gu::get_driver_of_sink_name(n, "negreset");
+        const bool low      = neg.is_const() && gu::const_of(neg).bit_test(0);
+        const bool nonzero  = !gu::const_of(f.rst_drv).is_known_false();
+        if (low ? nonzero : !nonzero) {  // active-low reset held high, or active-high held low
+          f.rst_drv  = {};
+          f.rval_drv = {};
+        }
+      }
       if (auto edge = gu::get_driver_of_sink_name(n, "posclk"); edge.is_const()) {
         f.neg_clock = gu::const_of(edge).is_known_false();
       }
@@ -838,14 +852,28 @@ Region_blast blast_region(const livehd::partition::Region_body& rb, const Blast_
       // A clock driven by region-INTERNAL logic (a genuinely gated/derived
       // clock -- a shape whole-design flatten makes reachable, since everything
       // is one region) cannot cross as a latch unless it is a recognized
-      // clock gate (icg_of_gclk): the read-back has no native source for the
-      // DFF/flop clock pin and used to silently drop the connection. Demote the
-      // register to a boundary box (the register=false machinery): it stays a
-      // native flop and its clock cone is technology-mapped and reconnected
-      // like any comb-driven boundary input.
+      // clock gate (icg_of_gclk) or pass.abc.derived_clock keeps it mapped: the
+      // read-back has no native source for the DFF/flop clock pin and used
+      // to silently drop the connection. Demote the register to a boundary box
+      // (the register=false machinery): it stays a native flop and its clock
+      // cone is technology-mapped and reconnected like any comb-driven
+      // boundary input.
+      //
+      // A clock that is the output pin of a module instance (the common
+      // `slcg`/`clock_gate` wrapper whose body the child region maps) is a
+      // boundary box's output: with pass.abc.derived_clock the read-back rebuilds
+      // that instance and wires the DFF clock pin straight to the rebuilt output
+      // (native_boundary_driver in region_writer), exactly as a region input
+      // would be, with no ABC clock PO.
       if (!options.logical_state && !f.clk_drv.is_invalid() && !f.clk_drv.is_const() && !region_in_name.contains(f.clk_drv)) {
         if (auto it = icg_of_gclk.find(f.clk_drv); it != icg_of_gclk.end()) {
           f.icg = it->second;
+        } else if (options.derived_clock && options.icg_flow_ok && real_width(f.clk_drv) == 1
+                   && gu::type_op_of(f.clk_drv.get_master_node()) == Ntype_op::Sub) {
+          // pass.abc.derived_clock: keep the register mapped; clk_drv resolves to the instance's output pin.
+        } else if (options.derived_clock && options.icg_flow_ok && !f.neg_clock && real_width(f.clk_drv) == 1) {
+          // pass.abc.derived_clock: keep the register mapped; its clock crosses as an ABC PO below.
+          f.clk_derived = true;
         } else {
           auto why = icg_rejected.find(f.clk_drv);
           clk_demoted_by[why != icg_rejected.end() ? why->second : std::string{icg_unavailable}].insert(n);
@@ -1188,7 +1216,7 @@ Region_blast blast_region(const livehd::partition::Region_body& rb, const Blast_
     absl::flat_hash_set<hhds::Node_class> comb_set;
     for (const auto& n : rb.nodes) {
       const auto op = gu::type_op_of(n);
-      if (gu::is_type_register(n) || op == Ntype_op::Sub || op == Ntype_op::Clock_cell || op == Ntype_op::Rem) {
+      if (gu::is_type_register(n) || op == Ntype_op::Sub || op == Ntype_op::Clock_cell) {
         continue;
       }
       comb.push_back(n);
@@ -1524,29 +1552,9 @@ Region_blast blast_region(const livehd::partition::Region_body& rb, const Blast_
     // POs, exactly like a Sub/Memory. Before this, a Latch matched none of the
     // cases below and fell into the bit-blast loop, aborting the whole region.
     const bool latch_boundary = op == Ntype_op::Latch;
-    if (op != Ntype_op::Sub && op != Ntype_op::Memory && op != Ntype_op::Clock_cell && op != Ntype_op::Rem && !flop_boundary
+    if (op != Ntype_op::Sub && op != Ntype_op::Memory && op != Ntype_op::Clock_cell && !flop_boundary
         && !latch_boundary && !native_wiring.contains(n)) {
       continue;
-    }
-    if (op == Ntype_op::Rem) {
-      // REMAINDER is where the synthesis constraint lives, and it is an ERROR
-      // rather than a warning. The rest of LiveHD handles `%` as an ordinary
-      // op -- bitwidth ranges it, constprop folds it, the LEC encoder proves it
-      // (SREM), the simulator runs it -- because none of those need it to become
-      // gates. Only the netlist mapper does. Raising it HERE, rather than at
-      // lowering time, is what lets a design that merely CONTAINS `%` compile,
-      // simulate and verify.
-      //
-      // Anything trivially convertible was already rewritten to a mask by
-      // rewrite_trivial_rems() above, so reaching this point means the shape
-      // genuinely has no easy gate-level translation.
-      livehd::diag::err(from_pass, "rem-unsupported", "unsupported")
-          .at(node_span(rb, n))
-          .msg("{}: {} in region '{}': remainder (`%`) has no gate-level translation", from_pass, node_identity(n), rb.module_name)
-          .hint(
-              "only a power-of-two divisor over a non-negative dividend converts trivially (to a mask); keep other "
-              "remainders out of the synthesized region")
-          .emit();
     }
     Bbox bb;
     bb.node = n;
@@ -1689,7 +1697,7 @@ Region_blast blast_region(const livehd::partition::Region_body& rb, const Blast_
     std::vector<hhds::Node_class> pending;
     for (const auto& n : rb.nodes) {
       auto op = gu::type_op_of(n);
-      if (op == Ntype_op::Sub || op == Ntype_op::Memory || op == Ntype_op::Clock_cell || op == Ntype_op::Rem
+      if (op == Ntype_op::Sub || op == Ntype_op::Memory || op == Ntype_op::Clock_cell
           || native_wiring.contains(n)) {
         continue;  // native boundary -- never eagerly bit-blasted
       }
@@ -2140,6 +2148,27 @@ Region_blast blast_region(const livehd::partition::Region_body& rb, const Blast_
     result.latch_pos = lnet.outputs().size() - first;
   }
   trace_stage("latch-pos");
+
+  // --- registers on a derived (gated) clock -> one ABC PO per clock net ---
+  // (after the latch-cell POs) The mapped logic computes the clock and the
+  // read-back wires it to the DFF cell's clock pin in pass 2b, like an
+  // internally computed async reset.
+  {
+    absl::flat_hash_map<hhds::Pin_class, int32_t> dclk_index;
+    const size_t                                  first = lnet.outputs().size();
+    for (auto& f : flops) {
+      if (!f.clk_derived) {
+        continue;
+      }
+      auto [it, fresh] = dclk_index.try_emplace(f.clk_drv, static_cast<int32_t>(lnet.outputs().size()));
+      if (fresh) {
+        lnet.add_output(abc_bit(f.clk_drv, 0), std::format("__dclk{}", it->second));
+      }
+      f.clk_po = it->second;
+    }
+    result.dclk_pos = lnet.outputs().size() - first;
+  }
+  trace_stage("dclk-pos");
 
   // Logical-state controls are live consumers, independent of a library's
   // clock/reset cell choices. Preserve raw bits and source polarity, including

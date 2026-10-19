@@ -223,7 +223,7 @@ sh_test(
 
 filegroup(
     name = "memory_generator_srcs",
-    srcs = ["cgen_verilog.cpp", "cgen_verilog.hpp", "inou_cgen.cpp"],
+    srcs = ["cgen_verilog.cpp", "cgen_verilog.hpp", "cgen_verilog_structural.cpp", "inou_cgen.cpp"],
     visibility = ["//visibility:public"],
 )
 
@@ -251,6 +251,14 @@ cc_test(
         "@googletest//:gtest_main",
         "@hhds//hhds:graph",
     ],
+)
+
+sh_test(
+    name = "structural_verilog",
+    size = "small",
+    srcs = ["tests/structural_verilog.sh"],
+    args = ["$(location :cgen_verilog_test)", "$(location //lhd:lhd)"],
+    data = [":cgen_verilog_test", "//lhd:lhd"],
 )
 
 sh_test(

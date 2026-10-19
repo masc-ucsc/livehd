@@ -147,3 +147,5 @@ generated/master_port/
 /pass/lean/specialization/tests/FP_SUPPORT_MANIFEST.tsv
 /pass/lean/specialization/tests/fp_obligation_inventory.tsv
 /todo/livehd/simulator-generation-matrix.html
+# Results belong under /repros/; prevent older report scripts from adding them here.
+/todo/livehd/placement-results/

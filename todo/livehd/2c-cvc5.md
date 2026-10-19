@@ -203,7 +203,7 @@ cvc5 through its C++ API only (`pass/lec/query.cpp`, `pass/formal/prove.cpp`).
   (`solve_stats.hpp:18` fixture). Existing lec `.sh` tests are the regression
   net; expect `lec_budget_test`/`lec_min_timeout_default_test` to need
   re-baselining if timing-sensitive.
-- Preserve the effort regressions (`effort_test`, `lhd_effort_smoke`): default
+- Preserve the effort regressions (`effort_test.cpp` in `lec_unit_test`, `lhd_effort_smoke`): default
   testing starts with sampling, proof mode never invokes the sampler even
   after Unknown/timeout, capped queries do not count, and cached theorems do
   not replace requested sampling. These must pass with fresh solvers too.

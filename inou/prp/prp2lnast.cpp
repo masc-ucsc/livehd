@@ -2421,7 +2421,7 @@ void Prp2lnast::walk_statement_block(TSNode parent) { lower_children_range(paren
 // `else`. Both leave NO `func_return` node, so the existing if-scope machinery
 // handles early termination — no runner flag. `return` is only valid inside a
 // function body, and the rewrite is per-scope, so a top-level guard (the common
-// idiom, e.g. adv_multi_out_07) is handled exactly; a `return` nested in a loop
+// idiom, e.g. spec_syntax_destructure_by_name.prp) is handled exactly; a `return` nested in a loop
 // or several `if` levels deep falls back to the prior behavior.
 std::string_view Prp2lnast::scan_overflow_in_gap(uint32_t prev_end, uint32_t gap_end) const {
   using namespace std::string_view_literals;

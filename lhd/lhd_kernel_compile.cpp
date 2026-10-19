@@ -16,6 +16,7 @@
 
 #include "absl/container/flat_hash_map.h"
 #include "absl/container/flat_hash_set.h"
+#include "acyclic.hpp"
 #include "diag.hpp"
 #include "graph_library_singleton.hpp"
 #include "hhds/tree_edit_distance.hpp"
@@ -25,12 +26,14 @@
 #include "lhd_compile_cache.hpp"
 #include "lhd_kernel_internal.hpp"
 #include "lhd_prp_import.hpp"
+#include "liberty_dff.hpp"
 #include "lnast.hpp"
 #include "lnast_ntype.hpp"
 #include "node_util.hpp"
 #include "pass.hpp"
 #include "perf_tracing.hpp"
 #include "prp2lnast.hpp"
+#include "specialize.hpp"
 #include "upass_tolg.hpp"
 #include "worker_pool.hpp"  // livehd::run_workers (big-stack workers)
 
@@ -676,6 +679,12 @@ void slang_parse(Options& opts, Result& res, Eprp_var& var) {
   }
 
   merge_sets(opts, "compile.slang", labels);  // e.g. --set compile.slang.preserve_param_provenance=false
+  const auto liberty = synth_set(opts, "liberty", "");
+  if (!liberty.empty()) {
+    check_inputs_exist({liberty});
+    labels["liberty"] = liberty;
+    res.inputs.push_back(liberty);
+  }
   // Named-constant provenance (symbolic pkg.PARAM refs + pub-comptime-const
   // package units) is ON BY DEFAULT for a pyrope-emitting, no-graphs compile —
   // every pyrope generation runs with the same behavior; the flag remains only
@@ -1810,9 +1819,9 @@ void graph_pipeline_and_emits(Options& opts, Result& res, Eprp_var& var, const s
     // pass.legalize -- the one sanctioned structural transform, and the one
     // owner of combinational loops (todo/livehd/legalize_acyclic.md). It runs
     // EARLY: right after the first cprop+bitwidth (packed fields are canonical
-    // Concat lanes and widths are known), ahead of enableopt, satopt and
-    // pass.formal, so every later pass -- formal's hierarchy views included --
-    // sees an acyclic design. RULE: only intra-module passes may run before it;
+    // Concat lanes and widths are known). Rewritten loop candidates use the
+    // existing second cprop+bitwidth before their verdict; enableopt, satopt
+    // and formal wait for that verdict. Only intra-module passes run before it;
     // anything hierarchical (cross-definition) runs after. Unconditional, not a recipe step. The FREEZE is
     // separate (seal_design, after the last pass below).
     //
@@ -1820,16 +1829,123 @@ void graph_pipeline_and_emits(Options& opts, Result& res, Eprp_var& var, const s
     // bodies, stale halves); both var.graphs and the active subset are updated
     // so the later passes, the emits, the cache and the freeze check see the
     // design as it is.
-    bool       legalized    = false;
-    const auto run_legalize = [&] {
+    bool       legalized         = false;
+    bool       needs_loop_check  = false;
+    bool       delayed_enableopt = false;
+    const auto run_legalize      = [&] {
       legalized = true;
       if (active->graphs.empty()) {
         return;
       }
+      bool specialize_modules = false;
+      for (const auto& [key, value] : opts.sets) {
+        if (key == "compile.specialize_modules") {
+          specialize_modules = value == "true" || value == "1" || value == "on";
+        }
+      }
+      if (specialize_modules) {
+        Phase_timer                               phase(res, "pass.specialize");
+        // This is the mutable compile library, before freeze. A generic router
+        // may contain feedback that disappears only in its caller's constant
+        // configuration. Check the instantiated design, retaining its original
+        // roots, instead of also rejecting the now-unused generic definition.
+        std::vector<std::shared_ptr<hhds::Graph>> design(var.graphs.begin(), var.graphs.end());
+        absl::flat_hash_set<const hhds::Graph*>   instantiated;
+        for (const auto& graph : design) {
+          for (auto node : graph->body().nodes()) {
+            if (livehd::graph_util::is_type_sub(node)) {
+              if (auto callee = node.get_subnode_graph()) {
+                instantiated.insert(callee.get());
+              }
+            }
+          }
+        }
+        // A user-selected top (--top / lec --ref-top / --impl-top) is a root even
+        // when another unit instantiates it: the Pyrope reader keeps every unit,
+        // and the top is picked only later (pick_top_graph). Without this, a
+        // constant-configured parent re-points its Sub at the clone and the
+        // requested top would be deleted as unreachable. QUIET resolve; the
+        // later top selection announces any entity fallback.
+        std::vector<std::string> names;
+        names.reserve(design.size());
+        for (const auto& graph : design) {
+          names.emplace_back(graph->get_name());
+        }
+        absl::flat_hash_set<std::string> selected_tops;
+        for (const std::string* want : {&opts.top, &opts.ref_top, &opts.impl_top}) {
+          if (!want->empty() && *want != "-auto-top") {
+            if (auto resolved = resolve_top_name(names, *want, /*diag_pass=*/""); !resolved.empty()) {
+              selected_tops.insert(std::move(resolved));
+            }
+          }
+        }
+        std::vector<std::shared_ptr<hhds::Graph>> roots;
+        for (const auto& graph : design) {
+          if (!instantiated.contains(graph.get()) || selected_tops.contains(std::string{graph->get_name()})) {
+            roots.push_back(graph);
+          }
+        }
+        (void)livehd::specialize::specialize_constants(design, {.refold_all = true, .max_versions = 64});
+        absl::flat_hash_set<const hhds::Graph*> reachable;
+        auto                                    pending = roots;
+        while (!pending.empty()) {
+          const auto graph = pending.back();
+          pending.pop_back();
+          if (!reachable.insert(graph.get()).second) {
+            continue;
+          }
+          for (auto node : graph->body().nodes()) {
+            if (livehd::graph_util::is_type_sub(node)) {
+              if (auto callee = node.get_subnode_graph()) {
+                pending.push_back(std::move(callee));
+              }
+            }
+          }
+        }
+        var.graphs.clear();
+        for (const auto& graph : design) {
+          if (reachable.contains(graph.get())) {
+            var.add(graph);
+          } else {
+            auto*             library = graph->get_io()->get_library();
+            const std::string name{graph->get_name()};
+            library->delete_graph(graph);
+            library->delete_graphio(name);
+          }
+        }
+        // A changed context may have rewritten a cached parent too. Every
+        // reachable body now participates in the remaining passes and checks.
+        active = &var;
+        restored.clear();
+        res.compile_cache_restored_graphs.clear();
+        res.recipe_steps.emplace_back("pass.specialize");
+      }
       set_crash_context("pass.legalize", {});
       Phase_timer                               phase(res, "pass.legalize");
       std::vector<std::shared_ptr<hhds::Graph>> design(active->graphs.begin(), active->graphs.end());
-      const auto legalized_design = livehd::legalize::legalize_design(design, /*freeze_graphs=*/false);
+      std::vector<std::string>                  names;
+      for (const auto& graph : design) {
+        names.emplace_back(graph->get_name());
+      }
+      absl::flat_hash_set<std::string> selected_tops;
+      for (const std::string* want : {&opts.top, &opts.ref_top, &opts.impl_top}) {
+        if (!want->empty() && *want != "-auto-top") {
+          if (auto resolved = resolve_top_name(names, *want, /*diag_pass=*/""); !resolved.empty()) {
+            selected_tops.insert(std::move(resolved));
+          }
+        }
+      }
+      std::vector<std::shared_ptr<hhds::Graph>> roots;
+      for (const auto& graph : design) {
+        if (selected_tops.contains(std::string{graph->get_name()})) {
+          roots.push_back(graph);
+        }
+      }
+      const auto legalized_design = livehd::legalize::legalize_design(design,
+                                                                      /*freeze_graphs=*/false,
+                                                                      /*defer_inlined_loops=*/true,
+                                                                      roots);
+      needs_loop_check            = legalized_design.needs_loop_check;
       if (!legalized_design.removed.empty() || !legalized_design.added.empty()) {
         absl::flat_hash_set<const hhds::Graph*> gone;
         for (const auto& g : legalized_design.removed) {
@@ -1848,10 +1964,8 @@ void graph_pipeline_and_emits(Options& opts, Result& res, Eprp_var& var, const s
           }
         }
       }
-      // Not run through run_step, so the halting-error gate is spelled out: a
-      // genuine combinational loop (comb-loop) must stop the pipeline HERE, not
-      // let enableopt / cprop / satopt walk a graph already known to be cyclic
-      // and fail later under their own name.
+      // Unrepaired loops still fail here. Rewritten candidates wait for the
+      // already scheduled cprop + bitwidth, before enableopt or formal runs.
       res.recipe_steps.emplace_back("pass.legalize");
       if (livehd::diag::sink().has_halting_errors()) {
         throw classify_engine_failure("pass.legalize reported errors");
@@ -1864,16 +1978,38 @@ void graph_pipeline_and_emits(Options& opts, Result& res, Eprp_var& var, const s
       }
       Eprp_var::Eprp_dict labels;
       merge_sets(opts, set_name, labels);
+      if (needs_loop_check && method == "pass.enableopt") {
+        delayed_enableopt = true;
+        continue;
+      }
       // Before legalize only INTRA-module work may run (bitfuzz, cprop's
       // per-body transform, bitwidth -- which reads a callee only through its
       // declared interface). cprop's loop-invariant hoist edits a loop body and
       // its parents together, so it waits for the cprop after legalize.
-      if (!legalized && method == "pass.cprop") {
+      if ((!legalized || needs_loop_check) && method == "pass.cprop") {
         labels["loop_hoist"] = "false";
       }
       run_step(method, *active, labels, opts, res);
       if (!legalized && method == "pass.bitwidth") {
         run_legalize();
+      } else if (needs_loop_check && method == "pass.bitwidth") {
+        set_crash_context("pass.legalize.check", {});
+        {
+          Phase_timer                               phase(res, "pass.legalize.check");
+          std::vector<std::shared_ptr<hhds::Graph>> design(active->graphs.begin(), active->graphs.end());
+          (void)livehd::legalize::check_comb_cycles(design);
+        }
+        res.recipe_steps.emplace_back("pass.legalize.check");
+        if (livehd::diag::sink().has_halting_errors()) {
+          throw classify_engine_failure("pass.legalize.check reported errors");
+        }
+        needs_loop_check = false;
+        set_crash_context({}, {});
+        if (delayed_enableopt) {
+          Eprp_var::Eprp_dict enable_labels;
+          merge_sets(opts, "compile.enableopt", enable_labels);
+          run_step("pass.enableopt", *active, enable_labels, opts, res);
+        }
       }
     }
     if (!legalized) {
@@ -2369,6 +2505,26 @@ void compile_sources(Options& opts, Result& res, const Ir_inputs& ir) {
       const auto* lg_out   = find_slot(opts.emit_dirs, "lg");
       const auto* ln_out   = find_slot(opts.emit_dirs, "ln");
       std::string lib_path = lg_out ? lg_out->path : workdir(opts) + "/lgdb";
+      const auto  liberty  = synth_set(opts, "liberty", "");
+      if (!liberty.empty()) {
+        auto& glib = livehd::Hhds_graph_library::instance(lib_path);
+        livehd::liberty::declare_memory_cells(glib, livehd::liberty::scan_memory_cells(liberty));
+        // compile.slang.liberty_cells: the reader bound modules only the Liberty defines (standard
+        // cells instantiated by name) as external instances; declare exactly those, typed.
+        bool liberty_cells = false;
+        for (const auto& [key, value] : opts.sets) {
+          if (key == "compile.slang.liberty_cells") {
+            liberty_cells = value == "true";
+          }
+        }
+        if (liberty_cells) {
+          std::set<std::string> instantiated;
+          for (const auto& ln : var.lnasts) {
+            instantiated.insert(ln->get_external_modules().begin(), ln->get_external_modules().end());
+          }
+          livehd::liberty::declare_memory_cells(glib, livehd::liberty::scan_logic_cells(liberty, instantiated));
+        }
+      }
       // Bare `lhd compile FILE.sv` (no emit) still lowers for max diagnostics.
       lower_lnasts(opts, res, var, lib_path, emits_need_graphs(opts) || force_diag_graphs(opts));
       if (ln_out != nullptr) {

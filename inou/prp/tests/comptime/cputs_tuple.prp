@@ -44,3 +44,8 @@ cassert(n.x == 1)
 const nest = (1, (2, 3))
 cputs("nest={nest}")       // prp:nest=(1,(2,3))
 cassert(nest[1] == (2, 3))
+
+// (was cputs_basic: a hole-free string literal and an interpolated scalar)
+mut cb = 7
+cputs("a is {cb}")
+cputs("plain")

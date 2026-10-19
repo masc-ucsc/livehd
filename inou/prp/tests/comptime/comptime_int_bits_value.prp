@@ -9,7 +9,7 @@
 // an UNTYPED COMPTIME integer is derived from its VALUE -- the minimal width
 // that holds it (13 -> 4, 0 -> 1, a negative value -> its signed width,
 // -4 -> 3). A typed value keeps its declared width, and an untyped RUNTIME
-// value still reads nil (phase2_attr_bits.prp). Today the untyped comptime
+// value still reads nil (phase2_attr_max_min.prp). Today the untyped comptime
 // read is nil, so `N.[bits] == 4` is a false cassert and `W.[bits] + x` on a
 // generic is a nil-operand error.
 //

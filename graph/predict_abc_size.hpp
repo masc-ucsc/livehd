@@ -157,27 +157,6 @@ struct Ctrl_pids {
   return total;
 }
 
-// `a % 2^k` is rewritten to an And before ABC ever sees it, so charge it as one.
-// Any other remainder is unsupported by the mapper.
-[[nodiscard]] inline bool rem_is_power_of_two_mask(const hhds::Node_class& node) {
-  const auto b = get_driver_of_sink_name(node, "b");
-  if (b.is_invalid() || !b.is_const()) {
-    return false;
-  }
-  const auto& v = const_of(b);
-  if (v.is_negative()) {
-    return false;
-  }
-  // Exactly one set bit == a power of two.
-  int set = 0;
-  for (int bit = 0; bit < static_cast<int>(v.get_signed_bits()); ++bit) {
-    if (v.bit_test(bit) && ++set > 1) {
-      return false;
-    }
-  }
-  return set == 1;
-}
-
 }  // namespace predict_detail
 
 // Predicted 2-input AIG-size score of `node`. 0 means "mints no gate here":
@@ -217,7 +196,8 @@ struct Ctrl_pids {
 
     case Ntype_op::Div: return division_aig_count(node);
 
-    case Ntype_op::Rem: return rem_is_power_of_two_mask(node) ? atleast1(ge_detail::out_width(node)) : 0;
+    case Ntype_op::Rem:
+      return rem_is_power_of_two_mask(node) ? atleast1(ge_detail::out_width(node)) : division_aig_count(node);
 
     // ---- selections: constant endpoints are wiring; runtime endpoints need logic --
     case Ntype_op::Get_mask:

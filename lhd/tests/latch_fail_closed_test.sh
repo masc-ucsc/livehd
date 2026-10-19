@@ -218,8 +218,8 @@ echo "ok: lec REFUTES an enable-polarity flip (the proof above is not vacuous)"
 # flop (the gate was dead code, so the flop loaded every tick — a silently wrong
 # waveform). M5 replaced both refusals with actual simulation, so asserting the
 # refusals here would now be asserting a BUG. The positive behavior is pinned by
-# the promoted trackers in inou/prp/tests/sim/ (latch_sim_hold, latch_sim_low,
-# latch_sim_master_slave, flop_sim_gated_clock); all this file still owes is
+# the promoted trackers in inou/prp/tests/sim/ (latch_sim_basic_lane,
+# icg_enable_sampling); all this file still owes is
 # that the two misleading OLD failure modes never come back.
 cat > "$W/lsim.prp" <<'EOF'
 pub mod lhold8(en:Bool, d:U8) -> (q:U8@[0]) {
@@ -331,7 +331,7 @@ expect_fail_with "sim on a yosys-read derived clock" "gated-clock-unsupported" \
 # gives non-reference clock nets real edge detection, so this is now supported
 # and asserting the refusal would be asserting a bug. The VALUE semantics —
 # including pre-edge sampling on a coincident tick — are pinned by
-# inou/prp/tests/sim/multiclock_two_domain.prp against an iverilog golden; all
+# inou/prp/tests/sim/flop_sim_secondary_negedge.prp against an iverilog golden; all
 # this file owes is that the refusal is gone.
 cat > "$W/twoclk.prp" <<'EOF'
 pub mod twoclk(clka:Clock, clkb:Clock, d:U8) -> (qa:U8@[1], qb:U8@[2]) {

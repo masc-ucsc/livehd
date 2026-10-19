@@ -83,6 +83,27 @@ struct uPass_detuple_registry {
   absl::flat_hash_map<std::string, Layout> named_types;
 };
 
+// Preorder facts of one LNAST for the loop roll planner's "is it written
+// before this loop" / "does a later loop domain read it" questions, built in
+// ONE walk per tree (upass must stay O(N): a walk of the definition per loop
+// was O(loops x definition)). A REGION is a definition's scope: the root's
+// subtree, or the subtree of a lambda's (`func_def`) child; nothing outside a
+// loop's region (an enclosing scope, a nested lambda) is "before" or "after"
+// it.
+struct Loop_tree_order {
+  std::shared_ptr<Lnast>                   tree;  // pins the address while cached
+  absl::flat_hash_map<Lnast_nid, uint32_t> pre;   // node -> preorder index
+  std::vector<Lnast_nid>                   node;  // preorder index -> node
+  std::vector<uint32_t>                    parent;
+  std::vector<uint32_t>                    last;    // the last preorder index in the subtree
+  std::vector<uint32_t>                    region;  // the region root
+  // name -> preorder indices, ascending: its whole-name `store`s (a key store
+  // under a call/tuple is no write), and the loop domains that read it (a
+  // `range` statement, or a `for` header: its index and iterable).
+  absl::flat_hash_map<std::string, std::vector<uint32_t>> stores;
+  absl::flat_hash_map<std::string, std::vector<uint32_t>> domains;
+};
+
 struct uPass_runner : public upass::uPass_struct {
 public:
   uPass_runner(std::shared_ptr<upass::Lnast_manager>& _lm, const std::vector<std::string>& upass_names,
@@ -1864,6 +1885,19 @@ protected:
   };
   Loop_scope_facts& loop_scope_facts(const Lnast_nid& definition);
 
+  // Where a source tree declares each name (a `declare`, or an io port's
+  // store), in source order, outside nested lambdas: plan_loop_roll's type
+  // lookup visits a name's sites instead of scanning the tree per name.
+  // Built once per tree; `tree` pins the address while cached.
+  struct Decl_sites {
+    using Map = absl::flat_hash_map<std::string, std::vector<Lnast_nid>>;
+    std::shared_ptr<Lnast> tree;
+    Map                    by_name;
+  };
+  const Decl_sites::Map& decl_sites_of(const std::shared_ptr<Lnast>& tree);
+  // The Loop_tree_order of `tree`, built once (rebuilt if `node` is missing).
+  const Loop_tree_order& loop_tree_order(const std::shared_ptr<Lnast>& tree, const Lnast_nid& node);
+
   // Post-walk DCE: scans the freshly-built staging tree, drops definition
   // statements (assign / tuple_add / attr_set / etc.) whose dst name is
   // never read elsewhere, and iterates to fixpoint. Constprop's
@@ -1884,6 +1918,8 @@ private:
     absl::flat_hash_map<Lnast_nid, Loop_scope_facts> definitions;
   };
   absl::flat_hash_map<const Lnast*, Loop_tree_facts> loop_tree_facts_;
+  absl::flat_hash_map<const Lnast*, std::unique_ptr<Decl_sites>> decl_sites_;  // decl_sites_of (stable references)
+  absl::flat_hash_map<const Lnast*, std::unique_ptr<Loop_tree_order>> loop_tree_orders_;  // loop_tree_order
 
   // Dispatches `fn` across every registered pass so they can update their
   // internal state (symbol tables, etc.) from the current read cursor. The

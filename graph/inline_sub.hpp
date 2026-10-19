@@ -1,6 +1,7 @@
 // This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 #pragma once
 
+#include <chrono>
 #include <memory>
 #include <optional>
 #include <string>
@@ -108,9 +109,18 @@ struct Host_state;  // inline_sub.cpp
 //     and a graph input's width under its name, both of which hhds only finds
 //     by walking every declaration; each graph is indexed once per batch.
 // Every refusal and diagnostic is inline_sub_instance's own.
+//
+// A `deadline` (a run's wall budget, e.g. lec's formal.timeout) is also checked
+// INSIDE a splice, every few thousand cloned nodes and wired sinks, so one huge
+// definition cannot overrun it by its whole splice. A splice that reaches it
+// stops where it is and returns false with timed_out() set, leaving the host
+// PARTIALLY spliced (the instance and a fraction of its clones): the caller
+// must abandon the host -- report TIMEOUT-time, never read or query it. An
+// unset deadline (the default) never stops a splice.
 class Host_inliner {
 public:
-  Host_inliner(hhds::Graph* host, std::string_view from_pass);
+  Host_inliner(hhds::Graph* host, std::string_view from_pass,
+               std::chrono::steady_clock::time_point deadline = std::chrono::steady_clock::time_point{});
   ~Host_inliner();
   Host_inliner(const Host_inliner&)            = delete;
   Host_inliner& operator=(const Host_inliner&) = delete;
@@ -118,6 +128,9 @@ public:
   // Splice `inst` (a Sub in the host). `new_subs`, when non-null, receives
   // (appended) the Sub clones the splice created, ascending node id.
   [[nodiscard]] bool splice(const hhds::Node_class& inst, std::vector<hhds::Node_class>* new_subs = nullptr);
+
+  // A splice stopped at the deadline (see above): the host is partial.
+  [[nodiscard]] bool timed_out() const;
 
   // Write the deferred simulation_init merge into the host (idempotent).
   void flush();

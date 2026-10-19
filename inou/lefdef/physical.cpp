@@ -55,6 +55,12 @@ int layer_cb(lefrCallbackType_e, lefiLayer* layer, lefiUserData data) {
   if (layer->hasWidth()) {
     l.width = layer->width();
   }
+  if (layer->hasXYPitch()) {
+    l.pitch_x = layer->pitchX();
+    l.pitch_y = layer->pitchY();
+  } else if (layer->hasPitch()) {
+    l.pitch_x = l.pitch_y = layer->pitch();
+  }
   if (layer->hasResistance()) {
     l.resistance = layer->resistance();
   }
@@ -139,6 +145,21 @@ int pin_cb(lefrCallbackType_e, lefiPin* pin, lefiUserData data) {
   }
   return 0;
 }
+int obstruction_cb(lefrCallbackType_e, lefiObstruction* obs, lefiUserData data) {
+  auto&       c        = *static_cast<LefContext*>(data);
+  auto*       geometry = obs->geometries();
+  std::string layer;
+  for (int i = 0; i < geometry->numItems(); ++i) {
+    if (geometry->itemType(i) == lefiGeomLayerE) {
+      layer = geometry->getLayer(i);
+    } else if (!layer.empty()
+               && (geometry->itemType(i) == lefiGeomRectE || geometry->itemType(i) == lefiGeomPolygonE
+                   || geometry->itemType(i) == lefiGeomRectIterE || geometry->itemType(i) == lefiGeomPolygonIterE)) {
+      c.tech.macros.at(c.macro).blocked_layers.insert(layer);
+    }
+  }
+  return 0;
+}
 struct DefContext {
   Floorplan   fp;
   std::string error;
@@ -205,21 +226,40 @@ int terminal_cb(defrCallbackType_e, defiPin* pin, defiUserData data) {
   if (pin->hasDirection()) {
     p.direction = pin->direction();
   }
-  p.x           = pin->placementX();
-  p.y           = pin->placementY();
-  p.orientation = parse_orientation(pin->orientStr());
-  p.status      = pin->isFixed() || pin->isCover() ? Status::FIXED : pin->isPlaced() ? Status::PLACED : Status::UNPLACED;
-  for (int i = 0; i < pin->numLayer(); ++i) {
-    int xl, yl, xh, yh;
-    pin->bounds(i, &xl, &yl, &xh, &yh);
-    p.shapes.push_back({
-        pin->layer(i),
-        {double(xl), double(yl), double(xh), double(yh)}
-    });
-  }
-  if (pin->numPorts() != 0) {
-    c.error = "DEF PIN PORT geometry is unsupported; use direct LAYER shapes";
+  const auto placement = [&](const auto* item) {
+    if (item->hasPlacement()) {
+      p.x           = item->placementX();
+      p.y           = item->placementY();
+      p.orientation = parse_orientation(item->orientStr());
+      p.status      = item->isFixed() || item->isCover() ? Status::FIXED : item->isPlaced() ? Status::PLACED : Status::UNPLACED;
+    }
+  };
+  const auto shapes = [&](const auto* item) {
+    for (int i = 0; i < item->numLayer(); ++i) {
+      int xl, yl, xh, yh;
+      item->bounds(i, &xl, &yl, &xh, &yh);
+      p.shapes.push_back({
+          item->layer(i),
+          {double(xl), double(yl), double(xh), double(yh)}
+      });
+    }
+  };
+  placement(pin);
+  shapes(pin);
+  if (pin->numPorts() > 1 || (pin->numPorts() && pin->numLayer())) {
+    c.error = "DEF PIN with multiple ports or mixed direct/PORT geometry is unsupported";
     return 1;
+  }
+  if (pin->numPorts() == 1) {
+    const auto* port = pin->pinPort(0);
+    if (port->numPolygons() || port->numVias()) {
+      c.error = "DEF PIN PORT requires rectangular LAYER shapes";
+      return 1;
+    }
+    // OpenROAD writes one PORT per ordinary IO. Its placement and rectangles
+    // have the same representation as direct PIN geometry in our model.
+    placement(port);
+    shapes(port);
   }
   c.fp.terminals.push_back(std::move(p));
   return 0;
@@ -238,9 +278,17 @@ int blockage_cb(defrCallbackType_e, defiBlockage*, defiUserData data) {
   return 1;
 }
 std::string identifier(const std::string& text) {
+  // The text is already DEF-escaped (the reader retains escapes): copy `\x` pairs as-is and escape only bare specials.
   std::string out;
-  for (unsigned char c : text) {
-    if (c <= ' ' || c == '(' || c == ')' || c == ';' || c == '+' || c == '\\') {
+  for (size_t i = 0; i < text.size(); ++i) {
+    const unsigned char c = text[i];
+    if (c == '\\') {
+      out += '\\';
+      // A trailing lone backslash would escape the following separator, so escape it itself.
+      out += i + 1 < text.size() ? text[++i] : '\\';
+      continue;
+    }
+    if (c <= ' ' || c == '(' || c == ')' || c == ';' || c == '+') {
       out += '\\';
     }
     out += char(c);
@@ -295,6 +343,7 @@ Technology read_lef(const std::vector<std::string>& paths) {
     lefrSetMacroBeginCbk(macro_begin_cb);
     lefrSetMacroCbk(macro_cb);
     lefrSetPinCbk(pin_cb);
+    lefrSetObstructionCbk(obstruction_cb);
     const int rc = lefrRead(file.get(), path.c_str(), &c);
     lefrClear();
     if (rc || !c.error.empty()) {
@@ -375,7 +424,32 @@ void write_def(const Floorplan& fp, const std::string& path) {
 void verify_def_roundtrip(const Floorplan& a, const Floorplan& b) {
   if (a.design != b.design || a.dbu != b.dbu || a.die != b.die || a.rows != b.rows || a.terminals != b.terminals || a.nets != b.nets
       || a.components.size() != b.components.size()) {
-    throw std::runtime_error("DEF roundtrip changed floorplan/connectivity");
+    const auto  field = a.design != b.design         ? "design"
+                        : a.dbu != b.dbu             ? "units"
+                        : a.die != b.die             ? "die"
+                        : a.rows != b.rows           ? "rows"
+                        : a.terminals != b.terminals ? "terminals"
+                        : a.nets != b.nets           ? "nets"
+                                                     : "component count";
+    std::string detail;
+    if (a.nets != b.nets) {
+      detail = " (nets " + std::to_string(a.nets.size()) + " -> " + std::to_string(b.nets.size()) + ")";
+      for (size_t i = 0; i < std::min(a.nets.size(), b.nets.size()); ++i) {
+        if (a.nets[i] != b.nets[i]) {
+          detail += " at " + std::to_string(i) + ": " + a.nets[i].name + " -> " + b.nets[i].name + " connections "
+                    + std::to_string(a.nets[i].connections.size()) + " -> " + std::to_string(b.nets[i].connections.size());
+          for (size_t j = 0; j < std::min(a.nets[i].connections.size(), b.nets[i].connections.size()); ++j) {
+            if (a.nets[i].connections[j] != b.nets[i].connections[j]) {
+              detail += " endpoint " + a.nets[i].connections[j].instance + ":" + a.nets[i].connections[j].pin + " -> "
+                        + b.nets[i].connections[j].instance + ":" + b.nets[i].connections[j].pin;
+              break;
+            }
+          }
+          break;
+        }
+      }
+    }
+    throw std::runtime_error(std::string("DEF roundtrip changed floorplan/connectivity: ") + field + detail);
   }
   for (size_t i = 0; i < a.components.size(); ++i) {
     auto c        = a.components[i];

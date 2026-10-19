@@ -50,6 +50,8 @@ protected:
   void                                                validate_physical_rc(const std::shared_ptr<hhds::Graph>& graph) const;
   void                                                apply_physical_rc(const std::shared_ptr<hhds::Graph>& graph);
   void                                                apply_physical_captures();
+  std::set<std::string>                               propagated_clocks_;
+  std::set<std::string>                               false_start_ports_;
 
   int    margin;  // % margin to mark nodes
   double freq;
@@ -60,6 +62,7 @@ protected:
   struct Timing_target {
     float                    period = 0;
     std::vector<std::string> ports;
+    std::string              pin;  // `inst:pin` of a clock created on an internal pin (a macro's clock output)
   };
   std::map<std::string, Timing_target>                            timing_targets_;
   std::map<std::string, std::string>                              target_overrides_;
@@ -118,6 +121,12 @@ protected:
   float                                     virtual_clock_period_ = 0;
   absl::flat_hash_map<std::string, uint8_t> clock_inputs_, clock_outputs_;
   std::string                               clock_qor_json();
+  double                                    endpoint_tns(ot::Split split);
+  std::string                               negative_endpoints_;
+  std::map<std::string, bool>               timing_constant_pins_;
+  unsigned                                  case_constants_ = 0, case_disabled_ = 0, case_narrowed_ = 0;
+  unsigned                                  case_conditions_ = 0;
+  void                                      apply_case_analysis();
   float                                     io_load_ff_ = -1;
   std::vector<std::string>                  opaque_logic_examples_;
   std::vector<std::string>                  ambiguous_or_examples_;

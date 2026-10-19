@@ -26,7 +26,9 @@ test quadratic.exhaustive {
     mut x:S16 = `clock` - 32768
     acc.x = x
     step
-    assert(acc.y == x * (x + 768), "mapped quadratic mismatch")
+    // The structural netlist declares plain (unsigned) ports, so y carries the
+    // product's low 33 bits; compare that two's-complement pattern.
+    assert(acc.y == (x * (x + 768)) & 0x1ffffffff, "mapped quadratic mismatch")
   }
 }
 TB

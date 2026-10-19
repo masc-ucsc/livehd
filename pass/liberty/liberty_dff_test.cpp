@@ -777,6 +777,30 @@ TEST(LibertyDff, DualOutputTieInventoryPreservesBothConstants) {
                 {"LO", false}
   }));
 }
+TEST(LibertyDff, ConstantInventoryExcludesDisabledStateAndThreeStateCells) {
+  const auto path  = write_lib("constant_inventory.lib", lib(R"(
+    cell(arbitrary_high) { pg_pin(VP) {pg_type:primary_power;}
+      pin(unusual) {direction:output; function:"1";} }
+    cell(arbitrary_low) { pin(different) {direction:output; function:"0";} }
+    cell(disabled) {dont_use:true; pin(Y) {direction:output; function:"1";} }
+    cell(state) {ff(IQ,IQN) {next_state:"0";} pin(Y) {direction:output; function:"0";} }
+    cell(high_impedance) {pin(Y) {direction:output; function:"0"; three_state:"1";} }
+    cell(bussed) {bus(Y) {pin(Y[0]) {direction:output; function:"0";} } }
+    cell(extra_input) {pin(A) {direction:input;} pin(Y) {direction:output; function:"0";} }
+  )"));
+  const auto cells = livehd::liberty::scan_constant_cells(path);
+  ASSERT_EQ(cells.size(), 2);
+  EXPECT_EQ(cells[0].name, "arbitrary_high");
+  EXPECT_EQ(cells[0].outputs,
+            (std::vector<std::pair<std::string, bool>>{
+                {"unusual", true}
+  }));
+  EXPECT_EQ(cells[1].name, "arbitrary_low");
+  EXPECT_EQ(cells[1].outputs,
+            (std::vector<std::pair<std::string, bool>>{
+                {"different", false}
+  }));
+}
 
 TEST(LibertyFunction, ExactTruthAndUnsupportedSyntax) {
   livehd::liberty::Comb_cell c;
@@ -818,6 +842,48 @@ TEST(LibertyFunction, RepairElectricalUnitsAndNldmEstimate) {
   EXPECT_FALSE(cells[1].max_transition_ps);
 }
 
+TEST(LibertyFunction, ExistingSequentialOutputDriveUsesItsOwnTablesAndUnits) {
+  const std::string text   = R"(
+    library (ns) { time_unit : "1ns"; capacitive_load_unit (1, "pf"); default_max_transition : 0.5;
+      cell (FF) { area : 1; dont_use : true;
+        ff(IQ, IQN) { next_state : "D"; clocked_on : "CLK"; }
+        pin(CLK) { direction : input; clock : true; }
+        pin(D) { direction : input; }
+        pin(Q) { direction : output; function : "IQ"; max_capacitance : 0.2; max_fanout : 20;
+          timing() { related_pin : "CLK"; timing_type : rising_edge;
+            cell_rise(t) { index_2("0.01,0.11"); values("0.02,0.12"); } } }
+        pin(QN) { direction : output; function : "IQN"; max_capacitance : 0.1;
+          timing() { related_pin : "CLK"; timing_type : rising_edge;
+            cell_fall(t) { index_2("0.01,0.11"); values("0.03,0.23"); } } }
+        pin(Z) { direction : output; three_state : "D"; }
+      }
+    }
+    library (ps) { time_unit : "1ps"; capacitive_load_unit (1, "ff");
+      cell (OTHER) { pin(Y) { direction : output; max_capacitance : 8;
+        timing() { cell_rise(t) { index_2("1,3"); values("2,6"); } } } }
+    }
+  )";
+  const auto        drives = livehd::liberty::scan_output_drives_text(text);
+  ASSERT_EQ(drives.size(), 3);
+  EXPECT_EQ(drives[0].name, "FF");
+  EXPECT_TRUE(drives[0].sequential);
+  EXPECT_EQ(drives[0].output, "Q");
+  EXPECT_DOUBLE_EQ(drives[0].max_capacitance_ff.value(), 200);
+  EXPECT_DOUBLE_EQ(drives[0].max_transition_ps.value(), 500);
+  EXPECT_DOUBLE_EQ(drives[0].max_fanout.value(), 20);
+  EXPECT_DOUBLE_EQ(drives[0].intrinsic_ps, 20);
+  EXPECT_NEAR(drives[0].resistance_ohm, 1000, 1e-8);
+  EXPECT_EQ(drives[1].output, "QN");
+  EXPECT_NEAR(drives[1].resistance_ohm, 2000, 1e-8);
+  EXPECT_FALSE(drives[1].max_fanout);
+  EXPECT_EQ(drives[2].name, "OTHER");
+  EXPECT_FALSE(drives[2].sequential);
+  EXPECT_DOUBLE_EQ(drives[2].max_capacitance_ff.value(), 8);
+  EXPECT_DOUBLE_EQ(drives[2].intrinsic_ps, 2);
+  EXPECT_NEAR(drives[2].resistance_ohm, 2000, 1e-8);
+  EXPECT_TRUE(livehd::liberty::scan_comb_cells_text(text).empty());
+}
+
 TEST(LibertyFunction, RepairNldmLoadAxisFollowsTemplate) {
   // osu018 shape: variable_1 is the load, so index_2 holds slews and the load
   // sweep is column 0. A template with no load axis gives no estimate.
@@ -839,4 +905,199 @@ TEST(LibertyFunction, RepairNldmLoadAxisFollowsTemplate) {
   EXPECT_NEAR(cells[0].resistance_ohm, 1700, 1e-6);  // (0.235-0.065) ns / 0.1 pF
   EXPECT_DOUBLE_EQ(cells[1].intrinsic_ps, 40);
   EXPECT_DOUBLE_EQ(cells[1].resistance_ohm, 0);
+}
+
+TEST(LibertyMemory, OpaqueTypedInterfaceAndScopedBusTypes) {
+  const auto file  = write_lib("memory_interface.lib", R"(
+ library(one) {
+   type(DATA) { bit_width: 5; bit_from: 0; bit_to: 4; }
+   cell(ram5) {
+     dont_use: true; area: 123;
+     memory() { type: ram; address_width: 3; word_width: 5; }
+     pin(CK) { direction: input; clock: true; }
+     pin(A) { direction: input; }
+     bus(D) { direction: input; bus_type: DATA; }
+     bus(Q) { direction: output; bus_type: DATA;
+       timing() { related_pin: "CK"; timing_type: rising_edge; }
+       pin(Q[0]) { direction: output; }
+     }
+   }
+ }
+ library(two) {
+   type(DATA) { bit_width: 7; bit_from: 6; bit_to: 0; }
+   cell(ram7) {
+     memory() { type: ram; address_width: 2; word_width: 7; }
+     bus(D) { direction: input; bus_type: DATA; }
+     bus(Q) { direction: output; bus_type: DATA; }
+   }
+ })");
+  const auto cells = livehd::liberty::scan_memory_cells(file);
+  ASSERT_EQ(cells.size(), 2U);
+  EXPECT_EQ(cells[0].name, "ram5");
+  EXPECT_EQ(cells[0].area, 123);
+  EXPECT_EQ(cells[0].address_bits, 3);
+  ASSERT_EQ(cells[0].pins.size(), 4U);  // nested per-bit pins do not duplicate the bus
+  EXPECT_TRUE(cells[0].pins[3].clocked);
+  EXPECT_FALSE(cells[1].pins[1].clocked);
+  EXPECT_EQ(cells[0].pins[2].msb, 0);
+  EXPECT_EQ(cells[0].pins[2].lsb, 4);
+  EXPECT_EQ(cells[1].pins[0].msb, 6);
+  EXPECT_EQ(cells[1].pins[0].lsb, 0);
+  const auto decl = livehd::liberty::memory_cell_declarations(cells);
+  EXPECT_NE(decl.find("input [0:4] \\D "), std::string::npos);
+  EXPECT_NE(decl.find("output [6:0] \\Q "), std::string::npos);
+  EXPECT_EQ(decl.find("always"), std::string::npos);  // no invented functional/collision model
+  hhds::GraphLibrary lib;
+  livehd::liberty::declare_memory_cells(lib, cells);
+  EXPECT_NO_THROW(livehd::liberty::declare_memory_cells(lib, cells));
+  // Ask without materializing: get_graph() asserts on a body-less gid.
+  EXPECT_FALSE(lib.find_io("ram5")->has_graph());
+  EXPECT_FALSE(lib.find_io("ram7")->has_graph());
+  EXPECT_TRUE(lib.find_io("ram5")->is_loop_break("Q"));
+  EXPECT_FALSE(lib.find_io("ram7")->is_loop_break("Q"));
+  // A reused lg: dir keeps the body-less declaration of an older .lib: the
+  // current Liberty replaces it (same gid) instead of failing every rerun.
+  const auto gid               = lib.find_io("ram5")->get_gid();
+  auto       changed           = cells;
+  changed[0].pins[0].direction = "output";
+  EXPECT_NO_THROW(livehd::liberty::declare_memory_cells(lib, changed));
+  ASSERT_TRUE(lib.find_io("ram5"));
+  EXPECT_TRUE(lib.find_io("ram5")->has_output("CK"));
+  EXPECT_FALSE(lib.find_io("ram5")->has_input("CK"));
+  EXPECT_EQ(lib.find_io("ram5")->get_gid(), gid);
+  EXPECT_FALSE(lib.find_io("ram5")->has_graph());
+  auto renamed = cells;  // a pin the saved declaration never had (output, so is_loop_break is probed)
+  renamed[0].pins.push_back(livehd::liberty::Memory_pin{.name = "BUSY", .direction = "output"});
+  EXPECT_NO_THROW(livehd::liberty::declare_memory_cells(lib, renamed));
+  EXPECT_TRUE(lib.find_io("ram5")->has_output("BUSY"));
+  // A same-named module with a real body is never silently turned into the macro.
+  hhds::GraphLibrary design;
+  ASSERT_TRUE(design.create_io("ram7")->create_graph());
+  EXPECT_THROW(livehd::liberty::declare_memory_cells(design, cells), std::runtime_error);
+}
+
+TEST(LibertyMemory, AddressDataAndClockRolesComeFromMetadata) {
+  const auto file  = write_lib("memory_roles.lib", R"(
+ library(one) {
+   cell(arbitrary_ram_name) {
+     memory() { type: ram; address_width: 1; word_width: 1; }
+     pin(P) { direction: input; clock: true; }
+     pin(X) { direction: input; }
+     pin(Y) { direction: input; memory_write() { address: X; } }
+     pin(E) { direction: input; }
+     pin(Z) { direction: output; memory_read() { address: X; } }
+   }
+ })");
+  const auto cells = livehd::liberty::scan_memory_cells(file);
+  ASSERT_EQ(cells.size(), 1U);
+  ASSERT_EQ(cells[0].pins.size(), 5U);
+  EXPECT_TRUE(cells[0].pins[0].clock_input);
+  EXPECT_FALSE(cells[0].pins[0].address_data_input);
+  EXPECT_TRUE(cells[0].pins[1].address_data_input);
+  EXPECT_TRUE(cells[0].pins[2].address_data_input);
+  EXPECT_FALSE(cells[0].pins[3].address_data_input);
+  EXPECT_FALSE(cells[0].pins[4].address_data_input);
+}
+
+TEST(LibertyMemory, UnsupportedMemoryCellsAreSkippedNotFatal) {
+  // A ROM, an inout-pin RAM, an untyped bus and a malformed standard-cell type
+  // group must not fail a design that never instantiates them; a bus typed at
+  // cell scope (legal Liberty) resolves, and an internal pin is not a port.
+  const auto                                file = write_lib("memory_tolerant.lib", R"(
+ library(mixed) {
+   type(BAD) { bit_width: 4; }
+   type(DATA) { bit_width: 8; bit_from: 7; bit_to: 0; }
+   cell(INVX1) { area: 1; pin(A) { direction: input; } pin(Y) { direction: output; function: "!A"; } }
+   cell(rom8) { memory() { type: rom; address_width: 2; word_width: 8; }
+     bus(A) { direction: input; bus_type: DATA; } bus(Q) { direction: output; bus_type: DATA; } }
+   cell(ram_inout) { memory() { type: ram; address_width: 2; word_width: 1; }
+     pin(A) { direction: input; } pin(DQ) { direction: inout; } }
+   cell(ram_untyped) { memory() { type: ram; address_width: 2; word_width: 3; }
+     bus(D) { direction: input; bus_type: NOPE; } }
+   cell(ram_local) {
+     type(WORD) { bit_width: 3; bit_from: 2; bit_to: 0; }
+     type(DATA) { bit_width: 3; bit_from: 0; bit_to: 2; }
+     memory() { type: ram; address_width: 2; word_width: 3; }
+     pin(CK) { direction: input; } pin(NODE) { direction: internal; }
+     bus(D) { direction: input; bus_type: WORD; } bus(Q) { direction: output; bus_type: DATA; } }
+ })");
+  std::vector<livehd::liberty::Memory_skip> skipped;
+  std::vector<livehd::liberty::Memory_cell> cells;
+  ASSERT_NO_THROW(cells = livehd::liberty::scan_memory_cells(file, &skipped));
+  ASSERT_EQ(cells.size(), 1U);
+  EXPECT_EQ(cells[0].name, "ram_local");
+  ASSERT_EQ(cells[0].pins.size(), 3U);  // CK, D, Q: the internal node is dropped
+  EXPECT_EQ(cells[0].pins[1].msb, 2);
+  EXPECT_EQ(cells[0].pins[1].lsb, 0);
+  EXPECT_EQ(cells[0].pins[2].msb, 0);  // the cell-scope DATA shadows the library's [7:0]
+  EXPECT_EQ(cells[0].pins[2].lsb, 2);
+  ASSERT_EQ(skipped.size(), 3U);
+  EXPECT_EQ(skipped[0].name, "rom8");
+  EXPECT_NE(skipped[0].reason.find("rom"), std::string::npos);
+  EXPECT_EQ(skipped[1].name, "ram_inout");
+  EXPECT_NE(skipped[1].reason.find("inout"), std::string::npos);
+  EXPECT_EQ(skipped[2].name, "ram_untyped");
+  EXPECT_NE(skipped[2].reason.find("NOPE"), std::string::npos);
+  EXPECT_EQ(livehd::liberty::scan_memory_cells(file).size(), 1U);  // the reason list is optional
+}
+
+TEST(LibertyMemory, InvalidAndConflictingInterfacesAreRefused) {
+  const std::string cell = R"(cell(ram) { memory() { type: ram; address_width: 3; word_width: 1; }
+    pin(D) { direction: input; } pin(Q) { direction: output; } })";
+  const auto        same = write_lib("memory_corners.lib", "library(a){" + cell + "} library(b){" + cell + "}");
+  EXPECT_EQ(livehd::liberty::scan_memory_cells(same).size(), 1U);
+  auto bad = cell;
+  bad.replace(bad.find("word_width: 1"), std::string("word_width: 1").size(), "word_width: 2");
+  EXPECT_THROW(
+      livehd::liberty::scan_memory_cells(write_lib("memory_conflict.lib", "library(a){" + cell + "} library(b){" + bad + "}")),
+      std::runtime_error);
+  const auto invalid = write_lib("memory_bus_bad.lib", R"(library(a){
+    type(DATA) { bit_width: 7; bit_from: 0; bit_to: 3; }
+    cell(ram) { memory() { type: ram; address_width: 2; word_width: 7; }
+      bus(D) { direction: input; bus_type: DATA; } }
+  })");
+  EXPECT_THROW(livehd::liberty::scan_memory_cells(invalid), std::runtime_error);
+}
+
+TEST(LibertyFunction, ClockedMemoryBusDriveKeepsConstantDelayAndElectricalLimits) {
+  const std::string contents = R"(
+    library (ram) { time_unit : "1ns"; capacitive_load_unit (1, "pf");
+      type(data) { base_type : array; data_type : bit; bit_width : 2; bit_from : 3; bit_to : 2; }
+      type(addr) { base_type : array; data_type : bit; bit_width : 4; bit_from : 3; bit_to : 0; }
+      cell(RAM) { memory() { type : ram; address_width : 4; word_width : 2; }
+        pin(CLK) { direction : input; clock : true; }
+        bus(A) { bus_type : addr; direction : input; }
+        bus(Q) { bus_type : data; direction : output; max_capacitance : 0.5;
+          memory_read() { address : A; }
+          timing() { related_pin : "CLK"; timing_type : rising_edge;
+            cell_rise(t) { index_2("0.005,0.5"); values("0.218,0.218"); } }
+        }
+      }
+    }
+  )";
+  const auto        drives   = livehd::liberty::scan_output_drives_text(contents);
+  ASSERT_EQ(drives.size(), 2);
+  for (size_t i = 0; i < drives.size(); ++i) {
+    EXPECT_EQ(drives[i].name, "RAM");
+    EXPECT_EQ(drives[i].output, "Q[" + std::to_string(i + 2) + "]");
+    EXPECT_TRUE(drives[i].sequential);
+    EXPECT_DOUBLE_EQ(drives[i].max_capacitance_ff.value(), 500);
+    EXPECT_DOUBLE_EQ(drives[i].intrinsic_ps, 218);
+    EXPECT_DOUBLE_EQ(drives[i].resistance_ohm, 0);
+    EXPECT_FALSE(drives[i].max_fanout);
+  }
+  auto              async_contents = contents;
+  const std::string edge           = "related_pin : \"CLK\"; timing_type : rising_edge;";
+  const auto        at             = async_contents.find(edge);
+  ASSERT_NE(at, std::string::npos);
+  async_contents.replace(at, edge.size(), "related_pin : \"A\"; timing_type : combinational;");
+  const auto async_drives = livehd::liberty::scan_output_drives_text(async_contents);
+  ASSERT_EQ(async_drives.size(), 2);
+  EXPECT_TRUE(async_drives[0].sequential);  // storage cell, even with an asynchronous output
+  EXPECT_DOUBLE_EQ(async_drives[0].intrinsic_ps, 218);
+  EXPECT_FALSE(livehd::liberty::scan_memory_cells_text(async_contents)[0].pins.back().clocked);
+  EXPECT_TRUE(livehd::liberty::scan_comb_cells_text(R"(
+    library(ram) { cell(RAM) { memory() { type : ram; } } }
+  )")
+                  .empty());
 }

@@ -74,6 +74,13 @@ has a non-flat port list (SystemVerilog `struct`/packed-2D that Icarus rejects,
 or tuple/bundle ports emitted as escaped `\a.b` identifiers), or whose outputs
 are `X`/don't-care (no numeric signature). Those pairs have no `_tb` files.
 
+Pairs whose generated bench is a duplicate of another pair's (the same stimulus,
+the same baked signature and the same lowered graph, differing only in the
+front-end spelling that `prp-equiv-<name>` already proves) are deliberately left
+out of `_SIMEQ` and their `_tb` files are not kept. A SETUP over all pairs
+recreates those files; delete them again, or run `--setup --name <name>` only
+for pairs that `_SIMEQ` lists.
+
 Pairs that generate but whose `lhd sim` result disagrees with the golden are
 tracked as `prp-simeq-<name>` **`fixme`** targets (see `_SIMEQ_FIXME` in
 `inou/prp/BUILD`). Each is a real `inou.cgen.sim` gap the harness surfaces —

@@ -1,10 +1,12 @@
 /*
 :name: concat_more
 :type: parsing lnast comptime
-:verifier_pass: 22
+:verifier_pass: 44
 :verifier_fail: 0
 */
 
+// ---- concat_more ----
+{
 {
   const lhs = (const a=1,const b=2)
   const rhs = (const c=3,const d=4)
@@ -76,4 +78,110 @@
   b.f2 = nil
   const x = (...a, ...b)
   cassert(x.f1==3 and x.f2==2)
+}
+}
+
+// ---- tuple_concat ----
+{
+cassert((...(a=1,c=3), ...(b=2,d=4)) == (a=1, c=3, b=2, d=4))
+cassert((...(1,2), ...(2,nil,5)) == (1,2,2,nil,5))
+cassert((...(x=1), ...(a=2,b=5)) == (x=1,a=2,b=5))
+
+// unknown bits survive a splice
+const unknown_concat = (...(x=1,b=2), ...(y=0sb?,z=3))
+cassert(unknown_concat.x == 1 and unknown_concat.b == 2 and unknown_concat.z == 3
+        and "{unknown_concat.y:b}" == "{0sb?:b}")
+
+cassert((1,...(3,4),6) == (1,3,4,6))
+}
+
+// ---- adv_splice_append ----
+{
+// 05b-statements.md array-builder idiom (replaces `++=`): rebuild with `...`.
+mut acc:[] = nil
+for i in 0..<5 {
+  acc = (...acc, i)
+}
+cassert(acc == (0, 1, 2, 3, 4))
+cassert(acc[3] == 3)
+}
+
+// ---- adv_splice_callarg ----
+{
+// 03-bundle.md: call-argument spread `foo(a=1, ...rest)` fills the remaining params.
+comb foo_sum(a, b, c) -> (r) { r = a + b + c }
+const rest = (const b = 2, mut c = 3)
+cassert(foo_sum(a = 1, ...rest) == 6)
+}
+
+// ---- adv_splice_extend ----
+{
+// 03-bundle.md: extend a tuple by splicing it into a new literal with extra fields.
+const y  = (mut ff = 1, const zz = 3)
+const y2 = (...y, const qq = 2)
+// y2 = (ff=1, zz=3, qq=2): the splice keeps the field NAMES, so compare by
+// name (a named tuple never equals a positional one; see tuple_simple5).
+cassert(y2 == (ff = 1, zz = 3, qq = 2))
+cassert(y2.qq == 2)
+cassert(y2.ff == 1)
+}
+
+// ---- adv_splice_merge ----
+{
+// 03-bundle.md: `(...a, ...b)` splices/merges both tuples' fields into a new tuple.
+const a = (mut x = 1, mut y = 2)
+const b = (const z = 3)
+const c = (...a, ...b)
+cassert(c == (const x = 1, const y = 2, const z = 3))
+// the spliced tuple keeps its field NAMES — a named tuple never compares
+// equal to a positional one (`c == (1,2,3)` is false; see tuple_simple5).
+cassert(c == (x = 1, y = 2, z = 3))
+cassert(c.z == 3)
+}
+
+// ---- spec_calls_splice_call_args ----
+{
+// docs 03-bundle.md: "Because `...` splices fields at its position, it can also
+// insert in the middle of a literal and add arguments to a function call":
+// `cassert(foo(a=1, ...rest) == 6)   // same as foo(a=1, b=2, c=3)`.
+// qa.md Appendix §8: the argument list is a named tuple; named ++ named merges.
+
+comb foo(a, b, c) -> (r) { r = a * 100 + b * 10 + c }
+
+const rest = (const b=2, mut c=3)
+cassert(foo(a=1, ...rest) == 123)
+cassert(foo(...rest, a=4) == 423)
+}
+
+// ---- spec_calls_splice_named ----
+{
+// qa.md Appendix §8: "named ++ named merges (overlapping names are an error, as
+// today)".
+// docs 03-bundle.md: `const ccat1 = (...a, ...b)` ==
+// `(const a=1, const b=2, const c=3)`; a same-named nested tuple merges its
+// subfields recursively.
+
+const a = (mut a=1, mut b=2)
+const b = (const c=3)
+const ccat1 = (...a, ...b)
+cassert(ccat1 == (const a=1, const b=2, const c=3))
+const ccat2 = (...a, const d=20, ...b)
+cassert(ccat2.d == 20 and ccat2.c == 3 and ccat2.a == 1)
+const deep = (...(const cfg=(const lo=2), const c=3), ...(const cfg=(const hi=20), const d=30))
+cassert(deep.cfg.lo == 2 and deep.cfg.hi == 20 and deep.d == 30)
+}
+
+// ---- spec_calls_splice_unnamed ----
+{
+// qa.md Appendix §8: "Splice `x = (...foo, ...bar)` concatenates: unnamed ++
+// unnamed appends".
+// docs 03-bundle.md: `assert((...p, ...q) == (1,2,3,4))  // unnamed splices
+// append in order`, `assert((...p, 5) == (1,2,5))`.
+
+const p = (1, 2)
+const q = (3, 4)
+cassert((...p, ...q) == (1, 2, 3, 4))
+cassert((...p, 5) == (1, 2, 5))
+const pq = (...q, ...p)
+cassert(pq[0] == 3 and pq[3] == 2)
 }

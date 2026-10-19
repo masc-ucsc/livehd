@@ -77,10 +77,12 @@ genrule(
         "lhd_prp_import.hpp",
         "//core",
         "//core:file_name",
+        "//pass/specialize:specialize_srcs",
         "//pass/satopt:satopt_srcs",
         "//pass/synth:synth_srcs",
         "//graph",
         "//inou/prp:inou_prp",
+        "//inou/slang:inou_slang",
         "//lnast",
         "//pass/bitfuzz:pass_bitfuzz",
         "//pass/bitwidth:pass_bitwidth",
@@ -88,6 +90,7 @@ genrule(
         "//pass/enableopt:pass_enableopt",
         "//pass/formal:pass_formal",
         "//pass/legalize",
+        "//pass/liberty:liberty_dff",
         "//pass/lnastfmt:pass_lnastfmt",
         "//pass/semdiff",
         "//pass/upass:pass_upass",
@@ -189,6 +192,8 @@ cc_library(
         "//pass/bitwidth:pass_bitwidth",
         "//pass/color:pass_color",
         "//pass/common:pass",
+        "//pass/liberty:liberty_dff",
+        "//pass/specialize",
         "//pass/opentimer:pass_opentimer",
         "//pass/place",
         "//pass/cprop:pass_cprop",
@@ -209,7 +214,7 @@ cc_library(
         "//pass/upass:pass_upass",
         "//upass/tolg:upass_tolg",
         "@hhds//hhds:tree_edit_distance",
-        "@opentimer//:taskflow",  # the OT-bundled copy — see packages/opentimer.BUILD for the ODR rule
+        "@opentimer//:taskflow",  # the OT-bundled copy — see ../OpenTimer/BUILD.bazel for the ODR rule
         "@rapidjson",
     ] + select({
         "//:without_abc": [],

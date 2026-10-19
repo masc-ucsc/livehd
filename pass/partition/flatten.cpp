@@ -77,6 +77,7 @@ struct Ictx {
   Ictx*                                                        parent = nullptr;  // enclosing context (nullptr for top)
   hhds::Node_class                                             inst;              // the Sub node in parent->src (invalid for top)
   std::string                                                  prefix;            // dotted instance path ("" for top)
+  std::string                                                  inherited_color_group;
   uint32_t                                                     synth_region_id = 0;
   std::shared_ptr<const livehd::partition::Flat_instance_path> instance;
 
@@ -202,6 +203,12 @@ Ictx* Flattener::make_ctx(hhds::Graph* src, Ictx* parent, const hhds::Node_class
     path->steps.push_back({site.gid, site.value, std::nullopt});
   }
   c.instance = std::move(path);
+  if (parent) {
+    c.inherited_color_group = parent->inherited_color_group;
+    if (auto group = inst.attr(livehd::attrs::synth_color_group); group.has()) {
+      c.inherited_color_group = parent->prefix + std::string(group.get());
+    }
+  }
   auto input = src->get_input_node();
   if (auto id = input.attr(livehd::attrs::synth_region_id); id.has()) {
     c.synth_region_id = id.get();
@@ -266,6 +273,11 @@ hhds::Pin_class Flattener::apply_port_shape(const hhds::Pin_class& source, const
 
 void Flattener::carry_node_attrs(Ictx* ctx, const hhds::Node_class& orig, const hhds::Node_class& neo) {
   admit("flatten-carry_node_attrs");
+  if (auto a = orig.attr(livehd::attrs::synth_color_group); a.has()) {
+    neo.attr(livehd::attrs::synth_color_group).set(ctx->prefix + std::string(a.get()));
+  } else if (!ctx->inherited_color_group.empty()) {
+    neo.attr(livehd::attrs::synth_color_group).set(ctx->inherited_color_group);
+  }
   auto policy=orig.attr(livehd::attrs::synth_policy).has()?livehd::synth_attr::read(orig.attr(livehd::attrs::synth_policy).get()):livehd::synth_attr::Policy{};
   for (auto* scope=ctx;scope!=nullptr;scope=scope->parent) {
     if (!scope->inst.is_invalid()) if(auto a=scope->inst.attr(livehd::attrs::synth_policy);a.has()) {auto call=livehd::synth_attr::read(a.get());if(!call.contains("_specialized")) livehd::synth_attr::rescope(policy,call);}

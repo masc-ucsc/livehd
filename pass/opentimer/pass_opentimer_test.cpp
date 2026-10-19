@@ -22,9 +22,18 @@ public:
     timer.connect_pin("a", "wire").connect_pin("y", "wire");
   }
   using Pass_opentimer::clock_qor_json;
+  using Pass_opentimer::endpoint_tns;
   using Pass_opentimer::read_sdc;
   using Pass_opentimer::timer;
   bool complete() const { return constraints_complete_; }
+  bool propagated(const std::string& name) const { return propagated_clocks_.contains(name); }
+};
+class Circuit_probe : public Pass_opentimer {
+public:
+  explicit Circuit_probe(const Eprp_var& var) : Pass_opentimer(var) { timer.set_num_threads(1); }
+  using Pass_opentimer::apply_case_analysis;
+  using Pass_opentimer::build_circuit;
+  using Pass_opentimer::timer;
 };
 class SdcClock : public ::testing::Test {
 protected:
@@ -63,6 +72,247 @@ set_output_delay -clock virtual -min -5 [all_outputs]
   EXPECT_NE(report.find("\"setup_slack\":68"), std::string::npos);
   EXPECT_NE(report.find("\"hold_slack\":-2"), std::string::npos);
 }
+
+TEST_F(SdcClock, TotalNegativeSlackCountsEachEndpointOnce) {
+  Sdc_probe pass(var);
+  pass.timer.insert_primary_output("z").disconnect_pin("z").connect_pin("z", "wire");
+  pass.read_sdc(write(R"sdc(
+create_clock -name virtual -period 100
+set_input_delay 140 -clock virtual [all_inputs]
+set_input_delay -fall 130 -clock virtual [all_inputs]
+set_output_delay 20 -clock virtual [all_outputs]
+)sdc"));
+  EXPECT_NEAR(pass.timer.report_tns(ot::MAX).value(), -220, 1e-5);
+  EXPECT_NEAR(pass.endpoint_tns(ot::MAX), -120, 1e-5);
+}
+TEST_F(SdcClock, ExpandsScalarSelectorVariablesAndArithmeticLoads) {
+  Sdc_probe pass(var);
+  pass.read_sdc(write(R"sdc(
+current_design top
+set clock_name virtual
+set period 100
+set inputs [all_inputs -no_clocks]
+set output [get_ports y]
+set cap 0.25
+create_clock -name $clock_name -period ${period}
+set_input_delay 10 -clock $clock_name $inputs
+set_output_delay 20 -clock $clock_name $output
+set_load [expr {4.0 * $cap}] $output
+)sdc"));
+  EXPECT_EQ(pass.timer.report_slack("y", ot::MAX, ot::RISE), 70);
+  EXPECT_FLOAT_EQ(pass.timer.pins().at("y").cap(ot::MAX, ot::RISE), 1);
+  pass.clock_qor_json();
+  EXPECT_TRUE(pass.complete());
+}
+
+TEST_F(SdcClock, ExactInputFalsePathPreservesUnrelatedPathsAndSurvivesLaterConstraints) {
+  Sdc_probe pass(var);
+  pass.timer.insert_primary_input("b").insert_primary_output("z").insert_net("other");
+  pass.timer.disconnect_pin("b").disconnect_pin("z");
+  pass.timer.connect_pin("b", "other").connect_pin("z", "other");
+  pass.read_sdc(write(R"sdc(
+create_clock -name virtual -period 100
+set_input_delay 10 -clock virtual [all_inputs]
+set_output_delay 20 -clock virtual [all_outputs]
+set_false_path -from [get_ports a]
+)sdc"));
+  EXPECT_FALSE(pass.timer.report_at("y", ot::MAX, ot::RISE));
+  EXPECT_FALSE(pass.timer.report_slack("y", ot::MAX, ot::RISE));
+  EXPECT_FLOAT_EQ(pass.timer.report_slack("z", ot::MAX, ot::RISE).value(), 70);
+  pass.read_sdc(write("set_input_delay 20 -clock virtual [all_inputs]\n"));
+  EXPECT_FALSE(pass.timer.report_at("y", ot::MAX, ot::RISE));
+  EXPECT_FLOAT_EQ(pass.timer.report_slack("z", ot::MAX, ot::RISE).value(), 60);
+  EXPECT_TRUE(pass.complete());
+}
+TEST_F(SdcClock, ExactListSearchExcludesOnlyTheSelectedInputPort) {
+  Sdc_probe pass(var);
+  pass.timer.insert_primary_input("clk");
+  pass.read_sdc(write(R"sdc(
+set clk_port [get_ports clk]
+set inputs [lsearch -inline -all -not -exact [all_inputs] $clk_port]
+create_clock -name virtual -period 100
+set_input_delay 10 -clock virtual $inputs
+set_output_delay 20 -clock virtual [all_outputs]
+)sdc"));
+  EXPECT_FLOAT_EQ(pass.timer.report_at("a", ot::MAX, ot::RISE).value(), 10);
+  EXPECT_FALSE(pass.timer.report_at("clk", ot::MAX, ot::RISE));
+  EXPECT_FLOAT_EQ(pass.timer.report_slack("y", ot::MAX, ot::RISE).value(), 70);
+  EXPECT_TRUE(pass.complete());
+}
+TEST_F(SdcClock, NestedListSearchExcludesEveryNamedInputAndBackslashJoinsLines) {
+  Sdc_probe pass(var);
+  pass.timer.insert_primary_input("clk_p").insert_primary_input("clk_n");
+  // The litepci/HighTide idiom: one nested search per excluded port, continued over two lines.
+  pass.read_sdc(write(R"sdc(
+set non_clock_inputs [lsearch -inline -all -not \
+    [lsearch -inline -all -not [all_inputs] clk_p] clk_n]
+create_clock -name virtual -period 100
+set_input_delay 10 -clock virtual $non_clock_inputs
+set_output_delay 20 -clock virtual [all_outputs]
+)sdc"));
+  EXPECT_FLOAT_EQ(pass.timer.report_at("a", ot::MAX, ot::RISE).value(), 10);
+  EXPECT_FALSE(pass.timer.report_at("clk_p", ot::MAX, ot::RISE));
+  EXPECT_FALSE(pass.timer.report_at("clk_n", ot::MAX, ot::RISE));
+  EXPECT_FLOAT_EQ(pass.timer.report_slack("y", ot::MAX, ot::RISE).value(), 70);
+  EXPECT_TRUE(pass.complete());
+}
+TEST_F(SdcClock, ClockOnAnInternalPinIsCreatedAndAMissingPinOnlyWarns) {
+  Sdc_probe pass(var);
+  // `a` is a pin of the timing graph; `inst/pin` would be spelled `inst:pin` there. Both forms of
+  // create_clock define the clock, and neither is a hard error (the SDC also names generated clocks).
+  pass.read_sdc(write(R"sdc(
+create_clock -name on_pin -period 100 [get_pins a]
+create_clock -name nowhere -period 50 [get_pins macro/clk_out]
+)sdc"));
+  pass.timer.update_timing();
+  ASSERT_TRUE(pass.timer.clocks().contains("on_pin"));
+  EXPECT_FLOAT_EQ(pass.timer.clocks().at("on_pin").period(), 100);
+  ASSERT_TRUE(pass.timer.clocks().contains("nowhere"));
+  EXPECT_FLOAT_EQ(pass.timer.clocks().at("nowhere").period(), 50);
+}
+TEST_F(SdcClock, TclControlStructureBodyIsSkippedAsOneUnit) {
+  Sdc_probe pass(var);
+  // HighTide's NyuziProcessor SDC loops over the JTAG ports. The body lines mean nothing without the loop
+  // variables, so reading them one by one failed on `$port`; the whole braced command is skipped instead.
+  pass.read_sdc(write(R"sdc(
+create_clock -name virtual -period 100
+set_input_delay 10 -clock virtual [all_inputs]
+foreach {port bit} {
+    a 1 b 0
+} {
+    set pin [get_pins -hierarchical -regexp [format {^x\[%d\]$} $bit]]
+    if {[llength $pin] != 1} {
+        error "expected one pin for $port"
+    }
+    set_false_path -from [get_ports $port] -to $pin
+}
+unset port bit pin
+set_output_delay 20 -clock virtual [all_outputs]
+)sdc"));
+  EXPECT_FLOAT_EQ(pass.timer.report_at("a", ot::MAX, ot::RISE).value(), 10);
+  EXPECT_FLOAT_EQ(pass.timer.report_slack("y", ot::MAX, ot::RISE).value(), 70);
+}
+TEST_F(SdcClock, ExprDividesIntegersLikeTcl) {
+  Sdc_probe pass(var);
+  const std::string clock = "create_clock -name virtual -period 100\n";
+  const std::pair<const char*, float> cases[] = {{"1001/2", 500}, {"5/2.0", 2.5}, {"-5/2", -3}, {"(1+1)/4", 0}, {"0x1E/2", 15}, {"0x1F/2", 15}};
+  for (const auto& [expression, expected] : cases) {
+    pass.read_sdc(write(clock + std::format("set_input_delay [expr {}] -clock virtual [get_ports a]\n", expression)));
+    EXPECT_FLOAT_EQ(pass.timer.report_at("a", ot::MAX, ot::RISE).value(), expected) << expression;
+  }
+}
+TEST_F(SdcClock, TclSubstitutionStaysInsideBracesAndUnmodelledCommandsDegrade) {
+  Sdc_probe pass(var);
+  pass.read_sdc(write(R"sdc(
+create_clock -name virtual -period 100
+set_input_delay 10 -clock virtual [get_ports {d$x}]
+set_input_delay 10 -clock virtual [all_inputs]
+set_clock_uncertainty $::env(U) virtual
+set x $::env(X)
+set_output_delay 20 -clock virtual [all_outputs]
+)sdc"));
+  EXPECT_FALSE(pass.complete());
+  EXPECT_EQ(pass.timer.report_slack("y", ot::MAX, ot::RISE), 70);
+}
+TEST_F(SdcClock, SkipsLoadAndDrivingCellForms) {
+  Sdc_probe pass(var);
+  pass.read_sdc(write(R"sdc(
+create_clock -name virtual -period 100
+set_input_delay 10 -clock virtual [all_inputs]
+set_output_delay 20 -clock virtual [all_outputs]
+set_load -pin_load 0.1 [get_ports y]
+set_load 0.2 [all_inputs]
+set_load 0.2 [get_nets wire]
+set_driving_cell -library lib -lib_cell NOPE [get_ports a]
+set_driving_cell -lib_cell NOPE [get_ports a]
+)sdc"));
+  EXPECT_FALSE(pass.complete());
+  EXPECT_EQ(pass.timer.report_slack("y", ot::MAX, ot::RISE), 70);
+}
+TEST_F(SdcClock, PropagatedClockAcceptsBracedQuotedAndListedNames) {
+  Sdc_probe pass(var);
+  pass.timer.insert_primary_input("c2");
+  pass.read_sdc(write(R"sdc(
+create_clock -name one -period 100 [get_ports a]
+create_clock -name two -period 100 [get_ports c2]
+set_propagated_clock [get_clocks {one}]
+)sdc"));
+  EXPECT_TRUE(pass.propagated("one"));
+  EXPECT_FALSE(pass.propagated("two"));
+  pass.read_sdc(write("set_propagated_clock [get_clocks \"two\"]\n"));
+  EXPECT_TRUE(pass.propagated("two"));
+}
+TEST_F(SdcClock, PropagatedClockListedNamesAreEachResolved) {
+  const std::string clocks = "create_clock -name one -period 100 [get_ports a]\ncreate_clock -name two -period 100 [get_ports c2]\n";
+  {
+    Sdc_probe pass(var);
+    pass.timer.insert_primary_input("c2");
+    pass.read_sdc(write(clocks + "set_propagated_clock [get_clocks {one two}]\n"));
+    EXPECT_TRUE(pass.propagated("one"));
+    EXPECT_TRUE(pass.propagated("two"));
+  }
+  {
+    Sdc_probe pass(var);
+    pass.timer.insert_primary_input("c2");
+    EXPECT_THROW(pass.read_sdc(write(clocks + "set_propagated_clock [get_clocks {one nope}]\n")), std::runtime_error);
+    EXPECT_FALSE(pass.propagated("nope"));
+  }
+}
+TEST_F(SdcClock, DrivingCellUsesLoadedSlewAndExternalDelayIncrement) {
+  const auto library = directory + "/driver.lib";
+  std::ofstream(library) << R"lib(library(driver) {
+    time_unit : "1ps"; capacitive_load_unit(1,ff);
+    lu_table_template(table) {
+      variable_1 : input_net_transition; variable_2 : total_output_net_capacitance;
+      index_1("0,100"); index_2("0,100");
+    }
+    cell(BUF) {
+      pin(A) { direction : input; capacitance : 2; }
+      pin(Y) { direction : output;
+        timing() { related_pin : "A"; timing_sense : positive_unate;
+          cell_rise(table) { values("10,210", "60,260"); }
+          cell_fall(table) { values("10,210", "60,260"); }
+          rise_transition(table) { values("4,104", "54,154"); }
+          fall_transition(table) { values("4,104", "54,154"); }
+        }
+      }
+    }
+  })lib";
+  Sdc_probe pass(var);
+  pass.timer.read_celllib(library).update_timing();
+  pass.read_sdc(write(R"sdc(
+create_clock -name virtual -period 100
+set ports [all_inputs -no_clocks]
+set_input_delay 10 -clock virtual $ports
+set_output_delay 20 -clock virtual [all_outputs]
+set_load 2 [all_outputs]
+set_driving_cell -lib_cell BUF -from_pin A -pin Y -input_transition_rise 20 -input_transition_fall 20 $ports
+)sdc"));
+  for (auto split : {ot::MIN, ot::MAX}) {
+    for (auto tran : {ot::RISE, ot::FALL}) {
+      EXPECT_NEAR(pass.timer.report_at("a", split, tran).value(), 14, 1e-4);
+      EXPECT_NEAR(pass.timer.report_slew("a", split, tran).value(), 16, 1e-4);
+    }
+  }
+  // An explicit transition after a driving-cell command replaces its waveform.
+  pass.read_sdc(write("set_input_transition 80 [get_ports a]\n"));
+  EXPECT_NEAR(pass.timer.report_at("a", ot::MAX, ot::RISE).value(), 10, 1e-4);
+  EXPECT_NEAR(pass.timer.report_slew("a", ot::MAX, ot::RISE).value(), 80, 1e-4);
+}
+TEST_F(SdcClock, BindsPhysicalClockSourceAndSubtractsOutputDelayFromItsPeriod) {
+  Sdc_probe pass(var);
+  pass.read_sdc(write(R"sdc(
+set name clk
+set port [get_ports a]
+set period 100
+create_clock -name $name -period $period $port
+set_input_delay 10 -clock $name [all_inputs]
+set_output_delay 20 -clock $name [all_outputs]
+)sdc"));
+  EXPECT_EQ(pass.timer.report_slack("y", ot::MAX, ot::RISE), 70);
+  // Broader physical-clock coverage remains conservative.
+  EXPECT_FALSE(pass.complete());
+}
 TEST_F(SdcClock, VirtualClockNameDoesNotTurnADataInputIntoAPhysicalClock) {
   Sdc_probe pass(var);
   pass.read_sdc(
@@ -90,6 +340,185 @@ TEST_F(SdcClock, MissingAndUnsupportedClockSemanticsCannotCertifyCoverage) {
     pass.read_sdc(write(text));
     pass.clock_qor_json();
     EXPECT_FALSE(pass.complete()) << text;
+  }
+}
+
+TEST_F(SdcClock, UnusedCellOutputsStillPresentTheirInputCapacitance) {
+  const auto path = directory + "/loads.lib";
+  std::ofstream(path) << R"lib(library(loads) {
+    time_unit : "1ps"; capacitive_load_unit(1,ff);
+    cell(BUF) {
+      pin(A) { direction : input; capacitance : 2; }
+      pin(Y) { direction : output;
+        timing() { related_pin : "A"; timing_sense : positive_unate;
+          cell_rise(scalar) { values("5"); } cell_fall(scalar) { values("5"); }
+          rise_transition(scalar) { values("1"); } fall_transition(scalar) { values("1"); }
+        }
+      }
+    }
+  })lib";
+  var.dict["files"] = path;
+  var.set_stage_labels(var.dict);
+  hhds::GraphLibrary library;
+  auto               io = library.create_io("top");
+  io->add_input("a", 0);
+  io->set_bits("a", 1);
+  io->add_output("y", 0);
+  io->set_bits("y", 1);
+  auto graph  = io->create_graph();
+  auto master = library.create_io("BUF");
+  master->add_input("A", 0);
+  master->set_bits("A", 1);
+  master->add_output("Y", 0);
+  master->set_bits("Y", 1);
+  auto input = graph->get_input_pin("a");
+  livehd::graph_util::set_bits(input, 1);
+  for (bool used : {true, false}) {
+    auto node = livehd::graph_util::create_typed_node(*graph, Ntype_op::Sub);
+    node.set_name(used ? "used" : "unused");
+    node.set_subnode(master);
+    node.create_sink_pin("A").connect_driver(input);
+    if (used) {
+      auto output = node.create_driver_pin("Y");
+      livehd::graph_util::set_bits(output, 1);
+      graph->get_output_pin("y").connect_driver(output);
+    }
+  }
+  Circuit_probe probe(var);
+  probe.build_circuit(graph);
+  probe.timer.update_timing();
+  EXPECT_EQ(probe.timer.num_gates(), 2);
+  EXPECT_NEAR(probe.timer.report_load("a", ot::MAX, ot::RISE).value(), 4, 1e-5);
+}
+
+TEST_F(SdcClock, CaseAnalysisPrunesConstantPathsAndRestrictsNonUnateArcs) {
+  const auto path = directory + "/case.lib";
+  std::ofstream(path) << R"lib(library(cases) {
+    time_unit : "1ps"; capacitive_load_unit(1,ff);
+    cell(T0) { dont_use : true; pin(Y) { direction : output; function : "0"; } }
+    cell(T1) { pin(Y) { direction : output; function : "1"; } }
+    cell(BUF) {
+      pin(A) { direction : input; capacitance : 2; }
+      pin(Y) { direction : output; function : "A";
+        timing() { related_pin : "A"; timing_sense : positive_unate;
+          cell_rise(scalar) { values("10"); } cell_fall(scalar) { values("10"); }
+          rise_transition(scalar) { values("1"); } fall_transition(scalar) { values("1"); }
+        }
+      }
+    }
+    cell(AND) {
+      pin(A) { direction : input; capacitance : 2; }
+      pin(B) { direction : input; capacitance : 2; }
+      pin(Y) { direction : output; function : "A * B";
+        timing() { related_pin : "A B"; timing_sense : positive_unate;
+          cell_rise(scalar) { values("20"); } cell_fall(scalar) { values("20"); }
+          rise_transition(scalar) { values("1"); } fall_transition(scalar) { values("1"); }
+        }
+      }
+    }
+    cell(XOR) {
+      pin(A) { direction : input; capacitance : 2; }
+      pin(B) { direction : input; capacitance : 2; }
+      pin(Y) { direction : output; function : "A ^ B";
+        timing() { related_pin : "A B"; timing_sense : non_unate;
+          cell_rise(scalar) { values("2"); } cell_fall(scalar) { values("10"); }
+          rise_transition(scalar) { values("1"); } fall_transition(scalar) { values("1"); }
+        }
+      }
+    }
+  })lib";
+  var.dict["files"] = path;
+  var.set_stage_labels(var.dict);
+  Circuit_probe probe(var);
+  auto&         timer = probe.timer;
+  timer.read_celllib(path).insert_primary_input("a");
+  for (const auto& [instance, master] : std::vector<std::pair<std::string, std::string>>{
+           {  "zero",  "T0"},
+           {   "one",  "T1"},
+           {  "copy", "BUF"},
+           {"masked", "AND"},
+           {"invert", "XOR"}
+  }) {
+    timer.insert_gate(instance, master);
+  }
+  for (const auto* net : {"data", "zero", "one", "copied"}) {
+    timer.insert_net(net);
+  }
+  timer.disconnect_pin("a").connect_pin("a", "data");
+  timer.connect_pin("zero:Y", "zero").connect_pin("copy:A", "zero");
+  timer.connect_pin("copy:Y", "copied").connect_pin("masked:A", "copied");
+  timer.connect_pin("one:Y", "one").connect_pin("invert:B", "one");
+  timer.connect_pin("masked:B", "data").connect_pin("invert:A", "data");
+  for (auto split : {ot::MIN, ot::MAX}) {
+    timer.set_at("a", split, ot::RISE, 200).set_at("a", split, ot::FALL, 500);
+    timer.set_slew("a", split, ot::RISE, 1).set_slew("a", split, ot::FALL, 1);
+  }
+  ASSERT_EQ(timer.report_at("masked:Y", ot::MAX, ot::RISE).value(), 220);
+  ASSERT_EQ(timer.report_at("invert:Y", ot::MAX, ot::FALL).value(), 510);
+  probe.apply_case_analysis();
+  EXPECT_FALSE(timer.report_at("masked:Y", ot::MAX, ot::RISE));
+  EXPECT_FALSE(timer.report_at("masked:Y", ot::MAX, ot::FALL));
+  EXPECT_EQ(timer.report_at("invert:Y", ot::MAX, ot::FALL).value(), 210);
+  EXPECT_EQ(timer.report_at("invert:Y", ot::MAX, ot::RISE).value(), 502);
+  EXPECT_EQ(timer.report_load("data", ot::MAX, ot::RISE).value(), 4);
+  timer.set_case_masks({});
+  EXPECT_EQ(timer.report_at("masked:Y", ot::MAX, ot::RISE).value(), 220);
+  EXPECT_EQ(timer.report_at("invert:Y", ot::MAX, ot::FALL).value(), 510);
+}
+
+TEST_F(SdcClock, ConditionalTimingSelectsKnownCasesAndKeepsUnknownFallback) {
+  const auto path = directory + "/conditional.lib";
+  std::ofstream(path) << R"lib(library(conditions) {
+    time_unit : "1ps"; capacitive_load_unit(1,ff);
+    cell(T0) { pin(Y) { direction : output; function : "0"; } }
+    cell(T1) { pin(Y) { direction : output; function : "1"; } }
+    cell(COND) {
+      pin(A) { direction : input; capacitance : 2; }
+      pin(B) { direction : input; capacitance : 2; }
+      pin(Y) { direction : output; function : "A";
+        timing() { related_pin : "A"; timing_sense : positive_unate; when : "B";
+          cell_rise(scalar) { values("25"); } cell_fall(scalar) { values("25"); }
+          rise_transition(scalar) { values("1"); } fall_transition(scalar) { values("1"); }
+        }
+        timing() { related_pin : "A"; timing_sense : positive_unate;
+          cell_rise(scalar) { values("100"); } cell_fall(scalar) { values("100"); }
+          rise_transition(scalar) { values("1"); } fall_transition(scalar) { values("1"); }
+        }
+      }
+    }
+  })lib";
+  var.dict["files"] = path;
+  var.set_stage_labels(var.dict);
+  Circuit_probe probe(var);
+  auto&         timer = probe.timer;
+  timer.read_celllib(path).insert_primary_input("a");
+  timer.insert_gate("zero", "T0").insert_gate("one", "T1");
+  for (const auto* name : {"on", "off", "unknown"}) {
+    timer.insert_gate(name, "COND");
+  }
+  for (const auto* net : {"data", "zero", "one"}) {
+    timer.insert_net(net);
+  }
+  timer.disconnect_pin("a").connect_pin("a", "data");
+  timer.connect_pin("zero:Y", "zero").connect_pin("off:B", "zero");
+  timer.connect_pin("one:Y", "one").connect_pin("on:B", "one");
+  timer.connect_pin("unknown:B", "data");
+  for (const auto* name : {"on", "off", "unknown"}) {
+    timer.connect_pin(std::string(name) + ":A", "data");
+  }
+  for (auto split : {ot::MIN, ot::MAX}) {
+    for (auto tran : {ot::RISE, ot::FALL}) {
+      timer.set_at("a", split, tran, 10).set_slew("a", split, tran, 1);
+    }
+  }
+  probe.apply_case_analysis();
+  for (auto tran : {ot::RISE, ot::FALL}) {
+    EXPECT_EQ(timer.report_at("on:Y", ot::MIN, tran).value(), 35);
+    EXPECT_EQ(timer.report_at("on:Y", ot::MAX, tran).value(), 35);
+    EXPECT_EQ(timer.report_at("off:Y", ot::MIN, tran).value(), 110);
+    EXPECT_EQ(timer.report_at("off:Y", ot::MAX, tran).value(), 110);
+    EXPECT_EQ(timer.report_at("unknown:Y", ot::MIN, tran).value(), 35);
+    EXPECT_EQ(timer.report_at("unknown:Y", ot::MAX, tran).value(), 110);
   }
 }
 

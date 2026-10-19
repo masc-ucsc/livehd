@@ -1,0 +1,266 @@
+/*
+:name: spec_tests_clock_and_step
+:type: simulation
+*/
+// Merged fixture: each section below is the original tests/sim fixture listed in its banner,
+// body unchanged (module and test names are unique across the sections).
+
+// ============================================================
+// from spec_tests_clock_bind_explicit.prp
+// ============================================================
+// Spec (qa.md appendix section 6): "Test harnesses declare/pass a real Clock
+// (no `clk=1`)". docs 05b "Running cycles (tick)": "A harness never feeds a
+// constant to a `Clock` input (`clk=1` is an error); it passes a real Clock
+// such as the tick's `clock`."
+//
+// Rule pinned: binding the tick's minted `clock` EXPLICITLY to the DUT's Clock
+// input (`d.clk = clock`) is legal and clocks the DUT exactly like the
+// implicit auto-wire.
+
+mod spec_cbe_cnt(clk:Clock, en:Bool) -> (q:U8@[0]) {
+  reg c:U8 = 0
+  if en { wrap c = c + 1 }
+  q = c
+}
+
+test spec_cbe.explicit {
+  mut d = spec_cbe_cnt
+  tick 4 {
+    d.clk = clock            // pass the real (minted) Clock
+    d.en  = true
+    step
+  }
+  assert(d.q == 4)
+}
+
+// ============================================================
+// from spec_tests_clock_debug_view.prp
+// ============================================================
+// Spec (qa.md appendix section 6): "the numeric view of a Clock is legal ONLY
+// in debug contexts (test blocks, puts, assert/cassert)"; "upass must not fold
+// `clock < N` (debug-only reads are not u1-range values)". docs 05b "Running
+// cycles (tick)": "A test is a debug context, so the numeric view of `clock`
+// is legal there: use it in `puts`, `assert`, and to drive inputs".
+//
+// Rule pinned: inside a tick the minted `clock` may be printed, asserted on,
+// compared (`==`, `>=`) and used as a data value (`acc.din = clock`), and
+// none of those comparisons is folded as if `clock` were a 1-bit value.
+
+mod spec_cdv_acc(din:U8) -> (sum:U32@[0]) {
+  reg total:U32 = 0
+  sum = total
+  wrap total = total + din
+}
+
+test spec_cdv.debug_view {
+  mut acc  = spec_cdv_acc
+  mut hits = 0
+  mut big  = 0
+  tick 12 {
+    puts("cycle {clock}")
+    assert(clock < 12, "clock is the 0-based cycle index")
+    if clock == 9 { hits += 1 }       // not folded: 9 > 1-bit range
+    if clock >= 3 { big += 1 }        // not folded to false
+    acc.din = clock                    // numeric view drives a data input
+    step
+  }
+  assert(hits == 1)
+  assert(big == 9)
+  assert(acc.sum == 66)                // 0 + 1 + ... + 11
+}
+
+// ============================================================
+// from spec_tests_clock_declared_no_tick.prp
+// ============================================================
+// Spec (qa.md appendix section 8): "`clock` outside a tick block is undefined
+// unless declared." docs 05b "Running cycles (tick)": "Outside a `tick` block,
+// `clock` is undefined unless the test declares it."
+//
+// Rule pinned (the "unless declared" half): `clock` is not a reserved word, so
+// a test with no `tick` may declare its own local named `clock` and read it.
+
+mod spec_cdn_pass(a:U8) -> (o:U8@[0]) {
+  o = a
+}
+
+test spec_cdn.declared {
+  mut d     = spec_cdn_pass
+  const clock = 7
+  d.a = clock
+  step
+  assert(d.o == 7)
+  assert(clock == 7)
+}
+
+// ============================================================
+// from spec_tests_dut_clock_reads_counter.prp
+// ============================================================
+// Spec (qa.md appendix section 6): "Clock: ... in simulation it is a CYCLE
+// counter (rising edges), so `clock < 1000` works -- but the numeric view of
+// a Clock is legal ONLY in debug contexts (test blocks, puts,
+// assert/cassert)"; "each Clock input has its own simulation counter".
+// Section 8: "the DUT instances stepped inside that tick auto-wire their
+// single Clock input to it". docs 05b "Running cycles (tick)": "`acc.y` reads
+// an output or an internal register" -- and 09b lists the minted `acc.clock`
+// among a DUT's observable signals.
+//
+// Rule pinned: a test reading the DUT's (auto-wired) Clock input sees the
+// clock's cycle count -- the same count as the tick's `clock` it is wired to
+// -- both for a declared `ck:Clock` and for a MINTED `clock:Clock`. Reads are
+// placed ABOVE the step (k edges so far in iteration k).
+
+mod spec_drc_cnt(ck:Clock, en:Bool) -> (q:U8@[0]) {
+  reg c:U8 = 0
+  if en { wrap c = c + 1 }
+  q = c
+}
+
+mod spec_drc_min(en:Bool) -> (q:U8@[0]) {
+  reg c:U8 = 0
+  if en { wrap c = c + 1 }
+  q = c
+}
+
+test spec_drc.reads {
+  mut d   = spec_drc_cnt
+  mut m   = spec_drc_min
+  mut bad = 0
+  tick 5 {
+    if d.ck != clock { bad += 1 }      // declared Clock input, auto-wired
+    if m.clock != clock { bad += 1 }   // minted Clock input, auto-wired
+    d.en = true
+    m.en = true
+    step
+  }
+  assert(bad == 0, "a DUT's Clock input reads as the tick's cycle count")
+}
+
+// ============================================================
+// from spec_tests_tick_clock_index.prp
+// ============================================================
+// Spec (qa.md appendix section 8, "Test clock"): "each `tick` block gets a
+// MINTED `clock:Clock` ... Its counter is the tick's cycle index (0-based) and
+// `step` advances it." docs 05b "Running cycles (tick)": "it is `0` in the
+// first iteration and each `step` advances it."
+//
+// Rule pinned: read BEFORE the step, `clock` is 0 in the first iteration and
+// grows by exactly one per iteration (0, 1, 2, ... N-1). The test has no DUT
+// of its own besides a trivial pass-through so the tick has something to step.
+
+mod spec_tci_pass(a:U8) -> (o:U8@[0]) {
+  o = a
+}
+
+test spec_tci.index {
+  mut d     = spec_tci_pass
+  mut iters = 0
+  mut bad   = 0
+  mut first = 99
+  mut last  = 99
+  tick 6 {
+    if iters == 0 { first = clock }
+    if clock != iters { bad += 1 }   // pre-step: the 0-based cycle index
+    last = clock
+    d.a = 1
+    step
+    iters += 1
+  }
+  assert(first == 0, "the minted clock must start at 0")
+  assert(last == 5, "the last iteration of `tick 6` is cycle 5")
+  assert(bad == 0, "clock must equal the iteration index before the step")
+  assert(iters == 6)
+}
+
+// ============================================================
+// from spec_tests_tick_clock_per_tick.prp
+// ============================================================
+// Spec (qa.md Q38 answer): "Each tick gets a minted clock:Clock"; appendix
+// section 8: "each `tick` block gets a MINTED `clock:Clock` ... Its counter is
+// the tick's cycle index (0-based)".
+//
+// Rule pinned: the counter belongs to ONE tick block, so a second sequential
+// `tick` in the same test mints a fresh `clock` that starts again at 0 (the
+// DUT state itself carries over: the counter keeps counting).
+
+mod spec_tcp_cnt(en:Bool) -> (q:U8@[0]) {
+  reg c:U8 = 0
+  if en { wrap c = c + 1 }
+  q = c
+}
+
+test spec_tcp.two_ticks {
+  mut d      = spec_tcp_cnt
+  mut first2 = 99
+  mut bad    = 0
+  tick 3 {
+    if clock > 2 { bad += 1 }
+    d.en = true
+    step
+  }
+  tick 4 {
+    if first2 == 99 { first2 = clock }
+    d.en = true
+    step
+  }
+  assert(first2 == 0, "the second tick's minted clock must restart at 0")
+  assert(bad == 0)
+  assert(d.q == 7, "DUT state carries across ticks: 3 + 4 enabled cycles")
+}
+
+// ============================================================
+// from spec_tests_step_n_timer.prp
+// ============================================================
+// Spec: docs 05b "Test only statements": "`step [ncycles]` advances the
+// simulation one cycle (or `ncycles`)". docs 09-verification cocotb map:
+// "`await Timer(5 cycles)` | `step 5`"; "`step N` covers `await Timer(N
+// cycles)`".
+//
+// Rule pinned: a bare `step 5` in a test body (outside any tick) advances the
+// DUT five clock edges; a following `step` advances one more.
+
+mod counter(enable:Bool) -> (value:U8@[0]) {
+  reg count:U8 = 0
+  value = count
+  if enable { wrap count += 1 }
+}
+
+test counter.timer {
+  mut acc = counter
+  acc.enable = true
+  step 5
+  assert(acc.value == 5, "`step 5` is five edges")
+  step
+  assert(acc.value == 6)
+}
+
+// ============================================================
+// from spec_tests_step_read_placement.prp
+// ============================================================
+// Spec: docs 05b "Running cycles (tick)": "Read the DUT *below* the `step`: a
+// read placed above it observes what the previous `step` settled, not the
+// inputs driven by the statements just above it, so for an output that
+// depends combinationally on those inputs the two placements differ by a
+// cycle." 05b "Test only statements": "One `step` is settle -> commit ->
+// settle ... the second is why a read placed immediately after it sees
+// post-edge values."
+//
+// Rule pinned: for a purely combinational output `o = a + 1`, a read ABOVE the
+// step sees the previous iteration's drive, a read BELOW sees this one's.
+
+mod spec_srp_inc(a:U8) -> (o:U9@[0]) {
+  o = a + 1
+}
+
+test spec_srp.placement {
+  mut d   = spec_srp_inc
+  mut bad = 0
+  tick 5 {
+    d.a = 10 + clock
+    const above = d.o              // what the previous step settled
+    step
+    const below = d.o              // this cycle's drive, settled
+    if clock > 0 and above != 10 + clock { bad += 1 }   // previous a (= 10+clock-1) plus 1
+    if below != 11 + clock { bad += 1 }
+  }
+  assert(bad == 0)
+}

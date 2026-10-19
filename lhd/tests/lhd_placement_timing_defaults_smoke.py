@@ -1,0 +1,115 @@
+#!/usr/bin/env python3
+"""Full placement defaults to timing feedback; geometric debugging is explicit."""
+import json
+import os
+from pathlib import Path
+import subprocess
+
+root = Path(os.environ['TEST_TMPDIR']) / 'timing_defaults'
+root.mkdir()
+source = root / 'dut.v'
+source.write_text('module dut(input [1:0] a,b, output [1:0] y); assign y=a^b; endmodule\n')
+sdc = root / 'timing.sdc'
+sdc.write_text('create_clock -name virtual -period 10\n'
+               'set_input_delay -clock virtual 0 [all_inputs]\n'
+               'set_output_delay -clock virtual 0 [all_outputs]\n')
+lib = Path('inou/lefdef/tests/data')
+base = ['lhd/lhd', 'synth', str(source), '--top', 'dut',
+        '--set', f'synth.liberty={lib}/sky130hd.lib',
+        '--set', f'synth.lef={lib}/sky130hd.tlef,{lib}/sky130hd.lef',
+        '--set', f'synth.sdc={sdc}', '--set', 'synth.place.iterations=30',
+        '--set', 'synth.place.bins=8', '--set', 'synth.place.timing_rounds=1', '-q']
+
+def run(name, extra, success=True, expect=None):
+    report = root / (name + '.json')
+    p = subprocess.run(base + extra + ['--workdir', str(root/name), '--result-json', str(report)],
+                       capture_output=True, text=True, timeout=10)
+    assert report.exists(), (name, p.returncode, p.stdout, p.stderr)
+    data = json.loads(report.read_text())
+    assert (p.returncode == 0) == success, (name, data, p.stdout, p.stderr)
+    if not success:
+        error = data['error']
+        assert error['class'] == 'usage', (name, error)
+        assert expect in error['message'], (name, expect, error)
+    return data
+
+timed = run('default', ['--set', 'synth.place=true'])
+q = timed['qor']['place']
+assert q['legal'], q
+td = q['timing_driven']
+assert td['initial_timing_source'] == 'post_synthesis_zero_wire', td
+assert max(td['initial_weights'].values()) > 1, td
+assert td['timing_fraction'] == 0.2 and td['timing_max_weight'] == 5 and td['timing_smoothing'] == .5, td
+assert len(td['rounds']) == 1, td
+assert 'pass.place.post_synth_timing' in [p['name'] for p in timed['phases']]
+
+debug = run('debug', ['--set', 'synth.place=true', '--set', 'synth.place.timing_driven=false'])
+assert debug['qor']['place']['legal'] and 'timing_driven' not in debug['qor']['place']
+assert not any('post_synth_timing' in p['name'] for p in debug['phases'])
+plain = run('synthesis_only', [])
+assert 'place' not in plain['qor']
+gp = run('gp_only', ['--set', 'synth.place=true', '--set', 'synth.place.mode=gp'])
+assert 'timing_driven' not in gp['qor']['place']
+run('no_sta', ['--set', 'synth.place=true', '--set', 'synth.opentimer=false'], success=False, expect='OpenTimer')
+no_sta_debug = run('no_sta_debug', ['--set', 'synth.place=true', '--set', 'synth.opentimer=false',
+                                  '--set', 'synth.place.timing_driven=false'])
+assert no_sta_debug['qor']['place']['legal'] and 'sta' not in no_sta_debug['qor']
+# A real Liberty cell classified as a macro supplies an FP candidate without a
+# second timing library. Native FIFO proxies are pre-fixed and cannot qualify.
+source.write_text('module dut(input [1:0] a,b,output [1:0] y);assign y=~(a^b);endmodule\n')
+lef = (lib/'sky130hd.lef').read_text()
+start = lef.index('MACRO sky130_fd_sc_hd__inv_1\n')
+klass = lef.index('CLASS CORE', start)
+lef = lef[:klass] + lef[klass:].replace('CLASS CORE', 'CLASS BLOCK', 1)
+macro_lef = root/'macro.lef'
+macro_lef.write_text(lef)
+base[base.index(f'synth.lef={lib}/sky130hd.tlef,{lib}/sky130hd.lef')] = f'synth.lef={lib}/sky130hd.tlef,{macro_lef}'
+ram = run('fp_macro', ['--set', 'synth.place=true',
+                     '--set', 'synth.place.halo=0',
+                     '--set', 'synth.place.fp.colors=true', '--set', 'synth.place.fp.minimum=0',
+                     '--set', 'synth.place.fp.iterations=120', '--set', 'synth.place.utilization=0.1'])
+assert ram['qor']['place']['legal'], ram
+fp = json.loads((root/'fp_macro/synth/place/macro/fp_place.json').read_text())
+assert fp['timing_interval'] == 50 and fp['timing_checkpoints'] > 0, fp
+assert fp['timing_sta_calls'] == fp['timing_checkpoints'], fp
+assert fp['timing_resized_cells'] == 0, fp
+assert fp['fp_timing_observed'], fp
+assert 'fp_continuation_deadline' in fp and 'fp_timing_satisfied_at_last_checkpoint' in fp, fp
+assert not fp['timing_after_density'] and fp['timing_density_schedule'] == [], fp
+gated_result = run('fp_gated', ['--set', 'synth.place=true', '--set', 'synth.place.halo=0',
+                 '--set', 'synth.place.fp.colors=true', '--set', 'synth.place.fp.minimum=0',
+                 '--set', 'synth.place.fp.iterations=120', '--set', 'synth.place.utilization=0.1',
+                 '--set', 'synth.place.fp.timing_after_density=true',
+                 '--set', 'synth.place.timing_fraction=0.29',
+                 '--set', 'synth.place.timing_max_weight=3', '--set', 'synth.place.timing_smoothing=0.25',
+                 '--set', 'synth.place.stop_overflow=0.08', '--set', 'synth.place.initial_density_weight=0.02',
+                 '--set', 'synth.place.fp.timing_movement=0.01', '--set', 'synth.place.fp.timing_max_updates=2'])
+gated = json.loads((root/'fp_gated/synth/place/macro/fp_place.json').read_text())
+assert gated['timing_after_density'] and gated['timing_checkpoints'] > 0, gated
+assert gated['timing_fraction'] == 0.29, gated
+assert gated['timing_max_weight'] == 3 and gated['timing_smoothing'] == .25, gated
+assert gated['timing_max_updates'] == 2 and gated['timing_checkpoints'] <= 2, gated
+assert gated['timing_stop_overflow'] == .08 and gated['initial_density_weight'] == .02, gated
+weighted = gated_result['qor']['place']['timing_driven']
+assert weighted['timing_fraction'] == .29 and weighted['timing_max_weight'] == 3 and weighted['timing_smoothing'] == .25, weighted
+assert max(weighted['initial_weights'].values()) <= 3, weighted
+for path in (root/'fp_gated/synth/place').rglob('gp_history.json'):
+    history = json.loads(path.read_text())
+    assert history['stop_overflow'] == .08 and history['initial_density_weight'] == .02, (path, history)
+
+assert gated['timing_density_schedule'], gated
+for sample in gated['timing_density_schedule']:
+    assert not sample['invoked'] or sample['forced'] or sample['overflow'] <= gated['timing_stop_overflow'], sample
+run('fraction_zero', ['--set', 'synth.place=true', '--set', 'synth.place.timing_fraction=0'], success=False,
+    expect='timing_fraction')
+run('fraction_percent', ['--set', 'synth.place=true', '--set', 'synth.place.timing_fraction=20'], success=False,
+    expect='timing_fraction')
+# These controls share one message that does not name the option.
+for name, setting in [('weight_below_one', 'timing_max_weight=0.5'),
+                      ('smoothing_range', 'timing_smoothing=1.1'),
+                      ('overflow_range', 'stop_overflow=-0.1'),
+                      ('density_weight_zero', 'initial_density_weight=0'),
+                      ('timing_budget_small', 'fp.timing_max_updates=1')]:
+    run(name, ['--set', 'synth.place=true', '--set', 'synth.place.' + setting], success=False,
+        expect='timing/density tuning controls')
+print('placement timing defaults: weighted full flow, debug opt-out, synthesis/GP modes passed')

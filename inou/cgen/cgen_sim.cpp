@@ -2463,8 +2463,12 @@ std::string Cgen_sim::node_expr(const hhds::Node_class& node, int wbits) {
       // one headroom bit when either side is signed, so a signed operand actually
       // sign-extends before the divide (same reasoning as the LT/GT/SRA cases);
       // the quotient then fits to the node width on assignment.
+      // One connected operand (P4, same reading as cprop): a lone dividend
+      // `a/?` (`a%?`) may be a; a lone divisor `?/b` (`?%b`) may be 0, while b
+      // is never a legal remainder.
       if (e.size() < 2) {
-        return e.empty() ? absl::StrCat("Slop<", tw, ">::create_integer(0)") : operand(e[0].get_driver_pin(), wbits);
+        return e.empty() || e[0].get_port_id() != 0 ? absl::StrCat("Slop<", tw, ">::create_integer(0)")
+                                                    : operand(e[0].get_driver_pin(), wbits);
       }
       // Slop<cw> is a SIGNED carrier: a w-bit unsigned operand needs w+1 bits
       // (the sum 20 of `(i1 - (-19)) / 2` read back as -12 from Slop<5>;
@@ -2484,8 +2488,12 @@ std::string Cgen_sim::node_expr(const hhds::Node_class& node, int wbits) {
       // `a % b` as the bare dividend. Truncated remainder, sign following the
       // dividend -- Dlop::rem_op is exactly that, and there is only one flavour
       // because every value is signed.
+      // One connected operand (P4, same reading as cprop): a lone dividend
+      // `a/?` (`a%?`) may be a; a lone divisor `?/b` (`?%b`) may be 0, while b
+      // is never a legal remainder.
       if (e.size() < 2) {
-        return e.empty() ? absl::StrCat("Slop<", tw, ">::create_integer(0)") : operand(e[0].get_driver_pin(), wbits);
+        return e.empty() || e[0].get_port_id() != 0 ? absl::StrCat("Slop<", tw, ">::create_integer(0)")
+                                                    : operand(e[0].get_driver_pin(), wbits);
       }
       // Slop<cw> is a SIGNED carrier: a w-bit unsigned operand needs w+1 bits
       // (the sum 20 of `(i1 - (-19)) / 2` read back as -12 from Slop<5>;
@@ -3658,7 +3666,8 @@ std::string Cgen_sim::clock_input_of(hhds::Graph* g) {
       // (clock & r) | (clock & e), not one `clock & en` cone: look for an input
       // literally named `clock` (the flop name fallback's convention) in the
       // enable's small combinational cone. Only that name: a `clk` the
-      // testbench pokes as data (tests/sim/latch_sim_master_slave) stays data.
+      // testbench pokes as data (the master/slave test of
+      // tests/sim/latch_sim_basic_lane.prp) stays data.
       std::vector<std::pair<hhds::Pin_class, int>> work{{enable, 0}};
       absl::flat_hash_set<hhds::Class_index>       seen;
       while (!work.empty()) {
@@ -5503,7 +5512,8 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
         //    children commit per gated period on a `gclk` PORT through the
         //    `<port>__tick` channel, never by a toggling port value;
         //  * a conventionally spelled reference (clk, clock, clk_i, rf_clk_i,
-        //    ...) is never edge-detected -- conditional_state_named_clock pins
+        //    ...) is never edge-detected -- conditional_call_lane.prp (its
+        //    conditional_state_named_clock section) pins
         //    that a sole explicit `clk_i` commits once per tick. The spelling
         //    test is the shared Design_clocks::name_looks_like_clock notion,
         //    not a private list.
@@ -14602,8 +14612,11 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
             case Ntype_op::Div:
             case Ntype_op::Rem:
               if (operands.size() < 2) {
-                result = operands.empty() ? llvm_kernel.constant(result_width, 0, result_unsign)
-                                                 : llvm_kernel.resize(operands[0], result_width, result_unsign);
+                // One connected operand: a lone dividend forwards, a lone
+                // divisor is 0 (P4, same reading as cprop and the slop path).
+                result = operands.empty() || edges[0].sink.get_port_id() != 0
+                             ? llvm_kernel.constant(result_width, 0, result_unsign)
+                             : llvm_kernel.resize(operands[0], result_width, result_unsign);
               } else {
                 const auto operation = type_op_of(node) == Ntype_op::Div ? Cgen_llvm::Binary_op::div : Cgen_llvm::Binary_op::rem;
                 uint32_t   work_width = std::max({operands[0].width, operands[1].width, result_width});
@@ -16002,7 +16015,7 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
     // default-constructed 0, not the reset/drawn Q. Whether the two share a
     // color is decided by the coarsener's live-word budget, so the values
     // depended on sim.tune.live_words
-    // (tests/sim/conditional_internal_icg_call.prp at live_words=1). Treat such
+    // (tests/sim/conditional_icg_sliced_guard.prp at live_words=1). Treat such
     // a reader like any other cross-color consumer: the latch's `_din` is an
     // external write, so its update runs in the unconditional domain (its hold
     // mux keeps a de-asserted enable holding) exactly as the same-color case

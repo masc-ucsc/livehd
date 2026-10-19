@@ -1,9 +1,14 @@
 /*
 :name: adv_enum_hier_encoding
 :type: comptime
-:verifier_pass: 9
+:verifier_pass: 33
 :verifier_fail: 0
 */
+
+// Hierarchical enum encodings (03-bundle.md:604-657). The plain-tuple spelling
+// of the same enum is checked as AnimalTuple, the Dir enum is the in/!= sections.
+
+// ---- adv_enum_hier_encoding ----
 // 03-bundle.md:604-657 — hierarchical enum: a child keeps the parent's bits
 // (child encoding = parent_bits | new_bit). Verbatim doc example + in/union.
 enum Animal = (
@@ -20,3 +25,71 @@ const human_rat = Animal.mammal.rat | Animal.mammal.human
 cassert(Animal.mammal     in human_rat)
 cassert(Animal.mammal.rat in human_rat)
 cassert(not (Animal.bird  in human_rat))
+
+// ---- adv_enum_hier_02 ----
+{
+// Doc 03-bundle.md: hierarchical name comparisons.
+// A parent equals its own child within the same subtree (the parent bit is a
+// prefix of the child encoding); cross-subtree names differ.
+// (uses the Animal enum declared above)
+
+cassert(Animal.bird.eagle != Animal.mammal)
+cassert(Animal.bird != Animal.mammal.human)
+cassert(Animal.bird == Animal.bird.parrot)
+}
+
+// ---- adv_enum_hier_04 ----
+{
+// Doc 03-bundle.md: enum union (|) and membership (in) on a hierarchical enum.
+// (uses the Animal enum declared above)
+
+const human_rat04 = Animal.mammal.rat | Animal.mammal.human
+
+cassert(Animal.mammal.rat   in human_rat04)
+cassert(Animal.mammal.human in human_rat04)
+cassert(not (Animal.bird in human_rat04))
+}
+
+// ---- adv_enum_hier_15 ----
+{
+// `in` array-membership on a hierarchical enum's leaf values.
+enum Dir = (
+  vert  = (up, down),
+  horiz = (left, right)
+)
+
+cassert(Dir.vert.up in (Dir.vert.up, Dir.vert.down))
+cassert(Dir.horiz.left != Dir.horiz.right)
+cassert(Dir.vert != Dir.horiz)
+cassert(Dir.vert.up != Dir.horiz.left)
+}
+
+// ---- enum_numeric_cast ----
+{
+// (uses the Animal enum declared above)
+cassert(Signed(Animal.bird) == 1)
+cassert(Signed(Animal.bird.eagle) == 3)
+cassert(Signed(Animal.bird.parrot) == 5)
+cassert(Signed(Animal.mammal) == 8)
+cassert(Signed(Animal.mammal.rat) == 24)
+cassert(Signed(Animal.mammal.human) == 40)
+cassert(Unsigned(Animal.mammal.human) == Animal.mammal.human#[..])
+enum State = (a=3,b)
+cassert(Unsigned(State.b) == 4)
+}
+
+// ---- enum_hier_tuple ----
+{
+// The documented hierarchical-enum spelling uses bare tuple values rather
+// than requiring a nested `enum(...)` expression.
+enum AnimalTuple = (
+  bird   = (,eagle, ,parrot),
+  mammal = (,rat, ,human)
+)
+cassert(U8(AnimalTuple.bird)         == 0ub000001)
+cassert(U8(AnimalTuple.bird.eagle)   == 0ub000011)
+cassert(U8(AnimalTuple.bird.parrot)  == 0ub000101)
+cassert(U8(AnimalTuple.mammal)       == 0ub001000)
+cassert(U8(AnimalTuple.mammal.rat)   == 0ub011000)
+cassert(U8(AnimalTuple.mammal.human) == 0ub101000)
+}

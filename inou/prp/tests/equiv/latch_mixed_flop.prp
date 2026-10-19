@@ -19,7 +19,7 @@
 // the simulator never emits the latch at all and its `q` is never bound,
 // producing a misleading `combinational-loop` error instead of a real
 // diagnostic (2f-latch M0 replaces the diagnostic, M5 implements latch sim;
-// tracked by tests/fixme/latch_sim_hold.prp and friends).
+// tracked by tests/sim/latch_sim_basic_lane.prp).
 pub mod mixed8(clk:Clock, en:Bool, d:U8) -> (q:U8@[1]) {
   reg l:U8:[latch=true]
   reg f:U8

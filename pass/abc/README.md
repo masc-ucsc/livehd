@@ -293,7 +293,23 @@ through the shared clock inverter) and any other reader of the gated clock
 keeps working. Anything else (the active-low `clk | ~latch` flavour, a latch
 with a reset or open on the wrong phase, a Liberty without such a cell) stays
 native with the precise reason (`derived-clock-native`, `icg-native`); pass.color
-keeps a gate's latch in its AND's color so the two meet in one region. Latch
+keeps a gate's latch in its AND's color so the two meet in one region.
+`pass.abc.derived_clock=true` (default false) maps those registers to ordinary
+DFF / clear / preset cells instead, clocked by the mapped clock logic: the clock
+net crosses ABC as one PO per net (`__dclk<n>`, after the latch-cell POs), the
+read-back wires every cell's clock pin to that mapped net in pass 2b and the
+clock fanout tree buffers it like an ICG output. It needs a DFF cell and a flow
+that keeps every latch as crossed, like the ICG and async cells; a negedge
+register (the cells are posedge-only) and a multi-bit clock stay native. Use it
+when a physical flow follows (placement refuses a native flop) and the Liberty
+has no usable ICG cell, e.g. ASAP7 with `ICG*` dont_use. A register
+clocked by the OUTPUT OF A MODULE INSTANCE in its own region (a clock-gate wrapper
+whose body maps in a child region, next to a flattened sibling block) is also a derived
+clock, but it needs no ABC clock PO: with `pass.abc.derived_clock=true` the instance is a
+native boundary box, so the register still crosses as a latch and its DFF clock pin is
+wired straight to the rebuilt instance's output, whatever the register's edge
+(`lhd/tests/lhd_abc_instance_clock_test.sh`); without the option it stays native like any
+other derived clock. Latch
 init comes from a resetless power-on constant only (a reset-backed latch is a don't-care to ABC:
 the cell it maps to powers on X). On read-back, latches rebuild into native
 flops or plain Liberty DFF cells according to the `register` option:
@@ -652,6 +668,13 @@ is re-run: `&undo` restores the GIA `&nf` consumed, so `&fraig`/`dc2`/`&dch` —
 the expensive part — run once. `-R` relaxes the mapper's depth model while the
 slack came from the SCL timer, so a miss after the remap is repaired with step
 2. `&undo` reverses exactly ONE step, which is why there is no second undo.
+The remap spends slack, never the budget: when even the repair leaves it over
+the budget, the mapping from before the remap (which met it, kept as a
+duplicate) is restored -- otherwise the region came back upsized past its
+budget and, no longer meeting it, also lost its area candidate (a 256-term
+guarded XOR accumulator: 253 ps before the `-R 58` remap, 437 ps after it,
+572 um^2 / 424 ps sized, against 566 um^2 / 312 ps restored; on the lhdtrack
+corpus no ABC region overshot, two `usyn` tmap regions did).
 
 **The area candidate.** A region that met its budget is then mapped a second
 time from a duplicate of the same pre-flow logic network with `area_flow` —

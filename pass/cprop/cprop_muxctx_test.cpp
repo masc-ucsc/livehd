@@ -196,4 +196,93 @@ TEST(CpropHotmuxCse, IdenticalValuesDoNotEraseUnprovenOverlap) {
   EXPECT_EQ(gu::type_op_of(root.get_master_node()), Ntype_op::Hotmux);
   EXPECT_FALSE(gu::has_proven(root.get_master_node()));
 }
+
+// P5 (todo/livehd/2a-aegraph.html): path pruning zeroes a Hotmux control that
+// is false on the path. It must keep whatever proven code the Hotmux already
+// carries (none stays none, kFormalAssumeUnchecked stays unchecked) instead of
+// stamping kFormalOnehot, and the zeroed control must not break the Hotmux's
+// structural exclusivity (a known-zero control is never active).
+TEST(CpropMuxContext, PruneKeepsHotmuxProvenCode) {
+  for (int code : {-1, static_cast<int>(gu::kFormalAssumeUnchecked), static_cast<int>(gu::kFormalOnehot)}) {
+    Fixture f;
+    auto    e3 = f.eq(f.x, 3), e5 = f.eq(f.x, 5);
+    auto    inner = f.hot(e3, f.a, e5, f.b, f.x);
+    auto    node  = inner.get_master_node();
+    if (code >= 0) {
+      gu::set_proven(node, static_cast<uint32_t>(code));
+    }
+    auto root = f.mux(e3, inner, f.b);  // inner sits on the e3==false arm
+    root.connect_sink(f.graph->get_output_pin("out"));
+    EXPECT_EQ(f.prune_and_prove(), 1) << code;
+    auto c0 = node.get_sink_pin(0).get_driver_pin();
+    ASSERT_TRUE(c0.is_const()) << code;
+    EXPECT_TRUE(gu::const_of(c0).is_known_zero()) << code;
+    EXPECT_EQ(gu::has_proven(node), code >= 0) << code;
+    if (code >= 0) {
+      EXPECT_EQ(gu::proven_of(node), static_cast<uint32_t>(code)) << code;
+    }
+    EXPECT_TRUE(ctx::exclusive(node)) << code;
+  }
+}
+
+// P5, all controls pruned: on the e3==false && e5==false path both controls
+// of H become zero. A Hotmux with no live control is trivially exclusive
+// (only its default is active), so exclusive() says so on the structure and
+// prune stamps no proven code -- the stamp used to re-key H in the next CSE.
+TEST(CpropMuxContext, PruneAllControlsKeepsHotmuxUnstamped) {
+  Fixture f;
+  auto    e3 = f.eq(f.x, 3), e5 = f.eq(f.x, 5);
+  auto    inner = f.hot(e3, f.a, e5, f.b, f.x);
+  auto    node  = inner.get_master_node();
+  auto    root  = f.mux(e3, f.mux(e5, inner, f.b), f.b);
+  root.connect_sink(f.graph->get_output_pin("out"));
+  EXPECT_EQ(f.prune_and_prove(), 2);
+  for (int pid : {0, 2}) {
+    auto c = node.get_sink_pin(pid).get_driver_pin();
+    ASSERT_TRUE(c.is_const()) << pid;
+    EXPECT_TRUE(gu::const_of(c).is_known_zero()) << pid;
+  }
+  EXPECT_FALSE(gu::has_proven(node));
+  EXPECT_TRUE(ctx::exclusive(node));
+}
+
+// P5 CSE-key consequence: the Hotmux CSE key carries has_proven/proven_of, and
+// cse_pass runs BEFORE muxctx::prune inside one do_trans, so the NEXT compile
+// cprop slot is the first to key a pruned Hotmux. Prune no longer stamps a
+// code, so the pruned shape (a known-zero control) must stay CSE-eligible on
+// its structure alone, and its key must still keep provenance apart: twins
+// with the same code merge, a none/unchecked pair does not.
+TEST(CpropHotmuxCse, PrunedShapeKeepsStructuralKeyAndProvenance) {
+  for (int variant = 0; variant < 3; ++variant) {
+    Fixture f;
+    auto    e5   = f.eq(f.x, 5);
+    auto    zero = f.c(0);  // one zero pin, as prune() shares it
+    auto    h1   = f.hot(zero, f.a, e5, f.b, f.x);
+    auto    h2   = f.hot(zero, f.a, e5, f.b, f.x);
+    if (variant >= 1) {
+      gu::set_proven(h2.get_master_node(), gu::kFormalAssumeUnchecked);
+    }
+    if (variant == 2) {
+      gu::set_proven(h1.get_master_node(), gu::kFormalAssumeUnchecked);
+    }
+    EXPECT_TRUE(ctx::exclusive(h1.get_master_node())) << variant;
+    h1.connect_sink(f.graph->get_output_pin("out"));
+    auto sink = f.graph->get_output_pin("observe");
+    sink.get_driver_pin().del_sink(sink);
+    h2.connect_sink(sink);
+    Cprop{}.do_trans(f.graph);
+    const auto out     = f.graph->get_output_pin("out").get_driver_pin();
+    const auto observe = sink.get_driver_pin();
+    EXPECT_EQ(out == observe, variant != 1) << variant;
+    for (auto pin : {out, observe}) {
+      auto n = pin.get_master_node();
+      ASSERT_EQ(gu::type_op_of(n), Ntype_op::Hotmux) << variant;
+      const bool unchecked = variant == 2 || (variant == 1 && pin == observe);
+      EXPECT_EQ(gu::has_proven(n), unchecked) << variant;
+      if (unchecked) {
+        EXPECT_EQ(gu::proven_of(n), gu::kFormalAssumeUnchecked) << variant;
+      }
+    }
+  }
+}
 }  // namespace

@@ -3,7 +3,7 @@
 :type: simulation
 */
 // todo/livehd/3d-sim-color: a conditional stateful call whose merged output
-// feeds an ALWAYS-ACTIVE accumulator. conditional_state_call.prp pins hold-
+// feeds an ALWAYS-ACTIVE accumulator. conditional_call_lane.prp pins hold-
 // and-mask on the region's own output; this fixture adds the shape that
 // stresses subtask G's condition tasks: a consumer OUTSIDE the region reads
 // the caller-side merge every cycle, including cycles where the region is

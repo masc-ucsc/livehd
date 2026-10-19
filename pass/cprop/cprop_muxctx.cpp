@@ -56,14 +56,24 @@ bool exclusive(const Node& node) {
     }
     pins.push_back(sink.get_driver_pin());
   }
+  bool any_live = false;
   for (size_t i = 0; i + 1 < pins.size(); i += 2) {
+    // A known-zero control is never active, so it cannot overlap any other.
+    // Path pruning below zeroes controls; skipping them here keeps a pruned
+    // Hotmux structurally exclusive without stamping a proven code on it.
+    if (pins[i].is_const() && gu::const_of(pins[i]).is_known_zero()) {
+      continue;
+    }
+    any_live     = true;
     const auto d = equality(pins[i]);
     if (!d || (!selector.is_invalid() && selector != d->value) || !constants.insert(d->constant).second) {
       return false;
     }
     selector = d->value;
   }
-  return !selector.is_invalid();
+  // No live control (every one known zero): only the default is active, which
+  // is trivially at most one -- the same answer a kFormalOnehot stamp gives.
+  return !any_live || !selector.is_invalid();
 }
 
 std::optional<bool> Path_facts::compare(Pin value, int64_t constant) const {
@@ -247,8 +257,15 @@ size_t prune(hhds::Graph& graph, const Decode& decode, const Boolean& boolean) {
         if (auto truth = visit.facts.truth(c.pins[i], decode); truth && !*truth) {
           // Removing an activation preserves global exclusivity; asserting one
           // only under a path would invalidate the global proof outside it.
-          gu::set_proven(c.node, gu::kFormalOnehot);
+          // P5 (todo/livehd/2a-aegraph.html): no proven code is stamped. A
+          // candidate was exclusive() before, and zeroing a control keeps it
+          // so structurally (a subset of one selector's distinct constants,
+          // or no live control at all). A stamp would overwrite an existing
+          // code (kFormalAssumeUnchecked must stay disclosed as unchecked) or
+          // re-key the Hotmux in the next CSE (the key carries has_proven/
+          // proven_of, and cse_pass runs before this prune).
           replace(c.node.get_sink_pin(i), zero);
+          I(exclusive(c.node));
         }
         auto facts = visit.facts;
         facts.assume(c.pins[i], true, decode);

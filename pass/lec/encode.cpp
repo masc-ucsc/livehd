@@ -3,12 +3,12 @@
 #include "encode.hpp"
 
 #include <algorithm>
+#include <tuple>
 #include <cctype>
 #include <concepts>
 #include <cstdint>
 #include <format>
 #include <memory>
-#include <mutex>
 #include <optional>
 #include <string>
 #include <type_traits>
@@ -23,7 +23,6 @@
 
 #include "hhds/source_locator.hpp"
 #include "hlop/dlop.hpp"
-#include "hlop/readmem.hpp"
 #include "latch_contract.hpp"  // Design_clocks::name_looks_like_clock (the ICG clock-operand disambiguator)
 #include "node_util.hpp"
 #include "property_types.hpp"  // is_assume_kind -- shared with the asserter, without its query engine
@@ -1171,94 +1170,6 @@ std::string mem_state_key(const Mem_sig& sig, std::string_view name) {
   return std::format("\x01m:{}x{}:n:{}", sig.size, sig.bits, name);
 }
 
-namespace {
-// Whole $readmem files, cached by (path, radix, bits, size): BMC re-encodes a
-// design once per cycle, and a hierarchy proves many defs.
-struct Image_load {
-  std::vector<hlop::Memory_image_word> words;
-  std::string                          error;
-};
-const Image_load& load_memory_image(const hlop::Memory_image& image, const Mem_sig& sig) {
-  static std::mutex                                          mu;
-  static absl::flat_hash_map<std::string, std::unique_ptr<Image_load>> cache;
-  const std::string key = std::format("{}\x1f{}\x1f{}\x1f{}", image.path, image.radix, sig.bits, sig.size);
-  std::lock_guard   lock(mu);
-  auto&             slot = cache[key];
-  if (!slot) {
-    slot = std::make_unique<Image_load>();
-    try {
-      slot->words = hlop::read_memory_image(image.path, image.radix, sig.bits, static_cast<std::size_t>(sig.size));
-    } catch (const std::exception& e) {
-      slot->error = e.what();
-    }
-  }
-  return *slot;
-}
-}  // namespace
-
-Mem_power_on memory_power_on(const hhds::Occurrence_node& node, const Mem_sig& sig) {
-  Mem_power_on out;
-  if (sig.bits <= 0 || sig.size <= 0) {
-    return out;
-  }
-  auto init = gu::get_driver_of_sink_name(node, "initial");
-  if (init.is_invalid() || !init.is_const()) {
-    return out;
-  }
-  const auto bits = static_cast<size_t>(sig.bits);
-  if (auto image = gu::memory_image_of(node)) {
-    out.kind   = Mem_power_on::Kind::image;
-    out.source = std::string(image->radix == 16 ? "$readmemh(" : "$readmemb(") + image->path + ")";
-    auto type  = gu::get_driver_of_sink_name(node, "type");
-    if (type.is_const() && gu::const_of(type).to_just_i64() == 2) {
-      out.error = "a combinational array has no power-on contents to load";
-    } else if (!gu::get_driver_of_sink_name(node, "reset").is_invalid()) {
-      out.error = "the memory also has a reset arm, which the image does not define";
-    } else if (!gu::get_driver_of_sink_name(node, "update").is_invalid()) {
-      out.error = "the memory is written by a whole-array update";
-    } else {
-      const auto& load = load_memory_image(*image, sig);
-      if (!load.error.empty()) {
-        out.error = load.error;
-      } else {
-        out.entries.assign(static_cast<size_t>(sig.size), std::string{});
-        for (const auto& w : load.words) {
-          std::string bin = w.binary;
-          for (auto& ch : bin) {
-            if (ch != '0' && ch != '1') {
-              ch = '0';
-            }
-          }
-          out.entries[w.address] = std::move(bin);  // a later word for the same address wins, like $readmem
-        }
-      }
-    }
-    return out;
-  }
-  out.kind          = Mem_power_on::Kind::constant;
-  const auto  width = bits * static_cast<size_t>(sig.size);
-  std::string bin   = gu::const_of(init).to_binary();
-  for (auto& ch : bin) {
-    if (ch != '0' && ch != '1') {
-      ch = '0';
-    }
-  }
-  if (bin.size() < width) {
-    bin.insert(bin.begin(), width - bin.size(), '0');
-  } else if (bin.size() > width) {
-    bin.erase(0, bin.size() - width);
-  }
-  out.entries.resize(static_cast<size_t>(sig.size));
-  for (size_t i = 0; i < out.entries.size(); ++i) {
-    out.entries[i] = bin.substr(width - (i + 1) * bits, bits);  // entry 0 in the low bits
-  }
-  return out;
-}
-
-bool same_power_on(const Mem_power_on& a, const Mem_power_on& b) {
-  return a.has_contents() == b.has_contents() && (!a.has_contents() || a.entries == b.entries);
-}
-
 // Memory knowledge state (see encode.hpp).
 namespace {
 cvc5::Term mem_x_index(cvc5::TermManager& tm, const cvc5::Term& epoch, const cvc5::Term& addr) {
@@ -1406,6 +1317,119 @@ static Encoded::Cone_stats cone_of(const hhds::Occurrence_pin& start, std::vecto
     }
   }
   return cs;
+}
+
+// 128-bit FNV-1a, two lanes; stable across runs and builds.
+static std::string digest128(std::string_view data) {
+  uint64_t a = 0xcbf29ce484222325ULL, b = 0x84222325cbf29ce4ULL;
+  for (unsigned char c : data) {
+    a = (a ^ c) * 0x100000001b3ULL;
+    b = (b ^ (c + 0x9e)) * 0x100000001b3ULL;
+  }
+  return std::format("{:016x}{:016x}", a, b);
+}
+
+// Structural digest of the cone behind `starts`: Weisfeiler-Lehman refinement
+// over the occurrence graph. A node's label is its op plus, per input port,
+// the labels of its drivers; graph inputs keep their port name and constants
+// their value. Internal names never enter, so a rename keeps the digest, and
+// any change to logic, constants, widths or wiring inside the cone moves it.
+std::string cone_digest_over(const std::vector<hhds::Occurrence_pin>& starts) {
+  std::vector<hhds::Occurrence_node>    nodes;
+  absl::flat_hash_map<std::string, int> index;
+  std::vector<hhds::Occurrence_pin>     work(starts.begin(), starts.end());
+  auto pin_token = [](const hhds::Occurrence_pin& pin) -> std::string {
+    if (gu::is_graph_input_pin(pin)) {
+      return std::format("in:{}:{}", pin.get_pin_name(), gu::bits_of(pin));
+    }
+    if (pin.is_const()) {
+      return std::format("k:{}:{}", gu::const_of(pin).to_verilog(), gu::bits_of(pin));
+    }
+    return {};
+  };
+  while (!work.empty()) {
+    auto pin = work.back();
+    work.pop_back();
+    if (pin.is_invalid() || !pin_token(pin).empty()) {
+      continue;
+    }
+    auto node = pin.get_master_node();
+    if (node.is_invalid()) {
+      continue;
+    }
+    if (!index.emplace(box_node_key(node), static_cast<int>(nodes.size())).second) {
+      continue;
+    }
+    nodes.push_back(node);
+    for (const auto& sink : node.inp_sorted_pins()) {
+      for (const auto& drv : sink.get_driver_pins()) {
+        work.push_back(drv);
+      }
+    }
+  }
+  // Per node, per input port: (port, [driver token or node index + driver port + width]).
+  struct In {
+    int                                              port;
+    std::vector<std::tuple<std::string, int, int, int>> drv;  // token, node idx (-1), drv port, bits
+  };
+  std::vector<std::vector<In>> ins(nodes.size());
+  std::vector<std::string>     lab(nodes.size());
+  for (size_t i = 0; i < nodes.size(); ++i) {
+    for (const auto& sink : nodes[i].inp_sorted_pins()) {
+      In in{static_cast<int>(sink.get_port_id()), {}};
+      for (const auto& drv : sink.get_driver_pins()) {
+        std::string tok = pin_token(drv);
+        int         j   = -1;
+        if (tok.empty() && !drv.is_invalid() && !drv.get_master_node().is_invalid()) {
+          j = index.at(box_node_key(drv.get_master_node()));
+        }
+        in.drv.emplace_back(std::move(tok), j, static_cast<int>(drv.get_port_id()), gu::bits_of(drv));
+      }
+      ins[i].push_back(std::move(in));
+    }
+    lab[i] = digest128(std::format("op:{}", static_cast<int>(gu::type_op_of(nodes[i]))));
+  }
+  const std::vector<std::string> base = lab;
+  size_t                         prev = 0;
+  for (int round = 0; round < 64; ++round) {
+    std::vector<std::string> next(nodes.size());
+    for (size_t i = 0; i < nodes.size(); ++i) {
+      std::string s = base[i];
+      for (const auto& in : ins[i]) {
+        s += std::format("|p{}", in.port);
+        for (const auto& [tok, j, dport, bits] : in.drv) {
+          s += j < 0 ? std::format(",{}", tok) : std::format(",n{}.{}:{}", lab[static_cast<size_t>(j)], dport, bits);
+        }
+      }
+      next[i] = digest128(s);
+    }
+    lab = std::move(next);
+    absl::flat_hash_set<std::string> distinct(lab.begin(), lab.end());
+    if (distinct.size() == prev) {
+      break;
+    }
+    prev = distinct.size();
+  }
+  std::vector<std::string> roots;
+  for (const auto& start : starts) {
+    std::string root = pin_token(start);
+    if (root.empty() && !start.is_invalid() && !start.get_master_node().is_invalid()) {
+      root = std::format("{}.{}", lab[static_cast<size_t>(index.at(box_node_key(start.get_master_node())))],
+                         static_cast<int>(start.get_port_id()));
+    }
+    roots.push_back(std::move(root));
+  }
+  std::sort(roots.begin(), roots.end());
+  std::vector<std::string> sorted = lab;
+  std::sort(sorted.begin(), sorted.end());
+  std::string all = "root:";
+  for (const auto& r : roots) {
+    all += r + ";";
+  }
+  for (const auto& l : sorted) {
+    all += "," + l;
+  }
+  return digest128(all);
 }
 
 Encoded::Cone_stats cone_over(const std::vector<hhds::Occurrence_pin>& seeds) {
@@ -1994,12 +2018,9 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
     // clock exactly like a flop on that clock.
     Memory_clocks                     clocks;
     std::vector<size_t>               rd_pid;  // per read port (rd_fresh order): its cell port index
-    // `$readmem` image contents per entry ("" = not loaded); empty when the
-    // memory has no readable image.
-    std::vector<std::string>          image;
     // Per read port (rd_fresh order): the free value an UNDEFINED read returns
     // on the implementation side (set_undef_read_free); null = none.
-    std::vector<Term>                 rd_xfree;
+    std::vector<Term>                      rd_xfree;
     // formal.ignore_memory: the user EXCLUDED this memory from the comparison.
     // It is blackboxed -- every read dout becomes ONE SHARED free symbol per
     // (memory, port, cycle) across ref and impl, and no next-state array is
@@ -2148,12 +2169,11 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
           mc.reset = driver;
         } else if (pn == "initial") {
           if (!gu::memory_image_of(mc.node)) {
-            mc.init = driver;
+            mc.init = driver;  // file preload is symbolic external state
           }
-          // A `$readmem` image: its contents (memory_power_on) pin a ROM below;
-          // a writable memory's power-on contents are state[0], which the
-          // caller seeds (query.cpp). An image that cannot be read leaves the
-          // contents free here; the LEC queries refuse it before encoding.
+          // File-loaded storage stays symbolic, including memories without
+          // an RTL writer. Image contents are a simulation dependency, not a
+          // specialization of the native formal proof.
         } else if (pn == "type") {
           if (driver.is_const()) {
             mtype = static_cast<int>(gu::const_of(driver).to_just_i64());
@@ -2204,12 +2224,12 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
     // would be a vacuous proof when the two inits differ; per-design + compared
     // outputs makes equal inits PROVE and differing inits REFUTE.
     Sort asort = tm_.mkArraySort(bv(mc.sig.addr_w), bv(mc.sig.bits));
-    if (gu::memory_image_of(node)) {
-      if (auto po = memory_power_on(node, mc.sig); po.has_contents()) {
-        mc.image = std::move(po.entries);
-      }
-    }
-    mc.is_rom = (!mc.is_comb && !mc.is_whole && mc.sig.n_wr == 0 && (!mc.init.is_invalid() || !mc.image.empty()));
+    // A `$readmem` image is EXTERNALLY LOADABLE state, not a constant: its
+    // memory never takes the image's contents (mc.init stays unset), so it is
+    // no ROM and starts from the shared array like any uninitialized memory.
+    // Two designs loading different files are therefore equal, and an image
+    // is never folded to its contents (lhd/tests/readmem_smoke.sh).
+    mc.is_rom = (!mc.is_comb && !mc.is_whole && mc.sig.n_wr == 0 && !mc.init.is_invalid());
     if (shared_mems != nullptr && !mc.is_rom) {
       if (auto it = shared_mems->find(mc.key); it != shared_mems->end()) {
         mc.a_cur        = it->second;
@@ -4250,6 +4270,12 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
         std::vector<std::string> reached;
         out.prop_cone[occ]        = cone_of(cond_drv, reached);
         out.prop_cone_inputs[occ] = std::move(reached);
+        const auto mk = std::to_string(reinterpret_cast<uintptr_t>(g)) + ":" + std::to_string(occ);
+        auto [dit, fresh] = digest_memo_.try_emplace(mk);
+        if (fresh) {
+          dit->second = cone_digest_over({cond_drv});
+        }
+        out.prop_cone_digest[occ] = dit->second;
       }
       // Which assumes are ACTIVE hypotheses (see Encoded::prop_active_assume).
       // Record the decision by occ so the design-assumption asserter never has to
@@ -5578,18 +5604,6 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
         return fail("memory '" + gu::debug_name(mc.node) + "' init contents not encodable");
       }
       a_next = array_from_bus(mc.a_cur, fit_unsigned(iv, mc.sig.size * mc.sig.bits));
-    } else if (mc.is_rom && !mc.image.empty()) {
-      // A `$readmem` ROM: pin each entry the image loads, exactly like the
-      // comptime-init ROM below. An entry the file leaves out stays free per
-      // design (power-on hardware state: a read of it cannot prove).
-      for (size_t i = 0; i < mc.image.size(); ++i) {
-        if (mc.image[i].empty()) {
-          continue;
-        }
-        const Term at = bv_const(tm_, mc.sig.addr_w, static_cast<uint64_t>(i));
-        out.equalities.emplace_back(tm_.mkTerm(Kind::SELECT, {mc.a_cur, at}),
-                                    tm_.mkBitVector(static_cast<uint32_t>(mc.sig.bits), mc.image[i], 2));
-      }
     } else if (mc.is_rom) {
       // no-write PERSISTENT ROM (type==0/1): pin the per-design a_cur to the
       // comptime init constant so committed reads (rd_src == a_cur) return init.

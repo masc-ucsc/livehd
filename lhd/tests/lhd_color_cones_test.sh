@@ -64,6 +64,13 @@ for entry in "${DESIGNS[@]}"; do
   info_has() { LC_ALL=C grep -raq -- "$1" "$D/lg"; }
   info_has '"forward":"all"' || fail "$FIX: default forward mode was not all"
   info_has '"mode":"cones"' || fail "$FIX: coloring_info does not record mode=cones"
+  info_has '"memory_color_first":false' || fail "$FIX: memory-first must remain opt-in"
+  cp -R "$D/lg0" "$D/lg_memory_first"
+  run pass color synth --set color.synth.min_color_nodes=0 --top "$TOP" \
+       --set color.synth.max_gate=40 --set color.synth.memory_color_first=true \
+       lg:"$D/lg_memory_first" --workdir "$D/w_memory_first"
+  LC_ALL=C grep -raq '"memory_color_first":true' "$D/lg_memory_first" \
+    || fail "$FIX: memory-first CLI option was not recorded"
   info_has '"max_gate":40' || fail "$FIX: coloring_info does not record max_gate"
   # A cones color is first-wins, so an earlier owner can split a later cone into
   # disjoint clouds. Without "packed" pass.partition emits one

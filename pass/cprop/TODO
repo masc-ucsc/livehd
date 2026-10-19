@@ -74,14 +74,14 @@ to
  (a+c<<(m-n))<<n | 0
 
 convert
- a*(power2a+power2b)  // power2a>power2b
+ a*(2^p+2^q)  // p>q
 to
- (a+a<<power2b)>>(power2a-power2b)
+ ((a<<(p-q)) + a)<<q
 
 convert
- a*(power2a-power2b)  // power2a>power2b
+ a*(2^p-2^q)  // p>q
 to
- (a-a<<power2b)>>(power2a-power2b)
+ ((a<<(p-q)) - a)<<q
 
 convert
  a - a + c
