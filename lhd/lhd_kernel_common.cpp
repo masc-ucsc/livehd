@@ -1762,7 +1762,7 @@ void write_unit_meta(std::ofstream& ofs, const Lnast& ln) {
   // Deferred templates are still source bodies. Their generic signature and
   // template flag must survive independently of the tree, just as they do in
   // the compile cache; otherwise reload lowers an unspecialized body as hardware.
-  ofs << ",\"template\":" << (ln.is_template() ? "true" : "false")
+  ofs << ",\"template\":" << (ln.is_template() ? "true" : "false") << ",\"blackbox\":" << (ln.is_blackbox() ? "true" : "false")
       << ",\"skip_timecheck\":" << (ln.get_skip_timecheck() ? "true" : "false") << ",\"lg_name\":\""
       << json_escape_min(ln.get_lg_name()) << "\"";
   const auto write_strings = [&](std::string_view key, const std::vector<std::string>& values) {
@@ -2008,6 +2008,9 @@ void save_ln_dir(Options& opts, Result& res, const std::vector<std::shared_ptr<L
 void restore_unit_meta(const rapidjson::Value& u, Lnast& ln) {
   if (u.HasMember("template") && u["template"].IsBool()) {
     ln.set_template(u["template"].GetBool());
+  }
+  if (u.HasMember("blackbox") && u["blackbox"].IsBool()) {
+    ln.set_blackbox(u["blackbox"].GetBool());
   }
   if (u.HasMember("skip_timecheck") && u["skip_timecheck"].IsBool()) {
     ln.set_skip_timecheck(u["skip_timecheck"].GetBool());

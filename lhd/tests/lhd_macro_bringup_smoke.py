@@ -83,4 +83,30 @@ diag = lhd('open_bad', ['compile', str(open_in), '--top', 'open_in', '--set', 'c
                         '--workdir', str(root / 'openWbad')], success=False)
 assert 'bad-unconnected-input' in diag, diag
 
+# ---- compile.slang.blackbox_attribute ----------------------------------------------------------------
+stub = root / 'stub.v'
+stub.write_text('''(* blackbox *)
+module hardmac(input clk, input [3:0] a, output [3:0] y, output uclk);
+endmodule
+module top(input clk, input [3:0] d, output reg [3:0] q, output [3:0] y);
+  wire uclk;
+  hardmac m(.clk(clk), .a(d), .y(y), .uclk(uclk));
+  always @(posedge uclk) q <= d;
+endmodule
+''')
+base = ['compile', str(stub), '--top', 'top']
+lhd('stub_default', [*base, '--workdir', str(root / 'stubW0'), '--emit-dir', f'verilog:{root}/stub-default'])
+assert 'module hardmac' in verilog('stub-default'), verilog('stub-default')  # lowered as written: an empty body
+lhd('stub_opt_in', [*base, '--set', 'compile.slang.blackbox_attribute=true', '--workdir', str(root / 'stubW1'),
+                    '--emit-dir', f'verilog:{root}/stub-opt'])
+net = verilog('stub-opt')
+assert 'module hardmac' not in net and 'hardmac m(' in net and '.uclk(' in net, net  # an opaque instance, no body
+# The flag survives an ln: directory, so a later compile of the saved units keeps the instance opaque.
+lhd('stub_ln', [*base, '--set', 'compile.slang.blackbox_attribute=true', '--workdir', str(root / 'stubW2'),
+                '--emit-dir', f'ln:{root}/stub-ln'])
+lhd('stub_from_ln', ['compile', f'ln:{root}/stub-ln', '--top', 'top', '--workdir', str(root / 'stubW3'),
+                     '--emit-dir', f'verilog:{root}/stub-from-ln'])
+net = verilog('stub-from-ln')
+assert 'module hardmac' not in net and 'hardmac m(' in net, net
+
 print('Macro and vendor-stub bring-up behaviors pass')

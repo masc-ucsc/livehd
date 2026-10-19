@@ -130,6 +130,8 @@ void Inou_slang::setup() {
                         "name) as a typed, opaque cell instance");
   m1.add_label_optional("unconnected_input",
                         "zero|one to read an unconnected instance input as that constant instead of the unknown 'x (default: x)");
+  m1.add_label_optional("blackbox_attribute",
+                        "true to treat a module marked (* blackbox *) as an interface only: ports declared, no body, instances stay opaque");
 
   register_pass(m1);
 
@@ -172,6 +174,8 @@ void Inou_slang::setup() {
                         "name) as a typed, opaque cell instance");
   m2.add_label_optional("unconnected_input",
                         "zero|one to read an unconnected instance input as that constant instead of the unknown 'x (default: x)");
+  m2.add_label_optional("blackbox_attribute",
+                        "true to treat a module marked (* blackbox *) as an interface only: ports declared, no body, instances stay opaque");
 
   m2.add_label_optional("liberty", "Selected Liberty: typed, opaque memory-cell interfaces", "");
   register_pass(m2);
@@ -324,6 +328,7 @@ void Inou_slang::work(Eprp_var& var) {
   opts.liberty_macro_precedence      = flag_true("liberty_macro_precedence");
   opts.liberty_allow_truncation      = flag_true("liberty_allow_truncation");
   opts.liberty_cells                 = flag_true("liberty_cells");
+  opts.blackbox_attribute            = flag_true("blackbox_attribute");
   if (var.has_label("unconnected_input")) {
     const auto value = std::string(var.get("unconnected_input"));
     if (value == "zero") {

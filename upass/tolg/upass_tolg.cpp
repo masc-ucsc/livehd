@@ -15573,6 +15573,16 @@ std::shared_ptr<hhds::Graph> uPass_tolg::run(const std::shared_ptr<Lnast>& lnast
   }
 
   auto io_setup = setup_io_impl(lnast, lib_path, registry);
+  if (lnast->is_blackbox()) {
+    // A `(* blackbox *)` module is its interface only: the GraphIO just declared stays body-less, so
+    // every instance remains an opaque Sub (a hard macro or vendor primitive), never an empty module
+    // whose outputs read as unknown. A body left by an earlier build of this module is dropped.
+    auto& decl_lib = livehd::Hhds_graph_library::instance(lib_path);
+    if (auto stale = decl_lib.find_io(std::string(lnast->get_graph_name())); stale && stale->has_graph()) {
+      decl_lib.delete_graph(stale->get_gid());
+    }
+    return nullptr;
+  }
   const_clock_memo().clear();  // a body lowered since the last unit may have replaced one it read
 
   auto& lib = livehd::Hhds_graph_library::instance(lib_path);

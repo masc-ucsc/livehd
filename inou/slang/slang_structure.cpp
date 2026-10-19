@@ -2158,6 +2158,22 @@ bool Slang_context::lower_module(const slang::ast::InstanceSymbol& symbol) {
   }
 
   emit_module_io(symbol, in_tup, out_tup);
+  // compile.slang.blackbox_attribute: a `(* blackbox *)` module (a hard macro or vendor primitive stub: Yosys'
+  // own convention for "this is the interface, the body lives elsewhere") is its ports only. Lowering its
+  // empty body would turn every output into an unknown constant; flag the unit so tolg declares the
+  // interface and builds no body.
+  for (const auto* attr : options_.blackbox_attribute ? body->getCompilation().getAttributes(body->getDefinition())
+                                                      : std::span<const slang::ast::AttributeSymbol* const>{}) {
+    if (attr->name == "blackbox") {
+      builder_.lnast->set_blackbox(true);
+      if (module_failed_) {
+        return false;
+      }
+      lowered_[body] = builder_.lnast;
+      ordered_lnasts_.push_back(builder_.lnast);
+      return true;
+    }
+  }
   prepare_plusargs(*body);
   // Every classification pre-scan runs BEFORE the first expression lowers:
   // is_scalar_struct_var memoizes over the port/reg sets and struct_use_.

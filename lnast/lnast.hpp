@@ -386,6 +386,7 @@ private:
   // signature is not fully typed; cleared on a specialized clone. tolg + the
   // no-LGraph gate read it. In-memory only (sibling to lambda_kind_).
   bool                                             template_        = false;
+  bool                                             blackbox_        = false;
   // Pre-elaborated import: a unit LOADED from an `ln:` directory as an import
   // (its io_meta/bw_meta were restored from the manifest, its body is already
   // the post-upass form). pass.upass SKIPS re-elaborating it (no SSA / runner /
@@ -744,6 +745,12 @@ public:
   //     specialized clone). True ⇒ no LGraph at definition time. ───────────
   bool is_template() const noexcept { return template_; }
   void set_template(bool t) noexcept { template_ = t; }
+
+  // ── interface-only unit: a Verilog `(* blackbox *)` module. tolg declares its
+  //     GraphIO (ports, widths) but builds no body, so an instance of it stays an
+  //     opaque Sub for the rest of the flow (a hard macro, a vendor primitive). ──
+  bool is_blackbox() const noexcept { return blackbox_; }
+  void set_blackbox(bool b) noexcept { blackbox_ = b; }
 
   // ── pre-elaborated import (loaded post-upass; skip re-elaboration) ─────────
   bool is_pre_elaborated() const noexcept { return pre_elaborated_; }

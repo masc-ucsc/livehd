@@ -464,6 +464,11 @@ public:
     // exactly like a RAM macro. `liberty_files` is the selected library list.
     bool                             liberty_cells = false;
     std::string                      liberty_files;
+    // Opt-in (compile.slang.blackbox_attribute): a module carrying the Yosys attribute `(* blackbox *)` is
+    // an interface only (a hard-macro or vendor-primitive stub whose body is the LEF/Liberty macro).
+    // Its ports are declared, no body is built and every instance stays an opaque Sub. Without it the
+    // module lowers as written: an empty body whose outputs read as unknown.
+    bool                             blackbox_attribute = false;
     // Opt-in (compile.slang.unconnected_input = zero|one): an input port left unconnected
     // on an instance reads that constant instead of the default unknown 'x. Verilog leaves
     // such a port floating (z, read as x); a synthesis tool is free to pick any value, and
