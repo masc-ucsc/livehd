@@ -39,6 +39,15 @@ def inputWidthOf (D : DesignCert) (i : Nat) : Nat :=
     | .input idx w => if idx == i then some w else none
     | _ => none).getD 1
 
+/-- `inputWidthOf D i` for every `i < n`, in ONE pass over the sources (the
+first source declaring an input wins, as in `findSome?`; 1 when none does).
+Mapping `inputWidthOf` over the inputs walked every source once per input. -/
+def inputWidths (D : DesignCert) (n : Nat) : List Nat :=
+  let t := D.sources.foldl (fun (t : Array (Option Nat)) s => match s with
+    | .input idx w => if h : idx < t.size then (if t[idx].isNone then t.set idx (some w) else t) else t
+    | _ => t) (Array.replicate n none)
+  (List.range n).map fun i => (t[i]?.bind id).getD 1
+
 def inputCount (D : DesignCert) : Nat :=
   D.sources.foldl (fun m s => match s with
     | .input idx _ => max m (idx + 1)
@@ -272,7 +281,7 @@ def main (args : List String) : IO UInt32 := do
       let pre := if single then "" else s!"[k={kd}] "
       let sp : RefSpec :=
         { pairs, adv, inMap, asmOut, asmIn, k := kd, fuelI := bI + 16, fuelS := bS + 16
-        , inW := (List.range (inputCount DI)).map (inputWidthOf DI), LI := shapeOf DI, LS := shapeOf DS
+        , inW := inputWidths DI (inputCount DI), LI := shapeOf DI, LS := shapeOf DS
         , stateEq := rest.contains "stateq" }
       unless refSideOK sy sp do
         say s!"  {pre}RESULT: REFUSED (side checks)"; return 4
