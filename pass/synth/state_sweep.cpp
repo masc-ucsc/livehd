@@ -548,13 +548,10 @@ private:
         return;
       }
       case Ntype_op::SHL: {
+        // Only a constant left shift is followed: result bit i is operand bit i - amount.
         const auto amount = const_i64(gu::get_driver_of_sink_name(node, "b"));
-        const auto a      = gu::get_driver_of_sink_name(node, "a");
         if (amount && *amount >= 0 && top != std::numeric_limits<int64_t>::max()) {
-          add_demand(def, a, m.window(*amount, top + 1));
-        } else if (top != std::numeric_limits<int64_t>::max()) {
-          add_demand(def, a, Mask::prefix(top + 1));  // a left shift only moves bits up
-          add_all(def, gu::get_driver_of_sink_name(node, "b"));
+          add_demand(def, gu::get_driver_of_sink_name(node, "a"), m.window(*amount, top + 1));
         } else {
           demand_all_inputs(def, node);
         }
