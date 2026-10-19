@@ -613,6 +613,15 @@ private:
     return c.to_just_i64();
   }
 
+  // A constant a Mask is built from (a slice bound, a shift distance, a bit count). The sets are dense bitmaps: a value past this
+  // is read as "anything" (every operand bit demanded) instead of allocating a bitmap that wide.
+  static constexpr int64_t kMaxMaskOperand = int64_t{1} << 24;
+
+  static std::optional<int64_t> mask_operand(const hhds::Pin_class& pin) {
+    const auto value = const_i64(pin);
+    return value && *value <= kMaxMaskOperand ? value : std::nullopt;
+  }
+
   void propagate(Def& def, const hhds::Node_class& node) {
     const auto op = gu::type_op_of(node);
     if (op == Ntype_op::Sub) {
@@ -667,8 +676,8 @@ private:
         return;
       }
       case Ntype_op::Get_mask: {
-        const auto lo = const_i64(gu::get_driver_of_sink_name(node, "lo"));
-        const auto hi = const_i64(gu::get_driver_of_sink_name(node, "hi"));
+        const auto lo = mask_operand(gu::get_driver_of_sink_name(node, "lo"));
+        const auto hi = mask_operand(gu::get_driver_of_sink_name(node, "hi"));
         const auto a  = gu::get_driver_of_sink_name(node, "a");
         if (!lo || !hi || *lo < 0 || *hi <= *lo) {
           demand_all_inputs(def, node);
@@ -682,8 +691,8 @@ private:
         return;
       }
       case Ntype_op::Set_mask: {
-        const auto lo = const_i64(gu::get_driver_of_sink_name(node, "lo"));
-        const auto hi = const_i64(gu::get_driver_of_sink_name(node, "hi"));
+        const auto lo = mask_operand(gu::get_driver_of_sink_name(node, "lo"));
+        const auto hi = mask_operand(gu::get_driver_of_sink_name(node, "hi"));
         if (!lo || !hi || *lo < 0 || *hi <= *lo) {
           demand_all_inputs(def, node);
           return;
@@ -720,7 +729,7 @@ private:
       }
       case Ntype_op::Sext: {
         // Sext(a, b) keeps a's low b bits and repeats bit b-1 above them.
-        const auto keep = const_i64(gu::get_driver_of_sink_name(node, "b"));
+        const auto keep = mask_operand(gu::get_driver_of_sink_name(node, "b"));
         if (!keep || *keep < 1) {
           demand_all_inputs(def, node);
           return;
@@ -735,7 +744,7 @@ private:
       }
       case Ntype_op::SRA: {
         // Result bit i is operand bit i + amount (the sign above the operand), for a constant amount.
-        const auto amount = const_i64(gu::get_driver_of_sink_name(node, "b"));
+        const auto amount = mask_operand(gu::get_driver_of_sink_name(node, "b"));
         if (amount && *amount >= 0 && top != std::numeric_limits<int64_t>::max()) {
           add_demand(def, gu::get_driver_of_sink_name(node, "a"), m.clipped(top + 1).shifted_up(*amount));
           add_all(def, gu::get_driver_of_sink_name(node, "b"));
@@ -747,7 +756,7 @@ private:
       case Ntype_op::Rxor:
       case Ntype_op::Popcount: {
         // Only the low b bits of a take part.
-        const auto count = const_i64(gu::get_driver_of_sink_name(node, "b"));
+        const auto count = mask_operand(gu::get_driver_of_sink_name(node, "b"));
         if (count && *count >= 0) {
           add_demand(def, gu::get_driver_of_sink_name(node, "a"), Mask::prefix(*count));
           add_all(def, gu::get_driver_of_sink_name(node, "b"));

@@ -400,6 +400,24 @@ TEST(StateSweep, ConstantArithmeticShiftsMoveTheDemandUp) {
   EXPECT_EQ(names, expected);
 }
 
+TEST(StateSweep, AHugeConstantOperandDemandsEveryBitInsteadOfAllocatingABitmap) {
+  hhds::GraphLibrary library;
+  auto               m   = make_module(library, "top", 32, 8);
+  auto&              g   = *m.graph;
+  auto               reg = make_reg(g, g.get_input_pin("d"), g.get_input_pin("clk"), 32, "word");
+  auto               sra = gu::create_typed_node(g, Ntype_op::SRA);
+  reg.create_driver_pin(0).connect_sink(gu::setup_sink_by_name(sra, "a"));
+  gu::create_const(g, *Dlop::create_integer(int64_t{1} << 40)).connect_sink(gu::setup_sink_by_name(sra, "b"));
+  gu::set_ubits(sra.create_driver_pin(0), 8);
+  sra.create_driver_pin(0).connect_sink(g.get_output_pin("o"));
+
+  const auto stats = sweep({m.graph}, "top");
+  ASSERT_TRUE(stats);
+  EXPECT_EQ(stats->registers_removed + stats->registers_trimmed + stats->registers_split, 0U);  // not followed: all 32 bits stay
+  ASSERT_EQ(nodes_of(g, Ntype_op::Flop).size(), 1U);
+  EXPECT_EQ(gu::bits_of(nodes_of(g, Ntype_op::Flop)[0].create_driver_pin(0)), 32);
+}
+
 TEST(StateSweep, ARegisterThatOnlyEverLoadsItsResetConstantIsThatConstant) {
   hhds::GraphLibrary library;
   auto               m   = make_module(library, "top", 8, 8);
