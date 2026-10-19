@@ -183,6 +183,7 @@ first — one `--set` cannot say two things.
 | `:lec_expect: proven\|refuted` | variant | what the run must report (default `proven`) |
 | `:lec_grep: REGEX` | both | must appear in the `lhd lec` output (repeatable) |
 | `:lec_grep_not: REGEX` | both | must NOT appear (repeatable) |
+| `:compile_grep: REGEX` | both | must appear in the IMPL side's own `lhd compile` output, per-pass logs included (repeatable): a claim about how the variant COMPILED (e.g. that an aegraph rule fired: `aegraph-rule not_not .*extracted=[1-9]`), not how it was proven. It forces the per-side pre-compile and adds `lhd.stats=true` to the impl compile so the pass census exists |
 
 `:lec_grep:` is what keeps a fixture honest about HOW it was proven: `loop_roll_mixed_1`
 would still say PROVEN if the compact-vs-unrolled normalization stopped working

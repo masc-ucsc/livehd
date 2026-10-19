@@ -2070,6 +2070,10 @@ void graph_pipeline_and_emits(Options& opts, Result& res, Eprp_var& var, const s
         // no label, so its recipe is unchanged).
         labels["engine"] = "classic";
       }
+      if (opts.stats && (method == "pass.cprop" || method == "pass.aegraph")) {
+        // lhd.stats: both engines emit their per-graph cprop-summary diagnostic.
+        labels["stats"] = "true";
+      }
       if (needs_loop_check && method == "pass.enableopt") {
         delayed_enableopt = true;
         continue;

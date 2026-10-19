@@ -1,0 +1,9 @@
+/*
+:name: aeg_xor_bool_one_1
+:type: lec
+:set: compile.cprop.engine=aegraph
+:compile_grep: aegraph-rule xor_bool_one .*extracted=[1-9]
+*/
+// HEADER-ONLY variant: aeg_xor_bool_one.prp compiled by the acyclic e-graph
+// engine. `:compile_grep:` is the proof that `xor_bool_one` itself rewrote
+// something the extraction kept (extracted >= 1), not just that the engine ran.

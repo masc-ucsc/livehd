@@ -1,0 +1,14 @@
+;; analyses.decl: the facts a rule guard may ask about a class.
+;;
+;;   (analysis NAME (params) :type T :spec S)
+;;   (pred     NAME (params) :uses A :spec S)
+;;
+;; The :spec is a boolean expression over the parameters and the builtins. It is the hypothesis of every
+;; proof obligation and the sampler of the generated fuzz: `(bool01 x)` samples x in {0, 1}. A guard on an
+;; analysis compiles to a call of the runtime implementation (rulegen's analysis table); rulegen refuses a
+;; guard whose analysis the runtime does not implement yet.
+;;
+;; Milestone G adds range, known bits, nonneg, range_bounded and known_zero_outside here, each with its
+;; implementation in pass/aegraph/analyses/.
+
+(analysis bool01 (x) :type bool :spec (and (<= 0 x) (<= x 1)))

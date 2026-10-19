@@ -1,0 +1,33 @@
+;; rules/arith.rules: bitwise and arithmetic rewrites whose left-hand side is a pattern.
+;;
+;; The commutative-bank algebra (constant folding, cancellation, flattening, absorption) needs loops over a
+;; bank and stays hand-written in arith.cpp (AEG_NATIVE_RULE); everything that is a fixed shape lives here.
+;; See pass/aegraph/RULES.md for the generated table.
+
+(simplify not_not 30
+  (Not (Not x))
+  => x
+  :example (Not (Not $x))
+  :doc "Not(Not x) = x: the double complement of an unlimited integer.")
+
+;; An alt, not a simplify: Not(x) and Xor(x, -1) are the same number and the same size, so the union is free
+;; and extraction keeps the original on a tie. It is what lets a bitwise-xor spelling elsewhere share this class.
+(alt not_xor_alt 5
+  (Not x)
+  => (Xor x -1)
+  :example (Not $x)
+  :doc "Not(x) and Xor(x, -1) share a class; extraction keeps the original on a tie.")
+
+(simplify mult_pow2_shl 30
+  (Mult (as x (k c)))
+  :when (pow2? c) (> c 1)
+  => (SHL x (k (log2 c)))
+  :example (Mult $x 8)
+  :doc "Strength reduction: Mult(x, 2^k) = SHL(x, k), exact for any sign of x.")
+
+(simplify xor_bool_one 30
+  (Xor (as x 1))
+  :when (bool01 x)
+  => (EQ x 0)
+  :example (Xor (EQ $x 0) 1)
+  :doc "x ^ 1 = EQ(x, 0) for a 0/1 value x.")

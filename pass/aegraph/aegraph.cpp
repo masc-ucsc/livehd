@@ -2,18 +2,26 @@
 #include "aegraph.hpp"
 
 #include <algorithm>
+#include <charconv>
 #include <cstdint>
+#include <cstdio>
 #include <deque>
+#include <format>
 #include <limits>
+#include <optional>
+#include <stdexcept>
 #include <string>
 #include <utility>
 #include <vector>
 
 #include "absl/container/flat_hash_set.h"
 #include "absl/container/inlined_vector.h"
+#include "aegraph_profile.hpp"
+#include "diag.hpp"
 #include "cprop_muxctx.hpp"
 #include "mask_eval.hpp"
 #include "node_util.hpp"
+#include "runtime/match.hpp"
 
 namespace livehd::aegraph {
 
@@ -80,7 +88,7 @@ uint32_t Egraph::policy_id(std::string_view policy) {
   return it->second;
 }
 
-Class_id Egraph::intern(Ntype_op op, const Enode_attrs& attrs, std::span<const Operand> operands, bool& created) {
+Class_id Egraph::intern(Ntype_op op, const Enode_attrs& attrs, std::span<const Operand> operands, bool& created, Class_id* raw) {
   const uint64_t h        = hash_of(op, attrs, operands);
   auto           bucket   = buckets_.find(h);
   Enode_id       previous = kNoEnode;
@@ -95,7 +103,10 @@ Class_id Egraph::intern(Ntype_op op, const Enode_attrs& attrs, std::span<const O
       }
       if (std::equal(operands.begin(), operands.end(), pool_.begin() + member.first_operand)) {
         created = false;
-        return member.cls;
+        if (raw != nullptr) {
+          *raw = member.cls;
+        }
+        return resolve(member.cls);  // a rewrite may have replaced or extended it since
       }
     }
   }
@@ -113,6 +124,9 @@ Class_id Egraph::intern(Ntype_op op, const Enode_attrs& attrs, std::span<const O
   node.cls                    = static_cast<Class_id>(classes_.size() - 1);
   const auto id               = static_cast<Enode_id>(enodes_.size());
   classes_[node.cls].first    = id;
+  if (raw != nullptr) {
+    *raw = node.cls;
+  }
   enodes_.push_back(node);
   if (bucket == buckets_.end()) {
     buckets_.emplace(h, id);
@@ -122,7 +136,29 @@ Class_id Egraph::intern(Ntype_op op, const Enode_attrs& attrs, std::span<const O
   return node.cls;
 }
 
+size_t Egraph::bytes() const {
+  size_t n = classes_.capacity() * sizeof(Eclass) + enodes_.capacity() * sizeof(Enode) + pool_.capacity() * sizeof(Operand);
+  n += buckets_.capacity() * (sizeof(decltype(buckets_)::value_type) + 1);
+  n += consts_.capacity() * (sizeof(decltype(consts_)::value_type) + 1);
+  for (const auto& [hash, members] : consts_) {
+    n += members.capacity() * sizeof(Class_id);
+  }
+  n += policies_.capacity() * sizeof(std::string) + policy_ids_.capacity() * (sizeof(decltype(policy_ids_)::value_type) + 1);
+  return n;
+}
+
 void Egraph::set_value(Class_id cls, Dlop value) { classes_[cls].value = std::move(value); }
+
+Class_id Egraph::add_union(Class_id a, Class_id b) {
+  Eclass u;
+  u.kind    = Kind::uni;
+  u.alt_a   = a;
+  u.alt_b   = b;
+  u.value   = classes_[a].value;
+  u.members = static_cast<uint16_t>(std::min<uint32_t>(UINT16_MAX, uint32_t{classes_[a].members} + classes_[b].members));
+  classes_.push_back(std::move(u));
+  return static_cast<Class_id>(classes_.size() - 1);
+}
 
 // ---------------------------------------------------------------------------
 // Constant analysis (three-valued; folds only to fully known values)
@@ -525,6 +561,207 @@ Fold fold_node(Ntype_op op, std::span<const Eval_operand> ops, const Egraph& eg)
   }
 }
 
+}  // namespace
+
+std::optional<Dlop> eval_op(Ntype_op op, std::span<const Eval_arg> args) {
+  // fold_node wants the operands in ascending sink-port order and reads a class kind only to spot a
+  // whole '?' literal, so mirror the arguments into a scratch e-graph.
+  std::vector<size_t> order(args.size());
+  for (size_t i = 0; i < order.size(); ++i) {
+    order[i] = i;
+  }
+  std::ranges::stable_sort(order, [&](size_t a, size_t b) { return args[a].port < args[b].port; });
+  Egraph                    scratch;
+  std::vector<Eval_operand> ops;
+  ops.reserve(args.size());
+  for (size_t i = 0; i < args.size(); ++i) {
+    const auto cls = args[i].value.has_unknowns() ? scratch.add_literal(args[i].value) : scratch.add_leaf();
+    I(cls == i);
+  }
+  for (const auto i : order) {
+    ops.push_back({args[i].port, args[i].bank, static_cast<Class_id>(i), &args[i].value});
+  }
+  const Fold f = fold_node(op, ops, scratch);
+  if (f.kind == Fold::Kind::value) {
+    return f.value;
+  }
+  if (f.kind == Fold::Kind::forward) {
+    return args[f.fwd].value;
+  }
+  return std::nullopt;
+}
+
+namespace {
+
+// ---------------------------------------------------------------------------
+// check=unions|full: value evidence for the rewrites
+// ---------------------------------------------------------------------------
+
+// Evaluates a cone of e-graph classes on random assignments with the SAME Dlop
+// semantics the constant analysis folds with (fold_node). A leaf draws a value
+// from a small deterministic set (0, 1, -1 and small magnitudes: shift amounts
+// stay cheap); a '?' literal has no value, so a cone that reaches one is skipped,
+// like a vector whose result carries '?' bits.
+class Checker {
+public:
+  Checker(const Egraph& eg, const std::vector<Class_id>* best) : eg_(eg), best_(best) {}
+
+  // The cone below `roots`, ascending by class id (operands are always older than
+  // their reader, so that is a topological order). false when it holds more than
+  // `fuel` classes.
+  bool gather(std::span<const Class_id> roots, size_t fuel) {
+    cone_.clear();
+    absl::flat_hash_set<Class_id> seen;
+    std::vector<Class_id>         stack(roots.begin(), roots.end());
+    while (!stack.empty()) {
+      const auto c = stack.back();
+      stack.pop_back();
+      if (!seen.insert(c).second) {
+        continue;
+      }
+      if (seen.size() > fuel) {
+        return false;
+      }
+      cone_.push_back(c);
+      const auto& cls = eg_.cls(c);
+      if (cls.kind == Egraph::Kind::uni) {
+        stack.push_back(member_of(c));
+      } else if (cls.kind == Egraph::Kind::node) {
+        for (const auto& o : eg_.operands(eg_.enode(cls.first))) {
+          stack.push_back(o.cls);
+        }
+      }
+    }
+    std::ranges::sort(cone_);
+    return true;
+  }
+
+  void evaluate(uint64_t vec) {
+    vals_.clear();
+    for (const auto c : cone_) {
+      const auto& cls = eg_.cls(c);
+      switch (cls.kind) {
+        case Egraph::Kind::konst  : vals_[c] = cls.value; break;
+        case Egraph::Kind::literal: vals_[c] = std::nullopt; break;
+        case Egraph::Kind::leaf   : vals_[c] = leaf_value(vec, c); break;
+        case Egraph::Kind::uni    : {
+          auto v   = vals_[member_of(c)];
+          vals_[c] = std::move(v);
+          break;
+        }
+        case Egraph::Kind::node   : {
+          const auto& n = eg_.enode(cls.first);
+          vals_[c]      = eval_node(n.op, eg_.operands(n));
+          break;
+        }
+      }
+    }
+  }
+
+  // The value of a gathered class under the last assignment (null: none).
+  [[nodiscard]] const Dlop* value(Class_id c) const {
+    const auto it = vals_.find(c);
+    return it == vals_.end() || !it->second ? nullptr : &*it->second;
+  }
+
+  // `op` applied to the (gathered) operand classes.
+  [[nodiscard]] std::optional<Dlop> eval_node(Ntype_op op, std::span<const Operand> ops) const {
+    absl::InlinedVector<Dlop, 8> vals;
+    for (const auto& o : ops) {
+      const auto* v = value(o.cls);
+      if (v == nullptr) {
+        return std::nullopt;
+      }
+      vals.push_back(*v);
+    }
+    absl::InlinedVector<Eval_operand, 8> ev;
+    for (size_t i = 0; i < ops.size(); ++i) {
+      const auto port = Ntype::is_banked_sink_op(op) ? static_cast<hhds::Port_id>(i) : static_cast<hhds::Port_id>(ops[i].bank);
+      ev.push_back(Eval_operand{port, ops[i].bank, ops[i].cls, &vals[i]});
+    }
+    if (!sane(op, ev)) {
+      return std::nullopt;
+    }
+    const auto fold = fold_node(op, ev, eg_);
+    if (fold.kind == Fold::Kind::value && !fold.value.has_unknowns()) {
+      return fold.value;
+    }
+    if (fold.kind == Fold::Kind::forward) {
+      for (size_t i = 0; i < ev.size(); ++i) {
+        if (ev[i].cls == fold.fwd) {
+          return vals[i];
+        }
+      }
+    }
+    return std::nullopt;
+  }
+
+  // Equal as numbers; nullopt when either side is not a plain known value.
+  [[nodiscard]] static std::optional<bool> same(const Dlop* a, const Dlop* b) {
+    if (a == nullptr || b == nullptr || a->has_unknowns() || b->has_unknowns() || !a->is_numeric() || !b->is_numeric()) {
+      return std::nullopt;
+    }
+    return a->eq_op(*b)->is_known_true();
+  }
+
+private:
+  [[nodiscard]] Class_id member_of(Class_id u) const {
+    if (best_ != nullptr) {
+      return (*best_)[u];
+    }
+    while (eg_.cls(u).kind == Egraph::Kind::uni) {
+      u = eg_.cls(u).alt_a;
+    }
+    return u;
+  }
+
+  [[nodiscard]] static Dlop leaf_value(uint64_t vec, Class_id c) {
+    uint64_t h = vec * 0x9e3779b97f4a7c15ULL + c * 0xbf58476d1ce4e5b9ULL + 0x1234567ULL;
+    h ^= h >> 30;
+    h *= 0xbf58476d1ce4e5b9ULL;
+    h ^= h >> 27;
+    h *= 0x94d049bb133111ebULL;
+    h ^= h >> 31;
+    static constexpr int64_t kSpecial[] = {0, 1, -1, 2, 3, -2, 7, 8, 15, 16, 255, -256};
+    int64_t                  v          = 0;
+    switch (h & 3) {
+      case 0 : v = kSpecial[(h >> 8) % std::size(kSpecial)]; break;
+      case 1 : v = static_cast<int64_t>((h >> 8) % 64) - 32; break;
+      case 2 : v = static_cast<int64_t>((h >> 8) % 8192) - 4096; break;
+      default: v = static_cast<int64_t>((h >> 8) & 1); break;  // a mix of booleans keeps the 0/1 rules honest
+    }
+    Dlop d;
+    d = Dlop::create_integer(v);
+    return d;
+  }
+
+  // Refuse a vector whose operands would make a shift or a window absurd (a
+  // product can feed a shift amount): the evaluation must stay cheap.
+  [[nodiscard]] static bool sane(Ntype_op op, std::span<const Eval_operand> ev) {
+    constexpr int64_t kBig = int64_t{1} << 16;
+    for (const auto& o : ev) {
+      if (o.val->get_payload_bits() > 1 << 16) {
+        return false;
+      }
+      const bool amount = ((op == Ntype_op::SHL || op == Ntype_op::SRA || op == Ntype_op::Sext || op == Ntype_op::Rxor
+                            || op == Ntype_op::Popcount)
+                           && o.port == 1)
+                          || ((op == Ntype_op::Get_mask || op == Ntype_op::Set_mask) && (o.port == 2 || o.port == 3))
+                          || (op == Ntype_op::Concat && o.port % 2 == 1);
+      if (amount
+          && (o.val->has_unknowns() || !o.val->is_just_i64() || o.val->to_just_i64() > kBig || o.val->to_just_i64() < -kBig)) {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  const Egraph&                                          eg_;
+  const std::vector<Class_id>*                           best_;
+  std::vector<Class_id>                                  cone_;
+  absl::flat_hash_map<Class_id, std::optional<Dlop>>     vals_;
+};
+
 // ---------------------------------------------------------------------------
 // The engine
 // ---------------------------------------------------------------------------
@@ -537,23 +774,30 @@ Fold fold_node(Ntype_op op, std::span<const Eval_operand> ops, const Egraph& eg)
   return Ntype::is_comb(op) && op != Ntype_op::Hotmux && op != Ntype_op::Clock_cell && !gu::has_runtime_check(node);
 }
 
-class Engine {
+class Engine final : public rt::Builder {
 public:
-  Engine(hhds::Graph& graph, const Cycle_cutter& cut_cycles) : g_(graph), cut_cycles_(cut_cycles) {}
+  Engine(hhds::Graph& graph, const Cycle_cutter& cut_cycles, const Options& options, std::string name);
 
   Stats run();
 
+  // ---- rt::Builder: what the rules may do ----
+  Class_id make(Ntype_op op, std::span<const Operand> ops) override;
+  Class_id konst(const Dlop& value) override { return eg_.add_const(value); }
+  [[nodiscard]] bool single_use(Class_id cls) const override { return cls < readers_.size() && readers_[cls] == 1; }
+
 private:
   // How a pure node entered the e-graph.
-  enum class How : uint8_t { created, merged, constant, forward };
+  enum class How : uint8_t { created, merged, constant, forward, rewritten };
   struct Built {
     Class_id cls = kNoClass;
     How      how = How::created;
   };
   struct Member {
-    hhds::Node_class node;
-    Class_id         cls;
-    How              how;
+    hhds::Node_class      node;
+    Class_id              cls;
+    How                   how;
+    Ntype_op              spec_op = Ntype_op::Invalid;  // check=full: the node as the graph had it,
+    std::vector<Operand>  spec_ops;                     // over the final operand classes
   };
   enum class Replaced : uint8_t { done, dead, declined };
 
@@ -570,14 +814,27 @@ private:
   void                                 resolve_false_cycles();
   [[nodiscard]] bool is_pure_candidate(const hhds::Node_class& node) const;
   Class_id         class_of(const hhds::Pin_class& pin);
+  void             ensure(Class_id cls);
   std::optional<Built> build(const hhds::Node_class& node);
+  // The rewrite rules of one new e-node (depth = rule-built nesting, 0 for an
+  // original node). Returns the class that stands for the node afterwards.
+  Class_id         rewrite(Class_id cls, uint32_t depth);
+  void             check_pair(Class_id a, Class_id b, rt::Rule_id rule);
+  void             check_full();
+  void             compute_best();
   hhds::Pin_class  realize(Class_id cls);
+  [[nodiscard]] bool adopt(const Member& member, Class_id target);
+  void             create_node(Class_id cls);
+  void             rewire(const hhds::Node_class& node, Ntype_op op, std::span<const Operand> ops);
   void             elaborate();
   Replaced         replace(const Member& member, const hhds::Pin_class& target);
   void             sweep_dead();
+  [[nodiscard]] std::string describe(Class_id cls) const;
 
   hhds::Graph&         g_;
   const Cycle_cutter&  cut_cycles_;
+  Options              opt_;
+  std::string          name_;
   Egraph               eg_;
   Stats        stats_;
 
@@ -587,6 +844,22 @@ private:
   absl::flat_hash_map<hhds::Class_index, Class_id>   pin_class_;
   std::vector<hhds::Pin_class>                       rep_pin_;  // class -> the pin that realizes it (invalid until known)
   std::vector<Member>                                members_;
+
+  // ---- rewrite rules ----
+  std::vector<uint8_t>   enabled_;       // per Rule_id
+  bool                   rules_active_ = false;
+  rt::Rule_id            current_rule_ = rt::kNoRule;  // the rule whose body is running
+  Enode_attrs            cur_attrs_;     // attrs the rule's new e-nodes inherit
+  uint32_t               depth_        = 0;
+  uint64_t               rewrites_     = 0;
+  bool                   cutoff_       = false;  // max_rewrites reached
+  uint64_t               work_used_    = 0;
+  uint64_t               work_budget_  = 0;
+  bool                   budget_hit_   = false;
+  std::vector<uint32_t>  readers_;       // per class: readers in the graph being built
+  std::vector<Operand>   spec_ops_;      // check=full: the operands build() last saw (final classes)
+  std::vector<Class_id>  best_;          // per class: the non-union class that realizes it (once unions exist)
+  bool                   has_best_     = false;
 };
 
 void Engine::collect_nodes() {
@@ -777,6 +1050,13 @@ bool Engine::is_pure_candidate(const hhds::Node_class& node) const {
   return true;
 }
 
+void Engine::ensure(Class_id cls) {
+  if (rep_pin_.size() <= cls) {
+    rep_pin_.resize(cls + 1);
+    readers_.resize(cls + 1, 0);
+  }
+}
+
 Class_id Engine::class_of(const hhds::Pin_class& pin) {
   const auto key = pin.get_class_index();
   if (const auto it = pin_class_.find(key); it != pin_class_.end()) {
@@ -791,14 +1071,60 @@ Class_id Engine::class_of(const hhds::Pin_class& pin) {
   } else {
     cls = eg_.add_leaf();
   }
-  if (rep_pin_.size() <= cls) {
-    rep_pin_.resize(cls + 1);
-  }
+  ensure(cls);
   if (rep_pin_[cls].is_invalid()) {
     rep_pin_[cls] = pin;
   }
   pin_class_.emplace(key, cls);
   return cls;
+}
+
+// The Eval_operand view of a normalized operand list. A positional operand's
+// bank is its port; a banked operand has no port role, so its index stands in.
+namespace {
+void eval_view(Ntype_op op, std::span<const Operand> operands, const Egraph& eg, absl::InlinedVector<Eval_operand, 8>& eval) {
+  const bool banked = Ntype::is_banked_sink_op(op);
+  for (size_t i = 0; i < operands.size(); ++i) {
+    eval.push_back(Eval_operand{banked ? static_cast<hhds::Port_id>(i) : static_cast<hhds::Port_id>(operands[i].bank),
+                                operands[i].bank,
+                                operands[i].cls,
+                                eg.value_of(operands[i].cls)});
+  }
+}
+}  // namespace
+
+// A rule-built e-node: fold, normalize, hash-cons and (up to rewrite_depth) run
+// the rules of its own root op. The attrs are the rewritten node's.
+Class_id Engine::make(Ntype_op op, std::span<const Operand> in) {
+  I(op != Ntype_op::Hotmux, "rules do not build Hotmux");
+  absl::InlinedVector<Operand, 8> operands(in.begin(), in.end());
+  std::ranges::sort(operands);
+
+  absl::InlinedVector<Eval_operand, 8> eval;
+  eval_view(op, operands, eg_, eval);
+  const Fold fold = fold_node(op, eval, eg_);
+  if (fold.kind == Fold::Kind::forward) {
+    return fold.fwd;
+  }
+  if (fold.kind == Fold::Kind::value && !fold.value.has_unknowns()) {
+    return eg_.add_const(fold.value);
+  }
+
+  bool       created = false;
+  const auto cls     = eg_.intern(op, cur_attrs_, operands, created);
+  ensure(cls);
+  if (!created) {
+    return cls;
+  }
+  eg_.set_rule(cls, current_rule_);
+  if (fold.kind == Fold::Kind::value) {
+    eg_.set_value(cls, fold.value);
+  }
+  for (const auto& operand : operands) {
+    ensure(operand.cls);  // a constant the rule just minted has no slot yet
+    ++readers_[operand.cls];
+  }
+  return rewrite(cls, depth_ + 1);
 }
 
 std::optional<Engine::Built> Engine::build(const hhds::Node_class& node) {
@@ -834,6 +1160,10 @@ std::optional<Engine::Built> Engine::build(const hhds::Node_class& node) {
   // would move the values an earlier pointer referred to.
   for (auto& operand : eval) {
     operand.val = eg_.value_of(operand.cls);
+  }
+
+  if (opt_.check == Options::Check::full) {
+    spec_ops_.assign(operands.begin(), operands.end());
   }
 
   // Constant analysis first: a forward or a fully known value needs no e-node.
@@ -880,31 +1210,460 @@ std::optional<Engine::Built> Engine::build(const hhds::Node_class& node) {
     attrs.policy = eg_.policy_id(policy.get());
   }
 
+  size_t readers = 0;
+  for ([[maybe_unused]] const auto& edge : node.out_edges()) {
+    ++readers;
+  }
+
   bool       created = false;
-  const auto cls     = eg_.intern(op, attrs, operands, created);
-  if (rep_pin_.size() <= cls) {
-    rep_pin_.resize(cls + 1);
-  }
-  if (created) {
-    rep_pin_[cls] = out;
-    if (fold.kind == Fold::Kind::value) {
-      eg_.set_value(cls, fold.value);  // a three-valued value; never materialized (P7)
+  Class_id   raw     = kNoClass;
+  const auto cls     = eg_.intern(op, attrs, operands, created, &raw);
+  ensure(cls);
+  ensure(raw);
+  readers_[raw] += static_cast<uint32_t>(readers);
+  if (!created) {
+    // A hit on an e-node only a rule built: this original node is its first real
+    // realization, so it becomes the class's pin (no new node is created).
+    if (rep_pin_[raw].is_invalid() && eg_.cls(raw).kind == Egraph::Kind::node) {
+      rep_pin_[raw] = out;
     }
+    return Built{cls, How::merged};
   }
-  return Built{cls, created ? How::created : How::merged};
+  rep_pin_[raw] = out;
+  if (fold.kind == Fold::Kind::value) {
+    eg_.set_value(cls, fold.value);  // a three-valued value; never materialized (P7)
+  }
+
+  Class_id final_cls = cls;
+  if (op != Ntype_op::Hotmux) {
+    cur_attrs_            = attrs;
+    cur_attrs_.has_proven = false;
+    cur_attrs_.proven     = 0;
+    current_rule_         = rt::kNoRule;
+    depth_                = 0;
+    final_cls             = rewrite(cls, 0);
+  }
+  if (final_cls == cls) {
+    return Built{cls, How::created};
+  }
+  return Built{final_cls, eg_.cls(final_cls).kind == Egraph::Kind::konst ? How::constant : How::rewritten};
 }
 
-hhds::Pin_class Engine::realize(Class_id cls) {
-  if (rep_pin_.size() <= cls) {
-    rep_pin_.resize(cls + 1);
+// ---------------------------------------------------------------------------
+// Rewriting
+// ---------------------------------------------------------------------------
+
+namespace {
+[[nodiscard]] bool name_listed(std::string_view list, std::string_view name, std::string_view group) {
+  size_t i = 0;
+  while (i <= list.size()) {
+    const auto j = std::min(list.find('+', i), list.size());
+    const auto t = list.substr(i, j - i);
+    if (!t.empty() && (t == name || (t.starts_with("group:") && t.substr(6) == group))) {
+      return true;
+    }
+    i = j + 1;
   }
-  if (rep_pin_[cls].is_invalid()) {
-    const auto& c = eg_.cls(cls);
-    I(c.kind == Egraph::Kind::konst && c.value.has_value());
-    rep_pin_[cls] = gu::create_const(g_, *c.value);
-    ++stats_.consts_created;
+  return false;
+}
+}  // namespace
+
+std::string Engine::describe(Class_id cls) const {
+  const auto& c = eg_.cls(cls);
+  switch (c.kind) {
+    case Egraph::Kind::leaf   : return std::format("c{}:leaf", cls);
+    case Egraph::Kind::literal: return std::format("c{}:literal", cls);
+    case Egraph::Kind::konst  : return std::format("c{}:const({})", cls, c.value->to_pyrope());
+    case Egraph::Kind::uni    : return std::format("c{}:union(c{},c{})", cls, c.alt_a, c.alt_b);
+    case Egraph::Kind::node   : {
+      const auto& n = eg_.enode(c.first);
+      std::string s = std::format("c{}:{}", cls, Ntype::get_name(n.op));
+      if (n.rule != rt::kNoRule) {
+        s += std::format("[{}]", rt::Registry::instance().rule(n.rule).name);
+      }
+      s += "(";
+      for (size_t i = 0; i < n.n_operands; ++i) {
+        const auto& o = eg_.operands(n)[i];
+        s += std::format("{}{}:c{}", i == 0 ? "" : ",", o.bank, o.cls);
+      }
+      return s + ")";
+    }
+  }
+  return {};
+}
+
+Class_id Engine::rewrite(Class_id cls, uint32_t depth) {
+  if (!rules_active_ || cutoff_ || eg_.cls(cls).kind != Egraph::Kind::node) {
+    return cls;
+  }
+  // Copies: a rule that builds e-nodes grows the pool the originals live in.
+  const Enode                           node = eg_.enode(eg_.cls(cls).first);
+  const absl::InlinedVector<Operand, 8> ops(eg_.operands(node).begin(), eg_.operands(node).end());
+  const Enode_attrs                     attrs = node.attrs;
+  auto&                                 reg   = rt::Registry::instance();
+  const auto                            ids   = reg.for_op(node.op);
+  if (ids.empty()) {
+    return cls;
+  }
+  if (depth >= opt_.rewrite_depth) {
+    ++stats_.depth_limited;
+    return cls;
+  }
+
+  std::optional<livehd::aegraph_profile::Timer> timer;  // rule time is nested in build; only the outermost call times
+  if (depth == 0) {
+    timer.emplace(livehd::aegraph_profile::rules);
+  }
+  const auto saved_rule  = current_rule_;
+  const auto saved_attrs = cur_attrs_;
+  const auto saved_depth = depth_;
+  Class_id   current     = cls;
+  uint32_t   alts        = 0;
+  const rt::Root root{node.op, attrs, std::span<const Operand>(ops.data(), ops.size()), cls};
+
+  for (const auto id : ids) {
+    if (!enabled_[id]) {
+      continue;
+    }
+    const auto& info = reg.rule(id);
+    if (info.tag == rt::Tag::choice && !opt_.choices) {
+      continue;
+    }
+    if (work_used_ + ops.size() + 1 > work_budget_) {
+      if (!budget_hit_) {
+        budget_hit_ = true;
+        ++stats_.budget_hit;
+      }
+      break;
+    }
+    work_used_ += ops.size() + 1;
+    auto& counters = stats_.rule_counts[id];
+    ++counters.tried;
+
+    rt::Results results;
+    rt::Ctx     ctx(eg_, *this, size_t{opt_.eclass_limit} * 16);
+    current_rule_         = id;
+    cur_attrs_            = attrs;
+    cur_attrs_.has_proven = false;
+    cur_attrs_.proven     = 0;
+    depth_                = depth;
+    info.fn(ctx, root, results);
+    if (results.empty()) {
+      continue;
+    }
+    ++counters.matched;
+
+    bool subsumed = false;
+    for (const auto& item : results.items()) {
+      if (item.cls == kNoClass || item.cls == cls || item.cls == current) {
+        continue;  // the rule rebuilt what is already there
+      }
+      if (item.tag == rt::Tag::choice) {
+        continue;  // choices=off: nothing assumes a '?' value
+      }
+      if (opt_.max_rewrites != 0 && rewrites_ >= opt_.max_rewrites) {
+        ++counters.limit_rejected;
+        cutoff_ = true;
+        continue;
+      }
+      if (item.tag == rt::Tag::simplify) {
+        if (opt_.check != Options::Check::off) {
+          check_pair(cls, item.cls, id);
+        }
+        ++rewrites_;
+        ++counters.applied;
+        ++counters.subsumed;
+        ++stats_.rules_fired;
+        current  = item.cls;
+        subsumed = true;
+      } else {
+        // alt: a union with what the class is so far, within the limits.
+        const bool duplicate = eg_.for_each_member(item.cls, 32, [&](Class_id m) {
+          return eg_.for_each_member(current, 32, [&](Class_id c) { return c == m; });
+        });
+        if (duplicate) {
+          continue;
+        }
+        if (alts >= opt_.matches_limit || uint32_t{eg_.cls(current).members} + eg_.cls(item.cls).members > opt_.eclass_limit) {
+          ++counters.limit_rejected;
+          continue;
+        }
+        if (opt_.check != Options::Check::off) {
+          check_pair(current, item.cls, id);
+        }
+        ++rewrites_;
+        ++counters.applied;
+        ++stats_.rules_fired;
+        ++stats_.unions;
+        ++alts;
+        current = eg_.add_union(current, item.cls);
+        ensure(current);
+      }
+      if (opt_.max_rewrites != 0 && rewrites_ == opt_.max_rewrites && (opt_.bisect_graph.empty() || opt_.bisect_graph == name_)) {
+        std::fprintf(stderr,
+                     "aegraph-bisect graph=%s rewrite=%llu rule=%s enode=c%u op=%.*s\n",
+                     name_.c_str(),
+                     static_cast<unsigned long long>(rewrites_),
+                     info.name,
+                     cls,
+                     static_cast<int>(Ntype::get_name(node.op).size()),
+                     Ntype::get_name(node.op).data());
+      }
+      if (subsumed) {
+        break;
+      }
+    }
+    if (subsumed) {
+      break;
+    }
+  }
+  current_rule_ = saved_rule;
+  cur_attrs_    = saved_attrs;
+  depth_        = saved_depth;
+  if (current != cls) {
+    ensure(current);
+    readers_[current] += readers_[cls];
+    eg_.set_alias(cls, current);
+  }
+  return current;
+}
+
+// check=unions (and check=full for each rewrite): the two classes must agree on
+// 8 random assignments.
+void Engine::check_pair(Class_id a, Class_id b, rt::Rule_id rule) {
+  constexpr size_t kConeFuel = 4096;
+  Checker          ck(eg_, nullptr);
+  const Class_id   roots[2] = {a, b};
+  if (!ck.gather(roots, kConeFuel)) {
+    ++stats_.check_skipped;
+    return;
+  }
+  for (uint64_t vec = 1; vec <= 8; ++vec) {
+    ck.evaluate(vec);
+    const auto same = Checker::same(ck.value(a), ck.value(b));
+    if (!same) {
+      ++stats_.check_skipped;
+      continue;
+    }
+    ++stats_.checks;
+    if (!*same) {
+      const auto& info = rt::Registry::instance().rule(rule);
+      throw std::logic_error(std::format("aegraph check: rule '{}' ({}:{}) is not value-preserving in graph '{}' on vector {}: "
+                                         "{} = {} but {} = {}",
+                                         info.name,
+                                         info.file,
+                                         info.line,
+                                         name_,
+                                         vec,
+                                         describe(a),
+                                         ck.value(a)->to_pyrope(),
+                                         describe(b),
+                                         ck.value(b)->to_pyrope()));
+    }
+  }
+}
+
+// check=full: every original node, applied to its final operand classes, must
+// equal the class the extraction keeps for it (64 assignments, whole cones).
+void Engine::check_full() {
+  std::vector<Class_id> roots;
+  for (const auto& m : members_) {
+    roots.push_back(m.cls);
+    for (const auto& o : m.spec_ops) {
+      roots.push_back(o.cls);
+    }
+  }
+  Checker ck(eg_, has_best_ ? &best_ : nullptr);
+  if (!ck.gather(roots, std::numeric_limits<size_t>::max())) {
+    return;
+  }
+  for (uint64_t vec = 1; vec <= 64; ++vec) {
+    ck.evaluate(vec);
+    for (const auto& m : members_) {
+      if (m.spec_op == Ntype_op::Invalid) {
+        continue;
+      }
+      const auto spec = ck.eval_node(m.spec_op, m.spec_ops);
+      const auto same = Checker::same(spec ? &*spec : nullptr, ck.value(m.cls));
+      if (!same) {
+        ++stats_.check_skipped;
+        continue;
+      }
+      ++stats_.checks;
+      if (!*same) {
+        const auto* n    = eg_.cls(m.cls).kind == Egraph::Kind::node ? &eg_.enode(eg_.cls(m.cls).first) : nullptr;
+        const char* rule = n != nullptr && n->rule != rt::kNoRule ? rt::Registry::instance().rule(n->rule).name : "(none)";
+        throw std::logic_error(std::format("aegraph check=full: graph '{}' node {} ({}) is {} but its class {} is {} on vector {} "
+                                           "(creating rule {})",
+                                           name_,
+                                           gu::debug_name(m.node),
+                                           Ntype::get_name(m.spec_op),
+                                           spec->to_pyrope(),
+                                           describe(m.cls),
+                                           ck.value(m.cls)->to_pyrope(),
+                                           vec,
+                                           rule));
+      }
+    }
+  }
+}
+
+// Extraction: the cheapest member of each union class. The cost is the size of
+// the expression tree (one per e-node, constants and leaves free), saturating at
+// extractor_fuel; a union keeps its original side unless the alternative is
+// STRICTLY cheaper, so a tie never changes the graph. Classes are numbered
+// operands-first, so one ascending pass is a bottom-up dynamic program.
+void Engine::compute_best() {
+  has_best_ = stats_.unions != 0;
+  if (!has_best_) {
+    return;
+  }
+  const size_t         n = eg_.num_classes();
+  std::vector<uint32_t> cost(n, 0);
+  best_.assign(n, kNoClass);
+  const uint32_t cap = std::max<uint32_t>(1, opt_.extractor_fuel);
+  for (Class_id c = 0; c < n; ++c) {
+    const auto& cls = eg_.cls(c);
+    if (cls.kind == Egraph::Kind::uni) {
+      const auto ca = cost[cls.alt_a], cb = cost[cls.alt_b];
+      if (cb < ca) {
+        cost[c]  = cb;
+        best_[c] = best_[cls.alt_b];
+      } else {
+        cost[c]  = ca;
+        best_[c] = best_[cls.alt_a];
+      }
+      continue;
+    }
+    best_[c] = c;
+    if (cls.kind == Egraph::Kind::node) {
+      uint64_t sum = 1;
+      for (const auto& o : eg_.operands(eg_.enode(cls.first))) {
+        sum += cost[o.cls];
+      }
+      cost[c] = static_cast<uint32_t>(std::min<uint64_t>(sum, cap));
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Elaboration
+// ---------------------------------------------------------------------------
+
+// (Re)connect `node` as an `op` cell over the pins realizing `ops`: the node
+// keeps its identity (nid, name, srcid, output pin and consumers).
+void Engine::rewire(const hhds::Node_class& node, Ntype_op op, std::span<const Operand> ops) {
+  for (const auto& spin : node.inp_pins_snapshot()) {
+    spin.del_sink();
+  }
+  if (gu::type_op_of(node) != op) {
+    gu::set_type_op(node, op);
+  }
+  for (const auto& operand : ops) {
+    const auto driver = rep_pin_[operand.cls];
+    const auto sink   = Ntype::is_banked_sink_op(op) ? gu::append_sink_operand(node, op, operand.bank)
+                                                     : node.create_sink_pin(static_cast<hhds::Port_id>(operand.bank));
+    driver.connect_sink(sink);
+  }
+}
+
+// A rule-built e-node no original node realizes: a new cell.
+void Engine::create_node(Class_id cls) {
+  const Enode& n    = eg_.enode(eg_.cls(cls).first);
+  auto         node = gu::create_typed_node(g_, n.op);
+  rewire(node, n.op, eg_.operands(n));
+  rep_pin_[cls] = node.create_driver_pin(0);
+  if (n.attrs.has_color) {
+    gu::set_color(node, n.attrs.color);
+  }
+  if (n.attrs.policy != 0) {
+    node.attr(livehd::attrs::synth_policy).set(eg_.policies()[n.attrs.policy]);
+  }
+  if (n.rule != rt::kNoRule) {
+    ++stats_.rule_counts[n.rule].extracted;
+    if (!opt_.explain.empty() && opt_.explain == rt::Registry::instance().rule(n.rule).name) {
+      std::fprintf(stderr,
+                   "aegraph-explain graph=%s rule=%s node=%s\n",
+                   name_.c_str(),
+                   opt_.explain.c_str(),
+                   describe(cls).c_str());
+    }
+  }
+}
+
+// The pin that realizes `cls` (extracting a union's cheapest member). Iterative:
+// a chain of rule-built e-nodes can be deeper than any stack.
+hhds::Pin_class Engine::realize(Class_id cls) {
+  std::vector<Class_id> stack{cls};
+  while (!stack.empty()) {
+    const auto c = stack.back();
+    ensure(c);
+    if (!rep_pin_[c].is_invalid()) {
+      stack.pop_back();
+      continue;
+    }
+    const auto& k = eg_.cls(c);
+    switch (k.kind) {
+      case Egraph::Kind::konst: {
+        rep_pin_[c] = gu::create_const(g_, *k.value);
+        ++stats_.consts_created;
+        stack.pop_back();
+        break;
+      }
+      case Egraph::Kind::uni: {
+        const auto member = has_best_ ? best_[c] : k.alt_a;
+        ensure(member);
+        if (rep_pin_[member].is_invalid()) {
+          stack.push_back(member);
+          break;
+        }
+        rep_pin_[c] = rep_pin_[member];
+        stack.pop_back();
+        break;
+      }
+      case Egraph::Kind::node: {
+        bool ready = true;
+        for (const auto& o : eg_.operands(eg_.enode(k.first))) {
+          ensure(o.cls);
+          if (rep_pin_[o.cls].is_invalid()) {
+            stack.push_back(o.cls);
+            ready = false;
+          }
+        }
+        if (ready) {
+          create_node(c);
+          stack.pop_back();
+        }
+        break;
+      }
+      default: I(false, "a leaf or literal class always has its pin");
+    }
   }
   return rep_pin_[cls];
+}
+
+// Adopt: `member.node` becomes the cell of the rule-built e-node `target` (same
+// nid, name, output pin and consumers; only its operands, and its op, change).
+// This is what keeps a rewritten node's identity, as the classic engine's
+// in-place rewrites do.
+bool Engine::adopt(const Member& member, Class_id target) {
+  const auto& k = eg_.cls(target);
+  if (k.kind != Egraph::Kind::node || !rep_pin_[target].is_invalid() || eg_.enode(k.first).rule == rt::kNoRule) {
+    return false;
+  }
+  for (const auto& o : eg_.operands(eg_.enode(k.first))) {
+    const auto pin = realize(o.cls);
+    // The node must not feed itself.
+    if (!pin.is_const() && pin.get_master_node() == member.node) {
+      return false;
+    }
+  }
+  const Enode  n = eg_.enode(k.first);  // realize() may not grow the e-graph, but copy anyway
+  const auto   ops = eg_.operands(n);
+  rewire(member.node, n.op, ops);
+  rep_pin_[target] = member.node.get_driver_pin(0);
+  ++stats_.rule_counts[n.rule].extracted;
+  return true;
 }
 
 // Retire `member.node`, whose class is realized by `target`. false = declined:
@@ -980,6 +1739,16 @@ Engine::Replaced Engine::replace(const Member& member, const hhds::Pin_class& ta
 
 void Engine::elaborate() {
   for (const auto& member : members_) {
+    // The class the extraction keeps (a union's cheapest side).
+    Class_id kept = member.cls;
+    if (has_best_ && eg_.cls(kept).kind == Egraph::Kind::uni) {
+      kept = best_[kept];
+    }
+    ensure(kept);
+    if (rep_pin_[kept].is_invalid() && adopt(member, kept)) {
+      ++stats_.rewritten;
+      continue;
+    }
     const auto target = realize(member.cls);
     if (target == member.node.get_driver_pin(0)) {
       continue;  // the class representative is the original node: reused as is
@@ -989,9 +1758,10 @@ void Engine::elaborate() {
       ++stats_.kept_twin;
     } else if (result == Replaced::done) {
       switch (member.how) {
-        case How::constant: ++stats_.const_folded; break;
-        case How::forward : ++stats_.forwarded; break;
-        default           : ++stats_.cse_merged; break;
+        case How::constant : ++stats_.const_folded; break;
+        case How::forward  : ++stats_.forwarded; break;
+        case How::rewritten: ++stats_.rewritten; break;
+        default            : ++stats_.cse_merged; break;
       }
     }
   }
@@ -1055,7 +1825,12 @@ void Engine::build_all(const std::vector<hhds::Node_class>& producers_first) {
     ++stats_.pure;
     // The node's output now reads as its class for every consumer built later.
     pin_class_[node.get_driver_pin(0).get_class_index()] = cls->cls;
-    members_.push_back(Member{node, cls->cls, cls->how});
+    Member member{node, cls->cls, cls->how, Ntype_op::Invalid, {}};
+    if (opt_.check == Options::Check::full) {
+      member.spec_op  = gu::type_op_of(node);
+      member.spec_ops = spec_ops_;
+    }
+    members_.push_back(std::move(member));
   }
 }
 
@@ -1097,9 +1872,36 @@ void Engine::resolve_false_cycles() {
   }
 }
 
+Engine::Engine(hhds::Graph& graph, const Cycle_cutter& cut_cycles, const Options& options, std::string name)
+    : g_(graph), cut_cycles_(cut_cycles), opt_(options), name_(std::move(name)) {
+  auto& reg = rt::Registry::instance();
+  stats_.rule_counts.assign(reg.size() + 1, Rule_counters{});
+  enabled_.assign(reg.size() + 1, 0);
+  for (rt::Rule_id id = 1; id <= reg.size(); ++id) {
+    const auto& info = reg.rule(id);
+    const bool  only = opt_.rules_only.empty() || name_listed(opt_.rules_only, info.name, info.group);
+    enabled_[id]     = only && !name_listed(opt_.rules_disable, info.name, info.group);
+    rules_active_    = rules_active_ || enabled_[id] != 0;
+  }
+}
+
 Stats Engine::run() {
+  std::optional<livehd::aegraph_profile::Timer> phase;
+  phase.emplace(livehd::aegraph_profile::prepass);
   collect_nodes();
   stats_.nodes_in = nodes_.size();
+  if (opt_.edge_budget == 0) {
+    work_budget_ = std::numeric_limits<uint64_t>::max();
+  } else {
+    // Rule work is O(input edges): the cprop contract.
+    uint64_t edges = nodes_.size();
+    for (const auto& node : nodes_) {
+      for ([[maybe_unused]] const auto& sink : node.inp_sorted_pins()) {
+        ++edges;
+      }
+    }
+    work_budget_ = edges * opt_.edge_budget;
+  }
 
   // IO, state and other non-transparent nodes are skeleton leaves.
   std::vector<hhds::Node_class> transparent;
@@ -1145,6 +1947,7 @@ Stats Engine::run() {
 
   // Build: components consumers-first, built producers-first, so every
   // operand's class exists before its consumer is built.
+  phase.emplace(livehd::aegraph_profile::build);
   std::vector<hhds::Node_class> producers_first;
   for (const auto& part : parts) {
     if (part.cyclic) {
@@ -1163,13 +1966,21 @@ Stats Engine::run() {
   resolve_false_cycles();
   stats_.opaque = cyclic_nodes_.size();
   stats_.skeleton += cyclic_nodes_.size();
-  stats_.classes = eg_.num_classes();
+  stats_.classes   = eg_.num_classes();
+  stats_.aeg_bytes = eg_.bytes();
 
-  // Extract: cost-free. The representative of a node class is its first member
-  // (the original node); a constant class is its constant; a forward is the
-  // operand class. realize() resolves all three.
+  // Extract: a class without unions is its first member (the original node), a
+  // constant class its constant, a forward the operand class; a union keeps its
+  // cheapest side. realize() resolves them all.
+  phase.emplace(livehd::aegraph_profile::extract);
+  compute_best();
+  if (opt_.check == Options::Check::full) {
+    check_full();
+  }
+  phase.emplace(livehd::aegraph_profile::elaborate);
   elaborate();
   sweep_dead();
+  phase.reset();
 
   stats_.nodes_out = 0;
   for ([[maybe_unused]] auto node : g_.body().nodes()) {
@@ -1180,12 +1991,84 @@ Stats Engine::run() {
 
 }  // namespace
 
-Stats optimize(const std::shared_ptr<hhds::Graph>& graph, const Cycle_cutter& cut_cycles) {
+Stats optimize(const std::shared_ptr<hhds::Graph>& graph, const Cycle_cutter& cut_cycles, const Options& options) {
   if (!graph) {
     return {};
   }
-  Engine engine(*graph, cut_cycles);
+  const auto name = graph->get_io() ? std::string{graph->get_io()->get_name()} : std::string{};
+  Engine     engine(*graph, cut_cycles, options, name);
   return engine.run();
+}
+
+Options make_options(std::string_view rules_disable, std::string_view rules_only, std::string_view max_rewrites,
+                     std::string_view bisect_graph, std::string_view explain, std::string_view check,
+                     std::string_view rewrite_depth, std::string_view matches_limit, std::string_view eclass_limit,
+                     std::string_view extractor_fuel, std::string_view edge_budget, std::string_view cost,
+                     std::string_view choices) {
+  const auto bad = [](std::string_view label, std::string_view value, std::string_view want) {
+    livehd::diag::err("pass.aegraph", "bad-option", "io").msg("compile.aegraph.{}={} is not {}", label, value, want).fatal();
+  };
+  const auto number = [&](std::string_view label, std::string_view text, uint64_t lo, uint64_t hi, uint64_t keep) -> uint64_t {
+    if (text.empty()) {
+      return keep;
+    }
+    uint64_t v   = 0;
+    const auto r = std::from_chars(text.data(), text.data() + text.size(), v);
+    if (r.ec != std::errc{} || r.ptr != text.data() + text.size() || v < lo || v > hi) {
+      bad(label, text, std::format("an integer in [{}..{}]", lo, hi));
+    }
+    return v;
+  };
+  const auto rule_list = [&](std::string_view label, std::string_view list) {
+    size_t i = 0;
+    while (i <= list.size()) {
+      const auto j = std::min(list.find('+', i), list.size());
+      const auto t = list.substr(i, j - i);
+      if (!t.empty()) {
+        auto& reg = rt::Registry::instance();
+        if (t.starts_with("group:") ? !reg.has_group(t.substr(6)) : !reg.find(t).has_value()) {
+          bad(label, t, "a rule name or group:NAME of a registered rule (join several with '+')");
+        }
+      }
+      i = j + 1;
+    }
+  };
+
+  Options o;
+  rule_list("rules_disable", rules_disable);
+  rule_list("rules_only", rules_only);
+  o.rules_disable = std::string{rules_disable};
+  o.rules_only    = std::string{rules_only};
+  o.max_rewrites  = number("max_rewrites", max_rewrites, 0, UINT32_MAX, o.max_rewrites);
+  o.bisect_graph  = std::string{bisect_graph};
+  if (!explain.empty() && !rt::Registry::instance().find(explain)) {
+    bad("explain", explain, "the name of a registered rule");
+  }
+  o.explain = std::string{explain};
+  if (check == "off") {
+    o.check = Options::Check::off;
+  } else if (check == "unions") {
+    o.check = Options::Check::unions;
+  } else if (check == "full") {
+    o.check = Options::Check::full;
+  } else if (!check.empty()) {
+    bad("check", check, "off|unions|full");
+  }
+  o.rewrite_depth  = static_cast<uint32_t>(number("rewrite_depth", rewrite_depth, 0, 64, o.rewrite_depth));
+  o.matches_limit  = static_cast<uint32_t>(number("matches_limit", matches_limit, 0, 32, o.matches_limit));
+  o.eclass_limit   = static_cast<uint32_t>(number("eclass_limit", eclass_limit, 1, 32, o.eclass_limit));
+  o.extractor_fuel = static_cast<uint32_t>(number("extractor_fuel", extractor_fuel, 1, UINT32_MAX, o.extractor_fuel));
+  o.edge_budget    = static_cast<uint32_t>(number("edge_budget", edge_budget, 0, UINT32_MAX, o.edge_budget));
+  if (cost == "sim") {
+    o.cost = Options::Cost::sim;
+  } else if (!cost.empty() && cost != "synth") {
+    bad("cost", cost, "synth|sim");
+  }
+  if (!choices.empty() && choices != "off" && choices != "const" && choices != "expr") {
+    bad("choices", choices, "off|const|expr");
+  }
+  o.choices = !choices.empty() && choices != "off";
+  return o;
 }
 
 }  // namespace livehd::aegraph

@@ -40,6 +40,13 @@
 #                         `lhd compile` output is part of that text too (the ref
 #                         side's is not -- a grep is a claim about the variant)
 #   :lec_grep_not: REGEX  must NOT appear in the lec output (repeatable)
+#   :compile_grep: REGEX  must appear in the IMPL side's own `lhd compile` output, its
+#                         per-pass logs included (repeatable). A claim about how the variant
+#                         COMPILED, not about how it was proven: e.g. that a rewrite rule fired
+#                         (`:compile_grep: aegraph-rule not_not .*extracted=[1-9]`, which is how
+#                         an aegraph rule's fixture shows the rule did the work). It forces the
+#                         per-side pre-compile (the impl log only exists then) and turns on
+#                         `lhd.stats=true` for the impl compile so the pass census records exist
 #
 # Run one group by hand (base = every variant, or name a single variant):
 #
@@ -293,6 +300,21 @@ def _run_pair(runner, tmp_dir, base_test, var_test, verbose=False):
     # BECAUSE their flags differ, so that is the common case, not a corner one.
     impl_log = ''
     ref_log  = ''
+    compile_greps = _tags(base_test, 'compile_grep') + _tags(var_test, 'compile_grep')
+    if compile_greps and runner.compile_sets:
+        # A harness-wide compile override (--aegraph / LHD_PRP_COMPILE_SETS) that replaces a flag the
+        # variant sets itself changes WHAT is compiled: the variant's claim about its own flags no
+        # longer describes the run, so the grep is skipped (the pair is still LEC'd).
+        forced = dict(tok.split('=', 1) for tok in runner.compile_sets if '=' in tok)
+        lost = [tok for tok in _sets(var_test) if '=' in tok and tok.split('=', 1)[0] in forced
+                and forced[tok.split('=', 1)[0]] != tok.split('=', 1)[1]]
+        if lost:
+            print('{} - note: :compile_grep: skipped, the harness override replaces {}'.format(name, ' '.join(lost)))
+            compile_greps = []
+    if compile_greps:
+        # A grep on the compile output needs that output: compile the sides separately, and ask
+        # the impl compile for the pass census records (`lhd.stats`).
+        impl.sets = _merge_sets(impl.sets, ['lhd.stats=true'])
     if impl.sets != ref.sets:
         # Different compile flags per side: one `lhd lec --set` cannot say two
         # things, so each side is compiled into its own library first.
@@ -327,6 +349,11 @@ def _run_pair(runner, tmp_dir, base_test, var_test, verbose=False):
             print(out)
 
         why  = _check(impl_log + out, rc, expect, base_test, var_test)
+        if not why:
+            for pat in compile_greps:
+                if not re.search(pat, impl_log):
+                    why = 'the impl compile output never matched :compile_grep: {}'.format(pat)
+                    break
         what = '{} vs {}{}'.format(os.path.basename(base), name,
                                    ' [' + ' '.join(combo) + ']' if combo else '')
         if why:

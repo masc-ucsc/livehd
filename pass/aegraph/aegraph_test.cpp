@@ -16,6 +16,14 @@
 namespace {
 namespace gu = livehd::graph_util;
 
+// Every test runs the rule runtime's strongest check: any rewrite that does not
+// preserve values aborts naming the rule.
+livehd::aegraph::Options checked() {
+  livehd::aegraph::Options o;
+  o.check = livehd::aegraph::Options::Check::full;
+  return o;
+}
+
 // A name-blind-free structural signature: every node's nid, op, name, color and
 // each operand's driver (nid.pid, or the constant's spelling), sorted. With no
 // rules the engine must leave this untouched except for CSE and constant folds,
@@ -111,7 +119,7 @@ TEST(Aegraph, NoRuleRoundTripIsStructurallyIdentical) {
   flop.create_driver_pin(0).connect_sink(g->get_output_pin("o1"));
 
   const auto before = signature(g);
-  const auto stats  = livehd::aegraph::optimize(g);
+  const auto stats  = livehd::aegraph::optimize(g, {}, checked());
   EXPECT_EQ(signature(g), before);
   EXPECT_EQ(stats.cse_merged, 0u);
   EXPECT_EQ(stats.const_folded, 0u);
@@ -171,7 +179,7 @@ TEST(Aegraph, SubnodeLoopBodyRoundTrip) {
 
   for (const auto& g : {body, parent}) {
     const auto before = signature(g);
-    livehd::aegraph::optimize(g);
+    livehd::aegraph::optimize(g, {}, checked());
     EXPECT_EQ(signature(g), before) << g->get_io()->get_name();
   }
   // The carry edge is still there.
@@ -212,7 +220,7 @@ TEST(Aegraph, NonExclusiveHotmuxIsASkeletonLeaf) {
   (void)unread;
 
   const auto before = signature(g);
-  const auto stats  = livehd::aegraph::optimize(g);
+  const auto stats  = livehd::aegraph::optimize(g, {}, checked());
   EXPECT_EQ(signature(g), before);
   EXPECT_EQ(count_op(g, Ntype_op::Hotmux), 3u);
   EXPECT_EQ(stats.cse_merged, 0u);
@@ -235,7 +243,7 @@ TEST(Aegraph, HotmuxProvenCodeIsPartOfTheKey) {
     }
     hot_a.create_driver_pin(0).connect_sink(g->get_output_pin("o0"));
     hot_b.create_driver_pin(0).connect_sink(g->get_output_pin("o1"));
-    livehd::aegraph::optimize(g);
+    livehd::aegraph::optimize(g, {}, checked());
     if (both_proven) {
       EXPECT_EQ(count_op(g, Ntype_op::Hotmux), 1u) << "exclusive proven twins merge";
       EXPECT_TRUE(out_driver(g, "o0") == out_driver(g, "o1"));
@@ -259,7 +267,7 @@ TEST(Aegraph, CommutativeBanksAreSortedAndMultiplicityIsKept) {
   s1.connect_sink(g->get_output_pin("o0"));
   s2.connect_sink(g->get_output_pin("o1"));
   d.connect_sink(g->get_output_pin("o2"));
-  const auto stats = livehd::aegraph::optimize(g);
+  const auto stats = livehd::aegraph::optimize(g, {}, checked());
   EXPECT_EQ(stats.cse_merged, 1u);
   EXPECT_EQ(count_op(g, Ntype_op::Sum), 2u);
   EXPECT_TRUE(out_driver(g, "o0") == out_driver(g, "o1"));
@@ -281,7 +289,7 @@ TEST(Aegraph, SumBanksStayDistinct) {
   diff(a, b).connect_sink(g->get_output_pin("o0"));
   diff(b, a).connect_sink(g->get_output_pin("o1"));
   diff(a, b).connect_sink(g->get_output_pin("o2"));
-  livehd::aegraph::optimize(g);
+  livehd::aegraph::optimize(g, {}, checked());
   EXPECT_EQ(count_op(g, Ntype_op::Sum), 2u);
   EXPECT_TRUE(out_driver(g, "o0") == out_driver(g, "o2"));
   EXPECT_FALSE(out_driver(g, "o0") == out_driver(g, "o1"));
@@ -302,7 +310,7 @@ TEST(Aegraph, ColorAndSynthPolicyAreBarriers) {
   y.connect_sink(g->get_output_pin("o1"));
   z.connect_sink(g->get_output_pin("o2"));
   w.connect_sink(g->get_output_pin("o3"));
-  livehd::aegraph::optimize(g);
+  livehd::aegraph::optimize(g, {}, checked());
   EXPECT_EQ(count_op(g, Ntype_op::Xor), 3u) << "plain, colored and policy twins stay apart; the plain twins merge";
   EXPECT_TRUE(out_driver(g, "o0") == out_driver(g, "o3"));
 }
@@ -321,7 +329,7 @@ TEST(Aegraph, NamedTwinPolicy) {
   first.connect_sink(g->get_output_pin("o0"));
   second.connect_sink(g->get_output_pin("o1"));
   third.connect_sink(g->get_output_pin("o2"));
-  const auto stats = livehd::aegraph::optimize(g);
+  const auto stats = livehd::aegraph::optimize(g, {}, checked());
   EXPECT_EQ(count_op(g, Ntype_op::And), 2u);
   EXPECT_EQ(stats.kept_twin, 1u);
   EXPECT_FALSE(out_driver(g, "o0") == out_driver(g, "o1")) << "two named twins both stay";
@@ -336,8 +344,8 @@ TEST(Aegraph, FullyKnownConesFoldToConstants) {
   auto sum  = binop(g, Ntype_op::Sum, konst(g, 3), konst(g, 4));
   auto mult = binop(g, Ntype_op::Mult, sum, konst(g, 2));
   mult.connect_sink(g->get_output_pin("o0"));
-  // An op with a runtime operand and a 0 mask: And(x, 0) is NOT folded here
-  // (a rule, not a constant fold): the operand is not constant.
+  // An op with a runtime operand and a 0 mask: the constant analysis alone does
+  // not fold it (the operand is not constant); the `annihilate` rule does.
   auto masked = binop(g, Ntype_op::And, g->get_input_pin("i0"), konst(g, 0));
   masked.connect_sink(g->get_output_pin("o1"));
   // A constant select forwards the chosen arm.
@@ -350,10 +358,11 @@ TEST(Aegraph, FullyKnownConesFoldToConstants) {
   auto eq = binop(g, Ntype_op::EQ, konst(g, 5), konst(g, 6));
   eq.connect_sink(g->get_output_pin("o3"));
 
-  const auto stats = livehd::aegraph::optimize(g);
+  const auto stats = livehd::aegraph::optimize(g, {}, checked());
   ASSERT_TRUE(out_driver(g, "o0").is_const());
   EXPECT_EQ(gu::const_of(out_driver(g, "o0")).to_just_i64(), 14);
-  EXPECT_FALSE(out_driver(g, "o1").is_const());
+  ASSERT_TRUE(out_driver(g, "o1").is_const());
+  EXPECT_EQ(gu::const_of(out_driver(g, "o1")).to_just_i64(), 0);
   ASSERT_TRUE(out_driver(g, "o2").is_const());
   EXPECT_EQ(gu::const_of(out_driver(g, "o2")).to_just_i64(), 9);
   ASSERT_TRUE(out_driver(g, "o3").is_const());
@@ -362,7 +371,7 @@ TEST(Aegraph, FullyKnownConesFoldToConstants) {
   EXPECT_EQ(count_op(g, Ntype_op::Mult), 0u);
   EXPECT_EQ(count_op(g, Ntype_op::Mux), 0u);
   EXPECT_EQ(count_op(g, Ntype_op::EQ), 0u);
-  EXPECT_EQ(count_op(g, Ntype_op::And), 1u);
+  EXPECT_EQ(count_op(g, Ntype_op::And), 0u);
   EXPECT_GE(stats.const_folded, 3u);
 }
 
@@ -387,7 +396,7 @@ TEST(Aegraph, UnknownLiteralsAreNeverSplit) {
   gu::connect_mask_operands(whole, q, 0, 4);
   whole.create_driver_pin(0).connect_sink(g->get_output_pin("o2"));
 
-  livehd::aegraph::optimize(g);
+  livehd::aegraph::optimize(g, {}, checked());
   EXPECT_EQ(gu::type_op_of(out_driver(g, "o0").get_master_node()), Ntype_op::Get_mask);
   ASSERT_TRUE(out_driver(g, "o1").is_const());
   EXPECT_TRUE(gu::const_of(out_driver(g, "o1")).is_known_zero());
@@ -425,7 +434,7 @@ TEST(Aegraph, CombinationalCycleMembersAreOpaque) {
   auto sum = binop(g, Ntype_op::Sum, konst(g, 1), konst(g, 2));
   sum.connect_sink(gu::setup_sink_by_name(q, "as"));
 
-  const auto stats = livehd::aegraph::optimize(g);
+  const auto stats = livehd::aegraph::optimize(g, {}, checked());
   EXPECT_EQ(stats.opaque, 2u);
   EXPECT_EQ(count_op(g, Ntype_op::Or), 2u);
   EXPECT_EQ(count_op(g, Ntype_op::Sum), 0u);
@@ -448,7 +457,7 @@ TEST(Aegraph, ConstantSelectorMuxRingIsNotACycle) {
   m1.create_driver_pin(0).connect_sink(m2.create_sink_pin(2));
   m2.create_driver_pin(0).connect_sink(g->get_output_pin("o0"));
 
-  const auto stats = livehd::aegraph::optimize(g);
+  const auto stats = livehd::aegraph::optimize(g, {}, checked());
   EXPECT_EQ(stats.opaque, 0u);
   EXPECT_EQ(count_op(g, Ntype_op::Mux), 0u);
   EXPECT_TRUE(out_driver(g, "o0") == g->get_input_pin("i0"));
@@ -470,7 +479,7 @@ TEST(Aegraph, MuxWithEqualConnectedArmsCollapses) {
   mux({{1, x}, {2, x}, {3, x}}).connect_sink(g->get_output_pin("o1"));
   // A disconnected arm 2: the connected arms agree.
   mux({{1, x}, {3, x}}).connect_sink(g->get_output_pin("o2"));
-  livehd::aegraph::optimize(g);
+  livehd::aegraph::optimize(g, {}, checked());
   EXPECT_EQ(count_op(g, Ntype_op::Mux), 0u);
   for (const char* name : {"o0", "o1", "o2"}) {
     EXPECT_TRUE(out_driver(g, name) == x) << name;
@@ -500,7 +509,7 @@ TEST(Aegraph, HotmuxCollapsesOnlyWhenSoundAndExclusive) {
   hot(c0, c1, konst(g, 0), konst(g, 0), hhds::Pin_class{}).connect_sink(g->get_output_pin("o2"));
   // Constant controls select a value.
   hot(konst(g, 0), konst(g, 1), konst(g, 7), konst(g, 9), hhds::Pin_class{}).connect_sink(g->get_output_pin("o3"));
-  livehd::aegraph::optimize(g);
+  livehd::aegraph::optimize(g, {}, checked());
   EXPECT_TRUE(out_driver(g, "o0") == v);
   EXPECT_EQ(gu::type_op_of(out_driver(g, "o1").get_master_node()), Ntype_op::Hotmux);
   ASSERT_TRUE(out_driver(g, "o2").is_const());
@@ -538,14 +547,14 @@ TEST(Aegraph, DeterministicAndIdempotent) {
   auto               a = busy_graph(lib_a);
   auto               b = busy_graph(lib_b);
   ASSERT_EQ(signature(a), signature(b));
-  const auto stats_a = livehd::aegraph::optimize(a);
-  const auto stats_b = livehd::aegraph::optimize(b);
+  const auto stats_a = livehd::aegraph::optimize(a, {}, checked());
+  const auto stats_b = livehd::aegraph::optimize(b, {}, checked());
   EXPECT_EQ(signature(a), signature(b)) << "two runs on equal input must elaborate the same graph";
   EXPECT_EQ(stats_a.cse_merged, stats_b.cse_merged);
   EXPECT_GT(stats_a.cse_merged, 0u);
 
   const auto settled = signature(a);
-  const auto again   = livehd::aegraph::optimize(a);
+  const auto again   = livehd::aegraph::optimize(a, {}, checked());
   EXPECT_EQ(signature(a), settled) << "a second run finds nothing more";
   EXPECT_EQ(again.cse_merged + again.const_folded + again.forwarded + again.dead_removed, 0u);
 }
@@ -557,7 +566,7 @@ TEST(Aegraph, ElaboratedGraphIsEquivalentToTheInput) {
   hhds::GraphLibrary lib_ref, lib_impl;
   auto               ref  = busy_graph(lib_ref);
   auto               impl = busy_graph(lib_impl);
-  livehd::aegraph::optimize(impl);
+  livehd::aegraph::optimize(impl, {}, checked());
   const auto arith = [](const std::shared_ptr<hhds::Graph>& g) { return count_op(g, Ntype_op::Xor) + count_op(g, Ntype_op::Sum); };
   ASSERT_LT(arith(impl), arith(ref));
   livehd::lec::Lec_options options;
@@ -586,7 +595,7 @@ TEST(Aegraph, PostStepsKeepTheGraphEquivalent) {
   hhds::GraphLibrary lib_ref, lib_impl;
   auto               ref  = build(lib_ref);
   auto               impl = build(lib_impl);
-  livehd::aegraph::optimize(impl);
+  livehd::aegraph::optimize(impl, {}, checked());
   Cprop{true}.do_post(impl);
   // The constant-true enable is folded away by the post step.
   for (auto node : impl->body().nodes()) {

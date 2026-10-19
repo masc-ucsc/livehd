@@ -1,0 +1,8 @@
+/*
+:name: aeg_mux_sel_not_1
+:type: lec
+:set: compile.cprop.engine=aegraph
+:compile_grep: aegraph-rule mux_sel_not .*extracted=[1-9]
+*/
+// HEADER-ONLY variant: aeg_mux_sel_not.prp compiled by the acyclic e-graph
+// engine; the grep shows `mux_sel_not` fired and the extraction kept its result.

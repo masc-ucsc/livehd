@@ -9,6 +9,7 @@
 #include <unordered_map>
 
 #include "cprop.hpp"
+#include "cprop_test_eval.hpp"
 #include "graph_library_singleton.hpp"
 #include "gtest/gtest.h"
 #include "node_util.hpp"
@@ -18,90 +19,7 @@ namespace gu = livehd::graph_util;
 using Pin    = hhds::Pin_class;
 using Node   = hhds::Node_class;
 
-// Unlimited-precision evaluator over the ops the rewrites read and create.
-Dlop eval(const Pin& p, std::unordered_map<uint64_t, Dlop>& memo) {
-  if (p.is_const()) {
-    return gu::const_of(p);
-  }
-  const auto key = static_cast<uint64_t>(p.get_class_index().value);
-  if (auto it = memo.find(key); it != memo.end()) {
-    return it->second;
-  }
-  const auto                                  n  = p.get_master_node();
-  const auto                                  op = gu::type_op_of(n);
-  std::vector<std::pair<hhds::Port_id, Dlop>> in;
-  for (auto s : n.inp_sorted_pins()) {
-    for (auto d : s.get_driver_pins()) {
-      in.emplace_back(s.get_port_id(), eval(d, memo));
-    }
-  }
-  const auto at = [&](hhds::Port_id pid) -> Dlop {
-    for (const auto& [q, v] : in) {
-      if (q == pid) {
-        return v;
-      }
-    }
-    ADD_FAILURE() << "missing pid " << pid;
-    return *Dlop::create_integer(0);
-  };
-  Dlop r = *Dlop::create_integer(0);
-  switch (op) {
-    case Ntype_op::Sum:
-      for (const auto& [q, v] : in) {
-        r = Ntype::sink_bank(op, q) == 1 ? *r.sub_op(v) : *r.add_op(v);
-      }
-      break;
-    case Ntype_op::Mult:
-      r = *Dlop::create_integer(1);
-      for (const auto& [q, v] : in) {
-        r = *r.mult_op(v);
-      }
-      break;
-    case Ntype_op::And:
-      r = *Dlop::create_integer(-1);
-      for (const auto& [q, v] : in) {
-        r = *r.and_op(v);
-      }
-      break;
-    case Ntype_op::Or:
-      for (const auto& [q, v] : in) {
-        r = *r.or_op(v);
-      }
-      break;
-    case Ntype_op::Xor:
-      for (const auto& [q, v] : in) {
-        r = *r.xor_op(v);
-      }
-      break;
-    case Ntype_op::Not     : r = *at(0).not_op(); break;
-    case Ntype_op::SHL     : r = *at(0).shl_op(at(1)); break;
-    case Ntype_op::SRA     : r = *at(0).sra_op(at(1)); break;
-    case Ntype_op::Sext    : r = *at(0).sext_op(at(1)); break;
-    case Ntype_op::Get_mask: {
-      const auto [lo, hi] = *gu::bit_range(n);
-      r                   = *at(0).get_mask_op_opt(lo, hi);
-      break;
-    }
-    case Ntype_op::Mux   : r = at(at(0).is_known_zero() ? 1 : 2); break;
-    case Ntype_op::EQ    : r = *in[0].second.eq_op(in[1].second); break;
-    case Ntype_op::LT    : r = *at(0).lt_op(at(1)); break;
-    case Ntype_op::GT    : r = *at(0).gt_op(at(1)); break;
-    case Ntype_op::Concat: {
-      // Each lane masked into its window (graph/cell.hpp Concat).
-      for (const auto& l : gu::concat_lanes(n)) {
-        r = *r.or_op(*eval(l.value, memo).get_mask_op_opt(0, l.width)->shl_op(*Dlop::create_integer(l.offset)));
-      }
-      break;
-    }
-    default: ADD_FAILURE() << "unsupported op " << gu::debug_name(n); break;
-  }
-  // Comparisons read as 0/1 integers.
-  if (r.is_bool()) {
-    r = *Dlop::create_integer(r.is_known_true() ? 1 : 0);
-  }
-  memo.emplace(key, r);
-  return r;
-}
+using livehd::cprop_testing::dlop_eval;
 
 struct Fixture {
   std::shared_ptr<hhds::Graph> g;
@@ -185,7 +103,7 @@ std::vector<Dlop> run(Fixture& f, const std::vector<std::array<int64_t, 4>>& vec
     for (int i = 0; i < 4; ++i) {
       memo.emplace(static_cast<uint64_t>(ins[i].get_class_index().value), *Dlop::create_integer(v[i]));
     }
-    out.push_back(eval(o, memo));
+    out.push_back(dlop_eval(o, memo));
   }
   return out;
 }

@@ -16,6 +16,7 @@
 
 #include "absl/container/flat_hash_set.h"
 #include "bitwidth.hpp"
+#include "cprop_test_eval.hpp"
 #include "enableopt.hpp"
 #include "graph_library_singleton.hpp"
 #include "gtest/gtest.h"
@@ -1645,233 +1646,10 @@ TEST(CpropHotmux, IdenticalArmsRequireExclusivity) {
 
 namespace {
 namespace gu      = livehd::graph_util;
-using Test_pin    = hhds::Pin_class;
-using Test_values = std::unordered_map<uint64_t, int64_t>;
-
-// Independent integer evaluator for the small combinational transition cones
-// below. Inputs and current state are supplied explicitly; memoization preserves
-// DAG sharing. Unsupported operators fail rather than supplying a golden value.
-int64_t mux_eval(Test_pin pin, Test_values& values) {
-  if (pin.is_const()) {
-    return gu::const_of(pin).to_just_i64();
-  }
-  auto key = static_cast<uint64_t>(pin.get_class_index().value);
-  if (auto it = values.find(key); it != values.end()) {
-    return it->second;
-  }
-  auto node = pin.get_master_node();
-  auto op   = gu::type_op_of(node);
-  auto at   = [&](int pid) {
-    auto ds = node.get_sink_pin(pid).get_driver_pins();
-    EXPECT_EQ(ds.size(), 1);
-    return ds.empty() ? int64_t{0} : mux_eval(ds.front(), values);
-  };
-  int64_t result = 0;
-  if (op == Ntype_op::Mux) {
-    const auto count  = node.inp_pins_snapshot().size() - 1;
-    const auto select = at(0);
-    const auto arm    = count == 2                                             ? size_t(select != 0)
-                        : select < 0 || static_cast<uint64_t>(select) >= count ? count - 1
-                                                                               : size_t(select);
-    result            = at(arm + 1);
-  } else if (op == Ntype_op::Not) {
-    result = ~at(0);
-  } else if (op == Ntype_op::Sum || op == Ntype_op::Mult || op == Ntype_op::LT || op == Ntype_op::GT) {
-    int64_t a = op == Ntype_op::Mult ? 1 : 0, b = 0;
-    for (auto sink : node.inp_sorted_pins()) {
-      const auto value = mux_eval(sink.get_driver_pin(), values);
-      if (Ntype::sink_bank(op, sink.get_port_id()) == 1) {
-        b += value;
-      } else if (op == Ntype_op::Mult) {
-        a *= value;
-      } else {
-        a += value;
-      }
-    }
-    result = op == Ntype_op::LT ? a < b : op == Ntype_op::GT ? a > b : a - b;
-  } else if (op == Ntype_op::Div || op == Ntype_op::Rem) {
-    const auto a = at(0), b = at(1);
-    EXPECT_NE(b, 0);
-    result = b == 0 ? 0 : op == Ntype_op::Div ? a / b : a % b;
-  } else if (op == Ntype_op::Sext) {
-    const auto bit   = at(1) - 1;
-    const auto mask  = (int64_t{1} << bit) - 1;
-    const auto value = at(0);
-    result           = (value & (int64_t{1} << bit)) ? (value | ~mask) : (value & mask);
-  } else if (op == Ntype_op::Rxor || op == Ntype_op::Popcount) {
-    const auto value = static_cast<uint64_t>(at(0)) & ((uint64_t{1} << at(1)) - 1);
-    const auto count = std::popcount(value);
-    result           = op == Ntype_op::Rxor ? count % 2 : count;
-  } else if (op == Ntype_op::Hotmux) {
-    auto inputs = gu::hotmux_inputs(node);
-    bool found  = false;
-    for (const auto& [control, value] : inputs.arms) {
-      if (mux_eval(control, values) != 0) {
-        EXPECT_FALSE(found) << "a rewritten Hotmux must remain one-hot";
-        found  = true;
-        result = mux_eval(value, values);
-      }
-    }
-    if (!found && !inputs.fallback.is_invalid()) {
-      result = mux_eval(inputs.fallback, values);
-    }
-  } else if (op == Ntype_op::Concat) {
-    for (const auto& lane : gu::concat_lanes(node)) {
-      const auto mask  = (uint64_t{1} << lane.width) - 1;
-      result          |= static_cast<int64_t>((static_cast<uint64_t>(mux_eval(lane.value, values)) & mask) << lane.offset);
-    }
-  } else if (op == Ntype_op::Set_mask) {
-    const auto [lo, hi] = *gu::bit_range(node);
-    const auto mask     = ((uint64_t{1} << (hi - lo)) - 1) << lo;
-    const auto base     = static_cast<uint64_t>(mux_eval(gu::get_driver_of_sink_name(node, "a"), values));
-    const auto value    = static_cast<uint64_t>(mux_eval(gu::get_driver_of_sink_name(node, "value"), values));
-    result              = static_cast<int64_t>((base & ~mask) | ((value << lo) & mask));
-  } else if (op == Ntype_op::Get_mask) {
-    // Constant contiguous window only: bits [lo,hi) of `a`, LSB-aligned.
-    const auto [lo, hi] = *gu::bit_range(node);
-    EXPECT_GE(lo, 0);
-    const auto value = mux_eval(gu::get_driver_of_sink_name(node, "a"), values);
-    result           = (value >> lo) & ((int64_t{1} << (hi - lo)) - 1);
-  } else if (op == Ntype_op::SHL || op == Ntype_op::SRA) {
-    // Non-negative test values only, so SRA is a logical shift here.
-    const auto value  = mux_eval(gu::get_driver_of_sink_name(node, "a"), values);
-    const auto amount = mux_eval(gu::get_driver_of_sink_name(node, "b"), values);
-    result            = op == Ntype_op::SHL ? value << amount : value >> amount;
-  } else if (op == Ntype_op::And || op == Ntype_op::Or || op == Ntype_op::Ror || op == Ntype_op::EQ || op == Ntype_op::Xor) {
-    result           = op == Ntype_op::And ? -1 : 0;
-    bool    first    = true;
-    int64_t previous = 0;
-    for (auto e_sink : node.inp_sorted_pins()) {
-      for (auto e_drv : e_sink.get_driver_pins()) {
-        auto value = mux_eval(e_drv, values);
-        if (op == Ntype_op::And) {
-          result &= value;
-        } else if (op == Ntype_op::Or || op == Ntype_op::Ror) {
-          result |= value;
-        } else if (op == Ntype_op::Xor) {
-          result ^= value;
-        } else {
-          if (first) {
-            result = 1;
-          } else {
-            result &= previous == value;
-          }
-          previous = value;
-          first    = false;
-        }
-      }
-    }
-    if (op == Ntype_op::Ror) {
-      result = result != 0;
-    }
-  } else {
-    ADD_FAILURE() << "unbound input/state or unsupported evaluator op " << gu::debug_name(node);
-  }
-  values.emplace(key, result);
-  return result;
-}
-
-struct Mux_graph {
-  std::shared_ptr<hhds::Graph> graph;
-  int                          width;
-  bool                         signed_data;
-  std::vector<Test_pin>        controls;
-  Test_pin                     a, b, en, clock;
-
-  Mux_graph(const std::string& name, int count, int bits = 32, bool sign = false, bool wide_control = false)
-      : width(bits), signed_data(sign) {
-    auto& lib = livehd::Hhds_graph_library::instance("lgdb_cprop_mux_sharing");
-    auto  io  = lib.create_io(name);
-    for (int i = 0; i < count; ++i) {
-      const auto s = "c" + std::to_string(i);
-      io->add_input(s, i + 1);
-      io->set_bits(s, wide_control ? 8 : 1);
-    }
-    io->add_input("a", count + 1);
-    io->set_bits("a", bits);
-    io->add_input("b", count + 2);
-    io->set_bits("b", bits);
-    io->add_input("en", count + 3);
-    io->set_bits("en", 1);
-    io->add_input("clock", count + 4);
-    io->set_bits("clock", 1);
-    io->add_output("out", count + 5);
-    io->set_bits("out", bits);
-    io->add_output("observe", count + 6);
-    io->set_bits("observe", bits);
-    graph = io->create_graph();
-    for (int i = 0; i < count; ++i) {
-      controls.push_back(graph->get_input_pin("c" + std::to_string(i)));
-    }
-    a     = graph->get_input_pin("a");
-    b     = graph->get_input_pin("b");
-    en    = graph->get_input_pin("en");
-    clock = graph->get_input_pin("clock");
-    if (sign) {
-      gu::set_sbits(a, bits);
-      gu::set_sbits(b, bits);
-    }
-  }
-  Test_pin         constant(int64_t value) { return gu::create_const(*graph, *Dlop::create_integer(value)); }
-  hhds::Node_class node(Ntype_op op, int bits = 0) {
-    auto n = gu::create_typed_node(*graph, op, bits ? bits : width);
-    if (signed_data && !bits) {
-      gu::set_sbits(n.create_driver_pin(0), width);
-    } else {
-      gu::set_ubits(n.create_driver_pin(0), bits ? bits : width);
-    }
-    return n;
-  }
-  Test_pin mux(Test_pin s, Test_pin f, Test_pin t) {
-    auto n = node(Ntype_op::Mux);
-    n.create_sink_pin(0).connect_driver(s);
-    n.create_sink_pin(1).connect_driver(f);
-    n.create_sink_pin(2).connect_driver(t);
-    return n.create_driver_pin(0);
-  }
-  Test_pin eq(Test_pin selector, int64_t value) {
-    auto n = node(Ntype_op::EQ, 1);
-    // EQ is single-bank: its two operands take consecutive pids, not one pin.
-    gu::setup_sink_pid(n, 0).connect_driver(selector);
-    gu::setup_sink_pid(n, 0).connect_driver(constant(value));
-    return n.create_driver_pin(0);
-  }
-  // tolg's `x != 0`: (x == 0) ^ 1.
-  Test_pin not_zero(Test_pin x) {
-    auto n = node(Ntype_op::Xor, 1);
-    gu::setup_sink_pid(n, 0).connect_driver(eq(x, 0));
-    gu::setup_sink_pid(n, 0).connect_driver(constant(1));
-    return n.create_driver_pin(0);
-  }
-  Test_pin logic(Ntype_op op, std::initializer_list<Test_pin> operands) {
-    auto n = node(op, 1);
-    for (auto p : operands) {
-      gu::setup_sink_pid(n, 0).connect_driver(p);
-    }
-    return n.create_driver_pin(0);
-  }
-  Test_pin output() { return graph->get_output_pin("out").get_driver_pins().front(); }
-  Test_pin observed() { return graph->get_output_pin("observe").get_driver_pins().front(); }
-  size_t   count(Ntype_op op) {
-    size_t result = 0;
-    for (auto n : graph->body().nodes()) {
-      result += gu::type_op_of(n) == op;
-    }
-    return result;
-  }
-  Test_values inputs(uint64_t mask, int64_t av, int64_t bv, bool enabled = true, bool wide = false) {
-    Test_values result;
-    auto        put = [&](Test_pin p, int64_t v) { result.emplace(p.get_class_index().value, v); };
-    put(a, av);
-    put(b, bv);
-    put(en, enabled);
-    put(clock, 0);
-    for (size_t i = 0; i < controls.size(); ++i) {
-      put(controls[i], mask & (uint64_t{1} << (i % 64)) ? (wide ? 32 : 1) : 0);
-    }
-    return result;
-  }
-};
+using livehd::cprop_testing::Mux_graph;
+using livehd::cprop_testing::mux_eval;
+using livehd::cprop_testing::Test_pin;
+using livehd::cprop_testing::Test_values;
 
 TEST(CpropMuxSharing, PriorityTreePreservesEveryControlCombination) {
   for (bool sign : {false, true}) {
@@ -3099,26 +2877,8 @@ TEST(CpropOpSharing, DeepCascadeHasLinearGeneratedSize) {
 // `if c_i { acc OP= b + k_i }` unrolled: mux(c_i, acc, acc OP x_i) per link,
 // or the update on the false arm. `links` is the chain's update cells
 // (link i: its Mux and its update cell).
-struct Guard_chain {
-  std::vector<hhds::Node_class> muxes, updates;
-};
-Guard_chain build_guard_chain(Mux_graph& f, Ntype_op op, bool update_true) {
-  Guard_chain chain;
-  auto        acc = f.a;
-  for (int i = 0; i < 4; ++i) {
-    auto term = f.node(Ntype_op::Sum);
-    gu::setup_sink_pid(term, 0).connect_driver(f.b);
-    gu::setup_sink_pid(term, 0).connect_driver(f.constant(3 * i + 1));
-    auto upd = f.node(op);
-    gu::setup_sink_pid(upd, 0).connect_driver(acc);
-    gu::setup_sink_pid(upd, 0).connect_driver(term.create_driver_pin(0));
-    acc = update_true ? f.mux(f.controls[i], acc, upd.create_driver_pin(0)) : f.mux(f.controls[i], upd.create_driver_pin(0), acc);
-    chain.updates.push_back(upd);
-    chain.muxes.push_back(acc.get_master_node());
-  }
-  acc.connect_sink(f.graph->get_output_pin("out"));
-  return chain;
-}
+using livehd::cprop_testing::build_guard_chain;
+using livehd::cprop_testing::Guard_chain;
 
 // Inside a guard scope (a lifted loop body) the guard moves onto the term
 // (acc OP mux(c_i, id, x_i)) and the compile schedule flattens the plain

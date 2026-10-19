@@ -1,0 +1,31 @@
+;; rules/shift.rules: Sext algebra. Sext(x, b) keeps x's low b bits and sign-extends from bit b-1, b >= 1.
+;; The same-direction shift chains (shl_shl, sra_sra) are here too; the mixed SHL/SRA compositions have a
+;; sign-dependent result and stay hand-written in shift.cpp.
+
+(simplify sext_sext 30
+  (Sext (Sext x (k a)) (k b))
+  :when (>= a 1) (>= b 1)
+  => (Sext x (k (min a b)))
+  :example (Sext (Sext $x 6) 4)
+  :doc "Sext(Sext(x, a), b) = Sext(x, min(a, b)).")
+
+(simplify sext_getmask 30
+  (Sext (Get_mask y 0 (k hi)) (k b))
+  :when (>= b 1) (<= b hi)
+  => (Sext y (k b))
+  :example (Sext (Get_mask $y 0 8) 4)
+  :doc "Sext(Get_mask(y, 0, hi), b) = Sext(y, b) for 1 <= b <= hi: Sext keeps b bits, all inside the low window, so they are y's.")
+
+(simplify shl_shl 30
+  (SHL (SHL x (k a)) (k b))
+  :when (>= a 0) (>= b 0) (<= (+ a b) 268435456)
+  => (SHL x (k (+ a b)))
+  :example (SHL (SHL $x 2) 3)
+  :doc "SHL(SHL(x, a), b) = SHL(x, a + b): shifts never drop bits, so chained left shifts add (up to the 2^28 amount cap).")
+
+(simplify sra_sra 30
+  (SRA (SRA x (k a)) (k b))
+  :when (>= a 0) (>= b 0) (<= (+ a b) 268435456)
+  => (SRA x (k (+ a b)))
+  :example (SRA (SRA $x 2) 3)
+  :doc "SRA(SRA(x, a), b) = SRA(x, a + b): floor division by 2^a then 2^b is floor division by 2^(a+b).")

@@ -3,7 +3,11 @@
 load("@build_bazel_apple_support//xcode:xcode_config.bzl", "xcode_config")
 load("@rules_cc//cc:defs.bzl", "cc_binary")
 
-exports_files(["native_sim.py"])
+exports_files([
+    "aegraph_md_fresh.sh",
+    "aegraph_md_refresh.sh",
+    "native_sim.py",
+])
 
 cc_binary(
     name = "rudy_metrics",

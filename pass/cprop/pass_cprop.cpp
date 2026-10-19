@@ -9,6 +9,7 @@
 
 #include "absl/container/flat_hash_set.h"
 #include "cprop.hpp"
+#include "cprop_summary.hpp"
 #include "loop_hoist.hpp"
 #include "worker_pool.hpp"  // livehd::run_workers (big-stack workers)
 
@@ -36,6 +37,11 @@ void Pass_cprop::setup() {
                         "both|first|second: which of the two compile cprop slots (the first, before pass.legalize, and the "
                         "second, after enableopt) follow compile.cprop.engine; the other slot stays classic",
                         "both");
+
+  m1.add_label_optional("stats",
+                        "INTERNAL set by the kernel from lhd.stats: emit one cprop-summary diagnostic per graph "
+                        "(nodes_in/out, by_op, ms, creates, lg_bytes)",
+                        "false");
 
   register_pass(m1);
 }
@@ -83,6 +89,29 @@ void Pass_cprop::optimize(Eprp_var& var) {
     return;
   }
   const auto low_lanes = var.get("low_lanes", "true") != "false";
+  const auto stats     = var.get("stats", "false") == "true";
+  // One summary record per graph (indexed like var.graphs), emitted serially
+  // after the workers join so the diagnostic order is the graph order.
+  std::vector<livehd::cprop_summary::Record> records(stats ? var.graphs.size() : 0);
+  const auto                                 transform = [&](Cprop& cp, size_t i) {
+    const auto& g = var.graphs[i];
+    if (!stats || !g) {
+      cp.do_trans(g);
+      return;
+    }
+    const auto name = g->get_io() ? std::string{g->get_io()->get_name()} : std::string{};
+    livehd::cprop_summary::Probe probe(*g, true);
+    cp.do_trans(g);
+    records[i] = probe.finish(*g, name);
+  };
+  const auto report = [&] {
+    for (const auto& r : records) {
+      if (r.graph.empty()) {
+        continue;
+      }
+      livehd::cprop_summary::emit("pass.cprop", r);
+    }
+  };
   // The accumulation guard is a rolled-loop rewrite (Cprop::set_guard_scope):
   // every cell of a lifted loop body, nothing else.
   const auto loop_bodies = lifted_loop_bodies(var.graphs);
@@ -102,10 +131,11 @@ void Pass_cprop::optimize(Eprp_var& var) {
   const size_t        nw = std::min({var.graphs.size(), hw, size_t{16}});
   if (nw <= 1) {
     Cprop cp{low_lanes};
-    for (const auto& g : var.graphs) {
-      scoped(cp, g);
-      cp.do_trans(g);
+    for (size_t i = 0; i < var.graphs.size(); ++i) {
+      scoped(cp, var.graphs[i]);
+      transform(cp, i);
     }
+    report();
     hoist_after(var);
     return;
   }
@@ -128,7 +158,7 @@ void Pass_cprop::optimize(Eprp_var& var) {
       }
       try {
         scoped(cp, var.graphs[i]);
-        cp.do_trans(var.graphs[i]);
+        transform(cp, i);
       } catch (...) {
         errors[i] = std::current_exception();
         failed.store(true, std::memory_order_relaxed);
@@ -140,5 +170,6 @@ void Pass_cprop::optimize(Eprp_var& var) {
       std::rethrow_exception(error);
     }
   }
+  report();
   hoist_after(var);
 }

@@ -1,0 +1,15 @@
+;; rules/mux.rules: two-arm Mux rewrites. Mux s f t = s ? t : f, pins s (0), f (1), t (2); the
+;; exact-arity pattern (Mux s f t) never matches an n-ary Mux.
+
+(simplify mux_sel_arm 30
+  (Mux s 0 s)
+  => s
+  :example (Mux $s 0 $s)
+  :doc "Mux(s, 0, s) = s: s ? s : 0.")
+
+(simplify mux_sel_not 30
+  (Mux (EQ c 0) f t)
+  :when (bool01 c)
+  => (Mux c t f)
+  :example (Mux (EQ (EQ $a 0) 0) $f $t)
+  :doc "Mux(EQ(c, 0), f, t) = Mux(c, t, f) for a 0/1 value c: the selector reads the condition itself and the arms swap.")

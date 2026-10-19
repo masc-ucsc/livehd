@@ -1,0 +1,11 @@
+/*
+:name: aeg_mux_sel_not
+:type: lec
+*/
+// PYROPE-vs-PYROPE group, the fixture of the aegraph rule `mux_sel_not`
+// (pass/aegraph/rules/mux.rules): Mux(EQ(c, 0), f, t) = Mux(c, t, f) for a 0/1
+// value c. `!(a > b)` selects with EQ(GT, 0) and a comparison is 0/1, so the
+// rule's bool01 guard holds. REFERENCE = classic engine; `_1` = e-graph engine.
+pub comb top(a:U8, b:U8, p:U8, q:U8) -> (y:U8) {
+  y = if !(a > b) { p } else { q }
+}
