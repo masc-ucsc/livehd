@@ -64,7 +64,9 @@ fi
 # original-repo-class defects; the substitution is a pure declaration reorder and
 # is recorded in the .f header so no result silently claims to be about the
 # unpatched source.
-PATCH_MAP="$(dirname "$SCRIPT_DIR")/generated/core-et/patched_src/map.tsv"
+# COREET_PATCH_MAP overrides it, so a caller can use a map it derived into fresh
+# staging (COREET_PATCHED_OUTDIR) without touching the shared one.
+PATCH_MAP="${COREET_PATCH_MAP:-$(dirname "$SCRIPT_DIR")/generated/core-et/patched_src/map.tsv}"
 # REFUSE to run unpatched. This used to fall back to the original sources when
 # the map was absent, and silence is the worst possible behaviour here: the
 # unpatched tree fails slang on defects the patcher already fixes, so a sweep

@@ -24,6 +24,7 @@ is a design the memory route's own theorems apply to, nothing more.
 -/
 import LeanSemanticPrimitives.Projection.CertLoad
 import LeanSemanticPrimitives.Projection.HardwareMemFixture
+import LeanSemanticPrimitives.Projection.AxiomGate
 
 namespace Projection
 namespace MemSupport
@@ -105,7 +106,7 @@ different indices.  So "the memory route" is a different entry of the same
 program, not a replacement of the scalar one. -/
 
 theorem entry_name : hwMemS.entry = "mainM" := hwMemS_entry
-theorem entry_index : idOf "mainM" = some 50 := mainM_id
+theorem entry_index : idOf "mainM" = some 60 := mainM_id
 theorem entry_distinct : idOf "main" ≠ idOf "mainM" := main_ne_mainM
 
 /-- **The answer the report is worth.**  A design the memory route admits, run
@@ -262,13 +263,13 @@ private def romOnlyDesign : DesignCert :=
 /- …so the verdict can no longer be the one the audit caught -/
 #guard verdict romOnlyDesign != "SCALAR ROUTE: refused (memFree) -- MEMORY ROUTE: admitted"
 
-#print axioms memFree_mem_scalarFailures
-#print axioms sources_mem_scalarFailures
-#print axioms scalarFailures_ne_nil
-#print axioms admitOK_eq
-#print axioms scalar_refuses_memory
-#print axioms run_of_report
-#print axioms run_of_report_init
+#audit_axioms memFree_mem_scalarFailures
+#audit_axioms sources_mem_scalarFailures
+#audit_axioms scalarFailures_ne_nil
+#audit_axioms admitOK_eq
+#audit_axioms scalar_refuses_memory
+#audit_axioms run_of_report
+#audit_axioms run_of_report_init
 
 end MemSupport
 end Projection

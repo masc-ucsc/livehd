@@ -97,15 +97,16 @@ std::string canonical_decimal(std::string_view value) {
 
 uint32_t dcert_opcode(const Op& op) {
   // The numbering is `Compiler.CertIO.opCode`'s, which covers 29 operators.
-  // `Operation` names 24 of them: the LGraph front end never builds Sub (2),
-  // Div (4), SDiv (6), LT (12) or GT (13), so those codes are reachable only
-  // from a hand-written certificate. Listed here as a comment rather than as
-  // dead cases, so the switch stays exhaustive over `Operation`.
+  // `Operation` names 25 of them: the LGraph front end never builds Sub (2),
+  // Div (4), LT (12) or GT (13), so those codes are reachable only from a
+  // hand-written certificate. Listed here as a comment rather than as dead
+  // cases, so the switch stays exhaustive over `Operation`.
   switch (op.kind) {
     case Operation::Const     : return 0;
     case Operation::Sum       : return 1;
     case Operation::Mult      : return 3;
     case Operation::UDiv      : return 5;
+    case Operation::SDiv      : return 6;
     case Operation::And       : return 7;
     case Operation::Or        : return 8;
     case Operation::Xor       : return 9;

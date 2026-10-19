@@ -20,7 +20,7 @@ import LeanSemanticPrimitives.Projection.ProjectedStep
 import LeanSemanticPrimitives.Projection.Proto.PartialEvaluatorFast
 import LeanSemanticPrimitives.Projection.Proto.InterpreterVariant
 import LeanSemanticPrimitives.Projection.Proto.RewriteTotal
-import LeanSemanticPrimitives.Compiler.CertIOV1
+import LeanSemanticPrimitives.Projection.CertLoadAny   -- DCERT1 (unchanged) or DCERT2
 import LeanSemanticPrimitives.Projection.CertLoad
 
 open Compiler Projection
@@ -497,7 +497,7 @@ def one (shape : String) (n : Nat) (side : String) : IO UInt32 := do
 
 /-- Load a real DCERT1 certificate and specialize it, one side or both. -/
 def onFile (path : String) (side : String) : IO UInt32 := do
-  let D ← CertIO.V1.loadCert path
+  let D ← CertLoadAny.loadCertAny path
   IO.println s!"{path}: sources {D.sources.size} nodes {D.nodes.size} \
 outputs {D.outputs.size} flops {D.flops.size} memories {D.memories.size}"
   if side == "ref" then
@@ -511,7 +511,7 @@ outputs {D.outputs.size} flops {D.flops.size} memories {D.memories.size}"
   else compare path D D.nodes.size
 
 def onFileFuel (path : String) (sf wf : Nat) : IO UInt32 := do
-  let D ← CertIO.V1.loadCert path
+  let D ← CertLoadAny.loadCertAny path
   IO.println s!"{path}: nodes {D.nodes.size}  (fast, stepFuel {sf} wlFuel {wf})"
   match fastOfFuel sf wf D with
   | .ok R    => do IO.println s!"fast size {szOf R}"; return 0
@@ -541,7 +541,7 @@ def main (args : List String) : IO UInt32 := do
       -- whether a design has reachable sequential behaviour.  A design that
       -- merely collapses to its reset value once looks "changed" to a
       -- did-it-ever-move bit, which is why that bit is not enough.
-      let D ← CertIO.V1.loadCert path
+      let D ← CertLoadAny.loadCertAny path
       IO.println s!"{path}: flops {D.flops.size} sources {D.sources.size}"
       if D.flops.size == 0 then do
         IO.println "  combinational -- no reset sequence to drive"; return 0
@@ -619,7 +619,7 @@ the certificate is internally inconsistent, independent of any stimulus"
       -- projection.  A state that collapses to reset on cycle 1 and then sits
       -- there CHANGED ONCE but has no reachable sequential behaviour, and a
       -- vacuity check that only asks "did it ever change" passes it.
-      let D ← CertIO.V1.loadCert path
+      let D ← CertLoadAny.loadCertAny path
       let n := (ncyc.toNat?).getD 8
       IO.println s!"{path}: flops {D.flops.size} clock-domains {D.clocks.size}"
       let mut st := mkStateFor D 0
@@ -651,7 +651,7 @@ evidence of unreachable behaviour)"
       -- All SIX SupportedByProjection fields, per file, reported separately.
       let mut any := false
       for f in rest do
-        let D ← CertIO.V1.loadCert f
+        let D ← CertLoadAny.loadCertAny f
         let r := CertLoad.supportReport D
         let nm := (f.splitOn "/").getLast!
         IO.println s!"{nm}: src {D.sources.size} node {D.nodes.size} flop \
@@ -710,7 +710,7 @@ same-report {sameRep}  (applied {ra.applied}/{rb.applied}, beforeTotal \
       -- from the `partial` `goInline` that `hwAPVar` uses.  These are different
       -- programs; `--rewrite-agree` shows they agree on this input, which is
       -- evidence and not a transfer of theorems.
-      let D ← CertIO.V1.loadCert p
+      let D ← CertLoadAny.loadCertAny p
       IO.println s!"{p}: sources {D.sources.size} nodes {D.nodes.size} flops {D.flops.size}"
       let sr := CertLoad.supportReport D
       unless sr.allOK do IO.eprintln "  NOT SupportedByProjection"; return 2
@@ -748,7 +748,7 @@ NOT the 6-stimulus acceptance"
           return (if bad then 1 else 0)
   | "--host-var" :: p :: a :: b :: _ => do
       -- FEASIBILITY: the PROVED specializer with the VARIANT interpreter.
-      let D ← CertIO.V1.loadCert p
+      let D ← CertLoadAny.loadCertAny p
       IO.println s!"{p}: sources {D.sources.size} nodes {D.nodes.size} flops {D.flops.size}"
       let sr := CertLoad.supportReport D
       IO.println s!"support: wf {sr.wf} memFree {sr.memFree} sources {sr.sources} \
@@ -930,7 +930,7 @@ var-ok {b.toOption.isSome} at 20000/200"
       return (if bad then 2 else 0)
   | "--file-ab" :: p :: a :: b :: _ => do
       -- A real certificate, both interpreters, same fork specializer.
-      let D ← CertIO.V1.loadCert p
+      let D ← CertLoadAny.loadCertAny p
       IO.println s!"{p}: sources {D.sources.size} nodes {D.nodes.size} flops {D.flops.size}"
       unless ProtoVar.changed do IO.eprintln "variant not applied"; return 2
       -- SUPPORT FIRST.  `IHwAdequate` is stated under `SupportedByProjection`;
@@ -1016,7 +1016,7 @@ NOT evidence of unreachable behaviour."
 reference-runs {tRef} (6)  residual-runs {tRes} (6)  control {tCtl}"
           return (if bad then 1 else 0)
   | "--file-profile" :: p :: a :: b :: _ => do
-      let D ← CertIO.V1.loadCert p
+      let D ← CertLoadAny.loadCertAny p
       IO.println s!"{p}: sources {D.sources.size} nodes {D.nodes.size} flops {D.flops.size}"
       match fastOfFuel ((a.toNat?).getD 20000) ((b.toNat?).getD 200) D with
       | .error e => do IO.eprintln s!"FAILED ({repr e})"; return 2

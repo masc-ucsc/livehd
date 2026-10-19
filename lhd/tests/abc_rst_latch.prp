@@ -1,0 +1,9 @@
+// A wide latch with a reset VALUE mixing 0 and 1 bits: pass.abc maps it onto clear and preset latch cells
+// whose reset pins hang on one net (pass.abc.reset_fanout deals them out through a buffer tree).
+pub mod abc_rst_latch(en:Bool, d:U12) -> (q:U12@[0]) {
+  reg l:U12:[latch=true] = 1365
+  if en {
+    l = d
+  }
+  q = l
+}

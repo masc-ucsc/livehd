@@ -31,6 +31,7 @@ mentions an address at all — is consumed ONLY by an enabled write, and the
 disabled branch is proved without it.
 -/
 import LeanSemanticPrimitives.Projection.HardwareMemNodes
+import LeanSemanticPrimitives.Projection.AxiomGate
 
 namespace Projection
 namespace HwMem
@@ -789,10 +790,10 @@ theorem mixedDesign_arity : ∀ c ∈ mixedDesign.nodes.toList,
   intro c hc
   revert hc; revert c; decide
 
-#print axioms mixedDesign_semwf
-#print axioms mixedDesign_admitted
-#print axioms mixedDesign_arity
-#print axioms sourcesThenNodes
+#audit_axioms mixedDesign_semwf
+#audit_axioms mixedDesign_admitted
+#audit_axioms mixedDesign_arity
+#audit_axioms sourcesThenNodes
 
 /-! ## 13. Crossed to the resolved program
 
@@ -802,7 +803,7 @@ left to the caller. -/
 
 /-- `evalNodesM` sits where `resolveProgram` put it — the same id the executed
 checks call. -/
-theorem evalNodesM_id : idOf "evalNodesM" = some 47 := rfl
+theorem evalNodesM_id : idOf "evalNodesM" = some 57 := rfl
 
 theorem sourcesThenNodes_resolved {D : DesignCert} {i : RuntimeInput} {st : StateM}
     {G : Nat → Option Nat}
@@ -817,7 +818,7 @@ theorem sourcesThenNodes_resolved {D : DesignCert} {i : RuntimeInput} {st : Stat
     ∃ ss' : List SlotV,
       PrefixRelM D i st G (D.sources.size + D.nodes.size) ss'
       ∧ Eval hwMemP []
-          (.call 47
+          (.call 57
              ([ encListG encNode D.nodes.toList
               , objEnv ((D.sources.toList.map (srcSlotV i st)).map SlotV.enc)
               , Val.int (Int.ofNat D.sources.size) ].map Term.lit))
@@ -952,7 +953,7 @@ theorem mixed_fold_resolved (i : RuntimeInput) (st : StateM)
       PrefixRelM mixedDesign i st mixedG
         (mixedDesign.sources.size + mixedDesign.nodes.size) ss'
       ∧ Eval hwMemP []
-          (.call 47
+          (.call 57
              ([ encListG encNode mixedDesign.nodes.toList
               , objEnv ((mixedDesign.sources.toList.map (srcSlotV i st)).map SlotV.enc)
               , Val.int (Int.ofNat mixedDesign.sources.size) ].map Term.lit))
@@ -968,7 +969,7 @@ theorem mixed_fold_resolved_zero (i : RuntimeInput) :
       PrefixRelM mixedDesign i zeroState mixedG
         (mixedDesign.sources.size + mixedDesign.nodes.size) ss'
       ∧ Eval hwMemP []
-          (.call 47
+          (.call 57
              ([ encListG encNode mixedDesign.nodes.toList
               , objEnv ((mixedDesign.sources.toList.map (srcSlotV i zeroState)).map SlotV.enc)
               , Val.int (Int.ofNat mixedDesign.sources.size) ].map Term.lit))
@@ -980,7 +981,7 @@ theorem mixed_fold_resolved_init (i : RuntimeInput) :
       PrefixRelM mixedDesign i initState mixedG
         (mixedDesign.sources.size + mixedDesign.nodes.size) ss'
       ∧ Eval hwMemP []
-          (.call 47
+          (.call 57
              ([ encListG encNode mixedDesign.nodes.toList
               , objEnv ((mixedDesign.sources.toList.map (srcSlotV i initState)).map SlotV.enc)
               , Val.int (Int.ofNat mixedDesign.sources.size) ].map Term.lit))
@@ -1043,35 +1044,35 @@ private def inDisabled : RuntimeInput :=
              | none   => false)
         | _ => false)
 
-#print axioms designCertWF_of_semwf
-#print axioms zeroState_shape
-#print axioms initState_shape
-#print axioms mixedG_src
-#print axioms mixedG_prop
-#print axioms mixed_addr_width
-#print axioms mixedG_fits
-#print axioms mixed_fold_resolved
-#print axioms mixed_fold_resolved_zero
-#print axioms mixed_fold_resolved_init
-#print axioms evalNodesM_id
-#print axioms sourcesThenNodes_resolved
-#print axioms slotValM_source
-#print axioms nodeValM_rec
-#print axioms prefixRelM_sources
-#print axioms dep_scalar
-#print axioms dep_mem
-#print axioms dep_kind_of_semwf
-#print axioms opArity_of_semwf
-#print axioms memRead_deps
-#print axioms memWriteBE_deps
-#print axioms deps_scalar
-#print axioms node_step_scalar
-#print axioms node_step_memRead
-#print axioms node_step_memWriteBE
-#print axioms node_step
-#print axioms prefixRelM_snoc
-#print axioms objEnv_snoc
-#print axioms evalNodesM_agree
+#audit_axioms designCertWF_of_semwf
+#audit_axioms zeroState_shape
+#audit_axioms initState_shape
+#audit_axioms mixedG_src
+#audit_axioms mixedG_prop
+#audit_axioms mixed_addr_width
+#audit_axioms mixedG_fits
+#audit_axioms mixed_fold_resolved
+#audit_axioms mixed_fold_resolved_zero
+#audit_axioms mixed_fold_resolved_init
+#audit_axioms evalNodesM_id
+#audit_axioms sourcesThenNodes_resolved
+#audit_axioms slotValM_source
+#audit_axioms nodeValM_rec
+#audit_axioms prefixRelM_sources
+#audit_axioms dep_scalar
+#audit_axioms dep_mem
+#audit_axioms dep_kind_of_semwf
+#audit_axioms opArity_of_semwf
+#audit_axioms memRead_deps
+#audit_axioms memWriteBE_deps
+#audit_axioms deps_scalar
+#audit_axioms node_step_scalar
+#audit_axioms node_step_memRead
+#audit_axioms node_step_memWriteBE
+#audit_axioms node_step
+#audit_axioms prefixRelM_snoc
+#audit_axioms objEnv_snoc
+#audit_axioms evalNodesM_agree
 
 end HwMem
 end Projection

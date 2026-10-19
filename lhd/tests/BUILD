@@ -1067,6 +1067,67 @@ sh_test(
     data = ["//lhd"],
 )
 
+# A clock gate in front of a LATCH (CORE-ET prim_write_commit_en): accepted as
+# window-held at P=2, reading the enable latch's HELD Q (no bypass); the same-
+# phase gate keeps the bypass path and rule 4 still refuses a same-edge reader.
+# LHD_EXTERNAL_SIM=1 adds a source-vs-normalized differential (iverilog, else
+# Verilator) with bypass and P=1 negative controls.
+sh_test(
+    name = "single_edge_latch_icg_test",
+    size = "large",
+    srcs = ["single_edge_latch_icg_test.sh"],
+    data = ["//lhd"],
+)
+
+# A GATED memory write clock with no phase divider (P=1): the gate folds into the
+# write enable and the port's clock rebinds to the root, so pass.lean emits a
+# certificate (it refuses a gate left on a memory clock). With LHD_EXTERNAL_SIM=1
+# an Icarus differential against the source, and against a GATE-LESS source as
+# the negative control.
+sh_test(
+    name = "single_edge_memory_gate_p1_test",
+    size = "large",
+    srcs = ["single_edge_memory_gate_p1_test.sh"],
+    data = [
+        "//lhd",
+        "//ware:cgen_memory_rtl",
+    ],
+)
+
+# A full case's "no branch matched" hold arm (yosys `proc -ifx`) is a FALSE
+# combinational cycle: pass.legalize proves it never active and unrolls it; a
+# sparse case's reachable hold is still refused. With LHD_EXTERNAL_SIM=1 an
+# Icarus differential against the RTL and a swapped-arm control.
+sh_test(
+    name = "legalize_false_cycle_test",
+    size = "medium",
+    srcs = ["legalize_false_cycle_test.sh"],
+    data = ["//lhd"],
+)
+
+# A DATA-gated latch whose window still reads a clock through logic the pass
+# cannot resolve (a gate inside an instance) is refused, not lowered with the
+# clock read as data; the same gate written in the top folds, and a window from
+# a stateful instance is accepted.
+sh_test(
+    name = "single_edge_opaque_gate_test",
+    size = "medium",
+    srcs = ["single_edge_opaque_gate_test.sh"],
+    data = ["//lhd"],
+)
+
+# CORE-ET's latch primitives read as the CORE-ET rows are (yosys-slang,
+# setundef=zero): the `Ror(clk)` phase spelling and the known-constant hold arm
+# normalize without the clock read as data, the preview latch on a gated clock is
+# admitted only for a falling-edge reader, and with LHD_EXTERNAL_SIM=1 an Icarus
+# differential against the RTL (P=1 and gate-less negative controls).
+sh_test(
+    name = "single_edge_setundef_latch_test",
+    size = "large",
+    srcs = ["single_edge_setundef_latch_test.sh"],
+    data = ["//lhd"],
+)
+
 # LIVE test for todo/livehd/2f-latch M8 steps 3b + 3g: all FOUR commit classes
 # (posedge, negedge, transparent-high, transparent-low) in ONE module.
 # Discrimination is checked through `lhd lec` (collapsing any two classes must
@@ -1605,6 +1666,34 @@ sh_test(
     env = {"MAPPER": mapper},
 ) for suffix, mapper in _MAPPERS]
 
+# pass/sweep (compile.flatten / compile.unknown_zero / compile.sweep): flop counts of
+# the mapped fixture with each option alone and together, a live stub that must keep
+# everything, an x-driven stub that folds only under unknown_zero, and the flattened +
+# swept compile result proven (bounded, from reset) equivalent to the default one.
+sh_test(
+    name = "lhd_sweep_test",
+    size = "large",
+    srcs = ["lhd_sweep_test.sh"],
+    data = _FLOW_DATA + [
+        "abc_arst_q.lib",
+        "sweep_mini.sv",
+    ],
+)
+
+# pass.abc.ware_zero_bits / pass.abc.memory_prune_reads: a barrel shifter over a vector
+# with one live lane and a lowered memory with narrow read windows map to fewer cells
+# when the module boundary no longer hides what the parent knows, and the mapped
+# netlists are LEC-equivalent to the source.
+sh_test(
+    name = "lhd_abc_zero_bits_test",
+    size = "large",
+    srcs = ["lhd_abc_zero_bits_test.sh"],
+    data = _FLOW_DATA + [
+        "abc_zero_bits.sv",
+        "//inou/prp:abc_tests",
+    ],
+)
+
 # 2i-abc_arith: every selectable adder architecture (rca/cska/cla + block_size)
 # tech-maps the arithmetic fixture and is LEC-equivalent to the original logic
 # (MAPPER=abc; the _usyn twin proves native USYN mapped, residual-off and
@@ -1640,6 +1729,22 @@ sh_test(
         "abc_arst_mix.v",
         "abc_arst_q.lib",
         "abc_arst_qn.lib",
+    ],
+    env = {"MAPPER": mapper},
+) for suffix, mapper in _MAPPERS]
+
+# pass.abc.reset_fanout deals an asynchronous-reset net with many clear/preset pins out through
+# a buffer tree (default off): every reset net is bounded, the netlist is proven by the graph
+# LEC and lgyosys, a flipped reset value refutes, and a cap of 1 is refused.
+[sh_test(
+    name = "lhd_abc_reset_tree_test" + suffix,
+    srcs = ["lhd_abc_reset_tree_test.sh"],
+    data = _FLOW_DATA + [
+        "abc_arst_q.lib",
+        "abc_arst_qn.lib",
+        "abc_latch_q.lib",
+        "abc_rst_latch.prp",
+        "abc_rst_tree.v",
     ],
     env = {"MAPPER": mapper},
 ) for suffix, mapper in _MAPPERS]
@@ -1685,6 +1790,32 @@ sh_test(
     name = "lhd_abc_derived_clock_test",
     size = "small",
     srcs = ["lhd_abc_derived_clock_test.sh"],
+    data = _FLOW_DATA + [
+        "abc_arst_q.lib",
+        "abc_derived_clock.v",
+    ],
+)
+
+# synth.state_sweep: unobserved registers and register bits leave the mapper's private
+# copy (across the hierarchy), proven equivalent to the source by the graph-native LEC.
+sh_test(
+    name = "lhd_state_sweep_test",
+    size = "small",
+    srcs = ["lhd_state_sweep_test.sh"],
+    data = _FLOW_DATA + [
+        "abc_arst_q.lib",
+        "reg_merge.v",
+        "state_sweep.v",
+        "state_sweep_mem.v",
+    ],
+)
+
+# pass.abc.large_flow_latches: a region mapped by the size tier's default flow (large_ge) keeps its
+# latches like the built-in flow, so derived-clock registers map to DFF cells instead of native flops.
+sh_test(
+    name = "lhd_abc_large_flow_latches_test",
+    size = "small",
+    srcs = ["lhd_abc_large_flow_latches_test.sh"],
     data = _FLOW_DATA + [
         "abc_arst_q.lib",
         "abc_derived_clock.v",
@@ -2648,6 +2779,23 @@ sh_test(
     timeout = "short",
     srcs = ["lhd_placement_unknown_const_smoke.py"],
     data = ["//lhd", "//inou/lefdef:test_data"],
+)
+
+# synth.place.reset_fanout: a flat net that drives many asynchronous reset pins is dealt out through a
+# buffer tree before placement; bounded, LEC-proven on the placed netlist, off by default.
+sh_test(
+    name = "lhd_placement_reset_tree_smoke",
+    size = "small",
+    timeout = "moderate",
+    srcs = ["lhd_placement_reset_tree_smoke.py"],
+    data = [
+        "sky130hd_dfbbp_1.lef.part",
+        "sky130hd_dfbbp_1.lib.part",
+        "sky130hd_dfrtp_1.lef.part",
+        "sky130hd_dfrtp_1.lib.part",
+        "//inou/lefdef:test_data",
+        "//lhd",
+    ],
 )
 
 sh_test(

@@ -20,6 +20,7 @@ invariant's `kind` field those give `SlotHere` at exactly the slots these
 lemmas read — so the scalar premises are the CHECKER's, not assumptions.
 -/
 import LeanSemanticPrimitives.Projection.HardwareMemCommit
+import LeanSemanticPrimitives.Projection.AxiomGate
 
 namespace Projection
 namespace HwLocal
@@ -218,11 +219,11 @@ theorem flopNexts_agreeOn {vals : List Val} {rho : Nat → CertVal}
           (by simp only [List.length_cons] at hidx; omega)
           (SEval_tl (.ref rfl)) (.ref rfl) (.ref rfl) (.ref rfl) (.ref rfl)
           (SEval_prim2 (.ref rfl) .lit (by simp [evalPrim] <;> omega)))
-#print axioms mkOutputs_agreeOn
-#print axioms rstActive_agreeOn
-#print axioms capture_agreeOn
-#print axioms flopNext_agreeOn
-#print axioms flopNexts_agreeOn
+#audit_axioms mkOutputs_agreeOn
+#audit_axioms rstActive_agreeOn
+#audit_axioms capture_agreeOn
+#audit_axioms flopNext_agreeOn
+#audit_axioms flopNexts_agreeOn
 
 end HwLocal
 end Projection

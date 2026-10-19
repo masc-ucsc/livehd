@@ -3,12 +3,16 @@
 # (no lake, no Mathlib).
 #
 # The shared core -- SemanticPrimitives, Translation/LGraphModel,
-# Translation/GraphRefine, Compiler/* -- is imported verbatim from livehd-new at
-# a pinned revision (see Projection/SHARED_SEMANTICS.md).  None of it imports
-# Mathlib, so it builds here in seconds alongside everything else.
+# Translation/GraphRefine and the Mathlib-free part of Compiler/* -- is
+# master's own (the FP branch pinned a livehd-new revision; master carries the
+# SHL/SRA/Sext boundary repairs, see Projection/SHARED_SEMANTICS.md).  None of
+# it imports Mathlib, so it builds here in seconds alongside everything else.
 #
-# Translation/OpBridge.lean DOES need Mathlib and is deliberately absent from
-# the list below; it is pinned for consistency, not built by this script.
+# Mathlib enters only through Compiler/{CompileOp,CompileGraph,CompileDesign}
+# and Translation/OpBridge; anything importing those (Compiler/CertIO's
+# runChecked_correct, CertIORoundTrip, ...) belongs to `lake build`, not here.
+# Every Projection module, including the whole memory route, is Mathlib-free
+# and is built by this script.
 set -uo pipefail
 cd "$(dirname "$0")"
 OUT=.olean-dev
@@ -24,14 +28,19 @@ MODULES=(
   Compiler/Runtime
   Compiler/DesignCertWF
   Compiler/DesignSemantics
-  # Compiler/CertIO is NOT built here. On the FP branch it was the DCERT1
-  # codec with no heavy dependencies; master's is DCERT2 and imports
-  # Compiler/CompileDesign, whose whole chain imports Mathlib. This driver
-  # is deliberately "no lake, no Mathlib" -- it excludes Translation/OpBridge
-  # for the same reason -- so DCERT2 is out of its scope and belongs to
-  # `lake build`. Nothing in the Projection contribution needs it:
-  # Projection/CertLoad takes the V1 route.
+  # Compiler/CertIO itself is NOT built here: its verified entry point
+  # (runChecked_correct) imports Compiler/CompileDesign, whose chain imports
+  # Mathlib, so it belongs to `lake build`. The DCERT2 CODEC it used to
+  # contain is Compiler/CertIOCodec (Mathlib-free), and the format router is
+  # Compiler/CertIORoute; both are built here, next to FP's DCERT1 codec.
   Compiler/CertIOV1
+  Compiler/CertIOCodec
+  Compiler/CertIORoute
+  # Run admission (decisions C3, C4): exact edge vectors, reset-polarity guard.
+  Compiler/ResetPolarity
+  Compiler/RunAdmission
+  # The axiom gate (`#audit_axioms`), first: every module that audits imports it.
+  Projection/AxiomGate
   Projection/ObjectLanguage
   Projection/ObjectLanguageSemantics
   Projection/BindingTime
@@ -40,6 +49,10 @@ MODULES=(
   Projection/SurfaceSemantics
   Projection/BTA
   Projection/PartialEvaluator
+  # S3 (deferred shifting) and its proof; the @[csimp] lemma must be in scope
+  # wherever mixDriver is compiled, so this precedes HardwareInterpreter.
+  Projection/PartialEvaluatorS3
+  Projection/S3Correct
   Projection/MixProgram
   Projection/Demo
   Projection/Gate0
@@ -50,12 +63,82 @@ MODULES=(
   Projection/RuntimeEncoding
   Projection/OperatorBridge
   Projection/HardwareInterpreter
+  Projection/SetMaskLoop
   Projection/HardwareAdequacy
   Projection/ProjectionCorrect
   Projection/ResidualFragment
   Projection/ProjectedStep
   Projection/CertLoad
+  # DCERT1 or DCERT2: one loader for the FP runners (CertLoad stays DCERT1-only).
+  Projection/CertLoadAny
+  # The memory route (master-only): finite memory images, the hwMemS entry,
+  # its adequacy chain, the static and runtime admission checks, BTA and the
+  # proved specialization on the memory entry. Mathlib-free; Compiler/DirectCheck
+  # (also Mathlib-free) supplies the checker's slot kinds.
+  Projection/MemImage
+  Projection/HardwareMem
+  Projection/HardwareMemSource
+  Projection/HardwareMemOp
+  Projection/HardwareMemSlots
+  Compiler/DirectCheck
+  Projection/HardwareMemTraversal
+  Projection/HardwareMemShapes
+  Projection/HardwareMemNodes
+  Projection/HardwareMemFold
+  Projection/HardwareMemCommit
+  Projection/HardwareMemOutFlop
+  Projection/HardwareMemMain
+  Projection/HardwareMemWidth
+  Projection/HardwareMemAdmit
+  Projection/HardwareMemChecks
+  Projection/HardwareMemCycle
+  Projection/HardwareMemSlotTy
+  Projection/HardwareMemRuntime
+  Projection/HardwareMemFixture
+  Projection/HardwareMemWrite
+  Projection/MemSupport
+  Projection/MemProjection
+  Projection/HardwareMemWriteAdmit
+  # The memory entry with `env0` inlined (the scalar route's TOTAL-variant
+  # rewrite, applied to mainM): memVar_iff(W), projectMemVarDesignAt(W)_correct.
+  Projection/Proto/InterpreterVariant
+  Projection/Proto/VariantTransport
+  Projection/Proto/RewriteTotal
+  Projection/MemVariant
+  Projection/MemVariantSim
+  # ... and the node fold fused into its readers (MemFused): the default route
+  Projection/MemFused
+  Projection/MemLog
+  Projection/MemPrimChecks
+  # host vs object specializer on the three memory primitives
+  Projection/MemMixMirrorCheck
+  Projection/Proto/ShiftBridge
+  # The bridge: exact edges + certWfError imply every route's edge premise.
+  Projection/EdgePolicy
+  # Residual serialization: a proved codec (decodeProgram_encodeProgram).
+  Projection/ResidualIO
   Projection/Scaling
+  # M3: verified symbolic interpretation of a residual (Projection/Sym/*).
+  Projection/Sym/Kit
+  Projection/Sym/Bridge
+  Projection/Sym/Val
+  Projection/Sym/Prim
+  Projection/Sym/Mem
+  Projection/Sym/Dispatch
+  Projection/Sym/Eval
+  Projection/Sym/Asg
+  Projection/Sym/Sat
+  Projection/Sym/Layout
+  Projection/Sym/Step
+  Projection/Sym/Trace
+  Projection/Sym/Shape
+  Projection/Sym/Unroll
+  Projection/Sym/Oblig
+  Projection/Sym/KInd
+  Projection/Sym/Refine
+  # The central audit: `#audit_axioms` FAILS this build on any axiom outside
+  # propext/Classical.choice/Quot.sound. The memory-route modules above audit
+  # their own theorems in place with the same command.
   Projection/Audit
 )
 

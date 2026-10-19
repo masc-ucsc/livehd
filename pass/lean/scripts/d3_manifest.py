@@ -43,7 +43,7 @@ import time
 ROOT = pathlib.Path(__file__).resolve().parents[3]
 DEFAULT_COREET = "${LIVEHD_NEW_ROOT:-../livehd-new}/generated/vc_sweep2/lean"
 DEFAULT_CVA6 = "${LIVEHD_NEW_ROOT:-../livehd-new}/generated/cva6_vc/lean"
-CVA6_PLAN = ROOT / "pass" / "lean" / "CVA6_COVERAGE_PLAN.md"
+CVA6_BLOCKS = ROOT / "pass" / "lean" / "tests" / "d4" / "cva6_78.list"
 COREET_SWEEP = ROOT / "pass" / "lean" / "SWEEP_b1-b2.tsv"
 
 EXPECT_COREET = 122
@@ -52,7 +52,7 @@ EXPECT_CVA6_SELECTED = 30
 
 SELECTION_RULE = (
     "the 30 CVA6 core-hierarchy blocks (of the authoritative 78 in "
-    "CVA6_COVERAGE_PLAN.md Phase 2) that had a certificate when the list was "
+    "pass/lean/tests/d4/cva6_78.list) that had a certificate when the list was "
     "first frozen, ranked by node count, largest first. Ranking by size keeps "
     "the selection re-derivable and biases it toward the hard cases. Once "
     "frozen the list is READ, never recomputed."
@@ -142,17 +142,28 @@ def coreet_manifest(certs_dir: pathlib.Path, out: pathlib.Path,
     return {"targets": len(man), "with_cert": have, "digest": digest}
 
 
+def read_block_list(path: pathlib.Path) -> list:
+    """One module name per line; blank lines and `#` comments are skipped."""
+    blocks = []
+    for line in path.read_text().splitlines():
+        name = line.strip()
+        if not name or name.startswith("#"):
+            continue
+        if not re.fullmatch(r"[A-Za-z0-9_]+", name):
+            raise ManifestError(f"bad module name in {path}: {name!r}")
+        blocks.append(name)
+    return blocks
+
+
 def cva6_manifests(certs_dir: pathlib.Path, out: pathlib.Path, refreeze: bool,
-                   plan_path: pathlib.Path = None) -> dict:
-    plan = (plan_path or CVA6_PLAN).read_text()
-    sec = plan.split("### TOP LEVEL", 1)[1].split("\n## ", 1)[0]
-    blocks = re.findall(r"^- `([A-Za-z0-9_]+)`", sec, re.M)
+                   blocks_path: pathlib.Path = None) -> dict:
+    blocks = read_block_list(blocks_path or CVA6_BLOCKS)
     if len(blocks) != EXPECT_CVA6_BLOCKS:
         raise ManifestError(
             f"CVA6 authoritative list is {len(blocks)}, expected {EXPECT_CVA6_BLOCKS}")
     dupes = sorted({b for b in blocks if blocks.count(b) > 1})
     if dupes:
-        raise ManifestError(f"duplicate CVA6 blocks in the plan: {dupes}")
+        raise ManifestError(f"duplicate CVA6 blocks in the block list: {dupes}")
 
     emit = {}
     emit_tsv = certs_dir.parent / "emit.tsv"

@@ -4,6 +4,7 @@
 
 #include <algorithm>
 #include <format>
+#include <functional>
 #include <optional>
 #include <set>
 #include <string>
@@ -18,6 +19,7 @@
 #include "hhds/attrs/name.hpp"
 #include "hhds/graph.hpp"
 #include "hlop/dlop.hpp"
+#include "attr_carry.hpp"
 #include "latch_contract.hpp"
 #include "node_util.hpp"
 
@@ -69,7 +71,87 @@ struct Element {
   // the GATE GUARD (and only the gate guard) is sampled in the rising slot and
   // held; see apply_icg's hold path.
   bool                        icg_hold = false;
+  // Enable latches this GATED LATCH reads by their held Q (the window rule in
+  // build_plan): the gate is steady over its whole open phase, so no bypass.
+  int                         icg_window_held = 0;
+  // Commits on a NON-reference root (Options::multi_clock): left the plain
+  // posedge flop it is -- no slot gate, no sync-reset move, clock_pin rebound to
+  // its OWN root; only its gated clock (if any) is folded.
+  bool                        off_ref         = false;
 };
+
+// Is an instance's definition purely combinational (no state anywhere below
+// it)? A body-less def is unknown and counted as combinational: the walk below
+// is a REFUSAL test, so the conservative answer is the one that keeps walking.
+bool def_is_comb(const std::shared_ptr<hhds::Graph>& def, absl::flat_hash_map<const hhds::Graph*, bool>& memo, int depth) {
+  if (!def) {
+    return true;
+  }
+  if (auto it = memo.find(def.get()); it != memo.end()) {
+    return it->second;
+  }
+  memo[def.get()] = false;  // a def reached again while open is a cycle: not provably combinational
+  bool comb = depth < 16;
+  for (auto dn : def->body().nodes()) {
+    if (!comb) {
+      break;
+    }
+    const auto op = gu::type_op_of(dn);
+    if (gu::is_type_register(dn)) {
+      comb = false;
+    } else if (op == Ntype_op::Sub) {
+      comb = def_is_comb(dn.get_subnode_graph(), memo, depth + 1);
+    }
+  }
+  memo[def.get()] = comb;
+  return comb;
+}
+
+// The clock input a DATA-gated latch's window still reads, or invalid. Such a
+// latch keeps its enable through the rewrite and evaluates it on every
+// sub-step, so a clock in that cone is read AS DATA after normalization: the
+// window follows the free sub-step clock, not the source phase. Every shape the
+// pass understands (a clock-phase window, a gate cone) is classified as
+// Clock-role before it gets here; what is left reads the clock through logic
+// the classifier could not resolve -- a gate inside an instance (a mapped
+// netlist's AND2 cell under a wrapper module), a reduction it does not
+// model. Walks the combinational cone INTO combinational instances (an
+// instance output is taken to depend on every input) and through Clock_cells,
+// stopping at state.
+hhds::Pin_class window_clock_read(const hhds::Pin_class& start, const lc::Design_clocks& clocks) {
+  absl::flat_hash_set<hhds::Class_index>        seen;
+  absl::flat_hash_map<const hhds::Graph*, bool> comb_def;
+  std::vector<hhds::Pin_class>                  work{start};
+  while (!work.empty()) {
+    auto p = work.back();
+    work.pop_back();
+    if (p.is_invalid() || p.is_const()) {
+      continue;
+    }
+    if (gu::is_graph_input_pin(p)) {
+      if (clocks.is_clock(p)) {
+        return p;
+      }
+      continue;
+    }
+    if (!seen.insert(p.get_class_index()).second) {
+      continue;
+    }
+    auto n = p.get_master_node();
+    if (gu::is_type_register(n)) {
+      continue;  // state: a value the window may read
+    }
+    if (gu::type_op_of(n) == Ntype_op::Sub && !def_is_comb(n.get_subnode_graph(), comb_def, 0)) {
+      continue;  // a stateful instance: its outputs are state, not a path from its clock input
+    }
+    for (auto sink : n.inp_sorted_pins()) {  // read-only pin walk
+      for (const auto& drv : sink.get_driver_pins()) {
+        work.push_back(drv);
+      }
+    }
+  }
+  return {};
+}
 
 // Backward combinational reach to STATE elements (stops at any register), so a
 // data-gated latch can inherit the slot of whatever drives its enable.
@@ -225,7 +307,27 @@ struct Mem_gate_plan {
   // the graph untouched (`opts.dry_run` returns before any rewrite and promises
   // exactly that). The AND cone over them is built in the rewrite.
   std::vector<hhds::Pin_class> gate_ops;
+  // The clock_pin to rebind to once the gate is folded: invalid means the
+  // reference pin; a port on a SECOND clock domain (multi_clock) keeps its own
+  // resolved root, because it is exported, not lowered.
+  hhds::Pin_class own_root;
 };
+
+// Does a write port of `n` sit behind a clock GATE? Such a port owes the fold
+// below even without a phase divider: the exporter refuses a gate left on
+// clock_pin, since dropping it would commit unconditionally.
+bool mem_has_gated_write_port(const hhds::Node_class& n, const lc::Design_clocks& clocks) {
+  const auto ms = mem_shape_of(n);
+  if (!ms.parsed) {
+    return false;  // judged by name where the scan runs; not a reason to start one
+  }
+  for (const auto& port : ms.ports) {
+    if (!port.rdport && !port.clock.is_invalid() && lc::resolve_icg(port.clock, clocks)) {
+      return true;
+    }
+  }
+  return false;
+}
 
 // A cell with no committing port: an immutable asynchronous ROM.  `update`,
 // `update_enable` and whole-array reset cells all carry a write port and are
@@ -526,13 +628,22 @@ struct Plan {
   // plus `[k]` for a bit k>0 of a bus (encode.cpp's Clk_root spelling), so a
   // side on clks[0] and one on clks[1] are two different time bases.
   std::string                           ref_clock_name;
+  int                                   domains = 1;  // clock roots state commits on (multi_clock lets >1 through)
+  std::string                           domain_desc;  // per-root detail, for the reason text
+  // Decision 3A: (latch, reader) pairs on one commit edge that rule 4 would
+  // refuse, admitted by GUARDED READER FORWARDING (apply_reader_forwards).
+  std::vector<std::pair<hhds::Node_class, hhds::Node_class>> forwards;
 };
 
-Plan build_plan(hhds::Graph* g, const lc::Design_clocks& clocks) {
+Plan build_plan(hhds::Graph* g, const lc::Design_clocks& clocks, bool multi_clock) {
   Plan plan;
 
   // 1. Collect every state element with its commit class.
   absl::flat_hash_map<std::string, int> per_net;  // net_key -> #elements on it (clock role only)
+  // One state element per clock net, for the multi-clock refusal: "3 clock
+  // nets" alone does not say WHICH nets, and a derived net the walk could not
+  // trace to its root reads exactly like a genuine second domain.
+  absl::flat_hash_map<std::string, std::string> example_on_net;
   // Multi-bit clock inputs: net_key -> the distinct bits used ("?<elem>" = not
   // decidable), and the bit itself when decided.
   absl::flat_hash_map<std::string, std::set<std::string>> bus_bits;
@@ -616,6 +727,9 @@ Plan build_plan(hhds::Graph* g, const lc::Design_clocks& clocks) {
         // suppress glitches: the latch closes exactly when the flop samples, so
         // the flop sees what the latch was passing THROUGH. Reading its Q
         // instead is the classic L1 error.
+        // The gate's enables AS WRITTEN, before any arm bypass below rewrites
+        // one: the window rule conditions on the OTHER enables of this cone.
+        const std::vector<hhds::Pin_class> gate_enables = e.icg->enables;
         for (auto& en : e.icg->enables) {
           if (en.is_invalid() || en.is_const() || gu::is_graph_input_pin(en)) {
             continue;
@@ -647,18 +761,70 @@ Plan build_plan(hhds::Graph* g, const lc::Design_clocks& clocks) {
           // lowering question, not a refusal.
           //
           // FLOPS ONLY. A latch behind a gate has its own window and its own
-          // commit rules, and a sampled enable is the wrong instrument for it.
+          // commit rules, and a sampled enable is the wrong instrument for it
+          // (its rule is `held_for_window`, below).
           const bool opposite_for_other_edge = !e.cc.rising && !e.is_latch
                                                && lc::gated_latch_closed_at(dn, e.icg->clock, /*closed_level=*/true)
                                                && lc::latch_open_at(dn, e.icg->clock, /*level=*/false);
+          // A GATED LATCH has its own rule, and it is NOT the flop rule above.
+          // A flop samples at one edge, so its gate must be steady ACROSS that
+          // edge. A latch is open for a whole PHASE and commits when it closes,
+          // so its gate must be steady for the WHOLE WINDOW: the enable latch
+          // shut while the gated latch is open, open while it is shut. That is
+          // the textbook glitch-free gate in front of a latch -- CORE-ET's
+          // tech_generic/prim_write_commit_en:
+          //
+          //     always_latch if (!clk)          en_1p <= en_i;   // shut while clk is high
+          //     always_latch if (clk && en_1p)  q_o   <= d_i;    // open while clk is high
+          //
+          // The flop rule asks the wrong question here (closed after the
+          // FALLING commit edge = open while clk is high, which would be the
+          // glitchy gate) and refused it as `clock-gate-latch-phase`.
+          //
+          // NO BYPASS on this path. The gated latch closes half a period after
+          // the enable latch did, so what gates its window -- and so what the
+          // commit-at-closing-edge model must read -- is the enable latch's
+          // HELD Q, captured when it shut. Its transparent arm is the value
+          // passing through at the OTHER edge: reading it would let `en_i`
+          // change mid-window and decide a commit the hardware had already
+          // decided. (The enable latch is itself retyped to a flop committing
+          // at its own closing edge, so its Q stays a valid read.)
+          const bool window_level = !e.cc.rising;  // a latch committing at FALL is open while the clock is HIGH
+          //
+          // NESTED GATES. After resolve_icg flattens a gate of a gated clock,
+          // the inner enable latch is `en_1p` with window `!(clk & en_q)`: shut
+          // at clk=1 only while the OUTER enable `en_q` is on. That is the only
+          // time this latch is open (its window needs every enable of the cone),
+          // so "shut whenever this latch is open" holds pointwise -- the check
+          // conditions on the cone's other enables being 1.
+          std::vector<hhds::Pin_class> others;
+          for (const auto& o : gate_enables) {
+            if (!o.is_invalid() && o != en) {
+              others.push_back(o);
+            }
+          }
+          // ...and "open while this latch is shut" conditions the same way: an
+          // enable latch ON the gated clock (`if (clock) en_2p = ...`, B08's
+          // prim_mul_div with clock = clk & en_q) is open at clk=1 only while
+          // the outer gate is on -- the only time this latch can commit.
+          const bool held_for_window
+              = e.is_latch
+                && (lc::gated_latch_closed_at(dn, e.icg->clock, /*closed_level=*/window_level)
+                    || lc::gated_latch_closed_assuming(dn, e.icg->clock, /*closed_level=*/window_level, others))
+                && (lc::latch_open_at(dn, e.icg->clock, /*level=*/!window_level)
+                    || lc::latch_open_assuming(dn, e.icg->clock, /*level=*/!window_level, others));
           if (opposite_for_other_edge && !opposite_here) {
             e.icg_hold = true;
           }
-          if (!opposite_here && !opposite_for_other_edge) {
+          if (!opposite_here && !opposite_for_other_edge && !held_for_window) {
             plan.code = "clock-gate-latch-phase";
             plan.why  = "state element `" + label_of(n) + "` is clocked through a gate whose enable latch `" + label_of(dn)
                         + "` is not transparent exactly on the phase opposite the gated edge";
             return plan;
+          }
+          if (held_for_window && !opposite_here) {
+            ++e.icg_window_held;
+            continue;  // the held Q, deliberately: see above
           }
           if (auto arm = lc::latch_transparent_arm(dn); !arm.is_invalid()) {
             en = arm;
@@ -686,6 +852,7 @@ Plan build_plan(hhds::Graph* g, const lc::Design_clocks& clocks) {
     plan.elems.push_back(e);
     if (cc->role == lc::Net_role::Clock) {
       ++per_net[cc->net_key()];
+      example_on_net.try_emplace(cc->net_key(), label_of(n));
       // A clock that is ONE BIT of a multi-bit input: record WHICH bit. The
       // commit class is keyed by the whole input (control_root follows every
       // Get_mask to it), so clks[0] and clks[1] would otherwise share one slot
@@ -733,12 +900,25 @@ Plan build_plan(hhds::Graph* g, const lc::Design_clocks& clocks) {
 
   // 2. Reference clock = the clock net carrying the most state. Ties break on
   //    the KEY (a string), never on traversal order, so both miter sides agree.
+  //    Under multi_clock a net whose state commits on the FALL needs the phase
+  //    divider, and only the reference gets one, so such a net is preferred:
+  //    counting cells alone made an 8-bit latch (8 cells) on a second clock
+  //    outweigh the clock that carried the negedge state.
+  absl::flat_hash_set<std::string> needs_divider;
+  for (const auto& e : plan.elems) {
+    if (e.cc.role == lc::Net_role::Clock && !e.cc.implicit_clock && !e.cc.rising) {
+      needs_divider.insert(e.cc.net_key());
+    }
+  }
   std::string ref_net;
-  int         best = -1;
+  int         best     = -1;
+  bool        best_div = false;
   for (const auto& [k, cnt] : per_net) {
-    if (cnt > best || (cnt == best && k < ref_net)) {
-      best    = cnt;
-      ref_net = k;
+    const bool div = needs_divider.contains(k);
+    if (std::tuple{div, cnt} > std::tuple{best_div, best} || (div == best_div && cnt == best && k < ref_net)) {
+      best     = cnt;
+      best_div = div;
+      ref_net  = k;
     }
   }
   if (per_net.size() >= 2) {
@@ -746,9 +926,32 @@ Plan build_plan(hhds::Graph* g, const lc::Design_clocks& clocks) {
     // free, testbench-driven clock genuinely has none), and slotting it anyway
     // would silently change what the design means. Decline: pass/lec's
     // detected-edge branch and sim's M6 model both still handle it honestly.
-    plan.code = "multi-clock-no-ratio";
-    plan.why  = std::format("{} clock nets and no known integer ratio between them", per_net.size());
-    return plan;
+    std::vector<std::string> keys;
+    for (const auto& [k, cnt] : per_net) {
+      keys.push_back(k);
+    }
+    std::sort(keys.begin(), keys.end());  // deterministic: keys are structural
+    std::string detail;
+    for (size_t i = 0; i < keys.size(); ++i) {
+      detail += std::format("{} `{}` ({} element(s), e.g. `{}`)",
+                            i == 0 ? ": " : "; ",
+                            keys[i],
+                            per_net[keys[i]],
+                            example_on_net[keys[i]]);
+    }
+    if (!multi_clock) {
+      plan.code = "multi-clock-no-ratio";
+      plan.why  = std::format("{} clock nets and no known integer ratio between them", per_net.size()) + detail;
+      return plan;
+    }
+    // multi_clock: the heaviest root is the reference and is normalized exactly
+    // as before. Every element on ANOTHER root is left the plain posedge flop it
+    // is -- step 3 refuses anything else -- and the consumer reads its domain
+    // from the certificate's clock table. Nothing here relates the domains: a
+    // step of the Lean semantics says which clocks fire, and the reference
+    // divider counts only its own clock's edges.
+    plan.domains     = static_cast<int>(per_net.size());
+    plan.domain_desc = detail;
   }
   // The reference clock is the RESOLVED ROOT of the class, not the raw
   // clock_pin driver. They differ whenever the cone carries an inversion or a
@@ -780,14 +983,43 @@ Plan build_plan(hhds::Graph* g, const lc::Design_clocks& clocks) {
   //    slot from the EDGE; a data-gated latch inherits the slot of the state
   //    its enable depends on.
   absl::flat_hash_map<hhds::Class_index, int> slot_of_node;  // for the data pass below
+  absl::flat_hash_set<hhds::Class_index>      off_ref_nodes;  // multi_clock: state left on a non-reference root
   for (auto& e : plan.elems) {
     if (e.cc.role != lc::Net_role::Clock) {
       continue;
     }
     if (e.cc.net_key() != ref_net) {
-      plan.code = "off-reference-clock";
-      plan.why  = "state element `" + label_of(e.node) + "` commits on a net that is not the reference clock";
-      return plan;
+      if (!multi_clock) {
+        plan.code = "off-reference-clock";
+        plan.why  = "state element `" + label_of(e.node) + "` commits on a net that is not the reference clock";
+        return plan;
+      }
+      // A second domain is EXPORTED, not divided: everything on it must commit
+      // on its clock's RISE. A posedge flop is left as it is. A latch that
+      // CLOSES on the rise (open while its clock is low -- a gate's enable
+      // latch, CORE-ET B05's `u_noc_clk_gate.en_latch`) is lowered exactly as
+      // the reference domain lowers one at P=1: retyped to a posedge flop on
+      // its own root (commit at the closing edge), with rule 4 and the
+      // cross-domain read rule below as its preconditions. A negedge element or
+      // a latch closing on the FALL would need a phase divider of its own --
+      // the reference divider counts the wrong clock -- so it is refused, never
+      // left as a partial lowering.
+      if (!e.cc.rising) {
+        plan.code = "off-reference-clock";
+        plan.why  = std::format("{} `{}` commits on `{}` ({}), a clock domain other than the reference `{}`; off the "
+                                "reference clock only state committing on the rise is supported (a second domain "
+                                "would need its own phase divider)",
+                                e.is_latch ? "latch" : "negedge flop",
+                                label_of(e.node),
+                                e.cc.net_key(),
+                                e.cc.rising ? "rise" : "fall",
+                                ref_net);
+        return plan;
+      }
+      e.off_ref = true;
+      e.slot    = 0;  // unused: it takes no slot gate
+      off_ref_nodes.insert(e.node.get_class_index());
+      continue;
     }
     e.slot                                 = e.cc.rising ? 0 : 1;
     plan.slot_of_key[e.cc.key()]           = e.slot;
@@ -797,12 +1029,34 @@ Plan build_plan(hhds::Graph* g, const lc::Design_clocks& clocks) {
     if (e.cc.role == lc::Net_role::Clock) {
       continue;
     }
+    // A data-gated window that still reads a CLOCK is not data: lowering it
+    // keeps the clock as data in the enable, a silent full-cycle error.
+    // Decline instead (B08's rule: refuse the shape whenever its conditions
+    // cannot be checked). Measured: `lhd_abc_latch_test_usyn`'s mapped
+    // `abc_latch_gated`, whose gate is an AND2 cell inside a wrapper module,
+    // normalized this way and REFUTED against its correctly normalized RTL.
+    if (const auto ck = window_clock_read(sink_driver(e.node, "enable"), clocks); !ck.is_invalid()) {
+      plan.code = "latch-window-reads-clock";
+      plan.why  = "latch `" + label_of(e.node) + "` has a window that reads clock `" + std::string{gu::pin_name_of(ck)}
+                 + "` through logic this pass cannot resolve to a clock phase or a gate, so its lowered enable would "
+                   "read the clock as data";
+      return plan;
+    }
     // Data-gated: the window closes when the enable deasserts, and the enable
     // is a function of state, so it closes on THAT state's commit edge.
     absl::flat_hash_set<hhds::Class_index> hit;
     comb_state_reach(sink_driver(e.node, "enable"), hit);
     absl::flat_hash_set<int> slots;
     for (const auto& ix : hit) {
+      // Its closing edge would be ANOTHER domain's edge, which the reference
+      // divider cannot express.
+      if (off_ref_nodes.contains(ix)) {
+        plan.code = "off-reference-clock";
+        plan.why  = "latch `" + label_of(e.node)
+                   + "` has an enable driven by state in a clock domain other than the reference, so its closing "
+                     "edge is not a slot of the reference clock";
+        return plan;
+      }
       if (auto it = slot_of_node.find(ix); it != slot_of_node.end()) {
         slots.insert(it->second);
       }
@@ -825,6 +1079,167 @@ Plan build_plan(hhds::Graph* g, const lc::Design_clocks& clocks) {
     // a false REFUTED.
   }
 
+  // CROSS-DOMAIN LATCH READS. A second-domain element samples on ITS clock,
+  // whose edges are unrelated to the reference: one can fall while a
+  // reference-domain latch is transparent, and then the hardware reads the
+  // latch's D while the commit-at-closing-edge model gives the held Q. Rule 4
+  // catches this within one domain (same commit class); across domains there is
+  // no shared edge to compare, so the only sound answer is to refuse the read.
+  if (!off_ref_nodes.empty()) {
+    absl::flat_hash_set<hhds::Class_index> ref_latches;
+    for (const auto& e : plan.elems) {
+      if (e.is_latch && !e.off_ref) {
+        ref_latches.insert(e.node.get_class_index());
+      }
+    }
+    if (!ref_latches.empty()) {
+      const auto reads_ref_latch = [&](const hhds::Pin_class& p) -> std::optional<hhds::Class_index> {
+        absl::flat_hash_set<hhds::Class_index> hit;
+        comb_state_reach(p, hit);
+        for (const auto& ix : hit) {
+          if (ref_latches.contains(ix)) {
+            return ix;
+          }
+        }
+        return std::nullopt;
+      };
+      for (const auto& e : plan.elems) {
+        if (!e.off_ref) {
+          continue;
+        }
+        std::vector<hhds::Pin_class> cones{sink_driver(e.node, "din"), sink_driver(e.node, "enable")};
+        if (e.icg) {
+          cones.insert(cones.end(), e.icg->enables.begin(), e.icg->enables.end());
+        }
+        for (const auto& c : cones) {
+          if (c.is_invalid()) {
+            continue;
+          }
+          if (auto ix = reads_ref_latch(c)) {
+            std::string latch_name = "?";
+            for (const auto& l : plan.elems) {
+              if (l.node.get_class_index() == *ix) {
+                latch_name = label_of(l.node);
+              }
+            }
+            plan.code = "cross-domain-latch-read";
+            plan.why  = std::format("state element `{}` on clock `{}` reads latch `{}` of the reference domain `{}` "
+                                    "combinationally; an edge of `{}` can fall inside that latch's window, where the "
+                                    "hardware reads its D and the commit-at-closing-edge model its held Q",
+                                    label_of(e.node), e.cc.net_key(), latch_name, ref_net, e.cc.net_key());
+            return plan;
+          }
+        }
+      }
+      // ...and every memory write port clocked off the reference.
+      if (g != nullptr) {
+        for (auto n : g->body().nodes()) {
+          if (gu::type_op_of(n) != Ntype_op::Memory) {
+            continue;
+          }
+          const auto ms = mem_shape_of(n);
+          if (!ms.parsed) {
+            continue;  // normalize() refuses an unparsed memory by name before any use
+          }
+          for (const auto& mp : ms.ports) {
+            if (mp.rdport || mp.clock.is_invalid()) {
+              continue;
+            }
+            const auto mcc = lc::commit_class_of_clock(mp.clock, ms.rising, &clocks);
+            if (!mcc || mcc->implicit_clock || mcc->net_key() == ref_net) {
+              continue;
+            }
+            for (const char* field : {"addr", "din", "enable"}) {
+              if (auto ix = reads_ref_latch(mem_port_driver(n, field, mp.port))) {
+                plan.code = "cross-domain-latch-read";
+                plan.why  = std::format("memory `{}` write port {} on clock `{}` reads a latch of the reference "
+                                        "domain `{}` combinationally (through `{}`)",
+                                        label_of(n), mp.port, mcc->net_key(), ref_net, field);
+                return plan;
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+
+  // ...and the REVERSE: a latch left on a second domain, read combinationally by
+  // state of ANOTHER domain. An edge of that domain can fall inside the latch's
+  // window, where the hardware reads its D and the model its held Q -- the same
+  // hazard, from the other side. Within its own domain rule 4 decides.
+  {
+    absl::flat_hash_map<hhds::Class_index, std::string> off_latch_root;
+    for (const auto& e : plan.elems) {
+      if (e.is_latch && e.off_ref) {
+        off_latch_root.emplace(e.node.get_class_index(), e.cc.net_key());
+      }
+    }
+    if (!off_latch_root.empty()) {
+      const auto reads_other = [&](const hhds::Pin_class& p, const std::string& my_root) -> const hhds::Node_class* {
+        absl::flat_hash_set<hhds::Class_index> hit;
+        comb_state_reach(p, hit);
+        for (const auto& l : plan.elems) {
+          if (hit.contains(l.node.get_class_index())) {
+            if (auto it = off_latch_root.find(l.node.get_class_index()); it != off_latch_root.end() && it->second != my_root) {
+              return &l.node;
+            }
+          }
+        }
+        return nullptr;
+      };
+      for (const auto& e : plan.elems) {
+        const std::string my_root = e.off_ref ? e.cc.net_key() : ref_net;
+        std::vector<hhds::Pin_class> cones{sink_driver(e.node, "din"), sink_driver(e.node, "enable")};
+        if (e.icg) {
+          cones.insert(cones.end(), e.icg->enables.begin(), e.icg->enables.end());
+        }
+        for (const auto& c : cones) {
+          if (c.is_invalid()) {
+            continue;
+          }
+          if (const auto* l = reads_other(c, my_root)) {
+            plan.code = "cross-domain-latch-read";
+            plan.why  = std::format("state element `{}` on clock `{}` reads latch `{}` of the domain `{}` "
+                                    "combinationally; an edge of `{}` can fall inside that latch's window, where the "
+                                    "hardware reads its D and the commit-at-closing-edge model its held Q",
+                                    label_of(e.node), my_root, label_of(*l), off_latch_root.at(l->get_class_index()),
+                                    my_root);
+            return plan;
+          }
+        }
+      }
+      if (g != nullptr) {
+        for (auto n : g->body().nodes()) {
+          if (gu::type_op_of(n) != Ntype_op::Memory) {
+            continue;
+          }
+          const auto ms = mem_shape_of(n);
+          if (!ms.parsed) {
+            continue;
+          }
+          for (const auto& mp : ms.ports) {
+            if (mp.rdport) {
+              continue;
+            }
+            const auto mcc = mp.clock.is_invalid() ? std::nullopt : lc::commit_class_of_clock(mp.clock, ms.rising, &clocks);
+            const std::string my_root = (!mcc || mcc->implicit_clock) ? ref_net : mcc->net_key();
+            for (const char* field : {"addr", "din", "enable"}) {
+              if (const auto* l = reads_other(mem_port_driver(n, field, mp.port), my_root)) {
+                plan.code = "cross-domain-latch-read";
+                plan.why  = std::format("memory `{}` write port {} on clock `{}` reads latch `{}` of the domain `{}` "
+                                        "combinationally (through `{}`)",
+                                        label_of(n), mp.port, my_root, label_of(*l),
+                                        off_latch_root.at(l->get_class_index()), field);
+                return plan;
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+
   int max_slot = 0;
   for (const auto& e : plan.elems) {
     max_slot = std::max(max_slot, e.slot);
@@ -844,7 +1259,18 @@ Plan build_plan(hhds::Graph* g, const lc::Design_clocks& clocks) {
 // share a slot by construction. So refuse (M3 rule 4's "explicit rejection"
 // arm); rewriting the latch to a buffer is the other legal answer and is left
 // for when a real design needs it.
-bool check_rule4(const Plan& plan, hhds::Graph* g, const lc::Design_clocks& clocks, bool quiet) {
+// Decision 3A's guard: which same-edge (latch, reader) pairs are FORWARDED
+// instead of refused. The latch is lowered by the slot model (clock-role, on
+// the reference); the reader is a FLOP there too, reading the latch through a
+// combinational path (comb_state_reach does not enter instances or memories,
+// so a hazard it reports has a path the forwarding can clone). A latch reader,
+// a memory port, or a second-domain element keeps the refusal.
+bool rule4_forwardable(const Element& l, const Element& s) {
+  return l.is_latch && l.cc.role == lc::Net_role::Clock && !l.off_ref && !s.is_latch && !s.off_ref
+         && gu::type_op_of(s.node) == Ntype_op::Flop;
+}
+
+bool check_rule4(Plan& plan, hhds::Graph* g, const lc::Design_clocks& clocks, bool quiet, bool forward) {
   bool ok = true;
   // MEMORY WRITE PORTS ARE READERS TOO.
   //
@@ -908,6 +1334,7 @@ bool check_rule4(const Plan& plan, hhds::Graph* g, const lc::Design_clocks& cloc
       }
     }
   }
+  absl::flat_hash_map<hhds::Class_index, absl::flat_hash_set<hhds::Class_index>> reach_of;
   for (const auto& l : plan.elems) {
     if (!l.is_latch) {
       continue;
@@ -926,10 +1353,34 @@ bool check_rule4(const Plan& plan, hhds::Graph* g, const lc::Design_clocks& cloc
       if (s.node.get_class_index() == l.node.get_class_index() || s.cc.key() != l.cc.key()) {
         continue;
       }
-      absl::flat_hash_set<hhds::Class_index> hit;
-      comb_state_reach(sink_driver(s.node, "din"), hit);
-      if (!hit.contains(l.node.get_class_index())) {
+      // ONE reach per reader, not one per (latch, reader) pair: B08 has 1587
+      // latches against ~2400 elements, and recomputing the reader's cone for
+      // every latch was most of a 270 s run.
+      auto reach = reach_of.find(s.node.get_class_index());
+      if (reach == reach_of.end()) {
+        absl::flat_hash_set<hhds::Class_index> hit;
+        // A CLOCK-gated latch reader samples its TRANSPARENT arm: the rewrite
+        // peels its hold mux, whose selector is the gate (`Ror(clk & en_l) ? 0 :
+        // d`), so walking the raw din would charge it with reading the gate's
+        // own enable latch -- a read the lowering does not make. Same arm the
+        // fold uses, as for the memory gate cones above.
+        auto s_din = sink_driver(s.node, "din");
+        if (s.is_latch && s.cc.role == lc::Net_role::Clock) {
+          if (const auto hp = lc::latch_hold_path(s.node)) {
+            s_din = hp->value;  // a bit-blasted wide latch: its bit of the open arm
+          } else if (auto arm = lc::latch_transparent_arm(s.node); !arm.is_invalid()) {
+            s_din = arm;
+          }
+        }
+        comb_state_reach(s_din, hit);
+        reach = reach_of.emplace(s.node.get_class_index(), std::move(hit)).first;
+      }
+      if (!reach->second.contains(l.node.get_class_index())) {
         continue;
+      }
+      if (forward && rule4_forwardable(l, s)) {
+        plan.forwards.emplace_back(l.node, s.node);
+        continue;  // 3A: forwarded, see apply_reader_forwards
       }
       ok = false;
       if (quiet) {
@@ -1042,6 +1493,152 @@ bool needed(hhds::Graph* g, const std::vector<hhds::Graph*>& defs) {
   return false;
 }
 
+// DECISION 3A: GUARDED READER FORWARDING. Rule 4's hazard -- a flop committing
+// on the very edge a latch it reads closes on -- is that the hardware flop
+// samples the latch while it is still TRANSPARENT (its D), and the
+// commit-at-closing-edge model gives it the held Q. CORE-ET B08's register file
+// write-data delay flop (`always_ff @(negedge rf_clk_i)`) reads the write-back
+// mux of CSR and multiplier latches that close on that same fall.
+//
+// The forwarded value is the latch's OUTPUT AT THE EDGE, built once per latch
+// from its lowered controls: `reset ? RV : (E ? D : Q)` -- E its final commit
+// enable (gate enables and slot predicate), D its open value, Q the held value.
+// It replaces the latch's Q in the hazardous READER'S cone only: the
+// combinational nodes between those latches and that reader's din/enable are
+// cloned (attributes carried), so every other reader -- including every reader
+// on another edge, for which the held Q is right -- keeps reading Q. Not a
+// latch-to-wire replacement.
+void copy_width_sign(const hhds::Pin_class& from, const hhds::Pin_class& to) {
+  gu::set_bits(to, gu::bits_of(from));
+  if (gu::is_unsign(from)) {
+    gu::set_unsign(to);
+  } else {
+    gu::set_sign(to);
+  }
+}
+
+int apply_reader_forwards(hhds::Graph& g, const std::vector<std::pair<hhds::Node_class, hhds::Node_class>>& fwd) {
+  absl::flat_hash_map<hhds::Class_index, hhds::Pin_class> forwarded;  // latch node -> its value at the edge
+  const auto value_at_edge = [&](const hhds::Node_class& l) -> hhds::Pin_class {
+    if (auto it = forwarded.find(l.get_class_index()); it != forwarded.end()) {
+      return it->second;
+    }
+    const auto q   = l.get_driver_pin(0);
+    const auto mux = [&](const hhds::Pin_class& sel, const hhds::Pin_class& if0, const hhds::Pin_class& if1) {
+      auto m = gu::create_typed_node(g, Ntype_op::Mux);
+      sel.connect_sink(livehd::graph_util::setup_sink_pid(m, 0));
+      if0.connect_sink(livehd::graph_util::setup_sink_pid(m, 1));
+      if1.connect_sink(livehd::graph_util::setup_sink_pid(m, 2));
+      auto o = m.create_driver_pin(0);
+      copy_width_sign(q, o);  // the latch's width and sign, NOT its name
+      return o;
+    };
+    hhds::Pin_class v = sink_driver(l, "din");
+    if (const auto en = sink_driver(l, "enable"); !en.is_invalid()) {
+      v = mux(en, q, v);
+    }
+    if (const auto rst = sink_driver(l, "reset_pin"); !rst.is_invalid()) {
+      auto rv = sink_driver(l, "initial");
+      if (rv.is_invalid()) {
+        rv = gu::create_const(g, *Dlop::create_integer(0));
+      }
+      const auto neg = sink_driver(l, "negreset");
+      v = (neg.is_const() && !neg.is_known_false()) ? mux(rst, rv, v) : mux(rst, v, rv);
+    }
+    forwarded.emplace(l.get_class_index(), v);
+    return v;
+  };
+
+  absl::flat_hash_map<hhds::Class_index, std::vector<hhds::Node_class>> latches_of;
+  std::vector<hhds::Node_class>                                          readers;
+  for (const auto& [l, s] : fwd) {
+    auto& v = latches_of[s.get_class_index()];
+    if (v.empty()) {
+      readers.push_back(s);
+    }
+    v.push_back(l);
+  }
+  int rewired = 0;
+  for (const auto& s : readers) {
+    absl::flat_hash_map<hhds::Class_index, hhds::Node_class> latch_of_q;  // Q pin -> latch
+    for (const auto& l : latches_of.at(s.get_class_index())) {
+      latch_of_q.emplace(l.get_driver_pin(0).get_class_index(), l);
+    }
+    absl::flat_hash_map<hhds::Class_index, bool> dep;  // node -> reaches a forwarded Q combinationally
+    std::function<bool(const hhds::Pin_class&)> depends = [&](const hhds::Pin_class& p) -> bool {
+      if (p.is_invalid() || p.is_const() || gu::is_graph_input_pin(p)) {
+        return false;
+      }
+      if (latch_of_q.contains(p.get_class_index())) {
+        return true;
+      }
+      const auto n = p.get_master_node();
+      if (gu::is_type_register(n) || gu::type_op_of(n) == Ntype_op::Sub) {
+        return false;
+      }
+      if (auto it = dep.find(n.get_class_index()); it != dep.end()) {
+        return it->second;
+      }
+      dep[n.get_class_index()] = false;  // a DAG; a cycle here would be a comb loop
+      bool d = false;
+      for (auto sink : n.inp_sorted_pins()) {
+        for (const auto& drv : sink.get_driver_pins()) {
+          d = depends(drv) || d;
+        }
+      }
+      dep[n.get_class_index()] = d;
+      return d;
+    };
+    absl::flat_hash_map<hhds::Class_index, hhds::Node_class> clone_of;
+    std::function<hhds::Pin_class(const hhds::Pin_class&)> rebuild = [&](const hhds::Pin_class& p) -> hhds::Pin_class {
+      if (auto it = latch_of_q.find(p.get_class_index()); it != latch_of_q.end()) {
+        return value_at_edge(it->second);
+      }
+      if (!depends(p)) {
+        return p;
+      }
+      const auto n = p.get_master_node();
+      // BY VALUE: the recursion below inserts into clone_of, which invalidates
+      // any iterator into it (measured: a dangling one returned the forwarded
+      // mux in place of the clone).
+      hhds::Node_class neo;
+      if (auto c = clone_of.find(n.get_class_index()); c != clone_of.end()) {
+        neo = c->second;
+      } else {
+        neo = gu::create_typed_node(g, gu::type_op_of(n));
+        // Semantics only: inputs (constants included) and each output's width
+        // and sign. NO names -- a second driver named like the original makes
+        // name-keyed resolution conflate the two (measured: the clone's output
+        // was replaced by the forwarded latch value on save). A LUT's table is
+        // the one semantic node attribute.
+        livehd::graph_util::carry_attr<livehd::attrs::lut_t>(n, neo);
+        clone_of.emplace(n.get_class_index(), neo);
+        for (auto sink : n.inp_sorted_pins()) {
+          const auto pid = static_cast<int>(sink.get_port_id());
+          for (const auto& drv : sink.get_driver_pins()) {
+            rebuild(drv).connect_sink(livehd::graph_util::setup_sink_pid(neo, pid));
+          }
+        }
+        for (auto dp : n.out_sorted_pins()) {
+          copy_width_sign(dp, neo.create_driver_pin(dp.get_port_id()));
+        }
+      }
+      return neo.create_driver_pin(p.get_port_id());
+    };
+    for (const char* pin : {"din", "enable"}) {
+      const auto drv = sink_driver(s, pin);
+      if (drv.is_invalid() || (!latch_of_q.contains(drv.get_class_index()) && !depends(drv))) {
+        continue;
+      }
+      const auto neo = rebuild(drv);
+      drop_sink(s, pin);
+      neo.connect_sink(gu::setup_sink_by_name(s, pin));
+      ++rewired;
+    }
+  }
+  return rewired;
+}
+
 Result normalize(hhds::Graph* g, const std::vector<hhds::Graph*>& defs, const Options& opts) {
   Result     r;
   const bool quiet = opts.quiet || opts.dry_run;
@@ -1114,7 +1711,9 @@ Result normalize(hhds::Graph* g, const std::vector<hhds::Graph*>& defs, const Op
   // SECOND domain (`gclk = clk_b & gate` while other flops run on `clock`) has
   // no such reference and the fold would be meaningless. There we owe nothing:
   // leave it skipped for pass/lec's multi-clock machinery, exactly as before.
-  const bool icg_foldable = need.n_icg_flops > 0 && need.n_clock_nets <= 1;
+  // With multi_clock the fold is relative to each element's OWN root, which
+  // the certificate then names, so a gate in a second domain is meaningful too.
+  const bool icg_foldable = need.n_icg_flops > 0 && (need.n_clock_nets <= 1 || opts.multi_clock);
   const bool must_fix     = need.n_latches > 0 || need.n_negedge_flops > 0 || icg_foldable || def_needs;
   if (!must_fix && opts.force_slots <= 1) {
     r.reason = need.needed ? std::format("skipped: {} — no latch or negedge state to lower", need.why)
@@ -1136,7 +1735,7 @@ Result normalize(hhds::Graph* g, const std::vector<hhds::Graph*>& defs, const Op
     return r;
   }
 
-  auto plan = build_plan(g, clocks);
+  auto plan = build_plan(g, clocks, opts.multi_clock);
   if (!plan.ok) {
     if (!must_fix) {
       r.reason = std::format("skipped: {}", plan.why);  // nothing owed here; downstream handles it
@@ -1151,7 +1750,7 @@ Result normalize(hhds::Graph* g, const std::vector<hhds::Graph*>& defs, const Op
     return r;
   }
   plan.slots = std::max(plan.slots, opts.force_slots);
-  if (!check_rule4(plan, g, clocks, quiet)) {
+  if (!check_rule4(plan, g, clocks, quiet, opts.forward_same_edge)) {
     r.error  = true;
     r.reason = "coincident commit edges between a latch and another state element";
     return r;
@@ -1188,7 +1787,13 @@ Result normalize(hhds::Graph* g, const std::vector<hhds::Graph*>& defs, const Op
       refuse(quiet, "fflop-unsupported", std::format("{}: {}", g->get_name(), r.reason), "");
       return r;
     }
-    if (op == Ntype_op::Memory && plan.slots > 1) {
+    // WITHOUT a divider a memory owes this pass something only when a write
+    // port is GATED: the gate must still fold into the write enable (ported
+    // from d2, 90583be13 -- the Phase-A fold rode inside P>1, so a gated memory
+    // in a design that needed no divider kept its gated clock and the exporter
+    // refused it: B05's async-FIFO `u_ar_fifo.mem_1`).
+    const bool mem_fold_only = op == Ntype_op::Memory && plan.slots <= 1 && mem_has_gated_write_port(n, clocks);
+    if (op == Ntype_op::Memory && (plan.slots > 1 || mem_fold_only)) {
       // The blanket refusal this replaces fired on EVERY Memory at P>1.  What
       // actually mis-times under a phase divider is a port that COMMITS on a
       // sub-step it does not own, so the shape and the CLOCK decide.
@@ -1223,7 +1828,7 @@ Result normalize(hhds::Graph* g, const std::vector<hhds::Graph*>& defs, const Op
       if (mem_is_immutable_rom(ms)) {
         continue;  // nothing commits: an immutable asynchronous ROM
       }
-      if (ms.sync_read) {
+      if (ms.sync_read && plan.slots > 1) {  // a divider-only hazard: at P=1 there are no sub-steps
         r.error  = true;
         r.reason = "memory `" + label_of(n) + "` has a synchronous read port; its read register would commit on every sub-step";
         refuse(quiet, "memory-unsupported", std::format("{}: {}", g->get_name(), r.reason),
@@ -1269,19 +1874,29 @@ Result normalize(hhds::Graph* g, const std::vector<hhds::Graph*>& defs, const Op
                  "the committing edge must be classified before the port can be slotted");
           return r;
         }
+        // A SECOND CLOCK DOMAIN (multi_clock): a POSEDGE port on another root
+        // is exported as its own domain -- no slot gate, its gate (if any)
+        // folds, its clock rebinds to ITS root. Anything else off the reference
+        // is refused as before.
+        bool port_off_ref = false;
         if (!cc->implicit_clock && cc->net_key() != plan.ref_net) {
-          r.error  = true;
-          r.reason = "memory `" + label_of(n) + "` write port " + std::to_string(port.port)
-                     + " commits on a net that is not the reference clock";
-          refuse(quiet, "memory-unsupported", std::format("{}: {}", g->get_name(), r.reason),
-                 "an off-reference memory clock is not rebound by this pass");
-          return r;
+          if (opts.multi_clock && cc->rising) {
+            port_off_ref = true;
+          } else {
+            r.error  = true;
+            r.reason = "memory `" + label_of(n) + "` write port " + std::to_string(port.port)
+                       + " commits on a net that is not the reference clock";
+            refuse(quiet, "memory-unsupported", std::format("{}: {}", g->get_name(), r.reason),
+                   opts.multi_clock ? "only a posedge memory may live off the reference clock"
+                                    : "an off-reference memory clock is not rebound by this pass (see multi_clock)");
+            return r;
+          }
         }
         // TWO BITS OF ONE CLOCK BUS ARE DIFFERENT CLOCKS.  `build_plan` already
         // tracks this with `clock_bit_on`/`ref_clk_bit`; comparing `net_key()`
         // alone would accept a memory clocked by a DIFFERENT bit of the same
         // multi-bit input and then gate it against the reference bit's phase.
-        if (!cc->implicit_clock && !cc->net.is_invalid() && gu::is_graph_input_pin(cc->net)
+        if (!port_off_ref && !cc->implicit_clock && !cc->net.is_invalid() && gu::is_graph_input_pin(cc->net)
             && gu::bits_of(cc->net) > 1) {
           const auto bit = clock_bit_on(clk_pin, cc->net, 0, 0);
           if (!bit || (plan.ref_clk_bit >= 0 && *bit != plan.ref_clk_bit)) {
@@ -1399,13 +2014,20 @@ Result normalize(hhds::Graph* g, const std::vector<hhds::Graph*>& defs, const Op
         // THE SLOT, decided here and FROZEN.  There is no fallback: the class
         // resolved, is on the reference net and bit, and is rising, so either
         // the key is in `slot_of_key` or the rise/fall map gives it.
-        int slot = 0;
-        if (auto it = plan.slot_of_key.find(cc->key()); it != plan.slot_of_key.end()) {
-          slot = it->second;
-        } else {
-          slot = cc->rising ? 0 : 1;  // the same map build_plan uses
+        // -1 = NO slot gate: no divider, or a port on a second domain.
+        int slot = -1;
+        if (plan.slots > 1 && !port_off_ref) {
+          if (auto it = plan.slot_of_key.find(cc->key()); it != plan.slot_of_key.end()) {
+            slot = it->second;
+          } else {
+            slot = cc->rising ? 0 : 1;  // the same map build_plan uses
+          }
         }
-        mem_gate_plans.push_back({n, port.port, port.enable, ms.wensize, slot, port_gate_ops});
+        if (slot < 0 && port_gate_ops.empty()) {
+          continue;  // neither a slot nor a gate: this port is left exactly as it is
+        }
+        mem_gate_plans.push_back({n, port.port, port.enable, ms.wensize, slot, port_gate_ops,
+                                  port_off_ref ? cc->net : hhds::Pin_class{}});
       }
       // everything else is handled by the slot gate below
     }
@@ -1662,9 +2284,14 @@ Result normalize(hhds::Graph* g, const std::vector<hhds::Graph*>& defs, const Op
     // the AND is a 1-bit AND and the Sext + Get_mask below widens the PAIR to
     // `wensize` -- the gate therefore reaches every lane, and no wide constant
     // is minted for it either.
-    auto pred = slot_pred[mp.slot];
+    // No slot (P=1, or a second domain): the gate ALONE is the predicate.
+    hhds::Pin_class pred = mp.slot >= 0 ? slot_pred[mp.slot] : hhds::Pin_class{};
     for (const auto& gop : mp.gate_ops) {
       if (gop.is_invalid()) {
+        continue;
+      }
+      if (pred.is_invalid()) {
+        pred = gop;
         continue;
       }
       auto gandn = gu::create_typed_node(*g, Ntype_op::And);
@@ -1673,6 +2300,9 @@ Result normalize(hhds::Graph* g, const std::vector<hhds::Graph*>& defs, const Op
       pred = gandn.create_driver_pin(0);
       gu::set_bits(pred, 1);
       gu::set_unsign(pred);
+    }
+    if (pred.is_invalid()) {
+      continue;  // unreachable: a port with neither slot nor gate is never planned
     }
     auto sx = gu::create_typed_node(*g, Ntype_op::Sext);
     pred.connect_sink(sx.create_sink_pin(0));
@@ -1709,7 +2339,8 @@ Result normalize(hhds::Graph* g, const std::vector<hhds::Graph*>& defs, const Op
     // a DERIVED clock in a design this pass exists to make single-edge -- the
     // encoder refuses one, so the cell would come back UNKNOWN after a
     // successful lowering. Rebind to the root the gate resolved to.
-    if (!mp.gate_ops.empty() && !plan.ref_clk_pin.is_invalid()) {
+    const auto rebind_to = mp.own_root.is_invalid() ? plan.ref_clk_pin : mp.own_root;
+    if (!mp.gate_ops.empty() && !rebind_to.is_invalid()) {
       // REBIND TO THE VALIDATED REFERENCE PIN, not to the gate's bare root.
       // When the reference edge is on bit k>0 of a bus, `plan.ref_clk_pin` has
       // already been replaced by the SELECTED bit above -- every rebound
@@ -1719,16 +2350,20 @@ Result normalize(hhds::Graph* g, const std::vector<hhds::Graph*>& defs, const Op
       // this port is on the reference bit by construction and the selected pin
       // is the right one.
       mem_drop_port_sink(mp.node, "clock_pin", mp.port);
-      plan.ref_clk_pin.connect_sink(
+      rebind_to.connect_sink(
           mp.node.create_sink_pin(Ntype::get_sink_pid(Ntype_op::Memory, "clock_pin") + mp.port * stride));
       ++r.mem_ports_ungated;
     }
-    ++r.mem_ports_slotted;
+    if (mp.slot >= 0) {
+      ++r.mem_ports_slotted;
+    } else {
+      ++r.icg_folded;  // a gate folded with no slot (P=1, or a second domain)
+    }
   }
   {
     absl::flat_hash_set<hhds::Class_index> seen;
     for (const auto& mp : mem_gate_plans) {
-      if (seen.insert(mp.node.get_class_index()).second) {
+      if (mp.slot >= 0 && seen.insert(mp.node.get_class_index()).second) {
         ++r.mems_slotted;
       }
     }
@@ -1738,6 +2373,14 @@ Result normalize(hhds::Graph* g, const std::vector<hhds::Graph*>& defs, const Op
   std::vector<hhds::Pin_class> orphaned_clocks;  // old clock_pin drivers the rebind below disconnects
   for (const auto& e : plan.elems) {
     if (e.is_latch) {
+      // The value a CLOCK-gated latch passes through, read BEFORE anything below
+      // rewires its enable: latch_transparent_arm proves a hold arm against the
+      // window as written (enable + polarity pin), and the active-low lowering
+      // next inverts the enable while the pin is still on the cell.
+      const auto through
+          = e.cc.role == lc::Net_role::Clock ? lc::latch_transparent_arm(e.node) : hhds::Pin_class{};
+      const auto hold_path
+          = e.cc.role == lc::Net_role::Clock ? lc::latch_hold_path(e.node) : std::optional<lc::Latch_hold_path>{};
       // `posclk` on a Latch is the ENABLE POLARITY, not an edge. Carrying it
       // onto a Flop would silently re-read it as "negedge" — the exact
       // double-negation this task exists to prevent. Move the polarity into the
@@ -1769,31 +2412,35 @@ Result normalize(hhds::Graph* g, const std::vector<hhds::Graph*>& defs, const Op
       // commit-at-closing-edge commits. A DATA gate is left completely alone —
       // it is real logic, and collapsing the two cases is what would blind the
       // transparent-low polarity canary.
+      //
+      // The hold arm comes in THREE spellings and all of them are peeled: tolg's
+      // Q feedback (`gate ? d : q`), the reader's don't-care (`gate ? d : 'x`),
+      // and -- under `yosys.setundef=zero`, which every CORE-ET and CVA6 row is
+      // compiled with -- a KNOWN constant (`Ror(clk) ? 0 : en`). Peeling only the
+      // Q spelling left the other two in din, so the normalized design kept
+      // reading the clock as data on exactly the latches the gate removed:
+      // CORE-ET B01's `if (!clk_i) en_1p <= en_i` enable latches, live state in
+      // the certificate. latch_transparent_arm proves the constant/X arm is the
+      // SHUT phase's before it peels; anything it cannot prove comes back as din
+      // itself, which is the value mux it really is.
       if (e.cc.role == lc::Net_role::Clock) {
-        if (has_hold_mux(e.node)) {
-          auto            q   = e.node.get_driver_pin(0);
-          auto            mux = sink_driver(e.node, "din").get_master_node();
-          hhds::Pin_class transparent;
-          for (auto msink : mux.inp_sorted_pins()) {
-            if (msink.get_port_id() == 0) {
-              continue;  // the selector (the gate itself)
-            }
-            const auto mdrv = msink.get_driver_pin();
-            if (!mdrv.is_invalid() && mdrv.get_class_index() != q.get_class_index()) {
-              transparent = mdrv;
-            }
-          }
-          if (transparent.is_invalid()) {
-            r.error  = true;
-            r.reason = "clock-gated latch `" + label_of(e.node) + "` has a hold mux with no transparent arm";
-            refuse(quiet, "latch-shape-unsupported", std::format("{}: {}", g->get_name(), r.reason), "");
-            return r;
-          }
-          drop_sink(e.node, "din");
-          transparent.connect_sink(gu::setup_sink_by_name(e.node, "din"));
+        // A bit-blasted WIDE latch: din is a bit select of the hold mux, which
+        // latch_transparent_arm returns unchanged; its open value is the same
+        // bit select of the open arm (CORE-ET B08's mpcnd_1p[k]).
+        const auto open_value = hold_path ? lc::rebuild_bit_select(*g, hold_path->chain, hold_path->value) : through;
+        if (open_value.is_invalid()) {
+          r.error  = true;
+          r.reason = "clock-gated latch `" + label_of(e.node) + "` has a hold mux with no transparent arm";
+          refuse(quiet, "latch-shape-unsupported", std::format("{}: {}", g->get_name(), r.reason), "");
+          return r;
         }
-        // No hold mux (the yosys raw-D shape): `din` is already the transparent
-        // value, so only the gate has to go.
+        if (auto din = sink_driver(e.node, "din");
+            din.is_invalid() || din.get_class_index() != open_value.get_class_index()) {
+          drop_sink(e.node, "din");
+          open_value.connect_sink(gu::setup_sink_by_name(e.node, "din"));
+        }
+        // The yosys raw-D shape has no hold arm at all: `din` is already the
+        // transparent value, so only the gate has to go.
         drop_sink(e.node, "enable");
       }
       drop_sink(e.node, "posclk");
@@ -1918,6 +2565,27 @@ Result normalize(hhds::Graph* g, const std::vector<hhds::Graph*>& defs, const Op
         acc.connect_sink(gu::setup_sink_by_name(e.node, "enable"));
       }
       ++r.icg_folded;
+      r.icg_window_held += e.icg_window_held > 0 ? 1 : 0;
+    }
+
+    // ---- a SECOND DOMAIN (multi_clock): exported, not lowered ------------
+    // Its timing is ITS clock's, not a slot of the reference divider, so it
+    // gets no slot gate and no sync-reset move; only the clock cone is rebound
+    // to its resolved root (an ICG fold above has already moved the gate into
+    // the enable), so the consumer sees a clean root and not a derived cone.
+    if (e.off_ref) {
+      const auto own = e.icg ? e.icg->clock : e.cc.net;
+      if (!own.is_invalid()) {
+        auto cur = sink_driver(e.node, "clock_pin");
+        if (cur.is_invalid() || cur.get_class_index() != own.get_class_index()) {
+          if (!cur.is_invalid()) {
+            orphaned_clocks.push_back(cur);
+          }
+          drop_sink(e.node, "clock_pin");
+          own.connect_sink(gu::setup_sink_by_name(e.node, "clock_pin"));
+        }
+      }
+      continue;
     }
 
     // ---- every element now commits on the REFERENCE clock ----------------
@@ -2039,6 +2707,13 @@ Result normalize(hhds::Graph* g, const std::vector<hhds::Graph*>& defs, const Op
     }
   }
 
+  // ---- decision 3A: same-edge readers get the latch's value AT the edge ----
+  // After every element is lowered, so each forwarded value is built from the
+  // latch's FINAL enable, din and reset.
+  if (!plan.forwards.empty()) {
+    r.reader_forwards = apply_reader_forwards(*g, plan.forwards);
+  }
+
   // ---- the derived clock cones the rebind left behind -------------------
   // A cone that only ever fed a clock_pin is dead once every element commits
   // on the reference clock, but it is not GONE: the encoder skips a node with
@@ -2151,19 +2826,26 @@ Result normalize(hhds::Graph* g, const std::vector<hhds::Graph*>& defs, const Op
     }
   }
 
-  r.applied   = true;
-  r.slots     = plan.slots;
-  r.ref_clock = plan.ref_clock_name;
-  r.reason    = std::format(
-      "P={} slots, {} latch(es) retyped, {} gated clock(s) folded into an enable ({} sampled-held), {} element(s) "
-      "slotted, {} memory(ies) slotted over {} write port(s) ({})",
+  r.applied       = true;
+  r.slots         = plan.slots;
+  r.ref_clock     = plan.ref_clock_name;
+  r.clock_domains = plan.domains;
+  r.reason        = std::format(
+      "P={} slots, {} latch(es) retyped, {} gated clock(s) folded into an enable ({} sampled-held, {} "
+      "window-held), {} element(s) slotted, {} memory(ies) slotted over {} write port(s), {} clock domain(s){}{} ({})",
       r.slots,
       r.latches_retyped,
       r.icg_folded,
       r.icg_held,
+      r.icg_window_held,
       r.flops_slotted,
       r.mems_slotted,
       r.mem_ports_slotted,
+      r.clock_domains,
+      plan.domains > 1 ? " exported" + plan.domain_desc : "",
+      r.reader_forwards > 0 ? std::format(", {} same-edge reader input(s) forwarded from {} latch read(s)",
+                                          r.reader_forwards, plan.forwards.size())
+                            : "",
       need.why.empty() ? "def-driven" : need.why);
   livehd::diag::info(kPass, "single-edge-applied", "progress")
       .msg("edge normalization on `{}`: {}", g->get_name(), r.reason)
@@ -2186,6 +2868,14 @@ void Pass_single_edge::setup() {
                 "and simulation only; never on the synthesis path)",
                 &Pass_single_edge::work);
   m.add_label_optional("out", "output graph_library directory (the --emit-dir lg: slot)", "");
+  m.add_label_optional("forward_same_edge",
+                       "true|false. Admit a flop committing on the edge a latch it reads closes on (rule 4) by giving "
+                       "that reader alone the latch's value at the edge, instead of refusing the pair",
+                       "false");
+  m.add_label_optional("multi_clock",
+                       "true|false. Export unrelated clock domains (plain posedge state off the reference clock is "
+                       "left on its own clock, for a consumer that carries clock ordinals) instead of refusing them",
+                       "false");
   register_pass(m);
 }
 
@@ -2228,7 +2918,17 @@ void Pass_single_edge::work(Eprp_var& var) {
         .msg("pass.single_edge: inlined {} clock-gate cell(s) into `{}`", nc, g->get_name())
         .emit();
   }
-  const auto res = livehd::single_edge::normalize(g, defs, {});
+  // ...and lift a LEVEL-RESET latch's reset out of its window (see
+  // lift_latch_level_resets): `rst | gate` matches no gate shape, `gate` does.
+  if (const int nl = lc::lift_latch_level_resets(g); nl > 0) {
+    livehd::diag::info("pass.single_edge", "latch-reset-lifted", "progress")
+        .msg("pass.single_edge: lifted the level reset of {} latch(es) in `{}` onto reset_pin", nl, g->get_name())
+        .emit();
+  }
+  livehd::single_edge::Options opts;
+  opts.multi_clock       = std::string{var.get("multi_clock", "false")} == "true";
+  opts.forward_same_edge = std::string{var.get("forward_same_edge", "false")} == "true";
+  const auto res   = livehd::single_edge::normalize(g, defs, opts);
   if (res.error) {
     livehd::diag::err("pass.single_edge", "normalize-refused", "unsupported")
         .msg("pass.single_edge refused '{}': {}", g->get_name(), res.reason)

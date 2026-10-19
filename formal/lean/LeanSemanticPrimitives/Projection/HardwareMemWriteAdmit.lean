@@ -40,6 +40,7 @@ the WHOLE vector and its datum is stored RAW, so:
 import LeanSemanticPrimitives.Projection.HardwareMemWrite
 import LeanSemanticPrimitives.Projection.HardwareMemSlotTy
 import LeanSemanticPrimitives.Projection.MemProjection
+import LeanSemanticPrimitives.Projection.AxiomGate
 
 namespace Projection
 namespace HwMem
@@ -1548,12 +1549,13 @@ def plainWriteDesign : DesignCert :=
                          else some (.tbl 1 8)) plainWriteDesign.nodes[0]!
        = none
 
-/- The extension is EXACTLY the plain write: the five refused scalar operators
-   are still refused by the extended typing too. -/
+/- The extension is EXACTLY the plain write: the refused scalar operators are
+   still refused by the extended typing too (`Op_Div`; UDiv/SDiv/Mult are
+   supported since D6 Tier 1). -/
 #guard nodeTyW (fun _ => some (.bv 8))
          { op := .Op_Sub, width := 8, deps := #[1,2], origin := 0 } = none
 #guard nodeTyW (fun _ => some (.bv 8))
-         { op := .Op_UDiv, width := 8, deps := #[1,2], origin := 0 } = none
+         { op := .Op_Div, width := 8, deps := #[1,2], origin := 0 } = none
 
 /- …and an admitted scalar operator types identically on both routes. -/
 #guard nodeTyW (fun _ => some (.bv 8))
@@ -1776,7 +1778,7 @@ private def refImg (e : ClockEdges) (i : RuntimeInput) (st : StateM) : MemImg :=
          (refImg pwActive pwIn pwState) = true
 #guard stateFullOKB plainRamDesign ⟨#[], #[refImg pwActive pwIn pwState]⟩ = true
 
-#print axioms plainRamDesign_two_steps
+#audit_axioms plainRamDesign_two_steps
 
 /-! ### Executed: the ordinary write, through the RESIDUAL
 
@@ -1856,45 +1858,45 @@ theorem plainRamSim_runs {sim : MemSimulator} (h : plainRamSim = some sim)
   rw [hd] at this
   exact this
 
-#print axioms plainRamDesign_admitsW
-#print axioms nodeTy_memWrite_none
-#print axioms nodeTyW_eq_of_ne
-#print axioms nodeTyW_admits
-#print axioms nodeTyW_result
-#print axioms nodeTyW_bv_ne_memWrite
-#print axioms nodeTyW_write_geom
-#print axioms admitsWB_eq
-#print axioms inferTysW_eq
-#print axioms admitsB_tysOK
-#print axioms evalPrim_memWrite
-#print axioms evalPrim_memWrite_disabled
-#print axioms applyOpM_memWrite
-#print axioms applyOpM_memWrite_disabled
-#print axioms evalNodeM_memWrite
-#print axioms evalNodeM_memWrite_disabled
-#print axioms memWrite_deps
-#print axioms node_step_memWrite
-#print axioms node_stepW
-#print axioms admits_node_tyW
-#print axioms admitsW_nodeAdmitted
-#print axioms admitsW_writePropagates
-#print axioms admits_slot_widthW
-#print axioms admits_writeAddrFitsW
-#print axioms admitsW_mainM_resolved
-#print axioms nodeTyW_tbl_op
-#print axioms admits_slot_memwidthW
-#print axioms admitsW_nextImgTy
-#print axioms admits_runW
-#print axioms admits_runW_pres
-#print axioms admits_runW_full
-#print axioms admits_runW_full_two
-#print axioms memEntry_uniqueW
-#print axioms projectMemDesignAtW_correct
-#print axioms mkMemSimAtW_wf
-#print axioms mkMemSimOfW_wf
-#print axioms MemSimWFAt_toW
-#print axioms runMemSimW_correct
-#print axioms plainRamSim_runs
+#audit_axioms plainRamDesign_admitsW
+#audit_axioms nodeTy_memWrite_none
+#audit_axioms nodeTyW_eq_of_ne
+#audit_axioms nodeTyW_admits
+#audit_axioms nodeTyW_result
+#audit_axioms nodeTyW_bv_ne_memWrite
+#audit_axioms nodeTyW_write_geom
+#audit_axioms admitsWB_eq
+#audit_axioms inferTysW_eq
+#audit_axioms admitsB_tysOK
+#audit_axioms evalPrim_memWrite
+#audit_axioms evalPrim_memWrite_disabled
+#audit_axioms applyOpM_memWrite
+#audit_axioms applyOpM_memWrite_disabled
+#audit_axioms evalNodeM_memWrite
+#audit_axioms evalNodeM_memWrite_disabled
+#audit_axioms memWrite_deps
+#audit_axioms node_step_memWrite
+#audit_axioms node_stepW
+#audit_axioms admits_node_tyW
+#audit_axioms admitsW_nodeAdmitted
+#audit_axioms admitsW_writePropagates
+#audit_axioms admits_slot_widthW
+#audit_axioms admits_writeAddrFitsW
+#audit_axioms admitsW_mainM_resolved
+#audit_axioms nodeTyW_tbl_op
+#audit_axioms admits_slot_memwidthW
+#audit_axioms admitsW_nextImgTy
+#audit_axioms admits_runW
+#audit_axioms admits_runW_pres
+#audit_axioms admits_runW_full
+#audit_axioms admits_runW_full_two
+#audit_axioms memEntry_uniqueW
+#audit_axioms projectMemDesignAtW_correct
+#audit_axioms mkMemSimAtW_wf
+#audit_axioms mkMemSimOfW_wf
+#audit_axioms MemSimWFAt_toW
+#audit_axioms runMemSimW_correct
+#audit_axioms plainRamSim_runs
 
 end HwMem
 end Projection

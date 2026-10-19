@@ -53,6 +53,7 @@ the dense slot order.  It is carried as a premise here rather than asserted,
 and the checker extension is not claimed to exist yet.
 -/
 import LeanSemanticPrimitives.Projection.HardwareMemFold
+import LeanSemanticPrimitives.Projection.AxiomGate
 
 namespace Projection
 namespace HwMem
@@ -620,22 +621,22 @@ private def inNoWrite : RuntimeInput :=
         | some (g0, g1) => g0.words.length == 32 && g1.words.length == 32
         | none          => false)
 
-#print axioms twoMemDesign_semwf
-#print axioms twoMemG_src
-#print axioms twoMemG_nextImg
-#print axioms twoMemG_prop
-#print axioms twoMemG_fits
-#print axioms twoMem_commit
+#audit_axioms twoMemDesign_semwf
+#audit_axioms twoMemG_src
+#audit_axioms twoMemG_nextImg
+#audit_axioms twoMemG_prop
+#audit_axioms twoMemG_fits
+#audit_axioms twoMem_commit
 
-#print axioms memSlot_img
-#print axioms slot_readImg
-#print axioms memNextsOf_get
-#print axioms memNext_agree
-#print axioms memNexts_agree
-#print axioms memNextOf_denote
-#print axioms memNextsOf_denote
-#print axioms memNextOf_FullTable
-#print axioms stepState_shape
+#audit_axioms memSlot_img
+#audit_axioms slot_readImg
+#audit_axioms memNextsOf_get
+#audit_axioms memNext_agree
+#audit_axioms memNexts_agree
+#audit_axioms memNextOf_denote
+#audit_axioms memNextsOf_denote
+#audit_axioms memNextOf_FullTable
+#audit_axioms stepState_shape
 
 end HwMem
 end Projection

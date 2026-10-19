@@ -354,6 +354,21 @@ branches and inserts repeaters along long edges. It uses Liberty input caps,
 available slew/cap/fanout limits and placement wire RC to plan candidates. Resolved
 physical pins preserve individual packed-bus bits through wiring aliases.
 
+`synth.place.reset_fanout=N` (default 0 = off; N >= 2) is the placement-time reset buffer tree that does not
+depend on timing acceptance. Right after the mapped hierarchy is flattened, every net that drives an asynchronous
+clear/preset pin of a Liberty flop and more than N cell pins in all (the synchronous-reset logic of the same signal
+included) is dealt out through the library's smallest placeable buffer, N pins per buffer, level by level until the
+driver carries at most N loads. Pins are grouped in instance-name order, which follows the source hierarchy, so a buffer
+serves neighbouring registers; graph outputs, bus-wiring aliases and macros keep their direct connection. It is pure
+fanout restructuring (a chain of identity buffers per pin, LEC-proven in `lhd_placement_reset_tree_smoke`) and
+idempotent, and it composes with `pass.abc.reset_fanout`, which builds the same tree inside each mapped region at
+read-back: the region trees bound a reset net where its registers sit in one region, this one bounds the sum across
+the many regions a reset reaches (a mux output driving 225 pins spread over fourteen regions of NVDLA partition_a).
+Unlike `synth.place.resize` it is not an accept/reject trial: the post-placement repair measures a change with a
+fresh STA and rejects a whole batch on any hold-WNS movement, and on NVDLA partition_m the forest that fixes the
+439-pin reset (3496 -> 1420 ps) was rejected for `hold_wns` in each trial that contained it. The `reset_tree` object of `qor.json`
+records `fanout`, `nets`, `sinks`, `added`, `levels` and `skipped` (clear/preset pins left alone because a multi-bit or multi-driver bus alias drives them) of the pass in that placement call and `buffers`, the tree cells present in the placed netlist (a timing-driven run builds the tree in its seed placement, so the final call adds none); the value is part of the placement cache identity.
+
 New or resized cells first search row/site-aligned whitespace while all unchanged
 cells remain fixed. Obstacles are indexed as sorted intervals per row, including
 all rows intersected by macro halos. Each inserted cell updates those intervals;

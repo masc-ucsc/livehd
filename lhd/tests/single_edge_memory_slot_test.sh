@@ -147,7 +147,11 @@ module tb;
   integer errs = 0, p;
 
   always #10      clk_s = ~clk_s;   // source:     rise 10+20p, fall 20+20p
-  always #(\`HALF) clk_n = ~clk_n;   // normalized: slot0 15+20p, slot1 25+20p
+  // normalized: slot0 15+20p, slot1 25+20p. The divider is \`initial 0\` and is
+  // not reset by \`reset\`, so its FIRST posedge is slot 0 and the clock must
+  // START there; free-running from t=0 it put slot 0 at 5+20p and every value one
+  // period late (the errs=78 offset single_edge_four_classes_test had).
+  initial begin #10; forever #(\`HALF) clk_n = ~clk_n; end
 
   memslot   src(.${CLK}(clk_s), .reset(reset), .d(d), .we(we), .wa(wa), .ra(ra), .rd(s_rd), .qp(s_qp), .qn(s_qn));
   memslot_n nrm(.${CLK}(clk_n), .reset(reset), .d(d), .we(we), .wa(wa), .ra(ra), .rd(n_rd), .qp(n_qp), .qn(n_qn));

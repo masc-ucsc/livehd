@@ -42,7 +42,9 @@ struct Options {
   int                                   macro_timing_interval = 50;
   int                                   fp_timing_max_updates = 10;
   bool                                  fp_resize             = false;
-  bool                                  repair_reset = false;  // size/buffer reset-pin cones too (default: protected like clocks)
+  bool                                  repair_reset          = false;  // size/buffer reset-pin cones too (default: protected like clocks)
+  // Pre-placement fanout tree on every flat net that drives an async clear/preset pin (loads per buffer; 0 = off).
+  unsigned                              reset_fanout          = 0;
   Evaluate                              fp_evaluate;
   double                                fp_minimum = 3000, fp_attraction = .25, fp_repulsion = 5, fp_anchor = .25;
   bool                                  fp_distance_attraction = true;

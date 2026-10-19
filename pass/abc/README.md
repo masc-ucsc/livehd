@@ -276,7 +276,30 @@ level the pin wants, so mapped logic drives it. The register stays a native
 boundary (`reset-native`, naming the precise reason) only when the Liberty has
 no clear (or preset) cell for a needed value, the reset value is not a
 constant, the reset is multi-bit, or a user `flow` may reshape latches; its
-surrounding data logic is still mapped. A register on a **latch-based clock
+surrounding data logic is still mapped.
+
+**Asynchronous-reset fanout tree (`reset_fanout`).** The clear/preset pins never
+enter ABC's logic network, so `max_fanout` (`buffer -N`) cannot bound them: one
+region input, one polarity inverter (`abc_reset_inv_<n>`, a minimum INVx1) or one mapped
+reset cone drives every asynchronous flop of the region. A weak gate on thousands of pins
+is a multi-nanosecond slew and an equally large recovery violation (NVDLA
+partition_m: one AO21x1 on 439 SETN pins, 4.1 ns slew, WNS -1016 ps; coralnpu: one INVx1 on
+5,348 pins, 62.8 ns slew). With `--set pass.abc.reset_fanout=N` (N >= 2; 0, the default, is off)
+the read-back collects the clear/preset pins by driver and, for a driver with more than N
+of them, deals them out in blocks of N through the library's smallest identity
+buffer (`<region>__rstbuf<level>_<n>`), level by level until the root drives at most N loads --
+the clock tree's mechanism, so a tree is logic-preserving by construction (LEC-proven by
+`lhd_abc_reset_tree_test`). The tree is region-local: a reset that fans out to several regions
+(a synchronizer in one, flops in six) gets one tree per consuming region, and each region
+input then loads the shared driver with only its tree roots. The buffers count in the
+region's `gates`/`area` and are part of the region-cache identity (`|rsttree=N`, absent when
+off). 16 to 32 pins per buffer is the typical range (ORFS's own repair uses 25 to 53);
+the smallest tree that meets timing is the cheapest in cells. A region tree cannot see the sum a reset
+reaches across many small regions (partition_a: 225 loads on one AO21x1 spread over fourteen regions, each
+below the cap); `synth.place.reset_fanout` (pass/place/README.md) bounds the flat net instead, before
+placement, and the two compose.
+
+A register on a **latch-based clock
 gate** (`always_latch if (!clk) en_l = en; assign gclk = clk & en_l;`, minion's
 `prim_clk_gate`) maps too: the gate itself becomes the Liberty's **integrated
 clock-gate cell** (`Dff_selection::icg_ladder`: a `clock_gating_integrated_cell
@@ -570,6 +593,8 @@ The option namespace matches the command path (`lhd pass abc`); after the
 | `dff_cell` | explicit Liberty DFF cell for `register=true` (empty = the smallest-area plain posedge D-flop, QN cells included; an explicit name also disables the drive ladder) | `` |
 | `memory` | lower memory RTL and ABC-map its body in a separate module (`true`), preserve its native implementation (`false`), or decide per memory (`auto`: fold within `memory_max_bits`, or over 3 ports whatever the size); every mode retains the memory instance boundary | `auto` |
 | `memory_max_bits` | with `memory=auto`, fold a memory whose `bits x size` is within this many bits and keep a larger one native, with a one-line note naming it (`0` = no size limit); `true`/`false` ignore it | `1024` |
+| `memory_prune_reads` | with a lowered memory, clear at the memory module's output every bit of a read port that no reader observes (all readers are constant `Get_mask` windows of the word, or there is none), and feed constants for the input bits the parent provably drives with 0 (a lane-enable vector of `cond ? K : 0`, a narrow address), so the mapper drops the read-mux and write logic of those bits; the observed bits are unchanged. With it set the memory modules are built before the ware modules, so the shapes that feed a port are still visible | `false` |
+| `ware_zero_bits` | clear, inside an extracted ware shifter, the data-operand bits its parent provably drives with 0 (a lane placed by a constant left shift, a value narrower than its port), when at least an eighth of the operand's bits are, and every provably-zero bit of the shift amount (the five low bits of a word select's `idx * 32`, each a whole barrel stage): the module boundary otherwise hides the constants from the mapper. The cleared-bit pattern is part of the module identity; the mask cell takes the shifter's color so it maps in the same region | `false` |
 | `adder` | `auto` starts with RCA and trials CLA/CSKA; explicit `rca`/`cska`/`cla` disables adder selection | `auto` |
 | `barrel` | `auto` trials reversed mux stages; explicit `log`/`reverse` fixes stage order | `auto` |
 | `threads` | maximum ABC workers (`0` = automatic cap of 8 or available CPUs when fewer); `lhd synth` sets this through `abc.threads`, which defaults to `0` | `1` |
@@ -583,12 +608,16 @@ The option namespace matches the command path (`lhd pass abc`); after the
 | `boundary` | size every region against what lies beyond its partition (see "Partition boundaries" above): the static estimate while it maps, the exact re-size once every region exists | `true` |
 | `boundary_buffer` | tree every region input's fanout inside the region when it exceeds `max_fanout` -- the design's primary inputs and the sink side of crossing nets alike -- by declaring `boundary_drive` as ABC's driving cell (its `buffer` only trees an input that has a driver); independent of `boundary`; false leaves inputs unbuffered and relies on the exact re-size to upsize the driver | `true` |
 | `boundary_drive` | stand-in Liberty cell driving a region input whose real driver is not a mapped cell (a primary input, a flop, a memory or child output, every input under the estimate): empty = the library's smallest ordinary buffer, `none` = an ideal driver | `` |
+| `reset_fanout` | cap on the asynchronous clear/preset pins one reset net drives inside a region (a region input, a reset-polarity inverter or a mapped reset cone): past it the net is dealt out through a tree of the library's smallest buffer, this many pins per buffer, level by level, exactly like the `icg_fanout` clock tree (see "Asynchronous-reset fanout tree"). `0` disables; `1` is refused (a level could never shrink) | `0` |
 | `boundary_rounds` | rounds of the exact re-size (a path through k regions needs k rounds) | `1` |
 | `io_load` | load in fF on a primary output of `--top` (and on a port whose sink cannot be resolved); negative = one typical input pin of the library | `-1` |
 | `verbose` | extra per-region prints (assume constraints, …) | `false` |
 | `flatten` | whole-design flatten: `auto`/`true`/`false` — see below | `auto` |
 | `qor` | write the QoR JSON (below) to this file | empty (`lhd pass abc` defaults it to `<workdir>/qor.json` under `--workdir`) |
 | `region_opts` | per-region (color-keyed) overrides, JSON — see below | empty |
+| `state_sweep` | delete the registers (and the cells behind them) that no top output, memory or body-less cell can observe, and keep of the other registers only the bits something reads, on the private copy, tracking the demand per bit across the instance hierarchy (`pass/synth/state_sweep.hpp`). Also spelled `synth.state_sweep`; `pass.usyn` takes it too. Opt-in: Yosys gets the same from flattening and `opt_clean`, LiveHD kept dead counters, unread status words and the unused upper half of wide output registers | `false` |
+| `merge_registers` | merge registers that are the same machine (same clock, enable, reset and reset value, width, sign and D driver) on the private copy, repeating until nothing merges (`pass/synth/register_merge.hpp`): Yosys's `opt_merge` on flops. Also spelled `synth.merge_registers`; `pass.usyn` takes it too. Opt-in: NVDLA's SRAM wrappers hold twin read-data registers LiveHD kept (528 flops in partition_a) | `false` |
+| `large_flow_latches` | a region at or above `large_ge` is mapped by the size tier's flow, which counts as a user command list that may reshape latches: clock-gated, derived-clock and asynchronously reset registers stay native flops (`icg-native`, `derived-clock-native`, `reset-native`), which placement cannot take. The tool's own default `large_flow` only strashes and maps, so `true` treats such a region like the built-in flow and maps those registers to cells. A user-supplied `large_flow` keeps the old rule. Opt-in: coralnpu's coarse-partition region is one such region (8.2k registers) | `false` |
 
 The Liberty `.lib` handed to `read_lib` is **not** a `pass.abc` option: there is
 one Liberty spelling for the whole CLI, `--set synth.liberty=…` (empty resolves

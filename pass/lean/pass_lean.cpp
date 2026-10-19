@@ -29,6 +29,9 @@ void Pass_lean::setup() {
                         "the proved compiler Compiler.compileDesign instead of from this pass.",
                         "legacy");
   m1.add_label_optional("max_width", "Hard cap on node Bits width; 0 or 'unlimited' = no cap (default 1024).", "1024");
+  m1.add_label_optional("max_nodes",
+                        "Hard cap on the combinational cone's node count; 0 or 'unlimited' = no cap (default 0).",
+                        "0");
   m1.add_label_optional("cert_wf", "skip|eval|sorry|chunked. Certificate well-formedness proof mode.", "skip");
   m1.add_label_optional("cert_wf_fallback", "fail|sorry|eval for unsupported cert_wf:chunked chunk shapes.", "fail");
   m1.add_label_optional("cert_chunk_size", "Number of node certificates per chunk for cert_wf:chunked.", "25");
@@ -48,7 +51,7 @@ void Pass_lean::emit_for_graph(const std::shared_ptr<hhds::Graph>& graph) const 
     livehd::diag::warn("pass.lean", "no-input", "io").msg("received a null Graph instance").emit();
     return;
   }
-  const auto design      = lean_export::scan_design(*graph, {strict, max_width});
+  const auto design      = lean_export::scan_design(*graph, {strict, max_width, max_nodes});
   const auto certificate = lean_export::build_certificate(design, {});
   const auto raw_name    = top.empty() ? design.name : top;
   const auto base_name   = lean_export::sanitize_lean(raw_name);

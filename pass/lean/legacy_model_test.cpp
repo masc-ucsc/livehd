@@ -90,9 +90,12 @@ TEST(LegacyModel, LoweringReadsSemanticWidthsAndSextAmount) {
   d.nodes.front().operands[1].driver = constant("3", 2);
   c                                  = build_certificate(d, {});
   EXPECT_NE(lower_fast_expr(c, c.nodes.front()).text.find("BitVec.toNat @1@"), std::string::npos);
-  d.nodes.front().op        = ScanOp::LT;
-  d.nodes.front().is_signed = true;
-  c                         = build_certificate(d, {});
+  // A comparison is signed because its OPERANDS are, not its 1-bit result.
+  d.nodes.front().op                           = ScanOp::LT;
+  d.nodes.front().operands[0].driver.is_signed = true;
+  d.nodes.front().operands[1].driver           = input(2000000001, 8);
+  d.nodes.front().operands[1].driver.is_signed = true;
+  c                                            = build_certificate(d, {});
   EXPECT_NE(lower_fast_expr(c, c.nodes.front()).text.find("BitVec.toInt @0@"), std::string::npos);
 }
 TEST(LegacyModel, NaryMixedWidthBridgeFixtures) {
@@ -255,7 +258,9 @@ TEST(LegacyModel, ArithmeticAndSimultaneousStateOracleFixtures) {
     d.name                              = name;
     d.inputs[1].width                   = 4;
     d.nodes[0].operands[1].driver.width = 4;
-    d.nodes[0].is_signed                = op == ScanOp::LT || op == ScanOp::GT;
+    // signed comparisons: the OPERANDS are signed (the result never decides)
+    d.nodes[0].operands[0].driver.is_signed = op == ScanOp::LT || op == ScanOp::GT;
+    d.nodes[0].operands[1].driver.is_signed = op == ScanOp::LT || op == ScanOp::GT;
     designs.push_back(d);
   }
   for (const auto& [name, operand_width, result_width] : std::vector<std::tuple<std::string, uint32_t, uint32_t>>{

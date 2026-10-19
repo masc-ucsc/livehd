@@ -15,6 +15,7 @@ The returned `ResultM` is decoded and its state fed to a SECOND `mainM` step,
 with reachable-state preservation supplied by the theorem itself.
 -/
 import LeanSemanticPrimitives.Projection.HardwareMemRuntime
+import LeanSemanticPrimitives.Projection.AxiomGate
 
 namespace Projection
 namespace HwMem
@@ -358,11 +359,11 @@ theorem fullRunInit (i : RuntimeInput) (e : ClockEdges)
 #guard (initStateOf fullDesign).mems.size == 1
 #guard ((initStateOf fullDesign).mems[0]!).words.length == 32
 
-#print axioms fullRunInit
+#audit_axioms fullRunInit
 
-#print axioms fullRunTwo
+#audit_axioms fullRunTwo
 
-#print axioms fullRun
+#audit_axioms fullRun
 
 /-- The returned state has as many flops as the design declares — read off the
 adequacy equation, not assumed. -/
@@ -613,22 +614,22 @@ theorem fullRunFullTwo (i₁ i₂ : RuntimeInput) (e₁ e₂ : ClockEdges) (st :
   obtain ⟨r₂, hev2, hden2, hok2⟩ := hnext hin hed
   exact ⟨r₁, r₂, hev, hden, hev2, hden2, hok2⟩
 
-#print axioms fullRunFull
-#print axioms fullRunFullInit
-#print axioms fullRunFullTwo
+#audit_axioms fullRunFull
+#audit_axioms fullRunFullInit
+#audit_axioms fullRunFullTwo
 
-#print axioms fullDesign_admits
-#print axioms fullDesign_static
-#print axioms fullDesign_semwf
-#print axioms fullG_src
-#print axioms fullG_nextImg
-#print axioms fullG_prop
-#print axioms geomAt_full
-#print axioms full_fits_checked
-#print axioms fullG_fits
-#print axioms fullState_shape
-#print axioms fullStep
-#print axioms fullTwoSteps
+#audit_axioms fullDesign_admits
+#audit_axioms fullDesign_static
+#audit_axioms fullDesign_semwf
+#audit_axioms fullG_src
+#audit_axioms fullG_nextImg
+#audit_axioms fullG_prop
+#audit_axioms geomAt_full
+#audit_axioms full_fits_checked
+#audit_axioms fullG_fits
+#audit_axioms fullState_shape
+#audit_axioms fullStep
+#audit_axioms fullTwoSteps
 
 end HwMem
 end Projection

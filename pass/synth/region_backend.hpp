@@ -63,6 +63,12 @@ struct Driver_options {
   // port). Trees are built under a primary clock net only past this many register
   // bits in the source graph; a derived clock (gate output) is always bounded.
   uint32_t input_clock_min = 8192;
+  // An asynchronous-reset net (a region input, a reset inverter or a mapped reset cone) that drives more
+  // clear/preset pins than this is dealt out through a tree of the library's smallest buffer, `reset_fanout`
+  // pins per buffer, level by level (the clock tree's mechanism). The pins never enter the logic network, so the
+  // mapper's `max_fanout` cannot bound them: one weak gate otherwise drives thousands of flops (a 439-pin
+  // AO21x1 gave a 4 ns slew and a -1 ns recovery slack). 0 (the default) disables the tree.
+  uint32_t reset_fanout = 0;
   // Optional region hook, and its identity in the region-cache recipe (two
   // regions with equal logic but different hook settings never share a body).
   Region_hook                                                               region_hook;

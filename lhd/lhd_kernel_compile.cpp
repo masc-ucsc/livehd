@@ -34,6 +34,7 @@
 #include "perf_tracing.hpp"
 #include "prp2lnast.hpp"
 #include "specialize.hpp"
+#include "sweep.hpp"
 #include "upass_tolg.hpp"
 #include "worker_pool.hpp"  // livehd::run_workers (big-stack workers)
 
@@ -1829,6 +1830,14 @@ void graph_pipeline_and_emits(Options& opts, Result& res, Eprp_var& var, const s
     // bodies, stale halves); both var.graphs and the active subset are updated
     // so the later passes, the emits, the cache and the freeze check see the
     // design as it is.
+    const auto set_on = [&](std::string_view key) {
+      for (const auto& [k, v] : opts.sets) {
+        if (k == key) {
+          return v == "true" || v == "1" || v == "on";
+        }
+      }
+      return false;
+    };
     bool       legalized         = false;
     bool       needs_loop_check  = false;
     bool       delayed_enableopt = false;
@@ -1919,6 +1928,77 @@ void graph_pipeline_and_emits(Options& opts, Result& res, Eprp_var& var, const s
         restored.clear();
         res.compile_cache_restored_graphs.clear();
         res.recipe_steps.emplace_back("pass.specialize");
+      }
+      // compile.flatten / compile.unknown_zero (pass/sweep): whole-design
+      // clean-ups a hierarchy of separately compiled modules hides. Opt-in.
+      const bool sweep_flatten = set_on("compile.flatten");
+      const bool sweep_unknown = set_on("compile.unknown_zero");
+      if (sweep_flatten) {
+        Phase_timer                               phase(res, "pass.sweep.flatten");
+        std::vector<std::shared_ptr<hhds::Graph>> design(var.graphs.begin(), var.graphs.end());
+        // The roots are the requested top(s), or every definition nothing instantiates.
+        absl::flat_hash_set<const hhds::Graph*> instantiated;
+        std::vector<std::string>                names;
+        for (const auto& graph : design) {
+          names.emplace_back(graph->get_name());
+          for (auto node : graph->body().nodes()) {
+            if (livehd::graph_util::is_type_sub(node)) {
+              if (auto callee = node.get_subnode_graph()) {
+                instantiated.insert(callee.get());
+              }
+            }
+          }
+        }
+        absl::flat_hash_set<std::string> selected_tops;
+        for (const std::string* want : {&opts.top, &opts.ref_top, &opts.impl_top}) {
+          if (!want->empty() && *want != "-auto-top") {
+            if (auto resolved = resolve_top_name(names, *want, /*diag_pass=*/""); !resolved.empty()) {
+              selected_tops.insert(std::move(resolved));
+            }
+          }
+        }
+        std::vector<std::shared_ptr<hhds::Graph>> roots;
+        for (const auto& graph : design) {
+          if (selected_tops.contains(std::string{graph->get_name()}) || (selected_tops.empty() && !instantiated.contains(graph.get()))) {
+            roots.push_back(graph);
+          }
+        }
+        const auto stats = livehd::sweep::flatten(roots);
+        livehd::diag::info("pass.sweep", "flatten", "progress")
+            .msg("pass.sweep: flattened {} instance(s) into {} root(s); {} instance(s) kept", stats.inlined, roots.size(), stats.kept)
+            .emit();
+        absl::flat_hash_set<const hhds::Graph*> reachable;
+        for (const auto& graph : livehd::sweep::reachable_closure(roots)) {
+          reachable.insert(graph.get());
+        }
+        var.graphs.clear();
+        for (const auto& graph : design) {
+          if (reachable.contains(graph.get())) {
+            var.add(graph);
+          } else {
+            auto*             library = graph->get_io()->get_library();
+            const std::string name{graph->get_name()};
+            library->delete_graph(graph);
+            library->delete_graphio(name);
+          }
+        }
+        active = &var;
+        restored.clear();
+        res.compile_cache_restored_graphs.clear();
+        res.recipe_steps.emplace_back("pass.sweep.flatten");
+      }
+      if (sweep_unknown) {
+        size_t refined = 0;
+        for (const auto& graph : var.graphs) {
+          refined += livehd::sweep::refine_unknown(*graph);
+        }
+        livehd::diag::info("pass.sweep", "unknown-zero", "progress")
+            .msg("pass.sweep: {} constant sink(s) with unknown bits read as 0", refined)
+            .emit();
+        active = &var;
+        restored.clear();
+        res.compile_cache_restored_graphs.clear();
+        res.recipe_steps.emplace_back("pass.sweep.unknown_zero");
       }
       set_crash_context("pass.legalize", {});
       Phase_timer                               phase(res, "pass.legalize");
@@ -2014,6 +2094,43 @@ void graph_pipeline_and_emits(Options& opts, Result& res, Eprp_var& var, const s
     }
     if (!legalized) {
       run_legalize();
+    }
+
+    // compile.sweep: constant / unobserved state bits (pass/sweep/state.cpp), one
+    // round at a time, each folded by cprop + bitwidth, until a round finds nothing.
+    if (set_on("compile.sweep") && !active->graphs.empty()) {
+      Phase_timer phase(res, "pass.sweep.state");
+      size_t      total_const = 0, total_dead = 0, total_fix = 0, total_mem = 0;
+      int         rounds = 0;
+      for (; rounds < 256; ++rounds) {
+        livehd::sweep::State_stats round;
+        for (const auto& graph : active->graphs) {
+          const auto st = livehd::sweep::sweep_state(*graph, {.observe_markers = opts.command != "synth"});
+          round.const_bits += st.const_bits;
+          round.dead_bits  += st.dead_bits;
+          round.dead_memories += st.dead_memories;
+          round.fix_rounds += st.fix_rounds;
+          round.flops_rebuilt += st.flops_rebuilt;
+        }
+        if (!round.changed()) {
+          break;
+        }
+        total_const += round.const_bits;
+        total_dead  += round.dead_bits;
+        total_mem   += round.dead_memories;
+        total_fix   += round.fix_rounds;
+        Eprp_var::Eprp_dict cp_labels, bw_labels;
+        merge_sets(opts, "compile.cprop", cp_labels);
+        cp_labels["loop_hoist"] = "false";
+        run_step("pass.cprop", *active, cp_labels, opts, res);
+        merge_sets(opts, "compile.bitwidth", bw_labels);
+        run_step("pass.bitwidth", *active, bw_labels, opts, res);
+      }
+      livehd::diag::info("pass.sweep", "state", "progress")
+          .msg("pass.sweep: {} constant and {} unobserved flop bit(s) and {} unobserved memorie(s) removed in {} round(s) ({} fixpoint evaluations)",
+               total_const, total_dead, total_mem, rounds, total_fix)
+          .emit();
+      res.recipe_steps.emplace_back("pass.sweep.state");
     }
 
     // pass.satopt (todo/livehd/2s-satopt A): proof-backed rewrites committed

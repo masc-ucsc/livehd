@@ -1,8 +1,8 @@
 # CORE-ET operator census — what the numbers are, and what they are not
 
-Phase 3 of the Futamura plan is driven by a census of which LGraph operators the
-CORE-ET certificates actually use.  The numbers were previously only in terminal
-output; this directory makes them reproducible.
+A census of which LGraph operators the CORE-ET certificates actually use, and
+whether the Futamura projection implements each of them.  This directory makes
+the numbers reproducible.
 
 ## Reproduce
 
@@ -93,10 +93,9 @@ It is **static operator-shape reachability**, not execution, and not
 * It is evidence about **the exporter**, not a theorem.  It says no emitted
   certificate violates the condition today, not that none can.
 
-Actually running designs is Phase 6, and its first external milestone is 30
-CVA6 blocks through the projected simulator — to be claimed only from recorded
-execution and comparison against the reference semantics, never from
-certificate emission, projection, or a census like this one.
+A design counts as run only from recorded execution and comparison against the
+reference semantics, never from certificate emission, projection, or a census
+like this one.
 
 ## Caveats visible in the data
 
@@ -106,6 +105,3 @@ certificate emission, projection, or a census like this one.
 * Five further modules carry a non-empty certificate without being READY.  The
   filter excludes them.  Including them would add `Op_Mult` (4 nodes, 1 module)
   and make the totals 70 modules / 18 operators.
-* The plan text once said "20 distinct operators over 71 proven certificates".
-  That matches neither reading of the data on disk and was corrected when the
-  census was first re-run.

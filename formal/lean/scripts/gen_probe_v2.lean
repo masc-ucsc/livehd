@@ -47,7 +47,9 @@ unsupported / 3 out of fuel at the requested budget.
 -/
 import LeanSemanticPrimitives.Projection.Proto.RunnerSupport
 import LeanSemanticPrimitives.Projection.CertLoad
-import LeanSemanticPrimitives.Compiler.CertIOFacade   -- DCERT2 + DCERT1, routed by magic
+import LeanSemanticPrimitives.Compiler.CertIORoute   -- DCERT2 + DCERT1, routed by magic (Mathlib-free)
+import LeanSemanticPrimitives.Compiler.RunAdmission   -- C3 edges / C4 reset polarity
+import LeanSemanticPrimitives.Projection.ResidualIO   -- save:<file> (B10)
 
 open Compiler Projection Projection.Hw Projection.Runner Projection.ProtoVar
 
@@ -63,11 +65,14 @@ def loadAny (p : System.FilePath) : IO (CertIO.Format × DesignCert) := do
 
 def main (args : List String) : IO UInt32 := do
   match args with
-  | path :: a :: b :: _ => do
+  | path :: a :: b :: rest => do
+      -- optional `save:<file>`: write the checked residual (Projection/ResidualIO)
+      let saveTo := rest.findSome? (fun t => (t.dropPrefix? "save:").map (·.toString))
       let sf := (a.toNat?).getD 20000
       let wf := (b.toNat?).getD 200
       let t0 ← IO.monoMsNow
       let (fmt, D) ← loadAny path
+      if let some rc := (← RunAdmission.refuseDesign? D) then return rc
       let t1 ← IO.monoMsNow
       let sr := CertLoad.supportReport D
       let okAll := sr.wf && sr.memFree && sr.sources && sr.ops && sr.arities && sr.flopClocks
@@ -89,7 +94,9 @@ inherited projection semantics/runtime-relation/adequacy gap, not a loader defec
         return 2
       IO.println s!"  backend: PROVED mixDriver + hwAPVarT (TOTAL variant), fuel {sf}/{wf}"
       IO.println "  GENERATION ONLY: no reference stimuli, no trace, no control interpreter."
-      IO.println "  artifact: an IN-MEMORY Program; nothing is serialized and no source is written."
+      match saveTo with
+      | some f => IO.println s!"  artifact: the checked Program, SERIALIZED to {f} (Projection/ResidualIO)"
+      | none   => IO.println "  artifact: an IN-MEMORY Program; nothing is serialized and no source is written."
       (← IO.getStdout).flush
       let t3 ← IO.monoMsNow
       let res ← IO.lazyPure (fun _ => mixDriver sf wf hwAPVarT [encDesign D])
@@ -128,8 +135,17 @@ specialize-whnf {t4 - t3}  specialize-force {t5 - t4}  check {t6 - t5}  TOTAL {t
           let terms := szOf R
           let t8 ← IO.monoMsNow
           IO.println s!"  EXCLUDED FROM GENERATION -- profiling: szOf {terms} terms in {t8 - t7} ms"
+          if let some f := saveTo then
+            let digest := ResidualIO.fnv1a (← IO.FS.readBinFile path)
+            let t9 ← IO.monoMsNow
+            let n ← ResidualIO.writeResidual f
+              { certDigest := toString digest, backend := "hwAPVarT",
+                stepFuel := sf, workFuel := wf, producer := "gen_probe_v2" } R
+            let t10 ← IO.monoMsNow
+            IO.println s!"  EXCLUDED FROM GENERATION -- residual saved: {f}, payload {n} bytes, \
+certificate fnv1a {digest}, in {t10 - t9} ms"
           IO.println "  RESULT: GENERATION OK (NOT a full benchmark pass: no stimuli, no trace, no control)"
           return 0
   | _ => do
-      IO.eprintln "usage: gen_probe_v2 <cert.dcert> <stepFuel> <workFuel>"
+      IO.eprintln "usage: gen_probe_v2 <cert.dcert> <stepFuel> <workFuel> [save:<residual.fpres>]"
       return 2

@@ -17,6 +17,7 @@
 
 #include "affine_amount.hpp"
 #include "attr_carry.hpp"
+#include "bit_facts.hpp"
 #include "node_util.hpp"
 #include "synth_policy.hpp"
 #include "synthesis_cost.hpp"
@@ -182,7 +183,7 @@ std::string section_info(hhds::Graph& graph, int color, Ware_policy policy) {
 }
 
 std::shared_ptr<hhds::Graph> enclose(hhds::Graph& parent, const hhds::Node_class& node, const std::string& kind, Ware_policy policy,
-                                     const std::set<int>& option_colors) {
+                                     const std::set<int>& option_colors, bool zero_bits) {
   // Sink-port ascending by contract (the pin chain is kept sorted), which is the
   // whole of the order now. The sort_drivers_within_pin call that used to follow
   // is GONE: it imposed a deterministic order on the SEVERAL DRIVERS OF ONE SINK
@@ -212,7 +213,34 @@ std::shared_ptr<hhds::Graph> enclose(hhds::Graph& parent, const hhds::Node_class
   // Include source mapping options so sections with different policies never
   // accidentally share an implementation selected in a different context.
   std::string descriptor = kind;
-  for (auto e : edges) {
+  // The data operand of a shifter: bits the parent drives with a provable 0.
+  std::map<size_t, std::vector<bool>> kept_bits;  // edge index -> keep mask (only when something is cleared)
+  if (zero_bits && (kind == "shl" || kind == "sra")) {
+    for (size_t i = 0; i < edges.size(); ++i) {
+      const auto drv = edges[i].get_driver_pin();
+      const bool data   = edges[i].get_port_id() == Ntype::get_sink_pid(gu::type_op_of(node), "a");
+      const bool amount = edges[i].get_port_id() == Ntype::get_sink_pid(gu::type_op_of(node), "b");
+      if ((!data && !amount) || drv.is_const() || is_affine_edge(edges[i])) {
+        continue;
+      }
+      const int  width = std::max(gu::bits_of(drv), 1);
+      const auto zero  = bit_facts::known_zero_bits(drv, width);
+      // Data operand: only a vector with a real share of constant bits (a few zero bits among
+      // live ones do not simplify the barrel and only perturb the mapping). Amount operand:
+      // every provably-zero bit removes a whole barrel stage (the `idx * 32` of a word select
+      // has five low zeros).
+      const auto zeros = static_cast<size_t>(std::ranges::count(zero, true));
+      if ((amount ? zeros > 0 : zeros * 8 >= zero.size() && zeros > 0)) {
+        std::vector<bool> keep(zero.size());
+        for (size_t b = 0; b < zero.size(); ++b) {
+          keep[b] = !zero[b];
+        }
+        kept_bits.emplace(i, std::move(keep));
+      }
+    }
+  }
+  for (size_t ei = 0; ei < edges.size(); ++ei) {
+    const auto& e = edges[ei];
     if (is_affine_edge(e)) {
       descriptor += std::format("/i{}:{}", e.get_port_id(), describe_affine(*affine));
       continue;
@@ -220,6 +248,9 @@ std::shared_ptr<hhds::Graph> enclose(hhds::Graph& parent, const hhds::Node_class
     descriptor += std::format("/i{}:{}:{}", e.get_port_id(), gu::bits_of(e.get_driver_pin()), gu::is_unsign(e.get_driver_pin()));
     if (e.get_driver_pin().is_const()) {
       descriptor += ":" + gu::const_of(e.get_driver_pin()).to_pyrope();
+    }
+    if (const auto it = kept_bits.find(ei); it != kept_bits.end()) {
+      descriptor += ":z" + bit_facts::mask_text(it->second);
     }
   }
   for (auto [pid, pin] : outputs) {
@@ -320,6 +351,9 @@ std::shared_ptr<hhds::Graph> enclose(hhds::Graph& parent, const hhds::Node_class
         gu::carry_pin_attrs(e.get_driver_pin(), driver);
       } else {
         shape(e.get_driver_pin(), driver);
+        if (const auto it = kept_bits.find(i); it != kept_bits.end()) {
+          driver = bit_facts::mask_pin(*body, driver, it->second, color);
+        }
       }
       auto sink = inner.create_sink_pin(e.get_port_id());
       gu::carry_pin_attrs(e, sink);
@@ -384,7 +418,8 @@ std::shared_ptr<hhds::Graph> enclose(hhds::Graph& parent, const hhds::Node_class
 }  // namespace
 
 std::vector<std::shared_ptr<hhds::Graph>> build_ware_modules(const std::vector<std::shared_ptr<hhds::Graph>>& graphs,
-                                                             Ware_policy fallback, const std::set<int>& option_colors) {
+                                                             Ware_policy fallback, const std::set<int>& option_colors,
+                                                             bool zero_bits) {
   std::vector<std::shared_ptr<hhds::Graph>> modules;
   for (const auto& graph : graphs) {
     if (!graph || graph->get_input_node().attr(attrs::ware_module).has()) {
@@ -443,7 +478,7 @@ std::vector<std::shared_ptr<hhds::Graph>> build_ware_modules(const std::vector<s
         }
       }
       for (const auto& [node, kind] : nodes) {
-        auto child = enclose(*graph, node, kind, policy, option_colors);
+        auto child = enclose(*graph, node, kind, policy, option_colors, zero_bits);
         if (std::find(modules.begin(), modules.end(), child) == modules.end()) {
           modules.push_back(child);
         }

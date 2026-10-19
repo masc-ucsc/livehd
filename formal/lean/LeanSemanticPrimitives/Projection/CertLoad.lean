@@ -1,8 +1,9 @@
 /-
 # Loading a real certificate, and running it both ways
 
-Phase 6 infrastructure.  `Compiler/CertIO.lean` is the ported DCERT1 loader;
-this file is what uses it:
+Phase 6 infrastructure.  FP's ported DCERT1 loader is `Compiler/CertIOV1.lean`
+(namespace `Compiler.CertIO.V1`; on master the unqualified `Compiler.CertIO`
+is DCERT2, read by `Projection/CertLoadAny.lean`); this file is what uses it:
 
   * round-trip and malformed-input regressions for the TRUSTED parser;
   * a per-field support report -- all six `SupportedByProjection` conjuncts

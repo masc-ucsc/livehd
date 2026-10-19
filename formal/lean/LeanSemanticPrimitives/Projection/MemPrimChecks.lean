@@ -38,3 +38,19 @@ open Projection Projection.MemImg Projection.Hw Compiler
 -- the arity gate `fragB` applies agrees with the declared arity
 #guard Prim.arity .memRead == 4
 #guard fragB 4 (.prim .memRead [.var 0, .var 1, .var 2]) == false
+
+-- The two WRITE primitives, by the same component checks: a dynamic application
+-- has no structural rule (so it residualises), the residual node is inside the
+-- fragment at its declared arity, and the codes are the ones `MixProgram`'s
+-- `primTable` mirrors (32/33/34).  The host-vs-object agreement for all three
+-- is in `MemMixMirrorCheck.lean`.
+#guard (primStruct .memWriteBE
+          [.code (.var 0), .code (.var 1), .code (.var 2),
+           .code (.var 3), .code (.var 4), .code (.var 5)]).isNone
+#guard (primStruct .memWrite
+          [.code (.var 0), .code (.var 1), .code (.var 2), .code (.var 3)]).isNone
+#guard fragB 6 (.prim .memWriteBE [.var 0, .var 1, .var 2, .var 3, .var 4, .var 5])
+#guard fragB 4 (.prim .memWrite [.var 0, .var 1, .var 2, .var 3])
+#guard Prim.arity .memWriteBE == 6 && Prim.arity .memWrite == 4
+#guard fragB 4 (.prim .memWrite [.var 0, .var 1, .var 2]) == false
+#guard primCode .memRead == 32 && primCode .memWriteBE == 33 && primCode .memWrite == 34

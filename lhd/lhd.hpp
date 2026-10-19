@@ -831,6 +831,11 @@ inline constexpr Synth_set_option kSynthSetOptions[] = {
      "false",
      Synth_set_option::Kind::boolean,
      "let synth.place.resize repair size and buffer reset-pin cones (a high-fanout reset net); default protects them like clocks"},
+    {"place.reset_fanout",
+     "0",
+     Synth_set_option::Kind::integer,
+     "before placement, deal every flat net that drives an asynchronous clear/preset pin and more than this many cell pins out through "
+     "a tree of the library's smallest buffer, this many pins per buffer (0 = off, >= 2); unlike resize it is not gated on timing"},
     {"place.fp.colors",
      "false",
      Synth_set_option::Kind::boolean,
@@ -1149,6 +1154,18 @@ inline constexpr Synth_set_option kSynthSetOptions[] = {
      "run pass.specialize on the mapper's private copy after pass.color: a constant instance input is folded into a "
      "content-named copy of its state-free callee, and a constant a callee returns reaches its parent. false keeps "
      "every instance boundary as compiled"},
+    {"state_sweep",
+     "false",
+     Synth_set_option::Kind::boolean,
+     "opt in to the observability sweep of the mapper's private copy: delete the registers and cells that no output, memory or "
+     "body-less cell can observe and narrow each register to its highest observed bit, tracking the demand per bit across the "
+     "instance hierarchy (what Yosys gets from flattening and opt_clean). Works on the private copy only and also sweeps the "
+     "lowered memories; complements compile.sweep, which edits the flat compile graphs. Off by default"},
+    {"merge_registers",
+     "false",
+     Synth_set_option::Kind::boolean,
+     "opt in to merging registers that are the same machine (same clock, enable, reset, reset value, width and D driver) on the "
+     "mapper's private copy, repeating until nothing merges: Yosys's opt_merge on flops. Off by default"},
     {"sdc", "", Synth_set_option::Kind::file, "PATH -- optional .sdc timing constraints handed to pass.opentimer"},
     {"spef", "", Synth_set_option::Kind::file, "PATH -- optional .spef parasitics handed to pass.opentimer"},
 };

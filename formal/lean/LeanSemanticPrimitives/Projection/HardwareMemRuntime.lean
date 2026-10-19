@@ -33,6 +33,7 @@ without altering any existing predicate.  `SourceSupported`, `OpSupported` and
 `memFree` are untouched and the public route still refuses memory-bearing designs.
 -/
 import LeanSemanticPrimitives.Projection.HardwareMemSlotTy
+import LeanSemanticPrimitives.Projection.AxiomGate
 
 namespace Projection
 namespace HwMem
@@ -464,8 +465,8 @@ theorem admits_slot_memwidth {D : DesignCert} (h : admitsB D = true)
       simp only [hdeps, List.map_cons, List.map_nil, eval_op_cert, CertVal.asMem]
       exact cert_mem_write_be_width hwid' hIH' x
 
-#print axioms memShape_of_denote
-#print axioms admits_slot_memwidth
+#audit_axioms memShape_of_denote
+#audit_axioms admits_slot_memwidth
 
 
 /-! ## 7. The next state passes the SAME policy
@@ -643,8 +644,8 @@ theorem admits_run_two {D : DesignCert} {i₁ i₂ : RuntimeInput} {st : StateM}
     exact ⟨⟨⟨hok, hin⟩, hfb⟩, hed⟩
   exact admits_run_pres hA hR₂
 
-#print axioms admits_run_pres
-#print axioms admits_run_two
+#audit_axioms admits_run_pres
+#audit_axioms admits_run_two
 
 
 /-! ## 8. Initialisation: every admitted design HAS a legal state
@@ -765,9 +766,9 @@ theorem StateRelR_initStateOf (D : DesignCert) :
 #guard runtimeOKB twoMemDesign #[mk_bv 5 3, mk_bv 32 0xFFFFFFFF, mk_bv 1 1, mk_bv 32 0xF]
          (initStateOf twoMemDesign) #[true, true] == true
 
-#print axioms initStateOf_ok
-#print axioms admits_run_init
-#print axioms initStateOf_codec
+#audit_axioms initStateOf_ok
+#audit_axioms admits_run_init
+#audit_axioms initStateOf_codec
 
 
 /-! ## 9. The DECLARED FLOP WIDTH, which the size check does not see
@@ -1081,14 +1082,14 @@ route carries the lane distinction too. -/
 #guard flopShapeOKB mixedDesign zeroState == true
 #guard flopShapeOKB mixedDesign initState == true
 
-#print axioms srcFlopNext_width
-#print axioms admits_run_full
-#print axioms admits_run_full_init
-#print axioms admits_run_full_two
+#audit_axioms srcFlopNext_width
+#audit_axioms admits_run_full
+#audit_axioms admits_run_full_init
+#audit_axioms admits_run_full_two
 
-#print axioms memImgOKB_sound
-#print axioms stateOKB_shape
-#print axioms admits_run
+#audit_axioms memImgOKB_sound
+#audit_axioms stateOKB_shape
+#audit_axioms admits_run
 
 end HwMem
 end Projection

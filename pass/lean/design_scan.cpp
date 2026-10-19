@@ -56,6 +56,9 @@ PinRef capture_pin(const LeanCtx& ctx, const Node_pin& pin) {
   } else if (node_is_memory(node)) {
     result.kind = PinKind::Memory;
   }
+  if (result.kind != PinKind::Constant) {
+    result.is_signed = !livehd::graph_util::is_unsign(pin);
+  }
   return result;
 }
 
@@ -959,6 +962,16 @@ DesignScan scan_design(hhds::Graph& graph, const ScanOptions& options) {
   };
   std::set<uint64_t>                 reached, active;
   std::vector<std::tuple<Node, bool, int>> stack;
+  // Traversal ceiling, scaled to the graph: one push per edge on an acyclic
+  // walk, so this is slack of several hundred edges per node before it fires.
+  // Counted with a loop, not std::distance: hhds' forward iterator is
+  // move-only, so the distance overload does not compile against it.
+  size_t graph_nodes = 0;
+  for ([[maybe_unused]] auto gn : graph.body().nodes(hhds::Node_order::forward)) {
+    ++graph_nodes;
+  }
+  const size_t push_cap    = 64 * (graph_nodes + 1024);
+  size_t       pushes      = 0;
   // Operator census: name -> first node that used it, plus a total node count.
   std::map<std::string, std::string> unsupported;
   size_t                             unsupported_nodes = 0;
@@ -1116,9 +1129,25 @@ DesignScan scan_design(hhds::Graph& graph, const ScanOptions& options) {
         continue;
       }
       if (!active.insert(key).second) {
+        // Name BOTH endpoints. "cycle at node n_X" alone leaves the other half
+        // to be hunted for, and on a word-level loop the pair IS the finding:
+        // the reader below is still being resolved, so the two sit on one
+        // combinational loop. The caller that pushed us is the stack entry
+        // underneath, when there is one.
+        std::string reader;
+        if (stack.size() >= 2) {
+          const auto& parent    = stack[stack.size() - 2];
+          const auto  parent_nd = std::get<0>(parent);
+          reader                = ", which is read by n_" + std::to_string(node_id(parent_nd)) + " ("
+                   + std::string(livehd::graph_util::debug_name(parent_nd)) + ")";
+        }
         fatal(ctx,
-              "combinational cycle at node n_" + std::to_string(id)
-                  + (read_ordinal >= 0 ? " read port " + std::to_string(read_ordinal) : ""));
+              "combinational cycle at node n_" + std::to_string(id) + " ("
+                  + std::string(livehd::graph_util::debug_name(node)) + ")"
+                  + (read_ordinal >= 0 ? " read port " + std::to_string(read_ordinal) : "") + reader
+                  + " -- the two are on a word-level combinational loop. cprop's split_packed_selfref_wires "
+                    "should have dissolved it; check its `unresolved-cycle` warning earlier in this run. A "
+                    "surviving loop has no dependency order, so there is no certificate to emit.");
       }
       std::get<1>(stack.back()) = true;
       const auto push           = [&](const Node_pin& drv) {
@@ -1128,6 +1157,20 @@ DesignScan scan_design(hhds::Graph& graph, const ScanOptions& options) {
         const auto r = read_ordinal_of(drv);
         if (reached.contains(vkey(node_id(pin_node(drv)), r))) {
           return;
+        }
+        // A ceiling on the walk itself, independent of the gray set above. On
+        // an acyclic graph this walk costs one push per edge, so blowing the
+        // ceiling is a STRUCTURAL problem rather than a large design -- most
+        // likely a loop shape the gray set did not catch. Without it the
+        // traversal grows the stack without bound and the pass dies as an OOM
+        // with no diagnostic at all.
+        if (++pushes > push_cap) {
+          fatal(ctx,
+                "the combinational traversal exceeded " + std::to_string(push_cap) + " steps on a graph of "
+                    + std::to_string(graph_nodes)
+                    + " nodes. On an acyclic graph this walk costs one step per edge, so this is a structural "
+                      "problem rather than a large design -- most likely a combinational loop the cycle check "
+                      "did not catch.");
         }
         stack.emplace_back(pin_node(drv), false, r);
       };
@@ -1139,6 +1182,12 @@ DesignScan scan_design(hhds::Graph& graph, const ScanOptions& options) {
         }
       }
     }
+  }
+  if (options.max_nodes != 0 && design.nodes.size() > options.max_nodes) {
+    fatal(ctx,
+          "the design's combinational cone has " + std::to_string(design.nodes.size()) + " nodes, over the "
+              + std::to_string(options.max_nodes)
+              + "-node budget (formal.lean.max_nodes). Raise it, or emit a smaller block.");
   }
   // One refusal naming the COMPLETE census. The old behaviour fataled on the
   // first unsupported node, so a design needing two operators reported one and

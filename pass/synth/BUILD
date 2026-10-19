@@ -225,6 +225,30 @@ cc_test(
 )
 
 cc_test(
+    name = "register_merge_test",
+    srcs = ["register_merge_test.cpp"],
+    copts = COPTS,
+    deps = [
+        ":synth",
+        "//graph",
+        "@googletest//:gtest_main",
+        "@hhds//hhds:graph",
+    ],
+)
+
+cc_test(
+    name = "state_sweep_test",
+    srcs = ["state_sweep_test.cpp"],
+    copts = COPTS,
+    deps = [
+        ":synth",
+        "//graph",
+        "@googletest//:gtest_main",
+        "@hhds//hhds:graph",
+    ],
+)
+
+cc_test(
     name = "arith_test",
     srcs = [
         "arith.hpp",
@@ -280,6 +304,19 @@ cc_test(
     deps = [
         "//graph",
         "@abseil-cpp//absl/container:flat_hash_map",
+        "@googletest//:gtest_main",
+        "@hhds//hhds:graph",
+    ],
+)
+
+# Which bits of a word-level value are provably 0 (ware_zero_bits / memory_prune_reads).
+cc_test(
+    name = "bit_facts_smoke",
+    srcs = ["bit_facts_smoke.cpp"],
+    copts = COPTS,
+    deps = [
+        ":synth",
+        "//graph",
         "@googletest//:gtest_main",
         "@hhds//hhds:graph",
     ],

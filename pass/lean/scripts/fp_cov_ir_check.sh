@@ -19,9 +19,9 @@
 # timeout cap (124), a producer refusal (other nonzero) and a phase that never
 # produced an exit record (MISSING -> 97) are distinguishable from OK.
 set -uo pipefail
-R=/WORKROOT/projects/livehd-pass-lean-master
+R="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"   # the repo root, from this script's location
 COV=$R/generated/master_port/cov12x5
-LEANBIN=/WORKROOT/.elan/toolchains/leanprover--lean4---v4.31.0/bin/lean
+LEANBIN=${FP_LEAN_BIN:-${ELAN_HOME:-$HOME/.elan}/toolchains/leanprover--lean4---v4.31.0/bin/lean}
 
 # classify <cell-dir> <phase-name>  ->  prints "<label> exit=<e> time_exit=<t>"
 #   OK | CAP | REFUSED | MISSING | DISAGREE

@@ -248,6 +248,10 @@ livehd::placement::Options placement_options(const Options& opts) {
     throw Lhd_error{"usage", "invalid FP color/pin adjustment settings", ""};
   }
   out.repair_reset                = truthy(synth_set(opts, "place.repair.reset", "false"));
+  out.reset_fanout                = static_cast<unsigned>(integer("place.reset_fanout", "0"));
+  if (out.reset_fanout == 1) {
+    throw Lhd_error{"usage", "invalid synth.place.reset_fanout: 1", "expected 0 (off) or an integer >= 2: loads per reset buffer"};
+  }
   out.fp_iterations               = integer("place.fp.iterations", "1500");
   out.fp_minimum                  = number("place.fp.minimum", "3000");
   out.fp_min_copies               = integer("place.fp.min_copies", "4");
@@ -900,6 +904,8 @@ void synth_command(Options& opts, Result& res) {
     // ABC keeps its independent worker setting; USYN uses shared admission.
     labels["threads"]    = "0";
     labels["specialize"] = synth_set(opts, "specialize", "true");
+    labels["state_sweep"]     = synth_set(opts, "state_sweep", "false");
+    labels["merge_registers"] = synth_set(opts, "merge_registers", "false");
     // Each mapper receives its own labels. Native USYN does not inherit
     // ABC optimization settings; standalone dispatch uses the same rule.
     merge_mapper_sets(opts, mapper_method, labels);

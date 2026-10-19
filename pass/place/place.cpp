@@ -29,6 +29,7 @@
 #include "memory_proxy.hpp"
 #include "pin_adjust.hpp"
 #include "repair.hpp"
+#include "reset_tree.hpp"
 #include "technology_rc.hpp"
 #if defined(__APPLE__)
 #include <mach-o/dyld.h>
@@ -147,6 +148,9 @@ std::string environment_key(const Options& o, const ph::Technology& tech) {
                             o.halo_y),
                 h);
   h = hash_text(o.macro_mode, h);
+  if (o.reset_fanout) {
+    h = hash_text(std::format("reset-fanout:{}", o.reset_fanout), h);
+  }
   if (!o.die.empty() || !o.core.empty()) {
     h = hash_text("fixed-frame", h);
     for (const auto v : o.die) {
@@ -2406,6 +2410,20 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
   v.fp.dbu                 = tech.dbu;
   const auto  memories     = memory_proxies(graph, tech, options.liberty);
   Resolver    resolver(tech, memories, options.unknown_const_zero);
+  // Opt-in: the flat reset nets are bounded before the first cell is read, so the buffers place like any cell.
+  // A driver that resolves to a constant (the tied inactive pin of a clear+preset flop) is not a reset net.
+  const auto reset_tree = options.reset_fanout ? buffer_reset_nets(graph,
+                                                                   tech,
+                                                                   options.liberty,
+                                                                   options.reset_fanout,
+                                                                   [&](const Pin& driver) {
+                                                                     try {
+                                                                       return resolver.bit(driver, 0).constant >= 0;
+                                                                     } catch (const std::exception&) {
+                                                                       return true;  // unknown constant: left to the tie logic
+                                                                     }
+                                                                   })
+                                                : Reset_tree_stats{};
   double      area      = 0;
   int64_t     max_width = 0, max_height = 0;
   std::string site_name;
@@ -4896,6 +4914,23 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
             [&](const Cell& c) { return (v.halo_x || v.halo_y) && !tech.macros.at(c.macro).klass.starts_with("CORE"); })),
         allocator);
     json.AddMember("halo", halo, allocator);
+    if (options.reset_fanout) {
+      rapidjson::Value tree(rapidjson::kObjectType);
+      tree.AddMember("fanout", options.reset_fanout, allocator);
+      // nets/sinks/added/levels describe this call; the seed placement of a timing-driven run already built the
+      // tree, so `buffers` counts the tree cells present in the placed netlist.
+      tree.AddMember("nets", reset_tree.nets, allocator);
+      tree.AddMember("sinks", reset_tree.sinks, allocator);
+      tree.AddMember("added", reset_tree.buffers, allocator);
+      tree.AddMember("buffers",
+                     static_cast<uint64_t>(std::count_if(v.cells.begin(),
+                                                         v.cells.end(),
+                                                         [](const Cell& c) { return c.name.find("__place_rsttree") != std::string::npos; })),
+                     allocator);
+      tree.AddMember("levels", reset_tree.levels, allocator);
+      tree.AddMember("skipped", reset_tree.skipped, allocator);
+      json.AddMember("reset_tree", tree, allocator);
+    }
     if (macro_run) {
       rapidjson::Value macro(rapidjson::kObjectType);
       macro.AddMember("mode", "h2d", allocator);

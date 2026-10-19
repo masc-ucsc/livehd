@@ -16,6 +16,7 @@ The node fold's EVALUATION witness is retained and used — `mainM` is proved by
 running the actual chain, not by assuming an environment appears.
 -/
 import LeanSemanticPrimitives.Projection.HardwareMemOutFlop
+import LeanSemanticPrimitives.Projection.AxiomGate
 
 namespace Projection
 namespace HwMem
@@ -308,7 +309,7 @@ one relabelled. -/
 
 theorem hwMemS_entry : hwMemS.entry = "mainM" := rfl
 
-theorem mainM_id : idOf "mainM" = some 50 := rfl
+theorem mainM_id : idOf "mainM" = some 60 := rfl
 
 theorem main_ne_mainM : idOf "main" ≠ idOf "mainM" := by decide
 
@@ -371,17 +372,17 @@ theorem mainM_adequate_resolved {D : DesignCert} {i : RuntimeInput} {st : StateM
         (hprop j _ hcj) (hfits _ hmemc) hpre)
     hin hstb hfclk hmclk hfsize
 
-#print axioms mainM_adequate
-#print axioms mainM_adequate_gen
-#print axioms mainM_adequate_resolved_gen
-#print axioms mainM_resultRel
-#print axioms mainM_id
-#print axioms main_ne_mainM
-#print axioms mainM_adequate_resolved
+#audit_axioms mainM_adequate
+#audit_axioms mainM_adequate_gen
+#audit_axioms mainM_adequate_resolved_gen
+#audit_axioms mainM_resultRel
+#audit_axioms mainM_id
+#audit_axioms main_ne_mainM
+#audit_axioms mainM_adequate_resolved
 
-#print axioms outputs_scalar
-#print axioms flops_scalar
-#print axioms memNextsOf_denote_array
+#audit_axioms outputs_scalar
+#audit_axioms flops_scalar
+#audit_axioms memNextsOf_denote_array
 
 end HwMem
 end Projection

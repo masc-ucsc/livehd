@@ -40,6 +40,7 @@ struct Acyclic_result {
   int  instances_inlined = 0;
   int  loops_split       = 0;
   int  slices_rewired    = 0;
+  int  false_cycles      = 0;      // cycles proven never active and unrolled (see break_false_cycle)
   int  loops             = 0;      // candidate loops left (errors unless deferred)
   bool needs_loop_check  = false;  // rewritten candidate: check after the existing cprop + bitwidth
   // per graph: callee names of the instances inlined into it
