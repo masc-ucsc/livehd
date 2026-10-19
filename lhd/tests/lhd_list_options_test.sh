@@ -36,7 +36,11 @@ echo "$out" | grep -q '"name":"compile.unroll","method":"compile","default":"fal
   || fail "compile.unroll must default false: $out"
 echo "$out" | grep -Eq '"name":"compile.upass.(roll|roll_arrays|roll_cap|unroll)"' \
   && fail "internal or removed loop options must not be listed: $out"
-# pass.abc zero-bit facts: opt-in
+# pass/sweep: whole-design clean-ups, all opt-in
+for sweep_opt in compile.flatten compile.unknown_zero compile.sweep; do
+  echo "$out" | grep -q "\"name\":\"$sweep_opt\",\"method\":\"compile\",\"default\":\"false\"" \
+    || fail "$sweep_opt must be listed and default false: $out"
+done
 for abc_opt in memory_prune_reads ware_zero_bits; do
   echo "$out" | grep -q "\"name\":\"pass.abc.$abc_opt\",\"method\":\"pass.abc\",\"default\":\"false\"" \
     || fail "pass.abc.$abc_opt must be listed and default false: $out"

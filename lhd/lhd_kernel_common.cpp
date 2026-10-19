@@ -1216,7 +1216,9 @@ void check_known_set_passes(const Options& opts) {
       }
       continue;
     }
-    if (pass == "compile" && (flag == "lnast_fmt" || flag == "verify_frozen" || flag == "specialize_modules")) {
+    if (pass == "compile"
+        && (flag == "lnast_fmt" || flag == "verify_frozen" || flag == "specialize_modules" || flag == "flatten" || flag == "unknown_zero"
+            || flag == "sweep")) {
       // Kernel gates (not pass options): whether the pass.lnastfmt LNAST
       // self-check runs / whether pass.legalize freezes and re-checks the graphs.
       // Folded into a kernel decision; merge_sets never copies them into a pass

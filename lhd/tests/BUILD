@@ -1605,6 +1605,20 @@ sh_test(
     env = {"MAPPER": mapper},
 ) for suffix, mapper in _MAPPERS]
 
+# pass/sweep (compile.flatten / compile.unknown_zero / compile.sweep): flop counts of
+# the mapped fixture with each option alone and together, a live stub that must keep
+# everything, an x-driven stub that folds only under unknown_zero, and the flattened +
+# swept compile result proven (bounded, from reset) equivalent to the default one.
+sh_test(
+    name = "lhd_sweep_test",
+    size = "large",
+    srcs = ["lhd_sweep_test.sh"],
+    data = _FLOW_DATA + [
+        "abc_arst_q.lib",
+        "sweep_mini.sv",
+    ],
+)
+
 # pass.abc.ware_zero_bits / pass.abc.memory_prune_reads: a barrel shifter over a vector
 # with one live lane and a lowered memory with narrow read windows map to fewer cells
 # when the module boundary no longer hides what the parent knows, and the mapped
