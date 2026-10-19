@@ -5971,8 +5971,11 @@ private:
           if (comp.size() >= 2 && ((comp.front() == '\'' && comp.back() == '\'') || (comp.front() == '"' && comp.back() == '"'))) {
             comp = comp.substr(1, comp.size() - 2);
           }
+          // A nested field spelled like a type (`U0`) keeps its quotes here;
+          // the flattened output name does not (see upass_ssa unquote_field).
           if (!joined.empty()) {
             joined += '.';
+            comp = canon_io_name(comp);
           }
           joined += comp;
         }
