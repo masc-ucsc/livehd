@@ -335,6 +335,24 @@ public:
     return v;
   }
 };
+// Net `{` minus `}` of one Tcl line, ignoring braces that are backslash-escaped or inside double quotes.
+int brace_delta(std::string_view line) {
+  int  delta = 0;
+  bool quote = false;
+  for (size_t i = 0; i < line.size(); ++i) {
+    const char c = line[i];
+    if (c == '\\') {
+      ++i;
+    } else if (c == '"') {
+      quote = !quote;
+    } else if (!quote && c == '{') {
+      ++delta;
+    } else if (!quote && c == '}') {
+      --delta;
+    }
+  }
+  return delta;
+}
 std::string sdc_expand(std::string_view line, const std::map<std::string, std::string>& variables) {
   std::string text;
   // Tcl does not substitute inside {...}; only expr's own braced argument is
@@ -482,6 +500,23 @@ void Pass_opentimer::read_sdc(std::string_view sdc_file) {
     const auto first = line.find_first_not_of(" \t\r");
     if (first == std::string::npos || line[first] == '#') {
       continue;
+    }
+    // A Tcl control structure (`foreach {a b} {...} { ... }`) is not interpreted here, and the lines of its
+    // body mean nothing without the variables it binds: skip the whole braced command as one unit rather
+    // than reading its body line by line (an undefined loop variable would fail a constraint that is fine).
+    {
+      static const absl::flat_hash_set<std::string> control{"foreach", "for", "while", "if", "switch", "proc", "catch"};
+      const std::string word = line.substr(first, line.find_first_of(" \t\r{", first) - first);
+      if (control.contains(word)) {
+        int         depth = brace_delta(line);
+        std::string more;
+        while (depth > 0 && std::getline(file, more)) {
+          ++lineno;
+          depth += brace_delta(more);
+        }
+        warn_ignored(word, "is a Tcl control structure pass.opentimer does not interpret; its body was skipped");
+        continue;
+      }
     }
     std::string expanded;
     try {

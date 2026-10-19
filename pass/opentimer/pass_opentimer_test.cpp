@@ -170,6 +170,28 @@ create_clock -name nowhere -period 50 [get_pins macro/clk_out]
   ASSERT_TRUE(pass.timer.clocks().contains("nowhere"));
   EXPECT_FLOAT_EQ(pass.timer.clocks().at("nowhere").period(), 50);
 }
+TEST_F(SdcClock, TclControlStructureBodyIsSkippedAsOneUnit) {
+  Sdc_probe pass(var);
+  // HighTide's NyuziProcessor SDC loops over the JTAG ports. The body lines mean nothing without the loop
+  // variables, so reading them one by one failed on `$port`; the whole braced command is skipped instead.
+  pass.read_sdc(write(R"sdc(
+create_clock -name virtual -period 100
+set_input_delay 10 -clock virtual [all_inputs]
+foreach {port bit} {
+    a 1 b 0
+} {
+    set pin [get_pins -hierarchical -regexp [format {^x\[%d\]$} $bit]]
+    if {[llength $pin] != 1} {
+        error "expected one pin for $port"
+    }
+    set_false_path -from [get_ports $port] -to $pin
+}
+unset port bit pin
+set_output_delay 20 -clock virtual [all_outputs]
+)sdc"));
+  EXPECT_FLOAT_EQ(pass.timer.report_at("a", ot::MAX, ot::RISE).value(), 10);
+  EXPECT_FLOAT_EQ(pass.timer.report_slack("y", ot::MAX, ot::RISE).value(), 70);
+}
 TEST_F(SdcClock, ExprDividesIntegersLikeTcl) {
   Sdc_probe pass(var);
   const std::string clock = "create_clock -name virtual -period 100\n";
