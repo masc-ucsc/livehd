@@ -128,10 +128,10 @@ flattens packed structs to bit-vectors, unrolls `generate`, and drops packages
 and interfaces. The result is plain Verilog with **no parameters and no struct
 types left to bind** — so no wrapper is needed to declare them.
 
-### 2.2 sv2v on this machine
+### 2.2 sv2v version
 
 ```
-/mada/software/verilog/sv2v        # v0.0.12-19-g7808819
+sv2v        # v0.0.12-19-g7808819
 ```
 
 Relevant flags (`sv2v --help`):
@@ -169,7 +169,7 @@ Load into an array and call sv2v:
 
 ```bash
 mapfile -t SV2V_ARGS < <(flist2sv2v cv64a6_imafdc_sv39_hpdcache_wb.top_cva6.flistplus.f)
-/mada/software/verilog/sv2v --top=cva6 -D VERILATOR "${SV2V_ARGS[@]}" -w cva6.lowered.v
+sv2v --top=cva6 -D VERILATOR "${SV2V_ARGS[@]}" -w cva6.lowered.v
 ```
 
 ### 2.4 Two defines you will need
@@ -217,7 +217,7 @@ OUT=generated/cva6_sv2v_lower_sv39
 mapfile -t SV2V_ARGS < <(flist2sv2v generated/cva6_filelists/cv64a6_imafdc_sv39_hpdcache_wb.top_cva6.flistplus.f)
 SV2V_ARGS+=("scripts/cva6_module_wrappers/cva6_tlb_gate.sv")
 
-/mada/software/verilog/sv2v --top=cva6_tlb_gate -D VERILATOR "${SV2V_ARGS[@]}" \
+sv2v --top=cva6_tlb_gate -D VERILATOR "${SV2V_ARGS[@]}" \
   -w "$OUT/cva6_tlb_gate.lowered.v"
 # => exit 0, 749 lines, 2 modules (cva6_tlb_gate + monomorphized cva6_tlb), 0 warnings
 ```
@@ -301,12 +301,6 @@ defaults → degenerate 1-bit ports. Two options, in order of preference:
    `hierarchy -top <submodule>; flatten` to pick the submodule out. (Useful when
    the submodule is hard to instantiate standalone.)
 
-To extend MMU coverage past the TLB, add `cva6_ptw_gate.sv`,
-`cva6_shared_tlb_gate.sv`, and a `cva6_mmu_gate.sv` (binds the icache/dcache
-`type` params from the config), each as a one-line instantiation top, and run
-§3.2 + §3.3 per gate. All three are accelerator-free, so `--top` pruning keeps
-sv2v happy.
-
 ---
 
 ## 5. Quick checklist
@@ -322,7 +316,7 @@ sv2v happy.
 
 | Thing | Path |
 |---|---|
-| sv2v | `/mada/software/verilog/sv2v` |
+| sv2v | `sv2v` on `PATH` |
 | static flists | `livehd-new/generated/cva6_filelists/*.flistplus.f` |
 | module runner | `livehd-new/scripts/run_cva6_module_isabelle_stress.sh` |
 | full-core runner | `livehd-new/scripts/run_cva6_complex_isabelle_stress.sh` |

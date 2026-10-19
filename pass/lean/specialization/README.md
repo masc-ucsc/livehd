@@ -16,8 +16,6 @@ the drivers in `formal/lean/scripts/` (`gen_probe_v2`, `gen_readiness_v2`,
 
 | file | content |
 |---|---|
-| `FUTAMURA_PROJECTIONS.md` | design report: first/second projection over the LiveHD-to-Lean flow |
-| `FP_PROJECTION_GAP_AUDIT.md` | gaps against the projection branch, part B (closed by M1) and parts C/D |
 | `M3_UNBOUNDED_PROOFS.md` | M3: unbounded invariants and refinement with stuttering on the projection residual (`Projection/Sym/*`) and the `MemVariant`/`MemFused` memory interpreters |
 
 ## Runner and measurement scripts
@@ -39,7 +37,8 @@ the drivers in `formal/lean/scripts/` (`gen_probe_v2`, `gen_readiness_v2`,
 
 ## tests/
 
-Evidence ledgers (`*.tsv`, `*.jsonl`, `fp_generation_only.md`) and controls:
+Evidence (`*.tsv`, `*.jsonl`), the generation-only measurement procedure
+(`fp_generation_only.md`), and controls:
 
 | control | run |
 |---|---|
@@ -47,7 +46,3 @@ Evidence ledgers (`*.tsv`, `*.jsonl`, `fp_generation_only.md`) and controls:
 | `fp_replay_controls.py` | `python pass/lean/specialization/tests/fp_replay_controls.py` (project venv) |
 | `fp_csimp_checks.lean`, `fp_sext_controls.lean`, `fp_dcert1_admission_controls.lean` | `lean` from `formal/lean` |
 | `fp_cov_dcert2_reuse_test.sh` (one level up) | `bash pass/lean/specialization/fp_cov_dcert2_reuse_test.sh` |
-
-Historical records written before the move (`PORT_LEDGER_D3_D4_FP.md`, the
-`tests/MASTER_*_PRESERVATION.json` audits) keep the old `pass/lean/scripts/fp_*`
-and `pass/lean/tests/fp/` paths as they were recorded.

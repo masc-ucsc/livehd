@@ -135,9 +135,9 @@ that k.
 - **cadical is never trusted.** The exporter and the observer outputs
   (below) stay the semantic boundary.
 - **No kernel control on Lean 4.31.** `decide +kernel` gets stuck in
-  `Std.Tactic.BVDecide.LRAT.check` even on a 3-clause CNF. The plan's kernel
+  `Std.Tactic.BVDecide.LRAT.check` even on a 3-clause CNF. A kernel
   control would need an enumeration over primary variables (`enumUnsat`),
-  which is not built.
+  which is not implemented.
 
 ## Drivers
 
@@ -183,7 +183,7 @@ its `always` block, read by a port.
   optional output assumption and fixed input values. Anything richer is
   written as an observer output (`sym_observe.py`): sequential monitors,
   invariants over internal state, refinement relations.
-- **Remaining residual plumbing.** Reads of FLOP sources walk the dynamic
+- **Residual plumbing.** Reads of FLOP sources walk the dynamic
   flop list (see "Which residual"). This costs time, not soundness.
 - **No kernel control.** See "Trust per verdict".
 - **Out of scope.** Liveness. Stuttering is bounded by k: a witness that holds

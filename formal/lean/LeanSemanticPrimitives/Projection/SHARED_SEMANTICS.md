@@ -1,9 +1,9 @@
 # Shared semantic contract — provenance on master
 
-Milestone 0 of `SIMULATOR_PLAN.md` requires the projection to use the *same*
-`DesignCert` / runtime / `interpretDesign` as the other executable tracks, not a
-copy that has drifted.  A copied-and-modified `interpretDesign` would make the
-Milestone 5 equivalence theorem meaningless.
+The projection uses the *same* `DesignCert` / runtime / `interpretDesign` as
+the other executable tracks, not a copy that has drifted.  A copied-and-modified
+`interpretDesign` would make any equivalence result between the tracks
+meaningless.
 
 ## Base, and what master carries
 
@@ -103,7 +103,7 @@ module; it is pinned for the bridge results above.
 
 `CompileDesign`, `CompileGraph`, `CompileOp`, `ResidualIR`, `ResidualSemantics`.
 
-The plan is explicit: this track must stay independent of the verified compiler
-it will later be compared against.  Importing `compileDesign` would make the
-Milestone 5 comparison circular.  (`Compiler/CertIO.lean` imports it for
+This track stays independent of the verified compiler, so that comparing the
+two is not circular; importing `compileDesign` would make it so.
+(`Compiler/CertIO.lean` imports it for
 `runChecked_correct`, which is why the codec was split into `CertIOCodec`.)
