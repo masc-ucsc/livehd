@@ -36,6 +36,10 @@ def run(name, extra, success=True, expect=None):
 timed = run('default', ['--set', 'synth.place=true'])
 q = timed['qor']['place']
 assert q['legal'], q
+# With no macros the default alignment must not impose its 500-iteration ramp.
+alignment = json.loads((root/'default/synth/place/alignment.json').read_text())
+assert alignment['global_same_master'] and alignment['weight'] == 25, alignment
+assert alignment['gp_alignment_seconds'] == 0, alignment
 td = q['timing_driven']
 assert td['initial_timing_source'] == 'post_synthesis_zero_wire', td
 assert max(td['initial_weights'].values()) > 1, td
@@ -44,7 +48,9 @@ assert td['timing_exponent'] == 1, td
 assert len(td['rounds']) == 1, td
 assert 'pass.place.post_synth_timing' in [p['name'] for p in timed['phases']]
 
-debug = run('debug', ['--set', 'synth.place=true', '--set', 'synth.place.timing_driven=false'])
+debug = run('debug', ['--set', 'synth.place=true', '--set', 'synth.place.timing_driven=false',
+                      '--set', 'synth.place.macro.align_weight=0'])
+assert json.loads((root/'debug/synth/place/alignment.json').read_text())['weight'] == 0
 assert debug['qor']['place']['legal'] and 'timing_driven' not in debug['qor']['place']
 assert not any('post_synth_timing' in p['name'] for p in debug['phases'])
 plain = run('synthesis_only', [])
@@ -75,6 +81,12 @@ assert fp['timing_interval'] == 50 and fp['timing_checkpoints'] > 0, fp
 assert fp['timing_sta_calls'] == fp['timing_checkpoints'], fp
 assert fp['timing_resized_cells'] == 0, fp
 assert fp['routability_macro_weight'] == 1 and fp['routability_macro_range'] == 2, fp
+alignment = json.loads((root/'fp_macro/synth/place/macro/alignment.json').read_text())
+assert alignment['global_same_master'] and alignment['weight'] == 25 and alignment['sigma'] == .25, alignment
+assert alignment['start'] == 100 and alignment['full'] == 500, alignment
+assert not (root/'fp_macro/synth/place/alignment.json').exists()
+final_history = json.loads((root/'fp_macro/synth/place/gp_history.json').read_text())
+assert all(s['align_force'] == 0 and s['align_pairs'] == 0 for s in final_history['samples']), final_history
 assert fp['fp_routing_history'], fp
 assert fp['fp_timing_observed'], fp
 assert 'fp_continuation_deadline' in fp and 'fp_timing_satisfied_at_last_checkpoint' in fp, fp
@@ -85,11 +97,15 @@ gated_result = run('fp_gated', ['--set', 'synth.place=true', '--set', 'synth.pla
                  '--set', 'synth.place.fp.timing_after_density=true',
                  '--set', 'synth.place.timing_fraction=0.29',
                  '--set', 'synth.place.timing_exponent=3', '--set', 'synth.place.macro.timing_interval=10',
+                 '--set', 'synth.place.macro.align_global=true', '--set', 'synth.place.macro.align_weight=1',
+                 '--set', 'synth.place.macro.align_sigma=0.25', '--set', 'synth.place.macro.align_start=0',
+                 '--set', 'synth.place.macro.align_full=20',
                  '--set', 'synth.place.routability_macro_weight=0', '--set', 'synth.place.routability_macro_range=3',
                  '--set', 'synth.place.timing_max_weight=3', '--set', 'synth.place.timing_smoothing=0.25',
                  '--set', 'synth.place.stop_overflow=0.08', '--set', 'synth.place.initial_density_weight=0.02',
                  '--set', 'synth.place.fp.timing_movement=0.01', '--set', 'synth.place.fp.timing_max_updates=2'])
 gated = json.loads((root/'fp_gated/synth/place/macro/fp_place.json').read_text())
+assert json.loads((root/'fp_gated/synth/place/macro/alignment.json').read_text())['global_same_master']
 assert gated['timing_after_density'] and gated['timing_checkpoints'] > 0, gated
 assert gated['timing_fraction'] == 0.29, gated
 assert gated['timing_exponent'] == 3, gated

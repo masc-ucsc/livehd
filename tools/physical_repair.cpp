@@ -379,6 +379,21 @@ int main(int argc, char** argv) {
         options.fp_colors                                           = true;
         // Diagnostic comparisons use the same mapped inputs/timing policy
         // while selecting the production FP/color switches independently.
+        if (config.HasMember("macro_align_global")) {
+          options.macro_align_global = config["macro_align_global"].GetBool();
+        }
+        if (config.HasMember("macro_align_weight")) {
+          options.macro_align_weight = config["macro_align_weight"].GetDouble();
+        }
+        if (config.HasMember("macro_align_sigma")) {
+          options.macro_align_sigma = config["macro_align_sigma"].GetDouble();
+        }
+        if (config.HasMember("macro_align_start")) {
+          options.macro_align_start = config["macro_align_start"].GetInt();
+        }
+        if (config.HasMember("macro_align_full")) {
+          options.macro_align_full = config["macro_align_full"].GetInt();
+        }
         if (config.HasMember("macro_snap_mode")) {
           options.macro_snap_mode = text("macro_snap_mode");
         }
@@ -506,7 +521,7 @@ int main(int argc, char** argv) {
       std::ofstream(root + "/timing_place.json") << refined.report;
       auto& result = refined.placed;
       raw_evaluate(result);
-      rapidjson::StringBuffer weights_json;
+      rapidjson::StringBuffer                    weights_json;
       rapidjson::Writer<rapidjson::StringBuffer> weights_writer(weights_json);
       weights_writer.StartObject();
       for (const auto& [name, weight] : result.net_weights) {

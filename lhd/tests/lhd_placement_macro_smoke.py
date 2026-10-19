@@ -46,7 +46,7 @@ endmodule
 """)
 base=['lhd/lhd','synth',str(source),'--top','top','--workdir',str(root/'W'),'--set',f'synth.liberty={library}','--set',f'synth.lef={data}/sky130hd.tlef,{data}/sky130hd.lef,{lef}','--set','synth.opentimer=false','--set','synth.place.timing_driven=false','--set','compile.specialize_modules=true','--set','synth.place=true','--set','synth.place.macro=h2d','--set','synth.place.utilization=0.1','--set','synth.place.density=0.5','--set','synth.place.halo=0.5','--set','synth.place.iterations=10','--set','synth.place.bins=8','--set','synth.place.macro.K=2','--set','synth.place.macro.iters_per_outer=5','--set','synth.place.macro.evals=4','--set','synth.place.macro.seed_sa_evals=4','-q']
 # H2D and the older isolated-stage checks pin the old plain controls.
-base += [x for key,value in {'fp':'false','final':'false','macro.snap':'false','scale_macro_density':'false','exact_macro_density':'false','adaptive_density':'false','routability':'false','macro_overlap':'0','macro_jitter':'0','schedule_iterations':'0','io_iterations':'0'}.items() for x in ['--set','synth.place.'+key+'='+value]]
+base += [x for key,value in {'fp':'false','final':'false','macro.snap':'false','macro.align_weight':'0','scale_macro_density':'false','exact_macro_density':'false','adaptive_density':'false','routability':'false','macro_overlap':'0','macro_jitter':'0','schedule_iterations':'0','io_iterations':'0'}.items() for x in ['--set','synth.place.'+key+'='+value]]
 def run(name,extra=(),success=True):
  result=root/(name+'.json')
  overrides={extra[i+1].split('=',1)[0] for i in range(len(extra)-1) if extra[i]=='--set'}

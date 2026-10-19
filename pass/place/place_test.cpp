@@ -24,11 +24,13 @@ namespace {
 // Fixtures for the independent plain/H2D/ECO paths pin their original controls.
 Options plain_options() {
   Options o;
-  o.fp_place    = false;
-  o.final_cells = false;
-  o.macro_snap  = false;
-  o.utilization = .5;
-  o.density     = .8;
+  o.fp_place           = false;
+  o.final_cells        = false;
+  o.macro_snap         = false;
+  o.macro_align_weight = 0;
+  o.macro_align_global = false;
+  o.utilization        = .5;
+  o.density            = .8;
   o.halo_x = o.halo_y   = 0;
   o.iterations          = 500;
   o.bins                = 32;
@@ -698,7 +700,11 @@ TEST(Placement, UnknownConstantIsRefusedUnlessTiedLowByOption) {
     graph->get_output_pin("y").connect_driver(y);
     return graph;
   };
-  const auto options = tie_options("unknown", {{"tie_lo", {{"lo", false}}}, {"tie_hi", {{"hi", true}}}});
+  const auto options = tie_options("unknown",
+                                   {
+                                       {"tie_lo", {{"lo", false}}},
+                                       {"tie_hi",  {{"hi", true}}}
+  });
   {
     hhds::GraphLibrary source, flat;
     const auto         graph = build(source);
@@ -990,9 +996,9 @@ TEST(Placement, FixedDieAndCoreSnapInwardAndKeepPinsOnTheDie) {
     frame.nets.clear();
     const auto def = std::filesystem::path(std::getenv("TEST_TMPDIR")) / "fixed_frame_import.def";
     physical::write_def(frame, def.string());
-    auto staged         = options;
-    staged.floorplan    = def.string();
-    staged.output_dir   = std::string(std::getenv("TEST_TMPDIR")) + "/fixed_frame_staged";
+    auto staged       = options;
+    staged.floorplan  = def.string();
+    staged.output_dir = std::string(std::getenv("TEST_TMPDIR")) + "/fixed_frame_staged";
     hhds::GraphLibrary again;
     const auto         restaged = place(*graph, again, staged);
     EXPECT_EQ(restaged.floorplan.rows.size(), fp.rows.size());
@@ -1902,6 +1908,20 @@ END LIBRARY
     EXPECT_EQ(count, 2);
   }
   EXPECT_NE(colors.begin()->second, colors.rbegin()->second);
+  // Global GP alignment groups the same master across colors and hierarchy,
+  // while the end-of-GP snap still retains its original hierarchy classes.
+  options.macro_align_global = true;
+  hhds::GraphLibrary global_flat;
+  const auto         global = place(*graph, global_flat, options);
+  EXPECT_NO_THROW(check_legality(tech, global.floorplan, 1, 1));
+  report.Parse(read("alignment.json").c_str());
+  ASSERT_TRUE(report["global_same_master"].GetBool());
+  classes.clear();
+  for (const auto& macro : report["macros"].GetArray()) {
+    ++classes[macro["class"].GetInt()];
+  }
+  ASSERT_EQ(classes.size(), 1);
+  EXPECT_EQ(classes.begin()->second, 4);
 }
 
 TEST(Placement, PlacementColorsUseLibertyRolesAndPinsMoveWithoutSta) {

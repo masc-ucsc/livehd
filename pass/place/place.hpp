@@ -66,10 +66,11 @@ struct Options {
   bool        routability_charge_compensation = true;
   double      routability_macro_weight = 1, routability_macro_range = 2;  // direct channel pressure; range in bins
   double      macro_overlap_weight = 50, macro_jitter = .01;
-  double      macro_align_weight = 0, macro_align_sigma = 0, macro_align_overlap_boost = 0;
+  double      macro_align_weight = 25, macro_align_sigma = .25, macro_align_overlap_boost = 0;
   int         macro_align_start = 100, macro_align_full = 500;
   bool        macro_align_nearest = false, macro_snap = true;
-  std::string macro_snap_mode = "alignment";  // alignment | symmetry
+  bool        macro_align_global = true;         // same master across colors; refresh strip pairs each GP iteration
+  std::string macro_snap_mode    = "alignment";  // alignment | symmetry
   DreamPlace::native::FloorplanOptions macro_snap_options;
   double                               macro_snap_tolerance = .25;
   int                                  macro_snap_weight    = 100;

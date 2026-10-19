@@ -268,6 +268,9 @@ std::string environment_key(const Options& o, const ph::Technology& tech) {
                                           p.max_displacement),
                               h);
   }
+  if (o.macro_align_weight > 0 && o.macro_align_global) {
+    h = hash_text("global-master-strip-alignment-v1", h);
+  }
   if (o.macro_align_weight > 0 || o.macro_snap) {
     h = hash_text(std::format("alignment:{}:{}:{}:{}:{}:{}:{}:{}:{}",
                               o.macro_align_weight,
@@ -598,15 +601,16 @@ std::map<std::string, FloorplanPorts> floorplan_ports(const std::string& library
 }
 struct View {
   dp::Design                                    design;
-  bool                                          hierarchy_snap      = false;
-  bool                                          native_orientations = false;
-  bool                                          align_macros        = false;
-  bool                                          centroids           = false;
-  bool                                          color_centroids     = false;
-  bool                                          placement_colors    = false;
-  bool                                          memory_colors       = false;
-  double                                        color_maximum       = 30000;
-  double                                        color_minimum       = 0;
+  bool                                          hierarchy_snap         = false;
+  bool                                          native_orientations    = false;
+  bool                                          align_macros           = false;
+  bool                                          global_macro_alignment = false;
+  bool                                          centroids              = false;
+  bool                                          color_centroids        = false;
+  bool                                          placement_colors       = false;
+  bool                                          memory_colors          = false;
+  double                                        color_maximum          = 30000;
+  double                                        color_minimum          = 0;
   std::map<std::string, FloorplanPorts>         fp_ports;
   color::Floorplan_coloring                     fp_coloring;
   size_t                                        hierarchy_centroids = 0;
@@ -847,8 +851,9 @@ void make_arrays(View& v, const ph::Technology& tech) {
     for (const auto& c : v.cells) {
       const auto owner = v.cohesion_owners.find(c.name);
       const int  i     = v.cell.at(c.name);
-      if (d.node_macro[i] && owner != v.cohesion_owners.end()) {
-        const auto [it, inserted] = classes.try_emplace({c.macro, owner->second}, classes.size());
+      if (d.node_macro[i] && (v.global_macro_alignment || owner != v.cohesion_owners.end())) {
+        const auto [it, inserted]
+            = classes.try_emplace({c.macro, v.global_macro_alignment ? std::string{} : owner->second}, classes.size());
         (void)inserted;
         d.node_align_class[i] = it->second;
       }
@@ -2391,14 +2396,15 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
     }
     v.fp_ports = floorplan_ports(options.liberty);
   }
-  v.centroid_minimum    = options.fp_minimum;
-  v.centroid_min_copies = options.fp_min_copies;
-  v.hierarchy_snap      = options.macro_snap;
-  v.align_macros        = options.macro_align_weight > 0 || options.macro_snap;
-  v.weights             = options.net_weights;
-  v.fp.design           = std::string(source.get_name());
-  v.fp.dbu              = tech.dbu;
-  const auto  memories  = memory_proxies(graph, tech, options.liberty);
+  v.centroid_minimum       = options.fp_minimum;
+  v.centroid_min_copies    = options.fp_min_copies;
+  v.hierarchy_snap         = options.macro_snap;
+  v.align_macros           = options.macro_align_weight > 0 || options.macro_snap;
+  v.global_macro_alignment = options.macro_align_global && options.macro_align_weight > 0;
+  v.weights                = options.net_weights;
+  v.fp.design              = std::string(source.get_name());
+  v.fp.dbu                 = tech.dbu;
+  const auto  memories     = memory_proxies(graph, tech, options.liberty);
   Resolver    resolver(tech, memories, options.unknown_const_zero);
   double      area      = 0;
   int64_t     max_width = 0, max_height = 0;
@@ -3190,25 +3196,37 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
   control.fixed_macro_overlap_weight = options.fixed_macro_overlap_weight;
   control.wirelength_gamma_end       = options.wirelength_gamma_end;
   control.cohesion_weight            = options.cohesion / tech.dbu;
-  control.macro_align_weight         = options.macro_align_weight;
-  control.macro_align_sigma          = options.macro_align_sigma;
-  control.macro_align_start          = options.macro_align_start;
-  control.macro_align_full           = options.macro_align_full;
-  control.macro_align_overlap_boost  = options.macro_align_overlap_boost;
-  control.macro_align_nearest        = options.macro_align_nearest;
-  control.macro_snap                 = options.macro_snap;
-  control.macro_snap_regular         = options.macro_snap && options.macro_snap_mode == "symmetry";
-  control.macro_snap_options         = options.macro_snap_options;
-  control.macro_snap_tolerance       = options.macro_snap_tolerance;
-  control.macro_snap_weight          = options.macro_snap_weight;
-  control.automatic_bins             = options.automatic_bins;
-  control.scale_macro_density        = options.scale_macro_density;
-  control.exact_macro_density        = options.exact_macro_density;
-  control.exact_cell_density         = options.exact_cell_density;
-  control.adaptive_density           = options.adaptive_density;
-  control.macro_overlap_weight       = options.macro_overlap_weight;
-  control.macro_jitter               = options.macro_jitter;
-  control.schedule_iterations        = options.schedule_iterations;
+  // The default alignment ramp only applies when movable macros can pair.
+  // Cell-only/fixed-macro runs must not wait for an inactive macro ramp.
+  bool          has_alignment_pair   = false;
+  std::set<int> alignment_classes;
+  for (int i = 0; i < v.design.num_movable; ++i) {
+    if (!v.design.node_macro.empty() && v.design.node_macro[i] && !v.design.node_align_class.empty()
+        && v.design.node_align_class[i] >= 0 && !alignment_classes.insert(v.design.node_align_class[i]).second) {
+      has_alignment_pair = true;
+      break;
+    }
+  }
+  control.macro_align_weight        = has_alignment_pair ? options.macro_align_weight : 0;
+  control.macro_align_sigma         = options.macro_align_sigma;
+  control.macro_align_start         = options.macro_align_start;
+  control.macro_align_full          = options.macro_align_full;
+  control.macro_align_overlap_boost = options.macro_align_overlap_boost;
+  control.macro_align_nearest       = options.macro_align_nearest;
+  control.macro_align_global        = options.macro_align_global;
+  control.macro_snap                = options.macro_snap;
+  control.macro_snap_regular        = options.macro_snap && options.macro_snap_mode == "symmetry";
+  control.macro_snap_options        = options.macro_snap_options;
+  control.macro_snap_tolerance      = options.macro_snap_tolerance;
+  control.macro_snap_weight         = options.macro_snap_weight;
+  control.automatic_bins            = options.automatic_bins;
+  control.scale_macro_density       = options.scale_macro_density;
+  control.exact_macro_density       = options.exact_macro_density;
+  control.exact_cell_density        = options.exact_cell_density;
+  control.adaptive_density          = options.adaptive_density;
+  control.macro_overlap_weight      = options.macro_overlap_weight;
+  control.macro_jitter              = options.macro_jitter;
+  control.schedule_iterations       = options.schedule_iterations;
   control.routability = control.improved_routability = options.routability;
   control.routability_charge_compensation            = options.routability_charge_compensation;
   control.routability_macro_weight                   = options.routability_macro_weight;
@@ -3257,6 +3275,7 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
                           s.route_peak_utilization,
                           s.macro_routing_force,
                           s.macro_routing_channels);
+      line += std::format(",\"align_force\":{}", s.align_force);
       if (s.centroid_repulsion_weight > 0) {
         line += std::format(",\"centroid_overlap_pairs\":{},\"centroid_max_overlap\":{},\"centroid_repulsion_weight\":{}",
                             s.centroid_overlaps,
@@ -3452,6 +3471,10 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
       control.centroid_distance_attraction = options.fp_distance_attraction;
       control.centroid_attraction_outside  = options.fp_attraction_outside;
       auto fp_control                      = control;
+      // This experiment acts during macro GP, after the optional FP stage.
+      if (options.macro_align_global) {
+        fp_control.macro_align_weight = 0;
+      }
       fp_control.legalize = fp_control.detailed_place = false;
       fp_control.centroid_weight                      = options.fp_attraction;
       fp_control.centroid_repulsion_weight            = options.fp_repulsion;
@@ -4534,6 +4557,8 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
       json.Double(s.align_residual);
       json.Key("align_ramp");
       json.Double(s.align_ramp);
+      json.Key("align_force");
+      json.Double(s.align_force);
       if (control.centroid_adaptive_repulsion) {
         json.Key("centroid_overlap_pairs");
         json.Uint64(s.centroid_overlaps);
@@ -4578,6 +4603,10 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
     json.String("microns");
     json.Key("weight");
     json.Double(options.macro_align_weight);
+    json.Key("global_same_master");
+    json.Bool(options.macro_align_global);
+    json.Key("gp_alignment_seconds");
+    json.Double(metrics.macro_alignment_seconds);
     json.Key("sigma");
     json.Double(options.macro_align_sigma);
     json.Key("start");
