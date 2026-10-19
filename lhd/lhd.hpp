@@ -1093,7 +1093,8 @@ inline constexpr Synth_set_option kSynthSetOptions[] = {
      Synth_set_option::Kind::boolean,
      "opt in to the observability sweep of the mapper's private copy: delete the registers and cells that no output, memory or "
      "body-less cell can observe and narrow each register to its highest observed bit, tracking the demand per bit across the "
-     "instance hierarchy (what Yosys gets from flattening and opt_clean). Off by default"},
+     "instance hierarchy (what Yosys gets from flattening and opt_clean). Works on the private copy only and also sweeps the "
+     "lowered memories; complements compile.sweep, which edits the flat compile graphs. Off by default"},
     {"merge_registers",
      "false",
      Synth_set_option::Kind::boolean,

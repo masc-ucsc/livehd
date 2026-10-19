@@ -70,6 +70,20 @@ lec on
 CELLS='^[A-Z][A-Za-z0-9]*x[0-9][0-9]* '
 [ "$(count "$W/on/net.v" "$CELLS")" -lt "$(count "$W/off/net.v" "$CELLS")" ] || fail "on: the swept netlist is not smaller"
 
+# compile.sweep edits the flat compile graphs, synth.state_sweep the mapper's private copy: they overlap and compose. Alone,
+# compile.sweep (no flatten, so no hierarchy to see through) leaves the child's dead bits, which the private-copy sweep takes;
+# together, flat or not, the netlist is the same 99 register bits and the LEC proof against the source still holds.
+synth csweep false --set compile.sweep=true
+CSWEEP=$(count "$W/csweep/net.v" '^DFF')
+[ "$CSWEEP" -lt "$OFF" ] && [ "$CSWEEP" -gt "$ON" ] || fail "compile.sweep alone: expected between $ON and $OFF register bits, got $CSWEEP"
+lec csweep
+synth both true --set compile.sweep=true
+[ "$(count "$W/both/net.v" '^DFF')" = 99 ] || fail "compile.sweep + state_sweep: expected 99 register bits, got $(count "$W/both/net.v" '^DFF')"
+lec both
+synth flat true --set compile.flatten=true --set compile.sweep=true --set compile.unknown_zero=true
+[ "$(count "$W/flat/net.v" '^DFF')" = 99 ] || fail "flatten + sweeps: expected 99 register bits, got $(count "$W/flat/net.v" '^DFF')"
+lec flat
+
 # The native unate mapper shares the sweep: its logical netlist keeps the same registers.
 usyn() { # <tag> <state_sweep>
   local d="$W/usyn_$1"
@@ -132,5 +146,15 @@ lec = json.load(open(sys.argv[1])).get('lec', {})
 if lec.get('verdict') not in ('proven-full', 'proven-bounded') or (lec.get('bounded') and lec.get('bound', 0) < 4):
     raise SystemExit('FAIL: expected a LEC proof of the narrowed memory, got {}'.format(lec))
 CHECK
+
+# The lowered memory exists only after the compile step: compile.sweep cannot see its unread columns, the private-copy sweep can.
+d="$W/mem_both"
+mkdir -p "$d"
+"$LHD" synth --result-json "$d/r.json" --reader slang --top sweep_mem --workdir "$d/W" --emit-dir lg:"$d/net" \
+  --emit-dir verilog:"$d/netv" --set synth.liberty="$LIB" --set synth.memory=flops --set compile.flatten=true \
+  --set compile.sweep=true --set synth.state_sweep=true -- "$MEM_SRC" > "$d/synth.log" 2>&1 \
+  || fail "mem both: synth -> $(cat "$d/r.json" 2>/dev/null)"
+cat "$d/netv/"*.v > "$d/net.v"
+[ "$(count "$d/net.v" '^DFF')" = 32 ] || fail "mem both: expected 32 register bits, got $(count "$d/net.v" '^DFF')"
 
 echo "PASS: synth.state_sweep drops unobserved registers and register bits, proven against the source"

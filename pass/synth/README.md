@@ -59,6 +59,17 @@ Remaining native synthesis work is tracked in [2u-usyn](../../todo/livehd/2u-usy
    output demand and `LIVEHD_STATE_SWEEP_TRACE=<register name part>` prints why a
    register stays observed. Covered by `//pass/synth:state_sweep_test` and, with an
    unbounded LEC proof of the mapped result, `//lhd/tests:lhd_state_sweep_test`.
+   **Relation to `compile.sweep`** (`pass/sweep`, which also deletes unobserved flop bits and
+   folds constant ones). The two do not replace each other and compose. `compile.sweep`
+   rewrites the *compile* graphs (what `lhd lec`, simulation and every later step read) of a
+   flattened top (`compile.flatten`), and its constant-bit induction proves bits constant that
+   `synth.state_sweep` (D is itself a constant) never sees. `synth.state_sweep` never touches
+   the compile output: it works on the mapper's private copy, follows the per-bit demand across
+   instance boundaries *without* flattening (a child output bit no instance reads), also
+   sweeps the memories `synth` lowers to flops (a column no reader looks at; those exist only
+   after the first sweep), and `pass.usyn` takes it too. Run together, the second finds only
+   what the first could not (`//lhd/tests:lhd_state_sweep_test` runs both and proves the
+   result against the source).
    **Register merge** (`synth.merge_registers`, default false; `register_merge.cpp`), just
    before the sweep: a Flop with the same clock, enable, reset, polarities, reset value,
    width, sign and D driver as another in its definition holds the same value every cycle,

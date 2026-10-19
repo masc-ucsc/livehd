@@ -63,6 +63,19 @@ Concat that puts the constants (or 0, for an unobserved bit) back for the old
 readers; a flop with nothing live disappears. A signed register is only replaced
 whole.
 
+## Relation to `synth.state_sweep`
+
+`synth.state_sweep` (`pass/synth/state_sweep.hpp`) is the mapper-side counterpart, also opt-in.
+They overlap on purpose and compose. `compile.sweep` edits the compile graphs of a flat top and
+proves constant bits by induction; `synth.state_sweep` edits only the mapper's private copy,
+follows the per-bit demand across instance boundaries without flattening, narrows a register to
+its highest observed bit, folds only registers whose D is a constant, and also sweeps the
+memories that `lhd synth` lowers to flops after the compile step (an unread column), which
+this pass cannot see. `synth.merge_registers` (twin flops) has no counterpart here. With both
+on, `lhd synth` runs this one in the compile step and the other on the result; the
+`//lhd/tests:lhd_state_sweep_test` cases with `compile.sweep` check the combination against
+the source.
+
 ## Measured
 
 `floonoc_mesh_top` (HighTide asap7, 4x4 FlooNoC mesh with black-box cluster stubs
