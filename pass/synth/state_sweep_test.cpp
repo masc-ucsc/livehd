@@ -400,6 +400,39 @@ TEST(StateSweep, ConstantArithmeticShiftsMoveTheDemandUp) {
   EXPECT_EQ(names, expected);
 }
 
+TEST(StateSweep, ARegisterThatOnlyEverLoadsItsResetConstantIsThatConstant) {
+  hhds::GraphLibrary library;
+  auto               m   = make_module(library, "top", 8, 8);
+  auto&              g   = *m.graph;
+  auto               reg = make_reg(g, gu::create_const(g, *Dlop::create_integer(5)), g.get_input_pin("clk"), 8, "five");
+  gu::create_const(g, *Dlop::create_integer(5))
+      .connect_sink(gu::setup_sink_pid(reg, static_cast<hhds::Port_id>(Ntype::get_sink_pid(Ntype_op::Flop, "initial"))));
+  g.get_input_pin("d").connect_sink(gu::setup_sink_pid(reg, static_cast<hhds::Port_id>(Ntype::get_sink_pid(Ntype_op::Flop, "enable"))));
+  reg.create_driver_pin(0).connect_sink(g.get_output_pin("o"));
+
+  const auto stats = sweep({m.graph}, "top");
+  ASSERT_TRUE(stats);
+  EXPECT_EQ(stats->registers_constant, 1U);
+  EXPECT_EQ(stats->constant_bits, 8U);
+  EXPECT_TRUE(nodes_of(g, Ntype_op::Flop).empty());
+}
+
+TEST(StateSweep, ARegisterWhoseResetValueDiffersFromWhatItLoadsStaysARegister) {
+  hhds::GraphLibrary library;
+  auto               m   = make_module(library, "top", 8, 8);
+  auto&              g   = *m.graph;
+  auto               reg = make_reg(g, gu::create_const(g, *Dlop::create_integer(5)), g.get_input_pin("clk"), 8, "five");
+  gu::create_const(g, *Dlop::create_integer(0))
+      .connect_sink(gu::setup_sink_pid(reg, static_cast<hhds::Port_id>(Ntype::get_sink_pid(Ntype_op::Flop, "initial"))));
+  g.get_input_pin("d").connect_sink(gu::setup_sink_pid(reg, static_cast<hhds::Port_id>(Ntype::get_sink_pid(Ntype_op::Flop, "enable"))));
+  reg.create_driver_pin(0).connect_sink(g.get_output_pin("o"));
+
+  const auto stats = sweep({m.graph}, "top");
+  ASSERT_TRUE(stats);
+  EXPECT_EQ(stats->registers_constant, 0U);
+  EXPECT_EQ(nodes_of(g, Ntype_op::Flop).size(), 1U);
+}
+
 TEST(StateSweep, AnAdmissionRefusalIsReported) {
   hhds::GraphLibrary library;
   auto               m = make_module(library, "top", 8, 8);

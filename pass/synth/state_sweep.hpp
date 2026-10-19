@@ -14,6 +14,8 @@ namespace livehd::synth {
 
 // What the sweep of unobserved state did.
 struct State_sweep_stats {
+  uint64_t registers_constant = 0;  // registers that only ever hold one constant, replaced by it
+  uint64_t constant_bits      = 0;  // their bits
   uint64_t registers_removed = 0;  // Flop/Latch cells nothing observes, deleted
   uint64_t register_bits     = 0;  // their bits
   uint64_t registers_trimmed = 0;  // registers narrowed to the highest bit anything observes

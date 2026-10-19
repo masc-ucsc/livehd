@@ -16,6 +16,7 @@
 #include "attr_carry.hpp"
 #include "bus_name.hpp"
 #include "node_util.hpp"
+#include "specialize.hpp"
 
 namespace livehd::synth {
 
@@ -255,6 +256,20 @@ public:
   }
 
   std::optional<State_sweep_stats> run() {
+    State_sweep_stats folded;
+    if (!fold_constant_registers(folded)) {
+      return std::nullopt;
+    }
+    auto stats = run_demand();
+    if (stats) {
+      stats->registers_constant = folded.registers_constant;
+      stats->constant_bits      = folded.constant_bits;
+    }
+    return stats;
+  }
+
+private:
+  std::optional<State_sweep_stats> run_demand() {
     if (!link()) {
       return std::nullopt;
     }
@@ -273,6 +288,105 @@ public:
       }
     }
     return apply();
+  }
+
+  // ---- constant registers -------------------------------------------------
+  // A register whose D is the constant c holds c from its first load on, and holds nothing else when its reset or
+  // power-on value is c as well (or it has none): every reader sees c. Yosys's opt_dff does this; here it is the
+  // `enable ? 0 : q` registers of generated RTL (a size field set to 0 or a parameter) that enableopt left with a constant D.
+  // The constant then folds into the readers, which can make more registers constant, so the definition is refolded and
+  // the scan repeats.
+  static std::optional<Dlop> constant_register_value(const hhds::Node_class& flop) {
+    const auto q     = flop.get_driver_pin(0);
+    const auto width = gu::bits_of(q);
+    if (q.is_invalid() || width < 1) {
+      return std::nullopt;
+    }
+    for (auto name : {"pipe_min", "pipe_max"}) {
+      const auto depth = gu::get_driver_of_sink_name(flop, name);
+      if (!depth.is_invalid() && const_i64(depth) != std::optional<int64_t>{1}) {
+        return std::nullopt;
+      }
+    }
+    const auto din = gu::get_driver_of_sink_name(flop, "din");
+    if (din.is_invalid() || !din.is_const() || gu::const_of(din).has_unknowns() || !gu::const_of(din).is_just_i64()) {
+      return std::nullopt;
+    }
+    const int64_t raw      = gu::const_of(din).to_just_i64();
+    int64_t       value    = raw;
+    int64_t       reduced  = raw;
+    if (width < 63) {
+      const int64_t mask = (int64_t{1} << width) - 1;
+      reduced            = raw & mask;
+      value              = !gu::is_unsign(q) && ((reduced >> (width - 1)) & 1) != 0 ? reduced - (int64_t{1} << width) : reduced;
+    } else if (raw != 0) {
+      return std::nullopt;
+    }
+    const auto initial   = gu::get_driver_of_sink_name(flop, "initial");
+    const auto reset     = gu::get_driver_of_sink_name(flop, "reset_pin");
+    int64_t    held      = 0;  // the reset value when there is a reset and no value: zero
+    if (!initial.is_invalid()) {
+      if (!initial.is_const() || gu::const_of(initial).has_unknowns() || !gu::const_of(initial).is_just_i64()) {
+        return std::nullopt;
+      }
+      held = gu::const_of(initial).to_just_i64();
+      if (width < 63) {
+        held &= (int64_t{1} << width) - 1;
+      }
+    }
+    if ((!initial.is_invalid() || !reset.is_invalid()) && held != reduced) {
+      return std::nullopt;
+    }
+    return *Dlop::create_integer(value);
+  }
+
+  bool fold_constant_registers(State_sweep_stats& stats) {
+    for (auto& def : defs_) {
+      std::optional<absl::flat_hash_set<uint64_t>> existed;
+      for (int round = 0; round < 8; ++round) {
+        std::vector<std::pair<hhds::Node_class, Dlop>> constants;
+        for (auto node : def.graph->body().nodes()) {
+          if (!admit("state-sweep-constant")) {
+            return false;
+          }
+          if (gu::type_op_of(node) == Ntype_op::Flop) {
+            if (auto value = constant_register_value(node)) {
+              constants.emplace_back(node, std::move(*value));
+            }
+          }
+        }
+        if (constants.empty()) {
+          break;
+        }
+        if (!existed) {
+          existed.emplace();
+          for (auto node : def.graph->body().nodes()) {
+            existed->insert(static_cast<uint64_t>(node.get_debug_nid()));
+          }
+        }
+        for (const auto& [flop, value] : constants) {
+          const auto q = flop.get_driver_pin(0);
+          std::vector<hhds::Pin_class> readers;
+          for (auto edge : q.out_edges()) {
+            readers.push_back(edge.sink);
+          }
+          if (!readers.empty()) {
+            const auto constant = gu::create_const(*def.graph, value);
+            for (const auto& sink : readers) {
+              sink.del_sink(q);
+              constant.connect_sink(sink);
+            }
+          }
+          ++stats.registers_constant;
+          stats.constant_bits += static_cast<uint64_t>(gu::bits_of(q));
+          gu::drop_drivers(flop);
+          flop.del_node();
+        }
+        specialize::refold_private_body(def.graph);
+        specialize::inherit_colors(*def.graph, &*existed);
+      }
+    }
+    return true;
   }
 
 private:

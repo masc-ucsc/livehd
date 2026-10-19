@@ -270,11 +270,13 @@ std::unique_ptr<Prepared_design> prepare_design(std::span<const std::shared_ptr<
       return {};
     }
     result->sweep = *swept;
-    if (swept->registers_removed + swept->registers_trimmed + swept->registers_split + swept->cells_removed > 0) {
+    if (swept->registers_constant + swept->registers_removed + swept->registers_trimmed + swept->registers_split + swept->cells_removed > 0) {
       livehd::diag::info(from_pass, "state-swept", "progress")
-          .msg("{}: state sweep removed {} unobserved register(s) ({} bit(s)) and {} cell(s), narrowed {} and split {} "
-               "register(s), dropping {} unobserved register bit(s)",
+          .msg("{}: state sweep folded {} constant register(s) ({} bit(s)), removed {} unobserved register(s) ({} bit(s)) and {} "
+               "cell(s), narrowed {} and split {} register(s), dropping {} unobserved register bit(s)",
                from_pass,
+               swept->registers_constant,
+               swept->constant_bits,
                swept->registers_removed,
                swept->register_bits,
                swept->cells_removed,
