@@ -60,7 +60,9 @@ protected:
   std::string                  liberty;
   Pin                          reset, clock, tie;
   void                         SetUp() override {
-    const auto dir = std::filesystem::path(std::getenv("TEST_TMPDIR")) / ::testing::UnitTest::GetInstance()->current_test_info()->name();
+    const char* tmp = std::getenv("TEST_TMPDIR");
+    const auto  dir = (tmp ? std::filesystem::path(tmp) : std::filesystem::temp_directory_path())
+                     / ::testing::UnitTest::GetInstance()->current_test_info()->name();
     std::filesystem::create_directories(dir);
     liberty = (dir / "rst_tree.lib").string();
     std::ofstream(liberty) << kLib;

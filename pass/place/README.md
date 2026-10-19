@@ -367,7 +367,7 @@ the many regions a reset reaches (a mux output driving 225 pins spread over four
 Unlike `synth.place.resize` it is not an accept/reject trial: the post-placement repair measures a change with a
 fresh STA and rejects a whole batch on any hold-WNS movement, and on NVDLA partition_m the forest that fixes the
 439-pin reset (3496 -> 1420 ps) was rejected for `hold_wns` in each trial that contained it. The `reset_tree` object of `qor.json`
-records `fanout`, `nets`, `sinks`, `added` and `levels` of the pass in that placement call and `buffers`, the tree cells present in the placed netlist (a timing-driven run builds the tree in its seed placement, so the final call adds none); the value is part of the placement cache identity.
+records `fanout`, `nets`, `sinks`, `added`, `levels` and `skipped` (clear/preset pins left alone because a multi-bit or multi-driver bus alias drives them) of the pass in that placement call and `buffers`, the tree cells present in the placed netlist (a timing-driven run builds the tree in its seed placement, so the final call adds none); the value is part of the placement cache identity.
 
 New or resized cells first search row/site-aligned whitespace while all unchanged
 cells remain fixed. Obstacles are indexed as sorted intervals per row, including

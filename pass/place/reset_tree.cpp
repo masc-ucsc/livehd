@@ -103,7 +103,11 @@ Reset_tree_stats buffer_reset_nets(hhds::Graph& graph, const physical::Technolog
         continue;
       }
       const auto drv = pin.get_driver_pins();
-      if (drv.size() != 1 || drv.front().is_invalid() || drv.front().is_const() || gu::bits_of(drv.front()) != 1) {
+      if (drv.empty() || drv.front().is_invalid() || drv.front().is_const()) {
+        continue;
+      }
+      if (drv.size() != 1 || gu::bits_of(drv.front()) != 1) {
+        ++stats.skipped;  // a packed-bus alias: not a net this pass can move pin by pin
         continue;
       }
       if (is_constant && is_constant(drv.front())) {

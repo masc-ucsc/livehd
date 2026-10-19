@@ -777,7 +777,8 @@ bool Region_writer::write(const livehd::partition::Region_body& rb, const Region
   const auto&                                                     icg_ladder = registers.icg != nullptr ? *registers.icg : kNoIcgs;
   absl::flat_hash_set<std::string>                                icg_names;
   std::vector<hhds::Pin_class>                                    icg_out(blast.icgs.size());
-  std::vector<std::tuple<hhds::Node_class, std::string, int32_t>> icg_en_pending;  // (cell, EN pin, PO) for pass 2b
+  // (cell, pin, PO, a clear/preset pin: dealt out by the reset-fanout tree) for pass 2b
+  std::vector<std::tuple<hhds::Node_class, std::string, int32_t, bool>> icg_en_pending;
   std::function<hhds::Pin_class(size_t)>                          icg_output = [&](size_t i) -> hhds::Pin_class {
     auto& out = icg_out[i];
     if (!out.is_invalid()) {
@@ -810,7 +811,7 @@ bool Region_writer::write(const livehd::partition::Region_body& rb, const Region
     if (!cell.test_pin.empty()) {
       gu::create_const(*body, *Dlop::create_integer(0)).connect_sink(sub.create_sink_pin(cell.test_pin));
     }
-    icg_en_pending.emplace_back(sub, cell.en_pin, gate.en_po);
+    icg_en_pending.emplace_back(sub, cell.en_pin, gate.en_po, false);
     out = sub.create_driver_pin(cell.out_pin);
     gu::set_ubits(out, 1);
     ++icg_cells;
@@ -866,23 +867,26 @@ bool Region_writer::write(const livehd::partition::Region_body& rb, const Region
           en.connect_sink(sub.create_sink_pin(cell.clk_pin));
         } else {
           I(lm.en_po >= 0);  // the blaster made the PO for every enable it did not trace
-          icg_en_pending.emplace_back(sub, cell.clk_pin, lm.en_po);
+          icg_en_pending.emplace_back(sub, cell.clk_pin, lm.en_po, false);
         }
         if (lm.reset_cells) {
           const bool v       = lm.rst_val[b];
           const bool pin_low = cell.reset_low(v);
           if (!rst_src.is_invalid()) {
-            level(rst_src, pin_low != lm.rst_src_low, "rst").connect_sink(sub.create_sink_pin(cell.reset_pin(v)));
+            const auto rdrv  = level(rst_src, pin_low != lm.rst_src_low, "rst");
+            auto       rsink = sub.create_sink_pin(cell.reset_pin(v));
+            rdrv.connect_sink(rsink);
+            reset_sinks[rdrv].push_back(rsink);
           } else {
             I(lm.rst_po[pin_low ? 1 : 0] >= 0);
-            icg_en_pending.emplace_back(sub, cell.reset_pin(v), lm.rst_po[pin_low ? 1 : 0]);
+            icg_en_pending.emplace_back(sub, cell.reset_pin(v), lm.rst_po[pin_low ? 1 : 0], true);
           }
           if (const auto& other = cell.reset_pin(!v); !other.empty()) {
             gu::create_const(*body, *Dlop::create_integer(cell.reset_low(!v) ? 1 : 0)).connect_sink(sub.create_sink_pin(other));
           }
         }
         if (lm.fold) {
-          icg_en_pending.emplace_back(sub, cell.d_pin, lm.d_po[b]);  // already complemented for a QN cell
+          icg_en_pending.emplace_back(sub, cell.d_pin, lm.d_po[b], false);  // already complemented for a QN cell
         }
       }
     }
@@ -1837,8 +1841,8 @@ bool Region_writer::write(const livehd::partition::Region_body& rb, const Region
       deal_out(driver, clock_sinks[driver], cap, "clkbuf", clock_tree_cells, clock_tree_area);
     }
   }
-  for (const auto& [sub, pin, po] : icg_en_pending) {
-    pending_resets.push_back({sub, pin, po});
+  for (const auto& [sub, pin, po, async_reset] : icg_en_pending) {
+    pending_resets.push_back({sub, pin, po, async_reset});
   }
   for (const auto& pr : pending_resets) {
     auto drv = pr.po < static_cast<int32_t>(mapped.outputs.size()) ? get_net_driver(mapped.outputs[static_cast<size_t>(pr.po)])

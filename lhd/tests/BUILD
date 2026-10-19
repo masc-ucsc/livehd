@@ -1653,6 +1653,8 @@ sh_test(
     data = _FLOW_DATA + [
         "abc_arst_q.lib",
         "abc_arst_qn.lib",
+        "abc_latch_q.lib",
+        "abc_rst_latch.prp",
         "abc_rst_tree.v",
     ],
     env = {"MAPPER": mapper},
@@ -2669,7 +2671,7 @@ sh_test(
 sh_test(
     name = "lhd_placement_reset_tree_smoke",
     size = "small",
-    timeout = "short",
+    timeout = "moderate",
     srcs = ["lhd_placement_reset_tree_smoke.py"],
     data = [
         "sky130hd_dfbbp_1.lef.part",

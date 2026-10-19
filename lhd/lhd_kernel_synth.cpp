@@ -227,14 +227,9 @@ livehd::placement::Options placement_options(const Options& opts) {
   out.fp_snap_enabled             = truthy(synth_set(opts, "place.fp.snap", "true"));
   out.fp_colors                   = truthy(synth_set(opts, "place.fp.colors", "false"));
   out.repair_reset                = truthy(synth_set(opts, "place.repair.reset", "false"));
-  {
-    const auto text = synth_set(opts, "place.reset_fanout", "0");
-    char*      end  = nullptr;
-    const auto n    = std::strtoul(text.c_str(), &end, 10);
-    if (text.empty() || *end != '\0' || n == 1 || n > 1000000 || text.front() == '-') {
-      throw Lhd_error{"usage", "invalid synth.place.reset_fanout: " + text, "expected 0 (off) or an integer >= 2: loads per reset buffer"};
-    }
-    out.reset_fanout = static_cast<unsigned>(n);
+  out.reset_fanout                = static_cast<unsigned>(integer("place.reset_fanout", "0"));
+  if (out.reset_fanout == 1) {
+    throw Lhd_error{"usage", "invalid synth.place.reset_fanout: 1", "expected 0 (off) or an integer >= 2: loads per reset buffer"};
   }
   out.fp_iterations               = integer("place.fp.iterations", "1500");
   out.fp_minimum                  = number("place.fp.minimum", "3000");

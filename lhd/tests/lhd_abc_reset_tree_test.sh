@@ -16,6 +16,7 @@
 #     *__rstbuf*, and the netlist is proven against the source graph by the graph-native
 #     LEC (cvc5, gensim models) and, on the Verilog netlist, by the independent yosys
 #     checker (lgyosys);
+#   * the clear/preset pins of reset LATCH cells (abc_rst_latch.prp on abc_latch_q.lib, ABC mapper) join the same tree;
 #   * a flipped reset-value bit refutes against the buffered netlist;
 #   * reset_fanout=1 (a tree that can never shrink) is refused, naming the option.
 set -u
@@ -60,7 +61,7 @@ for stmt in text.split(";"):
     cell, inst, body = m.groups()
     if cell == "BUFx1" and "__rstbuf" in inst:
         bufs += 1
-    if not cell.startswith("DFF"):
+    if not cell.startswith(("DFF", "DL")):
         continue
     for pin, net in re.findall(r"\.(\w+)\(([^()]*)\)", body):
         if pin in pins and not net.startswith("1'h"):
@@ -135,6 +136,28 @@ for tag in q qn; do
   grep -q '"verdict":"refuted-cex"' "$d/r.json" || fail "$tag: flipped reset value was not refuted: $(cat "$d/r.json")"
 done
 echo "PASS: a flipped reset value refutes against the buffered netlists"
+
+# --- latch cells: their clear/preset pins are reset pins too (ABC mapper) ----------
+if [ "$MAPPER" = abc ]; then
+  d="$W/latch"
+  mkdir -p "$d"
+  r="$d/r.json"
+  LPRP=lhd/tests/abc_rst_latch.prp
+  LLIB=lhd/tests/abc_latch_q.lib
+  lrun() { "$LHD" "$@" -q --result-json "$r" > "$d/last.log" 2>&1 || fail "latch: $* -> $(cat "$r" 2>/dev/null)"; }
+  lrun compile "$LPRP" --top abc_rst_latch --emit-dir lg:"$d/ref" --workdir "$d/Wc"
+  lrun pass color flat --top abc_rst_latch lg:"$d/ref" --set color.ware_arith=false --set color.ware_cmp=false \
+    --set color.ware_shift=false --workdir "$d/Wcolor"
+  lrun pass abc --top abc_rst_latch lg:"$d/ref" --emit-dir lg:"$d/net" --emit-dir verilog:"$d/netv" \
+    --set synth.liberty="$LLIB" --set pass.abc.reset_fanout=4 --workdir "$d/W"
+  cat "$d/netv/"*.v > "$d/net.v"
+  read -r lmax lbufs < <(stats "$d/net.v" RESET_B SET)
+  [ "$lmax" -le 4 ] && [ "$lbufs" -ge 2 ] || fail "latch cap 4: expected every reset net <= 4 pins and >= 2 rstbuf, got max=$lmax bufs=$lbufs"
+  lrun pass liberty gensim "$LLIB" --emit-dir lg:"$d/models" --workdir "$d/Wm"
+  lrun lec --set formal.effort=proof --impl lg:"$d/net" --ref lg:"$d/ref" --lib lg:"$d/models" --top abc_rst_latch --workdir "$d/Wlec"
+  grep -qE '"verdict":"proven-(full|bounded)"' "$r" || fail "latch: graph LEC did not prove: $(cat "$r")"
+  echo "PASS: reset latch cells join the tree (max $lmax pins, $lbufs buffers), cvc5 proven"
+fi
 
 # --- a cap of 1 would never shrink a tree level: refused, naming the option -------
 d="$W/one"

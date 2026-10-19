@@ -12,6 +12,7 @@ struct Reset_tree_stats {
   unsigned sinks = 0;    // cell pins moved behind a buffer (async clear/preset and every other load of the same net)
   unsigned buffers = 0;  // buffers minted
   unsigned levels = 0;   // deepest tree
+  unsigned skipped = 0;  // clear/preset pins left alone: driven through a multi-bit or multi-driver wiring alias
 };
 // Pre-placement fanout tree over the FLAT mapped netlist (synth.place.reset_fanout). A net that
 // drives an asynchronous clear/preset pin of a Liberty flop and more than `cap` cell pins in all

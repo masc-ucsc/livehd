@@ -4160,6 +4160,7 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
                                                          [](const Cell& c) { return c.name.find("__place_rsttree") != std::string::npos; })),
                      allocator);
       tree.AddMember("levels", reset_tree.levels, allocator);
+      tree.AddMember("skipped", reset_tree.skipped, allocator);
       json.AddMember("reset_tree", tree, allocator);
     }
     if (macro_run) {
