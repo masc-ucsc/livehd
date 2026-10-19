@@ -21,9 +21,8 @@ evidence to be validated inside Isabelle.
 
 The certificate and the fast word model are produced by the same emitter, so
 their agreement cannot by itself expose an emitter semantic bug that both
-share.  `scripts/run_dino_lgraph_isabelle.sh` can run an RTL-vs-LGraph LEC gate
-before generation (`RUN_LEC_GATE=true`); it aborts on a REFUTED or INCONCLUSIVE
-result.
+share.  `scripts/run_dino_lgraph_lec_gate.sh` runs an RTL-vs-LGraph LEC gate on
+the DINO designs; run it before generation.
 
 ## Terminology
 
@@ -393,7 +392,6 @@ Results:
 ### Inputs and Related Files
 
 - Generator: `pass/isabelle/pass_isabelle.cpp`, `pass/isabelle/pass_isabelle.hpp`
-- Generation script: `scripts/run_dino_lgraph_isabelle.sh`
 - Primitive helper definitions:
   `formal/semantic_primitives/SemanticPrimitives.thy`
 - Primitive helper tests: `formal/semantic_primitives/SemanticPrimitives_Test.thy`
@@ -416,9 +414,7 @@ example while writing the `LGraph-Translation-Correctness` heap.
 
 Use a project-local isolated Isabelle home and a project-local temporary
 directory, never `/tmp`, and run the build outside the sandbox when heap writes
-are required.  `scripts/run_dino_lgraph_isabelle.sh` does this itself: it keeps
-everything under `$OUT` (default `generated/dino_lgraph_isabelle`), exports
-`TMPDIR=$OUT/runtime_tmp`, and runs Isabelle with `HOME=$OUT/isabelle_home`.
+are required.
 
 A manual build from the repository root:
 
@@ -440,66 +436,61 @@ isabelle build -v \
 To build only the generic library, drop `-d "$OUT/isabelle"` and build the
 `LGraph-Translation-Correctness` session instead.
 
-### Generating and Checking DINO Artifacts
+### Generating DINO Artifacts
 
-`scripts/run_dino_lgraph_isabelle.sh` compiles each design's SystemVerilog to
-an LGraph with `lhd compile verilog`, runs `pass.isabelle`
-(`--emit-dir isabelle:...`), writes one Model/Cert session pair per design, and
-builds them.  Build `lhd` first with `bazel build //lhd:lhd`.
+Build `lhd` first with `bazel build //lhd:lhd`, then compile each design's
+SystemVerilog to an LGraph and run `pass.isabelle` on it:
 
 ```bash
-DESIGNS="SingleCycleCPU" \
-CERT_WF_MODE=chunked CERT_WF_FALLBACK=fail CERT_CHUNK_SIZE=25 \
-scripts/run_dino_lgraph_isabelle.sh
+OUT="$PWD/generated/dino_lgraph_isabelle"
+bazel-bin/lhd/lhd compile verilog <design .sv files> \
+  --reader yosys-verilog \
+  --top SingleCycleCPU \
+  --emit-dir isabelle:"$OUT/isabelle" \
+  --set yosys.setundef=zero \
+  --set formal.isabelle.cert_wf=chunked \
+  --set formal.isabelle.cert_wf_fallback=fail \
+  --set formal.isabelle.cert_chunk_size=25
 ```
 
-Environment variables:
+This writes `$OUT/isabelle/<Top>_Lgraph.thy` (the generated fast word model)
+and `$OUT/isabelle/<Top>_Lgraph_Cert.thy` (the graph certificate and its
+theorems).  The pass output includes per-chunk summaries such as:
 
-| Variable | Default | Meaning |
-|----------|---------|---------|
-| `DESIGNS` | `SingleCycleCPU` | Space-separated subset of `SingleCycleCPU PipelinedCPU PipelinedDualIssueCPU` |
-| `LHD` | `bazel-bin/lhd/lhd` | LiveHD binary |
-| `ISABELLE` | (site path) | Isabelle binary; override with `ISABELLE=/path/to/isabelle` |
-| `RUN_ISABELLE` | `true` | Build the generated sessions |
-| `RUN_LEC_GATE` | `false` | Run the RTL-vs-LGraph LEC gate before generation |
-| `CERT_WF_MODE` | `skip` | `skip`, `eval`, `sorry`, or `chunked` |
-| `CERT_WF_FALLBACK` | `fail` | `fail`, `sorry`, or `eval` for unsupported chunks |
-| `CERT_CHUNK_SIZE` | `25` | Node certificates per chunk |
-| `CERT_CHUNK_LIMIT` | `0` | Emit only the first N chunks (0 = all) |
-| `ISA_STRICT` | `true` | Abort on unsupported ops |
-| `ISA_MAX_WIDTH` | `1024` | Maximum node width |
-| `THREADS` | `8` | Isabelle `threads` option |
-| `PARALLEL_PROOFS` | `1` | `parallel_proofs` option in the generated session ROOTs |
-| `OUT` | `generated/dino_lgraph_isabelle` | Output root |
-| `HAGENT_BUILD`, `SC_DIR`, `PIPE_DIR`, `DUAL_DIR` | (site paths) | Directories holding each design's `.sv` files |
+```text
+pass.isabelle cert chunks for SingleCycleCPU:
+  total_nodes=5383 chunk_size=25 emitted_chunks=50 full_chunks=216
+  chunk 0:  nodes=25 class=const-only ops={Op_Const=25}
+  ...
+  chunk 35: nodes=25 class=simple-mixed
+    ops={Op_And=2, Op_Const=9, Op_EQ=2, Op_GetMask=7,
+         Op_MuxBool=1, Op_SHL=1, Op_SRA=1, Op_Sext=2}
+```
 
-The script fails if a generated theory contains unresolved `pass.isabelle`
-markers, and warns if it contains `sorry`.
+To build the result, give each design a Model/Cert session pair.  The
+certificate theory imports the model by bare name, so inside the pair qualify
+that import as `"<name>-Model.<Top>_Lgraph"`.  With
+`sessions/<Top>_model/ROOT`:
 
-Outputs under `$OUT`:
+```text
+session "<name>-Model" = "LGraph-Translation-Correctness" +
+  options [document = false, browser_info = false]
+  theories
+    <Top>_Lgraph
+```
 
-- `isabelle/<Top>_Lgraph.thy`: the generated fast word model.
-- `isabelle/<Top>_Lgraph_Cert.thy`: the graph certificate and its theorems.
-- `isabelle/sessions/<Top>_model/ROOT`, `isabelle/sessions/<Top>_cert/ROOT`,
-  and `isabelle/ROOTS`: the `<name>-Model` and `<name>-Cert` session pair per
-  design.
-- `logs/<Top>.log`: `pass.isabelle` output, including per-chunk summaries such
-  as:
+`sessions/<Top>_cert/ROOT`:
 
-  ```text
-  pass.isabelle cert chunks for SingleCycleCPU:
-    total_nodes=5383 chunk_size=25 emitted_chunks=50 full_chunks=216
-    chunk 0:  nodes=25 class=const-only ops={Op_Const=25}
-    ...
-    chunk 35: nodes=25 class=simple-mixed
-      ops={Op_And=2, Op_Const=9, Op_EQ=2, Op_GetMask=7,
-           Op_MuxBool=1, Op_SHL=1, Op_SRA=1, Op_Sext=2}
-  ```
+```text
+session "<name>-Cert" = "<name>-Model" +
+  options [document = false, browser_info = false]
+  theories
+    <Top>_Lgraph_Cert
+```
 
-- `logs/<Top>_Model.build.log`, `logs/<Top>_Cert.build.log`: Isabelle build
-  logs.
-- `runtime_tmp/`, `isabelle_home/`: project-local temporary directory and
-  isolated Isabelle home.
+and both directories listed in `$OUT/isabelle/ROOTS`, the isolated-home build
+above checks the pair (`DINO-Lgraph-SingleCycle-Cert` there is the Cert session
+for `SingleCycleCPU`).
 
 ### `pass.isabelle` Options
 

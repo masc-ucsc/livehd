@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 #
-# DINO LEC frontend gate (plan §Step 4).
+# DINO LEC frontend gate.
 #
 # Genuine RTL-vs-graph equivalence gate:
 #   impl = the post-cprop LGraph compiled from the RTL
@@ -10,8 +10,6 @@ set -euo pipefail
 # the auto portfolio (ind|bmc, cvc5) proves semantic equivalence via flop-cut
 # miters.  This catches translation bugs a dual-compile determinism check would
 # miss (e.g. an identical mistranslation on both compiles).
-#
-# See also: scripts/run_cva6_cache_memory_lec.sh (synth->verilog regeneration LEC)
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 LIVEHD_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"

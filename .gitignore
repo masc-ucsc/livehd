@@ -117,9 +117,9 @@ generated/master_port/
 # Lean/Isabelle proof flows stay local. The repository carries only usage and
 # introduction documents, and states which benchmarks are covered -- never which
 # ones are planned, queued or still to run. The patterns catch new documents;
-# the explicit paths are the ones already written under other names, and
-# <doc>.archieve.md holds the passages cut from a tracked doc for that reason.
-*.archieve.md
+# the explicit paths are the ones already written under other names.
+# <doc>.plans.md, beside <doc>, holds the passages cut from that tracked doc.
+*.plans.md
 /pass/lean/**/*_PLAN.md
 /pass/lean/**/*_AUDIT.md
 /pass/lean/**/*_LEDGER*.md

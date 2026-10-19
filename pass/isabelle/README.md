@@ -52,28 +52,11 @@ split.
 
 ## CVA6 Cache/Memory LEC Gate
 
-Module-level cache and memory validation is driven by
-`scripts/run_cva6_cache_memory_lec.sh`. From the LiveHD repository root:
-
-```bash
-bazel build //lhd:lhd
-
-OUT_ROOT=$PWD/generated/cva6_cache_memory_lec_runN \
-YOSYS_MEMORY_MODE=collect \
-scripts/run_cva6_cache_memory_lec.sh tc_sram_gate
-```
-
-The script accepts one or more of the wrapper tops `tc_sram_gate`,
-`hpdcache_regbank_wbyteenable_1rw_gate`, `hpdcache_regbank_wmask_1rw_gate`,
-`hpdcache_fifo_reg_gate`, and `cva6_tlb_gate`; with no arguments it runs all
-five in that order and stops at the first failure. Validate the small wrapper
-modules before larger cache/core tops. Use a fresh project-local `OUT_ROOT` for
-each major attempt; do not use `/tmp`.
-
-For each top, `$OUT_ROOT/<top>/` holds the Yosys-elaborated reference
-(`reference_pp.v`), the Verilog regenerated from the LGraph
-(`regenerated_from_lgraph.v`), the `pass.isabelle` output (`isabelle/`), and the
-LEC logs (`lec_work/`).
+Module-level cache and memory validation runs on the wrapper tops
+`tc_sram_gate`, `hpdcache_regbank_wbyteenable_1rw_gate`,
+`hpdcache_regbank_wmask_1rw_gate`, `hpdcache_fifo_reg_gate`, and
+`cva6_tlb_gate`. Validate the small wrapper modules before larger cache/core
+tops.
 
 The LEC comparison is:
 
@@ -84,16 +67,11 @@ LiveHD LGraph -> Cgen regenerated Verilog
 ```
 
 This check is outside `pass.isabelle`, but it is required before trusting the
-Isabelle export. If LEC fails, inspect the generated reference Verilog,
-regenerated Verilog, and `lec_work` logs first. Real issues found this way
+Isabelle export. If LEC fails, inspect the reference Verilog, the regenerated
+Verilog, and the LEC logs first. Real issues found this way
 include sparse mux defaults reintroducing X after `setundef=zero`, duplicate
 Cgen declarations for memory-like state, and large shift constants being
 emitted in Isabelle as `1 word`.
-
-If the wrapper script stalls in the LEC phase, use a project-local
-`lec_bmc_only` directory and run the bounded Yosys SAT miter directly. Treat the
-finite BMC log as the validation artifact; do not confuse a stuck wrapper with a
-semantic failure unless the Yosys log reports a counterexample.
 
 ## What "Depths 1-3 Pass" Means
 
@@ -293,13 +271,14 @@ The certificate proof must be built incrementally. Use chunked certificate
 checking first, not one monolithic `by eval` proof:
 
 ```bash
-RUN_ISABELLE=false \
-CERT_WF_MODE=chunked \
-CERT_WF_FALLBACK=fail \
-CERT_CHUNK_SIZE=25 \
-CERT_CHUNK_LIMIT=1 \
-scripts/run_dino_lgraph_isabelle.sh
+--set formal.isabelle.cert_wf=chunked \
+--set formal.isabelle.cert_wf_fallback=fail \
+--set formal.isabelle.cert_chunk_size=25 \
+--set formal.isabelle.cert_chunk_limit=1
 ```
+
+The full generation command and the session layout for building the result are
+in `formal/translation_correctness/README.md`.
 
 Increase the chunk limit only after the previous limit builds quickly. Const-only
 chunks should use specialized symbolic lemmas. Simple mixed chunks should use
