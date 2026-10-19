@@ -2672,6 +2672,8 @@ sh_test(
     timeout = "short",
     srcs = ["lhd_placement_reset_tree_smoke.py"],
     data = [
+        "sky130hd_dfbbp_1.lef.part",
+        "sky130hd_dfbbp_1.lib.part",
         "sky130hd_dfrtp_1.lef.part",
         "sky130hd_dfrtp_1.lib.part",
         "//inou/lefdef:test_data",

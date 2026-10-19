@@ -213,6 +213,24 @@ TEST_F(Reset_tree, LeavesADriverThatResolvesToAConstant) {
   EXPECT_LE(fanout(reset), 8u);
 }
 
+TEST_F(Reset_tree, LeavesATieCellAlone) {
+  // The placer materializes a tie as an input-less library cell; a later pass over the placed graph must not tree it.
+  tech.macros["TIEHIx1"] = core_macro({"H"});
+  auto tie_io            = library.create_io("TIEHIx1");
+  tie_io->add_output("H", 0);
+  tie_io->set_bits("H", 1);
+  auto tie_cell = gu::create_typed_node(*graph, Ntype_op::Sub);
+  tie_cell.set_subnode(tie_io);
+  tie_cell.set_name("__place_tiehi");
+  auto tie_out = tie_cell.create_driver_pin("H");
+  gu::set_bits(tie_out, 1);
+  for (int i = 0; i < 20; ++i) {
+    flop("r" + std::to_string(i), tie_out);
+  }
+  EXPECT_EQ(buffer_reset_nets(*graph, tech, liberty, 8).buffers, 0u);
+  EXPECT_EQ(fanout(tie_out), 40u);
+}
+
 TEST_F(Reset_tree, NeedsAPlaceableBuffer) {
   for (int i = 0; i < 20; ++i) {
     flop("r" + std::to_string(i), reset);

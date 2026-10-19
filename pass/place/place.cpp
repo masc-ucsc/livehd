@@ -4149,9 +4149,16 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
     if (options.reset_fanout) {
       rapidjson::Value tree(rapidjson::kObjectType);
       tree.AddMember("fanout", options.reset_fanout, allocator);
+      // nets/sinks/added/levels describe this call; the seed placement of a timing-driven run already built the
+      // tree, so `buffers` counts the tree cells present in the placed netlist.
       tree.AddMember("nets", reset_tree.nets, allocator);
       tree.AddMember("sinks", reset_tree.sinks, allocator);
-      tree.AddMember("buffers", reset_tree.buffers, allocator);
+      tree.AddMember("added", reset_tree.buffers, allocator);
+      tree.AddMember("buffers",
+                     static_cast<uint64_t>(std::count_if(v.cells.begin(),
+                                                         v.cells.end(),
+                                                         [](const Cell& c) { return c.name.find("__place_rsttree") != std::string::npos; })),
+                     allocator);
       tree.AddMember("levels", reset_tree.levels, allocator);
       json.AddMember("reset_tree", tree, allocator);
     }

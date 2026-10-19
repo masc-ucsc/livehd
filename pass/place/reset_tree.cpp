@@ -109,6 +109,11 @@ Reset_tree_stats buffer_reset_nets(hhds::Graph& graph, const physical::Technolog
       if (is_constant && is_constant(drv.front())) {
         continue;  // the tied inactive pin of a clear+preset flop
       }
+      // A second place() over a placed graph sees that tie as the cell it became: an input-less library cell is a
+      // constant source, and a tree behind it would only add cells.
+      if (const auto driver_io = drv.front().get_master_node().get_subnode_io(); driver_io && driver_io->get_input_pin_decls().empty()) {
+        continue;
+      }
       const auto key = std::make_pair<uint64_t, uint64_t>(drv.front().get_master_node().get_debug_nid(), drv.front().get_port_id());
       if (seen.insert(key).second) {
         drivers.push_back(drv.front());
