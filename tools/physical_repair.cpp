@@ -367,6 +367,9 @@ int main(int argc, char** argv) {
         options.fp_colors                                           = true;
         // Diagnostic comparisons use the same mapped inputs/timing policy
         // while selecting the production FP/color switches independently.
+        if (config.HasMember("macro_snap_mode")) {
+          options.macro_snap_mode = text("macro_snap_mode");
+        }
         if (config.HasMember("fp_place")) {
           options.fp_place = config["fp_place"].GetBool();
         }

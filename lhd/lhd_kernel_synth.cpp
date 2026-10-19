@@ -236,15 +236,28 @@ livehd::placement::Options placement_options(const Options& opts) {
   if (out.macro_mode != "none" && out.macro_mode != "h2d") {
     throw Lhd_error{"usage", "synth.place.macro must be none or h2d", ""};
   }
-  out.macro_align_weight        = number("place.macro.align_weight", "0");
-  out.macro_align_sigma         = number("place.macro.align_sigma", "0");
-  out.macro_align_overlap_boost = number("place.macro.align_overlap_boost", "0");
-  out.macro_align_start         = integer("place.macro.align_start", "100");
-  out.macro_align_full          = integer("place.macro.align_full", "500");
-  out.macro_align_nearest       = truthy(synth_set(opts, "place.macro.align_nearest", "false"));
-  out.macro_snap                = truthy(synth_set(opts, "place.macro.snap", out.full ? "true" : "false"));
-  out.macro_snap_tolerance      = number("place.macro.snap_tolerance", "0.25");
-  out.macro_snap_weight         = integer("place.macro.snap_weight", "100");
+  out.macro_align_weight                     = number("place.macro.align_weight", "0");
+  out.macro_align_sigma                      = number("place.macro.align_sigma", "0");
+  out.macro_align_overlap_boost              = number("place.macro.align_overlap_boost", "0");
+  out.macro_align_start                      = integer("place.macro.align_start", "100");
+  out.macro_align_full                       = integer("place.macro.align_full", "500");
+  out.macro_align_nearest                    = truthy(synth_set(opts, "place.macro.align_nearest", "false"));
+  out.macro_snap                             = truthy(synth_set(opts, "place.macro.snap", out.full ? "true" : "false"));
+  out.macro_snap_mode                        = synth_set(opts, "place.macro.snap_mode", "alignment");
+  out.macro_snap_options.alignment_tolerance = number("place.macro.snap_alignment", "1");
+  out.macro_snap_options.spacing_tolerance   = number("place.macro.snap_spacing_tolerance", "0.25");
+  out.macro_snap_options.spacing_penalty     = number("place.macro.snap_spacing_penalty", "0.02");
+  out.macro_snap_options.symmetry_tolerance  = number("place.macro.snap_symmetry", "1");
+  out.macro_snap_options.max_displacement    = number("place.macro.snap_displacement", "1");
+  if ((out.macro_snap_mode != "alignment" && out.macro_snap_mode != "symmetry") || out.macro_snap_options.alignment_tolerance < 0
+      || out.macro_snap_options.spacing_tolerance < 0 || out.macro_snap_options.spacing_penalty < 0
+      || out.macro_snap_options.symmetry_tolerance < 0 || out.macro_snap_options.max_displacement < 0) {
+    throw Lhd_error{"usage",
+                    "invalid macro snap mode or regularity controls",
+                    "expected alignment or symmetry and nonnegative controls"};
+  }
+  out.macro_snap_tolerance = number("place.macro.snap_tolerance", "0.25");
+  out.macro_snap_weight    = integer("place.macro.snap_weight", "100");
   if (out.macro_align_weight < 0 || out.macro_align_sigma < 0 || out.macro_align_overlap_boost < 0
       || (out.macro_align_weight > 0 && out.macro_align_start >= out.macro_align_full) || out.macro_snap_tolerance < 0
       || out.macro_snap_weight == 0) {

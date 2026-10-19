@@ -54,39 +54,41 @@ struct Options {
   double                                                     stop_overflow = .1, initial_density_weight = .01;
   double                                                     halo_x = 5, halo_y = 5;  // microns per side, non-CORE macros only
   bool                                                       scale_macro_density = true;
-  bool   automatic_bins = false, exact_macro_density = true, adaptive_density = true, routability = true;
-  bool   routability_charge_compensation = true;
-  double macro_overlap_weight = 50, macro_jitter = .01;
-  double macro_align_weight = 0, macro_align_sigma = 0, macro_align_overlap_boost = 0;
-  int    macro_align_start = 100, macro_align_full = 500;
-  bool   macro_align_nearest = false, macro_snap = true;
-  double macro_snap_tolerance = .25;
-  int    macro_snap_weight    = 100;
-  int    schedule_iterations = 500, io_iterations = 500;
-  double cohesion          = 0;
-  double resistance_ohm_um = -1, capacitance_ff_um = -1;
-  int    iterations = 1500, bins = 64, threads = 1;
-  double fixed_macro_overlap_weight = 0;
-  double wirelength_gamma_end       = .05;  // experimental; existing smoothing schedule by default
-  int    detailed_iterations        = 2;
-  bool   exact_cell_density         = false;
-  bool   density_upper_bound        = false;  // experimental filler-free upper-bound penalty
-  int    min_iterations             = 40;
-  int    post_density_factor        = 4;  // bounded continuation after geometry/density settle; zero disables
-  double convergence_tolerance      = .01;
-  bool   full                       = true;
-  bool   final_cells                = true;
-  int    final_iterations           = 0;  // zero inherits iterations; only after fp in full mode
+  bool        automatic_bins = false, exact_macro_density = true, adaptive_density = true, routability = true;
+  bool        routability_charge_compensation = true;
+  double      macro_overlap_weight = 50, macro_jitter = .01;
+  double      macro_align_weight = 0, macro_align_sigma = 0, macro_align_overlap_boost = 0;
+  int         macro_align_start = 100, macro_align_full = 500;
+  bool        macro_align_nearest = false, macro_snap = true;
+  std::string macro_snap_mode = "alignment";  // alignment | symmetry
+  DreamPlace::native::FloorplanOptions macro_snap_options;
+  double                               macro_snap_tolerance = .25;
+  int                                  macro_snap_weight    = 100;
+  int                                  schedule_iterations = 500, io_iterations = 500;
+  double                               cohesion          = 0;
+  double                               resistance_ohm_um = -1, capacitance_ff_um = -1;
+  int                                  iterations = 1500, bins = 64, threads = 1;
+  double                               fixed_macro_overlap_weight = 0;
+  double                               wirelength_gamma_end       = .05;  // experimental; existing smoothing schedule by default
+  int                                  detailed_iterations        = 2;
+  bool                                 exact_cell_density         = false;
+  bool                                 density_upper_bound        = false;  // experimental filler-free upper-bound penalty
+  int                                  min_iterations             = 40;
+  int    post_density_factor   = 4;  // bounded continuation after geometry/density settle; zero disables
+  double convergence_tolerance = .01;
+  bool   full                  = true;
+  bool   final_cells           = true;
+  int    final_iterations      = 0;  // zero inherits iterations; only after fp in full mode
   // Diagnostic physical GP coordinates, before macro/cell legalization.
-  bool   snapshots                  = false;
+  bool   snapshots             = false;
   // Internal post-synthesis STA snapshot: mapped pins and zero wire RC, no GP
   // or legalization, and no placement-cache publication.
-  bool   timing_seed                = false;
+  bool   timing_seed           = false;
   // Timing-only import of a complete saved placement. Preserve every location;
   // do not legalize, optimize or certify the imported placement's legality.
-  bool   retain_placement           = false;
+  bool   retain_placement      = false;
   // Try nearest-whitespace placement of edited/new cells before windowed GP.
-  bool   legalize_cells             = false;
+  bool   legalize_cells        = false;
 };
 struct Result {
   unsigned                                         fp_resized_cells = 0, fp_repair_edits = 0;

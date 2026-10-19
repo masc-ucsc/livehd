@@ -245,3 +245,12 @@ assert (p/'gp.json').is_file() and (p/'out.def').is_file()
 assert not (p/'flow.json').exists() and not (p/'macro').exists()
 assert json.loads((p/'alignment.json').read_text())['snap']
 print('Default single mixed-size pass retains macro snap without FP anchors')
+run('hierarchy_regular_snap',['--set',f'synth.place.tech_rc={tech_rc}','--set','lhd.incremental=false','--set','synth.place.iterations=40','--set','synth.place.io_iterations=10','--set','synth.place.snapshots=true','--set','synth.place.macro.snap_mode=symmetry'])
+a=json.loads((p/'alignment.json').read_text())
+assert a['snap_mode']=='symmetry' and a['snap'] and not (p/'flow.json').exists(),a
+classes={n['node']:n['class'] for n in a['snap_classes']}
+assert len(classes)==24 and len(set(classes.values()))==4,a['snap_classes']
+for left,right,axis,offset in a['soft_constraints']:
+ assert classes[left]==classes[right],(left,right)
+run('bad_snap_mode',['--set','synth.place.macro=none','--set','synth.place.macro.snap_mode=unknown'],False)
+print('Same-hierarchy/master regularity snap is opt-in and excludes cross-scope arcs')

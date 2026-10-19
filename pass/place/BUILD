@@ -8,7 +8,9 @@ filegroup(
         "color_centroids.hpp",
         "h2d.cpp",
         "h2d.hpp",
+        "macro_snap.cpp",
         "memory_proxy.cpp",
+        "macro_snap.hpp",
         "memory_proxy.hpp",
         "pin_adjust.cpp",
         "pin_adjust.hpp",
@@ -55,6 +57,7 @@ cc_library(
     srcs = [
         "color_centroids.cpp",
         "h2d.cpp",
+        "macro_snap.cpp",
         "memory_proxy.cpp",
         "pin_adjust.cpp",
         "place.cpp",
@@ -67,6 +70,7 @@ cc_library(
     hdrs = [
         "color_centroids.hpp",
         "h2d.hpp",
+        "macro_snap.hpp",
         "memory_proxy.hpp",
         "pin_adjust.hpp",
         "place.hpp",
@@ -150,4 +154,11 @@ cc_test(
         ":place",
         "@googletest//:gtest_main",
     ],
+)
+
+cc_test(
+    name = "macro_snap_test",
+    srcs = ["macro_snap_test.cpp"],
+    copts = COPTS,
+    deps = [":place", "@googletest//:gtest_main"],
 )

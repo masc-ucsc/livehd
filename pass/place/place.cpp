@@ -25,6 +25,7 @@
 
 #include "color_centroids.hpp"
 #include "h2d.hpp"
+#include "macro_snap.hpp"
 #include "memory_proxy.hpp"
 #include "pin_adjust.hpp"
 #include "repair.hpp"
@@ -232,6 +233,17 @@ std::string environment_key(const Options& o, const ph::Technology& tech) {
                               o.io_iterations,
                               o.scale_macro_density),
                   h);
+  }
+  if (o.macro_snap) {
+    h             = hash_text(o.macro_snap_mode, h);
+    const auto& p = o.macro_snap_options;
+    h             = hash_text(std::format("scope-size-snap:{}:{}:{}:{}:{}",
+                                          p.alignment_tolerance,
+                                          p.spacing_tolerance,
+                                          p.spacing_penalty,
+                                          p.symmetry_tolerance,
+                                          p.max_displacement),
+                              h);
   }
   if (o.macro_align_weight > 0 || o.macro_snap) {
     h = hash_text(std::format("alignment:{}:{}:{}:{}:{}:{}:{}:{}:{}",
@@ -542,6 +554,7 @@ std::map<std::string, FloorplanPorts> floorplan_ports(const std::string& library
 }
 struct View {
   dp::Design                                    design;
+  bool                                          hierarchy_snap      = false;
   bool                                          native_orientations = false;
   bool                                          align_macros        = false;
   bool                                          centroids           = false;
@@ -797,6 +810,15 @@ void make_arrays(View& v, const ph::Technology& tech) {
       }
     }
   }
+  if (v.hierarchy_snap) {
+    std::vector<std::string>               names(d.node_x.size());
+    std::vector<std::pair<double, double>> sizes(d.node_x.size());
+    for (size_t i = 0; i < v.cells.size(); ++i) {
+      names[i] = v.cells[i].name;
+      sizes[i] = {d.node_size_x[i], d.node_size_y[i]};
+    }
+    d.node_snap_class = hierarchy_macro_classes(names, sizes, d.node_macro, d.num_movable);
+  }
   if (!v.cohesion_owners.empty()) {
     std::map<std::string, std::vector<int>> groups;
     for (const auto& c : v.cells) {
@@ -858,22 +880,7 @@ void make_arrays(View& v, const ph::Technology& tech) {
   if (v.centroids) {
     std::vector<std::string> paths, masters;
     for (const auto& c : v.cells) {
-      std::istringstream input(c.name);
-      std::string        path, part;
-      while (std::getline(input, part, '.')) {
-        // Synthesis color containers retain the original instance path inside.
-        const bool generated
-            = part.starts_with("sub_") && part.size() > 4
-              && std::all_of(part.begin() + 4, part.end(), [](unsigned char ch) { return ch >= '0' && ch <= '9'; });
-        if (generated) {
-          continue;
-        }
-        if (!path.empty()) {
-          path += '.';
-        }
-        path += part;
-      }
-      paths.push_back(std::move(path));
+      paths.push_back(original_hierarchy_path(c.name));
       masters.push_back(c.macro);
     }
     paths.resize(d.node_x.size());
@@ -2223,6 +2230,18 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
       throw std::invalid_argument("invalid floorplan coefficient");
     }
   }
+  if (options.macro_snap_mode != "alignment" && options.macro_snap_mode != "symmetry") {
+    throw std::invalid_argument("macro snap mode must be alignment or symmetry");
+  }
+  for (double value : {options.macro_snap_options.alignment_tolerance,
+                       options.macro_snap_options.spacing_tolerance,
+                       options.macro_snap_options.spacing_penalty,
+                       options.macro_snap_options.symmetry_tolerance,
+                       options.macro_snap_options.max_displacement}) {
+    if (!std::isfinite(value) || value < 0) {
+      throw std::invalid_argument("invalid macro regularity control");
+    }
+  }
   const bool macro_active = options.macro_mode == "h2d" && !options.timing_seed;
   if (macro_active
       && (options.automatic_bins || options.exact_macro_density || options.scale_macro_density || options.adaptive_density
@@ -2287,6 +2306,7 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
   }
   v.centroid_minimum    = options.fp_minimum;
   v.centroid_min_copies = options.fp_min_copies;
+  v.hierarchy_snap      = options.macro_snap;
   v.align_macros        = options.macro_align_weight > 0 || options.macro_snap;
   v.weights             = options.net_weights;
   v.fp.design           = std::string(source.get_name());
@@ -3029,6 +3049,8 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
   control.macro_align_overlap_boost  = options.macro_align_overlap_boost;
   control.macro_align_nearest        = options.macro_align_nearest;
   control.macro_snap                 = options.macro_snap;
+  control.macro_snap_regular         = options.macro_snap && options.macro_snap_mode == "symmetry";
+  control.macro_snap_options         = options.macro_snap_options;
   control.macro_snap_tolerance       = options.macro_snap_tolerance;
   control.macro_snap_weight          = options.macro_snap_weight;
   control.automatic_bins             = options.automatic_bins;
@@ -4290,7 +4312,64 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
     json.Double(options.macro_snap_tolerance);
     json.Key("snap_weight");
     json.Int(options.macro_snap_weight);
+    json.Key("snap_mode");
+    json.String(options.macro_snap_mode.c_str());
     const auto& a = metrics.alignment;
+    json.Key("regularity_attempted");
+    json.Int(a.regularity.attempted);
+    json.Key("regularity_rejected");
+    json.Int(a.regularity.rejected);
+    json.Key("regularity_infeasible_classes");
+    json.Int(a.regularity.infeasible_families);
+    json.Key("regularity_seconds");
+    json.Double(a.regularity.seconds);
+    json.Key("snap_classes");
+    json.StartArray();
+    if (v.hierarchy_snap) {
+      for (size_t n = 0; n < v.cells.size(); ++n) {
+        if (v.design.node_snap_class[n] < 0) {
+          continue;
+        }
+        json.StartObject();
+        json.Key("node");
+        json.String(v.cells[n].name.c_str());
+        json.Key("master");
+        json.String(v.cells[n].macro.c_str());
+        json.Key("class");
+        json.Int(v.design.node_snap_class[n]);
+        json.EndObject();
+      }
+    }
+    json.EndArray();
+    json.Key("regularity_relations");
+    json.StartArray();
+    for (const auto& relation : a.regularity.relations) {
+      json.StartObject();
+      json.Key("kind");
+      json.String(relation.kind.c_str());
+      json.Key("axis");
+      json.Int(relation.axis);
+      json.Key("nodes");
+      json.StartArray();
+      for (int c : relation.nodes) {
+        int n = std::stoi(a.regularity.circles.at(c).name);
+        json.String(v.cells.at(n).name.c_str());
+      }
+      json.EndArray();
+      json.EndObject();
+    }
+    json.EndArray();
+    json.Key("soft_constraints");
+    json.StartArray();
+    for (const auto& constraint : a.constraints) {
+      json.StartArray();
+      json.String(v.cells.at(constraint.a).name.c_str());
+      json.String(v.cells.at(constraint.b).name.c_str());
+      json.Int(constraint.axis);
+      json.Double(constraint.offset / tech.dbu);
+      json.EndArray();
+    }
+    json.EndArray();
     json.Key("macro_legalization_s");
     json.Double(a.macro_legalization_seconds);
     json.Key("cell_legalization_s");
