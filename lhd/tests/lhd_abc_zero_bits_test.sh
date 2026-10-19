@@ -9,6 +9,8 @@
 #      into a ware module; with ware_zero_bits the module is told which operand bits
 #      are provably 0 and maps to far fewer cells (fixture: 2,645 -> 721 with the
 #      ASAP7 library, a clear drop with the hermetic one).
+#   3. zb_lanes: a write-masked memory (two partial writes of one entry). The write-enable
+#      lane vector of each port reaches the lowered module as its one condition bit.
 #   2. zb_mem: a lowered memory whose two read ports each observe a narrow window of
 #      the word. With memory_prune_reads the bits no reader observes are cleared at
 #      the memory module's output, so the read mux of those bits is not built.
@@ -78,6 +80,8 @@ map_design "$W/shift_off" zb_shift
 map_design "$W/shift_on" zb_shift --set pass.abc.ware_zero_bits=true
 map_design "$W/mem_off" zb_mem --set pass.abc.memory=true
 map_design "$W/mem_on" zb_mem --set pass.abc.memory=true --set pass.abc.memory_prune_reads=true
+map_design "$W/lanes_off" zb_lanes --set pass.abc.memory=true
+map_design "$W/lanes_on" zb_lanes --set pass.abc.memory=true --set pass.abc.memory_prune_reads=true
 
 off=$(cells "$W/shift_off/netv")
 on=$(cells "$W/shift_on/netv")
@@ -92,3 +96,10 @@ on=$(cells "$W/mem_on/netv")
 [ "$on" -lt "$off" ] || fail "zb_mem: memory_prune_reads did not reduce the cells (off=$off on=$on)"
 lec_both "$W/mem_on" zb_mem
 echo "PASS: memory_prune_reads maps the narrow-window memory reads to $on cells instead of $off, LEC-equivalent"
+
+off=$(cells "$W/lanes_off/netv")
+on=$(cells "$W/lanes_on/netv")
+[ "$off" -gt 0 ] && [ "$on" -gt 0 ] || fail "zb_lanes: no mapped cells (off=$off on=$on)"
+[ "$on" -lt "$off" ] || fail "zb_lanes: memory_prune_reads did not reduce the cells (off=$off on=$on)"
+lec_both "$W/lanes_on" zb_lanes
+echo "PASS: memory_prune_reads maps the write-masked memory to $on cells (default $off), LEC-equivalent"

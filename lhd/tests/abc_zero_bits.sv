@@ -32,3 +32,27 @@ module zb_mem (
   assign r0 = mem[raddr0][1:0];
   assign r1 = mem[raddr1][11:8];
 endmodule
+
+// zb_lanes: two partial writes of different bit ranges of the same 16-bit entry (a
+// write-masked memory: the enable of each port is a lane vector that is its condition
+// on the written lanes and 0 elsewhere) and a full-word read. Without
+// memory_prune_reads the lowered module is handed each lane as an independent input
+// bit; with it, one condition bit per port.
+module zb_lanes (
+  input  logic        clk,
+  input  logic        we0,
+  input  logic        we1,
+  input  logic [2:0]  waddr0,
+  input  logic [2:0]  waddr1,
+  input  logic [5:0]  wdata0,
+  input  logic [3:0]  wdata1,
+  input  logic [2:0]  raddr,
+  output logic [15:0] r
+);
+  logic [15:0] mem[8];
+  always_ff @(posedge clk) begin
+    if (we0) mem[waddr0][6:1] <= wdata0;
+    if (we1) mem[waddr1][14:11] <= wdata1;
+  end
+  assign r = mem[raddr];
+endmodule
