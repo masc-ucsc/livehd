@@ -2440,7 +2440,17 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
           found = true;
         }
         if (!found) {
-          throw std::runtime_error("physical input pin absent from LEF: " + cell.macro + "/" + name);
+          std::string declared;
+          if (auto cell_io = cell.node.get_subnode_io()) {
+            for (const auto& d : cell_io->get_input_pin_decls()) {
+              declared += std::format(" in {}={}", d.name, d.port_id);
+            }
+            for (const auto& d : cell_io->get_output_pin_decls()) {
+              declared += std::format(" out {}={}", d.name, d.port_id);
+            }
+          }
+          throw std::runtime_error(std::format("physical input pin absent from LEF: {}/{} (instance {}, sink port {}, declared{})",
+                                               cell.macro, name, cell.name, sink.get_port_id(), declared));
         }
       }
     }
