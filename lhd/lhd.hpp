@@ -831,6 +831,11 @@ inline constexpr Synth_set_option kSynthSetOptions[] = {
      "false",
      Synth_set_option::Kind::boolean,
      "let synth.place.resize repair size and buffer reset-pin cones (a high-fanout reset net); default protects them like clocks"},
+    {"place.reset_fanout",
+     "0",
+     Synth_set_option::Kind::integer,
+     "before placement, deal every flat net that drives an asynchronous clear/preset pin and more than this many cell pins out through "
+     "a tree of the library's smallest buffer, this many pins per buffer (0 = off, >= 2); unlike resize it is not gated on timing"},
     {"place.fp.colors",
      "false",
      Synth_set_option::Kind::boolean,

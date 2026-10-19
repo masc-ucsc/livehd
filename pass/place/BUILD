@@ -14,6 +14,8 @@ filegroup(
         "place.hpp",
         "repair.cpp",
         "repair.hpp",
+        "reset_tree.cpp",
+        "reset_tree.hpp",
         "resynthesize.cpp",
         "steiner_repair.cpp",
         "steiner_repair.hpp",
@@ -55,6 +57,7 @@ cc_library(
         "memory_proxy.cpp",
         "place.cpp",
         "repair.cpp",
+        "reset_tree.cpp",
         "resynthesize.cpp",
         "steiner_repair.cpp",
         "timing_place.cpp",
@@ -66,6 +69,7 @@ cc_library(
         "memory_proxy.hpp",
         "place.hpp",
         "repair.hpp",
+        "reset_tree.hpp",
         "steiner_repair.hpp",
         "technology_rc.hpp",
         ":place_salt",
@@ -98,6 +102,17 @@ cc_test(
     deps = [
         ":place",
         "//pass/opentimer:pass_opentimer",
+        "@googletest//:gtest_main",
+    ],
+)
+
+cc_test(
+    name = "reset_tree_test",
+    size = "small",
+    srcs = ["reset_tree_test.cpp"],
+    copts = COPTS,
+    deps = [
+        ":place",
         "@googletest//:gtest_main",
     ],
 )

@@ -2664,6 +2664,21 @@ sh_test(
     data = ["//lhd", "//inou/lefdef:test_data"],
 )
 
+# synth.place.reset_fanout: a flat net that drives many asynchronous reset pins is dealt out through a
+# buffer tree before placement; bounded, LEC-proven on the placed netlist, off by default.
+sh_test(
+    name = "lhd_placement_reset_tree_smoke",
+    size = "small",
+    timeout = "short",
+    srcs = ["lhd_placement_reset_tree_smoke.py"],
+    data = [
+        "sky130hd_dfrtp_1.lef.part",
+        "sky130hd_dfrtp_1.lib.part",
+        "//inou/lefdef:test_data",
+        "//lhd",
+    ],
+)
+
 sh_test(
     name = "lhd_placement_smoke_usyn",
     size = "small",

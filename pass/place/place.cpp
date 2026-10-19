@@ -38,6 +38,7 @@
 #include "node_util.hpp"
 #include "pass/liberty/liberty_dff.hpp"
 #include "pass/partition/flatten.hpp"
+#include "reset_tree.hpp"
 #include "pass/place/place_salt.hpp"
 #include "rapidjson/document.h"
 #include "rapidjson/stringbuffer.h"
@@ -145,6 +146,9 @@ std::string environment_key(const Options& o, const ph::Technology& tech) {
                             o.halo_y),
                 h);
   h = hash_text(o.macro_mode, h);
+  if (o.reset_fanout) {
+    h = hash_text(std::format("reset-fanout:{}", o.reset_fanout), h);
+  }
   if (!o.die.empty() || !o.core.empty()) {
     h = hash_text("fixed-frame", h);
     for (const auto v : o.die) {
@@ -2074,6 +2078,8 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
   }
   auto& graph = *result.graph;
   remove_transparent_latches(graph);
+  // Opt-in: the flat reset nets are bounded before the first cell is read, so the buffers place like any cell.
+  const auto reset_tree = options.reset_fanout ? buffer_reset_nets(graph, tech, options.liberty, options.reset_fanout) : Reset_tree_stats{};
   View v;
   v.native_orientations = macro_active;
   // ECO starts from the supplied physical frame; centroid initialization is a
@@ -4128,6 +4134,15 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
             [&](const Cell& c) { return (v.halo_x || v.halo_y) && !tech.macros.at(c.macro).klass.starts_with("CORE"); })),
         allocator);
     json.AddMember("halo", halo, allocator);
+    if (options.reset_fanout) {
+      rapidjson::Value tree(rapidjson::kObjectType);
+      tree.AddMember("fanout", options.reset_fanout, allocator);
+      tree.AddMember("nets", reset_tree.nets, allocator);
+      tree.AddMember("sinks", reset_tree.sinks, allocator);
+      tree.AddMember("buffers", reset_tree.buffers, allocator);
+      tree.AddMember("levels", reset_tree.levels, allocator);
+      json.AddMember("reset_tree", tree, allocator);
+    }
     if (macro_run) {
       rapidjson::Value macro(rapidjson::kObjectType);
       macro.AddMember("mode", "h2d", allocator);
