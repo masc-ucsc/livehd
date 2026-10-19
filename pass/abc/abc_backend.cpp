@@ -556,8 +556,9 @@ synth::Region_plan Abc_backend::plan(const synth::Region_ctx& ctx) {
   }
 
   synth::Region_plan plan;
-  // pass.abc.large_flow_latches: the tool's default size-tier flow is combinational too.
-  const bool keeps_latches = builtin_flow_ || (large_tier && region_.large_flow_latches && !custom_area);
+  // pass.abc.large_flow_latches: the tool's default size-tier flow is combinational too (the option is only ever set while
+  // large_flow is that default, so a tier region keeps its latches exactly then).
+  const bool keeps_latches = builtin_flow_ || (large_tier && region_.large_flow_latches);
   plan.preserves_latches   = keeps_latches;
   plan.recipe             = resolve_recipe(ctx);
   plan.recipe            += ctx.rb.ctrl ? "|ctrl=1" : "|ctrl=0";
