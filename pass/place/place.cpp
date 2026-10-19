@@ -338,7 +338,9 @@ struct Endpoint {
 class Resolver {
   std::map<std::pair<uint64_t, int>, Endpoint> memo;
   std::set<std::pair<uint64_t, int>>           busy;
-  size_t                                       tied_unknown = 0;
+  // Distinct unknown constant bits tied low: a top output's driver is resolved twice (the net,
+  // then the rewrite to its tie cell), so count the (driver, bit) once, not each lookup.
+  std::set<std::pair<uint64_t, int>>           tied_unknown;
   const ph::Technology&                        tech;
   const std::map<uint64_t, std::string>&       memories;
   bool                                         unknown_as_zero;
@@ -348,7 +350,7 @@ public:
   // instead of refusing the net; the number of bits tied this way is unknown_tied().
   explicit Resolver(const ph::Technology& t, const std::map<uint64_t, std::string>& m, bool unknown_zero = false)
       : tech(t), memories(m), unknown_as_zero(unknown_zero) {}
-  size_t unknown_tied() const { return tied_unknown; }
+  size_t unknown_tied() const { return tied_unknown.size(); }
   Endpoint bit(Pin p, int b, int depth = 0) {
     if (p.is_invalid() || b < 0) {
       throw std::runtime_error("invalid physical wiring operand");
@@ -362,7 +364,7 @@ public:
         if (!unknown_as_zero) {
           throw std::runtime_error("physical net has an unknown constant (synth.place.unknown_const=zero ties it low)");
         }
-        ++tied_unknown;
+        tied_unknown.emplace(static_cast<uint64_t>(p.get_debug_pid()), b);
         return {{}, {}, 0};
       }
       return {{}, {}, c.bit_test(b) ? 1 : 0};
