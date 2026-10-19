@@ -1517,9 +1517,17 @@ void Slang_context::emit_module_io(const slang::ast::InstanceSymbol& symbol, con
   // ("reg names clock_pin 'RW0_clk_s1' but module has no such input/wire").
   const auto* canon = symbol.getCanonicalBody();
   const auto& body  = canon != nullptr ? *canon : symbol.body;
+  // `--compat=vcs` downgrades slang's `Redefinition` error to a warning, so a port declared TWICE
+  // (the Xilinx GTHE4_CHANNEL stub lists some of its ports twice) reaches this loop as two
+  // PortSymbols of one name. Like VCS, the first declaration is the port; the later ones name the
+  // same signal and must not become a second IO of that name.
+  absl::flat_hash_set<std::string_view> seen_port_names;
   for (const auto& p : body.getPortList()) {
     if (p->kind == SymbolKind::Port) {
       const auto& port = p->as<slang::ast::PortSymbol>();
+      if (!port.name.empty() && !seen_port_names.insert(port.name).second) {
+        continue;
+      }
 
       if (!port_direction_supported(port)) {
         emit_unsupported(port.location,
@@ -8247,6 +8255,7 @@ void Slang_context::lower_instance(const slang::ast::InstanceSymbol& inst) {
     input_phase.clear();
   };
 
+  absl::flat_hash_set<std::string_view> seen_port_names;  // a port listed twice under --compat=vcs: the first wins
   for (const auto* conn : inst.getPortConnections()) {
     if (conn->port.kind != SymbolKind::Port) {
       end_input_phase();
@@ -8256,6 +8265,9 @@ void Slang_context::lower_instance(const slang::ast::InstanceSymbol& inst) {
       return;
     }
     const auto& port   = conn->port.as<slang::ast::PortSymbol>();
+    if (!port.name.empty() && !seen_port_names.insert(port.name).second) {
+      continue;
+    }
     const auto* expr   = conn->getExpression();
     const bool  is_out = port_is_output(port);
     if (liberty_memory && !is_out && expr != nullptr) {

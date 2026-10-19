@@ -2698,6 +2698,14 @@ sh_test(
 )
 
 sh_test(
+    name = "lhd_macro_bringup_smoke",
+    size = "small",
+    timeout = "short",
+    srcs = ["lhd_macro_bringup_smoke.py"],
+    data = ["//lhd", "//inou/lefdef:test_data"],
+)
+
+sh_test(
     name = "lhd_remainder_smoke",
     size = "small",
     timeout = "short",
