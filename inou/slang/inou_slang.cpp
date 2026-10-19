@@ -128,6 +128,8 @@ void Inou_slang::setup() {
   m1.add_label_optional("liberty_cells",
                         "true to bind a module that only the selected synth.liberty defines (a standard cell instantiated by "
                         "name) as a typed, opaque cell instance");
+  m1.add_label_optional("unconnected_input",
+                        "zero|one to read an unconnected instance input as that constant instead of the unknown 'x (default: x)");
 
   register_pass(m1);
 
@@ -168,6 +170,8 @@ void Inou_slang::setup() {
   m2.add_label_optional("liberty_cells",
                         "true to bind a module that only the selected synth.liberty defines (a standard cell instantiated by "
                         "name) as a typed, opaque cell instance");
+  m2.add_label_optional("unconnected_input",
+                        "zero|one to read an unconnected instance input as that constant instead of the unknown 'x (default: x)");
 
   m2.add_label_optional("liberty", "Selected Liberty: typed, opaque memory-cell interfaces", "");
   register_pass(m2);
@@ -320,6 +324,18 @@ void Inou_slang::work(Eprp_var& var) {
   opts.liberty_macro_precedence      = flag_true("liberty_macro_precedence");
   opts.liberty_allow_truncation      = flag_true("liberty_allow_truncation");
   opts.liberty_cells                 = flag_true("liberty_cells");
+  if (var.has_label("unconnected_input")) {
+    const auto value = std::string(var.get("unconnected_input"));
+    if (value == "zero") {
+      opts.unconnected_input = '0';
+    } else if (value == "one") {
+      opts.unconnected_input = '1';
+    } else if (!value.empty() && value != "x") {
+      livehd::diag::err("inou.slang", "bad-unconnected-input", "usage")
+          .msg("compile.slang.unconnected_input must be zero|one|x, got '{}'", value)
+          .fatal();
+    }
+  }
   if (var.has_label("liberty")) {
     opts.liberty_files = std::string(var.get("liberty"));
   }

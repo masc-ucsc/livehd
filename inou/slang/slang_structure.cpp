@@ -8319,8 +8319,8 @@ void Slang_context::lower_instance(const slang::ast::InstanceSymbol& inst) {
           clear_pending_loc();
         } else {
           auto        ti = flat_or_tinfo(port.getType());
-          // unconnected input reads x
-          std::string qmarks(static_cast<size_t>(ti.bits), '?');
+          // unconnected input reads x (compile.slang.unconnected_input=zero|one: that constant)
+          std::string qmarks(static_cast<size_t>(ti.bits), options_.unconnected_input == 'x' ? '?' : options_.unconnected_input);
           // A Verilog escaped identifier may contain dots (`\\io_in.field `).
           // Keep that as ONE literal named argument, matching the backticked
           // formal emitted above; an unquoted dotted ref is parsed by upass as

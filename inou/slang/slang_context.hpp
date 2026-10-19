@@ -464,6 +464,13 @@ public:
     // exactly like a RAM macro. `liberty_files` is the selected library list.
     bool                             liberty_cells = false;
     std::string                      liberty_files;
+    // Opt-in (compile.slang.unconnected_input = zero|one): an input port left unconnected
+    // on an instance reads that constant instead of the default unknown 'x. Verilog leaves
+    // such a port floating (z, read as x); a synthesis tool is free to pick any value, and
+    // Yosys picks whichever simplifies the logic. A vendor primitive stub whose control
+    // inputs are left open (BUFG_GT's CE/CLR) keeps its whole enable cone as logic on a
+    // clock net when the value stays unknown; a constant folds it away. 'x stays the default.
+    char                             unconnected_input = 'x';  // 'x', '0' or '1'
     int                              unroll_limit              = 4000;  // slang-side loop unroll cap (yosys-slang default)
     // Emit a canonical procedural `for` as an LNAST/Pyrope LOOP instead of
     // unrolling it here. LNAST already owns loops with `break`/`continue`

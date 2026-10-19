@@ -66,4 +66,21 @@ own.write_text(cell.read_text() + 'module sky130_fd_sc_hd__buf_1(input A, output
 lhd('cell_own', ['synth', str(own), '--top', 'cellmod', '--set', f'synth.liberty={lib}', '--set', 'synth.opentimer=false',
                  '--set', 'compile.slang.liberty_cells=true', '--workdir', str(root / 'ownW')])
 
+# ---- compile.slang.unconnected_input ----------------------------------------------------------------
+open_in = root / 'open.v'
+open_in.write_text('''module child(input c, input a, output y);
+  assign y = c ? a : 1'b0;
+endmodule
+module open_in(input a, output y);
+  child k(.a(a), .y(y));
+endmodule
+''')
+for value, literal in [('x', ".c(1'bx)"), ('one', ".c(1'h1)"), ('zero', ".c(1'h0)")]:
+    lhd('open_' + value, ['compile', str(open_in), '--top', 'open_in', '--set', f'compile.slang.unconnected_input={value}',
+                          '--workdir', str(root / ('openW' + value)), '--emit-dir', f'verilog:{root}/open-{value}'])
+    assert literal in verilog('open-' + value), (value, verilog('open-' + value))
+diag = lhd('open_bad', ['compile', str(open_in), '--top', 'open_in', '--set', 'compile.slang.unconnected_input=maybe',
+                        '--workdir', str(root / 'openWbad')], success=False)
+assert 'bad-unconnected-input' in diag, diag
+
 print('Macro and vendor-stub bring-up behaviors pass')
