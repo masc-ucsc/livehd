@@ -433,6 +433,31 @@ TEST(StateSweep, ARegisterWhoseResetValueDiffersFromWhatItLoadsStaysARegister) {
   EXPECT_EQ(nodes_of(g, Ntype_op::Flop).size(), 1U);
 }
 
+TEST(StateSweep, HotmuxControlsAreObservedInFullAndItsValuesWhereTheOutputIs) {
+  hhds::GraphLibrary library;
+  auto               m = make_module(library, "top", 32, 4);
+  auto&              g = *m.graph;
+  auto               c0 = make_reg(g, g.get_input_pin("d"), g.get_input_pin("clk"), 1, "c0");
+  auto               c1 = make_reg(g, g.get_input_pin("d"), g.get_input_pin("clk"), 1, "c1");
+  auto               v0 = make_reg(g, g.get_input_pin("d"), g.get_input_pin("clk"), 32, "v0");
+  auto               v1 = make_reg(g, g.get_input_pin("d"), g.get_input_pin("clk"), 32, "v1");
+  auto               hot = gu::create_typed_node(g, Ntype_op::Hotmux, 32);
+  c0.create_driver_pin(0).connect_sink(gu::setup_sink_pid(hot, 0));
+  v0.create_driver_pin(0).connect_sink(gu::setup_sink_pid(hot, 1));
+  c1.create_driver_pin(0).connect_sink(gu::setup_sink_pid(hot, 2));
+  v1.create_driver_pin(0).connect_sink(gu::setup_sink_pid(hot, 3));
+  slice(g, hot.create_driver_pin(0), 0, 4).connect_sink(g.get_output_pin("o"));
+
+  const auto stats = sweep({m.graph}, "top");
+  ASSERT_TRUE(stats);
+  std::vector<int> widths;
+  for (const auto& flop : nodes_of(g, Ntype_op::Flop)) {
+    widths.push_back(gu::bits_of(flop.create_driver_pin(0)));
+  }
+  std::ranges::sort(widths);
+  EXPECT_EQ(widths, (std::vector<int>{1, 1, 4, 4}));
+}
+
 TEST(StateSweep, AnAdmissionRefusalIsReported) {
   hhds::GraphLibrary library;
   auto               m = make_module(library, "top", 8, 8);
