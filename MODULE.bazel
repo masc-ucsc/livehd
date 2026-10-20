@@ -124,7 +124,7 @@ bazel_dep(name = "gmp", version = "6.3.0.bcr.2")
 # the filegroup and the pin moves past it.
 git_repository(
     name = "iassert",
-    commit = "b18182f668ff42b0f96c3a1e3e6deee4e6da221f",  # "fix un-initialized access": sigaction sa_mask (todo/ 1s)
+    commit = "5ad1ddb96d9ecce9f5269ce4b89ef1fa6d727a39",  # "fix un-initialized access": sigaction sa_mask (todo/ 1s)
     patch_cmds = [
         "printf '\\nfilegroup(\\n   name = \"sim_runtime_hdrs\",\\n   srcs = [\"src/iassert.hpp\"],\\n   visibility = [\"//visibility:public\"],\\n)\\n' >> BUILD",
     ],
