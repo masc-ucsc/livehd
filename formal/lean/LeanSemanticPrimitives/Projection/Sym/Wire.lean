@@ -431,6 +431,7 @@ def Run.expr : Run → (Σ n, BVExpr n)
 /-- Runs joined, the FIRST run lowest. -/
 def runsExpr : List Run → (Σ n, BVExpr n)
   | [] => ⟨0, .const 0#0⟩
+  | [r] => r.expr
   | r :: rs =>
       let lo := r.expr
       let hi := runsExpr rs
@@ -474,18 +475,26 @@ theorem Run.expr_bit (σ : Asg) (r : Run) (i : Nat) :
 
 theorem runsExpr_len : ∀ rs : List Run, (runsExpr rs).1 = (runsBits rs).length
   | [] => rfl
-  | r :: rs => by
-      simp only [runsExpr, runsBits, List.map_cons, List.flatten_cons, List.length_append]
-      rw [runsExpr_len rs, Run.expr_len]; simp [runsBits]; omega
+  | [r] => by simp [runsExpr, runsBits, Run.expr_len]
+  | r :: r' :: rs => by
+      have ih := runsExpr_len (r' :: rs)
+      simp only [runsExpr] at ih ⊢
+      simp only [runsBits, List.map_cons, List.flatten_cons, List.length_append] at ih ⊢
+      rw [ih, Run.expr_len]; omega
 
 theorem runsExpr_bit (σ : Asg) : ∀ (rs : List Run) (i : Nat),
     ((runsExpr rs).2.eval σ).getLsbD i = ((runsBits rs).getD i (.c false)).eval σ
   | [], i => by simp [runsExpr, runsBits]
-  | r :: rs, i => by
-      simp only [runsExpr]
+  | [r], i => by simp only [runsExpr, runsBits, List.map_cons, List.map_nil, List.flatten_cons,
+      List.flatten_nil, List.append_nil]; exact Run.expr_bit σ r i
+  | r :: r' :: rs, i => by
+      have hsplit : runsExpr (r :: r' :: rs)
+          = ⟨(runsExpr (r' :: rs)).1 + r.expr.1, .append (runsExpr (r' :: rs)).2 r.expr.2 rfl⟩ := rfl
+      rw [hsplit]
       rw [eval_append' σ _ _ rfl, getLsbD_cast_eq rfl, BitVec.getLsbD_append]
       have hl := Run.expr_len r
-      have ih := runsExpr_bit σ rs
+      have ih := runsExpr_bit σ (r' :: rs)
+      generalize r' :: rs = rs' at ih ⊢
       simp only [runsBits, List.map_cons, List.flatten_cons] at ih ⊢
       rw [List.getD_eq_getElem?_getD, List.getElem?_append]
       by_cases hi : i < r.expr.1
