@@ -997,6 +997,24 @@ sh_test(
     tags = ["no-sandbox"],
 )
 
+# A disabled SYNCHRONOUS read HOLDS its output register. RD_EN on a sync read
+# port is a clock enable, which is what pass.lean models and what
+# pass.single_edge relies on when it folds a gated clock into that enable.
+#
+# Drives the SHIPPED wrapper with a Verilog testbench instead of inferring a
+# memory from RTL. That is deliberate: the reader runs `memory -nomap -nordff`,
+# so `memory_dff` never folds a read register into a memory and NO RTL path
+# produces a sync read port. Driving the model directly tests the contract that
+# the generator and the shipped wrappers both implement, without depending on
+# an inference path that no longer forms the shape.
+sh_test(
+    name = "mem_multiread_hold_test",
+    size = "small",
+    srcs = ["mem_multiread_hold_test.sh"],
+    data = ["//ware:cgen_memory_rtl"],
+    tags = ["no-sandbox"],  # drives iverilog or verilator
+)
+
 sh_test(
     name = "mem_forward_test",
     size = "medium",
