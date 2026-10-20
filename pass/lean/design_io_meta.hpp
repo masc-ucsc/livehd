@@ -37,6 +37,17 @@ struct ClockMeta {
   bool        implicit = false;
 };
 
+// A certificate flop by its RUNTIME ordinal (the index into `StateM.flops` /
+// `DesignCert.flops`), with the register name the RTL gave it. Proof tools that
+// state facts about a design's registers (equalities between two cores, a case
+// split on an FSM state) name them through this; the certificate itself carries
+// no names. A synthetic memory read register is `<memory>.rd<port>`.
+struct FlopMeta {
+  std::string name;
+  uint32_t    ordinal = 0;
+  uint32_t    width   = 0;
+};
+
 struct DesignIoMeta {
   std::string             top;
   // `Direct.inputArity`: one past the highest ordinal any source references,
@@ -48,6 +59,7 @@ struct DesignIoMeta {
   std::vector<IoPortMeta> inputs;   // declaration order, ordinals and GAPS kept
   std::vector<IoPortMeta> outputs;  // emission order
   std::vector<ClockMeta>  clocks;
+  std::vector<FlopMeta>   flops;    // certificate (runtime) order
 };
 
 DesignIoMeta build_io_meta(const DesignScan& design, const CertificateIR& cert);
