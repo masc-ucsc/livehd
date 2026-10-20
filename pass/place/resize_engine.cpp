@@ -237,7 +237,12 @@ public:
     try {
       auto t = Clock::now();
       std::cout << std::format("resize: plan start wns {:.2f} tns {:.1f} margin {:.1f}\n", wns_, tns_, margin_) << std::flush;
-      electrical_phase();
+      // LHD_RESIZE_PHASES (debug): subset of "eta" (electrical, timing, area).
+      const char*       phases_env = std::getenv("LHD_RESIZE_PHASES");
+      const std::string phases     = phases_env ? phases_env : "eta";
+      if (phases.find('e') != std::string::npos) {
+        electrical_phase();
+      }
       electrical_s_ = elapsed(t);
       std::cout << std::format("resize: electrical {} nets {} fixed wns {:.2f} tns {:.1f} {:.1f}s\n",
                                electrical_nets_,
@@ -247,12 +252,15 @@ public:
                                electrical_s_)
                 << std::flush;
       t = Clock::now();
-      if (wns_ < 0) {
+      if (wns_ < 0 && phases.find('t') != std::string::npos) {
+        batch_phase();
         timing_phase();
       }
       timing_s_ = elapsed(t);
       t         = Clock::now();
-      recovery_phase();
+      if (phases.find('a') != std::string::npos) {
+        recovery_phase();
+      }
       recovery_s_ = elapsed(t);
     } catch (...) {
       w_.rollback(start_mark_);
@@ -309,7 +317,8 @@ private:
   size_t                                                    start_mark_ = 0;
   double                                                    wns_ = 0, tns_ = 0, margin_ = 25, period_ = 0;
   // statistics
-  Counters                                                  upsize_, isolate_, repeater_, shed_, electrical_, recover_;
+  Counters                                                  upsize_, isolate_, repeater_, shed_, electrical_, recover_, batch_;
+  unsigned    batch_moves_ = 0, batch_reject_tns_ = 0, batch_reject_wns_ = 0, batch_reject_electrical_ = 0;
   unsigned    upsized_ = 0, downsized_ = 0, endpoints_worked_ = 0, endpoints_stuck_ = 0, infeasible_paths_ = 0, feasible_paths_ = 0;
   unsigned    electrical_nets_ = 0, electrical_fixed_ = 0, rounds_ = 0, recover_batches_ = 0;
   double      electrical_s_ = 0, timing_s_ = 0, recovery_s_ = 0, probe_s_ = 0;
@@ -1109,10 +1118,11 @@ private:
       }
       const double gain = *cur - *d - up;
       if (gain > best.est) {
-        best.kind = Move::Kind::upsize;
-        best.est  = gain;
-        best.inst = st.inst;
-        best.to   = v;
+        best.kind   = Move::Kind::upsize;
+        best.est    = gain;
+        best.inst   = st.inst;
+        best.to     = v;
+        best.driver = st.driver;
       }
     }
     if (best.to) {
@@ -1263,6 +1273,7 @@ private:
     const auto& st = stages[k];
     Move        m;
     m.kind    = Move::Kind::shed;
+    m.driver  = st.driver;
     double dc = 0;
     for (const auto& s : nets_.at(st.driver)) {
       const auto owner = instance_of(s);
@@ -1422,6 +1433,156 @@ private:
     }
     return true;
   }
+  std::vector<Move> path_moves(const std::vector<Stage>& stages, double slack, bool feasible) {
+    std::vector<Move> moves;
+    for (size_t k = 0; k < stages.size(); ++k) {
+      upsize_moves(stages, k, moves);
+      shed_moves(stages, k, slack, moves);
+      if (feasible) {
+        isolate_moves(stages, k, slack, moves);
+        repeater_moves(stages, k, moves);
+      }
+    }
+    std::stable_sort(moves.begin(), moves.end(), [](const Move& a, const Move& b) {
+      // Prefer moves that add no cell when the estimates are comparable.
+      const double ea = a.est * (a.adds_cells() ? .7 : 1), eb = b.est * (b.adds_cells() ? .7 : 1);
+      return ea > eb;
+    });
+    return moves;
+  }
+  [[nodiscard]] static unsigned cells_of(const Move& m) {
+    return m.kind == Move::Kind::isolate ? 1 : m.kind == Move::Kind::repeater ? std::max<unsigned>(1, m.chain.size()) : 0;
+  }
+  // Many failing endpoints (long macro wires, a slow block): the best estimated
+  // move of each path, on disjoint nets, probed together; a rejected batch is
+  // bisected. Per-endpoint refinement follows for what remains.
+  void batch_phase() {
+    const double tns0  = tns_;
+    unsigned     stall = 0;
+    for (unsigned round = 0; round < 10000; ++round) {
+      const auto failing = w_.failing_endpoints(0);
+      if (failing.size() < 64) {
+        break;
+      }
+      const double                    wns_round = wns_, tns_round = tns_;
+      const size_t                    take = std::max<size_t>(64, failing.size() / 4);
+      std::vector<Move>               batch;
+      std::unordered_set<std::string> used;
+      for (size_t i = 0; i < failing.size() && i < take; ++i) {
+        const auto& [endpoint, slack] = failing[i];
+        const auto stages             = trace(endpoint);
+        if (stages.empty()) {
+          continue;
+        }
+        const bool feasible = ideal_slack(stages, slack) >= 0;
+        ++(feasible ? feasible_paths_ : infeasible_paths_);
+        for (auto& m : path_moves(stages, slack, feasible)) {
+          // Shedding and isolation judge "non-critical" against this one path;
+          // batched together they slow other paths, so they stay per endpoint.
+          if (m.kind == Move::Kind::shed || m.kind == Move::Kind::isolate) {
+            continue;
+          }
+          const unsigned cells = cells_of(m);
+          if (cells && m.est < 2 * cells * std::max(1.0, .005 * std::abs(slack))) {
+            continue;  // a batched repeater must clearly pay for itself
+          }
+          std::vector<std::string> keys{m.driver};
+          if (!m.inst.empty()) {
+            keys.push_back(m.inst);
+          }
+          for (const auto& [name, to] : m.downs) {
+            keys.push_back(name);
+          }
+          if (std::any_of(keys.begin(), keys.end(), [&](const auto& k) { return used.contains(k); })) {
+            continue;
+          }
+          used.insert(keys.begin(), keys.end());
+          ++generated_[static_cast<int>(m.kind)];
+          batch.push_back(std::move(m));
+          break;
+        }
+      }
+      if (batch.empty()) {
+        break;
+      }
+      std::vector<std::pair<size_t, size_t>> pending{
+          {0, batch.size()}
+      };
+      for (size_t cursor = 0; cursor < pending.size(); ++cursor) {
+        const auto [begin, end] = pending[cursor];
+        std::vector<std::string> drivers;
+        for (size_t i = begin; i < end; ++i) {
+          for (auto& d : move_drivers(batch[i])) {
+            drivers.push_back(std::move(d));
+          }
+        }
+        auto       pins = touched(drivers);
+        const auto e0   = w_.electrical(pins);
+        Attempt    a(*this);
+        for (size_t i = begin; i < end; ++i) {
+          apply(batch[i]);
+        }
+        for (size_t i = a.e_mark; i < edits_.size(); ++i) {
+          if (edits_[i].kind == Resize_edit::Kind::buffer) {
+            for (auto& q : net_pins(insts_.at(edits_[i].instance).output)) {
+              pins.push_back(std::move(q));
+            }
+          }
+        }
+        const auto p  = measure();
+        const auto e1 = w_.electrical(pins);
+        ++batch_.probes;
+        if (p.tns > tns_ + kTnsEps && timing_not_worse(p) && electrical_not_worse(e0, e1)) {
+          a.commit();
+          wns_ = p.wns;
+          tns_ = p.tns;
+          ++batch_.accepted;
+          batch_moves_ += end - begin;
+          continue;
+        }
+        ++(p.tns <= tns_ + kTnsEps ? batch_reject_tns_ : !timing_not_worse(p) ? batch_reject_wns_ : batch_reject_electrical_);
+        if (debug_) {
+          std::cout << std::format("resize-debug: batch [{},{}) wns {:.2f}->{:.2f} tns {:.1f}->{:.1f} elec {}/{:.3f}->{}/{:.3f}\n",
+                                   begin,
+                                   end,
+                                   wns_,
+                                   p.wns,
+                                   tns_,
+                                   p.tns,
+                                   e0.first,
+                                   e0.second,
+                                   e1.first,
+                                   e1.second);
+        }
+        a.rollback();
+        if (end - begin > 2) {
+          const auto mid = begin + (end - begin) / 2;
+          pending.emplace_back(begin, mid);
+          pending.emplace_back(mid, end);
+        }
+      }
+      std::cout << std::format(
+          "resize: batch round {} failing {} moves {} wns {:.2f} tns {:.1f} probes {} ({:.1f}s) edits {} reject tns/wns/elec "
+          "{}/{}/{}\n",
+          round,
+          failing.size(),
+          batch.size(),
+          wns_,
+          tns_,
+          probes_,
+          probe_s_,
+          edits_.size(),
+          batch_reject_tns_,
+          batch_reject_wns_,
+          batch_reject_electrical_)
+                << std::flush;
+      const bool slow = tns_ - tns_round < std::max(1.0, 2e-3 * std::abs(tns0)) && wns_ - wns_round < .5;
+      stall           = slow ? stall + 1 : 0;
+      if (stall >= 2) {
+        break;
+      }
+    }
+  }
   unsigned work_endpoint(const std::string& endpoint) {
     unsigned accepted = 0;
     for (unsigned iteration = 0; iteration < 24; ++iteration) {
@@ -1458,20 +1619,7 @@ private:
       if (iteration == 0) {
         ++(feasible ? feasible_paths_ : infeasible_paths_);
       }
-      std::vector<Move> moves;
-      for (size_t k = 0; k < stages.size(); ++k) {
-        upsize_moves(stages, k, moves);
-        shed_moves(stages, k, *slack, moves);
-        if (feasible) {
-          isolate_moves(stages, k, *slack, moves);
-          repeater_moves(stages, k, moves);
-        }
-      }
-      std::stable_sort(moves.begin(), moves.end(), [](const Move& a, const Move& b) {
-        // Prefer moves that add no cell when the estimates are comparable.
-        const double ea = a.est * (a.adds_cells() ? .7 : 1), eb = b.est * (b.adds_cells() ? .7 : 1);
-        return ea > eb;
-      });
+      auto moves = path_moves(stages, *slack, feasible);
       for (const auto& m : moves) {
         ++generated_[static_cast<int>(m.kind)];
       }
@@ -1621,7 +1769,7 @@ private:
       return std::format(R"({{"probes":{},"accepted":{},"seconds":{:.3f}}})", c.probes, c.accepted, c.seconds);
     };
     return std::format(
-        R"({{"stage":"{}","period_ps":{:.1f},"margin_ps":{:.1f},"whatif_wns_ps":[{:.4f},{:.4f}],"whatif_tns_ps":[{:.4f},{:.4f}],"edits":{},"groups":{},"buffers":{},"upsized":{},"downsized":{},"electrical":{{"nets":{},"fixed":{},"moves":{},"seconds":{:.3f}}},"timing":{{"rounds":{},"endpoints_worked":{},"endpoints_stuck":{},"feasible_paths":{},"infeasible_paths":{},"stop":{},"upsize":{},"isolate":{},"repeater":{},"shed":{},"seconds":{:.3f}}},"recover":{{"batches":{},"moves":{},"seconds":{:.3f}}},"probes":{},"probe_seconds":{:.3f},"rejects":{{"slack":{},"wns":{},"tns":{},"electrical":{}}},"generated":{{"upsize":{},"isolate":{},"repeater":{},"shed":{},"none":{}}},"seconds":{:.3f}}})",
+        R"({{"stage":"{}","period_ps":{:.1f},"margin_ps":{:.1f},"whatif_wns_ps":[{:.4f},{:.4f}],"whatif_tns_ps":[{:.4f},{:.4f}],"edits":{},"groups":{},"buffers":{},"upsized":{},"downsized":{},"electrical":{{"nets":{},"fixed":{},"moves":{},"seconds":{:.3f}}},"timing":{{"rounds":{},"endpoints_worked":{},"endpoints_stuck":{},"feasible_paths":{},"infeasible_paths":{},"stop":{},"upsize":{},"isolate":{},"repeater":{},"shed":{},"seconds":{:.3f}}},"recover":{{"batches":{},"moves":{},"seconds":{:.3f}}},"batch":{{"moves":{},"probes":{}}},"probes":{},"probe_seconds":{:.3f},"rejects":{{"slack":{},"wns":{},"tns":{},"electrical":{}}},"generated":{{"upsize":{},"isolate":{},"repeater":{},"shed":{},"none":{}}},"seconds":{:.3f}}})",
         stage_ == Resize_stage::floorplan ? "floorplan" : "placed",
         period_,
         margin_,
@@ -1652,6 +1800,8 @@ private:
         recover_batches_,
         counters(recover_),
         recovery_s_,
+        batch_moves_,
+        counters(batch_),
         probes_,
         probe_s_,
         reject_slack_,
