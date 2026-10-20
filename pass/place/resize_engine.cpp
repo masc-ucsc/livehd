@@ -196,12 +196,13 @@ struct Stage {
   double      at_in = 0, at_out = 0, at_sink = 0, slew_in = 0, slew_out = 0;
 };
 struct Move {
-  enum class Kind { upsize, isolate, repeater, shed };
+  enum class Kind { upsize, isolate, repeater, shed, bypass };
   Kind                                               kind = Kind::upsize;
   double                                             est  = 0;
   std::string                                        inst;
   const Buffer*                                      to = nullptr;
   std::string                                        driver, owner;
+  std::string                                        from;  // bypass: the net the sinks leave
   std::vector<std::string>                           sinks;
   const Buffer*                                      buffer = nullptr;
   Point                                              at{};
@@ -319,7 +320,7 @@ private:
   size_t                                                    start_mark_ = 0;
   double                                                    wns_ = 0, tns_ = 0, margin_ = 25, period_ = 0, wns_start_ = 0;
   // statistics
-  Counters                                                  upsize_, isolate_, repeater_, shed_, electrical_, recover_, batch_;
+  Counters                                                  upsize_, isolate_, repeater_, shed_, bypass_, electrical_, recover_, batch_;
   std::unordered_set<std::string>                           rejected_;  // batched moves that failed alone
   unsigned    batch_moves_ = 0, batch_reject_tns_ = 0, batch_reject_wns_ = 0, batch_reject_electrical_ = 0;
   unsigned    upsized_ = 0, downsized_ = 0, endpoints_worked_ = 0, endpoints_stuck_ = 0, infeasible_paths_ = 0, feasible_paths_ = 0;
@@ -328,7 +329,7 @@ private:
   double      electrical_s_ = 0, timing_s_ = 0, recovery_s_ = 0, probe_s_ = 0;
   unsigned    probes_       = 0;
   unsigned    reject_slack_ = 0, reject_wns_ = 0, reject_tns_ = 0, reject_electrical_ = 0, no_moves_ = 0;
-  unsigned    generated_[4]  = {0, 0, 0, 0};
+  unsigned    generated_[5]  = {0, 0, 0, 0, 0};
   std::string stop_reason_   = "none";
   bool        debug_         = std::getenv("LHD_RESIZE_DEBUG") != nullptr;
   unsigned    debug_printed_ = 0;
@@ -562,6 +563,26 @@ private:
     w_.set_net(net_rc(out));
     edits_.push_back({Resize_edit::Kind::buffer, name, cell->name, driver, moved, center, owner, group_});
     return name;
+  }
+  // Move sinks from their net to the net of `driver` (both carry the same value).
+  void rewire(const std::string& from, const std::string& driver, const std::vector<std::string>& moved) {
+    std::unordered_set<std::string> gone(moved.begin(), moved.end());
+    std::vector<std::string>        rest;
+    for (const auto& s : nets_.at(from)) {
+      if (!gone.contains(s)) {
+        rest.push_back(s);
+      }
+    }
+    auto joined = nets_.at(driver);
+    joined.insert(joined.end(), moved.begin(), moved.end());
+    set_sinks(from, std::move(rest));
+    set_sinks(driver, std::move(joined));
+    for (const auto& s : moved) {
+      set_net_of(s, driver);
+    }
+    w_.set_net(net_rc(from));
+    w_.set_net(net_rc(driver));
+    edits_.push_back({Resize_edit::Kind::rewire, {}, {}, driver, moved, {}, {}, group_});
   }
   // RAII transaction over the timer, the model and the edit list.
   struct Attempt {
@@ -1374,6 +1395,52 @@ private:
       moves.push_back(std::move(best));
     }
   }
+  // Stage k is driven by a non-inverting buffer whose input comes from stage k-1.
+  [[nodiscard]] bool buffer_stage(const Stage& st) const {
+    if (st.input.empty()) {
+      return false;
+    }
+    const auto inst = insts_.find(st.inst);
+    return inst != insts_.end() && inst->second.cell && inst->second.output == st.driver && identity(*inst->second.cell);
+  }
+  // Synthesis buffer chains (a fanout tree built as a chain, each buffer driving
+  // some loads and the next buffer): the on-path sink at the end of a run of
+  // buffers is re-driven from an earlier net of the chain, which carries the
+  // same value, skipping the buffers in between. Pure rewiring, no cell.
+  void bypass_moves(const std::vector<Stage>& stages, size_t k, std::vector<Move>& moves) {
+    const auto& st = stages[k];
+    if (k == 0 || !buffer_stage(st) || blocked_drivers_.contains(st.driver) || nets_.at(st.driver).size() < 2) {
+      return;  // the buffer keeps a load after the move
+    }
+    const double cs = pin_cap(st.sink);
+    const Point  ps = position(st.sink);
+    const double r = lib_.r_dbu, c = lib_.c_dbu;
+    Move         best;
+    best.est = 1;
+    for (size_t j = k; j-- > 0;) {
+      const auto& up = stages[j];
+      if (blocked_drivers_.contains(up.driver) || !nets_.contains(up.driver)) {
+        break;
+      }
+      const double dist  = manhattan(position(up.driver), ps);
+      const double l0    = load(up.driver);
+      const double at    = up.at_out + driver_delta(up, l0, l0 + cs + c * dist) + r * dist * (c * dist / 2 + cs) * 1e-3;
+      const double gain  = st.at_sink - at;
+      if (gain > best.est) {
+        best.kind   = Move::Kind::bypass;
+        best.est    = gain;
+        best.driver = up.driver;
+        best.from   = st.driver;
+        best.sinks  = {st.sink};
+      }
+      if (!buffer_stage(up)) {
+        break;  // up.driver is the chain's head
+      }
+    }
+    if (!best.from.empty()) {
+      moves.push_back(std::move(best));
+    }
+  }
   // Downsize non-critical gates loading an on-path net: less load, less area.
   void shed_moves(const std::vector<Stage>& stages, size_t k, double path_slack, std::vector<Move>& moves) {
     const auto& st = stages[k];
@@ -1459,6 +1526,7 @@ private:
         }
         break;
       case Move::Kind::isolate : insert_buffer(m.driver, m.sinks, m.buffer, m.at, m.owner); break;
+      case Move::Kind::bypass  : rewire(m.from, m.driver, m.sinks); break;
       case Move::Kind::repeater: {
         auto driver = m.driver;
         for (const auto& at : m.chain.empty() ? std::vector<Point>{m.at} : m.chain) {
@@ -1481,6 +1549,10 @@ private:
         break;
       case Move::Kind::isolate:
       case Move::Kind::repeater: drivers.push_back(m.driver); break;
+      case Move::Kind::bypass:
+        drivers.push_back(m.driver);
+        drivers.push_back(m.from);
+        break;
     }
     return drivers;
   }
@@ -1490,6 +1562,7 @@ private:
       case Move::Kind::isolate : return isolate_;
       case Move::Kind::repeater: return repeater_;
       case Move::Kind::shed    : return shed_;
+      case Move::Kind::bypass  : return bypass_;
     }
     return upsize_;
   }
@@ -1550,6 +1623,7 @@ private:
     std::vector<Move> moves;
     for (size_t k = 0; k < stages.size(); ++k) {
       upsize_moves(stages, k, moves);
+      bypass_moves(stages, k, moves);
       shed_moves(stages, k, slack, moves);
       // Wire buffers (isolation, repeaters) only on the legal placement: at FP
       // checkpoints cells still move, and buffers inserted there pile up as GP
@@ -1567,9 +1641,10 @@ private:
     return moves;
   }
   static std::string move_key(const Move& m) {
-    return std::format("{}|{}|{}|{}|{}|{}",
+    return std::format("{}|{}|{}|{}|{}|{}|{}",
                        static_cast<int>(m.kind),
                        m.driver,
+                       m.from,
                        m.inst,
                        m.to ? m.to->name : "",
                        m.buffer ? m.buffer->name : "",
@@ -1611,6 +1686,9 @@ private:
             continue;  // a batched repeater must clearly pay for itself
           }
           std::vector<std::string> keys{m.driver};
+          if (!m.from.empty()) {
+            keys.push_back(m.from);
+          }
           if (!m.inst.empty()) {
             keys.push_back(m.inst);
           }
@@ -1803,7 +1881,7 @@ private:
         break;
       }
       std::cout << std::format(
-          "resize: timing round {} worked {} stuck {} wns {:.2f} tns {:.1f} probes {} ({:.1f}s) moves u/s/i/r {}/{}/{}/{} none {} "
+          "resize: timing round {} worked {} stuck {} wns {:.2f} tns {:.1f} probes {} ({:.1f}s) moves u/s/i/r/b {}/{}/{}/{}/{} none {} "
           "reject slack/wns/tns/elec {}/{}/{}/{} infeasible {}\n",
           rounds_,
           worked,
@@ -1816,6 +1894,7 @@ private:
           generated_[3],
           generated_[1],
           generated_[2],
+          generated_[4],
           no_moves_,
           reject_slack_,
           reject_wns_,
@@ -1919,7 +1998,7 @@ private:
       return std::format(R"({{"probes":{},"accepted":{},"seconds":{:.3f}}})", c.probes, c.accepted, c.seconds);
     };
     return std::format(
-        R"({{"stage":"{}","period_ps":{:.1f},"margin_ps":{:.1f},"whatif_wns_ps":[{:.4f},{:.4f}],"whatif_tns_ps":[{:.4f},{:.4f}],"edits":{},"groups":{},"buffers":{},"upsized":{},"downsized":{},"electrical":{{"nets":{},"fixed":{},"skipped":{},"moves":{},"seconds":{:.3f}}},"timing":{{"rounds":{},"endpoints_worked":{},"endpoints_stuck":{},"feasible_paths":{},"infeasible_paths":{},"stop":{},"upsize":{},"isolate":{},"repeater":{},"shed":{},"seconds":{:.3f}}},"recover":{{"batches":{},"moves":{},"seconds":{:.3f}}},"batch":{{"moves":{},"probes":{}}},"probes":{},"probe_seconds":{:.3f},"rejects":{{"slack":{},"wns":{},"tns":{},"electrical":{}}},"generated":{{"upsize":{},"isolate":{},"repeater":{},"shed":{},"none":{}}},"seconds":{:.3f}}})",
+        R"({{"stage":"{}","period_ps":{:.1f},"margin_ps":{:.1f},"whatif_wns_ps":[{:.4f},{:.4f}],"whatif_tns_ps":[{:.4f},{:.4f}],"edits":{},"groups":{},"buffers":{},"upsized":{},"downsized":{},"electrical":{{"nets":{},"fixed":{},"skipped":{},"moves":{},"seconds":{:.3f}}},"timing":{{"rounds":{},"endpoints_worked":{},"endpoints_stuck":{},"feasible_paths":{},"infeasible_paths":{},"stop":{},"upsize":{},"isolate":{},"repeater":{},"shed":{},"bypass":{},"seconds":{:.3f}}},"recover":{{"batches":{},"moves":{},"seconds":{:.3f}}},"batch":{{"moves":{},"probes":{}}},"probes":{},"probe_seconds":{:.3f},"rejects":{{"slack":{},"wns":{},"tns":{},"electrical":{}}},"generated":{{"upsize":{},"isolate":{},"repeater":{},"shed":{},"bypass":{},"none":{}}},"seconds":{:.3f}}})",
         stage_ == Resize_stage::floorplan ? "floorplan" : "placed",
         period_,
         margin_,
@@ -1947,6 +2026,7 @@ private:
         counters(isolate_),
         counters(repeater_),
         counters(shed_),
+        counters(bypass_),
         timing_s_,
         recover_batches_,
         counters(recover_),
@@ -1963,6 +2043,7 @@ private:
         generated_[1],
         generated_[2],
         generated_[3],
+        generated_[4],
         no_moves_,
         seconds);
   }
@@ -1993,7 +2074,9 @@ std::vector<Resize_edit> prefix(const std::vector<Resize_edit>& edits, unsigned 
 std::vector<std::string> changed_names(const std::vector<Resize_edit>& edits) {
   std::set<std::string> names;
   for (const auto& e : edits) {
-    names.insert(e.instance);
+    if (e.kind != Resize_edit::Kind::rewire) {
+      names.insert(e.instance);
+    }
   }
   return {names.begin(), names.end()};
 }
@@ -2025,16 +2108,22 @@ void apply_resize_edits(hhds::Graph& graph, const Options& options, const std::v
       change_master(n, *from, lib->cells.at(e.master));
       continue;
     }
-    const auto& b      = lib->cells.at(e.master);
-    const auto  source = physical_pin(graph, e.driver, nodes, true);
-    Pin         root   = source.pin;
+    const auto source = physical_pin(graph, e.driver, nodes, true);
+    Pin        root   = source.pin;
     if (root.is_invalid() || root.is_const()) {
-      throw std::runtime_error("resize plan buffer has no driver: " + e.driver);
+      throw std::runtime_error("resize plan edit has no driver: " + e.driver);
     }
     if (source.width > 1) {
       root = gu::create_get_mask(graph, root, source.bit).get_driver_pin(0);
       gu::set_bits(root, 1);
     }
+    if (e.kind == Resize_edit::Kind::rewire) {
+      for (const auto& s : e.sinks) {
+        connect_bit(graph, physical_pin(graph, s, nodes, false), root);
+      }
+      continue;
+    }
+    const auto& b = lib->cells.at(e.master);
     auto cell = gu::create_typed_node(graph, Ntype_op::Sub);
     cell.set_subnode(buffer_io(graph, b));
     cell.set_name(e.instance);
@@ -2241,7 +2330,8 @@ Floorplan_resize resize_floorplan_engine(Result& state, const Options& options, 
     }
     unsigned resized = 0, buffers = 0;
     for (const auto& e : edits) {
-      ++(e.kind == Resize_edit::Kind::buffer ? buffers : resized);
+      buffers += e.kind == Resize_edit::Kind::buffer;
+      resized += e.kind == Resize_edit::Kind::resize;
     }
     result.proposed        += resized;
     result.repair_proposed += buffers;

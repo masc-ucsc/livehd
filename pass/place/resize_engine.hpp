@@ -14,11 +14,11 @@
 
 namespace livehd::placement {
 struct Resize_edit {
-  enum class Kind { resize, buffer };
+  enum class Kind { resize, buffer, rewire };
   Kind                     kind = Kind::resize;
   std::string              instance, master;  // resize: instance -> master; buffer: new instance of master
-  std::string              driver;            // buffer: driver label of the net it cuts
-  std::vector<std::string> sinks;             // buffer: sink labels moved behind the buffer
+  std::string              driver;            // buffer: driver label of the net it cuts; rewire: the sinks' new driver
+  std::vector<std::string> sinks;             // buffer: sink labels moved behind the buffer; rewire: moved sinks
   Point                    position{};        // buffer: seeded center, DBU
   std::string              owner;             // buffer: instance whose color/region/block it inherits
   unsigned                 group = 0;         // edits of one accepted move; plans are committed by group prefix
