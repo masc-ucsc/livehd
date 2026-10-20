@@ -384,6 +384,66 @@ TEST_F(Resize_engine, FloorplanCheckpointsUseTheEngineOnRealTiming) {
   EXPECT_TRUE(saw_engine);
 }
 
+TEST_F(Resize_engine, SynthesisBufferChainIsBypassedForTheCriticalSink) {
+  // A fanout "tree" built as a chain (each buffer drives a leaf and the next
+  // buffer): the failing last leaf is re-driven from an earlier net of the
+  // chain, which carries the same value. Rewiring only, no cell added.
+  auto p = graph->get_input_pin("a");
+  for (unsigned i = 0; i < 8; ++i) {
+    p = gate("sky130_fd_sc_hd__buf_1", "b" + std::to_string(i), p);
+    output(i ? "y" + std::to_string(i) : std::string("y"), i, gate("sky130_fd_sc_hd__inv_1", "leaf" + std::to_string(i), p));
+  }
+  output("y8", 8, gate("sky130_fd_sc_hd__inv_1", "last", p));
+  auto         placed = place(*graph, flat, options);
+  const auto   probe  = timing(placed);
+  const double last   = probe.pins.at("y8").arrival.value_or(0) * probe.time_unit_ps;
+  const double first  = probe.pins.at("y1").arrival.value_or(0) * probe.time_unit_ps;
+  ASSERT_GT(last - first, 300);
+  session.reset();
+  period_ns         = (last - 150) / 1000;  // only the chain's end fails
+  const auto before = timing(placed);
+  ASSERT_LT(ps(before, before.wns), 0);
+  ASSERT_EQ(before.violations, 0u);
+  auto       result = resize_placed(std::move(placed), options, [&](const Result& r) { return timing(r); });
+  const auto after  = timing(result.placed);
+  SCOPED_TRACE(result.report);
+  EXPECT_EQ(count(result.placed, "__place_rebuffer"), 0u);
+  EXPECT_GT(ps(after, after.wns), ps(before, before.wns) + 100);
+  EXPECT_GE(ps(after, after.tns), ps(before, before.tns));
+  rapidjson::Document report;
+  report.Parse(result.report.c_str());
+  ASSERT_TRUE(report.IsObject());
+  EXPECT_GT(report["rounds"][0]["plan"]["timing"]["bypass"]["accepted"].GetUint(), 0u);
+  // Every buffer still drives something; every output keeps its function.
+  for (auto n : result.placed.graph->body().nodes()) {
+    if (n.get_name().starts_with("b")) {
+      EXPECT_FALSE(n.get_driver_pin("X").out_edges().empty()) << n.get_name();
+    }
+  }
+  equivalent(result.placed);
+}
+
+TEST_F(Resize_engine, SlackRichLongWireOnlyGetsTheRepeatersItsLimitsNeed) {
+  // A 600 um wire with a real Liberty violation and ample slack: only the
+  // limits matter, so the repair uses the longest legal repeater spacing. The
+  // delay-optimal spacing for buf_1 at this RC (~140 um) would spend four.
+  options.resistance_ohm_um = 10;
+  options.capacitance_ff_um = 1;
+  period_ns                 = 1000;
+  auto       placed         = long_wires(1, 600000);
+  const auto before         = timing(placed);
+  ASSERT_GT(before.violations, 0u);
+  auto       result = resize_placed(std::move(placed), options, [&](const Result& r) { return timing(r); });
+  const auto after  = timing(result.placed);
+  SCOPED_TRACE(result.report);
+  EXPECT_LT(after.violations, before.violations);
+  EXPECT_GE(ps(after, after.wns), ps(before, before.wns) - 1e-3);
+  const auto repeaters = count(result.placed, "__place_rebuffer");
+  EXPECT_GT(repeaters, 0u);
+  EXPECT_LE(repeaters, 2u);
+  equivalent(result.placed);
+}
+
 TEST_F(Resize_engine, LegacyEngineStaysSelectable) {
   options.resize_engine = "legacy";
   add_variant("sky130_fd_sc_hd__buf_1", "sky130_fd_sc_hd__buf_8", 11.26, 2.760);

@@ -682,6 +682,41 @@ TEST_F(SdcClock, NegativeEdgeCheckCapturesTheSameCycleRisingLaunch) {
   EXPECT_NEAR(*setup, 500 - 10, 1e-3);
   EXPECT_GT(*hold, 0);
 }
+TEST_F(SdcClock, InvertedClockCaptureIsTheSameCycleFallingEdge) {
+  // A positive-edge flop behind a clock inverter (the enable flop of a
+  // synthesized clock gate) captures at the source clock's falling edge: a
+  // half-cycle path from a rising launch, as OpenSTA times it. It used to be
+  // captured a full period later, 1.5 ns optimistic on NVDLA partition_p.
+  auto lib = std::string(kFlopLib);
+  lib.insert(lib.rfind('}'), R"lib(cell(CKINV) {
+      pin(A) { direction : input; capacitance : 1; }
+      pin(Y) { direction : output; function : "!A";
+        timing() { related_pin : "A"; timing_sense : negative_unate;
+          cell_rise(scalar) { values("0"); } cell_fall(scalar) { values("0"); }
+          rise_transition(scalar) { values("1"); } fall_transition(scalar) { values("1"); } } } }
+  )lib");
+  const auto path = directory + "/flops_inv.lib";
+  std::ofstream(path) << lib;
+  var.dict["files"] = path;
+  var.set_stage_labels(var.dict);
+  Sdc_probe pass(var);
+  auto&     timer = pass.timer;
+  timer.read_celllib(path).insert_primary_input("c");
+  timer.insert_gate("inv", "CKINV").insert_gate("gate", "DFF").insert_net("n").insert_net("ni");
+  timer.disconnect_pin("c").connect_pin("c", "n").connect_pin("inv:A", "n");
+  timer.connect_pin("inv:Y", "ni").connect_pin("gate:CLK", "ni");
+  timer.connect_pin("gate:D", "wire");
+  pass.read_sdc(write("create_clock -name clk -period 1000 [get_ports c]\nset_input_delay -clock clk 0 [get_ports a]\n"));
+  timer.set_ideal_clocks({"clk"});
+  for (const auto* port : {"a", "c"}) {
+    for (auto split : {ot::MIN, ot::MAX}) {
+      timer.set_slew(port, split, ot::RISE, 1).set_slew(port, split, ot::FALL, 1);
+    }
+  }
+  const auto setup = timer.report_slack("gate:D", ot::MAX, ot::RISE);
+  ASSERT_TRUE(setup);
+  EXPECT_NEAR(*setup, 500 - 10, 1e-3);
+}
 TEST_F(SdcClock, ClockWaveformIsHonoredOnAPhysicalSource) {
   // `-waveform` used to make the clock virtual, timing the clock network as data.
   Sdc_probe pass(var);

@@ -563,7 +563,10 @@ roll back together):
 2. Timing (only while setup WNS < 0): failing endpoints, worst first. The path is traced
    back by pin slack, through multi-output combinational cells. Candidate moves per stage:
    up-size the driver (NLDM gain including the upstream load change), down-size
-   slack-rich gates loading the on-path net (shed), isolate non-critical sinks behind a
+   slack-rich gates loading the on-path net (shed), bypass a run of non-inverting
+   buffers (synthesis fanout chains: the on-path sink is re-driven from an earlier net of
+   the chain, which carries the same value; no cell, and the skipped buffer keeps a load),
+   isolate non-critical sinks behind a
    buffer, or cut the on-path wire with one repeater (30/50/70%) or an evenly spaced chain
    (count from the optimal repeater spacing). Moves are ranked by estimated gain and probed;
    at most five moves whose estimate could pass are probed per step; one is kept only if the endpoint improves (by 0.05 ps, or per added cell
