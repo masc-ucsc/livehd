@@ -2652,13 +2652,13 @@ void Pass_opentimer::compute_timing(const std::shared_ptr<hhds::Graph>& g) {
         value.electrical_excess = electrical->second.second;
       }
       const auto extreme = [&](auto getter, bool largest) {
-        std::optional<float> value;
+        std::optional<float> best;
         for (const auto tran : {ot::RISE, ot::FALL}) {
           if (const auto v = getter(tran); v && std::isfinite(*v)) {
-            value = value ? (largest ? std::max(*value, *v) : std::min(*value, *v)) : *v;
+            best = best ? (largest ? std::max(*best, *v) : std::min(*best, *v)) : *v;
           }
         }
-        return value;
+        return best;
       };
       value.arrival  = extreme([&](ot::Tran t) { return pin.at(ot::MAX, t); }, true);
       value.required = extreme([&](ot::Tran t) { return pin.rat(ot::MAX, t); }, false);

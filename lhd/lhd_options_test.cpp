@@ -287,6 +287,7 @@ TEST(LhdOptions, SynthDelayFractionScalesTheSdcClockPeriod) {
                    {"synth.delay_frac",            "-1"}
   }),
                lhd::Lhd_error);
+}
 
 // compile.cprop.engine: the kernel dispatches the cprop slots. At least one
 // engine always runs (there is no "none"), classic stays the default, and
