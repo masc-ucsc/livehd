@@ -98,7 +98,9 @@ endmodule
 EOF
 "$LHD" compile "$W/ring.v" --top ring --workdir "$W/ring" \
   --set compile.specialize_modules=false > "$W/ring.log" 2>&1
-grep -q 'pass.legalize.check' "$W/ring.log"
+# The benign ring is accepted either through the deferred loop check or because
+# the false-cycle unroller proved the cycle inactive first (selectors 0/1).
+grep -q -e 'pass.legalize.check' -e 'false-cycle-unrolled' "$W/ring.log"
 if "$LHD" compile "$W/ring.v" --top real_ring --workdir "$W/real-ring" \
   --set compile.specialize_modules=false > "$W/real-ring.log" 2>&1; then
   echo 'FAIL: real mux ring survived the deferred loop check'; exit 1

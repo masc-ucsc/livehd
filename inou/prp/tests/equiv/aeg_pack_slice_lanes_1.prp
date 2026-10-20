@@ -1,0 +1,7 @@
+/*
+:name: aeg_pack_slice_lanes_1
+:type: lec
+:set: compile.cprop.engine=aegraph
+*/
+// HEADER-ONLY variant: aeg_pack_slice_lanes.prp compiled by the acyclic e-graph
+// engine (it must compile, and prove equal to the classic reference).

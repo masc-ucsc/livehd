@@ -20,6 +20,7 @@ struct Tmap_options {
   // buffer and size mapped cells against the delay budget and the partition
   // environment; none restructures the Boolean network the caller hands over.
   uint32_t                              max_fanout      = 16;       // `buffer -N` cap; 0 disables buffering
+  uint32_t                              reset_fanout    = 0;        // async clear/preset pins per buffer of a reset tree; 0 off
   bool                                  boundary        = true;     // static + exact boundary re-size
   bool                                  boundary_buffer = true;     // tree region inputs past max_fanout
   std::string                           boundary_drive;             // empty: smallest buffer; `none`: ideal driver

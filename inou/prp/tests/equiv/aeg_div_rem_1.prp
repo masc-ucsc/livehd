@@ -1,0 +1,8 @@
+/*
+:name: aeg_div_rem_1
+:type: lec
+:set: compile.cprop.engine=aegraph
+:compile_grep: aegraph-rule div_pow2 .*extracted=[1-9]
+*/
+// HEADER-ONLY variant: aeg_div_rem.prp compiled by the acyclic e-graph engine. `a` is a declared U8 input,
+// so a / 4 and a % 4 are shifts / masks (div_pow2, rem_pow2) while the signed dividend keeps its Div / Rem.

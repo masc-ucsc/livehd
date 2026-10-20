@@ -220,6 +220,30 @@ std::vector<Set_option> list_set_options() {
                            "specialize constant instance inputs before cycle checking (up to 64 contexts per definition), including stateful modules; "
                            "retain the original roots and only their reachable specialized definitions. Useful for configurable "
                            "router modules whose generic feedback disappears under the top's constant configuration"});
+  out.push_back(Set_option{"compile.flatten",
+                           "compile",
+                           "false",
+                           "true|false: after the first cprop+bitwidth, splice every module instance that has a body into the "
+                           "selected top (or each uninstantiated root) so constant propagation, dead-logic removal and "
+                           "compile.sweep see across module ports, like a Yosys `flatten`. The original definitions are dropped "
+                           "once nothing instantiates them. Black boxes (macros, Liberty cells) and rolled loops stay instances. "
+                           "Hierarchy-based reuse (the per-module ABC cache) is lost, so use it on designs whose cost is the "
+                           "hierarchy itself, not on well-factored ones"});
+  out.push_back(Set_option{"compile.unknown_zero",
+                           "compile",
+                           "false",
+                           "true|false: read every constant bit that is unknown (x: an undriven output, an unconnected input, "
+                           "an explicit 'x) as 0 right after the first cprop+bitwidth, like Yosys `setundef -zero` run before "
+                           "optimization instead of after it, so constants fold across what were x-driven ports. A legal "
+                           "refinement of a don't-care"});
+  out.push_back(Set_option{"compile.sweep",
+                           "compile",
+                           "false",
+                           "true|false: after the last cprop+bitwidth round, iterate a state sweep (pass/sweep): flop bits "
+                           "whose next state can only be their own value or their reset value are replaced by that constant, and "
+                           "state bits no output can observe are removed, each round followed by cprop+bitwidth until nothing "
+                           "changes. Treats a flop with no reset and no initial value as free to start at its constant. Best "
+                           "with compile.flatten, since module ports otherwise hide both constants and unobserved bits"});
   out.push_back(Set_option{
       "compile.lnast_fmt",
       "compile",

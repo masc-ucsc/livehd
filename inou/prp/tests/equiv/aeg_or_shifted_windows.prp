@@ -1,0 +1,12 @@
+/*
+:name: aeg_or_shifted_windows
+:type: lec
+*/
+// PYROPE-vs-PYROPE group, the fixture of the aegraph rule `or_shifted_windows` (pass/aegraph/rules/mask.cpp):
+// Or(x[a +: n] << s, x[a+n +: m] << (s+n), ..) = Or(x[a +: n+m] << s, ..). Four nested 4-bit bit-gather ladders
+// over strided groups of one word, the shape of a round-robin arbiter's request packing. REFERENCE = classic
+// engine; `_1` = e-graph engine.
+pub comb top(x:U16) -> (r:U4, q:U8) {
+  r = ((0 | ((x#[3] << 3) | (x#[2] << 2) | (x#[1] << 1) | x#[0])) | ((x#[7] << 3) | (x#[6] << 2) | (x#[5] << 1) | x#[4])) | ((x#[11] << 3) | (x#[10] << 2) | (x#[9] << 1) | x#[8]) | ((x#[15] << 3) | (x#[14] << 2) | (x#[13] << 1) | x#[12])
+  q = (x#[5] << 4) | (x#[4] << 3) | (x#[10] << 6) | (x#[9] << 5) | x#[1]
+}

@@ -9,7 +9,10 @@ cc_library(
         ["*.cpp"],
         exclude = ["*test*.cpp"],
     ),
-    hdrs = glob(["*.hpp"]),
+    hdrs = glob(
+        ["*.hpp"],
+        exclude = ["cprop_test_eval.hpp"],
+    ),
     copts = COPTS,
     includes = ["."],
     visibility = ["//visibility:public"],
@@ -19,6 +22,23 @@ cc_library(
         "//pass/common:pass",
     ],
     alwayslink = True,
+)
+
+# The evaluators the cprop gtests and pass/aegraph's parity/differential smokes
+# share (mux_eval, Mux_graph, the Dlop evaluator). Test-only: it includes gtest.
+cc_library(
+    name = "cprop_test_eval",
+    testonly = True,
+    hdrs = ["cprop_test_eval.hpp"],
+    copts = COPTS,
+    includes = ["."],
+    visibility = ["//pass:__subpackages__"],
+    deps = [
+        "//core",
+        "//graph",
+        "@googletest//:gtest",
+        "@hhds//hhds:graph",
+    ],
 )
 
 cc_test(
@@ -32,6 +52,7 @@ cc_test(
     ],
     copts = COPTS,
     deps = [
+        ":cprop_test_eval",
         ":pass_cprop",
         "//core",
         "//graph",

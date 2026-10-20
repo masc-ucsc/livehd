@@ -1,0 +1,7 @@
+/*
+:name: aeg_mask_windows_1
+:type: lec
+:set: compile.cprop.engine=aegraph
+:compile_grep: aegraph-rule getmask_getmask .*extracted=[1-9]
+*/
+// HEADER-ONLY variant: aeg_mask_windows.prp compiled by the acyclic e-graph engine.

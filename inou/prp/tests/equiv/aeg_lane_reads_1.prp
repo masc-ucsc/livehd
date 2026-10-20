@@ -1,0 +1,9 @@
+/*
+:name: aeg_lane_reads_1
+:type: lec
+:set: compile.cprop.engine=aegraph
+:compile_grep: aegraph-rule sra_lane .*applied=[1-9]
+:compile_grep: aegraph-rule getmask_concat_straddle .*extracted=[1-9]
+:compile_grep: aegraph-rule getmask_not_getmask .*applied=[1-9]
+*/
+// HEADER-ONLY variant: aeg_lane_reads.prp compiled by the acyclic e-graph engine.

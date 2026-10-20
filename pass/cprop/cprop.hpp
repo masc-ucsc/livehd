@@ -124,6 +124,8 @@ protected:
   // true = node rewritten (it may have been forwarded and deleted).
   bool merge_concat_slices(hhds::Node_class& node);
   void remember_node(const hhds::Node_class& node);
+  // The region passes that follow the forward sweep (do_trans and do_post).
+  void region_passes();
   bool canonicalize_pack(hhds::Node_class& node);
   // Low-lane narrowing (cprop_lowlane.cpp): an operation reading a value
   // spelled Or(Shl(H, k), L) runs on the H parts, k bits narrower, and
@@ -169,6 +171,19 @@ public:
   }
   // Rewrites unlimited-precision values without consulting width/sign hints.
   void do_trans(const std::shared_ptr<hhds::Graph>& g);
+  // The post steps of the e-graph engine (pass.aegraph): low-lane narrowing
+  // and the classic region passes (pack canonicalization, vector-mux
+  // narrowing, muxctx, mux/op sharing, flop-enable folding, dead-code sweep)
+  // over a graph the engine already elaborated. Skips the forward scalar
+  // sweep and CSE; it is NOT a second do_trans.
+  void do_post(const std::shared_ptr<hhds::Graph>& g);
+  // pass.aegraph's pre-pass: the classic scalar rewrites (canonicalization and
+  // scalar_node: packed-slice resolution, boolean cancellation, constant
+  // folds) over just `nodes`, the members of its combinational SCCs, in the
+  // order given. Cuts the false cycles those rewrites can cut; what stays
+  // cyclic is opaque to the e-graph. `nodes` may hold handles this call
+  // retires; the caller re-collects the body afterwards.
+  void do_scalar(const std::shared_ptr<hhds::Graph>& g, const std::vector<hhds::Node_class>& nodes);
 };
 
 namespace livehd {

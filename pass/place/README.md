@@ -1,5 +1,11 @@
 # Physical placement stage
 
+The default is one mixed-size GP pass followed by macro/cell legalization and
+detailed placement (`synth.place.fp=false`). Macro snapping remains enabled.
+Enable `synth.place.fp=true` explicitly for centroid floorplanning and the separate
+macro-refinement/final-cell passes. The legacy `r8h2`/`r8h3` macro modes and manual
+macro-centroid diagnostic have been removed.
+
 `lhd synth --set synth.place=true` runs CPU DREAMPlace between mapping and STA.
 The default remains false. `synth.lef` is a comma-separated tech LEF and cell/macro
 LEFs; its sky130HD fallback is next to the Liberty directory in
@@ -189,6 +195,25 @@ capacities derive from routing LEF pitches, or require explicit
 `route_cap_h/route_cap_v` in tracks per DBU. RUDY and GP convergence are placement
 proxies; synthetic legality tests do not establish routed QoR against OpenROAD.
 
+In the ordinary native FP/macro flow, `synth.place.routability=true` also enables
+direct macro channel pressure. `synth.place.routability_macro_weight=1` scales
+this force relative to the ordinary macro wirelength/density force; zero
+disables it. `synth.place.routability_macro_range=2` sets its reach in density
+bins (allowed range `(0,16]`). RUDY updates every 20 iterations after density
+overflow falls below 0.3. The force uses squared channel utilization, including
+utilization below 1, and tapers to zero at the configured reach. Facing macro
+edges push apart; fixed macros and die edges can supply the opposing boundary.
+Other macros occlude non-neighboring edges. Halos remain routing space and
+legalization still enforces them. Once all macros are fixed, this force is off.
+
+`fp_place.json` includes `fp_routing_history`; `gp_history.json` and the live
+JSONL samples include `route_peak_utilization`, `macro_routing_force`, and
+`macro_routing_channels`. The latter two are maxima since the preceding sample,
+so a brief force is visible even if the gap opens before the next sample.
+`macro_routing_seconds` records the pressure calculation time. This is a local
+channel heuristic, not the derivative of a routed-wire objective; compare
+timing and routed congestion before making QoR claims.
+
 The ASAP7 Eyeriss geometry trial with `synth.place.halo=5`, utilization 0.30 and
 density 0.5 places all 1040 supplied SRAMs and 303436 standard cells legally.
 OpenROAD placement checking and a separate expanded-box audit pass with unchanged
@@ -354,6 +379,21 @@ branches and inserts repeaters along long edges. It uses Liberty input caps,
 available slew/cap/fanout limits and placement wire RC to plan candidates. Resolved
 physical pins preserve individual packed-bus bits through wiring aliases.
 
+`synth.place.reset_fanout=N` (default 0 = off; N >= 2) is the placement-time reset buffer tree that does not
+depend on timing acceptance. Right after the mapped hierarchy is flattened, every net that drives an asynchronous
+clear/preset pin of a Liberty flop and more than N cell pins in all (the synchronous-reset logic of the same signal
+included) is dealt out through the library's smallest placeable buffer, N pins per buffer, level by level until the
+driver carries at most N loads. Pins are grouped in instance-name order, which follows the source hierarchy, so a buffer
+serves neighbouring registers; graph outputs, bus-wiring aliases and macros keep their direct connection. It is pure
+fanout restructuring (a chain of identity buffers per pin, LEC-proven in `lhd_placement_reset_tree_smoke`) and
+idempotent, and it composes with `pass.abc.reset_fanout`, which builds the same tree inside each mapped region at
+read-back: the region trees bound a reset net where its registers sit in one region, this one bounds the sum across
+the many regions a reset reaches (a mux output driving 225 pins spread over fourteen regions of NVDLA partition_a).
+Unlike `synth.place.resize` it is not an accept/reject trial: the post-placement repair measures a change with a
+fresh STA and rejects a whole batch on any hold-WNS movement, and on NVDLA partition_m the forest that fixes the
+439-pin reset (3496 -> 1420 ps) was rejected for `hold_wns` in each trial that contained it. The `reset_tree` object of `qor.json`
+records `fanout`, `nets`, `sinks`, `added`, `levels` and `skipped` (clear/preset pins left alone because a multi-bit or multi-driver bus alias drives them) of the pass in that placement call and `buffers`, the tree cells present in the placed netlist (a timing-driven run builds the tree in its seed placement, so the final call adds none); the value is part of the placement cache identity.
+
 New or resized cells first search row/site-aligned whitespace while all unchanged
 cells remain fixed. Obstacles are indexed as sorted intervals per row, including
 all rows intersected by macro halos. Each inserted cell updates those intervals;
@@ -510,15 +550,75 @@ no Torch or Python. The focused integration check is
 the [grid comparison](../../repros/placement-results/eyeriss-20261016/comparison.html)
 for per-run settings, timing and pre/post legalization PNGs.
 
-### Same-master/color macro alignment and snapping (opt-in)
+### Same-type alignment during macro GP
+
+`synth.place.macro.align_global=true` makes GP alignment classes depend on the
+macro master alone, across synthesis colors and hierarchy. It is enabled by default with
+`synth.place.macro.align_weight=25`. Set the weight to zero to disable attraction;
+`align_global=false` selects the older per-color pairing. Pair candidates
+are rebuilt each iteration using sparse X/Y strips sized from the smallest
+physical macro. Neighboring strips are searched too. Only pairs whose physical
+projections overlap on exactly one axis attract on that axis; fully overlapping
+macros remain the responsibility of overlap repulsion. Halos do not widen this
+attraction range. The grid indexes neighbors; it does not fix target coordinates.
+
+The existing `align_sigma`, `align_start`, `align_full`, and `align_nearest`
+controls set the bounded-well force, ramp, and partner selection. Defaults are
+weight 25, sigma 0.25, start 100, full 500. The force is scaled by
+current macro wirelength/density forces and normalized by pair degree. It acts
+only in macro GP in the staged LiveHD flow: the optional FP stage and final
+fixed-macro cell stage do not apply it. RUDY and overlap repulsion remain active.
+End-of-GP macro snap still uses the original hierarchy/size groups.
+
+`alignment.json` reports `global_same_master` and `gp_alignment_seconds`;
+GP history records `align_pairs`, `align_residual`, `align_ramp`, and the peak
+applied L1 `align_force` in each sampling window. Alignment residual alone does
+not establish QoR; compare final WNS/TNS, HPWL, RUDY, and legalization displacement.
+
+### Macro legalization snap algorithms
+
+`synth.place.macro.snap=true` enables macro snapping before cell legalization.
+`synth.place.macro.snap_mode` selects `alignment` (default) or `symmetry`.
+Both use the same eligibility: movable macros of identical physical width and
+height in the same original hierarchy scope. Synthesis-only `sub_<number>`
+containers are ignored. A wrapper containing a single macro inherits its nearest
+enclosing scope containing multiple macros; separate branching scopes never
+share snap constraints. Flat designs use the top scope. Fixed macros and standard
+cells do not participate. This grouping is independent of synthesis colors.
+
+- `alignment` keeps the existing near-line algorithm: projection-overlapping
+  macro pairs form x/y groups within `macro.snap_tolerance` (default 0.25), then
+  use median lattice targets and soft equality arcs.
+- `symmetry` reuses the floorplan centroid fitter for horizontal/vertical lines,
+  repeated neighbor gaps and shared midpoints. Equal-area circles from the
+  halo-padded macro rectangles set its local scale. Fitted, lattice-rounded
+  targets and relative offsets become soft macro-LP constraints. If the bounded
+  fit fails, that group adds no symmetry constraints.
+
+Both retain hard rectangular legality and halo spacing. Soft constraints may
+break when they conflict with obstacles or spacing; `alignment.json` reports
+these violations. `snap_classes` is the shared hierarchy/size eligibility map;
+`regularity_relations` records the symmetry fitter's accepted proposals. The
+older `macros[].class` field still describes the independent GP alignment color.
+Neither algorithm adds FP centroids or changes GP forces. The opt-in GP
+`macro.align_*` term still uses same-master/synthesis-color groups.
+
+Symmetry controls are `macro.snap_alignment=1`, `macro.snap_spacing_tolerance=0.25`,
+`macro.snap_spacing_penalty=0.02`, `macro.snap_symmetry=1` and
+`macro.snap_displacement=1`. Distances use the equal-area circle radius; the
+spacing tolerance is dimensionless. Both algorithms use `macro.snap_weight=100`.
+
+### Optional synthesis-color GP alignment and legacy snap measurements
+
 
 These controls apply to plain whole-design placement (`synth.place.macro=none`).
 The default mode and all existing placement forces remain unchanged.
 
 | `synth.place.macro.*` option | Default | Behavior |
 |---|---|---|
-| `align_weight` | `0` | GP attraction between movable macros with the same LEF master and fully scoped synthesis color, relative to mean macro wirelength+density force. |
-| `align_sigma` | `0` | Well width as a fraction of the smaller macro extent. Zero is quadratic; `0.25` gives the bounded well used in the experiment. |
+| `align_global` | `true` | Same-master pairs across colors and hierarchy, refreshed each iteration. False selects the older per-color pairing. |
+| `align_weight` | `25` | GP attraction relative to mean macro wirelength+density force. Zero disables. |
+| `align_sigma` | `0.25` | Well width as a fraction of the smaller macro extent. Zero is quadratic; `0.25` gives the bounded well used in the experiment. |
 | `align_start`, `align_full` | `100`, `500` | Quadratic ramp window in global GP iterations. An enabled alignment run cannot stop before the full-strength point. |
 | `align_overlap_boost` | `0` | Multiply macro-overlap weight by `1 + boost * ramp`. |
 | `align_nearest` | `false` | Restrict the experimental pair selection to nearest partners per side. |
@@ -589,114 +689,7 @@ All future Eyeriss comparisons explicitly set `synth.place.bins=64` and
 `synth.place.auto_bins=false` for every GP stage. The native default grid is unchanged;
 earlier mixed-grid results are historical.
 
-`synth.place.macro=r8h2` enables candidate/color moving-centroid attraction during
-its **first GP from scratch**. It replaces the discarded R8H experiment. Candidates
-require >1 matching copy, >2 movable macros and physical logic-plus-macro area
->2000 times the design's mean mapped standard-cell area. Identity uses normalized
-relative macro paths, masters and sizes; unary wrappers are collapsed. This is
-cohesion, not a connectivity equivalence proof or relative-shape reuse.
-
-Every synthesis color found inside a candidate contributes its full mapped
-membership, including cells outside that hierarchy. Uncolored descendants are
-included directly. The centroid and anchor therefore include both macros and
-standard cells. A color appearing in n candidates gets n additive forces toward
-those candidates' current centroids. No single-owner assignment removes anchors;
-identical memberships may have identical centroids. Physical-area weights survive
-halo padding. Parent ids describe the hierarchy and do not create fixed locations.
-
-Attraction starts in iteration 0 and ramps over 100 iterations to relative RMS force
-weight0.25, using the ordinary GP stopping/cap and R8 repulsion/routability controls.
-The automatic-IO pilot remains unchanged to preserve common IO coordinates, but
-its cell/macro positions are discarded for R8H2. The first macro GP starts from
-deterministic unplaced seeds, not the pilot or an R8 macro result. Existing
-legalization/detail placement follow; the comparison then fixes all SRAMs and IOs
-and runs the usual ordinary64-bin cell GP/LG/DP with those macro locations.
-
-`W/synth/place/r8h2.json` reports scope versus full-anchor counts, shared-color
-anchor multiplicities, parent/family ids, equivalent areas, initial/GP/final
-centroids and RMS radii, and force time. `r8h2_membership.tsv` preserves the node-to-
-color evidence. With snapshots enabled, `gp_start.json` records the from-scratch
-iteration 0 state and `gp.json` records GP before legalization. Cache reuse is labeled.
-No template selection/copying/release/mirroring, new hard bounds or default changes
-are introduced.
-
-The [all 64-bin Eyeriss comparison](../../repros/placement-results/eyeriss-r8h2-20261016/comparison.html)
-records the from-scratch full-color experiment:204 candidates in 9 families, colors
-with up to 8 anchors, and exact replay of the disabled 64-bin baseline. Final native
-HPWL is 11.527 m versus 11.149 m (+3.39%). Both flows pass independent legality/halo
-checks and their selected density target; the R8H2 source GP stops at 120 iterations
-while internal HPWL is still falling 16.6% per 20-iteration window. ClusterGroup
-centroids separate but their extents remain heavily interleaved. Keep this opt-in;
-review from-scratch stopping/density behavior before adding relative-shape reuse.
-
-`synth.place.macro=r8h3` adds same-family centroid-circle repulsion to the
-from-scratch flow and lowers candidate eligibility to **>1000 equivalent cells**.
-Both eligibility and repulsion use the same unit: mean mapped physical
-standard-cell area. The anchor footprint includes the physical area of all
-attracted standard cells and SRAMs, once per candidate; shared members still
-contribute to each candidate that attracts them. Halo area and temporary fillers
-are excluded from this count.
-
-For anchored area A and the requested `synth.place.density` rho, the repulsion
-circle has radius `sqrt(A / (pi * rho))`. Only pairs with the same repeated-family
-identity interact. Their energy is `lambda * max(0, r_i+r_j-distance)^2`, so the
-force is zero at and beyond the sum of radii. Coincident centers use a
-deterministic separating direction. Centroid derivatives distribute the pair
-forces through area-weighted memberships; colors shared across n candidates
-receive the sum. Centroids remain derived from current cell/macro positions.
-
-Repulsion starts at weight 5 relative to the existing centroid attraction gradient,
-sharing its normalization and 100-iteration ramp. R8H3 enables adaptive repulsion:
-every 20 iterations after the ramp, the penalty doubles if maximum relative
-circle penetration improves by less than 10%, capped at weight 50000. GP must
-satisfy both density and maximum circle penetration <=0.001 of r_i+r_j. Density
-weight holds when its target is met and circle separation alone remains pending.
-The native adaptive option defaults off; ordinary placement remains the CLI default.
-`r8h3.json` and `r8h3_membership.tsv` record the candidate threshold, common area
-unit, density, circle radii, membership, centroids and force runtime. The subsequent
-fixed-macro cell flow is unchanged. The R8H3 evaluation compares only with the
-all-64-bin R8 baseline; R8H2 is a rejected historical experiment.
-
-The [initial fixed-penalty R8H3 evaluation](../../repros/placement-results/eyeriss-r8h3-20261016/comparison.html)
-finishes legal at 6.799 m versus 11.149 m final HPWL (-39.02%), with the same
-64-bin reference replayed byte for byte. Total synthesis/placement-export time
-is 28.51/220.28 s versus 28.12/252.78 s. All 18 focused checks pass, and all 1040
-macro frames remain fixed during the second pass. Lowering eligibility to 1K
-does not add Eyeriss candidates: it still has 204 candidates in 9 families.
-The CLI fixture separately verifies admission between 1K and 2K.
-
-Minimum final ClusterGroup centroid spacing increases from 46.8 to 248.9 µm,
-but all six repulsion-circle pairs still overlap. The source GP stops at 220
-iterations while internal HPWL is falling 15.25% over its last 20 iterations.
-Circle separation and wirelength settling remain open; density-target
-convergence does not establish either. No new STA/routing benefit is claimed.
-
-
-The [stronger R8H3 evaluation](../../repros/placement-results/eyeriss-r8h3-repulsion-20261016/comparison.html)
-keeps the circle radii and r_i+r_j cutoff, increases the penalty adaptively and
-checks separation before GP can stop. With radius 304.692 µm, the large
-ClusterGroup circles require 609.385 µm center spacing. Their minimum spacing is
-613.392 µm after macro legalization and 613.375 µm after ordinary fixed-macro cell
-placement: none of the six large-circle pairs overlap in those legal frames.
-Source GP meets both density and the 0.1% relative circle tolerance at 640
-iterations, with effective penalty 2560. Cell GP meets density at 780 iterations.
-Final HPWL is 4.595 m versus the reused all-64-bin R8 reference’s 11.149 m
-(-58.78%). Combined synthesis/placement-export time is 27.86/216.26 s versus
-28.12/252.78 s. All 18 focused checks pass, including equal-circle force between
-r and 2r, zero force outside 2r, feasible-pair separation, and default-off behavior.
-Independent full-design checks verify physical/halo legality, full-color circle
-geometry and all 1040 fixed macro frames. After the ordinary cell pass, 9 of 3234 same-type candidate pairs overlap
-(up to 11.15% relative penetration), all among the smaller circles; circle convergence
-is measured at the end of source GP. No new STA/routing result is claimed.
-
-Nested candidates inherit attraction through membership: all child cells/macros
-receive both the child and parent pulls. Their summed parent force draws the
-child centroid toward its parent without making the child rigid. Parent/child
-types do not repel; same-type copies repel. A focused nested-candidate regression
-checks both the absence of parent/child repulsion and the inherited net pull.
-
-
-### Default floorplan, macro and cell passes
+### Optional floorplan, macro and cell passes
 
 `synth.place.fp=true` runs the R8H3-style floorplan GP from scratch, without
 legalization. It discovers repeated scopes using the same full-color membership,
@@ -746,10 +739,33 @@ This is a local heuristic, not a global symmetry optimum.
 | `fp.min_copies` | 4 | Minimum qualifying copies of one macro structure under each immediate hierarchy parent; minimum accepted value is 2 |
 | `fp.attraction`, `fp.repulsion` | 0.25, 5 | First-GP attraction and initial adaptive circle penalty |
 | `fp.anchor` | 0.25 | Weak member attraction to frozen targets in the next GP |
+| `fp.distance_attraction` | true | Calibrate once per phase at one circle radius; retain increasing restoring force |
+| `fp.attraction_outside` | 4 | Extra stiffness beyond the circle; 4 gives five times the inside slope |
 | `fp.alignment`, `fp.symmetry` | 1, 1 | Alignment/midpoint thresholds in smaller-circle radii |
 | `fp.spacing_tolerance` | 0.25 | Maximum observed gap range / mean within a class |
 | `fp.spacing_penalty` | 0.02 | Normalized squared gap error plus penalty per class |
 | `fp.max_displacement` | 1 | Per-axis local movement / own radius; inherited parent translation is additional |
+
+Distance attraction uses the same physical-area/density radius as the repulsion
+circle (physical member area when the repulsion budget is zero). For distance
+`d` from the candidate center, its energy is proportional to
+`d*d + fp.attraction_outside * max(0, d-R)^2`. The pull grows gently inside the
+circle and more steeply outside; its value is continuous at the boundary. This
+is a soft anchor, not a containment constraint. Each member contributes by its
+physical area, and membership in several candidates adds several springs.
+
+The coefficient is calibrated once per phase against the ordinary wirelength
+and density gradients at one radius, before adding overlap/alignment penalties.
+It is then retained, rather than renormalizing away increased displacement.
+Moving FP centroids include the centroid derivative so a group remains free to
+translate, with the usual startup ramp. Frozen targets apply immediately in
+macro GP without restarting that ramp. Circle repulsion retains its existing
+normalization and schedule. The final cell pass clears all centroid anchors.
+`fp.distance_attraction=false` selects the legacy per-iteration normalization;
+`fp.attraction_outside=0` keeps a quadratic spring with the new fixed coefficient.
+The native library remains opt-in (`centroid_distance_attraction=false`).
+`fp_place.json` reports both phases' coefficients and calibration iterations.
+
 
 The user-authorized production defaults also enable SRAM snapping and the evaluated
 repulsion/routability controls, with 64 bins, utilization 0.30, density 0.5,
@@ -823,7 +839,7 @@ Candidate discovery now requires `synth.place.fp.min_copies` qualifying siblings
 **per immediate hierarchy parent** (default 4). Copies in different parents never
 combine to meet the threshold. Each copy must independently exceed the configured
 equivalent-area minimum and contain more than two movable macros. The setting also
-applies to the legacy `r8h2`/`r8h3` centroid paths. The area setting remains separate;
+is independent of the area threshold. The area setting remains separate;
 the current experiment uses `synth.place.fp.minimum=3000`.
 
 `synth.place.fp.colors=true` adds an opt-in fallback for designs with SRAMs but
@@ -912,3 +928,153 @@ adds no finer density grid or cell-to-cell pair enumeration. All comparisons use
 core, SRAM frame, IO frame, cell masters or net connectivity during placement.
 The density/obstacle controls remain experimental; timing and legalizer movement
 must be checked on each design before adopting a different default.
+
+### Placement-color leaves and adaptive IOs
+
+The opt-in controls below extend FP without changing existing defaults.
+
+The matching native support is in `../DREAMPlace`; `MODULE.bazel` uses that local
+checkout for co-development of separate circle budgets and fixed-terminal updates.
+
+| Option (`synth.place.` prefix) | Default | Meaning |
+|---|---:|---|
+| `fp.color_source` | `synthesis` | `placement` selects unbounded macro input/output cones; `memory_first` selects bounded memory input-cone growth. Both run after synthesis and require FP colors and Liberty metadata |
+| `fp.color_maximum` | 30000 | Memory-first logic growth limit in equivalent average standard-cell area; macro footprints do not consume this budget |
+| `fp.color_minimum` | -1 | Strict color member-area threshold in equivalent cells; -1 inherits `fp.minimum`. Reserved area does not affect eligibility |
+| `fp.pin_adjust` | false | Bus-aware initial IO assignment and periodic perimeter moves during FP |
+| `fp.pin_interval` | 50 | Iterations between IO updates, independent of STA/resize cadence |
+| `fp.pin_step` | 0.01 | Maximum per-update travel as a fraction of die perimeter |
+| `fp.pin_improvement` | 0.001 | Minimum relative incident-net weighted-HPWL improvement for moves/reversals |
+| `macro.pin_adjust` | false | Enable the same bus-preserving IO moves during GP with movable macros, independently of FP |
+| `macro.pin_interval` | 50 | Macro GP iterations between IO updates |
+| `macro.pin_step` | 0.01 | Maximum per-update macro-stage travel as a fraction of die perimeter |
+| `macro.pin_improvement` | 0.001 | Minimum relative incident-net weighted-HPWL gain during macro GP |
+
+Add these flags to a technology-configured `lhd synth` placement invocation:
+
+```
+--set synth.place.fp.colors=true --set synth.place.fp.color_source=placement \
+--set synth.place.fp.pin_adjust=true --set synth.place.macro.pin_adjust=true
+```
+
+The color source and pin adjustment are independent: either can be enabled
+without the other. Explicitly fixed IOs remain fixed in both cases.
+
+Placement colors are split into local portions under their deepest selected
+hierarchy candidates. A portion outside every selected candidate remains at the
+root; external shared logic does not promote the portions inside candidates.
+Each portion is evaluated independently for a movable macro and the physical
+area threshold. Structural candidates retain all their physical descendants for
+attraction. Each local color leaf receives its full member budget. One-stage
+reservation reachability is recomputed from local members, allocated once among eligible color leaves and
+propagated once to each ancestor, without duplicating parent budgets. Member attraction
+remains additive through ancestors. Parent/child centroids never repel, and
+repulsion is between siblings at the same candidate scope. Colors are not
+independently snapped; a color leaf follows its parent's snap translation.
+
+Pin adjustment preserves actual graph-port bus lanes in circular numeric order,
+ascending or descending. Buses may have gaps and interleave, and can turn corners.
+A whole-bus reversal is accepted only on improved weighted HPWL. Imported fixed
+pins retain their coordinates, including pin centers inset from the edge. Imported
+constraints bind by graph-port name; a scalar name and a DEF name ending in `[0]`
+are distinct, so check naming before claiming that all pins are constrained.
+Slots use a conservative pitch derived from the
+used LEF layers and pin extents; movements respect spacing, a travel bound and a
+gain margin. The initial assignment uses ordered dynamic programming. Subsequent
+moves score only incident nets. Native GP resets momentum/convergence history
+after a terminal changes, and timing callbacks see the updated coordinates.
+IO updates can run without centroids or STA. The FP and macro controls are
+independent; macro adjustment also works when FP is disabled. With both enabled,
+FP performs the ordered initialization and macro GP continues from those IOs
+without reinitializing them. After macro placement, the staged flow freezes IOs
+alongside macros for final cell placement. A separate final-cell invocation must
+likewise import the handoff pins as `FIXED`; the macro callback is inactive when
+there are no movable macros.
+
+When preparing comparison inputs, preserve actual design pin constraints, but
+leave automatically chosen pin positions `PLACED` if either adjustment is to
+optimize them. A script that converts every imported pin to `FIXED` prevents
+both stages from moving those pins. Do not infer design-required positions from
+an automatically generated intermediate DEF.
+
+`fp_placement_colors.json` summarizes physical/reserved/unassigned area and
+merges. `fp_placement_colors.tsv` records each member and its reservation
+recipients. `fp_candidates.json` and `fp_place.json` distinguish member area from
+repulsion area. `fp_pins.jsonl` and `macro_pins.jsonl` record stage-specific pin positions,
+weighted HPWL, travel and reversals. Reports live under the selected output
+directory, or its `macro/` subdirectory for the three-pass flow.
+
+For controlled evaluation on an existing mapped graph, `//tools:physical_repair`
+accepts `floorplan_place:true`, `lg`, `top`, the same technology/SDC/core inputs,
+and `fp_color_source` / `fp_pin_adjust` / `macro_pin_adjust` in its JSON configuration. This mode uses
+the normal FP, macro and final-cell APIs without synthesis. Optional
+`fp_color_minimum`, `fp_iterations`, `fp_timing_interval`,
+`fp_timing_after_density`, `fp_timing_movement` and `fp_resize` make experimental
+choices explicit; it checks unchanged masters/counts when repair is disabled.
+Keep configurations, reports and images under ignored `repros/`.
+
+The optional `synth.place.fp.color_source=memory_first` uses bounded, round-robin
+memory input-cone growth after synthesis. Enable it with
+`synth.place.fp.colors=true`; `synth.place.fp.color_maximum=30000` sets the
+logic-growth cap in equivalent average standard-cell area. Macro footprints
+are excluded from that growth cap and included fully in centroid sizing.
+See [placement coloring](../color/README.md#memory-first-placement-colors) for
+ownership, merge ordering, boundaries and repair behavior. This option does not
+recolor or resynthesize the mapped netlist. The default source is still
+`synthesis`. All other FP/macro/final placement options apply unchanged.
+
+For a grouping-only diagnostic, `tools/physical_repair` accepts
+`floorplan_place: true` with `color_analysis_only: true` and a physical color
+source. It writes membership and centroid-area reports under `analysis/`
+without GP, legalization, RC/STA or a final DEF. The result is explicitly tagged
+`floorplan_color_analysis`; it is not a legal placement. Use this inexpensive
+check to inspect budget sensitivity before running full placement. The typed
+API's `analyze_colors_only` mode rejects caches, prior placements and competing
+placement modes.
+
+
+### Moving hierarchy-centroid alignment during FP
+
+`synth.place.fp.align_weight` is an opt-in FP-only force (default `0`).
+`align_sigma=0.25` sets the bounded well as a fraction of circle diameter;
+`align_start=100` and `align_full=500` define its quadratic ramp. Weight `25`
+uses the same relative scale as the default SRAM alignment experiment.
+The reference is the absolute net wirelength+density force of each candidate's
+movable members, averaged across candidates per axis.
+
+Candidate circles use their physical reserved area at the target density.
+Only the same family under the same candidate parent can pair. Overlap on
+exactly one axis attracts their centers on that axis; overlap on both axes is
+left to existing circle repulsion. The gradient reaches members through the
+area-weighted centroid derivative, including summed contributions for shared
+members. Existing attraction, repulsion, end-of-FP snap and macro-stage anchors
+are retained. This force ends when FP freezes the centroid targets.
+
+`fp_history.jsonl` streams iteration, overflow, weighted HPWL, circle overlap,
+and centroid alignment pair/residual/ramp/applied-force diagnostics.
+`fp_place.json` includes the same history, controls, and alignment runtime.
+An explicit zero weight preserves the previous floorplan algorithm.
+
+During FP, `synth.place.fp.parent_weight=1` enables explicit parent–child
+centroid springs (default `0`, opt-in). It scales the once-calibrated member
+attraction coefficient; `fp.parent_outside=4` controls the outside-circle term.
+For separation `d` and parent radius `r`, the energy is proportional to
+`d² + parent_outside * max(0,d-r)^4 / r²`. The force is linear inside the
+parent circle, with an additional cubic restoring force outside it. Equal and
+opposite endpoint gradients propagate through both moving, area-weighted
+centroids, including shared members. These springs only run during FP; the
+macro stage retains frozen-target member attraction. Diagnostics record edge
+count, maximum child/parent distance in parent radii, applied force and time.
+
+FP centroid snap reserves the whole circle inside the core. Radius-inset bounds
+also apply after inherited parent translations; mandatory boundary correction
+has priority over the regularity movement limit. Unique color leaves gain no
+snap relations but also obey these bounds. An impossible circle fit is reported
+instead of handing an out-of-core target to macro GP. Rectangular macro
+regularity continues to use its existing bounds and macro legalizer.
+
+`synth.place.fp.anchor_macros_only=true` restricts the frozen-target spring in
+macro GP to movable macros. FP itself still attracts all candidate members. The
+candidate areas, circle radii and calibration retain all members, so dropping
+standard-cell springs does not strengthen the remaining macro springs. The
+option defaults to false; final cell placement has no centroid anchors.

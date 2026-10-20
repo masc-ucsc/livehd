@@ -7,9 +7,15 @@ cc_library(
     name = "pass_color",
     srcs = glob(
         ["*.cpp"],
-        exclude = ["*test*.cpp"],
+        exclude = [
+            "*test*.cpp",
+            "floorplan_color.cpp",
+        ],
     ),
-    hdrs = glob(["*.hpp"]),
+    hdrs = glob(
+        ["*.hpp"],
+        exclude = ["floorplan_color.hpp"],
+    ),
     copts = COPTS,
     includes = ["."],
     visibility = ["//visibility:public"],
@@ -26,6 +32,33 @@ cc_library(
         "@rapidjson",
     ],
     alwayslink = True,  # static Pass_plugin registration
+)
+
+filegroup(
+    name = "floorplan_color_srcs",
+    srcs = [
+        "floorplan_color.cpp",
+        "floorplan_color.hpp",
+    ],
+    visibility = ["//visibility:public"],
+)
+
+cc_library(
+    name = "floorplan_color",
+    srcs = ["floorplan_color.cpp"],
+    hdrs = ["floorplan_color.hpp"],
+    copts = COPTS,
+    visibility = ["//visibility:public"],
+)
+
+cc_test(
+    name = "floorplan_color_test",
+    srcs = ["floorplan_color_test.cpp"],
+    copts = COPTS,
+    deps = [
+        ":floorplan_color",
+        "@googletest//:gtest_main",
+    ],
 )
 
 cc_test(

@@ -1684,6 +1684,34 @@ sh_test(
     env = {"MAPPER": mapper},
 ) for suffix, mapper in _MAPPERS]
 
+# pass/sweep (compile.flatten / compile.unknown_zero / compile.sweep): flop counts of
+# the mapped fixture with each option alone and together, a live stub that must keep
+# everything, an x-driven stub that folds only under unknown_zero, and the flattened +
+# swept compile result proven (bounded, from reset) equivalent to the default one.
+sh_test(
+    name = "lhd_sweep_test",
+    size = "large",
+    srcs = ["lhd_sweep_test.sh"],
+    data = _FLOW_DATA + [
+        "abc_arst_q.lib",
+        "sweep_mini.sv",
+    ],
+)
+
+# pass.abc.ware_zero_bits / pass.abc.memory_prune_reads: a barrel shifter over a vector
+# with one live lane and a lowered memory with narrow read windows map to fewer cells
+# when the module boundary no longer hides what the parent knows, and the mapped
+# netlists are LEC-equivalent to the source.
+sh_test(
+    name = "lhd_abc_zero_bits_test",
+    size = "large",
+    srcs = ["lhd_abc_zero_bits_test.sh"],
+    data = _FLOW_DATA + [
+        "abc_zero_bits.sv",
+        "//inou/prp:abc_tests",
+    ],
+)
+
 # 2i-abc_arith: every selectable adder architecture (rca/cska/cla + block_size)
 # tech-maps the arithmetic fixture and is LEC-equivalent to the original logic
 # (MAPPER=abc; the _usyn twin proves native USYN mapped, residual-off and
@@ -1719,6 +1747,22 @@ sh_test(
         "abc_arst_mix.v",
         "abc_arst_q.lib",
         "abc_arst_qn.lib",
+    ],
+    env = {"MAPPER": mapper},
+) for suffix, mapper in _MAPPERS]
+
+# pass.abc.reset_fanout deals an asynchronous-reset net with many clear/preset pins out through
+# a buffer tree (default off): every reset net is bounded, the netlist is proven by the graph
+# LEC and lgyosys, a flipped reset value refutes, and a cap of 1 is refused.
+[sh_test(
+    name = "lhd_abc_reset_tree_test" + suffix,
+    srcs = ["lhd_abc_reset_tree_test.sh"],
+    data = _FLOW_DATA + [
+        "abc_arst_q.lib",
+        "abc_arst_qn.lib",
+        "abc_latch_q.lib",
+        "abc_rst_latch.prp",
+        "abc_rst_tree.v",
     ],
     env = {"MAPPER": mapper},
 ) for suffix, mapper in _MAPPERS]
@@ -1764,6 +1808,32 @@ sh_test(
     name = "lhd_abc_derived_clock_test",
     size = "small",
     srcs = ["lhd_abc_derived_clock_test.sh"],
+    data = _FLOW_DATA + [
+        "abc_arst_q.lib",
+        "abc_derived_clock.v",
+    ],
+)
+
+# synth.state_sweep: unobserved registers and register bits leave the mapper's private
+# copy (across the hierarchy), proven equivalent to the source by the graph-native LEC.
+sh_test(
+    name = "lhd_state_sweep_test",
+    size = "small",
+    srcs = ["lhd_state_sweep_test.sh"],
+    data = _FLOW_DATA + [
+        "abc_arst_q.lib",
+        "reg_merge.v",
+        "state_sweep.v",
+        "state_sweep_mem.v",
+    ],
+)
+
+# pass.abc.large_flow_latches: a region mapped by the size tier's default flow (large_ge) keeps its
+# latches like the built-in flow, so derived-clock registers map to DFF cells instead of native flops.
+sh_test(
+    name = "lhd_abc_large_flow_latches_test",
+    size = "small",
+    srcs = ["lhd_abc_large_flow_latches_test.sh"],
     data = _FLOW_DATA + [
         "abc_arst_q.lib",
         "abc_derived_clock.v",
@@ -2039,6 +2109,14 @@ sh_test(
 sh_test(
     name = "lhd_config_test",
     srcs = ["lhd_config_test.sh"],
+    data = _FLOW_DATA,
+)
+
+# pass.aegraph (compile.cprop.engine=aegraph) through the kernel: determinism
+# (tool diff --structural), summary line, LEC equality with classic, cache key.
+sh_test(
+    name = "lhd_aegraph_test",
+    srcs = ["lhd_aegraph_test.sh"],
     data = _FLOW_DATA,
 )
 
@@ -2727,6 +2805,23 @@ sh_test(
     timeout = "short",
     srcs = ["lhd_placement_unknown_const_smoke.py"],
     data = ["//lhd", "//inou/lefdef:test_data"],
+)
+
+# synth.place.reset_fanout: a flat net that drives many asynchronous reset pins is dealt out through a
+# buffer tree before placement; bounded, LEC-proven on the placed netlist, off by default.
+sh_test(
+    name = "lhd_placement_reset_tree_smoke",
+    size = "small",
+    timeout = "moderate",
+    srcs = ["lhd_placement_reset_tree_smoke.py"],
+    data = [
+        "sky130hd_dfbbp_1.lef.part",
+        "sky130hd_dfbbp_1.lib.part",
+        "sky130hd_dfrtp_1.lef.part",
+        "sky130hd_dfrtp_1.lib.part",
+        "//inou/lefdef:test_data",
+        "//lhd",
+    ],
 )
 
 sh_test(

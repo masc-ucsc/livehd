@@ -114,14 +114,18 @@ bool Bitwidth_rewrite::scalar_get_mask_range(hhds::Node_class& node) {
           livehd::cprop_value::retire(inner);
           consumed = true;
           for (size_t i = 0; i < operands.size(); ++i) {
-            const auto narrowed = window(operands[i], bits);
-            // The placeholder kept its producer alive while siblings changed.
-            livehd::cprop_value::retire(windows[i]);
-            operands[i] = narrowed;
+            // Every placeholder stays until the result below reads the narrowed operands: a narrowed operand
+            // that is a bare, unchanged pin has no other reader yet, and a sibling's window that reaches the same
+            // producer (Or(x, x << 2)) would otherwise see it as privately owned and consume it, leaving this
+            // operand dangling.
+            operands[i] = window(operands[i], bits);
           }
           auto result = make_node(*current_graph, op);
           for (auto operand : operands) {
             livehd::graph_util::append_sink_operand(result, op, 0).connect_driver(operand);
+          }
+          for (auto placeholder : windows) {
+            livehd::cprop_value::retire(placeholder);
           }
           auto output = result.create_driver_pin(0);
           livehd::graph_util::set_ubits(output, bits);

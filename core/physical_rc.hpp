@@ -8,16 +8,19 @@
 namespace livehd::physical {
 struct Rc_node {
   std::string pin;
-  double      capacitance_ff = 0;
+  double      capacitance_ff                   = 0;
+  bool        operator==(const Rc_node&) const = default;
 };
 struct Rc_edge {
   unsigned from = 0, to = 0;
-  double   resistance_ohm = 0;
+  double   resistance_ohm                   = 0;
+  bool     operator==(const Rc_edge&) const = default;
 };
 struct Rc_net {
   std::string          driver;
   std::vector<Rc_node> nodes;
   std::vector<Rc_edge> edges;
+  bool                 operator==(const Rc_net&) const = default;
 };
 struct Parasitics {
   std::string         identity;

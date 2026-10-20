@@ -1,0 +1,207 @@
+;; rules/mask.rules: Get_mask / Set_mask / Concat window algebra and the comparison / reduction facts that come
+;; from the range and known-bits analyses (rules/analyses.decl).
+;;
+;; Get_mask(y, lo, hi) is bits [lo, hi) of y read as a NON-NEGATIVE number (an infinite two's complement
+;; value, so a window above a negative y reads ones). Set_mask(a, lo, hi, v) replaces bits [lo, hi) of a with
+;; the low hi-lo bits of v. Concat lanes are (value, width) pairs, most significant first.
+;; The lane-layout rule for a window of a Concat / Set_mask / packed word (an n-ary walk) is native
+;; (rules/mask.cpp); everything with a fixed shape is here.
+
+;; ---- Get_mask of Get_mask / shifts ----
+
+(simplify getmask_getmask 30
+  (Get_mask (Get_mask y (k a) (k b)) (k c) (k d))
+  :when (>= a 0) (> b a) (>= c 0) (> d c) (< c (- b a))
+  => (Get_mask y (k (+ a c)) (k (min (+ a d) b)))
+  :example (Get_mask (Get_mask $y 4 12) 2 6)
+  :doc "Get_mask(Get_mask(y, a, b), c, d) = Get_mask(y, a + c, min(a + d, b)): the inner window is zero above its width, so the outer one reads the same bits of y, clipped at b.")
+
+(simplify getmask_getmask_zero 30
+  (Get_mask (Get_mask y (k a) (k b)) (k c) (k d))
+  :when (>= a 0) (> b a) (>= c 0) (> d c) (>= c (- b a))
+  => 0
+  :example (Get_mask (Get_mask $y 4 8) 4 6)
+  :doc "A window that starts at or above the inner window's width reads only its zero padding.")
+
+(simplify getmask_shl_up 30
+  (Get_mask (SHL x (k s)) (k lo) (k hi))
+  :when (> s 0) (>= lo s) (> hi lo)
+  => (Get_mask x (k (- lo s)) (k (- hi s)))
+  :example (Get_mask (SHL $x 3) 4 9)
+  :doc "Get_mask(SHL(x, s), lo, hi) = Get_mask(x, lo - s, hi - s) when the window is above the s zero bits.")
+
+(alt getmask_shl_straddle 20
+  (Get_mask (SHL x (k s)) (k lo) (k hi))
+  :when (> s 0) (>= lo 0) (< lo s) (> hi s)
+  => (SHL (Get_mask x 0 (k (- hi s))) (k (- s lo)))
+  :example (Get_mask (SHL $x 4) 2 8)
+  :doc "A window that straddles the shift: the zero bits below, x's low hi - s bits above (the bitwidth_rewrite Get_mask(SHL) rule). An alt: both spellings are two nodes, so extraction keeps the original until a cost profile prefers the narrower Get_mask.")
+
+(simplify getmask_shl_low 30
+  (Get_mask (SHL x (k s)) (k lo) (k hi))
+  :when (> s 0) (>= lo 0) (> hi lo) (<= hi s)
+  => 0
+  :example (Get_mask (SHL $x 8) 0 8)
+  :doc "A window inside the s low zero bits of SHL(x, s) is zero.")
+
+(simplify getmask_sra 30
+  (Get_mask (SRA x (k s)) (k lo) (k hi))
+  :when (>= s 0) (>= lo 0) (> hi lo)
+  => (Get_mask x (k (+ lo s)) (k (+ hi s)))
+  :example (Get_mask (SRA $x 3) 1 5)
+  :doc "Bit i of SRA(x, s) is bit i + s of x (sign bits included), so a window moves up by s.")
+
+;; ---- Get_mask by range ----
+
+;; getmask_fits (Get_mask(y, 0, n) = y when 0 <= y < 2^n) is native: see rules/mask.cpp.
+
+(simplify getmask_above 30
+  (Get_mask y (k lo) (k hi))
+  :when (>= lo 0) (> hi lo) (fits y lo)
+  => 0
+  :example (Get_mask (Get_mask $y 0 4) 4 8)
+  :doc "A window above the highest bit a value can have is zero: 0 <= y < 2^lo.")
+
+;; ---- Get_mask of Set_mask ----
+
+(simplify getmask_setmask_outside 30
+  (Get_mask (Set_mask a (k slo) (k shi) v) (k lo) (k hi))
+  :when (>= slo 0) (> shi slo) (>= lo 0) (> hi lo) (or (<= hi slo) (>= lo shi))
+  => (Get_mask a (k lo) (k hi))
+  :example (Get_mask (Set_mask $a 8 12 $v) 0 8)
+  :doc "A window disjoint from the written one reads the base.")
+
+(simplify getmask_setmask_inside 30
+  (Get_mask (Set_mask a (k slo) (k shi) v) (k lo) (k hi))
+  :when (>= slo 0) (> shi slo) (>= lo slo) (<= hi shi) (> hi lo)
+  => (Get_mask v (k (- lo slo)) (k (- hi slo)))
+  :example (Get_mask (Set_mask $a 4 12 $v) 6 10)
+  :doc "A window inside the written one reads the value: bit slo + i of the result is bit i of v.")
+
+;; ---- Set_mask ----
+
+;; (A Set_mask whose value is a Get_mask of at least the window width is NOT simplified: cgen and the LEC encoder read
+;; the value operand as already fitting the window, so the mask on it is load-bearing.)
+
+(simplify setmask_overwrite 30
+  (Set_mask (Set_mask a (k lo1) (k hi1) v1) (k lo2) (k hi2) v2)
+  :when (>= lo2 0) (>= lo1 0) (> hi1 lo1) (<= lo2 lo1) (>= hi2 hi1)
+  => (Set_mask a (k lo2) (k hi2) v2)
+  :example (Set_mask (Set_mask $a 4 8 $v1) 0 12 $v2)
+  :doc "A write that covers an earlier write to the same base overwrites it: the inner Set_mask is dead.")
+
+(simplify setmask_own_bits 30
+  (Set_mask a (k lo) (k hi) (Get_mask a (k lo) (k hi)))
+  :when (>= lo 0) (> hi lo)
+  => a
+  :example (Set_mask $a 4 8 (Get_mask $a 4 8))
+  :doc "Writing a's own bits back into the window they came from changes nothing.")
+
+(simplify setmask_zero_noop 30
+  (Set_mask a (k lo) (k hi) 0)
+  :when (>= lo 0) (> hi lo) (<= hi 62) (known_zero a (- (mask_of hi) (mask_of lo)))
+  => a
+  :example (Set_mask (Get_mask $a 0 4) 4 8 0)
+  :doc "Writing zeros over bits that are already known zero changes nothing.")
+
+;; ---- Concat ----
+
+(simplify concat_single_fits 30
+  (Concat x (k n))
+  :when (> n 0) (fits x n)
+  => x
+  :example (Concat (Get_mask $x 0 4) 8)
+  :doc "A one-lane Concat of a value that already fits its window is the value.")
+
+(simplify concat_zero_top 30
+  (Concat 0 (k w) x (k n))
+  :when (> w 0) (> n 0) (fits x n)
+  => x
+  :example (Concat 0 4 (Get_mask $x 0 4) 4)
+  :doc "A zero most-significant lane over a value that fits its lane adds nothing.")
+
+(simplify concat_merge_slices 30
+  (Concat (Get_mask v (k m) (k h)) (k w1) (Get_mask v (k l) (k m)) (k w2))
+  :when (>= l 0) (> m l) (> h m) (= w1 (- h m)) (= w2 (- m l))
+  => (Get_mask v (k l) (k h))
+  :example (Concat (Get_mask $v 4 8) 4 (Get_mask $v 0 4) 4)
+  :doc "Two adjacent windows of the same value, reassembled in order, are the one wider window (merge_concat_slices).")
+
+;; ---- comparisons by range ----
+
+(simplify lt_always 30
+  (LT x y)
+  :when (lt_always x y)
+  => 1
+  :example (LT (Get_mask $x 0 4) (Sum (Get_mask $y 0 4) 16))
+  :doc "x < y whenever the largest x is below the smallest y.")
+
+(simplify lt_never 30
+  (LT x y)
+  :when (ge_always x y)
+  => 0
+  :example (LT (Sum (Get_mask $x 0 4) 16) (Get_mask $y 0 4))
+  :doc "x < y is false whenever the smallest x is not below the largest y.")
+
+(simplify gt_always 30
+  (GT x y)
+  :when (lt_always y x)
+  => 1
+  :example (GT (Sum (Get_mask $x 0 4) 16) (Get_mask $y 0 4))
+  :doc "x > y whenever the largest y is below the smallest x.")
+
+(simplify gt_never 30
+  (GT x y)
+  :when (ge_always y x)
+  => 0
+  :example (GT (Get_mask $x 0 4) (Sum (Get_mask $y 0 4) 16))
+  :doc "x > y is false whenever the smallest y is not below the largest x.")
+
+(simplify eq_distinct 30
+  (EQ x y)
+  :when (distinct x y)
+  => 0
+  :example (EQ (Get_mask $x 0 4) (Sum (Get_mask $y 0 4) 16))
+  :doc "Two values with disjoint ranges, or a known bit that differs, are never equal.")
+
+;; ---- reductions, extensions, selectors by fact ----
+
+(simplify ror_bool 30
+  (Ror (as x))
+  :when (bool01 x)
+  => x
+  :example (Ror (EQ $x 0))
+  :doc "The OR-reduction of a 0/1 value is the value.")
+
+(simplify sext_fits 30
+  (Sext x (k b))
+  :when (>= b 1) (sfits x b)
+  => x
+  :example (Sext (Get_mask $x 0 4) 8)
+  :doc "Sext(x, b) = x when -2^(b-1) <= x < 2^(b-1): the sign extension adds nothing.")
+
+(simplify mux_nonzero_sel 30
+  (Mux s f t)
+  :when (nonzero s)
+  => t
+  :example (Mux (Sum (Get_mask $s 0 4) 1) $f $t)
+  :doc "A selector that is provably nonzero picks the true arm.")
+
+(simplify mux_zero_sel 30
+  (Mux s f t)
+  :when (zero s)
+  => f
+  :example (Mux (Get_mask (SHL $s 8) 0 8) $f $t)
+  :doc "A selector that is provably zero picks the false arm.")
+
+;; ---- Get_mask of a complement ----
+
+(simplify getmask_not_getmask 30
+  (Get_mask (Not (Get_mask y 0 (k n))) 0 (k m))
+  :when (> m 0) (>= n m)
+  => (Get_mask (Not y) 0 (k m))
+  :example (Get_mask (Not (Get_mask $y 0 8)) 0 4)
+  :doc "Bit i of Not(w) is the complement of bit i of w, and Get_mask(y, 0, n) leaves the low n bits of y alone: a window of the complement inside the low n bits does not need the inner mask (classic scalar_get_mask's low window of a complement).")
+
+;; (The per-lane form of vectorize_bit_reductions, a run of adjacent bits of one word, is the native rule
+;; `bit_run_reduction` in rules/mask.cpp: its operands are a multiset, and a run is found whatever order they arrive in.)

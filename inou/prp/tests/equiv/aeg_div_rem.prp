@@ -1,0 +1,26 @@
+/*
+:name: aeg_div_rem
+:type: lec
+*/
+// PYROPE-vs-PYROPE group, the fixture of the aegraph Div/Rem rules (pass/aegraph/rules/div.rules, Q2).
+// Dlop truncates toward zero and the remainder follows the DIVIDEND, so a power-of-two divisor is a shift /
+// mask only for a non-negative dividend; `sq` / `sr` carry a NEGATIVE dividend and must keep the truncation.
+// `qb` / `rb` / `qz` / `rz` are runtime divisors that can be ZERO (x / 0 and x % 0 are the all-unknown
+// value, which the engine must not turn into a fixed result differently from classic). `qq` / `rr` are
+// b / b and b % b. This is the REFERENCE, compiled by the classic engine; `aeg_div_rem_1.prp` is the
+// same source compiled by the e-graph engine.
+pub comb top(a:U8, s:S8, b:U8, z:U8) -> (q1:U8, q4:U6, r4:U2, q10:U5, r10:U4, sq:S8, sr:S8, qb:U8, rb:U8, qq:U8, rr:U8, qz:U8, rz:U8) {
+  q1  = a / 1
+  q4  = a / 4
+  r4  = a % 4
+  q10 = a / 10
+  r10 = a % 10
+  sq  = s / 4
+  sr  = s % 4
+  qb  = a / b
+  rb  = a % b
+  qq  = b / b
+  rr  = b % b
+  qz  = a / z
+  rz  = a % z
+}

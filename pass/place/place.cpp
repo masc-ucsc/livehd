@@ -25,8 +25,11 @@
 
 #include "color_centroids.hpp"
 #include "h2d.hpp"
+#include "macro_snap.hpp"
 #include "memory_proxy.hpp"
+#include "pin_adjust.hpp"
 #include "repair.hpp"
+#include "reset_tree.hpp"
 #include "technology_rc.hpp"
 #if defined(__APPLE__)
 #include <mach-o/dyld.h>
@@ -145,6 +148,9 @@ std::string environment_key(const Options& o, const ph::Technology& tech) {
                             o.halo_y),
                 h);
   h = hash_text(o.macro_mode, h);
+  if (o.reset_fanout) {
+    h = hash_text(std::format("reset-fanout:{}", o.reset_fanout), h);
+  }
   if (!o.die.empty() || !o.core.empty()) {
     h = hash_text("fixed-frame", h);
     for (const auto v : o.die) {
@@ -156,6 +162,17 @@ std::string environment_key(const Options& o, const ph::Technology& tech) {
   }
   if (o.timing_max_weight != 5 || o.timing_smoothing != .5) {
     h = hash_text(std::format("timing-force:{}:{}", o.timing_max_weight, o.timing_smoothing), h);
+  }
+  if (o.timing_exponent != 1) {
+    h = hash_text(std::format("timing-exponent:{}", o.timing_exponent), h);
+  }
+  if (o.fp_evaluate && o.macro_timing_interval > 0) {
+    h = hash_text(std::format("macro-timing:{}:{}:{}:{}",
+                              o.macro_timing_interval,
+                              o.fp_timing_movement,
+                              o.fp_timing_after_density,
+                              o.fp_timing_max_updates),
+                  h);
   }
   if (o.stop_overflow != .1 || o.initial_density_weight != .01) {
     h = hash_text(std::format("density-controls:{}:{}", o.stop_overflow, o.initial_density_weight), h);
@@ -187,7 +204,7 @@ std::string environment_key(const Options& o, const ph::Technology& tech) {
   if (o.density_upper_bound) {
     h = hash_text("density-upper-bound", h);
   }
-  if (o.fp_place || o.macro_mode == "r8h2" || o.macro_mode == "r8h3") {
+  if (o.fp_place) {
     h = hash_text(std::format("centroid-copies:per-parent:{}", o.fp_min_copies), h);
   }
   if (o.fp_place) {
@@ -212,11 +229,35 @@ std::string environment_key(const Options& o, const ph::Technology& tech) {
                               o.fp_snap.max_displacement),
                   h);
   }
+  if (o.fp_place && o.fp_anchor_macros_only) {
+    h = hash_text("fp:macro-only-frozen-anchors", h);
+  }
+  if (o.fp_place && o.fp_distance_attraction) {
+    h = hash_text(std::format("fp:distance-attraction:{}", o.fp_attraction_outside), h);
+  }
+  if (o.fp_place && o.fp_snap_enabled) {
+    h = hash_text("fp:circle-core-bounds", h);
+  }
+  if (o.fp_place && o.fp_parent_weight > 0) {
+    h = hash_text(std::format("fp:parent-spring:{}:{}", o.fp_parent_weight, o.fp_parent_outside), h);
+  }
   if (o.fp_place && !o.fp_snap_enabled) {
     h = hash_text("fp:no_snap", h);
   }
   if (o.fp_place && o.fp_colors) {
     h = hash_text("fp:uncovered-colors", h);
+    if (o.fp_color_source != "synthesis" || o.fp_color_minimum != -1) {
+      h = hash_text(std::format("fp-colors:{}:{}", o.fp_color_source, o.fp_color_minimum), h);
+      if (o.fp_color_source == "memory_first") {
+        h = hash_text(std::format("memory-first:{}", o.fp_color_maximum), h);
+      }
+    }
+  }
+  if (o.fp_place && o.fp_pin_adjust) {
+    h = hash_text(std::format("fp-pins:{}:{}:{}", o.fp_pin_interval, o.fp_pin_step, o.fp_pin_improvement), h);
+  }
+  if (o.macro_pin_adjust) {
+    h = hash_text(std::format("macro-pins:{}:{}:{}", o.macro_pin_interval, o.macro_pin_step, o.macro_pin_improvement), h);
   }
   if (o.scale_macro_density || o.automatic_bins || o.exact_macro_density || o.adaptive_density || o.routability
       || o.macro_overlap_weight || o.macro_jitter || o.schedule_iterations || o.io_iterations) {
@@ -231,6 +272,25 @@ std::string environment_key(const Options& o, const ph::Technology& tech) {
                               o.io_iterations,
                               o.scale_macro_density),
                   h);
+  }
+  if (o.macro_snap) {
+    h             = hash_text(o.macro_snap_mode, h);
+    const auto& p = o.macro_snap_options;
+    h             = hash_text(std::format("scope-size-snap:{}:{}:{}:{}:{}",
+                                          p.alignment_tolerance,
+                                          p.spacing_tolerance,
+                                          p.spacing_penalty,
+                                          p.symmetry_tolerance,
+                                          p.max_displacement),
+                              h);
+  }
+  if (o.fp_align_weight > 0) {
+    h = hash_text(
+        std::format("centroid-alignment:{}:{}:{}:{}", o.fp_align_weight, o.fp_align_sigma, o.fp_align_start, o.fp_align_full),
+        h);
+  }
+  if (o.macro_align_weight > 0 && o.macro_align_global) {
+    h = hash_text("global-master-strip-alignment-v1", h);
   }
   if (o.macro_align_weight > 0 || o.macro_snap) {
     h = hash_text(std::format("alignment:{}:{}:{}:{}:{}:{}:{}:{}:{}",
@@ -247,6 +307,12 @@ std::string environment_key(const Options& o, const ph::Technology& tech) {
   }
   if (o.routability && !o.routability_charge_compensation) {
     h = hash_text("inflation-only-charge", h);
+  }
+  if (o.routability) {
+    h = hash_text("opaque-macro-routing-v1", h);
+    if (o.routability_macro_weight > 0) {
+      h = hash_text(std::format("macro-route-pressure:{}:{}", o.routability_macro_weight, o.routability_macro_range), h);
+    }
   }
   if (o.cohesion > 0) {
     h = hash_text(std::format("cohesion:{}", o.cohesion), h);
@@ -353,7 +419,7 @@ public:
   // instead of refusing the net; the number of bits tied this way is unknown_tied().
   explicit Resolver(const ph::Technology& t, const std::map<uint64_t, std::string>& m, bool unknown_zero = false)
       : tech(t), memories(m), unknown_as_zero(unknown_zero) {}
-  size_t unknown_tied() const { return tied_unknown.size(); }
+  size_t   unknown_tied() const { return tied_unknown.size(); }
   Endpoint bit(Pin p, int b, int depth = 0) {
     if (p.is_invalid() || b < 0) {
       throw std::runtime_error("invalid physical wiring operand");
@@ -499,21 +565,87 @@ struct Cell {
   Ann_place   place;
   bool        locked = false;
 };
+struct FloorplanPorts {
+  color::Floorplan_kind kind            = color::Floorplan_kind::logic;
+  bool                  input_allowlist = false;
+  bool                  constant        = false;
+  std::set<std::string> data, controls;
+};
+std::map<std::string, FloorplanPorts> floorplan_ports(const std::string& library) {
+  std::map<std::string, FloorplanPorts> ports;
+  for (const auto& c : liberty::scan_output_drives(library)) {
+    if (c.sequential) {
+      ports[c.name].kind = color::Floorplan_kind::barrier;
+    }
+  }
+  auto flops = liberty::scan_dff_cells(library);
+  for (const auto& c : liberty::scan_async_dff_cells(library)) {
+    flops.push_back(c);
+  }
+  for (const auto& c : liberty::scan_latch_cells(library)) {
+    flops.push_back(c);
+  }
+  for (const auto& c : flops) {
+    auto& p           = ports[c.name];
+    p.kind            = color::Floorplan_kind::state;
+    p.input_allowlist = true;
+    p.data.insert(c.d_pin);
+    p.controls.insert(c.clk_pin);
+    if (!c.reset0_pin.empty()) {
+      p.controls.insert(c.reset0_pin);
+    }
+    if (!c.reset1_pin.empty()) {
+      p.controls.insert(c.reset1_pin);
+    }
+  }
+  for (const auto& c : liberty::scan_memory_cells(library)) {
+    auto& p           = ports[c.name];
+    p.kind            = color::Floorplan_kind::macro;
+    p.input_allowlist = true;
+    for (const auto& pin : c.pins) {
+      if (pin.address_data_input) {
+        p.data.insert(pin.name);
+      }
+      if (pin.clock_input) {
+        p.controls.insert(pin.name);
+      }
+    }
+  }
+  for (const auto& c : liberty::scan_icg_cells(library)) {
+    ports[c.name].kind = color::Floorplan_kind::barrier;
+  }
+  for (const auto& c : liberty::scan_constant_cells(library)) {
+    ports[c.name].kind     = color::Floorplan_kind::barrier;
+    ports[c.name].constant = true;
+  }
+  return ports;
+}
 struct View {
   dp::Design                                    design;
-  bool                                          native_orientations = false;
-  bool                                          align_macros        = false;
-  bool                                          centroids           = false;
-  bool                                          color_centroids     = false;
+  bool                                          hierarchy_snap         = false;
+  bool                                          native_orientations    = false;
+  bool                                          align_macros           = false;
+  bool                                          global_macro_alignment = false;
+  bool                                          centroids              = false;
+  bool                                          color_centroids        = false;
+  bool                                          placement_colors       = false;
+  bool                                          memory_colors          = false;
+  double                                        color_maximum          = 30000;
+  double                                        color_minimum          = 0;
+  std::map<std::string, FloorplanPorts>         fp_ports;
+  color::Floorplan_coloring                     fp_coloring;
   size_t                                        hierarchy_centroids = 0;
   std::optional<std::vector<dp::CentroidGroup>> frozen_centroids;
   size_t                                        frozen_hierarchy_centroids = 0;
   std::vector<std::vector<std::string>>         frozen_members;
   std::vector<std::string>                      frozen_color_names;
+  std::map<std::string, int>                    frozen_placement_owner;
   double                                        centroid_minimum    = 2000;
   int                                           centroid_min_copies = 4;
   int64_t                                       halo_x = 0, halo_y = 0;
   ph::Floorplan                                 fp;
+  std::vector<std::string>                      io_buses;
+  std::vector<int>                              io_bits;
   std::vector<Cell>                             cells;
   std::vector<Endpoint>                         pins;
   std::vector<Endpoint>                         drivers;
@@ -534,6 +666,126 @@ std::pair<double, double> offset(const ph::Macro& macro, const std::string& name
   auto [x, y]
       = ph::orient_point((r.xl + r.xh) / 2 + macro.origin_x, (r.yl + r.yh) / 2 + macro.origin_y, macro.width, macro.height, o);
   return {x * dbu, y * dbu};
+}
+color::Floorplan_coloring analyze_floorplan_colors(const View& v, const ph::Technology& tech, const std::vector<int>& scopes) {
+  using Kind = color::Floorplan_kind;
+  std::vector<color::Floorplan_node> nodes(v.design.node_x.size());
+  std::vector<FloorplanPorts>        roles(v.cells.size());
+  for (size_t i = 0; i < nodes.size(); ++i) {
+    nodes[i].kind = Kind::barrier;
+  }
+  for (size_t i = 0; i < v.cells.size(); ++i) {
+    const auto& cell = v.cells[i];
+    if (auto found = v.fp_ports.find(cell.macro); found != v.fp_ports.end()) {
+      roles[i] = found->second;
+    }
+    if (gu::type_op_of(cell.node) == Ntype_op::Memory) {
+      roles[i].input_allowlist = true;
+      for (auto pin : cell.node.inp_sorted_pins()) {
+        const auto offset = pin.get_port_id() % Ntype::Memory_port_stride;
+        if (offset == 0 || offset == 3 || offset == 12) {  // address, data, whole-array data
+          roles[i].data.insert(std::format("in_{}", pin.get_port_id()));
+        } else if (offset == 2 || offset == 14) {  // clock and synchronous reset
+          roles[i].controls.insert(std::format("in_{}", pin.get_port_id()));
+        }
+      }
+    }
+    nodes[i] = {cell.name, v.design.node_macro[i] ? Kind::macro : roles[i].kind, double(cell.place.width) * cell.place.height};
+  }
+  std::vector<std::pair<int, int>>              edges;
+  std::vector<std::vector<std::pair<int, int>>> input_nets(nodes.size());
+  int                                           net_id = 0;
+  std::vector<std::vector<int>>                 backward(nodes.size()), forward(nodes.size());
+  std::vector<int>                              controls;
+  const auto                                    pin_base = [](const std::string& pin) { return pin.substr(0, pin.find('[')); };
+  const auto                                    index
+      = [&](const Endpoint& p) { return int(p.instance == "PIN" ? v.cells.size() + v.terminal.at(p.pin) : v.cell.at(p.instance)); };
+  for (const auto& [driver, sinks] : v.nets) {
+    const int from = index(driver);
+    ++net_id;
+    for (const auto& sink : sinks) {
+      const int to = index(sink);
+      backward[to].push_back(from);
+      forward[from].push_back(to);
+      if (sink.instance == "PIN") {
+        continue;
+      }
+      const auto& p        = roles[to];
+      const auto  base     = pin_base(sink.pin);
+      const auto& physical = tech.macros.at(v.cells[to].macro).pins.at(sink.pin);
+      if (physical.use == "CLOCK" || p.controls.contains(base) || p.controls.contains(sink.pin)
+          || (nodes[to].kind == Kind::barrier && p.kind == Kind::barrier)) {
+        controls.push_back(from);
+        continue;
+      }
+      if (!p.input_allowlist || p.data.contains(base) || p.data.contains(sink.pin)) {
+        edges.emplace_back(from, to);
+        if (nodes[to].kind == Kind::macro) {
+          input_nets[to].emplace_back(from, net_id);
+        }
+      }
+    }
+  }
+  // Constant ties may feed buffers or other combinational gates. Such paths
+  // must not become shared-cone evidence merely because a buffer was retained.
+  // Stop this propagation at every state element and macro: constant inputs
+  // do not establish the value of stored state.
+  std::vector<size_t> remaining;
+  std::vector<int>    constant;
+  for (size_t n = 0; n < nodes.size(); ++n) {
+    remaining.push_back(backward[n].size());
+    if (n < roles.size() && roles[n].constant) {
+      constant.push_back(n);
+    }
+  }
+  while (!constant.empty()) {
+    const int n = constant.back();
+    constant.pop_back();
+    for (int next : forward[n]) {
+      if (--remaining[next] == 0 && nodes[next].kind == Kind::logic) {
+        nodes[next].kind = Kind::barrier;
+        constant.push_back(next);
+      }
+    }
+  }
+  std::vector<bool> seen(nodes.size());
+  while (!controls.empty()) {
+    const int n = controls.back();
+    controls.pop_back();
+    if (seen[n] || nodes[n].kind != Kind::logic) {
+      continue;
+    }
+    seen[n]       = true;
+    nodes[n].kind = Kind::barrier;
+    controls.insert(controls.end(), backward[n].begin(), backward[n].end());
+  }
+  for (size_t n = 0; n < nodes.size(); ++n) {
+    for (const auto& [from, id] : input_nets[n]) {
+      if (size_t(from) >= v.cells.size() || nodes[from].kind != Kind::barrier) {
+        nodes[n].input_nets.push_back(id);
+      }
+    }
+  }
+  color::Floorplan_coloring preserved;
+  if (v.frozen_centroids && v.placement_colors) {
+    preserved.initial_memory_groups = v.fp_coloring.initial_memory_groups;
+    preserved.merges_per_round      = v.fp_coloring.merges_per_round;
+    preserved.truncated_cones       = v.fp_coloring.truncated_cones;
+    preserved.owner.assign(nodes.size(), -1);
+    for (const auto& name : v.frozen_color_names) {
+      preserved.colors.push_back({name, {}, 0, 0});
+    }
+    for (size_t i = 0; i < v.cells.size(); ++i) {
+      if (auto it = v.frozen_placement_owner.find(v.cells[i].name);
+          it != v.frozen_placement_owner.end() && (nodes[i].kind == Kind::logic || nodes[i].kind == Kind::macro)) {
+        preserved.owner[i] = it->second;
+      }
+    }
+  }
+  return color::floorplan_color(nodes,
+                                edges,
+                                v.frozen_centroids && v.placement_colors ? &preserved : nullptr,
+                                {v.memory_colors, v.color_maximum * dp::detail::centroid_cell_area(v.design), scopes});
 }
 void make_arrays(View& v, const ph::Technology& tech) {
   v.design             = {};
@@ -620,12 +872,22 @@ void make_arrays(View& v, const ph::Technology& tech) {
     for (const auto& c : v.cells) {
       const auto owner = v.cohesion_owners.find(c.name);
       const int  i     = v.cell.at(c.name);
-      if (d.node_macro[i] && owner != v.cohesion_owners.end()) {
-        const auto [it, inserted] = classes.try_emplace({c.macro, owner->second}, classes.size());
+      if (d.node_macro[i] && (v.global_macro_alignment || owner != v.cohesion_owners.end())) {
+        const auto [it, inserted]
+            = classes.try_emplace({c.macro, v.global_macro_alignment ? std::string{} : owner->second}, classes.size());
         (void)inserted;
         d.node_align_class[i] = it->second;
       }
     }
+  }
+  if (v.hierarchy_snap) {
+    std::vector<std::string>               names(d.node_x.size());
+    std::vector<std::pair<double, double>> sizes(d.node_x.size());
+    for (size_t i = 0; i < v.cells.size(); ++i) {
+      names[i] = v.cells[i].name;
+      sizes[i] = {d.node_size_x[i], d.node_size_y[i]};
+    }
+    d.node_snap_class = hierarchy_macro_classes(names, sizes, d.node_macro, d.num_movable);
   }
   if (!v.cohesion_owners.empty()) {
     std::map<std::string, std::vector<int>> groups;
@@ -688,22 +950,7 @@ void make_arrays(View& v, const ph::Technology& tech) {
   if (v.centroids) {
     std::vector<std::string> paths, masters;
     for (const auto& c : v.cells) {
-      std::istringstream input(c.name);
-      std::string        path, part;
-      while (std::getline(input, part, '.')) {
-        // Synthesis color containers retain the original instance path inside.
-        const bool generated
-            = part.starts_with("sub_") && part.size() > 4
-              && std::all_of(part.begin() + 4, part.end(), [](unsigned char ch) { return ch >= '0' && ch <= '9'; });
-        if (generated) {
-          continue;
-        }
-        if (!path.empty()) {
-          path += '.';
-        }
-        path += part;
-      }
-      paths.push_back(std::move(path));
+      paths.push_back(original_hierarchy_path(c.name));
       masters.push_back(c.macro);
     }
     paths.resize(d.node_x.size());
@@ -720,7 +967,7 @@ void make_arrays(View& v, const ph::Technology& tech) {
         colors.emplace(d.centroid_color_names[i], i);
       }
     }
-    for (size_t i = 0; i < v.cells.size(); ++i) {
+    for (size_t i = 0; !v.placement_colors && i < v.cells.size(); ++i) {
       if (auto attr = v.cells[i].node.attr(attrs::synth_color_group); attr.has()) {
         auto key               = std::string(attr.get());
         const auto [it, added] = colors.try_emplace(key, colors.size());
@@ -745,9 +992,21 @@ void make_arrays(View& v, const ph::Technology& tech) {
     } else {
       d.centroid_groups     = dp::detail::centroid_candidates(d, paths, masters, v.centroid_minimum, v.centroid_min_copies);
       v.hierarchy_centroids = d.centroid_groups.size();
-      if (v.color_centroids) {
-        add_color_centroids(d, v.centroid_minimum);
+      if (v.color_centroids && !v.placement_colors) {
+        add_color_centroids(d, v.color_minimum);
       }
+    }
+    if (v.placement_colors) {
+      v.fp_coloring = analyze_floorplan_colors(v, tech, v.frozen_centroids ? std::vector<int>{} : centroid_node_scopes(d, paths));
+      d.node_centroid_color = v.fp_coloring.owner;
+      d.centroid_color_names.clear();
+      for (const auto& c : v.fp_coloring.colors) {
+        d.centroid_color_names.push_back(c.name);
+      }
+      placement_color_centroids(d, paths, v.fp_coloring, v.color_minimum, v.frozen_centroids.has_value());
+      v.hierarchy_centroids = std::count_if(d.centroid_groups.begin(), d.centroid_groups.end(), [](const auto& g) {
+        return !g.name.starts_with("@placement:");
+      });
     }
   }
   if (v.native_orientations) {
@@ -806,6 +1065,9 @@ void refresh_floorplan_view(View& v, const View& baseline, Result& state, const 
       std::set<std::string> visited;
       while (!previous.contains(origin) && state.fp_buffer_origins.contains(origin) && visited.insert(origin).second) {
         origin = state.fp_buffer_origins.at(origin);
+      }
+      if (auto it = v.frozen_placement_owner.find(origin); it != v.frozen_placement_owner.end()) {
+        v.frozen_placement_owner[name] = it->second;
       }
       for (auto& members : v.frozen_members) {
         if (std::find(members.begin(), members.end(), origin) != members.end()) {
@@ -1975,6 +2237,36 @@ Steiner_tree steiner_tree(const std::vector<Point>& points) {
   std::free(tree.branch);
   return result;
 }
+// Area-weighted RMS movement, in density bins, of the movable cells since the
+// previous timing checkpoint. Shared by the FP and macro GP checkpoints.
+static double checkpoint_movement(const dp::Design& physical, const std::vector<Cell>& cells,
+                                  const std::map<std::string, Point>& previous, int bins) {
+  double       movement = 0, area = 0;
+  const double bin_x = (physical.layout.xh - physical.layout.xl) / bins;
+  const double bin_y = (physical.layout.yh - physical.layout.yl) / bins;
+  const size_t count = std::min(cells.size(), static_cast<size_t>(std::max(0, physical.num_movable)));
+  for (size_t i = 0; i < count; ++i) {
+    if (auto old = previous.find(cells[i].name); old != previous.end()) {
+      const double cell_area  = physical.node_size_x[i] * physical.node_size_y[i];
+      movement               += cell_area
+                                * (std::pow((physical.node_x[i] - old->second.first) / bin_x, 2)
+                                   + std::pow((physical.node_y[i] - old->second.second) / bin_y, 2));
+      area                   += cell_area;
+    }
+  }
+  return area ? std::sqrt(movement / area) : 0;
+}
+// Movement/budget gate shared by the FP and macro GP timing checkpoints. One
+// budgeted update stays reserved for the final coordinates; rapid early motion
+// is coalesced so the whole solve, not just its start, is timed.
+static bool defer_timing_checkpoint(const Options& options, unsigned done, bool final, int iteration, int max_iterations,
+                                    double movement) {
+  if (options.fp_timing_movement <= 0 || !done || final) {
+    return false;
+  }
+  const unsigned quota = std::max(1, int(std::ceil(double(options.fp_timing_max_updates - 1) * iteration / max_iterations)));
+  return done >= quota || movement < options.fp_timing_movement;
+}
 static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, const Options& options) {
   if (options.retain_placement && (!options.previous || options.timing_seed || options.fp_place || options.macro_mode != "none")) {
     throw std::invalid_argument("timing snapshot requires an explicit previous placement and no placement stages");
@@ -1993,13 +2285,19 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
       throw std::invalid_argument("synth.place.die/core expect nonnegative xl,yl,xh,yh microns with xh>xl and yh>yl");
     }
   }
-  if (options.macro_mode != "none" && options.macro_mode != "h2d" && options.macro_mode != "r8h2" && options.macro_mode != "r8h3") {
-    throw std::invalid_argument("macro placement mode must be none, h2d, r8h2 or r8h3");
+  if (options.macro_mode != "none" && options.macro_mode != "h2d") {
+    throw std::invalid_argument("macro placement mode must be none or h2d");
   }
   if (!std::isfinite(options.timing_max_weight) || options.timing_max_weight < 1 || options.timing_max_weight > max_net_weight
-      || !std::isfinite(options.timing_smoothing)
-      || options.timing_smoothing < 0 || options.timing_smoothing > 1 || options.fp_timing_max_updates < 2) {
+      || !std::isfinite(options.timing_smoothing) || options.timing_smoothing < 0 || options.timing_smoothing > 1
+      || options.fp_timing_max_updates < 2 || !std::isfinite(options.timing_exponent) || options.timing_exponent < 1
+      || options.macro_timing_interval < 0) {
     throw std::invalid_argument("invalid timing weight/smoothing/update budget");
+  }
+  if (!std::isfinite(options.routability_macro_weight) || options.routability_macro_weight < 0
+      || !std::isfinite(options.routability_macro_range) || options.routability_macro_range <= 0
+      || options.routability_macro_range > 16) {
+    throw std::invalid_argument("invalid macro routing pressure controls");
   }
   if (!std::isfinite(options.stop_overflow) || options.stop_overflow < 0 || options.stop_overflow > 1
       || !std::isfinite(options.initial_density_weight) || options.initial_density_weight <= 0) {
@@ -2011,12 +2309,36 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
   if (!std::isfinite(options.timing_fraction) || options.timing_fraction <= 0 || options.timing_fraction > 1) {
     throw std::invalid_argument("timing fraction must be in (0, 1]");
   }
+  if (!std::isfinite(options.fp_attraction_outside) || options.fp_attraction_outside < 0) {
+    throw std::invalid_argument("invalid floorplan outside-circle attraction stiffness");
+  }
   if (options.fp_iterations < 0 || options.fp_timing_interval < 0 || options.fp_min_copies < 2 || options.fp_attraction <= 0
       || options.fp_repulsion <= 0 || (options.fp_place && options.macro_mode == "h2d")) {
     throw std::invalid_argument("invalid floorplan stage settings or incompatible H2D mode");
   }
+  if (options.analyze_colors_only
+      && (!options.fp_place || !options.fp_colors || options.fp_color_source == "synthesis" || options.final_cells
+          || options.previous || options.timing_seed || options.retain_placement || !options.cache_dir.empty()
+          || options.macro_mode != "none")) {
+    throw std::invalid_argument("color analysis requires uncached physical FP colors without other placement modes");
+  }
+  if ((options.fp_color_source != "synthesis" && options.fp_color_source != "placement"
+       && options.fp_color_source != "memory_first")
+      || !std::isfinite(options.fp_color_minimum) || (options.fp_color_minimum < 0 && options.fp_color_minimum != -1)
+      || !std::isfinite(options.fp_color_maximum) || options.fp_color_maximum <= 0 || options.fp_pin_interval < 1
+      || !std::isfinite(options.fp_pin_step) || options.fp_pin_step <= 0 || options.fp_pin_step > .5
+      || !std::isfinite(options.fp_pin_improvement) || options.fp_pin_improvement < 0 || options.fp_pin_improvement >= 1) {
+    throw std::invalid_argument("invalid FP color/pin adjustment controls");
+  }
+  if (options.macro_pin_interval < 1 || !std::isfinite(options.macro_pin_step) || options.macro_pin_step <= 0
+      || options.macro_pin_step > .5 || !std::isfinite(options.macro_pin_improvement) || options.macro_pin_improvement < 0
+      || options.macro_pin_improvement >= 1) {
+    throw std::invalid_argument("invalid macro pin adjustment controls");
+  }
   for (double x : {options.fp_minimum,
                    options.fp_attraction,
+                   options.fp_parent_weight,
+                   options.fp_parent_outside,
                    options.fp_repulsion,
                    options.fp_anchor,
                    options.fp_snap.alignment_tolerance,
@@ -2027,6 +2349,23 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
     if (!std::isfinite(x) || x < 0) {
       throw std::invalid_argument("invalid floorplan coefficient");
     }
+  }
+  if (options.macro_snap_mode != "alignment" && options.macro_snap_mode != "symmetry") {
+    throw std::invalid_argument("macro snap mode must be alignment or symmetry");
+  }
+  for (double value : {options.macro_snap_options.alignment_tolerance,
+                       options.macro_snap_options.spacing_tolerance,
+                       options.macro_snap_options.spacing_penalty,
+                       options.macro_snap_options.symmetry_tolerance,
+                       options.macro_snap_options.max_displacement}) {
+    if (!std::isfinite(value) || value < 0) {
+      throw std::invalid_argument("invalid macro regularity control");
+    }
+  }
+  if (!std::isfinite(options.fp_align_weight) || options.fp_align_weight < 0 || !std::isfinite(options.fp_align_sigma)
+      || options.fp_align_sigma < 0
+      || (options.fp_align_weight > 0 && (options.fp_align_start < 0 || options.fp_align_start >= options.fp_align_full))) {
+    throw std::invalid_argument("invalid FP centroid alignment controls");
   }
   const bool macro_active = options.macro_mode == "h2d" && !options.timing_seed;
   if (macro_active
@@ -2041,8 +2380,8 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
   if (macro_active && !options.full) {
     throw std::invalid_argument("H2D requires full placement mode");
   }
-  if ((options.macro_align_weight > 0 || options.macro_snap) && macro_active) {
-    throw std::invalid_argument("alignment/snap require plain macro placement mode");
+  if ((options.macro_align_weight > 0 || options.macro_snap || options.macro_pin_adjust) && macro_active) {
+    throw std::invalid_argument("alignment/snap/pin adjustment require plain macro placement mode");
   }
   for (double value :
        {options.macro_align_weight, options.macro_align_sigma, options.macro_align_overlap_boost, options.macro_snap_tolerance}) {
@@ -2078,16 +2417,42 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
   v.native_orientations = macro_active;
   // ECO starts from the supplied physical frame; centroid initialization is a
   // fresh-placement stage and must not overwrite its unchanged neighbors.
-  v.centroids           = !options.previous && (options.fp_place || options.macro_mode == "r8h2" || options.macro_mode == "r8h3");
-  v.color_centroids     = options.fp_place && options.fp_colors;
-  v.centroid_minimum    = options.fp_place ? options.fp_minimum : (options.macro_mode == "r8h3" ? 1000 : 2000);
-  v.centroid_min_copies = options.fp_min_copies;
-  v.align_macros        = options.macro_align_weight > 0 || options.macro_snap;
-  v.weights             = options.net_weights;
-  v.fp.design           = std::string(source.get_name());
-  v.fp.dbu              = tech.dbu;
-  const auto  memories  = memory_proxies(graph, tech, options.liberty);
+  v.centroids           = !options.previous && !options.timing_seed && options.fp_place;
+  v.color_centroids     = v.centroids && options.fp_place && options.fp_colors;
+  v.placement_colors    = v.color_centroids && options.fp_color_source != "synthesis";
+  v.memory_colors       = options.fp_color_source == "memory_first";
+  v.color_maximum       = options.fp_color_maximum;
+  v.color_minimum       = options.fp_color_minimum < 0 ? options.fp_minimum : options.fp_color_minimum;
+  if (v.placement_colors) {
+    if (options.liberty.empty()) {
+      throw std::invalid_argument("placement colors require Liberty pin-role metadata");
+    }
+    v.fp_ports = floorplan_ports(options.liberty);
+  }
+  v.centroid_minimum       = options.fp_minimum;
+  v.centroid_min_copies    = options.fp_min_copies;
+  v.hierarchy_snap         = options.macro_snap;
+  v.align_macros           = options.macro_align_weight > 0 || options.macro_snap;
+  v.global_macro_alignment = options.macro_align_global && options.macro_align_weight > 0;
+  v.weights                = options.net_weights;
+  v.fp.design              = std::string(source.get_name());
+  v.fp.dbu                 = tech.dbu;
+  const auto  memories     = memory_proxies(graph, tech, options.liberty);
   Resolver    resolver(tech, memories, options.unknown_const_zero);
+  // Opt-in: the flat reset nets are bounded before the first cell is read, so the buffers place like any cell.
+  // A driver that resolves to a constant (the tied inactive pin of a clear+preset flop) is not a reset net.
+  const auto reset_tree = options.reset_fanout ? buffer_reset_nets(graph,
+                                                                   tech,
+                                                                   options.liberty,
+                                                                   options.reset_fanout,
+                                                                   [&](const Pin& driver) {
+                                                                     try {
+                                                                       return resolver.bit(driver, 0).constant >= 0;
+                                                                     } catch (const std::exception&) {
+                                                                       return true;  // unknown constant: left to the tie logic
+                                                                     }
+                                                                   })
+                                                : Reset_tree_stats{};
   double      area      = 0;
   int64_t     max_width = 0, max_height = 0;
   std::string site_name;
@@ -2206,9 +2571,8 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
     int64_t columns = 0, rows = 0, origin_x = 0, origin_y = 0;
     if (options.die.empty() && options.core.empty()) {
       const double core_area = area / options.utilization;
-      columns = std::max<int64_t>(std::ceil(std::sqrt(core_area * options.aspect) / sw), (max_width + sw - 1) / sw);
-      rows
-          = std::max<int64_t>({2, static_cast<int64_t>(std::ceil(core_area / (columns * sw * rh))), (max_height + rh - 1) / rh});
+      columns                = std::max<int64_t>(std::ceil(std::sqrt(core_area * options.aspect) / sw), (max_width + sw - 1) / sw);
+      rows = std::max<int64_t>({2, static_cast<int64_t>(std::ceil(core_area / (columns * sw * rh))), (max_height + rh - 1) / rh});
       v.fp.die = {0, 0, double(columns * sw), double(rows * rh)};
     } else {
       // A benchmark-fixed frame (ORFS DIE_AREA/CORE_AREA, microns). The core snaps inward to the
@@ -2216,18 +2580,15 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
       const auto& die_um  = options.die.empty() ? options.core : options.die;
       const auto& core_um = options.core.empty() ? options.die : options.core;
       const auto  dbu     = [&](double um) { return um * tech.dbu; };
-      v.fp.die            = {std::round(dbu(die_um[0])),
-                             std::round(dbu(die_um[1])),
-                             std::round(dbu(die_um[2])),
-                             std::round(dbu(die_um[3]))};
-      const auto lo_x     = static_cast<int64_t>(std::ceil(dbu(core_um[0]) / sw - 1e-9));
-      const auto lo_y     = static_cast<int64_t>(std::ceil(dbu(core_um[1]) / rh - 1e-9));
-      const auto hi_x     = static_cast<int64_t>(std::floor(dbu(core_um[2]) / sw + 1e-9));
-      const auto hi_y     = static_cast<int64_t>(std::floor(dbu(core_um[3]) / rh + 1e-9));
-      origin_x            = lo_x * sw;
-      origin_y            = lo_y * rh;
-      columns             = hi_x - lo_x;
-      rows                = hi_y - lo_y;
+      v.fp.die = {std::round(dbu(die_um[0])), std::round(dbu(die_um[1])), std::round(dbu(die_um[2])), std::round(dbu(die_um[3]))};
+      const auto lo_x = static_cast<int64_t>(std::ceil(dbu(core_um[0]) / sw - 1e-9));
+      const auto lo_y = static_cast<int64_t>(std::ceil(dbu(core_um[1]) / rh - 1e-9));
+      const auto hi_x = static_cast<int64_t>(std::floor(dbu(core_um[2]) / sw + 1e-9));
+      const auto hi_y = static_cast<int64_t>(std::floor(dbu(core_um[3]) / rh + 1e-9));
+      origin_x        = lo_x * sw;
+      origin_y        = lo_y * rh;
+      columns         = hi_x - lo_x;
+      rows            = hi_y - lo_y;
       if (columns < 1 || rows < 1) {
         throw std::runtime_error("synth.place.core holds no complete site/row");
       }
@@ -2293,17 +2654,6 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
     for (const auto& c : previous->components) {
       old.emplace(c.name, &c);
     }
-    if (options.retain_placement) {
-      if (old.size() != v.cells.size()) {
-        throw std::runtime_error("timing snapshot component count differs from netlist");
-      }
-      for (const auto& c : v.cells) {
-        const auto it = old.find(c.name);
-        if (it == old.end() || it->second->macro != c.macro || it->second->place.status == Status::UNPLACED) {
-          throw std::runtime_error("timing snapshot requires every mapped cell placed with its original master: " + c.name);
-        }
-      }
-    }
     for (auto& c : v.cells) {
       if (const auto it = old.find(c.name); it != old.end()) {
         const auto source_orientation = c.place.orientation;
@@ -2348,7 +2698,7 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
   // Terminals whose position came from the floorplan/previous frame; only the
   // rest get the default spread (and, on the ECO path, a slot from assign_io).
   std::unordered_set<std::string> imported_pos;
-  auto                            add_terminal = [&](Pin p, const std::string& name, const std::string& direction) {
+  auto add_terminal = [&](Pin p, const std::string& name, const std::string& direction, const std::string& bus, int bit) {
     ph::Terminal t;
     t.name      = name;
     t.direction = direction;
@@ -2367,8 +2717,10 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
         {-half, -half, half, half}
     });
     if (const auto it = imported_terms.find(name); it != imported_terms.end()) {
-      if (it->second.status != Status::FIXED && !previous) {
-        throw std::runtime_error("floorplan PINS must be FIXED: " + name);
+      const bool adjustable
+          = it->second.status == Status::PLACED && ((options.fp_place && options.fp_pin_adjust) || options.macro_pin_adjust);
+      if (it->second.status != Status::FIXED && !previous && !adjustable) {
+        throw std::runtime_error("floorplan PINS must be FIXED unless IO adjustment is enabled: " + name);
       }
       t           = it->second;
       t.direction = direction;
@@ -2376,12 +2728,14 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
     }
     top_pins.emplace(name, p);
     v.fp.terminals.push_back(std::move(t));
+    v.io_buses.push_back(bus);
+    v.io_bits.push_back(bit);
   };
   auto io = graph.get_io();
   for (const auto& d : io->get_input_pin_decls()) {
     const auto p = graph.get_input_pin(d.name);
     for (int b = 0; b < std::max(1, static_cast<int>(d.bits)); ++b) {
-      add_terminal(p, bit_name(d.name, std::max(1, static_cast<int>(d.bits)), b), "INPUT");
+      add_terminal(p, bit_name(d.name, std::max(1, static_cast<int>(d.bits)), b), "INPUT", d.name, b);
     }
   }
   for (const auto& d : io->get_output_pin_decls()) {
@@ -2392,7 +2746,7 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
     }
     for (int b = 0; b < std::max(1, static_cast<int>(d.bits)); ++b) {
       auto name = bit_name(d.name, std::max(1, static_cast<int>(d.bits)), b);
-      add_terminal(p, name, "OUTPUT");
+      add_terminal(p, name, "OUTPUT", d.name, b);
       v.nets[resolver.bit(drivers.front(), b)].push_back({"PIN", name, -1});
     }
   }
@@ -2450,7 +2804,11 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
             }
           }
           throw std::runtime_error(std::format("physical input pin absent from LEF: {}/{} (instance {}, sink port {}, declared{})",
-                                               cell.macro, name, cell.name, sink.get_port_id(), declared));
+                                               cell.macro,
+                                               name,
+                                               cell.name,
+                                               sink.get_port_id(),
+                                               declared));
         }
       }
     }
@@ -2693,6 +3051,25 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
       target.connect_driver(out);
     }
   }
+  // A saved DEF includes the physical tie cells materialized above. Validate
+  // the complete inventory only now, so re-importing the original mapped graph
+  // does not mistake those generated cells for extra netlist components.
+  if (options.retain_placement) {
+    std::map<std::string, const ph::Component*> old;
+    for (const auto& c : previous->components) {
+      old.emplace(c.name, &c);
+    }
+    if (old.size() != v.cells.size()) {
+      throw std::runtime_error("timing snapshot component count differs from netlist");
+    }
+    for (const auto& c : v.cells) {
+      const auto it = old.find(c.name);
+      if (it == old.end() || it->second->macro != c.macro || it->second->place.status == Status::UNPLACED
+          || c.place.status == Status::UNPLACED) {
+        throw std::runtime_error("timing snapshot requires every mapped cell placed with its original master: " + c.name);
+      }
+    }
+  }
   for (auto& c : v.cells) {
     if (c.place.status == Status::UNPLACED
         || (v.centroids && !c.locked && c.place.status != Status::FIXED && c.place.status != Status::LOCKED)) {
@@ -2850,10 +3227,8 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
       = (macro_solved || options.fp_place) ? CacheInfo{0, hashes.size(), false} : restore_cache(v, tech, cache_path, env, hashes);
   make_arrays(v, tech);
   dp::Options control;
-  control.max_iterations              = options.iterations;
-  control.centroid_weight             = v.centroids ? .25 : 0;
-  control.centroid_repulsion_weight   = options.macro_mode == "r8h3" ? 5 : 0;
-  control.centroid_adaptive_repulsion = options.macro_mode == "r8h3";
+  control.max_iterations  = options.iterations;
+  control.centroid_weight = v.centroids ? .25 : 0;
   control.bins_x = control.bins_y    = options.bins;
   control.num_threads                = options.threads;
   control.target_density             = options.density;
@@ -2870,25 +3245,41 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
   control.fixed_macro_overlap_weight = options.fixed_macro_overlap_weight;
   control.wirelength_gamma_end       = options.wirelength_gamma_end;
   control.cohesion_weight            = options.cohesion / tech.dbu;
-  control.macro_align_weight         = options.macro_align_weight;
-  control.macro_align_sigma          = options.macro_align_sigma;
-  control.macro_align_start          = options.macro_align_start;
-  control.macro_align_full           = options.macro_align_full;
-  control.macro_align_overlap_boost  = options.macro_align_overlap_boost;
-  control.macro_align_nearest        = options.macro_align_nearest;
-  control.macro_snap                 = options.macro_snap;
-  control.macro_snap_tolerance       = options.macro_snap_tolerance;
-  control.macro_snap_weight          = options.macro_snap_weight;
-  control.automatic_bins             = options.automatic_bins;
-  control.scale_macro_density        = options.scale_macro_density;
-  control.exact_macro_density        = options.exact_macro_density;
-  control.exact_cell_density         = options.exact_cell_density;
-  control.adaptive_density           = options.adaptive_density;
-  control.macro_overlap_weight       = options.macro_overlap_weight;
-  control.macro_jitter               = options.macro_jitter;
-  control.schedule_iterations        = options.schedule_iterations;
+  // The default alignment ramp only applies when movable macros can pair.
+  // Cell-only/fixed-macro runs must not wait for an inactive macro ramp.
+  bool          has_alignment_pair   = false;
+  std::set<int> alignment_classes;
+  for (int i = 0; i < v.design.num_movable; ++i) {
+    if (!v.design.node_macro.empty() && v.design.node_macro[i] && !v.design.node_align_class.empty()
+        && v.design.node_align_class[i] >= 0 && !alignment_classes.insert(v.design.node_align_class[i]).second) {
+      has_alignment_pair = true;
+      break;
+    }
+  }
+  control.macro_align_weight        = has_alignment_pair ? options.macro_align_weight : 0;
+  control.macro_align_sigma         = options.macro_align_sigma;
+  control.macro_align_start         = options.macro_align_start;
+  control.macro_align_full          = options.macro_align_full;
+  control.macro_align_overlap_boost = options.macro_align_overlap_boost;
+  control.macro_align_nearest       = options.macro_align_nearest;
+  control.macro_align_global        = options.macro_align_global;
+  control.macro_snap                = options.macro_snap;
+  control.macro_snap_regular        = options.macro_snap && options.macro_snap_mode == "symmetry";
+  control.macro_snap_options        = options.macro_snap_options;
+  control.macro_snap_tolerance      = options.macro_snap_tolerance;
+  control.macro_snap_weight         = options.macro_snap_weight;
+  control.automatic_bins            = options.automatic_bins;
+  control.scale_macro_density       = options.scale_macro_density;
+  control.exact_macro_density       = options.exact_macro_density;
+  control.exact_cell_density        = options.exact_cell_density;
+  control.adaptive_density          = options.adaptive_density;
+  control.macro_overlap_weight      = options.macro_overlap_weight;
+  control.macro_jitter              = options.macro_jitter;
+  control.schedule_iterations       = options.schedule_iterations;
   control.routability = control.improved_routability = options.routability;
   control.routability_charge_compensation            = options.routability_charge_compensation;
+  control.routability_macro_weight                   = options.routability_macro_weight;
+  control.routability_macro_range                    = options.routability_macro_range;
   if (options.routability) {
     control.route_capacity_h = control.route_capacity_v = 0;
     for (const auto& name : tech.routing_layers) {
@@ -2929,6 +3320,11 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
           s.align_pairs,
           s.align_residual,
           s.align_ramp);
+      line += std::format(",\"route_peak_utilization\":{},\"macro_routing_force\":{},\"macro_routing_channels\":{}",
+                          s.route_peak_utilization,
+                          s.macro_routing_force,
+                          s.macro_routing_channels);
+      line += std::format(",\"align_force\":{}", s.align_force);
       if (s.centroid_repulsion_weight > 0) {
         line += std::format(",\"centroid_overlap_pairs\":{},\"centroid_max_overlap\":{},\"centroid_repulsion_weight\":{}",
                             s.centroid_overlaps,
@@ -2939,9 +3335,100 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
       progress->flush();
     };
   }
-  std::vector<CentroidSample>      centroid_initial, centroid_gp;
-  dp::Result                       metrics, fp_metrics;
-  std::optional<dp::FloorplanSnap> fp_snap;
+  std::vector<CentroidSample>                   centroid_initial, centroid_gp;
+  dp::Result                                    metrics, fp_metrics;
+  std::optional<dp::FloorplanSnap>              fp_snap;
+  std::vector<std::pair<int, Pin_adjust_stats>> fp_pin_history, macro_pin_history;
+  bool                                          movable_macros = false;
+  for (int i = 0; i < v.design.num_movable; ++i) {
+    movable_macros |= !v.design.node_macro.empty() && v.design.node_macro[i];
+  }
+  const bool macro_pin_adjust = options.macro_pin_adjust && movable_macros;
+  const bool adjustable_io
+      = options.fp_place && options.fp_pin_adjust
+        && std::any_of(v.fp.terminals.begin(), v.fp.terminals.end(), [](const auto& t) { return t.status != Status::FIXED; });
+  double io_pitch = 1;
+  if ((options.fp_place && options.fp_pin_adjust) || macro_pin_adjust) {
+    for (const auto& t : v.fp.terminals) {
+      for (const auto& shape : t.shapes) {
+        const auto&  layer  = tech.layers.at(shape.layer);
+        const double extent = std::max(shape.rect.xh - shape.rect.xl, shape.rect.yh - shape.rect.yl);
+        io_pitch            = std::max(io_pitch, std::ceil(extent + std::max(layer.pitch_x, layer.pitch_y) * tech.dbu));
+      }
+    }
+  }
+  const auto adjust_pins = [&](dp::Design& d, int iteration, bool initialize, bool macro) {
+    const auto stats   = adjust_fp_pins(d,
+                                        v.fp,
+                                        v.io_buses,
+                                        v.io_bits,
+                                        io_pitch,
+                                        macro ? options.macro_pin_step : options.fp_pin_step,
+                                        macro ? options.macro_pin_improvement : options.fp_pin_improvement,
+                                        initialize);
+    auto&      history = macro ? macro_pin_history : fp_pin_history;
+    const auto stage   = macro ? "macro" : "fp";
+    const bool first   = history.empty();
+    history.emplace_back(iteration, stats);
+    fs::create_directories(options.output_dir);
+    std::ofstream           trace(options.output_dir + "/" + stage + "_pins.jsonl", first ? std::ios::trunc : std::ios::app);
+    rapidjson::StringBuffer buffer;
+    rapidjson::Writer<rapidjson::StringBuffer> json(buffer);
+    json.StartObject();
+    json.Key("stage");
+    json.String(stage);
+    json.Key("iteration");
+    json.Int(iteration);
+    json.Key("initialize");
+    json.Bool(initialize);
+    json.Key("moved");
+    json.Uint(stats.moved);
+    json.Key("reversals");
+    json.Uint(stats.reversals);
+    json.Key("travel_dbu");
+    json.Double(stats.travel);
+    json.Key("weighted_hpwl_before_dbu");
+    json.Double(stats.before);
+    json.Key("weighted_hpwl_after_dbu");
+    json.Double(stats.after);
+    json.Key("pins");
+    json.StartArray();
+    for (size_t i = 0; i < v.fp.terminals.size(); ++i) {
+      const auto& t = v.fp.terminals[i];
+      json.StartObject();
+      json.Key("name");
+      json.String(t.name.c_str());
+      json.Key("bus");
+      json.String(v.io_buses[i].c_str());
+      json.Key("bit");
+      json.Int(v.io_bits[i]);
+      json.Key("fixed");
+      json.Bool(t.status == Status::FIXED);
+      json.Key("x");
+      json.Int64(t.x);
+      json.Key("y");
+      json.Int64(t.y);
+      json.EndObject();
+    }
+    json.EndArray();
+    json.EndObject();
+    if (!(trace << buffer.GetString() << '\n')) {
+      throw std::runtime_error("cannot write IO movement report");
+    }
+  };
+  const auto pin_updater = [&](bool macro) {
+    return [&, macro](const dp::Design& snapshot, int iteration) {
+      auto adjusted = snapshot;
+      adjust_pins(adjusted, iteration, false, macro);
+      std::vector<dp::TerminalPosition> updates;
+      for (size_t i = v.cells.size(); i < snapshot.node_x.size(); ++i) {
+        if (adjusted.node_x[i] != snapshot.node_x[i] || adjusted.node_y[i] != snapshot.node_y[i]) {
+          updates.push_back({static_cast<int>(i), adjusted.node_x[i], adjusted.node_y[i]});
+        }
+      }
+      return updates;
+    };
+  };
   std::vector<dp::FloorplanCircle> fp_before;
   std::vector<CentroidSample>      fp_gp, fp_final;
   unsigned                         fp_checkpoints = 0, fp_sta_calls = 0, fp_resized = 0, fp_repairs = 0;
@@ -2952,7 +3439,7 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
     return dp::hpwl(d);
   }();
   Eco_stats eco;
-  if (options.timing_seed || options.retain_placement) {
+  if (options.timing_seed || options.retain_placement || options.analyze_colors_only) {
     metrics.legal = false;
   } else if (macro_solved && !cache.reused) {
     metrics       = macro_run->result.placement;
@@ -3020,7 +3507,11 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
       prototype.centroid_adaptive_repulsion = false;
       metrics                               = dp::place(v.design, prototype);
       capture(v, tech, false);
-      assign_io(v);
+      if ((options.fp_place && options.fp_pin_adjust) || macro_pin_adjust) {
+        adjust_pins(v.design, 0, true, !(options.fp_place && options.fp_pin_adjust));
+      } else {
+        assign_io(v);
+      }
       if (v.centroids) {
         v.cells = scratch_cells;
       }
@@ -3054,18 +3545,51 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
                           iteration);
       };
     }
-    if (options.fp_place && !v.design.centroid_groups.empty()) {
-      auto fp_control     = control;
+    if (options.fp_place && (!v.design.centroid_groups.empty() || adjustable_io)) {
+      control.centroid_distance_attraction = options.fp_distance_attraction;
+      control.centroid_attraction_outside  = options.fp_attraction_outside;
+      auto fp_control                      = control;
+      // This experiment acts during macro GP, after the optional FP stage.
+      if (options.macro_align_global) {
+        fp_control.macro_align_weight = 0;
+      }
       fp_control.legalize = fp_control.detailed_place = false;
       fp_control.centroid_weight                      = options.fp_attraction;
+      fp_control.centroid_align_weight                = options.fp_align_weight;
+      fp_control.centroid_align_sigma                 = options.fp_align_sigma;
+      fp_control.centroid_align_start                 = options.fp_align_start;
+      fp_control.centroid_align_full                  = options.fp_align_full;
+      fp_control.centroid_parent_weight               = options.fp_parent_weight;
+      fp_control.centroid_parent_outside              = options.fp_parent_outside;
       fp_control.centroid_repulsion_weight            = options.fp_repulsion;
       fp_control.centroid_adaptive_repulsion          = true;
       fp_control.max_iterations                       = options.fp_iterations ? options.fp_iterations : options.iterations;
       fp_control.observer_interval                    = fp_control.max_iterations + 1;
       // The FP stage has its own history and physical before-snap snapshot.
-      fp_control.progress_observer                    = {};
-      const auto observer                             = control.observer;
-      fp_control.observer                             = [&](const dp::Design& snapshot, dp::PlacementStage stage, int iteration) {
+      fs::create_directories(options.output_dir);
+      std::ofstream fp_progress(options.output_dir + "/fp_history.jsonl");
+      if (!fp_progress) {
+        throw std::runtime_error("cannot write floorplan progress history");
+      }
+      fp_control.progress_observer = [&](const dp::GpSample& sample) {
+        fp_progress << std::format(
+            R"({{"iteration":{},"overflow":{},"hpwl_dbu":{},"centroid_max_overlap":{},"centroid_align_pairs":{},"centroid_align_residual":{},"centroid_align_ramp":{},"centroid_align_force":{},"centroid_parent_edges":{},"centroid_parent_max_distance":{},"centroid_parent_force":{}}})",
+            sample.iteration,
+            sample.overflow,
+            sample.hpwl,
+            sample.centroid_max_overlap,
+            sample.centroid_align_pairs,
+            sample.centroid_align_residual,
+            sample.centroid_align_ramp,
+            sample.centroid_align_force,
+            sample.centroid_parent_edges,
+            sample.centroid_parent_max_distance,
+            sample.centroid_parent_force)
+                    << '\n';
+        fp_progress.flush();
+      };
+      const auto observer = control.observer;
+      fp_control.observer = [&](const dp::Design& snapshot, dp::PlacementStage stage, int iteration) {
         if (stage != dp::PlacementStage::centroid_start && stage != dp::PlacementStage::global_placement) {
           return;
         }
@@ -3084,12 +3608,21 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
                           options.output_dir + (stage == dp::PlacementStage::centroid_start ? "/fp_start.json" : "/fp_gp.json"),
                           iteration);
       };
+      if (options.fp_pin_adjust) {
+        fp_control.terminal_interval = options.fp_pin_interval;
+        fp_control.terminal_update   = pin_updater(false);
+      }
       std::map<std::string, Point> timed_positions;
       bool                         fp_checkpoint_forced = false;
       if (options.fp_evaluate && options.fp_timing_interval > 0) {
         v.frozen_centroids           = v.design.centroid_groups;
         v.frozen_hierarchy_centroids = v.hierarchy_centroids;
         v.frozen_color_names         = v.design.centroid_color_names;
+        if (v.placement_colors) {
+          for (size_t i = 0; i < v.cells.size(); ++i) {
+            v.frozen_placement_owner[v.cells[i].name] = v.fp_coloring.owner[i];
+          }
+        }
         for (const auto& group : v.design.centroid_groups) {
           std::vector<std::string> names;
           for (int i : group.nodes) {
@@ -3102,27 +3635,11 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
         fp_control.checkpoint_after_density = options.fp_timing_after_density;
         fp_control.checkpoint_observer      = [&](const dp::GpCheckpointSample& sample) { fp_checkpoint_forced = sample.forced; };
         fp_control.checkpoint               = [&](const dp::Design& physical, int iteration) {
-          double       movement = 0, total_area = 0;
-          const double bin_x = (physical.layout.xh - physical.layout.xl) / options.bins;
-          const double bin_y = (physical.layout.yh - physical.layout.yl) / options.bins;
-          for (size_t i = 0; i < v.cells.size(); ++i) {
-            if (auto old = timed_positions.find(v.cells[i].name); old != timed_positions.end() && int(i) < physical.num_movable) {
-              const double cell_area = physical.node_size_x[i] * physical.node_size_y[i];
-              movement              += cell_area
-                                       * (std::pow((physical.node_x[i] - old->second.first) / bin_x, 2)
-                                          + std::pow((physical.node_y[i] - old->second.second) / bin_y, 2));
-              total_area            += cell_area;
-            }
-          }
-          movement            = total_area ? std::sqrt(movement / total_area) : 0;
-          const bool  final   = iteration == fp_control.max_iterations || fp_checkpoint_forced;
-          const char* trigger = options.fp_timing_after_density ? (final ? "final" : "density-ready") : "interval";
+          const double movement = checkpoint_movement(physical, v.cells, timed_positions, options.bins);
+          const bool   final    = iteration == fp_control.max_iterations || fp_checkpoint_forced;
+          const char*  trigger  = options.fp_timing_after_density ? (final ? "final" : "density-ready") : "interval";
           if (options.fp_timing_movement > 0) {
-            // Reserve one budgeted update for the final coordinates. Coalesce
-            // rapid early motion so the whole solve, not just its start, is timed.
-            const unsigned quota
-                = std::max(1, int(std::ceil(double(options.fp_timing_max_updates - 1) * iteration / fp_control.max_iterations)));
-            if (fp_checkpoints && !final && (fp_checkpoints >= quota || movement < options.fp_timing_movement)) {
+            if (defer_timing_checkpoint(options, fp_checkpoints, final, iteration, fp_control.max_iterations, movement)) {
               return dp::GpUpdate{};
             }
             trigger = final ? "final" : fp_checkpoints ? "movement" : "initial";
@@ -3138,6 +3655,7 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
           }
           Result checkpoint;
           checkpoint.graph             = result.graph;
+          checkpoint.net_weights       = v.weights;
           checkpoint.fp_library        = result.fp_library;
           checkpoint.fp_buffer_origins = result.fp_buffer_origins;
           checkpoint.floorplan         = v.fp;
@@ -3188,7 +3706,11 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
             result.fp_library        = checkpoint.fp_library;
             result.fp_buffer_origins = checkpoint.fp_buffer_origins;
           }
-          const auto target = timing_weights(*checkpoint.parasitics, after, options.timing_fraction, options.timing_max_weight);
+          const auto target = timing_weights(*checkpoint.parasitics,
+                                             after,
+                                             options.timing_fraction,
+                                             options.timing_max_weight,
+                                             options.timing_exponent);
           if (target.empty()) {
             throw std::runtime_error("FP timing has no constrained data nets for weighting");
           }
@@ -3208,7 +3730,7 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
           fs::create_directories(options.output_dir);
           std::ofstream trace(options.output_dir + "/fp_timing.jsonl", fp_checkpoints == 1 ? std::ios::trunc : std::ios::app);
           trace << std::format(
-              R"({{"iteration":{},"trigger":"{}","movement_bins":{},"timing_seconds":{},"weighted_nets":{},"sta_calls":{},"resize_proposed":{},"resize_accepted":{},"repair_accepted":{},"before_delay":{},"after_delay":{},"time_unit_ps":{}}})",
+              R"({{"iteration":{},"trigger":"{}","movement_bins":{},"timing_seconds":{},"weighted_nets":{},"sta_calls":{},"resize_proposed":{},"resize_accepted":{},"repair_accepted":{},"before_delay":{},"after_delay":{},"time_unit_ps":{},"timing_exponent":{}}})",
               iteration,
               trigger,
               movement,
@@ -3220,7 +3742,8 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
               repairs,
               before.delay,
               after.delay,
-              after.time_unit_ps)
+              after.time_unit_ps,
+              options.timing_exponent)
                 << '\n';
           if (!trace) {
             throw std::runtime_error("cannot write FP timing checkpoint report");
@@ -3245,7 +3768,13 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
       for (size_t i = 0; i < fp_gp.size(); ++i) {
         const auto& g = v.design.centroid_groups[i];
         const auto& p = fp_gp[i];
-        fp_before.push_back({g.name, p.x, p.y, std::sqrt(p.area / (std::acos(-1.) * options.density)), p.area, g.family, g.parent});
+        fp_before.push_back({g.name,
+                             p.x,
+                             p.y,
+                             std::sqrt((g.repulsion_area < 0 ? p.area : g.repulsion_area) / (std::acos(-1.) * options.density)),
+                             p.area,
+                             g.family,
+                             g.parent});
       }
       const auto& l = v.design.layout;
       if (options.fp_snap_enabled) {
@@ -3263,6 +3792,7 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
       }
       // Warm-start the next mixed-size GP at the FP positions, with fixed
       // targets and NO centroid repulsion. Cells/macros are still movable.
+      control.centroid_anchor_macros_only = options.fp_anchor_macros_only && !v.design.centroid_targets.empty();
       control.centroid_weight             = options.fp_anchor;
       control.centroid_repulsion_weight   = 0;
       control.centroid_adaptive_repulsion = false;
@@ -3283,6 +3813,101 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
                    fp_snap->maximum_overlap);
       }
     }
+    // The second mixed-size solve must refresh its own RC/criticalities. FP
+    // weights alone become stale as macros settle around the frozen centroids.
+    // This callback changes only the objective: macro geometry, centroid targets
+    // and graph topology stay owned by the native solver. Resizing remains FP-only.
+    std::map<std::string, Point> macro_timed_positions;
+    unsigned                     macro_checkpoints       = 0;
+    bool                         macro_checkpoint_forced = false;
+    if (macro_pin_adjust) {
+      control.terminal_interval = options.macro_pin_interval;
+      control.terminal_update   = pin_updater(true);
+    }
+    if (movable_macros && options.fp_evaluate && options.macro_timing_interval > 0 && control.max_iterations > 0) {
+      control.checkpoint_interval      = options.macro_timing_interval;
+      control.checkpoint_final         = true;
+      control.checkpoint_after_density = options.fp_timing_after_density;
+      control.checkpoint_observer      = [&](const dp::GpCheckpointSample& sample) { macro_checkpoint_forced = sample.forced; };
+      control.checkpoint               = [&](const dp::Design& physical, int iteration) {
+        const auto   started  = std::chrono::steady_clock::now();
+        const bool   final    = macro_checkpoint_forced || iteration == control.max_iterations;
+        const double movement = checkpoint_movement(physical, v.cells, macro_timed_positions, options.bins);
+        if (defer_timing_checkpoint(options, macro_checkpoints, final, iteration, control.max_iterations, movement)) {
+          return dp::GpUpdate{};
+        }
+        auto view   = v;
+        view.design = physical;
+        for (size_t i = 0; i < view.cells.size(); ++i) {
+          view.cells[i].place.x = std::llround(physical.node_x[i]);
+          view.cells[i].place.y = std::llround(physical.node_y[i]);
+          // STA checks graph placement against the RC provenance. Keep the
+          // private physical graph at this checkpoint's coordinates as in FP.
+          view.cells[i].node.attr(attrs::place).set(view.cells[i].place);
+        }
+        Result checkpoint;
+        checkpoint.graph       = result.graph;
+        checkpoint.net_weights = v.weights;
+        checkpoint.fp_library  = result.fp_library;
+        checkpoint.floorplan   = view.fp;
+        checkpoint.floorplan.components.clear();
+        auto rc_options = options;
+        rc_options.full = false;
+        fs::create_directories(options.output_dir);
+        checkpoint.parasitics = estimate_rc(view, tech, rc_options, checkpoint.pin_locations);
+        for (const auto& c : view.cells) {
+          checkpoint.floorplan.components.push_back({c.name, c.macro, c.place});
+          checkpoint.parasitics->cells.push_back(
+              {c.name, c.place.x, c.place.y, static_cast<unsigned>(c.place.orientation), c.macro, c.place.width, c.place.height});
+        }
+        for (const auto& t : view.fp.terminals) {
+          checkpoint.parasitics->terminals.push_back({t.name, t.x, t.y});
+        }
+        const auto timing = options.fp_evaluate(checkpoint);
+        const auto target = timing_weights(*checkpoint.parasitics,
+                                           timing,
+                                           options.timing_fraction,
+                                           options.timing_max_weight,
+                                           options.timing_exponent);
+        if (target.empty()) {
+          throw std::runtime_error("macro timing has no constrained data nets for weighting");
+        }
+        dp::GpUpdate update;
+        for (const auto& driver : v.drivers) {
+          const auto name   = driver.instance == "PIN" ? driver.pin : driver.instance + ":" + driver.pin;
+          const auto old    = v.weights.contains(name) ? v.weights.at(name) : 1.;
+          const auto next   = target.contains(name) ? target.at(name) : 1.;
+          const auto weight = (1 - options.timing_smoothing) * old + options.timing_smoothing * next;
+          v.weights[name]   = weight;
+          update.net_weights.push_back(weight);
+        }
+        if (timing.wns) {
+          update.timing_violation = std::max(0., -*timing.wns);
+        }
+        macro_timed_positions.clear();
+        for (size_t i = 0; i < v.cells.size(); ++i) {
+          macro_timed_positions.emplace(v.cells[i].name, Point{physical.node_x[i], physical.node_y[i]});
+        }
+        ++macro_checkpoints;
+        std::ofstream trace(options.output_dir + "/macro_timing.jsonl", macro_checkpoints == 1 ? std::ios::trunc : std::ios::app);
+        trace << std::format(
+            R"({{"stage":"macro","iteration":{},"forced":{},"movement_bins":{},"timing_seconds":{},"weighted_nets":{},"timing_exponent":{},"max_applied_weight":{},"delay":{},"time_unit_ps":{}}})",
+            iteration,
+            final,
+            movement,
+            std::chrono::duration<double>(std::chrono::steady_clock::now() - started).count(),
+            target.size(),
+            options.timing_exponent,
+            *std::max_element(update.net_weights.begin(), update.net_weights.end()),
+            timing.delay,
+            timing.time_unit_ps)
+              << '\n';
+        if (!trace) {
+          throw std::runtime_error("cannot write macro timing checkpoint report");
+        }
+        return update;
+      };
+    }
     try {
       metrics = dp::place(v.design, control);
     } catch (const std::runtime_error&) {
@@ -3296,6 +3921,10 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
       }
       cache = {0, hashes.size(), false};
       make_arrays(v, tech);
+      // The retry is a fresh solve: restart the macro timing budget and trace.
+      macro_checkpoints       = 0;
+      macro_checkpoint_forced = false;
+      macro_timed_positions.clear();
       metrics = dp::place(v.design, control);
     }
     capture(v, tech, options.full);
@@ -3326,7 +3955,23 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
     json.Key("minimum_equivalent_cells");
     json.Double(options.fp_minimum);
     json.Key("color_candidates_enabled");
-    json.Bool(options.fp_colors);
+    json.Bool(v.color_centroids);
+    json.Key("color_source");
+    json.String(options.fp_color_source.c_str());
+    json.Key("color_minimum_equivalent_cells");
+    json.Double(v.color_minimum);
+    json.Key("pin_adjust_enabled");
+    json.Bool(options.fp_pin_adjust);
+    json.Key("pin_interval");
+    json.Int(options.fp_pin_interval);
+    json.Key("pin_pitch_dbu");
+    json.Double(io_pitch);
+    json.Key("pin_updates");
+    json.Uint64(fp_pin_history.size());
+    json.Key("macro_pin_adjust_enabled");
+    json.Bool(options.macro_pin_adjust);
+    json.Key("macro_pin_updates");
+    json.Uint64(macro_pin_history.size());
     json.Key("minimum_copies_per_parent");
     json.Int(options.fp_min_copies);
     json.Key("copy_scope");
@@ -3337,8 +3982,42 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
     json.Double(options.fp_attraction);
     json.Key("initial_repulsion_weight");
     json.Double(options.fp_repulsion);
+    json.Key("fixed_anchor_macros_only");
+    json.Bool(options.fp_anchor_macros_only);
     json.Key("fixed_anchor_weight");
     json.Double(options.fp_anchor);
+    json.Key("distance_attraction");
+    json.Bool(options.fp_distance_attraction);
+    json.Key("attraction_outside");
+    json.Double(options.fp_attraction_outside);
+    json.Key("centroid_parent_weight");
+    json.Double(options.fp_parent_weight);
+    json.Key("centroid_parent_outside");
+    json.Double(options.fp_parent_outside);
+    json.Key("centroid_parent_seconds");
+    json.Double(fp_metrics.centroid.parent_seconds);
+    json.Key("macro_centroid_parent_seconds");
+    json.Double(metrics.centroid.parent_seconds);
+    json.Key("centroid_align_weight");
+    json.Double(options.fp_align_weight);
+    json.Key("centroid_align_sigma");
+    json.Double(options.fp_align_sigma);
+    json.Key("centroid_align_start");
+    json.Int(options.fp_align_start);
+    json.Key("centroid_align_full");
+    json.Int(options.fp_align_full);
+    json.Key("centroid_align_seconds");
+    json.Double(fp_metrics.centroid.alignment_seconds);
+    json.Key("macro_centroid_align_seconds");
+    json.Double(metrics.centroid.alignment_seconds);
+    json.Key("fp_attraction_coefficient");
+    json.Double(fp_metrics.centroid.attraction_coefficient);
+    json.Key("fp_attraction_calibration_iteration");
+    json.Int(fp_metrics.centroid.attraction_calibration_iteration);
+    json.Key("macro_attraction_coefficient");
+    json.Double(metrics.centroid.attraction_coefficient);
+    json.Key("macro_attraction_calibration_iteration");
+    json.Int(metrics.centroid.attraction_calibration_iteration);
     json.Key("refinement_repulsion_weight");
     json.Double(control.centroid_repulsion_weight);
     json.Key("placement_cache_reused");
@@ -3349,10 +4028,35 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
     json.Double(fp_metrics.global_placement_seconds);
     json.Key("fp_poisson_seconds");
     json.Double(fp_metrics.poisson_seconds);
+    json.Key("fp_macro_routing_seconds");
+    json.Double(fp_metrics.macro_routing_seconds);
+    json.Key("fp_rudy_seconds");
+    json.Double(fp_metrics.rudy_seconds);
+    json.Key("fp_rudy_calls");
+    json.Int(fp_metrics.rudy_calls);
     json.Key("fp_overflow");
     json.Double(fp_metrics.overflow);
     json.Key("fp_converged");
     json.Bool(fp_metrics.converged);
+    json.Key("routability_macro_weight");
+    json.Double(options.routability_macro_weight);
+    json.Key("routability_macro_range");
+    json.Double(options.routability_macro_range);
+    json.Key("fp_routing_history");
+    json.StartArray();
+    for (const auto& sample : fp_metrics.history) {
+      json.StartObject();
+      json.Key("iteration");
+      json.Int(sample.iteration);
+      json.Key("route_peak_utilization");
+      json.Double(sample.route_peak_utilization);
+      json.Key("macro_routing_force");
+      json.Double(sample.macro_routing_force);
+      json.Key("macro_routing_channels");
+      json.Uint64(sample.macro_routing_channels);
+      json.EndObject();
+    }
+    json.EndArray();
     json.Key("fp_density_ready_iteration");
     json.Int(fp_metrics.density_iteration);
     json.Key("fp_continuation_deadline");
@@ -3367,6 +4071,8 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
     json.Int(options.fp_timing_interval);
     json.Key("timing_fraction");
     json.Double(options.timing_fraction);
+    json.Key("timing_exponent");
+    json.Double(options.timing_exponent);
     json.Key("timing_max_weight");
     json.Double(options.timing_max_weight);
     json.Key("timing_smoothing");
@@ -3422,6 +4128,8 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
     json.Int(fp_snap ? fp_snap->infeasible_families : 0);
     json.Key("snap_max_overlap");
     json.Double(fp_snap ? fp_snap->maximum_overlap : 0);
+    json.Key("snap_max_boundary_violation_dbu");
+    json.Double(fp_snap ? fp_snap->maximum_boundary_violation : 0);
     json.Key("snap_max_displacement");
     json.Double(fp_snap ? fp_snap->maximum_displacement : 0);
     json.Key("candidates");
@@ -3449,6 +4157,8 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
       json.Double(p.radius);
       json.Key("area");
       json.Double(p.area);
+      json.Key("repulsion_area_dbu2");
+      json.Double(v.design.centroid_groups[i].repulsion_area < 0 ? p.area : v.design.centroid_groups[i].repulsion_area);
       for (auto [key, x, y] : {
                std::tuple{       "before",              p.x,              p.y},
                std::tuple{       "target",              t.x,              t.y},
@@ -3497,6 +4207,20 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
       json.Double(s.hpwl);
       json.Key("centroid_max_overlap");
       json.Double(s.centroid_max_overlap);
+      json.Key("centroid_parent_edges");
+      json.Uint64(s.centroid_parent_edges);
+      json.Key("centroid_parent_max_distance");
+      json.Double(s.centroid_parent_max_distance);
+      json.Key("centroid_parent_force");
+      json.Double(s.centroid_parent_force);
+      json.Key("centroid_align_pairs");
+      json.Uint64(s.centroid_align_pairs);
+      json.Key("centroid_align_residual");
+      json.Double(s.centroid_align_residual);
+      json.Key("centroid_align_ramp");
+      json.Double(s.centroid_align_ramp);
+      json.Key("centroid_align_force");
+      json.Double(s.centroid_align_force);
       json.EndObject();
     }
     json.EndArray();
@@ -3506,6 +4230,109 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
       throw std::runtime_error("cannot write floorplan snap report");
     }
   }
+  if (v.placement_colors) {
+    const auto&      colors = v.fp_coloring;
+    std::vector<int> candidate(colors.colors.size(), -1);
+    for (size_t g = v.hierarchy_centroids; g < v.design.centroid_groups.size(); ++g) {
+      for (int c : v.design.centroid_groups[g].colors) {
+        candidate[c] = g;
+      }
+    }
+    std::vector<double> reserved(colors.colors.size());
+    double              physical = 0, uncolored = 0, unassigned = 0;
+    std::ofstream       membership(options.output_dir + "/fp_placement_colors.tsv");
+    membership << "node\tcolor\tphysical_area_dbu2\treservation_recipients\n";
+    for (size_t n = 0; n < v.cells.size(); ++n) {
+      const double node_area  = v.design.centroid_node_area[n];
+      physical               += node_area;
+      std::vector<int> recipients;
+      if (colors.owner[n] < 0) {
+        uncolored += node_area;
+        for (int c : colors.recipients[n]) {
+          if (candidate[c] >= 0) {
+            recipients.push_back(c);
+          }
+        }
+        if (recipients.empty()) {
+          unassigned += node_area;
+        }
+        for (int c : recipients) {
+          reserved[c] += node_area / recipients.size();
+        }
+      }
+      membership << v.cells[n].name << '\t' << colors.owner[n] << '\t' << node_area << '\t';
+      for (size_t k = 0; k < recipients.size(); ++k) {
+        membership << (k ? "," : "") << recipients[k];
+      }
+      membership << '\n';
+    }
+    rapidjson::StringBuffer                    buffer;
+    rapidjson::Writer<rapidjson::StringBuffer> json(buffer);
+    json.StartObject();
+    json.Key("source");
+    json.String(options.fp_color_source.c_str());
+    json.Key("hierarchy_scoped");
+    json.Bool(true);
+    json.Key("maximum_logic_equivalent_cells");
+    json.Double(v.memory_colors ? v.color_maximum : 0);
+    json.Key("initial_memory_groups");
+    json.Int(colors.initial_memory_groups);
+    json.Key("truncated_cones");
+    json.Int(colors.truncated_cones);
+    json.Key("merges_per_round");
+    json.StartArray();
+    for (int count : colors.merges_per_round) {
+      json.Int(count);
+    }
+    json.EndArray();
+    json.Key("physical_area_dbu2");
+    json.Double(physical);
+    json.Key("uncolored_area_dbu2");
+    json.Double(uncolored);
+    json.Key("reserved_area_dbu2");
+    json.Double(uncolored - unassigned);
+    json.Key("unassigned_area_dbu2");
+    json.Double(unassigned);
+    json.Key("equivalent_cell_area_dbu2");
+    json.Double(dp::detail::centroid_cell_area(v.design));
+    json.Key("minimum_equivalent_cells");
+    json.Double(v.color_minimum);
+    json.Key("membership_frozen_during_repair");
+    json.Bool(v.frozen_centroids.has_value());
+    json.Key("colors");
+    json.StartArray();
+    for (size_t c = 0; c < colors.colors.size(); ++c) {
+      const auto& color = colors.colors[c];
+      json.StartObject();
+      json.Key("id");
+      json.Uint64(c);
+      json.Key("seed");
+      json.String(color.name.c_str());
+      json.Key("macros");
+      json.Int(color.macros);
+      json.Key("members");
+      json.Uint64(color.members.size());
+      json.Key("merged_seeds");
+      json.Int(std::max(0, color.macros - 1));
+      json.Key("candidate");
+      json.Int(candidate[c]);
+      json.Key("physical_area_dbu2");
+      json.Double(color.area);
+      json.Key("reserved_area_dbu2");
+      json.Double(reserved[c]);
+      json.Key("allocated_member_area_dbu2");
+      json.Double(candidate[c] >= 0 ? v.design.centroid_groups[candidate[c]].repulsion_area - reserved[c] : 0);
+      json.Key("repulsion_area_dbu2");
+      json.Double(candidate[c] >= 0 ? v.design.centroid_groups[candidate[c]].repulsion_area : 0);
+      json.EndObject();
+    }
+    json.EndArray();
+    json.EndObject();
+    std::ofstream out(options.output_dir + "/fp_placement_colors.json");
+    if (!membership || !(out << buffer.GetString() << '\n')) {
+      throw std::runtime_error("cannot write FP placement color report");
+    }
+  }
   if (v.centroids) {
     const auto                                 final                = summarize_centroids(v.design);
     const double                               equivalent_cell_area = dp::detail::centroid_cell_area(v.design);
@@ -3513,10 +4340,8 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
     rapidjson::Writer<rapidjson::StringBuffer> json(buffer);
     json.StartObject();
     json.Key("mode");
-    json.String(options.fp_place ? (options.iterations == 0
-                                        ? "fp-direct-macro-frame"
-                                        : (options.fp_snap_enabled ? "fp-snap-frozen-targets" : "fp-unsnapped-frozen-targets"))
-                                 : (options.macro_mode == "r8h3" ? "r8h3-repelling-centroids" : "r8h2-moving-centroids"));
+    json.String(options.iterations == 0 ? "fp-direct-macro-frame"
+                                        : (options.fp_snap_enabled ? "fp-snap-frozen-targets" : "fp-unsnapped-frozen-targets"));
     json.Key("coordinate_units");
     json.String("DBU");
     json.Key("weight");
@@ -3546,7 +4371,7 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
     json.Key("completed");
     json.Bool(metrics.centroid.completed);
     json.Key("from_scratch");
-    json.Bool(!options.fp_place);
+    json.Bool(false);
     json.Key("start_iteration");
     json.Int(metrics.centroid.start_iteration);
     json.Key("iterations");
@@ -3593,7 +4418,9 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
       json.Key("anchor_equivalent_cells");
       json.Double(final[i].area / equivalent_cell_area);
       json.Key("repulsion_radius_dbu");
-      json.Double(std::sqrt(final[i].area / (std::acos(-1.) * control.target_density)));
+      json.Double(std::sqrt((g.repulsion_area < 0 ? final[i].area : g.repulsion_area) / (std::acos(-1.) * control.target_density)));
+      json.Key("repulsion_area_dbu2");
+      json.Double(g.repulsion_area < 0 ? final[i].area : g.repulsion_area);
       json.Key("colors");
       json.StartArray();
       for (int c : g.colors) {
@@ -3658,13 +4485,21 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
     }
     json.EndArray();
     json.EndObject();
-    std::ofstream membership(options.output_dir + "/" + (options.fp_place ? std::string("fp") : options.macro_mode)
-                             + "_membership.tsv");
+    std::ofstream membership(options.output_dir + "/fp_membership.tsv");
     for (size_t n = 0; n < v.cells.size(); ++n) {
       membership << v.cells[n].name << '\t' << v.design.node_centroid_color[n] << '\n';
     }
-    std::ofstream out(options.output_dir + "/" + (options.fp_place ? std::string("fp_candidates") : options.macro_mode) + ".json");
+    std::ofstream out(options.output_dir + "/fp_candidates.json");
     out << buffer.GetString() << '\n';
+  }
+  if (options.analyze_colors_only) {
+    result.floorplan = v.fp;
+    for (const auto& c : v.cells) {
+      result.floorplan.components.push_back({c.name, c.macro, c.place});
+    }
+    result.qor = std::format(R"({{"schema_version":1,"kind":"floorplan_color_analysis","legal":false,"colors":{}}})",
+                             v.fp_coloring.colors.size());
+    return result;
   }
   for (auto& c : v.cells) {
     c.node.attr(attrs::place).set(c.place);
@@ -3765,6 +4600,16 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
     json.StartObject();
     json.Key("bins_x");
     json.Int(metrics.bins_x);
+    json.Key("routability_macro_weight");
+    json.Double(options.routability_macro_weight);
+    json.Key("routability_macro_range");
+    json.Double(options.routability_macro_range);
+    json.Key("macro_routing_seconds");
+    json.Double(metrics.macro_routing_seconds);
+    json.Key("rudy_seconds");
+    json.Double(metrics.rudy_seconds);
+    json.Key("rudy_calls");
+    json.Int(metrics.rudy_calls);
     json.Key("bins_y");
     json.Int(metrics.bins_y);
     json.Key("stop_overflow");
@@ -3836,6 +4681,12 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
       json.Double(s.density_weight);
       json.Key("route_overflow");
       json.Double(s.route_overflow);
+      json.Key("route_peak_utilization");
+      json.Double(s.route_peak_utilization);
+      json.Key("macro_routing_force");
+      json.Double(s.macro_routing_force);
+      json.Key("macro_routing_channels");
+      json.Uint64(s.macro_routing_channels);
       json.Key("inflation_area_ratio");
       json.Double(s.inflation_area_ratio);
       json.Key("model_density");
@@ -3852,6 +4703,8 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
       json.Double(s.align_residual);
       json.Key("align_ramp");
       json.Double(s.align_ramp);
+      json.Key("align_force");
+      json.Double(s.align_force);
       if (control.centroid_adaptive_repulsion) {
         json.Key("centroid_overlap_pairs");
         json.Uint64(s.centroid_overlaps);
@@ -3896,6 +4749,10 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
     json.String("microns");
     json.Key("weight");
     json.Double(options.macro_align_weight);
+    json.Key("global_same_master");
+    json.Bool(options.macro_align_global);
+    json.Key("gp_alignment_seconds");
+    json.Double(metrics.macro_alignment_seconds);
     json.Key("sigma");
     json.Double(options.macro_align_sigma);
     json.Key("start");
@@ -3908,7 +4765,64 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
     json.Double(options.macro_snap_tolerance);
     json.Key("snap_weight");
     json.Int(options.macro_snap_weight);
+    json.Key("snap_mode");
+    json.String(options.macro_snap_mode.c_str());
     const auto& a = metrics.alignment;
+    json.Key("regularity_attempted");
+    json.Int(a.regularity.attempted);
+    json.Key("regularity_rejected");
+    json.Int(a.regularity.rejected);
+    json.Key("regularity_infeasible_classes");
+    json.Int(a.regularity.infeasible_families);
+    json.Key("regularity_seconds");
+    json.Double(a.regularity.seconds);
+    json.Key("snap_classes");
+    json.StartArray();
+    if (v.hierarchy_snap) {
+      for (size_t n = 0; n < v.cells.size(); ++n) {
+        if (v.design.node_snap_class[n] < 0) {
+          continue;
+        }
+        json.StartObject();
+        json.Key("node");
+        json.String(v.cells[n].name.c_str());
+        json.Key("master");
+        json.String(v.cells[n].macro.c_str());
+        json.Key("class");
+        json.Int(v.design.node_snap_class[n]);
+        json.EndObject();
+      }
+    }
+    json.EndArray();
+    json.Key("regularity_relations");
+    json.StartArray();
+    for (const auto& relation : a.regularity.relations) {
+      json.StartObject();
+      json.Key("kind");
+      json.String(relation.kind.c_str());
+      json.Key("axis");
+      json.Int(relation.axis);
+      json.Key("nodes");
+      json.StartArray();
+      for (int c : relation.nodes) {
+        int n = std::stoi(a.regularity.circles.at(c).name);
+        json.String(v.cells.at(n).name.c_str());
+      }
+      json.EndArray();
+      json.EndObject();
+    }
+    json.EndArray();
+    json.Key("soft_constraints");
+    json.StartArray();
+    for (const auto& constraint : a.constraints) {
+      json.StartArray();
+      json.String(v.cells.at(constraint.a).name.c_str());
+      json.String(v.cells.at(constraint.b).name.c_str());
+      json.Int(constraint.axis);
+      json.Double(constraint.offset / tech.dbu);
+      json.EndArray();
+    }
+    json.EndArray();
     json.Key("macro_legalization_s");
     json.Double(a.macro_legalization_seconds);
     json.Key("cell_legalization_s");
@@ -4085,7 +4999,7 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
     fs::remove(def, ec);
   }
   result.unknown_const_tied = resolver.unknown_tied();
-  result.qor = std::format(
+  result.qor                = std::format(
       R"({{"schema_version":1,"kind":"placement","mode":"{}","legal":{},"gp_converged":{},"gp_overflow":{},"hpwl_um":{},"initial_hpwl_um":{},"cells":{},"nets":{},"estimated_macros":{},"virtual_fillers":false,"density_constraint":"soft","timing_model":"placement_rc","timing_approximate":{},"rc_identity":"{}","incremental":{{"enabled":{},"hit":{},"reused_blocks":{},"changed_blocks":{}}}}})",
       options.retain_placement ? "timing_snapshot"
       : options.timing_seed    ? "post_synthesis_zero_wire"
@@ -4128,6 +5042,23 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
             [&](const Cell& c) { return (v.halo_x || v.halo_y) && !tech.macros.at(c.macro).klass.starts_with("CORE"); })),
         allocator);
     json.AddMember("halo", halo, allocator);
+    if (options.reset_fanout) {
+      rapidjson::Value tree(rapidjson::kObjectType);
+      tree.AddMember("fanout", options.reset_fanout, allocator);
+      // nets/sinks/added/levels describe this call; the seed placement of a timing-driven run already built the
+      // tree, so `buffers` counts the tree cells present in the placed netlist.
+      tree.AddMember("nets", reset_tree.nets, allocator);
+      tree.AddMember("sinks", reset_tree.sinks, allocator);
+      tree.AddMember("added", reset_tree.buffers, allocator);
+      tree.AddMember("buffers",
+                     static_cast<uint64_t>(std::count_if(v.cells.begin(),
+                                                         v.cells.end(),
+                                                         [](const Cell& c) { return c.name.find("__place_rsttree") != std::string::npos; })),
+                     allocator);
+      tree.AddMember("levels", reset_tree.levels, allocator);
+      tree.AddMember("skipped", reset_tree.skipped, allocator);
+      json.AddMember("reset_tree", tree, allocator);
+    }
     if (macro_run) {
       rapidjson::Value macro(rapidjson::kObjectType);
       macro.AddMember("mode", "h2d", allocator);
@@ -4219,6 +5150,8 @@ Result place(hhds::Graph& source, hhds::GraphLibrary& library, const Options& op
   auto cell_options               = options;
   cell_options.net_weights        = macro.net_weights;
   cell_options.fp_place           = false;
+  cell_options.fp_pin_adjust      = false;
+  cell_options.macro_pin_adjust   = false;
   cell_options.final_cells        = false;
   cell_options.macro_mode         = "none";
   cell_options.macro_snap         = false;

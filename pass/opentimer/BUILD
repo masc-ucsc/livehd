@@ -92,3 +92,16 @@ cc_test(
     copts = COPTS,
     deps = [":pass_opentimer", "@googletest//:gtest_main"],
 )
+
+cc_test(
+    name = "physical_session_test",
+    size = "small",
+    srcs = ["physical_session_test.cpp"],
+    copts = COPTS,
+    data = ["//inou/lefdef:test_data"],
+    deps = [
+        ":pass_opentimer",
+        "//pass/place:place",
+        "@googletest//:gtest_main",
+    ],
+)

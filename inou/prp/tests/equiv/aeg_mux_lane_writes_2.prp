@@ -1,0 +1,12 @@
+/*
+:name: aeg_mux_lane_writes_2
+:type: lec
+:set: compile.cprop.engine=aegraph compile.aegraph.cost=sim
+:compile_grep: aegraph-rule mux_setmask_arm tried=[0-9]+ matched=[1-9][0-9]* applied=[1-9][0-9]* extracted=0
+*/
+// HEADER-ONLY variant: aeg_mux_lane_writes.prp compiled by the e-graph engine under the `sim` cost profile. The lane
+// factoring is an alt (mux_setmask_arm: `Mux(s, b, Set_mask(b, w, v))` = `Set_mask(b, w, Mux(s, Get_mask(b, w), v))`):
+// hardware pays per bit, so the default `synth` profile takes the narrow lane Mux (aeg_mux_lane_writes_1), but a
+// simulator word is a word and the factored form adds a Get_mask, so `sim` keeps the word Mux of a register of at
+// most 64 bits. The rule still fires (matched, applied) and the extraction does not take it (extracted=0).
+// The result must still prove equal to the classic reference.

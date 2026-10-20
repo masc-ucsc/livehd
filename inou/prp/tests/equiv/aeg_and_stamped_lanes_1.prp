@@ -1,0 +1,7 @@
+/*
+:name: aeg_and_stamped_lanes_1
+:type: lec
+:set: compile.cprop.engine=aegraph
+*/
+// HEADER-ONLY variant: aeg_and_stamped_lanes.prp compiled by the acyclic e-graph engine (before the fix, its
+// compile failed in pass.bitwidth with the "Concat lane" error).

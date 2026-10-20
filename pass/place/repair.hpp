@@ -7,26 +7,9 @@
 #include "place.hpp"
 
 namespace livehd::placement {
-struct Timing_feedback {
-  struct Pin {
-    std::optional<double> arrival, required, slew, load_ff, slack, capacitance_ff;
-    unsigned              violations        = 0;
-    double                electrical_excess = 0;
-    bool                  clock             = false;
-  };
-  double                     time_unit_ps = 1000;
-  std::map<std::string, Pin> pins;
-  double                     delay = 0, area = 0, electrical_excess = 0;
-  unsigned                   violations              = 0;
-  bool                       electrical_pin_feedback = false;
-  // Optional provenance of the accepted analysis; never used to decide QoR.
-  std::string                source_report;
-  std::optional<double>      wns, tns, hold_wns;
-  std::vector<std::string>   path;
-};
 Timing_feedback               timing_feedback(std::string_view json);
 std::map<std::string, double> timing_weights(const physical::Parasitics& nets, const Timing_feedback& timing, double fraction = .2,
-                                             double max_weight = 5);
+                                             double max_weight = 5, double exponent = 1);
 struct Repair_result {
   // Own independent accepted graphs; libraries outlive the placed graph.
   std::vector<std::unique_ptr<hhds::GraphLibrary>> libraries;

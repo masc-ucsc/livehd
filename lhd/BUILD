@@ -36,6 +36,7 @@ genrule(
         "//graph:node_util.hpp",  # logical hierarchy names are proof/cache identity
         "//graph:split_selfref.cpp",
         "//graph:split_selfref.hpp",
+        "//pass/aegraph:pass_aegraph",  # formal.lec.preflight_engine=aegraph runs the e-graph engine in the post-inline re-simplify (archive)
         "//pass/cprop:pass_cprop",  # post-inline folds + mixed-loop normalization (archive)
         "//pass/lec:formal_srcs",
         "//pass/semdiff:formal_srcs",
@@ -78,6 +79,7 @@ genrule(
         "//core",
         "//core:file_name",
         "//pass/specialize:specialize_srcs",
+        "//pass/sweep:sweep_srcs",
         "//pass/satopt:satopt_srcs",
         "//pass/synth:synth_srcs",
         "//graph",
@@ -85,6 +87,7 @@ genrule(
         "//inou/slang:inou_slang",
         "//lnast",
         "//pass/bitfuzz:pass_bitfuzz",
+        "//pass/aegraph:pass_aegraph",
         "//pass/bitwidth:pass_bitwidth",
         "//pass/cprop:pass_cprop",
         "//pass/enableopt:pass_enableopt",
@@ -190,10 +193,12 @@ cc_library(
         "//pass/usyn:pass_usyn",
         "//pass/bitfuzz:pass_bitfuzz",
         "//pass/bitwidth:pass_bitwidth",
+        "//pass/aegraph:pass_aegraph",
         "//pass/color:pass_color",
         "//pass/common:pass",
         "//pass/liberty:liberty_dff",
         "//pass/specialize",
+        "//pass/sweep",
         "//pass/opentimer:pass_opentimer",
         "//pass/place",
         "//pass/cprop:pass_cprop",

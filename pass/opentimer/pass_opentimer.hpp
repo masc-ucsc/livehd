@@ -15,6 +15,7 @@
 #include "pass.hpp"
 #include "physical_rc.hpp"
 #include "sta_cache.hpp"
+#include "timing_feedback.hpp"
 #include "vcd_power.hpp"
 
 class Pass_opentimer : public Pass {
@@ -42,6 +43,11 @@ protected:
   ankerl::unordered_dense::set<hhds::Gid> opaque_gids_;
 
   ot::Timer                                           timer;
+  livehd::timing::Feedback*                           feedback_              = nullptr;
+  size_t                                              physical_updated_nets_ = 0;
+  // Persistent physical sessions name gates independently of scratch graph indices.
+  std::map<std::string, std::string>                  physical_instances_;
+  std::shared_ptr<const livehd::physical::Parasitics> previous_physical_rc_;
   std::shared_ptr<const livehd::physical::Parasitics> physical_rc_;
   std::map<std::string, std::string>                  physical_native_pins_;
   std::map<std::string, std::string>                  physical_timing_pins_;
@@ -220,3 +226,26 @@ public:
 
   static void setup();
 };
+
+namespace livehd::opentimer {
+// One owner per placement flow. Liberty/SDC are loaded once. evaluate() applies
+// master, connectivity and RC deltas, including undoing rejected repair trials.
+// No timing reports are serialized or written by this interface.
+class Physical_session {
+  struct Impl;
+  Eprp_var              options_;
+  std::unique_ptr<Impl> impl_;
+
+public:
+  struct Statistics {
+    unsigned evaluations = 0, builds = 0;
+    size_t   repowered_gates = 0, inserted_gates = 0, removed_gates = 0, updated_nets = 0;
+    double   seconds = 0;
+  };
+  explicit Physical_session(const Eprp_var& options);
+  ~Physical_session();
+  livehd::timing::Feedback evaluate(const std::shared_ptr<hhds::Graph>&                 graph,
+                                    std::shared_ptr<const livehd::physical::Parasitics> rc);
+  const Statistics&        statistics() const;
+};
+}  // namespace livehd::opentimer

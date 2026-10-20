@@ -1,0 +1,139 @@
+/*
+:name: aeg_and_stamped_lanes
+:type: lec
+:lec_top: top
+*/
+// PYROPE-vs-PYROPE group, the fixture of a bitwidth inference bug the e-graph engine exposed. A ready/valid
+// join (two instances fed from per-FIFO staging buffers, a don't-care xbar) whose per-lane `&` of two packs the
+// engine's second slot rewrites into `get_mask(instance output) & concat(...)` lanes. Bitwidth then visits that
+// And before it has any range for the Get_mask (its source is an instance output whose boundary range is only
+// seeded when the instance is reached); `adjust_bw` only ever widens, so an And ranged from the Concat alone
+// stayed 2 bits for good and the Concat lane check rejected it ("driver 'and_N' occupies 2 bits but its
+// declared window is 1"). This is the REFERENCE, compiled by the classic engine; `aeg_and_stamped_lanes_1.prp`
+// is the same source compiled by the e-graph engine.
+pub mod dly::[timecheck=false](clk:Clock, `in`:U1, in_valid:U1, rst:U1) -> (out:U1@[], out_stages:U2@[], out_valid:U1@[], out_valid_stages:U2@[]) {
+  reg stage_valid___q:U2 = nil
+  mut stage_valid:U2 = 0
+  reg stage___q:U2 = nil
+  mut `stage`:U2 = 0
+  mut stage_valid__w1 = stage_valid
+  mut stage__w1 = `stage`
+  if rst != 0 {
+    stage_valid___q#[1] = 0
+    stage_valid___q#[1] = stage_valid__w1 & 1
+  }
+  if (stage_valid__w1 & 1) != 0 {
+    stage___q#[1] = stage__w1 & 1
+  }
+  out_valid = (stage_valid__w1 >> 1) & 1
+  out = (stage__w1 >> 1) & 1
+  out_valid_stages = stage_valid__w1
+  out_stages = stage__w1
+}
+
+pub mod xbar::[timecheck=false](arb_can_grant:U2, arb_grant:U2, clk:Clock, pop_rd_data:U32, pop_rd_data_valid:U1, push_rd_addr:U10, push_rd_addr_valid:U2, rst:U1) -> (arb_enable_priority_update:U1@[], arb_request:U2@[], pop_rd_addr:U5@[], pop_rd_addr_valid:U1@[], push_rd_addr_ready:U2@[], push_rd_data:U64@[], push_rd_data_valid:(e1:U1, e0:U1)@[]) {
+  mut demuxed_rd_addr_ready:U2 = 0
+  mut demuxed_rd_data_valid:U2 = 0
+  mut demuxed_rd_data:U64 = 0
+  mut pop_rd_addr_fifo_id:U1 = 0
+  demuxed_rd_addr_ready = 0sb?
+  pop_rd_addr_valid = 0ub?
+  pop_rd_addr = 0sb?
+  arb_request = 0sb?
+  arb_enable_priority_update = 0ub?
+  mut pop_rd_addr_valid__w1 = pop_rd_addr_valid
+  mut pop_rd_addr_fifo_id__w1 = pop_rd_addr_fifo_id
+  mut dly0 = dly::[name=dly0](clk=clk, rst=rst, in_valid=pop_rd_addr_valid__w1 & 1, `in`=pop_rd_addr_fifo_id__w1 & 1)
+  mut demuxed_rd_data_valid__w1 = demuxed_rd_data_valid
+  mut demuxed_rd_data__w1 = demuxed_rd_data
+  mut `push_rd_data_valid__bpo.e1` = (demuxed_rd_data_valid__w1 >> 1) & 1
+  mut `push_rd_data_valid__bpo.e0` = demuxed_rd_data_valid__w1 & 1
+  mut demuxed_rd_addr_ready__w1 = demuxed_rd_addr_ready
+  mut demuxed_rd_addr_ready__w2 = demuxed_rd_addr_ready__w1
+  push_rd_data_valid.e1 = `push_rd_data_valid__bpo.e1`
+  push_rd_data_valid.e0 = `push_rd_data_valid__bpo.e0`
+  push_rd_addr_ready = demuxed_rd_addr_ready__w2
+  push_rd_data = demuxed_rd_data__w1
+}
+
+pub mod staging::[timecheck=false](bypass_data_unstable:U32, bypass_valid_unstable:U1, clk:Clock, pop_ready:U1, ram_rd_addr_ready:U1, ram_rd_data:U32, ram_rd_data_valid:U1, rst:U1, total_items:U6) -> (bypass_ready:U1@[], pop_data:U32@[], pop_empty:U1@[], pop_valid:U1@[], ram_rd_addr_valid:U1@[]) {
+  reg rv:U1 = 0
+  bypass_ready = 0
+  pop_data = ram_rd_data
+  pop_empty = ~rv
+  pop_valid = rv & pop_ready
+  ram_rd_addr_valid = total_items#[0] & ~rv & ~ram_rd_data_valid
+}
+
+pub mod multihot::[timecheck=false](clk:Clock, pop_ready:U1, push_valid:U2, rst:U1, select_multihot:(e1:U1, e0:U1)) -> (pop_valid_unstable:U1@[], push_ready:(e1:U1, e0:U1)@[]) {
+  mut `push_ready__bpo.e1` = 0
+  mut `push_ready__bpo.e0` = 0
+  const selection:U2 = (select_multihot.e1 << 1) | select_multihot.e0
+  const push_valid_or_unselected__w1 = push_valid | (~selection)#[0..=1]
+  {
+    `push_ready__bpo.e0` = `push_ready__bpo.e0` & (push_valid_or_unselected__w1 >> 1) & 1 & 1
+  }
+  `push_ready__bpo.e1` = Unsigned(pop_ready != 0 and select_multihot.e1 != 0)
+  {
+    `push_ready__bpo.e1` = `push_ready__bpo.e1` & push_valid_or_unselected__w1 & 1 & 1
+  }
+  const pop_valid_unstable__w1 = Unsigned(push_valid_or_unselected__w1 == 3)
+  push_ready.e1 = `push_ready__bpo.e1`
+  push_ready.e0 = `push_ready__bpo.e0`
+  pop_valid_unstable = pop_valid_unstable__w1
+}
+
+pub mod join::[timecheck=false](clk:Clock, pop_ready:U1, push_valid:U2, rst:U1) -> (pop_valid:U1@[], push_ready:U2@[]) {
+  mut multihot = multihot::[name=multihot](clk=clk, rst=rst, select_multihot=(const e0=1, const e1=1), push_valid=push_valid, pop_ready=pop_ready)
+  push_ready = (multihot.push_ready.e1 << 1) | multihot.push_ready.e0
+  pop_valid = multihot.pop_valid_unstable
+}
+
+pub mod top::[timecheck=false](arb_can_grant:U2, arb_grant:U2, bypass_data_unstable:U64, bypass_valid_unstable:(e1:U1, e0:U1), clk:Clock, data_ram_rd_data:U32, data_ram_rd_data_valid:U1, head:U10, head_valid:(e1:U1, e0:U1), pop_ready:(e1:U1, e0:U1), ram_empty:(e1:U1, e0:U1), ram_items:U12, rst:U1) -> (arb_enable_priority_update:U1@[], arb_request:U2@[], bypass_ready:(e1:U1, e0:U1)@[], data_ram_rd_addr:U5@[], data_ram_rd_addr_valid:U1@[], dealloc_entry_id:U10@[], dealloc_valid:U2@[], head_ready:(e1:U1, e0:U1)@[], pop_data:U64@[], pop_empty:(e1:U1, e0:U1)@[], pop_valid:(e1:U1, e0:U1)@[]) {
+  wire fifo_ram_rd_addr_ready:U2 = nil
+  wire fifo_ram_rd_data_valid:U2 = nil
+  wire fifo_ram_rd_data:U64 = nil
+  mut fifo_ram_rd_addr_valid:U2 = 0
+  mut fifo_ram_rd_addr:U10 = 0
+  mut `head_ready__bpo.e1` = 0
+  mut `head_ready__bpo.e0` = 0
+  wire empty0:U1 = nil
+  wire empty1:U1 = nil
+  wire rdy0:U1 = nil
+  wire rdy1:U1 = nil
+  pop_data = 0sb?
+  mut `pop_empty__bpo.e0` = Unsigned(ram_empty.e0 != 0 and empty0 != 0)
+  mut fifo_ram_rd_addr__w1 = fifo_ram_rd_addr
+  mut `pop_empty__bpo.e1` = Unsigned(ram_empty.e1 != 0 and empty1 != 0)
+  mut fifo_ram_rd_addr__w2 = fifo_ram_rd_addr__w1
+  mut sb0 = staging::[name=sb0](clk=clk, rst=rst, total_items=ram_items#[0..=5], bypass_valid_unstable=bypass_valid_unstable.e0, bypass_data_unstable=bypass_data_unstable#[0..=31], ram_rd_addr_ready=rdy0, ram_rd_data_valid=fifo_ram_rd_data_valid & 1, ram_rd_data=fifo_ram_rd_data#[0..=31], pop_ready=pop_ready.e0)
+  empty0 = sb0.pop_empty
+  mut jn0 = join::[name=jn0](clk=clk, rst=rst, push_valid=((head_valid.e0 & 1) << 1) | (sb0.ram_rd_addr_valid & 1), pop_ready=fifo_ram_rd_addr_ready & 1)
+  rdy0 = jn0.push_ready & 1
+  `head_ready__bpo.e0` = (jn0.push_ready >> 1) & 1
+  mut fifo_ram_rd_addr_valid__w1 = fifo_ram_rd_addr_valid
+  mut sb1 = staging::[name=sb1](clk=clk, rst=rst, total_items=ram_items#[6..=11], bypass_valid_unstable=bypass_valid_unstable.e1, bypass_data_unstable=bypass_data_unstable#[32..=63], ram_rd_addr_ready=rdy1, ram_rd_data_valid=(fifo_ram_rd_data_valid >> 1) & 1, ram_rd_data=fifo_ram_rd_data#[32..=63], pop_ready=pop_ready.e1)
+  empty1 = sb1.pop_empty
+  mut jn1 = join::[name=jn1](clk=clk, rst=rst, push_valid=((head_valid.e1 & 1) << 1) | (sb1.ram_rd_addr_valid & 1), pop_ready=(fifo_ram_rd_addr_ready >> 1) & 1)
+  rdy1 = jn1.push_ready & 1
+  `head_ready__bpo.e1` = (jn1.push_ready >> 1) & 1
+  mut fifo_ram_rd_addr_valid__w2 = fifo_ram_rd_addr_valid__w1
+  mut xbar = xbar::[name=xbar](clk=clk, rst=rst, push_rd_addr_valid=fifo_ram_rd_addr_valid__w2, push_rd_addr=fifo_ram_rd_addr__w2, pop_rd_data_valid=data_ram_rd_data_valid, pop_rd_data=data_ram_rd_data, arb_can_grant=arb_can_grant, arb_grant=arb_grant)
+  fifo_ram_rd_addr_ready = xbar.push_rd_addr_ready
+  fifo_ram_rd_data_valid = (xbar.push_rd_data_valid.e1 << 1) | xbar.push_rd_data_valid.e0
+  fifo_ram_rd_data = xbar.push_rd_data
+  head_ready.e1 = `head_ready__bpo.e1`
+  head_ready.e0 = `head_ready__bpo.e0`
+  bypass_ready.e1 = sb1.bypass_ready
+  bypass_ready.e0 = sb0.bypass_ready
+  pop_valid.e1 = sb1.pop_valid
+  pop_valid.e0 = sb0.pop_valid
+  pop_empty.e1 = `pop_empty__bpo.e1`
+  pop_empty.e0 = `pop_empty__bpo.e0`
+  dealloc_valid = (((head_valid.e1 << 1) | head_valid.e0) & ((`head_ready__bpo.e1` << 1) | `head_ready__bpo.e0`))#[0..=1]
+  dealloc_entry_id = head
+  data_ram_rd_addr_valid = xbar.pop_rd_addr_valid
+  data_ram_rd_addr = xbar.pop_rd_addr
+  arb_request = xbar.arb_request
+  arb_enable_priority_update = xbar.arb_enable_priority_update
+}

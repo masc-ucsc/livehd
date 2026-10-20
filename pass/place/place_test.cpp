@@ -17,17 +17,20 @@
 #include "pass/liberty/liberty_dff.hpp"
 #include "pass/opentimer/pass_opentimer.hpp"
 #include "rapidjson/document.h"
+#include "repair.hpp"
 namespace livehd::placement {
 namespace gu = graph_util;
 namespace {
 // Fixtures for the independent plain/H2D/ECO paths pin their original controls.
 Options plain_options() {
   Options o;
-  o.fp_place    = false;
-  o.final_cells = false;
-  o.macro_snap  = false;
-  o.utilization = .5;
-  o.density     = .8;
+  o.fp_place           = false;
+  o.final_cells        = false;
+  o.macro_snap         = false;
+  o.macro_align_weight = 0;
+  o.macro_align_global = false;
+  o.utilization        = .5;
+  o.density            = .8;
   o.halo_x = o.halo_y   = 0;
   o.iterations          = 500;
   o.bins                = 32;
@@ -271,6 +274,44 @@ TEST(Placement, MappedBusGraphLegalityRcAndReuse) {
   const auto         placed = place(*graph, first, options);
   EXPECT_EQ(placed.floorplan.components.size(), 2);
   EXPECT_EQ(placed.floorplan.terminals.size(), 3);
+  {
+    // Pin-only FP still runs when no macro/hierarchy qualifies and STA is off.
+    auto pins = options;
+    pins.cache_dir.clear();
+    pins.output_dir = (root / "pin_only").string();
+    pins.fp_place = pins.fp_pin_adjust = pins.final_cells = true;
+    pins.fp_colors                                        = false;
+    pins.fp_pin_interval                                  = 5;
+    pins.io_iterations = pins.fp_iterations = pins.iterations = 20;
+    // Automatic imported PLACED terminals must remain movable when opted in.
+    const auto pin_input                                      = root / "movable_pins.def";
+    physical::write_def(placed.floorplan, pin_input.string());
+    pins.floorplan          = pin_input.string();
+    auto forbidden          = pins;
+    forbidden.fp_pin_adjust = false;
+    hhds::GraphLibrary rejected_library;
+    EXPECT_THROW(place(*graph, rejected_library, forbidden), std::runtime_error);
+    hhds::GraphLibrary  pin_library;
+    const auto          result = place(*graph, pin_library, pins);
+    std::ifstream       report_file(pins.output_dir + "/macro/fp_place.json");
+    const std::string   text{std::istreambuf_iterator<char>(report_file), {}};
+    rapidjson::Document report;
+    report.Parse(text.c_str());
+    ASSERT_FALSE(report.HasParseError());
+    EXPECT_TRUE(report["candidates"].Empty());
+    EXPECT_GT(report["fp_iterations"].GetInt(), 0);
+    EXPECT_GE(report["pin_updates"].GetUint64(), 2);
+    EXPECT_EQ(report["timing_sta_calls"].GetUint(), 0);
+    for (const auto& terminal : result.floorplan.terminals) {
+      EXPECT_EQ(terminal.status, physical::Status::FIXED);
+      const auto point = std::find_if(result.parasitics->terminals.begin(), result.parasitics->terminals.end(), [&](const auto& p) {
+        return p.name == terminal.name;
+      });
+      ASSERT_NE(point, result.parasitics->terminals.end());
+      EXPECT_EQ(point->x, terminal.x);
+      EXPECT_EQ(point->y, terminal.y);
+    }
+  }
   {
     // A supplied frame is authoritative even above the soft density target.
     auto frame = placed.floorplan;
@@ -614,6 +655,36 @@ TEST(Placement, ConstantDriversUseLibertyPolarityAndPhysicalCandidates) {
   }
   EXPECT_FALSE(source.find_io("a_high"));  // Only the private physical library changes.
 }
+TEST(Placement, RetainedOriginalNetlistRecreatesSavedTieCells) {
+  hhds::GraphLibrary source, flat;
+  const auto         graph   = both_constants(source);
+  auto               options = tie_options("retain_ties",
+                                           {
+                                               {"tie_lo", {{"lo", false}}},
+                                               {"tie_hi",  {{"hi", true}}}
+  });
+  const auto         placed  = place(*graph, flat, options);
+  options.previous           = std::make_shared<physical::Floorplan>(placed.floorplan);
+  options.retain_placement   = true;
+  hhds::GraphLibrary retained;
+  const auto         result = place(*graph, retained, options);
+  ASSERT_EQ(result.floorplan.components.size(), placed.floorplan.components.size());
+  for (const auto& cell : result.floorplan.components) {
+    const auto old = std::find_if(placed.floorplan.components.begin(), placed.floorplan.components.end(), [&](const auto& c) {
+      return c.name == cell.name;
+    });
+    ASSERT_NE(old, placed.floorplan.components.end());
+    EXPECT_EQ(cell.macro, old->macro);
+    EXPECT_EQ(cell.place.x, old->place.x);
+    EXPECT_EQ(cell.place.y, old->place.y);
+    EXPECT_EQ(cell.place.orientation, old->place.orientation);
+  }
+  auto missing = std::make_shared<physical::Floorplan>(placed.floorplan);
+  std::erase_if(missing->components, [](const auto& cell) { return cell.name == "__place_tiehi"; });
+  options.previous = missing;
+  hhds::GraphLibrary rejected;
+  EXPECT_THROW(place(*graph, rejected, options), std::runtime_error);
+}
 // An unknown (X) constant that reaches a mapped cell input is a synthesis don't-care
 // (`assign y = 'x` in the RTL). The default refuses it by name; unknown_const_zero ties it
 // low (a legal refinement) through the usual tie cell and counts what it tied.
@@ -637,7 +708,11 @@ TEST(Placement, UnknownConstantIsRefusedUnlessTiedLowByOption) {
     graph->get_output_pin("y").connect_driver(y);
     return graph;
   };
-  const auto options = tie_options("unknown", {{"tie_lo", {{"lo", false}}}, {"tie_hi", {{"hi", true}}}});
+  const auto options = tie_options("unknown",
+                                   {
+                                       {"tie_lo", {{"lo", false}}},
+                                       {"tie_hi",  {{"hi", true}}}
+  });
   {
     hhds::GraphLibrary source, flat;
     const auto         graph = build(source);
@@ -929,9 +1004,9 @@ TEST(Placement, FixedDieAndCoreSnapInwardAndKeepPinsOnTheDie) {
     frame.nets.clear();
     const auto def = std::filesystem::path(std::getenv("TEST_TMPDIR")) / "fixed_frame_import.def";
     physical::write_def(frame, def.string());
-    auto staged         = options;
-    staged.floorplan    = def.string();
-    staged.output_dir   = std::string(std::getenv("TEST_TMPDIR")) + "/fixed_frame_staged";
+    auto staged       = options;
+    staged.floorplan  = def.string();
+    staged.output_dir = std::string(std::getenv("TEST_TMPDIR")) + "/fixed_frame_staged";
     hhds::GraphLibrary again;
     const auto         restaged = place(*graph, again, staged);
     EXPECT_EQ(restaged.floorplan.rows.size(), fp.rows.size());
@@ -1841,6 +1916,262 @@ END LIBRARY
     EXPECT_EQ(count, 2);
   }
   EXPECT_NE(colors.begin()->second, colors.rbegin()->second);
+  // Global GP alignment groups the same master across colors and hierarchy,
+  // while the end-of-GP snap still retains its original hierarchy classes.
+  options.macro_align_global = true;
+  hhds::GraphLibrary global_flat;
+  const auto         global = place(*graph, global_flat, options);
+  EXPECT_NO_THROW(check_legality(tech, global.floorplan, 1, 1));
+  report.Parse(read("alignment.json").c_str());
+  ASSERT_TRUE(report["global_same_master"].GetBool());
+  classes.clear();
+  for (const auto& macro : report["macros"].GetArray()) {
+    ++classes[macro["class"].GetInt()];
+  }
+  ASSERT_EQ(classes.size(), 1);
+  EXPECT_EQ(classes.begin()->second, 4);
 }
 
+TEST(Placement, PlacementColorsUseLibertyRolesAndPinsMoveWithoutSta) {
+  const auto dir = std::filesystem::path(std::getenv("TEST_TMPDIR")) / "fp_color_adapter";
+  std::filesystem::create_directories(dir);
+  {
+    std::ofstream lef(dir / "ram.lef");
+    lef << "VERSION 5.8 ;\nMACRO RAM\n CLASS BLOCK ; SIZE 5 BY 5 ; SYMMETRY X Y ;\n";
+    for (const auto* pin : {"P", "X", "Y", "E", "Z"}) {
+      lef << " PIN " << pin << "\n DIRECTION " << (std::string(pin) == "Z" ? "OUTPUT" : "INPUT")
+          << " ; USE SIGNAL ;\n PORT LAYER met1 ; RECT 0 0.1 0.1 0.2 ; END\n END " << pin << '\n';
+    }
+    lef << "END RAM\nEND LIBRARY\n";
+    std::ofstream lib(dir / "ram.lib");
+    lib << R"(library(ram) { cell(RAM) {
+      memory() { type: ram; address_width: 1; word_width: 1; }
+      pin(P) { direction: input; clock: true; }
+      pin(X) { direction: input; }
+      pin(Y) { direction: input; memory_write() { address: X; } }
+      pin(E) { direction: input; }
+      pin(Z) { direction: output; memory_read() { address: X; } }
+    } })";
+    std::ifstream cells("inou/lefdef/tests/data/sky130hd.lib");
+    lib << cells.rdbuf();
+  }
+  hhds::GraphLibrary source, flat;
+  auto               io = source.create_io("fp_colors");
+  io->add_input("in", 0);
+  io->set_bits("in", 1);
+  for (int i = 0; i < 2; ++i) {
+    io->add_output("out" + std::to_string(i), i);
+    io->set_bits("out" + std::to_string(i), 1);
+  }
+  auto graph = io->create_graph();
+  auto input = graph->get_input_pin("in");
+  gu::set_bits(input, 1);
+  auto inv_io = source.create_io("sky130_fd_sc_hd__inv_1");
+  inv_io->add_input("A", 0);
+  inv_io->add_output("Y", 0);
+  auto ram_io = source.create_io("RAM");
+  for (const auto* pin : {"P", "X", "Y", "E"}) {
+    ram_io->add_input(pin, ram_io->get_input_pin_decls().size());
+  }
+  ram_io->add_output("Z", 0);
+  const auto inverter = [&](const std::string& name, hhds::Pin_class from) {
+    auto n = gu::create_typed_node(*graph, Ntype_op::Sub);
+    n.set_subnode(inv_io);
+    n.set_name(name);
+    n.attr(attrs::synth_color_group).set("synthesis-kept");
+    n.create_sink_pin("A").connect_driver(from);
+    auto output = n.create_driver_pin("Y");
+    gu::set_bits(output, 1);
+    return output;
+  };
+  const auto clock = inverter("clock_logic", input), enable = inverter("enable_logic", input);
+  const auto constant_data
+      = inverter("constant_buffer2", inverter("constant_buffer1", gu::create_const(*graph, *Dlop::create_integer(0))));
+  for (int i = 0; i < 2; ++i) {
+    const auto name = "ram" + std::to_string(i);
+    auto       pre  = inverter(name + "_input", input);
+    auto       ram  = gu::create_typed_node(*graph, Ntype_op::Sub);
+    ram.set_subnode(ram_io);
+    ram.set_name(name);
+    ram.attr(attrs::synth_color_group).set("synthesis-kept");
+    ram.create_sink_pin("P").connect_driver(clock);
+    ram.create_sink_pin("E").connect_driver(enable);
+    ram.create_sink_pin("X").connect_driver(pre);
+    ram.create_sink_pin("Y").connect_driver(constant_data);
+    auto q = ram.create_driver_pin("Z");
+    gu::set_bits(q, 1);
+    auto post = inverter(name + "_output", q);
+    graph->get_output_pin("out" + std::to_string(i)).connect_driver(post);
+  }
+  auto o       = plain_options();
+  o.lefs       = {"inou/lefdef/tests/data/sky130hd.tlef", "inou/lefdef/tests/data/sky130hd.lef", (dir / "ram.lef").string()};
+  o.liberty    = (dir / "ram.lib").string();
+  o.output_dir = (dir / "out").string();
+  o.fp_place = o.fp_colors = o.fp_pin_adjust = true;
+  o.macro_pin_adjust                         = true;
+  o.macro_pin_interval                       = 5;
+  for (const auto* color_source : {"placement", "memory_first"}) {
+    o.fp_anchor_macros_only = true;
+    o.fp_color_source       = color_source;
+    o.fp_color_minimum      = 0;
+    o.fp_iterations         = 40;
+    o.iterations            = 20;
+    o.io_iterations         = 10;
+    o.fp_pin_interval       = 5;
+    o.bins                  = 8;
+    o.utilization           = .05;
+    const auto result       = place(*graph, flat, o);
+    EXPECT_NO_THROW(check_legality(physical::read_lef(o.lefs), result.floorplan));
+    const auto read_json = [&](const std::string& name) {
+      std::ifstream       file(dir / "out" / name);
+      const std::string   text{std::istreambuf_iterator<char>(file), {}};
+      rapidjson::Document doc;
+      doc.Parse(text.c_str());
+      return doc;
+    };
+    auto colors = read_json("fp_placement_colors.json");
+    ASSERT_FALSE(colors.HasParseError());
+    ASSERT_EQ(colors["colors"].Size(), 2);
+    for (const auto& c : colors["colors"].GetArray()) {
+      EXPECT_EQ(c["macros"].GetInt(), 1);
+      EXPECT_EQ(c["members"].GetUint64(), o.fp_color_source == "memory_first" ? 2 : 3);
+    }
+    auto report = read_json("fp_place.json");
+    ASSERT_FALSE(report.HasParseError());
+    EXPECT_TRUE(report["distance_attraction"].GetBool());
+    EXPECT_TRUE(report["fixed_anchor_macros_only"].GetBool());
+    EXPECT_EQ(report["attraction_outside"].GetDouble(), 4);
+    EXPECT_GT(report["fp_attraction_coefficient"].GetDouble(), 0);
+    EXPECT_GT(report["macro_attraction_coefficient"].GetDouble(), 0);
+    EXPECT_EQ(report["macro_attraction_calibration_iteration"].GetInt(), 0);
+    EXPECT_GE(report["pin_updates"].GetUint64(), 2);
+    EXPECT_GE(report["macro_pin_updates"].GetUint64(), 1);
+    EXPECT_GT(report["fp_iterations"].GetInt(), 0);
+    for (auto node : graph->body().nodes()) {
+      if (auto a = node.attr(attrs::synth_color_group); a.has()) {
+        EXPECT_EQ(a.get(), "synthesis-kept");
+      }
+    }
+    for (const auto& t : result.floorplan.terminals) {
+      const auto it = std::find_if(result.parasitics->terminals.begin(), result.parasitics->terminals.end(), [&](const auto& p) {
+        return p.name == t.name;
+      });
+      ASSERT_NE(it, result.parasitics->terminals.end());
+      EXPECT_EQ(it->x, t.x);
+      EXPECT_EQ(it->y, t.y);
+    }
+  }
+  // Without FP, macro GP still owns IO movement. A fixed macro/IO handoff
+  // suppresses that callback in the final cell solve, even with the flag set.
+  o.fp_place = o.fp_colors = o.fp_pin_adjust = false;
+  o.output_dir                               = (dir / "macro_only").string();
+  o.floorplan                                = (dir / "out/out.def").string();
+  const auto macro_only                      = place(*graph, flat, o);
+  EXPECT_TRUE(std::filesystem::exists(dir / "macro_only/macro_pins.jsonl"));
+  EXPECT_FALSE(std::filesystem::exists(dir / "macro_only/fp_pins.jsonl"));
+  auto       frame = macro_only.floorplan;
+  const auto tech  = physical::read_lef(o.lefs);
+  for (auto& c : frame.components) {
+    if (!tech.macros.at(c.macro).klass.starts_with("CORE")) {
+      c.place.status = physical::Status::FIXED;
+    }
+  }
+  for (auto& t : frame.terminals) {
+    t.status = physical::Status::FIXED;
+  }
+  o.floorplan = (dir / "fixed.def").string();
+  physical::write_def(frame, o.floorplan);
+  o.output_dir     = (dir / "final").string();
+  const auto final = place(*graph, flat, o);
+  EXPECT_FALSE(std::filesystem::exists(dir / "final/macro_pins.jsonl"));
+  for (const auto& t : final.floorplan.terminals) {
+    const auto it = std::find_if(frame.terminals.begin(), frame.terminals.end(), [&](const auto& p) { return p.name == t.name; });
+    ASSERT_NE(it, frame.terminals.end());
+    EXPECT_EQ(t.x, it->x);
+    EXPECT_EQ(t.y, it->y);
+    EXPECT_EQ(t.status, physical::Status::FIXED);
+  }
+  o.floorplan.clear();
+  o.fp_place = o.fp_colors = true;
+  o.analyze_colors_only    = true;
+  o.final_cells            = false;
+  o.fp_evaluate            = [](const Result&) -> Timing_feedback { throw std::runtime_error("analysis invoked STA"); };
+  o.output_dir             = (dir / "analysis").string();
+  const auto analysis      = place(*graph, flat, o);
+  EXPECT_TRUE(std::filesystem::exists(dir / "analysis/fp_placement_colors.json"));
+  EXPECT_FALSE(std::filesystem::exists(dir / "analysis/fp_gp.json"));
+  EXPECT_FALSE(std::filesystem::exists(dir / "analysis/gp_history.json"));
+  EXPECT_GE(analysis.floorplan.components.size(), 6);
+}
+TEST(Placement, ProxyMemoryColorsExcludeSharedClockAndResetLogic) {
+  hhds::GraphLibrary source, flat;
+  const auto         io = source.create_io("proxy_colors");
+  io->add_input("in", 0);
+  io->set_bits("in", 1);
+  for (unsigned i = 0; i < 2; ++i) {
+    io->add_output("out" + std::to_string(i), i);
+    io->set_bits("out" + std::to_string(i), 1);
+  }
+  auto graph = io->create_graph();
+  auto input = graph->get_input_pin("in");
+  gu::set_bits(input, 1);
+  const auto inv = source.create_io("sky130_fd_sc_hd__inv_1");
+  inv->add_input("A", 0);
+  inv->add_output("Y", 0);
+  const auto control = [&](const char* name) {
+    auto n = gu::create_typed_node(*graph, Ntype_op::Sub);
+    n.set_subnode(inv);
+    n.set_name(name);
+    n.create_sink_pin("A").connect_driver(input);
+    auto pin = n.create_driver_pin("Y");
+    gu::set_bits(pin, 1);
+    return pin;
+  };
+  const auto clock = control("shared_clock"), reset = control("shared_reset");
+  for (unsigned i = 0; i < 2; ++i) {
+    auto mem = gu::create_typed_node(*graph, Ntype_op::Memory);
+    mem.set_name("ram" + std::to_string(i));
+    for (auto [pid, value] : std::vector<std::pair<unsigned, int>>{
+             { 1, 1},
+             { 9, 2},
+             { 4, 1},
+             { 7, 1},
+             {10, 1}
+    }) {
+      mem.create_sink_pin(pid).connect_driver(gu::create_const(*graph, *Dlop::create_integer(value)));
+    }
+    mem.create_sink_pin(0).connect_driver(input);
+    mem.create_sink_pin(2).connect_driver(clock);
+    mem.create_sink_pin(14).connect_driver(reset);
+    auto q = mem.create_driver_pin(0);
+    gu::set_bits(q, 1);
+    graph->get_output_pin("out" + std::to_string(i)).connect_driver(q);
+  }
+  auto options       = plain_options();
+  options.lefs       = {"inou/lefdef/tests/data/sky130hd.tlef", "inou/lefdef/tests/data/sky130hd.lef"};
+  options.liberty    = "inou/lefdef/tests/data/sky130hd.lib";
+  options.output_dir = std::string(std::getenv("TEST_TMPDIR")) + "/proxy_colors";
+  options.fp_place = options.fp_colors = true;
+  options.fp_color_source              = "placement";
+  options.fp_color_minimum             = 0;
+  options.bins                         = 8;
+  options.fp_iterations = options.iterations = options.io_iterations = 20;
+  options.utilization                                                = .05;
+  const auto          placed                                         = place(*graph, flat, options);
+  std::ifstream       input_report(options.output_dir + "/fp_placement_colors.json");
+  const std::string   text{std::istreambuf_iterator<char>(input_report), {}};
+  rapidjson::Document report;
+  report.Parse(text.c_str());
+  ASSERT_FALSE(report.HasParseError());
+  ASSERT_EQ(report["colors"].Size(), 2);
+  for (const auto& c : report["colors"].GetArray()) {
+    EXPECT_EQ(c["members"].GetUint64(), 1);
+    EXPECT_EQ(c["macros"].GetInt(), 1);
+  }
+  EXPECT_EQ(placed.floorplan.components.size(), 5);  // Two macros, two controls, and the enable tie.
+  EXPECT_EQ(std::count_if(placed.floorplan.components.begin(),
+                          placed.floorplan.components.end(),
+                          [](const auto& c) { return c.macro == "sky130_fd_sc_hd__inv_1"; }),
+            2);
+}
 }  // namespace livehd::placement

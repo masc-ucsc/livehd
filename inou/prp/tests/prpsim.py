@@ -81,7 +81,7 @@ def run_simulation(runner, tmp_dir, test):
         # lhd.jobs=2: the harness already runs fixtures in parallel (bazel or a
         # batch driver); a per-fixture fan-out of every core oversubscribes.
         cmd = [runner.lhd, 'sim', test.params['files'][0], '--workdir', work,
-               '--set', 'sim.tune.profile=off', '--set', 'lhd.jobs=2', '-q'] + runner._extra_sets(test)
+               '--set', 'sim.tune.profile=off', '--set', 'lhd.jobs=2', '-q'] + runner._extra_sets(test) + runner.compile_set_args()
         for setting in vector:
             cmd += ['--set', setting]
         for key, value in _parse_args(test):

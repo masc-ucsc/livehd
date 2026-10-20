@@ -69,7 +69,12 @@ struct Memory_row {
 // memories whose cgen form is an inline array are also enclosed in a module.
 // The returned definitions belong to the parents' scratch graph library.
 // `max_bits` (0 = no limit) is the `auto` storage threshold only.
+// `prune_reads` (pass.abc.memory_prune_reads): a lowered memory's read port whose
+// readers all take constant Get_mask windows of its word has every bit outside
+// those windows cleared at the module output, so the mapper drops the read mux
+// logic of the bits nobody observes. Off by default.
 std::vector<std::shared_ptr<hhds::Graph>> build_memory_modules(const std::vector<std::shared_ptr<hhds::Graph>>& graphs,
                                                                Memory_fold mode, uint64_t max_bits,
-                                                               std::vector<Memory_row>* report = nullptr);
+                                                               std::vector<Memory_row>* report = nullptr,
+                                                               bool                     prune_reads = false);
 }  // namespace livehd::synth

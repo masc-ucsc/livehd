@@ -1353,6 +1353,9 @@ void Region_driver::map_region(const livehd::partition::Region_body& rb) {
       += std::format("|source={}/{}/{}/{}", opts_.source_adder, opts_.source_multiplier, opts_.source_barrel, opts_.source_block);
   // The clock tree is written after mapping and cached with the body.
   recipe += std::format("|clktree={}/{}", opts_.icg_fanout, design_state_bits_ >= opts_.input_clock_min ? 1 : 0);
+  if (opts_.reset_fanout != 0) {  // absent when off, so existing cache rows keep their identity
+    recipe += std::format("|rsttree={}", opts_.reset_fanout);
+  }
   if (opts_.derived_clock) {
     recipe += "|dclk=1";
   }
@@ -1650,7 +1653,8 @@ void Region_driver::map_region(const livehd::partition::Region_body& rb) {
   Region_writer::Counts counts{qor_.back().gates, qor_.back().area, qor_.back().bypassed};
   Region_writer::Registers
       registers{opts_.map_register, &dff_, &dff_ladder_, &areset_ladder_[0], &areset_ladder_[1], &icg_ladder_, &latch_ladder_, opts_.icg_fanout, design_state_bits_ >= opts_.input_clock_min, &derived_ports_};
-  registers.drop_init = opts_.drop_init;
+  registers.drop_init    = opts_.drop_init;
+  registers.reset_fanout = opts_.reset_fanout;
   writer_.set_outlib(outlib_);
   writer_.set_flat(flat_);
   if (!writer_.write(rb, blast, *cells, backend_->cells(), registers, counts, trace_stage)) {

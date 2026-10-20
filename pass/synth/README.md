@@ -35,6 +35,49 @@ Remaining native synthesis work is tracked in [2u-usyn](../../todo/livehd/2u-usy
    ([`pass/satopt`](../satopt/README.md)) already ran in the compile step when
    explicitly enabled (`pass.satopt` defaults off for every command); the mapper maps what
    compile produced.
+   **State sweep** (`synth.state_sweep`, default false; `state_sweep.cpp`). On the
+   private copy, after `pass.specialize` and before the loops are prepared, a
+   register that no top output, no instance of a body-less cell (a Liberty cell,
+   a macro), no memory and no attribute cell can observe is deleted with the cells
+   behind it, and a register is kept only as far as its observed bits reach: the
+   demand is a per-bit set per driver pin, pushed backwards through the bitwise
+   cells, muxes, slices (`Get_mask`/`Set_mask`), concatenations, adds/multiplies
+   (low prefix) and constant left shifts -- every other cell demands all its operand
+   bits -- and across the instance hierarchy (a child output bit no instance reads
+   demands nothing inside the child; a child input bit the body never reads demands
+   nothing of its driver), to a fixpoint. A register whose highest observed bit is
+   below its width is narrowed to that bit (its Q pin restamped unsigned); one with
+   at least 8 unobserved bits below that bit becomes one single-bit register per
+   observed bit, named `reg[i]` as the bus-expansion standard names the bit of a bus
+   (so the mapped names, the LEC state pairing and the placement names stay those of
+   the source), and a Concat rebuilds the narrow value its readers saw. Definitions
+   instantiated by a compact loop are never touched. This is what Yosys gets from
+   flattening and `opt_clean` bit-wise; without it LiveHD maps and places dead
+   counters, unread CSR words and the unused upper half of wide primitive outputs
+   (liteeth: 18% of the mapped cells). `lhd synth --stats`/the step log report what
+   went (`state-swept`), `LIVEHD_STATE_SWEEP_DEBUG=1` dumps the per-definition
+   output demand and `LIVEHD_STATE_SWEEP_TRACE=<register name part>` prints why a
+   register stays observed. Covered by `//pass/synth:state_sweep_test` and, with an
+   unbounded LEC proof of the mapped result, `//lhd/tests:lhd_state_sweep_test`.
+   **Relation to `compile.sweep`** (`pass/sweep`, which also deletes unobserved flop bits and
+   folds constant ones). The two do not replace each other and compose. `compile.sweep`
+   rewrites the *compile* graphs (what `lhd lec`, simulation and every later step read) of a
+   flattened top (`compile.flatten`), and its constant-bit induction proves bits constant that
+   `synth.state_sweep` (D is itself a constant) never sees. `synth.state_sweep` never touches
+   the compile output: it works on the mapper's private copy, follows the per-bit demand across
+   instance boundaries *without* flattening (a child output bit no instance reads), also
+   sweeps the memories `synth` lowers to flops (a column no reader looks at; those exist only
+   after the first sweep), and `pass.usyn` takes it too. Run together, the second finds only
+   what the first could not (`//lhd/tests:lhd_state_sweep_test` runs both and proves the
+   result against the source).
+   **Register merge** (`synth.merge_registers`, default false; `register_merge.cpp`), just
+   before the sweep: a Flop with the same clock, enable, reset, polarities, reset value,
+   width, sign and D driver as another in its definition holds the same value every cycle,
+   so its readers move to the survivor and it goes, repeated until nothing merges (a
+   register fed by merged twins becomes a twin itself). Yosys's `opt_merge` on flops; the
+   twin read-data registers of NVDLA's SRAM wrappers are 528 of partition_a's flops. The
+   survivor keeps its own name; the LEC proof of the merged netlist is a bounded one (the
+   twin has no counterpart left to pair), see `//lhd/tests:lhd_state_sweep_test`.
 2. **Modules.** `ware_module.cpp` extracts width-specialized arithmetic
    modules, `memory_module.cpp` lowers small or many-ported memories, and
    `loop_cleanup.cpp` prepares compact loops. An expanded iteration takes its
@@ -68,6 +111,17 @@ Remaining native synthesis work is tracked in [2u-usyn](../../todo/livehd/2u-usy
    `br_mux_bin_array` / `br_apb_demux_select_onehot` delay gaps but loses as
    often elsewhere: `br_arb_lru` 273 -> 368 ps, `br_multi_xfer_distributor_rr`
    +65% area), as `compile.unroll=true` does.
+   `bit_facts.cpp` answers "which bits of this value are provably 0" for the two
+   module boundaries that would otherwise hide the answer from the mapper, both
+   opt-in: `pass.abc.ware_zero_bits` clears, inside an extracted ware shifter, the
+   data-operand bits and the shift-amount bits its parent drives with 0 (one live lane of a
+   word-select vector; the five low bits of `idx * 32`), and `pass.abc.memory_prune_reads` clears at a lowered memory's output
+   the read-port bits no reader observes, feeds the bits a parent drives with 0
+   to the module as constants, and passes a write-enable lane vector that is one
+   condition on a constant lane pattern (`cond * K`) as that one bit, so the
+   module's lanes share one net instead of costing an enable product per lane.
+   The mask cell takes the color of the logic it feeds (a different color is a
+   different region, and the constant would not cross it).
    Explicit SRAM cells declared by the selected Liberty remain opaque `Sub`
    instances. They bypass native-array lowering; their physical geometry is
    supplied by the corresponding LEF. The library interface alone does not

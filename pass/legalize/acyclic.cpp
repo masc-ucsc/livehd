@@ -1239,6 +1239,23 @@ void model_pin(const hhds::Pin_class& p, Cond_model& m, int depth) {
 uint64_t mask_w(int w) { return w >= 64 ? ~uint64_t{0} : ((uint64_t{1} << w) - 1); }
 
 uint64_t eval_pin(const hhds::Pin_class& p, const Cond_model& m, const std::vector<uint64_t>& asg,
+                  absl::flat_hash_map<hhds::Class_index, uint64_t>& memo);
+
+// The value of `p` restricted to its own width. A constant keeps its value: its pin
+// can report width 0 (an unsized or folded literal), and masking by that width made
+// `1'b1` read as false, so a cycle whose muxes all select the cycle arm through
+// constant selectors looked unsatisfiable and a real loop was unrolled away.
+uint64_t eval_masked(const hhds::Pin_class& p, const Cond_model& m, const std::vector<uint64_t>& asg,
+                     absl::flat_hash_map<hhds::Class_index, uint64_t>& memo) {
+  const auto v = eval_pin(p, m, asg, memo);
+  if (small_const(p)) {
+    return v;
+  }
+  const int w = pin_w(p);
+  return w > 0 ? (v & mask_w(w)) : v;
+}
+
+uint64_t eval_pin(const hhds::Pin_class& p, const Cond_model& m, const std::vector<uint64_t>& asg,
                   absl::flat_hash_map<hhds::Class_index, uint64_t>& memo) {
   if (const auto c = small_const(p)) {
     return static_cast<uint64_t>(*c);
@@ -1259,7 +1276,7 @@ uint64_t eval_pin(const hhds::Pin_class& p, const Cond_model& m, const std::vect
     if (c0 || c1) {
       const auto& x = c0 ? ins[1].driver : ins[0].driver;
       const auto  c = static_cast<uint64_t>(c0 ? *c0 : *c1);
-      r             = (eval_pin(x, m, asg, memo) & mask_w(pin_w(x))) == c ? 1 : 0;
+      r             = eval_masked(x, m, asg, memo) == c ? 1 : 0;
     } else {
       const auto mw = mask_w(pin_w(ins[0].driver));
       r = (eval_pin(ins[0].driver, m, asg, memo) & mw) == (eval_pin(ins[1].driver, m, asg, memo) & mw) ? 1 : 0;
@@ -1273,11 +1290,11 @@ uint64_t eval_pin(const hhds::Pin_class& p, const Cond_model& m, const std::vect
   } else if (op == Ntype_op::Not) {
     r = (~eval_pin(ins[0].driver, m, asg, memo)) & mask_w(w);
   } else if (op == Ntype_op::Ror) {
-    r = (eval_pin(ins[0].driver, m, asg, memo) & mask_w(pin_w(ins[0].driver))) != 0 ? 1 : 0;
+    r = eval_masked(ins[0].driver, m, asg, memo) != 0 ? 1 : 0;
   } else if (op == Ntype_op::Get_mask) {
     const auto rng = gu::bit_range(n);
     const auto a   = gu::get_driver_of_sink_name(n, "a");
-    r              = ((eval_pin(a, m, asg, memo) & mask_w(pin_w(a))) >> rng->first) & mask_w(w);
+    r              = (eval_masked(a, m, asg, memo) >> rng->first) & mask_w(w);
   } else if (op == Ntype_op::Sext) {
     r = eval_pin(gu::first_value_driver(n), m, asg, memo) & 1;
   } else if (op == Ntype_op::Mux) {
@@ -1285,7 +1302,7 @@ uint64_t eval_pin(const hhds::Pin_class& p, const Cond_model& m, const std::vect
     for (const auto& in : ins) {
       (in.get_port_id() == 0 ? sel : in.get_port_id() == 1 ? a0 : a1) = in.driver;
     }
-    const bool t = (eval_pin(sel, m, asg, memo) & mask_w(pin_w(sel))) != 0;
+    const bool t = eval_masked(sel, m, asg, memo) != 0;
     r            = eval_pin(t ? a1 : a0, m, asg, memo) & mask_w(w);
   }
   memo.emplace(p.get_class_index(), r);
@@ -1312,7 +1329,7 @@ bool conds_satisfiable(const std::vector<std::pair<hhds::Pin_class, bool>>& cond
     absl::flat_hash_map<hhds::Class_index, uint64_t> memo;
     bool                                             all = true;
     for (const auto& [sel, want] : conds) {
-      const bool t = (eval_pin(sel, m, asg, memo) & mask_w(pin_w(sel))) != 0;
+      const bool t = eval_masked(sel, m, asg, memo) != 0;
       if (t != want) {
         all = false;
         break;

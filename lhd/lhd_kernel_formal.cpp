@@ -22,6 +22,7 @@
 #include "absl/container/flat_hash_set.h"
 #include "absl/strings/str_join.h"
 #include "cprop.hpp"
+#include "pass_aegraph.hpp"
 #include "diag.hpp"
 #include "encode.hpp"
 #include "file_utils.hpp"
@@ -5771,6 +5772,13 @@ void lec_command(Options& opts, Result& res) {
       //
       // Under the run deadline, checked between graphs (a cprop of one graph
       // cannot stop part-way): on cva6 this step alone ran ~7 min.
+      // formal.lec.preflight_engine: the cprop engine of this re-simplify (INTERNAL; default classic).
+      const std::string preflight_engine = label("preflight_engine", "classic");
+      if (preflight_engine != "classic" && preflight_engine != "aegraph") {
+        throw Lhd_error{"usage",
+                        std::format("--set formal.lec.preflight_engine expects classic|aegraph, got '{}'", preflight_engine),
+                        "classic (default) | aegraph (the e-graph engine, stamping every cell it creates)"};
+      }
       absl::flat_hash_set<hhds::Graph*> simplified;
       auto                              simplify_after_inline = [&](const std::vector<std::shared_ptr<hhds::Graph>>& graphs) {
         for (const auto& sp : graphs) {
@@ -5787,7 +5795,15 @@ void lec_command(Options& opts, Result& res) {
           // lane whose internal carrier has no standalone width stamp. cprop
           // has no entry check on width stamps and keeps only value-preserving
           // folds, so it runs here unchanged.
-          cprop.do_trans(sp);
+          if (preflight_engine == "aegraph") {
+            // The e-graph engine under the same contract as Cprop{false}: no pass.bitwidth follows, so
+            // every cell it creates is stamped, and a graph where it cannot is left to classic.
+            livehd::aegraph::Options eopts;
+            eopts.preflight = true;
+            (void)livehd::aegraph::optimize_body(cprop, sp, eopts);
+          } else {
+            cprop.do_trans(sp);
+          }
         }
         return true;
       };

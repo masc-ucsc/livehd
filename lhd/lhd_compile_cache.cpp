@@ -872,7 +872,10 @@ std::string scope_name(const Options& opts, const std::vector<std::string>& seed
 }
 
 std::string context_descriptor(const Options& opts) {
-  std::string text = std::format("top={}|pipeline=cprop,bitwidth|formal_preflight={}", opts.top, opts.compile_formal_preflight);
+  std::string text = std::format("top={}|pipeline=cprop[{}],bitwidth|formal_preflight={}",
+                                  opts.top,
+                                  cprop_engine_descriptor(opts),
+                                  opts.compile_formal_preflight);
   // Keep opt-in optimized graphs separate from unoptimized source compiles.
   text += std::format("|satopt={}", satopt_during_compile(opts));
   // Seed identity: scope_name alone is a stem/--top, so two different designs

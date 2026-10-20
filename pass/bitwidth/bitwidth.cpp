@@ -1470,6 +1470,21 @@ void Bitwidth::process_bit_and(hhds::Node_class& node, Inp_pins& inp_edges) {
     const auto& e  = inp_edges[i];
     auto        it = bwmap.find(e.get_driver_pin().get_class_index());
     if (it == bwmap.end()) {
+      // The operand has no range YET (a walk that met it before its driver: an acyclic body in a
+      // storage order that is not topological, e.g. behind a false word-level loop through an
+      // instance). adjust_bw only ever WIDENS, so committing a range derived from the other operand
+      // alone would pin the And at that operand's width forever, even though this operand's own
+      // stamp (every producer stamps its pin) bounds it tighter. Use the stamp as the operand's range.
+      const auto drv   = e.get_driver_pin();
+      const auto stamp = bits_of(drv);
+      if (stamp > 0 && !drv.is_const()) {
+        if (livehd::graph_util::is_unsign(drv)) {
+          pos_min_sbits = std::min(pos_min_sbits, stamp);
+        } else {
+          unk_max_sbits = std::max(unk_max_sbits, stamp);
+        }
+        continue;
+      }
       unk_max_sbits = Bits_unknown;
       continue;
     }

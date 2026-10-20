@@ -35,6 +35,7 @@
 // as a cold one (the abc region digest is content-based, the coloring is
 // seeded and deterministic).
 
+#include "pass/opentimer/pass_opentimer.hpp"
 #include <algorithm>
 #include <cmath>
 #include <cstdlib>
@@ -125,13 +126,15 @@ livehd::placement::Options placement_options(const Options& opts) {
   out.fp_timing_after_density = truthy(synth_set(opts, "place.fp.timing_after_density", "false"));
   out.timing_fraction         = number("place.timing_fraction", "0.2");
   out.timing_max_weight       = number("place.timing_max_weight", "5");
+  out.timing_exponent         = number("place.timing_exponent", "1");
+  out.macro_timing_interval   = static_cast<int>(integer("place.macro.timing_interval", "50"));
   out.timing_smoothing        = number("place.timing_smoothing", "0.5");
   out.fp_timing_max_updates   = integer("place.fp.timing_max_updates", "10");
   out.stop_overflow           = number("place.stop_overflow", "0.1");
   out.initial_density_weight  = number("place.initial_density_weight", "0.01");
   if (out.timing_max_weight < 1 || out.timing_max_weight > livehd::placement::max_net_weight || out.timing_smoothing < 0
       || out.timing_smoothing > 1 || out.fp_timing_max_updates < 2 || out.stop_overflow < 0 || out.stop_overflow > 1
-      || out.initial_density_weight <= 0) {
+      || out.initial_density_weight <= 0 || out.timing_exponent < 1 || out.macro_timing_interval < 0) {
     throw Lhd_error{"usage", "invalid synth.place timing/density tuning controls", "check lhd describe synth for allowed values"};
   }
   if (out.timing_fraction <= 0 || out.timing_fraction > 1) {
@@ -142,10 +145,12 @@ livehd::placement::Options placement_options(const Options& opts) {
   if (out.cohesion < 0) {
     throw Lhd_error{"usage", "synth.place.cohesion must be nonnegative", ""};
   }
-  out.utilization                = number("place.utilization", "0.30");
-  out.aspect                     = number("place.aspect", "1");
-  for (const auto& [key, frame] : {std::pair<const char*, std::vector<double>*>{"place.die", &out.die},
-                                   std::pair<const char*, std::vector<double>*>{"place.core", &out.core}}) {
+  out.utilization = number("place.utilization", "0.30");
+  out.aspect      = number("place.aspect", "1");
+  for (const auto& [key, frame] : {
+           std::pair<const char*, std::vector<double>*>{ "place.die",  &out.die},
+           std::pair<const char*, std::vector<double>*>{"place.core", &out.core}
+  }) {
     const auto text = synth_set(opts, key, "");
     if (text.empty()) {
       continue;
@@ -183,11 +188,11 @@ livehd::placement::Options placement_options(const Options& opts) {
       || out.fixed_macro_overlap_weight < 0) {
     throw Lhd_error{"usage", "invalid synth.place cell-placement controls", ""};
   }
-  out.bins                            = integer("place.bins", "64");
-  out.scale_macro_density             = truthy(synth_set(opts, "place.scale_macro_density", "true"));
-  out.automatic_bins                  = truthy(synth_set(opts, "place.auto_bins", "false"));
-  out.exact_macro_density             = truthy(synth_set(opts, "place.exact_macro_density", "true"));
-  out.adaptive_density                = truthy(synth_set(opts, "place.adaptive_density", "true"));
+  out.bins                 = integer("place.bins", "64");
+  out.scale_macro_density  = truthy(synth_set(opts, "place.scale_macro_density", "true"));
+  out.automatic_bins       = truthy(synth_set(opts, "place.auto_bins", "false"));
+  out.exact_macro_density  = truthy(synth_set(opts, "place.exact_macro_density", "true"));
+  out.adaptive_density     = truthy(synth_set(opts, "place.adaptive_density", "true"));
   const auto unknown_const = synth_set(opts, "place.unknown_const", "error");
   if (unknown_const != "error" && unknown_const != "zero") {
     throw Lhd_error{"usage", "synth.place.unknown_const must be error or zero", ""};
@@ -195,10 +200,15 @@ livehd::placement::Options placement_options(const Options& opts) {
   out.unknown_const_zero              = unknown_const == "zero";
   out.routability                     = truthy(synth_set(opts, "place.routability", "true"));
   out.routability_charge_compensation = truthy(synth_set(opts, "place.routability_charge_compensation", "true"));
-  out.macro_overlap_weight            = number("place.macro_overlap", "50");
-  out.macro_jitter                    = number("place.macro_jitter", "0.01");
-  out.io_iterations                   = integer("place.io_iterations", "500");
-  out.schedule_iterations             = integer("place.schedule_iterations", "500");
+  out.routability_macro_weight        = number("place.routability_macro_weight", "1");
+  out.routability_macro_range         = number("place.routability_macro_range", "2");
+  if (out.routability_macro_weight < 0 || out.routability_macro_range <= 0 || out.routability_macro_range > 16) {
+    throw Lhd_error{"usage", "invalid synth.place macro routing pressure controls", "weight >= 0; range in (0,16]"};
+  }
+  out.macro_overlap_weight = number("place.macro_overlap", "50");
+  out.macro_jitter         = number("place.macro_jitter", "0.01");
+  out.io_iterations        = integer("place.io_iterations", "500");
+  out.schedule_iterations  = integer("place.schedule_iterations", "500");
   if (out.macro_overlap_weight < 0 || out.macro_jitter < 0 || out.macro_jitter > .1 || out.schedule_iterations < 0
       || out.io_iterations < 0) {
     throw Lhd_error{"usage", "invalid synth.place repulsion controls", ""};
@@ -221,18 +231,57 @@ livehd::placement::Options placement_options(const Options& opts) {
   if (*halo_end != '\0' || !std::isfinite(out.halo_x) || !std::isfinite(out.halo_y) || out.halo_x < 0 || out.halo_y < 0) {
     throw Lhd_error{"usage", "invalid synth.place.halo", "expected nonnegative microns: H or X,Y"};
   }
-  out.final_cells                 = truthy(synth_set(opts, "place.final", "true"));
-  out.final_iterations            = integer("place.final.iterations", "0");
-  out.fp_place                    = truthy(synth_set(opts, "place.fp", "true"));
-  out.fp_snap_enabled             = truthy(synth_set(opts, "place.fp.snap", "true"));
-  out.fp_colors                   = truthy(synth_set(opts, "place.fp.colors", "false"));
+  out.final_cells           = truthy(synth_set(opts, "place.final", "true"));
+  out.final_iterations      = integer("place.final.iterations", "0");
+  out.fp_place              = truthy(synth_set(opts, "place.fp", "false"));
+  out.fp_snap_enabled       = truthy(synth_set(opts, "place.fp.snap", "true"));
+  out.fp_colors             = truthy(synth_set(opts, "place.fp.colors", "false"));
+  out.fp_color_source       = synth_set(opts, "place.fp.color_source", "synthesis");
+  out.fp_color_minimum      = number("place.fp.color_minimum", "-1");
+  out.fp_color_maximum      = number("place.fp.color_maximum", "30000");
+  out.fp_pin_adjust         = truthy(synth_set(opts, "place.fp.pin_adjust", "false"));
+  out.fp_pin_interval       = integer("place.fp.pin_interval", "50");
+  out.fp_pin_step           = number("place.fp.pin_step", "0.01");
+  out.fp_pin_improvement    = number("place.fp.pin_improvement", "0.001");
+  out.macro_pin_adjust      = truthy(synth_set(opts, "place.macro.pin_adjust", "false"));
+  out.macro_pin_interval    = integer("place.macro.pin_interval", "50");
+  out.macro_pin_step        = number("place.macro.pin_step", "0.01");
+  out.macro_pin_improvement = number("place.macro.pin_improvement", "0.001");
+  if (out.macro_pin_interval < 1 || out.macro_pin_step <= 0 || out.macro_pin_step > .5 || out.macro_pin_improvement < 0
+      || out.macro_pin_improvement >= 1) {
+    throw Lhd_error{"usage",
+                    "invalid macro pin adjustment settings",
+                    "positive interval, step in (0, 0.5], gain in [0, 1) required"};
+  }
+  if ((out.fp_color_source != "synthesis" && out.fp_color_source != "placement" && out.fp_color_source != "memory_first")
+      || (out.fp_color_minimum < 0 && out.fp_color_minimum != -1) || out.fp_color_maximum <= 0 || out.fp_pin_interval < 1
+      || out.fp_pin_step <= 0 || out.fp_pin_step > .5 || out.fp_pin_improvement < 0 || out.fp_pin_improvement >= 1) {
+    throw Lhd_error{"usage", "invalid FP color/pin adjustment settings", ""};
+  }
   out.repair_reset                = truthy(synth_set(opts, "place.repair.reset", "false"));
-  out.fp_iterations               = integer("place.fp.iterations", "1500");
-  out.fp_minimum                  = number("place.fp.minimum", "3000");
-  out.fp_min_copies               = integer("place.fp.min_copies", "4");
-  out.fp_attraction               = number("place.fp.attraction", "0.25");
-  out.fp_repulsion                = number("place.fp.repulsion", "5");
+  out.reset_fanout                = static_cast<unsigned>(integer("place.reset_fanout", "0"));
+  if (out.reset_fanout == 1) {
+    throw Lhd_error{"usage", "invalid synth.place.reset_fanout: 1", "expected 0 (off) or an integer >= 2: loads per reset buffer"};
+  }
+  out.fp_iterations   = integer("place.fp.iterations", "1500");
+  out.fp_minimum      = number("place.fp.minimum", "3000");
+  out.fp_min_copies   = integer("place.fp.min_copies", "4");
+  out.fp_attraction   = number("place.fp.attraction", "0.25");
+  out.fp_repulsion    = number("place.fp.repulsion", "5");
+  out.fp_align_weight = number("place.fp.align_weight", "0");
+  out.fp_align_sigma  = number("place.fp.align_sigma", "0.25");
+  out.fp_align_start  = integer("place.fp.align_start", "100");
+  out.fp_align_full   = integer("place.fp.align_full", "500");
+  if (out.fp_align_weight < 0 || out.fp_align_sigma < 0
+      || (out.fp_align_weight > 0 && (out.fp_align_start < 0 || out.fp_align_start >= out.fp_align_full))) {
+    throw Lhd_error{"usage", "invalid synth.place.fp alignment controls", "nonnegative weight/sigma and start < full required"};
+  }
+  out.fp_parent_weight            = number("place.fp.parent_weight", "0");
+  out.fp_parent_outside           = number("place.fp.parent_outside", "4");
+  out.fp_anchor_macros_only       = truthy(synth_set(opts, "place.fp.anchor_macros_only", "false"));
   out.fp_anchor                   = number("place.fp.anchor", "0.25");
+  out.fp_distance_attraction      = truthy(synth_set(opts, "place.fp.distance_attraction", "true"));
+  out.fp_attraction_outside       = number("place.fp.attraction_outside", "4");
   out.fp_snap.alignment_tolerance = number("place.fp.alignment", "1");
   out.fp_snap.spacing_tolerance   = number("place.fp.spacing_tolerance", "0.25");
   out.fp_snap.spacing_penalty     = number("place.fp.spacing_penalty", "0.02");
@@ -241,9 +290,10 @@ livehd::placement::Options placement_options(const Options& opts) {
   if (out.fp_min_copies < 2) {
     throw Lhd_error{"usage", "synth.place.fp.min_copies must be at least 2", "copies are counted separately per hierarchy parent"};
   }
-  if (out.fp_minimum < 0 || out.fp_attraction <= 0 || out.fp_repulsion <= 0 || out.fp_anchor < 0
-      || out.fp_snap.alignment_tolerance < 0 || out.fp_snap.spacing_tolerance < 0 || out.fp_snap.spacing_penalty < 0
-      || out.fp_snap.symmetry_tolerance < 0 || out.fp_snap.max_displacement < 0) {
+  if (out.fp_minimum < 0 || out.fp_attraction <= 0 || out.fp_repulsion <= 0 || out.fp_anchor < 0 || out.fp_attraction_outside < 0
+      || out.fp_parent_weight < 0 || out.fp_parent_outside < 0 || out.fp_snap.alignment_tolerance < 0
+      || out.fp_snap.spacing_tolerance < 0 || out.fp_snap.spacing_penalty < 0 || out.fp_snap.symmetry_tolerance < 0
+      || out.fp_snap.max_displacement < 0) {
     throw Lhd_error{"usage",
                     "invalid synth.place.fp controls",
                     "expected nonnegative values; attraction/repulsion must be positive"};
@@ -252,25 +302,39 @@ livehd::placement::Options placement_options(const Options& opts) {
   if (out.fp_place && out.macro_mode == "h2d") {
     throw Lhd_error{"usage", "synth.place.fp requires the native plain placer", "use synth.place.macro=none"};
   }
-  if (out.macro_mode != "none" && out.macro_mode != "h2d" && out.macro_mode != "r8h2" && out.macro_mode != "r8h3") {
-    throw Lhd_error{"usage", "synth.place.macro must be none, h2d, r8h2 or r8h3", ""};
+  if (out.macro_mode != "none" && out.macro_mode != "h2d") {
+    throw Lhd_error{"usage", "synth.place.macro must be none or h2d", ""};
   }
-  out.macro_align_weight        = number("place.macro.align_weight", "0");
-  out.macro_align_sigma         = number("place.macro.align_sigma", "0");
-  out.macro_align_overlap_boost = number("place.macro.align_overlap_boost", "0");
-  out.macro_align_start         = integer("place.macro.align_start", "100");
-  out.macro_align_full          = integer("place.macro.align_full", "500");
-  out.macro_align_nearest       = truthy(synth_set(opts, "place.macro.align_nearest", "false"));
-  out.macro_snap                = truthy(synth_set(opts, "place.macro.snap", out.full ? "true" : "false"));
-  out.macro_snap_tolerance      = number("place.macro.snap_tolerance", "0.25");
-  out.macro_snap_weight         = integer("place.macro.snap_weight", "100");
+  out.macro_align_weight                     = number("place.macro.align_weight", "25");
+  out.macro_align_sigma                      = number("place.macro.align_sigma", "0.25");
+  out.macro_align_overlap_boost              = number("place.macro.align_overlap_boost", "0");
+  out.macro_align_start                      = integer("place.macro.align_start", "100");
+  out.macro_align_full                       = integer("place.macro.align_full", "500");
+  out.macro_align_nearest                    = truthy(synth_set(opts, "place.macro.align_nearest", "false"));
+  out.macro_align_global                     = truthy(synth_set(opts, "place.macro.align_global", "true"));
+  out.macro_snap                             = truthy(synth_set(opts, "place.macro.snap", out.full ? "true" : "false"));
+  out.macro_snap_mode                        = synth_set(opts, "place.macro.snap_mode", "alignment");
+  out.macro_snap_options.alignment_tolerance = number("place.macro.snap_alignment", "1");
+  out.macro_snap_options.spacing_tolerance   = number("place.macro.snap_spacing_tolerance", "0.25");
+  out.macro_snap_options.spacing_penalty     = number("place.macro.snap_spacing_penalty", "0.02");
+  out.macro_snap_options.symmetry_tolerance  = number("place.macro.snap_symmetry", "1");
+  out.macro_snap_options.max_displacement    = number("place.macro.snap_displacement", "1");
+  if ((out.macro_snap_mode != "alignment" && out.macro_snap_mode != "symmetry") || out.macro_snap_options.alignment_tolerance < 0
+      || out.macro_snap_options.spacing_tolerance < 0 || out.macro_snap_options.spacing_penalty < 0
+      || out.macro_snap_options.symmetry_tolerance < 0 || out.macro_snap_options.max_displacement < 0) {
+    throw Lhd_error{"usage",
+                    "invalid macro snap mode or regularity controls",
+                    "expected alignment or symmetry and nonnegative controls"};
+  }
+  out.macro_snap_tolerance = number("place.macro.snap_tolerance", "0.25");
+  out.macro_snap_weight    = integer("place.macro.snap_weight", "100");
   if (out.macro_align_weight < 0 || out.macro_align_sigma < 0 || out.macro_align_overlap_boost < 0
       || (out.macro_align_weight > 0 && out.macro_align_start >= out.macro_align_full) || out.macro_snap_tolerance < 0
       || out.macro_snap_weight == 0) {
     throw Lhd_error{"usage", "invalid synth.place.macro alignment/snap controls", "alignment requires start < full"};
   }
-  if ((out.macro_align_weight > 0 || out.macro_snap) && out.macro_mode == "h2d") {
-    throw Lhd_error{"usage", "macro alignment/snap requires synth.place.macro=none, r8h2 or r8h3", ""};
+  if ((out.macro_align_weight > 0 || out.macro_snap || out.macro_pin_adjust) && out.macro_mode == "h2d") {
+    throw Lhd_error{"usage", "macro alignment/snap/pin adjustment requires synth.place.macro=none", ""};
   }
   if (out.macro_snap && !out.full) {
     throw Lhd_error{"usage", "macro snapping requires full placement", "use synth.place.mode=full"};
@@ -863,6 +927,8 @@ void synth_command(Options& opts, Result& res) {
     // ABC keeps its independent worker setting; USYN uses shared admission.
     labels["threads"]    = "0";
     labels["specialize"] = synth_set(opts, "specialize", "true");
+    labels["state_sweep"]     = synth_set(opts, "state_sweep", "false");
+    labels["merge_registers"] = synth_set(opts, "merge_registers", "false");
     // Each mapper receives its own labels. Native USYN does not inherit
     // ABC optimization settings; standalone dispatch uses the same rule.
     merge_mapper_sets(opts, mapper_method, labels);
@@ -928,27 +994,24 @@ void synth_command(Options& opts, Result& res) {
     if (user_workdir && opts.incremental) {
       place_options.cache_dir = opts.workdir + "/place_cache";
     }
-    unsigned    trial = 0;
-    // The placement phase currently driving evaluate(): FP checkpoints call it
-    // from inside place(), and its run_step clears the crash context, which
-    // then names that phase again for the rest of the placement call.
+    Eprp_var timing_options;
+    timing_options.dict = {{"files", liberty + (sdc.empty() ? "" : "," + sdc)}, {"top", top}, {"hier", "false"}};
+    merge_sets(opts, "pass.opentimer", timing_options.dict);
+    timing_options.dict["cache_dir"] = "";
+    timing_options.dict["qor"] = "";
+    timing_options.set_stage_labels(timing_options.dict);
+    livehd::opentimer::Physical_session timing_session(timing_options);
     std::string phase_step;
     std::string phase_log;
-    const auto  evaluate = [&](const livehd::placement::Result& state) {
-      Eprp_var analysis;
-      analysis.graphs            = {state.graph};
-      analysis.physical_rc       = state.parasitics;
-      const auto          report = root + "/place/resize_timing_" + std::to_string(trial++) + ".json";
-      Eprp_var::Eprp_dict labels{
-          {"files", liberty + (sdc.empty() ? "" : "," + sdc)},
-          {  "top",                                      top},
-          {  "qor",                                   report}
-      };
-      merge_sets(opts, "pass.opentimer", labels);
-      labels["cache_dir"] = "";
-      run_step("pass.opentimer", analysis, labels, opts, res);
+    // The session runs in-process (no run_step), so keep Liberty/timer prints off the protocol stdout here.
+    // Nested redirects (calls from inside place()/repair, already logged) restore correctly.
+    const auto timing_log = next_log_path(opts, "pass.opentimer.incremental");
+    const auto evaluate   = [&](const livehd::placement::Result& state) {
+      Phase_timer   phase(res, "pass.opentimer.incremental");
+      Stdout_to_log redirect(timing_log);
+      auto          feedback = timing_session.evaluate(state.graph, state.parasitics);
       set_crash_context(phase_step, phase_log);
-      return livehd::placement::timing_feedback(slurp_json(report));
+      return feedback;
     };
     // `synth.place.unknown_const=zero` is a refinement of a don't-care, so say how many bits it touched.
     const auto note_unknown_tied = [](const livehd::placement::Result& r) {
@@ -962,7 +1025,7 @@ void synth_command(Options& opts, Result& res) {
     };
     hhds::GraphLibrary seed_library;
     auto               placement_input = *found;
-    if (run_timing_place && place_options.fp_timing_interval > 0) {
+    if (run_timing_place && (place_options.fp_timing_interval > 0 || place_options.macro_timing_interval > 0)) {
       place_options.fp_evaluate = evaluate;
       place_options.fp_resize   = run_resize;
     }
@@ -975,8 +1038,8 @@ void synth_command(Options& opts, Result& res) {
       // Like pass.place below: DREAMPlace prints to stdout, which is reserved
       // for the result protocol, and a refusal is a placement failure.
       const auto  seed_log = next_log_path(opts, "pass.place.post_synth_timing");
-      phase_step = "pass.place.post_synth_timing";
-      phase_log  = seed_log;
+      phase_step           = "pass.place.post_synth_timing";
+      phase_log            = seed_log;
       set_crash_context(phase_step, phase_log);
       livehd::placement::Result seed;
       try {
@@ -993,7 +1056,8 @@ void synth_command(Options& opts, Result& res) {
       place_options.net_weights = livehd::placement::timing_weights(*seed.parasitics,
                                                                     timing,
                                                                     place_options.timing_fraction,
-                                                                    place_options.timing_max_weight);
+                                                                    place_options.timing_max_weight,
+                                                                    place_options.timing_exponent);
       if (place_options.net_weights.empty()) {
         throw Lhd_error{"unsupported",
                         "post-synthesis timing has no constrained data nets for placement weighting",
@@ -1003,8 +1067,8 @@ void synth_command(Options& opts, Result& res) {
       res.recipe_steps.emplace_back("pass.place.post_synth_timing");
     }
     const auto log = next_log_path(opts, "pass.place");
-    phase_step = "pass.place";
-    phase_log  = log;
+    phase_step     = "pass.place";
+    phase_log      = log;
     set_crash_context(phase_step, phase_log);
     livehd::placement::Result placed;
     try {

@@ -564,13 +564,12 @@ assumption set.</li>
 
 <h3>Knobs and which callers follow them</h3>
 <ul>
-<li><strong>Selector: <code>compile.cprop.engine=classic|aegraph|aegraph+classic|none</code></strong>
-(default <code>classic</code>).
+<li><strong>Selector: <code>compile.cprop.engine=classic|aegraph|aegraph+classic</code></strong>
+(default <code>classic</code>). There is no <code>none</code> value (user ruling
+2026-10-18): at least one engine always runs.
   <ul>
   <li><code>aegraph+classic</code> runs the aegraph then classic in each slot, to
   measure what classic still removes.</li>
-  <li><code>none</code> skips the engine. It isolates the input for timing and gives
-  the failure baseline.</li>
   <li>It is registered as a <code>pass.cprop</code> label
   (<code>pass/cprop/pass_cprop.cpp:17-30</code>), so <code>lhd describe</code> and
   unknown-flag checking work.</li>
@@ -1123,8 +1122,8 @@ is immutable and is not edited.</li>
     <li><code>pass/aegraph/</code> with a BUILD modeled on <code>pass/cprop/BUILD</code>:
     <code>alwayslink</code>, COPTS, no <code>-Wno-*</code>;</li>
     <li><code>pass.aegraph</code> with its INTERNAL shared labels;</li>
-    <li><code>compile.cprop.engine</code> (all four values) and
-    <code>engine_slots</code>, both validated;</li>
+    <li><code>compile.cprop.engine</code> (all three values: no <code>none</code>)
+    and <code>engine_slots</code>, both validated;</li>
     <li>the dispatch, the driver merge, and the <code>:1808</code> gate;</li>
     <li>the <code>kSetPasses</code> row, the <code>compile_salt</code> entry, and
     the engine name in the cache descriptor;</li>
@@ -1155,12 +1154,96 @@ is immutable and is not edited.</li>
     </ul></li>
   <li>Exit:
     <ul>
-    <li>the set of failing fixtures under <code>aegraph</code> is a subset of the
-    set under <code>none</code>;</li>
+    <li>the set of failing fixtures under <code>aegraph</code> is recorded and
+    contains no REFUTED and no crash (there is no <code>none</code> baseline;
+    <code>classic</code> is the reference, with 0 failures);</li>
     <li>0 REFUTED and 0 crashes;</li>
     <li>both failure lists are recorded in this file.</li>
     </ul>
   The full 0-failure bar moves to G2.</li>
+  <li><span class="status landed">landed 2026-10-18 (uncommitted)</span> What exists and what was measured:
+    <ul>
+    <li>Plumbing as listed: <code>pass/aegraph/</code>, <code>pass.aegraph</code>
+    with INTERNAL shared labels, the eager <code>engine</code> /
+    <code>engine_slots</code> checks, the dispatch in
+    <code>compile_graph_passes</code> (the set name stays <code>compile.cprop</code>
+    for every engine; <code>aegraph+classic</code> is two steps per slot), the
+    driver merge of <code>compile.aegraph</code> and the
+    <code>loop_hoist=false</code> gate for both methods, the
+    <code>kSetPasses</code> row, <code>compile_salt</code> and the engine name in
+    the cache descriptor (<code>pipeline=cprop[aegraph:both],bitwidth</code>).
+    <code>check_known_set_passes</code> rejects
+    <code>compile.aegraph.{low_lanes,loop_hoist,engine,engine_slots}</code>
+    with the <code>compile.cprop.X</code> hint.</li>
+    <li>Engine: pre-pass Tarjan SCC (members opaque; a Mux with a known selector
+    contributes only its chosen arm, so a ring closed through constant-selected
+    routers is acyclic, re-examined once the acyclic part is built because the
+    selector can itself be a computed constant). The classic scalar rewrites
+    (<code>Cprop::do_scalar</code>) get one chance on the members of every SCC
+    before the build, which cuts the algebraic false cycles
+    (<code>module_cycle_context_5</code>: <code>x = ~x ^ ~x ^ a</code>). Build in
+    producers-first order with hash-consing, a three-valued constant analysis that
+    folds only fully known results (P7), and forwarding folds that are the
+    constant analysis, not rules: constant-selector Mux, a shift by 0, a window
+    covering a whole <code>?</code> literal, equal connected Mux arms (Q1),
+    exclusive-Hotmux equal arms or constant controls. Cost-free extraction and
+    diff-elaboration (loop-carry guard, parallel-edge refusal, named-twin policy,
+    width-stamp carry, dead pure node sweep). The post steps are the classic
+    region passes (<code>Cprop::do_post</code>, shared with <code>do_trans</code>
+    through <code>Cprop::region_passes</code>) and low-lane narrowing, then
+    <code>hoist_loop_invariants</code>.</li>
+    <li>Not done (rules, D and later): partial constant merging
+    (<code>x + 3 + 4</code>), strength reduction, boolean canonicalization
+    (<code>Mux(s,1,0)</code> to <code>EQ(s,0)</code>), the muxctx-before-sharing
+    order, the choice rules. Out of the e-graph on purpose: false-cycle algebra
+    beyond the classic call above, packed-slice resolution beyond
+    <code>do_post</code>.</li>
+    <li>Harness: <code>PrpRunner.compile_sets</code> rides only the compile and
+    sim commands of the design under test (never <code>lhd lec</code> and never a
+    golden Verilog compile). <code>pyrope_test.py --aegraph</code> and
+    <code>LHD_PRP_COMPILE_SETS="k=v ..."</code> feed it; in a Pyrope-vs-Pyrope
+    LEC the variant side gets the sets and the base stays classic. Manual twins:
+    <code>//inou/prp:prp-aegraph-sim</code>, <code>//inou/prp:prp-aegraph-lec</code>.
+    Three header-only equiv variants: <code>loop_carry_kinds_3</code> (compact
+    loops), <code>runtime_index_store_lanes_3</code> (packed lanes),
+    <code>hotmux_unique_1</code> (exclusive Hotmux). Tests:
+    <code>//pass/aegraph:aegraph_test</code> (round trip incl. a
+    <code>Subnode_loop</code> body and a non-exclusive Hotmux, CSE keys, folds,
+    P7, cycles, determinism, LEC soundness),
+    <code>//lhd/tests:lhd_aegraph_test</code> (<code>tool diff --structural</code>
+    on two runs, LEC equal to classic, cache keyed on the engine),
+    <code>lhd_options_test</code>, <code>lhd_config_test</code>,
+    <code>lhd_list_options_test</code>.</li>
+    <li>Command that forces the engine over the existing inou/prp tests, no BUILD
+    edit: <code>bazel test -c opt //inou/prp:all
+    --test_tag_filters=-manual,-external-simulator,-fixme
+    --test_env=LHD_PRP_COMPILE_SETS=compile.cprop.engine=aegraph</code> (use
+    <code>aegraph+classic</code> for the third engine).</li>
+    <li><strong>Failing fixtures, <code>-c opt</code>, 2825 targets of
+    <code>//inou/prp:all</code> (non-manual, non-fixme), 2026-10-18:</strong>
+      <ul>
+      <li><code>classic</code>: 0 failures.</li>
+      <li><code>aegraph+classic</code>: 0 failures.</li>
+      <li><code>aegraph</code>: 2 failures, 0 REFUTED, 0 crashes. Both pin classic's
+      structure rather than the design's behaviour:
+      <code>lec-transparent_hier_1</code> (<code>:lec_grep: 'top' MATCHED (semdiff</code>:
+      classic canonicalizes <code>rst ? 0 : 1</code> to <code>EQ(rst,0)</code>, the
+      aegraph keeps the Mux, so the pair needs a solver) and
+      <code>prp-lec-loop_roll_mixed_1</code> (<code>:lec_grep: 0 via solver</code>:
+      classic flattens the nested <code>Sum</code> in the loop body
+      <code>acc_step</code> (<code>collapse_forward_same_op</code>), the aegraph
+      keeps it, so that def needs a solver). The pairs are still proven. Both
+      disappear when the flattening and boolean-canonicalization rules land
+      (D).</li>
+      </ul></li>
+    <li>Bugs the corpus found and fixed on the way (kept as regression tests in
+    <code>aegraph_test</code>): a class-table realloc invalidating operand value
+    pointers; consumers keyed on a leaf instead of the producer's class; the
+    latch whose enable is an exhaustive Hotmux of constants
+    (<code>latch_match_exhaustive</code>: without the Hotmux collapse the latch
+    survives and LEC refutes it); feedback rings closed through constant-selected
+    Muxes (<code>module_cycle_context*</code>).</li>
+    </ul></li>
   </ul></li>
 <li><strong>C — A/B harness</strong> <span class="status">phase 1</span>
   <ul>
@@ -1178,6 +1261,168 @@ is immutable and is not edited.</li>
     </ul></li>
   <li>Exit: one command produces the full A/B table on the in-repo corpora. The
   baseline table and parity-gap list are recorded in this file.</li>
+  <li><span class="status landed">landed 2026-10-18 (uncommitted)</span> What exists and what was measured:
+    <ul>
+    <li><strong>Profile and summary.</strong> <code>LHD_AEGRAPH_PROFILE=1</code>
+    (<code>pass/aegraph/aegraph_profile.hpp</code>) prints
+    <code>aegraph-profile graph= phase= ms= calls=</code>, the record shape of
+    <code>LHD_CPROP_PROFILE</code>, with phases <code>prepass build rules extract
+    elaborate post</code> (<code>rules</code> and <code>extract</code> stay at zero
+    calls until D and I: extraction is folded into <code>elaborate</code>). With
+    <code>lhd.stats</code> (<code>--stats</code>) both <code>pass.cprop</code> and
+    <code>pass.aegraph</code> emit one <code>cprop-summary</code> diagnostic per
+    graph and per cprop slot with attrs <code>graph nodes_in nodes_out by_op ms
+    rules_fired creates aeg_bytes lg_bytes</code>
+    (<code>pass/cprop/cprop_summary.hpp</code>; the kernel hands the INTERNAL
+    <code>stats</code> label to the two methods; <code>--emit
+    diagnostics:PATH</code> writes them as JSON lines). <code>creates</code> is the
+    number of body nodes whose class index did not exist before the step (a lower
+    bound); <code>aeg_bytes</code> is the peak container capacity of the e-graph
+    (<code>Egraph::bytes</code>, 0 for classic); <code>lg_bytes</code> is
+    <code>nodes_out*32 + driven sink edges*16</code>; <code>rules_fired</code> is 0
+    until D. Records are emitted serially after the workers join, in graph order. A
+    cache-replayed compile runs no pass: measure with
+    <code>lhd.incremental=false</code>.</li>
+    <li><strong>Shared evaluators and parity.</strong>
+    <code>pass/cprop/cprop_test_eval.hpp</code> (<code>//pass/cprop:cprop_test_eval</code>,
+    <code>testonly</code>, kept out of <code>pass_cprop</code>) holds
+    <code>mux_eval</code>, <code>Mux_graph</code>, <code>Guard_chain</code> and the
+    unlimited-precision Dlop evaluator (<code>dlop_eval</code>, moved out of
+    <code>cprop_lowlane_test.cpp</code>; it now reads Sext's <code>b</code> as the kept
+    bit COUNT, as cprop folds do, and covers Hotmux, Set_mask and Ror).
+    <code>//pass/aegraph:aeg_parity_smoke</code> runs 25 value-oracle cases moved
+    from <code>cprop_test.cpp</code> as <code>TEST_P</code> over {classic, aegraph}
+    (50 runs; the aegraph runs call <code>livehd::aegraph::optimize_body</code>, the
+    exact per-body path of <code>pass.aegraph</code>); their shape assertions (Mux
+    counts, Hotmux presence, widths, guard moves) are NOT repeated there, they stay
+    classic-only in <code>cprop_test.cpp</code>. 50/50 pass.</li>
+    <li><strong>Differential fuzzer.</strong>
+    <code>//pass/aegraph:aeg_diff_smoke</code>: random unbounded-integer DAGs (Sum
+    with both banks, Mult, And/Or/Xor with repeated operands, Not, Mux incl. constant
+    selectors, EQ/LT/GT, constant SHL/SRA, Sext, Get_mask, repeated-op twins,
+    <code>?</code> literals of 1 to 2 low bits), copied with
+    <code>GraphLibrary::copy_from</code>, classic on one copy and the aegraph on the
+    other. Oracle: for every input vector, the outputs of an optimized graph under SOME
+    value of its literals are among the original's outputs under ALL values of its
+    literals (one value per literal at all its uses, so a split literal fails).
+    <code>prove_equal</code> only annotates a mismatch and runs once per run on one
+    literal-free iteration. Default 1000 iterations (0.4 s under <code>-c opt</code>);
+    <code>AEG_FUZZ_ITERS</code> / <code>AEG_FUZZ_SEED</code> rescale and reproduce.
+    Validation run: 80000 iterations (4 seeds x 20000, about 300000 original nodes
+    per seed), 0 failures for both engines. It found one oracle bug on the way (Dlop's
+    <code>sext_op</code> takes the sign-bit position, the graph's Sext takes the bit
+    count), none in the engines.</li>
+    <li><strong>The sweep.</strong> <code>scripts/cprop_engine_sweep.py</code>:
+    per fixture and engine ms (wall and the per-graph cprop sum), peak RSS, nodes
+    in/out, nodes per op after the schedule, creates, aeg/lg bytes, plus
+    <code>--lec</code> (A==B against the classic <code>lg:</code>; B==source, engine
+    knob never passed to the reference), <code>--determinism</code> (aegraph twice,
+    <code>tool diff --structural</code>), <code>--synth</code> (gates, area, delay,
+    <code>pred_aig</code> from <code>qor.abc.total</code> with the in-repo
+    <code>test.lib</code>), <code>--sim</code> (<code>out_digest</code> equality,
+    instructions, cycles/s) and the <code>aegraph+classic</code> parity-gap report;
+    <code>--set k=v</code> crosses any set (for example
+    <code>compile.bitfuzz.mode=wires</code>, the width-agnostic axis) with the
+    engine. One command: <code>scripts/cprop_engine_sweep.py -j 8 --lec
+    --determinism --synth</code>. The header lists the sibling-repo commands.</li>
+    <li><strong>Siblings (manual).</strong> <code>../lhdtrack</code>:
+    <code>flows/syn_lhd_pyrope_aegraph.py</code> and
+    <code>flows/sim_lhd_pyrope_aegraph_llvm.py</code> (planned with
+    <code>LHDTRACK_EXTRA_FLOWS=...</code>, the A/B partners of
+    <code>syn_lhd_pyrope</code> and <code>sim_lhd_pyrope_llvm</code>);
+    <code>LHDTRACK_CPROP_ENGINE</code> and <code>LHDTRACK_SIM_SET</code> now reach
+    both <code>lhd sim</code> legs of every <code>sim_lhd_*</code> flow
+    (<code>flows/lib/simgate.py</code>, unit-tested; the result records
+    <code>sim.cprop_engine</code>), and the existing <code>LHDTRACK_LHD_SET</code>
+    carries the knob into the synthesis flows. <code>../lhdsuite</code> needs no
+    change: <code>BENCH_PYROPE_SETS="compile.cprop.engine=aegraph"</code> already
+    rides every Pyrope compile, synth, sim (both legs and the timed rerun) and lec
+    impl command (<code>bench/common.sh</code>, <code>matrix.sh</code>); it must be
+    passed with <code>--test_env</code>, because <code>CORE_SIM_SETS</code> is
+    pinned per core by <code>defs.bzl</code> and a test env cannot override it. Not
+    run here: both repos need their own toolchains and hours of runtime.</li>
+    <li>Re-checked after C (2825 targets of <code>//inou/prp:all</code>, forced
+    with <code>LHD_PRP_COMPILE_SETS</code>): <code>classic</code> 0 failures,
+    <code>aegraph+classic</code> 0 failures, <code>aegraph</code> the same 2 failures
+    as B (<code>lec-transparent_hier_1</code>, <code>prp-lec-loop_roll_mixed_1</code>;
+    0 REFUTED). All 328 <code>//lhd/tests</code> targets pass with the new
+    <code>stats</code> label in the schedule.</li>
+    <li>Not done: <code>../logikbench</code> (no wrapper; pass the set to its
+    <code>lhd</code> commands), and the input-driven constprop generator
+    (<code>benchmark/constprop_gen.py</code> still folds in upass; the contract file
+    is immutable).</li>
+    </ul></li>
+  <li><strong>Baseline table, 2026-10-18</strong> (<code>-c opt</code> binary, 656
+  fixtures of <code>inou/prp/tests/equiv</code> that are not header-only variants,
+  cold compiles, <code>-j 8</code>; every status ok; times are for tiny designs and
+  show the harness, not scaling):
+    <table>
+    <tr><th>engine</th><th>wall ms (sum)</th><th>cprop ms (sum of graphs)</th><th>peak RSS MB</th><th>nodes in</th><th>nodes out</th><th>creates</th><th>peak aeg KiB</th></tr>
+    <tr><td>classic</td><td>13439</td><td>134.4</td><td>82</td><td>11993</td><td>5685</td><td>888</td><td>0</td></tr>
+    <tr><td>aegraph</td><td>13472</td><td>114.9</td><td>83</td><td>11993</td><td>6231</td><td>284</td><td>254</td></tr>
+    <tr><td>aegraph+classic</td><td>13725</td><td>197.1</td><td>83</td><td>11993</td><td>5663</td><td>842</td><td>254</td></tr>
+    </table>
+    <ul>
+    <li>cprop time per graph, geomean over 656 fixtures: aegraph 0.94x of classic,
+    aegraph+classic 1.48x.</li>
+    <li>Correctness legs: determinism (aegraph twice, structural diff) 656 same, 0
+    different. LEC on the 515 fixtures with a top: A==B and B==source, all three
+    engines, 515 <code>proven-full</code> each, 0 REFUTED, 0 errors.</li>
+    <li>Synthesis QoR over the 630 fixtures that map (<code>lhd synth</code>, in-repo
+    <code>test.lib</code>): gates 295009 classic, 307985 aegraph (+4.4%), 294986
+    aegraph+classic; area 869181, 912205 (+4.9%), 869144; <code>pred_aig</code>
+    1232839, 1581889 (+28.3%), 1232904. Per fixture the aegraph has worse area on 51
+    and better area on 13; aegraph+classic is worse on 1 and better on 4.</li>
+    <li>Simulation corpus (226 <code>inou/prp/tests/sim</code> fixtures, <code>lhd
+    sim</code> llvm, three engines): <code>out_digest</code> DIFFERENT 0. One fixture,
+    <code>latch_gated_feedback</code>, fails <code>lhd sim</code> under all three
+    engines including classic (so it is not an engine finding). Instructions read 0
+    on this host (no perf counters), so use cycles/s only as a smoke number.</li>
+    </ul>
+    <p><strong>Nodes per op after the schedule</strong> (656 fixtures; the last
+    column is aegraph minus classic):</p>
+    <table>
+    <tr><th>op</th><th>classic</th><th>aegraph</th><th>aegraph+classic</th><th>diff</th></tr>
+    <tr><td>get_mask</td><td>1138</td><td>1045</td><td>1113</td><td>-93</td></tr>
+    <tr><td>and</td><td>482</td><td>648</td><td>484</td><td>+166</td></tr>
+    <tr><td>eq</td><td>483</td><td>557</td><td>485</td><td>+74</td></tr>
+    <tr><td>sum</td><td>388</td><td>488</td><td>388</td><td>+100</td></tr>
+    <tr><td>mux</td><td>426</td><td>425</td><td>426</td><td>-1</td></tr>
+    <tr><td>shl</td><td>367</td><td>308</td><td>365</td><td>-59</td></tr>
+    <tr><td>or</td><td>245</td><td>367</td><td>246</td><td>+122</td></tr>
+    <tr><td>sra</td><td>204</td><td>280</td><td>205</td><td>+76</td></tr>
+    <tr><td>xor</td><td>223</td><td>257</td><td>223</td><td>+34</td></tr>
+    <tr><td>set_mask</td><td>209</td><td>245</td><td>209</td><td>+36</td></tr>
+    <tr><td>concat</td><td>161</td><td>145</td><td>159</td><td>-16</td></tr>
+    <tr><td>mult</td><td>50</td><td>137</td><td>50</td><td>+87</td></tr>
+    <tr><td>sext</td><td>66</td><td>80</td><td>66</td><td>+14</td></tr>
+    </table>
+    <p>sub, flop, memory, hotmux, rxor, gt, popcount, latch, clock_cell, rem and div
+    are identical in all three. Classic ends with MORE <code>shl</code>,
+    <code>get_mask</code> and <code>concat</code> than the aegraph: its low-lane,
+    opshare and strength rewrites mint those cells (the design doc notes they add
+    nodes on purpose), so read node counts next to the per-op table.</p>
+  </li>
+  <li><strong>Parity-gap list</strong> (<code>aegraph+classic</code>: nodes classic
+  still removes from what the aegraph left, per op; this is the porting order for D
+  onward). Equiv corpus, 952 nodes over 258 of 656 fixtures:
+  <code>xor</code> 237, <code>and</code> 218, <code>or</code> 214, <code>sum</code>
+  99, <code>mult</code> 89, <code>mux</code> 88, <code>sra</code> 65,
+  <code>set_mask</code> 47, <code>sext</code> 9, <code>not</code> 1; classic ADDS
+  (negative gap) <code>eq</code> 37, <code>concat</code> 32, <code>shl</code> 29,
+  <code>get_mask</code> 15, <code>hotmux</code> 2. Sim corpus, 586 nodes over 106 of
+  226: <code>set_mask</code> 126, <code>and</code> 83, <code>sra</code> 83,
+  <code>mult</code> 77, <code>sum</code> 73, <code>xor</code> 69, <code>or</code>
+  53, <code>get_mask</code> 51, <code>eq</code> 30, <code>mux</code> 26; classic adds
+  <code>shl</code> 73, <code>concat</code> 14. Largest fixtures by gap:
+  <code>selfref_rows</code> 47, <code>packed_slice_updates</code> 38,
+  <code>selfref_concat_assign</code> 32, <code>sim_loop_mux1h_selfslice</code> 29,
+  <code>clz_nest</code> 20, <code>mem_dynamic_splice_bounds</code> 18,
+  <code>sim_loop_sbox_bit_selfref</code> 16, <code>folded_rotate</code> 14,
+  <code>concat_array_lane</code> 14. Reading: the first rules to port are the
+  And/Or/Xor/Sum identities and cancellation (the bank-multiset folds), Mult by a
+  power of two to shift, shift composition and the Set_mask/Get_mask window folds, in
+  that order; the Mux gap is H.</li>
   </ul></li>
 <li><strong>D — Rule runtime (S0) and local folds</strong> <span class="status">phase 1</span>
   <ul>
@@ -1208,6 +1453,150 @@ is immutable and is not edited.</li>
     <li><code>aeg_parity_smoke</code>;</li>
     <li>the equiv twin run in dbg with <code>check=unions</code>.</li>
     </ul></li>
+  <li><span class="status landed">landed 2026-10-18 (uncommitted)</span> What exists and what was measured:
+    <ul>
+    <li><strong>Runtime.</strong> <code>pass/aegraph/runtime/match.{hpp,cpp}</code>:
+    <code>Ctx</code> (read: <code>known</code>, <code>is_int</code>, <code>small_int</code>,
+    <code>bool01</code>, <code>eq_against</code>, fuel-limited <code>each_member</code>;
+    build: <code>make</code>, <code>make_bank</code>, <code>konst</code>),
+    <code>Results</code> (<code>subsume</code>, <code>add</code>, <code>choice</code>),
+    PatternMatch-style combinators with a continuation (<code>m_any</code>,
+    <code>m_bind</code>, <code>m_same</code>, <code>m_int</code>, <code>m_k</code>,
+    <code>m_op</code>, <code>match_root</code>) so a later failure backtracks into the
+    next member of a union, and <code>AEG_RULE</code> / <code>AEG_NATIVE_RULE</code>
+    over a registry that fixes <code>Rule_id</code> and the dispatch table per root op
+    (sorted by priority, group, name: independent of static-initialization order).
+    <code>Builder::make</code> is the one entry point: it folds, normalizes,
+    hash-conses and runs the rules of the new e-node, <code>rewrite_depth</code>
+    levels deep, so a rule's right-hand side meets the rules too.</li>
+    <li><strong>Union nodes.</strong> <code>Egraph</code> gained <code>Kind::uni</code>
+    (<code>add_union(a, b)</code>, neither side changes), <code>alias</code> (a
+    rewritten class leaves its replacement; a hash-cons hit reads it) and
+    <code>for_each_member</code>. <code>simplify</code> subsumes (the first match in
+    priority order); <code>alt</code> unions up to <code>matches_limit</code> results and
+    <code>eclass_limit</code> members. A duplicate member is dropped. The extraction
+    (<code>compute_best</code>) keeps the original side of a union unless the
+    alternative has a STRICTLY smaller expression tree (e-nodes counted, saturating at
+    <code>extractor_fuel</code>), so a tie never changes the graph.</li>
+    <li><strong>Elaboration.</strong> An original node whose class a rule replaced is
+    rebuilt IN PLACE as the rule's e-node (same cell, name, srcid, output pin and
+    consumers; its op and operands change, as the classic in-place rewrites do);
+    e-nodes no original node realizes become new cells; an original node that hash-cons
+    hits a rule-built e-node becomes its realization. Realization is iterative.</li>
+    <li><strong>Counters and census.</strong> Per rule <code>tried matched applied
+    subsumed limit_rejected extracted</code> (<code>extracted</code> is counted when the
+    elaborator creates or adopts a cell for an e-node the rule built), local to one
+    engine run and merged under the worker mutex. With <code>lhd.stats</code> one
+    <code>aegraph-rule</code> diagnostic per rule that ran; <code>rules_fired</code> of
+    <code>cprop-summary</code> is the sum of <code>applied</code>;
+    <code>scripts/cprop_engine_sweep.py</code> prints the rule census.</li>
+    <li><strong>Knobs</strong> (<code>compile.aegraph.*</code>, validated when the pass
+    starts; a bad value or an unknown rule is a fatal <code>bad-option</code>
+    diagnostic): <code>rules_disable</code>, <code>rules_only</code> (names or
+    <code>group:NAME</code> joined with <code>+</code>), <code>max_rewrites</code> and
+    <code>bisect_graph</code> (per graph, forward-walk order, one worker; logs
+    <code>aegraph-bisect graph= rewrite= rule= enode= op=</code>), <code>explain</code>,
+    <code>check=off|unions|full</code> (default <code>unions</code> in dbg, <code>off</code>
+    in opt), <code>rewrite_depth=5</code>, <code>matches_limit=5</code>,
+    <code>eclass_limit=5</code>, <code>extractor_fuel=500</code>, <code>edge_budget=32</code>
+    (rule work, in operands scanned, per input edge; 0 = unlimited), and the plumbed
+    labels <code>cost=synth|sim</code> and <code>choices=off|const|expr</code> (no
+    profile and no choice rule exist yet).</li>
+    <li><strong>Check modes.</strong> <code>unions</code>: every committed rewrite
+    (subsume or union) is evaluated on both sides over 8 random assignments with the
+    constant analysis's own Dlop semantics (<code>fold_node</code>), over the whole cone
+    below the two classes (at most 4096 classes, else skipped); a mismatch throws
+    naming the rule, <code>file:line</code>, the graph and the values. A
+    <code>?</code> literal in the cone, or a result with <code>?</code> bits, skips the
+    vector (counted). <code>full</code>: also every original node, applied to its final
+    operand classes, against the class the extraction keeps for it, 64 assignments over
+    the whole body. (The design text says "a cone of depth at most
+    <code>rewrite_depth</code>"; a depth cut makes the leaves of the cut independent
+    random values, which breaks every rule that depends on a deeper fact such as
+    <code>bool01</code>, so the cone is the whole fan-in, bounded by size.)</li>
+    <li><strong>26 hand rules</strong> (<code>rules/arith.cpp</code>, <code>shift.cpp</code>,
+    <code>mux.cpp</code>), in the order of the parity-gap list. arith:
+    <code>const_fold_bank</code>, <code>annihilate</code>, <code>ident_drop</code>,
+    <code>single_operand</code>, <code>idempotent</code>, <code>xor_pair_cancel</code>,
+    <code>sum_cancel</code>, <code>flatten</code> (inner cell with no other reader and
+    equal color/policy; a subtracted Sum flips banks), <code>or_absorb</code>,
+    <code>and_absorb</code>, <code>bool_complement</code>, <code>xor_bool_one</code>,
+    <code>mult_pow2_shl</code>, <code>and_mask_get_mask</code>, <code>not_not</code>,
+    <code>cmp_same</code> (P8), <code>eq_bool_chain</code>, and the <code>alt</code>
+    <code>not_xor_alt</code> (<code>Not x</code> and <code>Xor(x, -1)</code> tie, so
+    extraction keeps the original; it keeps the union path alive in every run). shift:
+    <code>shift_zero</code>, <code>shift_compose</code>, <code>sext_sext</code>,
+    <code>sext_getmask</code>. mux: <code>mux_bool_const_arms</code>
+    (<code>Mux(s,1,0) = EQ(s,0)</code>, <code>Mux(s,0,1) = s</code> for a 0/1 selector),
+    <code>mux_sel_arm</code>, <code>mux_sel_not</code>, <code>mux_const_arm_logic</code>.
+    The Sext constant fold is the all-known fold of milestone B. No rule creates a
+    <code>?</code> spelling (P7): constants are combined only from fully known classes
+    and a literal is an opaque operand. Not ported (they need the range / known-bits
+    analyses of G): the <code>Set_mask</code> window rules, <code>Get_mask</code>
+    folds, the shared-cell Sum splice, and every Hotmux rule.</li>
+    <li><strong>Tests.</strong> <code>aeg_union_smoke</code> (13 tests, with test-only
+    rules in group <code>uniontest</code>: registry order and dispatch, option parsing,
+    union/alias mechanics, an alt that loses and one that wins, the
+    <code>matches_limit</code>/<code>eclass_limit</code>/<code>rewrite_depth</code>
+    rejections, a deliberately WRONG rule caught by <code>check=unions</code> with its
+    name, the knobs, <code>max_rewrites</code> bisection, <code>explain</code>,
+    determinism, and one example per production rule that must fire it);
+    <code>aegraph_test</code>, <code>aeg_parity_smoke</code> and
+    <code>aeg_diff_smoke</code> now run with <code>check=full</code>, so any unsound
+    rewrite aborts. Fuzzer: 80000 iterations (4 seeds x 20000) with the 26 rules, 0
+    failures.</li>
+    <li><strong>dbg.</strong> <code>bazel test -c dbg</code> of the 167
+    <code>prp-lec-*</code>/<code>lec-*</code> targets (the Pyrope-vs-Pyrope and
+    Verilog LEC twins) with <code>compile.cprop.engine=aegraph</code> and
+    <code>check=unions</code> (the dbg default): 167/167, plus the four
+    <code>//pass/aegraph</code> tests (fuzzer included: 5000 iterations of one seed in
+    dbg). The dbg run found an hhds epoch assertion in the fuzzer's own twin builder
+    (a sorted-pin walk over a body it was mutating; now a snapshot), none in the
+    engine.</li>
+    <li><strong>The two milestone-B failures are gone.</strong>
+    <code>lec-transparent_hier_1</code> (<code>Mux(rst,1,0)</code> now canonicalizes to
+    <code>EQ(rst,0)</code>) and <code>prp-lec-loop_roll_mixed_1</code> (nested Sum
+    flattening) pass under <code>compile.cprop.engine=aegraph</code>.</li>
+    <li><strong>In-repo suites, <code>-c opt</code>,</strong> <code>//inou/prp:all</code>
+    (non-manual, non-external-simulator, non-fixme, 2825 targets), the engine forced with
+    <code>LHD_PRP_COMPILE_SETS</code>: <code>classic</code> 2825/2825,
+    <code>aegraph</code> 2825/2825 and <code>aegraph+classic</code> 2825/2825, the latter
+    two with <code>compile.aegraph.check=unions</code> as well. <code>//lhd/tests:all</code>
+    328/328; <code>//pass/cprop</code>, <code>//pass/aegraph</code>,
+    <code>lhd_aegraph_test</code>, <code>lhd_config_test</code>,
+    <code>lhd_list_options_test</code>, <code>lhd_options_test</code> pass.</li>
+    <li><strong>Measured</strong> (656 <code>inou/prp/tests/equiv</code> fixtures, cold,
+    <code>-c opt</code>, <code>scripts/cprop_engine_sweep.py -j 8 --lec --determinism
+    --synth</code>; the machine was also building, so times are noisy):
+      <table>
+      <tr><th>engine</th><th>nodes out (C to D)</th><th>creates</th><th>cprop ms (sum)</th></tr>
+      <tr><td>classic</td><td>5685</td><td>888</td><td>233.1</td></tr>
+      <tr><td>aegraph</td><td>6231 to 5824</td><td>284 to 374</td><td>252.6 (geomean 1.17x classic per graph)</td></tr>
+      <tr><td>aegraph+classic</td><td>5663 to 5614</td><td>842 to 662</td><td>348.7 (geomean 1.63x)</td></tr>
+      </table>
+      Parity gap (nodes classic still removes after the aegraph): 952 over 258 fixtures
+      to 351 over 114. Per op, C to D: xor 237 to 2, and 218 to 27, or 214 to 11, sum 99
+      to 9, mult 89 to 0, mux 88 to 3, sra 65 to 67, set_mask 47 to 39, and the new
+      leader get_mask 166 (classic folds packed slices of the Get_mask the
+      <code>and_mask_get_mask</code> rule now creates; before that rule the same
+      nodes were 223 <code>and</code>), then sra 67, set_mask 39, shl 28: all mask/lane
+      territory (G). LEC on the 515 fixtures with a top: every leg
+      <code>proven-full</code> for all three engines, 0 REFUTED. Determinism: 656 same, 0
+      different. Synthesis QoR over 630 fixtures against classic: aegraph gates -2.05%,
+      area -1.61%, <code>pred_aig</code> -0.30% (milestone C: +4.4%, +4.9%, +28%);
+      aegraph+classic +0.05%, +0.06%, +0.04%. 11 fixtures have more gates under the
+      aegraph (the largest: <code>reg_tuple_field_bit_write</code> 93 to 139,
+      <code>imported_comb_overload_set</code> 93 to 128, <code>loop_rca_flat</code> 52
+      to 64). Rule census (aegraph, whole corpus, tried / applied): mux_sel_not
+      2080/358, and_mask_get_mask 901/221, flatten 3492/206, xor_bool_one 629/205,
+      eq_bool_chain 1054/140, single_operand 3635/116, not_xor_alt 103/103 (extracted
+      0), mult_pow2_shl 154/87, ident_drop 3739/85, mux_bool_const_arms 2202/76,
+      sext_getmask 202/57; 0 rejections by any limit.</li>
+    <li><strong>Divergences from this text.</strong> The check cone is bounded by size,
+    not depth (above). <code>extracted</code> counts cells created or adopted, not
+    only new nids. <code>edge_budget</code> counts operands scanned, not edges.
+    <code>rules</code> profile time is nested in <code>build</code>.</li>
+    </ul></li>
   </ul></li>
 <li><strong>E — rulegen DSL (S1) and the bv proof tier</strong> <span class="status">phase 1</span>
   <ul>
@@ -1229,6 +1618,105 @@ is immutable and is not edited.</li>
   <li>Exit: the checklist works end to end on a new rule (<code>shl_shl</code>),
   with no hand edits outside the <code>.rules</code> file. Each generated test
   stays under 25 s in opt and 90 s in dbg.</li>
+  <li><span class="status landed">landed 2026-10-18 (uncommitted)</span> What exists and what was measured:
+    <ul>
+    <li><strong>Tool and macro.</strong> <code>pass/aegraph/rulegen/</code>: a
+    S-expression reader (<code>sexp</code>), the parser, the lints and the emitters
+    (<code>rules_parse.cpp</code>, <code>rules_emit.cpp</code>), and the
+    <code>rulegen</code> <code>cc_binary</code> over <code>//graph</code> (it reads the
+    Ntype pin tables, so an op or pin name is checked against the cell definition).
+    <code>aeg_rules()</code> in <code>tools/aegraph.bzl</code> is one call in
+    <code>pass/aegraph/BUILD</code> (groups <code>arith mux shift</code>): a genrule that
+    runs rulegen, a filegroup of the generated rule C++ that <code>pass_aegraph</code>
+    compiles in, and per group <code>aeg_fuzz_&lt;group&gt;_smoke</code> and
+    <code>aeg_prove_&lt;group&gt;_smoke</code>, plus <code>aeg_rules_md_fresh</code> and the
+    <code>bazel run //pass/aegraph:aeg_rules_refresh</code> target that rewrites the
+    checked-in <code>RULES.md</code>. Generated files are byte-identical across runs
+    (checked) and across sandboxes: no timestamp, address or hash order.</li>
+    <li><strong>Syntax</strong> exactly as in "Rule API": <code>simplify</code> /
+    <code>alt</code> / <code>choice</code>, <code>:let :when :example :expect :fuel :proof
+    :doc</code>, patterns <code>x _ 0 (k c) ?q (Op p...) (Op pin: p) (as .. ..r) (bs ..)
+    Op{attr}</code>. <code>rules/analyses.decl</code> is parsed (<code>analysis</code> and
+    <code>pred</code> forms, <code>:type :uses :spec</code>); today it declares
+    <code>bool01</code>, the one analysis the runtime implements, and rulegen refuses a
+    guard on a declared-but-unimplemented analysis. The generated matcher is real C++
+    (nested <code>each_member</code> lambdas and bank loops with a used-operand mask) with
+    <code>#line</code> back to the <code>.rules</code> line, so a <code>check=</code> failure
+    reads <code>arith.rules:21</code>.</li>
+    <li><strong>Rules.</strong> D's pattern rules moved into <code>rules/*.rules</code>:
+    <code>not_not not_xor_alt mult_pow2_shl xor_bool_one</code> (arith),
+    <code>sext_sext sext_getmask</code> (shift) and <code>mux_sel_arm mux_sel_not</code>
+    (mux); the bank-algebra and region rules stay <code>AEG_NATIVE_RULE</code>. The
+    checklist exit was exercised with <code>shl_shl</code> added by a single
+    <code>.rules</code> entry (plus the refresh command): lints, fuzz, example, 8 bv
+    instances and the staleness test all ran with no other edit. It then replaced the
+    same-direction half of the native <code>shift_compose</code>, together with
+    <code>sra_sra</code> (same priority, same 2^28 amount cap), so the rule set is 28
+    rules: 10 pattern, 18 native.</li>
+    <li><strong>Tests.</strong> Fuzz per rule: LHS against RHS on values from small
+    integers to ~130 bits with the engine's own folds (<code>aegraph::eval_op</code>,
+    which exposes the constant analysis' <code>fold_node</code>), 1000 samples, seed
+    <code>AEG_FUZZ_SEED</code> echoed on failure, <code>?</code> refinement mode and choice arms with
+    their assignment substituted (exercised on inline rules in
+    <code>rules_parse_test</code>; no production rule has a <code>?</code> yet), and "example
+    fires" through the real engine with <code>rules_only=&lt;rule&gt;</code> and
+    <code>check=full</code>. bv tier: micro-LGraphs of the instantiated LHS and RHS through
+    <code>lec::prove_equal</code> at widths 1, 2, 3, 8, 16, 65 (signed, unsigned, mixed),
+    at most 8 instances per rule picked by a per-rule hash. Measured: every default
+    group test runs in 0.1–0.6 s in opt and 0.2–0.6 s in dbg (limits 25 s and 90 s,
+    asserted per group by a last <code>zz_wall_time</code> test). <code>AEG_PROVE_FULL=1</code>
+    sweeps every instance: 18 to 2592 per rule, all proven, the whole shift group in
+    39 s. <code>rules_parse_test</code> (19 tests) checks the reader, the parser, every
+    lint with a failing and a passing rule, emitter determinism, and that the drivers
+    pass a correct rule and catch a wrong one (a wrong <code>simplify</code>, a rule that drops
+    known <code>?</code> bits, a wrong choice arm, a wrong rule in the bv tier with its
+    counterexample and instance printed).</li>
+    <li><strong>Lints that fail generation</strong> (and so the build): unknown op or
+    pin, an op that is not a pure e-graph op, an unbound variable, a <code>simplify</code> that grows
+    the graph or builds an op priced above its root (structural: node count and a fixed
+    price table; the profile form comes with H), a fresh <code>?</code> or an atom that would
+    <code>create_const</code> one, a <code>choice</code> arm without an assignment, an unregistered
+    <code>{attr}</code>, an unknown profile, a missing <code>:example</code>, a duplicate name
+    (rulegen also scans the hand-written rules for <code>AEG_RULE</code> /
+    <code>AEG_NATIVE_RULE</code>). The generated <code>RULES.md</code> lists all 28
+    rules with priority, root, proof tier and source line; the hand-written ones take their
+    doc from the comment above them.</li>
+    <li><strong><code>:compile_grep:</code>.</strong> <code>prplec.py</code>: a regex that
+    must appear in the IMPL side's own compile output (per-pass logs included); it forces the
+    per-side pre-compile and <code>lhd.stats=true</code> on the impl compile. It is skipped
+    with a note when a harness-wide <code>LHD_PRP_COMPILE_SETS</code> replaces a flag the
+    variant sets itself (the pair is still LEC'd). The <code>aegraph-rule</code> census
+    message is now <code>aegraph-rule NAME tried=N matched=N applied=N extracted=N</code> so
+    a grep reads it (the attrs the sweep script parses are unchanged). Fixtures
+    <code>aeg_xor_bool_one{,_1}</code> and <code>aeg_mux_sel_not{,_1}</code> use it for the two
+    <code>bool01</code>-guarded rules; a README row documents the tag.</li>
+    <li><strong>Suites.</strong> <code>bazel test -c opt //inou/prp:all</code> (non-manual, non-external-simulator,
+    non-fixme, 2827 targets with the 2 new fixtures) with
+    <code>LHD_PRP_COMPILE_SETS</code> forcing the engine: classic 2827/2827; aegraph with
+    <code>compile.aegraph.check=unions</code> 2827/2827; aegraph+classic with
+    <code>check=unions</code> 2827/2827. <code>//pass/aegraph/...</code> 12/12 in opt and in
+    dbg (dbg runs <code>check=unions</code> by default); 169 <code>prp-lec-*</code> /
+    <code>lec-*</code> targets with engine=aegraph in dbg 169/169;
+    <code>//pass/cprop:all</code>, <code>//lhd:lhd_options_test</code> and
+    <code>//lhd/tests:all</code> 342/342 together with the aegraph targets. The
+    sibling benchmark repositories (<code>../lhdtrack</code>, <code>../lhdsuite</code>) were not run.</li>
+    </ul></li>
+  <li><strong>Divergences from this text.</strong> <code>rulegen</code> is passed to the
+  genrule through <code>srcs</code>, not <code>tools</code> (the exec configuration lacks the
+  repo's <code>-std=c++23</code>; <code>tools/lhd.bzl</code> does the same) and links
+  <code>//graph</code> (there is no <code>//graph:cell</code> target; hlop comes with it).
+  Guard and <code>:let</code> expressions are int64 with checked arithmetic, one builtin
+  table for the generated code, the tests and the lints (<code>(k c)</code> binds only constants that
+  fit an int64); there is no SMT or Lean spelling yet, because the bv tier evaluates guards
+  on concrete instances (N needs them). The generated matcher takes the first match of a
+  rule. <code>:fuel</code> and <code>:expect</code> are parsed and stored only; <code>:proof int|lean</code> is stored
+  (the bv sweep still runs). <code>{proven}</code> is a registered attribute but rejected until F, a
+  <code>choice</code> arm assigns constants or <code>NONZERO</code> only (expression assignments wait for J), and
+  the overlap warning is limited to equal left-hand sides at one priority. Positional
+  operands on a banked op are accepted as sugar (<code>(Xor x -1)</code>, <code>(LT a b)</code>). The bv
+  tier stamps comparison results 1 bit and a <code>Sext</code> at least <code>b</code> bits wide: the LEC encoder
+  throws on a wider comparison stamp and evaluates a <code>Sext</code> at its own width. A
+  <code>?</code>-literal or choice rule has no bv instances (the refinement fuzz covers it).</li>
   </ul></li>
 <li><strong>F — CSE parity and obligation handling</strong> <span class="status">phase 1</span>
   <ul>
@@ -1257,6 +1745,81 @@ is immutable and is not edited.</li>
     peak RSS (<code>/usr/bin/time -l</code>) within 1.2x of classic on those
     designs;</li>
     <li>if G1 fails, profile before porting more rules.</li>
+    </ul></li>
+  <li><span class="status landed">landed 2026-10-18 (uncommitted)</span> What exists and what was measured:
+    <ul>
+    <li><strong>CSE policy.</strong> Most of the policy was already in the engine from B/C
+    and is now pinned by tests (<code>aegraph_test.cpp</code>): the naming twin at elaboration (a named
+    twin absorbs an unnamed one, two named twins both stay), color and <code>synth_policy</code>
+    as barriers (both are in the hash-cons key), Hotmux <code>proven</code> in the key, and LUT,
+    <code>runtime_check</code> and non-exclusive Hotmux as skeleton leaves, IO, state,
+    <code>loop_last</code>, Sub and obligations as roots of the dead sweep. New in F: constants of equal
+    value and a different tag fold into one class (<code>ConstantsOfEqualValueAndDifferentTagShareAClass</code>):
+    a Boolean and an Integer of the same value (the pool hashes the Integer spelling of a Boolean and
+    compares across the two tags; the first spelling seen is the one realized); String, Bitwidth and Nil keep their tag.
+    <code>{proven}</code> on the right-hand side of a <code>.rules</code> entry stays rejected: no rule builds a
+    Hotmux yet (the Hotmux rules are milestone H/I).</li>
+    <li><strong>G1 profiled and fixed.</strong> The first minion run found two real problems that the small corpus
+    could not show:
+      <ul>
+      <li><code>Engine::rewire</code> rescanned the cell's pin list for every operand
+      (<code>append_sink_operand</code>), quadratic in the width of a bank:
+      <code>minion_dcache_tensor_load</code> spent 1.73 s of 1.88 s in elaborate (classic: 0.19 s for the graph).
+      It now numbers the bank slots itself; the graph dropped to 0.27 s, and 0.14 s after the next item.</li>
+      <li>The <code>flatten</code> rule re-created a k-operand bank per link of a k-long chain and the
+      e-graph never frees an e-node: 426k of the 459k pool operands of that graph were dead copies of
+      861 wide banks (max 925 operands). <code>flatten</code> now keeps the merged bank within 64
+      operands (<code>WideChainFlattensWithinTheBankCap</code>). Superseded: the 64 cap made aegraph emit ceil(k/63) nested cells where classic emits one. A link whose only reader is a same-op, same-attrs cell now leaves the work to that reader (<code>Ctx::chain_inner</code>) and the chain top absorbs all single-use links in one firing: linear, no cap, one banked cell as in classic (<code>WideChainFlattensIntoOneBank</code> for Or/And/Xor/Sum/Mult at 150 operands, <code>VeryWideChainDoesWorkLinearInTheWidth</code> at 5000 with an aeg_bytes bound, <code>SharedChainLinkStopsTheFlatten</code>). Minion node count after the full schedule: aegraph 66059 vs classic 65540 (+0.8%).</li>
+      <li>Memory layout: <code>Eclass</code> 56 to 20 bytes (the value lives in a side table shared by
+      index), <code>Enode</code> 56 to 20 bytes (attrs are an index), the hash-cons table is an open-addressing
+      array of <code>Enode_id</code> (no stored hash, no chains, load at most 0.75), and
+      <code>aeg_bytes</code> now counts bytes in use, not capacities. <code>lg_bytes</code> now estimates the
+      real hhds footprint (<code>nodes*64 + driven sink edges*48</code>: 32 B NodeEntry + 32 B driver PinEntry per node, 32 B sink PinEntry
+      + 16 B edge per sink) at the LARGER of the input and the output body; the old
+      <code>nodes_out*32 + edges*16</code> compared the e-graph built from the input with the shrunk output.</li>
+      <li><strong>A correctness bug the XiangShan Backend found</strong> (11 of its 1088 modules and the whole Backend failed to compile at first):
+      the second slot's post steps (low-lane narrowing and the slice repacking it triggers in
+      <code>normalize_emitted</code>) ran after <code>pass.bitwidth</code> had dropped masks justified only by the
+      unpacked spelling's tighter range, and the Concat the slice became declared its full window: "Concat lane 0 ...
+      driver 'shl_1212' occupies 56 bits but its declared window is 55" (<code>fpsqrt_r16_block</code>,
+      <code>FDivSqrt</code>, <code>ExuBlock</code>, ...). Classic never hits it because its first sweep already folds those slices.
+      The kernel now hands the post-bitwidth aegraph slot the INTERNAL label <code>after_bitwidth=true</code>, which turns
+      <code>low_lanes</code> off for that slot. Reduced to an 894-byte fixture
+      (<code>inou/prp/tests/equiv/aeg_pack_slice_lanes{,_1}.prp</code>, fails without the fix). A first attempt, running
+      <code>scalar_get_mask_packed</code> on every Get_mask in the first slot's post, fixed fpsqrt but broke
+      <code>intpipe_csr_file</code> and was dropped.</li>
+      </ul></li>
+    <li><strong>Gate G1.</strong>
+      <ul>
+      <li>LEC, 0 REFUTED: equiv corpus (659 fixtures; 515 have a top), aegraph vs classic and aegraph vs the source,
+      515 + 515 proven-full, and the same for aegraph+classic. The sim corpus (226 fixtures) and the abc corpus are the
+      <code>prp-sim-*</code> / <code>prp-synth-*</code> targets: all of <code>//inou/prp:all</code> passes forced to
+      aegraph (2828/2828) and to aegraph+classic (2828/2828); a sim sweep of the sim corpus gave the same
+      <code>out_digest</code> in the 20 simulated fixtures (cycles/s geomean aegraph/classic 0.97, aegraph+classic 1.01: noise; instruction counts read 0 here, perf counters are not permitted on this host).</li>
+      <li>Determinism 100%: 659/659 equiv and 226/226 sim (<code>lhd tool diff --structural</code> of two runs).</li>
+      <li>Width-agnostic: <code>scripts/cprop_engine_sweep.py --width-agnostic</code> compiles the aegraph result with and
+      without <code>compile.bitfuzz.mode=wires</code> and LECs them: 513 proven-full, 2 REFUTED (<code>mod_general</code>,
+      <code>signed_divrem_mixed</code>). Classic wires-vs-no-wires is refuted on the same two (and <code>lec_src</code> with
+      wires refutes both under classic too), so it is a property of the fixtures under bitfuzz, not of the engine.</li>
+      <li>Compile time (<code>pass.aegraph</code> vs <code>pass.cprop</code>, both compile slots, ms summed over graphs from <code>cprop-summary</code>):
+      equiv corpus 139.4 vs 143.2 (0.97x; 1.05x in an earlier run); minion (<code>--set lhd.incremental=false</code>, 141 graphs) 6501 vs 8070 ms (0.81x),
+      wall 22.2 s vs 23.2 s; XS Backend (1088 graphs) 79.3 s vs 115.1 s (0.69x). No graph with a classic time of at least 1 ms is over 2x:
+      worst 1.56x (minion <code>intpipe_rf</code>, 5.0 to 7.8 ms), 1.27x on XS. Sub-millisecond graphs can read 5x to 9x
+      (3 us to 28 us: a fixed per-graph setup), at most 30 us in absolute terms.</li>
+      <li><strong>Memory yardstick redefined (finding, re-measured).</strong> The ratios below use the F definitions (<code>aeg_bytes</code> = bytes in use, <code>lg_bytes</code> = <code>nodes*64+edges*48</code> at the larger of input/output), NOT the gate as first written. <code>cprop-summary</code> now also reports <code>aeg_cap_bytes</code> (same tables at capacity, up to 2x in use) and <code>lg_bytes_v1</code> (the original <code>nodes_out*32+edges*16</code>). Minion, 77 graphs with lg of at least 50 KB, after the linear flatten: in-use/lg-v2 median 0.26, p90 0.43, max 0.47 (0 over 0.5); capacity/lg-v2 median 0.37, p90 0.62, max 0.79 (18 over 0.5); in-use/lg-v1 median 1.52, max 4.27 (74 over 0.5); capacity/lg-v1 median 2.06 (76 over 0.5). So the 0.5 bound holds only with the redefined lg and in-use bytes; against the original formula or at capacity it does not. The RSS comparison (below) is the honest bound: minion peak RSS 745 MB aegraph vs 731 MB classic (1.02x). <code>scripts/cprop_engine_sweep.py</code> prints these four ratios.</li>
+      <li>Memory, <code>aeg_bytes/lg_bytes</code> per graph (graphs with lg of at least 50 KB): minion median 0.29, p90 0.46, max 0.84 (126 graphs, 8 over 0.5);
+      XS median 0.35, p90 0.50, max 1.09 (766 graphs, 76 over 0.5; DecodeUnit 1.1: 88k operands of a few 128-wide banks, 8 bytes each).
+      Peak RSS: minion 1.51 GB vs 1.43 GB (1.05x), XS Backend 25.5 GB vs 25.8 GB (0.99x). The RSS half of the gate
+      holds; <strong>the per-graph 0.5 bound of the ratio does NOT</strong>: an e-class plus e-node plus operands cost at least ~64 bytes per
+      node against ~160 of hhds, and a wide bank costs 8 bytes per operand against 48 for its edge. Next lever if it matters:
+      4-byte operands (a 1-bit bank for banked ops, the position for positional ones).</li>
+      <li>XS Backend (<code>xiangshan/Backend/pyrope/Backend.prp</code>, <code>--top Backend</code>, 32 cores, cold): classic 14:24 min / 25.8 GB, aegraph 10:49 min and 13:36 min in two clean runs (the
+      difference is <code>pass.legalize</code> and its seal, 246 s to 375 s, which this pass does not touch; <code>pass.bitwidth</code> is 30 s vs 45 s because the graphs are smaller), 25.5 GB. The largest graph, <code>DecodeStage</code>, is 50k nodes.</li>
+      </ul></li>
+    <li><strong>Left for later:</strong> the 4-byte operand encoding above; the Hotmux
+    <code>{proven}</code> rule attribute; the first slot's post still lacks classic's per-Get_mask pack folds
+    (milestone G, where the false-cycle slice resolution moves into the pre-pass); node count after the full schedule on the equiv corpus is +2% vs
+    classic (5878 vs 5763) with the second slot's low-lane narrowing off, 5716 with it on.</li>
     </ul></li>
   </ul></li>
 <li><strong>G — Analyses and mask/lane rules</strong> <span class="status">phase 1</span>
@@ -1298,6 +1861,37 @@ is immutable and is not edited.</li>
   multiply-shift as an <code>alt</code> under a <code>range</code> guard.
   Variable divisors are left alone. Fixtures cover a negative dividend and
   <code>x/0</code>, <code>x%0</code>.</li>
+  <li><span class="status landed">landed 2026-10-18 (uncommitted)</span> What exists and what was measured:
+    <ul>
+    <li><strong>Analyses</strong> (<code>rules/analyses.decl</code>, implemented with <code>AEG_ANALYSIS</code> in
+    <code>runtime/analyses.cpp</code>, lazy and memoized per class): bool01, range (<code>nonneg</code>, <code>fits</code>,
+    <code>sfits</code>), known_zero / known_one / low_zero, exclusive, opposite ((base, polarity)), has_lane (the persistent
+    lane layout of Concat / Set_mask / SHL / packed Or-Sum) and lt_always / ge_always / distinct / nonzero / zero.
+    Declared widths of graph inputs and Flop/Fflop/Latch outputs seed the leaf intervals (<code>a:U8 / 4</code> is a shift).
+    <code>aeg_analyses_smoke</code>: 8.0M positive claims verified per default run over 400 random e-graphs (6000 graphs x 5 seeds: 0 unsound);
+    it found a real bug on its first run (a saturating multiply returned +inf as a lower bound).</li>
+    <li><strong>Rules</strong>: 67 in total (was 28): group <code>mask</code> (getmask_getmask, Get_mask of SHL/SRA/Set_mask, fits/above,
+    Set_mask overwrite/own-bits/zero, Concat single/zero-top/merge, lt/gt/eq by range, ror_bool, sext_fits, mux nonzero/zero selector,
+    native <code>getmask_lane</code> and <code>concat_lanes</code>) and group <code>div</code> (div_one, rem_one, div_self, rem_self, div_pow2,
+    rem_pow2, div_shl_pow2; alts div_pow2_trunc, div_mulshift8/16/31, rem_via_div). Fuzz + bv-proof tiers pass
+    (the DSL gained analysis calls with constant arguments, <code>band</code>/<code>div</code>/<code>pow2</code>/<code>clog2</code>,
+    equality solving of related <code>(k)</code> constants in the sampler, refinement checking of an all-unknown left side such as x/0).
+    <code>setmask_getmask_value</code> (drop a Get_mask on a Set_mask value) was removed: cgen and the LEC encoder read that operand as already
+    fitting its window (<code>bitset_gap</code>, <code>bitset_mut</code> refuted).</li>
+    <li><strong>Pre-pass</strong>: the classic packed-slice resolution already runs on the SCC members before the build;
+    <code>PackedFalseCycleIsResolvedInThePrePass</code> (a ready/valid ring of packed vectors, the br_amba_axi_demux shape) pins it: 0 opaque members.</li>
+    <li><strong>Div/Rem</strong> are pure and CSE'd in classic (<code>is_computed_comb_op</code> no longer excludes Rem; opshare already listed both).</li>
+    <li><strong>formal.lec.preflight_engine=classic|aegraph</strong> (INTERNAL, default classic, <code>//pass/aegraph:pass_aegraph</code> in <code>//lhd:formal_salt</code>);
+    preflight mode stamps every created cell or refuses the graph and classic runs. br_amba_axi_demux itself lives in a sibling repo, so the
+    gtests run the in-repo reduced packed ready/valid ring through both engines and prove them equal.</li>
+    <li><strong>Fixtures</strong>: <code>aeg_div_rem</code> (negative dividend, runtime divisors that can be 0, b/b), <code>aeg_mask_windows</code>,
+    <code>aeg_pack_rdy_vld</code>, each with a <code>_1</code> aegraph variant (<code>:compile_grep:</code> on div_pow2 / getmask_getmask).</li>
+    <li><strong>Results</strong> (-c opt): <code>//inou/prp:all</code> forced to <code>aegraph</code> 2831/2831 and to <code>aegraph+classic</code> 2831/2831;
+    <code>//lhd/...</code> 330/330; <code>//pass/aegraph/...</code> 17/17.</li>
+    <li><strong>Left</strong>: the alts (<code>div_mulshift*</code>, <code>div_pow2_trunc</code>, <code>getmask_shl_straddle</code>) are never extracted until the cost
+    profiles of milestone I (a tie keeps the original); a straddling window of a Concat is not rebuilt as a narrower Concat; the prove tier
+    skips rules guarded by two-class analyses and the Concat rules (fuzz covers them); sim instruction counts need perf counters this host does not allow.</li>
+    </ul></li>
   </ul></li>
 <li><strong>H — Mux simplification</strong> <span class="status">phase 1</span>
   <ul>
@@ -1323,6 +1917,83 @@ is immutable and is not edited.</li>
     <li>G1 still holds.</li>
     </ul>
   G2 must pass before any QoR-directed work.</li>
+  <li><span class="status landed">landed 2026-10-19 (uncommitted)</span> What exists and what was measured (<strong>G2 passes</strong>):
+    <ul>
+    <li><strong>The scalar_mux / scalar_eq / scalar_bool equivalents.</strong> Most already existed from D/G (the boolean and EQ-chain
+    folds, <code>mux_sel_not</code>, the constant-arm logic, the same-arm collapse and the constant-selector fold in the engine; the P10 string
+    shortcut is not carried over, a string arm is a constant like any other). New in H: <code>mux_setmask_pair</code> and <code>mux_setmask_arm</code>
+    (the lane factoring: a conditional write of one bit of a packed register keeps a one-bit Mux; <code>reg_partial_write_chain</code> pred_aig 31 vs 73
+    before it), <code>mux_guard_accumulation</code> (the rolled-loop accumulation guard, only in a lifted loop body and only before bitwidth, the
+    classic conditions; a held state output keeps its Mux), the Q1 <code>mux_oob_sel</code> (an alt: a selector that names no connected arm of an
+    n-ary Mux is a <code>?</code> the Mux owns, 0 is offered and the extraction takes it, as classic folds it; never a <code>simplify</code>),
+    and <code>getmask_not_getmask</code> (the low window of a complement). <code>getmask_fits</code> became native: it keeps the mask of a
+    leaf (an input or register output: the region passes read booleans structurally, <code>wire_cond_match</code> went from 5 to 8 nodes without
+    it) and of a Sum (a mask between two additions stops the chain from flattening before the low-lane narrowing sees each partial sum,
+    <code>loop_ref_arg</code> pred_aig 152 vs 192 without it); bitwidth deletes the redundant mask afterwards, as in classic.</li>
+    <li><strong>Packed reads.</strong> <code>sra_lane</code> (an array element or struct field read is <code>SRA</code> of a non-negative packed word, resolved through the
+    lane layout), <code>getmask_concat_straddle</code> (a window across two lanes of a private Concat is a narrower Concat: the
+    <code>color_kernel_llvm_wide</code> xor went from 130 to 17 bits), <code>setmask_to_concat</code> (a chain of constant disjoint lane writes
+    over zero or a Concat is one Concat, classic's pack canonicalization). The lane layout now covers <code>SRA</code> and write chains of any length (iterative
+    warm-up, at most 256 lanes per class).</li>
+    <li><strong>Per-lane vectorizer forms.</strong> <code>mux_lane_vector</code> (DSL alt: one lane of a bit-sliced Mux is a bit of the 64-bit-aligned word
+    Mux; every lane of a run builds the SAME word Mux, so hash-consing shares it) and <code>bit_run_reduction</code> (native alt: four or more adjacent
+    single bits of one word under an And/Or are one window test). The lane Mux is never extracted before the cost profiles of I (one lane alone is cheaper
+    as the scalar Mux); the real vectorizing is still the classic <code>vectorize_bit_muxes</code> / <code>vectorize_bit_reductions</code> on the extracted
+    graph (below). 77 rules in total (67 before), proof tiers unchanged: the DSL ones are fuzzed and bv-swept, the native ones have equiv fixtures
+    (<code>aeg_mux_lane_writes</code>, <code>aeg_lane_reads</code>, <code>aeg_loop_guard_accum</code>, each with a <code>_1</code> aegraph variant that
+    greps the rule counters) and gtests in <code>aegraph_test.cpp</code>.</li>
+    <li><strong>Engine changes that were needed to pass G2.</strong> (1) Reader counts: a node whose structural twin is built AFTER its first reader looked
+    "single use" and the flatten rule absorbed it, leaving two <code>x + y</code> (<code>overload_dispatch</code> pred_aig 152 vs 232). The engine now
+    counts, before the walk, the readers of the whole twin group (<code>precount_twins</code>) and ignores dead readers (<code>mark_dead</code>: a dead Mux
+    over a live Or made the Or look shared). A first version of <code>mark_dead</code> asked <code>is_pure_candidate</code> of every reader, which re-runs the
+    exclusivity scan of a Hotmux once per input: minion's <code>intpipe_csr_file</code> took 9.2 s instead of 0.5 s. Found only on a real design, so
+    run minion after touching the build phase. (2) <code>pin_latch_holds</code>: the Latch-din root constraint. A Mux that feeds a latch's din with the
+    latch's own Q as a direct arm is a root, no rule rewrites it (latch contract rule B allows Q to reach D only through that mux); a state output is a
+    marked leaf (<code>Egraph::is_state</code>). A flop's hold Mux is NOT pinned: classic lane-factors it too, and enableopt reads the result.</li>
+    <li><strong>What is not redone in the e-graph.</strong> The vector-mux window narrowing, muxctx, mux and operator sharing, flop-enable folding
+    (<code>fold_constant_flop_enables</code>), pack canonicalization and the dead sweep are the classic <code>Cprop::region_passes</code>, run on the
+    elaborated graph by <code>Cprop::do_post</code> (one implementation for both engines). <strong>muxctx order change, measured:</strong> with
+    <code>muxctx::prune</code> off, the equiv+sim+lgraph corpus has 8929 nodes under classic (8922 on) and 8624 under aegraph (8618 on), pred_aig +12 under both: running it
+    after the extraction instead of after the classic forward sweep changes nothing measurable (it removes no node in either engine, it only rewrites
+    conditions). The region passes' own node deltas, summed over equiv+sim: classic pack -36, mux_op_share -35, mux_share +89, cleanup -104;
+    aegraph pack -54, mux_op_share -24, mux_share +21, cleanup -19 (the engine leaves less for them to clean).</li>
+    <li><strong>Gate G2 (<code>scripts/cprop_engine_sweep.py --synth</code> prints it under "gate G2";
+    the nodes are those of the lg after the FULL schedule, counted with <code>lhd tool cat --target node</code>, not the mid-pipeline
+    cprop-summary count the earlier baselines used).</strong>
+      <table>
+      <tr><th>measure</th><th>equiv (665)</th><th>sim (226)</th><th>lgraph (2)</th><th>all (868 incl. 3 new fixtures)</th><th>gate</th></tr>
+      <tr><td>total nodes, geomean aegraph/classic</td><td>0.9793</td><td>0.9859</td><td>1.0000</td><td>0.9810 (8618 vs 8922 nodes)</td><td>within 2%: yes</td></tr>
+      <tr><td>total nodes, worst fixture</td><td>1.065 (<code>mem_dynamic_splice_bounds</code> 62 to 66)</td><td>1.077 (<code>bool_port_boundary</code> 13 to 14)</td><td>1.000</td><td>1.077</td><td>no fixture over 10%: yes</td></tr>
+      <tr><td>pred_aig, geomean</td><td>0.9861</td><td>0.9604</td><td>1.0000</td><td>0.9837 over 605 fixtures with pred_aig; sum 2451232 vs 2461338 (0.996)</td><td>within 2%: yes</td></tr>
+      <tr><td>pred_aig, worst fixture</td><td>1.049 (<code>func_ret_reused_in_loop</code> 41 to 43)</td><td>1.000</td><td>1.000</td><td>1.049</td><td>no fixture over 10%: yes</td></tr>
+      <tr><td>op classes above classic by more than 5% (summed)</td><td>none</td><td>none</td><td>none</td><td>none (concat +1.9%, sra +0.2%, shl +0.2%; every other op at or below classic)</td><td>yes</td></tr>
+      <tr><td>failures under aegraph</td><td>0</td><td>0</td><td>0</td><td>0 compile failures; <code>//inou/prp:all</code> forced to aegraph and to aegraph+classic: 2834/2834 each</td><td>0: yes</td></tr>
+      </table>
+      Where H started (same corpora, cprop-summary count of the last slot): equiv nodes geomean 0.972 with a worst fixture of 1.60
+      (<code>wire_cond_match</code>), pred_aig geomean 0.996 with a worst of 2.35 (<code>reg_partial_write_chain</code>), op classes sra +10.8% and set_mask +9.1%;
+      sim nodes worst 3.0 (<code>comb_array_port_inline</code>), sra +14.4%, set_mask +45.5%, concat +11.8%, xor +5.9%, sext +50%.
+      Fixtures that needed a specific change: lane reads (<code>comb_array_port_inline</code>, 8 generic array fixtures), the set-mask lane factoring
+      (<code>reg_partial_write_chain</code>, <code>backtick_cond_lane_write</code>, <code>reg_tuple_field_bit_write</code>), twin readers (5 overload fixtures),
+      the straddle (<code>color_kernel_llvm_wide</code>, <code>_reg</code>), the leaf/Sum mask (<code>wire_cond_match</code>, <code>loop_ref_arg</code>).
+      Remaining gap with aegraph+classic (the parity-gap report): classic still removes 77 transient nodes over 30 of 665 equiv fixtures (or 35, shl 20, and 14, sum 6, eq 6;
+      <code>packed_slice_updates</code> 27 and <code>aeg_pack_slice_lanes</code> 19, both smaller under aegraph alone at the end of the schedule) and 7 over 21 of 226 sim fixtures;
+      none of it is a G2 failure. The same gate on the aegraph+classic engine: nodes geomean 0.9803, worst 1.065, pred_aig geomean 0.9836, worst 1.049, op classes concat +4.3% and sra +1.0% (< 5%). Known: <code>loop_ref_arg</code> is now 144 vs 152 pred_aig and 23 vs 23 gates, but its partial sums stay one flat Sum where classic narrows each (14 vs 11 <code>get_mask</code> in the sim build, see below); the low-lane producers of L reproduce classic's ripple form.</li>
+    <li><strong>Gate G1 still holds.</strong> LEC: equiv corpus aegraph vs classic and aegraph vs the source, 515 + 515 proven-full, 0 REFUTED (classic vs source 515 proven-full).
+    Determinism 665/665 equiv and 226/226 sim. Width-agnostic: 513 proven-full, 2 REFUTED (<code>mod_general</code>, <code>signed_divrem_mixed</code>), the same two as
+    before H and as classic. Compile time (<code>cprop-summary</code> ms summed over graphs, both slots): equiv 189.1 vs 160.9 ms (1.18x), sim 94.3 vs 76.9 ms (1.23x), a
+    1500-operation synthetic comb design 14.6 vs 21.1 ms (0.69x), minion (<code>--set lhd.incremental=false</code>, 141 graphs) 8967 vs 8344 ms (1.07x), wall 24.2 vs 23.5 s, peak RSS 1.47 vs 1.44 GB;
+    worst minion graph <code>minion_frontend</code> 1.23x. XS Backend (<code>xiangshan/Backend/pyrope/Backend.prp --top Backend</code>, 1088 graphs, cold, 32 cores): wall 858 s classic vs 573 s aegraph (0.67x), <code>cprop-summary</code> ms summed 115.1 vs 79.2 s (0.69x), peak RSS 25.35 vs 25.42 GB (1.00x); the worst graph of at least 1 ms is 1.03x (<code>MnstatusModule</code>, 1.15 to 1.18 ms); the largest, <code>Rob</code> (1.09M nodes in), 38.5 vs 32.6 s; the lg after the schedule has 1,656,338 nodes against 2,103,979 under classic (-21%). Memory: <code>aeg_bytes/lg_bytes</code> v2 max 0.30 in use and 0.47 at capacity on the in-repo corpus.</li>
+    <li><strong>Simulation (<code>--sim</code>, engine=aegraph vs classic, LLVM backend).</strong> <code>out_digest</code> identical in all 224 simulated fixtures (3 engines) (<code>latch_gated_feedback</code> fails to build
+    under all three engines, as before H). The perf <code>instructions</code> counter reads 0 on this host (perf_event_paranoid=4), so the sweep now also records the STATIC machine instructions of the compiled
+    design (<code>objdump -d</code> of the color kernels and module objects; a color kernel is straight-line code run once per cycle): PRIMARY metric, LLVM color kernels only (the per-cycle cost): aegraph/classic geomean 1.0017 over 214 fixtures, i.e. a slight regression (aegraph+classic 1.0020).
+    The whole-fixture figure (0.9994 over 222 fixtures, 13 fewer, 6 more) is secondary: it includes fixed per-module and runtime code, so every regression reads as 1.000 and it must not be read as parity or an improvement. Both metrics are STATIC instruction counts, not weighted by loop trip counts or cycles (perf counters are unavailable). Regressions to note: <code>comb_array_port_inline</code> kernel 4 to 13 instructions (its constant-zero output),
+    <code>loop_roll_conditional_state_call</code> +8% (62 to 67), <code>fsm_runner</code> +2.6%, <code>loop_regression_lane</code> +2.0% (the flat partial sums of <code>loop_ref_arg</code>), <code>reg_rw_rolled_loop</code> +0.8%;
+    improvements: <code>div_narrow_result</code> 6 to 3, <code>loop_body_reads_wire</code> -6%, <code>loop_runtime_break_reads_wire</code> -6%, <code>icarus_backend_parity</code> -5.6%.
+    Wall-clock cycles/s of these tiny designs is noise (geomean 0.98). Reproduce: <code>scripts/cprop_engine_sweep.py --corpus sim --sim --engines classic,aegraph</code>.</li>
+    <li><strong>Left for I and L:</strong> the cost profiles that will pick <code>mux_lane_vector</code> and the other alts; the Sum/Xor/Mux/EQ low-lane producers (the
+    <code>loop_ref_arg</code> shape, the sim regressions above); <code>wire_cond_match</code>'s region passes still restructure a graph of 5 nodes into 8 when the mask of
+    a leaf is gone (the leaf mask rule avoids it); the shared-cell Sum splice and the Hotmux rules.</li>
+    </ul></li>
   </ul></li>
 <li><strong>I — Cost profiles, alternatives, extraction</strong> <span class="status">phase 1</span>
   <ul>
@@ -1347,6 +2018,106 @@ is immutable and is not edited.</li>
     </ul></li>
   <li><strong>Decision point:</strong> report the A/B table (time, memory, nodes,
   QoR, sim, rule census) to the user. Phase 2 is planned only if G3 holds.</li>
+  <li><span class="status landed">landed 2026-10-19 (uncommitted)</span> What exists and what was measured (<strong>G3 holds</strong>: synthesis on the abc fixtures plus lhdtrack, simulation within 5% on every lhdsuite core measured; tests/sim has outliers up to 3.25x in kernel instructions, comb_array_port_inline 4 to 13):
+    <ul>
+    <li><strong>Cost profiles.</strong> <code>pass/aegraph/cost/synth.cost</code> and <code>sim.cost</code>, one S-expression file per profile:
+    <code>(profile NAME :default-width N)</code> and <code>(cost NAME PATTERN [:when GUARD...] PRICE)</code>, first match wins, the last entry is the catch-all
+    <code>_</code> (rulegen refuses a profile without one, an unknown op or name, an unreachable entry). A pattern is <code>OP</code>, <code>_</code> or
+    <code>(OP item...)</code> with items <code>_</code>, <code>(k)</code> / <code>(k name)</code> (a fully known constant operand, bound to <code>name</code>) and
+    <code>..</code> (banked ops match the items as a multiset, positional ones by pin); a price and a guard use the rule DSL's builtins over <code>W</code> (result width),
+    <code>A</code> (operands), <code>Wmax</code>, <code>Wsum</code>, <code>N</code> and <code>Nmax</code> (64-bit words of the result and of the widest operand) and the binders.
+    <code>rulegen/cost_model.{hpp,cpp}</code> is the ONE implementation: rulegen lints a profile with it, the generated <code>gen/cost_&lt;name&gt;.gen.cpp</code> embeds the file text
+    (the runtime parses it on first use, <code>runtime/cost.{hpp,cpp}</code>), the extractor, the per-profile rule lint and the <code>:expect</code> tests all call <code>cost::price</code>.
+    <strong>synth</strong> is gate equivalents: wiring is free (<code>Get_mask</code>, <code>Set_mask</code>, <code>Sext</code>, <code>Concat</code>, a shift by a constant, <code>x * 2^k</code>),
+    prices scale with W (the range-analysis bound of the class, a declared input or register width included, else 32). <strong>sim</strong> is host instructions of the
+    LLVM-emitted color kernel (<code>inou/cgen/cgen_llvm.cpp</code>), quantized to 64-bit words: a bit select is a shift and a mask, a window write four instructions,
+    a shift by a constant or by an immediate multiply one, a shift by a variable a compare plus a select, a divide by a constant a multiply-high, a divide by a variable a trap plus a divide,
+    a two-arm Mux one select per word, everything repeated per word beyond 64 bits.</li>
+    <li><strong>Extraction (<code>Engine::compute_best</code>), width-aware and sharing-aware.</strong> A union keeps its original (older) side unless the alternative is STRICTLY cheaper,
+    so a tie never changes the graph and the choice is a pure function of class order; no decision iterates an unordered container (determinism, below). A node's price is
+    its own price plus its operands'; an operand with another reader costs nothing (it is needed whichever member is taken), so low-lane narrowing, mux sharing and operator sharing are not undone.
+    The reader count is optimistic on the first pass (every e-node counts, including alternatives that may lose) and is recounted under the selection for at most two more passes,
+    because a first version that counted only the optimistic readers extracted a 64-bit word Mux that nothing else read (the parity fixture
+    <code>CpropMuxSharing_TwoGroupSelectTree</code>). Costs are computed lazily and saturate at <code>extractor_fuel * 1024</code>. Cost of the extraction: 0.2 ms of 85 ms on
+    <code>br_amba_axi_shrinker</code>, 28 ms of 10.7 s on minion (<code>LHD_AEGRAPH_PROFILE=1</code>).</li>
+    <li><strong>The knob and the cache.</strong> <code>compile.aegraph.cost=synth|sim|auto</code>, default <code>synth</code> for EVERY command, <code>lhd sim</code> included.
+    The directive asked for <code>lhd sim</code> to use <code>sim</code> automatically only if no documented default changes; it would (the knob's documented default is <code>synth</code>, in the
+    pass help, <code>lhd list options</code> and the README), so there is NO auto-selection and <code>auto</code> is the opt-in (<code>sim</code> under <code>lhd sim</code>, <code>synth</code> elsewhere).
+    The kernel resolves it (<code>resolve_aegraph_cost</code>), hands the resolved name to <code>pass.aegraph</code>, validates the value eagerly, and the compile-cache descriptor names it
+    (<code>pipeline=cprop[aegraph:both:cost=sim],bitwidth</code>; <code>classic</code> is unchanged), so a profile switch never replays the other profile's graphs.
+    To measure simulation speed with the LLVM backend: <code>lhd sim X.prp --set compile.cprop.engine=aegraph --set compile.aegraph.cost=sim</code>
+    (lhdtrack: add <code>compile.aegraph.cost=sim</code> to <code>LHDTRACK_SIM_SET</code>; lhdsuite: to <code>BENCH_PYROPE_SETS</code>).</li>
+    <li><strong>Per-profile cost lint, <code>:expect</code> tests.</strong> A <code>simplify</code> is sampled (the constants its guards admit, widths 1, 8 and 70) and may not price its
+    right-hand side above its left in ANY profile; the diagnostic names the profile and says "make it alt" (the build fails: it already caught <code>xor_bool_one</code>, 2 against 1 in <code>sim</code>,
+    which fixed the profile, not the rule: an <code>icmp</code> against an immediate fuses into the select or branch that reads it, a <code>Xor</code> does not).
+    <code>:expect (PROFILE lhs|rhs)</code> becomes <code>&lt;group&gt;_&lt;rule&gt;_expect_&lt;profile&gt;_&lt;side&gt;</code>: the rule's <code>:example</code> is built as a micro-LGraph, the engine runs with only that rule under the
+    profile, and the test checks which side the extraction kept. 14 expectations on 7 rules (<code>not_xor_alt</code>, <code>mux_lane_vector</code>, <code>div_pow2_trunc</code>, <code>div_mulshift8/16/31</code>, <code>rem_via_div</code>);
+    <code>RULES.md</code> prints them. Tests: <code>cost_model_test</code> (10), 14 generated <code>_expect_</code> tests, <code>AegUnion.AnAltThatWinsUnderTheSimProfileIsExtracted</code> /
+    <code>TheSameAltTiesUnderTheSynthProfileAndTheOriginalStays</code> / <code>TheExtractionIsSharingAware</code> (one alt, three outcomes), <code>Aegraph.AdjacentBitRunsOfAReductionBecomeAWindowTestUnderTheSimProfile</code>
+    and its synth twin, <code>LhdOptions.AegraphCostProfileIsResolvedAndNamedInTheDescriptor</code>, the eager value check, and the fixtures <code>aeg_cost_sim{,_1,_2}</code> (the synth/sim choice of
+    <code>div_mulshift*</code>, grep on the rule counters) and <code>aeg_mux_lane_writes_2</code> (the lane factoring under <code>sim</code>).</li>
+    <li><strong>The alternatives, one by one.</strong>
+      <ul>
+      <li><code>Mult(2^k) -> SHL</code> and <code>Mux -> And/Or</code> (<code>mux_bool_const_arms</code>, <code>mux_const_arm_logic</code>) stay <code>simplify</code>: the lint proves
+      the right-hand side is no dearer in either profile (SHL 0 against 0 in synth, 1 against 1 in sim), so offering the extraction a choice would only grow the e-graph.</li>
+      <li>Set_mask pair factoring (<code>mux_setmask_pair</code>, <code>mux_setmask_arm</code>) became <code>alt</code>: hardware pays per bit and takes the narrower lane Mux, a simulator word is a word.
+      On the equiv corpus under <code>synth</code> the two rules fired 25 times and 60 of their e-nodes were extracted; under <code>sim</code> the factored form is kept only where it is cheaper (<code>aeg_mux_lane_writes_2</code>).
+      No effect measured on tests/sim (the rule never fires there).</li>
+      <li>Division and remainder by a constant (<code>div_mulshift8/16/31</code>, <code>rem_via_div</code>, built in G, never extractable before): <code>sim</code> takes the multiply-shift, <code>synth</code> keeps the Div.
+      This is the one place the profiles visibly part ways and it is a real simulation win: a 4-output design with <code>a / 10</code>, <code>b / 3</code>, <code>a / 7</code>, <code>a % 10</code> is 24 kernel instructions under classic
+      and under <code>aegraph</code>+<code>synth</code>, <strong>16 under <code>sim</code></strong> (whole object 19189 to 16329 static instructions; LLVM's own reciprocal for <code>/ 7</code> needs the add-and-shift fix-up,
+      the Granlund-Montgomery form with a 17-bit multiplier does not). In hardware the divider array specializes on a constant divisor and measured smaller: <code>aeg_div_rem</code> area 4182 with the Div kept against 4637 with the multiply-shift forced.
+      The formula was also checked exhaustively in Python (8 and 16 bits, c up to 300) and by sampling (31 bits).</li>
+      <li>Mux chain collapsed, <code>mux_arm_merge_or / _and</code> (<code>s1 ? a : (s2 ? a : f)</code> = <code>(s1 | s2) ? a : f</code>): built as DSL alts with proofs, MEASURED AND WITHDRAWN. ABC maps the stacked and the merged form to the same netlist
+      (<code>aeg_mux_arm_merge</code>: 96 gates, area 280, delay 4 both ways, pred_aig 144 against 98), lhdtrack area/delay are unchanged within 0.0004, and in the simulator they lose: kernel instructions with the rules on against off,
+      <code>loop_cond_break_no_sub</code> 94 against 90, <code>loop_regression_lane</code> 553 against 549, <code>loop_roll_index_bitslice</code> 81 against 75, <code>loop_roll_conditional_state_call</code> 95 against 67 (classic 62). The cost model
+      called them a win in both profiles; the post steps (<code>mux_share</code>, Hotmux formation) see a stack differently from a merged selector, which no per-node price can express. Nothing ships; the lesson is in the profile comments.</li>
+      <li>Mux chain to Hotmux: NOT done. A rule would build a <code>Hotmux</code> whose exclusivity is proven by an analysis, which needs the <code>{proven}</code> attribute and its proof obligation (deferred since F), and classic
+      <code>mux_share</code> already builds Hotmuxes on the extracted graph with the structural exclusivity check.</li>
+      </ul></li>
+    <li><strong>Bugs found on the way (both pre-existing, neither cost related).</strong> (1) <code>minion_top</code> under <code>lhd sim</code> with the e-graph engine failed with "Concat lane 0 ... driver occupies 6 bits but its declared window is 3":
+    the sim cgen splices small loops and runs the classic cprop over the aegraph output (<code>refold_private_body</code>); <code>Cprop::indexed_get_mask</code> turned a Get_mask whose pin bitwidth had stamped narrower than its window into a Concat of the WHOLE window.
+    Fix: read only the stamped bits (<code>stamped &lt; hi - lo</code> and unsigned means the bits above are zero by proof). The standalone repro is <code>lhd compile lg:DIR</code> on the aegraph lg of minion (3.5 s on the one definition). I could not
+    build a unit test that reaches the path without the whole pipeline, so the regression guard is the minion sim itself. (2) the test oracle <code>cprop_test_eval.hpp::mux_eval</code> shifted by 64 for a 64-bit <code>Get_mask</code> window (undefined behaviour); fixed.</li>
+    <li><strong>Gate G3, synthesis</strong> (<code>scripts/cprop_engine_sweep.py --synth</code>, the in-repo <code>test.lib</code>, ABC through <code>lhd synth</code>; geomean of aegraph/classic per fixture, the engine run under <code>synth</code>; new: <code>--corpus lhdtrack:../lhdtrack</code>, <code>--synth-cost</code>, the G3 table):
+      <table>
+      <tr><th>corpus</th><th>fixtures</th><th>area geomean</th><th>delay geomean</th><th>gates geomean</th><th>sums (area, delay)</th></tr>
+      <tr><td>abc fixtures (<code>tests/pyrope/abc_*</code>, <code>tests/abc/*.prp</code>)</td><td>13</td><td>1.0000</td><td>1.0000</td><td>1.0000</td><td>identical</td></tr>
+      <tr><td>lhdtrack (<code>tests/*/pyrope/&lt;top&gt;.prp</code>, 191 designs; 3 do not compile under aegraph, below)</td><td>180 (185 with delay)</td><td>0.9997</td><td>0.9991</td><td>0.9995</td><td>1.0010, 1.0008</td></tr>
+      <tr><td><strong>abc fixtures + lhdtrack (the gate)</strong></td><td>193 (198)</td><td><strong>0.9997</strong></td><td><strong>0.9991</strong></td><td>0.9996</td><td></td></tr>
+      <tr><td>equiv corpus</td><td>550 (614)</td><td>0.9988</td><td>1.0006</td><td>0.9982</td><td>0.9985, 1.0017</td></tr>
+      <tr><td>all of the above</td><td>743 (812)</td><td>0.9990</td><td>1.0003</td><td>0.9985</td><td></td></tr>
+      </table>
+      Both halves hold on the gate corpus. On the equiv corpus the delay geomean is 1.0006 and it is ONE fixture: <code>loop_rca_flat</code> 16 to 22 (1.375x) where the two compiles are structurally identical to
+      <code>lhd tool diff --structural</code> and differ only in the stored graph bytes, so pass.abc maps them differently (52 against 64 gates). Without it 1.0001. Three experiments did not move it
+      (constants last, operand order kept, rewire only the sinks that change); it is an ordering sensitivity of the mapper, not a rule. Fixtures where aegraph is better: <code>aeg_lane_reads</code> area 331 against 468, <code>aeg_div_rem</code> 4182 against 5085,
+      <code>loop_break_result_positions</code> 1093 against 1284. No alt is ever extracted under <code>synth</code> in these corpora except the lane factoring (60 firings) and, on the constant-divisor fixtures, none of the multiply-shifts.</li>
+    <li><strong>Gate G3, simulation</strong> (LLVM backend, <code>lhd sim</code>, out_digest identical to classic in every run; static kernel instructions = <code>objdump</code> of the color kernels, the per-cycle cost, perf counters are not readable on this host;
+    cycles/s is the best of three runs of the built driver and noisy at the few-percent level):
+      <table>
+      <tr><th>design</th><th>classic kernel instr</th><th>aegraph, synth</th><th>aegraph, sim</th><th>cycles/s or exec time (classic, aegraph sim)</th></tr>
+      <tr><td>tests/sim corpus (226, 214 with a kernel)</td><td>geomean 1</td><td>1.0035 (10 better, 9 worse)</td><td>1.0017 (10 better, 7 worse)</td><td>whole object 0.9994; worst <code>comb_array_port_inline</code> 4 to 13 (a folded output), then <code>loop_roll_conditional_state_call</code> 62 to 67, <code>fsm_runner</code> +2.6%, <code>loop_regression_lane</code> +2.0%</td></tr>
+      <tr><td>minion (<code>minion_top</code> + <code>minion_prog_tb</code>, 100k cycles)</td><td>683,049</td><td>1.0182</td><td>1.0174</td><td>3.649 s, 3.575 s (-2%; -5.5% under synth); whole object 4.358M to 4.319M</td></tr>
+      <tr><td>dino (<code>PipelinedDualIssueCPU</code>, 2M cycles)</td><td>3,246</td><td>1.0031</td><td>1.0031</td><td>0.772 s, 0.779 s</td></tr>
+      <tr><td>matched_filter (1M cycles)</td><td>2,375</td><td>1.0004</td><td>1.0004</td><td>0.480 s, 0.479 s</td></tr>
+      <tr><td>picorv32 (500k cycles)</td><td>4,840</td><td><strong>0.9467</strong></td><td><strong>0.9467</strong></td><td>0.377 s, 0.349 s (-7%)</td></tr>
+      <tr><td>constant-divide microbench (<code>a/10, b/3, a/7, a%10</code>)</td><td>24</td><td>24</td><td><strong>16</strong></td><td>whole object 19189, 16329</td></tr>
+      </table>
+      Every lhdsuite core measured is within 5% of classic; tests/sim has outliers up to 3.25x in kernel instructions (4 to 13) (worst core: minion, +1.7% of a 683k-instruction kernel, and 2 to 5% FASTER in wall time). The profile matters where the divisions are; elsewhere the two profiles differ by 0.1% or less (minion 695,449 against 694,961), because the
+      alts the profiles disagree about almost never fire on these designs. <code>aegraph+classic</code> on picorv32 reads 1.0033 and 0.968 in the earlier run: a few instructions of noise from classic's second look, not a trend. A third of the sim corpus differences are the
+      known <code>loop_ref_arg</code> flat partial sums (L).</li>
+    <li><strong>Correctness and determinism.</strong> Tests, <code>-c opt</code>: <code>//lhd/... //pass/... //inou/...</code> with the default engine 3619 of 3619; <code>//inou/prp:all</code> forced with
+    <code>LHD_PRP_COMPILE_SETS=compile.cprop.engine=aegraph</code> 2837 of 2837, with <code>=aegraph+classic</code> 2837 of 2837. Also forced with <code>compile.cprop.engine=aegraph compile.aegraph.cost=sim</code>: 2837 of 2837 (also 2837 of 2837 with aegraph+classic and cost=sim) (an earlier run failed <code>aeg_div_rem_1</code> and <code>mod_general</code> in their <code>--bitfuzz</code> rerun; classic itself DOES pass that rerun of <code>mod_general</code>, so the fault was <code>rem_via_div</code>, whose unstamped Sum had no width contract once bitfuzz cleared the pins; the rule now requires <code>(fits x 31)</code> and wraps the difference in a <code>Get_mask</code> of clog2(c) bits). LEC of the equiv corpus (<code>--lec</code>, 528 fixtures with a top): aegraph against classic and against the source <code>proven-full</code> 528 + 528, classic against the source 528, 0 REFUTED, under BOTH profiles.
+    Determinism (<code>--determinism</code>, aegraph twice, <code>tool diff --structural</code>): equiv 666 of 666 and sim 226 of 226, under both profiles. <code>//pass/aegraph/...</code>: 18 targets, all green.</li>
+    <li><strong>Time and memory.</strong> The extraction costs 0.3% (above). Compile, cprop ms summed over graphs, quiet machine: lhdtrack (188 designs) 1402.9 against 2255.3 ms classic (0.62x), peak RSS 402 against 432 MB; minion wall 23.9 against 23.1 s (+3.5%), RSS 1.46 against 1.41 GB;
+    equiv (666 tiny graphs) 225 against 138 ms (1.6x), which is 0.13 ms per process of fixed cost (the cost profile is parsed on first use), not a trend. Nodes in the last cprop slot: equiv 5477 against 5847; lhdtrack 52706 against 48767 (a mid-pipeline count: the aegraph leaves more cells that bitwidth drops later). G2 on lhdtrack, counted on the final lg:
+    nodes geomean 0.9637, but 4 designs are over +10% (worst 1.84) and pred_aig has a worst of 3.25 on 2 designs, so lhdtrack does NOT meet the in-repo G2 bar on its worst designs (not a G3 criterion).</li>
+    <li><strong>Left for later.</strong> (1) Three lhdtrack designs do not compile under <code>aegraph</code> alone (<code>br_fifo_shared_pstatic_flops</code>, <code>br_fifo_shared_dynamic_ctrl</code>, <code>br_fifo_shared_dynamic_ctrl_push_credit_ext_arbiter</code>; they compile
+    under classic and <code>aegraph+classic</code>): "Concat lane 0 ... driver 'and_N' occupies 2 bits but its declared window is 1" from pass.bitwidth; it needs BOTH aegraph slots, is independent of every rule (it reproduces with <code>rules_only=not_not</code>) and of the cost profile.
+    Reproduce: <code>lhd compile .../lhdtrack/tests/br_fifo_shared_pstatic_flops/pyrope/br_fifo_shared_pop_ctrl_ext_arbiter.prp --top br_fifo_shared_pop_ctrl_ext_arbiter --set compile.cprop.engine=aegraph</code>. (2) The Hotmux alternative (above).
+    (3) The mapper's ordering sensitivity on <code>loop_rca_flat</code>. (4) Classic's <code>Rem</code> precision contract against the e-graph's unlimited <code>Rem</code> (above); the e-graph's reading is the Q2 one, the two disagree only when a frontend or bitfuzz stamps a Rem narrower than its result.
+    (5) The sim profile is calibrated against LLVM output on four cores and the sim corpus; a profile for the Verilog flow of cva6, rocket and xiangshan needs those runs (not done here: they need the full lhdsuite toolchain).</li>
+    </ul></li>
   </ul></li>
 </ul>
 

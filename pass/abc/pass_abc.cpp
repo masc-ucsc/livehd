@@ -42,6 +42,11 @@
 
 static Pass_plugin sample("pass_abc", Pass_abc::setup);
 
+namespace {
+// The size tier's own flow: strash and map, nothing sequential. Also the `large_flow` label's default.
+constexpr std::string_view kDefaultLargeFlow = "strash; &get -n; &nf {D}; &put";
+}  // namespace
+
 Pass_abc::Pass_abc(const Eprp_var& var) : Pass("pass.abc", var) {}
 
 void Pass_abc::setup() {
@@ -68,6 +73,17 @@ void Pass_abc::add_mapping_labels(Eprp_method& m) {
                        "true|false: run pass.specialize (constant instance inputs folded into state-free callees) on "
                        "the private copy after pass.color (default true; the synth.specialize spelling)",
                        "true");
+  m.add_label_optional("state_sweep",
+                       "true|false: delete the registers and cells that no output, memory or body-less cell can observe, and "
+                       "narrow each register to its highest observed bit, on the private copy after pass.specialize "
+                       "(default false; the synth.state_sweep spelling). Yosys does the same by flattening and opt_clean; "
+                       "pass/synth/state_sweep.hpp tracks the demand per bit across the instance hierarchy",
+                       "false");
+  m.add_label_optional("merge_registers",
+                       "true|false: merge registers that are the same machine (same clock, enable, reset, reset value, width and "
+                       "D driver) on the private copy, repeating until nothing merges (default false; the synth.merge_registers "
+                       "spelling). Yosys's opt_merge on flops; pass/synth/register_merge.hpp",
+                       "false");
   m.add_label_optional("reassoc",
                        "true|false: merge the And/Or/Xor chains an expanded carried loop leaves (`acc |= x` per "
                        "iteration, also the guarded `if c { acc |= x }`) into balanced n-ary cells before blasting "
@@ -124,6 +140,13 @@ void Pass_abc::add_mapping_labels(Eprp_method& m) {
                        "icg_fanout buffer tree. The primary clock port is an ideal driver in a timer, so below this a tree "
                        "only adds launch latency (0 = always buffer it)",
                        "8192");
+  m.add_label_optional("reset_fanout",
+                       "max asynchronous clear/preset pins one reset net drives inside a region (a region input, a reset "
+                       "polarity inverter or a mapped reset cone): past it the net is dealt out through a tree of the "
+                       "library's smallest buffer, this many pins per buffer, level by level. The pins never enter the "
+                       "logic network, so max_fanout cannot bound them; one weak gate on thousands of flops is a "
+                       "multi-nanosecond recovery violation (0 disables, the default)",
+                       "0");
   m.add_label_optional("max_fanout",
                        "cap the fanout of every net ABC maps, by appending `buffer -N <n>; dnsize {B}` to the "
                        "built-in flows (0 disables the tail, sizing included). A custom `flow` places `{F}` -- the bare "
@@ -164,7 +187,13 @@ void Pass_abc::add_mapping_labels(Eprp_method& m) {
   m.add_label_optional("large_flow",
                        "ABC command string for indivisible over-large regions at or above large_ge; empty disables the tier. "
                        "An explicit global flow or region_opts flow wins",
-                       "strash; &get -n; &nf {D}; &put");
+                       kDefaultLargeFlow);
+  m.add_label_optional("large_flow_latches",
+                       "true|false: treat a region mapped by the tool's own default large_flow like the built-in flow: it only "
+                       "strashes and maps, so clock-gated, derived-clock and asynchronously reset registers map to cells instead "
+                       "of staying native flops (which cannot be placed). False (default) keeps the size tier's regions on the "
+                       "\"user command list may reshape latches\" rule. A user-supplied large_flow always keeps that rule",
+                       "false");
   m.add_label_optional("large_ge",
                        "inclusive synthesis-GE threshold for large_flow (0 disables it); default protects wide indivisible "
                        "operations from unbounded &dch choice synthesis",
@@ -203,6 +232,22 @@ void Pass_abc::add_mapping_labels(Eprp_method& m) {
                        "larger one native, saying which (0 = no size limit, fold every memory). memory=true/false do not "
                        "consult it",
                        "1024");
+  m.add_label_optional("memory_prune_reads",
+                       "true|false with a lowered (bit-blasted) memory, clear at the memory module's output every bit of a "
+                       "read port that no reader observes (all readers take constant Get_mask windows of the word, or "
+                       "there is no reader), feed constants for the input bits the parent provably drives with 0 (a lane "
+                       "enable of `cond ? K : 0`, a narrow address), and pass a lane-enable vector that is one condition on "
+                       "a constant lane pattern as that one bit, so the read and write logic of those bits is dropped. The "
+                       "mapped function of every observed bit is unchanged. Memory modules are then built before ware "
+                       "modules (false, the default)",
+                       "false");
+  m.add_label_optional("ware_zero_bits",
+                       "true|false clear, inside an extracted ware shifter, the data-operand bits its parent provably drives "
+                       "with 0 (a lane placed by a constant left shift, a value narrower than the port), so the mapper sees the "
+                       "constants the module boundary hides; a data operand only when at least an eighth of its bits are provably 0, "
+                       "the shift amount whenever any bit is (each is a whole barrel stage). The cleared-bit pattern is part "
+                       "of the module identity (false, the default)",
+                       "false");
   m.add_label_optional("dff_cell",
                        "explicit Liberty DFF cell name for register=true (empty => auto-detect a plain posedge D-flop)",
                        "");
@@ -762,13 +807,24 @@ void Pass_abc::map_with(Eprp_var& var, const std::function<void(livehd::abc::Map
     livehd::diag::err("pass.abc", "bad-reassoc", "syntax").msg("pass.abc.reassoc expects true|false, got '{}'", reassoc_text).emit();
     return;
   }
+  for (const char* name : {"state_sweep", "merge_registers"}) {
+    // A misspelt switch must not silently leave the dead state in the netlist.
+    const auto text = var.get(name, "false");
+    if (text != "true" && text != "false") {
+      livehd::diag::err("pass.abc", "bad-register-cleanup", "syntax").msg("pass.abc.{} expects true|false, got '{}'", name, text).emit();
+      return;
+    }
+  }
   auto prepared
       = livehd::synth::prepare_design(var.graphs,
                                       unroll_carry_text == "true" || unroll_carry_text == "1" || unroll_carry_text == "on",
                                       "pass.abc",
                                       nullptr,
                                       var.get("specialize", "true") != "false",
-                                      reassoc_text == "true");
+                                      reassoc_text == "true",
+                                      livehd::synth::State_options{.state_sweep     = var.get("state_sweep", "false") == "true",
+                                                                   .merge_registers = var.get("merge_registers", "false") == "true",
+                                                                   .top             = var.get("top", "")});
   if (!prepared) {
     return;
   }
@@ -796,6 +852,8 @@ void Pass_abc::map_with(Eprp_var& var, const std::function<void(livehd::abc::Map
   bool map_register        = truthy(var.get("register", "true"));
   bool drop_init           = truthy(var.get("drop_init", "false"));
   bool derived_clock       = truthy(var.get("derived_clock", "false"));
+  const bool memory_prune_reads = truthy(var.get("memory_prune_reads", "false"));
+  const bool ware_zero_bits     = truthy(var.get("ware_zero_bits", "false"));
   auto memory_s            = std::string{var.get("memory", "auto")};
   auto memory_max_bits_s   = std::string{var.get("memory_max_bits", "1024")};
   auto register_max_bits_s = std::string{var.get("register_max_bits", "0")};
@@ -913,6 +971,18 @@ void Pass_abc::map_with(Eprp_var& var, const std::function<void(livehd::abc::Map
     if (ec != std::errc{} || p != e || icg_fanout == 1 || icg_fanout > std::numeric_limits<uint32_t>::max()) {
       livehd::diag::err("pass.abc", "bad-icg-fanout", "syntax")
           .msg("pass.abc.icg_fanout '{}' must be 0 (off) or an integer >= 2", s)
+          .fatal();
+    }
+  }
+  // Same contract as icg_fanout: 0 (off) or a tree that can shrink, never a silent fallback.
+  uint64_t reset_fanout = 0;
+  if (auto s = std::string{var.get("reset_fanout", "0")}; !s.empty()) {
+    const char* b = s.data();
+    const char* e = s.data() + s.size();
+    auto [p, ec]  = std::from_chars(b, e, reset_fanout);
+    if (ec != std::errc{} || p != e || reset_fanout == 1 || reset_fanout > std::numeric_limits<uint32_t>::max()) {
+      livehd::diag::err("pass.abc", "bad-reset-fanout", "syntax")
+          .msg("pass.abc.reset_fanout '{}' must be 0 (off) or an integer >= 2", s)
           .fatal();
     }
   }
@@ -1056,10 +1126,12 @@ void Pass_abc::map_with(Eprp_var& var, const std::function<void(livehd::abc::Map
   opts.max_fanout        = static_cast<uint32_t>(max_fanout);
   opts.icg_fanout        = static_cast<uint32_t>(icg_fanout);
   opts.input_clock_min   = static_cast<uint32_t>(input_clock_min);
+  opts.reset_fanout      = static_cast<uint32_t>(reset_fanout);
   opts.area_relax_pct    = static_cast<uint32_t>(area_relax_pct);
   opts.area_flow         = area_flow;
   opts.reg_margin        = reg_margin;
   opts.large_flow        = large_flow;
+  opts.large_flow_latches = truthy(var.get("large_flow_latches", "false")) && large_flow == kDefaultLargeFlow;
   opts.large_ge          = large_ge;
   opts.ware_max_cells    = ware_max_cells;
   opts.map_register      = map_register;
@@ -1173,11 +1245,37 @@ void Pass_abc::map_with(Eprp_var& var, const std::function<void(livehd::abc::Map
   for (const auto& [color, ro] : region_opts) {
     option_colors.insert(color);
   }
-  auto ware_modules = livehd::synth::build_ware_modules(scratch_graphs, ware_policy, option_colors);
+  // Order matters only for memory_prune_reads: it reads the shapes that feed a
+  // memory's ports (a cprop `cond * lanes` enable, a constant lane pattern),
+  // which a ware extraction would turn into an opaque instance. Without it the
+  // historical order (ware first) is unchanged.
+  std::vector<livehd::synth::Memory_row>      memory_table;
+  std::vector<std::shared_ptr<hhds::Graph>>   memory_modules, ware_modules;
+  if (memory_prune_reads) {
+    memory_modules = livehd::synth::build_memory_modules(scratch_graphs, opts.memory_fold, opts.memory_max_bits, &memory_table, true);
+    ware_modules   = livehd::synth::build_ware_modules(scratch_graphs, ware_policy, option_colors, ware_zero_bits);
+  } else {
+    ware_modules   = livehd::synth::build_ware_modules(scratch_graphs, ware_policy, option_colors, ware_zero_bits);
+    memory_modules = livehd::synth::build_memory_modules(scratch_graphs, opts.memory_fold, opts.memory_max_bits, &memory_table);
+  }
   resolve_graphs.insert(resolve_graphs.end(), ware_modules.begin(), ware_modules.end());
-  std::vector<livehd::synth::Memory_row> memory_table;
-  auto memory_modules = livehd::synth::build_memory_modules(scratch_graphs, opts.memory_fold, opts.memory_max_bits, &memory_table);
   resolve_graphs.insert(resolve_graphs.end(), memory_modules.begin(), memory_modules.end());
+  if (var.get("state_sweep", "false") == "true" && !memory_modules.empty()) {
+    // A lowered memory is flops behind a read mux: a column no reader looks at is unobserved state like any other,
+    // and only now is it visible (the first sweep ran before the memories became modules).
+    if (const auto swept = livehd::synth::sweep_unobserved_state(resolve_graphs, top, nullptr);
+        swept && swept->registers_removed + swept->registers_trimmed + swept->registers_split + swept->cells_removed > 0) {
+      livehd::diag::info("pass.abc", "state-swept-memory", "progress")
+          .msg("pass.abc: state sweep of the lowered memories removed {} unobserved register(s) and {} cell(s), narrowed {} and "
+               "split {} register(s), dropping {} unobserved register bit(s)",
+               swept->registers_removed,
+               swept->cells_removed,
+               swept->registers_trimmed,
+               swept->registers_split,
+               swept->trimmed_bits)
+          .emit();
+    }
+  }
 
   auto& outlib = livehd::Hhds_graph_library::instance(out);
 

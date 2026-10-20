@@ -1,0 +1,61 @@
+;; cost/synth.cost: the hardware profile. A price is roughly the number of two-input gates the node costs after
+;; technology-independent mapping, per result width W, so it is WIDTH-AWARE (W is the driver stamp, else the range
+;; analysis, else :default-width). The extractor counts a class with several readers once (SHARING-AWARE), so
+;; low-lane narrowing, mux sharing and operator sharing are not undone.
+;;
+;; Wiring is free: a bit select, a sign extension, a concatenation, a shift by a constant and a window write
+;; (Set_mask) only move wires. That is the whole reason this profile exists: x << k always beats x * 2^k.
+;; Syntax and variables: rulegen/cost_model.hpp. First matching entry wins; the last entry is the catch-all.
+
+(profile synth
+  :default-width 32
+  :doc "Two-input gate equivalents; wiring is free; width-aware.")
+
+;; ---- wiring
+(cost synth Get_mask 0 :doc "bit select: wires")
+(cost synth Set_mask 0 :doc "window write: wires")
+(cost synth Sext 0)
+(cost synth Concat 0)
+(cost synth (SHL _ (k)) 0 :doc "shift by a constant: wires")
+(cost synth (SRA _ (k)) 0)
+(cost synth SHL (* 3 W (clog2 (max 2 W))) :doc "barrel shifter: log2(W) mux layers")
+(cost synth SRA (* 3 W (clog2 (max 2 W))))
+
+;; ---- bitwise
+(cost synth Not (div W 4) :doc "inverters fold into the neighbouring gates")
+(cost synth And (* (- A 1) W))
+(cost synth Or (* (- A 1) W))
+(cost synth Xor (* 2 (- A 1) W))
+(cost synth Ror (max 0 (- Wsum 1)))
+(cost synth Rxor (* 2 (max 0 (- Wsum 1))))
+(cost synth Popcount (* 5 Wmax))
+
+;; ---- arithmetic
+(cost synth (Sum (k) ..) :when (< A 3) (* 2 W) :doc "x + const: half adders")
+(cost synth Sum (* 5 (- A 1) W) :doc "one full adder per bit and extra operand")
+(cost synth (Mult (k c) ..) :when (pow2? (abs c)) 0 :doc "x * 2^k: wires")
+(cost synth (Mult (k c) ..) (* 5 W (max 0 (- (popcount (abs c)) 1))) :doc "shift-add: one adder per extra set bit")
+(cost synth Mult (* 6 Wmax (- Wsum Wmax)) :doc "array multiplier")
+(cost synth (Div _ (k c)) :when (pow2? c) (* 2 W) :doc "shift plus the rounding fix of a signed dividend")
+(cost synth (Rem _ (k c)) :when (pow2? c) (* 2 W))
+(cost synth (Div _ (k)) (* 12 W) :doc "constant divisor: the divider array specializes")
+(cost synth (Rem _ (k)) (* 12 W))
+(cost synth Div (* 6 W W) :doc "restoring divider")
+(cost synth Rem (* 6 W W))
+
+;; ---- compare
+(cost synth (EQ (k) ..) (max 0 (- Wmax 1)) :doc "an and-tree over the bits of the difference")
+(cost synth EQ (* 3 Wmax (- A 1)))
+(cost synth (LT _ (k)) (* 2 Wmax))
+(cost synth (GT _ (k)) (* 2 Wmax))
+(cost synth LT (* 3 Wmax))
+(cost synth GT (* 3 Wmax))
+
+;; ---- selection
+(cost synth (Mux _ (k) _) W :doc "a constant arm turns the mux into one and/or gate per bit")
+(cost synth (Mux _ _ (k)) W)
+(cost synth (Mux _ _ _) (* 3 W) :doc "one 2:1 mux per bit")
+(cost synth Mux (* 3 W (max 1 (- A 2))) :doc "n-ary: A - 2 mux layers")
+(cost synth Hotmux (* 2 W (div (+ A 1) 2)) :doc "and-or per arm")
+
+(cost synth _ W)

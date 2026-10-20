@@ -17,6 +17,18 @@ turns every `stop_*` off so a color runs register to register. An explicit
 Primary-input sharing now counts as cone overlap. See the
 [lhdtrack cones QoR task](../todo/livehd/2d-cones-qor.html) for the measurements
 and the selected per-PDK benchmark profiles, including `stop_mux=false` for Sky130.
+**2026-10-19 (cone duplication on wide datapath muxes):** on HighTide
+NyuziProcessor (asap7) the default `stop_mux=true` duplicates the select cone
+of every cut mux into each consuming region (`writeback_stage` 74,338 cells vs
+5,640 with `stop_mux=false`; whole design, synth only, 877,679 logic cells vs
+687,114 with `stop_mux=false` and 625,029 with `mode=synth`, reference 357,202).
+Harness (pre-CTS, OpenSTA, same other options): `stop_mux=false` gave 730,707
+cells, WNS -41.8 ns, TNS -78.1e6 ps; the default coloring gave 921,272 cells,
+WNS -26.7 ns, TNS -140.7e6 ps; `mode=synth` gave 668,622 cells but WNS -141.6 ns,
+so it is a cell-count knob only. Timing on this design is dominated by
+unbuffered high-fanout wires, not by the mapped logic. See `pass/abc/README.md`
+(`memory_prune_reads`, `ware_zero_bits`) and `pass/sweep/README.md` for the
+other inflation fixes found on the same design.
 
 **Deliverable of this document:** a repeatable loop, not a fixed feature list.
 Sections 4–6 are one-time setup (a trustworthy measurement contract); sections
@@ -350,6 +362,8 @@ today, for the record:
 | `pass.abc.register` | `true` (flops map to Liberty DFF cells) | `pass_abc.cpp` (`register`) |
 | `pass.abc.memory` | `auto` (fold a memory within `memory_max_bits`, or over 3 ports whatever the size) | `pass_abc.cpp` (`memory`) |
 | `pass.abc.memory_max_bits` | `1024` | `pass_abc.cpp` (`memory_max_bits`) |
+| `pass.abc.memory_prune_reads` | `false` (clear unobserved read-port bits and feed provably-zero input bits as constants in a lowered memory) | `pass_abc.cpp` (`memory_prune_reads`), `memory_module.cpp`, `bit_facts.cpp` |
+| `pass.abc.ware_zero_bits` | `false` (clear provably-zero data bits of a ware shifter inside its module) | `pass_abc.cpp` (`ware_zero_bits`), `ware_module.cpp`, `bit_facts.cpp` |
 | `pass.color.synth.mode` | **`cones`** (`cones` \| `synth` \| `pipe`) | `pass_color.cpp` (`mode`) |
 | `pass.color.synth.mapper` | `abc` (`lhd synth` sets it from `synth.mapper`); picks the `stop_*` default profile | `pass_color.cpp` (`mapper`) |
 | `pass.color.synth.stop_{mux,arith,cmp,shift}` | `true` under `mapper=abc`, `false` under `mapper=usyn`; an explicit value wins | `pass_color.cpp` (`stop_*`) |

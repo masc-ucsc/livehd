@@ -40,6 +40,13 @@
 #                         `lhd compile` output is part of that text too (the ref
 #                         side's is not -- a grep is a claim about the variant)
 #   :lec_grep_not: REGEX  must NOT appear in the lec output (repeatable)
+#   :compile_grep: REGEX  must appear in the IMPL side's own `lhd compile` output, its
+#                         per-pass logs included (repeatable). A claim about how the variant
+#                         COMPILED, not about how it was proven: e.g. that a rewrite rule fired
+#                         (`:compile_grep: aegraph-rule not_not .*extracted=[1-9]`, which is how
+#                         an aegraph rule's fixture shows the rule did the work). It forces the
+#                         per-side pre-compile (the impl log only exists then) and turns on
+#                         `lhd.stats=true` for the impl compile so the pass census records exist
 #
 # Run one group by hand (base = every variant, or name a single variant):
 #
@@ -167,7 +174,7 @@ class _Side:
         self.arg   = ('pyrope:' if src.endswith('.prp') else 'verilog:') + src   # replaced by `lg:<dir>` when pre-compiled
 
 
-def _precompile(runner, tmp_dir, side, top, odir):
+def _precompile(runner, tmp_dir, side, top, odir, forced=False):
     """Elaborate one side into its own `lg:` library (needed only when the two
     sides disagree on COMPILE flags — a single `lhd lec --set` cannot).
 
@@ -179,9 +186,18 @@ def _precompile(runner, tmp_dir, side, top, odir):
     # replays the graph without running the front end, and then nothing the
     # front end would have said (a `roll declined`) is there to grep.
     wdir = odir + '_w'
-    cmd = [runner.lhd, 'compile', side.src, '--top', top,
-           '--emit-dir', 'lg:' + odir, '--workdir', wdir] + _set_args(_merge_sets(['lhd.incremental=false'], side.sets, runner.equiv_sets))
+    def compile_cmd(more=()):
+        return [runner.lhd, 'compile', side.src, '--top', top,
+                '--emit-dir', 'lg:' + odir, '--workdir', wdir] + _set_args(
+                    _merge_sets(['lhd.incremental=false'], side.sets, runner.equiv_sets, more))
+    cmd = compile_cmd()
     rc, log = _run(cmd, tmp_dir)
+    if rc != 0 and forced and 'assume is refuted' in log:
+        # Harness-forced pre-compile only (see _run_pair): a standalone compile checks
+        # an `assume` over free inputs in isolation, where the pair's LEC would take it
+        # as a premise. Retry with the premise unchecked, as `lhd lec` reads it.
+        cmd = compile_cmd(['formal.assume_check=false'])
+        rc, log = _run(cmd, tmp_dir)
     # A pass's own chatter goes to the workdir's per-pass log, not the console.
     for f in sorted(globmod.glob(os.path.join(tmp_dir if not os.path.isabs(wdir) else '', wdir, 'logs', '*.log'))):
         try:
@@ -259,6 +275,18 @@ def _run_pair(runner, tmp_dir, base_test, var_test, verbose=False):
     # A variant that declares no `:set:` of its own inherits the base's, so the
     # two sides differ in exactly the way the variant says they do.
     impl = _Side('impl', var_src, _sets(var_test) if var_test.params.get('set') else ref.sets)
+    # Harness-wide compile sets (--aegraph / LHD_PRP_COMPILE_SETS) go to the IMPL
+    # side only, which makes the two sides differ and pre-compiles each: the
+    # reference stays the classic compile, so a pair proves "engine == classic".
+    forced = False
+    if runner.compile_sets:
+        if impl.sets == ref.sets:
+            # The pair would have gone to `lhd lec` as two sources, where an
+            # `assume` is a premise of the proof. Pre-compiling each side makes it a
+            # standalone compile, whose own check refuses an assume that a free input
+            # falsifies (`assume(a != 3)`), so the premise rides to the LEC instead.
+            forced = True
+        impl.sets = _merge_sets(impl.sets, runner.compile_sets)
 
     # Same flags on both sides -> hand the .prp files straight to `lhd lec` and
     # let its own elaboration carry those flags (this also exercises lec's
@@ -272,12 +300,27 @@ def _run_pair(runner, tmp_dir, base_test, var_test, verbose=False):
     # BECAUSE their flags differ, so that is the common case, not a corner one.
     impl_log = ''
     ref_log  = ''
+    compile_greps = _tags(base_test, 'compile_grep') + _tags(var_test, 'compile_grep')
+    if compile_greps and runner.compile_sets:
+        # A harness-wide compile override (--aegraph / LHD_PRP_COMPILE_SETS) that replaces a flag the
+        # variant sets itself changes WHAT is compiled: the variant's claim about its own flags no
+        # longer describes the run, so the grep is skipped (the pair is still LEC'd).
+        forced = dict(tok.split('=', 1) for tok in runner.compile_sets if '=' in tok)
+        lost = [tok for tok in _sets(var_test) if '=' in tok and tok.split('=', 1)[0] in forced
+                and forced[tok.split('=', 1)[0]] != tok.split('=', 1)[1]]
+        if lost:
+            print('{} - note: :compile_grep: skipped, the harness override replaces {}'.format(name, ' '.join(lost)))
+            compile_greps = []
+    if compile_greps:
+        # A grep on the compile output needs that output: compile the sides separately, and ask
+        # the impl compile for the pass census records (`lhd.stats`).
+        impl.sets = _merge_sets(impl.sets, ['lhd.stats=true'])
     if impl.sets != ref.sets:
         # Different compile flags per side: one `lhd lec --set` cannot say two
         # things, so each side is compiled into its own library first.
         shared_compile = []
         for side in (ref, impl):
-            err, log = _precompile(runner, tmp_dir, side, top, os.path.join(scratch, side.label))
+            err, log = _precompile(runner, tmp_dir, side, top, os.path.join(scratch, side.label), forced)
             if err:
                 print('{} - lec - FAILED: {}'.format(name, err))
                 return 1
@@ -306,6 +349,11 @@ def _run_pair(runner, tmp_dir, base_test, var_test, verbose=False):
             print(out)
 
         why  = _check(impl_log + out, rc, expect, base_test, var_test)
+        if not why:
+            for pat in compile_greps:
+                if not re.search(pat, impl_log):
+                    why = 'the impl compile output never matched :compile_grep: {}'.format(pat)
+                    break
         what = '{} vs {}{}'.format(os.path.basename(base), name,
                                    ' [' + ' '.join(combo) + ']' if combo else '')
         if why:

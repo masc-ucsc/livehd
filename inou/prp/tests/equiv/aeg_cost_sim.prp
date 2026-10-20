@@ -1,0 +1,16 @@
+/*
+:name: aeg_cost_sim
+:type: lec
+*/
+// PYROPE-vs-PYROPE group, the fixture of the cost profile choice (pass/aegraph/cost/*.cost, milestone I): a divide
+// by a constant has a multiply-shift alternative (div_mulshift8 / 16 / 31, rules/div.rules) that the `sim` profile
+// prices below the divide (the LLVM backend emits a multiply-high; `lhd sim` is the target) and the default
+// `synth` profile does not (the divider array specializes on a constant divisor and measured smaller than the
+// multiplier of the magic constant). Whatever the profile picks must be equal to the classic reference.
+// `aeg_cost_sim_1.prp` is the same source under the default profile, `aeg_cost_sim_2.prp` under `sim`.
+pub comb top(a:U8, b:U16, s:S8) -> (q1:U5, q2:U15, q3:U6, q4:S8) {
+  q1 = a / 10
+  q2 = b / 3
+  q3 = a / 7
+  q4 = s / 3
+}

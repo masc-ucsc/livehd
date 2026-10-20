@@ -266,12 +266,12 @@ constexpr int                 kConcatPackFanInLimit = 4096;
 // "Is `op` a COMPUTED combinational cell (as opposed to an IO/state/Sub/const/
 // attr boundary)?"
 //
-// Ntype::is_comb minus two deliberate exclusions. Clock_cell is a clock-network
-// operator, never folded or CSE'd as data. Rem is combinational too but every
-// site below has its own measured reason to keep it out (see is_bool01 and
-// canonicalize_and_masks).
+// Ntype::is_comb minus Clock_cell, a clock-network operator that is never
+// folded or CSE'd as data. Div and Rem are pure (Q2: x/0 and x%0 are the
+// all-unknown value, never a trap), so they are hash-consed and CSE'd like any
+// other op; cprop_opshare.cpp's shape_of lists both for the same reason.
 [[nodiscard]] constexpr bool is_computed_comb_op(Ntype_op op) {
-  return Ntype::is_comb(op) && op != Ntype_op::Rem && op != Ntype_op::Clock_cell;
+  return Ntype::is_comb(op) && op != Ntype_op::Clock_cell;
 }
 
 using livehd::cprop_value::is_bool01;
@@ -3561,6 +3561,16 @@ bool Cprop::merge_concat_slices(hhds::Node_class& node) {
 }
 
 bool Cprop::indexed_get_mask(hhds::Node_class& node, hhds::Pin_class source, int lo, int hi) {
+  // A stamp narrower than the window is a proof (pass.bitwidth): the bits above it are zero. The node may become a
+  // Concat of its window's lanes, and a lane table wider than the stamp would overflow the lane window of the
+  // Concat that reads this node ("a lane driver may only be NARROWER than its window"), so read only the stamped
+  // bits. After the first bitwidth this is reachable whenever a packed read survived the first cprop slot.
+  if (const auto out = node.get_driver_pin(0); !out.is_invalid()) {
+    const auto stamped = livehd::graph_util::bits_of(out);
+    if (stamped > 0 && livehd::graph_util::is_unsign(out) && stamped < hi - lo) {
+      hi = lo + stamped;
+    }
+  }
   if (!source.is_const() && type_op_of(source.get_master_node()) == Ntype_op::Or
       && !livehd::cprop_value::active->wiring.has_layout(source)) {
     livehd::cprop_value::remember(source.get_master_node());
@@ -4119,20 +4129,8 @@ void Cprop::scalar_node(hhds::Node_class& node) {
   // between Mux (36) and IO (39) and IS handled (const one-hot selector fold,
   // same-arm collapse); Concat sits ABOVE the boundary band by encoding
   // accident and is handled too (all-const lane fold) -- see
-  // is_computed_comb_op.
-  //
-  // Rem stays out of the generic scalar rules and CSE (is_computed_comb_op),
-  // but its own folds run here: the P4 lone operand (collapse_single_input_divrem),
-  // Q2 x%0, and the all-constant fold. Without this they were unreachable.
-  if (op == Ntype_op::Rem) {
-    if (node.has_out_edges()) {
-      auto inputs = ordered_inp_edges(node);
-      if (!collapse_single_input_divrem(node, inputs)) {
-        (void)try_constant_prop(node, inputs);
-      }
-    }
-    return;
-  }
+  // is_computed_comb_op. Div and Rem are ordinary computed ops here: their P4/Q2
+  // folds run inside try_constant_prop like every other all-constant fold.
   if (!is_computed_comb_op(op)) {
     return;
   }
@@ -4277,6 +4275,34 @@ static void fold_constant_flop_enables(hhds::Graph* graph) {
   }
 }
 
+// The region passes that follow the forward scalar sweep, in classic order.
+// pass.aegraph reuses them verbatim as its post steps (vector-mux narrowing,
+// muxctx, flop-enable folding, ...) until each becomes a native rule, so the
+// two engines share ONE implementation. Needs current_graph and an active
+// cprop_value::Facts scope whose per-node facts (remember_node) are primed.
+void Cprop::region_passes() {
+  // Consumer-side ownership absorbs each private write suffix once. Delaying
+  // layout emission preserves the Set_mask shape used by mux lane factoring.
+  auto packs = storage_nodes(current_graph);
+  for (auto it = packs.rbegin(); it != packs.rend(); ++it) {
+    canonicalize_concat_pack(current_graph, *it);
+  }
+  vectorize_bit_muxes();
+  livehd::muxctx::prune(*current_graph, decode_bool_condition, is_bool01);
+  mux_op_share_pass();
+  mux_share_pass();
+  vectorize_bit_reductions();
+  // Concats containing vectorized lanes are the explicit consumers affected
+  // by region emission. This visits lane operands once, with no scalar retry.
+  for (auto node : storage_nodes(current_graph)) {
+    if (!node.is_invalid() && type_op_of(node) == Ntype_op::Concat) {
+      merge_concat_slices(node);
+    }
+  }
+  fold_constant_flop_enables(current_graph);
+  cleanup_dead_nodes(current_graph);
+}
+
 void Cprop::do_trans(const std::shared_ptr<hhds::Graph>& g) {
   if (!g) {
     return;
@@ -4306,26 +4332,90 @@ void Cprop::do_trans(const std::shared_ptr<hhds::Graph>& g) {
   facts.wiring.set_edge_budget(edge_budget);
   facts.inspection_budget = edge_budget;
   cse_pass(order);
-  // Consumer-side ownership absorbs each private write suffix once. Delaying
-  // layout emission preserves the Set_mask shape used by mux lane factoring.
-  auto packs = storage_nodes(current_graph);
-  for (auto it = packs.rbegin(); it != packs.rend(); ++it) {
-    canonicalize_concat_pack(current_graph, *it);
+  region_passes();
+  current_graph = nullptr;
+}
+
+// pass.aegraph's post steps: the classic region passes over a graph the
+// e-graph engine already elaborated. The forward sweep (scalar rules + CSE) is
+// NOT run -- that is the engine's job -- so the per-node facts the region
+// passes read are primed here, one cheap visit per node.
+void Cprop::do_post(const std::shared_ptr<hhds::Graph>& g) {
+  if (!g) {
+    return;
   }
-  vectorize_bit_muxes();
-  livehd::muxctx::prune(*current_graph, decode_bool_condition, is_bool01);
-  mux_op_share_pass();
-  mux_share_pass();
-  vectorize_bit_reductions();
-  // Concats containing vectorized lanes are the explicit consumers affected
-  // by region emission. This visits lane operands once, with no scalar retry.
-  for (auto node : storage_nodes(current_graph)) {
-    if (!node.is_invalid() && type_op_of(node) == Ntype_op::Concat) {
-      merge_concat_slices(node);
+  livehd::cprop_value::Facts facts;
+  livehd::cprop_value::Scope fact_scope(facts);
+  current_graph          = g.get();
+  const auto order       = stable_nodes(current_graph);
+  size_t     edge_budget = 0;
+  for (auto node : order) {
+    for ([[maybe_unused]] auto input : node.inp_sorted_pins()) {
+      ++edge_budget;
     }
   }
-  fold_constant_flop_enables(current_graph);
-  cleanup_dead_nodes(current_graph);
+  facts.wiring.set_edge_budget(edge_budget);
+  facts.inspection_budget = edge_budget;
+  const auto generation = [&](const hhds::Node_class& node) {
+    const auto it = facts.generations.find(node.get_class_index());
+    return it == facts.generations.end() ? uint64_t{0} : it->second;
+  };
+  for (auto node : order) {
+    // A handle low_lane retired and recycled for a fresh node is not ours to visit.
+    if (node.is_invalid() || generation(node) != 0) {
+      continue;
+    }
+    if (low_lanes_ && is_computed_comb_op(type_op_of(node)) && node.has_out_edges()) {
+      low_lane(node);
+    }
+    if (!node.is_invalid()) {
+      remember_node(node);
+    }
+  }
+  region_passes();
+  current_graph = nullptr;
+}
+
+void Cprop::do_scalar(const std::shared_ptr<hhds::Graph>& g, const std::vector<hhds::Node_class>& nodes) {
+  if (!g || nodes.empty()) {
+    return;
+  }
+  livehd::cprop_value::Facts facts;
+  livehd::cprop_value::Scope fact_scope(facts);
+  current_graph          = g.get();
+  const auto order       = stable_nodes(current_graph);
+  size_t     edge_budget = 0;
+  for (auto node : order) {
+    for ([[maybe_unused]] auto input : node.inp_sorted_pins()) {
+      ++edge_budget;
+    }
+  }
+  facts.wiring.set_edge_budget(edge_budget);
+  facts.inspection_budget = edge_budget;
+  // The facts the rewrites read (ranges, layouts, conditions) come from every
+  // producer, so prime them over the whole body first, as the forward sweep
+  // would have by the time it reached these nodes.
+  for (auto node : order) {
+    if (!node.is_invalid()) {
+      remember_node(node);
+    }
+  }
+  const auto generation = [&](const hhds::Node_class& node) {
+    const auto it = facts.generations.find(node.get_class_index());
+    return it == facts.generations.end() ? uint64_t{0} : it->second;
+  };
+  for (auto node : nodes) {
+    // A handle may have been retired and recycled by an earlier rewrite; a node
+    // minted in this call carries a generation and is not ours to revisit.
+    if (node.is_invalid() || generation(node) != 0) {
+      continue;
+    }
+    canonicalize_and_mask(node);
+    scalar_node(node);
+    if (!node.is_invalid()) {
+      remember_node(node);
+    }
+  }
   current_graph = nullptr;
 }
 

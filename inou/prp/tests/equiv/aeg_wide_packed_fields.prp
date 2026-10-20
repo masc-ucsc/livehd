@@ -1,0 +1,18 @@
+/*
+:name: aeg_wide_packed_fields
+:type: lec
+*/
+// PYROPE-vs-PYROPE group, the fixture of the wide-lane fix of the aegraph lane layout (pass/aegraph/runtime/analyses.cpp):
+// a packed Or whose fields are wider than the 99-bit interval facts (a 10400-bit input bundle under two flag fields
+// shifted past bit 4096, the shape of XiangShan's io_diffCommits) still has a lane layout, so every window read goes
+// straight to the field it lands in instead of keeping the 10921-bit pack alive. REFERENCE = classic engine; `_1` =
+// e-graph engine.
+pub comb top(a:U1, v:U8, info:U10400) -> (o0:U1, o1:U1, o2:U1, o3:U4, o4:U1, o5:U8) {
+  const w = (a << 0x2aa8) | (v << 0x28a0) | info
+  o0 = w#[0x28a0..<0x28a8]#[1..<2]
+  o1 = w#[0x2aa8..<0x2aa9] & w#[0x28a0..<0x28a8]#[2..<3]
+  o2 = w#[40..<41]
+  o3 = w#[100..<104]
+  o4 = w#[0x28a7..<0x28a8]
+  o5 = w#[0x28a0..<0x28a8]
+}

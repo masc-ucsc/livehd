@@ -56,6 +56,9 @@ public:
     // Resetless power-on init values are dropped (plain DFF cell) instead of kept
     // on a native flop; pass.abc.drop_init.
     bool                                    drop_init = false;
+    // Asynchronous-reset buffer-tree fan-out cap: clear/preset pins per buffer (0: no tree;
+    // Driver_options::reset_fanout).
+    uint32_t                                reset_fanout = 0;
   };
 
   void set_outlib(hhds::GraphLibrary* outlib) { outlib_ = outlib; }

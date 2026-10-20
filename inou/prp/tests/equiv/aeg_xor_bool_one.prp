@@ -1,0 +1,14 @@
+/*
+:name: aeg_xor_bool_one
+:type: lec
+*/
+// PYROPE-vs-PYROPE group, the fixture of the aegraph rule `xor_bool_one`
+// (pass/aegraph/rules/arith.rules): `x ^ 1 = EQ(x, 0)` for a 0/1 value x. tolg
+// lowers `a != 0` to `(a == 0) ^ 1`, a Xor over a comparison, so the rule's
+// 0/1 guard (bool01) holds. This is the REFERENCE, compiled by the classic
+// engine; `aeg_xor_bool_one_1.prp` is the same source compiled by the e-graph
+// engine, which must prove equal AND must have made the rule do the work.
+pub comb top(a:U8, b:U8) -> (y:Bool, z:Bool) {
+  y = a != 0
+  z = (a == b) != true
+}

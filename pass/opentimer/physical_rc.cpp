@@ -75,8 +75,13 @@ void Pass_opentimer::apply_physical_rc(const std::shared_ptr<hhds::Graph>& graph
   }
   validate_physical_rc(graph);
   timer.update_timing();  // materialize queued pin/net builders before matching identities
+  if (previous_physical_rc_ && previous_physical_rc_->nets == physical_rc_->nets) {
+    physical_updated_nets_ = 0;
+    return;  // Master changes retain pin identities; unchanged wire RC stays attached.
+  }
   std::map<std::string, std::string> ports;
-  std::map<std::string, std::string> instances;
+  std::map<std::string, std::string> instances = physical_instances_;
+  physical_timing_pins_.clear();
   for (auto node : graph->body().nodes()) {
     if (!node.get_subnode_io() && livehd::graph_util::type_op_of(node) != Ntype_op::Memory) {
       continue;
@@ -110,10 +115,18 @@ void Pass_opentimer::apply_physical_rc(const std::shared_ptr<hhds::Graph>& graph
     }
     return physical;
   };
+  std::map<std::string, const livehd::physical::Rc_net*> previous;
+  if (previous_physical_rc_) {
+    for (const auto& net : previous_physical_rc_->nets) {
+      previous.emplace(net.driver, &net);
+    }
+  }
   spef::Spef data;
   data.capacitance_unit = "1 FF";
   data.resistance_unit  = "1 OHM";
   for (const auto& net : physical_rc_->nets) {
+    const auto old                    = previous.find(net.driver);
+    const bool unchanged              = old != previous.end() && *old->second == net;
     const auto root                   = timer_pin(net.driver);
     physical_timing_pins_[net.driver] = root;
     const auto driver                 = timer.pins().find(root);
@@ -139,9 +152,14 @@ void Pass_opentimer::apply_physical_rc(const std::shared_ptr<hhds::Graph>& graph
       if (!std::isfinite(node.capacitance_ff) || node.capacitance_ff < 0) {
         throw std::invalid_argument("invalid placement capacitance");
       }
-      nodes.push_back(label);
-      mapped.caps.emplace_back(label, "", node.capacitance_ff);
-      mapped.lcap += node.capacitance_ff;
+      if (!unchanged) {
+        nodes.push_back(label);
+        mapped.caps.emplace_back(label, "", node.capacitance_ff);
+        mapped.lcap += node.capacitance_ff;
+      }
+    }
+    if (unchanged) {
+      continue;
     }
     for (const auto& edge : net.edges) {
       if (edge.from >= nodes.size() || edge.to >= nodes.size() || !std::isfinite(edge.resistance_ohm) || edge.resistance_ohm < 0) {
@@ -151,5 +169,8 @@ void Pass_opentimer::apply_physical_rc(const std::shared_ptr<hhds::Graph>& graph
     }
     data.nets.push_back(std::move(mapped));
   }
-  timer.read_parasitics(std::move(data));
+  physical_updated_nets_ = data.nets.size();
+  if (!data.nets.empty()) {
+    timer.read_parasitics(std::move(data));
+  }
 }

@@ -331,3 +331,30 @@ The native wire model still uses total capacitance and an Elmore/moment response
 It differs from OpenSTA's effective-capacitance waveform calculator even with
 identical RC. Keep this modeling difference separate from Liberty/constraint
 errors and from differences between placement RC estimators.
+
+## Placement feedback in memory
+
+`livehd::opentimer::Physical_session` owns one OpenTimer for a placement flow.
+Construct it with the Liberty/SDC options, then call `evaluate(graph, rc)` with
+its flat mapped graph and placement parasitics. It returns
+`livehd::timing::Feedback` directly, including physical-pin timing, electrical
+violations, area, endpoint WNS/TNS and the path used by physical repair.
+No timing JSON is generated, written or read by this interface. Explicit
+standalone timing reports remain output artifacts, separate from feedback.
+
+The session loads Liberty and SDC once. Later evaluations apply gate repowering,
+buffer insertion/removal, connectivity changes and changed RC nets to the same
+timer. Cell identities use physical instance names, independent of scratch-graph
+node indices. Evaluating the retained placement after a rejected candidate
+reverses its deltas; it does not assume that the last timed candidate was kept.
+Parasitic snapshots supplied to the session must remain immutable. A changed
+snapshot is a new `Parasitics` object, as produced by the placement RC estimator.
+Top-level ports and native memory/state boundaries remain the same during the
+session. Synthesis criticality-color annotation and external SPEF use the
+standalone pass rather than this physical-feedback interface.
+
+This is incremental timing within a running optimization. It is independent of
+the on-disk STA result cache used by separate CLI invocations. The session's
+statistics count builds, evaluations, edited gates, updated RC nets and timing
+wall time without per-evaluation report files. Edit counters include candidate
+trials and rollback operations; they are not final netlist change counts.

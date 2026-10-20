@@ -1,0 +1,8 @@
+/*
+:name: aeg_wide_gather_1
+:type: lec
+:set: compile.cprop.engine=aegraph
+:compile_grep: aegraph-rule or_shifted_windows .*extracted=[1-9]
+*/
+// HEADER-ONLY variant: aeg_wide_gather.prp compiled by the acyclic e-graph engine; the grep shows `or_shifted_windows`
+// packed the gather and the extraction kept its result.

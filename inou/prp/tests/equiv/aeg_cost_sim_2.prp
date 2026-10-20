@@ -1,0 +1,8 @@
+/*
+:name: aeg_cost_sim_2
+:type: lec
+:set: compile.cprop.engine=aegraph compile.aegraph.cost=sim
+:compile_grep: aegraph-rule div_mulshift(8|16|31) .*extracted=[1-9]
+*/
+// HEADER-ONLY variant: aeg_cost_sim.prp compiled by the e-graph engine under the `sim` cost profile: the unsigned
+// dividends are bounded by their declared widths, so a / 10, a / 7 and b / 3 take the multiply-shift.

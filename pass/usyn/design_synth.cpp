@@ -153,7 +153,9 @@ Design_result synthesize_cmos_design(const std::shared_ptr<hhds::Graph>& top, co
     return work.spend(amount);
   };
   const std::array roots{top};
-  auto             prepared = synth::prepare_design(roots, options.unroll_carry, "pass.usyn", &preparation, options.specialize);
+  const synth::State_options state{
+      .state_sweep = options.state_sweep, .merge_registers = options.merge_registers, .top = top->get_name()};
+  auto prepared = synth::prepare_design(roots, options.unroll_carry, "pass.usyn", &preparation, options.specialize, false, state);
   if (!prepared) {
     if (preparation.refused) {
       exhausted();

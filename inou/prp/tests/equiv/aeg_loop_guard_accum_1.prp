@@ -1,0 +1,7 @@
+/*
+:name: aeg_loop_guard_accum_1
+:type: lec
+:set: compile.cprop.engine=aegraph
+:compile_grep: aegraph-rule mux_guard_accumulation .*applied=[1-9]
+*/
+// HEADER-ONLY variant: aeg_loop_guard_accum.prp compiled by the acyclic e-graph engine.
