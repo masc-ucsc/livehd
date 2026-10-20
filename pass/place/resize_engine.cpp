@@ -205,6 +205,7 @@ struct Move {
   std::vector<std::string>                           sinks;
   const Buffer*                                      buffer = nullptr;
   Point                                              at{};
+  std::vector<Point>                                 chain;  // repeater chain seeds, driver to sink
   std::vector<std::pair<std::string, const Buffer*>> downs;
   [[nodiscard]] bool                                 adds_cells() const { return kind == Kind::isolate || kind == Kind::repeater; }
 };
@@ -756,7 +757,45 @@ private:
         return 1;
       }
     }
-    return build_tree(driver, nets_.at(driver), 0, owner, created) ? 1 : 0;
+    if (nets_.at(driver).size() >= 4 && build_tree(driver, nets_.at(driver), 0, owner, created)) {
+      return 1;
+    }
+    return wire_repair(driver, created) ? 1 : 0;
+  }
+  // A long wire to few sinks: a repeater chain toward the farthest sink.
+  bool wire_repair(const std::string& driver, std::vector<std::string>& created) {
+    const auto& sinks = nets_.at(driver);
+    if (sinks.empty()) {
+      return false;
+    }
+    const Point d   = position(driver);
+    std::string far = sinks.front();
+    for (const auto& s : sinks) {
+      if (manhattan(d, position(s)) > manhattan(d, position(far))) {
+        far = s;
+      }
+    }
+    Stage st;
+    st.driver     = driver;
+    st.sink       = far;
+    st.inst       = instance_of(driver);
+    const auto td = w_.pin(driver);
+    st.at_out     = td.arrival.value_or(0);
+    st.slew_out   = td.slew.value_or(0);
+    st.at_sink    = std::max(w_.pin(far).arrival.value_or(0), st.at_out + 3);
+    std::vector<Move> moves;
+    repeater_moves({st}, 0, moves);
+    if (moves.empty()) {
+      return false;
+    }
+    const auto before = edits_.size();
+    apply(moves.front());
+    for (size_t i = before; i < edits_.size(); ++i) {
+      if (edits_[i].kind == Resize_edit::Kind::buffer) {
+        created.push_back(edits_[i].instance);
+      }
+    }
+    return true;
   }
   bool fix_electrical(const std::string& driver) {
     auto       pins   = touched({driver});
@@ -789,10 +828,19 @@ private:
         }
       }
     }
-    // 2. A variable-base buffer tree over the sinks.
+    // 2. A variable-base buffer tree over the sinks, 3. a repeater chain.
+    for (const bool tree : {true, false}) {
+      if (try_topology(driver, owner, pins, before, tree)) {
+        return true;
+      }
+    }
+    return false;
+  }
+  bool try_topology(const std::string& driver, const std::string& owner, const std::vector<std::string>& pins,
+                    std::pair<unsigned, double> before, bool tree) {
     Attempt                  a(*this);
     std::vector<std::string> created;
-    if (!build_tree(driver, nets_.at(driver), 0, owner, created)) {
+    if (tree ? !build_tree(driver, nets_.at(driver), 0, owner, created) : !wire_repair(driver, created)) {
       return false;
     }
     const auto p   = measure();
@@ -1120,6 +1168,10 @@ private:
       moves.push_back(std::move(m));
     }
   }
+  // Repeaters on a long on-path wire: one buffer at 30/50/70% of the edge, or
+  // a chain of N evenly spaced ones (N from the optimal repeater spacing), each
+  // seeded on the driver->sink edge it cuts. Elmore estimates pick the size,
+  // count and cut; the incremental timer decides.
   void repeater_moves(const std::vector<Stage>& stages, size_t k, std::vector<Move>& moves) {
     const auto& st = stages[k];
     if (lib_.buffers.empty() || blocked_drivers_.contains(st.driver) || st.at_sink - st.at_out < 3) {
@@ -1130,51 +1182,75 @@ private:
     if (l0 < 5 * lib_.tech.dbu) {
       return;
     }
-    const double cs    = pin_cap(st.sink);
-    const double load0 = load(st.driver);
+    const double cs = pin_cap(st.sink), load0 = load(st.driver);
     const double r = lib_.r_dbu, c = lib_.c_dbu;
-    const double t_old = r * l0 * (c * l0 / 2 + cs) * 1e-3;
+    const auto   wire  = [&](double l, double tail) { return r * l * (c * l / 2 + tail) * 1e-3; };
+    const double t_old = wire(l0, cs);
     Move         best;
     best.est = 1;
-    std::vector<const Buffer*> sizes;
     for (const auto* b : lib_.buffers) {
-      sizes.push_back(b);
-    }
-    for (const double f : {.3, .5, .7}) {
-      const auto               at = lerp(d, s, f);
-      std::vector<std::string> moved{st.sink};
-      for (const auto& other : nets_.at(st.driver)) {
-        if (other != st.sink && manhattan(position(other), at) < manhattan(position(other), d)) {
-          moved.push_back(other);
+      const double   cin       = cell_pin_cap(*b, b->inputs.front());
+      const double   unit      = b->intrinsic_ps + b->resistance_ohm * cin * 1e-3;
+      const double   l_opt     = r > 0 && c > 0 ? std::sqrt(2 * std::max(unit, 1.0) / (r * c * 1e-3)) : kInf;
+      const unsigned max_chain = std::isfinite(l_opt) ? std::clamp(static_cast<unsigned>(std::ceil(l0 / l_opt)), 1u, 12u) : 1u;
+      for (unsigned n = 1; n <= max_chain; ++n) {
+        std::vector<std::vector<double>> cuts;
+        if (n == 1) {
+          cuts = {{.3}, {.5}, {.7}};
+        } else {
+          std::vector<double> even;
+          for (unsigned i = 1; i <= n; ++i) {
+            even.push_back(double(i) / (n + 1));
+          }
+          cuts.push_back(std::move(even));
         }
-      }
-      double moved_cap = 0;
-      for (const auto& m : moved) {
-        moved_cap += pin_cap(m) + c * manhattan(d, position(m));
-      }
-      const double lp = manhattan(d, at), ls = manhattan(at, s);
-      for (const auto* b : sizes) {
-        const double cin  = cell_pin_cap(*b, b->inputs.front());
-        const double l1   = std::max(cin, load0 - moved_cap + c * lp + cin);
-        const double down = group_load(moved, at);
-        if (!electrical_limit_ok(*b, down)) {
-          continue;
-        }
-        const auto bd = stage_delay(b->name, b->inputs.front(), b->output, std::max(5.0, st.slew_out), down);
-        if (!bd) {
-          continue;
-        }
-        const double t_new
-            = driver_delta(st, load0, l1) + r * lp * (c * lp / 2 + cin) * 1e-3 + *bd + r * ls * (c * ls / 2 + cs) * 1e-3;
-        const double gain = t_old - t_new;
-        if (gain > best.est) {
-          best.kind   = Move::Kind::repeater;
-          best.est    = gain;
-          best.driver = st.driver;
-          best.sinks  = moved;
-          best.buffer = b;
-          best.at     = at;
-          best.owner  = st.inst;
+        for (const auto& fractions : cuts) {
+          std::vector<Point> chain;
+          for (const double f : fractions) {
+            chain.push_back(lerp(d, s, f));
+          }
+          std::vector<std::string> moved{st.sink};
+          for (const auto& other : nets_.at(st.driver)) {
+            if (other != st.sink && manhattan(position(other), chain.front()) < manhattan(position(other), d)) {
+              moved.push_back(other);
+            }
+          }
+          double moved_cap = 0;
+          for (const auto& m : moved) {
+            moved_cap += pin_cap(m) + c * manhattan(d, position(m));
+          }
+          const double down = group_load(moved, chain.back());
+          if (!electrical_limit_ok(*b, down)) {
+            continue;
+          }
+          const double lp    = manhattan(d, chain.front());
+          const double l1    = std::max(cin, load0 - moved_cap + c * lp + cin);
+          double       t_new = driver_delta(st, load0, l1) + wire(lp, cin);
+          double       slew  = std::max(5.0, st.slew_out);
+          bool         ok    = true;
+          for (size_t i = 0; i < chain.size() && ok; ++i) {
+            const bool   last = i + 1 == chain.size();
+            const double seg  = manhattan(chain[i], last ? s : chain[i + 1]);
+            const auto   a    = w_.arc(b->name, b->inputs.front(), b->output, slew, last ? down : c * seg + cin);
+            if (!a) {
+              ok = false;
+              break;
+            }
+            t_new += a->first + wire(seg, last ? cs : cin);
+            slew   = std::max(5.0, a->second);
+          }
+          const double gain = ok ? t_old - t_new : 0;
+          // Each extra repeater must pay for itself.
+          if (ok && gain - (n - 1) * 1.0 > best.est) {
+            best.kind   = Move::Kind::repeater;
+            best.est    = gain;
+            best.driver = st.driver;
+            best.sinks  = moved;
+            best.buffer = b;
+            best.at     = chain.front();
+            best.chain  = chain;
+            best.owner  = st.inst;
+          }
         }
       }
     }
@@ -1262,8 +1338,14 @@ private:
           resize(name, to);
         }
         break;
-      case Move::Kind::isolate:
-      case Move::Kind::repeater: insert_buffer(m.driver, m.sinks, m.buffer, m.at, m.owner); break;
+      case Move::Kind::isolate : insert_buffer(m.driver, m.sinks, m.buffer, m.at, m.owner); break;
+      case Move::Kind::repeater: {
+        auto driver = m.driver;
+        for (const auto& at : m.chain.empty() ? std::vector<Point>{m.at} : m.chain) {
+          driver = insts_.at(insert_buffer(driver, m.sinks, m.buffer, at, m.owner)).output;
+        }
+        break;
+      }
     }
   }
   std::vector<std::string> move_drivers(const Move& m) const {
@@ -1298,9 +1380,13 @@ private:
     const auto e0    = w_.electrical(pins);
     Attempt    a(*this);
     apply(m);
-    if (m.adds_cells()) {
-      for (auto& p : net_pins(insts_.at(edits_.back().instance).output)) {
-        pins.push_back(std::move(p));
+    unsigned cells = 0;
+    for (size_t i = a.e_mark; i < edits_.size(); ++i) {
+      if (edits_[i].kind == Resize_edit::Kind::buffer) {
+        ++cells;
+        for (auto& p : net_pins(insts_.at(edits_[i].instance).output)) {
+          pins.push_back(std::move(p));
+        }
       }
     }
     const auto   p  = measure();
@@ -1308,7 +1394,7 @@ private:
     const auto   e1 = w_.electrical(pins);
     ++stats.probes;
     stats.seconds     += elapsed(t);
-    const double need  = m.adds_cells() ? std::max(1.0, .01 * std::abs(slack)) : .05;
+    const double need  = cells ? cells * std::max(1.0, .005 * std::abs(slack)) : .05;
     if (s1 < slack + need) {
       ++reject_slack_;
       return false;

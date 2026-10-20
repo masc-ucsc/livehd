@@ -482,6 +482,75 @@ lhd synth design.v --top top --workdir W --set synth.place=true \
   --set synth.place.resynth=true
 ```
 
+### Path-based resize engine (`synth.place.resize.engine=new`)
+
+`synth.place.resize.engine` selects the implementation behind `synth.place.resize=true`,
+both at FP timing checkpoints and after legal placement. `legacy` is the batch
+sizing/forest sweep described above; `new` (`resize_engine.{hpp,cpp}`) plans on the
+persistent incremental timer instead of a fresh evaluation per batch.
+
+| Option (`synth.place.` prefix) | Default | Meaning |
+| --- | --- | --- |
+| `resize.engine` | `legacy` | `new` or `legacy` |
+| `resize.vt_swap` | false | `new`: allow same-footprint/function swaps across Liberty files (multi-VT); otherwise a cell keeps its file |
+| `resize.dont_use` | empty | `new`: comma-separated globs never chosen as a new master or repeater (Liberty `dont_use` cells stay excluded) |
+
+*What-if timing.* `Physical_session::whatif()` (`core/timing_whatif.hpp`) applies
+transient edits to the evaluated OpenTimer state: a master swap (`repower_gate`), a new
+cell, and `set_net`, which moves pins onto a net and attaches its wire RC. Cutting a wire
+for a buffer is two `set_net` calls whose FLUTE Steiner RC (`steiner_rc`, the same
+construction placement RC uses) is rebuilt for both pieces from the seeded buffer
+position. Queries (WNS, TNS per endpoint, pin slack/arrival/slew, net load, Liberty arc
+delays, electrical checks) run an incremental update; `rollback(mark)` undoes edits LIFO
+and the next full `evaluate()` discards anything pending.
+
+*Plan.* One plan per round, each move a transaction (timer, netlist model and edit list
+roll back together):
+
+1. Electrical: only nets with a real Liberty max slew/capacitance/fanout violation in the
+   full evaluation. The smallest stronger same-function driver that meets the limits,
+   else a fanout tree. Trees use variable branching: per level 2..8 spatial groups
+   (recursive median bisection) chosen from the load and fanout a mid-strength repeater
+   may carry, more groups when the net fails timing, the most critical sinks kept on the
+   root, a deeper level only where a group still exceeds a repeater's limits. Each repeater
+   is seeded on the edge from its driver toward its group. Many nets are probed in
+   bisected batches.
+2. Timing (only while setup WNS < 0): failing endpoints, worst first. The path is traced
+   back by pin slack, through multi-output combinational cells. Candidate moves per stage:
+   up-size the driver (NLDM gain including the upstream load change), down-size
+   slack-rich gates loading the on-path net (shed), isolate non-critical sinks behind a
+   buffer, or cut the on-path wire with one repeater (30/50/70%) or an evenly spaced chain
+   (count from the optimal repeater spacing). Moves are ranked by estimated gain and probed;
+   one is kept only if the endpoint improves (by 0.05 ps, or per added cell
+   max(1 ps, 0.5% of its slack)) and setup WNS, TNS and the electrical checks of the
+   touched pins are not worse.
+3. Area recovery: down-size gates whose slack exceeds max(0, WNS) plus
+   max(25 ps, 40% of the shortest clock period) by at least twice the estimated delay
+   increase. Gates with slack above a whole period (a check the timer does not model, such
+   as a half-cycle negative-edge capture) are never down-sized. Probed in bisected batches.
+
+*Stopping.* No cell or edit budget. An endpoint stops when it meets timing or no move is
+accepted; a path that fails even with ideal (zero-RC) wires and the fastest same-function
+drive at every stage, each loaded only by its on-path pin, is provably not fixable by
+buffering and gets sizing moves only. The phase stops when every failing endpoint is met,
+stuck or infeasible, or after two rounds that gain less than 0.01% TNS and 0.1 ps WNS.
+After legal placement a new plan is made on the legalized result only while setup still
+fails and the previous round gained at least 1 ps WNS or 1% TNS (at most four rounds).
+
+*Commit.* A plan is materialized once on a clone (new cells keep the owner's color,
+region and block), ECO-legalized (`legalize_cells`) or, at FP checkpoints, refreshed at GP
+coordinates, and evaluated in full. It is kept only if setup WNS and TNS and the
+electrical violations are not worse and something improved (timing, electrical or area);
+hold is reported but not gated (pre-CTS). Otherwise the earliest half of its moves
+(electrical first, then the most critical) is tried, a few times. `resize.json` (and the
+`resize` member of the placement QoR, `fp_repair_<iteration>.json` at checkpoints) records
+the phases, probes, rejections, stop reason and every commit trial.
+
+*Timer fidelity this relies on.* Setup checks use the period of the ideal clock that
+reaches their clock pin (multi-clock designs used the first clock's period),
+`create_clock -waveform` is honored, and data paths through async preset/clear arcs are not
+timed (OpenSTA's default).
+
 The weighting follows [OpenROAD GPL's slack weighting](https://openroad.readthedocs.io/en/latest/main/src/gpl/README.html),
 and buffer repair follows its [removal, rebuffering and timing-check sequence](https://openroad.readthedocs.io/en/latest/main/src/rsz/README.html).
 No stock-DREAMPlace QoR parity or large-design scalability has been established

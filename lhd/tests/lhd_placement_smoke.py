@@ -89,6 +89,18 @@ assert resized['qor']['place']['resize']['attempts'] <= 24
 assert resized['qor']['place']['repair']['attempts'] <= 24
 phases = [p['name'] for p in resized['phases']]
 assert phases.index('pass.place.resize') < phases.index('pass.place.repair')
+# The path-based engine on the incremental what-if timer: one resize phase, its own report.
+resized_new = run('resize_new', ['--set', 'synth.place=true', '--set', 'synth.place.resize=true',
+                                 '--set', 'synth.place.resize.engine=new'])
+assert resized_new['qor']['place']['legal']
+new_report = resized_new['qor']['place']['resize']
+assert new_report['engine'] == 'new' and 1 <= len(new_report['rounds']) <= 4, new_report
+assert new_report['after']['wns_ps'] >= new_report['before']['wns_ps'] - 1e-3, new_report
+assert new_report['after']['tns_ps'] >= new_report['before']['tns_ps'] - 1e-3, new_report
+new_phases = [p['name'] for p in resized_new['phases']]
+assert 'pass.place.resize' in new_phases and 'pass.place.repair' not in new_phases, new_phases
+run('bad_engine', ['--set', 'synth.place=true', '--set', 'synth.place.resize=true',
+                   '--set', 'synth.place.resize.engine=fast'], False)
 resynth = run('resynth', ['--set', 'synth.place=true', '--set', 'synth.place.resynth=true'])
 assert resynth['qor']['place']['legal']
 assert 0 < resynth['qor']['place']['resynth']['attempts'] <= 4

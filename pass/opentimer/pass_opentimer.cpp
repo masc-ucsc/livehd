@@ -760,6 +760,14 @@ void Pass_opentimer::read_sdc(std::string_view sdc_file) {
       if ((critical_ || !target_overrides_.empty()) && !clock_pin.empty()) {
         fail("critical-constraints", "critical annotations cannot honor a clock created on an internal pin");
       }
+      if (supported && !waveform.empty() && waveform[1] - waveform[0] >= period) {
+        supported = false;  // edges must fit one period
+      }
+      const bool default_waveform
+          = waveform.empty() || (waveform[0] == 0 && std::abs(waveform[1] - period / 2) <= 1e-6f * std::max(1.0f, period));
+      if (!default_waveform && source_ports.empty() && clock_pin.empty()) {
+        supported = false;  // a virtual clock has no source to carry its edges
+      }
       timing_targets_[pname] = {period, source_ports, clock_pin};
       if (supported && source_ports.empty() && clock_pin.empty() && have_period && have_name && !pname.empty() && sdc_clocks_ == 1) {
         virtual_clock_name_   = pname;
@@ -767,12 +775,6 @@ void Pass_opentimer::read_sdc(std::string_view sdc_file) {
       } else {
         constraints_complete_ = false;
       }
-      if (supported && !waveform.empty() && waveform[1] - waveform[0] >= period) {
-        supported             = false;  // edges must fit one period
-        constraints_complete_ = false;
-      }
-      const bool default_waveform
-          = waveform.empty() || (waveform[0] == 0 && std::abs(waveform[1] - period / 2) <= 1e-6f * std::max(1.0f, period));
       if (supported && source_ports.size() == 1 && timer.primary_inputs().contains(source_ports.front())) {
         if (default_waveform) {
           timer.create_clock(pname, source_ports.front(), period);
