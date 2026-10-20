@@ -1477,7 +1477,7 @@ private:
   // move of each path, on disjoint nets, probed together; a rejected batch is
   // bisected. Per-endpoint refinement follows for what remains.
   void batch_phase() {
-    unsigned     stall = 0;
+    unsigned stall = 0;
     for (unsigned round = 0; round < 10000; ++round) {
       const auto failing = w_.failing_endpoints(0);
       if (failing.size() < 64) {
@@ -1647,9 +1647,16 @@ private:
       for (const auto& m : moves) {
         ++generated_[static_cast<int>(m.kind)];
       }
-      no_moves_     += moves.empty();
-      bool progress  = false;
-      for (size_t i = 0; i < moves.size() && i < 8; ++i) {
+      no_moves_         += moves.empty();
+      bool     progress  = false;
+      unsigned tries     = 0;
+      for (size_t i = 0; i < moves.size() && tries < 5; ++i) {
+        // Probe only moves whose estimate could pass the acceptance gain.
+        const unsigned cells = cells_of(moves[i]);
+        if (moves[i].est < .5 * (cells ? cells * std::max(1.0, .005 * std::abs(*slack)) : .05)) {
+          continue;
+        }
+        ++tries;
         if (attempt(moves[i], endpoint, *slack)) {
           progress = true;
           ++accepted;
@@ -1668,7 +1675,7 @@ private:
     stop_reason_                          = "no failing endpoint";
     // At FP checkpoints the coordinates still move: batched moves plus a short
     // per-endpoint pass; the legal placement gets the full refinement.
-    const unsigned max_rounds = stage_ == Resize_stage::floorplan ? 2 : 100000;
+    const unsigned max_rounds             = stage_ == Resize_stage::floorplan ? 2 : 100000;
     for (rounds_ = 0; rounds_ < max_rounds; ++rounds_) {
       const double wns_round = wns_, tns_round = tns_;
       const auto   failing = w_.failing_endpoints(0);
@@ -2051,12 +2058,12 @@ Repair_result resize_placed(Result initial, const Options& options, const Evalua
                           accepted);
     // Another round re-plans on the legalized result. Stop on lack of progress:
     // nothing proposed or confirmed, met timing, or a round that gained less
-    // than 1 ps WNS and 1% TNS.
+    // than 5 ps WNS and 2% TNS.
     const double wns_gain  = scaled(score, score.wns) - scaled(round_start, round_start.wns);
     const double tns_gain  = scaled(score, score.tns) - scaled(round_start, round_start.tns);
     const double tns_ref   = std::abs(scaled(round_start, round_start.tns));
     if (!accepted || plan.edits.empty() || !score.wns || *score.wns >= 0
-        || (wns_gain < 1 && tns_gain < std::max(1.0, .01 * tns_ref))) {
+        || (wns_gain < 5 && tns_gain < std::max(1.0, .02 * tns_ref))) {
       break;
     }
   }

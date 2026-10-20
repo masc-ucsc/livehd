@@ -523,7 +523,7 @@ roll back together):
    slack-rich gates loading the on-path net (shed), isolate non-critical sinks behind a
    buffer, or cut the on-path wire with one repeater (30/50/70%) or an evenly spaced chain
    (count from the optimal repeater spacing). Moves are ranked by estimated gain and probed;
-   one is kept only if the endpoint improves (by 0.05 ps, or per added cell
+   at most five moves whose estimate could pass are probed per step; one is kept only if the endpoint improves (by 0.05 ps, or per added cell
    max(1 ps, 0.5% of its slack)) and setup WNS, TNS and the electrical checks of the
    touched pins are not worse.
 3. Area recovery: down-size gates whose slack exceeds max(0, WNS) plus
@@ -542,7 +542,7 @@ stops when every failing endpoint is met, stuck or infeasible, or after two roun
 endpoints that gain less than 2% TNS and 1 ps WNS. At FP checkpoints the per-endpoint pass is
 limited to two rounds (coordinates still move).
 After legal placement a new plan is made on the legalized result only while setup still
-fails and the previous round gained at least 1 ps WNS or 1% TNS (at most four rounds).
+fails and the previous round gained at least 5 ps WNS or 2% TNS (at most four rounds).
 
 *Commit.* A plan is materialized once on a clone (new cells keep the owner's color,
 region and block), ECO-legalized (`legalize_cells`) or, at FP checkpoints, refreshed at GP
