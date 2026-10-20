@@ -35,7 +35,6 @@
 // as a cold one (the abc region digest is content-based, the coloring is
 // seeded and deterministic).
 
-#include "pass/opentimer/pass_opentimer.hpp"
 #include <algorithm>
 #include <cmath>
 #include <cstdlib>
@@ -52,14 +51,17 @@
 #include <vector>
 
 #include "absl/container/flat_hash_set.h"
+#include "absl/strings/str_split.h"
 #include "attrs.hpp"
 #include "diag.hpp"
 #include "graph_library_singleton.hpp"
 #include "lhd_kernel_internal.hpp"
 #include "node_util.hpp"
 #include "pass.hpp"
+#include "pass/opentimer/pass_opentimer.hpp"
 #include "pass/place/place.hpp"
 #include "pass/place/repair.hpp"
+#include "pass/place/resize_engine.hpp"
 #include "rapidjson/document.h"
 #include "rapidjson/stringbuffer.h"
 #include "rapidjson/writer.h"
@@ -259,6 +261,14 @@ livehd::placement::Options placement_options(const Options& opts) {
     throw Lhd_error{"usage", "invalid FP color/pin adjustment settings", ""};
   }
   out.repair_reset                = truthy(synth_set(opts, "place.repair.reset", "false"));
+  out.resize_engine               = synth_set(opts, "place.resize.engine", "legacy");
+  if (out.resize_engine != "new" && out.resize_engine != "legacy") {
+    throw Lhd_error{"usage", "invalid synth.place.resize.engine: " + out.resize_engine, "expected new or legacy"};
+  }
+  out.resize_vt_swap = truthy(synth_set(opts, "place.resize.vt_swap", "false"));
+  for (const auto& pattern : absl::StrSplit(synth_set(opts, "place.resize.dont_use", ""), ',', absl::SkipWhitespace())) {
+    out.resize_dont_use.emplace_back(pattern);
+  }
   out.reset_fanout                = static_cast<unsigned>(integer("place.reset_fanout", "0"));
   if (out.reset_fanout == 1) {
     throw Lhd_error{"usage", "invalid synth.place.reset_fanout: 1", "expected 0 (off) or an integer >= 2: loads per reset buffer"};
@@ -1001,6 +1011,7 @@ void synth_command(Options& opts, Result& res) {
     timing_options.dict["qor"] = "";
     timing_options.set_stage_labels(timing_options.dict);
     livehd::opentimer::Physical_session timing_session(timing_options);
+    place_options.whatif = &timing_session.whatif();
     std::string phase_step;
     std::string phase_log;
     // The session runs in-process (no run_step), so keep Liberty/timer prints off the protocol stdout here.
@@ -1099,7 +1110,12 @@ void synth_command(Options& opts, Result& res) {
           placed          = std::move(timed_placement.placed);
           res.recipe_steps.emplace_back("pass.place.timing_driven");
         }
-        if (run_resize) {
+        if (run_resize && place_options.resize_engine == "new") {
+          Phase_timer phase(res, "pass.place.resize");
+          repaired = livehd::placement::resize_placed(std::move(placed), place_options, evaluate);
+          placed   = std::move(repaired.placed);
+          res.recipe_steps.emplace_back("pass.place.resize");
+        } else if (run_resize) {
           Phase_timer phase(res, "pass.place.resize");
           repaired = livehd::placement::repair_buffers(std::move(placed),
                                                        place_options,
@@ -1109,7 +1125,7 @@ void synth_command(Options& opts, Result& res) {
           placed   = std::move(repaired.placed);
           res.recipe_steps.emplace_back("pass.place.resize");
         }
-        if (run_resize) {
+        if (run_resize && place_options.resize_engine != "new") {
           Phase_timer phase(res, "pass.place.repair");
           design_repaired = livehd::placement::repair_buffers(std::move(placed),
                                                               place_options,

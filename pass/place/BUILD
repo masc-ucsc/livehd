@@ -18,8 +18,11 @@ filegroup(
         "place.hpp",
         "repair.cpp",
         "repair.hpp",
+        "repair_internal.hpp",
         "reset_tree.cpp",
         "reset_tree.hpp",
+        "resize_engine.cpp",
+        "resize_engine.hpp",
         "resynthesize.cpp",
         "steiner_repair.cpp",
         "steiner_repair.hpp",
@@ -65,6 +68,7 @@ cc_library(
         "place.cpp",
         "repair.cpp",
         "reset_tree.cpp",
+        "resize_engine.cpp",
         "resynthesize.cpp",
         "steiner_repair.cpp",
         "technology_rc.cpp",
@@ -78,7 +82,9 @@ cc_library(
         "pin_adjust.hpp",
         "place.hpp",
         "repair.hpp",
+        "repair_internal.hpp",
         "reset_tree.hpp",
+        "resize_engine.hpp",
         "steiner_repair.hpp",
         "technology_rc.hpp",
         ":place_salt",
@@ -176,4 +182,17 @@ cc_test(
     srcs = ["macro_snap_test.cpp"],
     copts = COPTS,
     deps = [":place", "@googletest//:gtest_main"],
+)
+
+cc_test(
+    name = "resize_engine_test",
+    size = "small",
+    srcs = ["resize_engine_test.cpp"],
+    copts = COPTS,
+    data = ["//inou/lefdef:test_data"],
+    deps = [
+        ":place",
+        "//pass/opentimer:pass_opentimer",
+        "@googletest//:gtest_main",
+    ],
 )

@@ -23,17 +23,14 @@
 #include "rapidjson/document.h"
 #include "rapidjson/stringbuffer.h"
 #include "rapidjson/writer.h"
+#include "repair_internal.hpp"
 #include "steiner_repair.hpp"
 #include "technology_rc.hpp"
 
 namespace livehd::placement {
-namespace {
-namespace gu    = graph_util;
-namespace fs    = std::filesystem;
-using Node      = hhds::Node_class;
-using Pin       = hhds::Pin_class;
-using Buffer    = liberty::Comb_cell;
-using Inventory = std::map<std::string, Buffer>;
+namespace detail {
+namespace gu = graph_util;
+namespace fs = std::filesystem;
 struct Edit {
   std::string kind, node, master;
   unsigned    fanout  = 4;
@@ -87,7 +84,6 @@ Inventory inventory(const Options& options, const physical::Technology& tech) {
 // `protect_reset` false (synth.place.repair.reset) reset sinks and reset-named
 // pins stop protecting their cones, so a high-fanout reset net is sized and
 // buffered like any data net; clock sinks stay protected.
-using Special_pins = std::map<std::string, std::set<std::string>>;
 // Liberty parses are expensive and independent of the graph: floorplan repair scans once.
 Special_pins scan_special_pins(const std::string& libs, bool protect_reset) {
   Special_pins special;
@@ -621,11 +617,6 @@ void change_master(Node n, const Buffer& from, const Buffer& to) {
     p.connect_driver(out);
   }
 }
-struct Physical_sink {
-  Pin      pin;
-  unsigned bit = 0, width = 1;
-};
-using Node_index = std::unordered_map<std::string, Node>;
 Physical_sink physical_pin(hhds::Graph& graph, const std::string& label, const Node_index& nodes, bool driver) {
   const auto bit = [](const std::string& text, const std::string& prefix) -> std::optional<unsigned> {
     if (!text.starts_with(prefix + "[") || text.back() != ']') {
@@ -1131,7 +1122,8 @@ std::set<std::string> regressed_nodes(const Timing_feedback& before, const Timin
   }
   return nodes;
 }
-}  // namespace
+}  // namespace detail
+using namespace detail;
 bool            timing_improves(const Timing_feedback& before, const Timing_feedback& after) { return retain(before, after); }
 Timing_feedback timing_feedback(std::string_view text) {
   rapidjson::Document json;

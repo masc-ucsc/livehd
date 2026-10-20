@@ -15,6 +15,7 @@
 #include "node_util.hpp"
 #include "pass/opentimer/pass_opentimer.hpp"
 #include "pass/place/repair.hpp"
+#include "pass/place/resize_engine.hpp"
 #include "rapidjson/document.h"
 #include "rapidjson/stringbuffer.h"
 #include "rapidjson/writer.h"
@@ -276,6 +277,20 @@ int main(int argc, char** argv) {
     if (config.HasMember("timing_fraction")) {
       options.timing_fraction = config["timing_fraction"].GetDouble();
     }
+    if (config.HasMember("resize_engine")) {
+      options.resize_engine = text("resize_engine");
+      if (options.resize_engine != "new" && options.resize_engine != "legacy") {
+        throw std::invalid_argument("resize_engine must be new or legacy");
+      }
+    }
+    if (config.HasMember("resize_vt_swap")) {
+      options.resize_vt_swap = config["resize_vt_swap"].GetBool();
+    }
+    if (config.HasMember("dont_use")) {
+      for (const auto& pattern : config["dont_use"].GetArray()) {
+        options.resize_dont_use.emplace_back(pattern.GetString());
+      }
+    }
     options.liberty      = text("liberty");
     options.tech_rc_file = text("tech_rc");
     options.output_dir   = root + "/initial";
@@ -460,6 +475,7 @@ int main(int argc, char** argv) {
         return 0;
       }
       livehd::opentimer::Physical_session timing_session(timing_options(options.liberty, sdc, top));
+      options.whatif    = &timing_session.whatif();
       unsigned   serial = 0;
       const auto raw_evaluate
           = [&](const pl::Result& placed) { return evaluate_timing(placed, timing_session, serial); };
@@ -531,13 +547,16 @@ int main(int argc, char** argv) {
       std::ofstream(root + "/timing_place.json") << refined.report;
       const auto        timing_placed = std::chrono::steady_clock::now();
       pl::Repair_result sized, repaired;
-      if (run_resize) {
+      const bool        new_engine = options.resize_engine == "new";
+      if (run_resize && new_engine) {
+        repaired = pl::resize_placed(std::move(refined.placed), options, evaluate);
+      } else if (run_resize) {
         sized
             = pl::repair_buffers(std::move(refined.placed), options, evaluate, pl::Repair_scope::sizing, std::move(refined.timing));
         std::ofstream(root + "/resize.json") << sized.report;
       }
       const auto sized_at = std::chrono::steady_clock::now();
-      if (run_resize) {
+      if (run_resize && !new_engine) {
         repaired
             = pl::repair_buffers(std::move(sized.placed), options, evaluate, pl::Repair_scope::design, std::move(sized.timing));
         std::ofstream(root + "/repair.json") << repaired.report;
@@ -666,13 +685,15 @@ int main(int argc, char** argv) {
     }
     unsigned   serial = 0;
     livehd::opentimer::Physical_session timing_session(timing_options(options.liberty, sdc, top));
+    options.whatif = &timing_session.whatif();
     const auto evaluate
         = [&](const pl::Result& placed) { return evaluate_timing(placed, timing_session, serial); };
     if (options.retain_placement) {
       std::ofstream(root + "/parasitics.json") << ph::serialize_parasitics(*state.parasitics);
     }
     auto initial = evaluate(state);
-    std::cout << "initial delay " << initial.delay << std::endl;
+    std::cout << "initial delay " << initial.delay << " wns " << initial.wns.value_or(0) * initial.time_unit_ps << " tns "
+              << initial.tns.value_or(0) * initial.time_unit_ps << " violations " << initial.violations << std::endl;
     if (config.HasMember("timing_only") && config["timing_only"].GetBool()) {
       std::ofstream(root + "/parasitics.json") << ph::serialize_parasitics(*state.parasitics);
       ph::write_def(state.floorplan, root + "/out.def");
@@ -680,6 +701,30 @@ int main(int argc, char** argv) {
     }
     const bool repair_first = config.HasMember("repair_first") && config["repair_first"].GetBool();
     const auto start        = std::chrono::steady_clock::now();
+    if (options.resize_engine == "new") {
+      // Path-based engine: plan on the incremental timer, legalize, confirm (resize.json).
+      options.output_dir  = root;
+      auto       repaired = pl::resize_placed(std::move(state), options, evaluate);
+      const auto done     = std::chrono::steady_clock::now();
+      auto       report   = timing_options(options.liberty, sdc, top);
+      report.graphs       = {repaired.placed.graph};
+      report.physical_rc  = repaired.placed.parasitics;
+      report.dict["qor"]  = root + "/final_timing.json";
+      report.set_stage_labels(report.dict);
+      Pass_opentimer::time_work(report);
+      ph::write_def(repaired.placed.floorplan, root + "/out.def");
+      hhds::GraphLibrary output;
+      if (!livehd::copy_with_callees(output, *repaired.placed.graph->get_io()->get_library(), top)) {
+        throw std::runtime_error("cannot save repaired graph");
+      }
+      output.save(root + "/lg");
+      std::ofstream(root + "/runtime.json") << "{\"engine\":\"new\",\"resize_s\":"
+                                            << std::chrono::duration<double>(done - start).count()
+                                            << ",\"timing_evaluations\":" << serial
+                                            << ",\"timing_engine_s\":" << timing_session.statistics().seconds
+                                            << ",\"timing_builds\":" << timing_session.statistics().builds << "}\n";
+      return 0;
+    }
     auto       sizing       = pl::repair_buffers(std::move(state),
                                                  options,
                                                  evaluate,

@@ -63,6 +63,9 @@ void Pass_opentimer::setup() {
 }
 
 Pass_opentimer::Pass_opentimer(const Eprp_var& var) : Pass("pass.opentimer", var) {
+  // Like OpenSTA's default, do not time data paths through async preset/clear
+  // -> Q arcs (recovery/removal checks on those pins remain).
+  timer.preset_clear_arcs(false);
   physical_rc_ = var.physical_rc;
   parse_critical_options(var);
   const auto load_text = std::string(var.get("io_load", "-1"));
@@ -606,6 +609,7 @@ void Pass_opentimer::read_sdc(std::string_view sdc_file) {
       ++sdc_clocks_;
       bool                     supported = true, have_period = false, have_name = false;
       float                    period = 1000;
+      std::vector<float>       waveform;  // -waveform {rise fall}
       std::string              pname  = "clock";
       std::vector<std::string> source_ports, source_pins;
       for (std::size_t i = 1; i < tok.size(); i++) {
@@ -629,6 +633,24 @@ void Pass_opentimer::read_sdc(std::string_view sdc_file) {
             fail("sdc-syntax", std::format("create_clock -period expects a number, got '{}'", tok[i + 1]));
           }
           ++i;
+        } else if (tok[i] == "-waveform") {
+          // A braced edge list: `{0 750}` (one or two tokens). Only a single rise/fall pair is modelled.
+          bool closed = false;
+          for (std::size_t j = i + 1; j < tok.size(); ++j) {
+            for (const auto& edge : absl::StrSplit(tok[j], absl::ByAnyChar("{}"), absl::SkipEmpty())) {
+              if (float v = 0; sdc_number(std::string(edge), v)) {
+                waveform.push_back(v);
+              } else {
+                fail("sdc-syntax", std::format("create_clock -waveform expects numbers, got '{}'", tok[j]));
+              }
+            }
+            if (!tok[j].empty() && tok[j].back() == '}') {
+              i      = j;
+              closed = true;
+              break;
+            }
+          }
+          supported &= closed && waveform.size() == 2 && waveform[0] >= 0 && waveform[1] > waveform[0];
         } else if (sdc_strip(tok[i]) == "get_ports") {
           bool closed = false;
           for (std::size_t j = i + 1; j < tok.size(); ++j) {
@@ -745,8 +767,20 @@ void Pass_opentimer::read_sdc(std::string_view sdc_file) {
       } else {
         constraints_complete_ = false;
       }
+      if (supported && !waveform.empty() && waveform[1] - waveform[0] >= period) {
+        supported             = false;  // edges must fit one period
+        constraints_complete_ = false;
+      }
+      const bool default_waveform
+          = waveform.empty() || (waveform[0] == 0 && std::abs(waveform[1] - period / 2) <= 1e-6f * std::max(1.0f, period));
       if (supported && source_ports.size() == 1 && timer.primary_inputs().contains(source_ports.front())) {
-        timer.create_clock(pname, source_ports.front(), period);
+        if (default_waveform) {
+          timer.create_clock(pname, source_ports.front(), period);
+        } else {
+          timer.create_clock(pname, source_ports.front(), period, {waveform[0], waveform[1]});
+        }
+      } else if (supported && !default_waveform && !clock_pin.empty()) {
+        timer.create_clock(pname, clock_pin, period, {waveform[0], waveform[1]});
       } else if (!clock_pin.empty()) {
         timer.create_clock(pname, clock_pin, period);
       } else {

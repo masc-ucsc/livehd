@@ -30,6 +30,7 @@
 #include "pin_adjust.hpp"
 #include "repair.hpp"
 #include "reset_tree.hpp"
+#include "resize_engine.hpp"
 #include "technology_rc.hpp"
 #if defined(__APPLE__)
 #include <mach-o/dyld.h>
@@ -211,6 +212,12 @@ std::string environment_key(const Options& o, const ph::Technology& tech) {
     h = hash_text(std::format("fp-timing:{}:{}:{}", o.fp_timing_interval, bool(o.fp_evaluate), o.fp_resize), h);
     if (o.repair_reset) {
       h = hash_text("repair-reset", h);  // FP resize may then touch reset cones
+    }
+    if (o.fp_resize && o.resize_engine != "legacy") {
+      h = hash_text(std::format("resize-engine:{}:{}", o.resize_engine, o.resize_vt_swap), h);
+      for (const auto& pattern : o.resize_dont_use) {
+        h = hash_text("dont-use:" + pattern, h);
+      }
     }
     h = hash_text(std::format("fp-movement:{}", o.fp_timing_movement), h);
     if (o.fp_timing_after_density) {
@@ -1381,6 +1388,80 @@ void init_flute() {
     flute::readLUT(powv.c_str(), post.c_str());
   });
 }
+}  // namespace
+// One net's FLUTE Steiner RC exactly as placement RC estimation builds it: pin
+// nodes in order, one junction per distinct location (pins attach through a
+// 1e-9 ohm edge), FLUTE edges between junctions with half the wire capacitance
+// on each end, and a star from the first pin above 1000 locations.
+ph::Rc_net steiner_rc(std::string driver, const std::vector<std::pair<std::string, std::pair<double, double>>>& pins,
+                      const Wire_rc& wire, double dbu, bool* approximate) {
+  init_flute();
+  ph::Rc_net rc;
+  rc.driver = std::move(driver);
+  std::vector<int>                        xs, ys;
+  std::map<std::pair<int, int>, unsigned> junction;
+  std::vector<std::pair<int, int>>        positions;
+  for (const auto& [label, xy] : pins) {
+    if (std::abs(xy.first) > std::numeric_limits<int>::max() / 4.0 || std::abs(xy.second) > std::numeric_limits<int>::max() / 4.0) {
+      throw std::runtime_error("coordinates exceed FLUTE integer range");
+    }
+    positions.emplace_back(std::llround(xy.first), std::llround(xy.second));
+    rc.nodes.push_back({label, 0});
+  }
+  auto vertex = [&](std::pair<int, int> xy) {
+    auto [it, added] = junction.emplace(xy, rc.nodes.size());
+    if (added) {
+      rc.nodes.push_back({{}, 0});
+    }
+    return it->second;
+  };
+  for (size_t i = 0; i < positions.size(); ++i) {
+    rc.edges.push_back({static_cast<unsigned>(i), vertex(positions[i]), 1e-9});
+  }
+  for (const auto& [xy, index] : junction) {
+    (void)index;
+    xs.push_back(xy.first);
+    ys.push_back(xy.second);
+  }
+  auto add_edge = [&](unsigned a, unsigned b, double dx, double dy) {
+    if (a == b) {
+      return;
+    }
+    const double resistance  = (wire.horizontal_r * dx + wire.vertical_r * dy) / dbu;
+    const double capacitance = (wire.horizontal_c * dx + wire.vertical_c * dy) / dbu;
+    rc.edges.push_back({a, b, std::max(1e-9, resistance)});
+    rc.nodes[a].capacitance_ff += capacitance / 2;
+    rc.nodes[b].capacitance_ff += capacitance / 2;
+  };
+  if (xs.size() > 1 && xs.size() <= 1000) {
+    auto                                    tree = flute::flute(xs.size(), xs.data(), ys.data(), 3);
+    std::set<std::pair<unsigned, unsigned>> edges;
+    for (int i = 0; i < 2 * tree.deg - 2; ++i) {
+      const auto a  = std::pair{tree.branch[i].x, tree.branch[i].y};
+      const auto b  = std::pair{tree.branch[tree.branch[i].n].x, tree.branch[tree.branch[i].n].y};
+      const auto ai = vertex(a), bi = vertex(b);
+      if (edges.emplace(std::min(ai, bi), std::max(ai, bi)).second) {
+        add_edge(ai, bi, std::abs(double(a.first) - b.first), std::abs(double(a.second) - b.second));
+      }
+    }
+    std::free(tree.branch);
+  } else if (xs.size() > 1000) {
+    if (approximate) {
+      *approximate = true;
+    }
+    const auto root = vertex(positions.front());
+    for (const auto& [xy, index] : junction) {
+      if (index != root) {
+        add_edge(root,
+                 index,
+                 std::abs(double(xy.first) - positions.front().first),
+                 std::abs(double(xy.second) - positions.front().second));
+      }
+    }
+  }
+  return rc;
+}
+namespace {
 std::shared_ptr<ph::Parasitics> estimate_rc(const View& v, const ph::Technology& tech, const Options& options,
                                             std::map<std::string, std::pair<double, double>>& pin_locations) {
   auto result         = std::make_shared<ph::Parasitics>();
@@ -1419,79 +1500,27 @@ std::shared_ptr<ph::Parasitics> estimate_rc(const View& v, const ph::Technology&
   init_flute();
   uint64_t hash
       = hash_text(std::format("{}:{}:{}:{}:{}:{}", horizontal_r, horizontal_c, vertical_r, vertical_c, options.full, tech.dbu));
+  std::vector<std::pair<std::string, std::pair<double, double>>> pins;
   for (size_t net = 0; net < v.drivers.size(); ++net) {
-    ph::Rc_net rc;
     const auto endpoint = [](const Endpoint& e) { return e.instance == "PIN" ? e.pin : e.instance + ":" + e.pin; };
-    rc.driver           = endpoint(v.drivers[net]);
-    const int begin = v.design.flat_net2pin_start[net], end = v.design.flat_net2pin_start[net + 1];
+    const int  begin = v.design.flat_net2pin_start[net], end = v.design.flat_net2pin_start[net + 1];
     if (end - begin < 2) {
       continue;
     }
-    std::vector<int>                        xs, ys;
-    std::map<std::pair<int, int>, unsigned> junction;
-    std::vector<std::pair<int, int>>        positions;
+    pins.clear();
     for (int p = begin; p < end; ++p) {
       const auto   node = v.design.pin2node[p];
       const double x = v.design.node_x[node] + v.design.pin_offset_x[p], y = v.design.node_y[node] + v.design.pin_offset_y[p];
-      if (std::abs(x) > std::numeric_limits<int>::max() / 4.0 || std::abs(y) > std::numeric_limits<int>::max() / 4.0) {
-        throw std::runtime_error("coordinates exceed FLUTE integer range");
-      }
-      positions.emplace_back(std::llround(x), std::llround(y));
-      pin_locations.emplace(endpoint(v.pins[p]), std::pair{x, y});
-      rc.nodes.push_back({endpoint(v.pins[p]), 0});
-      hash = hash_text(std::format("{}:{}:{};", rc.nodes.back().pin, positions.back().first, positions.back().second), hash);
+      pins.emplace_back(endpoint(v.pins[p]), std::pair{x, y});
+      pin_locations.emplace(pins.back().first, std::pair{x, y});
+      hash = hash_text(std::format("{}:{}:{};", pins.back().first, std::llround(x), std::llround(y)), hash);
     }
-    auto vertex = [&](std::pair<int, int> xy) {
-      auto [it, added] = junction.emplace(xy, rc.nodes.size());
-      if (added) {
-        rc.nodes.push_back({{}, 0});
-      }
-      return it->second;
-    };
-    for (size_t i = 0; i < positions.size(); ++i) {
-      rc.edges.push_back({static_cast<unsigned>(i), vertex(positions[i]), 1e-9});
-    }
-    for (const auto& [xy, index] : junction) {
-      (void)index;
-      xs.push_back(xy.first);
-      ys.push_back(xy.second);
-    }
-    auto add_edge = [&](unsigned a, unsigned b, double dx, double dy) {
-      if (a == b) {
-        return;
-      }
-      const double resistance  = (horizontal_r * dx + vertical_r * dy) / tech.dbu;
-      const double capacitance = (horizontal_c * dx + vertical_c * dy) / tech.dbu;
-      rc.edges.push_back({a, b, std::max(1e-9, resistance)});
-      rc.nodes[a].capacitance_ff += capacitance / 2;
-      rc.nodes[b].capacitance_ff += capacitance / 2;
-    };
-    if (xs.size() > 1 && xs.size() <= 1000) {
-      auto                                    tree = flute::flute(xs.size(), xs.data(), ys.data(), 3);
-      std::set<std::pair<unsigned, unsigned>> edges;
-      for (int i = 0; i < 2 * tree.deg - 2; ++i) {
-        const auto a  = std::pair{tree.branch[i].x, tree.branch[i].y};
-        const auto b  = std::pair{tree.branch[tree.branch[i].n].x, tree.branch[tree.branch[i].n].y};
-        const auto ai = vertex(a), bi = vertex(b);
-        if (edges.emplace(std::min(ai, bi), std::max(ai, bi)).second) {
-          add_edge(ai, bi, std::abs(double(a.first) - b.first), std::abs(double(a.second) - b.second));
-        }
-      }
-      std::free(tree.branch);
-    } else if (xs.size() > 1000) {
+    bool approximate = false;
+    auto rc          = steiner_rc(endpoint(v.drivers[net]), pins, wire, tech.dbu, &approximate);
+    if (approximate) {
       // A bounded star estimate lets timing drive fanout repair before FLUTE's
-      // degree limit can be met. Each branch has its Manhattan wire R/C; the
-      // absence of shared trunks is explicitly reported as approximate.
+      // degree limit can be met; the absent shared trunks are reported.
       result->approximate = true;
-      const auto root     = vertex(positions.front());
-      for (const auto& [xy, index] : junction) {
-        if (index != root) {
-          add_edge(root,
-                   index,
-                   std::abs(double(xy.first) - positions.front().first),
-                   std::abs(double(xy.second) - positions.front().second));
-        }
-      }
     }
     for (const auto& node : rc.nodes) {
       hash = hash_text(std::format("{}:{:.17g};", node.pin, node.capacitance_ff), hash);
@@ -3694,7 +3723,9 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
           unsigned   resized = 0, proposed = 0, repairs = 0;
           const auto sta_before_repair = fp_sta_calls;
           if (options.fp_resize) {
-            const auto sized = repair_floorplan(checkpoint, options, before, evaluate, refresh);
+            const auto sized = options.resize_engine == "new"
+                                   ? resize_floorplan_engine(checkpoint, options, before, evaluate, refresh)
+                                   : repair_floorplan(checkpoint, options, before, evaluate, refresh);
             after            = sized.timing;
             resized          = sized.accepted;
             proposed         = sized.proposed;

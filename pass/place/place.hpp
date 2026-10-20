@@ -9,6 +9,7 @@
 
 #include "core/physical_rc.hpp"
 #include "core/timing_feedback.hpp"
+#include "core/timing_whatif.hpp"
 #include "dreamplace/native/floorplan.hpp"
 #include "dreamplace/native/macro/topology.hpp"
 #include "hhds/graph.hpp"
@@ -47,6 +48,13 @@ struct Options {
   int                                   fp_timing_max_updates = 10;
   bool                                  fp_resize             = false;
   bool                                  repair_reset          = false;  // size/buffer reset-pin cones too (default: protected like clocks)
+  // synth.place.resize.engine: "new" = path-based sizing/buffering on the
+  // incremental what-if timer (resize_engine.hpp); "legacy" = batch sweeps.
+  std::string                           resize_engine  = "legacy";
+  bool                                  resize_vt_swap = false;  // allow same-footprint swaps across Liberty files (multi-VT)
+  std::vector<std::string>              resize_dont_use;         // glob patterns never chosen as a new master
+  // What-if handle of the timer behind fp_evaluate/evaluate (required by engine=new).
+  livehd::timing::Whatif*               whatif                = nullptr;
   // Pre-placement fanout tree on every flat net that drives an async clear/preset pin (loads per buffer; 0 = off).
   unsigned                              reset_fanout          = 0;
   Evaluate                              fp_evaluate;

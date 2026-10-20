@@ -1,10 +1,16 @@
 // This file is distributed under the BSD 3-Clause License. See LICENSE for details.
+#include <algorithm>
 #include <chrono>
+#include <cmath>
 #include <format>
 #include <stdexcept>
+#include <string_view>
+#include <tuple>
+#include <unordered_map>
 
 #include "node_util.hpp"
 #include "pass_opentimer.hpp"
+#include "timing_whatif.hpp"
 
 namespace livehd::opentimer {
 struct Physical_session::Impl : Pass_opentimer {
@@ -252,11 +258,466 @@ struct Physical_session::Impl : Pass_opentimer {
     apply_physical_rc(graph);
   }
 
+  // ---- what-if edits (core/timing_whatif.hpp) -------------------------------
+  // Transient master/topology/RC edits on the evaluated state. Every timer
+  // change is logged and undone in reverse order; RC restores run last so a
+  // restored net only names pins that are back on it. The session maps
+  // (masters, net_names, connections) always describe the evaluated state.
+  struct Whatif_impl final : livehd::timing::Whatif {
+    Impl& s;
+    enum class Kind { repower, gate, net, pin, rc };
+    struct Undo {
+      Kind                                    kind;
+      std::string                             a, b;
+      std::optional<livehd::physical::Rc_net> rc;
+    };
+    std::vector<Undo>                                                log;
+    std::unordered_map<std::string, std::string>                     conn;  // timer pin -> net ("" = none), overrides s.connections
+    std::unordered_map<std::string, std::string>                     nets;  // what-if driver label -> timer net
+    std::unordered_map<std::string, std::string>                     gates;    // what-if instance -> master
+    std::unordered_map<std::string, std::string>                     resized;  // instance -> current master
+    std::unordered_map<std::string, livehd::physical::Rc_net>        rc_now;   // driver label -> current what-if RC
+    std::unordered_map<std::string, const livehd::physical::Rc_net*> base;     // evaluated RC by driver
+    const livehd::physical::Parasitics*                              base_owner = nullptr;
+    size_t                                                           serial     = 0;
+
+    explicit Whatif_impl(Impl& owner) : s(owner) {}
+
+    void index_base() {
+      if (base_owner == s.previous_physical_rc_.get()) {
+        return;
+      }
+      base.clear();
+      base_owner = s.previous_physical_rc_.get();
+      if (base_owner) {
+        for (const auto& net : base_owner->nets) {
+          base.emplace(net.driver, &net);
+        }
+      }
+    }
+    double      unit_ps() { return s.timer.time_unit() ? s.timer.time_unit()->value() * 1e12 : 1000; }
+    double      cap_ff() { return s.timer.capacitance_unit() ? s.timer.capacitance_unit()->value() / 1e-15 : 1; }
+    std::string timer_pin(const std::string& label) const { return s.pin_name(label); }
+    std::string net_of_pin(const std::string& pin) const {
+      if (const auto it = conn.find(pin); it != conn.end()) {
+        return it->second;
+      }
+      const auto it = s.connections.find(pin);
+      return it == s.connections.end() ? std::string{} : it->second;
+    }
+    std::string net_of_driver(const std::string& driver) const {
+      if (const auto it = nets.find(driver); it != nets.end()) {
+        return it->second;
+      }
+      const auto it = s.net_names.find(driver);
+      return it == s.net_names.end() ? std::string{} : it->second;
+    }
+    spef::Net to_spef(const livehd::physical::Rc_net& net, const std::string& name) const {
+      spef::Net                mapped(name, 0);
+      std::vector<std::string> labels;
+      for (size_t i = 0; i < net.nodes.size(); ++i) {
+        const auto& node  = net.nodes[i];
+        auto        label = node.pin.empty() ? std::format("{}:__lhd_steiner_{}", name, i) : timer_pin(node.pin);
+        if (!std::isfinite(node.capacitance_ff) || node.capacitance_ff < 0) {
+          throw std::invalid_argument("invalid what-if capacitance");
+        }
+        mapped.caps.emplace_back(label, "", node.capacitance_ff);
+        mapped.lcap += node.capacitance_ff;
+        labels.push_back(std::move(label));
+      }
+      for (const auto& edge : net.edges) {
+        if (edge.from >= labels.size() || edge.to >= labels.size() || !std::isfinite(edge.resistance_ohm)
+            || edge.resistance_ohm < 0) {
+          throw std::invalid_argument("invalid what-if RC edge");
+        }
+        mapped.ress.emplace_back(labels[edge.from], labels[edge.to], edge.resistance_ohm);
+      }
+      return mapped;
+    }
+    void attach(const livehd::physical::Rc_net& net, const std::string& name) {
+      spef::Spef data;
+      data.capacitance_unit = "1 FF";
+      data.resistance_unit  = "1 OHM";
+      data.nets.push_back(to_spef(net, name));
+      s.timer.read_parasitics(std::move(data));
+    }
+    [[nodiscard]] size_t mark() const override { return log.size(); }
+    void                 require_state() const {
+      if (!s.previous_physical_rc_) {
+        throw std::logic_error("what-if timing requires a prior physical evaluation");
+      }
+    }
+    std::string master_of(const std::string& instance) const {
+      if (const auto it = resized.find(instance); it != resized.end()) {
+        return it->second;
+      }
+      if (const auto it = gates.find(instance); it != gates.end()) {
+        return it->second;
+      }
+      const auto it = s.masters.find(instance);
+      if (it == s.masters.end()) {
+        throw std::runtime_error("what-if resize of an unknown instance: " + instance);
+      }
+      return it->second;
+    }
+    void resize(const std::string& instance, const std::string& master) override {
+      require_state();
+      const auto old = master_of(instance);
+      if (old == master) {
+        return;
+      }
+      if (!s.timer.celllib(ot::MIN)->cell(master) || !s.timer.celllib(ot::MAX)->cell(master)) {
+        throw std::runtime_error("what-if master lacks Liberty timing: " + master);
+      }
+      const auto timer_instance = s.physical_instances_.at(instance);
+      s.timer.repower_gate(timer_instance, master);
+      log.push_back({Kind::repower, instance, old, {}});
+      resized[instance] = master;
+    }
+    void add_cell(const std::string& instance, const std::string& master) override {
+      require_state();
+      if (s.physical_instances_.contains(instance) || s.masters.contains(instance)) {
+        throw std::runtime_error("what-if instance already exists: " + instance);
+      }
+      if (!s.timer.celllib(ot::MIN)->cell(master) || !s.timer.celllib(ot::MAX)->cell(master)) {
+        throw std::runtime_error("what-if master lacks Liberty timing: " + master);
+      }
+      s.timer.insert_gate(instance, master);
+      s.physical_instances_.emplace(instance, instance);
+      gates.emplace(instance, master);
+      log.push_back({Kind::gate, instance, master, {}});
+    }
+    void move_pin(const std::string& pin, const std::string& net) {
+      const auto old = net_of_pin(pin);
+      if (old == net) {
+        return;
+      }
+      if (!old.empty()) {
+        s.timer.disconnect_pin(pin);
+      }
+      if (!net.empty()) {
+        s.timer.connect_pin(pin, net);
+      }
+      conn[pin] = net;
+      log.push_back({Kind::pin, pin, old, {}});
+    }
+    void set_net(const livehd::physical::Rc_net& net) override {
+      require_state();
+      index_base();
+      auto name = net_of_driver(net.driver);
+      if (name.empty()) {
+        name = std::format("__lhd_whatif_net_{}", serial++);
+        s.timer.insert_net(name);
+        nets.emplace(net.driver, name);
+        log.push_back({Kind::net, net.driver, name, {}});
+      }
+      for (const auto& node : net.nodes) {
+        if (!node.pin.empty()) {
+          move_pin(timer_pin(node.pin), name);
+        }
+      }
+      std::optional<livehd::physical::Rc_net> old;
+      if (const auto it = rc_now.find(net.driver); it != rc_now.end()) {
+        old = it->second;
+      } else if (const auto b = base.find(net.driver); b != base.end()) {
+        old = *b->second;
+      }
+      log.push_back({Kind::rc, net.driver, name, std::move(old)});
+      rc_now[net.driver] = net;
+      attach(net, name);
+    }
+    void rollback(size_t to) override {
+      if (to > log.size()) {
+        throw std::logic_error("what-if rollback past the edit log");
+      }
+      std::vector<std::pair<std::string, std::optional<livehd::physical::Rc_net>>> restore;  // oldest value last
+      while (log.size() > to) {
+        auto undo = std::move(log.back());
+        log.pop_back();
+        switch (undo.kind) {
+          case Kind::repower: {
+            s.timer.repower_gate(s.physical_instances_.at(undo.a), undo.b);
+            if (s.masters.contains(undo.a) && s.masters.at(undo.a) == undo.b) {
+              resized.erase(undo.a);
+            } else {
+              resized[undo.a] = undo.b;
+            }
+            break;
+          }
+          case Kind::pin: {
+            if (!net_of_pin(undo.a).empty()) {
+              s.timer.disconnect_pin(undo.a);
+            }
+            if (!undo.b.empty()) {
+              s.timer.connect_pin(undo.a, undo.b);
+            }
+            const auto evaluated = s.connections.find(undo.a);
+            if ((evaluated == s.connections.end() && undo.b.empty())
+                || (evaluated != s.connections.end() && evaluated->second == undo.b)) {
+              conn.erase(undo.a);
+            } else {
+              conn[undo.a] = undo.b;
+            }
+            break;
+          }
+          case Kind::net: {
+            s.timer.remove_net(undo.b);
+            nets.erase(undo.a);
+            break;
+          }
+          case Kind::gate: {
+            s.timer.remove_gate(undo.a);
+            s.physical_instances_.erase(undo.a);
+            gates.erase(undo.a);
+            resized.erase(undo.a);
+            break;
+          }
+          case Kind::rc: {
+            restore.emplace_back(undo.a, std::move(undo.rc));
+            break;
+          }
+        }
+      }
+      // Reverse pop order: the last entry holds the value from before all undone edits.
+      std::unordered_map<std::string, std::optional<livehd::physical::Rc_net>> final_rc;
+      for (auto& [driver, rc] : restore) {
+        final_rc[driver] = std::move(rc);
+      }
+      index_base();
+      for (auto& [driver, rc] : final_rc) {
+        const auto name = net_of_driver(driver);
+        if (!rc || name.empty()) {
+          rc_now.erase(driver);
+          continue;
+        }
+        const auto b = base.find(driver);
+        if (b != base.end() && *b->second == *rc) {
+          rc_now.erase(driver);
+        } else {
+          rc_now[driver] = *rc;
+        }
+        attach(*rc, name);
+      }
+    }
+    void   update() { s.timer.update_timing(); }
+    double wns() override {
+      update();
+      const auto value = s.timer.report_wns(ot::MAX);
+      return value && std::isfinite(*value) ? *value * unit_ps() : 0;
+    }
+    double tns() override {
+      update();
+      std::unordered_map<std::string_view, float> worst;
+      const auto                                  add = [&](std::string_view pin, std::optional<float> slack) {
+        if (!slack || !std::isfinite(*slack)) {
+          return;
+        }
+        auto [it, inserted] = worst.emplace(pin, *slack);
+        if (!inserted) {
+          it->second = std::min(it->second, *slack);
+        }
+      };
+      for (const auto& [name, output] : s.timer.primary_outputs()) {
+        for (auto tran : {ot::RISE, ot::FALL}) {
+          add(name, output.slack(ot::MAX, tran));
+        }
+      }
+      for (const auto& test : s.timer.tests()) {
+        for (auto tran : {ot::RISE, ot::FALL}) {
+          add(test.constrained_pin().name(), test.slack(ot::MAX, tran));
+        }
+      }
+      double total = 0;
+      for (const auto& [pin, slack] : worst) {
+        total += std::min(0.0f, slack);
+      }
+      return total * unit_ps();
+    }
+    std::vector<std::pair<std::string, double>> failing_endpoints(double below_ps) override {
+      update();
+      const double                                scale = unit_ps();
+      std::unordered_map<std::string_view, float> worst;
+      const auto                                  add = [&](std::string_view pin, std::optional<float> slack) {
+        if (!slack || !std::isfinite(*slack)) {
+          return;
+        }
+        auto [it, inserted] = worst.emplace(pin, *slack);
+        if (!inserted) {
+          it->second = std::min(it->second, *slack);
+        }
+      };
+      for (const auto& [name, output] : s.timer.primary_outputs()) {
+        for (auto tran : {ot::RISE, ot::FALL}) {
+          add(name, output.slack(ot::MAX, tran));
+        }
+      }
+      for (const auto& test : s.timer.tests()) {
+        for (auto tran : {ot::RISE, ot::FALL}) {
+          add(test.constrained_pin().name(), test.slack(ot::MAX, tran));
+        }
+      }
+      if (reverse_pins.empty()) {
+        for (const auto& [physical, timer] : s.physical_timing_pins_) {
+          reverse_pins.emplace(timer, physical);
+        }
+      }
+      std::vector<std::pair<std::string, double>> result;
+      for (const auto& [pin, slack] : worst) {
+        if (slack * scale >= below_ps) {
+          continue;
+        }
+        const auto physical = reverse_pins.find(std::string(pin));
+        result.emplace_back(physical == reverse_pins.end() ? std::string(pin) : physical->second, slack * scale);
+      }
+      std::sort(result.begin(), result.end(), [](const auto& a, const auto& b) {
+        return std::tie(a.second, a.first) < std::tie(b.second, b.first);
+      });
+      return result;
+    }
+    std::unordered_map<std::string, std::string> reverse_pins;
+    double                                       clock_period() override {
+      update();
+      double best = 0;
+      for (const auto& [name, clock] : s.timer.clocks()) {
+        if (clock.period() > 0 && (best == 0 || clock.period() < best)) {
+          best = clock.period();
+        }
+      }
+      return best * unit_ps();
+    }
+    std::pair<unsigned, double> electrical(const std::vector<std::string>& labels) override {
+      update();
+      unsigned violations = 0;
+      double   excess     = 0;
+      for (const auto& label : labels) {
+        const auto it = s.timer.pins().find(timer_pin(label));
+        if (it == s.timer.pins().end() || it->second.is_ideal_clock()) {
+          continue;
+        }
+        const auto& pin = it->second;
+        for (const auto split : {ot::MIN, ot::MAX}) {
+          const auto* cp = pin.cellpin(split);
+          if (!cp) {
+            continue;
+          }
+          const auto check = [&](double actual, const std::optional<float>& limit) {
+            if (limit && *limit > 0 && actual > *limit * (1 + 1e-6)) {
+              ++violations;
+              excess += actual / *limit - 1;
+            }
+          };
+          for (const auto tran : {ot::RISE, ot::FALL}) {
+            if (const auto slew = pin.slew(split, tran)) {
+              check(*slew, cp->max_transition);
+            }
+            if (pin.is_output() && pin.net()) {
+              if (const auto value = s.timer.report_load(pin.net()->name(), split, tran)) {
+                check(*value, cp->max_capacitance);
+              }
+            }
+          }
+          if (pin.is_output() && pin.net()) {
+            check((pin.net()->num_pins() - 1), cp->max_fanout);
+          }
+        }
+      }
+      return {violations, excess};
+    }
+    Pin_timing pin(const std::string& label) override {
+      update();
+      Pin_timing result;
+      const auto it = s.timer.pins().find(timer_pin(label));
+      if (it == s.timer.pins().end()) {
+        return result;
+      }
+      const double scale   = unit_ps();
+      const auto   extreme = [&](auto getter, bool largest) -> std::optional<double> {
+        std::optional<double> best;
+        for (const auto tran : {ot::RISE, ot::FALL}) {
+          if (const auto v = getter(tran); v && std::isfinite(*v)) {
+            best = best ? (largest ? std::max(*best, double(*v)) : std::min(*best, double(*v))) : double(*v);
+          }
+        }
+        return best ? std::optional<double>(*best * scale) : std::nullopt;
+      };
+      const auto& p   = it->second;
+      result.slack    = extreme([&](ot::Tran t) { return p.slack(ot::MAX, t); }, false);
+      result.arrival  = extreme([&](ot::Tran t) { return p.at(ot::MAX, t); }, true);
+      result.required = extreme([&](ot::Tran t) { return p.rat(ot::MAX, t); }, false);
+      result.slew     = extreme([&](ot::Tran t) { return p.slew(ot::MAX, t); }, true);
+      return result;
+    }
+    std::optional<double> load(const std::string& driver) override {
+      update();
+      const auto name = net_of_driver(driver);
+      const auto it   = s.timer.nets().find(name);
+      if (name.empty() || it == s.timer.nets().end()) {
+        return std::nullopt;
+      }
+      return std::max(it->second.load(ot::MAX, ot::RISE), it->second.load(ot::MAX, ot::FALL)) * cap_ff();
+    }
+    std::optional<std::pair<double, double>> arc(const std::string& master, const std::string& from, const std::string& to,
+                                                 double slew_ps, double load_ff) override {
+      const auto* cell = s.timer.celllib(ot::MAX) ? s.timer.celllib(ot::MAX)->cell(master) : nullptr;
+      const auto* pin  = cell ? cell->cellpin(to) : nullptr;
+      if (!pin) {
+        return std::nullopt;
+      }
+      const double                             scale = unit_ps();
+      std::optional<std::pair<double, double>> worst;
+      for (const auto& timing : pin->timings) {
+        if (timing.related_pin != from || timing.is_constraint()) {
+          continue;
+        }
+        for (auto irf : {ot::RISE, ot::FALL}) {
+          for (auto orf : {ot::RISE, ot::FALL}) {
+            const auto d = timing.delay(irf, orf, slew_ps / scale, load_ff / cap_ff());
+            const auto t = timing.slew(irf, orf, slew_ps / scale, load_ff / cap_ff());
+            if (!d || !std::isfinite(*d)) {
+              continue;
+            }
+            const double delay = *d * scale, out = t && std::isfinite(*t) ? *t * scale : 0;
+            if (!worst) {
+              worst = {delay, out};
+            } else {
+              worst = {std::max(worst->first, delay), std::max(worst->second, out)};
+            }
+          }
+        }
+      }
+      return worst;
+    }
+    std::optional<double> pin_capacitance(const std::string& master, const std::string& name) override {
+      const auto* cell = s.timer.celllib(ot::MAX) ? s.timer.celllib(ot::MAX)->cell(master) : nullptr;
+      const auto* pin  = cell ? cell->cellpin(name) : nullptr;
+      if (!pin || !pin->capacitance) {
+        return std::nullopt;
+      }
+      return *pin->capacitance * cap_ff();
+    }
+  };
+  std::unique_ptr<Whatif_impl> whatif_;
+  Whatif_impl&                 whatif() {
+    if (!whatif_) {
+      whatif_ = std::make_unique<Whatif_impl>(*this);
+    }
+    return *whatif_;
+  }
+  void discard_whatif() {
+    if (whatif_ && whatif_->mark() > 0) {
+      whatif_->rollback(0);
+    }
+    if (whatif_) {
+      whatif_->reverse_pins.clear();
+    }
+  }
+
   livehd::timing::Feedback evaluate(const std::shared_ptr<hhds::Graph>&                 graph,
                                     std::shared_ptr<const livehd::physical::Parasitics> rc) {
     if (!graph || !rc) {
       throw std::invalid_argument("physical timing requires a graph and in-memory RC");
     }
+    discard_whatif();
     const auto start = std::chrono::steady_clock::now();
     physical_rc_     = std::move(rc);
     validate_physical_rc(graph);
@@ -282,7 +743,35 @@ struct Physical_session::Impl : Pass_opentimer {
     return result;
   }
 };
+// Forwards to the current Impl: a failed evaluation rebuilds Impl (and drops its edits).
+struct Physical_session::Proxy final : livehd::timing::Whatif {
+  Physical_session& owner;
+  explicit Proxy(Physical_session& o) : owner(o) {}
+  Impl::Whatif_impl&   w() { return owner.impl_->whatif(); }
+  [[nodiscard]] size_t mark() const override { return owner.impl_->whatif().mark(); }
+  void                 rollback(size_t m) override { w().rollback(m); }
+  void                 resize(const std::string& instance, const std::string& master) override { w().resize(instance, master); }
+  void                 add_cell(const std::string& instance, const std::string& master) override { w().add_cell(instance, master); }
+  void                 set_net(const livehd::physical::Rc_net& net) override { w().set_net(net); }
+  double               wns() override { return w().wns(); }
+  double               tns() override { return w().tns(); }
+  Pin_timing           pin(const std::string& label) override { return w().pin(label); }
+  std::optional<double>                       load(const std::string& driver) override { return w().load(driver); }
+  std::vector<std::pair<std::string, double>> failing_endpoints(double below_ps) override {
+    return w().failing_endpoints(below_ps);
+  }
+  std::optional<std::pair<double, double>> arc(const std::string& master, const std::string& from, const std::string& to,
+                                               double slew_ps, double load_ff) override {
+    return w().arc(master, from, to, slew_ps, load_ff);
+  }
+  std::optional<double> pin_capacitance(const std::string& master, const std::string& pin) override {
+    return w().pin_capacitance(master, pin);
+  }
+  std::pair<unsigned, double> electrical(const std::vector<std::string>& labels) override { return w().electrical(labels); }
+  double                      clock_period() override { return w().clock_period(); }
+};
 Physical_session::Physical_session(const Eprp_var& options) : options_(options) {
+  proxy_ = std::make_unique<Proxy>(*this);
   options_.graphs.clear();
   options_.physical_rc.reset();
   impl_ = std::make_unique<Impl>(options_);
@@ -302,4 +791,5 @@ livehd::timing::Feedback Physical_session::evaluate(const std::shared_ptr<hhds::
   }
 }
 const Physical_session::Statistics& Physical_session::statistics() const { return impl_->stats; }
+livehd::timing::Whatif&             Physical_session::whatif() { return *proxy_; }
 }  // namespace livehd::opentimer
