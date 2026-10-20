@@ -345,10 +345,15 @@ bit by bit. `hyps:` lists the conjuncts a target's STEP assumes (all when
 absent); `split:` checks the target once per case of that `oneof`, each from a
 template state in which the case's registers are constants and every `eq`
 (and every `eqif` the case satisfies) shares one variable. Each case is one
-symbolic run, all built in parallel; the obligations are solved in parallel
+symbolic run, built `runs:<n>` at a time (default: `jobs`; a run holds its
+symbolic state until the final check); the obligations are solved in parallel
 (`jobs:<n>`, default 8). The verdict is `runConjTOf` (`runConjTOf_sound_ref`),
-evaluated as `sideOKC && checkT` over the runs built here. A satisfiable
-STEP is decoded through its case's template and replayed concretely. -/
+evaluated as `sideOKC && checkT` over the runs built here. A satisfiable STEP
+is decoded through its case's template into a state and two cycles of inputs;
+every conjunct is evaluated on it at both cycles, and `<work>/cti_<target>.txt`
+lists the conjuncts false at each cycle, the nonzero inputs, the registers that
+change and the whole state by register name (untrusted diagnostics). `replay`
+also re-runs the two cycles on the projection's simulator. -/
 
 structure SpecLine where
   name  : String
@@ -456,6 +461,40 @@ def decodeStepT (φ : BVLogicalExpr) (model : Std.HashMap Nat Bool) (L : Shape) 
     (inW.zipIdx.map fun (w, t) => mk_bv w (val (base + j * nIn + t) w)).toArray
   return ({ flops, mems }, ins.toArray)
 
+/-! ## Counterexample evaluation (diagnostics only)
+A counterexample report evaluates the decoded state through the run's definitions.
+That output is untrusted: no verdict uses it. `evalD` is `BVExpr.eval` reading the
+variables from an array, with every shift amount clamped to the width (`x <<< n` for
+`n >= w` equals `x <<< w`), so a large symbolic amount never makes `Nat.shiftLeft`
+build `2^n`. `extendD` extends the primary values through the definitions in order,
+like `extendSt`, in linear time. -/
+partial def evalD (get : Nat → PBV) : {w : Nat} → BVExpr w → BitVec w
+  | w, .var idx => let p := get idx; if h : p.w = w then h ▸ p.bv else p.bv.truncate w
+  | _, .const val => val
+  | _, .extract start len e => BitVec.extractLsb' start len (evalD get e)
+  | _, .bin l op r => op.eval (evalD get l) (evalD get r)
+  | _, .un op e => op.eval (evalD get e)
+  | _, .append l r h => h ▸ (evalD get l ++ evalD get r)
+  | _, .replicate n e h => h ▸ BitVec.replicate n (evalD get e)
+  | w, .shiftLeft l r => evalD get l <<< min (evalD get r).toNat w
+  | w, .shiftRight l r => evalD get l >>> min (evalD get r).toNat w
+  | w, .arithShiftRight l r => (evalD get l).sshiftRight (min (evalD get r).toNat w)
+
+partial def evalLD (get : Nat → PBV) : BVLogicalExpr → Bool
+  | .literal (.bin l op r) => op.eval (evalD get l) (evalD get r)
+  | .literal (.getLsbD e i) => (evalD get e).getLsbD i
+  | .const b => b
+  | .not e => !evalLD get e
+  | .gate g a b => g.eval (evalLD get a) (evalLD get b)
+  | .ite c a b => if evalLD get c then evalLD get a else evalLD get b
+
+def extendD (xs : Array PBV) (st : SymSt) : Array PBV := Id.run do
+  let mut a := xs
+  for d in st.defs do
+    let v := evalD (fun i => a.getD i ⟨0#0⟩) d.2
+    a := a.push ⟨v⟩
+  return a
+
 /-- Two concrete cycles from the decoded state: outputs of both, and the state
 after the first. -/
 def replay2 (D : DesignCert) (R : Program) (st : StateM) (ins : Array RuntimeInput) :
@@ -466,18 +505,22 @@ def replay2 (D : DesignCert) (R : Program) (st : StateM) (ins : Array RuntimeInp
   pure (r0.outputs, r0.nextState, r1.outputs)
 
 /-- Registers by name: bits `x[3]`, `x[2]`, ... of a bit-blasted register are
-joined back into `x`. -/
+joined back into `x` (the last index only, so the bits of `mem[1][3]` form `mem[1]`). -/
 def groupedState (names : Array String) (st : StateM) : List (String × String) := Id.run do
   let mut groups : Std.HashMap String (List (Nat × Nat × Int)) := {}
   let mut order : Array String := #[]
   for i in List.range st.flops.size do
     let b := st.flops[i]!
     let nm := names.getD i s!"flop{i}"
-    let (base, bit) := match nm.splitOn "[" with
-      | [x, r] => match (r.dropRight 1).toNat? with
-        | some k => (x, k)
-        | none => (nm, 0)
-      | _ => (nm, 0)
+    let parts := nm.splitOn "["
+    let (base, bit) := match parts.getLast? with
+      | some r =>
+        if parts.length ≥ 2 && r.endsWith "]" then
+          match (r.dropRight 1).toNat? with
+          | some k => ("[".intercalate parts.dropLast, k)
+          | none => (nm, 0)
+        else (nm, 0)
+      | none => (nm, 0)
     unless groups.contains base do order := order.push base
     groups := groups.insert base ((bit, b.width, bv_uint b) :: groups.getD base [])
   return order.toList.map fun base =>
@@ -605,16 +648,20 @@ k = 1; jobs {jobs}; initial state all-zero"
   -- the base run, the plain step run (layout), and one run per case, in parallel
   let tb ← IO.asTask (prio := .dedicated) (IO.lazyPure fun _ => baseRunC D R sp.plain s0)
   let tp ← IO.asTask (prio := .dedicated) (IO.lazyPure fun _ => stepRunC D R sp.plain)
-  let mut tcs := #[]
-  for c in allC do
-    tcs := tcs.push (← IO.asTask (prio := .dedicated) (IO.lazyPure fun _ => stepRunT D R sp c))
+  -- case runs, `runs` at a time (each holds a symbolic run in memory until the final check)
+  let runJobs := max 1 (((opt "runs").bind (·.toNat?)).getD jobs)
+  let mut runList : List (Case × Except String (List StepO × SymSt)) := []
+  for batch in chunksOf (List.range allC.length) runJobs do
+    let mut tcs := #[]
+    for j in batch do
+      let c := allC.getD j []
+      tcs := tcs.push (c, ← IO.asTask (prio := .dedicated) (IO.lazyPure fun _ => stepRunT D R sp c))
+    for (c, task) in tcs.toList do
+      match ← IO.wait task with
+      | .ok r => runList := runList ++ [(c, r)]
+      | .error e => do say s!"  RESULT: REFUSED ({e})"; return 4
   let rb ← match ← IO.wait tb with | .ok r => pure r | .error e => do say s!"  RESULT: REFUSED ({e})"; return 4
   let r0 ← match ← IO.wait tp with | .ok r => pure r | .error e => do say s!"  RESULT: REFUSED ({e})"; return 4
-  let mut runList : List (Case × Except String (List StepO × SymSt)) := []
-  for (c, task) in allC.zip tcs.toList do
-    match ← IO.wait task with
-    | .ok r => runList := runList ++ [(c, r)]
-    | .error e => do say s!"  RESULT: REFUSED ({e})"; return 4
   let t2 ← IO.monoMsNow
   say s!"  symbolic runs built in {t2 - t1} ms (base, plain step, {allC.length} case run(s))"
   let (sB, stB) ← match rb with
@@ -678,31 +725,50 @@ k = 1; jobs {jobs}; initial state all-zero"
             failing := failing ++ [tag]
             say s!"  [{tag}] {nc} clauses; bit-blast+CNF+write {bb} ms, solver {sat} ms: SAT (not preserved)"
             if let some φ := φo then
-              let (st0, ins) := decodeStepT φ (parseModel model) sp.L sp.inW (sp.tmplOf c)
-              match replay2 D R st0 ins with
-              | none => say s!"  [{tag}] counterexample NOT REPLAYED (the simulator refused the decoded state)"
-              | some (o0, st1, o1) =>
-                let a0 := asmBit o0 ins[0]! sp.asmOut sp.asmIn
-                let a1 := asmBit o1 ins[1]! sp.asmOut sp.asmIn
-                let hs := (sp.hypsOf t).all fun i => (sp.conjs.getD i default).holds st0.flops o0
-                let inCase := caseHolds st0.flops c
-                let broke := !(sp.conjs.getD t default).holds st1.flops o1
-                let conf := a0 && a1 && hs && inCase && broke
+              if let some (.ok ([a, b], st)) := findRun runList c then
+                -- the model's primary values: the cycle-0 state (through the case's
+                -- template) and both cycles' inputs; every cut variable then follows
+                -- from the run's definitions (extendSt, as in the soundness proofs), so
+                -- every conjunct and register is evaluated exactly, without simulating
+                let (st0, ins) := decodeStepT φ (parseModel model) sp.L sp.inW (sp.tmplOf c)
+                let xs := (stateVals st0 ++ inputVals ins[0]! ++ inputVals ins[1]!).toArray
+                let σa := extendD xs st
+                let get := fun i => σa.getD i ⟨0#0⟩
+                let s0V := stateVarT sp.L (sp.tmplOf c) 0
+                let falseAt (sv so : SVal) : List String := (List.range n).filterMap fun i =>
+                  match holdsE sv so (conjs[i]!) with
+                  | some e => if evalLD get e then none else some (cname[i]!)
+                  | none => some s!"{cname[i]!}(unreadable)"
+                let f0 := falseAt s0V a.2.1
+                let f1 := falseAt a.2.2 b.2.1
+                let fl1 : Array BV := (List.range sp.L.fws.length).toArray.map fun f =>
+                  match flopE a.2.2 f with
+                  | some ⟨w, e⟩ => mk_bv w (Int.ofNat (evalD get e).toNat)
+                  | none => mk_bv 1 0
+                let regs0 := groupedState flopNames st0
+                let regs1 := groupedState flopNames { flops := fl1, mems := #[] }
+                let changed := (regs0.zip regs1).filterMap fun ((r, v0), (_, v1)) =>
+                  if v0 == v1 then none else some s!"  {r}: {v0} -> {v1}"
                 let inNames ← ioNames cert "inputs"
                 let safe := tag.map fun ch => if ch.isAlphanum || ch == '_' then ch else '_'
                 let f := work / s!"cti_{safe}.txt"
-                let conjAt (fl : Array BV) (o : Array BV) : String := " ".intercalate ((List.range n).filterMap fun i =>
-                  if (conjs[i]!).holds fl o then none else some (cname[i]!))
-                let regs := "\n".intercalate ((groupedState flopNames st0).map fun (r, v) => s!"  {r} = {v}")
                 let inLine (i : RuntimeInput) : String := " ".intercalate ((List.range i.size).filterMap fun k =>
                   let v := bv_uint i[k]!
                   if v == 0 then none else some s!"{inNames.getD k s!"in{k}"}={v}")
                 IO.FS.writeFile f s!"counterexample to induction for {tag}\n\
-replayed: assumptions {a0}/{a1}, in the case {inCase}, hypotheses at cycle 0 {hs}, broken at cycle 1 {broke}\n\
-conjuncts FALSE at cycle 0: {conjAt st0.flops o0}\nconjuncts FALSE at cycle 1: {conjAt st1.flops o1}\n\
+conjuncts FALSE at cycle 0: {f0}\nconjuncts FALSE at cycle 1: {f1}\n\
 nonzero inputs, cycle 0: {inLine ins[0]!}\nnonzero inputs, cycle 1: {inLine ins[1]!}\n\
-state at cycle 0:\n{regs}\n"
-                say s!"  [{tag}] counterexample {if conf then "REPLAYED" else "NOT CONFIRMED by replay"}; false at cycle 1: {conjAt st1.flops o1}; state and inputs in {f}"
+registers that change from cycle 0 to cycle 1:\n{"\n".intercalate changed}\n\
+state at cycle 0:\n{"\n".intercalate (regs0.map fun (r, v) => s!"  {r} = {v}")}\n"
+                say s!"  [{tag}] counterexample: false at cycle 0 {f0}, at cycle 1 {f1}; state, inputs and changes in {f}"
+                -- optional concrete cross-check on the projection's simulator (slow on big designs)
+                if rest.contains "replay" then
+                  match replay2 D R st0 ins with
+                  | none => say s!"  [{tag}] replay: the simulator refused the decoded state"
+                  | some (o0, st1, o1) =>
+                    let broke := !(sp.conjs.getD t default).holds st1.flops o1
+                    let hs := (sp.hypsOf t).all fun i => (sp.conjs.getD i default).holds st0.flops o0
+                    say s!"  [{tag}] replay: hypotheses at cycle 0 {hs}, broken at cycle 1 {broke}"
         | .failed w => do say s!"  [{tag}] RESULT: SOLVER FAILED: {w}"; return 5
   let t3 ← IO.monoMsNow
   say s!"  steps: {items.size} obligations, {totalC} clauses in total, largest {maxC}; {t3 - t2} ms"

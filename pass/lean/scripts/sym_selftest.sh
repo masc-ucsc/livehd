@@ -186,8 +186,12 @@ run sym_refine "COUNTEREXAMPLE"      "$A2" "$A1" pair:acc_o=acc_o k:4
 grep -q "COUNTEREXAMPLE (base, replayed)" "$OUT/run_$N.log" || { tail -5 "$OUT/run_$N.log"; echo "FAIL: refinement counterexample not replayed"; exit 1; }
 run sym_verify "INVARIANT PROVED"    "$P" "conj:$OUT/pair_all.spec" jobs:4
 run sym_verify "INVARIANT PROVED"    "$P" "conj:$OUT/pair_min.spec" jobs:4
-run sym_verify "NOT INDUCTIVE"       "$P" "conj:$OUT/pair_missing.spec" jobs:4
-grep -q '\[eq_ok\] counterexample REPLAYED' "$OUT/run_$N.log" || { tail -5 "$OUT/run_$N.log"; echo "FAIL: step counterexample not replayed"; exit 1; }
+run sym_verify "NOT INDUCTIVE"       "$P" "conj:$OUT/pair_missing.spec" jobs:4 replay
+# the CTI is evaluated on every conjunct: eq_ok's hypotheses hold at cycle 0
+# (only the left-out a_ok fails there) and eq_ok fails at cycle 1
+grep -q '\[eq_ok\] counterexample: false at cycle 0 \[a_ok\], at cycle 1 \[.*eq_ok' "$OUT/run_$N.log" || { tail -5 "$OUT/run_$N.log"; echo "FAIL: step counterexample not evaluated"; exit 1; }
+grep -q '\[eq_ok\] replay: hypotheses at cycle 0 true, broken at cycle 1 true' "$OUT/run_$N.log" || { tail -5 "$OUT/run_$N.log"; echo "FAIL: step counterexample not replayed"; exit 1; }
+grep -q '^conjuncts FALSE at cycle 1: .*eq_ok' "$OUT/work/cti_eq_ok.txt" || { cat "$OUT/work/cti_eq_ok.txt"; echo "FAIL: counterexample report"; exit 1; }
 grep -q 'not preserved under their hypotheses: \[eq_ok\]' "$OUT/run_$N.log" || { echo "FAIL: the failing conjunct is not named"; exit 1; }
 grep -q '^  a = 4.ha$' "$OUT/work/cti_eq_ok.txt" || { cat "$OUT/work/cti_eq_ok.txt"; echo "FAIL: counterexample state by register name"; exit 1; }
 run sym_verify "COUNTEREXAMPLE"      "$P" "conj:$OUT/pair_false.spec"
@@ -197,5 +201,5 @@ TC="$OUT/twocore_lean/twocore.dcert"
 run sym_verify "INVARIANT PROVED"    "$TC" "conj:$OUT/tc_split.spec" jobs:4
 grep -q '\[d_eq | sA=2,sB=3\] .*UNSAT' "$OUT/run_$N.log" || { echo "FAIL: per-case obligation not reported"; exit 1; }
 run sym_verify "NOT INDUCTIVE"       "$TC" "conj:$OUT/tc_bad.spec" jobs:4
-grep -q '\[d_eq | sA=2,sB=2\] counterexample REPLAYED' "$OUT/run_$N.log" || { tail -5 "$OUT/run_$N.log"; echo "FAIL: case counterexample not replayed"; exit 1; }
+grep -q '\[d_eq | sA=2,sB=2\] counterexample: false at cycle 0 \[\], at cycle 1 \[.*d_eq' "$OUT/run_$N.log" || { tail -5 "$OUT/run_$N.log"; echo "FAIL: case counterexample not evaluated"; exit 1; }
 echo "PASS: sym_selftest"
