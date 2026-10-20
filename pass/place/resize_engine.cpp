@@ -6,10 +6,12 @@
 #include <algorithm>
 #include <chrono>
 #include <cmath>
+#include <cstdlib>
 #include <filesystem>
 #include <format>
 #include <fstream>
 #include <functional>
+#include <iostream>
 #include <limits>
 #include <mutex>
 #include <numeric>
@@ -184,6 +186,10 @@ struct Inst {
   Point                    center{};
   std::vector<std::string> inputs;
   std::string              output;
+  // Non-inventory combinational cells (several outputs, wide functions) are
+  // traversed by path tracing but never edited.
+  bool                     through = false;
+  std::vector<std::string> outputs;
 };
 struct Stage {
   std::string driver, sink, input, inst;  // input/inst empty for a port startpoint
@@ -229,9 +235,17 @@ public:
     plan.tns_before = tns_;
     try {
       auto t = Clock::now();
+      std::cout << std::format("resize: plan start wns {:.2f} tns {:.1f} margin {:.1f}\n", wns_, tns_, margin_) << std::flush;
       electrical_phase();
       electrical_s_ = elapsed(t);
-      t             = Clock::now();
+      std::cout << std::format("resize: electrical {} nets {} fixed wns {:.2f} tns {:.1f} {:.1f}s\n",
+                               electrical_nets_,
+                               electrical_fixed_,
+                               wns_,
+                               tns_,
+                               electrical_s_)
+                << std::flush;
+      t = Clock::now();
       if (wns_ < 0) {
         timing_phase();
       }
@@ -253,9 +267,23 @@ public:
         ++plan.buffers;
       }
     }
-    plan.upsized   = upsized_;
-    plan.downsized = downsized_;
-    plan.report    = report(plan, elapsed(start));
+    // Net master changes of pre-existing instances (several edits may touch one).
+    std::unordered_map<std::string, std::string> final_master;
+    for (const auto& e : plan.edits) {
+      if (e.kind == Resize_edit::Kind::resize) {
+        final_master[e.instance] = e.master;
+      }
+    }
+    for (const auto& [name, master] : final_master) {
+      const auto original = original_area_.find(name);
+      if (original == original_area_.end()) {
+        continue;  // a buffer this plan created
+      }
+      const double area  = lib_.cells.at(master).area;
+      plan.upsized      += area > original->second;
+      plan.downsized    += area < original->second;
+    }
+    plan.report = report(plan, elapsed(start));
     return plan;
   }
 
@@ -273,7 +301,7 @@ private:
   std::unordered_map<std::string, Point>                    pos_;
   std::unordered_set<std::string>                           blocked_drivers_;  // clock/protected nets: never touched
   std::unordered_set<std::string>                           names_;
-  std::unordered_map<std::string, double>                   pin_cap_;
+  std::unordered_map<std::string, double>                   pin_cap_, original_area_;
   std::vector<std::function<void()>>                        journal_;
   std::vector<Resize_edit>                                  edits_;
   unsigned                                                  group_ = 0, serial_ = 0;
@@ -284,8 +312,12 @@ private:
   unsigned    upsized_ = 0, downsized_ = 0, endpoints_worked_ = 0, endpoints_stuck_ = 0, infeasible_paths_ = 0, feasible_paths_ = 0;
   unsigned    electrical_nets_ = 0, electrical_fixed_ = 0, rounds_ = 0, recover_batches_ = 0;
   double      electrical_s_ = 0, timing_s_ = 0, recovery_s_ = 0, probe_s_ = 0;
-  unsigned    probes_      = 0;
-  std::string stop_reason_ = "none";
+  unsigned    probes_       = 0;
+  unsigned    reject_slack_ = 0, reject_wns_ = 0, reject_tns_ = 0, reject_electrical_ = 0, no_moves_ = 0;
+  unsigned    generated_[4]  = {0, 0, 0, 0};
+  std::string stop_reason_   = "none";
+  bool        debug_         = std::getenv("LHD_RESIZE_DEBUG") != nullptr;
+  unsigned    debug_printed_ = 0;
 
   // ---- model -------------------------------------------------------------
   void build_model() {
@@ -312,6 +344,7 @@ private:
         inst.center   = {p.x + p.width / 2.0, p.y + p.height / 2.0};
       }
       if (const auto* cell = combinational(n, lib_.cells)) {
+        original_area_.emplace(name, cell->area);
         inst.cell   = cell;
         inst.output = name + ":" + cell->output;
         for (const auto& pin : cell->inputs) {
@@ -326,6 +359,21 @@ private:
         inst.editable = scalar && !fixed(n) && !protected_names.contains(name) && c != components.end()
                         && c->second->place.status != Ann_place::Status::FIXED
                         && c->second->place.status != Ann_place::Status::LOCKED && lib_.ladders.contains(cell->name);
+      } else {
+        bool combinational_outputs = !io->get_output_pin_decls().empty();
+        for (const auto& d : io->get_output_pin_decls()) {
+          const auto drive      = lib_.drives.find({inst.master, d.name});
+          combinational_outputs = combinational_outputs && drive != lib_.drives.end() && !drive->second.sequential;
+          inst.outputs.push_back(name + ":" + d.name);
+        }
+        if (combinational_outputs) {
+          inst.through = true;
+          for (const auto& d : io->get_input_pin_decls()) {
+            if (io->get_bits(d.name) <= 1) {
+              inst.inputs.push_back(name + ":" + d.name);
+            }
+          }
+        }
       }
       insts_.emplace(name, std::move(inst));
     }
@@ -614,15 +662,101 @@ private:
         drivers.insert(d->second);
       }
     }
+    std::vector<std::string> todo;
     for (const auto& driver : drivers) {
-      if (blocked_drivers_.contains(driver) || !nets_.contains(driver)) {
-        continue;
-      }
-      ++electrical_nets_;
-      if (fix_electrical(driver)) {
-        ++electrical_fixed_;
+      if (!blocked_drivers_.contains(driver) && nets_.contains(driver)) {
+        todo.push_back(driver);
       }
     }
+    electrical_nets_ = todo.size();
+    // Many violating nets (an unbuffered synthesis netlist): plan each repair
+    // locally and probe them together; a rejected batch is bisected down to the
+    // per-net search, which also tries every alternative.
+    std::vector<std::pair<size_t, size_t>> pending;
+    const size_t                           batch = todo.size() > 32 ? std::max<size_t>(32, todo.size() / 8) : 1;
+    for (size_t i = 0; i < todo.size(); i += batch) {
+      pending.emplace_back(i, std::min(todo.size(), i + batch));
+    }
+    for (size_t cursor = 0; cursor < pending.size(); ++cursor) {
+      const auto [begin, end] = pending[cursor];
+      if (end - begin == 1) {
+        electrical_fixed_ += fix_electrical(todo[begin]);
+        continue;
+      }
+      std::vector<std::string> drivers_in;
+      for (size_t i = begin; i < end; ++i) {
+        drivers_in.push_back(todo[i]);
+      }
+      auto                     pins   = touched(drivers_in);
+      const auto               before = w_.electrical(pins);
+      Attempt                  a(*this);
+      std::vector<std::string> created;
+      unsigned                 applied = 0;
+      for (const auto& d : drivers_in) {
+        applied += quick_electrical(d, created);
+      }
+      for (const auto& b : created) {
+        for (auto& q : net_pins(insts_.at(b).output)) {
+          pins.push_back(std::move(q));
+        }
+      }
+      for (const auto& d : drivers_in) {  // upsized drivers load their input nets too
+        if (const auto inst = insts_.find(instance_of(d)); inst != insts_.end() && inst->second.output == d) {
+          for (auto& q : touched(nets_of_instance(instance_of(d)))) {
+            pins.push_back(std::move(q));
+          }
+        }
+      }
+      const auto p     = measure();
+      const auto after = w_.electrical(pins);
+      ++electrical_.probes;
+      if (applied && after.first < before.first && timing_not_worse(p)) {
+        a.commit();
+        wns_ = p.wns;
+        tns_ = p.tns;
+        ++electrical_.accepted;
+        electrical_fixed_ += applied;
+        continue;
+      }
+      a.rollback();
+      const auto mid = begin + (end - begin) / 2;
+      pending.emplace_back(begin, mid);
+      pending.emplace_back(mid, end);
+    }
+  }
+  // One local repair without probing: the smallest stronger driver that meets
+  // its Liberty limits at the present load, otherwise a fanout tree.
+  unsigned quick_electrical(const std::string& driver, std::vector<std::string>& created) {
+    const auto owner = instance_of(driver);
+    if (editable(owner) && insts_.at(owner).output == driver) {
+      const auto& inst    = insts_.at(owner);
+      const auto* current = inst.cell;
+      const auto  l       = load(driver);
+      const auto  fanout  = nets_.at(driver).size();
+      double      slew_in = 0;
+      for (const auto& in : inst.inputs) {
+        slew_in = std::max(slew_in, w_.pin(in).slew.value_or(0));
+      }
+      for (const auto* v : lib_.ladders.at(current->name)) {
+        if (v->area <= current->area || (v->max_capacitance_ff && *v->max_capacitance_ff < l * 1.1)
+            || (v->max_fanout && *v->max_fanout < fanout)) {
+          continue;
+        }
+        double slew = 0;
+        for (const auto& in : inst.inputs) {
+          if (const auto a = w_.arc(v->name, pin_of(in), v->output, slew_in, l)) {
+            slew = std::max(slew, a->second);
+          }
+        }
+        if (v->max_transition_ps && slew > .9 * *v->max_transition_ps) {
+          continue;
+        }
+        resize(owner, v);
+        ++upsized_;
+        return 1;
+      }
+    }
+    return build_tree(driver, nets_.at(driver), 0, owner, created) ? 1 : 0;
   }
   bool fix_electrical(const std::string& driver) {
     auto       pins   = touched({driver});
@@ -730,7 +864,7 @@ private:
   // still exceeds a repeater's limits. Critical sinks stay on the root.
   bool build_tree(const std::string& driver, std::vector<std::string> sinks, unsigned depth, const std::string& owner,
                   std::vector<std::string>& created) {
-    if (lib_.buffers.empty() || sinks.size() < 2 || depth > 3) {
+    if (lib_.buffers.empty() || sinks.size() < 2 || depth > 5) {
       return false;
     }
     const Point root  = position(driver);
@@ -832,7 +966,12 @@ private:
       st.slew_out     = td.slew.value_or(0);
       st.inst         = instance_of(st.driver);
       const auto inst = insts_.find(st.inst);
-      if (inst == insts_.end() || !inst->second.cell || inst->second.output != st.driver) {
+      const bool comb = inst != insts_.end()
+                        && ((inst->second.cell && inst->second.output == st.driver)
+                            || (inst->second.through
+                                && std::find(inst->second.outputs.begin(), inst->second.outputs.end(), st.driver)
+                                       != inst->second.outputs.end()));
+      if (!comb) {
         stages.push_back(std::move(st));
         break;
       }
@@ -869,7 +1008,7 @@ private:
         const auto& inst   = insts_.at(st.inst);
         const auto  actual = st.at_out - st.at_in;
         double      best   = actual;
-        const auto  ladder = lib_.ladders.find(inst.cell->name);
+        const auto  ladder = inst.cell ? lib_.ladders.find(inst.cell->name) : lib_.ladders.end();
         if (ladder != lib_.ladders.end()) {
           for (const auto* v : ladder->second) {
             if (const auto d = stage_delay(v->name, pin_of(st.input), v->output, kIdealSlew, next)) {
@@ -1059,7 +1198,8 @@ private:
       if (!out.slack || *out.slack < path_slack + 50 || !believable(*out.slack)) {
         continue;
       }
-      const auto* small = smaller(owner, *out.slack - std::max(0.0, wns_) - margin_);
+      // Load shedding on a failing path: the gate keeps 50 ps above the path.
+      const auto* small = smaller(owner, *out.slack - path_slack - 50);
       if (small) {
         dc += pin_cap(s) - cell_pin_cap(*small, pin_of(s));
         m.downs.emplace_back(owner, small);
@@ -1169,7 +1309,20 @@ private:
     ++stats.probes;
     stats.seconds     += elapsed(t);
     const double need  = m.adds_cells() ? std::max(1.0, .01 * std::abs(slack)) : .05;
-    if (s1 < slack + need || !timing_not_worse(p) || !electrical_not_worse(e0, e1)) {
+    if (s1 < slack + need) {
+      ++reject_slack_;
+      return false;
+    }
+    if (p.wns < wns_ - kWnsEps) {
+      ++reject_wns_;
+      return false;
+    }
+    if (p.tns < tns_ - kTnsEps) {
+      ++reject_tns_;
+      return false;
+    }
+    if (!electrical_not_worse(e0, e1)) {
+      ++reject_electrical_;
       return false;
     }
     a.commit();
@@ -1194,7 +1347,28 @@ private:
       if (stages.empty()) {
         break;
       }
-      const bool feasible = ideal_slack(stages, *slack) >= 0;
+      const double ideal    = ideal_slack(stages, *slack);
+      const bool   feasible = ideal >= 0;
+      if (iteration == 0 && debug_ && debug_printed_ < 4) {
+        ++debug_printed_;
+        std::cout << std::format("resize-debug: endpoint {} slack {:.2f} ideal {:.2f} stages {}\n",
+                                 endpoint,
+                                 *slack,
+                                 ideal,
+                                 stages.size());
+        for (const auto& st : stages) {
+          const auto inst = insts_.find(st.inst);
+          std::cout << std::format("  {} -> {} master {} edit {} gate {:.2f} wire {:.2f} load {:.2f} slew {:.2f}\n",
+                                   st.input.empty() ? st.driver : st.input,
+                                   st.sink,
+                                   inst == insts_.end() ? std::string("-") : inst->second.master,
+                                   editable(st.inst),
+                                   st.input.empty() ? st.at_out : st.at_out - st.at_in,
+                                   st.at_sink - st.at_out,
+                                   load(st.driver),
+                                   st.slew_out);
+        }
+      }
       if (iteration == 0) {
         ++(feasible ? feasible_paths_ : infeasible_paths_);
       }
@@ -1212,7 +1386,11 @@ private:
         const double ea = a.est * (a.adds_cells() ? .7 : 1), eb = b.est * (b.adds_cells() ? .7 : 1);
         return ea > eb;
       });
-      bool progress = false;
+      for (const auto& m : moves) {
+        ++generated_[static_cast<int>(m.kind)];
+      }
+      no_moves_     += moves.empty();
+      bool progress  = false;
       for (size_t i = 0; i < moves.size() && i < 8; ++i) {
         if (attempt(moves[i], endpoint, *slack)) {
           progress = true;
@@ -1252,6 +1430,27 @@ private:
         stop_reason_ = failing.empty() ? "no failing endpoint" : "every failing endpoint is stuck or provably infeasible";
         break;
       }
+      std::cout << std::format(
+          "resize: timing round {} worked {} stuck {} wns {:.2f} tns {:.1f} probes {} ({:.1f}s) moves u/s/i/r {}/{}/{}/{} none {} "
+          "reject slack/wns/tns/elec {}/{}/{}/{} infeasible {}\n",
+          rounds_,
+          worked,
+          stuck.size(),
+          wns_,
+          tns_,
+          probes_,
+          probe_s_,
+          generated_[0],
+          generated_[3],
+          generated_[1],
+          generated_[2],
+          no_moves_,
+          reject_slack_,
+          reject_wns_,
+          reject_tns_,
+          reject_electrical_,
+          infeasible_paths_)
+                << std::flush;
       // Lack of progress: two consecutive rounds below 0.01% of the initial TNS
       // and 0.1 ps of WNS end the phase, independent of any cell budget.
       const bool slow = tns_ - tns_round < std::max(.1, 1e-4 * std::abs(tns0)) && wns_ - wns_round < .1;
@@ -1336,7 +1535,7 @@ private:
       return std::format(R"({{"probes":{},"accepted":{},"seconds":{:.3f}}})", c.probes, c.accepted, c.seconds);
     };
     return std::format(
-        R"({{"stage":"{}","period_ps":{:.1f},"margin_ps":{:.1f},"whatif_wns_ps":[{:.4f},{:.4f}],"whatif_tns_ps":[{:.4f},{:.4f}],"edits":{},"groups":{},"buffers":{},"upsized":{},"downsized":{},"electrical":{{"nets":{},"fixed":{},"moves":{},"seconds":{:.3f}}},"timing":{{"rounds":{},"endpoints_worked":{},"endpoints_stuck":{},"feasible_paths":{},"infeasible_paths":{},"stop":{},"upsize":{},"isolate":{},"repeater":{},"shed":{},"seconds":{:.3f}}},"recover":{{"batches":{},"moves":{},"seconds":{:.3f}}},"probes":{},"probe_seconds":{:.3f},"seconds":{:.3f}}})",
+        R"({{"stage":"{}","period_ps":{:.1f},"margin_ps":{:.1f},"whatif_wns_ps":[{:.4f},{:.4f}],"whatif_tns_ps":[{:.4f},{:.4f}],"edits":{},"groups":{},"buffers":{},"upsized":{},"downsized":{},"electrical":{{"nets":{},"fixed":{},"moves":{},"seconds":{:.3f}}},"timing":{{"rounds":{},"endpoints_worked":{},"endpoints_stuck":{},"feasible_paths":{},"infeasible_paths":{},"stop":{},"upsize":{},"isolate":{},"repeater":{},"shed":{},"seconds":{:.3f}}},"recover":{{"batches":{},"moves":{},"seconds":{:.3f}}},"probes":{},"probe_seconds":{:.3f},"rejects":{{"slack":{},"wns":{},"tns":{},"electrical":{}}},"generated":{{"upsize":{},"isolate":{},"repeater":{},"shed":{},"none":{}}},"seconds":{:.3f}}})",
         stage_ == Resize_stage::floorplan ? "floorplan" : "placed",
         period_,
         margin_,
@@ -1369,6 +1568,15 @@ private:
         recovery_s_,
         probes_,
         probe_s_,
+        reject_slack_,
+        reject_wns_,
+        reject_tns_,
+        reject_electrical_,
+        generated_[0],
+        generated_[1],
+        generated_[2],
+        generated_[3],
+        no_moves_,
         seconds);
   }
 };

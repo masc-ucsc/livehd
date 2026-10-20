@@ -78,6 +78,10 @@ protected:
     graph->get_output_pin(name).connect_driver(driver);
   }
   Timing_feedback timing(const Result& state) {
+    start_session();
+    return session->evaluate(state.graph, state.parasitics);
+  }
+  void start_session() {
     if (!session) {
       const auto sdc = options.output_dir + "/clock.sdc";
       std::ofstream(sdc) << std::format(
@@ -94,7 +98,6 @@ protected:
       session        = std::make_unique<livehd::opentimer::Physical_session>(var);
       options.whatif = &session->whatif();
     }
-    return session->evaluate(state.graph, state.parasitics);
   }
   // root at the left edge, `leaves` inverters at the right edge (x_right DBU).
   Result long_wires(unsigned leaves, int64_t x_right) {
@@ -319,6 +322,66 @@ TEST_F(Resize_engine, ElectricalFanoutTreeUsesVariableBranching) {
   }
   EXPECT_GE(children["root"], 2u);
   equivalent(result.placed);
+}
+
+TEST_F(Resize_engine, FloorplanCheckpointsUseTheEngineOnRealTiming) {
+  // FP plan with resize: the floorplan-stage checkpoints run the new engine on
+  // the real incremental timer at overlapping GP coordinates.
+  auto root = gate("sky130_fd_sc_hd__buf_1", "root", graph->get_input_pin("a"));
+  for (unsigned i = 0; i < 6; ++i) {
+    output(i ? "y" + std::to_string(i) : std::string("y"), i, gate("sky130_fd_sc_hd__inv_1", "macro" + std::to_string(i), root));
+  }
+  std::ifstream input(options.lefs[1]);
+  std::string   lef{std::istreambuf_iterator<char>(input), {}};
+  const auto    start = lef.find("MACRO sky130_fd_sc_hd__inv_1\n");
+  ASSERT_NE(start, std::string::npos);
+  lef.replace(lef.find("CLASS CORE", start), std::string("CLASS CORE").size(), "CLASS BLOCK");
+  options.lefs[1] = options.output_dir + "/macro.lef";
+  std::ofstream(options.lefs[1]) << lef;
+  options.fp_place = options.final_cells = options.fp_colors = options.fp_resize = true;
+  options.fp_minimum                                                             = 0;
+  options.fp_iterations                                                          = 120;
+  options.iterations                                                             = 40;
+  options.fp_timing_interval                                                     = 50;
+  options.halo_x = options.halo_y = .46;
+  options.utilization             = .1;
+  options.resistance_ohm_um       = 200;
+  options.capacitance_ff_um       = 20;
+  period_ns                       = .3;
+  for (auto n : graph->body().nodes()) {
+    n.attr(attrs::synth_color_group).set(std::string("bank:color:1"));
+  }
+  unsigned checkpoints = 0;
+  options.fp_evaluate  = [&](const Result& state) {
+    ++checkpoints;
+    for (auto n : state.graph->body().nodes()) {
+      if (n.get_name().starts_with("__place_rebuffer")) {
+        EXPECT_TRUE(n.attr(attrs::place).has());
+        EXPECT_TRUE(n.attr(attrs::synth_color_group).has());
+      }
+    }
+    return timing(state);
+  };
+  start_session();
+  hhds::GraphLibrary owner;
+  const auto         placed = place(*graph, owner, options);
+  EXPECT_GT(checkpoints, 1u);
+  equivalent(placed);
+  check_legality(physical::read_lef(options.lefs), placed.floorplan, options.halo_x, options.halo_y);
+  bool saw_engine = false;
+  for (const auto& entry : std::filesystem::recursive_directory_iterator(options.output_dir)) {
+    if (!entry.path().filename().string().starts_with("fp_repair_")) {
+      continue;
+    }
+    std::ifstream       f(entry.path());
+    const std::string   text{std::istreambuf_iterator<char>(f), {}};
+    rapidjson::Document report;
+    report.Parse(text.c_str());
+    ASSERT_TRUE(report.IsObject()) << entry.path();
+    EXPECT_STREQ(report["engine"].GetString(), "new");
+    saw_engine = true;
+  }
+  EXPECT_TRUE(saw_engine);
 }
 
 TEST_F(Resize_engine, LegacyEngineStaysSelectable) {
