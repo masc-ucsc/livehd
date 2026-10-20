@@ -309,7 +309,7 @@ private:
   std::unordered_map<std::string, std::string>              net_of_;  // sink -> driver
   std::unordered_map<std::string, Point>                    pos_;
   std::unordered_set<std::string>                           blocked_drivers_;  // clock/protected nets: never touched
-  std::unordered_set<std::string>                           names_;
+  std::unordered_set<std::string>                           names_, constant_drivers_;
   std::unordered_map<std::string, double>                   pin_cap_, original_area_;
   std::vector<std::function<void()>>                        journal_;
   std::vector<Resize_edit>                                  edits_;
@@ -386,6 +386,13 @@ private:
           }
         }
       }
+      if (io->get_input_pin_decls().empty()) {
+        // Tie cells (and any other input-less driver) drive constants: never
+        // buffered or sized, whatever their fanout.
+        for (const auto& d : io->get_output_pin_decls()) {
+          constant_drivers_.insert(name + ":" + d.name);
+        }
+      }
       insts_.emplace(name, std::move(inst));
     }
     for (const auto& net : state_.parasitics->nets) {
@@ -399,6 +406,9 @@ private:
       }
       const auto owner = instance_of(net.driver);
       const auto pin   = timing_.pins.find(net.driver);
+      if (constant_drivers_.contains(net.driver)) {
+        blocked_drivers_.insert(net.driver);
+      }
       if ((pin != timing_.pins.end() && pin->second.clock) || (owner.empty() && protected_names.contains("@port:" + net.driver))
           || (!owner.empty() && protected_names.contains(owner))) {
         blocked_drivers_.insert(net.driver);
