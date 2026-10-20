@@ -1537,13 +1537,18 @@ uint64_t Abc_backend::refine(hhds::GraphLibrary& outlib, std::string_view top, c
       // Time the sized network and read the port times for the next round:
       // the arrival at each output's driver (without the port's own downstream
       // delay) and the departure at each input (with it).
+      struct Boundary_measurement {
+        bool   valid = false;
+        float  delay = 0;
+        double area  = 0;
+      };
       auto measure = [&]() {
-        std::optional<std::pair<float, double>> after;
+        Boundary_measurement measured;
         if (Abc_SclCheckNtk(logic, 0)) {
           auto* man      = Abc_SclManStart(R.scl, logic, wire_scope.enabled(), 1, budget, 0);
           // MaxDelay0 is clamped up to the target when the reverse pass runs;
           // the true worst arrival is the priority queue's head.
-          after          = std::pair{Abc_SclReadMaxDelay(man), static_cast<double>(man->SumArea0)};
+          measured       = {true, Abc_SclReadMaxDelay(man), static_cast<double>(man->SumArea0)};
           Abc_Obj_t* obj = nullptr;
           int        i   = 0;
           Abc_NtkForEachPo(logic, obj, i) {
@@ -1559,10 +1564,10 @@ uint64_t Abc_backend::refine(hhds::GraphLibrary& outlib, std::string_view top, c
           }
           Abc_SclManFree(man);
         }
-        return after;
+        return measured;
       };
       auto after = measure();
-      if (base_.io_boundary_timing && before && after && after->first > before->first + 1e-4) {
+      if (base_.io_boundary_timing && before && after.valid && after.delay > before->first + 1e-4) {
         for (auto& pair : pairs) {
           pair.obj->pData = pair.net_obj->pData;
         }
@@ -1614,9 +1619,9 @@ uint64_t Abc_backend::refine(hhds::GraphLibrary& outlib, std::string_view top, c
           q.boundary_delay_pre = before->first;
           q.boundary_area_pre  = before->second;
         }
-        if (after) {
-          q.delay    = after->first;
-          q.area     = after->second;
+        if (after.valid) {
+          q.delay    = after.delay;
+          q.area     = after.area;
           q.delay_ps = true;
         }
         if (design.cache != nullptr) {
@@ -1632,7 +1637,7 @@ uint64_t Abc_backend::refine(hhds::GraphLibrary& outlib, std::string_view top, c
             bits,
             budget,
             before ? std::format("{:.1f} ps / {:.2f}", before->first, before->second) : "untimed",
-            after ? std::format("{:.1f} ps / {:.2f}", after->first, after->second) : "untimed",
+            after.valid ? std::format("{:.1f} ps / {:.2f}", after.delay, after.area) : "untimed",
             swapped);
       }
     }

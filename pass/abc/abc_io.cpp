@@ -47,13 +47,13 @@ synth::Io_mapper make_mapper(const std::map<std::string, std::string>& values) {
                             double                       percent,
                             bool apply) { return backend->io_region(graph, env, used, period, percent, apply); };
   result.refine = [shared_options](hhds::GraphLibrary& library, const std::string& top) {
-    auto options               = *shared_options;
-    options.io_boundary_timing = true;
-    options.reg_margin         = "0";  // recorded mapping budgets already include it
-    Mapper                       driver(options);
+    auto refine_options               = *shared_options;
+    refine_options.io_boundary_timing = true;
+    refine_options.reg_margin         = "0";  // recorded mapping budgets already include it
+    Mapper                       driver(refine_options);
     std::map<std::string, float> budgets;
-    if (options.io_feedback) {
-      for (const auto& [name, mapping] : options.io_feedback->mappings) {
+    if (refine_options.io_feedback) {
+      for (const auto& [name, mapping] : refine_options.io_feedback->mappings) {
         if (mapping.budget_ps > 0) {
           budgets[name] = mapping.budget_ps;
         }
@@ -61,7 +61,7 @@ synth::Io_mapper make_mapper(const std::map<std::string, std::string>& values) {
     }
     driver.set_region_delay_targets(std::move(budgets));
     driver.set_outlib(&library);
-    const auto dff = liberty::resolve_dff_cells(options.library, options.dff_cell);
+    const auto dff = liberty::resolve_dff_cells(refine_options.library, refine_options.dff_cell);
     driver.set_dff_cells(dff);
     driver.refine_boundaries(library, top);
     driver.stop();
