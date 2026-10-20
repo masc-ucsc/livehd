@@ -526,7 +526,9 @@ roll back together):
    at most five moves whose estimate could pass are probed per step; one is kept only if the endpoint improves (by 0.05 ps, or per added cell
    max(1 ps, 0.5% of its slack)) and setup WNS, TNS and the electrical checks of the
    touched pins are not worse.
-3. Area recovery: down-size gates whose slack exceeds max(0, WNS) plus
+3. Area recovery: down-size gates whose slack exceeds the slack of the worst met endpoint
+   (zero when every endpoint fails; with a few failing endpoints it still protects the real
+   critical paths) plus
    max(25 ps, 40% of the shortest clock period) by at least twice the estimated delay
    increase. Gates with slack above a whole period (a check the timer does not model, such
    as a half-cycle negative-edge capture) are never down-sized. Probed in bisected batches.

@@ -1738,7 +1738,19 @@ private:
       double        saving;
     };
     std::vector<Candidate> candidates;
-    const double           floor = std::max(0.0, wns_) + margin_;
+    // The floor protects the worst met endpoint, not only the worst one: a few
+    // failing endpoints (or one the sign-off timer does not time) must not let
+    // the real critical paths lose their margin.
+    double                 worst_met = std::max(0.0, wns_);
+    if (wns_ < 0) {
+      for (const auto& [endpoint, slack] : w_.failing_endpoints(kInf)) {
+        if (slack >= 0) {
+          worst_met = slack;
+          break;
+        }
+      }
+    }
+    const double floor = worst_met + margin_;
     for (const auto& [name, inst] : insts_) {
       if (!editable(name) || inst.added) {
         continue;
