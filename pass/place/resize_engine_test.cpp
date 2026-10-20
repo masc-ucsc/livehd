@@ -423,6 +423,27 @@ TEST_F(Resize_engine, SynthesisBufferChainIsBypassedForTheCriticalSink) {
   equivalent(result.placed);
 }
 
+TEST_F(Resize_engine, SlackRichLongWireOnlyGetsTheRepeatersItsLimitsNeed) {
+  // A 600 um wire with a real Liberty violation and ample slack: only the
+  // limits matter, so the repair uses the longest legal repeater spacing. The
+  // delay-optimal spacing for buf_1 at this RC (~140 um) would spend four.
+  options.resistance_ohm_um = 10;
+  options.capacitance_ff_um = 1;
+  period_ns                 = 1000;
+  auto       placed         = long_wires(1, 600000);
+  const auto before         = timing(placed);
+  ASSERT_GT(before.violations, 0u);
+  auto       result = resize_placed(std::move(placed), options, [&](const Result& r) { return timing(r); });
+  const auto after  = timing(result.placed);
+  SCOPED_TRACE(result.report);
+  EXPECT_LT(after.violations, before.violations);
+  EXPECT_GE(ps(after, after.wns), ps(before, before.wns) - 1e-3);
+  const auto repeaters = count(result.placed, "__place_rebuffer");
+  EXPECT_GT(repeaters, 0u);
+  EXPECT_LE(repeaters, 2u);
+  equivalent(result.placed);
+}
+
 TEST_F(Resize_engine, LegacyEngineStaysSelectable) {
   options.resize_engine = "legacy";
   add_variant("sky130_fd_sc_hd__buf_1", "sky130_fd_sc_hd__buf_8", 11.26, 2.760);

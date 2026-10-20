@@ -887,8 +887,21 @@ private:
     st.at_out     = td.arrival.value_or(0);
     st.slew_out   = td.slew.value_or(0);
     st.at_sink    = std::max(w_.pin(far).arrival.value_or(0), st.at_out + 3);
+    // A net with ample slack only needs its Liberty limits met: the fewest
+    // repeaters at the longest legal spacing, not the delay-optimal chain.
+    double worst = kInf;
+    for (const auto& s : sinks) {
+      worst = std::min(worst, w_.pin(s).slack.value_or(kInf));
+    }
     std::vector<Move> moves;
-    repeater_moves({st}, 0, moves);
+    if (worst >= margin_) {
+      if (auto m = electrical_chain(st)) {
+        moves.push_back(std::move(*m));
+      }
+    }
+    if (moves.empty()) {
+      repeater_moves({st}, 0, moves);
+    }
     if (moves.empty()) {
       return false;
     }
@@ -900,6 +913,72 @@ private:
       }
     }
     return true;
+  }
+  // Fewest evenly spaced repeaters (then the smallest size) that keep every
+  // segment within the repeater's capacitance and transition limits, the wire's
+  // RC slew degradation included. Nothing when even 12 do not.
+  std::optional<Move> electrical_chain(const Stage& st) {
+    const Point  d = position(st.driver), s = position(st.sink);
+    const double l0 = manhattan(d, s);
+    if (lib_.buffers.empty() || l0 < 5 * lib_.tech.dbu) {
+      return std::nullopt;
+    }
+    const double r = lib_.r_dbu, c = lib_.c_dbu, cs = pin_cap(st.sink), load0 = std::max(1e-3, load(st.driver));
+    const double slew0     = std::max(5.0, st.slew_out);
+    const auto   wire_slew = [&](double in, double seg, double tail) {
+      const double e = 2.2 * r * seg * (c * seg / 2 + tail) * 1e-3;
+      return std::sqrt(in * in + e * e);
+    };
+    const auto& net_sinks = nets_.at(st.driver);
+    for (unsigned n = 1; n <= 12; ++n) {
+      std::vector<Point> chain;
+      for (unsigned i = 1; i <= n; ++i) {
+        chain.push_back(lerp(d, s, double(i) / (n + 1)));
+      }
+      std::vector<std::string> moved{st.sink};
+      for (const auto& other : net_sinks) {
+        if (other != st.sink && manhattan(position(other), chain.front()) < manhattan(position(other), d)) {
+          moved.push_back(other);
+        }
+      }
+      double moved_cap = 0;
+      for (const auto& m : moved) {
+        moved_cap += pin_cap(m) + c * manhattan(d, position(m));
+      }
+      const double down = group_load(moved, chain.back());
+      const double lp   = manhattan(d, chain.front());
+      for (const auto* b : lib_.buffers) {
+        const double cin   = cell_pin_cap(*b, b->inputs.front());
+        const double limit = b->max_transition_ps ? .9 * *b->max_transition_ps : kInf;
+        // The driver's output slew scales with its load.
+        const double l1   = std::max(cin, load0 - moved_cap + c * lp + cin);
+        double       slew = wire_slew(slew0 * l1 / load0, lp, cin);
+        bool         ok   = slew <= limit;
+        for (size_t i = 0; i < chain.size() && ok; ++i) {
+          const bool   last = i + 1 == chain.size();
+          const double seg  = manhattan(chain[i], last ? s : chain[i + 1]);
+          const double l    = last ? down : c * seg + cin;
+          const auto   a    = w_.arc(b->name, b->inputs.front(), b->output, slew, l);
+          ok                = a && electrical_limit_ok(*b, l);
+          if (ok) {
+            slew = wire_slew(a->second, seg, last ? cs : cin);
+            ok   = slew <= limit;
+          }
+        }
+        if (ok) {
+          Move m;
+          m.kind   = Move::Kind::repeater;
+          m.driver = st.driver;
+          m.sinks  = std::move(moved);
+          m.buffer = b;
+          m.at     = chain.front();
+          m.chain  = std::move(chain);
+          m.owner  = st.inst;
+          return m;
+        }
+      }
+    }
+    return std::nullopt;
   }
   bool fix_electrical(const std::string& driver) {
     auto       pins   = touched({driver});
