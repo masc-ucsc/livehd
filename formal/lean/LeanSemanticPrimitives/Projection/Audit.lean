@@ -39,6 +39,7 @@ import LeanSemanticPrimitives.Projection.CertLoad
 -- M3/M8: the verified symbolic interpretation of a residual
 import LeanSemanticPrimitives.Projection.Sym.Refine
 import LeanSemanticPrimitives.Projection.Sym.Conj
+import LeanSemanticPrimitives.Projection.Sym.ConjT
 
 namespace Projection
 
@@ -444,6 +445,8 @@ namespace Projection
 #audit_axioms Sym.checkUnsat_sound
 #audit_axioms Sym.runInvKOf_sound_ref
 #audit_axioms Sym.runConjOf_sound_ref
+#audit_axioms Sym.stateVarT_rel
+#audit_axioms Sym.runConjTOf_sound_ref
 #audit_axioms Sym.runRefKOf_sound_ref
 
 end Projection
