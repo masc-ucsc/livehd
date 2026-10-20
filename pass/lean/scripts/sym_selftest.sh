@@ -67,7 +67,36 @@ module acc2(input clk, input [7:0] x, output [7:0] acc_o, output adv);
   assign adv = phase;
 endmodule
 EOF
-for d in cnt10 acc1 acc2; do
+# M8 conjunctive induction: two counters kept in step, and a delayed copy.
+# eq_ok holds only with a_ok in range; lag_ok also needs itself (en = 0 holds).
+cat > "$OUT/pair.sv" <<'EOF'
+module pair(input clk, input rst, input en,
+            output a_ok, output b_ok, output eq_ok, output lag_ok, output [3:0] a_o);
+  reg [3:0] a;    // 0..9, counting up
+  reg [3:0] b;    // (10 - a) mod 10, counting down
+  reg [3:0] a_d;  // a, one enabled step late
+  always @(posedge clk) begin
+    if (rst) begin a <= 4'd0; b <= 4'd0; a_d <= 4'd0; end
+    else if (en) begin
+      a   <= (a == 4'd9) ? 4'd0 : a + 4'd1;
+      b   <= (b == 4'd0) ? 4'd9 : b - 4'd1;
+      a_d <= a;
+    end
+  end
+  assign a_ok   = a <= 4'd9;
+  assign b_ok   = b <= 4'd9;
+  assign eq_ok  = (a == 4'd0) ? (b == 4'd0) : ({1'b0, a} + {1'b0, b} == 5'd10);
+  assign lag_ok = a_d <= 4'd9;
+  assign a_o = a;
+endmodule
+EOF
+printf '%s\n' 'a_ok a_ok' 'b_ok b_ok' 'eq_ok eq_ok' 'lag_ok lag_ok' > "$OUT/pair_all.spec"
+printf '%s\n' 'a_ok a_ok hyps: a_ok' 'b_ok b_ok hyps: b_ok' 'eq_ok eq_ok hyps: eq_ok a_ok' \
+  'lag_ok lag_ok hyps: lag_ok a_ok' > "$OUT/pair_min.spec"
+printf '%s\n' 'a_ok a_ok hyps: a_ok' 'b_ok b_ok hyps: b_ok' 'eq_ok eq_ok hyps: eq_ok' \
+  'lag_ok lag_ok hyps: lag_ok a_ok' > "$OUT/pair_missing.spec"
+printf '%s\n' 'a_ok a_ok' 'never !a_ok' > "$OUT/pair_false.spec"
+for d in cnt10 acc1 acc2 pair; do
   "$LHD" compile "$OUT/$d.sv" --reader yosys-slang --top "$d" --set yosys.setundef=zero \
     --emit-dir "lg:$OUT/${d}_lg" --workdir "$OUT/${d}_cw" > "$OUT/$d.compile.log" 2>&1 \
     || { tail -5 "$OUT/$d.compile.log"; echo "FAIL: compile $d"; exit 1; }
@@ -96,6 +125,7 @@ N=0
 C="$OUT/cnt10_lean/cnt10.dcert"
 A1="$OUT/acc1_lean/acc1.dcert"
 A2="$OUT/acc2_lean/acc2.dcert"
+P="$OUT/pair_lean/pair.dcert"
 run sym_verify "INVARIANT PROVED"    "$C" ok_good k:1
 run sym_verify "INVARIANT PROVED"    "$C" ok_good k:1 rebuild
 run sym_verify "INVARIANT PROVED"    "$C" ok_good k:1 closed
@@ -123,4 +153,13 @@ run sym_refine "REFINEMENT PROVED"   "$A2" "$A1" pair:acc_o=acc_o adv:adv k:1,2
 grep -q '\[k=1\] RESULT: NOT K-INDUCTIVE' "$OUT/run_$N.log" || { echo "FAIL: k list"; exit 1; }
 run sym_refine "COUNTEREXAMPLE"      "$A2" "$A1" pair:acc_o=acc_o k:4
 grep -q "COUNTEREXAMPLE (base, replayed)" "$OUT/run_$N.log" || { tail -5 "$OUT/run_$N.log"; echo "FAIL: refinement counterexample not replayed"; exit 1; }
+run sym_verify "INVARIANT PROVED"    "$P" "conj:$OUT/pair_all.spec" jobs:4
+run sym_verify "INVARIANT PROVED"    "$P" "conj:$OUT/pair_min.spec" jobs:4
+run sym_verify "NOT INDUCTIVE"       "$P" "conj:$OUT/pair_missing.spec" jobs:4
+grep -q '\[eq_ok\] counterexample REPLAYED' "$OUT/run_$N.log" || { tail -5 "$OUT/run_$N.log"; echo "FAIL: step counterexample not replayed"; exit 1; }
+grep -q 'not preserved under their hypotheses: \[eq_ok\]' "$OUT/run_$N.log" || { echo "FAIL: the failing conjunct is not named"; exit 1; }
+grep -q '^  a = 4.ha$' "$OUT/work/cti_eq_ok.txt" || { cat "$OUT/work/cti_eq_ok.txt"; echo "FAIL: counterexample state by register name"; exit 1; }
+run sym_verify "COUNTEREXAMPLE"      "$P" "conj:$OUT/pair_false.spec"
+# the monolithic check of eq_ok alone is not inductive: it needs a_ok
+run sym_verify "NOT K-INDUCTIVE"     "$P" eq_ok k:1
 echo "PASS: sym_selftest"
