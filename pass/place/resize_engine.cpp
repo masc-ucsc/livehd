@@ -244,9 +244,10 @@ public:
         electrical_phase();
       }
       electrical_s_ = elapsed(t);
-      std::cout << std::format("resize: electrical {} nets {} fixed wns {:.2f} tns {:.1f} {:.1f}s\n",
+      std::cout << std::format("resize: electrical {} nets {} fixed {} skipped wns {:.2f} tns {:.1f} {:.1f}s\n",
                                electrical_nets_,
                                electrical_fixed_,
+                               electrical_skipped_,
                                wns_,
                                tns_,
                                electrical_s_)
@@ -321,6 +322,7 @@ private:
   std::unordered_set<std::string>                           rejected_;  // batched moves that failed alone
   unsigned    batch_moves_ = 0, batch_reject_tns_ = 0, batch_reject_wns_ = 0, batch_reject_electrical_ = 0;
   unsigned    upsized_ = 0, downsized_ = 0, endpoints_worked_ = 0, endpoints_stuck_ = 0, infeasible_paths_ = 0, feasible_paths_ = 0;
+  unsigned    electrical_skipped_ = 0;
   unsigned    electrical_nets_ = 0, electrical_fixed_ = 0, rounds_ = 0, recover_batches_ = 0;
   double      electrical_s_ = 0, timing_s_ = 0, recovery_s_ = 0, probe_s_ = 0;
   unsigned    probes_       = 0;
@@ -694,7 +696,8 @@ private:
     // locally and probe them together; a rejected batch is bisected down to the
     // per-net search, which also tries every alternative.
     std::vector<std::pair<size_t, size_t>> pending;
-    const size_t                           batch = todo.size() > 32 ? std::max<size_t>(32, todo.size() / 8) : 1;
+    const size_t                           batch      = todo.size() > 32 ? std::max<size_t>(32, todo.size() / 8) : 1;
+    const size_t                           floor_size = todo.size() > 64 ? todo.size() / 64 : 0;
     for (size_t i = 0; i < todo.size(); i += batch) {
       pending.emplace_back(i, std::min(todo.size(), i + batch));
     }
@@ -740,9 +743,16 @@ private:
         continue;
       }
       a.rollback();
-      const auto mid = begin + (end - begin) / 2;
-      pending.emplace_back(begin, mid);
-      pending.emplace_back(mid, end);
+      // Bisect down to 1/64 of the nets; below that a few hundred probes on
+      // single nets cost more than they return, so those nets stay as they are
+      // (small sets still get the per-net search with every alternative).
+      if (end - begin > floor_size) {
+        const auto mid = begin + (end - begin) / 2;
+        pending.emplace_back(begin, mid);
+        pending.emplace_back(mid, end);
+      } else {
+        electrical_skipped_ += end - begin;
+      }
     }
   }
   // One local repair without probing: the smallest stronger driver that meets
@@ -826,11 +836,21 @@ private:
     const auto owner = instance_of(driver);
     // 1. A stronger driver, smallest first.
     if (editable(owner) && insts_.at(owner).output == driver) {
-      const auto* current = insts_.at(owner).cell;
+      const auto*                current = insts_.at(owner).cell;
+      // Probe two drives: the smallest that meets the limits at this load and the strongest.
+      std::vector<const Buffer*> tries;
+      const auto                 l = load(driver);
       for (const auto* v : lib_.ladders.at(current->name)) {
-        if (v->area <= current->area || v == current) {
-          continue;
+        if (v->area > current->area && (!v->max_capacitance_ff || *v->max_capacitance_ff >= l * 1.1)) {
+          tries.push_back(v);
+          break;
         }
+      }
+      const auto* strongest = lib_.ladders.at(current->name).back();
+      if (strongest->area > current->area && (tries.empty() || tries.front() != strongest)) {
+        tries.push_back(strongest);
+      }
+      for (const auto* v : tries) {
         Attempt    a(*this);
         const auto upstream = touched(nets_of_instance(owner));
         const auto e0       = w_.electrical(upstream);
@@ -1818,7 +1838,7 @@ private:
       return std::format(R"({{"probes":{},"accepted":{},"seconds":{:.3f}}})", c.probes, c.accepted, c.seconds);
     };
     return std::format(
-        R"({{"stage":"{}","period_ps":{:.1f},"margin_ps":{:.1f},"whatif_wns_ps":[{:.4f},{:.4f}],"whatif_tns_ps":[{:.4f},{:.4f}],"edits":{},"groups":{},"buffers":{},"upsized":{},"downsized":{},"electrical":{{"nets":{},"fixed":{},"moves":{},"seconds":{:.3f}}},"timing":{{"rounds":{},"endpoints_worked":{},"endpoints_stuck":{},"feasible_paths":{},"infeasible_paths":{},"stop":{},"upsize":{},"isolate":{},"repeater":{},"shed":{},"seconds":{:.3f}}},"recover":{{"batches":{},"moves":{},"seconds":{:.3f}}},"batch":{{"moves":{},"probes":{}}},"probes":{},"probe_seconds":{:.3f},"rejects":{{"slack":{},"wns":{},"tns":{},"electrical":{}}},"generated":{{"upsize":{},"isolate":{},"repeater":{},"shed":{},"none":{}}},"seconds":{:.3f}}})",
+        R"({{"stage":"{}","period_ps":{:.1f},"margin_ps":{:.1f},"whatif_wns_ps":[{:.4f},{:.4f}],"whatif_tns_ps":[{:.4f},{:.4f}],"edits":{},"groups":{},"buffers":{},"upsized":{},"downsized":{},"electrical":{{"nets":{},"fixed":{},"skipped":{},"moves":{},"seconds":{:.3f}}},"timing":{{"rounds":{},"endpoints_worked":{},"endpoints_stuck":{},"feasible_paths":{},"infeasible_paths":{},"stop":{},"upsize":{},"isolate":{},"repeater":{},"shed":{},"seconds":{:.3f}}},"recover":{{"batches":{},"moves":{},"seconds":{:.3f}}},"batch":{{"moves":{},"probes":{}}},"probes":{},"probe_seconds":{:.3f},"rejects":{{"slack":{},"wns":{},"tns":{},"electrical":{}}},"generated":{{"upsize":{},"isolate":{},"repeater":{},"shed":{},"none":{}}},"seconds":{:.3f}}})",
         stage_ == Resize_stage::floorplan ? "floorplan" : "placed",
         period_,
         margin_,
@@ -1833,6 +1853,7 @@ private:
         plan.downsized,
         electrical_nets_,
         electrical_fixed_,
+        electrical_skipped_,
         counters(electrical_),
         electrical_s_,
         rounds_,
