@@ -202,7 +202,8 @@ struct Move {
   std::string                                        inst;
   const Buffer*                                      to = nullptr;
   std::string                                        driver, owner;
-  std::string                                        from;  // bypass: the net the sinks leave
+  std::string                                        from;     // bypass: the net the sinks leave
+  double                                             arrival = 0;  // bypass: the on-path sink's arrival before
   std::vector<std::string>                           sinks;
   const Buffer*                                      buffer = nullptr;
   Point                                              at{};
@@ -1412,11 +1413,10 @@ private:
     if (k == 0 || !buffer_stage(st) || blocked_drivers_.contains(st.driver) || nets_.at(st.driver).size() < 2) {
       return;  // the buffer keeps a load after the move
     }
-    const double cs = pin_cap(st.sink);
-    const Point  ps = position(st.sink);
-    const double r = lib_.r_dbu, c = lib_.c_dbu;
-    Move         best;
-    best.est = 1;
+    const double      cs = pin_cap(st.sink);
+    const Point       ps = position(st.sink);
+    const double      r = lib_.r_dbu, c = lib_.c_dbu;
+    std::vector<Move> found;
     for (size_t j = k; j-- > 0;) {
       const auto& up = stages[j];
       if (blocked_drivers_.contains(up.driver) || !nets_.contains(up.driver)) {
@@ -1426,19 +1426,25 @@ private:
       const double l0    = load(up.driver);
       const double at    = up.at_out + driver_delta(up, l0, l0 + cs + c * dist) + r * dist * (c * dist / 2 + cs) * 1e-3;
       const double gain  = st.at_sink - at;
-      if (gain > best.est) {
-        best.kind   = Move::Kind::bypass;
-        best.est    = gain;
-        best.driver = up.driver;
-        best.from   = st.driver;
-        best.sinks  = {st.sink};
+      if (gain > 1) {
+        Move m;
+        m.kind   = Move::Kind::bypass;
+        m.est    = gain;
+        m.driver = up.driver;
+        m.from    = st.driver;
+        m.sinks   = {st.sink};
+        m.arrival = st.at_sink;
+        found.push_back(std::move(m));
       }
       if (!buffer_stage(up)) {
         break;  // up.driver is the chain's head
       }
     }
-    if (!best.from.empty()) {
-      moves.push_back(std::move(best));
+    // The wire and load estimates are rough on long chains: offer the three
+    // best skip lengths and let the timer choose.
+    std::sort(found.begin(), found.end(), [](const Move& a, const Move& b) { return a.est > b.est; });
+    for (size_t i = 0; i < found.size() && i < 3; ++i) {
+      moves.push_back(std::move(found[i]));
     }
   }
   // Downsize non-critical gates loading an on-path net: less load, less area.
@@ -1587,7 +1593,23 @@ private:
     const double s1   = w_.pin(endpoint).slack.value_or(-kInf);
     const double need = cells ? cells * std::max(1.0, .005 * std::abs(slack)) : .05;
     ++stats.probes;
-    if (s1 < slack + need) {
+    if (debug_ && debug_printed_ < 4 && m.kind == Move::Kind::bypass) {
+      std::cout << std::format("resize-debug: bypass {} -> {} est {:.2f} endpoint {:.2f} -> {:.2f}\n",
+                               m.from,
+                               m.driver,
+                               m.est,
+                               slack,
+                               s1);
+    }
+    // Parallel near-critical paths (wide adders, counters): a bypass that speeds
+    // its own path up by more than 1 ps without hurting the endpoint is progress
+    // even while a sibling path still sets the endpoint slack. It adds no cell.
+    bool local = false;
+    if (m.kind == Move::Kind::bypass && s1 >= slack - kWnsEps) {
+      const auto a1 = w_.pin(m.sinks.front()).arrival;
+      local         = a1 && *a1 < m.arrival - 1;
+    }
+    if (s1 < slack + need && !local) {
       ++probes_;
       stats.seconds += elapsed(t);
       ++reject_slack_;
