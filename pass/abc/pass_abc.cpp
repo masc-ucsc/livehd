@@ -1,6 +1,7 @@
 // This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 
 #include "pass_abc.hpp"
+#include "fold_engine.hpp"
 
 #include <charconv>
 #include <cstdlib>
@@ -151,7 +152,7 @@ void Pass_abc::add_mapping_labels(Eprp_method& m) {
                        "cap the fanout of every net ABC maps, by appending `buffer -N <n>; dnsize {B}` to the "
                        "built-in flows (0 disables the tail, sizing included). A custom `flow` places `{F}` -- the bare "
                        "number -- and `{B}` itself",
-                       "16");
+                       "32");
   // A delay target is a BUDGET. ABC's own `&nf -D` is a no-op for the mapper
   // (giaNf.c reads MapDelayTarget, which `-D` never writes), so without this the
   // built-in flow always maps for MINIMUM delay -- which is right for a tight
@@ -162,7 +163,7 @@ void Pass_abc::add_mapping_labels(Eprp_method& m) {
                        "delay budget, pass.abc re-maps with ABC's `&nf -R <pct>` relaxation (a percentage of the "
                        "mapper's own logic depth on the unit-delay GENLIB), bounded by both this cap and the real slack, "
                        "then re-sizes to the budget. 0 disables it. Requires `delay` and an NLDM Liberty",
-                       "200");
+                       "0");
   // With no target this is the primary objective; with a target it is a
   // second candidate, accepted only when smaller and still inside the budget.
   m.add_label_optional("area_flow",
@@ -241,13 +242,14 @@ void Pass_abc::add_mapping_labels(Eprp_method& m) {
                        "mapped function of every observed bit is unchanged. Memory modules are then built before ware "
                        "modules (false, the default)",
                        "false");
-  m.add_label_optional("ware_zero_bits",
-                       "true|false clear, inside an extracted ware shifter, the data-operand bits its parent provably drives "
-                       "with 0 (a lane placed by a constant left shift, a value narrower than the port), so the mapper sees the "
-                       "constants the module boundary hides; a data operand only when at least an eighth of its bits are provably 0, "
-                       "the shift amount whenever any bit is (each is a whole barrel stage). The cleared-bit pattern is part "
-                       "of the module identity (false, the default)",
-                       "false");
+  m.add_label_optional(
+      "ware_zero_bits",
+      "true|false clear, inside an extracted ware shifter, the data-operand bits its parent provably drives "
+      "with 0 (a lane placed by a constant left shift, a value narrower than the port), so the mapper sees the "
+      "constants the module boundary hides; a data operand only when at least an eighth of its bits are provably 0, "
+      "the shift amount whenever any bit is (each is a whole barrel stage). The cleared-bit pattern is part "
+      "of the module identity (false, the default)",
+      "false");
   m.add_label_optional("dff_cell",
                        "explicit Liberty DFF cell name for register=true (empty => auto-detect a plain posedge D-flop)",
                        "");
@@ -503,7 +505,15 @@ void emit_qor(const std::vector<livehd::abc::Region_qor>& qor, std::string_view 
     // the area, so the design reads smaller or larger than it is.
     std::print("pass.abc memories: {}\n", memories.size());
     for (const auto& m : memories) {
-      std::print("  {}.{} {}x{}b {}p {}clk -> {} ({})\n", m.graph, m.name, m.size, m.bits, m.ports, m.clocks, m.realization, m.reason);
+      std::print("  {}.{} {}x{}b {}p {}clk -> {} ({})\n",
+                 m.graph,
+                 m.name,
+                 m.size,
+                 m.bits,
+                 m.ports,
+                 m.clocks,
+                 m.realization,
+                 m.reason);
     }
   }
 
@@ -526,8 +536,8 @@ void emit_qor(const std::vector<livehd::abc::Region_qor>& qor, std::string_view 
   j             += std::format("\"top\":\"{}\",", jesc(top));
   j             += std::format("\"library\":\"{}\",", jesc(opts.library));
   j             += std::format("\"register\":{},\"memory\":\"{}\",",
-                   opts.map_register ? "true" : "false",
-                   livehd::synth::memory_fold_name(opts.memory_fold));
+                               opts.map_register ? "true" : "false",
+                               livehd::synth::memory_fold_name(opts.memory_fold));
   // The per-region register guard (0 = every flop maps), so a QoR reader can
   // tell "kept native by limit" from "kept native by contract" (an
   // asynchronous reset) without the diagnostics stream.
@@ -567,17 +577,17 @@ void emit_qor(const std::vector<livehd::abc::Region_qor>& qor, std::string_view 
     }
     // The asynchronous clear/preset picks (empty: that reset value stays native).
     j          += std::format("],\"clear\":\"{}\",\"preset\":\"{}\"",
-                     dff_sel.areset_ladder[0].empty() ? "" : jesc(dff_sel.areset_ladder[0].front().name),
-                     dff_sel.areset_ladder[1].empty() ? "" : jesc(dff_sel.areset_ladder[1].front().name));
+                              dff_sel.areset_ladder[0].empty() ? "" : jesc(dff_sel.areset_ladder[0].front().name),
+                              dff_sel.areset_ladder[1].empty() ? "" : jesc(dff_sel.areset_ladder[1].front().name));
     // The integrated clock-gate pick (empty: gated-clock registers stay native).
     j          += std::format(",\"icg\":\"{}\"", dff_sel.icg_ladder.empty() ? "" : jesc(dff_sel.icg_ladder.front().name));
     // The transparent data-latch picks, active-high / active-low enable
     // (empty: that latch polarity maps through the other one plus an inverter,
     // or stays native without either).
     j          += std::format(",\"latch\":\"{}\",\"latch_n\":\"{}\"",
-                     dff_sel.latch_ladder[0][0].empty() ? "" : jesc(dff_sel.latch_ladder[0][0].front().name),
-                     dff_sel.latch_ladder[1][0].empty() ? "" : jesc(dff_sel.latch_ladder[1][0].front().name));
-    j += ",\"cells\":{";
+                              dff_sel.latch_ladder[0][0].empty() ? "" : jesc(dff_sel.latch_ladder[0][0].front().name),
+                              dff_sel.latch_ladder[1][0].empty() ? "" : jesc(dff_sel.latch_ladder[1][0].front().name));
+    j          += ",\"cells\":{";
     bool first  = true;
     for (const auto& [name, n] : dff_count) {
       j     += std::format("{}\"{}\":{}", first ? "" : ",", jesc(name), n);
@@ -662,10 +672,18 @@ void emit_qor(const std::vector<livehd::abc::Region_qor>& qor, std::string_view 
   j += ",\"memories\":[";
   for (size_t i = 0; i < memories.size(); ++i) {
     const auto& m  = memories[i];
-    j             += std::format("{}{{\"module\":\"{}\",\"name\":\"{}\",\"bits\":{},\"size\":{},\"ports\":{},\"write_clocks\":{},"
-                                 "\"realization\":\"{}\",\"reason\":\"{}\"}}",
-                     i != 0 ? "," : "", jesc(m.graph), jesc(m.name), m.bits, m.size, m.ports, m.clocks, m.realization,
-                     jesc(m.reason));
+    j             += std::format(
+        "{}{{\"module\":\"{}\",\"name\":\"{}\",\"bits\":{},\"size\":{},\"ports\":{},\"write_clocks\":{},"
+        "\"realization\":\"{}\",\"reason\":\"{}\"}}",
+        i != 0 ? "," : "",
+        jesc(m.graph),
+        jesc(m.name),
+        m.bits,
+        m.size,
+        m.ports,
+        m.clocks,
+        m.realization,
+        jesc(m.reason));
   }
   j += "]";
   j += ",\"regions\":[";
@@ -770,8 +788,9 @@ void emit_qor(const std::vector<livehd::abc::Region_qor>& qor, std::string_view 
                        : std::format("the process memory budget of {} MiB (the RLIMIT_AS backstop: LIVEHD_MEMORY_BUDGET_MB, "
                                      "else physical RAM minus max(2 GiB, 25%))",
                                      budget >> 20))
-      .hint("color into smaller regions and map those (`lhd pass color synth --top <top> lg:... --stats` sizes them first), "
-            "or synthesize on a host with more memory")
+      .hint(
+          "color into smaller regions and map those (`lhd pass color synth --top <top> lg:... --stats` sizes them first), "
+          "or synthesize on a host with more memory")
       .fatal();
 }
 
@@ -804,14 +823,18 @@ void Pass_abc::map_with(Eprp_var& var, const std::function<void(livehd::abc::Map
   }
   const auto reassoc_text = var.get("reassoc", "true");
   if (reassoc_text != "true" && reassoc_text != "false") {
-    livehd::diag::err("pass.abc", "bad-reassoc", "syntax").msg("pass.abc.reassoc expects true|false, got '{}'", reassoc_text).emit();
+    livehd::diag::err("pass.abc", "bad-reassoc", "syntax")
+        .msg("pass.abc.reassoc expects true|false, got '{}'", reassoc_text)
+        .emit();
     return;
   }
   for (const char* name : {"state_sweep", "merge_registers"}) {
     // A misspelt switch must not silently leave the dead state in the netlist.
     const auto text = var.get(name, "false");
     if (text != "true" && text != "false") {
-      livehd::diag::err("pass.abc", "bad-register-cleanup", "syntax").msg("pass.abc.{} expects true|false, got '{}'", name, text).emit();
+      livehd::diag::err("pass.abc", "bad-register-cleanup", "syntax")
+          .msg("pass.abc.{} expects true|false, got '{}'", name, text)
+          .emit();
       return;
     }
   }
@@ -843,38 +866,38 @@ void Pass_abc::map_with(Eprp_var& var, const std::function<void(livehd::abc::Map
                prepared->reassoc.absorbed);
   }
 
-  auto top                 = std::string{var.get("top", "")};
-  auto out                 = std::string{var.get("out", "")};
-  auto library             = std::string{var.get("library", "")};
-  auto flow                = std::string{var.get("flow", "")};
-  auto large_flow          = std::string{var.get("large_flow", "")};
-  auto large_ge_s          = std::string{var.get("large_ge", "200000")};
-  bool map_register        = truthy(var.get("register", "true"));
-  bool drop_init           = truthy(var.get("drop_init", "false"));
-  bool derived_clock       = truthy(var.get("derived_clock", "false"));
-  const bool memory_prune_reads = truthy(var.get("memory_prune_reads", "false"));
-  const bool ware_zero_bits     = truthy(var.get("ware_zero_bits", "false"));
-  auto memory_s            = std::string{var.get("memory", "auto")};
-  auto memory_max_bits_s   = std::string{var.get("memory_max_bits", "1024")};
-  auto register_max_bits_s = std::string{var.get("register_max_bits", "0")};
-  auto delay               = std::string{var.get("delay", "")};
-  auto load                = std::string{var.get("load", "")};
-  bool boundary            = truthy(var.get("boundary", "true"));
-  auto boundary_drive      = std::string{var.get("boundary_drive", "")};
-  bool boundary_buffer     = truthy(var.get("boundary_buffer", "true"));
-  auto io_load_s           = std::string{var.get("io_load", "-1")};
-  auto boundary_rounds_s   = std::string{var.get("boundary_rounds", "1")};
-  bool verbose             = truthy(var.get("verbose", "false"));
-  auto adder_s             = std::string{var.get("adder", "auto")};
-  auto bs_s                = std::string{var.get("block_size", "0")};
-  auto mult_s              = std::string{var.get("multiplier", "auto")};
-  auto qor_path            = std::string{var.get("qor", "")};
-  auto region_opts_s       = std::string{var.get("region_opts", "")};
-  auto area_flow           = std::string{var.get("area_flow", "")};
-  auto reg_margin          = std::string{var.get("reg_margin", "auto")};
-  auto mem_budget_s        = std::string{var.get("memory_budget_mb", "16384")};
-  auto time_budget_s       = std::string{var.get("time_budget_ms", "0")};
-  auto flatten             = livehd::partition::parse_flatten_mode(var.get("flatten", "auto"), "pass.abc");
+  auto       top                 = std::string{var.get("top", "")};
+  auto       out                 = std::string{var.get("out", "")};
+  auto       library             = std::string{var.get("library", "")};
+  auto       flow                = std::string{var.get("flow", "")};
+  auto       large_flow          = std::string{var.get("large_flow", "")};
+  auto       large_ge_s          = std::string{var.get("large_ge", "200000")};
+  bool       map_register        = truthy(var.get("register", "true"));
+  bool       drop_init           = truthy(var.get("drop_init", "false"));
+  bool       derived_clock       = truthy(var.get("derived_clock", "false"));
+  const bool memory_prune_reads  = truthy(var.get("memory_prune_reads", "false"));
+  const bool ware_zero_bits      = truthy(var.get("ware_zero_bits", "false"));
+  auto       memory_s            = std::string{var.get("memory", "auto")};
+  auto       memory_max_bits_s   = std::string{var.get("memory_max_bits", "1024")};
+  auto       register_max_bits_s = std::string{var.get("register_max_bits", "0")};
+  auto       delay               = std::string{var.get("delay", "")};
+  auto       load                = std::string{var.get("load", "")};
+  bool       boundary            = truthy(var.get("boundary", "true"));
+  auto       boundary_drive      = std::string{var.get("boundary_drive", "")};
+  bool       boundary_buffer     = truthy(var.get("boundary_buffer", "true"));
+  auto       io_load_s           = std::string{var.get("io_load", "-1")};
+  auto       boundary_rounds_s   = std::string{var.get("boundary_rounds", "1")};
+  bool       verbose             = truthy(var.get("verbose", "false"));
+  auto       adder_s             = std::string{var.get("adder", "auto")};
+  auto       bs_s                = std::string{var.get("block_size", "0")};
+  auto       mult_s              = std::string{var.get("multiplier", "auto")};
+  auto       qor_path            = std::string{var.get("qor", "")};
+  auto       region_opts_s       = std::string{var.get("region_opts", "")};
+  auto       area_flow           = std::string{var.get("area_flow", "")};
+  auto       reg_margin          = std::string{var.get("reg_margin", "auto")};
+  auto       mem_budget_s        = std::string{var.get("memory_budget_mb", "16384")};
+  auto       time_budget_s       = std::string{var.get("time_budget_ms", "0")};
+  auto       flatten             = livehd::partition::parse_flatten_mode(var.get("flatten", "auto"), "pass.abc");
 
   livehd::abc::Region_opts_map region_opts;
   if (!region_opts_s.empty()) {
@@ -995,9 +1018,9 @@ void Pass_abc::map_with(Eprp_var& var, const std::function<void(livehd::abc::Map
       livehd::diag::err("pass.abc", "bad-icg-fanout", "syntax").msg("pass.abc.icg_input_min '{}' is not an integer", s).fatal();
     }
   }
-  uint64_t max_fanout = 16;
+  uint64_t max_fanout = 32;
   {
-    const auto s_mf = std::string{var.get("max_fanout", "16")};
+    const auto s_mf = std::string{var.get("max_fanout", "32")};
     auto*      b    = s_mf.data();
     auto*      e    = s_mf.data() + s_mf.size();
     auto [p, ec]    = std::from_chars(b, e, max_fanout);
@@ -1013,9 +1036,9 @@ void Pass_abc::map_with(Eprp_var& var, const std::function<void(livehd::abc::Map
       return;
     }
   }
-  uint64_t area_relax_pct = 200;
+  uint64_t area_relax_pct = 0;
   {
-    const auto s_ar = std::string{var.get("area_relax", "200")};
+    const auto s_ar = std::string{var.get("area_relax", "0")};
     auto*      b    = s_ar.data();
     auto*      e    = s_ar.data() + s_ar.size();
     auto [p, ec]    = std::from_chars(b, e, area_relax_pct);
@@ -1111,57 +1134,58 @@ void Pass_abc::map_with(Eprp_var& var, const std::function<void(livehd::abc::Map
   }
 
   livehd::abc::Map_options opts;
-  opts.flow              = flow;
-  opts.pre               = std::string{var.get("pre", "")};
+  opts.io_feedback = var.synthesis_feedback;
+  opts.flow        = flow;
+  opts.pre         = std::string{var.get("pre", "")};
   if (!livehd::synth_attr::valid_abc_pre(opts.pre)) {
     livehd::diag::err("pass.abc", "bad-pre", "syntax")
         .msg("pass.abc.pre '{}' is not a ';'-separated list of allow-listed ABC optimization steps", opts.pre)
         .fatal();
   }
-  opts.boundary          = boundary;
-  opts.boundary_buffer   = boundary_buffer;
-  opts.boundary_rounds   = boundary_rounds;
-  opts.boundary_drive    = boundary_drive;
-  opts.io_load           = io_load;
-  opts.max_fanout        = static_cast<uint32_t>(max_fanout);
-  opts.icg_fanout        = static_cast<uint32_t>(icg_fanout);
-  opts.input_clock_min   = static_cast<uint32_t>(input_clock_min);
-  opts.reset_fanout      = static_cast<uint32_t>(reset_fanout);
-  opts.area_relax_pct    = static_cast<uint32_t>(area_relax_pct);
-  opts.area_flow         = area_flow;
-  opts.reg_margin        = reg_margin;
-  opts.large_flow        = large_flow;
+  opts.boundary           = boundary;
+  opts.boundary_buffer    = boundary_buffer;
+  opts.boundary_rounds    = boundary_rounds;
+  opts.boundary_drive     = boundary_drive;
+  opts.io_load            = io_load;
+  opts.max_fanout         = static_cast<uint32_t>(max_fanout);
+  opts.icg_fanout         = static_cast<uint32_t>(icg_fanout);
+  opts.input_clock_min    = static_cast<uint32_t>(input_clock_min);
+  opts.reset_fanout       = static_cast<uint32_t>(reset_fanout);
+  opts.area_relax_pct     = static_cast<uint32_t>(area_relax_pct);
+  opts.area_flow          = area_flow;
+  opts.reg_margin         = reg_margin;
+  opts.large_flow         = large_flow;
   opts.large_flow_latches = truthy(var.get("large_flow_latches", "false")) && large_flow == kDefaultLargeFlow;
-  opts.large_ge          = large_ge;
-  opts.ware_max_cells    = ware_max_cells;
-  opts.map_register      = map_register;
-  opts.drop_init         = drop_init;
-  opts.derived_clock     = derived_clock;
-  opts.memory_fold       = *memory_fold;
-  opts.memory_max_bits   = memory_max_bits;
-  opts.register_max_bits = register_max_bits;
-  opts.dff_cell          = std::string{var.get("dff_cell", "")};
-  opts.delay             = delay;
-  opts.load              = load;
-  opts.verbose           = verbose;
-  opts.adder             = adder.value();
-  opts.auto_adder        = adder_s == "auto" && block_size == 0;
-  opts.force_remap       = truthy(var.get("tune_finalize", "false"));
-  opts.tune_profile      = std::string(var.get("tune_profile", "auto"));
-  opts.tune_validate     = std::string(var.get("tune_validate", "structural"));
-  opts.ware_trials       = opts.tune_profile == "on";
-  opts.tune_attempts     = static_cast<uint32_t>(std::stoul(std::string(var.get("tune_attempts", "24"))));
-  opts.tune_time_ms      = std::stoull(std::string(var.get("tune_time_ms", "60000")));
-  opts.tune_patience     = static_cast<uint32_t>(std::stoul(std::string(var.get("tune_patience", "3"))));
-  opts.tune_min_share    = std::stod(std::string(var.get("tune_min_share", "0.02")));
-  opts.tune_store        = std::make_shared<livehd::synth::Tune_store>(std::string(var.get("tune_dir", "")),
-                                                                std::string(var.get("tune_file", "")),
-                                                                std::string(var.get("tune_export", "")),
-                                                                var.get("tune_persist", "true") != "false",
-                                                                opts.tune_profile != "off",
-                                                                opts.tune_validate);
-  opts.auto_multiplier   = mult_s == "auto";
-  auto barrel            = std::string{var.get("barrel", "auto")};
+  opts.large_ge           = large_ge;
+  opts.ware_max_cells     = ware_max_cells;
+  opts.map_register       = map_register;
+  opts.drop_init          = drop_init;
+  opts.derived_clock      = derived_clock;
+  opts.memory_fold        = *memory_fold;
+  opts.memory_max_bits    = memory_max_bits;
+  opts.register_max_bits  = register_max_bits;
+  opts.dff_cell           = std::string{var.get("dff_cell", "")};
+  opts.delay              = delay;
+  opts.load               = load;
+  opts.verbose            = verbose;
+  opts.adder              = adder.value();
+  opts.auto_adder         = adder_s == "auto" && block_size == 0;
+  opts.force_remap        = truthy(var.get("tune_finalize", "false"));
+  opts.tune_profile       = std::string(var.get("tune_profile", "auto"));
+  opts.tune_validate      = std::string(var.get("tune_validate", "structural"));
+  opts.ware_trials        = opts.tune_profile == "on";
+  opts.tune_attempts      = static_cast<uint32_t>(std::stoul(std::string(var.get("tune_attempts", "24"))));
+  opts.tune_time_ms       = std::stoull(std::string(var.get("tune_time_ms", "60000")));
+  opts.tune_patience      = static_cast<uint32_t>(std::stoul(std::string(var.get("tune_patience", "3"))));
+  opts.tune_min_share     = std::stod(std::string(var.get("tune_min_share", "0.02")));
+  opts.tune_store         = std::make_shared<livehd::synth::Tune_store>(std::string(var.get("tune_dir", "")),
+                                                                        std::string(var.get("tune_file", "")),
+                                                                        std::string(var.get("tune_export", "")),
+                                                                        var.get("tune_persist", "true") != "false",
+                                                                        opts.tune_profile != "off",
+                                                                        opts.tune_validate);
+  opts.auto_multiplier    = mult_s == "auto";
+  auto barrel             = std::string{var.get("barrel", "auto")};
   if (barrel != "auto" && barrel != "log" && barrel != "reverse") {
     livehd::diag::err("pass.abc", "bad-barrel", "io").msg("barrel must be auto|log|reverse").fatal();
     return;
@@ -1249,11 +1273,12 @@ void Pass_abc::map_with(Eprp_var& var, const std::function<void(livehd::abc::Map
   // memory's ports (a cprop `cond * lanes` enable, a constant lane pattern),
   // which a ware extraction would turn into an opaque instance. Without it the
   // historical order (ware first) is unchanged.
-  std::vector<livehd::synth::Memory_row>      memory_table;
-  std::vector<std::shared_ptr<hhds::Graph>>   memory_modules, ware_modules;
+  std::vector<livehd::synth::Memory_row>    memory_table;
+  std::vector<std::shared_ptr<hhds::Graph>> memory_modules, ware_modules;
   if (memory_prune_reads) {
-    memory_modules = livehd::synth::build_memory_modules(scratch_graphs, opts.memory_fold, opts.memory_max_bits, &memory_table, true);
-    ware_modules   = livehd::synth::build_ware_modules(scratch_graphs, ware_policy, option_colors, ware_zero_bits);
+    memory_modules
+        = livehd::synth::build_memory_modules(scratch_graphs, opts.memory_fold, opts.memory_max_bits, &memory_table, true);
+    ware_modules = livehd::synth::build_ware_modules(scratch_graphs, ware_policy, option_colors, ware_zero_bits);
   } else {
     ware_modules   = livehd::synth::build_ware_modules(scratch_graphs, ware_policy, option_colors, ware_zero_bits);
     memory_modules = livehd::synth::build_memory_modules(scratch_graphs, opts.memory_fold, opts.memory_max_bits, &memory_table);
@@ -1266,13 +1291,14 @@ void Pass_abc::map_with(Eprp_var& var, const std::function<void(livehd::abc::Map
     if (const auto swept = livehd::synth::sweep_unobserved_state(resolve_graphs, top, nullptr);
         swept && swept->registers_removed + swept->registers_trimmed + swept->registers_split + swept->cells_removed > 0) {
       livehd::diag::info("pass.abc", "state-swept-memory", "progress")
-          .msg("pass.abc: state sweep of the lowered memories removed {} unobserved register(s) and {} cell(s), narrowed {} and "
-               "split {} register(s), dropping {} unobserved register bit(s)",
-               swept->registers_removed,
-               swept->cells_removed,
-               swept->registers_trimmed,
-               swept->registers_split,
-               swept->trimmed_bits)
+          .msg(
+              "pass.abc: state sweep of the lowered memories removed {} unobserved register(s) and {} cell(s), narrowed {} and "
+              "split {} register(s), dropping {} unobserved register bit(s)",
+              swept->registers_removed,
+              swept->cells_removed,
+              swept->registers_trimmed,
+              swept->registers_split,
+              swept->trimmed_bits)
           .emit();
     }
   }
@@ -1313,12 +1339,13 @@ void Pass_abc::map_with(Eprp_var& var, const std::function<void(livehd::abc::Map
           .emit();
     }
   }
-  opts.tune_salt = livehd::synth::Region_cache::make_salt(livehd::abc::kAbcSrcSalt,
+  opts.tune_salt = livehd::synth::Region_cache::make_salt(livehd::fold_salt_mix(livehd::abc::kAbcSrcSalt),
                                                           opts.library,
                                                           opts.map_register,
                                                           opts.memory_fold,
                                                           opts.memory_max_bits,
-                                                          livehd::liberty::dff_selection_descriptor(dff_sel, opts.dff_cell) + (opts.drop_init ? "+drop_init" : "")
+                                                          livehd::liberty::dff_selection_descriptor(dff_sel, opts.dff_cell)
+                                                              + (opts.drop_init ? "+drop_init" : "")
                                                               + (opts.derived_clock ? "+derived_clock" : ""));
   if (!cache_dir.empty()) {
     std::error_code ec;
@@ -1337,7 +1364,7 @@ void Pass_abc::map_with(Eprp_var& var, const std::function<void(livehd::abc::Map
     const std::string dff_desc = livehd::liberty::dff_selection_descriptor(dff_sel, opts.dff_cell) + (opts.drop_init ? "+drop_init" : "")
                                  + (opts.derived_clock ? "+derived_clock" : "");
     incr                       = std::make_shared<livehd::synth::Region_cache>(cache_dir,
-                                                         livehd::synth::Region_cache::make_salt(livehd::abc::kAbcSrcSalt,
+                                                         livehd::synth::Region_cache::make_salt(livehd::fold_salt_mix(livehd::abc::kAbcSrcSalt),
                                                                                                 opts.library,
                                                                                                 opts.map_register,
                                                                                                 opts.memory_fold,
@@ -1347,6 +1374,9 @@ void Pass_abc::map_with(Eprp_var& var, const std::function<void(livehd::abc::Map
   }
 
   // A whole-design flatten maps ONE region and its netlist must hold exactly one
+  if (opts.io_feedback) {
+    opts.io_feedback->cache = incr;
+  }
   // module; the mapper drops its shared helper defs in that mode (set_flat).
   // Virtual flattening (pass.color synth) flattens too but emits a wrapper plus
   // one module per color, so it must NOT take this path.
@@ -1579,7 +1609,15 @@ void Pass_abc::map_with(Eprp_var& var, const std::function<void(livehd::abc::Map
   }
 
   if (!canonical_final) {
-    emit_qor(mapper.qor(), top, opts, qor_path, incr.get(), mapper.backend_started(), hier, dff_sel, mapper.parallel_stats(),
+    emit_qor(mapper.qor(),
+             top,
+             opts,
+             qor_path,
+             incr.get(),
+             mapper.backend_started(),
+             hier,
+             dff_sel,
+             mapper.parallel_stats(),
              memory_table);
   } else if (!qor_path.empty()) {
     std::ifstream       in(canonical_qor);

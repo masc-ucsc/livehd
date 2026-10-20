@@ -212,7 +212,7 @@ mod root(c:U4) -> (d:U4@[0]) {
   d = s
 }
 EOF
-compile_case hier_ref hier_top --top root
+compile_case hier_ref hier_top --top root --set compile.specialize_modules=false
 [ "$RC" -eq 0 ] || fail "a submodule refutation (not enough top) must NOT fail the build (got rc=$RC): $(cat "$DIAG")"
 grep -q '"code":"assert-deferred"' "$DIAG" || fail "submodule refutation must emit a deferred warning: $(cat "$DIAG")"
 grep -q 'not enough top' "$DIAG" || fail "deferred warning must explain the missing top context: $(cat "$DIAG")"

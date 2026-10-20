@@ -8,6 +8,8 @@ filegroup(
         "color_centroids.hpp",
         "h2d.cpp",
         "h2d.hpp",
+        "io_timing.cpp",
+        "io_timing.hpp",
         "macro_snap.cpp",
         "macro_snap.hpp",
         "memory_proxy.cpp",
@@ -18,8 +20,11 @@ filegroup(
         "place.hpp",
         "repair.cpp",
         "repair.hpp",
+        "repair_internal.hpp",
         "reset_tree.cpp",
         "reset_tree.hpp",
+        "resize_engine.cpp",
+        "resize_engine.hpp",
         "resynthesize.cpp",
         "steiner_repair.cpp",
         "steiner_repair.hpp",
@@ -59,12 +64,14 @@ cc_library(
     srcs = [
         "color_centroids.cpp",
         "h2d.cpp",
+        "io_timing.cpp",
         "macro_snap.cpp",
         "memory_proxy.cpp",
         "pin_adjust.cpp",
         "place.cpp",
         "repair.cpp",
         "reset_tree.cpp",
+        "resize_engine.cpp",
         "resynthesize.cpp",
         "steiner_repair.cpp",
         "technology_rc.cpp",
@@ -73,12 +80,15 @@ cc_library(
     hdrs = [
         "color_centroids.hpp",
         "h2d.hpp",
+        "io_timing.hpp",
         "macro_snap.hpp",
         "memory_proxy.hpp",
         "pin_adjust.hpp",
         "place.hpp",
         "repair.hpp",
+        "repair_internal.hpp",
         "reset_tree.hpp",
+        "resize_engine.hpp",
         "steiner_repair.hpp",
         "technology_rc.hpp",
         ":place_salt",
@@ -112,6 +122,22 @@ cc_test(
     deps = [
         ":place",
         "//pass/opentimer:pass_opentimer",
+        "@googletest//:gtest_main",
+    ],
+)
+
+cc_test(
+    name = "io_timing_test",
+    size = "small",
+    srcs = ["io_timing_test.cpp"],
+    copts = COPTS,
+    data = [
+        "//inou/lefdef:test_data",
+        "//inou/prp:abc_tests",
+    ],
+    deps = [
+        ":place",
+        "//pass/abc:pass_abc",
         "@googletest//:gtest_main",
     ],
 )
@@ -175,5 +201,21 @@ cc_test(
     name = "macro_snap_test",
     srcs = ["macro_snap_test.cpp"],
     copts = COPTS,
-    deps = [":place", "@googletest//:gtest_main"],
+    deps = [
+        ":place",
+        "@googletest//:gtest_main",
+    ],
+)
+
+cc_test(
+    name = "resize_engine_test",
+    size = "small",
+    srcs = ["resize_engine_test.cpp"],
+    copts = COPTS,
+    data = ["//inou/lefdef:test_data"],
+    deps = [
+        ":place",
+        "//pass/opentimer:pass_opentimer",
+        "@googletest//:gtest_main",
+    ],
 )

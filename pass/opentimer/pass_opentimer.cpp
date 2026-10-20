@@ -63,6 +63,12 @@ void Pass_opentimer::setup() {
 }
 
 Pass_opentimer::Pass_opentimer(const Eprp_var& var) : Pass("pass.opentimer", var) {
+  // Like OpenSTA's default, do not time data paths through async preset/clear
+  // -> Q arcs (recovery/removal checks on those pins remain).
+  timer.preset_clear_arcs(false);
+  // A negative-edge check (clock-gate enable flops) captures the rising-edge
+  // launch of the same cycle, as OpenSTA times a half-cycle path.
+  timer.falling_edge_same_cycle(true);
   physical_rc_ = var.physical_rc;
   parse_critical_options(var);
   const auto load_text = std::string(var.get("io_load", "-1"));
@@ -215,19 +221,70 @@ void Pass_opentimer::ensure_libs() {
 // reading, which is never safe to guess at.
 namespace {
 
-// Tcl bracket/brace wrappers around one token: `[get_ports` -> `get_ports`,
-// `clk]` -> `clk`, `[all_outputs]` -> `all_outputs`, `{a` -> `a`.
+// Tcl wrappers around a scalar token or selector head. Port-list contents
+// are handled separately so literal bus indices keep their closing bracket.
 std::string sdc_strip(std::string_view t) {
-  while (!t.empty() && (t.front() == '[' || t.front() == '{')) {
+  if (!t.empty() && (t.front() == '[' || t.front() == '{' || t.front() == '"')) {
+    const char closing = t.front() == '[' ? ']' : t.front() == '{' ? '}' : '"';
     t.remove_prefix(1);
-  }
-  while (!t.empty() && (t.back() == ']' || t.back() == '}')) {
-    t.remove_suffix(1);
+    if (!t.empty() && t.back() == closing) {
+      t.remove_suffix(1);
+    }
   }
   return std::string{t};
 }
 
-bool sdc_closes(std::string_view t) { return !t.empty() && t.back() == ']'; }
+struct Sdc_selector {
+  std::vector<std::string> args;
+  bool                     closed = false;
+};
+
+// Read the outer command substitution, not the first bus-index ']'. Braced
+// port lists quote their brackets literally; escapes and balanced unbraced
+// brackets must likewise survive as part of the selected pin name.
+Sdc_selector sdc_selector(const std::vector<std::string>& tokens, size_t& index) {
+  Sdc_selector result;
+  unsigned     braces = 0, brackets = 1;
+  bool         quoted = false;
+  for (++index; index < tokens.size(); ++index) {
+    std::string argument;
+    const auto& token = tokens[index];
+    for (size_t offset = 0; offset < token.size(); ++offset) {
+      const char c = token[offset];
+      if (c == '\\' && offset + 1 < token.size()) {
+        argument += token[++offset];
+      } else if (c == '{' && !quoted) {
+        if (braces++) {
+          argument += c;
+        }
+      } else if (c == '}' && !quoted && braces) {
+        if (--braces) {
+          argument += c;
+        }
+      } else if (c == '"' && !braces) {
+        quoted = !quoted;
+      } else if (c == '[' && !braces && !quoted) {
+        ++brackets;
+        argument += c;
+      } else if (c == ']' && !braces && !quoted) {
+        if (--brackets == 0) {
+          if (!argument.empty()) {
+            result.args.push_back(std::move(argument));
+          }
+          result.closed = offset + 1 == token.size();
+          return result;
+        }
+        argument += c;
+      } else {
+        argument += c;
+      }
+    }
+    if (!argument.empty()) {
+      result.args.push_back(std::move(argument));
+    }
+  }
+  return result;
+}
 
 // A token is the constraint's VALUE only if it parses as a complete number.
 // `-min` must not be read as one, and neither must a port called `1a`.
@@ -464,6 +521,29 @@ void Pass_opentimer::read_sdc(std::string_view sdc_file) {
   const auto fail = [&](std::string_view code, const std::string& what) {
     livehd::diag::err("pass.opentimer", code, "io").msg("{}:{}: {}", sdc_file, lineno, what).hint(std::string{line}).fatal();
   };
+  const auto port_name = [&](const std::string& name) {
+    const auto exists = [&](const std::string& candidate) {
+      return timer.primary_inputs().contains(candidate) || timer.primary_outputs().contains(candidate);
+    };
+    if (exists(name) || name.empty() || name.back() != ']') {
+      return name;
+    }
+    const auto open = name.rfind('[');
+    if (open == std::string::npos || open + 2 >= name.size()) {
+      return name;
+    }
+    const auto index = name.substr(open + 1, name.size() - open - 2);
+    if (index.find_first_not_of("0123456789") != std::string::npos) {
+      return name;
+    }
+    // Pin_tracker names bit zero by the base port and later bits base.N.
+    // A graph whose port already has the literal bracket name wins above.
+    auto candidate = name.substr(0, open);
+    if (index != "0") {
+      candidate += "." + index;
+    }
+    return exists(candidate) ? candidate : name;
+  };
 
   // A command this pass cannot honor: fatal when annotations are critical,
   // else flag the report incomplete and say so once per command.
@@ -606,6 +686,7 @@ void Pass_opentimer::read_sdc(std::string_view sdc_file) {
       ++sdc_clocks_;
       bool                     supported = true, have_period = false, have_name = false;
       float                    period = 1000;
+      std::vector<float>       waveform;  // -waveform {rise fall}
       std::string              pname  = "clock";
       std::vector<std::string> source_ports, source_pins;
       for (std::size_t i = 1; i < tok.size(); i++) {
@@ -629,31 +710,37 @@ void Pass_opentimer::read_sdc(std::string_view sdc_file) {
             fail("sdc-syntax", std::format("create_clock -period expects a number, got '{}'", tok[i + 1]));
           }
           ++i;
-        } else if (sdc_strip(tok[i]) == "get_ports") {
+        } else if (tok[i] == "-waveform") {
+          // A braced edge list: `{0 750}` (one or two tokens). Only a single rise/fall pair is modelled.
           bool closed = false;
           for (std::size_t j = i + 1; j < tok.size(); ++j) {
-            clock_ports.insert(sdc_strip(tok[j]));
-            source_ports.push_back(sdc_strip(tok[j]));
-            if (sdc_closes(tok[j])) {
+            for (const auto& edge : absl::StrSplit(tok[j], absl::ByAnyChar("{}"), absl::SkipEmpty())) {
+              if (float v = 0; sdc_number(std::string(edge), v)) {
+                waveform.push_back(v);
+              } else {
+                fail("sdc-syntax", std::format("create_clock -waveform expects numbers, got '{}'", tok[j]));
+              }
+            }
+            if (!tok[j].empty() && tok[j].back() == '}') {
               i      = j;
               closed = true;
               break;
             }
           }
-          supported &= closed;
+          supported &= closed && waveform.size() == 2 && waveform[0] >= 0 && waveform[1] > waveform[0];
+        } else if (sdc_strip(tok[i]) == "get_ports") {
+          const auto selector = sdc_selector(tok, i);
+          for (const auto& port : selector.args) {
+            clock_ports.insert(port_name(port));
+            source_ports.push_back(port_name(port));
+          }
+          supported &= selector.closed;
         } else if (sdc_strip(tok[i]) == "get_pins") {
           // A clock on an INTERNAL pin: the output of a hard macro that generates the design clock
           // (litepci's `pcie_us/user_clk`). SDC spells the pin `instance/pin`, OpenTimer `instance:pin`.
-          bool closed = false;
-          for (std::size_t j = i + 1; j < tok.size(); ++j) {
-            source_pins.push_back(sdc_strip(tok[j]));
-            if (sdc_closes(tok[j])) {
-              i      = j;
-              closed = true;
-              break;
-            }
-          }
-          supported &= closed;
+          const auto selector = sdc_selector(tok, i);
+          source_pins.insert(source_pins.end(), selector.args.begin(), selector.args.end());
+          supported &= selector.closed;
         } else {
           supported = false;  // Waveforms, generated clocks and Tcl expressions are not guessed.
         }
@@ -664,7 +751,8 @@ void Pass_opentimer::read_sdc(std::string_view sdc_file) {
       // The one pin the clock is attached to, as OpenTimer names it; empty unless a single plain pin of
       // the timing graph is given (a missing or wildcard pin leaves a virtual clock, reported incomplete).
       std::string clock_pin;
-      if (supported && source_ports.empty() && source_pins.size() == 1 && source_pins.front().find_first_of("*?[") == std::string::npos) {
+      if (supported && source_ports.empty() && source_pins.size() == 1
+          && source_pins.front().find_first_of("*?[") == std::string::npos) {
         auto candidate = source_pins.front();
         if (const auto slash = candidate.rfind('/'); slash != std::string::npos) {
           candidate[slash] = ':';
@@ -738,6 +826,14 @@ void Pass_opentimer::read_sdc(std::string_view sdc_file) {
       if ((critical_ || !target_overrides_.empty()) && !clock_pin.empty()) {
         fail("critical-constraints", "critical annotations cannot honor a clock created on an internal pin");
       }
+      if (supported && !waveform.empty() && waveform[1] - waveform[0] >= period) {
+        supported = false;  // edges must fit one period
+      }
+      const bool default_waveform
+          = waveform.empty() || (waveform[0] == 0 && std::abs(waveform[1] - period / 2) <= 1e-6f * std::max(1.0f, period));
+      if (!default_waveform && source_ports.empty() && clock_pin.empty()) {
+        supported = false;  // a virtual clock has no source to carry its edges
+      }
       timing_targets_[pname] = {period, source_ports, clock_pin};
       if (supported && source_ports.empty() && clock_pin.empty() && have_period && have_name && !pname.empty() && sdc_clocks_ == 1) {
         virtual_clock_name_   = pname;
@@ -746,7 +842,13 @@ void Pass_opentimer::read_sdc(std::string_view sdc_file) {
         constraints_complete_ = false;
       }
       if (supported && source_ports.size() == 1 && timer.primary_inputs().contains(source_ports.front())) {
-        timer.create_clock(pname, source_ports.front(), period);
+        if (default_waveform) {
+          timer.create_clock(pname, source_ports.front(), period);
+        } else {
+          timer.create_clock(pname, source_ports.front(), period, {waveform[0], waveform[1]});
+        }
+      } else if (supported && !default_waveform && !clock_pin.empty()) {
+        timer.create_clock(pname, clock_pin, period, {waveform[0], waveform[1]});
       } else if (!clock_pin.empty()) {
         timer.create_clock(pname, clock_pin, period);
       } else {
@@ -829,19 +931,19 @@ void Pass_opentimer::read_sdc(std::string_view sdc_file) {
         } else if (bare == "all_outputs") {
           all_outputs = true;
         }
-        if (sdc_closes(t)) {
+        if (!t.empty() && t.back() == ']') {
           continue;  // `[all_outputs]` is self-closing
         }
-        bool closed = false;
-        for (std::size_t j = i + 1; j < tok.size(); ++j) {
-          const std::string arg = sdc_strip(tok[j]);
+        const auto selector = sdc_selector(tok, i);
+        for (size_t j = 0; j < selector.args.size(); ++j) {
+          const auto& arg = selector.args[j];
           if (arg == "-no_clocks" && bare == "all_inputs") {
             no_clocks = true;
           } else if (arg == "-exclude_exact" && bare == "all_inputs") {
-            if (++j >= tok.size()) {
+            if (++j >= selector.args.size()) {
               fail("sdc-syntax", "input exclusion needs a port name");
             }
-            excluded_inputs.insert(sdc_strip(tok[j]));
+            excluded_inputs.insert(selector.args[j]);
           } else if (bare == "get_ports" && !arg.empty()) {
             ports.push_back(arg);
           } else if (!arg.empty()) {
@@ -850,15 +952,9 @@ void Pass_opentimer::read_sdc(std::string_view sdc_file) {
             }
             constraints_complete_ = false;
           }
-          if (sdc_closes(tok[j])) {
-            i      = j;
-            closed = true;
-            break;
-          }
-          i = j;
         }
-        constraints_complete_ &= closed;
-        if (critical_ && !closed) {
+        constraints_complete_ &= selector.closed;
+        if (critical_ && !selector.closed) {
           fail("sdc-syntax", "port selector is missing its closing bracket");
         }
       } else if (!have_value && sdc_number(t, value)) {
@@ -897,6 +993,9 @@ void Pass_opentimer::read_sdc(std::string_view sdc_file) {
           ports.push_back(pname);
         }
       }
+    }
+    for (auto& port : ports) {
+      port = port_name(port);
     }
 
     const bool clocked

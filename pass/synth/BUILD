@@ -53,6 +53,7 @@ genrule(
         "//ware:cgen_memory_rtl",
         "//inou/cgen:memory_generator_srcs",
         "//inou/yosys:memory_import_srcs",
+        "//pass/aegraph:pass_aegraph",  # the engine the fold sites dispatch to (fold_body)
         "//pass/cprop:pass_cprop",
         "//pass/enableopt:pass_enableopt",
         "//pass/bitwidth:pass_bitwidth",
@@ -122,6 +123,8 @@ cc_library(
         ":lnet",
         "//core",
         "//graph",
+        "//pass/aegraph:fold_engine",
+        "//pass/aegraph:pass_aegraph",  # livehd::fold_body (loop cleanup, memory modules)
         "//pass/bitwidth:pass_bitwidth",
         "//pass/color:pass_color",
         "//pass/common:pass",
@@ -131,8 +134,8 @@ cc_library(
         "//pass/formal",
         "//pass/liberty:liberty_dff",
         "//pass/partition:pass_partition",
-        "//pass/specialize",
         "//pass/semdiff",  # region cache: structural_identical
+        "//pass/specialize",
         "@abseil-cpp//absl/container:btree",
         "@abseil-cpp//absl/container:flat_hash_map",
         "@abseil-cpp//absl/container:flat_hash_set",
@@ -142,6 +145,17 @@ cc_library(
 )
 
 exports_files(["arith.hpp"])
+
+cc_test(
+    name = "io_resynth_test",
+    size = "small",
+    srcs = ["io_resynth_test.cpp"],
+    copts = COPTS,
+    deps = [
+        ":synth",
+        "@googletest//:gtest_main",
+    ],
+)
 
 cc_library(
     name = "arith",

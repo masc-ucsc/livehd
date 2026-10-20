@@ -184,6 +184,39 @@ TEST(AbcIncr, StructuralEqualReuse) {
 }
 
 // Repeated subblocks can land in different color/module names in one compile.
+TEST(AbcIncr, PlacementUpdateKeepsPreBodyAndRecipe) {
+  auto&        out = livehd::Hhds_graph_library::instance("lgdb_io_update_out");
+  auto         f   = make_region("lgdb_io_update_src", out, "top__c1");
+  Region_cache cache("lgdb_io_update_cache", 7);
+  ASSERT_TRUE(cache.store(f.rb, *f.slib, f.src_name, Region_qor{}, "original-recipe", &out));
+  cache.save();
+  for (auto n : f.mapped->body().nodes()) {
+    if (!livehd::graph_util::is_builtin_node(n)) {
+      n.set_name("placement_remapped");
+    }
+  }
+  f.mapped->commit();
+  Region_qor q;
+  q.area     = 42;
+  q.delay    = 200;
+  q.delay_ps = true;
+  ASSERT_TRUE(cache.update_mapped("top__c1", out, q, "placed-io-environment"));
+  cache.save();
+  Region_cache loaded("lgdb_io_update_cache", 7);
+  auto         hit = loaded.lookup_compare(f.rb, f.src.get(), "original-recipe");
+  ASSERT_TRUE(hit.hit);
+  EXPECT_EQ(hit.row->io_env, "placed-io-environment");
+  EXPECT_EQ(hit.row->area, 42);
+  EXPECT_FALSE(loaded.lookup_compare(f.rb, f.src.get(), "changed-recipe").hit);
+  ASSERT_TRUE(loaded.reuse_hit(f.rb, hit, &out));
+  bool marker = false;
+  for (auto n : f.rb.body->body().nodes()) {
+    marker |= n.get_name() == "placement_remapped";
+  }
+  EXPECT_TRUE(marker);
+}
+
+// Repeated subblocks can land in different color/module names in one compile.
 // The canonical digest discovers them, then the exact structural comparison
 // proves the reuse before the mapped body is copied under the new name.
 TEST(AbcIncr, CrossNameStructuralReuse) {

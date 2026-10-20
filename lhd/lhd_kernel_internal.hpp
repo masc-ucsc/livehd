@@ -57,36 +57,12 @@ struct Set_pass {
 // `formal.<flag>`. Everything else on pass.lec is ref/impl-pairing machinery:
 // canonical spelling `formal.lec.<flag>`.
 inline constexpr std::string_view kFormalCommonFlags[] = {
-    "abc",
-    "abc_budget",
-    "abc_mem",
-    "assume_check",
-    "bound",
-    "engine",
-    "profile",
-    "portfolio",
-    "effort",
-    "hard_timeout_mult",
-    "ignore_memory",
-    "mine",
-    "min_timeout",
-    "partitions",
-    "pdr",
-    "pdr_timeout",
-    "phase",
-    "report",
-    "reset",
-    "reset_cycles",
-    "retry",
-    "reuse",
-    "sec_timeout",
-    "solver",
-    "spec_mining_timeout",
-    "simfail",
-    "simfail_run",
-    "split",
-    "stats",
-    "timeout",
+    "abc",           "abc_budget",  "abc_mem",     "assume_check", "bound",
+    "engine",        "profile",     "portfolio",   "effort",       "hard_timeout_mult",
+    "ignore_memory", "mine",        "min_timeout", "partitions",   "pdr",
+    "pdr_timeout",   "phase",       "report",      "reset",        "reset_cycles",
+    "retry",         "reuse",       "sec_timeout", "solver",       "spec_mining_timeout",
+    "simfail",       "simfail_run", "split",       "stats",        "timeout",
     "witness",
 };
 
@@ -96,26 +72,9 @@ inline constexpr std::string_view kFormalCommonFlags[] = {
 // pass.abc honors under ANY coloring, and the other algorithms' own knobs --
 // stays `pass.color.<flag>`.
 inline constexpr std::string_view kColorSynthFlags[] = {
-    "boundary_wiring",
-    "ctrl_cones",
-    "ctrl_max_gate",
-    "ctrl_min_gate",
-    "flop_to_flop",
-    "forward",
-    "liberty",
-    "mapper",
-    "max_gate",
-    "max_ge",
-    "memory_color_first",
-    "min_color_nodes",
-    "min_gate",
-    "min_ge",
-    "mode",
-    "name_weight",
-    "stop_arith",
-    "stop_cmp",
-    "stop_mux",
-    "stop_shift",
+    "boundary_wiring", "ctrl_cones", "ctrl_max_gate",      "ctrl_min_gate",   "flop_to_flop", "forward", "liberty", "mapper",
+    "max_gate",        "max_ge",     "memory_color_first", "min_color_nodes", "min_gate",     "min_ge",  "mode",    "name_weight",
+    "stop_arith",      "stop_cmp",   "stop_mux",           "stop_shift",
 };
 
 // The common/specific split of a method shared by two namespaces (Set_pass
@@ -207,98 +166,110 @@ struct Retired_set_option {
   std::string_view hint;
 };
 inline constexpr Retired_set_option kRetiredSetOptions[] = {
-    {"pass.usyn", "threads", "Use --set lhd.jobs=N for shared native synthesis admission."},
-    {"inou.cgen.verilog","verbose",                                                                    "This option had no implemented effect; drop the setting."                         },
-    {        "pass.lean",                 "normalize",                                                                    "This option had no implemented effect; drop the setting."},
-    {     "pass.semdiff",                       "alg",                                                                    "This option had no implemented effect; drop the setting."},
-    {     "pass.semdiff",                   "verbose",                                                                    "This option had no implemented effect; drop the setting."},
-    {       "pass.color",                   "compact",                                                                    "This option had no implemented effect; drop the setting."},
-    {              "sim",                   "flatten",                                                                    "This option had no implemented effect; drop the setting."},
-    {      "pass.formal",                   "enabled",                                                        "Use --set compile.formal.mode=none to disable compile-time checking."},
-    {         "pass.abc",                       "out",                                                                         "Use --emit-dir lg:DIR for the output graph library."},
-    {   "pass.partition",                       "out",                                                                         "Use --emit-dir lg:DIR for the output graph library."},
-    {     "pass.liberty",                       "out",                                                                         "Use --emit-dir lg:DIR for the output graph library."},
-    { "pass.single_edge",                       "out",                                                                         "Use --emit-dir lg:DIR for the output graph library."},
-    {  "inou.yosys.tolg",                  "frontend",                                                                      "Select --reader yosys-verilog or --reader yosys-slang."},
-    {       "inou.slang",                   "defines",                                                                            "Pass -D NAME=VALUE after -- to the slang reader."},
-    {       "inou.slang",                  "includes",                                                                                   "Pass -I DIR after -- to the slang reader."},
-    {       "inou.slang",                 "undefines",                                                                                  "Pass -U NAME after -- to the slang reader."},
-    {         "pass.abc",                "small_flow",                                                                  "This unused optional policy was removed; drop the setting."},
-    {         "pass.abc",                  "small_ge",                                                                  "This unused optional policy was removed; drop the setting."},
-    {         "pass.abc",              "small_min_ge",                                                                  "This unused optional policy was removed; drop the setting."},
-    {         "pass.abc",                 "ctrl_flow",                                                                  "This unused optional policy was removed; drop the setting."},
-    {         "pass.abc",           "ctrl_area_relax",                                                                  "This unused optional policy was removed; drop the setting."},
-    {         "pass.abc",       "ctrl_time_budget_ms",                                                                  "This unused optional policy was removed; drop the setting."},
-    {  "inou.yosys.tolg",                       "abc",                                                                  "This unused optional policy was removed; drop the setting."},
-    {  "inou.yosys.tolg",                   "techmap",                                                                  "This unused optional policy was removed; drop the setting."},
-    {  "inou.yosys.tolg",                  "elab_top",                                                                  "This unused optional policy was removed; drop the setting."},
-    {  "inou.yosys.tolg",                "rename_top",                                                                  "This unused optional policy was removed; drop the setting."},
-    {      "pass.formal",                    "active",                                                "The kernel manages this implementation setting internally; drop the setting."},
-    {      "pass.formal",            "hier_preflight",                                                "The kernel manages this implementation setting internally; drop the setting."},
-    {       "pass.upass",              "import_defer",                                                "The kernel manages this implementation setting internally; drop the setting."},
-    {       "pass.upass",                       "dce",                                                "The kernel manages this implementation setting internally; drop the setting."},
-    {       "pass.upass",                   "inherit",                                                "The kernel manages this implementation setting internally; drop the setting."},
-    {       "pass.upass", "preserve_param_provenance",                                                "The kernel manages this implementation setting internally; drop the setting."},
-    {       "pass.upass",                "ssa_stream",                                                "The kernel manages this implementation setting internally; drop the setting."},
-    {       "inou.slang",               "slang_flags",                                                     "Pass reader arguments after -- instead of setting serialized arguments."},
-    {  "inou.yosys.tolg",               "slang_flags",                                                     "Pass reader arguments after -- instead of setting serialized arguments."},
-    {         "pass.abc",                     "stats",                                                                         "Use --stats or --set lhd.stats=true for statistics."},
-    {       "pass.color",                     "stats",                                                                         "Use --stats or --set lhd.stats=true for statistics."},
-    {   "pass.opentimer",                     "stats",                                                                         "Use --stats or --set lhd.stats=true for statistics."},
-    {     "pass.semdiff",                     "stats",                                                                         "Use --stats or --set lhd.stats=true for statistics."},
-    {         "pass.lec",                     "stats",                                                                         "Use --stats or --set lhd.stats=true for statistics."},
+    {        "pass.usyn","threads",                               "Use --set lhd.jobs=N for shared native synthesis admission."                                                      },
+    {"inou.cgen.verilog",                   "verbose",                                                               "This option had no implemented effect; drop the setting."},
+    {        "pass.lean",                 "normalize",                                                               "This option had no implemented effect; drop the setting."},
+    {     "pass.semdiff",                       "alg",                                                               "This option had no implemented effect; drop the setting."},
+    {     "pass.semdiff",                   "verbose",                                                               "This option had no implemented effect; drop the setting."},
+    {       "pass.color",                   "compact",                                                               "This option had no implemented effect; drop the setting."},
+    {              "sim",                   "flatten",                                                               "This option had no implemented effect; drop the setting."},
+    {      "pass.formal",                   "enabled",                                                   "Use --set compile.formal.mode=none to disable compile-time checking."},
+    {         "pass.abc",                       "out",                                                                    "Use --emit-dir lg:DIR for the output graph library."},
+    {   "pass.partition",                       "out",                                                                    "Use --emit-dir lg:DIR for the output graph library."},
+    {     "pass.liberty",                       "out",                                                                    "Use --emit-dir lg:DIR for the output graph library."},
+    { "pass.single_edge",                       "out",                                                                    "Use --emit-dir lg:DIR for the output graph library."},
+    {  "inou.yosys.tolg",                  "frontend",                                                                 "Select --reader yosys-verilog or --reader yosys-slang."},
+    {       "inou.slang",                   "defines",                                                                       "Pass -D NAME=VALUE after -- to the slang reader."},
+    {       "inou.slang",                  "includes",                                                                              "Pass -I DIR after -- to the slang reader."},
+    {       "inou.slang",                 "undefines",                                                                             "Pass -U NAME after -- to the slang reader."},
+    {         "pass.abc",                "small_flow",                                                             "This unused optional policy was removed; drop the setting."},
+    {         "pass.abc",                  "small_ge",                                                             "This unused optional policy was removed; drop the setting."},
+    {         "pass.abc",              "small_min_ge",                                                             "This unused optional policy was removed; drop the setting."},
+    {         "pass.abc",                 "ctrl_flow",                                                             "This unused optional policy was removed; drop the setting."},
+    {         "pass.abc",           "ctrl_area_relax",                                                             "This unused optional policy was removed; drop the setting."},
+    {         "pass.abc",       "ctrl_time_budget_ms",                                                             "This unused optional policy was removed; drop the setting."},
+    {  "inou.yosys.tolg",                       "abc",                                                             "This unused optional policy was removed; drop the setting."},
+    {  "inou.yosys.tolg",                   "techmap",                                                             "This unused optional policy was removed; drop the setting."},
+    {  "inou.yosys.tolg",                  "elab_top",                                                             "This unused optional policy was removed; drop the setting."},
+    {  "inou.yosys.tolg",                "rename_top",                                                             "This unused optional policy was removed; drop the setting."},
+    {      "pass.formal",                    "active",                                           "The kernel manages this implementation setting internally; drop the setting."},
+    {      "pass.formal",            "hier_preflight",                                           "The kernel manages this implementation setting internally; drop the setting."},
+    {       "pass.upass",              "import_defer",                                           "The kernel manages this implementation setting internally; drop the setting."},
+    {       "pass.upass",                       "dce",                                           "The kernel manages this implementation setting internally; drop the setting."},
+    {       "pass.upass",                   "inherit",                                           "The kernel manages this implementation setting internally; drop the setting."},
+    {       "pass.upass", "preserve_param_provenance",                                           "The kernel manages this implementation setting internally; drop the setting."},
+    {       "pass.upass",                "ssa_stream",                                           "The kernel manages this implementation setting internally; drop the setting."},
+    {       "inou.slang",               "slang_flags",                                                "Pass reader arguments after -- instead of setting serialized arguments."},
+    {  "inou.yosys.tolg",               "slang_flags",                                                "Pass reader arguments after -- instead of setting serialized arguments."},
+    {         "pass.abc",                     "stats",                                                                    "Use --stats or --set lhd.stats=true for statistics."},
+    {       "pass.color",                     "stats",                                                                    "Use --stats or --set lhd.stats=true for statistics."},
+    {   "pass.opentimer",                     "stats",                                                                    "Use --stats or --set lhd.stats=true for statistics."},
+    {     "pass.semdiff",                     "stats",                                                                    "Use --stats or --set lhd.stats=true for statistics."},
+    {         "pass.lec",                     "stats",                                                                    "Use --stats or --set lhd.stats=true for statistics."},
     {         "pass.lec",
-     "allow_oversize", "The design-size gate was removed: lec and formal verify always attempt the design, and a run that outgrows memory reports TIMEOUT-memory instead of crashing. Drop the setting."},
+     "allow_oversize",                                                                                                                          "The design-size gate was removed: lec and formal verify always attempt the design, and a run that outgrows memory reports "
+     "TIMEOUT-memory instead of crashing. Drop the setting."                                                                                                                                                         },
     {         "pass.abc",
-     "allow_oversize", "The design-size gate was removed: pass.abc always attempts the design; raise pass.abc.memory_budget_mb for a larger per-color ceiling, and a run that outgrows memory reports TIMEOUT-memory instead of crashing. Drop the setting."},
+     "allow_oversize",                                                                                                                          "The design-size gate was removed: pass.abc always attempts the design; raise pass.abc.memory_budget_mb for a larger "
+     "per-color ceiling, and a run that outgrows memory reports TIMEOUT-memory instead of crashing. Drop the setting."                                                                                                                                                          },
     {         "pass.lec",
-     "strict", "formal.strict was removed. Every verdict now carries a modifier: TIMEOUT-time/-memory exit 0 with a warning (no proof claimed), REFUTED-cex exits 10, and every other REFUTED-<why> (interface, unsupported, unchecked, vacuous, unexplained) exits 7; a contradictory assume set or a check with nothing to compare is REFUTED-vacuous. Drop the setting."                                        },
+     "strict",                                                                                                                          "formal.strict was removed. Every verdict now carries a modifier: TIMEOUT-time/-memory exit 0 with a warning (no proof "
+     "claimed), REFUTED-cex exits 10, and every other REFUTED-<why> (interface, unsupported, unchecked, vacuous, unexplained) "
+     "exits 7; a contradictory assume set or a check with nothing to compare is REFUTED-vacuous. Drop the setting."},
     {        "pass.usyn",
-     "recipes", "pass.usyn runs one native recipe; tune logical_inputs, stack, branches and cut_inputs instead. Drop the setting."},
+     "recipes",       "pass.usyn runs one native recipe; tune logical_inputs, stack, branches and cut_inputs instead. Drop the setting."                                                          },
     {        "pass.usyn",
      "proof_seconds", "pass.usyn no longer proves equivalence; verify the mapped netlist with `lhd lec` as a separate step. Drop the setting."},
     {        "pass.usyn",
-     "proof_nodes", "pass.usyn no longer proves equivalence; verify the mapped netlist with `lhd lec` as a separate step. Drop the setting."},
+     "proof_nodes", "pass.usyn no longer proves equivalence; verify the mapped netlist with `lhd lec` as a separate step. Drop the setting."                               },
+    {        "pass.usyn",           "delay_tolerance",                                     "pass.usyn no longer compares its result against an ABC baseline. Drop the setting."  },
     {        "pass.usyn",
-     "delay_tolerance", "pass.usyn no longer compares its result against an ABC baseline. Drop the setting."},
+     "max_depth",                                                                                                                          "The unate search this bounded was removed; native USYN is bounded by work, endpoint_work, cut_inputs and window_nodes. Drop "
+     "the setting."                },
     {        "pass.usyn",
-     "max_depth", "The unate search this bounded was removed; native USYN is bounded by work, endpoint_work, cut_inputs and window_nodes. Drop the setting."},
+     "cuts",                                                                                                                          "The unate search this bounded was removed; native USYN is bounded by work, endpoint_work, cut_inputs and window_nodes. Drop "
+     "the setting."                                                                                                                                                            },
     {        "pass.usyn",
-     "cuts", "The unate search this bounded was removed; native USYN is bounded by work, endpoint_work, cut_inputs and window_nodes. Drop the setting."},
+     "joint_limit",                                                                                                                          "The unate search this bounded was removed; native USYN is bounded by work, endpoint_work, cut_inputs and window_nodes. Drop "
+     "the setting."                                                                                                                                                                   },
     {        "pass.usyn",
-     "joint_limit", "The unate search this bounded was removed; native USYN is bounded by work, endpoint_work, cut_inputs and window_nodes. Drop the setting."},
+     "joint_windows",                                                                                                                          "The unate search this bounded was removed; native USYN is bounded by work, endpoint_work, cut_inputs and window_nodes. Drop "
+     "the setting."                                                                                                                                                             },
     {        "pass.usyn",
-     "joint_windows", "The unate search this bounded was removed; native USYN is bounded by work, endpoint_work, cut_inputs and window_nodes. Drop the setting."},
+     "image_inputs",                                                                                                                          "The unate search this bounded was removed; native USYN is bounded by work, endpoint_work, cut_inputs and window_nodes. Drop "
+     "the setting."},
     {        "pass.usyn",
-     "image_inputs", "The unate search this bounded was removed; native USYN is bounded by work, endpoint_work, cut_inputs and window_nodes. Drop the setting."},
+     "reshape_limit",                                                                                                                          "The unate search this bounded was removed; native USYN is bounded by work, endpoint_work, cut_inputs and window_nodes. Drop "
+     "the setting."},
     {        "pass.usyn",
-     "reshape_limit", "The unate search this bounded was removed; native USYN is bounded by work, endpoint_work, cut_inputs and window_nodes. Drop the setting."},
+     "encoding_limit",                                                                                                                          "The unate search this bounded was removed; native USYN is bounded by work, endpoint_work, cut_inputs and window_nodes. Drop "
+     "the setting."                                                                                                                                                            },
     {        "pass.usyn",
-     "encoding_limit", "The unate search this bounded was removed; native USYN is bounded by work, endpoint_work, cut_inputs and window_nodes. Drop the setting."},
+     "encoding_code_limit",                                                                                                                          "The unate search this bounded was removed; native USYN is bounded by work, endpoint_work, cut_inputs and window_nodes. Drop "
+     "the setting."                                                                                                                                                          },
     {        "pass.usyn",
-     "encoding_code_limit", "The unate search this bounded was removed; native USYN is bounded by work, endpoint_work, cut_inputs and window_nodes. Drop the setting."},
+     "encoding_pair_limit",                                                                                                                          "The unate search this bounded was removed; native USYN is bounded by work, endpoint_work, cut_inputs and window_nodes. Drop "
+     "the setting."                                                                                                                                                          },
     {        "pass.usyn",
-     "encoding_pair_limit", "The unate search this bounded was removed; native USYN is bounded by work, endpoint_work, cut_inputs and window_nodes. Drop the setting."},
+     "symbolic_nodes",                                                                                                                          "The unate search this bounded was removed; native USYN is bounded by work, endpoint_work, cut_inputs and window_nodes. Drop "
+     "the setting."},
     {        "pass.usyn",
-     "symbolic_nodes", "The unate search this bounded was removed; native USYN is bounded by work, endpoint_work, cut_inputs and window_nodes. Drop the setting."},
+     "cover_limit",                                                                                                                          "The unate search this bounded was removed; native USYN is bounded by work, endpoint_work, cut_inputs and window_nodes. Drop "
+     "the setting."},
     {        "pass.usyn",
-     "cover_limit", "The unate search this bounded was removed; native USYN is bounded by work, endpoint_work, cut_inputs and window_nodes. Drop the setting."},
+     "divisor_limit",                                                                                                                          "The unate search this bounded was removed; native USYN is bounded by work, endpoint_work, cut_inputs and window_nodes. Drop "
+     "the setting."                                                                                                                                                            },
+    {        "pass.usyn",                     "split",                       "The per-cone split mode was removed; pass.usyn always covers the whole region. Drop the setting."                                                                                                                                                         },
     {        "pass.usyn",
-     "divisor_limit", "The unate search this bounded was removed; native USYN is bounded by work, endpoint_work, cut_inputs and window_nodes. Drop the setting."},
+     "split_exact",                       "The per-cone split mode was removed; pass.usyn always covers the whole region. Drop the setting."                                                                                                                                                             },
     {        "pass.usyn",
-     "split", "The per-cone split mode was removed; pass.usyn always covers the whole region. Drop the setting."},
+     "split_factor",                       "The per-cone split mode was removed; pass.usyn always covers the whole region. Drop the setting."                                                                                                                                      },
+    {        "pass.usyn",                 "split_cut",                       "The per-cone split mode was removed; pass.usyn always covers the whole region. Drop the setting."},
     {        "pass.usyn",
-     "split_exact", "The per-cone split mode was removed; pass.usyn always covers the whole region. Drop the setting."},
+     "split_share",                       "The per-cone split mode was removed; pass.usyn always covers the whole region. Drop the setting."},
+    {        "pass.usyn",                 "reference",                                                             "The ABC `&if` LUT reference was removed. Drop the setting."},
     {        "pass.usyn",
-     "split_factor", "The per-cone split mode was removed; pass.usyn always covers the whole region. Drop the setting."},
-    {        "pass.usyn",
-     "split_cut", "The per-cone split mode was removed; pass.usyn always covers the whole region. Drop the setting."},
-    {        "pass.usyn",
-     "split_share", "The per-cone split mode was removed; pass.usyn always covers the whole region. Drop the setting."},
-    {        "pass.usyn",
-     "reference", "The ABC `&if` LUT reference was removed. Drop the setting."},
-    {        "pass.usyn",
-     "witness_bytes", "pass.usyn no longer writes a witness archive; verify the mapped netlist with `lhd lec`. Drop the setting."},
+     "witness_bytes",              "pass.usyn no longer writes a witness archive; verify the mapped netlist with `lhd lec`. Drop the setting."},
 };
 inline std::string_view retired_set_hint(std::string_view method, std::string_view flag) {
   if ((method == "pass.abc" || method == "pass.usyn") && flag == "satopt") {
@@ -449,23 +420,24 @@ void              check_known_set_passes(const Options& opts);
 // in one flow can end up on different files.
 std::string       synth_set(const Options& opts, std::string_view flag, std::string_view def);
 std::string       resolve_liberty(const Options& opts);
-bool              lnastfmt_enabled(const Options& opts);
+std::optional<double> sdc_min_clock_period_ps(const std::string& sdc_path, const std::string& liberty_path);
+bool                  lnastfmt_enabled(const Options& opts);
 // `compile.verify_frozen`: freeze every legalized def and re-check it after the
 // emits (pass/legalize). A full structural digest per graph twice, so on by
 // default only in debug builds (same policy as lnast_fmt).
-bool              verify_frozen_enabled(const Options& opts);
-bool              compile_unroll_requested(const Options& opts);  // compile.unroll (default false)
-std::optional<bool> satopt_setting(const Options& opts);  // the explicit pass.satopt, if any
+bool                  verify_frozen_enabled(const Options& opts);
+bool                  compile_unroll_requested(const Options& opts);  // compile.unroll (default false)
+std::optional<bool>   satopt_setting(const Options& opts);            // the explicit pass.satopt, if any
 // Options for materializing a --lib model library (lg: -> cgen Verilog): no
 // --lib recursion, no top selection (a cell library holds many unrelated
 // tops), and satopt pinned off -- an explicit pass.satopt=true targets the
 // elaborated design, never the model library.
-Options           library_model_opts(const Options& opts);
+Options               library_model_opts(const Options& opts);
 // satopt in the compile graph pipeline: explicit setting, otherwise disabled.
-bool              satopt_during_compile(const Options& opts);
-bool              compile_cache_enabled(const Options& opts);
-void              apply_log_settings(const Options& opts);
-void              apply_lhd_settings(Options& opts);
+bool                  satopt_during_compile(const Options& opts);
+bool                  compile_cache_enabled(const Options& opts);
+void                  apply_log_settings(const Options& opts);
+void                  apply_lhd_settings(Options& opts);
 std::vector<std::pair<std::string, std::string>> compile_graph_passes(const Options& opts);
 // Per step of `passes` (compile_graph_passes): true when a pass.bitwidth step
 // precedes it. pass.aegraph gets the INTERNAL after_bitwidth label exactly there,

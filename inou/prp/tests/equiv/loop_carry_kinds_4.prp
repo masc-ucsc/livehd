@@ -1,0 +1,8 @@
+/*
+:name: loop_carry_kinds_4
+:type: lec
+:set: compile.cprop.engine=aegraph+classic
+:lec_expect: proven
+*/
+// HEADER-ONLY variant: loop_carry_kinds.prp with every cprop site (compile slots, specialize refolds) on
+// `compile.cprop.engine=aegraph+classic`, proven equal to the classic-compiled base.

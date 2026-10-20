@@ -25,6 +25,7 @@ def synth(name, source, *settings):
     return run("synth", source, "--top", name, "--workdir", work / name,
                "--emit-dir", "lg:" + str(work / (name + "-net")),
                "--set", "synth.liberty=" + lib, "--set", timer,
+               "--set", "synth.partition=fine",
                *[a for value in settings for a in ("--set", value)])
 
 guided = work / "guided.prp"

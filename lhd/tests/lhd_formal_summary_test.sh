@@ -107,7 +107,13 @@ formal cnt.temporal {
 EOF
 OUT="$W/tout"
 (cd "$W" && "$LHD" formal verify d.prp t.verify.prp --top cnt --set formal.bound=20) >"$OUT" 2>&1
-grep -q 'SHALLOW:' "$OUT" || fail "a one-step window over a past() property must be disclosed: $(cat "$OUT")"
+# engine=auto races bmc-first against ind-first, so either may settle first: a
+# one-step window must be disclosed, a full-bound window must not.
+if grep -qE '^  depth +1 +checked' "$OUT"; then
+  grep -q 'SHALLOW:' "$OUT" || fail "a one-step window over a past() property must be disclosed: $(cat "$OUT")"
+else
+  grep -q 'SHALLOW:' "$OUT" && fail "a full-bound window is not shallow: $(grep -i -A1 shallow "$OUT")"
+fi
 
 # bmc walks the full bound, so the same property is genuinely checked.
 OUT="$W/tout2"

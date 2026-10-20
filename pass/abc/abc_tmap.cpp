@@ -9,6 +9,7 @@
 #include "abc_salt.hpp"
 #include "design_prepare.hpp"
 #include "diag.hpp"
+#include "fold_engine.hpp"
 #include "sharing_hint.hpp"
 #include "tmap.hpp"
 #include "tmap_cache.hpp"
@@ -103,7 +104,7 @@ synth::Tmap_result map_design(const std::shared_ptr<hhds::Graph>& top, const syn
   output->cache_enabled = !request.cache_directory.empty();
   if (output->cache_enabled) {
     const auto salt = synth::Region_cache::make_salt(
-        kAbcSrcSalt,
+        livehd::fold_salt_mix(kAbcSrcSalt),
         options.library,
         options.map_register,
         options.memory_fold,

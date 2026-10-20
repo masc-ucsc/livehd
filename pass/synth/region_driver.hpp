@@ -7,13 +7,13 @@
 // (region_blast.hpp), hands it to its backend (region_backend.hpp) and writes
 // the mapped cells back (region_writer.hpp). Across regions it schedules
 // parallel lanes under memory admission, and it runs the ware trials.
-#include <set>
 #include <atomic>
 #include <cstdint>
 #include <map>
 #include <memory>
 #include <mutex>
 #include <optional>
+#include <set>
 #include <span>
 #include <string>
 #include <string_view>
@@ -63,6 +63,7 @@ public:
     }
   }
   void set_outlib(hhds::GraphLibrary* l) { outlib_ = l; }
+  void set_region_delay_targets(std::map<std::string, float> targets) { region_delay_targets_ = std::move(targets); }
 
   // Whole-design flatten: the run maps ONE region and the emitted netlist is
   // contracted to hold exactly one module (lhd_abc_flat_test). Suppresses the
@@ -208,14 +209,14 @@ private:
   std::map<const hhds::Graph*, Ware_policy>     graph_ware_policy_;
   // (module, input port) a parent drives from a cell: a derived clock inside the module.
   std::set<std::pair<hhds::Gid, std::string>>   derived_ports_;
-  uint64_t                                      design_state_bits_ = 0;  // register bits under the largest graph (primary-clock fanout)
+  uint64_t                          design_state_bits_ = 0;  // register bits under the largest graph (primary-clock fanout)
   // rewrite_trivial_rems scans and rewrites a whole source def. A def is shared
   // by all of its colored Region_body callbacks, so doing it once per region is
   // an accidental O(regions * def_nodes) cost (528 full RenameBuffer walks).
-  absl::flat_hash_set<hhds::Graph*>             rems_rewritten_graphs_;
+  absl::flat_hash_set<hhds::Graph*> rems_rewritten_graphs_;
   // The read-back of every region this driver maps (it keeps the shared
   // input-splitter defs).
-  Region_writer                                 writer_;
+  Region_writer                     writer_;
 
   // A delay target anywhere in this run: the run level, the current region, or
   // any region_opts. Constant for a backend session (its timing model is set

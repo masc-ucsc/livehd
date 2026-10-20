@@ -30,6 +30,7 @@
 #include "pin_adjust.hpp"
 #include "repair.hpp"
 #include "reset_tree.hpp"
+#include "resize_engine.hpp"
 #include "technology_rc.hpp"
 #if defined(__APPLE__)
 #include <mach-o/dyld.h>
@@ -211,6 +212,12 @@ std::string environment_key(const Options& o, const ph::Technology& tech) {
     h = hash_text(std::format("fp-timing:{}:{}:{}", o.fp_timing_interval, bool(o.fp_evaluate), o.fp_resize), h);
     if (o.repair_reset) {
       h = hash_text("repair-reset", h);  // FP resize may then touch reset cones
+    }
+    if (o.fp_resize && o.resize_engine != "legacy") {
+      h = hash_text(std::format("resize-engine:{}:{}", o.resize_engine, o.resize_vt_swap), h);
+      for (const auto& pattern : o.resize_dont_use) {
+        h = hash_text("dont-use:" + pattern, h);
+      }
     }
     h = hash_text(std::format("fp-movement:{}", o.fp_timing_movement), h);
     if (o.fp_timing_after_density) {
@@ -1381,6 +1388,138 @@ void init_flute() {
     flute::readLUT(powv.c_str(), post.c_str());
   });
 }
+}  // namespace
+// One net's FLUTE Steiner RC exactly as placement RC estimation builds it: pin
+// nodes in order, one junction per distinct location (pins attach through a
+// 1e-9 ohm edge), FLUTE edges between junctions with half the wire capacitance
+// on each end, and a star from the first pin above 1000 locations.
+ph::Rc_net steiner_rc(std::string driver, const std::vector<std::pair<std::string, std::pair<double, double>>>& pins,
+                      const Wire_rc& wire, double dbu, bool* approximate) {
+  init_flute();
+  ph::Rc_net rc;
+  rc.driver = std::move(driver);
+  std::vector<int>                        xs, ys;
+  std::map<std::pair<int, int>, unsigned> junction;
+  std::vector<std::pair<int, int>>        positions;
+  for (const auto& [label, xy] : pins) {
+    if (std::abs(xy.first) > std::numeric_limits<int>::max() / 4.0 || std::abs(xy.second) > std::numeric_limits<int>::max() / 4.0) {
+      throw std::runtime_error("coordinates exceed FLUTE integer range");
+    }
+    positions.emplace_back(std::llround(xy.first), std::llround(xy.second));
+    rc.nodes.push_back({label, 0});
+  }
+  auto vertex = [&](std::pair<int, int> xy) {
+    auto [it, added] = junction.emplace(xy, rc.nodes.size());
+    if (added) {
+      rc.nodes.push_back({{}, 0});
+    }
+    return it->second;
+  };
+  for (size_t i = 0; i < positions.size(); ++i) {
+    rc.edges.push_back({static_cast<unsigned>(i), vertex(positions[i]), 1e-9});
+  }
+  for (const auto& [xy, index] : junction) {
+    (void)index;
+    xs.push_back(xy.first);
+    ys.push_back(xy.second);
+  }
+  auto add_edge = [&](unsigned a, unsigned b, double dx, double dy) {
+    if (a == b) {
+      return;
+    }
+    const double resistance  = (wire.horizontal_r * dx + wire.vertical_r * dy) / dbu;
+    const double capacitance = (wire.horizontal_c * dx + wire.vertical_c * dy) / dbu;
+    rc.edges.push_back({a, b, std::max(1e-9, resistance)});
+    rc.nodes[a].capacitance_ff += capacitance / 2;
+    rc.nodes[b].capacitance_ff += capacitance / 2;
+  };
+  if (xs.size() > 1 && xs.size() <= 1000) {
+    auto                                    tree = flute::flute(xs.size(), xs.data(), ys.data(), 3);
+    std::set<std::pair<unsigned, unsigned>> edges;
+    for (int i = 0; i < 2 * tree.deg - 2; ++i) {
+      const auto a  = std::pair{tree.branch[i].x, tree.branch[i].y};
+      const auto b  = std::pair{tree.branch[tree.branch[i].n].x, tree.branch[tree.branch[i].n].y};
+      const auto ai = vertex(a), bi = vertex(b);
+      if (edges.emplace(std::min(ai, bi), std::max(ai, bi)).second) {
+        add_edge(ai, bi, std::abs(double(a.first) - b.first), std::abs(double(a.second) - b.second));
+      }
+    }
+    std::free(tree.branch);
+  } else if (xs.size() > 1000) {
+    // Beyond FLUTE's degree limit: FLUTE trees over spatial groups of at most
+    // 1000 locations (recursive median bisection), joined by a FLUTE tree over
+    // each group's location nearest the driver. A star from the driver would
+    // charge every sink its full Manhattan distance (a 1036-sink net timed 6x
+    // slower than a Steiner estimate).
+    if (approximate) {
+      *approximate = true;
+    }
+    std::vector<std::pair<int, int>> points;
+    for (const auto& [xy, index] : junction) {
+      (void)index;
+      points.push_back(xy);
+    }
+    std::set<std::pair<unsigned, unsigned>> edges;
+    const auto                              tree = [&](const std::vector<std::pair<int, int>>& group) {
+      if (group.size() < 2) {
+        return;
+      }
+      std::vector<int> gx, gy;
+      for (const auto& p : group) {
+        gx.push_back(p.first);
+        gy.push_back(p.second);
+      }
+      auto t = flute::flute(gx.size(), gx.data(), gy.data(), 3);
+      for (int i = 0; i < 2 * t.deg - 2; ++i) {
+        const auto a  = std::pair{t.branch[i].x, t.branch[i].y};
+        const auto b  = std::pair{t.branch[t.branch[i].n].x, t.branch[t.branch[i].n].y};
+        const auto ai = vertex(a), bi = vertex(b);
+        if (edges.emplace(std::min(ai, bi), std::max(ai, bi)).second) {
+          add_edge(ai, bi, std::abs(double(a.first) - b.first), std::abs(double(a.second) - b.second));
+        }
+      }
+      std::free(t.branch);
+    };
+    const auto root  = positions.front();
+    const auto close = [&](const std::pair<int, int>& p) {
+      return std::abs(double(p.first) - root.first) + std::abs(double(p.second) - root.second);
+    };
+    // Groups of <= 1000 locations; their representatives form the next level.
+    std::vector<std::pair<int, int>> level = points;
+    while (level.size() > 1000) {
+      std::vector<std::vector<std::pair<int, int>>> groups;
+      const auto                                    split = [&](auto&& self, std::vector<std::pair<int, int>> items) -> void {
+        if (items.size() <= 1000) {
+          groups.push_back(std::move(items));
+          return;
+        }
+        int x0 = items.front().first, x1 = x0, y0 = items.front().second, y1 = y0;
+        for (const auto& p : items) {
+          x0 = std::min(x0, p.first);
+          x1 = std::max(x1, p.first);
+          y0 = std::min(y0, p.second);
+          y1 = std::max(y1, p.second);
+        }
+        const bool by_x = x1 - x0 >= y1 - y0;
+        const auto mid  = items.begin() + items.size() / 2;
+        std::nth_element(items.begin(), mid, items.end(), [&](const auto& a, const auto& b) {
+          return by_x ? a < b : std::pair{a.second, a.first} < std::pair{b.second, b.first};
+        });
+        self(self, std::vector<std::pair<int, int>>(items.begin(), mid));
+        self(self, std::vector<std::pair<int, int>>(mid, items.end()));
+      };
+      split(split, level);
+      level.clear();
+      for (const auto& g : groups) {
+        tree(g);
+        level.push_back(*std::min_element(g.begin(), g.end(), [&](const auto& a, const auto& b) { return close(a) < close(b); }));
+      }
+    }
+    tree(level);
+  }
+  return rc;
+}
+namespace {
 std::shared_ptr<ph::Parasitics> estimate_rc(const View& v, const ph::Technology& tech, const Options& options,
                                             std::map<std::string, std::pair<double, double>>& pin_locations) {
   auto result         = std::make_shared<ph::Parasitics>();
@@ -1419,79 +1558,26 @@ std::shared_ptr<ph::Parasitics> estimate_rc(const View& v, const ph::Technology&
   init_flute();
   uint64_t hash
       = hash_text(std::format("{}:{}:{}:{}:{}:{}", horizontal_r, horizontal_c, vertical_r, vertical_c, options.full, tech.dbu));
+  std::vector<std::pair<std::string, std::pair<double, double>>> pins;
   for (size_t net = 0; net < v.drivers.size(); ++net) {
-    ph::Rc_net rc;
     const auto endpoint = [](const Endpoint& e) { return e.instance == "PIN" ? e.pin : e.instance + ":" + e.pin; };
-    rc.driver           = endpoint(v.drivers[net]);
-    const int begin = v.design.flat_net2pin_start[net], end = v.design.flat_net2pin_start[net + 1];
+    const int  begin = v.design.flat_net2pin_start[net], end = v.design.flat_net2pin_start[net + 1];
     if (end - begin < 2) {
       continue;
     }
-    std::vector<int>                        xs, ys;
-    std::map<std::pair<int, int>, unsigned> junction;
-    std::vector<std::pair<int, int>>        positions;
+    pins.clear();
     for (int p = begin; p < end; ++p) {
       const auto   node = v.design.pin2node[p];
       const double x = v.design.node_x[node] + v.design.pin_offset_x[p], y = v.design.node_y[node] + v.design.pin_offset_y[p];
-      if (std::abs(x) > std::numeric_limits<int>::max() / 4.0 || std::abs(y) > std::numeric_limits<int>::max() / 4.0) {
-        throw std::runtime_error("coordinates exceed FLUTE integer range");
-      }
-      positions.emplace_back(std::llround(x), std::llround(y));
-      pin_locations.emplace(endpoint(v.pins[p]), std::pair{x, y});
-      rc.nodes.push_back({endpoint(v.pins[p]), 0});
-      hash = hash_text(std::format("{}:{}:{};", rc.nodes.back().pin, positions.back().first, positions.back().second), hash);
+      pins.emplace_back(endpoint(v.pins[p]), std::pair{x, y});
+      pin_locations.emplace(pins.back().first, std::pair{x, y});
+      hash = hash_text(std::format("{}:{}:{};", pins.back().first, std::llround(x), std::llround(y)), hash);
     }
-    auto vertex = [&](std::pair<int, int> xy) {
-      auto [it, added] = junction.emplace(xy, rc.nodes.size());
-      if (added) {
-        rc.nodes.push_back({{}, 0});
-      }
-      return it->second;
-    };
-    for (size_t i = 0; i < positions.size(); ++i) {
-      rc.edges.push_back({static_cast<unsigned>(i), vertex(positions[i]), 1e-9});
-    }
-    for (const auto& [xy, index] : junction) {
-      (void)index;
-      xs.push_back(xy.first);
-      ys.push_back(xy.second);
-    }
-    auto add_edge = [&](unsigned a, unsigned b, double dx, double dy) {
-      if (a == b) {
-        return;
-      }
-      const double resistance  = (horizontal_r * dx + vertical_r * dy) / tech.dbu;
-      const double capacitance = (horizontal_c * dx + vertical_c * dy) / tech.dbu;
-      rc.edges.push_back({a, b, std::max(1e-9, resistance)});
-      rc.nodes[a].capacitance_ff += capacitance / 2;
-      rc.nodes[b].capacitance_ff += capacitance / 2;
-    };
-    if (xs.size() > 1 && xs.size() <= 1000) {
-      auto                                    tree = flute::flute(xs.size(), xs.data(), ys.data(), 3);
-      std::set<std::pair<unsigned, unsigned>> edges;
-      for (int i = 0; i < 2 * tree.deg - 2; ++i) {
-        const auto a  = std::pair{tree.branch[i].x, tree.branch[i].y};
-        const auto b  = std::pair{tree.branch[tree.branch[i].n].x, tree.branch[tree.branch[i].n].y};
-        const auto ai = vertex(a), bi = vertex(b);
-        if (edges.emplace(std::min(ai, bi), std::max(ai, bi)).second) {
-          add_edge(ai, bi, std::abs(double(a.first) - b.first), std::abs(double(a.second) - b.second));
-        }
-      }
-      std::free(tree.branch);
-    } else if (xs.size() > 1000) {
-      // A bounded star estimate lets timing drive fanout repair before FLUTE's
-      // degree limit can be met. Each branch has its Manhattan wire R/C; the
-      // absence of shared trunks is explicitly reported as approximate.
+    bool approximate = false;
+    auto rc          = steiner_rc(endpoint(v.drivers[net]), pins, wire, tech.dbu, &approximate);
+    if (approximate) {
+      // Larger-net trees use the shared estimator's bounded approximation.
       result->approximate = true;
-      const auto root     = vertex(positions.front());
-      for (const auto& [xy, index] : junction) {
-        if (index != root) {
-          add_edge(root,
-                   index,
-                   std::abs(double(xy.first) - positions.front().first),
-                   std::abs(double(xy.second) - positions.front().second));
-        }
-      }
     }
     for (const auto& node : rc.nodes) {
       hash = hash_text(std::format("{}:{:.17g};", node.pin, node.capacitance_ff), hash);
@@ -2441,19 +2527,19 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
   Resolver    resolver(tech, memories, options.unknown_const_zero);
   // Opt-in: the flat reset nets are bounded before the first cell is read, so the buffers place like any cell.
   // A driver that resolves to a constant (the tied inactive pin of a clear+preset flop) is not a reset net.
-  const auto reset_tree = options.reset_fanout ? buffer_reset_nets(graph,
-                                                                   tech,
-                                                                   options.liberty,
-                                                                   options.reset_fanout,
-                                                                   [&](const Pin& driver) {
+  const auto  reset_tree = options.reset_fanout ? buffer_reset_nets(graph,
+                                                                    tech,
+                                                                    options.liberty,
+                                                                    options.reset_fanout,
+                                                                    [&](const Pin& driver) {
                                                                      try {
                                                                        return resolver.bit(driver, 0).constant >= 0;
                                                                      } catch (const std::exception&) {
                                                                        return true;  // unknown constant: left to the tie logic
                                                                      }
-                                                                   })
+                                                                    })
                                                 : Reset_tree_stats{};
-  double      area      = 0;
+  double      area       = 0;
   int64_t     max_width = 0, max_height = 0;
   std::string site_name;
   for (auto node : graph.body().nodes()) {
@@ -2530,10 +2616,10 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
     }
     env += std::format(":groups:{:016x}", membership);
   }
-  const auto cache_path       = (options.timing_seed || options.retain_placement || options.cache_dir.empty())
-                                    ? std::string{}
-                                    : options.cache_dir + "/placement.json";
-  auto       previous         = options.previous;
+  const auto cache_path = (options.timing_seed || options.retain_placement || options.restart_seed || options.cache_dir.empty())
+                              ? std::string{}
+                              : options.cache_dir + "/placement.json";
+  auto       previous   = options.previous;
   bool       cached_reference = false;
   if (!previous && options.floorplan.empty() && !cache_path.empty() && fs::is_regular_file(cache_path)
       && fs::is_regular_file(options.cache_dir + "/floorplan.def")) {
@@ -3225,6 +3311,51 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
   // Experimental FP targets are not persisted by the placement cache yet.
   auto       cache
       = (macro_solved || options.fp_place) ? CacheInfo{0, hashes.size(), false} : restore_cache(v, tech, cache_path, env, hashes);
+  if (options.restart_seed) {
+    // This is an initial guess after resynthesis, not an ECO lock. In
+    // particular, never copy the old status or create position boxes.
+    std::map<std::string, Ann_place> positions;
+    for (const auto& c : options.restart_seed->components) {
+      positions.emplace(c.name, c.place);
+    }
+    size_t reused_cells = 0, reused_macros = 0, new_cells = 0, reused_ios = 0;
+    for (auto& c : v.cells) {
+      const auto old = positions.find(c.name);
+      if (c.place.status == Status::FIXED || c.place.status == Status::LOCKED) {
+        continue;
+      }
+      if (old != positions.end()) {
+        c.place.x = old->second.x;
+        c.place.y = old->second.y;
+        ++reused_cells;
+        reused_macros += !tech.macros.at(c.macro).klass.starts_with("CORE");
+      } else {
+        ++new_cells;
+      }
+    }
+    for (auto& terminal : v.fp.terminals) {
+      for (const auto& old : options.restart_seed->terminals) {
+        if (terminal.name == old.name && terminal.status != Status::FIXED) {
+          terminal.x = old.x;
+          terminal.y = old.y;
+          ++reused_ios;
+          break;
+        }
+      }
+    }
+    fs::create_directories(options.output_dir);
+    std::ofstream report(options.output_dir + "/restart_seed.json");
+    report << std::format(
+        R"({{"coordinates_only":true,"reused_movable_cells":{},"reused_movable_macros":{},"new_movable_cells":{},"reused_ios":{}}})",
+        reused_cells,
+        reused_macros,
+        new_cells,
+        reused_ios)
+           << '\n';
+    if (!report) {
+      throw std::runtime_error("cannot write placement restart seed report");
+    }
+  }
   make_arrays(v, tech);
   dp::Options control;
   control.max_iterations  = options.iterations;
@@ -3481,7 +3612,7 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
       }
     }
   } else if (!cache.hit) {
-    if (!macro_active) {
+    if (!macro_active && !options.restart_seed) {
       // This prototype determines automatic IO locations. Keep it a plain GP
       // (no post-density continuation) so a cohesion comparison starts with the
       // same fixed IOs and GP seed.
@@ -3694,7 +3825,9 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
           unsigned   resized = 0, proposed = 0, repairs = 0;
           const auto sta_before_repair = fp_sta_calls;
           if (options.fp_resize) {
-            const auto sized = repair_floorplan(checkpoint, options, before, evaluate, refresh);
+            const auto sized = options.resize_engine == "new"
+                                   ? resize_floorplan_engine(checkpoint, options, before, evaluate, refresh)
+                                   : repair_floorplan(checkpoint, options, before, evaluate, refresh);
             after            = sized.timing;
             resized          = sized.accepted;
             proposed         = sized.proposed;
@@ -3764,7 +3897,31 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
         };
       }
       fp_metrics = dp::place(v.design, fp_control);
-      fp_gp      = summarize_centroids(v.design);
+      if (options.after_stage) {
+        auto view = v;
+        capture(view, tech, false);
+        Result checkpoint;
+        checkpoint.graph      = result.graph;
+        checkpoint.fp_library = result.fp_library;
+        checkpoint.floorplan  = view.fp;
+        checkpoint.floorplan.components.clear();
+        auto rc_options       = options;
+        rc_options.full       = false;
+        checkpoint.parasitics = estimate_rc(view, tech, rc_options, checkpoint.pin_locations);
+        for (const auto& c : view.cells) {
+          c.node.attr(attrs::place).set(c.place);
+          checkpoint.floorplan.components.push_back({c.name, c.macro, c.place});
+          checkpoint.parasitics->cells.push_back(
+              {c.name, c.place.x, c.place.y, static_cast<unsigned>(c.place.orientation), c.macro, c.place.width, c.place.height});
+        }
+        for (const auto& terminal : view.fp.terminals) {
+          checkpoint.parasitics->terminals.push_back({terminal.name, terminal.x, terminal.y});
+        }
+        if (options.after_stage(Placement_stage::floorplan, checkpoint)) {
+          throw Placement_restart(checkpoint.floorplan, Placement_stage::floorplan);
+        }
+      }
+      fp_gp = summarize_centroids(v.design);
       for (size_t i = 0; i < fp_gp.size(); ++i) {
         const auto& g = v.design.centroid_groups[i];
         const auto& p = fp_gp[i];
@@ -5050,11 +5207,12 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
       tree.AddMember("nets", reset_tree.nets, allocator);
       tree.AddMember("sinks", reset_tree.sinks, allocator);
       tree.AddMember("added", reset_tree.buffers, allocator);
-      tree.AddMember("buffers",
-                     static_cast<uint64_t>(std::count_if(v.cells.begin(),
-                                                         v.cells.end(),
-                                                         [](const Cell& c) { return c.name.find("__place_rsttree") != std::string::npos; })),
-                     allocator);
+      tree.AddMember(
+          "buffers",
+          static_cast<uint64_t>(std::count_if(v.cells.begin(),
+                                              v.cells.end(),
+                                              [](const Cell& c) { return c.name.find("__place_rsttree") != std::string::npos; })),
+          allocator);
       tree.AddMember("levels", reset_tree.levels, allocator);
       tree.AddMember("skipped", reset_tree.skipped, allocator);
       json.AddMember("reset_tree", tree, allocator);
@@ -5113,6 +5271,9 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
   result.floorplan        = std::move(v.fp);
   result.fp_resized_cells = fp_resized;
   result.fp_repair_edits  = fp_repairs;
+  if (options.after_stage && !options.timing_seed && options.after_stage(options.completed_stage, result)) {
+    throw Placement_restart(result.floorplan, options.completed_stage);
+  }
   return result;
 }
 
@@ -5120,7 +5281,24 @@ Result place(hhds::Graph& source, hhds::GraphLibrary& library, const Options& op
   if (options.final_iterations < 0) {
     throw std::invalid_argument("invalid final cell iteration budget");
   }
-  if (!options.fp_place || !options.final_cells || !options.full || options.timing_seed || options.previous) {
+  bool stage_macros = false;
+  if (options.after_stage && !options.fp_place && options.full && !options.timing_seed) {
+    const auto technology = ph::read_lef(options.lefs);
+    for (const auto& graph : source.definitions().graphs()) {
+      for (auto node : graph->body().nodes()) {
+        if (gu::type_op_of(node) == Ntype_op::Memory) {
+          stage_macros = true;
+        }
+        if (auto io = node.get_subnode_io()) {
+          const auto found = technology.macros.find(std::string(io->get_name()));
+          if (found != technology.macros.end() && !found->second.klass.starts_with("CORE")) {
+            stage_macros = true;
+          }
+        }
+      }
+    }
+  }
+  if ((!options.fp_place && !stage_macros) || !options.final_cells || !options.full || options.timing_seed || options.previous) {
     return place_single(source, library, options);
   }
   // Keep the macro frame in a separate library: the returned final graph must
@@ -5128,6 +5306,7 @@ Result place(hhds::Graph& source, hhds::GraphLibrary& library, const Options& op
   hhds::GraphLibrary macro_library;
   auto               macro_options = options;
   macro_options.final_cells        = false;
+  macro_options.completed_stage    = Placement_stage::macro;
   macro_options.cache_dir.clear();
   macro_options.output_dir += "/macro";
   const auto start          = std::chrono::steady_clock::now();
@@ -5147,9 +5326,11 @@ Result place(hhds::Graph& source, hhds::GraphLibrary& library, const Options& op
   }
   const auto frame = macro_options.output_dir + "/fixed.def";
   ph::write_def(macro.floorplan, frame);
-  auto cell_options               = options;
-  cell_options.net_weights        = macro.net_weights;
-  cell_options.fp_place           = false;
+  auto cell_options            = options;
+  cell_options.net_weights     = macro.net_weights;
+  cell_options.fp_place        = false;
+  cell_options.completed_stage = Placement_stage::final;
+  cell_options.restart_seed.reset();
   cell_options.fp_pin_adjust      = false;
   cell_options.macro_pin_adjust   = false;
   cell_options.final_cells        = false;
@@ -5164,7 +5345,8 @@ Result place(hhds::Graph& source, hhds::GraphLibrary& library, const Options& op
   const auto end          = std::chrono::steady_clock::now();
   const auto seconds      = [](auto a, auto b) { return std::chrono::duration<double>(b - a).count(); };
   const auto text         = std::format(
-      R"({{"schema_version":1,"mode":"floorplan-macro-cells","centroid_snap":{},"macro_snap":{},"final_centroid_anchors":false,"fixed_macros":{},"macro_source_hpwl_um":{},"final_hpwl_um":{},"macro_source_seconds":{},"final_cells_seconds":{}}})",
+      R"({{"schema_version":1,"mode":"{}","centroid_snap":{},"macro_snap":{},"final_centroid_anchors":false,"fixed_macros":{},"macro_source_hpwl_um":{},"final_hpwl_um":{},"macro_source_seconds":{},"final_cells_seconds":{}}})",
+      options.fp_place ? "floorplan-macro-cells" : "macro-cells",
       options.fp_snap_enabled,
       options.macro_snap,
       fixed_macros,

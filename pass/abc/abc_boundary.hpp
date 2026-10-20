@@ -44,8 +44,23 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <string_view>
+
+#include "io_resynth.hpp"
 
 namespace livehd::abc {
+class Wire_load_scope {
+public:
+  explicit Wire_load_scope(const synth::Wire_load& model, std::string_view module = "anonymous");
+  ~Wire_load_scope();
+  bool enabled() const { return library_ != nullptr; }
+
+private:
+  void* library_       = nullptr;
+  void* model_         = nullptr;
+  char* old_default_   = nullptr;
+  char* old_selection_ = nullptr;
+};
 
 // Owns one SC_Bnd table (its ABC vectors) and installs/uninstalls it on the
 // global ABC frame. Every entry starts "unconstrained"; ABC headers stay in

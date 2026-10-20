@@ -38,6 +38,11 @@ cold = run('cold', ['--set', 'synth.place=true', '--emit-dir', f'def:{root}/def'
 place = cold['qor']['place']
 assert place['legal'] and place['mode'] == 'full', place
 assert (root/'def/out.def').is_file()
+exported_lefs = json.loads((root/'def/lefs.json').read_text())
+assert len(exported_lefs) == 2, exported_lefs
+for name, original in zip(exported_lefs, ['sky130hd.tlef', 'sky130hd.lef']):
+    assert (root/'def'/name).read_bytes() == (libdir/original).read_bytes()
+    assert str(root/'def'/name) in cold['outputs'], cold['outputs']
 assert any(p['name'] == 'pass.place' for p in cold['phases']), cold['phases']
 sta = cold['qor']['sta']['designs'][0]
 assert sta['parasitics']['nets'] > 0 and sta['parasitics']['identity'] == place['rc_identity'], sta
@@ -89,6 +94,18 @@ assert resized['qor']['place']['resize']['attempts'] <= 24
 assert resized['qor']['place']['repair']['attempts'] <= 24
 phases = [p['name'] for p in resized['phases']]
 assert phases.index('pass.place.resize') < phases.index('pass.place.repair')
+# The path-based engine on the incremental what-if timer: one resize phase, its own report.
+resized_new = run('resize_new', ['--set', 'synth.place=true', '--set', 'synth.place.resize=true',
+                                 '--set', 'synth.place.resize.engine=new'])
+assert resized_new['qor']['place']['legal']
+new_report = resized_new['qor']['place']['resize']
+assert new_report['engine'] == 'new' and 1 <= len(new_report['rounds']) <= 4, new_report
+assert new_report['after']['wns_ps'] >= new_report['before']['wns_ps'] - 1e-3, new_report
+assert new_report['after']['tns_ps'] >= new_report['before']['tns_ps'] - 1e-3, new_report
+new_phases = [p['name'] for p in resized_new['phases']]
+assert 'pass.place.resize' in new_phases and 'pass.place.repair' not in new_phases, new_phases
+run('bad_engine', ['--set', 'synth.place=true', '--set', 'synth.place.resize=true',
+                   '--set', 'synth.place.resize.engine=fast'], False)
 resynth = run('resynth', ['--set', 'synth.place=true', '--set', 'synth.place.resynth=true'])
 assert resynth['qor']['place']['legal']
 assert 0 < resynth['qor']['place']['resynth']['attempts'] <= 4

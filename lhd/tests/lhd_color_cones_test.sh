@@ -34,7 +34,12 @@ fail() {
   echo "FAIL: $*" >&2
   exit 1
 }
-run() { "$LHD" "$@" -q --result-json "$W/r.json" || fail "$* -> $(cat "$W/r.json" 2>/dev/null)"; }
+run() {
+  local flags=()
+  # This fixture exercises the per-color control/data partitions.
+  [ "$1" != synth ] || flags=(--set synth.partition=fine)
+  "$LHD" "$@" "${flags[@]}" -q --result-json "$W/r.json" || fail "$* -> $(cat "$W/r.json" 2>/dev/null)"
+}
 
 # fixture   top
 DESIGNS=(

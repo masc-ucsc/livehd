@@ -16,6 +16,7 @@
 #include "physical_rc.hpp"
 #include "sta_cache.hpp"
 #include "timing_feedback.hpp"
+#include "timing_whatif.hpp"
 #include "vcd_power.hpp"
 
 class Pass_opentimer : public Pass {
@@ -233,8 +234,10 @@ namespace livehd::opentimer {
 // No timing reports are serialized or written by this interface.
 class Physical_session {
   struct Impl;
-  Eprp_var              options_;
-  std::unique_ptr<Impl> impl_;
+  struct Proxy;
+  Eprp_var               options_;
+  std::unique_ptr<Impl>  impl_;
+  std::unique_ptr<Proxy> proxy_;  // stable what-if handle across an internal timer rebuild
 
 public:
   struct Statistics {
@@ -247,5 +250,8 @@ public:
   livehd::timing::Feedback evaluate(const std::shared_ptr<hhds::Graph>&                 graph,
                                     std::shared_ptr<const livehd::physical::Parasitics> rc);
   const Statistics&        statistics() const;
+  // Transient what-if edits on the last evaluated state (core/timing_whatif.hpp).
+  // evaluate() first discards every pending what-if edit.
+  livehd::timing::Whatif&  whatif();
 };
 }  // namespace livehd::opentimer

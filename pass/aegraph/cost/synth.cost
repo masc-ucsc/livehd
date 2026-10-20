@@ -22,7 +22,7 @@
 (cost synth SRA (* 3 W (clog2 (max 2 W))))
 
 ;; ---- bitwise
-(cost synth Not (div W 4) :doc "inverters fold into the neighbouring gates")
+(cost synth Not (div (+ W 3) 4) :doc "inverters fold into the neighbouring gates; a lone one still counts, so a rewrite that removes it wins a tie")
 (cost synth And (* (- A 1) W))
 (cost synth Or (* (- A 1) W))
 (cost synth Xor (* 2 (- A 1) W))

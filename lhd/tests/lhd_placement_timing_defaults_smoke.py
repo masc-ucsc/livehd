@@ -79,7 +79,9 @@ ram = run('fp_macro', ['--set', 'synth.place=true',
 assert ram['qor']['place']['legal'], ram
 fp = json.loads((root/'fp_macro/synth/place/macro/fp_place.json').read_text())
 assert fp['timing_interval'] == 50 and fp['timing_checkpoints'] > 0, fp
-assert fp['timing_sta_calls'] == fp['timing_checkpoints'], fp
+# The approved resize default runs STA before and after each sizing/repair
+# checkpoint, including a checkpoint whose trial makes no accepted edits.
+assert fp['timing_sta_calls'] == 2 * fp['timing_checkpoints'], fp
 assert fp['timing_resized_cells'] == 0, fp
 assert fp['centroid_align_weight'] == 0 and fp['centroid_align_seconds'] == 0, fp
 assert fp['centroid_parent_weight'] == 0 and fp['centroid_parent_seconds'] == 0, fp

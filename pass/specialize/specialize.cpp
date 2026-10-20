@@ -16,7 +16,7 @@
 #include "absl/container/flat_hash_set.h"
 #include "bitwidth.hpp"
 #include "hash_util.hpp"
-#include "cprop.hpp"
+#include "fold_body.hpp"
 #include "inline_sub.hpp"
 #include "node_util.hpp"
 
@@ -67,8 +67,21 @@ std::vector<hhds::Node_class> zero_index_shifts(hhds::Graph& graph, hhds::Port_i
 }
 }  // namespace
 
-void refold_private_body(const std::shared_ptr<hhds::Graph>& graph) {
-  Cprop{}.do_trans(graph);
+namespace {
+// One constant-folding round over a body: the fold engine (classic Cprop{} by default), then width inference follows.
+void fold(const std::shared_ptr<hhds::Graph>& graph, Fold_cost cost, std::string_view site) {
+  Fold_options options;
+  options.cost = cost;
+  options.site = site;
+  fold_body(graph, options);
+}
+}  // namespace
+
+void refold_private_body(const std::shared_ptr<hhds::Graph>& graph, Refold_cost refold_cost, std::string_view site) {
+  const Fold_cost cost = refold_cost == Refold_cost::sim     ? Fold_cost::sim
+                         : refold_cost == Refold_cost::synth ? Fold_cost::synth
+                                                             : fold_default_cost();
+  fold(graph, cost, site);
   Bitwidth{16}.do_trans(graph);
   // cprop deliberately works on unlimited-precision integers, so 1 | x is
   // generally not an annihilator. Here widths have just been inferred. When
@@ -113,7 +126,7 @@ void refold_private_body(const std::shared_ptr<hhds::Graph>& graph) {
     folded = true;
   }
   if (folded) {
-    Cprop{}.do_trans(graph);
+    fold(graph, cost, site);
     Bitwidth{16}.do_trans(graph);
   }
 }
@@ -294,6 +307,9 @@ int specialize_per_binding(std::vector<std::shared_ptr<hhds::Graph>>& graphs, co
       // every unaffected definition after any specialization in the library.
       if (pending_refold.erase(graph.get()) != 0) {
         refold_private_body(graph);
+        if (options.modified) {
+          options.modified->insert(graph.get());
+        }
         // A fold can publish an output for a parent already visited this round.
         // Keep one following scan even if this body's call sites need no edits.
         changed = true;
@@ -396,7 +412,7 @@ int specialize_per_binding(std::vector<std::shared_ptr<hhds::Graph>>& graphs, co
                 }
               }
             }
-            Cprop{}.do_trans(specialized);
+            fold(specialized, fold_default_cost(), "specialize.constants");
             // Zero shifted by an ordinal stays zero over the descriptor's
             // proven nonnegative domain. Cprop deliberately ignores hints, so
             // expose this instance-specific fact here, without expanding it.
@@ -410,7 +426,7 @@ int specialize_per_binding(std::vector<std::shared_ptr<hhds::Graph>>& graphs, co
                 }
                 shift.del_node();
               }
-              Cprop{}.do_trans(specialized);
+              fold(specialized, fold_default_cost(), "specialize.constants");
             }
             Bitwidth{16}.do_trans(specialized);
             if (options.inherit_colors) {
@@ -855,6 +871,9 @@ int specialize_shared(std::vector<std::shared_ptr<hhds::Graph>>& graphs, const O
     for (const auto& g : graphs) {
       if (pending.erase(g.get()) != 0) {
         refold_private_body(g);
+        if (options.modified) {
+          options.modified->insert(g.get());
+        }
       }
     }
     // Parents-first order over the design reachable from the roots, and every
@@ -982,6 +1001,9 @@ int specialize_shared(std::vector<std::shared_ptr<hhds::Graph>>& graphs, const O
   for (const auto& g : graphs) {
     if (pending.erase(g.get()) != 0) {
       refold_private_body(g);
+      if (options.modified) {
+        options.modified->insert(g.get());
+      }
     }
   }
   // An original every instance left STAYS in `graphs`: a simulation testbench

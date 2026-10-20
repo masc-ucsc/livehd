@@ -1,0 +1,20 @@
+/*
+:name: aeg_getmask_not_fits
+:type: lec
+*/
+// PYROPE-vs-PYROPE group, the fixture of the aegraph rule `getmask_not_fits` (pass/aegraph/rules/mask.rules): the low window
+// of a complement of a value that fits the window is the value xor all ones (EQ(x, 0) for a bit). REFERENCE = classic
+// engine; `_1` = e-graph engine.
+pub comb top(a:U1, b:U1, c:U4, d:U8) -> (y:U1, z:U4, w:U1) {
+  mut p:U1 = 0
+  mut q:U4 = 0
+  mut r:U1 = 0
+  const ab:U1 = a & b
+  const dc:U1 = (d & 1) & (c & 1)
+  p#[0] = ~ab
+  q#[0..<4] = ~c
+  r#[0] = ~dc
+  y = p
+  z = q
+  w = r
+}

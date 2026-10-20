@@ -48,6 +48,8 @@ std::string serialize_parasitics(const Parasitics& rc) {
     w.StartObject();
     w.Key("driver");
     w.String(net.driver.c_str());
+    w.Key("wire_length_um");
+    w.Double(net.wire_length_um);
     w.Key("nodes");
     w.StartArray();
     for (const auto& n : net.nodes) {
@@ -115,6 +117,11 @@ Parasitics deserialize_parasitics(std::string_view text) {
             && net["nodes"].IsArray() && net.HasMember("edges") && net["edges"].IsArray());
     Rc_net output;
     output.driver = net["driver"].GetString();
+    if (net.HasMember("wire_length_um")) {
+      require(net["wire_length_um"].IsNumber() && std::isfinite(net["wire_length_um"].GetDouble())
+              && net["wire_length_um"].GetDouble() >= 0);
+      output.wire_length_um = net["wire_length_um"].GetDouble();
+    }
     for (const auto& node : net["nodes"].GetArray()) {
       require(node.IsArray() && node.Size() == 2 && node[0].IsString() && node[1].IsNumber() && node[1].GetDouble() >= 0
               && std::isfinite(node[1].GetDouble()));

@@ -9,6 +9,7 @@
 
 #include "core/physical_rc.hpp"
 #include "core/timing_feedback.hpp"
+#include "core/timing_whatif.hpp"
 #include "dreamplace/native/floorplan.hpp"
 #include "dreamplace/native/macro/topology.hpp"
 #include "hhds/graph.hpp"
@@ -17,14 +18,24 @@
 namespace livehd::placement {
 inline constexpr double max_net_weight = 100;  // physical net weight ceiling shared by option checks and the placement database
 struct Result;
+enum class Placement_stage { floorplan, macro, final };
+struct Placement_restart : std::exception {
+  physical::Floorplan seed;
+  Placement_stage     stage;
+  Placement_restart(physical::Floorplan frame, Placement_stage s) : seed(std::move(frame)), stage(s) {}
+  const char* what() const noexcept override { return "placement restarted after whole-color resynthesis"; }
+};
 using Timing_feedback = livehd::timing::Feedback;
-using Evaluate = std::function<Timing_feedback(const Result&)>;
+using Evaluate        = std::function<Timing_feedback(const Result&)>;
 struct Options {
-  std::vector<std::string>              lefs;
-  std::string                           floorplan, output_dir, cache_dir;
-  std::string                           liberty, tech_rc_file;
-  std::string                           macro_mode = "none";
-  bool                                  fp_place = false, fp_snap_enabled = true;
+  std::function<bool(Placement_stage, const Result&)> after_stage;
+  std::shared_ptr<const physical::Floorplan>          restart_seed;
+  Placement_stage                                     completed_stage = Placement_stage::final;
+  std::vector<std::string>                            lefs;
+  std::string                                         floorplan, output_dir, cache_dir;
+  std::string                                         liberty, tech_rc_file;
+  std::string                                         macro_mode = "none";
+  bool                                                fp_place = false, fp_snap_enabled = true;
   bool                                  fp_colors           = false;  // eligible color leaves; never independently centroid-snapped
   std::string                           fp_color_source     = "synthesis";
   bool                                  analyze_colors_only = false;  // diagnostic: no GP/LG/STA or cache
@@ -46,9 +57,16 @@ struct Options {
   int                                   macro_timing_interval = 50;
   int                                   fp_timing_max_updates = 10;
   bool                                  fp_resize             = false;
-  bool                                  repair_reset          = false;  // size/buffer reset-pin cones too (default: protected like clocks)
+  bool                                  repair_reset   = false;  // size/buffer reset-pin cones too (default: protected like clocks)
+  // synth.place.resize.engine: "new" = path-based sizing/buffering on the
+  // incremental what-if timer (resize_engine.hpp); "legacy" = batch sweeps.
+  std::string                           resize_engine  = "legacy";
+  bool                                  resize_vt_swap = false;  // allow same-footprint swaps across Liberty files (multi-VT)
+  std::vector<std::string>              resize_dont_use;         // glob patterns never chosen as a new master
+  // What-if handle of the timer behind fp_evaluate/evaluate (required by engine=new).
+  livehd::timing::Whatif*               whatif       = nullptr;
   // Pre-placement fanout tree on every flat net that drives an async clear/preset pin (loads per buffer; 0 = off).
-  unsigned                              reset_fanout          = 0;
+  unsigned                              reset_fanout = 32;
   Evaluate                              fp_evaluate;
   double                                fp_minimum = 3000, fp_attraction = .25, fp_repulsion = 5, fp_anchor = .25;
   bool                                  fp_distance_attraction = true;

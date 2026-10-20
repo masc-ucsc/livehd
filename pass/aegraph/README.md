@@ -206,10 +206,45 @@ values, the lane layout is checked window by window against `Get_mask`, and the 
 values; it also fails when `analyses.decl` and the `AEG_ANALYSIS` registry disagree
 (`AEG_FUZZ_SEED`, `AEG_ANALYSES_GRAPHS`, `AEG_ANALYSES_VERBOSE=1` for per-analysis counts).
 
+### Every fold site follows the engine (`livehd::fold_body`)
+
+`compile.cprop.engine` is not only the two compile cprop slots. Every other place that folds a graph body
+goes through `livehd::fold_body` (`fold_body.hpp`): `classic` runs `Cprop::do_trans` (byte for byte what the
+site ran before), `aegraph` runs `optimize_body` (the engine plus the classic post steps), `aegraph+classic`
+runs both. The kernel sets the engine ONCE per command (`apply_lhd_settings` -> `set_fold_engine`, the
+`fold_engine` library, no dependency on cprop or the engine); the cost profile is `synth` at the synthesis
+sites, `sim` at the sim-time fold, and the resolved `compile.aegraph.cost` elsewhere.
+
+| site (`LHD_FOLD_BODY_LOG` name) | where | cost | low_lanes | bitwidth after |
+| --- | --- | --- | --- | --- |
+| `specialize.constants`, `specialize.refold` | `pass/specialize` (sim and synth private copies) | compile | no | yes |
+| `cgen.sim.refold` | `inou/cgen/cgen_sim.cpp`, after a small loop is spliced flat (`sim.unroll_sites`) | sim | no | yes |
+| `synth.state_sweep` | `pass/synth/state_sweep.cpp` (refold after constant registers go) | synth | no | yes |
+| `synth.loop_cleanup` | `pass/synth/loop_cleanup.cpp` (guard scope: the cells the expansion minted; classic cutter only, the engine's guard rule is whole-body) | synth | yes | yes |
+| `synth.memory_module` | `pass/synth/memory_module.cpp` (method level: `fold_graphs` runs pass.cprop / pass.aegraph) | synth | yes | yes |
+| `satopt.cleanup` | `pass/satopt/pass_satopt.cpp` | synth | yes | yes |
+| `formal.lec.preflight`, `formal.semdiff` | `lhd/lhd_kernel_formal.cpp` (the re-simplify after hierarchy inlining, the mixed-loop identity) | synth | no | NO: `Options::preflight` |
+| compile.sweep | the per-round fold of `compile.sweep` runs the engine's pass methods like the schedule slots | compile | yes | yes |
+
+Not folding sites, and so left alone: `Bitwidth_rewrite`, `enableopt` and `satopt` use `Cprop` as a helper
+class (`Inp_pins`, `share_mux_regions`, the low-lane helpers); `legalize` and `semdiff` only mention it.
+
+Caches never mix engines: the compile-cache descriptor names the engine (as before); every synthesis and
+formal salt that a fold site can influence goes through `fold_salt_mix` (identity for `classic`, so classic
+keys are unchanged) -- the ABC region/tmap caches, the usyn logical cache and provenance, and the formal
+verdict cache -- and `//pass/synth:synth_salt` and `//lhd:formal_salt` hash `pass_aegraph`.
+
+Observability: with `LHD_FOLD_BODY_LOG=1` each call prints `fold_body engine=<engine> site=<site>` on
+stderr; `fold_count(site, engine)` reads the counters in-process. Tests: `fold_body_test` (dispatch,
+counters, salt, `fold_graphs`), `SpecializeRefold.FollowsTheProcessWideFoldEngine`,
+`//lhd/tests:lhd_fold_sites_test` (one command per site family under each engine, results PROVEN, region
+cache keyed by engine), the `prp-sim-loop_*_{aeg,aegc,unroll}` fixtures and `equiv/loop_carry_kinds_4`.
+
 ### The LEC preflight engine
 
-`--set formal.lec.preflight_engine=classic|aegraph` (INTERNAL, default `classic`, the e-graph archive is in
-`//lhd:formal_salt`) picks the engine of the re-simplify after hierarchy inlining. No `pass.bitwidth`
+`--set formal.lec.preflight_engine=classic|aegraph|aegraph+classic` (INTERNAL) picks the engine of the
+re-simplify after hierarchy inlining; UNSET it follows `compile.cprop.engine` (default `classic`, so the
+default is unchanged; the e-graph archive is in `//lhd:formal_salt`). No `pass.bitwidth`
 follows it, so under `Options::preflight` every cell the elaborator creates is stamped (a member's top
 class takes the member's stamp, an interior cell the range-analysis bound) and an engine that would create
 a cell it cannot stamp REFUSES the graph (`Stats::refused`) and classic does it. `optimize_body` then runs

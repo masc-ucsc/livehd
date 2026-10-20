@@ -44,13 +44,15 @@ print(sum(json.load(open(sys.argv[1]))['dff']['cells'].values()))
 PYCODE
 }
 
-# synth_case <dir> <STUB> [extra --set ...]: map through the shipped flow and emit the netlist.
+# synth_case <dir> <STUB> [extra --set ...]: isolate the compile sweep from
+# specialization and the mapper's separate state optimizations.
 synth_case() {
   local d="$1" stub="$2"
   shift 2
   mkdir -p "$d"
   "$LHD" synth "$SRC" --top "$TOP" --workdir "$d/w" --emit-dir verilog:"$d/net/" \
-      --set synth.liberty="$LIB" --set synth.opentimer=false -q --result-json "$d/r.json" "$@" -- -GSTUB="$stub" \
+      --set synth.liberty="$LIB" --set synth.opentimer=false \
+      --set compile.specialize_modules=false --set synth.state_sweep=false --set synth.merge_registers=false -q --result-json "$d/r.json" "$@" -- -GSTUB="$stub" \
       || fail "synth STUB=$stub $* -> $(cat "$d/r.json" 2>/dev/null)"
 }
 
@@ -93,9 +95,9 @@ echo "PASS: an undriven output folds only under compile.unknown_zero"
 lec_pair() {  # lec_pair <STUB> <name>: ref = default compile, impl = flatten + sweep
   local stub="$1" n="$2" d="$W/lec_$2"
   mkdir -p "$d"
-  "$LHD" compile "$SRC" --top "$TOP" --emit-dir lg:"$d/ref/" --workdir "$d/wr" -q --result-json "$d/rr.json" -- -GSTUB="$stub" \
+  "$LHD" compile "$SRC" --top "$TOP" --set compile.specialize_modules=false --emit-dir lg:"$d/ref/" --workdir "$d/wr" -q --result-json "$d/rr.json" -- -GSTUB="$stub" \
       || fail "$n: ref compile -> $(cat "$d/rr.json" 2>/dev/null)"
-  "$LHD" compile "$SRC" --top "$TOP" --emit-dir lg:"$d/impl/" --workdir "$d/wi" "${SWEEP[@]}" -q --result-json "$d/ri.json" -- -GSTUB="$stub" \
+  "$LHD" compile "$SRC" --top "$TOP" --set compile.specialize_modules=false --emit-dir lg:"$d/impl/" --workdir "$d/wi" "${SWEEP[@]}" -q --result-json "$d/ri.json" -- -GSTUB="$stub" \
       || fail "$n: impl compile -> $(cat "$d/ri.json" 2>/dev/null)"
   "$LHD" lec --set formal.effort=proof --impl lg:"$d/impl" --ref lg:"$d/ref" --top "$TOP" --workdir "$d/wl" -q \
       --result-json "$d/lec.json" || fail "$n: lec -> $(cat "$d/lec.json" 2>/dev/null)"

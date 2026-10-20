@@ -18,6 +18,7 @@
 #include "arith.hpp"
 #include "cell_netlist.hpp"
 #include "cone_map.hpp"
+#include "io_resynth.hpp"
 #include "liberty_dff.hpp"
 #include "memory_module.hpp"
 #include "pass_partition.hpp"
@@ -51,28 +52,30 @@ using Region_hook = std::function<Region_rewrite(const Lnet& net, const Region_c
 
 // The options the region pipeline itself reads. A backend adds its own.
 struct Driver_options {
+  std::shared_ptr<Io_store> io_feedback;
+  bool                      io_boundary_timing = false;  // internal: post-resynthesis boundary refinement
   // A clock net (a region input, or a clock gate's output) that clocks more
   // register cells than this is dealt out through a tree of the library's
   // smallest buffer, `icg_fanout` sinks per buffer, level by level. One net on
   // thousands of flops is unbuffered and dominates every gate-level timing report
   // (minion: a 1.5-2.5 ns ICG output as the whole critical path). 0 disables.
-  uint32_t icg_fanout = 16;
+  uint32_t                  icg_fanout         = 16;
   // The primary clock port is an ideal driver in a timer, so a tree directly under
   // it only adds launch latency. It pays only when the design's registers are so
   // many that the unbuffered port slews every clock pin (minion: 25k flops on one
   // port). Trees are built under a primary clock net only past this many register
   // bits in the source graph; a derived clock (gate output) is always bounded.
-  uint32_t input_clock_min = 8192;
+  uint32_t                  input_clock_min    = 8192;
   // An asynchronous-reset net (a region input, a reset inverter or a mapped reset cone) that drives more
   // clear/preset pins than this is dealt out through a tree of the library's smallest buffer, `reset_fanout`
   // pins per buffer, level by level (the clock tree's mechanism). The pins never enter the logic network, so the
   // mapper's `max_fanout` cannot bound them: one weak gate otherwise drives thousands of flops (a 439-pin
   // AO21x1 gave a 4 ns slew and a -1 ns recovery slack). 0 (the default) disables the tree.
-  uint32_t reset_fanout = 0;
+  uint32_t                  reset_fanout       = 0;
   // Optional region hook, and its identity in the region-cache recipe (two
   // regions with equal logic but different hook settings never share a body).
-  Region_hook                                                               region_hook;
-  std::string                                                               region_hook_recipe;
+  Region_hook               region_hook;
+  std::string               region_hook_recipe;
   // A hook's decision evidence travels with its region-cache row:
   // evidence_valid(cached_region, evidence) is checked before a cached body is
   // copied, and evidence_replay(current_region, cached_region, evidence) runs
@@ -84,9 +87,9 @@ struct Driver_options {
   // multiplier and barrel lowerings and keep the best stitched result.
   bool                        ware_trials  = false;
   std::string                 tune_profile = "auto", tune_validate = "structural";
-  uint32_t                    tune_attempts = 24;
-  uint64_t                    tune_time_ms  = 60000;
-  uint32_t                    tune_patience = 3;      // consecutive rejects before a region stops (0 = never)
+  uint32_t                    tune_attempts  = 24;
+  uint64_t                    tune_time_ms   = 60000;
+  uint32_t                    tune_patience  = 3;     // consecutive rejects before a region stops (0 = never)
   double                      tune_min_share = 0.02;  // skip regions under this share of the mapped area
   std::shared_ptr<Tune_store> tune_store;
 
@@ -185,7 +188,7 @@ struct Region_ctx {
   // Owned, resolved metadata built under the graph lock. Available to a
   // region hook after blasting; null before translation and on cache hits.
   // No source-graph access is needed to read these snapshots.
-  const Source_state_table*             source_state = nullptr;
+  const Source_state_table*             source_state      = nullptr;
   // Placed cone re-synthesis overrides the static partition estimate.
   const Cone_boundary*                  physical_boundary = nullptr;
   // region_opts overrides of the backend's own command strings (flow, load).
@@ -221,6 +224,8 @@ struct Region_ctx {
 
 // A backend's per-region decisions, made before translation.
 struct Region_plan {
+  std::string resolved_flow;
+  bool        custom_flow = false;
   std::string recipe;  // the backend's cache-recipe fragment (verbatim, compared exactly)
   // The backend's flow keeps every latch as crossed (no retiming, no sequential
   // sweep): a QN-only DFF encoding on the latch input is then exact.
@@ -267,16 +272,15 @@ public:
   [[nodiscard]] virtual std::shared_ptr<void> region_scope()               = 0;
 
   // Per region, before translation (and before the cache lookup).
-  [[nodiscard]] virtual Region_plan                 plan(const Region_ctx& ctx) = 0;
+  [[nodiscard]] virtual Region_plan                 plan(const Region_ctx& ctx)                       = 0;
   // Map the translated region (or the hook's rewrite of it), filling the
   // backend's part of `q`. nullopt: refused (recorded through ctx) or failed
   // (diagnosed).
   [[nodiscard]] virtual std::optional<Cell_netlist> map(const Region_ctx& ctx, const Region_blast& blast,
-                                                        const Region_rewrite& rewrite, Region_qor& q)
-      = 0;
-  [[nodiscard]] virtual const Cell_library& cells() const = 0;
+                                                        const Region_rewrite& rewrite, Region_qor& q) = 0;
+  [[nodiscard]] virtual const Cell_library&         cells() const                                     = 0;
   // Release the region's workspace once it is written.
-  virtual void                              end_region()  = 0;
+  virtual void                                      end_region()                                      = 0;
 
   // Scheduling estimate for a parallel lane mapping a region of `aig_nodes`.
   [[nodiscard]] virtual uint64_t projected_memory(uint64_t aig_nodes) const = 0;

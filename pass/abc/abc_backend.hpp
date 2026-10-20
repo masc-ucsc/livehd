@@ -37,8 +37,11 @@ public:
   [[nodiscard]] const synth::Cell_library&             cells() const override { return cell_library_; }
   void                                                 end_region() override;
   [[nodiscard]] uint64_t                               projected_memory(uint64_t aig_nodes) const override;
-  uint64_t          refine(hhds::GraphLibrary& outlib, std::string_view top, const synth::Design_ctx& design) override;
-  synth::Ware_score score(hhds::GraphLibrary& outlib, std::string_view top, const synth::Design_ctx& design) override;
+  uint64_t           refine(hhds::GraphLibrary& outlib, std::string_view top, const synth::Design_ctx& design) override;
+  synth::Ware_score  score(hhds::GraphLibrary& outlib, std::string_view top, const synth::Design_ctx& design) override;
+  synth::Io_decision io_region(hhds::Graph&, const synth::Io_environment&, const synth::Io_environment&, double period_ps,
+                               double percent, bool apply, bool bindings_only = false);
+  void               set_io_feedback(std::shared_ptr<synth::Io_store> store) { base_.io_feedback = std::move(store); }
 
 private:
   // Run-level options; `region_` is the current region's (region options and
@@ -55,11 +58,11 @@ private:
   // cell (SC_Cell*, opaque here), and whether the Liberty can size at all
   // (lib_has_nldm_timing, the buffering tail's own predicate -- unlike
   // scl_timing_ok_ it does not need a delay target).
-  float typical_cap_ff_ = -1.0f;
-  void* drive_cell_     = nullptr;
-  bool  scl_lib_ok_     = false;
-  void* pabc_           = nullptr;  // Abc_Frame_t*
-  bool  lib_loaded_     = false;
+  float                   typical_cap_ff_ = -1.0f;
+  void*                   drive_cell_     = nullptr;
+  bool                    scl_lib_ok_     = false;
+  void*                   pabc_           = nullptr;  // Abc_Frame_t*
+  bool                    lib_loaded_     = false;
   // A delay target was requested AND the Liberty carries the 2-D NLDM
   // slew/load surfaces the SCL commands walk (lib_has_nldm_timing): the
   // `buffer`/`upsize`/`dnsize` steps and the SCL QoR timer may run. The mapper
@@ -71,13 +74,13 @@ private:
   // and 1.22/0.93 at the same number of periods met; `amap` (the area
   // candidate) ignores GENLIB delays entirely (bit-identical netlists either
   // way).
-  bool  scl_timing_ok_  = false;
+  bool                    scl_timing_ok_  = false;
   // One-shot: the Liberty gave ABC no SCL library, so the max_fanout tail
   // cannot run (see the strip in map()). Warn once per session, not per region.
-  bool  warned_no_scl_  = false;
+  bool                    warned_no_scl_  = false;
   // The session's GENLIB as a Cell_library.
-  synth::Cell_library cell_library_;
-  Gate_types          gate_type_;  // Mio_Gate_t* -> cell_library_ type
+  synth::Cell_library     cell_library_;
+  Gate_types              gate_type_;  // Mio_Gate_t* -> cell_library_ type
   // The Liberty cell IO decl of a Mio gate in the output library -- the SAME
   // construction for a cell a region read-back mints and for a cell a
   // boundary re-size swaps in: both must agree on port ids.

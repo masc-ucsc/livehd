@@ -34,7 +34,15 @@ TOP=loop_lru_matrix
 LIB=inou/prp/tests/abc/test.lib
 W="${TEST_TMPDIR:-/tmp/loop_bit_write_qor_$$}"
 mkdir -p "$W"
-run() { "$LHD" "$@" -q >"$W/latest.log" 2>&1 || { cat "$W/latest.log"; exit 1; }; }
+run() {
+  # Measure rolled-body lowering without specializing one definition per ordinal.
+  local flags=()
+  case "$1" in
+    compile) flags=(--set compile.specialize_modules=false) ;;
+    synth) flags=(--set compile.specialize_modules=false --set synth.partition=fine) ;;
+  esac
+  "$LHD" "$@" "${flags[@]}" -q >"$W/latest.log" 2>&1 || { cat "$W/latest.log"; exit 1; }
+}
 jget() { python3 -c "import json,sys; d=json.load(open(sys.argv[1]))
 for k in sys.argv[2].split('.'): d=d[k]
 print(d)" "$1" "$2"; }

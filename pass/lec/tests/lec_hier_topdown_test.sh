@@ -74,7 +74,8 @@ module mid  (input [7:0] a, input [7:0] b, output [7:0] y); wire [7:0] t; inner 
 module top  (input [7:0] p, input [7:0] q, output [7:0] o); mid m(.a(p),.b(q),.y(o)); endmodule
 EOF
 
-C() { "$LHD" compile "$W/$1.v" --top top --emit-dir "lg:$W/$1" --workdir "$W/c$1" >/dev/null 2>&1 \
+# Keep the source hierarchy intact: these cases exercise LEC boundary premises.
+C() { "$LHD" compile "$W/$1.v" --set compile.specialize_modules=false --top top --emit-dir "lg:$W/$1" --workdir "$W/c$1" >/dev/null 2>&1 \
       || { echo "FAIL: compile of $1.v failed"; exit 1; }; }
 for m in A B D E; do C "$m"; done
 

@@ -164,6 +164,24 @@ TEST_F(PhysicalSession, ResizeRcTopologyAndRejectedTrialRollbackMatchFreshTiming
   EXPECT_EQ(session.statistics().inserted_gates, 1u);
   EXPECT_EQ(session.statistics().removed_gates, 1u);
 }
+TEST_F(PhysicalSession, ShieldedLoadsRepowerAndRollbackMatchFreshTiming) {
+  livehd::opentimer::Physical_session session(options);
+  for (const auto [strong, extra, resistance] : {
+           std::tuple{false, false, 250000.},
+           std::tuple{ true, false, 250000.},
+           std::tuple{ true,  true, 100000.},
+           std::tuple{false, false, 250000.},
+  }) {
+    Circuit                             circuit(strong, extra, resistance, true);
+    const auto                          incremental = session.evaluate(circuit.graph, circuit.rc);
+    livehd::opentimer::Physical_session fresh(options);
+    compare(incremental, fresh.evaluate(circuit.graph, circuit.rc));
+  }
+  EXPECT_EQ(session.statistics().builds, 1u);
+  EXPECT_GE(session.statistics().repowered_gates, 2u);
+  EXPECT_EQ(session.statistics().inserted_gates, 1u);
+  EXPECT_EQ(session.statistics().removed_gates, 1u);
+}
 TEST_F(PhysicalSession, DirectFeedbackMatchesExplicitReportAndDoesNotReloadFiles) {
   Circuit circuit(false, false);
   auto    report_options     = options;
@@ -204,5 +222,64 @@ TEST_F(PhysicalSession, InvalidCandidateDoesNotPoisonTheRetainedNetlist) {
   }
   EXPECT_THROW(session.evaluate(candidate.graph, candidate.rc), std::runtime_error);
   compare(session.evaluate(initial.graph, initial.rc), before);
+}
+}  // namespace
+namespace {
+TEST_F(PhysicalSession, WhatifResizeBufferAndRollbackMatchFreshTiming) {
+  Circuit                             initial(false, false), strong(true, false), buffered(false, true);
+  livehd::opentimer::Physical_session session(options);
+  const auto                          before = session.evaluate(initial.graph, initial.rc);
+  auto&                               w      = session.whatif();
+  const auto                          ps     = [&](const Feedback& f, double v) { return v * f.time_unit_ps; };
+  const double                        wns0 = w.wns(), tns0 = w.tns();
+  ASSERT_TRUE(before.wns);
+  EXPECT_NEAR(wns0, ps(before, *before.wns), 1e-3);
+  EXPECT_NEAR(tns0, ps(before, before.tns.value_or(0)), 1e-3);
+
+  // Resize: equal to a fresh timer on the resized netlist.
+  const auto start = w.mark();
+  w.resize("u", "sky130_fd_sc_hd__buf_2");
+  livehd::opentimer::Physical_session fresh_strong(options);
+  const auto                          sized = fresh_strong.evaluate(strong.graph, strong.rc);
+  EXPECT_NEAR(w.wns(), ps(sized, *sized.wns), 1e-3);
+  EXPECT_NEAR(*w.pin("y").slack, ps(sized, *sized.pins.at("y").slack), 1e-3);
+  w.rollback(start);
+  EXPECT_NEAR(w.wns(), wns0, 1e-6);
+
+  // Buffer insertion through set_net on both pieces: equal to the explicit netlist.
+  w.add_cell("b", "sky130_fd_sc_hd__buf_1");
+  w.set_net({
+      "u:X",
+      {{"u:X", .1}, {"b:A", .2}},
+      {{0, 1, 100}}
+  });
+  w.set_net({
+      "b:X",
+      {{"b:X", .1}, {"v:A", .2}},
+      {{0, 1, 100}}
+  });
+  livehd::opentimer::Physical_session fresh_buffered(options);
+  const auto                          inserted = fresh_buffered.evaluate(buffered.graph, buffered.rc);
+  EXPECT_NEAR(w.wns(), ps(inserted, *inserted.wns), 1e-3);
+  EXPECT_NEAR(*w.pin("v:A").arrival, ps(inserted, *inserted.pins.at("v:A").arrival), 1e-3);
+  ASSERT_TRUE(w.load("b:X"));
+  EXPECT_GT(*w.load("b:X"), .29);
+  const auto failing = w.failing_endpoints(1e9);
+  ASSERT_EQ(failing.size(), 1u);
+  EXPECT_EQ(failing.front().first, "y");
+  w.rollback(start);
+  EXPECT_NEAR(w.wns(), wns0, 1e-6);
+  EXPECT_NEAR(w.tns(), tns0, 1e-6);
+  EXPECT_NEAR(*w.pin("v:A").arrival, ps(before, *before.pins.at("v:A").arrival), 1e-3);
+
+  // Pending edits never leak into the next full evaluation.
+  w.resize("u", "sky130_fd_sc_hd__buf_2");
+  compare(session.evaluate(initial.graph, initial.rc), before);
+  EXPECT_EQ(w.mark(), 0u);
+  EXPECT_EQ(session.statistics().builds, 1u);
+  const auto arc = w.arc("sky130_fd_sc_hd__buf_1", "A", "X", 20, 1);
+  ASSERT_TRUE(arc);
+  EXPECT_GT(arc->first, 0);
+  EXPECT_GT(*w.pin_capacitance("sky130_fd_sc_hd__buf_1", "A"), 0);
 }
 }  // namespace

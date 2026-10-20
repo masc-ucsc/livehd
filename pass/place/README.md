@@ -1,10 +1,49 @@
 # Physical placement stage
 
-The default is one mixed-size GP pass followed by macro/cell legalization and
-detailed placement (`synth.place.fp=false`). Macro snapping remains enabled.
+With ABC, OpenTimer and an explicit workdir, the default runs macro placement,
+fixes the macros, and then places the cells (`synth.place.fp=false`). Without
+macros it uses a single placement stage. Macro snapping remains enabled.
 Enable `synth.place.fp=true` explicitly for centroid floorplanning and the separate
 macro-refinement/final-cell passes. The legacy `r8h2`/`r8h3` macro modes and manual
 macro-centroid diagnostic have been removed.
+
+`synth.place.io_resynth=5` enables placement-aware whole-color ABC resynthesis.
+At each completed stage, OpenTimer's in-memory pin arrivals/required times are
+reduced to region port bits; clock and reset nets are excluded. A near-critical
+color is remapped only if an IO constraint on a near-critical path tightened by
+more than 5% of the clock period. A scoped fanout-to-Steiner-length wire-load
+table supplies ABC's capacitance estimate. Timing must not worsen under the
+same environment and a bounded combinational CEC must prove the replacement.
+State and memory instances remain opaque and retain their interfaces.
+
+One automatic batch is allowed: either before placement using saved final
+feedback, or after the first completed stage. An accepted batch restarts that
+stage, seeding surviving cells (including SRAMs) and IOs from its placement.
+These are movable initial coordinates: the restart does not copy fixed status,
+add position bounds, or lock unchanged colors. The normal macro lock happens
+after macro placement. A saved-feedback resynthesis before placement has no
+placement seed. `restart_seed.json` in the restarted stage reports reused
+movable cells/macros and new cells. Later stages save
+feedback and warn when another run could help. The per-color decisions and
+used/placed environments are in `synth/place/io_resynth.json`; reusable state is
+in `abc_cache/io_timing.json` and `abc_cache/wire_load.json`. Use a distinct
+`--workdir` for each major placement configuration. `lhd.incremental=false`
+disables reading/writing reusable state but permits feedback within this run.
+The IO timing snapshot records the timing-engine source identity. A timer
+change discards its old measured arrivals/required times before the pre-placement
+trigger check, while preserving the constraints used to map the body and the
+geometric wire-load tables. Fresh placement then supplies current measurements.
+Set `synth.place.io_resynth=0` to disable the loop and retain the single-call
+non-FP flow. Explicit positive values require a workdir, ABC, full placement,
+OpenTimer, and a resolvable SDC clock. No IO timing JSON is exchanged during GP
+timing callbacks; the two state files are stage-boundary snapshots.
+
+`synth.place.resize=true` enables timing-checked sizing and buffering in full
+placement with OpenTimer. Explicitly disable it for a geometry-only comparison.
+The shared synthesis defaults use coarse partitions, state sweeping and register
+merging, a delay budget of 0.4 of the SDC clock period when available, ABC fanout
+32 with area relaxation off, and flat reset fanout 32. Explicit options override
+these defaults.
 
 `lhd synth --set synth.place=true` runs CPU DREAMPlace between mapping and STA.
 The default remains false. `synth.lef` is a comma-separated tech LEF and cell/macro
@@ -47,6 +86,10 @@ then writes and reads back `synth/place/out.def`. GP mode may overlap, reports
 approximate timing and removes the stage's DEF. `synth/place/qor.json` reports
 legality separately from GP convergence/overflow, plus HPWL and placed WNS/TNS
 when STA supplies them. `--emit-dir report:` exports this as `placement.json`.
+`--emit-dir def:physical/` retains `out.def`, copies the ordered technology and
+cell LEFs under `physical/lef/`, and writes their relative paths to `lefs.json`
+(including a memory proxy LEF when present). These exports are part of the
+synthesis invocation; downstream independent timing analysis is separate.
 An unmet GP overflow target is reported even when legalization succeeds.
 
 GP also waits for timing-weighted HPWL and routability after geometry/density
@@ -344,9 +387,8 @@ It uses the same Liberty interface/truth-table checks, clock/reset protection,
 fanout/capacitance/slew limits and timing/electrical acceptance as the post-place
 repair. A load-ranked sizing sweep is followed by a whole-forest repair batch,
 with at most eight individual topology fallback trials (at most four accepted).
-Each evaluated batch/trial gets fresh RC and OpenTimer. Even an empty
-sizing batch gets a second STA call. Each evaluation currently constructs a fresh
-OpenTimer instance; it does not yet retain incremental timing state between trials.
+Each evaluated batch/trial gets fresh RC and an incremental update of the one
+persistent `Physical_session` timer. Even an empty sizing batch gets a second STA call.
 Trials use the current overlapping GP coordinates; no legalization or macro locking
 happens during these checkpoints.
 Rejected edits restore graph, physical pins, RC and centroid membership together.
@@ -423,6 +465,9 @@ Aggregate-only diagnostic callers retain the bounded individual fallback; it
 interleaves alternatives across drivers and stops at eight accepted edits. `synth/place/resize.json` and
 `synth/place/repair.json` record their trials.
 
+Placement RC uses FLUTE up to 1000 distinct locations of a net; larger nets are
+FLUTE trees over spatial groups of at most 1000 locations joined by a FLUTE tree over
+each group's location nearest the driver (it was a star from the driver).
 Steiner repair uses FLUTE for at most 1000 distinct locations and a deterministic
 spatial median tree above that degree. The old 4096-leaf/256-buffer exclusions are
 removed; a one-million-buffer resource guard prevents runaway allocation. Library
@@ -442,8 +487,8 @@ controls acceptance and does not guarantee timing or electrical closure.
 SDC clocks stay ideal before CTS unless `set_propagated_clock` requests propagation.
 The OpenTimer adapter traces source-to-clock-sink paths, preserves inversion and
 clock-to-Q timing, and retains all data-net placement RC. Ideal clock pins do not
-contribute data-net criticality or electrical repair violations. Each batch still
-constructs a fresh OpenTimer; retained incremental timing is pending.
+contribute data-net criticality or electrical repair violations. All evaluations of
+one flow share one persistent incremental timer (`Physical_session`).
 
 `synth.place.resynth=true` enables up to four critical-cone trials through the
 optional ABC provider. A cut walks backward through scalar combinational cells,
@@ -481,6 +526,84 @@ lhd synth design.v --top top --workdir W --set synth.place=true \
   --set synth.place.timing_driven=true --set synth.place.resize=true \
   --set synth.place.resynth=true
 ```
+
+### Path-based resize engine (`synth.place.resize.engine=new`)
+
+`synth.place.resize.engine` selects the implementation behind `synth.place.resize=true`,
+both at FP timing checkpoints and after legal placement. `legacy` is the batch
+sizing/forest sweep described above; `new` (`resize_engine.{hpp,cpp}`) plans on the
+persistent incremental timer instead of a fresh evaluation per batch.
+
+| Option (`synth.place.` prefix) | Default | Meaning |
+| --- | --- | --- |
+| `resize.engine` | `legacy` | `new` or `legacy` |
+| `resize.vt_swap` | false | `new`: allow same-footprint/function swaps across Liberty files (multi-VT); otherwise a cell keeps its file |
+| `resize.dont_use` | empty | `new`: comma-separated globs never chosen as a new master or repeater (Liberty `dont_use` cells stay excluded) |
+
+*What-if timing.* `Physical_session::whatif()` (`core/timing_whatif.hpp`) applies
+transient edits to the evaluated OpenTimer state: a master swap (`repower_gate`), a new
+cell, and `set_net`, which moves pins onto a net and attaches its wire RC. Cutting a wire
+for a buffer is two `set_net` calls whose FLUTE Steiner RC (`steiner_rc`, the same
+construction placement RC uses) is rebuilt for both pieces from the seeded buffer
+position. Queries (WNS, TNS per endpoint, pin slack/arrival/slew, net load, Liberty arc
+delays, electrical checks) run an incremental update; `rollback(mark)` undoes edits LIFO
+and the next full `evaluate()` discards anything pending.
+
+*Plan.* One plan per round, each move a transaction (timer, netlist model and edit list
+roll back together):
+
+1. Electrical: only nets with a real Liberty max slew/capacitance/fanout violation in the
+   full evaluation. The smallest stronger same-function driver that meets the limits,
+   else a fanout tree. Trees use variable branching: per level 2..8 spatial groups
+   (recursive median bisection) chosen from the load and fanout a mid-strength repeater
+   may carry, more groups when the net fails timing, the most critical sinks kept on the
+   root, a deeper level only where a group still exceeds a repeater's limits. Each repeater
+   is seeded on the edge from its driver toward its group. Many nets are probed in
+   bisected batches.
+2. Timing (only while setup WNS < 0): failing endpoints, worst first. The path is traced
+   back by pin slack, through multi-output combinational cells. Candidate moves per stage:
+   up-size the driver (NLDM gain including the upstream load change), down-size
+   slack-rich gates loading the on-path net (shed), isolate non-critical sinks behind a
+   buffer, or cut the on-path wire with one repeater (30/50/70%) or an evenly spaced chain
+   (count from the optimal repeater spacing). Moves are ranked by estimated gain and probed;
+   at most five moves whose estimate could pass are probed per step; one is kept only if the endpoint improves (by 0.05 ps, or per added cell
+   max(1 ps, 0.5% of its slack)) and setup WNS, TNS and the electrical checks of the
+   touched pins are not worse.
+3. Area recovery: down-size gates whose slack exceeds the slack of the worst met endpoint
+   (zero when every endpoint fails; with a few failing endpoints it still protects the real
+   critical paths) plus
+   max(25 ps, 40% of the shortest clock period) by at least twice the estimated delay
+   increase. Gates with slack above a whole period (a check the timer does not model, such
+   as a half-cycle negative-edge capture) are never down-sized. Probed in bisected batches.
+
+*Stopping.* No cell or edit budget. An endpoint stops when it meets timing or no move is
+accepted; a path that fails even with ideal (zero-RC) wires and the fastest same-function
+drive at every stage, each loaded only by its on-path pin, is provably not fixable by
+buffering and gets sizing moves only. With many failing endpoints, the best estimated
+sizing/repeater move of each of the worst quarter of failing paths (disjoint nets) is probed
+as one batch, bisected when rejected (a move that fails alone is not retried); batches stop
+after two rounds gaining less than 0.2% TNS and 0.5 ps WNS. Per-endpoint refinement then
+stops when every failing endpoint is met, stuck or infeasible, or after two rounds of 32
+endpoints that gain less than 2% TNS and 1 ps WNS. At FP checkpoints the per-endpoint pass is
+limited to two rounds and uses no wire buffers (isolation, repeaters, repeater chains):
+coordinates still move, and buffers placed for GP wire lengths piled up checkpoint after
+checkpoint (eyeriss: +12% cells in three checkpoints); sizing and fanout trees remain.
+After legal placement a new plan is made on the legalized result only while setup still
+fails and the previous round gained at least 5 ps WNS or 2% TNS (at most four rounds).
+
+*Commit.* A plan is materialized once on a clone (new cells keep the owner's color,
+region and block), ECO-legalized (`legalize_cells`) or, at FP checkpoints, refreshed at GP
+coordinates, and evaluated in full. It is kept only if setup WNS and TNS and the
+electrical violations are not worse and something improved (timing, electrical or area);
+hold is reported but not gated (pre-CTS). Otherwise the earliest half of its moves
+(electrical first, then the most critical) is tried, a few times. `resize.json` (and the
+`resize` member of the placement QoR, `fp_repair_<iteration>.json` at checkpoints) records
+the phases, probes, rejections, stop reason and every commit trial.
+
+*Timer fidelity this relies on.* Setup checks use the period of the ideal clock that
+reaches their clock pin (multi-clock designs used the first clock's period),
+`create_clock -waveform` is honored, and data paths through async preset/clear arcs are not
+timed (OpenSTA's default).
 
 The weighting follows [OpenROAD GPL's slack weighting](https://openroad.readthedocs.io/en/latest/main/src/gpl/README.html),
 and buffer repair follows its [removal, rebuffering and timing-check sequence](https://openroad.readthedocs.io/en/latest/main/src/rsz/README.html).
@@ -907,8 +1030,8 @@ surviving edits. These measurements preserve the existing acceptance checks.
 Placement refinement and repair return their accepted timing feedback. Callers can
 move that feedback into the next repair pass only when graph, placement, RC and
 constraints are unchanged; rejected-trial timing is never reused as the baseline.
-This avoids duplicate analyses between passes, but each changed-state callback
-still builds a fresh OpenTimer instance. The diagnostic tool publishes the accepted
+This avoids duplicate analyses between passes; each changed-state callback is an
+incremental update of the persistent timer. The diagnostic tool publishes the accepted
 analysis as `final_timing.json`; the last numbered trial can be a rejected state.
 
 ### Fixed-macro cell-placement experiments

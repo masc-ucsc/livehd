@@ -30,31 +30,46 @@ _MAPPERS = [
     ("_usyn", "usyn"),
 ]
 
-
 sh_test(
     name = "lhd_unate_smoke",
     srcs = ["lhd_unate_smoke.sh"],
-    data = ["//lhd", "//inou/prp:abc_tests", "//pass/usyn:provenance_checker"],
+    data = [
+        "//inou/prp:abc_tests",
+        "//lhd",
+        "//pass/usyn:provenance_checker",
+    ],
 )
 
 sh_test(
     name = "lhd_synth_instances_smoke",
     srcs = ["lhd_synth_instances_smoke.py"],
-    data = ["//lhd", "//inou/prp:abc_tests", "//pass/usyn:measure_synth"],
+    data = [
+        "//inou/prp:abc_tests",
+        "//lhd",
+        "//pass/usyn:measure_synth",
+    ],
 )
 
 sh_test(
     name = "lhd_synth_instance_defs_smoke",
     srcs = ["lhd_synth_instances_smoke.py"],
     args = ["definitions"],
-    data = ["//lhd", "//inou/prp:abc_tests", "//pass/usyn:measure_synth"],
+    data = [
+        "//inou/prp:abc_tests",
+        "//lhd",
+        "//pass/usyn:measure_synth",
+    ],
 )
 
 sh_test(
     name = "lhd_synth_instance_colors_smoke",
     srcs = ["lhd_synth_instances_smoke.py"],
     args = ["occurrences"],
-    data = ["//lhd", "//inou/prp:abc_tests", "//pass/usyn:measure_synth"],
+    data = [
+        "//inou/prp:abc_tests",
+        "//lhd",
+        "//pass/usyn:measure_synth",
+    ],
 )
 
 sh_test(
@@ -481,8 +496,8 @@ sh_test(
 # SIG OP V condition holds). Runtime checks use declared dependencies.
 [sh_test(
     name = "lhd_sim_observe_test" + suffix,
-    args = [group],
     srcs = ["lhd_sim_observe_test.sh"],
+    args = [group],
     data = ["//lhd"],
 ) for suffix, group in [
     ("", "structural"),
@@ -1272,26 +1287,26 @@ sh_test(
     data = [
         "//inou/prp:tests/sim/color_kernel_llvm_mem_whole.prp",
         "//inou/prp:tests/sim/color_kernel_llvm_reg.prp",
-        "//inou/prp:tests/sim/ordered_state.prp",
         "//inou/prp:tests/sim/color_kernel_llvm_reg_const.prp",
         "//inou/prp:tests/sim/color_kernel_llvm_scalar.prp",
         "//inou/prp:tests/sim/color_kernel_llvm_wide.prp",
         "//inou/prp:tests/sim/color_kernel_multiwrite.prp",
         "//inou/prp:tests/sim/div_narrow_result.prp",
-        "//inou/prp:tests/sim/llvm_native_division.prp",
         "//inou/prp:tests/sim/llvm_boundary_slices.prp",
+        "//inou/prp:tests/sim/llvm_native_division.prp",
         "//inou/prp:tests/sim/loop_carry_kinds_sim.prp",
         "//inou/prp:tests/sim/loop_fused_state.prp",
         "//inou/prp:tests/sim/loop_hierarchy.prp",
+        "//inou/prp:tests/sim/loop_inline_colors.prp",
         "//inou/prp:tests/sim/loop_inlined_array.prp",
         "//inou/prp:tests/sim/loop_inlined_capture.prp",
         "//inou/prp:tests/sim/loop_invariant_broadcast.prp",
         "//inou/prp:tests/sim/loop_mixed_carry.prp",
-        "//inou/prp:tests/sim/loop_inline_colors.prp",
         "//inou/prp:tests/sim/loop_roll_conditional_state_call.prp",
         "//inou/prp:tests/sim/loop_state_multi_carry.prp",
         "//inou/prp:tests/sim/mem_sim_gated_clock.prp",
         "//inou/prp:tests/sim/mem_wensize_lanes.prp",
+        "//inou/prp:tests/sim/ordered_state.prp",
         "//inou/prp:tests/sim/reduce_wide.prp",
         "//lhd",
     ],
@@ -1638,7 +1653,10 @@ sh_test(
 sh_test(
     name = "lhd_sta_critical_smoke",
     srcs = ["lhd_sta_critical_smoke.py"],
-    data = ["//lhd", "//inou/prp:abc_tests"],
+    data = [
+        "//inou/prp:abc_tests",
+        "//lhd",
+    ],
 )
 
 sh_test(
@@ -1894,7 +1912,6 @@ sh_test(
     name = name + suffix,
     srcs = ["lhd_abc_seq_test.sh"],
     args = [group],
-    env = {"MAPPER": mapper},
     data = _FLOW_DATA + [
         "abc_async_reset.prp",
         "abc_qn_fanout.prp",
@@ -1902,6 +1919,7 @@ sh_test(
         "abc_resetless_sync.prp",
         "//inou/prp:abc_tests",
     ],
+    env = {"MAPPER": mapper},
 ) for name, group in [
     ("lhd_abc_seq_test", "registers"),
     ("lhd_abc_qn_test", "qn"),
@@ -2118,6 +2136,22 @@ sh_test(
     name = "lhd_aegraph_test",
     srcs = ["lhd_aegraph_test.sh"],
     data = _FLOW_DATA,
+)
+
+# compile.cprop.engine reaches EVERY fold site (livehd::fold_body): sim refolds, synthesis loop cleanup /
+# memory modules / state sweep, the satopt cleanup, the LEC preflight and compile.sweep -- each counted per
+# engine through LHD_FOLD_BODY_LOG -- with the results PROVEN and the region cache keyed by engine.
+sh_test(
+    name = "lhd_fold_sites_test",
+    size = "large",
+    srcs = ["lhd_fold_sites_test.sh"],
+    data = _FLOW_DATA + [
+        "abc_arst_q.lib",
+        "abc_memtile.sv",
+        "state_sweep.v",
+        "//inou/prp:abc_tests",
+        "//inou/prp:tests/sim/loop_roll_carry.prp",
+    ],
 )
 
 # ECMA-426 source-map egress ([[1f]]-G): .v.map sidecar with sourcesContent,
@@ -2468,13 +2502,17 @@ sh_test(
     name = "lhd_memory_hierarchy_test" + suffix,
     size = "medium",
     srcs = ["lhd_memory_hierarchy_test.sh"],
-    env = {"NATIVE_MODE": mode},
     data = _FLOW_DATA + [
-        "//tools:native_sim.py",
         "//inou/prp:abc_tests",
+        "//tools:native_sim.py",
         "//ware:cgen_memory_rtl",
     ],
-) for suffix, mode in [("", "default"), ("_native", "false"), ("_identities", "identities")]]
+    env = {"NATIVE_MODE": mode},
+) for suffix, mode in [
+    ("", "default"),
+    ("_native", "false"),
+    ("_identities", "identities"),
+]]
 
 sh_test(
     name = "lhd_ware_options_smoke",
@@ -2584,8 +2622,8 @@ sh_test(
     srcs = ["readmem_smoke.sh"],
     args = ["native"],
     data = [
-        "//lhd",
         "//inou/prp:abc_tests",
+        "//lhd",
     ],
 )
 
@@ -2620,7 +2658,10 @@ sh_test(
     name = "lhd_sim_pure_loop_test",
     size = "small",
     srcs = ["lhd_sim_pure_loop_test.sh"],
-    data = ["lhd_sim_pure_loop.prp", "//lhd"],
+    data = [
+        "lhd_sim_pure_loop.prp",
+        "//lhd",
+    ],
 )
 
 sh_test(
@@ -2628,7 +2669,10 @@ sh_test(
     size = "small",
     srcs = ["lhd_sim_pure_loop_test.sh"],
     args = ["observed"],
-    data = ["lhd_sim_pure_loop.prp", "//lhd"],
+    data = [
+        "lhd_sim_pure_loop.prp",
+        "//lhd",
+    ],
 )
 
 sh_test(
@@ -2636,7 +2680,10 @@ sh_test(
     size = "small",
     srcs = ["lhd_sim_pure_loop_test.sh"],
     args = ["llvm"],
-    data = ["lhd_sim_pure_loop.prp", "//lhd"],
+    data = [
+        "lhd_sim_pure_loop.prp",
+        "//lhd",
+    ],
 )
 
 sh_test(
@@ -2644,7 +2691,11 @@ sh_test(
     size = "small",
     srcs = ["lhd_sim_pure_loop_test.sh"],
     args = ["embedded"],
-    data = ["lhd_sim_embedded_loop.prp", "lhd_sim_pure_loop.prp", "//lhd"],
+    data = [
+        "lhd_sim_embedded_loop.prp",
+        "lhd_sim_pure_loop.prp",
+        "//lhd",
+    ],
 )
 
 sh_test(
@@ -2652,7 +2703,11 @@ sh_test(
     size = "small",
     srcs = ["lhd_sim_pure_loop_test.sh"],
     args = ["nested"],
-    data = ["lhd_sim_nested_loop.prp", "lhd_sim_pure_loop.prp", "//lhd"],
+    data = [
+        "lhd_sim_nested_loop.prp",
+        "lhd_sim_pure_loop.prp",
+        "//lhd",
+    ],
 )
 
 sh_test(
@@ -2660,7 +2715,10 @@ sh_test(
     size = "small",
     srcs = ["lhd_sim_pure_loop_test.sh"],
     args = ["legacy"],
-    data = ["lhd_sim_pure_loop.prp", "//lhd"],
+    data = [
+        "lhd_sim_pure_loop.prp",
+        "//lhd",
+    ],
 )
 
 [
@@ -2668,10 +2726,16 @@ sh_test(
         name = "sim_unknown_outputs_" + backend,
         size = "large",
         srcs = ["sim_unknown_outputs_test.sh"],
-        data = ["sim_unknown_outputs.prp", "//lhd"],
+        data = [
+            "sim_unknown_outputs.prp",
+            "//lhd",
+        ],
         env = {"SIM_BACKEND": backend},
     )
-    for backend in ["slop", "llvm"]
+    for backend in [
+        "slop",
+        "llvm",
+    ]
 ]
 
 sh_test(
@@ -2771,7 +2835,10 @@ sh_test(
     name = "lhd_synth_attributes_smoke",
     size = "medium",
     srcs = ["lhd_synth_attributes_smoke.py"],
-    data = ["//lhd", "//inou/prp:abc_tests"],
+    data = [
+        "//inou/prp:abc_tests",
+        "//lhd",
+    ],
 )
 
 sh_test(
@@ -2782,11 +2849,25 @@ sh_test(
 )
 
 sh_test(
+    name = "lhd_io_resynth_smoke",
+    size = "small",
+    timeout = "short",
+    srcs = ["lhd_io_resynth_smoke.py"],
+    data = [
+        "//inou/lefdef:test_data",
+        "//lhd",
+    ],
+)
+
+sh_test(
     name = "lhd_placement_timing_defaults_smoke",
     size = "small",
     timeout = "short",
     srcs = ["lhd_placement_timing_defaults_smoke.py"],
-    data = ["//lhd", "//inou/lefdef:test_data"],
+    data = [
+        "//inou/lefdef:test_data",
+        "//lhd",
+    ],
 )
 
 sh_test(
@@ -2794,7 +2875,10 @@ sh_test(
     size = "small",
     timeout = "short",
     srcs = ["lhd_placement_smoke.py"],
-    data = ["//lhd", "//inou/lefdef:test_data"],
+    data = [
+        "//inou/lefdef:test_data",
+        "//lhd",
+    ],
 )
 
 # An x constant on a physical net (an undriven RTL signal that mapping kept) is refused unless
@@ -2804,7 +2888,10 @@ sh_test(
     size = "small",
     timeout = "short",
     srcs = ["lhd_placement_unknown_const_smoke.py"],
-    data = ["//lhd", "//inou/lefdef:test_data"],
+    data = [
+        "//inou/lefdef:test_data",
+        "//lhd",
+    ],
 )
 
 # synth.place.reset_fanout: a flat net that drives many asynchronous reset pins is dealt out through a
@@ -2829,8 +2916,11 @@ sh_test(
     size = "small",
     timeout = "short",
     srcs = ["lhd_placement_smoke.py"],
+    data = [
+        "//inou/lefdef:test_data",
+        "//lhd",
+    ],
     env = {"MAPPER": "usyn"},
-    data = ["//lhd", "//inou/lefdef:test_data"],
 )
 
 sh_test(
@@ -2860,7 +2950,10 @@ sh_test(
     size = "small",
     timeout = "short",
     srcs = ["lhd_placement_memory_smoke.py"],
-    data = ["//lhd", "//inou/lefdef:test_data"],
+    data = [
+        "//inou/lefdef:test_data",
+        "//lhd",
+    ],
 )
 
 sh_test(
@@ -2868,7 +2961,10 @@ sh_test(
     size = "small",
     timeout = "short",
     srcs = ["lhd_liberty_memory_smoke.py"],
-    data = ["//lhd", "//inou/lefdef:test_data"],
+    data = [
+        "//inou/lefdef:test_data",
+        "//lhd",
+    ],
 )
 
 sh_test(
@@ -2876,7 +2972,10 @@ sh_test(
     size = "small",
     timeout = "short",
     srcs = ["lhd_macro_bringup_smoke.py"],
-    data = ["//lhd", "//inou/lefdef:test_data"],
+    data = [
+        "//inou/lefdef:test_data",
+        "//lhd",
+    ],
 )
 
 sh_test(
@@ -2884,7 +2983,10 @@ sh_test(
     size = "small",
     timeout = "short",
     srcs = ["lhd_remainder_smoke.py"],
-    data = ["//lhd", "//inou/prp:abc_tests"],
+    data = [
+        "//inou/prp:abc_tests",
+        "//lhd",
+    ],
 )
 
 sh_test(
@@ -2892,5 +2994,8 @@ sh_test(
     size = "small",
     timeout = "short",
     srcs = ["lhd_placement_macro_smoke.py"],
-    data = ["//lhd", "//inou/lefdef:test_data"],
+    data = [
+        "//inou/lefdef:test_data",
+        "//lhd",
+    ],
 )

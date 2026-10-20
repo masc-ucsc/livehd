@@ -56,7 +56,7 @@ def reset_loads(name, pins=('RESET_B',)):
     return worst, len(re.findall(r'^\s*- \S*__place_rsttree\S* ', components, re.M))
 
 
-off = run('off', [])
+off = run('off', ['--set', 'synth.place.reset_fanout=0'])
 assert 'reset_tree' not in off['qor']['place'], off['qor']['place']
 loads, buffers = reset_loads('off')
 assert loads >= 48 and buffers == 0, (loads, buffers)

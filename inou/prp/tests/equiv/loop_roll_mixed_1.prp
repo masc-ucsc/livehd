@@ -1,6 +1,6 @@
 /*
 :name: loop_roll_mixed_1
-:set: compile.unroll=true
+:set: compile.unroll=true compile.specialize_modules=false
 :lec_grep: MATCHED \(semdiff compact-vs-unrolled normalization, no solver\)
 :lec_grep: 0 via solver
 */

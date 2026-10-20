@@ -214,12 +214,13 @@ std::vector<Set_option> list_set_options() {
       "register written in the body, a carry without a declared type, a nested loop whose domain reads the index, …) "
       "unrolls either way, with the reason in the pass.upass log. Backends that cannot consume the compact form expand it "
       "themselves, so results are identical; only representation and speed differ"});
-  out.push_back(Set_option{"compile.specialize_modules",
-                           "compile",
-                           "false",
-                           "specialize constant instance inputs before cycle checking (up to 64 contexts per definition), including stateful modules; "
-                           "retain the original roots and only their reachable specialized definitions. Useful for configurable "
-                           "router modules whose generic feedback disappears under the top's constant configuration"});
+  out.push_back(Set_option{
+      "compile.specialize_modules",
+      "compile",
+      "true",
+      "specialize constant instance inputs before cycle checking (up to 64 contexts per definition), including stateful modules; "
+      "retain the original roots and only their reachable specialized definitions. Useful for configurable "
+      "router modules whose generic feedback disappears under the top's constant configuration"});
   out.push_back(Set_option{"compile.flatten",
                            "compile",
                            "false",

@@ -4632,7 +4632,7 @@ bool Cgen_sim::prepare_graph(const std::shared_ptr<hhds::Graph>& graph) {
     }
   }
   if (spliced) {
-    livehd::specialize::refold_private_body(graph);
+    livehd::specialize::refold_private_body(graph, livehd::specialize::Refold_cost::sim, "cgen.sim.refold");
     // This body's flat cost changed: a later parent must not size it from the
     // pre-splice memo entry.
     unrolled_cost_memo_.erase(g);

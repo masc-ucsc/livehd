@@ -224,6 +224,7 @@ Region_cache::Region_cache(std::string dir, uint64_t salt, bool scoped_libraries
       row.logic_depth = m->value.GetInt();
     }
     row.crit_output = gets("crit_output");
+    row.io_env      = gets("io_env");
     row.crit_src    = gets("crit_src");
     if (auto m = v.FindMember("div_blackbox"); m != v.MemberEnd() && m->value.IsInt()) {
       row.div_blackbox = m->value.GetInt();
@@ -740,6 +741,19 @@ void Region_cache::refresh_qor(std::string_view module, const Region_qor& q) {
   dirty_              = true;
 }
 
+bool Region_cache::update_mapped(std::string_view module, hhds::GraphLibrary& outlib, const Region_qor& q,
+                                 std::string environment) {
+  const auto found = rows_.find(std::string(module));
+  if (found == rows_.end()) {
+    return false;
+  }
+  outlib_                 = &outlib;
+  found->second.in_outlib = true;
+  found->second.io_env    = std::move(environment);
+  refresh_qor(module, q);
+  return true;
+}
+
 void Region_cache::freeze_pending() {
   // After freezing, lib() may contain the new owner of an old name. A previous
   // row must no longer direct reuse_hit to that name in the changed library.
@@ -888,6 +902,8 @@ void Region_cache::save_to(const std::string& directory, bool strict) {
         json_util::escape(evidence_file),
         evidence ? evidence->size() : 0,
         evidence ? fnv1a64(*evidence) : 0);
+    out.pop_back();
+    out += std::format(",\"io_env\":\"{}\"}}", json_util::escape(r.io_env));
   }
   out += "}}";
 

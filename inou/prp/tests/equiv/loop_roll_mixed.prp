@@ -1,4 +1,5 @@
 /*
+:set: compile.specialize_modules=false
 :name: loop_roll_mixed
 :type: lec
 */

@@ -82,7 +82,7 @@ bazel_dep(name = "rapidjson", version = "1.1.0.bcr.20250205")
 # Native CPU placement; the repository uses LiveHD's HHDS/HLOP repositories.
 git_repository(
     name = "dreamplace",
-    commit = "5745688379469e0a85d01edbcbcb65babb3db028",
+    commit = "a750f3601babf3a580e3174e24d9af9492f24505",
     remote = "https://github.com/masc-ucsc/DREAMPlace.git",
 )
 # For local co-development swap the git_repository above for:
@@ -117,17 +117,10 @@ bazel_dep(name = "gmp", version = "6.3.0.bcr.2")
 # self-contained. Their BUILD files resolve external labels (@rules_cc,
 # @abseil-cpp, @iassert, @googletest, ...) through livehd's own deps.
 
-# iassert
-# The patch_cmds (TEMPORARY, inline so this file is self-contained) add the
-# public sim_runtime_hdrs filegroup that //lhd:lhd stages into its runfiles
-# for the `lhd sim` host-compile stage; drop them once upstream iassert ships
-# the filegroup and the pin moves past it.
+# iassert exports the headers used by lhd sim's runtime compilation.
 git_repository(
     name = "iassert",
-    commit = "b18182f668ff42b0f96c3a1e3e6deee4e6da221f",  # "fix un-initialized access": sigaction sa_mask (todo/ 1s)
-    patch_cmds = [
-        "printf '\\nfilegroup(\\n   name = \"sim_runtime_hdrs\",\\n   srcs = [\"src/iassert.hpp\"],\\n   visibility = [\"//visibility:public\"],\\n)\\n' >> BUILD",
-    ],
+    commit = "5ad1ddb96d9ecce9f5269ce4b89ef1fa6d727a39",
     remote = "https://github.com/masc-ucsc/iassert.git",
 )
 # For local debug/testing, swap the git_repository above for:
@@ -261,7 +254,7 @@ http_archive(
 # OpenTimer: the masc-ucsc fork provides its own BUILD.bazel.
 git_repository(
     name = "opentimer",
-    commit = "bc3c36e9da311ca1aa7e710e72436fac2a8abfe9",
+    commit = "55e71b9374b915c6371d49e6b8d964702c3470eb",
     remote = "https://github.com/masc-ucsc/OpenTimer.git",
 )
 # For local co-development swap the git_repository above for:

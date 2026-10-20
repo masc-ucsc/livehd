@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Hermetic Slang -> opaque SRAM synthesis -> full H2D -> LEF/DEF and cache."""
 import json
+import math
 import os
 from pathlib import Path
 import subprocess
@@ -175,7 +176,8 @@ run('fp_color_fallback',default_common+['--set','synth.place.macro=none','--set'
 color_report=json.loads((root/'W/synth/place/fp_candidates.json').read_text())
 color_fp=json.loads((root/'W/synth/place/fp_place.json').read_text())
 assert color_report['instances'] and all(g['kind']=='color' and not g['snap_eligible'] and g['repulsion_scope']==0 for g in color_report['instances']),color_report
-assert all(c['before']==c['target'] for c in color_fp['candidates']) and not color_fp['relations'] and color_fp['snap_attempted']==0,color_fp
+# Unique colors get no relations, but core containment still moves a circle that sticks out of the core.
+assert all(math.dist(c['before'],c['target'])<=color_fp['snap_max_displacement']+1e-6 for c in color_fp['candidates']) and not color_fp['relations'] and color_fp['snap_attempted']==0,color_fp
 for value in ['1','0','2.5']:
  run('bad_fp_copies_'+value,common+['--set','synth.place.macro=none','--set','synth.place.fp.min_copies='+value],False)
 source.write_text("""module bank(input clk,we,input [2:0] a,input [4:0] d,output [4:0] q);

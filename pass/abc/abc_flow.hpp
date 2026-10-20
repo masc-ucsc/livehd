@@ -20,7 +20,8 @@ struct Flow_plan {
   // With an empty flow: the caller already ran exactly the mapping-only
   // `map_step` (after `&st`) and `remap_post`, so area recovery may `&undo`
   // and re-run that mapper. No Boolean restructuring is involved.
-  bool        mapped_remap   = false;
+  bool        mapped_remap = false;
+  bool        wire_loads = false, annotate_wire_commands = false;
   float       budget         = 0;
   uint32_t    area_relax_pct = 0;
 };
@@ -42,7 +43,7 @@ struct Flow_result {
 // on every exit. Admission surrounds commands and timing/copy steps; it is
 // cooperative and cannot interrupt a running ABC call.
 Flow_result execute_flow(void* frame, const Flow_plan& plan, const std::function<bool(std::string_view)>& admission = {});
-Flow_qor    physical_flow_qor(void* mapped);
+Flow_qor    physical_flow_qor(void* mapped, bool wire_loads = false);
 
 // The one library-capability predicate for every SCL command (the `buffer`/
 // `dnsize` tails, the boundary re-size and the SCL QoR timer): the parsed

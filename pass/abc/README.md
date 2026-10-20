@@ -17,6 +17,7 @@ trials -- is backend-neutral and lives in [`pass/synth`](../synth/README.md).
 | `abc_backend.{hpp,cpp}` | `Abc_backend`: the session per lane, flow strings, the budget ladder, `map()` of one region, whole-design refine and score |
 | `abc_flow.{hpp,cpp}` | `execute_flow`: the flow, budget ladder and area candidate in one entered frame; SCL QoR |
 | `abc_boundary.{hpp,cpp}` | the partition-boundary environment (static estimate, exact re-size) |
+| `abc_io.cpp` | placement-aware whole-color remapper registration; typed IO/RC feedback, native-state cuts, and exact boundary re-size |
 | `abc_lnet.{hpp,cpp}` | Lnet → ABC: `lnet_to_abc` (object-for-object replay) and `lnet_into_logic` (a hook's cover network as SOP nodes) |
 | `abc_cells.{hpp,cpp}` | ABC mapped network → backend-neutral `Cell_netlist`; the Mio gate library as a `Cell_library` |
 | `abc_satopt.{hpp,cpp}` | `prove_const0`: the satopt mux-fact proof network swept by `&fraig`, registered as satopt's bit prover |
@@ -602,7 +603,7 @@ The option namespace matches the command path (`lhd pass abc`); after the
 | `block_size` | CSKA/CLA block width (`0` = auto) | `0` |
 | `multiplier` | `auto` starts with serial partial-product addition and trials balanced `tree`; explicit `array`/`tree`/`csa`/`tdm` (alias `sn`) locks the multiplier and its internal adder | `auto` |
 | `delay` / `load` | the timing BUDGET in ps / the load: `{D}` / `{L}` expand to the full flag (`-D <val>` / `-L <val>`) when set, to nothing when empty — `&nf {D}` needs `-D`, a bare value is silently ignored by ABC. `delay` is also the target the built-in objective sizes to and judges the area candidate against (see below); `{B}` is the per-region budget (`delay` minus `reg_margin` when the region holds flops) as `-D <ps>` | empty |
-| `area_relax` | max percent of a MET delay budget to trade back for area, via ABC's `&nf -R` (bounded by the real slack too); `0` disables that remap — see below | `200` |
+| `area_relax` | max percent of a MET delay budget to trade back for area, via ABC's `&nf -R` (bounded by the real slack too); `0` disables that remap — see below | `0` |
 | `area_flow` | AREA command string: empty = the former baseline (`&fraig`/`dc2`/`&dch`/`&nf`); used without delay or as a second candidate after meeting a delay budget. Built-ins append `buffer -N {F}; dnsize {B}`, adding `upsize {B}` before `dnsize` for a timed candidate. `none` disables only the second candidate. Custom strings run verbatim (`{D}`/`{L}`/`{F}`/`{B}` substituted, no tail appended); explicit `flow` takes precedence | empty |
 | `reg_margin` | register overhead subtracted from `delay` to form a flop-bearing region's budget: `auto` = the mapped DFF cell's clk→Q + setup read off its Liberty timing tables (ASAP7 DFFHQNx1 83.9 ps, sky130 dfxtp_1 528 ps), a number = that many ps, `0` = no margin — see below | `auto` |
 | `boundary` | size every region against what lies beyond its partition (see "Partition boundaries" above): the static estimate while it maps, the exact re-size once every region exists | `true` |
