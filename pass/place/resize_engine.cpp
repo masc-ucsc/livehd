@@ -711,38 +711,25 @@ private:
       for (size_t i = begin; i < end; ++i) {
         drivers_in.push_back(todo[i]);
       }
-      auto                     pins   = touched(drivers_in);
-      const auto               before = w_.electrical(pins);
-      Attempt                  a(*this);
-      std::vector<std::string> created;
-      unsigned                 applied = 0;
-      for (const auto& d : drivers_in) {
-        applied += quick_electrical(d, created);
-      }
-      for (const auto& b : created) {
-        for (auto& q : net_pins(insts_.at(b).output)) {
-          pins.push_back(std::move(q));
-        }
-      }
-      for (const auto& d : drivers_in) {  // upsized drivers load their input nets too
-        if (const auto inst = insts_.find(instance_of(d)); inst != insts_.end() && inst->second.output == d) {
-          for (auto& q : touched(nets_of_instance(instance_of(d)))) {
-            pins.push_back(std::move(q));
-          }
-        }
-      }
-      const auto p     = measure();
-      const auto after = w_.electrical(pins);
-      ++electrical_.probes;
-      if (applied && after.first < before.first && timing_not_worse(p)) {
-        a.commit();
-        wns_ = p.wns;
-        tns_ = p.tns;
-        ++electrical_.accepted;
-        electrical_fixed_ += applied;
+      std::vector<std::string> harmful;
+      if (electrical_batch(drivers_in, &harmful)) {
         continue;
       }
-      a.rollback();
+      // Retry without the repairs that slowed their own net's worst sink (a
+      // tree on the critical path), then bisect.
+      if (!harmful.empty() && harmful.size() < drivers_in.size()) {
+        std::unordered_set<std::string> drop(harmful.begin(), harmful.end());
+        std::vector<std::string>        kept;
+        for (const auto& d : drivers_in) {
+          if (!drop.contains(d)) {
+            kept.push_back(d);
+          }
+        }
+        if (electrical_batch(kept, nullptr)) {
+          electrical_skipped_ += harmful.size();
+          continue;
+        }
+      }
       // Up to 2000 violating nets, bisect down to the per-net search. Beyond
       // that (an unbuffered synthesis netlist) stop at 1/64 of the nets: single-
       // net probes would cost hours; those nets stay as they are.
@@ -754,6 +741,68 @@ private:
         electrical_skipped_ += end - begin;
       }
     }
+  }
+  // Repair these nets locally and probe them together. On rejection, harmful
+  // (when given) lists the nets whose worst original sink (or driver) slack got
+  // worse by more than 1 ps.
+  bool electrical_batch(const std::vector<std::string>& drivers_in, std::vector<std::string>* harmful) {
+    auto                                  pins   = touched(drivers_in);
+    const auto                            before = w_.electrical(pins);
+    std::vector<std::vector<std::string>> watched;
+    std::vector<double>                   worst_before;
+    if (harmful) {
+      for (const auto& d : drivers_in) {
+        auto   list  = net_pins(d);
+        double worst = kInf;
+        for (const auto& q : list) {
+          worst = std::min(worst, w_.pin(q).slack.value_or(kInf));
+        }
+        watched.push_back(std::move(list));
+        worst_before.push_back(worst);
+      }
+    }
+    Attempt                  a(*this);
+    std::vector<std::string> created;
+    unsigned                 applied = 0;
+    for (const auto& d : drivers_in) {
+      applied += quick_electrical(d, created);
+    }
+    for (const auto& b : created) {
+      for (auto& q : net_pins(insts_.at(b).output)) {
+        pins.push_back(std::move(q));
+      }
+    }
+    for (const auto& d : drivers_in) {  // upsized drivers load their input nets too
+      if (const auto inst = insts_.find(instance_of(d)); inst != insts_.end() && inst->second.output == d) {
+        for (auto& q : touched(nets_of_instance(instance_of(d)))) {
+          pins.push_back(std::move(q));
+        }
+      }
+    }
+    const auto p     = measure();
+    const auto after = w_.electrical(pins);
+    ++electrical_.probes;
+    if (applied && after.first < before.first && timing_not_worse(p)) {
+      a.commit();
+      wns_ = p.wns;
+      tns_ = p.tns;
+      ++electrical_.accepted;
+      electrical_fixed_ += applied;
+      return true;
+    }
+    if (harmful) {
+      for (size_t i = 0; i < drivers_in.size(); ++i) {
+        double worst = kInf;
+        for (const auto& q : watched[i]) {
+          worst = std::min(worst, w_.pin(q).slack.value_or(kInf));
+        }
+        if (worst < worst_before[i] - 1) {
+          harmful->push_back(drivers_in[i]);
+        }
+      }
+    }
+    a.rollback();
+    return false;
   }
   // One local repair without probing: the smallest stronger driver that meets
   // its Liberty limits at the present load, otherwise a fanout tree.
