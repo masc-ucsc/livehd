@@ -64,6 +64,7 @@ struct Cached_facts {
 
 struct Analysis_cache {
   absl::flat_hash_map<Class_id, Facts>                        seeds;  // declared bounds of leaf classes (seed_leaf)
+  absl::flat_hash_map<Class_id, int64_t>                      wide_seeds;  // unsigned leaves wider than the Facts range (seed_leaf)
   absl::flat_hash_map<Class_id, Cached_facts>                 facts;
   absl::flat_hash_map<Class_id, std::shared_ptr<const Layout>> layouts;
 };
@@ -72,6 +73,12 @@ struct Analysis_cache {
 // unsigned, [-2^(bits-1), 2^(bits-1) - 1] signed. Declared widths define the value domain of an input or a
 // register (the simulator and the LEC encoder both truncate to them), so this is a fact about the class.
 void seed_leaf(const Egraph& eg, Class_id cls, int bits, bool is_unsigned);
+// A bit count n such that 0 <= value < 2^n for the class, or -1 when none is known. Unlike Facts it is not limited to
+// 99 bits: a wide unsigned input (a 10400-bit bundle), a Concat, a window and a shifted or OR-ed field of them all
+// carry a width, which is what a packed Or of wide fields needs to prove its fields do not overlap.
+[[nodiscard]] int64_t unsigned_bits(const Egraph& eg, Class_id cls);
+// Layout lanes and window constants of a packed word stay far below this; it only keeps the offsets in int64 range.
+inline constexpr int64_t kMaxLaneBit = int64_t{1} << 24;
 // The value facts of a class. The class id must be valid.
 [[nodiscard]] Facts facts_of(const Egraph& eg, Class_id cls);
 // (base, inverted) of a 0/1 class: the class is `base`, or EQ(base, 0) when inverted. A class that is no

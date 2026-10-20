@@ -9,6 +9,7 @@
 // pairs on pins 2i / 2i+1, most significant lane first.
 
 #include <algorithm>
+#include <tuple>
 #include <vector>
 
 #include "absl/container/flat_hash_map.h"
@@ -56,7 +57,7 @@ struct Lane_in {
       return false;
     }
     const auto w = ctx.small_int(root.ops[i + 1].cls);
-    if (!w || *w <= 0 || *w > 4096) {
+    if (!w || *w <= 0 || *w > kMaxLaneBit) {
       return false;
     }
     lanes.push_back({root.ops[i].cls, *w});
@@ -120,6 +121,10 @@ AEG_NATIVE_RULE(getmask_lane, simplify, 40, Ntype_op::Get_mask) {
     const auto f = facts_of(ctx.eg(), lane->src);
     if (f.nonneg() && f.hi < kInf && f.hi <= ((Wide{1} << std::min<int64_t>(s_hi, 99)) - 1)) {
       out.subsume(lane->src);  // the lane is exactly the window and already fits it
+      return;
+    }
+    if (const auto bits = unsigned_bits(ctx.eg(), lane->src); bits >= 0 && bits <= s_hi) {
+      out.subsume(lane->src);  // a value wider than the interval facts reach (a wide input) that still fits the window
       return;
     }
   }
@@ -192,7 +197,7 @@ AEG_NATIVE_RULE(getmask_concat_straddle, simplify, 35, Ntype_op::Get_mask) {
       return;
     }
     const auto w = ctx.small_int(ops[i + 1].cls);
-    if (!w || *w <= 0 || *w > 4096) {
+    if (!w || *w <= 0 || *w > kMaxLaneBit) {
       return;
     }
     lanes.push_back({ops[i].cls, *w});
@@ -290,6 +295,100 @@ AEG_NATIVE_RULE(bit_run_reduction, alt, 20, Ntype_op::And, Ntype_op::Or) {
   }
 }
 
+// Or of shifted windows of ONE word whose positions are contiguous in both the source and the destination:
+//   Or(x[a +: n] << s, x[a+n +: m] << (s+n), rest) = Or(x[a +: n+m] << s, rest)
+// (a bare window is shifted by zero). Every shifted window is `x[lo, hi) << s`, so its bit lo+i sits at s+i; two
+// windows with the same delta lo-s whose destination ranges touch tile one wider window exactly. This is the
+// bit-gather ladder `(g[3]<<3) | (g[2]<<2) | (g[1]<<1) | g[0]` that classic canonicalizes (pack canonicalization plus
+// vectorize_bit_reductions) BEFORE a surrounding Or flattens it away; the engine's `flatten` merges nested Ors
+// first, so without this rule a strided gather stays one shift and one Get_mask per bit. An alt: extraction keeps
+// whichever form the profile prices lower.
+AEG_NATIVE_RULE(or_shifted_windows, alt, 21, Ntype_op::Or) {
+  constexpr size_t kMaxTerms = size_t{1} << 14;
+  if (root.ops.size() < 2 || root.ops.size() > kMaxTerms) {
+    return;
+  }
+  // One scan of every operand: the member fuel of a rule run is sized for a few operands, so an n-ary root pays for
+  // its own arity (a 1392-bit gather would otherwise stop being read after its first 40 terms).
+  ctx.grant_fuel(root.ops.size() * 12);
+  struct Term {
+    size_t   index;
+    Class_id source;
+    int64_t  lo, hi, shift;
+    [[nodiscard]] int64_t delta() const { return lo - shift; }
+  };
+  std::vector<Term> terms;
+  for (size_t i = 0; i < root.ops.size(); ++i) {
+    if (root.ops[i].bank != 0) {
+      return;
+    }
+    const Class_id cls = root.ops[i].cls;
+    bool           got = false;
+    ctx.each_member(cls, [&](Class_id member) {
+      const Enode* n = ctx.node_of(member);
+      if (n == nullptr || n->op != Ntype_op::SHL) {
+        return false;
+      }
+      const auto ops = ctx.operands_of(*n);
+      if (ops.size() != 2 || ops[0].bank != 0 || ops[1].bank != 1) {
+        return false;
+      }
+      const auto amount = ctx.small_int(ops[1].cls);
+      const auto slice  = slice_of(ctx, ops[0].cls);
+      if (!amount || *amount < 0 || *amount > kMaxLaneBit || !slice) {
+        return false;
+      }
+      terms.push_back({i, slice->source, slice->lo, slice->hi, *amount});
+      got = true;
+      return true;
+    });
+    if (!got) {
+      if (const auto slice = slice_of(ctx, cls)) {
+        terms.push_back({i, slice->source, slice->lo, slice->hi, 0});
+      }
+    }
+  }
+  if (terms.size() < 2) {
+    return;
+  }
+  std::ranges::sort(terms, [](const Term& a, const Term& b) {
+    return std::tuple{a.source, a.delta(), a.shift, a.index} < std::tuple{b.source, b.delta(), b.shift, b.index};
+  });
+  std::vector<bool>    taken(root.ops.size(), false);
+  std::vector<Operand> merged;  // the rebuilt terms
+  size_t               start = 0;
+  while (start < terms.size()) {
+    size_t  end  = start + 1;
+    int64_t next = terms[start].shift + (terms[start].hi - terms[start].lo);
+    while (end < terms.size() && terms[end].source == terms[start].source && terms[end].delta() == terms[start].delta()
+           && terms[end].shift == next) {
+      next += terms[end].hi - terms[end].lo;
+      ++end;
+    }
+    if (end - start >= 2) {
+      const Term&    first  = terms[start];
+      const int64_t  lo     = first.lo;
+      const int64_t  hi     = lo + (next - first.shift);
+      const Class_id window = make_get_mask(ctx, first.source, lo, hi);
+      for (size_t k = start; k < end; ++k) {
+        taken[terms[k].index] = true;
+      }
+      merged.push_back(Operand{0, first.shift == 0 ? window : ctx.make(Ntype_op::SHL, {Operand{0, window}, Operand{1, ctx.konst(first.shift)}})});
+    }
+    start = end;
+  }
+  if (merged.empty()) {
+    return;
+  }
+  std::vector<Operand> rest = std::move(merged);
+  for (size_t i = 0; i < root.ops.size(); ++i) {
+    if (!taken[i]) {
+      rest.push_back(Operand{0, root.ops[i].cls});
+    }
+  }
+  out.add(ctx.make_bank(Ntype_op::Or, std::move(rest)));
+}
+
 // One lane of a pack being rebuilt: value, bit offset and width.
 struct Pack_lane {
   Class_id value;
@@ -320,7 +419,7 @@ struct Pack_lane {
     int64_t total = 0;
     for (size_t i = 0; i < ops.size(); i += 2) {
       const auto w = ctx.small_int(ops[i + 1].cls);
-      if (ops[i].bank != i || ops[i + 1].bank != i + 1 || !w || *w <= 0 || *w > 4096) {
+      if (ops[i].bank != i || ops[i + 1].bank != i + 1 || !w || *w <= 0 || *w > kMaxLaneBit) {
         return false;
       }
       total += *w;
@@ -350,7 +449,7 @@ AEG_NATIVE_RULE(setmask_to_concat, simplify, 20, Ntype_op::Set_mask) {
     return;
   }
   const auto l = ctx.small_int(root.ops[1].cls), h = ctx.small_int(root.ops[2].cls);
-  if (!l || !h || *l < 0 || *h <= *l || *h > 4096) {
+  if (!l || !h || *l < 0 || *h <= *l || *h > kMaxLaneBit) {
     return;
   }
   std::vector<Pack_lane> base;
@@ -409,17 +508,21 @@ AEG_NATIVE_RULE(sra_lane, simplify, 40, Ntype_op::SRA) {
     return;
   }
   const auto k = ctx.small_int(root.ops[1].cls);
-  if (!k || *k <= 0 || *k > 4096) {
+  if (!k || *k <= 0 || *k > kMaxLaneBit) {
     return;
   }
   const Class_id x = root.ops[0].cls;
   const auto     f = facts_of(ctx.eg(), x);
-  if (!f.nonneg() || f.hi >= kInf) {
-    return;
-  }
-  int64_t n = 0;
-  while (n < 120 && (Wide{1} << n) <= f.hi) {
-    ++n;
+  int64_t        n = 0;
+  if (f.nonneg() && f.hi < kInf) {
+    while (n < 120 && (Wide{1} << n) <= f.hi) {
+      ++n;
+    }
+  } else {
+    n = unsigned_bits(ctx.eg(), x);  // a value wider than the interval facts reach still has a width
+    if (n < 0) {
+      return;
+    }
   }
   if (n <= *k) {
     out.subsume(ctx.konst(0));

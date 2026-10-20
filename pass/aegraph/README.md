@@ -139,7 +139,9 @@ AEG_RULE(not_not, simplify, 30, Ntype_op::Not) {         // name, tag, priority,
 ```
 
 * **`Ctx`** reads classes (`known`, `is_int`, `small_int`, `bool01`, `eq_against`,
-  `each_member`: fuel-limited iteration over the members of a union) and builds
+  `each_member`: fuel-limited iteration over the members of a union; a rule that scans every
+  operand of an n-ary root calls `grant_fuel(arity * k)` first, or only the first few operands
+  are ever read) and builds
   e-nodes (`make`, `make_bank`, `konst`). `make` folds, normalizes, hash-conses and
   runs the rules of the new e-node, `rewrite_depth` levels deep. Pointers and
   spans obtained from `node_of`/`operands_of`/`known` are invalidated by `make`.
@@ -191,7 +193,7 @@ name) or a constant `(k n)` in the declaration. The facts are lazy and memoized 
 | `range x lo hi`, `nonneg`, `fits x n`, `sfits x n` | an interval per class (int128, saturating, rounded in the direction of each bound) |
 | `known_zero x m`, `known_one x m`, `low_zero x n` | known bits of the low 64 (low-lane facts: shifts, multiples, packed words) |
 | `exclusive x y`, `opposite x y` | disjoint bits; the (base, polarity) of a boolean and its `EQ(.,0)` |
-| `has_lane x lo hi` | the persistent lane layout (Concat, Set_mask chains of any length, SHL, SRA, Or/Sum of disjoint shifted fields): the window lies in one lane of another class or of zero |
+| `has_lane x lo hi` | the persistent lane layout (Concat, Set_mask chains of any length, SHL, SRA, Or/Sum of disjoint shifted fields): the window lies in one lane of another class or of zero. A field wider than the 99-bit interval facts (a 10400-bit input bundle) still has a width (`unsigned_bits`: wide unsigned inputs, windows, Concats, Or/And/Xor, shifts), so a packed Or of wide fields keeps its layout; lane offsets and window constants go up to `kMaxLaneBit` (2^24) |
 | `lt_always`, `ge_always`, `distinct`, `nonzero`, `zero` | relations decided by the intervals and bits |
 
 Declared widths are facts: a graph input (its IO declaration) and a Flop/Fflop/Latch output with a stamp are

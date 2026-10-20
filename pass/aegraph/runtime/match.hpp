@@ -113,6 +113,8 @@ public:
   [[nodiscard]] bool guard_scope() const { return builder_.guard_scope(); }
 
   // ---- reading ----
+  // Raises the member fuel of this rule run by `n` visits (a rule that scans every operand of an n-ary root).
+  void grant_fuel(size_t n) { fuel_ += n; }
   // Calls fn(member_class) for each non-union member of `cls` until fn returns
   // true. The walk shares one fuel budget per rule run.
   template <typename Fn>

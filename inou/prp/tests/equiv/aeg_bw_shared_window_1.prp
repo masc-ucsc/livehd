@@ -1,0 +1,6 @@
+/*
+:name: aeg_bw_shared_window_1
+:type: lec
+:set: compile.cprop.engine=aegraph
+*/
+// HEADER-ONLY variant: aeg_bw_shared_window.prp compiled by the acyclic e-graph engine.

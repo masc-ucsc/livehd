@@ -1,0 +1,16 @@
+/*
+:name: aeg_bw_shared_window
+:type: lec
+*/
+// PYROPE-vs-PYROPE group, the fixture of a bitwidth_rewrite bug the e-graph engine exposed. Two chained
+// `wrap p |= p << k` steps leave Or(x, Shl(x, 2)) under a finite window, both operands reading the same single-reader
+// producer x. Bitwidth_rewrite::scalar_get_mask_range pushes the window through the Or; the first operand's window
+// is x itself (it already fits) and the second operand's window found x "privately owned" (its placeholder was
+// already retired), consumed it and left the new Or with an unconnected first input (r = 'hx | ...).
+// REFERENCE = classic engine; `_1` = e-graph engine.
+pub comb top(v:U8) -> (r:U8) {
+  mut p:U8 = v#[0..<7] << 1
+  wrap p |= p << 1
+  wrap p |= p << 2
+  r = p
+}

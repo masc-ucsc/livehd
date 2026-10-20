@@ -1236,7 +1236,9 @@ template <class Node>
   }
   const auto& l = const_of(lo);
   const auto& h = const_of(hi);
-  if (!l.is_integer() || !h.is_integer() || !l.is_just_i64() || !h.is_just_i64() || l.has_unknowns() || h.has_unknowns()
+  // A bool literal (`false` out of a folded comparison) is a valid 0/1 endpoint: the e-graph engine interns constants by
+  // value, so the first spelling of 0 it met (a folded `==`, a bool) is the one it realizes for every use of 0.
+  if (!l.is_numeric() || !h.is_numeric() || !l.is_just_i64() || !h.is_just_i64() || l.has_unknowns() || h.has_unknowns()
       || l.to_just_i64() < 0 || h.to_just_i64() <= l.to_just_i64() || h.to_just_i64() > std::numeric_limits<int>::max()) {
     return std::nullopt;
   }

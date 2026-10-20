@@ -1,0 +1,8 @@
+/*
+:name: aeg_or_shifted_windows_1
+:type: lec
+:set: compile.cprop.engine=aegraph
+:compile_grep: aegraph-rule or_shifted_windows .*extracted=[1-9]
+*/
+// HEADER-ONLY variant: aeg_or_shifted_windows.prp compiled by the acyclic e-graph engine; the grep shows
+// `or_shifted_windows` fired and the extraction kept its result.

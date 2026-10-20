@@ -517,6 +517,10 @@ Facts facts_rec(const Egraph& eg, Class_id c, int depth) {
 }  // namespace
 
 void seed_leaf(const Egraph& eg, Class_id cls, int bits, bool is_unsigned) {
+  if (bits > 98 && is_unsigned) {
+    eg.analysis_cache().wide_seeds[cls] = bits;  // no interval fits, but the width is still a fact
+    return;
+  }
   if (bits <= 0 || bits > 98) {
     return;
   }
@@ -531,6 +535,116 @@ void seed_leaf(const Egraph& eg, Class_id cls, int bits, bool is_unsigned) {
   refine(f);
   eg.analysis_cache().seeds[cls] = f;
 }
+
+namespace {
+
+int64_t unsigned_bits_rec(const Egraph& eg, Class_id c, int depth) {
+  int64_t best = -1;
+  const auto keep = [&](int64_t n) {
+    if (n >= 0 && (best < 0 || n < best)) {
+      best = n;
+    }
+  };
+  const auto facts = facts_rec(eg, c, 2);
+  if (facts.nonneg() && facts.hi < kInf) {
+    keep(bitlen(facts.hi));
+  }
+  const auto& cache = eg.analysis_cache().wide_seeds;
+  if (const auto it = cache.find(c); it != cache.end()) {
+    keep(it->second);
+  }
+  if (depth <= 0) {
+    return best;
+  }
+  eg.for_each_member(c, 8, [&](Class_id member) {
+    const Enode* n = eg.enode_of(member);
+    if (n == nullptr) {
+      return false;
+    }
+    const auto ops = eg.operands(*n);
+    switch (n->op) {
+      case Ntype_op::Get_mask: {
+        const auto *lo = by_bank(ops, 2), *hi = by_bank(ops, 3);
+        if (ops.size() != 3 || lo == nullptr || hi == nullptr) {
+          break;
+        }
+        const auto l = const_i64(eg, lo->cls), h = const_i64(eg, hi->cls);
+        if (l && h && *l >= 0 && *h > *l && *h - *l <= kMaxLaneBit) {
+          keep(*h - *l);
+        }
+        break;
+      }
+      case Ntype_op::Concat: {
+        if (ops.size() % 2 != 0 || ops.empty()) {
+          break;
+        }
+        int64_t total = 0;
+        bool    ok    = true;
+        for (size_t i = 0; i < ops.size() && ok; i += 2) {
+          const auto w = ops[i].bank == i && ops[i + 1].bank == i + 1 ? const_i64(eg, ops[i + 1].cls) : std::nullopt;
+          ok           = w && *w > 0 && *w <= kMaxLaneBit;
+          total += ok ? *w : 0;
+        }
+        if (ok && total <= kMaxLaneBit) {
+          keep(total);
+        }
+        break;
+      }
+      case Ntype_op::Or:
+      case Ntype_op::Xor: {
+        int64_t widest = 0;
+        for (const auto& o : ops) {
+          const auto b = o.bank == 0 ? unsigned_bits_rec(eg, o.cls, depth - 1) : int64_t{-1};
+          if (b < 0) {
+            return false;
+          }
+          widest = std::max(widest, b);
+        }
+        keep(widest);
+        break;
+      }
+      case Ntype_op::And: {
+        for (const auto& o : ops) {
+          if (o.bank == 0) {
+            keep(unsigned_bits_rec(eg, o.cls, depth - 1));
+          }
+        }
+        break;
+      }
+      case Ntype_op::SHL: {
+        const auto *a = by_bank(ops, 0), *b = by_bank(ops, 1);
+        if (ops.size() != 2 || a == nullptr || b == nullptr) {
+          break;
+        }
+        const auto k = const_i64(eg, b->cls);
+        const auto w = k && *k >= 0 && *k <= kMaxLaneBit ? unsigned_bits_rec(eg, a->cls, depth - 1) : int64_t{-1};
+        if (w >= 0) {
+          keep(w + *k);
+        }
+        break;
+      }
+      case Ntype_op::SRA: {
+        const auto *a = by_bank(ops, 0), *b = by_bank(ops, 1);
+        if (ops.size() != 2 || a == nullptr || b == nullptr) {
+          break;
+        }
+        const auto k = const_i64(eg, b->cls);
+        const auto w = k && *k >= 0 ? unsigned_bits_rec(eg, a->cls, depth - 1) : int64_t{-1};
+        if (w >= 0) {
+          keep(std::max<int64_t>(w - *k, 0));
+        }
+        break;
+      }
+      default: break;
+    }
+    return false;
+  });
+  return best;
+}
+
+}  // namespace
+
+int64_t unsigned_bits(const Egraph& eg, Class_id cls) { return unsigned_bits_rec(eg, cls, 3); }
 
 Facts facts_of(const Egraph& eg, Class_id cls) {
   return facts_rec(eg, cls, kDepth);
@@ -639,7 +753,7 @@ std::optional<std::pair<Class_id, int64_t>> shl_of(const Egraph& eg, Class_id c)
       return false;
     }
     const auto k = const_i64(eg, b->cls);
-    if (!k || *k <= 0 || *k > 4096) {
+    if (!k || *k <= 0 || *k > kMaxLaneBit) {
       return false;
     }
     found = std::pair{a->cls, *k};
@@ -691,7 +805,14 @@ std::optional<Layout> packed_layout(const Egraph& eg, std::span<const Operand> o
     }
     if (i + 1 < fields.size()) {
       const auto g = facts_of(eg, fields[i].cls);
-      if (!(g.nonneg() && g.hi <= mask_w(static_cast<int>(std::min<int64_t>(hi - lo, 100))))) {
+      bool fits = false;
+      if (g.nonneg() && g.hi < kInf) {
+        fits = g.hi <= mask_w(static_cast<int>(std::min<int64_t>(hi - lo, 100)));
+      } else {
+        const auto bits = unsigned_bits(eg, fields[i].cls);  // wider than the interval facts reach
+        fits            = bits >= 0 && bits <= hi - lo;
+      }
+      if (!fits) {
         return std::nullopt;  // the field could spill into the next one
       }
     }
@@ -713,7 +834,7 @@ std::optional<Layout> node_layout(const Egraph& eg, const Enode& n) {
           return std::nullopt;
         }
         const auto w = const_i64(eg, ops[i + 1].cls);
-        if (!w || *w <= 0 || *w > 4096) {
+        if (!w || *w <= 0 || *w > kMaxLaneBit) {
           return std::nullopt;
         }
         total += *w;
@@ -735,7 +856,7 @@ std::optional<Layout> node_layout(const Egraph& eg, const Enode& n) {
         return std::nullopt;
       }
       const auto l = const_i64(eg, lo->cls), h = const_i64(eg, hi->cls);
-      if (!l || !h || *l < 0 || *h <= *l || *h > 4096) {
+      if (!l || !h || *l < 0 || *h <= *l || *h > kMaxLaneBit) {
         return std::nullopt;
       }
       // The base layout comes through the cache (layout_of warms a write chain bottom-up), so a long Set_mask chain
@@ -753,7 +874,7 @@ std::optional<Layout> node_layout(const Egraph& eg, const Enode& n) {
         return std::nullopt;
       }
       const auto k = const_i64(eg, b->cls);
-      if (!k || *k <= 0 || *k > 4096) {
+      if (!k || *k <= 0 || *k > kMaxLaneBit) {
         return std::nullopt;
       }
       const auto base = layout_of(eg, a->cls);
@@ -776,7 +897,7 @@ std::optional<Layout> node_layout(const Egraph& eg, const Enode& n) {
         return std::nullopt;
       }
       const auto k = const_i64(eg, b->cls);
-      if (!k || *k <= 0 || *k > 4096) {
+      if (!k || *k <= 0 || *k > kMaxLaneBit) {
         return std::nullopt;
       }
       return Layout{Lane{0, *k, kNoClass, 0, true}, Lane{*k, kLaneInf, a->cls, 0, false}};

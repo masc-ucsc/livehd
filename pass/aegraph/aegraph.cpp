@@ -1904,6 +1904,36 @@ void Engine::compute_best() {
 // (Re)connect `node` as an `op` cell over the pins realizing `ops`: the node
 // keeps its identity (nid, name, srcid, output pin and consumers).
 void Engine::rewire(const hhds::Node_class& node, Ntype_op op, std::span<const Operand> ops) {
+  // Same cell over the same drivers per bank: keep the sinks exactly as the front end ordered them. The e-node
+  // sorts a commutative bank by class, so rebuilding would swap e.g. `eq(x, 0)` into `eq(0, x)`; the graph is
+  // structurally identical, but pin order is the order every later pass (and the ABC AIG it feeds) walks, and
+  // classic cprop leaves it alone.
+  if (gu::type_op_of(node) == op) {
+    absl::flat_hash_map<std::pair<uint32_t, hhds::Class_index>, int> balance;
+    size_t                                                           have = 0;
+    bool                                                             same = true;
+    for (const auto& spin : node.inp_sorted_pins()) {
+      const auto drivers = spin.get_driver_pins();
+      if (drivers.size() != 1 || drivers.front().is_invalid()) {
+        same = false;
+        break;
+      }
+      ++balance[{static_cast<uint32_t>(Ntype::sink_bank(op, spin.get_port_id())), drivers.front().get_class_index()}];
+      ++have;
+    }
+    if (same && have == ops.size()) {
+      for (const auto& operand : ops) {
+        if (rep_pin_[operand.cls].is_invalid()) {
+          same = false;
+          break;
+        }
+        --balance[{operand.bank, rep_pin_[operand.cls].get_class_index()}];
+      }
+      if (same && std::ranges::all_of(balance, [](const auto& kv) { return kv.second == 0; })) {
+        return;
+      }
+    }
+  }
   for (const auto& spin : node.inp_pins_snapshot()) {
     spin.del_sink();
   }
@@ -1920,7 +1950,33 @@ void Engine::rewire(const hhds::Node_class& node, Ntype_op op, std::span<const O
   for (hhds::Port_id b = 0; b < stride; ++b) {
     next[b] = b;
   }
-  for (const auto& operand : ops) {
+  // The e-node keeps a commutative bank sorted by class, an order that depends on when each class was interned and
+  // that puts a constant (interned first) in front. Front ends and classic cprop spell `a ^ b ^ c` / `x == 0` in source
+  // order with constants last, and pin order is what every later pass and the AIG ABC builds from it walk. So emit each
+  // bank in the order its drivers were created (storage order of the driver cell, then its pin), constants last. The
+  // class order is only the tie-break for operands driven by the same pin.
+  absl::InlinedVector<Operand, 8> ordered(ops.begin(), ops.end());
+  if (op != Ntype_op::Hotmux) {  // a Hotmux bank is an ordered (control, value) association, not a multiset
+    const auto key = [&](const Operand& x) {
+      const auto pin = rep_pin_[x.cls];
+      if (pin.is_const()) {
+        return std::tuple<uint32_t, bool, uint64_t, uint32_t>{x.bank, true, 0, 0};
+      }
+      return std::tuple<uint32_t, bool, uint64_t, uint32_t>{
+          x.bank, false, static_cast<uint64_t>(pin.get_master_node().get_debug_nid()), static_cast<uint32_t>(pin.get_port_id())};
+    };
+    // Classic flattens a nested And/Or by putting the outer operand in front of the inner chain (so a chain reads
+    // newest first) and a nested Xor/Sum/Mult the other way round (oldest first); match both.
+    const bool newest_first = op == Ntype_op::And || op == Ntype_op::Or;
+    std::ranges::stable_sort(ordered, [&](const Operand& x, const Operand& y) {
+      const auto kx = key(x), ky = key(y);
+      if (newest_first && std::get<0>(kx) == std::get<0>(ky) && !std::get<1>(kx) && !std::get<1>(ky)) {
+        return std::pair{std::get<2>(kx), std::get<3>(kx)} > std::pair{std::get<2>(ky), std::get<3>(ky)};
+      }
+      return kx < ky;
+    });
+  }
+  for (const auto& operand : ordered) {
     const auto      driver = rep_pin_[operand.cls];
     hhds::Pin_class sink;
     if (banked) {

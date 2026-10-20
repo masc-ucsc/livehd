@@ -872,7 +872,7 @@ def main():
     ap.add_argument("--synth-cost", default="synth", help="compile.aegraph.cost of the --synth leg (default synth)")
     ap.add_argument("--sim-cost", default="sim", help="compile.aegraph.cost of the --sim leg (default sim; auto = sim under lhd sim)")
     ap.add_argument("--rows", type=int, default=60, help="cap rows of the synth/sim tables")
-    ap.add_argument("--out", default=os.path.join(REPO, "tmp_cprop_engine_sweep"), help="work root")
+    ap.add_argument("--out", default=os.path.join(REPO, "tmp", "cprop_engine_sweep"), help="work root")
     ap.add_argument("--json", default="", help="also write the raw results here")
     args = ap.parse_args()
 
