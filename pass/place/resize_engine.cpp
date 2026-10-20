@@ -1477,7 +1477,6 @@ private:
   // move of each path, on disjoint nets, probed together; a rejected batch is
   // bisected. Per-endpoint refinement follows for what remains.
   void batch_phase() {
-    const double tns0  = tns_;
     unsigned     stall = 0;
     for (unsigned round = 0; round < 10000; ++round) {
       const auto failing = w_.failing_endpoints(0);
@@ -1601,7 +1600,7 @@ private:
           batch_reject_wns_,
           batch_reject_electrical_)
                 << std::flush;
-      const bool slow = tns_ - tns_round < std::max(1.0, 2e-3 * std::abs(tns0)) && wns_ - wns_round < .5;
+      const bool slow = tns_ - tns_round < std::max(1.0, 2e-3 * std::abs(tns_round)) && wns_ - wns_round < .5;
       stall           = slow ? stall + 1 : 0;
       if (stall >= 2) {
         break;
@@ -1712,9 +1711,9 @@ private:
           reject_electrical_,
           infeasible_paths_)
                 << std::flush;
-      // Lack of progress: two consecutive rounds below 0.5% of the round's TNS
-      // and 0.5 ps of WNS end the phase, independent of any cell budget.
-      const bool slow = tns_ - tns_round < std::max(.1, 5e-3 * std::abs(tns_round)) && wns_ - wns_round < .5;
+      // Lack of progress: two consecutive rounds below 2% of the round's TNS and
+      // 1 ps of WNS end the phase, independent of any cell budget.
+      const bool slow = tns_ - tns_round < std::max(.1, .02 * std::abs(tns_round)) && wns_ - wns_round < 1;
       stall           = slow ? stall + 1 : 0;
       if (stall >= 2) {
         stop_reason_ = "no progress";

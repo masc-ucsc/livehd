@@ -534,8 +534,13 @@ roll back together):
 *Stopping.* No cell or edit budget. An endpoint stops when it meets timing or no move is
 accepted; a path that fails even with ideal (zero-RC) wires and the fastest same-function
 drive at every stage, each loaded only by its on-path pin, is provably not fixable by
-buffering and gets sizing moves only. The phase stops when every failing endpoint is met,
-stuck or infeasible, or after two rounds that gain less than 0.01% TNS and 0.1 ps WNS.
+buffering and gets sizing moves only. With many failing endpoints, the best estimated
+sizing/repeater move of each of the worst quarter of failing paths (disjoint nets) is probed
+as one batch, bisected when rejected (a move that fails alone is not retried); batches stop
+after two rounds gaining less than 0.2% TNS and 0.5 ps WNS. Per-endpoint refinement then
+stops when every failing endpoint is met, stuck or infeasible, or after two rounds of 32
+endpoints that gain less than 2% TNS and 1 ps WNS. At FP checkpoints the per-endpoint pass is
+limited to two rounds (coordinates still move).
 After legal placement a new plan is made on the legalized result only while setup still
 fails and the previous round gained at least 1 ps WNS or 1% TNS (at most four rounds).
 
