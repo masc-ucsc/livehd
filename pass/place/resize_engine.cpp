@@ -1411,16 +1411,20 @@ private:
         }
       }
     }
-    const auto   p  = measure();
-    const double s1 = w_.pin(endpoint).slack.value_or(-kInf);
-    const auto   e1 = w_.electrical(pins);
+    // The endpoint first (one incremental update); the design-wide WNS/TNS scan
+    // only for moves that helped it.
+    const double s1   = w_.pin(endpoint).slack.value_or(-kInf);
+    const double need = cells ? cells * std::max(1.0, .005 * std::abs(slack)) : .05;
     ++stats.probes;
-    stats.seconds     += elapsed(t);
-    const double need  = cells ? cells * std::max(1.0, .005 * std::abs(slack)) : .05;
     if (s1 < slack + need) {
+      ++probes_;
+      stats.seconds += elapsed(t);
       ++reject_slack_;
       return false;
     }
+    const auto p   = measure();
+    const auto e1  = w_.electrical(pins);
+    stats.seconds += elapsed(t);
     if (p.wns < wns_ - kWnsEps) {
       ++reject_wns_;
       return false;
