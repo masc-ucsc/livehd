@@ -544,6 +544,21 @@ constexpr const char* kFlopLib = R"lib(library(flops) {
       }
       ff(IQ, IQN) { clocked_on : "CLK"; next_state : "D"; clear : "!RN"; }
     }
+    cell(DFFN) {
+      pin(CLK) { direction : input; capacitance : 1; clock : true; }
+      pin(D) { direction : input; capacitance : 1;
+        timing() { related_pin : "CLK"; timing_type : setup_falling;
+          rise_constraint(scalar) { values("10"); } fall_constraint(scalar) { values("10"); } }
+        timing() { related_pin : "CLK"; timing_type : hold_falling;
+          rise_constraint(scalar) { values("5"); } fall_constraint(scalar) { values("5"); } }
+      }
+      pin(Q) { direction : output; function : "IQ";
+        timing() { related_pin : "CLK"; timing_type : falling_edge;
+          cell_rise(scalar) { values("20"); } cell_fall(scalar) { values("20"); }
+          rise_transition(scalar) { values("1"); } fall_transition(scalar) { values("1"); } }
+      }
+      ff(IQ, IQN) { clocked_on : "!CLK"; next_state : "D"; }
+    }
   })lib";
 TEST_F(SdcClock, AsyncClearToOutputArcsAreNotTimedAsData) {
   // OpenSTA disables preset/clear -> Q arcs by default; a reset tree must not
@@ -602,6 +617,32 @@ TEST_F(SdcClock, EachSetupCheckUsesThePeriodOfItsCaptureClock) {
                             << timer.report_rat("fast:D", ot::MAX, ot::RISE).value_or(-1);
   EXPECT_NEAR(*fast, 1000 - 10, 1e-3);
   EXPECT_NEAR(*slow, 6400 - 10, 1e-3);
+}
+TEST_F(SdcClock, NegativeEdgeCheckCapturesTheSameCycleRisingLaunch) {
+  // A posedge -> negedge (half-cycle) path is captured at the falling edge of
+  // the same cycle for setup and checked against the previous fall for hold.
+  const auto path = directory + "/flops.lib";
+  std::ofstream(path) << kFlopLib;
+  var.dict["files"] = path;
+  var.set_stage_labels(var.dict);
+  Sdc_probe pass(var);
+  auto&     timer = pass.timer;
+  timer.read_celllib(path).insert_primary_input("c");
+  timer.insert_gate("gate", "DFFN").insert_net("n");
+  timer.disconnect_pin("c").connect_pin("c", "n").connect_pin("gate:CLK", "n");
+  timer.connect_pin("gate:D", "wire");
+  pass.read_sdc(write("create_clock -name clk -period 1000 [get_ports c]\nset_input_delay -clock clk 0 [get_ports a]\n"));
+  timer.set_ideal_clocks({"clk"});
+  for (const auto* port : {"a", "c"}) {
+    for (auto split : {ot::MIN, ot::MAX}) {
+      timer.set_slew(port, split, ot::RISE, 1).set_slew(port, split, ot::FALL, 1);
+    }
+  }
+  const auto setup = timer.report_slack("gate:D", ot::MAX, ot::RISE);
+  const auto hold  = timer.report_slack("gate:D", ot::MIN, ot::RISE);
+  ASSERT_TRUE(setup && hold);
+  EXPECT_NEAR(*setup, 500 - 10, 1e-3);
+  EXPECT_GT(*hold, 0);
 }
 TEST_F(SdcClock, ClockWaveformIsHonoredOnAPhysicalSource) {
   // `-waveform` used to make the clock virtual, timing the clock network as data.

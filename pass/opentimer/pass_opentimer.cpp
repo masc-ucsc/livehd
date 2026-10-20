@@ -66,6 +66,9 @@ Pass_opentimer::Pass_opentimer(const Eprp_var& var) : Pass("pass.opentimer", var
   // Like OpenSTA's default, do not time data paths through async preset/clear
   // -> Q arcs (recovery/removal checks on those pins remain).
   timer.preset_clear_arcs(false);
+  // A negative-edge check (clock-gate enable flops) captures the rising-edge
+  // launch of the same cycle, as OpenSTA times a half-cycle path.
+  timer.falling_edge_same_cycle(true);
   physical_rc_ = var.physical_rc;
   parse_critical_options(var);
   const auto load_text = std::string(var.get("io_load", "-1"));
