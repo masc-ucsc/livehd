@@ -28,6 +28,8 @@ cc_library(
     deps = [
         "//core",
         "//graph",
+        "//pass/aegraph:fold_engine",
+        "//pass/aegraph:pass_aegraph",  # livehd::fold_body: classic | aegraph | aegraph+classic
         "//pass/bitwidth:pass_bitwidth",
         "//pass/cprop:pass_cprop",
         "@hhds//hhds:graph",
@@ -44,6 +46,7 @@ cc_test(
     deps = [
         ":specialize",
         "//graph",
+        "//pass/aegraph:fold_engine",
         "@abseil-cpp//absl/container:flat_hash_set",
         "@googletest//:gtest_main",
         "@hhds//hhds:graph",

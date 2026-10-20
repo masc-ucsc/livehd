@@ -8,7 +8,7 @@
 #include "attr_carry.hpp"
 #include "bitwidth.hpp"
 #include "color_reduce.hpp"
-#include "cprop.hpp"
+#include "fold_body.hpp"
 #include "diag.hpp"
 #include "inline_sub.hpp"
 #include "node_util.hpp"
@@ -258,12 +258,17 @@ bool cleanup_loop_bodies(const std::vector<std::shared_ptr<hhds::Graph>>& graphs
         if (!admit_preparation(budget, "loop-specialize", 0)) {
           return false;
         }
-        Cprop cprop{true};
-        cprop.set_guard_scope(
-            [&](const hhds::Node_class& node) { return !before_expansion.contains(static_cast<uint64_t>(node.get_debug_nid())); });
-        cprop.do_trans(graph);
+        // The accumulation guard is scoped to the cells the expansion minted: classic's scope predicate. The
+        // e-graph engine's own guard rule is whole-body only, so under aegraph the predicate reaches just the
+        // classic false-cycle cutter inside it.
+        livehd::Fold_options fold;
+        fold.low_lanes = true;
+        fold.cost      = livehd::Fold_cost::synth;
+        fold.site      = "synth.loop_cleanup";
+        fold.guard     = [&](const hhds::Node_class& node) { return !before_expansion.contains(static_cast<uint64_t>(node.get_debug_nid())); };
+        livehd::fold_body(graph, fold);
         Bitwidth{3}.do_trans(graph);
-        cprop.do_trans(graph);
+        livehd::fold_body(graph, fold);
         Bitwidth{3}.do_trans(graph);
         if (!admit_preparation(budget, "loop-specialized", 0)) {
           return false;

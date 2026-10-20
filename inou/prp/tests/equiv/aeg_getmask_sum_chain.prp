@@ -1,0 +1,11 @@
+/*
+:name: aeg_getmask_sum_chain
+:type: lec
+*/
+// PYROPE-vs-PYROPE group, the fixture of the aegraph rule `getmask_sum_chain` (pass/aegraph/rules/mask.cpp): the low
+// window of a Sum reads its operands modulo 2^n, so a masked inner Sum merges into the outer one (the address range
+// `(base + size - 1)` of bedrock's demux decoder). REFERENCE = classic engine; `_1` = e-graph engine.
+pub comb top(base:U16, size:U16, x:U8) -> (limit:U16, y:U8) {
+  limit = ((base + size)#[0..<16] - 1)#[0..<16]
+  y = ((x + 3)#[0..<8] + x)#[0..<8]
+}

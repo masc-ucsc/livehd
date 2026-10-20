@@ -284,6 +284,7 @@ cc_library(
         ":usyn_lnet",
         ":usyn_logic",
         "//graph",
+        "//pass/aegraph:fold_engine",  # the engine is part of the cache salt
         "//pass/partition:pass_partition",
         "//pass/synth",
         "//pass/synth:lnet",
@@ -444,6 +445,7 @@ cc_library(
         ":usyn_semantic",
         "//core",
         "//graph",
+        "//pass/aegraph:fold_engine",  # the engine is part of the cache salt
         "//pass/lec:lec_query",
         "//pass/common:pass",
         "//pass/cost:host_mem",

@@ -163,6 +163,172 @@ AEG_NATIVE_RULE(getmask_fits, simplify, 30, Ntype_op::Get_mask) {
   out.subsume(y);
 }
 
+// A window of an Or / Xor / Sum / And does not read the terms that cannot reach it:
+//   * a term whose low `hi` bits are zero (a constant left shift by >= hi, a multiple of 2^hi) adds nothing to the bits
+//     below `hi` of an Or, Xor or Sum (a Sum carries only upwards), and zeroes the whole window of an And;
+//   * a non-negative term below 2^lo has no bits in [lo, hi): it adds nothing to an Or or Xor window and zeroes an And.
+// The bit-gather ladder `((m[63] << 63) | .. | (m[1] << 1) | m[0])[0]` reads one bit of 64 shifted rows, and classic's
+// demanded-bits narrowing leaves only the row that owns the bit. Sole readers, or a window that keeps at most half of
+// the terms, replace the read (simplify); otherwise the narrower Or is an alternative the extraction prices.
+AEG_NATIVE_RULE(getmask_drop_terms, simplify, 36, Ntype_op::Get_mask) {
+  Class_id x = kNoClass;
+  int64_t  lo = 0, hi = 0;
+  if (!get_mask_window(ctx, root, x, lo, hi) || hi > kMaxLaneBit) {
+    return;
+  }
+  const Enode* bank = nullptr;
+  ctx.each_member(x, [&](Class_id member) {
+    const Enode* n = ctx.node_of(member);
+    if (n != nullptr && (n->op == Ntype_op::Or || n->op == Ntype_op::Xor || n->op == Ntype_op::Sum || n->op == Ntype_op::And)) {
+      bank = n;
+      return true;
+    }
+    return false;
+  });
+  if (bank == nullptr) {
+    return;
+  }
+  const Ntype_op op = bank->op;
+  const auto     all = ctx.operands_of(*bank);
+  if (all.size() < 2 || all.size() > 4096) {
+    return;
+  }
+  const std::vector<Operand> terms(all.begin(), all.end());  // make() below invalidates the span
+  ctx.grant_fuel(terms.size() * 6);
+  const auto low_zero = [&](Class_id t) {
+    bool zero = false;
+    ctx.each_member(t, [&](Class_id member) {
+      const Enode* n = ctx.node_of(member);
+      if (n == nullptr || n->op != Ntype_op::SHL) {
+        return false;
+      }
+      const auto ops = ctx.operands_of(*n);
+      if (ops.size() != 2 || ops[0].bank != 0 || ops[1].bank != 1) {
+        return false;
+      }
+      const auto k = ctx.small_int(ops[1].cls);
+      zero         = k && *k >= hi;
+      return zero;
+    });
+    if (zero) {
+      return true;
+    }
+    if (hi <= 64) {
+      const auto f    = facts_of(ctx.eg(), t);
+      const auto want = hi == 64 ? ~uint64_t{0} : (uint64_t{1} << hi) - 1;
+      return (f.kz & want) == want;
+    }
+    return false;
+  };
+  const auto below_window = [&](Class_id t) {
+    if (lo == 0) {
+      return false;
+    }
+    const auto f = facts_of(ctx.eg(), t);
+    if (f.nonneg() && f.hi < kInf && f.hi <= ((Wide{1} << std::min<int64_t>(lo, 99)) - 1)) {
+      return true;
+    }
+    const int64_t bits = unsigned_bits(ctx.eg(), t);
+    return bits >= 0 && bits <= lo;
+  };
+  std::vector<Operand> rest;
+  bool                 dropped = false;
+  for (const auto& t : terms) {
+    const bool dead = low_zero(t.cls) || (op != Ntype_op::Sum && below_window(t.cls));
+    if (!dead) {
+      rest.push_back(t);
+      continue;
+    }
+    if (op == Ntype_op::And) {
+      out.subsume(ctx.konst(0));  // a term with no bit in the window clears it
+      return;
+    }
+    dropped = true;
+  }
+  if (!dropped || op == Ntype_op::And) {
+    return;
+  }
+  const size_t   kept     = rest.size();
+  const Class_id narrowed = rest.empty() ? ctx.konst(0) : ctx.make_bank(op, std::move(rest));
+  const Class_id window   = make_get_mask(ctx, narrowed, lo, hi);
+  if (ctx.single_use(x) || kept <= 1 || 2 * kept <= terms.size()) {
+    out.subsume(window);
+  } else {
+    out.add(window);
+  }
+}
+
+// A low window of a Sum reads its operands modulo 2^hi, so an operand that is itself a low window Get_mask(y, 0, k) of a
+// Sum y (k >= hi) can be y: the sums merge into one wider Sum under the outer window,
+//   Get_mask(Sum(Get_mask(Sum(a, b), 0, 16), 1-), 0, 16) = Get_mask(Sum(a, b, 1-), 0, 16)
+// (modular arithmetic: the truncation of the inner sum is undone by the outer one). Classic folds the same chain
+// (`(base + size - 1)` of an address range). Only when every operand of y already fits `hi` bits, so the merged Sum
+// is no wider than the outer window: a wide y would trade the inner mask for a wider adder.
+AEG_NATIVE_RULE(getmask_sum_chain, simplify, 37, Ntype_op::Get_mask) {
+  Class_id x = kNoClass;
+  int64_t  lo = 0, hi = 0;
+  if (!get_mask_window(ctx, root, x, lo, hi) || lo != 0 || hi > 4096) {
+    return;
+  }
+  const Enode* sum = nullptr;
+  ctx.each_member(x, [&](Class_id member) {
+    const Enode* n = ctx.node_of(member);
+    if (n != nullptr && n->op == Ntype_op::Sum) {
+      sum = n;
+      return true;
+    }
+    return false;
+  });
+  if (sum == nullptr) {
+    return;
+  }
+  const std::vector<Operand> terms(ctx.operands_of(*sum).begin(), ctx.operands_of(*sum).end());
+  if (terms.size() < 2 || terms.size() > 64) {
+    return;
+  }
+  ctx.grant_fuel(terms.size() * 8);
+  std::vector<Operand> merged;
+  bool                 peeled = false;
+  for (const auto& t : terms) {
+    const Enode* inner = nullptr;
+    Class_id     y     = kNoClass;
+    if (const auto s = slice_of(ctx, t.cls); s && s->lo == 0 && s->hi >= hi) {
+      y = s->source;
+      ctx.each_member(y, [&](Class_id member) {
+        const Enode* n = ctx.node_of(member);
+        if (n != nullptr && n->op == Ntype_op::Sum) {
+          inner = n;
+          return true;
+        }
+        return false;
+      });
+    }
+    if (inner == nullptr) {
+      merged.push_back(t);
+      continue;
+    }
+    const std::vector<Operand> ys(ctx.operands_of(*inner).begin(), ctx.operands_of(*inner).end());
+    bool                       narrow = ys.size() <= 16;
+    for (const auto& o : ys) {
+      const int64_t bits = unsigned_bits(ctx.eg(), o.cls);
+      narrow             = narrow && bits >= 0 && bits <= hi;
+    }
+    if (!narrow) {
+      merged.push_back(t);
+      continue;
+    }
+    for (const auto& o : ys) {
+      // a subtracted Sum operand under a subtracted slot adds back: flip the bank when the slot is subtracted
+      merged.push_back(Operand{t.bank == 0 ? o.bank : (o.bank == 0 ? uint32_t{1} : uint32_t{0}), o.cls});
+    }
+    peeled = true;
+  }
+  if (!peeled) {
+    return;
+  }
+  out.subsume(make_get_mask(ctx, ctx.make_bank(Ntype_op::Sum, std::move(merged)), 0, hi));
+}
+
 // A window that spans several lanes of a Concat only this Get_mask reads is the Concat of the covered pieces:
 //   Get_mask(Concat(.., v_i, w_i, ..), lo, hi) = Concat(Get_mask(v_i, a_i, b_i), b_i - a_i, ...)
 // over the lanes the window touches (classic indexed_get_mask re-packs a private Concat the same way). The
@@ -387,6 +553,81 @@ AEG_NATIVE_RULE(or_shifted_windows, alt, 21, Ntype_op::Or) {
     }
   }
   out.add(ctx.make_bank(Ntype_op::Or, std::move(rest)));
+}
+
+// Or of fields at DISJOINT constant windows, each a value of known width optionally shifted left by a constant:
+//   Or(a << 8, b << 4, c)  =  Concat(a, w_a, b, 4, c, 4)       (w_a, 4 and 4 the widths; gaps are zero lanes)
+// Classic's canonicalize_or_pack (the bit-gather ladder `(m[63] << 63) | .. | m[0]` of a packed row). An alt: the
+// profile prices a constant shift and a Concat as wiring (synth) or as one instruction per lane (sim), and an Or of n
+// shifted fields as n - 1 gates, so the original stays when a field is shared and the Concat would not be cheaper.
+// Every field needs a proven width (unsigned_bits) and the windows must not overlap, or the rule declines.
+AEG_NATIVE_RULE(or_pack_to_concat, alt, 19, Ntype_op::Or) {
+  constexpr size_t kMinFields = 3;
+  constexpr size_t kMaxFields = 1024;
+  if (root.ops.size() < kMinFields || root.ops.size() > kMaxFields) {
+    return;
+  }
+  ctx.grant_fuel(root.ops.size() * 8);
+  struct Field {
+    Class_id value;
+    int64_t  lo, width;
+  };
+  std::vector<Field> fields;
+  for (const auto& o : root.ops) {
+    if (o.bank != 0) {
+      return;
+    }
+    Class_id value = o.cls;
+    int64_t  shift = 0;
+    ctx.each_member(o.cls, [&](Class_id member) {
+      const Enode* n = ctx.node_of(member);
+      if (n == nullptr || n->op != Ntype_op::SHL) {
+        return false;
+      }
+      const auto ops = ctx.operands_of(*n);
+      if (ops.size() != 2 || ops[0].bank != 0 || ops[1].bank != 1) {
+        return false;
+      }
+      const auto k = ctx.small_int(ops[1].cls);
+      if (!k || *k < 0 || *k > kMaxLaneBit) {
+        return false;
+      }
+      value = ops[0].cls;
+      shift = *k;
+      return true;
+    });
+    const int64_t w = unsigned_bits(ctx.eg(), value);
+    if (w < 0 || shift + w > kMaxLaneBit) {
+      return;  // a field without a proven width: no window
+    }
+    if (w == 0) {
+      continue;  // provably zero: contributes nothing
+    }
+    fields.push_back({value, shift, w});
+  }
+  if (fields.size() < kMinFields) {
+    return;
+  }
+  std::ranges::sort(fields, [](const Field& a, const Field& b) { return a.lo < b.lo; });
+  std::vector<Operand> ops;  // built least significant first, then reversed by pairs
+  std::vector<std::pair<Class_id, int64_t>> lanes;
+  int64_t pos = 0;
+  for (const auto& f : fields) {
+    if (f.lo < pos) {
+      return;  // overlapping windows: the bits merge, which a Concat cannot say
+    }
+    if (f.lo > pos) {
+      lanes.emplace_back(ctx.konst(0), f.lo - pos);
+    }
+    lanes.emplace_back(f.value, f.width);
+    pos = f.lo + f.width;
+  }
+  for (size_t i = lanes.size(); i-- > 0;) {  // most significant first
+    const auto k = static_cast<uint32_t>(ops.size());
+    ops.push_back(Operand{k, lanes[i].first});
+    ops.push_back(Operand{k + 1, ctx.konst(lanes[i].second)});
+  }
+  out.add(ctx.make(Ntype_op::Concat, std::span<const Operand>(ops.data(), ops.size())));
 }
 
 // One lane of a pack being rebuilt: value, bit offset and width.

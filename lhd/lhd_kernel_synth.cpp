@@ -1276,6 +1276,25 @@ void synth_command(Options& opts, Result& res) {
         fs::copy_file(root + "/place/out.def", destination, fs::copy_options::overwrite_existing);
       }
       res.outputs.push_back(destination.string());
+      // A DEF alone is not a portable physical handoff. Preserve the exact
+      // ordered technology/cell views in the requested export, including their
+      // copy cost in this invocation rather than in a downstream STA script.
+      const auto lef_directory = fs::path(def_out->path) / "lef";
+      ensure_dir(lef_directory.string());
+      std::string lef_manifest = "[";
+      for (size_t index = 0; index < place_options.lefs.size(); ++index) {
+        const auto& source = place_options.lefs[index];
+        const auto  name   = std::to_string(index) + "_" + fs::path(source).filename().string();
+        const auto  target = lef_directory / name;
+        if (canon(source) != canon(target.string())) {
+          fs::copy_file(source, target, fs::copy_options::overwrite_existing);
+        }
+        if (index) {
+          lef_manifest += ",";
+        }
+        lef_manifest += livehd::synth_attr::quote("lef/" + name);
+        res.outputs.push_back(target.string());
+      }
       const auto proxy_lef = fs::path(root) / "place/memory_proxies.lef";
       if (fs::is_regular_file(proxy_lef)) {
         const auto proxy_destination = fs::path(def_out->path) / "memory_proxies.lef";
@@ -1283,7 +1302,15 @@ void synth_command(Options& opts, Result& res) {
           fs::copy_file(proxy_lef, proxy_destination, fs::copy_options::overwrite_existing);
         }
         res.outputs.push_back(proxy_destination.string());
+        if (!place_options.lefs.empty()) {
+          lef_manifest += ",";
+        }
+        lef_manifest += livehd::synth_attr::quote("memory_proxies.lef");
       }
+      lef_manifest             += "]\n";
+      const auto manifest_path  = fs::path(def_out->path) / "lefs.json";
+      std::ofstream(manifest_path) << lef_manifest;
+      res.outputs.push_back(manifest_path.string());
     }
   }
 

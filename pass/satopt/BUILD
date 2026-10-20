@@ -64,6 +64,7 @@ cc_library(
     deps = [
         "//core",
         "//graph",
+        "//pass/aegraph:pass_aegraph",  # livehd::fold_body (the cleanup after a satopt run)
         "//pass/bitwidth:pass_bitwidth",
         "//pass/common:pass",
         "//pass/cprop:pass_cprop",

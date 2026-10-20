@@ -42,6 +42,7 @@
 #include "lnast.hpp"
 #include "log.hpp"
 #include "node_util.hpp"
+#include "fold_engine.hpp"
 #include "pass.hpp"
 #include "perf_tracing.hpp"
 #include "rapidjson/document.h"
@@ -1723,6 +1724,15 @@ void apply_lhd_settings(Options& opts) {
     }
   }
   livehd::Job_manager::global().configure(opts.jobs);
+
+  // The constant-folding engine of every fold site outside the two compile cprop slots (specialize refolds,
+  // the sim post-splice fold, synthesis loop cleanup and memory modules, the satopt cleanup, the LEC
+  // preflight): ONE process-wide setting from compile.cprop.engine, set here on every command so a
+  // previous in-process run never leaks its engine. The caches key on it (livehd::fold_salt_mix and the
+  // compile-cache context descriptor).
+  const auto choice = resolve_cprop_engine(opts);
+  livehd::set_fold_engine(livehd::parse_fold_engine(choice.engine).value_or(livehd::Fold_engine::classic));
+  livehd::set_fold_default_cost(resolve_aegraph_cost(opts) == "sim" ? livehd::Fold_cost::sim : livehd::Fold_cost::synth);
 }
 
 Cprop_engine resolve_cprop_engine(const Options& opts) {

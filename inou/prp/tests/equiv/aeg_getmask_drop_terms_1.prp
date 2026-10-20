@@ -1,0 +1,8 @@
+/*
+:name: aeg_getmask_drop_terms_1
+:type: lec
+:set: compile.cprop.engine=aegraph
+:compile_grep: aegraph-rule getmask_drop_terms .*extracted=[0-9]*[1-9]
+*/
+// HEADER-ONLY variant: aeg_getmask_drop_terms.prp compiled by the acyclic e-graph engine; the grep shows the rule fired and
+// the extraction kept its result.

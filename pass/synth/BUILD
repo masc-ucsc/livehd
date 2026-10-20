@@ -53,6 +53,7 @@ genrule(
         "//ware:cgen_memory_rtl",
         "//inou/cgen:memory_generator_srcs",
         "//inou/yosys:memory_import_srcs",
+        "//pass/aegraph:pass_aegraph",  # the engine the fold sites dispatch to (fold_body)
         "//pass/cprop:pass_cprop",
         "//pass/enableopt:pass_enableopt",
         "//pass/bitwidth:pass_bitwidth",
@@ -122,6 +123,8 @@ cc_library(
         ":lnet",
         "//core",
         "//graph",
+        "//pass/aegraph:fold_engine",
+        "//pass/aegraph:pass_aegraph",  # livehd::fold_body (loop cleanup, memory modules)
         "//pass/bitwidth:pass_bitwidth",
         "//pass/color:pass_color",
         "//pass/common:pass",

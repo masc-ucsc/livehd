@@ -1,0 +1,8 @@
+/*
+:name: aeg_bit_reduction_rows_1
+:type: lec
+:set: compile.cprop.engine=aegraph
+:compile_grep: aegraph-rule getmask_lane .*
+*/
+// HEADER-ONLY variant: aeg_bit_reduction_rows.prp compiled by the acyclic e-graph engine; the grep shows the rule fired and
+// the extraction kept its result.

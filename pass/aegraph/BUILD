@@ -46,6 +46,17 @@ cc_binary(
     deps = [":rulegen_lib"],
 )
 
+# The process-wide fold-engine setting (classic|aegraph|aegraph+classic), the cache-salt mix and the
+# per-site counters. No dependency on the engine or on cprop, so cache code can key on it.
+cc_library(
+    name = "fold_engine",
+    srcs = ["fold_engine.cpp"],
+    hdrs = ["fold_engine.hpp"],
+    copts = COPTS,
+    includes = ["."],
+    visibility = ["//visibility:public"],
+)
+
 cc_library(
     name = "pass_aegraph",
     srcs = glob(
@@ -57,16 +68,21 @@ cc_library(
         exclude = [
             "*test*.cpp",
             "*smoke*.cpp",
+            "fold_engine.cpp",
         ],
     ) + [":aeg_rules_cpp"],
-    hdrs = glob([
-        "*.hpp",
-        "runtime/*.hpp",
-    ]),
+    hdrs = glob(
+        [
+            "*.hpp",
+            "runtime/*.hpp",
+        ],
+        exclude = ["fold_engine.hpp"],
+    ),
     copts = COPTS,
     includes = ["."],
     visibility = ["//visibility:public"],
     deps = [
+        ":fold_engine",
         ":rule_expr",
         ":rulegen_lib",
         "//graph",
@@ -149,6 +165,22 @@ cc_test(
         ":rule_test_support",
         ":rulegen_lib",
         "@googletest//:gtest_main",
+    ],
+)
+
+cc_test(
+    name = "fold_body_test",
+    srcs = ["fold_body_test.cpp"],
+    copts = COPTS,
+    deps = [
+        ":fold_engine",
+        ":pass_aegraph",
+        "//core",
+        "//graph",
+        "//pass/cprop:pass_cprop",
+        "//pass/lec:lec_query",
+        "@googletest//:gtest_main",
+        "@hhds//hhds:graph",
     ],
 )
 

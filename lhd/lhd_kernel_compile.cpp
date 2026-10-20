@@ -1898,7 +1898,11 @@ void graph_pipeline_and_emits(Options& opts, Result& res, Eprp_var& var, const s
         // only bodies changed by specialization: repeating classic cprop here
         // bypasses the selected engine and can reshape a false-cycle predicate
         // before the legalizer has discharged its hold arm.
-        (void)livehd::specialize::specialize_constants(design, {.max_versions = 64});
+        absl::flat_hash_set<const hhds::Graph*> specialized_bodies;
+        (void)livehd::specialize::specialize_constants(design, {.max_versions = 64, .modified = &specialized_bodies});
+        for (const auto* graph : specialized_bodies) {
+          restored.erase(std::string{graph->get_name()});
+        }
         absl::flat_hash_set<const hhds::Graph*> reachable;
         auto                                    pending = roots;
         while (!pending.empty()) {
@@ -1926,11 +1930,21 @@ void graph_pipeline_and_emits(Options& opts, Result& res, Eprp_var& var, const s
             library->delete_graphio(name);
           }
         }
-        // A changed context may have rewritten a cached parent too. Every
-        // reachable body now participates in the remaining passes and checks.
-        active = &var;
-        restored.clear();
-        res.compile_cache_restored_graphs.clear();
+        // Untouched restored bodies are already fully optimized. Repeating
+        // cprop can change their operand-bank attributes again. Only changed
+        // contexts, newly specialized bodies and fresh graphs need the slots.
+        absl::flat_hash_set<std::string> retained;
+        fresh.graphs.clear();
+        for (const auto& graph : var.graphs) {
+          const std::string name{graph->get_name()};
+          retained.insert(name);
+          if (!restored.contains(name)) {
+            fresh.add(graph);
+          }
+        }
+        absl::erase_if(restored, [&](const auto& name) { return !retained.contains(name); });
+        std::erase_if(res.compile_cache_restored_graphs, [&](const auto& name) { return !restored.contains(name); });
+        active = &fresh;
         res.recipe_steps.emplace_back("pass.specialize");
       }
       // compile.flatten / compile.unknown_zero (pass/sweep): whole-design
@@ -2155,10 +2169,25 @@ void graph_pipeline_and_emits(Options& opts, Result& res, Eprp_var& var, const s
         total_dead  += round.dead_bits;
         total_mem   += round.dead_memories;
         total_fix   += round.fix_rounds;
-        Eprp_var::Eprp_dict cp_labels, bw_labels;
-        merge_sets(opts, "compile.cprop", cp_labels);
-        cp_labels["loop_hoist"] = "false";
-        run_step("pass.cprop", *active, cp_labels, opts, res);
+        Eprp_var::Eprp_dict bw_labels;
+        // The sweep's fold follows compile.cprop.engine like the two schedule slots (whatever
+        // compile.cprop.engine_slots says: that selector only picks among the schedule's own slots).
+        Cprop_engine sweep_choice = resolve_cprop_engine(opts);
+        sweep_choice.slots        = "both";
+        for (const auto& method : cprop_slot_methods(sweep_choice, 0)) {
+          Eprp_var::Eprp_dict cp_labels;
+          merge_sets(opts, "compile.cprop", cp_labels);
+          cp_labels["loop_hoist"] = "false";
+          if (method == "pass.aegraph") {
+            cp_labels["after_bitwidth"] = "true";
+            cp_labels.erase("engine_slots");
+            merge_sets(opts, "compile.aegraph", cp_labels);
+            cp_labels["cost"] = resolve_aegraph_cost(opts);
+          } else if (cp_labels.contains("engine")) {
+            cp_labels["engine"] = "classic";
+          }
+          run_step(method, *active, cp_labels, opts, res);
+        }
         merge_sets(opts, "compile.bitwidth", bw_labels);
         run_step("pass.bitwidth", *active, bw_labels, opts, res);
       }

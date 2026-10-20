@@ -2120,6 +2120,22 @@ sh_test(
     data = _FLOW_DATA,
 )
 
+# compile.cprop.engine reaches EVERY fold site (livehd::fold_body): sim refolds, synthesis loop cleanup /
+# memory modules / state sweep, the satopt cleanup, the LEC preflight and compile.sweep -- each counted per
+# engine through LHD_FOLD_BODY_LOG -- with the results PROVEN and the region cache keyed by engine.
+sh_test(
+    name = "lhd_fold_sites_test",
+    size = "large",
+    srcs = ["lhd_fold_sites_test.sh"],
+    data = _FLOW_DATA + [
+        "abc_arst_q.lib",
+        "abc_memtile.sv",
+        "state_sweep.v",
+        "//inou/prp:abc_tests",
+        "//inou/prp:tests/sim/loop_roll_carry.prp",
+    ],
+)
+
 # ECMA-426 source-map egress ([[1f]]-G): .v.map sidecar with sourcesContent,
 # in-process and lg:-reload (hash-validated disk recovery + drift rejection).
 sh_test(
