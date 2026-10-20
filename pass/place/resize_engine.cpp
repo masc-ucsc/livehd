@@ -697,7 +697,7 @@ private:
     // per-net search, which also tries every alternative.
     std::vector<std::pair<size_t, size_t>> pending;
     const size_t                           batch      = todo.size() > 32 ? std::max<size_t>(32, todo.size() / 8) : 1;
-    const size_t                           floor_size = todo.size() > 64 ? todo.size() / 64 : 0;
+    const size_t                           floor_size = todo.size() > 2000 ? todo.size() / 64 : 0;
     for (size_t i = 0; i < todo.size(); i += batch) {
       pending.emplace_back(i, std::min(todo.size(), i + batch));
     }
@@ -743,9 +743,9 @@ private:
         continue;
       }
       a.rollback();
-      // Bisect down to 1/64 of the nets; below that a few hundred probes on
-      // single nets cost more than they return, so those nets stay as they are
-      // (small sets still get the per-net search with every alternative).
+      // Up to 2000 violating nets, bisect down to the per-net search. Beyond
+      // that (an unbuffered synthesis netlist) stop at 1/64 of the nets: single-
+      // net probes would cost hours; those nets stay as they are.
       if (end - begin > floor_size) {
         const auto mid = begin + (end - begin) / 2;
         pending.emplace_back(begin, mid);
