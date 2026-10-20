@@ -542,7 +542,9 @@ as one batch, bisected when rejected (a move that fails alone is not retried); b
 after two rounds gaining less than 0.2% TNS and 0.5 ps WNS. Per-endpoint refinement then
 stops when every failing endpoint is met, stuck or infeasible, or after two rounds of 32
 endpoints that gain less than 2% TNS and 1 ps WNS. At FP checkpoints the per-endpoint pass is
-limited to two rounds (coordinates still move).
+limited to two rounds and uses no wire buffers (isolation, repeaters, repeater chains):
+coordinates still move, and buffers placed for GP wire lengths piled up checkpoint after
+checkpoint (eyeriss: +12% cells in three checkpoints); sizing and fanout trees remain.
 After legal placement a new plan is made on the legalized result only while setup still
 fails and the previous round gained at least 5 ps WNS or 2% TNS (at most four rounds).
 

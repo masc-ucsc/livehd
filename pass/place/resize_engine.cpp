@@ -839,7 +839,7 @@ private:
     if (nets_.at(driver).size() >= 4 && build_tree(driver, nets_.at(driver), 0, owner, created)) {
       return 1;
     }
-    return wire_repair(driver, created) ? 1 : 0;
+    return stage_ == Resize_stage::placed && wire_repair(driver, created) ? 1 : 0;
   }
   // A long wire to few sinks: a repeater chain toward the farthest sink.
   bool wire_repair(const std::string& driver, std::vector<std::string>& created) {
@@ -919,6 +919,9 @@ private:
     }
     // 2. A variable-base buffer tree over the sinks, 3. a repeater chain.
     for (const bool tree : {true, false}) {
+      if (!tree && stage_ != Resize_stage::placed) {
+        break;  // no repeater chains at FP checkpoints
+      }
       if (try_topology(driver, owner, pins, before, tree)) {
         return true;
       }
@@ -1522,7 +1525,10 @@ private:
     for (size_t k = 0; k < stages.size(); ++k) {
       upsize_moves(stages, k, moves);
       shed_moves(stages, k, slack, moves);
-      if (feasible) {
+      // Wire buffers (isolation, repeaters) only on the legal placement: at FP
+      // checkpoints cells still move, and buffers inserted there pile up as GP
+      // stretches the wires again (sizing and fanout trees remain).
+      if (feasible && stage_ == Resize_stage::placed) {
         isolate_moves(stages, k, slack, moves);
         repeater_moves(stages, k, moves);
       }
