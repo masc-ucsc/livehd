@@ -7,6 +7,7 @@
 #include <string_view>
 #include <tuple>
 #include <unordered_map>
+#include <unordered_set>
 
 #include "node_util.hpp"
 #include "pass_opentimer.hpp"
@@ -277,6 +278,7 @@ struct Physical_session::Impl : Pass_opentimer {
     std::unordered_map<std::string, std::string>                     gates;    // what-if instance -> master
     std::unordered_map<std::string, std::string>                     resized;  // instance -> current master
     std::unordered_map<std::string, livehd::physical::Rc_net>        rc_now;   // driver label -> current what-if RC
+    std::unordered_set<std::string>                                pending_rc;
     std::unordered_map<std::string, const livehd::physical::Rc_net*> base;     // evaluated RC by driver
     const livehd::physical::Parasitics*                              base_owner = nullptr;
     size_t                                                           serial     = 0;
@@ -424,7 +426,9 @@ struct Physical_session::Impl : Pass_opentimer {
       }
       log.push_back({Kind::rc, net.driver, name, std::move(old)});
       rc_now[net.driver] = net;
-      attach(net, name);
+      // Finish every pin move before attaching RC: moving a sink off another
+      // edited net invalidates that net's existing parasitic annotation.
+      pending_rc.insert(net.driver);
     }
     void rollback(size_t to) override {
       if (to > log.size()) {
@@ -485,6 +489,7 @@ struct Physical_session::Impl : Pass_opentimer {
       }
       index_base();
       for (auto& [driver, rc] : final_rc) {
+        pending_rc.erase(driver);
         const auto name = net_of_driver(driver);
         if (!rc || name.empty()) {
           rc_now.erase(driver);
@@ -499,7 +504,13 @@ struct Physical_session::Impl : Pass_opentimer {
         attach(*rc, name);
       }
     }
-    void   update() { s.timer.update_timing(); }
+    void update() {
+      for (const auto& driver : pending_rc) {
+        attach(rc_now.at(driver), net_of_driver(driver));
+      }
+      pending_rc.clear();
+      s.timer.update_timing();
+    }
     double wns() override {
       update();
       const auto value = s.timer.report_wns(ot::MAX);

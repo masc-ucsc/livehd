@@ -130,9 +130,12 @@ class PrpRunner:
         cmd += self.compile_set_args()
         return cmd
 
-    @staticmethod
-    def _extra_sets(test):
+    def _extra_sets(self, test):
         """`:set: a.b=c d.e=f` — per-fixture pass flags, appended to every mode.
+
+        A key a harness-wide compile set (--aegraph / LHD_PRP_COMPILE_SETS) also names is dropped here: `lhd`
+        refuses one key given twice with different values, and the harness override must win (that is how an
+        engine-variant fixture, `:set: compile.cprop.engine=...`, also runs under a forced engine).
 
         Used by fixtures that must exercise a non-default lowering (e.g.
         `:set: compile.unroll=true` to unroll a source loop instead of keeping it rolled, or
@@ -141,9 +144,11 @@ class PrpRunner:
         spec = test.params.get('set')
         if not spec:
             return []
+        forced = {tok.split('=', 1)[0] for tok in self.compile_sets}
         out = []
         for tok in spec.split():
-            out += ['--set', tok]
+            if tok.split('=', 1)[0] not in forced:
+                out += ['--set', tok]
         return out
 
     @staticmethod

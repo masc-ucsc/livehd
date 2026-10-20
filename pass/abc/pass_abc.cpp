@@ -1,6 +1,7 @@
 // This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 
 #include "pass_abc.hpp"
+#include "fold_engine.hpp"
 
 #include <charconv>
 #include <cstdlib>
@@ -1313,7 +1314,7 @@ void Pass_abc::map_with(Eprp_var& var, const std::function<void(livehd::abc::Map
           .emit();
     }
   }
-  opts.tune_salt = livehd::synth::Region_cache::make_salt(livehd::abc::kAbcSrcSalt,
+  opts.tune_salt = livehd::synth::Region_cache::make_salt(livehd::fold_salt_mix(livehd::abc::kAbcSrcSalt),
                                                           opts.library,
                                                           opts.map_register,
                                                           opts.memory_fold,
@@ -1337,7 +1338,7 @@ void Pass_abc::map_with(Eprp_var& var, const std::function<void(livehd::abc::Map
     const std::string dff_desc = livehd::liberty::dff_selection_descriptor(dff_sel, opts.dff_cell) + (opts.drop_init ? "+drop_init" : "")
                                  + (opts.derived_clock ? "+derived_clock" : "");
     incr                       = std::make_shared<livehd::synth::Region_cache>(cache_dir,
-                                                         livehd::synth::Region_cache::make_salt(livehd::abc::kAbcSrcSalt,
+                                                         livehd::synth::Region_cache::make_salt(livehd::fold_salt_mix(livehd::abc::kAbcSrcSalt),
                                                                                                 opts.library,
                                                                                                 opts.map_register,
                                                                                                 opts.memory_fold,

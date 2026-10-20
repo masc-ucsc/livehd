@@ -15,6 +15,7 @@
 
 #include "artifact.hpp"
 #include "design_synth.hpp"
+#include "fold_engine.hpp"
 #include "graph_library_singleton.hpp"
 #include "host_mem.hpp"
 #include "job_manager.hpp"
@@ -621,7 +622,7 @@ void Pass_usyn::synthesize(Eprp_var& var) {
     fs::remove_all(provenance_staging.path, ec);
   }
   const auto provenance
-      = usyn::archive_provenance(provenance_staging.path, var.get("invocation_context", ""), std::to_string(usyn::kUsynSrcSalt));
+      = usyn::archive_provenance(provenance_staging.path, var.get("invocation_context", ""), std::to_string(livehd::fold_salt_mix(usyn::kUsynSrcSalt)));
   const auto start   = std::chrono::steady_clock::now();
   const auto elapsed = [&] { return std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - start).count(); };
   usyn::Resource_budget resources;

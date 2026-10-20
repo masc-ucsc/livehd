@@ -12,6 +12,7 @@
 #include "arith_choice.hpp"
 #include "design_prepare.hpp"
 #include "diag.hpp"
+#include "fold_engine.hpp"
 #include "hash_util.hpp"
 #include "literal_stats.hpp"
 #include "node_util.hpp"
@@ -330,7 +331,7 @@ Design_result synthesize_cmos_design(const std::shared_ptr<hhds::Graph>& top, co
                                                  *blast.source_state,
                                                  names,
                                                  options.logical,
-                                                 kUsynSrcSalt,
+                                                 livehd::fold_salt_mix(kUsynSrcSalt),
                                                  options.cache.context,
                                                  identity_work,
                                                  cache_options.limits);

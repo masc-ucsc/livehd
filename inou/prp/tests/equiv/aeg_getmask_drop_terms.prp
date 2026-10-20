@@ -1,0 +1,14 @@
+/*
+:name: aeg_getmask_drop_terms
+:type: lec
+*/
+// PYROPE-vs-PYROPE group, the fixture of the aegraph rule `getmask_drop_terms` (pass/aegraph/rules/mask.cpp): a window of
+// an Or / Xor / Sum / And does not read the terms that cannot reach it (a left shift by at least the window's top bit
+// adds nothing below it). REFERENCE = classic engine; `_1` = e-graph engine.
+pub comb top(a:U8, b:U8, c:U8, d:U2) -> (y:U4, z:U4, w:U8, v:U3, u:U4) {
+  y = ((a << 8) | (b << 4) | c)#[0..<4]
+  z = (a + (b << 4) + (c << 6))#[0..<4]
+  w = ((a << 8) ^ (b << 9) ^ c)#[0..<8]
+  v = ((d << 4) | (b << 3) | c)#[0..<3]
+  u = (((c << 4) | a) & (d << 4))#[0..<4]
+}

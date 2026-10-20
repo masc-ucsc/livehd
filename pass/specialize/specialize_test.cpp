@@ -10,6 +10,7 @@
 #include <vector>
 
 #include "absl/container/flat_hash_set.h"
+#include "fold_engine.hpp"
 #include "gtest/gtest.h"
 #include "node_util.hpp"
 #include "specialize.hpp"
@@ -173,3 +174,28 @@ TEST(InheritColors, BackwardChainIsLinear) {
 }
 
 }  // namespace
+
+// refold_private_body is the fold site cgen_sim (post-splice, sim cost), the synthesis state sweep (synth cost)
+// and specialize_constants share: it follows the process-wide fold engine and counts under its site.
+TEST(SpecializeRefold, FollowsTheProcessWideFoldEngine) {
+  for (const auto engine : {livehd::Fold_engine::classic, livehd::Fold_engine::aegraph, livehd::Fold_engine::aegraph_classic}) {
+    livehd::fold_counters_reset();
+    livehd::set_fold_engine(engine);
+    hhds::GraphLibrary lib;
+    auto               io = lib.create_io("refold_site");
+    io->add_output("o0", 0);
+    io->set_bits("o0", 8);
+    io->set_unsign("o0", true);
+    auto g   = io->create_graph();
+    auto sum = gu::create_typed_node(*g, Ntype_op::Sum);
+    gu::create_const(*g, *Dlop::create_integer(20)).connect_sink(gu::setup_sink_by_name(sum, "as"));
+    gu::create_const(*g, *Dlop::create_integer(22)).connect_sink(gu::setup_sink_by_name(sum, "as"));
+    sum.create_driver_pin(0).connect_sink(g->get_output_pin("o0"));
+    livehd::specialize::refold_private_body(g, livehd::specialize::Refold_cost::sim, "test.refold");
+    EXPECT_GE(livehd::fold_count("test.refold", engine), 1u) << livehd::fold_engine_name(engine);
+    for (auto node : g->body().nodes()) {
+      EXPECT_NE(gu::type_op_of(node), Ntype_op::Sum) << livehd::fold_engine_name(engine) << ": the constant sum folds";
+    }
+  }
+  livehd::set_fold_engine(livehd::Fold_engine::classic);
+}

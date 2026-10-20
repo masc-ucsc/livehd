@@ -24,6 +24,37 @@ a bounded proof obligation. Classic cprop stays the default and is not deleted.
 The work is split into Phase 1 (milestones A–I, which end at a decision point
 with an A/B table) and Phase 2 (J–O, planned only if Phase 1 passes gate G3).</p>
 
+<h2>ASAP7 synthesis and pre-CTS review · 2026-10-20</h2>
+<p>The initial <a href="../../../lhdtrack/target-results-llmhdl-placement.html">lhdsuite diagnostic placement report</a>
+records fresh, serial PicoRV32 and matched-filter runs: default LiveHD ABC,
+explicit aegraph, native placement, HighTide/Yosys synthesis, and OpenROAD
+pre-CTS placement. These are lhdsuite inputs; the separate lhdtrack corpus run
+belongs in <code>lhdtrack/target/results-placement-llmhdl.html</code>.
+The diagnostic retains wall time, child-inclusive CPU, process/tree RSS,
+<code>perf stat</code>, frozen tools and inputs, and common OpenSTA scoring.
+DEF/LEF exports are timed; independent scoring and SystemVerilog wiring-wrapper
+elaboration are separate. The scorer refuses functional cells requiring further
+mapping. Routing is excluded at the user's request.</p>
+<ul>
+<li>The full aegraph package, fold-site integration and selected DREAMPlace
+checks pass. This small sweep does not establish G4 or authorize a default flip.</li>
+<li>PicoRV32 aegraph synthesis has slightly lower area but worse common
+zero-wire setup WNS: about −146 ps versus +21 ps for classic, at essentially
+the same synthesis time. Matched-filter synthesis has identical scored QoR.
+The default remains classic.</li>
+<li>The sweep found and fixed two SDC-reader issues: a bus index's closing
+bracket terminated a braced port selector early, and Verilog bus names did
+not bind Pin_tracker's base/base.N timing names. Literal existing bracket
+names take precedence. Regression tests cover both representations.</li>
+<li>CPU samples identified the native Poisson solver as a placement hotspot.
+Contiguous-lane loop interchange preserves each reduction order and removes
+an unused scratch allocation. Three kernel runs are about 3× faster, with
+byte-identical fields on square and rectangular grids. The same patch is
+in the pushed DREAMPlace commit pinned by LiveHD; normal
+builds need no local override. Whole-flow gains and DEF/QoR equality are
+recorded in the linked report.</li>
+</ul>
+
 <h2>Depends on</h2>
 <ul>
 <li>No new infrastructure. The plan builds on:
@@ -2223,6 +2254,25 @@ is immutable and is not edited.</li>
   </ul></li>
 <li><strong>O — More callers (only after G4)</strong> <span class="status">phase 2</span>
   <ul>
+  <li><span class="status landed">landed 2026-10-20</span> <strong>Every fold site follows <code>compile.cprop.engine</code></strong> (user requirement, ahead of G4).
+    <code>livehd::fold_body(graph, engine, Fold_options)</code> (<code>pass/aegraph/fold_body.{hpp,cpp}</code>) dispatches classic (<code>Cprop::do_trans</code>, byte for byte the old call),
+    aegraph (<code>optimize_body</code>) and aegraph+classic; <code>fold_graphs</code> is its method-level twin (<code>pass.cprop</code>/<code>pass.aegraph</code>). The engine is ONE process-wide setting
+    (<code>fold_engine.{hpp,cpp}</code>, no dependency on cprop/engine) set by the kernel in <code>apply_lhd_settings</code> on every command; the default stays classic.
+    Sites moved: <code>specialize.constants</code> / <code>specialize.refold</code> (the 4 <code>Cprop{}</code> calls; <code>refold_private_body</code> gained a <code>Refold_cost</code>), <code>cgen.sim.refold</code>
+    (cost=sim), <code>synth.state_sweep</code>, <code>synth.loop_cleanup</code> (classic guard-scope predicate kept for the cutter; the engine's guard rule is whole-body only), <code>synth.memory_module</code>,
+    <code>satopt.cleanup</code>, <code>formal.lec.preflight</code> and <code>formal.semdiff</code> (<code>Options::preflight</code>, no bitwidth after), and the <code>compile.sweep</code> per-round fold in the kernel.
+    <code>formal.lec.preflight_engine</code> now accepts <code>aegraph+classic</code> and, UNSET, follows the engine (default unchanged: classic). Left alone because they are not pass calls:
+    <code>Bitwidth_rewrite</code>, <code>enableopt</code>, <code>satopt</code> use <code>Cprop</code> as a helper class; <code>legalize</code> and <code>semdiff</code> only mention it.
+    Caches: <code>fold_salt_mix</code> (identity for classic) in the ABC region/tmap salts, the usyn logical cache and provenance, and the formal verdict cache; <code>pass_aegraph</code> is hashed by
+    <code>//pass/synth:synth_salt</code> (and already by <code>compile_salt</code>, <code>formal_salt</code>); the compile-cache descriptor already named the engine. Tests: <code>fold_body_test</code> (6),
+    <code>SpecializeRefold.FollowsTheProcessWideFoldEngine</code>, <code>//lhd/tests:lhd_fold_sites_test</code> (each site family under each of the 3 engines through <code>LHD_FOLD_BODY_LOG=1</code>
+    <code>fold_body engine=E site=S</code> lines, no other engine's name allowed; loop and state-sweep netlists and the hierarchy LEC PROVEN; compile.sweep schedule; the region cache misses on an engine switch and hits on a repeat),
+    the sim fixtures <code>loop_roll_carry_{aeg,aegc,unroll}</code>, <code>loop_carry_kinds_sim_{aeg,aegc,unroll}</code> (<code>sim.unroll_sites</code> splices the loop so <code>cgen.sim.refold</code> runs) and the equiv header variant
+    <code>loop_carry_kinds_4</code> (aegraph+classic). Harness: a fixture <code>:set:</code> key that a forced <code>LHD_PRP_COMPILE_SETS</code> also names is dropped (the harness wins).
+    The LEC flip to the engine is in (unset <code>preflight_engine</code> follows the engine; the default engine is still classic): every in-repo lec/formal/semdiff/equiv test (790 targets in
+    <code>//lhd/... //pass/... //inou/prp:all</code> matching lec|formal|semdiff|equiv) passes with the process-wide engine forced to aegraph and to aegraph+classic (a temporary env override in the kernel, removed afterwards,
+    since the prp forced suites never pass the sets to <code>lhd lec</code>); <code>lhd_formal_summary_test</code> flaked once under load and passes alone. br_amba_axi_demux lives in a sibling suite that this repo's tests must not reference
+    and was NOT run here: the in-repo stand-in is <code>PreflightEngineOnTheDemuxShapeIsStampedAndEquivalent</code> (the packed ready/valid ring), so run it from the lhdtrack side before relying on the flip for that design.</li>
   <li>A <code>livehd::fold_body(graph, Engine, low_lanes)</code> dispatch for:
     <ul>
     <li>satopt cleanup;</li>

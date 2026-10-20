@@ -1,0 +1,13 @@
+/*
+:name: aeg_bit_reduction_rows
+:type: lec
+*/
+// PYROPE-vs-PYROPE group, the fixture of the bit-row reductions of the aegraph post step (Cprop::vectorize_bit_reductions
+// over the 0/1 expressions the engine built, whose widths come from Facts::structural_logic): bedrock's pairwise arbiter
+// `AND_j (!request[j] | priority[i][j])` as one word expression under a mask. REFERENCE = classic engine; `_1` = e-graph engine.
+pub comb top(req:U8, pm:U64) -> (cg:U8, any:U1) {
+  const t = (U1((req#[1] == 0) or (pm#[1] != 0)) & U1((req#[2] == 0) or (pm#[2] != 0)) & U1((req#[3] == 0) or (pm#[3] != 0)) & U1((req#[4] == 0) or (pm#[4] != 0)) & U1((req#[5] == 0) or (pm#[5] != 0)) & U1((req#[6] == 0) or (pm#[6] != 0)))
+  const u = (U1((req#[0] == 0) or (pm#[8] != 0)) & U1((req#[2] == 0) or (pm#[10] != 0)) & U1((req#[3] == 0) or (pm#[11] != 0)) & U1((req#[4] == 0) or (pm#[12] != 0)) & U1((req#[5] == 0) or (pm#[13] != 0)))
+  cg = (u << 1) | t
+  any = U1((req#[0] == 0) or (pm#[0] != 0)) | U1((req#[1] == 0) or (pm#[1] != 0))
+}

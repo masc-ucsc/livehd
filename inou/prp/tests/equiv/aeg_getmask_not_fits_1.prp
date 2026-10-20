@@ -1,0 +1,8 @@
+/*
+:name: aeg_getmask_not_fits_1
+:type: lec
+:set: compile.cprop.engine=aegraph
+:compile_grep: aegraph-rule getmask_not_bit .*extracted=[1-9]
+*/
+// HEADER-ONLY variant: aeg_getmask_not_fits.prp compiled by the acyclic e-graph engine; the grep shows the rule fired and
+// the extraction kept its result.

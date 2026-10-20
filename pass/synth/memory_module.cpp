@@ -18,6 +18,7 @@
 #include "bus_name.hpp"
 #include "diag.hpp"
 #include "file_utils.hpp"
+#include "fold_body.hpp"
 #include "graph_library_singleton.hpp"
 #include "node_util.hpp"
 #include "pass.hpp"
@@ -652,10 +653,10 @@ std::shared_ptr<hhds::Graph> enclose(hhds::Graph& parent, const hhds::Node_class
                                   {  "path",          (dir / "lg").string()},
                                   {"script",                script.string()}
     });
-    Pass::eprp.run_method_now("pass.cprop", parsed, {});
+    livehd::fold_graphs(parsed, "synth.memory_module", livehd::Fold_cost::synth);
     Pass::eprp.run_method_now("pass.bitwidth", parsed, {});
     Pass::eprp.run_method_now("pass.enableopt", parsed, {});
-    Pass::eprp.run_method_now("pass.cprop", parsed, {});
+    livehd::fold_graphs(parsed, "synth.memory_module", livehd::Fold_cost::synth, true);
     Pass::eprp.run_method_now("pass.bitwidth", parsed, {});
     auto& imported = Hhds_graph_library::instance((dir / "lg").string());
     auto  result   = imported.find_io(name);
@@ -767,7 +768,7 @@ std::shared_ptr<hhds::Graph> enclose(hhds::Graph& parent, const hhds::Node_class
       }
     }
     if (!observed.empty()) {
-      Pass::eprp.run_method_now("pass.cprop", parsed, {});
+      livehd::fold_graphs(parsed, "synth.memory_module", livehd::Fold_cost::synth, true);
       Pass::eprp.run_method_now("pass.bitwidth", parsed, {});
     }
     if (!lib->copy_from(imported, name)) {

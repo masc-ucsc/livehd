@@ -4346,6 +4346,7 @@ void Cprop::do_post(const std::shared_ptr<hhds::Graph>& g) {
   }
   livehd::cprop_value::Facts facts;
   livehd::cprop_value::Scope fact_scope(facts);
+  facts.structural_logic = true;
   current_graph          = g.get();
   const auto order       = stable_nodes(current_graph);
   size_t     edge_budget = 0;

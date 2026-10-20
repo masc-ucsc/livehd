@@ -11,7 +11,7 @@
 
 #include "absl/container/flat_hash_set.h"
 #include "bitwidth.hpp"
-#include "cprop.hpp"
+#include "fold_body.hpp"
 #include "diag.hpp"
 #include "graph_library_singleton.hpp"
 #include "pass.hpp"
@@ -78,8 +78,11 @@ public:
         if (graphs[i]->body_epoch() == before[i]) {
           continue;
         }
-        Cprop cprop{true};
-        cprop.do_trans(graphs[i]);
+        livehd::Fold_options fold;
+        fold.low_lanes = true;
+        fold.cost      = livehd::Fold_cost::synth;
+        fold.site      = "satopt.cleanup";
+        livehd::fold_body(graphs[i], fold);
         Bitwidth bitwidth(3);
         bitwidth.do_trans(graphs[i]);
       }

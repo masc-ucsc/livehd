@@ -1,6 +1,8 @@
 // This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 #pragma once
+#include <cstdint>
 #include <memory>
+#include <string_view>
 #include <vector>
 
 #include "absl/container/flat_hash_set.h"
@@ -50,7 +52,14 @@ int specialize_constants(std::vector<std::shared_ptr<hhds::Graph>>& graphs, cons
 // arithmetic with constant inputs): the same pair specialize_constants runs
 // after a callee publishes a constant. Kept here so cgen_sim.cpp does not
 // include the pass headers (pass/common/pass.hpp's `Pass` shadows its locals).
-void refold_private_body(const std::shared_ptr<hhds::Graph>& graph);
+//
+// The cprop half follows the fold engine (livehd::fold_body: compile.cprop.engine, set once by the kernel).
+// `cost` picks the engine's extraction profile: `compile` the kernel's resolved compile.aegraph.cost, `synth`
+// and `sim` pin one (the synthesis state sweep and the post-splice sim-time fold). `site` names the call in
+// the fold_body counters.
+enum class Refold_cost : uint8_t { compile, synth, sim };
+void refold_private_body(const std::shared_ptr<hhds::Graph>& graph, Refold_cost cost = Refold_cost::compile,
+                         std::string_view site = "specialize.refold");
 
 // In a colored graph (synthesis regions), give every node created since
 // `existed` (node debug ids; nullptr = every node) the color of a colored

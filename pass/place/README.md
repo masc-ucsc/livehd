@@ -47,6 +47,10 @@ then writes and reads back `synth/place/out.def`. GP mode may overlap, reports
 approximate timing and removes the stage's DEF. `synth/place/qor.json` reports
 legality separately from GP convergence/overflow, plus HPWL and placed WNS/TNS
 when STA supplies them. `--emit-dir report:` exports this as `placement.json`.
+`--emit-dir def:physical/` retains `out.def`, copies the ordered technology and
+cell LEFs under `physical/lef/`, and writes their relative paths to `lefs.json`
+(including a memory proxy LEF when present). These exports are part of the
+synthesis invocation; downstream independent timing analysis is separate.
 An unmet GP overflow target is reported even when legalization succeeds.
 
 GP also waits for timing-weighted HPWL and routability after geometry/density

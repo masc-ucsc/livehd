@@ -10,6 +10,7 @@
 
 #include "llvm/ADT/StringRef.h"
 #include "llvm/Support/SHA256.h"
+#include "fold_engine.hpp"
 #include "usyn_salt.hpp"
 
 namespace livehd::usyn {
@@ -37,7 +38,7 @@ Logical_cache_probe probe_logical_cache(const Logical_cache_options& options, st
   if (options.directory.empty()) {
     return result;
   }
-  auto identity = serialize_logical_identity(raw, source, names, logical, kUsynSrcSalt, options.context, io, options.limits);
+  auto identity = serialize_logical_identity(raw, source, names, logical, livehd::fold_salt_mix(kUsynSrcSalt), options.context, io, options.limits);
   if (identity.status != Status::feasible || !io.spend(identity.bytes.size())) {
     result.outcome = Cache_lookup::refused;
     result.reason  = "logical cache identity admission";

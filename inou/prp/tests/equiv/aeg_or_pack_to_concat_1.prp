@@ -1,0 +1,8 @@
+/*
+:name: aeg_or_pack_to_concat_1
+:type: lec
+:set: compile.cprop.engine=aegraph
+:compile_grep: aegraph-rule or_pack_to_concat .*extracted=[1-9]
+*/
+// HEADER-ONLY variant: aeg_or_pack_to_concat.prp compiled by the acyclic e-graph engine; the grep shows the rule fired and
+// the extraction kept its result.

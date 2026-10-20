@@ -64,6 +64,7 @@ cc_library(
     deps = [
         "//core",
         "//graph",
+        "//pass/aegraph:fold_engine",  # the engine is part of the cache salt
         "//pass/common:pass",
         "//pass/cprop:pass_cprop",
         "//pass/enableopt:pass_enableopt",

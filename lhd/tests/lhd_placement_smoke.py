@@ -38,6 +38,11 @@ cold = run('cold', ['--set', 'synth.place=true', '--emit-dir', f'def:{root}/def'
 place = cold['qor']['place']
 assert place['legal'] and place['mode'] == 'full', place
 assert (root/'def/out.def').is_file()
+exported_lefs = json.loads((root/'def/lefs.json').read_text())
+assert len(exported_lefs) == 2, exported_lefs
+for name, original in zip(exported_lefs, ['sky130hd.tlef', 'sky130hd.lef']):
+    assert (root/'def'/name).read_bytes() == (libdir/original).read_bytes()
+    assert str(root/'def'/name) in cold['outputs'], cold['outputs']
 assert any(p['name'] == 'pass.place' for p in cold['phases']), cold['phases']
 sta = cold['qor']['sta']['designs'][0]
 assert sta['parasitics']['nets'] > 0 and sta['parasitics']['identity'] == place['rc_identity'], sta

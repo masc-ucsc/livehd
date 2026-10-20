@@ -2147,10 +2147,25 @@ void graph_pipeline_and_emits(Options& opts, Result& res, Eprp_var& var, const s
         total_dead  += round.dead_bits;
         total_mem   += round.dead_memories;
         total_fix   += round.fix_rounds;
-        Eprp_var::Eprp_dict cp_labels, bw_labels;
-        merge_sets(opts, "compile.cprop", cp_labels);
-        cp_labels["loop_hoist"] = "false";
-        run_step("pass.cprop", *active, cp_labels, opts, res);
+        Eprp_var::Eprp_dict bw_labels;
+        // The sweep's fold follows compile.cprop.engine like the two schedule slots (whatever
+        // compile.cprop.engine_slots says: that selector only picks among the schedule's own slots).
+        Cprop_engine sweep_choice = resolve_cprop_engine(opts);
+        sweep_choice.slots        = "both";
+        for (const auto& method : cprop_slot_methods(sweep_choice, 0)) {
+          Eprp_var::Eprp_dict cp_labels;
+          merge_sets(opts, "compile.cprop", cp_labels);
+          cp_labels["loop_hoist"] = "false";
+          if (method == "pass.aegraph") {
+            cp_labels["after_bitwidth"] = "true";
+            cp_labels.erase("engine_slots");
+            merge_sets(opts, "compile.aegraph", cp_labels);
+            cp_labels["cost"] = resolve_aegraph_cost(opts);
+          } else if (cp_labels.contains("engine")) {
+            cp_labels["engine"] = "classic";
+          }
+          run_step(method, *active, cp_labels, opts, res);
+        }
         merge_sets(opts, "compile.bitwidth", bw_labels);
         run_step("pass.bitwidth", *active, bw_labels, opts, res);
       }

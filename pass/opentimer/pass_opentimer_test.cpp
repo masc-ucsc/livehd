@@ -85,6 +85,44 @@ set_output_delay 20 -clock virtual [all_outputs]
   EXPECT_NEAR(pass.timer.report_tns(ot::MAX).value(), -220, 1e-5);
   EXPECT_NEAR(pass.endpoint_tns(ot::MAX), -120, 1e-5);
 }
+TEST_F(SdcClock, BracedBusSelectorsPreserveEveryIndexAndContinueThroughTheList) {
+  Sdc_probe pass(var);
+  for (const auto& name : {"data[0]", "data[1]"}) {
+    pass.timer.insert_primary_input(name).disconnect_pin(name).connect_pin(name, "wire");
+  }
+  for (const auto& name : {"out[0]", "out[1]"}) {
+    pass.timer.insert_primary_output(name).disconnect_pin(name).connect_pin(name, "wire");
+  }
+  pass.read_sdc(write(R"sdc(
+create_clock -name virtual -period 100
+set_input_delay 10 -clock virtual [get_ports {a data[0] data[1]}]
+set_output_delay 20 -clock virtual [get_ports {y out[0] out[1]}]
+)sdc"));
+  for (const auto& name : {"y", "out[0]", "out[1]"}) {
+    EXPECT_EQ(pass.timer.report_slack(name, ot::MAX, ot::RISE), 70);
+  }
+  EXPECT_EQ(pass.timer.report_at("data[1]", ot::MAX, ot::RISE), 10);
+  pass.clock_qor_json();
+  EXPECT_TRUE(pass.complete());
+}
+TEST_F(SdcClock, VerilogBusSelectorsBindPinTrackerDotNames) {
+  Sdc_probe pass(var);
+  for (const auto& name : {"data", "data.1"}) {
+    pass.timer.insert_primary_input(name).disconnect_pin(name).connect_pin(name, "wire");
+  }
+  for (const auto& name : {"out", "out.1"}) {
+    pass.timer.insert_primary_output(name).disconnect_pin(name).connect_pin(name, "wire");
+  }
+  pass.read_sdc(write(R"sdc(
+create_clock -name virtual -period 100
+set_input_delay 10 -clock virtual [get_ports {a data[0] data[1]}]
+set_output_delay 20 -clock virtual [get_ports {y out[0] out[1]}]
+)sdc"));
+  EXPECT_EQ(pass.timer.report_at("data.1", ot::MAX, ot::RISE), 10);
+  EXPECT_EQ(pass.timer.report_slack("out.1", ot::MAX, ot::RISE), 70);
+  pass.clock_qor_json();
+  EXPECT_TRUE(pass.complete());
+}
 TEST_F(SdcClock, ExpandsScalarSelectorVariablesAndArithmeticLoads) {
   Sdc_probe pass(var);
   pass.read_sdc(write(R"sdc(

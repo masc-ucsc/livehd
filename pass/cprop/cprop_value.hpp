@@ -22,6 +22,9 @@ inline constexpr Window unknown_window{-1, -1};
 struct Facts {
   absl::flat_hash_map<hhds::Class_index, size_t>                                   write_costs;
   bool                                                                             track_wiring = true;
+  // pass.aegraph's post steps: And/Or/Xor widths follow their operands (remember() records them), so a 0/1 expression the
+  // engine built reads as a bit to the region passes (vectorize_bit_reductions) without the forward sweep that records it.
+  bool                                                                             structural_logic = false;
   Cprop_wiring                                                                     wiring;
   absl::flat_hash_map<hhds::Class_index, std::pair<Cprop_wiring::Reference, bool>> conditions;
   absl::flat_hash_map<hhds::Class_index, uint64_t>                                 generations;
@@ -234,6 +237,28 @@ inline void remember(const Node& node) {
     active->write_costs.insert_or_assign(output.get_class_index(), cost);
     if (window && base_width >= 0) {
       active->capacities.insert_or_assign(output.get_class_index(), std::max(base_width, window->second));
+    }
+  }
+  if (active->structural_logic && (op == Ntype_op::And || op == Ntype_op::Or || op == Ntype_op::Xor)) {
+    // And: the narrowest known operand bounds it. Or/Xor: every operand must be known, the widest bounds it.
+    int  bound = op == Ntype_op::And ? std::numeric_limits<int>::max() : 0;
+    bool known = op != Ntype_op::And ? true : false;
+    for (auto sink : node.inp_sorted_pins()) {
+      const int w = unsigned_width(sink.get_driver_pin());
+      if (op == Ntype_op::And) {
+        if (w >= 0) {
+          bound = std::min(bound, w);
+          known = true;
+        }
+      } else if (w < 0) {
+        known = false;
+        break;
+      } else {
+        bound = std::max(bound, w);
+      }
+    }
+    if (known && bound >= 0 && bound < (1 << 20)) {
+      active->capacities.insert_or_assign(output.get_class_index(), bound);
     }
   }
   const int width   = unsigned_width(output);

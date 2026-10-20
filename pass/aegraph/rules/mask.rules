@@ -205,3 +205,24 @@
 
 ;; (The per-lane form of vectorize_bit_reductions, a run of adjacent bits of one word, is the native rule
 ;; `bit_run_reduction` in rules/mask.cpp: its operands are a multiset, and a run is found whatever order they arrive in.)
+
+;; The low bit of a complement of a 0/1 value is the value's negation: the Not and its Get_mask become one EQ (this
+;; is the NAND of bedrock's priority encoder, `!(in[i] & ~seen)`, one bit wide). An alt: the lint prices the right-hand side at the
+;; example's width, where the guard does not hold; at one bit EQ(x, 0) is free under the hardware profile and the Not is not.
+(alt getmask_not_bit 31
+  (Get_mask (Not x) 0 1)
+  :when (bool01 x)
+  => (EQ x 0)
+  :example (Get_mask (Not (Get_mask $x 0 1)) 0 1)
+  :doc "Get_mask(Not(x), 0, 1) = EQ(x, 0) for a 0/1 value x: bit 0 of the complement of 0 / 1 is 1 / 0.")
+
+;; The wider form: the low window of a complement of a value that already fits the window is that value xor all ones. An
+;; alt: a Xor is priced above a Not under the hardware profile, where the window is free, and below Not + Get_mask under
+;; the simulation profile, where the window costs instructions.
+(alt getmask_not_fits 31
+  (Get_mask (Not x) 0 (k n))
+  :when (> n 1) (<= n 62) (fits x n)
+  => (Xor x (k (mask_of n)))
+  :expect (synth lhs) (sim rhs)
+  :example (Get_mask (Not (Get_mask $x 0 4)) 0 4)
+  :doc "Get_mask(Not(x), 0, n) = x ^ (2^n - 1) when 0 <= x < 2^n: two nodes (the complement and its mask) become one.")

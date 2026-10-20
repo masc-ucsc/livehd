@@ -416,7 +416,7 @@ private:
           gu::drop_drivers(flop);
           flop.del_node();
         }
-        specialize::refold_private_body(def.graph);
+        specialize::refold_private_body(def.graph, specialize::Refold_cost::synth, "synth.state_sweep");
         specialize::inherit_colors(*def.graph, &*existed);
       }
     }
