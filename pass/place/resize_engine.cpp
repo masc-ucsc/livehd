@@ -1215,7 +1215,8 @@ private:
   void isolate_moves(const std::vector<Stage>& stages, size_t k, double path_slack, std::vector<Move>& moves) {
     const auto& st    = stages[k];
     const auto& sinks = nets_.at(st.driver);
-    if (sinks.size() < 2 || lib_.buffers.empty() || blocked_drivers_.contains(st.driver)) {
+    // High-fanout nets are the fanout trees' job; isolation probes every sink.
+    if (sinks.size() < 2 || sinks.size() > 256 || lib_.buffers.empty() || blocked_drivers_.contains(st.driver)) {
       return;
     }
     std::vector<std::string> moved;
@@ -1281,42 +1282,61 @@ private:
     const double t_old = wire(l0, cs);
     Move         best;
     best.est = 1;
-    for (const auto* b : lib_.buffers) {
-      const double   cin       = cell_pin_cap(*b, b->inputs.front());
-      const double   unit      = b->intrinsic_ps + b->resistance_ohm * cin * 1e-3;
-      const double   l_opt     = r > 0 && c > 0 ? std::sqrt(2 * std::max(unit, 1.0) / (r * c * 1e-3)) : kInf;
-      const unsigned max_chain = std::isfinite(l_opt) ? std::clamp(static_cast<unsigned>(std::ceil(l0 / l_opt)), 1u, 12u) : 1u;
-      for (unsigned n = 1; n <= max_chain; ++n) {
-        std::vector<std::vector<double>> cuts;
-        if (n == 1) {
-          cuts = {{.3}, {.5}, {.7}};
-        } else {
-          std::vector<double> even;
-          for (unsigned i = 1; i <= n; ++i) {
-            even.push_back(double(i) / (n + 1));
-          }
-          cuts.push_back(std::move(even));
+    // Up to four repeater sizes spread over the library, smallest to strongest.
+    std::vector<const Buffer*> sizes;
+    for (size_t i = 0; i < 4 && !lib_.buffers.empty(); ++i) {
+      const auto* b = lib_.buffers[i * (lib_.buffers.size() - 1) / 3];
+      if (sizes.empty() || sizes.back() != b) {
+        sizes.push_back(b);
+      }
+    }
+    unsigned max_chain = 1;
+    for (const auto* b : sizes) {
+      const double cin   = cell_pin_cap(*b, b->inputs.front());
+      const double unit  = b->intrinsic_ps + b->resistance_ohm * cin * 1e-3;
+      const double l_opt = r > 0 && c > 0 ? std::sqrt(2 * std::max(unit, 1.0) / (r * c * 1e-3)) : kInf;
+      if (std::isfinite(l_opt)) {
+        max_chain = std::max(max_chain, std::clamp(static_cast<unsigned>(std::ceil(l0 / l_opt)), 1u, 12u));
+      }
+    }
+    // Cut geometry (seeds, moved sinks, their load) does not depend on the size.
+    const auto& net_sinks = nets_.at(st.driver);
+    for (unsigned n = 1; n <= max_chain; ++n) {
+      std::vector<std::vector<double>> cuts;
+      if (n == 1) {
+        cuts = {{.3}, {.5}, {.7}};
+      } else {
+        std::vector<double> even;
+        for (unsigned i = 1; i <= n; ++i) {
+          even.push_back(double(i) / (n + 1));
         }
-        for (const auto& fractions : cuts) {
-          std::vector<Point> chain;
-          for (const double f : fractions) {
-            chain.push_back(lerp(d, s, f));
+        cuts.push_back(std::move(even));
+      }
+      for (const auto& fractions : cuts) {
+        std::vector<Point> chain;
+        for (const double f : fractions) {
+          chain.push_back(lerp(d, s, f));
+        }
+        std::vector<std::string> moved{st.sink};
+        for (const auto& other : net_sinks) {
+          if (other != st.sink && manhattan(position(other), chain.front()) < manhattan(position(other), d)) {
+            moved.push_back(other);
           }
-          std::vector<std::string> moved{st.sink};
-          for (const auto& other : nets_.at(st.driver)) {
-            if (other != st.sink && manhattan(position(other), chain.front()) < manhattan(position(other), d)) {
-              moved.push_back(other);
-            }
+        }
+        double moved_cap = 0;
+        for (const auto& m : moved) {
+          moved_cap += pin_cap(m) + c * manhattan(d, position(m));
+        }
+        const double down = group_load(moved, chain.back());
+        const double lp   = manhattan(d, chain.front());
+        for (const auto* b : sizes) {
+          if (n > 1 && b == sizes.front() && sizes.size() > 1) {
+            continue;  // chains use real drivers
           }
-          double moved_cap = 0;
-          for (const auto& m : moved) {
-            moved_cap += pin_cap(m) + c * manhattan(d, position(m));
-          }
-          const double down = group_load(moved, chain.back());
           if (!electrical_limit_ok(*b, down)) {
             continue;
           }
-          const double lp    = manhattan(d, chain.front());
+          const double cin   = cell_pin_cap(*b, b->inputs.front());
           const double l1    = std::max(cin, load0 - moved_cap + c * lp + cin);
           double       t_new = driver_delta(st, load0, l1) + wire(lp, cin);
           double       slew  = std::max(5.0, st.slew_out);
@@ -1358,6 +1378,9 @@ private:
     m.kind    = Move::Kind::shed;
     m.driver  = st.driver;
     double dc = 0;
+    if (nets_.at(st.driver).size() > 64) {
+      return;  // shedding is a local move; very wide nets need a tree instead
+    }
     for (const auto& s : nets_.at(st.driver)) {
       const auto owner = instance_of(s);
       if (s == st.sink || !editable(owner)) {
