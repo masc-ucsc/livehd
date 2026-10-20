@@ -96,7 +96,38 @@ printf '%s\n' 'a_ok a_ok hyps: a_ok' 'b_ok b_ok hyps: b_ok' 'eq_ok eq_ok hyps: e
 printf '%s\n' 'a_ok a_ok hyps: a_ok' 'b_ok b_ok hyps: b_ok' 'eq_ok eq_ok hyps: eq_ok' \
   'lag_ok lag_ok hyps: lag_ok a_ok' > "$OUT/pair_missing.spec"
 printf '%s\n' 'a_ok a_ok' 'never !a_ok' > "$OUT/pair_false.spec"
-for d in cnt10 acc1 acc2 pair; do
+# M8 register facts and case splits: two cores running one FSM, core B's states
+# encoded one higher; their data registers are equal, checked per joint state.
+cat > "$OUT/twocore.sv" <<'EOF'
+module twocore(input clk, input rst, input go, input [7:0] x, output [7:0] dA_o, output [7:0] dB_o);
+  reg [1:0] sA; reg [7:0] dA;
+  always @(posedge clk) begin
+    if (rst) begin sA <= 2'd0; dA <= 8'd0; end
+    else begin
+      sA <= (sA == 2'd0) ? (go ? 2'd1 : 2'd0) : (sA == 2'd1) ? 2'd2 : 2'd0;
+      if (sA == 2'd1) dA <= dA + x;
+      else if (sA == 2'd2) dA <= dA ^ x;
+    end
+  end
+  reg [1:0] sB; reg [7:0] dB;
+  always @(posedge clk) begin
+    if (rst) begin sB <= 2'd1; dB <= 8'd0; end
+    else begin
+      case (sB)
+        2'd2: sB <= 2'd3;
+        2'd3: sB <= 2'd1;
+        default: sB <= go ? 2'd2 : 2'd1;
+      endcase
+      dB <= (sB == 2'd2) ? x + dB : (sB == 2'd3) ? x ^ dB : dB;
+    end
+  end
+  assign dA_o = dA;
+  assign dB_o = dB;
+endmodule
+EOF
+printf '%s\n' 's_dom oneof sA=0,sB=0;sA=0,sB=1;sA=1,sB=2;sA=2,sB=3' 'd_eq eq dA dB split: s_dom' > "$OUT/tc_split.spec"
+printf '%s\n' 's_dom oneof sA=0,sB=0;sA=0,sB=1;sA=1,sB=2;sA=2,sB=2;sA=2,sB=3' 'd_eq eq dA dB split: s_dom' > "$OUT/tc_bad.spec"
+for d in cnt10 acc1 acc2 pair twocore; do
   "$LHD" compile "$OUT/$d.sv" --reader yosys-slang --top "$d" --set yosys.setundef=zero \
     --emit-dir "lg:$OUT/${d}_lg" --workdir "$OUT/${d}_cw" > "$OUT/$d.compile.log" 2>&1 \
     || { tail -5 "$OUT/$d.compile.log"; echo "FAIL: compile $d"; exit 1; }
@@ -162,4 +193,9 @@ grep -q '^  a = 4.ha$' "$OUT/work/cti_eq_ok.txt" || { cat "$OUT/work/cti_eq_ok.t
 run sym_verify "COUNTEREXAMPLE"      "$P" "conj:$OUT/pair_false.spec"
 # the monolithic check of eq_ok alone is not inductive: it needs a_ok
 run sym_verify "NOT K-INDUCTIVE"     "$P" eq_ok k:1
+TC="$OUT/twocore_lean/twocore.dcert"
+run sym_verify "INVARIANT PROVED"    "$TC" "conj:$OUT/tc_split.spec" jobs:4
+grep -q '\[d_eq | sA=2,sB=3\] .*UNSAT' "$OUT/run_$N.log" || { echo "FAIL: per-case obligation not reported"; exit 1; }
+run sym_verify "NOT INDUCTIVE"       "$TC" "conj:$OUT/tc_bad.spec" jobs:4
+grep -q '\[d_eq | sA=2,sB=2\] counterexample REPLAYED' "$OUT/run_$N.log" || { tail -5 "$OUT/run_$N.log"; echo "FAIL: case counterexample not replayed"; exit 1; }
 echo "PASS: sym_selftest"
