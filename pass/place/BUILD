@@ -8,6 +8,8 @@ filegroup(
         "color_centroids.hpp",
         "h2d.cpp",
         "h2d.hpp",
+        "io_timing.cpp",
+        "io_timing.hpp",
         "macro_snap.cpp",
         "macro_snap.hpp",
         "memory_proxy.cpp",
@@ -62,6 +64,7 @@ cc_library(
     srcs = [
         "color_centroids.cpp",
         "h2d.cpp",
+        "io_timing.cpp",
         "macro_snap.cpp",
         "memory_proxy.cpp",
         "pin_adjust.cpp",
@@ -77,6 +80,7 @@ cc_library(
     hdrs = [
         "color_centroids.hpp",
         "h2d.hpp",
+        "io_timing.hpp",
         "macro_snap.hpp",
         "memory_proxy.hpp",
         "pin_adjust.hpp",
@@ -118,6 +122,22 @@ cc_test(
     deps = [
         ":place",
         "//pass/opentimer:pass_opentimer",
+        "@googletest//:gtest_main",
+    ],
+)
+
+cc_test(
+    name = "io_timing_test",
+    size = "small",
+    srcs = ["io_timing_test.cpp"],
+    copts = COPTS,
+    data = [
+        "//inou/lefdef:test_data",
+        "//inou/prp:abc_tests",
+    ],
+    deps = [
+        ":place",
+        "//pass/abc:pass_abc",
         "@googletest//:gtest_main",
     ],
 )
@@ -181,7 +201,10 @@ cc_test(
     name = "macro_snap_test",
     srcs = ["macro_snap_test.cpp"],
     copts = COPTS,
-    deps = [":place", "@googletest//:gtest_main"],
+    deps = [
+        ":place",
+        "@googletest//:gtest_main",
+    ],
 )
 
 cc_test(

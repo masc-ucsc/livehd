@@ -184,8 +184,8 @@ AEG_NATIVE_RULE(mux_guard_accumulation, simplify, 25, Ntype_op::Mux) {
     const Class_id updated = updated_is_true ? root.ops[2].cls : root.ops[1].cls;
     const Class_id hold    = updated_is_true ? root.ops[1].cls : root.ops[2].cls;
     const Enode*   cell    = ctx.eg().enode_of(updated);
-      if (cell == nullptr || (cell->op != Ntype_op::Or && cell->op != Ntype_op::Xor && cell->op != Ntype_op::And)
-        || updated == hold || !ctx.single_use(updated)) {
+    if (cell == nullptr || (cell->op != Ntype_op::Or && cell->op != Ntype_op::Xor && cell->op != Ntype_op::And) || updated == hold
+        || !ctx.single_use(updated)) {
       continue;
     }
     const auto& attrs = ctx.eg().attrs_of(*cell);
@@ -212,11 +212,22 @@ AEG_NATIVE_RULE(mux_guard_accumulation, simplify, 25, Ntype_op::Mux) {
     if (held != 1 || rest.empty()) {
       continue;  // the held value must appear exactly once (a Xor parity of it stays)
     }
-    const Class_id term     = ctx.make_bank(cell->op, std::move(rest));
-    const Class_id identity = ctx.konst(cell->op == Ntype_op::And ? -1 : 0);
-    const Class_id guard    = updated_is_true ? ctx.make(Ntype_op::Mux, {Operand{0, s}, Operand{1, identity}, Operand{2, term}})
+    // Building a class may reallocate the e-node storage behind cell.
+    const auto     op       = cell->op;
+    const Class_id term     = ctx.make_bank(op, std::move(rest));
+    const Class_id identity = ctx.konst(op == Ntype_op::And ? -1 : 0);
+    const Class_id guard    = updated_is_true ? ctx.make(Ntype_op::Mux,
+                                                         {
+                                                             Operand{0,        s},
+                                                             Operand{1, identity},
+                                                             Operand{2,     term}
+    })
                                               : ctx.make(Ntype_op::Mux, {Operand{0, s}, Operand{1, term}, Operand{2, identity}});
-    out.subsume(ctx.make_bank(cell->op, std::vector<Operand>{Operand{0, hold}, Operand{0, guard}}));
+    out.subsume(ctx.make_bank(op,
+                              std::vector<Operand>{
+                                  Operand{0,  hold},
+                                  Operand{0, guard}
+    }));
     return;
   }
 }

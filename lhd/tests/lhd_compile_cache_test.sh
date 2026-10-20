@@ -486,7 +486,7 @@ EOF
 
 fcompile() {  # RESULT_JSON DIAG_JSONL
   local result=$1 diag=$2
-  "$LHD" compile "$FW/src/froot.prp" --top froot --emit-dir "lg:$FW/lg" \
+  "$LHD" compile "$FW/src/froot.prp" --top froot --set compile.specialize_modules=false --emit-dir "lg:$FW/lg" \
     --workdir "$FW/w" -q --result-json "$result" --emit "diagnostics:$diag" \
     || fail "formal-warning compile failed: $(cat "$result" 2>/dev/null)"
 }
@@ -591,7 +591,7 @@ has_phase "$FW/edit.json" pass.upass || fail "semantic edit did not re-lower the
   || fail "a warning-bearing partial restore did not retain the clean graphs"
 [ "$(fwarns "$FW/edit.jsonl")" = "$COLD_WARNS" ] \
   || fail "semantic edit did not reproduce the pass.formal warnings live"
-"$LHD" compile "$FW/src/froot.prp" --top froot --emit-dir "lg:$FW/edit_cold_lg" \
+"$LHD" compile "$FW/src/froot.prp" --top froot --set compile.specialize_modules=false --emit-dir "lg:$FW/edit_cold_lg" \
   --workdir "$FW/edit_cold_w" --set lhd.incremental=false -q --result-json "$FW/edit_cold.json" \
   || fail "formal-warning cold reference failed"
 [ "$("$LHD" tool diff "lg:$FW/edit_cold_lg" "lg:$FW/lg" --structural -q)" = identical ] \
@@ -613,7 +613,7 @@ fcompile "$FW/ovdmg.json" "$FW/ovdmg.jsonl"
 [ "$(field "$FW/ovdmg.json" incremental.compile.refused)" -ge 1 ] \
   || fail "damaged warning-bearing graph generation was not refused"
 has_phase "$FW/ovdmg.json" pass.upass || fail "damaged graph generation did not rebuild live"
-"$LHD" compile "$FW/src/froot.prp" --top froot --emit-dir "lg:$FW/ovdmg_cold_lg" \
+"$LHD" compile "$FW/src/froot.prp" --top froot --set compile.specialize_modules=false --emit-dir "lg:$FW/ovdmg_cold_lg" \
   --workdir "$FW/ovdmg_cold_w" --set lhd.incremental=false -q --result-json "$FW/ovdmg_cold.json" \
   || fail "overlay-declined cold reference failed"
 [ "$("$LHD" tool diff "lg:$FW/ovdmg_cold_lg" "lg:$FW/lg" --structural -q)" = identical ] \

@@ -678,7 +678,7 @@ public:
         err(p.line, "an analysis parameter is a name (a class) or (k name) (a constant)");
       }
     }
-    for (size_t i = 3; i < s.items.size(); ++i) {
+    for (size_t i = 3; i < s.items.size(); i += 2) {
       const auto& k = s.items[i];
       if (!k.is_atom() || i + 1 >= s.items.size()) {
         err(k.line, "expected :type/:uses/:spec with a value");
@@ -694,7 +694,6 @@ public:
       } else {
         err(k.line, "unknown analysis option `" + k.text + "`");
       }
-      ++i;
     }
     out.list.push_back(std::move(a));
   }

@@ -515,7 +515,7 @@ synth::Region_plan Abc_backend::plan(const synth::Region_ctx& ctx) {
   // The `*_flow selected` lines are the only external evidence that a tier fired
   // (lhd/tests/lhd_abc_test.sh greps for them); keep them on every branch that
   // substitutes a recipe.
-  bool large_tier = false;  // the region runs the size tier's flow
+  bool large_tier                              = false;  // the region runs the size tier's flow
   if (region_.flow.empty() && region_.large_ge && !region_.large_flow.empty() && ctx.input_ge >= region_.large_ge) {
     region_.flow = resolve_flow(region_.large_flow);
     large_tier   = true;
@@ -556,23 +556,25 @@ synth::Region_plan Abc_backend::plan(const synth::Region_ctx& ctx) {
   }
 
   synth::Region_plan plan;
+  plan.resolved_flow        = comb_flow();
+  plan.custom_flow          = !tool_owned_flow_;
   // pass.abc.large_flow_latches: the tool's default size-tier flow is combinational too (the option is only ever set while
   // large_flow is that default, so a tier region keeps its latches exactly then).
-  const bool keeps_latches = builtin_flow_ || (large_tier && region_.large_flow_latches);
-  plan.preserves_latches   = keeps_latches;
-  plan.recipe             = resolve_recipe(ctx);
-  plan.recipe            += ctx.rb.ctrl ? "|ctrl=1" : "|ctrl=0";
+  const bool keeps_latches  = builtin_flow_ || (large_tier && region_.large_flow_latches);
+  plan.preserves_latches    = keeps_latches;
+  plan.recipe               = resolve_recipe(ctx);
+  plan.recipe              += ctx.rb.ctrl ? "|ctrl=1" : "|ctrl=0";
   // The frame's driving cell (resolve_boundary_defaults) makes `buffer` tree
   // every input's fanout out of band of the flow string: spell the decision.
   // From the OPTIONS, not the frame -- an all-hit run never starts ABC, and
   // the resolved cell is a function of the library (in the cache salt) and
   // `boundary_drive` alone.
-  plan.recipe            += "|pi_drive=";
-  plan.recipe            += (region_.boundary_buffer && region_.max_fanout != 0)
-                                ? (region_.boundary_drive.empty() ? "auto" : region_.boundary_drive)
-                                : "none";
-  plan.recipe            += keeps_latches && !builtin_flow_ ? "|tier_latches=1" : "";
-  plan.recipe            += region_.map_register ? "\n# livehd-register=abc" : "\n# livehd-register=native";
+  plan.recipe              += "|pi_drive=";
+  plan.recipe              += (region_.boundary_buffer && region_.max_fanout != 0)
+                                  ? (region_.boundary_drive.empty() ? "auto" : region_.boundary_drive)
+                                  : "none";
+  plan.recipe              += keeps_latches && !builtin_flow_ ? "|tier_latches=1" : "";
+  plan.recipe              += region_.map_register ? "\n# livehd-register=abc" : "\n# livehd-register=native";
   return plan;
 }
 
@@ -765,28 +767,31 @@ std::optional<synth::Cell_netlist> Abc_backend::map(const synth::Region_ctx& ctx
   const std::string remap_post = put_step + (tail_on ? flow_tail : "");
   const bool        remappable = tool_owned_flow_ && flow.ends_with(map_step + remap_post);
   Flow_plan         plan;
-  plan.flow                  = flow;
-  plan.size_to_budget        = std::format("upsize {0}; dnsize {0}", budget_flag_);
-  plan.map_step              = map_step;
-  plan.remap_post            = remap_post;
-  plan.area_flow             = area_cmd;
-  plan.ladder                = ladder_on;
-  plan.remappable            = remappable;
-  plan.area_candidate        = candidate_on;
-  plan.budget                = budget;
-  plan.area_relax_pct        = region_.area_relax_pct;
-  const auto& flow_admission = ctx.admission;
+  Wire_load_scope wire_scope(region_.io_feedback ? region_.io_feedback->wire(rb.module_name) : synth::Wire_load{}, rb.module_name);
+  plan.wire_loads             = wire_scope.enabled();
+  plan.annotate_wire_commands = tool_owned_flow_;
+  plan.flow                   = flow;
+  plan.size_to_budget         = std::format("upsize {0}; dnsize {0}", budget_flag_);
+  plan.map_step               = map_step;
+  plan.remap_post             = remap_post;
+  plan.area_flow              = area_cmd;
+  plan.ladder                 = ladder_on;
+  plan.remappable             = remappable;
+  plan.area_candidate         = candidate_on;
+  plan.budget                 = budget;
+  plan.area_relax_pct         = region_.area_relax_pct;
+  const auto& flow_admission  = ctx.admission;
   // A region hook's rewrite (pass/usyn) replaces the region's logic: in the
   // region's own PI/PO/latch skeleton, as the flow's input, or technology-
   // mapped only (`&nf`, no restructuring). A tmap result only gets the
   // fanout/sizing tail (buffering and gate sizing), like every built-in flow,
   // then the budget ladder: sizing to the budget and slack-to-area re-mapping.
-  bool        rewrite_mapped = false;
+  bool        rewrite_mapped  = false;
   // A tmap result may still convert measured slack into area by re-running the
   // same mapping-only `&nf` with ABC's relaxation ratio (`area_relax`); `&st`
   // saves the GIA that `&undo` restores. It needs the sizing ladder's budget.
-  const bool  tmap_remap     = rewrite.map == synth::Region_rewrite::Map::tmap && ladder_on && region_.area_relax_pct > 0;
-  const auto  tmap_nf        = region_.delay.empty() ? std::string{"&nf"} : std::format("&nf -D {}", region_.delay);
+  const bool  tmap_remap      = rewrite.map == synth::Region_rewrite::Map::tmap && ladder_on && region_.area_relax_pct > 0;
+  const auto  tmap_nf         = region_.delay.empty() ? std::string{"&nf"} : std::format("&nf -D {}", region_.delay);
   if (rewrite.map != synth::Region_rewrite::Map::region) {
     auto* logic = static_cast<Abc_Ntk_t*>(lnet_into_logic(rewrite.logic, Abc_FrameReadNtk(frame)));
     if (logic == nullptr) {
@@ -945,7 +950,7 @@ std::optional<synth::Cell_netlist> Abc_backend::map(const synth::Region_ctx& ctx
         // sizing steps have selected concrete drive strengths, time the
         // resulting network with those cells' actual NLDM surfaces, matching
         // ABC's `stime` (the same timer the budget ladder judged by).
-        if (const auto phys = physical_flow_qor(pMappedLogic)) {
+        if (const auto phys = physical_flow_qor(pMappedLogic, wire_scope.enabled())) {
           q.delay    = phys->first;
           q.area     = phys->second;
           q.delay_ps = true;

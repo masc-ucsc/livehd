@@ -42,7 +42,7 @@ grep -q "1'b0" "$W/impl.v" && grep -q '{3' "$W/ref_live.v" || { echo "FAIL: fixt
 run() {  # tag ref impl [extra...]
   local tag=$1 ref=$2 impl=$3
   shift 3
-  "$LHD" lec --set formal.effort=proof --set formal.timeout=20 --set formal.lec.semdiff=none \
+  "$LHD" lec --set compile.specialize_modules=false --set formal.effort=proof --set formal.timeout=20 --set formal.lec.semdiff=none \
     --set formal.simfail_run=false --ref "$W/$ref" --impl "$W/$impl" --top top \
     --workdir "$W/$tag" --result-json "$W/$tag.json" "$@" >"$W/$tag.log" 2>&1
   RC=$?

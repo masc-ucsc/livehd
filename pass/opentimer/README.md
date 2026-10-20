@@ -324,13 +324,37 @@ The native `physical_repair` diagnostic accepts `timing_only=true` and
 `source_def=true` to import mapped DEF connectivity without HDL optimization or
 legalization. `rc_file` supplies serialized native parasitics; `zero_wire=true`
 removes wire R/C while retaining characterized pin loads. This path does not
-certify the imported layout's legality. The smaller `timing_probe` diagnostic
-times a structural Verilog/Liberty/SDC/SPEF reproducer through the same adapter.
+certify the imported layout's legality. Its `timing.json` retains the path and
+the 256 worst physical pins; `timing_pins` adds explicitly requested pins.
+The smaller `timing_probe` diagnostic times a structural Verilog/Liberty/SDC/SPEF
+reproducer through the same adapter. An optional `pins` list restricts its
+per-transition report, including arrival, required time, slew, slack and load.
 
-The native wire model still uses total capacitance and an Elmore/moment response.
-It differs from OpenSTA's effective-capacitance waveform calculator even with
-identical RC. Keep this modeling difference separate from Liberty/constraint
-errors and from differences between placement RC estimators.
+The native interconnect model reduces each RC tree to a driving-point Pi model
+and computes a bounded charge-equivalent capacitance for characterized drivers.
+It fits the driver ramp to Liberty timing, evaluates threshold crossings on the
+driver/wire waveform, and honors each library's rise/fall thresholds and slew
+derate. Invalid or load-independent characterized drivers retain full-load NLDM
+timing, Elmore wire delay and characterized slew (converted to the sink
+library conventions). This avoids inventing a waveform for constant-delay SRAM
+tables. Uncharacterized input ports use a finite-ramp one-pole response.
+`set_driving_cell` uses the same model. Physical capacitance and electrical-load
+limits still use the full load; the selected effective capacitance is available
+separately through OpenTimer's `Net::effective_load` and the diagnostic probe.
+This remains an RC approximation. Keep its residual differences separate from
+Liberty/constraint errors and differences between placement RC estimators.
+
+Compare a persistent session with a fresh session before changing the timing
+model. Then compare engines with zero wire RC and with an identical exported RC
+network. Inspect one common path by transition, not just each engine's own worst
+path. A matching zero-wire result isolates interconnect behavior from Liberty
+tables and setup constraints. A single-pole test provides an analytic reference:
+at 50% voltage the delay is `tau * ln(2)`, while a step's 20–80% slew is
+`tau * ln(4)`. Finite input slew and each library's threshold/derate conventions
+must be included when comparing wire responses. Driver effective capacitance is
+a separate model from converting an RC moment to a voltage crossing; correcting
+one does not establish agreement in the other. Do not compensate for an
+unexplained model difference by adjusting critical-net fractions or sizing limits.
 
 ## Placement feedback in memory
 
@@ -349,6 +373,9 @@ node indices. Evaluating the retained placement after a rejected candidate
 reverses its deltas; it does not assume that the last timed candidate was kept.
 Parasitic snapshots supplied to the session must remain immutable. A changed
 snapshot is a new `Parasitics` object, as produced by the placement RC estimator.
+Changing net membership invalidates its old RC tree before another timing
+evaluation; attaching the new parasitics restores the updated tree. Repowering
+retains connectivity and recalculates the load-dependent driver model.
 Top-level ports and native memory/state boundaries remain the same during the
 session. Synthesis criticality-color annotation and external SPEF use the
 standalone pass rather than this physical-feedback interface.

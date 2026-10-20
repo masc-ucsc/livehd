@@ -16,6 +16,7 @@
 #include "abc_boundary.hpp"
 
 #include <algorithm>
+#include <chrono>
 #include <cmath>
 #include <format>
 #include <functional>
@@ -23,6 +24,7 @@
 #include <memory>
 #include <optional>
 #include <print>
+#include <set>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -40,6 +42,7 @@
 #include "hhds/graph.hpp"
 #include "host_mem.hpp"
 #include "node_util.hpp"
+#include "pass/partition/flatten.hpp"
 #include "pin_tracker.hpp"
 #include "region_cache.hpp"
 
@@ -55,12 +58,60 @@ extern "C" {
 #include "map/scl/sclLib.h"
 #include "map/scl/sclSize.h"
 #include "misc/extra/extra.h"
+int Abc_NtkDarCec(Abc_Ntk_t*, Abc_Ntk_t*, int, int, int);
 }
 // clang-format on
 
 namespace gu = livehd::graph_util;
 
 namespace livehd::abc {
+Wire_load_scope::Wire_load_scope(const synth::Wire_load& wire, std::string_view module) {
+  if (wire.empty()) {
+    return;
+  }
+  auto* lib = static_cast<SC_Lib*>(Abc_FrameReadLibScl());
+  if (!lib) {
+    return;
+  }
+  auto* model  = Abc_SclWireLoadAlloc();
+  model->pName = Extra_UtilStrsav(std::format("lhd_{}", module).c_str());
+  model->cap   = wire.capacitance_ff_um;
+  auto lengths = wire.length_um;
+  // ABC returns early when fanout one is absent. Anchor interpolation there.
+  if (!lengths.contains(1)) {
+    lengths[1] = lengths.begin()->second / lengths.begin()->first;
+  }
+  if (lengths[1] == 0 && std::any_of(lengths.begin(), lengths.end(), [](const auto& entry) { return entry.second > 0; })) {
+    lengths[1] = 1e-9;  // avoid ABC's zero-fanout-one early return
+  }
+  unsigned previous        = 0;
+  double   previous_length = 0;
+  for (const auto& [fanout, length] : lengths) {
+    Vec_IntPush(&model->vFanout, fanout);
+    Vec_FltPush(&model->vLen, length);
+    model->slope    = (length - previous_length) / (fanout - previous);
+    previous        = fanout;
+    previous_length = length;
+  }
+  model->slope               = std::max(0.f, model->slope);
+  old_default_               = lib->default_wire_load;
+  old_selection_             = lib->default_wire_load_sel;
+  lib->default_wire_load     = model->pName;
+  lib->default_wire_load_sel = nullptr;
+  Vec_PtrPush(&lib->vWireLoads, model);
+  library_ = lib;
+  model_   = model;
+}
+Wire_load_scope::~Wire_load_scope() {
+  if (!library_) {
+    return;
+  }
+  auto* lib                  = static_cast<SC_Lib*>(library_);
+  lib->default_wire_load     = old_default_;
+  lib->default_wire_load_sel = old_selection_;
+  Vec_PtrRemove(&lib->vWireLoads, model_);
+  Abc_SclWireLoadFree(static_cast<SC_WireLoad*>(model_));
+}
 
 // ---------------------------------------------------------------------------
 // Boundary_table
@@ -327,6 +378,8 @@ struct Instance {
 // One def of the output library reachable from --top: region modules and
 // wrappers alike (a wrapper is a def with zero cells and only instances).
 struct Imp_def {
+  bool                                                        combinational_cuts = false;
+  std::vector<Pin_key>                                        pi_leaves, po_sinks;
   bool                                                        depth_complete = true;
   std::string                                                 name;
   hhds::Graph*                                                g   = nullptr;
@@ -422,6 +475,33 @@ struct Refine {
 bool is_splitter_def(std::string_view n) { return n.starts_with("__livehd_abc_input_bits_"); }
 bool is_tie_def(std::string_view n) { return n == "_const0_" || n == "_const1_"; }
 
+// ABC names logic POs after their incoming net. Distinct native sink cuts may
+// share that net; decouple repeated outputs so the logic network has unique
+// CO names. Readback aliases these CO-only identity buffers back to one driver.
+Abc_Ntk_t* io_logic(Abc_Ntk_t* network) {
+  std::set<Abc_Obj_t*> outputs;
+  Abc_Obj_t*           po    = nullptr;
+  int                  index = 0;
+  Abc_NtkForEachPo(network, po, index) {
+    auto* net = Abc_ObjFanin0(po);
+    if (outputs.insert(net).second) {
+      continue;
+    }
+    auto* buffer = Mio_LibraryReadBuf(static_cast<Mio_Library_t*>(network->pManFunc));
+    if (!buffer) {
+      return nullptr;
+    }
+    auto* node  = Abc_NtkCreateNode(network);
+    node->pData = buffer;
+    Abc_ObjAddFanin(node, net);
+    auto* output = Abc_NtkCreateNet(network);
+    Abc_ObjAddFanin(output, node);
+    (void)Abc_ObjName(output);
+    Abc_ObjPatchFanin(po, net, output);
+  }
+  return Abc_NtkToLogic(network);
+}
+
 }  // namespace
 
 // Import one def's mapped body into an ABC mapped netlist. Every port bit the
@@ -458,6 +538,7 @@ static bool import_def(Refine& R, Imp_def& d) {
     hhds::Pin_class drv;
     int             bit;
     Terminal        term;
+    hhds::Pin_class sink;
   };
   std::vector<Cell>   cells;
   std::vector<Latch>  latches;
@@ -622,7 +703,7 @@ static bool import_def(Refine& R, Imp_def& d) {
           t.inst      = ii;
           t.inst_port = id.name;
           t.bit       = b;
-          cut_ins.push_back({drv, b, t});
+          cut_ins.push_back({drv, b, t, node.get_sink_pin(id.port_id)});
         }
       }
       continue;
@@ -636,12 +717,12 @@ static bool import_def(Refine& R, Imp_def& d) {
       for (const auto& in_pin : node.inp_sorted_pins()) {
         const auto in_drv = in_pin.get_driver_pin();
         const auto pid    = in_pin.get_port_id();
-        if (op != Ntype_op::Memory && (pid == 2 || pid == 0 || pid == 1 || pid == 6 || pid == 5)) {
+        if (!d.combinational_cuts && op != Ntype_op::Memory && (pid == 2 || pid == 0 || pid == 1 || pid == 6 || pid == 5)) {
           continue;  // clock / async / initial / posclk / negreset: not a data load
         }
         const int w = width_of(in_drv);
         for (int b = 0; b < w; ++b) {
-          cut_ins.push_back({in_drv, b, Terminal{}});
+          cut_ins.push_back({in_drv, b, Terminal{}, in_pin});
         }
       }
       continue;
@@ -656,7 +737,7 @@ static bool import_def(Refine& R, Imp_def& d) {
           const auto in_drv = in_pin.get_driver_pin();
           const int  w      = width_of(in_drv);
           for (int b = 0; b < w; ++b) {
-            cut_ins.push_back({in_drv, b, Terminal{}});
+            cut_ins.push_back({in_drv, b, Terminal{}, in_pin});
           }
         }
         continue;
@@ -677,7 +758,7 @@ static bool import_def(Refine& R, Imp_def& d) {
       const auto in_drv = in_pin.get_driver_pin();
       const int  w      = width_of(in_drv);
       for (int b = 0; b < w; ++b) {
-        cut_ins.push_back({in_drv, b, Terminal{}});
+        cut_ins.push_back({in_drv, b, Terminal{}, in_pin});
       }
     }
   }
@@ -783,7 +864,7 @@ static bool import_def(Refine& R, Imp_def& d) {
         const auto in_drv = in_pin.get_driver_pin();
         const int  w      = width_of(in_drv);
         for (int b = 0; b < w; ++b) {
-          cut_ins.push_back({in_drv, b, Terminal{}});
+          cut_ins.push_back({in_drv, b, Terminal{}, in_pin});
         }
       }
       progress = true;
@@ -848,6 +929,7 @@ static bool import_def(Refine& R, Imp_def& d) {
       d.inst_out_pi[{term.inst, term.inst_port, term.bit}] = idx;
     }
     d.pi.push_back(std::move(term));
+    d.pi_leaves.push_back(key);
     leaf_net[key] = net;
     return net;
   };
@@ -936,6 +1018,7 @@ static bool import_def(Refine& R, Imp_def& d) {
       t.bit                 = b;
       d.out_po[{t.port, b}] = Abc_NtkPoNum(ntk) - 1;
       d.po.push_back(std::move(t));
+      d.po_sinks.emplace_back(opin, b);
     }
   }
   for (auto& ci : cut_ins) {
@@ -946,11 +1029,13 @@ static bool import_def(Refine& R, Imp_def& d) {
       d.inst_in_po[{ci.term.inst, ci.term.inst_port, ci.term.bit}] = Abc_NtkPoNum(ntk) - 1;
     }
     d.po.push_back(ci.term);
+    d.po_sinks.emplace_back(ci.sink, ci.bit);
   }
   if (Abc_NtkPoNum(ntk) == 0) {
     auto* po = Abc_NtkCreatePo(ntk);
     Abc_ObjAddFanin(po, const_bit(false));
     d.po.push_back(Terminal{});
+    d.po_sinks.emplace_back(hhds::Pin_class{}, 0);
   }
   d.cells   = static_cast<int>(cells.size());
   d.latches = static_cast<int>(latches.size());
@@ -1132,14 +1217,14 @@ SC_Cell* po_driver(Refine& R, int di, int po, int depth) {
 }
 
 // SCL timing of a mapped logic network under the installed table.
-std::optional<std::pair<float, double>> time_ntk(SC_Lib* scl, Abc_Ntk_t* ntk) {
+std::optional<std::pair<float, double>> time_ntk(SC_Lib* scl, Abc_Ntk_t* ntk, bool wire_loads = false) {
   if (ntk == nullptr || !Abc_NtkIsMappedLogic(ntk)) {
     return std::nullopt;
   }
   auto*                                   t = ntk->nBarBufs2 > 0 ? Abc_NtkDupDfsNoBarBufs(ntk) : ntk;
   std::optional<std::pair<float, double>> out;
   if (Abc_SclCheckNtk(t, 0)) {
-    auto* man = Abc_SclManStart(scl, t, 0, 1, 0.0f, 0);
+    auto* man = Abc_SclManStart(scl, t, wire_loads, 1, 0.0f, 0);
     out       = std::pair{man->MaxDelay0, static_cast<double>(man->SumArea0)};
     Abc_SclManFree(man);
   }
@@ -1339,6 +1424,16 @@ uint64_t Abc_backend::refine(hhds::GraphLibrary& outlib, std::string_view top, c
         }
         continue;
       }
+      const auto                   target_it = design.region_delay_targets.find(d.name);
+      const float                  target    = target_it == design.region_delay_targets.end() ? delay_target : target_it->second;
+      const float                  budget    = design.region_budget(target, d.latches > 0);
+      const synth::Io_environment* physical_environment = nullptr;
+      if (base_.io_boundary_timing && base_.io_feedback) {
+        const auto row = base_.io_feedback->rows.find(d.name);
+        if (row != base_.io_feedback->rows.end()) {
+          physical_environment = row->second.stage.empty() ? &row->second.used : &row->second.placed;
+        }
+      }
       // Environment for this def.
       Boundary_table table(static_cast<size_t>(Abc_NtkPiNum(d.ntk)), static_cast<size_t>(Abc_NtkPoNum(d.ntk)));
       int            bits = 0;
@@ -1348,7 +1443,14 @@ uint64_t Abc_backend::refine(hhds::GraphLibrary& outlib, std::string_view top, c
           table.set_pi(static_cast<size_t>(i), R.drive_cell, -1.0f);  // native state: the stand-in
           continue;
         }
-        table.set_pi(static_cast<size_t>(i), pi_driver(R, static_cast<int>(di), i, 0), d.pi_arr[static_cast<size_t>(i)]);
+        float arrival = d.pi_arr[static_cast<size_t>(i)];
+        if (physical_environment && t.port >= 0) {
+          const auto key = std::format("{}[{}]", d.in_names[t.port], t.bit);
+          if (const auto found = physical_environment->inputs.find(key); found != physical_environment->inputs.end()) {
+            arrival = found->second;
+          }
+        }
+        table.set_pi(static_cast<size_t>(i), pi_driver(R, static_cast<int>(di), i, 0), arrival);
         ++bits;
       }
       for (int i = 0; i < Abc_NtkPoNum(d.ntk); ++i) {
@@ -1377,7 +1479,14 @@ uint64_t Abc_backend::refine(hhds::GraphLibrary& outlib, std::string_view top, c
         } else {
           load = R.typical_cap;  // native sink (flop din, memory input)
         }
-        table.set_po(static_cast<size_t>(i), load, d.po_delay[static_cast<size_t>(i)]);
+        float departure = d.po_delay[static_cast<size_t>(i)];
+        if (physical_environment && t.port >= 0) {
+          const auto key = std::format("{}[{}]", d.out_names[t.port], t.bit);
+          if (const auto found = physical_environment->required.find(key); found != physical_environment->required.end()) {
+            departure = std::max(0., budget - found->second);
+          }
+        }
+        table.set_po(static_cast<size_t>(i), load, departure);
       }
       crossing += static_cast<uint64_t>(bits);
 
@@ -1385,7 +1494,7 @@ uint64_t Abc_backend::refine(hhds::GraphLibrary& outlib, std::string_view top, c
       // walks objects in id order and refuses anything else -- the import
       // created cells in LGraph order). Netlist node -> logic node -> DFS copy
       // through the two pCopy links the conversions leave behind.
-      auto* logic0 = Abc_NtkToLogic(d.ntk);
+      auto* logic0 = base_.io_boundary_timing ? io_logic(d.ntk) : Abc_NtkToLogic(d.ntk);
       if (logic0 == nullptr) {
         continue;
       }
@@ -1410,14 +1519,13 @@ uint64_t Abc_backend::refine(hhds::GraphLibrary& outlib, std::string_view top, c
       if (logic == nullptr) {
         continue;
       }
-      const auto  target_it = design.region_delay_targets.find(d.name);
-      const float target    = target_it == design.region_delay_targets.end() ? delay_target : target_it->second;
-      const float budget    = design.region_budget(target, d.latches > 0);
+      Wire_load_scope wire_scope(base_.io_feedback ? base_.io_feedback->wire(d.name) : synth::Wire_load{}, d.name);
       table.install();
       Abc_FrameReplaceCurrentNetwork(frame, logic);
-      const auto before   = time_ntk(R.scl, logic);
+      const auto before   = time_ntk(R.scl, logic, wire_scope.enabled());
       const int  budget_i = static_cast<int>(std::floor(budget));
-      const auto cmd      = target > 0 ? std::format("upsize -D {0}; dnsize -D {0}", budget_i) : std::string{};
+      const auto cmd = target > 0 ? std::format("upsize {1}-D {0}; dnsize {1}-D {0}", budget_i, wire_scope.enabled() ? "-c " : "")
+                                  : std::string{};
       if (!cmd.empty() && Cmd_CommandExecute(frame, cmd.c_str()) != 0) {
         livehd::diag::warn("pass.abc", "boundary-resize", "internal")
             .msg("pass.abc boundary: ABC sizing failed on module '{}': {}", d.name, cmd)
@@ -1425,30 +1533,40 @@ uint64_t Abc_backend::refine(hhds::GraphLibrary& outlib, std::string_view top, c
         table.uninstall();
         continue;
       }
-      logic = Abc_FrameReadNtk(frame);
+      logic        = Abc_FrameReadNtk(frame);
       // Time the sized network and read the port times for the next round:
       // the arrival at each output's driver (without the port's own downstream
       // delay) and the departure at each input (with it).
-      std::optional<std::pair<float, double>> after;
-      if (Abc_SclCheckNtk(logic, 0)) {
-        auto* man      = Abc_SclManStart(R.scl, logic, 0, 1, budget, 0);
-        // MaxDelay0 is clamped up to the target when the reverse pass runs;
-        // the true worst arrival is the priority queue's head.
-        after          = std::pair{Abc_SclReadMaxDelay(man), static_cast<double>(man->SumArea0)};
-        Abc_Obj_t* obj = nullptr;
-        int        i   = 0;
-        Abc_NtkForEachPo(logic, obj, i) {
-          if (i < Abc_NtkPoNum(d.ntk)) {
-            d.po_arr[static_cast<size_t>(i)] = Abc_SclObjTimeMax(man, Abc_ObjFanin0(obj));
+      auto measure = [&]() {
+        std::optional<std::pair<float, double>> after;
+        if (Abc_SclCheckNtk(logic, 0)) {
+          auto* man      = Abc_SclManStart(R.scl, logic, wire_scope.enabled(), 1, budget, 0);
+          // MaxDelay0 is clamped up to the target when the reverse pass runs;
+          // the true worst arrival is the priority queue's head.
+          after          = std::pair{Abc_SclReadMaxDelay(man), static_cast<double>(man->SumArea0)};
+          Abc_Obj_t* obj = nullptr;
+          int        i   = 0;
+          Abc_NtkForEachPo(logic, obj, i) {
+            if (i < Abc_NtkPoNum(d.ntk)) {
+              d.po_arr[static_cast<size_t>(i)] = Abc_SclObjTimeMax(man, Abc_ObjFanin0(obj));
+            }
           }
-        }
-        Abc_NtkForEachPi(logic, obj, i) {
-          if (i < Abc_NtkPiNum(d.ntk)) {
-            const auto* dp                    = Abc_SclObjDept(man, obj);
-            d.pi_dept[static_cast<size_t>(i)] = std::max(dp->rise, dp->fall);
+          Abc_NtkForEachPi(logic, obj, i) {
+            if (i < Abc_NtkPiNum(d.ntk)) {
+              const auto* dp                    = Abc_SclObjDept(man, obj);
+              d.pi_dept[static_cast<size_t>(i)] = std::max(dp->rise, dp->fall);
+            }
           }
+          Abc_SclManFree(man);
         }
-        Abc_SclManFree(man);
+        return after;
+      };
+      auto after = measure();
+      if (base_.io_boundary_timing && before && after && after->first > before->first + 1e-4) {
+        for (auto& pair : pairs) {
+          pair.obj->pData = pair.net_obj->pData;
+        }
+        after = measure();
       }
       table.uninstall();
       // write back
@@ -1993,6 +2111,473 @@ synth::Ware_score Abc_backend::score(hhds::GraphLibrary& outlib, std::string_vie
     std::print("[pass.abc] ware: {} unresolved imported bits\n", R.unresolved_bits);
   }
   return score;
+}
+
+namespace {
+std::string io_bit(const std::string& name, int bit) { return std::format("{}[{}]", name, bit); }
+std::string pin_decl(hhds::Pin_class pin, bool input, int bit = -1) {
+  auto node = pin.get_master_node();
+  if (auto io = node.get_subnode_io()) {
+    for (const auto& d : input ? io->get_input_pin_decls() : io->get_output_pin_decls()) {
+      if (d.port_id == pin.get_port_id()) {
+        return d.bits > 1 && bit >= 0 ? io_bit(d.name, bit) : d.name;
+      }
+    }
+  }
+  return std::string(pin.get_pin_name());
+}
+// The importer cuts at every state/memory boundary; CEC therefore proves the
+// complete combinational relation while clock/reset/state instances stay exact.
+void write_io_body(hhds::Graph& source, const Imp_def& imported, const synth::Cell_netlist& net, const synth::Cell_library& cells) {
+  if (!net.latches.empty() || net.sources.size() != imported.pi_leaves.size() || net.outputs.size() != imported.po_sinks.size()) {
+    throw std::runtime_error("resynthesis changed the mapped region boundary");
+  }
+  hhds::GraphLibrary    scratch;
+  auto*                 source_library = source.get_io()->get_library();
+  std::set<std::string> copied;
+  const auto            copy = [&](auto&& self, hhds::Graph& graph) -> void {
+    const std::string name(graph.get_name());
+    if (!copied.insert(name).second) {
+      return;
+    }
+    for (auto n : graph.body().nodes()) {
+      if (auto io = n.get_subnode_io()) {
+        if (auto child = io->get_graph()) {
+          self(self, *child);
+        } else {
+          partition::resolve_or_clone_subdef(&scratch, n);
+        }
+      }
+    }
+    if (!scratch.copy_from(*source_library, name)) {
+      throw std::runtime_error("cannot snapshot mapped region");
+    }
+  };
+  copy(copy, source);
+  auto                          graph = scratch.find_io(source.get_name())->get_graph();
+  std::vector<hhds::Node_class> remove;
+  std::set<uint64_t>            mapped_nodes;
+  for (auto n : imported.node_sub) {
+    if (!n.is_invalid()) {
+      mapped_nodes.insert(n.get_debug_nid());
+    }
+  }
+  for (auto n : graph->body().nodes()) {
+    const auto op = gu::type_op_of(n);
+    const auto io = n.get_subnode_io();
+    if (!gu::is_builtin_node(n)
+        && (mapped_nodes.contains(n.get_debug_nid()) || Ntype::is_pin_trackable(op)
+            || (io && (is_splitter_def(io->get_name()) || is_tie_def(io->get_name()))))) {
+      remove.push_back(n);
+    }
+  }
+  std::vector<hhds::Pin_class> signals(net.signals.size());
+  const auto                   readers = net.cell_readers();
+  std::vector<uint32_t>        aliases(net.signals.size(), synth::Cell_netlist::kNone);
+  for (const auto& cell : net.cells) {
+    if (cell.fanins.size() == 1 && cells.is_identity(cell.type) && readers[cell.output] == 0) {
+      aliases[cell.output] = cell.fanins.front();
+    }
+  }
+  const auto resolve = [&](uint32_t signal) {
+    while (aliases.at(signal) != synth::Cell_netlist::kNone) {
+      signal = aliases[signal];
+    }
+    return signals.at(signal);
+  };
+  for (size_t i = 0; i < net.sources.size(); ++i) {
+    auto [pin, bit] = imported.pi_leaves[i];
+    auto local      = graph->get_pin(pin.get_class_index());
+    if (gu::bits_of(local) > 1 || bit > 0) {
+      auto shift = gu::create_typed_node(*graph, Ntype_op::SRA);
+      local.connect_sink(gu::setup_sink_by_name(shift, "a"));
+      gu::create_const(*graph, *Dlop::create_integer(bit)).connect_sink(gu::setup_sink_by_name(shift, "b"));
+      local = shift.create_driver_pin(0);
+      gu::set_bits(local, 1);
+      gu::set_unsign(local);
+    }
+    signals[net.sources[i]] = local;
+  }
+  const auto            region = source.get_input_node().attr(livehd::attrs::synth_region_id);
+  const auto            color  = gu::node_color_of(source.get_input_node());
+  std::set<std::string> existing_names, kept_names, blocks, groups;
+  std::set<uint64_t>    removed_ids;
+  for (auto node : remove) {
+    removed_ids.insert(node.get_debug_nid());
+  }
+  for (auto node : graph->body().nodes()) {
+    existing_names.emplace(node.get_name());
+    if (!removed_ids.contains(node.get_debug_nid())) {
+      kept_names.emplace(node.get_name());
+    }
+    if (mapped_nodes.contains(node.get_debug_nid())) {
+      if (auto group = node.attr(livehd::attrs::synth_color_group); group.has()) {
+        groups.emplace(group.get());
+      }
+      if (auto block = node.attr(livehd::attrs::placement_block); block.has()) {
+        blocks.emplace(block.get());
+      }
+    }
+  }
+  std::vector<std::string>      final_names(net.cells.size());
+  // Create every output before wiring: mapped ABC node IDs need not be sorted.
+  std::vector<hhds::Node_class> new_nodes;
+  for (size_t i = 0; i < net.cells.size(); ++i) {
+    const auto& c    = net.cells[i];
+    const auto& type = cells.type(c.type);
+    if (c.fanins.empty()) {
+      // Mio constants are mapping primitives, not physical Liberty cells.
+      signals[c.output] = gu::create_const(*graph, *Dlop::create_integer(type.truth != 0 ? 1 : 0));
+      new_nodes.push_back({});
+      continue;
+    }
+    if (aliases[c.output] != synth::Cell_netlist::kNone) {
+      new_nodes.push_back({});
+      continue;
+    }
+    auto n = gu::create_typed_node(*graph, Ntype_op::Sub);
+    n.set_subnode(synth::declare_cell(scratch, type).io);
+    auto temporary = std::format("__io_tmp_{}", n.get_debug_nid());
+    while (existing_names.contains(temporary)) {
+      temporary += '_';
+    }
+    n.set_name(temporary);
+    existing_names.insert(temporary);
+    auto canonical = std::format("__io_g{}_{}", i, type.name);
+    while (kept_names.contains(canonical)) {
+      canonical += '_';
+    }
+    kept_names.insert(canonical);
+    final_names[i] = std::move(canonical);
+    n.attr(livehd::attrs::color).set(color);
+    if (region.has()) {
+      n.attr(livehd::attrs::synth_region_id).set(region.get());
+    }
+    if (groups.size() == 1) {
+      n.attr(livehd::attrs::synth_color_group).set(*groups.begin());
+    }
+    if (blocks.size() == 1) {
+      n.attr(livehd::attrs::placement_block).set(*blocks.begin());
+    }
+    signals[c.output] = n.create_driver_pin(type.output);
+    gu::set_bits(signals[c.output], 1);
+    new_nodes.push_back(n);
+  }
+  for (size_t i = 0; i < net.cells.size(); ++i) {
+    const auto& c    = net.cells[i];
+    const auto& type = cells.type(c.type);
+    if (new_nodes[i].is_invalid()) {
+      continue;
+    }
+    for (size_t k = 0; k < c.fanins.size(); ++k) {
+      new_nodes[i].create_sink_pin(type.inputs[k]).connect_driver(resolve(c.fanins[k]));
+    }
+  }
+  const auto pin_less = [](hhds::Pin_class a, hhds::Pin_class b) { return a.get_debug_pid() < b.get_debug_pid(); };
+  std::map<hhds::Pin_class, std::vector<hhds::Pin_class>, decltype(pin_less)> outputs(pin_less);
+  for (size_t i = 0; i < imported.po_sinks.size(); ++i) {
+    auto [target, bit] = imported.po_sinks[i];
+    if (target.is_invalid()) {
+      continue;
+    }
+    auto& bits = outputs[graph->get_pin(target.get_class_index())];
+    bits.resize(std::max<size_t>(bits.size(), bit + 1));
+    bits[bit] = resolve(net.outputs[i]);
+  }
+  for (auto& [sink, bits] : outputs) {
+    for (const auto& bit : bits) {
+      if (bit.is_invalid()) {
+        throw std::runtime_error("incomplete resynthesized port bus");
+      }
+    }
+    hhds::Pin_class driver = bits.front();
+    if (bits.size() > 1) {
+      auto       concat = gu::create_typed_node(*graph, Ntype_op::Concat);
+      const auto one    = gu::create_const(*graph, *Dlop::create_integer(1));
+      for (size_t b = 0; b < bits.size(); ++b) {
+        const auto pid = static_cast<hhds::Port_id>(2 * (bits.size() - 1 - b));
+        bits[b].connect_sink(concat.create_sink_pin(pid));
+        one.connect_sink(concat.create_sink_pin(pid + 1));
+      }
+      driver = concat.create_driver_pin(0);
+      gu::set_bits(driver, bits.size());
+      gu::set_unsign(driver);
+    }
+    auto old = sink.get_driver_pin();
+    if (!old.is_invalid()) {
+      sink.del_sink(old);
+    }
+    sink.connect_driver(driver);
+  }
+  for (auto node : remove) {
+    node.del_node();
+  }
+  for (size_t i = 0; i < new_nodes.size(); ++i) {
+    if (!new_nodes[i].is_invalid()) {
+      new_nodes[i].set_name(final_names[i]);
+    }
+  }
+  graph->commit();
+  for (auto n : graph->body().nodes()) {
+    if (n.get_subnode_io()) {
+      partition::resolve_or_clone_subdef(source_library, n);
+    }
+  }
+  if (!source_library->replace_body_from(source.get_name(), *graph)) {
+    throw std::runtime_error("cannot publish resynthesized region");
+  }
+}
+}  // namespace
+
+synth::Io_decision Abc_backend::io_region(hhds::Graph& graph, const synth::Io_environment& env, const synth::Io_environment& used,
+                                          double period, double percent, bool apply, bool bindings_only) {
+  synth::Io_decision result;
+  result.module                = std::string(graph.get_name());
+  const auto             start = std::chrono::steady_clock::now();
+  partition::Region_body rb;
+  rb.module_name = result.module;
+  synth::Region_ctx context(rb, base_);
+  context.budget           = base_.delay.empty() ? period : std::stod(base_.delay);
+  context.timing_requested = true;
+  for (auto node : graph.body().nodes()) {
+    (void)node;
+    ++context.input_ge;
+  }
+  const auto mapping       = base_.io_feedback ? base_.io_feedback->mappings.find(result.module)
+                                               : std::map<std::string, synth::Io_store::Mapping>::const_iterator{};
+  const bool known_mapping = base_.io_feedback && mapping != base_.io_feedback->mappings.end();
+  if (known_mapping && mapping->second.budget_ps > 0) {
+    context.budget = mapping->second.budget_ps;
+  }
+  auto scope = region_scope();
+  (void)plan(context);
+  if (known_mapping) {
+    region_.flow     = mapping->second.flow;
+    tool_owned_flow_ = !mapping->second.custom;
+  }
+  if (this->start(context) == synth::Region_backend::Start::failed || !scl_lib_ok_ || !scl_timing_ok_) {
+    result.decision = "no SCL timing library";
+    return result;
+  }
+  auto*  frame = static_cast<Abc_Frame_t*>(pabc_);
+  Refine imported(*this, *graph.get_io()->get_library());
+  imported.mio       = static_cast<Mio_Library_t*>(Abc_FrameReadLibGen());
+  imported.scl       = static_cast<SC_Lib*>(Abc_FrameReadLibScl());
+  imported.pin_names = [this, &graph](Mio_Gate_t* gate) -> const std::vector<std::string>& {
+    return cell_desc_for(*graph.get_io()->get_library(), gate).input_names;
+  };
+  Imp_def d;
+  d.name               = result.module;
+  d.g                  = &graph;
+  d.combinational_cuts = true;
+  if (!import_def(imported, d)) {
+    if (d.ntk) {
+      Abc_NtkDelete(d.ntk);
+    }
+    result.decision = "mapped import unavailable";
+    return result;
+  }
+  const auto free_network = [](Abc_Ntk_t* n) {
+    if (n) {
+      Abc_NtkDelete(n);
+    }
+  };
+  std::unique_ptr<Abc_Ntk_t, decltype(free_network)> netlist(d.ntk, free_network);
+  std::map<Abc_Obj_t*, int>                          pi_index;
+  for (int i = 0; i < Abc_NtkPiNum(d.ntk); ++i) {
+    pi_index[Abc_NtkPi(d.ntk, i)] = i;
+  }
+  const auto input_binding = [&](Abc_Obj_t* net, hhds::Pin_class sink, int bit = 0) {
+    auto*      driver = Abc_ObjFanin0(net);
+    const auto found  = pi_index.find(driver);
+    if (found == pi_index.end()) {
+      return;
+    }
+    const auto& term = d.pi[found->second];
+    if (term.port >= 0 && !sink.is_invalid()) {
+      result.bindings.push_back({io_bit(d.in_names[term.port], term.bit),
+                                 std::string(sink.get_master_node().get_name()),
+                                 pin_decl(sink, true, bit),
+                                 true});
+    }
+  };
+  Abc_Obj_t* object = nullptr;
+  int        index  = 0;
+  Abc_NtkForEachNode(d.ntk, object, index) {
+    if (size_t(Abc_ObjId(object)) >= d.node_sub.size() || d.node_sub[Abc_ObjId(object)].is_invalid()) {
+      continue;
+    }
+    auto        node  = d.node_sub[Abc_ObjId(object)];
+    const auto& names = imported.pin_names(static_cast<Mio_Gate_t*>(object->pData));
+    for (size_t k = 0; k < names.size(); ++k) {
+      input_binding(Abc_ObjFanin(object, k), node.get_sink_pin(names[k]));
+    }
+  }
+  for (int i = 0; i < Abc_NtkPoNum(d.ntk); ++i) {
+    auto* net = Abc_ObjFanin0(Abc_NtkPo(d.ntk, i));
+    input_binding(net, d.po_sinks[i].first, d.po_sinks[i].second);
+    const auto& term = d.po[i];
+    if (term.port < 0) {
+      continue;
+    }
+    auto*           driver = Abc_ObjFanin0(net);
+    hhds::Pin_class pin;
+    int             bit = 0;
+    const auto      id  = size_t(Abc_ObjId(driver));
+    if (id < d.node_sub.size() && !d.node_sub[id].is_invalid()) {
+      auto       n  = d.node_sub[id];
+      const auto io = n.get_subnode_io();
+      pin           = n.get_driver_pin(io->get_output_pin_decls().front().port_id);
+    } else if (const auto it = pi_index.find(driver); it != pi_index.end()) {
+      pin = d.pi_leaves[it->second].first;
+      bit = d.pi_leaves[it->second].second;
+    }
+    if (!pin.is_invalid() && !pin.get_master_node().is_input_node()) {
+      result.bindings.push_back({io_bit(d.out_names[term.port], term.bit),
+                                 std::string(pin.get_master_node().get_name()),
+                                 pin_decl(pin, false, bit),
+                                 false});
+    }
+  }
+  if (bindings_only) {
+    return result;
+  }
+  auto* converted = io_logic(d.ntk);
+  if (!converted) {
+    result.decision = "mapped logic conversion unavailable";
+    return result;
+  }
+  std::unique_ptr<Abc_Ntk_t, decltype(free_network)> logic0(converted, free_network);
+  auto*                                              logic = Abc_NtkDupDfs(converted);
+  if (!logic) {
+    result.decision = "mapped logic ordering unavailable";
+    return result;
+  }
+  Boundary_table table(Abc_NtkPiNum(logic), Abc_NtkPoNum(logic));
+  for (int i = 0; i < Abc_NtkPiNum(logic); ++i) {
+    const auto& term = d.pi[i];
+    const auto  key  = term.port >= 0 ? io_bit(d.in_names[term.port], term.bit) : std::string{};
+    const auto  it   = env.inputs.find(key);
+    table.set_pi(i, drive_cell_, it == env.inputs.end() ? 0 : std::max(0., it->second));
+  }
+  for (int i = 0; i < Abc_NtkPoNum(logic); ++i) {
+    const auto& term = d.po[i];
+    const auto  key  = term.port >= 0 ? io_bit(d.out_names[term.port], term.bit) : std::string{};
+    const auto  it   = env.required.find(key);
+    table.set_po(i, std::max(typical_cap_ff_, 0.f), it == env.required.end() ? 0 : std::max(0., context.budget - it->second));
+  }
+  table.install();
+  Abc_FrameReplaceCurrentNetwork(frame, logic);
+  if (!Abc_SclCheckNtk(logic, 0)) {
+    result.decision = "SCL network unavailable";
+    return result;
+  }
+  const auto no_wire = time_ntk(imported.scl, logic);
+  if (!no_wire) {
+    result.decision = "SCL network unavailable";
+    return result;
+  }
+  result.no_wire_delay_ps = no_wire->first;
+  Wire_load_scope wire(env.wire, result.module);
+  auto*           timing = Abc_SclManStart(imported.scl, logic, wire.enabled(), 1, context.budget, 0);
+  result.checked         = true;
+  result.wire_delay_ps   = Abc_SclReadMaxDelay(timing);
+  result.area            = timing->SumArea0;
+  result.gates           = d.cells;
+  result.slack_before_ps = context.budget - result.wire_delay_ps;
+  result.slack_after_ps  = result.slack_before_ps;
+  // Arrival + departure identifies every near-critical boundary bit, avoiding
+  // an unrelated port delta triggering a resynthesis of this color.
+  const auto threshold   = period * percent / 100;
+  for (int i = 0; i < Abc_NtkPiNum(logic); ++i) {
+    const auto& term = d.pi[i];
+    if (term.port < 0) {
+      continue;
+    }
+    const auto key     = io_bit(d.in_names[term.port], term.bit);
+    const auto current = env.inputs.find(key);
+    if (current == env.inputs.end()) {
+      continue;
+    }
+    const auto   old   = used.inputs.find(key);
+    const double delta = current->second - (old == used.inputs.end() ? 0 : old->second);
+    const auto   slack = Abc_SclObjGetSlack(timing, Abc_NtkPi(logic, i), context.budget);
+    if (slack <= threshold && delta > result.delta_ps) {
+      result.delta_ps = delta;
+      result.input    = key;
+    }
+  }
+  for (int i = 0; i < Abc_NtkPoNum(logic); ++i) {
+    const auto& term = d.po[i];
+    if (term.port < 0) {
+      continue;
+    }
+    const auto key     = io_bit(d.out_names[term.port], term.bit);
+    const auto current = env.required.find(key);
+    if (current == env.required.end()) {
+      continue;
+    }
+    const auto   old   = used.required.find(key);
+    const double delta = (old == used.required.end() ? context.budget : old->second) - current->second;
+    const auto   slack = context.budget - Abc_SclObjTimeMax(timing, Abc_NtkPo(logic, i));
+    if (slack <= threshold && delta > result.delta_ps) {
+      result.delta_ps = delta;
+      result.output   = key;
+    }
+  }
+  Abc_SclManFree(timing);
+  result.fired    = synth::io_trigger(result.slack_before_ps, result.delta_ps, period, percent);
+  result.decision = result.fired ? "would resynthesize" : "not critical or no tightening";
+  if (result.fired && apply && d.depth_complete) {
+    std::unique_ptr<Abc_Ntk_t, decltype(free_network)> before(Abc_NtkDup(logic), free_network);
+    Flow_plan                                          flow;
+    flow.flow                   = comb_flow();
+    flow.budget                 = context.budget;
+    flow.ladder                 = tool_owned_flow_;
+    flow.wire_loads             = wire.enabled();
+    flow.annotate_wire_commands = tool_owned_flow_;
+    flow.size_to_budget         = std::format("upsize {}; dnsize {}", budget_flag_, budget_flag_);
+    const auto rss              = cost::process_footprint_bytes();
+    const auto admission        = [&](std::string_view) {
+      const auto now     = cost::process_footprint_bytes();
+      const auto elapsed = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - start).count();
+      return (!base_.time_budget_ms || elapsed <= base_.time_budget_ms)
+             && (now <= rss || now - rss <= uint64_t(base_.memory_budget_mb) * 1024 * 1024);
+    };
+    const auto mapped    = execute_flow(frame, flow, admission);
+    auto*      candidate = Abc_FrameReadNtk(frame);
+    const auto after     = physical_flow_qor(candidate, wire.enabled());
+    if (mapped.status != Flow_status::completed || !after || !admission("complete")) {
+      result.decision = "mapping refused";
+    } else if (after->first > result.wire_delay_ps + 1e-4) {
+      result.decision = "no gain";
+    } else {
+      // Bounded combinational CEC, matching effort=test; unproven trials stay old.
+      std::unique_ptr<Abc_Ntk_t, decltype(free_network)> a(Abc_NtkStrash(before.get(), 0, 1, 0), free_network);
+      std::unique_ptr<Abc_Ntk_t, decltype(free_network)> proof_candidate(Abc_NtkDup(candidate), free_network);
+      std::unique_ptr<Abc_Ntk_t, decltype(free_network)> b(Abc_NtkStrash(proof_candidate.get(), 0, 1, 0), free_network);
+      if (!a || !b || Abc_NtkDarCec(a.get(), b.get(), 1000, 0, 0) != 1) {
+        result.decision = "CEC unproven; retained original";
+      } else {
+        std::unique_ptr<Abc_Ntk_t, decltype(free_network)> mapped_net(Abc_NtkToNetlist(candidate), free_network);
+        auto cells = mapped_net ? abc_to_cells(mapped_net.get(), gate_type_, graph.get_name()) : std::nullopt;
+        if (!cells) {
+          result.decision = "readback unavailable";
+        } else {
+          write_io_body(graph, d, *cells, cell_library_);
+          result.accepted       = true;
+          result.slack_after_ps = context.budget - after->first;
+          result.decision       = "accepted";
+          result.area           = after->second;
+          result.gates          = cells->cells.size();
+        }
+      }
+    }
+  } else if (result.fired && apply) {
+    result.decision = "unsupported native cut; retained original";
+  }
+  result.seconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count();
+  return result;
 }
 
 }  // namespace livehd::abc

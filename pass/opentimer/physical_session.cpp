@@ -3,6 +3,7 @@
 #include <chrono>
 #include <cmath>
 #include <format>
+#include <set>
 #include <stdexcept>
 #include <string_view>
 #include <tuple>
@@ -280,6 +281,8 @@ struct Physical_session::Impl : Pass_opentimer {
     std::unordered_map<std::string, const livehd::physical::Rc_net*> base;     // evaluated RC by driver
     const livehd::physical::Parasitics*                              base_owner = nullptr;
     size_t                                                           serial     = 0;
+    std::unordered_map<std::string, std::string>                     rc_labels;  // timer net -> physical driver
+    std::set<std::string>                                            pending_rc;
 
     explicit Whatif_impl(Impl& owner) : s(owner) {}
 
@@ -288,10 +291,15 @@ struct Physical_session::Impl : Pass_opentimer {
         return;
       }
       base.clear();
+      rc_labels.clear();
+      pending_rc.clear();
       base_owner = s.previous_physical_rc_.get();
       if (base_owner) {
         for (const auto& net : base_owner->nets) {
           base.emplace(net.driver, &net);
+          if (const auto name = net_of_driver(net.driver); !name.empty()) {
+            rc_labels.emplace(name, net.driver);
+          }
         }
       }
     }
@@ -398,6 +406,8 @@ struct Physical_session::Impl : Pass_opentimer {
       if (!net.empty()) {
         s.timer.connect_pin(pin, net);
       }
+      pending_rc.insert(old);
+      pending_rc.insert(net);
       conn[pin] = net;
       log.push_back({Kind::pin, pin, old, {}});
     }
@@ -411,6 +421,7 @@ struct Physical_session::Impl : Pass_opentimer {
         nets.emplace(net.driver, name);
         log.push_back({Kind::net, net.driver, name, {}});
       }
+      rc_labels[name] = net.driver;
       for (const auto& node : net.nodes) {
         if (!node.pin.empty()) {
           move_pin(timer_pin(node.pin), name);
@@ -424,7 +435,7 @@ struct Physical_session::Impl : Pass_opentimer {
       }
       log.push_back({Kind::rc, net.driver, name, std::move(old)});
       rc_now[net.driver] = net;
-      attach(net, name);
+      pending_rc.insert(name);
     }
     void rollback(size_t to) override {
       if (to > log.size()) {
@@ -445,6 +456,8 @@ struct Physical_session::Impl : Pass_opentimer {
             break;
           }
           case Kind::pin: {
+            pending_rc.insert(net_of_pin(undo.a));
+            pending_rc.insert(undo.b);
             if (!net_of_pin(undo.a).empty()) {
               s.timer.disconnect_pin(undo.a);
             }
@@ -462,6 +475,8 @@ struct Physical_session::Impl : Pass_opentimer {
           }
           case Kind::net: {
             s.timer.remove_net(undo.b);
+            pending_rc.erase(undo.b);
+            rc_labels.erase(undo.b);
             nets.erase(undo.a);
             break;
           }
@@ -488,6 +503,7 @@ struct Physical_session::Impl : Pass_opentimer {
         const auto name = net_of_driver(driver);
         if (!rc || name.empty()) {
           rc_now.erase(driver);
+          pending_rc.erase(name);
           continue;
         }
         const auto b = base.find(driver);
@@ -496,10 +512,28 @@ struct Physical_session::Impl : Pass_opentimer {
         } else {
           rc_now[driver] = *rc;
         }
-        attach(*rc, name);
+        pending_rc.insert(name);
       }
     }
-    void   update() { s.timer.update_timing(); }
+    void update() {
+      index_base();
+      // A later set_net can move a sink out of an earlier net and invalidate
+      // that net's RC. Attach touched trees only after all topology edits,
+      // including rollback, have been queued; untouched nets remain incremental.
+      for (const auto& name : pending_rc) {
+        const auto label = rc_labels.find(name);
+        if (label == rc_labels.end()) {
+          continue;
+        }
+        if (const auto it = rc_now.find(label->second); it != rc_now.end()) {
+          attach(it->second, name);
+        } else if (const auto base_it = base.find(label->second); base_it != base.end()) {
+          attach(*base_it->second, name);
+        }
+      }
+      pending_rc.clear();
+      s.timer.update_timing();
+    }
     double wns() override {
       update();
       const auto value = s.timer.report_wns(ot::MAX);

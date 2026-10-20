@@ -20,6 +20,7 @@ struct Rc_net {
   std::string          driver;
   std::vector<Rc_node> nodes;
   std::vector<Rc_edge> edges;
+  double               wire_length_um                  = 0;  // actual estimated Steiner tree, independent of RC units
   bool                 operator==(const Rc_net&) const = default;
 };
 struct Parasitics {

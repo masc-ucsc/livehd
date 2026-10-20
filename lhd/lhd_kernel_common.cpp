@@ -538,7 +538,7 @@ void copy_crash_ctx(char (&dst)[kCrashCtxMax], std::string_view src) {
   dst[n] = '\0';
 }
 
-struct sigaction crash_prev_segv_{};   // the handler this one replaced (iassert's on glibc)
+struct sigaction crash_prev_segv_{};  // the handler this one replaced (iassert's on glibc)
 bool             crash_prev_set_ = false;
 pid_t            crash_main_pid_ = 0;  // a different getpid() is a forked solver child
 
@@ -558,8 +558,8 @@ void crash_write_mib(uint64_t bytes) {
   uint64_t v = bytes >> 20;
   buf[i]     = '\0';
   do {
-    buf[--i] = static_cast<char>('0' + v % 10);
-    v /= 10;
+    buf[--i]  = static_cast<char>('0' + v % 10);
+    v        /= 10;
   } while (v != 0 && i > 0);
   crash_write(buf + i);
   crash_write(" MiB");
@@ -587,15 +587,17 @@ static void crash_handler(int sig, siginfo_t* info, void* uctx) {
     crash_write_mib(used);
     crash_write(" of the ");
     crash_write_mib(cap);
-    crash_write(" RLIMIT_AS cap); a library that does not check its allocations (ABC, a solver) crashed on the failed "
-                "allocation -- not a livehd bug\n");
+    crash_write(
+        " RLIMIT_AS cap); a library that does not check its allocations (ABC, a solver) crashed on the failed "
+        "allocation -- not a livehd bug\n");
     if (crash_step_[0] != '\0') {
       crash_write("lhd: ran out of memory while running ");
       crash_write(crash_step_);
       crash_write("\n");
     }
-    crash_write("lhd: hint: run on a host with more memory or a larger LIVEHD_MEMORY_BUDGET_MB, lower "
-                "pass.abc.memory_budget_mb so admission refuses earlier, or color/decompose into smaller pieces\n");
+    crash_write(
+        "lhd: hint: run on a host with more memory or a larger LIVEHD_MEMORY_BUDGET_MB, lower "
+        "pass.abc.memory_budget_mb so admission refuses earlier, or color/decompose into smaller pieces\n");
     ::_exit(::getpid() != crash_main_pid_ ? livehd::lec::kChildExitBadAlloc : 7);
   }
 #if defined(__GLIBC__)
@@ -606,7 +608,8 @@ static void crash_handler(int sig, siginfo_t* info, void* uctx) {
       crash_prev_segv_.sa_sigaction(sig, info, uctx);
       ::_exit(EXIT_FAILURE);
     }
-    if (crash_prev_segv_.sa_handler != SIG_DFL && crash_prev_segv_.sa_handler != SIG_IGN && crash_prev_segv_.sa_handler != nullptr) {
+    if (crash_prev_segv_.sa_handler != SIG_DFL && crash_prev_segv_.sa_handler != SIG_IGN
+        && crash_prev_segv_.sa_handler != nullptr) {
       crash_prev_segv_.sa_handler(sig);
       ::_exit(EXIT_FAILURE);
     }
@@ -858,7 +861,7 @@ void merge_color_sets(const Options& opts, Eprp_var::Eprp_dict& labels) {
 // period can be resolved. Handles `set VAR number` and `$VAR` / `${VAR}` periods
 // (the usual HighTide/ORFS spelling); a Tcl expression is not guessed. The SDC
 // time unit is the Liberty time unit, read from the first `time_unit` attribute.
-static std::optional<double> sdc_min_clock_period_ps(const std::string& sdc_path, const std::string& liberty_path) {
+std::optional<double> sdc_min_clock_period_ps(const std::string& sdc_path, const std::string& liberty_path) {
   std::ifstream     in(sdc_path);
   const std::string text{std::istreambuf_iterator<char>(in), {}};
   if (text.empty()) {
@@ -878,7 +881,7 @@ static std::optional<double> sdc_min_clock_period_ps(const std::string& sdc_path
     }
   }
   absl::flat_hash_map<std::string, double> vars;
-  const auto number = [&](std::string tok, double& out) {
+  const auto                               number = [&](std::string tok, double& out) {
     while (!tok.empty() && (tok.front() == '"' || tok.front() == '{')) {
       tok.erase(0, 1);
     }
@@ -903,7 +906,8 @@ static std::optional<double> sdc_min_clock_period_ps(const std::string& sdc_path
   };
   std::optional<double> best;
   for (const auto line_sv : absl::StrSplit(text, absl::ByAnyChar("\n;"))) {
-    const std::vector<std::string> tok = absl::StrSplit(absl::StripAsciiWhitespace(line_sv), absl::ByAnyChar(" \t"), absl::SkipEmpty());
+    const std::vector<std::string> tok
+        = absl::StrSplit(absl::StripAsciiWhitespace(line_sv), absl::ByAnyChar(" \t"), absl::SkipEmpty());
     if (tok.size() >= 3 && tok[0] == "set") {
       if (double v = 0; number(tok[2], v) && tok.size() == 3) {
         vars[tok[1]] = v;
@@ -938,13 +942,23 @@ void merge_mapper_sets(const Options& opts, std::string_view method, Eprp_var::E
       labels["memory"] = v == "flops" ? "true" : v == "macro" ? "false" : "auto";
     }
   }
-  // synth.delay_frac: a budget relative to the clock, below an explicit synth.delay
-  // and the pass's own namespace (merged afterwards).
-  if (!have_delay) {
-    std::string frac, sdc, liberty;
+  // The shared clock fraction applies when an SDC actually defines a clock.
+  // Explicit mapper budgets win; an explicit fraction without a clock is an
+  // error, while an untimed/default invocation remains supported.
+  const auto* descriptor    = mapper_of_method(method);
+  const bool  abc_namespace = method == "pass.abc" || (descriptor && descriptor->inherits_abc);
+  const bool  mapper_delay  = std::any_of(opts.sets.begin(), opts.sets.end(), [&](const auto& value) {
+    return !value.second.empty()
+           && (value.first == std::string(method) + ".delay"
+               || (abc_namespace && (value.first == "pass.abc.delay" || value.first == "abc.delay")));
+  });
+  if (!have_delay && !mapper_delay) {
+    std::string frac              = "0.4", sdc, liberty;
+    bool        explicit_fraction = false;
     for (const auto& [k, v] : opts.sets) {
       if (k == "synth.delay_frac") {
-        frac = v;
+        frac              = v;
+        explicit_fraction = true;
       } else if (k == "synth.sdc") {
         sdc = v;
       } else if (k == "synth.liberty") {
@@ -954,14 +968,18 @@ void merge_mapper_sets(const Options& opts, std::string_view method, Eprp_var::E
     if (!frac.empty()) {
       char*        end = nullptr;
       const double f   = std::strtod(frac.c_str(), &end);
-      if (end == frac.c_str() || *end != '\0' || !(f > 0.0)) {
+      if (end == frac.c_str() || *end != '\0' || !std::isfinite(f) || !(f > 0.0)) {
         throw Lhd_error{"usage", std::format("synth.delay_frac expects a positive number, got '{}'", frac), ""};
       }
       const auto period = sdc.empty() ? std::nullopt : sdc_min_clock_period_ps(sdc, liberty);
-      if (!period) {
-        throw Lhd_error{"usage", "synth.delay_frac needs a synth.sdc with a resolvable create_clock -period", "set synth.sdc or use synth.delay"};
+      if (!period && explicit_fraction) {
+        throw Lhd_error{"usage",
+                        "synth.delay_frac needs a synth.sdc with a resolvable create_clock -period",
+                        "set synth.sdc or use synth.delay"};
       }
-      labels["delay"] = std::format("{:.3f}", f * *period);
+      if (period) {
+        labels["delay"] = std::format("{:.3f}", f * *period);
+      }
     }
   }
   if (const auto* mapper = mapper_of_method(method); mapper != nullptr && mapper->inherits_abc) {
@@ -1192,7 +1210,8 @@ void check_known_set_passes(const Options& opts) {
                                   value)};
     }
     if (pass == "compile.slang" && flag == "liberty") {
-      throw Lhd_error{"usage", "compile.slang.liberty is an internal label",
+      throw Lhd_error{"usage",
+                      "compile.slang.liberty is an internal label",
                       "select the SRAM interfaces and mapper cells with --set synth.liberty=" + value};
     }
     if (pass == "compile" && flag == "cache") {
@@ -1217,8 +1236,8 @@ void check_known_set_passes(const Options& opts) {
       continue;
     }
     if (pass == "compile"
-        && (flag == "lnast_fmt" || flag == "verify_frozen" || flag == "specialize_modules" || flag == "flatten" || flag == "unknown_zero"
-            || flag == "sweep")) {
+        && (flag == "lnast_fmt" || flag == "verify_frozen" || flag == "specialize_modules" || flag == "flatten"
+            || flag == "unknown_zero" || flag == "sweep")) {
       // Kernel gates (not pass options): whether the pass.lnastfmt LNAST
       // self-check runs / whether pass.legalize freezes and re-checks the graphs.
       // Folded into a kernel decision; merge_sets never copies them into a pass
@@ -1256,10 +1275,10 @@ void check_known_set_passes(const Options& opts) {
                         value == "synth" ? "the unate-synthesis mapper was renamed: use --set synth.mapper=usyn" : ""};
       }
       if (opt->kind == Synth_set_option::Kind::source_only) {
-        throw Lhd_error{"usage",
-                        std::format("synth.{} is a source attribute with no run-wide value", flag),
-                        std::format("write ::[synth.{}=...] on a module, block, call or declaration; `lhd describe synth.{}`", flag,
-                                    flag)};
+        throw Lhd_error{
+            "usage",
+            std::format("synth.{} is a source attribute with no run-wide value", flag),
+            std::format("write ::[synth.{}=...] on a module, block, call or declaration; `lhd describe synth.{}`", flag, flag)};
       }
       if (flag == "abc_pre" && !livehd::synth_attr::valid_abc_pre(value)) {
         throw Lhd_error{"usage",
@@ -1270,7 +1289,8 @@ void check_known_set_passes(const Options& opts) {
         throw Lhd_error{"usage", std::format("synth.memory expects auto|flops|macro, got '{}'", value), ""};
       }
       if (flag == "partition" && value != "auto" && value != "fine" && value != "coarse") {
-        throw Lhd_error{"usage", std::format("synth.partition expects auto|fine|coarse, got '{}'", value),
+        throw Lhd_error{"usage",
+                        std::format("synth.partition expects auto|fine|coarse, got '{}'", value),
                         "fine = the abc profile, coarse = the usyn profile; auto follows synth.mapper"};
       }
       if (opt->kind == Synth_set_option::Kind::integer) {
@@ -2036,9 +2056,9 @@ void save_ln_dir(Options& opts, Result& res, const std::vector<std::shared_ptr<L
     if (end - i > 1) {
       const auto& tmpl      = sorted[i];
       const bool  defaulted = !tmpl->get_generics().empty() && tmpl->get_generic_defaults().size() == tmpl->get_generics().size()
-                             && std::none_of(tmpl->get_generic_defaults().begin(),
-                                             tmpl->get_generic_defaults().end(),
-                                             [](const auto& value) { return value.empty(); });
+                              && std::none_of(tmpl->get_generic_defaults().begin(),
+                                              tmpl->get_generic_defaults().end(),
+                                              [](const auto& value) { return value.empty(); });
       if (end - i != 2 || !tmpl->is_template() || sorted[i + 1]->is_template() || !defaulted
           || tmpl->get_lambda_kind() != sorted[i + 1]->get_lambda_kind()) {
         throw Lhd_error{"config", std::format("duplicate LNAST unit name '{}'", tmpl->get_top_module_name()), ""};

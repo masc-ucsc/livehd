@@ -832,9 +832,10 @@ inline constexpr Synth_set_option kSynthSetOptions[] = {
      Synth_set_option::Kind::boolean,
      "let synth.place.resize repair size and buffer reset-pin cones (a high-fanout reset net); default protects them like clocks"},
     {"place.reset_fanout",
-     "0",
+     "32",
      Synth_set_option::Kind::integer,
-     "before placement, deal every flat net that drives an asynchronous clear/preset pin and more than this many cell pins out through "
+     "before placement, deal every flat net that drives an asynchronous clear/preset pin and more than this many cell pins out "
+     "through "
      "a tree of the library's smallest buffer, this many pins per buffer (0 = off, >= 2); unlike resize it is not gated on timing"},
     {"place.fp.colors",
      "false",
@@ -1073,10 +1074,15 @@ inline constexpr Synth_set_option kSynthSetOptions[] = {
      "false",
      Synth_set_option::Kind::boolean,
      "opt in to proved critical-cone resynthesis with local placement and timing acceptance"},
+    {"place.io_resynth",
+     "5",
+     Synth_set_option::Kind::file,
+     "whole-color placement-aware resynthesis: critical margin and tightening threshold as percent of the clock period; "
+     "0 disables; ABC full placement with OpenTimer and --workdir; at most one automatic round, then rerun on the same workdir"},
     {"place.resize",
-     "false",
+     "true",
      Synth_set_option::Kind::boolean,
-     "opt in to timing-checked gate sizing, buffer removal and Steiner repair with single-cell legalization"},
+     "timing-checked gate sizing, buffer removal and Steiner repair with single-cell legalization"},
     {"place.resize.engine",
      "legacy",
      Synth_set_option::Kind::file,
@@ -1105,7 +1111,7 @@ inline constexpr Synth_set_option kSynthSetOptions[] = {
      Synth_set_option::Kind::integer,
      "timing budget in ps for every region (= pass.abc.delay); source pins override it"},
     {"delay_frac",
-     "",
+     "0.4",
      Synth_set_option::Kind::file,
      "timing budget as a fraction of the smallest create_clock period of synth.sdc (e.g. 0.4); used only when no "
      "synth.delay or pass.abc.delay is set, so one value can be shared by designs with different clocks"},
@@ -1146,7 +1152,7 @@ inline constexpr Synth_set_option kSynthSetOptions[] = {
      Synth_set_option::Kind::source_only,
      "no run-wide value; the ABC flow script for the region (run-wide: pass.abc.flow)"},
     {"partition",
-     "auto",
+     "coarse",
      Synth_set_option::Kind::file,
      "auto|fine|coarse: region granularity, independent of the mapper. fine cuts at wide arithmetic/shifters/compares/muxes "
      "and extracts ware modules (small ABC regions); coarse keeps register-to-register cones and extracts nothing. "
@@ -1200,17 +1206,17 @@ inline constexpr Synth_set_option kSynthSetOptions[] = {
      "content-named copy of its state-free callee, and a constant a callee returns reaches its parent. false keeps "
      "every instance boundary as compiled"},
     {"state_sweep",
-     "false",
+     "true",
      Synth_set_option::Kind::boolean,
      "opt in to the observability sweep of the mapper's private copy: delete the registers and cells that no output, memory or "
      "body-less cell can observe and narrow each register to its highest observed bit, tracking the demand per bit across the "
      "instance hierarchy (what Yosys gets from flattening and opt_clean). Works on the private copy only and also sweeps the "
-     "lowered memories; complements compile.sweep, which edits the flat compile graphs. Off by default"},
+     "lowered memories; complements compile.sweep, which edits the flat compile graphs. Enabled by default"},
     {"merge_registers",
-     "false",
+     "true",
      Synth_set_option::Kind::boolean,
      "opt in to merging registers that are the same machine (same clock, enable, reset, reset value, width and D driver) on the "
-     "mapper's private copy, repeating until nothing merges: Yosys's opt_merge on flops. Off by default"},
+     "mapper's private copy, repeating until nothing merges: Yosys's opt_merge on flops. Enabled by default"},
     {"sdc", "", Synth_set_option::Kind::file, "PATH -- optional .sdc timing constraints handed to pass.opentimer"},
     {"spef", "", Synth_set_option::Kind::file, "PATH -- optional .spef parasitics handed to pass.opentimer"},
 };

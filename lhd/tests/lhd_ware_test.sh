@@ -36,7 +36,7 @@ def run(*args):
 PROFILE = ('--set', 'synth.tune.profile=on')  # trials run only on explicit request
 
 def synth(name, src, lib, *opts):
-    j = run('synth', src, '--top', 'top', '--set', f'synth.liberty={lib}', '--set', 'synth.opentimer=false',
+    j = run('synth', src, '--top', 'top', '--set', f'synth.liberty={lib}', '--set', 'synth.opentimer=false', '--set', 'synth.partition=fine',
             '--workdir', w/name, '--emit', f'verilog:{w/name}_mapped.v', '--emit-dir', f'lg:{w/name}-net', *opts)
     return j['qor']['abc']['regions']
 

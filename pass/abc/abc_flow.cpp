@@ -67,7 +67,7 @@ int area_relax_percent(float target, float achieved, uint32_t cap) {
   return slack_pct < 25.0 ? 0 : static_cast<int>(std::min(slack_pct, static_cast<double>(cap)));
 }
 
-Flow_qor physical_flow_qor(void* opaque) {
+Flow_qor physical_flow_qor(void* opaque, bool wire_loads) {
   auto* mapped = static_cast<Abc_Ntk_t*>(opaque);
   if (!mapped || !Abc_NtkIsMappedLogic(mapped)) {
     return {};
@@ -78,7 +78,7 @@ Flow_qor physical_flow_qor(void* opaque) {
   if (!Abc_SclCheckNtk(timing_net, 0)) {
     return {};
   }
-  auto*      timing = Abc_SclManStart(static_cast<SC_Lib*>(Abc_FrameReadLibScl()), timing_net, 0, 1, 0.0f, 0);
+  auto*      timing = Abc_SclManStart(static_cast<SC_Lib*>(Abc_FrameReadLibScl()), timing_net, wire_loads, 1, 0.0f, 0);
   const auto result = std::pair{timing->MaxDelay0, static_cast<double>(timing->SumArea0)};
   Abc_SclManFree(timing);
   return result;
@@ -99,7 +99,30 @@ Flow_result execute_flow(void* opaque, const Flow_plan& plan, const std::functio
     if (!admit(stage)) {
       return false;
     }
-    if (Cmd_CommandExecute(frame, std::string(command).c_str()) != 0) {
+    std::string resolved(command);
+    if (plan.wire_loads && plan.annotate_wire_commands) {
+      std::string annotated;
+      for (size_t start = 0; start < resolved.size();) {
+        const auto end   = resolved.find(';', start);
+        auto       piece = resolved.substr(start, end == std::string::npos ? end : end - start);
+        const auto first = piece.find_first_not_of(" \t");
+        if (first != std::string::npos) {
+          const auto word_end = piece.find_first_of(" \t", first);
+          const auto word     = piece.substr(first, word_end == std::string::npos ? word_end : word_end - first);
+          if (word == "buffer" || word == "upsize" || word == "dnsize" || word == "stime") {
+            piece.insert(first + word.size(), " -c");
+          }
+        }
+        annotated += piece;
+        if (end == std::string::npos) {
+          break;
+        }
+        annotated += ';';
+        start      = end + 1;
+      }
+      resolved = std::move(annotated);
+    }
+    if (Cmd_CommandExecute(frame, resolved.c_str()) != 0) {
       result.status  = Flow_status::failed;
       result.stage   = stage;
       result.command = command;
@@ -112,7 +135,7 @@ Flow_result execute_flow(void* opaque, const Flow_plan& plan, const std::functio
     if (!admit("timing")) {
       return false;
     }
-    qor = physical_flow_qor(Abc_FrameReadNtk(frame));
+    qor = physical_flow_qor(Abc_FrameReadNtk(frame), plan.wire_loads);
     return admit("timing");
   };
   if (!frame || !Abc_FrameReadNtk(frame)) {

@@ -67,6 +67,90 @@ TEST(Placement, RowLegalityAcceptsOnlyTechnologyPermittedHorizontalMirrors) {
   fp.components[0].place.orientation = Ann_place::Orientation::W;
   EXPECT_THROW(check_legality(tech, fp), std::runtime_error);
 }
+TEST(Placement, ResynthesisRestartSeedsCoordinatesWithoutLockingCellsOrMacros) {
+  const auto root = std::filesystem::path(std::getenv("TEST_TMPDIR")) / "restart_seed";
+  std::filesystem::create_directories(root);
+  std::ifstream lef_input("inou/lefdef/tests/data/sky130hd.lef");
+  std::string   lef{std::istreambuf_iterator<char>(lef_input), {}};
+  // Use one tiny BLOCK master and two CORE cells so both movable paths run.
+  lef.replace(lef.find("CLASS CORE"), std::string("CLASS CORE").size(), "CLASS BLOCK");
+  const auto lef_path = (root / "macro.lef").string();
+  std::ofstream(lef_path) << lef;
+  hhds::GraphLibrary source;
+  auto               io = source.create_io("restart_seed");
+  io->add_input("a", 0);
+  io->set_bits("a", 1);
+  io->add_output("y", 0);
+  io->set_bits("y", 1);
+  auto graph  = io->create_graph();
+  auto signal = graph->get_input_pin("a");
+  gu::set_bits(signal, 1);
+  for (int i = 0; i < 3; ++i) {
+    const auto master  = i ? "sky130_fd_sc_hd__buf_1" : "sky130_fd_sc_hd__inv_1";
+    auto       cell_io = source.create_io(master);
+    cell_io->add_input("A", 0);
+    cell_io->add_output(i ? "X" : "Y", 0);
+    auto cell = gu::create_typed_node(*graph, Ntype_op::Sub);
+    cell.set_subnode(cell_io);
+    cell.set_name("cell" + std::to_string(i));
+    cell.create_sink_pin("A").connect_driver(signal);
+    signal = cell.create_driver_pin(i ? "X" : "Y");
+    gu::set_bits(signal, 1);
+  }
+  graph->get_output_pin("y").connect_driver(signal);
+  auto options       = plain_options();
+  options.lefs       = {"inou/lefdef/tests/data/sky130hd.tlef", lef_path};
+  options.output_dir = (root / "cold").string();
+  options.core       = {0, 0, 100, 100};
+  options.iterations = 0;
+  options.full       = false;
+  hhds::GraphLibrary cold_library;
+  auto               frame = place(*graph, cold_library, options).floorplan;
+  ASSERT_EQ(frame.components.size(), 3);
+  for (size_t i = 0; i < frame.components.size(); ++i) {
+    auto& cell        = frame.components[i];
+    cell.place.x      = 10000 + i * 20000;
+    cell.place.y      = 15000 + i * 10000;
+    // A previous frame may have locked macros; its status is not inherited.
+    cell.place.status = Ann_place::Status::FIXED;
+  }
+  const auto first = frame.components[0], second = frame.components[1];
+  frame.components.pop_back();  // Simulates a newly created mapped cell.
+  options.restart_seed = std::make_shared<physical::Floorplan>(frame);
+  options.output_dir   = (root / "restart").string();
+  hhds::GraphLibrary restart_library;
+  const auto         seeded = place(*graph, restart_library, options);
+  for (const auto& old : {first, second}) {
+    const auto now = std::find_if(seeded.floorplan.components.begin(), seeded.floorplan.components.end(), [&](const auto& cell) {
+      return cell.name == old.name;
+    });
+    ASSERT_NE(now, seeded.floorplan.components.end());
+    EXPECT_EQ(now->place.x, old.place.x);
+    EXPECT_EQ(now->place.y, old.place.y);
+    EXPECT_NE(now->place.status, Ann_place::Status::FIXED);
+    EXPECT_NE(now->place.status, Ann_place::Status::LOCKED);
+  }
+  std::ifstream       report_file(options.output_dir + "/restart_seed.json");
+  const std::string   text{std::istreambuf_iterator<char>(report_file), {}};
+  rapidjson::Document report;
+  report.Parse(text.c_str());
+  ASSERT_FALSE(report.HasParseError());
+  EXPECT_TRUE(report["coordinates_only"].GetBool());
+  EXPECT_EQ(report["reused_movable_cells"].GetUint64(), 2);
+  EXPECT_EQ(report["reused_movable_macros"].GetUint64(), 1);
+  EXPECT_EQ(report["new_movable_cells"].GetUint64(), 1);
+  options.iterations = 20;
+  options.output_dir = (root / "continue").string();
+  hhds::GraphLibrary moving_library;
+  const auto         moved = place(*graph, moving_library, options);
+  for (const auto& old : {first, second}) {
+    const auto now = std::find_if(moved.floorplan.components.begin(), moved.floorplan.components.end(), [&](const auto& cell) {
+      return cell.name == old.name;
+    });
+    ASSERT_NE(now, moved.floorplan.components.end());
+    EXPECT_TRUE(now->place.x != old.place.x || now->place.y != old.place.y) << old.name;
+  }
+}
 TEST(Placement, RepulsionControlsRejectUnsupportedH2dCombination) {
   hhds::GraphLibrary source, scratch;
   auto               io      = source.create_io("repulsion_validation");

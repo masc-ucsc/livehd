@@ -98,7 +98,9 @@ top = 'abc_ware_attr.abc_ware_attr'
 
 def run(*args):
     result = w/'result.json'
-    p = subprocess.run([lhd, *map(str,args), '-q', '--result-json',str(result)], capture_output=True, text=True, timeout=120)
+    # Ware policy is independent of the production region-granularity default.
+    flags = ['--set', 'synth.partition=fine'] if args[0] == 'synth' else []
+    p = subprocess.run([lhd, *map(str,args), *flags, '-q', '--result-json',str(result)], capture_output=True, text=True, timeout=120)
     assert p.returncode == 0, (args, p.stdout, p.stderr, result.read_text())
     return json.loads(result.read_text())
 

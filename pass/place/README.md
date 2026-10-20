@@ -1,10 +1,49 @@
 # Physical placement stage
 
-The default is one mixed-size GP pass followed by macro/cell legalization and
-detailed placement (`synth.place.fp=false`). Macro snapping remains enabled.
+With ABC, OpenTimer and an explicit workdir, the default runs macro placement,
+fixes the macros, and then places the cells (`synth.place.fp=false`). Without
+macros it uses a single placement stage. Macro snapping remains enabled.
 Enable `synth.place.fp=true` explicitly for centroid floorplanning and the separate
 macro-refinement/final-cell passes. The legacy `r8h2`/`r8h3` macro modes and manual
 macro-centroid diagnostic have been removed.
+
+`synth.place.io_resynth=5` enables placement-aware whole-color ABC resynthesis.
+At each completed stage, OpenTimer's in-memory pin arrivals/required times are
+reduced to region port bits; clock and reset nets are excluded. A near-critical
+color is remapped only if an IO constraint on a near-critical path tightened by
+more than 5% of the clock period. A scoped fanout-to-Steiner-length wire-load
+table supplies ABC's capacitance estimate. Timing must not worsen under the
+same environment and a bounded combinational CEC must prove the replacement.
+State and memory instances remain opaque and retain their interfaces.
+
+One automatic batch is allowed: either before placement using saved final
+feedback, or after the first completed stage. An accepted batch restarts that
+stage, seeding surviving cells (including SRAMs) and IOs from its placement.
+These are movable initial coordinates: the restart does not copy fixed status,
+add position bounds, or lock unchanged colors. The normal macro lock happens
+after macro placement. A saved-feedback resynthesis before placement has no
+placement seed. `restart_seed.json` in the restarted stage reports reused
+movable cells/macros and new cells. Later stages save
+feedback and warn when another run could help. The per-color decisions and
+used/placed environments are in `synth/place/io_resynth.json`; reusable state is
+in `abc_cache/io_timing.json` and `abc_cache/wire_load.json`. Use a distinct
+`--workdir` for each major placement configuration. `lhd.incremental=false`
+disables reading/writing reusable state but permits feedback within this run.
+The IO timing snapshot records the timing-engine source identity. A timer
+change discards its old measured arrivals/required times before the pre-placement
+trigger check, while preserving the constraints used to map the body and the
+geometric wire-load tables. Fresh placement then supplies current measurements.
+Set `synth.place.io_resynth=0` to disable the loop and retain the single-call
+non-FP flow. Explicit positive values require a workdir, ABC, full placement,
+OpenTimer, and a resolvable SDC clock. No IO timing JSON is exchanged during GP
+timing callbacks; the two state files are stage-boundary snapshots.
+
+`synth.place.resize=true` enables timing-checked sizing and buffering in full
+placement with OpenTimer. Explicitly disable it for a geometry-only comparison.
+The shared synthesis defaults use coarse partitions, state sweeping and register
+merging, a delay budget of 0.4 of the SDC clock period when available, ABC fanout
+32 with area relaxation off, and flat reset fanout 32. Explicit options override
+these defaults.
 
 `lhd synth --set synth.place=true` runs CPU DREAMPlace between mapping and STA.
 The default remains false. `synth.lef` is a comma-separated tech LEF and cell/macro

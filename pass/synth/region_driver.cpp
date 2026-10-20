@@ -319,7 +319,7 @@ std::optional<Region_opts_map> parse_region_opts(std::string_view json, std::str
 void Region_driver::prepare_region_opts(const std::vector<std::shared_ptr<hhds::Graph>>& graphs) {
   // Register bits of every graph including its instantiated children, once per
   // definition: the largest is the design's total (the primary clock's fanout).
-  absl::flat_hash_map<hhds::Gid, uint64_t> total;
+  absl::flat_hash_map<hhds::Gid, uint64_t>                          total;
   std::function<uint64_t(const std::shared_ptr<hhds::Graph>&, int)> count = [&](const std::shared_ptr<hhds::Graph>& g, int depth) {
     if (auto it = total.find(g->get_gid()); it != total.end()) {
       return it->second;
@@ -345,7 +345,7 @@ void Region_driver::prepare_region_opts(const std::vector<std::shared_ptr<hhds::
   // directly or through the parent's own derived port: inside that module the
   // port is a derived clock, not the primary one (region_writer clock tree).
   absl::flat_hash_map<std::pair<hhds::Gid, std::string>, std::vector<std::pair<hhds::Gid, std::string>>> feeds;
-  std::vector<std::pair<hhds::Gid, std::string>>                                                     work;
+  std::vector<std::pair<hhds::Gid, std::string>>                                                         work;
   for (const auto& g : graphs) {
     if (!g) {
       continue;
@@ -474,7 +474,7 @@ bool Region_driver::apply_region_overrides(const livehd::partition::Region_body&
   // explicit values among the cells of one color are therefore an error whatever
   // their source precedence (a module default plus a block pin would otherwise
   // silently change the whole region). Cells without the key inherit the value.
-  livehd::synth_attr::Policy source;
+  livehd::synth_attr::Policy                                                 source;
   absl::flat_hash_map<std::string, absl::flat_hash_map<std::string, size_t>> seen;  // key -> value -> cells
   for (const auto& node : rb.nodes) {
     if (auto a = node.attr(livehd::attrs::synth_policy); a.has()) {
@@ -671,11 +671,11 @@ bool Region_driver::over_budget(std::string_view region, uint64_t rss_before, si
   // an allocation the backstop denies is a bare SIGSEGV, never an error. Refuse
   // while a margin of the configured budget is still left below the cap, so the
   // admission fires (a clean TIMEOUT-memory) before the backstop can.
-  const uint64_t as_cap    = cost::address_space_limit_bytes();
-  const uint64_t as_used   = as_cap != 0 ? cost::process_virtual_bytes() : 0;
-  const uint64_t as_margin = std::max<uint64_t>(uint64_t{256} << 20, cost::configured_budget_bytes() / 8);
-  const bool     over_va   = as_cap != 0 && as_used != 0 && gu::sat_add(gu::sat_add(as_used, pending_bytes), as_margin) > as_cap;
-  const bool     over_now  = over_growth || over_total || over_va;
+  const uint64_t as_cap        = cost::address_space_limit_bytes();
+  const uint64_t as_used       = as_cap != 0 ? cost::process_virtual_bytes() : 0;
+  const uint64_t as_margin     = std::max<uint64_t>(uint64_t{256} << 20, cost::configured_budget_bytes() / 8);
+  const bool     over_va  = as_cap != 0 && as_used != 0 && gu::sat_add(gu::sat_add(as_used, pending_bytes), as_margin) > as_cap;
+  const bool     over_now = over_growth || over_total || over_va;
   const bool     over_projected
       = coordinator_ == nullptr && grown >= kMinGrowthToProject && projected_growth / kProjectionMargin > budget;
   if (!over_now && !over_projected) {
@@ -689,13 +689,14 @@ bool Region_driver::over_budget(std::string_view region, uint64_t rss_before, si
   // a second such invention.
   const std::string budget_desc
       = (over_va && !over_growth && !over_total)
-            ? std::format("process address space {} MiB{} is within {} MiB of the RLIMIT_AS memory backstop {} MiB (virtual "
-                          "memory, above the footprint: malloc arenas, stacks, reservations) -- a further allocation there "
-                          "would crash ABC instead of failing cleanly",
-                          mib(as_used),
-                          pending_bytes ? std::format(" (+{} MiB pending)", mib(pending_bytes)) : std::string{},
-                          mib(as_margin),
-                          mib(as_cap))
+            ? std::format(
+                  "process address space {} MiB{} is within {} MiB of the RLIMIT_AS memory backstop {} MiB (virtual "
+                  "memory, above the footprint: malloc arenas, stacks, reservations) -- a further allocation there "
+                  "would crash ABC instead of failing cleanly",
+                  mib(as_used),
+                  pending_bytes ? std::format(" (+{} MiB pending)", mib(pending_bytes)) : std::string{},
+                  mib(as_margin),
+                  mib(as_cap))
         : coordinator_
             ? (over_total ? std::format("parallel process physical-memory ceiling {} MiB (half of physical RAM or the smaller "
                                         "configured process budget)",
@@ -721,14 +722,14 @@ bool Region_driver::over_budget(std::string_view region, uint64_t rss_before, si
                                 : std::format(" (after {} completed color(s), whose retained memory is the cost)", qor_.size());
   refusal_                = std::format(
       "region '{}' does not fit in memory: {} of {} node(s) translated ({:.0f}%), RSS {} MiB{} "
-                     "(was {} MiB, {} added {} MiB){}, {}{}",
+      "(was {} MiB, {} added {} MiB){}, {}{}",
       region,
       blasted,
       total,
       100.0 * fraction,
       mib(rss),
       pending_bytes ? std::format(" (incl. {} MiB estimated for the ABC netlist not yet built)", mib(pending_bytes))
-                                   : std::string{},
+                    : std::string{},
       mib(rss_before),
       coordinator_ ? "process" : "color",
       mib(grown),
@@ -997,9 +998,9 @@ std::string applied_operations(std::span<const hhds::Node_class> nodes, const Dr
       rows += ",";
     }
     rows       += std::format("{{\"node\":{},\"source_id\":{},\"operation\":\"{}\",\"choices\":{{",
-                        node.get_debug_nid(),
-                        node.attr(hhds::attrs::srcid).has() ? node.attr(hhds::attrs::srcid).get() : 0,
-                        mult    ? "multiplier"
+                              node.get_debug_nid(),
+                              node.attr(hhds::attrs::srcid).has() ? node.attr(hhds::attrs::srcid).get() : 0,
+                              mult    ? "multiplier"
                               : shift ? "barrel"
                                       : "adder");
     bool first  = true;
@@ -1063,29 +1064,29 @@ std::string tune_key(const partition::Region_body& rb, const Driver_options& opt
     }
   }
   std::sort(hints.begin(), hints.end());
-  std::string recipe = tune_options(options) + options.delay + options.region_hook_recipe
-                       + std::format("|inherited={}/{}/{}",
-                                     options.inherited_adder ? static_cast<int>(*options.inherited_adder) : -1,
-                                     options.inherited_multiplier ? static_cast<int>(*options.inherited_multiplier) : -1,
-                                     options.inherited_barrel ? static_cast<int>(*options.inherited_barrel) : -1);
-  recipe += std::format("|source={}/{}/{}/{}|auto={}/{}/{}",
-                        options.source_adder,
-                        options.source_multiplier,
-                        options.source_barrel,
-                        options.source_block,
-                        options.auto_adder,
-                        options.auto_multiplier,
-                        options.auto_barrel);
+  std::string recipe  = tune_options(options) + options.delay + options.region_hook_recipe
+                        + std::format("|inherited={}/{}/{}",
+                                      options.inherited_adder ? static_cast<int>(*options.inherited_adder) : -1,
+                                      options.inherited_multiplier ? static_cast<int>(*options.inherited_multiplier) : -1,
+                                      options.inherited_barrel ? static_cast<int>(*options.inherited_barrel) : -1);
+  recipe             += std::format("|source={}/{}/{}/{}|auto={}/{}/{}",
+                                    options.source_adder,
+                                    options.source_multiplier,
+                                    options.source_barrel,
+                                    options.source_block,
+                                    options.auto_adder,
+                                    options.auto_multiplier,
+                                    options.auto_barrel);
   // Equal arithmetic cones can belong to differently constrained regions.
   // The ID alone is not semantic, but ware/flow/load are part of the policy:
   // a selected implementation must never leak into a disabled sibling.
-  recipe += std::format("|ware={}/{}/{}/{}|flow={}|load={}",
-                        options.ware,
-                        options.ware_arith,
-                        options.ware_cmp,
-                        options.ware_shift,
-                        flow,
-                        load);
+  recipe             += std::format("|ware={}/{}/{}/{}|flow={}|load={}",
+                                    options.ware,
+                                    options.ware_arith,
+                                    options.ware_cmp,
+                                    options.ware_shift,
+                                    flow,
+                                    load);
   for (const auto& hint : hints) {
     recipe += hint;
   }
@@ -1246,8 +1247,12 @@ void Region_driver::map_region(const livehd::partition::Region_body& rb) {
     (void)apply_region_overrides(rb, overrides);
   }
   if (!ware_trial_) {
-    auto  key   = tune_key(rb, opts_, overrides.flow.value_or(""), overrides.load.value_or("") + "|pre=" + overrides.pre.value_or(""), opts_.tune_salt);
-    auto* owner = coordinator_ ? coordinator_ : this;
+    auto  key                         = tune_key(rb,
+                                                 opts_,
+                                                 overrides.flow.value_or(""),
+                                                 overrides.load.value_or("") + "|pre=" + overrides.pre.value_or(""),
+                                                 opts_.tune_salt);
+    auto* owner                       = coordinator_ ? coordinator_ : this;
     owner->tune_keys_[rb.module_name] = key;
     bool replay                       = false;
     if (opts_.tune_store && opts_.tune_profile == "auto"
@@ -1300,6 +1305,9 @@ void Region_driver::map_region(const livehd::partition::Region_body& rb) {
   ctx.trace_stage      = trace_stage;
   ctx.elapsed_ms       = since;
   const auto plan      = backend_->plan(ctx);
+  if (opts_.io_feedback) {
+    opts_.io_feedback->mapping(rb.module_name, {plan.resolved_flow, ctx.budget, plan.custom_flow});
+  }
   if (opts_.verbose) {
     uint64_t input_bits  = 0;
     uint64_t output_bits = 0;
@@ -1346,9 +1354,9 @@ void Region_driver::map_region(const livehd::partition::Region_body& rb) {
   // cache key.
   std::string recipe  = opts_.region_hook ? std::format("{}|hook={}", plan.recipe, opts_.region_hook_recipe) : plan.recipe;
   recipe             += std::format("|inherited={}/{}/{}",
-                        opts_.inherited_adder ? static_cast<int>(*opts_.inherited_adder) : -1,
-                        opts_.inherited_multiplier ? static_cast<int>(*opts_.inherited_multiplier) : -1,
-                        opts_.inherited_barrel ? static_cast<int>(*opts_.inherited_barrel) : -1);
+                                    opts_.inherited_adder ? static_cast<int>(*opts_.inherited_adder) : -1,
+                                    opts_.inherited_multiplier ? static_cast<int>(*opts_.inherited_multiplier) : -1,
+                                    opts_.inherited_barrel ? static_cast<int>(*opts_.inherited_barrel) : -1);
   recipe
       += std::format("|source={}/{}/{}/{}", opts_.source_adder, opts_.source_multiplier, opts_.source_barrel, opts_.source_block);
   // The clock tree is written after mapping and cached with the body.
@@ -1454,6 +1462,9 @@ void Region_driver::map_region(const livehd::partition::Region_body& rb) {
   }
 
   resynthesized = true;
+  if (opts_.io_feedback) {
+    opts_.io_feedback->invalidate(rb.module_name);
+  }
 
   // Do not pay the backend's start (an ABC session parses the Liberty) for an
   // all-hit rebuild. The cache salt has already folded the Liberty content and
@@ -1550,8 +1561,8 @@ void Region_driver::map_region(const livehd::partition::Region_body& rb) {
   }
   blast_options.verbose = opts_.verbose;
   Blast_hooks hooks;
-  hooks.stage      = trace_stage;
-  hooks.elapsed_ms = since;
+  hooks.stage       = trace_stage;
+  hooks.elapsed_ms  = since;
   hooks.over_budget = [&](uint64_t rss_before, size_t blasted, size_t total, size_t net_nodes) {
     // The Lnet is small; the backend network built from it is what costs
     // memory, so count it as already allocated (measured 250-300 bytes per
@@ -1650,9 +1661,17 @@ void Region_driver::map_region(const livehd::partition::Region_body& rb) {
   qor_.push_back(std::move(q));
 
   // --- read back: the mapped cells -> the region body ---
-  Region_writer::Counts counts{qor_.back().gates, qor_.back().area, qor_.back().bypassed};
-  Region_writer::Registers
-      registers{opts_.map_register, &dff_, &dff_ladder_, &areset_ladder_[0], &areset_ladder_[1], &icg_ladder_, &latch_ladder_, opts_.icg_fanout, design_state_bits_ >= opts_.input_clock_min, &derived_ports_};
+  Region_writer::Counts    counts{qor_.back().gates, qor_.back().area, qor_.back().bypassed};
+  Region_writer::Registers registers{opts_.map_register,
+                                     &dff_,
+                                     &dff_ladder_,
+                                     &areset_ladder_[0],
+                                     &areset_ladder_[1],
+                                     &icg_ladder_,
+                                     &latch_ladder_,
+                                     opts_.icg_fanout,
+                                     design_state_bits_ >= opts_.input_clock_min,
+                                     &derived_ports_};
   registers.drop_init    = opts_.drop_init;
   registers.reset_fanout = opts_.reset_fanout;
   writer_.set_outlib(outlib_);
@@ -1812,9 +1831,9 @@ void Region_driver::remember_ware(const livehd::partition::Region_body& rb, cons
       const auto v = synth_attr::get(hints, key);
       return !v.empty() && v != "auto";
     };
-    w.add |= options.auto_adder && !pinned("adder")
-             && ((options.ware_arith && op == Ntype_op::Sum) || (options.ware_cmp && (op == Ntype_op::LT || op == Ntype_op::GT)));
-    w.mult   |= options.ware_arith && options.auto_multiplier && !pinned("multiplier") && op == Ntype_op::Mult;
+    w.add  |= options.auto_adder && !pinned("adder")
+              && ((options.ware_arith && op == Ntype_op::Sum) || (options.ware_cmp && (op == Ntype_op::LT || op == Ntype_op::GT)));
+    w.mult |= options.ware_arith && options.auto_multiplier && !pinned("multiplier") && op == Ntype_op::Mult;
     w.barrel |= options.ware_shift && options.auto_barrel && !pinned("barrel") && (op == Ntype_op::SHL || op == Ntype_op::SRA);
   }
   if ((!w.add && !w.mult && !w.barrel) || (options.large_ge && ge >= options.large_ge)) {
@@ -1940,7 +1959,7 @@ void Region_driver::optimize_ware(hhds::GraphLibrary& outlib, std::string_view t
   // region's weight is its stitched path delay over the worst path; with an area
   // objective it is its share of the mapped gates. A region under the area
   // share floor is not worth a trial (each trial re-times the whole design).
-  double total_gates = 0;
+  double                           total_gates = 0;
   for (const auto& q : qor_) {
     total_gates += std::max(q.gates, 0);
   }
@@ -1983,8 +2002,8 @@ void Region_driver::optimize_ware(hhds::GraphLibrary& outlib, std::string_view t
         }
         rank = share;
       }
-      if (rank > best_rank + 1e-12 || (std::abs(rank - best_rank) <= 1e-12 && next != ware_regions_.end()
-                                       && cand.rb.module_name < next->rb.module_name)) {
+      if (rank > best_rank + 1e-12
+          || (std::abs(rank - best_rank) <= 1e-12 && next != ware_regions_.end() && cand.rb.module_name < next->rb.module_name)) {
         best_rank = rank;
         next      = it;
       }
@@ -2118,10 +2137,10 @@ void Region_driver::optimize_ware(hhds::GraphLibrary& outlib, std::string_view t
       if (saved_cache && w.rb.pre_body) {
         const auto& o   = candidate.options;
         const auto  key = std::format("a{}_b{}_m{}_s{}",
-                                     static_cast<int>(o.adder),
-                                     o.block_size,
-                                     static_cast<int>(o.multiplier),
-                                     o.reverse_barrel);
+                                      static_cast<int>(o.adder),
+                                      o.block_size,
+                                      static_cast<int>(o.multiplier),
+                                      o.reverse_barrel);
         candidate_cache
             = std::make_unique<Region_cache>(saved_cache->dir() + "/ware/" + name + "/" + key, saved_cache->salt(), true);
         incr_ = candidate_cache.get();
@@ -2138,12 +2157,12 @@ void Region_driver::optimize_ware(hhds::GraphLibrary& outlib, std::string_view t
       if (qor_.size() > count) {
         qor_.resize(count);
       }
-      auto       trial_score = mapped ? score_ware(outlib, top) : Ware_score{};
-      const bool keep        = trial_score.valid
-                        && ware_qor_better(score, trial_score, timing)
-                        // Area-only sections must not degrade another section's
-                        // constrained stitched paths.
-                        && (timing || score.delays.empty() || !ware_qor_better(trial_score, score, true));
+      auto       trial_score      = mapped ? score_ware(outlib, top) : Ware_score{};
+      const bool keep             = trial_score.valid
+                                    && ware_qor_better(score, trial_score, timing)
+                                    // Area-only sections must not degrade another section's
+                                    // constrained stitched paths.
+                                    && (timing || score.delays.empty() || !ware_qor_better(trial_score, score, true));
       trial_q.ware_trials         = previous.ware_trials + 1;
       const bool   candidate_hit  = mapped && !trial_q.resynth;
       const double trial_ms       = mapped ? trial_q.ms : 0.0;
@@ -2216,7 +2235,8 @@ void Region_driver::optimize_ware(hhds::GraphLibrary& outlib, std::string_view t
             pin += std::format(", synth.block_size={}", selected.block_size);
           }
         } else if (kind == "mult") {
-          pin = std::format("synth.multiplier=\"{}\", synth.adder=\"{}\"", multiplier_name(selected.multiplier),
+          pin = std::format("synth.multiplier=\"{}\", synth.adder=\"{}\"",
+                            multiplier_name(selected.multiplier),
                             adder_name(selected.adder));
         } else if (kind == "shl" || kind == "sra") {
           pin = std::format("synth.barrel=\"{}\"", barrel_name(selected.reverse_barrel));

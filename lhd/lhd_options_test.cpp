@@ -232,7 +232,7 @@ TEST(LhdOptions, SynthAttributesAreOptions) {
 
 // synth.delay_frac turns a fraction of the SDC clock period into the ABC budget, so
 // one setting serves designs with different clocks. An explicit synth.delay wins;
-// a missing or unresolvable period is a usage error, never a silent default.
+// an explicit fraction with a missing or unresolvable period is a usage error.
 TEST(LhdOptions, SynthDelayFractionScalesTheSdcClockPeriod) {
   const auto dir = ::testing::TempDir();
   {
@@ -253,38 +253,65 @@ TEST(LhdOptions, SynthDelayFractionScalesTheSdcClockPeriod) {
     lhd::merge_mapper_sets(opts, "pass.abc", labels);
     return labels;
   };
+  EXPECT_FALSE(merged({}).contains("delay"));
   EXPECT_EQ(merged({
-                {"synth.sdc",       dir + "/frac.sdc"},
-                {"synth.liberty", dir + "/frac_ps.lib"},
-                {"synth.delay_frac",           "0.4"}
-  }).at("delay"),
+                       {    "synth.sdc",    dir + "/frac.sdc"},
+                       {"synth.liberty", dir + "/frac_ps.lib"}
+  })
+                .at("delay"),
+            "360.000");
+  EXPECT_EQ(merged({
+                       {     "synth.sdc", dir + "/frac.sdc"},
+                       {"pass.abc.delay",             "222"}
+  })
+                .at("delay"),
+            "222");
+  {
+    lhd::Options opts;
+    opts.sets = {
+        {     "synth.sdc",    dir + "/frac.sdc"},
+        { "synth.liberty", dir + "/frac_ps.lib"},
+        {"pass.abc.delay",                "222"}
+    };
+    Eprp_var::Eprp_dict labels;
+    lhd::merge_mapper_sets(opts, "pass.usyn", labels);
+    EXPECT_EQ(labels.at("delay"), "360.000");
+  }
+  EXPECT_EQ(merged({
+                       {       "synth.sdc",    dir + "/frac.sdc"},
+                       {   "synth.liberty", dir + "/frac_ps.lib"},
+                       {"synth.delay_frac",                "0.4"}
+  })
+                .at("delay"),
             "360.000");
   // The SDC unit is the Liberty unit: 0.9 ns is 900 ps.
   EXPECT_EQ(merged({
-                {"synth.sdc",      dir + "/frac_ns.sdc"},
-                {"synth.liberty", dir + "/frac_ns.lib"},
-                {"synth.delay_frac",            "0.5"}
-  }).at("delay"),
+                       {       "synth.sdc", dir + "/frac_ns.sdc"},
+                       {   "synth.liberty", dir + "/frac_ns.lib"},
+                       {"synth.delay_frac",                "0.5"}
+  })
+                .at("delay"),
             "450.000");
   EXPECT_EQ(merged({
-                {"synth.sdc",       dir + "/frac.sdc"},
-                {"synth.liberty", dir + "/frac_ps.lib"},
-                {"synth.delay_frac",           "0.4"},
-                {"synth.delay",                "123"}
-  }).at("delay"),
+                       {       "synth.sdc",    dir + "/frac.sdc"},
+                       {   "synth.liberty", dir + "/frac_ps.lib"},
+                       {"synth.delay_frac",                "0.4"},
+                       {     "synth.delay",                "123"}
+  })
+                .at("delay"),
             "123");
   EXPECT_THROW(merged({
                    {"synth.delay_frac", "0.4"}
   }),
                lhd::Lhd_error);
   EXPECT_THROW(merged({
-                   {"synth.sdc",   dir + "/frac_bad.sdc"},
-                   {"synth.delay_frac",           "0.4"}
+                   {       "synth.sdc", dir + "/frac_bad.sdc"},
+                   {"synth.delay_frac",                 "0.4"}
   }),
                lhd::Lhd_error);
   EXPECT_THROW(merged({
-                   {"synth.sdc",       dir + "/frac.sdc"},
-                   {"synth.delay_frac",            "-1"}
+                   {       "synth.sdc", dir + "/frac.sdc"},
+                   {"synth.delay_frac",              "-1"}
   }),
                lhd::Lhd_error);
 }
@@ -309,18 +336,39 @@ TEST(LhdOptions, CpropEngineDispatch) {
   };
   using V = std::vector<std::string>;
   EXPECT_EQ(methods({}), (V{"pass.cprop", "pass.cprop"}));
-  EXPECT_EQ(methods({{"compile.cprop.engine", "classic"}}), (V{"pass.cprop", "pass.cprop"}));
-  EXPECT_EQ(methods({{"compile.cprop.engine", "aegraph"}}), (V{"pass.aegraph", "pass.aegraph"}));
-  EXPECT_EQ(methods({{"compile.cprop.engine", "aegraph+classic"}}),
+  EXPECT_EQ(methods({
+                {"compile.cprop.engine", "classic"}
+  }),
+            (V{"pass.cprop", "pass.cprop"}));
+  EXPECT_EQ(methods({
+                {"compile.cprop.engine", "aegraph"}
+  }),
+            (V{"pass.aegraph", "pass.aegraph"}));
+  EXPECT_EQ(methods({
+                {"compile.cprop.engine", "aegraph+classic"}
+  }),
             (V{"pass.aegraph", "pass.cprop", "pass.aegraph", "pass.cprop"}));
-  EXPECT_EQ(methods({{"compile.cprop.engine", "aegraph"}, {"compile.cprop.engine_slots", "first"}}),
+  EXPECT_EQ(methods({
+                {      "compile.cprop.engine", "aegraph"},
+                {"compile.cprop.engine_slots",   "first"}
+  }),
             (V{"pass.aegraph", "pass.cprop"}));
-  EXPECT_EQ(methods({{"compile.cprop.engine", "aegraph"}, {"compile.cprop.engine_slots", "second"}}),
+  EXPECT_EQ(methods({
+                {      "compile.cprop.engine", "aegraph"},
+                {"compile.cprop.engine_slots",  "second"}
+  }),
             (V{"pass.cprop", "pass.aegraph"}));
-  EXPECT_EQ(methods({{"compile.cprop.engine", "aegraph+classic"}, {"compile.cprop.engine_slots", "second"}}),
+  EXPECT_EQ(methods({
+                {      "compile.cprop.engine", "aegraph+classic"},
+                {"compile.cprop.engine_slots",          "second"}
+  }),
             (V{"pass.cprop", "pass.aegraph", "pass.cprop"}));
   // The last --set wins, like every other pass flag.
-  EXPECT_EQ(methods({{"compile.cprop.engine", "aegraph"}, {"compile.cprop.engine", "classic"}}), (V{"pass.cprop", "pass.cprop"}));
+  EXPECT_EQ(methods({
+                {"compile.cprop.engine", "aegraph"},
+                {"compile.cprop.engine", "classic"}
+  }),
+            (V{"pass.cprop", "pass.cprop"}));
 
   lhd::Options opts;
   EXPECT_EQ(lhd::cprop_engine_descriptor(opts), "classic");
@@ -432,9 +480,39 @@ TEST(LhdOptions, PassCpropRefusesNonClassicEngine) {
   (void)lhd::list_set_options();  // registers every pass method
   for (const char* engine : {"aegraph", "aegraph+classic", "none"}) {
     Eprp_var var;
-    EXPECT_THROW(Pass::eprp.run_method_now("pass.cprop", var, {{"engine", engine}}), std::exception) << engine;
+    EXPECT_THROW(Pass::eprp.run_method_now("pass.cprop",
+                                           var,
+                                           {
+                                               {"engine", engine}
+    }),
+                 std::exception)
+        << engine;
   }
   Eprp_var var;
-  EXPECT_NO_THROW(Pass::eprp.run_method_now("pass.cprop", var, {{"engine", "classic"}}));
+  EXPECT_NO_THROW(Pass::eprp.run_method_now("pass.cprop",
+                                            var,
+                                            {
+                                                {"engine", "classic"}
+  }));
   EXPECT_NO_THROW(Pass::eprp.run_method_now("pass.cprop", var, {}));
+}
+
+TEST(LhdOptions, RecommendedSharedDefaults) {
+  const auto listed = lhd::list_set_options();
+  for (const auto& [key, value] : std::vector<std::pair<std::string, std::string>>{
+           {"compile.specialize_modules",   "true"},
+           {       "pass.abc.area_relax",      "0"},
+           {       "pass.abc.max_fanout",     "32"},
+           {          "synth.delay_frac",    "0.4"},
+           {           "synth.partition", "coarse"},
+           {  "synth.place.reset_fanout",     "32"},
+           {        "synth.place.resize",   "true"},
+           {         "synth.state_sweep",   "true"},
+           {     "synth.merge_registers",   "true"},
+           {    "synth.place.io_resynth",      "5"}
+  }) {
+    const auto option = std::find_if(listed.begin(), listed.end(), [&](const auto& o) { return o.name == key; });
+    ASSERT_NE(option, listed.end()) << key;
+    EXPECT_EQ(option->default_value, value) << key;
+  }
 }

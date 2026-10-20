@@ -131,8 +131,8 @@ cc_library(
         "//pass/formal",
         "//pass/liberty:liberty_dff",
         "//pass/partition:pass_partition",
-        "//pass/specialize",
         "//pass/semdiff",  # region cache: structural_identical
+        "//pass/specialize",
         "@abseil-cpp//absl/container:btree",
         "@abseil-cpp//absl/container:flat_hash_map",
         "@abseil-cpp//absl/container:flat_hash_set",
@@ -142,6 +142,17 @@ cc_library(
 )
 
 exports_files(["arith.hpp"])
+
+cc_test(
+    name = "io_resynth_test",
+    size = "small",
+    srcs = ["io_resynth_test.cpp"],
+    copts = COPTS,
+    deps = [
+        ":synth",
+        "@googletest//:gtest_main",
+    ],
+)
 
 cc_library(
     name = "arith",

@@ -15,7 +15,6 @@ load("//tools:copt_default.bzl", "COPTS")
 # OUTPUT; globbing a generated header back in as a source is a cycle.
 filegroup(
     name = "mapper_srcs",
-    visibility = ["//visibility:public"],
     srcs = glob(
         [
             "*.cpp",
@@ -27,17 +26,18 @@ filegroup(
             "*_smoke.cpp",
         ],
     ),
+    visibility = ["//visibility:public"],
 )
 
 genrule(
     name = "abc_salt",
-    visibility = ["//pass/usyn:__pkg__"],
     srcs = [
         ":mapper_srcs",
         "//pass/satopt:satopt_salt",
         "//pass/synth:synth_salt",
         "//:MODULE.bazel",
-        "//packages:abc.patch", "//packages:abc-physical.patch",
+        "//packages:abc.patch",
+        "//packages:abc-physical.patch",
     ],
     outs = ["abc_salt.hpp"],
     cmd = "h=$$(cat $(SRCS) | (shasum -a 256 2>/dev/null || sha256sum) | cut -c1-16); " +
@@ -46,13 +46,17 @@ genrule(
           "// pin: the ABC incremental-cache code salt (docs/opt_loop_incr.md L2).\\n" +
           "#pragma once\\n#include <cstdint>\\n" +
           "namespace livehd::abc { inline constexpr uint64_t kAbcSrcSalt = 0x%sULL; }\\n' \"$$h\" > $@",
+    visibility = ["//pass/usyn:__pkg__"],
 )
 
 cc_library(
     name = "pass_abc",
     srcs = glob(
         ["*.cpp"],
-        exclude = ["*test*.cpp", "*_smoke.cpp"],
+        exclude = [
+            "*test*.cpp",
+            "*_smoke.cpp",
+        ],
     ),
     hdrs = glob(
         ["*.hpp"],
@@ -64,19 +68,19 @@ cc_library(
     deps = [
         "//core",
         "//graph",
+        "//pass/bitwidth:pass_bitwidth",
+        "//pass/color:pass_color",
         "//pass/common:pass",
+        "//pass/cost:host_mem",
         "//pass/cprop:pass_cprop",
         "//pass/enableopt:pass_enableopt",
-        "//pass/color:pass_color",
-        "//pass/bitwidth:pass_bitwidth",
-        "//pass/cost:host_mem",
+        "//pass/formal",
+        "//pass/lec:lec_query",
         "//pass/liberty:liberty_dff",
         "//pass/liberty:pass_liberty",
-        "//pass/lec:lec_query",
         "//pass/partition:pass_partition",
-        "//pass/semdiff:semdiff",
-        "//pass/formal:formal",
         "//pass/satopt",
+        "//pass/semdiff",
         "//pass/synth",
         "@abc",
         "@abseil-cpp//absl/container:node_hash_map",
@@ -96,8 +100,8 @@ cc_test(
         "//graph",
         "//pass/partition:flatten",
         "//pass/synth",
-        "//pass/usyn:usyn_semantic",
         "//pass/usyn:usyn_logic",
+        "//pass/usyn:usyn_semantic",
         "@googletest//:gtest_main",
         "@hhds//hhds:core",
     ],
@@ -140,6 +144,19 @@ cc_test(
 )
 
 cc_test(
+    name = "abc_io_test",
+    size = "small",
+    srcs = ["abc_io_test.cpp"],
+    copts = COPTS,
+    data = ["//inou/prp:abc_tests"],
+    deps = [
+        ":pass_abc",
+        "@abc",
+        "@googletest//:gtest_main",
+    ],
+)
+
+cc_test(
     name = "abc_session_smoke",
     srcs = ["abc_session_smoke.cpp"],
     copts = COPTS,
@@ -171,8 +188,8 @@ cc_test(
         ":pass_abc",
         "//graph",
         "//pass/color:pass_color",
-        "//pass/liberty:pass_liberty",
         "//pass/lec:lec_query",
+        "//pass/liberty:pass_liberty",
         "//pass/partition:pass_partition",
         "@googletest//:gtest_main",
     ],

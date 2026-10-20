@@ -17,6 +17,9 @@
 namespace livehd::physical {
 struct Parasitics;
 }
+namespace livehd::synth {
+class Io_store;
+}
 
 struct eprp_casecmp_str {
   struct nocase_compare {
@@ -39,6 +42,7 @@ public:
   Eprp_lnasts                                         lnasts;
   // Typed in-memory placement RC, consumed by pass.opentimer. No file round trip.
   std::shared_ptr<const livehd::physical::Parasitics> physical_rc;
+  std::shared_ptr<livehd::synth::Io_store>            synthesis_feedback;
 
   // Optional stable ordering for a mixed forest reconstructed from persisted
   // and freshly parsed units. pass.upass applies it after lambda extraction,

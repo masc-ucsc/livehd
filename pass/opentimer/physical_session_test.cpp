@@ -164,6 +164,24 @@ TEST_F(PhysicalSession, ResizeRcTopologyAndRejectedTrialRollbackMatchFreshTiming
   EXPECT_EQ(session.statistics().inserted_gates, 1u);
   EXPECT_EQ(session.statistics().removed_gates, 1u);
 }
+TEST_F(PhysicalSession, ShieldedLoadsRepowerAndRollbackMatchFreshTiming) {
+  livehd::opentimer::Physical_session session(options);
+  for (const auto [strong, extra, resistance] : {
+           std::tuple{false, false, 250000.},
+           std::tuple{ true, false, 250000.},
+           std::tuple{ true,  true, 100000.},
+           std::tuple{false, false, 250000.},
+  }) {
+    Circuit                             circuit(strong, extra, resistance, true);
+    const auto                          incremental = session.evaluate(circuit.graph, circuit.rc);
+    livehd::opentimer::Physical_session fresh(options);
+    compare(incremental, fresh.evaluate(circuit.graph, circuit.rc));
+  }
+  EXPECT_EQ(session.statistics().builds, 1u);
+  EXPECT_GE(session.statistics().repowered_gates, 2u);
+  EXPECT_EQ(session.statistics().inserted_gates, 1u);
+  EXPECT_EQ(session.statistics().removed_gates, 1u);
+}
 TEST_F(PhysicalSession, DirectFeedbackMatchesExplicitReportAndDoesNotReloadFiles) {
   Circuit circuit(false, false);
   auto    report_options     = options;

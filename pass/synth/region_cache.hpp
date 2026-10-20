@@ -49,9 +49,10 @@ struct Region_qor;  // region_qor.hpp
 class Region_cache {
 public:
   struct Row {
-    std::string                        module;   // cache-lib name of the mapped body (== module_name)
-    std::string                        pre;      // cache-lib name of the pre-abc body ("p_"+module_name)
-    std::string                        recipe;   // verbatim resolved ABC recipe (the recipe gate)
+    std::string                        module;  // cache-lib name of the mapped body (== module_name)
+    std::string                        pre;     // cache-lib name of the pre-abc body ("p_"+module_name)
+    std::string                        recipe;  // verbatim resolved ABC recipe (the recipe gate)
+    std::string                        io_env;
     std::vector<std::string>           in, out;  // cached module port names (existence-checked on reuse)
     int                                gates       = 0;
     double                             area        = 0.0;
@@ -142,6 +143,7 @@ public:
   // area/delay in line with the body save() is about to copy. No-op for a
   // module this run did not store.
   void refresh_qor(std::string_view module, const Region_qor& q);
+  bool update_mapped(std::string_view module, hhds::GraphLibrary& outlib, const Region_qor& q, std::string environment);
 
   [[nodiscard]] int hits() const { return hits_; }
   [[nodiscard]] int misses() const { return misses_; }

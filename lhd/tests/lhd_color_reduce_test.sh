@@ -22,7 +22,12 @@ fail() {
   echo "FAIL: $*" >&2
   exit 1
 }
-run() { "$LHD" "$@" -q --result-json "$W/r.json" || fail "$* -> $(cat "$W/r.json" 2>/dev/null)"; }
+run() {
+  # This checks shared pattern definitions independently of module specialization.
+  local flags=()
+  [ "$1" != compile ] || flags=(--set compile.specialize_modules=false)
+  "$LHD" "$@" "${flags[@]}" -q --result-json "$W/r.json" || fail "$* -> $(cat "$W/r.json" 2>/dev/null)"
+}
 
 # Three copies of the same 6-node cone on distinct inputs. The cone is bigger
 # than the min_nodes floor (4) and repeats exactly min_count (3) times.

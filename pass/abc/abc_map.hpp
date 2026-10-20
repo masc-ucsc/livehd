@@ -26,8 +26,8 @@ struct Map_options : synth::Driver_options {
   // Cap on the fanout of any net ABC MAPS, enforced by appending
   // `buffer -N <n>; dnsize` to a built-in flow. 0 disables the tail.
   // Nets driven by native (unblasted) nodes are outside ABC and keep their
-  // fanout regardless. Default 16.
-  uint32_t    max_fanout = 16;
+  // fanout regardless. Default 32.
+  uint32_t    max_fanout = 32;
   // Indivisible wide operations can exceed pass.color.synth.max_gate by orders of
   // magnitude. The default large tier (at or above Driver_options::large_ge)
   // skips ABC's unbounded structural-choice synthesis and maps the already
@@ -50,7 +50,7 @@ struct Map_options : synth::Driver_options {
   // percentage; 0 disables the recovery entirely and restores minimum-delay
   // mapping. Needs a physical (NLDM) Liberty and a `delay` target: with neither
   // there is no budget to be inside of.
-  uint32_t    area_relax_pct = 200;
+  uint32_t    area_relax_pct = 0;
   // tmap regions only (pass.usyn.tmap_pre): `;`-separated GIA commands run
   // before `&nf` (empty: none).
   std::string tmap_pre;

@@ -1576,8 +1576,7 @@ std::shared_ptr<ph::Parasitics> estimate_rc(const View& v, const ph::Technology&
     bool approximate = false;
     auto rc          = steiner_rc(endpoint(v.drivers[net]), pins, wire, tech.dbu, &approximate);
     if (approximate) {
-      // A bounded star estimate lets timing drive fanout repair before FLUTE's
-      // degree limit can be met; the absent shared trunks are reported.
+      // Larger-net trees use the shared estimator's bounded approximation.
       result->approximate = true;
     }
     for (const auto& node : rc.nodes) {
@@ -2528,19 +2527,19 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
   Resolver    resolver(tech, memories, options.unknown_const_zero);
   // Opt-in: the flat reset nets are bounded before the first cell is read, so the buffers place like any cell.
   // A driver that resolves to a constant (the tied inactive pin of a clear+preset flop) is not a reset net.
-  const auto reset_tree = options.reset_fanout ? buffer_reset_nets(graph,
-                                                                   tech,
-                                                                   options.liberty,
-                                                                   options.reset_fanout,
-                                                                   [&](const Pin& driver) {
+  const auto  reset_tree = options.reset_fanout ? buffer_reset_nets(graph,
+                                                                    tech,
+                                                                    options.liberty,
+                                                                    options.reset_fanout,
+                                                                    [&](const Pin& driver) {
                                                                      try {
                                                                        return resolver.bit(driver, 0).constant >= 0;
                                                                      } catch (const std::exception&) {
                                                                        return true;  // unknown constant: left to the tie logic
                                                                      }
-                                                                   })
+                                                                    })
                                                 : Reset_tree_stats{};
-  double      area      = 0;
+  double      area       = 0;
   int64_t     max_width = 0, max_height = 0;
   std::string site_name;
   for (auto node : graph.body().nodes()) {
@@ -2617,10 +2616,10 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
     }
     env += std::format(":groups:{:016x}", membership);
   }
-  const auto cache_path       = (options.timing_seed || options.retain_placement || options.cache_dir.empty())
-                                    ? std::string{}
-                                    : options.cache_dir + "/placement.json";
-  auto       previous         = options.previous;
+  const auto cache_path = (options.timing_seed || options.retain_placement || options.restart_seed || options.cache_dir.empty())
+                              ? std::string{}
+                              : options.cache_dir + "/placement.json";
+  auto       previous   = options.previous;
   bool       cached_reference = false;
   if (!previous && options.floorplan.empty() && !cache_path.empty() && fs::is_regular_file(cache_path)
       && fs::is_regular_file(options.cache_dir + "/floorplan.def")) {
@@ -3312,6 +3311,51 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
   // Experimental FP targets are not persisted by the placement cache yet.
   auto       cache
       = (macro_solved || options.fp_place) ? CacheInfo{0, hashes.size(), false} : restore_cache(v, tech, cache_path, env, hashes);
+  if (options.restart_seed) {
+    // This is an initial guess after resynthesis, not an ECO lock. In
+    // particular, never copy the old status or create position boxes.
+    std::map<std::string, Ann_place> positions;
+    for (const auto& c : options.restart_seed->components) {
+      positions.emplace(c.name, c.place);
+    }
+    size_t reused_cells = 0, reused_macros = 0, new_cells = 0, reused_ios = 0;
+    for (auto& c : v.cells) {
+      const auto old = positions.find(c.name);
+      if (c.place.status == Status::FIXED || c.place.status == Status::LOCKED) {
+        continue;
+      }
+      if (old != positions.end()) {
+        c.place.x = old->second.x;
+        c.place.y = old->second.y;
+        ++reused_cells;
+        reused_macros += !tech.macros.at(c.macro).klass.starts_with("CORE");
+      } else {
+        ++new_cells;
+      }
+    }
+    for (auto& terminal : v.fp.terminals) {
+      for (const auto& old : options.restart_seed->terminals) {
+        if (terminal.name == old.name && terminal.status != Status::FIXED) {
+          terminal.x = old.x;
+          terminal.y = old.y;
+          ++reused_ios;
+          break;
+        }
+      }
+    }
+    fs::create_directories(options.output_dir);
+    std::ofstream report(options.output_dir + "/restart_seed.json");
+    report << std::format(
+        R"({{"coordinates_only":true,"reused_movable_cells":{},"reused_movable_macros":{},"new_movable_cells":{},"reused_ios":{}}})",
+        reused_cells,
+        reused_macros,
+        new_cells,
+        reused_ios)
+           << '\n';
+    if (!report) {
+      throw std::runtime_error("cannot write placement restart seed report");
+    }
+  }
   make_arrays(v, tech);
   dp::Options control;
   control.max_iterations  = options.iterations;
@@ -3568,7 +3612,7 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
       }
     }
   } else if (!cache.hit) {
-    if (!macro_active) {
+    if (!macro_active && !options.restart_seed) {
       // This prototype determines automatic IO locations. Keep it a plain GP
       // (no post-density continuation) so a cohesion comparison starts with the
       // same fixed IOs and GP seed.
@@ -3853,7 +3897,31 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
         };
       }
       fp_metrics = dp::place(v.design, fp_control);
-      fp_gp      = summarize_centroids(v.design);
+      if (options.after_stage) {
+        auto view = v;
+        capture(view, tech, false);
+        Result checkpoint;
+        checkpoint.graph      = result.graph;
+        checkpoint.fp_library = result.fp_library;
+        checkpoint.floorplan  = view.fp;
+        checkpoint.floorplan.components.clear();
+        auto rc_options       = options;
+        rc_options.full       = false;
+        checkpoint.parasitics = estimate_rc(view, tech, rc_options, checkpoint.pin_locations);
+        for (const auto& c : view.cells) {
+          c.node.attr(attrs::place).set(c.place);
+          checkpoint.floorplan.components.push_back({c.name, c.macro, c.place});
+          checkpoint.parasitics->cells.push_back(
+              {c.name, c.place.x, c.place.y, static_cast<unsigned>(c.place.orientation), c.macro, c.place.width, c.place.height});
+        }
+        for (const auto& terminal : view.fp.terminals) {
+          checkpoint.parasitics->terminals.push_back({terminal.name, terminal.x, terminal.y});
+        }
+        if (options.after_stage(Placement_stage::floorplan, checkpoint)) {
+          throw Placement_restart(checkpoint.floorplan, Placement_stage::floorplan);
+        }
+      }
+      fp_gp = summarize_centroids(v.design);
       for (size_t i = 0; i < fp_gp.size(); ++i) {
         const auto& g = v.design.centroid_groups[i];
         const auto& p = fp_gp[i];
@@ -5139,11 +5207,12 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
       tree.AddMember("nets", reset_tree.nets, allocator);
       tree.AddMember("sinks", reset_tree.sinks, allocator);
       tree.AddMember("added", reset_tree.buffers, allocator);
-      tree.AddMember("buffers",
-                     static_cast<uint64_t>(std::count_if(v.cells.begin(),
-                                                         v.cells.end(),
-                                                         [](const Cell& c) { return c.name.find("__place_rsttree") != std::string::npos; })),
-                     allocator);
+      tree.AddMember(
+          "buffers",
+          static_cast<uint64_t>(std::count_if(v.cells.begin(),
+                                              v.cells.end(),
+                                              [](const Cell& c) { return c.name.find("__place_rsttree") != std::string::npos; })),
+          allocator);
       tree.AddMember("levels", reset_tree.levels, allocator);
       tree.AddMember("skipped", reset_tree.skipped, allocator);
       json.AddMember("reset_tree", tree, allocator);
@@ -5202,6 +5271,9 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
   result.floorplan        = std::move(v.fp);
   result.fp_resized_cells = fp_resized;
   result.fp_repair_edits  = fp_repairs;
+  if (options.after_stage && !options.timing_seed && options.after_stage(options.completed_stage, result)) {
+    throw Placement_restart(result.floorplan, options.completed_stage);
+  }
   return result;
 }
 
@@ -5209,7 +5281,24 @@ Result place(hhds::Graph& source, hhds::GraphLibrary& library, const Options& op
   if (options.final_iterations < 0) {
     throw std::invalid_argument("invalid final cell iteration budget");
   }
-  if (!options.fp_place || !options.final_cells || !options.full || options.timing_seed || options.previous) {
+  bool stage_macros = false;
+  if (options.after_stage && !options.fp_place && options.full && !options.timing_seed) {
+    const auto technology = ph::read_lef(options.lefs);
+    for (const auto& graph : source.definitions().graphs()) {
+      for (auto node : graph->body().nodes()) {
+        if (gu::type_op_of(node) == Ntype_op::Memory) {
+          stage_macros = true;
+        }
+        if (auto io = node.get_subnode_io()) {
+          const auto found = technology.macros.find(std::string(io->get_name()));
+          if (found != technology.macros.end() && !found->second.klass.starts_with("CORE")) {
+            stage_macros = true;
+          }
+        }
+      }
+    }
+  }
+  if ((!options.fp_place && !stage_macros) || !options.final_cells || !options.full || options.timing_seed || options.previous) {
     return place_single(source, library, options);
   }
   // Keep the macro frame in a separate library: the returned final graph must
@@ -5217,6 +5306,7 @@ Result place(hhds::Graph& source, hhds::GraphLibrary& library, const Options& op
   hhds::GraphLibrary macro_library;
   auto               macro_options = options;
   macro_options.final_cells        = false;
+  macro_options.completed_stage    = Placement_stage::macro;
   macro_options.cache_dir.clear();
   macro_options.output_dir += "/macro";
   const auto start          = std::chrono::steady_clock::now();
@@ -5236,9 +5326,11 @@ Result place(hhds::Graph& source, hhds::GraphLibrary& library, const Options& op
   }
   const auto frame = macro_options.output_dir + "/fixed.def";
   ph::write_def(macro.floorplan, frame);
-  auto cell_options               = options;
-  cell_options.net_weights        = macro.net_weights;
-  cell_options.fp_place           = false;
+  auto cell_options            = options;
+  cell_options.net_weights     = macro.net_weights;
+  cell_options.fp_place        = false;
+  cell_options.completed_stage = Placement_stage::final;
+  cell_options.restart_seed.reset();
   cell_options.fp_pin_adjust      = false;
   cell_options.macro_pin_adjust   = false;
   cell_options.final_cells        = false;
@@ -5253,7 +5345,8 @@ Result place(hhds::Graph& source, hhds::GraphLibrary& library, const Options& op
   const auto end          = std::chrono::steady_clock::now();
   const auto seconds      = [](auto a, auto b) { return std::chrono::duration<double>(b - a).count(); };
   const auto text         = std::format(
-      R"({{"schema_version":1,"mode":"floorplan-macro-cells","centroid_snap":{},"macro_snap":{},"final_centroid_anchors":false,"fixed_macros":{},"macro_source_hpwl_um":{},"final_hpwl_um":{},"macro_source_seconds":{},"final_cells_seconds":{}}})",
+      R"({{"schema_version":1,"mode":"{}","centroid_snap":{},"macro_snap":{},"final_centroid_anchors":false,"fixed_macros":{},"macro_source_hpwl_um":{},"final_hpwl_um":{},"macro_source_seconds":{},"final_cells_seconds":{}}})",
+      options.fp_place ? "floorplan-macro-cells" : "macro-cells",
       options.fp_snap_enabled,
       options.macro_snap,
       fixed_macros,

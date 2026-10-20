@@ -1474,7 +1474,7 @@ void lower_lnasts(Options& opts, Result& res, Eprp_var& var, const std::string& 
       absl::flat_hash_set<const Lnast*> dropped;
       std::set<std::string>             erased;
       std::vector<std::string>          erased_work;
-      auto drop_unit = [&](const Lnast* ln) {
+      auto                              drop_unit = [&](const Lnast* ln) {
         if (dropped.insert(ln).second) {
           std::string name{ln->get_top_module_name()};
           if (erased.insert(name).second) {
@@ -1687,8 +1687,8 @@ void lower_lnasts(Options& opts, Result& res, Eprp_var& var, const std::string& 
     return;  // no lg/verilog emit requested -> skip the tolg lowering
   }
   {
-    Phase_timer   phase(res, "lnast.tolg");
-    Stdout_to_log redirect(next_log_path(opts, "lnast.tolg"));
+    Phase_timer                       phase(res, "lnast.tolg");
+    Stdout_to_log                     redirect(next_log_path(opts, "lnast.tolg"));
     // An explicit `--top` names the design. A file-scope helper `comb` that is
     // not `pub` and that nothing lowered reaches through a call (used only at
     // comptime, inlined, or called only from a branch a comptime `if` folded
@@ -1846,7 +1846,7 @@ void graph_pipeline_and_emits(Options& opts, Result& res, Eprp_var& var, const s
       if (active->graphs.empty()) {
         return;
       }
-      bool specialize_modules = false;
+      bool specialize_modules = true;
       for (const auto& [key, value] : opts.sets) {
         if (key == "compile.specialize_modules") {
           specialize_modules = value == "true" || value == "1" || value == "on";
@@ -1894,7 +1894,11 @@ void graph_pipeline_and_emits(Options& opts, Result& res, Eprp_var& var, const s
             roots.push_back(graph);
           }
         }
-        (void)livehd::specialize::specialize_constants(design, {.refold_all = true, .max_versions = 64});
+        // The scheduled cprop/bitwidth slot already folded each body. Refold
+        // only bodies changed by specialization: repeating classic cprop here
+        // bypasses the selected engine and can reshape a false-cycle predicate
+        // before the legalizer has discharged its hold arm.
+        (void)livehd::specialize::specialize_constants(design, {.max_versions = 64});
         absl::flat_hash_set<const hhds::Graph*> reachable;
         auto                                    pending = roots;
         while (!pending.empty()) {
@@ -1937,8 +1941,8 @@ void graph_pipeline_and_emits(Options& opts, Result& res, Eprp_var& var, const s
         Phase_timer                               phase(res, "pass.sweep.flatten");
         std::vector<std::shared_ptr<hhds::Graph>> design(var.graphs.begin(), var.graphs.end());
         // The roots are the requested top(s), or every definition nothing instantiates.
-        absl::flat_hash_set<const hhds::Graph*> instantiated;
-        std::vector<std::string>                names;
+        absl::flat_hash_set<const hhds::Graph*>   instantiated;
+        std::vector<std::string>                  names;
         for (const auto& graph : design) {
           names.emplace_back(graph->get_name());
           for (auto node : graph->body().nodes()) {
@@ -1959,13 +1963,17 @@ void graph_pipeline_and_emits(Options& opts, Result& res, Eprp_var& var, const s
         }
         std::vector<std::shared_ptr<hhds::Graph>> roots;
         for (const auto& graph : design) {
-          if (selected_tops.contains(std::string{graph->get_name()}) || (selected_tops.empty() && !instantiated.contains(graph.get()))) {
+          if (selected_tops.contains(std::string{graph->get_name()})
+              || (selected_tops.empty() && !instantiated.contains(graph.get()))) {
             roots.push_back(graph);
           }
         }
         const auto stats = livehd::sweep::flatten(roots);
         livehd::diag::info("pass.sweep", "flatten", "progress")
-            .msg("pass.sweep: flattened {} instance(s) into {} root(s); {} instance(s) kept", stats.inlined, roots.size(), stats.kept)
+            .msg("pass.sweep: flattened {} instance(s) into {} root(s); {} instance(s) kept",
+                 stats.inlined,
+                 roots.size(),
+                 stats.kept)
             .emit();
         absl::flat_hash_set<const hhds::Graph*> reachable;
         for (const auto& graph : livehd::sweep::reachable_closure(roots)) {
@@ -2133,11 +2141,11 @@ void graph_pipeline_and_emits(Options& opts, Result& res, Eprp_var& var, const s
       for (; rounds < 256; ++rounds) {
         livehd::sweep::State_stats round;
         for (const auto& graph : active->graphs) {
-          const auto st = livehd::sweep::sweep_state(*graph, {.observe_markers = opts.command != "synth"});
-          round.const_bits += st.const_bits;
-          round.dead_bits  += st.dead_bits;
+          const auto st        = livehd::sweep::sweep_state(*graph, {.observe_markers = opts.command != "synth"});
+          round.const_bits    += st.const_bits;
+          round.dead_bits     += st.dead_bits;
           round.dead_memories += st.dead_memories;
-          round.fix_rounds += st.fix_rounds;
+          round.fix_rounds    += st.fix_rounds;
           round.flops_rebuilt += st.flops_rebuilt;
         }
         if (!round.changed()) {
@@ -2155,8 +2163,14 @@ void graph_pipeline_and_emits(Options& opts, Result& res, Eprp_var& var, const s
         run_step("pass.bitwidth", *active, bw_labels, opts, res);
       }
       livehd::diag::info("pass.sweep", "state", "progress")
-          .msg("pass.sweep: {} constant and {} unobserved flop bit(s) and {} unobserved memorie(s) removed in {} round(s) ({} fixpoint evaluations)",
-               total_const, total_dead, total_mem, rounds, total_fix)
+          .msg(
+              "pass.sweep: {} constant and {} unobserved flop bit(s) and {} unobserved memorie(s) removed in {} round(s) ({} "
+              "fixpoint evaluations)",
+              total_const,
+              total_dead,
+              total_mem,
+              rounds,
+              total_fix)
           .emit();
       res.recipe_steps.emplace_back("pass.sweep.state");
     }

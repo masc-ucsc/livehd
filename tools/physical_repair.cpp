@@ -8,6 +8,7 @@
 #include <fstream>
 #include <iomanip>
 #include <iostream>
+#include <set>
 #include <stdexcept>
 
 #include "attrs.hpp"
@@ -32,7 +33,11 @@ std::string read(const std::string& path) {
 
 Eprp_var timing_options(const std::string& liberty, const std::string& sdc, const std::string& top) {
   Eprp_var options;
-  options.dict = {{"files", liberty + (sdc.empty() ? "" : "," + sdc)}, {"top", top}, {"hier", "false"}};
+  options.dict = {
+      {"files", liberty + (sdc.empty() ? "" : "," + sdc)},
+      {  "top",                                      top},
+      { "hier",                                  "false"}
+  };
   options.set_stage_labels(options.dict);
   return options;
 }
@@ -475,10 +480,9 @@ int main(int argc, char** argv) {
         return 0;
       }
       livehd::opentimer::Physical_session timing_session(timing_options(options.liberty, sdc, top));
-      options.whatif    = &timing_session.whatif();
-      unsigned   serial = 0;
-      const auto raw_evaluate
-          = [&](const pl::Result& placed) { return evaluate_timing(placed, timing_session, serial); };
+      options.whatif            = &timing_session.whatif();
+      unsigned     serial       = 0;
+      const auto   raw_evaluate = [&](const pl::Result& placed) { return evaluate_timing(placed, timing_session, serial); };
       pl::Evaluate evaluate     = raw_evaluate;
       const auto   start        = std::chrono::steady_clock::now();
       auto         seed_options = options;
@@ -683,26 +687,82 @@ int main(int argc, char** argv) {
       }
       state.parasitics = std::move(rc);
     }
-    unsigned   serial = 0;
+    unsigned                            serial = 0;
     livehd::opentimer::Physical_session timing_session(timing_options(options.liberty, sdc, top));
-    options.whatif = &timing_session.whatif();
-    const auto evaluate
-        = [&](const pl::Result& placed) { return evaluate_timing(placed, timing_session, serial); };
-    if (options.retain_placement) {
+    options.whatif      = &timing_session.whatif();
+    const auto evaluate = [&](const pl::Result& placed) { return evaluate_timing(placed, timing_session, serial); };
+    if (options.retain_placement && (!config.HasMember("export_rc") || config["export_rc"].GetBool())) {
       std::ofstream(root + "/parasitics.json") << ph::serialize_parasitics(*state.parasitics);
     }
     auto initial = evaluate(state);
     std::cout << "initial delay " << initial.delay << " wns " << initial.wns.value_or(0) * initial.time_unit_ps << " tns "
               << initial.tns.value_or(0) * initial.time_unit_ps << " violations " << initial.violations << std::endl;
     if (config.HasMember("timing_only") && config["timing_only"].GetBool()) {
-      // Full report of the input's timing (per-pin slack) for timer-agreement checks.
-      auto report        = timing_options(options.liberty, sdc, top);
-      report.graphs      = {state.graph};
-      report.physical_rc = state.parasitics;
-      report.dict["qor"] = root + "/final_timing.json";
-      report.set_stage_labels(report.dict);
-      Pass_opentimer::time_work(report);
-      std::ofstream(root + "/parasitics.json") << ph::serialize_parasitics(*state.parasitics);
+      // Bounded diagnostic report, separate from the optimizer's in-memory
+      // feedback path. Keep the worst pins and path without dumping every pin
+      // in a large design on each timing evaluation.
+      std::vector<std::pair<std::string, const pl::Timing_feedback::Pin*>> pins;
+      for (const auto& [name, pin] : initial.pins) {
+        if (pin.slack && !pin.clock) {
+          pins.emplace_back(name, &pin);
+        }
+      }
+      std::sort(pins.begin(), pins.end(), [](const auto& a, const auto& b) {
+        return *a.second->slack != *b.second->slack ? *a.second->slack < *b.second->slack : a.first < b.first;
+      });
+      if (pins.size() > 256) {
+        pins.resize(256);
+      }
+      std::set<std::string> selected(initial.path.begin(), initial.path.end());
+      for (const auto& pin : pins) {
+        selected.insert(pin.first);
+      }
+      if (config.HasMember("timing_pins")) {
+        for (const auto& pin : config["timing_pins"].GetArray()) {
+          selected.insert(pin.GetString());
+        }
+      }
+      rapidjson::StringBuffer                    buffer;
+      rapidjson::Writer<rapidjson::StringBuffer> json(buffer);
+      json.StartObject();
+      const auto field = [&](const char* key, std::optional<double> value) {
+        json.Key(key);
+        if (value) {
+          json.Double(*value);
+        } else {
+          json.Null();
+        }
+      };
+      field("time_unit_ps", initial.time_unit_ps);
+      field("max_delay", initial.delay);
+      field("wns", initial.wns);
+      field("tns", initial.tns);
+      field("hold_wns", initial.hold_wns);
+      json.Key("path");
+      json.StartArray();
+      for (const auto& pin : initial.path) {
+        json.String(pin.c_str());
+      }
+      json.EndArray();
+      json.Key("pins");
+      json.StartObject();
+      for (const auto& name : selected) {
+        const auto it = initial.pins.find(name);
+        if (it == initial.pins.end()) {
+          continue;
+        }
+        json.Key(name.c_str());
+        json.StartObject();
+        field("arrival", it->second.arrival);
+        field("required", it->second.required);
+        field("slack", it->second.slack);
+        field("slew", it->second.slew);
+        field("load_ff", it->second.load_ff);
+        json.EndObject();
+      }
+      json.EndObject();
+      json.EndObject();
+      std::ofstream(root + "/timing.json") << buffer.GetString() << '\n';
       ph::write_def(state.floorplan, root + "/out.def");
       return 0;
     }
@@ -732,11 +792,11 @@ int main(int argc, char** argv) {
                                             << ",\"timing_builds\":" << timing_session.statistics().builds << "}\n";
       return 0;
     }
-    auto       sizing       = pl::repair_buffers(std::move(state),
-                                                 options,
-                                                 evaluate,
-                                                 repair_first ? pl::Repair_scope::design : pl::Repair_scope::sizing,
-                                                 std::move(initial));
+    auto sizing = pl::repair_buffers(std::move(state),
+                                     options,
+                                     evaluate,
+                                     repair_first ? pl::Repair_scope::design : pl::Repair_scope::sizing,
+                                     std::move(initial));
     std::ofstream(root + (repair_first ? "/repair.json" : "/resize.json")) << sizing.report;
     const auto sized  = std::chrono::steady_clock::now();
     auto       repair = pl::repair_buffers(std::move(sizing.placed),
@@ -748,10 +808,10 @@ int main(int argc, char** argv) {
     const auto repaired = std::chrono::steady_clock::now();
     // The diagnostic's final report is an output artifact, not feedback.
     // The optimizer never reads it or writes reports for candidate trials.
-    auto report = timing_options(options.liberty, sdc, top);
-    report.graphs = {repair.placed.graph};
-    report.physical_rc = repair.placed.parasitics;
-    report.dict["qor"] = root + "/final_timing.json";
+    auto       report   = timing_options(options.liberty, sdc, top);
+    report.graphs       = {repair.placed.graph};
+    report.physical_rc  = repair.placed.parasitics;
+    report.dict["qor"]  = root + "/final_timing.json";
     report.set_stage_labels(report.dict);
     Pass_opentimer::time_work(report);
     ph::write_def(repair.placed.floorplan, root + "/out.def");
