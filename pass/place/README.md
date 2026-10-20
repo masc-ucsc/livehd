@@ -344,9 +344,8 @@ It uses the same Liberty interface/truth-table checks, clock/reset protection,
 fanout/capacitance/slew limits and timing/electrical acceptance as the post-place
 repair. A load-ranked sizing sweep is followed by a whole-forest repair batch,
 with at most eight individual topology fallback trials (at most four accepted).
-Each evaluated batch/trial gets fresh RC and OpenTimer. Even an empty
-sizing batch gets a second STA call. Each evaluation currently constructs a fresh
-OpenTimer instance; it does not yet retain incremental timing state between trials.
+Each evaluated batch/trial gets fresh RC and an incremental update of the one
+persistent `Physical_session` timer. Even an empty sizing batch gets a second STA call.
 Trials use the current overlapping GP coordinates; no legalization or macro locking
 happens during these checkpoints.
 Rejected edits restore graph, physical pins, RC and centroid membership together.
@@ -423,6 +422,9 @@ Aggregate-only diagnostic callers retain the bounded individual fallback; it
 interleaves alternatives across drivers and stops at eight accepted edits. `synth/place/resize.json` and
 `synth/place/repair.json` record their trials.
 
+Placement RC uses FLUTE up to 1000 distinct locations of a net; larger nets are
+FLUTE trees over spatial groups of at most 1000 locations joined by a FLUTE tree over
+each group's location nearest the driver (it was a star from the driver).
 Steiner repair uses FLUTE for at most 1000 distinct locations and a deterministic
 spatial median tree above that degree. The old 4096-leaf/256-buffer exclusions are
 removed; a one-million-buffer resource guard prevents runaway allocation. Library
@@ -442,8 +444,8 @@ controls acceptance and does not guarantee timing or electrical closure.
 SDC clocks stay ideal before CTS unless `set_propagated_clock` requests propagation.
 The OpenTimer adapter traces source-to-clock-sink paths, preserves inversion and
 clock-to-Q timing, and retains all data-net placement RC. Ideal clock pins do not
-contribute data-net criticality or electrical repair violations. Each batch still
-constructs a fresh OpenTimer; retained incremental timing is pending.
+contribute data-net criticality or electrical repair violations. All evaluations of
+one flow share one persistent incremental timer (`Physical_session`).
 
 `synth.place.resynth=true` enables up to four critical-cone trials through the
 optional ABC provider. A cut walks backward through scalar combinational cells,
@@ -976,8 +978,8 @@ surviving edits. These measurements preserve the existing acceptance checks.
 Placement refinement and repair return their accepted timing feedback. Callers can
 move that feedback into the next repair pass only when graph, placement, RC and
 constraints are unchanged; rejected-trial timing is never reused as the baseline.
-This avoids duplicate analyses between passes, but each changed-state callback
-still builds a fresh OpenTimer instance. The diagnostic tool publishes the accepted
+This avoids duplicate analyses between passes; each changed-state callback is an
+incremental update of the persistent timer. The diagnostic tool publishes the accepted
 analysis as `final_timing.json`; the last numbered trial can be a rejected state.
 
 ### Fixed-macro cell-placement experiments
