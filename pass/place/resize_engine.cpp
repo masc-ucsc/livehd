@@ -318,6 +318,7 @@ private:
   double                                                    wns_ = 0, tns_ = 0, margin_ = 25, period_ = 0;
   // statistics
   Counters                                                  upsize_, isolate_, repeater_, shed_, electrical_, recover_, batch_;
+  std::unordered_set<std::string>                           rejected_;  // batched moves that failed alone
   unsigned    batch_moves_ = 0, batch_reject_tns_ = 0, batch_reject_wns_ = 0, batch_reject_electrical_ = 0;
   unsigned    upsized_ = 0, downsized_ = 0, endpoints_worked_ = 0, endpoints_stuck_ = 0, infeasible_paths_ = 0, feasible_paths_ = 0;
   unsigned    electrical_nets_ = 0, electrical_fixed_ = 0, rounds_ = 0, recover_batches_ = 0;
@@ -1450,6 +1451,15 @@ private:
     });
     return moves;
   }
+  static std::string move_key(const Move& m) {
+    return std::format("{}|{}|{}|{}|{}|{}",
+                       static_cast<int>(m.kind),
+                       m.driver,
+                       m.inst,
+                       m.to ? m.to->name : "",
+                       m.buffer ? m.buffer->name : "",
+                       m.chain.size());
+  }
   [[nodiscard]] static unsigned cells_of(const Move& m) {
     return m.kind == Move::Kind::isolate ? 1 : m.kind == Move::Kind::repeater ? std::max<unsigned>(1, m.chain.size()) : 0;
   }
@@ -1479,7 +1489,7 @@ private:
         for (auto& m : path_moves(stages, slack, feasible)) {
           // Shedding and isolation judge "non-critical" against this one path;
           // batched together they slow other paths, so they stay per endpoint.
-          if (m.kind == Move::Kind::shed || m.kind == Move::Kind::isolate) {
+          if (m.kind == Move::Kind::shed || m.kind == Move::Kind::isolate || rejected_.contains(move_key(m))) {
             continue;
           }
           const unsigned cells = cells_of(m);
@@ -1555,6 +1565,11 @@ private:
                                    e1.second);
         }
         a.rollback();
+        if (end - begin <= 2) {
+          for (size_t i = begin; i < end; ++i) {
+            rejected_.insert(move_key(batch[i]));  // the next round tries the path's next move
+          }
+        }
         if (end - begin > 2) {
           const auto mid = begin + (end - begin) / 2;
           pending.emplace_back(begin, mid);
@@ -1640,7 +1655,6 @@ private:
   }
   void timing_phase() {
     std::unordered_set<std::string> stuck;
-    const double                    tns0  = tns_;
     unsigned                        stall = 0;
     stop_reason_                          = "no failing endpoint";
     for (rounds_ = 0; rounds_ < 100000; ++rounds_) {
@@ -1685,9 +1699,9 @@ private:
           reject_electrical_,
           infeasible_paths_)
                 << std::flush;
-      // Lack of progress: two consecutive rounds below 0.01% of the initial TNS
-      // and 0.1 ps of WNS end the phase, independent of any cell budget.
-      const bool slow = tns_ - tns_round < std::max(.1, 1e-4 * std::abs(tns0)) && wns_ - wns_round < .1;
+      // Lack of progress: two consecutive rounds below 0.5% of the round's TNS
+      // and 0.5 ps of WNS end the phase, independent of any cell budget.
+      const bool slow = tns_ - tns_round < std::max(.1, 5e-3 * std::abs(tns_round)) && wns_ - wns_round < .5;
       stall           = slow ? stall + 1 : 0;
       if (stall >= 2) {
         stop_reason_ = "no progress";
