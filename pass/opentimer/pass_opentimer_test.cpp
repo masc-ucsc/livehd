@@ -525,6 +525,139 @@ TEST_F(SdcClock, ConditionalTimingSelectsKnownCasesAndKeepsUnknownFallback) {
 // A placed three-port memory (write port 0, read ports 1 and 2) timed with
 // hand-built placement RC. Every addr/din/enable sink is a capture endpoint;
 // the clock pins only carry clock-net RC.
+// Timer-fidelity regressions found against OpenSTA on the resize study inputs.
+constexpr const char* kFlopLib = R"lib(library(flops) {
+    time_unit : "1ps"; capacitive_load_unit(1,ff);
+    cell(DFF) {
+      pin(CLK) { direction : input; capacitance : 1; clock : true; }
+      pin(D) { direction : input; capacitance : 1;
+        timing() { related_pin : "CLK"; timing_type : setup_rising;
+          rise_constraint(scalar) { values("10"); } fall_constraint(scalar) { values("10"); } }
+      }
+      pin(RN) { direction : input; capacitance : 1; }
+      pin(Q) { direction : output; function : "IQ";
+        timing() { related_pin : "CLK"; timing_type : rising_edge;
+          cell_rise(scalar) { values("20"); } cell_fall(scalar) { values("20"); }
+          rise_transition(scalar) { values("1"); } fall_transition(scalar) { values("1"); } }
+        timing() { related_pin : "RN"; timing_type : clear; timing_sense : positive_unate;
+          cell_fall(scalar) { values("30"); } fall_transition(scalar) { values("1"); } }
+      }
+      ff(IQ, IQN) { clocked_on : "CLK"; next_state : "D"; clear : "!RN"; }
+    }
+  })lib";
+TEST_F(SdcClock, AsyncClearToOutputArcsAreNotTimedAsData) {
+  // OpenSTA disables preset/clear -> Q arcs by default; a reset tree must not
+  // become the worst data path.
+  const auto path = directory + "/flops.lib";
+  std::ofstream(path) << kFlopLib;
+  var.dict["files"] = path;
+  var.set_stage_labels(var.dict);
+  Circuit_probe probe(var);
+  auto&         timer = probe.timer;
+  timer.read_celllib(path).insert_primary_input("clk").insert_primary_input("rst").insert_primary_output("y");
+  timer.insert_gate("f", "DFF");
+  for (const auto* net : {"c", "r", "q"}) {
+    timer.insert_net(net);
+  }
+  timer.disconnect_pin("clk").connect_pin("clk", "c").connect_pin("f:CLK", "c");
+  timer.disconnect_pin("rst").connect_pin("rst", "r").connect_pin("f:RN", "r");
+  timer.disconnect_pin("y").connect_pin("f:Q", "q").connect_pin("y", "q");
+  for (auto split : {ot::MIN, ot::MAX}) {
+    for (auto tran : {ot::RISE, ot::FALL}) {
+      timer.set_at("clk", split, tran, 0).set_slew("clk", split, tran, 1);
+      timer.set_at("rst", split, tran, 500).set_slew("rst", split, tran, 1);
+    }
+  }
+  const auto at = timer.report_at("y", ot::MAX, ot::FALL);
+  ASSERT_TRUE(at);
+  EXPECT_LT(*at, 100);  // clock-to-Q only; with the clear arc it would be 530
+}
+TEST_F(SdcClock, EachSetupCheckUsesThePeriodOfItsCaptureClock) {
+  const auto path = directory + "/flops.lib";
+  std::ofstream(path) << kFlopLib;
+  var.dict["files"] = path;
+  var.set_stage_labels(var.dict);
+  Sdc_probe pass(var);
+  auto&     timer = pass.timer;
+  timer.read_celllib(path).insert_primary_input("c1").insert_primary_input("c2");
+  timer.insert_gate("fast", "DFF").insert_gate("slow", "DFF");
+  timer.insert_net("n1").insert_net("n2");
+  timer.disconnect_pin("c1").connect_pin("c1", "n1").connect_pin("fast:CLK", "n1");
+  timer.disconnect_pin("c2").connect_pin("c2", "n2").connect_pin("slow:CLK", "n2");
+  timer.connect_pin("fast:D", "wire").connect_pin("slow:D", "wire");
+  pass.read_sdc(
+      write("create_clock -name slow_clk -period 6400 [get_ports c2]\n"
+            "create_clock -name fast_clk -period 1000 [get_ports c1]\n"
+            "set_input_delay -clock fast_clk 0 [get_ports a]\n"));
+  timer.set_ideal_clocks({"fast_clk", "slow_clk"});
+  for (const auto* port : {"a", "c1", "c2"}) {
+    for (auto split : {ot::MIN, ot::MAX}) {
+      timer.set_slew(port, split, ot::RISE, 1).set_slew(port, split, ot::FALL, 1);
+    }
+  }
+  const auto fast = timer.report_slack("fast:D", ot::MAX, ot::RISE);
+  const auto slow = timer.report_slack("slow:D", ot::MAX, ot::RISE);
+  ASSERT_TRUE(fast && slow) << timer.report_at("fast:D", ot::MAX, ot::RISE).value_or(-1) << " "
+                            << timer.report_at("fast:CLK", ot::MAX, ot::RISE).value_or(-1) << " "
+                            << timer.report_rat("fast:D", ot::MAX, ot::RISE).value_or(-1);
+  EXPECT_NEAR(*fast, 1000 - 10, 1e-3);
+  EXPECT_NEAR(*slow, 6400 - 10, 1e-3);
+}
+TEST_F(SdcClock, ClockWaveformIsHonoredOnAPhysicalSource) {
+  // `-waveform` used to make the clock virtual, timing the clock network as data.
+  Sdc_probe pass(var);
+  pass.read_sdc(write("create_clock -name clk -period 1265 -waveform {0 750} [get_ports a]\n"));
+  pass.timer.update_timing();
+  const auto& clocks = pass.timer.clocks();
+  ASSERT_TRUE(clocks.contains("clk"));
+  EXPECT_FLOAT_EQ(clocks.at("clk").period(), 1265);
+  EXPECT_FLOAT_EQ(clocks.at("clk").waveform(ot::RISE), 0);
+  EXPECT_FLOAT_EQ(clocks.at("clk").waveform(ot::FALL), 750);
+}
+TEST_F(SdcClock, ResizingAGateKeepsItsCaseAnalysisMasks) {
+  // An incremental repower rebuilt the arcs with every case mask cleared, so a
+  // constant-disabled false path through the resized gate became real.
+  const auto path = directory + "/case.lib";
+  std::ofstream(path) << R"lib(library(cases) {
+    time_unit : "1ps"; capacitive_load_unit(1,ff);
+    cell(T0) { pin(Y) { direction : output; function : "0"; } }
+    cell(AND) { area : 1;
+      pin(A) { direction : input; capacitance : 2; }
+      pin(B) { direction : input; capacitance : 2; }
+      pin(Y) { direction : output; function : "A * B";
+        timing() { related_pin : "A B"; timing_sense : positive_unate;
+          cell_rise(scalar) { values("20"); } cell_fall(scalar) { values("20"); }
+          rise_transition(scalar) { values("1"); } fall_transition(scalar) { values("1"); } } } }
+    cell(AND_STRONG) { area : 2;
+      pin(A) { direction : input; capacitance : 3; }
+      pin(B) { direction : input; capacitance : 3; }
+      pin(Y) { direction : output; function : "A * B";
+        timing() { related_pin : "A B"; timing_sense : positive_unate;
+          cell_rise(scalar) { values("10"); } cell_fall(scalar) { values("10"); }
+          rise_transition(scalar) { values("1"); } fall_transition(scalar) { values("1"); } } } }
+  })lib";
+  var.dict["files"] = path;
+  var.set_stage_labels(var.dict);
+  Circuit_probe probe(var);
+  auto&         timer = probe.timer;
+  timer.read_celllib(path).insert_primary_input("a");
+  timer.insert_gate("zero", "T0").insert_gate("masked", "AND");
+  timer.insert_net("data").insert_net("zero");
+  timer.disconnect_pin("a").connect_pin("a", "data").connect_pin("masked:A", "data");
+  timer.connect_pin("zero:Y", "zero").connect_pin("masked:B", "zero");
+  for (auto split : {ot::MIN, ot::MAX}) {
+    timer.set_at("a", split, ot::RISE, 200).set_at("a", split, ot::FALL, 200);
+    timer.set_slew("a", split, ot::RISE, 1).set_slew("a", split, ot::FALL, 1);
+  }
+  ASSERT_TRUE(timer.report_at("masked:Y", ot::MAX, ot::RISE));
+  probe.apply_case_analysis();
+  ASSERT_FALSE(timer.report_at("masked:Y", ot::MAX, ot::RISE));
+  timer.repower_gate("masked", "AND_STRONG");
+  EXPECT_FALSE(timer.report_at("masked:Y", ot::MAX, ot::RISE));
+  timer.repower_gate("masked", "AND");
+  EXPECT_FALSE(timer.report_at("masked:Y", ot::MAX, ot::RISE));
+}
+
 class PhysicalMemory : public ::testing::Test {
 protected:
   std::string        directory;

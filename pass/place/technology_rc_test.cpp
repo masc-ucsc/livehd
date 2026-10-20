@@ -4,6 +4,8 @@
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
+#include <queue>
+#include <vector>
 
 #include "gtest/gtest.h"
 
@@ -114,6 +116,53 @@ TEST_F(Technology_rc, DistanceUnitsNormalizePerLengthValues) {
             "set_cmd_units -resistance kohm -capacitance ff -distance nm\nset_wire_rc -signal -resistance .03 -capacitance .2\n"));
   EXPECT_DOUBLE_EQ(rc.horizontal_r, 30000);
   EXPECT_DOUBLE_EQ(rc.horizontal_c, 200);
+}
+TEST(Steiner_rc, NetsBeyondFluteDegreeAreTreesNotStars) {
+  // 1500 sinks on a 1 um pitch line, driver at one end: a Steiner tree has
+  // about 1500 um of wire; a star from the driver would have about 1.1 m.
+  std::vector<std::pair<std::string, std::pair<double, double>>> pins{
+      {"drv:Y", {0, 0}}
+  };
+  for (int i = 1; i <= 1500; ++i) {
+    pins.emplace_back("s" + std::to_string(i) + ":A", std::pair{1000.0 * i, 1000.0 * (i % 3)});
+  }
+  Wire_rc wire;
+  wire.horizontal_r = wire.vertical_r = 1;
+  wire.horizontal_c = wire.vertical_c = 1;
+  bool       approximate              = false;
+  const auto rc                       = steiner_rc("drv:Y", pins, wire, 1000, &approximate);
+  EXPECT_TRUE(approximate);
+  double cap = 0;
+  for (const auto& node : rc.nodes) {
+    cap += node.capacitance_ff;
+  }
+  EXPECT_LT(cap, 3 * 1500.0 + 3 * 1500);  // tree length (with the 0..2 um zigzag), not a star
+  EXPECT_GT(cap, 1400);
+  // Every pin is connected to the driver.
+  std::vector<std::vector<unsigned>> adjacent(rc.nodes.size());
+  for (const auto& e : rc.edges) {
+    adjacent[e.from].push_back(e.to);
+    adjacent[e.to].push_back(e.from);
+  }
+  std::vector<bool>    seen(rc.nodes.size(), false);
+  std::queue<unsigned> todo;
+  todo.push(0);
+  seen[0] = true;
+  while (!todo.empty()) {
+    const auto n = todo.front();
+    todo.pop();
+    for (const auto m : adjacent[n]) {
+      if (!seen[m]) {
+        seen[m] = true;
+        todo.push(m);
+      }
+    }
+  }
+  for (size_t i = 0; i < rc.nodes.size(); ++i) {
+    if (!rc.nodes[i].pin.empty()) {
+      EXPECT_TRUE(seen[i]) << rc.nodes[i].pin;
+    }
+  }
 }
 }  // namespace
 }  // namespace livehd::placement

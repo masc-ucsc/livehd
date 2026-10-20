@@ -695,6 +695,13 @@ int main(int argc, char** argv) {
     std::cout << "initial delay " << initial.delay << " wns " << initial.wns.value_or(0) * initial.time_unit_ps << " tns "
               << initial.tns.value_or(0) * initial.time_unit_ps << " violations " << initial.violations << std::endl;
     if (config.HasMember("timing_only") && config["timing_only"].GetBool()) {
+      // Full report of the input's timing (per-pin slack) for timer-agreement checks.
+      auto report        = timing_options(options.liberty, sdc, top);
+      report.graphs      = {state.graph};
+      report.physical_rc = state.parasitics;
+      report.dict["qor"] = root + "/final_timing.json";
+      report.set_stage_labels(report.dict);
+      Pass_opentimer::time_work(report);
       std::ofstream(root + "/parasitics.json") << ph::serialize_parasitics(*state.parasitics);
       ph::write_def(state.floorplan, root + "/out.def");
       return 0;

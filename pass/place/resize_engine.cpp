@@ -1657,7 +1657,10 @@ private:
     std::unordered_set<std::string> stuck;
     unsigned                        stall = 0;
     stop_reason_                          = "no failing endpoint";
-    for (rounds_ = 0; rounds_ < 100000; ++rounds_) {
+    // At FP checkpoints the coordinates still move: batched moves plus a short
+    // per-endpoint pass; the legal placement gets the full refinement.
+    const unsigned max_rounds = stage_ == Resize_stage::floorplan ? 2 : 100000;
+    for (rounds_ = 0; rounds_ < max_rounds; ++rounds_) {
       const double wns_round = wns_, tns_round = tns_;
       const auto   failing = w_.failing_endpoints(0);
       unsigned     worked  = 0;

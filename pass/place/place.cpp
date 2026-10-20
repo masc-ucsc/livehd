@@ -1446,18 +1446,76 @@ ph::Rc_net steiner_rc(std::string driver, const std::vector<std::pair<std::strin
     }
     std::free(tree.branch);
   } else if (xs.size() > 1000) {
+    // Beyond FLUTE's degree limit: FLUTE trees over spatial groups of at most
+    // 1000 locations (recursive median bisection), joined by a FLUTE tree over
+    // each group's location nearest the driver. A star from the driver would
+    // charge every sink its full Manhattan distance (a 1036-sink net timed 6x
+    // slower than a Steiner estimate).
     if (approximate) {
       *approximate = true;
     }
-    const auto root = vertex(positions.front());
+    std::vector<std::pair<int, int>> points;
     for (const auto& [xy, index] : junction) {
-      if (index != root) {
-        add_edge(root,
-                 index,
-                 std::abs(double(xy.first) - positions.front().first),
-                 std::abs(double(xy.second) - positions.front().second));
+      (void)index;
+      points.push_back(xy);
+    }
+    std::set<std::pair<unsigned, unsigned>> edges;
+    const auto                              tree = [&](const std::vector<std::pair<int, int>>& group) {
+      if (group.size() < 2) {
+        return;
+      }
+      std::vector<int> gx, gy;
+      for (const auto& p : group) {
+        gx.push_back(p.first);
+        gy.push_back(p.second);
+      }
+      auto t = flute::flute(gx.size(), gx.data(), gy.data(), 3);
+      for (int i = 0; i < 2 * t.deg - 2; ++i) {
+        const auto a  = std::pair{t.branch[i].x, t.branch[i].y};
+        const auto b  = std::pair{t.branch[t.branch[i].n].x, t.branch[t.branch[i].n].y};
+        const auto ai = vertex(a), bi = vertex(b);
+        if (edges.emplace(std::min(ai, bi), std::max(ai, bi)).second) {
+          add_edge(ai, bi, std::abs(double(a.first) - b.first), std::abs(double(a.second) - b.second));
+        }
+      }
+      std::free(t.branch);
+    };
+    const auto root  = positions.front();
+    const auto close = [&](const std::pair<int, int>& p) {
+      return std::abs(double(p.first) - root.first) + std::abs(double(p.second) - root.second);
+    };
+    // Groups of <= 1000 locations; their representatives form the next level.
+    std::vector<std::pair<int, int>> level = points;
+    while (level.size() > 1000) {
+      std::vector<std::vector<std::pair<int, int>>> groups;
+      const auto                                    split = [&](auto&& self, std::vector<std::pair<int, int>> items) -> void {
+        if (items.size() <= 1000) {
+          groups.push_back(std::move(items));
+          return;
+        }
+        int x0 = items.front().first, x1 = x0, y0 = items.front().second, y1 = y0;
+        for (const auto& p : items) {
+          x0 = std::min(x0, p.first);
+          x1 = std::max(x1, p.first);
+          y0 = std::min(y0, p.second);
+          y1 = std::max(y1, p.second);
+        }
+        const bool by_x = x1 - x0 >= y1 - y0;
+        const auto mid  = items.begin() + items.size() / 2;
+        std::nth_element(items.begin(), mid, items.end(), [&](const auto& a, const auto& b) {
+          return by_x ? a < b : std::pair{a.second, a.first} < std::pair{b.second, b.first};
+        });
+        self(self, std::vector<std::pair<int, int>>(items.begin(), mid));
+        self(self, std::vector<std::pair<int, int>>(mid, items.end()));
+      };
+      split(split, level);
+      level.clear();
+      for (const auto& g : groups) {
+        tree(g);
+        level.push_back(*std::min_element(g.begin(), g.end(), [&](const auto& a, const auto& b) { return close(a) < close(b); }));
       }
     }
+    tree(level);
   }
   return rc;
 }
