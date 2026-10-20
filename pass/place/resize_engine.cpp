@@ -226,6 +226,7 @@ public:
     start_mark_ = w_.mark();
     wns_        = w_.wns();
     tns_        = w_.tns();
+    wns_start_  = wns_;
     // Only gates with more than this slack above the worst one are "non-critical"
     // for down-sizing. A wide margin (40% of the shortest clock period) keeps
     // the recovery safe where another timer's view of the worst path differs.
@@ -316,7 +317,7 @@ private:
   std::vector<Resize_edit>                                  edits_;
   unsigned                                                  group_ = 0, serial_ = 0;
   size_t                                                    start_mark_ = 0;
-  double                                                    wns_ = 0, tns_ = 0, margin_ = 25, period_ = 0;
+  double                                                    wns_ = 0, tns_ = 0, margin_ = 25, period_ = 0, wns_start_ = 0;
   // statistics
   Counters                                                  upsize_, isolate_, repeater_, shed_, electrical_, recover_, batch_;
   std::unordered_set<std::string>                           rejected_;  // batched moves that failed alone
@@ -782,7 +783,9 @@ private:
     const auto p     = measure();
     const auto after = w_.electrical(pins);
     ++electrical_.probes;
-    if (applied && after.first < before.first && timing_not_worse(p)) {
+    // Electrical batches must reduce violations and TNS; WNS may give back what
+    // earlier repairs of this plan gained but never drop below the plan's start.
+    if (applied && after.first < before.first && p.tns >= tns_ - kTnsEps && p.wns >= std::min(wns_, wns_start_) - kWnsEps) {
       a.commit();
       wns_ = p.wns;
       tns_ = p.tns;
