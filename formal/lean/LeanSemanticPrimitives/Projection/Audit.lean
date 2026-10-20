@@ -36,6 +36,9 @@ import LeanSemanticPrimitives.Projection.ResidualFragment
 import LeanSemanticPrimitives.Projection.ProjectedStep
 -- Phase 6: the DCERT1 loader and the per-field support report
 import LeanSemanticPrimitives.Projection.CertLoad
+-- M3/M8: the verified symbolic interpretation of a residual
+import LeanSemanticPrimitives.Projection.Sym.Refine
+import LeanSemanticPrimitives.Projection.Sym.Conj
 
 namespace Projection
 
@@ -433,5 +436,14 @@ namespace Projection
 -- give `SupportedByProjection`.  The parser itself stays trusted.
 #audit_axioms CertLoad.slotsInRange_of_bool
 #audit_axioms CertLoad.supported_of_report
+
+-- M3/M8 (Sym): the symbolic evaluator, the wiring normal form it keeps uncut,
+-- the LRAT-checked UNSAT, and the three checkers' reference-semantics theorems.
+#audit_axioms Sym.symEval_sound
+#audit_axioms Sym.eval_norm
+#audit_axioms Sym.checkUnsat_sound
+#audit_axioms Sym.runInvKOf_sound_ref
+#audit_axioms Sym.runConjOf_sound_ref
+#audit_axioms Sym.runRefKOf_sound_ref
 
 end Projection
