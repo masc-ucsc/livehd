@@ -136,6 +136,7 @@ MODULES=(
   Projection/Sym/Unroll
   Projection/Sym/Oblig
   Projection/Sym/KInd
+  Projection/Sym/Conj
   Projection/Sym/Refine
   # The central audit: `#audit_axioms` FAILS this build on any axiom outside
   # propext/Classical.choice/Quot.sound. The memory-route modules above audit

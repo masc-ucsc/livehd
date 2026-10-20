@@ -65,7 +65,7 @@ MODULES=(
   Projection/Sym/Kit Projection/Sym/Bridge Projection/Sym/Val Projection/Sym/Prim
   Projection/Sym/Mem Projection/Sym/Dispatch Projection/Sym/Wire Projection/Sym/Eval Projection/Sym/Asg
   Projection/Sym/Sat Projection/Sym/Layout Projection/Sym/Step Projection/Sym/Trace
-  Projection/Sym/Shape Projection/Sym/Unroll Projection/Sym/Oblig Projection/Sym/KInd
+  Projection/Sym/Shape Projection/Sym/Unroll Projection/Sym/Oblig Projection/Sym/KInd Projection/Sym/Conj
   Projection/Sym/Refine
 )
 OBJS=()
