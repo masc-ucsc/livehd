@@ -1055,6 +1055,45 @@ TEST_F(Buffer_repair, TimingWeightsExcludeClockNetsAndRevertWorsePlacements) {
     EXPECT_FALSE(round["accepted"].GetBool());
   }
 }
+TEST_F(Buffer_repair, PreservesCriticalAndNameTieOrderForRepairCandidates) {
+  // Creation order deliberately differs from the priority/name order. Rejected
+  // trials leave the graph and feedback fixed throughout candidate enumeration.
+  unsigned port_id = 0;
+  for (const auto* name : {"z_noncritical", "b_critical", "a_noncritical"}) {
+    const auto port = port_id ? "y" + std::to_string(port_id) : "y";
+    if (port_id) {
+      graph->get_io()->add_output(port, port_id);
+      graph->get_io()->set_bits(port, 1);
+    }
+    graph->get_output_pin(port).connect_driver(gate("sky130_fd_sc_hd__buf_1", name, graph->get_input_pin("a")));
+    ++port_id;
+  }
+  auto            placed = place(*graph, flat, options);
+  Timing_feedback before;
+  before.delay = before.area = 1;
+  before.path                = {"b_critical:X"};
+  const auto result          = repair_buffers(
+      std::move(placed),
+      options,
+      [&](const Result&) {
+        auto after  = before;
+        after.delay = 2;
+        return after;
+      },
+      Repair_scope::sizing,
+      before);
+  rapidjson::Document report;
+  report.Parse(result.report.c_str());
+  ASSERT_GE(report["trials"].Size(), 3);
+  const std::vector<std::string> expected{"b_critical", "a_noncritical", "z_noncritical"};
+  for (unsigned i = 0; i < expected.size(); ++i) {
+    const auto& trial = report["trials"][i];
+    EXPECT_EQ(std::string_view(trial["action"].GetString()), "remove");
+    EXPECT_EQ(std::string_view(trial["instance"].GetString()), expected[i]);
+    EXPECT_FALSE(trial["accepted"].GetBool());
+  }
+  EXPECT_EQ(report["accepted"].GetUint(), 0);
+}
 TEST_F(Buffer_repair, ProtectsClockLogicThroughAliasesAndBuffers) {
   auto p  = gate("sky130_fd_sc_hd__buf_1", "clock_buffer", graph->get_input_pin("a"));
   p       = gate("sky130_fd_sc_hd__inv_1", "clock_inverter", p);

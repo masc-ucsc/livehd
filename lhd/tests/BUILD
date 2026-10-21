@@ -3002,3 +3002,13 @@ sh_test(
         "//lhd",
     ],
 )
+
+sh_test(
+    name = "lhd_route_smoke",
+    size = "small",
+    srcs = ["lhd_route_smoke.py"],
+    data = [
+        "//lhd",
+        "//inou/lefdef:test_data",
+    ],
+)

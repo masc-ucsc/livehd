@@ -178,6 +178,18 @@ Macro_run place_macros(dp::Design& d, const std::vector<mp::NodeInfo>& info, con
           || json["environment"].GetString() != environment) {
         throw std::invalid_argument("macro environment changed");
       }
+      const auto policy = resolve_route_policy(o, o.macro_route);
+      if (!json.HasMember("route_model") || !json["route_model"].IsString()) {
+        throw std::invalid_argument("cached macro route model missing");
+      }
+      const std::string model = json["route_model"].GetString();
+      const auto active = model == "rsmt" ? dp::RouteModel::rsmt : model == "rudy" ? dp::RouteModel::rudy : dp::RouteModel::off;
+      const bool latches = policy.model == dp::RouteModel::automatic
+                           || (policy.model == dp::RouteModel::rudy && policy.probe);
+      if ((model != "off" && model != "rudy" && model != "rsmt")
+          || (latches ? active == dp::RouteModel::off : active != policy.model)) {
+        throw std::invalid_argument("cached macro route model inconsistent with policy");
+      }
       auto topology  = mp::cached_topology(text, d, info, p);
       auto frozen    = mp::abstract_design(d, info, topology, p, true);
       auto candidate = d;
@@ -211,11 +223,12 @@ Macro_run place_macros(dp::Design& d, const std::vector<mp::NodeInfo>& info, con
           }
         }
       }
-      out.cache_hit       = true;
-      out.result.topology = std::move(topology);
-      out.result.resolved = p;
-      out.result.legal    = true;
-      d                   = std::move(candidate);
+      out.cache_hit                    = true;
+      out.result.topology              = std::move(topology);
+      out.result.resolved              = p;
+      out.result.legal                 = true;
+      out.result.placement.route_model = active;
+      d                                = std::move(candidate);
       return out;
     } catch (const std::invalid_argument& e) {  // A stale/malformed cache is never user input.
       cache_miss = e.what();
@@ -227,7 +240,9 @@ Macro_run place_macros(dp::Design& d, const std::vector<mp::NodeInfo>& info, con
   auto         seed      = mp::seed(d, info, hierarchy.hierarchy, p, requested);
   seed.design            = hierarchy.design;
   dp::Options cells;
-  cells.max_iterations = o.iterations;
+  cells.route            = resolve_route_policy(o, o.macro_route);
+  cells.route_initialize = initialize_route_tables;
+  cells.max_iterations   = o.iterations;
   cells.bins_x = cells.bins_y = o.bins;
   cells.num_threads           = o.threads;
   cells.target_density        = o.density;
@@ -253,9 +268,19 @@ void write_macro_report(const Macro_run& run, const dp::Design& d, const std::ve
   }
   auto result = run.result;
   result.hpwl = dp::hpwl(d);
-  result.rudy_overflow
-      = dp::rudy(d, {result.resolved.bins, result.resolved.bins, result.resolved.route_cap_h, result.resolved.route_cap_v})
-            .overflow;
+  dp::RudyOptions route_options{result.resolved.bins,
+                                result.resolved.bins,
+                                result.resolved.route_cap_h,
+                                result.resolved.route_cap_v};
+  const auto      policy   = resolve_route_policy(o, o.macro_route);
+  const bool      latches  = policy.model == dp::RouteModel::automatic
+                            || (policy.model == dp::RouteModel::rudy && policy.probe);
+  const auto      active   = latches ? run.result.placement.route_model : policy.model;
+  route_options.model      = active == dp::RouteModel::rsmt ? dp::RudyModel::rsmt : dp::RudyModel::bbox;
+  route_options.degree     = policy.degree;
+  route_options.accuracy   = policy.accuracy;
+  route_options.initialize = initialize_route_tables;
+  result.rudy_overflow     = policy.model == dp::RouteModel::off ? 0 : dp::rudy(d, route_options).overflow;
   result.merit
       = result.hpwl + result.resolved.alpha * ((d.layout.xh - d.layout.xl) + (d.layout.yh - d.layout.yl)) * result.rudy_overflow;
   auto                report = mp::report_json(result, d, info);
@@ -264,6 +289,11 @@ void write_macro_report(const Macro_run& run, const dp::Design& d, const std::ve
   auto& allocator = json.GetAllocator();
   json.AddMember("environment", rapidjson::Value(run.environment.c_str(), allocator), allocator);
   json.AddMember("cache_hit", run.cache_hit, allocator);
+  json.AddMember(
+      "route_model",
+      rapidjson::Value(policy.model == dp::RouteModel::off ? "off" : (route_options.model == dp::RudyModel::rsmt ? "rsmt" : "rudy"),
+                       allocator),
+      allocator);
   json["units"].AddMember("dbu_per_um", dbu_per_um, allocator);
   rapidjson::StringBuffer                    buffer;
   rapidjson::Writer<rapidjson::StringBuffer> writer(buffer);

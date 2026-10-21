@@ -292,8 +292,45 @@ livehd::placement::Options placement_options(const Options& opts) {
   if (unknown_const != "error" && unknown_const != "zero") {
     throw Lhd_error{"usage", "synth.place.unknown_const must be error or zero", ""};
   }
-  out.unknown_const_zero              = unknown_const == "zero";
-  out.routability                     = truthy(synth_set(opts, "place.routability", "true"));
+  out.unknown_const_zero = unknown_const == "zero";
+  out.routability        = truthy(synth_set(opts, "place.routability", "true"));
+  out.route_model        = synth_set(opts, "place.route.model", "rudy");
+  out.route_degree       = integer("place.route.degree", "40");
+  out.route_accuracy     = integer("place.route.accuracy", "3");
+  const auto read_route  = [&](livehd::placement::Stage_route& stage, const std::string& name) {
+    const auto prefix             = "place." + name + ".route.";
+    stage.model                   = synth_set(opts, prefix + "model", "inherit");
+    stage.policy.switch_overflow  = number(prefix + "switch", "0.05");
+    stage.policy.target_overflow  = number(prefix + "target", "0.000000001");
+    stage.policy.hold             = integer(prefix + "hold", "1");
+    stage.policy.probe            = truthy(synth_set(opts, prefix + "probe", "false"));
+    stage.policy.probe_iterations = integer(prefix + "probe_iterations", "100");
+    const auto model              = stage.model == "inherit" ? out.route_model : stage.model;
+    if ((model != "off" && model != "rudy" && model != "rsmt" && model != "auto")
+        || stage.policy.switch_overflow < stage.policy.target_overflow || stage.policy.target_overflow < 0 || stage.policy.hold < 1
+        || stage.policy.hold > 1000 || stage.policy.probe_iterations < 1 || stage.policy.probe_iterations > 10000) {
+      throw Lhd_error{"usage", "invalid synth." + prefix + " controls", "target must be <= switch; model off/rudy/rsmt/auto"};
+    }
+  };
+  if (out.route_model != "off" && out.route_model != "rudy" && out.route_model != "rsmt" && out.route_model != "auto") {
+    throw Lhd_error{"usage", "invalid synth.place.route.model", "use off, rudy, rsmt or auto"};
+  }
+  read_route(out.fp_route, "fp");
+  read_route(out.macro_route, "macro");
+  read_route(out.final_route, "final");
+  bool uses_flute = false;
+  for (const auto* stage : {&out.fp_route, &out.macro_route, &out.final_route}) {
+    const auto model  = stage->model == "inherit" ? out.route_model : stage->model;
+    uses_flute       |= model == "rsmt" || model == "auto" || (model != "off" && stage->policy.probe);
+  }
+  if (out.route_degree < 2 || out.route_degree > 1000 || out.route_accuracy < 1 || out.route_accuracy > 10
+      || (!uses_flute && std::any_of(opts.sets.begin(), opts.sets.end(), [](const auto& kv) {
+           return kv.first == "synth.place.route.degree" || kv.first == "synth.place.route.accuracy";
+         }))) {
+    throw Lhd_error{"usage",
+                    "invalid FLUTE route options",
+                    "degree 2..1000, accuracy 1..10, and an rsmt/auto/probe stage required"};
+  }
   out.routability_charge_compensation = truthy(synth_set(opts, "place.routability_charge_compensation", "true"));
   out.routability_macro_weight        = number("place.routability_macro_weight", "1");
   out.routability_macro_range         = number("place.routability_macro_range", "2");
@@ -1019,10 +1056,10 @@ void synth_command(Options& opts, Result& res) {
       if (!first) {
         groups += ",";
       }
-      first   = false;
-      groups += "{\"module\":" + livehd::synth_attr::quote(graph->get_name())
-                + ",\"physical_instances\":" + std::to_string(occurrences[graph->get_gid()]) + ",\"specialized\":"
-                + (graph->get_name().find("__s_") != std::string_view::npos ? "true" : "false") + ",\"coloring\":";
+      first      = false;
+      groups    += "{\"module\":" + livehd::synth_attr::quote(graph->get_name())
+                   + ",\"physical_instances\":" + std::to_string(occurrences[graph->get_gid()]) + ",\"specialized\":"
+                   + (graph->get_name().find("__s_") != std::string_view::npos ? "true" : "false") + ",\"coloring\":";
       auto info  = graph->get_input_node().attr(livehd::attrs::coloring_info);
       groups    += info.has() ? std::string(info.get()) : "{}";
       if (auto policy = graph->get_input_node().attr(livehd::attrs::synth_policy); policy.has()) {
@@ -1037,9 +1074,9 @@ void synth_command(Options& opts, Result& res) {
         member_first    = false;
         const auto sid  = node.attr(hhds::attrs::srcid).has() ? node.attr(hhds::attrs::srcid).get() : 0;
         groups         += std::format("{{\"node\":{},\"color\":{},\"source_id\":{}",
-                              node.get_debug_nid(),
-                              livehd::graph_util::node_color_of(node),
-                              sid);
+                                      node.get_debug_nid(),
+                                      livehd::graph_util::node_color_of(node),
+                                      sid);
         // The source locator turns the id into the file and line a person can open.
         if (sid != 0) {
           const auto span = graph->source_locator().resolve_spans(static_cast<hhds::SourceId>(sid)).primary;
@@ -1556,7 +1593,7 @@ void synth_command(Options& opts, Result& res) {
   // consumer checks each report kind before reading its fields. USYN mapping
   // uses technology-map; logical-only output has abc:null and no STA report.
   const auto timing_target = timing_target_json(abc_qor, sta_qor, sdc);
-  res.qor_json             = std::format(R"({{"schema_version":1,"kind":"synth","top":"{}","abc":{}{}{}{}}})",
+  res.qor_json = std::format(R"({{"schema_version":1,"kind":"synth","top":"{}","abc":{}{}{}{}}})",
                              json_escape_min(top),
                              abc_qor.empty() ? std::string{"null"} : abc_qor,
                              sta_qor.empty() ? std::string{} : std::format(R"(,"sta":{})", sta_qor),

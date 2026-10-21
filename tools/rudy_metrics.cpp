@@ -4,26 +4,58 @@
 // node_count, then x y width height is_macro blocked_h blocked_v per node;
 // net_count, then pin_count followed by node_id absolute_x absolute_y per pin.
 #include <algorithm>
+#include <chrono>
+#include <filesystem>
 #include <fstream>
 #include <iomanip>
 #include <iostream>
+#include <map>
+#include <mutex>
 #include <numeric>
 #include <stdexcept>
 #include <string>
 
 #include "dreamplace/native/placement.hpp"
 #include "dreamplace/native/rudy.hpp"
+#include "thirdparty/flute/flute.hpp"
+#include "tools/cpp/runfiles/runfiles.h"
 
 namespace dp = DreamPlace::native;
 
 int main(int argc, char** argv) {
   try {
-    if (argc != 3) {
-      throw std::invalid_argument("usage: rudy_metrics physical_snapshot.txt output_prefix");
+    if (argc != 3 && argc != 4) {
+      throw std::invalid_argument("usage: rudy_metrics physical_snapshot.txt output_prefix [rudy|rsmt]");
     }
     std::ifstream   input(argv[1]);
     dp::Design      d;
     dp::RudyOptions options;
+    if (argc == 4) {
+      const std::string model = argv[3];
+      if (model != "rudy" && model != "rsmt") {
+        throw std::invalid_argument("unknown route model");
+      }
+      if (model == "rsmt") {
+        options.model = dp::RudyModel::rsmt;
+      }
+    }
+    options.initialize = [exe = std::string(argv[0])] {
+      static std::once_flag once;
+      std::call_once(once, [&] {
+        std::string                                            error;
+        std::unique_ptr<bazel::tools::cpp::runfiles::Runfiles> files(
+            bazel::tools::cpp::runfiles::Runfiles::Create(exe, BAZEL_CURRENT_REPOSITORY, &error));
+        if (!files) {
+          throw std::runtime_error("cannot locate FLUTE runfiles: " + error);
+        }
+        const auto powv = files->Rlocation("dreamplace/thirdparty/flute/lut.ICCAD2015/POWV9.dat");
+        const auto post = files->Rlocation("dreamplace/thirdparty/flute/lut.ICCAD2015/POST9.dat");
+        if (!std::filesystem::is_regular_file(powv) || !std::filesystem::is_regular_file(post)) {
+          throw std::runtime_error("FLUTE lookup tables missing from runfiles");
+        }
+        flute::readLUT(powv.c_str(), post.c_str());
+      });
+    };
     input >> d.layout.xl >> d.layout.yl >> d.layout.xh >> d.layout.yh >> d.layout.site_width >> d.layout.row_height
         >> options.horizontal_capacity >> options.vertical_capacity >> options.bins_x;
     options.bins_y = options.bins_x;
@@ -79,9 +111,25 @@ int main(int argc, char** argv) {
         << ",\"nets\":" << nets << ",\"pins\":" << d.pin2node.size()
         << ",\"capacity_h_tracks_per_dbu\":" << options.horizontal_capacity
         << ",\"capacity_v_tracks_per_dbu\":" << options.vertical_capacity;
+    out << ",\"route_model\":\"" << (options.model == dp::RudyModel::rsmt ? "rsmt" : "rudy") << "\",\"degree_histogram\":{";
+    std::map<int, int> histogram;
+    for (int n = 0; n < nets; ++n) {
+      ++histogram[d.flat_net2pin_start[n + 1] - d.flat_net2pin_start[n]];
+    }
+    bool first = true;
+    for (auto [degree, count] : histogram) {
+      if (!first) {
+        out << ',';
+      }
+      first = false;
+      out << '"' << degree << "\":" << count;
+    }
+    out << '}';
     for (bool enhanced : {false, true}) {
       options.macro_blockages = options.pin_access = enhanced;
+      const auto          started                  = std::chrono::steady_clock::now();
       const auto          r                        = dp::rudy(d, options);
+      const double        seconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - started).count();
       std::vector<double> utilization;
       size_t              congested = 0;
       std::ofstream       map(std::string(argv[2]) + (enhanced ? "_enhanced.tsv" : "_base.tsv"));
@@ -94,7 +142,7 @@ int main(int argc, char** argv) {
             << r.pin_utilization[i] << '\t' << u << '\t' << (r.blocked_fraction.empty() ? 0 : r.blocked_fraction[i]) << '\n';
       }
       std::sort(utilization.begin(), utilization.end());
-      out << (enhanced ? ",\"enhanced\":{" : ",\"base\":{") << "\"overflow\":" << r.overflow
+      out << (enhanced ? ",\"enhanced\":{" : ",\"base\":{") << "\"overflow\":" << r.overflow << ",\"seconds\":" << seconds
           << ",\"max_utilization\":" << r.max_utilization << ",\"congested_bins\":" << congested
           << ",\"mean_utilization\":" << std::accumulate(utilization.begin(), utilization.end(), 0.) / utilization.size()
           << ",\"p95_utilization\":" << utilization[(utilization.size() - 1) * 95 / 100]

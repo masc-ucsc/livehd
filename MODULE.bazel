@@ -82,7 +82,7 @@ bazel_dep(name = "rapidjson", version = "1.1.0.bcr.20250205")
 # Native CPU placement; the repository uses LiveHD's HHDS/HLOP repositories.
 git_repository(
     name = "dreamplace",
-    commit = "3e998043d90bf8b2b3a8c1e6dd7b58011683e52c",
+    commit = "946259b6bcacdd0ab62e8027d7f87ec8a6eebde4",
     remote = "https://github.com/masc-ucsc/DREAMPlace.git",
 )
 # For local co-development swap the git_repository above for:
@@ -160,7 +160,7 @@ http_archive(
 # HHDS (plain git repo — see the iassert/hlop note above)
 git_repository(
     name = "hhds",
-    commit = "a632b5b1c144b19654241e05e91216ae5c6eeb6c",
+    commit = "8121500a8b1b2743043a134f22708b3f87c348d9",
     patch_args = ["-p1"],
     patches = ["//packages:hhds_pin_padding.patch"],
     remote = "https://github.com/masc-ucsc/hhds.git",

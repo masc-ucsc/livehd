@@ -21,6 +21,7 @@ protected:
     write("net/graph/body.bin", "repaired masters, connectivity, positions and RC");
     write("place/out.def", "final DEF");
     write("place/qor.json", "{}");
+    write("place/route_options.json", "{\"global_model\":\"auto\"}");
     write("place/io_resynth.json", "{\"boundary_ps\":213.3134765625}");
   }
   void write(const fs::path& path, const std::string& text) {
@@ -44,6 +45,8 @@ TEST_F(PhysicalCache, RestoresTheCompleteRepairedGenerationAcrossFreshInstances)
         EXPECT_EQ((std::string{std::istreambuf_iterator<char>(a), {}}), (std::string{std::istreambuf_iterator<char>(b), {}}));
       }
     }
+    std::ifstream route(root / "restored/place/route_options.json");
+    EXPECT_EQ((std::string{std::istreambuf_iterator<char>(route), {}}), "{\"global_model\":\"auto\"}");
     std::ifstream timing(root / "restored/place/io_resynth.json");
     EXPECT_EQ((std::string{std::istreambuf_iterator<char>(timing), {}}), "{\"boundary_ps\":213.3134765625}");
   }

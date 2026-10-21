@@ -348,20 +348,36 @@ std::vector<Edit> edits(hhds::Graph& graph, const Inventory& cells, const Timing
       critical_nodes.insert(n.get_debug_nid());
     }
   }
+  struct Node_priority {
+    std::pair<double, double> score;
+    bool                      critical;
+    std::string               name;
+  };
+  std::unordered_map<uint64_t, Node_priority> priorities;
+  priorities.reserve(buffers.size());
+  // These graph/name/feedback lookups do not mutate the graph. Compute them
+  // once instead of rebuilding long physical labels in every sort comparison.
+  // Keep sorting the original Node vector with the same comparison sequence,
+  // including its name tie-break, so equivalent keys retain the old permutation.
+  for (const auto& n : buffers) {
+    const auto*  c      = combinational(n, cells);
+    const auto   p      = timing.pins.find(physical_label(output(n, *c)));
+    const double stress = p == timing.pins.end() ? 0 : drive_stress(*c, p->second, timing.time_unit_ps);
+    const double slack  = p == timing.pins.end() ? 0 : -p->second.slack.value_or(0);
+    priorities.emplace(n.get_debug_nid(),
+                       Node_priority{
+                           {stress > 1 ? stress : 0, slack},
+                           critical_nodes.contains(n.get_debug_nid()),
+                           std::string(n.get_name())
+    });
+  }
   std::sort(buffers.begin(), buffers.end(), [&](const auto& a, const auto& b) {
-    const bool ca = critical_nodes.contains(a.get_debug_nid()), cb = critical_nodes.contains(b.get_debug_nid());
-    const auto priority = [&](Node n) {
-      const auto*  c      = combinational(n, cells);
-      const auto   p      = timing.pins.find(physical_label(output(n, *c)));
-      const double stress = p == timing.pins.end() ? 0 : drive_stress(*c, p->second, timing.time_unit_ps);
-      const double slack  = p == timing.pins.end() ? 0 : -p->second.slack.value_or(0);
-      return std::pair{stress > 1 ? stress : 0, slack};
-    };
-    const auto pa = priority(a), pb = priority(b);
-    if (pa != pb) {
-      return pa > pb;
+    const auto& pa = priorities.at(a.get_debug_nid());
+    const auto& pb = priorities.at(b.get_debug_nid());
+    if (pa.score != pb.score) {
+      return pa.score > pb.score;
     }
-    return ca != cb ? ca > cb : a.get_name() < b.get_name();
+    return pa.critical != pb.critical ? pa.critical > pb.critical : pa.name < pb.name;
   });
   Rc_index nets;
   nets.reserve(placed.parasitics->nets.size());

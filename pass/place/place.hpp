@@ -12,6 +12,7 @@
 #include "core/timing_whatif.hpp"
 #include "dreamplace/native/floorplan.hpp"
 #include "dreamplace/native/macro/topology.hpp"
+#include "dreamplace/native/placement.hpp"
 #include "hhds/graph.hpp"
 #include "inou/lefdef/physical.hpp"
 
@@ -27,6 +28,10 @@ struct Placement_restart : std::exception {
 };
 using Timing_feedback = livehd::timing::Feedback;
 using Evaluate        = std::function<Timing_feedback(const Result&)>;
+struct Stage_route {
+  std::string                     model = "inherit";
+  DreamPlace::native::RoutePolicy policy;
+};
 struct Options {
   std::function<bool(Placement_stage, const Result&)> after_stage;
   std::shared_ptr<const physical::Floorplan>          restart_seed;
@@ -99,6 +104,9 @@ struct Options {
   double      macro_cell_density_weight = 0;  // standard-cell pressure on macros in FP/macro GP
   double      macro_density_pull_weight = 0, macro_density_pull_range = 4;
   bool        automatic_bins = false, exact_macro_density = true, adaptive_density = true, routability = true;
+  std::string route_model = "rudy";
+  Stage_route fp_route, macro_route, final_route;
+  int         route_degree = 40, route_accuracy = 3;
   bool        routability_charge_compensation = true;
   double      routability_macro_weight = 1, routability_macro_range = 2;  // direct channel pressure; range in bins
   double      macro_overlap_weight = 50, macro_jitter = .01;
@@ -140,6 +148,8 @@ struct Options {
   // instead of refusing the placement. Off keeps the refusal.
   bool   unknown_const_zero    = false;
 };
+DreamPlace::native::RoutePolicy resolve_route_policy(const Options&, const Stage_route&);
+void                            initialize_route_tables();
 struct Result {
   unsigned                                         fp_resized_cells = 0, fp_repair_edits = 0;
   // Unknown constant bits tied low under Options::unknown_const_zero (zero otherwise).

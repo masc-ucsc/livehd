@@ -12,7 +12,7 @@ exports_files([
 cc_binary(
     name = "rudy_metrics",
     srcs = ["rudy_metrics.cpp"],
-    deps = ["@dreamplace//dreamplace/native:placer"],
+    deps = ["@dreamplace//dreamplace/native:placer", "@dreamplace//thirdparty/flute", "@bazel_tools//tools/cpp/runfiles"],
 )
 
 cc_binary(

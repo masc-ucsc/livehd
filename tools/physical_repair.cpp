@@ -361,8 +361,50 @@ int main(int argc, char** argv) {
       const auto input = options.previous;
       options.previous.reset();
       options.snapshots = true;
-      options.bins      = 64;
-      options.density   = .5;
+      options.bins      = config.HasMember("bins") ? config["bins"].GetInt() : 64;
+      options.density   = config.HasMember("density") ? config["density"].GetDouble() : .5;
+      // Reuse production spreading controls on an unchanged mapped netlist,
+      // supplied core and fixed macro frame. This isolates placement from
+      // synthesis when comparing downstream CTS and routing.
+      if (config.HasMember("threads")) {
+        options.threads = config["threads"].GetInt();
+      }
+      if (config.HasMember("dynamic_bins")) {
+        options.dynamic_bins = config["dynamic_bins"].GetBool();
+      }
+      if (config.HasMember("bin_max")) {
+        options.bin_max = config["bin_max"].GetInt();
+      }
+      if (config.HasMember("virtual_fillers")) {
+        options.virtual_fillers = config["virtual_fillers"].GetBool();
+      }
+      if (config.HasMember("virtual_filler_max_count")) {
+        options.virtual_filler_max_count = config["virtual_filler_max_count"].GetInt();
+      }
+      if (config.HasMember("virtual_filler_fraction")) {
+        options.virtual_filler_fraction = config["virtual_filler_fraction"].GetDouble();
+      }
+      if (config.HasMember("local_density_weight")) {
+        options.local_density_weight = config["local_density_weight"].GetDouble();
+      }
+      if (config.HasMember("local_density_bins")) {
+        options.local_density_bins = config["local_density_bins"].GetInt();
+      }
+      if (config.HasMember("local_density_range")) {
+        options.local_density_range = config["local_density_range"].GetDouble();
+      }
+      if (config.HasMember("local_density_jitter")) {
+        options.local_density_jitter = config["local_density_jitter"].GetDouble();
+      }
+      if (config.HasMember("adaptive_density")) {
+        options.adaptive_density = config["adaptive_density"].GetBool();
+      }
+      if (config.HasMember("routability")) {
+        options.routability = config["routability"].GetBool();
+      }
+      if (config.HasMember("route_model")) {
+        options.route_model = text("route_model");
+      }
       if (config.HasMember("iterations")) {
         options.iterations = config["iterations"].GetInt();
       }

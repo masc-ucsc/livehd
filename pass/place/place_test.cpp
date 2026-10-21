@@ -314,6 +314,50 @@ TEST(Placement, AlwaysTransparentLatchAliasesPreservePackedInputsAndSource) {
     EXPECT_EQ(gu::get_driver_of_sink_name(latch, "din"), a);
   }
 }
+TEST(Placement, SnapshotsPreserveUnconnectedInputNets) {
+  hhds::GraphLibrary source, flat;
+  auto               io = source.create_io("snapshot_ports");
+  io->add_input("a", 0);
+  io->set_bits("a", 1);
+  io->add_input("unused", 1);
+  io->set_bits("unused", 1);
+  io->add_output("y", 0);
+  io->set_bits("y", 1);
+  auto graph = io->create_graph();
+  auto inv   = source.create_io("sky130_fd_sc_hd__inv_1");
+  inv->add_input("A", 0);
+  inv->add_output("Y", 0);
+  auto cell = gu::create_typed_node(*graph, Ntype_op::Sub);
+  cell.set_subnode(inv);
+  cell.set_name("invert");
+  cell.create_sink_pin("A").connect_driver(graph->get_input_pin("a"));
+  auto y = cell.create_driver_pin("Y");
+  gu::set_bits(y, 1);
+  graph->get_output_pin("y").connect_driver(y);
+  auto options       = plain_options();
+  options.lefs       = {"inou/lefdef/tests/data/sky130hd.tlef", "inou/lefdef/tests/data/sky130hd.lef"};
+  options.output_dir = std::string(std::getenv("TEST_TMPDIR")) + "/snapshot_unconnected";
+  options.iterations = 40;
+  options.bins       = 8;
+  options.snapshots  = true;
+  ASSERT_NO_THROW(place(*graph, flat, options));
+  for (const auto* name : {"before_legalization.def", "after_legalization.def", "after_detailed.def"}) {
+    const auto frame = physical::read_def(options.output_dir + "/" + name);
+    ASSERT_EQ(frame.terminals.size(), 3);
+    for (const auto& terminal : frame.terminals) {
+      ASSERT_FALSE(terminal.net.empty());
+      const auto net = std::ranges::find(frame.nets, terminal.net, &physical::Net::name);
+      ASSERT_NE(net, frame.nets.end());
+      EXPECT_TRUE(std::ranges::any_of(net->connections, [&](const auto& endpoint) {
+        return endpoint.instance == "PIN" && endpoint.pin == terminal.name;
+      }));
+      if (terminal.name == "unused") {
+        EXPECT_EQ(net->connections.size(), 1);
+      }
+    }
+  }
+}
+
 TEST(Placement, MappedBusGraphLegalityRcAndReuse) {
   hhds::GraphLibrary source;
   auto               io = source.create_io("top");
@@ -2003,6 +2047,69 @@ END LIBRARY
   report.Parse(read("macro_topology.json").c_str());
   ASSERT_FALSE(report.HasParseError());
   EXPECT_FALSE(report["cache_hit"].GetBool());
+  // Auto's active estimator is part of the restored macro report, including
+  // when a macros-only final pass has no movable cells to run GP on.
+  options.route_model                        = "auto";
+  options.macro_parameters.routability       = true;
+  options.macro_route.policy.switch_overflow = 1000000;
+  options.macro_parameters.iters_per_outer   = 25;
+  options.cache_dir                          = (dir / "auto_cache").string();
+  hhds::GraphLibrary auto_flat;
+  const auto         auto_first = place(*graph, auto_flat, options);
+  report.Parse(read("macro_topology.json").c_str());
+  ASSERT_FALSE(report.HasParseError());
+  ASSERT_STREQ(report["route_model"].GetString(), "rsmt");
+  rapidjson::Document route_options;
+  route_options.Parse(read("route_options.json").c_str());
+  ASSERT_FALSE(route_options.HasParseError());
+  EXPECT_TRUE(route_options["stages"]["macro"]["feedback_enabled"].GetBool());
+  EXPECT_FALSE(route_options["stages"]["final"]["feedback_enabled"].GetBool());
+  const auto         route_overflow = report["rudy_overflow"].GetDouble();
+  const auto         merit          = report["merit"].GetDouble();
+  hhds::GraphLibrary auto_warm_flat;
+  const auto         auto_warm = place(*graph, auto_warm_flat, options);
+  EXPECT_EQ(auto_first.floorplan.components, auto_warm.floorplan.components);
+  report.Parse(read("macro_topology.json").c_str());
+  ASSERT_FALSE(report.HasParseError());
+  EXPECT_TRUE(report["cache_hit"].GetBool());
+  EXPECT_STREQ(report["route_model"].GetString(), "rsmt");
+  EXPECT_DOUBLE_EQ(report["rudy_overflow"].GetDouble(), route_overflow);
+  EXPECT_DOUBLE_EQ(report["merit"].GetDouble(), merit);
+  // A Rudy probe can also latch RSMT. Both the cold report and restored
+  // topology must score that active model, not the requested Rudy policy.
+  options.route_model                       = "rudy";
+  options.macro_route.policy.probe           = true;
+  options.macro_route.policy.target_overflow = 0;
+  options.macro_parameters.iters_per_outer   = 100;
+  options.macro_parameters.route_cap_h       = 1e-8;
+  options.macro_parameters.route_cap_v       = 1e-8;
+  options.density                           = .9;
+  options.cache_dir                         = (dir / "probe_cache").string();
+  hhds::GraphLibrary probe_flat;
+  const auto         probe_first = place(*graph, probe_flat, options);
+  report.Parse(read("macro_topology.json").c_str());
+  ASSERT_FALSE(report.HasParseError());
+  EXPECT_FALSE(report["cache_hit"].GetBool());
+  ASSERT_STREQ(report["route_model"].GetString(), "rsmt");
+  const auto probe_overflow = report["rudy_overflow"].GetDouble();
+  const auto probe_merit    = report["merit"].GetDouble();
+  hhds::GraphLibrary probe_warm_flat;
+  const auto         probe_warm = place(*graph, probe_warm_flat, options);
+  EXPECT_EQ(probe_first.floorplan.components, probe_warm.floorplan.components);
+  report.Parse(read("macro_topology.json").c_str());
+  ASSERT_FALSE(report.HasParseError());
+  EXPECT_TRUE(report["cache_hit"].GetBool());
+  EXPECT_STREQ(report["route_model"].GetString(), "rsmt");
+  EXPECT_DOUBLE_EQ(report["rudy_overflow"].GetDouble(), probe_overflow);
+  EXPECT_DOUBLE_EQ(report["merit"].GetDouble(), probe_merit);
+  options.macro_route.policy.probe           = false;
+  options.macro_route.policy.target_overflow = 1e-9;
+  options.macro_parameters.iters_per_outer   = 25;
+  options.macro_parameters.route_cap_h       = 0;
+  options.macro_parameters.route_cap_v       = 0;
+  options.density                           = .5;
+  options.route_model                  = "rudy";
+  options.macro_parameters.routability = false;
   // The plain flow keeps each hierarchy instance's color separate even when
   // both instances use the same SRAM master and local color number.
   for (auto node : body->body().nodes()) {
@@ -2314,3 +2421,26 @@ TEST(Placement, ProxyMemoryColorsExcludeSharedClockAndResetLogic) {
             2);
 }
 }  // namespace livehd::placement
+
+TEST(Placement, RoutePoliciesResolveStagesAndRejectInconsistentLevels) {
+  livehd::placement::Options options;
+  options.route_model                        = "auto";
+  options.macro_route.model                  = "rudy";
+  options.final_route.policy.switch_overflow = .02;
+  options.final_route.policy.target_overflow = .005;
+  const auto macro                           = livehd::placement::resolve_route_policy(options, options.macro_route);
+  const auto final                           = livehd::placement::resolve_route_policy(options, options.final_route);
+  EXPECT_EQ(macro.model, DreamPlace::native::RouteModel::rudy);
+  EXPECT_EQ(final.model, DreamPlace::native::RouteModel::automatic);
+  EXPECT_DOUBLE_EQ(final.switch_overflow, .02);
+  EXPECT_DOUBLE_EQ(final.target_overflow, .005);
+  options.final_route.policy.target_overflow = .03;
+  EXPECT_THROW(livehd::placement::resolve_route_policy(options, options.final_route), std::invalid_argument);
+  options.final_route.policy.target_overflow = std::numeric_limits<double>::infinity();
+  EXPECT_THROW(livehd::placement::resolve_route_policy(options, options.final_route), std::invalid_argument);
+  options.final_route.policy.target_overflow = 0;
+  options.final_route.model                  = "off";
+  EXPECT_EQ(livehd::placement::resolve_route_policy(options, options.final_route).model, DreamPlace::native::RouteModel::off);
+  options.final_route.model = "unknown";
+  EXPECT_THROW(livehd::placement::resolve_route_policy(options, options.final_route), std::invalid_argument);
+}

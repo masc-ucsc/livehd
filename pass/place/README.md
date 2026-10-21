@@ -585,6 +585,16 @@ The filler-free native flow has two independent opt-in controls:
 Adaptive density grids and the local field use the native radix-2 FFT-based
 DCT Poisson path, with no external numerical package. The existing fixed-grid
 solver remains the default. Neither option inserts physical or virtual cells.
+The fast path caches the dimension-dependent DCT phases, normalization and
+bit-reversal permutation per thread. It preserves the transform arithmetic and
+keeps no density data between solves; the cache is bounded by the supported
+power-of-two grid sizes.
+Transforms with at least 16,384 bins use the existing placement thread budget
+across independent output rows or columns. Bounded C++ workers keep this
+available without an OpenMP build setting. Both fast and dense transforms
+preserve each output's arithmetic order; small grids and one-thread dense
+solves retain their original loops. Screened local fields use the same thread
+budget, and serial/parallel fields are checked bit for bit.
 
 `synth.place.macro.cell_density_weight=0` independently controls local
 standard-cell pressure on movable macros. Positive values enable it during
@@ -1138,6 +1148,18 @@ analysis as `final_timing.json`; the last numbered trial can be a rejected state
 
 ### Fixed-macro cell-placement experiments
 
+For a controlled replay, `physical_repair` accepts `source_def=true` and
+`cell_place=true` to import the exact mapped DEF and recompute standard-cell
+placement while checking fixed macro geometry and cell masters. The JSON can
+set `density`, `bins`, `threads`, `dynamic_bins`, `bin_max`, `virtual_fillers`,
+`virtual_filler_max_count`, `virtual_filler_fraction`, `local_density_weight`,
+`local_density_bins`, `local_density_range`, `local_density_jitter`,
+`adaptive_density`, `routability` and `route_model`. These select the same
+production controls described above. Omitted fields retain the diagnostic's
+existing values (`density=0.5`, `bins=64`). Keep the supplied core and macro
+frame fixed when isolating spreading, then evaluate the accepted DEF with
+matched CTS, routing and extraction. A density estimate alone is not routed QoR.
+
 The following opt-in `synth.place.*` controls preserve the existing defaults:
 
 | Option | Default | Meaning |
@@ -1303,3 +1325,87 @@ macro GP to movable macros. FP itself still attracts all candidate members. The
 candidate areas, circle radii and calibration retain all members, so dropping
 standard-cell springs does not strengthen the remaining macro springs. The
 option defaults to false; final cell placement has no centroid anchors.
+
+### Steiner route feedback (`3r-route`)
+
+`synth.place.route.model=rudy|rsmt|auto|off` selects the estimator. The default
+remains `rudy`. `rsmt` uses FLUTE; `auto` starts each stage on RUDY and latches
+RSMT after consecutive qualifying route samples. Each of `fp`, `macro`, and
+`final` has `synth.place.S.route.model=inherit` and these independent controls:
+
+| Suffix | Default | Meaning |
+| --- | --- | --- |
+| `switch` | 0.05 | RUDY route overflow at or below which auto may switch |
+| `target` | 1e-9 | Active-model route overflow required for convergence |
+| `hold` | 1 | Consecutive qualifying samples (1..1000) |
+| `probe` | false | One diagnostic RSMT sample at a convergence candidate |
+| `probe_iterations` | 100 | Maximum extra GP iterations after a failing probe |
+
+For example, `--set synth.place.route.model=auto --set
+synth.place.macro.route.model=rudy` keeps macro feedback on RUDY while final
+placement switches to RSMT. `synth.place.fp=false` skips FP planning; the
+incremental fused flow still runs macro placement followed by final cell
+placement when `synth.place.final=true` and the design contains macros.
+`lhd.incremental=true` enables compile, mapping, timing and placement reuse.
+
+The existing `synth.place.routability=false` disables feedback in the ordinary
+FP, macro-source and final GP stages. H2D retains its independent
+`synth.place.macro.routability` switch (default false).
+A stage's `route.model=off` disables its inflation, macro channel pressure and
+route convergence test. IO prototype GP continues to disable route feedback.
+An enabled probe accepts successful RSMT diagnostics without changing feedback;
+a failing probe latches RSMT and continues within the configured extra budget.
+Ordinary auto switching also evaluates both models at the transition. Inflation
+remains monotone across the change of estimator.
+H2D retains the latch across its abstract and final-cell passes and rescales
+incumbent merit comparisons after a switch. Its cached macro frame preserves
+the active estimator for subsequent scoring and reports. The same stage latch
+applies after a failed Rudy probe; a passing probe is not repeated by later
+inner solver calls.
+
+Density overflow below 0.3 gates enhanced route sampling; it is distinct from
+route overflow. Enhanced route overflow is the mean excess of directional/pin
+utilization above one **plus** `(unroutable_nets + blocked_pins)/bin_count`.
+These geometric penalties can dominate a macro stage and prevent auto switching.
+A stage that never reaches its switch threshold reports `route_never_switched`.
+
+`synth.place.route.degree=40` caps FLUTE's net degree (2..1000); larger nets keep
+the weighted bounding-box approximation. `route.accuracy=3` accepts 1..10.
+Explicit FLUTE options require an rsmt/auto/probe stage. FLUTE nets omit the
+bounding-box pin-count correction to avoid double counting. Degree two uses a
+box and degree three a median Steiner junction without a FLUTE call. Other
+nets use deduplicated, core-clamped integer pins, guarded against coordinate and
+wirelength overflow. Missing lookup tables fail clearly. Straight projections
+consume a site/row corridor. Macro-aware RSMT retains net-box reachability and
+detour detection and distributes tree wirelength over reachable free space;
+per-edge obstacle routing is deferred.
+
+`target > switch`, negative/non-finite levels, invalid models, holds, FLUTE
+controls and probe budgets are rejected. All stage policies and FLUTE controls
+participate in placement and native continuation identity. The command's resolved
+options include the controls; `route_options.json` resolves all three stage policies,
+including inherited models and feedback enablement. `gp_history.json` and snapshot `gp_history.jsonl`
+include active `route_model`, `route_sampled`, `route_calls`, `route_seconds`,
+model-specific seconds, bin count, blocked pins, unreachable nets, switch
+iteration, both switch overflows, and probe status. Seconds include the two
+model calls on a switch sample. Values of -1 mark an absent switch measurement.
+
+`tools/rudy_metrics physical_snapshot.txt output_prefix [rudy|rsmt]` measures a
+saved snapshot without modifying it, exporting degree histograms, call times,
+and base/enhanced utilization maps. Evaluate against the same placement's real
+router map: estimator overflow is a proxy, not a routed timing result. In
+particular, HPWL is only a lower bound on Steiner length; the draft's universal
+`RSMT <= 1.12 * HPWL` test is invalid (four corners already give 1.5). Tests use
+an independent Manhattan spanning-tree bound instead.
+
+
+The evaluation and measured defaults decision are recorded in
+[`todo/livehd/3r-route.html`](../../todo/livehd/3r-route.html). The global-swap
+kernel caches high-degree net extrema and current-position net HPWL to preserve
+exact proposal costs while avoiding repeated full-pin scans. Sparse flat HHDS attributes persist in sorted
+key order so unchanged compiled designs keep the same completed-placement cache
+identity. Both changes have independent correctness regressions; routing model
+and existing placement defaults remain unchanged.
+Repair candidate sorting caches immutable electrical/slack, critical-path and
+name keys before sorting the original node sequence, preserving proposal order
+and trial budgets while avoiding repeated physical-label construction.

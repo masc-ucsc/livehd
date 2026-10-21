@@ -98,3 +98,11 @@ cc_test(
         "@hhds//hhds:graph",
     ],
 )
+
+cc_test(
+    name = "attribute_persistence_smoke",
+    size = "small",
+    srcs = ["attribute_persistence_smoke.cpp"],
+    copts = COPTS,
+    deps = ["@hhds//hhds:graph"],
+)

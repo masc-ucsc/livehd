@@ -331,6 +331,17 @@ std::string environment_key(const Options& o, const ph::Technology& tech) {
                               o.macro_snap_weight),
                   h);
   }
+  h = hash_text(std::format("route-model:{}:{}:{}", o.route_model, o.route_degree, o.route_accuracy), h);
+  for (const auto* stage : {&o.fp_route, &o.macro_route, &o.final_route}) {
+    h = hash_text(std::format("route-stage:{}:{}:{}:{}:{}:{}",
+                              stage->model,
+                              stage->policy.switch_overflow,
+                              stage->policy.target_overflow,
+                              stage->policy.hold,
+                              stage->policy.probe,
+                              stage->policy.probe_iterations),
+                  h);
+  }
   if (o.routability && !o.routability_charge_compensation) {
     h = hash_text("inflation-only-charge", h);
   }
@@ -1391,6 +1402,30 @@ std::unique_ptr<rules_cc::cc::runfiles::Runfiles> runfiles() {
   }
   return result;
 }
+dp::RoutePolicy route_policy(const Options& options, const Stage_route& stage) {
+  auto       policy = stage.policy;
+  const auto model  = stage.model == "inherit" ? options.route_model : stage.model;
+  if (model == "off") {
+    policy.model = dp::RouteModel::off;
+  } else if (model == "rudy") {
+    policy.model = dp::RouteModel::rudy;
+  } else if (model == "rsmt") {
+    policy.model = dp::RouteModel::rsmt;
+  } else if (model == "auto") {
+    policy.model = dp::RouteModel::automatic;
+  } else {
+    throw std::invalid_argument("invalid route model: " + model);
+  }
+  policy.degree   = options.route_degree;
+  policy.accuracy = options.route_accuracy;
+  if (!std::isfinite(policy.switch_overflow) || !std::isfinite(policy.target_overflow) || policy.target_overflow < 0
+      || policy.target_overflow > policy.switch_overflow || policy.hold < 1 || policy.hold > 1000 || policy.degree < 2
+      || policy.degree > 1000 || policy.accuracy < 1 || policy.accuracy > 10 || policy.probe_iterations < 1
+      || policy.probe_iterations > 10000) {
+    throw std::invalid_argument("invalid route switch/target, hold, FLUTE options or probe budget");
+  }
+  return policy;
+}
 void init_flute() {
   static std::once_flag once;
   std::call_once(once, [] {
@@ -1408,6 +1443,10 @@ void init_flute() {
   });
 }
 }  // namespace
+DreamPlace::native::RoutePolicy resolve_route_policy(const Options& options, const Stage_route& stage) {
+  return route_policy(options, stage);
+}
+void       initialize_route_tables() { init_flute(); }
 // One net's FLUTE Steiner RC exactly as placement RC estimation builds it: pin
 // nodes in order, one junction per distinct location (pins attach through a
 // 1e-9 ohm edge), FLUTE edges between junctions with half the wire capacitance
@@ -2398,6 +2437,9 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
       || options.fp_timing_max_updates < 2 || !std::isfinite(options.timing_exponent) || options.timing_exponent < 1
       || options.macro_timing_interval < 0) {
     throw std::invalid_argument("invalid timing weight/smoothing/update budget");
+  }
+  for (const auto* stage : {&options.fp_route, &options.macro_route, &options.final_route}) {
+    route_policy(options, *stage);
   }
   if (!std::isfinite(options.routability_macro_weight) || options.routability_macro_weight < 0
       || !std::isfinite(options.routability_macro_range) || options.routability_macro_range <= 0
@@ -3460,10 +3502,18 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
   control.macro_jitter              = options.macro_jitter;
   control.schedule_iterations       = options.schedule_iterations;
   control.routability = control.improved_routability = options.routability;
-  control.routability_charge_compensation            = options.routability_charge_compensation;
-  control.routability_macro_weight                   = options.routability_macro_weight;
-  control.routability_macro_range                    = options.routability_macro_range;
-  if (options.routability) {
+  control.route
+      = route_policy(options, options.completed_stage == Placement_stage::macro ? options.macro_route : options.final_route);
+  control.route_initialize = init_flute;
+  if (control.route.model == dp::RouteModel::off) {
+    control.routability = control.improved_routability = false;
+  }
+
+  control.routability_charge_compensation = options.routability_charge_compensation;
+  control.routability_macro_weight        = options.routability_macro_weight;
+  control.routability_macro_range         = options.routability_macro_range;
+  if (options.routability
+      && (control.routability || (options.fp_place && route_policy(options, options.fp_route).model != dp::RouteModel::off))) {
     control.route_capacity_h = control.route_capacity_v = 0;
     for (const auto& name : tech.routing_layers) {
       const auto& l = tech.layers.at(name);
@@ -3507,6 +3557,25 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
                           s.route_peak_utilization,
                           s.macro_routing_force,
                           s.macro_routing_channels);
+      line += std::format(
+          ",\"route_model\":\"{}\",\"route_sampled\":{},\"route_seconds\":{},\"route_bins\":{},\"route_switch_iteration\":{},"
+          "\"route_switch_rudy\":{},\"route_switch_rsmt\":{},\"route_probe\":{}",
+          dp::route_model_name(s.route_model),
+          s.route_sampled,
+          s.route_seconds,
+          s.route_bins,
+          s.route_switch_iteration,
+          s.route_switch_rudy,
+          s.route_switch_rsmt,
+          s.route_probe);
+      line += std::format(
+          ",\"route_blocked_pins\":{},\"route_unroutable_nets\":{},\"route_calls\":{},\"route_rudy_seconds\":{},\"route_rsmt_"
+          "seconds\":{}",
+          s.route_blocked_pins,
+          s.route_unroutable_nets,
+          s.route_calls,
+          s.route_rudy_seconds,
+          s.route_rsmt_seconds);
       line += std::format(",\"align_force\":{}", s.align_force);
       if (s.centroid_repulsion_weight > 0) {
         line += std::format(",\"centroid_overlap_pairs\":{},\"centroid_max_overlap\":{},\"centroid_repulsion_weight\":{}",
@@ -3727,6 +3796,7 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
           for (size_t i = 0; i < frame.terminals.size(); ++i) {
             frame.terminals[i].x = std::llround(snapshot.node_x[v.cells.size() + i]);
             frame.terminals[i].y = std::llround(snapshot.node_y[v.cells.size() + i]);
+            frame.terminals[i].net.clear();
           }
           size_t index = 0;
           for (const auto& [driver, sinks] : v.nets) {
@@ -3740,6 +3810,12 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
               }
             }
             frame.nets.push_back(std::move(net));
+          }
+          for (auto& terminal : frame.terminals) {
+            if (terminal.net.empty()) {
+              terminal.net = "snapshot_net_" + std::to_string(index++);
+              frame.nets.push_back({terminal.net, {{"PIN", terminal.name}}});
+            }
           }
           const std::string name = stage == dp::PlacementStage::global_placement ? "before_legalization.def"
                                    : stage == dp::PlacementStage::legalization   ? "after_legalization.def"
@@ -3773,6 +3849,9 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
       control.centroid_distance_attraction = options.fp_distance_attraction;
       control.centroid_attraction_outside  = options.fp_attraction_outside;
       auto fp_control                      = control;
+      fp_control.route                     = route_policy(options, options.fp_route);
+      fp_control.routability               = fp_control.improved_routability
+          = options.routability && fp_control.route.model != dp::RouteModel::off;
       // This experiment acts during macro GP, after the optional FP stage.
       if (options.macro_align_global) {
         fp_control.macro_align_weight = 0;
@@ -4854,12 +4933,85 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
   }
   result.graph->get_input_node().attr(attrs::placement_rc).set(ph::serialize_parasitics(*result.parasitics));
   fs::create_directories(options.output_dir);
+  {
+    rapidjson::StringBuffer                    buffer;
+    rapidjson::Writer<rapidjson::StringBuffer> json(buffer);
+    json.StartObject();
+    json.Key("schema_version");
+    json.Int(1);
+    json.Key("global_model");
+    json.String(options.route_model.c_str());
+    json.Key("degree");
+    json.Int(options.route_degree);
+    json.Key("accuracy");
+    json.Int(options.route_accuracy);
+    json.Key("routability");
+    json.Bool(options.routability);
+    json.Key("stages");
+    json.StartObject();
+    for (const auto& [name, stage] : {
+             std::pair{   "fp",    &options.fp_route},
+             std::pair{"macro", &options.macro_route},
+             std::pair{"final", &options.final_route}
+    }) {
+      const auto policy = route_policy(options, *stage);
+      json.Key(name);
+      json.StartObject();
+      json.Key("requested_model");
+      json.String(stage->model.c_str());
+      json.Key("model");
+      json.String(dp::route_model_name(policy.model));
+      json.Key("feedback_enabled");
+      const bool feedback = stage == &options.macro_route && options.macro_mode == "h2d" ? options.macro_parameters.routability
+                                                                                         : options.routability;
+      json.Bool(feedback && policy.model != dp::RouteModel::off);
+      json.Key("switch");
+      json.Double(policy.switch_overflow);
+      json.Key("target");
+      json.Double(policy.target_overflow);
+      json.Key("hold");
+      json.Int(policy.hold);
+      json.Key("probe");
+      json.Bool(policy.probe);
+      json.Key("probe_iterations");
+      json.Int(policy.probe_iterations);
+      json.EndObject();
+    }
+    json.EndObject();
+    json.EndObject();
+    std::ofstream resolved(options.output_dir + "/route_options.json");
+    resolved << buffer.GetString() << '\n';
+    if (!resolved) {
+      throw std::runtime_error("cannot write resolved route options");
+    }
+  }
   if (!metrics.history.empty() || !metrics.detailed_history.empty()) {
     rapidjson::StringBuffer                    buffer;
     rapidjson::Writer<rapidjson::StringBuffer> json(buffer);
     json.StartObject();
     json.Key("bins_x");
     json.Int(metrics.bins_x);
+    json.Key("route_model");
+    json.String(dp::route_model_name(metrics.route_model));
+    json.Key("route_never_switched");
+    json.Bool(control.route.model == dp::RouteModel::automatic && metrics.route_switch_iteration < 0);
+    json.Key("route_switch_iteration");
+    json.Int(metrics.route_switch_iteration);
+    json.Key("route_switch_rudy");
+    json.Double(metrics.route_switch_rudy);
+    json.Key("route_switch_rsmt");
+    json.Double(metrics.route_switch_rsmt);
+    json.Key("route_switch");
+    json.Double(control.route.switch_overflow);
+    json.Key("route_target");
+    json.Double(control.route.target_overflow);
+    json.Key("route_hold");
+    json.Int(control.route.hold);
+    json.Key("route_degree");
+    json.Int(control.route.degree);
+    json.Key("route_accuracy");
+    json.Int(control.route.accuracy);
+
     json.Key("routability_macro_weight");
     json.Double(options.routability_macro_weight);
     json.Key("routability_macro_range");
@@ -4971,6 +5123,33 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
       json.Double(s.density_weight);
       json.Key("route_overflow");
       json.Double(s.route_overflow);
+      json.Key("route_model");
+      json.String(dp::route_model_name(s.route_model));
+      json.Key("route_sampled");
+      json.Bool(s.route_sampled);
+      json.Key("route_seconds");
+      json.Double(s.route_seconds);
+      json.Key("route_bins");
+      json.Int(s.route_bins);
+      json.Key("route_switch_iteration");
+      json.Int(s.route_switch_iteration);
+      json.Key("route_switch_rudy");
+      json.Double(s.route_switch_rudy);
+      json.Key("route_switch_rsmt");
+      json.Double(s.route_switch_rsmt);
+      json.Key("route_probe");
+      json.Bool(s.route_probe);
+      json.Key("route_blocked_pins");
+      json.Int(s.route_blocked_pins);
+      json.Key("route_unroutable_nets");
+      json.Int(s.route_unroutable_nets);
+      json.Key("route_calls");
+      json.Int(s.route_calls);
+      json.Key("route_rudy_seconds");
+      json.Double(s.route_rudy_seconds);
+      json.Key("route_rsmt_seconds");
+      json.Double(s.route_rsmt_seconds);
+
       json.Key("route_peak_utilization");
       json.Double(s.route_peak_utilization);
       json.Key("macro_routing_force");
