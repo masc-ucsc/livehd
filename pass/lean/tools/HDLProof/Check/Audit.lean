@@ -12,6 +12,7 @@ import LeanSemanticPrimitives.Projection.AxiomGate
 import HDLProof.Sym.Refine
 import HDLProof.Sym.Conj
 import HDLProof.Sym.ConjT
+import HDLProof.Theory.Progress
 
 namespace HDLProof
 
@@ -25,5 +26,15 @@ namespace HDLProof
 #audit_axioms Sym.stateVarT_rel
 #audit_axioms Sym.runConjTOf_sound_ref
 #audit_axioms Sym.runRefKOf_sound_ref
+
+-- Refinement theory: Kahn determinism of a confluent channel spec, runs that
+-- refine it, horizontal and vertical composition, progress under fairness.
+#audit_axioms Theory.Spec.chan_agree
+#audit_axioms Theory.Exec.upTo_valid
+#audit_axioms Theory.PipelineRefinement.exec_refines
+#audit_axioms Theory.compose
+#audit_axioms Theory.Exec.map_refines
+#audit_axioms Theory.channel_progress
+#audit_axioms Theory.helpful_bound
 
 end HDLProof

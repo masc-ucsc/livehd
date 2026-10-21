@@ -129,6 +129,12 @@ MODULES=(
 # into the same olean dir after the simulator above, which they import.
 TOOLS="$(cd ../../pass/lean/tools && pwd)"
 TOOL_MODULES=(
+  # refinement theory, pure Lean: channel specs and Kahn determinism, stuttering
+  # runs, horizontal/vertical composition, progress under fairness
+  HDLProof/Theory/Channels
+  HDLProof/Theory/Stutter
+  HDLProof/Theory/Compose
+  HDLProof/Theory/Progress
   # the verified symbolic interpretation of a residual
   HDLProof/Sym/Kit
   HDLProof/Sym/Bridge
