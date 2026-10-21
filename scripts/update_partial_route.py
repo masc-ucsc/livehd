@@ -129,14 +129,24 @@ def main():
     closed = [item for item in ey_history['iterations'] if item.get('status') == 'iteration_complete']
     assert closed
     ey_last = closed[-1]
+    ey_closed_wall = 0
+    for item in closed:
+        hours, minutes, seconds = map(int, item['elapsed_time'].split(':'))
+        ey_closed_wall += hours * 3600 + minutes * 60 + seconds
     rows.append('<tr>' + cell('Eyeriss') + cell('LiveHD')
                 + cell('<span class="bad">DRT unresolved</span>', link('eyeriss_correct_rc_matched/direct_allowcong_guides/drt_progress.json', f'Completed check {ey_last["iteration"]}'))
                 + cell(f'{ey_last["violations"]:,}', 'Completed full check; final extraction pending')
-                + cell('Pending') * 5 + '</tr>')
+                + cell('Pending') * 4
+                + cell('≥ ' + number(ey_closed_wall, 1), 'Sum of closed DRT passes only; startup and active pass excluded') + '</tr>')
     ey_boundary = read('eyeriss_or_cells_listfix_retry/replacement_boundary_clock_tag_audit.json')
+    ey_summary_path = 'eyeriss_or_cells_listfix_retry/strict_placement_summary.json'
+    ey_summary = read(ey_summary_path) or {}
+    ey_stage = ey_summary.get('latest_stage', 'PreCTS placement saved')
+    ey_placement = ey_summary.get('placement_result', {})
     rows.append('<tr>' + cell('Eyeriss') + cell('OpenROAD')
-                + cell('PreCTS placement saved', 'Boundary audit ' + escape(ey_boundary.get('status', 'pending') if ey_boundary else 'pending') + '; CTS/routing pending')
-                + cell('Pending') * 6 + '</tr>')
+                + cell(link(ey_summary_path, ey_stage), 'Boundary audit ' + escape(ey_boundary.get('status', 'pending') if ey_boundary else 'pending') + '; final extraction pending')
+                + cell('Pending') * 5
+                + cell(number(ey_placement.get('wall_seconds'), 1), 'Replacement placement job only; CTS/routing cost excluded') + '</tr>')
 
     density_rows = []
     relative = 'cnn/matched_prects_density.json'
