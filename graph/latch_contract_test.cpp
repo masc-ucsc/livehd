@@ -448,3 +448,143 @@ TEST(LatchContract, WrappedDontCareOnTheOpenPhaseIsStillRefused) {
 // refuses first and a test would pass without ever exercising the offset. A
 // control that cannot fail for its stated reason is worse than none -- the L1
 // negative in single_edge_icg_test sat broken for exactly that reason.
+
+// ---------------------------------------------------------------------------
+// RULE C AND THE GATED-CLOCK PAIR.
+//
+// CORE-ET's `prim_clk_gate` + `prim_rf_1r1w_diff_preview`, cut down to the
+// shape rule C sees:
+//
+//     el    : latch, open while clk == 0          -- the gate's enable latch
+//     gated : And(clk, el.q)                      -- the gated clock
+//     pv    : latch, open while gated == 0,
+//             din = Hotmux(ctl, hot, dflt)        -- the preview latch
+//
+// Both latches commit on the same net and edge, so rule C looks at the pair,
+// and `el.q` really does reach `pv`'s din -- through `gated`. That is NOT time
+// borrowing: over `pv`'s window `gated` is pinned at its open level, so `el`
+// cannot move anything `pv` passes while `pv` is open.
+//
+// The discharge is exactly that one argument, so these cases bracket it: each
+// `Leak` below adds a second path from `el.q` that does NOT run through the
+// window root, and every one of them must still be refused.
+namespace {
+enum class Leak {
+  kThroughGateOnly,  // the real shape: el.q reaches pv ONLY via `gated`
+  kControl,          // ...and also straight into the hotmux CONTROL
+  kHotValue,         // ...and also into the selected VALUE arm
+  kDefault,          // ...and also into the DEFAULT arm
+  kUngatedWindow,    // pv's window is the RAW clk, which does not pin `gated`
+};
+
+hhds::Pin_class bit(hhds::Graph& g, Ntype_op op, const hhds::Pin_class& a, const hhds::Pin_class& b) {
+  auto n = gu::create_typed_node(g, op);
+  a.connect_sink(gu::setup_sink_pid(n, 0));
+  if (!b.is_invalid()) {
+    b.connect_sink(gu::setup_sink_pid(n, 1));
+  }
+  auto q = n.create_driver_pin(0);
+  gu::set_bits(q, 1);
+  gu::set_unsign(q);
+  return q;
+}
+
+hhds::Node_class latch1(hhds::Graph& g, const std::string& name, const hhds::Pin_class& enable) {
+  auto l = gu::create_typed_node(g, Ntype_op::Latch);
+  l.attr(hhds::attrs::name).set(name);
+  auto q = l.create_driver_pin(0);
+  gu::set_bits(q, 1);
+  gu::set_unsign(q);
+  enable.connect_sink(gu::setup_sink_by_name(l, "enable"));
+  return l;
+}
+
+void build_gate_pair(hhds::Graph& g, Leak leak) {
+  auto clk = g.get_input_pin("clk");
+  auto en  = g.get_input_pin("en");
+  auto d2  = g.get_input_pin("d2");
+  for (auto p : {clk, en, d2}) {
+    gu::set_ubits(p, 1);
+  }
+
+  auto nclk = bit(g, Ntype_op::Not, clk, {});
+  auto el   = latch1(g, "el", nclk);  // open while clk == 0
+  en.connect_sink(gu::setup_sink_by_name(el, "din"));
+  auto elq = el.get_driver_pin(0);
+
+  auto gated  = bit(g, Ntype_op::And, clk, elq);  // the ICG cone
+  auto ngated = bit(g, Ntype_op::Not, gated, {});
+
+  auto pv = latch1(g, "pv", leak == Leak::kUngatedWindow ? nclk : ngated);
+
+  // A control that mixes the gated clock with data -- `proc -ifx`'s shape for a
+  // case statement inside a gated always block.
+  auto ctl = bit(g, Ntype_op::Or, bit(g, Ntype_op::Ror, gated, {}),
+                 leak == Leak::kControl ? bit(g, Ntype_op::And, d2, elq) : d2);
+  auto hot  = leak == Leak::kHotValue ? bit(g, Ntype_op::And, d2, elq) : d2;
+  auto dflt = leak == Leak::kDefault ? bit(g, Ntype_op::And, d2, elq) : d2;
+
+  auto hm = gu::create_typed_node(g, Ntype_op::Hotmux);
+  ctl.connect_sink(gu::setup_sink_pid(hm, 0));   // control
+  hot.connect_sink(gu::setup_sink_pid(hm, 1));   // its value
+  dflt.connect_sink(gu::setup_sink_pid(hm, 2));  // trailing default
+  auto hq = hm.create_driver_pin(0);
+  gu::set_bits(hq, 1);
+  gu::set_unsign(hq);
+  hq.connect_sink(gu::setup_sink_by_name(pv, "din"));
+}
+
+bool contract_ok(const std::string& tag, Leak leak) {
+  auto& lib = livehd::Hhds_graph_library::instance("lgdb_lcontract_" + tag);
+  auto  gio = lib.create_io(tag);
+  int   pos = 0;
+  for (const char* n : {"clk", "en", "d2"}) {
+    gio->add_input(n, pos++);
+    gio->set_bits(n, 1);
+    gio->set_unsign(n, true);
+  }
+  auto g = gio->create_graph();
+  build_gate_pair(*g, leak);
+  return livehd::latch_contract::check(g.get());
+}
+}  // namespace
+
+// The real shape. Every path from the gate's enable latch into the preview
+// latch's data runs through the gated clock, which is the preview latch's own
+// window root -- pinned for the whole window it is open.
+TEST(LatchContract, GatedPreviewPairIsDischargedByItsOwnWindowRoot) {
+  EXPECT_TRUE(contract_ok("gatepair_ok", Leak::kThroughGateOnly))
+      << "el.q reaches pv only through `gated`, and `gated` is fixed across pv's window, so nothing "
+         "el does can move what pv passes while pv is open";
+}
+
+// A CONTROL that selects on the other latch directly. The selection can change
+// inside the window, so which data pv passes depends on el: real borrowing.
+TEST(LatchContract, HotmuxControlReadingTheOtherLatchIsRefused) {
+  EXPECT_FALSE(contract_ok("gatepair_ctl", Leak::kControl))
+      << "a hotmux control that reads el.q around the gated clock is a live selection change inside "
+         "pv's window";
+}
+
+// ...and the same for the VALUE the control selects.
+TEST(LatchContract, HotmuxValueArmReadingTheOtherLatchIsRefused) {
+  EXPECT_FALSE(contract_ok("gatepair_val", Leak::kHotValue))
+      << "the selected arm itself carries el.q, so pv passes a value el can move while pv is open";
+}
+
+// ...and for the DEFAULT arm, which carries the value whenever no control is
+// hot and is easy to drop from an arm-by-arm analysis.
+TEST(LatchContract, HotmuxDefaultArmReadingTheOtherLatchIsRefused) {
+  EXPECT_FALSE(contract_ok("gatepair_dflt", Leak::kDefault))
+      << "the trailing default is a value arm like any other";
+}
+
+// THE PHASE RELATION ITSELF. Here pv's window is the UNGATED clock, so pinning
+// its root leaves `And(clk, el.q)` free in el.q -- the dependence survives and
+// the pair must still be refused. This is what separates "pinned by the
+// window" from "mentions the clock somewhere".
+TEST(LatchContract, UngatedWindowDoesNotPinTheGatedClock) {
+  EXPECT_FALSE(contract_ok("gatepair_ungated", Leak::kUngatedWindow))
+      << "pv open on the raw clk: its window root does not pin `gated`, so el.q still reaches the "
+         "data through the gate";
+}

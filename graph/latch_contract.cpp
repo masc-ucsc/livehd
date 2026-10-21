@@ -3,6 +3,7 @@
 #include "latch_contract.hpp"
 
 #include <algorithm>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -338,8 +339,12 @@ Phase latch_phase(const hhds::Node_class& n) {
 // latch has a STRUCTURAL q-to-own-D path that is not a real one. The exemption
 // is narrow on purpose — only an operand that is DIRECTLY that latch's q is
 // skipped, so `q + 1` (where q reaches din through a Sum) is still caught.
+// `cut`, when valid, is walked as a LEAF: the pin is not expanded and
+// contributes nothing. Rule C passes the destination latch's window root there
+// -- see its use below for why a path through that one pin cannot carry
+// anything into the value the latch passes while it is open.
 void comb_reach(const hhds::Pin_class& start, const hhds::Node_class& hold_owner,
-                absl::flat_hash_set<hhds::Class_index>& hit_state) {
+                absl::flat_hash_set<hhds::Class_index>& hit_state, const hhds::Pin_class& cut = {}) {
   if (start.is_invalid()) {
     return;
   }
@@ -356,6 +361,9 @@ void comb_reach(const hhds::Pin_class& start, const hhds::Node_class& hold_owner
     work.pop_back();
     if (p.is_invalid() || p.is_const() || gu::is_graph_input_pin(p)) {
       continue;
+    }
+    if (!cut.is_invalid() && p.get_class_index() == cut.get_class_index()) {
+      continue;  // pinned by the caller: a fixed value, so nothing flows through it
     }
     if (!seen.insert(p.get_class_index()).second) {
       continue;
@@ -3709,6 +3717,26 @@ bool check(hhds::Graph* g) {
       // value lands in stops being well defined. A master/slave pair sits on
       // OPPOSITE parities of the same net and is ACCEPTED — that is the whole
       // reason phases are resolved to a root net instead of compared per-node.
+      //
+      // THE PATH ALSO HAS TO BE LIVE WHILE THIS LATCH IS OPEN. Borrowing needs
+      // the other latch to MOVE what this one is passing, and over this
+      // latch's window its enable root sits at a fixed level by definition. So
+      // a value that reaches `d_open` only THROUGH that root is fixed for the
+      // whole window, and the other latch cannot move it. `hit_open` is the
+      // same walk with that one pin as a leaf.
+      //
+      // It discharges exactly one shape, and keeps everything else: every mux
+      // and hotmux arm, every control, the don't-cares and the default are
+      // still walked, so a control that selects on anything but the window
+      // root still reports, and so does a data arm. CORE-ET's
+      // `prim_clk_gate` + `prim_rf_1r1w_diff_preview` pair is the case —
+      // measured there, the preview latch's whole din cone reaches the gate's
+      // enable latch ONLY through the gated clock, which is its own window
+      // root. Without this it is refused for a dependency it cannot observe.
+      //
+      // Computed once per latch and only when a pair would otherwise be
+      // refused, so the ordinary design pays nothing.
+      std::optional<absl::flat_hash_set<hhds::Class_index>> hit_open;
       for (const auto& other : latches) {
         const auto other_ix = other.get_class_index();
         if (other_ix == self_ix || !hit.contains(other_ix)) {
@@ -3725,6 +3753,18 @@ bool check(hhds::Graph* g) {
         if (a_it->second.net.get_class_index() != b_it->second.net.get_class_index()
             || a_it->second.rising != b_it->second.rising) {
           continue;  // opposite phase (master/slave): the point of the whole walk
+        }
+        if (!hit_open) {
+          hit_open.emplace();
+          const auto wroot = resolve_phase(sink_driver_hier(l, "enable"), /*stop_at_clock_cell=*/true).net;
+          if (wroot.is_invalid()) {
+            *hit_open = hit;  // no root to pin: nothing is discharged, refuse as before
+          } else {
+            comb_reach(d_open, l, *hit_open, wroot);
+          }
+        }
+        if (!hit_open->contains(other_ix)) {
+          continue;  // every path runs through the window root: fixed while this latch is open
         }
         reject("rule C, simultaneously-transparent pair",
                "latches `" + latch_label(other) + "` and `" + latch_label(l)
