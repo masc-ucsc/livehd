@@ -280,6 +280,29 @@ def main():
     assert macro_native['status'] == 'pass' and macro_status['status'] == 'failed_preserved_no_retry'
     native_async = read_sync('liteeth_macro_pressure_v2/outputs/control_p0_o50/native_clock_diagnostic_snapshot.json')
     assert len(native_async['rows']['closed_v3']['unique_normalized_tests']) == 14
+    macro_recovered = read_sync('liteeth_macro_pressure_score_recovery_v1/run/accepted_control.json')
+    macro_recovery_review = read_sync('liteeth_macro_pressure_score_recovery_v1/run/parent_review.json')
+    assert macro_recovery_review['status'] == 'approved_preCTS_macro_control_with_partial_latch_coverage'
+    assert macro_recovery_review['accepted_control_sha256'] == SYNC_SOURCES['liteeth_macro_pressure_score_recovery_v1/run/accepted_control.json']
+    assert macro_recovered['status'] == 'pass'
+    macro_positive = read_sync('liteeth_macro_pressure_v3/manifest.json')
+    macro_positive_release = read_sync('liteeth_macro_pressure_v3/parent_positive_release.json')
+    assert macro_positive_release['manifest_sha256'] == SYNC_SOURCES['liteeth_macro_pressure_v3/manifest.json']
+    assert macro_positive_release['status'] == 'approved_three_positive_macro_diagnostics'
+    assert macro_positive_release['allowed_arms'] == macro_positive['allowed_positive_arms']
+    control_rows = []
+    for stage, label in (('first_macro', 'First macro frame'), ('accepted_macro', 'Accepted macro frame'), ('final', 'Final cells')):
+        row = macro_recovered['independent'][stage]
+        score = row['score']
+        assert row['metadata']['status'] == 'pass' and row['PG_certificate']['missing'] == row['PG_certificate']['wrong'] == 0
+        frame = score['die_um']
+        control_rows.append('<tr>' + cell(label) + cell(f'{score["instances"]:,}')
+                            + cell(number(frame[2] - frame[0], 3) + ' × ' + number(frame[3] - frame[1], 3))
+                            + cell(number(score['setup_wns_ps']) + ' / ' + number(score['setup_tns_ps']))
+                            + cell(number(score['hold_wns_ps']) + ' / ' + number(score['hold_tns_ps']))
+                            + cell(number(score['hpwl_um'], 1))
+                            + cell(str(macro_recovery_review['coverage'][stage]['count']))
+                            + cell(number(row['metadata']['wall_s'], 2)) + '</tr>')
     gap = read_sync('liteeth_v3_macro_gap_readonly/summary.json')
     assert gap['status'] == 'closed_v3_macro_stage_readonly_diagnostic'
     gap_plot = 'liteeth_v3_macro_gap_readonly/macro_stage_density.svg'
@@ -312,6 +335,13 @@ def main():
         options = seed_plan['policies']['primary'][policy]
         score = result['independent_preCTS_placement_timing']
         final_density = result['density_phase_trajectory'][-1]
+        if 'convergence_caveat' in result:
+            convergence_note = result['convergence_caveat']
+        else:
+            convergence = result['convergence']
+            convergence_note = (f'{convergence["iterations"]} iterations; '
+                                + ('converged' if convergence['converged'] else 'not converged')
+                                + '; overflow target ' + str(convergence['stop_overflow']))
         placement_rows.append('<tr>' + cell(sync_link(relative, policy))
                               + cell(str(options['local_density_weight']) + ' / ' + number(options['halo_um'], 2))
                               + cell(number(100 * final_density['CORE_area_fraction_hot80'], 2) + '%',
@@ -321,7 +351,7 @@ def main():
                               + cell(number(score['hold_wns_ps']) + ' / ' + number(score['hold_tns_ps']))
                               + cell(number(result['native_measurement']['wall_s'], 1) + ' / '
                                      + number(result['score_measurement']['wall_s'], 1), 'Native / independent score jobs')
-                              + cell(escape(result['convergence_caveat'])) + '</tr>')
+                              + cell(escape(convergence_note)) + '</tr>')
 
     stamp = datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')
     sources = ''.join(f'<li>{link(path, path)} <code>{digest[:12]}</code></li>' for path, digest in SOURCES.items())
@@ -357,9 +387,10 @@ def main():
 <p>Six placement diagnostics are released: OpenROAD seeds at local pressure 0, 1 and 4, LiveHD seeds at 0 and 4, and a separate OpenROAD pressure-0 halo sensitivity. The primary arms use the same nominal 2 µm halo; native row/site snapping enlarges that clearance to 2.052 × 2.160 µm. Movement of the 712 OpenROAD-seed cells affected by that adaptation is tracked separately. The 4.59 µm sensitivity is not pooled with primary results. Raw PG associations remain identically deferred in this import check and must be connected before physical acceptance.</p>
 <div class="scroll"><table><caption>Closed CNN placement diagnostics — estimated timing only</caption><thead><tr><th>Policy</th><th>Local pressure / halo (µm)</th><th>Final CORE area in hot bins</th><th>HPWL (µm)</th><th>Estimated setup WNS / TNS (ps)</th><th>Estimated hold WNS / TNS (ps)</th><th>Measured wall time (s)</th><th>Convergence</th></tr></thead><tbody>@PLACEMENT_ROWS@</tbody></table></div>
 <p>The first OpenROAD-seeded pressure-0 run creates crowding during GP: 0 hot bins at input, 1,087 before legalization, 796 after legalization and 717 after detailed placement. Final hot-bin CORE area is 21.16%; the halo-adaptation cohort contributes no final area to those hot bins. Estimated worst setup improves by 239.94 ps, while setup TNS worsens by 9.681 million ps and HPWL increases 22.07%. The density, HPWL and TNS regressions coexist with better worst slack; no routing or frequency improvement is established.</p>
-<p>A separate LiteEth flow experiment has released its control; the remaining three arms await control verification. Cell-pressure / soft macro-overlap weights are 0/50, 1/50, 1/5 and 4/5. FP plan is disabled, macro and final placement are enabled, incremental synthesis is enabled, and the 5 µm configured halo is preserved. Macros receive an area-integrated field emitted only by standard cells, so they can move toward quieter space. Macro-to-macro overlap uses a separate soft penalty, which is zero for disjoint padded footprints; reducing it may have no effect there. Global electrostatic density also separates macros and is unchanged in this comparison. The current flow carries macro-cell pressure into the automatic-IO prototype too, so IO changes are measured outcomes and effects cannot be attributed solely to macro GP. Measure actual force, macro movement, usable cell occupancy in inter-macro corridors, final density and timing before selecting a policy. Corridor denominators separately exclude physical macros and halos. The current observer first exposes raw GP coordinates, so initial pre-GP displacement and density are unavailable.</p>
+<p>A separate LiteEth flow experiment has verified its control as a placement diagnostic and released three positive-pressure arms sequentially. Cell-pressure / soft macro-overlap weights are 0/50, 1/50, 1/5 and 4/5. FP plan is disabled, macro and final placement are enabled, incremental synthesis is enabled, and the 5 µm configured halo is preserved. Macros receive an area-integrated field emitted only by standard cells, so they can move toward quieter space. Macro-to-macro overlap uses a separate soft penalty, which is zero for disjoint padded footprints; reducing it may have no effect there. Global electrostatic density also separates macros and is unchanged in this comparison. The current flow carries macro-cell pressure into the automatic-IO prototype too, so IO changes are measured outcomes and effects cannot be attributed solely to macro GP. Measure actual force, macro movement, usable cell occupancy in inter-macro corridors, final density and timing before selecting a policy. Corridor denominators separately exclude physical macros and halos. Feedback-derived topology and die dimensions are recorded as outcomes; all arms must start from identical mapped inputs. The current observer first exposes raw GP coordinates, so initial pre-GP displacement and density are unavailable.</p>
 <p>@MACRO_GAP_NOTE@</p>
-<p>The LiteEth control's native command completed in 404.71 s (guarded job). Its first independent scorer failed because the clock checker used an unsupported OpenSTA waveform property. That failed attempt is preserved; a separate checker recovery will score the three saved frames without rerunning placement. Positive-pressure arms remain held. Native OpenTimer also skips nonsequential asynchronous set/reset checks on 14 normalized cell-pin pairs, an existing modeling limitation reproduced in reuse-v3. Command success does not certify complete native timing coverage; independent OpenROAD clock and setup/hold checks remain required.</p>
+<div class="scroll"><table><caption>LiteEth macro control — independent placement-RC estimates, partial timing coverage</caption><thead><tr><th>Frame</th><th>Instances</th><th>Die size (µm)</th><th>Estimated setup WNS / TNS (ps)</th><th>Estimated hold WNS / TNS (ps)</th><th>All non-PG HPWL (µm)</th><th>Unclocked latch pins</th><th>Score job wall (s)</th></tr></thead><tbody>@CONTROL_ROWS@</tbody></table></div>
+<p>The LiteEth control's native command completed in 404.71 s (guarded job). Its original independent scorer failed on an unsupported OpenSTA waveform property; that attempt remains unchanged. A separate corrected checker passed all three saved frames without rerunning placement, including the four defined clock roots, periods, waveforms, leaf memberships and full PG association checks. The final DEF matches reuse-v3 byte for byte. All three frames also report 46 unclocked DHL transparent latch pins and 46 unconstrained endpoints, so four defined clocks do not establish complete timing coverage. Track their census and any changes across policies; frequency qualification remains pending. Native OpenTimer separately skips nonsequential asynchronous set/reset checks on 14 normalized cell-pin pairs, an existing modeling limitation reproduced in reuse-v3.</p>
 <h2>Comparison and performance scope</h2>
 <p>The placement comparisons share their design's mapped starting netlist, macro/IO frame and authoritative constraints. CTS and repair may make arm-specific changes, which remain audited. CNN uses 65 SRAMs, Eyeriss 1,040 and LiteEth 5. The LiteEth reference uses routability-only placement after a preserved timing-driven rebuffering crash; this qualification prevents a whole-flow dominance claim. Both LiteEth arms configured a 1% repair-buffer option, but that option did not act as an observed cumulative hard bound.</p>
 <p>Timing values in the main table are final extracted results only. Pending entries are not zero and placement/GRT estimates are not substituted. A supported-frequency claim needs fresh extracted per-clock STA, consistent generated-clock relationships, IO budgets and timing exceptions, and explicit setup/hold reporting. CNN uses the shared ASAP7 RVT FF 0.77 V / 0 °C standard-cell corner with normalized SRAM models and fixed 10 ps IO budgets; this is not an all-corner frequency claim.</p>
@@ -371,7 +402,7 @@ def main():
     for key, value in {'STAMP': stamp, 'ROWS': ''.join(rows), 'DENSITY': ''.join(density_rows),
                        'CNN': f'{cnn_counts["LiveHD"]:,}', 'CNN_FINAL': cnn_final_note,
                        'EY': f'{ey_last["violations"]:,}', 'VALIDATION': validation, 'SEED_ROWS': ''.join(seed_rows),
-                       'PLACEMENT_ROWS': ''.join(placement_rows),
+                       'PLACEMENT_ROWS': ''.join(placement_rows), 'CONTROL_ROWS': ''.join(control_rows),
                        'MACRO_GAP_NOTE': gap_note, 'MARKER_NOTE': marker_note, 'SOURCES': sources}.items():
         page = page.replace('@' + key + '@', value)
     output = ROOT / 'docs/partial_route.html'
