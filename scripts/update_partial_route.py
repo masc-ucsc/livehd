@@ -145,11 +145,19 @@ def main():
     for item in closed:
         hours, minutes, seconds = map(int, item['elapsed_time'].split(':'))
         ey_closed_wall += hours * 3600 + minutes * 60 + seconds
+    ey_runtime = '≥ ' + number(ey_closed_wall, 1)
+    ey_runtime_note = 'Sum of closed DRT passes only; startup and active pass excluded'
+    ey_progress = read('eyeriss_correct_rc_matched/direct_allowcong_guides/drt_observed_progress_snapshot.json')
+    if ey_progress and ey_progress['stage_wall_seconds'] >= ey_closed_wall:
+        assert isfinite(ey_progress['stage_wall_seconds']) and ey_progress['stage_wall_seconds'] > 0
+        ey_runtime = '≥ ' + number(ey_progress['stage_wall_seconds'], 1)
+        ey_runtime_note = ('In progress; observed ' + escape(ey_progress['observed_utc'])
+                           + '; cumulative tool CPU ' + number(ey_progress['cumulative_tool_CPU_seconds'], 1) + ' s')
     rows.append('<tr>' + cell('Eyeriss') + cell('LiveHD')
                 + cell('<span class="bad">DRT unresolved</span>', link('eyeriss_correct_rc_matched/direct_allowcong_guides/drt_progress.json', f'Completed check {ey_last["iteration"]}'))
                 + cell(f'{ey_last["violations"]:,}', 'Completed full check; final extraction pending')
                 + cell('Pending') * 4
-                + cell('≥ ' + number(ey_closed_wall, 1), 'Sum of closed DRT passes only; startup and active pass excluded') + '</tr>')
+                + cell(ey_runtime, ey_runtime_note) + '</tr>')
     ey_boundary = read('eyeriss_or_cells_listfix_retry/replacement_boundary_clock_tag_audit.json')
     ey_summary_path = 'eyeriss_or_cells_listfix_retry/strict_placement_summary.json'
     ey_summary = read(ey_summary_path) or {}
