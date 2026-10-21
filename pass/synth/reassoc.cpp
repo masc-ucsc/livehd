@@ -199,10 +199,51 @@ private:
   return width > 0 && width < kMaxReassocBits;
 }
 
+// A guard operand of an `op` link: Mux(c, x, id) or Mux(c, id, x) with the
+// operator's identity on one arm (0 for Or/Xor; for And all ones, which the
+// guard rules spell -1 and bitwidth may respell at the Mux's width).
+[[nodiscard]] bool guard_operand(const hhds::Pin_class& pin, Ntype_op op) {
+  if (pin.is_invalid() || pin.is_const() || gu::is_graph_input_pin(pin)) {
+    return false;
+  }
+  const auto mux = pin.get_master_node();
+  if (gu::is_builtin_node(mux) || gu::type_op_of(mux) != Ntype_op::Mux) {
+    return false;
+  }
+  std::array<hhds::Pin_class, 3> in;
+  for (const auto& sink : mux.inp_sorted_pins()) {
+    const auto pid = sink.get_port_id();
+    if (pid > 2) {
+      return false;  // a multi-way Mux
+    }
+    in[pid] = sink.get_driver_pin();
+  }
+  const int width = out_width(mux);
+  for (int arm = 1; arm <= 2; ++arm) {
+    if (in[arm].is_invalid() || !in[arm].is_const()) {
+      continue;
+    }
+    const auto& value = gu::const_of(in[arm]);
+    if (value.has_unknowns() || !value.is_just_i64()) {
+      continue;
+    }
+    const auto v = value.to_just_i64();
+    if (op != Ntype_op::And) {
+      if (v == 0) {
+        return true;
+      }
+    } else if (v == -1 || (width > 0 && width < 63 && v == (int64_t{1} << width) - 1)) {
+      return true;
+    }
+  }
+  return false;
+}
+
 class Reassociator {
 public:
-  Reassociator(hhds::Graph* graph, Reassoc_stats& stats, Preparation_budget* budget, const Reassoc_scope& scope)
-      : graph_(graph), stats_(stats), budget_(budget), scope_(scope), regions_(*graph) {}
+  Reassociator(hhds::Graph* graph, Reassoc_stats& stats, Preparation_budget* budget, const Reassoc_scope& scope,
+               Reassoc_trees trees)
+      : graph_(graph), stats_(stats), budget_(budget), scope_(scope), trees_(trees), regions_(*graph) {}
 
   bool run() {
     if (!guard_terms()) {
@@ -242,6 +283,7 @@ private:
   Reassoc_stats&                               stats_;
   Preparation_budget*                          budget_;
   const Reassoc_scope&                         scope_;
+  Reassoc_trees                                trees_;
   Region_keys                                  regions_;
   absl::flat_hash_set<hhds::Class_index>       absorbable_;
   absl::flat_hash_map<hhds::Class_index, bool> mergeable_;
@@ -420,6 +462,16 @@ private:
     if (absorbed.empty()) {
       return;
     }
+    if (trees_ == Reassoc_trees::guarded) {
+      // Every link ORs (XORs, ANDs) in a guard; anything else stays a chain.
+      const auto guarded = [op](const hhds::Node_class& link) {
+        return std::ranges::any_of(link.inp_sorted_pins(),
+                                   [op](const hhds::Pin_class& sink) { return guard_operand(sink.get_driver_pin(), op); });
+      };
+      if (!guarded(root) || !std::ranges::all_of(absorbed, guarded)) {
+        return;
+      }
+    }
     // And/Or are idempotent; Xor cancels pairs. Keep first-occurrence order.
     absl::flat_hash_map<hhds::Class_index, size_t> seen;
     std::vector<hhds::Pin_class>                   operands;
@@ -458,11 +510,12 @@ private:
 };
 }  // namespace
 
-bool reassociate_chains(hhds::Graph* graph, Reassoc_stats& stats, Preparation_budget* budget, const Reassoc_scope& scope) {
+bool reassociate_chains(hhds::Graph* graph, Reassoc_stats& stats, Preparation_budget* budget, const Reassoc_scope& scope,
+                        Reassoc_trees trees) {
   if (!graph) {
     return true;
   }
-  return Reassociator{graph, stats, budget, scope}.run();
+  return Reassociator{graph, stats, budget, scope, trees}.run();
 }
 
 }  // namespace livehd::synth

@@ -10168,7 +10168,7 @@ private:
   //   view  = base >> pos                       (shift_window_view)
   //   upper = set_mask(view, lane, 0, width) << pos
   //   low   = base & ((1 << pos) - 1)
-  //   out   = (low | upper)[0 .. mw]
+  //   out   = low | upper[0 .. mw]
   // `pos_max` bounds the position (a non-negative published range).
   [[nodiscard]] Pin shift_window_write(const Val& base, const Pin& pos, int64_t pos_max, const Pin& view, int32_t width,
                                        const Pin& lane) {
@@ -10212,21 +10212,26 @@ private:
     auto low_dp = low.create_driver_pin(0);
     set_ubits(low_dp, mw);
 
-    auto merged = make_node(Ntype_op::Or);
-    setup_sink_by_name(merged, "as").connect_driver(low_dp);
-    setup_sink_by_name(merged, "as").connect_driver(up_dp);
-    auto merged_dp = merged.create_driver_pin(0);
-    set_ubits(merged_dp, up_mw);
-    if (up_mw <= mw) {
-      return merged_dp;
-    }
-    // A window that may reach past the base's top bit: the variable keeps its
-    // own bits only, as the masked RMW's base-width inverse mask did.
+    // The variable keeps its own bits only, as the masked RMW's base-width
+    // inverse mask did. ALWAYS, not only for a window that may reach past the
+    // base's top bit: pass.bitwidth re-derives the `upper` shift's width from
+    // the position's storage envelope (a signed W-bit position is its bit
+    // pattern read unsigned, a shift of up to 2^W - 1), not from `pos_max`, so
+    // an uncut write widened the next write's base by that envelope: the K
+    // writes `v#[i*K + n] = x_n#[i]` of one rolled body grew a K*8K-bit chain
+    // (review2 L2; 65 Kbit intermediates for a 512-bit `v` at K = 64). Cut
+    // here, the Or and every later write stay `mw` bits.
     auto keep = make_node(Ntype_op::Get_mask);
-    livehd::graph_util::connect_mask_operands(keep, merged_dp, 0, mw);
+    livehd::graph_util::connect_mask_operands(keep, up_dp, 0, mw);
     auto keep_dp = keep.create_driver_pin(0);
     set_ubits(keep_dp, mw);
-    return keep_dp;
+
+    auto merged = make_node(Ntype_op::Or);
+    setup_sink_by_name(merged, "as").connect_driver(low_dp);
+    setup_sink_by_name(merged, "as").connect_driver(keep_dp);
+    auto merged_dp = merged.create_driver_pin(0);
+    set_ubits(merged_dp, mw);
+    return merged_dp;
   }
 
   // `lane` reduced to its low `width` bits as a non-negative value (the bits a

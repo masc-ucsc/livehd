@@ -1,0 +1,18 @@
+/*
+:name: rolled_loop_index_oob_write
+:type: error
+:error: Pyrope array index 4 is outside \[0, 4\) for `arr`
+:help: iteration i = 3
+*/
+// An element WRITE past the array's extent inside a loop the default compile
+// ROLLS (compile.unroll is false). The last iteration writes arr[4]: unrolled
+// that is a constant index and upass.constprop rejects it, but the lifted body
+// only sees the index port's range, so the rolled loop compiled silently
+// (review2 D4). The roll planner's per-iteration walk reports the same error.
+pub comb rolled_loop_index_oob_write(d:U8) -> (o:U4) {
+  mut arr:[4]U4 = (0, 0, 0, 0)
+  for i in 0..<4 {
+    arr[i + 1] = d#[i..+4]   // locate_error_here
+  }
+  o = arr[0] ^ arr[3]
+}

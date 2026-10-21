@@ -1,0 +1,18 @@
+/*
+:name: rolled_loop_index_oob_break
+:type: error
+:error: Pyrope array index 4 is outside \[0, 4\) for `arr`
+*/
+// A runtime `break` keeps the loop rolled in every mode. The last iteration
+// still writes arr[4] whenever no earlier bit of `x` is set: an access under a
+// runtime condition is judged, as a loop-free `if c { arr[4] = .. }` is
+// (review2 D4: this compiled silently).
+pub comb rolled_loop_index_oob_break(d:U8, x:U4) -> (o:U4, p:U4) {
+  mut arr:[4]U4 = (0, 0, 0, 0)
+  for i in 0..<4 {
+    if x#[i] == 1 { break }
+    arr[i + 1] = d#[i..+4]   // locate_error_here
+  }
+  o = arr[0] ^ arr[3]
+  p = arr[1]
+}

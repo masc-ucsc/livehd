@@ -258,6 +258,11 @@ induction gives up on a memory whose power-on contents only the reference has
 only, so those refinements come back PROVEN-bounded. A `$readmem` image is
 externally loadable state, not an initializer: the memory starts from the
 shared array, images are never compared and never folded to their contents.
+It is still DEFINED state, so a reference image shares that array only with
+an implementation image: an implementation memory without one (uninitialized,
+`initial`, or reset) gets its own array and refutes, write port or not
+(`lec_mem_image_test`); an uninitialized reference against an implementation
+image is a refinement.
 An `ordering="none"` read that collides with a write is a don't-care on the
 reference and an unconstrained value on the implementation, so "none" refines
 "old" but not the other way around.

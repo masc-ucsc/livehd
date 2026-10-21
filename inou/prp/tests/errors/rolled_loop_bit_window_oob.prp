@@ -1,0 +1,17 @@
+/*
+:name: rolled_loop_bit_window_oob
+:type: error
+:error: bit range ending at 17 does not fit the 16-bit destination
+:help: iteration i = 3
+*/
+// A bit-window WRITE past the variable's declared storage inside a rolled
+// loop: the last iteration writes v#[13..<17] of a U16. Unrolled,
+// upass.bitwidth rejects the constant range; rolled, the runtime window was
+// silently cut to 16 bits (review2 mw5 / D4).
+pub comb rolled_loop_bit_window_oob(c:U16, d:U8) -> (o:U16) {
+  mut v:U16 = c
+  for i in 0..<4 {
+    v#[(i*4 + 1)..+4] = d#[0..<4]   // locate_error_here
+  }
+  o = v
+}

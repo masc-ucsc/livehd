@@ -11572,6 +11572,55 @@ public:
   absl::flat_hash_set<Lnast_nid> overflow;
   absl::flat_hash_set<Lnast_nid> unknown;
 
+  // ── Out-of-range probe (exact iterations only) ──
+  // An unrolled iteration has a CONSTANT index, so `arr[i + 1]` past the
+  // array's extent, or `v#[i*3 +: 3]` past v's declared storage, is a compile
+  // error there (upass.constprop / upass.bitwidth). The lifted body only sees
+  // the index port's range, and a runtime position stays unjudged, so the same
+  // loop rolled was silently accepted (review2 D4). With the index one value
+  // per run (eval_carry_ranges' exact mode) an access whose index evaluates to
+  // a constant is exactly the unrolled one; the probe records it when it is
+  // out of range and REACHABLE: not under an arm whose condition is comptime
+  // false here, nor after a comptime-taken break/continue/return. An access
+  // under a RUNTIME condition (one that reads a runtime input of the loop, or
+  // a value written under such a condition) is judged, as the unrolled `if`
+  // arm is. Any other condition this evaluator cannot decide may still be
+  // comptime where the loop unrolls (an opaque call, a tuple read, an
+  // enclosing loop's promoted index, a range this lattice keeps loose): it
+  // silences the probe for what it guards, and for the rest of the loop when
+  // it guards an exit -- a missed report, never a false one. The probe only
+  // records; it never changes a range or the evaluation itself.
+  struct Oob_access {
+    Lnast_nid   stmt;
+    std::string name;   // the array or the written variable
+    int64_t     index;  // the element index, or the bit range's end (exclusive)
+    int64_t     size;   // the array's entries, or the variable's storage bits
+    int64_t     iter;   // the loop index value of that iteration
+    bool        bits;   // a bit-range write past the storage, else an element access
+  };
+  std::vector<Oob_access> oob;
+  // `array_size`: the extent of each zero-based one-dimension array the body
+  // reads or writes (a body-local declare adds its own); `runtime`: the names
+  // entering the loop with a runtime value (inputs, a carry's runtime seed);
+  // `opaque`: names whose value may be comptime where the loop unrolls
+  // although this evaluator does not know it (promoted indices, enclosing
+  // loop-index ports).
+  void enable_probe(absl::flat_hash_map<std::string, int64_t> array_size, absl::flat_hash_set<std::string> runtime,
+                    absl::flat_hash_set<std::string> opaque) {
+    probe_      = true;
+    array_size_ = std::move(array_size);
+    runtime_    = std::move(runtime);
+    opaque_     = std::move(opaque);
+  }
+  // One iteration of the probed loop: `iter` is its index value.
+  void begin_iteration(int64_t iter) {
+    iter_         = iter;
+    live_exit_    = false;
+    dead_         = false;
+    cond_unknown_ = 0;
+    loop_unknown_ = 0;
+  }
+
   // One pass over `stmts`: `env` in, the values at its end out; every early
   // exit (break/continue) point is joined in. False when the budget ran out.
   bool run(const Lnast_nid& stmts, Env& env) {
@@ -11600,6 +11649,208 @@ private:
   absl::flat_hash_map<std::string, Lnast_nid>                           bound_defs_;
   std::vector<Env>                                                      exits_;
   int64_t                                                               budget_ = 1 << 19;  // statement evaluations
+
+  // Out-of-range probe state (enable_probe; see Oob_access).
+  bool                                     probe_ = false;
+  absl::flat_hash_map<std::string, int64_t> array_size_;
+  absl::flat_hash_set<std::string>         runtime_;             // names holding a runtime-dependent value
+  absl::flat_hash_set<std::string>         opaque_;              // names this evaluator may not know are comptime
+  absl::flat_hash_map<std::string, bool>   truth_;               // compiler temps: a comparison decided here
+  absl::flat_hash_set<Lnast_nid>           oob_seen_;            // one report per statement
+  int64_t                                  iter_         = 0;
+  bool                                     dead_         = false;  // under a comptime-false arm
+  bool                                     live_exit_    = false;  // a comptime-taken exit ended this iteration
+  bool                                     loop_done_    = false;  // a comptime-taken break/return ended the loop
+  bool                                     returned_     = false;  // ... by a return (it leaves enclosing loops too)
+  bool                                     undecided_    = false;  // an exit under an undecidable condition: stop
+  int                                      cond_unknown_ = 0;      // runtime-condition arms around this statement
+  int                                      cond_undecidable_ = 0;  // undecidable-condition arms around it
+  int                                      loop_unknown_ = 0;      // cond_unknown_ where the innermost loop starts
+
+  [[nodiscard]] bool probe_live() const {
+    return probe_ && !dead_ && !live_exit_ && !loop_done_ && !undecided_ && cond_undecidable_ == 0;
+  }
+  // A write that happens whenever this iteration runs (decided arms only).
+  [[nodiscard]] bool definite_write() const {
+    return probe_ && !dead_ && !live_exit_ && !loop_done_ && cond_unknown_ == 0 && cond_undecidable_ == 0;
+  }
+
+  enum class Cond { is_false, is_true, runtime, undecidable };
+
+  // An operand's truth where it is decided here: a literal, a compiler temp
+  // whose comparison was decided (truth_), or a name whose range is one value.
+  std::optional<bool> truth_of(const Lnast_nid& n, const Env& env) const {
+    if (n.is_invalid()) {
+      return std::nullopt;
+    }
+    if (Lnast_ntype::is_const(ln_.get_type(n))) {
+      const auto txt = ln_.get_name(n);
+      if (txt == "true" || txt == "false") {
+        return txt == "true";
+      }
+    } else if (const auto it = truth_.find(ref_name(n)); it != truth_.end()) {
+      return it->second;
+    }
+    const auto r = val(n, env);
+    if (r.is_constant()) {
+      return r.min != 0;
+    }
+    return std::nullopt;
+  }
+
+  Cond cond_of(const Lnast_nid& n, const Env& env) const {
+    if (const auto t = truth_of(n, env)) {
+      return *t ? Cond::is_true : Cond::is_false;
+    }
+    const auto name = ref_name(n);
+    if (name.empty() || opaque_.contains(name) || !runtime_.contains(name)) {
+      return Cond::undecidable;
+    }
+    return Cond::runtime;
+  }
+
+  // Taint of a (re)definition of `dst` from `ops` on a path that runs: a value
+  // computed from a runtime one, or written under a runtime condition, is
+  // runtime; from an opaque one (or a call or tuple read, or written under an
+  // undecidable condition) it is opaque. A definite write (under decided arms
+  // only) replaces the old taint; a conditional one can only add to it.
+  // `partial`: an element or field write, which keeps the rest of `dst`.
+  void taint(Lnast_ntype::Lnast_ntype_int t, const std::string& dst, const std::vector<Lnast_nid>& ops, bool partial) {
+    if (!probe_ || dead_ || live_exit_ || loop_done_) {
+      return;  // this write does not happen
+    }
+    const bool definite = !partial && definite_write();
+    const bool opaque   = Lnast_ntype::is_func_call(t) || Lnast_ntype::is_tuple_get(t) || cond_undecidable_ > 0
+                        || std::ranges::any_of(ops, [&](const Lnast_nid& o) { return opaque_.contains(ref_name(o)); });
+    const bool runtime
+        = cond_unknown_ > 0 || std::ranges::any_of(ops, [&](const Lnast_nid& o) { return runtime_.contains(ref_name(o)); });
+    if (opaque) {
+      opaque_.insert(dst);
+    } else if (definite) {
+      opaque_.erase(dst);
+    }
+    if (runtime) {
+      runtime_.insert(dst);
+    } else if (definite) {
+      runtime_.erase(dst);
+    }
+  }
+
+  // A comparison or logic op decided by its operands' ranges (probe only).
+  std::optional<bool> decide(Lnast_ntype::Lnast_ntype_int t, const std::vector<Lnast_nid>& ops, const Env& env) const {
+    using N = Lnast_ntype;
+    if (N::is_log_not(t)) {
+      const auto a = ops.size() == 1 ? truth_of(ops[0], env) : std::nullopt;
+      return a ? std::optional<bool>{!*a} : std::nullopt;
+    }
+    if (N::is_log_and(t) || N::is_log_or(t)) {
+      const bool is_and = N::is_log_and(t);
+      bool       all    = !ops.empty();
+      for (const auto& o : ops) {
+        const auto v = truth_of(o, env);
+        if (v && *v != is_and) {
+          return !is_and;  // a false operand of `and`, a true one of `or`
+        }
+        all = all && v.has_value();
+      }
+      return all ? std::optional<bool>{is_and} : std::nullopt;
+    }
+    if (ops.size() != 2 || !(N::is_eq(t) || N::is_ne(t) || N::is_lt(t) || N::is_le(t) || N::is_gt(t) || N::is_ge(t))) {
+      return std::nullopt;
+    }
+    const auto a = val(ops[0], env);
+    const auto b = val(ops[1], env);
+    if (a.is_unbounded() || b.is_unbounded()) {
+      return std::nullopt;
+    }
+    const auto lt = [](const Lnast_range& x, const Lnast_range& y) -> std::optional<bool> {
+      if (x.max < y.min) {
+        return true;
+      }
+      if (x.min >= y.max) {
+        return false;
+      }
+      return std::nullopt;
+    };
+    const auto neg = [](std::optional<bool> v) { return v ? std::optional<bool>{!*v} : std::nullopt; };
+    if (N::is_eq(t) || N::is_ne(t)) {
+      std::optional<bool> eq;
+      if (a.is_constant() && b.is_constant()) {
+        eq = a.min == b.min;
+      } else if (a.max < b.min || b.max < a.min) {
+        eq = false;
+      }
+      return N::is_eq(t) ? eq : neg(eq);
+    }
+    if (N::is_lt(t)) {
+      return lt(a, b);
+    }
+    if (N::is_ge(t)) {
+      return neg(lt(a, b));
+    }
+    if (N::is_gt(t)) {
+      return lt(b, a);
+    }
+    return neg(lt(b, a));  // le
+  }
+
+  // `v` of a constant range from a non-literal operand: the index of this
+  // iteration (a literal index is judged on every path already).
+  std::optional<int64_t> exact_index(const Lnast_nid& n, const Env& env) const {
+    if (ref_name(n).empty()) {
+      return std::nullopt;
+    }
+    const auto r = val(n, env);
+    return r.is_constant() ? std::optional<int64_t>{r.min} : std::nullopt;
+  }
+
+  void note_oob(const Lnast_nid& stmt, std::string_view name, int64_t index, int64_t size, bool bits) {
+    if (oob_seen_.insert(stmt).second) {
+      oob.push_back(Oob_access{.stmt = stmt, .name = std::string(name), .index = index, .size = size, .iter = iter_, .bits = bits});
+    }
+  }
+
+  // An element read `tuple_get(d, arr, idx)` or write `store(arr, idx, v)`.
+  void probe_element(const Lnast_nid& stmt, std::string_view arr, const Lnast_nid& idx, const Env& env) {
+    const auto it = array_size_.find(arr);
+    if (!probe_live() || it == array_size_.end()) {
+      return;
+    }
+    // A negative index is upass.bitwidth's `negative-index` (its range check
+    // sees the index port's range in the lifted body as well).
+    if (const auto v = exact_index(idx, env); v && *v >= it->second) {
+      note_oob(stmt, arr, *v, it->second, false);
+    }
+  }
+
+  // A bit write `set_mask(d, base, value, lo[, hi])` into a declared variable.
+  void probe_bits(const Lnast_nid& stmt, const std::vector<Lnast_nid>& ops, const Env& env) {
+    if (!probe_live() || ops.size() < 3) {
+      return;
+    }
+    const auto base = ref_name(ops[0]);
+    const auto it   = typed_.find(base);
+    if (base.empty() || it == typed_.end() || it->second.is_unbounded()) {
+      return;
+    }
+    std::optional<int64_t> end;
+    if (ops.size() == 3) {
+      if (const auto lo = exact_index(ops[2], env)) {
+        end = *lo + 1;
+      }
+    } else if (!ref_name(ops[2]).empty() || !ref_name(ops[3]).empty()) {
+      const auto hi = val(ops[3], env);
+      if (hi.is_constant()) {
+        end = hi.min;
+      }
+    }
+    const auto&   decl = it->second;
+    const int64_t bits = decl.min >= 0 ? (decl.max == 0 ? 0 : static_cast<int64_t>(std::bit_width(static_cast<uint64_t>(decl.max))))
+                                       : decl.get_sbits();
+    if (end && *end > bits) {
+      note_oob(stmt, base, *end, bits, true);
+    }
+  }
 
   // `pre` holds the value a path that skipped the arm keeps.
   static void join_into(Env& acc, const Env& other, const Env* pre) {
@@ -11818,6 +12069,15 @@ private:
         // A `return` leaves the loop too: what the carries hold there is a
         // value the loop's results can take, like a break's.
         exits_.push_back(env);
+        if (probe_ && !dead_ && !live_exit_ && !loop_done_ && !undecided_) {
+          if (cond_undecidable_ > 0) {
+            undecided_ = true;  // it may be comptime-taken: what follows may be unreachable
+          } else if (cond_unknown_ == loop_unknown_) {
+            live_exit_ = true;  // taken whenever this loop's iteration reaches this point
+            loop_done_ = !Lnast_ntype::is_func_continue(t);
+            returned_  = Lnast_ntype::is_func_return(t);
+          }
+        }
         continue;
       }
       if (Lnast_ntype::is_for(t)) {
@@ -11838,11 +12098,26 @@ private:
           return false;
         }
         const std::string index(ref_name(var));
+        // The probe's exits inside belong to the nested loop (a `return`
+        // leaves this one too): one is taken whenever the nested iteration
+        // reaches it when no runtime condition opened INSIDE that loop guards
+        // it. The runtime conditions around the nested loop still guard every
+        // write in it.
+        const bool saved_dead      = dead_;
+        const bool saved_exit      = live_exit_;
+        const bool saved_done      = loop_done_;
+        const bool saved_ret       = returned_;
+        const int  saved_loop_unkn = loop_unknown_;
+        dead_                      = dead_ || live_exit_ || loop_done_;
+        loop_done_                 = false;
+        returned_                  = false;
+        loop_unknown_              = cond_unknown_;
         for (int64_t x = lo.min; x <= hi.min; ++x) {
           if (--budget_ < 0) {
             return false;
           }
           env.insert_or_assign(index, Lnast_range::constant(x));
+          live_exit_      = false;
           const auto mark = exits_.size();
           if (!eval_block(body, env)) {
             return false;
@@ -11856,6 +12131,15 @@ private:
           }
           exits_.resize(mark);
         }
+        const bool nested_ret = returned_;
+        dead_                 = saved_dead;
+        live_exit_            = saved_exit;
+        loop_done_            = saved_done;
+        returned_             = saved_ret;
+        loop_unknown_         = saved_loop_unkn;
+        if (nested_ret && probe_live() && cond_unknown_ == loop_unknown_) {
+          live_exit_ = loop_done_ = returned_ = true;
+        }
         continue;
       }
       if (Lnast_ntype::is_while(t) || Lnast_ntype::is_rolled_for(t)) {
@@ -11864,19 +12148,53 @@ private:
       if (Lnast_ntype::is_if(t) || Lnast_ntype::is_unique_if(t)) {
         // (cond, stmts, cond, stmts, …, [stmts]): every arm may run; without a
         // trailing else the pre-if values survive too.
-        int  conds = 0;
-        int  arms  = 0;
-        Env  merged;
-        bool first = true;
+        int       conds = 0;
+        int       arms  = 0;
+        Env       merged;
+        bool      first = true;
+        Lnast_nid cond;
+        // Probe: an arm after a comptime-true one, or under a comptime-false
+        // condition, is dead. An arm is reached only when every condition
+        // before it is false, so it is no more decided than they are (an
+        // `else` is the arm whose own condition is true).
+        bool taken = false;
+        auto rest  = Cond::is_false;  // the least decided live condition before this arm
         for (auto c : ln_.children(stmt)) {
           if (!Lnast_ntype::is_stmts(ln_.get_type(c))) {
             ++conds;
+            cond = c;
             continue;
           }
           ++arms;
-          Env arm = env;
-          if (!eval_block(c, arm)) {
+          // `own`: this arm's condition (an else arm's is true); `guard`: what
+          // reaching its body takes, `own` and every live condition before it
+          // false. A comptime-true `own` shadows every later arm, whatever
+          // the earlier conditions are.
+          const Cond own   = !probe_ || conds < arms ? Cond::is_true : cond_of(cond, env);
+          Cond       guard = own;
+          if (own == Cond::is_true || own == Cond::runtime) {
+            guard = rest == Cond::undecidable ? Cond::undecidable : (rest == Cond::runtime ? Cond::runtime : own);
+          }
+          const bool saved_dead = dead_;
+          const int  saved_unk  = cond_unknown_;
+          const int  saved_und  = cond_undecidable_;
+          const bool arm_dead   = taken || own == Cond::is_false;
+          dead_                 = dead_ || arm_dead;
+          cond_unknown_ += guard == Cond::runtime ? 1 : 0;
+          cond_undecidable_ += guard == Cond::undecidable ? 1 : 0;
+          Env        arm = env;
+          const bool ok  = eval_block(c, arm);
+          dead_             = saved_dead;
+          cond_unknown_     = saved_unk;
+          cond_undecidable_ = saved_und;
+          if (!ok) {
             return false;
+          }
+          if (!arm_dead) {
+            taken = taken || own == Cond::is_true;
+            if (own == Cond::undecidable || (own == Cond::runtime && rest != Cond::undecidable)) {
+              rest = own;
+            }
           }
           if (first) {
             merged = std::move(arm);
@@ -11901,6 +12219,26 @@ private:
       std::vector<Lnast_nid> ops;
       for (auto c = ln_.get_sibling_next(dst_nid); !c.is_invalid(); c = ln_.get_sibling_next(c)) {
         ops.push_back(c);
+      }
+      if (probe_ && !Lnast_ntype::is_declare(t) && !Lnast_ntype::is_type_spec(t)) {
+        truth_.erase(dst);  // redefined: an older decision is stale
+        const bool partial = Lnast_ntype::is_store(t) && (ops.size() > 1 || Bundle::get_first_level(dst) != dst);
+        taint(t, partial ? std::string(Bundle::get_first_level(dst)) : dst, ops, partial);
+      }
+      if (Lnast_ntype::is_declare(t) && probe_ && !ops.empty() && Lnast_ntype::is_comp_type_array(ln_.get_type(ops[0]))) {
+        // A body-local `[N]T` array (zero-based, one dimension): its extent.
+        const auto elem = ln_.get_first_child(ops[0]);
+        const auto dim  = elem.is_invalid() ? elem : ln_.get_sibling_next(elem);
+        if (!elem.is_invalid() && !Lnast_ntype::is_comp_type_array(ln_.get_type(elem)) && !dim.is_invalid()
+            && Lnast_ntype::is_const(ln_.get_type(dim))) {
+          if (const auto lanes = upass::array_dim_lanes(ln_.get_name(dim))) {
+            array_size_.insert_or_assign(dst, *lanes);
+          } else {
+            array_size_.erase(dst);
+          }
+        } else {
+          array_size_.erase(dst);
+        }
       }
       if (Lnast_ntype::is_declare(t) || Lnast_ntype::is_type_spec(t)) {
         // declare(var, prim_type_int(max, min), mode[, value]): the type a
@@ -11935,12 +12273,20 @@ private:
         continue;
       }
       if (Lnast_ntype::is_store(t)) {
+        if (ops.size() == 1 && probe_ && definite_write()) {
+          if (const auto d = truth_of(ops[0], env)) {
+            truth_.insert_or_assign(dst, *d);  // `const ok = i < 3`: the copy keeps the decision
+          }
+        }
         if (ops.size() == 1) {
           const auto r = val(ops[0], env);
           judge(stmt, dst, r, ref_name(ops[0]));
           env.insert_or_assign(dst, r);
         } else {
           const std::string base(Bundle::get_first_level(dst));
+          if (ops.size() == 2 && base == dst) {
+            probe_element(stmt, dst, ops[0], env);  // store(arr, idx, v)
+          }
           judge(stmt, base, val(ops.back(), env), ref_name(ops.back()), /*element=*/true);
           env.insert_or_assign(base, Lnast_range::make_unbounded());
         }
@@ -11975,6 +12321,7 @@ private:
         continue;
       }
       if (Lnast_ntype::is_tuple_get(t) && ops.size() == 2) {
+        probe_element(stmt, ref_name(ops[0]), ops[1], env);  // tuple_get(d, arr, idx)
         // An element of a typed one-dimensional array: its element type bounds
         // it, as upass.bitwidth's process_tuple_get does (every element store
         // is held to that type).
@@ -11995,6 +12342,13 @@ private:
       if (Lnast::is_tmp(dst) && (Lnast_ntype::is_plus(t) || Lnast_ntype::is_minus(t))) {
         bound_defs_.insert_or_assign(dst, stmt);
       }
+      if (probe_) {
+        if (Lnast_ntype::is_set_mask(t)) {
+          probe_bits(stmt, ops, env);
+        } else if (const auto d = decide(t, ops, env); d && (Lnast::is_tmp(dst) || definite_write())) {
+          truth_.insert_or_assign(dst, *d);  // a temp has one definition; a variable keeps a definite one
+        }
+      }
       env.insert_or_assign(dst, eval_op(t, ops, env));
     }
     return true;
@@ -12006,6 +12360,17 @@ struct Carry_ranges {
   absl::flat_hash_map<std::string, Lnast_range> carry_in;    // the union of the values entering an iteration
   absl::flat_hash_map<std::string, Lnast_range> carry_out;   // every value the loop's result can take
   bool rolled_stricter = false;  // one walk over carry_in rejects a typed write no single iteration does
+  // Out-of-range accesses an unrolled iteration would reject (exact mode only;
+  // Loop_range_eval::Oob_access). Valid even when `ok` is false: each was seen
+  // on a reachable path at an exact index before the evaluation gave up.
+  std::vector<Loop_range_eval::Oob_access> oob;
+};
+
+// What the out-of-range probe needs from the plan (Loop_range_eval::enable_probe).
+struct Loop_probe_seeds {
+  absl::flat_hash_map<std::string, int64_t> array_size;
+  absl::flat_hash_set<std::string>         runtime;
+  absl::flat_hash_set<std::string>         opaque;
 };
 
 // Iterate the body over its carries: exactly, one index value per iteration,
@@ -12016,7 +12381,8 @@ struct Carry_ranges {
 Carry_ranges eval_carry_ranges(const Lnast& ln, const Lnast_nid& body, const std::string& ivar, int64_t first, int64_t step,
                                uint64_t count, const Loop_range_eval::Env& base, const Loop_range_eval::Env& carry_init,
                                const Loop_range_eval::Env& typed, const Loop_range_eval::Env& elem_typed,
-                               const Loop_range_eval::Callee_out& callee_out, bool early_exit) {
+                               const Loop_range_eval::Callee_out& callee_out, bool early_exit,
+                               const Loop_probe_seeds* probe = nullptr) {
   Carry_ranges       out;
   Loop_range_eval    per_iter(ln, typed, elem_typed, callee_out);
   const int64_t      last    = static_cast<int64_t>(static_cast<__int128>(first) + static_cast<__int128>(count - 1) * step);
@@ -12047,16 +12413,20 @@ Carry_ranges eval_carry_ranges(const Lnast& ln, const Lnast_nid& body, const std
   // iteration k's value, so the last iteration's carry-out alone is no bound.
   Loop_range_eval::Env all_out;
   if (count <= kExactIterations) {
+    if (probe != nullptr) {
+      per_iter.enable_probe(probe->array_size, probe->runtime, probe->opaque);
+    }
     for (uint64_t k = 0; k < count; ++k) {
       join_in(current);
-      auto env = base;
-      env.insert_or_assign(
-          ivar,
-          Lnast_range::constant(static_cast<int64_t>(static_cast<__int128>(first) + static_cast<__int128>(k) * step)));
+      auto          env   = base;
+      const int64_t index = static_cast<int64_t>(static_cast<__int128>(first) + static_cast<__int128>(k) * step);
+      env.insert_or_assign(ivar, Lnast_range::constant(index));
       for (const auto& [c, r] : current) {
         env.insert_or_assign(c, r);
       }
+      per_iter.begin_iteration(index);
       if (!per_iter.run(body, env)) {
+        out.oob = std::move(per_iter.oob);
         return out;
       }
       carry_out(env);
@@ -12088,6 +12458,7 @@ Carry_ranges eval_carry_ranges(const Lnast& ln, const Lnast_nid& body, const std
       return out;
     }
   }
+  out.oob = std::move(per_iter.oob);
   // One walk over the unions, as the lifted body will judge it.
   Loop_range_eval rolled(ln, typed, elem_typed, callee_out);
   auto            env = base;
@@ -12944,6 +13315,7 @@ bool uPass_runner::plan_loop_roll(const Lnast_nid& body_stmts, const std::string
       && std::ranges::any_of(out.carries, [&](const std::string& n) { return out.types.at(n).kind != Io_kind::boolean; })) {
     return refuse("rolling would hide per-iteration range/overflow diagnostics on a bounded carry");
   }
+  std::vector<Loop_range_eval::Oob_access> oob_found;  // reported once the roll is decided (below)
   {
     // The overflow rule must judge the rolled loop as the unrolled one would
     // (compile.unroll must not change what compiles): seed the lifted body with
@@ -13059,8 +13431,54 @@ bool uPass_runner::plan_loop_roll(const Lnast_nid& body_stmts, const std::string
       }
       return std::nullopt;
     };
-    const auto cr
-        = eval_carry_ranges(ln, body_stmts, ivar, lo, step, count, base, carry_init, typed, elem_typed, callee_out, out.has_loop_control);
+    // The out-of-range probe (Loop_range_eval::Oob_access): the extent of
+    // each zero-based one-dimension array crossing the boundary (an index
+    // range or enum dimension rebases its index, so it is left alone), the
+    // names entering with a runtime value, and the one-value-per-occurrence
+    // indices (promoted, enclosing loop-index ports) whose value the copy
+    // knows but this evaluation does not.
+    Loop_probe_seeds probe;
+    for (const auto& [n, sp] : out.types) {
+      if (sp.array_size <= 0) {
+        continue;
+      }
+      const auto act = out.actual_names.find(n);
+      const auto b   = act == out.actual_names.end() ? nullptr : symbol_table_.get_bundle(act->second);
+      if (b && std::ranges::none_of(b->get_attrs(), [](const auto& kv) {
+            return std::string_view(kv.first).starts_with("__array_n");
+          })) {
+        probe.array_size.emplace(n, sp.array_size);
+      }
+    }
+    for (const auto& n : out.invariants) {
+      if (promoted.contains(n) || out.index_ports.contains(n)) {
+        probe.opaque.emplace(n);
+      } else if (const auto it = base.find(n); it == base.end() || !it->second.is_constant()) {
+        probe.runtime.emplace(n);
+      }
+    }
+    for (const auto& [n, r] : carry_init) {
+      if (!r.is_constant()) {
+        probe.runtime.emplace(n);
+      }
+    }
+    auto cr = eval_carry_ranges(ln,
+                                body_stmts,
+                                ivar,
+                                lo,
+                                step,
+                                count,
+                                base,
+                                carry_init,
+                                typed,
+                                elem_typed,
+                                callee_out,
+                                out.has_loop_control,
+                                // Verilog keeps its own out-of-range rules (a
+                                // write dropped, a read X), and a template's
+                                // dims fold in its specializations.
+                                loop_oob_probe_off_ || ln.is_verilog_origin() || ln.is_template() ? nullptr : &probe);
+    oob_found = std::move(cr.oob);
     if (!out.has_loop_control) {
       if (cr.ok && cr.rolled_stricter) {
         return refuse("one walk of the lifted body would judge a typed write stricter than every iteration does");
@@ -13134,6 +13552,32 @@ bool uPass_runner::plan_loop_roll(const Lnast_nid& body_stmts, const std::string
     if (n.ends_with(kCarryInSuffix) || n.ends_with(kCarryOutSuffix) || n == kLoopValid || n == kLoopExec || n == kLoopNextActive) {
       return refuse(std::format("variable `{}` collides with a reserved loop port name", n));
     }
+  }
+  // The loop rolls: report what its unrolled iterations would have rejected,
+  // with the unrolled diagnostics (upass.constprop's element index,
+  // upass.bitwidth's bit range), once per access.
+  for (const auto& a : oob_found) {
+    auto       where = ln.span_of_nearest(a.stmt);
+    const auto shown = upass::Lnast_manager::user_name(a.name);
+    const auto at    = std::format("rolled loop `for {}`, iteration {} = {}", upass::Lnast_manager::user_name(ivar),
+                                upass::Lnast_manager::user_name(ivar), a.iter);
+    const auto msg   = a.bits ? std::format("bit range ending at {} does not fit the {}-bit destination", a.index, a.size)
+                              : std::format("Pyrope array index {} is outside [0, {}) for `{}`", a.index, a.size, shown);
+    if (!loop_oob_reported_
+             .insert(std::format("{}@{}:{}:{}", msg, where.file, where.start_line.value_or(0), where.start_col.value_or(0)))
+             .second) {
+      continue;
+    }
+    livehd::diag::sink().emit(livehd::diag::Diagnostic{
+        .severity = livehd::diag::Severity::error,
+        .code     = a.bits ? "bit-range-overflow" : "array-index-out-of-range",
+        .category = a.bits ? "bitwidth" : "type",
+        .pass     = "upass.runner",
+        .message  = msg,
+        .span     = std::move(where),
+        .hint     = a.bits ? std::format("keep the selection within the destination storage ({})", at)
+                           : std::format("use an index within the array's declared extent ({})", at),
+    });
   }
   return true;
 }
@@ -13686,7 +14130,12 @@ void uPass_runner::lift_or_share_loop(const Lnast_nid& body_stmts, Loop_roll_pla
       const auto     hull_lo = std::min(lo, def.lo);
       const auto     hull_hi = std::max(hi, def.hi);
       Loop_roll_plan wide;
-      if (plan_loop_roll(body_stmts, plan.ivar, hull_lo, hull_hi, plan.step, wide) && signature_of(wide) == sig
+      // The hull may hold indices neither occurrence runs: each occurrence's
+      // own plan already probed its accesses (Loop_range_eval::Oob_access).
+      loop_oob_probe_off_ = true;
+      const bool wide_ok  = plan_loop_roll(body_stmts, plan.ivar, hull_lo, hull_hi, plan.step, wide);
+      loop_oob_probe_off_ = false;
+      if (wide_ok && signature_of(wide) == sig
           && ranges_within(def.plan.carry_in_ranges, wide.carry_in_ranges) && ranges_within(plan.carry_in_ranges, wide.carry_in_ranges)
           && ranges_within(def.plan.invariant_ranges, wide.invariant_ranges)
           && ranges_within(plan.invariant_ranges, wide.invariant_ranges)) {

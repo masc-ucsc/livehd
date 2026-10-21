@@ -442,6 +442,108 @@ TEST(Reassoc, NestedGuardsRewriteFromTheInside) {
   EXPECT_EQ(d.truth(2), before);
 }
 
+// Reassoc_trees::guarded (pass.usyn) merges a chain only when every link has a
+// guard operand -- Mux(c, x, id) / Mux(c, id, x), id the operator's identity --
+// whether guard_terms just made it (from Mux(s, acc, acc OP x)) or cprop's
+// guard_accumulation did (acc OP Mux(s, id, x)). A plain chain, or a chain
+// with one unguarded link, stays exactly as written.
+TEST(Reassoc, GuardedTreesMergeOnlyGuardedAccumulatorChains) {
+  const auto guarded_run = [](Design& d) {
+    Reassoc_stats stats;
+    EXPECT_TRUE(reassociate_chains(d.graph.get(), stats, nullptr, {}, Reassoc_trees::guarded));
+    return stats;
+  };
+  const std::vector<In> ins{{"a", 2, false},
+                            {"s0", 1, false},
+                            {"s1", 1, false},
+                            {"s2", 1, false},
+                            {"s3", 1, false},
+                            {"x0", 2, false},
+                            {"x1", 2, false},
+                            {"x2", 2, false},
+                            {"x3", 2, false}};
+  for (const auto op : {Ntype_op::Or, Ntype_op::And, Ntype_op::Xor}) {
+    SCOPED_TRACE(static_cast<int>(op));
+    {
+      // Mux(s_k, acc, acc OP x_k): guard_terms rewrites, then the chain merges.
+      Design d(ins, 2);
+      auto   acc = d.in("a");
+      for (int k = 0; k < 4; ++k) {
+        const auto term = d.cell(op, {acc, d.in("x" + std::to_string(k))}, 2).create_driver_pin(0);
+        acc             = d.mux(d.in("s" + std::to_string(k)), acc, term, 2).create_driver_pin(0);
+      }
+      d.output(acc.get_master_node());
+      const auto before = d.truth(2);
+      const auto stats  = guarded_run(d);
+      EXPECT_EQ(stats.guarded, 4U);
+      EXPECT_EQ(stats.absorbed, 3U);
+      EXPECT_EQ(d.count(op), 1U);
+      EXPECT_EQ(d.arity(d.root()), 5U);
+      EXPECT_EQ(d.truth(2), before);
+    }
+    // acc OP Mux(s_k, id, x_k), cprop's spelling; the And identity as -1 and
+    // as the all-ones value at the guard's width.
+    for (const int64_t and_id : {int64_t{-1}, int64_t{3}}) {
+      Design     d(ins, 2);
+      const auto id  = gu::create_const(*d.graph, *Dlop::create_integer(op == Ntype_op::And ? and_id : 0));
+      auto       acc = d.in("a");
+      for (int k = 0; k < 4; ++k) {
+        const auto guard = d.mux(d.in("s" + std::to_string(k)), id, d.in("x" + std::to_string(k)), 2).create_driver_pin(0);
+        acc              = d.cell(op, {acc, guard}, 2).create_driver_pin(0);
+      }
+      d.output(acc.get_master_node());
+      const auto before = d.truth(2);
+      const auto stats  = guarded_run(d);
+      EXPECT_EQ(stats.absorbed, 3U);
+      EXPECT_EQ(d.count(op), 1U);
+      EXPECT_EQ(d.arity(d.root()), 5U);
+      EXPECT_EQ(d.truth(2), before);
+    }
+    {
+      // A plain `acc OP= x_k` chain: kept (Reassoc_trees::all merges it).
+      Design d(ins, 2);
+      auto   acc = d.in("a");
+      for (int k = 0; k < 4; ++k) {
+        acc = d.cell(op, {acc, d.in("x" + std::to_string(k))}, 2).create_driver_pin(0);
+      }
+      d.output(acc.get_master_node());
+      const auto before = d.truth(2);
+      EXPECT_EQ(guarded_run(d).absorbed, 0U);
+      EXPECT_EQ(d.count(op), 4U);
+      EXPECT_EQ(d.truth(2), before);
+    }
+    {
+      // Three guarded links and one plain one: the whole chain is kept.
+      Design     d(ins, 2);
+      const auto id  = gu::create_const(*d.graph, *Dlop::create_integer(op == Ntype_op::And ? -1 : 0));
+      auto       acc = d.in("a");
+      for (int k = 0; k < 4; ++k) {
+        const auto x = d.in("x" + std::to_string(k));
+        const auto t = k == 2 ? x : d.mux(d.in("s" + std::to_string(k)), id, x, 2).create_driver_pin(0);
+        acc          = d.cell(op, {acc, t}, 2).create_driver_pin(0);
+      }
+      d.output(acc.get_master_node());
+      const auto before = d.truth(2);
+      EXPECT_EQ(guarded_run(d).absorbed, 0U);
+      EXPECT_EQ(d.count(op), 4U);
+      EXPECT_EQ(d.truth(2), before);
+    }
+  }
+  {
+    // A Mux whose constant arm is not the operator's identity is no guard.
+    Design     d(ins, 2);
+    const auto one = gu::create_const(*d.graph, *Dlop::create_integer(1));
+    auto       acc = d.in("a");
+    for (int k = 0; k < 4; ++k) {
+      const auto t = d.mux(d.in("s" + std::to_string(k)), one, d.in("x" + std::to_string(k)), 2).create_driver_pin(0);
+      acc          = d.cell(Ntype_op::Or, {acc, t}, 2).create_driver_pin(0);
+    }
+    d.output(acc.get_master_node());
+    EXPECT_EQ(guarded_run(d).absorbed, 0U);
+    EXPECT_EQ(d.count(Ntype_op::Or), 4U);
+  }
+}
+
 // prepare_design scopes the merge to the cells a loop expansion minted: a
 // source tree outside the scope keeps its shape, and a link merges only into
 // an in-scope consumer.

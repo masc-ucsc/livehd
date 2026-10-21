@@ -291,7 +291,10 @@ ports) and the loop becomes a `rolled_for` node that upass.tolg lowers to a
   unroll).
 - **Bit writes.** `v#[p +: w] = x` (and an array element `a[i] = x`) at a
   loop-affine `p` lowers to
-  `(v & ((1 << p) - 1)) | (set_mask(v >> p, x, 0, w) << p)`, which cprop folds
+  `(v & ((1 << p) - 1)) | (set_mask(v >> p, x, 0, w) << p)[0 .. |v|]` (the
+  shift always cut to v's width: pass.bitwidth sizes it by p's storage
+  envelope, so uncut each write widened the next one's base and K writes per
+  body grew a K*8K-bit chain), which cprop folds
   to the slices `v[p + w ..]`, `x`, `v[0 .. p]` once `p` is constant (the
   masked RMW `(v & ~(m << p)) | ((x << p) & (m << p))` does not fold: a
   word-wide And with a one-hole mask stays per write). A data-dependent `p`
@@ -323,6 +326,22 @@ ports) and the loop becomes a `rolled_for` node that upass.tolg lowers to a
   (`Loop_roll_plan::tuple_invariants`, `constant_field_reads`). A single-output
   handle used to cross as a scalar and leave `s.sel` undriven in the body; a
   multi-output one declined the roll and silently unrolled.
+- **Out-of-range accesses.** An unrolled iteration indexes with a constant,
+  so `arr[i + 1]` past the array's extent or `v#[i*3 +: 3]` past v's declared
+  storage is a compile error there; the lifted body sees only the index
+  port's range. The roll planner's exact per-iteration walk
+  (`eval_carry_ranges`, loops of at most 4096 iterations) therefore probes
+  every element read/write of a zero-based one-dimension array and every bit
+  write into a declared variable whose index evaluates to a constant, and
+  reports the unrolled diagnostic (`array-index-out-of-range`,
+  `bit-range-overflow`, the iteration in the hint) when the access is
+  reachable: arms whose condition is comptime false here, and code after a
+  comptime-taken `break`/`continue`/`return`, are skipped; an access under a
+  runtime condition (one reading a runtime input, or written under one) is
+  judged, as the unrolled `if` arm is. A condition the walk cannot decide but
+  that may be comptime once unrolled (a call, a tuple read, a promoted index)
+  silences the probe for what it guards -- a missed report, never a false one
+  (`Loop_range_eval::Oob_access`).
 - **Result ranges.** The values a rolled loop produces are bound in the
   hidden payload, which the plugins do not walk, so each result's range is
   published by the runner: every value the loop can leave with

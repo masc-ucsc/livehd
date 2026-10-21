@@ -237,4 +237,111 @@ TEST(DesignPrepare, ClockExpansionRefusalDiscardsPrivateCopyAndPreservesSource) 
   EXPECT_EQ(graph->get_output_pin("gclk").get_driver_pin(), output);
 }
 
+// A carried compact loop of 8 iterations, `acc = acc | t_i` with t_i =
+// Mux(s ^ i, 0, x ^ i) when `guarded` (the shape cprop's guard_accumulation
+// leaves in a lifted body), else t_i = x ^ i. Expanded, it is one Or link per
+// iteration. Loop_reassoc::all merges either chain into one n-ary Or;
+// Loop_reassoc::guarded (pass.usyn) merges only the guarded one; ::none keeps
+// both. The source graphs never change.
+TEST(DesignPrepare, LoopReassocMergesGuardedChainsForGuardedAndEveryChainForAll) {
+  namespace gu = graph_util;
+  struct Loop_design {
+    hhds::GraphLibrary           library;
+    std::shared_ptr<hhds::Graph> top, body;
+    explicit Loop_design(bool guarded) {
+      auto bio = library.create_io("body");
+      bio->add_input("acc", 1);
+      bio->add_input("idx", 2);
+      bio->add_input("s", 3);
+      bio->add_input("x", 4);
+      bio->add_output("acc_out", 5);
+      for (auto name : {"acc", "idx", "s", "x", "acc_out"}) {
+        bio->set_bits(name, 4);
+        bio->set_unsign(name, true);
+      }
+      body = bio->create_graph();
+      for (auto name : {"acc", "idx", "s", "x"}) {
+        gu::set_ubits(body->get_input_pin(name), 4);
+      }
+      const auto op2 = [&](Ntype_op op, hhds::Pin_class a, hhds::Pin_class b) {
+        auto node = gu::create_typed_node(*body, op);
+        a.connect_sink(gu::setup_sink_pid(node, 0));
+        b.connect_sink(gu::setup_sink_pid(node, 0));
+        gu::set_color(node, 1);  // colored, as after pass.color: cprop does not flatten it
+        auto out = node.create_driver_pin(0);
+        gu::set_ubits(out, 4);
+        return out;
+      };
+      auto term = op2(Ntype_op::Xor, body->get_input_pin("x"), body->get_input_pin("idx"));
+      if (guarded) {
+        auto sel   = op2(Ntype_op::Xor, body->get_input_pin("s"), body->get_input_pin("idx"));
+        auto guard = gu::create_typed_node(*body, Ntype_op::Mux);
+        gu::set_color(guard, 1);
+        sel.connect_sink(gu::setup_sink_pid(guard, 0));
+        gu::create_const(*body, *Dlop::create_integer(0)).connect_sink(gu::setup_sink_pid(guard, 1));
+        term.connect_sink(gu::setup_sink_pid(guard, 2));
+        term = guard.create_driver_pin(0);
+        gu::set_ubits(term, 4);
+      }
+      op2(Ntype_op::Or, body->get_input_pin("acc"), term).connect_sink(body->get_output_pin("acc_out"));
+
+      auto tio = library.create_io("top");
+      tio->add_input("s", 1);
+      tio->add_input("x", 2);
+      tio->add_output("y", 3);
+      for (auto name : {"s", "x", "y"}) {
+        tio->set_bits(name, 4);
+        tio->set_unsign(name, true);
+      }
+      top = tio->create_graph();
+      gu::set_ubits(top->get_input_pin("s"), 4);
+      gu::set_ubits(top->get_input_pin("x"), 4);
+      hhds::Subnode_loop loop;
+      loop.first       = 0;
+      loop.step        = 1;
+      loop.count       = 8;
+      loop.index_input = 2;
+      auto inst        = gu::create_typed_node(*top, Ntype_op::Sub);
+      inst.set_subnode(bio, loop);
+      gu::set_color(inst, 1);
+      gu::create_const(*top, *Dlop::create_integer(0)).connect_sink(gu::setup_sink_pid(inst, 1));
+      top->get_input_pin("s").connect_sink(gu::setup_sink_pid(inst, 3));
+      top->get_input_pin("x").connect_sink(gu::setup_sink_pid(inst, 4));
+      auto out = inst.create_driver_pin(5);
+      gu::set_ubits(out, 4);
+      out.connect_sink(gu::setup_sink_pid(inst, 1));  // the carry
+      out.connect_sink(top->get_output_pin("y"));
+    }
+  };
+  const auto ors = [](const hhds::Graph& g) {
+    size_t n = 0;
+    for (const auto node : g.body().nodes()) {
+      n += gu::type_op_of(node) == Ntype_op::Or ? 1 : 0;
+    }
+    return n;
+  };
+  for (const bool guarded : {true, false}) {
+    for (const auto mode : {Loop_reassoc::none, Loop_reassoc::guarded, Loop_reassoc::all}) {
+      SCOPED_TRACE(std::string(guarded ? "guarded" : "plain") + " mode " + std::to_string(static_cast<int>(mode)));
+      Loop_design      d(guarded);
+      const std::array sources{d.top};
+      auto             prepared = prepare_design(sources, true, "pass.usyn", nullptr, false, mode);
+      ASSERT_TRUE(prepared);
+      EXPECT_EQ(prepared->loops.expanded, 1U);
+      const bool merge = mode == Loop_reassoc::all || (mode == Loop_reassoc::guarded && guarded);
+      const auto links = ors(*prepared->roots[0]);
+      EXPECT_GE(links, 1U);
+      if (merge) {
+        EXPECT_EQ(links, 1U);
+        EXPECT_GE(prepared->reassoc.absorbed, 6U);
+      } else {
+        EXPECT_GE(links, 7U);  // one link per iteration (the first may fold into its constant carry-in)
+        EXPECT_EQ(prepared->reassoc.absorbed, 0U);
+      }
+      EXPECT_EQ(ors(*d.top), 0U);   // the source keeps its compact loop
+      EXPECT_EQ(ors(*d.body), 1U);
+    }
+  }
+}
+
 }  // namespace livehd::synth

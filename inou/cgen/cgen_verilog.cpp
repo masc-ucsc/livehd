@@ -144,6 +144,28 @@ std::string const_to_verilog(const C& c, int width, bool unsign) {
     }
     return absl::StrCat(width, unsign ? "'h" : "'sh", absl::Hex(value));
   }
+  // Past 64 bits a NON-NEGATIVE known value is still exact in hex: the zero
+  // extension a sized literal gets IS that value's extension. Only the value's
+  // own bits are spelled (cut at `width`, as the bit spelling truncates), so the
+  // text is O(value) instead of O(width). The bit spelling made a small
+  // constant in a wide context cost its whole context width: a rolled loop's
+  // runtime-position bit write `(1 << pos) - 1` sized its `1` at the mask width
+  // on every write, K writes of an O(K)-bit literal (quadratic Verilog, 17 MB
+  // for an 8-iteration loop writing 1024 bits per iteration).
+  if (!c.has_unknowns() && !c.is_negative()) {
+    const int   nbits = std::min(width, std::max(1, static_cast<int>(c.get_signed_bits()) - 1));
+    std::string hex;
+    hex.reserve(static_cast<size_t>((nbits + 3) / 4));
+    for (int d = (nbits + 3) / 4 - 1; d >= 0; --d) {
+      int nibble = 0;
+      for (int b = 3; b >= 0; --b) {
+        const int pos = 4 * d + b;
+        nibble        = (nibble << 1) | ((pos < nbits && c.bit_test(pos)) ? 1 : 0);
+      }
+      hex.push_back("0123456789abcdef"[nibble]);
+    }
+    return absl::StrCat(width, unsign ? "'h" : "'sh", hex);
+  }
   std::string bits;
   bits.reserve(static_cast<size_t>(width));
   const int  source_bits = std::max(1, static_cast<int>(c.get_signed_bits()));

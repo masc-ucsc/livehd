@@ -691,6 +691,17 @@ sh_test(
     tags = ["no-sandbox"],
 )
 
+# A reference `$readmem` image is defined (externally loaded) power-on state:
+# it pairs only with an implementation image, so an uninitialized, initialized
+# or reset implementation memory refutes; the reverse is a refinement.
+sh_test(
+    name = "lec_mem_image_test",
+    size = "small",
+    srcs = ["tests/lec_mem_image_test.sh"],
+    data = ["//lhd"],
+    tags = ["no-sandbox"],
+)
+
 # Small memories reach cvc5 as per-entry bit-vectors (array_blast.hpp): a
 # two-lane 4x8 design with unknown write addresses finishes BMC bound 2 well
 # inside a 15 s budget (it took ~21 s, and bound 3 timed out).

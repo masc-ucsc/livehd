@@ -1,0 +1,70 @@
+/*
+:name: rolled_loop_index_guarded
+:type: compile
+*/
+// Rolled loops whose index COULD leave the array at some iteration but never
+// does on a reachable path: the roll planner's out-of-range probe
+// (Loop_range_eval::Oob_access) must not report any of them, as the unrolled
+// iterations would not. Each loop rolls (compile.unroll is false).
+pub comb rolled_loop_index_guarded(d:U8, x:U8) -> (o:U4, p:U4, q:U4, r:U4, s:U4, t:U8) {
+  // A comptime-false arm: i + 1 = 4 only where `i < 3` is false.
+  mut a:[4]U4 = (0, 0, 0, 0)
+  for i in 0..<4 {
+    if i < 3 {
+      a[i + 1] = d#[i..+4]
+    }
+  }
+  o = a[0] ^ a[3]
+
+  // An elif whose comptime-true condition shadows the else arm, after a
+  // runtime first arm.
+  mut b:[4]U4 = (0, 0, 0, 0)
+  for i in 0..<4 {
+    if x#[i] == 1 {
+      b[0] = 1
+    } elif i == 3 {
+      b[0] = 2
+    } else {
+      b[i + 1] = d#[i..+4]
+    }
+  }
+  p = b[0] ^ b[3]
+
+  // A comptime break ends the loop before arr[4]; a runtime break first.
+  mut c:[4]U4 = (0, 0, 0, 0)
+  for i in 0..<8 {
+    if x#[i] == 1 { break }
+    if i == 4 { break }
+    c[i] = d#[i..+4]
+  }
+  q = c[0] ^ c[3]
+
+  // A comptime continue skips the out-of-range iterations.
+  mut e:[4]U4 = (0, 0, 0, 0)
+  for i in 0..<6 {
+    if x#[i] == 1 { break }
+    if i >= 4 { continue }
+    e[i] = d#[i..+4]
+  }
+  r = e[0] ^ e[3]
+
+  // The decision rides a named constant, and a runtime term joins it.
+  mut f:[4]U4 = (0, 0, 0, 0)
+  for i in 0..<4 {
+    const ok = i < 3
+    if ok and x#[i] == 1 {
+      f[i + 1] = d#[i..+4]
+    }
+  }
+  s = f[0] ^ f[3]
+
+  // A guarded bit window: v#[6..<9] and v#[9..<12] only where `i < 2` is
+  // false.
+  mut v:U8 = 0
+  for i in 0..<4 {
+    if i < 2 {
+      v#[i*3..+3] = d#[0..<3]
+    }
+  }
+  t = v
+}

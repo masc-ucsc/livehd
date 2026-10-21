@@ -98,8 +98,15 @@ Remaining native synthesis work is tracked in [2u-usyn](../../todo/livehd/2u-usy
    blaster's truncate/extend semantics, after first moving an expanded
    `if c { acc |= x }` guard onto its term (cprop's rule, for links that share
    a region); one O(V + E) pass. The blaster lowers an n-ary And/Or/Xor as a
-   balanced pairwise tree. `pass.usyn` keeps the chains: its XAG flow measured
-   neutral to worse on balanced loop chains (lhdtrack `br_arb_lru` +8% delay).
+   balanced pairwise tree. `pass.usyn` merges only the guarded-accumulation
+   chains (`Reassoc_trees::guarded`: every link ORs/XORs/ANDs in a guard
+   `Mux(c, x, identity)`) and keeps every other chain: its XAG flow measured
+   neutral to worse on balanced plain loop chains (lhdtrack `br_arb_lru` +8%
+   delay), but maps a guarded chain linearly once the guard moved onto its
+   term (asap7 at 400 ps: 128 guarded 8-bit ORs/ANDs/XORs 503 ps as the chain,
+   280 ps merged; 386 ps as the MUX chain before the guard rule; corpus of 47
+   lhdtrack loop designs geomean area +0.1%, delay -0.1%, loop-free designs
+   byte-identical since only expansion-minted cells are in scope).
    `--set pass.abc.reassoc=false` hands ABC the chains as expanded (A/B
    runs; the region cache compares the prepared bodies, so each setting reuses
    only its own rows), and `--stats` reports what merged on the

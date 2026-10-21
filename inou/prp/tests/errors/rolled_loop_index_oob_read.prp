@@ -1,0 +1,17 @@
+/*
+:name: rolled_loop_index_oob_read
+:type: error
+:error: Pyrope array index 4 is outside \[0, 4\) for `arr`
+:help: iteration i = 3
+*/
+// An element READ past the extent of a loop-invariant array inside a rolled
+// loop: unrolled, the last iteration's arr[4] is rejected; rolled it read
+// whatever the runtime index selected (review2 D4).
+pub comb rolled_loop_index_oob_read(a0:U4, a1:U4, a2:U4, a3:U4) -> (o:U4) {
+  const arr:[4]U4 = (a0, a1, a2, a3)
+  mut acc:U4 = 0
+  for i in 0..<4 {
+    acc = acc ^ arr[i + 1]   // locate_error_here
+  }
+  o = acc
+}

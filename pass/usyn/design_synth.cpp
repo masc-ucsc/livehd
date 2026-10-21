@@ -156,7 +156,16 @@ Design_result synthesize_cmos_design(const std::shared_ptr<hhds::Graph>& top, co
   const std::array roots{top};
   const synth::State_options state{
       .state_sweep = options.state_sweep, .merge_registers = options.merge_registers, .top = top->get_name()};
-  auto prepared = synth::prepare_design(roots, options.unroll_carry, "pass.usyn", &preparation, options.specialize, false, state);
+  // Merge only guarded-accumulation chains (Reassoc_trees::guarded): a plain
+  // expanded chain maps well as written, but the chain the guard rewrite
+  // leaves maps linearly unless it is balanced first.
+  auto prepared = synth::prepare_design(roots,
+                                        options.unroll_carry,
+                                        "pass.usyn",
+                                        &preparation,
+                                        options.specialize,
+                                        synth::Loop_reassoc::guarded,
+                                        state);
   if (!prepared) {
     if (preparation.refused) {
       exhausted();

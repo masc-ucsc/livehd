@@ -844,7 +844,7 @@ void Pass_abc::map_with(Eprp_var& var, const std::function<void(livehd::abc::Map
                                       "pass.abc",
                                       nullptr,
                                       var.get("specialize", "true") != "false",
-                                      reassoc_text == "true",
+                                      reassoc_text == "true" ? livehd::synth::Loop_reassoc::all : livehd::synth::Loop_reassoc::none,
                                       livehd::synth::State_options{.state_sweep     = var.get("state_sweep", "false") == "true",
                                                                    .merge_registers = var.get("merge_registers", "false") == "true",
                                                                    .top             = var.get("top", "")});

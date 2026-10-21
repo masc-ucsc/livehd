@@ -58,3 +58,12 @@ sh_test(
         "//lhd",
     ],
 )
+
+# Rolled-loop window writes stay the variable's width: K shift-form bit writes
+# per body grew a K*8K-bit chain while the `upper` shift was cut only when the
+# window could pass the top bit (review2 L2; tests/loop_window_width_test.sh).
+sh_test(
+    name = "loop_window_width_test",
+    srcs = ["tests/loop_window_width_test.sh"],
+    data = ["//lhd"],
+)

@@ -1844,6 +1844,11 @@ protected:
   // Returns false (with a debug-log reason) to fall back to unrolling.
   bool plan_loop_roll(const Lnast_nid& body_stmts, const std::string& ivar, int64_t lo, int64_t hi, int64_t step,
                       Loop_roll_plan& out);
+  // A rolled loop's out-of-range accesses, judged per iteration as the
+  // unrolled loop would (plan_loop_roll): reported once per access and message,
+  // and not for a widened hull's re-plan (whose extra indices no copy runs).
+  absl::flat_hash_set<std::string> loop_oob_reported_;
+  bool                             loop_oob_probe_off_ = false;
   // A call under `nid` writes a variable back through `ref`: a `ref x` actual,
   // or the receiver of a `ref self` method (or of a callee that does not
   // resolve here). The roll plan's carry analysis sees only stores.

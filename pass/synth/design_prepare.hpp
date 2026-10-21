@@ -29,6 +29,13 @@ struct Prepared_design {
   State_sweep_stats                         sweep;    // what `state_sweep` removed
 };
 
+// What prepare_design reassociates among the cells a loop expansion minted.
+enum class Loop_reassoc {
+  none,     // the chains stay as expanded
+  all,      // every chain (Reassoc_trees::all)
+  guarded,  // only guarded-accumulation chains (Reassoc_trees::guarded)
+};
+
 // ABC-independent private-copy and compact-loop preparation. Source graphs
 // and their libraries remain untouched. Opaque callee IOs are copied as well
 // as bodies, so nested blackboxes retain their declared ports. Optional budget
@@ -37,10 +44,11 @@ struct Prepared_design {
 // `specialize` runs pass.specialize (state-free callees only) on the private
 // copy, after pass.color decided the regions (synth.specialize, default true).
 // `reassociate_loops` merges the associative chains an expanded carried loop
-// leaves into balanced n-ary cells (reassoc.hpp). pass.abc asks for it: ABC
-// maps the structure it is handed and does not rebalance a 16-link chain.
-// pass.usyn does not: its XAG flow measured neutral to worse on balanced
-// loop chains (lhdtrack br_arb_lru +8% delay).
+// leaves into balanced n-ary cells (reassoc.hpp). pass.abc asks for `all`:
+// ABC maps the structure it is handed and does not rebalance a 16-link chain.
+// pass.usyn asks for `guarded`: its XAG flow measured neutral to worse on
+// balanced plain loop chains (lhdtrack br_arb_lru +8% delay), but a guarded
+// accumulation's chain it maps linearly (Reassoc_trees::guarded).
 // `state` runs the register clean-ups of the private copy, after specialization and before
 // the loops are prepared: `merge_registers` (synth.merge_registers, default false) merges
 // registers that are the same machine (register_merge.hpp), then `state_sweep`
@@ -53,7 +61,7 @@ struct State_options {
 };
 std::unique_ptr<Prepared_design> prepare_design(std::span<const std::shared_ptr<hhds::Graph>> sources, bool unroll_carry,
                                                 std::string_view from_pass, Preparation_budget* budget = nullptr,
-                                                bool specialize = true, bool reassociate_loops = false,
+                                                bool specialize = true, Loop_reassoc reassociate_loops = Loop_reassoc::none,
                                                 const State_options& state = {});
 
 }  // namespace livehd::synth

@@ -5163,6 +5163,44 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
     return out;
   };
 
+  // The cut keys of `g`'s `$readmem` image memories, ROMs included. An image
+  // is externally loaded power-on state: DEFINED contents (not X) that are
+  // never compared file to file, so two images share one array -- and a
+  // reference image pairs ONLY with an implementation image. An implementation
+  // memory without one (uninitialized, initialized or reset) does not load the
+  // reference's contents: initialized reference vs uninitialized
+  // implementation refutes (owner ruling 2026-10-16), and a constant is never
+  // accepted for an image (lhd/tests/readmem_smoke.sh). Both engines used to
+  // treat a written reference image as an X memory and proved it against a
+  // constant-initialized or uninitialized implementation (lec_mem_image_test).
+  auto collect_memory_images = [&](hhds::Graph* g) {
+    absl::flat_hash_set<std::string> out;
+    for (auto node : g->occurrences(collapse_gids_ptr).nodes(hhds::Node_order::forward)) {
+      if (graph_util::type_op_of(node) == Ntype_op::Memory && node.has_out_edges() && graph_util::memory_image_of(node)) {
+        out.insert(mem_cut_key(g, node));
+      }
+    }
+    return out;
+  };
+  // The reference image keys an implementation memory WITHOUT an image shares.
+  auto ref_images_without_impl_image = [&]() {
+    const auto                       ref_images  = collect_memory_images(ref);
+    const auto                       impl_images = collect_memory_images(impl);
+    absl::flat_hash_set<std::string> impl_keys;
+    for (auto node : impl->occurrences(collapse_gids_ptr).nodes(hhds::Node_order::forward)) {
+      if (graph_util::type_op_of(node) == Ntype_op::Memory && node.has_out_edges()) {
+        impl_keys.insert(mem_cut_key(impl, node));
+      }
+    }
+    std::set<std::string> out;  // ordered: the induction refusal lists them
+    for (const auto& key : ref_images) {
+      if (impl_keys.contains(key) && !impl_images.contains(key)) {
+        out.insert(key);
+      }
+    }
+    return out;
+  };
+
   // ── Tuple-leaf <-> flat-bus port correspondence (both engines) ────────────
   // See detect_port_bundles above. INPUTS: one shared flat symbol per base;
   // the flat side's decl consumes it whole, each leaf decl consumes
@@ -6410,6 +6448,15 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
     const auto            impl_mem_sig  = collect_memory_sigs(impl);
     const auto            ref_mem_type  = collect_memory_types(ref);
     const auto            impl_mem_type = collect_memory_types(impl);
+    // A reference image against an implementation memory with no image: the
+    // implementation starts from its OWN array (collect_memory_images), and
+    // the one-sided initializer tie below never adopts the image as X.
+    const auto ref_only_images = ref_images_without_impl_image();
+    for (const auto& key : ref_only_images) {
+      if (auto it = impl_mem.find(key); it != impl_mem.end()) {
+        it->second = tm.mkConst(it->second.getSort(), "m0i_" + key);
+      }
+    }
     std::set<std::string> initialized_mem_keys;
     for (const auto& item : ref_mem_init) {
       initialized_mem_keys.insert(item.first);
@@ -6427,7 +6474,8 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
       const bool unspecified_writable_pair = rs != ref_mem.end() && is != impl_mem.end() && rg != ref_mem_sig.end()
                                              && ig != impl_mem_sig.end() && rg->second.n_wr > 0 && ig->second.n_wr > 0
                                              && ref_mem_type.contains(key) && impl_mem_type.contains(key)
-                                             && ref_mem_type.at(key) != 2 && impl_mem_type.at(key) != 2;
+                                             && ref_mem_type.at(key) != 2 && impl_mem_type.at(key) != 2
+                                             && !ref_only_images.contains(key);
       if (ri != ref_mem_init.end() && ii != impl_mem_init.end() && rs != ref_mem.end() && is != impl_mem.end()
           && rg != ref_mem_sig.end() && ig != impl_mem_sig.end()) {
         // Two specified initial states are independently observable: preserve
@@ -7984,6 +8032,14 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
         continue;
       }
       if (auto it = impl_inits.find(key); it != impl_inits.end() ? it->second != bin : impl_writable.contains(key)) {
+        diverged.push_back(key);
+      }
+    }
+    // A reference image the implementation memory does not load: defined
+    // contents against arbitrary (or constant) ones, ROMs included -- an
+    // image ROM reads the shared array too (collect_memory_images).
+    for (const auto& key : ref_images_without_impl_image()) {
+      if (shared_mems.contains(key)) {
         diverged.push_back(key);
       }
     }

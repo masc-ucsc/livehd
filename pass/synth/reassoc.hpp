@@ -58,7 +58,21 @@ struct Reassoc_stats {
 // whose region trees encode arrival order the RAW levels cannot see.
 using Reassoc_scope = std::function<bool(const hhds::Node_class&)>;
 
+// Which trees merge. `all` (pass.abc): every in-scope tree. `guarded`
+// (pass.usyn): only a tree whose every link -- the root and each absorbed
+// cell -- has a guard operand, Mux(c, x, id) or Mux(c, id, x) with the
+// operator's identity (0 for Or/Xor, all ones for And) on one arm. That is
+// what an unrolled `if c { acc |= x }` leaves once its guard moved onto the
+// term (cprop's guard_accumulation, guard_terms here): the rewrite is a
+// depth win only when the chain it makes is then lowered balanced, and usyn
+// does not rebalance a chain itself (gacc128, 128 guarded 8-bit ORs: 503 ps
+// as the chain, 280 ps merged, 386 ps as the MUX chain before the guard). A
+// plain `acc &= term` chain (no guard) stays as written for usyn, whose
+// region trees encode an arrival order the merge cannot see (lhdtrack
+// br_arb_lru +8% delay merged). guard_terms runs in both modes.
+enum class Reassoc_trees { all, guarded };
+
 [[nodiscard]] bool reassociate_chains(hhds::Graph* graph, Reassoc_stats& stats, Preparation_budget* budget = nullptr,
-                                      const Reassoc_scope& scope = {});
+                                      const Reassoc_scope& scope = {}, Reassoc_trees trees = Reassoc_trees::all);
 
 }  // namespace livehd::synth

@@ -100,7 +100,7 @@ std::optional<uint64_t> expand_plain_clock_cells(hhds::Graph* g, Preparation_bud
 
 std::unique_ptr<Prepared_design> prepare_design(std::span<const std::shared_ptr<hhds::Graph>> sources, bool unroll_carry,
                                                 std::string_view from_pass, Preparation_budget* budget, bool specialize,
-                                                bool reassociate_loops, const State_options& state) {
+                                                Loop_reassoc reassociate_loops, const State_options& state) {
   if (!admit_preparation(budget, "begin", 0)) {
     return {};
   }
@@ -290,7 +290,7 @@ std::unique_ptr<Prepared_design> prepare_design(std::span<const std::shared_ptr<
   // reassociation works only on what the expansion mints (reassoc.hpp). Only
   // a definition with a compact loop can gain any.
   absl::flat_hash_map<hhds::Gid, absl::flat_hash_set<hhds::Class_index>> before_loops;
-  if (unroll_carry && reassociate_loops) {
+  if (unroll_carry && reassociate_loops != Loop_reassoc::none) {
     for (const auto& graph : result->definitions) {
       absl::flat_hash_set<hhds::Class_index> cells;
       bool                                   loops = false;
@@ -322,7 +322,8 @@ std::unique_ptr<Prepared_design> prepare_design(std::span<const std::shared_ptr<
   // tree: only the cells the expansion minted (in an expanded definition, or
   // in a shared body it extracted). Before the clock-cell spelling below: an
   // ICG's `clk & latch` keeps its two-input AND (reassoc.hpp).
-  if (reassociate_loops && result->loops.expanded > 0) {
+  if (reassociate_loops != Loop_reassoc::none && result->loops.expanded > 0) {
+    const auto trees = reassociate_loops == Loop_reassoc::guarded ? Reassoc_trees::guarded : Reassoc_trees::all;
     absl::flat_hash_set<hhds::Gid> extracted;
     for (const auto& body : result->loops.shared_bodies) {
       extracted.insert(body->get_gid());
@@ -333,9 +334,12 @@ std::unique_ptr<Prepared_design> prepare_design(std::span<const std::shared_ptr<
         continue;  // no expansion touched this definition
       }
       const auto* existed = it == before_loops.end() ? nullptr : &it->second;
-      if (!reassociate_chains(graph.get(), result->reassoc, budget, [existed](const hhds::Node_class& node) {
-            return existed == nullptr || !existed->contains(node.get_class_index());
-          })) {
+      if (!reassociate_chains(
+              graph.get(),
+              result->reassoc,
+              budget,
+              [existed](const hhds::Node_class& node) { return existed == nullptr || !existed->contains(node.get_class_index()); },
+              trees)) {
         return {};
       }
     }
