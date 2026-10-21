@@ -245,6 +245,7 @@ Macro_run place_macros(dp::Design& d, const std::vector<mp::NodeInfo>& info, con
   cells.max_iterations   = o.iterations;
   cells.bins_x = cells.bins_y = o.bins;
   cells.num_threads           = o.threads;
+  cells.timing_spread_weight   = o.timing_spread_weight;
   cells.target_density        = o.density;
   cells.add_fillers           = false;
   if (o.snapshots) {

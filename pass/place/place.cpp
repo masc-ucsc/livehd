@@ -167,6 +167,9 @@ std::string environment_key(const Options& o, const ph::Technology& tech) {
   if (o.timing_exponent != 1) {
     h = hash_text(std::format("timing-exponent:{}", o.timing_exponent), h);
   }
+  if (o.timing_spread_weight != 0) {
+    h = hash_text(std::format("timing-spread:{}", o.timing_spread_weight), h);
+  }
   if (o.fp_evaluate && o.macro_timing_interval > 0) {
     h = hash_text(std::format("macro-timing:{}:{}:{}:{}",
                               o.macro_timing_interval,
@@ -2435,6 +2438,7 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
   if (!std::isfinite(options.timing_max_weight) || options.timing_max_weight < 1 || options.timing_max_weight > max_net_weight
       || !std::isfinite(options.timing_smoothing) || options.timing_smoothing < 0 || options.timing_smoothing > 1
       || options.fp_timing_max_updates < 2 || !std::isfinite(options.timing_exponent) || options.timing_exponent < 1
+      || !std::isfinite(options.timing_spread_weight) || options.timing_spread_weight < 0 || options.timing_spread_weight > 1
       || options.macro_timing_interval < 0) {
     throw std::invalid_argument("invalid timing weight/smoothing/update budget");
   }
@@ -3440,6 +3444,7 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
   control.bin_max                    = options.bin_max;
   control.auxiliary_bins             = options.dynamic_bins ? options.bins : 0;
   control.local_density_weight       = options.local_density_weight;
+  control.timing_spread_weight       = options.timing_spread_weight;
   control.local_density_bins         = options.local_density_bins;
   control.local_density_range        = options.local_density_range;
   control.local_density_jitter       = options.local_density_jitter;
@@ -4412,6 +4417,8 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
     json.Double(options.timing_fraction);
     json.Key("timing_exponent");
     json.Double(options.timing_exponent);
+    json.Key("timing_spread_weight");
+    json.Double(options.timing_spread_weight);
     json.Key("timing_max_weight");
     json.Double(options.timing_max_weight);
     json.Key("timing_smoothing");
@@ -5028,6 +5035,12 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
     json.Double(metrics.filler_area / tech.dbu / tech.dbu);
     json.Key("local_density_force");
     json.Double(metrics.local_density_force);
+    json.Key("timing_spread_weight");
+    json.Double(control.timing_spread_weight);
+    json.Key("timing_spread_cells");
+    json.Int(metrics.timing_spread_cells);
+    json.Key("timing_spread_min_mobility");
+    json.Double(metrics.timing_spread_min_mobility);
     json.Key("macro_cell_density_weight");
     json.Double(control.macro_cell_density_weight);
     json.Key("macro_cell_density_seconds");

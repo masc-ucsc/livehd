@@ -1131,6 +1131,35 @@ All three cold LiteEth policies use the same frozen executable and initial
 mapping cache. Full-flow synthesis feedback can accept different netlists, so
 the timing comparison measures the complete policy rather than a fixed-netlist
 placement experiment.</p>
+<h2>Timing-aware spreading response</h2>
+<p><code>synth.place.timing_spread_weight</code> is an opt-in fraction from 0 to 1
+(default 0). It retains the full RUDY/RSMT inflated area as a density-field
+source and attenuates the extra response of timing-sensitive standard cells.
+For the largest active incident net weight <code>w &gt;= 1</code>, mobility is
+<code>m = 1-a+a/w</code>. The received density-force multiplier for inflation
+<code>f</code> is <code>(1+(f-1)*m)/f</code>. Optional local-density pressure is
+also multiplied by <code>m</code> after calibration. At full protection, a
+weight-5 cell gets 20% of the additional response while a weight-1 cell keeps
+the full response. Physical-area response in the existing inflated footprint
+remains active; cell masters, macros, fixed geometry and wirelength attraction
+are unchanged.</p>
+<p>Priorities refresh after STA-weight updates and netlist replacement. Nonzero
+protection participates in native continuation and LiveHD placement/macro cache
+identity. The implementation adds no Poisson solve or STA call. Focused tests
+cover relative movement under local and routing pressure, unit-weight exactness,
+ordinary-density exactness, masked nets, checkpoint refresh, fixed geometry and
+invalid controls. The CLI smoke test exercises option propagation and range
+rejection. DREAMPlace implementation commit:
+<code>53e97f2b7c551a16f3e8b1eda7eb2410490169a1</code>. The full debug build
+(3,914 targets) and nine optimized placement/CLI/cache regression tests pass
+against that published dependency pin. Independent review found no blockers.</p>
+<p>This is force preconditioning, not a hard movement bound or a hold-slack
+model. With no cell inflation, global response to virtual fillers is unchanged.
+The prepared CNN comparison reuses the same 18,139-cell selection, input DEF,
+RC/SDC and saved timing weights: 6,032 cells have weight above 1, including
+4,242 at weight at least 3. Raw movement, legality and fresh setup/hold remain
+acceptance gates before any new downstream candidate. Evaluation artifacts:
+<code>tmp/timing_spread_20261021/</code>.</p>
 <h2>Design notes</h2>
 <ul>
   <li>The switch is one-way per stage and per run, to keep the control loop stable:

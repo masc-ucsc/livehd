@@ -261,6 +261,9 @@ int main(int argc, char** argv) {
     if (config.HasMember("timing_exponent")) {
       options.timing_exponent = config["timing_exponent"].GetDouble();
     }
+    if (config.HasMember("timing_spread_weight")) {
+      options.timing_spread_weight = config["timing_spread_weight"].GetDouble();
+    }
     if (config.HasMember("routability_macro_weight")) {
       options.routability_macro_weight = config["routability_macro_weight"].GetDouble();
     }

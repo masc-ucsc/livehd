@@ -103,7 +103,8 @@ gated_result = run('fp_gated', ['--set', 'synth.place=true', '--set', 'synth.pla
                  '--set', 'synth.place.fp.iterations=120', '--set', 'synth.place.utilization=0.1',
                  '--set', 'synth.place.fp.timing_after_density=true',
                  '--set', 'synth.place.timing_fraction=0.29',
-                 '--set', 'synth.place.timing_exponent=3', '--set', 'synth.place.macro.timing_interval=10',
+                 '--set', 'synth.place.timing_exponent=3', '--set', 'synth.place.timing_spread_weight=1',
+                 '--set', 'synth.place.macro.timing_interval=10',
                  '--set', 'synth.place.macro.align_global=true', '--set', 'synth.place.macro.align_weight=1',
                  '--set', 'synth.place.macro.align_sigma=0.25', '--set', 'synth.place.macro.align_start=0',
                  '--set', 'synth.place.macro.align_full=20',
@@ -145,6 +146,7 @@ assert (root/'fp_gated/synth/place/macro/fp_history.jsonl').exists()
 assert gated['timing_after_density'] and gated['timing_checkpoints'] > 0, gated
 assert gated['timing_fraction'] == 0.29, gated
 assert gated['timing_exponent'] == 3, gated
+assert gated['timing_spread_weight'] == 1, gated
 assert gated['routability_macro_weight'] == 0 and gated['routability_macro_range'] == 3, gated
 assert all(sample['macro_routing_force'] == 0 for sample in gated['fp_routing_history']), gated
 assert gated['timing_max_weight'] == 3 and gated['timing_smoothing'] == .25, gated
@@ -161,6 +163,7 @@ assert all(sample['stage'] == 'macro' and sample['timing_exponent'] == 3 for sam
 for path in (root/'fp_gated/synth/place').rglob('gp_history.json'):
     history = json.loads(path.read_text())
     assert history['stop_overflow'] == .08 and history['initial_density_weight'] == .02, (path, history)
+    assert history['timing_spread_weight'] == 1, (path, history)
 
 assert gated['timing_density_schedule'], gated
 for sample in gated['timing_density_schedule']:
@@ -182,6 +185,8 @@ run('routing_range_zero', ['--set', 'synth.place=true', '--set', 'synth.place.ro
 # These controls share one message that does not name the option.
 for name, setting in [('weight_below_one', 'timing_max_weight=0.5'),
                       ('exponent_below_one', 'timing_exponent=0.5'),
+                      ('spread_below_zero', 'timing_spread_weight=-0.1'),
+                      ('spread_above_one', 'timing_spread_weight=1.1'),
                       ('smoothing_range', 'timing_smoothing=1.1'),
                       ('overflow_range', 'stop_overflow=-0.1'),
                       ('density_weight_zero', 'initial_density_weight=0'),

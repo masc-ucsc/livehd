@@ -351,6 +351,32 @@ is preserved by the weighting path. Centroid forces remain normalized against
 the current combined wirelength/density force, so their effective scale can
 change indirectly even though their option values are unchanged.
 
+`synth.place.timing_spread_weight` opts into protecting timing-sensitive standard
+cells from extra routing and local-density spreading. It is a fraction `a` in
+`[0,1]`, default `0`. For each movable standard cell, take the largest incident
+active net weight `w`, with a minimum of 1, and set its spreading mobility to
+`m = 1 - a + a/w`. At `a=1`, a cell on a weight-5 net gets 20% of the additional
+spreading response; a weight-1 cell gets the full response. The per-cell values
+refresh after timing-weight updates and netlist replacements.
+
+RUDY/RSMT inflation still deposits the full virtual area into the density field,
+so neighbors continue to see the congested region. For area inflation `f`, the
+receiver's density-force multiplier becomes `(1 + (f-1)*m)/f`: this retains the
+physical-area contribution within the existing inflated footprint and attenuates
+the extra charge contribution. Optional `local_density_weight` pressure is also
+multiplied by `m`, after its ordinary calibration, so normalization does not
+cancel the protection. No extra Poisson solve or STA invocation is required.
+The existing timing-weighted wirelength force, macros, fixed nodes, physical
+sizes and legalization remain unchanged. `gp_history.json` reports the option,
+last protected-cell count and minimum mobility.
+
+This is a force-preconditioning heuristic, not a hard displacement bound or an
+exact gradient of the unchanged density energy. Its priorities inherit the
+existing setup-slack ranking; they do not encode hold slack. Movement, density,
+setup and hold must still be checked on the resulting legal placement and route.
+When `f=1`, the global density response is unchanged, including response to
+virtual fillers; protecting a pure-filler experiment needs a separate policy.
+
 With timing-driven placement enabled, `synth.place.fp.timing_interval=50`
 recomputes placement RC and runs OpenTimer every 50 completed FP GP iterations.
 It uses the same `timing_weights()` rule and configured smoothing. Set the

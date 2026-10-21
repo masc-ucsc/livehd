@@ -210,6 +210,7 @@ livehd::placement::Options placement_options(const Options& opts) {
   out.timing_fraction         = number("place.timing_fraction", "0.2");
   out.timing_max_weight       = number("place.timing_max_weight", "5");
   out.timing_exponent         = number("place.timing_exponent", "1");
+  out.timing_spread_weight    = number("place.timing_spread_weight", "0");
   out.macro_timing_interval   = static_cast<int>(integer("place.macro.timing_interval", "50"));
   out.timing_smoothing        = number("place.timing_smoothing", "0.5");
   out.fp_timing_max_updates   = integer("place.fp.timing_max_updates", "10");
@@ -217,7 +218,8 @@ livehd::placement::Options placement_options(const Options& opts) {
   out.initial_density_weight  = number("place.initial_density_weight", "0.01");
   if (out.timing_max_weight < 1 || out.timing_max_weight > livehd::placement::max_net_weight || out.timing_smoothing < 0
       || out.timing_smoothing > 1 || out.fp_timing_max_updates < 2 || out.stop_overflow < 0 || out.stop_overflow > 1
-      || out.initial_density_weight <= 0 || out.timing_exponent < 1 || out.macro_timing_interval < 0) {
+      || out.initial_density_weight <= 0 || out.timing_exponent < 1 || out.macro_timing_interval < 0
+      || out.timing_spread_weight < 0 || out.timing_spread_weight > 1) {
     throw Lhd_error{"usage", "invalid synth.place timing/density tuning controls", "check lhd describe synth for allowed values"};
   }
   if (out.timing_fraction <= 0 || out.timing_fraction > 1) {

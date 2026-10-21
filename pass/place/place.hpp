@@ -59,6 +59,7 @@ struct Options {
   double                                timing_fraction         = .2;  // worst-slack fraction of timed non-clock nets
   double                                timing_max_weight = 5, timing_smoothing = .5;
   double                                timing_exponent       = 1;  // convex criticality curve; 1 preserves linear weights
+  double                                timing_spread_weight  = 0;  // [0,1] protection from extra routing/local spreading
   int                                   macro_timing_interval = 50;
   int                                   fp_timing_max_updates = 10;
   bool                                  fp_resize             = false;
