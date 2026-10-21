@@ -152,7 +152,13 @@ void Physical_cache::publish(const fs::path& net, const fs::path& place) {
   fs::remove_all(pending);
   fs::create_directories(pending / "artifacts/place");
   copy_tree(net, pending / "artifacts/net");
-  for (const auto* name : {"out.def", "qor.json", "io_resynth.json", "memory_proxies.lef", "route_options.json"}) {
+  for (const auto* name : {"out.def",
+                           "qor.json",
+                           "io_resynth.json",
+                           "memory_proxies.lef",
+                           "route_options.json",
+                           "sat_route_grid.json",
+                           "sat_route_guard.json"}) {
     if (fs::is_regular_file(place / name)) {
       fs::copy_file(place / name, pending / "artifacts/place" / name);
     }

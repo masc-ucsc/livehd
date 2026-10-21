@@ -4,6 +4,7 @@
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
+#include <stdexcept>
 
 #include "attrs.hpp"
 #include "gtest/gtest.h"
@@ -163,6 +164,21 @@ TEST_F(PhysicalSession, ResizeRcTopologyAndRejectedTrialRollbackMatchFreshTiming
   EXPECT_GE(session.statistics().repowered_gates, 2u);
   EXPECT_EQ(session.statistics().inserted_gates, 1u);
   EXPECT_EQ(session.statistics().removed_gates, 1u);
+}
+TEST_F(PhysicalSession, RejectsCyclicAndDisconnectedRcBeforeTiming) {
+  Circuit circuit(false, false);
+  auto&   net = circuit.rc->nets.front();
+  net.nodes.push_back({{}, .1});
+  net.edges.push_back({1, 2, 1});
+  net.edges.push_back({2, 0, 1});
+  livehd::opentimer::Physical_session session(options);
+  EXPECT_THROW(session.evaluate(circuit.graph, circuit.rc), std::invalid_argument);
+  net.edges.resize(1);
+  livehd::opentimer::Physical_session fresh(options);
+  EXPECT_THROW(fresh.evaluate(circuit.graph, circuit.rc), std::invalid_argument);
+  net.edges.push_back({1, 2, 1});
+  livehd::opentimer::Physical_session valid(options);
+  EXPECT_NO_THROW(valid.evaluate(circuit.graph, circuit.rc));
 }
 TEST_F(PhysicalSession, ShieldedLoadsRepowerAndRollbackMatchFreshTiming) {
   livehd::opentimer::Physical_session session(options);

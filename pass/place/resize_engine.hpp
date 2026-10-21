@@ -35,12 +35,12 @@ enum class Resize_stage { floorplan, placed };
 Resize_plan plan_resize(const Result& state, const Options& options, const Timing_feedback& timing, livehd::timing::Whatif& whatif,
                         Resize_stage stage);
 // Materialize the edits (in order) in graph; origins maps each new buffer to its owner.
-void        apply_resize_edits(hhds::Graph& graph, const Options& options, const std::vector<Resize_edit>& edits,
-                               std::map<std::string, std::string>* origins = nullptr);
+void apply_resize_edits(hhds::Graph& graph, const Options& options, const std::vector<Resize_edit>& edits,
+                        std::map<std::string, std::string>* origins = nullptr, std::map<std::string, double>* weights = nullptr);
 // Full-evaluation acceptance: setup WNS/TNS and electrical violations never worse
 // (hold is reported, not gated, as pre-CTS), and some improvement (timing,
 // electrical or area).
-bool        resize_accepts(const Timing_feedback& before, const Timing_feedback& after);
+bool resize_accepts(const Timing_feedback& before, const Timing_feedback& after);
 // Post-legal-placement engine: plan, materialize, ECO-legalize, confirm; repeat
 // while it improves. Writes resize.json in options.output_dir.
 Repair_result    resize_placed(Result initial, const Options& options, const Evaluate& evaluate);

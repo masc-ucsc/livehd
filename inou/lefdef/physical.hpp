@@ -28,7 +28,10 @@ struct Macro {
   double                     width = 0, height = 0, origin_x = 0, origin_y = 0;
   std::string                site, klass;
   bool                       symmetry_x = false, symmetry_y = false;
+  bool                       virtual_proxy = false;  // synthesized RC geometry, not a routable LEF abstract
   std::map<std::string, Pin> pins;
+  std::vector<Shape>         obstructions;
+  std::set<std::string>      conservative_obstructions;
   std::set<std::string>      blocked_layers;  // OBS layers; routability uses conservative full-footprint blocking
 };
 struct Site {
@@ -39,6 +42,8 @@ struct Layer {
   double      width = 0, resistance = 0, capacitance = 0, edge_cap = 0;
   std::string direction;
   double      pitch_x = 0, pitch_y = 0;
+  double      offset_x = 0, offset_y = 0;
+  bool        has_offset = false;
 };
 // LEF geometry is in microns; graph/DEF positions are integer DBU.
 struct Technology {
@@ -46,7 +51,8 @@ struct Technology {
   std::map<std::string, Site>  sites;
   std::map<std::string, Macro> macros;
   std::map<std::string, Layer> layers;
-  std::vector<std::string>     routing_layers;  // LEF routing-stack order
+  std::vector<std::string>     routing_layers;          // LEF routing-stack order
+  double                       manufacturing_grid = 0;  // microns; 0 means unspecified
 };
 struct Row {
   std::string name, site;
@@ -76,11 +82,19 @@ struct Net {
   std::vector<Connection> connections;
   friend bool             operator==(const Net&, const Net&) = default;
 };
+struct Track {
+  std::string axis, layer;
+  int64_t     start = 0, count = 0, step = 0;
+  int         mask                                   = 0;
+  bool        same_mask                              = false;
+  friend bool operator==(const Track&, const Track&) = default;
+};
 struct Floorplan {
   std::string            design;
   int64_t                dbu = 1000;
   Rect                   die;
   std::vector<Row>       rows;
+  std::vector<Track>     tracks;
   std::vector<Component> components;
   std::vector<Terminal>  terminals;
   std::vector<Net>       nets;

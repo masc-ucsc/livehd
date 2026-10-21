@@ -15,6 +15,9 @@ void Pass_opentimer::validate_physical_rc(const std::shared_ptr<hhds::Graph>& gr
   if (!spef_file_list.empty()) {
     throw std::invalid_argument("placed RC and synth.spef cannot be combined");
   }
+  for (const auto& net : physical_rc_->nets) {
+    livehd::physical::validate_rc_tree(net);
+  }
   std::map<std::string, Ann_place>   positions;
   std::map<std::string, std::string> masters;
   for (auto node : graph->body().nodes()) {

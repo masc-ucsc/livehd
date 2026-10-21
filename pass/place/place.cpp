@@ -26,6 +26,7 @@
 #include "color_centroids.hpp"
 #include "h2d.hpp"
 #include "macro_snap.hpp"
+#include "macro_tracks.hpp"
 #include "memory_proxy.hpp"
 #include "pin_adjust.hpp"
 #include "repair.hpp"
@@ -38,6 +39,7 @@
 
 #include "attrs.hpp"
 #include "dreamplace/native/placement.hpp"
+#include "dreamplace/native/rudy.hpp"
 #include "hash_util.hpp"
 #include "node_util.hpp"
 #include "pass/liberty/liberty_dff.hpp"
@@ -60,6 +62,122 @@ using Node        = hhds::Node_class;
 using Pin         = hhds::Pin_class;
 using Orientation = ph::Orientation;
 using Status      = ph::Status;
+
+void sat_window_statistics(rapidjson::Value& json, const Satlegalize_report& report, const Satlegalize_options& options,
+                           rapidjson::Document::AllocatorType& allocator) {
+  rapidjson::Value windows(rapidjson::kArrayType);
+  uint64_t         total = 0, minimum = std::numeric_limits<uint64_t>::max(), maximum = 0;
+  for (const auto& window : report.window_stats) {
+    rapidjson::Value entry(rapidjson::kObjectType), bounds(rapidjson::kArrayType);
+    for (double value : {window.bounds.xl, window.bounds.yl, window.bounds.xh, window.bounds.yh}) {
+      bounds.PushBack(value, allocator);
+    }
+    entry.AddMember("bounds_dbu", bounds, allocator);
+    entry.AddMember("movable_cells", static_cast<uint64_t>(window.movable_cells), allocator);
+    entry.AddMember("oversized", window.oversized, allocator);
+    if (options.route_grid) {
+      entry.AddMember("route_utilization", window.route_utilization, allocator);
+      entry.AddMember("source_gap_cells", static_cast<uint64_t>(window.source_gap_cells), allocator);
+      entry.AddMember("source_gap_candidates", static_cast<uint64_t>(window.source_gap_candidates), allocator);
+    }
+    if (options.region_width_um > 0 || options.route_grid) {
+      entry.AddMember("candidate_cells", static_cast<uint64_t>(window.candidate_cells), allocator);
+      entry.AddMember("retained_candidates", static_cast<uint64_t>(window.retained_candidates), allocator);
+      entry.AddMember("spill_eligible_cells", static_cast<uint64_t>(window.spill_eligible_cells), allocator);
+      if (!window.first_no_candidate_cell.empty()) {
+        rapidjson::Value blocker(rapidjson::kObjectType), pose(rapidjson::kArrayType);
+        blocker.AddMember("cell", rapidjson::Value(window.first_no_candidate_cell.c_str(), allocator), allocator);
+        blocker.AddMember("master", rapidjson::Value(window.first_no_candidate_master.c_str(), allocator), allocator);
+        blocker.AddMember("spill_reason", rapidjson::Value(window.first_no_candidate_spill_reason.c_str(), allocator), allocator);
+        const auto& place = window.first_no_candidate_place;
+        for (int64_t value : {place.x, place.y, place.width, place.height}) {
+          pose.PushBack(value, allocator);
+        }
+        blocker.AddMember("xywh_dbu", pose, allocator);
+        blocker.AddMember("orientation", rapidjson::Value(ph::orientation_name(place.orientation).c_str(), allocator), allocator);
+        blocker.AddMember("minimum_connected_slack_ps",
+                          window.first_no_candidate_slack_ps ? rapidjson::Value(*window.first_no_candidate_slack_ps)
+                                                             : rapidjson::Value(rapidjson::kNullType),
+                          allocator);
+        entry.AddMember("first_no_candidate", blocker, allocator);
+      }
+      entry.AddMember("usable_area_dbu2", window.usable_area, allocator);
+      entry.AddMember("movable_area_before_dbu2", window.movable_area_before, allocator);
+      entry.AddMember("movable_area_after_dbu2", window.movable_area_after, allocator);
+      entry.AddMember(
+          "density_before",
+          std::isfinite(window.density_before) ? rapidjson::Value(window.density_before) : rapidjson::Value(rapidjson::kNullType),
+          allocator);
+      entry.AddMember(
+          "density_after",
+          std::isfinite(window.density_after) ? rapidjson::Value(window.density_after) : rapidjson::Value(rapidjson::kNullType),
+          allocator);
+      entry.AddMember("spill_candidates", window.spill_candidates, allocator);
+      entry.AddMember("spilled_cells", window.spilled_cells, allocator);
+      rapidjson::Value neighbors(rapidjson::kArrayType);
+      for (const auto& neighbor : window.neighbors) {
+        rapidjson::Value tile(rapidjson::kObjectType), tile_bounds(rapidjson::kArrayType);
+        for (double value : {neighbor.bounds.xl, neighbor.bounds.yl, neighbor.bounds.xh, neighbor.bounds.yh}) {
+          tile_bounds.PushBack(value, allocator);
+        }
+        tile.AddMember("bounds_dbu", tile_bounds, allocator);
+        tile.AddMember("movable_cells", static_cast<uint64_t>(neighbor.movable_cells), allocator);
+        if (options.route_grid) {
+          tile.AddMember("route_utilization", neighbor.route_utilization, allocator);
+        }
+        tile.AddMember("usable_area_dbu2", neighbor.usable_area, allocator);
+        tile.AddMember("movable_area_before_dbu2", neighbor.movable_area_before, allocator);
+        tile.AddMember("movable_area_after_dbu2", neighbor.movable_area_after, allocator);
+        tile.AddMember("density_before",
+                       std::isfinite(neighbor.density_before) ? rapidjson::Value(neighbor.density_before)
+                                                              : rapidjson::Value(rapidjson::kNullType),
+                       allocator);
+        tile.AddMember("density_after",
+                       std::isfinite(neighbor.density_after) ? rapidjson::Value(neighbor.density_after)
+                                                             : rapidjson::Value(rapidjson::kNullType),
+                       allocator);
+        neighbors.PushBack(tile, allocator);
+      }
+      entry.AddMember("neighbors", neighbors, allocator);
+    }
+    windows.PushBack(entry, allocator);
+    total   += window.movable_cells;
+    minimum  = std::min(minimum, static_cast<uint64_t>(window.movable_cells));
+    maximum  = std::max(maximum, static_cast<uint64_t>(window.movable_cells));
+  }
+  rapidjson::Value counts(rapidjson::kObjectType);
+  counts.AddMember("regions", static_cast<uint64_t>(report.window_stats.size()), allocator);
+  counts.AddMember("total_memberships", total, allocator);
+  counts.AddMember("minimum", report.window_stats.empty() ? uint64_t{0} : minimum, allocator);
+  counts.AddMember("maximum", maximum, allocator);
+  counts.AddMember("mean", report.window_stats.empty() ? 0. : double(total) / report.window_stats.size(), allocator);
+  json.AddMember("window_cell_counts", counts, allocator);
+  json.AddMember("window_stats", windows, allocator);
+  if (options.region_width_um > 0 || options.route_grid) {
+    rapidjson::Value region(rapidjson::kObjectType);
+    region.AddMember("width_um", options.region_width_um, allocator);
+    region.AddMember("height_um", options.region_height_um, allocator);
+    region.AddMember("spill_neighbors", options.spill_neighbors, allocator);
+    region.AddMember("spill_slack_margin_ps", options.spill_slack_margin_ps, allocator);
+    region.AddMember("sampled_windows", report.sampled_windows, allocator);
+    region.AddMember("routing_grid", options.route_grid, allocator);
+    region.AddMember("routing_guidance", options.route_grid && options.route_guidance, allocator);
+    region.AddMember("cross_grid_pairs", report.cross_grid_pairs, allocator);
+    region.AddMember("ordering",
+                     rapidjson::Value(options.route_grid && options.route_guidance
+                                          ? "initial route utilization descending, current cell density tie-break"
+                                          : "current density descending within sampled timing-selected regions",
+                                      allocator),
+                     allocator);
+    region.AddMember("spill_candidates", report.spill_candidates, allocator);
+    region.AddMember("accepted_cell_transfers", report.spilled_cells, allocator);
+    region.AddMember("density_rejected", report.density_rejected, allocator);
+    region.AddMember("region_backoff", false, allocator);
+    region.AddMember("prefix_backoff", false, allocator);
+    json.AddMember("fixed_regions", region, allocator);
+  }
+}
+
 // Fully assigned combinational Verilog regs can retain a Latch declaration
 // after mapping. Like cgen's always_comb emission, an always-open latch with
 // no reset is just its data value. Normalize only the private physical graph.
@@ -113,6 +231,41 @@ std::string file_text(const std::string& path) {
   }
   return {std::istreambuf_iterator<char>(input), {}};
 }
+std::pair<double, double> effective_halo(const Options& options) {
+  return options.cell_stage && options.cell_halo && !options.timing_seed && !options.retain_placement
+             ? *options.cell_halo
+             : std::pair{options.halo_x, options.halo_y};
+}
+void validate_cell_halo(const Options& options) {
+  if (options.cell_halo
+      && (!std::isfinite(options.cell_halo->first) || !std::isfinite(options.cell_halo->second) || options.cell_halo->first < 0
+          || options.cell_halo->second < 0)) {
+    throw std::invalid_argument("cell halo must be finite and nonnegative");
+  }
+  if (options.cell_halo && (options.cell_halo->first > options.halo_x || options.cell_halo->second > options.halo_y)) {
+    throw std::invalid_argument("cell halo cannot exceed macro halo on either axis");
+  }
+}
+void check_macro_halo(const ph::Technology& tech, const ph::Floorplan& fp, const Options& options) {
+  if (!options.cell_stage || !options.cell_halo || options.timing_seed || options.retain_placement) {
+    return;
+  }
+  ph::Floorplan macros;
+  macros.die  = fp.die;
+  macros.dbu  = fp.dbu;
+  macros.rows = fp.rows;
+  for (const auto& c : fp.components) {
+    if (!tech.macros.at(c.macro).klass.starts_with("CORE")) {
+      macros.components.push_back(c);
+    }
+  }
+  for (const auto& c : macros.components) {
+    if (c.place.status != Status::FIXED && c.place.status != Status::LOCKED) {
+      throw std::invalid_argument("cell halo requires a fixed macro frame: " + c.name);
+    }
+  }
+  check_legality(tech, macros, options.halo_x, options.halo_y);
+}
 int64_t macro_halo(double microns, int64_t dbu, int64_t pitch) {
   const double value = std::ceil(microns * dbu / pitch - 1e-9) * pitch;
   if (!std::isfinite(microns) || microns < 0 || !std::isfinite(value)
@@ -148,6 +301,9 @@ std::string environment_key(const Options& o, const ph::Technology& tech) {
                             o.halo_x,
                             o.halo_y),
                 h);
+  if (o.cell_halo) {
+    h = hash_text(std::format("cell-halo:{}:{}:{}", o.cell_halo->first, o.cell_halo->second, o.cell_stage), h);
+  }
   h = hash_text(o.macro_mode, h);
   if (o.reset_fanout) {
     h = hash_text(std::format("reset-fanout:{}", o.reset_fanout), h);
@@ -163,6 +319,40 @@ std::string environment_key(const Options& o, const ph::Technology& tech) {
   }
   if (o.timing_max_weight != 5 || o.timing_smoothing != .5) {
     h = hash_text(std::format("timing-force:{}:{}", o.timing_max_weight, o.timing_smoothing), h);
+  }
+  if (o.satlegalize_options.route_grid) {
+    h = hash_text(std::format("sat-route-grid-v1:{}", o.satlegalize_options.route_guidance), h);
+  }
+  if (o.satlegalize) {
+    const auto& a = o.satlegalize_options;
+    h             = hash_text(std::format("satlegalize:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}",
+                                          a.backend,
+                                          a.encoding,
+                                          a.max_cells,
+                                          a.max_candidates,
+                                          a.max_windows,
+                                          a.max_pairs,
+                                          a.move_sites,
+                                          a.move_rows,
+                                          a.conflicts,
+                                          a.milliseconds,
+                                          a.skip_conflicts,
+                                          a.boundary_growth),
+                              h);
+    if (a.region_width_um || a.region_height_um || a.spill_neighbors) {
+      h = hash_text(std::format("satlegalize-region-v1:{}:{}:{}:{}",
+                                a.region_width_um,
+                                a.region_height_um,
+                                a.spill_neighbors,
+                                a.spill_slack_margin_ps),
+                    h);
+    }
+  }
+  if (o.legalize_timing_corrections) {
+    h = hash_text(std::format("timing-corrections:{}", o.legalize_timing_corrections), h);
+  }
+  if (o.legalize_timing_strength > 0) {
+    h = hash_text(std::format("timing-legalize:{}:{}", o.legalize_timing_strength, o.legalize_timing_threshold), h);
   }
   if (o.timing_exponent != 1) {
     h = hash_text(std::format("timing-exponent:{}", o.timing_exponent), h);
@@ -189,6 +379,9 @@ std::string environment_key(const Options& o, const ph::Technology& tech) {
   }
   if (o.fixed_macro_overlap_weight > 0) {
     h = hash_text(std::format("fixed-macro-overlap:{}", o.fixed_macro_overlap_weight), h);
+  }
+  if (o.eco_connectivity_weight > 0) {
+    h = hash_text(std::format("eco-connectivity:{}", o.eco_connectivity_weight), h);
   }
   if (o.detailed_iterations != 2) {
     h = hash_text(std::format("detail-iterations:{}", o.detailed_iterations), h);
@@ -237,6 +430,8 @@ std::string environment_key(const Options& o, const ph::Technology& tech) {
     }
     if (o.fp_resize && o.resize_engine != "legacy") {
       h = hash_text(std::format("resize-engine:{}:{}", o.resize_engine, o.resize_vt_swap), h);
+    }
+    if (o.fp_resize) {
       for (const auto& pattern : o.resize_dont_use) {
         h = hash_text("dont-use:" + pattern, h);
       }
@@ -687,6 +882,7 @@ struct View {
   std::vector<std::string>                      io_buses;
   std::vector<int>                              io_bits;
   std::vector<Cell>                             cells;
+  std::set<std::string>                         constant_masters;
   std::vector<Endpoint>                         pins;
   std::vector<Endpoint>                         drivers;
   std::map<Endpoint, std::vector<Endpoint>>     nets;
@@ -859,6 +1055,7 @@ void make_arrays(View& v, const ph::Technology& tech) {
     d.node_y.push_back(c.place.y);
     d.node_size_x.push_back(c.place.width);
     d.node_size_y.push_back(c.place.height);
+    d.node_legalize_last.push_back(v.constant_masters.contains(c.macro));
     const bool standard  = tech.macros.at(c.macro).klass.starts_with("CORE");
     double     blocked_h = 0, blocked_v = 0;
     if (!standard) {
@@ -896,6 +1093,7 @@ void make_arrays(View& v, const ph::Technology& tech) {
     d.node_y.push_back(p.y);
     d.node_size_x.push_back(0);
     d.node_size_y.push_back(0);
+    d.node_legalize_last.push_back(0);
     d.node_blocked_capacity_h.push_back(0);
     d.node_blocked_capacity_v.push_back(0);
     d.node_macro.push_back(0);
@@ -1144,11 +1342,7 @@ void refresh_floorplan_view(View& v, const View& baseline, Result& state, const 
   const auto endpoint = [&](Pin p, int bit) {
     auto e = resolve.bit(p, bit);
     if (e.constant >= 0) {
-      const auto tie = previous.find(e.constant ? "__place_tiehi" : "__place_tielo");
-      if (tie == previous.end()) {
-        throw std::runtime_error("FP repair lost physical tie driver");
-      }
-      e = {tie->first, std::string(tie->second.node.get_subnode_io()->get_output_pin_decls().front().name), -1};
+      throw std::runtime_error("FP repair introduced an unmaterialized constant driver");
     }
     return e;
   };
@@ -1200,6 +1394,56 @@ void refresh_floorplan_view(View& v, const View& baseline, Result& state, const 
     state.floorplan.components.push_back({c.name, c.macro, c.place});
   }
 }
+// Routing-track correction belongs between macro legalization and row packing.
+// Movable CORE coordinates are not obstacles until the native cell legalizer
+// packs them; explicit fixed cells and all macro hard halos remain obstacles.
+bool align_macro_geometry(const View& v, const ph::Technology& tech, dp::Design& physical, bool move, bool freeze_all) {
+  if (std::none_of(physical.node_macro.begin(), physical.node_macro.begin() + v.cells.size(), [](auto macro) { return macro; })) {
+    return false;
+  }
+  std::vector<ph::Component> frame;
+  std::vector<size_t>        indexes;
+  for (size_t i = 0; i < v.cells.size(); ++i) {
+    const bool macro = physical.node_macro[i];
+    if (!macro && i < static_cast<size_t>(physical.num_movable)) {
+      continue;
+    }
+    const auto& c     = v.cells[i];
+    auto        place = c.place;
+    place.x           = std::llround(physical.node_x[i]);
+    place.y           = std::llround(physical.node_y[i]);
+    place.width       = std::llround(physical.node_size_x[i]);
+    place.height      = std::llround(physical.node_size_y[i]);
+    if (!physical.node_orientation.empty()) {
+      place.orientation = physical_orientation(physical.node_orientation[i]);
+    }
+    place.status = i >= static_cast<size_t>(physical.num_movable) || (macro && freeze_all) ? Status::FIXED : Status::PLACED;
+    frame.push_back({c.name, c.macro, place});
+    indexes.push_back(i);
+  }
+  legalize_macro_tracks(tech, v.fp, frame, v.halo_x, v.halo_y, move);
+  bool changed = false;
+  if (move) {
+    for (size_t j = 0; j < frame.size(); ++j) {
+      const auto i = indexes[j];
+      if (!physical.node_macro[i]) {
+        continue;
+      }
+      changed            |= physical.node_x[i] != frame[j].place.x || physical.node_y[i] != frame[j].place.y;
+      physical.node_x[i]  = frame[j].place.x;
+      physical.node_y[i]  = frame[j].place.y;
+    }
+  }
+  return changed;
+}
+bool macro_tracks_valid(const View& v, const ph::Technology& tech, dp::Design& physical) {
+  try {
+    align_macro_geometry(v, tech, physical, false, true);
+    return true;
+  } catch (const std::runtime_error&) {
+    return false;
+  }
+}
 // Row flips apply only to CORE cells; BLOCK macros keep their supplied
 // orientation. Shared by capture() and restore_cache() so cold and warm runs
 // agree. Returns false when an FS row needs a master without SYMMETRY X.
@@ -1238,6 +1482,258 @@ void capture(View& v, const ph::Technology& tech, bool full) {
   }
   // Recompute offsets after changing rows/orientations and round GP coordinates
   // consistently with the graph that STA and subsequent exports will read.
+  make_arrays(v, tech);
+}
+// Settle constant sources after their functional users have finished moving.
+// Search free row intervals, using actual oriented pin locations. Functional
+// cells and fixed objects keep their final sites. The transaction falls back to
+// the already legal frame if fragmented free space cannot fit every tie.
+void localize_tie_sites(View& v, const ph::Technology& tech, const std::string& liberty_path) {
+  if (liberty_path.empty()) {
+    return;
+  }
+  std::set<std::string> masters;
+  for (const auto& model : liberty::scan_constant_cells(liberty_path)) {
+    masters.insert(model.name);
+  }
+  std::map<size_t, std::vector<Endpoint>>    targets;
+  std::map<size_t, std::vector<std::string>> outputs;
+  for (const auto& [driver, sinks] : v.nets) {
+    if (driver.instance != "PIN" && masters.contains(v.cells[v.cell.at(driver.instance)].macro)) {
+      if (sinks.size() != 1) {
+        throw std::runtime_error("constant output must have exactly one physical load: " + driver.instance);
+      }
+      const auto  index = v.cell.at(driver.instance);
+      const auto& cell  = v.cells[index];
+      if (!cell.locked && cell.place.status != Status::FIXED && cell.place.status != Status::LOCKED) {
+        targets[index].push_back(sinks.front());
+        outputs[index].push_back(driver.pin);
+      }
+    }
+  }
+  if (targets.empty()) {
+    return;
+  }
+  using Interval = std::pair<int64_t, int64_t>;
+  std::vector<std::vector<Interval>> occupied(v.fp.rows.size());
+  const auto                         rh   = int64_t(std::llround(v.design.layout.row_height));
+  const auto                         sw   = int64_t(std::llround(v.design.layout.site_width));
+  const auto                         mark = [&](const Cell& c) {
+    const bool macro  = !tech.macros.at(c.macro).klass.starts_with("CORE");
+    const auto halo_x = macro ? v.halo_x : 0, halo_y = macro ? v.halo_y : 0;
+    const auto bottom = c.place.y - halo_y;
+    const auto top    = c.place.y + c.place.height + halo_y;
+    auto       row
+        = std::lower_bound(v.fp.rows.begin(), v.fp.rows.end(), bottom, [&](const auto& r, int64_t y) { return r.y + rh <= y; });
+    for (; row != v.fp.rows.end() && row->y < top; ++row) {
+      occupied[row - v.fp.rows.begin()].emplace_back(c.place.x - halo_x, c.place.x + c.place.width + halo_x);
+    }
+  };
+  std::map<size_t, Ann_place> original;
+  for (size_t i = 0; i < v.cells.size(); ++i) {
+    if (targets.contains(i)) {
+      original.emplace(i, v.cells[i].place);
+    } else {
+      mark(v.cells[i]);
+    }
+  }
+  for (auto& row : occupied) {
+    std::sort(row.begin(), row.end());
+  }
+  for (const auto& [index, sinks] : targets) {
+    auto&  cell = v.cells[index];
+    double x = 0, y = 0;
+    for (const auto& sink : sinks) {
+      if (sink.instance == "PIN") {
+        const auto& terminal  = v.fp.terminals[v.terminal.at(sink.pin)];
+        x                    += terminal.x;
+        y                    += terminal.y;
+      } else {
+        const auto& user     = v.cells[v.cell.at(sink.instance)];
+        const auto [dx, dy]  = offset(tech.macros.at(user.macro), sink.pin, user.place.orientation, tech.dbu);
+        x                   += user.place.x + dx;
+        y                   += user.place.y + dy;
+      }
+    }
+    x                 /= sinks.size();
+    y                 /= sinks.size();
+    double     best    = INFINITY;
+    auto       chosen  = cell.place;
+    const auto cut
+        = std::lower_bound(v.fp.rows.begin(), v.fp.rows.end(), y, [](const auto& row, double target) { return row.y < target; });
+    size_t                row_right = cut - v.fp.rows.begin();
+    std::optional<size_t> row_left;
+    if (row_right) {
+      row_left = row_right - 1;
+    }
+    while (row_left || row_right < v.fp.rows.size()) {
+      size_t row;
+      if (row_left
+          && (row_right == v.fp.rows.size() || std::abs(v.fp.rows[*row_left].y - y) <= std::abs(v.fp.rows[row_right].y - y))) {
+        row = *row_left;
+        if (*row_left) {
+          --*row_left;
+        } else {
+          row_left.reset();
+        }
+      } else {
+        row = row_right++;
+      }
+      const auto& r = v.fp.rows[row];
+      // Rows are visited by increasing distance, so no farther row can improve
+      // the current pin-distance bound once this conservative limit is crossed.
+      if (std::abs(r.y - y) > best + cell.place.height) {
+        break;
+      }
+      if (r.y + cell.place.height > v.design.layout.yh
+          || (r.orientation == Orientation::FS && !tech.macros.at(cell.macro).symmetry_x)) {
+        continue;
+      }
+      double dx = 0, dy = 0;
+      for (const auto& pin : outputs.at(index)) {
+        const auto [px, py]  = offset(tech.macros.at(cell.macro), pin, r.orientation, tech.dbu);
+        dx                  += px;
+        dy                  += py;
+      }
+      dx /= outputs.at(index).size();
+      dy /= outputs.at(index).size();
+      std::vector<Interval> blocked;
+      for (size_t j = row; j < occupied.size() && v.fp.rows[j].y < r.y + cell.place.height; ++j) {
+        blocked.insert(blocked.end(), occupied[j].begin(), occupied[j].end());
+      }
+      std::sort(blocked.begin(), blocked.end());
+      blocked.emplace_back(r.x + r.count * r.step, r.x + r.count * r.step);
+      int64_t left = r.x;
+      for (const auto& [lo, hi] : blocked) {
+        const auto right      = std::min(lo, r.x + r.count * r.step) - cell.place.width;
+        const auto first_site = r.x + ((left - r.x + sw - 1) / sw) * sw;
+        const auto last_site  = r.x + int64_t(std::floor(double(right - r.x) / sw)) * sw;
+        if (last_site >= first_site) {
+          const auto   candidate = std::clamp(r.x + int64_t(std::llround((x - dx - r.x) / sw)) * sw, first_site, last_site);
+          const double cost      = std::abs(candidate + dx - x) + std::abs(r.y + dy - y);
+          if (cost < best) {
+            best               = cost;
+            chosen.x           = candidate;
+            chosen.y           = r.y;
+            chosen.orientation = r.orientation;
+          }
+        }
+        left = std::max(left, hi);
+      }
+    }
+    if (!std::isfinite(best)) {
+      for (const auto& [i, place] : original) {
+        v.cells[i].place = place;
+      }
+      return;
+    }
+    cell.place = chosen;
+    mark(cell);
+  }
+  // When nearby whitespace is exhausted, permit one bounded equal-footprint
+  // exchange with a movable functional neighbor. This keeps the complete row
+  // packing legal and limits collateral motion to four rows. Two passes revisit
+  // tie users moved by an earlier exchange; explicit constraints never relax.
+  const double movement_limit = 4 * rh;
+  using Footprint             = std::pair<int64_t, int64_t>;
+  using Row_cells             = std::map<int64_t, std::multimap<int64_t, size_t>>;
+  std::map<Footprint, Row_cells> nearby;
+  for (size_t i = 0; i < v.cells.size(); ++i) {
+    const auto& c = v.cells[i];
+    if (!targets.contains(i) && !masters.contains(c.macro) && !c.locked && c.place.status != Status::FIXED
+        && c.place.status != Status::LOCKED && tech.macros.at(c.macro).klass.starts_with("CORE")) {
+      nearby[{c.place.width, c.place.height}][c.place.y].emplace(c.place.x, i);
+    }
+  }
+  for (int round = 0; round < 2; ++round) {
+    bool moved = false;
+    for (const auto& [index, sinks] : targets) {
+      auto&      tie               = v.cells[index];
+      const auto distance_to_users = [&](const Ann_place& place) {
+        double cost = 0;
+        for (size_t i = 0; i < sinks.size(); ++i) {
+          const auto& sink = sinks[i];
+          double      x, y;
+          if (sink.instance == "PIN") {
+            const auto& terminal = v.fp.terminals[v.terminal.at(sink.pin)];
+            x                    = terminal.x;
+            y                    = terminal.y;
+          } else {
+            const auto& user    = v.cells[v.cell.at(sink.instance)];
+            const auto [dx, dy] = offset(tech.macros.at(user.macro), sink.pin, user.place.orientation, tech.dbu);
+            x                   = user.place.x + dx;
+            y                   = user.place.y + dy;
+          }
+          const auto [dx, dy]  = offset(tech.macros.at(tie.macro), outputs.at(index)[i], place.orientation, tech.dbu);
+          cost                += std::abs(place.x + dx - x) + std::abs(place.y + dy - y);
+        }
+        return cost;
+      };
+      const auto original_cost = distance_to_users(tie.place);
+      if (original_cost <= movement_limit) {
+        continue;
+      }
+      size_t              best      = v.cells.size();
+      double              best_cost = original_cost;
+      std::vector<size_t> candidates;
+      const auto          footprint = nearby.find({tie.place.width, tie.place.height});
+      if (footprint == nearby.end()) {
+        continue;
+      }
+      auto& rows = footprint->second;
+      for (auto row = rows.lower_bound(tie.place.y - int64_t(movement_limit));
+           row != rows.end() && row->first <= tie.place.y + movement_limit;
+           ++row) {
+        const auto dx = int64_t(movement_limit) - std::abs(row->first - tie.place.y);
+        for (auto cell = row->second.lower_bound(tie.place.x - dx); cell != row->second.end() && cell->first <= tie.place.x + dx;
+             ++cell) {
+          candidates.push_back(cell->second);
+        }
+      }
+      // Keep the previous deterministic candidate tie break, independently of
+      // the spatial index's row/site traversal order.
+      std::sort(candidates.begin(), candidates.end());
+      for (size_t i : candidates) {
+        const auto& candidate = v.cells[i];
+        if (targets.contains(i) || masters.contains(candidate.macro) || candidate.locked || candidate.place.status == Status::FIXED
+            || candidate.place.status == Status::LOCKED || !tech.macros.at(candidate.macro).klass.starts_with("CORE")
+            || candidate.place.width != tie.place.width || candidate.place.height != tie.place.height
+            || std::abs(candidate.place.x - tie.place.x) + std::abs(candidate.place.y - tie.place.y) > movement_limit
+            || (candidate.place.orientation == Orientation::FS && !tech.macros.at(tie.macro).symmetry_x)
+            || (tie.place.orientation == Orientation::FS && !tech.macros.at(candidate.macro).symmetry_x)
+            || std::any_of(sinks.begin(), sinks.end(), [&](const Endpoint& sink) { return sink.instance == candidate.name; })) {
+          continue;
+        }
+        auto destination        = candidate.place;
+        destination.orientation = v.fp.rows.at((destination.y - v.fp.rows.front().y) / rh).orientation;
+        const auto cost         = distance_to_users(destination);
+        if (cost + sw < best_cost) {
+          best      = i;
+          best_cost = cost;
+        }
+      }
+      if (best < v.cells.size()) {
+        auto& other              = v.cells[best];
+        auto& old_row            = rows.at(other.place.y);
+        const auto [first, last] = old_row.equal_range(other.place.x);
+        for (auto cell = first; cell != last; ++cell) {
+          if (cell->second == best) {
+            old_row.erase(cell);
+            break;
+          }
+        }
+        std::swap(tie.place.x, other.place.x);
+        std::swap(tie.place.y, other.place.y);
+        tie.place.orientation   = v.fp.rows.at((tie.place.y - v.fp.rows.front().y) / rh).orientation;
+        other.place.orientation = v.fp.rows.at((other.place.y - v.fp.rows.front().y) / rh).orientation;
+        rows[other.place.y].emplace(other.place.x, best);
+        moved = true;
+      }
+    }
+    if (!moved) {
+      break;
+    }
+  }
   make_arrays(v, tech);
 }
 void validate_rows(const ph::Technology& tech, ph::Floorplan& fp) {
@@ -1453,7 +1949,8 @@ void       initialize_route_tables() { init_flute(); }
 // One net's FLUTE Steiner RC exactly as placement RC estimation builds it: pin
 // nodes in order, one junction per distinct location (pins attach through a
 // 1e-9 ohm edge), FLUTE edges between junctions with half the wire capacitance
-// on each end, and a star from the first pin above 1000 locations.
+// on each end. Above 1000 locations, spatial FLUTE groups are joined by
+// representative trees and any cycles in that geometric union are removed.
 ph::Rc_net steiner_rc(std::string driver, const std::vector<std::pair<std::string, std::pair<double, double>>>& pins,
                       const Wire_rc& wire, double dbu, bool* approximate) {
   init_flute();
@@ -1476,7 +1973,9 @@ ph::Rc_net steiner_rc(std::string driver, const std::vector<std::pair<std::strin
     }
     return it->second;
   };
+  std::vector<double> edge_capacitance;
   for (size_t i = 0; i < positions.size(); ++i) {
+    edge_capacitance.push_back(0);
     rc.edges.push_back({static_cast<unsigned>(i), vertex(positions[i]), 1e-9});
   }
   for (const auto& [xy, index] : junction) {
@@ -1491,6 +1990,7 @@ ph::Rc_net steiner_rc(std::string driver, const std::vector<std::pair<std::strin
     const double resistance  = (wire.horizontal_r * dx + wire.vertical_r * dy) / dbu;
     const double capacitance = (wire.horizontal_c * dx + wire.vertical_c * dy) / dbu;
     rc.edges.push_back({a, b, std::max(1e-9, resistance)});
+    edge_capacitance.push_back(capacitance);
     rc.nodes[a].capacitance_ff += capacitance / 2;
     rc.nodes[b].capacitance_ff += capacitance / 2;
   };
@@ -1577,6 +2077,87 @@ ph::Rc_net steiner_rc(std::string driver, const std::vector<std::pair<std::strin
       }
     }
     tree(level);
+  }
+  // Coordinate coalescing can make independently built FLUTE trees share
+  // several junctions. Their geometric union is connected but need not be a
+  // tree: edge deduplication alone leaves cycles, which RC traversal cannot
+  // time. Leave an already valid tree's edges and capacitance sums untouched.
+  if (!rc.nodes.empty()) {
+    std::vector<unsigned> parent(rc.nodes.size()), size(rc.nodes.size(), 1);
+    const auto            reset = [&] {
+      std::iota(parent.begin(), parent.end(), 0);
+      std::fill(size.begin(), size.end(), 1);
+    };
+    const auto root = [&](unsigned n) {
+      while (parent[n] != n) {
+        parent[n] = parent[parent[n]];
+        n         = parent[n];
+      }
+      return n;
+    };
+    const auto join = [&](unsigned a, unsigned b) {
+      a = root(a);
+      b = root(b);
+      if (a == b) {
+        return false;
+      }
+      if (size[a] < size[b]) {
+        std::swap(a, b);
+      }
+      parent[b]  = a;
+      size[a]   += size[b];
+      return true;
+    };
+    reset();
+    bool cyclic = false;
+    for (const auto& edge : rc.edges) {
+      cyclic |= !join(edge.from, edge.to);
+    }
+    for (unsigned i = 0; i < rc.nodes.size(); ++i) {
+      if (root(i) != root(0)) {
+        throw std::runtime_error("disconnected FLUTE RC graph for " + rc.driver);
+      }
+    }
+    if (cyclic) {
+      reset();
+      std::vector<bool> keep(rc.edges.size());
+      // Pin-to-junction edges are mandatory leaves, including coincident pins.
+      for (size_t i = 0; i < pins.size(); ++i) {
+        const auto& edge = rc.edges[i];
+        if (!join(edge.from, edge.to)) {
+          throw std::logic_error("cyclic FLUTE pin attachments");
+        }
+        keep[i] = true;
+      }
+      std::vector<size_t> candidates(rc.edges.size() - pins.size());
+      std::iota(candidates.begin(), candidates.end(), pins.size());
+      std::stable_sort(candidates.begin(), candidates.end(), [&](size_t a, size_t b) {
+        return rc.edges[a].resistance_ohm < rc.edges[b].resistance_ohm;
+      });
+      for (const auto i : candidates) {
+        const auto& edge = rc.edges[i];
+        keep[i]          = join(edge.from, edge.to);
+      }
+      for (auto& node : rc.nodes) {
+        node.capacitance_ff = 0;
+      }
+      size_t retained = 0;
+      for (size_t i = 0; i < rc.edges.size(); ++i) {
+        if (keep[i]) {
+          const auto edge                     = rc.edges[i];
+          rc.nodes[edge.from].capacitance_ff += edge_capacitance[i] / 2;
+          rc.nodes[edge.to].capacitance_ff   += edge_capacitance[i] / 2;
+          rc.edges[retained++]                = edge;
+        }
+      }
+      rc.edges.resize(retained);
+      if (retained + 1 != rc.nodes.size()) {
+        throw std::logic_error("FLUTE spanning tree did not retain every junction");
+      }
+      if (approximate) {
+        *approximate = true;
+      }
+    }
   }
   return rc;
 }
@@ -1817,16 +2398,186 @@ CacheInfo restore_cache(View& v, const ph::Technology& tech, const std::string& 
   v.fp.terminals = std::move(terminals);
   return info;
 }
+// Dynamic incident-net extrema avoid rescanning a high-fanout net for every
+// dirty sink. Own pins are removed during a cell's search and reinserted only
+// after its chosen site; pending cells therefore retain their original seeds.
+class Eco_connectivity {
+  struct Net {
+    double                weight = 1;
+    std::multiset<double> x, y;
+  };
+  struct Pin_point {
+    size_t               net = 0;
+    double               x = 0, y = 0;
+    std::array<Point, 2> offsets;
+  };
+  struct Term {
+    double                  weight = 1;
+    std::array<ph::Rect, 2> origins;
+  };
+  std::vector<Net>                         nets;
+  std::vector<Pin_point>                   pins;
+  std::vector<std::vector<size_t>>         incident;
+  std::vector<Term>                        terms;
+  std::array<std::pair<double, double>, 2> minima;
+  double                                   strength;
+  static double outside(double value, double lo, double hi) { return std::max({lo - value, 0.0, value - hi}); }
+
+public:
+  Eco_connectivity(const View& v, const ph::Technology& tech, const std::vector<size_t>& edits, double weight)
+      : incident(v.cells.size()), strength(weight) {
+    std::vector<bool> dirty(v.cells.size());
+    for (const auto i : edits) {
+      dirty[i] = true;
+    }
+    const auto& d = v.design;
+    for (size_t n = 0; n < d.net_weights.size(); ++n) {
+      if (!d.net_mask.empty() && !d.net_mask[n]) {
+        continue;  // pre-CTS clocks and empty nets are absent from HPWL
+      }
+      const auto begin = d.flat_net2pin_start[n], end = d.flat_net2pin_start[n + 1];
+      bool       relevant = false;
+      for (int k = begin; k < end; ++k) {
+        const auto node  = d.pin2node[d.flat_net2pin[k]];
+        relevant        |= node < static_cast<int>(dirty.size()) && dirty[node];
+      }
+      if (!relevant) {
+        continue;
+      }
+      const auto net = nets.size();
+      nets.emplace_back();
+      nets.back().weight = d.net_weights[n];
+      for (int k = begin; k < end; ++k) {
+        const auto   p = d.flat_net2pin[k], node = d.pin2node[p];
+        const double x = d.node_x[node] + d.pin_offset_x[p], y = d.node_y[node] + d.pin_offset_y[p];
+        nets.back().x.insert(x);
+        nets.back().y.insert(y);
+        if (node < static_cast<int>(dirty.size()) && dirty[node]) {
+          const auto& cell  = v.cells[node];
+          const auto& macro = tech.macros.at(cell.macro);
+          incident[node].push_back(pins.size());
+          pins.push_back({
+              net,
+              x,
+              y,
+              {offset(macro, v.pins[p].pin, Orientation::N, tech.dbu), offset(macro, v.pins[p].pin, Orientation::FS, tech.dbu)}
+          });
+        }
+      }
+    }
+  }
+  size_t net_count() const { return nets.size(); }
+  size_t pin_count() const { return pins.size(); }
+  bool   active() const { return !terms.empty(); }
+  void   prepare(size_t cell, double seed_x) {
+    terms.clear();
+    // incident[cell] is grouped by net, since construction visits whole nets.
+    for (size_t first = 0; first < incident[cell].size();) {
+      const auto              net   = pins[incident[cell][first]].net;
+      auto&                   other = nets[net];
+      std::array<ph::Rect, 2> own;
+      for (auto& box : own) {
+        box = {std::numeric_limits<double>::infinity(),
+               std::numeric_limits<double>::infinity(),
+               -std::numeric_limits<double>::infinity(),
+               -std::numeric_limits<double>::infinity()};
+      }
+      size_t last = first;
+      while (last < incident[cell].size() && pins[incident[cell][last]].net == net) {
+        const auto& pin = pins[incident[cell][last++]];
+        other.x.erase(other.x.find(pin.x));
+        other.y.erase(other.y.find(pin.y));
+        for (size_t o = 0; o < own.size(); ++o) {
+          const auto [x, y] = pin.offsets[o];
+          own[o].xl         = std::min(own[o].xl, x);
+          own[o].xh         = std::max(own[o].xh, x);
+          own[o].yl         = std::min(own[o].yl, y);
+          own[o].yh         = std::max(own[o].yh, y);
+        }
+      }
+      if (!other.x.empty()) {
+        Term term;
+        term.weight = strength * other.weight;
+        for (size_t o = 0; o < own.size(); ++o) {
+          const double xa = *other.x.begin() - own[o].xl, xb = *other.x.rbegin() - own[o].xh;
+          const double ya = *other.y.begin() - own[o].yl, yb = *other.y.rbegin() - own[o].yh;
+          term.origins[o] = {std::min(xa, xb), std::min(ya, yb), std::max(xa, xb), std::max(ya, yb)};
+        }
+        terms.push_back(term);
+      }
+      first = last;
+    }
+    for (size_t o = 0; o < minima.size(); ++o) {
+      std::vector<std::pair<double, double>> points{
+          {seed_x, 1}
+      };
+      double total = 1;
+      for (const auto& term : terms) {
+        points.emplace_back(term.origins[o].xl, term.weight / 2);
+        points.emplace_back(term.origins[o].xh, term.weight / 2);
+        total += term.weight;
+      }
+      std::sort(points.begin(), points.end());
+      double cumulative = 0;
+      for (size_t k = 0; k < points.size(); ++k) {
+        cumulative += points[k].second;
+        if (cumulative >= total / 2) {
+          minima[o] = {points[k].first, cumulative == total / 2 && k + 1 < points.size() ? points[k + 1].first : points[k].first};
+          break;
+        }
+      }
+    }
+  }
+  double preferred_x(double seed_x, bool fs) const { return std::clamp(seed_x, minima[fs].first, minima[fs].second); }
+  double vertical(double y, bool fs) const {
+    double result = 0;
+    for (const auto& term : terms) {
+      const auto& box  = term.origins[fs];
+      result          += term.weight * outside(y, box.yl, box.yh);
+    }
+    return result;
+  }
+  double horizontal(double x, bool fs) const {
+    double result = 0;
+    for (const auto& term : terms) {
+      const auto& box  = term.origins[fs];
+      result          += term.weight * outside(x, box.xl, box.xh);
+    }
+    return result;
+  }
+  void commit(size_t cell, const Ann_place& chosen) {
+    const bool fs = chosen.orientation == Orientation::FS;
+    for (const auto id : incident[cell]) {
+      auto& pin = pins[id];
+      pin.x     = chosen.x + pin.offsets[fs].first;
+      pin.y     = chosen.y + pin.offsets[fs].second;
+      nets[pin.net].x.insert(pin.x);
+      nets[pin.net].y.insert(pin.y);
+    }
+  }
+};
+struct Eco_trace {
+  std::string name, master;
+  Ann_place   seed, chosen;
+  size_t      row = 0, order = 0;
+  int64_t     gap_lo = 0, gap_hi = 0;
+};
 struct Eco_stats {
-  bool     used           = false;
-  bool     single_cell    = false;
-  bool     released_locks = false;  // whole-core retry made cache-reused cells movable
-  unsigned attempts = 0, moved = 0;
-  double   max_displacement_um = 0;
-  ph::Rect window;
+  bool                   used           = false;
+  bool                   single_cell    = false;
+  bool                   released_locks = false;  // whole-core retry made cache-reused cells movable
+  unsigned               attempts = 0, moved = 0;
+  double                 max_displacement_um = 0;
+  ph::Rect               window;
+  std::vector<Eco_trace> trace;
+  size_t                 connectivity_nets = 0, connectivity_pins = 0, candidate_sites = 0, candidate_rows = 0;
+  double                 connectivity_seconds = 0;
 };
 bool legalize_edits(View& v, const ph::Technology& tech, const ph::Floorplan& reference, const std::vector<std::string>& forced,
-                    Eco_stats& stats) {
+                    Eco_stats& stats, const std::vector<std::string>& trace_cells, double connectivity_weight) {
+  const auto                                  connectivity_start = std::chrono::steady_clock::now();
+  const std::set<std::string>                 traced(trace_cells.begin(), trace_cells.end());
+  std::vector<Eco_trace>                      trace;
   const auto                                  original = v.cells;
   std::map<std::string, const ph::Component*> old;
   for (const auto& c : reference.components) {
@@ -1865,6 +2616,11 @@ bool legalize_edits(View& v, const ph::Technology& tech, const ph::Floorplan& re
     return v.cells[a].place.width != v.cells[b].place.width ? v.cells[a].place.width > v.cells[b].place.width
                                                             : v.cells[a].name < v.cells[b].name;
   });
+  std::unique_ptr<Eco_connectivity> connectivity;
+  if (connectivity_weight > 0) {
+    connectivity = std::make_unique<Eco_connectivity>(v, tech, edits, connectivity_weight);
+  }
+  size_t                                                candidate_sites = 0, candidate_rows = 0;
   // Preserve the exhaustive row/gap search, but collect each row's obstacles
   // once. Scanning every cell for every row of every inserted buffer is costly
   // even when a large core has abundant whitespace.
@@ -1887,12 +2643,18 @@ bool legalize_edits(View& v, const ph::Technology& tech, const ph::Floorplan& re
   for (auto& intervals : occupied_rows) {
     std::sort(intervals.begin(), intervals.end());
   }
-  for (const auto index : edits) {
-    auto&      c    = v.cells[index];
-    const auto seed = c.place;
-    double     best = std::numeric_limits<double>::infinity();
+  for (size_t order = 0; order < edits.size(); ++order) {
+    const auto index = edits[order];
+    auto&      c     = v.cells[index];
+    const auto seed  = c.place;
+    if (connectivity) {
+      connectivity->prepare(index, seed.x);
+    }
+    const bool connected = connectivity && connectivity->active();
+    double     best      = std::numeric_limits<double>::infinity();
     Ann_place  chosen;
-    size_t     chosen_row = v.fp.rows.size();
+    size_t     chosen_row    = v.fp.rows.size();
+    int64_t    chosen_gap_lo = 0, chosen_gap_hi = 0;
     // Visit rows by their vertical lower bound. Once that alone exceeds the
     // best Manhattan displacement, no farther row can improve it. Resolve
     // equal-cost choices by original row order, as the exhaustive search did.
@@ -1913,26 +2675,51 @@ bool legalize_edits(View& v, const ph::Technology& tech, const ph::Floorplan& re
       if (row.orientation == Orientation::FS && !tech.macros.at(c.macro).symmetry_x) {
         continue;
       }
+      const bool   fs       = row.orientation == Orientation::FS;
+      const double vertical = std::abs(double(row.y - seed.y)) + (connected ? connectivity->vertical(row.y, fs) : 0);
+      if (vertical > best) {
+        continue;
+      }
+      ++candidate_rows;
       const auto&   occupied = occupied_rows[row_index];
       int64_t       left     = row.x;
       const int64_t right    = row.x + row.count * sw;
       const auto    consider = [&](int64_t lo, int64_t hi) {
+        const auto gap_lo = lo, gap_hi = hi;
         lo = row.x + static_cast<int64_t>(std::ceil(double(lo - row.x) / sw)) * sw;
         hi = row.x + static_cast<int64_t>(std::floor(double(hi - c.place.width - row.x) / sw)) * sw;
         if (hi < lo) {
           return;
         }
-        const auto    desired  = row.x + std::llround(double(seed.x - row.x) / sw) * sw;
-        const int64_t x        = std::clamp<int64_t>(desired, lo, hi);
-        const double  distance = std::abs(double(x - seed.x)) + std::abs(double(row.y - seed.y));
-        if (distance < best || (distance == best && row_index < chosen_row)) {
-          chosen_row         = row_index;
-          best               = distance;
-          chosen             = seed;
-          chosen.x           = x;
-          chosen.y           = row.y;
-          chosen.orientation = row.orientation;
-          chosen.status      = Status::PLACED;
+        const auto evaluate = [&](int64_t x) {
+          ++candidate_sites;
+          const double distance = std::abs(double(x - seed.x)) + vertical + (connected ? connectivity->horizontal(x, fs) : 0);
+          if (distance < best
+              || (distance == best && (row_index < chosen_row || (connected && row_index == chosen_row && x < chosen.x)))) {
+            chosen_row         = row_index;
+            chosen_gap_lo      = gap_lo;
+            chosen_gap_hi      = gap_hi;
+            best               = distance;
+            chosen             = seed;
+            chosen.x           = x;
+            chosen.y           = row.y;
+            chosen.orientation = row.orientation;
+            chosen.status      = Status::PLACED;
+          }
+        };
+        if (!connected) {
+          // Keep the legacy llround half-site choice, including clock-only or
+          // disconnected cells when the opt-in coefficient is positive.
+          const auto desired = row.x + std::llround(double(seed.x - row.x) / sw) * sw;
+          evaluate(std::clamp<int64_t>(desired, lo, hi));
+        } else {
+          const double desired = std::clamp(connectivity->preferred_x(seed.x, fs), double(lo), double(hi));
+          const auto   lower   = std::clamp<int64_t>(row.x + std::floor((desired - row.x) / sw) * sw, lo, hi);
+          const auto   upper   = std::clamp<int64_t>(row.x + std::ceil((desired - row.x) / sw) * sw, lo, hi);
+          evaluate(lower);
+          if (upper != lower) {
+            evaluate(upper);
+          }
         }
       };
       for (const auto& [lo, hi] : occupied) {
@@ -1953,6 +2740,12 @@ bool legalize_edits(View& v, const ph::Technology& tech, const ph::Floorplan& re
       v.cells = original;
       return false;
     }
+    if (traced.contains(c.name)) {
+      trace.push_back({c.name, c.macro, seed, chosen, chosen_row, order, chosen_gap_lo, chosen_gap_hi});
+    }
+    if (connectivity) {
+      connectivity->commit(index, chosen);
+    }
     c.place = chosen;
     add_obstacle(chosen, true);
   }
@@ -1967,6 +2760,14 @@ bool legalize_edits(View& v, const ph::Technology& tech, const ph::Floorplan& re
     v.cells = original;
     return false;
   }
+  if (connectivity) {
+    stats.connectivity_nets    = connectivity->net_count();
+    stats.connectivity_pins    = connectivity->pin_count();
+    stats.candidate_sites      = candidate_sites;
+    stats.candidate_rows       = candidate_rows;
+    stats.connectivity_seconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - connectivity_start).count();
+  }
+  stats.trace       = std::move(trace);
   stats.used        = true;
   stats.attempts    = 1;
   stats.single_cell = true;
@@ -2114,7 +2915,7 @@ dp::Result local_place(View& v, const ph::Technology& tech, const Options& optio
                                              (std::abs(double(c.place.x) - p.x) + std::abs(double(c.place.y) - p.y)) / tech.dbu);
         c.locked                  = before.at(c.name)->locked;
       }
-      check_legality(tech, check, options.halo_x, options.halo_y);
+      check_legality(tech, check, options);
       make_arrays(v, tech);
       return metrics;
     } catch (const std::runtime_error&) {
@@ -2218,12 +3019,24 @@ void check_legality(const ph::Technology& tech, const ph::Floorplan& fp, double 
     const auto&   site   = tech.sites.at(fp.rows.front().site);
     const int64_t sw = fp.rows.front().step, rh = std::llround(site.height * tech.dbu);
     const auto    x = macro_halo(halo_x, tech.dbu, sw), y = macro_halo(halo_y, tech.dbu, rh);
+    const int64_t xl = fp.rows.front().x, yl = fp.rows.front().y;
+    const int64_t xh = xl + fp.rows.front().count * sw, yh = fp.rows.back().y + rh;
     for (auto& c : padded.components) {
       if (!tech.macros.at(c.macro).klass.starts_with("CORE")) {
-        c.place.x      -= static_cast<int64_t>(x);
-        c.place.y      -= static_cast<int64_t>(y);
-        c.place.width  += 2 * static_cast<int64_t>(x);
-        c.place.height += 2 * static_cast<int64_t>(y);
+        auto& p = c.place;
+        // A fixed macro may touch a core edge. Its physical body must fit,
+        // while clearance outside the core has no placeable area to reserve.
+        // Check the body before clipping so an out-of-bounds macro cannot pass.
+        if (p.x < xl || p.y < yl || p.x + p.width > xh || p.y + p.height > yh) {
+          throw std::runtime_error("cell outside core/unplaced: " + c.name);
+        }
+        const bool fixed = p.status == Status::FIXED || p.status == Status::LOCKED;
+        const auto left = p.x - static_cast<int64_t>(x), bottom = p.y - static_cast<int64_t>(y);
+        const auto right = p.x + p.width + static_cast<int64_t>(x), top = p.y + p.height + static_cast<int64_t>(y);
+        p.x      = fixed ? std::max(xl, left) : left;
+        p.y      = fixed ? std::max(yl, bottom) : bottom;
+        p.width  = (fixed ? std::min(xh, right) : right) - p.x;
+        p.height = (fixed ? std::min(yh, top) : top) - p.y;
       }
     }
     check_legality(tech, padded);
@@ -2282,6 +3095,35 @@ void check_legality(const ph::Technology& tech, const ph::Floorplan& fp, double 
       }
     }
   }
+}
+
+Options final_cell_options(const Options& options) {
+  validate_cell_halo(options);
+  if (!options.cell_halo) {
+    return options;  // Unset must preserve every existing staged/default decision.
+  }
+  auto resolved       = options;
+  resolved.cell_stage = true;
+  // A placed-context request must not re-enter fresh floorplan or macro optimization.
+  if (resolved.cell_halo) {
+    resolved.fp_place    = false;
+    resolved.final_cells = false;
+    resolved.macro_mode  = "none";
+  }
+  return resolved;
+}
+void check_placed_legality(const Result& result, const Options& options) {
+  auto tech = ph::read_lef(options.lefs);
+  if (result.graph) {
+    memory_proxies(*result.graph, tech, options.liberty);
+  }
+  check_legality(tech, result.floorplan, final_cell_options(options));
+}
+void check_legality(const ph::Technology& tech, const ph::Floorplan& fp, const Options& options) {
+  validate_cell_halo(options);
+  check_macro_halo(tech, fp, options);
+  const auto [x, y] = effective_halo(options);
+  check_legality(tech, fp, x, y);
 }
 
 Steiner_tree steiner_tree(const std::vector<Point>& points) {
@@ -2415,6 +3257,12 @@ static bool defer_timing_checkpoint(const Options& options, unsigned done, bool 
   return done >= quota || movement < options.fp_timing_movement;
 }
 static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, const Options& options) {
+  validate_cell_halo(options);
+  const auto [cell_halo_x, cell_halo_y] = effective_halo(options);
+  if (!std::isfinite(options.eco_connectivity_weight) || options.eco_connectivity_weight < 0
+      || options.eco_connectivity_weight > 100) {
+    throw std::invalid_argument("ECO connectivity weight must be finite and between 0 and 100");
+  }
   if (options.retain_placement && (!options.previous || options.timing_seed || options.fp_place || options.macro_mode != "none")) {
     throw std::invalid_argument("timing snapshot requires an explicit previous placement and no placement stages");
   }
@@ -2434,6 +3282,14 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
   }
   if (options.macro_mode != "none" && options.macro_mode != "h2d") {
     throw std::invalid_argument("macro placement mode must be none or h2d");
+  }
+  if (options.legalize_timing_corrections > 2) {
+    throw std::invalid_argument("timing correction budget must be 0..2");
+  }
+  if (!std::isfinite(options.legalize_timing_strength) || options.legalize_timing_strength < 0
+      || options.legalize_timing_strength > 99 || !std::isfinite(options.legalize_timing_threshold)
+      || options.legalize_timing_threshold < 0 || options.legalize_timing_threshold > 1) {
+    throw std::invalid_argument("invalid timing legalization strength/threshold");
   }
   if (!std::isfinite(options.timing_max_weight) || options.timing_max_weight < 1 || options.timing_max_weight > max_net_weight
       || !std::isfinite(options.timing_smoothing) || options.timing_smoothing < 0 || options.timing_smoothing > 1
@@ -2677,8 +3533,99 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
   if (sw <= 0 || rh <= 0) {
     throw std::runtime_error("invalid LEF SITE dimensions");
   }
-  v.halo_x = macro_halo(options.halo_x, tech.dbu, sw);
-  v.halo_y = macro_halo(options.halo_y, tech.dbu, rh);
+  // Build physical connectivity before sizing the frame: replicated ties are
+  // real cells and must consume capacity from the first placement iteration.
+  for (const auto& decl : graph.get_io()->get_output_pin_decls()) {
+    const auto drivers = graph.get_output_pin(decl.name).get_driver_pins();
+    if (drivers.size() != 1) {
+      throw std::runtime_error("top output needs exactly one driver: " + decl.name);
+    }
+    for (int bit = 0; bit < std::max(1, int(decl.bits)); ++bit) {
+      v.nets[resolver.bit(drivers.front(), bit)].push_back({"PIN", bit_name(decl.name, std::max(1, int(decl.bits)), bit), -1});
+    }
+  }
+  for (const auto& cell : v.cells) {
+    const bool memory = memories.contains(cell.node.get_debug_nid());
+    for (auto sink : cell.node.inp_sorted_pins()) {
+      if (memory && !memory_runtime_pin(sink.get_port_id())) {
+        continue;
+      }
+      const auto drivers = sink.get_driver_pins();
+      if (drivers.size() != 1) {
+        throw std::runtime_error("physical input needs exactly one driver: " + cell.name);
+      }
+      if (memory) {
+        for (int b = 0; b < std::max(1, gu::bits_of(drivers.front())); ++b) {
+          v.nets[resolver.bit(drivers.front(), b)].push_back({cell.name, memory_pin(sink.get_port_id(), b, false), -1});
+        }
+        continue;
+      }
+      const auto& macro = tech.macros.at(cell.macro);
+      const auto  name  = pin_name(sink);
+      if (macro.pins.contains(name)) {
+        v.nets[resolver.bit(drivers.front(), 0)].push_back({cell.name, name, -1});
+      } else {
+        bool found = false;
+        for (int b = 0; macro.pins.contains(std::format("{}[{}]", name, b)); ++b) {
+          v.nets[resolver.bit(drivers.front(), b)].push_back({cell.name, std::format("{}[{}]", name, b), -1});
+          found = true;
+        }
+        if (!found) {
+          std::string declared;
+          if (auto cell_io = cell.node.get_subnode_io()) {
+            for (const auto& d : cell_io->get_input_pin_decls()) {
+              declared += std::format(" in {}={}", d.name, d.port_id);
+            }
+            for (const auto& d : cell_io->get_output_pin_decls()) {
+              declared += std::format(" out {}={}", d.name, d.port_id);
+            }
+          }
+          throw std::runtime_error(std::format("physical input pin absent from LEF: {}/{} (instance {}, sink port {}, declared{})",
+                                               cell.macro,
+                                               name,
+                                               cell.name,
+                                               sink.get_port_id(),
+                                               declared));
+        }
+      }
+    }
+  }
+  std::map<Endpoint, bool> characterized_ties;
+  if (!options.liberty.empty()) {
+    for (const auto& model : liberty::scan_constant_cells(options.liberty)) {
+      v.constant_masters.insert(model.name);
+      for (const auto& cell : v.cells) {
+        if (cell.macro == model.name) {
+          for (const auto& [pin, value] : model.outputs) {
+            characterized_ties.emplace(Endpoint{cell.name, pin, -1}, value);
+          }
+        }
+      }
+    }
+  }
+  std::array<std::optional<Tie_cell>, 2> tie_cells;
+  if (v.nets.contains(Endpoint{{}, {}, 0}) || v.nets.contains(Endpoint{{}, {}, 1})) {
+    tie_cells = find_tie_cells(options, tech, site_name);
+  }
+  for (const auto& [driver, sinks] : v.nets) {
+    if (driver.constant >= 0) {
+      const auto& selected = tie_cells[driver.constant];
+      if (!selected) {
+        throw std::runtime_error(
+            std::format("no usable Liberty/LEF constant-{} driver; provide matching synth.liberty and synth.lef cells",
+                        driver.constant));
+      }
+      const auto& master  = tech.macros.at(selected->cell.name);
+      area               += sinks.size() * selected->area * tech.dbu * tech.dbu;
+      max_width           = std::max(max_width, int64_t(std::llround(master.width * tech.dbu)));
+      max_height          = std::max(max_height, int64_t(std::llround(master.height * tech.dbu)));
+    } else if (characterized_ties.contains(driver) && sinks.size() > 1) {
+      const auto cell  = std::find_if(v.cells.begin(), v.cells.end(), [&](const Cell& c) { return c.name == driver.instance; });
+      area            += (sinks.size() - 1) * double(cell->place.width) * cell->place.height;
+    }
+  }
+  v.halo_x = macro_halo(cell_halo_x, tech.dbu, sw);
+  v.halo_y = macro_halo(cell_halo_y, tech.dbu, rh);
   for (const auto& c : v.cells) {
     if (!tech.macros.at(c.macro).klass.starts_with("CORE")) {
       max_width  = std::max(max_width, c.place.width + 2 * v.halo_x);
@@ -2881,14 +3828,18 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
         {-half, -half, half, half}
     });
     if (const auto it = imported_terms.find(name); it != imported_terms.end()) {
-      const bool adjustable
-          = it->second.status == Status::PLACED && ((options.fp_place && options.fp_pin_adjust) || options.macro_pin_adjust);
+      const bool adjustable = (options.fp_place && options.fp_pin_adjust) || options.macro_pin_adjust;
       if (it->second.status != Status::FIXED && !previous && !adjustable) {
         throw std::runtime_error("floorplan PINS must be FIXED unless IO adjustment is enabled: " + name);
       }
-      t           = it->second;
-      t.direction = direction;
-      imported_pos.insert(name);
+      if (it->second.status != Status::UNPLACED) {
+        t           = it->second;
+        t.direction = direction;
+        imported_pos.insert(name);
+      }
+      // UNPLACED declares a port, not a position or an explicit constraint.
+      // Keep the generated legal-layer shape and default perimeter seed; the
+      // initial spread/IO assignment must treat it like any new movable pin.
     }
     top_pins.emplace(name, p);
     v.fp.terminals.push_back(std::move(t));
@@ -2911,7 +3862,6 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
     for (int b = 0; b < std::max(1, static_cast<int>(d.bits)); ++b) {
       auto name = bit_name(d.name, std::max(1, static_cast<int>(d.bits)), b);
       add_terminal(p, name, "OUTPUT", d.name, b);
-      v.nets[resolver.bit(drivers.front(), b)].push_back({"PIN", name, -1});
     }
   }
   // Start with distributed side pins so the first GP does not pull every
@@ -2931,57 +3881,9 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
       }
     }
   }
-  for (const auto& cell : v.cells) {
-    const bool memory = memories.contains(cell.node.get_debug_nid());
-    for (auto sink : cell.node.inp_sorted_pins()) {
-      if (memory && !memory_runtime_pin(sink.get_port_id())) {
-        continue;
-      }
-      const auto drivers = sink.get_driver_pins();
-      if (drivers.size() != 1) {
-        throw std::runtime_error("physical input needs exactly one driver: " + cell.name);
-      }
-      if (memory) {
-        for (int b = 0; b < std::max(1, gu::bits_of(drivers.front())); ++b) {
-          v.nets[resolver.bit(drivers.front(), b)].push_back({cell.name, memory_pin(sink.get_port_id(), b, false), -1});
-        }
-        continue;
-      }
-      const auto& macro = tech.macros.at(cell.macro);
-      const auto  name  = pin_name(sink);
-      if (macro.pins.contains(name)) {
-        v.nets[resolver.bit(drivers.front(), 0)].push_back({cell.name, name, -1});
-      } else {
-        bool found = false;
-        for (int b = 0; macro.pins.contains(std::format("{}[{}]", name, b)); ++b) {
-          v.nets[resolver.bit(drivers.front(), b)].push_back({cell.name, std::format("{}[{}]", name, b), -1});
-          found = true;
-        }
-        if (!found) {
-          std::string declared;
-          if (auto cell_io = cell.node.get_subnode_io()) {
-            for (const auto& d : cell_io->get_input_pin_decls()) {
-              declared += std::format(" in {}={}", d.name, d.port_id);
-            }
-            for (const auto& d : cell_io->get_output_pin_decls()) {
-              declared += std::format(" out {}={}", d.name, d.port_id);
-            }
-          }
-          throw std::runtime_error(std::format("physical input pin absent from LEF: {}/{} (instance {}, sink port {}, declared{})",
-                                               cell.macro,
-                                               name,
-                                               cell.name,
-                                               sink.get_port_id(),
-                                               declared));
-        }
-      }
-    }
-  }
   // Constants remain logical constants in the graph. Instantiate real tie cells
   // for the physical view and graph so DEF/Verilog/STA share the same netlist.
-  std::array<std::optional<Tie_cell>, 2> tie_cells;
   if (v.nets.contains(Endpoint{{}, {}, 0}) || v.nets.contains(Endpoint{{}, {}, 1})) {
-    tie_cells = find_tie_cells(options, tech, site_name);
     // The generated N/FS decision above only saw the mapped cells. If a needed
     // tie cannot flip (no X-symmetric candidate exists), generated rows fall
     // back to all-N; imported or caller-supplied previous FS rows cannot use it.
@@ -3003,51 +3905,54 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
       }
     }
   }
-  std::array<Pin, 2> tie_drivers;
-  for (int value = 0; value < 2; ++value) {
-    Endpoint key{{}, {}, value};
-    auto     it = v.nets.find(key);
-    if (it == v.nets.end()) {
-      continue;
+  // Each physical pin/bit owns its driver. Keep an imported single-load tie
+  // (identified by its Liberty function), and split shared ties before GP.
+  // Additional names depend on the user, so refresh and cache rounds cannot
+  // accidentally merge local sources back into a global constant net.
+  std::map<Endpoint, Pin>                   tie_drivers;
+  std::map<Endpoint, std::vector<Endpoint>> constant_nets;
+  for (const auto& [driver, sinks] : v.nets) {
+    if (driver.constant >= 0 || characterized_ties.contains(driver)) {
+      constant_nets.emplace(driver, sinks);
     }
-    if (!tie_cells[value]) {
-      throw std::runtime_error(
-          std::format("no usable Liberty/LEF constant-{} driver; provide matching synth.liberty and synth.lef cells"
-                      " (flipped FS rows need a SYMMETRY X master)",
-                      value));
-    }
-    const auto&       selected   = *tie_cells[value];
-    const auto&       macro_name = selected.cell.name;
-    const auto&       output     = selected.output;
-    // A re-placed graph (timing/repair/resynth rounds) already carries this tie
-    // cell (including top-output aliases): reuse the existing tie.
-    const std::string tie_name   = value ? "__place_tiehi" : "__place_tielo";
-    const auto        existing   = std::find_if(v.cells.begin(), v.cells.end(), [&](const Cell& c) { return c.name == tie_name; });
-    Node              node;
-    if (existing != v.cells.end()) {
-      if (existing->macro != macro_name) {
-        throw std::runtime_error("tie cell master mismatch: " + tie_name);
-      }
-      node = existing->node;
+  }
+  for (const auto& [constant_driver, sinks] : constant_nets) {
+    const bool  imported = constant_driver.constant < 0;
+    const int   value    = imported ? int(characterized_ties.at(constant_driver)) : constant_driver.constant;
+    std::string master_name, output;
+    if (imported) {
+      const auto cell
+          = std::find_if(v.cells.begin(), v.cells.end(), [&](const Cell& c) { return c.name == constant_driver.instance; });
+      master_name = cell->macro;
+      output      = constant_driver.pin;
     } else {
-      auto tie_io = library.find_io(macro_name);
-      if (!tie_io) {
-        tie_io = library.create_io(macro_name);
+      if (!tie_cells[value]) {
+        throw std::runtime_error(
+            std::format("no usable Liberty/LEF constant-{} driver (flipped FS rows need a SYMMETRY X master)", value));
       }
-      if (!tie_io->get_input_pin_decls().empty()) {
-        throw std::runtime_error("constant cell declaration has inputs: " + macro_name);
-      }
+      master_name = tie_cells[value]->cell.name;
+      output      = tie_cells[value]->output;
+    }
+    auto tie_io = library.find_io(master_name);
+    if (!tie_io) {
+      tie_io = library.create_io(master_name);
+    }
+    if (!tie_io->get_input_pin_decls().empty()) {
+      throw std::runtime_error("constant cell declaration has inputs: " + master_name);
+    }
+    if (!imported) {
       hhds::Port_id next = 0;
       for (const auto& decl : tie_io->get_output_pin_decls()) {
         next = std::max(next, static_cast<hhds::Port_id>(decl.port_id + 1));
-        if (decl.bits != 1 || std::none_of(selected.cell.outputs.begin(), selected.cell.outputs.end(), [&](const auto& pin) {
-              return pin.first == decl.name;
-            })) {
-          throw std::runtime_error("incompatible constant cell declaration: " + macro_name);
+        if (decl.bits != 1
+            || std::none_of(tie_cells[value]->cell.outputs.begin(), tie_cells[value]->cell.outputs.end(), [&](const auto& pin) {
+                 return pin.first == decl.name;
+               })) {
+          throw std::runtime_error("incompatible constant cell declaration: " + master_name);
         }
       }
-      for (const auto& [name, constant_value] : selected.cell.outputs) {
-        (void)constant_value;
+      for (const auto& [name, polarity] : tie_cells[value]->cell.outputs) {
+        (void)polarity;
         const auto& decls = tie_io->get_output_pin_decls();
         if (std::none_of(decls.begin(), decls.end(), [&](const auto& decl) { return decl.name == name; })) {
           tie_io->add_output(name, next++);
@@ -3055,52 +3960,39 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
           tie_io->set_unsign(name, true);
         }
       }
-      node = graph.create_node();
-      gu::set_type_op(node, Ntype_op::Sub);
-      node.set_subnode(tie_io);
-      node.set_name(tie_name);
-      const auto& macro = tech.macros.at(macro_name);
-      Ann_place   p(0, 0, macro.width * tech.dbu, macro.height * tech.dbu);
-      // Ties are materialized after the previous frame seeded the cells.
-      if (previous) {
-        for (const auto& c : previous->components) {
-          if (c.name == tie_name && c.macro == macro_name) {
-            p.x           = c.place.x;
-            p.y           = c.place.y;
-            p.orientation = c.place.orientation;
-            p.status      = c.place.status;
-          }
+    }
+    v.nets.erase(constant_driver);
+    for (size_t i = 0; i < sinks.size(); ++i) {
+      const auto& target = sinks[i];
+      const auto  base   = imported ? constant_driver.instance : std::string(value ? "__place_tiehi" : "__place_tielo");
+      const auto  name = imported && i == 0 ? base : std::format("{}_{:016x}", base, hash_text(target.instance + ":" + target.pin));
+      auto        existing = std::find_if(v.cells.begin(), v.cells.end(), [&](const Cell& c) { return c.name == name; });
+      Node        node;
+      if (existing != v.cells.end()) {
+        if (existing->macro != master_name) {
+          throw std::runtime_error("tie cell master mismatch: " + name);
         }
-      }
-      v.cells.push_back({node, tie_name, macro_name, "__ties", p});
-    }
-    auto sinks = std::move(it->second);
-    v.nets.erase(it);
-    // Append: a reused tie already drives the cells wired to it last round.
-    auto& net = v.nets[{tie_name, output, -1}];
-    net.insert(net.end(), sinks.begin(), sinks.end());
-    // Physical connectivity replaces constants at each directly connected cell
-    // input. Constants embedded in bus wiring keep their logical aliases; the
-    // physical view resolves those aliases to this same tie source.
-    auto driver = node.create_driver_pin(output);
-    gu::set_bits(driver, 1);
-    tie_drivers[value] = driver;
-    std::unordered_map<std::string_view, Node> nodes;
-    for (const auto& c : v.cells) {
-      nodes.emplace(c.name, c.node);
-    }
-    for (const auto& target : sinks) {
-      if (target.instance != "PIN") {
-        for (auto sink : nodes.at(target.instance).inp_pins_snapshot()) {
-          if (pin_name(sink) == target.pin) {
-            const auto old_drivers = sink.get_driver_pins();
-            if (old_drivers.size() == 1 && old_drivers.front().is_const()) {
-              gu::drop_drivers(sink);
-              sink.connect_driver(driver);
+        node = existing->node;
+      } else {
+        node = graph.create_node();
+        gu::set_type_op(node, Ntype_op::Sub);
+        node.set_subnode(tie_io);
+        node.set_name(name);
+        const auto& master = tech.macros.at(master_name);
+        Ann_place   place(0, 0, std::llround(master.width * tech.dbu), std::llround(master.height * tech.dbu));
+        if (previous) {
+          for (const auto& old : previous->components) {
+            if (old.name == name && old.macro == master_name) {
+              place = old.place;
             }
           }
         }
+        v.cells.push_back({node, name, master_name, "__ties", place});
       }
+      auto driver = node.create_driver_pin(output);
+      gu::set_bits(driver, 1);
+      tie_drivers.emplace(target, driver);
+      v.nets[{name, output, -1}].push_back(target);
     }
   }
   // Materialize tie sources inside bus aliases too, including memory ports.
@@ -3129,24 +4021,26 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
           }
         }
       }
-      std::vector<int> constants;
-      bool             changed = false;
+      std::vector<bool> constants;
+      bool              changed = false;
       for (int b = 0; b < width; ++b) {
-        const int value = resolver.bit(original, b).constant;
-        constants.push_back(value);
-        changed |= value >= 0;
+        const auto endpoint = resolver.bit(original, b);
+        const bool constant = endpoint.constant >= 0 || characterized_ties.contains(endpoint);
+        constants.push_back(constant);
+        if (constant) {
+          const auto physical_pin  = memory ? memory_pin(sink.get_port_id(), b, false) : bit_name(pin_name(sink), width, b);
+          const auto driver        = tie_drivers.at(Endpoint{c.name, physical_pin, -1});
+          changed                 |= endpoint != Endpoint{std::string(driver.get_master_node().get_name()), pin_name(driver), -1};
+        }
       }
       if (!changed) {
         continue;
       }
       std::vector<Pin> values;
       for (int b = 0; b < width; ++b) {
-        const int value = constants[b];
-        if (value >= 0) {
-          if (tie_drivers[value].is_invalid()) {
-            throw std::runtime_error("missing physical tie source");
-          }
-          values.push_back(tie_drivers[value]);
+        if (constants[b]) {
+          const auto pin = memory ? memory_pin(sink.get_port_id(), b, false) : bit_name(pin_name(sink), width, b);
+          values.push_back(tie_drivers.at(Endpoint{c.name, pin, -1}));
         } else {
           values.push_back(width == 1 ? original : gu::create_get_mask(graph, original, b).get_driver_pin(0));
         }
@@ -3176,25 +4070,26 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
     if (drivers.size() != 1) {
       throw std::runtime_error("top output needs exactly one driver: " + std::string(decl.name));
     }
-    const auto       original = drivers.front();
-    const int        width    = std::max(1, int(decl.bits));
-    std::vector<int> constants;
-    bool             changed = false;
+    const auto        original = drivers.front();
+    const int         width    = std::max(1, int(decl.bits));
+    std::vector<bool> constants;
+    bool              changed = false;
     for (int b = 0; b < width; ++b) {
-      const int value = resolver.bit(original, b).constant;
-      constants.push_back(value);
-      changed |= value >= 0;
+      const auto endpoint = resolver.bit(original, b);
+      const bool constant = endpoint.constant >= 0 || characterized_ties.contains(endpoint);
+      constants.push_back(constant);
+      if (constant) {
+        const auto driver  = tie_drivers.at(Endpoint{"PIN", bit_name(decl.name, width, b), -1});
+        changed           |= endpoint != Endpoint{std::string(driver.get_master_node().get_name()), pin_name(driver), -1};
+      }
     }
     if (!changed) {
       continue;
     }
     std::vector<Pin> values;
     for (int b = 0; b < width; ++b) {
-      if (constants[b] >= 0) {
-        if (tie_drivers[constants[b]].is_invalid()) {
-          throw std::runtime_error("missing physical top-output tie source");
-        }
-        values.push_back(tie_drivers[constants[b]]);
+      if (constants[b]) {
+        values.push_back(tie_drivers.at(Endpoint{"PIN", bit_name(decl.name, width, b), -1}));
       } else {
         values.push_back(width == 1 ? original : gu::create_get_mask(graph, original, b).get_driver_pin(0));
       }
@@ -3242,6 +4137,15 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
       c.place.x       = row.x + static_cast<int64_t>(h % std::max<int64_t>(1, row.count - c.place.width / sw + 1)) * sw;
       c.place.y       = row.y;
     }
+  }
+  if (options.cell_stage && options.cell_halo && !options.timing_seed && !options.retain_placement) {
+    auto frame = v.fp;
+    for (const auto& c : v.cells) {
+      if (!tech.macros.at(c.macro).klass.starts_with("CORE")) {
+        frame.components.push_back({c.name, c.macro, c.place});
+      }
+    }
+    check_macro_halo(tech, frame, options);
   }
   std::optional<Macro_run>  macro_run;
   dp::Design                macro_report_design;
@@ -3321,9 +4225,10 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
     for (const auto& t : v.fp.terminals) {
       identity += std::format(":{}:{},{}", t.name, t.x, t.y);
     }
-    macro_run           = place_macros(v.design, macro_report_info, *hierarchy, resolved, identity);
-    macro_solved        = !macro_run->cache_hit;
-    macro_report_design = v.design;
+    macro_run              = place_macros(v.design, macro_report_info, *hierarchy, resolved, identity);
+    macro_solved           = !macro_run->cache_hit;
+    const bool track_moved = align_macro_geometry(v, tech, v.design, true, false);
+    macro_report_design    = v.design;
     for (size_t i = 0; i < v.cells.size(); ++i) {
       if (macro_report_info[i].macro) {
         auto& c   = v.cells[i];
@@ -3338,6 +4243,17 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
       }
     }
     capture(v, tech, macro_solved);
+    if (track_moved) {
+      dp::Options rows;
+      rows.max_iterations = 0;
+      rows.add_fillers    = false;
+      rows.bins_x = rows.bins_y                                        = options.bins;
+      rows.num_threads                                                 = options.threads;
+      const auto repaired                                              = dp::place(v.design, rows);
+      macro_run->result.placement.alignment.cell_legalization_seconds += repaired.alignment.cell_legalization_seconds;
+      macro_run->result.placement.detailed_placement_seconds          += repaired.detailed_placement_seconds;
+      capture(v, tech, true);
+    }
   }
   // Square proxy macros are packed first and become obstacles for DREAMPlace.
   // Their exact square dimensions need not be a multiple of the standard site.
@@ -3438,6 +4354,8 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
   dp::Options control;
   control.max_iterations  = options.iterations;
   control.centroid_weight = v.centroids ? .25 : 0;
+  align_macro_geometry(v, tech, v.design, false, false);
+  control.after_macro_legalize = [&](dp::Design& physical) { align_macro_geometry(v, tech, physical, true, false); };
   control.bins_x = control.bins_y    = options.bins;
   control.num_threads                = options.threads;
   control.dynamic_bins               = options.dynamic_bins;
@@ -3594,6 +4512,8 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
   }
   std::vector<CentroidSample>                   centroid_initial, centroid_gp;
   dp::Result                                    metrics, fp_metrics;
+  std::optional<Satlegalize_report>             sat_report;
+  size_t                                        sat_retained = 0;
   std::optional<dp::FloorplanSnap>              fp_snap;
   std::vector<std::pair<int, Pin_adjust_stats>> fp_pin_history, macro_pin_history;
   bool                                          movable_macros = false;
@@ -3702,7 +4622,8 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
     metrics       = macro_run->result.placement;
     metrics.legal = dp::is_legal(v.design);
     metrics.hpwl  = dp::hpwl(v.design);
-  } else if (!cache.hit && previous && options.full) {
+  } else if (!cache.hit && previous && options.full && !adjustable_io && !macro_pin_adjust
+             && macro_tracks_valid(v, tech, v.design)) {
     // The ECO path keeps imported IO positions; slot only the new terminals,
     // treating the imported ones as fixed obstacles for assign_io.
     if (std::any_of(v.fp.terminals.begin(), v.fp.terminals.end(), [&](const auto& t) {
@@ -3729,7 +4650,8 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
         }
       }
     }
-    if (options.legalize_cells && legalize_edits(v, tech, *previous, changed, eco)) {
+    if (options.legalize_cells
+        && legalize_edits(v, tech, *previous, changed, eco, options.eco_trace_cells, options.eco_connectivity_weight)) {
       metrics.legal = true;
     } else {
       metrics = local_place(v, tech, options, *previous, changed, eco);
@@ -3795,17 +4717,44 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
             }
             if (i < static_cast<size_t>(snapshot.num_movable)) {
               place.status = Status::PLACED;
+              if (stage != dp::PlacementStage::global_placement && tech.macros.at(cell.macro).klass.starts_with("CORE")) {
+                // capture() applies physical CORE row flips after the native
+                // solver. Export the same legal orientation without mutating it.
+                auto observed  = cell;
+                observed.place = place;
+                const auto row = static_cast<size_t>(std::llround((place.y - v.fp.rows.front().y) / snapshot.layout.row_height));
+                if (row >= v.fp.rows.size()) {
+                  throw std::runtime_error("placed cell outside rows");
+                }
+                if (!apply_row_orientation(observed, tech, v.fp.rows[row].orientation)) {
+                  throw std::runtime_error("cell cannot use flipped row: " + cell.name);
+                }
+                place.orientation = observed.place.orientation;
+              }
             }
             frame.components.push_back({cell.name, cell.macro, place});
           }
+          std::set<std::string> net_names;
           for (size_t i = 0; i < frame.terminals.size(); ++i) {
             frame.terminals[i].x = std::llround(snapshot.node_x[v.cells.size() + i]);
             frame.terminals[i].y = std::llround(snapshot.node_y[v.cells.size() + i]);
+            // The imported DEF name is not evidence of current connectivity.
+            // Rebuild every terminal alias and reserve all port identities,
+            // including unused ports, before choosing internal net names.
             frame.terminals[i].net.clear();
+            net_names.insert(frame.terminals[i].name);
           }
           size_t index = 0;
           for (const auto& [driver, sinks] : v.nets) {
-            ph::Net net{"snapshot_net_" + std::to_string(index++), {{driver.instance, driver.pin}}};
+            auto net_name = driver.instance == "PIN" ? driver.pin : "snapshot_net_" + std::to_string(index++);
+            if (driver.instance != "PIN") {
+              const auto base   = net_name;
+              unsigned   suffix = 0;
+              while (!net_names.insert(net_name).second) {
+                net_name = base + "_" + std::to_string(++suffix);
+              }
+            }
+            ph::Net net{net_name, {{driver.instance, driver.pin}}};
             for (const auto& sink : sinks) {
               net.connections.push_back({sink.instance, sink.pin});
             }
@@ -3818,7 +4767,7 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
           }
           for (auto& terminal : frame.terminals) {
             if (terminal.net.empty()) {
-              terminal.net = "snapshot_net_" + std::to_string(index++);
+              terminal.net = terminal.name;
               frame.nets.push_back({terminal.net, {{"PIN", terminal.name}}});
             }
           }
@@ -4024,11 +4973,8 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
           if (target.empty()) {
             throw std::runtime_error("FP timing has no constrained data nets for weighting");
           }
-          for (const auto& net : checkpoint.parasitics->nets) {
-            const auto old        = v.weights.contains(net.driver) ? v.weights.at(net.driver) : 1.;
-            const auto next       = target.contains(net.driver) ? target.at(net.driver) : 1.;
-            v.weights[net.driver] = (1 - options.timing_smoothing) * old + options.timing_smoothing * next;
-          }
+          refresh_timing_weights(checkpoint, options, after);
+          v.weights = checkpoint.net_weights;
           make_arrays(v, tech);
           timed_positions.clear();
           for (const auto& c : v.cells) {
@@ -4158,7 +5104,11 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
       control.terminal_interval = options.macro_pin_interval;
       control.terminal_update   = pin_updater(true);
     }
-    if (movable_macros && options.fp_evaluate && options.macro_timing_interval > 0 && control.max_iterations > 0) {
+    const bool      final_timing = !movable_macros && !options.fp_place;
+    Timing_feedback final_gp_timing;
+    const char*     timing_stage          = final_timing ? "final" : "macro";
+    bool            legal_timing_snapshot = false;
+    if ((movable_macros || final_timing) && options.fp_evaluate && options.macro_timing_interval > 0) {
       control.checkpoint_interval      = options.macro_timing_interval;
       control.checkpoint_final         = true;
       control.checkpoint_after_density = options.fp_timing_after_density;
@@ -4179,6 +5129,12 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
           // private physical graph at this checkpoint's coordinates as in FP.
           view.cells[i].node.attr(attrs::place).set(view.cells[i].place);
         }
+        if (legal_timing_snapshot) {
+          capture(view, tech, true);
+          for (const auto& cell : view.cells) {
+            cell.node.attr(attrs::place).set(cell.place);
+          }
+        }
         Result checkpoint;
         checkpoint.graph       = result.graph;
         checkpoint.net_weights = v.weights;
@@ -4198,22 +5154,13 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
           checkpoint.parasitics->terminals.push_back({t.name, t.x, t.y});
         }
         const auto timing = options.fp_evaluate(checkpoint);
-        const auto target = timing_weights(*checkpoint.parasitics,
-                                           timing,
-                                           options.timing_fraction,
-                                           options.timing_max_weight,
-                                           options.timing_exponent);
-        if (target.empty()) {
-          throw std::runtime_error("macro timing has no constrained data nets for weighting");
-        }
+        final_gp_timing   = timing;
+        refresh_timing_weights(checkpoint, options, timing);
+        v.weights = checkpoint.net_weights;
         dp::GpUpdate update;
         for (const auto& driver : v.drivers) {
-          const auto name   = driver.instance == "PIN" ? driver.pin : driver.instance + ":" + driver.pin;
-          const auto old    = v.weights.contains(name) ? v.weights.at(name) : 1.;
-          const auto next   = target.contains(name) ? target.at(name) : 1.;
-          const auto weight = (1 - options.timing_smoothing) * old + options.timing_smoothing * next;
-          v.weights[name]   = weight;
-          update.net_weights.push_back(weight);
+          const auto name = driver.instance == "PIN" ? driver.pin : driver.instance + ":" + driver.pin;
+          update.net_weights.push_back(v.weights.contains(name) ? v.weights.at(name) : 1.);
         }
         if (timing.wns) {
           update.timing_violation = std::max(0., -*timing.wns);
@@ -4223,49 +5170,572 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
           macro_timed_positions.emplace(v.cells[i].name, Point{physical.node_x[i], physical.node_y[i]});
         }
         ++macro_checkpoints;
-        std::ofstream trace(options.output_dir + "/macro_timing.jsonl", macro_checkpoints == 1 ? std::ios::trunc : std::ios::app);
+        std::ofstream trace(options.output_dir + "/" + timing_stage + "_timing.jsonl",
+                            macro_checkpoints == 1 ? std::ios::trunc : std::ios::app);
         trace << std::format(
-            R"({{"stage":"macro","iteration":{},"forced":{},"movement_bins":{},"timing_seconds":{},"weighted_nets":{},"timing_exponent":{},"max_applied_weight":{},"delay":{},"time_unit_ps":{}}})",
+            R"({{"stage":"{}","iteration":{},"forced":{},"movement_bins":{},"timing_seconds":{},"weighted_nets":{},"timing_exponent":{},"max_applied_weight":{},"delay":{},"time_unit_ps":{}}})",
+            timing_stage,
             iteration,
             final,
             movement,
             std::chrono::duration<double>(std::chrono::steady_clock::now() - started).count(),
-            target.size(),
+            std::count_if(v.weights.begin(), v.weights.end(), [](const auto& entry) { return entry.second > 1; }),
             options.timing_exponent,
-            *std::max_element(update.net_weights.begin(), update.net_weights.end()),
+            update.net_weights.empty() ? 1. : *std::max_element(update.net_weights.begin(), update.net_weights.end()),
             timing.delay,
             timing.time_unit_ps)
               << '\n';
         if (!trace) {
           throw std::runtime_error("cannot write macro timing checkpoint report");
         }
+        const auto                                 membership = timing_weights(*checkpoint.parasitics,
+                                                                               timing,
+                                                                               options.timing_fraction,
+                                                                               options.timing_max_weight,
+                                                                               options.timing_exponent);
+        rapidjson::StringBuffer                    weights_json;
+        rapidjson::Writer<rapidjson::StringBuffer> weights_writer(weights_json);
+        weights_writer.StartObject();
+        weights_writer.Key("stage");
+        weights_writer.String(timing_stage);
+        weights_writer.Key("checkpoint");
+        weights_writer.Uint(macro_checkpoints);
+        weights_writer.Key("iteration");
+        weights_writer.Int(iteration);
+        weights_writer.Key("nets");
+        weights_writer.StartArray();
+        for (const auto& [driver, weight] : v.weights) {
+          weights_writer.StartObject();
+          weights_writer.Key("driver");
+          weights_writer.String(driver.c_str());
+          weights_writer.Key("critical");
+          weights_writer.Bool(membership.contains(driver));
+          weights_writer.Key("weight");
+          weights_writer.Double(weight);
+          weights_writer.EndObject();
+        }
+        weights_writer.EndArray();
+        weights_writer.EndObject();
+        std::ofstream weights_file(options.output_dir + "/" + timing_stage + "_weights.json");
+        weights_file << weights_json.GetString() << '\n';
+        if (!weights_file) {
+          throw std::runtime_error("cannot write placement weight report");
+        }
         return update;
+      };
+    }
+    if (final_timing && ((options.fp_evaluate && control.checkpoint) || options.legalize_timing_strength > 0)) {
+      if (!options.fp_evaluate || !control.checkpoint) {
+        throw std::invalid_argument("timing-aware legalization requires timing feedback and a positive timing interval");
+      }
+      control.before_legalize = [&](dp::Design& physical) {
+        // The selected GP checkpoint can precede the last iteration. Reanalyze
+        // precisely the coordinates handed to the legalizer, never stale weights.
+        macro_checkpoint_forced = true;
+        const auto update       = control.checkpoint(physical, control.max_iterations);
+        physical.net_weights    = update.net_weights;
+        // Fresh priorities also reach the zero-strength control, so comparing
+        // displacement costs does not accidentally compare stale detail weights.
+        if (options.legalize_timing_strength == 0) {
+          return;
+        }
+        physical.node_legalize_weights.assign(physical.node_x.size(), 1);
+        physical.node_legalize_anchor_x = physical.node_x;
+        physical.node_legalize_anchor_y = physical.node_y;
+        // Rank current cell path slack, including positive-slack designs.
+        // Negative-slack normalization alone loses all priorities as soon as
+        // every path meets timing, and depends on arbitrary timing units.
+        std::vector<std::optional<double>> cell_slacks(v.cells.size());
+        std::vector<double>                ranked;
+        for (size_t i = 0; i < v.cells.size(); ++i) {
+          const std::string prefix = v.cells[i].name + ":";
+          for (auto it = final_gp_timing.pins.lower_bound(prefix);
+               it != final_gp_timing.pins.end() && it->first.starts_with(prefix);
+               ++it) {
+            if (!it->second.clock && it->second.slack && std::isfinite(*it->second.slack)) {
+              if (!cell_slacks[i] || *it->second.slack < *cell_slacks[i]) {
+                cell_slacks[i] = *it->second.slack;
+              }
+            }
+          }
+          if (cell_slacks[i]) {
+            ranked.push_back(*cell_slacks[i]);
+          }
+        }
+        std::sort(ranked.begin(), ranked.end());
+        ranked.erase(std::unique(ranked.begin(), ranked.end()), ranked.end());
+        std::ofstream priorities(options.output_dir + "/legalize_priorities.tsv");
+        priorities << "cell\tslack\tcriticality\tweight\tgp_x_dbu\tgp_y_dbu\n";
+        for (size_t i = 0; i < v.cells.size(); ++i) {
+          double criticality = 0;
+          if (cell_slacks[i]) {
+            criticality = ranked.size() <= 1
+                              ? 1
+                              : 1.
+                                    - double(std::lower_bound(ranked.begin(), ranked.end(), *cell_slacks[i]) - ranked.begin())
+                                          / (ranked.size() - 1);
+          }
+          if (criticality >= options.legalize_timing_threshold) {
+            physical.node_legalize_weights[i] = 1 + options.legalize_timing_strength * criticality;
+          }
+          priorities << v.cells[i].name << '\t' << (cell_slacks[i] ? std::format("{}", *cell_slacks[i]) : "nan") << '\t'
+                     << criticality << '\t' << physical.node_legalize_weights[i] << '\t' << physical.node_x[i] << '\t'
+                     << physical.node_y[i] << '\n';
+        }
+        if (!priorities) {
+          throw std::runtime_error("cannot write timing legalization priorities");
+        }
+      };
+    }
+    std::optional<dp::Design>                     sat_gp;
+    std::shared_ptr<const Satlegalize_route_grid> sat_routing;
+    std::optional<dp::RudyOptions>                sat_route_options;
+    if (final_timing && options.satlegalize_options.route_grid) {
+      if (!options.fp_evaluate || !control.checkpoint || control.route.model != dp::RouteModel::rsmt
+          || !control.improved_routability || control.automatic_bins || options.satlegalize_options.region_width_um
+          || options.satlegalize_options.region_height_um) {
+        throw std::invalid_argument(
+            "satlegalize route_grid requires timing feedback, explicit rsmt, routability, fixed bin counts and no region_size");
+      }
+      dp::RudyOptions routing;
+      routing.bins_x              = control.auxiliary_bins ? control.auxiliary_bins : control.bins_x;
+      routing.bins_y              = control.auxiliary_bins ? control.auxiliary_bins : control.bins_y;
+      routing.horizontal_capacity = control.route_capacity_h;
+      routing.vertical_capacity   = control.route_capacity_v;
+      routing.macro_blockages = routing.pin_access = true;
+      routing.model                                = dp::RudyModel::rsmt;
+      routing.degree                               = control.route.degree;
+      routing.accuracy                             = control.route.accuracy;
+      routing.initialize                           = control.route_initialize;
+      sat_route_options                            = routing;
+      const auto prior                             = control.before_legalize;
+      control.before_legalize                      = [&, prior, routing](dp::Design& physical) {
+        if (prior) {
+          prior(physical);
+        } else {
+          macro_checkpoint_forced = true;
+          physical.net_weights    = control.checkpoint(physical, control.max_iterations).net_weights;
+        }
+        const auto map        = dp::rudy(physical, routing);
+        auto       grid       = std::make_shared<Satlegalize_route_grid>();
+        grid->bounds          = {physical.layout.xl, physical.layout.yl, physical.layout.xh, physical.layout.yh};
+        grid->bins_x          = routing.bins_x;
+        grid->bins_y          = routing.bins_y;
+        grid->horizontal      = map.horizontal;
+        grid->vertical        = map.vertical;
+        grid->pin_utilization = map.pin_utilization;
+        sat_routing           = std::move(grid);
+        uint64_t geometry     = hash_util::kFnv1a64_offset;
+        for (const auto& c : v.cells) {
+          geometry = hash_text(std::format("{}:{};", c.name, c.macro), geometry);
+        }
+        for (const auto& [driver, sinks] : v.nets) {
+          geometry = hash_text(std::format("{}:{}=", driver.instance, driver.pin), geometry);
+          for (const auto& sink : sinks) {
+            geometry = hash_text(std::format("{}:{};", sink.instance, sink.pin), geometry);
+          }
+        }
+        const auto bind = [&](const auto& values) {
+          geometry = hash_text(std::format("{}:", values.size()), geometry);
+          if (!values.empty()) {
+            geometry
+                = hash_text(std::string_view(reinterpret_cast<const char*>(values.data()), values.size() * sizeof(values.front())),
+                            geometry);
+          }
+        };
+        bind(physical.node_x);
+        bind(physical.node_y);
+        bind(physical.node_size_x);
+        bind(physical.node_size_y);
+        bind(physical.node_orientation);
+        bind(physical.node_macro);
+        bind(physical.pin_offset_x);
+        bind(physical.pin_offset_y);
+        bind(physical.pin2node);
+        bind(physical.flat_net2pin);
+        bind(physical.flat_net2pin_start);
+        bind(physical.net_mask);
+        geometry                            = hash_text(std::format("{}:{}:{}:{}:{}:{}",
+                                                                    physical.layout.xl,
+                                                                    physical.layout.yl,
+                                                                    physical.layout.xh,
+                                                                    physical.layout.yh,
+                                                                    physical.layout.site_width,
+                                                                    physical.layout.row_height),
+                                                        geometry);
+        const auto              weight_hash = hash_text(std::string_view(reinterpret_cast<const char*>(physical.net_weights.data()),
+                                                                         physical.net_weights.size() * sizeof(double)));
+        rapidjson::StringBuffer buffer;
+        rapidjson::Writer<rapidjson::StringBuffer> json(buffer);
+        json.StartObject();
+        json.Key("schema");
+        json.Int(1);
+        json.Key("model");
+        json.String("rsmt");
+        json.Key("index_order");
+        json.String("x*bins_y+y");
+        json.Key("bins_x");
+        json.Int(routing.bins_x);
+        json.Key("bins_y");
+        json.Int(routing.bins_y);
+        json.Key("bounds_dbu");
+        json.StartArray();
+        for (double x : {physical.layout.xl, physical.layout.yl, physical.layout.xh, physical.layout.yh}) {
+          json.Double(x);
+        }
+        json.EndArray();
+        json.Key("dbu_per_um");
+        json.Int64(tech.dbu);
+        json.Key("degree");
+        json.Int(routing.degree);
+        json.Key("accuracy");
+        json.Int(routing.accuracy);
+        json.Key("capacity_h_per_dbu");
+        json.Double(routing.horizontal_capacity);
+        json.Key("capacity_v_per_dbu");
+        json.Double(routing.vertical_capacity);
+        json.Key("macro_blockages");
+        json.Bool(routing.macro_blockages);
+        json.Key("pin_access");
+        json.Bool(routing.pin_access);
+        json.Key("geometry_topology_fnv1a64");
+        json.String(std::format("{:016x}", geometry).c_str());
+        json.Key("net_weights_fnv1a64");
+        json.String(std::format("{:016x}", weight_hash).c_str());
+        json.Key("net_count");
+        json.Uint64(physical.net_weights.size());
+        json.Key("overflow");
+        json.Double(map.overflow);
+        json.Key("max_utilization");
+        json.Double(map.max_utilization);
+        json.Key("measured_nets");
+        json.Int(map.measured_nets);
+        json.Key("blocked_pins");
+        json.Int(map.blocked_pins);
+        json.Key("unroutable_nets");
+        json.Int(map.unroutable_nets);
+        json.Key("detour_wirelength_dbu");
+        json.Double(map.detour_wirelength);
+        const auto array = [&](const char* key, const auto& values) {
+          json.Key(key);
+          json.StartArray();
+          for (double value : values) {
+            json.Double(value);
+          }
+          json.EndArray();
+        };
+        array("horizontal", map.horizontal);
+        array("vertical", map.vertical);
+        array("pin_utilization", map.pin_utilization);
+        array("blocked_fraction", map.blocked_fraction);
+        json.EndObject();
+        std::ofstream file(options.output_dir + "/sat_route_grid.json");
+        file << buffer.GetString() << '\n';
+        if (!file) {
+          throw std::runtime_error("cannot write SAT route grid");
+        }
+      };
+    }
+    auto sat_frame = [&](const dp::Design& physical, bool legal) {
+      auto view   = v;
+      view.design = physical;
+      capture(view, tech, legal);
+      auto frame = view.fp;
+      frame.components.clear();
+      frame.nets.clear();
+      for (const auto& c : view.cells) {
+        frame.components.push_back({c.name, c.macro, c.place});
+      }
+      size_t serial = 0;
+      for (const auto& [driver, sinks] : v.nets) {
+        ph::Net net{"sat_net_" + std::to_string(serial++), {{driver.instance, driver.pin}}};
+        for (const auto& sink : sinks) {
+          net.connections.push_back({sink.instance, sink.pin});
+        }
+        frame.nets.push_back(std::move(net));
+      }
+      return frame;
+    };
+    auto sat_install = [&](dp::Design& physical, const ph::Floorplan& frame) {
+      for (size_t i = 0; i < v.cells.size(); ++i) {
+        physical.node_x[i] = frame.components[i].place.x;
+        physical.node_y[i] = frame.components[i].place.y;
+        dp::set_orientation_unchecked(physical, i, native_orientation(frame.components[i].place.orientation));
+      }
+      physical.validate();
+    };
+    if (final_timing && options.satlegalize) {
+      if (!options.fp_evaluate || !control.checkpoint) {
+        throw std::invalid_argument("satlegalize requires timing feedback and a positive timing interval");
+      }
+      const auto prior        = control.before_legalize;
+      control.before_legalize = [&, prior](dp::Design& physical) {
+        if (prior) {
+          prior(physical);
+        } else {
+          macro_checkpoint_forced = true;
+          const auto update       = control.checkpoint(physical, control.max_iterations);
+          physical.net_weights    = update.net_weights;
+        }
+        sat_gp     = physical;
+        auto frame = sat_frame(physical, false);
+        if (options.satlegalize_options.region_width_um || options.satlegalize_options.region_height_um
+            || options.satlegalize_options.route_grid) {
+          auto sat_options             = options.satlegalize_options;
+          sat_options.macro_halo_x_dbu = v.halo_x;
+          sat_options.macro_halo_y_dbu = v.halo_y;
+          sat_options.routing          = sat_routing;
+          sat_report                   = satlegalize(tech, frame, final_gp_timing, sat_options);
+        } else {
+          sat_report = satlegalize(tech, frame, final_gp_timing, options.satlegalize_options);
+        }
+        sat_retained = sat_report->accepted.size();
+        sat_install(physical, frame);
+      };
+    }
+    if (final_timing && options.fp_evaluate && control.checkpoint) {
+      const auto observer = control.observer;
+      control.observer    = [&, observer](const dp::Design& physical, dp::PlacementStage stage, int iteration) {
+        if (observer) {
+          observer(physical, stage, iteration);
+        }
+        if (stage != dp::PlacementStage::legalization && stage != dp::PlacementStage::detailed_placement) {
+          return;
+        }
+        legal_timing_snapshot   = true;
+        macro_checkpoint_forced = true;
+        control.checkpoint(physical, control.max_iterations);
+        legal_timing_snapshot = false;
+        std::ofstream report(options.output_dir + "/legalize_timing.jsonl", std::ios::app);
+        report << std::format(
+            R"({{"stage":"{}","wns":{},"tns":{},"violations":{},"electrical_excess":{},"delay":{},"time_unit_ps":{}}})",
+            stage == dp::PlacementStage::legalization ? "legalization" : "detail",
+            final_gp_timing.wns ? std::format("{}", *final_gp_timing.wns) : "null",
+            final_gp_timing.tns ? std::format("{}", *final_gp_timing.tns) : "null",
+            final_gp_timing.violations,
+            final_gp_timing.electrical_excess,
+            final_gp_timing.delay,
+            final_gp_timing.time_unit_ps)
+               << '\n';
+        if (!report) {
+          throw std::runtime_error("cannot write legalization timing report");
+        }
+      };
+    }
+    bool zero_gp_snapshot_emitted = false;
+    if (options.snapshots && control.max_iterations == 0) {
+      const auto prior        = control.before_legalize;
+      const auto observer     = control.observer;
+      control.before_legalize = [prior, observer, &zero_gp_snapshot_emitted](dp::Design& physical) {
+        if (!zero_gp_snapshot_emitted && observer) {
+          observer(physical, dp::PlacementStage::global_placement, 0);
+          zero_gp_snapshot_emitted = true;
+        }
+        if (prior) {
+          prior(physical);
+        }
       };
     }
     try {
       metrics = dp::place(v.design, control);
     } catch (const std::runtime_error&) {
-      if (cache.reused == 0) {
-        throw;
+      if (sat_gp) {
+        v.design                 = *sat_gp;
+        auto fallback            = control;
+        fallback.max_iterations  = 0;
+        fallback.before_legalize = {};
+        sat_retained             = 0;
+        metrics                  = dp::place(v.design, fallback);
+      } else {
+        if (cache.reused == 0) {
+          throw;
+        }
+        // Changed blocks may need whitespace outside their old anchors. Retry
+        // with reusable blocks movable; imported FIXED cells remain fixed.
+        for (auto& c : v.cells) {
+          c.locked = false;
+        }
+        cache = {0, hashes.size(), false};
+        make_arrays(v, tech);
+        // The retry is a fresh solve: restart the macro timing budget and trace.
+        macro_checkpoints       = 0;
+        macro_checkpoint_forced = false;
+        macro_timed_positions.clear();
+        metrics = dp::place(v.design, control);
       }
-      // Changed blocks may need whitespace outside their old anchors. Retry
-      // with reusable blocks movable; imported FIXED cells remain fixed.
-      for (auto& c : v.cells) {
-        c.locked = false;
+    }
+    if (final_timing && options.legalize_timing_strength > 0 && !options.satlegalize) {
+      for (unsigned attempt = 0; attempt < options.legalize_timing_corrections; ++attempt) {
+        const auto before         = v.design;
+        const auto before_metrics = metrics;
+        const auto before_timing  = final_gp_timing;
+        auto       correction     = control;
+        correction.max_iterations = correction.min_iterations = 8;
+        correction.post_density_factor                        = 0;
+        correction.checkpoint_interval                        = 0;
+        bool accepted                                         = false;
+        try {
+          auto trial = dp::place(v.design, correction);
+          accepted   = timing_improves(before_timing, final_gp_timing) && final_gp_timing.violations <= before_timing.violations
+                       && final_gp_timing.electrical_excess <= before_timing.electrical_excess + 1e-9;
+          if (accepted) {
+            metrics.hpwl                                 = trial.hpwl;
+            metrics.alignment.cell_legalization_seconds += trial.alignment.cell_legalization_seconds;
+            metrics.detailed_placement_seconds          += trial.detailed_placement_seconds;
+          }
+        } catch (const std::runtime_error&) {
+        }
+        std::ofstream report(options.output_dir + "/legalize_correction.jsonl", std::ios::app);
+        report << std::format(R"({{"attempt":{},"iterations":8,"accepted":{}}})", attempt, accepted) << '\n';
+        if (!accepted) {
+          v.design                = before;
+          metrics                 = before_metrics;
+          legal_timing_snapshot   = true;
+          macro_checkpoint_forced = true;
+          control.checkpoint(v.design, control.max_iterations);
+          legal_timing_snapshot = false;
+          break;
+        }
       }
-      cache = {0, hashes.size(), false};
-      make_arrays(v, tech);
-      // The retry is a fresh solve: restart the macro timing budget and trace.
-      macro_checkpoints       = 0;
-      macro_checkpoint_forced = false;
-      macro_timed_positions.clear();
-      metrics = dp::place(v.design, control);
+    }
+    if (sat_gp && sat_report && sat_retained) {
+      const auto accepted          = v.design;
+      const auto accepted_metrics  = metrics;
+      const auto accepted_feedback = final_gp_timing;
+      auto       baseline          = *sat_gp;
+      auto       fallback          = control;
+      fallback.max_iterations      = 0;
+      fallback.before_legalize     = {};
+      auto       baseline_metrics  = dp::place(baseline, fallback);
+      const auto baseline_feedback = final_gp_timing;
+      const auto accepted_timing   = [&](const Timing_feedback& after) {
+        return after.violations <= baseline_feedback.violations
+               && after.electrical_excess <= baseline_feedback.electrical_excess + 1e-9
+               && (!baseline_feedback.wns || (after.wns && *after.wns >= *baseline_feedback.wns - 1e-9))
+               && (!baseline_feedback.tns || (after.tns && *after.tns >= *baseline_feedback.tns - 1e-9))
+               && ((!options.satlegalize_options.route_grid && options.satlegalize_options.region_width_um <= 0)
+                   || !baseline_feedback.hold_wns || (after.hold_wns && *after.hold_wns >= *baseline_feedback.hold_wns - 1e-9));
+      };
+      bool route_accepted = true;
+      if (sat_route_options) {
+        auto scored_accepted = accepted, scored_baseline = baseline;
+        // Hold timing weights fixed while comparing geometry, including demand
+        // outside the SAT neighborhood. STA callbacks may refresh weights.
+        scored_accepted.net_weights = scored_baseline.net_weights = sat_gp->net_weights;
+        const auto a                                              = dp::rudy(scored_accepted, *sat_route_options);
+        const auto b                                              = dp::rudy(scored_baseline, *sat_route_options);
+        route_accepted = a.overflow <= b.overflow + 1e-9 && a.max_utilization <= b.max_utilization + 1e-9
+                         && a.blocked_pins <= b.blocked_pins && a.unroutable_nets <= b.unroutable_nets;
+        std::ofstream file(options.output_dir + "/sat_route_guard.json");
+        file << std::format(
+            R"({{"accepted":{},"scope":"full post-legalization geometry with common pre-SAT weights","candidate":{{"overflow":{},"peak":{},"blocked_pins":{},"unroutable_nets":{}}},"baseline":{{"overflow":{},"peak":{},"blocked_pins":{},"unroutable_nets":{}}}}})",
+            route_accepted,
+            a.overflow,
+            a.max_utilization,
+            a.blocked_pins,
+            a.unroutable_nets,
+            b.overflow,
+            b.max_utilization,
+            b.blocked_pins,
+            b.unroutable_nets)
+             << '\n';
+        if (!file) {
+          throw std::runtime_error("cannot write SAT route guard");
+        }
+      }
+      if (route_accepted && satlegalize_preserved(tech, sat_frame(accepted, true), *sat_report)
+          && accepted_timing(accepted_feedback)) {
+        v.design = accepted;
+        metrics  = accepted_metrics;
+      } else {
+        const size_t total = sat_report->accepted.size();
+        sat_retained       = 0;
+        v.design           = std::move(baseline);
+        metrics            = std::move(baseline_metrics);
+        // The fixed-region experiment accepts the complete proposal or restores
+        // the ordinary legal baseline. It does not retry smaller prefixes.
+        // Legacy windows retain their existing bounded prefix relaxation.
+        for (size_t prefix : {total / 2, (3 * total) / 4}) {
+          if (options.satlegalize_options.region_width_um > 0 || options.satlegalize_options.route_grid) {
+            break;
+          }
+          if (!prefix) {
+            continue;
+          }
+          auto candidate = *sat_gp;
+          auto frame     = sat_frame(candidate, false);
+          satlegalize_restore(frame, *sat_report, prefix);
+          sat_install(candidate, frame);
+          try {
+            auto candidate_metrics = dp::place(candidate, fallback);
+            if (!satlegalize_preserved(tech, sat_frame(candidate, true), *sat_report, prefix)
+                || !accepted_timing(final_gp_timing)) {
+              continue;
+            }
+            v.design     = std::move(candidate);
+            metrics      = std::move(candidate_metrics);
+            sat_retained = prefix;
+          } catch (const std::runtime_error&) {
+          }
+        }
+      }
+      // Rejected baseline/prefix analyses changed the persistent timer. Restore
+      // it to the accepted graph/coordinates before further repair consumes it.
+      legal_timing_snapshot   = true;
+      macro_checkpoint_forced = true;
+      control.checkpoint(v.design, control.max_iterations);
+      legal_timing_snapshot = false;
     }
     capture(v, tech, options.full);
   } else {
     metrics.legal     = dp::is_legal(v.design);
     metrics.converged = false;
     capture(v, tech, options.full);
+  }
+  if (options.full && !options.timing_seed && !options.retain_placement && !options.analyze_colors_only) {
+    align_macro_geometry(v, tech, v.design, false, true);
+    localize_tie_sites(v, tech, options.liberty);
+    metrics.legal = dp::is_legal(v.design);
+    metrics.hpwl  = dp::hpwl(v.design);
+  }
+  if (sat_report) {
+    auto final_frame = v.fp;
+    final_frame.components.clear();
+    for (const auto& c : v.cells) {
+      final_frame.components.push_back({c.name, c.macro, c.place});
+    }
+    // Final tie relocation may exchange a functional user with a tie. Explicitly
+    // relax any affected alignment rather than persisting an obsolete promise.
+    if (sat_retained && !satlegalize_preserved(tech, final_frame, *sat_report, sat_retained)) {
+      sat_retained = 0;
+    }
+    std::ofstream report(options.output_dir + "/satlegalize.json");
+    const auto    summary = std::format(
+        R"({{"backend":"{}","encoding":"{}","windows":{},"trials":{},"accepted":{},"retained":{},"unknown":{},"conflicts":{},"oversized":{},"boundary_rejected":{},"hpwl_before":{},"hpwl_after":{},"seconds":{},"fallback":{}}})",
+        options.satlegalize_options.backend,
+        options.satlegalize_options.encoding,
+        sat_report->windows,
+        sat_report->trials,
+        sat_report->accepted.size(),
+        sat_retained,
+        sat_report->unknown,
+        sat_report->conflicts,
+        sat_report->oversized,
+        sat_report->boundary_rejected,
+        sat_report->hpwl_before,
+        sat_report->hpwl_after,
+        sat_report->seconds,
+        sat_retained == 0 ? "true" : "false");
+    rapidjson::Document document;
+    document.Parse(summary.c_str());
+    sat_window_statistics(document, *sat_report, options.satlegalize_options, document.GetAllocator());
+    rapidjson::StringBuffer                    buffer;
+    rapidjson::Writer<rapidjson::StringBuffer> writer(buffer);
+    document.Accept(writer);
+    report << buffer.GetString() << '\n';
+    if (!report) {
+      throw std::runtime_error("cannot write satlegalize report");
+    }
   }
   fs::create_directories(options.output_dir);
   if (options.fp_place) {
@@ -4859,7 +6329,10 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
   // writer does not emit input aliases for otherwise valid DEF pin/net names.
   // Reserve every port name before choosing names for internal nets.
   std::set<std::string> net_names;
-  for (const auto& terminal : v.fp.terminals) {
+  for (auto& terminal : v.fp.terminals) {
+    // Imported/staged aliases can name nets that are absent from the rebuilt
+    // connectivity, especially unused inputs. Reconstruct every alias below.
+    terminal.net.clear();
     net_names.insert(terminal.name);
   }
   for (size_t net = 0; net < v.drivers.size(); ++net) {
@@ -4888,6 +6361,13 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
     if (t.net.empty()) {
       t.net = t.name;
       v.fp.nets.push_back({t.net, {{"PIN", t.name}}});
+    }
+  }
+  // A macro-to-cell handoff freezes coordinates only for that solve. Do not
+  // persist it as a user constraint into saved DEFs, graphs or cache frames.
+  for (auto& terminal : v.fp.terminals) {
+    if (const auto status = options.stage_pin_status.find(terminal.name); status != options.stage_pin_status.end()) {
+      terminal.status = status->second;
     }
   }
   for (auto& t : v.fp.terminals) {
@@ -4923,7 +6403,7 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
     }
   }
   if (options.full && !options.timing_seed && !options.retain_placement) {
-    check_legality(tech, v.fp, options.halo_x, options.halo_y);
+    check_legality(tech, v.fp, options);
   }
   auto rc_options = options;
   if (options.timing_seed) {
@@ -5515,8 +6995,8 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
     json.AddMember("virtual_filler_count", metrics.filler_count, allocator);
     json.AddMember("virtual_filler_area_um2", metrics.filler_area / tech.dbu / tech.dbu, allocator);
     rapidjson::Value halo(rapidjson::kObjectType);
-    halo.AddMember("x_um", options.halo_x, allocator);
-    halo.AddMember("y_um", options.halo_y, allocator);
+    halo.AddMember("x_um", cell_halo_x, allocator);
+    halo.AddMember("y_um", cell_halo_y, allocator);
     halo.AddMember("x_dbu", v.halo_x, allocator);
     halo.AddMember("y_dbu", v.halo_y, allocator);
     halo.AddMember(
@@ -5527,6 +7007,21 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
             [&](const Cell& c) { return (v.halo_x || v.halo_y) && !tech.macros.at(c.macro).klass.starts_with("CORE"); })),
         allocator);
     json.AddMember("halo", halo, allocator);
+    if (options.cell_halo) {
+      rapidjson::Value macro_halo_json(rapidjson::kObjectType), cell_halo_json(rapidjson::kObjectType);
+      macro_halo_json.AddMember("x_um", options.halo_x, allocator);
+      macro_halo_json.AddMember("y_um", options.halo_y, allocator);
+      macro_halo_json.AddMember("x_dbu", macro_halo(options.halo_x, tech.dbu, sw), allocator);
+      macro_halo_json.AddMember("y_dbu", macro_halo(options.halo_y, tech.dbu, rh), allocator);
+      cell_halo_json.AddMember("x_um", options.cell_halo->first, allocator);
+      cell_halo_json.AddMember("y_um", options.cell_halo->second, allocator);
+      cell_halo_json.AddMember("active", options.cell_stage && !options.timing_seed && !options.retain_placement, allocator);
+      cell_halo_json.AddMember("effective_x_um", cell_halo_x, allocator);
+      cell_halo_json.AddMember("effective_y_um", cell_halo_y, allocator);
+      json.AddMember("macro_halo", macro_halo_json, allocator);
+      json.AddMember("cell_halo", cell_halo_json, allocator);
+    }
+
     if (options.reset_fanout) {
       rapidjson::Value tree(rapidjson::kObjectType);
       tree.AddMember("fanout", options.reset_fanout, allocator);
@@ -5571,7 +7066,66 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
         eco.window.xh,
         eco.window.yh);
     details.Parse(text.c_str());
+    if (options.eco_connectivity_weight > 0) {
+      auto&            a = details.GetAllocator();
+      rapidjson::Value connectivity(rapidjson::kObjectType);
+      connectivity.AddMember("weight", options.eco_connectivity_weight, a);
+      connectivity.AddMember("nets", static_cast<uint64_t>(eco.connectivity_nets), a);
+      connectivity.AddMember("dirty_pins", static_cast<uint64_t>(eco.connectivity_pins), a);
+      connectivity.AddMember("candidate_sites", static_cast<uint64_t>(eco.candidate_sites), a);
+      connectivity.AddMember("candidate_rows", static_cast<uint64_t>(eco.candidate_rows), a);
+      connectivity.AddMember("search_seconds", eco.connectivity_seconds, a);
+      details.AddMember("connectivity", connectivity, a);
+    }
+    if (!options.eco_trace_cells.empty()) {
+      auto&            trace_allocator = details.GetAllocator();
+      rapidjson::Value traces(rapidjson::kArrayType);
+      for (const auto& entry : eco.trace) {
+        rapidjson::Value item(rapidjson::kObjectType);
+        item.AddMember("name", rapidjson::Value(entry.name.c_str(), trace_allocator), trace_allocator);
+        item.AddMember("master", rapidjson::Value(entry.master.c_str(), trace_allocator), trace_allocator);
+        item.AddMember("edit_order", static_cast<uint64_t>(entry.order), trace_allocator);
+        item.AddMember("row_index", static_cast<uint64_t>(entry.row), trace_allocator);
+        const auto pair = [&](int64_t a, int64_t b) {
+          rapidjson::Value values(rapidjson::kArrayType);
+          values.PushBack(a, trace_allocator).PushBack(b, trace_allocator);
+          return values;
+        };
+        item.AddMember("seed_dbu", pair(entry.seed.x, entry.seed.y), trace_allocator);
+        item.AddMember("chosen_dbu", pair(entry.chosen.x, entry.chosen.y), trace_allocator);
+        item.AddMember("gap_dbu", pair(entry.gap_lo, entry.gap_hi), trace_allocator);
+        item.AddMember("row_y_dbu", entry.chosen.y, trace_allocator);
+        item.AddMember(
+            "displacement_um",
+            (std::abs(double(entry.chosen.x - entry.seed.x)) + std::abs(double(entry.chosen.y - entry.seed.y))) / tech.dbu,
+            trace_allocator);
+        traces.PushBack(item, trace_allocator);
+      }
+      details.AddMember("trace", traces, trace_allocator);
+    }
     json.AddMember("eco", rapidjson::Value(details, json.GetAllocator()), json.GetAllocator());
+    if (sat_report) {
+      rapidjson::Value sat(rapidjson::kObjectType);
+      sat.AddMember("stage", "final_cell", allocator);
+      sat.AddMember("accepted", static_cast<uint64_t>(sat_report->accepted.size()), allocator);
+      sat.AddMember("retained", static_cast<uint64_t>(sat_retained), allocator);
+      sat.AddMember("windows", sat_report->windows, allocator);
+      sat.AddMember("unknown", sat_report->unknown, allocator);
+      sat.AddMember("seconds", sat_report->seconds, allocator);
+      sat_window_statistics(sat, *sat_report, options.satlegalize_options, allocator);
+      rapidjson::Value relations(rapidjson::kArrayType);
+      for (size_t i = 0; i < sat_retained; ++i) {
+        const auto&      pair = sat_report->accepted[i];
+        rapidjson::Value relation(rapidjson::kObjectType);
+        relation.AddMember("first", rapidjson::Value(v.cells.at(pair.first).name.c_str(), allocator), allocator);
+        relation.AddMember("first_pin", rapidjson::Value(pair.first_pin.c_str(), allocator), allocator);
+        relation.AddMember("second", rapidjson::Value(v.cells.at(pair.second).name.c_str(), allocator), allocator);
+        relation.AddMember("second_pin", rapidjson::Value(pair.second_pin.c_str(), allocator), allocator);
+        relations.PushBack(relation, allocator);
+      }
+      sat.AddMember("relations", relations, allocator);
+      json.AddMember("satlegalize", sat, allocator);
+    }
     rapidjson::StringBuffer                    buffer;
     rapidjson::Writer<rapidjson::StringBuffer> writer(buffer);
     json.Accept(writer);
@@ -5605,12 +7159,22 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
   return result;
 }
 
-Result place(hhds::Graph& source, hhds::GraphLibrary& library, const Options& options) {
+Result place(hhds::Graph& source, hhds::GraphLibrary& library, const Options& requested) {
+  validate_cell_halo(requested);
+  if (requested.cell_halo && !requested.full && !requested.timing_seed && !requested.retain_placement) {
+    throw std::invalid_argument("cell halo requires full placement with a final cell stage");
+  }
+  std::optional<Options> resolved_options;
+  if (requested.cell_halo) {
+    resolved_options = requested;
+  }
+  const auto& options = resolved_options ? *resolved_options : requested;
   if (options.final_iterations < 0) {
     throw std::invalid_argument("invalid final cell iteration budget");
   }
   bool stage_macros = false;
-  if (options.after_stage && !options.fp_place && options.full && !options.timing_seed) {
+  if ((options.after_stage || options.cell_halo) && !options.fp_place && options.full && !options.timing_seed
+      && !options.cell_stage) {
     const auto technology = ph::read_lef(options.lefs);
     for (const auto& graph : source.definitions().graphs()) {
       for (auto node : graph->body().nodes()) {
@@ -5625,6 +7189,18 @@ Result place(hhds::Graph& source, hhds::GraphLibrary& library, const Options& op
         }
       }
     }
+  }
+  if (options.cell_halo && !options.cell_stage && !options.fp_place && !stage_macros && !options.timing_seed
+      && !options.retain_placement) {
+    *resolved_options = final_cell_options(options);  // CORE-only solve has no macro-spacing ambiguity.
+  }
+  if (options.cell_halo && !options.cell_stage && stage_macros && !options.final_cells && !options.timing_seed
+      && !options.retain_placement) {
+    throw std::invalid_argument("cell halo with movable macros requires the final cell stage");
+  }
+  if (options.cell_halo && !options.cell_stage && stage_macros && options.previous && !options.timing_seed
+      && !options.retain_placement) {
+    throw std::invalid_argument("cell halo with a previous macro frame requires explicit final_cell_options context");
   }
   if ((!options.fp_place && !stage_macros) || !options.final_cells || !options.full || options.timing_seed || options.previous) {
     return place_single(source, library, options);
@@ -5649,15 +7225,18 @@ Result place(hhds::Graph& source, hhds::GraphLibrary& library, const Options& op
       ++fixed_macros;
     }
   }
+  std::map<std::string, Status> pin_status;
   for (auto& terminal : macro.floorplan.terminals) {
+    pin_status.emplace(terminal.name, terminal.status);
     terminal.status = Status::FIXED;
   }
   const auto frame = macro_options.output_dir + "/fixed.def";
   ph::write_def(macro.floorplan, frame);
-  auto cell_options            = options;
-  cell_options.net_weights     = macro.net_weights;
-  cell_options.fp_place        = false;
-  cell_options.completed_stage = Placement_stage::final;
+  auto cell_options             = final_cell_options(options);
+  cell_options.stage_pin_status = std::move(pin_status);
+  cell_options.net_weights      = macro.net_weights;
+  cell_options.fp_place         = false;
+  cell_options.completed_stage  = Placement_stage::final;
   cell_options.restart_seed.reset();
   cell_options.fp_pin_adjust             = false;
   cell_options.macro_pin_adjust          = false;
@@ -5674,7 +7253,7 @@ Result place(hhds::Graph& source, hhds::GraphLibrary& library, const Options& op
   result.fp_repair_edits  = macro.fp_repair_edits;
   const auto end          = std::chrono::steady_clock::now();
   const auto seconds      = [](auto a, auto b) { return std::chrono::duration<double>(b - a).count(); };
-  const auto text         = std::format(
+  auto       text         = std::format(
       R"({{"schema_version":1,"mode":"{}","centroid_snap":{},"macro_snap":{},"final_centroid_anchors":false,"fixed_macros":{},"macro_source_hpwl_um":{},"final_hpwl_um":{},"macro_source_seconds":{},"final_cells_seconds":{}}})",
       options.fp_place ? "floorplan-macro-cells" : "macro-cells",
       options.fp_snap_enabled,
@@ -5692,6 +7271,14 @@ Result place(hhds::Graph& source, hhds::GraphLibrary& library, const Options& op
       }(),
       seconds(start, macro_end),
       seconds(macro_end, end));
+  if (options.cell_halo) {
+    text.pop_back();
+    text += std::format(R"(,"macro_halo_um":[{},{}],"cell_halo_um":[{},{}]}})",
+                        options.halo_x,
+                        options.halo_y,
+                        options.cell_halo->first,
+                        options.cell_halo->second);
+  }
   std::ofstream out(options.output_dir + "/flow.json");
   if (!(out << text << '\n')) {
     throw std::runtime_error("cannot write staged placement report");

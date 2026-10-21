@@ -22,6 +22,8 @@ protected:
     write("place/out.def", "final DEF");
     write("place/qor.json", "{}");
     write("place/route_options.json", "{\"global_model\":\"auto\"}");
+    write("place/sat_route_grid.json", "{\"bins_x\":128,\"horizontal\":[0.5]}");
+    write("place/sat_route_guard.json", "{\"accepted\":true}");
     write("place/io_resynth.json", "{\"boundary_ps\":213.3134765625}");
   }
   void write(const fs::path& path, const std::string& text) {
@@ -47,6 +49,10 @@ TEST_F(PhysicalCache, RestoresTheCompleteRepairedGenerationAcrossFreshInstances)
     }
     std::ifstream route(root / "restored/place/route_options.json");
     EXPECT_EQ((std::string{std::istreambuf_iterator<char>(route), {}}), "{\"global_model\":\"auto\"}");
+    std::ifstream grid(root / "restored/place/sat_route_grid.json");
+    EXPECT_EQ((std::string{std::istreambuf_iterator<char>(grid), {}}), "{\"bins_x\":128,\"horizontal\":[0.5]}");
+    std::ifstream guard(root / "restored/place/sat_route_guard.json");
+    EXPECT_EQ((std::string{std::istreambuf_iterator<char>(guard), {}}), "{\"accepted\":true}");
     std::ifstream timing(root / "restored/place/io_resynth.json");
     EXPECT_EQ((std::string{std::istreambuf_iterator<char>(timing), {}}), "{\"boundary_ps\":213.3134765625}");
   }

@@ -243,6 +243,85 @@ int main(int argc, char** argv) {
     std::filesystem::create_directories(root);
     const bool  floorplan_mode = config.HasMember("floorplan_place") && config["floorplan_place"].GetBool();
     pl::Options options;
+    // Expose existing production spreading controls to this diagnostic without
+    // changing their defaults. Type errors must fail instead of being ignored.
+    const auto  number_option = [&](const char* key, double& value) {
+      if (config.HasMember(key)) {
+        if (!config[key].IsNumber()) {
+          throw std::invalid_argument(std::string(key) + " requires a number");
+        }
+        value = config[key].GetDouble();
+      }
+    };
+    const auto integer_option = [&](const char* key, int& value) {
+      if (config.HasMember(key)) {
+        if (!config[key].IsInt()) {
+          throw std::invalid_argument(std::string(key) + " requires an integer");
+        }
+        value = config[key].GetInt();
+      }
+    };
+    const auto boolean_option = [&](const char* key, bool& value) {
+      if (config.HasMember(key)) {
+        if (!config[key].IsBool()) {
+          throw std::invalid_argument(std::string(key) + " requires a boolean");
+        }
+        value = config[key].GetBool();
+      }
+    };
+    if (config.HasMember("eco_trace_cells")) {
+      if (!config["eco_trace_cells"].IsArray()) {
+        throw std::invalid_argument("eco_trace_cells requires an array of exact cell names");
+      }
+      for (const auto& name : config["eco_trace_cells"].GetArray()) {
+        if (!name.IsString() || !name.GetStringLength()) {
+          throw std::invalid_argument("eco_trace_cells requires nonempty exact cell names");
+        }
+        options.eco_trace_cells.emplace_back(name.GetString(), name.GetStringLength());
+      }
+    }
+    bool retained_repair = false;
+    boolean_option("retained_repair", retained_repair);
+    if (retained_repair
+        && (floorplan_mode || (config.HasMember("cell_place") && config["cell_place"].GetBool())
+            || (config.HasMember("timing_only") && config["timing_only"].GetBool())
+            || (config.HasMember("snapshot_only") && config["snapshot_only"].GetBool()) || !config.HasMember("net_weights"))) {
+      throw std::invalid_argument(
+          "retained_repair requires explicit net_weights and no placement, timing_only or snapshot_only mode");
+    }
+    bool forest_only = false, sizing_forest = false;
+    if (config.HasMember("repair_scope")) {
+      const auto scope = text("repair_scope");
+      if (scope != "forest" && scope != "sizing_forest") {
+        throw std::invalid_argument("repair_scope supports only forest or sizing_forest");
+      }
+      if (!retained_repair) {
+        throw std::invalid_argument("repair_scope requires retained_repair");
+      }
+      forest_only   = scope == "forest";
+      sizing_forest = scope == "sizing_forest";
+    }
+    number_option("density", options.density);
+    integer_option("bins", options.bins);
+    integer_option("threads", options.threads);
+    boolean_option("dynamic_bins", options.dynamic_bins);
+    integer_option("bin_max", options.bin_max);
+    boolean_option("auto_bins", options.automatic_bins);
+    number_option("local_density_weight", options.local_density_weight);
+    integer_option("local_density_bins", options.local_density_bins);
+    number_option("local_density_range", options.local_density_range);
+    number_option("local_density_jitter", options.local_density_jitter);
+    boolean_option("virtual_fillers", options.virtual_fillers);
+    integer_option("virtual_filler_max_count", options.virtual_filler_max_count);
+    number_option("virtual_filler_fraction", options.virtual_filler_fraction);
+    boolean_option("scale_macro_density", options.scale_macro_density);
+    boolean_option("exact_macro_density", options.exact_macro_density);
+    boolean_option("adaptive_density", options.adaptive_density);
+    boolean_option("routability", options.routability);
+    boolean_option("routability_charge_compensation", options.routability_charge_compensation);
+    number_option("macro_cell_density_weight", options.macro_cell_density_weight);
+    number_option("macro_density_pull_weight", options.macro_density_pull_weight);
+    number_option("macro_density_pull_range", options.macro_density_pull_range);
     options.fp_place = options.final_cells = options.macro_snap = false;
     options.legalize_cells                                      = true;
     options.retain_placement    = config.HasMember("timing_only") && config["timing_only"].GetBool();
@@ -257,6 +336,79 @@ int main(int argc, char** argv) {
     }
     if (config.HasMember("timing_max_weight")) {
       options.timing_max_weight = config["timing_max_weight"].GetDouble();
+    }
+    if (config.HasMember("satlegalize")) {
+      options.satlegalize = config["satlegalize"].GetBool();
+    }
+    if (config.HasMember("satlegalize_backend")) {
+      options.satlegalize_options.backend = text("satlegalize_backend");
+    }
+    if (config.HasMember("satlegalize_encoding")) {
+      options.satlegalize_options.encoding = text("satlegalize_encoding");
+    }
+    const auto sat_limit = [&](const char* key, unsigned& value) {
+      if (!config.HasMember(key)) {
+        return;
+      }
+      if (!config[key].IsUint()) {
+        throw std::invalid_argument(std::string(key) + " requires an unsigned integer");
+      }
+      value = config[key].GetUint();
+    };
+    auto& sat_options = options.satlegalize_options;
+    boolean_option("satlegalize_route_grid", sat_options.route_grid);
+    boolean_option("satlegalize_route_guidance", sat_options.route_guidance);
+    sat_limit("satlegalize_max_cells", sat_options.max_cells);
+    sat_limit("satlegalize_max_candidates", sat_options.max_candidates);
+    sat_limit("satlegalize_max_windows", sat_options.max_windows);
+    sat_limit("satlegalize_max_pairs", sat_options.max_pairs);
+    sat_limit("satlegalize_move_sites", sat_options.move_sites);
+    sat_limit("satlegalize_move_rows", sat_options.move_rows);
+    if (config.HasMember("satlegalize_spill_neighbors")) {
+      if (!config["satlegalize_spill_neighbors"].IsBool()) {
+        throw std::invalid_argument("satlegalize_spill_neighbors requires a boolean");
+      }
+      sat_options.spill_neighbors = config["satlegalize_spill_neighbors"].GetBool();
+    }
+    if (config.HasMember("satlegalize_region_size")) {
+      const auto& region = config["satlegalize_region_size"];
+      if (region.IsNumber()) {
+        sat_options.region_width_um = sat_options.region_height_um = region.GetDouble();
+      } else if (region.IsArray() && region.Size() == 2 && region[0].IsNumber() && region[1].IsNumber()) {
+        sat_options.region_width_um  = region[0].GetDouble();
+        sat_options.region_height_um = region[1].GetDouble();
+      } else {
+        throw std::invalid_argument("satlegalize_region_size requires positive microns: number or [width,height]");
+      }
+      if (!std::isfinite(sat_options.region_width_um) || !std::isfinite(sat_options.region_height_um)
+          || sat_options.region_width_um <= 0 || sat_options.region_height_um <= 0) {
+        throw std::invalid_argument("satlegalize_region_size requires finite positive microns");
+      }
+    }
+    if (sat_options.route_grid && config.HasMember("satlegalize_region_size")) {
+      throw std::invalid_argument("satlegalize_route_grid cannot be combined with satlegalize_region_size");
+    }
+    if (sat_options.spill_neighbors && !config.HasMember("satlegalize_region_size") && !sat_options.route_grid) {
+      throw std::invalid_argument("satlegalize_spill_neighbors requires satlegalize_region_size or satlegalize_route_grid");
+    }
+    number_option("satlegalize_spill_slack_margin_ps", sat_options.spill_slack_margin_ps);
+    sat_limit("satlegalize_conflicts", sat_options.conflicts);
+    sat_limit("satlegalize_milliseconds", sat_options.milliseconds);
+    if (config.HasMember("satlegalize_skip_conflicts")) {
+      sat_options.skip_conflicts = config["satlegalize_skip_conflicts"].GetBool();
+    }
+    if (config.HasMember("satlegalize_boundary_growth")) {
+      sat_options.boundary_growth = config["satlegalize_boundary_growth"].GetDouble();
+    }
+    number_option("eco_connectivity_weight", options.eco_connectivity_weight);
+    if (config.HasMember("legalize_timing_corrections")) {
+      options.legalize_timing_corrections = config["legalize_timing_corrections"].GetUint();
+    }
+    if (config.HasMember("legalize_timing_strength")) {
+      options.legalize_timing_strength = config["legalize_timing_strength"].GetDouble();
+    }
+    if (config.HasMember("legalize_timing_threshold")) {
+      options.legalize_timing_threshold = config["legalize_timing_threshold"].GetDouble();
     }
     if (config.HasMember("timing_exponent")) {
       options.timing_exponent = config["timing_exponent"].GetDouble();
@@ -291,12 +443,31 @@ int main(int argc, char** argv) {
         throw std::invalid_argument("resize_engine must be new or legacy");
       }
     }
+    if ((forest_only || sizing_forest) && options.resize_engine != "legacy") {
+      throw std::invalid_argument("repair_scope requires resize_engine=legacy");
+    }
     if (config.HasMember("resize_vt_swap")) {
       options.resize_vt_swap = config["resize_vt_swap"].GetBool();
     }
     if (config.HasMember("dont_use")) {
       for (const auto& pattern : config["dont_use"].GetArray()) {
         options.resize_dont_use.emplace_back(pattern.GetString());
+      }
+    }
+    // A retained-placement repair replay needs the exact incoming GP weights
+    // too. Keep explicit weights common to both diagnostic entry paths.
+    if (config.HasMember("net_weights")) {
+      rapidjson::Document weights;
+      weights.Parse(read(text("net_weights")).c_str());
+      if (weights.HasParseError() || !weights.IsObject()) {
+        throw std::invalid_argument("invalid net_weights file");
+      }
+      for (const auto& item : weights.GetObject()) {
+        if (!item.value.IsNumber() || !std::isfinite(item.value.GetDouble()) || item.value.GetDouble() < 1
+            || item.value.GetDouble() > pl::max_net_weight
+            || !options.net_weights.emplace(item.name.GetString(), item.value.GetDouble()).second) {
+          throw std::invalid_argument("invalid or duplicate net weight");
+        }
       }
     }
     options.liberty      = text("liberty");
@@ -329,6 +500,23 @@ int main(int argc, char** argv) {
     }
     if (config.HasMember("halo")) {
       options.halo_x = options.halo_y = config["halo"].GetDouble();
+    }
+    if (config.HasMember("cell_halo")) {
+      const auto& halo = config["cell_halo"];
+      if (halo.IsNumber()) {
+        options.cell_halo = std::pair{halo.GetDouble(), halo.GetDouble()};
+      } else if (halo.IsArray() && halo.Size() == 2 && halo[0].IsNumber() && halo[1].IsNumber()) {
+        options.cell_halo = std::pair{halo[0].GetDouble(), halo[1].GetDouble()};
+      } else {
+        throw std::invalid_argument("cell_halo requires nonnegative microns: number or [x,y]");
+      }
+      if (!std::isfinite(options.cell_halo->first) || !std::isfinite(options.cell_halo->second) || options.cell_halo->first < 0
+          || options.cell_halo->second < 0) {
+        throw std::invalid_argument("cell_halo requires finite nonnegative microns");
+      }
+      if (options.cell_halo->first > options.halo_x || options.cell_halo->second > options.halo_y) {
+        throw std::invalid_argument("each cell_halo axis must not exceed halo");
+      }
     }
     if (config.HasMember("snapshot_only") && config["snapshot_only"].GetBool()) {
       physical_snapshot(tech, *options.previous, root);
@@ -364,47 +552,6 @@ int main(int argc, char** argv) {
       const auto input = options.previous;
       options.previous.reset();
       options.snapshots = true;
-      options.bins      = config.HasMember("bins") ? config["bins"].GetInt() : 64;
-      options.density   = config.HasMember("density") ? config["density"].GetDouble() : .5;
-      // Reuse production spreading controls on an unchanged mapped netlist,
-      // supplied core and fixed macro frame. This isolates placement from
-      // synthesis when comparing downstream CTS and routing.
-      if (config.HasMember("threads")) {
-        options.threads = config["threads"].GetInt();
-      }
-      if (config.HasMember("dynamic_bins")) {
-        options.dynamic_bins = config["dynamic_bins"].GetBool();
-      }
-      if (config.HasMember("bin_max")) {
-        options.bin_max = config["bin_max"].GetInt();
-      }
-      if (config.HasMember("virtual_fillers")) {
-        options.virtual_fillers = config["virtual_fillers"].GetBool();
-      }
-      if (config.HasMember("virtual_filler_max_count")) {
-        options.virtual_filler_max_count = config["virtual_filler_max_count"].GetInt();
-      }
-      if (config.HasMember("virtual_filler_fraction")) {
-        options.virtual_filler_fraction = config["virtual_filler_fraction"].GetDouble();
-      }
-      if (config.HasMember("local_density_weight")) {
-        options.local_density_weight = config["local_density_weight"].GetDouble();
-      }
-      if (config.HasMember("local_density_bins")) {
-        options.local_density_bins = config["local_density_bins"].GetInt();
-      }
-      if (config.HasMember("local_density_range")) {
-        options.local_density_range = config["local_density_range"].GetDouble();
-      }
-      if (config.HasMember("local_density_jitter")) {
-        options.local_density_jitter = config["local_density_jitter"].GetDouble();
-      }
-      if (config.HasMember("adaptive_density")) {
-        options.adaptive_density = config["adaptive_density"].GetBool();
-      }
-      if (config.HasMember("routability")) {
-        options.routability = config["routability"].GetBool();
-      }
       if (config.HasMember("route_model")) {
         options.route_model = text("route_model");
       }
@@ -414,6 +561,9 @@ int main(int argc, char** argv) {
       if (floorplan_mode) {
         options.fp_place = options.final_cells = options.macro_snap = true;
         options.fp_colors                                           = true;
+        // Request the production macro-to-cell handoff even when the
+        // diagnostic disables centroid FP. No resynthesis restart is needed.
+        options.after_stage                                         = [](pl::Placement_stage, const pl::Result&) { return false; };
         // Diagnostic comparisons use the same mapped inputs/timing policy
         // while selecting the production FP/color switches independently.
         if (config.HasMember("macro_align_global")) {
@@ -513,6 +663,11 @@ int main(int argc, char** argv) {
           options.fp_resize = config["fp_resize"].GetBool();
         }
       }
+      if (!floorplan_mode && options.cell_halo) {
+        // This diagnostic mode already supplies the fixed macro frame; only
+        // its final cell GP is requested, without another macro-stage solve.
+        options = pl::final_cell_options(options);
+      }
       if (config.HasMember("color_analysis_only") && config["color_analysis_only"].GetBool()) {
         if (!floorplan_mode) {
           throw std::runtime_error("color_analysis_only requires floorplan_place");
@@ -531,38 +686,24 @@ int main(int argc, char** argv) {
       pl::Evaluate evaluate     = raw_evaluate;
       const auto   start        = std::chrono::steady_clock::now();
       auto         seed_options = options;
-      seed_options.timing_seed  = true;
-      seed_options.output_dir   = root + "/seed";
+      // Explicit replay weights used to be loaded after the timing seed.
+      seed_options.net_weights.clear();
+      seed_options.timing_seed = true;
+      seed_options.output_dir  = root + "/seed";
       hhds::GraphLibrary seed_library;
       auto               seed          = pl::place(*source, seed_library, seed_options);
       const auto         seed_timing   = evaluate(seed);
       const bool         timing_driven = !config.HasMember("timing_driven") || config["timing_driven"].GetBool();
       // A separately invoked fixed-macro cell pass can carry the macro pass's
       // last timing weights, exactly as the in-process staged placer does.
-      if (!config.HasMember("net_weights")) {
-        if (timing_driven) {
-          options.net_weights = pl::timing_weights(*seed.parasitics,
-                                                   seed_timing,
-                                                   options.timing_fraction,
-                                                   options.timing_max_weight,
-                                                   options.timing_exponent);
-        }
-      } else {
-        rapidjson::Document weights;
-        weights.Parse(read(text("net_weights")).c_str());
-        if (weights.HasParseError() || !weights.IsObject()) {
-          throw std::invalid_argument("invalid net_weights file");
-        }
-        options.net_weights.clear();
-        for (const auto& item : weights.GetObject()) {
-          if (!item.value.IsNumber() || !std::isfinite(item.value.GetDouble()) || item.value.GetDouble() < 1
-              || item.value.GetDouble() > pl::max_net_weight) {
-            throw std::invalid_argument("invalid net weight");
-          }
-          options.net_weights.emplace(item.name.GetString(), item.value.GetDouble());
-        }
+      if (!config.HasMember("net_weights") && timing_driven) {
+        options.net_weights = pl::timing_weights(*seed.parasitics,
+                                                 seed_timing,
+                                                 options.timing_fraction,
+                                                 options.timing_max_weight,
+                                                 options.timing_exponent);
       }
-      if (floorplan_mode && timing_driven) {
+      if (timing_driven) {
         options.fp_evaluate = raw_evaluate;
       }
       const auto seeded = std::chrono::steady_clock::now();
@@ -610,9 +751,10 @@ int main(int argc, char** argv) {
             = pl::repair_buffers(std::move(sized.placed), options, evaluate, pl::Repair_scope::design, std::move(sized.timing));
         std::ofstream(root + "/repair.json") << repaired.report;
       }
-      const auto repaired_at = std::chrono::steady_clock::now();
-      auto&      result      = run_resize ? repaired.placed : refined.placed;
-      raw_evaluate(result);
+      const auto repaired_at    = std::chrono::steady_clock::now();
+      auto&      result         = run_resize ? repaired.placed : refined.placed;
+      const auto final_feedback = raw_evaluate(result);
+      pl::refresh_timing_weights(result, options, final_feedback);
       const auto                                 timed_at = std::chrono::steady_clock::now();
       rapidjson::StringBuffer                    weights_json;
       rapidjson::Writer<rapidjson::StringBuffer> weights_writer(weights_json);
@@ -624,6 +766,67 @@ int main(int argc, char** argv) {
       weights_writer.EndObject();
       if (!(std::ofstream(root + "/net_weights.json") << weights_json.GetString() << '\n')) {
         throw std::runtime_error("cannot write net_weights");
+      }
+      const auto                                 membership = pl::timing_weights(*result.parasitics,
+                                                                                 final_feedback,
+                                                                                 options.timing_fraction,
+                                                                                 options.timing_max_weight,
+                                                                                 options.timing_exponent);
+      rapidjson::StringBuffer                    final_weights_json;
+      rapidjson::Writer<rapidjson::StringBuffer> final_weights(final_weights_json);
+      final_weights.StartObject();
+      final_weights.Key("stage");
+      final_weights.String(run_resize ? "post_repair" : "final");
+      final_weights.Key("checkpoint");
+      final_weights.Uint(serial);
+      final_weights.Key("nets");
+      final_weights.StartArray();
+      for (const auto& [driver, weight] : result.net_weights) {
+        final_weights.StartObject();
+        final_weights.Key("driver");
+        final_weights.String(driver.c_str());
+        final_weights.Key("critical");
+        final_weights.Bool(membership.contains(driver));
+        final_weights.Key("weight");
+        final_weights.Double(weight);
+        final_weights.EndObject();
+      }
+      final_weights.EndArray();
+      final_weights.EndObject();
+      if (!(std::ofstream(root + "/final_weights.json") << final_weights_json.GetString() << '\n')) {
+        throw std::runtime_error("cannot write final timing weights");
+      }
+      rapidjson::StringBuffer                    final_timing_json;
+      rapidjson::Writer<rapidjson::StringBuffer> final_timing(final_timing_json);
+      final_timing.StartObject();
+      final_timing.Key("stage");
+      final_timing.String(run_resize ? "post_repair" : "final");
+      final_timing.Key("checkpoint");
+      final_timing.Uint(serial);
+      const auto optional_number = [&](const char* name, const std::optional<double>& value) {
+        final_timing.Key(name);
+        if (value) {
+          final_timing.Double(*value);
+        } else {
+          final_timing.Null();
+        }
+      };
+      optional_number("wns", final_feedback.wns);
+      optional_number("tns", final_feedback.tns);
+      optional_number("hold_wns", final_feedback.hold_wns);
+      final_timing.Key("delay");
+      final_timing.Double(final_feedback.delay);
+      final_timing.Key("area");
+      final_timing.Double(final_feedback.area);
+      final_timing.Key("violations");
+      final_timing.Uint(final_feedback.violations);
+      final_timing.Key("electrical_excess");
+      final_timing.Double(final_feedback.electrical_excess);
+      final_timing.Key("time_unit_ps");
+      final_timing.Double(final_feedback.time_unit_ps);
+      final_timing.EndObject();
+      if (!(std::ofstream(root + "/final_timing.json") << final_timing_json.GetString() << '\n')) {
+        throw std::runtime_error("cannot write final timing report");
       }
       std::map<std::string, const ph::Component*> originals;
       for (const auto& cell : (floorplan_mode ? seed.floorplan.components : input->components)) {
@@ -697,7 +900,15 @@ int main(int argc, char** argv) {
       return 0;
     }
     std::cout << "reconstructing retained placement and RC" << std::endl;
-    auto                                        state = pl::place(*source, placed_library, options);
+    auto import_options = options;
+    if (retained_repair) {
+      // Import the certified pre-repair frame without rerunning tie localization
+      // or legalization. Repair trials below retain ordinary placement options.
+      import_options.retain_placement = true;
+    } else if (options.cell_halo && !options.retain_placement) {
+      import_options = pl::final_cell_options(options);
+    }
+    auto                                        state = pl::place(*source, placed_library, import_options);
     std::map<std::string, const ph::Component*> initial_geometry;
     for (const auto& cell : options.previous->components) {
       initial_geometry.emplace(cell.name, &cell);
@@ -711,6 +922,36 @@ int main(int argc, char** argv) {
           || old.place.orientation != cell.place.orientation) {
         throw std::runtime_error("retained placement moved " + cell.name);
       }
+    }
+    std::map<std::string, const ph::Terminal*> initial_io;
+    for (const auto& port : options.previous->terminals) {
+      initial_io.emplace(port.name, &port);
+    }
+    if (state.floorplan.terminals.size() != initial_io.size()) {
+      throw std::runtime_error("retained placement IO count changed");
+    }
+    for (const auto& port : state.floorplan.terminals) {
+      const auto& old = *initial_io.at(port.name);
+      if (port.x != old.x || port.y != old.y || port.orientation != old.orientation) {
+        throw std::runtime_error("retained placement moved IO " + port.name);
+      }
+    }
+    if (config.HasMember("net_weights")) {
+      std::set<std::string> drivers;
+      for (const auto& net : state.parasitics->nets) {
+        drivers.insert(net.driver);
+        if (!options.net_weights.contains(net.driver)) {
+          throw std::runtime_error("retained replay missing current driver weight: " + net.driver);
+        }
+      }
+      if (drivers.size() != options.net_weights.size() || state.net_weights != options.net_weights) {
+        throw std::runtime_error("retained replay weights include obsolete drivers or changed values");
+      }
+      ph::write_def(state.floorplan, root + "/retained_initial.def");
+      std::ofstream(root + "/retained_import.json")
+          << "{\"component_poses_unchanged\":true,\"io_poses_unchanged\":true,"
+             "\"exact_current_driver_weights\":true,\"components\":"
+          << initial_geometry.size() << ",\"io\":" << initial_io.size() << ",\"weights\":" << drivers.size() << "}\n";
     }
     std::cout << "retained placement ready: all masters, positions and orientations unchanged" << std::endl;
     if (config.HasMember("rc_file")) {
@@ -811,8 +1052,9 @@ int main(int argc, char** argv) {
       ph::write_def(state.floorplan, root + "/out.def");
       return 0;
     }
-    const bool repair_first = config.HasMember("repair_first") && config["repair_first"].GetBool();
-    const auto start        = std::chrono::steady_clock::now();
+    const bool repair_first
+        = forest_only || (!sizing_forest && config.HasMember("repair_first") && config["repair_first"].GetBool());
+    const auto start = std::chrono::steady_clock::now();
     if (options.resize_engine == "new") {
       // Path-based engine: plan on the incremental timer, legalize, confirm (resize.json).
       options.output_dir  = root;
@@ -840,16 +1082,23 @@ int main(int argc, char** argv) {
     auto sizing = pl::repair_buffers(std::move(state),
                                      options,
                                      evaluate,
-                                     repair_first ? pl::Repair_scope::design : pl::Repair_scope::sizing,
+                                     forest_only    ? pl::Repair_scope::forest
+                                     : repair_first ? pl::Repair_scope::design
+                                                    : pl::Repair_scope::sizing,
                                      std::move(initial));
     std::ofstream(root + (repair_first ? "/repair.json" : "/resize.json")) << sizing.report;
     const auto sized  = std::chrono::steady_clock::now();
-    auto       repair = pl::repair_buffers(std::move(sizing.placed),
-                                           options,
-                                           evaluate,
-                                           repair_first ? pl::Repair_scope::sizing : pl::Repair_scope::design,
-                                           std::move(sizing.timing));
-    std::ofstream(root + (repair_first ? "/resize.json" : "/repair.json")) << repair.report;
+    auto       repair = forest_only ? std::move(sizing)
+                                    : pl::repair_buffers(std::move(sizing.placed),
+                                                         options,
+                                                         evaluate,
+                                                         sizing_forest  ? pl::Repair_scope::forest
+                                                         : repair_first ? pl::Repair_scope::sizing
+                                                                        : pl::Repair_scope::design,
+                                                         std::move(sizing.timing));
+    if (!forest_only) {
+      std::ofstream(root + (repair_first ? "/resize.json" : "/repair.json")) << repair.report;
+    }
     const auto repaired = std::chrono::steady_clock::now();
     // The diagnostic's final report is an output artifact, not feedback.
     // The optimizer never reads it or writes reports for candidate trials.

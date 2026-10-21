@@ -9,10 +9,15 @@ namespace livehd::physical {
 TEST(Physical, Sky130GeometryAndRc) {
   const auto tech = read_lef({"inou/lefdef/tests/data/sky130hd.tlef", "inou/lefdef/tests/data/sky130hd.lef"});
   EXPECT_GT(tech.dbu, 0);
+  EXPECT_NEAR(tech.manufacturing_grid, .005, 1e-12);
   EXPECT_NEAR(tech.macros.at("sky130_fd_sc_hd__inv_1").width, 1.38, 1e-9);
   EXPECT_FALSE(tech.macros.at("sky130_fd_sc_hd__inv_1").pins.at("Y").shapes.empty());
   EXPECT_GT(tech.layers.at("met1").resistance, 0);
   EXPECT_TRUE(tech.macros.at("sky130_fd_sc_hd__inv_1").blocked_layers.contains("li1"));
+  EXPECT_FALSE(tech.macros.at("sky130_fd_sc_hd__inv_1").obstructions.empty());
+  EXPECT_TRUE(tech.layers.at("li1").has_offset);
+  EXPECT_NEAR(tech.layers.at("li1").offset_x, .23, 1e-9);
+  EXPECT_NEAR(tech.layers.at("li1").offset_y, .17, 1e-9);
   EXPECT_NEAR(tech.layers.at("li1").pitch_x, 0.46, 1e-9);
   EXPECT_NEAR(tech.layers.at("li1").pitch_y, 0.34, 1e-9);
   EXPECT_NEAR(tech.layers.at("met1").pitch_y, 0.34, 1e-9);
@@ -37,6 +42,23 @@ TEST(Physical, DefIdentityRoundtrip) {
   auto broken = read_def(path.string());
   broken.terminals[0].x++;
   EXPECT_THROW(verify_def_roundtrip(fp, broken), std::runtime_error);
+}
+TEST(Physical, DefTracksAndMasksRoundtrip) {
+  Floorplan fp;
+  fp.design = "tracks";
+  fp.die    = {0, 0, 10000, 10000};
+  fp.tracks = {
+      {"X", "met2", 230, 20, 460},
+      {"Y", "met1", 170, 30, 340, 1, true}
+  };
+  const auto path = std::filesystem::path(std::getenv("TEST_TMPDIR")) / "tracks.def";
+  write_def(fp, path.string());
+  const auto restored = read_def(path.string());
+  EXPECT_EQ(restored.tracks, fp.tracks);
+  EXPECT_NO_THROW(verify_def_roundtrip(fp, restored));
+  auto changed = restored;
+  ++changed.tracks.front().start;
+  EXPECT_THROW(verify_def_roundtrip(fp, changed), std::runtime_error);
 }
 TEST(Physical, DefEscapedInstanceNames) {
   // The Si2 DEF reader retains escapes, as OpenDB does. Re-escaping these
@@ -66,7 +88,7 @@ TEST(Physical, DefPreEscapedSpecialNames) {
   for (const std::string name : {"a\\+b", "a\\(b", "a\\;b"}) {
     fp.components.clear();
     fp.nets.clear();
-    fp.components.push_back({name,"sky130_fd_sc_hd__inv_1", place});
+    fp.components.push_back({name, "sky130_fd_sc_hd__inv_1", place});
     fp.nets.push_back({"wire0", {{name, "A"}}});
     const auto path = std::filesystem::path(std::getenv("TEST_TMPDIR")) / "pre_escaped.def";
     write_def(fp, path.string());

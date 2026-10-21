@@ -404,8 +404,16 @@ void splice(hhds::Graph& graph, const Cone& cone, const synth::Cone_mapping& map
   }
 }
 }  // namespace
-Repair_result resynthesize_cones(Result initial, const Options& options, const Evaluate& evaluate,
+Repair_result resynthesize_cones(Result initial, const Options& requested, const Evaluate& evaluate,
                                  const synth::Cone_provider& provider) {
+  std::optional<Options> resolved_options;
+  if (requested.cell_halo) {
+    resolved_options = final_cell_options(requested);
+  }
+  const auto& options = resolved_options ? *resolved_options : requested;
+  if (options.cell_halo) {
+    check_placed_legality(initial, options);
+  }
   if (!options.full || !provider) {
     throw std::invalid_argument("cone re-synthesis requires full placement and a provider");
   }

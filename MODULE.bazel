@@ -83,6 +83,8 @@ bazel_dep(name = "rapidjson", version = "1.1.0.bcr.20250205")
 git_repository(
     name = "dreamplace",
     commit = "53e97f2b7c551a16f3e8b1eda7eb2410490169a1",
+    patches = ["//packages:dreamplace-timing-legalize.patch"],
+    patch_args = ["-p1"],
     remote = "https://github.com/masc-ucsc/DREAMPlace.git",
 )
 # For local co-development swap the git_repository above for:

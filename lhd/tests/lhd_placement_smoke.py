@@ -117,16 +117,81 @@ td = timed['qor']['place']['timing_driven']
 assert td['initial_timing_source'] == 'post_synthesis_zero_wire' and max(td['initial_weights'].values()) > 1, td
 assert 'pass.place.post_synth_timing' in [p['name'] for p in timed['phases']]
 
-resized = run('resize', ['--set', 'synth.place=true', '--set', 'synth.place.resize=true'])
+# Exercise the full final-GP hook and persistence path alongside the formal
+# libraries linked into lhd. Missing routing-access candidates must fall back.
+satplaced = run('satlegalize', ['--set', 'synth.place=true',
+                               '--set', 'synth.place.timing_driven=true',
+                               '--set', 'synth.place.legalize.timing_strength=8',
+                               '--set', 'synth.place.satlegalize=true',
+                               '--set', 'synth.place.satlegalize.max_windows=2'])
+assert satplaced['qor']['place']['legal'], satplaced
+sat_report = satplaced['qor']['place']['satlegalize']
+assert sat_report['retained'] <= sat_report['accepted'] and sat_report['stage'] == 'final_cell', sat_report
+assert 'window_cell_counts' in sat_report and 'fixed_regions' not in sat_report, sat_report
+sat_region_options = ['--set', 'synth.place=true', '--set', 'synth.place.timing_driven=true',
+                      '--set', 'synth.place.satlegalize=true', '--set', 'synth.place.satlegalize.max_windows=2',
+                      '--set', 'synth.place.satlegalize.max_cells=65536',
+                      '--set', 'synth.place.satlegalize.region_size=40,40',
+                      '--set', 'synth.place.satlegalize.spill_neighbors=true',
+                      '--set', 'synth.place.satlegalize.spill_slack_margin_ps=20']
+sat_regions = run('sat_fixed_regions', sat_region_options)
+assert sat_regions['qor']['place']['legal'], sat_regions
+region_report = sat_regions['qor']['place']['satlegalize']['fixed_regions']
+assert region_report['width_um'] == region_report['height_um'] == 40, region_report
+assert region_report['spill_neighbors'] and not region_report['region_backoff'], region_report
+assert region_report['spill_slack_margin_ps'] == 20, region_report
+sat_regions_warm = run('sat_fixed_regions_warm', sat_region_options)
+assert sat_regions_warm['qor']['place']['reused_final_state'], sat_regions_warm
+sat_regions_changed = run('sat_fixed_regions_changed', [v.replace('region_size=40,40', 'region_size=40,20')
+                                                       for v in sat_region_options])
+assert not sat_regions_changed['qor']['place'].get('reused_final_state', False), sat_regions_changed
+# The shared RSMT map is exported even for the no-SAT matched control.
+route_grid_options = ['--set', 'synth.place=true', '--set', 'synth.place.timing_driven=true',
+                      '--set', 'synth.place.route.model=rsmt',
+                      '--set', 'synth.place.satlegalize.route_grid=true',
+                      '--set', 'synth.place.satlegalize.max_cells=65536',
+                      '--set', 'synth.place.satlegalize.max_windows=2']
+route_control = run('route_grid_control', route_grid_options)
+route_map_path = root/'W/synth/place/sat_route_grid.json'
+assert route_map_path.is_file(), list((root/'W/synth/place').iterdir())
+route_map = json.loads(route_map_path.read_text())
+assert route_map['model'] == 'rsmt' and route_map['bins_x'] == route_map['bins_y'] == 8, route_map
+assert len(route_map['horizontal']) == len(route_map['vertical']) == len(route_map['pin_utilization']) == 64
+route_guided = run('route_grid_guided', route_grid_options + ['--set', 'synth.place.satlegalize=true'])
+assert route_guided['qor']['place']['legal'], route_guided
+assert route_guided['qor']['place']['satlegalize']['fixed_regions']['routing_grid'], route_guided
+run('bad_route_grid_model', ['--set', 'synth.place=true', '--set', 'synth.place.satlegalize.route_grid=true'], False)
+run('bad_route_grid_region', route_grid_options + ['--set', 'synth.place.satlegalize.region_size=40'], False)
+
+for setting in ['region_size=0,40', 'region_size=nan,40', 'spill_slack_margin_ps=-1', 'max_cells=65537']:
+    run('bad_sat_' + setting.replace('=', '_').replace(',', '_'),
+        ['--set', 'synth.place=true', '--set', 'synth.place.satlegalize.' + setting], False)
+run('sat_spill_missing_region', ['--set', 'synth.place=true',
+                               '--set', 'synth.place.satlegalize.spill_neighbors=true'], False)
+
+resized = run('resize', ['--set', 'synth.place=true', '--set', 'synth.place.resize=true',
+                         '--set', 'synth.place.cell_halo=0'])
 assert resized['qor']['place']['legal']
+assert resized['qor']['place']['cell_halo']['active']
+assert resized['qor']['place']['halo']['x_um'] == 0
 assert resized['qor']['place']['resize']['attempts'] <= 24
 assert resized['qor']['place']['repair']['attempts'] <= 24
 phases = [p['name'] for p in resized['phases']]
 assert phases.index('pass.place.resize') < phases.index('pass.place.repair')
+eco_connected = run("eco_connectivity", ["--set", "synth.place=true", "--set", "synth.place.resize=true",
+                                       "--set", "synth.place.legalize.eco_connectivity_weight=1"])
+assert eco_connected["qor"]["place"]["legal"]
+assert eco_connected["qor"]["place"]["eco"]["connectivity"]["weight"] == 1
+assert not eco_connected["qor"]["place"].get("reused_final_state", False)
+for value in ("-1", "101"):
+    run("bad_eco_connectivity_" + value, ["--set", "synth.place=true",
+        "--set", "synth.place.legalize.eco_connectivity_weight=" + value], False)
 # The path-based engine on the incremental what-if timer: one resize phase, its own report.
 resized_new = run('resize_new', ['--set', 'synth.place=true', '--set', 'synth.place.resize=true',
-                                 '--set', 'synth.place.resize.engine=new'])
+                                 '--set', 'synth.place.resize.engine=new', '--set', 'synth.place.cell_halo=0'])
 assert resized_new['qor']['place']['legal']
+assert resized_new['qor']['place']['cell_halo']['active']
+assert resized_new['qor']['place']['halo']['x_um'] == 0
 new_report = resized_new['qor']['place']['resize']
 assert new_report['engine'] == 'new' and 1 <= len(new_report['rounds']) <= 4, new_report
 assert new_report['after']['wns_ps'] >= new_report['before']['wns_ps'] - 1e-3, new_report
@@ -152,4 +217,20 @@ for label, halo in [('scalar', '5'), ('xy', '1.1,2.2')]:
     assert data['qor']['place']['halo']['macros'] == 0, data
 for halo in ['-1', '1,-2', 'nan', 'inf', '1,', '1,2,3', 'x']:
     run('bad_halo_' + halo.replace(',', '_'), ['--set', 'synth.place=true', '--set', 'synth.place.halo=' + halo], False)
+# Cell clearance is independent of macro spacing; zero is an override, not inheritance.
+for label, value, expected in [('zero', '0', (0, 0)), ('xy', '1.1,2.2', (1.1, 2.2))]:
+    data = run('cell_halo_' + label, ['--set', 'synth.place=true', '--set', 'synth.place.cell_halo=' + value])
+    placement = data['qor']['place']
+    assert placement['legal'] and placement['cell_halo']['active'], placement
+    assert (placement['halo']['x_um'], placement['halo']['y_um']) == expected, placement
+    assert placement['macro_halo']['x_um'] == placement['macro_halo']['y_um'] == 5, placement
+cell_warm = run('cell_halo_warm', ['--set', 'synth.place=true', '--set', 'synth.place.cell_halo=1.1,2.2'])
+assert cell_warm['qor']['place']['incremental']['hit'], cell_warm
+cell_changed = run('cell_halo_changed', ['--set', 'synth.place=true', '--set', 'synth.place.cell_halo=0'])
+assert not cell_changed['qor']['place'].get('reused_final_state', False), cell_changed
+inherited = run('cell_halo_inherited', ['--set', 'synth.place=true', '--set', 'synth.place.cell_halo='])
+assert 'cell_halo' not in inherited['qor']['place'] and 'macro_halo' not in inherited['qor']['place'], inherited
+for value in ['-1', '1,-2', 'nan', '6', '1,6']:
+    run('bad_cell_halo_' + value.replace(',', '_'), ['--set', 'synth.place=true',
+        '--set', 'synth.place.cell_halo=' + value], False)
 print('placement: legal DEF, bus connectivity, RC timing, warm/cold reuse, GP/default controls passed')

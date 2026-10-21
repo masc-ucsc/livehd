@@ -13,15 +13,352 @@
 <p>Collect LiveHD placement issues found while inspecting designs in OpenROAD.
 Add each finding as a separate subtask with its observed behavior, proposed fix
 and acceptance checks.</p>
-<p><span class="status">Pending — findings and agreed plans, not implemented</span>
-Started 2026-10-20.</p>
+<p><span class="status">Implemented and evaluated — experimental routing limitations remain</span>
+Started 2026-10-20; evaluated 2026-10-21. Checkpoint scope and qualifications are recorded below.</p>
+
+<h2 id="rsmt-sat-plan">RSMT-RUDY guided legalization — plan, 2026-10-21</h2>
+<p><strong>First experiment: fresh 128 × 128 RSMT-RUDY runs on CNN, Eyeriss
+and Coral in parallel, using the same generated map as SAT guidance and region
+granularity.</strong> This follows the requested local review and upstream pull.
+The pull fast-forwarded <code>e4defb13f</code> to <code>0a01540ee</code>;
+The frozen bin18 experiment uses DREAMPlace <code>946259b6</code> and HHDS
+<code>8121500a</code>. The subsequent source checkpoint also integrates upstream
+<code>e05ab85ef</code> and DREAMPlace <code>53e97f2b</code>, including opt-in timing
+spreading protection. The local legalization extension applies to that new pin.
+Existing experiment binaries and configurations remain frozen.</p>
+<p>The resolved grid counts <em>bins</em>, not tracks. The default LiveHD grid is
+64 × 64; the requested experiment explicitly selects 128 × 128. Bins partition
+the native core rectangle. For the saved frames, 128-bin widths/heights are
+approximately CNN 15.206/15.204 µm, Eyeriss 11.070/11.068 µm and Coral
+2.661/2.660 µm. Fresh frames must report their actual extents. SAT must inherit
+the producer's origin, bounds and dimensions rather than assume a square
+physical tile or silently reconstruct a different 40 µm grid.</p>
+<p><strong>Launch status:</strong> the opt-in grid handoff, source-gap menu,
+congestion ordering and post-legalization map guard are implemented and frozen
+as bin18. All 22 integration targets, 27 SAT regressions and four diagnostic
+entry/map checks pass. The six fresh full-GP legs are running as three
+parallel design workers, ordinary then guided per design. Both legs use the
+same binary and differ only in SAT enablement and output directory.
+<a href="../../repros/route_eval_20261021/spreading/rsmt128_fresh/comparison.html">Fresh comparison and maps</a>;
+<a href="../../repros/route_eval_20261021/spreading/rsmt128_fresh/prepared.json">Exact experiment matrix</a>;
+<a href="../../repros/route_eval_20261021/spreading/rsmt128_fresh/release.json">Frozen launch record</a>;
+<a href="../../repros/route_eval_20261021/bin18-validation/summary.json">Validation</a>;
+<a href="../../repros/route_eval_20261021/bin18-smoke/results.json">Diagnostic map identity</a>.
+Large-design results remain pending; the tiny diagnostic selects no same-bin
+alignment and does not establish a SAT quality gain.</p>
+<p><strong>Checkpoint review correction:</strong> a regression exposed secondary
+alignment pairs using boundary-straddling cells in an otherwise eligible bin.
+The current source requires both endpoints to have been fully inside the source
+bin before solving and requires every activated endpoint candidate to stay
+inside it. All intersecting cells still participate in regional legalization.
+The regression fails before the fix and all 28 SAT regressions pass afterward.
+Frozen bin18 predates this correction: its cross-grid counter describes rejected
+seed selection, while secondary alignments can still involve straddlers. Treat
+those runs as exploratory evidence, not proof of strict same-bin alignment.</p>
+<h3>Review findings that determine the experiment</h3>
+<ul>
+<li>The existing SAT density is movable cell area divided by usable row area.
+It does not measure route congestion. Existing pair selection requires both
+movable single-height CORE endpoints to fit inside one region; fixed SRAM
+endpoints and cross-region pairs are not primary alignment targets.</li>
+<li>The completed nine-leg 40 µm study preserves its input identities. Attempted
+regions contain, on average, 1,246.875 CNN, 3,480.5 Eyeriss and 6,375.875 Coral
+cells. Both SAT legs on every design reach zero solver trials because candidate
+construction fails. Wider CNN movement reaches 32 bounded-candidate UNSAT
+trials in five regions, with no accepted changes. This does not prove that the
+physical regions have no legal solution. The first new experiment must expose
+candidate coverage and provide bounded legal row-gap choices within each full
+source region; merely changing region ordering cannot fix an empty menu.</li>
+<li>The new estimator exposes H/V utilization, macro-pin utilization, blocked
+fraction and aggregate overflow/unreachable counters. It does not export
+per-net routed segments. Enhanced RSMT uses tree lengths with free-space
+redistribution inside reachable net boxes/channels; it is a routing proxy.
+Its internal tree edges can also represent bounding rectangles, and nets above
+the degree cap fall back to weighted RUDY. A long-block experiment requires
+explicit proposal construction, not an assumption that the map already stores
+legal detailed routes.</li>
+<li>Map freshness includes physical pin positions, orientations/offsets,
+masters, topology, weights, masks, core/grid, capacities and model options.
+A GP continuation signature alone is insufficient. The current
+<code>rudy_metrics</code> snapshot diagnostic substitutes unit weights, so it
+cannot transport the timing-weighted placement map unchanged.</li>
+</ul>
+<p><a href="../../repros/route_eval_20261021/upstream_rsmt_merge/before.json">Pre-pull review and source snapshot</a>;
+<a href="../../repros/route_eval_20261021/spreading/sat_region40_bin15/comparison.json">Completed 40 µm experiment</a>;
+<a href="../../repros/route_eval_20261021/spreading/sat_region40_wider15/comparison.json">Wider-menu CNN experiment</a>;
+<a href="3r-route.html">Upstream routing model and qualified measurements</a>.</p>
+<h3>Shared map interface and first implementation</h3>
+<ol>
+<li>After the forced final-GP timing/weight update, evaluate the public native
+RSMT-RUDY estimator on that exact physical design with the resolved 128 × 128
+grid, existing LEF-derived H/V capacities, macro-blockage/pin flags and degree
+40/accuracy 3. Hand the same immutable arrays to SAT and the report. Export
+input identity, grid, options, H/V/pin arrays and structural counters. Force
+explicit <code>rsmt</code> for this experiment; supporting <code>auto</code>
+requires exporting its actual active model/latch, not guessing from the requested
+policy. Baseline runs also export the map without enabling SAT.</li>
+<li>Use map-bin boundaries as complete SAT regions, including intersecting cell
+bodies. Visit the most congested eligible source bins first, with cell density
+as a tie-breaker. Preserve site legality, macro poses/halos, fixed IO and outside
+cells. Keep H/V and pin channels separate in reports. A source-bin row-gap menu
+is bounded by candidate count, while noncritical neighbor escape remains
+subject to measured timing slack and existing capacity guards.</li>
+<li>Allow spill only into a neighbor with lower routing utilization and lower
+cell density, and verify aggregate recipient physical capacity. Macro halos
+remove placement space but are not additional RSMT routing blockages. The first
+pass uses one immutable map for scheduling; recompute the full affected-design
+map to validate the resulting placement. Do not claim that stale per-bin scores
+are updated during a batch. A later incremental version must update every
+incident hypernet, including demand outside the local bins.</li>
+<li>Compare the fully legalized proposal with ordinary legalization of the
+same saved native state using identical frozen net weights for map scoring.
+Require legal geometry, preserved accepted alignments, nonworse setup/hold and
+electrical metrics, and nonworse route overflow/peak/structural counters.
+A rejected whole proposal restores the baseline. No region shrinking or
+shorter-prefix retry is part of this mode.</li>
+</ol>
+<h3>Experiment sequence</h3>
+<table><thead><tr><th>Step</th><th>Comparison</th><th>Purpose</th></tr></thead><tbody>
+<tr><td>0 — correctness</td><td>Rectangular/offset grid, exact map binding,
+invalid/stale input, source-gap coverage, lower-congestion neighbor,
+aggregate physical capacity and rollback regressions.</td><td>Verify map
+orientation, region geometry and safety before large runs.</td></tr>
+<tr><td>1 — requested fresh 128-grid pair</td><td>Per design: fresh explicit
+RSMT full placement with SAT off, then identical fresh placement with map-guided
+SAT. Designs run concurrently; both legs use one frozen merged binary,
+cell halo 2, original macro halos 12/5/6 µm, original spreading/repair policies,
+1500/300 GP limits and zero timing-correction passes.</td><td>Measure the net
+benefit of the first map-guided implementation. Verify identical macro and
+floating pre-SAT frames, weights and maps; failed identity checks invalidate
+causal comparisons. Record bounded-run convergence honestly.</td></tr>
+<tr><td>2 — separate guidance from geometry</td><td>Same grid and expanded
+candidate menu with cell-density ordering versus routing-map ordering.
+Optional 64/128/256-bin diagnostic comparisons retain identical geometry,
+weights and estimator.</td><td>Determine whether map ranking helps, rather than
+crediting new region sizes or candidate menus. Resolution changes are explicit
+experiments, never default changes.</td></tr>
+<tr><td>3 — critical cells first</td><td>Choose the top 20% of eligible cells by
+fresh minimum data-pin slack, solve small alignment groups, reserve their
+accepted sites/relations, then move other cells only to eligible lower-density
+neighbors and legalize remaining local edges.</td><td>Protect important cells
+without solving every cell in a bin simultaneously. Compare fixed anchors with
+movable aligned groups, using separate whole-transaction rollback.</td></tr>
+<tr><td>4 — critical nets across blocks</td><td>Select the top 10% of signal
+nets globally by worst finite sink slack. Propose H/V aligned groups in connected
+unions of up to 3–4 map bins. Then process remaining top-20% critical cells
+locally and remaining local edges.</td><td>Test the user's multi-block strategy.
+Global ranking does not require a chip-wide monolithic SAT solve. Include all
+moved cells, fixed obstacles and affected hypernets; record cross-bin pairs
+currently excluded and separately address fixed-macro endpoints.</td></tr>
+<tr><td>5 — focused tuning</td><td>Only after measurable gains, vary cell
+fractions 10/20/30%, net fractions 5/10/20%, and corridor lengths 1/2/3/4 bins
+one axis at a time; compare bounded candidate and solve budgets.</td><td>Avoid
+a full Cartesian sweep. Prioritize retained improvements and route correlation
+over raw alignment count.</td></tr>
+</tbody></table>
+<p>Percentiles count eligible unique cells/nets, with deterministic name tie-breaks;
+exclude clocks, constants and missing/nonfinite timing from critical-net targets.
+Outside the worst 20% does not automatically mean safe to spill: the first mode
+retains the positive-slack margin. Any relative-slack relaxation is a separate
+experiment with explicit full timing acceptance. Existing pairwise CORE alignment
+and macro-pin access optimization remain separately measured capabilities.</p>
+<h3>Measurements and routing admission</h3>
+<p>Report construction/encoding/solve time separately, memory, actual cells per
+region, missing candidates, base-packing versus alignment UNSAT, unknown/timeouts,
+proposed/accepted/retained alignments, moved/spilled cells, displacement and
+weighted/unweighted HPWL. Record H/V/pin utilization, overflow/peak, blocked pins,
+unreachable nets, full STA, electrical violations and area at pre-SAT,
+post-legalization and post-repair boundaries. Recompute actual final geometry;
+a locally accepted correction can still worsen final repair, as the completed
+Eyeriss c1 follow-up did.</p>
+<p>Only candidates passing geometry and full pin-access checks enter unchanged
+OpenROAD CTS → strict zero-overflow GRT → DRT → extraction/PG checks. Compare
+setup and hold WNS/TNS, routed wirelength/vias, area, zero-DRC completion and
+resources against the fresh OpenROAD references and the matched LiveHD control.
+All three fresh references now have verified complete flows. The CNN reference
+final-only 256 GiB retry succeeds; its earlier 128 GiB failure remains preserved.
+The corrected original CNN spreading candidate now completes detailed routing
+with zero DRCs, 6,051,981 µm wire and 2,375,332 vias; final extraction/timing
+remain pending. Its newer full-GP successor is in detailed routing. No LiveHD
+candidate has yet established full extracted routing parity. Native
+LEF-wide track capacity differs from OpenROAD's M2–M7 routing configuration;
+proxy improvements are screening evidence, not routing closure.</p>
+
+<h2>CTS-to-route follow-up — in progress, 2026-10-21</h2>
+<p>Run the generated LiveHD pre-CTS placements through the original HighTide
+OpenROAD CTS, global routing, detailed routing and extraction/report scripts.
+Compare CNN, Eyeriss and Coral concurrently against their original OpenROAD
+pre-CTS references. Require actual detailed-route completion and report DRCs,
+setup/hold timing, routed wirelength, vias and resources; placement or
+congestion-allowed global routing alone does not meet this goal.</p>
+<p>The first measurements identify macro routing-track phase incompatibility and
+local cell-density hotspots. Experiments preserve existing option defaults while
+testing finer grids, virtual fillers, local spreading and the original downstream
+cell exclusions. Native handoff regenerates taps and power grids around the new
+macro frame; any required standard-cell legalization is explicitly audited for
+movement, fixed objects, cell masters and signal connectivity.</p>
+<p>The original LiveHD macro3 cases all completed CTS, then failed strict global
+routing at macro pin access (CNN 25, Eyeriss 252, Coral 1 affected macro instance
+reported before termination). The corrected bin8 aligns real macro pin geometry
+to routing tracks before standard-cell packing and preserves off-site BLOCK
+origins through legalization and detailed placement. Fixed halo portions outside
+the core are clipped while physical-body bounds and interior clearances remain
+checked. Compact macro packs can move coherently onto legal track phases without
+changing the core; fixed macro access is validated before recovery. All 16 focused targets pass, including repair/resize regressions and the
+full CLI link. Corrected full-path corpus replays pass OpenROAD placement and isolated macro pin
+access on all three designs (25/252/1 inaccessible macros reduced to zero). Full
+spreading comparisons and prepared-design CTS/routing remain in progress; no
+routing-quality parity is claimed yet.</p>
+<p>The first complete Coral spreading pairs reduce the fraction of cell area in
+bins above 80% occupancy from 51.14% to 8.26% with the reference macro frame and
+from 48.01% to 6.47% with LiveHD-placed macros. These are independent geometric
+measurements on a 256×256 grid, excluding macro bodies from available area;
+they do not establish routing capacity or timing closure. The native spreading result survives OpenROAD handoff legalization: prepared dense-bin area is 6.47%, versus 47.52% for the prepared baseline. The fresh OpenROAD
+Coral reference has completed detailed routing with zero DRCs, 1,900,919 µm of
+wire and 2,487,362 vias, matching the cached reference counts. Corrected LiveHD
+Coral and fixed-frame CNN candidates have passed full prepared-design pin
+access and CTS. Fixed-frame CNN spreading reduces dense-bin cell area from
+26.52% to 7.49% and improves CTS setup TNS by about 19%, but worst slack remains
+near −25 ns. A native buffer-chain detour is present in the first saved
+post-insertion legalization frame. An exact sizing/first-forest replay now proves
+that independent nearest-gap legalization projects compact buffer seeds toward
+different free regions, creating the detour. A default-zero incident-net
+connectivity cost is implemented and passes all sixteen focused test targets, including an exhaustive legal-site oracle. Its full CNN repair comparison completed from the exact saved initial frame: WNS improves from −25.37 to −14.71 ns and electrical violations fall, but TNS worsens by 17.4%. The same six-buffer chain shrinks from 4274 to 155 µm with identical seeds and touching connectivity. All three native spreading follow-ons completed: weight one regresses CNN/Eyeriss setup WNS and gives Coral only a marginal improvement, so it is not recommended across designs. Routed parity remains unproven. A controlled Coral
+repair-policy pair preserves exact imported placement and driver weights before
+fresh timing analysis: cell exclusions work but slightly regress native timing
+proxies. The alternative repair engine reached the two-hour bound; its second accepted intermediate checkpoint passes a fresh geometry/timing audit and is queued for routing as an explicitly incomplete, budget-limited result.</p>
+<p>All twelve full-GP histories meet the final density-overflow threshold, but none
+reports full objective/timing convergence at the explicit 1500-iteration cap.
+These are bounded configuration comparisons, not fully converged placements.
+An independent CNN clock-only experiment changes the misplaced automatic clock
+pin on an otherwise identical prepared database. Measured CTS setup WS stays at
+−6043.04 ps; hold WS worsens from −3205.89 to −3280.27 ps, with worse hold TNS.
+The pin move alone has not established an improvement; global routing continues.</p>
+<p>A completed fixed-CNN experiment distinguishes the reference flow’s 12 µm
+macro spacing from its 2 µm standard-cell row exclusion. Keeping all macro poses
+and initial timing inputs fixed, it changes only LiveHD’s cell exclusion halo
+from 11.88 to 2 µm (rounded to 2.052/2.16 µm on the site/row grid). Macro-only
+geometry proves that the larger exclusion closes channels beside SRAM inputs:
+one critical pin is at least 1118.243 µm from a legal buffer output, versus
+2.671 µm with the smaller exclusion. Other standard-cell occupancy is omitted
+from that bound. Actual accepted repair uses the newly opened channels: WNS
+improves from −14.710 to −2.747 ns and TNS from −11.202 to −4.257 million ps,
+with unchanged hold WNS and macro/IO positions. Electrical violation count rises
+slightly while excess falls. Fresh handoff/CTS/routing is queued. The native CNN
+halo-two replay, retaining its original weight-zero repair policy, also improves
+WNS from −3.890 to −3.132 ns and TNS from −9.363 to −2.552 million ps, with
+unchanged hold WNS and slightly more cell area. Eyeriss also improves WNS from
+−1.863 to −1.634 ns and TNS from −4.881 to −4.547 million ps, with unchanged
+hold WNS and lower area and electrical violations. Coral setup is effectively
+unchanged. All three replays completed with passing input and fixed-object audits.</p>
+<p>The opt-in <code>synth.place.cell_halo=H|X,Y</code> is implemented and frozen
+as bin13. Unset inherits the existing halo exactly; each explicit axis must lie
+between zero and the original macro halo. Macro spacing is checked independently,
+while final-cell GP and repair use the selected cell clearance. All sixteen
+focused test targets and eight diagnostic checks pass. CNN, Eyeriss and Coral
+were launched for fresh full placement in parallel with cell halo two and their
+original macro halos, spreading settings and repair policies.</p>
+<p>The final bin14 compatibility fix preserves the original stateful callback
+object when <code>cell_halo</code> is unset. Its callback-reuse regression and
+all sixteen focused targets pass. The explicit-halo measurements retain their
+immutable bin13 binary.</p>
+<p>Current evidence and reproducible commands:
+<a href="../../repros/route_eval_20261021/comparison.html">CTS and routing evaluation</a>.
+The corrected native Coral baseline has now failed global routing with 395 units of residual overflow after 97.91 minutes; strict checks prevent it from entering detailed routing despite process exit zero. Spreading candidates are being tested with the original routing-capacity settings. The earlier A–F measurements below remain preserved and do not claim routing closure.</p>
+<p>The fixed-frame CNN spreading candidate has passed strict global routing
+with zero overflow and verified routing guides in 2166.08 seconds. Detailed
+routing from that checkpoint fails after 378.35 seconds with DRT-0255 on six
+nets near the left boundary, including CLK. Their generated M2 port shapes lack
+an interior preferred track. A controlled pin-geometry correction is under
+investigation. An isolated post-CTS clone now passes an independent audit: only the 365 signal-pin rectangles change to track-centered M4/M5 minimum-area shapes, with at most 24 DBU tangential movement. Cells, macros, connectivity, PG wires, rows and tracks remain exact. Fresh global routing on that clone passes strict zero-overflow checks in 1,448.35 seconds, with setup WNS improving from −17.949 to −16.958 ns. Detailed routing completes iteration zero without the earlier fatal error, with 114,728 provisional DRCs; repair iterations continue. This clears the original terminal phase but does not establish full closure. No LiveHD candidate has completed the full routed extraction comparison yet.</p>
+<p>A one-port/one-buffer fixture reproduces the exact CNN DRT-0255 access point and worker box with original 18×18 DBU M2 geometry after placement/AP/GRT pass. Corrected 37×18 DBU track-centered M2 and 84×24 DBU track-centered M4 variants each route with zero DRCs. Shared cell, row, track and connectivity audits pass; full-design PG/macros/congestion are outside this local proof.</p>
+<p>The fresh Eyeriss OpenROAD reference has completed zero-DRC detailed routing, full extraction and both PG connectivity checks. Extracted setup WNS/TNS are −668.039/−99,505.6 ps; hold WNS/TNS are −240.621/−1,446.08 ps. Corrected-pin pre-CTS successors for the fixed CNN halo-two repair, fresh full CNN placement and accepted Coral intermediate have passed independent geometry/connectivity audits and entered fresh pin-access/CTS-to-route evaluation.</p>
+<p>The fresh full CNN placement with separate cell halo two completed with
+passing macro, IO and stage-context audits. WNS improves from −3.890 to −1.425 ns
+and TNS from −9.363 to −1.062 million ps. Electrical violations and area also
+fall; hold WNS stays positive but decreases from 9.172 to 7.141 ps. Its GP meets
+the density threshold at 1500 iterations without full objective convergence.
+Coral also completed with passing controls: area and electrical violations improve, but setup WNS worsens from −496.583 to −503.583 ps and TNS from −119,150 to −132,081 ps. Eyeriss also completes: WNS −2,424.734 ps and TNS −2.921 million ps trade worse WNS/electrical metrics for better TNS. Its retained-placement halo-two variant is selected for routing because it improves both setup measures and electrical metrics versus the original. All three full runs and their immutable control audits pass.</p>
+
+<p>The fresh full CNN cell-halo-two candidate with corrected pins completes fresh CTS: setup WNS/TNS −1,700.74/−836,046 ps and hold WNS/TNS −896.423/−10,273.8 ps. All four CTS metrics improve against both the matched reference and original native spreading control. Fresh global routing also passes with zero overflow in 662.19 seconds: 3,376,271 µm wire, 1,748,935 vias, setup WNS/TNS −1395.51/−314878 ps and hold WNS/TNS −495.907/−3832.59 ps. All six GRT metrics improve versus both controls. Detailed routing is active; detailed/extracted results remain pending.</p>
+<p>Native CNN spreading now passes strict global routing and improves all six matched GRT metrics: wirelength 16.935→6.454 million µm, vias 3.056→1.979 million, setup WNS −6.164→−3.721 ns and hold WNS −1.516→−1.241 ns, with both TNS values improving. Its subsequent detailed route fails on eleven boundary nets with the same DRT-0255 class; a corrected-pin continuation is authorized from exact saved CTS. Detailed-route/extracted parity remains unproven. The fresh CNN reference final power analysis failed an allocation under its 128 GiB process address-space cap after clean routing and partial extraction. A resource-only final-stage retry with a 256 GiB cap preserves all earlier stages; no final success is accepted until its complete audit passes.</p>
+<p>A read-only GP-tail analysis finds identical macro-stage histories but nearly flat Eyeriss cell HPWL within each constant timing-weight segment. Its native timing gap widens during legalization and narrows during repair. The completed correction-count-one follow-up preserves those inputs and GP budgets. Its eight local iterations improve immediate WNS, but later repair regresses final WNS from −2,424.73 to −6,992.27 ps and TNS from −2.921 to −17.134 million ps. The option is not promoted; the selected retained-halo-two route continues independently.</p>
+<p>The fixed-frame CNN baseline finishes strict global routing with 38,986 units of residual overflow after 13,506 seconds and does not enter detailed routing. The original native CNN baseline also fails strict GRT with 39,349 units after 12,309 seconds. Neither failed run enters detailed routing. The corrected fixed-frame spreading continuation is progressing through detailed routing; full closure remains pending.</p>
+<p>The requested 40×40 µm SAT-region census is complete on the saved floating final-GP placements. With a die-origin grid, the busiest regions intersect 3,888 CNN, 6,284 Eyeriss and 7,451 Coral movable CORE cells. Core-origin counts are 3,917/6,347/7,544. This is much larger than the previous 24–128-cell domain probes. Explicit fixed regions with sparse candidate-overlap constraints and noncritical overflow into less-dense adjacent regions are implemented. All 19 focused SAT regressions pass, including boundary-straddler transfers and aggregate recipient-density enforcement. The final integration/CLI build passes all sixteen targets after the last guard fix and is frozen as bin15. The requested experiment will not shrink regions or retry shorter alignment prefixes. All nine matched baseline/no-spill/spill replays complete with passing identity audits and unchanged final DEF/timing. Each SAT leg visits eight whole regions but reaches zero solver trials because candidate construction fails. Mean window populations are 1,246.9 CNN, 3,480.5 Eyeriss and 6,375.9 Coral cells. Wider local reach on CNN reaches 32 bounded-menu UNSAT trials across five whole regions without accepted transfers. The new RSMT-grid experiment adds bounded legal row-gap choices within each source bin.</p>
+<p>The boundary-pin factor test isolates the local routing cause: minimum-area M2 at the original off-track center still fails, while the original undersized M2 centered on a preferred track routes locally. The undersized input remains LEF AREA/MINSIZE-invalid. Full candidates use both correct track centering and minimum-area geometry.</p>
+<h2>Implementation and evaluation — 2026-10-21</h2>
+<p>Subtasks A–F have implementation and repository-owned regression coverage.
+Existing option defaults are preserved. Timing-aware displacement protection and
+<code>satlegalize</code> remain opt-in. The portable native changes are carried in
+<code>packages/dreamplace-timing-legalize.patch</code> against the pinned source.
+Fourteen repository targets pass with full <code>lhd</code> and diagnostic links;
+the incremental solver bridge also passed full-driver source/prebuilt cvc5 linkage
+and solver/cvc5/ABC coexistence checks.</p>
+<p>CNN, Eyeriss and Coral ran concurrently from matched HighTide inputs with frozen
+executables. All three full macro/final-cell/repair runs finished successfully and
+pass independent OpenDB placement checking. These common OpenSTA results use the
+original individual Liberty libraries and constraints:</p>
+<table><thead><tr><th>Design</th><th>WNS (ns)</th><th>TNS (ns)</th><th>Native full run (min)</th></tr></thead>
+<tbody><tr><td>CNN</td><td>-4.816</td><td>-41546.733</td><td>20.3</td></tr><tr><td>Eyeriss</td><td>-0.846</td><td>-365.752</td><td>51.9</td></tr><tr><td>Coral</td><td>-0.899</td><td>-186.669</td><td>25.3</td></tr></tbody></table>
+<p>The cached OpenROAD whole-flow references have different netlist counts and
+placement policies: CNN improves WNS but worsens TNS, Eyeriss improves both, and
+Coral worsens both. This is mixed contextual evidence, not a netlist-identical
+comparison or timing closure.</p>
+<ul>
+<li><strong>A/B:</strong> all 14,668 tie identities, 23,515 buffered constant leaf
+associations and polarities, and 3,375 IO coordinates survive repair. All 80 complete
+DEF snapshots pass connectivity checks. A controlled CNN replay splits two shared
+sources into 1,945 legal single-load ties; fixed/movable IO controls verify actual
+movement and explicit fixed-pin preservation. CNN SRAM distance tails are checked
+against available legal sites, not assumed to equal the nominal halo.</li>
+<li><strong>C/D:</strong> all current-driver weight exports pass identity and
+baseline checks. Final recovery tries 12 bypasses per design and accepts none;
+the broader repair flow's netlist edits are recorded separately. No buffer-count
+gain is attributed to the new recovery sweep.</li>
+<li><strong>E:</strong> all 24 priority/threshold variants and four correction
+cases pass exact saved-GP comparison. The measured opt-in choice is
+<code>timing_strength=8</code>, <code>timing_threshold=0.5</code>,
+<code>timing_corrections=1</code>: common WNS/TNS and native electrical counts
+improve on both CNN and Eyeriss. One eight-iteration correction costs about
+1.78×/1.70× replay runtime; a second correction rolls back to the identical result.
+This recommendation covers legalization/detail with resizing disabled. Its effect
+after the full repair flow is unmeasured. Geometry search/relaxation caps were held
+fixed; no claim is made that those caps are optimal.</li>
+<li><strong>F:</strong> all 12 backend/encoding comparisons and six adaptive CNN
+probes complete, with no retained alignment. Every final DEF matches its ordinary
+E8 control byte-for-byte. No solver winner or placement/routing gain is established.
+CNN fails access on 25 macro pins and its congestion-allowed global route remains
+congested. The original isolated 65-macro frame passes access, while the native
+frame fails those same pins using identical abstracts; this is a native macro-frame
+follow-up, outside F's fixed-macro windows. Eyeriss fails access on 252 macro pins.
+No detailed-routing or DRC closure is claimed.</li>
+</ul>
+<p>Large centroid-FP attempts hit the existing circle-fit precondition; the completed
+experiment explicitly disables centroid FP and uses the production macro/final-cell
+handoff. Macro soft-halo/row normalization and its conservative native policy are
+proved and disclosed. Original inputs and failed attempts remain available. Eyeriss
+has original combinational-loop coverage warnings; Coral's asynchronous-check
+limitations are documented in the report.</p>
+<p>Measurements use frozen <strong>bin5</strong>. Final reviewed <strong>bin6</strong>
+corrects only intermediate DEF observer row-orientation serialization, plus its
+regression and documentation. Final exports and native timing already used the
+correct orientations. Raw measured snapshots are preserved; common stage scores use
+audited orientation-only views matching native physical capture.</p>
+<p>Artifacts: <a href="../../repros/2p_eval_20261020/comparison.html">complete evaluation report and images</a>,
+<a href="../../repros/2p_eval_20261020/frozen-bin5.json">measured tools/source</a>,
+<a href="../../repros/2p_eval_20261020/frozen-bin6.json">final reviewed tools/source</a>,
+<a href="../../repros/2p_eval_20261020/final_source_delta.json">exact final source delta</a>,
+<a href="../../repros/2p_eval_20261020/macro3.runs.json">three concurrent full runs</a>,
+<a href="../../repros/2p_eval_20261020/validation.json">validation</a>,
+<a href="../../repros/2p_eval_20261020/evaluation_recipe.json">reproduction controls</a>.
+See <code>pass/place/README.md</code> for controls and model scope.</p>
 
 <h2>Depends on</h2>
 <p>None. These are follow-up fixes to the existing native placement flow tracked
 in <a class="xref" href="3p-placement.html">3p-placement</a>. OpenROAD is the
 inspection tool; the fixes belong in LiveHD's placement implementation.</p>
 
-<h2>Subtasks — pending</h2>
+<h2>Subtasks — implemented and evaluated</h2>
 <ul class="subtasks">
   <li id="A"><strong>A — Local TIELO/TIEHI drivers for each constant use.</strong>
     <ul>
@@ -331,8 +668,44 @@ inspection tool; the fixes belong in LiveHD's placement implementation.</p>
   </li>
 </ul>
 
-<h2>Subtasks — landed</h2>
-<p>None yet.</p>
+<h2>Delivery status</h2>
+<p><strong>Checkpoint validation:</strong> 23 integration targets pass, including
+28 SAT regressions, native placement/RSMT tests, cache and LEC checks, CLI
+placement/routing smoke tests, and the new timing-spread-control smoke.
+The handoff smoke verifies exact IO geometry and restoration of original
+placement constraints. C++ formatting, whitespace and compiler-warning
+contract checks pass.</p>
+<p>This checkpoint preserves the reviewed native placement/repair fixes,
+track-aware macro access, current-driver timing weights, constant/tie handling,
+separate cell clearance, opt-in SAT legalization, and the exact RSMT-map handoff.
+It integrates upstream <code>e05ab85ef</code> with DREAMPlace
+<code>53e97f2b</code>. Existing user-visible defaults remain unchanged; SAT,
+separate cell clearance, ECO connectivity cost and timing-spread protection
+remain opt-in. Large generated designs, logs, tool binaries and run directories
+remain local under <code>repros/</code>.</p>
+<table><thead><tr><th>Design</th><th>Best selected setup so far</th><th>Verified scope</th></tr></thead><tbody>
+<tr><td>CNN</td><td>Fresh full placement, macro halo 12 µm, cell halo 2 µm,
+128 bins, virtual fillers, local-density weight 1, original weight-zero ECO
+policy and zero legalization correction passes.</td><td>Clean GRT and improved
+setup/hold estimates; detailed routing active. The earlier spreading control
+already has zero-DRC detailed routing, with extraction/timing still pending.</td></tr>
+<tr><td>Eyeriss</td><td>Retain the original spreading placement and macro/IO
+frame, macro halo 5 µm, repair with cell halo 2 µm and ECO connectivity weight
+zero.</td><td>Better setup and hold CTS WNS/TNS than the fresh reference;
+global routing active. Fresh full-GP halo-two and correction-count-one runs
+are not selected because their final native metrics regress.</td></tr>
+<tr><td>Coral</td><td>Accepted second checkpoint of the alternate repair
+engine on the original spreading frame, macro/cell halo 6 µm.</td><td>The
+producer reached its two-hour limit; this is a qualified intermediate checkpoint.
+CTS completes, but reference timing is still better; routing is active.</td></tr>
+</tbody></table>
+<p>Selected routes use audited M4/M5 boundary-pin transforms, the original
+platform scripts/constraints/capacity settings, eight-thread CTS/GRT and
+32-thread detailed routing. These transforms are evaluation setup, not a new
+native IO default. The separate fresh RSMT128 study retains cell halo 2 µm for
+all three paired controls; it does not replace the stronger selected Eyeriss
+and Coral configurations without measured evidence. No LiveHD candidate has
+yet established equal-or-better fully extracted routing across all metrics.</p>
 
 <h2>Design notes</h2>
 <p>Append future OpenROAD inspection findings with stable subtask letters. Record

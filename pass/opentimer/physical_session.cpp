@@ -321,6 +321,7 @@ struct Physical_session::Impl : Pass_opentimer {
       return it == s.net_names.end() ? std::string{} : it->second;
     }
     spef::Net to_spef(const livehd::physical::Rc_net& net, const std::string& name) const {
+      livehd::physical::validate_rc_tree(net);
       spef::Net                mapped(name, 0);
       std::vector<std::string> labels;
       for (size_t i = 0; i < net.nodes.size(); ++i) {

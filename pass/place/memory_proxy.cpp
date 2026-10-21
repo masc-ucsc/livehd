@@ -61,6 +61,7 @@ std::map<uint64_t, std::string> memory_proxies(hhds::Graph& graph, physical::Tec
     physical::Macro macro;
     macro.width = macro.height = double(side) / tech.dbu;
     macro.klass                = "BLOCK";
+    macro.virtual_proxy        = true;
     std::vector<std::string> address, data, control;
     for (auto sink : node.inp_sorted_pins()) {
       if (!memory_runtime_pin(sink.get_port_id())) {

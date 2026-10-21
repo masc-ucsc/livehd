@@ -79,6 +79,11 @@ def _source_impl(ctx):
         if name == "CryptoMiniSat":
             text = text.replace("CMAKE_ARGS -DCMAKE_BUILD_TYPE=Release", "CMAKE_ARGS -DCMAKE_BUILD_TYPE=Release -DCMAKE_CXX_STANDARD_LIBRARIES=${CMAKE_CXX_STANDARD_LIBRARIES}")
         ctx.file(path, text)
+    # Reuse the pinned dependency APIs for a placement solver bridge. These
+    # headers never escape @cvc5_source; the bridge joins the isolated object.
+    ctx.extract("deps/livehd/CaDiCaL.tar.gz", output = "satheaders/cadical", stripPrefix = "cadical-rel-2.1.3-elevate")
+    ctx.extract("deps/livehd/CryptoMiniSat.tar.gz", output = "satheaders/cms", stripPrefix = "cryptominisat-5.11.21")
+    ctx.file("livehd_sat_bridge.cpp", ctx.read(ctx.attr.sat_bridge))
     path = "cmake/deps-helper.cmake"
     ctx.file(path, ctx.read(path).replace("if(NOT ENABLE_AUTO_DOWNLOAD)", "if(NOT ENABLE_AUTO_DOWNLOAD AND NOT LIVEHD_OFFLINE_DEPS)"))
     ctx.download_and_extract(
@@ -101,6 +106,7 @@ _source_repo = repository_rule(
     implementation = _source_impl,
     attrs = {
         "build_file": attr.label(default = "//packages:cvc5_src.BUILD"),
+        "sat_bridge": attr.label(default = "//packages:cvc5_sat.cpp"),
         "inputs_bzl": attr.label(default = "//packages:cvc5_inputs.bzl"),
         "offline_patch": attr.label(default = "//packages:cvc5-offline.patch"),
         "kissat_patch": attr.label(default = "//packages:cvc5-kissat-fresh.patch"),
@@ -112,6 +118,7 @@ def _alias_impl(ctx):
     ctx.file("BUILD.bazel", '''
 config_setting(name = "prebuilt", values = {"define": "cvc5_prebuilt=1"})
 alias(name = "cvc5", actual = select({":prebuilt": "@cvc5_prebuilt//:cvc5", "//conditions:default": "@cvc5_source//:cvc5"}), visibility = ["//visibility:public"])
+alias(name = "sat_solver", actual = select({":prebuilt": "@cvc5_source//:sat_standalone", "//conditions:default": "@cvc5_source//:sat_solver"}), visibility = ["//visibility:public"])
 alias(name = "cvc5_headers", actual = select({":prebuilt": "@cvc5_prebuilt//:cvc5_headers", "//conditions:default": "@cvc5_source//:cvc5_headers"}), visibility = ["//visibility:public"])
 ''')
 

@@ -7,7 +7,7 @@ cvc5_header(name = "gmp_header", library = "@gmp//:gmp", basename = "gmp.h")
 cvc5_header(name = "gmpxx_header", library = "@gmp//:gmpxx", basename = "gmpxx.h")
 cvc5_python(name = "python_runtime")
 filegroup(name = "python_executable", srcs = [":python_runtime"], output_group = "interpreter")
-filegroup(name = "source", srcs = glob(["**"], exclude = ["BUILD.bazel"]))
+filegroup(name = "source", srcs = glob(["**"], exclude = ["BUILD.bazel", "livehd_sat_bridge.cpp", "satheaders/**"]))
 filegroup(name = "gmp_archive", srcs = ["@gmp//:gmp"], output_group = "archive")
 filegroup(name = "gmpxx_archive", srcs = ["@gmp//:gmpxx"], output_group = "archive")
 cmake(
@@ -56,7 +56,9 @@ filegroup(name = "libpicpolyxx.a", srcs = [":build"], output_group = "libpicpoly
 filegroup(name = "libkissat.a", srcs = [":build"], output_group = "libkissat.a")
 filegroup(name = "libcryptominisat5.a", srcs = [":build"], output_group = "libcryptominisat5.a")
 filegroup(name = "installed_headers", srcs = [":build"], output_group = "include")
-genrule(name = "combined", srcs = [':libcvc5.a', ':libcadical.a', ':libpicpoly.a', ':libpicpolyxx.a', ':libkissat.a', ':libcryptominisat5.a'], outs = ["libcvc5_combined.a"],
+cc_library(name = "sat_bridge", srcs = ["livehd_sat_bridge.cpp"], hdrs = glob(["satheaders/cadical/src/*.hpp", "satheaders/cms/src/*.h"]))
+filegroup(name = "sat_bridge_archive", srcs = [":sat_bridge"], output_group = "archive")
+genrule(name = "combined", srcs = [':sat_bridge_archive', ':libcvc5.a', ':libcadical.a', ':libpicpoly.a', ':libpicpolyxx.a', ':libkissat.a', ':libcryptominisat5.a'], outs = ["libcvc5_combined.a"],
     cmd = """
 set -e
 work=$$(mktemp -d "$(@D)/cvc5-XXXXXX")
@@ -137,3 +139,42 @@ fi
 cc_import(name = "combined_import", static_library = "libcvc5_combined.a")
 cc_library(name = "cvc5_headers", defines = ["LIVEHD_CVC5_SOURCE_BUILD"], hdrs = [":installed_headers"], includes = ["build/include"], visibility = ["//visibility:public"])
 cc_library(name = "cvc5", deps = [":cvc5_headers", ":combined_import", "@gmp//:gmp", "@gmp//:gmpxx"], linkopts = ["-lpthread", "-ldl", "-lm"], visibility = ["//visibility:public"])
+
+# The public model-producing C API uses the same private solvers as cvc5.
+cc_library(name = "sat_solver", deps = [":cvc5"], visibility = ["//visibility:public"])
+
+# A prebuilt cvc5 can coexist with placement SAT without pulling a second
+# libcvc5 into lhd. Reuse the SAME pinned source-built SAT archives, but isolate
+# this bridge/dependency object under its own prefix (including COMDAT keys).
+genrule(
+    name = "sat_standalone_combined",
+    srcs = [":sat_bridge_archive", ":libcadical.a", ":libcryptominisat5.a"],
+    outs = ["liblivehd_sat.a"],
+    cmd = """
+set -e
+work=$$(mktemp -d "$(@D)/sat-XXXXXX")
+trap 'rm -rf "$$work"' EXIT
+if [ "$$(uname)" = "Darwin" ]; then
+  clang -nostdlib -Wl,-r -Wl,-all_load \
+    -Wl,-unexported_symbol,'*CaDiCaL*' \
+    -Wl,-unexported_symbol,'*ccadical*' \
+    -Wl,-unexported_symbol,'*Reap*' \
+    -Wl,-unexported_symbol,'_ipasir_*' \
+    -Wl,-unexported_symbol,'*CMSat*' \
+    -Wl,-unexported_symbol,'_cmsat_*' \
+    -o "$$work/combined.o" $(SRCS)
+  ar rcs $@ "$$work/combined.o"
+else
+  ld -r -o "$$work/combined.o" --whole-archive $(SRCS) --no-whole-archive
+  nm --defined-only --extern-only $(location :libcadical.a) $(location :libcryptominisat5.a) \
+    | awk '$$2 ~ /^[TDBR]$$/ {print $$3}' > "$$work/private.syms"
+  nm --defined-only "$$work/combined.o" | awk '{print $$3}' \
+    | grep -E 'CaDiCaL|4Reap|^ipasir_|^ccadical|CMSat|^cmsat_' >> "$$work/private.syms"
+  sort -u "$$work/private.syms" | awk '{print $$1, "lhdsatpriv_" $$1}' > "$$work/private.redef"
+  objcopy --redefine-syms="$$work/private.redef" "$$work/combined.o" "$$work/private.o"
+  ar rcs $@ "$$work/private.o"
+fi
+""",
+)
+cc_import(name = "sat_standalone_import", static_library = "liblivehd_sat.a")
+cc_library(name = "sat_standalone", deps = [":sat_standalone_import"], linkopts = ["-lpthread", "-lm"], visibility = ["//visibility:public"])

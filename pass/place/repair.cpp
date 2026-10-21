@@ -1,6 +1,8 @@
 // This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 #include "repair.hpp"
 
+#include <fnmatch.h>
+
 #include <algorithm>
 #include <cctype>
 #include <charconv>
@@ -46,6 +48,11 @@ const Buffer* combinational(Node n, const Inventory& cells) {
   return it == cells.end() ? nullptr : &it->second;
 }
 bool identity(const Buffer& cell) { return cell.inputs.size() == 1 && liberty::cell_truth(cell) == uint64_t{0xaaaaaaaaaaaaaaaa}; }
+bool matches_dont_use(const std::string& name, const Options& options) {
+  return std::any_of(options.resize_dont_use.begin(), options.resize_dont_use.end(), [&](const auto& pattern) {
+    return fnmatch(pattern.c_str(), name.c_str(), 0) == 0;
+  });
+}
 const Buffer* buffer(Node n, const Inventory& cells) {
   const auto* cell = combinational(n, cells);
   return cell && identity(*cell) ? cell : nullptr;
@@ -103,10 +110,11 @@ Special_pins scan_special_pins(const std::string& libs, bool protect_reset) {
   }
   return special;
 }
-std::set<std::string> protected_buffers(hhds::Graph& graph, const Inventory& cells, const Special_pins& special, bool protect_reset) {
+std::set<std::string> protected_buffers(hhds::Graph& graph, const Inventory& cells, const Special_pins& special,
+                                        bool protect_reset) {
   std::set<std::string> protected_names;
   std::set<uint64_t>    visited;
-  const auto protect = [&](auto&& self, Pin driver) -> void {
+  const auto            protect = [&](auto&& self, Pin driver) -> void {
     if (driver.is_invalid() || driver.is_const()) {
       return;
     }
@@ -149,8 +157,9 @@ std::set<std::string> protected_buffers(hhds::Graph& graph, const Inventory& cel
           || ((op == Ntype_op::Flop || op == Ntype_op::Latch)
               && (Ntype::get_sink_name(op, sink.get_port_id()) == "clock_pin"
                   || (protect_reset && Ntype::get_sink_name(op, sink.get_port_id()) == "reset_pin")))
-          || (io && special.contains(std::string(io->get_name())) && special.at(std::string(io->get_name())).contains(name)) || lower.find("clock") != std::string::npos
-          || lower.find("clk") != std::string::npos || (protect_reset && lower.find("reset") != std::string::npos)
+          || (io && special.contains(std::string(io->get_name())) && special.at(std::string(io->get_name())).contains(name))
+          || lower.find("clock") != std::string::npos || lower.find("clk") != std::string::npos
+          || (protect_reset && lower.find("reset") != std::string::npos)
           || (protect_reset && lower.find("rst") != std::string::npos)) {
         for (auto driver : sink.get_driver_pins()) {
           protect(protect, driver);
@@ -394,7 +403,7 @@ std::vector<Edit> edits(hhds::Graph& graph, const Inventory& cells, const Timing
     const auto truth  = truths.at(master);
     for (const auto& [name, c] : cells) {
       if (name != master && c.inputs == current.inputs && c.output == current.output && c.footprint == current.footprint
-          && truths.at(name) == truth) {
+          && truths.at(name) == truth && !matches_dont_use(name, options)) {
         ladder.push_back(&c);
       }
     }
@@ -404,7 +413,8 @@ std::vector<Edit> edits(hhds::Graph& graph, const Inventory& cells, const Timing
   }
   const Buffer* preferred = nullptr;
   for (const auto& [name, c] : cells) {
-    if (identity(c) && (!preferred || std::tie(c.area, name) < std::tie(preferred->area, preferred->name))) {
+    if (identity(c) && !matches_dont_use(name, options)
+        && (!preferred || std::tie(c.area, name) < std::tie(preferred->area, preferred->name))) {
       preferred = &c;
     }
   }
@@ -460,7 +470,11 @@ std::vector<Edit> edits(hhds::Graph& graph, const Inventory& cells, const Timing
                         drive_cost(*current, load) - candidate_cost(c)});
     }
     if (is_buffer) {
-      result.push_back({"rebuild", std::string(n.get_name()), current->name, 2});
+      // Existing excluded masters still need characterization and may be
+      // removed. Rebuilding would create new instances, so use allowed cells.
+      if (!matches_dont_use(current->name, options)) {
+        result.push_back({"rebuild", std::string(n.get_name()), current->name, 2});
+      }
       if (!ladder.empty()) {
         result.push_back({"rebuild", std::string(n.get_name()), ladder.back()->name, 4});
       }
@@ -569,7 +583,7 @@ std::vector<Edit> edits(hhds::Graph& graph, const Inventory& cells, const Timing
         continue;
       }
       for (const auto& [name, c] : cells) {
-        if (!preferred || !identity(c) || c.footprint != preferred->footprint) {
+        if (!preferred || !identity(c) || c.footprint != preferred->footprint || matches_dont_use(name, options)) {
           continue;
         }
         result.push_back({"tree", std::string(n.get_name()), name, 4});
@@ -729,8 +743,9 @@ struct Apply_index {
   std::optional<std::pair<double, double>>                                            rc;
   std::optional<std::map<std::pair<std::string, std::string>, liberty::Output_drive>> output_drives;
   std::unordered_map<std::string, std::string>                                        pin_driver, origins;
+  std::map<std::string, double>                                                       weights;
   size_t                                                                              sequential_drivers = 0;
-  Apply_index(hhds::Graph& graph, const Result& placed) {
+  Apply_index(hhds::Graph& graph, const Result& placed) : weights(placed.net_weights) {
     for (auto n : graph.body().nodes()) {
       if (!n.get_name().empty()) {
         nodes.emplace(std::string(n.get_name()), n);
@@ -774,6 +789,8 @@ std::optional<Buffer_tree> apply(hhds::Graph& graph, const Inventory& cells, con
       gu::drop_drivers(target);
       target.connect_driver(driver);
     }
+    shared->weights.erase(physical_label(output(n, *current)));
+    shared->nodes.erase(std::string(n.get_name()));
     n.del_node();
     return {};
   }
@@ -907,9 +924,8 @@ std::optional<Buffer_tree> apply(hhds::Graph& graph, const Inventory& cells, con
           cell.area};
     };
     for (const auto& [name, cell] : cells) {
-      (void)name;
       if (identity(cell) && (!cell.max_fanout || *cell.max_fanout >= 2) && cell.inputs == b.inputs && cell.output == b.output
-          && cell.footprint == b.footprint) {
+          && cell.footprint == b.footprint && !matches_dont_use(name, options)) {
         drive_cells.push_back(&cell);
         drives.push_back(model(cell));
       }
@@ -1011,6 +1027,7 @@ std::optional<Buffer_tree> apply(hhds::Graph& graph, const Inventory& cells, con
     }
   }
   for (auto removed_cell : removed) {
+    shared->weights.erase(physical_label(output(removed_cell, *buffer(removed_cell, cells))));
     shared->nodes.erase(std::string(removed_cell.get_name()));
     removed_cell.del_node();
   }
@@ -1064,7 +1081,76 @@ std::optional<Buffer_tree> apply(hhds::Graph& graph, const Inventory& cells, con
     connect(outputs[i], plan.buffers[i].loads);
   }
   connect(root, plan.root);
+  std::vector<std::string> output_names;
+  for (const auto& pin : outputs) {
+    output_names.push_back(physical_label(pin));
+  }
+  inherit_buffer_weights(shared->weights, root_name, output_names);
   return plan;
+}
+
+// Use the final physical terminals, not graph edge count: wiring aliases and
+// output branches can conceal extra loads. Both nets must be simple cell nets.
+std::vector<Edit> final_buffer_candidates(const Result& state, const Inventory& cells, const std::set<std::string>& protected_names,
+                                          const physical::Technology& tech) {
+  std::unordered_map<std::string, const physical::Rc_net*> nets, incoming;
+  for (const auto& net : state.parasitics->nets) {
+    nets.emplace(net.driver, &net);
+    for (const auto& point : net.nodes) {
+      if (!point.pin.empty() && point.pin != net.driver) {
+        incoming.emplace(point.pin, &net);
+      }
+    }
+  }
+  const auto length = [&](const physical::Rc_net& net) -> std::optional<double> {
+    std::vector<std::string> terminals;
+    for (const auto& point : net.nodes) {
+      if (!point.pin.empty()) {
+        if (point.pin.find(':') == std::string::npos) {
+          return {};  // primary port load/driver
+        }
+        terminals.push_back(point.pin);
+      }
+    }
+    if (terminals.size() != 2 || !state.pin_locations.contains(terminals[0]) || !state.pin_locations.contains(terminals[1])) {
+      return {};
+    }
+    const auto a = state.pin_locations.at(terminals[0]), b = state.pin_locations.at(terminals[1]);
+    return std::abs(a.first - b.first) + std::abs(a.second - b.second);
+  };
+  std::vector<std::pair<double, Edit>> ranked;
+  for (auto node : state.graph->body().nodes()) {
+    const auto* cell = buffer(node, cells);
+    if (!cell || fixed(node) || protected_names.contains(std::string(node.get_name()))) {
+      continue;
+    }
+    const auto in  = incoming.find(physical_label(node.get_sink_pin(cell->inputs.front())));
+    const auto out = nets.find(physical_label(output(node, *cell)));
+    if (in == incoming.end() || out == nets.end()) {
+      continue;
+    }
+    const auto upstream = input(node, *cell);
+    if (upstream.is_invalid() || upstream.is_const() || gu::bits_of(upstream) != 1 || upstream.get_master_node().is_input_node()
+        || protected_names.contains(std::string(upstream.get_master_node().get_name()))) {
+      continue;
+    }
+    const auto   a = length(*in->second), b = length(*out->second);
+    const double nearby = 2 * tech.macros.at(cell->name).height * tech.dbu;
+    if (a && b && std::min(*a, *b) <= nearby) {
+      ranked.push_back({
+          std::min(*a, *b),
+          {"remove", std::string(node.get_name()), {}, 0}
+      });
+    }
+  }
+  std::sort(ranked.begin(), ranked.end(), [](const auto& a, const auto& b) {
+    return std::tie(a.first, a.second.node) < std::tie(b.first, b.second.node);
+  });
+  std::vector<Edit> result;
+  for (auto& item : ranked) {
+    result.push_back(std::move(item.second));
+  }
+  return result;
 }
 
 std::vector<std::string_view> retention_failures(const Timing_feedback& before, const Timing_feedback& after) {
@@ -1219,11 +1305,11 @@ static Floorplan_library read_floorplan_library(const Options& options) {
 static Floorplan_resize resize_floorplan(Result& state, const Options& options, const Timing_feedback& before,
                                          const Evaluate& evaluate, const std::function<void(Result&)>& refresh,
                                          const Floorplan_library& library) {
-  const auto& tech           = library.tech;
-  const auto& cells          = library.cells;
+  const auto& tech            = library.tech;
+  const auto& cells           = library.cells;
   const auto  protected_names = protected_buffers(*state.graph, cells, library.special, !options.repair_reset);
   const auto  candidates      = edits(*state.graph, cells, before, protected_names, state, options, tech, &library.drives);
-  const auto saved           = state.floorplan;
+  const auto  saved           = state.floorplan;
   struct Change {
     Node          node;
     const Buffer* from;
@@ -1344,9 +1430,9 @@ Floorplan_resize repair_floorplan(Result& state, const Options& options, const T
       if (!graph) {
         throw std::runtime_error("cannot clone FP electrical sweep");
       }
-      const auto protected_names = protected_buffers(*state.graph, cells, scanned.special, !options.repair_reset);
-      auto       candidates = edits(*state.graph, cells, result.timing, protected_names, state, options, tech, &scanned.drives);
-      Apply_index           index(*graph, state);
+      const auto  protected_names = protected_buffers(*state.graph, cells, scanned.special, !options.repair_reset);
+      auto        candidates = edits(*state.graph, cells, result.timing, protected_names, state, options, tech, &scanned.drives);
+      Apply_index index(*graph, state);
       std::set<std::string> visited;
       for (const auto& edit : candidates) {
         // Pin-level trees already cover every retained fork; a legacy rebuild of the same
@@ -1363,17 +1449,18 @@ Floorplan_resize repair_floorplan(Result& state, const Options& options, const T
         }
       }
       if (changed) {
-        Result trial     = state;
-        trial.fp_library = std::move(library);
-        trial.graph      = std::move(graph);
+        Result trial      = state;
+        trial.fp_library  = std::move(library);
+        trial.graph       = std::move(graph);
+        trial.net_weights = std::move(index.weights);
         trial.fp_buffer_origins.insert(index.origins.begin(), index.origins.end());
         refresh(trial);
         const auto next = evaluate(trial);
         keep            = retain(result.timing, next);
         if (keep) {
-          const auto previous_owner  = state.fp_library;  // outlive the assignment that drops the old graph
-          state                      = std::move(trial);
-          result.timing              = next;
+          const auto previous_owner = state.fp_library;  // outlive the assignment that drops the old graph
+          state                     = std::move(trial);
+          result.timing             = next;
           ++result.repair_accepted;  // one accepted STA proposal, same unit as repair_proposed
         }
       }
@@ -1410,8 +1497,8 @@ Floorplan_resize repair_floorplan(Result& state, const Options& options, const T
   unsigned individual_accepted = 0;
   while (individual < 8 && individual_accepted < 4) {
     const auto protected_names = protected_buffers(*state.graph, cells, scanned.special, !options.repair_reset);
-    const auto candidates = edits(*state.graph, cells, result.timing, protected_names, state, options, tech, &scanned.drives);
-    bool       progress   = false;
+    const auto candidates      = edits(*state.graph, cells, result.timing, protected_names, state, options, tech, &scanned.drives);
+    bool       progress        = false;
     for (const auto& edit : candidates) {
       if (edit.kind == "resize" || edit.kind == "gate_resize") {
         continue;  // batch above
@@ -1443,9 +1530,10 @@ Floorplan_resize repair_floorplan(Result& state, const Options& options, const T
           w.Key("buffers");
           w.Uint64(tree->buffers.size());
         }
-        Result trial     = state;
-        trial.fp_library = std::move(library);
-        trial.graph      = std::move(graph);
+        Result trial      = state;
+        trial.fp_library  = std::move(library);
+        trial.graph       = std::move(graph);
+        trial.net_weights = std::move(trial_index.weights);
         trial.fp_buffer_origins.insert(trial_index.origins.begin(), trial_index.origins.end());
         refresh(trial);
         const auto next = evaluate(trial);
@@ -1485,24 +1573,33 @@ Floorplan_resize repair_floorplan(Result& state, const Options& options, const T
   w.Uint(result.repair_accepted);
   w.EndObject();
   result.report = trace.GetString();
+  refresh_timing_weights(state, options, result.timing);
   return result;
 }
-Repair_result repair_buffers(Result initial, const Options& options, const Evaluate& evaluate, Repair_scope scope,
+Repair_result repair_buffers(Result initial, const Options& requested, const Evaluate& evaluate, Repair_scope scope,
                              std::optional<Timing_feedback> prior_timing) {
+  std::optional<Options> resolved_options;
+  if (requested.cell_halo) {
+    resolved_options = final_cell_options(requested);
+  }
+  const auto& options = resolved_options ? *resolved_options : requested;
+  if (options.cell_halo) {
+    check_placed_legality(initial, options);
+  }
   const auto        prior_qor  = initial.qor;
   const bool        design     = scope == Repair_scope::design || scope == Repair_scope::forest;
-  const std::string report_key = design ? "repair" : "resize";
+  const std::string report_key = scope == Repair_scope::recovery ? "buffer_recovery" : design ? "repair" : "resize";
   if (!options.full) {
     throw std::invalid_argument("buffer repair requires legal full placement");
   }
   Repair_result result;
-  result.placed                                              = std::move(initial);
-  const auto                                 tech            = physical::read_lef(options.lefs);
-  const auto                                 cells           = inventory(options, tech);
-  auto                                       score           = prior_timing ? std::move(*prior_timing) : evaluate(result.placed);
-  const auto                                 protected_names = protected_buffers(*result.placed.graph, cells, options.liberty, !options.repair_reset);
-  std::set<std::string>                      tried;
-  rapidjson::StringBuffer                    trace;
+  result.placed                           = std::move(initial);
+  const auto              tech            = physical::read_lef(options.lefs);
+  const auto              cells           = inventory(options, tech);
+  auto                    score           = prior_timing ? std::move(*prior_timing) : evaluate(result.placed);
+  const auto              protected_names = protected_buffers(*result.placed.graph, cells, options.liberty, !options.repair_reset);
+  std::set<std::string>   tried;
+  rapidjson::StringBuffer trace;
   rapidjson::Writer<rapidjson::StringBuffer> w(trace);
   w.StartObject();
   w.Key("model");
@@ -1513,16 +1610,18 @@ Repair_result repair_buffers(Result initial, const Options& options, const Evalu
   w.Double(score.area);
   w.Key("trials");
   w.StartArray();
-  unsigned   accepted = 0, attempt = 0;
-  const auto directory = options.output_dir + "/" + report_key;
+  unsigned       accepted = 0, attempt = 0;
+  const bool     physical_recovery = !score.pins.empty() && scope != Repair_scope::sizing && scope != Repair_scope::forest;
+  const unsigned sweep_budget      = physical_recovery ? 12 : 24;
+  const auto     directory         = options.output_dir + "/" + report_key;
   fs::create_directories(directory);
   // Real physical feedback enables a design-wide electrical sweep. One
   // proposal per driver is applied transactionally, then legalized and timed
   // once for the batch. Rejected batches are bisected; the STA budget bounds
   // evaluations, not which two instance names happen to appear first.
-  if (!score.pins.empty()) {
+  if (!score.pins.empty() && scope != Repair_scope::recovery) {
     const auto sweep = [&](bool trees) {
-      const auto phase_limit = std::min(24u, attempt + 12);
+      const auto phase_limit = std::min(sweep_budget, attempt + 12);
       const auto candidates  = edits(*result.placed.graph, cells, score, protected_names, result.placed, options, tech);
       Node_index index;
       for (auto n : result.placed.graph->body().nodes()) {
@@ -1627,10 +1726,10 @@ Repair_result repair_buffers(Result initial, const Options& options, const Evalu
                 buffers_added += tree->buffers.size();
               }
               if (from) {  // counted only once apply() succeeded
-                const auto& to    = cells.at(edit.master);
-                upsized          += to.area > from->area;
-                downsized        += to.area < from->area;
-                same_area        += to.area == from->area;
+                const auto& to  = cells.at(edit.master);
+                upsized        += to.area > from->area;
+                downsized      += to.area < from->area;
+                same_area      += to.area == from->area;
               }
               changed_names.push_back(edit.node);
               ++changed;
@@ -1646,7 +1745,7 @@ Repair_result repair_buffers(Result initial, const Options& options, const Evalu
             auto trial_options = options;
             trial_options.cache_dir.clear();
             trial_options.legalize_cells = true;
-            trial_options.net_weights    = result.placed.net_weights;
+            trial_options.net_weights    = std::move(draft_index.weights);
             trial_options.previous       = std::make_shared<physical::Floorplan>(result.placed.floorplan);
             trial_options.changed_cells  = std::move(changed_names);
             trial_options.output_dir     = directory + "/sweep_" + std::to_string(attempt);
@@ -1698,6 +1797,7 @@ Repair_result repair_buffers(Result initial, const Options& options, const Evalu
               result.libraries.clear();
               result.libraries.push_back(std::move(owner));
               score = std::move(next);
+              refresh_timing_weights(result.placed, options, score);
               ++accepted;
             }
           }
@@ -1766,17 +1866,21 @@ Repair_result repair_buffers(Result initial, const Options& options, const Evalu
       }
     }
   }
-  // With physical feedback the forest sweep jointly removes/rebuilds buffer
-  // chains. Individual bypass trials before it repeat full STA and can undo
-  // that joint choice. Keep the bounded fallback for aggregate-only callers.
-  while (score.pins.empty() && attempt < 24 && accepted < 8) {
-    auto candidates = edits(*result.placed.graph, cells, score, protected_names, result.placed, options, tech);
-    std::erase_if(candidates, [&](const auto& edit) {
-      const bool tree = edit.kind == "tree" || edit.kind == "rebuild";
-      return scope == Repair_scope::sizing                                      ? tree
-             : (scope == Repair_scope::design || scope == Repair_scope::forest) ? !tree
-                                                                                : false;
-    });
+  // Reserve half the shared 24-trial budget for final physical recovery.
+  // Every accepted bypass refreshes candidates against the new legal geometry.
+  unsigned recovery_attempts = 0, recovery_accepted = 0;
+  while ((physical_recovery && attempt < 24 && recovery_attempts < 12 && recovery_accepted < 8)
+         || (score.pins.empty() && scope != Repair_scope::recovery && attempt < 24 && accepted < 8)) {
+    auto candidates = physical_recovery ? final_buffer_candidates(result.placed, cells, protected_names, tech)
+                                        : edits(*result.placed.graph, cells, score, protected_names, result.placed, options, tech);
+    if (!physical_recovery) {
+      std::erase_if(candidates, [&](const auto& edit) {
+        const bool tree = edit.kind == "tree" || edit.kind == "rebuild";
+        return scope == Repair_scope::sizing                                      ? tree
+               : (scope == Repair_scope::design || scope == Repair_scope::forest) ? !tree
+                                                                                  : false;
+      });
+    }
     bool progress = false;
     for (const auto& edit : candidates) {
       const auto key = std::format("{}:{}:{}:{}:{}", edit.kind, edit.node, edit.master, edit.fanout, edit.driver);
@@ -1784,6 +1888,7 @@ Repair_result repair_buffers(Result initial, const Options& options, const Evalu
         continue;
       }
       ++attempt;
+      recovery_attempts += physical_recovery;
       w.StartObject();
       w.Key("action");
       w.String(edit.kind.c_str());
@@ -1805,7 +1910,8 @@ Repair_result repair_buffers(Result initial, const Options& options, const Evalu
         if (!graph) {
           throw std::runtime_error("cannot clone buffer trial");
         }
-        const auto tree = apply(*graph, cells, edit, protected_names, result.placed, score, options, tech);
+        Apply_index trial_index(*graph, result.placed);
+        const auto  tree = apply(*graph, cells, edit, protected_names, result.placed, score, options, tech, &trial_index);
         if (tree) {
           w.Key("topology");
           w.String("flute_steiner");
@@ -1815,7 +1921,7 @@ Repair_result repair_buffers(Result initial, const Options& options, const Evalu
         auto trial_options = options;
         trial_options.cache_dir.clear();
         trial_options.legalize_cells = true;
-        trial_options.net_weights    = result.placed.net_weights;
+        trial_options.net_weights    = std::move(trial_index.weights);
         trial_options.previous       = std::make_shared<physical::Floorplan>(result.placed.floorplan);
         trial_options.changed_cells  = {edit.node};
         trial_options.output_dir     = directory + "/trial_" + std::to_string(attempt);
@@ -1841,7 +1947,10 @@ Repair_result repair_buffers(Result initial, const Options& options, const Evalu
           result.libraries.clear();
           result.libraries.push_back(std::move(library));
           score = next;
+          refresh_timing_weights(result.placed, options, score);
           ++accepted;
+          recovery_accepted += physical_recovery;
+          tried.clear();
           progress = true;
         }
       } catch (const std::exception& error) {
@@ -1851,7 +1960,7 @@ Repair_result repair_buffers(Result initial, const Options& options, const Evalu
       w.Key("accepted");
       w.Bool(kept);
       w.EndObject();
-      if (progress || attempt >= 24) {
+      if (progress || attempt >= 24 || (physical_recovery && recovery_attempts >= 12)) {
         break;
       }
     }
@@ -1864,6 +1973,10 @@ Repair_result repair_buffers(Result initial, const Options& options, const Evalu
   w.Uint(accepted);
   w.Key("attempts");
   w.Uint(attempt);
+  w.Key("recovery_attempts");
+  w.Uint(recovery_attempts);
+  w.Key("recovery_accepted");
+  w.Uint(recovery_accepted);
   w.Key("after_delay");
   w.Double(score.delay);
   w.Key("after_area");
@@ -1890,11 +2003,25 @@ Repair_result repair_buffers(Result initial, const Options& options, const Evalu
   repair.Parse(result.report.c_str());
   rapidjson::Document prior;
   prior.Parse(prior_qor.c_str());
-  for (const auto* key : {"timing_driven", "resize", "repair"}) {
+  for (const auto* key : {"timing_driven", "resize", "repair", "satlegalize"}) {
     if (prior.HasMember(key) && !qor.HasMember(key) && key != report_key) {
       qor.AddMember(rapidjson::Value(key, qor.GetAllocator()),
                     rapidjson::Value(prior[key], qor.GetAllocator()),
                     qor.GetAllocator());
+    }
+  }
+  if (accepted > 0 && qor.HasMember("satlegalize") && qor["satlegalize"].IsObject()) {
+    auto& alignment = qor["satlegalize"];
+    if (alignment.HasMember("retained")) {
+      if (!alignment.HasMember("previous_retained")) {
+        alignment.AddMember("previous_retained", rapidjson::Value(alignment["retained"], qor.GetAllocator()), qor.GetAllocator());
+      }
+      alignment["retained"].SetUint(0);
+    }
+    if (alignment.HasMember("relaxed_by")) {
+      alignment["relaxed_by"].SetString("physical_repair", qor.GetAllocator());
+    } else {
+      alignment.AddMember("relaxed_by", "physical_repair", qor.GetAllocator());
     }
   }
   if (qor.HasMember(report_key.c_str())) {

@@ -1,8 +1,6 @@
 // This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 #include "resize_engine.hpp"
 
-#include <fnmatch.h>
-
 #include <algorithm>
 #include <chrono>
 #include <cmath>
@@ -69,9 +67,6 @@ struct Library {
   Wire_rc                                                              wire;
   double                                                               r_dbu = 0, c_dbu = 0;  // ohm and fF per DBU
 };
-bool matches(const std::string& name, const std::vector<std::string>& patterns) {
-  return std::any_of(patterns.begin(), patterns.end(), [&](const auto& p) { return fnmatch(p.c_str(), name.c_str(), 0) == 0; });
-}
 std::shared_ptr<const Library> build_library(const Options& options) {
   auto lib     = std::make_shared<Library>();
   lib->tech    = physical::read_lef(options.lefs);
@@ -110,7 +105,7 @@ std::shared_ptr<const Library> build_library(const Options& options) {
     for (const auto& [name, c] : lib->cells) {
       if (c.inputs != current.inputs || c.output != current.output || c.footprint != current.footprint
           || truth.at(name) != truth.at(master) || std::abs(height(name) - height(master)) > 1e-9 || !same_family(name, master)
-          || (name != master && matches(name, options.resize_dont_use))) {
+          || (name != master && matches_dont_use(name, options))) {
         continue;
       }
       ladder.push_back(&c);
@@ -127,7 +122,7 @@ std::shared_ptr<const Library> build_library(const Options& options) {
   }
   for (const auto& [name, c] : lib->cells) {
     // Delay/hold cells are identities too; a repeater must be a real driver.
-    if (!identity(c) || matches(name, options.resize_dont_use) || (c.max_fanout && *c.max_fanout < 2)
+    if (!identity(c) || matches_dont_use(name, options) || (c.max_fanout && *c.max_fanout < 2)
         || (std::isfinite(fastest) && c.intrinsic_ps > 2.5 * fastest)) {
       continue;
     }
@@ -202,7 +197,7 @@ struct Move {
   std::string                                        inst;
   const Buffer*                                      to = nullptr;
   std::string                                        driver, owner;
-  std::string                                        from;     // bypass: the net the sinks leave
+  std::string                                        from;         // bypass: the net the sinks leave
   double                                             arrival = 0;  // bypass: the on-path sink's arrival before
   std::vector<std::string>                           sinks;
   const Buffer*                                      buffer = nullptr;
@@ -321,9 +316,9 @@ private:
   size_t                                                    start_mark_ = 0;
   double                                                    wns_ = 0, tns_ = 0, margin_ = 25, period_ = 0, wns_start_ = 0;
   // statistics
-  Counters                                                  upsize_, isolate_, repeater_, shed_, bypass_, electrical_, recover_, batch_;
-  std::unordered_set<std::string>                           rejected_;  // batched moves that failed alone
-  unsigned    batch_moves_ = 0, batch_reject_tns_ = 0, batch_reject_wns_ = 0, batch_reject_electrical_ = 0;
+  Counters                        upsize_, isolate_, repeater_, shed_, bypass_, electrical_, recover_, batch_;
+  std::unordered_set<std::string> rejected_;  // batched moves that failed alone
+  unsigned                        batch_moves_ = 0, batch_reject_tns_ = 0, batch_reject_wns_ = 0, batch_reject_electrical_ = 0;
   unsigned    upsized_ = 0, downsized_ = 0, endpoints_worked_ = 0, endpoints_stuck_ = 0, infeasible_paths_ = 0, feasible_paths_ = 0;
   unsigned    electrical_skipped_ = 0;
   unsigned    electrical_nets_ = 0, electrical_fixed_ = 0, rounds_ = 0, recover_batches_ = 0;
@@ -889,7 +884,7 @@ private:
     st.at_sink    = std::max(w_.pin(far).arrival.value_or(0), st.at_out + 3);
     // A net with ample slack only needs its Liberty limits met: the fewest
     // repeaters at the longest legal spacing, not the delay-optimal chain.
-    double worst = kInf;
+    double worst  = kInf;
     for (const auto& s : sinks) {
       worst = std::min(worst, w_.pin(s).slack.value_or(kInf));
     }
@@ -951,9 +946,9 @@ private:
         const double cin   = cell_pin_cap(*b, b->inputs.front());
         const double limit = b->max_transition_ps ? .9 * *b->max_transition_ps : kInf;
         // The driver's output slew scales with its load.
-        const double l1   = std::max(cin, load0 - moved_cap + c * lp + cin);
-        double       slew = wire_slew(slew0 * l1 / load0, lp, cin);
-        bool         ok   = slew <= limit;
+        const double l1    = std::max(cin, load0 - moved_cap + c * lp + cin);
+        double       slew  = wire_slew(slew0 * l1 / load0, lp, cin);
+        bool         ok    = slew <= limit;
         for (size_t i = 0; i < chain.size() && ok; ++i) {
           const bool   last = i + 1 == chain.size();
           const double seg  = manhattan(chain[i], last ? s : chain[i + 1]);
@@ -1501,15 +1496,15 @@ private:
       if (blocked_drivers_.contains(up.driver) || !nets_.contains(up.driver)) {
         break;
       }
-      const double dist  = manhattan(position(up.driver), ps);
-      const double l0    = load(up.driver);
-      const double at    = up.at_out + driver_delta(up, l0, l0 + cs + c * dist) + r * dist * (c * dist / 2 + cs) * 1e-3;
-      const double gain  = st.at_sink - at;
+      const double dist = manhattan(position(up.driver), ps);
+      const double l0   = load(up.driver);
+      const double at   = up.at_out + driver_delta(up, l0, l0 + cs + c * dist) + r * dist * (c * dist / 2 + cs) * 1e-3;
+      const double gain = st.at_sink - at;
       if (gain > 1) {
         Move m;
-        m.kind   = Move::Kind::bypass;
-        m.est    = gain;
-        m.driver = up.driver;
+        m.kind    = Move::Kind::bypass;
+        m.est     = gain;
+        m.driver  = up.driver;
         m.from    = st.driver;
         m.sinks   = {st.sink};
         m.arrival = st.at_sink;
@@ -1632,7 +1627,7 @@ private:
           }
         }
         break;
-      case Move::Kind::isolate:
+      case Move::Kind::isolate :
       case Move::Kind::repeater: drivers.push_back(m.driver); break;
       case Move::Kind::bypass:
         drivers.push_back(m.driver);
@@ -1982,7 +1977,8 @@ private:
         break;
       }
       std::cout << std::format(
-          "resize: timing round {} worked {} stuck {} wns {:.2f} tns {:.1f} probes {} ({:.1f}s) moves u/s/i/r/b {}/{}/{}/{}/{} none {} "
+          "resize: timing round {} worked {} stuck {} wns {:.2f} tns {:.1f} probes {} ({:.1f}s) moves u/s/i/r/b {}/{}/{}/{}/{} "
+          "none {} "
           "reject slack/wns/tns/elec {}/{}/{}/{} infeasible {}\n",
           rounds_,
           worked,
@@ -2191,7 +2187,7 @@ Resize_plan plan_resize(const Result& state, const Options& options, const Timin
 }
 
 void apply_resize_edits(hhds::Graph& graph, const Options& options, const std::vector<Resize_edit>& edits,
-                        std::map<std::string, std::string>* origins) {
+                        std::map<std::string, std::string>* origins, std::map<std::string, double>* weights) {
   const auto lib = library(options);
   Node_index nodes;
   for (auto n : graph.body().nodes()) {
@@ -2199,6 +2195,8 @@ void apply_resize_edits(hhds::Graph& graph, const Options& options, const std::v
       nodes.emplace(std::string(n.get_name()), n);
     }
   }
+  std::map<std::string, std::vector<std::string>> inherited;
+  std::unordered_map<std::string, std::string>    roots;
   for (const auto& e : edits) {
     if (e.kind == Resize_edit::Kind::resize) {
       auto        n    = nodes.at(e.instance);
@@ -2224,8 +2222,8 @@ void apply_resize_edits(hhds::Graph& graph, const Options& options, const std::v
       }
       continue;
     }
-    const auto& b = lib->cells.at(e.master);
-    auto cell = gu::create_typed_node(graph, Ntype_op::Sub);
+    const auto& b    = lib->cells.at(e.master);
+    auto        cell = gu::create_typed_node(graph, Ntype_op::Sub);
     cell.set_subnode(buffer_io(graph, b));
     cell.set_name(e.instance);
     if (const auto owner = nodes.find(e.owner); owner != nodes.end()) {
@@ -2242,20 +2240,30 @@ void apply_resize_edits(hhds::Graph& graph, const Options& options, const std::v
     }
     const auto& macro = lib->tech.macros.at(b.name);
     Ann_place   seed(e.position.first - macro.width * lib->tech.dbu / 2,
-                   e.position.second - macro.height * lib->tech.dbu / 2,
-                   macro.width * lib->tech.dbu,
-                   macro.height * lib->tech.dbu);
+                     e.position.second - macro.height * lib->tech.dbu / 2,
+                     macro.width * lib->tech.dbu,
+                     macro.height * lib->tech.dbu);
     seed.status = Ann_place::Status::PLACED;
     cell.attr(attrs::place).set(seed);
     cell.create_sink_pin(b.inputs.front()).connect_driver(root);
     auto out = cell.create_driver_pin(b.output);
     gu::set_bits(out, 1);
     nodes.emplace(e.instance, cell);
+    if (weights) {
+      const auto original        = roots.contains(e.driver) ? roots.at(e.driver) : e.driver;
+      roots[physical_label(out)] = original;
+      inherited[original].push_back(physical_label(out));
+    }
     for (const auto& s : e.sinks) {
       connect_bit(graph, physical_pin(graph, s, nodes, false), out);
     }
     if (origins) {
       origins->emplace(e.instance, e.owner);
+    }
+  }
+  if (weights) {
+    for (const auto& [driver, outputs] : inherited) {
+      inherit_buffer_weights(*weights, driver, outputs);
     }
   }
 }
@@ -2275,7 +2283,15 @@ bool resize_accepts(const Timing_feedback& before, const Timing_feedback& after)
          || after.area + 1e-9 < before.area;
 }
 
-Repair_result resize_placed(Result initial, const Options& options, const Evaluate& evaluate) {
+Repair_result resize_placed(Result initial, const Options& requested, const Evaluate& evaluate) {
+  std::optional<Options> resolved_options;
+  if (requested.cell_halo) {
+    resolved_options = final_cell_options(requested);
+  }
+  const auto& options = resolved_options ? *resolved_options : requested;
+  if (options.cell_halo) {
+    check_placed_legality(initial, options);
+  }
   if (!options.whatif) {
     throw std::invalid_argument("synth.place.resize.engine=new requires an incremental what-if timer");
   }
@@ -2291,7 +2307,7 @@ Repair_result resize_placed(Result initial, const Options& options, const Evalua
   auto        score = evaluate(result.placed);  // synchronizes the what-if timer with this state
   const auto  first = score;
   std::string rounds;
-  unsigned    commits = 0;
+  unsigned    commits = 0, accepted_edits = 0;
   for (unsigned round = 0; round < 4; ++round) {
     if (round > 0) {
       score = evaluate(result.placed);
@@ -2310,21 +2326,22 @@ Repair_result resize_placed(Result initial, const Options& options, const Evalua
       ++commits;
       hhds::GraphLibrary draft;
       auto               graph = partition::flatten_hierarchy(result.placed.graph.get(),
-                                                &draft,
-                                                result.placed.graph->get_name(),
-                                                nullptr,
-                                                false,
+                                                              &draft,
+                                                              result.placed.graph->get_name(),
+                                                              nullptr,
+                                                              false,
                                                               {},
                                                               {},
-                                                true);
+                                                              true);
       if (!graph) {
         throw std::runtime_error("cannot clone the placed netlist for resize");
       }
-      apply_resize_edits(*graph, options, edits);
+      auto inherited_weights = result.placed.net_weights;
+      apply_resize_edits(*graph, options, edits, nullptr, &inherited_weights);
       auto trial_options           = options;
       trial_options.cache_dir      = {};
       trial_options.legalize_cells = true;
-      trial_options.net_weights    = result.placed.net_weights;
+      trial_options.net_weights    = std::move(inherited_weights);
       trial_options.previous       = std::make_shared<physical::Floorplan>(result.placed.floorplan);
       trial_options.changed_cells  = changed_names(edits);
       trial_options.output_dir     = std::format("{}/commit_{}", directory, commits);
@@ -2342,28 +2359,30 @@ Repair_result resize_placed(Result initial, const Options& options, const Evalua
       const auto next    = evaluate(placed);
       const bool keep    = resize_accepts(score, next);
       trials            += std::format(R"({}{{"groups":{},"edits":{},"timing":{},"accepted":{},"seconds":{:.3f}}})",
-                            trials.empty() ? "" : ",",
-                            groups,
-                            edits.size(),
-                            feedback_json(next),
-                            keep,
-                            elapsed(t));
+                                       trials.empty() ? "" : ",",
+                                       groups,
+                                       edits.size(),
+                                       feedback_json(next),
+                                       keep,
+                                       elapsed(t));
       if (keep) {
         result.placed = std::move(placed);
         result.libraries.clear();
         result.libraries.push_back(std::move(owner));
-        score    = next;
-        accepted = true;
+        score = next;
+        refresh_timing_weights(result.placed, options, score);
+        accepted        = true;
+        accepted_edits += static_cast<unsigned>(edits.size());
         break;
       }
       groups /= 2;  // keep the earliest (electrical, then most critical) moves
     }
     rounds                += std::format(R"({}{{"round":{},"plan":{},"commits":[{}],"accepted":{}}})",
-                          rounds.empty() ? "" : ",",
-                          round,
-                          plan.report,
-                          trials,
-                          accepted);
+                                         rounds.empty() ? "" : ",",
+                                         round,
+                                         plan.report,
+                                         trials,
+                                         accepted);
     // Another round re-plans on the legalized result. Stop on lack of progress:
     // nothing proposed or confirmed, met timing, or a round that gained less
     // than 5 ps WNS and 2% TNS.
@@ -2375,6 +2394,12 @@ Repair_result resize_placed(Result initial, const Options& options, const Evalua
       break;
     }
   }
+  auto recovered = repair_buffers(std::move(result.placed), options, evaluate, Repair_scope::recovery, score);
+  result.placed  = std::move(recovered.placed);
+  for (auto& library : recovered.libraries) {
+    result.libraries.push_back(std::move(library));
+  }
+  score = std::move(*recovered.timing);
   evaluate(result.placed);  // leave the timer on the accepted state
   result.report = std::format(
       R"({{"engine":"new","model":"placement_rc_path_sizing_buffering","before":{},"after":{},"rounds":[{}],"seconds":{:.3f}}})",
@@ -2389,12 +2414,26 @@ Repair_result resize_placed(Result initial, const Options& options, const Evalua
   prior.Parse(prior_qor.c_str());
   if (qor.IsObject()) {
     if (prior.IsObject()) {
-      for (const auto* key : {"timing_driven"}) {
+      for (const auto* key : {"timing_driven", "satlegalize"}) {
         if (prior.HasMember(key) && !qor.HasMember(key)) {
           qor.AddMember(rapidjson::Value(key, qor.GetAllocator()),
                         rapidjson::Value(prior[key], qor.GetAllocator()),
                         qor.GetAllocator());
         }
+      }
+    }
+    if (accepted_edits > 0 && qor.HasMember("satlegalize") && qor["satlegalize"].IsObject()) {
+      auto& alignment = qor["satlegalize"];
+      if (alignment.HasMember("retained")) {
+        if (!alignment.HasMember("previous_retained")) {
+          alignment.AddMember("previous_retained", rapidjson::Value(alignment["retained"], qor.GetAllocator()), qor.GetAllocator());
+        }
+        alignment["retained"].SetUint(0);
+      }
+      if (alignment.HasMember("relaxed_by")) {
+        alignment["relaxed_by"].SetString("resize", qor.GetAllocator());
+      } else {
+        alignment.AddMember("relaxed_by", "resize", qor.GetAllocator());
       }
     }
     rapidjson::Document report;
@@ -2443,26 +2482,29 @@ Floorplan_resize resize_floorplan_engine(Result& state, const Options& options, 
       throw std::runtime_error("cannot clone the floorplan netlist for resize");
     }
     std::map<std::string, std::string> origins;
-    apply_resize_edits(*graph, options, edits, &origins);
-    Result trial     = state;
-    trial.fp_library = std::move(library);
-    trial.graph      = std::move(graph);
+    auto                               inherited_weights = state.net_weights;
+    apply_resize_edits(*graph, options, edits, &origins, &inherited_weights);
+    Result trial      = state;
+    trial.fp_library  = std::move(library);
+    trial.graph       = std::move(graph);
+    trial.net_weights = std::move(inherited_weights);
     trial.fp_buffer_origins.insert(origins.begin(), origins.end());
     refresh(trial);
     const auto next  = evaluate(trial);
     const bool keep  = resize_accepts(result.timing, next);
     trials          += std::format(R"({}{{"groups":{},"edits":{},"timing":{},"accepted":{}}})",
-                          trials.empty() ? "" : ",",
-                          groups,
-                          edits.size(),
-                          feedback_json(next),
-                          keep);
+                                   trials.empty() ? "" : ",",
+                                   groups,
+                                   edits.size(),
+                                   feedback_json(next),
+                                   keep);
     if (keep) {
       const auto previous_owner = state.fp_library;  // outlive the assignment that drops the old graph
       state                     = std::move(trial);
       result.timing             = next;
-      result.accepted           = resized;
-      result.repair_accepted    = buffers;
+      refresh_timing_weights(state, options, next);
+      result.accepted        = resized;
+      result.repair_accepted = buffers;
       break;
     }
     refresh(state);

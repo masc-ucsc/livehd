@@ -55,7 +55,41 @@ std::map<std::string, double> timing_weights(const physical::Parasitics& nets, c
   }
   return target;
 }
-Repair_result timing_place(Result initial, const Options& options, const Evaluate& evaluate, unsigned rounds) {
+void refresh_timing_weights(Result& state, const Options& options, const Timing_feedback& timing) {
+  const auto target
+      = timing_weights(*state.parasitics, timing, options.timing_fraction, options.timing_max_weight, options.timing_exponent);
+  std::map<std::string, double> current;
+  for (const auto& net : state.parasitics->nets) {
+    const auto next     = target.find(net.driver);
+    const auto old      = state.net_weights.find(net.driver);
+    current[net.driver] = next == target.end() || next->second <= 1
+                              ? 1
+                              : (1 - options.timing_smoothing) * (old == state.net_weights.end() ? 1 : old->second)
+                                    + options.timing_smoothing * next->second;
+  }
+  state.net_weights = std::move(current);
+}
+void inherit_buffer_weights(std::map<std::string, double>& weights, const std::string& driver,
+                            const std::vector<std::string>& outputs) {
+  if (outputs.empty()) {
+    return;
+  }
+  const auto   old     = weights.find(driver);
+  const double reduced = 1 + .5 * ((old == weights.end() ? 1 : old->second) - 1);
+  weights[driver]      = reduced;
+  for (const auto& output : outputs) {
+    weights[output] = reduced;
+  }
+}
+Repair_result timing_place(Result initial, const Options& requested, const Evaluate& evaluate, unsigned rounds) {
+  std::optional<Options> resolved_options;
+  if (requested.cell_halo) {
+    resolved_options = final_cell_options(requested);
+  }
+  const auto& options = resolved_options ? *resolved_options : requested;
+  if (options.cell_halo) {
+    check_placed_legality(initial, options);
+  }
   if (!options.full || rounds == 0 || rounds > 8) {
     throw std::invalid_argument("timing placement requires full mode and 1..8 rounds");
   }
@@ -101,12 +135,8 @@ Repair_result timing_place(Result initial, const Options& options, const Evaluat
     if (target.empty()) {
       break;
     }
-    for (const auto& net : result.placed.parasitics->nets) {
-      weights.try_emplace(net.driver, 1);
-    }
-    for (auto& [name, weight] : weights) {
-      weight = (1 - options.timing_smoothing) * weight + options.timing_smoothing * (target.contains(name) ? target.at(name) : 1);
-    }
+    refresh_timing_weights(result.placed, options, best);
+    weights    = result.placed.net_weights;
     auto trial = options;
     trial.cache_dir.clear();
     trial.previous.reset();
@@ -145,6 +175,7 @@ Repair_result timing_place(Result initial, const Options& options, const Evaluat
         result.placed = std::move(candidate);
         result.libraries.push_back(std::move(owner));
         best = score;
+        refresh_timing_weights(result.placed, options, best);
         ++accepted;
       }
     } catch (const std::exception& error) {

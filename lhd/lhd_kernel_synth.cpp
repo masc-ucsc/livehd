@@ -207,19 +207,33 @@ livehd::placement::Options placement_options(const Options& opts) {
   out.fp_timing_interval      = static_cast<int>(integer("place.fp.timing_interval", "50"));
   out.fp_timing_movement      = number("place.fp.timing_movement", "0");
   out.fp_timing_after_density = truthy(synth_set(opts, "place.fp.timing_after_density", "false"));
-  out.timing_fraction         = number("place.timing_fraction", "0.2");
-  out.timing_max_weight       = number("place.timing_max_weight", "5");
-  out.timing_exponent         = number("place.timing_exponent", "1");
-  out.timing_spread_weight    = number("place.timing_spread_weight", "0");
-  out.macro_timing_interval   = static_cast<int>(integer("place.macro.timing_interval", "50"));
-  out.timing_smoothing        = number("place.timing_smoothing", "0.5");
-  out.fp_timing_max_updates   = integer("place.fp.timing_max_updates", "10");
-  out.stop_overflow           = number("place.stop_overflow", "0.1");
-  out.initial_density_weight  = number("place.initial_density_weight", "0.01");
+  out.eco_connectivity_weight = number("place.legalize.eco_connectivity_weight", "0");
+  if (out.eco_connectivity_weight < 0 || out.eco_connectivity_weight > 100) {
+    throw Lhd_error{"usage", "invalid ECO connectivity weight", "expected 0..100"};
+  }
+  out.legalize_timing_corrections = integer("place.legalize.timing_corrections", "0");
+  if (out.legalize_timing_corrections > 2) {
+    throw Lhd_error{"usage", "timing corrections expect 0..2", ""};
+  }
+  out.legalize_timing_strength  = number("place.legalize.timing_strength", "0");
+  out.legalize_timing_threshold = number("place.legalize.timing_threshold", "0");
+  if (out.legalize_timing_strength < 0 || out.legalize_timing_strength > 99 || out.legalize_timing_threshold < 0
+      || out.legalize_timing_threshold > 1) {
+    throw Lhd_error{"usage", "invalid timing legalization controls", "strength: 0..99, threshold: 0..1"};
+  }
+  out.timing_fraction        = number("place.timing_fraction", "0.2");
+  out.timing_max_weight      = number("place.timing_max_weight", "5");
+  out.timing_exponent        = number("place.timing_exponent", "1");
+  out.timing_spread_weight   = number("place.timing_spread_weight", "0");
+  out.macro_timing_interval  = static_cast<int>(integer("place.macro.timing_interval", "50"));
+  out.timing_smoothing       = number("place.timing_smoothing", "0.5");
+  out.fp_timing_max_updates  = integer("place.fp.timing_max_updates", "10");
+  out.stop_overflow          = number("place.stop_overflow", "0.1");
+  out.initial_density_weight = number("place.initial_density_weight", "0.01");
   if (out.timing_max_weight < 1 || out.timing_max_weight > livehd::placement::max_net_weight || out.timing_smoothing < 0
       || out.timing_smoothing > 1 || out.fp_timing_max_updates < 2 || out.stop_overflow < 0 || out.stop_overflow > 1
-      || out.initial_density_weight <= 0 || out.timing_exponent < 1 || out.macro_timing_interval < 0
-      || out.timing_spread_weight < 0 || out.timing_spread_weight > 1) {
+      || out.initial_density_weight <= 0 || out.timing_exponent < 1 || out.macro_timing_interval < 0 || out.timing_spread_weight < 0
+      || out.timing_spread_weight > 1) {
     throw Lhd_error{"usage", "invalid synth.place timing/density tuning controls", "check lhd describe synth for allowed values"};
   }
   if (out.timing_fraction <= 0 || out.timing_fraction > 1) {
@@ -260,12 +274,50 @@ livehd::placement::Options placement_options(const Options& opts) {
   if (!out.floorplan.empty() && (!out.die.empty() || !out.core.empty())) {
     throw Lhd_error{"usage", "synth.place.die/core cannot be combined with synth.place.floorplan", "supply one frame source"};
   }
-  out.density                    = number("place.density", "0.5");
-  out.iterations                 = integer("place.iterations", "1500");
-  out.min_iterations             = integer("place.min_iterations", "40");
-  out.post_density_factor        = integer("place.post_density_factor", "4");
-  out.convergence_tolerance      = number("place.convergence_tolerance", "0.01");
-  out.detailed_iterations        = integer("place.detailed_iterations", "2");
+  out.density               = number("place.density", "0.5");
+  out.iterations            = integer("place.iterations", "1500");
+  out.min_iterations        = integer("place.min_iterations", "40");
+  out.post_density_factor   = integer("place.post_density_factor", "4");
+  out.convergence_tolerance = number("place.convergence_tolerance", "0.01");
+  out.detailed_iterations   = integer("place.detailed_iterations", "2");
+  out.satlegalize           = truthy(synth_set(opts, "place.satlegalize", "false"));
+  auto& sat                 = out.satlegalize_options;
+  sat.backend               = synth_set(opts, "place.satlegalize.backend", "cadical");
+  sat.encoding              = synth_set(opts, "place.satlegalize.encoding", "candidate");
+  if ((sat.backend != "cadical" && sat.backend != "cms-cnf" && sat.backend != "cms-xor")
+      || (sat.encoding != "candidate" && sat.encoding != "binary")) {
+    throw Lhd_error{"usage",
+                    "invalid synth.place.satlegalize backend or encoding",
+                    "expected cadical|cms-cnf|cms-xor and candidate|binary"};
+  }
+  const auto sat_limit = [&](const char* key, const char* fallback, int maximum, bool zero = false) {
+    const int value = integer(key, fallback);
+    if (value < (zero ? 0 : 1) || value > maximum) {
+      throw Lhd_error{"usage", std::string("invalid synth.") + key, "SAT budget out of range"};
+    }
+    return static_cast<unsigned>(value);
+  };
+  sat.max_cells             = sat_limit("place.satlegalize.max_cells", "24", 65536);
+  sat.max_candidates        = sat_limit("place.satlegalize.max_candidates", "12", 128);
+  sat.max_windows           = sat_limit("place.satlegalize.max_windows", "8", 1024);
+  sat.max_pairs             = sat_limit("place.satlegalize.max_pairs", "32", 1024);
+  sat.move_sites            = sat_limit("place.satlegalize.move_sites", "4", 128, true);
+  sat.move_rows             = sat_limit("place.satlegalize.move_rows", "1", 16, true);
+  sat.route_grid            = truthy(synth_set(opts, "place.satlegalize.route_grid", "false"));
+  sat.route_guidance        = truthy(synth_set(opts, "place.satlegalize.route_guidance", "true"));
+  sat.spill_neighbors       = truthy(synth_set(opts, "place.satlegalize.spill_neighbors", "false"));
+  sat.spill_slack_margin_ps = number("place.satlegalize.spill_slack_margin_ps", "0");
+  if (!std::isfinite(sat.spill_slack_margin_ps) || sat.spill_slack_margin_ps < 0) {
+    throw Lhd_error{"usage", "invalid synth.place.satlegalize.spill_slack_margin_ps", "expected a finite nonnegative margin in ps"};
+  }
+  sat.conflicts       = sat_limit("place.satlegalize.conflicts", "10000", 1000000000);
+  sat.milliseconds    = sat_limit("place.satlegalize.milliseconds", "50", 60000);
+  sat.skip_conflicts  = truthy(synth_set(opts, "place.satlegalize.skip_conflicts", "true"));
+  sat.boundary_growth = number("place.satlegalize.boundary_growth", "0.05");
+  if (sat.boundary_growth < 0 || sat.boundary_growth > 1) {
+    throw Lhd_error{"usage", "invalid synth.place.satlegalize.boundary_growth", "expected 0..1"};
+  }
+
   out.density_upper_bound        = truthy(synth_set(opts, "place.density_upper_bound", "false"));
   out.fixed_macro_overlap_weight = number("place.fixed_macro_overlap", "0");
   if (out.min_iterations < 0 || out.post_density_factor < 0 || out.post_density_factor > 100 || out.convergence_tolerance < 0
@@ -347,23 +399,56 @@ livehd::placement::Options placement_options(const Options& opts) {
       || out.io_iterations < 0) {
     throw Lhd_error{"usage", "invalid synth.place repulsion controls", ""};
   }
-  out.threads         = integer("place.threads", "1");
-  const auto halo     = synth_set(opts, "place.halo", "5");
-  char*      halo_end = nullptr;
-  out.halo_x          = std::strtod(halo.c_str(), &halo_end);
-  if (halo_end == halo.c_str()) {
-    throw Lhd_error{"usage", "invalid synth.place.halo", "expected nonnegative microns: H or X,Y"};
-  }
-  out.halo_y = out.halo_x;
-  if (*halo_end == ',') {
-    const auto* y = halo_end + 1;
-    out.halo_y    = std::strtod(y, &halo_end);
-    if (halo_end == y) {
-      throw Lhd_error{"usage", "invalid synth.place.halo", "expected nonnegative microns: H or X,Y"};
+  out.threads           = integer("place.threads", "1");
+  const auto parse_halo = [](const std::string& value, const char* name) {
+    const auto invalid
+        = [&]() { return Lhd_error{"usage", std::string("invalid synth.") + name, "expected nonnegative microns: H or X,Y"}; };
+    char*      end = nullptr;
+    const auto x   = std::strtod(value.c_str(), &end);
+    if (end == value.c_str()) {
+      throw invalid();
+    }
+    auto y = x;
+    if (*end == ',') {
+      const auto* y_begin = end + 1;
+      y                   = std::strtod(y_begin, &end);
+      if (end == y_begin) {
+        throw invalid();
+      }
+    }
+    if (*end != '\0' || !std::isfinite(x) || !std::isfinite(y) || x < 0 || y < 0) {
+      throw invalid();
+    }
+    return std::pair{x, y};
+  };
+  const auto halo      = parse_halo(synth_set(opts, "place.halo", "5"), "place.halo");
+  out.halo_x           = halo.first;
+  out.halo_y           = halo.second;
+  const auto cell_halo = synth_set(opts, "place.cell_halo", "");
+  if (!cell_halo.empty()) {
+    out.cell_halo = parse_halo(cell_halo, "place.cell_halo");
+    if (out.cell_halo->first > out.halo_x || out.cell_halo->second > out.halo_y) {
+      throw Lhd_error{"usage", "invalid synth.place.cell_halo", "each axis must not exceed synth.place.halo"};
     }
   }
-  if (*halo_end != '\0' || !std::isfinite(out.halo_x) || !std::isfinite(out.halo_y) || out.halo_x < 0 || out.halo_y < 0) {
-    throw Lhd_error{"usage", "invalid synth.place.halo", "expected nonnegative microns: H or X,Y"};
+  const auto sat_region = synth_set(opts, "place.satlegalize.region_size", "");
+  if (!sat_region.empty()) {
+    const auto dimensions = parse_halo(sat_region, "place.satlegalize.region_size");
+    sat.region_width_um   = dimensions.first;
+    sat.region_height_um  = dimensions.second;
+    if (sat.region_width_um <= 0 || sat.region_height_um <= 0) {
+      throw Lhd_error{"usage", "invalid synth.place.satlegalize.region_size", "expected positive width,height in microns"};
+    }
+  }
+  if (sat.route_grid
+      && (!sat_region.empty() || !out.routability || out.automatic_bins
+          || livehd::placement::resolve_route_policy(out, out.final_route).model != DreamPlace::native::RouteModel::rsmt)) {
+    throw Lhd_error{"usage",
+                    "invalid synth.place.satlegalize.route_grid",
+                    "requires explicit final rsmt, routability, fixed bins and no region_size"};
+  }
+  if (sat.spill_neighbors && sat_region.empty() && !sat.route_grid) {
+    throw Lhd_error{"usage", "synth.place.satlegalize.spill_neighbors requires region_size or route_grid", "select fixed regions"};
   }
   out.final_cells           = truthy(synth_set(opts, "place.final", "true"));
   out.final_iterations      = integer("place.final.iterations", "0");

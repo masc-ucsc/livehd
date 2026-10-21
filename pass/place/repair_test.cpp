@@ -16,6 +16,8 @@
 #include "pass/liberty/liberty_dff.hpp"
 #include "pass/opentimer/pass_opentimer.hpp"
 #include "rapidjson/document.h"
+#include "rapidjson/stringbuffer.h"
+#include "rapidjson/writer.h"
 #include "steiner_repair.hpp"
 namespace livehd::placement {
 namespace {
@@ -68,6 +70,34 @@ protected:
     auto out = n.create_driver_pin(out_name);
     gu::set_bits(out, 1);
     return out;
+  }
+  void add_allowed_buffer_variant() {
+    // The small checked-in library contains only buf_1. Add a distinct,
+    // stronger identity with the same pin/footprint and legal physical shape.
+    std::filesystem::create_directories(options.output_dir);
+    std::ifstream lib_input(options.liberty);
+    std::string   lib{std::istreambuf_iterator<char>(lib_input), {}};
+    const auto    end = lib.rfind('}');
+    ASSERT_NE(end, std::string::npos);
+    lib.insert(end,
+               R"(cell(sky130_fd_sc_hd__buf_2) { area: 1; cell_footprint: "sky130_fd_sc_hd__buf";
+                  pin(A) {direction: input; capacitance: 0.1;}
+                  pin(X) {direction: output; function: "A"; max_capacitance: 1000;
+                    timing() {related_pin: "A"; cell_rise(t) {index_1("0.001"); index_2("0.001,0.021"); values("0.001,0.003");}}}})");
+    options.liberty = options.output_dir + "/allowed.lib";
+    std::ofstream(options.liberty) << lib;
+    std::ifstream     lef_input(options.lefs.back());
+    std::string       lef{std::istreambuf_iterator<char>(lef_input), {}};
+    const std::string from = "sky130_fd_sc_hd__buf_1", to = "sky130_fd_sc_hd__buf_2";
+    const auto        begin = lef.find("MACRO " + from), finish = lef.find("END " + from, begin);
+    ASSERT_NE(begin, std::string::npos);
+    ASSERT_NE(finish, std::string::npos);
+    auto macro = lef.substr(begin, finish + 4 + from.size() - begin);
+    for (auto at = macro.find(from); at != std::string::npos; at = macro.find(from, at + to.size())) {
+      macro.replace(at, from.size(), to);
+    }
+    options.lefs.push_back(options.output_dir + "/allowed.lef");
+    std::ofstream(options.lefs.back()) << "VERSION 5.8 ;\n" << macro << "\nEND LIBRARY\n";
   }
   void enable_floorplan() {
     std::filesystem::create_directories(options.output_dir);
@@ -959,6 +989,111 @@ TEST_F(Buffer_repair, TimingPlacementUsesSlackWeightsAndRejectsRegressions) {
   }
   equivalent(result.placed);
 }
+TEST(Timing_weights, InheritsReducedPullAcrossEveryTreeEdgeAndRefreshesMembership) {
+  std::map<std::string, double> weights{
+      {"root", 5},
+      {"gone", 4}
+  };
+  inherit_buffer_weights(weights, "root", {"b0:X", "b1:X", "b2:X"});
+  for (const auto* label : {"root", "b0:X", "b1:X", "b2:X"}) {
+    EXPECT_DOUBLE_EQ(weights.at(label), 3);
+  }
+  Result state;
+  state.net_weights = weights;
+  state.parasitics  = std::make_shared<physical::Parasitics>();
+  Timing_feedback timing;
+  for (const auto* label : {"root", "b0:X", "b1:X", "b2:X", "new:X"}) {
+    physical::Rc_net net;
+    net.driver = label;
+    net.nodes.push_back({});
+    net.nodes.back().pin = label;
+    state.parasitics->nets.push_back(net);
+    timing.pins[label].slack = std::string_view(label) == "new:X" ? -5 : 1;
+  }
+  Options options;
+  options.timing_smoothing = 1;
+  refresh_timing_weights(state, options, timing);
+  EXPECT_FALSE(state.net_weights.contains("gone"));
+  EXPECT_DOUBLE_EQ(state.net_weights.at("new:X"), 5);
+  for (const auto* label : {"root", "b0:X", "b1:X", "b2:X"}) {
+    EXPECT_DOUBLE_EQ(state.net_weights.at(label), 1);
+  }
+  timing.pins["root"].slack = -10;
+  refresh_timing_weights(state, options, timing);
+  EXPECT_DOUBLE_EQ(state.net_weights.at("root"), 5);
+  EXPECT_DOUBLE_EQ(state.net_weights.at("new:X"), 1);
+}
+
+TEST_F(Buffer_repair, FinalRecoveryCollapsesLegalCellBufferChainsAndRepeatsSafely) {
+  auto p = gate("sky130_fd_sc_hd__inv_1", "driver", graph->get_input_pin("a"));
+  p      = gate("sky130_fd_sc_hd__buf_1", "b0", p);
+  p      = gate("sky130_fd_sc_hd__buf_1", "b1", p);
+  p      = gate("sky130_fd_sc_hd__inv_1", "sink", p);
+  graph->get_output_pin("y").connect_driver(p);
+  auto                placed = place(*graph, flat, options);
+  rapidjson::Document seeded_qor;
+  seeded_qor.Parse(placed.qor.c_str());
+  rapidjson::Value alignment(rapidjson::kObjectType);
+  alignment.AddMember("retained", 2, seeded_qor.GetAllocator());
+  seeded_qor.AddMember("satlegalize", alignment, seeded_qor.GetAllocator());
+  rapidjson::StringBuffer                    seeded_json;
+  rapidjson::Writer<rapidjson::StringBuffer> seeded_writer(seeded_json);
+  seeded_qor.Accept(seeded_writer);
+  placed.qor          = seeded_json.GetString();
+  const auto original = timing(placed);
+  auto recovered = repair_buffers(std::move(placed), options, [&](const Result& r) { return timing(r); }, Repair_scope::recovery);
+  EXPECT_EQ(count(recovered.placed, "b"), 0);
+  EXPECT_LT(recovered.timing->area, original.area);
+  rapidjson::Document recovered_qor;
+  recovered_qor.Parse(recovered.placed.qor.c_str());
+  ASSERT_TRUE(recovered_qor.HasMember("satlegalize"));
+  EXPECT_EQ(recovered_qor["satlegalize"]["retained"].GetUint(), 0);
+  EXPECT_EQ(recovered_qor["satlegalize"]["previous_retained"].GetUint(), 2);
+  EXPECT_STREQ(recovered_qor["satlegalize"]["relaxed_by"].GetString(), "physical_repair");
+  equivalent(recovered.placed, 0);
+  auto repeated
+      = repair_buffers(std::move(recovered.placed), options, [&](const Result& r) { return timing(r); }, Repair_scope::recovery);
+  EXPECT_EQ(count(repeated.placed, "b"), 0);
+  equivalent(repeated.placed, 0);
+}
+
+TEST_F(Buffer_repair, FinalRecoveryRejectsElectricalRegressionAndExtraFanout) {
+  auto p = gate("sky130_fd_sc_hd__inv_1", "driver", graph->get_input_pin("a"));
+  auto b = gate("sky130_fd_sc_hd__buf_1", "b0", p);
+  auto q = gate("sky130_fd_sc_hd__inv_1", "sink", b);
+  graph->get_output_pin("y").connect_driver(q);
+  auto       placed   = place(*graph, flat, options);
+  const auto feedback = [&](const Result& r) {
+    auto t = timing(r);
+    if (!count(r, "b")) {
+      ++t.violations;
+      t.electrical_excess += 1;
+    }
+    return t;
+  };
+  const auto rejected = repair_buffers(std::move(placed), options, feedback, Repair_scope::recovery);
+  EXPECT_EQ(count(rejected.placed, "b"), 1);
+  equivalent(rejected.placed, 0);
+  auto io = graph->get_io();
+  io->add_output("branch", 1);
+  io->set_bits("branch", 1);
+  graph->get_output_pin("branch").connect_driver(p);  // input net now has a port branch
+  timing_session.reset();                             // the interface changed; rebuild its port constraints and timing identities
+  hhds::GraphLibrary branch_owner;
+  auto               branched = place(*graph, branch_owner, options);
+  unsigned           calls    = 0;
+  const auto         retained = repair_buffers(
+      std::move(branched),
+      options,
+      [&](const Result& r) {
+        ++calls;
+        return timing(r);
+      },
+      Repair_scope::recovery);
+  EXPECT_EQ(count(retained.placed, "b"), 1);
+  EXPECT_EQ(calls, 1);  // no eligible bypass trial reaches STA
+}
+
 TEST(Timing_weights, ConfigurableFractionPreservesDefaultAndExcludesUntimedClocks) {
   physical::Parasitics rc;
   Timing_feedback      timing;
@@ -1139,7 +1274,10 @@ TEST_F(Buffer_repair, ResetLogicIsProtectedUnlessRepairResetIsEnabled) {
     std::ifstream input(path);
     return std::string{std::istreambuf_iterator<char>(input), {}};
   };
-  const auto clone_cell = [](std::string text, const std::string& open, const std::string& close, const std::string& extra,
+  const auto clone_cell = [](std::string        text,
+                             const std::string& open,
+                             const std::string& close,
+                             const std::string& extra,
                              const std::string& extra_anchor) {
     const auto start = text.find(open);
     EXPECT_NE(start, std::string::npos);
@@ -1156,13 +1294,13 @@ TEST_F(Buffer_repair, ResetLogicIsProtectedUnlessRepairResetIsEnabled) {
     return text;
   };
   // A reset-pin clone of the plain flop: same geometry and timing plus RESET_B.
-  auto lef = clone_cell(slurp(options.lefs[1]),
-                        "MACRO sky130_fd_sc_hd__dfxtp_1\n",
-                        "END sky130_fd_sc_hd__dfxtp_1\n",
-                        "  PIN RESET_B\n    DIRECTION INPUT ;\n    USE SIGNAL ;\n    PORT\n      LAYER li1 ;\n"
-                        "        RECT 3.370 0.715 3.650 1.665 ;\n    END\n  END RESET_B\n",
-                        "  PIN VGND\n");
-  auto lib = slurp(options.liberty);
+  auto       lef        = clone_cell(slurp(options.lefs[1]),
+                                     "MACRO sky130_fd_sc_hd__dfxtp_1\n",
+                                     "END sky130_fd_sc_hd__dfxtp_1\n",
+                                     "  PIN RESET_B\n    DIRECTION INPUT ;\n    USE SIGNAL ;\n    PORT\n      LAYER li1 ;\n"
+                                     "        RECT 3.370 0.715 3.650 1.665 ;\n    END\n  END RESET_B\n",
+                                     "  PIN VGND\n");
+  auto       lib        = slurp(options.liberty);
   const auto cell_start = lib.find("cell (\"sky130_fd_sc_hd__dfxtp_1\") {");
   ASSERT_NE(cell_start, std::string::npos);
   size_t depth = 0, cell_end = cell_start;
@@ -1184,8 +1322,8 @@ TEST_F(Buffer_repair, ResetLogicIsProtectedUnlessRepairResetIsEnabled) {
                "pin (\"RESET_B\") {\n capacitance : 0.0016780000;\n clock : \"false\";\n direction : \"input\";\n"
                " max_transition : 1.5000000000;\n related_ground_pin : \"VGND\";\n related_power_pin : \"VPWR\";\n }\n");
   lib.insert(cell_end, "\n" + clone + "\n");
-  options.lefs[1]  = options.output_dir + "/reset.lef";
-  options.liberty  = options.output_dir + "/reset.lib";
+  options.lefs[1] = options.output_dir + "/reset.lef";
+  options.liberty = options.output_dir + "/reset.lib";
   std::ofstream(options.lefs[1]) << lef;
   std::ofstream(options.liberty) << lib;
 
@@ -1217,7 +1355,7 @@ TEST_F(Buffer_repair, ResetLogicIsProtectedUnlessRepairResetIsEnabled) {
     f.area  = r.floorplan.components.size();
     return f;
   };
-  auto       placed    = place(*graph, flat, options);
+  auto       placed     = place(*graph, flat, options);
   const auto protected_ = repair_buffers(std::move(placed), options, evaluate);
   EXPECT_EQ(count(protected_.placed, "reset_buffer"), 1);
   rapidjson::Document report;
@@ -1263,6 +1401,81 @@ TEST_F(Buffer_repair, RejectsWorseTrialsAndRebuildsEveryFanoutBranch) {
   }
   EXPECT_TRUE(rejected_removal);
   EXPECT_TRUE(accepted_rebuild);
+}
+TEST_F(Buffer_repair, LegacySizingHonorsDontUseWithoutLosingExistingModels) {
+  add_allowed_buffer_variant();
+  const std::string weak = "sky130_fd_sc_hd__buf_1", strong = "sky130_fd_sc_hd__buf_2";
+  graph->get_output_pin("y").connect_driver(gate(weak, "root", graph->get_input_pin("a")));
+  const auto evaluate = [&](const Result& r) {
+    Timing_feedback f;
+    const bool      sized    = r.floorplan.components.at(0).macro == strong;
+    f.delay                  = sized ? 1 : 10;
+    f.area                   = r.floorplan.components.size();
+    f.pins["root:X"].load_ff = 100;
+    f.pins["root:X"].slack   = -1;
+    return f;
+  };
+  for (bool excluded : {false, true}) {
+    SCOPED_TRACE(excluded);
+    // Excluding the existing master must still allow its characterization and
+    // replacement by a legal master. Excluding both leaves the design intact.
+    options.resize_dont_use = {excluded ? "*__buf_?" : "*__buf_1"};
+    hhds::GraphLibrary owner;
+    auto               initial = place(*graph, owner, options);
+    const auto         result  = repair_buffers(std::move(initial), options, evaluate, Repair_scope::sizing);
+    ASSERT_EQ(result.placed.floorplan.components.size(), 1);
+    EXPECT_EQ(result.placed.floorplan.components.front().macro, excluded ? weak : strong) << result.report;
+    equivalent(result.placed, 0);
+    check_legality(physical::read_lef(options.lefs), result.placed.floorplan);
+  }
+}
+TEST_F(Buffer_repair, LegacyRebufferHonorsDontUseForEveryInsertedDrive) {
+  add_allowed_buffer_variant();
+  auto root = gate("sky130_fd_sc_hd__buf_1", "root", graph->get_input_pin("a"));
+  for (unsigned i = 0; i < 6; ++i) {
+    auto       p    = gate("sky130_fd_sc_hd__inv_1", "leaf" + std::to_string(i), root);
+    const auto port = i ? "y" + std::to_string(i) : "y";
+    if (i) {
+      graph->get_io()->add_output(port, i);
+      graph->get_io()->set_bits(port, 1);
+    }
+    graph->get_output_pin(port).connect_driver(p);
+  }
+  options.resize_dont_use = {"*__buf_1"};
+  for (bool pin_feedback : {false, true}) {
+    SCOPED_TRACE(pin_feedback);
+    hhds::GraphLibrary owner;
+    auto               placed   = place(*graph, owner, options);
+    const auto         evaluate = [&](const Result& r) {
+      Timing_feedback f;
+      f.delay = count(r, "__place_rebuffer") ? 5 : count(r, "root") ? 10 : 20;
+      f.area  = r.floorplan.components.size();
+      if (pin_feedback) {
+        f.wns = f.tns = -f.delay;
+        for (const auto& net : r.parasitics->nets) {
+          for (const auto& point : net.nodes) {
+            if (point.pin.empty()) {
+              continue;
+            }
+            auto& pin   = f.pins[point.pin];
+            pin.slack   = -1;
+            pin.load_ff = pin.capacitance_ff = 100;
+            pin.required                     = 0;
+          }
+        }
+      }
+      return f;
+    };
+    const auto result = repair_buffers(std::move(placed), options, evaluate, Repair_scope::design);
+    EXPECT_GT(count(result.placed, "__place_rebuffer"), 0) << result.report;
+    for (const auto& cell : result.placed.floorplan.components) {
+      if (cell.name.starts_with("__place_rebuffer")) {
+        EXPECT_EQ(cell.macro, "sky130_fd_sc_hd__buf_2") << result.report;
+      }
+    }
+    equivalent(result.placed);
+    check_legality(physical::read_lef(options.lefs), result.placed.floorplan);
+  }
 }
 TEST_F(Buffer_repair, RealTimingSteinerRepairReducesLongWireViolations) {
   options.resistance_ohm_um = 50;
@@ -1717,12 +1930,23 @@ TEST_F(Buffer_repair, BuffersEveryBitOfFixedMacroOutput) {
   }
   options.previous = frame;
   hhds::GraphLibrary fixed_owner;
-  auto               fixed    = place(*graph, fixed_owner, options);
-  const auto         repaired = repair_buffers(
+  auto               fixed = place(*graph, fixed_owner, options);
+  // Macro spacing stays requested; the placed-repair API propagates only the
+  // smaller CORE exclusion to its edited-cell legalization.
+  options.halo_x = options.halo_y = 2.72;
+  options.cell_halo               = std::pair{0., 0.};
+  const auto repaired             = repair_buffers(
       std::move(fixed),
       options,
       [&](const Result& trial) {
         Timing_feedback score;
+        if (count(trial, "__place_rebuffer")) {
+          rapidjson::Document placement_qor;
+          placement_qor.Parse(trial.qor.c_str());
+          EXPECT_TRUE(placement_qor["cell_halo"]["active"].GetBool());
+          EXPECT_EQ(placement_qor["halo"]["x_um"].GetDouble(), 0);
+          EXPECT_EQ(placement_qor["macro_halo"]["x_um"].GetDouble(), 2.72);
+        }
         score.delay = count(trial, "__place_rebuffer") ? 1 : 2;
         score.area  = count(trial, "__place_rebuffer") ? 0 : 100;
         for (const auto& [name, xy] : trial.pin_locations) {

@@ -153,9 +153,13 @@ OpenROAD flow applies before its tie cells, makes the same choice), and a
 `unknown-const-tied-low` warning reports how many bits it touched. It is part of the
 placement cache identity.
 
-Nets beyond FLUTE's 1000-location degree limit use an explicitly approximate
-Manhattan star until fanout repair can split them. Placed timing includes the
-last wire segment into primary outputs and native memory captures.
+Nets beyond FLUTE's 1000-location degree limit use approximate spatial groups
+and a representative FLUTE tree. Coordinate coalescing can introduce cycles in
+that union; cyclic unions retain a resistance-weighted spanning tree, preserve
+pin attachments and recompute retained wire capacitance. Already valid trees are
+unchanged. Both the producer and OpenTimer boundary require a connected resistor
+tree. Placed timing includes the last wire segment into primary outputs and native
+memory captures.
 
 `place_cache/placement.json` follows `lhd.incremental` and a build content salt.
 It stores cell positions and block bounding boxes keyed by instance context,
@@ -173,8 +177,11 @@ the replaced root's `placement_block`, color and synthesis-region provenance.
 Displacement is bounded by the chosen window; there is no separate per-cell
 radius constraint, and solver momentum is not reused across calls.
 
-Floorplan input currently requires the same DBU as LEF, contiguous equal-width
-N/FS rows, and FIXED IO pins. Row gaps/blockages and rotated rows are refused.
+Floorplan input currently requires the same DBU as LEF and contiguous equal-width
+N/FS rows. Imported IO pins must be FIXED unless IO adjustment is enabled;
+PLACED pins then supply movable initial positions, and UNPLACED pins receive
+generated perimeter seeds. Explicit FIXED pins remain fixed. Row gaps/blockages
+and rotated rows are refused.
 Mapped standard cells need matching LEF and Liberty models. Explicit hard macros
 remain movable and retain exact LEF dimensions, even when their widths/heights
 are not integral standard-cell sites/rows. DREAMPlace uses its existing macro
@@ -183,18 +190,51 @@ physical dimensions or pin offsets. Row flips apply only to CORE cells; BLOCK
 macros keep their supplied orientation, including when a warm cache hit locks
 them.
 
+Real BLOCK macros align their actual origins to signal-pin access on routing
+tracks before standard-cell packing. Imported DEF TRACKS take precedence;
+explicit LEF layer offsets and pitches provide a fallback. The search transforms
+pin shapes for the retained macro orientation and honors LEF MANUFACTURINGGRID,
+without changing master dimensions. Invalid fixed macro origins are diagnosed
+rather than moved. Synthesized memory proxies carry abstract RC geometry and
+are excluded from routing-track alignment. This correction adds no option or
+default change.
+
 `synth.place.halo=H` reserves H microns per side around every non-CORE LEF
 macro, including native-memory BLOCK proxies. `synth.place.halo=X,Y` selects
 horizontal and vertical clearance separately; the default is 5 µm per side. Clearance
 rounds up to the technology's site width and row height. CORE standard cells
 receive no halo. Physical dimensions, pin offsets and reported physical area
 remain unchanged; private padded occupancy participates in density, legalization
-and detailed placement. Two macros reserve both halos between them. The same
-clearance applies to cache reuse, ECO placement and independent legality checks;
-an imported fixed macro with an illegal halo cannot silently pass. Requested
+and detailed placement. Two macros reserve both halos between them. By default,
+the same clearance applies to cache reuse, ECO placement and independent legality checks;
+an imported fixed macro with an illegal internal halo cannot silently pass.
+For FIXED/LOCKED macros, halo exclusion is clipped at the core boundary while
+the physical body must remain inside and all internal clearance is preserved.
+Native movable macros keep their complete halo inside the core. Requested
 microns and effective DBU clearance are recorded in placement QoR. Floorplan
 utilization continues to use physical area, so halo occupancy can exceed the
 requested density target even when physical utilization is low.
+
+`synth.place.cell_halo=H` or `X,Y` optionally selects a separate clearance for
+standard cells around fixed macros during final cell placement and subsequent
+placed-design repair. Its default is empty: inherit `synth.place.halo` exactly.
+Zero explicitly removes this additional cell clearance; physical macro bodies
+remain obstacles. Each axis must be finite, nonnegative and no larger than the
+corresponding `synth.place.halo` axis. Macro placement and macro-to-macro spacing
+retain the original
+`synth.place.halo`, including during final legality checks. This lets a staged
+flow reserve, for example, 12 µm for macro placement while using 2 µm around the
+fixed macros for cell placement. Both clearances round up to the site/row grid.
+With movable macros, full placement performs the macro-to-cell handoff before
+applying the override. GP-only placement rejects it. Timing-only imports
+continue to preserve their input geometry.
+
+With this override, QoR `halo` describes the effective clearance, `macro_halo`
+records the original macro spacing, and `cell_halo` records the requested
+override and whether it is active in that stage. These additional keys are
+absent when the option is unset. The diagnostic `physical_repair` configuration
+accepts `cell_halo` as a number or a two-number `[x,y]` array; omission inherits
+its existing `halo` option.
 
 `synth.place.snapshots=true` saves physical GP coordinates before legalization
 for visualization. Ordinary placement writes `gp.json`; H2D writes
@@ -204,6 +244,11 @@ when comparing H2D against its final placement. These diagnostic frames can
 overlap and are not legal placement exports. Snapshots default off and do not
 change placement objectives or coordinates.
 Snapshots are generated by fresh GP calls; cache hits do not regenerate them.
+The stage DEFs `before_legalization.def`, `after_legalization.def` and
+`after_detailed.def` retain physical component identities. Legal/detail exports
+apply physical CORE row orientations while preserving fixed-cell and macro
+orientations; the saved GP frame retains its raw orientations. These observers
+do not change placement coordinates, priorities or timing.
 
 `synth.place.cohesion=C` enables soft, area-weighted centroid attraction for
 mapped cells and SRAMs sharing a synthesis color in the same instance scope.
@@ -330,9 +375,10 @@ For selected nets, let `s` be a net's worst
 pin slack, `s_worst` the worst selected slack, and `s_cutoff` the last selected
 slack. With `W = synth.place.timing_max_weight` (default 5), the target is
 `1 + (W - 1) * (s_cutoff - s)/(s_cutoff - s_worst)`; tied selected slacks get
-weight W. Other nets target weight 1. `synth.place.timing_smoothing` (default 0.5)
-is the new-target share at updates: `(1-alpha)*old + alpha*target`. Initial
-zero-wire weights use the target directly. These weights multiply both
+weight W. Current noncritical nets immediately receive weight 1, and obsolete
+driver identities are removed. `synth.place.timing_smoothing` (default 0.5) is the
+new-target share for selected nets at updates: `(1-alpha)*old + alpha*target`.
+Initial zero-wire weights use the target directly. These weights multiply both
 the smooth wirelength cost and its gradient before GP preconditioning. They do
 not directly change the configured centroid or density coefficients, or size
 cells. The native RUDY estimator also uses net weights, so critical nets count
@@ -340,6 +386,132 @@ more toward routing demand. Detailed placement also runs with timing weights: k_
 independent_set_matching and global_swap score moves with weighted HPWL (net
 weight times net HPWL), and a pass is kept only if weighted HPWL does not
 increase and the placement stays legal.
+
+`synth.place.satlegalize=true` enables experimental local pin-access alignment
+at the selected final-cell GP checkpoint, before legalization/detail. It requires
+fresh OpenTimer feedback (`synth.place.macro.timing_interval>0`). It leaves macros,
+fixed cells, IOs and cells outside each window unchanged. The existing legalizer
+remains the default and the zero-prefix fallback. Multi-height cells currently
+remain obstacles because the SAT model covers single-height row/site placement.
+
+`synth.place.satlegalize.backend=cadical|cms-cnf|cms-xor` selects incremental
+CaDiCaL CNF, CryptoMiniSat CNF, or CryptoMiniSat native XOR. Candidate encoding
+uses at-most-one clauses plus an odd-parity exactly-one constraint; native XOR
+replaces that parity's CNF expansion. `encoding=binary` instead allocates bounded
+binary **x/y DBU coordinates and orientation**, with a selector table admitting
+only enumerated legal positions. This is a bounded legal-position domain, not
+an unrestricted arithmetic placer. Pin offsets, displacement, overlap and access
+compatibility still require geometric tables; parity alone is not coordinate
+equality. The backend and encoding default to `cadical` and `candidate` only
+inside this opt-in feature; no measured backend winner is assumed.
+
+The remaining `synth.place.satlegalize.*` controls are `max_cells=24`,
+`max_candidates=12`, `max_windows=8`, `max_pairs=32`, `move_sites=4`,
+`move_rows=1`, `conflicts=10000`, `milliseconds=50`, `skip_conflicts=true` and
+`boundary_growth=0.05`. Windows follow nearby timing-ranked driver/sink pairs;
+movement and separation limits derive from site/row dimensions. All window
+cells receive legal candidates and non-overlap constraints, including fixed
+obstacles and window bounds. Incident-net HPWL includes endpoints outside the
+window; excess growth rejects a model. The model maintains one solver per
+window and tests guarded proposals using replaceable assumptions. Unknown/time
+limits are undecided and never count as proven infeasibility. Accepted pairs
+remain relational constraints while the window is solved, rather than fixing
+absolute coordinates immediately.
+
+`synth.place.satlegalize.region_size=W,H` selects fixed regions in microns;
+one number selects a square. Empty preserves the original pair-centered
+windows. `spill_neighbors=true` enables noncritical overflow movement to
+less-dense adjacent regions and requires an explicit region size or `route_grid=true`. These are
+opt-in experiments; the existing defaults are unchanged. A 40 by 40 micron
+experiment uses `region_size=40,40` and an explicit cell budget large enough
+for the full region (`max_cells` accepts up to 65536). Region size is never
+reduced to satisfy that budget.
+
+The fixed-region path considers complete movable-cell membership, orders its
+bounded pool of timing-selected regions by current density, and computes usable
+capacity from actual rows with fixed obstacles and the resolved standard-cell
+macro clearance removed. Density includes all current movable footprints;
+overlaps can therefore produce density above one. Outside cells remain
+obstacles. Noncritical cells can receive bounded escape candidates from legal
+gaps in less-dense neighboring regions. Clock-connected cells, current or
+retained alignment endpoints, and cells without reliable positive data-pin
+slack do not receive this extra movement. `spill_slack_margin_ps=0` requires
+strictly positive slack; a positive value adds an explicit margin in picoseconds.
+
+Candidate collisions use spatial overlap constraints. Candidate truncation
+reserves escape choices so that nearby occupied positions cannot consume the
+entire domain. Acceptance checks all proposed transfers together: the donor
+must lose occupancy, receiving regions cannot exceed their usable capacity or
+the donor's previous density, and incident-net HPWL and alignment checks still
+apply. Ordinary downstream legalization and fresh RC/STA remain the final
+acceptance checks, including nonworsening hold WNS when available. The fixed-region
+experiment accepts the complete proposal or restores the ordinary legal baseline;
+it does not retry shorter alignment prefixes. A failed or undecided solve is reported without claiming
+overflow was removed or silently retrying a smaller region. Per-region reports
+include exact cell counts, bounds, capacity, density and accepted transfers;
+the bounded region-selection scope is recorded explicitly.
+
+`synth.place.satlegalize.route_grid=true` selects the exact final native
+RSMT-RUDY grid instead of physical `region_size`; the two are mutually exclusive.
+This opt-in requires explicit final-stage `route.model=rsmt`, routability,
+fixed bin counts (no `auto_bins`) and fresh timing feedback. The requested
+128 by 128 experiment uses `synth.place.bins=128`. These are **bin counts over
+the core**, not track counts. Dynamic density bins retain the configured
+auxiliary routing grid. Baseline runs can export the map with SAT disabled.
+
+The host samples `dp::rudy` after the forced timing-weight refresh and passes
+those same H/V/pin utilization arrays to SAT. `sat_route_grid.json` records
+bounds, grid, resolved options, capacities and coordinate/topology/net-weight
+bindings. Bin boundaries share one DBU-rounded edge sequence, avoiding gaps
+from independently rounded widths. `route_guidance=true` orders eligible bins
+by initial congestion, then current cell density; neighbor spill must have both
+lower initial congestion and lower cell density, with aggregate placement
+capacity still checked. `route_guidance=false` uses identical region geometry
+and menus with cell-density ordering, for controlled experiments.
+
+Map-grid mode adds bounded nearest legal row-gap candidates anywhere inside
+each full source bin, including for protected critical cells; only independently
+spill-eligible cells may escape to neighbors. Every activated pair requires both
+original endpoint bodies and its chosen endpoint poses to fit inside the source
+bin. Boundary-straddling cells still participate in regional legality. The
+`cross_grid_pairs` counter reports rejected seeds during the bounded region
+search, not a census of all design nets. The input routing map is immutable
+during this first batch.
+The host compares full post-legalization candidate and ordinary-baseline maps
+using common pre-SAT weights, rejecting increased overflow, peak utilization,
+blocked pins or unroutable nets alongside timing/electrical/alignment guards.
+This map guard precedes final tie relocation and subsequent native repair;
+final alignments are revalidated, and final quality must be measured separately.
+It does not shrink regions or retry shorter prefixes. Fixed macros and IO stay
+fixed. Map arrays are normalized utilization, not raw track-capacity inventories;
+macro halos are placement exclusions, not additional routing blockages.
+
+Alignment requires transformed rectangular pin shapes, wire-width clearance,
+a compatible routing layer and an explicit DEF `TRACKS` grid or LEF `OFFSET` and
+`PITCH`. Missing grid evidence skips an alignment. Rectangular LEF OBS geometry
+is checked along the access corridor; nonrectangular/iterated OBS conservatively
+block their whole cell on the affected layer. Polygon pin approximations do not
+provide usable finite-width access. The model does not cover via stacks, PG
+pin geometry, spacing or end-of-line rules. These are conservative access checks,
+not a detailed-route or DRC guarantee. `satlegalize.json` records the backend,
+encoding, trials, accepted/retained pairs, undecided/conflicting trials, total pass
+runtime and fallback. Legalization/detail must preserve retained relationships;
+the host revalidates them, tries bounded shorter prefixes in legacy window mode, and restores the
+untouched GP state at prefix zero. Timing acceptance recomputes physical RC/STA
+against the ordinary legalization of the same GP input. Later accepted sizing or
+buffering edits explicitly mark these relations relaxed in final QoR rather than
+claiming that pre-repair alignments remain preserved.
+
+The model-producing solver bridge uses cvc5's pinned source dependency builds.
+In the default source mode it joins cvc5's combined object **before** private
+solver-symbol renaming. With `--define=cvc5_prebuilt=1`, a separately isolated
+bridge reuses the pinned SAT archives without linking a second libcvc5. Solver
+C++ types never cross the C ABI; repeated solver/cvc5/ABC coexistence is checked
+by `//pass/place:sat_solver_test`. `satlegalize_test` covers geometry, competing
+pairs, fragmented whitespace, boundary nets, unknowns and prefix-zero rollback.
+Large CNN/Eyeriss/Coral sweeps remain external evaluations: access predictions
+need routing inspection, and no timing improvement is claimed without measured
+post-legalization/detail RC/STA and electrical checks on identical GP inputs.
 
 The placer reads numerical setup slack for physical driver/sink pins, taking
 the minimum available rise/fall slack per pin and then the minimum across each
@@ -380,9 +552,10 @@ virtual fillers; protecting a pure-filler experiment needs a separate policy.
 With timing-driven placement enabled, `synth.place.fp.timing_interval=50`
 recomputes placement RC and runs OpenTimer every 50 completed FP GP iterations.
 It uses the same `timing_weights()` rule and configured smoothing. Set the
-interval to `0` to disable FP timing and sizing checkpoints. No checkpoints run
-in the IO prototype, macro GP, or final-cell GP; those stages inherit the last
-available weights. Designs with no FP candidates have no FP pass/checkpoints.
+interval to `0` to disable FP timing and sizing checkpoints. The IO prototype
+inherits available weights. Macro and final-cell GP refresh timing using
+`synth.place.macro.timing_interval` (default 50); setting it to zero disables those
+periodic checkpoints. Designs with no FP candidates have no FP pass/checkpoints.
 
 Set `synth.place.fp.timing_after_density=true` to defer FP timing and repair
 while the actual GP overflow exceeds `synth.place.stop_overflow` (default 0.1). This uses the
@@ -583,7 +756,7 @@ whitespace charge; a smaller positive fraction is useful for tuning. Routability
 inflation adjusts that charge budget as well. Reports include actual count and
 charge area. The existing soft-density behavior is unchanged when disabled.
 
-The filler-free native flow has two independent opt-in controls:
+The native flow has two independent opt-in spreading controls:
 
 - `synth.place.local_density_weight=0` disables the local field by default.
   Positive values add a screened Poisson field for real standard-cell area,
@@ -597,8 +770,9 @@ The filler-free native flow has two independent opt-in controls:
   soft target emits charge; its distance-decaying field can push neighboring
   cells even without physical overlap. Macro/halo area reduces local capacity. `local_density_jitter=0.01` supplies deterministic
   dimension-relative cell offsets to break exact stacks; zero disables jitter.
-  Local spreading requires the native filler-free path and does not support
-  external `GpState` continuation yet; in-process timing checkpoints work.
+  Local spreading uses the native solver and can run alongside virtual density
+  particles. It does not support external `GpState` continuation yet; in-process
+  timing checkpoints work.
 - `synth.place.dynamic_bins=false` retains the configured density grid.
   When enabled, the ideal bin area is average movable-instance area divided by
   target density, following OpenROAD's rule. Power-of-two counts account for
@@ -673,7 +847,7 @@ persistent incremental timer instead of a fresh evaluation per batch.
 | --- | --- | --- |
 | `resize.engine` | `legacy` | `new` or `legacy` |
 | `resize.vt_swap` | false | `new`: allow same-footprint/function swaps across Liberty files (multi-VT); otherwise a cell keeps its file |
-| `resize.dont_use` | empty | `new`: comma-separated globs never chosen as a new master or repeater (Liberty `dont_use` cells stay excluded) |
+| `resize.dont_use` | empty | Comma-separated globs never chosen as a new master or repeater by either engine. Existing matching instances remain characterized and may be retained or removed; Liberty `dont_use` cells stay excluded. |
 
 *What-if timing.* `Physical_session::whatif()` (`core/timing_whatif.hpp`) applies
 transient edits to the evaluated OpenTimer state: a master swap (`repower_gate`), a new
@@ -1158,6 +1332,18 @@ positions and orientations are unchanged, then runs sizing and design repair
 without synthesis or GP. The output retains per-evaluation timing, both repair
 traces, phase runtimes, the final DEF and the repaired graph library.
 
+For an exact replay of an already exported placement, set `retained_repair` to
+`true` and set `net_weights` to the path of a JSON object mapping every current
+graph driver key to a finite weight in `[1, 100]`. This mode retains the imported
+placement while reconstructing the graph, then permits ordinary repair trials. It checks every
+initial master, position, orientation, IO coordinate and driver weight before
+starting fresh timing analysis; `retained_initial.def` and
+`retained_import.json` record that starting state. It cannot be combined with
+`cell_place`, `floorplan`, `timing_only` or `snapshot_only`. Use identical
+placement and weight inputs for paired repair-policy experiments; this replay
+starts a new timing session and does not reproduce a prior run's incremental
+timing history.
+
 `timing_calls.jsonl` separates each diagnostic timing callback into engine/report
 generation and feedback parsing, with report byte counts. Sizing/forest trial
 records include preparation, placement/RC and timing durations, upsize/downsize
@@ -1435,3 +1621,96 @@ and existing placement defaults remain unchanged.
 Repair candidate sorting caches immutable electrical/slack, critical-path and
 name keys before sorting the original node sequence, preserving proposal order
 and trial budgets while avoiding repeated physical-label construction.
+
+### Local constants, timing refresh, and legalization
+
+Constant-output drivers are recognized from Liberty functions and split per physical
+load, including bus bits, memory pins and constant top-level outputs. Their area is
+reserved before sizing the placement frame. Legalization defers these drivers behind
+functional cells; final tie placement uses the users' oriented pin positions and legal
+row whitespace, with bounded equal-footprint exchanges when necessary. Exported DEF,
+physical nets, graph connectivity and repeated placement retain the local identities.
+Automatically generated IO positions remain movable in later FP/macro runs; only
+explicit `FIXED` constraints persist. Movable clocks use their sink distribution even
+though ideal clock nets are masked out of the ordinary GP wirelength objective.
+
+Inserted buffer trees inherit half of the original driver's excess weight above one,
+on every segment. Fresh STA replaces provisional priorities and immediately resets
+nets outside the selected critical set to one. Final cell GP now uses the same bounded
+checkpoint cadence as macro GP. `<stage>_weights.json` records current driver identity,
+critical membership, applied weight and checkpoint. Final buffer recovery trials use
+legal coordinates and fresh RC/STA; both adjacent nets must have one physical load
+and no port branches. Electrical and timing acceptance still gate each bypass. The physical
+flow bounds trials to 24 per design and reserves at most 12 for final topology
+recovery; counters distinguish attempts, accepted edits and timer operations
+caused by rejected-trial rollback.
+
+The following legalization controls are opt-in (`synth.place.` prefix):
+
+| Control | Default | Meaning |
+|---|---:|---|
+| `legalize.eco_connectivity_weight` | `0` | Incident-net wirelength cost during edited-cell legalization, 0–100; zero preserves nearest-seed placement |
+| `legalize.timing_strength` | `0` | Displacement protection scaling, 0–99; zero retains ordinary legalization |
+| `legalize.timing_threshold` | `0` | Fresh cell-slack rank threshold, 0–1; zero gives continuous protection |
+| `legalize.timing_corrections` | `0` | Up to two local eight-iteration correction attempts after detail; fresh STA/electrical checks decide acceptance |
+
+The selected final-GP coordinates receive fresh physical RC/STA before assigning
+cell priorities. Priority packing tries bounded nearby free row intervals and falls
+back atomically on fragmented/unsupported geometry. Weighted Abacus and detailed
+placement retain displacement protection. `legalize_priorities.tsv` records current
+slack, criticality, cost and GP anchors, including designs with positive slack only.
+`legalize_timing.jsonl` reports independent post-legalization/detail timing, and
+`legalize_correction.jsonl` records correction acceptance. These controls do not select
+new global defaults; use matched saved GP inputs when evaluating their scaling.
+
+With positive `legalize.eco_connectivity_weight`, the fast ECO row-gap search
+adds weighted incident-net HPWL to seed displacement when choosing legal sites.
+Earlier edits contribute their chosen coordinates; pending edits retain their
+seeds. Ideal-clock nets remain excluded. Unchanged cells, macros and IO stay
+fixed, and the surrounding repair transaction still requires fresh RC/STA
+acceptance. This is an opt-in placement heuristic; routed timing determines
+whether a configuration is useful. The standalone diagnostic uses the JSON
+key `eco_connectivity_weight`. Enabled `qor.eco.connectivity` telemetry records
+net/pin and candidate counts; `search_seconds` covers the complete fast ECO
+legalization, including its setup and legality check.
+
+### 2p HighTide evaluation
+
+The [CNN, Eyeriss and Coral evaluation](../../repros/2p_eval_20261020/comparison.html)
+records frozen tools, original constraints, normalized inputs, concurrent runtime,
+placement checks, tie/IO persistence and same-GP E/F comparisons. All three native
+full flows complete legally; comparison with cached OpenROAD whole flows is mixed
+and uses different final netlists. Large centroid FP was disabled after a circle-fit
+precondition failed. That evaluation exposed native macro-frame pin-access failures.
+The subsequent [CTS-to-route evaluation](../../repros/route_eval_20261021/comparison.html)
+fixes track-phase alignment and macro preservation, with passing full-path access
+checks on all three designs; routed quality comparisons remain in progress.
+
+For the measured same-GP legalization/detail replay with resizing disabled,
+`legalize.timing_strength=8`, `legalize.timing_threshold=0.5` and
+`legalize.timing_corrections=1` improve common setup WNS/TNS and native electrical
+counts across CNN and Eyeriss. The extra eight GP iterations raise replay runtime
+from 222 to 396 seconds on CNN and 385 to 656 seconds on Eyeriss. A second correction
+is rejected on both designs and leaves the identical final DEF. This combined
+opt-in choice has not been evaluated through the subsequent full repair flow;
+existing defaults remain zero. Fixed row/interval search caps were not swept.
+
+All 12 SAT backend/encoding cases and six adaptive probes retain zero alignments
+and match their ordinary E8 control exactly. These measurements support safe
+fallback, with no backend winner or routed QoR gain. The solver remains experimental.
+Measured bin5 raw stage DEFs are preserved with audited row-orientation views; final
+reviewed bin6 changes only the stage serializer, its regression and documentation.
+
+For ECO diagnostics, `placement::Options::eco_trace_cells` accepts exact edited
+cell names (empty by default). A successful fast row-gap legalization records
+only those names under `qor.eco.trace`, including seed/chosen DBU coordinates,
+master, edit order, selected row, free-gap bounds and displacement. Tracing
+does not change legalization or placement-cache admission. The standalone
+`physical_repair` diagnostic accepts the same JSON list. Its explicit
+`retained_repair=true, repair_scope="forest"` mode runs the existing forest-only
+repair API, skipping sizing and recovery. `repair_scope="sizing_forest"` first
+runs ordinary sizing, retaining its refreshed weights in process, then runs
+forest-only repair. Both explicit scopes require the legacy engine. Absent
+`repair_scope` keeps the ordinary complete flow. A successful first full forest
+batch ends these modes; rejected batches retain the existing bounded bisection
+behavior.

@@ -140,8 +140,12 @@ fixed = (pin_root/'macro/fixed.def').read_text().split('\nPINS ',1)[1].split('EN
 for pin in macro_pins[-1]['pins']:
     assert re.search(r'- ' + re.escape(pin['name']) + r'(?=\s).*?\+ FIXED \( '
                      + str(pin['x']) + ' ' + str(pin['y']) + r' \)', fixed, re.S), pin
+original_pins = (pin_root/'macro/out.def').read_text().split('\nPINS ',1)[1].split('END PINS',1)[0]
+# The handoff freezes IOs only for this solve; final output restores the original
+# user constraints. Compare every coordinate, shape and net field exactly.
+assert fixed == original_pins.replace(' + PLACED (', ' + FIXED ('), 'handoff changed IO geometry'
 final_pins = (pin_root/'out.def').read_text().split('\nPINS ',1)[1].split('END PINS',1)[0]
-assert fixed == final_pins, 'final cell placement changed the frozen IOs'
+assert original_pins == final_pins, 'final cell placement changed IO geometry or original constraints'
 assert (root/'fp_gated/synth/place/macro/fp_history.jsonl').exists()
 assert gated['timing_after_density'] and gated['timing_checkpoints'] > 0, gated
 assert gated['timing_fraction'] == 0.29, gated

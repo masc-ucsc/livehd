@@ -2,6 +2,7 @@
 #include "physical.hpp"
 
 #include <algorithm>
+#include <cmath>
 #include <cstdio>
 #include <fstream>
 #include <memory>
@@ -38,6 +39,15 @@ int units_cb(lefrCallbackType_e, lefiUnits* units, lefiUserData data) {
   }
   return 0;
 }
+int manufacturing_grid_cb(lefrCallbackType_e, double grid, lefiUserData data) {
+  auto& c = *static_cast<LefContext*>(data);
+  if (!std::isfinite(grid) || grid <= 0 || (c.tech.manufacturing_grid > 0 && std::abs(c.tech.manufacturing_grid - grid) > 1e-12)) {
+    c.error = "invalid or conflicting LEF MANUFACTURINGGRID";
+    return 1;
+  }
+  c.tech.manufacturing_grid = grid;
+  return 0;
+}
 int site_cb(lefrCallbackType_e, lefiSite* site, lefiUserData data) {
   auto& c                    = *static_cast<LefContext*>(data);
   c.tech.sites[site->name()] = {site->sizeX(), site->sizeY(), site->hasXSymmetry() != 0};
@@ -60,6 +70,14 @@ int layer_cb(lefrCallbackType_e, lefiLayer* layer, lefiUserData data) {
     l.pitch_y = layer->pitchY();
   } else if (layer->hasPitch()) {
     l.pitch_x = l.pitch_y = layer->pitch();
+  }
+  if (layer->hasXYOffset()) {
+    l.offset_x   = layer->offsetX();
+    l.offset_y   = layer->offsetY();
+    l.has_offset = true;
+  } else if (layer->hasOffset()) {
+    l.offset_x = l.offset_y = layer->offset();
+    l.has_offset            = true;
   }
   if (layer->hasResistance()) {
     l.resistance = layer->resistance();
@@ -155,7 +173,18 @@ int obstruction_cb(lefrCallbackType_e, lefiObstruction* obs, lefiUserData data) 
     } else if (!layer.empty()
                && (geometry->itemType(i) == lefiGeomRectE || geometry->itemType(i) == lefiGeomPolygonE
                    || geometry->itemType(i) == lefiGeomRectIterE || geometry->itemType(i) == lefiGeomPolygonIterE)) {
-      c.tech.macros.at(c.macro).blocked_layers.insert(layer);
+      auto& macro = c.tech.macros.at(c.macro);
+      macro.blocked_layers.insert(layer);
+      if (geometry->itemType(i) == lefiGeomRectE) {
+        const auto* rect = geometry->getRect(i);
+        macro.obstructions.push_back({
+            layer,
+            {rect->xl, rect->yl, rect->xh, rect->yh}
+        });
+      } else {
+        // Nonrectangular/iterated OBS remain a conservative full-cell block.
+        macro.conservative_obstructions.insert(layer);
+      }
     }
   }
   return 0;
@@ -204,6 +233,19 @@ int row_cb(defrCallbackType_e, defiRow* row, defiUserData data) {
                        std::llround(row->xNum()),
                        std::llround(row->xStep()),
                        parse_orientation(row->orientStr())});
+  return 0;
+}
+int track_cb(defrCallbackType_e, defiTrack* track, defiUserData data) {
+  auto& fp = static_cast<DefContext*>(data)->fp;
+  for (int i = 0; i < track->numLayers(); ++i) {
+    fp.tracks.push_back({track->macro(),
+                         track->layer(i),
+                         std::llround(track->x()),
+                         std::llround(track->xNum()),
+                         std::llround(track->xStep()),
+                         track->firstTrackMask(),
+                         track->sameMask() != 0});
+  }
   return 0;
 }
 int component_cb(defrCallbackType_e, defiComponent* component, defiUserData data) {
@@ -338,6 +380,7 @@ Technology read_lef(const std::vector<std::string>& paths) {
     auto file = open_file(path);
     lefrInit();
     lefrSetUnitsCbk(units_cb);
+    lefrSetManufacturingCbk(manufacturing_grid_cb);
     lefrSetSiteCbk(site_cb);
     lefrSetLayerCbk(layer_cb);
     lefrSetMacroBeginCbk(macro_begin_cb);
@@ -364,6 +407,7 @@ Floorplan read_def(const std::string& path) {
   defrSetDesignCbk(def_design_cb);
   defrSetDieAreaCbk(die_cb);
   defrSetRowCbk(row_cb);
+  defrSetTrackCbk(track_cb);
   defrSetComponentCbk(component_cb);
   defrSetPinCbk(terminal_cb);
   defrSetNetCbk(net_cb);
@@ -386,6 +430,13 @@ void write_def(const Floorplan& fp, const std::string& path) {
   for (const auto& row : fp.rows) {
     out << "ROW " << identifier(row.name) << ' ' << identifier(row.site) << ' ' << row.x << ' ' << row.y << ' '
         << orientation_name(row.orientation) << " DO " << row.count << " BY 1 STEP " << row.step << " 0 ;\n";
+  }
+  for (const auto& track : fp.tracks) {
+    out << "TRACKS " << track.axis << ' ' << track.start << " DO " << track.count << " STEP " << track.step;
+    if (track.mask) {
+      out << " MASK " << track.mask << (track.same_mask ? " SAMEMASK" : "");
+    }
+    out << " LAYER " << identifier(track.layer) << " ;\n";
   }
   out << "COMPONENTS " << fp.components.size() << " ;\n";
   for (const auto& c : fp.components) {
@@ -422,12 +473,13 @@ void write_def(const Floorplan& fp, const std::string& path) {
   }
 }
 void verify_def_roundtrip(const Floorplan& a, const Floorplan& b) {
-  if (a.design != b.design || a.dbu != b.dbu || a.die != b.die || a.rows != b.rows || a.terminals != b.terminals || a.nets != b.nets
-      || a.components.size() != b.components.size()) {
+  if (a.design != b.design || a.dbu != b.dbu || a.die != b.die || a.rows != b.rows || a.tracks != b.tracks
+      || a.terminals != b.terminals || a.nets != b.nets || a.components.size() != b.components.size()) {
     const auto  field = a.design != b.design         ? "design"
                         : a.dbu != b.dbu             ? "units"
                         : a.die != b.die             ? "die"
                         : a.rows != b.rows           ? "rows"
+                        : a.tracks != b.tracks       ? "tracks"
                         : a.terminals != b.terminals ? "terminals"
                         : a.nets != b.nets           ? "nets"
                                                      : "component count";

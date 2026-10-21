@@ -11,7 +11,9 @@ filegroup(
         "io_timing.cpp",
         "io_timing.hpp",
         "macro_snap.cpp",
+        "macro_tracks.cpp",
         "macro_snap.hpp",
+        "macro_tracks.hpp",
         "memory_proxy.cpp",
         "memory_proxy.hpp",
         "pin_adjust.cpp",
@@ -25,6 +27,10 @@ filegroup(
         "reset_tree.hpp",
         "resize_engine.cpp",
         "resize_engine.hpp",
+        "satlegalize.cpp",
+        "satlegalize.hpp",
+        "sat_solver.cpp",
+        "sat_solver.hpp",
         "resynthesize.cpp",
         "steiner_repair.cpp",
         "steiner_repair.hpp",
@@ -40,6 +46,9 @@ genrule(
     srcs = [
         ":place_srcs",
         "//:MODULE.bazel",
+        "//packages:cvc5_sat.cpp",
+        "//packages:cvc5_repo.bzl",
+        "//packages:cvc5_src.BUILD",
         "//graph",
         "//inou/lefdef:inou_lefdef",
         "//pass/liberty:liberty_dff",
@@ -66,6 +75,7 @@ cc_library(
         "h2d.cpp",
         "io_timing.cpp",
         "macro_snap.cpp",
+        "macro_tracks.cpp",
         "memory_proxy.cpp",
         "pin_adjust.cpp",
         "place.cpp",
@@ -82,6 +92,7 @@ cc_library(
         "h2d.hpp",
         "io_timing.hpp",
         "macro_snap.hpp",
+        "macro_tracks.hpp",
         "memory_proxy.hpp",
         "pin_adjust.hpp",
         "place.hpp",
@@ -96,6 +107,7 @@ cc_library(
     copts = COPTS,
     visibility = ["//visibility:public"],
     deps = [
+        ":satlegalize",
         "//core",
         "//graph",
         "//inou/lefdef:inou_lefdef",
@@ -218,4 +230,39 @@ cc_test(
         "//pass/opentimer:pass_opentimer",
         "@googletest//:gtest_main",
     ],
+)
+
+cc_library(
+    name = "sat_solver",
+    srcs = ["sat_solver.cpp"],
+    hdrs = ["sat_solver.hpp"],
+    copts = COPTS,
+    deps = ["@cvc5//:sat_solver"],
+)
+cc_library(
+    name = "satlegalize",
+    srcs = ["satlegalize.cpp"],
+    hdrs = ["satlegalize.hpp"],
+    copts = COPTS,
+    deps = [":sat_solver", "//core", "//inou/lefdef:inou_lefdef"],
+)
+cc_test(
+    name = "sat_solver_test",
+    srcs = ["sat_solver_test.cpp"],
+    copts = COPTS,
+    deps = [":sat_solver", "@cvc5", "@abc", "@googletest//:gtest_main"],
+)
+cc_test(
+    name = "satlegalize_test",
+    srcs = ["satlegalize_test.cpp"],
+    copts = COPTS,
+    deps = [":satlegalize", "@googletest//:gtest_main"],
+)
+
+cc_test(
+    name = "macro_tracks_test",
+    size = "small",
+    srcs = ["macro_tracks_test.cpp"],
+    copts = COPTS,
+    deps = [":place", "@googletest//:gtest_main"],
 )

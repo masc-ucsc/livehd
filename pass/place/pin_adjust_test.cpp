@@ -169,3 +169,64 @@ TEST(PinAdjust, RejectsInvalidMetadataAndLeavesFixedInteriorPins) {
   }
 }
 }  // namespace livehd::placement
+
+namespace livehd::placement {
+namespace {
+// A single ideal-clock terminal, with a broadly spread or concentrated set of
+// sink access points. Clock nets remain masked from cell GP's HPWL objective.
+static void check_clock_io(bool concentrated, bool fixed, bool tall) {
+  dp::Design          d;
+  physical::Floorplan fp;
+  fp.die        = tall ? physical::Rect{0, 0, 100, 200} : physical::Rect{0, 0, 200, 100};
+  d.layout      = {fp.die.xl, fp.die.yl, fp.die.xh, fp.die.yh, 1, 1};
+  d.num_movable = 4;
+  d.node_x      = concentrated ? std::vector<double>{10, 15, 20, 15, 0} : std::vector<double>{20, 180, 20, 180, 0};
+  d.node_y      = concentrated ? std::vector<double>{10, 15, 20, 15, 0} : std::vector<double>{20, 20, 80, 80, 0};
+  if (tall && !concentrated) {
+    for (size_t i = 0; i < 4; ++i) {
+      std::swap(d.node_x[i], d.node_y[i]);
+    }
+  }
+  d.node_size_x = d.node_size_y = {1, 1, 1, 1, 0};
+  d.pin2node                    = {4, 0, 1, 2, 3};
+  d.pin_offset_x = d.pin_offset_y = {0, 0, 0, 0, 0};
+  d.flat_net2pin                  = {0, 1, 2, 3, 4};
+  d.flat_net2pin_start            = {0, 5};
+  d.net_mask                      = {0};
+  d.net_weights                   = {1};
+  d.build_maps();
+  physical::Terminal clock;
+  clock.name      = "clk";
+  clock.direction = "INPUT";
+  clock.status    = fixed ? physical::Status::FIXED : physical::Status::PLACED;
+  fp.terminals.push_back(clock);
+  const auto connectivity = d.pin2node;
+  adjust_fp_pins(d, fp, {"clk"}, {0}, 5, .5, 0, true);
+  if (fixed) {
+    EXPECT_EQ(fp.terminals[0].x, 0);
+    EXPECT_EQ(fp.terminals[0].y, 0);
+  } else if (concentrated) {
+    EXPECT_LE(fp.terminals[0].x + fp.terminals[0].y, 20);
+    EXPECT_GT(fp.terminals[0].x + fp.terminals[0].y, 0);
+  } else if (tall) {
+    EXPECT_EQ(fp.terminals[0].y, 100);
+    EXPECT_TRUE(fp.terminals[0].x == 0 || fp.terminals[0].x == 100);
+  } else {
+    EXPECT_EQ(fp.terminals[0].x, 100);
+    EXPECT_TRUE(fp.terminals[0].y == 0 || fp.terminals[0].y == 100);
+  }
+  EXPECT_EQ(d.pin2node, connectivity);
+  // Later FP/macro updates use the same objective and preserve the legal edge.
+  adjust_fp_pins(d, fp, {"clk"}, {0}, 5, .5, 0, false);
+  EXPECT_TRUE(fp.terminals[0].x == 0 || fp.terminals[0].x == fp.die.xh || fp.terminals[0].y == 0 || fp.terminals[0].y == fp.die.yh);
+}
+TEST(PinAdjust, DistributedIdealClockUsesLongSideMidpoint) {
+  check_clock_io(false, false, false);
+  check_clock_io(false, false, true);
+}
+TEST(PinAdjust, ConcentratedIdealClockFollowsItsSinksAndFixedClockStaysFixed) {
+  check_clock_io(true, false, false);
+  check_clock_io(false, true, false);
+}
+}  // namespace
+}  // namespace livehd::placement

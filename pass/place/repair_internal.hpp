@@ -27,6 +27,7 @@ struct Physical_sink {
 };
 const Buffer*                  combinational(Node n, const Inventory& cells);
 bool                           identity(const Buffer& cell);
+bool                           matches_dont_use(const std::string& name, const Options& options);
 const Buffer*                  buffer(Node n, const Inventory& cells);
 bool                           fixed(Node n);
 Pin                            output(Node n, const Buffer& cell);

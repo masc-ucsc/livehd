@@ -43,4 +43,7 @@ struct Parasitics {
 };
 std::string serialize_parasitics(const Parasitics& rc);
 Parasitics  deserialize_parasitics(std::string_view text);
+// OpenTimer's RC traversal requires a connected resistor tree. Reject invalid
+// producer/what-if topology before its recursive load calculation.
+void        validate_rc_tree(const Rc_net& net);
 }  // namespace livehd::physical

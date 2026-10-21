@@ -2,12 +2,47 @@
 #include "physical_rc.hpp"
 
 #include <cmath>
+#include <numeric>
 #include <stdexcept>
+#include <utility>
 
 #include "rapidjson/document.h"
 #include "rapidjson/stringbuffer.h"
 #include "rapidjson/writer.h"
 namespace livehd::physical {
+void validate_rc_tree(const Rc_net& net) {
+  const auto fail = [&] { throw std::invalid_argument("placement RC must be a connected tree: " + net.driver); };
+  if (net.nodes.empty()) {
+    fail();
+  }
+  std::vector<size_t>   parent(net.nodes.size());
+  std::vector<unsigned> rank(net.nodes.size());
+  std::iota(parent.begin(), parent.end(), 0);
+  const auto root = [&](size_t node) {
+    while (parent[node] != node) {
+      parent[node] = parent[parent[node]];
+      node         = parent[node];
+    }
+    return node;
+  };
+  for (const auto& edge : net.edges) {
+    if (edge.from >= parent.size() || edge.to >= parent.size()) {
+      fail();
+    }
+    auto a = root(edge.from), b = root(edge.to);
+    if (a == b) {
+      fail();
+    }
+    if (rank[a] < rank[b]) {
+      std::swap(a, b);
+    }
+    parent[b]  = a;
+    rank[a]   += rank[a] == rank[b];
+  }
+  if (net.edges.size() != net.nodes.size() - 1) {
+    fail();
+  }
+}
 std::string serialize_parasitics(const Parasitics& rc) {
   rapidjson::StringBuffer                    buffer;
   rapidjson::Writer<rapidjson::StringBuffer> w(buffer);
