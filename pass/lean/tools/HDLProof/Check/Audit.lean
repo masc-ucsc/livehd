@@ -13,7 +13,7 @@ import HDLProof.Sym.Refine
 import HDLProof.Sym.Conj
 import HDLProof.Sym.ConjT
 import HDLProof.Theory.Progress
-import HDLProof.Check.RefMapCompose
+import HDLProof.Check.RefMapRef
 
 namespace HDLProof
 
@@ -50,5 +50,14 @@ namespace HDLProof
 #audit_axioms Check.implStream_eq
 #audit_axioms Check.refmap_compose
 #audit_axioms Check.refmap_progress
+#audit_axioms Check.compose_of_facts
+#audit_axioms Check.progress_of_facts
+#audit_axioms Check.rm_denote
+#audit_axioms Check.checked_parts
+#audit_axioms Check.specFacts_checked
+#audit_axioms Check.start_of_facts
+#audit_axioms Check.start_ref
+#audit_axioms Check.refmap_compose_ref
+#audit_axioms Check.refmap_progress_ref
 
 end HDLProof

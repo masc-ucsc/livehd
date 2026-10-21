@@ -264,6 +264,30 @@ theorem specFacts_same {DS : DesignCert} {a b : RefMapSpec} (h : SameSpec a b)
 
 /-! ## The composition -/
 
+/-- The composition from the checks' facts (`runRefMapOf_sound`, `runSpecFactsOf_sound`): the
+residuals the checks ran on do not appear, so each certificate may be specialized on its own. -/
+theorem compose_of_facts {DIa DIb DS : DesignCert} {spA spB : RefMapSpec} {s0A s0B : StateM}
+    {insA insB : Nat → RuntimeInput} (hAS : admitsWB DS = true) (hsideA : specSideOK DS spA = true)
+    (hSFa : SpecFactsOK DS spA) (hsame : SameSpec spA spB)
+    (hFA : RefMapFacts DIa DS spA s0A insA) (hFB : RefMapFacts DIb DS spB s0B insB)
+    (hgA : ∀ n, Good DIa spA s0A insA n) (hgB : ∀ n, Good DIb spB s0B insB n)
+    (hstart : alphaSt spA (outM DIa s0A insA spA.R0) = alphaSt spB (outM DIb s0B insB spB.R0))
+    {E : Theory.Env Nat (List Int) (List Int)}
+    (hEA : ImplObeys DIa spA s0A insA E) (hEB : ImplObeys DIb spB s0B insB E) :
+    ∀ nA nB x, Theory.PrefixAgree (implStream DIa spA s0A insA x nA)
+      (implStream DIb spB s0B insB x nB) := by
+  have hSFb := specFacts_same hsame hSFa
+  have hsideB : specSideOK DS spB = true := by rw [← specSide_same hsame]; exact hsideA
+  obtain ⟨hXA, -⟩ := execOf_refines hAS hsideA hSFa hFA hgA
+  obtain ⟨hXB, -⟩ := execOf_refines hAS hsideB hSFb hFB hgB
+  have hOA := implObeys_exec hAS hsideA hSFa hFA hgA hEA
+  have hOB := implObeys_exec hAS hsideB hSFb hFB hgB hEB
+  rw [← specOf_same hsame] at hXB hOB
+  intro nA nB x
+  rw [implStream_eq hAS hsideA hSFa hFA hgA, implStream_eq hAS hsideB hSFb hFB hgB,
+    ← specOf_same hsame]
+  exact Theory.compose hSFa.conf hXA hXB (cycles_of hFA hgA 0).2 hstart hOA hOB nA nB x
+
 /-- **Two implementations refining one spec show the same streams.** Both checked against the
 same spec (`SameSpec`, spec facts checked once), both runs meeting their assumptions, both
 starting from the same map state at `R0`, each answered by the same environment from its own
@@ -287,21 +311,9 @@ theorem refmap_compose {DIa DIb DS : DesignCert} {RIa RIb RS : Program} {spA spB
     (hEA : ImplObeys DIa spA s0A insA E) (hEB : ImplObeys DIb spB s0B insB E) :
     ∀ nA nB x, Theory.PrefixAgree (implStream DIa spA s0A insA x nA)
       (implStream DIb spB s0B insB x nB) := by
-  have hSFa := runSpecFactsOf_sound hrS hAS hF
-  have hSFb := specFacts_same hsame hSFa
-  have hsideA : specSideOK DS spA = true := (sf_parts hF).1
-  have hsideB : specSideOK DS spB = true := by rw [← specSide_same hsame]; exact hsideA
-  have hFA := runRefMapOf_sound hrIa hAIa hrS hAS hA hinsA
-  have hFB := runRefMapOf_sound hrIb hAIb hrS hAS hB hinsB
-  obtain ⟨hXA, -⟩ := execOf_refines hAS hsideA hSFa hFA hgA
-  obtain ⟨hXB, -⟩ := execOf_refines hAS hsideB hSFb hFB hgB
-  have hOA := implObeys_exec hAS hsideA hSFa hFA hgA hEA
-  have hOB := implObeys_exec hAS hsideB hSFb hFB hgB hEB
-  rw [← specOf_same hsame] at hXB hOB
-  intro nA nB x
-  rw [implStream_eq hAS hsideA hSFa hFA hgA, implStream_eq hAS hsideB hSFb hFB hgB,
-    ← specOf_same hsame]
-  exact Theory.compose hSFa.conf hXA hXB (cycles_of hFA hgA 0).2 hstart hOA hOB nA nB x
+  exact compose_of_facts hAS (sf_parts hF).1 (runSpecFactsOf_sound hrS hAS hF) hsame
+    (runRefMapOf_sound hrIa hAIa hrS hAS hA hinsA) (runRefMapOf_sound hrIb hAIb hrS hAS hB hinsB)
+    hgA hgB hstart hEA hEB
 
 /-! ## Progress -/
 
@@ -378,20 +390,13 @@ theorem progOf_sound (hF : RefMapFacts DI DS sp s0 ins) (hg : ∀ n, Good DI sp 
   obtain ⟨r, hr', hrb⟩ := hreq j hj
   simp [hr', hrb]
 
-/-- **Progress.** Under justice of the environment requirements, a ranked channel allowed at a
-cycle from `R0` on gets, at that cycle or later, a slot of its own that fires. -/
-theorem refmap_progress (hrI : MemResidual DI RI) (hAI : admitsWB DI = true)
-    (hrS : MemResidual DS RS) (hAS : admitsWB DS = true) {pfF : List ByteArray}
-    (hchk : runRefMapOf DI DS RI RS sp s0 pfIB pfIS pfB pfS = true)
-    (hSF : runSpecFactsOf DS RS sp pfF = true)
-    (hins : ∀ n, (ins n).toList.map BV.width = sp.inv.inW) (hg : ∀ n, Good DI sp s0 ins n)
+/-- The progress from the checks' facts. -/
+theorem progress_of_facts (hAS : admitsWB DS = true) (hside : specSideOK DS sp = true)
+    (hSFo : SpecFactsOK DS sp) (hF : RefMapFacts DI DS sp s0 ins) (hg : ∀ n, Good DI sp s0 ins n)
     (hJ : (progOf DI sp s0 ins).Just) {c : Nat} {ch : ChanS} {r : Nat × Nat}
     (hch : sp.chans[c]? = some ch) (hrank : ch.rank = some r) :
     ∀ n, sp.R0 ≤ n → (specOf DS sp).en (alphaSt sp (outM DI s0 ins n)) c = true →
       ∃ m, n ≤ m ∧ ∃ sl ∈ sp.slots, sl.chan = c ∧ sl.kind.bit (portsAt DI s0 ins m) = true := by
-  have hSFo := runSpecFactsOf_sound hrS hAS hSF
-  have hside := (sf_parts hSF).1
-  have hF := runRefMapOf_sound hrI hAI hrS hAS hchk hins
   obtain ⟨hX, -⟩ := execOf_refines hAS hside hSFo hF hg
   obtain ⟨ro, so⟩ := r
   intro n hn hen
@@ -416,6 +421,20 @@ theorem refmap_progress (hrI : MemResidual DI RI) (hAI : admitsWB DI = true)
         exact ⟨sl', List.mem_cons_of_mem _ hsl', h1, h2⟩
   obtain ⟨sl, hsl, h1, h2⟩ := this sp.slots he
   exact ⟨sl, hsl, h1.trans hec, h2⟩
+
+/-- **Progress.** Under justice of the environment requirements, a ranked channel allowed at a
+cycle from `R0` on gets, at that cycle or later, a slot of its own that fires. -/
+theorem refmap_progress (hrI : MemResidual DI RI) (hAI : admitsWB DI = true)
+    (hrS : MemResidual DS RS) (hAS : admitsWB DS = true) {pfF : List ByteArray}
+    (hchk : runRefMapOf DI DS RI RS sp s0 pfIB pfIS pfB pfS = true)
+    (hSF : runSpecFactsOf DS RS sp pfF = true)
+    (hins : ∀ n, (ins n).toList.map BV.width = sp.inv.inW) (hg : ∀ n, Good DI sp s0 ins n)
+    (hJ : (progOf DI sp s0 ins).Just) {c : Nat} {ch : ChanS} {r : Nat × Nat}
+    (hch : sp.chans[c]? = some ch) (hrank : ch.rank = some r) :
+    ∀ n, sp.R0 ≤ n → (specOf DS sp).en (alphaSt sp (outM DI s0 ins n)) c = true →
+      ∃ m, n ≤ m ∧ ∃ sl ∈ sp.slots, sl.chan = c ∧ sl.kind.bit (portsAt DI s0 ins m) = true := by
+  exact progress_of_facts hAS (sf_parts hSF).1 (runSpecFactsOf_sound hrS hAS hSF)
+    (runRefMapOf_sound hrI hAI hrS hAS hchk hins) hg hJ hch hrank
 
 end
 

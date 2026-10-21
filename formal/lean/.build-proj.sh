@@ -163,6 +163,7 @@ TOOL_MODULES=(
   HDLProof/Check/RefMapSound
   HDLProof/Check/SpecFacts
   HDLProof/Check/RefMapCompose
+  HDLProof/Check/RefMapRef
   # the tools' audit: fails the build on a non-standard axiom
   HDLProof/Check/Audit
 )
