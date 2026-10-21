@@ -156,6 +156,11 @@ TOOL_MODULES=(
   HDLProof/Sym/Conj
   HDLProof/Sym/ConjT
   HDLProof/Sym/Refine
+  # refinement maps: kit (normalized states, port formulas) and the checker
+  HDLProof/Kit/Norm
+  HDLProof/Kit/BitE
+  HDLProof/Check/RefMap
+  HDLProof/Check/RefMapSound
   # the tools' audit: fails the build on a non-standard axiom
   HDLProof/Check/Audit
 )

@@ -16,6 +16,8 @@ memory route) stays in `formal/lean`; everything here builds on it.
 |---|---|
 | `HDLProof/Theory/` | refinement theory in pure Lean, independent of hardware: channel specs and Kahn determinism (`Channels`), runs refining a spec with stuttering and the `PipelineRefinement` API (`Stutter`), horizontal and vertical composition (`Compose`), progress under fairness (`Progress`) |
 | `HDLProof/Sym/` | the verified symbolic interpretation of a residual: evaluator (`Eval`), SAT/LRAT (`Sat`), k-induction (`KInd`), conjunctive invariants (`Conj`, `ConjT`), refinement with stuttering (`Refine`) |
+| `HDLProof/Kit/` | `Norm` (normalized memory-free states, state values from leaves), `BitE` (formulas and observed words over a design's real ports) |
+| `HDLProof/Check/RefMap*.lean` | the refinement-map checker: a design refines a spec certificate with stuttering, the spec's state at every cycle being the map's value (`runRefMapOf`, `runRefMapOf_sound`) |
 | `HDLProof/Check/Audit.lean` | the axiom gate: `#audit_axioms` for every checker theorem; the build fails on anything but `propext`, `Classical.choice`, `Quot.sound` |
 | `drivers/` | `sym_verify.lean` (invariants, k-induction, `conj:` specs), `sym_refine.lean` (refinement with stuttering) |
 | `tests/` | `sym_selftest.sh`: small fixtures through the real flow |

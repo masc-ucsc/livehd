@@ -13,6 +13,7 @@ import HDLProof.Sym.Refine
 import HDLProof.Sym.Conj
 import HDLProof.Sym.ConjT
 import HDLProof.Theory.Progress
+import HDLProof.Check.RefMapSound
 
 namespace HDLProof
 
@@ -36,5 +37,11 @@ namespace HDLProof
 #audit_axioms Theory.Exec.map_refines
 #audit_axioms Theory.channel_progress
 #audit_axioms Theory.helpful_bound
+
+-- Refinement maps: the spec chain over a cycle's slots, and the check.
+#audit_axioms Kit.rebuildS_rel
+#audit_axioms Kit.ObsW.sym_sound
+#audit_axioms Check.chainS_sound
+#audit_axioms Check.runRefMapOf_sound
 
 end HDLProof
