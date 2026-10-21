@@ -3,6 +3,7 @@
 from datetime import datetime, timezone
 from hashlib import sha256
 from html import escape
+from math import isfinite
 from pathlib import Path
 import json
 
@@ -75,24 +76,36 @@ def main():
         stage_evidence = relative
         stage = '<span class="good">DRT complete</span>' if routed else '<span class="bad">DRT unresolved</span>'
         if routed and arm == 'or_cells_clockclean':
-            recovery = f'cnn/{arm}/read_only_extracted_recovery_v3'
-            recovery_meta = read(recovery + '/metadata.json')
-            if recovery_meta and recovery_meta.get('status') == 'verification_complete':
-                proof = read(recovery + '/proof.json')
-                assert recovery_meta['physical_inputs_unchanged'] and recovery_meta['exitcode'] == 0
-                assert proof['status'] == 'independent_actual_SPEF_PG_geometry_proof_pass'
+            recovery = 'cnn/extracted_timing/recovery_postverify_v2'
+            review = read(recovery + '_parent_review.json')
+            if review and review.get('status') == 'approved_actual_SPEF_metrics_with_precision_bounded_census':
+                read(recovery + '/manifest.json')
+                proof = read(recovery + '/analysis_result.json')
+                assert SOURCES[recovery + '/manifest.json'] == review['manifest_sha256']
+                assert SOURCES[recovery + '/analysis_result.json'] == review['analysis_sha256']
+                assert proof['original_inputs_unchanged'] and proof['original_failed_metadata_unchanged']
                 assert proof['PG_census']['unconnected_pg_iterms'] == 0
                 assert proof['PG_census']['wrong_net_or_sigtype_pg_iterms'] == 0
-                assert proof['geometry']['status'] == 'complete_DEF_geometry_projection_equal'
+                assert proof['geometry']['original']['raw_sha256'] == proof['geometry']['reloaded']['raw_sha256']
+                for kind in ('setup', 'hold'):
+                    census = proof[kind]
+                    assert census['intervals_compatible'] and census['WNS_inside_endpoint_minimum_interval']
+                    assert census['globally_unique_endpoint_pins'] and not census['path_cap_reached']
                 timing = proof['metrics']
                 assert timing['timing_model'] == 'actual_extracted_spef'
+                assert all(isfinite(timing[kind + suffix]) for kind in ('setup', 'hold')
+                           for suffix in ('_wns_ps', '_tns_ps'))
                 stage = '<span class="good">Extracted STA verified</span>'
-                stage_evidence = recovery + '/proof.json'
-                detail = 'Read-only final SPEF/geometry/PG-association proof; original IR analysis incomplete'
+                stage_evidence = recovery + '_parent_review.json'
+                detail = 'Read-only SPEF/PG/geometry checks; endpoint sums consistent within float precision'
                 cnn_final_note = ('Separate read-only recovery verified actual-SPEF setup/hold timing, '
-                                  'PG associations and final DEF geometry. The original IR-analysis attempt remains '
-                                  'resource-incomplete; PG continuity/IR signoff and frequency qualification remain pending. '
-                                  + link(recovery + '/proof.json', 'Recovery evidence'))
+                                  'all 14,918,070 PG associations and byte-identical final DEF geometry. '
+                                  'Endpoint totals are consistent with source-derived float precision; the hold '
+                                  'printed-path sum does not uniquely reconstruct the tool aggregate. The failed '
+                                  'census verification and resource-stopped IR-analysis attempts are retained. '
+                                  'IR/continuity signoff and frequency '
+                                  'qualification remain pending. '
+                                  + link(recovery + '_parent_review.json', 'Reviewed recovery evidence'))
         if not routed:
             progress = read(f'cnn/{arm}/drt_observed_progress_snapshot.json')
             if progress:
