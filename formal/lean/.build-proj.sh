@@ -161,6 +161,7 @@ TOOL_MODULES=(
   HDLProof/Kit/BitE
   HDLProof/Check/RefMap
   HDLProof/Check/RefMapSound
+  HDLProof/Check/SpecFacts
   # the tools' audit: fails the build on a non-standard axiom
   HDLProof/Check/Audit
 )

@@ -13,7 +13,7 @@ import HDLProof.Sym.Refine
 import HDLProof.Sym.Conj
 import HDLProof.Sym.ConjT
 import HDLProof.Theory.Progress
-import HDLProof.Check.RefMapSound
+import HDLProof.Check.SpecFacts
 
 namespace HDLProof
 
@@ -43,5 +43,7 @@ namespace HDLProof
 #audit_axioms Kit.ObsW.sym_sound
 #audit_axioms Check.chainS_sound
 #audit_axioms Check.runRefMapOf_sound
+-- The spec's own facts: Moore and confluence of its channel events.
+#audit_axioms Check.runSpecFactsOf_sound
 
 end HDLProof
