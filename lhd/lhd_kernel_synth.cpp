@@ -271,12 +271,24 @@ livehd::placement::Options placement_options(const Options& opts) {
       || out.fixed_macro_overlap_weight < 0) {
     throw Lhd_error{"usage", "invalid synth.place cell-placement controls", ""};
   }
-  out.bins                 = integer("place.bins", "64");
-  out.scale_macro_density  = truthy(synth_set(opts, "place.scale_macro_density", "true"));
-  out.automatic_bins       = truthy(synth_set(opts, "place.auto_bins", "false"));
-  out.exact_macro_density  = truthy(synth_set(opts, "place.exact_macro_density", "true"));
-  out.adaptive_density     = truthy(synth_set(opts, "place.adaptive_density", "true"));
-  const auto unknown_const = synth_set(opts, "place.unknown_const", "error");
+  out.bins                      = integer("place.bins", "64");
+  out.dynamic_bins              = truthy(synth_set(opts, "place.dynamic_bins", "false"));
+  out.virtual_fillers           = truthy(synth_set(opts, "place.virtual_fillers", "false"));
+  out.virtual_filler_max_count  = integer("place.virtual_filler_max_count", "65536");
+  out.virtual_filler_fraction   = number("place.virtual_filler_fraction", "1");
+  out.bin_max                   = integer("place.bin_max", "512");
+  out.local_density_weight      = number("place.local_density_weight", "0");
+  out.local_density_bins        = integer("place.local_density_bins", "512");
+  out.local_density_range       = number("place.local_density_range", "4");
+  out.local_density_jitter      = number("place.local_density_jitter", "0.01");
+  out.macro_cell_density_weight = number("place.macro.cell_density_weight", "0");
+  out.macro_density_pull_weight = number("place.macro.density_pull_weight", "0");
+  out.macro_density_pull_range  = number("place.macro.density_pull_range", "4");
+  out.scale_macro_density       = truthy(synth_set(opts, "place.scale_macro_density", "true"));
+  out.automatic_bins            = truthy(synth_set(opts, "place.auto_bins", "false"));
+  out.exact_macro_density       = truthy(synth_set(opts, "place.exact_macro_density", "true"));
+  out.adaptive_density          = truthy(synth_set(opts, "place.adaptive_density", "true"));
+  const auto unknown_const      = synth_set(opts, "place.unknown_const", "error");
   if (unknown_const != "error" && unknown_const != "zero") {
     throw Lhd_error{"usage", "synth.place.unknown_const must be error or zero", ""};
   }

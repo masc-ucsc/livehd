@@ -89,7 +89,15 @@ struct Options {
   std::vector<double>                                        die, core;
   double                                                     stop_overflow = .1, initial_density_weight = .01;
   double                                                     halo_x = 5, halo_y = 5;  // microns per side, non-CORE macros only
-  bool                                                       scale_macro_density = true;
+  bool                                                       scale_macro_density      = true;
+  bool                                                       dynamic_bins             = false;
+  bool                                                       virtual_fillers          = false;
+  int                                                        virtual_filler_max_count = 65536;
+  double                                                     virtual_filler_fraction  = 1;
+  int                                                        bin_max = 512, local_density_bins = 512;
+  double      local_density_weight = 0, local_density_range = 4, local_density_jitter = .01;
+  double      macro_cell_density_weight = 0;  // standard-cell pressure on macros in FP/macro GP
+  double      macro_density_pull_weight = 0, macro_density_pull_range = 4;
   bool        automatic_bins = false, exact_macro_density = true, adaptive_density = true, routability = true;
   bool        routability_charge_compensation = true;
   double      routability_macro_weight = 1, routability_macro_range = 2;  // direct channel pressure; range in bins

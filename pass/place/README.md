@@ -541,7 +541,92 @@ lhd synth design.v --top top --workdir W --set synth.place=true \
   --set synth.place.resynth=true
 ```
 
-### Path-based resize engine (`synth.place.resize.engine=new`)
+### Local standard-cell spreading and adaptive density bins
+
+`synth.place.virtual_fillers=false` keeps virtual density particles disabled by
+default. An explicit `true` enables the native DREAMPlace filler mechanism in
+FP, macro and final GP, alongside any local spreading forces. These are movable
+density charges with no pins or nets; they consume no legal sites and never
+appear in the mapped graph, timing/IO callbacks, netlist or DEF. They are removed
+before legalization. The supplied core stays unchanged.
+
+`synth.place.virtual_filler_max_count=65536` bounds the particle count by enlarging
+their density footprints in sparse cores (allowed range `1..1000000`).
+`synth.place.virtual_filler_fraction=1` supplies the full target-density
+whitespace charge; a smaller positive fraction is useful for tuning. Routability
+inflation adjusts that charge budget as well. Reports include actual count and
+charge area. The existing soft-density behavior is unchanged when disabled.
+
+The filler-free native flow has two independent opt-in controls:
+
+- `synth.place.local_density_weight=0` disables the local field by default.
+  Positive values add a screened Poisson field for real standard-cell area,
+  with cloud-in-cell deposition/gather. Macros and zero-area IOs do not supply
+  this field; macro density, halos and the existing overlap forces remain
+  separate. The force repels separated cells as well as overlapping cells and
+  decays over `synth.place.local_density_range=4` local-bin pitches.
+  `synth.place.local_density_bins=512` chooses its grid. Strength is relative
+  to the ordinary GP force, calibrated against target density and local-bin
+  pitch rather than the current field magnitude. Only local area above the
+  soft target emits charge; its distance-decaying field can push neighboring
+  cells even without physical overlap. Macro/halo area reduces local capacity. `local_density_jitter=0.01` supplies deterministic
+  dimension-relative cell offsets to break exact stacks; zero disables jitter.
+  Local spreading requires the native filler-free path and does not support
+  external `GpState` continuation yet; in-process timing checkpoints work.
+- `synth.place.dynamic_bins=false` retains the configured density grid.
+  When enabled, the ideal bin area is average movable-instance area divided by
+  target density, following OpenROAD's rule. Power-of-two counts account for
+  core aspect ratio and are capped by `synth.place.bin_max=512` per axis
+  (32..1024, power of two). This differs from legacy `auto_bins`, which still
+  uses macro pitch and is limited to 32..64. The configured `place.bins` grid
+  remains in use for routing feedback, macro channel pressure, legalization
+  and detailed placement, isolating the density-resolution experiment.
+
+Adaptive density grids and the local field use the native radix-2 FFT-based
+DCT Poisson path, with no external numerical package. The existing fixed-grid
+solver remains the default. Neither option inserts physical or virtual cells.
+
+`synth.place.macro.cell_density_weight=0` independently controls local
+standard-cell pressure on movable macros. Positive values enable it during
+both FP and macro GP; the final cell pass disables it and keeps macros fixed.
+The source is real standard-cell area, including below-target density, so a
+macro can prefer a quieter neighborhood before cells exceed the soft target.
+The screened field uses `local_density_bins` and `local_density_range` and is
+integrated over each halo-padded macro footprint rather than sampled only at
+its center. Macros never emit this local field: it adds no macro-to-macro
+distance repulsion. Existing global density, RUDY pressure and overlap/halo
+handling remain separate. It imposes no minimum gap. Phase reports include
+the applied force and time spent computing it.
+
+`synth.place.macro.density_pull_weight=0` adds an independent weak slide toward
+less crowded neighboring space when positive (range `0..1`). It queries average
+standard-cell density in strips beside each halo-padded macro using a summed-area
+table. `synth.place.macro.density_pull_range=4` sets strip reach in local-grid bin
+pitches (positive, at most 32). Equal surrounding densities cancel; clipped
+strips are normalized by their actual area, and wholly off-core strips cannot
+attract a macro. Macros never contribute density to this local term.
+
+The weight limits force relative to ordinary macro WL/density force. Where a
+distance-based centroid anchor exists, it also caps the pull to that fraction of
+the spring's reference force at one circle radius. It is not capped against the
+instantaneous spring force, which vanishes exactly at the centroid. FP and macro
+GP may use the pull; final fixed-macro cell GP disables it. Cell spreading, cell
+pressure on macros, and this pull share a single cell-density raster per GP
+iteration. The added prefix-sum queries require no additional Poisson solve.
+Reports record grid time and pull time/force separately.
+The local field is an additional soft force, not a hard utilization limit or
+minimum-gap guarantee. Tune force strength against HPWL, timing, local density
+and runtime rather than interpreting legality as routability.
+
+With `synth.place.snapshots=true`, each full GP call emits
+`before_legalization.def`, `after_legalization.def`, and `after_detailed.def`
+next to its `gp.json`. These are diagnostic copies of that stage's cell masters,
+positions, IOs and connectivity, independent of later resizing/netlist edits.
+The pre-legalization DEF can overlap or be off-site and is for inspection.
+The final `out.def` also contains accepted later sizing/buffer-repair edits.
+`gp_history.json` records actual density bins, local-field time and peak force.
+
+## Path-based resize engine (`synth.place.resize.engine=new`)
 
 `synth.place.resize.engine` selects the implementation behind `synth.place.resize=true`,
 both at FP timing checkpoints and after legal placement. `legacy` is the batch

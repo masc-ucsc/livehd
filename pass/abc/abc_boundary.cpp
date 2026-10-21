@@ -709,14 +709,26 @@ static bool import_def(Refine& R, Imp_def& d) {
       continue;
     }
     if (op == Ntype_op::Flop || op == Ntype_op::Latch || op == Ntype_op::Fflop || op == Ntype_op::Memory) {
-      // Native state: every output bit is an opaque source; din/enable/reset
-      // (and every memory input) are cuts of unknown load.
+      // Native state: every output bit is an opaque source; runtime inputs
+      // are cuts of unknown load. Memory elaboration metadata stays exact.
       for (const auto& out : driven_pins(node)) {
         mark_opaque(node, out, -1, "");
       }
       for (const auto& in_pin : node.inp_sorted_pins()) {
         const auto in_drv = in_pin.get_driver_pin();
         const auto pid    = in_pin.get_port_id();
+        if (op == Ntype_op::Memory) {
+          switch (pid % Ntype::Memory_port_stride) {
+            case 0 :
+            case 2 :
+            case 3 :
+            case 4 :
+            case 12:
+            case 13:
+            case 14: break;     // address / clock / data / enable / update / reset
+            default: continue;  // width, depth, and other compile-time parameters
+          }
+        }
         if (!d.combinational_cuts && op != Ntype_op::Memory && (pid == 2 || pid == 0 || pid == 1 || pid == 6 || pid == 5)) {
           continue;  // clock / async / initial / posclk / negreset: not a data load
         }

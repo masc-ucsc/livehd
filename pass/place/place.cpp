@@ -199,6 +199,25 @@ std::string environment_key(const Options& o, const ph::Technology& tech) {
   if (o.post_density_factor) {
     h = hash_text(std::format("gp-post-density:{}:{}", o.post_density_factor, o.convergence_tolerance), h);
   }
+  if (o.virtual_fillers) {
+    h = hash_text(std::format("virtual-fillers:{}:{}", o.virtual_filler_max_count, o.virtual_filler_fraction), h);
+  }
+  if (o.dynamic_bins || o.local_density_weight > 0 || o.macro_cell_density_weight > 0 || o.macro_density_pull_weight > 0) {
+    h = hash_text(std::format("local-spread:{}:{}:{}:{}:{}:{}",
+                              o.dynamic_bins,
+                              o.bin_max,
+                              o.local_density_weight,
+                              o.local_density_bins,
+                              o.local_density_range,
+                              o.local_density_jitter),
+                  h);
+  }
+  if (o.macro_cell_density_weight > 0) {
+    h = hash_text(std::format("macro-cell-density:{}", o.macro_cell_density_weight), h);
+  }
+  if (o.macro_density_pull_weight > 0) {
+    h = hash_text(std::format("macro-density-pull:{}:{}", o.macro_density_pull_weight, o.macro_density_pull_range), h);
+  }
   if (o.exact_cell_density) {
     h = hash_text("exact-cell-density", h);
   }
@@ -2385,6 +2404,19 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
       || options.routability_macro_range > 16) {
     throw std::invalid_argument("invalid macro routing pressure controls");
   }
+  if (!std::isfinite(options.macro_cell_density_weight) || options.macro_cell_density_weight < 0) {
+    throw std::invalid_argument("invalid macro cell density weight");
+  }
+  if (options.virtual_filler_max_count < 1 || options.virtual_filler_max_count > 1000000
+      || !std::isfinite(options.virtual_filler_fraction) || options.virtual_filler_fraction <= 0
+      || options.virtual_filler_fraction > 1) {
+    throw std::invalid_argument("invalid virtual filler budget");
+  }
+  if (!std::isfinite(options.macro_density_pull_weight) || options.macro_density_pull_weight < 0
+      || options.macro_density_pull_weight > 1 || !std::isfinite(options.macro_density_pull_range)
+      || options.macro_density_pull_range <= 0 || options.macro_density_pull_range > 32) {
+    throw std::invalid_argument("invalid macro density pull controls");
+  }
   if (!std::isfinite(options.stop_overflow) || options.stop_overflow < 0 || options.stop_overflow > 1
       || !std::isfinite(options.initial_density_weight) || options.initial_density_weight <= 0) {
     throw std::invalid_argument("invalid density stopping/initial weight controls");
@@ -3362,12 +3394,32 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
   control.centroid_weight = v.centroids ? .25 : 0;
   control.bins_x = control.bins_y    = options.bins;
   control.num_threads                = options.threads;
+  control.dynamic_bins               = options.dynamic_bins;
+  control.bin_max                    = options.bin_max;
+  control.auxiliary_bins             = options.dynamic_bins ? options.bins : 0;
+  control.local_density_weight       = options.local_density_weight;
+  control.local_density_bins         = options.local_density_bins;
+  control.local_density_range        = options.local_density_range;
+  control.local_density_jitter       = options.local_density_jitter;
+  control.macro_cell_density_weight  = std::any_of(v.design.node_macro.begin(),
+                                                   v.design.node_macro.begin() + v.design.num_movable,
+                                                   [](auto macro) { return macro != 0; })
+                                           ? options.macro_cell_density_weight
+                                           : 0;
+  control.macro_density_pull_weight  = std::any_of(v.design.node_macro.begin(),
+                                                   v.design.node_macro.begin() + v.design.num_movable,
+                                                   [](auto macro) { return macro != 0; })
+                                           ? options.macro_density_pull_weight
+                                           : 0;
+  control.macro_density_pull_range   = options.macro_density_pull_range;
   control.target_density             = options.density;
   control.stop_overflow              = options.stop_overflow;
   control.initial_density_weight     = options.initial_density_weight;
-  // The caller's floorplan is authoritative. Density is a soft spreading
-  // target; never add artificial nodes merely to fill its whitespace.
-  control.add_fillers                = false;
+  // Internal density particles are opt-in; they never consume legal sites or
+  // escape to the physical graph/DEF. The supplied outline stays authoritative.
+  control.add_fillers                = options.virtual_fillers;
+  control.filler_max_count           = options.virtual_filler_max_count;
+  control.filler_area_fraction       = options.virtual_filler_fraction;
   control.density_upper_bound        = options.density_upper_bound;
   control.min_iterations             = options.min_iterations;
   control.post_density_factor        = options.post_density_factor;
@@ -3653,6 +3705,47 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
     if (options.snapshots || v.centroids) {
       control.observer_interval = options.iterations + 1;
       control.observer          = [&](const dp::Design& snapshot, dp::PlacementStage stage, int iteration) {
+        if (options.snapshots
+            && (stage == dp::PlacementStage::global_placement || stage == dp::PlacementStage::legalization
+                || stage == dp::PlacementStage::detailed_placement)) {
+          auto frame = v.fp;
+          frame.components.clear();
+          frame.nets.clear();
+          for (size_t i = 0; i < v.cells.size(); ++i) {
+            const auto& cell  = v.cells[i];
+            auto        place = cell.place;
+            place.x           = std::llround(snapshot.node_x[i]);
+            place.y           = std::llround(snapshot.node_y[i]);
+            if (!snapshot.node_orientation.empty()) {
+              place.orientation = physical_orientation(snapshot.node_orientation[i]);
+            }
+            if (i < static_cast<size_t>(snapshot.num_movable)) {
+              place.status = Status::PLACED;
+            }
+            frame.components.push_back({cell.name, cell.macro, place});
+          }
+          for (size_t i = 0; i < frame.terminals.size(); ++i) {
+            frame.terminals[i].x = std::llround(snapshot.node_x[v.cells.size() + i]);
+            frame.terminals[i].y = std::llround(snapshot.node_y[v.cells.size() + i]);
+          }
+          size_t index = 0;
+          for (const auto& [driver, sinks] : v.nets) {
+            ph::Net net{"snapshot_net_" + std::to_string(index++), {{driver.instance, driver.pin}}};
+            for (const auto& sink : sinks) {
+              net.connections.push_back({sink.instance, sink.pin});
+            }
+            for (const auto& endpoint : net.connections) {
+              if (endpoint.instance == "PIN") {
+                frame.terminals[v.terminal.at(endpoint.pin)].net = net.name;
+              }
+            }
+            frame.nets.push_back(std::move(net));
+          }
+          const std::string name = stage == dp::PlacementStage::global_placement ? "before_legalization.def"
+                                   : stage == dp::PlacementStage::legalization   ? "after_legalization.def"
+                                                                                 : "after_detailed.def";
+          ph::write_def(frame, options.output_dir + "/" + name);
+        }
         if (stage == dp::PlacementStage::centroid_start) {
           centroid_initial = summarize_centroids(snapshot);
         } else if (stage == dp::PlacementStage::global_placement) {
@@ -4185,6 +4278,16 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
     json.Double(fp_metrics.global_placement_seconds);
     json.Key("fp_poisson_seconds");
     json.Double(fp_metrics.poisson_seconds);
+    json.Key("fp_macro_cell_density_seconds");
+    json.Double(fp_metrics.macro_cell_density_seconds);
+    json.Key("fp_macro_cell_density_force");
+    json.Double(fp_metrics.macro_cell_density_force);
+    json.Key("fp_macro_density_pull_seconds");
+    json.Double(fp_metrics.macro_density_pull_seconds);
+    json.Key("fp_macro_density_pull_force");
+    json.Double(fp_metrics.macro_density_pull_force);
+    json.Key("fp_macro_density_pull_anchor_ratio");
+    json.Double(fp_metrics.macro_density_pull_anchor_ratio);
     json.Key("fp_macro_routing_seconds");
     json.Double(fp_metrics.macro_routing_seconds);
     json.Key("fp_rudy_seconds");
@@ -4763,6 +4866,36 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
     json.Double(options.routability_macro_range);
     json.Key("macro_routing_seconds");
     json.Double(metrics.macro_routing_seconds);
+    json.Key("local_density_seconds");
+    json.Double(metrics.local_density_seconds);
+    json.Key("virtual_fillers");
+    json.Bool(options.virtual_fillers);
+    json.Key("virtual_filler_count");
+    json.Int(metrics.filler_count);
+    json.Key("virtual_filler_area_um2");
+    json.Double(metrics.filler_area / tech.dbu / tech.dbu);
+    json.Key("local_density_force");
+    json.Double(metrics.local_density_force);
+    json.Key("macro_cell_density_weight");
+    json.Double(control.macro_cell_density_weight);
+    json.Key("macro_cell_density_seconds");
+    json.Double(metrics.macro_cell_density_seconds);
+    json.Key("macro_cell_density_force");
+    json.Double(metrics.macro_cell_density_force);
+    json.Key("local_density_grid_seconds");
+    json.Double(metrics.local_density_grid_seconds);
+    json.Key("macro_density_pull_weight");
+    json.Double(control.macro_density_pull_weight);
+    json.Key("macro_density_pull_seconds");
+    json.Double(metrics.macro_density_pull_seconds);
+    json.Key("macro_density_pull_force");
+    json.Double(metrics.macro_density_pull_force);
+    json.Key("macro_density_pull_anchor_ratio");
+    json.Double(metrics.macro_density_pull_anchor_ratio);
+    json.Key("local_density_bins");
+    json.Int(options.local_density_bins);
+    json.Key("dynamic_bins");
+    json.Bool(options.dynamic_bins);
     json.Key("rudy_seconds");
     json.Double(metrics.rudy_seconds);
     json.Key("rudy_calls");
@@ -5185,7 +5318,10 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
   {
     rapidjson::Document json;
     json.Parse(result.qor.c_str());
-    auto&            allocator = json.GetAllocator();
+    auto& allocator = json.GetAllocator();
+    json["virtual_fillers"].SetBool(options.virtual_fillers);
+    json.AddMember("virtual_filler_count", metrics.filler_count, allocator);
+    json.AddMember("virtual_filler_area_um2", metrics.filler_area / tech.dbu / tech.dbu, allocator);
     rapidjson::Value halo(rapidjson::kObjectType);
     halo.AddMember("x_um", options.halo_x, allocator);
     halo.AddMember("y_um", options.halo_y, allocator);
@@ -5331,14 +5467,16 @@ Result place(hhds::Graph& source, hhds::GraphLibrary& library, const Options& op
   cell_options.fp_place        = false;
   cell_options.completed_stage = Placement_stage::final;
   cell_options.restart_seed.reset();
-  cell_options.fp_pin_adjust      = false;
-  cell_options.macro_pin_adjust   = false;
-  cell_options.final_cells        = false;
-  cell_options.macro_mode         = "none";
-  cell_options.macro_snap         = false;
-  cell_options.macro_align_weight = 0;
-  cell_options.floorplan          = frame;
-  cell_options.iterations         = options.final_iterations ? options.final_iterations : options.iterations;
+  cell_options.fp_pin_adjust             = false;
+  cell_options.macro_pin_adjust          = false;
+  cell_options.final_cells               = false;
+  cell_options.macro_mode                = "none";
+  cell_options.macro_snap                = false;
+  cell_options.macro_align_weight        = 0;
+  cell_options.macro_cell_density_weight = 0;
+  cell_options.macro_density_pull_weight = 0;
+  cell_options.floorplan                 = frame;
+  cell_options.iterations                = options.final_iterations ? options.final_iterations : options.iterations;
   auto result = place_single((macro.fp_resized_cells || macro.fp_repair_edits) ? *macro.graph : source, library, cell_options);
   result.fp_resized_cells = macro.fp_resized_cells;
   result.fp_repair_edits  = macro.fp_repair_edits;

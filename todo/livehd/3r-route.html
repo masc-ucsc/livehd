@@ -1,0 +1,262 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>TODO 3r-route — RSMT-RUDY routability feedback</title>
+<link rel="stylesheet" href="../todo.css">
+</head>
+<body>
+<nav><span class="brand">LiveHD TODO</span><a href="../index.html">← All tasks</a></nav>
+<main>
+<h1><strong class="item-id">3r-route</strong> RSMT-RUDY routability feedback</h1>
+<p>Add a Steiner-tree (FLUTE) congestion estimator, RSMT-RUDY, next to the existing
+bounding-box RUDY used by native DREAMPlace in LiveHD. The estimator is chosen at
+run time per placement stage. A stage starts on plain RUDY and, once congestion is
+low enough, switches once to RSMT-RUDY and never switches back. The same ladder
+leaves room for a fast global router as a more accurate third rung.</p>
+<p><span class="status">Future — plan draft, nothing implemented</span>
+Written 2026-10-19 from a read of the current estimator; all cost figures below are
+estimates, not measurements, until R0 replaces them.</p>
+
+<h2>Depends on</h2>
+<p>Nothing outstanding must finish first. This extends the routability flow of
+<a class="xref" href="3p-placement.html">3p-placement</a>; the current behavior is
+documented in <a href="../../pass/place/README.md">pass/place/README.md</a>
+(<code>routability</code>, <code>synth.place.macro.routability</code>,
+<code>routability_macro_weight</code>).</p>
+
+<h2>Why</h2>
+<p>Today <code>dp::rudy()</code> (sibling DREAMPlace repo,
+<code>dreamplace/native/rudy.cpp</code> and <code>rudy_obstacles.cpp</code>) is
+plain RUDY. Each net contributes its pin bounding box, spread uniformly over the
+bins it covers, scaled by net weight and by DREAMPlace's pin-count table
+(<code>netWiringDistributionMapWeight</code>, 1.0 for 1–3 pins up to about 1.9 for
+16–20). There is no Steiner tree. The box smears demand across the whole box, so
+it overestimates mid-box congestion and underestimates demand near the pins, and
+in legacy mode it drops any net whose box has zero width or height. The macro-aware
+path adds obstacles, detours and pin access to the capacity side only.</p>
+<p>The estimate drives three things: cell inflation in the final cell GP, direct
+macro channel pressure (<code>macro_routing_pressure</code>) in the FP/macro
+stages, and the GP convergence test (<code>route_overflow &lt;= 1e-9</code>). A
+better estimate near convergence should push the right cells and macros apart.
+It is only worth its cost once the gross congestion is already gone, which is the
+reason for the Rudy-first, RSMT-later ladder.</p>
+
+<h2>Facts to confirm first (R0)</h2>
+<ul>
+  <li>Two different overflows exist and must not be confused. The density overflow
+  (<code>previous_overflow &lt; .3</code>) gates when routability sampling starts at
+  all. The route overflow (<code>RudyResult::overflow</code>, mean excess of
+  <code>max(h, v, pin)</code> over 1 across all bins) is what the switch and success
+  levels below refer to.</li>
+  <li>RUDY is evaluated every 20 GP iterations and once more as a convergence
+  recheck (two call sites in <code>dreamplace/native/placement.cpp</code>). Both must
+  use the same active model.</li>
+  <li>The IO-prototype GP already disables routability
+  (<code>pass/place/place.cpp</code>, prototype control); it stays that way.</li>
+  <li>Which of FP, macro (H2D / macro-source GP) and final cell GP currently
+  consume the map, and through which consumer (inflation vs macro pressure), is to be
+  written down before choosing defaults.</li>
+</ul>
+
+<h2>Subtasks</h2>
+<ul class="subtasks">
+  <li id="R0"><strong>R0 — Baseline and decision data.</strong>
+    <ul>
+      <li>Use the read-only <code>tools/rudy_metrics.cpp</code> on saved snapshots
+      (for example <code>repros/rudy_macro_eval_20261019</code>, cnn, and the Eyeriss
+      layouts) to record net-degree histograms and current RUDY time per call and
+      per stage.</li>
+      <li>From <code>gp_history.json</code>, record how route overflow evolves in
+      each stage today (when it first falls below 0.3 density overflow, when it
+      reaches zero, how often it never does). This sets the candidate switch and
+      success levels.</li>
+      <li>Build the reference for validation: congestion maps from a real router on
+      the same placements (NCTUgr is vendored in DREAMPlace thirdparty; OpenROAD
+      global routing is the alternative), so RUDY and RSMT-RUDY can be scored by
+      correlation of overflow maps and hotspot overlap, not by their own numbers.</li>
+    </ul>
+  </li>
+  <li id="R1"><strong>R1 — Native RSMT-RUDY model (sibling DREAMPlace repo).</strong>
+    <ul>
+      <li>Add <code>RudyModel {bbox, rsmt}</code>, a degree cap and the FLUTE accuracy
+      to <code>RudyOptions</code>; keep <code>bbox</code> bit-identical to today.</li>
+      <li>Add <code>//thirdparty/flute</code> to the native <code>placer</code>
+      target. FLUTE lookup tables must be loaded once; take an init hook from the
+      caller (LiveHD already does this in <code>init_flute()</code>) and fail clearly
+      when the tables are missing. Tests need the table data in runfiles.</li>
+      <li>Per net: clamp pins to the core, convert to FLUTE's integer type with the
+      existing range guard, call <code>flute()</code>. Fall back to bounding box
+      times the pin-count weight above the degree cap (candidate 30–50, never above
+      <code>MAXD</code>=1000). Do not apply the pin-count weight to FLUTE nets: it
+      approximates the same Steiner-to-HPWL ratio and would double count.</li>
+      <li>Rasterize each tree edge with the existing per-bin formula applied to the
+      edge's box. Straight edges need a one-site/row corridor, like the macro-aware
+      path's <code>gx/gy</code>, because most edges are straight and today's code
+      discards zero-extent boxes.</li>
+      <li>Macro-aware path, phase 1: keep per-net connectivity and detour detection
+      on the net box, then distribute the tree's wirelength over the reachable free
+      component. Per-edge channel detours are a later refinement, not part of R1.</li>
+      <li>Tests: tree length at least HPWL and at most about 1.12 times HPWL on random
+      nets; straight and degenerate nets; duplicate pins; huge-coordinate guard;
+      cap fallback; deterministic repeat; both models agree on 2-pin L-nets.</li>
+    </ul>
+  </li>
+  <li id="R2"><strong>R2 — Runtime switching state machine in the GP loop.</strong>
+    <ul>
+      <li>Replace the fixed <code>rudy(...)</code> calls in
+      <code>placement.cpp</code> by one stage-local estimator that holds the active
+      model: <code>rudy</code> until a sample satisfies the switch level, then
+      <code>rsmt</code> for the rest of the stage. The latch is one way. An optional
+      hold count (default 1 sample) guards against a noisy single sample.</li>
+      <li>At the switch sample, evaluate both models once and record both overflows,
+      so the scale step between them is visible and the inflation history stays
+      explainable. Inflation remains monotone; a higher RSMT demand simply adds
+      inflation, it never removes any.</li>
+      <li>The convergence test uses the active model's success level. If the stage
+      ends before the switch level was reached, report it as "never switched".</li>
+      <li>Record <code>route_model</code>, both overflows at the switch, the switch
+      iteration and per-call time in <code>gp_history.json(l)</code>.</li>
+    </ul>
+  </li>
+  <li id="R3"><strong>R3 — Per-stage options and LiveHD plumbing.</strong>
+    <ul>
+      <li>Options in <code>lhd/lhd.hpp</code>, <code>pass/place/place.hpp</code> and
+      the mapping near <code>pass/place/place.cpp</code> (control assembly), with
+      <code>lhd describe</code> text and README documentation. Proposed names, per
+      stage <code>S</code> in <code>fp</code>, <code>macro</code>, <code>final</code>:
+      <table>
+        <tr><th>Option (<code>synth.place.</code> prefix)</th><th>Meaning</th></tr>
+        <tr><td><code>route.model</code></td><td>Global default: <code>off</code>, <code>rudy</code>, <code>rsmt</code> or <code>auto</code> (Rudy, then one-way switch to RSMT)</td></tr>
+        <tr><td><code>S.route.model</code></td><td>Per-stage override; <code>inherit</code> by default</td></tr>
+        <tr><td><code>S.route.switch</code></td><td>Rudy route-overflow level at or below which <code>auto</code> switches to RSMT</td></tr>
+        <tr><td><code>S.route.target</code></td><td>Route-overflow level, measured with the active model, counted as success for the stage; must be at most <code>switch</code>, otherwise rejected</td></tr>
+        <tr><td><code>S.route.probe</code></td><td>One diagnostic RSMT evaluation at the stage's convergence candidate; see R4</td></tr>
+        <tr><td><code>S.route.hold</code></td><td>Consecutive samples below <code>switch</code> required before latching</td></tr>
+        <tr><td><code>route.degree</code>, <code>route.accuracy</code></td><td>FLUTE degree cap and accuracy</td></tr>
+      </table>
+      Existing <code>routability*</code> options keep their meaning. Exactly what
+      <code>off</code> means per stage (no inflation, no macro pressure, no
+      convergence test) is pinned down in R0.</li>
+      <li>The model, switch, success level, hold, degree and accuracy are part of the
+      placement cache identity (the hashing next to the
+      <code>macro-route-pressure</code> key), and of the resolved-options JSON.</li>
+      <li>Reject inconsistent combinations early: <code>target &gt; switch</code>,
+      FLUTE options without a model that uses them, non-finite levels.</li>
+    </ul>
+  </li>
+  <li id="R4"><strong>R4 — Stage policy: FP, macro, final.</strong>
+    <ul>
+      <li>Final cell placement: the main user. Default candidate <code>auto</code>.</li>
+      <li>Macro placement (H2D and the macro-source GP): candidate <code>auto</code>,
+      since channel pressure sets macro spacing before cells are placed. Measure
+      whether RSMT changes the macro layout at all; if it does not, leave Rudy.</li>
+      <li>FP (floorplan GP): uncertain value. Start with Rudy only plus
+      <code>probe</code>: at the FP convergence candidate evaluate RSMT-RUDY once,
+      without feedback. If its overflow is at or below the success level, accept the
+      stage as is. If it is above, continue the FP GP with RSMT feedback for a
+      bounded number of extra iterations. If the probes show it never changes the
+      outcome across the evaluation set, FP stays on plain Rudy and the probe is off
+      by default.</li>
+      <li>Defaults for <code>switch</code> and <code>target</code> per stage are set
+      from R0/R5 data. Initial sweep candidates (not decided values): switch in
+      {0.02, 0.05, 0.10}, target in {0, 0.005, 0.01}. Expect the success level to be
+      below the switch level, since RSMT is stricter near the end.</li>
+    </ul>
+  </li>
+  <li id="R5"><strong>R5 — Calibration, validation and QoR.</strong>
+    <ul>
+      <li>Retune what was calibrated against the bounding-box model: route
+      capacities from LEF pitches, the 5% inflation growth and 3× ceiling, the
+      macro pressure range/weight, and the existing <code>rudy_test</code> /
+      <code>rudy_macro_test</code> expectations.</li>
+      <li>Compare Rudy-only, RSMT-only and auto against the router reference from R0:
+      overflow-map correlation, hotspot overlap, and then the final metrics that
+      matter, namely routed overflow or wirelength where a router is available, plus
+      pre-CTS WNS/TNS, HPWL and legalization displacement. RUDY numbers remain
+      proxies.</li>
+      <li>Performance budget: the extra time of RSMT calls must stay a small fraction
+      of the stage time; measure it, do not assume it (see Cost).</li>
+      <li>Decide, from these results, per stage whether <code>auto</code> becomes the
+      default or the option stays opt-in.</li>
+    </ul>
+  </li>
+  <li id="R6"><strong>R6 — Performance, only if R5 shows it matters.</strong>
+    <ul>
+      <li>Rebuild tree topologies only every N calls and reuse them in between,
+      refreshing coordinates.</li>
+      <li>Parallelize the net loop with per-thread bin maps and a fixed reduction
+      order. The estimator is deliberately serial and deterministic today, so this
+      must preserve exact repeatability. First check whether FLUTE's global state is
+      thread safe.</li>
+      <li>Special-case degree 2 and 3 nets without calling FLUTE.</li>
+    </ul>
+  </li>
+  <li id="R7"><strong>R7 — Future: fast global router as a third rung.</strong>
+    <ul>
+      <li>Keep the estimator interface model-agnostic: input is the design, grid and
+      capacities; output is the existing result (horizontal, vertical, pin maps and
+      overflow). A router backend then plugs in as <code>route.model=grt</code> with
+      the same one-way ladder semantics, <code>rudy → rsmt → grt</code>, each
+      transition with its own level.</li>
+      <li>Candidates: an in-process fast router in the style of FastRoute/CUGR, or the
+      vendored NCTUgr op as an external process. Run it rarely (a handful of times
+      per stage), because it is far more expensive than any estimator.</li>
+      <li>Only specified here; no implementation until R5 shows RSMT-RUDY is still
+      not accurate enough.</li>
+    </ul>
+  </li>
+</ul>
+
+<h2>Cost estimate (to be replaced by R0 numbers)</h2>
+<p>Estimate, not measured. RSMT-RUDY adds one FLUTE call per net. Degree 2–3 nets
+are cheap or special-cased; degrees 4–9 use the lookup table at roughly 1–5 µs;
+larger nets are far slower and use the degree-cap fallback. The average comes to
+about 2–4 µs per net, i.e. 2–4 s per million nets serial, versus a few hundred
+milliseconds today, so a legacy-path call gets about 3–10 times slower. Edge
+rasterization is roughly cost-neutral. The macro-aware path is already heavier, so
+FLUTE is a smaller relative increase there. RUDY runs only about every 20 GP
+iterations (roughly 75 calls in 1500 iterations) and only after the density-overflow
+gate, so on cnn-sized designs the impact should be negligible and on million-net
+designs a few minutes at worst. Running Rudy first and RSMT only after the switch
+also bounds the number of expensive calls.</p>
+
+<h2>Design notes</h2>
+<ul>
+  <li>The switch is one-way per stage and per run, to keep the control loop stable:
+  inflation is monotone and the convergence test must not flip scale mid-stage.
+  Warm starts and ECO runs restart each stage on Rudy unless the cache identity
+  says otherwise.</li>
+  <li>Levels are mean overflow over all bins, so small values are significant on a
+  fine grid; record the bin count with every reported level.</li>
+  <li>FLUTE nets must not also get the pin-count weight. Nets above the degree cap
+  keep the old bounding-box-times-weight model, so a mixed design is consistent.</li>
+  <li>RUDY is not differentiable here: it only drives inflation, macro pressure and
+  convergence. Topology changes between calls therefore do not disturb the
+  gradients.</li>
+</ul>
+
+<h2>Implementation entry points</h2>
+<ul>
+  <li>Sibling DREAMPlace repo (follow the sibling-repo rules in
+  <a href="../../AGENTS.md">AGENTS.md</a> and verify the active Bazel dependency
+  first): <code>dreamplace/native/rudy.cpp</code>, <code>rudy_obstacles.cpp</code>,
+  <code>rudy.hpp</code>, <code>rudy_macro.cpp</code> (<code>macro_routing_pressure</code>),
+  the two <code>rudy(...)</code> call sites in <code>placement.cpp</code>,
+  <code>native/BUILD.bazel</code>, <code>thirdparty/flute</code> and the existing
+  <code>rudy_test.cpp</code> / <code>rudy_macro_test.cpp</code>.</li>
+  <li><a href="../../pass/place/place.cpp">pass/place/place.cpp</a>:
+  <code>init_flute()</code>, control assembly, cache hashing, per-stage controls and
+  history JSON; <a href="../../pass/place/place.hpp">pass/place/place.hpp</a>,
+  <a href="../../lhd/lhd.hpp">lhd/lhd.hpp</a>,
+  <a href="../../pass/place/h2d.cpp">pass/place/h2d.cpp</a> (H2D RUDY evaluation) and
+  <a href="../../tools/rudy_metrics.cpp">tools/rudy_metrics.cpp</a>
+  (offline evaluation, extend with a model argument).</li>
+  <li><a href="../../pass/place/README.md">pass/place/README.md</a>: document the
+  options, the one-way switch and the level semantics.</li>
+</ul>
+</main>
+<footer>LiveHD TODO · 3r-route</footer>
+</body>
+</html>

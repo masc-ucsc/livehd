@@ -439,6 +439,27 @@ TEST(Placement, MappedBusGraphLegalityRcAndReuse) {
     const auto         sparse = place(*graph, sparse_library, soft);
     EXPECT_EQ(sparse.floorplan.components.size(), 2);
     EXPECT_EQ(sparse.floorplan.die.xh, frame.die.xh);
+    // Internal density particles can model this whitespace without creating
+    // physical cells or exceeding a bounded particle count.
+    soft.virtual_fillers          = true;
+    soft.virtual_filler_max_count = 64;
+    soft.virtual_filler_fraction  = .5;
+    soft.output_dir               = (root / "bounded_virtual_fillers").string();
+    hhds::GraphLibrary virtual_library;
+    const auto         virtual_result = place(*graph, virtual_library, soft);
+    EXPECT_EQ(virtual_result.floorplan.components.size(), 2);
+    EXPECT_EQ(virtual_result.floorplan.die, sparse.floorplan.die);
+    rapidjson::Document virtual_qor;
+    virtual_qor.Parse(virtual_result.qor.c_str());
+    ASSERT_FALSE(virtual_qor.HasParseError());
+    EXPECT_TRUE(virtual_qor["virtual_fillers"].GetBool());
+    EXPECT_EQ(std::count_if(virtual_qor.MemberBegin(),
+                            virtual_qor.MemberEnd(),
+                            [](const auto& member) { return member.name == "virtual_fillers"; }),
+              1);
+    auto invalid                     = soft;
+    invalid.virtual_filler_max_count = 0;
+    EXPECT_THROW(place(*graph, virtual_library, invalid), std::invalid_argument);
   }
   {
     auto core_only   = options;
@@ -450,6 +471,12 @@ TEST(Placement, MappedBusGraphLegalityRcAndReuse) {
     const auto         same = place(*graph, untouched, core_only);
     EXPECT_EQ(same.floorplan.components, placed.floorplan.components);
     EXPECT_EQ(same.floorplan.die, placed.floorplan.die);
+    for (const auto* name : {"before_legalization.def", "after_legalization.def", "after_detailed.def"}) {
+      const auto frame = physical::read_def(core_only.output_dir + "/" + name);
+      EXPECT_EQ(frame.components.size(), 2);
+      EXPECT_EQ(frame.terminals.size(), 3);
+      EXPECT_FALSE(frame.nets.empty());
+    }
     std::ifstream snapshot(root / "core_halo/gp.json");
     ASSERT_TRUE(snapshot.good());
     const std::string   text{std::istreambuf_iterator<char>(snapshot), {}};
@@ -465,6 +492,18 @@ TEST(Placement, MappedBusGraphLegalityRcAndReuse) {
       EXPECT_TRUE(std::isfinite(node[2].GetDouble()));
     }
     EXPECT_EQ(snapshot_names, (std::set<std::string>{"logic.inv", "logic.nand"}));
+  }
+  {
+    auto spread = options;
+    spread.cache_dir.clear();
+    spread.output_dir   = (root / "local_spread").string();
+    spread.dynamic_bins = true;
+    spread.bin_max = spread.local_density_bins = 32;
+    spread.local_density_weight                = 8;
+    hhds::GraphLibrary spread_library;
+    const auto         result = place(*graph, spread_library, spread);
+    EXPECT_EQ(result.floorplan.components.size(), placed.floorplan.components.size());
+    EXPECT_NE(result.qor.find("\"legal\":true"), std::string::npos);
   }
   EXPECT_FALSE(placed.parasitics->nets.empty());
   EXPECT_TRUE(std::filesystem::exists(root / "place/out.def"));
@@ -2093,6 +2132,9 @@ TEST(Placement, PlacementColorsUseLibertyRolesAndPinsMoveWithoutSta) {
   o.output_dir = (dir / "out").string();
   o.fp_place = o.fp_colors = o.fp_pin_adjust = true;
   o.macro_pin_adjust                         = true;
+  o.macro_cell_density_weight                = 2;
+  o.macro_density_pull_weight                = .1;
+  o.local_density_bins                       = 32;
   o.macro_pin_interval                       = 5;
   for (const auto* color_source : {"placement", "memory_first"}) {
     o.fp_anchor_macros_only = true;
@@ -2131,6 +2173,8 @@ TEST(Placement, PlacementColorsUseLibertyRolesAndPinsMoveWithoutSta) {
     EXPECT_GE(report["pin_updates"].GetUint64(), 2);
     EXPECT_GE(report["macro_pin_updates"].GetUint64(), 1);
     EXPECT_GT(report["fp_iterations"].GetInt(), 0);
+    EXPECT_GT(report["fp_macro_cell_density_seconds"].GetDouble(), 0);
+    EXPECT_GT(report["fp_macro_density_pull_seconds"].GetDouble(), 0);
     for (auto node : graph->body().nodes()) {
       if (auto a = node.attr(attrs::synth_color_group); a.has()) {
         EXPECT_EQ(a.get(), "synthesis-kept");
@@ -2168,6 +2212,17 @@ TEST(Placement, PlacementColorsUseLibertyRolesAndPinsMoveWithoutSta) {
   o.output_dir     = (dir / "final").string();
   const auto final = place(*graph, flat, o);
   EXPECT_FALSE(std::filesystem::exists(dir / "final/macro_pins.jsonl"));
+  {
+    std::ifstream       history_file(dir / "final/gp_history.json");
+    const std::string   text{std::istreambuf_iterator<char>(history_file), {}};
+    rapidjson::Document report;
+    report.Parse(text.c_str());
+    ASSERT_FALSE(report.HasParseError());
+    EXPECT_EQ(report["macro_cell_density_weight"].GetDouble(), 0);
+    EXPECT_EQ(report["macro_cell_density_seconds"].GetDouble(), 0);
+    EXPECT_EQ(report["macro_density_pull_weight"].GetDouble(), 0);
+    EXPECT_EQ(report["macro_density_pull_seconds"].GetDouble(), 0);
+  }
   for (const auto& t : final.floorplan.terminals) {
     const auto it = std::find_if(frame.terminals.begin(), frame.terminals.end(), [&](const auto& p) { return p.name == t.name; });
     ASSERT_NE(it, frame.terminals.end());

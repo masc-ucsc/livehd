@@ -1,0 +1,346 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>TODO 2p-plan — OpenROAD placement inspection findings</title>
+<link rel="stylesheet" href="../todo.css">
+</head>
+<body>
+<nav><span class="brand">LiveHD TODO</span><a href="../index.html">← All tasks</a></nav>
+<main>
+<h1><strong class="item-id">2p-plan</strong> OpenROAD placement inspection findings</h1>
+<p>Collect LiveHD placement issues found while inspecting designs in OpenROAD.
+Add each finding as a separate subtask with its observed behavior, proposed fix
+and acceptance checks.</p>
+<p><span class="status">Pending — findings and agreed plans, not implemented</span>
+Started 2026-10-20.</p>
+
+<h2>Depends on</h2>
+<p>None. These are follow-up fixes to the existing native placement flow tracked
+in <a class="xref" href="3p-placement.html">3p-placement</a>. OpenROAD is the
+inspection tool; the fixes belong in LiveHD's placement implementation.</p>
+
+<h2>Subtasks — pending</h2>
+<ul class="subtasks">
+  <li id="A"><strong>A — Local TIELO/TIEHI drivers for each constant use.</strong>
+    <ul>
+      <li><strong>Observed:</strong> the live CNN design inspected on 2026-10-20
+      has one <code>__place_tielo</code> driving <code>net_46575</code> with 34
+      top-level output pins and 181 internal input pins, and one
+      <code>__place_tiehi</code> driving <code>net_46574</code> with 9 top-level
+      output pins and 994 internal input pins. The TIELO net's terminal bounding
+      box spans approximately 1.95 × 1.86 mm. These are unrouted connections
+      displayed as flywires, not measured routed wirelength.</li>
+      <li><strong>Cause:</strong> <code>pass/place/place.cpp</code> materializes
+      one physical driver per constant value and merges the corresponding
+      sinks into its net. The same global tie identities are reused in later
+      placement and repair rounds.</li>
+      <li><strong>Before GP:</strong> replicate the tie for each physical sink
+      pin/bit, including macro inputs and constant top-level output pins. Give
+      each tie output a single load so its edge pulls it toward that user.
+      Include all tie-cell area in density and capacity accounting from the
+      start; initial tie positions are provisional.</li>
+      <li><strong>During legalization:</strong> identify ties from characterized
+      constant-output semantics rather than instance-name prefixes. Collect
+      them for final processing while legalizing their functional users first.</li>
+      <li><strong>Final placement:</strong> after the last stage that can move
+      the users, including detailed placement and later ECO/repair legalization,
+      revisit the ties. Move a single-load tie to a nearby legal row site using
+      its user's actual pin location and orientation. Split a remaining shared
+      tie into local copies, one per load. Prefer free sites; permit bounded
+      local cell displacement when necessary, respecting fixed cells, locked
+      macros, row compatibility and core bounds.</li>
+      <li><strong>Do not lose the fix:</strong> preserve stable per-sink tie
+      identities across incremental and repair rounds. Replace assumptions
+      about one global tie per polarity so refresh/cache paths cannot merge
+      local drivers again. Update physical nets and graph connectivity together,
+      including bus aliases, memory pins and top-level outputs, so DEF, Verilog,
+      timing and saved graphs agree. Final snapshots must include the repaired
+      tie placement.</li>
+      <li><strong>Acceptance:</strong> every constant use has the correct driver;
+      each used tie output drives exactly one load; all ties are legally placed
+      without overlap and close to their users. Add small repository-owned
+      checks for both polarities, constant IO outputs, multiple constant bits
+      on one user, imported/shared ties and repeated placement/repair/cache
+      flows. Reinspect the CNN placement to confirm the global constant
+      flywires are replaced by local connections.</li>
+    </ul>
+  </li>
+  <li id="B"><strong>B — Check IO movement and clock-pin placement; fix if needed.</strong>
+    <ul>
+      <li><strong>Observed:</strong> in the inspected pre-CTS CNN placement,
+      <code>CLK</code> sits at the bottom-left corner and connects to 181 cell
+      pins spread across the design. The current run has fixed IO pins, but was
+      intended to allow pin movement. Establish whether that fixed placement
+      was explicitly requested or introduced unintentionally by the flow.</li>
+      <li><strong>Controlled rerun:</strong> repeat the placement with IO pins
+      movable and IO placement enabled, keeping the design and other settings
+      comparable. Record effective configuration, explicit pin constraints and
+      pin coordinates before and after FP, macro placement and final placement.
+      Compare against the fixed-pin run; do not infer that IO movement worked
+      merely because an option was accepted.</li>
+      <li><strong>Check the handoff:</strong> when IO placement is enabled,
+      <code>fp_plan</code> and <code>macro_plan</code> should perform the intended
+      pin adjustment unless the user explicitly hardcoded a pin position.
+      Trace the request through stage controls, imported/generated pin status,
+      cached placements and stage-to-stage freezing. Distinguish an explicit
+      fixed-position constraint from an initial placement or a DEF export
+      status; neither initialization nor an unintended early freeze should
+      silently prevent requested IO movement.</li>
+      <li><strong>Clock sanity check:</strong> for a broadly distributed clock
+      load, expect a movable clock input near the midpoint of a longer core
+      side: top/bottom for a wider core, left/right for a taller core. Treat a
+      corner or another strongly offset location as suspicious unless the
+      actual DFF/clock-sink concentration supports it. Use the sink distribution
+      to assess the choice rather than imposing a midpoint regardless of the
+      design. Explicitly fixed clock pins must remain fixed.</li>
+      <li><strong>Fix and acceptance:</strong> if the rerun confirms unintended
+      immobility or a poor clock-location decision, correct the responsible
+      option/constraint handoff or placement policy. Add small repository-owned
+      checks for movable IOs in both FP and macro stages, preservation of
+      explicitly fixed pins, broadly distributed clock sinks and a deliberately
+      concentrated sink distribution. Verify legal pin placement, unchanged
+      connectivity and applicable bus-order/spacing constraints, then reinspect
+      the movable-pin CNN result in OpenROAD.</li>
+    </ul>
+  </li>
+  <li id="C"><strong>C — Recover redundant buffers and buffer chains after final legalization.</strong>
+    <ul>
+      <li><strong>Example to reproduce:</strong> running CNN and inspecting its
+      final pre-CTS placement in OpenROAD can show adjacent, single-fanout
+      buffer chains. In the 2026-10-20 run, the chain ending at
+      <code>__place_rebuffer_sub_20.inst_ram_w16_l32768_id1_1.<wbr>u_ram_w16_l32768_id1_1_mem_10</code>
+      has sibling buffers <code>…mem_12 → …mem_11 → …mem_10</code>, with
+      pin-to-pin Manhattan distances of 0.596 µm and 0.970 µm. Each of those
+      two nets has exactly one driver and one load, with no IO branches.
+      <code>…mem_10</code> then drives <code>…mem_9</code> about 519.8 µm away.
+      The middle buffer is a bypass candidate; the long outgoing connection
+      means the final driver may still be needed. The inspected run's settings
+      are in <a href="../../repros/macro_cell_density_20261020/cnn_B/evaluation-plan.json">the local CNN evaluation plan</a>.
+      Exact names and distances are observations of that run, not requirements
+      for future runs.</li>
+      <li><strong>Current gap:</strong> post-placement optimization already
+      runs after initial legalization/detail, and buffer rebuilding receives
+      ECO legalization and fresh timing checks. However, its final recovery
+      sweep only resizes cells. With full physical timing feedback, individual
+      buffer-bypass trials are skipped in <code>pass/place/repair.cpp</code>.
+      Thus nearby buffers can remain after rebuilding and legalization; a
+      final sizing sweep does not remove them.</li>
+      <li><strong>Fix:</strong> extend final recovery to trial identity-buffer
+      bypass and chain collapse using the final legalized coordinates. Cover
+      <code>DFF → BUF → CELL</code> and the general
+      <code>CELL → BUF → CELL</code>, including buffers at either endpoint.
+      For this check, both connecting nets must have exactly one load; exclude
+      extra fanout and top-level port loads from the simple-chain case.</li>
+      <li><strong>Acceptance of edits:</strong> closeness identifies candidates,
+      not proof that a buffer is unnecessary. Trial changes transactionally,
+      recompute physical RC and STA, and keep them only when the existing
+      timing/electrical acceptance policy permits the area/topology recovery.
+      Check the changed driver load, capacitance, slew and fanout, preserve
+      protected networks and fixed cells, and retain buffers required to drive
+      long wires or meet electrical limits. Locally legalize any resulting
+      sizing/placement changes and recheck timing.</li>
+      <li><strong>Placement and persistence:</strong> run cleanup after the last
+      relevant legalization/detail or buffer-repair edit, with bounded
+      repetition until no beneficial removals remain. Keep graph aliases,
+      physical nets, saved graphs, DEF/Verilog, RC/STA and final reports
+      consistent. Repeated placement, ECO and cache paths must not skip the
+      check or silently restore removed buffers.</li>
+      <li><strong>Validation:</strong> add small repository-owned positive
+      checks for an adjacent removable buffer and a collapsible buffer chain,
+      plus negative checks where bypass violates timing/electrical constraints
+      or a long-wire driver must remain. Verify single-load eligibility,
+      connectivity, legality and repeated-run behavior. Use CNN as an optional
+      visual reproduction and compare final buffer counts, area and timing;
+      keep default tests independent of sibling benchmark repositories.</li>
+    </ul>
+  </li>
+  <li id="D"><strong>D — Share reduced timing pull across inserted buffers and refresh critical nets periodically.</strong>
+    <ul>
+      <li><strong>Observed:</strong> placement weights are keyed by driver pin.
+      Post-GP buffer repair carries the original driver's weight forward, while
+      a newly inserted buffer output defaults to weight 1. In the inspected CNN,
+      <code>net_191017</code> retains weight approximately 3.064 on a 0.386 µm
+      driver-to-buffer segment, while the inserted buffer's output
+      <code>net_16096</code> defaults to 1. FP/macro timing checkpoints refresh
+      weights, but this run's final cell GP has no timing checkpoints, and fresh
+      post-GP repair STA does not refresh placement weights. Existing smoothing
+      also leaves residual extra pull after a net leaves the critical set.</li>
+      <li><strong>At buffer insertion:</strong> reduce the original driver's
+      extra pull above the baseline weight of 1, then assign that same reduced
+      weight to the new buffer-output edge. Do not retain the full old priority
+      only on the driver-to-buffer segment or leave the downstream segment
+      unweighted. Choose and validate the reduction factor as part of this task;
+      apply the policy consistently when inserting a buffer chain or tree.
+      These inherited weights are provisional until fresh timing is available.</li>
+      <li><strong>Next OpenTimer sizing/timing run:</strong> capture the changed
+      topology, loads and physical RC, and recompute critical-net membership and
+      target weights for all current nets, including newly inserted buffer
+      outputs. Feed the result back into placement's applied weights; updating
+      timing reports or sizing decisions alone is insufficient. Replace the
+      provisional split weights with the fresh timing-derived priorities.</li>
+      <li><strong>Periodic refresh:</strong> run timing from time to time during
+      FP, macro GP, final cell GP and subsequent repair/local placement, with a
+      bounded cadence and a refresh after accepted sizing or topology changes
+      before further placement uses stale priorities. Re-rank the worst-slack
+      20% of eligible timed non-clock nets, add newly critical nets, and remove
+      nets that leave that set. Restore non-critical nets to baseline weight 1
+      rather than leaving historical extra pull to decay indefinitely. Remove
+      obsolete driver identities after topology changes.</li>
+      <li><strong>Validation and inspection:</strong> add small repository-owned
+      checks for equal reduced weights on both sides of an inserted buffer,
+      chains/trees, new critical nets entering and former critical nets returning
+      to weight 1 on the next timing refresh. Verify final cell GP and repair
+      consume the refreshed weights. Export current membership, applied weight,
+      driver identity and timing checkpoint/stage so OpenROAD queries can
+      distinguish current criticality from inherited priority. Reinspect CNN
+      and compare placement, timing and electrical QoR.</li>
+    </ul>
+  </li>
+  <li id="E"><strong>E — Timing-aware legalization after final cell GP.</strong>
+    <ul>
+      <li><strong>Current gap:</strong> the native legalizer uses uniform cell
+      displacement weights for greedy packing and Abacus; GP's timing priorities
+      do not protect critical cells during final legalization. Abacus can move
+      cells that were already legalized, so priority ordering alone does not
+      preserve their positions.</li>
+      <li><strong>Proposed approach:</strong> run fresh OpenTimer analysis using
+      the final GP coordinates and physical RC, then derive cell priorities from
+      current pin/path timing rather than historical smoothed net weights.
+      Give critical cells first choice of nearby legal rows/sites and a larger
+      displacement penalty. Preserve the spatial ordering required inside the
+      row solver, and carry timing protection through Abacus and subsequent
+      detailed placement.</li>
+      <li><strong>Alternatives to evaluate:</strong> compare continuous
+      criticality-based ordering and displacement costs with a two-phase pass
+      that legalizes/protects critical cells first, optionally settles the
+      remaining movable cells, then legalizes the rest. Prefer strong movement
+      penalties or bounded protection over unconditional permanent locks; allow
+      controlled relaxation when necessary to avoid fragmented row space or
+      infeasible packing. Do not assume one extra GP iteration is sufficient.
+      Subtask F develops an optional solver-based alternative.</li>
+      <li><strong>Timing feedback:</strong> after full legalization, recompute
+      RC and STA, refresh criticality as in subtask D, and permit bounded local
+      correction when movement worsens timing. Check newly critical paths as
+      well as the original critical set. Preserve explicit fixed constraints,
+      row/site compatibility, connectivity and placement legality.</li>
+      <li><strong>Evaluate and adjust constants with Eyeriss and CNN:</strong>
+      sweep criticality-to-priority/displacement scaling, protection thresholds,
+      relaxation limits and any settling/local-correction iteration budgets.
+      Compare against the existing final legalization on both designs, using
+      comparable final GP inputs. Record post-legalization and post-detail
+      WNS/TNS, timing/electrical violations, critical-cell and overall
+      displacement, HPWL, legality and runtime. Choose constants from measured
+      tradeoffs across both designs, not one favorable case; inspect the
+      resulting placements in OpenROAD.</li>
+      <li><strong>Validation:</strong> add small repository-owned checks for
+      critical/non-critical site competition, preservation of timing priority
+      through Abacus/detail, dense-row relaxation and changing critical paths.
+      Keep Eyeriss and CNN as separate evaluation runs; default tests must not
+      depend on sibling benchmark repositories.</li>
+    </ul>
+  </li>
+  <li id="F"><strong>F — Optional satlegalize: incremental pin-access alignment at the end of final GP.</strong>
+    <ul>
+      <li><strong>Scope and activation:</strong> develop an opt-in
+      <code>satlegalize</code> option at the end of final cell GP, before its
+      legalization/detail handoff. Optimize only standard cells in small local
+      windows; preserve macros, explicit fixed cells, IO constraints and objects
+      outside the window. Retain the existing legalization flow as the default
+      and fallback. This is an elaborated alternative to subtask E, not a
+      replacement of FP or macro placement.</li>
+      <li><strong>Alignment targets:</strong> use fresh OpenTimer criticality
+      to try driver-sink pairs in descending timing priority, starting with
+      short connections and then nearby critical connections. Align usable pin
+      access points on compatible horizontal or vertical routing tracks, using
+      actual pin shapes, legal access locations, layers, cell orientations and
+      routing obstructions. Equal average pin-center coordinates alone are
+      insufficient. Evaluate separation limits in rows/sites as well as µm.</li>
+      <li><strong>Window model:</strong> constrain legal row/site placement,
+      allowed orientations, non-overlap, fixed obstacles, window boundaries and
+      bounded displacement. Include affected neighboring cells and the impact
+      on incident nets with endpoints outside the window. Budget by movable
+      cell count and candidate positions, density and solver effort; the
+      discussed 100 × 100 µm window is illustrative, not a chosen constant.
+      Either model complete legal placement of all window cells or validate
+      completion with the existing legalizer. Total whitespace alone does not
+      guarantee that the remaining cells fit around fixed aligned pairs.</li>
+      <li><strong>Incremental search:</strong> keep one solver per window and
+      guard proposed pair alignments with activation literals/assumptions.
+      Both encoding/backend alternatives must solve incrementally, reusing
+      constraints and learned information across trials. Preserve accepted
+      alignment relationships where possible without immediately freezing
+      absolute coordinates, so aligned cells can still move together. Try the
+      next critical pair until the budget is exhausted; on conflict, evaluate
+      skipping the pair and continuing versus stopping that window. Treat a
+      timeout/unknown result as undecided, not proof of infeasibility.</li>
+      <li><strong>Checkpoint and rollback:</strong> save accepted constraint
+      prefixes and placement snapshots. If 100 accepted pairs prevent the
+      remaining legalization from completing, try a shorter prefix such as 50;
+      after success, optionally try 75, keeping the best placement that actually
+      legalizes. Bound this search. Heuristic legalizer success need not be
+      monotonic, so backoff does not prove the largest feasible prefix. At zero
+      accepted alignments, restore the untouched final-GP snapshot and run the
+      original legalizer. Later legalization/detail must preserve accepted
+      alignments or explicitly relax and revalidate them.</li>
+      <li><strong>Encodings and backends:</strong> evaluate CryptoMiniSat with
+      native XOR/XNOR constraints and ordinary CNF, and CaDiCaL with ordinary
+      CNF. Compare candidate-position encodings against bounded binary
+      coordinates where appropriate. Bitwise equality may benefit from XNOR,
+      but pin offsets require arithmetic and legality requires comparisons,
+      cardinality and overlap constraints. A single parity equation does not
+      encode coordinate equality. Do not assume native XOR outperforms compact
+      CNF; measure the complete incremental workload, including model extraction
+      and repeated rollback/assumption changes.</li>
+      <li><strong>Clean solver build and linkage:</strong> both CryptoMiniSat
+      and CaDiCaL already exist inside the cvc5 build, with private solver
+      symbols; the existing LEC profiles are not a placement API. Provide a
+      clean, model-producing incremental interface, reusing the pinned builds
+      where practical. If a separate build is needed, check compile-option/ABI
+      compatibility, duplicate symbols and global-state isolation rather than
+      assuming another copy can link safely. Verify a clean compile and full
+      <code>lhd</code> link with cvc5 and ABC present, for both solver choices.
+      Preserve cvc5's private dependency isolation and existing formal behavior;
+      an isolated solver-only build is insufficient validation.</li>
+      <li><strong>CNN evaluation to evolve the algorithm:</strong> replay the
+      same saved final-GP inputs and representative CNN windows across both
+      incremental encodings/backends. Sweep window/candidate limits, movement
+      bounds, criticality order, search budgets, skip policy and rollback
+      granularity. Record accepted alignments, completed legalization, fallback
+      frequency, solver time/memory and runtime tails, displacement, HPWL,
+      routing-access quality and post-legalization/detail WNS/TNS and electrical
+      violations. Recompute physical RC/STA before accepting a timing result;
+      use routing checks to validate predicted alignment benefits. Inspect CNN
+      in OpenROAD and use the measurements to choose CNF versus XOR/XNOR and
+      adjust the algorithm. Cross-check generality with Eyeriss as in subtask E.</li>
+      <li><strong>Focused validation:</strong> add small repository-owned
+      checks for legal pin-access alignment with offsets/orientation, competing
+      pairs, fragmented free space, boundary nets, assumption retraction,
+      timeout handling, model extraction and complete rollback to zero.
+      Exercise repeated solver instances alongside cvc5 to catch linkage/state
+      conflicts. Keep large CNN/Eyeriss evaluations outside default tests.</li>
+      <li><strong>Related work:</strong>
+      <a href="https://vlsicad.ucsd.edu/Publications/Conferences/349/c349.pdf">Vertical M1 Routing-Aware Detailed Placement (DAC 2017)</a>
+      models local legal placement and pin alignment with MILP;
+      <a href="https://www.aspdac.com/aspdac2024/archive/pdf/3D-5.pdf">TransPlace (ASP-DAC 2024 presentation)</a>
+      uses incremental SAT in detailed-placement windows at transistor level.
+      These motivate the approach, not a demonstrated timing or runtime gain
+      for LiveHD standard-cell placement.</li>
+    </ul>
+  </li>
+</ul>
+
+<h2>Subtasks — landed</h2>
+<p>None yet.</p>
+
+<h2>Design notes</h2>
+<p>Append future OpenROAD inspection findings with stable subtask letters. Record
+the inspected design/stage and concrete evidence, then the proposed correction
+and checks needed to close the issue. Keep generated screenshots, reports and
+reproduction artifacts under <code>repros/</code>; link them here when available.
+Move completed items to the landed section with their original letters.</p>
+</main>
+<footer>LiveHD TODO</footer>
+</body>
+</html>

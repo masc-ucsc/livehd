@@ -82,7 +82,7 @@ bazel_dep(name = "rapidjson", version = "1.1.0.bcr.20250205")
 # Native CPU placement; the repository uses LiveHD's HHDS/HLOP repositories.
 git_repository(
     name = "dreamplace",
-    commit = "a750f3601babf3a580e3174e24d9af9492f24505",
+    commit = "3e998043d90bf8b2b3a8c1e6dd7b58011683e52c",
     remote = "https://github.com/masc-ucsc/DREAMPlace.git",
 )
 # For local co-development swap the git_repository above for:

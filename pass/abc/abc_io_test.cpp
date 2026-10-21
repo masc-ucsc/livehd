@@ -174,6 +174,56 @@ TEST(AbcIo, NativeStateAndClockPinSurviveWholeColorRewrite) {
   }
   EXPECT_TRUE(found);
 }
+TEST(AbcIo, NativeMemoryMetadataSurvivesWholeColorRewrite) {
+  Fixture f;
+  auto    memory = graph_util::create_typed_node(*f.graph, Ntype_op::Memory, 1);
+  memory.set_name("memory");
+  f.graph->get_input_pin("a").connect_sink(memory.create_sink_pin(0));
+  f.graph->get_output_pin("y").get_driver_pin().connect_sink(memory.create_sink_pin(3));
+  const std::vector<std::pair<hhds::Port_id, int64_t>> metadata = {
+      {                            1,  16},
+      {                            5,   0},
+      {                            6,   1},
+      {                            7,   0},
+      {                            8,   1},
+      {                            9, 512},
+      {                           10,   0},
+      {                           11,   0},
+      {                           15,   1},
+      {Ntype::Memory_port_stride + 1,  16},
+      {Ntype::Memory_port_stride + 9, 512}
+  };
+  for (const auto& [pid, value] : metadata) {
+    graph_util::create_const(*f.graph, *Dlop::create_integer(value)).connect_sink(memory.create_sink_pin(pid));
+  }
+  f.graph->commit();
+  auto                  mapper = synth::make_io_mapper("abc",
+                                                       {
+                                                           {"library", "inou/prp/tests/abc/timing.lib"}
+  });
+  synth::Io_environment env;
+  env.inputs["a[0]"]   = 950;
+  env.required["y[0]"] = 1000;
+  const auto result    = mapper(*f.graph, env, {}, 1000, 5, true);
+  ASSERT_TRUE(result.accepted) << result.decision;
+  bool found = false;
+  for (auto node : f.graph->body().nodes()) {
+    if (node.get_name() != "memory") {
+      continue;
+    }
+    found = true;
+    EXPECT_EQ(graph_util::type_op_of(node), Ntype_op::Memory);
+    for (const auto& [pid, value] : metadata) {
+      const auto driver = node.get_sink_pin(pid).get_driver_pin();
+      ASSERT_TRUE(driver.is_const()) << pid;
+      ASSERT_TRUE(graph_util::const_of(driver).is_just_i64()) << pid;
+      EXPECT_EQ(graph_util::const_of(driver).to_just_i64(), value) << pid;
+    }
+    EXPECT_EQ(node.get_sink_pin(0).get_driver_pin(), f.graph->get_input_pin("a"));
+    EXPECT_EQ(node.get_sink_pin(3).get_driver_pin(), f.graph->get_output_pin("y").get_driver_pin());
+  }
+  EXPECT_TRUE(found);
+}
 TEST(AbcIo, WireCapInterpolationAndExtrapolationUseFf) {
   auto* frame    = Abc_FrameCreate();
   auto* previous = Abc_FrameEnter(frame);
