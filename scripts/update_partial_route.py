@@ -192,16 +192,19 @@ def main():
     assert rejected['status'] == 'rejected_fixed_netlist_mutation_stopped'
     rc_perf = read_sync('rc_perf/owner_perf_summary.json')
     rc_owner = read_sync('rc-owner-opt.run.json')
+    integration = read_sync('corrected-integration-opt-retry.run.json')
+    debug = read_sync('corrected-debug-all.run.json')
+    assert integration['status'] == debug['status'] == 'pass'
     assert rc_owner['status'] == 'pass'
     rc_exact = read_sync('rc_perf/owner_boundary_result.json')
     assert rc_exact['status'] == 'pass'
     validation = ('<tr>' + cell('LiteEth incremental') + cell('Cold complete; warm1 failed')
                   + cell(number(cold['wall_s'], 1) + ' / ' + number(warm['wall_s'], 1), 'Cold / failed warm1 seconds')
-                  + cell('Cached placement restored, then companion LEF export failed on a read-only destination; fix under validation. Warm2 not run.')
+                  + cell('Cached placement restored, then companion LEF export failed on a read-only destination. Export regressions now pass; a fresh three-run proof is pending. Warm2 not run.')
                   + cell(sync_link('liteeth_reuse_v2/run/warm1/native.run.json', 'Preserved failure')) + '</tr>'
                   + '<tr>' + cell('CNN density control') + cell('Rejected; stopped at iteration 450')
                   + cell(number(rejected['measurement']['wall_s'], 1), 'Partial invalid attempt seconds')
-                  + cell('Imported shared tie expansion added 1,306 cells; violates the fixed-netlist comparison. Opt-in preservation fix under validation; other policies not launched.')
+                  + cell('Imported shared tie expansion added 1,306 cells; violates the fixed-netlist comparison. Opt-in preservation fix and its regressions now pass; a fresh density study is pending. Other policies not launched.')
                   + cell(sync_link('cnn_density/control/attempt001/rejected_attempt_summary.json', 'Rejection and perf evidence')) + '</tr>'
                   + '<tr>' + cell('OpenTimer RC kernel') + cell('Published; owner RC tests passed')
                   + cell(number(100 * rc_perf['task_clock_ms']['reduction'], 1) + '% less CPU', 'Median of three isolated paired runs')
@@ -234,6 +237,7 @@ def main():
 <h2>New-source validation in progress</h2>
 <p>These checks use the newly synchronized source snapshot and remain separate from the routed comparison above. Failed and rejected attempts are retained; they do not establish routing or reuse success.</p>
 <div class="scroll"><table><thead><tr><th>Check</th><th>Status</th><th>Measured cost</th><th>Finding</th><th>Evidence</th></tr></thead><tbody>@VALIDATION@</tbody></table></div>
+<p>The corrected source passed all 22 optimized integration tests, built both production executables, and compiled all 3,929 debug targets. The benchmark defaults remain unchanged. These build checks do not establish routed QoR.</p>
 <h2>Comparison and performance scope</h2>
 <p>The placement comparisons share their design's mapped starting netlist, macro/IO frame and authoritative constraints. CTS and repair may make arm-specific changes, which remain audited. CNN uses 65 SRAMs, Eyeriss 1,040 and LiteEth 5. The LiteEth reference uses routability-only placement after a preserved timing-driven rebuffering crash; this qualification prevents a whole-flow dominance claim. Both LiteEth arms configured a 1% repair-buffer option, but that option did not act as an observed cumulative hard bound.</p>
 <p>Timing values in the main table are final extracted results only. Pending entries are not zero and placement/GRT estimates are not substituted. A supported-frequency claim needs fresh extracted per-clock STA, consistent generated-clock relationships, IO budgets and timing exceptions, and explicit setup/hold reporting. CNN uses the shared ASAP7 RVT FF 0.77 V / 0 °C standard-cell corner with normalized SRAM models and fixed 10 ps IO budgets; this is not an all-corner frequency claim.</p>
@@ -248,7 +252,7 @@ def main():
         page = page.replace('@' + key + '@', value)
     output = ROOT / 'docs/partial_route.html'
     output.write_text(page)
-    print(f'Updated {output} from {len(SOURCES)} evidence files at {stamp}')
+    print(f'Updated {output} from {len(SOURCES) + len(SYNC_SOURCES)} evidence files at {stamp}')
 
 
 if __name__ == '__main__':

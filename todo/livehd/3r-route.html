@@ -1177,6 +1177,38 @@ RC/SDC and saved timing weights: 6,032 cells have weight above 1, including
 4,242 at weight at least 3. Raw movement, legality and fresh setup/hold remain
 acceptance gates before any new downstream candidate. Evaluation artifacts:
 <code>tmp/timing_spread_20261021/</code>.</p>
+<h2>Corrected replay and stronger spreading studies</h2>
+<p>The first synchronized-source CNN global-density control was stopped at
+iteration 450: per-load expansion of two imported shared tie cells added 1,306
+cells to the fixed starting netlist. The preserved attempt is invalid as a QoR
+comparison. The opt-in <code>preserve_imported_ties</code> mode now retains
+characterized shared masters and graph/physical endpoints, including mixed
+shared/single-output cells. Ordinary per-load tie splitting remains the default;
+logical constants still materialize real sources. CLI/helper propagation, cache
+separation and exact topology regressions pass.</p>
+<p>A new LiteEth cold incremental run completed in 400.570 s, but warm1 failed
+while exporting a read-only companion LEF after successfully restoring placement.
+Regular-file exports now write a unique sibling inode and atomically rename it,
+leaving source and retained hardlink aliases unchanged. Repeated read-only export,
+changed binary content, failure cleanup and equivalent-source regressions pass.
+The failed run remains preserved; a fresh cold/warm1/warm2 proof is required.</p>
+<p>The partial CNN profile identified RC waveform calculations as a major cost.
+OpenTimer <code>65ff460efc0b266f50997f719e26bb20851b0feb</code> reuses
+threshold-independent ramp constants locally within each response/fitting
+iteration. Paired isolated production-kernel measurements show 33.9% less CPU
+and 35.4% fewer instructions; this is not a whole-flow speedup claim.
+220,378 boundary/order/extreme-input output comparisons were checked, including
+16 paired NaNs; finite non-NaN outputs matched bitwise. Independent circuit-equation,
+effective-capacitance and integration checks pass. All 22 optimized integration
+tests and the full 3,929-target debug compilation pass against published pins.</p>
+<p>The next study verifies the OpenROAD macro map, then compares the original
+and OpenROAD movable-cell seeds under identical fixed macros. It measures
+stronger opt-in local repulsion, including weights 1 and 4, and captures physical
+density before legalization, after legalization and after detailed placement.
+Exact source topology, retained-source parity, fresh setup/hold estimates,
+movement and performance remain explicit; timing loss alone does not reject a
+spreading diagnostic. Routing and extracted timing still decide success.
+<a href="../../docs/partial_route.html">Current main result table</a>.</p>
 <h2>Design notes</h2>
 <ul>
   <li>The current routability capacity sums all LEF routing layers, while the
