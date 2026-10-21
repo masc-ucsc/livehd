@@ -934,6 +934,70 @@ TEST(Satlegalize, PeakFloorAllowsSubcapacityChangesWithoutRelaxingCongestionOrAc
   EXPECT_FALSE(satlegalize_route_preserved({.1, 1.3, 2, 1}, {.2, 1.2, 3, 2}, 1));
   EXPECT_FALSE(satlegalize_route_preserved({0, std::numeric_limits<double>::quiet_NaN(), 0, 0}, baseline, 1));
 }
+TEST(Satlegalize, MovementBudgetAlignsOneEndpointWithoutRelocatingAnUnrelatedCell) {
+  for (const auto* backend : {"cadical", "cms-cnf", "cms-xor"}) {
+    for (const auto* encoding : {"candidate", "binary"}) {
+      Fixture f;
+      auto    other = f.fp.components[0];
+      other.name    = "unrelated";
+      other.place.x = 1000;
+      other.place.y = 400;
+      f.fp.components.push_back(other);
+      auto options            = grid_options(route_grid(f.fp.die, 1, 1));
+      options.backend         = backend;
+      options.encoding        = encoding;
+      options.max_candidates  = 32;
+      options.max_moved_cells = 1;
+      options.check_packing   = true;
+      const auto report       = satlegalize(f.tech, f.fp, f.timing, options);
+      ASSERT_EQ(report.accepted.size(), 1) << backend << ' ' << encoding;
+      ASSERT_EQ(report.window_stats.size(), 1);
+      EXPECT_EQ(report.window_stats.front().moved_cells, 1);
+      EXPECT_GT(report.window_stats.front().displacement_dbu, 0);
+      EXPECT_EQ(f.fp.components.back(), other);
+      EXPECT_TRUE(satlegalize_preserved(f.tech, f.fp, report));
+      expect_no_overlap(f.fp);
+    }
+  }
+}
+TEST(Satlegalize, MovementBudgetCountsAllPackingMovesAndPreservesTheFullRegion) {
+  for (const auto* backend : {"cadical", "cms-cnf", "cms-xor"}) {
+    for (unsigned maximum : {1, 2}) {
+      Fixture f;
+      f.fp.die = {0, 0, 600, 200};
+      f.fp.rows.resize(1);
+      f.fp.rows.front().count  = 6;
+      f.fp.components[1].place = f.fp.components[0].place;
+      // Keep incident-net HPWL from selecting which of the six legal packing
+      // permutations is acceptable; this fixture isolates the movement bound.
+      f.fp.terminals.push_back({"boundary", "n", "INPUT", 600, 0, physical::Orientation::N, physical::Status::FIXED, {}});
+      f.fp.nets.front().connections.push_back({"PIN", "boundary"});
+      auto other = f.fp.components[0];
+      other.name = "overflow";
+      f.fp.components.push_back(other);
+      const auto original     = f.fp.components;
+      auto       options      = grid_options(route_grid(f.fp.die, 1, 1));
+      options.backend         = backend;
+      options.max_candidates  = 32;
+      options.max_moved_cells = maximum;
+      options.check_packing   = true;
+      options.boundary_growth = 1;
+      const auto report       = satlegalize(f.tech, f.fp, f.timing, options);
+      ASSERT_EQ(report.window_stats.size(), 1);
+      EXPECT_EQ(report.window_stats.front().movable_cells, 3);
+      if (maximum == 1) {
+        EXPECT_EQ(report.window_stats.front().packing_status, "unsat");
+        EXPECT_TRUE(report.accepted.empty());
+        EXPECT_EQ(f.fp.components, original);
+      } else {
+        EXPECT_EQ(report.window_stats.front().packing_status, "sat");
+        ASSERT_EQ(report.accepted.size(), 1);
+        EXPECT_EQ(report.window_stats.front().moved_cells, 2);
+        expect_no_overlap(f.fp);
+      }
+    }
+  }
+}
 TEST(Satlegalize, RoutingGridRejectsSecondaryCrossBinPairButKeepsBoundaryMembership) {
   Fixture f;
   f.fp.die = {0, 0, 1600, 200};

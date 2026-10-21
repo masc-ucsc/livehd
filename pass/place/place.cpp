@@ -79,6 +79,9 @@ void sat_window_statistics(rapidjson::Value& json, const Satlegalize_report& rep
     entry.AddMember("accepted", window.accepted, allocator);
     entry.AddMember("conflicts", window.conflicts, allocator);
     entry.AddMember("unknown", window.unknown, allocator);
+    entry.AddMember("proposed_moved_cells", window.moved_cells, allocator);
+    entry.AddMember("proposed_displacement_dbu", window.displacement_dbu, allocator);
+    entry.AddMember("proposed_max_displacement_dbu", window.max_displacement_dbu, allocator);
     entry.AddMember("candidate_packing", rapidjson::Value(window.packing_status.c_str(), allocator), allocator);
     if (options.route_grid) {
       entry.AddMember("route_utilization", window.route_utilization, allocator);
@@ -161,6 +164,7 @@ void sat_window_statistics(rapidjson::Value& json, const Satlegalize_report& rep
   json.AddMember("max_pairs_per_window", options.max_pairs_per_window, allocator);
   json.AddMember("check_packing", options.check_packing, allocator);
   json.AddMember("route_peak_floor", options.route_peak_floor, allocator);
+  json.AddMember("max_moved_cells", options.max_moved_cells, allocator);
   if (options.region_width_um > 0 || options.route_grid) {
     rapidjson::Value region(rapidjson::kObjectType);
     region.AddMember("width_um", options.region_width_um, allocator);
@@ -352,6 +356,9 @@ std::string environment_key(const Options& o, const ph::Technology& tech) {
     }
     if (a.route_peak_floor) {
       h = hash_text(std::format("satlegalize-route-peak-floor:{}", a.route_peak_floor), h);
+    }
+    if (a.max_moved_cells) {
+      h = hash_text(std::format("satlegalize-moved-cells:{}", a.max_moved_cells), h);
     }
     if (a.region_width_um || a.region_height_um || a.spill_neighbors) {
       h = hash_text(std::format("satlegalize-region-v1:{}:{}:{}:{}",

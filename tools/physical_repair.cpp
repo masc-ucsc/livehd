@@ -368,6 +368,7 @@ int main(int argc, char** argv) {
     sat_limit("satlegalize_max_pairs", sat_options.max_pairs);
     sat_limit("satlegalize_max_pairs_per_window", sat_options.max_pairs_per_window);
     boolean_option("satlegalize_check_packing", sat_options.check_packing);
+    sat_limit("satlegalize_max_moved_cells", sat_options.max_moved_cells);
     sat_limit("satlegalize_move_sites", sat_options.move_sites);
     sat_limit("satlegalize_move_rows", sat_options.move_rows);
     if (config.HasMember("satlegalize_spill_neighbors")) {

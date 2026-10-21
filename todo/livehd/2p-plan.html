@@ -247,6 +247,25 @@ RSMT128 maps. Macro/IO geometry, masters and connectivity remain fixed;
 ordinary legalization/detail is common to both arms and all native timing
 guards remain enforced. The selected Coral source remains the explicitly
 qualified second accepted checkpoint from its bounded engine run.</p>
+<p>The post-repair CNN proposal improves native WNS by 0.437 ps and TNS by
+298.395 ps with unchanged hold, but adds 14 electrical violations and 6.426
+units of electrical excess. The full guard rejects it. Coral's proposal
+regresses native WNS by 5.176 ps and TNS by 1,847.345 ps; it is also rejected.
+Both preserve their proposed alignments through ordinary legalization, so
+search feasibility and alignment retention alone are insufficient.</p>
+<p>Frozen <code>bin23</code> adds the opt-in
+<code>satlegalize.max_moved_cells</code> bound (default 0, unbounded).
+The <a href="../../repros/route_eval_20261021/spreading/sat_movement_bin23/prepared.json">matched post-repair movement screen</a>
+compares no SAT with limits of 2 and 8 moved cells per complete RSMT128 region
+on CNN, Eyeriss and Coral. All region members remain in the SAT problem;
+critical endpoints and spills count toward the bound. Neighbor spills still
+require lower density and the existing timing/capacity guards. Proposed
+movement counts and Manhattan displacement are reported before final
+acceptance. This controls collateral movement from the feasibility solver;
+it does not minimize displacement or back off to smaller regions. All 33 SAT
+regression cases, the solver suite and both ABC/USyn placement smoke tests
+pass. Results remain native screening evidence until matched clean routing
+and extraction complete.</p>
 <p>The synchronized-source CNN weight-zero GP arm finishes in 1,543.505 s
 and reproduces the prior arm's final native WNS/TNS exactly:
 −2,064.033691/−471,997.332825 ps. Its weight-one arm and the Eyeriss/Coral

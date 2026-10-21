@@ -25,6 +25,9 @@ struct Satlegalize_options {
   // distinguishes an infeasible candidate menu from an alignment conflict.
   unsigned                                      max_pairs_per_window = 0;
   bool                                          check_packing        = false;
+  // Zero is unbounded. Intended for already legal post-repair placements;
+  // count all moved region members, including alignment endpoints and spills.
+  unsigned                                      max_moved_cells      = 0;
   unsigned                                      move_sites = 4, move_rows = 1, conflicts = 10000, milliseconds = 50;
   bool                                          skip_conflicts  = true;
   double                                        boundary_growth = .05;
@@ -61,6 +64,8 @@ struct Satlegalize_window {
   size_t                                movable_cells = 0;
   bool                                  oversized     = false;
   unsigned                              trials = 0, accepted = 0, conflicts = 0, unknown = 0;
+  unsigned                              moved_cells      = 0;
+  double                                displacement_dbu = 0, max_displacement_dbu = 0;
   std::string                           packing_status = "not_checked";
   double                                usable_area = 0, movable_area_before = 0, movable_area_after = 0;
   double                                density_before = 0, density_after = 0;

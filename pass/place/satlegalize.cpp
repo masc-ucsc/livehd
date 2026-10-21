@@ -28,6 +28,7 @@ struct Candidate {
 struct Cell {
   size_t                 index;
   std::vector<Candidate> candidates;
+  Ann_place              before;
 };
 struct Pair {
   Satlegalize_alignment alignment;
@@ -673,6 +674,42 @@ void overlap_clauses(Sat_solver& solver, const std::vector<Cell>& cells) {
   }
 }
 
+bool same_pose(const Ann_place& a, const Ann_place& b) { return a.x == b.x && a.y == b.y && a.orientation == b.orientation; }
+void limit_movement(Sat_solver& solver, const std::vector<Cell>& cells, unsigned maximum) {
+  if (!maximum || maximum >= cells.size()) {
+    return;
+  }
+  std::vector<int> previous;
+  for (const auto& cell : cells) {
+    const auto stay  = std::find_if(cell.candidates.begin(), cell.candidates.end(), [&](const auto& candidate) {
+      return same_pose(candidate.place, cell.before);
+    });
+    int        moved = 0;
+    if (stay == cell.candidates.end()) {
+      moved = solver.new_variable();
+      solver.clause({moved});
+    } else {
+      moved = -stay->literal;
+    }
+    // Sequential unary counter: current[j] is implied by at least j+1
+    // moved cells. Forbidding the last threshold enforces the whole-region
+    // bound, without fixing a subset of cells or shrinking the region.
+    std::vector<int> current(std::min<size_t>(previous.size() + 1, maximum + 1));
+    for (auto& bit : current) {
+      bit = solver.new_variable();
+    }
+    solver.clause({-moved, current[0]});
+    for (size_t j = 0; j < previous.size(); ++j) {
+      solver.clause({-previous[j], current[j]});
+      if (j + 1 < current.size()) {
+        solver.clause({-moved, -previous[j], current[j + 1]});
+      }
+    }
+    previous = std::move(current);
+  }
+  solver.clause({-previous.back()});
+}
+
 void encode_choices(Sat_solver& solver, std::vector<Candidate>& choices, const std::string& encoding) {
   std::vector<int> literals;
   for (auto& c : choices) {
@@ -730,13 +767,14 @@ void encode_choices(Sat_solver& solver, std::vector<Candidate>& choices, const s
 Satlegalize_report satlegalize(const ph::Technology& tech, ph::Floorplan& fp, const timing::Feedback& timing,
                                const Satlegalize_options& options) {
   if (!options.max_cells || options.max_cells > 65536 || !options.max_candidates || options.max_candidates > 128
-      || !options.max_pairs || options.max_pairs > 1024 || options.max_pairs_per_window > 1024 || !options.max_windows
-      || options.max_windows > 1024 || options.move_sites > 128 || options.move_rows > 16 || !std::isfinite(options.boundary_growth)
-      || options.boundary_growth < 0 || options.boundary_growth > 1 || !std::isfinite(options.region_width_um)
-      || !std::isfinite(options.region_height_um) || options.region_width_um < 0 || options.region_height_um < 0
-      || (options.region_width_um == 0) != (options.region_height_um == 0) || !std::isfinite(options.spill_slack_margin_ps)
-      || options.spill_slack_margin_ps < 0 || !std::isfinite(options.route_peak_floor) || options.route_peak_floor < 0
-      || options.route_peak_floor > 1 || options.macro_halo_x_dbu < 0 || options.macro_halo_y_dbu < 0
+      || !options.max_pairs || options.max_pairs > 1024 || options.max_pairs_per_window > 1024 || options.max_moved_cells > 128
+      || !options.max_windows || options.max_windows > 1024 || options.move_sites > 128 || options.move_rows > 16
+      || !std::isfinite(options.boundary_growth) || options.boundary_growth < 0 || options.boundary_growth > 1
+      || !std::isfinite(options.region_width_um) || !std::isfinite(options.region_height_um) || options.region_width_um < 0
+      || options.region_height_um < 0 || (options.region_width_um == 0) != (options.region_height_um == 0)
+      || !std::isfinite(options.spill_slack_margin_ps) || options.spill_slack_margin_ps < 0
+      || !std::isfinite(options.route_peak_floor) || options.route_peak_floor < 0 || options.route_peak_floor > 1
+      || options.macro_halo_x_dbu < 0 || options.macro_halo_y_dbu < 0
       || (options.encoding != "candidate" && options.encoding != "binary")) {
     throw std::invalid_argument("invalid satlegalize limits");
   }
@@ -894,7 +932,7 @@ Satlegalize_report satlegalize(const ph::Technology& tech, ph::Floorplan& fp, co
           ++window_stats.spill_eligible_cells;
         }
         if (cells.size() <= options.max_cells) {
-          cells.push_back({i, {}});
+          cells.push_back({i, {}, fp.components[i].place});
           selected.insert(i);
           if (options.route_grid && contains(window, bounds(fp.components[i].place))) {
             source_contained.insert(i);
@@ -1279,6 +1317,7 @@ Satlegalize_report satlegalize(const ph::Technology& tech, ph::Floorplan& fp, co
     if (impossible) {
       continue;
     }
+    limit_movement(solver, cells, options.max_moved_cells);
     if (advanced) {
       overlap_clauses(solver, cells);
     } else {
@@ -1448,6 +1487,13 @@ Satlegalize_report satlegalize(const ph::Technology& tech, ph::Floorplan& fp, co
     window_stats.movable_area_after = advanced ? density->load(window) : 0;
     window_stats.density_after      = window_stats.usable_area > 0 ? window_stats.movable_area_after / window_stats.usable_area : 0;
     for (const auto& cell : cells) {
+      const auto& place = fp.components[cell.index].place;
+      if (!same_pose(place, cell.before)) {
+        ++window_stats.moved_cells;
+        const double distance              = std::abs(double(place.x) - cell.before.x) + std::abs(double(place.y) - cell.before.y);
+        window_stats.displacement_dbu     += distance;
+        window_stats.max_displacement_dbu  = std::max(window_stats.max_displacement_dbu, distance);
+      }
       if (!intersects(bounds(fp.components[cell.index].place), window)) {
         ++window_stats.spilled_cells;
       }

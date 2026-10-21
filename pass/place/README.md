@@ -426,6 +426,16 @@ active. `sat_validation.json` records those acceptance gates and both timing
 snapshots. Native congestion estimates remain screening evidence; completed
 OpenROAD routing and extracted timing decide routed success.
 
+For already legal post-repair placements, the optional `max_moved_cells=1..128`
+adds a whole-region cardinality bound on cells whose position or orientation
+changes. Endpoints and neighbor spills both count. The default `0` is
+unbounded. This controls arbitrary movement in a feasibility-only SAT model;
+it is not a displacement optimum. It retains every region member and does not
+shrink a region or retry a smaller alignment prefix. A small bound can make
+packing an overlapping raw GP region infeasible, so this experiment targets
+post-repair seeds. Per-window proposed movement counts and Manhattan
+displacements are reported separately from final retained alignment counts.
+
 The remaining `synth.place.satlegalize.*` controls are `max_cells=24`,
 `max_candidates=12`, `max_windows=8`, `max_pairs=32`, `move_sites=4`,
 `move_rows=1`, `conflicts=10000`, `milliseconds=50`, `skip_conflicts=true` and
