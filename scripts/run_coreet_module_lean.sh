@@ -89,11 +89,46 @@ printf '// Empty anchor. Real CORE-ET sources arrive via yosys.filelist_file.\n'
 } > "$LOG_DIR/preflight.log"
 
 # ---------------------------------------------------------------------------
+# Per-module elaboration parameters (pass/lean/MODULE_PARAMS.tsv).
+#
+# A parameterized module elaborated as a TOP has no parameters. For
+# `txfma_adder` -- `parameter int unsigned Width = 0` -- that gives
+# `logic [-1:0]` ports and a slang refusal. The module is correct when
+# INSTANTIATED, so this is the harness elaborating a leaf as a top, not a
+# defect in the RTL.
+#
+# The assignment is tracked in a file rather than passed on a command line so
+# the certificate's claim -- "this MEMBER of the family" -- stays checkable
+# afterwards.
+#
+# These flags reach BOTH reads below, the implementation AND the LEC reference.
+# Giving them to only one elaborates two different designs and refutes them
+# against each other with nothing wrong in the tool.
+# ---------------------------------------------------------------------------
+PARAMS_TSV="${COREET_PARAMS_TSV:-$LIVEHD_ROOT/pass/lean/MODULE_PARAMS.tsv}"
+declare -a MODULE_PARAMS=()
+if [[ -r "$PARAMS_TSV" ]]; then
+  while IFS=$'\t' read -r _m _flags _why; do
+    [[ "$_m" == "$TOP" ]] || continue
+    # shellcheck disable=SC2206  # the flags are deliberately word-split
+    MODULE_PARAMS=($_flags)
+    echo "module params: $TOP $_flags  ($_why)"
+  done < <(grep -v '^#' "$PARAMS_TSV" | grep -v '^[[:space:]]*$')
+fi
+
+# ---------------------------------------------------------------------------
 # 1. RTL -> LGraph.  yosys-slang: the CVA6-proven reader, and its script runs an
 #    unconditional `flatten`, which is what lets step 2 see the latch prims as
 #    cells in the top graph instead of stateful Subs it would have to refuse.
 #    --relax-enum-conversions is REQUIRED (92 typedef enum in core-et; mk/yosys.mk
 #    passes it on every synthesis run).
+#
+#    --allow-use-before-declare: slang rejects a signal read above its
+#    declaration (intpipe_mul_div_top's start_mul_2p, vpu_defs_pkg's
+#    TXFMA_EXP_FRAC_OFFSET), which is legal in every other front end CORE-ET is
+#    built with. The relaxation changes elaboration ORDER only, never a value.
+#    It goes to BOTH reads for the same reason the module params do: a flag on
+#    one side only elaborates two different designs. Both readers accept it.
 # ---------------------------------------------------------------------------
 "$LHD" compile verilog "$ANCHOR" \
   --reader yosys-slang --top "$TOP" \
@@ -102,7 +137,8 @@ printf '// Empty anchor. Real CORE-ET sources arrive via yosys.filelist_file.\n'
   --set yosys.filelist_file="$FILELIST" \
   --set yosys.setundef=zero \
   ${YOSYS_MEMORY_MODE:+--set yosys.memory_mode="$YOSYS_MEMORY_MODE"} \
-  -- --ignore-assertions --relax-enum-conversions \
+  -- --ignore-assertions --relax-enum-conversions --allow-use-before-declare \
+  ${MODULE_PARAMS[@]+"${MODULE_PARAMS[@]}"} \
   > "$LOG_DIR/lhd_compile.log" 2>&1
 status=$?
 echo "compile exit=$status"
@@ -187,7 +223,8 @@ if [[ "$RUN_LEC_GATE" == "true" ]]; then
   "$LHD" compile --reader slang --top "$TOP" \
     --emit-dir lg:"$REF_LG" --workdir "$WORK_DIR/ref" \
     --result-json "$LOG_DIR/lec_ref_compile.json" \
-    -- -F "$FILELIST" --relax-enum-conversions \
+    -- -F "$FILELIST" --relax-enum-conversions --allow-use-before-declare \
+    ${MODULE_PARAMS[@]+"${MODULE_PARAMS[@]}"} \
     > "$LOG_DIR/lec_ref_compile.log" 2>&1
   ref_status=$?
   if [[ "$ref_status" -ne 0 ]]; then
