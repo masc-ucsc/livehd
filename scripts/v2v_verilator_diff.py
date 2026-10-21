@@ -101,31 +101,53 @@ def parse_ports(vpath, top):
     return ports
 
 
+def mask_expr(width):
+    """`& mask` for a <=64-bit port, or '' when the port fills its word."""
+    if width >= 64:
+        return ''
+    return ' & 0x{:x}ull'.format((1 << width) - 1)
+
+
 def cpp_member_write(name, width, expr_fn):
     """Poke a port whose C++ representation depends on its width.
 
     Verilator maps <=32 bits to a scalar, 33..64 to a 64-bit scalar, and wider to
     a VlWide word array. Getting this wrong is a compile error rather than a
     silent bug, which is why it is written out explicitly per width class.
+
+    The value is MASKED to the port's declared width. Verilator does not promise
+    anything about bits above a signal's width, so poking a wider value leaves
+    the two models free to mask it at different points -- which shows up as a
+    mismatch in a design that has none.
     """
     if width <= 64:
-        return '  dut->{} = {};\n'.format(name, expr_fn())
+        return '  dut->{} = ({}){};\n'.format(name, expr_fn(), mask_expr(width))
     words = (width + 31) // 32
     out = ''
+    tail = width - 32 * (words - 1)
     for w in range(words):
-        out += '  dut->{}[{}] = (uint32_t)({});\n'.format(name, w, expr_fn())
+        m = '' if tail >= 32 or w != words - 1 else ' & 0x{:x}u'.format((1 << tail) - 1)
+        out += '  dut->{}[{}] = (uint32_t)({}){};\n'.format(name, w, expr_fn(), m)
     return out
 
 
 def cpp_member_read(name, width):
-    """Print a port's value as hex, widest word first, so two runs diff cleanly."""
+    """Print a port's value as hex, widest word first, so two runs diff cleanly.
+
+    MASKED to the declared width, for the same reason the writes are: Verilator
+    leaves the bits above a signal's width undefined, and they differ between
+    two models of the same design. Reading them raw reports a 1-bit output as
+    `1` on one side and `3d` on the other when both carry the same bit 0 --
+    a mismatch in the harness, not in the design.
+    """
     if width <= 64:
-        return '  std::printf(" {}=%llx", (unsigned long long)dut->{});\n'.format(name, name)
+        return '  std::printf(" {}=%llx", (unsigned long long)dut->{}{});\n'.format(name, name, mask_expr(width))
     words = (width + 31) // 32
-    out = '  std::printf(" {}=", );\n'.replace(', ', '')  # placeholder replaced below
+    tail = width - 32 * (words - 1)
     out = '  std::printf(" {}=");\n'.format(name)
     for w in range(words - 1, -1, -1):
-        out += '  std::printf("%08x", (unsigned)dut->{}[{}]);\n'.format(name, w)
+        m = '' if tail >= 32 or w != words - 1 else ' & 0x{:x}u'.format((1 << tail) - 1)
+        out += '  std::printf("%08x", (unsigned)(dut->{}[{}]{}));\n'.format(name, w, m)
     return out
 
 
