@@ -98,9 +98,9 @@ static int split_selfref_pass(hhds::Graph* g, int& unresolved_out, unsigned& sto
     return a.get_debug_nid() < b.get_debug_nid();
   });
   if (std::getenv("LIVEHD_SIM_SPLIT_DEBUG") != nullptr) {
-    std::print("split[dbg]: {} comb node(s), {} on a word-level cycle\n", comb_nodes.size(), in_cycle.size());
+    std::print(stderr, "split[dbg]: {} comb node(s), {} on a word-level cycle\n", comb_nodes.size(), in_cycle.size());
     for (auto& n : in_cycle) {
-      std::print("split[dbg]:   on-cycle {}\n", gu::debug_name(n));
+      std::print(stderr, "split[dbg]:   on-cycle {}\n", gu::debug_name(n));
     }
   }
   if (in_cycle.empty()) {
@@ -342,7 +342,7 @@ static int split_selfref_pass(hhds::Graph* g, int& unresolved_out, unsigned& sto
     const bool bad_shape   = v.is_invalid() || lo < 0 || hi <= lo;
     if (too_deep || bad_shape || over_budget) {
       if (split_dbg) {
-        std::print("split[dbg]: refuse depth={} lo={} hi={} created={} total={} invalid={}\n",
+        std::print(stderr, "split[dbg]: refuse depth={} lo={} hi={} created={} total={} invalid={}\n",
                    depth,
                    lo,
                    hi,
@@ -374,7 +374,7 @@ static int split_selfref_pass(hhds::Graph* g, int& unresolved_out, unsigned& sto
       // the slice's own value is on the current resolution path: a genuine
       // bit-level self-dependency -- permanently unresolvable
       if (split_dbg) {
-        std::print("split[dbg]: on-stack self-dependency [{},{}) depth={}\n", lo, hi, depth);
+        std::print(stderr, "split[dbg]: on-stack self-dependency [{},{}) depth={}\n", lo, hi, depth);
       }
       memo.emplace(key, hhds::Pin_class{});
       return {};
@@ -461,7 +461,7 @@ static int split_selfref_pass(hhds::Graph* g, int& unresolved_out, unsigned& sto
               // report blames whichever limit fired last (the conflation the
               // enum exists to remove).
               if (split_dbg) {
-                std::print("split[dbg]:   Sum low-slice refused: signed addend bits={} < hi={}\n", dbits, hi);
+                std::print(stderr, "split[dbg]:   Sum low-slice refused: signed addend bits={} < hi={}\n", dbits, hi);
               }
               stop_reasons |= kStopShape;  // diagnostic only: this refusal is PERMANENT,
               low_ok        = false;       // so it must stay memoizable (cap_hit untouched)
@@ -583,10 +583,10 @@ static int split_selfref_pass(hhds::Graph* g, int& unresolved_out, unsigned& sto
           int k = static_cast<int>(kc.to_just_i64());
           res   = self(self, drv_at(m, 0), lo + k, hi + k, depth + 1);
         } else if (split_dbg) {
-          std::print("split[dbg]:   sra amount const but unknowns/neg/wide\n");
+          std::print(stderr, "split[dbg]:   sra amount const but unknowns/neg/wide\n");
         }
       } else if (split_dbg) {
-        std::print("split[dbg]:   sra amount NON-CONST (dynamic shift)\n");
+        std::print(stderr, "split[dbg]:   sra amount NON-CONST (dynamic shift)\n");
       }
     } else if (op == Ntype_op::Sext) {
       // Sext(a, b) keeps bits [0,b) of `a` and fills everything at or above b
@@ -646,13 +646,13 @@ static int split_selfref_pass(hhds::Graph* g, int& unresolved_out, unsigned& sto
             // [lo,b) kept + [b,hi) sign-filled. A 1-bit read -- what this chain
             // actually asks for -- can never land here, so leave it unresolved
             // rather than grow a concat whose value equality no test pins yet.
-            std::print("split[dbg]:   sext slice straddles the sign at b={}\n", b);
+            std::print(stderr, "split[dbg]:   sext slice straddles the sign at b={}\n", b);
           }
         } else if (split_dbg) {
-          std::print("split[dbg]:   sext width const but unknowns/neg/zero/wide\n");
+          std::print(stderr, "split[dbg]:   sext width const but unknowns/neg/zero/wide\n");
         }
       } else if (split_dbg) {
-        std::print("split[dbg]:   sext width NON-CONST\n");
+        std::print(stderr, "split[dbg]:   sext width NON-CONST\n");
       }
     } else if (op == Ntype_op::Mux) {
       // Distribute the slice through the arms: Get_mask(mux(s, xs...), m) ==
@@ -760,7 +760,7 @@ static int split_selfref_pass(hhds::Graph* g, int& unresolved_out, unsigned& sto
             }
             if (whole_w == 0) {
               if (split_dbg) {
-                std::print("split[dbg]:   control operand {} bits={} unsigned={} has no complete bound\n",
+                std::print(stderr, "split[dbg]:   control operand {} bits={} unsigned={} has no complete bound\n",
                            Ntype::get_name(gu::type_op_of(d.get_master_node())),
                            db,
                            gu::is_unsign(d));
@@ -770,7 +770,7 @@ static int split_selfref_pass(hhds::Graph* g, int& unresolved_out, unsigned& sto
             }
             d = self(self, d, 0, whole_w, depth + 1);
             if (split_dbg) {
-              std::print("split[dbg]:   control operand complete width={} -> {}\n", whole_w, d.is_invalid() ? "FAIL" : "ok");
+              std::print(stderr, "split[dbg]:   control operand complete width={} -> {}\n", whole_w, d.is_invalid() ? "FAIL" : "ok");
             }
           }
           if (d.is_invalid()) {
@@ -917,7 +917,7 @@ static int split_selfref_pass(hhds::Graph* g, int& unresolved_out, unsigned& sto
       }
     }
     if (split_dbg && res.is_invalid()) {
-      std::print("split[dbg]: unresolved {} [{},{}) depth={}\n", Ntype::get_name(op), lo, hi, depth);
+      std::print(stderr, "split[dbg]: unresolved {} [{},{}) depth={}\n", Ntype::get_name(op), lo, hi, depth);
     }
     if (!res.is_invalid() || cap_hit == cap_before) {
       // memoize successes always; memoize failures only when NOT tainted by a
@@ -934,6 +934,7 @@ static int split_selfref_pass(hhds::Graph* g, int& unresolved_out, unsigned& sto
   // graph (created helper nodes are new and never on the cycle).
   std::vector<std::tuple<hhds::Node_class, hhds::Pin_class, int>>             gm_rewires;   // (reader, resolved, new mask)
   std::vector<std::tuple<hhds::Node_class, hhds::Pin_class, hhds::Pin_class>> and_rewires;  // (And, old SRA driver, resolved)
+  std::vector<std::tuple<hhds::Node_class, hhds::Pin_class, hhds::Pin_class>> sext_rewires;  // (Sext, old operand, resolved)
   int      unresolved_on_cycle = 0;  // on-cycle bit-field reads we could not dissolve (diagnostic)
   unsigned any_stop_reasons    = 0;  // ... and WHICH limit stopped them (kStop* bits)
   for (auto& R : comb_nodes) {       // == in_cycle, sorted for a deterministic visit order
@@ -1016,7 +1017,7 @@ static int split_selfref_pass(hhds::Graph* g, int& unresolved_out, unsigned& sto
       }
       auto res = resolve(resolve, wd, k, k + j, 0);
       if (split_dbg) {
-        std::print("split[dbg]: And-reader j={} k={} sra={} -> {}\n",
+        std::print(stderr, "split[dbg]: And-reader j={} k={} sra={} -> {}\n",
                    j,
                    k,
                    gu::type_op_of(sm) == Ntype_op::SRA,
@@ -1028,6 +1029,82 @@ static int split_selfref_pass(hhds::Graph* g, int& unresolved_out, unsigned& sto
         continue;
       }
       and_rewires.emplace_back(R, other, res);
+    } else if (rop == Ntype_op::Sext) {
+      // (c) Sext(w, n) or Sext(SRA(w, const k), n): the SIGNED field w[k +: n].
+      //
+      // Forms (a) and (b) both zero-extend, so neither can spell a read that
+      // KEEPS its sign; yosys emits this instead, and CSR files are full of it.
+      // The pass used to walk straight past the shape -- not a refusal, an
+      // unrecognised form, which is why it could warn about nothing while the
+      // cycle survived into pass.lean.
+      auto nd = drv_at(R, 1);
+      if (nd.is_invalid() || !nd.is_const()) {
+        continue;  // non-constant sign position
+      }
+      const auto& nc = gu::const_of(nd);
+      if (nc.has_unknowns() || nc.is_negative() || !nc.is_just_i64()) {
+        continue;
+      }
+      // VALIDATE AT 64 BITS, NARROW AFTERWARDS. A constant wider than `int`
+      // wraps on the cast -- a positive 2^40 sign position becomes 0 -- and
+      // `k + n` can overflow before any range test sees it. Both are silent,
+      // and both would hand `resolve` a slice that is not the field.
+      const int64_t n64 = nc.to_just_i64();
+      auto          vd  = drv_at(R, 0);
+      if (vd.is_invalid() || vd.is_const()) {
+        continue;
+      }
+      int64_t k64 = 0;
+      auto    wd  = vd;  // direct `$signed(w[0 +: n])` with no shift
+      auto    sm  = vd.get_master_node();
+      if (gu::type_op_of(sm) == Ntype_op::SRA) {
+        auto kd = drv_at(sm, 1);
+        if (kd.is_invalid() || !kd.is_const()) {
+          continue;  // dynamic shift: the field position is not a constant
+        }
+        const auto& kc = gu::const_of(kd);
+        if (kc.has_unknowns() || kc.is_negative() || !kc.is_just_i64()) {
+          continue;
+        }
+        k64 = kc.to_just_i64();
+        wd  = drv_at(sm, 0);
+        if (wd.is_invalid() || wd.is_const()) {
+          continue;
+        }
+      }
+      // OUT OF RANGE IS A REFUSAL, not a zero fill. Above the packed word's own
+      // width an arithmetic shift yields the word's replicated SIGN, and
+      // `resolve`'s Or/footprint descent would answer "outside every operand ->
+      // zero" instead. That is only the same answer for a non-negative word, so
+      // reading past the end is declined rather than guessed.
+      //
+      // `k > wb - n` and not `k + n > wb`: the sum can overflow, the difference
+      // cannot once `0 < n <= wb` is already proved.
+      const int64_t wb64 = static_cast<int64_t>(gu::bits_of(wd));
+      if (wb64 <= 0 || n64 <= 0 || n64 > wb64 || k64 < 0 || k64 > wb64 || k64 > wb64 - n64) {
+        if (split_dbg) {
+          std::print(stderr, "split[dbg]: Sext-reader REFUSE k={} n={} word_bits={} (out of range)\n", k64, n64, wb64);
+        }
+        continue;
+      }
+      const int n   = static_cast<int>(n64);  // both now proved to lie in [1, wb]
+      const int k   = static_cast<int>(k64);
+      const int wb  = static_cast<int>(wb64);
+      auto      res = resolve(resolve, wd, k, k + n, 0);
+      if (split_dbg) {
+        std::print(stderr, "split[dbg]: Sext-reader n={} k={} sra={} word_bits={} -> {}\n",
+                   n,
+                   k,
+                   gu::type_op_of(sm) == Ntype_op::SRA,
+                   wb,
+                   res.is_invalid() ? "FAIL" : "ok");
+      }
+      if (res.is_invalid()) {
+        ++unresolved_on_cycle;
+        any_stop_reasons |= stop_reasons;
+        continue;
+      }
+      sext_rewires.emplace_back(R, vd, res);
     }
   }
 
@@ -1055,7 +1132,21 @@ static int split_selfref_pass(hhds::Graph* g, int& unresolved_out, unsigned& sto
     // their (possibly still cyclic) reads and fail loudly if unresolvable.
     res.connect_sink(livehd::graph_util::setup_sink_pid(A, static_cast<hhds::Port_id>(0)));
   }
-  const int nrew   = static_cast<int>(gm_rewires.size() + and_rewires.size());
+  for (auto& [S, oldd, res] : sext_rewires) {
+    // SNAPSHOT before mutating: the body deletes the edge it stands on.
+    for (auto sink : S.inp_pins_snapshot()) {
+      if (auto drv = sink.get_driver_pin(); drv == oldd) {
+        sink.del_sink(drv);
+      }
+    }
+    // Sext(res, n) == Sext(SRA(word, k), n): resolve returned the field packed
+    // down to [0,n), whose low n bits -- and therefore whose bit n-1 sign -- are
+    // the same. The sign-position operand (pid 1) is untouched. Any other
+    // consumer of the old SRA keeps its own read and fails loudly if it cannot
+    // be resolved.
+    res.connect_sink(livehd::graph_util::setup_sink_pid(S, static_cast<hhds::Port_id>(0)));
+  }
+  const int nrew   = static_cast<int>(gm_rewires.size() + and_rewires.size() + sext_rewires.size());
   // Report the survivors to the caller (the iterating wrapper decides whether to
   // warn -- an intermediate round leaves nested reads unresolved only because the
   // next round's rewrites are not applied yet, so warning per pass would spam).
