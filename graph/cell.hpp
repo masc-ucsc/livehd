@@ -168,6 +168,37 @@ public:
   // anything other than "not negedge".
   static constexpr int Memory_posclk_mixed = 2;
 
+  // Memory READ-PORT TIMING.
+  //
+  // `type` is a SCALAR: 0 = asynchronous read, 1 = synchronous read, 2 = a
+  // combinational array. Yosys keeps a BIT PER READ PORT in RD_CLK_ENABLE, and
+  // collapsing that whole bitmask into `type` with `as_int()` is lossy in a way
+  // that ALIASES: masks 0 and 1 coincide with the scalar meaning by accident, so
+  // the one- and two-port cases look fine, but one async plus one sync read
+  // gives mask 0b10 = 2, which reads as "combinational array", and five ports
+  // with the top two registered gives 24.
+  //
+  // Measured on a five-port mixed memory: pass.lean refuses by name -- fail
+  // closed -- but cgen_verilog took the array path and emitted a STATELESS
+  // combinational lookup, the two synchronous read registers simply gone.
+  //
+  // So `type` keeps its documented scalar meaning and gains a MIXED sentinel,
+  // exactly as `posclk` did above, while the AUTHORITATIVE per-port timing lives
+  // in each read port's own `rdport` pin. Do not infer timing from `type` alone:
+  // the sentinel says "ask the ports", and scalar 2 means array, not a mask.
+  static constexpr int Memory_type_async = 0;
+  static constexpr int Memory_type_sync  = 1;
+  static constexpr int Memory_type_array = 2;
+  static constexpr int Memory_type_mixed = 3;
+
+  // Per-port `rdport` (base offset 10). Widened from the boolean {0 = write,
+  // 1 = read}: every existing consumer decides with `!is_known_false()` or
+  // `!= 0`, so a 2 still reads as "this is a read port" and nothing that
+  // ignores timing needs to change.
+  static constexpr int Memory_rdport_write = 0;
+  static constexpr int Memory_rdport_async = 1;
+  static constexpr int Memory_rdport_sync  = 2;
+
 protected:
   // Dense: indexed by Ntype_op underlying value.
   inline static constexpr auto cell_name_sv = []() {

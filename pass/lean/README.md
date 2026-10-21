@@ -46,7 +46,8 @@ Pass_lean / LeanOptions                                 pass_lean.cpp, lean_opti
 - `memory_lowering.*` — per-read forwarding chains, byte-enable writes,
   immutable ROM images, and synchronous read registers.  It never reads a graph.
 - `design_io_meta.*` — the `<Top>_io.json` sidecar (input/output ordinals,
-  widths, clocks), built from the same scan and certificate as the Lean file.
+  widths, clocks, and every flop's name in runtime order), built from the same
+  scan and certificate as the Lean file.
 - `lean_format.*` — shared literals, collections, lookup trees, operation
   spelling, and atomic file publication.
 - `emit_design_cert.*` — `verified_compiler`: the `<Top>_designCert` literal.
@@ -664,3 +665,145 @@ Real CVA6 SRAM (`tc_sram`) via the module stress runner:
 cd <livehd>
 CVA6_TOP=tc_sram LEAN_EMIT_CERT=true scripts/run_cva6_module_lean_stress.sh
 ```
+
+## Unbounded proofs on the projection simulator (`sym_verify`, `sym_refine`)
+
+A design's unbounded properties (invariants, refinement with stuttering) are checked on
+the residual of the Futamura projection, the same artifact the FP simulator runs. The
+checker is proved sound once for every design (`formal/lean/LeanSemanticPrimitives/
+Projection/Sym/*`); a run per design only produces obligations and checks proofs.
+No per-design Lean proof is written.
+
+The pipeline of one run:
+
+1. The interpreter is specialized to the certificate, giving the residual
+   (`MemFused.projectMemFDesignAt`, a trusted native run).
+2. The residual is evaluated symbolically: one step of the design as a circuit over the state and inputs.
+3. The obligations are built: base and step of k-induction, or one step obligation per conjunct and case.
+4. Each obligation is bit-blasted to CNF (`Std.Tactic.BVDecide`).
+5. cadical is run with `--lrat`. It is untrusted.
+6. Lean's `LRAT.check` checks the proofs.
+7. The verified checker accepts or rejects. Its acceptance is one of the theorems `runInvKOf_sound_ref`, `runConjTOf_sound_ref` or `runRefKOf_sound_ref`, each over `interpretDesign`.
+
+**Trusted:**
+- the front end and certificate exporter;
+- the native execution of the specializer and of the checker;
+- the Lean kernel.
+
+### Build
+
+```bash
+# lhd (see Build above); the native drivers, into a project-local root:
+cd formal/lean
+ROOT=$PWD/../../generated/sym/nat_root
+OPT=-O2 ROOT=$ROOT bash scripts/build-opt.sh scripts/sym_verify.lean scripts/sym_refine.lean
+# the solver: cadical ships with the Lean toolchain; link it next to the drivers
+# (or pass solver:<path>)
+ln -s "$(dirname "$(elan which lean)")/cadical" $ROOT/nat/cadical   # still in formal/lean
+```
+
+The self-test runs the whole flow on small fixtures (counters, a two-phase accumulator, a
+pair of registers, two cores with a case split):
+
+```bash
+SYM_NAT=<root>/nat LHD=<lhd> bash pass/lean/scripts/sym_selftest.sh
+```
+
+### Export a design
+
+```bash
+lhd compile top.sv --reader yosys-slang --top top --set yosys.setundef=zero \
+    --emit-dir lg:$W/lg --workdir $W/w1
+lhd pass single_edge --top top lg:$W/lg --emit-dir lg:$W/se --workdir $W/w2
+lhd compile lg:$W/se --top top --emit-dir lean:$W/lean --workdir $W/w3 \
+    --set formal.lean.mode=verified_compiler --set formal.lean.max_width=0
+```
+
+This writes `$W/lean/top.dcert` and `$W/lean/top_io.json`. The sidecar names every input,
+every output, and every flop in runtime order, e.g. `cpu_state[3]` or `mem[1][7]`. Properties,
+specs and counterexamples refer to those names.
+
+A relation or observer is ordinary RTL: add it to the design as extra outputs, one per
+property or conjunct, then export as above.
+
+### Invariants and k-induction
+
+```bash
+sym_verify top.dcert '!bad' k:1,2 work:$W/sym
+sym_verify top.dcert 'inv_a,inv_b' asm:in_reset in:rst_ni=0 k:1
+```
+
+- **Properties.** An output name means "nonzero"; `!` means "zero". A comma-separated list gives candidates; the first one proved wins.
+- **Assumptions.** `asm:<output>` and `in:<input>=<value>` say which cycles count.
+- **Initial state.** All flops and memory words are zero.
+- **Result lines.**
+  - `INVARIANT PROVED (k=…)`;
+  - `COUNTEREXAMPLE (base)`, decoded and replayed on the simulator;
+  - `NOT K-INDUCTIVE (step)`.
+- **F2 theorem file.** `emit:<file>` writes the proved property as a theorem.
+
+### Conjunctive invariants (`conj:<spec>`)
+
+A relation is given as many named conjuncts. Each conjunct's step obligation assumes only
+its hypotheses and is solved on its own, in parallel, so a failure names one conjunct.
+
+```bash
+sym_verify top.dcert conj:rel.spec sf:20000000 wf:500000 jobs:12 work:$W/sym
+```
+
+Spec format: one conjunct (or one group of conjuncts) per line.
+
+```text
+<name> [!]<output>                    an output is nonzero (zero with !)
+<name> eq <reg> <reg>                 two registers are equal (bit by bit for a register base name)
+<name> eqif <case> <reg> <reg>        ... whenever <case> holds
+<name> oneof <case>;<case>;...        the state is in one of these cases
+... hyps: <name> <name> ...           the conjuncts this one's step may assume (default: all)
+... split: <name of a oneof>          check this conjunct once per case of that oneof
+<case> = <reg>=<value>[,<reg>=<value>...]
+```
+
+How the checker uses these lines:
+- **Register equalities.** An `eq`, and an `eqif` whose case holds, make the step state use one variable for both registers. Identical next-state logic then becomes identical expressions.
+- **Case splits.** With `split:`, the case's registers are constants, so the control logic folds to one branch per case.
+- **Cone of influence.** Each obligation keeps only the definitions its own formula reaches.
+
+**Options:**
+
+| option | meaning |
+|---|---|
+| `jobs:<n>` | obligations solved in parallel (default 8) |
+| `runs:<n>` | per-case symbolic runs built at a time (default: `jobs`) |
+| `sf:<n>`, `wf:<n>` | specializer and walk fuel |
+| `solver:<path>` | the cadical binary |
+| `work:<dir>` | where CNF, LRAT and counterexample files go |
+| `replay` | also replays step counterexamples on the simulator |
+
+Output: one line per obligation (target, case, clause count, solver time, verdict). Then
+`RESULT: INVARIANT PROVED (conjunctive, k=1)`, or `NOT INDUCTIVE (step): not preserved
+under their hypotheses: [...]`.
+
+**Counterexamples.** A step that is not preserved is decoded into
+`<work>/cti_<target>.txt`. It contains:
+- the conjuncts false at cycle 0 and at cycle 1, evaluated on the decoded state;
+- the nonzero inputs of both cycles;
+- the registers that change;
+- the whole cycle-0 state, by register name.
+
+An agent iterates on these files: decide from the RTL which fact is missing or wrong,
+change the relation or the spec, and rerun. A cycle-0 list that is not empty names
+conjuncts left out of the target's `hyps:`. The report is diagnostic only; verdicts never
+depend on it.
+
+### Refinement with stuttering (`sym_refine`)
+
+```bash
+sym_refine impl.dcert spec.dcert pair:<implOut>=<specOut> [adv:[!]<implOut>] \
+    [map:<specIn>=<implIn>] [stateq] k:1,2,3
+```
+
+- **What is proved.** The implementation refines the specification up to stuttering.
+- **Witness and stuttering.** The specification steps only on cycles where the witness `adv` fires; without `adv`, the two designs step in lockstep.
+- **Output correspondence.** Every `pair:` must agree on every witnessed cycle.
+- **`stateq`.** Also requires equal next states, which an identity refinement needs.
+- **Counterexamples.** They are decoded and replayed on both simulators.

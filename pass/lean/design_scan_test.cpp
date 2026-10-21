@@ -2151,6 +2151,36 @@ TEST(DesignIoMeta, PreservesOrdinalsGapsAndIgnoredPorts) {
   EXPECT_EQ(meta.outputs[0].name, "z");
 }
 
+// Proof tools name a design's registers through the sidecar: one entry per
+// CERTIFICATE flop, in the runtime state order, with the scan's register name.
+// An entry out of order would attach a fact about one register to another.
+TEST(DesignIoMeta, FlopsAreNamedInRuntimeOrder) {
+  const std::vector<ResetFlopSpec> specs{{"clk", false, false, 3, false}, {"clk", true, false, 5, true}};
+  auto                             g      = build_reset_flops("lgdb_io_meta_flops", specs);
+  const auto                       design = scan_design(*g, {});
+  const auto                       cert   = build_certificate(design, {});
+  const auto                       meta   = build_io_meta(design, cert);
+
+  ASSERT_EQ(meta.flops.size(), cert.flops.size());
+  ASSERT_EQ(meta.flops.size(), 2u);
+  std::map<uint32_t, std::string> raw;
+  for (const auto& f : design.flops) {
+    raw[f.id] = f.raw_name;
+  }
+  std::set<std::string> names;
+  for (size_t k = 0; k < meta.flops.size(); ++k) {
+    EXPECT_EQ(meta.flops[k].ordinal, k) << "flop ordinals are not the runtime index";
+    EXPECT_EQ(meta.flops[k].width, cert.flops[k].width);
+    EXPECT_EQ(meta.flops[k].name, raw.at(cert.flops[k].origin)) << "a name is attached to the wrong flop";
+    EXPECT_FALSE(meta.flops[k].name.empty());
+    names.insert(meta.flops[k].name);
+  }
+  EXPECT_EQ(names.size(), meta.flops.size()) << "two flops share a name";
+  const auto json = io_meta_json(meta);
+  EXPECT_NE(json.find("\"flops\": ["), std::string::npos);
+  EXPECT_NE(json.find(meta.flops[1].name), std::string::npos);
+}
+
 // A RESET-ONLY port is referenced through `flopQAsync` and is never an `.input`
 // source. Computing arity from inputs alone makes it too small, and
 // `checkRuntime` then rejects an array the caller built correctly.

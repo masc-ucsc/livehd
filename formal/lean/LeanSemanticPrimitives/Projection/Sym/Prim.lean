@@ -272,8 +272,50 @@ theorem symBvWidth_sound {σ : Asg} {ss : List SVal} {vs : List Val} {s : SVal} 
     simp only [evalPrim, hb, Except.ok.injEq] at he; subst he
     rw [hbw]; exact .conc
 
+/-- A bit vector read as its unsigned integer: CONCRETE when the vector is a
+literal (so a constant state bit decides the comparisons and branches it
+feeds while the residual is evaluated), symbolic otherwise. -/
+def uintOf {w : Nat} (e : BVExpr w) : SVal :=
+  match e with
+  | .const c => .conc (.int (c.toNat : Int))
+  | e => .int (SInt.ofUint e)
+
+theorem uintOf_rel {σ : Asg} {w : Nat} {e : BVExpr w} {b : BV} (hu : bv_uint b = ((e.eval σ).toNat : Int)) :
+    SRel σ (uintOf e) (.int (bv_uint b)) := by
+  cases e with
+  | const c => simp only [uintOf]; rw [hu, BVExpr.eval_const]; exact .conc
+  | _ => exact .int (by rw [SInt.val_ofUint, hu])
+
+/-- The signed reading, concrete on a literal. -/
+def sintOf {w : Nat} (e : BVExpr w) : SVal :=
+  match e with
+  | .const c => .conc (.int c.toInt)
+  | e => .int (SInt.ofSint e)
+
+theorem sintOf_rel {σ : Asg} {w : Nat} {e : BVExpr w} {b : BV} (hw : b.width = w)
+    (hu : bv_uint b = ((e.eval σ).toNat : Int)) : SRel σ (sintOf e) (.int (bv_sint b)) := by
+  cases e with
+  | const c =>
+      simp only [sintOf]
+      have := sint_rel hw hu
+      rw [BVExpr.eval_const] at this
+      rw [this]; exact .conc
+  | _ => exact .int (by rw [SInt.val_ofSint, sint_rel hw hu])
+
+/-- Bit `i` of a vector, concrete on a literal. -/
+def bitOfE {w : Nat} (e : BVExpr w) (i : Nat) : SVal :=
+  match e with
+  | .const c => .conc (.bool (c.getLsbD i))
+  | e => .bool (.extract i 1 e)
+
+theorem bitOfE_rel {σ : Asg} {w : Nat} (e : BVExpr w) (i : Nat) (hi : i < w) :
+    SRel σ (bitOfE e i) (.bool ((e.eval σ).getLsbD i)) := by
+  cases e with
+  | const c => simp only [bitOfE, BVExpr.eval_const]; exact .conc
+  | _ => exact .bool (by simp [bitOf, hi])
+
 def symBvUint : List SVal → Option SVal
-  | [x] => (asSBV x).map (fun p => .int (SInt.ofUint p.2))
+  | [x] => (asSBV x).map (fun p => uintOf p.2)
   | _ => none
 
 theorem symBvUint_sound {σ : Asg} {ss : List SVal} {vs : List Val} {s : SVal} {v : Val}
@@ -286,10 +328,10 @@ theorem symBvUint_sound {σ : Asg} {ss : List SVal} {vs : List Val} {s : SVal} {
     obtain ⟨vx, rfl, rx⟩ := SRelL_one hr
     obtain ⟨b, hb, _, hu⟩ := asSBV_sound rx hx
     simp only [evalPrim, hb, Except.ok.injEq] at he; subst he
-    exact .int (by rw [SInt.val_ofUint, hu])
+    exact uintOf_rel hu
 
 def symBvSint : List SVal → Option SVal
-  | [x] => (asSBV x).map (fun p => .int (SInt.ofSint p.2))
+  | [x] => (asSBV x).map (fun p => sintOf p.2)
   | _ => none
 
 theorem symBvSint_sound {σ : Asg} {ss : List SVal} {vs : List Val} {s : SVal} {v : Val}
@@ -302,13 +344,13 @@ theorem symBvSint_sound {σ : Asg} {ss : List SVal} {vs : List Val} {s : SVal} {
     obtain ⟨vx, rfl, rx⟩ := SRelL_one hr
     obtain ⟨b, hb, hw, hu⟩ := asSBV_sound rx hx
     simp only [evalPrim, hb, Except.ok.injEq] at he; subst he
-    exact .int (by rw [SInt.val_ofSint, sint_rel hw hu])
+    exact sintOf_rel hw hu
 
 def symBvBit : List SVal → Option SVal
   | [x, i] => do
       let ⟨w, e⟩ ← asSBV x
       let iz ← cIntOf i
-      pure (if 0 ≤ iz ∧ iz.toNat < w then .bool (.extract iz.toNat 1 e) else .conc (.bool false))
+      pure (if 0 ≤ iz ∧ iz.toNat < w then bitOfE e iz.toNat else .conc (.bool false))
   | _ => none
 
 theorem symBvBit_sound {σ : Asg} {ss : List SVal} {vs : List Val} {s : SVal} {v : Val}
@@ -326,7 +368,8 @@ theorem symBvBit_sound {σ : Asg} {ss : List SVal} {vs : List Val} {s : SVal} {v
     rw [testBit_eq_bv_bit hu]
     split
     · rename_i hc
-      exact .bool (by simp [bitOf, hc.1])
+      have := bitOfE_rel (σ := σ) e iz.toNat hc.2
+      simpa [hc.1] using this
     · rename_i hc
       have : (decide (0 ≤ iz) && (e.eval σ).getLsbD iz.toNat) = false := by
         by_cases h0 : 0 ≤ iz

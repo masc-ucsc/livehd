@@ -13,10 +13,14 @@ stays about the proved `mixDriver` (`mixDriver_iff`, `projectDesign_correct`,
 shift quadratic (certio/PHASE6_PERF.md 39).
 
 The proof is a simulation.  `rep` reads an S3 partial value as the proved one
-it stands for -- `rep (.shifted k v) = PVal.shift k (rep v)` -- and `repR` does
-the same for results.  Every helper S3 changed commutes with `rep`/`repR`, and
-`mixTerm` & co. are the proved code over those helpers, so the specializers
-agree step for step.
+it stands for -- `rep (.shifted k v) = PVal.shift k (rep v)`, and an array
+spine `rep (.dyns cs t)` is the cons chain of its chunks' leaves onto `rep t`
+-- and `repR` does the same for results.  Every helper S3 changed commutes with
+`rep`/`repR` (for the array spine: `rep_mkCons`, `walkHeadAt_rep`,
+`rep_hnfAt`, `toCodeAt_rep`, `toPResAt_rep`, over the leaf lemmas of section
+1b), and `mixTerm` & co. are the proved code over those helpers, so the
+specializers agree step for step.  No invariant is involved: every chunk is a
+valid chunk, so the simulation holds for EVERY S3 environment.
 
 DEPENDENCIES ARE KEPT LIGHT ON PURPOSE: `@[csimp]` only rewrites callers that
 are compiled with this file in scope, so the modules that call `mixDriver`
@@ -32,12 +36,28 @@ namespace S3Correct
 
 /-! ## 1. Representation -/
 
-/-- What an S3 partial value stands for. -/
+/-- The leaves an array chunk stands for, offset applied. -/
+def chunkElems (c : S3.DChunk) : List Nat := (c.arr.toList.drop c.start).map (· + c.sh)
+
+/-- The leaves of a chunk list, in order. -/
+def chunksElems : List S3.DChunk → List Nat
+  | []      => []
+  | c :: cs => chunkElems c ++ chunksElems cs
+
+/-- Dynamic leaves consed onto a spine. -/
+def consDyns : List Nat → PVal → PVal
+  | [],      x => x
+  | y :: ys, x => .cons (.dyn y) (consDyns ys x)
+
+/-- What an S3 partial value stands for.  An array spine is the cons chain of
+its leaves: nothing about a chunk is assumed, so `rep` is total and no
+invariant has to be threaded through the simulation. -/
 def rep : S3.PVal → PVal
   | .stat v      => .stat v
   | .dyn i       => .dyn i
   | .cons a b    => .cons (rep a) (rep b)
   | .shifted k v => PVal.shift k (rep v)
+  | .dyns cs t   => consDyns (chunksElems cs) (rep t)
 
 /-- What an S3 result stands for: the same constructor, with `rep` on the
 partial values inside. -/
@@ -59,6 +79,125 @@ theorem shift_zero : ∀ v : PVal, PVal.shift 0 v = v
   | .dyn _    => by simp [PVal.shift]
   | .cons a b => by simp [PVal.shift, shift_zero a, shift_zero b]
 
+/-! ## 1b. The array spine: its leaves, chunk by chunk -/
+
+theorem shift_consDyns (k : Nat) : ∀ (ys : List Nat) (x : PVal),
+    PVal.shift k (consDyns ys x) = consDyns (ys.map (· + k)) (PVal.shift k x)
+  | [],      _ => rfl
+  | _ :: ys, x => by simp [consDyns, PVal.shift, shift_consDyns k ys x]
+
+theorem walkHead_consDyns : ∀ (ys : List Nat) (x : PVal) (n : Nat),
+    walkHead (consDyns ys x) n =
+      match ys[n]? with
+      | some y => some (.dyn y)
+      | none   => walkHead x (n - ys.length)
+  | [],      _, _     => by simp [consDyns]
+  | _ :: _,  _, 0     => by simp [consDyns, walkHead]
+  | _ :: ys, x, n + 1 => by
+      simp only [consDyns, walkHead, List.getElem?_cons_succ, List.length_cons,
+        Nat.add_sub_add_right]
+      exact walkHead_consDyns ys x n
+
+theorem toCode_consDyns : ∀ (ys : List Nat) (x : PVal),
+    PVal.toCode (consDyns ys x) = ys.foldr (fun y r => .prim .consP [.var y, r]) (PVal.toCode x)
+  | [],      _ => rfl
+  | _ :: ys, x => by simp [consDyns, PVal.toCode, toCode_consDyns ys x]
+
+theorem toPRes_consDyns : ∀ (ys : List Nat) (x : PVal),
+    PVal.toPRes (consDyns ys x) = ys.foldr (fun y r => .cons (.code (.var y)) r) (PVal.toPRes x)
+  | [],      _ => rfl
+  | _ :: ys, x => by simp [consDyns, PVal.toPRes, toPRes_consDyns ys x]
+
+theorem length_chunkElems (c : S3.DChunk) : (chunkElems c).length = c.size := by
+  simp [chunkElems, S3.DChunk.size]
+
+theorem getElem?_chunkElems (c : S3.DChunk) (n : Nat) :
+    (chunkElems c)[n]? = if n < c.size then some (c.arr.getD (c.start + n) 0 + c.sh) else none := by
+  unfold chunkElems S3.DChunk.size
+  split
+  · rw [List.getElem?_map, List.getElem?_drop, Array.getElem?_toList,
+      Array.getElem?_eq_getElem (by omega)]
+    simp [Array.getD, show c.start + n < c.arr.size by omega]
+  · rw [List.getElem?_eq_none]
+    simp; omega
+
+theorem chunkElems_pop (c : S3.DChunk) (h : c.start < c.arr.size) :
+    chunkElems c = (c.arr.getD c.start 0 + c.sh) :: chunkElems { c with start := c.start + 1 } := by
+  simp only [chunkElems]
+  rw [List.drop_eq_getElem_cons (by simpa using h)]
+  simp only [List.map_cons, Array.getD_eq_getD_getElem?, Array.getElem?_eq_getElem h,
+    Option.getD_some, Array.getElem_toList]
+
+theorem chunkElems_nil (c : S3.DChunk) (h : ¬ c.start < c.arr.size) : chunkElems c = [] := by
+  simp only [chunkElems, List.map_eq_nil_iff, List.drop_eq_nil_iff, Array.length_toList]
+  omega
+
+theorem vals_toList (c : S3.DChunk) : c.vals.toList = chunkElems c := by
+  simp only [S3.DChunk.vals, chunkElems, Array.toList_map]
+
+theorem chunkElems_merge (c1 c2 : S3.DChunk) :
+    chunkElems (c1.merge c2) = chunkElems c1 ++ chunkElems c2 := by
+  have h : chunkElems (c1.merge c2) = (c1.vals ++ c2.vals).toList := by
+    simp only [S3.DChunk.merge, chunkElems, List.drop_zero, Nat.add_zero, List.map_id']
+  rw [h, Array.toList_append, vals_toList, vals_toList]
+
+theorem chunkElems_addSh (k : Nat) (c : S3.DChunk) :
+    chunkElems (c.addSh k) = (chunkElems c).map (· + k) := by
+  simp [S3.DChunk.addSh, chunkElems, List.map_map, Function.comp_def, Nat.add_assoc]
+
+theorem chunksElems_map_addSh (k : Nat) : ∀ cs : List S3.DChunk,
+    chunksElems (cs.map (S3.DChunk.addSh k)) = (chunksElems cs).map (· + k)
+  | []      => rfl
+  | c :: cs => by simp [chunksElems, chunkElems_addSh, chunksElems_map_addSh k cs]
+
+theorem chunksElems_insertChunk : ∀ (c : S3.DChunk) (cs : List S3.DChunk),
+    chunksElems (S3.insertChunk c cs) = chunkElems c ++ chunksElems cs
+  | _, []         => by simp [S3.insertChunk, chunksElems]
+  | c, c2 :: rest => by
+      simp only [S3.insertChunk]
+      split
+      · rw [chunksElems_insertChunk, chunkElems_merge]
+        simp [chunksElems, List.append_assoc]
+      · rfl
+
+theorem popChunks_none : ∀ cs : List S3.DChunk, S3.popChunks cs = none → chunksElems cs = []
+  | [],      _ => rfl
+  | c :: cs, h => by
+      simp only [S3.popChunks] at h
+      split at h
+      · simp at h
+      · simp [chunksElems, chunkElems_nil c ‹_›, popChunks_none cs h]
+
+theorem popChunks_some : ∀ (cs : List S3.DChunk) (x : Nat) (cs' : List S3.DChunk),
+    S3.popChunks cs = some (x, cs') → chunksElems cs = x :: chunksElems cs'
+  | [],      _, _,   h => by simp [S3.popChunks] at h
+  | c :: cs, x, cs', h => by
+      simp only [S3.popChunks] at h
+      split at h
+      · next hc =>
+        simp only [Option.some.injEq, Prod.mk.injEq] at h
+        obtain ⟨rfl, rfl⟩ := h
+        simp [chunksElems, chunkElems_pop c hc, Array.getElem?_eq_getElem hc]
+      · next hc => simp [chunksElems, chunkElems_nil c hc, popChunks_some cs x cs' h]
+
+theorem chunksAt_spec : ∀ (cs : List S3.DChunk) (n : Nat),
+    S3.chunksAt cs n =
+      match (chunksElems cs)[n]? with
+      | some y => .inl y
+      | none   => .inr (n - (chunksElems cs).length)
+  | [],      n => by simp [S3.chunksAt, chunksElems]
+  | c :: cs, n => by
+      simp only [S3.chunksAt, chunksElems]
+      by_cases h : n < c.size
+      · rw [if_pos h, List.getElem?_append_left (by rw [length_chunkElems]; exact h),
+          getElem?_chunkElems, if_pos h]
+      · rw [if_neg h, chunksAt_spec cs (n - c.size),
+          List.getElem?_append_right (by rw [length_chunkElems]; omega), length_chunkElems,
+          List.length_append, length_chunkElems]
+        cases (chunksElems cs)[n - c.size]? with
+        | some _ => rfl
+        | none => simp only [Sum.inr.injEq]; omega
+
 /-! ## 2. The partial-value operations commute with `rep` -/
 
 theorem rep_shift (k : Nat) (v : S3.PVal) : rep (S3.PVal.shift k v) = PVal.shift k (rep v) := by
@@ -71,6 +210,7 @@ theorem rep_shift (k : Nat) (v : S3.PVal) : rep (S3.PVal.shift k v) = PVal.shift
     | dyn i        => simp [rep, PVal.shift]
     | shifted k' w => simp only [rep]; rw [shift_add, Nat.add_comm]
     | cons a b     => simp [rep]
+    | dyns cs t    => simp [rep]
 
 theorem rep_shiftBy (k : Nat) (env : S3.PEnv) :
     (S3.PEnv.shiftBy k env).map rep = PEnv.shiftBy k (env.map rep) := by
@@ -94,6 +234,11 @@ theorem rep_hnfAt : ∀ (acc : Nat) (v : S3.PVal),
   | _,   .stat _      => by simp [S3.PVal.hnfAt, rep, PVal.shift]
   | acc, .dyn i       => by simp [S3.PVal.hnfAt, rep, PVal.shift]
   | acc, .cons a b    => by simp [S3.PVal.hnfAt, rep, PVal.shift, rep_shift]
+  | acc, .dyns cs t   => by
+      rcases hp : S3.popChunks cs with _ | ⟨x, cs'⟩
+      · simp only [S3.PVal.hnfAt, hp, rep, popChunks_none cs hp, consDyns]
+        exact rep_hnfAt acc t
+      · simp [S3.PVal.hnfAt, hp, rep, rep_shift, popChunks_some cs x cs' hp, consDyns, PVal.shift]
 
 theorem rep_hnf (v : S3.PVal) : rep (S3.PVal.hnf v) = rep v := by
   simp [S3.PVal.hnf, rep_hnfAt]
@@ -105,6 +250,24 @@ theorem hnfAt_not_shifted : ∀ (acc : Nat) (v : S3.PVal) (k : Nat) (w : S3.PVal
   | _, .stat _,   _, _ => by simp [S3.PVal.hnfAt]
   | _, .dyn _,    _, _ => by simp [S3.PVal.hnfAt]
   | _, .cons _ _, _, _ => by simp [S3.PVal.hnfAt]
+  | acc, .dyns cs t, k, w => by
+      simp only [S3.PVal.hnfAt]
+      split
+      · simp
+      · exact hnfAt_not_shifted acc t k w
+
+/-- ... and never an array spine. -/
+theorem hnfAt_not_dyns : ∀ (acc : Nat) (v : S3.PVal) (cs : List S3.DChunk) (w : S3.PVal),
+    S3.PVal.hnfAt acc v ≠ .dyns cs w
+  | acc, .shifted k' v, cs, w => by simp only [S3.PVal.hnfAt]; exact hnfAt_not_dyns _ v cs w
+  | _, .stat _,   _, _ => by simp [S3.PVal.hnfAt]
+  | _, .dyn _,    _, _ => by simp [S3.PVal.hnfAt]
+  | _, .cons _ _, _, _ => by simp [S3.PVal.hnfAt]
+  | acc, .dyns cs' t, cs, w => by
+      simp only [S3.PVal.hnfAt]
+      split
+      · simp
+      · exact hnfAt_not_dyns acc t cs w
 
 /-- What `hnf` exposes, read through `rep`: the head constructor of `rep v`. -/
 theorem hnf_cases (v : S3.PVal) :
@@ -113,13 +276,40 @@ theorem hnf_cases (v : S3.PVal) :
     (∃ a b, S3.PVal.hnf v = .cons a b ∧ rep v = .cons (rep a) (rep b)) := by
   have hr := rep_hnf v
   have hns := hnfAt_not_shifted 0 v
-  unfold S3.PVal.hnf at hr hns ⊢
-  generalize hh : S3.PVal.hnfAt 0 v = h at hr hns
+  have hnd := hnfAt_not_dyns 0 v
+  unfold S3.PVal.hnf at hr hns hnd ⊢
+  generalize hh : S3.PVal.hnfAt 0 v = h at hr hns hnd
   cases h with
   | stat x => exact Or.inl ⟨x, rfl, by simpa [rep] using hr.symm⟩
   | dyn i => exact Or.inr (Or.inl ⟨i, rfl, by simpa [rep] using hr.symm⟩)
   | cons a b => exact Or.inr (Or.inr ⟨a, b, rfl, by simpa [rep] using hr.symm⟩)
   | shifted k w => exact absurd rfl (hns k w)
+  | dyns cs w => exact absurd rfl (hnd cs w)
+
+theorem chunksCode_eq (acc : Nat) : ∀ (cs : List S3.DChunk) (tl : Term),
+    S3.chunksCode acc cs tl =
+      ((chunksElems cs).map (· + acc)).foldr (fun y r => .prim .consP [.var y, r]) tl
+  | [],      _  => rfl
+  | c :: cs, tl => by
+      have ih := chunksCode_eq acc cs tl
+      simp only [S3.chunksCode, List.foldr_cons] at ih ⊢
+      rw [ih, ← Array.foldr_toList, vals_toList]
+      simp [chunksElems, List.foldr_map]
+
+theorem chunksPRes_eq (acc : Nat) : ∀ (cs : List S3.DChunk) (tl : S3.PRes),
+    repR (S3.chunksPRes acc cs tl) =
+      ((chunksElems cs).map (· + acc)).foldr (fun y r => .cons (.code (.var y)) r) (repR tl)
+  | [],      _  => rfl
+  | c :: cs, tl => by
+      have ih := chunksPRes_eq acc cs tl
+      simp only [S3.chunksPRes, List.foldr_cons] at ih ⊢
+      rw [← Array.foldr_toList, vals_toList]
+      generalize List.foldr (fun c r => Array.foldr (fun x r => S3.PRes.cons (.code (.var (x + acc))) r) r c.vals) tl cs = R at ih
+      simp only [chunksElems, List.map_append, List.foldr_append, ← ih]
+      generalize chunkElems c = L
+      induction L with
+      | nil => rfl
+      | cons y L ihL => simp [repR, ihL]
 
 theorem toCodeAt_rep : ∀ (acc : Nat) (v : S3.PVal),
     S3.PVal.toCodeAt acc v = PVal.toCode (PVal.shift acc (rep v))
@@ -130,6 +320,9 @@ theorem toCodeAt_rep : ∀ (acc : Nat) (v : S3.PVal),
   | acc, .dyn i       => by simp [S3.PVal.toCodeAt, rep, PVal.shift, PVal.toCode]
   | acc, .cons a b    => by
       simp [S3.PVal.toCodeAt, rep, PVal.shift, PVal.toCode, toCodeAt_rep acc a, toCodeAt_rep acc b]
+  | acc, .dyns cs t   => by
+      simp only [S3.PVal.toCodeAt, rep]
+      rw [toCodeAt_rep acc t, chunksCode_eq, shift_consDyns, toCode_consDyns]
 
 theorem toCode_rep (v : S3.PVal) : S3.PVal.toCode v = PVal.toCode (rep v) := by
   simp [S3.PVal.toCode, toCodeAt_rep]
@@ -143,6 +336,9 @@ theorem toPResAt_rep : ∀ (acc : Nat) (v : S3.PVal),
   | acc, .dyn i       => by simp [S3.PVal.toPResAt, rep, repR, PVal.shift, PVal.toPRes]
   | acc, .cons a b    => by
       simp [S3.PVal.toPResAt, rep, repR, PVal.shift, PVal.toPRes, toPResAt_rep acc a, toPResAt_rep acc b]
+  | acc, .dyns cs t   => by
+      simp only [S3.PVal.toPResAt, rep]
+      rw [chunksPRes_eq, toPResAt_rep acc t, shift_consDyns, toPRes_consDyns]
 
 theorem toPRes_rep (v : S3.PVal) : repR (S3.PVal.toPRes v) = PVal.toPRes (rep v) := by
   simp [S3.PVal.toPRes, toPResAt_rep]
@@ -200,6 +396,42 @@ theorem buildEnv_rep : ∀ (Δ : Div) (vs : List Val) (j : Nat),
       rw [← ih]
       cases S3.buildEnv bs vs (j + 1) <;> simp [Except.map, rep]
 
+theorem rep_peelShift : ∀ v : S3.PVal,
+    rep v = PVal.shift (S3.PVal.peelShift v).1 (rep (S3.PVal.peelShift v).2)
+  | .shifted k v => by
+      have ih := rep_peelShift v
+      rcases h : S3.PVal.peelShift v with ⟨k', w⟩
+      rw [h] at ih
+      simp only [S3.PVal.peelShift, h, rep]
+      rw [ih, shift_add, Nat.add_comm]
+  | .stat _    => by simp [S3.PVal.peelShift]
+  | .dyn _     => by simp [S3.PVal.peelShift]
+  | .cons _ _  => by simp [S3.PVal.peelShift]
+  | .dyns _ _  => by simp [S3.PVal.peelShift]
+
+/-- The array-spine cons IS `cons`. -/
+theorem rep_mkCons (h t : S3.PVal) : rep (S3.PVal.mkCons h t) = .cons (rep h) (rep t) := by
+  unfold S3.PVal.mkCons
+  cases h with
+  | dyn j =>
+    have hp := rep_peelShift t
+    rcases hpe : S3.PVal.peelShift t with ⟨k, w⟩
+    rw [hpe] at hp
+    cases w with
+    | dyns cs u =>
+      simp only at hp
+      simp only [rep, chunksElems_insertChunk]
+      rw [hp, rep_shift]
+      simp only [rep]
+      rw [shift_consDyns]
+      have h1 : chunkElems ⟨0, #[j], 0⟩ = [j] := by simp [chunkElems]
+      rw [h1]
+      by_cases hk : k = 0
+      · subst hk; simp [consDyns]
+      · simp [hk, chunksElems_map_addSh, consDyns]
+    | _ => simp [rep, chunksElems, chunkElems, consDyns]
+  | _ => simp [rep]
+
 def repP (p : S3.Prepared) : Prepared := ⟨p.binds, rep p.value⟩
 
 theorem prepare_rep : ∀ r : S3.PRes, prepare (repR r) = repP (S3.prepare r)
@@ -216,7 +448,7 @@ theorem prepare_rep : ∀ r : S3.PRes, prepare (repR r) = repP (S3.prepare r)
       rcases hpa : S3.prepare a with ⟨ba, va⟩
       rcases hpb : S3.prepare b with ⟨bb, vb⟩
       simp only [repP]
-      cases ba <;> cases bb <;> simp [rep, rep_shift, toCodeR_rep, repR]
+      cases ba <;> cases bb <;> simp [rep, rep_shift, rep_mkCons, toCodeR_rep, repR]
 
 theorem peelHd_rep : ∀ r : S3.PRes, (S3.peelHd r).map repR = peelHd (repR r)
   | .lets bs r => by
@@ -297,6 +529,13 @@ theorem walkHeadAt_rep : ∀ (acc : Nat) (v : S3.PVal) (n : Nat),
   | acc, .cons _ b, n + 1 => by
       simp only [S3.walkHeadAt, rep, PVal.shift, walkHead]
       exact walkHeadAt_rep acc b n
+  | acc, .dyns cs t, n => by
+      simp only [S3.walkHeadAt, rep]
+      rw [shift_consDyns, walkHead_consDyns, chunksAt_spec, List.getElem?_map, List.length_map]
+      rcases h : (chunksElems cs)[n]? with _ | y
+      · simp only [Option.map_none]
+        exact walkHeadAt_rep acc t _
+      · simp [rep]
   | _,   .stat _, _       => by simp [S3.walkHeadAt, rep, PVal.shift, walkHead]
   | _,   .dyn _,  _       => by simp [S3.walkHeadAt, rep, PVal.shift, walkHead]
 
@@ -449,7 +688,7 @@ theorem mixTerm_sim : ∀ n, TermSim n
           | some v =>
             simp only [Option.map_some]
             rcases hnf_cases v with ⟨x, h, hr⟩ | ⟨j, h, hr⟩ | ⟨a, c, h, hr⟩ <;>
-              rw [h, hr] <;> cases b <;> rfl
+              rw [h, hr] <;> cases b <;> simp [repR, hr]
       | lift e =>
         simp only [S3.mixTerm, mixTerm]
         rw [← hT A idx Δ env e]

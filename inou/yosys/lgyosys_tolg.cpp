@@ -2838,13 +2838,31 @@ static void process_cells(RTLIL::Module* mod, hhds::Graph* g) {
           collx = Dlop::from_pyrope(val);
         }
       }
+      // READ TIMING is PER PORT. `type` is a scalar and cannot express a memory
+      // whose read ports disagree, so a mixed cell carries the MIXED sentinel
+      // and the authoritative per-port timing goes in each port's `rdport` pin
+      // (Ntype::Memory_rdport_*), exactly as `posclk` already does for a mixed
+      // edge. Collapsing yosys's RD_CLK_ENABLE bitmask into `type` with
+      // `as_int()` is what aliased one async + one sync read onto 2, the
+      // encoding for "combinational array" -- a stateless lookup with the read
+      // registers gone, not a refusal.
+      //
+      // This used to log_error on a mix. It no longer has to: the shape is
+      // representable. The default reader path still runs `memory -nomap
+      // -nordff`, so a mix does not arise there; it is `memory_mode=collect`,
+      // which preserves whatever the RTL wrote, that can produce one.
       const auto& rd_clocks = cell->getParam(ID::RD_CLK_ENABLE);
       const int   rd_clke   = rd_clocks.size() > 0 && rd_clocks[0] == RTLIL::State::S1 ? 1 : 0;
+      bool        rd_mixed  = false;
       for (int i = 0; i < rd_clocks.size(); ++i) {
         if (rd_clocks[i] != (rd_clke ? RTLIL::State::S1 : RTLIL::State::S0)) {
-          log_error("Memory %s has mixed read latencies; keep read registers separate with memory -nordff.\n", cell->name.c_str());
+          rd_mixed = true;
+          break;
         }
       }
+      const int mem_type = rd_mixed ? Ntype::Memory_type_mixed
+                           : rd_clke ? Ntype::Memory_type_sync
+                                     : Ntype::Memory_type_async;
 
       // ---- ONE edge per memory ----------------------------------------------
       // The Memory cell carries a SINGLE global `posclk`; yosys keeps a bit per
@@ -2916,7 +2934,7 @@ static void process_cells(RTLIL::Module* mod, hhds::Graph* g) {
         setup_sink_by_name(exit_node, "undef").connect_driver(create_const(*g, *collx));
       }
       setup_sink_by_name(exit_node, "posclk").connect_driver(create_const(*g, *Dlop::create_integer(wr_clkp)));
-      setup_sink_by_name(exit_node, "type").connect_driver(create_const(*g, *Dlop::create_integer(rd_clke)));
+      setup_sink_by_name(exit_node, "type").connect_driver(create_const(*g, *Dlop::create_integer(mem_type)));
       setup_sink_by_name(exit_node, "wensize").connect_driver(create_const(*g, *Dlop::create_integer(width)));
       setup_sink_by_name(exit_node, "size").connect_driver(create_const(*g, *Dlop::create_integer(depth)));
 
@@ -3009,15 +3027,21 @@ static void process_cells(RTLIL::Module* mod, hhds::Graph* g) {
       }
       for (int i = 0; i < rdports; i++) {
         auto port_n = (wrports + i) * static_cast<int>(Ntype::Memory_port_stride);
+        // Per-port read timing, the authoritative record. Widened from the old
+        // boolean 1: every consumer that only asks "is this a read port"
+        // decides with `!is_known_false()` or `!= 0`, so the 2 is transparent
+        // to all of them.
+        const int rd_timing = param_bit(ID::RD_CLK_ENABLE, i) ? Ntype::Memory_rdport_sync
+                                                              : Ntype::Memory_rdport_async;
         livehd::graph_util::setup_sink_pid(exit_node, static_cast<hhds::Port_id>(10 + port_n))
-            .connect_driver(create_const(*g, *Dlop::create_integer(1)));
+            .connect_driver(create_const(*g, *Dlop::create_integer(rd_timing)));
         livehd::graph_util::setup_sink_pid(exit_node, static_cast<hhds::Port_id>(4 + port_n))
             .connect_driver(create_pick_concat_dpin(g, cell->getPort(ID::RD_EN).extract(i, 1), false));
         const auto rd_index = mem_index(create_pick_concat_dpin(g, cell->getPort(ID::RD_ADDR).extract(i * abits, abits), false));
         livehd::graph_util::setup_sink_pid(exit_node, static_cast<hhds::Port_id>(0 + port_n)).connect_driver(rd_index);
         if (const auto& zero_mux = mem_rd_past_depth[cell].at(static_cast<size_t>(i)); !zero_mux.is_invalid()) {
           auto sel = lt_node(rd_index, int_const(static_cast<int64_t>(depth)));
-          if (rd_clke) {
+          if (param_bit(ID::RD_CLK_ENABLE, i)) {
             // A clocked read port registers its data (Memory type=1): select
             // with the address sampled at the same edge, held while RD_EN is low.
             auto sel_ff = create_typed_node(*g, Ntype_op::Flop, 1);

@@ -326,7 +326,16 @@ Memory_info parse_memory_info(LeanCtx& ctx, const Node& node) {
     } else if (pname == "posclk") {
       mi.posclk = const_pin_int_or(e.driver, 1);  // unused in async emission; tolerate non-const
     } else if (pname == "rdport") {
-      mi.ports[port_id].rdport = const_pin_int(ctx, e.driver, node, pname) != 0;
+      // {0 = write, 1 = async read, 2 = sync read}. Widened from a boolean, so
+      // the truthiness test still answers "is this a read port".
+      const auto rd            = const_pin_int(ctx, e.driver, node, pname);
+      mi.ports[port_id].rdport = rd != 0;
+      // Only a 2 states SYNC by itself. A 1 means "this is a read port" and
+      // leaves the timing to the cell-global `type` -- the encoding every
+      // graph written before the widening uses, and the one the hand-built
+      // scanner fixtures use. `finalize` below folds `type` in; doing it here
+      // would depend on pin visit order.
+      mi.ports[port_id].rd_sync = rd == Ntype::Memory_rdport_sync;
     } else if (pname == "addr") {
       mi.ports[port_id].addr = e.driver;
     } else if (pname == "din") {
@@ -501,7 +510,30 @@ Memory_info parse_memory_info(LeanCtx& ctx, const Node& node) {
   // type 0/2 = async/array (combinational read); type 1 = sync-read (registered
   // read data, modeled with a read-data register field + sram_sync_read_reg_next).
   if (!(mi.type == 0 || mi.type == 1 || mi.type == 2)) {
-    fatal(ctx, memory_policy_summary(mi) + ". pass.lean memory supports async/array (type 0/2) and sync-read (type 1) only.");
+    // type 3 is the MIXED sentinel: the read ports disagree, so there is no
+    // scalar answer and the per-port `rdport` pins are authoritative. The
+    // scanner CARRIES that now (Memory_port_info::rd_sync), but the lowering
+    // and the legacy emitter still branch on the cell-global
+    // `Memory_info::sync`, so admitting one here would emit a single shape for
+    // a memory that needs two. Refused until those are per-port -- fail
+    // closed, and the diagnostic names the split so the work can be sized.
+    std::string detail;
+    if (mi.type == Ntype::Memory_type_mixed) {
+      std::string sync_ports;
+      std::string async_ports;
+      for (const auto& p : mi.ports) {
+        if (!p.rdport) {
+          continue;
+        }
+        auto& dst = p.rd_sync ? sync_ports : async_ports;
+        dst += (dst.empty() ? "" : ",") + std::to_string(p.port_id);
+      }
+      detail = ". Read ports disagree on timing: sync {" + sync_ports + "}, async {" + async_ports
+               + "}. The per-port record is present; the lowering is not yet per-port.";
+    }
+    fatal(ctx,
+          memory_policy_summary(mi) + ". pass.lean memory supports async/array (type 0/2) and sync-read (type 1) only"
+              + detail);
   }
   if (mi.undef) {
     fatal(ctx,
@@ -556,7 +588,27 @@ Memory_info parse_memory_info(LeanCtx& ctx, const Node& node) {
                   "than assuming read-first.");
     }
   }
-  mi.sync = (mi.type == 1);
+  // Fold the cell-global `type` into the per-port record, then summarize.
+  //
+  // The two encodings coexist: a graph written before `rdport` was widened
+  // says `type == 1` with every read port pinned to 1, and the widened reader
+  // says 2 on the sync ports. A port is synchronous under EITHER. For a mixed
+  // cell `type` has no scalar answer, so only the pins speak.
+  const bool cell_sync = (mi.type == Ntype::Memory_type_sync);
+  for (auto& p : mi.ports) {
+    if (p.rdport && cell_sync) {
+      p.rd_sync = true;
+    }
+  }
+  mi.sync = cell_sync;
+  if (mi.type == Ntype::Memory_type_mixed) {
+    for (const auto& p : mi.ports) {
+      if (p.rdport) {
+        mi.sync = p.rd_sync;
+        break;
+      }
+    }
+  }
 
   return mi;
 }

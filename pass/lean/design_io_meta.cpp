@@ -2,6 +2,7 @@
 #include "design_io_meta.hpp"
 
 #include <algorithm>
+#include <map>
 #include <set>
 #include <cstdio>
 #include <sstream>
@@ -66,6 +67,29 @@ DesignIoMeta build_io_meta(const DesignScan& design, const CertificateIR& cert) 
   for (uint32_t i = 0; i < design.clocks.size(); ++i) {
     meta.clocks.push_back({design.clocks[i].name, i, design.clocks[i].implicit});
   }
+
+  // Flops in the CERTIFICATE's order (scan flops by node id, then the synthetic
+  // memory read registers), which is the runtime state order. `origin` is the
+  // scan id of the flop, or of the memory for a read register.
+  std::map<uint32_t, const Flop*> flop_of;
+  for (const auto& f : design.flops) {
+    flop_of.emplace(f.id, &f);
+  }
+  for (uint32_t k = 0; k < cert.flops.size(); ++k) {
+    const auto& f = cert.flops[k];
+    std::string name;
+    if (f.read_port) {
+      const auto it = design.memories.find(f.origin);
+      const auto mem = it == design.memories.end() || it->second.raw_name.empty() ? "mem_" + std::to_string(f.origin)
+                                                                                  : it->second.raw_name;
+      name = mem + ".rd" + std::to_string(*f.read_port);
+    } else {
+      const auto it = flop_of.find(f.origin);
+      name = it == flop_of.end() || it->second->raw_name.empty() ? "flop_" + std::to_string(f.origin)
+                                                                 : it->second->raw_name;
+    }
+    meta.flops.push_back({name, k, f.width});
+  }
   return meta;
 }
 
@@ -129,6 +153,12 @@ std::string io_meta_json(const DesignIoMeta& meta) {
       << ", \"implicit\": " << (meta.clocks[i].implicit ? "true" : "false") << "}";
   }
   o << (meta.clocks.empty() ? "]" : "\n  ]");
+  o << ",\n  \"flops\": [";
+  for (size_t i = 0; i < meta.flops.size(); ++i) {
+    o << (i ? ",\n    " : "\n    ") << "{\"name\": " << json_str(meta.flops[i].name)
+      << ", \"ordinal\": " << meta.flops[i].ordinal << ", \"width\": " << meta.flops[i].width << "}";
+  }
+  o << (meta.flops.empty() ? "]" : "\n  ]");
   o << "\n}\n";
   return o.str();
 }

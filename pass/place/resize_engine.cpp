@@ -196,12 +196,14 @@ struct Stage {
   double      at_in = 0, at_out = 0, at_sink = 0, slew_in = 0, slew_out = 0;
 };
 struct Move {
-  enum class Kind { upsize, isolate, repeater, shed };
+  enum class Kind { upsize, isolate, repeater, shed, bypass };
   Kind                                               kind = Kind::upsize;
   double                                             est  = 0;
   std::string                                        inst;
   const Buffer*                                      to = nullptr;
   std::string                                        driver, owner;
+  std::string                                        from;     // bypass: the net the sinks leave
+  double                                             arrival = 0;  // bypass: the on-path sink's arrival before
   std::vector<std::string>                           sinks;
   const Buffer*                                      buffer = nullptr;
   Point                                              at{};
@@ -319,7 +321,7 @@ private:
   size_t                                                    start_mark_ = 0;
   double                                                    wns_ = 0, tns_ = 0, margin_ = 25, period_ = 0, wns_start_ = 0;
   // statistics
-  Counters                                                  upsize_, isolate_, repeater_, shed_, electrical_, recover_, batch_;
+  Counters                                                  upsize_, isolate_, repeater_, shed_, bypass_, electrical_, recover_, batch_;
   std::unordered_set<std::string>                           rejected_;  // batched moves that failed alone
   unsigned    batch_moves_ = 0, batch_reject_tns_ = 0, batch_reject_wns_ = 0, batch_reject_electrical_ = 0;
   unsigned    upsized_ = 0, downsized_ = 0, endpoints_worked_ = 0, endpoints_stuck_ = 0, infeasible_paths_ = 0, feasible_paths_ = 0;
@@ -328,7 +330,7 @@ private:
   double      electrical_s_ = 0, timing_s_ = 0, recovery_s_ = 0, probe_s_ = 0;
   unsigned    probes_       = 0;
   unsigned    reject_slack_ = 0, reject_wns_ = 0, reject_tns_ = 0, reject_electrical_ = 0, no_moves_ = 0;
-  unsigned    generated_[4]  = {0, 0, 0, 0};
+  unsigned    generated_[5]  = {0, 0, 0, 0, 0};
   std::string stop_reason_   = "none";
   bool        debug_         = std::getenv("LHD_RESIZE_DEBUG") != nullptr;
   unsigned    debug_printed_ = 0;
@@ -562,6 +564,26 @@ private:
     w_.set_net(net_rc(out));
     edits_.push_back({Resize_edit::Kind::buffer, name, cell->name, driver, moved, center, owner, group_});
     return name;
+  }
+  // Move sinks from their net to the net of `driver` (both carry the same value).
+  void rewire(const std::string& from, const std::string& driver, const std::vector<std::string>& moved) {
+    std::unordered_set<std::string> gone(moved.begin(), moved.end());
+    std::vector<std::string>        rest;
+    for (const auto& s : nets_.at(from)) {
+      if (!gone.contains(s)) {
+        rest.push_back(s);
+      }
+    }
+    auto joined = nets_.at(driver);
+    joined.insert(joined.end(), moved.begin(), moved.end());
+    set_sinks(from, std::move(rest));
+    set_sinks(driver, std::move(joined));
+    for (const auto& s : moved) {
+      set_net_of(s, driver);
+    }
+    w_.set_net(net_rc(from));
+    w_.set_net(net_rc(driver));
+    edits_.push_back({Resize_edit::Kind::rewire, {}, {}, driver, moved, {}, {}, group_});
   }
   // RAII transaction over the timer, the model and the edit list.
   struct Attempt {
@@ -865,8 +887,21 @@ private:
     st.at_out     = td.arrival.value_or(0);
     st.slew_out   = td.slew.value_or(0);
     st.at_sink    = std::max(w_.pin(far).arrival.value_or(0), st.at_out + 3);
+    // A net with ample slack only needs its Liberty limits met: the fewest
+    // repeaters at the longest legal spacing, not the delay-optimal chain.
+    double worst = kInf;
+    for (const auto& s : sinks) {
+      worst = std::min(worst, w_.pin(s).slack.value_or(kInf));
+    }
     std::vector<Move> moves;
-    repeater_moves({st}, 0, moves);
+    if (worst >= margin_) {
+      if (auto m = electrical_chain(st)) {
+        moves.push_back(std::move(*m));
+      }
+    }
+    if (moves.empty()) {
+      repeater_moves({st}, 0, moves);
+    }
     if (moves.empty()) {
       return false;
     }
@@ -878,6 +913,72 @@ private:
       }
     }
     return true;
+  }
+  // Fewest evenly spaced repeaters (then the smallest size) that keep every
+  // segment within the repeater's capacitance and transition limits, the wire's
+  // RC slew degradation included. Nothing when even 12 do not.
+  std::optional<Move> electrical_chain(const Stage& st) {
+    const Point  d = position(st.driver), s = position(st.sink);
+    const double l0 = manhattan(d, s);
+    if (lib_.buffers.empty() || l0 < 5 * lib_.tech.dbu) {
+      return std::nullopt;
+    }
+    const double r = lib_.r_dbu, c = lib_.c_dbu, cs = pin_cap(st.sink), load0 = std::max(1e-3, load(st.driver));
+    const double slew0     = std::max(5.0, st.slew_out);
+    const auto   wire_slew = [&](double in, double seg, double tail) {
+      const double e = 2.2 * r * seg * (c * seg / 2 + tail) * 1e-3;
+      return std::sqrt(in * in + e * e);
+    };
+    const auto& net_sinks = nets_.at(st.driver);
+    for (unsigned n = 1; n <= 12; ++n) {
+      std::vector<Point> chain;
+      for (unsigned i = 1; i <= n; ++i) {
+        chain.push_back(lerp(d, s, double(i) / (n + 1)));
+      }
+      std::vector<std::string> moved{st.sink};
+      for (const auto& other : net_sinks) {
+        if (other != st.sink && manhattan(position(other), chain.front()) < manhattan(position(other), d)) {
+          moved.push_back(other);
+        }
+      }
+      double moved_cap = 0;
+      for (const auto& m : moved) {
+        moved_cap += pin_cap(m) + c * manhattan(d, position(m));
+      }
+      const double down = group_load(moved, chain.back());
+      const double lp   = manhattan(d, chain.front());
+      for (const auto* b : lib_.buffers) {
+        const double cin   = cell_pin_cap(*b, b->inputs.front());
+        const double limit = b->max_transition_ps ? .9 * *b->max_transition_ps : kInf;
+        // The driver's output slew scales with its load.
+        const double l1   = std::max(cin, load0 - moved_cap + c * lp + cin);
+        double       slew = wire_slew(slew0 * l1 / load0, lp, cin);
+        bool         ok   = slew <= limit;
+        for (size_t i = 0; i < chain.size() && ok; ++i) {
+          const bool   last = i + 1 == chain.size();
+          const double seg  = manhattan(chain[i], last ? s : chain[i + 1]);
+          const double l    = last ? down : c * seg + cin;
+          const auto   a    = w_.arc(b->name, b->inputs.front(), b->output, slew, l);
+          ok                = a && electrical_limit_ok(*b, l);
+          if (ok) {
+            slew = wire_slew(a->second, seg, last ? cs : cin);
+            ok   = slew <= limit;
+          }
+        }
+        if (ok) {
+          Move m;
+          m.kind   = Move::Kind::repeater;
+          m.driver = st.driver;
+          m.sinks  = std::move(moved);
+          m.buffer = b;
+          m.at     = chain.front();
+          m.chain  = std::move(chain);
+          m.owner  = st.inst;
+          return m;
+        }
+      }
+    }
+    return std::nullopt;
   }
   bool fix_electrical(const std::string& driver) {
     auto       pins   = touched({driver});
@@ -1374,6 +1475,57 @@ private:
       moves.push_back(std::move(best));
     }
   }
+  // Stage k is driven by a non-inverting buffer whose input comes from stage k-1.
+  [[nodiscard]] bool buffer_stage(const Stage& st) const {
+    if (st.input.empty()) {
+      return false;
+    }
+    const auto inst = insts_.find(st.inst);
+    return inst != insts_.end() && inst->second.cell && inst->second.output == st.driver && identity(*inst->second.cell);
+  }
+  // Synthesis buffer chains (a fanout tree built as a chain, each buffer driving
+  // some loads and the next buffer): the on-path sink at the end of a run of
+  // buffers is re-driven from an earlier net of the chain, which carries the
+  // same value, skipping the buffers in between. Pure rewiring, no cell.
+  void bypass_moves(const std::vector<Stage>& stages, size_t k, std::vector<Move>& moves) {
+    const auto& st = stages[k];
+    if (k == 0 || !buffer_stage(st) || blocked_drivers_.contains(st.driver) || nets_.at(st.driver).size() < 2) {
+      return;  // the buffer keeps a load after the move
+    }
+    const double      cs = pin_cap(st.sink);
+    const Point       ps = position(st.sink);
+    const double      r = lib_.r_dbu, c = lib_.c_dbu;
+    std::vector<Move> found;
+    for (size_t j = k; j-- > 0;) {
+      const auto& up = stages[j];
+      if (blocked_drivers_.contains(up.driver) || !nets_.contains(up.driver)) {
+        break;
+      }
+      const double dist  = manhattan(position(up.driver), ps);
+      const double l0    = load(up.driver);
+      const double at    = up.at_out + driver_delta(up, l0, l0 + cs + c * dist) + r * dist * (c * dist / 2 + cs) * 1e-3;
+      const double gain  = st.at_sink - at;
+      if (gain > 1) {
+        Move m;
+        m.kind   = Move::Kind::bypass;
+        m.est    = gain;
+        m.driver = up.driver;
+        m.from    = st.driver;
+        m.sinks   = {st.sink};
+        m.arrival = st.at_sink;
+        found.push_back(std::move(m));
+      }
+      if (!buffer_stage(up)) {
+        break;  // up.driver is the chain's head
+      }
+    }
+    // The wire and load estimates are rough on long chains: offer the three
+    // best skip lengths and let the timer choose.
+    std::sort(found.begin(), found.end(), [](const Move& a, const Move& b) { return a.est > b.est; });
+    for (size_t i = 0; i < found.size() && i < 3; ++i) {
+      moves.push_back(std::move(found[i]));
+    }
+  }
   // Downsize non-critical gates loading an on-path net: less load, less area.
   void shed_moves(const std::vector<Stage>& stages, size_t k, double path_slack, std::vector<Move>& moves) {
     const auto& st = stages[k];
@@ -1459,6 +1611,7 @@ private:
         }
         break;
       case Move::Kind::isolate : insert_buffer(m.driver, m.sinks, m.buffer, m.at, m.owner); break;
+      case Move::Kind::bypass  : rewire(m.from, m.driver, m.sinks); break;
       case Move::Kind::repeater: {
         auto driver = m.driver;
         for (const auto& at : m.chain.empty() ? std::vector<Point>{m.at} : m.chain) {
@@ -1481,6 +1634,10 @@ private:
         break;
       case Move::Kind::isolate:
       case Move::Kind::repeater: drivers.push_back(m.driver); break;
+      case Move::Kind::bypass:
+        drivers.push_back(m.driver);
+        drivers.push_back(m.from);
+        break;
     }
     return drivers;
   }
@@ -1490,6 +1647,7 @@ private:
       case Move::Kind::isolate : return isolate_;
       case Move::Kind::repeater: return repeater_;
       case Move::Kind::shed    : return shed_;
+      case Move::Kind::bypass  : return bypass_;
     }
     return upsize_;
   }
@@ -1514,7 +1672,23 @@ private:
     const double s1   = w_.pin(endpoint).slack.value_or(-kInf);
     const double need = cells ? cells * std::max(1.0, .005 * std::abs(slack)) : .05;
     ++stats.probes;
-    if (s1 < slack + need) {
+    if (debug_ && debug_printed_ < 4 && m.kind == Move::Kind::bypass) {
+      std::cout << std::format("resize-debug: bypass {} -> {} est {:.2f} endpoint {:.2f} -> {:.2f}\n",
+                               m.from,
+                               m.driver,
+                               m.est,
+                               slack,
+                               s1);
+    }
+    // Parallel near-critical paths (wide adders, counters): a bypass that speeds
+    // its own path up by more than 1 ps without hurting the endpoint is progress
+    // even while a sibling path still sets the endpoint slack. It adds no cell.
+    bool local = false;
+    if (m.kind == Move::Kind::bypass && s1 >= slack - kWnsEps) {
+      const auto a1 = w_.pin(m.sinks.front()).arrival;
+      local         = a1 && *a1 < m.arrival - 1;
+    }
+    if (s1 < slack + need && !local) {
       ++probes_;
       stats.seconds += elapsed(t);
       ++reject_slack_;
@@ -1550,6 +1724,7 @@ private:
     std::vector<Move> moves;
     for (size_t k = 0; k < stages.size(); ++k) {
       upsize_moves(stages, k, moves);
+      bypass_moves(stages, k, moves);
       shed_moves(stages, k, slack, moves);
       // Wire buffers (isolation, repeaters) only on the legal placement: at FP
       // checkpoints cells still move, and buffers inserted there pile up as GP
@@ -1567,9 +1742,10 @@ private:
     return moves;
   }
   static std::string move_key(const Move& m) {
-    return std::format("{}|{}|{}|{}|{}|{}",
+    return std::format("{}|{}|{}|{}|{}|{}|{}",
                        static_cast<int>(m.kind),
                        m.driver,
+                       m.from,
                        m.inst,
                        m.to ? m.to->name : "",
                        m.buffer ? m.buffer->name : "",
@@ -1611,6 +1787,9 @@ private:
             continue;  // a batched repeater must clearly pay for itself
           }
           std::vector<std::string> keys{m.driver};
+          if (!m.from.empty()) {
+            keys.push_back(m.from);
+          }
           if (!m.inst.empty()) {
             keys.push_back(m.inst);
           }
@@ -1803,7 +1982,7 @@ private:
         break;
       }
       std::cout << std::format(
-          "resize: timing round {} worked {} stuck {} wns {:.2f} tns {:.1f} probes {} ({:.1f}s) moves u/s/i/r {}/{}/{}/{} none {} "
+          "resize: timing round {} worked {} stuck {} wns {:.2f} tns {:.1f} probes {} ({:.1f}s) moves u/s/i/r/b {}/{}/{}/{}/{} none {} "
           "reject slack/wns/tns/elec {}/{}/{}/{} infeasible {}\n",
           rounds_,
           worked,
@@ -1816,6 +1995,7 @@ private:
           generated_[3],
           generated_[1],
           generated_[2],
+          generated_[4],
           no_moves_,
           reject_slack_,
           reject_wns_,
@@ -1919,7 +2099,7 @@ private:
       return std::format(R"({{"probes":{},"accepted":{},"seconds":{:.3f}}})", c.probes, c.accepted, c.seconds);
     };
     return std::format(
-        R"({{"stage":"{}","period_ps":{:.1f},"margin_ps":{:.1f},"whatif_wns_ps":[{:.4f},{:.4f}],"whatif_tns_ps":[{:.4f},{:.4f}],"edits":{},"groups":{},"buffers":{},"upsized":{},"downsized":{},"electrical":{{"nets":{},"fixed":{},"skipped":{},"moves":{},"seconds":{:.3f}}},"timing":{{"rounds":{},"endpoints_worked":{},"endpoints_stuck":{},"feasible_paths":{},"infeasible_paths":{},"stop":{},"upsize":{},"isolate":{},"repeater":{},"shed":{},"seconds":{:.3f}}},"recover":{{"batches":{},"moves":{},"seconds":{:.3f}}},"batch":{{"moves":{},"probes":{}}},"probes":{},"probe_seconds":{:.3f},"rejects":{{"slack":{},"wns":{},"tns":{},"electrical":{}}},"generated":{{"upsize":{},"isolate":{},"repeater":{},"shed":{},"none":{}}},"seconds":{:.3f}}})",
+        R"({{"stage":"{}","period_ps":{:.1f},"margin_ps":{:.1f},"whatif_wns_ps":[{:.4f},{:.4f}],"whatif_tns_ps":[{:.4f},{:.4f}],"edits":{},"groups":{},"buffers":{},"upsized":{},"downsized":{},"electrical":{{"nets":{},"fixed":{},"skipped":{},"moves":{},"seconds":{:.3f}}},"timing":{{"rounds":{},"endpoints_worked":{},"endpoints_stuck":{},"feasible_paths":{},"infeasible_paths":{},"stop":{},"upsize":{},"isolate":{},"repeater":{},"shed":{},"bypass":{},"seconds":{:.3f}}},"recover":{{"batches":{},"moves":{},"seconds":{:.3f}}},"batch":{{"moves":{},"probes":{}}},"probes":{},"probe_seconds":{:.3f},"rejects":{{"slack":{},"wns":{},"tns":{},"electrical":{}}},"generated":{{"upsize":{},"isolate":{},"repeater":{},"shed":{},"bypass":{},"none":{}}},"seconds":{:.3f}}})",
         stage_ == Resize_stage::floorplan ? "floorplan" : "placed",
         period_,
         margin_,
@@ -1947,6 +2127,7 @@ private:
         counters(isolate_),
         counters(repeater_),
         counters(shed_),
+        counters(bypass_),
         timing_s_,
         recover_batches_,
         counters(recover_),
@@ -1963,6 +2144,7 @@ private:
         generated_[1],
         generated_[2],
         generated_[3],
+        generated_[4],
         no_moves_,
         seconds);
   }
@@ -1993,7 +2175,9 @@ std::vector<Resize_edit> prefix(const std::vector<Resize_edit>& edits, unsigned 
 std::vector<std::string> changed_names(const std::vector<Resize_edit>& edits) {
   std::set<std::string> names;
   for (const auto& e : edits) {
-    names.insert(e.instance);
+    if (e.kind != Resize_edit::Kind::rewire) {
+      names.insert(e.instance);
+    }
   }
   return {names.begin(), names.end()};
 }
@@ -2025,16 +2209,22 @@ void apply_resize_edits(hhds::Graph& graph, const Options& options, const std::v
       change_master(n, *from, lib->cells.at(e.master));
       continue;
     }
-    const auto& b      = lib->cells.at(e.master);
-    const auto  source = physical_pin(graph, e.driver, nodes, true);
-    Pin         root   = source.pin;
+    const auto source = physical_pin(graph, e.driver, nodes, true);
+    Pin        root   = source.pin;
     if (root.is_invalid() || root.is_const()) {
-      throw std::runtime_error("resize plan buffer has no driver: " + e.driver);
+      throw std::runtime_error("resize plan edit has no driver: " + e.driver);
     }
     if (source.width > 1) {
       root = gu::create_get_mask(graph, root, source.bit).get_driver_pin(0);
       gu::set_bits(root, 1);
     }
+    if (e.kind == Resize_edit::Kind::rewire) {
+      for (const auto& s : e.sinks) {
+        connect_bit(graph, physical_pin(graph, s, nodes, false), root);
+      }
+      continue;
+    }
+    const auto& b = lib->cells.at(e.master);
     auto cell = gu::create_typed_node(graph, Ntype_op::Sub);
     cell.set_subnode(buffer_io(graph, b));
     cell.set_name(e.instance);
@@ -2241,7 +2431,8 @@ Floorplan_resize resize_floorplan_engine(Result& state, const Options& options, 
     }
     unsigned resized = 0, buffers = 0;
     for (const auto& e : edits) {
-      ++(e.kind == Resize_edit::Kind::buffer ? buffers : resized);
+      buffers += e.kind == Resize_edit::Kind::buffer;
+      resized += e.kind == Resize_edit::Kind::resize;
     }
     result.proposed        += resized;
     result.repair_proposed += buffers;

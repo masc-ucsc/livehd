@@ -22,10 +22,12 @@ def run(*args, ok=True):
 def synth(name, source, *settings):
     timer = "synth.opentimer=true" if "synth.opentimer=true" in settings else "synth.opentimer=false"
     settings = [v for v in settings if v != "synth.opentimer=true"]
+    # Fine partitioning unless the caller picks one: a repeated --set is a usage error.
+    if not any(v.startswith("synth.partition=") for v in settings):
+        settings = ["synth.partition=fine", *settings]
     return run("synth", source, "--top", name, "--workdir", work / name,
                "--emit-dir", "lg:" + str(work / (name + "-net")),
                "--set", "synth.liberty=" + lib, "--set", timer,
-               "--set", "synth.partition=fine",
                *[a for value in settings for a in ("--set", value)])
 
 guided = work / "guided.prp"

@@ -166,7 +166,7 @@ TEST_F(PhysicalSession, ResizeRcTopologyAndRejectedTrialRollbackMatchFreshTiming
 }
 TEST_F(PhysicalSession, ShieldedLoadsRepowerAndRollbackMatchFreshTiming) {
   livehd::opentimer::Physical_session session(options);
-  for (const auto [strong, extra, resistance] : {
+  for (const auto& [strong, extra, resistance] : {
            std::tuple{false, false, 250000.},
            std::tuple{ true, false, 250000.},
            std::tuple{ true,  true, 100000.},

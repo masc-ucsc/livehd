@@ -63,6 +63,11 @@ inline auto inp_edges_ordered(const Node& node) {
 struct Memory_port_info {
   size_t   port_id = 0;
   bool     rdport  = false;
+  // This port's OWN read timing, from the `rdport` pin
+  // (Ntype::Memory_rdport_{write,async,sync}). The cell-global `type` cannot
+  // express a memory whose read ports differ, so this is the authoritative
+  // record; `Memory_info::sync` is the all-ports-agree summary of it.
+  bool     rd_sync = false;
   Node_pin addr;
   Node_pin din;
   Node_pin enable;

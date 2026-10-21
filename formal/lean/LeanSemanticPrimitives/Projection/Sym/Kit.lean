@@ -246,9 +246,27 @@ theorem bit_isNeg (σ : Asg) (x : SInt) : bitOf ((isNeg x).eval σ) = decide (x.
 
 def lt (x y : SInt) : BVExpr 1 := isNeg (x.sub y)
 def le (x y : SInt) : BVExpr 1 := notE (lt y x)
+
+/-- Some bit among the low `n` of `e` is set. -/
+def anyBitE {w : Nat} (e : BVExpr w) : Nat → BVExpr 1
+  | 0 => falseE
+  | n + 1 => orE (.extract n 1 e) (anyBitE e n)
+
+theorem bit_anyBitE (σ : Asg) {w : Nat} (e : BVExpr w) :
+    ∀ n, bitOf ((anyBitE e n).eval σ) = (List.range n).any fun i => (e.eval σ).getLsbD i
+  | 0 => by simp [anyBitE, falseE, bitOf]
+  | n + 1 => by
+      rw [anyBitE, bit_orE, bit_anyBitE σ e n, List.range_succ, List.any_append]
+      simp only [bitOf, BVExpr.eval_extract, BitVec.getLsbD_extractLsb', Nat.zero_lt_one, decide_true,
+        Nat.add_zero, Bool.true_and, List.any_cons, List.any_nil, Bool.or_false]
+      rw [Bool.or_comm]
+
+/-- Equality of two exact integers: both sign-extended to one width, then
+"no bit of the xor is set" -- one xor and an or-tree, where the difference
+form (subtract, then test both signs) took three adders. -/
 def eq (x y : SInt) : BVExpr 1 :=
-  let d := x.sub y
-  andE (notE (isNeg d)) (notE (isNeg d.neg))
+  let k := max x.k y.k
+  notE (anyBitE (.bin (sextE (k + 1) x.e) .xor (sextE (k + 1) y.e)) (k + 1))
 
 theorem bit_lt (σ : Asg) (x y : SInt) : bitOf ((lt x y).eval σ) = decide (x.val σ < y.val σ) := by
   simp only [lt, bit_isNeg, val_sub]
@@ -259,8 +277,30 @@ theorem bit_le (σ : Asg) (x y : SInt) : bitOf ((le x y).eval σ) = decide (x.va
   by_cases h : x.val σ ≤ y.val σ <;> simp [h] <;> omega
 
 theorem bit_eq (σ : Asg) (x y : SInt) : bitOf ((eq x y).eval σ) = decide (x.val σ = y.val σ) := by
-  simp only [eq, bit_andE, bit_notE, bit_isNeg, val_neg, val_sub]
-  by_cases h : x.val σ = y.val σ <;> simp [h] <;> omega
+  simp only [eq, bit_notE, bit_anyBitE, BVExpr.eval_bin, BVBinOp.eval_xor]
+  have ha : ((sextE (max x.k y.k + 1) x.e).eval σ).toInt = x.val σ := by
+    rw [eval_sextE, BitVec.toInt_signExtend_of_le (show x.k + 1 ≤ max x.k y.k + 1 by omega)]; rfl
+  have hb : ((sextE (max x.k y.k + 1) y.e).eval σ).toInt = y.val σ := by
+    rw [eval_sextE, BitVec.toInt_signExtend_of_le (show y.k + 1 ≤ max x.k y.k + 1 by omega)]; rfl
+  generalize (sextE (max x.k y.k + 1) x.e).eval σ = a at ha ⊢
+  generalize (sextE (max x.k y.k + 1) y.e).eval σ = b at hb ⊢
+  rw [← ha, ← hb]
+  by_cases hab : a = b
+  · subst hab
+    have : ((List.range (max x.k y.k + 1)).any fun i => (a ^^^ a).getLsbD i) = false := by simp
+    rw [this]; simp
+  · have hne : a.toInt ≠ b.toInt := fun h => hab (BitVec.toInt_inj.mp h)
+    have : ((List.range (max x.k y.k + 1)).any fun i => (a ^^^ b).getLsbD i) = true := by
+      rw [List.any_eq_true]
+      apply Classical.byContradiction
+      intro hno
+      apply hab
+      apply BitVec.eq_of_getLsbD_eq
+      intro i hi
+      have h : ¬ ((a ^^^ b).getLsbD i = true) := fun ht => hno ⟨i, List.mem_range.mpr hi, ht⟩
+      rw [BitVec.getLsbD_xor] at h
+      cases ha' : a.getLsbD i <;> cases hb' : b.getLsbD i <;> simp [ha', hb'] at h ⊢
+    rw [this]; simp [hne]
 
 /-- A literal, at a width that holds it. -/
 def lit (z : Int) : SInt :=

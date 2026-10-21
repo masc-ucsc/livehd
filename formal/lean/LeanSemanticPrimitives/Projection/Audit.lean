@@ -36,6 +36,10 @@ import LeanSemanticPrimitives.Projection.ResidualFragment
 import LeanSemanticPrimitives.Projection.ProjectedStep
 -- Phase 6: the DCERT1 loader and the per-field support report
 import LeanSemanticPrimitives.Projection.CertLoad
+-- M3/M8: the verified symbolic interpretation of a residual
+import LeanSemanticPrimitives.Projection.Sym.Refine
+import LeanSemanticPrimitives.Projection.Sym.Conj
+import LeanSemanticPrimitives.Projection.Sym.ConjT
 
 namespace Projection
 
@@ -68,6 +72,9 @@ namespace Projection
 #audit_axioms S3Correct.nthSummaryEnv_rep
 #audit_axioms S3Correct.prepare_rep
 #audit_axioms S3Correct.toCodeAt_rep
+-- M6: the array spine (S3's `dyns`): its cons and its indexed walk
+#audit_axioms S3Correct.rep_mkCons
+#audit_axioms S3Correct.walkHeadAt_rep
 #audit_axioms Compat_shift
 #audit_axioms Compat_fields_dyn
 #audit_axioms Compat_fields_stat
@@ -430,5 +437,16 @@ namespace Projection
 -- give `SupportedByProjection`.  The parser itself stays trusted.
 #audit_axioms CertLoad.slotsInRange_of_bool
 #audit_axioms CertLoad.supported_of_report
+
+-- M3/M8 (Sym): the symbolic evaluator, the wiring normal form it keeps uncut,
+-- the LRAT-checked UNSAT, and the three checkers' reference-semantics theorems.
+#audit_axioms Sym.symEval_sound
+#audit_axioms Sym.eval_norm
+#audit_axioms Sym.checkUnsat_sound
+#audit_axioms Sym.runInvKOf_sound_ref
+#audit_axioms Sym.runConjOf_sound_ref
+#audit_axioms Sym.stateVarT_rel
+#audit_axioms Sym.runConjTOf_sound_ref
+#audit_axioms Sym.runRefKOf_sound_ref
 
 end Projection
