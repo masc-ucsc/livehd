@@ -720,8 +720,29 @@ marked excess falls to 184.187 µm² and whole-frame excess to 2,457.233 µm².
 Setup and hold WNS and hold TNS stay exact, while setup TNS improves to
 −7,747,361.482 ps. HPWL rises 1.215%. Legalization and fresh candidate timing
 take 34.170 s and 53.150 s; the exact original timing score is explicitly
-reused. A matched handoff/CTS/global-route experiment is being prepared.
-Native detailed routing continues unchanged; these are placement-only scores.
+reused. A subsequent insertion into the immutable common OpenROAD database
+preserves its physical infrastructure but reveals 225 TAPCELL overlaps and
+225 padding failures. That check stops before timing or CTS, preserving the
+failed candidate and its full identity audit. The functional-only qualification
+therefore does not yet admit this candidate to downstream routing; a bounded
+repair must include the actual tap cells and cut rows. Native detailed routing
+continues unchanged; these are placement-only scores.</p>
+<p>A separate repair includes the actual common database's tap cells and cut
+rows. It fixes every exterior cell and physical instance, searches at most
+{5 5} µm per axis, restores every original placement status and passes
+<code>check_placement</code>. The final maximum L1 movement remains 28.782 µm;
+marked excess falls to 177.138 µm² and whole-frame excess to 2,446.842 µm².
+Both original-grid and actual-cut-row density gates pass. Fresh timing on the
+complete seed and candidate databases preserves setup WNS −1,503.281 ps,
+hold WNS +13.938 ps and zero hold TNS; setup TNS improves from
+−8,145,751.086 to −7,747,540.652 ps. All 555,821 instance masters/statuses,
+exterior geometry, noncomponent DEF data and clocks remain exact. Repair
+and the two fresh scores cost 56.248, 60.219 and 53.312 s, respectively.
+The repair tool peaks at 14.622 GiB; the separate geometry-audit controller's
+observed 2.567 GiB is additional, not included in that tool peak. This
+candidate qualifies for a separately guarded CTS/GRT evaluation; it has no
+routed result yet.
+<a href="../../tmp/route_cts_eval_20261021/cnn_local_halo1_infra_dpl5/common_frame_qualification.json">Actual-infrastructure qualification</a>;
 <a href="../../tmp/route_cts_eval_20261021/cnn/native_clockclean/first_completed_iter5_spatial.json">Actual marker classification</a>;
 <a href="../../tmp/route_cts_eval_20261021/cnn_local_halo1_screen/qualification.json">Rejected screen and timing scores</a>;
 <a href="../../tmp/route_cts_eval_20261021/cnn_local_halo1_screen/stage_attribution.json">Physical stage attribution</a>;
@@ -1039,8 +1060,10 @@ connections into generated-clock source inverters.
 <a href="../../tmp/route_cts_eval_20261021/liteeth/clock_root_motion.json">Coordinate audit</a>.</figcaption></figure>
 
 <h2>Validation</h2>
-<p><code>bazel build -c dbg //...</code> passes all 3,907 targets.
-The latest focused optimized suite passes 17 targets: native Rudy, macro Rudy, RSMT,
+<p>After rebasing onto upstream <code>fd9bd3719</code> and pinning the published
+DREAMPlace and HHDS commits, <code>bazel build -c dbg //...</code> passes all
+3,914 targets in 393.743 s.
+The latest focused optimized suite passes 17 targets in 207.499 s: native Rudy, macro Rudy, RSMT,
 placement, H2D and global swap; LiveHD placement, ABC IO, options, physical
 cache, canonical attribute persistence, repair candidate ordering, route CLI,
 unchanged timing defaults, spectral and local-density fields, and RC units.
@@ -1053,16 +1076,37 @@ and caches, and prevents a successful probe from repeating in later inner
 passes. Native and integration regressions pass; the running design
 evaluations use frozen inputs and do not enable this optional probe.
 Compiler-warning flags and existing option defaults are unchanged.</p>
+<p>Publication review fixes three additional issues. Reconstructing the local
+density solver after a checkpoint netlist replacement now preserves its thread
+budget. The optional HighTide IO helper checks all proposed and stationary
+port rectangles before mutation, rejects distinct-net overlap or contact, and
+rolls back failed replacement. Its 11 isolated regression cases pass on both
+frozen OpenROAD builds; saved CNN, Eyeriss and LiteEth IO snapshots remain
+exact. The optional PG geometry audit recognizes property delimiters outside
+connection tuples and escaped identifiers, so a plus sign in an instance name
+cannot change a geometry-only hash. These helpers remain explicit opt-ins, and
+the running routing experiments retain their frozen scripts. HHDS also passes
+three own-repository attribute persistence, contract and dirty-tracking tests.</p>
 <p>Saved validation logs:
 <a href="../../tmp/route_eval_20261020/validation/debug-all.log">complete debug build</a>,
 <a href="../../tmp/route_eval_20261020/validation/focused-tests.log">14 optimized tests</a>,
 <a href="../../tmp/route_eval_20261020/validation/optimized-build.log">optimized executable/tools build</a>.</p>
-<p>Follow-up validation:
-<a href="../../tmp/route_cts_eval_20261021/h2d_probe_fix/debug-all.log">latest complete debug build</a>,
-<a href="../../tmp/route_cts_eval_20261021/h2d_probe_fix/focused-tests.log">latest 17 optimized tests</a>.
+<p>Published-dependency validation:
+<a href="../../tmp/review_commit_20261021/debug-all.log">latest complete debug build</a>,
+<a href="../../tmp/review_commit_20261021/optimized-tests.log">latest 17 optimized tests</a>.
 The updated executable is frozen separately so earlier performance measurements
 retain their original binaries.</p>
-<p>The latest executable also completes the requested FP-disabled,
+<p>The final reviewed build with published dependency pins completes the same
+FP-disabled, macro/final-enabled incremental flow in 340.512 s cold,
+9.144 s warm 1 and 8.154 s warm 2. Both warm runs reuse all 17 mapped regions,
+STA and final placement, with byte-identical graph, mapped-netlist and DEF
+outputs. The cold DEF also exactly matches the previous current-input result
+(SHA-256 <code>553f9fb5…</code>). The cold process tree peaks at 1.671 GiB;
+all three runs include <code>perf record</code> and <code>perf stat</code>.
+Concurrent routing load prevents interpreting these times as an isolated
+speed comparison.
+<a href="../../tmp/review_commit_20261021/native_reuse/proof.json">Published-pin reuse proof</a>.</p>
+<p>The earlier pre-review executable also completes the requested FP-disabled,
 macro/final-enabled incremental flow on freshly regenerated LiteEth RTL:
 417.684 s cold, then 10.230 and 10.137 s warm. Both warm runs reuse all 17 mapped
 regions, the STA result and completed placement; graph, mapped-netlist and DEF
@@ -1091,8 +1135,9 @@ placement experiment.</p>
 <ul>
   <li>The switch is one-way per stage and per run, to keep the control loop stable:
   inflation is monotone and the convergence test must not flip scale mid-stage.
-  Warm starts and ECO runs restart each stage on Rudy unless the cache identity
-  says otherwise.</li>
+  A new auto stage starts on Rudy; continuation within a stage retains the
+  active model. Cached H2D reports restore their active model, and placement
+  cache identity includes every route-policy option.</li>
   <li>Levels are mean overflow over all bins, so small values are significant on a
   fine grid; record the bin count with every reported level.</li>
   <li>FLUTE nets must not also get the pin-count weight. Nets above the degree cap
