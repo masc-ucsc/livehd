@@ -4,8 +4,8 @@ A `.refmap` file says how an implementation certificate refines a spec certifica
 stuttering. `drivers/sym_refmap.lean` reads it in two modes:
 
 ```bash
-sym_refmap refmap    <file.refmap> [jobs:<n>] [runs:<n>] [sf:<n>] [wf:<n>] [emit:[f1:|f2:]<file>] [solver:<cadical>] [work:<dir>]
-sym_refmap specfacts <file.refmap> [jobs:<n>] [sf:<n>] [wf:<n>] [emit:[f1:|f2:]<file>] [solver:<cadical>] [work:<dir>]
+sym_refmap refmap    <file.refmap> [jobs:<n>] [runs:<n>] [sf:<n>] [wf:<n>] [emit:[f1:|f2:]<file>] [cache] [solver:<cadical>] [work:<dir>]
+sym_refmap specfacts <file.refmap> [jobs:<n>] [sf:<n>] [wf:<n>] [emit:[f1:|f2:]<file>] [cache] [solver:<cadical>] [work:<dir>]
 ```
 
 ## The model
@@ -113,6 +113,11 @@ A step counterexample is written to `<work>/cti_<target>.txt`. It lists the slot
 the nonzero inputs of both cycles, the spec registers on which the spec after the cycle
 differs from the map at `n+1`, the map at `n`, and the implementation's registers at `n`.
 `<work>/refmap_table.tsv` (`specfacts_table.tsv`) has clauses and solver time per obligation.
+
+`cache` reuses an LRAT proof already in `<work>` when the obligation's CNF there is
+byte-identical, without running the solver. The verified check re-checks every proof
+either way, so the cache saves solver time only. Use it to emit a verdict file from a round
+that has already solved everything.
 
 ## Theorem files
 
