@@ -1707,6 +1707,28 @@ void Cgen_verilog::process_memory(std::shared_ptr<File_output> fout, const hhds:
     return;
   }
 
+  // FAIL CLOSED on a mixed-timing memory. The guard below admits only the
+  // scalar types, so Memory_type_mixed would fall through to the ARRAY path --
+  // which is exactly how a memory with some asynchronous and some synchronous
+  // read ports comes out as a stateless combinational lookup, with the
+  // synchronous read registers gone and the write folded into an always_comb.
+  // Silently emitting the wrong model is worse than refusing.
+  //
+  // The reader can now REPRESENT this shape (the mixed sentinel plus per-port
+  // `rdport` timing), where it used to reject it at import. That is what makes
+  // this check load-bearing rather than theoretical.
+  if (mem_type == Ntype::Memory_type_mixed) {
+    livehd::diag::err("inou.cgen", "memory-mixed-read-timing", "unsupported")
+        .msg("memory {} has read ports of DIFFERENT timing (some asynchronous, some synchronous); this "
+             "emitter selects its memory model from the cell-global `type` and would emit a combinational "
+             "array, dropping the synchronous read registers",
+             debug_name(node))
+        .hint("per-port timing is on each read port's `rdport` pin (Ntype::Memory_rdport_async / _sync); "
+              "this emitter does not read it yet")
+        .fatal();
+    return;
+  }
+
   if (mem_type == 0 || mem_type == 1) {  // sync or async memory
     // Wrapper modules trigger on posedge; invert a uniform negedge clock at
     // their boundary instead of changing the memory's storage semantics.

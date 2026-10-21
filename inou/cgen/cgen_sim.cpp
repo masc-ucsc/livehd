@@ -5720,6 +5720,22 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
     if (m.bits <= 0) {
       m.bits = 1;
     }
+    // FAIL CLOSED on a mixed-timing memory. Every sync-read decision in this
+    // file is `p.rd && m.type == 1`, so Memory_type_mixed makes all five of
+    // them false and every read is modelled as ASYNCHRONOUS -- a synchronous
+    // read port loses its register silently. The per-port timing is on each
+    // read port's `rdport` pin; until this emitter reads it, refuse by name
+    // rather than emit a wrong model.
+    if (m.type == Ntype::Memory_type_mixed) {
+      livehd::diag::err("inou.cgen.sim", "memory-mixed-read-timing", "unsupported")
+          .msg("memory {} has read ports of DIFFERENT timing (some asynchronous, some synchronous); "
+               "cgen_sim decides sync-ness from the cell-global `type` and would model every read as "
+               "asynchronous, dropping the synchronous read registers",
+               debug_name(node))
+          .hint("per-port timing is on each read port's `rdport` pin (Ntype::Memory_rdport_async / "
+                "_sync); this emitter does not read it yet")
+          .fatal();
+    }
     return pv;
   };
   const auto infer_memory_unsign = [&](Mem& memory) {
