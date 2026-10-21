@@ -2051,6 +2051,9 @@ sh_test(
     data = _FLOW_DATA + [
         "part_hier.v",
         "tree_hier.prp",
+        # Endpoint labelling and the const_bits column (sections 11 and 12).
+        "tool_sink_pins.v",
+        "tool_const_width.v",
     ],
 )
 

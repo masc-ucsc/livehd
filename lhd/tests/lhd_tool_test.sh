@@ -136,4 +136,98 @@ grep -q '"color":null' "$W/j.out" || fail "jsonl must render an unset color as n
 P cat lg:"$W/lg2" --top "$TOP" --target node --max 2 >"$W/m.out" || fail "tool cat --max nonzero"
 grep -q 'truncated at --max 2' "$W/m.out" || fail "--max must print a truncation footer: $(cat "$W/m.out")"
 
+# 11. ENDPOINT LABELLING. An edge endpoint is `<debug_name>.<pin>`, and the
+#     `<pin>` half used to come from `pin_name_of` on BOTH sides. On a SINK pin
+#     that returns the DRIVER's name, so several operands of one node collapsed
+#     onto a single token and the port id -- the only thing that says which
+#     operand an edge lands on -- was gone. An operand-order bug then reads as a
+#     correct dump. A sink is now always `<node>.p<port_id>`.
+#
+#     D2's version of this section found the node by a named output pin
+#     (`named_mux_q`). That name does not survive this pipeline -- a
+#     combinational `reg` driven by an always-case loses it, while a wire driven
+#     by an instance output keeps it (part_hier's `m1`/`m2`) -- so the node is
+#     located STRUCTURALLY here instead: the assertion is about port ids, and
+#     needs no name to make.
+"$LHD" compile verilog lhd/tests/tool_sink_pins.v --top tool_sink_pins \
+  --reader yosys-verilog --emit-dir lg:"$W/slg" --workdir "$W/sw" \
+  -q --result-json "$W/sr.json" 2>/dev/null \
+  || fail "compile tool_sink_pins.v -> lg failed: $(cat "$W/sr.json")"
+
+J cat lg:"$W/slg" --top tool_sink_pins --target all --max 0 >"$W/sp.jsonl" \
+  || fail "tool cat tool_sink_pins (jsonl) nonzero"
+
+# 11a. EVERY sink endpoint is a port id. One that is not means some node printed
+#      a name on its sink side, which is the collision this guards.
+bad=$(sed -nE 's/^.*"to":"([^"$][^"]*)".*/\1/p' "$W/sp.jsonl" | grep -vE '\.p[0-9]+$' | sort -u)
+[ -z "$bad" ] || fail "sink endpoints must be <node>.p<id>, got: $(echo $bad)"
+
+# 11b. a node with several operands shows them as DISTINCT port ids. Without the
+#      fix they collapse onto one token, so the count would drop.
+multi=$(sed -nE 's/^.*"to":"([^"]*)\.p[0-9]+".*/\1/p' "$W/sp.jsonl" | sort | uniq -c \
+          | awk '$1 >= 3 {print $2; exit}')
+[ -n "$multi" ] || fail "fixture produced no node with 3+ sink operands"
+nsink=$(sed -nE 's/^.*"to":"'"$multi"'\.(p[0-9]+)".*/\1/p' "$W/sp.jsonl" | sort -u | wc -l)
+[ "$nsink" -ge 3 ] || fail "$multi must show 3+ DISTINCT sink port ids, got $nsink"
+
+# 11c. GRAPH-INPUT EDGES. An edge driven by a primary input is not reachable
+#      from any node's out-edges, so it used to be absent entirely and a
+#      consumer rebuilding the graph lost every input.
+ins=$(grep -c '"from":"\$' "$W/sp.jsonl")
+[ "$ins" -ge 1 ] || fail "no graph-input edge in the dump: primary inputs are lost"
+
+# 12. const_bits. A constant driver lives in the const pool, which the node
+#     iterators skip, so the dump showed a design's shape but none of its
+#     literals. For a packed bit-field cycle that is the whole question.
+"$LHD" compile verilog lhd/tests/tool_const_width.v --top tool_const_width \
+  --reader yosys-verilog --emit-dir lg:"$W/clg" --workdir "$W/cw" \
+  -q --result-json "$W/cr.json" 2>/dev/null \
+  || fail "compile tool_const_width.v -> lg failed: $(cat "$W/cr.json")"
+J cat lg:"$W/clg" --top tool_const_width --target node --max 0 >"$W/cw.jsonl" \
+  || fail "tool cat tool_const_width (jsonl) nonzero"
+
+# 12a. every entry is a width or "?", and `consts`/`const_bits` agree entry for
+#      entry -- they come from ONE loop in the emitter, and a silent
+#      misalignment would attach one constant's width to another's value.
+python3 - "$W/cw.jsonl" <<'PYEOF' || fail "consts/const_bits are not aligned"
+import json, sys
+n = 0
+for line in open(sys.argv[1]):
+    r = json.loads(line)
+    if r.get("t") != "node":
+        continue
+    cs, cb = r.get("consts"), r.get("const_bits")
+    if not cs:
+        assert cb is None, (cs, cb)
+        continue
+    v, b = cs.split(","), cb.split(",")
+    assert len(v) == len(b), (cs, cb)
+    for ve, be in zip(v, b):
+        assert ve.split("=")[0] == be.split("=")[0], (ve, be)
+        w = be.split("=", 1)[1]
+        assert w == "?" or (w.isdigit() and int(w) >= 1), be
+        n += 1
+assert n > 0, "fixture produced no constants"
+print(f"checked {n} constant operands")
+PYEOF
+
+# 12b. a >64-bit literal keeps its real width. Nothing that measures a constant
+#      through an int64 can report this one. It is operand 1 of the compare,
+#      which is where an EQ carries its constant.
+grep -q '"consts":"p1=0x1234567890abcdef12345","const_bits":"p1=82"' "$W/cw.jsonl" \
+  || fail "the 82-bit literal did not report const_bits=82: $(grep -o '"consts":"p1=0x[^"]*","const_bits":"[^"]*"' "$W/cw.jsonl")"
+
+# 12c. Get_mask endpoints are measured like any other constant. D2 asserted on
+#      the unsized `-1` of its zext idiom `get_mask(a,-1)`; that idiom does not
+#      exist here, because Get_mask takes `[lo,hi)` endpoints (graph/cell.hpp),
+#      so the endpoint pair is what this dump has to carry instead.
+grep -qE '"consts":"p2=[0-9]+,p3=[0-9]+","const_bits":"p2=[0-9]+,p3=[0-9]+"' "$W/cw.jsonl" \
+  || fail "no Get_mask endpoint pair carried a measured width"
+
+# 12d. a NEGATIVE literal on a declared-width pin reports that DECLARED width,
+#      which is what decides the value it is compared as. It survives constant
+#      folding in the section-11 fixture, not in this one, so it reads that dump.
+grep -q '"consts":"p1=-0x5b","const_bits":"p1=8"' "$W/sp.jsonl" \
+  || fail "the negative 8-bit mux-arm literal did not report const_bits=8: $(grep -o '"consts":"p1=-[^"]*","const_bits":"[^"]*"' "$W/sp.jsonl")"
+
 echo "PASS: lhd tool cat/grep/diff/tree (lg path)"
