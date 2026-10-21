@@ -61,13 +61,26 @@ def main():
         meta = read(f'cnn/{arm}/profiles/drt/metadata.json')
         routed = bool(meta and meta.get('status') == 'complete' and meta.get('exitcode') == 0 and last['violations'] == 0)
         metrics = read(f'cnn/{arm}/profiles/drt/metrics.json') if routed else None
+        final = read(f'cnn/{arm}/profiles/final/metadata.json')
+        final_stopped = bool(final and final.get('status') == 'incomplete_guard_stop')
+        detail = (f'Completed check {last["iteration"]}; extraction complete; final STA/PG resource-stopped'
+                  if final_stopped else f'Completed check {last["iteration"]}; final timing qualification pending')
+        runtime_note = ('DRT only; stopped final attempt also cost ' + number(final['wall_seconds'], 1) + ' s'
+                        if final_stopped else 'DRT stage only; not whole-flow time')
+        runtime = number(meta['wall_seconds'], 1) if routed else 'In progress'
+        if not routed:
+            progress = read(f'cnn/{arm}/drt_observed_progress_snapshot.json')
+            if progress:
+                runtime = '≥ ' + number(progress['stage_wall_seconds_elapsed_lower_bound'], 1)
+                runtime_note = ('In progress; observed ' + escape(progress['observed_at_utc'])
+                                + '; cumulative tool CPU ' + number(progress['tool_cpu_seconds_cumulative'], 1) + ' s')
         rows.append('<tr>' + cell('CNN') + cell(label)
                     + cell('<span class="good">DRT complete</span>' if routed else '<span class="bad">DRT unresolved</span>',
-                           link(relative, f'Completed check {last["iteration"]}; final extraction pending'))
+                           link(relative, detail))
                     + cell(f'{last["violations"]:,}', 'Completed full check; excludes in-pass estimates')
                     + cell('Pending') + cell('Pending') + cell('Pending')
                     + cell(number(metrics.get('detailedroute__route__wirelength') if metrics else None, 0))
-                    + cell(number(meta['wall_seconds'], 1) if routed else 'In progress', 'DRT stage only; not whole-flow time')
+                    + cell(runtime, runtime_note)
                     + '</tr>')
 
     ey_history = read('eyeriss_correct_rc_matched/direct_allowcong_guides/drt_progress.json')
@@ -84,6 +97,14 @@ def main():
                 + cell('Pending') * 6 + '</tr>')
 
     density_rows = []
+    relative = 'cnn/matched_prects_density.json'
+    cnn_density = read(relative)
+    for key, label in [('native_common_seed', 'LiveHD'), ('strict_OR_replacement', 'OpenROAD')]:
+        obj = cnn_density['rows'][key]['grids']['512']
+        density_rows.append('<tr>' + cell('CNN') + cell(label) + cell('Matched preCTS placement')
+                            + cell(f'{obj["hot_bins_above80"]:,}')
+                            + cell(number(100 * obj['cell_area_fraction_in_above80_bins']) + '%')
+                            + cell(link(relative, 'Exact same CORE-cell census')) + '</tr>')
     for arm, label in [('native_clockclean', 'LiveHD'), ('or_cells_clockclean', 'OpenROAD')]:
         relative = f'cnn/{arm}/drc_spatial_context.json'
         obj = read(relative)
@@ -114,17 +135,18 @@ def main():
 <p class="note"><strong>Goal:</strong> if OpenROAD routes and LiveHD cannot, fix route parity first. Once both route cleanly, improve extracted timing and supported frequency against a strong reference. Missing an unattainable requested period alone does not reject a design. Keep hold checks separate: lowering frequency does not generally repair same-edge hold violations.</p>
 <div class="scroll"><table><caption>Main results — timing in ps, wirelength in µm, wall time in seconds</caption>
 <thead><tr><th>Design</th><th>Placement arm</th><th>Latest verified stage</th><th>Routing DRCs</th><th>Extracted setup WNS / TNS</th><th>Extracted hold WNS / TNS</th><th>Supported frequency</th><th>Signal wirelength</th><th>Measured wall time</th></tr></thead><tbody>@ROWS@</tbody></table></div>
-<p><strong>CNN:</strong> the OpenROAD reference has completed zero-DRC detailed routing, while the LiveHD arm still has @CNN@ violations at its latest completed check. This is a route-parity problem. Final extraction and frequency qualification remain pending.</p>
+<p><strong>CNN:</strong> the OpenROAD reference has completed zero-DRC detailed routing, while the LiveHD arm still has @CNN@ violations at its latest completed check. This is a route-parity problem. Extraction wrote the OpenROAD SPEF, but the subsequent IR-analysis step exceeded its 55 GiB memory cap before final reports and the PG census were exported. Its stopped attempt is retained; final extracted timing, PG validation and frequency qualification remain pending.</p>
 <p><strong>Eyeriss:</strong> LiveHD has @EY@ violations at its latest completed check. The strict OpenROAD placement is saved and audited; its downstream result is pending. Neither arm has a final extracted comparison.</p>
 <p><strong>LiteEth:</strong> both arms have zero DRCs, all nets routed and independently reproduced extracted setup/hold timing. LiveHD improves setup slack by 2.712 ps and hold slack by 3.741 ps, but has 38.2% more signal wire and a 43.9% longer final-route job. This is a timing improvement with routing-cost tradeoffs; maximum-frequency optimization remains unmeasured.</p>
 <h2>Density evidence</h2>
 <p>All rows below use a 512 × 512 diagnostic grid and CORE-cell area divided by macro-free bin area. “Cell area in hot bins” is the fraction of total CORE area located in bins above 80% occupancy. This diagnostic grid is separate from the coarse routing-estimator grid. Comparisons within each design use identical fixed macro geometry; the measurement boundaries are explicit.</p>
 <div class="scroll"><table><thead><tr><th>Design</th><th>Arm</th><th>Boundary</th><th>Bins above 80%</th><th>Cell area in hot bins</th><th>Evidence</th></tr></thead><tbody>@DENSITY@</tbody></table></div>
-<p>The strong density association motivates spreading experiments. It does not by itself prove marker causation: CTS and repair add different cells and clock trees to the two arms.</p>
+<p>The matched preCTS CNN pair contains exactly the same 333,888 CORE cells and 43,982.961 µm² of cell area. At 512², LiveHD has 42.911% of its cell area in hot bins, versus none for OpenROAD. At 64², that LiveHD fraction appears to be only 3.828%, showing how the coarse density view hides local crowding. The routing-estimator grid remains unchanged; this motivates finer placement-density feedback.</p>
+<p>The strong density association motivates spreading experiments. It does not by itself prove marker causation: the placement policies differ, and CTS and repair add different cells and clock trees to the two arms. The separate postGRT rows show that later measurement boundary explicitly.</p>
 <h2>Comparison and performance scope</h2>
 <p>The placement comparisons share their design's mapped starting netlist, macro/IO frame and authoritative constraints. CTS and repair may make arm-specific changes, which remain audited. CNN uses 65 SRAMs, Eyeriss 1,040 and LiteEth 5. The LiteEth reference uses routability-only placement after a preserved timing-driven rebuffering crash; this qualification prevents a whole-flow dominance claim. Both LiteEth arms configured a 1% repair-buffer option, but that option did not act as an observed cumulative hard bound.</p>
 <p>Timing values in the main table are final extracted results only. Pending entries are not zero and placement/GRT estimates are not substituted. A supported-frequency claim needs fresh extracted per-clock STA, consistent generated-clock relationships, IO budgets and timing exceptions, and explicit setup/hold reporting. CNN uses the shared ASAP7 RVT FF 0.77 V / 0 °C standard-cell corner with normalized SRAM models and fixed 10 ps IO budgets; this is not an all-corner frequency claim.</p>
-<p><code>perf record</code> and <code>perf stat</code> accompany the physical evaluations. Closed-stage wall times are shown with their scope; an in-progress job has no final runtime. The LiteEth final-route numbers exclude upstream placement and research lineage: the separately retained selected-job ledgers total 5,818.296 s for LiveHD and 4,601.480 s for OpenROAD, excluding their shared 335.583 s cold input. They are not minimal production-flow runtimes. Performance improvements will be reported with any timing, geometry or routing changes.</p>
+<p><code>perf record</code> and <code>perf stat</code> accompany the physical evaluations. Closed-stage wall times are shown with their scope; an in-progress job has only a timestamped observed lower bound. These jobs share a 32-CPU host with other evaluations/builds, so their wall times do not represent exclusive hardware. The LiteEth final-route numbers exclude upstream placement and research lineage: the separately retained selected-job ledgers total 5,818.296 s for LiveHD and 4,601.480 s for OpenROAD, excluding their shared 335.583 s cold input. They are not minimal production-flow runtimes. Performance improvements will be reported with any timing, geometry or routing changes.</p>
 <p>After the initial three routed evaluations, two additional HighTide designs are authorized. Existing FP-plan-disabled, macro/final-enabled and incremental-synthesis requirements continue to apply. <a href="../todo/livehd/3r-route.html">Detailed implementation and experiment history</a>.</p>
 <h2>Snapshot evidence</h2><p>Links refer to local evaluation artifacts; their SHA-256 prefixes identify the exact bytes used to render this snapshot.</p><ul>@SOURCES@</ul>
 </body></html>
