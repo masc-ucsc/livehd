@@ -21,6 +21,10 @@ struct Satlegalize_route_grid {
 struct Satlegalize_options {
   std::string                                   backend = "cadical", encoding = "candidate";
   unsigned                                      max_cells = 24, max_candidates = 12, max_windows = 8, max_pairs = 32;
+  // Zero preserves the global-only trial budget. The optional packing probe
+  // distinguishes an infeasible candidate menu from an alignment conflict.
+  unsigned                                      max_pairs_per_window = 0;
+  bool                                          check_packing        = false;
   unsigned                                      move_sites = 4, move_rows = 1, conflicts = 10000, milliseconds = 50;
   bool                                          skip_conflicts  = true;
   double                                        boundary_growth = .05;
@@ -53,6 +57,8 @@ struct Satlegalize_window {
   physical::Rect                        bounds;
   size_t                                movable_cells = 0;
   bool                                  oversized     = false;
+  unsigned                              trials = 0, accepted = 0, conflicts = 0, unknown = 0;
+  std::string                           packing_status = "not_checked";
   double                                usable_area = 0, movable_area_before = 0, movable_area_after = 0;
   double                                density_before = 0, density_after = 0;
   double                                route_utilization = 0;

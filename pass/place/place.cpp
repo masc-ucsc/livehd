@@ -75,6 +75,11 @@ void sat_window_statistics(rapidjson::Value& json, const Satlegalize_report& rep
     entry.AddMember("bounds_dbu", bounds, allocator);
     entry.AddMember("movable_cells", static_cast<uint64_t>(window.movable_cells), allocator);
     entry.AddMember("oversized", window.oversized, allocator);
+    entry.AddMember("trials", window.trials, allocator);
+    entry.AddMember("accepted", window.accepted, allocator);
+    entry.AddMember("conflicts", window.conflicts, allocator);
+    entry.AddMember("unknown", window.unknown, allocator);
+    entry.AddMember("candidate_packing", rapidjson::Value(window.packing_status.c_str(), allocator), allocator);
     if (options.route_grid) {
       entry.AddMember("route_utilization", window.route_utilization, allocator);
       entry.AddMember("source_gap_cells", static_cast<uint64_t>(window.source_gap_cells), allocator);
@@ -153,6 +158,8 @@ void sat_window_statistics(rapidjson::Value& json, const Satlegalize_report& rep
   counts.AddMember("mean", report.window_stats.empty() ? 0. : double(total) / report.window_stats.size(), allocator);
   json.AddMember("window_cell_counts", counts, allocator);
   json.AddMember("window_stats", windows, allocator);
+  json.AddMember("max_pairs_per_window", options.max_pairs_per_window, allocator);
+  json.AddMember("check_packing", options.check_packing, allocator);
   if (options.region_width_um > 0 || options.route_grid) {
     rapidjson::Value region(rapidjson::kObjectType);
     region.AddMember("width_um", options.region_width_um, allocator);
@@ -339,6 +346,9 @@ std::string environment_key(const Options& o, const ph::Technology& tech) {
                                           a.skip_conflicts,
                                           a.boundary_growth),
                               h);
+    if (a.max_pairs_per_window || a.check_packing) {
+      h = hash_text(std::format("satlegalize-search-v1:{}:{}", a.max_pairs_per_window, a.check_packing), h);
+    }
     if (a.region_width_um || a.region_height_um || a.spill_neighbors) {
       h = hash_text(std::format("satlegalize-region-v1:{}:{}:{}:{}",
                                 a.region_width_um,

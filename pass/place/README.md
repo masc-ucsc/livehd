@@ -405,6 +405,17 @@ compatibility still require geometric tables; parity alone is not coordinate
 equality. The backend and encoding default to `cadical` and `candidate` only
 inside this opt-in feature; no measured backend winner is assumed.
 
+Optional `synth.place.satlegalize.max_pairs_per_window=N` caps alignment
+trials in each region so one hard bin cannot consume the entire global
+`max_pairs` budget. Its default `0` retains the global-only budget.
+`check_packing=true` first probes the complete candidate menu with legal-site
+and non-overlap constraints, using the same per-solve limits. An `unsat` probe
+means this menu cannot pack; `unknown` means its budget expired. Both skip
+that region without shrinking it or installing a partial model. A `sat`
+probe still requires all alignment, spill-density and timing guards. The
+default is `false`. Per-window telemetry records `candidate_packing` and
+alignment trials, accepts, conflicts and timeouts separately.
+
 The remaining `synth.place.satlegalize.*` controls are `max_cells=24`,
 `max_candidates=12`, `max_windows=8`, `max_pairs=32`, `move_sites=4`,
 `move_rows=1`, `conflicts=10000`, `milliseconds=50`, `skip_conflicts=true` and

@@ -206,6 +206,23 @@ mobility is not proof that a cell is safe to spill: retain the independent
 positive-slack, clock protection, recipient density/capacity and whole-proposal
 timing checks. No production default changes are part of this experiment.</p>
 <h3>Measurements and routing admission</h3>
+<p>The synchronized-source follow-up is running from frozen <code>bin20</code>
+(LiveHD <code>e5ad5255c</code>): fresh RSMT128 GP with timing-spread weights
+0 and 1, SAT disabled, three designs in parallel. The prior CNN matched SAT
+pair had identical pre-SAT inputs but spent all 128 proposals in two bins:
+83 unknown/timeouts, 45 conflicts and no accepted alignment. Frozen
+<code>bin21</code> adds opt-in <code>max_pairs_per_window</code> and
+<code>check_packing</code> controls; defaults remain 0/false. Its replay screen
+uses four proposals per bin, 16 bins, a separate packing probe, 32 versus 64
+candidates and CaDiCaL versus CMS-XOR. Each arm starts from the same rounded
+saved DEF, obtains fresh STA and regenerates the exact producer RSMT128 map.
+Map equality is required within each replay comparison. This is not a replay
+of the original floating-point GP trajectory. Full source, configuration and
+input hashes are under
+<a href="../../repros/route_eval_20261021/spreading/timing_spread_bin20/prepared.json">the GP screen</a>
+and <a href="../../repros/route_eval_20261021/spreading/sat_search_bin21/prepared.json">the SAT screen</a>.
+Thirty SAT regression cases, the solver suite, both ABC/USyn placement smoke
+tests and the timing-spread CLI smoke test pass.</p>
 <p>Report construction/encoding/solve time separately, memory, actual cells per
 region, missing candidates, base-packing versus alignment UNSAT, unknown/timeouts,
 proposed/accepted/retained alignments, moved/spilled cells, displacement and
@@ -214,16 +231,32 @@ unreachable nets, full STA, electrical violations and area at pre-SAT,
 post-legalization and post-repair boundaries. Recompute actual final geometry;
 a locally accepted correction can still worsen final repair, as the completed
 Eyeriss c1 follow-up did.</p>
-<p>Only candidates passing geometry and full pin-access checks enter unchanged
-OpenROAD CTS → strict zero-overflow GRT → DRT → extraction/PG checks. Compare
+<p>Only candidates passing geometry and full pin-access checks enter
+OpenROAD CTS → GRT → DRT → extraction/PG checks. Follow the updated
+<a href="3r-route.html">routing decision criteria</a>: preserve strict GRT
+failures, but allow a separately recorded, matched residual-congestion policy
+in both arms without changing routing layers, capacity adjustment or iteration
+budget. Final acceptance still requires completed detailed routing, zero
+reported routing DRCs, no unrouted nets, complete PG association and fresh
+extracted timing. The goal is better setup WNS/TNS and achievable frequency
+against a strong matched OpenROAD reference, with hold reported separately;
+missing the requested clock period alone does not reject a result. Compare
 setup and hold WNS/TNS, routed wirelength/vias, area, zero-DRC completion and
 resources against the fresh OpenROAD references and the matched LiveHD control.
 All three fresh references now have verified complete flows. The CNN reference
 final-only 256 GiB retry succeeds; its earlier 128 GiB failure remains preserved.
-The corrected original CNN spreading candidate now completes detailed routing
-with zero DRCs, 6,051,981 µm wire and 2,375,332 vias; final extraction/timing
-remain pending. Its newer full-GP successor is in detailed routing. No LiveHD
-candidate has yet established full extracted routing parity. Native
+The corrected original CNN spreading candidate now completes the entire
+extracted flow with zero routing DRCs, 6,051,981 µm wire and 2,375,332 vias.
+Setup WNS/TNS are −4,781.08/−10,236,100 ps versus the saved reference's
+−7,356.80/−26,629,200 ps; hold WNS/TNS are −1,085.10/−40,531.8 ps versus
+−1,358.77/−76,673.7 ps. Binary, Tcl, physical models, actual final SDC,
+environment and resource policy match in the
+<a href="../../repros/route_eval_20261021/cnn_corrected_native_extracted_comparison/comparison.json">completed extraction audit</a>.
+This is a contextual whole-flow improvement, not an isolated SAT result;
+the historical placement reference still needs strength qualification and
+supported frequency needs a fresh per-clock extracted STA check. The newer
+CNN full-GP successor has also completed clean DRT and is in extraction.
+The retained Eyeriss halo2 candidate is in DRT after clean GRT. Native
 LEF-wide track capacity differs from OpenROAD's M2–M7 routing configuration;
 proxy improvements are screening evidence, not routing closure.</p>
 

@@ -131,6 +131,8 @@ assert 'window_cell_counts' in sat_report and 'fixed_regions' not in sat_report,
 sat_region_options = ['--set', 'synth.place=true', '--set', 'synth.place.timing_driven=true',
                       '--set', 'synth.place.satlegalize=true', '--set', 'synth.place.satlegalize.max_windows=2',
                       '--set', 'synth.place.satlegalize.max_cells=65536',
+                      '--set', 'synth.place.satlegalize.max_pairs_per_window=2',
+                      '--set', 'synth.place.satlegalize.check_packing=true',
                       '--set', 'synth.place.satlegalize.region_size=40,40',
                       '--set', 'synth.place.satlegalize.spill_neighbors=true',
                       '--set', 'synth.place.satlegalize.spill_slack_margin_ps=20']
@@ -140,6 +142,8 @@ region_report = sat_regions['qor']['place']['satlegalize']['fixed_regions']
 assert region_report['width_um'] == region_report['height_um'] == 40, region_report
 assert region_report['spill_neighbors'] and not region_report['region_backoff'], region_report
 assert region_report['spill_slack_margin_ps'] == 20, region_report
+assert sat_regions['qor']['place']['satlegalize']['max_pairs_per_window'] == 2, sat_regions
+assert sat_regions['qor']['place']['satlegalize']['check_packing'], sat_regions
 # Final-state replay needs the physical cache, which only the abc mapper enables.
 if os.environ.get('MAPPER', 'abc') == 'abc':
     sat_regions_warm = run('sat_fixed_regions_warm', sat_region_options)
@@ -165,7 +169,8 @@ assert route_guided['qor']['place']['satlegalize']['fixed_regions']['routing_gri
 run('bad_route_grid_model', ['--set', 'synth.place=true', '--set', 'synth.place.satlegalize.route_grid=true'], False)
 run('bad_route_grid_region', route_grid_options + ['--set', 'synth.place.satlegalize.region_size=40'], False)
 
-for setting in ['region_size=0,40', 'region_size=nan,40', 'spill_slack_margin_ps=-1', 'max_cells=65537']:
+for setting in ['region_size=0,40', 'region_size=nan,40', 'spill_slack_margin_ps=-1', 'max_cells=65537',
+                'max_pairs_per_window=1025', 'max_pairs_per_window=-1']:
     run('bad_sat_' + setting.replace('=', '_').replace(',', '_'),
         ['--set', 'synth.place=true', '--set', 'synth.place.satlegalize.' + setting], False)
 run('sat_spill_missing_region', ['--set', 'synth.place=true',

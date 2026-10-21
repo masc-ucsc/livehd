@@ -730,8 +730,8 @@ void encode_choices(Sat_solver& solver, std::vector<Candidate>& choices, const s
 Satlegalize_report satlegalize(const ph::Technology& tech, ph::Floorplan& fp, const timing::Feedback& timing,
                                const Satlegalize_options& options) {
   if (!options.max_cells || options.max_cells > 65536 || !options.max_candidates || options.max_candidates > 128
-      || !options.max_pairs || options.max_pairs > 1024 || !options.max_windows || options.max_windows > 1024
-      || options.move_sites > 128 || options.move_rows > 16 || !std::isfinite(options.boundary_growth)
+      || !options.max_pairs || options.max_pairs > 1024 || options.max_pairs_per_window > 1024 || !options.max_windows
+      || options.max_windows > 1024 || options.move_sites > 128 || options.move_rows > 16 || !std::isfinite(options.boundary_growth)
       || options.boundary_growth < 0 || options.boundary_growth > 1 || !std::isfinite(options.region_width_um)
       || !std::isfinite(options.region_height_um) || options.region_width_um < 0 || options.region_height_um < 0
       || (options.region_width_um == 0) != (options.region_height_um == 0) || !std::isfinite(options.spill_slack_margin_ps)
@@ -1293,8 +1293,23 @@ Satlegalize_report satlegalize(const ph::Technology& tech, ph::Floorplan& fp, co
         }
       }
     }
+    if (options.check_packing) {
+      // This checks only the enumerated legal sites and non-overlap clauses.
+      // Do not install its model: spill density, pin access, retained
+      // alignments and the caller's timing guards still require validation.
+      const auto status           = solver.solve({}, options.conflicts, options.milliseconds);
+      window_stats.packing_status = status == Sat_status::satisfiable     ? "sat"
+                                    : status == Sat_status::unsatisfiable ? "unsat"
+                                                                          : "unknown";
+      if (status != Sat_status::satisfiable) {
+        // An exhausted probe budget is unknown, never a proof of infeasibility.
+        continue;
+      }
+    }
     std::vector<int> accepted;
-    for (size_t p = advanced ? 0 : target; p < targets.size() && report.trials < options.max_pairs; ++p) {
+    for (size_t p = advanced ? 0 : target; p < targets.size() && report.trials < options.max_pairs
+                                           && (!options.max_pairs_per_window || window_stats.trials < options.max_pairs_per_window);
+         ++p) {
       const auto& proposed = targets[p].alignment;
       if (tried.contains(p) || !selected.contains(proposed.first) || !selected.contains(proposed.second)
           || (options.route_grid && (!source_contained.contains(proposed.first) || !source_contained.contains(proposed.second)))) {
@@ -1302,6 +1317,7 @@ Satlegalize_report satlegalize(const ph::Technology& tech, ph::Floorplan& fp, co
       }
       tried.insert(p);
       ++report.trials;
+      ++window_stats.trials;
       const auto ia         = std::find_if(cells.begin(), cells.end(), [&](const auto& c) { return c.index == proposed.first; });
       const auto ib         = std::find_if(cells.begin(), cells.end(), [&](const auto& c) { return c.index == proposed.second; });
       const int  activation = solver.new_variable();
@@ -1334,10 +1350,12 @@ Satlegalize_report satlegalize(const ph::Technology& tech, ph::Floorplan& fp, co
         const auto status = solver.solve(assumptions, options.conflicts, options.milliseconds);
         if (status == Sat_status::unknown) {
           ++report.unknown;
+          ++window_stats.unknown;
           break;
         }
         if (status == Sat_status::unsatisfiable) {
           ++report.conflicts;
+          ++window_stats.conflicts;
           break;
         }
         Satlegalize_checkpoint checkpoint;
@@ -1409,6 +1427,7 @@ Satlegalize_report satlegalize(const ph::Technology& tech, ph::Floorplan& fp, co
         }
         accepted.push_back(activation);
         report.accepted.push_back(proposed);
+        ++window_stats.accepted;
         report.checkpoints.push_back(std::move(checkpoint));
         report.spilled_cells += options.spill_neighbors ? transfers : 0;
         installed             = true;

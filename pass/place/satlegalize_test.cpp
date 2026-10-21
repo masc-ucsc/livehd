@@ -849,6 +849,79 @@ TEST(Satlegalize, RoutingGridCountsCrossBinPairsWithoutShrinkingRegions) {
   EXPECT_TRUE(report.window_stats.empty());
   EXPECT_EQ(f.fp.components, original);
 }
+TEST(Satlegalize, PerWindowTrialCapReachesAnotherCongestionBin) {
+  for (unsigned per_window : {0, 1}) {
+    Fixture f;
+    f.fp.die = {0, 0, 1600, 200};
+    f.fp.rows.resize(1);
+    f.fp.rows[0].count         = 16;
+    f.fp.components[0].place.x = 0;
+    f.fp.components[1].place.x = 200;
+    f.fp.components[1].place.y = 0;
+    auto third                 = f.fp.components[1];
+    third.name                 = "third";
+    third.place.x              = 400;
+    f.fp.components.push_back(third);
+    f.fp.nets.front().connections.push_back({third.name, "A"});
+    auto driver = f.fp.components[0], sink = f.fp.components[1];
+    driver.name    = "other_driver";
+    sink.name      = "other_sink";
+    driver.place.x = 800;
+    sink.place.x   = 1000;
+    f.fp.components.push_back(driver);
+    f.fp.components.push_back(sink);
+    f.fp.nets.push_back({
+        "other",
+        {{driver.name, "Y"}, {sink.name, "A"}}
+    });
+    f.timing.pins["sink:A"].slack       = -3;
+    f.timing.pins["third:A"].slack      = -2;
+    f.timing.pins["other_sink:A"].slack = -1;
+    auto grid                           = route_grid(f.fp.die, 2, 1);
+    grid->horizontal                    = {2, 1};
+    auto options                        = grid_options(grid);
+    options.spill_neighbors             = false;
+    options.move_sites = options.move_rows = 0;
+    options.max_candidates                 = 1;
+    options.max_windows = options.max_pairs = 2;
+    options.max_pairs_per_window            = per_window;
+    const auto report                       = satlegalize(f.tech, f.fp, f.timing, options);
+    EXPECT_EQ(report.trials, 2);
+    ASSERT_EQ(report.accepted.size(), 2);
+    ASSERT_EQ(report.window_stats.size(), per_window ? 2 : 1);
+    EXPECT_EQ(report.window_stats.front().trials, per_window ? 1 : 2);
+    EXPECT_EQ(report.accepted.back().first, per_window ? 3 : 0);
+    EXPECT_TRUE(satlegalize_preserved(f.tech, f.fp, report));
+    expect_no_overlap(f.fp);
+  }
+}
+TEST(Satlegalize, PackingProbeSeparatesMenuInfeasibilityFromAlignmentAndTimeout) {
+  for (const auto* backend : {"cadical", "cms-cnf", "cms-xor"}) {
+    for (unsigned scenario : {0, 1, 2}) {
+      Fixture f;
+      auto    options         = grid_options(route_grid(f.fp.die, 1, 1));
+      options.backend         = backend;
+      options.check_packing   = true;
+      options.spill_neighbors = false;
+      options.move_sites = options.move_rows = 0;
+      options.max_candidates                 = 1;
+      if (scenario == 0) {
+        f.fp.components[1].place = f.fp.components[0].place;
+      } else if (scenario == 2) {
+        options.milliseconds = 0;
+      }
+      const auto original = f.fp.components;
+      const auto report   = satlegalize(f.tech, f.fp, f.timing, options);
+      ASSERT_EQ(report.window_stats.size(), 1);
+      EXPECT_EQ(report.window_stats.front().packing_status, scenario == 0 ? "unsat" : scenario == 1 ? "sat" : "unknown");
+      EXPECT_EQ(report.trials, scenario == 1 ? 1 : 0);
+      EXPECT_EQ(report.conflicts, scenario == 1 ? 1 : 0);
+      EXPECT_EQ(report.unknown, 0);  // Probe exhaustion is not an alignment timeout.
+      EXPECT_TRUE(report.accepted.empty());
+      EXPECT_EQ(f.fp.components, original);
+    }
+  }
+}
 TEST(Satlegalize, RoutingGridRejectsSecondaryCrossBinPairButKeepsBoundaryMembership) {
   Fixture f;
   f.fp.die = {0, 0, 1600, 200};

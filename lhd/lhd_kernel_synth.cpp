@@ -302,6 +302,8 @@ livehd::placement::Options placement_options(const Options& opts) {
   sat.max_candidates        = sat_limit("place.satlegalize.max_candidates", "12", 128);
   sat.max_windows           = sat_limit("place.satlegalize.max_windows", "8", 1024);
   sat.max_pairs             = sat_limit("place.satlegalize.max_pairs", "32", 1024);
+  sat.max_pairs_per_window  = sat_limit("place.satlegalize.max_pairs_per_window", "0", 1024, true);
+  sat.check_packing         = truthy(synth_set(opts, "place.satlegalize.check_packing", "false"));
   sat.move_sites            = sat_limit("place.satlegalize.move_sites", "4", 128, true);
   sat.move_rows             = sat_limit("place.satlegalize.move_rows", "1", 16, true);
   sat.route_grid            = truthy(synth_set(opts, "place.satlegalize.route_grid", "false"));
