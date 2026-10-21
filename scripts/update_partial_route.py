@@ -264,6 +264,21 @@ def main():
                   + cell(number(100 * rc_perf['task_clock_ms']['reduction'], 1) + '% less CPU', 'Median of three isolated paired runs')
                   + cell(number(100 * rc_perf['instructions']['reduction'], 1) + '% fewer instructions. Prepared constants reused across thresholds; 220,378 output comparisons checked, including 16 paired NaNs. No full-flow gain claim.')
                   + cell(sync_link('rc_perf/owner_perf_summary.json', 'Paired counters') + '; ' + sync_link('rc_perf/owner_boundary_result.json', 'Numerical boundary check')) + '</tr>')
+    stage_opt_path = 'macro-stage-isolation-opt.run.json'
+    stage_opt = read_sync(stage_opt_path)
+    assert stage_opt['status'] == 'pass'
+    stage_debug_path = 'macro-stage-isolation-debug-all.run.json'
+    stage_debug = (read_sync(stage_debug_path)
+                   if (ROOT / 'tmp/remote_sync_20261021' / stage_debug_path).is_file() else None)
+    stage_status = ('Optimized checks PASS; full debug build pending' if stage_debug is None
+                    else 'Optimized checks PASS; full debug build ' + stage_debug['status'].upper())
+    stage_evidence = sync_link(stage_opt_path, 'Optimized build and tests')
+    if stage_debug is not None:
+        stage_evidence += '; ' + sync_link(stage_debug_path, 'Full debug build')
+    validation += ('<tr>' + cell('Macro-plan-only pressure') + cell(stage_status)
+                   + cell(number(stage_opt['wall_s'], 2), 'Optimized guarded job seconds')
+                   + cell('Three selected targets pass, including the placement suite and CLI smoke checks; both production tools build. Regressions cover zero FP force/time, active macro pressure, unchanged preview IO poses, and zero fixed-final field/grid time.')
+                   + cell(stage_evidence) + '</tr>')
 
     seed_check = read_sync('cnn_or_seed_repulsion/preflight_summary.json')
     seed_review = read_sync('cnn_or_seed_repulsion/parent_preflight_review_and_GP_release.json')
@@ -290,6 +305,39 @@ def main():
     assert macro_positive_release['manifest_sha256'] == SYNC_SOURCES['liteeth_macro_pressure_v3/manifest.json']
     assert macro_positive_release['status'] == 'approved_three_positive_macro_diagnostics'
     assert macro_positive_release['allowed_arms'] == macro_positive['allowed_positive_arms']
+    macro_trial_path = 'liteeth_macro_pressure_v3/outputs/pressure_p1_o50/closed_diagnostic_summary.json'
+    macro_trial = read_sync(macro_trial_path)
+    macro_correction = read_sync('liteeth_macro_pressure_v3/outputs/pressure_p1_o50/closed_diagnostic_interpretation_correction.json')
+    assert macro_trial['status'] == 'closed_preCTS_diagnostic_pass'
+    assert macro_trial['manifest_sha256'] == SYNC_SOURCES['liteeth_macro_pressure_v3/manifest.json']
+    assert macro_correction['original_summary_sha256'] == SYNC_SOURCES[macro_trial_path]
+    assert macro_trial['initial_mapping_bytes_match']
+    assert macro_trial['remaining_arms']['status'] == 'held_no_launch'
+    macro_phases = read_sync('liteeth_macro_pressure_phase_audit/observed_history_census.json')
+    for arm in macro_phases['arms'].values():
+        final_phases = [value for name, value in arm['phases'].items()
+                        if name == 'w/synth/place/gp_history.json' or '/timing_place/' in name]
+        assert len(final_phases) == 4
+        assert all(phase[key] == 0 for phase in final_phases
+                   for key in ('macro_cell_density_weight', 'macro_cell_density_force',
+                               'macro_cell_density_seconds', 'local_density_grid_seconds'))
+    macro_trial_rows = []
+    for arm, label, runtime in (('control', 'Pressure 0 / overlap 50', macro_trial['control_native_runtime']),
+                                ('pressure', 'Pressure 1 / overlap 50', macro_trial['native_runtime'])):
+        final = macro_trial['stages']['final']
+        assert final['coverage']['reported_coverage_names_and_masters_match']
+        score = final[arm + '_score']
+        density = final[arm + '_density512']
+        frame = score['die_um']
+        macro_trial_rows.append('<tr>' + cell(label) + cell(f'{score["instances"]:,}')
+                                + cell(number(frame[2] - frame[0], 3) + ' × ' + number(frame[3] - frame[1], 3))
+                                + cell(number(100 * density['CORE_area_fraction_in_hot_bins'], 2) + '%',
+                                       f'{density["hot_bins_above80"]:,} hot bins; excess ' + number(density['excess_above80_um2'], 2) + ' µm²')
+                                + cell(number(score['hpwl_um'], 1))
+                                + cell(number(score['setup_wns_ps']) + ' / ' + number(score['setup_tns_ps']))
+                                + cell(number(score['hold_wns_ps']) + ' / ' + number(score['hold_tns_ps']))
+                                + cell(number(runtime['CLI_wall_seconds'], 2),
+                                       'CPU ' + number(runtime['CLI_process_tree_CPU_seconds'], 2) + ' s') + '</tr>')
     control_rows = []
     for stage, label in (('first_macro', 'First macro frame'), ('accepted_macro', 'Accepted macro frame'), ('final', 'Final cells')):
         row = macro_recovered['independent'][stage]
@@ -380,14 +428,18 @@ def main():
 <h2>New-source validation in progress</h2>
 <p>These checks use the newly synchronized source snapshot and remain separate from the routed comparison above. Failed and rejected attempts are retained; they do not establish routing or reuse success.</p>
 <div class="scroll"><table><thead><tr><th>Check</th><th>Status</th><th>Measured cost</th><th>Finding</th><th>Evidence</th></tr></thead><tbody>@VALIDATION@</tbody></table></div>
-<p>The corrected source passed all 22 optimized integration tests, built both production executables, and compiled all 3,929 debug targets. The benchmark defaults remain unchanged. These build checks do not establish routed QoR.</p>
+<p>The synchronized baseline passed all 22 optimized integration tests, built both production executables, and compiled all 3,929 debug targets. Validation of the subsequent macro-plan-only fix is listed separately above. The benchmark defaults remain unchanged. These build checks do not establish routed QoR.</p>
 <h2>Cell and macro spreading experiments</h2>
 <p>The CNN starting-frame check below uses the same mapped netlist, IO, fixed macro geometry, SDC and placement-RC scorer. All 333,955 components and 45,027 clock endpoints survive import exactly. Each seed's four timing values reproduce exactly after import. The OpenROAD seed has lower HPWL and density but worse setup estimates in this scope; these values are not extracted timing or a routed comparison.</p>
 <div class="scroll"><table><thead><tr><th>CNN starting cells</th><th>HPWL (µm)</th><th>Estimated setup WNS / TNS (ps)</th><th>Estimated hold WNS / TNS (ps)</th><th>Retained import</th></tr></thead><tbody>@SEED_ROWS@</tbody></table></div>
 <p>Six placement diagnostics are released: OpenROAD seeds at local pressure 0, 1 and 4, LiveHD seeds at 0 and 4, and a separate OpenROAD pressure-0 halo sensitivity. The primary arms use the same nominal 2 µm halo; native row/site snapping enlarges that clearance to 2.052 × 2.160 µm. Movement of the 712 OpenROAD-seed cells affected by that adaptation is tracked separately. The 4.59 µm sensitivity is not pooled with primary results. Raw PG associations remain identically deferred in this import check and must be connected before physical acceptance.</p>
 <div class="scroll"><table><caption>Closed CNN placement diagnostics — estimated timing only</caption><thead><tr><th>Policy</th><th>Local pressure / halo (µm)</th><th>Final CORE area in hot bins</th><th>HPWL (µm)</th><th>Estimated setup WNS / TNS (ps)</th><th>Estimated hold WNS / TNS (ps)</th><th>Measured wall time (s)</th><th>Convergence</th></tr></thead><tbody>@PLACEMENT_ROWS@</tbody></table></div>
 <p>The first OpenROAD-seeded pressure-0 run creates crowding during GP: 0 hot bins at input, 1,087 before legalization, 796 after legalization and 717 after detailed placement. Final hot-bin CORE area is 21.16%; the halo-adaptation cohort contributes no final area to those hot bins. Estimated worst setup improves by 239.94 ps, while setup TNS worsens by 9.681 million ps and HPWL increases 22.07%. The density, HPWL and TNS regressions coexist with better worst slack; no routing or frequency improvement is established.</p>
-<p>A separate LiteEth flow experiment has verified its control as a placement diagnostic and released three positive-pressure arms sequentially. Cell-pressure / soft macro-overlap weights are 0/50, 1/50, 1/5 and 4/5. FP plan is disabled, macro and final placement are enabled, incremental synthesis is enabled, and the 5 µm configured halo is preserved. Macros receive an area-integrated field emitted only by standard cells, so they can move toward quieter space. Macro-to-macro overlap uses a separate soft penalty, which is zero for disjoint padded footprints; reducing it may have no effect there. Global electrostatic density also separates macros and is unchanged in this comparison. The current flow carries macro-cell pressure into the automatic-IO prototype too, so IO changes are measured outcomes and effects cannot be attributed solely to macro GP. Measure actual force, macro movement, usable cell occupancy in inter-macro corridors, final density and timing before selecting a policy. Corridor denominators separately exclude physical macros and halos. Feedback-derived topology and die dimensions are recorded as outcomes; all arms must start from identical mapped inputs. The current observer first exposes raw GP coordinates, so initial pre-GP displacement and density are unavailable.</p>
+<p>The OpenROAD-seeded CNN pressure-1 diagnostic reduces final excess occupancy from 918.10 to 0.47 µm² and hot-bin count from 717 to 1, but worsens estimated setup WNS by 3,018.58 ps and increases HPWL by 30.65%. This strong density response has a substantial timing and wirelength cost; it is not a routed improvement.</p>
+<p>The pressure-4 CNN diagnostic finishes with zero hot bins and excess occupancy, improves estimated setup WNS by 1,288.55 ps and TNS by 5.049 million ps over pressure 0, and reduces HPWL by 2.97%. Its endogenous post-density budget stops GP at 200 iterations, versus 750 for pressure 0 and 1; this is not an equal-iteration dose comparison. Hold remains positive. This candidate still needs the common physical handoff and downstream routing before it can establish route parity.</p>
+<p>A separate LiteEth flow experiment has closed its control and pressure-1 / overlap-50 placement diagnostic. The remaining pressure-1 / overlap-5 and pressure-4 / overlap-5 arms are held while enforcing the user's macro-plan-only force requirement. FP plan is disabled, macro and final placement are enabled, incremental synthesis is enabled, and the 5 µm configured halo is preserved. Macros receive an area-integrated field emitted only by standard cells, so they can move toward quieter space. Macro-to-macro overlap uses a separate soft penalty, which is zero for disjoint padded footprints; reducing it may have no effect there. Global electrostatic density also separates macros and is unchanged in this comparison. The frozen tools used for these closed trials also carry macro-cell pressure into the automatic-IO preview, so IO changes are measured outcomes and effects cannot be attributed solely to macro GP. A source fix now clears both macro-pressure terms in FP and the IO preview; final placement already disables both. New trials will use a separately frozen build after validation. Corridor denominators separately exclude physical macros and halos. Feedback-derived topology and die dimensions are recorded as outcomes; both arms start from identical mapped inputs. The observer first exposes raw GP coordinates, so initial pre-GP displacement and density are unavailable.</p>
+<div class="scroll"><table><caption>LiteEth closed pressure trial — final placement-RC estimates, partial timing coverage</caption><thead><tr><th>Policy</th><th>Instances</th><th>Die size (µm)</th><th>Final CORE area in hot bins</th><th>All non-PG HPWL (µm)</th><th>Estimated setup WNS / TNS (ps)</th><th>Estimated hold WNS / TNS (ps)</th><th>Native CLI wall (s)</th></tr></thead><tbody>@MACRO_TRIAL_ROWS@</tbody></table></div>
+<p>Final density is mixed: hot-bin CORE-area fraction improves by 5.26 percentage points, while hot-bin count and excess area increase. Estimated setup, HPWL, cell count, frame size and runtime regress. All three frames retain the same 46 unclocked latch pins and 46 unconstrained endpoints. The two macro solves spend 42.86 and 44.15 seconds computing pressure, measured as elapsed time. Final and its timing-placement rounds record zero macro-field force, field time and shared-grid time. Whole-CLI samples also show substantial OpenMP waiting and RC waveform work; those shares do not attribute CPU time to the macro field. No routing or frequency improvement is established.</p>
 <p>@MACRO_GAP_NOTE@</p>
 <div class="scroll"><table><caption>LiteEth macro control — independent placement-RC estimates, partial timing coverage</caption><thead><tr><th>Frame</th><th>Instances</th><th>Die size (µm)</th><th>Estimated setup WNS / TNS (ps)</th><th>Estimated hold WNS / TNS (ps)</th><th>All non-PG HPWL (µm)</th><th>Unclocked latch pins</th><th>Score job wall (s)</th></tr></thead><tbody>@CONTROL_ROWS@</tbody></table></div>
 <p>The LiteEth control's native command completed in 404.71 s (guarded job). Its original independent scorer failed on an unsupported OpenSTA waveform property; that attempt remains unchanged. A separate corrected checker passed all three saved frames without rerunning placement, including the four defined clock roots, periods, waveforms, leaf memberships and full PG association checks. The final DEF matches reuse-v3 byte for byte. All three frames also report 46 unclocked DHL transparent latch pins and 46 unconstrained endpoints, so four defined clocks do not establish complete timing coverage. Track their census and any changes across policies; frequency qualification remains pending. Native OpenTimer separately skips nonsequential asynchronous set/reset checks on 14 normalized cell-pin pairs, an existing modeling limitation reproduced in reuse-v3.</p>
@@ -403,6 +455,7 @@ def main():
                        'CNN': f'{cnn_counts["LiveHD"]:,}', 'CNN_FINAL': cnn_final_note,
                        'EY': f'{ey_last["violations"]:,}', 'VALIDATION': validation, 'SEED_ROWS': ''.join(seed_rows),
                        'PLACEMENT_ROWS': ''.join(placement_rows), 'CONTROL_ROWS': ''.join(control_rows),
+                       'MACRO_TRIAL_ROWS': ''.join(macro_trial_rows),
                        'MACRO_GAP_NOTE': gap_note, 'MARKER_NOTE': marker_note, 'SOURCES': sources}.items():
         page = page.replace('@' + key + '@', value)
     output = ROOT / 'docs/partial_route.html'

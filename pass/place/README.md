@@ -858,7 +858,8 @@ claimed. Profiles and measurement records are in
 
 `synth.place.macro.cell_density_weight=0` independently controls local
 standard-cell pressure on movable macros. Positive values enable it during
-both FP and macro GP; the final cell pass disables it and keeps macros fixed.
+macro GP only. FP, the automatic IO preview, and final cell placement disable
+this field; final cell placement keeps macros fixed.
 The source is real standard-cell area, including below-target density, so a
 macro can prefer a quieter neighborhood before cells exceed the soft target.
 The screened field uses `local_density_bins` and `local_density_range` and is
@@ -879,10 +880,10 @@ attract a macro. Macros never contribute density to this local term.
 The weight limits force relative to ordinary macro WL/density force. Where a
 distance-based centroid anchor exists, it also caps the pull to that fraction of
 the spring's reference force at one circle radius. It is not capped against the
-instantaneous spring force, which vanishes exactly at the centroid. FP and macro
-GP may use the pull; final fixed-macro cell GP disables it. Cell spreading, cell
-pressure on macros, and this pull share a single cell-density raster per GP
-iteration. The added prefix-sum queries require no additional Poisson solve.
+instantaneous spring force, which vanishes exactly at the centroid. Only macro
+GP uses the pull; FP, the automatic IO preview, and final cell GP disable it.
+Cell spreading, cell pressure on macros, and this pull share a single
+cell-density raster per GP iteration. The added prefix-sum queries require no additional Poisson solve.
 Reports record grid time and pull time/force separately.
 The local field is an additional soft force, not a hard utilization limit or
 minimum-gap guarantee. Tune force strength against HPWL, timing, local density

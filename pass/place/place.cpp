@@ -4735,6 +4735,8 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
       prototype.progress_observer          = {};
       prototype.cohesion_weight            = 0;
       prototype.fixed_macro_overlap_weight = 0;
+      prototype.macro_cell_density_weight  = 0;
+      prototype.macro_density_pull_weight  = 0;
       prototype.wirelength_gamma_end       = .05;
       prototype.post_density_factor        = 0;
       prototype.macro_align_weight         = 0;
@@ -4869,6 +4871,9 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
       control.centroid_distance_attraction = options.fp_distance_attraction;
       control.centroid_attraction_outside  = options.fp_attraction_outside;
       auto fp_control                      = control;
+      // Macro-cell pressure belongs to macro GP, after this FP solve.
+      fp_control.macro_cell_density_weight = 0;
+      fp_control.macro_density_pull_weight = 0;
       fp_control.route                     = route_policy(options, options.fp_route);
       fp_control.routability               = fp_control.improved_routability
           = options.routability && fp_control.route.model != dp::RouteModel::off;

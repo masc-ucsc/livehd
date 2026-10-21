@@ -3009,8 +3009,15 @@ TEST(Placement, PlacementColorsUseLibertyRolesAndPinsMoveWithoutSta) {
     EXPECT_GE(report["pin_updates"].GetUint64(), 2);
     EXPECT_GE(report["macro_pin_updates"].GetUint64(), 1);
     EXPECT_GT(report["fp_iterations"].GetInt(), 0);
-    EXPECT_GT(report["fp_macro_cell_density_seconds"].GetDouble(), 0);
-    EXPECT_GT(report["fp_macro_density_pull_seconds"].GetDouble(), 0);
+    EXPECT_EQ(report["fp_macro_cell_density_seconds"].GetDouble(), 0);
+    EXPECT_EQ(report["fp_macro_cell_density_force"].GetDouble(), 0);
+    EXPECT_EQ(report["fp_macro_density_pull_seconds"].GetDouble(), 0);
+    EXPECT_EQ(report["fp_macro_density_pull_force"].GetDouble(), 0);
+    auto macro_history = read_json("gp_history.json");
+    ASSERT_FALSE(macro_history.HasParseError());
+    EXPECT_EQ(macro_history["macro_cell_density_weight"].GetDouble(), o.macro_cell_density_weight);
+    EXPECT_GT(macro_history["macro_cell_density_seconds"].GetDouble(), 0);
+    EXPECT_GT(macro_history["macro_density_pull_seconds"].GetDouble(), 0);
     for (auto node : graph->body().nodes()) {
       if (auto a = node.attr(attrs::synth_color_group); a.has()) {
         EXPECT_EQ(a.get(), "synthesis-kept");
@@ -3023,6 +3030,29 @@ TEST(Placement, PlacementColorsUseLibertyRolesAndPinsMoveWithoutSta) {
       ASSERT_NE(it, result.parasitics->terminals.end());
       EXPECT_EQ(it->x, t.x);
       EXPECT_EQ(it->y, t.y);
+    }
+  }
+  // Automatic IO uses its plain preview, independently of macro GP pressure.
+  {
+    auto io_options                      = o;
+    io_options.fp_place                  = false;
+    io_options.macro_pin_adjust          = false;
+    io_options.output_dir                = (dir / "io_without_pressure").string();
+    io_options.macro_cell_density_weight = io_options.macro_density_pull_weight = 0;
+    hhds::GraphLibrary plain_flat;
+    const auto        plain_io = place(*graph, plain_flat, io_options);
+    io_options.output_dir                = (dir / "io_with_pressure").string();
+    io_options.macro_cell_density_weight = o.macro_cell_density_weight;
+    io_options.macro_density_pull_weight = o.macro_density_pull_weight;
+    hhds::GraphLibrary pressure_flat;
+    const auto        pressure_io = place(*graph, pressure_flat, io_options);
+    ASSERT_EQ(plain_io.floorplan.terminals.size(), pressure_io.floorplan.terminals.size());
+    for (size_t i = 0; i < plain_io.floorplan.terminals.size(); ++i) {
+      const auto& plain    = plain_io.floorplan.terminals[i];
+      const auto& pressure = pressure_io.floorplan.terminals[i];
+      EXPECT_EQ(plain.name, pressure.name);
+      EXPECT_EQ(plain.x, pressure.x);
+      EXPECT_EQ(plain.y, pressure.y);
     }
   }
   // Without FP, macro GP still owns IO movement. A fixed macro/IO handoff
@@ -3058,6 +3088,7 @@ TEST(Placement, PlacementColorsUseLibertyRolesAndPinsMoveWithoutSta) {
     EXPECT_EQ(report["macro_cell_density_seconds"].GetDouble(), 0);
     EXPECT_EQ(report["macro_density_pull_weight"].GetDouble(), 0);
     EXPECT_EQ(report["macro_density_pull_seconds"].GetDouble(), 0);
+    EXPECT_EQ(report["local_density_grid_seconds"].GetDouble(), 0);
   }
   for (const auto& t : final.floorplan.terminals) {
     const auto it = std::find_if(frame.terminals.begin(), frame.terminals.end(), [&](const auto& p) { return p.name == t.name; });
