@@ -1,17 +1,30 @@
 # The CORE-ET benchmark corpus: 122 modules.
 #
 # SCOPE, stated rather than implied. This is a CHOSEN SUBSET, not all of
-# CORE-ET. The upstream inventory (`core_et_blocks.txt`) counts 215
-# non-technology RTL modules on main -- module declarations under rtl/, with
-# dv/ testbenches excluded -- plus 34 technology primitives, 249 distinct RTL
-# modules in all. So every coverage fraction quoted against this file is "of
-# the 122 we attempt", never "of CORE-ET".
+# CORE-ET. Measured from core-et main `c72b6a2` by collecting every `module`
+# declaration under `hw/**/rtl/`: 249 distinct names, of which 31 have more
+# than one implementation (the per-technology primitives). The repo's own
+# inventory, `core_et_blocks.txt`, splits the same 249 as 215 non-technology
+# modules plus 34 technology primitives. So every coverage fraction quoted
+# against this file is "of the 122 we attempt", never "of CORE-ET".
 #
-# The rule that selected these 122 is NOT recorded anywhere, and this file does
-# not reconstruct it. Only 48 of the 122 appear in the upstream inventory under
-# the same name, so it is not a prefix of that list and the remainder are not
-# accounted for here. Treat the set as declared, and say so when quoting a
-# number from it.
+# The selection rule was never written down, but it reconstructs almost
+# exactly. All 122 are real RTL modules, and none is a technology primitive.
+# They are the MINION-CORE slice: the name families `core_top`, `intpipe_*`,
+# `minion_*`, `vpu_*`, `txfma*`, `trans_*`, `tima*`, `debug_breakpoint` and
+# `null_vpu`. 124 modules carry those names; 122 are here. The two that are
+# not are `intpipe_mul_div_ctl` and `intpipe_mul_div_dp`, and the omission is
+# not technical -- both compile, export and pass the static gates in about a
+# second each. Everything outside the slice is the cache and interconnect
+# side: `prim_*` (39), `shirecache_*` (30), `rbox_*` (17), `icache_*` (10),
+# `neigh_*` (6) and a handful more.
+#
+# Cross-check: core-et's `dv/rtlcosim/` holds 216 per-module co-simulation
+# directories, and 94 of the 122 have one.
+#
+# DECISION (2026-10-20): 122 stays the declared scope. Adding the two mul_div
+# modules would make it a clean family slice at 124; that is a scope change,
+# not a correction, so it is recorded here rather than taken.
 #
 # One list, two consumers: the D4/DCERT2 sweep and scripts/coverage_ledger.py.
 # A second copy would be one more thing to drift.
