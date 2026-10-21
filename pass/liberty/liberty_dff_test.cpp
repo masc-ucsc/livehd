@@ -53,6 +53,27 @@ std::string lib(const std::string& cells) {
 
 }  // namespace
 
+TEST(LibertyDff, BufferedFilesAndCommentsPreserveCellBoundaries) {
+  const auto first = write_lib("comment-first.lib", std::string(65535, ' ')
+      + "/*" + std::string(65536, 'x') + "*/\n"
+      + lib(q_cell("FIRST", 2)) + "// no final newline");
+  const auto second = write_lib("comment-second.lib",
+      "// ignored cell(BAD) {}\n" + lib(q_cell("SECOND", 3))
+      + "/* unterminated cell(ALSO_BAD) {}");
+  const auto missing = first + ".missing";
+  const auto cells = livehd::liberty::scan_dff_cells(first + " " + missing + " " + second);
+  ASSERT_EQ(cells.size(), 2U);
+  EXPECT_EQ(cells[0].name, "FIRST");
+  EXPECT_EQ(cells[1].name, "SECOND");
+  EXPECT_DOUBLE_EQ(cells[0].area, 2);
+  EXPECT_DOUBLE_EQ(cells[1].area, 3);
+  // A slash that does not begin a comment must remain part of the quoted name.
+  const auto slash = write_lib("slash.lib", lib(q_cell("\"path/name\"", 4)) + "/");
+  const auto named = livehd::liberty::scan_dff_cells(slash);
+  ASSERT_EQ(named.size(), 1U);
+  EXPECT_EQ(named.front().name, "path/name");
+}
+
 TEST(LibertyDff, CombinationalInventoryKeepsPinOrderAndExcludesUnsupportedCells) {
   const auto cell = [](const std::string& name, const std::string& extra, const std::string& output) {
     return "cell(" + name + ") { area: 2; " + extra

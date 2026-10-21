@@ -3,6 +3,7 @@
 #include "liberty_dff.hpp"
 
 #include <algorithm>
+#include <array>
 #include <cctype>
 #include <charconv>
 #include <cmath>
@@ -147,7 +148,10 @@ std::string read_files(const std::string& lib_files) {
   while (ss >> path) {
     std::ifstream ifs(path, std::ios::binary);
     if (ifs) {
-      all.append(std::istreambuf_iterator<char>(ifs), std::istreambuf_iterator<char>());
+      std::array<char, 65536> block;
+      while (ifs.read(block.data(), block.size()) || ifs.gcount() > 0) {
+        all.append(block.data(), static_cast<size_t>(ifs.gcount()));
+      }
       all.push_back('\n');
     }
   }
@@ -156,24 +160,24 @@ std::string read_files(const std::string& lib_files) {
 
 // Drop /* */ and // comments (quotes are not comment-bearing in Liberty).
 std::string strip_comments(const std::string& s) {
-  std::string o;
-  o.reserve(s.size());
-  for (size_t i = 0; i < s.size();) {
-    if (i + 1 < s.size() && s[i] == '/' && s[i + 1] == '*') {
-      i += 2;
-      while (i + 1 < s.size() && !(s[i] == '*' && s[i + 1] == '/')) {
-        ++i;
-      }
-      i += 2;
-    } else if (i + 1 < s.size() && s[i] == '/' && s[i + 1] == '/') {
-      while (i < s.size() && s[i] != '\n') {
-        ++i;
-      }
-    } else {
-      o.push_back(s[i++]);
+  std::string out;
+  out.reserve(s.size());
+  size_t start = 0;
+  for (size_t slash = s.find('/'); slash != std::string::npos; slash = s.find('/', slash + 1)) {
+    if (slash + 1 == s.size() || (s[slash + 1] != '*' && s[slash + 1] != '/')) {
+      continue;
     }
+    out.append(s, start, slash - start);
+    const bool block = s[slash + 1] == '*';
+    const auto end   = block ? s.find("*/", slash + 2) : s.find('\n', slash + 2);
+    if (end == std::string::npos) {
+      return out;  // An unfinished comment consumes the remaining text.
+    }
+    start = block ? end + 2 : end;  // Keep a line comment's newline.
+    slash = start - 1;
   }
-  return o;
+  out.append(s, start, s.size() - start);
+  return out;
 }
 
 // Index of the `}` matching the `{` at `open`, honoring quoted strings.
