@@ -3310,6 +3310,27 @@ void feed_back(MemFix& f, const char* sink_name, int port_idx, int from_read = 0
   oq.connect_sink(sink);
 }
 
+// Re-pin an already built fixture as a MIXED-read-timing memory: the cell-global
+// `type` becomes the mixed sentinel and the read ports carry DISAGREEING
+// `rdport` values. No RTL route produces this today -- the reader's script runs
+// `memory -nomap -nordff`, so a synchronous read port is never formed and the
+// cell type is never 3 -- so the graph has to be written by hand. That is the
+// only way to reach the per-port code at all, and leaving it unreached is how a
+// fail-closed path rots into one that fails open.
+void make_mixed_read(MemFix& f, const std::vector<int64_t>& rdport_by_read) {
+  auto*     g      = f.g.get();
+  const int stride = static_cast<int>(Ntype::Memory_port_stride);
+  auto      repin  = [&](const char* name, int port_idx, int64_t v) {
+    auto sink = f.mem.create_sink_pin(Ntype::get_sink_pid(Ntype_op::Memory, name) + port_idx * stride);
+    sink.del_sink();
+    livehd::graph_util::create_const(*g, *Dlop::create_integer(v)).connect_sink(sink);
+  };
+  repin("type", 0, Ntype::Memory_type_mixed);
+  for (size_t r = 0; r < rdport_by_read.size(); ++r) {
+    repin("rdport", static_cast<int>(1 + r), rdport_by_read[r]);
+  }
+}
+
 // The WHOLE chain, not just the scan: `build_certificate` ends in
 // `index_certificate`, which refuses any node whose dependency was not declared
 // earlier. A scan that accepts a graph but schedules it in an order the
@@ -3372,6 +3393,46 @@ TEST(DesignScan, TwoIndependentReadPortsAreNotACycle) {
   feed_back(f, "addr", /*port_idx=*/0, /*from_read=*/1);
   EXPECT_NO_THROW(scan_and_build(*f.g))
       << "two read ports whose addresses do not depend on each other are independent cones";
+}
+
+// MIXED read timing: the cell says 3 and the ports disagree.
+//
+// The scanner carries the timing PER PORT (`Memory_port_info::rd_sync`), but
+// `memory_lowering` and the legacy emitter still branch on the cell-global
+// `Memory_info::sync`, so one shape would be emitted for a memory that needs
+// two. The refusal is the contract, and the diagnostic has to name WHICH ports
+// split, because that is what sizes the per-port lowering work.
+TEST(DesignScan, MixedReadTimingIsRefusedAndNamesTheSplit) {
+  auto& lib = livehd::Hhds_graph_library::instance("lgdb_scan_mem_mixed_rd");
+  auto  f   = build_mem(lib, "mixed_rd", /*sync_read=*/false, /*fwd=*/0, /*reads=*/2);
+  make_mixed_read(f, {Ntype::Memory_rdport_sync, Ntype::Memory_rdport_async});
+  try {
+    scan_design(*f.g, {});
+    ADD_FAILURE() << "a memory whose read ports disagree on timing was accepted";
+  } catch (const std::exception& e) {
+    const std::string what = e.what();
+    EXPECT_NE(what.find("Read ports disagree on timing"), std::string::npos) << what;
+    EXPECT_NE(what.find("sync {1}"), std::string::npos) << what;
+    EXPECT_NE(what.find("async {2}"), std::string::npos) << what;
+  }
+}
+
+// The split is read from the PINS, not from the port order: swapping which read
+// port is registered has to swap the two sets. A diagnostic built from the port
+// index instead would print the same text either way and would be worthless as
+// a sizing input.
+TEST(DesignScan, MixedReadTimingSplitFollowsThePins) {
+  auto& lib = livehd::Hhds_graph_library::instance("lgdb_scan_mem_mixed_rd_swap");
+  auto  f   = build_mem(lib, "mixed_rd_swap", /*sync_read=*/false, /*fwd=*/0, /*reads=*/2);
+  make_mixed_read(f, {Ntype::Memory_rdport_async, Ntype::Memory_rdport_sync});
+  try {
+    scan_design(*f.g, {});
+    ADD_FAILURE() << "a memory whose read ports disagree on timing was accepted";
+  } catch (const std::exception& e) {
+    const std::string what = e.what();
+    EXPECT_NE(what.find("sync {2}"), std::string::npos) << what;
+    EXPECT_NE(what.find("async {1}"), std::string::npos) << what;
+  }
 }
 
 // ONE WAY across two read ports is an ordinary DAG edge, not a cycle: read 0's

@@ -601,14 +601,12 @@ Memory_info parse_memory_info(LeanCtx& ctx, const Node& node) {
     }
   }
   mi.sync = cell_sync;
-  if (mi.type == Ntype::Memory_type_mixed) {
-    for (const auto& p : mi.ports) {
-      if (p.rdport) {
-        mi.sync = p.rd_sync;
-        break;
-      }
-    }
-  }
+  // No `Memory_type_mixed` arm, and that is deliberate. The refusal above is
+  // `[[noreturn]]`, so a mixed cell never reaches this line; a branch here
+  // would be dead code that reads as though `Memory_info::sync` carried a
+  // mixed meaning. When the lowering becomes per-port the refusal is what
+  // moves, and the per-port `rd_sync` record -- already filled from the pins
+  // above -- is what replaces this scalar.
 
   return mi;
 }
