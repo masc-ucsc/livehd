@@ -270,6 +270,23 @@ def main():
     assert seed_check['status'] == 'both_retained_seed_preflights_pass_no_GP'
     assert seed_review['status'] == 'approved_six_GP_diagnostics_after_both_retained_preflights'
     assert seed_review['preflight_summary_sha256'] == SYNC_SOURCES['cnn_or_seed_repulsion/preflight_summary.json']
+    macro_plan = read_sync('liteeth_macro_pressure_v2/manifest.json')
+    macro_release = read_sync('liteeth_macro_pressure_v2/parent_control_release.json')
+    assert macro_release['manifest_sha256'] == SYNC_SOURCES['liteeth_macro_pressure_v2/manifest.json']
+    assert macro_release['released_arm'] == 'control_p0_o50'
+    assert [(arm['pressure'], arm['soft_overlap']) for arm in macro_plan['arms']] == [(0, 50), (1, 50), (1, 5), (4, 5)]
+    gap = read_sync('liteeth_v3_macro_gap_readonly/summary.json')
+    assert gap['status'] == 'closed_v3_macro_stage_readonly_diagnostic'
+    gap_plot = 'liteeth_v3_macro_gap_readonly/macro_stage_density.svg'
+    SYNC_SOURCES[gap_plot] = sha256((ROOT / 'tmp/remote_sync_20261021' / gap_plot).read_bytes()).hexdigest()
+    gap_note = ('The saved LiteEth reuse-v3 macro-stage frame has only '
+                + number(100 * gap['halo_excluded']['CORE_occupancy'], 2)
+                + '% CORE occupancy in usable inter-macro corridors after excluding halos, while '
+                + number(100 * gap['grids']['512']['CORE_area_fraction_in_hot_bins'], 2)
+                + '% of CORE area is in bins above 80% occupancy. This points to the attraction/spreading balance '
+                'as a key issue alongside macro movement. This is a closed macro-stage diagnostic before final-cell '
+                'feedback, not a new candidate or routed result. ' + sync_link(gap_plot, 'Density plot') + '; '
+                + sync_link('liteeth_v3_macro_gap_readonly/summary.json', 'Gap-area measurements') + '.')
     seed_rows = []
     for seed, label in (('native', 'LiveHD cells'), ('or', 'OpenROAD cells')):
         result = seed_check['seeds'][seed]
@@ -312,7 +329,8 @@ def main():
 <p>The CNN starting-frame check below uses the same mapped netlist, IO, fixed macro geometry, SDC and placement-RC scorer. All 333,955 components and 45,027 clock endpoints survive import exactly. Each seed's four timing values reproduce exactly after import. The OpenROAD seed has lower HPWL and density but worse setup estimates in this scope; these values are not extracted timing or a routed comparison.</p>
 <div class="scroll"><table><thead><tr><th>CNN starting cells</th><th>HPWL (µm)</th><th>Estimated setup WNS / TNS (ps)</th><th>Estimated hold WNS / TNS (ps)</th><th>Retained import</th></tr></thead><tbody>@SEED_ROWS@</tbody></table></div>
 <p>Six placement diagnostics are released: OpenROAD seeds at local pressure 0, 1 and 4, LiveHD seeds at 0 and 4, and a separate OpenROAD pressure-0 halo sensitivity. The primary arms use the same nominal 2 µm halo; native row/site snapping enlarges that clearance to 2.052 × 2.160 µm. Movement of the 712 OpenROAD-seed cells affected by that adaptation is tracked separately. The 4.59 µm sensitivity is not pooled with primary results. Raw PG associations remain identically deferred in this import check and must be connected before physical acceptance.</p>
-<p>A separate LiteEth flow experiment is being prepared with cell-pressure / soft macro-overlap weights 0/50, 1/50, 1/5 and 4/5. Macros receive an area-integrated field emitted only by standard cells, so they can move toward quieter space. Macro-to-macro overlap uses a separate soft penalty, which is zero for disjoint padded footprints; reducing it may have no effect there. Global electrostatic density also separates macros and is unchanged in this comparison. Hard spacing stays enforced. The current flow carries macro-cell pressure into the automatic-IO prototype too, so IO changes are measured outcomes and effects cannot be attributed solely to macro GP. Measure actual force, macro movement, cell occupancy in inter-macro corridors, final density and timing before selecting a policy. The current observer first exposes raw GP coordinates, so initial pre-GP displacement and density are unavailable.</p>
+<p>A separate LiteEth flow experiment has released its control; the remaining three arms await control verification. Cell-pressure / soft macro-overlap weights are 0/50, 1/50, 1/5 and 4/5. FP plan is disabled, macro and final placement are enabled, incremental synthesis is enabled, and the 5 µm configured halo is preserved. Macros receive an area-integrated field emitted only by standard cells, so they can move toward quieter space. Macro-to-macro overlap uses a separate soft penalty, which is zero for disjoint padded footprints; reducing it may have no effect there. Global electrostatic density also separates macros and is unchanged in this comparison. The current flow carries macro-cell pressure into the automatic-IO prototype too, so IO changes are measured outcomes and effects cannot be attributed solely to macro GP. Measure actual force, macro movement, usable cell occupancy in inter-macro corridors, final density and timing before selecting a policy. Corridor denominators separately exclude physical macros and halos. The current observer first exposes raw GP coordinates, so initial pre-GP displacement and density are unavailable.</p>
+<p>@MACRO_GAP_NOTE@</p>
 <h2>Comparison and performance scope</h2>
 <p>The placement comparisons share their design's mapped starting netlist, macro/IO frame and authoritative constraints. CTS and repair may make arm-specific changes, which remain audited. CNN uses 65 SRAMs, Eyeriss 1,040 and LiteEth 5. The LiteEth reference uses routability-only placement after a preserved timing-driven rebuffering crash; this qualification prevents a whole-flow dominance claim. Both LiteEth arms configured a 1% repair-buffer option, but that option did not act as an observed cumulative hard bound.</p>
 <p>Timing values in the main table are final extracted results only. Pending entries are not zero and placement/GRT estimates are not substituted. A supported-frequency claim needs fresh extracted per-clock STA, consistent generated-clock relationships, IO budgets and timing exceptions, and explicit setup/hold reporting. CNN uses the shared ASAP7 RVT FF 0.77 V / 0 °C standard-cell corner with normalized SRAM models and fixed 10 ps IO budgets; this is not an all-corner frequency claim.</p>
@@ -324,7 +342,7 @@ def main():
     for key, value in {'STAMP': stamp, 'ROWS': ''.join(rows), 'DENSITY': ''.join(density_rows),
                        'CNN': f'{cnn_counts["LiveHD"]:,}', 'CNN_FINAL': cnn_final_note,
                        'EY': f'{ey_last["violations"]:,}', 'VALIDATION': validation, 'SEED_ROWS': ''.join(seed_rows),
-                       'MARKER_NOTE': marker_note, 'SOURCES': sources}.items():
+                       'MACRO_GAP_NOTE': gap_note, 'MARKER_NOTE': marker_note, 'SOURCES': sources}.items():
         page = page.replace('@' + key + '@', value)
     output = ROOT / 'docs/partial_route.html'
     output.write_text(page)
