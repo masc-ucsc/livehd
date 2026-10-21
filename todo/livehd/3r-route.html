@@ -568,6 +568,20 @@ The experiment manifest and stage commands are retained under
 <a href="../../tmp/route_cts_eval_20261021/experiment.json"><code>tmp/route_cts_eval_20261021</code></a>.
 FP planning stays disabled, macro and final placement stay enabled, and
 incremental synthesis stays enabled. Existing defaults are unchanged.</p>
+<p>The evaluation goal is the best achievable frequency with a completed clean
+route, compared against a strong, matched OpenROAD baseline. Missing the
+original requested clock period is acceptable and does not by itself reject a
+result. Report extracted setup WNS/TNS and hold separately, and validate any
+supported-frequency estimate per clock with fresh extracted STA. A frequency
+sweep must preserve generated-clock relationships, IO assumptions and timing
+exceptions consistently in both arms. If OpenROAD routes its design while
+LiveHD cannot route its own, the placement or flow needs correction. Once both
+route cleanly, LiveHD must demonstrate better extracted timing and achievable
+frequency; falling behind remains an optimization problem even if both meet
+the original requested period. A weak reference is not evidence of success.
+Once CNN, Eyeriss and LiteEth complete these routed evaluations, two
+additional HighTide designs are authorized to broaden memory-layout and timing
+coverage.</p>
 <p>Reference audits found that the old Eyeriss OpenROAD result contained only
 193 memories instead of the current 1,040, and the old LiteEth result had lost
 PHY logic and retained only one clock. Neither is a valid current reference.
