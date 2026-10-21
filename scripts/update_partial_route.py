@@ -163,10 +163,22 @@ def main():
     ey_summary = read(ey_summary_path) or {}
     ey_stage = ey_summary.get('latest_stage', 'PreCTS placement saved')
     ey_placement = ey_summary.get('placement_result', {})
+    ey_cts = read('eyeriss_or_cells_listfix_retry/cts_summary.json')
+    ey_grt = read('eyeriss_or_cells_listfix_retry/grt_summary.json')
+    ey_or_wall = ey_placement.get('wall_seconds')
+    ey_or_wall_note = 'Replacement placement job only; CTS/routing cost excluded'
+    ey_or_boundary_note = 'Boundary audit ' + escape(ey_boundary.get('status', 'pending') if ey_boundary else 'pending')
+    if ey_cts and ey_grt:
+        assert all(obj['result']['status'] == 'complete' and obj['result']['exit_code'] == 0
+                   for obj in (ey_cts, ey_grt))
+        assert ey_grt['total_overflow'] == 0 and ey_grt['PG_census']['unconnected_pg_iterms'] == 0
+        ey_or_wall += ey_cts['result']['wall_seconds'] + ey_grt['result']['wall_seconds']
+        ey_or_wall_note = 'Closed placement + CTS + GRT jobs; active DRT and research overhead excluded'
+        ey_or_boundary_note += '; GRT zero overflow, antenna 0; final extraction pending'
     rows.append('<tr>' + cell('Eyeriss') + cell('OpenROAD')
-                + cell(link(ey_summary_path, ey_stage), 'Boundary audit ' + escape(ey_boundary.get('status', 'pending') if ey_boundary else 'pending') + '; final extraction pending')
+                + cell(link(ey_summary_path, ey_stage), ey_or_boundary_note)
                 + cell('Pending') * 5
-                + cell(number(ey_placement.get('wall_seconds'), 1), 'Replacement placement job only; CTS/routing cost excluded') + '</tr>')
+                + cell(number(ey_or_wall, 1), ey_or_wall_note) + '</tr>')
 
     density_rows = []
     relative = 'cnn/matched_prects_density.json'
@@ -192,6 +204,16 @@ def main():
                             + cell(f'{obj["above80_bins"]:,}')
                             + cell(number(100 * obj['CORE_area_in_above80_fraction']) + '%')
                             + cell(link(relative, 'Density evidence')) + '</tr>')
+    relative = 'eyeriss_or_cells_listfix_retry/post_grt_density_comparison.json'
+    ey_postgrt = read(relative)
+    assert ey_postgrt['status'] == 'PASS' and ey_postgrt['exact_macro_master_status_xy_orientation_equal']
+    assert ey_postgrt['exact_macro_free_bin_area_array_equal']
+    for key, label in [('native', 'LiveHD'), ('OpenROAD', 'OpenROAD')]:
+        obj = ey_postgrt[key]
+        density_rows.append('<tr>' + cell('Eyeriss') + cell(label) + cell('PostGRT / DRT input')
+                            + cell(f'{obj["bins_above80"]:,}')
+                            + cell(number(100 * obj['CORE_area_in_above80_fraction']) + '%')
+                            + cell(link(relative, f'{obj["CORE_cells"]:,} CORE cells; arm-specific CTS changes')) + '</tr>')
 
     ey_markers = read('eyeriss_correct_rc_matched/direct_allowcong_guides/completed_iter10_summary.json')
     assert ey_markers['iteration10_markers'] == 10356 and ey_markers['same_DRT_input_geometry']
@@ -290,7 +312,7 @@ def main():
 <p>The CNN starting-frame check below uses the same mapped netlist, IO, fixed macro geometry, SDC and placement-RC scorer. All 333,955 components and 45,027 clock endpoints survive import exactly. Each seed's four timing values reproduce exactly after import. The OpenROAD seed has lower HPWL and density but worse setup estimates in this scope; these values are not extracted timing or a routed comparison.</p>
 <div class="scroll"><table><thead><tr><th>CNN starting cells</th><th>HPWL (µm)</th><th>Estimated setup WNS / TNS (ps)</th><th>Estimated hold WNS / TNS (ps)</th><th>Retained import</th></tr></thead><tbody>@SEED_ROWS@</tbody></table></div>
 <p>Six placement diagnostics are released: OpenROAD seeds at local pressure 0, 1 and 4, LiveHD seeds at 0 and 4, and a separate OpenROAD pressure-0 halo sensitivity. The primary arms use the same nominal 2 µm halo; native row/site snapping enlarges that clearance to 2.052 × 2.160 µm. Movement of the 712 OpenROAD-seed cells affected by that adaptation is tracked separately. The 4.59 µm sensitivity is not pooled with primary results. Raw PG associations remain identically deferred in this import check and must be connected before physical acceptance.</p>
-<p>A separate LiteEth macro-stage experiment is being prepared with cell-pressure / soft macro-overlap weights 0/50, 1/50, 1/5 and 4/5. Macros receive an area-integrated field emitted only by standard cells, so they can move toward quieter space. Macro-to-macro overlap uses a separate soft penalty, which is zero for disjoint padded footprints; reducing it may have no effect there. Hard spacing stays enforced. Measure actual force, macro movement, cell occupancy in inter-macro corridors, final density and timing before selecting a policy. The current observer first exposes raw GP coordinates, so initial pre-GP displacement and density are unavailable.</p>
+<p>A separate LiteEth flow experiment is being prepared with cell-pressure / soft macro-overlap weights 0/50, 1/50, 1/5 and 4/5. Macros receive an area-integrated field emitted only by standard cells, so they can move toward quieter space. Macro-to-macro overlap uses a separate soft penalty, which is zero for disjoint padded footprints; reducing it may have no effect there. Global electrostatic density also separates macros and is unchanged in this comparison. Hard spacing stays enforced. The current flow carries macro-cell pressure into the automatic-IO prototype too, so IO changes are measured outcomes and effects cannot be attributed solely to macro GP. Measure actual force, macro movement, cell occupancy in inter-macro corridors, final density and timing before selecting a policy. The current observer first exposes raw GP coordinates, so initial pre-GP displacement and density are unavailable.</p>
 <h2>Comparison and performance scope</h2>
 <p>The placement comparisons share their design's mapped starting netlist, macro/IO frame and authoritative constraints. CTS and repair may make arm-specific changes, which remain audited. CNN uses 65 SRAMs, Eyeriss 1,040 and LiteEth 5. The LiteEth reference uses routability-only placement after a preserved timing-driven rebuffering crash; this qualification prevents a whole-flow dominance claim. Both LiteEth arms configured a 1% repair-buffer option, but that option did not act as an observed cumulative hard bound.</p>
 <p>Timing values in the main table are final extracted results only. Pending entries are not zero and placement/GRT estimates are not substituted. A supported-frequency claim needs fresh extracted per-clock STA, consistent generated-clock relationships, IO budgets and timing exceptions, and explicit setup/hold reporting. CNN uses the shared ASAP7 RVT FF 0.77 V / 0 °C standard-cell corner with normalized SRAM models and fixed 10 ps IO budgets; this is not an all-corner frequency claim.</p>
