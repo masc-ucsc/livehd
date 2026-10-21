@@ -29,6 +29,20 @@ used/placed environments are in `synth/place/io_resynth.json`; reusable state is
 in `abc_cache/io_timing.json` and `abc_cache/wire_load.json`. Use a distinct
 `--workdir` for each major placement configuration. `lhd.incremental=false`
 disables reading/writing reusable state but permits feedback within this run.
+After a successful full invocation, `physical_cache/` retains the completed
+repaired netlist, including instance-specific color edits and inter-color
+buffers, its placement/RC attributes and final boundary measurements as one
+generation. An unchanged invocation restores that generation without repeating
+IO resynthesis, placement or physical repair. The restored IO report records
+zero new resynthesis attempts and identical used/measured boundary values;
+`reused_final_state` identifies replay, and `pass.place.restore` measures it.
+This avoids applying final feedback to the earlier, unrepaired ABC body.
+The gate checks compiled graph/attribute bytes, all explicit options, engine
+identity, Liberty/LEF, SDC and physical RC/floorplan contents. Missing, changed
+or damaged generations fall back to ordinary per-region synthesis and fresh
+physical optimization. Edited designs still use the existing region cache;
+this completed-generation tier does not claim per-instance physical reuse
+across RTL edits. Artifact digests are checked before restoring any files.
 The IO timing snapshot records the timing-engine source identity. A timer
 change discards its old measured arrivals/required times before the pre-placement
 trigger check, while preserving the constraints used to map the body and the

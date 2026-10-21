@@ -76,12 +76,41 @@ assert warm['qor']['place']['incremental']['hit'], warm['qor']['place']
 assert first_def == (root/'def/out.def').read_bytes()
 assert warm['qor']['sta']['designs'][0]['parasitics']['identity'] == place['rc_identity']
 assert warm['incremental']['sta']['hits'] == 1, warm['incremental']
+if os.environ.get('MAPPER', 'abc') == 'abc':
+    assert warm['qor']['place']['reused_final_state'], warm['qor']['place']
+    cold_netlist = (root/'placed.v').read_bytes()
+    for label in ('warm_again', 'warm_third'):
+        repeat = run(label, ['--set', 'synth.place=true', '--emit-dir', f'def:{root}/def',
+                             '--emit', f'verilog:{root}/repeat.v'])
+        assert repeat['qor']['place']['reused_final_state'], repeat['qor']['place']
+        assert (root/'repeat.v').read_bytes() == cold_netlist
+        assert (root/'def/out.def').read_bytes() == first_def
+        io = json.loads((root/'W/synth/place/io_resynth.json').read_text())
+        assert io['fired'] == io['accepted'] == io['restarts'] == 0, io
+        assert all(c['used'] == c['placed'] for c in io['colors']), io
+        assert repeat['qor']['sta']['designs'][0]['max_delay'] == sta['max_delay']
+        assert not any(p['name'] in ('pass.place.resize', 'pass.place.repair',
+                                    'pass.place.io_resynth') for p in repeat['phases'])
+    original_sdc = sdc.read_text()
+    sdc.write_text(original_sdc.replace('set_output_delay -clock virtual 0 ',
+                                      'set_output_delay -clock virtual 1 '))
+    constrained = run('sdc_edited', ['--set', 'synth.place=true'])
+    assert not constrained['qor']['place'].get('reused_final_state', False)
+    sdc.write_text(original_sdc)
+    original_source = source.read_text()
+    source.write_text(original_source.replace('(a ^ b)', '(a | b)'))
+    edited = run('source_edited', ['--set', 'synth.place=true',
+                                 '--emit', f'verilog:{root}/edited.v'])
+    assert not edited['qor']['place'].get('reused_final_state', False), edited['qor']['place']
+    assert (root/'edited.v').read_bytes() != cold_netlist
+    source.write_text(original_source)
 rc = run('rc_change', ['--set', 'synth.place=true', '--set', 'synth.place.wire_rc=50,5'])
 assert rc['qor']['place']['rc_identity'] != place['rc_identity']
 assert rc['incremental']['sta']['hits'] == 0, rc['incremental']
 assert rc['qor']['sta']['designs'][0]['max_delay'] != sta['max_delay']
 disabled = run('disabled', ['--set', 'synth.place=true', '--set', 'lhd.incremental=false'])
 assert not disabled['qor']['place']['incremental']['enabled']
+assert not disabled['qor']['place'].get('reused_final_state', False)
 timed = run('timing_driven', ['--set', 'synth.place=true', '--set', 'synth.place.timing_driven=true', '--set', 'synth.place.timing_rounds=2'])
 assert timed['qor']['place']['legal'] and len(timed['qor']['place']['timing_driven']['rounds']) == 2
 td = timed['qor']['place']['timing_driven']

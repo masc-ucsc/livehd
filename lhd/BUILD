@@ -146,6 +146,38 @@ cc_test(
     ],
 )
 
+genrule(
+    name = "physical_salt",
+    srcs = [
+        "lhd.hpp",
+        "lhd_kernel_synth.cpp",
+        "physical_cache.cpp",
+        "physical_cache.hpp",
+        ":compile_salt",
+        "//:MODULE.bazel",
+        "//pass/place",
+        "//pass/opentimer:pass_opentimer",
+    ],
+    outs = ["physical_salt.hpp"],
+    cmd = "h=$$(cat $(SRCS) | (shasum -a 256 2>/dev/null || sha256sum) | cut -c1-16); " +
+          "printf '#pragma once\\n#include <cstdint>\\nnamespace lhd { inline constexpr uint64_t kPhysicalSrcSalt = 0x%sULL; }\\n' \"$$h\" > $@",
+)
+
+cc_library(
+    name = "physical_cache",
+    srcs = ["physical_cache.cpp"],
+    hdrs = ["physical_cache.hpp"],
+    copts = COPTS,
+    deps = ["@llvm-project//llvm:Support", "@rapidjson"],
+)
+
+cc_test(
+    name = "physical_cache_test",
+    srcs = ["physical_cache_test.cpp"],
+    copts = COPTS,
+    deps = [":physical_cache", "@googletest//:gtest_main"],
+)
+
 cc_library(
     name = "lhd_lib",
     srcs = [
@@ -153,6 +185,7 @@ cc_library(
         "formal_cache.hpp",
         "formal_salt.hpp",
         "compile_salt.hpp",
+        "physical_salt.hpp",
         "lhd_compile_cache.cpp",
         "lhd_compile_cache.hpp",
         "lhd_prp_import.hpp",
@@ -182,6 +215,7 @@ cc_library(
     visibility = ["//visibility:public"],
     deps = [
         ":lhd_tune",
+        ":physical_cache",
         "//core",
         "//core:file_name",
         "//graph",
