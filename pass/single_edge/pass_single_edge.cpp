@@ -249,6 +249,10 @@ hhds::Pin_class zext_source(const hhds::Pin_class& p) {
 struct Mem_port {
   uint32_t        port      = 0;
   bool            rdport    = false;  // native default: a WRITE port
+  // This port's OWN read timing (Ntype::Memory_rdport_sync). The cell-global
+  // `type` cannot express a memory whose read ports differ, so for a MIXED
+  // cell this is the only thing that answers "does this port commit".
+  bool            rd_sync   = false;
   bool            has_rdpin = false;
   hhds::Pin_class enable;
   hhds::Pin_class clock;
@@ -258,7 +262,8 @@ struct Mem_port {
 
 struct Mem_shape {
   bool                  parsed      = true;   // every consulted policy pin was constant
-  bool                  sync_read   = false;  // `type != 0`: a REGISTERED read
+  bool                  sync_read   = false;  // a REGISTERED read commits here
+  bool                  mixed_read  = false;  // `type == Ntype::Memory_type_mixed`
   bool                  rising      = true;   // `posclk == 1`
   bool                  mixed_edge  = false;  // `posclk == Ntype::Memory_posclk_mixed`
   bool                  whole_array = false;  // `update`/`update_enable`/`reset` driven
@@ -292,8 +297,13 @@ Mem_shape mem_shape_of(const hhds::Node_class& n) {
         ms.parsed = false;
         continue;
       }
-      auto& p     = at(port);
-      p.rdport    = gu::const_of(e.driver).to_just_i64() != 0;
+      auto&      p  = at(port);
+      const auto rd = gu::const_of(e.driver).to_just_i64();
+      p.rdport      = rd != 0;
+      // Only a 2 states SYNC by itself. A 1 means "this is a read port" and
+      // leaves the timing to the cell-global `type` -- the encoding every graph
+      // written before `rdport` was widened uses.
+      p.rd_sync   = rd == Ntype::Memory_rdport_sync;
       p.has_rdpin = true;
     } else if (pname == "update" || pname == "update_enable" || pname == "reset") {
       // A WHOLE-ARRAY cell: one bulk next-state bus instead of per-entry write
@@ -309,7 +319,13 @@ Mem_shape mem_shape_of(const hhds::Node_class& n) {
       }
       const auto v = gu::const_of(e.driver).to_just_i64();
       if (pname == "type") {
-        ms.sync_read = v != 0;
+        // Conservative on purpose, and UNCHANGED for the scalar types: both
+        // consumers of `sync_read` only make the pass less willing to call a
+        // cell an immutable ROM and more willing to refuse, so reading an array
+        // (2) as "registered" errs safely. A MIXED cell (3) has no scalar
+        // answer at all, so the ports are asked below instead.
+        ms.sync_read  = v != 0;
+        ms.mixed_read = v == Ntype::Memory_type_mixed;
       } else if (pname == "wensize") {
         ms.wensize = v > 0 ? static_cast<uint32_t>(v) : 0;
       } else {
@@ -328,6 +344,23 @@ Mem_shape mem_shape_of(const hhds::Node_class& n) {
     }
   }
   std::sort(ms.ports.begin(), ms.ports.end(), [](const Mem_port& a, const Mem_port& b) { return a.port < b.port; });
+  // A MIXED cell's read timing is PER PORT, so the cell-global answer above is
+  // meaningless for it and the ports decide: the cell has a registered read iff
+  // some read port says so. Done after the sort rather than inside the pin walk
+  // so it cannot depend on the order pins are visited.
+  //
+  // The scalar types are left exactly as they were. `type == 1` already implies
+  // every read port is registered, and `type == 2` keeps its deliberately
+  // conservative reading.
+  if (ms.mixed_read) {
+    ms.sync_read = false;
+    for (const auto& p : ms.ports) {
+      if (p.rdport && p.rd_sync) {
+        ms.sync_read = true;
+        break;
+      }
+    }
+  }
   return ms;
 }
 
