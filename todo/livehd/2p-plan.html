@@ -311,8 +311,14 @@ native-rejected Coral proposal for independent OpenROAD evaluation: both arms
 must preserve the same topology, masters, macro/IO/PG frame and SDC, undergo
 common tap-aware legalization, then fresh CTS, congestion-tolerant GRT, clean
 DRT and extraction. Actual preparation displacement and the native rejection
-remain explicit. This compares a SAT proposal with its native baseline; the
-strong OpenROAD placement comparison remains separate. See the
+remain explicit. Both OpenROAD preparations now pass: masters, fixed geometry,
+netlist, IOs and routing state match, with 18 instance-pose differences after
+common tap-aware legalization. Placement-estimated WNS/TNS match at the tool's
+printed precision; fresh CTS-to-extraction jobs are queued. The
+<a href="../../repros/route_eval_20261021/sat_pose_route_bin25/prepared_pair_audit.json">prepared pair audit</a>
+records the actual geometry differences without assuming all SAT corridors
+survive that handoff. This compares a SAT proposal with its native baseline;
+the strong OpenROAD placement comparison remains separate. See the
 <a href="../../repros/route_eval_20261021/sat_pose_route_bin25/runner.log">diagnostic route queue</a>.</p>
 <p>The synchronized-source CNN timing-spread pair is complete. Weight zero
 finishes in 1,543.505 s and reproduces prior final native WNS/TNS exactly:
@@ -321,6 +327,9 @@ mobility 0.200822, but final WNS/TNS regress to
 −2,162.784912/−1,901,168.952759 ps. Hold WNS falls from 12.866405 to
 1.540668 ps. Electrical count/excess improve, but this is a timing tradeoff,
 not a general gain. Eyeriss and Coral pairs remain in progress. The
+cell-density-only SAT selector still fails on CNN (TNS −3.194 ps) and Coral
+(WNS/TNS −1.068/−374.082 ps). Eyeriss's two-cell-bound trial improves WNS by
+0.489 ps but worsens TNS by 1,741.382 ps, and is rejected. The
 <a href="../../repros/route_eval_20261021/resumed_sat_report.html">live experiment report</a>
 keeps native screening values separate from extracted routed results.</p>
 <p>The selected Eyeriss retained-halo-2 candidate completes DRT in 4,993.779 s,
