@@ -160,7 +160,7 @@ http_archive(
 # HHDS (plain git repo — see the iassert/hlop note above)
 git_repository(
     name = "hhds",
-    commit = "c5b23e807677e6e8c855f840b72f6b5f6b8b3192",
+    commit = "b40fc5e1fc6a1afd46dd8f26e7c0a48996bc9316",
     remote = "https://github.com/masc-ucsc/hhds.git",
 )
 # For local co-development swap the git_repository above for:
