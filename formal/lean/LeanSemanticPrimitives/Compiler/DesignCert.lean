@@ -103,8 +103,15 @@ deriving Repr, Inhabited, DecidableEq
 (`FlopDesc.clock`, `MemoryDesc.clock`) against the per-step edge vector
 (`ClockEdges`); the name is the resolved root net — `latch_contract`'s net key,
 a primary input's name or `implicit` for a Pyrope module clock — so a trace can
-be related back to the RTL.  Ordinal 0 is the design's reference clock: the net
-carrying the most state, the same rule `pass.single_edge` picks its reference by. -/
+be related back to the RTL.
+
+ORDINAL 0 CARRIES NO MEANING.  The exporter numbers domains by sorting on
+`latch_contract`'s structural key, so the numbering is a function of the design
+and two scans of it agree -- which is what makes a certificate digest
+comparable at all.  It is NOT "the net carrying the most state": that was an
+earlier rule, and an element count is not what the sort reads.  Nothing in the
+semantics attributes anything to ordinal 0; `interpretDesign` reads ordinals
+only against the edge vector. -/
 structure ClockDesc where
   name : String
 deriving Repr, Inhabited, DecidableEq

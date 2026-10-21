@@ -204,3 +204,26 @@ false loop is a structural repair, not a default, and stays.)
 - Modern Yosys produces `$mem_v2` (not `$mem`). Match both: `cell->type == "$mem" || cell->type == "$mem_v2"`.
 - Do NOT use `strncmp("$mem", 4)` — it catches `$memrd`/`$memwr`/`$meminit` which have different port structures.
 - Memory RTL modules are in `ware/rtl/cgen_memory_*.v`. The `multiclock` variants have per-port clock inputs instead of a shared `clk`.
+
+### Never modify a driver while it is executing
+
+Bash reads a script incrementally, by byte offset. Editing one that is running
+resumes parsing at a stale offset, so the interpreter lands mid-token in the
+NEW text and dies on something that was never a syntax error in either version:
+
+    scripts/<driver>.sh: line 341: syntax error near unexpected token `('
+
+Measured on a census driver: it was killed that way after `phase 1 done`, and
+four modules' generation was discarded.
+
+Atomic replace does not save you. The session scratchpad under `/tmp` is a
+DIFFERENT filesystem from the NFS working tree, so `mv` is a copy, not a
+rename -- it falls back to `open(dest, O_TRUNC)` on the same inode, which is
+exactly the in-place rewrite the running shell is reading.
+
+A run-directory lock does not save you either: it protects the OUTPUT, not the
+driver text.
+
+So: wait for it, or use the driver's own `--resume`. If it truly must stop,
+kill it by exact pid (never `pkill -f`, which matches your own command line)
+and relaunch into a fresh run directory.
