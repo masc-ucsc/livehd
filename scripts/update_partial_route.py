@@ -236,12 +236,27 @@ def main():
                          + sync_link('liteeth_reuse_v2/run/warm1/native.run.json', 'Preserved v2 failure')) + '</tr>'
                   + '<tr>' + cell('CNN density control') + cell('Rejected; stopped at iteration 450')
                   + cell(number(rejected['measurement']['wall_s'], 1), 'Partial invalid attempt seconds')
-                  + cell('Imported shared tie expansion added 1,306 cells; violates the fixed-netlist comparison. Opt-in preservation fix and its regressions now pass; a fresh density study is pending. Other policies not launched.')
+                  + cell('Imported shared tie expansion added 1,306 cells; violates the fixed-netlist comparison. Opt-in preservation fix and its regressions now pass. Both fresh seed-import preflights pass; the replacement GP study is active below.')
                   + cell(sync_link('cnn_density/control/attempt001/rejected_attempt_summary.json', 'Rejection and perf evidence')) + '</tr>'
                   + '<tr>' + cell('OpenTimer RC kernel') + cell('Published; owner RC tests passed')
                   + cell(number(100 * rc_perf['task_clock_ms']['reduction'], 1) + '% less CPU', 'Median of three isolated paired runs')
                   + cell(number(100 * rc_perf['instructions']['reduction'], 1) + '% fewer instructions. Prepared constants reused across thresholds; 220,378 output comparisons checked, including 16 paired NaNs. No full-flow gain claim.')
                   + cell(sync_link('rc_perf/owner_perf_summary.json', 'Paired counters') + '; ' + sync_link('rc_perf/owner_boundary_result.json', 'Numerical boundary check')) + '</tr>')
+
+    seed_check = read_sync('cnn_or_seed_repulsion/preflight_summary.json')
+    seed_review = read_sync('cnn_or_seed_repulsion/parent_preflight_review_and_GP_release.json')
+    assert seed_check['status'] == 'both_retained_seed_preflights_pass_no_GP'
+    assert seed_review['status'] == 'approved_six_GP_diagnostics_after_both_retained_preflights'
+    assert seed_review['preflight_summary_sha256'] == SYNC_SOURCES['cnn_or_seed_repulsion/preflight_summary.json']
+    seed_rows = []
+    for seed, label in (('native', 'LiveHD cells'), ('or', 'OpenROAD cells')):
+        result = seed_check['seeds'][seed]
+        assert result['all_structural_checks_pass'] and result['all_common_parity_checks_pass']
+        score = result['source_score']
+        seed_rows.append('<tr>' + cell(label) + cell(number(score['hpwl_um'], 1))
+                         + cell(number(score['setup_wns_ps']) + ' / ' + number(score['setup_tns_ps']))
+                         + cell(number(score['hold_wns_ps']) + ' / ' + number(score['hold_tns_ps']))
+                         + cell('Exact import and pose parity; legal; timing reproduced') + '</tr>')
 
     stamp = datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')
     sources = ''.join(f'<li>{link(path, path)} <code>{digest[:12]}</code></li>' for path, digest in SOURCES.items())
@@ -271,6 +286,11 @@ def main():
 <p>These checks use the newly synchronized source snapshot and remain separate from the routed comparison above. Failed and rejected attempts are retained; they do not establish routing or reuse success.</p>
 <div class="scroll"><table><thead><tr><th>Check</th><th>Status</th><th>Measured cost</th><th>Finding</th><th>Evidence</th></tr></thead><tbody>@VALIDATION@</tbody></table></div>
 <p>The corrected source passed all 22 optimized integration tests, built both production executables, and compiled all 3,929 debug targets. The benchmark defaults remain unchanged. These build checks do not establish routed QoR.</p>
+<h2>Cell and macro spreading experiments</h2>
+<p>The CNN starting-frame check below uses the same mapped netlist, IO, fixed macro geometry, SDC and placement-RC scorer. All 333,955 components and 45,027 clock endpoints survive import exactly. Each seed's four timing values reproduce exactly after import. The OpenROAD seed has lower HPWL and density but worse setup estimates in this scope; these values are not extracted timing or a routed comparison.</p>
+<div class="scroll"><table><thead><tr><th>CNN starting cells</th><th>HPWL (µm)</th><th>Estimated setup WNS / TNS (ps)</th><th>Estimated hold WNS / TNS (ps)</th><th>Retained import</th></tr></thead><tbody>@SEED_ROWS@</tbody></table></div>
+<p>Six placement diagnostics are released: OpenROAD seeds at local pressure 0, 1 and 4, LiveHD seeds at 0 and 4, and a separate OpenROAD pressure-0 halo sensitivity. The primary arms use the same nominal 2 µm halo; native row/site snapping enlarges that clearance to 2.052 × 2.160 µm. Movement of the 712 OpenROAD-seed cells affected by that adaptation is tracked separately. The 4.59 µm sensitivity is not pooled with primary results. Raw PG associations remain identically deferred in this import check and must be connected before physical acceptance.</p>
+<p>A separate LiteEth macro-stage experiment is being prepared with cell-pressure / soft macro-overlap weights 0/50, 1/50, 1/5 and 4/5. Macros receive an area-integrated field emitted only by standard cells, so they can move toward quieter space. Macro-to-macro overlap uses a separate soft penalty, which is zero for disjoint padded footprints; reducing it may have no effect there. Hard spacing stays enforced. Measure actual force, macro movement, cell occupancy in inter-macro corridors, final density and timing before selecting a policy. The current observer first exposes raw GP coordinates, so initial pre-GP displacement and density are unavailable.</p>
 <h2>Comparison and performance scope</h2>
 <p>The placement comparisons share their design's mapped starting netlist, macro/IO frame and authoritative constraints. CTS and repair may make arm-specific changes, which remain audited. CNN uses 65 SRAMs, Eyeriss 1,040 and LiteEth 5. The LiteEth reference uses routability-only placement after a preserved timing-driven rebuffering crash; this qualification prevents a whole-flow dominance claim. Both LiteEth arms configured a 1% repair-buffer option, but that option did not act as an observed cumulative hard bound.</p>
 <p>Timing values in the main table are final extracted results only. Pending entries are not zero and placement/GRT estimates are not substituted. A supported-frequency claim needs fresh extracted per-clock STA, consistent generated-clock relationships, IO budgets and timing exceptions, and explicit setup/hold reporting. CNN uses the shared ASAP7 RVT FF 0.77 V / 0 °C standard-cell corner with normalized SRAM models and fixed 10 ps IO budgets; this is not an all-corner frequency claim.</p>
@@ -281,7 +301,8 @@ def main():
 '''
     for key, value in {'STAMP': stamp, 'ROWS': ''.join(rows), 'DENSITY': ''.join(density_rows),
                        'CNN': f'{cnn_counts["LiveHD"]:,}', 'CNN_FINAL': cnn_final_note,
-                       'EY': f'{ey_last["violations"]:,}', 'VALIDATION': validation, 'MARKER_NOTE': marker_note, 'SOURCES': sources}.items():
+                       'EY': f'{ey_last["violations"]:,}', 'VALIDATION': validation, 'SEED_ROWS': ''.join(seed_rows),
+                       'MARKER_NOTE': marker_note, 'SOURCES': sources}.items():
         page = page.replace('@' + key + '@', value)
     output = ROOT / 'docs/partial_route.html'
     output.write_text(page)
