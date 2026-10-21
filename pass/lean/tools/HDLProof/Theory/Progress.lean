@@ -54,13 +54,16 @@ def helpful (n : Nat) (c : C) : Bool :=
   | none => true
   | some j => G.fires n j
 
-/-- The rank obligations, on every cycle where `c` is allowed and gets no event. -/
-def Sound (sp : Spec S C O R) (X : Exec S C R) : Prop :=
-  ∀ n c, X.R0 ≤ n → sp.en (X.arch n) c = true → Spec.Free c (X.evs n) →
+/-- Channel `c`'s rank obligations, on every cycle where `c` is allowed and gets no event. -/
+def SoundAt (sp : Spec S C O R) (X : Exec S C R) (c : C) : Prop :=
+  ∀ n, X.R0 ≤ n → sp.en (X.arch n) c = true → Spec.Free c (X.evs n) →
     G.rank (n + 1) c ≤ G.rank n c ∧
     (G.helpful n c = true → G.rank (n + 1) c < G.rank n c) ∧
     (G.rank (n + 1) c = G.rank n c →
       G.sel (n + 1) c = G.sel n c ∧ ∀ j, G.sel n c = some j → G.reqEn n j = true)
+
+/-- Every channel's rank obligations. -/
+def Sound (sp : Spec S C O R) (X : Exec S C R) : Prop := ∀ c, G.SoundAt sp X c
 
 /-- Justice: a requirement enabled from some cycle on eventually fires. -/
 def Just : Prop :=
@@ -92,10 +95,10 @@ theorem Exec.pres_arch {sp : Spec S C O R} {P : S → Prop}
 
 /-- **Channel progress.** Under justice, a channel allowed at some cycle gets its event later. -/
 theorem channel_progress [DecidableEq C] {sp : Spec S C O R} {P : S → Prop} (hc : sp.Confluent P)
-    {X : Exec S C R} (hX : X.Refines sp) (hP : P (X.arch X.R0))
-    (hS : G.Sound sp X) (hJ : G.Just) :
-    ∀ n c, X.R0 ≤ n → sp.en (X.arch n) c = true → ∃ m, n ≤ m ∧ ∃ e ∈ X.evs m, e.1 = c := by
-  intro n c hn hen
+    {X : Exec S C R} (hX : X.Refines sp) (hP : P (X.arch X.R0)) {c : C}
+    (hS : G.SoundAt sp X c) (hJ : G.Just) :
+    ∀ n, X.R0 ≤ n → sp.en (X.arch n) c = true → ∃ m, n ≤ m ∧ ∃ e ∈ X.evs m, e.1 = c := by
+  intro n hn hen
   apply Classical.byContradiction
   intro hno
   -- from `n` on, `c` gets no event and stays allowed
@@ -114,7 +117,7 @@ theorem channel_progress [DecidableEq C] {sp : Spec S C O R} {P : S → Prop} (h
         exact Spec.en_run hc (X.evs m) _ (hPn m (by omega)) (hX m (by omega)).1
           (hfree m (by omega)) ihm
       · rw [show m + 1 = n by omega]; exact hen
-  have hob : ∀ m, n ≤ m → _ := fun m hm => hS m c (by omega) (hen_all m hm) (hfree m hm)
+  have hob : ∀ m, n ≤ m → _ := fun m hm => hS m (by omega) (hen_all m hm) (hfree m hm)
   -- the rank cannot fall forever; once it stays, the awaited requirement never fires
   -- once the rank stops falling, the awaited requirement never fires: contradiction
   have stuck : ∀ m, n ≤ m → (∀ m', m ≤ m' → G.rank m c ≤ G.rank m' c) → False := by
@@ -179,15 +182,15 @@ def Progress.helpfulCount (G : Progress C J) (c : C) (n : Nat) : Nat → Nat
 
 /-- **Bounded stuttering.** While `c` waits for its event, the helpful cycles plus the
 remaining rank never exceed the rank at the start of the wait. -/
-theorem helpful_bound {sp : Spec S C O R} {X : Exec S C R} (hS : G.Sound sp X) (c : C) (n : Nat)
+theorem helpful_bound {sp : Spec S C O R} {X : Exec S C R} {c : C} (hS : G.SoundAt sp X c) (n : Nat)
     (hn : X.R0 ≤ n) :
     ∀ L, (∀ i, i < L → sp.en (X.arch (n + i)) c = true ∧ Spec.Free c (X.evs (n + i))) →
       G.helpfulCount c n L + G.rank (n + L) c ≤ G.rank n c
   | 0, _ => by simp [Progress.helpfulCount]
   | L + 1, h => by
-    have ih := helpful_bound hS c n hn L (fun i hi => h i (by omega))
+    have ih := helpful_bound hS n hn L (fun i hi => h i (by omega))
     obtain ⟨hen, hf⟩ := h L (by omega)
-    obtain ⟨hle, hlt, _⟩ := hS (n + L) c (by omega) hen hf
+    obtain ⟨hle, hlt, _⟩ := hS (n + L) (by omega) hen hf
     simp only [Progress.helpfulCount, show n + (L + 1) = n + L + 1 by omega]
     by_cases hh : G.helpful (n + L) c = true
     · have := hlt hh; simp only [hh, if_true]; omega

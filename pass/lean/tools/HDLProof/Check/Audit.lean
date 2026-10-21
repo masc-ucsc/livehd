@@ -13,7 +13,7 @@ import HDLProof.Sym.Refine
 import HDLProof.Sym.Conj
 import HDLProof.Sym.ConjT
 import HDLProof.Theory.Progress
-import HDLProof.Check.SpecFacts
+import HDLProof.Check.RefMapCompose
 
 namespace HDLProof
 
@@ -45,5 +45,10 @@ namespace HDLProof
 #audit_axioms Check.runRefMapOf_sound
 -- The spec's own facts: Moore and confluence of its channel events.
 #audit_axioms Check.runSpecFactsOf_sound
+-- A checked refinement as a run of the channel spec; two of them composed; progress.
+#audit_axioms Check.execOf_refines
+#audit_axioms Check.implStream_eq
+#audit_axioms Check.refmap_compose
+#audit_axioms Check.refmap_progress
 
 end HDLProof

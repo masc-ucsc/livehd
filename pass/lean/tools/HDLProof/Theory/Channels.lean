@@ -303,4 +303,45 @@ theorem chan_agree [DecidableEq C] {P : S → Prop} (hc : sp.Confluent P) :
 
 end Spec
 
+namespace Spec
+
+variable {sp : Spec S C O R}
+
+/-- A run's events, each with the request it presented. -/
+def annot (sp : Spec S C O R) : S → List (Ev C R) → List (C × (O × R))
+  | _, [] => []
+  | s, (c, r) :: u => (c, (sp.out s c, r)) :: annot sp (sp.δ s c r) u
+
+/-- The stream of channel `x` in an annotated event list. -/
+def chanOf [DecidableEq C] (x : C) (l : List (C × (O × R))) : List (O × R) :=
+  l.filterMap fun e => if e.1 = x then some e.2 else none
+
+theorem chan_eq_annot [DecidableEq C] (x : C) :
+    ∀ (s : S) (u : List (Ev C R)), sp.chan x s u = chanOf x (sp.annot s u)
+  | _, [] => rfl
+  | s, (c, r) :: u => by
+      simp only [chan, annot, chanOf, List.filterMap_cons]
+      rw [chan_eq_annot x _ u]
+      by_cases h : c = x <;> simp [h, chanOf]
+
+theorem annot_append (s : S) (u v : List (Ev C R)) :
+    sp.annot s (u ++ v) = sp.annot s u ++ sp.annot (sp.run s u) v := by
+  induction u generalizing s with
+  | nil => rfl
+  | cons e u ih => obtain ⟨c, r⟩ := e; simp [annot, run, ih]
+
+/-- Every response is the environment's answer to its channel's history, over annotated events. -/
+def ObeysA [DecidableEq C] : Env C O R → List (C × (O × R)) → Prop
+  | _, [] => True
+  | E, (c, (o, r)) :: l => r = E c [o] ∧ ObeysA (E.push c o) l
+
+theorem obeys_iff_annot [DecidableEq C] :
+    ∀ (E : Env C O R) (s : S) (u : List (Ev C R)), sp.Obeys E s u ↔ ObeysA E (sp.annot s u)
+  | _, _, [] => Iff.rfl
+  | E, s, (c, r) :: u => by
+      simp only [Obeys, annot, ObeysA]
+      rw [obeys_iff_annot _ _ u]
+
+end Spec
+
 end HDLProof.Theory
