@@ -35,6 +35,9 @@ struct Satlegalize_options {
   // Exact immutable native routing snapshot. Grid mode changes menus and
   // region geometry; guidance=false is its matched cell-density control.
   bool                                          route_grid = false, route_guidance = true;
+  // Zero keeps strict peak non-regression. One permits peak demand changes
+  // below estimated capacity, while retaining the other route guards.
+  double                                        route_peak_floor = 0;
   std::shared_ptr<const Satlegalize_route_grid> routing;
   // Placement caller supplies the active, rounded physical macro keepout.
   int64_t                                       macro_halo_x_dbu = 0, macro_halo_y_dbu = 0;
@@ -80,6 +83,12 @@ struct Satlegalize_report {
   std::vector<Satlegalize_alignment>  accepted;
   std::vector<Satlegalize_checkpoint> checkpoints;
 };
+struct Satlegalize_route_quality {
+  double overflow = 0, peak = 0;
+  int    blocked_pins = 0, unroutable_nets = 0;
+};
+bool satlegalize_route_preserved(const Satlegalize_route_quality& candidate, const Satlegalize_route_quality& baseline,
+                                 double peak_floor = 0);
 // Only complete legal local windows are installed. Fixed/macros/outside cells
 // and IOs are immutable. Empty/missing routing-grid or timing evidence skips.
 Satlegalize_report satlegalize(const physical::Technology&, physical::Floorplan&, const timing::Feedback&,

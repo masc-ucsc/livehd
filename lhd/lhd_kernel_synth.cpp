@@ -298,16 +298,20 @@ livehd::placement::Options placement_options(const Options& opts) {
     }
     return static_cast<unsigned>(value);
   };
-  sat.max_cells             = sat_limit("place.satlegalize.max_cells", "24", 65536);
-  sat.max_candidates        = sat_limit("place.satlegalize.max_candidates", "12", 128);
-  sat.max_windows           = sat_limit("place.satlegalize.max_windows", "8", 1024);
-  sat.max_pairs             = sat_limit("place.satlegalize.max_pairs", "32", 1024);
-  sat.max_pairs_per_window  = sat_limit("place.satlegalize.max_pairs_per_window", "0", 1024, true);
-  sat.check_packing         = truthy(synth_set(opts, "place.satlegalize.check_packing", "false"));
-  sat.move_sites            = sat_limit("place.satlegalize.move_sites", "4", 128, true);
-  sat.move_rows             = sat_limit("place.satlegalize.move_rows", "1", 16, true);
-  sat.route_grid            = truthy(synth_set(opts, "place.satlegalize.route_grid", "false"));
-  sat.route_guidance        = truthy(synth_set(opts, "place.satlegalize.route_guidance", "true"));
+  sat.max_cells            = sat_limit("place.satlegalize.max_cells", "24", 65536);
+  sat.max_candidates       = sat_limit("place.satlegalize.max_candidates", "12", 128);
+  sat.max_windows          = sat_limit("place.satlegalize.max_windows", "8", 1024);
+  sat.max_pairs            = sat_limit("place.satlegalize.max_pairs", "32", 1024);
+  sat.max_pairs_per_window = sat_limit("place.satlegalize.max_pairs_per_window", "0", 1024, true);
+  sat.check_packing        = truthy(synth_set(opts, "place.satlegalize.check_packing", "false"));
+  sat.move_sites           = sat_limit("place.satlegalize.move_sites", "4", 128, true);
+  sat.move_rows            = sat_limit("place.satlegalize.move_rows", "1", 16, true);
+  sat.route_grid           = truthy(synth_set(opts, "place.satlegalize.route_grid", "false"));
+  sat.route_guidance       = truthy(synth_set(opts, "place.satlegalize.route_guidance", "true"));
+  sat.route_peak_floor     = number("place.satlegalize.route_peak_floor", "0");
+  if (!std::isfinite(sat.route_peak_floor) || sat.route_peak_floor < 0 || sat.route_peak_floor > 1) {
+    throw Lhd_error{"usage", "invalid synth.place.satlegalize.route_peak_floor", "expected 0..1"};
+  }
   sat.spill_neighbors       = truthy(synth_set(opts, "place.satlegalize.spill_neighbors", "false"));
   sat.spill_slack_margin_ps = number("place.satlegalize.spill_slack_margin_ps", "0");
   if (!std::isfinite(sat.spill_slack_margin_ps) || sat.spill_slack_margin_ps < 0) {

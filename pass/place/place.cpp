@@ -160,6 +160,7 @@ void sat_window_statistics(rapidjson::Value& json, const Satlegalize_report& rep
   json.AddMember("window_stats", windows, allocator);
   json.AddMember("max_pairs_per_window", options.max_pairs_per_window, allocator);
   json.AddMember("check_packing", options.check_packing, allocator);
+  json.AddMember("route_peak_floor", options.route_peak_floor, allocator);
   if (options.region_width_um > 0 || options.route_grid) {
     rapidjson::Value region(rapidjson::kObjectType);
     region.AddMember("width_um", options.region_width_um, allocator);
@@ -348,6 +349,9 @@ std::string environment_key(const Options& o, const ph::Technology& tech) {
                               h);
     if (a.max_pairs_per_window || a.check_packing) {
       h = hash_text(std::format("satlegalize-search-v1:{}:{}", a.max_pairs_per_window, a.check_packing), h);
+    }
+    if (a.route_peak_floor) {
+      h = hash_text(std::format("satlegalize-route-peak-floor:{}", a.route_peak_floor), h);
     }
     if (a.region_width_um || a.region_height_um || a.spill_neighbors) {
       h = hash_text(std::format("satlegalize-region-v1:{}:{}:{}:{}",
@@ -5647,12 +5651,14 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
         scored_accepted.net_weights = scored_baseline.net_weights = sat_gp->net_weights;
         const auto a                                              = dp::rudy(scored_accepted, *sat_route_options);
         const auto b                                              = dp::rudy(scored_baseline, *sat_route_options);
-        route_accepted = a.overflow <= b.overflow + 1e-9 && a.max_utilization <= b.max_utilization + 1e-9
-                         && a.blocked_pins <= b.blocked_pins && a.unroutable_nets <= b.unroutable_nets;
+        route_accepted = satlegalize_route_preserved({a.overflow, a.max_utilization, a.blocked_pins, a.unroutable_nets},
+                                                     {b.overflow, b.max_utilization, b.blocked_pins, b.unroutable_nets},
+                                                     options.satlegalize_options.route_peak_floor);
         std::ofstream file(options.output_dir + "/sat_route_guard.json");
         file << std::format(
-            R"({{"accepted":{},"scope":"full post-legalization geometry with common pre-SAT weights","candidate":{{"overflow":{},"peak":{},"blocked_pins":{},"unroutable_nets":{}}},"baseline":{{"overflow":{},"peak":{},"blocked_pins":{},"unroutable_nets":{}}}}})",
+            R"({{"accepted":{},"peak_floor":{},"scope":"full post-legalization geometry with common pre-SAT weights","candidate":{{"overflow":{},"peak":{},"blocked_pins":{},"unroutable_nets":{}}},"baseline":{{"overflow":{},"peak":{},"blocked_pins":{},"unroutable_nets":{}}}}})",
             route_accepted,
+            options.satlegalize_options.route_peak_floor,
             a.overflow,
             a.max_utilization,
             a.blocked_pins,
@@ -5666,8 +5672,30 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
           throw std::runtime_error("cannot write SAT route guard");
         }
       }
-      if (route_accepted && satlegalize_preserved(tech, sat_frame(accepted, true), *sat_report)
-          && accepted_timing(accepted_feedback)) {
+      const bool alignments_preserved = satlegalize_preserved(tech, sat_frame(accepted, true), *sat_report);
+      const bool timing_accepted      = accepted_timing(accepted_feedback);
+      const auto feedback_json        = [](const Timing_feedback& f) {
+        const auto value = [](const auto& x) { return x ? std::format("{}", *x) : "null"; };
+        return std::format(R"({{"wns":{},"tns":{},"hold_wns":{},"violations":{},"electrical_excess":{}}})",
+                           value(f.wns),
+                           value(f.tns),
+                           value(f.hold_wns),
+                           f.violations,
+                           f.electrical_excess);
+      };
+      std::ofstream validation(options.output_dir + "/sat_validation.json");
+      validation << std::format(
+          R"({{"route_accepted":{},"alignments_preserved":{},"timing_accepted":{},"candidate":{},"baseline":{}}})",
+          route_accepted,
+          alignments_preserved,
+          timing_accepted,
+          feedback_json(accepted_feedback),
+          feedback_json(baseline_feedback))
+                 << '\n';
+      if (!validation) {
+        throw std::runtime_error("cannot write SAT validation report");
+      }
+      if (route_accepted && alignments_preserved && timing_accepted) {
         v.design = accepted;
         metrics  = accepted_metrics;
       } else {

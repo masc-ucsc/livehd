@@ -922,6 +922,18 @@ TEST(Satlegalize, PackingProbeSeparatesMenuInfeasibilityFromAlignmentAndTimeout)
     }
   }
 }
+TEST(Satlegalize, PeakFloorAllowsSubcapacityChangesWithoutRelaxingCongestionOrAccess) {
+  const Satlegalize_route_quality baseline{0, .3, 0, 0};
+  EXPECT_FALSE(satlegalize_route_preserved({0, .4, 0, 0}, baseline));
+  EXPECT_TRUE(satlegalize_route_preserved({0, .4, 0, 0}, baseline, 1));
+  EXPECT_FALSE(satlegalize_route_preserved({0, 1.01, 0, 0}, baseline, 1));
+  EXPECT_FALSE(satlegalize_route_preserved({.001, .4, 0, 0}, baseline, 1));
+  EXPECT_FALSE(satlegalize_route_preserved({0, .4, 1, 0}, baseline, 1));
+  EXPECT_FALSE(satlegalize_route_preserved({0, .4, 0, 1}, baseline, 1));
+  EXPECT_TRUE(satlegalize_route_preserved({.1, 1.1, 2, 1}, {.2, 1.2, 3, 2}, 1));
+  EXPECT_FALSE(satlegalize_route_preserved({.1, 1.3, 2, 1}, {.2, 1.2, 3, 2}, 1));
+  EXPECT_FALSE(satlegalize_route_preserved({0, std::numeric_limits<double>::quiet_NaN(), 0, 0}, baseline, 1));
+}
 TEST(Satlegalize, RoutingGridRejectsSecondaryCrossBinPairButKeepsBoundaryMembership) {
   Fixture f;
   f.fp.die = {0, 0, 1600, 200};

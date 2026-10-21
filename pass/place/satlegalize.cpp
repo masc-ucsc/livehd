@@ -735,7 +735,8 @@ Satlegalize_report satlegalize(const ph::Technology& tech, ph::Floorplan& fp, co
       || options.boundary_growth < 0 || options.boundary_growth > 1 || !std::isfinite(options.region_width_um)
       || !std::isfinite(options.region_height_um) || options.region_width_um < 0 || options.region_height_um < 0
       || (options.region_width_um == 0) != (options.region_height_um == 0) || !std::isfinite(options.spill_slack_margin_ps)
-      || options.spill_slack_margin_ps < 0 || options.macro_halo_x_dbu < 0 || options.macro_halo_y_dbu < 0
+      || options.spill_slack_margin_ps < 0 || !std::isfinite(options.route_peak_floor) || options.route_peak_floor < 0
+      || options.route_peak_floor > 1 || options.macro_halo_x_dbu < 0 || options.macro_halo_y_dbu < 0
       || (options.encoding != "candidate" && options.encoding != "binary")) {
     throw std::invalid_argument("invalid satlegalize limits");
   }
@@ -1455,6 +1456,13 @@ Satlegalize_report satlegalize(const ph::Technology& tech, ph::Floorplan& fp, co
   report.hpwl_after = hpwl(fp, hpwl_index);
   report.seconds    = std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count();
   return report;
+}
+
+bool satlegalize_route_preserved(const Satlegalize_route_quality& candidate, const Satlegalize_route_quality& baseline,
+                                 double peak_floor) {
+  return candidate.overflow <= baseline.overflow + 1e-9
+         && std::max(candidate.peak, peak_floor) <= std::max(baseline.peak, peak_floor) + 1e-9
+         && candidate.blocked_pins <= baseline.blocked_pins && candidate.unroutable_nets <= baseline.unroutable_nets;
 }
 
 bool satlegalize_preserved(const ph::Technology& tech, const ph::Floorplan& fp, const Satlegalize_report& report, size_t prefix) {

@@ -416,6 +416,16 @@ probe still requires all alignment, spill-density and timing guards. The
 default is `false`. Per-window telemetry records `candidate_packing` and
 alignment trials, accepts, conflicts and timeouts separately.
 
+The route guard compares full post-legalization geometry with common pre-SAT
+weights. `synth.place.satlegalize.route_peak_floor=1` experimentally allows
+peak-utilization changes below estimated routing capacity; `0` (the default)
+requires strict peak non-regression. Values in between set that comparison
+floor explicitly. Overflow, blocked pins and unroutable nets must still not
+increase, and alignment preservation, setup/hold and electrical guards remain
+active. `sat_validation.json` records those acceptance gates and both timing
+snapshots. Native congestion estimates remain screening evidence; completed
+OpenROAD routing and extracted timing decide routed success.
+
 The remaining `synth.place.satlegalize.*` controls are `max_cells=24`,
 `max_candidates=12`, `max_windows=8`, `max_pairs=32`, `move_sites=4`,
 `move_rows=1`, `conflicts=10000`, `milliseconds=50`, `skip_conflicts=true` and

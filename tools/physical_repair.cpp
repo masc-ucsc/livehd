@@ -356,6 +356,12 @@ int main(int argc, char** argv) {
     auto& sat_options = options.satlegalize_options;
     boolean_option("satlegalize_route_grid", sat_options.route_grid);
     boolean_option("satlegalize_route_guidance", sat_options.route_guidance);
+    if (config.HasMember("satlegalize_route_peak_floor")) {
+      if (!config["satlegalize_route_peak_floor"].IsNumber()) {
+        throw std::invalid_argument("satlegalize_route_peak_floor requires a number");
+      }
+      sat_options.route_peak_floor = config["satlegalize_route_peak_floor"].GetDouble();
+    }
     sat_limit("satlegalize_max_cells", sat_options.max_cells);
     sat_limit("satlegalize_max_candidates", sat_options.max_candidates);
     sat_limit("satlegalize_max_windows", sat_options.max_windows);

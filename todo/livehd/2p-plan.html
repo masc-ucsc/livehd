@@ -223,6 +223,29 @@ input hashes are under
 and <a href="../../repros/route_eval_20261021/spreading/sat_search_bin21/prepared.json">the SAT screen</a>.
 Thirty SAT regression cases, the solver suite, both ABC/USyn placement smoke
 tests and the timing-spread CLI smoke test pass.</p>
+<p>The first rounded CNN replay reaches all 16 configured bins: 32 candidates
+produce one alignment in 30 trials; 64 candidates produce five in 50 trials.
+Neither arm retains an alignment through final validation. In the 32-candidate
+arm, the strict route guard rejects a peak change from 0.324277 to 0.324300,
+with zero overflow, blocked pins and unroutable nets in both geometries.
+Frozen <code>bin22</code> therefore tests the opt-in
+<code>satlegalize.route_peak_floor=1</code> against the strict default 0 on
+matched 64-candidate CNN replays. This permits peak changes below estimated
+capacity while keeping all overflow, access, setup/hold and electrical guards.
+The new <code>sat_validation.json</code> separates route, alignment-preservation
+and timing rejection. The 31-case SAT suite and both placement CLI smoke tests
+pass. These are search diagnostics, not demonstrated timing improvements.</p>
+<p>A stronger OpenROAD cell-placement comparison is also running on each
+selected native candidate's exact mapped preCTS netlist and fixed macro/IO/PG
+frame. It enables timing-driven and routability-driven GP, retains resizing
+only virtually, and requires exact masters/endpoints and fixed geometry before
+routing. The first launch failed before placement because the stock loader
+prepended its results directory to an absolute path; the corrected immutable
+<code>matched_openroad_gp_v2</code> uses explicit input links. The paired
+<code>matched_allowcong</code> continuation admits residual congestion in both
+initial and incremental global-route calls, preserving stock routing layers,
+capacity and iteration settings. It launches only after the reference GP audit
+passes and still requires clean DRT, full PG and extraction.</p>
 <p>Report construction/encoding/solve time separately, memory, actual cells per
 region, missing candidates, base-packing versus alignment UNSAT, unknown/timeouts,
 proposed/accepted/retained alignments, moved/spilled cells, displacement and

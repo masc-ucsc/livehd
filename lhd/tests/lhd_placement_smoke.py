@@ -155,6 +155,7 @@ if os.environ.get('MAPPER', 'abc') == 'abc':
 route_grid_options = ['--set', 'synth.place=true', '--set', 'synth.place.timing_driven=true',
                       '--set', 'synth.place.route.model=rsmt',
                       '--set', 'synth.place.satlegalize.route_grid=true',
+                      '--set', 'synth.place.satlegalize.route_peak_floor=1',
                       '--set', 'synth.place.satlegalize.max_cells=65536',
                       '--set', 'synth.place.satlegalize.max_windows=2']
 route_control = run('route_grid_control', route_grid_options)
@@ -166,11 +167,13 @@ assert len(route_map['horizontal']) == len(route_map['vertical']) == len(route_m
 route_guided = run('route_grid_guided', route_grid_options + ['--set', 'synth.place.satlegalize=true'])
 assert route_guided['qor']['place']['legal'], route_guided
 assert route_guided['qor']['place']['satlegalize']['fixed_regions']['routing_grid'], route_guided
+assert route_guided['qor']['place']['satlegalize']['route_peak_floor'] == 1, route_guided
 run('bad_route_grid_model', ['--set', 'synth.place=true', '--set', 'synth.place.satlegalize.route_grid=true'], False)
 run('bad_route_grid_region', route_grid_options + ['--set', 'synth.place.satlegalize.region_size=40'], False)
 
 for setting in ['region_size=0,40', 'region_size=nan,40', 'spill_slack_margin_ps=-1', 'max_cells=65537',
-                'max_pairs_per_window=1025', 'max_pairs_per_window=-1']:
+                'max_pairs_per_window=1025', 'max_pairs_per_window=-1',
+                'route_peak_floor=-0.1', 'route_peak_floor=1.1', 'route_peak_floor=nan']:
     run('bad_sat_' + setting.replace('=', '_').replace(',', '_'),
         ['--set', 'synth.place=true', '--set', 'synth.place.satlegalize.' + setting], False)
 run('sat_spill_missing_region', ['--set', 'synth.place=true',
