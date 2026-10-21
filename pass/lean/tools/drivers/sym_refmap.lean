@@ -3,9 +3,9 @@
 stuttering, and the spec's own facts.
 
   sym_refmap refmap <file.refmap> [jobs:<n>] [runs:<n>] [sf:<n>] [wf:<n>] [emit:[f1:|f2:]<file>]
-                    [solver:<cadical>] [work:<dir>]
+                    [cache] [solver:<cadical>] [work:<dir>]
   sym_refmap specfacts <file.refmap> [jobs:<n>] [sf:<n>] [wf:<n>] [emit:[f1:|f2:]<file>]
-                    [solver:<cadical>] [work:<dir>]
+                    [cache] [solver:<cadical>] [work:<dir>]
 
 The `.refmap` file names both certificates and everything else by the names in their
 `_io.json` sidecars; its grammar is in `pass/lean/tools/formats/refmap.md`.
@@ -28,6 +28,10 @@ certificates included as text. `f2` (the default) embeds the proofs and proves t
 by `native_decide`; `f1` states it as one named axiom whose docstring records the certificates'
 and the proofs' SHA-256 (for proofs too large to embed). `Check.refmap_compose_ref`,
 `Check.start_ref` and `Check.refmap_progress_ref` take these statements.
+
+`cache` reuses an LRAT proof already in `work/` when the obligation's CNF there is
+byte-identical, without running the solver. The verified check re-checks every proof
+either way, so the cache saves solver time only; a wrong or stale proof is rejected.
 
 A satisfiable target is decoded through its case's template. The report
 `<work>/cti_<target>.txt` gives, by spec register name, the map's state at cycle `n`, the
@@ -466,7 +470,7 @@ def specialize (D : DesignCert) (sf wf : Nat) : IO (Except String (Program × Na
 
 /-- The invariant's proofs, as `sym_verify conj:` builds them. -/
 def proveInv (D : DesignCert) (R : Program) (sp : ConjTSpec) (s0 : StateM) (cname : Array String)
-    (solver : String) (work : System.FilePath) (jobs : Nat) :
+    (solver : String) (work : System.FilePath) (jobs : Nat) (cache : Bool) :
     IO (Except String (ByteArray × List (List ByteArray) × List String × Nat)) := do
   unless sideOKC D sp.plain s0 do return .error "invariant side conditions"
   let rb := baseRunC D R sp.plain s0
@@ -476,7 +480,7 @@ def proveInv (D : DesignCert) (R : Program) (sp : ConjTSpec) (s0 : StateM) (cnam
     | .error e => return .error s!"invariant base run: {e}"
   unless scopedB stB do return .error "invariant base definitions not scoped"
   let some φB := baseOblT sp s0 stB sB | return .error "an invariant conjunct could not be read"
-  let (aB, _, _, ncB) ← solve solver work "inv_base" φB
+  let (aB, _, _, ncB) ← solve solver work "inv_base" φB (cache := cache)
   let pfB ← match aB with
     | .unsat p => pure p
     | .sat _ => return .error "COUNTEREXAMPLE (invariant base): some conjunct fails from the initial state"
@@ -500,7 +504,7 @@ def proveInv (D : DesignCert) (R : Program) (sp : ConjTSpec) (s0 : StateM) (cnam
         let some (.ok ([a, b], st)) := findRun runList c | return (j, SatAnswer.failed "no run", 0)
         unless scopedB st do return (j, SatAnswer.failed "definitions not scoped", 0)
         let some φ := stepOblT sp c st a b t | return (j, SatAnswer.failed "unreadable", 0)
-        let (ans, _, _, nc) ← solve solver work s!"inv_{t}_{m}" φ
+        let (ans, _, _, nc) ← solve solver work s!"inv_{t}_{m}" φ (cache := cache)
         return (j, ans, nc)))
     for task in tasks do
       match ← IO.wait task with
@@ -569,10 +573,12 @@ def sha256 (path : String) : IO String := do
 /-- The SHA-256 of some proofs, in order (provenance only). -/
 def proofsHash (work : System.FilePath) (pfs : List ByteArray) : IO String := do
   let blob := work / "emit_proofs.bin"
-  IO.FS.writeBinFile blob (pfs.foldl (· ++ ·) ByteArray.empty)
-  let h ← sha256 blob.toString
+  -- streamed: the proofs of a real design are gigabytes
+  IO.FS.withFile blob .write fun h => do
+    for p in pfs do h.write p
+  let d ← sha256 blob.toString
   IO.FS.removeFile blob
-  return h
+  return d
 
 def certDef (tag path : String) (dir : System.FilePath) : IO String := do
   return s!"def cert{tag} : String := include_str {leanStr (← relPath dir path)}
@@ -584,7 +590,7 @@ def D{tag} : DesignCert := certOf cert{tag}
 check, by `native_decide` (trusted native: one `_native` axiom). `f1`: the verdict is a named
 axiom; its docstring records the certificates' and the proofs' hashes. -/
 def emitFile (out : System.FilePath) (kind : String) (facts : Bool) (implCert specCert : String)
-    (sf wf : Nat) (sp : RefMapSpec) (pfs : List ByteArray) (pfDefs : String) (pfArgs : String)
+    (sf wf : Nat) (sp : RefMapSpec) (pfs : List ByteArray) (pfDefs : Unit → String) (pfArgs : String)
     (work : System.FilePath) : IO Unit := do
   let dir := out.parent.getD "."
   IO.FS.createDirAll dir
@@ -606,7 +612,7 @@ def emitFile (out : System.FilePath) (kind : String) (facts : Bool) (implCert sp
 
 "
   let body ← if kind == "f2" then
-      pure s!"{hexBytesDef}{pfDefs}
+      pure s!"{hexBytesDef}{pfDefs ()}
 theorem verdict : {check} = true := by native_decide
 
 theorem checked : {stmt} := ⟨{pfArgs.replace " " ", "}, verdict⟩
@@ -651,6 +657,8 @@ def refmapMain (path : String) (rest : List String) (facts : Bool) : IO UInt32 :
   let sf := ((opt "sf").bind (·.toNat?)).getD 20000
   let wf := ((opt "wf").bind (·.toNat?)).getD 200
   let jobs := max 1 (((opt "jobs").bind (·.toNat?)).getD 8)
+  -- reuse an LRAT proof whose CNF in work/ is byte-identical (the check re-checks it)
+  let cache := rest.contains "cache"
   let solver ← match opt "solver" with
     | some s => pure s
     | none => do pure ((← IO.appDir) / "cadical").toString
@@ -703,7 +711,7 @@ def refmapMain (path : String) (rest : List String) (facts : Bool) : IO UInt32 :
         let t := ts[i]!
         tasks := tasks.push (← IO.asTask (prio := .dedicated) (do
           let some φ := sfObl DS RS sp t | return (i, SatAnswer.failed "the obligation could not be built", 0, 0, 0)
-          let (ans, bb, sat, nc) ← solve solver work s!"sf_{i}" φ
+          let (ans, bb, sat, nc) ← solve solver work s!"sf_{i}" φ (cache := cache)
           return (i, ans, bb, sat, nc)))
       for task in tasks do
         match ← IO.wait task with
@@ -725,7 +733,7 @@ def refmapMain (path : String) (rest : List String) (facts : Bool) : IO UInt32 :
     if ok then
       if let some (kind, out) := emitOpt rest then
         emitFile out kind true "" specCert sf wf sp pfs.toList
-          s!"def pfF : List ByteArray := {leanBytesL pfs.toList}\n" "pfF" work
+          (fun _ => s!"def pfF : List ByteArray := {leanBytesL pfs.toList}\n") "pfF" work
         say s!"  {kind.toUpper} theorem file: {out}"
       say "  RESULT: SPEC FACTS PROVED -- runSpecFactsOf_sound: Moore, and the channel spec is confluent"
       return 0
@@ -738,7 +746,7 @@ def refmapMain (path : String) (rest : List String) (facts : Bool) : IO UInt32 :
 {sp.reqs.length} requirement(s), {sp.groups.length} commutation group(s), reset {sp.R0}"
   unless sideRM DS sp do say "  RESULT: REFUSED (map side conditions: spec shape, alpha/init per register, groups)"; return 4
   let t2 ← IO.monoMsNow
-  let (pfIB, pfIS) ← match ← proveInv DI RI sp.inv s0 B.conjName solver work jobs with
+  let (pfIB, pfIS) ← match ← proveInv DI RI sp.inv s0 B.conjName solver work jobs cache with
     | .ok (pB, pS, [], nc) => do
         say s!"  invariant: {sp.inv.conjs.length} conjunct(s) PROVED ({nc} clauses)"
         pure (pB, pS)
@@ -752,7 +760,7 @@ def refmapMain (path : String) (rest : List String) (facts : Bool) : IO UInt32 :
     | .ok (steps, st) =>
         unless scopedB st do say "  RESULT: REFUSED (base definitions not scoped)"; return 4
         let some φB := baseOblRM sp st steps | say "  RESULT: REFUSED (the base could not be built)"; return 4
-        let (aB, bb, sat, nc) ← solve solver work "rm_base" φB
+        let (aB, bb, sat, nc) ← solve solver work "rm_base" φB (cache := cache)
         row "base" "-" nc bb sat (match aB with | .unsat _ => "UNSAT" | .sat _ => "SAT" | .failed _ => "FAILED")
         match aB with
         | .unsat p => do say s!"  base: {nc} clauses, solver {sat} ms: UNSAT"; pure p
@@ -795,7 +803,7 @@ def refmapMain (path : String) (rest : List String) (facts : Bool) : IO UInt32 :
       tasks := tasks.push (← IO.asTask (prio := .dedicated) (do
         let some (.ok R) := findRun runs c | return (j, SatAnswer.failed "no run for the case", 0, 0, 0, none)
         let some φ := oblRM sp c R ti ts[ti]! | return (j, SatAnswer.failed "the obligation could not be built", 0, 0, 0, none)
-        let (ans, bb, sat, nc) ← solve solver work s!"rm_{ti}_{m}" φ
+        let (ans, bb, sat, nc) ← solve solver work s!"rm_{ti}_{m}" φ (cache := cache)
         return (j, ans, bb, sat, nc, some φ)))
     for task in tasks do
       match ← IO.wait task with
@@ -852,8 +860,8 @@ implementation state at cycle n:\n{"\n".intercalate ((groupedState flopNames st0
   if ok then
     if let some (kind, out) := emitOpt rest then
       emitFile out kind false implCert specCert sf wf sp ([pfIB] ++ pfIS.flatten ++ [pfB] ++ pfL.flatten)
-        s!"def pfIB : ByteArray := {leanBytes pfIB}\ndef pfIS : List (List ByteArray) := {leanBytesLL pfIS}\n\
-def pfB : ByteArray := {leanBytes pfB}\ndef pfS : List (List ByteArray) := {leanBytesLL pfL}\n"
+        (fun _ => s!"def pfIB : ByteArray := {leanBytes pfIB}\ndef pfIS : List (List ByteArray) := {leanBytesLL pfIS}\n\
+def pfB : ByteArray := {leanBytes pfB}\ndef pfS : List (List ByteArray) := {leanBytesLL pfL}\n")
         "pfIB pfIS pfB pfS" work
       say s!"  {kind.toUpper} theorem file: {out}"
     say "  RESULT: REFINEMENT PROVED (refinement map) -- runRefMapOf_sound: on every run from the all-zero state, \
@@ -868,5 +876,5 @@ def main (args : List String) : IO UInt32 := do
   | "refmap" :: path :: rest => refmapMain path rest false
   | "specfacts" :: path :: rest => refmapMain path rest true
   | _ =>
-    IO.eprintln "usage: sym_refmap refmap|specfacts <file.refmap> [jobs:<n>] [runs:<n>] [sf:<n>] [wf:<n>] [emit:[f1:|f2:]<file>] [solver:<cadical>] [work:<dir>]"
+    IO.eprintln "usage: sym_refmap refmap|specfacts <file.refmap> [jobs:<n>] [runs:<n>] [sf:<n>] [wf:<n>] [emit:[f1:|f2:]<file>] [cache] [solver:<cadical>] [work:<dir>]"
     return 2

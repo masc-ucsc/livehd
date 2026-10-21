@@ -68,9 +68,12 @@ def resolvePort (cert : String) (kind : String) (tok : String) : IO (Option Nat)
 
 inductive SatAnswer | unsat (proof : ByteArray) | sat (model : String) | failed (why : String)
 
-/-- Write `φ`'s CNF, run the solver, return its LRAT proof bytes. -/
+/-- Write `φ`'s CNF, run the solver, return its LRAT proof bytes. With `cache`, an LRAT
+proof already in `work` is reused when the CNF there is byte-identical (no solver run); the
+checker re-checks every proof either way, so a stale or wrong one is rejected, never
+trusted. -/
 def solve (solver : String) (work : System.FilePath) (tag : String) (φ : BVLogicalExpr)
-    (extra : Array String := #[]) : IO (SatAnswer × Nat × Nat × Nat) := do
+    (extra : Array String := #[]) (cache : Bool := false) : IO (SatAnswer × Nat × Nat × Nat) := do
   let t0 ← IO.monoMsNow
   let cnfPath := work / s!"{tag}.cnf"
   let lratPath := work / s!"{tag}.lrat"
@@ -79,6 +82,10 @@ def solve (solver : String) (work : System.FilePath) (tag : String) (φ : BVLogi
   let (dimacs, nClauses) ← IO.lazyPure fun _ =>
     let cnf := cnfOf φ
     (Std.Sat.CNF.dimacs cnf, cnf.clauses.size)
+  if cache && (← cnfPath.pathExists) && (← lratPath.pathExists) then
+    if (← IO.FS.readFile cnfPath) == dimacs then
+      let t1 ← IO.monoMsNow
+      return (.unsat (← IO.FS.readBinFile lratPath), t1 - t0, 0, nClauses)
   IO.FS.writeFile cnfPath dimacs
   let t1 ← IO.monoMsNow
   let out ← IO.Process.output
