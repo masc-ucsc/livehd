@@ -190,6 +190,48 @@ void comb_state_reach(const hhds::Pin_class& start, absl::flat_hash_set<hhds::Cl
 
 hhds::Pin_class sink_driver(const hhds::Node_class& n, std::string_view pin) { return gu::get_driver_of_sink_name(n, pin); }
 
+// The SOURCE of a zero-extend wrapper, or an invalid pin.
+//
+// An ICG's enable often reaches the gate through a width adapter rather than
+// directly: `Get_mask(en, 0, W)` with W >= bits(en) is a zero extension, and
+// the enable latch sits UNDER it. The bypass below tests the driver's own node
+// type, so a wrapped enable looks like "not a latch", the bypass does not fire,
+// and the enable stays a full cycle late -- the defect is invisible because
+// nothing refuses, the netlist is simply wrong.
+//
+// Only a widening window anchored at 0 counts. `lo != 0` is a field read, not
+// an extension, and a result narrower than its source TRUNCATES: neither
+// preserves the value, so neither may be stepped through.
+hhds::Pin_class zext_source(const hhds::Pin_class& p) {
+  if (p.is_invalid()) {
+    return {};
+  }
+  auto n = p.get_master_node();
+  if (gu::type_op_of(n) != Ntype_op::Get_mask) {
+    return {};
+  }
+  auto a  = gu::get_driver_of_sink_name(n, "a");
+  auto lo = gu::get_driver_of_sink_name(n, "lo");
+  auto hi = gu::get_driver_of_sink_name(n, "hi");
+  if (a.is_invalid() || lo.is_invalid() || hi.is_invalid() || !lo.is_const() || !hi.is_const()) {
+    return {};
+  }
+  const auto& lc_ = gu::const_of(lo);
+  const auto& hc_ = gu::const_of(hi);
+  if (lc_.has_unknowns() || hc_.has_unknowns() || !lc_.is_just_i64() || !hc_.is_just_i64()) {
+    return {};
+  }
+  if (lc_.to_just_i64() != 0) {
+    return {};  // a field read, not an extension
+  }
+  const auto src_b = gu::bits_of(a);
+  const auto res_b = gu::bits_of(p);
+  if (src_b == 0 || res_b == 0 || res_b < src_b || hc_.to_just_i64() < static_cast<int64_t>(src_b)) {
+    return {};  // unknown width, or a TRUNCATING window: not a zero extension
+  }
+  return a;
+}
+
 // ---------------------------------------------------------------------------
 // Memory ports under a phase divider.
 //
@@ -734,7 +776,30 @@ Plan build_plan(hhds::Graph* g, const lc::Design_clocks& clocks, bool multi_cloc
           if (en.is_invalid() || en.is_const() || gu::is_graph_input_pin(en)) {
             continue;
           }
+          // STEP THROUGH ZERO-EXTEND WRAPPERS before asking what drives the
+          // enable. An ICG's enable commonly reaches the gate through a width
+          // adapter, and testing the wrapper's node type answers "not a latch",
+          // so the bypass silently does not fire and the enable stays a cycle
+          // late. The depth bound is a safety rail, not a shape: adapters nest
+          // at most a couple deep, and an unbounded walk here would follow a
+          // cycle. `en` itself is only rebound once a Latch is actually found,
+          // so a wrapper over something else leaves the enable untouched.
           auto dn = en.get_master_node();
+          if (gu::type_op_of(dn) != Ntype_op::Latch) {
+            auto under = en;
+            for (int depth = 0; depth < 4; ++depth) {
+              under = zext_source(under);
+              if (under.is_invalid()) {
+                break;
+              }
+              auto un = under.get_master_node();
+              if (gu::type_op_of(un) == Ntype_op::Latch) {
+                en = under;  // the latch IS the enable; the adapter only widened it
+                dn = un;
+                break;
+              }
+            }
+          }
           if (gu::type_op_of(dn) != Ntype_op::Latch) {
             continue;
           }
