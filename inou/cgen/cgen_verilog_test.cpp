@@ -248,4 +248,73 @@ TEST(CgenVerilog, DuplicatedInlineChainStaysLinear) {
   // 4x the cells: linear text grows ~4x, the quadratic re-spelling ~16x.
   EXPECT_LT(large.size(), small.size() * 6) << "small=" << small.size() << " large=" << large.size();
 }
+
+// A memory whose read ports DISAGREE on timing has no scalar `type`, and this
+// emitter picks its memory model from exactly that field. Before the guard, the
+// mixed sentinel matched neither admitted type and fell through to the ARRAY
+// path: a stateless combinational lookup, with the synchronous read registers
+// gone and the write folded into an always_comb. Wrong Verilog, emitted
+// silently.
+//
+// There is no RTL route to this shape -- the reader's script runs
+// `memory -nomap -nordff`, so a synchronous read port is never formed -- so the
+// graph is built by hand. That is the only way the guard is ever executed.
+TEST(CgenVerilog, MixedReadTimingMemoryIsRefused) {
+  const std::string name = "mixed_read_timing_mem";
+  auto&             lib  = livehd::Hhds_graph_library::instance("lgdb_" + name);
+  auto              io   = lib.create_io(name);
+  int               port = 0;
+  for (const char* n : {"clk", "we"}) {
+    io->add_input(n, port++);
+    io->set_bits(n, 1);
+    io->set_unsign(n, true);
+  }
+  for (const char* n : {"wa", "ra0", "ra1"}) {
+    io->add_input(n, port++);
+    io->set_bits(n, 2);
+    io->set_unsign(n, true);
+  }
+  io->add_input("din", port++);
+  io->set_bits("din", 8);
+  io->set_unsign("din", true);
+  for (const char* n : {"dout0", "dout1"}) {
+    io->add_output(n, port++);
+    io->set_bits(n, 8);
+    io->set_unsign(n, true);
+  }
+  auto      graph  = io->create_graph();
+  auto      mem    = gu::create_typed_node(*graph, Ntype_op::Memory);
+  const int stride = static_cast<int>(Ntype::Memory_port_stride);
+  auto      konst  = [&](int64_t v) { return gu::create_const(*graph, *Dlop::create_integer(v)); };
+  auto      pin    = [&](const char* n, int idx) {
+    return mem.create_sink_pin(Ntype::get_sink_pid(Ntype_op::Memory, n) + idx * stride);
+  };
+  konst(8).connect_sink(pin("bits", 0));
+  konst(4).connect_sink(pin("size", 0));
+  konst(0).connect_sink(pin("fwd", 0));
+  konst(1).connect_sink(pin("wensize", 0));
+  konst(1).connect_sink(pin("posclk", 0));
+  konst(Ntype::Memory_type_mixed).connect_sink(pin("type", 0));
+  // write port 0
+  graph->get_input_pin("wa").connect_sink(pin("addr", 0));
+  graph->get_input_pin("din").connect_sink(pin("din", 0));
+  graph->get_input_pin("we").connect_sink(pin("enable", 0));
+  graph->get_input_pin("clk").connect_sink(pin("clock_pin", 0));
+  konst(Ntype::Memory_rdport_write).connect_sink(pin("rdport", 0));
+  // read port 1 SYNCHRONOUS, read port 2 ASYNCHRONOUS -- the disagreement
+  const int64_t timing[] = {Ntype::Memory_rdport_sync, Ntype::Memory_rdport_async};
+  for (int r = 0; r < 2; ++r) {
+    graph->get_input_pin(r == 0 ? "ra0" : "ra1").connect_sink(pin("addr", 1 + r));
+    konst(1).connect_sink(pin("enable", 1 + r));
+    graph->get_input_pin("clk").connect_sink(pin("clock_pin", 1 + r));
+    konst(timing[r]).connect_sink(pin("rdport", 1 + r));
+    auto dout = mem.create_driver_pin(1 + r);
+    gu::set_ubits(dout, 8);
+    dout.connect_sink(graph->get_output_pin(r == 0 ? "dout0" : "dout1"));
+  }
+  std::filesystem::create_directories(name);
+  EXPECT_THROW(Cgen_verilog{name}.do_from_graph(graph), std::runtime_error)
+      << "a mixed-timing memory must be refused, not emitted as a combinational array";
+}
+
 }  // namespace

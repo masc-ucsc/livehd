@@ -153,6 +153,15 @@ Fixture build(hhds::GraphLibrary& lib, const std::string& mod, bool with_enable,
   return f;
 }
 
+// Replace whatever drives one of the memory's sinks. `build` has already wired
+// the scalar policy pins, so a test that wants a different `type` or `rdport`
+// has to displace the constant rather than add a second driver.
+void repin(const Fixture& f, int raw_pid, int64_t value) {
+  auto sink = f.mem.create_sink_pin(static_cast<hhds::Port_id>(raw_pid));
+  sink.del_sink();
+  gu::create_const(*f.g, *Dlop::create_integer(value)).connect_sink(sink);
+}
+
 // ---------------------------------------------------------------------------
 
 // THE ALIAS PROPERTY, on a lane the front end cannot fold away.
@@ -368,6 +377,43 @@ single_edge::Result run_dry(hhds::Graph* g) {
   o.dry_run = true;
   return single_edge::normalize(g, {}, o);
 }
+
+// ---------------------------------------------------------------------------
+// MIXED read timing: the cell-global `type` has no scalar answer, so the PORTS
+// decide.
+//
+// `sync_read` is read at two slots as "this memory has a read register, which
+// would commit on every sub-step" and the design is refused. Reading the mixed
+// sentinel as "nonzero, therefore registered" refuses a cell whose read ports
+// all say asynchronous -- a design with no read register at all.
+//
+// This is the only input that distinguishes the two readings, and no RTL route
+// builds it: the reader's script runs `memory -nomap -nordff`, so a
+// synchronous read port is never formed and `type` is never 3. Built by hand
+// for exactly that reason.
+TEST(SingleEdgeMemoryGate, MixedCellWhoseReadPortsAreAllAsyncHasNoReadRegister) {
+  hhds::GraphLibrary lib;
+  auto               f = build(lib, "mixed_rd_async", /*with_enable=*/true, /*with_concat=*/false);
+  repin(f, 7, Ntype::Memory_type_mixed);                 // the sentinel
+  repin(f, mpid(1, 10), Ntype::Memory_rdport_async);     // ... but the one read port is async
+  const auto r = run(f.g.get());
+  EXPECT_EQ(r.reason.find("synchronous read port"), std::string::npos)
+      << "the pins say asynchronous; the sentinel is not a scalar answer. reason: " << r.reason;
+}
+
+// The other direction, so the first test cannot be satisfied by ignoring the
+// sentinel altogether: a mixed cell with a REGISTERED read port is still
+// refused at two slots.
+TEST(SingleEdgeMemoryGate, MixedCellWithARegisteredReadPortIsStillRefusedAtTwoSlots) {
+  hhds::GraphLibrary lib;
+  auto               f = build(lib, "mixed_rd_sync", /*with_enable=*/true, /*with_concat=*/false);
+  repin(f, 7, Ntype::Memory_type_mixed);
+  repin(f, mpid(1, 10), Ntype::Memory_rdport_sync);
+  const auto r = run(f.g.get());
+  EXPECT_TRUE(r.error) << r.reason;
+  EXPECT_NE(r.reason.find("synchronous read port"), std::string::npos) << r.reason;
+}
+
 }  // namespace
 
 // PLANNING MUST NOT TOUCH THE GRAPH. `dry_run` returns before the rewrite and

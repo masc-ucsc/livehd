@@ -1305,6 +1305,71 @@ Shared_fixture shared_fixture(const std::string& lib, std::optional<int> m0, std
   f.graphs = {f.parent, f.child};
   return f;
 }
+
+// The sim emitter decides sync-ness from the cell-global `type` in five places,
+// and the mixed sentinel makes all five read false -- so every read would be
+// modelled as asynchronous and a synchronous read port would lose its register.
+// Same shape as CgenVerilog.MixedReadTimingMemoryIsRefused, and built by hand
+// for the same reason: no RTL route produces a mixed cell, so without this the
+// guard is never executed.
+TEST(CgenSim, MixedReadTimingMemoryIsRefused) {
+  const std::string name = "sim_mixed_read_timing_mem";
+  auto&             lib  = livehd::Hhds_graph_library::instance("lgdb_" + name);
+  auto              io   = lib.create_io(name);
+  int               port = 0;
+  for (const char* n : {"clk", "we"}) {
+    io->add_input(n, port++);
+    io->set_bits(n, 1);
+    io->set_unsign(n, true);
+  }
+  for (const char* n : {"wa", "ra0", "ra1"}) {
+    io->add_input(n, port++);
+    io->set_bits(n, 2);
+    io->set_unsign(n, true);
+  }
+  io->add_input("din", port++);
+  io->set_bits("din", 8);
+  io->set_unsign("din", true);
+  for (const char* n : {"dout0", "dout1"}) {
+    io->add_output(n, port++);
+    io->set_bits(n, 8);
+    io->set_unsign(n, true);
+  }
+  auto      graph  = io->create_graph();
+  auto      mem    = gu::create_typed_node(*graph, Ntype_op::Memory);
+  const int stride = static_cast<int>(Ntype::Memory_port_stride);
+  auto      konst  = [&](int64_t v) { return gu::create_const(*graph, *Dlop::create_integer(v)); };
+  auto      pin    = [&](const char* n, int idx) {
+    return mem.create_sink_pin(Ntype::get_sink_pid(Ntype_op::Memory, n) + idx * stride);
+  };
+  konst(8).connect_sink(pin("bits", 0));
+  konst(4).connect_sink(pin("size", 0));
+  konst(0).connect_sink(pin("fwd", 0));
+  konst(1).connect_sink(pin("wensize", 0));
+  konst(1).connect_sink(pin("posclk", 0));
+  konst(Ntype::Memory_type_mixed).connect_sink(pin("type", 0));
+  graph->get_input_pin("wa").connect_sink(pin("addr", 0));
+  graph->get_input_pin("din").connect_sink(pin("din", 0));
+  graph->get_input_pin("we").connect_sink(pin("enable", 0));
+  graph->get_input_pin("clk").connect_sink(pin("clock_pin", 0));
+  konst(Ntype::Memory_rdport_write).connect_sink(pin("rdport", 0));
+  const int64_t timing[] = {Ntype::Memory_rdport_sync, Ntype::Memory_rdport_async};
+  for (int r = 0; r < 2; ++r) {
+    graph->get_input_pin(r == 0 ? "ra0" : "ra1").connect_sink(pin("addr", 1 + r));
+    konst(1).connect_sink(pin("enable", 1 + r));
+    graph->get_input_pin("clk").connect_sink(pin("clock_pin", 1 + r));
+    konst(timing[r]).connect_sink(pin("rdport", 1 + r));
+    auto dout = mem.create_driver_pin(1 + r);
+    gu::set_ubits(dout, 8);
+    dout.connect_sink(graph->get_output_pin(r == 0 ? "dout0" : "dout1"));
+  }
+  std::filesystem::create_directories(name);
+  const auto plan = livehd::sim::Color_plan::discover(graph.get(), false);
+  Cgen_sim   emitter(name, "", name, "false", &plan);
+  EXPECT_THROW(emitter.do_from_graph(graph), std::runtime_error)
+      << "a mixed-timing memory must be refused, not modelled as all-asynchronous";
+}
+
 }  // namespace
 
 // max_versions == 1: every instance agrees on m = 0x0F, so ONE copy carries it,
