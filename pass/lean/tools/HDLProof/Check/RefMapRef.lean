@@ -212,6 +212,24 @@ def InitAgree (spA spB : RefMapSpec) (oA oB : Array BV) (k : Nat) : Prop :=
   ∨ ∃ a b, spA.init[k]? = some (.out0 a) ∧ spB.init[k]? = some (.out0 b)
       ∧ bv_uint (oA.getD a default) = bv_uint (oB.getD b default)
 
+/-- `InitAgree` from the maps' init lines: the same list, no `free` entry, and every
+implementation output an `out0` entry reads agreeing at cycle 0. -/
+theorem initAgree_of_same {spA spB : RefMapSpec} {oA oB : Array BV} (hinit : spA.init = spB.init)
+    (hfree : spA.init.all (fun e => match e with | .free => false | _ => true) = true)
+    (hout : ∀ o, InitE.out0 o ∈ spA.init → bv_uint (oA.getD o default) = bv_uint (oB.getD o default)) :
+    ∀ k, k < spA.init.length → InitAgree spA spB oA oB k := by
+  intro k hk
+  have he : spA.init[k]? = some spA.init[k] := List.getElem?_eq_getElem hk
+  have hmem : spA.init[k] ∈ spA.init := List.getElem_mem hk
+  have hnf := List.all_eq_true.mp hfree _ hmem
+  unfold InitAgree
+  rw [← hinit]
+  generalize spA.init[k] = e at he hmem hnf
+  cases e with
+  | cnst v => exact Or.inl ⟨v, he, he⟩
+  | out0 o => exact Or.inr ⟨o, o, he, he, hout o hmem⟩
+  | free => simp at hnf
+
 theorem start_of_facts {DIa DIb DS : DesignCert} {spA spB : RefMapSpec} {s0A s0B : StateM}
     {insA insB : Nat → RuntimeInput} (hsame : SameSpec spA spB)
     (hFA : RefMapFacts DIa DS spA s0A insA) (hFB : RefMapFacts DIb DS spB s0B insB)

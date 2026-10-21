@@ -55,6 +55,7 @@ namespace HDLProof
 #audit_axioms Check.rm_denote
 #audit_axioms Check.checked_parts
 #audit_axioms Check.specFacts_checked
+#audit_axioms Check.initAgree_of_same
 #audit_axioms Check.start_of_facts
 #audit_axioms Check.start_ref
 #audit_axioms Check.refmap_compose_ref
