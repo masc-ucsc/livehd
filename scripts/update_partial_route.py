@@ -11,6 +11,7 @@ import json
 ROOT = Path(__file__).resolve().parents[1]
 BASE = ROOT / 'tmp/route_cts_eval_20261021'
 SOURCES = {}
+SYNC_SOURCES = {}
 
 
 def read(relative):
@@ -25,6 +26,17 @@ def read(relative):
 
 def link(relative, label):
     return f'<a href="../tmp/route_cts_eval_20261021/{escape(relative, quote=True)}">{escape(label)}</a>'
+
+
+def read_sync(relative):
+    path = ROOT / 'tmp/remote_sync_20261021' / relative
+    data = path.read_bytes()
+    SYNC_SOURCES[relative] = sha256(data).hexdigest()
+    return json.loads(data)
+
+
+def sync_link(relative, label):
+    return f'<a href="../tmp/remote_sync_20261021/{escape(relative, quote=True)}">{escape(label)}</a>'
 
 
 def number(value, digits=3):
@@ -173,8 +185,30 @@ def main():
                             + cell(number(100 * obj['CORE_area_in_above80_fraction']) + '%')
                             + cell(link(relative, 'Density evidence')) + '</tr>')
 
+    cold = read_sync('liteeth_reuse_v2/run/cold/native.run.json')
+    warm = read_sync('liteeth_reuse_v2/run/warm1/native.run.json')
+    assert cold['status'] == 'pass' and warm['exit_code'] != 0
+    rejected = read_sync('cnn_density/control/attempt001/rejected_attempt_summary.json')
+    assert rejected['status'] == 'rejected_fixed_netlist_mutation_stopped'
+    rc_perf = read_sync('rc_perf/paired_summary.json')
+    rc_exact = read_sync('rc_perf/owner_boundary_result.json')
+    assert rc_exact['status'] == 'pass'
+    validation = ('<tr>' + cell('LiteEth incremental') + cell('Cold complete; warm1 failed')
+                  + cell(number(cold['wall_s'], 1) + ' / ' + number(warm['wall_s'], 1), 'Cold / failed warm1 seconds')
+                  + cell('Cached placement restored, then companion LEF export failed on a read-only destination; fix under validation. Warm2 not run.')
+                  + cell(sync_link('liteeth_reuse_v2/run/warm1/native.run.json', 'Preserved failure')) + '</tr>'
+                  + '<tr>' + cell('CNN density control') + cell('Rejected; stopped at iteration 450')
+                  + cell(number(rejected['measurement']['wall_s'], 1), 'Partial invalid attempt seconds')
+                  + cell('Imported shared tie expansion added 1,306 cells; violates the fixed-netlist comparison. Opt-in preservation fix under validation; other policies not launched.')
+                  + cell(sync_link('cnn_density/control/attempt001/rejected_attempt_summary.json', 'Rejection and perf evidence')) + '</tr>'
+                  + '<tr>' + cell('OpenTimer RC kernel') + cell('Prototype; owner tests pending')
+                  + cell(number(100 * rc_perf['task_clock_ms']['reduction'], 1) + '% less CPU', 'Median of three isolated paired runs')
+                  + cell(number(100 * rc_perf['instructions']['reduction'], 1) + '% fewer instructions. Prepared constants reused across thresholds; 220,378 output comparisons checked, including 16 paired NaNs. No full-flow gain claim.')
+                  + cell(sync_link('rc_perf/paired_summary.json', 'Paired counters') + '; ' + sync_link('rc_perf/owner_boundary_result.json', 'Numerical boundary check')) + '</tr>')
+
     stamp = datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')
     sources = ''.join(f'<li>{link(path, path)} <code>{digest[:12]}</code></li>' for path, digest in SOURCES.items())
+    sources += ''.join(f'<li>{sync_link(path, path)} <code>{digest[:12]}</code></li>' for path, digest in SYNC_SOURCES.items())
     page = '''<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
 <title>LiveHD / OpenROAD — partial routing results</title>
@@ -195,6 +229,9 @@ def main():
 <div class="scroll"><table><thead><tr><th>Design</th><th>Arm</th><th>Boundary</th><th>Bins above 80%</th><th>Cell area in hot bins</th><th>Evidence</th></tr></thead><tbody>@DENSITY@</tbody></table></div>
 <p>The matched preCTS CNN pair contains exactly the same 333,888 CORE cells and 43,982.961 µm² of cell area. At 512², LiveHD has 42.911% of its cell area in hot bins, versus none for OpenROAD. At 64², that LiveHD fraction appears to be only 3.828%, showing how the coarse density view hides local crowding. The routing-estimator grid remains unchanged; this motivates finer placement-density feedback.</p>
 <p>The strong density association motivates spreading experiments. It does not by itself prove marker causation: the placement policies differ, and CTS and repair add different cells and clock trees to the two arms. The separate postGRT rows show that later measurement boundary explicitly.</p>
+<h2>New-source validation in progress</h2>
+<p>These checks use the newly synchronized source snapshot and remain separate from the routed comparison above. Failed and rejected attempts are retained; they do not establish routing or reuse success.</p>
+<div class="scroll"><table><thead><tr><th>Check</th><th>Status</th><th>Measured cost</th><th>Finding</th><th>Evidence</th></tr></thead><tbody>@VALIDATION@</tbody></table></div>
 <h2>Comparison and performance scope</h2>
 <p>The placement comparisons share their design's mapped starting netlist, macro/IO frame and authoritative constraints. CTS and repair may make arm-specific changes, which remain audited. CNN uses 65 SRAMs, Eyeriss 1,040 and LiteEth 5. The LiteEth reference uses routability-only placement after a preserved timing-driven rebuffering crash; this qualification prevents a whole-flow dominance claim. Both LiteEth arms configured a 1% repair-buffer option, but that option did not act as an observed cumulative hard bound.</p>
 <p>Timing values in the main table are final extracted results only. Pending entries are not zero and placement/GRT estimates are not substituted. A supported-frequency claim needs fresh extracted per-clock STA, consistent generated-clock relationships, IO budgets and timing exceptions, and explicit setup/hold reporting. CNN uses the shared ASAP7 RVT FF 0.77 V / 0 °C standard-cell corner with normalized SRAM models and fixed 10 ps IO budgets; this is not an all-corner frequency claim.</p>
@@ -205,7 +242,7 @@ def main():
 '''
     for key, value in {'STAMP': stamp, 'ROWS': ''.join(rows), 'DENSITY': ''.join(density_rows),
                        'CNN': f'{cnn_counts["LiveHD"]:,}', 'CNN_FINAL': cnn_final_note,
-                       'EY': f'{ey_last["violations"]:,}', 'SOURCES': sources}.items():
+                       'EY': f'{ey_last["violations"]:,}', 'VALIDATION': validation, 'SOURCES': sources}.items():
         page = page.replace('@' + key + '@', value)
     output = ROOT / 'docs/partial_route.html'
     output.write_text(page)
