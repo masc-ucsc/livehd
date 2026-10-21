@@ -4,6 +4,7 @@
 # binaries of in-flight experiments -- is touched.
 #
 #   OPT=-O2 ROOT=/abs/path bash scripts/build-opt.sh scripts/total_probe.lean [more.lean ...]
+#   (the proof-tool drivers: ../../pass/lean/tools/drivers/sym_verify.lean sym_refine.lean)
 # OPT may carry several flags, e.g. OPT="-O2 -g -fno-omit-frame-pointer"
 # for a profiling build that keeps -O2 but can be unwound.
 set -uo pipefail
@@ -12,7 +13,7 @@ OPT=${OPT:--O2}
 ROOT=${ROOT:?set ROOT to an absolute, project-local build directory}
 OUT="$ROOT/olean"; NAT="$ROOT/nat"
 mkdir -p "$OUT/LeanSemanticPrimitives/Projection/Proto" \
-         "$OUT/LeanSemanticPrimitives/Projection/Sym" \
+         "$OUT/HDLProof/Sym" \
          "$OUT/LeanSemanticPrimitives/Compiler" \
          "$OUT/LeanSemanticPrimitives/Translation" "$NAT"
 export LEAN_PATH="$OUT"
@@ -61,12 +62,16 @@ MODULES=(
   Projection/Proto/RunnerSupport
   # the memory entry with env0 inlined (projectMemVarDesignAt)
   Projection/MemVariant Projection/MemVariantSim Projection/MemFused
-  # M3: verified symbolic interpretation and k-induction (sym_verify)
-  Projection/Sym/Kit Projection/Sym/Bridge Projection/Sym/Val Projection/Sym/Prim
-  Projection/Sym/Mem Projection/Sym/Dispatch Projection/Sym/Wire Projection/Sym/Eval Projection/Sym/Asg
-  Projection/Sym/Sat Projection/Sym/Layout Projection/Sym/Step Projection/Sym/Trace
-  Projection/Sym/Shape Projection/Sym/Unroll Projection/Sym/Oblig Projection/Sym/KInd Projection/Sym/Conj Projection/Sym/ConjT
-  Projection/Sym/Refine
+)
+# The proof tools (pass/lean/tools, HDLProof): a second source root.
+TOOLS="$(cd ../../pass/lean/tools && pwd)"
+TOOL_MODULES=(
+  # verified symbolic interpretation and k-induction (sym_verify, sym_refine)
+  HDLProof/Sym/Kit HDLProof/Sym/Bridge HDLProof/Sym/Val HDLProof/Sym/Prim
+  HDLProof/Sym/Mem HDLProof/Sym/Dispatch HDLProof/Sym/Wire HDLProof/Sym/Eval HDLProof/Sym/Asg
+  HDLProof/Sym/Sat HDLProof/Sym/Layout HDLProof/Sym/Step HDLProof/Sym/Trace
+  HDLProof/Sym/Shape HDLProof/Sym/Unroll HDLProof/Sym/Oblig HDLProof/Sym/KInd HDLProof/Sym/Conj HDLProof/Sym/ConjT
+  HDLProof/Sym/Refine
 )
 OBJS=()
 for m in "${MODULES[@]}"; do
@@ -76,12 +81,20 @@ for m in "${MODULES[@]}"; do
   leanc $OPT -c -o "$NAT/$flat.o" "$NAT/$flat.c" || exit 1
   OBJS+=("$NAT/$flat.o")
 done
+for m in "${TOOL_MODULES[@]}"; do
+  flat=${m//\//_}
+  lean -R "$TOOLS" -o "$OUT/$m.olean" -c "$NAT/$flat.c" "$TOOLS/$m.lean" || exit 1
+  leanc $OPT -c -o "$NAT/$flat.o" "$NAT/$flat.c" || exit 1
+  OBJS+=("$NAT/$flat.o")
+done
 # One or more probes, all linked against the modules built above (so several
 # drivers cost one module build, not one each).
 [ $# -ge 1 ] || { echo "usage: OPT=.. ROOT=.. build-opt.sh probe.lean [probe.lean ...]" >&2; exit 2; }
 for PROBE in "$@"; do
   pb=$(basename "$PROBE" .lean)
-  lean -o "$NAT/$pb.olean" -c "$NAT/$pb.c" "$PROBE" || exit 1
+  # the probe's own directory is its root, so a driver outside formal/lean
+  # (pass/lean/tools/drivers) compiles too
+  lean -R "$(cd "$(dirname "$PROBE")" && pwd)" -o "$NAT/$pb.olean" -c "$NAT/$pb.c" "$PROBE" || exit 1
   leanc $OPT -c -o "$NAT/$pb.o" "$NAT/$pb.c" || exit 1
   leanc $OPT -o "$NAT/$pb" "$NAT/$pb.o" "${OBJS[@]}" || exit 1
   echo "built $NAT/$pb at $OPT"

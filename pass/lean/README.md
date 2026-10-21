@@ -670,8 +670,9 @@ CVA6_TOP=tc_sram LEAN_EMIT_CERT=true scripts/run_cva6_module_lean_stress.sh
 
 A design's unbounded properties (invariants, refinement with stuttering) are checked on
 the residual of the Futamura projection, the same artifact the FP simulator runs. The
-checker is proved sound once for every design (`formal/lean/LeanSemanticPrimitives/
-Projection/Sym/*`); a run per design only produces obligations and checks proofs.
+checker is proved sound once for every design (`pass/lean/tools/HDLProof/Sym/*`, the
+proof tools; see `pass/lean/tools/README.md`); a run per design only produces
+obligations and checks proofs.
 No per-design Lean proof is written.
 
 The pipeline of one run:
@@ -696,7 +697,8 @@ The pipeline of one run:
 # lhd (see Build above); the native drivers, into a project-local root:
 cd formal/lean
 ROOT=$PWD/../../generated/sym/nat_root
-OPT=-O2 ROOT=$ROOT bash scripts/build-opt.sh scripts/sym_verify.lean scripts/sym_refine.lean
+OPT=-O2 ROOT=$ROOT bash scripts/build-opt.sh ../../pass/lean/tools/drivers/sym_verify.lean \
+    ../../pass/lean/tools/drivers/sym_refine.lean
 # the solver: cadical ships with the Lean toolchain; link it next to the drivers
 # (or pass solver:<path>)
 ln -s "$(dirname "$(elan which lean)")/cadical" $ROOT/nat/cadical   # still in formal/lean
@@ -706,7 +708,7 @@ The self-test runs the whole flow on small fixtures (counters, a two-phase accum
 pair of registers, two cores with a case split):
 
 ```bash
-SYM_NAT=<root>/nat LHD=<lhd> bash pass/lean/scripts/sym_selftest.sh
+SYM_NAT=<root>/nat LHD=<lhd> bash pass/lean/tools/tests/sym_selftest.sh
 ```
 
 ### Export a design

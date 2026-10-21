@@ -18,9 +18,9 @@ variable's consecutive bits as `extract`, constant runs as `const`, joined by
 `e`. Mathlib-free.
 -/
 import Std.Tactic.BVDecide
-import LeanSemanticPrimitives.Projection.Sym.Kit
+import HDLProof.Sym.Kit
 
-namespace Projection.Sym
+namespace HDLProof.Sym
 open Std.Tactic.BVDecide
 
 /-! ## Bits -/
@@ -527,4 +527,4 @@ theorem eval_norm (σ : Asg) {w : Nat} {e e' : BVExpr w} (h : norm e = some e') 
     rw [Array.getD_eq_getD_getElem?, List.getD_eq_getElem?_getD, Array.getElem?_toList]
   · cases h
 
-end Projection.Sym
+end HDLProof.Sym

@@ -8,7 +8,7 @@ Mathlib-free. Every statement is about a concrete `BV` whose NORMALIZED value
 layer keeps, so the raw (possibly unnormalized) field never matters.
 -/
 
-namespace Projection.Sym
+namespace HDLProof.Sym
 
 theorem two_pow_pos_int (w : Nat) : (0 : Int) < 2 ^ w := Int.pow_pos (by decide)
 
@@ -268,4 +268,4 @@ theorem getmask_rel {x : BV} {wx : Nat} {X : BitVec wx} (hx : bv_uint x = (X.toN
   rw [hb, bv_uint_mk_bv, BitVec.toNat_setWidth, two_pow_cast]
   simp [Int.natCast_emod]
 
-end Projection.Sym
+end HDLProof.Sym

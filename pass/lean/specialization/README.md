@@ -16,7 +16,7 @@ the drivers in `formal/lean/scripts/` (`gen_probe_v2`, `gen_readiness_v2`,
 
 | file | content |
 |---|---|
-| `M3_UNBOUNDED_PROOFS.md` | M3: unbounded invariants and refinement with stuttering on the projection residual (`Projection/Sym/*`) and the `MemVariant`/`MemFused` memory interpreters |
+| `M3_UNBOUNDED_PROOFS.md` | M3: unbounded invariants and refinement with stuttering on the projection residual (`pass/lean/tools/HDLProof/Sym/*`) and the `MemVariant`/`MemFused` memory interpreters |
 
 ## Runner and measurement scripts
 
@@ -28,12 +28,11 @@ the drivers in `formal/lean/scripts/` (`gen_probe_v2`, `gen_readiness_v2`,
 | `fp_install.py` | installs the projection-branch probes onto master (`tests/fp_install_map.tsv`) |
 | `fp_replay.py` | replays historical FP rows into a fresh outdir |
 
-## M3 scripts (in `pass/lean/scripts/`)
+## M3 scripts
 
-| file | role |
-|---|---|
-| `sym_selftest.sh` | fixtures through the real flow: invariants, counterexample replay, refinement with stuttering, F2 theorem file |
-| `sym_observe.py` | observer outputs (witnesses, internal state) on a copy of the RTL |
+The proof tools moved to `pass/lean/tools/` (see its `README.md`): the
+self-test `tests/sym_selftest.sh` and the observer generator
+`scripts/sym_observe.py`.
 
 ## tests/
 

@@ -17,11 +17,12 @@ assignment `σ`. `merge` builds `c ? a : b`; `merge_sound_t`/`_f` say it
 denotes whatever the TAKEN branch denotes -- the untaken branch need not
 relate to anything.
 -/
-import LeanSemanticPrimitives.Projection.Sym.Kit
-import LeanSemanticPrimitives.Projection.Sym.Bridge
+import HDLProof.Sym.Kit
+import HDLProof.Sym.Bridge
 import LeanSemanticPrimitives.Projection.ObjectLanguageSemantics
 
-namespace Projection.Sym
+open Projection
+namespace HDLProof.Sym
 open Std.Tactic.BVDecide
 
 inductive SVal where
@@ -339,4 +340,4 @@ def sListOf : List SVal → SVal
   | []      => .conc .nil
   | s :: ss => .cons s (sListOf ss)
 
-end Projection.Sym
+end HDLProof.Sym

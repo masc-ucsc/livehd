@@ -20,10 +20,11 @@ needs.
 inputs of the declared widths, the property holds at every cycle whose
 assumptions up to it all held. Proved once; run per design.
 -/
-import LeanSemanticPrimitives.Projection.Sym.Oblig
+import HDLProof.Sym.Oblig
 import LeanSemanticPrimitives.Projection.AxiomGate
 
-namespace Projection.Sym
+open Projection
+namespace HDLProof.Sym
 open Std.Tactic.BVDecide Projection.MemProjection Projection.Hw Projection.HwMem Compiler
 
 /-! ## Shapes, executable -/
@@ -443,4 +444,4 @@ theorem runInvKF_sound {sf wf : Nat} {D : DesignCert} {sp : InvSpec} {s0 : State
 #audit_axioms runInvKV_sound
 #audit_axioms runInvKF_sound
 
-end Projection.Sym
+end HDLProof.Sym

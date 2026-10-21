@@ -23,10 +23,11 @@ solver is asked to refute. The reachability itself is untrusted.
 reference semantics from `s0`, at every cycle whose assumptions up to it all
 held, EVERY conjunct holds. k = 1. Mathlib-free.
 -/
-import LeanSemanticPrimitives.Projection.Sym.KInd
+import HDLProof.Sym.KInd
 import LeanSemanticPrimitives.Projection.AxiomGate
 
-namespace Projection.Sym
+open Projection
+namespace HDLProof.Sym
 open Std.Tactic.BVDecide Projection.MemProjection Projection.Hw Projection.HwMem Compiler
 
 /-! ## Unrolling with the outputs kept -/
@@ -506,4 +507,4 @@ theorem runConjOf_sound_ref {D : DesignCert} {R : Program} {sp : ConjSpec}
   rw [← (hden n).2]
   exact runConjOf_sound hres hA hr hins n (fun j hj => by rw [(hden j).2]; exact hasm j hj)
 
-end Projection.Sym
+end HDLProof.Sym

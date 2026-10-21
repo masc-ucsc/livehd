@@ -2,10 +2,11 @@
 `Sym.Dispatch` -- `symPrim`: one symbolic semantics for every primitive the
 residuals use, and `symPrim_sound` (M3 S1/S4).
 -/
-import LeanSemanticPrimitives.Projection.Sym.Mem
+import HDLProof.Sym.Mem
 import LeanSemanticPrimitives.Projection.AxiomGate
 
-namespace Projection.Sym
+open Projection
+namespace HDLProof.Sym
 open Std.Tactic.BVDecide
 
 /-! ## The dispatcher -/
@@ -115,4 +116,4 @@ theorem symPrim_sound {σ : Asg} {p : Prim} {ss : List SVal} {vs : List Val} {s 
 #audit_axioms symPrimO_sound
 #audit_axioms symPrim_sound
 
-end Projection.Sym
+end HDLProof.Sym

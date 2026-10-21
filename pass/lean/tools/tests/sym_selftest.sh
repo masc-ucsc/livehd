@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 # M3 self-test: unbounded invariants and refinement with stuttering, proved on
-# the projection residual (formal/lean/scripts/sym_verify.lean, sym_refine.lean).
+# the projection residual (pass/lean/tools/drivers/sym_verify.lean, sym_refine.lean).
 #
 # Small RTL fixtures, each through the real flow (yosys-slang -> LGraph ->
 # DCERT2), then:
@@ -31,7 +31,7 @@ set -euo pipefail
 # formal/lean/.build-proj.sh). The Lean toolchain pin lives in formal/lean.
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-ROOT="$(cd "$SCRIPT_DIR/../../.." && pwd)"
+ROOT="$(cd "$SCRIPT_DIR/../../../.." && pwd)"
 OUT="${OUT:-$ROOT/generated/master_port/sym_selftest}"
 LHD="${LHD:-$ROOT/bazel-bin/lhd/lhd}"
 SYM_NAT="${SYM_NAT:-}"
@@ -142,7 +142,7 @@ run() { # <driver> <expect> args...
   if [[ -n "$SYM_NAT" ]]; then
     "$SYM_NAT/$drv" "$@" "work:$OUT/work" > "$log" 2>&1 || true
   else
-    (cd "$ROOT/formal/lean" && LEAN_PATH="$PWD/.olean-dev" lean --run "scripts/$drv.lean" "$@" "work:$OUT/work") \
+    (cd "$ROOT/formal/lean" && LEAN_PATH="$PWD/.olean-dev" lean --run "$ROOT/pass/lean/tools/drivers/$drv.lean" "$@" "work:$OUT/work") \
       > "$log" 2>&1 || true
   fi
   local got

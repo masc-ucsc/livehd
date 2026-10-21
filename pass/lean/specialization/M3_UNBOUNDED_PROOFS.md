@@ -7,11 +7,12 @@ FP route executes. Each checker is proved sound once, for all designs (the
 verified-validator pattern), and then run per design. There are no per-design
 Lean proofs.
 
-Lean: `formal/lean/LeanSemanticPrimitives/Projection/Sym/` (17 modules,
-Mathlib-free, built by `formal/lean/.build-proj.sh`, every theorem under the
-failing axiom gate). Drivers: `formal/lean/scripts/sym_verify.lean`,
-`sym_refine.lean`. Scripts: `pass/lean/scripts/sym_selftest.sh` (small
-fixtures only), `sym_observe.py`.
+Lean: `pass/lean/tools/HDLProof/Sym/` (the proof tools, namespace
+`HDLProof.Sym`; Mathlib-free, built by `formal/lean/.build-proj.sh` as a second
+source root, every theorem under the failing axiom gate in
+`HDLProof/Check/Audit.lean`). Drivers: `pass/lean/tools/drivers/sym_verify.lean`,
+`sym_refine.lean`. Scripts: `pass/lean/tools/tests/sym_selftest.sh` (small
+fixtures only), `pass/lean/tools/scripts/sym_observe.py`.
 
 This repository holds the machinery only. Properties of a particular RTL
 design, and their proof artifacts, live with that design, not here.
@@ -156,7 +157,7 @@ that k.
   certificate. Specification inputs default to the implementation input of
   the same name.
 - **Native builds.**
-  `OPT=-O2 ROOT=<dir> bash formal/lean/scripts/build-opt.sh scripts/sym_verify.lean scripts/sym_refine.lean`.
+  `OPT=-O2 ROOT=<dir> bash formal/lean/scripts/build-opt.sh ../../pass/lean/tools/drivers/sym_verify.lean ../../pass/lean/tools/drivers/sym_refine.lean`.
   Pass `solver:` explicitly, or link the toolchain's cadical
   (`$(dirname $(elan which lean))/cadical`, run from `formal/lean`) into the
   build directory.

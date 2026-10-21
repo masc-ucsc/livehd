@@ -9,10 +9,11 @@ and `traceM_denote` ties the trace to the shared reference semantics:
 `denote (traceM n)` is the `interpretDesign` state after `n` cycles and
 `outM n` its outputs at cycle `n`.
 -/
-import LeanSemanticPrimitives.Projection.Sym.Step
+import HDLProof.Sym.Step
 import LeanSemanticPrimitives.Projection.MemFused
 
-namespace Projection.Sym
+open Projection
+namespace HDLProof.Sym
 open Std.Tactic.BVDecide Projection.MemProjection Projection.Hw Projection.HwMem Compiler
 
 /-- The edge vector with every clock firing. -/
@@ -161,4 +162,4 @@ theorem traceM_denote {D : DesignCert} {s0 : StateM} {ins : Nat → RuntimeInput
       simp only [StateM.ResultM.denote] at this
       simp only [outM, refOut, this, hn]
 
-end Projection.Sym
+end HDLProof.Sym

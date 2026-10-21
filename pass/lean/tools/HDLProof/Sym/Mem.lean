@@ -9,9 +9,10 @@ An ENABLED out-of-range write makes the concrete primitive fail, so the
 soundness lemmas -- which assume the concrete step succeeded -- never have to
 model it.
 -/
-import LeanSemanticPrimitives.Projection.Sym.Prim
+import HDLProof.Sym.Prim
 
-namespace Projection.Sym
+open Projection
+namespace HDLProof.Sym
 open Std.Tactic.BVDecide
 
 /-! ## Lists of symbolic words -/
@@ -498,4 +499,4 @@ theorem symMemWrite_sound {σ : Asg} {ss : List SVal} {vs : List Val} {s : SVal}
           rw [hua, valMemSet_listVal _ wvs _ (by omega), Int.toNat_natCast]
           exact .ctor (.cons (sListOf_listVal (hrel.1 (by rw [hen]; exact hnz))) (.cons rdf .nil))
 
-end Projection.Sym
+end HDLProof.Sym

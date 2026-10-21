@@ -11,9 +11,10 @@ Refused (an `error`, never a guess): `mulI`, `divI`, `modI` with a symbolic
 operand, `eqV` on anything symbolic, `bvBit`/`bvGetMask` with a symbolic
 position or mask, and the memory primitives (a later increment).
 -/
-import LeanSemanticPrimitives.Projection.Sym.Val
+import HDLProof.Sym.Val
 
-namespace Projection.Sym
+open Projection
+namespace HDLProof.Sym
 open Std.Tactic.BVDecide
 
 /-! ## Inversion helpers -/
@@ -555,4 +556,4 @@ theorem symBvGetMask_sound {σ : Asg} {ss : List SVal} {vs : List Val} {s : SVal
     rw [getmask_rel hux _ mb ((catBits X (mask_indices_bv mb)).eval σ) rfl
           (fun j hj => getLsbD_catBits σ X _ j hj), eval_zextE]
 
-end Projection.Sym
+end HDLProof.Sym

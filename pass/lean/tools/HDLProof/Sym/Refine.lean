@@ -17,9 +17,10 @@ the specification's next state is `merge adv stepped held`. Soundness
 to it held, a witnessed cycle relates the implementation's outputs to the
 specification's outputs at its own (stuttered) position.
 -/
-import LeanSemanticPrimitives.Projection.Sym.KInd
+import HDLProof.Sym.KInd
 
-namespace Projection.Sym
+open Projection
+namespace HDLProof.Sym
 open Std.Tactic.BVDecide Projection.MemProjection Projection.Hw Projection.HwMem Compiler
 
 /-! ## The concrete pair -/
@@ -909,4 +910,4 @@ end
 #audit_axioms runRefKOf_of_obls
 #audit_axioms runRefKOf_sound_ref
 
-end Projection.Sym
+end HDLProof.Sym

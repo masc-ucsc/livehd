@@ -16,11 +16,12 @@ structurally hashed bit-blaster cache from walking a DAG as a tree.
 (`SymSt.Consistent`), a concrete `Eval` of the same term in a related
 environment yields a value the symbolic answer denotes.
 -/
-import LeanSemanticPrimitives.Projection.Sym.Dispatch
-import LeanSemanticPrimitives.Projection.Sym.Wire
+import HDLProof.Sym.Dispatch
+import HDLProof.Sym.Wire
 import LeanSemanticPrimitives.Projection.AxiomGate
 
-namespace Projection.Sym
+open Projection
+namespace HDLProof.Sym
 open Std.Tactic.BVDecide
 
 /-! ## Cut variables -/
@@ -752,4 +753,4 @@ end
 #audit_axioms symEval_extends
 #audit_axioms symEval_sound
 
-end Projection.Sym
+end HDLProof.Sym

@@ -21,11 +21,11 @@ untrusted solver;
 acceptance is `runRefKOf_sound_ref` (the refinement over `interpretDesign`)
 given the specializer runs (the D1 trusted native run of every FP route).
 -/
-import LeanSemanticPrimitives.Projection.Sym.Refine
+import HDLProof.Sym.Refine
 import LeanSemanticPrimitives.Projection.CertLoadAny
 import Lean.Data.Json
 
-open Compiler Projection Projection.Sym Projection.MemProjection Projection.HwMem
+open Compiler Projection HDLProof HDLProof.Sym Projection.MemProjection Projection.HwMem
 open Std.Tactic.BVDecide
 
 def say (s : String) : IO Unit := do

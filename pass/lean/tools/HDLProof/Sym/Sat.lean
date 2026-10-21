@@ -11,7 +11,7 @@ not valid UTF-8, so the `String` entry point cannot carry it).
 -/
 import Std.Tactic.BVDecide
 
-namespace Projection.Sym
+namespace HDLProof.Sym
 open Std.Tactic.BVDecide Std.Sat
 
 /-- The CNF the checker checks. -/
@@ -33,4 +33,4 @@ theorem checkUnsat_sound {φ : BVLogicalExpr} {proof : ByteArray}
   · exact LRAT.check_sound _ _ h
   · cases h
 
-end Projection.Sym
+end HDLProof.Sym

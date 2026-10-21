@@ -12,10 +12,11 @@ symbolic next state. `unroll_sound`: under an assignment satisfying the cut
 definitions and holding a concrete run's state and inputs, each returned
 expression evaluates to that run's bit, and each next state denotes its state.
 -/
-import LeanSemanticPrimitives.Projection.Sym.Shape
-import LeanSemanticPrimitives.Projection.Sym.Sat
+import HDLProof.Sym.Shape
+import HDLProof.Sym.Sat
 
-namespace Projection.Sym
+open Projection
+namespace HDLProof.Sym
 open Std.Tactic.BVDecide Projection.MemProjection Projection.Hw Projection.HwMem Compiler
 
 /-! ## Property bits -/
@@ -318,4 +319,4 @@ theorem unroll_sound {D : DesignCert} {R : Program} {fuel : Nat}
                     rwa [show m + 1 + j = m + (j + 1) by omega, show m + (j + 1) + 1 = m + 1 + j + 1 by omega]
                       at *
 
-end Projection.Sym
+end HDLProof.Sym

@@ -6,7 +6,7 @@ Mathlib-free.
 -/
 import Std.Tactic.BVDecide
 
-namespace Projection.Sym
+namespace HDLProof.Sym
 open Std.Tactic.BVDecide
 
 abbrev Asg := BVExpr.Assignment
@@ -337,4 +337,4 @@ theorem toBits_eq (σ : Asg) (x : SInt) (w : Nat) :
 
 end SInt
 
-end Projection.Sym
+end HDLProof.Sym

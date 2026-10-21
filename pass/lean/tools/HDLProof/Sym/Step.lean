@@ -8,11 +8,12 @@ denotes `encResultM r`, where `r` is THE result -- its denotation is
 `interpretDesign D e i (denote st)`. `splitResult`/`sNth` then take the next
 state and the outputs out of that result, each with its relation.
 -/
-import LeanSemanticPrimitives.Projection.Sym.Layout
+import HDLProof.Sym.Layout
 import LeanSemanticPrimitives.Projection.MemProjection
 import LeanSemanticPrimitives.Projection.SurfaceSemantics
 
-namespace Projection.Sym
+open Projection
+namespace HDLProof.Sym
 open Std.Tactic.BVDecide Projection.MemProjection Projection.Hw Projection.HwMem Compiler
 
 /-- The residual's entry body, run on symbolic `[edges, input, state]`. -/
@@ -156,4 +157,4 @@ theorem bvOfS_sound {σ : Asg} {s : SVal} {b : BV} {w : Nat} {e : BVExpr w}
   cases hb'
   exact ⟨hw, hu⟩
 
-end Projection.Sym
+end HDLProof.Sym

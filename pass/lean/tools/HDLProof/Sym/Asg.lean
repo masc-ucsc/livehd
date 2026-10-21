@@ -10,10 +10,11 @@ variables below its own index -- checked at run time by `scopedB`, a cheap
 traversal -- and the extension is then built by evaluating the definitions in
 order (`extendAsg`; proofs only, never executed).
 -/
-import LeanSemanticPrimitives.Projection.Sym.Eval
+import HDLProof.Sym.Eval
 import Lean.Data.RArray
 
-namespace Projection.Sym
+open Projection
+namespace HDLProof.Sym
 open Std.Tactic.BVDecide
 
 /-! ## Locality: an expression reads only the variables below its bound -/
@@ -185,4 +186,4 @@ theorem extendSt_consistent {xs : Array PBV} {st : SymSt} (hb : xs.size = st.bas
       · exact h
       · rw [Array.getElem?_eq_none h] at hi; cases hi)]; exact hi)
 
-end Projection.Sym
+end HDLProof.Sym

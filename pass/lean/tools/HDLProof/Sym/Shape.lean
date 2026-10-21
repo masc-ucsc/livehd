@@ -8,9 +8,10 @@ checking the next state's shape is `L` is therefore what makes "the state has
 layout `L`" an INVARIANT of every run -- checked once, at run time, with no
 lemma about `interpretDesign` needed.
 -/
-import LeanSemanticPrimitives.Projection.Sym.Trace
+import HDLProof.Sym.Trace
 
-namespace Projection.Sym
+open Projection
+namespace HDLProof.Sym
 open Std.Tactic.BVDecide Compiler
 
 /-- The widths along a list of bit vectors. -/
@@ -233,4 +234,4 @@ theorem stateShapeOf_sound {σ : Asg} {s : SVal} {st : StateM} {L : Shape}
     · cases h
   · cases h
 
-end Projection.Sym
+end HDLProof.Sym

@@ -9,9 +9,10 @@
 
 Each comes with what its value means under an assignment.
 -/
-import LeanSemanticPrimitives.Projection.Sym.Unroll
+import HDLProof.Sym.Unroll
 
-namespace Projection.Sym
+open Projection
+namespace HDLProof.Sym
 open Std.Tactic.BVDecide
 
 /-! ## The definitions -/
@@ -114,4 +115,4 @@ theorem stepConj_true {σ : Asg} :
       simp only [List.getElem_cons_zero] at h0 h1
       simp [h0, h1, this]
 
-end Projection.Sym
+end HDLProof.Sym

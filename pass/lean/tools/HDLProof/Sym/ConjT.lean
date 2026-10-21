@@ -28,10 +28,11 @@ all of them -- so a template depends on the case alone and one symbolic run
 serves every target in that case. `runConjTOf_sound_ref`. k = 1.
 Mathlib-free.
 -/
-import LeanSemanticPrimitives.Projection.Sym.Conj
+import HDLProof.Sym.Conj
 import LeanSemanticPrimitives.Projection.AxiomGate
 
-namespace Projection.Sym
+open Projection
+namespace HDLProof.Sym
 open Std.Tactic.BVDecide Projection.MemProjection Projection.Hw Projection.HwMem Compiler
 
 /-! ## Facts about registers -/
@@ -769,4 +770,4 @@ theorem runConjTOf_sound_ref {D : DesignCert} {R : Program} {sp : ConjTSpec}
   rw [← (hden n).2, ← (hden n).1]
   exact runConjTOf_sound hres hA hr hins n (fun j hj => by rw [(hden j).2]; exact hasm j hj)
 
-end Projection.Sym
+end HDLProof.Sym

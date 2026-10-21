@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# Build the shared semantic core + the Projection modules with plain `lean`
+# Build the shared semantic core, the Projection modules and the proof tools
+# (pass/lean/tools, HDLProof) with plain `lean`
 # (no lake, no Mathlib).
 #
 # The shared core -- SemanticPrimitives, Translation/LGraphModel,
@@ -118,54 +119,63 @@ MODULES=(
   # Residual serialization: a proved codec (decodeProgram_encodeProgram).
   Projection/ResidualIO
   Projection/Scaling
-  # M3: verified symbolic interpretation of a residual (Projection/Sym/*).
-  Projection/Sym/Kit
-  Projection/Sym/Bridge
-  Projection/Sym/Val
-  Projection/Sym/Prim
-  Projection/Sym/Mem
-  Projection/Sym/Dispatch
-  Projection/Sym/Wire
-  Projection/Sym/Eval
-  Projection/Sym/Asg
-  Projection/Sym/Sat
-  Projection/Sym/Layout
-  Projection/Sym/Step
-  Projection/Sym/Trace
-  Projection/Sym/Shape
-  Projection/Sym/Unroll
-  Projection/Sym/Oblig
-  Projection/Sym/KInd
-  Projection/Sym/Conj
-  Projection/Sym/ConjT
-  Projection/Sym/Refine
   # The central audit: `#audit_axioms` FAILS this build on any axiom outside
   # propext/Classical.choice/Quot.sound. The memory-route modules above audit
   # their own theorems in place with the same command.
   Projection/Audit
 )
 
+# The proof tools (HDLProof, pass/lean/tools): a second source root, compiled
+# into the same olean dir after the simulator above, which they import.
+TOOLS="$(cd ../../pass/lean/tools && pwd)"
+TOOL_MODULES=(
+  # the verified symbolic interpretation of a residual
+  HDLProof/Sym/Kit
+  HDLProof/Sym/Bridge
+  HDLProof/Sym/Val
+  HDLProof/Sym/Prim
+  HDLProof/Sym/Mem
+  HDLProof/Sym/Dispatch
+  HDLProof/Sym/Wire
+  HDLProof/Sym/Eval
+  HDLProof/Sym/Asg
+  HDLProof/Sym/Sat
+  HDLProof/Sym/Layout
+  HDLProof/Sym/Step
+  HDLProof/Sym/Trace
+  HDLProof/Sym/Shape
+  HDLProof/Sym/Unroll
+  HDLProof/Sym/Oblig
+  HDLProof/Sym/KInd
+  HDLProof/Sym/Conj
+  HDLProof/Sym/ConjT
+  HDLProof/Sym/Refine
+  # the tools' audit: fails the build on a non-standard axiom
+  HDLProof/Check/Audit
+)
+
 # A bare name on the command line means a Projection module; a path is taken
-# as given, so `./.build-proj.sh Compiler/DesignSemantics` also works.
+# as given, so `./.build-proj.sh Compiler/DesignSemantics` also works, and a
+# tools module is named by its HDLProof path (`HDLProof/Sym/ConjT`).
 if [ $# -gt 0 ]; then
-  MODULES=()
+  MODULES=(); TOOL_MODULES=()
   for a in "$@"; do
     if   [ -f "LeanSemanticPrimitives/$a.lean" ];            then MODULES+=("$a")
     elif [ -f "LeanSemanticPrimitives/Projection/$a.lean" ]; then MODULES+=("Projection/$a")
+    elif [ -f "$TOOLS/$a.lean" ];                            then TOOL_MODULES+=("$a")
     else echo "  no such module: $a" >&2; exit 2
     fi
   done
 fi
 
 rc=0
-for m in "${MODULES[@]}"; do
-  src="LeanSemanticPrimitives/$m.lean"
-  [ -f "$src" ] || continue
-  olean="$OUT/LeanSemanticPrimitives/$m.olean"
-  mkdir -p "$(dirname "$olean")"
-  printf '  %-38s ' "$m"
+# build_one <label> <root> <src> <olean>: the module name is the source path
+# relative to <root>.
+build_one() {
+  mkdir -p "$(dirname "$4")"
+  printf '  %-38s ' "$1"
   t0=$(date +%s%N)
-  if out=$(taskset -c 0-3 nice -n 19 ionice -c3 lean -o "$olean" "$src" 2>&1); then
+  if out=$(taskset -c 0-3 nice -n 19 ionice -c3 lean -R "$2" -o "$4" "$3" 2>&1); then
     t1=$(date +%s%N); printf 'ok   %5s ms\n' "$(( (t1-t0)/1000000 ))"
     [ -n "$out" ] && echo "$out" | sed 's/^/      /'
   else
@@ -173,5 +183,14 @@ for m in "${MODULES[@]}"; do
     echo "$out" | head -25 | sed 's/^/      /'
     rc=1
   fi
+}
+for m in "${MODULES[@]}"; do
+  src="LeanSemanticPrimitives/$m.lean"
+  [ -f "$src" ] || continue
+  build_one "$m" "$PWD" "$src" "$OUT/LeanSemanticPrimitives/$m.olean"
+done
+for m in "${TOOL_MODULES[@]}"; do
+  [ -f "$TOOLS/$m.lean" ] || continue
+  build_one "$m" "$TOOLS" "$TOOLS/$m.lean" "$OUT/$m.olean"
 done
 exit $rc

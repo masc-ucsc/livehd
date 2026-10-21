@@ -11,10 +11,11 @@ Each `*_rel` lemma: if the assignment holds the concrete values at the
 layout's indices and the concrete data has the layout's shape, the symbolic
 argument denotes the concrete encoding.
 -/
-import LeanSemanticPrimitives.Projection.Sym.Asg
+import HDLProof.Sym.Asg
 import LeanSemanticPrimitives.Projection.MemImage
 
-namespace Projection.Sym
+open Projection
+namespace HDLProof.Sym
 open Std.Tactic.BVDecide Compiler
 
 /-! ## Lists with a concrete spine -/
@@ -225,4 +226,4 @@ def allEdges (n : Nat) : ClockEdges := Array.replicate n true
 theorem allEdges_rel {σ : Asg} (n : Nat) :
     SRel σ (.conc (encEdges (allEdges n))) (encEdges (allEdges n)) := .conc
 
-end Projection.Sym
+end HDLProof.Sym
