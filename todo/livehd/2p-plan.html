@@ -235,6 +235,24 @@ capacity while keeping all overflow, access, setup/hold and electrical guards.
 The new <code>sat_validation.json</code> separates route, alignment-preservation
 and timing rejection. The 31-case SAT suite and both placement CLI smoke tests
 pass. These are search diagnostics, not demonstrated timing improvements.</p>
+<p>The detailed 64-candidate CNN audit confirms that all five alignments
+survive ordinary legalization/detail. Native WNS and hold WNS are unchanged,
+but TNS worsens by 2,985.031 ps and electrical excess increases by 4.252;
+the timing guard independently rejects the proposal. The next
+<a href="../../repros/route_eval_20261021/spreading/sat_postrepair_bin22/prepared.json">post-repair SAT screen</a>
+therefore starts from each selected routing candidate's repaired DEF, rather
+than its raw pre-legalization GP placement. It compares no SAT with a
+64-candidate, four-trial-per-bin search using fresh current-topology STA and
+RSMT128 maps. Macro/IO geometry, masters and connectivity remain fixed;
+ordinary legalization/detail is common to both arms and all native timing
+guards remain enforced. The selected Coral source remains the explicitly
+qualified second accepted checkpoint from its bounded engine run.</p>
+<p>The synchronized-source CNN weight-zero GP arm finishes in 1,543.505 s
+and reproduces the prior arm's final native WNS/TNS exactly:
+−2,064.033691/−471,997.332825 ps. Its weight-one arm and the Eyeriss/Coral
+pairs remain in progress. A
+<a href="../../repros/route_eval_20261021/resumed_sat_report.html">live experiment report</a>
+keeps native screening values separate from extracted routed results.</p>
 <p>A stronger OpenROAD cell-placement comparison is also running on each
 selected native candidate's exact mapped preCTS netlist and fixed macro/IO/PG
 frame. It enables timing-driven and routability-driven GP, retains resizing
