@@ -96,7 +96,15 @@ trap 'rm -f "$tmp"' EXIT
 n=0
 for f0 in $srcs; do
   f="$(subst_of "$f0")"
-  [[ "$f" != "$f0" ]] && patched_note+="// patched: $(basename "$f0") <- generated/core-et/patched_src/ (decl-before-use reorder)"$'\n'
+  # Quote the derived file's OWN `// change:` line rather than a fixed string.
+    # coreet_patch_srcs.py applies more than one kind of patch -- a declaration
+    # reorder, an untyped ANSI output, a pure DPI import -- so a hardcoded note
+    # mislabels every file it did not describe. That is exactly the silent claim
+    # this header exists to prevent.
+    if [[ "$f" != "$f0" ]]; then
+      chg="$(sed -n 's|^// change: ||p' "$f" | head -1)"
+      patched_note+="// patched: $(basename "$f0") <- generated/core-et/patched_src/ (${chg:-derived})"$'\n'
+    fi
   [[ -r "$f" ]] || { echo "FATAL: $MODULE filelist names a missing file: $f" >&2; exit 2; }
   grep -qxF "$f" "$tmp" 2>/dev/null && continue
   printf '%s\n' "$f" >> "$tmp"

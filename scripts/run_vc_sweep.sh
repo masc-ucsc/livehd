@@ -73,11 +73,19 @@ emit_one() {
   else
     # Name the stage, not just the exit code.
     local stage=unknown
+    # SPECIFIC stage markers first, the generic one LAST. `"status":"fail"` is
+    # written by every stage's result JSON, so testing it in the same branch as
+    # `compile exit=` filed every later refusal under `compile` -- measured as
+    # all 22 single_edge refusals reported NO_EMIT(compile) in a CORE-ET sweep.
+    # Matching a bare `single_edge` is wrong in the other direction: the word
+    # appears in the log of a run that got past it, so each stage is matched by
+    # its own exit line or its own diagnostic.
     if   [[ "$rc" -eq 124 ]]; then stage=timeout
-    elif grep -q 'no \.sv\|missing RTL\|filelist' "$log" 2>/dev/null; then stage=filelist
-    elif grep -q 'compile exit=[1-9]\|"status":"fail"' "$log" 2>/dev/null;  then stage=compile
-    elif grep -q 'single_edge' "$log" 2>/dev/null;                          then stage=single_edge
-    elif grep -q 'pass.lean' "$log" 2>/dev/null;                            then stage=pass_lean
+    elif grep -q 'no \.sv\|missing RTL\|filelist' "$log" 2>/dev/null;                 then stage=filelist
+    elif grep -q 'compile exit=[1-9]' "$log" 2>/dev/null;                               then stage=compile
+    elif grep -q 'single_edge exit=[1-9]\|pass.single_edge refused' "$log" 2>/dev/null; then stage=single_edge
+    elif grep -q 'lean emit exit=[1-9]\|\[ERROR\] pass.lean' "$log" 2>/dev/null;        then stage=pass_lean
+    elif grep -q '"status":"fail"' "$log" 2>/dev/null;                                  then stage=compile
     fi
     printf '%s\tNO_EMIT(%s)\t\t\t\t\n' "$m" "$stage"
   fi
