@@ -24,90 +24,10 @@ given the specializer runs (the D1 trusted native run of every FP route).
 import HDLProof.Sym.Refine
 import LeanSemanticPrimitives.Projection.CertLoadAny
 import Lean.Data.Json
+import HDLProof.Kit.Driver
 
-open Compiler Projection HDLProof HDLProof.Sym Projection.MemProjection Projection.HwMem
+open Compiler Projection HDLProof HDLProof.Sym HDLProof.Driver Projection.MemProjection Projection.HwMem
 open Std.Tactic.BVDecide
-
-def say (s : String) : IO Unit := do
-  IO.println s
-  -- a log file is block-buffered: flush so a long run shows its progress
-  (← IO.getStdout).flush
-
-/-- The declared width of input ordinal `i` (from its `SourceDesc.input`), or 1. -/
-def inputWidthOf (D : DesignCert) (i : Nat) : Nat :=
-  (D.sources.toList.findSome? fun
-    | .input idx w => if idx == i then some w else none
-    | _ => none).getD 1
-
-/-- `inputWidthOf D i` for every `i < n`, in ONE pass over the sources (the
-first source declaring an input wins, as in `findSome?`; 1 when none does).
-Mapping `inputWidthOf` over the inputs walked every source once per input. -/
-def inputWidths (D : DesignCert) (n : Nat) : List Nat :=
-  let t := D.sources.foldl (fun (t : Array (Option Nat)) s => match s with
-    | .input idx w => if h : idx < t.size then (if t[idx].isNone then t.set idx (some w) else t) else t
-    | _ => t) (Array.replicate n none)
-  (List.range n).map fun i => (t[i]?.bind id).getD 1
-
-def inputCount (D : DesignCert) : Nat :=
-  D.sources.foldl (fun m s => match s with
-    | .input idx _ => max m (idx + 1)
-    | .flopQAsync _ _ ri _ _ => max m (ri + 1)
-    | _ => m) 0
-
-def shapeOf (D : DesignCert) : Shape :=
-  ⟨D.flops.toList.map (·.width), D.memories.toList.map fun md => (md.aw, md.dw)⟩
-
-def zeroState (D : DesignCert) : StateM :=
-  { flops := D.flops.map (fun f => mk_bv f.width 0)
-  , mems  := D.memories.map (fun md =>
-      { words := List.replicate (2 ^ md.aw) (mk_bv md.dw 0), dflt := mk_bv md.dw 0 }) }
-
-/-- A port by ordinal, or by name through the io.json beside the certificate. -/
-def resolvePort (cert : String) (kind : String) (tok : String) : IO (Option Nat) := do
-  if let some n := tok.toNat? then return some n
-  let dir := (System.FilePath.mk cert).parent.getD "."
-  let stem := (System.FilePath.mk cert).fileStem.getD ""
-  let io := dir / s!"{stem}_io.json"
-  unless ← io.pathExists do return none
-  match Lean.Json.parse (← IO.FS.readFile io) with
-  | .error _ => return none
-  | .ok j =>
-    match j.getObjValD kind |>.getArr? with
-    | .error _ => return none
-    | .ok outs =>
-      for o in outs do
-        if (o.getObjValD "name").getStr?.toOption == some tok then
-          if let .ok n := (o.getObjValD "ordinal").getNat? then return some n
-      return none
-
-inductive SatAnswer | unsat (proof : ByteArray) | sat (model : String) | failed (why : String)
-
-/-- Write `φ`'s CNF, run the solver, return its LRAT proof bytes. -/
-def solve (solver : String) (work : System.FilePath) (tag : String) (φ : BVLogicalExpr) :
-    IO (SatAnswer × Nat × Nat × Nat) := do
-  let t0 ← IO.monoMsNow
-  let cnfPath := work / s!"{tag}.cnf"
-  let lratPath := work / s!"{tag}.lrat"
-  -- forced HERE (a plain `let` is floated into its use, which put the
-  -- bit-blast in the solver's time): bit-blast + CNF + DIMACS + write
-  let (dimacs, nClauses) ← IO.lazyPure fun _ =>
-    let cnf := cnfOf φ
-    (Std.Sat.CNF.dimacs cnf, cnf.clauses.size)
-  IO.FS.writeFile cnfPath dimacs
-  let t1 ← IO.monoMsNow
-  let out ← IO.Process.output
-    { cmd := solver, args := #[cnfPath.toString, lratPath.toString, "--lrat", "--binary=true",
-                               "--quiet", "--shrink=0", "--unsat"] }
-  let t2 ← IO.monoMsNow
-  if out.stdout.startsWith "s UNSATISFIABLE" then
-    return (.unsat (← IO.FS.readBinFile lratPath), t1 - t0, t2 - t1, nClauses)
-  else if out.stdout.startsWith "s SATISFIABLE" then
-    return (.sat out.stdout, t1 - t0, t2 - t1, nClauses)
-  else
-    return (.failed s!"solver exit {out.exitCode}: {out.stdout.take 200}{out.stderr.take 200}",
-            t1 - t0, t2 - t1, nClauses)
-
-
 
 /-! ## Counterexample replay
 
@@ -115,27 +35,6 @@ The BASE obligation's variables `j * nIn + t` are cycle `j`'s implementation
 input `t` (the layout `refBaseRun` builds). A model is decoded into the input
 sequence and REPLAYED on both residual simulators: the implementation every
 cycle, the specification only on witnessed cycles (as `stutM`). -/
-
-/-- cadical's `v` lines: DIMACS variable → value. -/
-def parseModel (stdout : String) : Std.HashMap Nat Bool := Id.run do
-  let mut m : Std.HashMap Nat Bool := {}
-  for line in stdout.splitOn "\n" do
-    if line.startsWith "v " then
-      for tok in (line.drop 2).toString.splitOn " " do
-        if let some z := tok.toInt? then
-          if z ≠ 0 then m := m.insert z.natAbs (0 < z)
-  return m
-
-def modelValue (map : Std.HashMap BVBit Nat) (aigSize : Nat) (model : Std.HashMap Nat Bool)
-    (var w : Nat) : Nat := Id.run do
-  let mut v := 0
-  for b in List.range w do
-    if h : b < w then
-      let bit : BVBit := { var, w, idx := ⟨b, h⟩ }
-      match map[bit]? with
-      | some c => if model.getD (c + aigSize + 1) false then v := v ||| (1 <<< b)
-      | none   => pure ()
-  return v
 
 def decodeInputs (φ : BVLogicalExpr) (model : Std.HashMap Nat Bool) (inW : List Nat) (k : Nat) :
     Array RuntimeInput := Id.run do
@@ -299,7 +198,7 @@ def main (args : List String) : IO UInt32 := do
             say s!"  {pre}RESULT: REFUSED (step obligation: {why})"; return 4
       let t3 ← IO.monoMsNow
       say s!"  {pre}obligations built in {t3 - t2} ms (symbolic evaluation of {kd} + {kd + 1} paired steps)"
-      let (aB, bbB, satB, ncB) ← solve solver work s!"rbase_k{kd}" φB
+      let (aB, bbB, satB, ncB) ← solve solver work s!"rbase_k{kd}" φB #["--unsat"]
       say s!"  {pre}base: {ncB} clauses; bit-blast+CNF+write {bbB} ms, solver {satB} ms"
       let pfB ← match aB with
         | .unsat p => pure p
@@ -323,7 +222,7 @@ def main (args : List String) : IO UInt32 := do
                 say s!"  {pre}RESULT: COUNTEREXAMPLE NOT REPLAYED (base): the solver's model did not reproduce on the simulators"
                 return 7
         | .failed w => do say s!"  {pre}RESULT: SOLVER FAILED (base): {w}"; return 5
-      let (aS, bbS, satS, ncS) ← solve solver work s!"rstep_k{kd}" φS
+      let (aS, bbS, satS, ncS) ← solve solver work s!"rstep_k{kd}" φS #["--unsat"]
       say s!"  {pre}step: {ncS} clauses; bit-blast+CNF+write {bbS} ms, solver {satS} ms"
       let pfS ← match aS with
         | .unsat p => pure p

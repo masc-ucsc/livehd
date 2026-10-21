@@ -666,7 +666,7 @@ cd <livehd>
 CVA6_TOP=tc_sram LEAN_EMIT_CERT=true scripts/run_cva6_module_lean_stress.sh
 ```
 
-## Unbounded proofs on the projection simulator (`sym_verify`, `sym_refine`)
+## Unbounded proofs on the projection simulator (`sym_verify`, `sym_refine`, `sym_refmap`)
 
 A design's unbounded properties (invariants, refinement with stuttering) are checked on
 the residual of the Futamura projection, the same artifact the FP simulator runs. The
@@ -698,7 +698,7 @@ The pipeline of one run:
 cd formal/lean
 ROOT=$PWD/../../generated/sym/nat_root
 OPT=-O2 ROOT=$ROOT bash scripts/build-opt.sh ../../pass/lean/tools/drivers/sym_verify.lean \
-    ../../pass/lean/tools/drivers/sym_refine.lean
+    ../../pass/lean/tools/drivers/sym_refine.lean ../../pass/lean/tools/drivers/sym_refmap.lean
 # the solver: cadical ships with the Lean toolchain; link it next to the drivers
 # (or pass solver:<path>)
 ln -s "$(dirname "$(elan which lean)")/cadical" $ROOT/nat/cadical   # still in formal/lean
@@ -709,6 +709,7 @@ pair of registers, two cores with a case split):
 
 ```bash
 SYM_NAT=<root>/nat LHD=<lhd> bash pass/lean/tools/tests/sym_selftest.sh
+SYM_NAT=<root>/nat LHD=<lhd> bash pass/lean/tools/tests/refmap_selftest.sh   # refinement maps
 ```
 
 ### Export a design
@@ -809,3 +810,19 @@ sym_refine impl.dcert spec.dcert pair:<implOut>=<specOut> [adv:[!]<implOut>] \
 - **Output correspondence.** Every `pair:` must agree on every witnessed cycle.
 - **`stateq`.** Also requires equal next states, which an identity refinement needs.
 - **Counterexamples.** They are decoded and replayed on both simulators.
+
+### Refinement maps (`sym_refmap`)
+
+```bash
+sym_refmap specfacts spec.refmap [emit:[f1:|f2:]<file>]
+sym_refmap refmap impl.refmap jobs:12 [emit:[f1:|f2:]<file>]
+```
+
+- **What is proved.** The implementation refines a spec certificate with stuttering. At every
+  cycle the spec's state is a map of the implementation's outputs, and each cycle's events
+  (slots, over real ports) are spec steps on their channels. Ranked channels also get the
+  progress obligations.
+- **Spec facts.** Moore, and confluence of every pair of channels. They are checked once per
+  spec and give equal streams for every two implementations of that spec.
+- **Format.** The `.refmap` format, the targets, the results and the theorem files are in
+  `pass/lean/tools/formats/refmap.md`. Counterexamples go to `<work>/cti_<target>.txt`.

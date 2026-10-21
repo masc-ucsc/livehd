@@ -4,7 +4,7 @@
 # binaries of in-flight experiments -- is touched.
 #
 #   OPT=-O2 ROOT=/abs/path bash scripts/build-opt.sh scripts/total_probe.lean [more.lean ...]
-#   (the proof-tool drivers: ../../pass/lean/tools/drivers/sym_verify.lean sym_refine.lean)
+#   (the proof-tool drivers: ../../pass/lean/tools/drivers/sym_verify.lean sym_refine.lean sym_refmap.lean)
 # OPT may carry several flags, e.g. OPT="-O2 -g -fno-omit-frame-pointer"
 # for a profiling build that keeps -O2 but can be unwound.
 set -uo pipefail
@@ -13,7 +13,7 @@ OPT=${OPT:--O2}
 ROOT=${ROOT:?set ROOT to an absolute, project-local build directory}
 OUT="$ROOT/olean"; NAT="$ROOT/nat"
 mkdir -p "$OUT/LeanSemanticPrimitives/Projection/Proto" \
-         "$OUT/HDLProof/Sym" \
+         "$OUT/HDLProof/Sym" "$OUT/HDLProof/Theory" "$OUT/HDLProof/Kit" "$OUT/HDLProof/Check" \
          "$OUT/LeanSemanticPrimitives/Compiler" \
          "$OUT/LeanSemanticPrimitives/Translation" "$NAT"
 export LEAN_PATH="$OUT"
@@ -72,6 +72,12 @@ TOOL_MODULES=(
   HDLProof/Sym/Sat HDLProof/Sym/Layout HDLProof/Sym/Step HDLProof/Sym/Trace
   HDLProof/Sym/Shape HDLProof/Sym/Unroll HDLProof/Sym/Oblig HDLProof/Sym/KInd HDLProof/Sym/Conj HDLProof/Sym/ConjT
   HDLProof/Sym/Refine
+  # refinement maps (sym_refmap): theory, kit, checker, spec facts, composition
+  HDLProof/Theory/Channels HDLProof/Theory/Stutter HDLProof/Theory/Compose HDLProof/Theory/Progress
+  HDLProof/Kit/Norm HDLProof/Kit/BitE HDLProof/Check/RefMap HDLProof/Check/RefMapSound
+  HDLProof/Check/SpecFacts HDLProof/Check/RefMapCompose
+  # the drivers' shared IO helpers
+  HDLProof/Kit/Driver
 )
 OBJS=()
 for m in "${MODULES[@]}"; do

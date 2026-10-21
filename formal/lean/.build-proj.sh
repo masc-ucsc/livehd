@@ -164,6 +164,8 @@ TOOL_MODULES=(
   HDLProof/Check/SpecFacts
   HDLProof/Check/RefMapCompose
   HDLProof/Check/RefMapRef
+  # the drivers' shared IO helpers (untrusted: no theorems)
+  HDLProof/Kit/Driver
   # the tools' audit: fails the build on a non-standard axiom
   HDLProof/Check/Audit
 )
