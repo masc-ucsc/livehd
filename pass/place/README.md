@@ -925,8 +925,10 @@ optimizer checkpoints and cross-process optimizer-state reuse remain follow-ups.
 
 The host pins DREAMPlace's shipped BUILD files and uses a plain LEMON archive
 with the registry compatibility patches, avoiding root-only Bzlmod overrides.
-The zero-area-terminal patch fixes the upstream row-overlap checker for IO
-points on core edges. Both independent and upstream checks remain enabled.
+The pinned DREAMPlace source includes the row-overlap fix for zero-area IO
+points on core edges and the native legalization hooks. Both independent and
+upstream checks remain enabled. Fixes to DREAMPlace belong in `../DREAMPlace`,
+with LiveHD consuming a published commit rather than a local dependency patch.
 FLUTE's lookup tables are runfiles of the standalone binary and test targets.
 
 ### Opt-in repulsion and routability experiments

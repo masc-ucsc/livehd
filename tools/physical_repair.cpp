@@ -337,9 +337,7 @@ int main(int argc, char** argv) {
     if (config.HasMember("timing_max_weight")) {
       options.timing_max_weight = config["timing_max_weight"].GetDouble();
     }
-    if (config.HasMember("satlegalize")) {
-      options.satlegalize = config["satlegalize"].GetBool();
-    }
+    boolean_option("satlegalize", options.satlegalize);
     if (config.HasMember("satlegalize_backend")) {
       options.satlegalize_options.backend = text("satlegalize_backend");
     }
@@ -394,22 +392,12 @@ int main(int argc, char** argv) {
     number_option("satlegalize_spill_slack_margin_ps", sat_options.spill_slack_margin_ps);
     sat_limit("satlegalize_conflicts", sat_options.conflicts);
     sat_limit("satlegalize_milliseconds", sat_options.milliseconds);
-    if (config.HasMember("satlegalize_skip_conflicts")) {
-      sat_options.skip_conflicts = config["satlegalize_skip_conflicts"].GetBool();
-    }
-    if (config.HasMember("satlegalize_boundary_growth")) {
-      sat_options.boundary_growth = config["satlegalize_boundary_growth"].GetDouble();
-    }
+    boolean_option("satlegalize_skip_conflicts", sat_options.skip_conflicts);
+    number_option("satlegalize_boundary_growth", sat_options.boundary_growth);
     number_option("eco_connectivity_weight", options.eco_connectivity_weight);
-    if (config.HasMember("legalize_timing_corrections")) {
-      options.legalize_timing_corrections = config["legalize_timing_corrections"].GetUint();
-    }
-    if (config.HasMember("legalize_timing_strength")) {
-      options.legalize_timing_strength = config["legalize_timing_strength"].GetDouble();
-    }
-    if (config.HasMember("legalize_timing_threshold")) {
-      options.legalize_timing_threshold = config["legalize_timing_threshold"].GetDouble();
-    }
+    sat_limit("legalize_timing_corrections", options.legalize_timing_corrections);
+    number_option("legalize_timing_strength", options.legalize_timing_strength);
+    number_option("legalize_timing_threshold", options.legalize_timing_threshold);
     if (config.HasMember("timing_exponent")) {
       options.timing_exponent = config["timing_exponent"].GetDouble();
     }

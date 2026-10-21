@@ -126,6 +126,9 @@ Repair_result timing_place(Result initial, const Options& requested, const Evalu
   unsigned                      accepted  = 0;
   const auto                    directory = options.output_dir + "/timing_place";
   std::filesystem::create_directories(directory);
+  // An accepted round already refreshed toward the new best; smoothing again
+  // at the next round start would apply the step twice.
+  bool refreshed = false;
   for (unsigned round = 0; round < rounds; ++round) {
     auto target = timing_weights(*result.placed.parasitics,
                                  best,
@@ -135,7 +138,10 @@ Repair_result timing_place(Result initial, const Options& requested, const Evalu
     if (target.empty()) {
       break;
     }
-    refresh_timing_weights(result.placed, options, best);
+    if (!refreshed) {
+      refresh_timing_weights(result.placed, options, best);
+    }
+    refreshed  = false;
     weights    = result.placed.net_weights;
     auto trial = options;
     trial.cache_dir.clear();
@@ -176,6 +182,7 @@ Repair_result timing_place(Result initial, const Options& requested, const Evalu
         result.libraries.push_back(std::move(owner));
         best = score;
         refresh_timing_weights(result.placed, options, best);
+        refreshed = true;
         ++accepted;
       }
     } catch (const std::exception& error) {

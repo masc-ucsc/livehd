@@ -291,8 +291,9 @@ livehd::placement::Options placement_options(const Options& opts) {
                     "expected cadical|cms-cnf|cms-xor and candidate|binary"};
   }
   const auto sat_limit = [&](const char* key, const char* fallback, int maximum, bool zero = false) {
-    const int value = integer(key, fallback);
-    if (value < (zero ? 0 : 1) || value > maximum) {
+    // Not integer(): its 1e6 cap would hide the larger conflicts budget.
+    const double value = number(key, fallback);
+    if (value < (zero ? 0 : 1) || value > maximum || std::floor(value) != value) {
       throw Lhd_error{"usage", std::string("invalid synth.") + key, "SAT budget out of range"};
     }
     return static_cast<unsigned>(value);

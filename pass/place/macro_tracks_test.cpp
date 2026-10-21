@@ -88,7 +88,10 @@ TEST(Placement, MacroTrackAlignmentRespectsFixedGeometryAndReportsConflicts) {
   EXPECT_EQ(cells.front(), bad);
   cells                                  = {track_macro()};
   tech.macros.at("ram").pins["conflict"] = {"INPUT", "SIGNAL", {{"V", {3, 0, 5, 4}}}};
-  EXPECT_THROW(legalize_macro_tracks(tech, fp, cells, 0, 0, true), std::runtime_error);
+  // No phase serves all three V pins: keep the phase serving A and B.
+  EXPECT_NO_THROW(legalize_macro_tracks(tech, fp, cells, 0, 0, true));
+  EXPECT_EQ((cells.front().place.x + 2 - 3) % 4, 0);
+  cells = {track_macro()};
   tech.macros.at("ram").pins["conflict"].shapes.push_back({
       "H",
       {0, 2, 6, 4}

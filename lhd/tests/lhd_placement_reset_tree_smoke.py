@@ -109,15 +109,16 @@ def run_dual(name, extra):
 
 
 def tie_fanout(name):
+    # Constant drivers are split per physical load, so count every tied pin.
     text = (root / f'{name}_def' / 'out.def').read_text()
     nets = re.search(r'^NETS \d+ ;(.*?)^END NETS', text, re.S | re.M).group(1)
-    return max((sum(1 for inst, pin in re.findall(r'\(\s*(\S+)\s+(\S+)\s*\)', net) if inst != 'PIN' and pin in ('SET_B', 'RESET_B'))
-                for net in nets.split(';') if '__place_tie' in net), default=0)
+    return sum(sum(1 for inst, pin in re.findall(r'\(\s*(\S+)\s+(\S+)\s*\)', net) if inst != 'PIN' and pin in ('SET_B', 'RESET_B'))
+               for net in nets.split(';') if '__place_tie' in net)
 
 
 plain = run_dual('dual_off', ['--set', 'synth.place.timing_driven=true'])
 tied = tie_fanout('dual_off')
-assert tied >= 48, tied  # 24 + 24 inactive pins on the one tie net
+assert tied >= 48, tied  # 24 + 24 inactive pins, each on a local tie
 treed = run_dual('dual_tree', ['--set', 'synth.place.timing_driven=true', '--set', 'synth.place.reset_fanout=8'])
 assert tie_fanout('dual_tree') == tied, (tie_fanout('dual_tree'), tied)
 assert treed['qor']['place']['reset_tree']['buffers'] > 0 and reset_loads('dual_tree', ('RESET_B', 'SET_B'))[0] <= 8

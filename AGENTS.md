@@ -43,6 +43,14 @@ LiveHD depends on several sibling repos. **Always look in these exact paths — 
 - `../hlop/` — HLOP library (dlop / slop helpers).
 - `../iassert/` — iassert library (`I(...)`, `GI(...)` invariant macros).
 - `../tree-sitter-pyrope/` — Tree-sitter grammar for Pyrope. The grammar lives at `../tree-sitter-pyrope/grammar.js`; generated parser sources are under `../tree-sitter-pyrope/src/`.
+- `../DREAMPlace/` — Native placement and routability. Sources: `dreamplace/native/`.
+- `../OpenTimer/` — Static timing engine. Sources: `ot/`.
+
+Do not carry local dependency patches for repositories we own, including
+DREAMPlace, OpenTimer, HHDS, HLOP, tree-sitter-pyrope and LiveHD. Make fixes in
+the owning sibling repository and consume its published commit in
+`MODULE.bazel`. During co-development, use the sibling checkout through a
+local repository override; do not edit Bazel's fetched external copies.
 
 **Rule:** if you need anything from one of these libraries (e.g. `grammar.js`, `tree.hpp`, `graph.hpp`, `attr.hpp`), open it directly at the path above. Do **not** start a `find / ...`, `find . ...`, or recursive `grep` to locate them — they are always at these fixed sibling paths. The bazel build fetches them as git-pinned plain repos (`use_repo_rule git_repository` in `MODULE.bazel`, NOT `bazel_dep` + `git_override`, so livehd stays self-contained when consumed as a bazel dependency); each has a commented `local_repository` swap for co-development against the sibling checkout. Running a broad `find` is wasteful and frequently the wrong tool; go straight to the known path.
 

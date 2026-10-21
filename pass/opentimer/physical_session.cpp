@@ -413,6 +413,7 @@ struct Physical_session::Impl : Pass_opentimer {
       log.push_back({Kind::pin, pin, old, {}});
     }
     void set_net(const livehd::physical::Rc_net& net) override {
+      livehd::physical::validate_rc_tree(net);  // reject before any what-if state changes
       require_state();
       index_base();
       auto name = net_of_driver(net.driver);

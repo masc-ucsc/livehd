@@ -140,11 +140,13 @@ region_report = sat_regions['qor']['place']['satlegalize']['fixed_regions']
 assert region_report['width_um'] == region_report['height_um'] == 40, region_report
 assert region_report['spill_neighbors'] and not region_report['region_backoff'], region_report
 assert region_report['spill_slack_margin_ps'] == 20, region_report
-sat_regions_warm = run('sat_fixed_regions_warm', sat_region_options)
-assert sat_regions_warm['qor']['place']['reused_final_state'], sat_regions_warm
-sat_regions_changed = run('sat_fixed_regions_changed', [v.replace('region_size=40,40', 'region_size=40,20')
-                                                       for v in sat_region_options])
-assert not sat_regions_changed['qor']['place'].get('reused_final_state', False), sat_regions_changed
+# Final-state replay needs the physical cache, which only the abc mapper enables.
+if os.environ.get('MAPPER', 'abc') == 'abc':
+    sat_regions_warm = run('sat_fixed_regions_warm', sat_region_options)
+    assert sat_regions_warm['qor']['place']['reused_final_state'], sat_regions_warm
+    sat_regions_changed = run('sat_fixed_regions_changed', [v.replace('region_size=40,40', 'region_size=40,20')
+                                                           for v in sat_region_options])
+    assert not sat_regions_changed['qor']['place'].get('reused_final_state', False), sat_regions_changed
 # The shared RSMT map is exported even for the no-SAT matched control.
 route_grid_options = ['--set', 'synth.place=true', '--set', 'synth.place.timing_driven=true',
                       '--set', 'synth.place.route.model=rsmt',

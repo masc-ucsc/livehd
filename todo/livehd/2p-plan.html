@@ -24,7 +24,10 @@ The pull fast-forwarded <code>e4defb13f</code> to <code>0a01540ee</code>;
 The frozen bin18 experiment uses DREAMPlace <code>946259b6</code> and HHDS
 <code>8121500a</code>. The subsequent source checkpoint also integrates upstream
 <code>e05ab85ef</code> and DREAMPlace <code>53e97f2b</code>, including opt-in timing
-spreading protection. The local legalization extension applies to that new pin.
+spreading protection. Dependency synchronization now uses DREAMPlace
+<code>64b2cd3</code>, HHDS <code>c5b23e8</code> and OpenTimer
+<code>e8883ed</code>. The native legalization and pin-padding fixes live in their
+owning repositories; LiveHD carries no local patches for owned dependencies.
 Existing experiment binaries and configurations remain frozen.</p>
 <p>The resolved grid counts <em>bins</em>, not tracks. The default LiveHD grid is
 64 × 64; the requested experiment explicitly selects 128 × 128. Bins partition
@@ -131,6 +134,15 @@ cell halo 2, original macro halos 12/5/6 µm, original spreading/repair policies
 benefit of the first map-guided implementation. Verify identical macro and
 floating pre-SAT frames, weights and maps; failed identity checks invalidate
 causal comparisons. Record bounded-run convergence honestly.</td></tr>
+<tr><td>1b — timing-aware spreading</td><td>On the checkpoint binary that
+includes <code>synth.place.timing_spread_weight</code>, screen explicit weights
+0 and 1 with SAT disabled and RSMT128 unchanged. Run CNN, Eyeriss and Coral
+concurrently with the same starting inputs and other controls. If full
+protection leaves excessive density or regresses timing, test 0.5. For a
+promising setting, add matched SAT-enabled legs at that setting and at zero.</td>
+<td>Separate changes caused by GP spreading from the additional benefit of SAT.
+Use the same corrected binary for every control; frozen bin18 predates this
+option and is historical context only. Default stays zero.</td></tr>
 <tr><td>2 — separate guidance from geometry</td><td>Same grid and expanded
 candidate menu with cell-density ordering versus routing-map ordering.
 Optional 64/128/256-bin diagnostic comparisons retain identical geometry,
@@ -162,6 +174,37 @@ Outside the worst 20% does not automatically mean safe to spill: the first mode
 retains the positive-slack margin. Any relative-slack relaxation is a separate
 experiment with explicit full timing acceptance. Existing pairwise CORE alignment
 and macro-pin access optimization remain separately measured capabilities.</p>
+<h3 id="timing-spread-experiment">Timing-spread interaction with bins</h3>
+<p>The upstream option is included in checkpoint <code>af1de573b</code> and
+validated by the native placement and CLI timing-control tests. For a movable
+standard cell with maximum incident active net weight <code>w &gt;= 1</code>,
+its extra-spreading mobility is <code>m = 1 - a + a/w</code>, where
+<code>a = synth.place.timing_spread_weight</code>. At <code>a=1</code>,
+weight-five cells receive 20% of the extra response while weight-one cells
+retain 100%. Full RSMT inflation charge remains in the density field; the
+receiver's extra-inflation response and optional local-density pressure are
+attenuated. Ordinary physical-density response remains, and pure virtual-filler
+pressure without inflation is not attenuated. This protects critical cells
+relative to their neighbors; it does not explicitly choose a destination bin.</p>
+<p>The study is a staged 2 × 2 comparison: weight 0/1, then SAT off/on only
+where the GP screen warrants it. Keep bin counts, cell/macro halos, fillers,
+local-density settings, timing-weight policy and solve budgets fixed. A changed
+spreading weight can change the full GP trajectory and indirectly the macro/IO
+frame. Require exact pre-SAT state and map identity within each fixed-weight
+SAT pair, not across different spreading weights. Recompute and bind each
+run's own map; never reuse the zero-weight map for a nonzero-weight placement.
+The current frozen runs remain unchanged.</p>
+<p>Check the effective option in each stage's <code>gp_history.json</code> and
+record <code>timing_spread_cells</code> and
+<code>timing_spread_min_mobility</code>; an enabled setting may still be inert
+when all active weights are one. Measure movement by a common initial timing
+cohort, bin occupancy/overflow, candidate failures, accepted/retained SAT
+alignments and spill transfers, followed by final setup/hold and routed quality.
+Preserve the exact timing-weighted maps used by SAT; use common weights for any
+separate geometric-congestion comparison across spreading settings. Setup-based
+mobility is not proof that a cell is safe to spill: retain the independent
+positive-slack, clock protection, recipient density/capacity and whole-proposal
+timing checks. No production default changes are part of this experiment.</p>
 <h3>Measurements and routing admission</h3>
 <p>Report construction/encoding/solve time separately, memory, actual cells per
 region, missing candidates, base-packing versus alignment UNSAT, unknown/timeouts,
@@ -289,8 +332,8 @@ Coral also completed with passing controls: area and electrical violations impro
 <h2>Implementation and evaluation — 2026-10-21</h2>
 <p>Subtasks A–F have implementation and repository-owned regression coverage.
 Existing option defaults are preserved. Timing-aware displacement protection and
-<code>satlegalize</code> remain opt-in. The portable native changes are carried in
-<code>packages/dreamplace-timing-legalize.patch</code> against the pinned source.
+<code>satlegalize</code> remain opt-in. The portable native changes are maintained
+in the DREAMPlace repository and consumed through its published commit pin.
 Fourteen repository targets pass with full <code>lhd</code> and diagnostic links;
 the incremental solver bridge also passed full-driver source/prebuilt cvc5 linkage
 and solver/cvc5/ABC coexistence checks.</p>
@@ -669,13 +712,22 @@ inspection tool; the fixes belong in LiveHD's placement implementation.</p>
 </ul>
 
 <h2>Delivery status</h2>
-<p><strong>Checkpoint validation:</strong> 23 integration targets pass, including
+<p><strong>Dependency synchronization:</strong> DREAMPlace <code>64b2cd3</code>,
+OpenTimer <code>e8883ed</code> and HHDS <code>c5b23e8</code> are published and
+pinned in LiveHD. The DREAMPlace legalization and HHDS padding patches have
+been removed from LiveHD. All 62 integration test targets pass with these
+published pins and no local repository overrides; DREAMPlace also passes its
+21 standalone native targets and HHDS passes seven focused graph/persistence
+checks. The reviewed host fixes preserve existing option defaults. This is
+build and integration validation; ongoing benchmark results retain their
+original frozen binaries and provenance.</p>
+<p><strong>Earlier checkpoint validation:</strong> 23 integration targets pass, including
 28 SAT regressions, native placement/RSMT tests, cache and LEC checks, CLI
 placement/routing smoke tests, and the new timing-spread-control smoke.
 The handoff smoke verifies exact IO geometry and restoration of original
 placement constraints. C++ formatting, whitespace and compiler-warning
 contract checks pass.</p>
-<p>This checkpoint preserves the reviewed native placement/repair fixes,
+<p>That checkpoint preserves the reviewed native placement/repair fixes,
 track-aware macro access, current-driver timing weights, constant/tie handling,
 separate cell clearance, opt-in SAT legalization, and the exact RSMT-map handoff.
 It integrates upstream <code>e05ab85ef</code> with DREAMPlace

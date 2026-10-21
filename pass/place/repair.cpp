@@ -1573,7 +1573,7 @@ Floorplan_resize repair_floorplan(Result& state, const Options& options, const T
   w.Uint(result.repair_accepted);
   w.EndObject();
   result.report = trace.GetString();
-  refresh_timing_weights(state, options, result.timing);
+  // The FP caller refreshes the checkpoint weights from result.timing.
   return result;
 }
 Repair_result repair_buffers(Result initial, const Options& requested, const Evaluate& evaluate, Repair_scope scope,
@@ -1797,7 +1797,7 @@ Repair_result repair_buffers(Result initial, const Options& requested, const Eva
               result.libraries.clear();
               result.libraries.push_back(std::move(owner));
               score = std::move(next);
-              refresh_timing_weights(result.placed, options, score);
+              refresh_repair_weights(result.placed, options, score);
               ++accepted;
             }
           }
@@ -1947,10 +1947,12 @@ Repair_result repair_buffers(Result initial, const Options& requested, const Eva
           result.libraries.clear();
           result.libraries.push_back(std::move(library));
           score = next;
-          refresh_timing_weights(result.placed, options, score);
+          refresh_repair_weights(result.placed, options, score);
           ++accepted;
           recovery_accepted += physical_recovery;
-          tried.clear();
+          if (physical_recovery) {
+            tried.clear();  // the aggregate-only fallback never retries a rejected edit
+          }
           progress = true;
         }
       } catch (const std::exception& error) {

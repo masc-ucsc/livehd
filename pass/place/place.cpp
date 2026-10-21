@@ -4009,11 +4009,13 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
       }
       const auto original = drivers.front();
       int        width    = std::max(1, gu::bits_of(original));
+      bool       scalar   = false;
       if (!memory) {
         const auto  name  = pin_name(sink);
         const auto& macro = tech.macros.at(c.macro);
         if (macro.pins.contains(name)) {
-          width = 1;
+          width  = 1;
+          scalar = true;
         } else {
           width = 0;
           while (macro.pins.contains(std::format("{}[{}]", name, width))) {
@@ -4021,6 +4023,13 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
           }
         }
       }
+      // Name sink bits as the net builder does: a LEF bus with only D[0] keeps
+      // its index even though the bus is one bit wide.
+      const auto tie_sink_pin = [&](int b) {
+        return memory   ? memory_pin(sink.get_port_id(), b, false)
+               : scalar ? pin_name(sink)
+                        : std::format("{}[{}]", pin_name(sink), b);
+      };
       std::vector<bool> constants;
       bool              changed = false;
       for (int b = 0; b < width; ++b) {
@@ -4028,7 +4037,7 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
         const bool constant = endpoint.constant >= 0 || characterized_ties.contains(endpoint);
         constants.push_back(constant);
         if (constant) {
-          const auto physical_pin  = memory ? memory_pin(sink.get_port_id(), b, false) : bit_name(pin_name(sink), width, b);
+          const auto physical_pin  = tie_sink_pin(b);
           const auto driver        = tie_drivers.at(Endpoint{c.name, physical_pin, -1});
           changed                 |= endpoint != Endpoint{std::string(driver.get_master_node().get_name()), pin_name(driver), -1};
         }
@@ -4039,8 +4048,7 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
       std::vector<Pin> values;
       for (int b = 0; b < width; ++b) {
         if (constants[b]) {
-          const auto pin = memory ? memory_pin(sink.get_port_id(), b, false) : bit_name(pin_name(sink), width, b);
-          values.push_back(tie_drivers.at(Endpoint{c.name, pin, -1}));
+          values.push_back(tie_drivers.at(Endpoint{c.name, tie_sink_pin(b), -1}));
         } else {
           values.push_back(width == 1 ? original : gu::create_get_mask(graph, original, b).get_driver_pin(0));
         }
@@ -4354,7 +4362,11 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
   dp::Options control;
   control.max_iterations  = options.iterations;
   control.centroid_weight = v.centroids ? .25 : 0;
-  align_macro_geometry(v, tech, v.design, false, false);
+  // Fail early only where the final track check will run; timing seeds and
+  // retained placements do not certify legality.
+  if (options.full && !options.timing_seed && !options.retain_placement && !options.analyze_colors_only) {
+    align_macro_geometry(v, tech, v.design, false, false);
+  }
   control.after_macro_legalize = [&](dp::Design& physical) { align_macro_geometry(v, tech, physical, true, false); };
   control.bins_x = control.bins_y    = options.bins;
   control.num_threads                = options.threads;
@@ -5576,7 +5588,8 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
         bool accepted                                         = false;
         try {
           auto trial = dp::place(v.design, correction);
-          accepted   = timing_improves(before_timing, final_gp_timing) && final_gp_timing.violations <= before_timing.violations
+          accepted   = trial.legal && timing_improves(before_timing, final_gp_timing)
+                       && final_gp_timing.violations <= before_timing.violations
                        && final_gp_timing.electrical_excess <= before_timing.electrical_excess + 1e-9;
           if (accepted) {
             metrics.hpwl                                 = trial.hpwl;

@@ -13,6 +13,7 @@
 #include "hhds/graph.hpp"
 #include "pass/liberty/liberty_dff.hpp"
 #include "place.hpp"
+#include "repair.hpp"
 
 namespace livehd::placement::detail {
 using Node         = hhds::Node_class;
@@ -41,4 +42,12 @@ std::shared_ptr<hhds::GraphIO> buffer_io(hhds::Graph& graph, const Buffer& b);
 void                           change_master(Node n, const Buffer& from, const Buffer& to);
 Physical_sink                  physical_pin(hhds::Graph& graph, const std::string& label, const Node_index& nodes, bool driver);
 void                           connect_bit(hhds::Graph& graph, const Physical_sink& sink, Pin driver);
+// Re-target timing weights after an accepted repair trial. Untimed placements
+// (no weights) stay unweighted, and aggregate-only feedback has no per-net
+// target to move toward.
+inline void                    refresh_repair_weights(Result& state, const Options& options, const Timing_feedback& timing) {
+  if (!state.net_weights.empty() && !timing.pins.empty()) {
+    refresh_timing_weights(state, options, timing);
+  }
+}
 }  // namespace livehd::placement::detail

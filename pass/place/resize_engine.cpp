@@ -2370,7 +2370,7 @@ Repair_result resize_placed(Result initial, const Options& requested, const Eval
         result.libraries.clear();
         result.libraries.push_back(std::move(owner));
         score = next;
-        refresh_timing_weights(result.placed, options, score);
+        refresh_repair_weights(result.placed, options, score);
         accepted        = true;
         accepted_edits += static_cast<unsigned>(edits.size());
         break;
@@ -2502,9 +2502,8 @@ Floorplan_resize resize_floorplan_engine(Result& state, const Options& options, 
       const auto previous_owner = state.fp_library;  // outlive the assignment that drops the old graph
       state                     = std::move(trial);
       result.timing             = next;
-      refresh_timing_weights(state, options, next);
-      result.accepted        = resized;
-      result.repair_accepted = buffers;
+      result.accepted           = resized;
+      result.repair_accepted    = buffers;
       break;
     }
     refresh(state);

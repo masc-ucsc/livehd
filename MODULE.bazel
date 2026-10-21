@@ -82,9 +82,7 @@ bazel_dep(name = "rapidjson", version = "1.1.0.bcr.20250205")
 # Native CPU placement; the repository uses LiveHD's HHDS/HLOP repositories.
 git_repository(
     name = "dreamplace",
-    commit = "53e97f2b7c551a16f3e8b1eda7eb2410490169a1",
-    patches = ["//packages:dreamplace-timing-legalize.patch"],
-    patch_args = ["-p1"],
+    commit = "64b2cd30002007c69f8bd2181966a772465e026e",
     remote = "https://github.com/masc-ucsc/DREAMPlace.git",
 )
 # For local co-development swap the git_repository above for:
@@ -162,9 +160,7 @@ http_archive(
 # HHDS (plain git repo — see the iassert/hlop note above)
 git_repository(
     name = "hhds",
-    commit = "8121500a8b1b2743043a134f22708b3f87c348d9",
-    patch_args = ["-p1"],
-    patches = ["//packages:hhds_pin_padding.patch"],
+    commit = "c5b23e807677e6e8c855f840b72f6b5f6b8b3192",
     remote = "https://github.com/masc-ucsc/hhds.git",
 )
 # For local co-development swap the git_repository above for:
@@ -256,7 +252,7 @@ http_archive(
 # OpenTimer: the masc-ucsc fork provides its own BUILD.bazel.
 git_repository(
     name = "opentimer",
-    commit = "5c8774c84a52ad2367d1f033db13b8cc8e055ad0",
+    commit = "e8883ed67d406b87f1e1fccfd04c5d3c8ea33825",
     remote = "https://github.com/masc-ucsc/OpenTimer.git",
 )
 # For local co-development swap the git_repository above for:

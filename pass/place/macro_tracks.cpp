@@ -110,9 +110,14 @@ Profile profile(const ph::Technology& tech, const ph::Floorplan& fp, const ph::C
     }
   }
   for (int axis = 0; axis < 2; ++axis) {
+    // Without a phase serving every single-axis pin, keep the one serving the
+    // most and stop requiring the rest: such macros placed before alignment
+    // existed, and alignment must not turn them into placement failures.
+    int64_t  best_phase = -1;
+    unsigned best_count = 0;
     for (int64_t phase = 0; phase < p.period[axis]; phase += grid) {
       bool        valid  = true;
-      unsigned    misses = 0;
+      unsigned    misses = 0, served = 0;
       std::string coverage;
       for (const auto& pin : p.pins) {
         bool interior = false, landing = false;
@@ -129,14 +134,22 @@ Profile profile(const ph::Technology& tech, const ph::Floorplan& fp, const ph::C
         } else if (pin.access.front().x == (axis == 0)) {
           valid  &= interior;
           misses += !landing;
+          served += interior;
         }
       }
       if (valid) {
         p.phases[axis].push_back({phase, misses, std::move(coverage)});
+      } else if (best_phase < 0 || served > best_count) {
+        best_phase = phase;
+        best_count = served;
       }
     }
     if (p.phases[axis].empty()) {
-      throw std::runtime_error("conflicting macro pin routing-track phases: " + c.macro);
+      std::erase_if(p.pins, [&](const Pin& pin) {
+        const auto served = [&](const auto& a) { return accessible(a, best_phase, false).first; };
+        return !pin.mixed && pin.access.front().x == (axis == 0) && std::none_of(pin.access.begin(), pin.access.end(), served);
+      });
+      --axis;  // re-derive this axis' phases (and coverage) from the kept pins
     }
   }
   return p;
@@ -406,19 +419,32 @@ void legalize_macro_tracks_impl(const ph::Technology& tech, const ph::Floorplan&
   }
   const auto grid = std::max<int64_t>(1, std::llround(tech.manufacturing_grid * tech.dbu));
   std::map<std::pair<std::string, ph::Orientation>, Profile> profiles;
-  for (size_t i = 0; i < cells.size(); ++i) {
-    auto& c = cells[i];
-    if (tech.macros.at(c.macro).klass.starts_with("CORE") || tech.macros.at(c.macro).virtual_proxy || (!move_macros && !fixed(c))) {
-      continue;
-    }
+  const auto                                                 profile_of = [&](const auto& c) -> const Profile& {
     const auto key = std::pair{c.macro, c.place.orientation};
     if (!profiles.contains(key)) {
       profiles.emplace(key, profile(tech, layout, c));
     }
-    const auto& p = profiles.at(key);
-    if (p.pins.empty() && grid == 1) {
+    return profiles.at(key);
+  };
+  const auto checked = [&](const auto& c) {
+    const auto& m = tech.macros.at(c.macro);
+    if (m.klass.starts_with("CORE") || m.virtual_proxy || (!move_macros && !fixed(c))) {
+      return false;
+    }
+    return !(profile_of(c).pins.empty() && grid == 1);
+  };
+  // Repack ignores later movable blockers only because they are placed after
+  // this macro; proxies and pinless macros never are, so they stay obstacles.
+  std::vector<bool> repacked(cells.size(), false);
+  for (size_t i = 0; i < cells.size(); ++i) {
+    repacked[i] = repack && !fixed(cells[i]) && checked(cells[i]);
+  }
+  for (size_t i = 0; i < cells.size(); ++i) {
+    auto& c = cells[i];
+    if (!checked(c)) {
       continue;
     }
+    const auto& p = profile_of(c);
     if (fixed(c)) {
       if (c.place.x % grid || c.place.y % grid) {
         throw std::runtime_error("fixed macro origin misses LEF manufacturing grid: " + c.name);
@@ -436,7 +462,7 @@ void legalize_macro_tracks_impl(const ph::Technology& tech, const ph::Floorplan&
     std::vector<int64_t> x_edges{core.xl + halo_x, core.xh - c.place.width - halo_x};
     std::vector<int64_t> y_edges{core.yl + halo_y, core.yh - c.place.height - halo_y};
     for (size_t j : blockers) {
-      if (j == i || (repack && j > i && !fixed(cells[j]))) {
+      if (j == i || (j > i && repacked[j])) {
         continue;
       }
       const auto obstacle = box(tech, cells[j], halo_x, halo_y);
@@ -479,7 +505,7 @@ void legalize_macro_tracks_impl(const ph::Technology& tech, const ph::Floorplan&
         const auto area    = box(tech, c, halo_x, halo_y);
         bool       blocked = false;
         for (size_t j : blockers) {
-          if (j == i || (repack && j > i && !fixed(cells[j]))) {
+          if (j == i || (j > i && repacked[j])) {
             continue;
           }
           if (intersects(area, box(tech, cells[j], halo_x, halo_y))) {
