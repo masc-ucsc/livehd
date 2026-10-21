@@ -1,3 +1,20 @@
+# The CORE-ET benchmark corpus: 122 modules.
+#
+# SCOPE, stated rather than implied. This is a CHOSEN SUBSET, not all of
+# CORE-ET. The upstream inventory (`core_et_blocks.txt`) counts 215
+# non-technology RTL modules on main -- module declarations under rtl/, with
+# dv/ testbenches excluded -- plus 34 technology primitives, 249 distinct RTL
+# modules in all. So every coverage fraction quoted against this file is "of
+# the 122 we attempt", never "of CORE-ET".
+#
+# The rule that selected these 122 is NOT recorded anywhere, and this file does
+# not reconstruct it. Only 48 of the 122 appear in the upstream inventory under
+# the same name, so it is not a prefix of that list and the remainder are not
+# accounted for here. Treat the set as declared, and say so when quoting a
+# number from it.
+#
+# One list, two consumers: the D4/DCERT2 sweep and scripts/coverage_ledger.py.
+# A second copy would be one more thing to drift.
 core_top
 debug_breakpoint
 intpipe_alu
