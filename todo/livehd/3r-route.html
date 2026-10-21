@@ -1179,6 +1179,11 @@ acceptance gates before any new downstream candidate. Evaluation artifacts:
 <code>tmp/timing_spread_20261021/</code>.</p>
 <h2>Design notes</h2>
 <ul>
+  <li>The current routability capacity sums all LEF routing layers, while the
+  matched ASAP7 downstream flow uses M2–M7 with its capacity adjustment. After
+  the fixed-route-grid density screens, evaluate explicit layer/capacity
+  selection consistently for both capacity and macro obstructions; keep
+  existing defaults unchanged.</li>
   <li>The switch is one-way per stage and per run, to keep the control loop stable:
   inflation is monotone and the convergence test must not flip scale mid-stage.
   A new auto stage starts on Rudy; continuation within a stage retains the

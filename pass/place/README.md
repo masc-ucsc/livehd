@@ -838,6 +838,18 @@ preserve each output's arithmetic order; small grids and one-thread dense
 solves retain their original loops. Screened local fields use the same thread
 budget, and serial/parallel fields are checked bit for bit.
 
+The finite FFT butterfly products are expressed as real arithmetic to avoid
+generic complex-multiplication recovery overhead. In an isolated screened
+512² solve benchmark, three interleaved trials on one pinned CPU improve the
+median from 5.189 to 4.303 seconds (1.206×); four-thread wall times are noisier,
+with a measured 1.085× median improvement and about 18% fewer instructions.
+These are solver measurements, not whole-placement speedups. Old/new fields
+are byte-identical on five grid/thread cases and four 1024² stress patterns,
+including sparse, DC and large finite inputs. Equivalence is scoped to finite,
+nonoverflowing placement arithmetic; arbitrary complex NaN/Inf recovery is not
+claimed. Profiles and measurement records are in
+`tmp/remote_sync_20261021/poisson_perf/`.
+
 `synth.place.macro.cell_density_weight=0` independently controls local
 standard-cell pressure on movable macros. Positive values enable it during
 both FP and macro GP; the final cell pass disables it and keeps macros fixed.

@@ -52,6 +52,9 @@ def main():
                     + '</tr>')
 
     cnn_counts = {}
+    cnn_final_note = ('Extraction wrote the OpenROAD SPEF, but the subsequent IR-analysis step exceeded its '
+                      '55 GiB memory cap before final reports and the PG census were exported. Its stopped '
+                      'attempt is retained; final extracted timing, PG validation and frequency qualification remain pending.')
     for arm, label in [('native_clockclean', 'LiveHD'), ('or_cells_clockclean', 'OpenROAD')]:
         relative = f'cnn/{arm}/drc_completed_iterations.json'
         history = read(relative)
@@ -63,22 +66,48 @@ def main():
         metrics = read(f'cnn/{arm}/profiles/drt/metrics.json') if routed else None
         final = read(f'cnn/{arm}/profiles/final/metadata.json')
         final_stopped = bool(final and final.get('status') == 'incomplete_guard_stop')
-        detail = (f'Completed check {last["iteration"]}; extraction complete; final STA/PG resource-stopped'
+        detail = (f'Completed check {last["iteration"]}; extraction complete; final reports blocked by IR resource stop'
                   if final_stopped else f'Completed check {last["iteration"]}; final timing qualification pending')
         runtime_note = ('DRT only; stopped final attempt also cost ' + number(final['wall_seconds'], 1) + ' s'
                         if final_stopped else 'DRT stage only; not whole-flow time')
         runtime = number(meta['wall_seconds'], 1) if routed else 'In progress'
+        timing = None
+        stage_evidence = relative
+        stage = '<span class="good">DRT complete</span>' if routed else '<span class="bad">DRT unresolved</span>'
+        if routed and arm == 'or_cells_clockclean':
+            recovery = f'cnn/{arm}/read_only_extracted_recovery_v3'
+            recovery_meta = read(recovery + '/metadata.json')
+            if recovery_meta and recovery_meta.get('status') == 'verification_complete':
+                proof = read(recovery + '/proof.json')
+                assert recovery_meta['physical_inputs_unchanged'] and recovery_meta['exitcode'] == 0
+                assert proof['status'] == 'independent_actual_SPEF_PG_geometry_proof_pass'
+                assert proof['PG_census']['unconnected_pg_iterms'] == 0
+                assert proof['PG_census']['wrong_net_or_sigtype_pg_iterms'] == 0
+                assert proof['geometry']['status'] == 'complete_DEF_geometry_projection_equal'
+                timing = proof['metrics']
+                assert timing['timing_model'] == 'actual_extracted_spef'
+                stage = '<span class="good">Extracted STA verified</span>'
+                stage_evidence = recovery + '/proof.json'
+                detail = 'Read-only final SPEF/geometry/PG-association proof; original IR analysis incomplete'
+                cnn_final_note = ('Separate read-only recovery verified actual-SPEF setup/hold timing, '
+                                  'PG associations and final DEF geometry. The original IR-analysis attempt remains '
+                                  'resource-incomplete; PG continuity/IR signoff and frequency qualification remain pending. '
+                                  + link(recovery + '/proof.json', 'Recovery evidence'))
         if not routed:
             progress = read(f'cnn/{arm}/drt_observed_progress_snapshot.json')
             if progress:
                 runtime = '≥ ' + number(progress['stage_wall_seconds_elapsed_lower_bound'], 1)
                 runtime_note = ('In progress; observed ' + escape(progress['observed_at_utc'])
                                 + '; cumulative tool CPU ' + number(progress['tool_cpu_seconds_cumulative'], 1) + ' s')
+        timing_cells = cell('Pending') * 2
+        if timing:
+            timing_cells = ''.join(cell(number(timing[kind + '_wns_ps']),
+                                        'TNS ' + number(timing[kind + '_tns_ps']) + ' ps')
+                                   for kind in ('setup', 'hold'))
         rows.append('<tr>' + cell('CNN') + cell(label)
-                    + cell('<span class="good">DRT complete</span>' if routed else '<span class="bad">DRT unresolved</span>',
-                           link(relative, detail))
+                    + cell(stage, link(stage_evidence, detail))
                     + cell(f'{last["violations"]:,}', 'Completed full check; excludes in-pass estimates')
-                    + cell('Pending') + cell('Pending') + cell('Pending')
+                    + timing_cells + cell('Pending')
                     + cell(number(metrics.get('detailedroute__route__wirelength') if metrics else None, 0))
                     + cell(runtime, runtime_note)
                     + '</tr>')
@@ -135,7 +164,7 @@ def main():
 <p class="note"><strong>Goal:</strong> if OpenROAD routes and LiveHD cannot, fix route parity first. Once both route cleanly, improve extracted timing and supported frequency against a strong reference. Missing an unattainable requested period alone does not reject a design. Keep hold checks separate: lowering frequency does not generally repair same-edge hold violations.</p>
 <div class="scroll"><table><caption>Main results — timing in ps, wirelength in µm, wall time in seconds</caption>
 <thead><tr><th>Design</th><th>Placement arm</th><th>Latest verified stage</th><th>Routing DRCs</th><th>Extracted setup WNS / TNS</th><th>Extracted hold WNS / TNS</th><th>Supported frequency</th><th>Signal wirelength</th><th>Measured wall time</th></tr></thead><tbody>@ROWS@</tbody></table></div>
-<p><strong>CNN:</strong> the OpenROAD reference has completed zero-DRC detailed routing, while the LiveHD arm still has @CNN@ violations at its latest completed check. This is a route-parity problem. Extraction wrote the OpenROAD SPEF, but the subsequent IR-analysis step exceeded its 55 GiB memory cap before final reports and the PG census were exported. Its stopped attempt is retained; final extracted timing, PG validation and frequency qualification remain pending.</p>
+<p><strong>CNN:</strong> the OpenROAD reference has completed zero-DRC detailed routing, while the LiveHD arm still has @CNN@ violations at its latest completed check. This is a route-parity problem. @CNN_FINAL@</p>
 <p><strong>Eyeriss:</strong> LiveHD has @EY@ violations at its latest completed check. The strict OpenROAD placement is saved and audited; its downstream result is pending. Neither arm has a final extracted comparison.</p>
 <p><strong>LiteEth:</strong> both arms have zero DRCs, all nets routed and independently reproduced extracted setup/hold timing. LiveHD improves setup slack by 2.712 ps and hold slack by 3.741 ps, but has 38.2% more signal wire and a 43.9% longer final-route job. This is a timing improvement with routing-cost tradeoffs; maximum-frequency optimization remains unmeasured.</p>
 <h2>Density evidence</h2>
@@ -152,7 +181,8 @@ def main():
 </body></html>
 '''
     for key, value in {'STAMP': stamp, 'ROWS': ''.join(rows), 'DENSITY': ''.join(density_rows),
-                       'CNN': f'{cnn_counts["LiveHD"]:,}', 'EY': f'{ey_last["violations"]:,}', 'SOURCES': sources}.items():
+                       'CNN': f'{cnn_counts["LiveHD"]:,}', 'CNN_FINAL': cnn_final_note,
+                       'EY': f'{ey_last["violations"]:,}', 'SOURCES': sources}.items():
         page = page.replace('@' + key + '@', value)
     output = ROOT / 'docs/partial_route.html'
     output.write_text(page)
