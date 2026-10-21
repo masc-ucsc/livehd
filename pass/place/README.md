@@ -434,7 +434,10 @@ it is not a displacement optimum. It retains every region member and does not
 shrink a region or retry a smaller alignment prefix. A small bound can make
 packing an overlapping raw GP region infeasible, so this experiment targets
 post-repair seeds. Per-window proposed movement counts and Manhattan
-displacements are reported separately from final retained alignment counts.
+displacements are reported separately from final retained alignment counts. Accepted proposals also distinguish
+corridors already aligned at trial entry from newly aligned corridors. This
+classification uses the complete geometry after prior accepted trials; it
+prevents an existing track corridor from being reported as a new alignment.
 
 The remaining `synth.place.satlegalize.*` controls are `max_cells=24`,
 `max_candidates=12`, `max_windows=8`, `max_pairs=32`, `move_sites=4`,

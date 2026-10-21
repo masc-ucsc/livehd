@@ -69,6 +69,26 @@ TEST(Satlegalize, TrackAccessOffsetsModelsAndCompleteRollback) {
     }
   }
 }
+TEST(Satlegalize, AcceptedCountsDistinguishExistingAndNewTrackCorridors) {
+  for (const auto* backend : {"cadical", "cms-cnf", "cms-xor"}) {
+    for (bool existing : {false, true}) {
+      Fixture f;
+      if (existing) {
+        f.fp.components[1].place.y = f.fp.components[0].place.y;
+      }
+      Satlegalize_options options;
+      options.backend         = backend;
+      options.max_pairs       = 1;
+      options.boundary_growth = 1;
+      const auto report       = satlegalize(f.tech, f.fp, f.timing, options);
+      ASSERT_EQ(report.accepted.size(), 1) << backend << ' ' << existing;
+      ASSERT_EQ(report.window_stats.size(), 1);
+      EXPECT_EQ(report.already_aligned, existing ? 1 : 0);
+      EXPECT_EQ(report.window_stats.front().already_aligned, report.already_aligned);
+      EXPECT_TRUE(satlegalize_preserved(f.tech, f.fp, report));
+    }
+  }
+}
 TEST(Satlegalize, MissingGridUnknownAndFixedSpaceFallBack) {
   Fixture             f;
   const auto          original = f.fp;

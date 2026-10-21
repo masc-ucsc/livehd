@@ -77,6 +77,8 @@ void sat_window_statistics(rapidjson::Value& json, const Satlegalize_report& rep
     entry.AddMember("oversized", window.oversized, allocator);
     entry.AddMember("trials", window.trials, allocator);
     entry.AddMember("accepted", window.accepted, allocator);
+    entry.AddMember("accepted_already_aligned_at_trial_start", window.already_aligned, allocator);
+    entry.AddMember("accepted_newly_aligned_at_trial_start", window.accepted - window.already_aligned, allocator);
     entry.AddMember("conflicts", window.conflicts, allocator);
     entry.AddMember("unknown", window.unknown, allocator);
     entry.AddMember("proposed_moved_cells", window.moved_cells, allocator);
@@ -165,6 +167,10 @@ void sat_window_statistics(rapidjson::Value& json, const Satlegalize_report& rep
   json.AddMember("check_packing", options.check_packing, allocator);
   json.AddMember("route_peak_floor", options.route_peak_floor, allocator);
   json.AddMember("max_moved_cells", options.max_moved_cells, allocator);
+  json.AddMember("accepted_already_aligned_at_trial_start", report.already_aligned, allocator);
+  json.AddMember("accepted_newly_aligned_at_trial_start",
+                 static_cast<uint64_t>(report.accepted.size() - report.already_aligned),
+                 allocator);
   if (options.region_width_um > 0 || options.route_grid) {
     rapidjson::Value region(rapidjson::kObjectType);
     region.AddMember("width_um", options.region_width_um, allocator);

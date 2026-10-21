@@ -266,6 +266,26 @@ it does not minimize displacement or back off to smaller regions. All 33 SAT
 regression cases, the solver suite and both ABC/USyn placement smoke tests
 pass. Results remain native screening evidence until matched clean routing
 and extraction complete.</p>
+<p>The first CNN two-cell-bound arm accepts 19 proposals in 64 trials,
+with every region respecting the movement bound. Routing estimates, hold,
+electrical count and electrical excess remain unchanged. WNS improves by
+0.044 ps but TNS regresses by 5.254 ps, so none is retained. The Eyeriss
+unbounded post-repair arm also fails timing: WNS regresses by 0.218 ps and
+TNS by 1,327.144 ps, although its seven proposed alignments survive legalization.
+Acceptance telemetry now distinguishes already aligned corridors from
+corridors created by the current trial, using its complete entry geometry.
+A higher accepted count alone is not evidence of more newly aligned nets.</p>
+<p>The selected older-source CNN cell-halo-2 candidate has completed clean
+DRT and extracted timing. It has zero routing DRCs, no unrouted-net error,
+verified VDD/VSS connectivity and 212,378 extracted nets. Setup WNS/TNS are
+−1,443.130/−263,617.000 ps; hold WNS/TNS are −438.291/−4,153.880 ps.
+Signal wirelength is 3,023,784 µm with 2,030,784 vias. Its
+<a href="../../repros/route_eval_20261021/cnn_halo2_extracted_comparison/comparison.json">saved-reference comparison</a>
+passes the downstream binary, scripts, physical models, final SDC, environment,
+thread and memory-policy checks. It improves on that historical reference,
+but this is whole-flow context: neither an isolated SAT result nor a qualified
+strong-reference win. The new same-netlist OpenROAD placement and supported
+frequency validation remain pending.</p>
 <p>The synchronized-source CNN weight-zero GP arm finishes in 1,543.505 s
 and reproduces the prior arm's final native WNS/TNS exactly:
 −2,064.033691/−471,997.332825 ps. Its weight-one arm and the Eyeriss/Coral

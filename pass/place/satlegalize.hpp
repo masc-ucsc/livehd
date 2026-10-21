@@ -64,6 +64,7 @@ struct Satlegalize_window {
   size_t                                movable_cells = 0;
   bool                                  oversized     = false;
   unsigned                              trials = 0, accepted = 0, conflicts = 0, unknown = 0;
+  unsigned                              already_aligned  = 0;
   unsigned                              moved_cells      = 0;
   double                                displacement_dbu = 0, max_displacement_dbu = 0;
   std::string                           packing_status = "not_checked";
@@ -83,6 +84,7 @@ struct Satlegalize_report {
   double                              seconds = 0, hpwl_before = 0, hpwl_after = 0;
   unsigned                            sampled_windows = 0, spill_candidates = 0, spilled_cells = 0, density_rejected = 0;
   unsigned                            cross_grid_pairs = 0;
+  unsigned                            already_aligned  = 0;
   std::vector<Satlegalize_window>     window_stats;
   std::vector<Ann_place>              before;
   std::vector<Satlegalize_alignment>  accepted;

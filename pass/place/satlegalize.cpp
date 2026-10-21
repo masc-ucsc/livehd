@@ -1355,6 +1355,11 @@ Satlegalize_report satlegalize(const ph::Technology& tech, ph::Floorplan& fp, co
           || (options.route_grid && (!source_contained.contains(proposed.first) || !source_contained.contains(proposed.second)))) {
         continue;
       }
+      // Classify the complete geometry at this trial's entry. Earlier accepted
+      // trials may already have created this corridor; do not count that as a
+      // new alignment caused by this proposal.
+      const bool already_aligned
+          = aligned(tech, fp, proposed, fp.components[proposed.first].place, fp.components[proposed.second].place);
       tried.insert(p);
       ++report.trials;
       ++window_stats.trials;
@@ -1468,6 +1473,8 @@ Satlegalize_report satlegalize(const ph::Technology& tech, ph::Floorplan& fp, co
         accepted.push_back(activation);
         report.accepted.push_back(proposed);
         ++window_stats.accepted;
+        window_stats.already_aligned += already_aligned;
+        report.already_aligned       += already_aligned;
         report.checkpoints.push_back(std::move(checkpoint));
         report.spilled_cells += options.spill_neighbors ? transfers : 0;
         installed             = true;
