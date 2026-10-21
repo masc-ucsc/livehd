@@ -426,6 +426,14 @@ active. `sat_validation.json` records those acceptance gates and both timing
 snapshots. Native congestion estimates remain screening evidence; completed
 OpenROAD routing and extracted timing decide routed success.
 
+When placement snapshots are enabled, `sat_proposal_positions.json` and
+`sat_baseline_positions.json` preserve the two geometries evaluated by the
+native guard, including a rejected proposal. They contain component/master
+poses and terminal poses in DBU, not a netlist or an accepted placement. A
+separate routing experiment must bind these to `before_legalization.def`,
+verify topology, masters, fixed macros and IOs, and retain the native rejection
+reason. The final `out.def` continues to follow the full acceptance guard.
+
 For already legal post-repair placements, the optional `max_moved_cells=1..128`
 adds a whole-region cardinality bound on cells whose position or orientation
 changes. Endpoints and neighbor spills both count. The default `0` is

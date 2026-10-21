@@ -286,12 +286,48 @@ thread and memory-policy checks. It improves on that historical reference,
 but this is whole-flow context: neither an isolated SAT result nor a qualified
 strong-reference win. The new same-netlist OpenROAD placement and supported
 frequency validation remain pending.</p>
-<p>The synchronized-source CNN weight-zero GP arm finishes in 1,543.505 s
-and reproduces the prior arm's final native WNS/TNS exactly:
-−2,064.033691/−471,997.332825 ps. Its weight-one arm and the Eyeriss/Coral
-pairs remain in progress. A
+<p>The <a href="../../repros/route_eval_20261021/spreading/sat_priority_bin24/prepared.json">matched region-priority screen</a>
+uses frozen <code>bin24</code>: no SAT, congestion guidance and cell-density-only
+guidance, with the same RSMT128 map, two-cell movement bound and four proposals
+per full region. Density-only guidance removes the extra lower-routing-utilization
+recipient requirement while preserving lower cell density, capacity and the
+whole-proposal routing guard. The repeated CNN guided arm exactly reproduces
+its native timing deltas; 14 of its 19 accepted proposals create a corridor at
+trial entry, while five were already aligned. The 34-case SAT suite, solver
+suite and both ABC/USyn smoke tests pass.</p>
+<p>Coral's two-cell proposal improves native WNS/TNS by 0.674/235.925 ps,
+with unchanged hold and electrical violation count; its aggregate electrical
+excess increases by 0.000274, so the strict native guard rejects it. The eight-cell
+arm regresses WNS/TNS by 0.090/31.116 ps. CNN's eight-cell arm improves
+WNS/TNS by 0.016/33.947 ps but increases electrical excess by 1.040, also failing
+validation. No arm is a retained native SAT improvement.</p>
+<p>The <a href="../../repros/route_eval_20261021/spreading/sat_pose_bin25/prepared.json">Coral diagnostic-pose replay</a>
+uses <code>bin25</code> to preserve each evaluated baseline and proposal's exact
+component/master and terminal poses when snapshots are enabled. Production
+acceptance is unchanged. The completed Coral replay reproduces its timing
+deltas exactly; both pose exports pass legal/master/macro/terminal/DBU audits
+and differ in 17 cell poses. A separate, bounded pilot admits the recorded
+native-rejected Coral proposal for independent OpenROAD evaluation: both arms
+must preserve the same topology, masters, macro/IO/PG frame and SDC, undergo
+common tap-aware legalization, then fresh CTS, congestion-tolerant GRT, clean
+DRT and extraction. Actual preparation displacement and the native rejection
+remain explicit. This compares a SAT proposal with its native baseline; the
+strong OpenROAD placement comparison remains separate. See the
+<a href="../../repros/route_eval_20261021/sat_pose_route_bin25/runner.log">diagnostic route queue</a>.</p>
+<p>The synchronized-source CNN timing-spread pair is complete. Weight zero
+finishes in 1,543.505 s and reproduces prior final native WNS/TNS exactly:
+−2,064.033691/−471,997.332825 ps. Weight one affects 55,873 cells with minimum
+mobility 0.200822, but final WNS/TNS regress to
+−2,162.784912/−1,901,168.952759 ps. Hold WNS falls from 12.866405 to
+1.540668 ps. Electrical count/excess improve, but this is a timing tradeoff,
+not a general gain. Eyeriss and Coral pairs remain in progress. The
 <a href="../../repros/route_eval_20261021/resumed_sat_report.html">live experiment report</a>
 keeps native screening values separate from extracted routed results.</p>
+<p>The selected Eyeriss retained-halo-2 candidate completes DRT in 4,993.779 s,
+with zero final DRCs and no unrouted-net error. Signal wirelength is
+8,744,263 µm with 5,030,760 vias; filler insertion also completes. Extraction
+and final PG/timing verification remain pending, so this establishes a clean
+route rather than an extracted timing improvement.</p>
 <p>A stronger OpenROAD cell-placement comparison is also running on each
 selected native candidate's exact mapped preCTS netlist and fixed macro/IO/PG
 frame. It enables timing-driven and routability-driven GP, retains resizing

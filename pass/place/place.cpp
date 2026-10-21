@@ -5687,7 +5687,70 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
       }
       const bool alignments_preserved = satlegalize_preserved(tech, sat_frame(accepted, true), *sat_report);
       const bool timing_accepted      = accepted_timing(accepted_feedback);
-      const auto feedback_json        = [](const Timing_feedback& f) {
+      if (options.snapshots) {
+        // Keep both evaluated geometries even when the native guard rejects
+        // the proposal. These are diagnostic poses, never accepted outputs.
+        // A routing experiment must bind them to the pre-SAT topology and
+        // audit masters, fixed geometry and IOs before constructing a DEF.
+        const auto snapshot = [&](const dp::Design& design, bool legal, const char* name) {
+          const auto                                 frame = sat_frame(design, true);
+          rapidjson::StringBuffer                    buffer;
+          rapidjson::Writer<rapidjson::StringBuffer> json(buffer);
+          json.StartObject();
+          json.Key("schema");
+          json.Int(1);
+          json.Key("scope");
+          json.String("post-legalization SAT comparison; diagnostic poses, not accepted placement or topology");
+          json.Key("legal");
+          json.Bool(legal);
+          json.Key("dbu_per_um");
+          json.Int64(frame.dbu);
+          json.Key("component_columns");
+          json.StartArray();
+          for (const char* column : {"name", "master", "x", "y", "orientation"}) {
+            json.String(column);
+          }
+          json.EndArray();
+          json.Key("components");
+          json.StartArray();
+          for (const auto& cell : frame.components) {
+            json.StartArray();
+            json.String(cell.name.c_str());
+            json.String(cell.macro.c_str());
+            json.Int64(cell.place.x);
+            json.Int64(cell.place.y);
+            json.String(ph::orientation_name(cell.place.orientation).c_str());
+            json.EndArray();
+          }
+          json.EndArray();
+          json.Key("terminal_columns");
+          json.StartArray();
+          for (const char* column : {"name", "x", "y", "orientation"}) {
+            json.String(column);
+          }
+          json.EndArray();
+          json.Key("terminals");
+          json.StartArray();
+          for (const auto& terminal : frame.terminals) {
+            json.StartArray();
+            json.String(terminal.name.c_str());
+            json.Int64(terminal.x);
+            json.Int64(terminal.y);
+            json.String(ph::orientation_name(terminal.orientation).c_str());
+            json.EndArray();
+          }
+          json.EndArray();
+          json.EndObject();
+          std::ofstream file(options.output_dir + "/" + name);
+          file << buffer.GetString() << '\n';
+          if (!file) {
+            throw std::runtime_error("cannot write SAT comparison poses");
+          }
+        };
+        snapshot(accepted, accepted_metrics.legal, "sat_proposal_positions.json");
+        snapshot(baseline, baseline_metrics.legal, "sat_baseline_positions.json");
+      }
+      const auto feedback_json = [](const Timing_feedback& f) {
         const auto value = [](const auto& x) { return x ? std::format("{}", *x) : "null"; };
         return std::format(R"({{"wns":{},"tns":{},"hold_wns":{},"violations":{},"electrical_excess":{}}})",
                            value(f.wns),
