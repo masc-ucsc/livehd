@@ -1,0 +1,243 @@
+/* Invented educational technology. No foundry characterization. */
+library(regularity) {
+  delay_model : table_lookup; time_unit : "1ns"; voltage_unit : "1V";
+  current_unit : "1mA"; pulling_resistance_unit : "1kohm";
+  capacitive_load_unit(1,pf);
+  default_input_pin_cap : 0.001; default_output_pin_cap : 0;
+  default_inout_pin_cap : 0; default_fanout_load : 1;
+  default_max_transition : 10;
+
+cell(INV) { area : 2;
+pin(A) { direction : input;
+capacitance : 0.001;
+}
+pin(Y) { direction : output;
+function : "!A"; max_capacitance : 10;
+timing() { related_pin : "A"; timing_type : combinational;
+      cell_rise(scalar) { values("0.05"); } cell_fall(scalar) { values("0.05"); }
+      rise_transition(scalar) { values("0.02"); } fall_transition(scalar) { values("0.02"); } }
+}
+}
+cell(BUF) { area : 2;
+pin(A) { direction : input;
+capacitance : 0.001;
+}
+pin(Y) { direction : output;
+function : "A"; max_capacitance : 10;
+timing() { related_pin : "A"; timing_type : combinational;
+      cell_rise(scalar) { values("0.05"); } cell_fall(scalar) { values("0.05"); }
+      rise_transition(scalar) { values("0.02"); } fall_transition(scalar) { values("0.02"); } }
+}
+}
+cell(NAND2) { area : 4;
+pin(A) { direction : input;
+capacitance : 0.001;
+}
+pin(B) { direction : input;
+capacitance : 0.001;
+}
+pin(Y) { direction : output;
+function : "!(A & B)"; max_capacitance : 10;
+timing() { related_pin : "A"; timing_type : combinational;
+      cell_rise(scalar) { values("0.05"); } cell_fall(scalar) { values("0.05"); }
+      rise_transition(scalar) { values("0.02"); } fall_transition(scalar) { values("0.02"); } }
+timing() { related_pin : "B"; timing_type : combinational;
+      cell_rise(scalar) { values("0.05"); } cell_fall(scalar) { values("0.05"); }
+      rise_transition(scalar) { values("0.02"); } fall_transition(scalar) { values("0.02"); } }
+}
+}
+cell(NOR2) { area : 4;
+pin(A) { direction : input;
+capacitance : 0.001;
+}
+pin(B) { direction : input;
+capacitance : 0.001;
+}
+pin(Y) { direction : output;
+function : "!(A | B)"; max_capacitance : 10;
+timing() { related_pin : "A"; timing_type : combinational;
+      cell_rise(scalar) { values("0.05"); } cell_fall(scalar) { values("0.05"); }
+      rise_transition(scalar) { values("0.02"); } fall_transition(scalar) { values("0.02"); } }
+timing() { related_pin : "B"; timing_type : combinational;
+      cell_rise(scalar) { values("0.05"); } cell_fall(scalar) { values("0.05"); }
+      rise_transition(scalar) { values("0.02"); } fall_transition(scalar) { values("0.02"); } }
+}
+}
+cell(XOR2) { area : 6;
+pin(A) { direction : input;
+capacitance : 0.001;
+}
+pin(B) { direction : input;
+capacitance : 0.001;
+}
+pin(Y) { direction : output;
+function : "A ^ B"; max_capacitance : 10;
+timing() { related_pin : "A"; timing_type : combinational;
+      cell_rise(scalar) { values("0.05"); } cell_fall(scalar) { values("0.05"); }
+      rise_transition(scalar) { values("0.02"); } fall_transition(scalar) { values("0.02"); } }
+timing() { related_pin : "B"; timing_type : combinational;
+      cell_rise(scalar) { values("0.05"); } cell_fall(scalar) { values("0.05"); }
+      rise_transition(scalar) { values("0.02"); } fall_transition(scalar) { values("0.02"); } }
+}
+}
+cell(TIE0) { area : 2;
+pin(Y) { direction : output;
+function : "0"; max_capacitance : 10;
+}
+}
+cell(TIE1) { area : 2;
+pin(Y) { direction : output;
+function : "1"; max_capacitance : 10;
+}
+}
+cell(DFF) { area : 8;
+ff(IQ,IQN) { next_state : "D"; clocked_on : "CLK"; }
+pin(D) { direction : input;
+capacitance : 0.001;
+timing() { related_pin : "CLK"; timing_type : setup_rising;
+                          rise_constraint(scalar) { values("0.02"); } fall_constraint(scalar) { values("0.02"); } }
+timing() { related_pin : "CLK"; timing_type : hold_rising;
+                          rise_constraint(scalar) { values("0.02"); } fall_constraint(scalar) { values("0.02"); } }
+}
+pin(CLK) { direction : input;
+capacitance : 0.001;
+clock : true;
+}
+pin(Q) { direction : output;
+function : "IQ"; max_capacitance : 10;
+timing() { related_pin : "CLK"; timing_type : rising_edge;
+      cell_rise(scalar) { values("0.05"); } cell_fall(scalar) { values("0.05"); }
+      rise_transition(scalar) { values("0.02"); } fall_transition(scalar) { values("0.02"); } }
+}
+}
+cell(REG_MACRO) { area : 1600; dont_use : true;
+pin("D[0]") { direction : input; capacitance : 0.005; }
+pin("Q[0]") { direction : output; function : "D[0]"; max_capacitance : 10; timing() { related_pin : "D[0]"; timing_type : combinational;
+      cell_rise(scalar) { values("0.4"); } cell_fall(scalar) { values("0.4"); }
+      rise_transition(scalar) { values("0.02"); } fall_transition(scalar) { values("0.02"); } } }
+pin("D[1]") { direction : input; capacitance : 0.005; }
+pin("Q[1]") { direction : output; function : "D[1]"; max_capacitance : 10; timing() { related_pin : "D[1]"; timing_type : combinational;
+      cell_rise(scalar) { values("0.4"); } cell_fall(scalar) { values("0.4"); }
+      rise_transition(scalar) { values("0.02"); } fall_transition(scalar) { values("0.02"); } } }
+pin("D[2]") { direction : input; capacitance : 0.005; }
+pin("Q[2]") { direction : output; function : "D[2]"; max_capacitance : 10; timing() { related_pin : "D[2]"; timing_type : combinational;
+      cell_rise(scalar) { values("0.4"); } cell_fall(scalar) { values("0.4"); }
+      rise_transition(scalar) { values("0.02"); } fall_transition(scalar) { values("0.02"); } } }
+pin("D[3]") { direction : input; capacitance : 0.005; }
+pin("Q[3]") { direction : output; function : "D[3]"; max_capacitance : 10; timing() { related_pin : "D[3]"; timing_type : combinational;
+      cell_rise(scalar) { values("0.4"); } cell_fall(scalar) { values("0.4"); }
+      rise_transition(scalar) { values("0.02"); } fall_transition(scalar) { values("0.02"); } } }
+pin("D[4]") { direction : input; capacitance : 0.005; }
+pin("Q[4]") { direction : output; function : "D[4]"; max_capacitance : 10; timing() { related_pin : "D[4]"; timing_type : combinational;
+      cell_rise(scalar) { values("0.4"); } cell_fall(scalar) { values("0.4"); }
+      rise_transition(scalar) { values("0.02"); } fall_transition(scalar) { values("0.02"); } } }
+pin("D[5]") { direction : input; capacitance : 0.005; }
+pin("Q[5]") { direction : output; function : "D[5]"; max_capacitance : 10; timing() { related_pin : "D[5]"; timing_type : combinational;
+      cell_rise(scalar) { values("0.4"); } cell_fall(scalar) { values("0.4"); }
+      rise_transition(scalar) { values("0.02"); } fall_transition(scalar) { values("0.02"); } } }
+pin("D[6]") { direction : input; capacitance : 0.005; }
+pin("Q[6]") { direction : output; function : "D[6]"; max_capacitance : 10; timing() { related_pin : "D[6]"; timing_type : combinational;
+      cell_rise(scalar) { values("0.4"); } cell_fall(scalar) { values("0.4"); }
+      rise_transition(scalar) { values("0.02"); } fall_transition(scalar) { values("0.02"); } } }
+pin("D[7]") { direction : input; capacitance : 0.005; }
+pin("Q[7]") { direction : output; function : "D[7]"; max_capacitance : 10; timing() { related_pin : "D[7]"; timing_type : combinational;
+      cell_rise(scalar) { values("0.4"); } cell_fall(scalar) { values("0.4"); }
+      rise_transition(scalar) { values("0.02"); } fall_transition(scalar) { values("0.02"); } } }
+pin("D[8]") { direction : input; capacitance : 0.005; }
+pin("Q[8]") { direction : output; function : "D[8]"; max_capacitance : 10; timing() { related_pin : "D[8]"; timing_type : combinational;
+      cell_rise(scalar) { values("0.4"); } cell_fall(scalar) { values("0.4"); }
+      rise_transition(scalar) { values("0.02"); } fall_transition(scalar) { values("0.02"); } } }
+pin("D[9]") { direction : input; capacitance : 0.005; }
+pin("Q[9]") { direction : output; function : "D[9]"; max_capacitance : 10; timing() { related_pin : "D[9]"; timing_type : combinational;
+      cell_rise(scalar) { values("0.4"); } cell_fall(scalar) { values("0.4"); }
+      rise_transition(scalar) { values("0.02"); } fall_transition(scalar) { values("0.02"); } } }
+pin("D[10]") { direction : input; capacitance : 0.005; }
+pin("Q[10]") { direction : output; function : "D[10]"; max_capacitance : 10; timing() { related_pin : "D[10]"; timing_type : combinational;
+      cell_rise(scalar) { values("0.4"); } cell_fall(scalar) { values("0.4"); }
+      rise_transition(scalar) { values("0.02"); } fall_transition(scalar) { values("0.02"); } } }
+pin("D[11]") { direction : input; capacitance : 0.005; }
+pin("Q[11]") { direction : output; function : "D[11]"; max_capacitance : 10; timing() { related_pin : "D[11]"; timing_type : combinational;
+      cell_rise(scalar) { values("0.4"); } cell_fall(scalar) { values("0.4"); }
+      rise_transition(scalar) { values("0.02"); } fall_transition(scalar) { values("0.02"); } } }
+pin("D[12]") { direction : input; capacitance : 0.005; }
+pin("Q[12]") { direction : output; function : "D[12]"; max_capacitance : 10; timing() { related_pin : "D[12]"; timing_type : combinational;
+      cell_rise(scalar) { values("0.4"); } cell_fall(scalar) { values("0.4"); }
+      rise_transition(scalar) { values("0.02"); } fall_transition(scalar) { values("0.02"); } } }
+pin("D[13]") { direction : input; capacitance : 0.005; }
+pin("Q[13]") { direction : output; function : "D[13]"; max_capacitance : 10; timing() { related_pin : "D[13]"; timing_type : combinational;
+      cell_rise(scalar) { values("0.4"); } cell_fall(scalar) { values("0.4"); }
+      rise_transition(scalar) { values("0.02"); } fall_transition(scalar) { values("0.02"); } } }
+pin("D[14]") { direction : input; capacitance : 0.005; }
+pin("Q[14]") { direction : output; function : "D[14]"; max_capacitance : 10; timing() { related_pin : "D[14]"; timing_type : combinational;
+      cell_rise(scalar) { values("0.4"); } cell_fall(scalar) { values("0.4"); }
+      rise_transition(scalar) { values("0.02"); } fall_transition(scalar) { values("0.02"); } } }
+pin("D[15]") { direction : input; capacitance : 0.005; }
+pin("Q[15]") { direction : output; function : "D[15]"; max_capacitance : 10; timing() { related_pin : "D[15]"; timing_type : combinational;
+      cell_rise(scalar) { values("0.4"); } cell_fall(scalar) { values("0.4"); }
+      rise_transition(scalar) { values("0.02"); } fall_transition(scalar) { values("0.02"); } } }
+pin("D[16]") { direction : input; capacitance : 0.005; }
+pin("Q[16]") { direction : output; function : "D[16]"; max_capacitance : 10; timing() { related_pin : "D[16]"; timing_type : combinational;
+      cell_rise(scalar) { values("0.4"); } cell_fall(scalar) { values("0.4"); }
+      rise_transition(scalar) { values("0.02"); } fall_transition(scalar) { values("0.02"); } } }
+pin("D[17]") { direction : input; capacitance : 0.005; }
+pin("Q[17]") { direction : output; function : "D[17]"; max_capacitance : 10; timing() { related_pin : "D[17]"; timing_type : combinational;
+      cell_rise(scalar) { values("0.4"); } cell_fall(scalar) { values("0.4"); }
+      rise_transition(scalar) { values("0.02"); } fall_transition(scalar) { values("0.02"); } } }
+pin("D[18]") { direction : input; capacitance : 0.005; }
+pin("Q[18]") { direction : output; function : "D[18]"; max_capacitance : 10; timing() { related_pin : "D[18]"; timing_type : combinational;
+      cell_rise(scalar) { values("0.4"); } cell_fall(scalar) { values("0.4"); }
+      rise_transition(scalar) { values("0.02"); } fall_transition(scalar) { values("0.02"); } } }
+pin("D[19]") { direction : input; capacitance : 0.005; }
+pin("Q[19]") { direction : output; function : "D[19]"; max_capacitance : 10; timing() { related_pin : "D[19]"; timing_type : combinational;
+      cell_rise(scalar) { values("0.4"); } cell_fall(scalar) { values("0.4"); }
+      rise_transition(scalar) { values("0.02"); } fall_transition(scalar) { values("0.02"); } } }
+pin("D[20]") { direction : input; capacitance : 0.005; }
+pin("Q[20]") { direction : output; function : "D[20]"; max_capacitance : 10; timing() { related_pin : "D[20]"; timing_type : combinational;
+      cell_rise(scalar) { values("0.4"); } cell_fall(scalar) { values("0.4"); }
+      rise_transition(scalar) { values("0.02"); } fall_transition(scalar) { values("0.02"); } } }
+pin("D[21]") { direction : input; capacitance : 0.005; }
+pin("Q[21]") { direction : output; function : "D[21]"; max_capacitance : 10; timing() { related_pin : "D[21]"; timing_type : combinational;
+      cell_rise(scalar) { values("0.4"); } cell_fall(scalar) { values("0.4"); }
+      rise_transition(scalar) { values("0.02"); } fall_transition(scalar) { values("0.02"); } } }
+pin("D[22]") { direction : input; capacitance : 0.005; }
+pin("Q[22]") { direction : output; function : "D[22]"; max_capacitance : 10; timing() { related_pin : "D[22]"; timing_type : combinational;
+      cell_rise(scalar) { values("0.4"); } cell_fall(scalar) { values("0.4"); }
+      rise_transition(scalar) { values("0.02"); } fall_transition(scalar) { values("0.02"); } } }
+pin("D[23]") { direction : input; capacitance : 0.005; }
+pin("Q[23]") { direction : output; function : "D[23]"; max_capacitance : 10; timing() { related_pin : "D[23]"; timing_type : combinational;
+      cell_rise(scalar) { values("0.4"); } cell_fall(scalar) { values("0.4"); }
+      rise_transition(scalar) { values("0.02"); } fall_transition(scalar) { values("0.02"); } } }
+pin("D[24]") { direction : input; capacitance : 0.005; }
+pin("Q[24]") { direction : output; function : "D[24]"; max_capacitance : 10; timing() { related_pin : "D[24]"; timing_type : combinational;
+      cell_rise(scalar) { values("0.4"); } cell_fall(scalar) { values("0.4"); }
+      rise_transition(scalar) { values("0.02"); } fall_transition(scalar) { values("0.02"); } } }
+pin("D[25]") { direction : input; capacitance : 0.005; }
+pin("Q[25]") { direction : output; function : "D[25]"; max_capacitance : 10; timing() { related_pin : "D[25]"; timing_type : combinational;
+      cell_rise(scalar) { values("0.4"); } cell_fall(scalar) { values("0.4"); }
+      rise_transition(scalar) { values("0.02"); } fall_transition(scalar) { values("0.02"); } } }
+pin("D[26]") { direction : input; capacitance : 0.005; }
+pin("Q[26]") { direction : output; function : "D[26]"; max_capacitance : 10; timing() { related_pin : "D[26]"; timing_type : combinational;
+      cell_rise(scalar) { values("0.4"); } cell_fall(scalar) { values("0.4"); }
+      rise_transition(scalar) { values("0.02"); } fall_transition(scalar) { values("0.02"); } } }
+pin("D[27]") { direction : input; capacitance : 0.005; }
+pin("Q[27]") { direction : output; function : "D[27]"; max_capacitance : 10; timing() { related_pin : "D[27]"; timing_type : combinational;
+      cell_rise(scalar) { values("0.4"); } cell_fall(scalar) { values("0.4"); }
+      rise_transition(scalar) { values("0.02"); } fall_transition(scalar) { values("0.02"); } } }
+pin("D[28]") { direction : input; capacitance : 0.005; }
+pin("Q[28]") { direction : output; function : "D[28]"; max_capacitance : 10; timing() { related_pin : "D[28]"; timing_type : combinational;
+      cell_rise(scalar) { values("0.4"); } cell_fall(scalar) { values("0.4"); }
+      rise_transition(scalar) { values("0.02"); } fall_transition(scalar) { values("0.02"); } } }
+pin("D[29]") { direction : input; capacitance : 0.005; }
+pin("Q[29]") { direction : output; function : "D[29]"; max_capacitance : 10; timing() { related_pin : "D[29]"; timing_type : combinational;
+      cell_rise(scalar) { values("0.4"); } cell_fall(scalar) { values("0.4"); }
+      rise_transition(scalar) { values("0.02"); } fall_transition(scalar) { values("0.02"); } } }
+pin("D[30]") { direction : input; capacitance : 0.005; }
+pin("Q[30]") { direction : output; function : "D[30]"; max_capacitance : 10; timing() { related_pin : "D[30]"; timing_type : combinational;
+      cell_rise(scalar) { values("0.4"); } cell_fall(scalar) { values("0.4"); }
+      rise_transition(scalar) { values("0.02"); } fall_transition(scalar) { values("0.02"); } } }
+pin("D[31]") { direction : input; capacitance : 0.005; }
+pin("Q[31]") { direction : output; function : "D[31]"; max_capacitance : 10; timing() { related_pin : "D[31]"; timing_type : combinational;
+      cell_rise(scalar) { values("0.4"); } cell_fall(scalar) { values("0.4"); }
+      rise_transition(scalar) { values("0.02"); } fall_transition(scalar) { values("0.02"); } } }
+}
+}

@@ -967,6 +967,192 @@ TEST(Placement, ConstantDriversUseLibertyPolarityAndPhysicalCandidates) {
   }
   EXPECT_FALSE(source.find_io("a_high"));  // Only the private physical library changes.
 }
+// Imported constant masters are physical netlist cells, rather than logical
+// constants. A geometry-only replay must be able to retain their shared nets.
+static std::shared_ptr<hhds::Graph> shared_imported_ties(hhds::GraphLibrary& source) {
+  auto io = source.create_io("shared_ties");
+  for (const auto* name : {"high_a", "high_b", "low_a", "low_b", "high_loaded", "low_loaded"}) {
+    io->add_output(name, io->get_output_pin_decls().size());
+    io->set_bits(name, 1);
+  }
+  auto graph = io->create_graph();
+  auto inv = source.create_io("sky130_fd_sc_hd__inv_1");
+  inv->add_input("A", 0);
+  inv->add_output("Y", 0);
+  for (bool high : {false, true}) {
+    auto master = source.create_io(high ? "TIEHI" : "TIELO");
+    master->add_output(high ? "H" : "L", 0);
+    master->set_bits(high ? "H" : "L", 1);
+    auto node = gu::create_typed_node(*graph, Ntype_op::Sub);
+    node.set_subnode(master);
+    node.set_name(high ? "shared_high" : "shared_low");
+    auto driver = node.create_driver_pin(high ? "H" : "L");
+    gu::set_bits(driver, 1);
+    graph->get_output_pin(high ? "high_a" : "low_a").connect_driver(driver);
+    graph->get_output_pin(high ? "high_b" : "low_b").connect_driver(driver);
+    auto load = gu::create_typed_node(*graph, Ntype_op::Sub);
+    load.set_subnode(inv);
+    load.set_name(high ? "high_load" : "low_load");
+    load.create_sink_pin("A").connect_driver(driver);
+    auto output = load.create_driver_pin("Y");
+    gu::set_bits(output, 1);
+    graph->get_output_pin(high ? "high_loaded" : "low_loaded").connect_driver(output);
+  }
+  return graph;
+}
+TEST(Placement, PreserveImportedSharedTieMastersAndGraphPhysicalEndpoints) {
+  hhds::GraphLibrary source;
+  const auto graph = shared_imported_ties(source);
+  auto options = tie_options("preserve_imported", {{"TIEHI", {{"H", true}}}, {"TIELO", {{"L", false}}}});
+  options.preserve_imported_ties = true;
+  options.cache_dir = options.output_dir + "/cache";
+  const std::map<std::string, std::string> expected_masters{
+      {"shared_high", "TIEHI"},
+      {"shared_low",  "TIELO"},
+      {"high_load",   "sky130_fd_sc_hd__inv_1"},
+      {"low_load",    "sky130_fd_sc_hd__inv_1"}};
+  using Endpoints = std::set<std::pair<std::string, std::string>>;
+  const std::multiset<Endpoints> expected_nets{
+      {{"shared_high", "H"}, {"PIN", "high_a"}, {"PIN", "high_b"}, {"high_load", "A"}},
+      {{"shared_low", "L"}, {"PIN", "low_a"}, {"PIN", "low_b"}, {"low_load", "A"}},
+      {{"high_load", "Y"}, {"PIN", "high_loaded"}},
+      {{"low_load", "Y"}, {"PIN", "low_loaded"}}};
+  const auto check = [&](const Result& placed) {
+    std::map<std::string, std::string> masters;
+    for (const auto& c : placed.floorplan.components) {
+      masters.emplace(c.name, c.macro);
+    }
+    EXPECT_EQ(masters, expected_masters);
+    std::multiset<Endpoints> nets;
+    for (const auto& net : placed.floorplan.nets) {
+      Endpoints endpoints;
+      for (const auto& pin : net.connections) {
+        endpoints.emplace(pin.instance, pin.pin);
+      }
+      nets.insert(endpoints);
+    }
+    EXPECT_EQ(nets, expected_nets);
+    for (bool high : {false, true}) {
+      for (const auto* output : {high ? "high_a" : "low_a", high ? "high_b" : "low_b"}) {
+        const auto drivers = placed.graph->get_output_pin(output).get_driver_pins();
+        ASSERT_EQ(drivers.size(), 1);
+        EXPECT_EQ(drivers.front().get_master_node().get_name(), high ? "shared_high" : "shared_low");
+        EXPECT_EQ(drivers.front().get_port_id(), 0);
+        EXPECT_EQ(drivers.front().get_master_node().get_subnode_io()->get_name(), high ? "TIEHI" : "TIELO");
+      }
+    }
+    for (auto node : placed.graph->body().nodes()) {
+      if (node.get_name() != "high_load" && node.get_name() != "low_load") {
+        continue;
+      }
+      for (auto pin : node.inp_pins()) {
+        const auto drivers = pin.get_driver_pins();
+        ASSERT_EQ(drivers.size(), 1);
+        EXPECT_EQ(drivers.front().get_master_node().get_name(), node.get_name() == "high_load" ? "shared_high" : "shared_low");
+      }
+    }
+    rapidjson::Document qor;
+    qor.Parse(placed.qor.c_str());
+    EXPECT_TRUE(qor["preserve_imported_ties"].GetBool());
+  };
+  hhds::GraphLibrary flat;
+  const auto first = place(*graph, flat, options);
+  check(first);
+  // Shared sources must not follow whichever single user happens to be last.
+  // A timing snapshot and a warm placement retain the same exact topology.
+  auto retained = options;
+  retained.previous = std::make_shared<physical::Floorplan>(first.floorplan);
+  retained.retain_placement = true;
+  hhds::GraphLibrary kept;
+  const auto snapshot = place(*first.graph, kept, retained);
+  check(snapshot);
+  for (const auto& c : snapshot.floorplan.components) {
+    const auto old = std::find_if(first.floorplan.components.begin(),
+                                  first.floorplan.components.end(),
+                                  [&](const auto& x) { return x.name == c.name; });
+    ASSERT_NE(old, first.floorplan.components.end());
+    EXPECT_EQ(c.place.x, old->place.x);
+    EXPECT_EQ(c.place.y, old->place.y);
+  }
+  hhds::GraphLibrary warm;
+  check(place(*graph, warm, options));
+  const auto environment = [&] {
+    std::ifstream file(options.cache_dir + "/placement.json");
+    const std::string text{std::istreambuf_iterator<char>(file), {}};
+    rapidjson::Document doc;
+    doc.Parse(text.c_str());
+    return std::string(doc["environment"].GetString());
+  };
+  const auto preserved_key = environment();
+  options.preserve_imported_ties = false;
+  hhds::GraphLibrary split_library;
+  const auto split = place(*graph, split_library, options);
+  EXPECT_NE(environment(), preserved_key);
+  EXPECT_EQ(split.floorplan.components.size(), 8);
+  EXPECT_EQ(split.floorplan.nets.size(), 8);
+  for (const auto& net : split.floorplan.nets) {
+    EXPECT_EQ(net.connections.size(), 2);
+  }
+}
+TEST(Placement, PreserveSharedTieDoesNotLocalizeItsOtherSingleLoadOutput) {
+  hhds::GraphLibrary source, flat;
+  auto io = source.create_io("dual_tie");
+  for (const auto* name : {"high_a", "high_b", "low"}) {
+    io->add_output(name, io->get_output_pin_decls().size());
+    io->set_bits(name, 1);
+  }
+  auto graph = io->create_graph();
+  auto master = source.create_io("DUAL_TIE");
+  master->add_output("H", 0);
+  master->add_output("L", 1);
+  master->set_bits("H", 1);
+  master->set_bits("L", 1);
+  auto node = gu::create_typed_node(*graph, Ntype_op::Sub);
+  node.set_subnode(master);
+  node.set_name("shared");
+  auto high = node.create_driver_pin("H");
+  auto low = node.create_driver_pin("L");
+  gu::set_bits(high, 1);
+  gu::set_bits(low, 1);
+  graph->get_output_pin("high_a").connect_driver(high);
+  graph->get_output_pin("high_b").connect_driver(high);
+  graph->get_output_pin("low").connect_driver(low);
+  auto options = tie_options("preserve_dual", {{"DUAL_TIE", {{"H", true}, {"L", false}}}});
+  options.preserve_imported_ties = true;
+  options.snapshots = true;
+  const auto result = place(*graph, flat, options);
+  ASSERT_EQ(result.floorplan.components.size(), 1);
+  EXPECT_EQ(result.floorplan.components.front().name, "shared");
+  EXPECT_EQ(result.floorplan.components.front().macro, "DUAL_TIE");
+  const auto snapshot = physical::read_def(options.output_dir + "/after_detailed.def");
+  ASSERT_EQ(snapshot.components.size(), 1);
+  // No one-load localization may move the shared cell after detailed placement.
+  EXPECT_EQ(result.floorplan.components.front().place.x, snapshot.components.front().place.x);
+  EXPECT_EQ(result.floorplan.components.front().place.y, snapshot.components.front().place.y);
+  EXPECT_EQ(result.floorplan.nets.size(), 2);
+}
+TEST(Placement, PreserveImportedTiesStillMaterializesLogicalConstantsPerLoad) {
+  hhds::GraphLibrary source, flat;
+  auto options = tie_options("preserve_logical", {{"TIEHI", {{"H", true}}}, {"TIELO", {{"L", false}}}});
+  options.preserve_imported_ties = true;
+  const auto placed = place(*both_constants(source), flat, options);
+  EXPECT_EQ(std::count_if(placed.floorplan.components.begin(),
+                          placed.floorplan.components.end(),
+                          [](const auto& cell) { return cell.name.starts_with("__place_tiehi"); }),
+            2);
+  EXPECT_EQ(std::count_if(placed.floorplan.components.begin(),
+                          placed.floorplan.components.end(),
+                          [](const auto& cell) { return cell.name.starts_with("__place_tielo"); }),
+            1);
+  for (const auto& net : placed.floorplan.nets) {
+    const bool tie = std::any_of(net.connections.begin(),
+                                 net.connections.end(),
+                                 [](const auto& pin) { return pin.instance.starts_with("__place_tie"); });
+    if (tie) {
+      EXPECT_EQ(net.connections.size(), 2);
+    }
+  }
+}
 TEST(Placement, RetainedOriginalNetlistRecreatesSavedTieCells) {
   hhds::GraphLibrary source, flat;
   const auto         graph   = both_constants(source);

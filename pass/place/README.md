@@ -92,6 +92,12 @@ counts as generated, so warm and cold runs agree); an imported floorplan or a
 caller-supplied previous floorplan with FS rows rejects it. Supply pins remain physical power/ground pins. No technology, cell or
 signal-pin spelling is hardcoded. Both the physical nets and private graph use
 the selected constant output; later placement/ECO rounds reuse existing ties.
+`synth.place.preserve_imported_ties=true` (helper JSON `preserve_imported_ties`)
+keeps characterized imported shared tie cells and their exact graph/physical
+endpoints for fixed-netlist geometry replays. Shared sources keep their ordinary
+GP/legalization positions rather than following an arbitrary single load. The
+default remains per-load splitting; logical constants still materialize real
+per-load sources under either setting. The option participates in cache identity.
 Missing characterization or geometry produces an explicit error for the required
 constant value. Library contents participate in placement-cache identity.
 

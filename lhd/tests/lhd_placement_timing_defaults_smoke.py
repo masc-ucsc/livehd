@@ -36,7 +36,7 @@ def run(name, extra, success=True, expect=None):
 
 timed = run('default', ['--set', 'synth.place=true'])
 q = timed['qor']['place']
-assert q['legal'], q
+assert q['legal'] and q['preserve_imported_ties'] is False, q
 # With no macros the default alignment must not impose its 500-iteration ramp.
 alignment = json.loads((root/'default/synth/place/alignment.json').read_text())
 assert alignment['global_same_master'] and alignment['weight'] == 25, alignment
@@ -50,8 +50,9 @@ assert len(td['rounds']) == 1, td
 assert 'pass.place.post_synth_timing' in [p['name'] for p in timed['phases']]
 
 debug = run('debug', ['--set', 'synth.place=true', '--set', 'synth.place.timing_driven=false',
-                      '--set', 'synth.place.macro.align_weight=0'])
+                      '--set', 'synth.place.macro.align_weight=0', '--set', 'synth.place.preserve_imported_ties=true'])
 assert json.loads((root/'debug/synth/place/alignment.json').read_text())['weight'] == 0
+assert debug['qor']['place']['preserve_imported_ties'] is True
 assert debug['qor']['place']['legal'] and 'timing_driven' not in debug['qor']['place']
 assert not any('post_synth_timing' in p['name'] for p in debug['phases'])
 plain = run('synthesis_only', [])

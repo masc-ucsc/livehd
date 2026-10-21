@@ -305,6 +305,7 @@ int main(int argc, char** argv) {
     integer_option("bins", options.bins);
     integer_option("threads", options.threads);
     boolean_option("dynamic_bins", options.dynamic_bins);
+    boolean_option("preserve_imported_ties", options.preserve_imported_ties);
     integer_option("bin_max", options.bin_max);
     boolean_option("auto_bins", options.automatic_bins);
     number_option("local_density_weight", options.local_density_weight);

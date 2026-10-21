@@ -166,6 +166,9 @@ struct Options {
   // don't-care (`assign y = 'x`), so any value is a legal refinement; tie it low
   // instead of refusing the placement. Off keeps the refusal.
   bool                unknown_const_zero = false;
+  // Geometry-only replay: retain characterized imported shared tie masters/nets.
+  // Logical constants still receive real per-load physical sources.
+  bool                preserve_imported_ties = false;
 };
 DreamPlace::native::RoutePolicy resolve_route_policy(const Options&, const Stage_route&);
 void                            initialize_route_tables();

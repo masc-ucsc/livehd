@@ -579,6 +579,9 @@ std::string environment_key(const Options& o, const ph::Technology& tech) {
   if (o.cohesion > 0) {
     h = hash_text(std::format("cohesion:{}", o.cohesion), h);
   }
+  if (o.preserve_imported_ties) {
+    h = hash_text("preserve-imported-ties", h);
+  }
   if (o.unknown_const_zero) {
     h = hash_text("unknown-const-zero", h);
   }
@@ -1515,7 +1518,7 @@ void capture(View& v, const ph::Technology& tech, bool full) {
 // Search free row intervals, using actual oriented pin locations. Functional
 // cells and fixed objects keep their final sites. The transaction falls back to
 // the already legal frame if fragmented free space cannot fit every tie.
-void localize_tie_sites(View& v, const ph::Technology& tech, const std::string& liberty_path) {
+void localize_tie_sites(View& v, const ph::Technology& tech, const std::string& liberty_path, bool preserve_imported_ties) {
   if (liberty_path.empty()) {
     return;
   }
@@ -1523,10 +1526,23 @@ void localize_tie_sites(View& v, const ph::Technology& tech, const std::string& 
   for (const auto& model : liberty::scan_constant_cells(liberty_path)) {
     masters.insert(model.name);
   }
+  // A shared imported source has no unique user to follow. Leave its GP/LG
+  // position alone, including any other output of the same physical cell.
+  std::set<std::string> shared_sources;
+  if (preserve_imported_ties) {
+    for (const auto& [driver, sinks] : v.nets) {
+      if (driver.instance != "PIN" && masters.contains(v.cells[v.cell.at(driver.instance)].macro) && sinks.size() > 1) {
+        shared_sources.insert(driver.instance);
+      }
+    }
+  }
   std::map<size_t, std::vector<Endpoint>>    targets;
   std::map<size_t, std::vector<std::string>> outputs;
   for (const auto& [driver, sinks] : v.nets) {
     if (driver.instance != "PIN" && masters.contains(v.cells[v.cell.at(driver.instance)].macro)) {
+      if (shared_sources.contains(driver.instance)) {
+        continue;
+      }
       if (sinks.size() != 1) {
         throw std::runtime_error("constant output must have exactly one physical load: " + driver.instance);
       }
@@ -3646,7 +3662,7 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
       area               += sinks.size() * selected->area * tech.dbu * tech.dbu;
       max_width           = std::max(max_width, int64_t(std::llround(master.width * tech.dbu)));
       max_height          = std::max(max_height, int64_t(std::llround(master.height * tech.dbu)));
-    } else if (characterized_ties.contains(driver) && sinks.size() > 1) {
+    } else if (!options.preserve_imported_ties && characterized_ties.contains(driver) && sinks.size() > 1) {
       const auto cell  = std::find_if(v.cells.begin(), v.cells.end(), [&](const Cell& c) { return c.name == driver.instance; });
       area            += (sinks.size() - 1) * double(cell->place.width) * cell->place.height;
     }
@@ -3933,13 +3949,22 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
     }
   }
   // Each physical pin/bit owns its driver. Keep an imported single-load tie
-  // (identified by its Liberty function), and split shared ties before GP.
+  // (identified by its Liberty function), and split shared ties before GP
+  // unless a fixed-netlist replay explicitly preserves their topology.
   // Additional names depend on the user, so refresh and cache rounds cannot
   // accidentally merge local sources back into a global constant net.
+  std::set<Endpoint> preserved_ties;
+  if (options.preserve_imported_ties) {
+    for (const auto& [driver, sinks] : v.nets) {
+      if (characterized_ties.contains(driver) && sinks.size() > 1) {
+        preserved_ties.insert(driver);
+      }
+    }
+  }
   std::map<Endpoint, Pin>                   tie_drivers;
   std::map<Endpoint, std::vector<Endpoint>> constant_nets;
   for (const auto& [driver, sinks] : v.nets) {
-    if (driver.constant >= 0 || characterized_ties.contains(driver)) {
+    if (driver.constant >= 0 || (characterized_ties.contains(driver) && !preserved_ties.contains(driver))) {
       constant_nets.emplace(driver, sinks);
     }
   }
@@ -4061,7 +4086,8 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
       bool              changed = false;
       for (int b = 0; b < width; ++b) {
         const auto endpoint = resolver.bit(original, b);
-        const bool constant = endpoint.constant >= 0 || characterized_ties.contains(endpoint);
+        const bool constant
+            = endpoint.constant >= 0 || (characterized_ties.contains(endpoint) && !preserved_ties.contains(endpoint));
         constants.push_back(constant);
         if (constant) {
           const auto physical_pin  = tie_sink_pin(b);
@@ -4111,7 +4137,8 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
     bool              changed = false;
     for (int b = 0; b < width; ++b) {
       const auto endpoint = resolver.bit(original, b);
-      const bool constant = endpoint.constant >= 0 || characterized_ties.contains(endpoint);
+      const bool constant
+          = endpoint.constant >= 0 || (characterized_ties.contains(endpoint) && !preserved_ties.contains(endpoint));
       constants.push_back(constant);
       if (constant) {
         const auto driver  = tie_drivers.at(Endpoint{"PIN", bit_name(decl.name, width, b), -1});
@@ -5821,7 +5848,7 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
   }
   if (options.full && !options.timing_seed && !options.retain_placement && !options.analyze_colors_only) {
     align_macro_geometry(v, tech, v.design, false, true);
-    localize_tie_sites(v, tech, options.liberty);
+    localize_tie_sites(v, tech, options.liberty, options.preserve_imported_ties);
     metrics.legal = dp::is_legal(v.design);
     metrics.hpwl  = dp::hpwl(v.design);
   }
@@ -7119,6 +7146,7 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
     json.Parse(result.qor.c_str());
     auto& allocator = json.GetAllocator();
     json["virtual_fillers"].SetBool(options.virtual_fillers);
+    json.AddMember("preserve_imported_ties", options.preserve_imported_ties, allocator);
     json.AddMember("virtual_filler_count", metrics.filler_count, allocator);
     json.AddMember("virtual_filler_area_um2", metrics.filler_area / tech.dbu / tech.dbu, allocator);
     rapidjson::Value halo(rapidjson::kObjectType);

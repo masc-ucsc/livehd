@@ -1,0 +1,37 @@
+[
+  {
+    "name": "mesh_2x2",
+    "side": 2,
+    "depth": 28,
+    "pattern": "mesh",
+    "target": 12000
+  },
+  {
+    "name": "mesh_4x4",
+    "side": 4,
+    "depth": 24,
+    "pattern": "mesh",
+    "target": 40000
+  },
+  {
+    "name": "ring_8",
+    "side": 3,
+    "depth": 28,
+    "pattern": "ring",
+    "target": 24000
+  },
+  {
+    "name": "hierarchy_4x4",
+    "side": 4,
+    "depth": 32,
+    "pattern": "hierarchy",
+    "target": 54000
+  },
+  {
+    "name": "mesh_6x6",
+    "side": 6,
+    "depth": 24,
+    "pattern": "mesh",
+    "target": 90000
+  }
+]

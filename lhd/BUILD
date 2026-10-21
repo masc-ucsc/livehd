@@ -149,6 +149,8 @@ cc_test(
 genrule(
     name = "physical_salt",
     srcs = [
+        "export_file.cpp",
+        "export_file.hpp",
         "lhd.hpp",
         "lhd_kernel_synth.cpp",
         "physical_cache.cpp",
@@ -169,6 +171,20 @@ cc_library(
     hdrs = ["physical_cache.hpp"],
     copts = COPTS,
     deps = ["@llvm-project//llvm:Support", "@rapidjson"],
+)
+
+cc_library(
+    name = "export_file",
+    srcs = ["export_file.cpp"],
+    hdrs = ["export_file.hpp"],
+    copts = COPTS,
+)
+
+cc_test(
+    name = "export_file_test",
+    srcs = ["export_file_test.cpp"],
+    copts = COPTS,
+    deps = [":export_file", "@googletest//:gtest_main"],
 )
 
 cc_test(
@@ -214,6 +230,7 @@ cc_library(
     includes = ["."],
     visibility = ["//visibility:public"],
     deps = [
+        ":export_file",
         ":lhd_tune",
         ":physical_cache",
         "//core",

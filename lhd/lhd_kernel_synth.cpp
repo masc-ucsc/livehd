@@ -54,6 +54,7 @@
 #include "absl/strings/str_split.h"
 #include "attrs.hpp"
 #include "diag.hpp"
+#include "export_file.hpp"
 #include "graph_library_singleton.hpp"
 #include "lhd_kernel_internal.hpp"
 #include "node_util.hpp"
@@ -354,11 +355,12 @@ livehd::placement::Options placement_options(const Options& opts) {
   if (unknown_const != "error" && unknown_const != "zero") {
     throw Lhd_error{"usage", "synth.place.unknown_const must be error or zero", ""};
   }
-  out.unknown_const_zero = unknown_const == "zero";
-  out.routability        = truthy(synth_set(opts, "place.routability", "true"));
-  out.route_model        = synth_set(opts, "place.route.model", "rudy");
-  out.route_degree       = integer("place.route.degree", "40");
-  out.route_accuracy     = integer("place.route.accuracy", "3");
+  out.unknown_const_zero     = unknown_const == "zero";
+  out.preserve_imported_ties = truthy(synth_set(opts, "place.preserve_imported_ties", "false"));
+  out.routability            = truthy(synth_set(opts, "place.routability", "true"));
+  out.route_model            = synth_set(opts, "place.route.model", "rudy");
+  out.route_degree           = integer("place.route.degree", "40");
+  out.route_accuracy         = integer("place.route.accuracy", "3");
   const auto read_route  = [&](livehd::placement::Stage_route& stage, const std::string& name) {
     const auto prefix             = "place." + name + ".route.";
     stage.model                   = synth_set(opts, prefix + "model", "inherit");
@@ -1562,7 +1564,7 @@ void synth_command(Options& opts, Result& res) {
       ensure_dir(def_out->path);
       const auto destination = fs::path(def_out->path) / "out.def";
       if (canon(destination.string()) != canon(root + "/place/out.def")) {
-        fs::copy_file(root + "/place/out.def", destination, fs::copy_options::overwrite_existing);
+        copy_export_file(root + "/place/out.def", destination);
       }
       res.outputs.push_back(destination.string());
       // A DEF alone is not a portable physical handoff. Preserve the exact
@@ -1576,7 +1578,7 @@ void synth_command(Options& opts, Result& res) {
         const auto  name   = std::to_string(index) + "_" + fs::path(source).filename().string();
         const auto  target = lef_directory / name;
         if (canon(source) != canon(target.string())) {
-          fs::copy_file(source, target, fs::copy_options::overwrite_existing);
+          copy_export_file(source, target);
         }
         if (index) {
           lef_manifest += ",";
@@ -1588,7 +1590,7 @@ void synth_command(Options& opts, Result& res) {
       if (fs::is_regular_file(proxy_lef)) {
         const auto proxy_destination = fs::path(def_out->path) / "memory_proxies.lef";
         if (canon(proxy_destination.string()) != canon(proxy_lef.string())) {
-          fs::copy_file(proxy_lef, proxy_destination, fs::copy_options::overwrite_existing);
+          copy_export_file(proxy_lef, proxy_destination);
         }
         res.outputs.push_back(proxy_destination.string());
         if (!place_options.lefs.empty()) {
@@ -1675,7 +1677,7 @@ void synth_command(Options& opts, Result& res) {
       ensure_dir(report_emit->path);
       const auto destination = fs::path(report_emit->path) / "placement.json";
       if (canon(destination.string()) != canon(place_qor_path)) {
-        fs::copy_file(place_qor_path, destination, fs::copy_options::overwrite_existing);
+        copy_export_file(place_qor_path, destination);
       }
       res.outputs.push_back(destination.string());
     }
@@ -1715,9 +1717,10 @@ void synth_command(Options& opts, Result& res) {
         continue;
       }
       const auto dst = (fs::path(report_emit->path) / fs::path(src).filename()).string();
-      fs::copy_file(src, dst, fs::copy_options::overwrite_existing, ec);
-      if (ec) {
-        throw Lhd_error{"config", std::format("could not write {}: {}", dst, ec.message()), "check --emit-dir report: permissions"};
+      try {
+        copy_export_file(src, dst);
+      } catch (const fs::filesystem_error& error) {
+        throw Lhd_error{"config", std::format("could not write {}: {}", dst, error.what()), "check --emit-dir report: permissions"};
       }
       res.outputs.push_back(dst);
     }

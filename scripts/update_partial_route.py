@@ -190,7 +190,9 @@ def main():
     assert cold['status'] == 'pass' and warm['exit_code'] != 0
     rejected = read_sync('cnn_density/control/attempt001/rejected_attempt_summary.json')
     assert rejected['status'] == 'rejected_fixed_netlist_mutation_stopped'
-    rc_perf = read_sync('rc_perf/paired_summary.json')
+    rc_perf = read_sync('rc_perf/owner_perf_summary.json')
+    rc_owner = read_sync('rc-owner-opt.run.json')
+    assert rc_owner['status'] == 'pass'
     rc_exact = read_sync('rc_perf/owner_boundary_result.json')
     assert rc_exact['status'] == 'pass'
     validation = ('<tr>' + cell('LiteEth incremental') + cell('Cold complete; warm1 failed')
@@ -201,10 +203,10 @@ def main():
                   + cell(number(rejected['measurement']['wall_s'], 1), 'Partial invalid attempt seconds')
                   + cell('Imported shared tie expansion added 1,306 cells; violates the fixed-netlist comparison. Opt-in preservation fix under validation; other policies not launched.')
                   + cell(sync_link('cnn_density/control/attempt001/rejected_attempt_summary.json', 'Rejection and perf evidence')) + '</tr>'
-                  + '<tr>' + cell('OpenTimer RC kernel') + cell('Prototype; owner tests pending')
+                  + '<tr>' + cell('OpenTimer RC kernel') + cell('Published; owner RC tests passed')
                   + cell(number(100 * rc_perf['task_clock_ms']['reduction'], 1) + '% less CPU', 'Median of three isolated paired runs')
                   + cell(number(100 * rc_perf['instructions']['reduction'], 1) + '% fewer instructions. Prepared constants reused across thresholds; 220,378 output comparisons checked, including 16 paired NaNs. No full-flow gain claim.')
-                  + cell(sync_link('rc_perf/paired_summary.json', 'Paired counters') + '; ' + sync_link('rc_perf/owner_boundary_result.json', 'Numerical boundary check')) + '</tr>')
+                  + cell(sync_link('rc_perf/owner_perf_summary.json', 'Paired counters') + '; ' + sync_link('rc_perf/owner_boundary_result.json', 'Numerical boundary check')) + '</tr>')
 
     stamp = datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')
     sources = ''.join(f'<li>{link(path, path)} <code>{digest[:12]}</code></li>' for path, digest in SOURCES.items())
