@@ -193,11 +193,33 @@ def main():
                             + cell(number(100 * obj['CORE_area_in_above80_fraction']) + '%')
                             + cell(link(relative, 'Density evidence')) + '</tr>')
 
+    ey_markers = read('eyeriss_correct_rc_matched/direct_allowcong_guides/completed_iter10_summary.json')
+    assert ey_markers['iteration10_markers'] == 10356 and ey_markers['same_DRT_input_geometry']
+    marker_note = ('At Eyeriss completed check 10, ' + number(100 * ey_markers['iteration10_fraction_in_above80_density'])
+                   + '% of 10,356 DRC markers lie in bins above 80% occupancy; none are within 1 µm of a macro perimeter. '
+                   + link('eyeriss_correct_rc_matched/direct_allowcong_guides/completed_iter10_summary.json', 'Closed spatial comparison')
+                   + '. This is spatial association on a fixed DRT input, not proof of causation.')
+
     cold = read_sync('liteeth_reuse_v2/run/cold/native.run.json')
     warm = read_sync('liteeth_reuse_v2/run/warm1/native.run.json')
     assert cold['status'] == 'pass' and warm['exit_code'] != 0
     rejected = read_sync('cnn_density/control/attempt001/rejected_attempt_summary.json')
     assert rejected['status'] == 'rejected_fixed_netlist_mutation_stopped'
+    reuse = read_sync('liteeth_reuse_v3/run/final_summary.json')
+    reuse_proof = read_sync('liteeth_reuse_v3/run/proof.json')
+    reuse_review = read_sync('liteeth_reuse_v3/parent_review.json')
+    assert reuse_review['status'] == 'approved_preCTS_incremental_reuse_only'
+    assert SYNC_SOURCES['liteeth_reuse_v3/run/final_summary.json'] == reuse_review['summary_sha256']
+    assert SYNC_SOURCES['liteeth_reuse_v3/run/proof.json'] == reuse_review['proof_sha256']
+    assert reuse['status'] == 'pass_corrected_export_cold_and_two_warm'
+    assert reuse_proof['status'] == 'pass_current_source_cold_and_two_warm'
+    for label in ('warm1', 'warm2'):
+        run = reuse_proof['runs'][label]
+        assert run['reused_final_state']
+        for key in ('def_sha256', 'mapped_netlist', 'compiled_graphs', 'exported_lefs'):
+            assert run[key] == reuse_proof['runs']['cold'][key]
+    reuse_times = ' / '.join(number(reuse['rows'][label]['CLI_wall_seconds_GNU_time'], 2)
+                              for label in ('cold', 'warm1', 'warm2'))
     rc_perf = read_sync('rc_perf/owner_perf_summary.json')
     rc_owner = read_sync('rc-owner-opt.run.json')
     integration = read_sync('corrected-integration-opt-retry.run.json')
@@ -206,10 +228,12 @@ def main():
     assert rc_owner['status'] == 'pass'
     rc_exact = read_sync('rc_perf/owner_boundary_result.json')
     assert rc_exact['status'] == 'pass'
-    validation = ('<tr>' + cell('LiteEth incremental') + cell('Cold complete; warm1 failed')
-                  + cell(number(cold['wall_s'], 1) + ' / ' + number(warm['wall_s'], 1), 'Cold / failed warm1 seconds')
-                  + cell('Cached placement restored, then companion LEF export failed on a read-only destination. Export regressions now pass; a fresh three-run proof is pending. Warm2 not run.')
-                  + cell(sync_link('liteeth_reuse_v2/run/warm1/native.run.json', 'Preserved failure')) + '</tr>'
+    validation = ('<tr>' + cell('LiteEth incremental') + cell('<span class="good">Cold + both warms PASS</span>')
+                  + cell(reuse_times, 'Cold / warm1 / authoritative warm2 GNU CLI seconds; excludes perf-wrapper overhead')
+                  + cell('Both warms: ABC 17/17 hits and STA 1 hit, zero misses; restore-only placement; exact DEF/netlist/graph/LEF identity. PreCTS reuse only. Earlier v2 export failure retained.')
+                  + cell(sync_link('liteeth_reuse_v3/run/final_summary.json', 'Reviewed reuse summary') + '; '
+                         + sync_link('liteeth_reuse_v3/parent_review.json', 'Parent verification') + '; '
+                         + sync_link('liteeth_reuse_v2/run/warm1/native.run.json', 'Preserved v2 failure')) + '</tr>'
                   + '<tr>' + cell('CNN density control') + cell('Rejected; stopped at iteration 450')
                   + cell(number(rejected['measurement']['wall_s'], 1), 'Partial invalid attempt seconds')
                   + cell('Imported shared tie expansion added 1,306 cells; violates the fixed-netlist comparison. Opt-in preservation fix and its regressions now pass; a fresh density study is pending. Other policies not launched.')
@@ -242,6 +266,7 @@ def main():
 <div class="scroll"><table><thead><tr><th>Design</th><th>Arm</th><th>Boundary</th><th>Bins above 80%</th><th>Cell area in hot bins</th><th>Evidence</th></tr></thead><tbody>@DENSITY@</tbody></table></div>
 <p>The matched preCTS CNN pair contains exactly the same 333,888 CORE cells and 43,982.961 µm² of cell area. At 512², LiveHD has 42.911% of its cell area in hot bins, versus none for OpenROAD. At 64², that LiveHD fraction appears to be only 3.828%, showing how the coarse density view hides local crowding. The routing-estimator grid remains unchanged; this motivates finer placement-density feedback.</p>
 <p>The strong density association motivates spreading experiments. It does not by itself prove marker causation: the placement policies differ, and CTS and repair add different cells and clock trees to the two arms. The separate postGRT rows show that later measurement boundary explicitly.</p>
+<p>@MARKER_NOTE@</p>
 <h2>New-source validation in progress</h2>
 <p>These checks use the newly synchronized source snapshot and remain separate from the routed comparison above. Failed and rejected attempts are retained; they do not establish routing or reuse success.</p>
 <div class="scroll"><table><thead><tr><th>Check</th><th>Status</th><th>Measured cost</th><th>Finding</th><th>Evidence</th></tr></thead><tbody>@VALIDATION@</tbody></table></div>
@@ -256,7 +281,7 @@ def main():
 '''
     for key, value in {'STAMP': stamp, 'ROWS': ''.join(rows), 'DENSITY': ''.join(density_rows),
                        'CNN': f'{cnn_counts["LiveHD"]:,}', 'CNN_FINAL': cnn_final_note,
-                       'EY': f'{ey_last["violations"]:,}', 'VALIDATION': validation, 'SOURCES': sources}.items():
+                       'EY': f'{ey_last["violations"]:,}', 'VALIDATION': validation, 'MARKER_NOTE': marker_note, 'SOURCES': sources}.items():
         page = page.replace('@' + key + '@', value)
     output = ROOT / 'docs/partial_route.html'
     output.write_text(page)
