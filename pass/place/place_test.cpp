@@ -521,7 +521,8 @@ TEST(Placement, TechnologyClockPinsAreExcludedOnlyFromPlacementCost) {
   EXPECT_EQ(automatic.floorplan.nets, reset.floorplan.nets);
 }
 TEST(Placement, TimingCheckpointsCarryConnectivityForAutomaticResetCuts) {
-  for (bool floorplan : {false, true}) {
+  for (unsigned mode = 0; mode < 4; ++mode) {
+    const bool floorplan = mode & 1;
     hhds::GraphLibrary source, flat;
     auto io = source.create_io("checkpoint_controls");
     for (const auto& [name, port] : std::vector<std::pair<std::string, unsigned>>{{"clk", 0}, {"trigger", 1}, {"data", 2}}) {
@@ -575,6 +576,8 @@ TEST(Placement, TimingCheckpointsCarryConnectivityForAutomaticResetCuts) {
     options.liberty    = "inou/lefdef/tests/data/sky130hd.lib";
     options.lefs       = {"inou/lefdef/tests/data/sky130hd.tlef", "inou/lefdef/tests/data/sky130hd.lef"};
     options.output_dir = std::string(std::getenv("TEST_TMPDIR")) + (floorplan ? "/checkpoint_fp" : "/checkpoint_final");
+    options.output_dir += std::to_string(mode);
+    options.control_ports = mode & 2 ? "clk" : "";
     std::filesystem::create_directories(options.output_dir);
     const auto sdc = options.output_dir + "/timing.sdc";
     std::ofstream(sdc) << "create_clock -name clk -period 10 [get_ports clk]\n"

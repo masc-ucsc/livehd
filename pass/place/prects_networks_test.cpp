@@ -133,7 +133,7 @@ TEST(PrectsNetworks, LefAndTimingEvidenceNeedNoFiniteSlack) {
   EXPECT_EQ(excluded.ignored, (std::vector<bool>{true, true, true, true}));
   EXPECT_TRUE(excluded.timing_cuts.empty());
 }
-TEST(PrectsNetworks, ExplicitPortsReplaceMetadataAndLibraryClockResetRoots) {
+TEST(PrectsNetworks, ExplicitPortsReplaceOptionalMetadataAndLibraryRoots) {
   auto roles = library();
   roles.pins.insert("registered:q");
   physical::Technology tech;
@@ -159,6 +159,37 @@ TEST(PrectsNetworks, ExplicitPortsReplaceMetadataAndLibraryClockResetRoots) {
   const auto clock_override = prects_networks(tech, fp, roles, timing);
   EXPECT_EQ(clock_override.ignored, (std::vector<bool>{true, false, false}));
   EXPECT_TRUE(clock_override.timing_cuts.empty());  // clock is still needed for launch/capture
+}
+
+TEST(PrectsNetworks, ExplicitPortsCannotDisableRecognizedResetFalsePaths) {
+  auto roles              = library();
+  roles.ports             = {"chosen"};
+  roles.override_controls = true;
+  ASSERT_TRUE(roles.resets.at("state").contains("r"));
+  roles.reset_ports.insert("trigger");
+  roles.reset_pins.insert("registered:q");
+  physical::Technology tech;
+  physical::Floorplan  fp;
+  fp.components = {
+      {"r0", "unary", {}}, {"r1", "invert", {}}, {"ff", "state", {}}, {"data", "functional_logic", {}}
+  };
+  fp.nets = {
+      {"root", {{"PIN", "unlisted"}, {"r0", "i"}}},
+      {"leaf", {{"r0", "o"}, {"r1", "i"}, {"ff", "r"}}},
+      {"sibling", {{"r1", "o"}, {"PIN", "out"}}},
+      {"sync", {{"registered", "q"}, {"ff", "d"}}},
+      {"port", {{"PIN", "trigger"}, {"data", "i"}}},
+      {"functional", {{"data", "o"}, {"PIN", "result"}}},
+      {"clock", {{"PIN", "clk"}, {"ff", "c"}}},
+      {"explicit", {{"PIN", "chosen"}}}
+  };
+  const auto excluded = prects_networks(tech, fp, roles);
+  EXPECT_EQ(excluded.ignored, (std::vector<bool>{true, true, true, true, true, false, false, true}));
+  for (const auto* pin : {"unlisted", "r0:o", "ff:r", "out", "registered:q", "ff:d", "trigger", "data:i"}) {
+    EXPECT_TRUE(excluded.timing_cuts.contains(pin)) << pin;
+  }
+  EXPECT_FALSE(excluded.timing_cuts.contains("data:o"));
+  EXPECT_FALSE(excluded.timing_cuts.contains("ff:c"));
 }
 
 }  // namespace livehd::placement

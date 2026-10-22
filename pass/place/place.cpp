@@ -958,6 +958,8 @@ void collect_control_roles(hhds::Graph& graph, Resolver& resolve, Prects_library
   }
   roles.clock_ports.clear();
   roles.clock_pins.clear();
+  roles.reset_ports.clear();
+  roles.reset_pins.clear();
   const auto collect = [&](const hhds::Node_class& node) {
     for (auto pin : node.out_sorted_pins()) {
       if (!gu::signal_roles_of(pin)) {
@@ -975,6 +977,9 @@ void collect_control_roles(hhds::Graph& graph, Resolver& resolve, Prects_library
         }
         if (gu::signal_roles_of(pin) & attrs::signal_clock) {
           (port ? roles.clock_ports : roles.clock_pins).insert(label);
+        }
+        if (gu::signal_roles_of(pin) & attrs::signal_reset) {
+          (port ? roles.reset_ports : roles.reset_pins).insert(label);
         }
       }
     }
@@ -7495,15 +7500,24 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
 
     json.AddMember("preserve_imported_ties", options.preserve_imported_ties, allocator);
     rapidjson::Value controls(rapidjson::kObjectType), ports(rapidjson::kArrayType), pins(rapidjson::kArrayType);
+    rapidjson::Value reset_ports(rapidjson::kArrayType), reset_pins(rapidjson::kArrayType);
     for (const auto& name : v.prects.ports) {
       ports.PushBack(rapidjson::Value(name.c_str(), allocator), allocator);
     }
     for (const auto& name : v.prects.pins) {
       pins.PushBack(rapidjson::Value(name.c_str(), allocator), allocator);
     }
+    for (const auto& name : v.prects.reset_ports) {
+      reset_ports.PushBack(rapidjson::Value(name.c_str(), allocator), allocator);
+    }
+    for (const auto& name : v.prects.reset_pins) {
+      reset_pins.PushBack(rapidjson::Value(name.c_str(), allocator), allocator);
+    }
     controls.AddMember("override", v.prects.override_controls, allocator);
     controls.AddMember("ports", ports, allocator);
     controls.AddMember("pins", pins, allocator);
+    controls.AddMember("reset_ports", reset_ports, allocator);
+    controls.AddMember("reset_pins", reset_pins, allocator);
     controls.AddMember("ignored_nets", uint64_t(std::count(v.ignored.ignored.begin(), v.ignored.ignored.end(), true)), allocator);
     json.AddMember("prects_controls", controls, allocator);
     json.AddMember("virtual_filler_count", metrics.filler_count, allocator);

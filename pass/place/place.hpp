@@ -87,7 +87,7 @@ struct Options {
   livehd::timing::Whatif*               whatif       = nullptr;
   // Legacy reset-tree control retained for a clear diagnostic on nonzero values.
   unsigned                              reset_fanout = 0;  // retired: pre-CTS control nets are never buffered
-  std::string                           control_ports;     // nonempty explicit override of automatic clock/reset roots
+  std::string                           control_ports;     // override optional roots; recognized resets stay excluded
   Evaluate                              fp_evaluate;
   double                                fp_minimum = 3000, fp_attraction = .25, fp_repulsion = 5, fp_anchor = .25;
   bool                                  fp_distance_attraction = true;

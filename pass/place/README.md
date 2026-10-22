@@ -734,9 +734,10 @@ LEF CLOCK pins, and timing clock flags supply additional automatic role evidence
 The exclusion propagates in both directions through characterized buffers/inverters
 and the clock path of ICGs, including sibling distribution branches. It stops at
 functional logic; an ICG enable remains data. No net or cell is deleted from DEF/STA.
-A nonempty `synth.place.control_ports=CLK,RESETN` explicitly replaces automatic
-clock/reset roots with the named ports; the default empty value uses automatic
-detection. There is no substring-based net-name inference. QoR `prects_controls`
+A nonempty `synth.place.control_ports=CLK,RESETN` replaces optional automatic
+roots with the named ports; recognized resets remain excluded regardless of this
+override or SDC exceptions. The default empty value uses automatic detection.
+There is no substring-based net-name inference. QoR `prects_controls`
 reports the resolved metadata roots, override status and excluded-net count.
 The native placement timing session also cuts non-clock control-net timing arcs
 before propagation; this prevents registered-reset arrivals from contaminating

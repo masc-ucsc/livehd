@@ -12,11 +12,13 @@
 namespace livehd::placement {
 // Read once per placement invocation; never infer a signal role from a cell or
 // net name. Internal pin seeds come from synthesis signal-role metadata. A
-// nonempty explicit control_ports list replaces automatic clock/reset roots.
+// nonempty explicit control_ports list replaces optional automatic roots;
+// recognized reset roots always remain false paths for placement timing.
 struct Prects_library {
-  std::map<std::string, std::set<std::string>>                            controls, clocks;
+  std::map<std::string, std::set<std::string>>                            controls, clocks, resets;
   std::map<std::string, std::vector<std::pair<std::string, std::string>>> links;
   std::set<std::string>                                                   ports, pins, clock_ports, clock_pins;
+  std::set<std::string>                                                   reset_ports, reset_pins;
   bool                                                                    override_controls = false;
 };
 Prects_library prects_library(const std::string& liberty, const std::string& control_ports = {});

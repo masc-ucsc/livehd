@@ -39,6 +39,11 @@ Prects_library prects_library(const std::string& library, const std::string& con
         pins.insert(pin);
       }
     }
+    for (const auto& pin : {cell.reset0_pin, cell.reset1_pin}) {
+      if (!pin.empty()) {
+        result.resets[cell.name].insert(pin);
+      }
+    }
   }
   for (const auto& cell : liberty::scan_memory_cells(library)) {
     for (const auto& pin : cell.pins) {
@@ -91,7 +96,7 @@ Prects_networks prects_networks(const physical::Technology& tech, const physical
       pending.push_back(n);
     }
   };
-  std::unordered_map<std::string, const std::set<std::string>*> controls, clocks;
+  std::unordered_map<std::string, const std::set<std::string>*> controls, clocks, resets;
   for (const auto& c : fp.components) {
     if (auto found = roles.clocks.find(c.macro); found != roles.clocks.end()) {
       clocks.emplace(c.name, &found->second);
@@ -99,11 +104,18 @@ Prects_networks prects_networks(const physical::Technology& tech, const physical
     if (auto found = roles.controls.find(c.macro); found != roles.controls.end()) {
       controls.emplace(c.name, &found->second);
     }
+    if (auto found = roles.resets.find(c.macro); found != roles.resets.end()) {
+      resets.emplace(c.name, &found->second);
+    }
   }
   for (size_t n = 0; n < fp.nets.size(); ++n) {
     for (const auto& c : fp.nets[n].connections) {
       const auto label = c.instance == "PIN" ? c.pin : c.instance + ":" + c.pin;
       pin_net.emplace(label, n);
+      if ((c.instance == "PIN" && roles.reset_ports.contains(c.pin))
+          || (c.instance != "PIN" && (roles.reset_pins.contains(label) || roles.reset_pins.contains(c.instance + "/" + c.pin)))) {
+        mark(n);
+      }
       if ((c.instance == "PIN" && roles.clock_ports.contains(c.pin)) || (c.instance != "PIN" && roles.clock_pins.contains(label))) {
         mark_clock(n);
       }
@@ -144,6 +156,10 @@ Prects_networks prects_networks(const physical::Technology& tech, const physical
       if (auto p = controls.find(c.instance);
           !roles.override_controls && p != controls.end()
           && (p->second->contains(c.pin) || p->second->contains(c.pin.substr(0, c.pin.find('['))))) {
+        mark(n);
+      }
+      if (auto p = resets.find(c.instance);
+          p != resets.end() && (p->second->contains(c.pin) || p->second->contains(c.pin.substr(0, c.pin.find('['))))) {
         mark(n);
       }
     }
