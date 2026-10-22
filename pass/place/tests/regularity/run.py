@@ -58,6 +58,11 @@ def run(case, args, output):
     settings['synth.place.fp.min_macros'] = args.min_macros
     if args.snap_mode:
         settings['synth.place.macro.snap_mode'] = args.snap_mode
+    if case.get('fixed_macros'):
+        settings['synth.place.floorplan'] = ROOT/(case['name']+'.def')
+        # Keep this fixture's root logic in one synthesis color so the DEF
+        # names retain their source call sites instead of generated wrappers.
+        settings['pass.color.synth.mode'] = 'synth'
     cmd = [args.lhd, 'synth', ROOT/(case['name']+'.prp'), f'lg:{directory}/macro_lg',
            '--top', case['name']+'.top', '--seed', '1', '--workdir', directory/'work',
            '--result-json', directory/'result.json', '--emit-dir', f'def:{directory}/physical', '-q']
@@ -86,9 +91,18 @@ def run(case, args, output):
             previous = macro_cells[name]
             if cell['status'] != 'FIXED' or any(cell[k] != previous[k] for k in ('x', 'y', 'orientation')):
                 raise ValueError(f'macro handoff moved or unlocked {name}')
-    _, _, exported = render.read_def(directory/'physical/out.def')
+    exported_units, _, exported = render.read_def(directory/'physical/out.def')
     if exported != cells:
         raise ValueError('exported DEF differs from the measured final placement')
+    if case.get('fixed_macros'):
+        anchor_units, _, anchors = render.read_def(ROOT/(case['name']+'.def'))
+        if anchor_units != exported_units:
+            raise ValueError(f'anchor DEF units {anchor_units} differ from exported DEF units {exported_units}')
+        for name, anchor in anchors.items():
+            if name not in cells:
+                raise ValueError(f'explicit macro anchor missing from exported DEF: {name}')
+            if any(cells[name][k] != anchor[k] for k in ('master', 'status', 'x', 'y', 'orientation')):
+                raise ValueError(f'explicit macro anchor moved: {name}')
     # Every view uses actual stage coordinates and the retained physical IDs.
     stages = [('fp_plan', place/'macro/fp_gp.json'), ('macro_plan', place/'macro/out.def'),
               ('before_legalization', place/'gp.json'), ('after_legalization', place/'after_legalization.def'),
@@ -104,10 +118,14 @@ def run(case, args, output):
             stage_units, stage_die, stage_cells = render.read_def(source)
             render.actual(case, stage_units, stage_die, stage_cells, directory/(name+'.png'))
             views[name] = render.scores(case, points, edges, stage_cells)
-    metrics = dict(name=case['name'], standard_cells=standard_cells, macros=macros, seconds=time.monotonic()-started,
+    inputs = [Path(args.lhd), ROOT/(case['name']+'.prp'), ROOT/'macros.v', ROOT/'fake.lib', ROOT/'fake.lef', ROOT/'timing.sdc', ROOT/'run.py', ROOT/'render.py']
+    if case.get('fixed_macros'):
+        inputs.append(ROOT/(case['name']+'.def'))
+    metrics = dict(name=case['name'], standard_cells=standard_cells, macros=macros,
+                   fixed_macro_anchors=len(case.get('fixed_macros', [])), seconds=time.monotonic()-started,
                    hpwl_um=qor['hpwl_um'], wns=qor['wns'], tns=qor['tns'], time_unit=qor.get('time_unit'),
                    legal=qor['legal'], gp_converged=qor['gp_converged'], stages=views,
-                   provenance={p.name: render.digest(p) for p in [Path(args.lhd), ROOT/(case['name']+'.prp'), ROOT/'macros.v', ROOT/'fake.lib', ROOT/'fake.lef', ROOT/'timing.sdc', ROOT/'run.py', ROOT/'render.py']},
+                   provenance={p.name: render.digest(p) for p in inputs},
                    settings={k:str(v) for k,v in settings.items()})
     if render.digest(args.lhd) != binary_hash:
         raise ValueError('lhd binary changed during measurement; rebuild first, then rerun')
@@ -128,6 +146,7 @@ def report(output, results):
         pictures = ''.join(f'<figure><img src="{name}/{view}.png" alt="{name}: {view}"><figcaption>{view}</figcaption></figure>'
                            for view in ['expected', 'fp_plan', 'macro_plan', 'before_legalization', 'after_legalization', 'final'])
         metric_html = f'''<p>{item['standard_cells']:,} standard cells; {item['macros']} macros.
+          {item.get('fixed_macro_anchors', 0)} explicit fixed anchors; {item['macros']-item.get('fixed_macro_anchors', 0)} initially movable macros.
           HPWL <b>{item['hpwl_um']:,.1f} µm</b>; WNS <b>{item['wns']:.4g} {html.escape(str(item['time_unit']))}</b>;
           TNS <b>{item['tns']:.4g} {html.escape(str(item['time_unit']))}</b>.
           Pattern RMS {item['stages']['final']['pattern_rms_pitch']:.3f} pitches;
@@ -149,7 +168,8 @@ def report(output, results):
       .error{color:#a21b28} @media(max-width:800px){.views{grid-template-columns:1fr}}</style>
       <h1>Placement regularity — measured results</h1>
       <p>Expected views are idealized topology sketches. Other PNGs use actual flow coordinates.
-      Colors identify tile ownership; dark outlines identify hard macros. White space and skew are observable results.
+      Colors identify tile ownership; outlines identify hard macros, with red marking explicit fixed anchors.
+      White space and skew are observable results.
       The invented Liberty/LEF and placement RC estimate are for comparisons within this suite, not silicon signoff.</p>
       <p>Lower pattern RMS (similarity fit allowing rotation/reflection, in grid pitches) and adjacent-edge length CV
       indicate a more regular macro frame. Timing uses a 20ns clock; no timing-closure threshold is imposed.

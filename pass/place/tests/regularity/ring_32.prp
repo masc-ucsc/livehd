@@ -52,19 +52,11 @@ mod tile::[timecheck=false](a:U32, b:U32, salt:U32) -> (q:U32@[0]) {
   x = r22 ^ (x & b) ^ salt
   const r23:U32 = ((x << 5) | (x >> 27))#[0..<32]
   x = r23 ^ (x & b) ^ salt
-  const r24:U32 = ((x << 5) | (x >> 27))#[0..<32]
-  x = r24 ^ (x & b) ^ salt
-  const r25:U32 = ((x << 5) | (x >> 27))#[0..<32]
-  x = r25 ^ (x & b) ^ salt
-  const r26:U32 = ((x << 5) | (x >> 27))#[0..<32]
-  x = r26 ^ (x & b) ^ salt
-  const r27:U32 = ((x << 5) | (x >> 27))#[0..<32]
-  x = r27 ^ (x & b) ^ salt
   state = x
   q = hard::[name=macro](D=state)
 }
 
-pub mod top::[timecheck=false](salt:U32) -> (q:U256@[0]) {
+pub mod top::[timecheck=false](salt:U32) -> (q:U1024@[0]) {
   wire w0:U32 = nil
   wire w1:U32 = nil
   wire w2:U32 = nil
@@ -73,13 +65,61 @@ pub mod top::[timecheck=false](salt:U32) -> (q:U256@[0]) {
   wire w5:U32 = nil
   wire w6:U32 = nil
   wire w7:U32 = nil
-  w0 = tile::[name=t0](a=w1, b=w7, salt=salt ^ 1)
+  wire w8:U32 = nil
+  wire w9:U32 = nil
+  wire w10:U32 = nil
+  wire w11:U32 = nil
+  wire w12:U32 = nil
+  wire w13:U32 = nil
+  wire w14:U32 = nil
+  wire w15:U32 = nil
+  wire w16:U32 = nil
+  wire w17:U32 = nil
+  wire w18:U32 = nil
+  wire w19:U32 = nil
+  wire w20:U32 = nil
+  wire w21:U32 = nil
+  wire w22:U32 = nil
+  wire w23:U32 = nil
+  wire w24:U32 = nil
+  wire w25:U32 = nil
+  wire w26:U32 = nil
+  wire w27:U32 = nil
+  wire w28:U32 = nil
+  wire w29:U32 = nil
+  wire w30:U32 = nil
+  wire w31:U32 = nil
+  w0 = tile::[name=t0](a=w1, b=w31, salt=salt ^ 1)
   w1 = tile::[name=t1](a=w0, b=w2, salt=salt ^ 2)
   w2 = tile::[name=t2](a=w1, b=w3, salt=salt ^ 3)
   w3 = tile::[name=t3](a=w2, b=w4, salt=salt ^ 4)
   w4 = tile::[name=t4](a=w3, b=w5, salt=salt ^ 5)
   w5 = tile::[name=t5](a=w4, b=w6, salt=salt ^ 6)
   w6 = tile::[name=t6](a=w5, b=w7, salt=salt ^ 7)
-  w7 = tile::[name=t7](a=w0, b=w6, salt=salt ^ 8)
-  q = (w7, w6, w5, w4, w3, w2, w1, w0)#[..]
+  w7 = tile::[name=t7](a=w6, b=w8, salt=salt ^ 8)
+  w8 = tile::[name=t8](a=w7, b=w9, salt=salt ^ 9)
+  w9 = tile::[name=t9](a=w8, b=w10, salt=salt ^ 10)
+  w10 = tile::[name=t10](a=w9, b=w11, salt=salt ^ 11)
+  w11 = tile::[name=t11](a=w10, b=w12, salt=salt ^ 12)
+  w12 = tile::[name=t12](a=w11, b=w13, salt=salt ^ 13)
+  w13 = tile::[name=t13](a=w12, b=w14, salt=salt ^ 14)
+  w14 = tile::[name=t14](a=w13, b=w15, salt=salt ^ 15)
+  w15 = tile::[name=t15](a=w14, b=w16, salt=salt ^ 16)
+  w16 = tile::[name=t16](a=w15, b=w17, salt=salt ^ 17)
+  w17 = tile::[name=t17](a=w16, b=w18, salt=salt ^ 18)
+  w18 = tile::[name=t18](a=w17, b=w19, salt=salt ^ 19)
+  w19 = tile::[name=t19](a=w18, b=w20, salt=salt ^ 20)
+  w20 = tile::[name=t20](a=w19, b=w21, salt=salt ^ 21)
+  w21 = tile::[name=t21](a=w20, b=w22, salt=salt ^ 22)
+  w22 = tile::[name=t22](a=w21, b=w23, salt=salt ^ 23)
+  w23 = tile::[name=t23](a=w22, b=w24, salt=salt ^ 24)
+  w24 = tile::[name=t24](a=w23, b=w25, salt=salt ^ 25)
+  w25 = tile::[name=t25](a=w24, b=w26, salt=salt ^ 26)
+  w26 = tile::[name=t26](a=w25, b=w27, salt=salt ^ 27)
+  w27 = tile::[name=t27](a=w26, b=w28, salt=salt ^ 28)
+  w28 = tile::[name=t28](a=w27, b=w29, salt=salt ^ 29)
+  w29 = tile::[name=t29](a=w28, b=w30, salt=salt ^ 30)
+  w30 = tile::[name=t30](a=w29, b=w31, salt=salt ^ 31)
+  w31 = tile::[name=t31](a=w0, b=w30, salt=salt ^ 32)
+  q = (w31, w30, w29, w28, w27, w26, w25, w24, w23, w22, w21, w20, w19, w18, w17, w16, w15, w14, w13, w12, w11, w10, w9, w8, w7, w6, w5, w4, w3, w2, w1, w0)#[..]
 }

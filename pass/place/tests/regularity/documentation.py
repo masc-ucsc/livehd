@@ -14,9 +14,11 @@ DESCRIPTIONS = {
                 'Expect a square, short balanced corridors, and four similarly sized logic neighborhoods.',
     'mesh_4x4': 'Sixteen hard macros on a non-wrapping Manhattan mesh. Interior tiles have four neighbors; '
                 'corners have two. Expect four rows and four columns with approximately equal pitch.',
-    'ring_8': 'Eight macros form one closed cycle around an empty center. Expect an open central region '
-              'and logic along the eight edges. An octagonal or rotated ring is also reasonable; the square-ring '
-              'similarity score deliberately measures the illustrated square template.',
+    'ring_32': 'A closed serpentine: 32 macro points across four alternating horizontal runs. '
+               'The four outer corners (0, 7, 24, 31) are fixed; the other 28 macros remain movable. '
+               'Expect regular points along the runs and logic following the folded cycle. '
+               'The reference draws the closing connection around the outside; this is not a routing guide. '
+               'The four anchors reduce geometric freedom without forcing the interior folds, so pattern scores remain advisory.',
     'hierarchy_4x4': 'Four repeated quadrants, each containing a four-tile square. Corresponding tiles in '
                      'neighboring quadrants communicate as well as local neighbors. Expect four cohesive '
                      'groups with repeated internal shape; the longer inter-quadrant links are intentional.',
@@ -38,8 +40,11 @@ def main():
             render.expected(case, points, edges, image)
             encoded = base64.b64encode(image.read_bytes()).decode()
             result = '../repros/placement_regularity/'+name
+            constraints = (f' · <a href="../pass/place/tests/regularity/{name}.def">Fixed corner DEF</a>'
+                           if case.get('fixed_macros') else '')
             cards.append(f'''<section id="{name}"><h2>{name}</h2><p>{DESCRIPTIONS[name]}</p>
             <p>{len(points)} macros · target ≈{case['target']:,} standard cells (the actual mapped count is checked) ·
+            {len(case.get('fixed_macros', []))} explicit fixed anchors{constraints} ·
             <a href="../pass/place/tests/regularity/{name}.prp">Pyrope source</a></p>
             <div class="pair"><figure><img src="data:image/png;base64,{encoded}" alt="Idealized {name} placement">
             <figcaption>Expected PNG regularity — manually designed topology, not measured placement.</figcaption></figure>
@@ -68,7 +73,8 @@ The purpose is to make physical structure easy to inspect through the complete P
 <p>The expected PNGs below are topology sketches, with macro squares and standard-cell corridors.
 Actual PNGs and timing numbers are generated locally under ignored <code>repros/placement_regularity/</code>.
 No measured result is checked into this guide. Tile colors are consistent between the sketches and stage views;
-dark outlines identify macro bodies. A sketch does not prescribe an exact gate location.</p>
+outlines identify macro bodies, with red marking the four explicit corner anchors in the serpentine.
+A sketch does not prescribe an exact gate location.</p>
 <p><a href="../repros/placement_regularity/index.html">Open the complete generated report</a> ·
 <a href="../pass/place/tests/regularity/BUILD">Bazel targets</a> ·
 <a href="../pass/place/tests/regularity/generate.py">Fixture generator</a></p>
@@ -115,9 +121,16 @@ default is 2). A hierarchy candidate needs <em>more</em> than that many movable 
 one- and few-macro tiles would never become hierarchy candidates: they would fall back to unsnapped color centroids and the
 floorplan snap would not be exercised. With 0, every repeated tile (four or more siblings under one parent,
 <code>synth.place.fp.min_copies</code>) is a snap-eligible hierarchy candidate. Snapshots are required: missing stage data fails the run.
-The optional <code>--snap-mode alignment|symmetry</code> sets <code>synth.place.macro.snap_mode</code> for the macro stage.
-Macro placement remains free in these five baselines. Pyrope fixed-coordinate attributes are not consumed by
-the current physical flow; fixed-frame experiments should use the supported imported DEF interface rather than ignored hints.</p>
+The optional <code>--snap-mode alignment|symmetry</code> sets <code>synth.place.macro.snap_mode</code> for the macro stage.</p>
+<p>The mesh and hierarchy cases start with all macros movable. The serpentine imports a generated DEF containing
+only its four corner macros as FIXED components; all 28 other macros and all standard cells remain movable.
+The runner verifies each fixed corner survives unchanged and that the macro-stage handoff preserves every macro.
+Pyrope fixed-coordinate attributes are not consumed by the current physical flow; this fixture uses the supported DEF interface.</p>
+<p>The serpentine explicitly selects <code>pass.color.synth.mode=synth</code> to keep its root logic in one color
+and retain the source instance names used by its DEF. The default cone coloring can wrap those instances in
+generated hierarchy. The other cases retain their default synthesis coloring.</p>
+<p>The serpentine follows the alternating runs in <a href="https://share.google/YXcon6ciunlGzwLwz">the supplied zigzag reference</a>,
+with an outside connection closing its two ends into one cycle. The reference image is not copied into the repository.</p>
 '''+''.join(cards)+'''
 <p>Refresh sources/technology with <code>python3 pass/place/tests/regularity/generate.py</code> and this guide with
 <code>python3 pass/place/tests/regularity/documentation.py</code>. The fast check detects stale generated fixtures.</p>

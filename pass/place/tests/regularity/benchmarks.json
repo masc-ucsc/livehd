@@ -14,11 +14,17 @@
     "target": 40000
   },
   {
-    "name": "ring_8",
-    "side": 3,
-    "depth": 28,
-    "pattern": "ring",
-    "target": 24000
+    "name": "ring_32",
+    "side": 9,
+    "depth": 24,
+    "pattern": "serpentine",
+    "target": 80000,
+    "fixed_macros": [
+      0,
+      7,
+      24,
+      31
+    ]
   },
   {
     "name": "hierarchy_4x4",

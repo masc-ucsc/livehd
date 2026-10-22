@@ -58,21 +58,51 @@ def color(index):
     return palette[index % len(palette)]
 
 
+def reference_routes(case, points, edges):
+    routes = []
+    for a, b in edges:
+        route = [points[a], points[b]]
+        if case['pattern'] == 'serpentine' and (a, b) == (0, len(points)-1):
+            # Draw the closing connection outside the folded runs. This is a
+            # reference sketch, not a routing guide or a measured wire path.
+            route = [points[a], (0, points[a][1]), (0, points[b][1]), points[b]]
+        routes.append((a, b, route))
+    return routes
+
+
 def expected(case, points, edges, path):
     image = Canvas()
-    pitch = 540 / (case['side']-1)
-    centers = [(90+x*pitch, SIZE-90-y*pitch) for x, y in points]
-    for a, b in edges:
-        image.line(centers[a], centers[b], width=5)
+    routes = reference_routes(case, points, edges)
+    vertices = [p for _, _, route in routes for p in route]
+    xmin, xmax = min(x for x, _ in vertices), max(x for x, _ in vertices)
+    ymin, ymax = min(y for _, y in vertices), max(y for _, y in vertices)
+    pitch = 540 / max(xmax-xmin, ymax-ymin)
+    left, bottom = (SIZE-(xmax-xmin)*pitch)/2, (SIZE-(ymax-ymin)*pitch)/2
+    def project(point):
+        x, y = point
+        return left+(x-xmin)*pitch, SIZE-bottom-(y-ymin)*pitch
+    centers = [project(p) for p in points]
+    half = min(24, pitch/4)
+    for a, b, route in routes:
+        for start, end in zip(route, route[1:]):
+            image.line(project(start), project(end), width=3)
         # Standard-cell logic belongs in the corridors between adjacent macros.
-        ax, ay = centers[a]
-        bx, by = centers[b]
+        segments = [(project(start), project(end)) for start, end in zip(route, route[1:])]
+        lengths = [math.dist(start, end) for start, end in segments]
         for t in range(3, 8):
-            x, y = ax+(bx-ax)*t/10, ay+(by-ay)*t/10
-            image.rect(x-5, y-5, 10, 10, color(a))
+            distance = sum(lengths)*t/10
+            for (start, end), length in zip(segments, lengths):
+                if distance <= length:
+                    x = start[0]+(end[0]-start[0])*distance/length
+                    y = start[1]+(end[1]-start[1])*distance/length
+                    radius = min(5, pitch/24)
+                    image.rect(x-radius, y-radius, 2*radius, 2*radius, color(a))
+                    break
+                distance -= length
     for i, (x, y) in enumerate(centers):
-        image.rect(x-24, y-24, 48, 48, (25, 40, 65))
-        image.rect(x-20, y-20, 40, 40, color(i))
+        outline = (190, 45, 55) if i in case.get('fixed_macros', []) else (25, 40, 65)
+        image.rect(x-half, y-half, 2*half, 2*half, outline)
+        image.rect(x-half+3, y-half+3, 2*half-6, 2*half-6, color(i))
         image.number(i, x, y)
     if case['pattern'] == 'hierarchy':
         for x in range(2):
@@ -133,7 +163,8 @@ def actual(case, units, die, cells, path, positions=None):
             ink = color(index) if index is not None else (145, 150, 160)
             px, py = 40+(x-xl)*scale, SIZE-40-(y+h-yl)*scale
             if macro:
-                image.rect(px-1, py-1, w*scale+2, h*scale+2, (25, 40, 65))
+                outline = (190, 45, 55) if index in case.get('fixed_macros', []) else (25, 40, 65)
+                image.rect(px-2, py-2, w*scale+4, h*scale+4, outline)
             image.rect(px, py, max(1, w*scale), max(1, h*scale), ink)
             if macro and index is not None:
                 image.number(index, px+w*scale/2, py+h*scale/2, scale=max(1, min(2, int(w*scale/10))))

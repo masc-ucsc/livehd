@@ -7,18 +7,23 @@ ROOT = Path(__file__).resolve().parent
 CASES = [
     dict(name="mesh_2x2", side=2, depth=28, pattern="mesh", target=12000),
     dict(name="mesh_4x4", side=4, depth=24, pattern="mesh", target=40000),
-    dict(name="ring_8", side=3, depth=28, pattern="ring", target=24000),
+    dict(name="ring_32", side=9, depth=24, pattern="serpentine", target=80000,
+         fixed_macros=[0, 7, 24, 31]),
     dict(name="hierarchy_4x4", side=4, depth=32, pattern="hierarchy", target=54000),
     dict(name="mesh_6x6", side=6, depth=24, pattern="mesh", target=90000),
 ]
 
 
 def topology(case):
+    if case["pattern"] == "serpentine":
+        # Four horizontal runs, eight macro sites each. Only consecutive
+        # sites communicate: physical proximity must not introduce mesh links.
+        points = [(x, 6-2*row) for row in range(4)
+                  for x in (range(1, 9) if row % 2 == 0 else range(8, 0, -1))]
+        edges = sorted([[i, i+1] for i in range(len(points)-1)] + [[0, len(points)-1]])
+        return points, edges
     n = case["side"]
-    points = [(x, y) for y in range(n) for x in range(n)
-              if case["pattern"] != "ring" or x in (0, n-1) or y in (0, n-1)]
-    if case["pattern"] == "ring":
-        points = [(0, 0), (1, 0), (2, 0), (2, 1), (2, 2), (1, 2), (0, 2), (0, 1)]
+    points = [(x, y) for y in range(n) for x in range(n)]
     edges = []
     for i, (x, y) in enumerate(points):
         for j in range(i+1, len(points)):
@@ -27,6 +32,23 @@ def topology(case):
             if (case["pattern"] == "hierarchy" and adjacent) or (case["pattern"] != "hierarchy" and abs(x-xj) + abs(y-yj) == 1):
                 edges.append([i, j])
     return points, edges
+
+
+def anchor_floorplan(case):
+    """Four fixed outer corners; every unlisted macro/cell stays movable."""
+    points, _ = topology(case)
+    lines = ['VERSION 5.8 ;', 'DIVIDERCHAR "/" ;', 'BUSBITCHARS "[]" ;',
+             f'DESIGN {case["name"]}.top ;', 'UNITS DISTANCE MICRONS 1000 ;',
+             'DIEAREA ( 0 0 ) ( 1200000 960000 ) ;']
+    for row in range(480):
+        orientation = 'FS' if row % 2 else 'N'
+        lines.append(f'ROW ROW_{row} unit 0 {row*2000} {orientation} DO 1200 BY 1 STEP 1000 0 ;')
+    lines.append(f'COMPONENTS {len(case["fixed_macros"])} ;')
+    for i in case["fixed_macros"]:
+        x, y = points[i]
+        lines.append(f'- t{i}.macro REG_MACRO + FIXED ( {(80+120*x)*1000} {(80+120*y)*1000} ) N ;')
+    lines += ['END COMPONENTS', 'END DESIGN']
+    return '\n'.join(lines) + '\n'
 
 
 def source(case):
@@ -171,6 +193,8 @@ END M2
 def main():
     for case in CASES:
         (ROOT / (case["name"] + ".prp")).write_text(source(case))
+        if case.get("fixed_macros"):
+            (ROOT / (case["name"] + ".def")).write_text(anchor_floorplan(case))
     lib, lef = technology()
     (ROOT / "fake.lib").write_text(lib)
     (ROOT / "fake.lef").write_text(lef)
