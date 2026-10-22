@@ -9,6 +9,8 @@
 #include <utility>
 #include <vector>
 
+#include "boundary_pins.hpp"
+#include "busorder.hpp"
 #include "core/physical_rc.hpp"
 #include "core/timing_feedback.hpp"
 #include "core/timing_whatif.hpp"
@@ -74,6 +76,8 @@ struct Options {
   double                                              legalize_timing_threshold   = 0;
   unsigned                                            legalize_timing_corrections = 0;
   bool                                                terminal_legalize           = true;
+  Busorder_options                                    busorder;
+  Boundary_pin_options                                boundarypins;
   Terminal_legalize_options                           terminal_legalize_options;
   int                                                 fp_timing_max_updates = 10;
   bool                                                fp_resize             = false;
@@ -119,9 +123,10 @@ struct Options {
   bool        cell_stage               = false;  // internal explicit final/placed context; never inferred from an ECO frame
   bool        scale_macro_density      = true;
   bool        dynamic_bins             = false;
-  bool        virtual_fillers          = false;
-  int         virtual_filler_max_count = 65536;
+  bool        virtual_fillers           = true;
+  int         virtual_filler_max_count  = 0;
   double      virtual_filler_fraction  = 1;
+  double      virtual_filler_cell_scale = 1, virtual_filler_bin_fraction = .25;
   int         bin_max = 512, local_density_bins = 512;
   double      local_density_weight = 0, local_density_range = 4, local_density_jitter = .01;
   double      macro_cell_density_weight = 0;  // standard-cell pressure on macros during macro GP only

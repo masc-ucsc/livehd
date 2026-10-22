@@ -4,6 +4,11 @@ load("//tools:copt_default.bzl", "COPTS")
 filegroup(
     name = "place_srcs",
     srcs = [
+        "boundary_pins.cpp",
+        "pinalign.cpp",
+        "busorder.cpp",
+        "boundary_pins.hpp",
+        "busorder.hpp",
         "density_warp.cpp",
         "density_warp.hpp",
         "warpspace.cpp",
@@ -81,6 +86,9 @@ genrule(
 cc_library(
     name = "place",
     srcs = [
+        "boundary_pins.cpp",
+        "pinalign.cpp",
+        "busorder.cpp",
         "color_centroids.cpp",
         "h2d.cpp",
         "io_timing.cpp",
@@ -99,6 +107,8 @@ cc_library(
         "timing_place.cpp",
     ],
     hdrs = [
+        "boundary_pins.hpp",
+        "busorder.hpp",
         "color_centroids.hpp",
         "h2d.hpp",
         "io_timing.hpp",
@@ -139,6 +149,30 @@ cc_library(
         "@rapidjson",
         "@rules_cc//cc/runfiles",
     ],
+)
+
+cc_test(
+    name = "pinalign_test",
+    size = "small",
+    srcs = ["pinalign_test.cpp"],
+    copts = COPTS,
+    deps = [":place", "@googletest//:gtest_main"],
+)
+
+cc_test(
+    name = "boundary_pins_test",
+    size = "small",
+    srcs = ["boundary_pins_test.cpp"],
+    copts = COPTS,
+    deps = [":place", "@googletest//:gtest_main"],
+)
+
+cc_test(
+    name = "busorder_test",
+    size = "small",
+    srcs = ["busorder_test.cpp"],
+    copts = COPTS,
+    deps = [":place", "@googletest//:gtest_main"],
 )
 
 cc_test(

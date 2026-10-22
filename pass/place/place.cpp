@@ -485,8 +485,35 @@ std::string environment_key(const Options& o, const ph::Technology& tech) {
   if (o.post_density_factor) {
     h = hash_text(std::format("gp-post-density:{}:{}", o.post_density_factor, o.convergence_tolerance), h);
   }
+  if (o.boundarypins.enabled) {
+    h = hash_text(std::format("boundarypins:{}:{}:{}:{}:{}:{}:{}",
+                              o.boundarypins.split,
+                              o.boundarypins.order,
+                              o.boundarypins.align,
+                              o.boundarypins.iterations,
+                              o.boundarypins.max_displacement_um,
+                              o.busorder.merge_um,
+                              o.busorder.max_cells),
+                  h);
+  }
+  if (o.busorder.enabled) {
+    const auto& b = o.busorder;
+    h             = hash_text(std::format("busorder:{}:{}:{}:{}:{}:{}",
+                              b.iterations,
+                              b.refresh,
+                              b.max_cells,
+                              b.weight,
+                              b.merge_um,
+                              b.max_displacement_um),
+                  h);
+  }
   if (o.virtual_fillers) {
-    h = hash_text(std::format("virtual-fillers:{}:{}", o.virtual_filler_max_count, o.virtual_filler_fraction), h);
+    h = hash_text(std::format("virtual-fillers:{}:{}:{}:{}",
+                              o.virtual_filler_max_count,
+                              o.virtual_filler_fraction,
+                              o.virtual_filler_cell_scale,
+                              o.virtual_filler_bin_fraction),
+                  h);
   }
   if (o.dynamic_bins || o.local_density_weight > 0 || o.macro_cell_density_weight > 0 || o.macro_density_pull_weight > 0) {
     h = hash_text(std::format("local-spread:{}:{}:{}:{}:{}:{}",
@@ -1016,6 +1043,7 @@ struct View {
   int                                           centroid_min_copies = 4;
   int                                           centroid_min_macros = 2;
   int64_t                                       halo_x = 0, halo_y = 0;
+  std::map<Endpoint, Bus_bit>                   bus_names;
   ph::Floorplan                                 fp;
   std::vector<std::string>                      io_buses;
   std::vector<int>                              io_bits;
@@ -3524,9 +3552,11 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
   if (!std::isfinite(options.macro_cell_density_weight) || options.macro_cell_density_weight < 0) {
     throw std::invalid_argument("invalid macro cell density weight");
   }
-  if (options.virtual_filler_max_count < 1 || options.virtual_filler_max_count > 1000000
-      || !std::isfinite(options.virtual_filler_fraction) || options.virtual_filler_fraction <= 0
-      || options.virtual_filler_fraction > 1) {
+  if (options.virtual_filler_max_count < 0 || options.virtual_filler_max_count > 100000000
+      || !std::isfinite(options.virtual_filler_cell_scale) || options.virtual_filler_cell_scale <= 0
+      || !std::isfinite(options.virtual_filler_bin_fraction) || options.virtual_filler_bin_fraction <= 0
+      || options.virtual_filler_bin_fraction > 1 || !std::isfinite(options.virtual_filler_fraction)
+      || options.virtual_filler_fraction <= 0 || options.virtual_filler_fraction > 1) {
     throw std::invalid_argument("invalid virtual filler budget");
   }
   if (!std::isfinite(options.macro_density_pull_weight) || options.macro_density_pull_weight < 0
@@ -3755,6 +3785,19 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
   if (sw <= 0 || rh <= 0) {
     throw std::runtime_error("invalid LEF SITE dimensions");
   }
+  const auto bus_endpoint = [&](Pin pin, int bit) {
+    const auto endpoint = resolver.bit(pin, bit);
+    if (options.busorder.enabled || options.boundarypins.enabled) {
+      if (const auto name = pin.attr(attrs::pin_name); name.has()) {
+        if (gu::bits_of(pin) > 1) {
+          v.bus_names.try_emplace(endpoint, Bus_bit{std::string(name.get()), bit});
+        } else if (const auto identity = indexed_bus_bit(std::string(name.get()))) {
+          v.bus_names.try_emplace(endpoint, *identity);
+        }
+      }
+    }
+    return endpoint;
+  };
   // Build physical connectivity before sizing the frame: replicated ties are
   // real cells and must consume capacity from the first placement iteration.
   for (const auto& decl : graph.get_io()->get_output_pin_decls()) {
@@ -3763,7 +3806,7 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
       throw std::runtime_error("top output needs exactly one driver: " + decl.name);
     }
     for (int bit = 0; bit < std::max(1, int(decl.bits)); ++bit) {
-      v.nets[resolver.bit(drivers.front(), bit)].push_back({"PIN", bit_name(decl.name, std::max(1, int(decl.bits)), bit), -1});
+      v.nets[bus_endpoint(drivers.front(), bit)].push_back({"PIN", bit_name(decl.name, std::max(1, int(decl.bits)), bit), -1});
     }
   }
   for (const auto& cell : v.cells) {
@@ -3778,18 +3821,18 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
       }
       if (memory) {
         for (int b = 0; b < std::max(1, gu::bits_of(drivers.front())); ++b) {
-          v.nets[resolver.bit(drivers.front(), b)].push_back({cell.name, memory_pin(sink.get_port_id(), b, false), -1});
+          v.nets[bus_endpoint(drivers.front(), b)].push_back({cell.name, memory_pin(sink.get_port_id(), b, false), -1});
         }
         continue;
       }
       const auto& macro = tech.macros.at(cell.macro);
       const auto  name  = pin_name(sink);
       if (macro.pins.contains(name)) {
-        v.nets[resolver.bit(drivers.front(), 0)].push_back({cell.name, name, -1});
+        v.nets[bus_endpoint(drivers.front(), 0)].push_back({cell.name, name, -1});
       } else {
         bool found = false;
         for (int b = 0; macro.pins.contains(std::format("{}[{}]", name, b)); ++b) {
-          v.nets[resolver.bit(drivers.front(), b)].push_back({cell.name, std::format("{}[{}]", name, b), -1});
+          v.nets[bus_endpoint(drivers.front(), b)].push_back({cell.name, std::format("{}[{}]", name, b), -1});
           found = true;
         }
         if (!found) {
@@ -4029,6 +4072,15 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
   }
   v.fp.terminals.clear();
   v.fp.components.clear();
+  if (options.busorder.enabled || options.boundarypins.enabled) {
+    for (const auto& net : v.fp.nets) {
+      if (const auto identity = indexed_bus_bit(net.name)) {
+        for (const auto& pin : net.connections) {
+          v.bus_names[{pin.instance, pin.pin, -1}] = *identity;
+        }
+      }
+    }
+  }
   v.fp.nets.clear();
   std::map<std::string, Pin>      top_pins;
   // Terminals whose position came from the floorplan/previous frame; only the
@@ -4628,11 +4680,13 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
   control.target_density             = options.density;
   control.stop_overflow              = options.stop_overflow;
   control.initial_density_weight     = options.initial_density_weight;
-  // Internal density particles are opt-in; they never consume legal sites or
+  // Internal density particles never consume legal sites or
   // escape to the physical graph/DEF. The supplied outline stays authoritative.
   control.add_fillers                = options.virtual_fillers;
   control.filler_max_count           = options.virtual_filler_max_count;
   control.filler_area_fraction       = options.virtual_filler_fraction;
+  control.filler_cell_scale          = options.virtual_filler_cell_scale;
+  control.filler_bin_fraction        = options.virtual_filler_bin_fraction;
   control.density_upper_bound        = options.density_upper_bound;
   control.min_iterations             = options.min_iterations;
   control.post_density_factor        = options.post_density_factor;
@@ -4777,6 +4831,113 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
   if (terminal_active && movable_macros) {
     throw std::invalid_argument("terminal legalization requires the final cell stage with fixed macros");
   }
+  const bool bus_active = options.busorder.enabled && options.full && !options.fp_place
+                          && options.completed_stage == Placement_stage::final && !options.timing_seed && !options.retain_placement
+                          && !options.analyze_colors_only;
+  const bool boundary_active = options.boundarypins.enabled && options.full && !options.fp_place
+                               && options.completed_stage == Placement_stage::final && !options.timing_seed
+                               && !options.retain_placement && !options.analyze_colors_only;
+  const bool refinement_active = bus_active || boundary_active;
+  if (refinement_active && movable_macros) {
+    throw std::invalid_argument("final boundary refinement requires fixed macros");
+  }
+  std::optional<Busorder>      bus_order;
+  std::optional<Boundary_pins> boundary_pins;
+  const auto                   refine_final_boundaries = [&](dp::Design& physical) {
+    std::vector<int> bus_macros;
+    for (size_t i = 0; i < v.cells.size(); ++i) {
+      if (!tech.macros.at(v.cells[i].macro).klass.starts_with("CORE") && !v.cells[i].name.starts_with("__lhd_frame_mask_")) {
+        bus_macros.push_back(i);
+      }
+    }
+    std::vector<Busorder_io> ios;
+    for (const auto& t : v.fp.terminals) {
+      ios.push_back({t.name, double(t.x), double(t.y)});
+    }
+    std::vector<Bus_bit> identities;
+    for (const auto& [driver, sinks] : v.nets) {
+      Bus_bit    identity;
+      const auto named = [&](const Endpoint& endpoint) {
+        const auto it = v.bus_names.find(endpoint);
+        if (it == v.bus_names.end()) {
+          return false;
+        }
+        identity = it->second;
+        return true;
+      };
+      if (!named(driver)) {
+        for (const auto& sink : sinks) {
+          if (named(sink)) {
+            break;
+          }
+        }
+      }
+      const auto fallback = [&](const Endpoint& endpoint) {
+        if (identity.bit >= 0) {
+          return;
+        }
+        if (endpoint.instance != "PIN") {
+          const auto cell = v.cell.find(endpoint.instance);
+          if (cell == v.cell.end() || tech.macros.at(v.cells[cell->second].macro).klass.starts_with("CORE")) {
+            return;
+          }
+        }
+        if (auto bit = indexed_bus_bit(endpoint.pin)) {
+          if (endpoint.instance != "PIN") {
+            bit->bus = endpoint.instance + "/" + bit->bus;
+          }
+          identity = *bit;
+        }
+      };
+      fallback(driver);
+      for (const auto& sink : sinks) {
+        fallback(sink);
+      }
+      identities.push_back(std::move(identity));
+    }
+    const auto router = [](const std::vector<Busorder_point>& points) {
+      const auto    tree = steiner_tree(points);
+      Busorder_tree segments;
+      for (auto [a, b] : tree.edges) {
+        segments.emplace_back(tree.points[a], tree.points[b]);
+      }
+      return segments;
+    };
+    if (boundary_active) {
+      const Busorder partition(physical, bus_macros, ios, identities, router, tech.dbu, options.busorder);
+      bus_order.emplace(physical,
+                        bus_macros,
+                        ios,
+                        identities,
+                        router,
+                        tech.dbu,
+                        options.busorder,
+                        options.output_dir.empty() ? "" : options.output_dir + "/boundarypins/rsmt_order");
+      bus_order->observe(physical, "before");
+      boundary_pins.emplace(partition.rectangles(),
+                            router,
+                            tech.dbu,
+                            options.boundarypins,
+                            options.output_dir.empty() ? "" : options.output_dir + "/boundarypins",
+                            identities,
+                            bus_macros);
+      boundary_pins->refine(physical, control);
+      bus_order->observe(physical, "after_gp");
+    } else {
+      bus_order.emplace(physical,
+                        bus_macros,
+                        ios,
+                        identities,
+                        router,
+                        tech.dbu,
+                        options.busorder,
+                        options.output_dir.empty() ? "" : options.output_dir + "/busorder");
+      bus_order->refine(physical, control);
+    }
+    if (control.observer) {
+      control.observer(physical, dp::PlacementStage::global_placement, control.max_iterations);
+    }
+  };
   std::optional<Terminal_legalize_report> terminal_report;
   const bool macro_pin_adjust = options.macro_pin_adjust && movable_macros;
   const bool adjustable_io
@@ -5880,6 +6041,15 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
         return macro_warp->refresh(snapshot, warp_memories(snapshot), iteration);
       };
     }
+    if (refinement_active && !terminal_active) {
+      const auto prior        = control.before_legalize;
+      control.before_legalize = [&, prior](dp::Design& physical) {
+        refine_final_boundaries(physical);
+        if (prior) {
+          prior(physical);
+        }
+      };
+    }
     bool zero_gp_snapshot_emitted = false;
     if (options.snapshots && control.max_iterations == 0) {
       const auto prior        = control.before_legalize;
@@ -5924,6 +6094,9 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
     }
     if (macro_warp) {
       macro_warp->finish(metrics.iterations);
+    }
+    if (refinement_active && terminal_active) {
+      refine_final_boundaries(v.design);
     }
     if (terminal_active) {
       if (options.snapshots && control.max_iterations == 0 && !zero_gp_snapshot_emitted && control.observer) {
@@ -6183,6 +6356,24 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
     }
     metrics.legal = dp::is_legal(v.design);
     metrics.hpwl  = dp::hpwl(v.design);
+  }
+  if (boundary_pins) {
+    for (const auto& sample : boundary_pins->samples()) {
+      if (sample.stage == "after_gp") {
+        metrics.overflow                  = sample.overflow;
+        metrics.global_placement_seconds += sample.seconds;
+      }
+    }
+    boundary_pins->observe(v.design, "after_legalization");
+  }
+  if (bus_order) {
+    for (const auto& sample : bus_order->samples()) {
+      if (sample.stage == "after_gp") {
+        metrics.overflow                  = sample.overflow;
+        metrics.global_placement_seconds += sample.seconds;
+      }
+    }
+    bus_order->observe(v.design, "after_legalization");
   }
   if (sat_report) {
     auto final_frame = v.fp;
@@ -6828,6 +7019,25 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
   for (size_t net = 0; net < v.drivers.size(); ++net) {
     auto name = v.drivers[net].instance == "PIN" ? v.drivers[net].pin : std::format("net_{}", net);
     if (v.drivers[net].instance != "PIN") {
+      // Preserve identified buses through the macro-to-final handoff when the
+      // experimental final refinement is requested. Never rename input nets.
+      if (options.busorder.enabled || options.boundarypins.enabled) {
+        auto identity = v.bus_names.find(v.drivers[net]);
+        if (identity == v.bus_names.end()) {
+          for (const auto& sink : v.nets.at(v.drivers[net])) {
+            identity = v.bus_names.find(sink);
+            if (identity != v.bus_names.end()) {
+              break;
+            }
+          }
+        }
+        if (identity != v.bus_names.end()) {
+          const auto candidate = std::format("{}[{}]", identity->second.bus, identity->second.bit);
+          if (!net_names.contains(candidate)) {
+            name = candidate;
+          }
+        }
+      }
       const auto base   = name;
       unsigned   suffix = 0;
       while (!net_names.insert(name).second) {
@@ -7522,6 +7732,9 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
     json.AddMember("prects_controls", controls, allocator);
     json.AddMember("virtual_filler_count", metrics.filler_count, allocator);
     json.AddMember("virtual_filler_area_um2", metrics.filler_area / tech.dbu / tech.dbu, allocator);
+    json.AddMember("virtual_filler_size_x_um", metrics.filler_size_x / tech.dbu, allocator);
+    json.AddMember("virtual_filler_size_y_um", metrics.filler_size_y / tech.dbu, allocator);
+    json.AddMember("virtual_filler_count_limited", metrics.filler_count_limited, allocator);
     rapidjson::Value halo(rapidjson::kObjectType);
     halo.AddMember("x_um", cell_halo_x, allocator);
     halo.AddMember("y_um", cell_halo_y, allocator);
@@ -7693,6 +7906,11 @@ Result place(hhds::Graph& source, hhds::GraphLibrary& library, const Options& re
     throw std::invalid_argument(
         "pre-CTS clock/reset sizing and buffering are disabled; reset_fanout must be 0 and repair_reset false");
   }
+  validate_busorder_options(requested.busorder);
+  validate_boundary_pin_options(requested.boundarypins);
+  if (requested.busorder.enabled && (requested.boundarypins.enabled || requested.boundarypins.align)) {
+    throw std::invalid_argument("busorder and boundarypins are separate experiments; enable only one");
+  }
   validate_warp_options(requested.fp_warp);
   validate_warp_options(requested.macro_warp);
   validate_cell_halo(requested);
@@ -7700,16 +7918,20 @@ Result place(hhds::Graph& source, hhds::GraphLibrary& library, const Options& re
     throw std::invalid_argument("cell halo requires full placement with a final cell stage");
   }
   std::optional<Options> resolved_options;
-  if (requested.cell_halo) {
+  if (requested.cell_halo || requested.boundarypins.align) {
     resolved_options = requested;
+    if (requested.boundarypins.align) {
+      resolved_options->boundarypins.enabled = true;
+    }
   }
   const auto& options = resolved_options ? *resolved_options : requested;
   if (options.final_iterations < 0) {
     throw std::invalid_argument("invalid final cell iteration budget");
   }
   bool stage_macros = false;
-  if ((options.after_stage || options.cell_halo || options.terminal_legalize) && !options.fp_place && options.full
-      && !options.timing_seed && !options.cell_stage) {
+  if ((options.after_stage || options.cell_halo || options.terminal_legalize || options.busorder.enabled
+       || options.boundarypins.enabled)
+      && !options.fp_place && options.full && !options.timing_seed && !options.cell_stage) {
     const auto technology = ph::read_lef(options.lefs);
     for (const auto& graph : source.definitions().graphs()) {
       for (auto node : graph->body().nodes()) {

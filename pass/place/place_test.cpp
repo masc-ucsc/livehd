@@ -47,6 +47,73 @@ Options plain_options() {
 }
 }  // namespace
 
+TEST(Placement, ExperimentalBoundaryRefinementsRunOnlyAtTheFinalStage) {
+  hhds::GraphLibrary source;
+  auto               io  = source.create_io("busorder_stages");
+  auto               inv = source.create_io("sky130_fd_sc_hd__inv_1");
+  inv->add_input("A", 0);
+  inv->add_output("Y", 0);
+  for (int bit = 0; bit < 4; ++bit) {
+    io->add_input(std::format("a[{}]", bit), bit);
+    io->set_bits(std::format("a[{}]", bit), 1);
+    io->add_output(std::format("y[{}]", bit), bit);
+    io->set_bits(std::format("y[{}]", bit), 1);
+  }
+  auto graph = io->create_graph();
+  for (int bit = 0; bit < 4; ++bit) {
+    auto node = gu::create_typed_node(*graph, Ntype_op::Sub);
+    node.set_subnode(inv);
+    node.set_name(std::format("inv{}", bit));
+    auto input = graph->get_input_pin(std::format("a[{}]", bit));
+    gu::set_bits(input, 1);
+    node.create_sink_pin("A").connect_driver(input);
+    auto output = node.create_driver_pin("Y");
+    gu::set_bits(output, 1);
+    graph->get_output_pin(std::format("y[{}]", bit)).connect_driver(output);
+  }
+  auto options                    = plain_options();
+  options.lefs                    = {"inou/lefdef/tests/data/sky130hd.tlef", "inou/lefdef/tests/data/sky130hd.lef"};
+  options.core                    = {0, 0, 55.2, 54.4};
+  options.die                     = options.core;
+  options.iterations              = 20;
+  options.bins                    = 4;
+  options.density                 = .5;
+  options.busorder.enabled        = true;
+  options.busorder.iterations     = 20;
+  options.busorder.refresh        = 10;
+  options.busorder.max_cells      = 2;
+  options.boundarypins.iterations = 20;
+  for (int mode : {0, 1, 2}) {
+    const bool boundary          = mode != 0;
+    options.busorder.enabled     = mode == 0;
+    options.boundarypins.enabled = mode == 1;
+    options.boundarypins.align   = mode == 2;
+    for (bool terminal : {false, true}) {
+      for (auto stage : {Placement_stage::macro, Placement_stage::final}) {
+        hhds::GraphLibrary placed;
+        options.terminal_legalize = terminal;
+        options.completed_stage   = stage;
+        options.output_dir = std::format("{}/busorder_stages_{}_{}_{}", std::getenv("TEST_TMPDIR"), mode, terminal, int(stage));
+        std::filesystem::remove_all(options.output_dir);
+        const auto result = place(*graph, placed, options);
+        check_legality(physical::read_lef(options.lefs), result.floorplan);
+        const auto report_path = options.output_dir + (boundary ? "/boundarypins/report.json" : "/busorder/report.json");
+        EXPECT_EQ(result.floorplan.components.size(), 4u);
+        EXPECT_EQ(std::filesystem::exists(report_path), stage == Placement_stage::final);
+        if (stage == Placement_stage::final) {
+          std::ifstream       report_file(report_path);
+          const std::string   text((std::istreambuf_iterator<char>(report_file)), {});
+          rapidjson::Document report;
+          report.Parse(text.c_str());
+          ASSERT_FALSE(report.HasParseError());
+          ASSERT_GE(report["history"].Size(), 3u);
+          EXPECT_STREQ(report["history"][report["history"].Size() - 1]["stage"].GetString(), "after_legalization");
+        }
+      }
+    }
+  }
+}
+
 TEST(Placement, RowLegalityAcceptsOnlyTechnologyPermittedHorizontalMirrors) {
   auto                tech = physical::read_lef({"inou/lefdef/tests/data/sky130hd.tlef", "inou/lefdef/tests/data/sky130hd.lef"});
   physical::Floorplan fp;
@@ -924,8 +991,7 @@ TEST(Placement, MappedBusGraphLegalityRcAndReuse) {
     EXPECT_EQ(result.floorplan.die.xh, frame.die.xh);
     EXPECT_EQ(result.floorplan.die.yh, frame.die.yh);
     EXPECT_EQ(result.floorplan.components.size(), 2);
-    // This whitespace would exceed the native one-million-filler budget if
-    // LiveHD enabled virtual fillers. Keep the IOs fixed to isolate the GP.
+    // Exercise an explicit filler opt-out on a very sparse fixed-IO frame.
     const auto original_rows = frame.rows;
     for (int block = 1; block < 1000; ++block) {
       for (auto row : original_rows) {
@@ -940,8 +1006,9 @@ TEST(Placement, MappedBusGraphLegalityRcAndReuse) {
     frame.die.xh *= 1000;
     frame.die.yh *= 1000;
     physical::write_def(frame, frame_path.string());
-    soft.output_dir = (root / "no_virtual_fillers").string();
-    soft.density    = .8;
+    soft.output_dir      = (root / "no_virtual_fillers").string();
+    soft.density         = .8;
+    soft.virtual_fillers = false;
     hhds::GraphLibrary sparse_library;
     const auto         sparse = place(*graph, sparse_library, soft);
     EXPECT_EQ(sparse.floorplan.components.size(), 2);
@@ -965,7 +1032,7 @@ TEST(Placement, MappedBusGraphLegalityRcAndReuse) {
                             [](const auto& member) { return member.name == "virtual_fillers"; }),
               1);
     auto invalid                     = soft;
-    invalid.virtual_filler_max_count = 0;
+    invalid.virtual_filler_max_count = -1;
     EXPECT_THROW(place(*graph, virtual_library, invalid), std::invalid_argument);
   }
   {

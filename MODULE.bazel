@@ -96,7 +96,7 @@ http_archive(
 # Native CPU placement; the repository uses LiveHD's HHDS/HLOP repositories.
 git_repository(
     name = "dreamplace",
-    commit = "affb958a77dadf30cacac4ea498d3a99600d2441",
+    commit = "4410f6222faebf8f86e30ada4d81be6de60f9645",
     remote = "https://github.com/masc-ucsc/DREAMPlace.git",
 )
 # For local co-development swap the git_repository above for:

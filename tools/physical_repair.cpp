@@ -329,6 +329,8 @@ int main(int argc, char** argv) {
     boolean_option("virtual_fillers", options.virtual_fillers);
     integer_option("virtual_filler_max_count", options.virtual_filler_max_count);
     number_option("virtual_filler_fraction", options.virtual_filler_fraction);
+    number_option("virtual_filler_cell_scale", options.virtual_filler_cell_scale);
+    number_option("virtual_filler_bin_fraction", options.virtual_filler_bin_fraction);
     boolean_option("scale_macro_density", options.scale_macro_density);
     boolean_option("exact_macro_density", options.exact_macro_density);
     boolean_option("adaptive_density", options.adaptive_density);
@@ -354,6 +356,15 @@ int main(int argc, char** argv) {
     }
     boolean_option("satlegalize", options.satlegalize);
     boolean_option("terminal_legalize", options.terminal_legalize);
+    boolean_option("boundarypins", options.boundarypins.enabled);
+    boolean_option("boundarypins_split", options.boundarypins.split);
+    boolean_option("boundarypins_order", options.boundarypins.order);
+    boolean_option("pinalign", options.boundarypins.align);
+    number_option("boundarypins_max_displacement_um", options.boundarypins.max_displacement_um);
+    boolean_option("busorder", options.busorder.enabled);
+    number_option("busorder_weight", options.busorder.weight);
+    number_option("busorder_merge_um", options.busorder.merge_um);
+    number_option("busorder_max_displacement_um", options.busorder.max_displacement_um);
     auto& terminal_options = options.terminal_legalize_options;
     boolean_option("legalize_joint_minimize_total", terminal_options.joint_minimize_total);
     number_option("legalize_remainder_wire_weight", terminal_options.remainder_wire_weight);
@@ -376,6 +387,10 @@ int main(int argc, char** argv) {
       value = config[key].GetUint();
     };
     auto& sat_options = options.satlegalize_options;
+    sat_limit("boundarypins_iterations", options.boundarypins.iterations);
+    sat_limit("busorder_iterations", options.busorder.iterations);
+    sat_limit("busorder_refresh", options.busorder.refresh);
+    sat_limit("busorder_max_cells", options.busorder.max_cells);
     sat_limit("legalize_padding_sites", terminal_options.padding_sites);
     sat_limit("legalize_padding_max_extra_rows", terminal_options.padding_max_extra_rows);
     sat_limit("legalize_critical_padding_sites", terminal_options.critical_padding_sites);

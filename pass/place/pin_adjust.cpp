@@ -18,6 +18,40 @@ struct Bounds {
   double xl, yl, xh, yh, weight;
 };
 }  // namespace
+std::vector<int> ordered_pin_slots(size_t lanes, size_t slots, const std::function<double(size_t, size_t)>& cost) {
+  if (!lanes || slots < lanes) {
+    return {};
+  }
+  std::vector<double>           previous(slots, INFINITY), current(slots, INFINITY);
+  std::vector<std::vector<int>> back(lanes, std::vector<int>(slots, -1));
+  for (size_t k = 0; k < lanes; ++k) {
+    double prefix    = INFINITY;
+    int    prefix_at = -1;
+    std::fill(current.begin(), current.end(), INFINITY);
+    for (size_t slot = 0; slot < slots; ++slot) {
+      if (slot && previous[slot - 1] < prefix) {
+        prefix    = previous[slot - 1];
+        prefix_at = slot - 1;
+      }
+      const double prior = k ? prefix : 0;
+      if (std::isfinite(prior)) {
+        current[slot] = prior + cost(k, slot);
+        back[k][slot] = prefix_at;
+      }
+    }
+    previous.swap(current);
+  }
+  int at = std::min_element(previous.begin(), previous.end()) - previous.begin();
+  if (!std::isfinite(previous[at])) {
+    return {};
+  }
+  std::vector<int> chosen(lanes);
+  for (int k = int(lanes) - 1; k >= 0; --k) {
+    chosen[k] = at;
+    at        = back[k][at];
+  }
+  return chosen;
+}
 Pin_adjust_stats adjust_fp_pins(dp::Design& d, physical::Floorplan& fp, const std::vector<std::string>& buses,
                                 const std::vector<int>& bits, double pitch, double step_fraction, double improvement,
                                 bool initialize) {
@@ -251,38 +285,26 @@ Pin_adjust_stats adjust_fp_pins(dp::Design& d, physical::Floorplan& fp, const st
           for (size_t k = 0; k < group.size(); ++k) {
             sequence.push_back(group[(pivot + direction * int(k) + int(group.size())) % group.size()]);
           }
-          std::vector<double>           previous(m, INFINITY), current(m, INFINITY);
-          std::vector<std::vector<int>> back(group.size(), std::vector<int>(m, -1));
-          for (size_t k = 0; k < sequence.size(); ++k) {
-            double prefix    = INFINITY;
-            int    prefix_at = -1;
-            std::fill(current.begin(), current.end(), INFINITY);
-            for (size_t s = 0; s < m; ++s) {
-              if (s && previous[s - 1] < prefix) {
-                prefix    = previous[s - 1];
-                prefix_at = s - 1;
-              }
-              const Point p   = slots[(start + s) % m];
-              const int   pin = sequence[k];
-              if ((fixed(pin) && p != xy[pin]) || !clear((start + s) % m, pin)) {
-                continue;
-              }
-              const double prior = k ? prefix : 0;
-              if (!std::isfinite(prior)) {
-                continue;
-              }
-              current[s] = prior + cost(pin, p);
-              back[k][s] = prefix_at;
+          const auto assigned = ordered_pin_slots(sequence.size(), m, [&](size_t k, size_t slot) {
+            const Point p   = slots[(start + slot) % m];
+            const int   pin = sequence[k];
+            if ((fixed(pin) && p != xy[pin]) || !clear((start + slot) % m, pin)) {
+              return double(INFINITY);
             }
-            previous.swap(current);
+            return cost(pin, p);
+          });
+          if (assigned.empty()) {
+            continue;
           }
-          int at = std::min_element(previous.begin(), previous.end()) - previous.begin();
-          if (previous[at] < best) {
-            best   = previous[at];
+          double value = 0;
+          for (size_t k = 0; k < sequence.size(); ++k) {
+            value += cost(sequence[k], slots[(start + assigned[k]) % m]);
+          }
+          if (value < best) {
+            best   = value;
             chosen = xy;
-            for (int k = int(sequence.size()) - 1; k >= 0; --k) {
-              chosen[sequence[k]] = slots[(start + at) % m];
-              at                  = back[k][at];
+            for (size_t k = 0; k < sequence.size(); ++k) {
+              chosen[sequence[k]] = slots[(start + assigned[k]) % m];
             }
           }
         }

@@ -841,19 +841,32 @@ lhd synth design.v --top top --workdir W --set synth.place=true \
 
 ### Local standard-cell spreading and adaptive density bins
 
-`synth.place.virtual_fillers=false` keeps virtual density particles disabled by
-default. An explicit `true` enables the native DREAMPlace filler mechanism in
-FP, macro and final GP, alongside any local spreading forces. These are movable
+`synth.place.virtual_fillers=true` enables native DREAMPlace virtual density
+particles by default in FP, macro and final GP, alongside any local spreading
+forces. Set it to `false` to disable them. These are movable
 density charges with no pins or nets; they consume no legal sites and never
 appear in the mapped graph, timing/IO callbacks, netlist or DEF. They are removed
 before legalization. The supplied core stays unchanged.
 
-`synth.place.virtual_filler_max_count=65536` bounds the particle count by enlarging
-their density footprints in sparse cores (allowed range `1..1000000`).
 `synth.place.virtual_filler_fraction=1` supplies the full target-density
-whitespace charge; a smaller positive fraction is useful for tuning. Routability
-inflation adjusts that charge budget as well. Reports include actual count and
-charge area. The existing soft-density behavior is unchanged when disabled.
+whitespace charge; a smaller positive fraction is useful for tuning.
+`virtual_filler_cell_scale=1` uses the central-90%-mean standard-cell width and
+height for particle dimensions. `virtual_filler_bin_fraction=0.25` bounds each
+particle dimension by a quarter of the corresponding density-bin pitch, subject
+to site/row granularity. Count is derived from this footprint and the area budget.
+
+`virtual_filler_max_count=0` disables the optional count guard. An explicit
+positive guard (up to 100000000) enlarges particle footprints when necessary to
+preserve the area budget. Reports expose actual count, footprint dimensions,
+charge area, and `virtual_filler_count_limited` so this coarsening is visible.
+Routability inflation adjusts the charge budget as well. The existing
+soft-density behavior is unchanged when fillers are disabled.
+
+For final GP with fixed macros and no routability inflation, the budget is
+`fraction * max(0, density * available_area - movable_area)`, using the density
+model's area accounting. The particles move under density forces, without a
+wirelength objective. They do not reserve specific gaps between real cells or
+guarantee uniform real-cell density after removal.
 
 The native flow has two independent opt-in spreading controls:
 
@@ -2108,3 +2121,134 @@ These stay per-design trial settings, not global defaults. A hard cap of 0.3
 also cannot replace the general default while the default target density is
 0.5. Post-CTS density and completed detailed routing plus extraction determine
 whether to promote any of these settings; pre-route density alone is insufficient.
+
+### Experimental final-placement bus ordering
+
+`place.busorder=false` is the default. Opt in with
+`--set synth.place.busorder=true` (or `"busorder": true` in a
+`physical_repair` configuration). Only the final cell stage uses it, between
+ordinary GP and legalization; macro and IO positions stay fixed.
+
+The mesh is built independently from that run's cell coordinates, macro edges,
+and IO bus spans. Cuts within 5 um merge; regions over 10,000 movable cells split
+along their longest dimension. Pruning alternates H/V candidates sorted by their
+initial neighbor distance, without reranking. The mesh then stays fixed.
+
+RSMT crossings supply soft adjacent-bit order constraints. Ascending and
+descending orders both work, including gaps in bit indices. Each virtual crossing
+is a supporting real pin coordinate plus an offset, so its force moves real cells;
+there are no added physical cells, signal nets, capacitance or timing arcs. A
+one-DBU order margin avoids making coincident crossings a zero-force optimum;
+it does not reserve physical routing tracks.
+Clock/reset masks apply. Ambiguous branched crossings are measured but do not
+receive single-lane constraints. RSMT uses a deterministic HV realization where
+its branch is diagonal; these are placement estimates, not routed wires.
+
+Controls under `place.busorder.` (diagnostic JSON uses `busorder_` followed by the field):
+
+| Option | Experimental default | Meaning |
+|---|---:|---|
+| `iterations` | 100 | Extra GP iteration budget |
+| `refresh` | 20 | Rebuild crossing constraints between chunks |
+| `weight` | 4 | Ordering strength; 0 is an extra-GP-only control |
+| `max_cells` | 10000 | Initial mesh cell cap |
+| `merge_um` | 5 | Merge distance for initial cuts |
+| `max_displacement_um` | 20 | Movement bound, reduced for timing-weighted cells |
+
+Each chunk starts with final wire smoothing and fresh optimizer state; existing
+wirelength, density and routability objectives remain active. A snapshot must
+stay within +2% physical HPWL and +0.01 density overflow of the input to be
+accepted. Selection favors genuinely resolved initial bus/edge groups, followed
+by lower ordering penalty. This is not a timing guarantee: compare actual
+post-CTS routed timing, wire/via counts, DRC and hold results.
+
+`busorder/report.json` records the mesh and per-chunk measurements. The initial
+unordered bus/edge cohort is tracked after convergence and after legalization:
+ordered percentage, still-unordered percentage, tied/ambiguous groups, and groups
+whose participating bits changed or no longer cross the same edge. Ties and
+missing crossings are not counted as untangled. Stage TSVs contain crossing
+coordinates for overlays. The report also includes the overall current unordered
+count, since new disorder can appear outside the original cohort.
+
+### Experimental fixed boundary pins
+
+`--set synth.place.boundarypins=true` enables a separate final-GP experiment
+(default false), with `place.busorder=false`. The same independently built mesh
+is used. All active signal nets are considered; clock/reset masks apply.
+
+Each RSMT branch is cut where it crosses rectangle boundaries. Connected pieces
+inside a rectangle become local placement nets, joined through fixed zero-area
+terminals at the original crossing coordinates. Separate reentries into one
+rectangle remain separate connected pieces. Exterior pieces retain real fixed
+IO terminals. With `place.boundarypins.order=false` (default), crossing positions
+are unchanged. There is no cell fence or clock/reset sizing. Nets above the bounded 1,000-pin routing limit remain unsplit and are
+reported. Virtual pins consume no area and never enter STA, legalization, DEF or
+LGraph; only real movable cell coordinates are copied out of the temporary model.
+
+The default extra budget is 50 iterations (`place.boundarypins.iterations`).
+`place.boundarypins.split=false` runs the matched extra-GP control without virtual
+pins. Both use final wire smoothing, the same optimizer startup and a 20 um
+movement bound reduced by original timing weights
+(`place.boundarypins.max_displacement_um`). Pin coordinates and the partition
+are frozen throughout this extra phase. Its last result is legalized normally,
+including when placement metrics regress: this experiment measures pin overhead
+and does not use the bus-order candidate selector.
+
+`boundarypins/report.json` records the boxes, pin/net counts, build time, real-net
+HPWL and density overflow before/after refinement and after legalization.
+Temporary split-net HPWL is labeled separately and is not comparable to real-net
+HPWL. `boundarypins/pins.tsv` gives the immutable boundary-pin locations for PNG
+overlays. Diagnostic JSON uses `boundarypins`, `boundarypins_split`,
+`boundarypins_iterations` and `boundarypins_max_displacement_um`.
+
+`place.boundarypins.order=true` uses the same prefix-minimum slot-assignment
+solver as top-level IO initialization to order bus lanes and minimize weighted
+split-net HPWL. Each virtual pin stays on its original atomic rectangle edge;
+there is no perimeter rotation or pin-to-pin ordering force. Per-bus assignment
+tries ascending and descending bit order, permits missing bits, and reserves
+site-pitch-spaced slots against other buses. Slots inside real macro footprints
+are forbidden; frame masks are not routing obstacles. Residual macro-interior
+pins from ambiguity or whole-edge fallback are reported explicitly. Ambiguous repeated crossings of one
+bit and corner pins stay fixed. An edge without sufficient slots is restored to
+its original coordinates and reported rather than silently breaking constraints.
+
+The assignment runs once before the extra GP iterations. All resulting virtual
+pins remain fixed throughout GP and are removed before normal legalization.
+The ordering report distinguishes virtual-pin order from actual estimated RSMT
+order: `boundarypins/rsmt_order/` tracks the initial unordered real-net cohort
+before GP, after GP, and after legalization. Changed or ambiguous groups are not
+counted as untangled. `pins.tsv` includes both original and assigned coordinates.
+The diagnostic JSON switch is `boundarypins_order`. Native HPWL trace fields use
+timing weights; the main QoR HPWL remains the unweighted physical-net metric.
+
+### Experimental opposite-edge pin alignment
+
+`--set synth.place.pinalign=true` enables the split-boundary-pin model in the
+final cell placement stage only (default false). It requires
+`place.boundarypins.split=true` and can be combined with
+`place.boundarypins.order=true`. It does not run during floorplan or macro
+placement. Diagnostic JSON uses `pinalign`.
+
+After optional bus ordering, the pass follows each split net from its original
+driver. It considers opposite-side boundary pins connected directly inside a
+rectangle, or through one movable standard cell whose center lies inside that
+rectangle. Adjacent sides, corners, masked controls, multi-cell paths and local
+pieces containing multiple real pins are excluded. This is a connectivity
+heuristic, not a timing-arc or via-delay model.
+
+The output pin takes the input pin's coordinate along its existing edge: equal
+Y for left/right passage and equal X for bottom/top passage. Connected alignment
+chains are handled together; upstream roots remain fixed. Conflicting roots or
+cycles are skipped. A chain is also skipped if it would change any bus's existing
+relative order, violate site-pitch spacing, leave an atomic edge segment, or move
+into a real macro. Bus order always takes precedence. No real cell moves during
+pin assignment. The assigned virtual pins then stay fixed during the extra GP
+iterations; the ordinary physical-net model is restored before legalization.
+
+`boundarypins/report.json` includes a `pinalign` object with direct/one-cell
+candidate counts, accepted pair counts (already aligned versus newly aligned),
+moved-pin counts, and rejection reasons.
+Its `pairs` list identifies input/output anchors (zero-based rows in `pins.tsv`),
+rectangle, intermediate cell (or -1), and outcome. These are actual virtual-pin
+alignment counts before GP, maintained throughout GP; the separate unconstrained
+physical-net RSMT diagnostic does not measure compliance with those assignments.

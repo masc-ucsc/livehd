@@ -229,6 +229,21 @@ livehd::placement::Options placement_options(const Options& opts) {
     livehd::placement::validate_warp_options(policy);
   }
   out.terminal_legalize           = truthy(synth_set(opts, "place.legalize.terminal", "true"));
+  out.boundarypins.enabled             = truthy(synth_set(opts, "place.boundarypins", "false"));
+  out.boundarypins.split               = truthy(synth_set(opts, "place.boundarypins.split", "true"));
+  out.boundarypins.order               = truthy(synth_set(opts, "place.boundarypins.order", "false"));
+  out.boundarypins.iterations          = integer("place.boundarypins.iterations", "50");
+  out.boundarypins.max_displacement_um = number("place.boundarypins.max_displacement_um", "20");
+  out.boundarypins.align               = truthy(synth_set(opts, "place.pinalign", "false"));
+  livehd::placement::validate_boundary_pin_options(out.boundarypins);
+  out.busorder.enabled             = truthy(synth_set(opts, "place.busorder", "false"));
+  out.busorder.iterations          = integer("place.busorder.iterations", "100");
+  out.busorder.refresh             = integer("place.busorder.refresh", "20");
+  out.busorder.max_cells           = integer("place.busorder.max_cells", "10000");
+  out.busorder.weight              = number("place.busorder.weight", "4");
+  out.busorder.merge_um            = number("place.busorder.merge_um", "5");
+  out.busorder.max_displacement_um = number("place.busorder.max_displacement_um", "20");
+  livehd::placement::validate_busorder_options(out.busorder);
   auto& terminal                  = out.terminal_legalize_options;
   terminal.remainder_warp.enabled = truthy(synth_set(opts, "place.legalize.warpspace", "false"));
   terminal.remainder_warp.weight  = number("place.legalize.warpspace.weight", "1");
@@ -375,9 +390,11 @@ livehd::placement::Options placement_options(const Options& opts) {
   }
   out.bins                      = integer("place.bins", "64");
   out.dynamic_bins              = truthy(synth_set(opts, "place.dynamic_bins", "false"));
-  out.virtual_fillers           = truthy(synth_set(opts, "place.virtual_fillers", "false"));
-  out.virtual_filler_max_count  = integer("place.virtual_filler_max_count", "65536");
+  out.virtual_fillers             = truthy(synth_set(opts, "place.virtual_fillers", "true"));
+  out.virtual_filler_max_count    = integer("place.virtual_filler_max_count", "0");
   out.virtual_filler_fraction   = number("place.virtual_filler_fraction", "1");
+  out.virtual_filler_cell_scale   = number("place.virtual_filler_cell_scale", "1");
+  out.virtual_filler_bin_fraction = number("place.virtual_filler_bin_fraction", "0.25");
   out.bin_max                   = integer("place.bin_max", "512");
   out.local_density_weight      = number("place.local_density_weight", "0");
   out.local_density_bins        = integer("place.local_density_bins", "512");
