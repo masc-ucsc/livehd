@@ -1158,15 +1158,16 @@ void render(const Layout& before, const Layout& after, const Mesh* mesh, const M
           auto lo = before.normalize(c.p), hi = before.normalize(c.p + Point{c.w, c.h});
           for (const auto& f : mesh->faces) {
             auto  face_lo = mesh->original[f.v[0]], face_hi = mesh->original[f.v[2]];
-            Point a{std::max(lo.x, face_lo.x), std::max(lo.y, face_lo.y)}, b{std::min(hi.x, face_hi.x), std::min(hi.y, face_hi.y)};
-            if (a.x >= b.x || a.y >= b.y) {
+            Point clipped_lo{std::max(lo.x, face_lo.x), std::max(lo.y, face_lo.y)},
+                  clipped_hi{std::min(hi.x, face_hi.x), std::min(hi.y, face_hi.y)};
+            if (clipped_lo.x >= clipped_hi.x || clipped_lo.y >= clipped_hi.y) {
               continue;
             }
             std::array<Point, 4> source = {
-                a,
-                Point{b.x, a.y},
-                b,
-                Point{a.x, b.y}
+                clipped_lo,
+                Point{clipped_hi.x, clipped_lo.y},
+                clipped_hi,
+                Point{clipped_lo.x, clipped_hi.y}
             };
             std::array<std::pair<int, int>, 4> polygon;
             for (int v = 0; v < 4; ++v) {
