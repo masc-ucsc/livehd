@@ -71,15 +71,30 @@ def performance_snapshot():
                                'Warm1 and warm2 DEF hashes match cold') + '</tr>')
     if not rows:
         return ''
-    return ('<h2>Latest-source Coral / CNN speed study</h2>'
-            '<p>LiveHD e94655bb7, DREAMPlace ac995f900, and published OpenTimer shared-wire-response '
-            'optimization 7718c2866. FP plan is disabled, macro and final placement are enabled, '
+    notes = []
+    comparison = base / 'speed_comparison.json'
+    if comparison.is_file():
+        for row in json.loads(comparison.read_text())['rows']:
+            if row['status'] != 'closed_match':
+                continue
+            change = row['improvements']['cold']
+            notes.append(escape(row['design']) + ': cold wall change '
+                         + number(-100 * change['wall_reduction'], 2) + '%, CPU change '
+                         + number(-100 * change['task-clock_reduction'], 2) + '%, instruction change '
+                         + number(-100 * change['instructions_reduction'], 2)
+                         + '%. Final DEF, macro counts, cell/net counts and native setup WNS/TNS match exactly.')
+    return ('<h2>Frozen pre-terminal-flow Coral / CNN speed study</h2>'
+            '<p>Both arms use LiveHD e94655bb7 and DREAMPlace ac995f900. Baseline uses OpenTimer '
+            '65ff460ef; candidate uses published shared-wire-response optimization 7718c2866. '
+            'FP plan is disabled, macro and final placement are enabled, '
             'and incremental synthesis and resynthesis remain enabled. Each build has its own fresh '
             'workdir: cold, warm1, then authoritative warm2. Measurements include perf record/stat '
-            'on a shared host; these are RTL-to-preCTS timings and do not establish route parity.</p>'
+            'on a shared host; these are RTL-to-preCTS timings and do not establish route parity. '
+            'This frozen source predates the subsequently merged terminal legalizer and '
+            'preCTS clock/reset optimization protection.</p>'
             '<div class="scroll"><table><thead><tr><th>Design</th><th>Build</th><th>Cold wall (s)</th>'
             '<th>Warm2 wall (s)</th><th>Validation</th></tr></thead><tbody>' + ''.join(rows)
-            + '</tbody></table></div>'
+            + '</tbody></table></div><p>' + ' '.join(notes) + '</p>'
             '<p>The CNN baseline contains all 65 expected SRAMs. Its cold profile spends 18.42% '
             'of sampled CPU cycles in expm1, 8.77% in detailed-placement global swap, 6.80% in '
             'RC driver crossing, and 6.74% in OpenMP waiting. These are self sample shares, not '
@@ -116,14 +131,16 @@ def handoff_snapshot():
                      + ('matches' if result['same_final_DEF'] else 'differs')
                      + '; macro poses ' + ('match' if result['same_macros'] else 'differ')
                      + '; IOs ' + ('match' if result['same_IOs'] else 'differ') + '.')
-    return ('<h2>LiteEth macro-to-final handoff experiment</h2>'
+    return ('<h2>LiteEth preliminary macro-to-final handoff experiment</h2>'
             '<p>All arms use one frozen validated build and the same RTL, constraints, density, halo and '
             'eight placement threads. FP plan is disabled; incremental synthesis and resynthesis remain '
             'enabled. Baseline retains macro cell detail and weight inheritance. Nodetail skips macro '
             'cell detail and exports only fixed/locked objects, IOs and frame geometry. Lean additionally '
             'starts final with synthesis weights and gates its own timing refresh on density. Final '
             'legalization and detailed placement remain enabled. Macro cell legalization is retained '
-            'for the existing legal resynthesis handoff; no extra post-macro timing solve was added.</p>'
+            'for the existing resynthesis handoff, which still re-runs STA after macro placement. '
+            'This preliminary experiment predates the merged terminal legalizer and clock/reset protection and does not implement '
+            'the requested macro-only legalization with reuse of pre-snap GP timing for resynthesis.</p>'
             '<div class="scroll"><table><thead><tr><th>Arm</th><th>Cold wall (s)</th>'
             '<th>Macro (s)</th><th>Final cells (s)</th><th>Independent setup WNS / TNS (ps)</th>'
             '<th>Independent hold WNS / TNS (ps)</th><th>HPWL (µm)</th><th>Handoff (KiB)</th>'
@@ -134,6 +151,83 @@ def handoff_snapshot():
             'coverage checks. They are not routed timing or a frequency qualification. Cold plus two '
             'warm runs verify stable DEF output. Perf measurements share the host with other jobs. '
             '<a href="../tmp/remote_sync_20261022/liteeth_handoff/comparison.json">Comparison evidence</a>.</p>')
+
+
+def macro_only_snapshot(repaired=False):
+    case = 'liteeth_macro_only_repaired' if repaired else 'liteeth_macro_only'
+    base = ROOT / 'tmp/remote_sync_20261022' / case
+    path = base / 'comparison.json'
+    if not path.is_file():
+        return ''
+    data = json.loads(path.read_text())
+    if set(data['rows']) != {'baseline', 'macro_only'}:
+        return ''
+    frozen = json.loads((ROOT / 'tmp/remote_sync_20261022/build_macro_only/manifest.json').read_text())
+    versions = frozen['repositories']
+    provenance = ('Frozen LiveHD ' + versions['livehd']['commit'][:9] + ', DREAMPlace '
+                  + versions['DREAMPlace']['commit'][:9] + ' and OpenTimer '
+                  + versions['OpenTimer']['commit'][:9] + '. '
+                  '<a href="../tmp/remote_sync_20261022/build_macro_only/manifest.json">Build provenance</a>. ')
+    rows = []
+    for arm, row in data['rows'].items():
+        boundary = json.loads((base / arm / 'stage_boundary.json').read_text())
+        score = row['score']
+        trace = base / arm / 'w/synth/place/legalize_timing.jsonl'
+        placement_timing = [json.loads(line) for line in trace.read_text().splitlines() if line][-1]
+        rows.append('<tr>' + cell(arm) + cell(number(row['cold_wall_s'], 2))
+                    + cell(number(row['flow']['macro_source_seconds'], 2))
+                    + cell(number(boundary['macro_cell_legalization_s'], 3))
+                    + cell(number(boundary['macro_cell_detail_s'], 3))
+                    + cell(str(boundary['macro_timing_checkpoints']))
+                    + cell(str(boundary['first_final_timing_iteration']))
+                    + cell(number(row['flow']['final_cells_seconds'], 2))
+                    + cell(number(placement_timing['wns']) + ' / ' + number(placement_timing['tns']),
+                           'Native reset-filtered ' + escape(placement_timing['stage']))
+                    + cell(number(score['setup_wns_ps']) + ' / ' + number(score['setup_tns_ps']))
+                    + cell(number(score['hold_wns_ps']) + ' / ' + number(score['hold_tns_ps']))
+                    + cell(number(score['hpwl_um'], 1)) + '</tr>')
+    delta = data['comparisons']['macro_only']
+    title = 'Macro-only handoff with final timing repair' if repaired else 'Corrected macro-only legalization and GP timing handoff'
+    flow = ('The matched pair explicitly sets <code>synth.place.legalize.terminal=false</code>, '
+            'enabling the legacy final legalization, refinement, resize and repair flow. '
+            if repaired else 'The matched pair retains the merged default final terminal legalizer, '
+            'whose CLI branch skips subsequent timing refinement, resize and repair. '
+            'Both terminal-flow rows have large setup violations; a separate pair explicitly '
+            'enables final timing recovery for comparison. ')
+    return ('<h2>' + title + '</h2><p>' + provenance + flow
+            + 'FP is disabled, macro/final stages and incremental synthesis are enabled, and IO '
+            'resynthesis remains enabled. The macro-only arm keeps macro GP timing checkpoints, '
+            'measures the selected GP iterate before snapping for resynthesis, skips cell '
+            'legalization/detail and post-legalization macro STA, and passes only fixed macro/IO '
+            'geometry to final. Final starts from synthesis weights and computes its own timing '
+            'after density settles. Hard-macro halo/track checks and final cell legality remain enforced.</p>'
+            '<p>All these arms retain the merged preCTS clock/reset-cone protection, which prevents '
+            'sizing and buffering those cones even when the later repair passes are enabled. '
+            'Placer timing automatically cuts recognized reset nets before propagation, independent '
+            'of SDC exceptions, and preserves physical RC loads and clock launch/capture timing. '
+            'The native column shows this reset-filtered view at the last legalization/detail checkpoint; '
+            'it is not an independent routed score. The separate raw OpenROAD score follows the original '
+            'SDC, includes reset paths, and has reset as its worst path. It does not measure the '
+            'placer objective and must not be used to infer data-path frequency. '
+            'Earlier frozen-source results used a different control-network optimization policy. '
+            'Routed-frequency qualification requires a matched timing policy and completed routing.</p>'
+            '<div class="scroll"><table><thead><tr><th>Arm</th><th>Cold wall (s)</th>'
+            '<th>Macro total (s)</th><th>Macro cell legalization (s)</th><th>Macro cell detail (s)</th>'
+            '<th>Macro pre-snap STA calls</th><th>First final STA iteration</th><th>Final cells (s)</th>'
+            '<th>Placement checkpoint WNS / TNS (ps; reset excluded)</th><th>Raw OpenROAD setup WNS / TNS (ps; original SDC)</th>'
+            '<th>Raw OpenROAD hold WNS / TNS (ps)</th><th>HPWL (µm)</th></tr></thead><tbody>'
+            + ''.join(rows) + '</tbody></table></div><p>Cold wall change '
+            + number(-100 * delta['wall_reduction'], 2) + '%, CPU change '
+            + number(-100 * delta['CPU_reduction'], 2) + '%, instruction change '
+            + number(-100 * delta['instruction_reduction'], 2)
+            + '%. Each arm completes cold plus two warm runs with matching within-arm DEF hashes. '
+            'The baseline also runs resynthesis STA after macro cell legalization; that call is outside its GP timing trace. '
+            'Timing scores are fresh independent OpenROAD preCTS placement-RC measurements with '
+            'clock, PG and coverage checks; they do not establish routing or supported frequency. '
+            'Stage timers cover the completed macro/final pair, while cold wall includes resynthesis '
+            'restarts and all other invocation work. Cross-arm macro poses differ after resynthesis; '
+            'each final placement preserves its own macro/IO frame. Perf measurements share the host. '
+            '<a href="../tmp/remote_sync_20261022/' + case + '/comparison.json">Comparison evidence</a>.</p>')
 
 
 def main():
@@ -502,6 +596,7 @@ def main():
 <h1>LiveHD / OpenROAD: partial routing results</h1>
 <p class="stamp">Snapshot: @STAMP@. Refresh with <code>python3 scripts/update_partial_route.py</code>.</p>
 <p>LiveHD and OpenROAD name the placement arms; both use OpenROAD for CTS through detailed routing and extraction. These are saved experiments using frozen tools and inputs. The newly synchronized sources have not yet produced a new routed result.</p>
+<p>Evaluations were stopped at the user's request on 2026-10-22 for code review and publication. Unfinished CNN/Eyeriss route numbers below are retained checkpoint evidence, not completed route results.</p>
 <p class="note"><strong>Goal:</strong> if OpenROAD routes and LiveHD cannot, fix route parity first. Once both route cleanly, improve extracted timing and supported frequency against a strong reference. Missing an unattainable requested period alone does not reject a design. Keep hold checks separate: lowering frequency does not generally repair same-edge hold violations.</p>
 <div class="scroll"><table><caption>Main results — timing in ps, wirelength in µm, wall time in seconds</caption>
 <thead><tr><th>Design</th><th>Placement arm</th><th>Latest verified stage</th><th>Routing DRCs</th><th>Extracted setup WNS / TNS</th><th>Extracted hold WNS / TNS</th><th>Supported frequency</th><th>Signal wirelength</th><th>Measured wall time</th></tr></thead><tbody>@ROWS@</tbody></table></div>
@@ -539,6 +634,8 @@ def main():
 <p>After the initial three routed evaluations, two additional HighTide designs are authorized. Existing FP-plan-disabled, macro/final-enabled and incremental-synthesis requirements continue to apply. <a href="../todo/livehd/3r-route.html">Detailed implementation and experiment history</a>.</p>
 @PERFORMANCE@
 @HANDOFF@
+@MACRO_ONLY@
+@MACRO_ONLY_REPAIRED@
 <h2>Snapshot evidence</h2><p>Links refer to local evaluation artifacts; their SHA-256 prefixes identify the exact bytes used to render this snapshot.</p><ul>@SOURCES@</ul>
 </body></html>
 '''
@@ -548,7 +645,9 @@ def main():
                        'PLACEMENT_ROWS': ''.join(placement_rows), 'CONTROL_ROWS': ''.join(control_rows),
                        'MACRO_TRIAL_ROWS': ''.join(macro_trial_rows),
                        'MACRO_GAP_NOTE': gap_note, 'MARKER_NOTE': marker_note, 'SOURCES': sources,
-                       'PERFORMANCE': performance_snapshot(), 'HANDOFF': handoff_snapshot()}.items():
+                       'PERFORMANCE': performance_snapshot(), 'HANDOFF': handoff_snapshot(),
+                       'MACRO_ONLY': macro_only_snapshot(),
+                       'MACRO_ONLY_REPAIRED': macro_only_snapshot(True)}.items():
         page = page.replace('@' + key + '@', value)
     output = ROOT / 'docs/partial_route.html'
     output.write_text(page)
