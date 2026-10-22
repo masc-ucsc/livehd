@@ -32,6 +32,8 @@ struct Terminal_legalize_options {
 };
 struct Terminal_legalize_bin {
   physical::Rect bounds;
+  // Capacity excludes macro keepouts and fixed WELLTAP/SPACER footprints;
+  // before/after count logic cells, including input-fixed and critical locks.
   double         capacity = 0, before = 0, after = 0;
 };
 struct Terminal_legalize_cell {

@@ -1933,7 +1933,11 @@ a common horizontal or vertical bin strip. Multi-terminal nets need explicit
 RSMT-edge evidence and currently proceed to step 2.
 
 The grid follows the active routing auxiliary grid. Usable capacity excludes
-macro/halo-covered row sites, and counts fixed CORE cells against the same cap.
+macro/halo-covered row sites and fixed `CORE WELLTAP`/`CORE SPACER` footprints.
+Those immutable physical cells reserve their body without logic-cell sizing
+padding. Input-fixed logic cells and critical cells locked during legalization
+still count against the same hard cap. This prevents imported tap-only row
+fragments from failing a logic-density limit before any movable cell is placed.
 Cell area is apportioned across all overlapped bins. An optional side-input expansion also protects all movable endpoints of untimed
 data nets feeding selected cells; clocks and supplies remain excluded. This is
 useful to test slew effects that setup slack alone misses. Critical locks remain

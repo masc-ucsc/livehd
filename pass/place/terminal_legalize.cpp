@@ -29,6 +29,9 @@ double           overlap(const ph::Rect& a, const ph::Rect& b) {
   return std::max(0., std::min(a.xh, b.xh) - std::max(a.xl, b.xl)) * std::max(0., std::min(a.yh, b.yh) - std::max(a.yl, b.yl));
 }
 bool fixed(const Ann_place& p) { return p.status == ph::Status::FIXED || p.status == ph::Status::LOCKED; }
+bool fixed_physical_cell(const ph::Component& c, const ph::Macro& m) {
+  return fixed(c.place) && (m.klass == "CORE WELLTAP" || m.klass == "CORE SPACER");
+}
 bool orientation_allowed(const ph::Macro& m, ph::Orientation o) {
   return o == ph::Orientation::N || (o == ph::Orientation::FS && m.symmetry_x) || (o == ph::Orientation::FN && m.symmetry_y)
          || (o == ph::Orientation::S && m.symmetry_x && m.symmetry_y);
@@ -372,19 +375,23 @@ struct Model {
       preferred.push_back(c.place);
       const bool core = master->second.klass.starts_with("CORE");
       movable[i]      = core && !fixed(c.place);
-      if (!core) {
-        auto b  = box(c.place);
-        b.xl   -= options.macro_halo_x_dbu;
-        b.xh   += options.macro_halo_x_dbu;
-        b.yl   -= options.macro_halo_y_dbu;
-        b.yh   += options.macro_halo_y_dbu;
+      if (!core || fixed_physical_cell(c, master->second)) {
+        auto b = box(c.place);
+        if (!core) {
+          b.xl -= options.macro_halo_x_dbu;
+          b.xh += options.macro_halo_x_dbu;
+          b.yl -= options.macro_halo_y_dbu;
+          b.yh += options.macro_halo_y_dbu;
+        }
         reserve(b);
         obstacles.push_back(i);
         installed[i] = true;
       }
     }
-    // Macro halos reduce usable row capacity. Fixed CORE cells consume that
-    // capacity, just like critical cells fixed later by this transaction.
+    // Macro halos and immutable physical infrastructure reduce usable row
+    // capacity. Fixed logic cells still consume density, just like critical
+    // cells fixed later by this transaction. Taps/spacers need no sizing pad;
+    // neighboring movable cells retain their own required padding.
     for (size_t i = 0; i < rows.size(); ++i) {
       const auto& r = rows[i];
       for (const auto& [a, b] : r.free) {
@@ -404,8 +411,9 @@ struct Model {
       total_capacity += b.capacity;
     }
     for (size_t i = 0; i < count; ++i) {
-      const auto& c = fp.components[i];
-      if (!tech.macros.at(c.macro).klass.starts_with("CORE")) {
+      const auto& c      = fp.components[i];
+      const auto& master = tech.macros.at(c.macro);
+      if (!master.klass.starts_with("CORE") || fixed_physical_cell(c, master)) {
         continue;
       }
       total_area += double(c.place.width) * c.place.height;
@@ -1912,7 +1920,8 @@ void fit_terminal_legalize_grid(const ph::Technology& tech, const ph::Floorplan&
     height       = std::max(height, double(h));
   }
   for (const auto& c : fp.components) {
-    if (auto m = tech.macros.find(c.macro); m != tech.macros.end() && m->second.klass.starts_with("CORE")) {
+    if (auto m = tech.macros.find(c.macro);
+        m != tech.macros.end() && m->second.klass.starts_with("CORE") && !fixed_physical_cell(c, m->second)) {
       widest = std::max(widest, double(c.place.width));
     }
   }

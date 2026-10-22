@@ -403,6 +403,60 @@ TEST(TerminalLegalize, FixedCellsConsumeDensityAndArePreserved) {
   EXPECT_LE(report.bins[0].after, 80000);
 }
 
+TEST(TerminalLegalize, FixedPhysicalInfrastructureReducesCapacityWithoutConsumingLogicDensity) {
+  for (const auto* klass : {"CORE WELLTAP", "CORE SPACER"}) {
+    SCOPED_TRACE(klass);
+    Fixture f(20, 1);
+    f.options.bins_x           = 2;
+    f.options.bins_y           = 1;
+    f.options.padding_sites    = 0;
+    f.options.max_density      = .3;
+    f.options.target_density   = .2;
+    // Physical cells reserve their body, without inheriting a macro halo.
+    f.options.macro_halo_x_dbu = f.options.macro_halo_y_dbu = 1000;
+    auto& tap                                               = f.tech.macros["tap"];
+    tap                                                     = f.tech.macros.at("cell");
+    tap.width                                               = 8;
+    tap.klass                                               = klass;
+    tap.pins.clear();
+    const auto i                    = f.cell(0, 0, "tap");
+    f.fp.components[i].place.status = physical::Status::FIXED;
+    const auto original             = f.fp.components[i];
+    f.cell(0, 0);
+    f.cell(0, 0);
+    fit_terminal_legalize_grid(f.tech, f.fp, f.options);
+    EXPECT_EQ(f.options.bins_x, 2);
+    Terminal_legalize_report report;
+    ASSERT_NO_THROW(report = terminal_legalize(f.tech, f.fp, f.timing, f.options));
+    EXPECT_EQ(f.fp.components[i], original);
+    ASSERT_EQ(report.bins.size(), 2);
+    EXPECT_DOUBLE_EQ(report.bins[0].capacity, 20000);
+    EXPECT_DOUBLE_EQ(report.bins[1].capacity, 100000);
+    EXPECT_DOUBLE_EQ(report.bins[0].after, 0);
+    EXPECT_DOUBLE_EQ(report.bins[1].after, 20000);
+    EXPECT_EQ(report.cells.size(), 2);
+    for (const auto& c : report.cells) {
+      EXPECT_GE(c.after.x, 1000);
+    }
+    EXPECT_NE(f.fp.components[1].place.x, f.fp.components[2].place.x);
+  }
+}
+
+TEST(TerminalLegalize, FixedLogicStillCannotExceedTheHardDensityCap) {
+  Fixture f(40, 1);
+  f.options.bins_x                = 2;
+  f.options.bins_y                = 1;
+  f.options.padding_sites         = 0;
+  f.options.max_density           = .3;
+  f.options.target_density        = .2;
+  f.tech.macros["cell"].width     = 8;
+  const auto i                    = f.cell(0, 0);
+  f.fp.components[i].place.status = physical::Status::FIXED;
+  const auto before               = f.fp.components;
+  EXPECT_THROW(terminal_legalize(f.tech, f.fp, f.timing, f.options), std::runtime_error);
+  EXPECT_EQ(f.fp.components, before);
+}
+
 TEST(TerminalLegalize, RejectsInvalidControls) {
   Fixture f;
   f.cell(2, 0);
