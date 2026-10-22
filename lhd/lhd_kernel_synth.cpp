@@ -318,6 +318,7 @@ livehd::placement::Options placement_options(const Options& opts) {
   out.convergence_tolerance = number("place.convergence_tolerance", "0.01");
   out.detailed_iterations   = integer("place.detailed_iterations", "2");
   out.macro_detailed_place  = truthy(synth_set(opts, "place.macro.detailed", "true"));
+  out.macro_legalize_cells  = truthy(synth_set(opts, "place.macro.legalize_cells", "true"));
   out.final_independent_timing = truthy(synth_set(opts, "place.final.independent_timing", "false"));
   out.satlegalize           = truthy(synth_set(opts, "place.satlegalize", "false"));
   auto& sat                 = out.satlegalize_options;
@@ -1441,6 +1442,12 @@ void synth_command(Options& opts, Result& res) {
       if (run_timing_place && (place_options.fp_timing_interval > 0 || place_options.macro_timing_interval > 0)) {
         place_options.fp_evaluate = evaluate;
         place_options.fp_resize   = run_resize;
+      }
+      if (io_flow && !place_options.macro_legalize_cells && !place_options.fp_evaluate) {
+        // Resynthesis still needs one selected GP measurement when periodic
+        // placement timing is disabled. It replaces the post-macro STA call.
+        place_options.fp_evaluate          = evaluate;
+        place_options.macro_timing_interval = 0;
       }
       if (run_timing_place) {
         auto seed_options        = place_options;

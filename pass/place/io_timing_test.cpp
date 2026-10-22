@@ -68,7 +68,9 @@ TEST(IoTiming, CrossingColorsAndSingleAutomaticRound) {
   options.output_dir        = std::string(std::getenv("TEST_TMPDIR")) + "/io_flow";
   std::filesystem::remove_all(options.output_dir);
   auto       store    = std::make_shared<synth::Io_store>(options.output_dir + "/abc_cache", 1000);
-  const auto evaluate = [](const Result& placed) {
+  unsigned timing_calls = 0;
+  const auto evaluate = [&](const Result& placed) {
+    ++timing_calls;
     Timing_feedback timing;
     timing.time_unit_ps = 1;
     timing.delay        = 1000;
@@ -111,6 +113,40 @@ TEST(IoTiming, CrossingColorsAndSingleAutomaticRound) {
       placed.parasitics->nets.push_back(std::move(net));
     }
   }
+  // Probe the saved GP measurement before the automatic remap below removes
+  // the even inverter chains. A high trigger threshold keeps this source body
+  // unchanged, so arrivals and wire lengths remain independently observable.
+  auto probe_options = options;
+  probe_options.macro_legalize_cells = false;
+  probe_options.output_dir += "/gp_probe";
+  auto probe_store = std::make_shared<synth::Io_store>(probe_options.output_dir + "/abc_cache", 1000);
+  Io_timing_flow probe(top, probe_options, probe_store,
+                       {{"library", options.liberty}, {"delay", "1000"}}, evaluate, 100);
+  const auto calls_before_missing = timing_calls;
+  EXPECT_THROW(probe.after_stage(Placement_stage::macro, placed), std::runtime_error);
+  EXPECT_EQ(timing_calls, calls_before_missing);
+  placed.macro_gp_timing = Macro_gp_timing{evaluate(placed), placed.parasitics, placed.pin_locations};
+  for (auto& [name, pin] : placed.macro_gp_timing->timing.pins) {
+    (void)name;
+    if (pin.arrival) {
+      pin.arrival = 850;
+    }
+  }
+  placed.parasitics = std::make_shared<physical::Parasitics>(*placed.parasitics);
+  for (auto& net : placed.parasitics->nets) {
+    net.wire_length_um = 1000;
+  }
+  const auto calls_before_macro = timing_calls;
+  EXPECT_FALSE(probe.after_stage(Placement_stage::macro, placed));
+  EXPECT_EQ(timing_calls, calls_before_macro);
+  EXPECT_EQ(probe_store->rows.at("top__c1").placed.inputs.at("a[0]"), 850);
+  EXPECT_EQ(probe_store->global_wire.length_um.at(1), 10);
+  EXPECT_FALSE(probe.after_stage(Placement_stage::final, placed));
+  EXPECT_EQ(timing_calls, calls_before_macro + 1);
+  EXPECT_EQ(probe_store->rows.at("top__c1").placed.inputs.at("a[0]"), 950);
+  EXPECT_EQ(probe_store->global_wire.length_um.at(1), 1000);
+  placed.parasitics = placed.macro_gp_timing->parasitics;
+  placed.macro_gp_timing.reset();
   EXPECT_TRUE(flow.after_stage(Placement_stage::floorplan, placed));
   EXPECT_EQ(store->wires.size(), 2);
   EXPECT_EQ(store->rows.at("top__c1").used.inputs.at("a[0]"), 950);

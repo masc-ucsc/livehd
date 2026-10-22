@@ -12,6 +12,7 @@
 #include <random>
 #include <set>
 #include <sstream>
+#include <tuple>
 
 #include "attrs.hpp"
 #include "gtest/gtest.h"
@@ -299,7 +300,7 @@ TEST(Placement, ResynthesisRestartSeedsCoordinatesWithoutLockingCellsOrMacros) {
     EXPECT_TRUE(now->place.x != old.place.x || now->place.y != old.place.y) << old.name;
   }
 }
-TEST(Placement, MacroDetailCanBeSkippedWithoutSkippingLegalizationOrFinalDetail) {
+TEST(Placement, MacroCellWorkCanBeDeferredWithoutSkippingGpTimingOrFinalLegalization) {
   const auto root = std::filesystem::path(std::getenv("TEST_TMPDIR")) / "macro_detail";
   std::filesystem::create_directories(root);
   std::ifstream lef_input("inou/lefdef/tests/data/sky130hd.lef");
@@ -328,22 +329,34 @@ TEST(Placement, MacroDetailCanBeSkippedWithoutSkippingLegalizationOrFinalDetail)
     gu::set_bits(signal, 1);
   }
   graph->get_output_pin("y").connect_driver(signal);
-  for (const auto& [detail, independent] : {std::pair{true, false}, std::pair{false, false}, std::pair{false, true}}) {
+  for (const auto& [detail, independent, legalize, terminal] : {std::tuple{true, false, true, false},
+                                                               std::tuple{false, false, true, false},
+                                                               std::tuple{false, true, true, false},
+                                                               std::tuple{false, true, false, false},
+                                                               std::tuple{false, true, false, true}}) {
     auto options                 = plain_options();
     options.lefs                 = {"inou/lefdef/tests/data/sky130hd.tlef", lef_path};
-    options.output_dir           = (root / (detail ? "enabled" : independent ? "independent" : "disabled")).string();
+    options.output_dir           = (root / (terminal ? "macro_only_terminal" : !legalize ? "macro_only"
+                                            : detail ? "enabled" : independent ? "independent" : "disabled")).string();
     options.core                 = {0, 0, 30, 30};
+    options.density              = .5;
     options.iterations           = 20;
     options.bins                 = 2;
     options.snapshots            = true;
     options.final_cells          = true;
     options.macro_detailed_place = detail;
+    options.macro_legalize_cells = legalize;
+    options.terminal_legalize = terminal;
     options.final_independent_timing = independent;
     options.macro_timing_interval = 10;
     options.net_weights["cell0:Y"] = 2;
     bool macro_complete = false, checked_final_weights = false;
     double macro_weight = 0;
+    unsigned macro_timing_calls = 0;
     options.fp_evaluate = [&](const Result& checkpoint) {
+      if (!macro_complete) {
+        ++macro_timing_calls;
+      }
       if (macro_complete && !checked_final_weights) {
         EXPECT_DOUBLE_EQ(checkpoint.net_weights.at("cell0:Y"), independent ? 2 : macro_weight);
         checked_final_weights = true;
@@ -354,8 +367,18 @@ TEST(Placement, MacroDetailCanBeSkippedWithoutSkippingLegalizationOrFinalDetail)
     };
     physical::Floorplan macro_frame;
     options.after_stage = [&](Placement_stage stage, const Result& result) {
-      EXPECT_NO_THROW(check_legality(physical::read_lef(options.lefs), result.floorplan));
+      if (legalize || stage != Placement_stage::macro) {
+        EXPECT_NO_THROW(check_legality(physical::read_lef(options.lefs), result.floorplan));
+      }
       if (stage == Placement_stage::macro) {
+        EXPECT_GE(macro_timing_calls, 2);  // In-loop timing remains enabled.
+        EXPECT_EQ(bool(result.macro_gp_timing), !legalize);
+        rapidjson::Document q;
+        q.Parse(result.qor.c_str());
+        EXPECT_EQ(q["cells_legalized"].GetBool(), legalize);
+        if (!legalize) {
+          EXPECT_NE(result.macro_gp_timing->parasitics, nullptr);
+        }
         macro_frame = result.floorplan;
         macro_weight = result.net_weights.at("cell0:Y");
         EXPECT_GT(macro_weight, 2);
@@ -365,11 +388,13 @@ TEST(Placement, MacroDetailCanBeSkippedWithoutSkippingLegalizationOrFinalDetail)
     };
     hhds::GraphLibrary placed;
     const auto result = place(*graph, placed, options);
+    EXPECT_NO_THROW(check_legality(physical::read_lef(options.lefs), result.floorplan));
     ASSERT_FALSE(macro_frame.components.empty());
     EXPECT_TRUE(checked_final_weights);
     EXPECT_TRUE(std::filesystem::exists(options.output_dir + "/macro/after_legalization.def"));
     EXPECT_EQ(std::filesystem::exists(options.output_dir + "/macro/after_detailed.def"), detail);
-    EXPECT_TRUE(std::filesystem::exists(options.output_dir + "/after_detailed.def"));
+    EXPECT_EQ(std::filesystem::exists(options.output_dir + "/after_detailed.def"), !terminal);
+    EXPECT_TRUE(std::filesystem::exists(options.output_dir + "/after_legalization.def"));
     const auto handoff = physical::read_def(options.output_dir + "/macro/fixed.def");
     EXPECT_EQ(handoff.components.size(), detail ? 3 : 1);
     EXPECT_EQ(result.floorplan.components.size(), 3);

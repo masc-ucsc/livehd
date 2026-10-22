@@ -327,8 +327,21 @@ bool Io_timing_flow::before_placement() { return check("before_placement", nullp
 bool Io_timing_flow::after_stage(Placement_stage stage, const Result& placed) {
   const bool automatic = first_stage_ && !automatic_used_;
   first_stage_         = false;
-  const auto timing    = evaluate_(placed);
-  const auto values    = harvest(placed, timing);
+  std::map<std::string, synth::Io_environment> values;
+  if (stage == Placement_stage::macro && !options_.macro_legalize_cells) {
+    if (!placed.macro_gp_timing || !placed.macro_gp_timing->parasitics) {
+      throw std::runtime_error("macro-only resynthesis requires a selected GP timing measurement");
+    }
+    // harvest reads graph connectivity/identities, not graph placement. Use
+    // both timing and RC from the same pre-snap GP frame, never a mixed frame.
+    Result measurement;
+    measurement.graph         = placed.graph;
+    measurement.parasitics    = placed.macro_gp_timing->parasitics;
+    measurement.pin_locations = placed.macro_gp_timing->pin_locations;
+    values = harvest(measurement, placed.macro_gp_timing->timing);
+  } else {
+    values = harvest(placed, evaluate_(placed));
+  }
   const bool restart   = check(stage_name(stage), &values, automatic);
   if (restart) {
     ++restarted_;

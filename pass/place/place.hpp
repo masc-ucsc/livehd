@@ -149,6 +149,7 @@ struct Options {
   double                               wirelength_gamma_end       = .05;  // experimental; existing smoothing schedule by default
   int                                  detailed_iterations        = 2;
   bool                                 macro_detailed_place       = true;  // cell detail while macros are movable
+  bool                                 macro_legalize_cells       = true;  // false leaves macro-stage cells at GP poses
   bool                                 final_independent_timing   = false;  // synthesis weights, then density-gated final STA
   bool                                 exact_cell_density         = false;
   bool                                 density_upper_bound        = false;  // experimental filler-free upper-bound penalty
@@ -180,6 +181,11 @@ struct Options {
 };
 DreamPlace::native::RoutePolicy resolve_route_policy(const Options&, const Stage_route&);
 void                            initialize_route_tables();
+struct Macro_gp_timing {
+  Timing_feedback                                timing;
+  std::shared_ptr<physical::Parasitics>            parasitics;
+  std::map<std::string, std::pair<double, double>> pin_locations;
+};
 struct Result {
   unsigned                                         fp_resized_cells = 0, fp_repair_edits = 0;
   // Unknown constant bits tied low under Options::unknown_const_zero (zero otherwise).
@@ -194,6 +200,9 @@ struct Result {
   std::string                                      qor;
   physical::Floorplan                              floorplan;
   Prects_library                                   prects;
+  // Selected GP measurement, before macro snapping. Resynthesis can harvest
+  // this without analyzing provisional cells after macro-only legalization.
+  std::optional<Macro_gp_timing>                   macro_gp_timing;
 };
 using Point = std::pair<double, double>;
 struct Steiner_tree {

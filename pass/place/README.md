@@ -618,13 +618,26 @@ periodic checkpoints. Designs with no FP candidates have no FP pass/checkpoints.
 `synth.place.macro.detailed=false` skips detailed cell placement while macros
 are movable. The default is `true`. This experiment retains macro/cell
 legalization, timing feedback and the legal macro handoff; the final cell stage
-still runs the configured detailed-placement kernels. The macro stage then
+still runs its configured legalization/refinement flow. The macro stage then
 exports `after_legalization.def` and `out.def` without an `after_detailed.def`
 snapshot. Compare the resulting macro/IO decisions, timing and routing before
 adopting this speed tradeoff.
 The final handoff DEF then contains only fixed/locked components, IOs and frame
 geometry. Final placement rebuilds movable cells and connectivity from the
 mapped source, as in the original full-frame handoff.
+
+For macro-only legalization, additionally set
+`synth.place.macro.legalize_cells=false` (default `true`). With FP disabled and
+plain macro placement, this leaves movable CORE cells at their GP coordinates,
+skips their row legalization, detail, row flips and tie-site repair, and retains
+hard-macro snapping, halo/track checks and IO placement. Timing checkpoints
+inside macro GP remain enabled. When IO resynthesis is enabled, one measurement
+of the selected GP iterate is retained before macro snapping; resynthesis uses
+that timing and RC snapshot without a post-legalization STA call. It can still
+remap and restart the macro stage. The intermediate result does not claim full
+cell legality. `gp_history.json` reports zero cell legalization/detail time;
+the final stage still checks all cells. This mode currently requires
+`synth.place.macro=none`, and is independent of the final weight policy below.
 
 `synth.place.final.independent_timing=true` starts final placement with the
 original synthesis timing weights instead of the macro stage's weights. Final
@@ -633,6 +646,8 @@ GP refreshes its own RC and criticalities only after density overflow reaches
 existing final legalization/detail timing checks still run. The default is
 `false`. This separates the final-cell objective from the provisional macro
 cell placement while keeping synthesis criticalities active initially.
+Use it together with `synth.place.macro.legalize_cells=false` for a macro stage
+whose internal timing weights are discarded at the fixed-macro/IO handoff.
 
 Set `synth.place.fp.timing_after_density=true` to defer FP timing and repair
 while the actual GP overflow exceeds `synth.place.stop_overflow` (default 0.1). This uses the

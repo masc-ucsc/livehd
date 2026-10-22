@@ -470,6 +470,9 @@ std::string environment_key(const Options& o, const ph::Technology& tech) {
   if (!o.macro_detailed_place) {
     h = hash_text("macro-detail:false", h);
   }
+  if (!o.macro_legalize_cells) {
+    h = hash_text("macro-legalize-cells:false", h);
+  }
   if (o.final_independent_timing) {
     h = hash_text("final-independent-timing:true", h);
   }
@@ -3595,6 +3598,9 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
     throw std::invalid_argument("invalid FP centroid alignment controls");
   }
   const bool macro_active = options.macro_mode == "h2d" && !options.timing_seed;
+  if (macro_active && !options.macro_legalize_cells) {
+    throw std::invalid_argument("macro-only legalization currently requires plain macro placement mode");
+  }
   if (macro_active
       && (options.automatic_bins || options.exact_macro_density || options.scale_macro_density || options.adaptive_density
           || options.routability || options.macro_overlap_weight || options.macro_jitter || options.schedule_iterations
@@ -4760,6 +4766,9 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
   const bool terminal_active = options.full && options.terminal_legalize && !options.fp_place
                                && options.completed_stage == Placement_stage::final && !options.timing_seed
                                && !options.retain_placement && !options.analyze_colors_only;
+  const bool defer_macro_cells = options.full && !options.macro_legalize_cells && !options.fp_place
+                                  && options.completed_stage == Placement_stage::macro && !options.timing_seed
+                                  && !options.retain_placement && !options.analyze_colors_only;
   if (terminal_active && movable_macros) {
     throw std::invalid_argument("terminal legalization requires the final cell stage with fixed macros");
   }
@@ -4961,8 +4970,10 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
       }
       make_arrays(v, tech);
     }
-    control.legalize       = options.full && !terminal_active;
-    control.detailed_place = options.full && !terminal_active && (!movable_macros || options.macro_detailed_place);
+    control.legalize           = options.full && !terminal_active;
+    control.macro_only_legalize = defer_macro_cells;
+    control.detailed_place     = options.full && !terminal_active && !defer_macro_cells
+                                  && (!movable_macros || options.macro_detailed_place);
     if (options.snapshots || v.centroids) {
       control.observer_interval = options.iterations + 1;
       control.observer          = [&](const dp::Design& snapshot, dp::PlacementStage stage, int iteration) {
@@ -4982,7 +4993,8 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
             }
             if (i < static_cast<size_t>(snapshot.num_movable)) {
               place.status = Status::PLACED;
-              if (stage != dp::PlacementStage::global_placement && tech.macros.at(cell.macro).klass.starts_with("CORE")) {
+              if (!defer_macro_cells && stage != dp::PlacementStage::global_placement
+                  && tech.macros.at(cell.macro).klass.starts_with("CORE")) {
                 // capture() applies physical CORE row flips after the native
                 // solver. Export the same legal orientation without mutating it.
                 auto observed  = cell;
@@ -5407,11 +5419,13 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
       control.terminal_interval = options.macro_pin_interval;
       control.terminal_update   = pin_updater(true);
     }
-    const bool      final_timing = !movable_macros && !options.fp_place;
+    const bool      final_timing = !defer_macro_cells && !movable_macros && !options.fp_place;
     Timing_feedback final_gp_timing;
     const char*     timing_stage          = final_timing ? "final" : "macro";
     bool            legal_timing_snapshot = false;
-    if ((movable_macros || final_timing) && options.fp_evaluate && options.macro_timing_interval > 0) {
+    bool            save_macro_gp_timing = false;
+    if ((movable_macros || final_timing || defer_macro_cells) && options.fp_evaluate
+        && (options.macro_timing_interval > 0 || (defer_macro_cells && options.after_stage))) {
       control.checkpoint_interval      = options.macro_timing_interval;
       control.checkpoint_final         = true;
       control.checkpoint_after_density = options.fp_timing_after_density || (final_timing && options.final_independent_timing);
@@ -5498,6 +5512,9 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
                                                                                options.timing_fraction,
                                                                                options.timing_max_weight,
                                                                                options.timing_exponent);
+        if (save_macro_gp_timing) {
+          result.macro_gp_timing = Macro_gp_timing{timing, std::move(checkpoint.parasitics), std::move(checkpoint.pin_locations)};
+        }
         rapidjson::StringBuffer                    weights_json;
         rapidjson::Writer<rapidjson::StringBuffer> weights_writer(weights_json);
         weights_writer.StartObject();
@@ -5527,6 +5544,17 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
           throw std::runtime_error("cannot write placement weight report");
         }
         return update;
+      };
+    }
+    if (defer_macro_cells && options.after_stage && control.checkpoint) {
+      control.before_legalize = [&](dp::Design& physical) {
+        // GP can restore an earlier selected iterate. Measure that exact frame
+        // before macro snap, and retain it for the resynthesis callback only.
+        macro_checkpoint_forced = true;
+        save_macro_gp_timing    = true;
+        const auto update       = control.checkpoint(physical, control.max_iterations);
+        save_macro_gp_timing    = false;
+        physical.net_weights    = update.net_weights;
       };
     }
     if (final_timing && ((options.fp_evaluate && control.checkpoint) || options.legalize_timing_strength > 0)) {
@@ -6137,15 +6165,17 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
       control.checkpoint(v.design, control.max_iterations);
       legal_timing_snapshot = false;
     }
-    capture(v, tech, options.full);
+    capture(v, tech, options.full && !defer_macro_cells);
   } else {
     metrics.legal     = dp::is_legal(v.design);
     metrics.converged = false;
-    capture(v, tech, options.full);
+    capture(v, tech, options.full && !defer_macro_cells);
   }
   if (options.full && !options.timing_seed && !options.retain_placement && !options.analyze_colors_only && !terminal_active) {
     align_macro_geometry(v, tech, v.design, false, true);
-    localize_tie_sites(v, tech, options.liberty, options.preserve_imported_ties);
+    if (!defer_macro_cells) {
+      localize_tie_sites(v, tech, options.liberty, options.preserve_imported_ties);
+    }
     metrics.legal = dp::is_legal(v.design);
     metrics.hpwl  = dp::hpwl(v.design);
   }
@@ -6858,7 +6888,16 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
     }
   }
   if (options.full && !options.timing_seed && !options.retain_placement) {
-    check_legality(tech, v.fp, options);
+    if (defer_macro_cells) {
+      auto frame = v.fp;
+      std::erase_if(frame.components, [&](const auto& cell) {
+        return tech.macros.at(cell.macro).klass.starts_with("CORE") && cell.place.status != Status::FIXED
+               && cell.place.status != Status::LOCKED;
+      });
+      check_legality(tech, frame, options);
+    } else {
+      check_legality(tech, v.fp, options);
+    }
   }
   auto rc_options = options;
   if (options.timing_seed) {
@@ -7423,7 +7462,7 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
       : options.full           ? "full"
                                : "gp",
       (options.timing_seed || options.retain_placement) ? "false"
-      : options.full                                    ? "true"
+      : options.full && !defer_macro_cells              ? "true"
                                                         : (metrics.legal ? "true" : "false"),
       metrics.converged ? "true" : "false",
       cache.hit ? "null" : std::format("{:.9g}", metrics.overflow),
@@ -7446,6 +7485,10 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
     rapidjson::Document json;
     json.Parse(result.qor.c_str());
     auto& allocator = json.GetAllocator();
+    json.AddMember("cells_legalized",
+                   options.full && !defer_macro_cells && !options.timing_seed && !options.retain_placement,
+                   allocator);
+    json.AddMember("macro_gp_timing_for_resynthesis", bool(result.macro_gp_timing), allocator);
     json["virtual_fillers"].SetBool(options.virtual_fillers);
     json.AddMember("fp_warpspace", options.fp_warp.enabled, allocator);
     json.AddMember("macro_warpspace", options.macro_warp.enabled, allocator);
@@ -7708,7 +7751,7 @@ Result place(hhds::Graph& source, hhds::GraphLibrary& library, const Options& re
     pin_status.emplace(terminal.name, terminal.status);
     terminal.status = Status::FIXED;
   }
-  if (!options.macro_detailed_place) {
+  if (!options.macro_detailed_place || !options.macro_legalize_cells) {
     // Final placement rebuilds movable cells/connectivity from source and
     // imports only fixed poses. Pass the actual handoff, not provisional cells.
     std::erase_if(macro.floorplan.components, [](const auto& cell) {
@@ -7745,11 +7788,12 @@ Result place(hhds::Graph& source, hhds::GraphLibrary& library, const Options& re
   const auto end          = std::chrono::steady_clock::now();
   const auto seconds      = [](auto a, auto b) { return std::chrono::duration<double>(b - a).count(); };
   auto       text         = std::format(
-      R"({{"schema_version":1,"mode":"{}","centroid_snap":{},"macro_snap":{},"macro_detailed":{},"final_independent_timing":{},"final_centroid_anchors":false,"fixed_macros":{},"macro_source_hpwl_um":{},"final_hpwl_um":{},"macro_source_seconds":{},"final_cells_seconds":{}}})",
+      R"({{"schema_version":1,"mode":"{}","centroid_snap":{},"macro_snap":{},"macro_detailed":{},"macro_legalize_cells":{},"final_independent_timing":{},"final_centroid_anchors":false,"fixed_macros":{},"macro_source_hpwl_um":{},"final_hpwl_um":{},"macro_source_seconds":{},"final_cells_seconds":{}}})",
       options.fp_place ? "floorplan-macro-cells" : "macro-cells",
       options.fp_snap_enabled,
       options.macro_snap,
       options.macro_detailed_place,
+      options.macro_legalize_cells,
       options.final_independent_timing,
       fixed_macros,
       [&] {
