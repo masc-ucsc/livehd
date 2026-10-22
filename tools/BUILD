@@ -9,7 +9,7 @@ cc_binary(
     name = "warpspace",
     srcs = ["warpspace.cpp"],
     copts = COPTS,
-    deps = ["@highs//:highs", "@zlib//:zlib", "@rapidjson"],
+    deps = ["//pass/place:density_warp", "@zlib//:zlib", "@rapidjson"],
 )
 
 py_test(

@@ -11,6 +11,7 @@
 #include <numeric>
 #include <random>
 #include <set>
+#include <sstream>
 
 #include "attrs.hpp"
 #include "gtest/gtest.h"
@@ -3240,6 +3241,48 @@ TEST(Placement, PlacementColorsUseLibertyRolesAndPinsMoveWithoutSta) {
       EXPECT_EQ(it->y, t.y);
     }
   }
+  // Exercise both stage controls independently without a timing callback.
+  std::optional<physical::Floorplan> off_frame;
+  for (unsigned mask : {0U, 1U, 2U, 3U, 0U}) {
+    auto warped               = o;
+    warped.fp_warp.enabled    = mask & 1;
+    warped.macro_warp.enabled = mask & 2;
+    warped.fp_warp.bins = warped.macro_warp.bins = 4;
+    warped.fp_warp.iterations = warped.macro_warp.iterations = 1;
+    warped.macro_warp.updates                                = 2;
+    warped.fp_snap_enabled                                   = false;  // shifted unsnapped targets must survive handoff
+    warped.output_dir                                        = (dir / ("warp_" + std::to_string(mask))).string();
+    hhds::GraphLibrary warped_flat;
+    const auto         result = place(*graph, warped_flat, warped);
+    EXPECT_NO_THROW(check_legality(physical::read_lef(warped.lefs), result.floorplan));
+    EXPECT_EQ(result.floorplan.nets.size(), result.parasitics->nets.size());
+    EXPECT_EQ(std::filesystem::exists(warped.output_dir + "/fp_warp_field.json"), bool(mask & 1));
+    EXPECT_EQ(std::filesystem::exists(warped.output_dir + "/macro_warp_summary.json"), bool(mask & 2));
+    if (mask & 1) {
+      std::ifstream targets(warped.output_dir + "/fp_warp_targets.tsv");
+      std::string   line;
+      std::getline(targets, line);
+      while (std::getline(targets, line)) {
+        std::istringstream row(line);
+        std::string        name;
+        double             bx, by, wx, wy, sx, sy;
+        ASSERT_TRUE(bool(row >> name >> bx >> by >> wx >> wy >> sx >> sy));
+        EXPECT_DOUBLE_EQ(wx, sx);
+        EXPECT_DOUBLE_EQ(wy, sy);
+      }
+    }
+
+    if (!mask) {
+      if (!off_frame) {
+        off_frame = result.floorplan;
+      } else {
+        ASSERT_EQ(off_frame->components.size(), result.floorplan.components.size());
+        for (size_t n = 0; n < off_frame->components.size(); ++n) {
+          EXPECT_EQ(off_frame->components[n].place, result.floorplan.components[n].place);
+        }
+      }
+    }
+  }
   // Automatic IO uses its plain preview, independently of macro GP pressure.
   {
     auto io_options                      = o;
@@ -4127,11 +4170,16 @@ END LIBRARY
   options.final_cells = true;
   options.cache_dir.clear();
   options.output_dir = (dir / "staged").string();
+  options.fp_warp.enabled = options.macro_warp.enabled = true;
   hhds::GraphLibrary  staged_library;
   const auto          staged = place(*graph, staged_library, options);
   rapidjson::Document staged_qor;
   staged_qor.Parse(staged.qor.c_str());
   EXPECT_TRUE(staged_qor["cell_halo"]["active"].GetBool());
+  EXPECT_FALSE(staged_qor["fp_warpspace"].GetBool());
+  EXPECT_FALSE(staged_qor["macro_warpspace"].GetBool());
+  EXPECT_FALSE(std::filesystem::exists(options.output_dir + "/macro_warp_summary.json"));
+  EXPECT_FALSE(std::filesystem::exists(options.output_dir + "/fp_place.json"));
   std::ifstream       macro_report(options.output_dir + "/macro/qor.json");
   rapidjson::Document macro_qor;
   const std::string   macro_text{std::istreambuf_iterator<char>(macro_report), {}};

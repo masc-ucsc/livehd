@@ -82,7 +82,7 @@ struct Model {
   ph::Rect                           bounds;
   std::vector<Row>                   rows;
   std::vector<std::vector<size_t>>   bin_rows;
-  std::vector<Ann_place>             original;
+  std::vector<Ann_place>             original, preferred;
   std::vector<bool>                  movable, installed, critical, compact;
   std::vector<std::optional<double>> slacks;
   std::vector<unsigned>              stages;
@@ -196,7 +196,7 @@ struct Model {
       }
       const auto median = [&](bool horizontal) {
         std::vector<std::pair<double, double>> points{
-            {horizontal ? double(original[cell].x) : double(original[cell].y), 1.}
+            {horizontal ? double(preferred[cell].x) : double(preferred[cell].y), 1.}
         };
         for (const auto& r : objective.intervals) {
           points.emplace_back(horizontal ? r.xl : r.yl, options.remainder_wire_weight / 2);
@@ -219,7 +219,7 @@ struct Model {
     wire_active = true;
   }
   double placement_cost(size_t cell, double x, double y, ph::Orientation orientation) const {
-    double result = std::abs(x - original[cell].x) + std::abs(y - original[cell].y);
+    double result = std::abs(x - preferred[cell].x) + std::abs(y - preferred[cell].y);
     if (wire_active) {
       for (const auto& r : wire_objectives.at(orientation).intervals) {
         result += options.remainder_wire_weight * (std::max({r.xl - x, x - r.xh, 0.}) + std::max({r.yl - y, y - r.yh, 0.}));
@@ -369,6 +369,7 @@ struct Model {
         throw std::invalid_argument("terminal legalization requires known masters, seeded cells and unique names");
       }
       original.push_back(c.place);
+      preferred.push_back(c.place);
       const bool core = master->second.klass.starts_with("CORE");
       movable[i]      = core && !fixed(c.place);
       if (!core) {
@@ -541,7 +542,7 @@ struct Model {
     }
     if (!dense_menu && !result.empty()) {
       const double lower_bound
-          = std::abs(double(r.y) - original[cell].y) + std::max({low - original[cell].x, double(original[cell].x) - high, 0.});
+          = std::abs(double(r.y) - preferred[cell].y) + std::max({low - preferred[cell].x, double(preferred[cell].x) - high, 0.});
       if ((!wire_active ? lower_bound
                         : placement_cost(cell,
                                          std::clamp(wire_objectives.at(fp.rows[r.source].orientation).xbest, low, high),
@@ -682,13 +683,72 @@ struct Model {
     obstacles.push_back(cell);
     each_bin(box(candidate.place), [&](size_t bin, double) { bin_obstacles[bin].push_back(cell); });
   }
+  void warp_remainder(const std::vector<size_t>& remaining) {
+    const auto& policy = options.remainder_warp;
+    if (!policy.enabled || policy.weight == 0 || remaining.empty()) {
+      return;
+    }
+    const auto start = warp::Clock::now();
+    try {
+      DreamPlace::native::Design d;
+      d.layout = {bounds.xl, bounds.yl, bounds.xh, bounds.yh, 1, 1};
+      std::vector<int>    samples;
+      // Remap only unprotected cells into the movable prefix. All locked cells
+      // contribute demand at their accepted coordinates, never sample targets.
+      std::vector<size_t> order = remaining;
+      d.num_movable             = int(order.size());
+      for (size_t i = 0; i < installed.size(); ++i) {
+        if (installed[i]) {
+          order.push_back(i);
+        }
+      }
+      for (size_t k = 0; k < order.size(); ++k) {
+        const auto   i     = order[k];
+        const auto&  p     = fp.components[i].place;
+        const bool   macro = !tech.macros.at(fp.components[i].macro).klass.starts_with("CORE");
+        const double hx    = macro ? options.macro_halo_x_dbu : 0;
+        const double hy    = macro ? options.macro_halo_y_dbu : 0;
+        d.node_x.push_back(p.x - hx);
+        d.node_y.push_back(p.y - hy);
+        d.node_size_x.push_back(p.width + 2 * hx);
+        d.node_size_y.push_back(p.height + 2 * hy);
+        d.node_macro.push_back(macro);
+        if (k < remaining.size()) {
+          samples.push_back(int(k));
+        }
+      }
+      auto controls       = policy;
+      controls.dbu_per_um = fp.dbu;
+      const auto field    = placement_warp(d, samples, controls, true);
+      auto       next     = preferred;
+      double     max_move = 0;
+      for (const auto& [node, delta] : field.delta) {
+        const auto i = order[node];
+        auto&      p = next[i];
+        if (p.width > bounds.xh - bounds.xl || p.height > bounds.yh - bounds.yl) {
+          throw std::invalid_argument("warp cell does not fit core");
+        }
+        p.x      = std::llround(std::clamp(original[i].x + policy.weight * delta.x, bounds.xl, bounds.xh - p.width));
+        p.y      = std::llround(std::clamp(original[i].y + policy.weight * delta.y, bounds.yl, bounds.yh - p.height));
+        max_move = std::max(max_move, distance(p, original[i]));
+      }
+      preferred                        = std::move(next);
+      report.warp_samples              = field.delta.size();
+      report.warp_max_displacement_dbu = max_move;
+      report.warp_status               = "applied";
+    } catch (const std::exception& error) {
+      report.warp_status = "retained";
+      report.warp_reason = error.what();
+    }
+    report.warp_seconds = std::chrono::duration<double>(warp::Clock::now() - start).count();
+  }
   void place_cell(size_t cell, unsigned stage) {
     if (installed[cell]) {
       return;
     }
     wire_active        = false;
     const auto nearest = [&] {
-      auto choices = menu(cell, original[cell], false);
+      auto choices = menu(cell, preferred[cell], false);
       if (choices.empty()) {
         // Capacity and obstruction constraints can reject a gap's nearest and
         // boundary sites while leaving an interior site usable. Check every
@@ -1748,6 +1808,7 @@ struct Model {
         remaining.push_back(i);
       }
     }
+    warp_remainder(remaining);
     // Placing the most critical remaining cells first leaves displacement to
     // less critical cells. Direct destinations eliminate push oscillations and
     // allow transfer past full intermediate bins without moving locked cells.
@@ -1879,6 +1940,7 @@ Terminal_legalize_report terminal_legalize(const physical::Technology& tech, phy
       || !std::isfinite(timing.time_unit_ps) || timing.time_unit_ps <= 0) {
     throw std::invalid_argument("invalid terminal legalization controls; target density must be below the hard bin cap");
   }
+  validate_warp_options(options.remainder_warp);
   (void)sat_backend(options.backend);
   const auto start    = std::chrono::steady_clock::now();
   auto       proposal = fp;
@@ -1913,6 +1975,13 @@ void write_terminal_legalize_report(const Terminal_legalize_report& r, const phy
   count("padding_max_extra_rows", o.padding_max_extra_rows);
   count("relaxed_padding_cells", r.relaxed_padding_cells);
   number("remainder_wire_weight", o.remainder_wire_weight);
+  count("warp_samples", r.warp_samples);
+  number("warp_seconds", r.warp_seconds);
+  number("warp_max_displacement_dbu", r.warp_max_displacement_dbu);
+  w.Key("warp_status");
+  w.String(r.warp_status.c_str());
+  w.Key("warp_reason");
+  w.String(r.warp_reason.c_str());
   count("wire_changed_cells", r.wire_changed_cells);
   count("critical_padding_sites", o.critical_padding_sites);
   count("critical_fanin_depth", o.critical_fanin_depth);

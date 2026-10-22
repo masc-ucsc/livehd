@@ -1964,3 +1964,108 @@ geometry, including after FP topology refreshes. Intermediate frames reconstruct
 connectivity from the placement view before automatic clock/reset classification;
 otherwise reset cuts would disappear while the placement objective still ignored
 those nets. Clock launch/capture timing and functional data paths remain timed.
+
+### Density-warp targets (experimental, opt-in)
+
+`synth.place.fp.warpspace=false` and `synth.place.macro.warpspace=false`
+independently enable density-warp guidance. Neither changes the final legalizer.
+The shared in-memory engine (`density_warp.cpp`) is also used by the standalone
+`//tools:warpspace` density-grid mode. It integrates actual standard-cell overlap,
+reserves the union of macro bodies, blends original and 32-bin-smoothed free-area
+density equally, and solves a boundary-fixed, no-fold mesh. Physical BLOCK macros
+(including native memory proxies and black-box memory models) supply samples;
+fixed macros reserve space but receive no pull.
+
+FP samples its provisional physical coordinates after FP GP, before snapping.
+Each distinct movable macro belongs to its deepest centroid candidate; stable
+candidate order breaks equal-depth ties. Each owning leaf averages its vectors.
+Ancestors average contributing leaf movements using sums/counts, not child
+averages. All target additions use the same original target snapshot; descendants
+never receive a second ancestor translation. Existing snap and frozen-target
+handoff then run normally, including the snap-disabled path. Cell coordinates,
+membership and physical connectivity are unchanged by the target shift.
+
+Macro GP replaces absolute virtual center targets at safe iteration boundaries,
+independently of STA. The native optimizer holds them between refreshes, adds a
+separate bounded distance-pull objective, and restarts momentum after replacement.
+The force uses the ordinary macro-force reference and retains displacement
+magnitude below one macro dimension. These pulls never enter physical nets,
+RUDY demand, STA, DEF, or final-cell placement. A topology replacement clears
+native pull state. Solver failure clears the affected pulls atomically; FP
+failure retains the original target snapshot and reports its reason.
+
+Each stage has `.warpspace.bins=16` (2..64), `.iterations=2` (1..6), and
+`.seconds=3` (per-axis solve limit, up to 30). The filter remains 32 bins,
+independent of solve-grid resolution. FP `.weight=1` scales target movement;
+macro `.weight=0.25` sets relative pull strength (both 0..1). Macro
+`.warmup=0.1` and `.updates=10` schedule at most ten attempts after the first
+10% of its iteration budget. Early convergence is never delayed to meet a quota.
+FP runs once. Zero macro weight skips field work and optimizer restarts.
+All enabled policy values and algorithm version enter placement
+reuse keys; disabled stages do no field work.
+
+`fp_warp_field.json` reports samples and transported-field diagnostics;
+`fp_warp_targets.tsv` records targets before warp, after warp and after snap,
+including hierarchy sums/counts. `macro_warp_<attempt>.json` records absolute
+endpoints, displacement, weight, status/time, density peak/p99/overflow, original
+grid arrays and conserved mass/occupied area. `macro_warp_summary.json` records
+actual attempts/successes, completed GP iterations, early termination and total
+callback time. A refresh at the final iteration is skipped because no optimizer
+step remains to consume it. Sample coordinates and endpoints use native DBU; field areas use µm².
+The adapter converts physical geometry to microns before solving so objective
+scales match the standalone prototype, then converts displacement back to DBU.
+Uniform power-of-two objective scaling bounds LP costs without changing relative
+penalties; feasibility tolerances remain unchanged. Field predictions describe transported density, not legal rigid
+macro placement; actual QoR must be measured from the completed stage.
+
+The optional macro `.warpspace.once_after_density=true` policy keeps its normal
+warmup but waits for native GP's physical density overflow to reach
+`stop_overflow`. It generates one set of absolute anchors and holds them for the
+remaining solve. A first refresh requires at least twenty iterations left;
+convergence then waits twenty optimizer steps after the change (the overall cap
+still applies). If density is reached too late, no anchors are generated.
+The summary reports the anchor iteration and number of iterations that consumed
+it. This avoids continually chasing a changing field and remains independent of
+STA checkpoints. The repeating policy remains the default when enabled.
+
+`synth.place.legalize.warpspace=false` independently controls standard-cell target
+warping inside terminal legalization. Critical and local-pair stages run first
+and lock their accepted poses. One density field then supplies preferred sites
+for only the remaining cells; fixed macros, critical cells, and accepted pair
+endpoints never move. The field includes all current cell demand and macro halo
+reservations. `.weight=1` scales displacement (0..1), and `.bins=16` chooses the
+solve grid (2..64); `.seconds=3` is the per-axis solver budget (up to 30). Actual geometry is always produced by the existing full-core
+candidate search with padding, corridor exclusions and hard bin capacity.
+The displacement objective and its pruning bounds consistently use the new
+preferred sites; original GP sites remain the reference for SAT domains and
+movement reporting. `remainder_wire_weight` still trades displacement against
+incident data-net wirelength. A failed field retains original preferred sites
+and reports its reason; an exhausted legalizer still fails atomically.
+`terminal_legalize.json` includes field status, sampled-cell count, runtime and
+maximum target displacement. Density transport is guidance only: critical cells
+and physical macro bodies stay fixed even though the field predicts transport.
+
+The final-cell handoff reconstructs a fresh placement view from the fixed macro
+and IO frame. FP centroid targets and macro warp pulls end with `macro_plan`;
+they are not saved as final-cell objectives or GP continuation state. Final
+legalizer remainder warping remains an independent option.
+
+### Routability option review (2026-10-22)
+
+The CNN, Eyeriss and BlackParrot uno trials do not establish a new universal
+routed winner. Keep the previously selected defaults: RSMT routing estimation,
+5 µm macro halos, terminal legalization, 256 critical pairs, no local pairs,
+joint total minimization, remainder wire weight 4, and SAT budgets of 1000 ms
+and 10,000,000 conflicts. FP, macro and remainder warps remain opt-in; neither
+repeated nor once-after-density anchors consistently improved the evaluated
+cases.
+
+At fixed GP seeds, a 128-bin grid, target density 0.2 and hard cap 0.3, remainder
+padding 3 and critical padding 3 eliminated 5 µm bins above 80% occupancy in
+CNN, Eyeriss and BlackParrot uno. However, critical padding worsened estimated
+WNS by 0.83, 0.07 and 53.66 ps respectively, and Eyeriss TNS worsened about 3.2%.
+Remainder-only padding 3 also worsened BlackParrot TNS despite unchanged WNS.
+These stay per-design trial settings, not global defaults. A hard cap of 0.3
+also cannot replace the general default while the default target density is
+0.5. Post-CTS density and completed detailed routing plus extraction determine
+whether to promote any of these settings; pre-route density alone is insufficient.

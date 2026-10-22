@@ -523,3 +523,13 @@ TEST(LhdOptions, RecommendedSharedDefaults) {
     EXPECT_EQ(option->default_value, value) << key;
   }
 }
+
+TEST(LhdOptions, WarpspaceStagesAreIndependentAndOptIn) {
+  const auto options = lhd::list_set_options();
+  for (const auto& stage : {std::string("fp"), std::string("macro")}) {
+    const auto name  = "synth.place." + stage + ".warpspace";
+    const auto found = std::find_if(options.begin(), options.end(), [&](const auto& option) { return option.name == name; });
+    ASSERT_NE(found, options.end());
+    EXPECT_EQ(found->default_value, "false");
+  }
+}

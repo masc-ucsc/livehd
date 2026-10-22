@@ -1049,3 +1049,48 @@ TEST(TerminalLegalize, SaturatedParallelMazeRecoversAllSharedCornerConnections) 
 TEST(TerminalLegalize, EightParallelMazePathsSaturateEveryLeg) { check_parallel_maze(8, 8); }
 TEST(TerminalLegalize, FifthParallelMazePathExceedsFourTrackCutCapacity) { check_parallel_maze(5); }
 }  // namespace livehd::placement
+
+namespace livehd::placement {
+TEST(TerminalLegalize, RemainderWarpKeepsCriticalLocksAndOriginalReport) {
+  Fixture f(80, 20);
+  f.options.bins_x                = 8;
+  f.options.bins_y                = 4;
+  f.options.remainder_wire_weight = 0;
+  f.options.critical_fraction     = 1;
+  f.options.critical_pair_limit   = 0;
+  const auto a = f.cell(5, 4), b = f.cell(7, 4);
+  f.net(a, b, -10);
+  for (int y = 0; y < 10; ++y) {
+    for (int x = 0; x < 12; ++x) {
+      f.cell(10 + x / 3, y);
+    }
+  }
+  const auto original                 = f.fp;
+  auto       plain                    = f.fp;
+  const auto baseline                 = terminal_legalize(f.tech, plain, f.timing, f.options);
+  f.options.remainder_warp.enabled    = true;
+  f.options.remainder_warp.bins       = 8;
+  f.options.remainder_warp.iterations = 1;
+  auto report                         = terminal_legalize(f.tech, f.fp, f.timing, f.options);
+  f.check(report);
+  ASSERT_EQ(report.warp_status, "applied") << report.warp_reason;
+  EXPECT_EQ(report.warp_samples, 120);
+  EXPECT_GT(report.warp_max_displacement_dbu, 100);
+  EXPECT_EQ(f.fp.components[a].place, plain.components[a].place);
+  EXPECT_EQ(f.fp.components[b].place, plain.components[b].place);
+  size_t changed = 0;
+  for (const auto& c : report.cells) {
+    EXPECT_EQ(c.before, original.components[c.index].place);
+    changed += c.after != plain.components[c.index].place;
+  }
+  EXPECT_GT(changed, 0);
+  // Disabled/zero-weight field is bit-identical, including legalizer decisions.
+  auto zero                       = original;
+  f.options.remainder_warp.weight = 0;
+  const auto skipped              = terminal_legalize(f.tech, zero, f.timing, f.options);
+  EXPECT_EQ(skipped.warp_samples, 0);
+  for (size_t i = 0; i < zero.components.size(); ++i) {
+    EXPECT_EQ(zero.components[i].place, plain.components[i].place);
+  }
+}
+}  // namespace livehd::placement

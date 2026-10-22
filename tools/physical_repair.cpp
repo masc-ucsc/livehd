@@ -317,6 +317,7 @@ int main(int argc, char** argv) {
     number_option("density", options.density);
     integer_option("bins", options.bins);
     integer_option("threads", options.threads);
+    integer_option("final_iterations", options.final_iterations);
     boolean_option("dynamic_bins", options.dynamic_bins);
     boolean_option("preserve_imported_ties", options.preserve_imported_ties);
     integer_option("bin_max", options.bin_max);
@@ -499,6 +500,24 @@ int main(int argc, char** argv) {
         }
       }
     }
+    boolean_option("remainder_warpspace", options.terminal_legalize_options.remainder_warp.enabled);
+    number_option("remainder_warp_weight", options.terminal_legalize_options.remainder_warp.weight);
+    number_option("remainder_warp_seconds", options.terminal_legalize_options.remainder_warp.seconds);
+    sat_limit("remainder_warp_bins", options.terminal_legalize_options.remainder_warp.bins);
+    boolean_option("fp_warpspace", options.fp_warp.enabled);
+    boolean_option("macro_warpspace", options.macro_warp.enabled);
+    boolean_option("macro_warp_once_after_density", options.macro_warp.once_after_density);
+    sat_limit("fp_warp_bins", options.fp_warp.bins);
+    sat_limit("macro_warp_bins", options.macro_warp.bins);
+    sat_limit("fp_warp_iterations", options.fp_warp.iterations);
+    sat_limit("macro_warp_iterations", options.macro_warp.iterations);
+    sat_limit("macro_warp_updates", options.macro_warp.updates);
+    number_option("fp_warp_weight", options.fp_warp.weight);
+    number_option("macro_warp_weight", options.macro_warp.weight);
+    number_option("fp_warp_seconds", options.fp_warp.seconds);
+    number_option("macro_warp_seconds", options.macro_warp.seconds);
+    number_option("macro_warp_warmup", options.macro_warp.warmup);
+
     options.liberty       = text("liberty");
     options.control_ports = config.HasMember("control_ports") ? text("control_ports") : "";
     options.tech_rc_file  = text("tech_rc");
@@ -591,6 +610,38 @@ int main(int argc, char** argv) {
       }
       source = std::move(restored.graph);
     }
+    hhds::GraphLibrary unlocked_seed_library;
+    bool               unlock_seed_components = false;
+    boolean_option("unlock_seed_components", unlock_seed_components);
+    if (unlock_seed_components) {
+      if (!floorplan_mode || !config.HasMember("seed_def_positions") || !config["seed_def_positions"].GetBool()) {
+        throw std::invalid_argument("unlock_seed_components requires floorplan_place and seed_def_positions");
+      }
+      // A replayed final GP graph carries fixed-macro annotations. Work on a
+      // private copy so the saved source remains an immutable comparison input.
+      if (!livehd::copy_with_callees(unlocked_seed_library, *source->get_io()->get_library(), top)) {
+        throw std::runtime_error("cannot clone seed for macro/FP replay");
+      }
+      source              = unlocked_seed_library.find_io(top)->get_graph();
+      size_t     unlocked = 0;
+      const auto unlock   = [&](hhds::Graph& definition) {
+        for (auto node : definition.body().nodes()) {
+          if (auto attr = node.attr(livehd::attrs::place); attr.has()) {
+            auto pose = attr.get();
+            if (pose.status == ph::Status::FIXED || pose.status == ph::Status::LOCKED) {
+              pose.status = ph::Status::PLACED;
+              attr.set(pose);
+              ++unlocked;
+            }
+          }
+        }
+      };
+      unlock(*source);
+      for (const auto& definition : source->definitions().graphs()) {
+        unlock(*definition);
+      }
+      std::ofstream(root + "/unlocked_seed.json") << "{\"components\":" << unlocked << "}\n";
+    }
     bool restart_seed_def = false;
     boolean_option("restart_seed_def", restart_seed_def);
     if (restart_seed_def) {
@@ -613,6 +664,7 @@ int main(int argc, char** argv) {
       if (floorplan_mode) {
         options.fp_place = options.final_cells = options.macro_snap = true;
         options.fp_colors                                           = true;
+        boolean_option("fp_snap", options.fp_snap_enabled);
         // Request the production macro-to-cell handoff even when the
         // diagnostic disables centroid FP. No resynthesis restart is needed.
         options.after_stage                                         = [](pl::Placement_stage, const pl::Result&) { return false; };

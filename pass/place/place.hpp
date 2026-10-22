@@ -19,6 +19,7 @@
 #include "inou/lefdef/physical.hpp"
 #include "satlegalize.hpp"
 #include "terminal_legalize.hpp"
+#include "warpspace.hpp"
 
 namespace livehd::placement {
 inline constexpr double max_net_weight = 100;  // physical net weight ceiling shared by option checks and the placement database
@@ -46,6 +47,7 @@ struct Options {
   std::string                                         floorplan, output_dir, cache_dir;
   std::string                                         liberty, tech_rc_file, tracks_file;
   std::string                                         macro_mode = "none";
+  Warp_options                                        fp_warp{.weight = 1}, macro_warp;
   bool                                                fp_place = false, fp_snap_enabled = true;
   bool                                  fp_colors           = false;  // eligible color leaves; never independently centroid-snapped
   std::string                           fp_color_source     = "synthesis";

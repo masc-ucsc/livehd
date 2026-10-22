@@ -8,12 +8,14 @@
 #include "core/timing_feedback.hpp"
 #include "inou/lefdef/physical.hpp"
 #include "prects_networks.hpp"
+#include "warpspace.hpp"
 
 namespace livehd::placement {
 // Final LiveHD placement operation. Locks exist only during this transaction;
 // successful output retains ordinary PLACED status for the OpenROAD handoff.
 struct Terminal_legalize_options {
   Prects_library prects;
+  Warp_options   remainder_warp{.weight = 1};
   unsigned       bins_x = 64, bins_y = 64;
   double         max_density = .8, target_density = .5;
   double         remainder_wire_weight = 4;
@@ -56,6 +58,9 @@ struct Terminal_legalize_report {
   size_t                              joint_density_cuts = 0, joint_obstruction_cuts = 0, joint_corridor_cuts = 0;
   size_t                              supporting_cells = 0, full_site_scans = 0, relaxed_padding_cells = 0, wire_changed_cells = 0;
   size_t                              ignored_nets = 0;
+  size_t                              warp_samples = 0;
+  double                              warp_seconds = 0, warp_max_displacement_dbu = 0;
+  std::string                         warp_status = "disabled", warp_reason;
   size_t                              timed_nets = 0, critical_nets = 0, critical_cells = 0;
   size_t                              critical_pairs = 0, local_pairs = 0, sat_trials = 0, sat_unknown = 0, sat_unsat = 0;
   size_t                              candidate_checks = 0, moved_cells = 0, crossed_cells = 0, max_bin_distance = 0;

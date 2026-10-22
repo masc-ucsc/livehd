@@ -213,8 +213,28 @@ livehd::placement::Options placement_options(const Options& opts) {
     throw Lhd_error{"usage", "invalid ECO connectivity weight", "expected 0..100"};
   }
   out.legalize_timing_corrections = integer("place.legalize.timing_corrections", "0");
+  for (const auto& stage : {std::string("fp"), std::string("macro")}) {
+    auto&      policy = stage == "fp" ? out.fp_warp : out.macro_warp;
+    const auto key    = "place." + stage + ".warpspace";
+    policy.enabled    = truthy(synth_set(opts, key, "false"));
+    policy.weight     = number(key + ".weight", stage == "fp" ? "1" : "0.25");
+    policy.bins       = integer(key + ".bins", "16");
+    policy.iterations = integer(key + ".iterations", "2");
+    policy.seconds    = number(key + ".seconds", "3");
+    if (stage == "macro") {
+      policy.once_after_density = truthy(synth_set(opts, key + ".once_after_density", "false"));
+      policy.updates            = integer(key + ".updates", "10");
+      policy.warmup             = number(key + ".warmup", "0.1");
+    }
+    livehd::placement::validate_warp_options(policy);
+  }
   out.terminal_legalize           = truthy(synth_set(opts, "place.legalize.terminal", "true"));
   auto& terminal                  = out.terminal_legalize_options;
+  terminal.remainder_warp.enabled = truthy(synth_set(opts, "place.legalize.warpspace", "false"));
+  terminal.remainder_warp.weight  = number("place.legalize.warpspace.weight", "1");
+  terminal.remainder_warp.bins    = integer("place.legalize.warpspace.bins", "16");
+  terminal.remainder_warp.seconds = number("place.legalize.warpspace.seconds", "3");
+  livehd::placement::validate_warp_options(terminal.remainder_warp);
   terminal.max_density            = number("place.legalize.max_density", "0.8");
   terminal.critical_fraction      = number("place.legalize.critical_fraction", "0.1");
   terminal.local_pair_fraction    = number("place.legalize.local_pair_fraction", "0.5");
