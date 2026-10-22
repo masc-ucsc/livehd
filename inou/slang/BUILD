@@ -109,6 +109,12 @@ sh_test(
     data = ["//lhd"],
 )
 
+sh_test(
+    name = "packed_struct_fullcase",
+    srcs = ["tests/packed_struct_fullcase.sh"],
+    data = ["//lhd"],
+)
+
 # `--reader slang -- -F filelist.f` passthrough: the verilog sources ride the
 # raw slang driver args (a `-F` command file) with no positional `*.v` input.
 sh_test(

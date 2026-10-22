@@ -846,17 +846,24 @@ bool Slang_context::has_full_case_attr(const slang::ast::Statement& stmt) const 
 
 namespace {
 // The variables a case arm writes. Same shape as slang_structure.cpp's
-// Write_collector (file-local there); only the write SET matters here, so
-// blocking/nonblocking are not split. Insertion ORDER is kept: the emitted
-// else arm must be deterministic (//inou/slang:slang_emit_determinism).
+// Write_collector (file-local there). Struct writes also retain their lvalues
+// and assignment style so the implicit default can update individual fields.
+// Insertion ORDER is kept: the emitted else arm must be deterministic
+// (//inou/slang:slang_emit_determinism).
 struct Fullcase_write_collector : public slang::ast::ASTVisitor<Fullcase_write_collector, slang::ast::VisitFlags::AllGood> {
+  struct Struct_write {
+    const slang::ast::ValueSymbol* symbol;
+    const slang::ast::Expression*  lhs;
+    bool                           nonblocking;
+  };
   std::vector<const slang::ast::ValueSymbol*>         order;
   absl::flat_hash_set<const slang::ast::ValueSymbol*> seen;
+  std::vector<Struct_write>                           struct_writes;
 
-  void note(const slang::ast::Expression& lhs) {
+  void note(const slang::ast::Expression& lhs, bool nonblocking = false) {
     if (lhs.kind == slang::ast::ExpressionKind::Concatenation) {
       for (const auto* op : lhs.as<slang::ast::ConcatenationExpression>().operands()) {
-        note(*op);
+        note(*op, nonblocking);
       }
       return;
     }
@@ -876,13 +883,16 @@ struct Fullcase_write_collector : public slang::ast::ASTVisitor<Fullcase_write_c
       return;
     }
     const auto* sym = &e->as<slang::ast::NamedValueExpression>().symbol;
+    if (sym->getType().getCanonicalType().isStruct()) {
+      struct_writes.push_back({sym, &lhs, nonblocking});
+    }
     if (seen.insert(sym).second) {
       order.emplace_back(sym);
     }
   }
 
   void handle(const slang::ast::AssignmentExpression& expr) {
-    note(expr.left());
+    note(expr.left(), expr.isNonBlocking());
     visitDefault(expr);
   }
 };
@@ -897,6 +907,25 @@ void Slang_context::emit_full_case_else(const slang::ast::CaseStatement& stmt, c
   auto else_stmts = builder_.add_if_stmts(if_nid);
   builder_.push_stmts(else_stmts);
   for (const auto* sym : wc.order) {
+    if (sym->getType().getCanonicalType().isStruct()) {
+      // Packed structs can be per-field bundles, with other fields driven by
+      // another process. A scalar assignment to their root is both ill-typed
+      // and wider than the case's write set. Use ordinary lvalue lowering for
+      // precisely the written members, preserving each assignment's style.
+      const auto saved_nonblocking = current_assign_nonblocking_;
+      for (const auto& write : wc.struct_writes) {
+        if (write.symbol != sym) {
+          continue;
+        }
+        const auto ti = tinfo(*write.lhs->type);
+        if (ti.bits > 0) {
+          current_assign_nonblocking_ = write.nonblocking;
+          assign_to(*write.lhs, absl::StrCat("0ub", std::string(static_cast<size_t>(ti.bits), '?')));
+        }
+      }
+      current_assign_nonblocking_ = saved_nonblocking;
+      continue;
+    }
     // Width-matched unknown: `0ub????`. A bare `0ub?` would be one bit wide and
     // the assignment would narrow the variable.
     auto ti = tinfo(sym->getType());
