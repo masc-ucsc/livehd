@@ -503,6 +503,7 @@ livehd::placement::Options placement_options(const Options& opts) {
   out.fp_iterations   = integer("place.fp.iterations", "1500");
   out.fp_minimum      = number("place.fp.minimum", "3000");
   out.fp_min_copies   = integer("place.fp.min_copies", "4");
+  out.fp_min_macros   = integer("place.fp.min_macros", "2");
   out.fp_attraction   = number("place.fp.attraction", "0.25");
   out.fp_repulsion    = number("place.fp.repulsion", "5");
   out.fp_align_weight = number("place.fp.align_weight", "0");
@@ -524,6 +525,9 @@ livehd::placement::Options placement_options(const Options& opts) {
   out.fp_snap.spacing_penalty     = number("place.fp.spacing_penalty", "0.02");
   out.fp_snap.symmetry_tolerance  = number("place.fp.symmetry", "1");
   out.fp_snap.max_displacement    = number("place.fp.max_displacement", "1");
+  if (out.fp_min_macros < 0) {
+    throw Lhd_error{"usage", "synth.place.fp.min_macros must be at least 0", "a candidate needs more than this many movable macros"};
+  }
   if (out.fp_min_copies < 2) {
     throw Lhd_error{"usage", "synth.place.fp.min_copies must be at least 2", "copies are counted separately per hierarchy parent"};
   }

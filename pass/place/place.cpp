@@ -449,6 +449,9 @@ std::string environment_key(const Options& o, const ph::Technology& tech) {
   }
   if (o.fp_place) {
     h = hash_text(std::format("centroid-copies:per-parent:{}", o.fp_min_copies), h);
+    if (o.fp_min_macros != 2) {
+      h = hash_text(std::format("centroid-min-macros:{}", o.fp_min_macros), h);
+    }
   }
   if (o.fp_place) {
     h = hash_text(std::format("fp-timing:{}:{}:{}", o.fp_timing_interval, bool(o.fp_evaluate), o.fp_resize), h);
@@ -907,6 +910,7 @@ struct View {
   std::map<std::string, int>                    frozen_placement_owner;
   double                                        centroid_minimum    = 2000;
   int                                           centroid_min_copies = 4;
+  int                                           centroid_min_macros = 2;
   int64_t                                       halo_x = 0, halo_y = 0;
   ph::Floorplan                                 fp;
   std::vector<std::string>                      io_buses;
@@ -1258,7 +1262,8 @@ void make_arrays(View& v, const ph::Technology& tech) {
       }
       v.hierarchy_centroids = v.frozen_hierarchy_centroids;
     } else {
-      d.centroid_groups     = dp::detail::centroid_candidates(d, paths, masters, v.centroid_minimum, v.centroid_min_copies);
+      d.centroid_groups     = dp::detail::centroid_candidates(d, paths, masters, v.centroid_minimum, v.centroid_min_copies,
+                                                           v.centroid_min_macros);
       v.hierarchy_centroids = d.centroid_groups.size();
       if (v.color_centroids && !v.placement_colors) {
         add_color_centroids(d, v.color_minimum);
@@ -3375,7 +3380,7 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
   if (!std::isfinite(options.fp_attraction_outside) || options.fp_attraction_outside < 0) {
     throw std::invalid_argument("invalid floorplan outside-circle attraction stiffness");
   }
-  if (options.fp_iterations < 0 || options.fp_timing_interval < 0 || options.fp_min_copies < 2 || options.fp_attraction <= 0
+  if (options.fp_iterations < 0 || options.fp_timing_interval < 0 || options.fp_min_copies < 2 || options.fp_min_macros < 0 || options.fp_attraction <= 0
       || options.fp_repulsion <= 0 || (options.fp_place && options.macro_mode == "h2d")) {
     throw std::invalid_argument("invalid floorplan stage settings or incompatible H2D mode");
   }
@@ -3494,6 +3499,7 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
   }
   v.centroid_minimum       = options.fp_minimum;
   v.centroid_min_copies    = options.fp_min_copies;
+  v.centroid_min_macros    = options.fp_min_macros;
   v.hierarchy_snap         = options.macro_snap;
   v.align_macros           = options.macro_align_weight > 0 || options.macro_snap;
   v.global_macro_alignment = options.macro_align_global && options.macro_align_weight > 0;
@@ -5937,6 +5943,8 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
     json.Uint64(macro_pin_history.size());
     json.Key("minimum_copies_per_parent");
     json.Int(options.fp_min_copies);
+    json.Key("minimum_macros");
+    json.Int(options.fp_min_macros);
     json.Key("copy_scope");
     json.String("immediate_hierarchy_parent");
     json.Key("target_density");
@@ -6357,6 +6365,8 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
     json.Double(v.centroid_minimum);
     json.Key("minimum_copies_per_parent");
     json.Int(v.centroid_min_copies);
+    json.Key("minimum_macros");
+    json.Int(v.centroid_min_macros);
     json.Key("copy_scope");
     json.String("immediate_hierarchy_parent");
     json.Key("instances");

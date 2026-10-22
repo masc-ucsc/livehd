@@ -57,7 +57,7 @@ struct Options {
   bool                                  macro_pin_adjust   = false;
   int                                   macro_pin_interval = 50;
   double                                macro_pin_step = .01, macro_pin_improvement = .001;
-  int                                   fp_iterations = 1500, fp_min_copies = 4;
+  int                                   fp_iterations = 1500, fp_min_copies = 4, fp_min_macros = 2;
   int                                   fp_timing_interval      = 50;
   double                                fp_timing_movement      = 0;  // RMS bin movement; 0 keeps fixed cadence
   bool                                  fp_timing_after_density = false;

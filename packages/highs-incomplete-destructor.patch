@@ -1,0 +1,20 @@
+diff --git a/highs/mip/HighsMipWorker.h b/highs/mip/HighsMipWorker.h
+--- a/highs/mip/HighsMipWorker.h
++++ b/highs/mip/HighsMipWorker.h
+@@ -89,4 +89 @@
+-  ~HighsMipWorker() {
+-    search_ptr_.reset();
+-    sepa_ptr_.reset();
+-  }
++  ~HighsMipWorker();
+diff --git a/highs/mip/HighsMipWorker.cpp b/highs/mip/HighsMipWorker.cpp
+--- a/highs/mip/HighsMipWorker.cpp
++++ b/highs/mip/HighsMipWorker.cpp
+@@ -10,0 +11 @@
++#include "mip/HighsSearch.h"
+@@ -36,0 +38,5 @@
++HighsMipWorker::~HighsMipWorker() {
++  search_ptr_.reset();
++  sepa_ptr_.reset();
++}
++

@@ -2,6 +2,24 @@
 
 load("@build_bazel_apple_support//xcode:xcode_config.bzl", "xcode_config")
 load("@rules_cc//cc:defs.bzl", "cc_binary")
+load("@rules_python//python:defs.bzl", "py_test")
+load("//tools:copt_default.bzl", "COPTS")
+
+cc_binary(
+    name = "warpspace",
+    srcs = ["warpspace.cpp"],
+    copts = COPTS,
+    deps = ["@highs//:highs", "@zlib//:zlib", "@rapidjson"],
+)
+
+py_test(
+    name = "warpspace_smoke",
+    srcs = ["warpspace_smoke.py"],
+    args = ["$(location :warpspace)"],
+    data = [":warpspace"],
+    legacy_create_init = 0,
+    timeout = "short",
+)
 
 exports_files([
     "aegraph_md_fresh.sh",

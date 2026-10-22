@@ -79,10 +79,24 @@ bazel_dep(name = "bison", version = "3.8.2.bcr.11")
 bazel_dep(name = "flex", version = "2.6.4.bcr.8")
 
 bazel_dep(name = "rapidjson", version = "1.1.0.bcr.20250205")
+# Standalone experimental mesh-warp tool; not part of the synthesis flow.
+bazel_dep(name = "zlib", version = "1.3.2")
+# Plain archive keeps the CPU-only build and libc++ source fix effective when
+# LiveHD is consumed as a dependency too (module overrides are root-only).
+http_archive(
+    name = "highs",
+    urls = ["https://github.com/ERGO-Code/HiGHS/releases/download/v1.15.1/source-archive.tar.gz"],
+    sha256 = "30132da2b21899c62f07c4d6566325a3b869a7da4ce61d8b25f833b38e1562b1",
+    strip_prefix = "HiGHS",
+    build_file = "//packages:highs.BUILD",
+    # Define the worker destructor where HighsSearch is complete (upstream #3227).
+    patches = ["//packages:highs-incomplete-destructor.patch"],
+    patch_args = ["-p1"],
+)
 # Native CPU placement; the repository uses LiveHD's HHDS/HLOP repositories.
 git_repository(
     name = "dreamplace",
-    commit = "ac6a10213c1a705e1d28b11fbd78aee39896a579",
+    commit = "ac995f900fedad0854dd702cd884c69f1e965c52",
     remote = "https://github.com/masc-ucsc/DREAMPlace.git",
 )
 # For local co-development swap the git_repository above for:

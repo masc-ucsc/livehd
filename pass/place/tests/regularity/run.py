@@ -53,6 +53,10 @@ def run(case, args, output):
         'synth.place.final.iterations': args.iterations, 'synth.place.bins': 16,
         'lhd.incremental': 'false', 'lhd.jobs': 1,
     }
+    # One-macro tiles must qualify as hierarchy candidates (the default of 2 admits only 3+ macros).
+    settings['synth.place.fp.min_macros'] = args.min_macros
+    if args.snap_mode:
+        settings['synth.place.macro.snap_mode'] = args.snap_mode
     cmd = [args.lhd, 'synth', ROOT/(case['name']+'.prp'), f'lg:{directory}/macro_lg',
            '--top', case['name']+'.top', '--seed', '1', '--workdir', directory/'work',
            '--result-json', directory/'result.json', '--emit-dir', f'def:{directory}/physical', '-q']
@@ -158,6 +162,9 @@ def main():
     parser.add_argument('--lhd', default='lhd/lhd' if os.environ.get('TEST_SRCDIR') else str(Path(os.environ.get('BUILD_WORKSPACE_DIRECTORY', '.'))/'bazel-bin/lhd/lhd'))
     parser.add_argument('--output', type=Path)
     parser.add_argument('--iterations', type=int, default=1500)
+    parser.add_argument('--min-macros', type=int, default=0,
+                        help='synth.place.fp.min_macros: a hierarchy candidate needs more macros than this; 0 makes each one-macro tile a candidate')
+    parser.add_argument('--snap-mode', choices=['alignment', 'symmetry'], help='synth.place.macro.snap_mode (flow default: alignment)')
     parser.add_argument('--timeout', type=int, default=3600)
     parser.add_argument('--max-pattern-rms', type=float)
     args = parser.parse_args()

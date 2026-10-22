@@ -1234,6 +1234,7 @@ This is a local heuristic, not a global symmetry optimum.
 | `fp.snap` | true | Fit circle targets; false freezes the original floorplan GP means without calling the snap solver |
 | `fp.iterations` | 1500 | Floorplan GP cap; zero uses `place.iterations` |
 | `fp.minimum` | 3000 | Strict scope threshold in equivalent physical cell area |
+| `fp.min_macros` | 2 | A hierarchy candidate needs strictly more than this many movable macros; 0 admits scopes with one macro |
 | `fp.min_copies` | 4 | Minimum qualifying copies of one macro structure under each immediate hierarchy parent; minimum accepted value is 2 |
 | `fp.attraction`, `fp.repulsion` | 0.25, 5 | First-GP attraction and initial adaptive circle penalty |
 | `fp.anchor` | 0.25 | Weak member attraction to frozen targets in the next GP |

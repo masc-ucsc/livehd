@@ -50,7 +50,7 @@ def main():
             <iframe class="metrics" src="{result}/metrics.html" title="Measured {name} HPWL, WNS, TNS and regularity"></iframe>
             <p><a href="{result}/metrics.json">Measured metrics and provenance</a> ·
             <a href="../repros/placement_regularity/index.html#{name}">FP, macro and legalization PNGs</a></p>
-            <pre>bazel run -c opt //pass/place/tests/regularity:run -- --case {name} --output "$PWD/repros/placement_regularity"</pre>
+            <pre>bazel run -c opt //pass/place/tests/regularity:run -- --case {name} --min-macros 0 --output "$PWD/repros/placement_regularity"</pre>
             </section>''')
     args.output.write_text('''<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
@@ -73,7 +73,7 @@ dark outlines identify macro bodies. A sketch does not prescribe an exact gate l
 <a href="../pass/place/tests/regularity/BUILD">Bazel targets</a> ·
 <a href="../pass/place/tests/regularity/generate.py">Fixture generator</a></p>
 <h2>Run and inspect</h2>
-<pre>bazel run -c opt //pass/place/tests/regularity:run -- --case all --output "$PWD/repros/placement_regularity"
+<pre>bazel run -c opt //pass/place/tests/regularity:run -- --case all --min-macros 0 --output "$PWD/repros/placement_regularity"
 # These longer tests are excluded from the default suite by the existing long1 filter:
 bazel test -c opt --test_tag_filters=placement --test_timeout=3600 //pass/place/tests/regularity:all
 # Fast fixture/observer checks stay in the ordinary suite:
@@ -81,8 +81,8 @@ bazel test -c opt //pass/place/tests/regularity:regularity_checks</pre>
 <p>Bazel test retains PNGs, HTML, metrics, DEFs and logs under
 <code>bazel-testlogs/pass/place/tests/regularity/&lt;case&gt;/test.outputs/</code>
 (or <code>outputs.zip</code> when undeclared-output zipping is enabled).
-The run target accepts <code>--iterations N</code>, <code>--timeout SECONDS</code>, and an optional
-<code>--max-pattern-rms PITCHES</code>. Use the same explicit settings and frozen binary for comparisons.
+The run target accepts <code>--iterations N</code>, <code>--timeout SECONDS</code>, <code>--min-macros N</code> (default 0),
+<code>--snap-mode alignment|symmetry</code>, and an optional <code>--max-pattern-rms PITCHES</code>. Use the same explicit settings and frozen binary for comparisons.
 Every benchmark runs cold (<code>lhd.incremental=false</code>) so saved placements cannot mask regressions.</p>
 <h2>What is measured</h2>
 <table><tr><th>Metric</th><th>Interpretation</th></tr>
@@ -110,8 +110,12 @@ and every tile is observable at a top output. Sequential feedback breaks the mes
 The explicit mapping recipe <code>strash; &amp;get -n; &amp;nf; &amp;put</code> avoids expensive synthesis searches.
 Resizing, placement-driven remapping and additional timing-driven placement rounds are explicitly disabled to keep
 netlist identity and stage images comparable. Final STA remains enabled. Existing flow defaults are unchanged.</p>
-<p>Color candidates explicitly enable FP for one-macro tiles; the nested hierarchy also qualifies repeated
-four-macro structural candidates. Snapshots are required: missing stage data fails the run.
+<p>The run target sets <code>synth.place.fp.min_macros=0</code> (flag <code>--min-macros</code>, default 0 here; the flow
+default is 2). A hierarchy candidate needs <em>more</em> than that many movable macros, so with the flow default these
+one- and few-macro tiles would never become hierarchy candidates: they would fall back to unsnapped color centroids and the
+floorplan snap would not be exercised. With 0, every repeated tile (four or more siblings under one parent,
+<code>synth.place.fp.min_copies</code>) is a snap-eligible hierarchy candidate. Snapshots are required: missing stage data fails the run.
+The optional <code>--snap-mode alignment|symmetry</code> sets <code>synth.place.macro.snap_mode</code> for the macro stage.
 Macro placement remains free in these five baselines. Pyrope fixed-coordinate attributes are not consumed by
 the current physical flow; fixed-frame experiments should use the supported imported DEF interface rather than ignored hints.</p>
 '''+''.join(cards)+'''

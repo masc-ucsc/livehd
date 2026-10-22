@@ -1,0 +1,238 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>TODO 2w-warpspace — density warp for FP centroids and macro anchors</title>
+<link rel="stylesheet" href="../todo.css">
+</head>
+<body>
+<nav><span class="brand">LiveHD TODO</span><a href="../index.html">← All tasks</a></nav>
+<main>
+<h1><strong class="item-id">2w-warpspace</strong> Density warp for FP centroids and macro anchors</h1>
+<p>Use the demonstrated density deformation to guide memories toward space that
+should contract or expand. During <code>fp_plan</code>, shift centroid targets before
+alignment snapping. During <code>macro_plan</code>, periodically refresh a virtual
+pull edge per movable memory; the placement optimizer performs the movement.</p>
+<p><span class="status">Prototype landed; placement integration planned</span>
+The standalone C++ tool and its 32-bin smoothing default are implemented.
+The two placement options and hooks below are pending; this page does not claim
+that native placement already consumes warp directions.</p>
+
+<h2>Depends on</h2>
+<ul>
+<li>The existing native FP → macro → final-cell placement pipeline, described in
+<a class="xref" href="3p-placement.html">3p-placement</a>, supplies geometry,
+centroid membership, hierarchy and stage handoff.</li>
+<li>Reuse the <a href="../../pass/place/README.md">placement-color membership
+and hierarchy accounting</a> when placement colors are selected. Synthesis-color and hierarchy-only FP must also remain supported.</li>
+</ul>
+
+<h2>Subtasks — pending</h2>
+<ul class="subtasks">
+<li id="B"><strong>B — Extract an in-memory density-warp engine.</strong>
+<ul>
+<li>Factor the demonstrated bin-mass and macro-anchor path out of
+<code>tools/warpspace.cpp</code> into a reusable C++ library. Feed it current
+physical coordinates, cell areas, die bounds, macro centers and oriented sizes;
+return displacement vectors and diagnostics. Reuse fixed-grid and sparse solver
+structure where possible, and measure the total cost of repeated refreshes.
+No DEF/LEF round trip, subprocess,
+OpenROAD or PNG generation in the placement loop.</li>
+<li>Keep the tool as a consumer of the same engine. Preserve its reference
+behavior: 32-bin smoothing, half original/half smoothed free-area density,
+reserved macro union area, smooth deformation and fixed die boundary.</li>
+<li>Use actual standard-cell area overlap on bins; memory bodies consume
+capacity, not cell demand. Do not count virtual centroid circles, reserved color
+allowances or virtual anchor edges as extra physical occupied area.</li>
+<li>Keep macro width/height unchanged in the returned anchor records. The
+transported occupied-area field is an approximation; it does not guarantee that
+rigid anchor boxes are legal or match that field.</li>
+</ul></li>
+<li id="C"><strong>C — Independent opt-in stage controls.</strong>
+<ul>
+<li>Add <code>synth.place.fp.warpspace=false</code> and
+<code>synth.place.macro.warpspace=false</code> to the CLI registry, option
+validation, stage configuration, reports and cache keys. These are the canonical
+existing-prefix spellings of the requested <code>fp_plan.warpspace</code> and
+<code>macro_plan.warpspace</code> controls; do not introduce undocumented aliases.</li>
+<li>Allow FP only, macro only, both, and neither. Disabled stages do no warp
+work and retain current placement behavior and defaults. The standalone tool's
+approved 32-bin filter default remains independent of these opt-in controls.</li>
+<li>Define and document stage-local edge weight, refresh budget and warmup
+controls during implementation. Keep new values explicit and bounded; do not
+change existing centroid, timing, density or snap defaults as a side effect.</li>
+</ul></li>
+<li id="D"><strong>D — Shift FP centroids before snapping.</strong>
+<ul>
+<li>After the FP placement has produced the current density and centroids,
+but before alignment/symmetry snapping, compute a warp displacement for every
+movable memory. Use the FP stage's provisional member positions for these samples;
+this does not assume that a final macro placement already exists. This is a field sample, not a physical macro placement update.</li>
+<li>For each leaf centroid, average the displacement vectors of its distinct
+owned movable memories and add that vector to its unsnapped centroid target.
+Resolve nested memberships to a unique owning leaf using the existing
+instance-aware ownership policy. Retain vector magnitude; do not average unit directions. A centroid with no
+movable memories receives zero shift.</li>
+<li>Propagate the average of the contributing leaf-centroid movements to each
+hierarchy node before snapping. Carry sums and contributing counts so unequal
+subtree sizes do not turn an average of leaf movements into an unweighted
+average of child averages. Do not count the same leaf or memory again through
+nested hierarchy membership.</li>
+<li>Apply each target shift once, using a snapshot of the original targets;
+never move descendants a second time by adding an ancestor shift. Recompute
+hierarchy target geometry consistently, then run the existing hierarchy-local
+snap and freeze those snapped targets for macro placement.</li>
+<li>Preserve macro/cell coordinates and centroid membership at this handoff.
+With FP snapping disabled, pass the shifted unsnapped targets to macro placement.</li>
+</ul></li>
+<li id="E"><strong>E — Refresh virtual macro pull edges during optimization.</strong>
+<ul>
+<li>After a warmup period of macro GP iterations, compute the warp from the
+current cell density and current macro geometry. For each movable memory at
+<var>p</var>, set an absolute virtual endpoint <var>a = p + Δwarp(p)</var>.</li>
+<li>Add one optimizer-only pull edge from the memory center to that endpoint.
+Do not assign the endpoint directly to the memory coordinate, create a physical
+cell/net/pin, alter STA connectivity, or change macro size/orientation. Existing
+centroid attraction and the new per-memory attraction remain separate terms.</li>
+<li>Hold endpoints fixed between refreshes. On refresh replace the existing
+endpoint, computed from current placement; do not append another edge or add
+the new vector to the previous endpoint. Exclude fixed/locked macros from pull
+edges while retaining their occupied space in density calculations.</li>
+<li>Refresh several times, aiming for 5–30 updates on a sufficiently long run
+with memories. Candidate bring-up policy: a 10% iteration-budget warmup followed
+by about 10 evenly spaced refresh opportunities. Tune against runtime and
+oscillation; this is a proposed schedule, not an implemented default.</li>
+<li>Reuse safe GP checkpoint boundaries. Every other timing checkpoint is a
+possible cadence, but warp updates must also work when timing feedback is off;
+provide independent iteration scheduling and avoid running STA solely for a warp.
+Avoid duplicate refreshes if iteration and timing events coincide.</li>
+<li>Report actual refresh count and early termination. Short runs may finish
+before five opportunities; do not prolong convergence merely to hit a quota.
+Skip all work for designs without movable memories.</li>
+<li>Feed pulls through the existing optimizer's supported anchor mechanism;
+reset affected optimizer state if required by an objective change. Preserve
+ordinary macro snapping/legalization, fixed IOs, and the final locked-macro
+handoff. Remove warp edges before final cell placement.</li>
+</ul></li>
+<li id="F"><strong>F — State, diagnostics and bounded failure handling.</strong>
+<ul>
+<li>Include warp policy and algorithm version in affected stage reuse keys.
+Invalidate membership/geometry-dependent state after resize, buffering, graph
+rebuilds or changes in macro identities; never reuse stale per-memory indices.</li>
+<li>Use deterministic ordering, bounded solver iterations/time, and explicit
+status. An infeasible or nonfinite field must not apply a partial update; retain
+the last valid targets only while identities and geometry remain compatible,
+otherwise clear the affected virtual pulls and report the reason.</li>
+<li>Export FP targets before warp, after warp and after snap; per-memory
+samples; hierarchy sums/counts; and the frozen handoff. Export macro refresh
+iteration, endpoints, displacement, edge weight, solve status/time and count.</li>
+<li>Keep density scales comparable within each before/after plot. Report peak,
+p99 and overflow on the original evaluation grid, mass/occupied-area conservation,
+mean and maximum movement, mean vector, HPWL, timing, legality and total runtime.
+Distinguish anchor predictions from actual optimizer movement.</li>
+</ul></li>
+<li id="G"><strong>G — Focused checks and controlled evaluation.</strong>
+<ul>
+<li>Use small generated in-repository fixtures: uniform free-area density gives
+zero field, boundary/oversized filters preserve the average, and macro overlap
+reserves its union once. Retain no-fold and conservation checks.</li>
+<li>Test exact vector averaging for multiple memories, zero-memory/fixed-only
+centroids, uneven hierarchy subtrees and overlapping membership. Check ordering
+before snap, no direct macro movement in FP, and the snap-disabled handoff.</li>
+<li>Test macro warmup, independent no-timing refreshes, bounded counts, endpoint
+replacement, no accumulation, fixed macros, early stop, objective-state reset
+and edge cleanup before final placement. Verify unchanged physical connectivity.</li>
+<li>Exercise all four option combinations and unchanged off/off behavior.
+Keep each focused optimized test below 20 seconds and benchmark runs separate.</li>
+<li>Compare the five
+<a href="../../docs/placement_regularity.html">placement regularity examples</a>,
+CNN, and real/synthetic Eyeriss against identical input snapshots and frozen
+binaries. Include uniform, off-center and corner-heavy demand, not only cases
+where the desired direction is toward the die edge. Run synthesis serially with
+whole-process-tree memory monitoring.</li>
+<li>Use source changes in <code>../DREAMPlace/dreamplace/native/</code> if its
+optimizer needs a new hook. Consume a published dependency commit before merging;
+never commit a sibling-path override or patch a fetched copy of an owned repo.</li>
+</ul></li>
+</ul>
+
+<h2>Subtasks — landed</h2>
+<ul class="subtasks">
+<li id="A"><strong>A — Standalone deformation and visual bring-up.</strong>
+<span class="status landed">landed</span>
+<ul>
+<li><a href="../../tools/warpspace.cpp">C++ tool</a>,
+<a href="../../tools/warpspace.txt">usage and model notes</a>, generated smoke
+regression and synthetic LEF/DEF generator. Supports DEF-to-PNG, experimental
+unlegalized DEF output, and the faster density-grid/anchor mode used here.</li>
+<li>Density-grid smoothing defaults to 32, with a 0.5 blend. Full-block or larger
+filters return the block average; smaller filters use reflected boundaries
+without diluting the average. Macro-space reservation is explicitly enabled in
+the demonstrated experiments.</li>
+<li>Local, untracked evidence:
+<a href="../../repros/warpspace_regularity_20261021/index.html">all five regularity cases</a>
+and the individual real/synthetic Eyeriss reports linked below. Generated
+artifacts remain outside Git.</li>
+</ul></li>
+</ul>
+
+<h2>Design notes</h2>
+<h3>Accepted density model</h3>
+<pre><code>D[b] = standard-cell area overlapping bin b
+O[b] = union area of physical macro bodies overlapping bin b
+F[b] = bin_area - O[b]
+B    = 32 × 32 box filter (global average when it spans the block)
+smooth_rho[b] = B(D)[b] / B(F)[b]
+rho_target[b] = 0.5 * D[b]/F[b] + 0.5 * smooth_rho[b]
+requested_free_area[b] = D[b] / rho_target[b]
+normalize requested free areas to sum(F); add O per bin
+solve the smooth no-fold mesh warp; sample Δwarp at each memory center</code></pre>
+<p>Use the prototype's regularization and empty-bin conventions. This is a soft
+area target, not an exact density cap after resampling. The 32-bin filter width
+is distinct from grid resolution; the comparison runs used 32×32 bins, so their
+smoothed density is block-wide. The die boundary stays fixed, physical cell
+mass and reserved occupied area are conserved, and macro shapes are metadata
+for anchor suggestions rather than deformable physical cells.</p>
+
+<h3>FP handoff</h3>
+<pre><code>snapshot = current FP density, physical macros, leaf/hierarchy centroids
+field = warp(snapshot)
+for each leaf centroid c:
+    memories = unique owned movable memories(c)
+    shift[c] = mean(field.delta[m] for m in memories), or zero
+for each hierarchy node h, bottom-up:
+    shift[h] = sum(shift[c] for contributing descendant leaves c) / count(c)
+shift each unsnapped centroid target once using the saved original target
+snap hierarchy/centroid targets using the existing snap policy
+freeze targets and hand them to macro_plan</code></pre>
+<p>The hierarchy reduction averages centroid movements, rather than pooling all
+memories under the parent. A leaf with ten memories does not get ten times the
+parent weight of a leaf with one memory. Only contributing leaves enter the
+parent count; a branch with no movable memories does not dilute the average.</p>
+
+<h3>Macro optimization</h3>
+<pre><code>run macro GP warmup with existing objectives
+at each scheduled refresh, up to the configured budget:
+    field = warp(current placement density and macro geometry)
+    for each movable memory m:
+        anchor[m] = current_center[m] + field.delta[m]
+    replace virtual pull edges atomically; resume GP
+between refreshes:
+    optimize existing objectives + sum_m weight[m] * pull(center[m], anchor[m])
+perform the existing macro snap/legalization and lock macros
+clear virtual warp edges before final cell placement</code></pre>
+<p>The exact pull penalty should reuse a supported optimizer anchor term, with
+its weight reported separately. A refresh changes the objective endpoints,
+not placement coordinates. Benchmark pull strength, warmup and cadence for
+oscillation, wirelength and timing before proposing any enabled-by-default
+placement policy.</p>
+<p>Local reference images:
+<a href="../../repros/warpspace_free_density32_20261021/eyeriss_real.png">real Eyeriss</a>,
+<a href="../../repros/warpspace_free_density32_20261021/eyeriss_offset.png">synthetic offset</a>,
+<a href="../../repros/warpspace_free_density32_20261021/eyeriss_corners.png">synthetic corners</a>.
+These show desired anchor directions, not validated integrated placement QoR.</p>
+</main>
+<footer>LiveHD TODO</footer>
+</body>
+</html>

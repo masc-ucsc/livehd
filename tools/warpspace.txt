@@ -1,0 +1,343 @@
+warpspace: experimental density-capped mesh deformation
+=====================================================
+
+Build:
+  bazel build -c opt //tools:warpspace
+
+Warp a placement and make a before/after PNG plus JSON metrics:
+  ./bazel-bin/tools/warpspace --lef tech.lef cells.lef macros.lef \
+    --def input.def --out-def warped.def --rho-max 0.5 \
+    --bins 64 --iters 6 --mu 1 --report warp_report.png
+
+DEF to PNG without deformation:
+  ./bazel-bin/tools/warpspace --lef tech.lef cells.lef macros.lef \
+    --def input.def --render-only --report placement.png
+
+No Python, Qt, OpenDB or OpenROAD runtime is needed for either command. The
+binary links HiGHS for sparse LPs and zlib for PNG encoding. The JSON sidecar
+has the PNG basename by default; use --metrics FILE to choose another name.
+Output directories must already exist; input files cannot be overwritten.
+
+Quick reproducible input (Python standard library only):
+  python3 tools/warpspace_demo.py /tmp/warp_demo --cells 20000
+  ./bazel-bin/tools/warpspace --lef /tmp/warp_demo/demo.lef \
+    --def /tmp/warp_demo/demo.def --out-def /tmp/warp_demo/warped.def \
+    --rho-max 0.1 --report /tmp/warp_demo/report.png
+
+The demo has a 1000 x 1000 die, three Gaussian cell clusters and four rigid
+macros, one FIXED. The generator prints 1.3 times global free-area density
+as a more aggressive optional target. Use the same --bins across experiments:
+it sets the uniform evaluation grid as well as the mesh's base grid.
+
+What the prototype does
+-----------------------
+- Reads rectangle geometry from LEF SIZE/CLASS/SITE, and placed DEF components.
+  E/W/FE/FW swap the footprint's width and height. Rows use the LEF SITE height.
+- Builds a nonuniform quadrilateral grid, preserving exact macro-edge lines.
+  Nearby uniform lines are dropped; distinct macro edges are never merged.
+  Minimum widths are reduced for initially thin faces so the identity mesh
+  remains feasible. A 100000-vertex limit bounds accidental huge models.
+- Uses center-assigned demand. Centers inside macro faces are reassigned to
+  the nearest free face and their bilinear coordinates clamped; the count is
+  reported. This special case does not preserve their original center order.
+- Alternates exact sparse x/y LPs. Each LP includes capacity slack, monotonic
+  edges, positive corner crosses, the fixed outline, rigid macro translations,
+  L1 displacement from the original mesh, and displacement total variation.
+  Center constraints also keep each rigid cell rectangle inside the die.
+- Uses HiGHS IPM, with simplex fallback for a numerical Unknown/SolveError.
+  Only optimal solutions are applied. Each axis has a --time-limit budget
+  (default 30 seconds, shared with fallback). Invariant failure stops the run.
+- Checks positive face areas, strict convexity, total die area and exact macro
+  translation after every pass. Standard-cell shapes and orientations are
+  unchanged. DEF coordinates are quantized to integer DBU on export.
+- Preserves the input DEF byte-for-byte except the numeric x/y placement
+  tokens of movable components. FIXED and COVER records remain verbatim.
+  Fixed standard cells are treated as rigid obstacles rather than moved; their
+  area is still included in the measured standard-cell density.
+- Measures actual rectangle-overlap density on the original uniform grid,
+  peak/p99 density, overflow, center HPWL and cell/macro displacement.
+  DEF PIN terms are omitted from center HPWL. Metrics use exported positions.
+
+Important interpretation
+------------------------
+Capacity on warped material faces is a surrogate. It does NOT prove a density
+cap on uniform evaluation bins: cells are rigid and only their centers move.
+The JSON reports mesh_cap_satisfied and uniform_grid_cap_satisfied separately.
+A finite slack penalty also allows locally infeasible capacity constraints.
+The outer loop stops at the face target or --iters, not at the evaluation-grid
+target. Re-running with warped.def as the next input rebuilds demand and lets
+you experiment with repeated warps. Neither method guarantees convergence.
+
+The default penalty is Lambda = 1000 / original uniform bin area in um^2.
+--lambda VALUE overrides that physical area penalty; increasing it prioritizes
+capacity over movement. --mu controls TV smoothness. --tol defaults to .02.
+--require-cap returns 2 when the measured evaluation-grid cap remains unmet,
+while still writing the valid unlegalized DEF and plots. Other errors return 1.
+
+The 2 x 3 report shows placement, density and histogram before, and placement
+with mesh, density and displacement quiver after. Density panels share a
+scale; above-cap bin boundaries are red and slack faces are hatched. Geometry
+plots preserve the physical die aspect ratio. Full mesh vertices and every
+macro displacement are also in JSON, for additional plotting or analysis.
+
+Supported input and limits
+--------------------------
+This is a prototype for rectangular, unrouted placements. All referenced
+masters must have LEF geometry and all components must already be positioned
+inside DIEAREA. Nonzero LEF ORIGIN, polygon dies, nonempty placement BLOCKAGES
+or REGIONS, overlapping rigid objects, and unplaced components are rejected.
+LEF pin shapes, routing layers, cell functions and timing are not optimized.
+Macro ordering/topology is frozen. Macro translations can be coupled when
+rigid objects share mesh vertices. Large or offset cells can overlap macros
+or other cells after mapping; no-fold applies to the continuous mesh, not to
+nonoverlap of finite cell footprints. Reassigned centers and DBU quantization
+are additional exceptions to exact center-order preservation.
+
+Routing and special-net text are preserved, but their geometry is stale after
+moving components. The output is a valid DEF placement, not a routed or legal
+placement. Legalize separately before timing/routing comparisons.
+
+For example, in OpenROAD after loading the same LEFs:
+  read_def warped.def
+  foreach inst [[ord::get_db_block] getInsts] {
+    if {[[$inst getMaster] isBlock]} {$inst setPlacementStatus FIRM}
+  }
+  detailed_placement
+  check_placement
+  write_def legalized.def
+
+Render/legalization metrics with:
+  ./bazel-bin/tools/warpspace --lef tech.lef cells.lef macros.lef \
+    --def legalized.def --render-only --rho-max 0.5 \
+    --report legalized.png
+
+For GUI inspection, load the LEFs and DEF in a Tcl script, call gui::fit, then:
+  ../OpenROAD/bazel-bin/openroad-qt -gui -no_init view_warp.tcl
+
+Regression:
+  bazel test -c opt //tools:warpspace_smoke --test_timeout=30
+
+The regression generates its own small inputs, uses no sibling benchmarks,
+and checks density reduction, mesh invariants, fixed/movable/rotated macros,
+thin faces, the no-macro case, verbatim DEF preservation, PNG output, rereading
+and clear failures for infeasible density or overlapping rigid objects.
+
+Moving macros into sparse space (opt-in)
+----------------------------------------
+  ./bazel-bin/tools/warpspace --lef tech.lef cells.lef macros.lef \
+    --def input.def --out-def balanced.def --report balanced.png \
+    --rho-max .5 --bins 64 --iters 4 --movable-macros --balance 1
+
+--movable-macros releases physical FIXED macros for translation during the
+warp. Fixed standard cells and COVER components remain immovable. Export
+retains each original placement status: a released FIXED macro is anchored
+at its new position in the output DEF. JSON input_fixed records the original
+constraint; fixed describes the constraint used during the warp.
+
+--balance WEIGHT adds an absolute face-area target penalty. Each free face
+receives a target of 5% of its original area plus its cell-demand share of
+95% of the total free area. This encourages dense regions to expand, sparse
+regions to contract, and rigid macros to move toward sparse space. The
+outline, macro rigidity and no-fold checks remain enforced. It is a soft
+objective, not a promise of equal density or a prescribed macro direction.
+
+The penalty per normalized unit area is WEIGHT * axis_length * vertex_count
+/ free_area. With the automatic lambda, capacity penalties are at least 100
+times this balancing penalty; explicit --lambda overrides that scaling.
+The balancing run uses all --iters, even if the face cap is reached sooner.
+Start with --balance .1, 1 or 3 to compare movement against spreading and
+HPWL. Large weights can cause substantial displacement and wirelength growth.
+Both options are off by default, preserving the original capped-warp behavior.
+
+Density-only space preview and fractional compression
+-----------------------------------------------------
+  ./bazel-bin/tools/warpspace --lef tech.lef cells.lef macros.lef \
+    --def input.def --deformation-preview --balance-model strain \
+    --balance 3 --bins 64 --iters 4 --report space.png
+
+This is a separate relaxed solve: physical macros contribute no demand, no
+obstacle area and no rigidity constraints. Their original footprints are
+passive markers carried by the mesh; each boundary segment follows its mesh
+edge, so SRAM outlines can shrink, stretch and bend. It shows the cell-density
+space warp before asking rigid macro shapes to fit. It is not an intermediate
+of the rigid-macro solver and cannot be exported as a valid macro placement.
+Fixed standard cells and COVER standard cells remain rigid obstacles.
+--deformation-preview rejects --out-def; only PNG and JSON are written.
+Post-warp placement HPWL is null in JSON because there are no rigid macro
+locations in this view. macros_and_fixed_objects still describes the original
+rigid records; the deformed shapes are represented by the mesh vertices.
+
+The bottom-right panel colors local area ratio: red = compressed, blue =
+expanded, white = unchanged. Color clips at ratios 1/16 and 16 on a log2 scale;
+the ratios themselves can exceed those limits. Macro outlines are overlaid.
+The preview's after-density panel is explicitly RESCALED to its own peak so
+the residual nonuniformity remains visible. The normal rigid-placement report
+continues using a shared density scale.
+
+--balance-model strain also works with ordinary rigid-macro warping. Let
+T = .05*A0 + .95*free_area*D/total_D, and z = (A-T)/A0. Instead of absolute
+area error it minimizes A0*phi(z), where phi is the maximum of tangents
+2*t*z-t*t for t in {0, +/-1/16, +/-1/8, +/-1/4, +/-1/2, +/-1, +/-2, +/-4}.
+This convex piecewise approximation of squared strain gives uncompressed
+sparse faces higher pressure than already compressed ones; its tails are
+linear. It removes the constant-pressure tie of the area model while keeping
+each axis an LP. Movement, smoothness and finite iteration limits still
+compete with density balance. There is no outward, radial or edge attraction.
+The default model remains area.
+
+Fast replotting without solving again:
+  ./bazel-bin/tools/warpspace --lef tech.lef cells.lef macros.lef \
+    --def input.def --deformation-preview --balance-model strain --balance 3 \
+    --bins 64 --replay-mesh space.json --report space_large.png --pixels 2400
+
+Use the same original DEF/LEFs and mesh options/mode. Replay checks original
+vertices, mode, and all mesh invariants before mapping cells and plotting.
+The saved JSON cannot be overwritten. mesh.free_faces rows contain:
+[v0,v1,v2,v3,cell_area,initial_area,final_area,target_area], with CCW vertex
+indices into mesh.vertices and areas in square microns.
+
+Comparing density colors and previewing macro-heavy designs
+-----------------------------------------------------------
+Use --density-scale shared to compare before/after heatmaps numerically with
+the same palette maximum. --density-scale independent zooms each panel to its
+own peak. The existing default auto retains the prior behavior: rigid reports
+share a scale, while density-only previews zoom the after panel. JSON records
+the chosen mode and both actual palette maxima. Changing the scale never
+changes placements or density values.
+
+For many macros, their edge cross-product can exceed the mesh vertex budget.
+In density-only mode, use --preview-grid uniform. Physical macro edges then
+do not add mesh lines; fixed standard-cell obstacles still add exact edges.
+Every macro footprint is clipped against the original mesh faces, and each
+clipped subrectangle is mapped bilinearly. This preserves the displayed
+piecewise outline even for macros smaller than a mesh face. Physical macros
+remain passive markers. Rigid-macro placement still uses exact macro edges;
+--preview-grid uniform requires --deformation-preview.
+
+A balance objective pursues density equalization across the available area;
+it can deform much more than a density cap alone needs. --balance 0 retains
+only capacity, movement and smoothing. Neither objective guarantees uniform
+point density inside a face: original intraface cell clusters and spatially
+varying bilinear-map Jacobians can produce evaluation-bin hotspots even when
+material-face average densities are balanced. Always inspect the measured
+uniform-bin density, not only material-face capacity or heatmap color.
+
+Fast density-field experiments and macro anchor suggestions
+-----------------------------------------------------------
+This mode does not place individual cells or enforce macro legality. Its
+inputs are a regular grid of cell-area demand plus macro centers and sizes.
+No netlist, routing, standard-cell coordinates or per-cell constraints enter
+the solver. All macro centers, including originally FIXED macros, are passive
+samples of the space deformation. It produces suggested anchors, not a DEF.
+
+Extract a compact dataset from a DEF once, without solving:
+  ./bazel-bin/tools/warpspace --lef tech.lef cells.lef macros.lef \
+    --def input.def --density-grid --bins 32 --iters 0 --report seed.png
+
+Experiment using only seed.json (no DEF/LEF reads):
+  ./bazel-bin/tools/warpspace --density-input seed.json \
+    --balance 3 --balance-model strain --iters 4 --report anchors.png
+
+Or extract and optimize in one invocation:
+  ./bazel-bin/tools/warpspace --lef tech.lef cells.lef macros.lef \
+    --def input.def --density-grid --bins 32 --balance 3 \
+    --balance-model strain --iters 4 --report anchors.png
+
+The square grid is uniform; pitch is die width/bins and die height/bins.
+For a 1418.994um die, 32 bins means about 44.34um per bin, a useful quick
+preview. A 64-bin solve is finer but substantially slower. Select --bins and
+--balance explicitly for experiments; smoothing defaults to a 32-bin window.
+
+Compact input JSON:
+  {"die":[0,0,100,100],"bins":2,"mass":[5,0,0,5],
+   "macros":[{"name":"ram0","center":[30,60],"size":[10,8]}]}
+
+Grid mass is total standard-cell area in square microns, indexed row-major
+from the bottom-left. Physical coordinates and macro sizes are microns.
+The dataset's bins field determines resolution when using --density-input.
+An optional label field, or --label TEXT, titles a controlled experiment.
+All mass values must be finite/nonnegative; total mass must be positive.
+
+Each bin's mass is attached to one mesh face. After the x/y LP deformation,
+its mass is spread uniformly over the warped quadrilateral and intersected
+with the original evaluation bins. This conserves total mass and deliberately
+forgets intrabin cell clumps. It is a predicted area-demand field, not an
+evaluation of mapped standard-cell rectangles. Macros contribute no cell demand;
+--macro-space reserves their occupied area as described below. Their new centers
+are bilinear samples of the same field;
+width/height are unchanged metadata. There is no outward, radial or edge
+attraction, and no claim of nonoverlap or in-die macro footprints.
+
+The three-panel PNG shows before density with original macro boxes, after
+density with suggested anchor boxes, and arrows from original to suggested
+macro centers. Heatmaps share one color scale. Boxes are clipped at the die
+for display; JSON retains full centers/sizes even when footprints extend out.
+
+The JSON output is also a compact dataset. mass is the transported output;
+input_mass preserves the original input. Each macro records before_center,
+center (suggested anchor), size and delta. Feeding this output back in performs
+another density transport step. Use the original seed to compare parameters.
+The optional radial_component is only a diagnostic: delta projected onto the
+outward radius at the ORIGINAL center. A negative value means an initially
+inward direction; it is not a term in the optimization objective.
+
+Positive convex faces, fixed outline/total mesh area and mass conservation
+are checked. --require-cap tests the transported density grid. HPWL and
+placement legality are outside this mode; --out-def is rejected.
+
+Reserved macro area and half-smoothed targets
+------------------------------------------------------------
+  ./bazel-bin/tools/warpspace --density-input seed.json \
+    --macro-space --smooth-window 32 --smooth-blend .5 \
+    --balance 3 --balance-model strain --iters 4 --report local.png
+
+For each original bin let A be its area, O its macro-rectangle UNION overlap,
+F=A-O its free area, and D its cell-area demand. Overlapping macro records do
+not reserve the same space twice. Macros are not cell demand. --macro-space
+adds the hard face constraint area >= O and changes capacity to
+area + slack >= O + D/rho_max. Thus the cells' density budget applies to the
+remaining free area, rather than to the entire bin.
+
+Density-grid mode defaults to --smooth-window 32 and --smooth-blend .5.
+Use --smooth-window 0 for the previous unsmoothed target. --macro-space
+remains opt-in. Smoothing does not apply to the DEF-writing warp mode.
+
+Let B be a centered reflected box filter of the selected width. The local
+model computes:
+  rho        = D / F
+  smooth_rho = B(D) / B(F)
+  rho_target = (1-alpha)*rho + alpha*smooth_rho
+  R          = D/rho_target                 if rho_target>0, otherwise F
+  scale      = sum(F)/sum(R)
+  target_area = O + scale*R
+where alpha is --smooth-blend. This occupancy-weighted average is important:
+a spatially uniform cells/free-area density stays uniform even when macro
+occupancy varies. Directly smoothing rho with zero-valued blocked bins would
+introduce a false gradient around macros.
+
+Only free areas are globally renormalized to conserve the die outline/area;
+O is never renormalized or compressed away. The half-blend is a soft local
+density target, not a hard guarantee that every final density retains exactly
+half its original value: free-area normalization, finite penalties and the
+mesh geometry can alter the result. With alpha=0 and inactive capacity, the
+identity deformation is optimal. Empty bins with no density in their filter
+neighborhood retain their initial free-area request.
+
+An even-width 8-bin box is centered without a half-bin directional bias:
+offsets -4..4 use weights {.5,1,1,1,1,1,1,1,.5}/8 along each axis. Boundaries
+are reflected, preserving the block average without zero padding. If the
+window spans or exceeds the block width (e.g. 32 on a 32x32 grid), B returns
+the block-wide average everywhere. Thus smooth_rho is total D / total F,
+including at edges. The filter is applied ONCE to the original input, not repeatedly
+as the mesh changes. Requested targets and occupied-area arrays are exported.
+The denominator is regularized to 1e-9 bin area for fully blocked input bins;
+input snapshots containing positive cell demand there are only coarse
+estimates, not valid physical free-space densities.
+
+The after map transports both D and O with the mesh and displays cells per
+remaining free area. Both total cell demand and reserved macro area must be
+conserved. Macro center/size records are anchor suggestions: their rigid boxes
+need not coincide with the transported occupied-area field. This approximation
+reserves macro space in the area model; it does not impose rigid macro shape
+or legal packing. Macro-space reservation remains opt-in; the smoothing
+window defaults to 32 in density-grid mode. Both options require density-grid mode.

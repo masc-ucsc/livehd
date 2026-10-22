@@ -19,7 +19,7 @@ dark outlines identify macro bodies. A sketch does not prescribe an exact gate l
 <a href="../pass/place/tests/regularity/BUILD">Bazel targets</a> ·
 <a href="../pass/place/tests/regularity/generate.py">Fixture generator</a></p>
 <h2>Run and inspect</h2>
-<pre>bazel run -c opt //pass/place/tests/regularity:run -- --case all --output "$PWD/repros/placement_regularity"
+<pre>bazel run -c opt //pass/place/tests/regularity:run -- --case all --min-macros 0 --output "$PWD/repros/placement_regularity"
 # These longer tests are excluded from the default suite by the existing long1 filter:
 bazel test -c opt --test_tag_filters=placement --test_timeout=3600 //pass/place/tests/regularity:all
 # Fast fixture/observer checks stay in the ordinary suite:
@@ -27,8 +27,8 @@ bazel test -c opt //pass/place/tests/regularity:regularity_checks</pre>
 <p>Bazel test retains PNGs, HTML, metrics, DEFs and logs under
 <code>bazel-testlogs/pass/place/tests/regularity/&lt;case&gt;/test.outputs/</code>
 (or <code>outputs.zip</code> when undeclared-output zipping is enabled).
-The run target accepts <code>--iterations N</code>, <code>--timeout SECONDS</code>, and an optional
-<code>--max-pattern-rms PITCHES</code>. Use the same explicit settings and frozen binary for comparisons.
+The run target accepts <code>--iterations N</code>, <code>--timeout SECONDS</code>, <code>--min-macros N</code> (default 0),
+<code>--snap-mode alignment|symmetry</code>, and an optional <code>--max-pattern-rms PITCHES</code>. Use the same explicit settings and frozen binary for comparisons.
 Every benchmark runs cold (<code>lhd.incremental=false</code>) so saved placements cannot mask regressions.</p>
 <h2>What is measured</h2>
 <table><tr><th>Metric</th><th>Interpretation</th></tr>
@@ -56,8 +56,12 @@ and every tile is observable at a top output. Sequential feedback breaks the mes
 The explicit mapping recipe <code>strash; &amp;get -n; &amp;nf; &amp;put</code> avoids expensive synthesis searches.
 Resizing, placement-driven remapping and additional timing-driven placement rounds are explicitly disabled to keep
 netlist identity and stage images comparable. Final STA remains enabled. Existing flow defaults are unchanged.</p>
-<p>Color candidates explicitly enable FP for one-macro tiles; the nested hierarchy also qualifies repeated
-four-macro structural candidates. Snapshots are required: missing stage data fails the run.
+<p>The run target sets <code>synth.place.fp.min_macros=0</code> (flag <code>--min-macros</code>, default 0 here; the flow
+default is 2). A hierarchy candidate needs <em>more</em> than that many movable macros, so with the flow default these
+one- and few-macro tiles would never become hierarchy candidates: they would fall back to unsnapped color centroids and the
+floorplan snap would not be exercised. With 0, every repeated tile (four or more siblings under one parent,
+<code>synth.place.fp.min_copies</code>) is a snap-eligible hierarchy candidate. Snapshots are required: missing stage data fails the run.
+The optional <code>--snap-mode alignment|symmetry</code> sets <code>synth.place.macro.snap_mode</code> for the macro stage.
 Macro placement remains free in these five baselines. Pyrope fixed-coordinate attributes are not consumed by
 the current physical flow; fixed-frame experiments should use the supported imported DEF interface rather than ignored hints.</p>
 <section id="mesh_2x2"><h2>mesh_2x2</h2><p>Start here: four identical hard macros with a cycle of nearest-neighbor logic. Expect a square, short balanced corridors, and four similarly sized logic neighborhoods.</p>
@@ -72,7 +76,7 @@ the current physical flow; fixed-frame experiments should use the supported impo
             <iframe class="metrics" src="../repros/placement_regularity/mesh_2x2/metrics.html" title="Measured mesh_2x2 HPWL, WNS, TNS and regularity"></iframe>
             <p><a href="../repros/placement_regularity/mesh_2x2/metrics.json">Measured metrics and provenance</a> ·
             <a href="../repros/placement_regularity/index.html#mesh_2x2">FP, macro and legalization PNGs</a></p>
-            <pre>bazel run -c opt //pass/place/tests/regularity:run -- --case mesh_2x2 --output "$PWD/repros/placement_regularity"</pre>
+            <pre>bazel run -c opt //pass/place/tests/regularity:run -- --case mesh_2x2 --min-macros 0 --output "$PWD/repros/placement_regularity"</pre>
             </section><section id="mesh_4x4"><h2>mesh_4x4</h2><p>Sixteen hard macros on a non-wrapping Manhattan mesh. Interior tiles have four neighbors; corners have two. Expect four rows and four columns with approximately equal pitch.</p>
             <p>16 macros · target ≈40,000 standard cells (the actual mapped count is checked) ·
             <a href="../pass/place/tests/regularity/mesh_4x4.prp">Pyrope source</a></p>
@@ -85,7 +89,7 @@ the current physical flow; fixed-frame experiments should use the supported impo
             <iframe class="metrics" src="../repros/placement_regularity/mesh_4x4/metrics.html" title="Measured mesh_4x4 HPWL, WNS, TNS and regularity"></iframe>
             <p><a href="../repros/placement_regularity/mesh_4x4/metrics.json">Measured metrics and provenance</a> ·
             <a href="../repros/placement_regularity/index.html#mesh_4x4">FP, macro and legalization PNGs</a></p>
-            <pre>bazel run -c opt //pass/place/tests/regularity:run -- --case mesh_4x4 --output "$PWD/repros/placement_regularity"</pre>
+            <pre>bazel run -c opt //pass/place/tests/regularity:run -- --case mesh_4x4 --min-macros 0 --output "$PWD/repros/placement_regularity"</pre>
             </section><section id="ring_8"><h2>ring_8</h2><p>Eight macros form one closed cycle around an empty center. Expect an open central region and logic along the eight edges. An octagonal or rotated ring is also reasonable; the square-ring similarity score deliberately measures the illustrated square template.</p>
             <p>8 macros · target ≈24,000 standard cells (the actual mapped count is checked) ·
             <a href="../pass/place/tests/regularity/ring_8.prp">Pyrope source</a></p>
@@ -98,7 +102,7 @@ the current physical flow; fixed-frame experiments should use the supported impo
             <iframe class="metrics" src="../repros/placement_regularity/ring_8/metrics.html" title="Measured ring_8 HPWL, WNS, TNS and regularity"></iframe>
             <p><a href="../repros/placement_regularity/ring_8/metrics.json">Measured metrics and provenance</a> ·
             <a href="../repros/placement_regularity/index.html#ring_8">FP, macro and legalization PNGs</a></p>
-            <pre>bazel run -c opt //pass/place/tests/regularity:run -- --case ring_8 --output "$PWD/repros/placement_regularity"</pre>
+            <pre>bazel run -c opt //pass/place/tests/regularity:run -- --case ring_8 --min-macros 0 --output "$PWD/repros/placement_regularity"</pre>
             </section><section id="hierarchy_4x4"><h2>hierarchy_4x4</h2><p>Four repeated quadrants, each containing a four-tile square. Corresponding tiles in neighboring quadrants communicate as well as local neighbors. Expect four cohesive groups with repeated internal shape; the longer inter-quadrant links are intentional.</p>
             <p>16 macros · target ≈54,000 standard cells (the actual mapped count is checked) ·
             <a href="../pass/place/tests/regularity/hierarchy_4x4.prp">Pyrope source</a></p>
@@ -111,7 +115,7 @@ the current physical flow; fixed-frame experiments should use the supported impo
             <iframe class="metrics" src="../repros/placement_regularity/hierarchy_4x4/metrics.html" title="Measured hierarchy_4x4 HPWL, WNS, TNS and regularity"></iframe>
             <p><a href="../repros/placement_regularity/hierarchy_4x4/metrics.json">Measured metrics and provenance</a> ·
             <a href="../repros/placement_regularity/index.html#hierarchy_4x4">FP, macro and legalization PNGs</a></p>
-            <pre>bazel run -c opt //pass/place/tests/regularity:run -- --case hierarchy_4x4 --output "$PWD/repros/placement_regularity"</pre>
+            <pre>bazel run -c opt //pass/place/tests/regularity:run -- --case hierarchy_4x4 --min-macros 0 --output "$PWD/repros/placement_regularity"</pre>
             </section><section id="mesh_6x6"><h2>mesh_6x6</h2><p>Thirty-six macros and roughly 90K mapped cells. This scales the same non-wrapping mesh to six rows and six columns, exposing cumulative pitch drift, channel collapse, and corner crowding.</p>
             <p>36 macros · target ≈90,000 standard cells (the actual mapped count is checked) ·
             <a href="../pass/place/tests/regularity/mesh_6x6.prp">Pyrope source</a></p>
@@ -124,7 +128,7 @@ the current physical flow; fixed-frame experiments should use the supported impo
             <iframe class="metrics" src="../repros/placement_regularity/mesh_6x6/metrics.html" title="Measured mesh_6x6 HPWL, WNS, TNS and regularity"></iframe>
             <p><a href="../repros/placement_regularity/mesh_6x6/metrics.json">Measured metrics and provenance</a> ·
             <a href="../repros/placement_regularity/index.html#mesh_6x6">FP, macro and legalization PNGs</a></p>
-            <pre>bazel run -c opt //pass/place/tests/regularity:run -- --case mesh_6x6 --output "$PWD/repros/placement_regularity"</pre>
+            <pre>bazel run -c opt //pass/place/tests/regularity:run -- --case mesh_6x6 --min-macros 0 --output "$PWD/repros/placement_regularity"</pre>
             </section>
 <p>Refresh sources/technology with <code>python3 pass/place/tests/regularity/generate.py</code> and this guide with
 <code>python3 pass/place/tests/regularity/documentation.py</code>. The fast check detects stale generated fixtures.</p>
