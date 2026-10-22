@@ -16,7 +16,8 @@ base = ['lhd/lhd', 'synth', str(source), '--top', 'dut', '-q',
         '--set', 'synth.place=true', '--set', 'synth.opentimer=false',
         '--set', 'synth.place.timing_driven=false', '--set', 'synth.place.resize=false',
         '--set', 'synth.place.io_resynth=0', '--set', 'synth.place.bins=8',
-        '--set', 'synth.place.iterations=100', '--set', 'synth.place.density=0.9']
+        '--set', 'synth.place.iterations=100', '--set', 'synth.place.density=0.9',
+        '--set', 'synth.place.legalize.terminal=false']
 
 
 def run(name, settings, error=None):
@@ -34,7 +35,7 @@ def run(name, settings, error=None):
     assert result.returncode == 0, (data, result.stderr)
     history = json.loads((work / 'synth/place/gp_history.json').read_text())
     resolved = json.loads((work / 'synth/place/route_options.json').read_text())
-    assert resolved['stages']['final']['model'] == settings['route.model'], resolved
+    assert resolved['stages']['final']['model'] == settings.get('route.model', 'rsmt'), resolved
     assert resolved['degree'] == 40 and resolved['accuracy'] == 3, resolved
     return history
 
@@ -43,11 +44,13 @@ for name, settings, error in [
     ('bad_model', {'route.model': 'typo'}, 'route.model'),
     ('bad_target', {'final.route.switch': '.01', 'final.route.target': '.02'}, 'final.route'),
     ('bad_finite', {'final.route.switch': 'nan'}, 'final.route.switch'),
-    ('unused_flute', {'route.degree': '20'}, 'FLUTE'),
+    ('unused_flute', {'route.model': 'rudy', 'route.degree': '20'}, 'FLUTE'),
     ('bad_degree', {'route.model': 'rsmt', 'route.degree': '1001'}, 'FLUTE'),
 ]:
     run(name, settings, error)
 
+history = run('default', {})
+assert history['route_model'] == 'rsmt' and history['rudy_calls'] > 0, history
 history = run('off', {'route.model': 'off'})
 assert history['route_model'] == 'off' and history['rudy_calls'] == 0, history
 history = run('rsmt', {'route.model': 'rsmt'})

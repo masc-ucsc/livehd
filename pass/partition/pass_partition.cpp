@@ -735,6 +735,7 @@ void Partitioner::carry_node_attrs(const hhds::Node_class& orig, const hhds::Nod
 
 void Partitioner::carry_driver_attrs(const hhds::Pin_class& orig, const hhds::Pin_class& neo) {
   admit("carry_driver_attrs");
+  gu::carry_signal_roles(orig, neo);
   if (auto b = gu::bits_of(orig); b != 0) {
     gu::set_bits(neo, b);
   }
@@ -1650,6 +1651,7 @@ void Partitioner::stamp_region_input_pins(uint32_t r, hhds::Graph* body) {
   for (auto& p : module_inputs_[r]) {
     admit("stamp_region_input_pins-step");
     auto ip = body->get_input_pin(p.name);
+    gu::carry_signal_roles(p.driver, ip);
     if (auto b = port_bits(p); b != 0) {
       gu::set_bits(ip, b);
     }

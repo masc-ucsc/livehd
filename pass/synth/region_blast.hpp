@@ -213,6 +213,7 @@ struct Region_blast {
   size_t                                            icg_pos    = 0;        // ICG enable POs, after the async-reset POs
   size_t                                            latch_pos  = 0;        // latch-cell enable/reset/D POs, after the ICG POs
   size_t                                            dclk_pos   = 0;        // derived-clock POs (Seq_flop::clk_po), after the latch POs
+  std::vector<Control_signal>                       control_signals;
   uint64_t                                          rss_before = 0;        // the admission baseline (0: no admission)
 };
 

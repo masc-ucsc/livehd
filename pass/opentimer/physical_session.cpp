@@ -8,6 +8,7 @@
 #include <string_view>
 #include <tuple>
 #include <unordered_map>
+#include <unordered_set>
 
 #include "node_util.hpp"
 #include "pass_opentimer.hpp"
@@ -19,6 +20,8 @@ struct Physical_session::Impl : Pass_opentimer {
   bool                               initialized = false;
   std::map<std::string, std::string> masters, ports, net_names, connections;
   size_t                             next_gate = 0, next_net = 0;
+  std::set<std::string>              data_exclusions;
+  bool                               exclusions_dirty = true;
 
   explicit Impl(const Eprp_var& options) : Pass_opentimer(options) {
     // Reporting/caching is a separate consumer, never the feedback transport.
@@ -248,6 +251,7 @@ struct Physical_session::Impl : Pass_opentimer {
     if (changed) {
       timer.update_timing();
       apply_case_analysis();
+      exclusions_dirty = true;
       std::vector<std::string> ideal;
       for (const auto& [name, target] : timing_targets_) {
         if ((!target.ports.empty() || !target.pin.empty()) && !propagated_clocks_.contains(name)) {
@@ -748,8 +752,37 @@ struct Physical_session::Impl : Pass_opentimer {
     }
   }
 
+  void apply_data_exclusions(const std::set<std::string>& exclusions) {
+    if (!exclusions_dirty && exclusions == data_exclusions) {
+      return;
+    }
+    if (!exclusions_dirty) {
+      // Restore the SDC/Liberty masks before replacing our private subset.
+      apply_case_analysis();
+    }
+    timer.update_timing();
+    std::unordered_set<std::string> roots;
+    for (const auto& net : physical_rc_->nets) {
+      if (exclusions.contains(net.driver)) {
+        roots.insert(pin_name(net.driver));
+      }
+    }
+    std::vector<std::pair<size_t, uint8_t>> masks;
+    for (const auto& arc : timer.arcs()) {
+      if (arc.is_net_arc() && roots.contains(arc.from().name())) {
+        masks.emplace_back(arc.idx(), 0);
+      }
+    }
+    if (!masks.empty()) {
+      timer.refine_case_masks(std::move(masks));
+    }
+    data_exclusions  = exclusions;
+    exclusions_dirty = false;
+  }
+
   livehd::timing::Feedback evaluate(const std::shared_ptr<hhds::Graph>&                 graph,
-                                    std::shared_ptr<const livehd::physical::Parasitics> rc) {
+                                    std::shared_ptr<const livehd::physical::Parasitics> rc,
+                                    const std::set<std::string>&                        exclusions) {
     if (!graph || !rc) {
       throw std::invalid_argument("physical timing requires a graph and in-memory RC");
     }
@@ -766,6 +799,7 @@ struct Physical_session::Impl : Pass_opentimer {
       } else {
         update(graph);
       }
+      apply_data_exclusions(exclusions);
       compute_timing(graph);
       previous_physical_rc_  = physical_rc_;
       stats.updated_nets    += physical_updated_nets_;
@@ -814,9 +848,10 @@ Physical_session::Physical_session(const Eprp_var& options) : options_(options) 
 }
 Physical_session::~Physical_session() = default;
 livehd::timing::Feedback Physical_session::evaluate(const std::shared_ptr<hhds::Graph>&                 graph,
-                                                    std::shared_ptr<const livehd::physical::Parasitics> rc) {
+                                                    std::shared_ptr<const livehd::physical::Parasitics> rc,
+                                                    const std::set<std::string>&                        data_exclusions) {
   try {
-    return impl_->evaluate(graph, std::move(rc));
+    return impl_->evaluate(graph, std::move(rc), data_exclusions);
   } catch (...) {
     // Invalid candidate inputs must not poison the next (possibly rolled-back)
     // trial. Normal accepted/rejected trials never recreate this timer.

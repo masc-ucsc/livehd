@@ -545,6 +545,7 @@ hhds::Pin_class Flattener::resolve_driver(Ictx* ctx, const hhds::Pin_class& d) {
 
   ctx->resolving.erase(d);
   if (!res.is_invalid()) {
+    gu::carry_signal_roles(d, res);
     ctx->pin_cache[d] = res;
   }
   return res;

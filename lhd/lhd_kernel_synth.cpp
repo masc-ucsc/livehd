@@ -213,6 +213,22 @@ livehd::placement::Options placement_options(const Options& opts) {
     throw Lhd_error{"usage", "invalid ECO connectivity weight", "expected 0..100"};
   }
   out.legalize_timing_corrections = integer("place.legalize.timing_corrections", "0");
+  out.terminal_legalize           = truthy(synth_set(opts, "place.legalize.terminal", "true"));
+  auto& terminal                  = out.terminal_legalize_options;
+  terminal.max_density            = number("place.legalize.max_density", "0.8");
+  terminal.critical_fraction      = number("place.legalize.critical_fraction", "0.1");
+  terminal.local_pair_fraction    = number("place.legalize.local_pair_fraction", "0.5");
+  terminal.padding_sites          = integer("place.legalize.padding_sites", "1");
+  terminal.remainder_wire_weight  = number("place.legalize.remainder_wire_weight", "4");
+  terminal.padding_max_extra_rows = integer("place.legalize.padding_max_extra_rows", "0");
+  terminal.critical_padding_sites = integer("place.legalize.critical_padding_sites", "0");
+  terminal.critical_fanin_depth   = integer("place.legalize.critical_fanin_depth", "0");
+  terminal.joint_minimize_total   = truthy(synth_set(opts, "place.legalize.joint_minimize_total", "true"));
+  terminal.candidates             = integer("place.legalize.candidates", "12");
+  terminal.pair_move_sites        = integer("place.legalize.pair_move_sites", "4");
+  terminal.pair_move_rows         = integer("place.legalize.pair_move_rows", "1");
+  terminal.critical_pair_limit    = integer("place.legalize.critical_pair_limit", "256");
+  terminal.local_pair_limit       = integer("place.legalize.local_pair_limit", "0");
   if (out.legalize_timing_corrections > 2) {
     throw Lhd_error{"usage", "timing corrections expect 0..2", ""};
   }
@@ -358,7 +374,7 @@ livehd::placement::Options placement_options(const Options& opts) {
   out.unknown_const_zero     = unknown_const == "zero";
   out.preserve_imported_ties = truthy(synth_set(opts, "place.preserve_imported_ties", "false"));
   out.routability            = truthy(synth_set(opts, "place.routability", "true"));
-  out.route_model            = synth_set(opts, "place.route.model", "rudy");
+  out.route_model            = synth_set(opts, "place.route.model", "rsmt");
   out.route_degree           = integer("place.route.degree", "40");
   out.route_accuracy         = integer("place.route.accuracy", "3");
   const auto read_route  = [&](livehd::placement::Stage_route& stage, const std::string& name) {
@@ -496,9 +512,12 @@ livehd::placement::Options placement_options(const Options& opts) {
   for (const auto& pattern : absl::StrSplit(synth_set(opts, "place.resize.dont_use", ""), ',', absl::SkipWhitespace())) {
     out.resize_dont_use.emplace_back(pattern);
   }
-  out.reset_fanout = static_cast<unsigned>(integer("place.reset_fanout", "32"));
-  if (out.reset_fanout == 1) {
-    throw Lhd_error{"usage", "invalid synth.place.reset_fanout: 1", "expected 0 (off) or an integer >= 2: loads per reset buffer"};
+  out.reset_fanout  = static_cast<unsigned>(integer("place.reset_fanout", "0"));
+  out.control_ports = synth_set(opts, "place.control_ports", "");
+  if (out.reset_fanout != 0 || out.repair_reset) {
+    throw Lhd_error{"usage",
+                    "pre-CTS clock/reset optimization is disabled",
+                    "use place.reset_fanout=0 and place.repair.reset=false"};
   }
   out.fp_iterations   = integer("place.fp.iterations", "1500");
   out.fp_minimum      = number("place.fp.minimum", "3000");
@@ -607,6 +626,10 @@ livehd::placement::Options placement_options(const Options& opts) {
     out.macro_parameters.validate();
   } catch (const std::invalid_argument& error) {
     throw Lhd_error{"usage", "invalid synth.place.macro parameter", error.what()};
+  }
+  out.tracks_file = synth_set(opts, "place.tracks", "");
+  if (!out.tracks_file.empty()) {
+    check_inputs_exist({out.tracks_file});
   }
   out.tech_rc_file = synth_set(opts, "place.tech_rc", "");
   if (!out.tech_rc_file.empty()) {
@@ -1028,7 +1051,7 @@ void synth_command(Options& opts, Result& res) {
     for (std::string path; paths >> path;) {
       dependencies.push_back(path);
     }
-    for (const auto& path : {sdc, place_options.tech_rc_file, place_options.floorplan}) {
+    for (const auto& path : {sdc, place_options.tech_rc_file, place_options.tracks_file, place_options.floorplan}) {
       if (!path.empty()) {
         dependencies.push_back(path);
       }
@@ -1354,12 +1377,14 @@ void synth_command(Options& opts, Result& res) {
       // The session runs in-process (no run_step), so keep Liberty/timer prints off the protocol stdout here.
       // Nested redirects (calls from inside place()/repair, already logged) restore correctly.
       const auto  timing_log = next_log_path(opts, "pass.opentimer.incremental");
+      const auto  timing_tech = livehd::physical::read_lef(place_options.lefs);
       const auto  evaluate   = [&](const livehd::placement::Result& state) {
         Phase_timer   phase(res, "pass.opentimer.incremental");
         Stdout_to_log redirect(timing_log);
-        auto          feedback = timing_session.evaluate(state.graph, state.parasitics);
+        const auto    controls = livehd::placement::prects_networks(timing_tech, state.floorplan, state.prects);
+        auto          feedback = timing_session.evaluate(state.graph, state.parasitics, controls.timing_cuts);
         set_crash_context(phase_step, phase_log);
-        return feedback;
+        return livehd::placement::prects_data_timing(feedback, controls);
       };
       std::unique_ptr<livehd::placement::Io_timing_flow> io_flow;
       if (io_store) {
@@ -1419,8 +1444,13 @@ void synth_command(Options& opts, Result& res) {
         set_crash_context({}, {});
         note_unknown_tied(seed);
         const auto timing         = evaluate(seed);
+        const auto controls       = livehd::placement::prects_networks(livehd::physical::read_lef(place_options.lefs),
+                                                                 seed.floorplan,
+                                                                 seed.prects,
+                                                                 timing);
+        const auto data_timing    = livehd::placement::prects_data_timing(timing, controls);
         place_options.net_weights = livehd::placement::timing_weights(*seed.parasitics,
-                                                                      timing,
+                                                                      data_timing,
                                                                       place_options.timing_fraction,
                                                                       place_options.timing_max_weight,
                                                                       place_options.timing_exponent);
@@ -1471,7 +1501,7 @@ void synth_command(Options& opts, Result& res) {
       // should replace the completed-stage feedback.
       place_options.after_stage = {};
       place_options.restart_seed.reset();
-      if (run_resize || run_timing_place || run_resynth) {
+      if ((run_resize || run_timing_place || run_resynth) && !place_options.terminal_legalize) {
         // Every round/trial below re-runs placement (and resynth a fresh ABC frame
         // per cone): keep their output off the protocol stdout, as for pass.place.
         phase_step = "pass.place.optimize";
@@ -1554,6 +1584,9 @@ void synth_command(Options& opts, Result& res) {
     }
     if (!place_options.tech_rc_file.empty()) {
       res.inputs.push_back(place_options.tech_rc_file);
+    }
+    if (!place_options.tracks_file.empty()) {
+      res.inputs.push_back(place_options.tracks_file);
     }
     if (!place_options.floorplan.empty()) {
       res.inputs.push_back(place_options.floorplan);

@@ -33,11 +33,14 @@ struct Circuit {
     }
     const auto gate = [&](std::string master, std::string name, const hhds::Pin_class& input, const std::string& physical_input) {
       const auto output = master.find("__buf_") != std::string::npos ? "X" : "Y";
-      auto       cell   = library.create_io(master);
-      cell->add_input("A", 0);
-      cell->set_bits("A", 1);
-      cell->add_output(output, 0);
-      cell->set_bits(output, 1);
+      auto       cell   = library.find_io(master);
+      if (!cell) {
+        cell = library.create_io(master);
+        cell->add_input("A", 0);
+        cell->set_bits("A", 1);
+        cell->add_output(output, 0);
+        cell->set_bits(output, 1);
+      }
       auto node = gu::create_typed_node(*graph, Ntype_op::Sub);
       node.set_subnode(cell);
       node.set_name(name);
@@ -136,6 +139,119 @@ protected:
     EXPECT_EQ(actual.path, expected.path);
   }
 };
+TEST_F(PhysicalSession, RegisteredResetCutChangesDownstreamSlackWithoutChangingLoadsOrClocks) {
+  hhds::GraphLibrary library;
+  auto               io = library.create_io("top");
+  for (const auto& [name, port] : std::vector<std::pair<std::string, unsigned>>{
+           {    "clk", 1},
+           {"trigger", 2},
+           {   "data", 3}
+  }) {
+    io->add_input(name, port);
+    io->set_bits(name, 1);
+  }
+  io->add_output("y", 0);
+  io->set_bits("y", 1);
+  auto graph = io->create_graph();
+  for (const auto* name : {"clk", "trigger", "data"}) {
+    gu::set_ubits(graph->get_input_pin(name), 1);
+  }
+  auto       rc = std::make_shared<livehd::physical::Parasitics>();
+  const auto cell
+      = [&](const std::string& name, const std::string& master, const std::vector<std::string>& inputs, const std::string& output) {
+          auto type = library.create_io(master);
+          for (size_t i = 0; i < inputs.size(); ++i) {
+            type->add_input(inputs[i], i + 1);
+            type->set_bits(inputs[i], 1);
+          }
+          type->add_output(output, 0);
+          type->set_bits(output, 1);
+          auto node = gu::create_typed_node(*graph, Ntype_op::Sub);
+          node.set_subnode(type);
+          node.set_name(name);
+          gu::set_ubits(node.create_driver_pin(output), 1);
+          node.attr(livehd::attrs::place).set(Ann_place(10, 10, 10, 10));
+          rc->cells.push_back({name, 10, 10, 0, master, 10, 10});
+          return node;
+        };
+  auto       reset = cell("reset_stage", "sky130_fd_sc_hd__dfxtp_1", {"CLK", "D"}, "Q");
+  auto       mix   = cell("mix", "sky130_fd_sc_hd__nor2_1", {"A", "B"}, "Y");
+  const auto wire  = [&](const hhds::Pin_class& from,
+                        const hhds::Pin_class& to,
+                        const std::string&     driver,
+                        const std::string&     sink,
+                        double                 resistance) {
+    from.connect_sink(to);
+    rc->nets.push_back({
+        driver,
+        {{driver, .1}, {sink, .2}},
+        {{0, 1, resistance}}
+    });
+  };
+  wire(graph->get_input_pin("clk"), reset.create_sink_pin("CLK"), "clk", "reset_stage:CLK", 100);
+  wire(graph->get_input_pin("trigger"), reset.create_sink_pin("D"), "trigger", "reset_stage:D", 100);
+  wire(graph->get_input_pin("data"), mix.create_sink_pin("A"), "data", "mix:A", 100);
+  wire(reset.get_driver_pin("Q"), mix.create_sink_pin("B"), "reset_stage:Q", "mix:B", 5000000);
+  wire(mix.get_driver_pin("Y"), graph->get_output_pin("y"), "mix:Y", "y", 100);
+  std::ofstream(directory / "timing.sdc")
+      << "create_clock -name clk -period 10 [get_ports clk]\n"
+         "set_input_delay -clock clk 0 [all_inputs]\nset_output_delay -clock clk 0 [all_outputs]\n";
+  const auto                          before = *rc;
+  livehd::opentimer::Physical_session session(options);
+  const auto                          full = session.evaluate(graph, rc);
+  const std::set<std::string>         cuts{"reset_stage:Q", "mix:B"};
+  const auto                          data = session.evaluate(graph, rc, cuts);
+  ASSERT_TRUE(full.pins.at("y").slack);
+  ASSERT_TRUE(data.pins.at("y").slack);
+  EXPECT_GT(*data.pins.at("y").slack, *full.pins.at("y").slack + 1);
+  EXPECT_TRUE(data.pins.at("reset_stage:CLK").clock);
+  EXPECT_FALSE(data.pins.at("mix:B").arrival);
+  EXPECT_TRUE(data.pins.at("mix:A").arrival);
+  EXPECT_EQ(data.pins.at("reset_stage:Q").load_ff, full.pins.at("reset_stage:Q").load_ff);
+  EXPECT_EQ(data.pins.at("mix:B").capacitance_ff, full.pins.at("mix:B").capacitance_ff);
+  EXPECT_EQ(rc->nets, before.nets);
+  livehd::opentimer::Physical_session fresh(options);
+  compare(data, fresh.evaluate(graph, rc, cuts));
+  compare(data, session.evaluate(graph, rc, cuts));
+  auto       moved          = std::make_shared<livehd::physical::Parasitics>(*rc);
+  const auto original_pose  = reset.attr(livehd::attrs::place).get();
+  auto       moved_pose     = original_pose;
+  moved_pose.x             += 100;
+  reset.attr(livehd::attrs::place).set(moved_pose);
+  moved->cells.front().x = moved_pose.x;
+  for (auto& net : moved->nets) {
+    if (net.driver == "reset_stage:Q") {
+      net.nodes.back().capacitance_ff  *= 2;
+      net.edges.front().resistance_ohm *= 2;
+    }
+  }
+  livehd::opentimer::Physical_session fresh_moved(options);
+  const auto                          moved_data = session.evaluate(graph, moved, cuts);
+  EXPECT_FALSE(moved_data.pins.at("mix:B").arrival);
+  compare(moved_data, fresh_moved.evaluate(graph, moved, cuts));
+  reset.attr(livehd::attrs::place).set(original_pose);
+  compare(full, session.evaluate(graph, rc));
+  EXPECT_EQ(session.statistics().builds, 1u);
+}
+
+TEST_F(PhysicalSession, DataCutsSurviveTopologyChangesAndCanBeRemoved) {
+  livehd::opentimer::Physical_session session(options);
+  for (bool extra : {false, true, false}) {
+    Circuit                     circuit(false, extra);
+    const std::set<std::string> cuts{"u:X"};
+    const auto                  cut = session.evaluate(circuit.graph, circuit.rc, cuts);
+    EXPECT_FALSE(cut.pins.at("y").arrival);
+    livehd::opentimer::Physical_session fresh(options);
+    compare(cut, fresh.evaluate(circuit.graph, circuit.rc, cuts));
+    const auto restored = session.evaluate(circuit.graph, circuit.rc);
+    EXPECT_TRUE(restored.pins.at("y").arrival);
+    compare(restored, fresh.evaluate(circuit.graph, circuit.rc));
+    // Leave the same mask active across the next topology change.
+    compare(cut, session.evaluate(circuit.graph, circuit.rc, cuts));
+  }
+  EXPECT_EQ(session.statistics().builds, 1u);
+}
+
 TEST_F(PhysicalSession, ResizeRcTopologyAndRejectedTrialRollbackMatchFreshTiming) {
   livehd::opentimer::Physical_session session(options);
   const auto                          check = [&](Circuit& circuit) {

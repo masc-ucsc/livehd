@@ -34,7 +34,8 @@ Logical_module_result write_module(const synth::Source_state_table& source, std:
     return invalid("logical graph emission requires a named module and complete logical controls");
   }
   if (source.sources.size() > max_nodes || source.bits.size() > max_nodes || source.controls.size() > max_nodes
-      || state_bits.size() > max_nodes || !work.spend(source.sources.size() + source.bits.size() + source.controls.size())) {
+      || source.control_signals.size() > max_nodes || state_bits.size() > max_nodes
+      || !work.spend(source.sources.size() + source.bits.size() + source.controls.size())) {
     return exhausted();
   }
   uint64_t control_lanes = 0;
@@ -291,6 +292,12 @@ Logical_module_result write_module(const synth::Source_state_table& source, std:
     } else {
       return invalid("CMOS expansion contains an unexpected binary function");
     }
+  }
+  for (const auto& signal : source.control_signals) {
+    if (!work.spend()) {
+      return exhausted();
+    }
+    gu::add_signal_roles(pins[net.outputs()[signal.output].node], signal.roles);
   }
   // Assemble original-width event controls. A multibit reset is a Boolean
   // condition on the complete value, not merely its least significant bit.

@@ -324,6 +324,7 @@ void Sub_inliner::carry_node_attrs(const hhds::Node_class& orig, const hhds::Nod
 }
 
 void Sub_inliner::carry_driver_attrs(const hhds::Pin_class& orig, const hhds::Pin_class& neo) {
+  carry_signal_roles(orig, neo);
   if (auto b = bits_of(orig); b != 0) {
     set_bits(neo, b);
   }
@@ -671,6 +672,7 @@ hhds::Pin_class Sub_inliner::resolve_driver(const hhds::Pin_class& d) {
   }
   if (!res.is_invalid()) {
     for (const auto& pin : path) {
+      carry_signal_roles(pin, res);
       pin_cache_[pin] = res;
     }
   }

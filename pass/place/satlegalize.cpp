@@ -55,6 +55,19 @@ ph::Rect pin_rect(const ph::Macro& m, const ph::Shape& shape, const Ann_place& p
           place.x + std::max(a.first, b.first) * dbu,
           place.y + std::max(a.second, b.second) * dbu};
 }
+std::optional<ph::Rect> pin_access_rect(const ph::Macro& macro, const ph::Shape& shape, const Ann_place& place, int64_t dbu,
+                                        const ph::Layer& layer) {
+  if (layer.width <= 0 || (layer.direction != "HORIZONTAL" && layer.direction != "VERTICAL")) {
+    return {};
+  }
+  auto         rect  = pin_rect(macro, shape, place, dbu);
+  const double half  = layer.width * dbu / 2;
+  rect.xl           += half;
+  rect.yl           += half;
+  rect.xh           -= half;
+  rect.yh           -= half;
+  return rect.xl <= rect.xh && rect.yl <= rect.yh ? std::optional{rect} : std::nullopt;
+}
 // Require an actual imported DEF track or explicit LEF OFFSET. A guessed zero
 // track origin and coincident pin centers are deliberately insufficient.
 std::vector<double> tracks(const ph::Floorplan& fp, const ph::Layer& layer, const std::string& name, bool horizontal, double low,
@@ -86,7 +99,7 @@ std::vector<double> tracks(const ph::Floorplan& fp, const ph::Layer& layer, cons
   return result;
 }
 bool aligned(const ph::Technology& tech, const ph::Floorplan& fp, const Satlegalize_alignment& pair, const Ann_place& a,
-             const Ann_place& b, const std::vector<size_t>* obstruction_indexes = nullptr) {
+             const Ann_place& b, const std::vector<size_t>* obstruction_indexes = nullptr, ph::Shape* witness = nullptr) {
   const auto& first  = fp.components.at(pair.first);
   const auto& second = fp.components.at(pair.second);
   const auto& ma     = tech.macros.at(first.macro);
@@ -112,19 +125,13 @@ bool aligned(const ph::Technology& tech, const ph::Floorplan& fp, const Satlegal
       if (!horizontal && layer.direction != "VERTICAL") {
         continue;
       }
-      auto         ra = pin_rect(ma, sa, a, fp.dbu), rb = pin_rect(mb, sb, b, fp.dbu);
-      const double half  = layer.width * fp.dbu / 2;
-      ra.xl             += half;
-      ra.yl             += half;
-      ra.xh             -= half;
-      ra.yh             -= half;
-      rb.xl             += half;
-      rb.yl             += half;
-      rb.xh             -= half;
-      rb.yh             -= half;
-      if (ra.xl > ra.xh || ra.yl > ra.yh || rb.xl > rb.xh || rb.yl > rb.yh) {
+      const auto access_a = pin_access_rect(ma, sa, a, fp.dbu, layer), access_b = pin_access_rect(mb, sb, b, fp.dbu, layer);
+      if (!access_a || !access_b) {
         continue;
       }
+      const auto&  ra   = *access_a;
+      const auto&  rb   = *access_b;
+      const double half = layer.width * fp.dbu / 2;
       const double low  = horizontal ? std::max(ra.yl, rb.yl) : std::max(ra.xl, rb.xl);
       const double high = horizontal ? std::min(ra.yh, rb.yh) : std::min(ra.xh, rb.xh);
       for (const double track : tracks(fp, layer, sa.layer, horizontal, low, high)) {
@@ -166,6 +173,9 @@ bool aligned(const ph::Technology& tech, const ph::Floorplan& fp, const Satlegal
           }
         }
         if (!blocked) {
+          if (witness) {
+            *witness = {sa.layer, corridor};
+          }
           return true;
         }
       }
@@ -181,7 +191,8 @@ struct Hpwl_endpoint {
 struct Hpwl_index {
   std::vector<std::vector<Hpwl_endpoint>> nets;
   std::vector<std::vector<size_t>>        incident;
-  Hpwl_index(const ph::Technology& tech, const ph::Floorplan& fp) : incident(fp.components.size()) {
+  Hpwl_index(const ph::Technology& tech, const ph::Floorplan& fp, const std::vector<bool>& ignored)
+      : incident(fp.components.size()) {
     std::map<std::string, size_t>              cells;
     std::map<std::string, const ph::Terminal*> terminals;
     for (size_t i = 0; i < fp.components.size(); ++i) {
@@ -190,7 +201,11 @@ struct Hpwl_index {
     for (const auto& t : fp.terminals) {
       terminals[t.name] = &t;
     }
-    for (const auto& net : fp.nets) {
+    for (size_t n = 0; n < fp.nets.size(); ++n) {
+      if (ignored[n]) {
+        continue;
+      }
+      const auto& net = fp.nets[n];
       nets.emplace_back();
       for (const auto& connection : net.connections) {
         if (connection.instance == "PIN") {
@@ -256,13 +271,18 @@ double hpwl(const ph::Floorplan& fp, const Hpwl_index& index, const std::set<siz
   }
   return total;
 }
-std::vector<Pair> pairs(const ph::Technology& tech, const ph::Floorplan& fp, const timing::Feedback& timing) {
+std::vector<Pair> pairs(const ph::Technology& tech, const ph::Floorplan& fp, const timing::Feedback& timing,
+                        const std::vector<bool>& ignored) {
   std::map<std::string, size_t> indexes;
   for (size_t i = 0; i < fp.components.size(); ++i) {
     indexes[fp.components[i].name] = i;
   }
   std::vector<Pair> result;
-  for (const auto& net : fp.nets) {
+  for (size_t n = 0; n < fp.nets.size(); ++n) {
+    if (ignored[n]) {
+      continue;
+    }
+    const auto& net       = fp.nets[n];
     const bool clock_net = std::any_of(net.connections.begin(), net.connections.end(), [&](const auto& connection) {
       auto pin = timing.pins.find(connection.instance == "PIN" ? connection.pin : connection.instance + ":" + connection.pin);
       if (pin == timing.pins.end() && connection.instance != "PIN") {
@@ -794,7 +814,9 @@ Satlegalize_report satlegalize(const ph::Technology& tech, ph::Floorplan& fp, co
   for (const auto& cell : fp.components) {
     report.before.push_back(cell.place);
   }
-  const Hpwl_index             hpwl_index(tech, fp);
+  const auto                   excluded    = prects_networks(tech, fp, options.prects, timing);
+  const auto                   data_timing = prects_data_timing(timing, excluded);
+  const Hpwl_index             hpwl_index(tech, fp, excluded.ignored);
   std::optional<Density_model> density;
   std::vector<bool>            safe_spill;
   if (advanced) {
@@ -806,11 +828,11 @@ Satlegalize_report satlegalize(const ph::Technology& tech, ph::Floorplan& fp, co
     }
     density.emplace(tech, fp, options);
     if (options.spill_neighbors) {
-      safe_spill = spillable(tech, fp, timing, options);
+      safe_spill = spillable(tech, fp, data_timing, options);
     }
   }
   report.hpwl_before    = hpwl(fp, hpwl_index);
-  const auto targets    = pairs(tech, fp, timing);
+  const auto targets    = pairs(tech, fp, data_timing, excluded.ignored);
   const auto window_for = [&](size_t target) -> std::optional<std::pair<ph::Rect, ph::Rect>> {
     const auto& pair   = targets[target].alignment;
     const auto& first  = fp.components[pair.first];
@@ -1516,6 +1538,50 @@ bool satlegalize_route_preserved(const Satlegalize_route_quality& candidate, con
   return candidate.overflow <= baseline.overflow + 1e-9
          && std::max(candidate.peak, peak_floor) <= std::max(baseline.peak, peak_floor) + 1e-9
          && candidate.blocked_pins <= baseline.blocked_pins && candidate.unroutable_nets <= baseline.unroutable_nets;
+}
+
+std::vector<physical::Shape> satlegalize_pin_access_bounds(const physical::Technology& tech, const physical::Component& cell,
+                                                           const Ann_place& place, const std::string& pin, int64_t dbu) {
+  std::vector<physical::Shape> result;
+  const auto&                  macro = tech.macros.at(cell.macro);
+  const auto                   found = macro.pins.find(pin);
+  if (found == macro.pins.end()) {
+    return result;
+  }
+  for (const auto& shape : found->second.shapes) {
+    const auto layer = tech.layers.find(shape.layer);
+    if (layer != tech.layers.end()) {
+      if (auto rect = pin_access_rect(macro, shape, place, dbu, layer->second)) {
+        result.push_back({shape.layer, *rect});
+      }
+    }
+  }
+  return result;
+}
+
+bool satlegalize_aligned(const physical::Technology& tech, const physical::Floorplan& fp, const Satlegalize_alignment& pair,
+                         const Ann_place& a, const Ann_place& b, const std::vector<size_t>& obstacles, physical::Shape* witness) {
+  return aligned(tech, fp, pair, a, b, &obstacles, witness);
+}
+
+bool satlegalize_obstructs(const physical::Technology& tech, const physical::Component& cell, const Ann_place& place,
+                           const physical::Shape& corridor, int64_t dbu) {
+  if (!intersects(corridor.rect, bounds(place))) {
+    return false;
+  }
+  const auto& macro = tech.macros.at(cell.macro);
+  if (!macro.blocked_layers.contains(corridor.layer)) {
+    return false;
+  }
+  if (macro.conservative_obstructions.contains(corridor.layer)
+      || std::none_of(macro.obstructions.begin(), macro.obstructions.end(), [&](const auto& obstruction) {
+           return obstruction.layer == corridor.layer;
+         })) {
+    return true;
+  }
+  return std::any_of(macro.obstructions.begin(), macro.obstructions.end(), [&](const auto& obstruction) {
+    return obstruction.layer == corridor.layer && intersects(corridor.rect, pin_rect(macro, obstruction, place, dbu));
+  });
 }
 
 bool satlegalize_preserved(const ph::Technology& tech, const ph::Floorplan& fp, const Satlegalize_report& report, size_t prefix) {

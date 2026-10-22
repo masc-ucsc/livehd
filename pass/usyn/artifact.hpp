@@ -9,7 +9,7 @@ namespace livehd::usyn {
 // ABC and mapping libraries. Native barriers/hierarchy are reconnected by the
 // design owner; this records the complete logical region boundary.
 struct Frozen_region {
-  static constexpr uint32_t version = 1;
+  static constexpr uint32_t version = 2;
   std::string               module_name;
   synth::State_target       target = synth::State_target::cmos;
   Endpoint_netlist          netlist;
@@ -36,7 +36,7 @@ struct Artifact_result {
   std::string                  reason;
 };
 
-// Format version 1. Exact-length little-endian fields, explicit enum/boolean
+// Format version 2. Exact-length little-endian fields, explicit enum/boolean
 // validation and bounded allocation; no raw C++ object representation. Failed
 // reads/writes publish no partial artifact. The source/control wrapper is
 // checked against the validated behavioral expansion on both paths.

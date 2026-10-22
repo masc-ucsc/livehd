@@ -397,6 +397,7 @@ void source(A& a, T& s) {
     enumeration(a, c.kind, 2);
     a.sequence(c.outputs, a.limits.nodes, [&](auto& o) { a.scalar(o); });
   });
+  a.sequence(s.control_signals, a.limits.nodes, [&](auto& c) { fields(a, c.output, c.roles); });
 }
 
 void validate(std::string_view module, synth::State_target target, const Endpoint_netlist& n, const synth::Source_state_table& s,
@@ -964,6 +965,7 @@ void identity_source(Writer& a, const synth::Source_state_table& s, std::span<co
     enumeration(a, c.kind, 2);
     a.sequence(c.outputs, a.limits.nodes, [&](auto& o) { a.scalar(o); });
   });
+  a.sequence(s.control_signals, a.limits.nodes, [&](auto& c) { fields(a, c.output, c.roles); });
 }
 
 // Source spellings of a canonical graph, replaced at the given positions;

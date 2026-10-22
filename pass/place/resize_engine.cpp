@@ -333,7 +333,7 @@ private:
   // ---- model -------------------------------------------------------------
   void build_model() {
     auto&      graph           = *state_.graph;
-    const auto protected_names = protected_buffers(graph, lib_.cells, lib_.special, !options_.repair_reset);
+    const auto protected_names = protected_buffers(graph, lib_.cells, lib_.special, true, options_.control_ports);
     std::unordered_map<std::string, const physical::Component*> components;
     for (const auto& c : state_.floorplan.components) {
       components.emplace(c.name, &c);

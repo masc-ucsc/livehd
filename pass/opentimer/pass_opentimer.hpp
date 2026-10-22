@@ -247,8 +247,11 @@ public:
   };
   explicit Physical_session(const Eprp_var& options);
   ~Physical_session();
+  // Optional optimization-only cut on physical non-clock nets. Connectivity,
+  // capacitance and SDC remain intact; an empty set restores full-path timing.
   livehd::timing::Feedback evaluate(const std::shared_ptr<hhds::Graph>&                 graph,
-                                    std::shared_ptr<const livehd::physical::Parasitics> rc);
+                                    std::shared_ptr<const livehd::physical::Parasitics> rc,
+                                    const std::set<std::string>&                        data_exclusions = {});
   const Statistics&        statistics() const;
   // Transient what-if edits on the last evaluated state (core/timing_whatif.hpp).
   // evaluate() first discards every pending what-if edit.

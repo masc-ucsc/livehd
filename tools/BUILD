@@ -51,6 +51,12 @@ cc_binary(
     ],
 )
 
+cc_binary(
+    name = "terminal_legalize",
+    srcs = ["terminal_legalize.cpp"],
+    deps = ["//pass/place:terminal_legalize", "//inou/lefdef:inou_lefdef", "@rapidjson"],
+)
+
 # An empty Xcode version list selects apple_support's Command Line Tools
 # toolchain, without discovering an unrelated /Applications/Xcode.app.
 xcode_config(

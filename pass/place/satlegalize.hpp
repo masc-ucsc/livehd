@@ -11,6 +11,7 @@
 
 #include "core/timing_feedback.hpp"
 #include "inou/lefdef/physical.hpp"
+#include "prects_networks.hpp"
 
 namespace livehd::placement {
 struct Satlegalize_route_grid {
@@ -19,6 +20,7 @@ struct Satlegalize_route_grid {
   std::vector<double> horizontal, vertical, pin_utilization;
 };
 struct Satlegalize_options {
+  Prects_library                                prects;
   std::string                                   backend = "cadical", encoding = "candidate";
   unsigned                                      max_cells = 24, max_candidates = 12, max_windows = 8, max_pairs = 32;
   // Zero preserves the global-only trial budget. The optional packing probe
@@ -49,6 +51,17 @@ struct Satlegalize_alignment {
   size_t      first = 0, second = 0;
   std::string first_pin, second_pin;
 };
+// Oriented pin rectangles in DBU, inset by half the routing width. These
+// bounds conservatively index possible common tracks; aligned() below still
+// verifies actual track phase, endpoint obstructions and the full corridor.
+std::vector<physical::Shape> satlegalize_pin_access_bounds(const physical::Technology&, const physical::Component&,
+                                                           const Ann_place&, const std::string& pin, int64_t dbu);
+// Shared geometric pin-access predicate for the terminal legalizer. Only the
+// supplied installed obstacles participate; unplaced GP cells are excluded.
+bool satlegalize_aligned(const physical::Technology&, const physical::Floorplan&, const Satlegalize_alignment&, const Ann_place&,
+                         const Ann_place&, const std::vector<size_t>& obstacles, physical::Shape* witness = nullptr);
+bool satlegalize_obstructs(const physical::Technology&, const physical::Component&, const Ann_place&,
+                           const physical::Shape& corridor, int64_t dbu);
 struct Satlegalize_checkpoint {
   std::vector<std::pair<size_t, Ann_place>> positions;
 };

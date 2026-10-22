@@ -2224,6 +2224,51 @@ Region_blast blast_region(const livehd::partition::Region_body& rb, const Blast_
     }
   }
 
+  // Preserve clock/reset identity independently of the chosen state cells and
+  // of reset mux folding. These output indices survive backend rewrites. A
+  // later mapping can also consume roles emitted by an earlier logical pass.
+  std::map<std::pair<uint64_t, uint32_t>, std::pair<hhds::Pin_class, uint8_t>> role_roots;
+  const auto remember_role = [&](hhds::Pin_class pin, uint8_t roles) {
+    if (pin.is_invalid() || pin.is_const() || !roles) {
+      return;
+    }
+    auto& entry   = role_roots[{pin.get_master_node().get_debug_nid(), pin.get_port_id()}];
+    entry.first   = pin;
+    entry.second |= roles;
+  };
+  for (const auto& input : rb.inputs) {
+    remember_role(input.src_driver, gu::signal_roles_of(input.src_driver));
+  }
+  for (auto node : rb.nodes) {
+    for (auto pin : node.out_sorted_pins()) {
+      remember_role(pin, gu::signal_roles_of(pin));
+    }
+    const auto op = gu::type_op_of(node);
+    if (op == Ntype_op::Flop) {
+      remember_role(gu::get_driver_of_sink_name(node, "clock_pin"), attrs::signal_clock);
+    }
+    if (op == Ntype_op::Flop || op == Ntype_op::Latch) {
+      remember_role(gu::get_driver_of_sink_name(node, "reset_pin"), attrs::signal_reset);
+    }
+  }
+  for (const auto& [key, value] : role_roots) {
+    (void)key;
+    const auto& [pin, roles] = value;
+    for (int bit = 0; bit < real_width(pin); ++bit) {
+      const auto signal = abc_bit(pin, bit);
+      if (options.logical_state && !admit_logical(lnet.size() + lnet.outputs().size() + 1)) {
+        result.status = Region_blast::Status::over_budget;
+        return result;
+      }
+      const auto output = static_cast<uint32_t>(lnet.outputs().size());
+      lnet.add_output(signal, std::format("__control_role{}", output));
+      result.control_signals.push_back({output, roles});
+    }
+  }
+  if (result.source_state) {
+    result.source_state->control_signals = result.control_signals;
+  }
+
   // Control and next-state materialization can discover an invalid driver
   // after the combinational loop. Never publish its temporary zero placeholder.
   if (unsupported) {

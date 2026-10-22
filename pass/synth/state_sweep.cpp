@@ -1054,7 +1054,7 @@ private:
       gu::carry_srcid(node, bit);
       const auto name = livehd::bus_name::bit(base, i);
       bit.attr(hhds::attrs::name).set(name);
-      for (auto sink : node.inp_sorted_pins()) {
+      for (auto sink : node.inp_pins_snapshot()) {
         if (sink.get_port_id() == din_pid || sink.get_port_id() == initial_pid) {
           continue;
         }

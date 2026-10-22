@@ -18,6 +18,7 @@
 #include "hhds/graph.hpp"
 #include "inou/lefdef/physical.hpp"
 #include "satlegalize.hpp"
+#include "terminal_legalize.hpp"
 
 namespace livehd::placement {
 inline constexpr double max_net_weight = 100;  // physical net weight ceiling shared by option checks and the placement database
@@ -43,7 +44,7 @@ struct Options {
   Placement_stage                                     completed_stage = Placement_stage::final;
   std::vector<std::string>                            lefs;
   std::string                                         floorplan, output_dir, cache_dir;
-  std::string                                         liberty, tech_rc_file;
+  std::string                                         liberty, tech_rc_file, tracks_file;
   std::string                                         macro_mode = "none";
   bool                                                fp_place = false, fp_snap_enabled = true;
   bool                                  fp_colors           = false;  // eligible color leaves; never independently centroid-snapped
@@ -65,14 +66,16 @@ struct Options {
   double                                timing_max_weight = 5, timing_smoothing = .5;
   double                                timing_exponent             = 1;  // convex criticality curve; 1 preserves linear weights
   double                                timing_spread_weight        = 0;  // [0,1] protection from extra routing/local spreading
-  int                                   macro_timing_interval       = 50;
+  int                                                 macro_timing_interval       = 50;
   // Opt-in fresh timing displacement protection, bounded to 100x.
-  double                                legalize_timing_strength    = 0;
-  double                                legalize_timing_threshold   = 0;
-  unsigned                              legalize_timing_corrections = 0;
-  int                                   fp_timing_max_updates       = 10;
-  bool                                  fp_resize                   = false;
-  bool                                  repair_reset   = false;  // size/buffer reset-pin cones too (default: protected like clocks)
+  double                                              legalize_timing_strength    = 0;
+  double                                              legalize_timing_threshold   = 0;
+  unsigned                                            legalize_timing_corrections = 0;
+  bool                                                terminal_legalize           = true;
+  Terminal_legalize_options                           terminal_legalize_options;
+  int                                                 fp_timing_max_updates = 10;
+  bool                                                fp_resize             = false;
+  bool                                  repair_reset   = false;  // retired: true is rejected before pre-CTS optimization
   // synth.place.resize.engine: "new" = path-based sizing/buffering on the
   // incremental what-if timer (resize_engine.hpp); "legacy" = batch sweeps.
   std::string                           resize_engine  = "legacy";
@@ -80,8 +83,9 @@ struct Options {
   std::vector<std::string>              resize_dont_use;         // glob patterns never chosen as a new master
   // What-if handle of the timer behind fp_evaluate/evaluate (required by engine=new).
   livehd::timing::Whatif*               whatif       = nullptr;
-  // Pre-placement fanout tree on every flat net that drives an async clear/preset pin (loads per buffer; 0 = off).
-  unsigned                              reset_fanout = 32;
+  // Legacy reset-tree control retained for a clear diagnostic on nonzero values.
+  unsigned                              reset_fanout = 0;  // retired: pre-CTS control nets are never buffered
+  std::string                           control_ports;     // nonempty explicit override of automatic clock/reset roots
   Evaluate                              fp_evaluate;
   double                                fp_minimum = 3000, fp_attraction = .25, fp_repulsion = 5, fp_anchor = .25;
   bool                                  fp_distance_attraction = true;
@@ -121,7 +125,7 @@ struct Options {
   double      macro_cell_density_weight = 0;  // standard-cell pressure on macros during macro GP only
   double      macro_density_pull_weight = 0, macro_density_pull_range = 4;
   bool        automatic_bins = false, exact_macro_density = true, adaptive_density = true, routability = true;
-  std::string route_model = "rudy";
+  std::string route_model = "rsmt";
   Stage_route fp_route, macro_route, final_route;
   int         route_degree = 40, route_accuracy = 3;
   bool        routability_charge_compensation = true;
@@ -185,6 +189,7 @@ struct Result {
   std::shared_ptr<physical::Parasitics>            parasitics;
   std::string                                      qor;
   physical::Floorplan                              floorplan;
+  Prects_library                                   prects;
 };
 using Point = std::pair<double, double>;
 struct Steiner_tree {

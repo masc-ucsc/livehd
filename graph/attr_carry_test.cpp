@@ -126,6 +126,7 @@ TEST(AttrCarry, EveryPinAttributeSurvivesARebuild) {
   src.attr(la::bits).set(int32_t{13});
   src.attr(la::pin_signed).set();
   src.attr(la::pin_delay).set(float{2.5});
+  src.attr(la::signal_roles).set(la::signal_clock | la::signal_reset);
   src.attr(la::pin_place).set(Ann_place{10, 20, 0, 0});
   src.attr(la::place_weight).set(2.0);
   src.attr(la::match).set(uint32_t{42});
@@ -133,13 +134,14 @@ TEST(AttrCarry, EveryPinAttributeSurvivesARebuild) {
   src.attr(la::pin_offset).set(int32_t{6});
   src.attr(la::time_range).set(la::time_range_t::value_type{.min = 0, .max = 3});
   src.attr(la::pending_time).set(la::pending_time_t::value_type{.min = 1, .max = 2});
-  static_assert(kPinTagsStamped == 10, "a pin-kind tag was added to LIVEHD_FOR_EACH_ATTR_TAG: stamp and check it here");
+  static_assert(kPinTagsStamped == 11, "a pin-kind tag was added to LIVEHD_FOR_EACH_ATTR_TAG: stamp and check it here");
 
   gu::carry_pin_attrs(src, dst);
 
   EXPECT_EQ(dst.attr(la::bits).get(), 13);
   EXPECT_TRUE(dst.attr(la::pin_signed).has());
   EXPECT_FLOAT_EQ(dst.attr(la::pin_delay).get(), 2.5F);
+  EXPECT_EQ(dst.attr(la::signal_roles).get(), la::signal_clock | la::signal_reset);
   EXPECT_EQ(dst.attr(la::pin_place).get(), Ann_place(10, 20, 0, 0));
   EXPECT_EQ(dst.attr(la::place_weight).get(), 2.0);
   EXPECT_EQ(dst.attr(la::match).get(), 42u);

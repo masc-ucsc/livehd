@@ -56,8 +56,18 @@ std::map<std::string, double> timing_weights(const physical::Parasitics& nets, c
   return target;
 }
 void refresh_timing_weights(Result& state, const Options& options, const Timing_feedback& timing) {
+  auto data = timing;
+  if (!state.floorplan.nets.empty()) {
+    const auto tech  = physical::read_lef(options.lefs);
+    auto       roles = prects_library(options.liberty, options.control_ports);
+    if (!roles.override_controls) {
+      roles.ports.insert(state.prects.ports.begin(), state.prects.ports.end());
+      roles.pins.insert(state.prects.pins.begin(), state.prects.pins.end());
+    }
+    data = prects_data_timing(timing, prects_networks(tech, state.floorplan, roles, timing));
+  }
   const auto target
-      = timing_weights(*state.parasitics, timing, options.timing_fraction, options.timing_max_weight, options.timing_exponent);
+      = timing_weights(*state.parasitics, data, options.timing_fraction, options.timing_max_weight, options.timing_exponent);
   std::map<std::string, double> current;
   for (const auto& net : state.parasitics->nets) {
     const auto next     = target.find(net.driver);

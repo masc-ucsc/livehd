@@ -227,6 +227,7 @@ bool expand_one(hhds::Graph* g, const hhds::Node_class& inst, const hhds::Subnod
       return hhds::Pin_class{};
     }
     auto dp = rep.create_driver_pin(pid);
+    carry_signal_roles(inst.try_get_driver_pin(pid), dp);
     set_bits(dp, decl->bits);
     if (decl->unsign) {
       set_unsign(dp);

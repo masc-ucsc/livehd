@@ -27,6 +27,7 @@
 #include "h2d.hpp"
 #include "macro_snap.hpp"
 #include "macro_tracks.hpp"
+#include "routing_tracks.hpp"
 #include "memory_proxy.hpp"
 #include "pin_adjust.hpp"
 #include "repair.hpp"
@@ -234,6 +235,7 @@ void remove_transparent_latches(hhds::Graph& graph) {
     for (const auto& edge : q.out_edges()) {
       sinks.push_back(edge.sink);
     }
+    gu::carry_signal_roles(q, din);
     for (auto sink : sinks) {
       sink.del_sink(q);
       sink.connect_driver(din);
@@ -307,6 +309,9 @@ std::string environment_key(const Options& o, const ph::Technology& tech) {
   if (!o.tech_rc_file.empty()) {
     h = hash_text(file_text(o.tech_rc_file), h);
   }
+  if (!o.tracks_file.empty()) {
+    h = hash_text(file_text(o.tracks_file), h);
+  }
   h = hash_text(std::format("{}:{}:{}:{}:{}:{}:{}:{}:{}:{}",
                             o.utilization,
                             o.aspect,
@@ -323,6 +328,7 @@ std::string environment_key(const Options& o, const ph::Technology& tech) {
     h = hash_text(std::format("cell-halo:{}:{}:{}", o.cell_halo->first, o.cell_halo->second, o.cell_stage), h);
   }
   h = hash_text(o.macro_mode, h);
+  h = hash_text("prects-controls:" + o.control_ports, h);
   if (o.reset_fanout) {
     h = hash_text(std::format("reset-fanout:{}", o.reset_fanout), h);
   }
@@ -380,6 +386,28 @@ std::string environment_key(const Options& o, const ph::Technology& tech) {
   }
   if (o.legalize_timing_strength > 0) {
     h = hash_text(std::format("timing-legalize:{}:{}", o.legalize_timing_strength, o.legalize_timing_threshold), h);
+  }
+  if (o.terminal_legalize) {
+    const auto& t = o.terminal_legalize_options;
+    h             = hash_text(std::format("terminal-legalize:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}",
+                              t.max_density,
+                              t.critical_fraction,
+                              t.local_pair_fraction,
+                              t.padding_sites,
+                              t.candidates,
+                              t.pair_move_sites,
+                              t.pair_move_rows,
+                              t.sat_conflicts,
+                              t.sat_milliseconds,
+                              t.critical_pair_limit,
+                              t.local_pair_limit,
+                              t.backend,
+                              t.critical_padding_sites,
+                              t.critical_fanin_depth,
+                              t.joint_minimize_total,
+                              t.padding_max_extra_rows,
+                              t.remainder_wire_weight),
+                  h);
   }
   if (o.timing_exponent != 1) {
     h = hash_text(std::format("timing-exponent:{}", o.timing_exponent), h);
@@ -888,7 +916,43 @@ std::map<std::string, FloorplanPorts> floorplan_ports(const std::string& library
   }
   return ports;
 }
+void collect_control_roles(hhds::Graph& graph, Resolver& resolve, Prects_library& roles) {
+  if (!roles.override_controls) {
+    roles.ports.clear();
+    roles.pins.clear();
+  }
+  roles.clock_ports.clear();
+  roles.clock_pins.clear();
+  const auto collect = [&](const hhds::Node_class& node) {
+    for (auto pin : node.out_sorted_pins()) {
+      if (!gu::signal_roles_of(pin)) {
+        continue;
+      }
+      for (int bit = 0; bit < std::max(1, gu::bits_of(pin)); ++bit) {
+        const auto endpoint = resolve.bit(pin, bit);
+        if (endpoint.constant >= 0) {
+          continue;
+        }
+        const bool port  = endpoint.instance == "PIN";
+        const auto label = port ? endpoint.pin : endpoint.instance + ":" + endpoint.pin;
+        if (!roles.override_controls) {
+          (port ? roles.ports : roles.pins).insert(label);
+        }
+        if (gu::signal_roles_of(pin) & attrs::signal_clock) {
+          (port ? roles.clock_ports : roles.clock_pins).insert(label);
+        }
+      }
+    }
+  };
+  collect(graph.get_input_node());
+  for (auto node : graph.body().nodes()) {
+    collect(node);
+  }
+}
+
 struct View {
+  Prects_library                                prects;
+  Prects_networks                               ignored;
   dp::Design                                    design;
   bool                                          hierarchy_snap         = false;
   bool                                          native_orientations    = false;
@@ -971,8 +1035,10 @@ color::Floorplan_coloring analyze_floorplan_colors(const View& v, const ph::Tech
   const auto                                    index
       = [&](const Endpoint& p) { return int(p.instance == "PIN" ? v.cells.size() + v.terminal.at(p.pin) : v.cell.at(p.instance)); };
   for (const auto& [driver, sinks] : v.nets) {
+    if (v.ignored.ignored[net_id++]) {
+      continue;
+    }
     const int from = index(driver);
-    ++net_id;
     for (const auto& sink : sinks) {
       const int to = index(sink);
       backward[to].push_back(from);
@@ -1056,6 +1122,43 @@ color::Floorplan_coloring analyze_floorplan_colors(const View& v, const ph::Tech
                                 edges,
                                 v.frozen_centroids && v.placement_colors ? &preserved : nullptr,
                                 {v.memory_colors, v.color_maximum * dp::detail::centroid_cell_area(v.design), scopes});
+}
+// Timing and repair callbacks need the same connectivity as the placement
+// objective. v.fp contains only the frame until final DEF export; v.nets owns
+// the current mapped connectivity, including changes accepted by FP repair.
+void snapshot_nets(ph::Floorplan& frame, const View& v) {
+  frame.nets.clear();
+  frame.nets.reserve(v.nets.size());
+  std::set<std::string> names;
+  for (auto& terminal : frame.terminals) {
+    names.insert(terminal.name);
+    terminal.net.clear();
+  }
+  size_t serial = 0;
+  for (const auto& [driver, sinks] : v.nets) {
+    auto name = driver.pin;
+    if (driver.instance != "PIN") {
+      do {
+        name = std::format("snapshot_net_{}", serial++);
+      } while (!names.insert(name).second);
+    }
+    ph::Net net{name, {{driver.instance, driver.pin}}};
+    for (const auto& sink : sinks) {
+      net.connections.push_back({sink.instance, sink.pin});
+    }
+    for (const auto& endpoint : net.connections) {
+      if (endpoint.instance == "PIN") {
+        frame.terminals.at(v.terminal.at(endpoint.pin)).net = name;
+      }
+    }
+    frame.nets.push_back(std::move(net));
+  }
+  for (auto& terminal : frame.terminals) {
+    if (terminal.net.empty()) {
+      terminal.net = terminal.name;
+      frame.nets.push_back({terminal.name, {{"PIN", terminal.name}}});
+    }
+  }
 }
 void make_arrays(View& v, const ph::Technology& tech) {
   v.design             = {};
@@ -1175,6 +1278,26 @@ void make_arrays(View& v, const ph::Technology& tech) {
       }
     }
   }
+  ph::Floorplan connectivity;
+  for (const auto& c : v.cells) {
+    connectivity.components.push_back({c.name, c.macro, c.place});
+    if (gu::type_op_of(c.node) == Ntype_op::Memory) {
+      for (auto pin : c.node.inp_sorted_pins()) {
+        const auto port = pin.get_port_id() % Ntype::Memory_port_stride;
+        if (port == 2 || port == 14) {
+          v.prects.controls[c.macro].insert(std::format("in_{}", pin.get_port_id()));
+        }
+      }
+    }
+  }
+  for (const auto& [driver, sinks] : v.nets) {
+    ph::Net net{{}, {{driver.instance, driver.pin}}};
+    for (const auto& sink : sinks) {
+      net.connections.push_back({sink.instance, sink.pin});
+    }
+    connectivity.nets.push_back(std::move(net));
+  }
+  v.ignored = prects_networks(tech, connectivity, v.prects);
   v.pins.clear();
   v.drivers.clear();
   for (const auto& [driver, sinks] : v.nets) {
@@ -1206,17 +1329,8 @@ void make_arrays(View& v, const ph::Technology& tech) {
       throw std::invalid_argument("invalid physical net weight");
     }
     d.net_weights.push_back(weight);
-    // Pre-CTS clocks are ideal. Honor the technology's pin roles when building
-    // the placement objective, while retaining every physical net for STA/DEF.
-    const auto clock_pin = [&](const Endpoint& endpoint) {
-      if (endpoint.instance == "PIN") {
-        return false;
-      }
-      const auto& cell = v.cells[v.cell.at(endpoint.instance)];
-      return tech.macros.at(cell.macro).pins.at(endpoint.pin).use == "CLOCK";
-    };
-    const bool clock = clock_pin(driver) || std::any_of(sinks.begin(), sinks.end(), clock_pin);
-    d.net_mask.push_back(!clock && !sinks.empty());
+    // These physical nets remain in DEF/STA, but have no placement edges.
+    d.net_mask.push_back(!v.ignored.ignored[v.drivers.size() - 1] && !sinks.empty());
   }
   d.build_maps();
   if (v.centroids) {
@@ -1374,6 +1488,8 @@ void refresh_floorplan_view(View& v, const View& baseline, Result& state, const 
     v.cells.push_back(std::move(cell));
   }
   Resolver   resolve(tech, memories, unknown_zero);
+  collect_control_roles(*state.graph, resolve, v.prects);
+  state.prects        = v.prects;
   const auto endpoint = [&](Pin p, int bit) {
     auto e = resolve.bit(p, bit);
     if (e.constant >= 0) {
@@ -1423,6 +1539,7 @@ void refresh_floorplan_view(View& v, const View& baseline, Result& state, const 
   }
   make_arrays(v, tech);
   state.floorplan = v.fp;
+  snapshot_nets(state.floorplan, v);
   state.floorplan.components.clear();
   for (const auto& c : v.cells) {
     c.node.attr(attrs::place).set(c.place);
@@ -1544,6 +1661,10 @@ void localize_tie_sites(View& v, const ph::Technology& tech, const std::string& 
   std::map<size_t, std::vector<Endpoint>>    targets;
   std::map<size_t, std::vector<std::string>> outputs;
   for (const auto& [driver, sinks] : v.nets) {
+    const auto label = driver.instance == "PIN" ? driver.pin : driver.instance + ":" + driver.pin;
+    if (v.ignored.pins.contains(label)) {
+      continue;
+    }
     if (driver.instance != "PIN" && masters.contains(v.cells[v.cell.at(driver.instance)].macro)) {
       if (shared_sources.contains(driver.instance)) {
         continue;
@@ -1846,6 +1967,9 @@ void assign_io(View& v) {
   // One pass over the nets: accumulate every touching net's cell pins per terminal.
   std::vector<std::tuple<double, double, int>> sums(v.fp.terminals.size());
   for (size_t net = 0; net < v.drivers.size(); ++net) {
+    if (!v.design.net_mask[net]) {
+      continue;
+    }
     const int begin = v.design.flat_net2pin_start[net], end = v.design.flat_net2pin_start[net + 1];
     double    x = 0, y = 0;
     int       count = 0;
@@ -3334,6 +3458,9 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
   if (options.legalize_timing_corrections > 2) {
     throw std::invalid_argument("timing correction budget must be 0..2");
   }
+  if (options.full && options.terminal_legalize && (options.satlegalize || options.legalize_timing_corrections)) {
+    throw std::invalid_argument("terminal legalization replaces local satlegalize/timing corrections");
+  }
   if (!std::isfinite(options.legalize_timing_strength) || options.legalize_timing_strength < 0
       || options.legalize_timing_strength > 99 || !std::isfinite(options.legalize_timing_threshold)
       || options.legalize_timing_threshold < 0 || options.legalize_timing_threshold > 1) {
@@ -3482,6 +3609,7 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
   auto& graph = *result.graph;
   remove_transparent_latches(graph);
   View v;
+  v.prects              = prects_library(options.liberty, options.control_ports);
   v.native_orientations = macro_active;
   // ECO starts from the supplied physical frame; centroid initialization is a
   // fresh-placement stage and must not overwrite its unchanged neighbors.
@@ -3508,6 +3636,8 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
   v.fp.dbu                 = tech.dbu;
   const auto  memories     = memory_proxies(graph, tech, options.liberty);
   Resolver    resolver(tech, memories, options.unknown_const_zero);
+  collect_control_roles(graph, resolver, v.prects);
+  result.prects          = v.prects;
   // Opt-in: the flat reset nets are bounded before the first cell is read, so the buffers place like any cell.
   // A driver that resolves to a constant (the tied inactive pin of a clear+preset flop) is not a reset net.
   const auto  reset_tree = options.reset_fanout ? buffer_reset_nets(graph,
@@ -3846,6 +3976,9 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
         }
       }
     }
+  }
+  if (!options.tracks_file.empty()) {
+    apply_routing_tracks(tech, v.fp, file_text(options.tracks_file));
   }
   std::unordered_map<std::string, ph::Terminal> imported_terms;
   for (auto& t : v.fp.terminals) {
@@ -4592,6 +4725,13 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
   for (int i = 0; i < v.design.num_movable; ++i) {
     movable_macros |= !v.design.node_macro.empty() && v.design.node_macro[i];
   }
+  const bool terminal_active = options.full && options.terminal_legalize && !options.fp_place
+                               && options.completed_stage == Placement_stage::final && !options.timing_seed
+                               && !options.retain_placement && !options.analyze_colors_only;
+  if (terminal_active && movable_macros) {
+    throw std::invalid_argument("terminal legalization requires the final cell stage with fixed macros");
+  }
+  std::optional<Terminal_legalize_report> terminal_report;
   const bool macro_pin_adjust = options.macro_pin_adjust && movable_macros;
   const bool adjustable_io
       = options.fp_place && options.fp_pin_adjust
@@ -4770,8 +4910,8 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
       }
       make_arrays(v, tech);
     }
-    control.legalize       = options.full;
-    control.detailed_place = options.full;
+    control.legalize       = options.full && !terminal_active;
+    control.detailed_place = options.full && !terminal_active;
     if (options.snapshots || v.centroids) {
       control.observer_interval = options.iterations + 1;
       control.observer          = [&](const dp::Design& snapshot, dp::PlacementStage stage, int iteration) {
@@ -4988,11 +5128,13 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
             v.cells[i].place.y = std::llround(physical.node_y[i]);
           }
           Result checkpoint;
+          checkpoint.prects            = v.prects;
           checkpoint.graph             = result.graph;
           checkpoint.net_weights       = v.weights;
           checkpoint.fp_library        = result.fp_library;
           checkpoint.fp_buffer_origins = result.fp_buffer_origins;
           checkpoint.floorplan         = v.fp;
+          snapshot_nets(checkpoint.floorplan, v);
           checkpoint.floorplan.components.clear();
           for (const auto& c : v.cells) {
             checkpoint.floorplan.components.push_back({c.name, c.macro, c.place});
@@ -5021,7 +5163,7 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
           refresh(checkpoint);
           const auto evaluate = [&](const Result& state) {
             ++fp_sta_calls;
-            return options.fp_evaluate(state);
+            return prects_data_timing(options.fp_evaluate(state), v.ignored);
           };
           const auto before  = evaluate(checkpoint);
           auto       after   = before;
@@ -5101,9 +5243,11 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
         auto view = v;
         capture(view, tech, false);
         Result checkpoint;
+        checkpoint.prects     = v.prects;
         checkpoint.graph      = result.graph;
         checkpoint.fp_library = result.fp_library;
         checkpoint.floorplan  = view.fp;
+        snapshot_nets(checkpoint.floorplan, view);
         checkpoint.floorplan.components.clear();
         auto rc_options       = options;
         rc_options.full       = false;
@@ -5213,10 +5357,12 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
           }
         }
         Result checkpoint;
+        checkpoint.prects      = v.prects;
         checkpoint.graph       = result.graph;
         checkpoint.net_weights = v.weights;
         checkpoint.fp_library  = result.fp_library;
         checkpoint.floorplan   = view.fp;
+        snapshot_nets(checkpoint.floorplan, view);
         checkpoint.floorplan.components.clear();
         auto rc_options = options;
         rc_options.full = false;
@@ -5230,7 +5376,7 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
         for (const auto& t : view.fp.terminals) {
           checkpoint.parasitics->terminals.push_back({t.name, t.x, t.y});
         }
-        const auto timing = options.fp_evaluate(checkpoint);
+        const auto timing = prects_data_timing(options.fp_evaluate(checkpoint), v.ignored);
         final_gp_timing   = timing;
         refresh_timing_weights(checkpoint, options, timing);
         v.weights = checkpoint.net_weights;
@@ -5559,17 +5705,37 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
         if (options.satlegalize_options.region_width_um || options.satlegalize_options.region_height_um
             || options.satlegalize_options.route_grid) {
           auto sat_options             = options.satlegalize_options;
+          sat_options.prects           = v.prects;
           sat_options.macro_halo_x_dbu = v.halo_x;
           sat_options.macro_halo_y_dbu = v.halo_y;
           sat_options.routing          = sat_routing;
           sat_report                   = satlegalize(tech, frame, final_gp_timing, sat_options);
         } else {
-          sat_report = satlegalize(tech, frame, final_gp_timing, options.satlegalize_options);
+          auto sat_options   = options.satlegalize_options;
+          sat_options.prects = v.prects;
+          sat_report         = satlegalize(tech, frame, final_gp_timing, sat_options);
         }
         sat_retained = sat_report->accepted.size();
         sat_install(physical, frame);
       };
     }
+    const auto write_legalize_timing = [&](std::string_view stage) {
+      std::ofstream report(options.output_dir + "/legalize_timing.jsonl",
+                           stage == "global_placement" ? std::ios::trunc : std::ios::app);
+      report << std::format(
+          R"({{"stage":"{}","wns":{},"tns":{},"violations":{},"electrical_excess":{},"delay":{},"time_unit_ps":{}}})",
+          stage,
+          final_gp_timing.wns ? std::format("{}", *final_gp_timing.wns) : "null",
+          final_gp_timing.tns ? std::format("{}", *final_gp_timing.tns) : "null",
+          final_gp_timing.violations,
+          final_gp_timing.electrical_excess,
+          final_gp_timing.delay,
+          final_gp_timing.time_unit_ps)
+             << '\n';
+      if (!report) {
+        throw std::runtime_error("cannot write legalization timing report");
+      }
+    };
     if (final_timing && options.fp_evaluate && control.checkpoint) {
       const auto observer = control.observer;
       control.observer    = [&, observer](const dp::Design& physical, dp::PlacementStage stage, int iteration) {
@@ -5583,20 +5749,7 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
         macro_checkpoint_forced = true;
         control.checkpoint(physical, control.max_iterations);
         legal_timing_snapshot = false;
-        std::ofstream report(options.output_dir + "/legalize_timing.jsonl", std::ios::app);
-        report << std::format(
-            R"({{"stage":"{}","wns":{},"tns":{},"violations":{},"electrical_excess":{},"delay":{},"time_unit_ps":{}}})",
-            stage == dp::PlacementStage::legalization ? "legalization" : "detail",
-            final_gp_timing.wns ? std::format("{}", *final_gp_timing.wns) : "null",
-            final_gp_timing.tns ? std::format("{}", *final_gp_timing.tns) : "null",
-            final_gp_timing.violations,
-            final_gp_timing.electrical_excess,
-            final_gp_timing.delay,
-            final_gp_timing.time_unit_ps)
-               << '\n';
-        if (!report) {
-          throw std::runtime_error("cannot write legalization timing report");
-        }
+        write_legalize_timing(stage == dp::PlacementStage::legalization ? "legalization" : "detail");
       };
     }
     bool zero_gp_snapshot_emitted = false;
@@ -5641,7 +5794,42 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
         metrics = dp::place(v.design, control);
       }
     }
-    if (final_timing && options.legalize_timing_strength > 0 && !options.satlegalize) {
+    if (terminal_active) {
+      if (options.snapshots && control.max_iterations == 0 && !zero_gp_snapshot_emitted && control.observer) {
+        control.observer(v.design, dp::PlacementStage::global_placement, 0);
+        zero_gp_snapshot_emitted = true;
+      }
+      // Geometric-only flows have no timed nets to protect. When a timer is
+      // available, refresh it at the exact final GP coordinates before selection.
+      if (control.checkpoint) {
+        macro_checkpoint_forced = true;
+        const auto update       = control.checkpoint(v.design, control.max_iterations);
+        v.design.net_weights    = update.net_weights;
+        write_legalize_timing("global_placement");
+      }
+      auto frame                        = sat_frame(v.design, false);
+      auto terminal_options             = options.terminal_legalize_options;
+      terminal_options.prects           = v.prects;
+      terminal_options.bins_x           = control.auxiliary_bins ? control.auxiliary_bins : metrics.bins_x;
+      terminal_options.bins_y           = control.auxiliary_bins ? control.auxiliary_bins : metrics.bins_y;
+      terminal_options.target_density   = options.density;
+      terminal_options.macro_halo_x_dbu = v.halo_x;
+      terminal_options.macro_halo_y_dbu = v.halo_y;
+      fit_terminal_legalize_grid(tech, frame, terminal_options);
+      terminal_report = terminal_legalize(tech, frame, final_gp_timing, terminal_options);
+      sat_install(v.design, frame);
+      metrics.legal                               = dp::is_legal(v.design);
+      metrics.hpwl                                = dp::hpwl(v.design);
+      metrics.alignment.cell_legalization_seconds = terminal_report->seconds;
+      if (!metrics.legal) {
+        throw std::runtime_error("terminal legalization failed independent native geometry validation");
+      }
+      write_terminal_legalize_report(*terminal_report, frame, terminal_options, options.output_dir + "/terminal_legalize");
+      if (control.observer) {
+        control.observer(v.design, dp::PlacementStage::legalization, metrics.iterations);
+      }
+    }
+    if (final_timing && options.legalize_timing_strength > 0 && !options.satlegalize && !terminal_active) {
       for (unsigned attempt = 0; attempt < options.legalize_timing_corrections; ++attempt) {
         const auto before         = v.design;
         const auto before_metrics = metrics;
@@ -5857,7 +6045,7 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
     metrics.converged = false;
     capture(v, tech, options.full);
   }
-  if (options.full && !options.timing_seed && !options.retain_placement && !options.analyze_colors_only) {
+  if (options.full && !options.timing_seed && !options.retain_placement && !options.analyze_colors_only && !terminal_active) {
     align_macro_geometry(v, tech, v.design, false, true);
     localize_tie_sites(v, tech, options.liberty, options.preserve_imported_ties);
     metrics.legal = dp::is_legal(v.design);
@@ -7162,6 +7350,18 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
     auto& allocator = json.GetAllocator();
     json["virtual_fillers"].SetBool(options.virtual_fillers);
     json.AddMember("preserve_imported_ties", options.preserve_imported_ties, allocator);
+    rapidjson::Value controls(rapidjson::kObjectType), ports(rapidjson::kArrayType), pins(rapidjson::kArrayType);
+    for (const auto& name : v.prects.ports) {
+      ports.PushBack(rapidjson::Value(name.c_str(), allocator), allocator);
+    }
+    for (const auto& name : v.prects.pins) {
+      pins.PushBack(rapidjson::Value(name.c_str(), allocator), allocator);
+    }
+    controls.AddMember("override", v.prects.override_controls, allocator);
+    controls.AddMember("ports", ports, allocator);
+    controls.AddMember("pins", pins, allocator);
+    controls.AddMember("ignored_nets", uint64_t(std::count(v.ignored.ignored.begin(), v.ignored.ignored.end(), true)), allocator);
+    json.AddMember("prects_controls", controls, allocator);
     json.AddMember("virtual_filler_count", metrics.filler_count, allocator);
     json.AddMember("virtual_filler_area_um2", metrics.filler_area / tech.dbu / tech.dbu, allocator);
     rapidjson::Value halo(rapidjson::kObjectType);
@@ -7320,16 +7520,21 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
       result.net_weights.emplace(name, v.weights.at(name));
     }
   }
+  result.prects           = v.prects;
   result.floorplan        = std::move(v.fp);
   result.fp_resized_cells = fp_resized;
   result.fp_repair_edits  = fp_repairs;
-  if (options.after_stage && !options.timing_seed && options.after_stage(options.completed_stage, result)) {
+  if (options.after_stage && !options.timing_seed && !terminal_active && options.after_stage(options.completed_stage, result)) {
     throw Placement_restart(result.floorplan, options.completed_stage);
   }
   return result;
 }
 
 Result place(hhds::Graph& source, hhds::GraphLibrary& library, const Options& requested) {
+  if (requested.reset_fanout || requested.repair_reset) {
+    throw std::invalid_argument(
+        "pre-CTS clock/reset sizing and buffering are disabled; reset_fanout must be 0 and repair_reset false");
+  }
   validate_cell_halo(requested);
   if (requested.cell_halo && !requested.full && !requested.timing_seed && !requested.retain_placement) {
     throw std::invalid_argument("cell halo requires full placement with a final cell stage");
@@ -7343,8 +7548,8 @@ Result place(hhds::Graph& source, hhds::GraphLibrary& library, const Options& re
     throw std::invalid_argument("invalid final cell iteration budget");
   }
   bool stage_macros = false;
-  if ((options.after_stage || options.cell_halo) && !options.fp_place && options.full && !options.timing_seed
-      && !options.cell_stage) {
+  if ((options.after_stage || options.cell_halo || options.terminal_legalize) && !options.fp_place && options.full
+      && !options.timing_seed && !options.cell_stage) {
     const auto technology = ph::read_lef(options.lefs);
     for (const auto& graph : source.definitions().graphs()) {
       for (auto node : graph->body().nodes()) {

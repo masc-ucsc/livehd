@@ -490,7 +490,7 @@ TEST_F(SemanticRegion, BlastedPipelineControlsAndQnEncodingSurviveSelectionAndEm
       for (const auto& s : roundtrip.state) {
         EXPECT_EQ(s.init, 'x');  // initial is a reset value, not a power-on value
       }
-      for (uint32_t x = 0; x < (logical ? 512U : 256U); ++x) {
+      for (uint32_t x = 0; x < 512U; ++x) {
         // Independent oracle: a[1:0], en, active-low rst, then the four
         // source-state bits. Translate the variable order from actual PI names.
         uint32_t assignment = 0;
@@ -515,6 +515,13 @@ TEST_F(SemanticRegion, BlastedPipelineControlsAndQnEncodingSurviveSelectionAndEm
           if (async) {
             expected.push_back(x & 8);  // raw reset; active-low remains in source metadata
           }
+        }
+        // Preserved role outputs remain independently observable even when a
+        // synchronous reset has folded into D and the backend clock is implicit.
+        for (const auto& signal : blast.control_signals) {
+          ASSERT_EQ(expected.size(), region.state_bits.size() + signal.output);
+          ASSERT_TRUE(signal.roles == attrs::signal_clock || signal.roles == attrs::signal_reset);
+          expected.push_back(signal.roles == attrs::signal_clock ? x & 256 : x & 8);
         }
         EXPECT_EQ(evaluate(region.selected.logic, assignment), expected) << qn << ':' << x;
         EXPECT_EQ(evaluate(roundtrip, assignment), expected) << qn << ':' << x;

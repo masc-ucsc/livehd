@@ -4,8 +4,10 @@
 #include <algorithm>
 #include <functional>
 
+#include "attrs.hpp"
 #include "gtest/gtest.h"
 #include "logical_writer.hpp"
+#include "node_util.hpp"
 
 namespace livehd::usyn {
 namespace {
@@ -97,6 +99,11 @@ protected:
     });
     net.add_output(rst, "reset0");
     net.add_output(net.add_lut({rst}, Lnet::kNot), "reset1");
+    table.control_signals = {
+        {2, attrs::signal_clock},
+        {3, attrs::signal_reset},
+        {4, attrs::signal_reset}
+    };
   }
   void TearDown() override { diag::sink().clear(); }
 };
@@ -157,6 +164,9 @@ TEST_F(Artifact, RoundTripPreservesFullSourceMetadataFunctionsAndCmosEmission) {
   EXPECT_EQ(copy.source.clocks[1].parent, 0);
   EXPECT_EQ(copy.source.clocks[1].output.port, 7U);
   EXPECT_EQ(copy.source.controls[1].outputs, (std::vector<uint32_t>{3, 4}));
+  ASSERT_EQ(copy.source.control_signals.size(), 3);
+  EXPECT_EQ(copy.source.control_signals[1].output, 3);
+  EXPECT_EQ(copy.source.control_signals[1].roles, attrs::signal_reset);
   const auto expanded = expand_endpoint_netlist(copy.netlist, work);
   ASSERT_EQ(expanded.status, Status::feasible) << expanded.reason;
   for (uint32_t x = 0; x < 64; ++x) {
@@ -165,6 +175,10 @@ TEST_F(Artifact, RoundTripPreservesFullSourceMetadataFunctionsAndCmosEmission) {
   const auto emitted = write_logical_module(copy, work);
   ASSERT_TRUE(emitted.module) << emitted.reason;
   EXPECT_EQ(emitted.module->state.size(), 2U);
+  for (const auto& signal : copy.source.control_signals) {
+    auto pin = emitted.module->graph->get_output_pin(emitted.module->outputs.at(signal.output)).get_driver_pin();
+    EXPECT_EQ(graph_util::signal_roles_of(pin) & signal.roles, signal.roles);
+  }
   const auto saved_again = serialize_artifact(copy, work);
   ASSERT_EQ(saved_again.status, Status::feasible) << saved_again.reason;
   EXPECT_EQ(saved_again.bytes, saved.bytes);

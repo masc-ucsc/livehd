@@ -240,6 +240,11 @@ bool bind_source_state(Source_state_table& table, const Region_blast& blast) {
 }
 
 bool validate_state_controls(const Source_state_table& table, const Lnet& net) {
+  for (const auto& signal : table.control_signals) {
+    if (signal.output >= net.outputs().size() || !signal.roles || (signal.roles & ~(attrs::signal_clock | attrs::signal_reset))) {
+      return false;
+    }
+  }
   if (!table.logical_boundary) {
     return table.controls.empty();
   }

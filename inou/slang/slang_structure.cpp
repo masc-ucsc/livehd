@@ -6903,92 +6903,130 @@ void Slang_context::lower_process(const slang::ast::ProceduralBlockSymbol& pbs) 
       }
       break;
     }
-    const slang::ast::ConditionalStatement* cs
-        = cand->kind == StatementKind::Conditional ? &cand->as<slang::ast::ConditionalStatement>() : nullptr;
-    if (cs != nullptr && cs->conditions.size() == 1 && cs->conditions[0].pattern == nullptr && cs->ifFalse != nullptr) {
-      // Normalize to (signal, active-high polarity), as the async rung does.
-      const slang::ast::Expression* cond     = cs->conditions[0].expr;
-      bool                          polarity = true;
-      while (true) {
-        if (cond->kind == ExpressionKind::UnaryOp) {
-          const auto& un = cond->as<slang::ast::UnaryExpression>();
-          if (un.op == slang::ast::UnaryOperator::LogicalNot || un.op == slang::ast::UnaryOperator::BitwiseNot) {
-            polarity = !polarity;
-            cond     = &un.operand();
-            continue;
-          }
-        }
-        if (cond->kind == ExpressionKind::Conversion) {
-          cond = &cond->as<slang::ast::ConversionExpression>().operand();
-          continue;
-        }
-        if (cond->kind == ExpressionKind::BinaryOp) {
-          const auto& bin = cond->as<slang::ast::BinaryExpression>();
-          if (bin.op == slang::ast::BinaryOperator::Equality || bin.op == slang::ast::BinaryOperator::Inequality) {
-            if (auto cv = try_eval(bin.right()); cv && cv->isInteger()) {
-              const bool rhs_true = cv->isTrue();
-              if (bin.op == slang::ast::BinaryOperator::Inequality ? rhs_true : !rhs_true) {
-                polarity = !polarity;
-              }
-              cond = &bin.left();
+    const auto recognize_sync = [&](const slang::ast::Statement* candidate, bool retain_body) {
+      const slang::ast::ConditionalStatement* cs
+          = candidate->kind == StatementKind::Conditional ? &candidate->as<slang::ast::ConditionalStatement>() : nullptr;
+      if (cs != nullptr && cs->conditions.size() == 1 && cs->conditions[0].pattern == nullptr && cs->ifFalse != nullptr) {
+        // Normalize to (signal, active-high polarity), as the async rung does.
+        const slang::ast::Expression* cond     = cs->conditions[0].expr;
+        bool                          polarity = true;
+        while (true) {
+          if (cond->kind == ExpressionKind::UnaryOp) {
+            const auto& un = cond->as<slang::ast::UnaryExpression>();
+            if (un.op == slang::ast::UnaryOperator::LogicalNot || un.op == slang::ast::UnaryOperator::BitwiseNot) {
+              polarity = !polarity;
+              cond     = &un.operand();
               continue;
             }
           }
-        }
-        break;
-      }
-      auto        sig     = plain_event_signal(*cond);
-      const auto* rst_sym = (sig && !sig->bit) ? sig->sym : nullptr;
-      const bool  visible = rst_sym != nullptr && (input_syms_.contains(rst_sym) || is_module_level(*rst_sym));
-      if (visible && rst_sym->getType().getBitWidth() == 1 && is_reset_like_name(rst_sym->name)) {
-        Reset_arm arm;
-        bool      ok = harvest_reset_arm(cs->ifTrue, arm, /*allow_loads=*/false) && arm.loads.empty() && arm.bit_stores.empty();
-        // Fold the constant slices; unlike the async twin there is no
-        // cross-process queue here, so an incompletely covered register simply
-        // declines the peel (the uncovered bits would have to HOLD, which one
-        // reset value cannot express).
-        for (const auto& [sym, p] : arm.partials) {
-          if (!p.complete()) {
-            ok = false;
-            break;
+          if (cond->kind == ExpressionKind::Conversion) {
+            cond = &cond->as<slang::ast::ConversionExpression>().operand();
+            continue;
           }
-          arm.stores.emplace_back(sym, const_text(p.assemble()));
-        }
-        for (const auto& [sym, value] : arm.stores) {
-          (void)value;
-          if (reset_attr_syms_.contains(sym) || cont_assign_syms_.contains(sym) || mem_syms_.contains(sym)) {
-            // Per-port Memory lowering has no reset-pin transition: its
-            // `initial` only initializes power-on contents. Keep a synchronous
-            // memory reset as an ordinary guarded write, including subsequent
-            // reset assertions after data has been stored. Peeling this arm
-            // would retain only `!reset && enable` writes and lose the reset.
-            ok = false;  // already reset, partly a register, or native memory
-            break;
+          if (cond->kind == ExpressionKind::BinaryOp) {
+            const auto& bin = cond->as<slang::ast::BinaryExpression>();
+            if (bin.op == slang::ast::BinaryOperator::Equality || bin.op == slang::ast::BinaryOperator::Inequality) {
+              if (auto cv = try_eval(bin.right()); cv && cv->isInteger()) {
+                const bool rhs_true = cv->isTrue();
+                if (bin.op == slang::ast::BinaryOperator::Inequality ? rhs_true : !rhs_true) {
+                  polarity = !polarity;
+                }
+                cond = &bin.left();
+                continue;
+              }
+            }
           }
+          break;
         }
-        if (ok && !arm.stores.empty()) {
-          if (!input_syms_.contains(rst_sym) && !declared_.contains(rst_sym)) {
-            declare_value_symbol(*rst_sym, /*force_reg=*/false);
+        auto        sig     = plain_event_signal(*cond);
+        const auto* rst_sym = (sig && !sig->bit) ? sig->sym : nullptr;
+        const bool  visible = rst_sym != nullptr && (input_syms_.contains(rst_sym) || is_module_level(*rst_sym));
+        if (visible && rst_sym->getType().getBitWidth() == 1 && is_reset_like_name(rst_sym->name)) {
+          Reset_arm arm;
+          bool      ok = harvest_reset_arm(cs->ifTrue, arm, /*allow_loads=*/false) && arm.loads.empty() && arm.bit_stores.empty();
+          // Fold the constant slices; unlike the async twin there is no
+          // cross-process queue here, so an incompletely covered register simply
+          // declines the peel (the uncovered bits would have to HOLD, which one
+          // reset value cannot express).
+          for (const auto& [sym, p] : arm.partials) {
+            if (!p.complete()) {
+              ok = false;
+              break;
+            }
+            arm.stores.emplace_back(sym, const_text(p.assemble()));
           }
-          const std::string reset_ref_name = lname_of(*rst_sym);
           for (const auto& [sym, value] : arm.stores) {
-            emit_reg_reset_attrs(*sym, value, reset_ref_name, /*edge_pos=*/polarity, /*initial_is_ref=*/false, /*async=*/false);
+            (void)value;
+            if (reset_attr_syms_.contains(sym) || cont_assign_syms_.contains(sym) || mem_syms_.contains(sym)) {
+              // Per-port Memory lowering has no reset-pin transition: its
+              // `initial` only initializes power-on contents. Keep a synchronous
+              // memory reset as an ordinary guarded write, including subsequent
+              // reset assertions after data has been stored. Peeling this arm
+              // would retain only `!reset && enable` writes and lose the reset.
+              ok = false;  // already reset, partly a register, or native memory
+              break;
+            }
           }
-          // The residual body must still not write while reset is held: a
-          // register the arm does NOT reset (a memory, say) only updates in the
-          // else arm. Same gate the async peel installs, and harmlessly
-          // redundant on the reset-bearing flops (their reset attr wins).
-          auto inactive_guard = booleanize(reset_ref_name);
-          if (polarity) {
-            inactive_guard = mark_bool(builder_.create_log_not_stmts(inactive_guard));
+          if (ok && !arm.stores.empty()) {
+            if (!input_syms_.contains(rst_sym) && !declared_.contains(rst_sym)) {
+              declare_value_symbol(*rst_sym, /*force_reg=*/false);
+            }
+            const std::string reset_ref_name = lname_of(*rst_sym);
+            for (const auto& [sym, value] : arm.stores) {
+              emit_reg_reset_attrs(*sym, value, reset_ref_name, /*edge_pos=*/polarity, /*initial_is_ref=*/false, /*async=*/false);
+            }
+            // Independent conditionals in one process retain their original
+            // guards. The reset attribute is redundant with the constant arm,
+            // but preserves the control role for synthesis and placement.
+            if (retain_body) {
+              return;
+            }
+            // The residual body must still not write while reset is held: a
+            // register the arm does NOT reset (a memory, say) only updates in the
+            // else arm. Same gate the async peel installs, and harmlessly
+            // redundant on the reset-bearing flops (their reset attr wins).
+            auto inactive_guard = booleanize(reset_ref_name);
+            if (polarity) {
+              inactive_guard = mark_bool(builder_.create_log_not_stmts(inactive_guard));
+            }
+            inactive_async_guards.push_back(std::move(inactive_guard));
+            for (const auto* p : sync_pre) {
+              prologue.push_back(p);
+            }
+            body = cs->ifFalse;
           }
-          inactive_async_guards.push_back(std::move(inactive_guard));
-          for (const auto* p : sync_pre) {
-            prologue.push_back(p);
-          }
-          body = cs->ifFalse;
         }
       }
+    };
+    if (cand->kind == StatementKind::List) {
+      // Generated RTL often puts one reset conditional per register in a
+      // single always block. Only attach reset attributes when these writes
+      // are independent: a later write must not override an earlier reset,
+      // and blocking assignments must not change its guard within the block.
+      absl::flat_hash_set<const slang::ast::ValueSymbol*> written;
+      bool                                                independent = true;
+      for (const auto* sub : cand->as<slang::ast::StatementList>().list) {
+        if (sub->kind == StatementKind::Empty) {
+          continue;
+        }
+        if (sub->kind != StatementKind::Conditional) {
+          independent = false;
+          break;
+        }
+        Write_collector writes;
+        sub->visit(writes);
+        independent &= writes.blocking.empty();
+        for (const auto* sym : writes.nonblocking) {
+          independent &= written.insert(sym).second;
+        }
+      }
+      if (independent) {
+        for (const auto* sub : cand->as<slang::ast::StatementList>().list) {
+          recognize_sync(sub, /*retain_body=*/true);
+        }
+      }
+    } else {
+      recognize_sync(cand, /*retain_body=*/false);
     }
   }
 

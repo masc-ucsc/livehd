@@ -80,6 +80,12 @@ struct State_control {
   std::vector<uint32_t> outputs;
 };
 
+// Role metadata refers to protected output positions, never unstable Lnet IDs.
+struct Control_signal {
+  uint32_t output = 0;
+  uint8_t  roles  = 0;
+};
+
 struct Source_state_table {
   std::string                    source_graph;
   State_scope                    scope = State_scope::logic;
@@ -95,6 +101,7 @@ struct Source_state_table {
   // Constants (including unknown reset bits) remain in the owned source row.
   bool                           logical_boundary = false;
   std::vector<State_control>     controls;
+  std::vector<Control_signal>    control_signals;
 };
 
 // An expanded memory module's structural memory_module attribute overrides the

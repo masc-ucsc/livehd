@@ -58,6 +58,17 @@ protected:
   }
 };
 
+TEST_F(FlattenAdmission, SignalRolesSurviveInternalAndInputHierarchyAliases) {
+  gu::add_signal_roles(child->get_input_pin("a"), attrs::signal_clock);
+  gu::add_signal_roles(invert.get_driver_pin(0), attrs::signal_reset);
+  hhds::GraphLibrary destination;
+  auto               flat = flatten_hierarchy(top.get(), &destination, "roles");
+  ASSERT_TRUE(flat);
+  EXPECT_EQ(gu::signal_roles_of(flat->get_input_pin("a")), attrs::signal_clock);
+  auto output = flat->get_output_pin("y").get_driver_pin();
+  EXPECT_EQ(gu::signal_roles_of(output), attrs::signal_reset);
+}
+
 TEST_F(FlattenAdmission, PhysicalNamesRetainTransparentInstanceScopes) {
   invert.set_name("same_leaf");
   auto root  = make_graph(source, "physical_root");

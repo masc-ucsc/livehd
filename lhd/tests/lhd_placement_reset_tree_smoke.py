@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""synth.place.reset_fanout: a flat net on many asynchronous reset pins gets a buffer tree before placement."""
+"""Pre-CTS placement preserves reset connectivity and rejects reset optimization."""
 import json
 import os
 from pathlib import Path
@@ -56,33 +56,25 @@ def reset_loads(name, pins=('RESET_B',)):
     return worst, len(re.findall(r'^\s*- \S*__place_rsttree\S* ', components, re.M))
 
 
-off = run('off', ['--set', 'synth.place.reset_fanout=0'])
+off = run('off', [])  # default must not create a reset tree
 assert 'reset_tree' not in off['qor']['place'], off['qor']['place']
 loads, buffers = reset_loads('off')
 assert loads >= 48 and buffers == 0, (loads, buffers)
 
-tree = run('tree', ['--set', 'synth.place.reset_fanout=8'])
-info = tree['qor']['place']['reset_tree']
-assert info['fanout'] == 8 and info['nets'] == 1 and info['sinks'] >= 48 and info['added'] >= 6 and info['buffers'] == info['added'], info
-loads, buffers = reset_loads('tree')
-assert loads <= 8 and buffers == info['buffers'], (loads, buffers, info)
+for name, setting in [('tree', 'synth.place.reset_fanout=8'), ('repair', 'synth.place.repair.reset=true')]:
+    refused = run(name, ['--set', setting], False)
+    assert 'pre-CTS' in json.dumps(refused['error']), refused['error']
 
-# The buffered netlist that was actually placed and saved is the source function.
+# The unchanged reset connectivity must still implement the source function.
 subprocess.run(['lhd/lhd', 'pass', 'liberty', 'gensim', str(root / 'arst.lib'), '--emit-dir', f'lg:{root}/models',
                 '--workdir', str(root / 'gensim'), '-q'], check=True, capture_output=True, timeout=30)
 proof = root / 'proof.json'
-subprocess.run(['lhd/lhd', 'lec', '--impl', f'lg:{root}/tree/synth/net', '--ref', f'verilog:{source}', '--lib', f'lg:{root}/models',
+subprocess.run(['lhd/lhd', 'lec', '--impl', f'lg:{root}/off/synth/net', '--ref', f'verilog:{source}', '--lib', f'lg:{root}/models',
                 '--top', 'dut', '--set', 'formal.effort=proof', '--set', 'formal.timeout=10', '--workdir', str(root / 'lec'),
                 '--result-json', str(proof), '-q'], check=True, capture_output=True, timeout=60)
 verdict = json.loads(proof.read_text())['lec']['verdict']
 assert verdict in ('proven-full', 'timeout-time', 'timeout-memory'), verdict
 
-# A deeper tree, the mapper's own tree composed with it, and malformed values.
-deep = run('deep', ['--set', 'synth.place.reset_fanout=2'])
-assert deep['qor']['place']['reset_tree']['levels'] >= 5, deep['qor']['place']['reset_tree']
-assert reset_loads('deep')[0] <= 2
-both = run('both', ['--set', 'synth.place.reset_fanout=8', '--set', 'pass.abc.reset_fanout=8'])
-assert both['qor']['place']['reset_tree']['nets'] == 0, both['qor']['place']['reset_tree']  # the mapper's tree already bounds it
 # A flop with a clear AND a preset (ASAP7 DFFASRHQN-shaped) ties one pin inactive: the tie is not a reset net, in the seed
 # placement or in the final one that re-reads the placed graph (timing_driven=true places twice).
 dual_lib = (libdir / 'sky130hd.lib').read_text()
@@ -119,10 +111,73 @@ def tie_fanout(name):
 plain = run_dual('dual_off', ['--set', 'synth.place.timing_driven=true'])
 tied = tie_fanout('dual_off')
 assert tied >= 48, tied  # 24 + 24 inactive pins, each on a local tie
-treed = run_dual('dual_tree', ['--set', 'synth.place.timing_driven=true', '--set', 'synth.place.reset_fanout=8'])
-assert tie_fanout('dual_tree') == tied, (tie_fanout('dual_tree'), tied)
-assert treed['qor']['place']['reset_tree']['buffers'] > 0 and reset_loads('dual_tree', ('RESET_B', 'SET_B'))[0] <= 8
 for bad in ['1', '-4', 'x', '2.5', '']:
     refused = run('bad_' + (bad or 'empty').replace('.', '_'), ['--set', 'synth.place.reset_fanout=' + bad], False)
     assert 'reset_fanout' in json.dumps(refused['error']), refused['error']
-print('placement: reset_fanout tree bounds the flat reset net, LEC-proven, default off, malformed values refused')
+print('placement: reset networks preserved by default; tree construction and reset repair refused')
+
+# A registered synchronous reset loses its reset-pin connection during mapping.
+# Synthesis role metadata must keep its Q network excluded automatically, even
+# though the physical sinks are ordinary data-logic pins.
+source.write_text("""module dut(input clk, input trigger, input [7:0] d, output reg [7:0] q);
+  reg reset_stage;
+  always @(posedge clk) reset_stage <= trigger;
+  always @(posedge clk) if (reset_stage) q <= 8'b0; else q <= d;
+endmodule
+""")
+auto = run('registered_auto', [])['qor']['place']['prects_controls']
+assert not auto['override'], auto
+# Mapping may attach the role to a buffer on Q rather than directly to Q.
+# Independently walk only the fixture's buffer/inverter links, then require
+# the reported metadata root to belong to that registered-reset network.
+placed = (root / 'registered_auto_def' / 'out.def').read_text()
+components = dict(re.findall(r'^- (\S+) (\S+) \+ PLACED', placed, re.M))
+net_text = re.search(r'^NETS \d+ ;(.*?)^END NETS', placed, re.S | re.M).group(1)
+nets = [set(re.findall(r'\(\s*(\S+)\s+(\S+)\s*\)', net)) for net in net_text.split(';') if '(' in net]
+reached = {('reset_stage', 'Q')}
+while True:
+    before = set(reached)
+    for net in nets:
+        if net & reached:
+            reached.update(net)
+    for inst, master in components.items():
+        output = {'sky130_fd_sc_hd__buf_1': 'X', 'sky130_fd_sc_hd__inv_1': 'Y'}.get(master)
+        if output and ({(inst, 'A'), (inst, output)} & reached):
+            reached.update({(inst, 'A'), (inst, output)})
+    if reached == before:
+        break
+assert auto['pins'] and all(tuple(pin.rsplit(':', 1)) in reached for pin in auto['pins']), (auto, reached)
+assert auto['ports'] == ['clk'], auto
+assert auto['ignored_nets'] == 1 + sum(bool(net & reached) for net in nets), (auto, reached)
+# Re-open the same incremental workdir: persisted mapped metadata is part of the contract.
+warm = run('registered_auto', [])['qor']['place']['prects_controls']
+assert warm == auto, (warm, auto)
+override = run('registered_override', ['--set', 'synth.place.control_ports=trigger'])['qor']['place']['prects_controls']
+assert override['override'] and override['ports'] == ['trigger'] and override['pins'] == [], override
+assert override['ignored_nets'] < auto['ignored_nets'], (override, auto)
+
+# Independent reset conditionals in a shared clocked block retain the same
+# semantic reset role as separate always blocks (common in generated RTL).
+source.write_text("""module dut(input clk, input reset, input [7:0] d,
+  output reg [7:0] q, output reg [7:0] p);
+  always @(posedge clk) begin
+    if (reset) q <= 0; else q <= d;
+    if (reset) p <= 0; else p <= ~d;
+  end
+endmodule
+""")
+shared = run('shared_reset', [])['qor']['place']['prects_controls']
+assert shared['ports'] == ['clk', 'reset'] and not shared['override'], shared
+
+# Later writes override earlier nonblocking writes. Such a block cannot be
+# annotated with a reset that would change this last-write-wins behavior.
+source.write_text("""module dut(input clk, input reset, input [7:0] d,
+  output reg [7:0] q);
+  always @(posedge clk) begin
+    if (reset) q <= 0; else q <= d;
+    if (d[0]) q <= d; else q <= ~d;
+  end
+endmodule
+""")
+overwritten = run('overwritten_reset', [])['qor']['place']['prects_controls']
+assert overwritten['ports'] == ['clk'] and not overwritten['pins'], overwritten

@@ -15,6 +15,7 @@
 #include "graph_library_singleton.hpp"
 #include "node_util.hpp"
 #include "pass/opentimer/pass_opentimer.hpp"
+#include "pass/place/prects_networks.hpp"
 #include "pass/place/repair.hpp"
 #include "pass/place/resize_engine.hpp"
 #include "rapidjson/document.h"
@@ -41,8 +42,13 @@ Eprp_var timing_options(const std::string& liberty, const std::string& sdc, cons
   options.set_stage_labels(options.dict);
   return options;
 }
-pl::Timing_feedback evaluate_timing(const pl::Result& placed, livehd::opentimer::Physical_session& session, unsigned& serial) {
+pl::Timing_feedback evaluate_timing(const pl::Result& placed, livehd::opentimer::Physical_session& session, unsigned& serial,
+                                    const ph::Technology* placement_tech = nullptr) {
   ++serial;
+  if (placement_tech) {
+    const auto controls = pl::prects_networks(*placement_tech, placed.floorplan, placed.prects);
+    return pl::prects_data_timing(session.evaluate(placed.graph, placed.parasitics, controls.timing_cuts), controls);
+  }
   return session.evaluate(placed.graph, placed.parasitics);
 }
 
@@ -280,6 +286,13 @@ int main(int argc, char** argv) {
         options.eco_trace_cells.emplace_back(name.GetString(), name.GetStringLength());
       }
     }
+    bool prects_timing = false;
+    boolean_option("prects_timing", prects_timing);
+    if (prects_timing
+        && (!(config.HasMember("timing_only") && config["timing_only"].GetBool())
+            || (config.HasMember("source_def") && config["source_def"].GetBool()))) {
+      throw std::invalid_argument("prects_timing requires timing_only and a mapped LGraph with synthesis control metadata");
+    }
     bool retained_repair = false;
     boolean_option("retained_repair", retained_repair);
     if (retained_repair
@@ -339,6 +352,13 @@ int main(int argc, char** argv) {
       options.timing_max_weight = config["timing_max_weight"].GetDouble();
     }
     boolean_option("satlegalize", options.satlegalize);
+    boolean_option("terminal_legalize", options.terminal_legalize);
+    auto& terminal_options = options.terminal_legalize_options;
+    boolean_option("legalize_joint_minimize_total", terminal_options.joint_minimize_total);
+    number_option("legalize_remainder_wire_weight", terminal_options.remainder_wire_weight);
+    number_option("legalize_max_density", terminal_options.max_density);
+    number_option("legalize_critical_fraction", terminal_options.critical_fraction);
+    number_option("legalize_local_pair_fraction", terminal_options.local_pair_fraction);
     if (config.HasMember("satlegalize_backend")) {
       options.satlegalize_options.backend = text("satlegalize_backend");
     }
@@ -355,6 +375,17 @@ int main(int argc, char** argv) {
       value = config[key].GetUint();
     };
     auto& sat_options = options.satlegalize_options;
+    sat_limit("legalize_padding_sites", terminal_options.padding_sites);
+    sat_limit("legalize_padding_max_extra_rows", terminal_options.padding_max_extra_rows);
+    sat_limit("legalize_critical_padding_sites", terminal_options.critical_padding_sites);
+    sat_limit("legalize_critical_fanin_depth", terminal_options.critical_fanin_depth);
+    sat_limit("legalize_sat_milliseconds", terminal_options.sat_milliseconds);
+    sat_limit("legalize_sat_conflicts", terminal_options.sat_conflicts);
+    sat_limit("legalize_candidates", terminal_options.candidates);
+    sat_limit("legalize_pair_move_sites", terminal_options.pair_move_sites);
+    sat_limit("legalize_pair_move_rows", terminal_options.pair_move_rows);
+    sat_limit("legalize_critical_pair_limit", terminal_options.critical_pair_limit);
+    sat_limit("legalize_local_pair_limit", terminal_options.local_pair_limit);
     boolean_option("satlegalize_route_grid", sat_options.route_grid);
     boolean_option("satlegalize_route_guidance", sat_options.route_guidance);
     if (config.HasMember("satlegalize_route_peak_floor")) {
@@ -468,11 +499,13 @@ int main(int argc, char** argv) {
         }
       }
     }
-    options.liberty      = text("liberty");
-    options.tech_rc_file = text("tech_rc");
-    options.output_dir   = root + "/initial";
-    options.floorplan    = text("def");
-    options.previous     = std::make_shared<ph::Floorplan>(ph::read_def(options.floorplan));
+    options.liberty       = text("liberty");
+    options.control_ports = config.HasMember("control_ports") ? text("control_ports") : "";
+    options.tech_rc_file  = text("tech_rc");
+    options.tracks_file   = config.HasMember("tracks") ? text("tracks") : "";
+    options.output_dir    = root + "/initial";
+    options.floorplan     = text("def");
+    options.previous      = std::make_shared<ph::Floorplan>(ph::read_def(options.floorplan));
     for (const auto& path : config["lefs"].GetArray()) {
       options.lefs.emplace_back(path.GetString());
     }
@@ -533,16 +566,37 @@ int main(int argc, char** argv) {
       }
       source = io->get_graph();
     }
+    hhds::GraphLibrary seeded_source_library;
     if (config.HasMember("seed_def_positions") && config["seed_def_positions"].GetBool()) {
-      std::map<std::string, Ann_place> seeds;
+      // Resolve hierarchical physical names through the normal retained-frame
+      // importer. Updating root nodes alone misses nested cells and leaves
+      // their old row orientations on an otherwise exact coordinate replay.
+      auto restore_options                                 = options;
+      restore_options.retain_placement                     = true;
+      restore_options.output_dir                           = root + "/seed_graph";
+      auto                                        restored = pl::place(*source, seeded_source_library, restore_options);
+      std::map<std::string, const ph::Component*> seeds;
       for (const auto& cell : options.previous->components) {
-        seeds.emplace(cell.name, cell.place);
+        seeds.emplace(cell.name, &cell);
       }
-      for (auto node : source->body().nodes()) {
-        if (const auto it = seeds.find(std::string(node.get_name())); it != seeds.end()) {
-          node.attr(livehd::attrs::place).set(it->second);
+      if (restored.floorplan.components.size() != seeds.size()) {
+        throw std::runtime_error("DEF seed changed the mapped component count");
+      }
+      for (const auto& cell : restored.floorplan.components) {
+        const auto old = seeds.find(cell.name);
+        if (old == seeds.end() || cell.macro != old->second->macro || cell.place.x != old->second->place.x
+            || cell.place.y != old->second->place.y || cell.place.orientation != old->second->place.orientation) {
+          throw std::runtime_error("DEF seed failed to preserve mapped component geometry: " + cell.name);
         }
       }
+      source = std::move(restored.graph);
+    }
+    bool restart_seed_def = false;
+    boolean_option("restart_seed_def", restart_seed_def);
+    if (restart_seed_def) {
+      // The restart seed is the production GP coordinate initialization path;
+      // node attributes alone do not select it for a fresh placement run.
+      options.restart_seed = options.previous;
     }
     hhds::GraphLibrary placed_library;
     if (floorplan_mode || (config.HasMember("cell_place") && config["cell_place"].GetBool())) {
@@ -680,7 +734,7 @@ int main(int argc, char** argv) {
       livehd::opentimer::Physical_session timing_session(timing_options(options.liberty, sdc, top));
       options.whatif            = &timing_session.whatif();
       unsigned     serial       = 0;
-      const auto   raw_evaluate = [&](const pl::Result& placed) { return evaluate_timing(placed, timing_session, serial); };
+      const auto   raw_evaluate = [&](const pl::Result& placed) { return evaluate_timing(placed, timing_session, serial, &tech); };
       pl::Evaluate evaluate     = raw_evaluate;
       const auto   start        = std::chrono::steady_clock::now();
       auto         seed_options = options;
@@ -724,9 +778,9 @@ int main(int argc, char** argv) {
         };
       }
       const auto        timing_rounds = config.HasMember("timing_rounds") ? config["timing_rounds"].GetUint() : 0;
-      const bool        run_resize    = config.HasMember("resize") && config["resize"].GetBool();
+      const bool        run_resize    = !options.terminal_legalize && config.HasMember("resize") && config["resize"].GetBool();
       pl::Repair_result refined;
-      if (timing_rounds) {
+      if (timing_rounds && !options.terminal_legalize) {
         refined = pl::timing_place(std::move(state), options, evaluate, timing_rounds);
       } else {
         refined.placed = std::move(state);
@@ -974,7 +1028,9 @@ int main(int argc, char** argv) {
     unsigned                            serial = 0;
     livehd::opentimer::Physical_session timing_session(timing_options(options.liberty, sdc, top));
     options.whatif      = &timing_session.whatif();
-    const auto evaluate = [&](const pl::Result& placed) { return evaluate_timing(placed, timing_session, serial); };
+    const auto evaluate = [&](const pl::Result& placed) {
+      return evaluate_timing(placed, timing_session, serial, prects_timing ? &tech : nullptr);
+    };
     if (options.retain_placement && (!config.HasMember("export_rc") || config["export_rc"].GetBool())) {
       std::ofstream(root + "/parasitics.json") << ph::serialize_parasitics(*state.parasitics);
     }
@@ -1017,6 +1073,8 @@ int main(int argc, char** argv) {
           json.Null();
         }
       };
+      json.Key("prects_filtered");
+      json.Bool(prects_timing);
       field("time_unit_ps", initial.time_unit_ps);
       field("max_delay", initial.delay);
       field("wns", initial.wns);

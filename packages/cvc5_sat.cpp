@@ -88,6 +88,20 @@ int lhd_sat_solve(void* opaque, const int* assumptions, unsigned count, unsigned
   const auto result = s.cms->solve(&lits);
   return result == CMSat::l_True ? 10 : result == CMSat::l_False ? 20 : 0;
 }
+int lhd_sat_failed(void* opaque, int literal) {
+  auto& s = *static_cast<Lhd_sat*>(opaque);
+  if (s.cad) {
+    return s.cad->failed(literal);
+  }
+  // CryptoMiniSat returns a clause of negated failed assumptions.
+  const CMSat::Lit negated(static_cast<unsigned>(std::abs(literal) - 1), literal > 0);
+  for (const auto lit : s.cms->get_conflict()) {
+    if (lit == negated) {
+      return 1;
+    }
+  }
+  return 0;
+}
 int lhd_sat_value(void* opaque, unsigned var) {
   auto& s = *static_cast<Lhd_sat*>(opaque);
   if (s.cad) {
