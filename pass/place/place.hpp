@@ -142,6 +142,8 @@ struct Options {
   double                               fixed_macro_overlap_weight = 0;
   double                               wirelength_gamma_end       = .05;  // experimental; existing smoothing schedule by default
   int                                  detailed_iterations        = 2;
+  bool                                 macro_detailed_place       = true;  // cell detail while macros are movable
+  bool                                 final_independent_timing   = false;  // synthesis weights, then density-gated final STA
   bool                                 exact_cell_density         = false;
   bool                                 density_upper_bound        = false;  // experimental filler-free upper-bound penalty
   int                                  min_iterations             = 40;

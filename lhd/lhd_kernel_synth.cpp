@@ -281,6 +281,8 @@ livehd::placement::Options placement_options(const Options& opts) {
   out.post_density_factor   = integer("place.post_density_factor", "4");
   out.convergence_tolerance = number("place.convergence_tolerance", "0.01");
   out.detailed_iterations   = integer("place.detailed_iterations", "2");
+  out.macro_detailed_place  = truthy(synth_set(opts, "place.macro.detailed", "true"));
+  out.final_independent_timing = truthy(synth_set(opts, "place.final.independent_timing", "false"));
   out.satlegalize           = truthy(synth_set(opts, "place.satlegalize", "false"));
   auto& sat                 = out.satlegalize_options;
   sat.backend               = synth_set(opts, "place.satlegalize.backend", "cadical");

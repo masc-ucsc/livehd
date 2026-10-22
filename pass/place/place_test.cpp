@@ -229,6 +229,94 @@ TEST(Placement, ResynthesisRestartSeedsCoordinatesWithoutLockingCellsOrMacros) {
     EXPECT_TRUE(now->place.x != old.place.x || now->place.y != old.place.y) << old.name;
   }
 }
+TEST(Placement, MacroDetailCanBeSkippedWithoutSkippingLegalizationOrFinalDetail) {
+  const auto root = std::filesystem::path(std::getenv("TEST_TMPDIR")) / "macro_detail";
+  std::filesystem::create_directories(root);
+  std::ifstream lef_input("inou/lefdef/tests/data/sky130hd.lef");
+  std::string   lef{std::istreambuf_iterator<char>(lef_input), {}};
+  lef.replace(lef.find("CLASS CORE"), std::string("CLASS CORE").size(), "CLASS BLOCK");
+  const auto lef_path = (root / "macro.lef").string();
+  std::ofstream(lef_path) << lef;
+  hhds::GraphLibrary source;
+  auto               io = source.create_io("macro_detail");
+  io->add_input("a", 0);
+  io->add_output("y", 0);
+  io->set_bits("a", 1);
+  io->set_bits("y", 1);
+  auto graph  = io->create_graph();
+  auto signal = graph->get_input_pin("a");
+  gu::set_bits(signal, 1);
+  for (int i = 0; i < 3; ++i) {
+    auto cell_io = source.create_io(i ? "sky130_fd_sc_hd__buf_1" : "sky130_fd_sc_hd__inv_1");
+    cell_io->add_input("A", 0);
+    cell_io->add_output(i ? "X" : "Y", 0);
+    auto cell = gu::create_typed_node(*graph, Ntype_op::Sub);
+    cell.set_subnode(cell_io);
+    cell.set_name("cell" + std::to_string(i));
+    cell.create_sink_pin("A").connect_driver(signal);
+    signal = cell.create_driver_pin(i ? "X" : "Y");
+    gu::set_bits(signal, 1);
+  }
+  graph->get_output_pin("y").connect_driver(signal);
+  for (const auto& [detail, independent] : {std::pair{true, false}, std::pair{false, false}, std::pair{false, true}}) {
+    auto options                 = plain_options();
+    options.lefs                 = {"inou/lefdef/tests/data/sky130hd.tlef", lef_path};
+    options.output_dir           = (root / (detail ? "enabled" : independent ? "independent" : "disabled")).string();
+    options.core                 = {0, 0, 30, 30};
+    options.iterations           = 20;
+    options.bins                 = 2;
+    options.snapshots            = true;
+    options.final_cells          = true;
+    options.macro_detailed_place = detail;
+    options.final_independent_timing = independent;
+    options.macro_timing_interval = 10;
+    options.net_weights["cell0:Y"] = 2;
+    bool macro_complete = false, checked_final_weights = false;
+    double macro_weight = 0;
+    options.fp_evaluate = [&](const Result& checkpoint) {
+      if (macro_complete && !checked_final_weights) {
+        EXPECT_DOUBLE_EQ(checkpoint.net_weights.at("cell0:Y"), independent ? 2 : macro_weight);
+        checked_final_weights = true;
+      }
+      Timing_feedback timing;
+      timing.pins["cell1:A"].slack = -10;
+      return timing;
+    };
+    physical::Floorplan macro_frame;
+    options.after_stage = [&](Placement_stage stage, const Result& result) {
+      EXPECT_NO_THROW(check_legality(physical::read_lef(options.lefs), result.floorplan));
+      if (stage == Placement_stage::macro) {
+        macro_frame = result.floorplan;
+        macro_weight = result.net_weights.at("cell0:Y");
+        EXPECT_GT(macro_weight, 2);
+        macro_complete = true;
+      }
+      return false;
+    };
+    hhds::GraphLibrary placed;
+    const auto result = place(*graph, placed, options);
+    ASSERT_FALSE(macro_frame.components.empty());
+    EXPECT_TRUE(checked_final_weights);
+    EXPECT_TRUE(std::filesystem::exists(options.output_dir + "/macro/after_legalization.def"));
+    EXPECT_EQ(std::filesystem::exists(options.output_dir + "/macro/after_detailed.def"), detail);
+    EXPECT_TRUE(std::filesystem::exists(options.output_dir + "/after_detailed.def"));
+    const auto handoff = physical::read_def(options.output_dir + "/macro/fixed.def");
+    EXPECT_EQ(handoff.components.size(), detail ? 3 : 1);
+    EXPECT_EQ(result.floorplan.components.size(), 3);
+    if (!detail) {
+      EXPECT_TRUE(handoff.nets.empty());
+    }
+    const auto before = std::find_if(macro_frame.components.begin(), macro_frame.components.end(),
+                                     [](const auto& c) { return c.name == "cell0"; });
+    const auto after = std::find_if(result.floorplan.components.begin(), result.floorplan.components.end(),
+                                    [](const auto& c) { return c.name == "cell0"; });
+    ASSERT_NE(before, macro_frame.components.end());
+    ASSERT_NE(after, result.floorplan.components.end());
+    EXPECT_EQ(before->place.x, after->place.x);
+    EXPECT_EQ(before->place.y, after->place.y);
+    EXPECT_EQ(before->place.orientation, after->place.orientation);
+  }
+}
 TEST(Placement, RepulsionControlsRejectUnsupportedH2dCombination) {
   hhds::GraphLibrary source, scratch;
   auto               io      = source.create_io("repulsion_validation");

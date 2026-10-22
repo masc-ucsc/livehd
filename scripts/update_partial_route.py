@@ -47,6 +47,95 @@ def cell(text, small=''):
     return f'<td>{text}' + (f'<small>{small}</small>' if small else '') + '</td>'
 
 
+def performance_snapshot():
+    """Keep latest-source speed measurements separate from route results."""
+    base = ROOT / 'tmp/remote_sync_20261022'
+    rows = []
+    for design in ('cnn', 'coralnpu'):
+        for variant in ('baseline', 'candidate'):
+            closed = base / design / variant / 'closed.json'
+            if not closed.is_file():
+                continue
+            data = json.loads(closed.read_text())
+            assert data['status'] == 'pass_cold_and_two_warm'
+            result = {r['stage']: r for r in data['results']}
+            assert len(result) == 3
+            cold, warm = result['cold'], result['warm2']
+            relative = str(closed.relative_to(ROOT / 'tmp'))
+            href = '../tmp/' + relative
+            rows.append('<tr>' + cell(design.upper() if design == 'cnn' else 'CoralNPU')
+                        + cell(variant)
+                        + cell(number(cold['run']['wall_s'], 2))
+                        + cell(number(warm['run']['wall_s'], 2))
+                        + cell('<a href="' + escape(href, quote=True) + '">Closed three-run evidence</a>',
+                               'Warm1 and warm2 DEF hashes match cold') + '</tr>')
+    if not rows:
+        return ''
+    return ('<h2>Latest-source Coral / CNN speed study</h2>'
+            '<p>LiveHD e94655bb7, DREAMPlace ac995f900, and published OpenTimer shared-wire-response '
+            'optimization 7718c2866. FP plan is disabled, macro and final placement are enabled, '
+            'and incremental synthesis and resynthesis remain enabled. Each build has its own fresh '
+            'workdir: cold, warm1, then authoritative warm2. Measurements include perf record/stat '
+            'on a shared host; these are RTL-to-preCTS timings and do not establish route parity.</p>'
+            '<div class="scroll"><table><thead><tr><th>Design</th><th>Build</th><th>Cold wall (s)</th>'
+            '<th>Warm2 wall (s)</th><th>Validation</th></tr></thead><tbody>' + ''.join(rows)
+            + '</tbody></table></div>'
+            '<p>The CNN baseline contains all 65 expected SRAMs. Its cold profile spends 18.42% '
+            'of sampled CPU cycles in expm1, 8.77% in detailed-placement global swap, 6.80% in '
+            'RC driver crossing, and 6.74% in OpenMP waiting. These are self sample shares, not '
+            'wall-time phase percentages. The OpenTimer change reuses the common wire ramp '
+            'inside each crossing sample while preserving arithmetic order and the coincident-pole '
+            'fallback. The numerical crossing regression passes exactly. Whole-flow speed and QoR '
+            'equivalence require a closed candidate comparison; pending candidates are omitted.</p>')
+
+
+def handoff_snapshot():
+    path = ROOT / 'tmp/remote_sync_20261022/liteeth_handoff/comparison.json'
+    if not path.is_file():
+        return ''
+    data = json.loads(path.read_text())
+    rows = []
+    for arm, row in data['rows'].items():
+        score = row['score']
+        rows.append('<tr>' + cell(arm)
+                    + cell(number(row['cold_wall_s'], 2))
+                    + cell(number(row['flow']['macro_source_seconds'], 2))
+                    + cell(number(row['flow']['final_cells_seconds'], 2))
+                    + cell(number(score['setup_wns_ps']) + ' / ' + number(score['setup_tns_ps']))
+                    + cell(number(score['hold_wns_ps']) + ' / ' + number(score['hold_tns_ps']))
+                    + cell(number(score['hpwl_um'], 1))
+                    + cell(number(row['handoff_bytes'] / 1024, 1)) + '</tr>')
+    if not rows:
+        return ''
+    notes = []
+    for arm, result in data['comparisons'].items():
+        notes.append(escape(arm) + ': cold wall change '
+                     + number(-100 * result['wall_reduction'], 2) + '%, CPU change '
+                     + number(-100 * result['CPU_reduction'], 2) + '%, instruction change '
+                     + number(-100 * result['instruction_reduction'], 2) + '%. Final DEF '
+                     + ('matches' if result['same_final_DEF'] else 'differs')
+                     + '; macro poses ' + ('match' if result['same_macros'] else 'differ')
+                     + '; IOs ' + ('match' if result['same_IOs'] else 'differ') + '.')
+    return ('<h2>LiteEth macro-to-final handoff experiment</h2>'
+            '<p>All arms use one frozen validated build and the same RTL, constraints, density, halo and '
+            'eight placement threads. FP plan is disabled; incremental synthesis and resynthesis remain '
+            'enabled. Baseline retains macro cell detail and weight inheritance. Nodetail skips macro '
+            'cell detail and exports only fixed/locked objects, IOs and frame geometry. Lean additionally '
+            'starts final with synthesis weights and gates its own timing refresh on density. Final '
+            'legalization and detailed placement remain enabled. Macro cell legalization is retained '
+            'for the existing legal resynthesis handoff; no extra post-macro timing solve was added.</p>'
+            '<div class="scroll"><table><thead><tr><th>Arm</th><th>Cold wall (s)</th>'
+            '<th>Macro (s)</th><th>Final cells (s)</th><th>Independent setup WNS / TNS (ps)</th>'
+            '<th>Independent hold WNS / TNS (ps)</th><th>HPWL (µm)</th><th>Handoff (KiB)</th>'
+            '</tr></thead><tbody>' + ''.join(rows) + '</tbody></table></div><p>'
+            + ' '.join(notes) + '</p><p>Stage timers describe the completed macro/final pair; cold wall '
+            'also includes earlier resynthesis restarts and subsequent timing refinement and repair. '
+            'Timing scores use fresh independent OpenROAD placement-RC analysis with clock, PG and '
+            'coverage checks. They are not routed timing or a frequency qualification. Cold plus two '
+            'warm runs verify stable DEF output. Perf measurements share the host with other jobs. '
+            '<a href="../tmp/remote_sync_20261022/liteeth_handoff/comparison.json">Comparison evidence</a>.</p>')
+
+
 def main():
     lite = read('liteeth/final_hold25_status.json')
     assert lite and lite['status'] == 'pass'
@@ -448,6 +537,8 @@ def main():
 <p>Timing values in the main table are final extracted results only. Pending entries are not zero and placement/GRT estimates are not substituted. A supported-frequency claim needs fresh extracted per-clock STA, consistent generated-clock relationships, IO budgets and timing exceptions, and explicit setup/hold reporting. CNN uses the shared ASAP7 RVT FF 0.77 V / 0 °C standard-cell corner with normalized SRAM models and fixed 10 ps IO budgets; this is not an all-corner frequency claim.</p>
 <p><code>perf record</code> and <code>perf stat</code> accompany the physical evaluations. Closed-stage wall times are shown with their scope; an in-progress job has only a timestamped observed lower bound. These jobs share a 32-CPU host with other evaluations/builds, so their wall times do not represent exclusive hardware. The LiteEth final-route numbers exclude upstream placement and research lineage: the separately retained selected-job ledgers total 5,818.296 s for LiveHD and 4,601.480 s for OpenROAD, excluding their shared 335.583 s cold input. They are not minimal production-flow runtimes. Performance improvements will be reported with any timing, geometry or routing changes.</p>
 <p>After the initial three routed evaluations, two additional HighTide designs are authorized. Existing FP-plan-disabled, macro/final-enabled and incremental-synthesis requirements continue to apply. <a href="../todo/livehd/3r-route.html">Detailed implementation and experiment history</a>.</p>
+@PERFORMANCE@
+@HANDOFF@
 <h2>Snapshot evidence</h2><p>Links refer to local evaluation artifacts; their SHA-256 prefixes identify the exact bytes used to render this snapshot.</p><ul>@SOURCES@</ul>
 </body></html>
 '''
@@ -456,7 +547,8 @@ def main():
                        'EY': f'{ey_last["violations"]:,}', 'VALIDATION': validation, 'SEED_ROWS': ''.join(seed_rows),
                        'PLACEMENT_ROWS': ''.join(placement_rows), 'CONTROL_ROWS': ''.join(control_rows),
                        'MACRO_TRIAL_ROWS': ''.join(macro_trial_rows),
-                       'MACRO_GAP_NOTE': gap_note, 'MARKER_NOTE': marker_note, 'SOURCES': sources}.items():
+                       'MACRO_GAP_NOTE': gap_note, 'MARKER_NOTE': marker_note, 'SOURCES': sources,
+                       'PERFORMANCE': performance_snapshot(), 'HANDOFF': handoff_snapshot()}.items():
         page = page.replace('@' + key + '@', value)
     output = ROOT / 'docs/partial_route.html'
     output.write_text(page)

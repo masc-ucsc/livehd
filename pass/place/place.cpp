@@ -413,6 +413,12 @@ std::string environment_key(const Options& o, const ph::Technology& tech) {
   if (o.detailed_iterations != 2) {
     h = hash_text(std::format("detail-iterations:{}", o.detailed_iterations), h);
   }
+  if (!o.macro_detailed_place) {
+    h = hash_text("macro-detail:false", h);
+  }
+  if (o.final_independent_timing) {
+    h = hash_text("final-independent-timing:true", h);
+  }
   if (o.wirelength_gamma_end != .05) {
     h = hash_text(std::format("wirelength-gamma-end:{}", o.wirelength_gamma_end), h);
   }
@@ -4771,7 +4777,7 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
       make_arrays(v, tech);
     }
     control.legalize       = options.full;
-    control.detailed_place = options.full;
+    control.detailed_place = options.full && (!movable_macros || options.macro_detailed_place);
     if (options.snapshots || v.centroids) {
       control.observer_interval = options.iterations + 1;
       control.observer          = [&](const dp::Design& snapshot, dp::PlacementStage stage, int iteration) {
@@ -5188,7 +5194,7 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
     if ((movable_macros || final_timing) && options.fp_evaluate && options.macro_timing_interval > 0) {
       control.checkpoint_interval      = options.macro_timing_interval;
       control.checkpoint_final         = true;
-      control.checkpoint_after_density = options.fp_timing_after_density;
+      control.checkpoint_after_density = options.fp_timing_after_density || (final_timing && options.final_independent_timing);
       control.checkpoint_observer      = [&](const dp::GpCheckpointSample& sample) { macro_checkpoint_forced = sample.forced; };
       control.checkpoint               = [&](const dp::Design& physical, int iteration) {
         const auto   started  = std::chrono::steady_clock::now();
@@ -7400,11 +7406,21 @@ Result place(hhds::Graph& source, hhds::GraphLibrary& library, const Options& re
     pin_status.emplace(terminal.name, terminal.status);
     terminal.status = Status::FIXED;
   }
+  if (!options.macro_detailed_place) {
+    // Final placement rebuilds movable cells/connectivity from source and
+    // imports only fixed poses. Pass the actual handoff, not provisional cells.
+    std::erase_if(macro.floorplan.components, [](const auto& cell) {
+      return cell.place.status != Status::FIXED && cell.place.status != Status::LOCKED;
+    });
+    macro.floorplan.nets.clear();
+  }
   const auto frame = macro_options.output_dir + "/fixed.def";
   ph::write_def(macro.floorplan, frame);
   auto cell_options             = final_cell_options(options);
   cell_options.stage_pin_status = std::move(pin_status);
-  cell_options.net_weights      = macro.net_weights;
+  if (!options.final_independent_timing) {
+    cell_options.net_weights = macro.net_weights;
+  }
   cell_options.fp_place         = false;
   cell_options.completed_stage  = Placement_stage::final;
   cell_options.restart_seed.reset();
@@ -7424,10 +7440,12 @@ Result place(hhds::Graph& source, hhds::GraphLibrary& library, const Options& re
   const auto end          = std::chrono::steady_clock::now();
   const auto seconds      = [](auto a, auto b) { return std::chrono::duration<double>(b - a).count(); };
   auto       text         = std::format(
-      R"({{"schema_version":1,"mode":"{}","centroid_snap":{},"macro_snap":{},"final_centroid_anchors":false,"fixed_macros":{},"macro_source_hpwl_um":{},"final_hpwl_um":{},"macro_source_seconds":{},"final_cells_seconds":{}}})",
+      R"({{"schema_version":1,"mode":"{}","centroid_snap":{},"macro_snap":{},"macro_detailed":{},"final_independent_timing":{},"final_centroid_anchors":false,"fixed_macros":{},"macro_source_hpwl_um":{},"final_hpwl_um":{},"macro_source_seconds":{},"final_cells_seconds":{}}})",
       options.fp_place ? "floorplan-macro-cells" : "macro-cells",
       options.fp_snap_enabled,
       options.macro_snap,
+      options.macro_detailed_place,
+      options.final_independent_timing,
       fixed_macros,
       [&] {
         rapidjson::Document q;

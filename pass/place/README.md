@@ -605,6 +605,25 @@ inherits available weights. Macro and final-cell GP refresh timing using
 `synth.place.macro.timing_interval` (default 50); setting it to zero disables those
 periodic checkpoints. Designs with no FP candidates have no FP pass/checkpoints.
 
+`synth.place.macro.detailed=false` skips detailed cell placement while macros
+are movable. The default is `true`. This experiment retains macro/cell
+legalization, timing feedback and the legal macro handoff; the final cell stage
+still runs the configured detailed-placement kernels. The macro stage then
+exports `after_legalization.def` and `out.def` without an `after_detailed.def`
+snapshot. Compare the resulting macro/IO decisions, timing and routing before
+adopting this speed tradeoff.
+The final handoff DEF then contains only fixed/locked components, IOs and frame
+geometry. Final placement rebuilds movable cells and connectivity from the
+mapped source, as in the original full-frame handoff.
+
+`synth.place.final.independent_timing=true` starts final placement with the
+original synthesis timing weights instead of the macro stage's weights. Final
+GP refreshes its own RC and criticalities only after density overflow reaches
+`synth.place.stop_overflow`. The end-of-GP checkpoint remains forced, and the
+existing final legalization/detail timing checks still run. The default is
+`false`. This separates the final-cell objective from the provisional macro
+cell placement while keeping synthesis criticalities active initially.
+
 Set `synth.place.fp.timing_after_density=true` to defer FP timing and repair
 while the actual GP overflow exceeds `synth.place.stop_overflow` (default 0.1). This uses the
 native halo-padded density model and rechecks at each timing interval; the
