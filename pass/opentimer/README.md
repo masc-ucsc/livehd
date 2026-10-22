@@ -366,6 +366,14 @@ violations, area, endpoint WNS/TNS and the path used by physical repair.
 No timing JSON is generated, written or read by this interface. Explicit
 standalone timing reports remain output artifacts, separate from feedback.
 
+Placement passes a third `data_exclusions` argument containing physical pins on
+excluded non-clock nets. The session masks those net timing arcs before propagating
+arrival/required times, so registered reset paths cannot dominate downstream data
+slack. Clock networks stay active for launch and capture. This analysis-only mask
+preserves net connectivity, physical capacitances and RC trees. Replacing the set
+or passing an empty set restores the SDC/Liberty case masks before applying the
+new exclusions; topology changes reapply them. Standalone STA remains unfiltered.
+
 The session loads Liberty and SDC once. Later evaluations apply gate repowering,
 buffer insertion/removal, connectivity changes and changed RC nets to the same
 timer. Cell identities use physical instance names, independent of scratch-graph

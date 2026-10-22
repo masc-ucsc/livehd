@@ -34,6 +34,34 @@ def run(name, extra, success=True, expect=None):
         assert expect in error['message'], (name, expect, error)
     return data
 
+native = run('terminal_default', ['--set', 'synth.place=true'])
+assert native['qor']['place']['legal'], native
+terminal = json.loads((root/'terminal_default/synth/place/terminal_legalize.json').read_text())
+assert terminal['remainder_wire_weight'] == 4 and terminal['joint_minimize_total'], terminal
+assert terminal['timed_nets'] > 0 and terminal['critical_nets'] > 0, terminal
+legal_timing = [json.loads(line) for line in (root/'terminal_default/synth/place/legalize_timing.jsonl').read_text().splitlines()]
+assert [entry['stage'] for entry in legal_timing] == ['global_placement', 'legalization'], legal_timing
+assert all(entry['wns'] is not None and entry['tns'] is not None for entry in legal_timing), legal_timing
+
+assert json.loads((root/'terminal_default/synth/place/route_options.json').read_text())['stages']['final']['model'] == 'rsmt'
+phases = [p['name'] for p in native['phases']]
+assert 'pass.place.post_synth_timing' in phases, phases
+assert 'pass.place.timing_driven' not in phases and 'pass.place.resize' not in phases, phases
+# Explicit router grids must survive the generated frame and DEF handoff.
+tracks = root / 'tracks.tcl'
+tracks.write_text('make_tracks met1 -x_offset .17 -x_pitch .34 -y_offset .17 -y_pitch .34\n')
+run('explicit_tracks', ['--set', 'synth.place=true', '--set', f'synth.place.tracks={tracks}'])
+track_def = (root/'explicit_tracks/synth/place/out.def').read_text()
+assert re.search(r'^TRACKS X 170 DO \d+ STEP 340 LAYER met1 ;$', track_def, re.M), track_def[:1000]
+assert re.search(r'^TRACKS Y 170 DO \d+ STEP 340 LAYER met1 ;$', track_def, re.M), track_def[:1000]
+native_debug = run('terminal_debug', ['--set', 'synth.place=true', '--set', 'synth.place.timing_driven=false',
+                                    '--set', 'synth.opentimer=false'])
+assert native_debug['qor']['place']['legal'], native_debug
+assert json.loads((root/'terminal_debug/synth/place/terminal_legalize.json').read_text())['timed_nets'] == 0
+run('terminal_gp_only', ['--set', 'synth.place=true', '--set', 'synth.place.mode=gp'])
+assert not (root/'terminal_gp_only/synth/place/terminal_legalize.json').exists()
+# The remaining cases exercise the explicitly selected legacy timing-refinement flow.
+base += ['--set', 'synth.place.legalize.terminal=false']
 timed = run('default', ['--set', 'synth.place=true'])
 q = timed['qor']['place']
 assert q['legal'] and q['preserve_imported_ties'] is False, q

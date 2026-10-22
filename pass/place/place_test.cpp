@@ -11,6 +11,7 @@
 #include <numeric>
 #include <random>
 #include <set>
+#include <sstream>
 
 #include "attrs.hpp"
 #include "gtest/gtest.h"
@@ -27,6 +28,7 @@ namespace {
 // Fixtures for the independent plain/H2D/ECO paths pin their original controls.
 Options plain_options() {
   Options o;
+  o.terminal_legalize  = false;  // These fixtures exercise the legacy final-placement paths.
   o.fp_place           = false;
   o.final_cells        = false;
   o.macro_snap         = false;
@@ -145,6 +147,71 @@ TEST(Placement, LegalStageSnapshotsUsePhysicalRowsAndPreserveFixedMirrors) {
     }
   }
 }
+TEST(Placement, TerminalLegalizerIsLastAndPreservesItsExactOutput) {
+  hhds::GraphLibrary source, flat;
+  auto               io = source.create_io("terminal_rows");
+  io->add_input("a", 0);
+  io->set_bits("a", 1);
+  io->add_output("y", 0);
+  io->set_bits("y", 1);
+  auto graph = io->create_graph();
+  auto inv   = source.create_io("sky130_fd_sc_hd__inv_1");
+  inv->add_input("A", 0);
+  inv->add_output("Y", 0);
+  auto signal = graph->get_input_pin("a");
+  gu::set_bits(signal, 1);
+  for (unsigned i = 0; i < 12; ++i) {
+    auto node = gu::create_typed_node(*graph, Ntype_op::Sub);
+    node.set_subnode(inv);
+    node.set_name("inv" + std::to_string(i));
+    node.create_sink_pin("A").connect_driver(signal);
+    signal = node.create_driver_pin("Y");
+    gu::set_bits(signal, 1);
+  }
+  graph->get_output_pin("y").connect_driver(signal);
+  auto options              = plain_options();
+  options.lefs              = {"inou/lefdef/tests/data/sky130hd.tlef", "inou/lefdef/tests/data/sky130hd.lef"};
+  options.output_dir        = std::string(std::getenv("TEST_TMPDIR")) + "/terminal_rows";
+  options.iterations        = 0;
+  options.snapshots         = true;
+  options.bins              = 4;
+  options.density           = .5;
+  options.utilization       = .15;
+  options.terminal_legalize = true;
+  options.terminal_legalize_options.critical_fraction = 0;
+  bool later_callback                                 = false;
+  options.after_stage                                 = [&](Placement_stage, const Result&) {
+    later_callback = true;
+    return true;
+  };
+  const auto result = place(*graph, flat, options);
+  EXPECT_FALSE(later_callback);
+  const auto tech = physical::read_lef(options.lefs);
+  EXPECT_NO_THROW(check_legality(tech, result.floorplan));
+  EXPECT_TRUE(std::filesystem::exists(options.output_dir + "/before_legalization.def"));
+  EXPECT_FALSE(std::filesystem::exists(options.output_dir + "/after_detailed.def"));
+  const auto snapshot = physical::read_def(options.output_dir + "/after_legalization.def");
+  ASSERT_EQ(snapshot.components.size(), result.floorplan.components.size());
+  for (const auto& cell : snapshot.components) {
+    const auto final = std::find_if(result.floorplan.components.begin(), result.floorplan.components.end(), [&](const auto& c) {
+      return c.name == cell.name;
+    });
+    ASSERT_NE(final, result.floorplan.components.end());
+    EXPECT_EQ(final->place.x, cell.place.x);
+    EXPECT_EQ(final->place.y, cell.place.y);
+    EXPECT_EQ(final->place.orientation, cell.place.orientation);
+    EXPECT_EQ(final->place.status, physical::Status::PLACED);
+  }
+  std::ifstream       file(options.output_dir + "/terminal_legalize.json");
+  std::string         text{std::istreambuf_iterator<char>(file), {}};
+  rapidjson::Document report;
+  report.Parse(text.c_str());
+  ASSERT_FALSE(report.HasParseError());
+  for (const auto& bin : report["bins"].GetArray()) {
+    EXPECT_LE(bin["after_density"].GetDouble(), .8 + 1e-8);
+  }
+}
+
 TEST(Placement, ResynthesisRestartSeedsCoordinatesWithoutLockingCellsOrMacros) {
   const auto root = std::filesystem::path(std::getenv("TEST_TMPDIR")) / "restart_seed";
   std::filesystem::create_directories(root);
@@ -165,9 +232,12 @@ TEST(Placement, ResynthesisRestartSeedsCoordinatesWithoutLockingCellsOrMacros) {
   gu::set_bits(signal, 1);
   for (int i = 0; i < 3; ++i) {
     const auto master  = i ? "sky130_fd_sc_hd__buf_1" : "sky130_fd_sc_hd__inv_1";
-    auto       cell_io = source.create_io(master);
-    cell_io->add_input("A", 0);
-    cell_io->add_output(i ? "X" : "Y", 0);
+    auto       cell_io = source.find_io(master);
+    if (!cell_io) {
+      cell_io = source.create_io(master);
+      cell_io->add_input("A", 0);
+      cell_io->add_output(i ? "X" : "Y", 0);
+    }
     auto cell = gu::create_typed_node(*graph, Ntype_op::Sub);
     cell.set_subnode(cell_io);
     cell.set_name("cell" + std::to_string(i));
@@ -400,6 +470,135 @@ TEST(Placement, TechnologyClockPinsAreExcludedOnlyFromPlacementCost) {
   }
   EXPECT_TRUE(preserved);
   EXPECT_EQ(result.floorplan.nets.size(), 2);
+  // With Liberty and an explicit mapped-reset root, every inverter segment is
+  // excluded, even though the ordinary LEF marks all pins SIGNAL.
+  options.lefs          = {"inou/lefdef/tests/data/sky130hd.tlef", "inou/lefdef/tests/data/sky130hd.lef"};
+  options.liberty       = "inou/lefdef/tests/data/sky130hd.lib";
+  options.control_ports = "clk";
+  options.output_dir    = (root / "explicit_control").string();
+  hhds::GraphLibrary reset_flat;
+  const auto         reset = place(*graph, reset_flat, options);
+  qor.Parse(reset.qor.c_str());
+  EXPECT_EQ(qor["hpwl_um"].GetDouble(), 0);
+  EXPECT_EQ(reset.floorplan.nets.size(), 2);
+  EXPECT_EQ(reset.floorplan.components.size(), result.floorplan.components.size());
+  // Automatic metadata on an internal signal works without any port override
+  // and survives the private flattening used by placement.
+  gu::add_signal_roles(y, attrs::signal_reset);
+  options.control_ports.clear();
+  options.output_dir = (root / "metadata_control").string();
+  hhds::GraphLibrary metadata_flat;
+  const auto         automatic = place(*graph, metadata_flat, options);
+  EXPECT_TRUE(automatic.prects.pins.contains("cell:Y"));
+  EXPECT_FALSE(automatic.prects.override_controls);
+  qor.Parse(automatic.qor.c_str());
+  EXPECT_EQ(qor["hpwl_um"].GetDouble(), 0);
+  EXPECT_EQ(automatic.floorplan.nets, reset.floorplan.nets);
+}
+TEST(Placement, TimingCheckpointsCarryConnectivityForAutomaticResetCuts) {
+  for (bool floorplan : {false, true}) {
+    hhds::GraphLibrary source, flat;
+    auto io = source.create_io("checkpoint_controls");
+    for (const auto& [name, port] : std::vector<std::pair<std::string, unsigned>>{{"clk", 0}, {"trigger", 1}, {"data", 2}}) {
+      io->add_input(name, port);
+      io->set_bits(name, 1);
+    }
+    io->add_output("y", 0);
+    io->set_bits("y", 1);
+    auto graph = io->create_graph();
+    for (const auto* name : {"clk", "trigger", "data"}) {
+      gu::set_bits(graph->get_input_pin(name), 1);
+    }
+    const auto cell = [&](const std::string&                                          name,
+                          const std::string&                                          master,
+                          const std::vector<std::pair<std::string, hhds::Pin_class>>& inputs,
+                          const std::string&                                          output) {
+      auto type = source.create_io(master);
+      for (size_t i = 0; i < inputs.size(); ++i) {
+        type->add_input(inputs[i].first, i);
+        type->set_bits(inputs[i].first, 1);
+      }
+      type->add_output(output, 0);
+      type->set_bits(output, 1);
+      auto node = gu::create_typed_node(*graph, Ntype_op::Sub);
+      node.set_subnode(type);
+      node.set_name(name);
+      for (const auto& [pin, driver] : inputs) {
+        node.create_sink_pin(pin).connect_driver(driver);
+      }
+      auto pin = node.create_driver_pin(output);
+      gu::set_bits(pin, 1);
+      return pin;
+    };
+    auto reset = cell("reset_stage",
+                      "sky130_fd_sc_hd__dfxtp_1",
+                      {
+                          {"CLK",     graph->get_input_pin("clk")},
+                          {  "D", graph->get_input_pin("trigger")}
+    },
+                      "Q");
+    gu::add_signal_roles(reset, attrs::signal_reset);
+    auto y = cell("mix",
+                  "sky130_fd_sc_hd__nand2_1",
+                  {
+                      {"A", graph->get_input_pin("data")},
+                      {"B",                        reset}
+    },
+                  "Y");
+    graph->get_output_pin("y").connect_driver(y);
+    auto options       = plain_options();
+    options.liberty    = "inou/lefdef/tests/data/sky130hd.lib";
+    options.lefs       = {"inou/lefdef/tests/data/sky130hd.tlef", "inou/lefdef/tests/data/sky130hd.lef"};
+    options.output_dir = std::string(std::getenv("TEST_TMPDIR")) + (floorplan ? "/checkpoint_fp" : "/checkpoint_final");
+    std::filesystem::create_directories(options.output_dir);
+    const auto sdc = options.output_dir + "/timing.sdc";
+    std::ofstream(sdc) << "create_clock -name clk -period 10 [get_ports clk]\n"
+                          "set_input_delay -clock clk 0 [all_inputs]\nset_output_delay -clock clk 0 [all_outputs]\n";
+    Eprp_var timing_options;
+    timing_options.dict = {
+        {"files", options.liberty + "," + sdc},
+        {  "top",       "checkpoint_controls"},
+        { "hier",                     "false"}
+    };
+    timing_options.set_stage_labels(timing_options.dict);
+    opentimer::Physical_session timer(timing_options);
+    const auto                  tech = physical::read_lef(options.lefs);
+    options.fp_pin_adjust            = floorplan;
+    options.fp_place                 = floorplan;
+    options.fp_iterations            = 2;
+    options.iterations               = 2;
+    options.bins                     = 4;
+    options.fp_resize                = false;
+    options.fp_timing_interval = options.macro_timing_interval = 1;
+    unsigned   calls = 0, floorplan_stages = 0;
+    const auto check = [&](const Result& state) {
+      EXPECT_EQ(state.floorplan.nets.size(), 5);
+      const auto controls = prects_networks(tech, state.floorplan, state.prects);
+      EXPECT_TRUE(controls.timing_cuts.contains("reset_stage:Q"));
+      EXPECT_TRUE(controls.timing_cuts.contains("mix:B"));
+      EXPECT_FALSE(controls.timing_cuts.contains("clk"));
+      EXPECT_FALSE(controls.timing_cuts.contains("mix:A"));
+      return controls;
+    };
+    options.fp_evaluate = [&](const Result& state) {
+      ++calls;
+      const auto controls = check(state);
+      auto       timing   = timer.evaluate(state.graph, state.parasitics, controls.timing_cuts);
+      EXPECT_TRUE(timing.pins.at("mix:A").arrival);
+      EXPECT_FALSE(timing.pins.at("mix:B").arrival);
+      EXPECT_TRUE(timing.pins.at("reset_stage:CLK").clock);
+      return prects_data_timing(timing, controls);
+    };
+    options.after_stage = [&](Placement_stage stage, const Result& state) {
+      check(state);
+      floorplan_stages += stage == Placement_stage::floorplan;
+      return false;
+    };
+    const auto result = place(*graph, flat, options);
+    EXPECT_GT(calls, 0);
+    EXPECT_EQ(floorplan_stages, floorplan ? 1 : 0);
+    EXPECT_EQ(result.floorplan.nets.size(), 5);
+  }
 }
 TEST(Placement, AlwaysTransparentLatchAliasesPreservePackedInputsAndSource) {
   // Missing gate, active-high true and active-low false all store no state.
@@ -424,6 +623,7 @@ TEST(Placement, AlwaysTransparentLatchAliasesPreservePackedInputsAndSource) {
     gu::setup_sink_by_name(latch, "din").connect_driver(a);
     auto q = latch.create_driver_pin(0);
     gu::set_bits(q, 2);
+    gu::add_signal_roles(q, attrs::signal_reset);
     const auto constant = [&](int value) { return gu::create_const(*graph, *Dlop::create_integer(value)); };
     if (mode) {
       gu::setup_sink_by_name(latch, "enable")
@@ -457,6 +657,8 @@ TEST(Placement, AlwaysTransparentLatchAliasesPreservePackedInputsAndSource) {
     } else {
       const auto result = place(*graph, flat, options);
       ASSERT_EQ(result.floorplan.components.size(), 1);
+      EXPECT_TRUE(result.prects.ports.contains("a[0]"));
+      EXPECT_TRUE(result.prects.ports.contains("a[1]"));
       bool connected = false;
       for (const auto& net : result.parasitics->nets) {
         if (net.driver == "a[1]") {
@@ -3004,6 +3206,8 @@ TEST(Placement, PlacementColorsUseLibertyRolesAndPinsMoveWithoutSta) {
   }
   hhds::GraphLibrary source, flat;
   auto               io = source.create_io("fp_colors");
+  io->add_input("clk", 1);
+  io->set_bits("clk", 1);
   io->add_input("in", 0);
   io->set_bits("in", 1);
   for (int i = 0; i < 2; ++i) {
@@ -3031,7 +3235,11 @@ TEST(Placement, PlacementColorsUseLibertyRolesAndPinsMoveWithoutSta) {
     gu::set_bits(output, 1);
     return output;
   };
-  const auto clock = inverter("clock_logic", input), enable = inverter("enable_logic", input);
+  // The clock must have a distinct source; a data branch of the same physical
+  // buffered clock is intentionally excluded from all placement edges.
+  auto clock_input = graph->get_input_pin("clk");
+  gu::set_bits(clock_input, 1);
+  const auto clock = inverter("clock_logic", clock_input), enable = inverter("enable_logic", input);
   const auto constant_data
       = inverter("constant_buffer2", inverter("constant_buffer1", gu::create_const(*graph, *Dlop::create_integer(0))));
   for (int i = 0; i < 2; ++i) {
@@ -3070,7 +3278,8 @@ TEST(Placement, PlacementColorsUseLibertyRolesAndPinsMoveWithoutSta) {
     o.fp_pin_interval       = 5;
     o.bins                  = 8;
     o.utilization           = .05;
-    const auto result       = place(*graph, flat, o);
+    hhds::GraphLibrary run_flat;
+    const auto         result = place(*graph, run_flat, o);
     EXPECT_NO_THROW(check_legality(physical::read_lef(o.lefs), result.floorplan));
     const auto read_json = [&](const std::string& name) {
       std::ifstream       file(dir / "out" / name);
@@ -3120,6 +3329,48 @@ TEST(Placement, PlacementColorsUseLibertyRolesAndPinsMoveWithoutSta) {
       EXPECT_EQ(it->y, t.y);
     }
   }
+  // Exercise both stage controls independently without a timing callback.
+  std::optional<physical::Floorplan> off_frame;
+  for (unsigned mask : {0U, 1U, 2U, 3U, 0U}) {
+    auto warped               = o;
+    warped.fp_warp.enabled    = mask & 1;
+    warped.macro_warp.enabled = mask & 2;
+    warped.fp_warp.bins = warped.macro_warp.bins = 4;
+    warped.fp_warp.iterations = warped.macro_warp.iterations = 1;
+    warped.macro_warp.updates                                = 2;
+    warped.fp_snap_enabled                                   = false;  // shifted unsnapped targets must survive handoff
+    warped.output_dir                                        = (dir / ("warp_" + std::to_string(mask))).string();
+    hhds::GraphLibrary warped_flat;
+    const auto         result = place(*graph, warped_flat, warped);
+    EXPECT_NO_THROW(check_legality(physical::read_lef(warped.lefs), result.floorplan));
+    EXPECT_EQ(result.floorplan.nets.size(), result.parasitics->nets.size());
+    EXPECT_EQ(std::filesystem::exists(warped.output_dir + "/fp_warp_field.json"), bool(mask & 1));
+    EXPECT_EQ(std::filesystem::exists(warped.output_dir + "/macro_warp_summary.json"), bool(mask & 2));
+    if (mask & 1) {
+      std::ifstream targets(warped.output_dir + "/fp_warp_targets.tsv");
+      std::string   line;
+      std::getline(targets, line);
+      while (std::getline(targets, line)) {
+        std::istringstream row(line);
+        std::string        name;
+        double             bx, by, wx, wy, sx, sy;
+        ASSERT_TRUE(bool(row >> name >> bx >> by >> wx >> wy >> sx >> sy));
+        EXPECT_DOUBLE_EQ(wx, sx);
+        EXPECT_DOUBLE_EQ(wy, sy);
+      }
+    }
+
+    if (!mask) {
+      if (!off_frame) {
+        off_frame = result.floorplan;
+      } else {
+        ASSERT_EQ(off_frame->components.size(), result.floorplan.components.size());
+        for (size_t n = 0; n < off_frame->components.size(); ++n) {
+          EXPECT_EQ(off_frame->components[n].place, result.floorplan.components[n].place);
+        }
+      }
+    }
+  }
   // Automatic IO uses its plain preview, independently of macro GP pressure.
   {
     auto io_options                      = o;
@@ -3163,8 +3414,9 @@ TEST(Placement, PlacementColorsUseLibertyRolesAndPinsMoveWithoutSta) {
   }
   o.floorplan = (dir / "fixed.def").string();
   physical::write_def(frame, o.floorplan);
-  o.output_dir     = (dir / "final").string();
-  const auto final = place(*graph, flat, o);
+  o.output_dir = (dir / "final").string();
+  hhds::GraphLibrary final_flat;
+  const auto         final = place(*graph, final_flat, o);
   EXPECT_FALSE(std::filesystem::exists(dir / "final/macro_pins.jsonl"));
   {
     std::ifstream       history_file(dir / "final/gp_history.json");
@@ -3191,7 +3443,8 @@ TEST(Placement, PlacementColorsUseLibertyRolesAndPinsMoveWithoutSta) {
   o.final_cells            = false;
   o.fp_evaluate            = [](const Result&) -> Timing_feedback { throw std::runtime_error("analysis invoked STA"); };
   o.output_dir             = (dir / "analysis").string();
-  const auto analysis      = place(*graph, flat, o);
+  hhds::GraphLibrary analysis_flat;
+  const auto         analysis = place(*graph, analysis_flat, o);
   EXPECT_TRUE(std::filesystem::exists(dir / "analysis/fp_placement_colors.json"));
   EXPECT_FALSE(std::filesystem::exists(dir / "analysis/fp_gp.json"));
   EXPECT_FALSE(std::filesystem::exists(dir / "analysis/gp_history.json"));
@@ -4005,11 +4258,16 @@ END LIBRARY
   options.final_cells = true;
   options.cache_dir.clear();
   options.output_dir = (dir / "staged").string();
+  options.fp_warp.enabled = options.macro_warp.enabled = true;
   hhds::GraphLibrary  staged_library;
   const auto          staged = place(*graph, staged_library, options);
   rapidjson::Document staged_qor;
   staged_qor.Parse(staged.qor.c_str());
   EXPECT_TRUE(staged_qor["cell_halo"]["active"].GetBool());
+  EXPECT_FALSE(staged_qor["fp_warpspace"].GetBool());
+  EXPECT_FALSE(staged_qor["macro_warpspace"].GetBool());
+  EXPECT_FALSE(std::filesystem::exists(options.output_dir + "/macro_warp_summary.json"));
+  EXPECT_FALSE(std::filesystem::exists(options.output_dir + "/fp_place.json"));
   std::ifstream       macro_report(options.output_dir + "/macro/qor.json");
   rapidjson::Document macro_qor;
   const std::string   macro_text{std::istreambuf_iterator<char>(macro_report), {}};

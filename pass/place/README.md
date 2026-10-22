@@ -136,6 +136,16 @@ vertical layer in LEF stack order. Sheet resistance/width and area/edge
 capacitance become ohm/um and fF/um. `synth.place.wire_rc=R,C` overrides both
 directions. RC enters OpenTimer in memory; there is no SPEF file round trip.
 This is a placement estimate, with no routing, via, coupling or clock-tree model.
+`synth.place.tracks=path/to/make_tracks.tcl` supplies the router's actual grid
+before macro alignment. It accepts literal `make_tracks LAYER -x_offset N
+-x_pitch N -y_offset N -y_pitch N` records in microns, with comments and line
+continuations; it does not execute Tcl. Every record requires all four values.
+An explicit file replaces imported tracks; without it, imported DEF tracks and
+then LEF pitch/offset data retain their existing precedence. File contents are
+included in placement-cache identity. Tracks are exported in DEF and must be
+preserved by the downstream flow rather than regenerated after changing DIEAREA.
+This matters when platform track offsets differ from technology LEF offsets.
+
 `synth.place.tech_rc=path/to/setRC.tcl` reads characterized technology data when
 RC is not supplied by LEF. The reader accepts literal `set_wire_rc` / `set_layer_rc`
 commands and explicit `set_cmd_units` / `set_units`; it parses data without running
@@ -687,13 +697,8 @@ approximate placement-RC timing decisions, with legal post-placement validation
 still performed by the existing outer flow.
 
 `synth.place.resize=true` enables bounded sizing and buffer optimization after
-legal placement. Logic upstream of a clock or reset pin is protected from every edit by
-default, so a reset net that fans out to thousands of registers (a reset synchronizer's
-mux driving all of a block's asynchronous resets) is left as mapped, one weak gate driving
-the whole net. `synth.place.repair.reset=true` lifts the protection for RESET pins and
-reset-named pins only (clock cones stay protected), letting the same sizing and fanout
-splitting treat the reset net like any data net, as a conventional pre-CTS flow does; it is
-part of the placement cache identity when floorplan resizing is on. Equivalent scalar logic cells must have the same ordered pin
+legal placement. Clock/reset distribution logic is protected from sizing, buffering and
+buffer bypass. `synth.place.repair.reset=true` is rejected. Equivalent scalar logic cells must have the same ordered pin
 interface, footprint and exact Liberty truth table (up to six inputs). Drive
 variants may have different widths. Sizing and redundant-buffer bypass run first,
 followed by a separate design-repair pass that splits fanout on FLUTE Steiner
@@ -701,20 +706,31 @@ branches and inserts repeaters along long edges. It uses Liberty input caps,
 available slew/cap/fanout limits and placement wire RC to plan candidates. Resolved
 physical pins preserve individual packed-bus bits through wiring aliases.
 
-`synth.place.reset_fanout=N` (default 0 = off; N >= 2) is the placement-time reset buffer tree that does not
-depend on timing acceptance. Right after the mapped hierarchy is flattened, every net that drives an asynchronous
-clear/preset pin of a Liberty flop and more than N cell pins in all (the synchronous-reset logic of the same signal
-included) is dealt out through the library's smallest placeable buffer, N pins per buffer, level by level until the
-driver carries at most N loads. Pins are grouped in instance-name order, which follows the source hierarchy, so a buffer
-serves neighbouring registers; graph outputs, bus-wiring aliases and macros keep their direct connection. It is pure
-fanout restructuring (a chain of identity buffers per pin, LEC-proven in `lhd_placement_reset_tree_smoke`) and
-idempotent, and it composes with `pass.abc.reset_fanout`, which builds the same tree inside each mapped region at
-read-back: the region trees bound a reset net where its registers sit in one region, this one bounds the sum across
-the many regions a reset reaches (a mux output driving 225 pins spread over fourteen regions of NVDLA partition_a).
-Unlike `synth.place.resize` it is not an accept/reject trial: the post-placement repair measures a change with a
-fresh STA and rejects a whole batch on any hold-WNS movement, and on NVDLA partition_m the forest that fixes the
-439-pin reset (3496 -> 1420 ps) was rejected for `hold_wns` in each trial that contained it. The `reset_tree` object of `qor.json`
-records `fanout`, `nets`, `sinks`, `added`, `levels` and `skipped` (clear/preset pins left alone because a multi-bit or multi-driver bus alias drives them) of the pass in that placement call and `buffers`, the tree cells present in the placed netlist (a timing-driven run builds the tree in its seed placement, so the final call adds none); the value is part of the placement cache identity.
+Pre-CTS placement does not construct reset trees. `synth.place.reset_fanout` defaults
+to 0; nonzero values are rejected. Existing mapped control cells remain physical
+objects for density, overlap, site and row legality.
+
+Clock/reset nets are excluded from GP wirelength, RUDY demand, connectivity-driven
+movement, IO attraction and legalization criticality/alignment. Synthesis preserves
+clock/reset roles on LGraph drivers through mapping, hierarchy flattening and cached
+artifacts, including registered synchronous resets folded into data muxes. Placement
+resolves these roles to physical pins. Liberty sequential and memory control pins,
+LEF CLOCK pins, and timing clock flags supply additional automatic role evidence.
+The exclusion propagates in both directions through characterized buffers/inverters
+and the clock path of ICGs, including sibling distribution branches. It stops at
+functional logic; an ICG enable remains data. No net or cell is deleted from DEF/STA.
+A nonempty `synth.place.control_ports=CLK,RESETN` explicitly replaces automatic
+clock/reset roots with the named ports; the default empty value uses automatic
+detection. There is no substring-based net-name inference. QoR `prects_controls`
+reports the resolved metadata roots, override status and excluded-net count.
+The native placement timing session also cuts non-clock control-net timing arcs
+before propagation; this prevents registered-reset arrivals from contaminating
+downstream data slack. It preserves clock launch/capture paths and physical loads.
+Standalone STA still reports the original SDC paths.
+The saved-DEF terminal replay accepts `liberty` and `control_ports`; a DEF alone
+does not carry LGraph signal-role metadata, and without Liberty, upstream buffer
+semantics cannot be recovered from LEF alone.
+
 
 New or resized cells first search row/site-aligned whitespace while all unchanged
 cells remain fixed. Obstacles are indexed as sorted intervals per row, including
@@ -1427,6 +1443,18 @@ placement and weight inputs for paired repair-policy experiments; this replay
 starts a new timing session and does not reproduce a prior run's incremental
 timing history.
 
+For terminal-legalizer replay, `legalize_sat_milliseconds` and
+`legalize_sat_conflicts` set the terminal solver budgets independently of the
+legacy `satlegalize_milliseconds` and `satlegalize_conflicts` options. Omitted
+values use the production defaults.
+
+For a read-only timing comparison, `timing_only:true` preserves all imported
+cell and IO coordinates and reports original-SDC timing. Add `prects_timing:true`
+to use the placement timer's clock/reset exclusions instead; this requires the
+mapped LGraph input (`lg`) so synthesis roles survive and cannot be combined
+with `source_def`. The report labels this analysis with `prects_filtered`.
+No sizing, buffering, legalization or timing-constraint edits run in this mode.
+
 `timing_calls.jsonl` separates each diagnostic timing callback into engine/report
 generation and feedback parsing, with report byte counts. Sizing/forest trial
 records include preparation, placement/RC and timing durations, upsize/downsize
@@ -1624,7 +1652,7 @@ option defaults to false; final cell placement has no centroid anchors.
 ### Steiner route feedback (`3r-route`)
 
 `synth.place.route.model=rudy|rsmt|auto|off` selects the estimator. The default
-remains `rudy`. `rsmt` uses FLUTE; `auto` starts each stage on RUDY and latches
+is `rsmt`. `rsmt` uses FLUTE; `auto` starts each stage on RUDY and latches
 RSMT after consecutive qualifying route samples. Each of `fp`, `macro`, and
 `final` has `synth.place.S.route.model=inherit` and these independent controls:
 
@@ -1714,8 +1742,8 @@ functional cells; final tie placement uses the users' oriented pin positions and
 row whitespace, with bounded equal-footprint exchanges when necessary. Exported DEF,
 physical nets, graph connectivity and repeated placement retain the local identities.
 Automatically generated IO positions remain movable in later FP/macro runs; only
-explicit `FIXED` constraints persist. Movable clocks use their sink distribution even
-though ideal clock nets are masked out of the ordinary GP wirelength objective.
+explicit `FIXED` constraints persist. Masked clock/reset nets do not attract IO pins
+toward their sinks.
 
 Inserted buffer trees inherit half of the original driver's excess weight above one,
 on every segment. Fresh STA replaces provisional priorities and immediately resets
@@ -1742,7 +1770,8 @@ cell priorities. Priority packing tries bounded nearby free row intervals and fa
 back atomically on fragmented/unsupported geometry. Weighted Abacus and detailed
 placement retain displacement protection. `legalize_priorities.tsv` records current
 slack, criticality, cost and GP anchors, including designs with positive slack only.
-`legalize_timing.jsonl` reports independent post-legalization/detail timing, and
+`legalize_timing.jsonl` reports independent post-legalization/detail timing and,
+for terminal legalization, the exact final-GP timing before any cell is legalized.
 `legalize_correction.jsonl` records correction acceptance. These controls do not select
 new global defaults; use matched saved GP inputs when evaluating their scaling.
 
@@ -1797,3 +1826,265 @@ forest-only repair. Both explicit scopes require the legacy engine. Absent
 `repair_scope` keeps the ordinary complete flow. A successful first full forest
 batch ends these modes; rejected batches retain the existing bounded bisection
 behavior.
+
+## Terminal legalization
+
+Terminal legalization defaults to `synth.place.legalize.terminal=true`. After final cell GP, the terminal
+legalizer selects timed critical nets, jointly solves eligible critical pairs,
+places the remaining selected critical cells, tries local pairs within a smaller
+occupancy budget, and redistributes the remaining cells across the full core.
+It replaces final detail placement, tie relocation and post-GP sizing/repair/
+resynthesis. Earlier GP/macro work still runs. OpenROAD receives ordinary PLACED
+cells and may modify them starting at CTS. Local-pair alignment is disabled by
+default (`local_pair_limit=0`). The SAT budget defaults to 1000 ms and 10000000
+conflicts, and the replay tool defaults to a 5 µm macro halo in each direction,
+matching native placement. Without timing feedback there are no timed nets to
+protect; geometric legalization still runs. GP-only mode omits legalization.
+For very small cores, native placement bounds the inherited routing-grid counts so bins
+are at least one row high and wide enough to hold the widest cell under the hard
+cap. Reports record the effective grid. This happens before critical selection
+and does not relax the density cap. Explicit replay/API terminal grids remain
+authoritative; the replay tool bounds its grid only when no bin counts are supplied.
+
+Controls under `synth.place.legalize.`:
+
+| Key | Default | Meaning |
+| --- | --- | --- |
+| `max_density` | 0.8 | Mandatory bin area cap; must exceed GP target density |
+| `critical_fraction` | 0.1 | Fraction of timed data nets selected globally |
+| `local_pair_fraction` | 0.5 | Local-pair occupancy budget relative to GP target |
+| `padding_sites` | 1 | Left/right reserved sites for remaining cells |
+| `remainder_wire_weight` | 4 | Optional timed-net HPWL cost for unprotected cells that must move |
+| `padding_max_extra_rows` | 0 | Optional stage-5 padding movement budget in row heights; zero retains mandatory padding |
+| `critical_padding_sites` | 0 | Left/right sites for protected critical cells |
+| `critical_fanin_depth` | 0 | Optional depth of untimed side-input net protection (0–8) |
+| `joint_minimize_total` | true | Minimize total displacement after the maximum-move objective |
+| `candidates` | 12 | SAT candidates per endpoint and anchor |
+| `pair_move_sites`, `pair_move_rows` | 4, 1 | Maximum candidate displacement from original GP coordinates |
+| `critical_pair_limit`, `local_pair_limit` | 256, 0 | Proposal budgets; zero disables that alignment stage |
+
+Step 1 uses one SAT instance for the entire selected set, with one candidate
+choice per physical cell. Every chosen cell has exactly one placement; overlapping
+candidates on different cells have an at-most-one clause, including cells on
+different nets. Endpoints retain their original center-bin membership and obey
+the configured movement radii. No endpoint is anchored or installed ahead of the
+joint solve. Alignment witnesses, cell obstructions, competing same-layer
+corridors and aggregate bin occupancy are checked together before commit.
+Initial candidate menus balance nearby poses across legal rows. If a pair has
+no valid alignment in those menus, its connected component is refined from the
+complete legal site/row domain inside the existing movement bounds and original
+bins. Oriented pin-access intervals index compatible layers/tracks; the normal
+pin-alignment predicate verifies actual track phase and obstructions. Refinement
+keeps the cheapest support for each endpoint pose on each track, so an alternate
+pose required by a neighboring net is not discarded just because the other
+endpoint can stay nearer its anchor. Track alternatives enter the final menus
+before redundant shifts on the same track. The configured candidate cap still
+applies to every physical cell. Fully supported components retain their original
+menus, and no cell is installed during refinement. All selected pairs still enter
+one joint SAT solve.
+
+Pin-alignment relations use bidirectional support clauses; overlapping endpoint
+poses cannot supply a witness. Common track segments also constrain other
+selected cells' obstructions before solving. The remaining geometric checks still
+validate every accepted model. Reports include `joint_menu_recovered` for pairs
+that gained a witness through refinement and `joint_pool_candidates` for the
+bounded-domain poses explored before final menu selection.
+
+Reports distinguish `joint_no_witness` (no compatible nonoverlapping pose pair in
+the sampled menus) from `joint_conflict_dropped` (a coupled conflict core).
+`joint_density_cuts`, `joint_obstruction_cuts`, and `joint_corridor_cuts` identify
+lazy validation failures; `joint_static_obstructions` counts cell-obstruction
+clauses on unavoidable track segments. None of these menu-based rejections proves
+that alignment is impossible over every legal site in the original box.
+
+The selected fraction is a ceiling. Step 1 reserves at most the GP target density
+per bin (including fixed cells), leaving the margin to the hard cap for later
+steps. A conflict core removes its least critical selected pair and re-solves all
+remaining placements; unrelated selections remain eligible. Dropped pairs still
+receive critical-cell legalization in step 2. Solver timeouts are recorded as
+unknown, not infeasibility. If the initial joint solve times out before finding a
+validated model, priority admission searches for an incumbent with one additional
+`sat_milliseconds` budget shared across all admission trials. Each trial re-solves
+all admitted cells together; accepted endpoints are not fixed between trials.
+`joint_admission_fallback` records this recovery and `joint_timeout_deferred`
+counts proposals deferred without a proof of conflict. After selection, bounded
+SAT trials minimize maximum endpoint displacement within the candidate menus; a timeout retains the last
+validated solution. The default `joint_minimize_total=true` adds a binary sum of
+endpoint displacement costs and minimizes it without changing the retained nets
+or increasing the maximum-move bound. Every cost trial is a joint placement
+solve. Reports distinguish a validated joint solution from completed maximum
+and total displacement optimization. The first implementation accepts only two-terminal nets in
+a common horizontal or vertical bin strip. Multi-terminal nets need explicit
+RSMT-edge evidence and currently proceed to step 2.
+
+The grid follows the active routing auxiliary grid. Usable capacity excludes
+macro/halo-covered row sites, and counts fixed CORE cells against the same cap.
+Cell area is apportioned across all overlapped bins. An optional side-input expansion also protects all movable endpoints of untimed
+data nets feeding selected cells; clocks and supplies remain excluded. This is
+useful to test slew effects that setup slack alone misses. Critical locks remain
+immutable during redistribution. If timing-order packing fails, only the
+unprotected remainder is restored and retried widest-first. If nearest positions
+still fragment the free rows, a final widest-first retry places padded footprints
+against gap/bin edges; mandatory cell spacing remains reserved. Search has no
+maximum displacement in bins. Failure is
+atomic; neither density nor padding is silently relaxed. The current row model
+supports compatible single-height CORE cells. An exhaustive site scan catches feasible interior positions missed by the fast
+menu before a fragmentation retry. Exhausting the current packing still does not
+prove infeasibility, even when aggregate area fits.
+
+`terminal_legalize.json` records settings, bin capacities/areas, stage counts,
+SAT outcomes, retries and displacement. `terminal_legalize_cells.tsv` records
+critical membership, stage, slack and before/after coordinates. Normal placement
+snapshots include the final-GP input and exact legalized output; fresh timing
+appears in `legalize_timing.jsonl` as `global_placement` and `legalization`
+records, allowing WNS/TNS comparison without another GP run. Pin alignment is a geometric access check;
+locked coordinates alone do not guarantee timing or routing success.
+
+`bazel run -c opt //tools:terminal_legalize -- config.json` replays a saved DEF.
+The JSON requires `def`, `lefs` (array) and `output`; optional controls use the
+unprefixed names above plus `bins_x`, `bins_y`, `target_density`, `backend`,
+`sat_conflicts`, `sat_milliseconds`, `macro_halo_x_um`, `macro_halo_y_um` and
+`timing`. Timing is a TSV with exact `instance:pin` or `instance/pin`, slack in
+ps, and clock flag 0/1. Use a fresh output directory for each configuration.
+The production pipeline obtains its own final-GP timing; a replay needs matching
+timing data for critical protection.
+
+See [the terminal legalization task](../../todo/livehd/3s-terminal-legalize.html)
+for evaluation protocol, measured regressions and remaining routed acceptance.
+
+The saturated-maze regressions use four- and eight-track channels with shared
+corner cells and independently shuffled initial positions. They verify full
+channel utilization, every alignment, original-bin membership, and absence of
+cell/corridor conflicts. A fifth path in a four-track maze must reduce selection
+without timing out. Run `bazel test -c opt //pass/place:terminal_legalize_test
+--test_filter='TerminalLegalize.*Maze*'`; `parallel_maze.svg` in the undeclared
+test outputs shows the actual before/after placement. See the
+[generated maze](../../todo/livehd/3s-terminal-maze.svg).
+
+Optional `padding_max_extra_rows=N` compares padded and unpadded destinations for
+unprotected stage-5 cells. It drops padding only when doing so saves more than N
+row heights of displacement, or makes an otherwise exhausted search succeed.
+The hard bin cap and previously reserved neighbors remain enforced. Critical
+cells and accepted local pairs are unaffected. Reports count relaxed cells and
+record each cell's actual padding; this experiment remains off by default.
+
+Optional `remainder_wire_weight=W` adds W times incident timed-data-net HPWL to
+stage-5 Manhattan displacement cost. Clocks and supplies are excluded. Only cells
+that cannot retain their original coordinates are considered; accepted critical
+and local-pair locks are unchanged. Pin offsets, row mirroring, multiple pins on
+the same cell, and current positions of already installed neighbors enter the
+cost. The geometric candidate search uses convex coordinate minima and safe
+lower bounds; hard bin capacity, padding and corridor checks still apply. This
+is a sequential relocation heuristic, not a global HPWL optimum or a timing
+model. Zero retains the displacement-only behavior.
+
+Timing and repair callbacks receive current mapped nets as well as component
+geometry, including after FP topology refreshes. Intermediate frames reconstruct
+connectivity from the placement view before automatic clock/reset classification;
+otherwise reset cuts would disappear while the placement objective still ignored
+those nets. Clock launch/capture timing and functional data paths remain timed.
+
+### Density-warp targets (experimental, opt-in)
+
+`synth.place.fp.warpspace=false` and `synth.place.macro.warpspace=false`
+independently enable density-warp guidance. Neither changes the final legalizer.
+The shared in-memory engine (`density_warp.cpp`) is also used by the standalone
+`//tools:warpspace` density-grid mode. It integrates actual standard-cell overlap,
+reserves the union of macro bodies, blends original and 32-bin-smoothed free-area
+density equally, and solves a boundary-fixed, no-fold mesh. Physical BLOCK macros
+(including native memory proxies and black-box memory models) supply samples;
+fixed macros reserve space but receive no pull.
+
+FP samples its provisional physical coordinates after FP GP, before snapping.
+Each distinct movable macro belongs to its deepest centroid candidate; stable
+candidate order breaks equal-depth ties. Each owning leaf averages its vectors.
+Ancestors average contributing leaf movements using sums/counts, not child
+averages. All target additions use the same original target snapshot; descendants
+never receive a second ancestor translation. Existing snap and frozen-target
+handoff then run normally, including the snap-disabled path. Cell coordinates,
+membership and physical connectivity are unchanged by the target shift.
+
+Macro GP replaces absolute virtual center targets at safe iteration boundaries,
+independently of STA. The native optimizer holds them between refreshes, adds a
+separate bounded distance-pull objective, and restarts momentum after replacement.
+The force uses the ordinary macro-force reference and retains displacement
+magnitude below one macro dimension. These pulls never enter physical nets,
+RUDY demand, STA, DEF, or final-cell placement. A topology replacement clears
+native pull state. Solver failure clears the affected pulls atomically; FP
+failure retains the original target snapshot and reports its reason.
+
+Each stage has `.warpspace.bins=16` (2..64), `.iterations=2` (1..6), and
+`.seconds=3` (per-axis solve limit, up to 30). The filter remains 32 bins,
+independent of solve-grid resolution. FP `.weight=1` scales target movement;
+macro `.weight=0.25` sets relative pull strength (both 0..1). Macro
+`.warmup=0.1` and `.updates=10` schedule at most ten attempts after the first
+10% of its iteration budget. Early convergence is never delayed to meet a quota.
+FP runs once. Zero macro weight skips field work and optimizer restarts.
+All enabled policy values and algorithm version enter placement
+reuse keys; disabled stages do no field work.
+
+`fp_warp_field.json` reports samples and transported-field diagnostics;
+`fp_warp_targets.tsv` records targets before warp, after warp and after snap,
+including hierarchy sums/counts. `macro_warp_<attempt>.json` records absolute
+endpoints, displacement, weight, status/time, density peak/p99/overflow, original
+grid arrays and conserved mass/occupied area. `macro_warp_summary.json` records
+actual attempts/successes, completed GP iterations, early termination and total
+callback time. A refresh at the final iteration is skipped because no optimizer
+step remains to consume it. Sample coordinates and endpoints use native DBU; field areas use µm².
+The adapter converts physical geometry to microns before solving so objective
+scales match the standalone prototype, then converts displacement back to DBU.
+Uniform power-of-two objective scaling bounds LP costs without changing relative
+penalties; feasibility tolerances remain unchanged. Field predictions describe transported density, not legal rigid
+macro placement; actual QoR must be measured from the completed stage.
+
+The optional macro `.warpspace.once_after_density=true` policy keeps its normal
+warmup but waits for native GP's physical density overflow to reach
+`stop_overflow`. It generates one set of absolute anchors and holds them for the
+remaining solve. A first refresh requires at least twenty iterations left;
+convergence then waits twenty optimizer steps after the change (the overall cap
+still applies). If density is reached too late, no anchors are generated.
+The summary reports the anchor iteration and number of iterations that consumed
+it. This avoids continually chasing a changing field and remains independent of
+STA checkpoints. The repeating policy remains the default when enabled.
+
+`synth.place.legalize.warpspace=false` independently controls standard-cell target
+warping inside terminal legalization. Critical and local-pair stages run first
+and lock their accepted poses. One density field then supplies preferred sites
+for only the remaining cells; fixed macros, critical cells, and accepted pair
+endpoints never move. The field includes all current cell demand and macro halo
+reservations. `.weight=1` scales displacement (0..1), and `.bins=16` chooses the
+solve grid (2..64); `.seconds=3` is the per-axis solver budget (up to 30). Actual geometry is always produced by the existing full-core
+candidate search with padding, corridor exclusions and hard bin capacity.
+The displacement objective and its pruning bounds consistently use the new
+preferred sites; original GP sites remain the reference for SAT domains and
+movement reporting. `remainder_wire_weight` still trades displacement against
+incident data-net wirelength. A failed field retains original preferred sites
+and reports its reason; an exhausted legalizer still fails atomically.
+`terminal_legalize.json` includes field status, sampled-cell count, runtime and
+maximum target displacement. Density transport is guidance only: critical cells
+and physical macro bodies stay fixed even though the field predicts transport.
+
+The final-cell handoff reconstructs a fresh placement view from the fixed macro
+and IO frame. FP centroid targets and macro warp pulls end with `macro_plan`;
+they are not saved as final-cell objectives or GP continuation state. Final
+legalizer remainder warping remains an independent option.
+
+### Routability option review (2026-10-22)
+
+The CNN, Eyeriss and BlackParrot uno trials do not establish a new universal
+routed winner. Keep the previously selected defaults: RSMT routing estimation,
+5 µm macro halos, terminal legalization, 256 critical pairs, no local pairs,
+joint total minimization, remainder wire weight 4, and SAT budgets of 1000 ms
+and 10,000,000 conflicts. FP, macro and remainder warps remain opt-in; neither
+repeated nor once-after-density anchors consistently improved the evaluated
+cases.
+
+At fixed GP seeds, a 128-bin grid, target density 0.2 and hard cap 0.3, remainder
+padding 3 and critical padding 3 eliminated 5 µm bins above 80% occupancy in
+CNN, Eyeriss and BlackParrot uno. However, critical padding worsened estimated
+WNS by 0.83, 0.07 and 53.66 ps respectively, and Eyeriss TNS worsened about 3.2%.
+Remainder-only padding 3 also worsened BlackParrot TNS despite unchanged WNS.
+These stay per-design trial settings, not global defaults. A hard cap of 0.3
+also cannot replace the general default while the default target density is
+0.5. Post-CTS density and completed detailed routing plus extraction determine
+whether to promote any of these settings; pre-route density alone is insufficient.

@@ -71,6 +71,9 @@ std::vector<Pin> sinks(Pin driver) {
   return result;
 }
 Inventory inventory(const Options& options, const physical::Technology& tech) {
+  if (options.repair_reset || options.reset_fanout) {
+    throw std::invalid_argument("pre-CTS clock/reset sizing and buffering are disabled");
+  }
   Inventory result;
   for (auto cell : liberty::scan_comb_cells(options.liberty)) {
     if (cell.physical_barrier || !tech.macros.contains(cell.name) || !liberty::cell_truth(cell)) {
@@ -87,10 +90,8 @@ Inventory inventory(const Options& options, const physical::Technology& tech) {
 }
 // Protect all combinational logic upstream of clock/reset sinks, including a whole tree
 // when it branches into both a protected net and a data net. Conservative name
-// matching covers uncharacterized macros and primary clocks too. With
-// `protect_reset` false (synth.place.repair.reset) reset sinks and reset-named
-// pins stop protecting their cones, so a high-fanout reset net is sized and
-// buffered like any data net; clock sinks stay protected.
+// matching covers uncharacterized macros and primary clocks too. Pre-CTS
+// callers always protect reset cones; the old repair-reset override is rejected.
 // Liberty parses are expensive and independent of the graph: floorplan repair scans once.
 Special_pins scan_special_pins(const std::string& libs, bool protect_reset) {
   Special_pins special;
@@ -108,11 +109,22 @@ Special_pins scan_special_pins(const std::string& libs, bool protect_reset) {
   for (const auto& c : liberty::scan_icg_cells(libs)) {
     special[c.name] = {c.clk_pin, c.en_pin, c.test_pin};
   }
+  for (const auto& cell : liberty::scan_memory_cells(libs)) {
+    for (const auto& pin : cell.pins) {
+      if (pin.clock_input) {
+        special[cell.name].insert(pin.name);
+      }
+    }
+  }
   return special;
 }
-std::set<std::string> protected_buffers(hhds::Graph& graph, const Inventory& cells, const Special_pins& special,
-                                        bool protect_reset) {
+std::set<std::string> protected_buffers(hhds::Graph& graph, const Inventory& cells, const Special_pins& special, bool protect_reset,
+                                        const std::string& control_ports) {
   std::set<std::string> protected_names;
+  const auto            roots = prects_library("", control_ports);
+  for (const auto& port : roots.ports) {
+    protected_names.insert("@port:" + port);
+  }
   std::set<uint64_t>    visited;
   const auto            protect = [&](auto&& self, Pin driver) -> void {
     if (driver.is_invalid() || driver.is_const()) {
@@ -138,8 +150,24 @@ std::set<std::string> protected_buffers(hhds::Graph& graph, const Inventory& cel
       }
     }
   };
+  if (!roots.override_controls) {
+    for (auto driver : graph.get_input_node().out_sorted_pins()) {
+      const auto mask = attrs::signal_clock | (protect_reset ? attrs::signal_reset : 0);
+      if (gu::signal_roles_of(driver) & mask) {
+        protect(protect, driver);
+      }
+    }
+  }
   for (auto n : graph.body().nodes()) {
     const auto io = n.get_subnode_io();
+    if (!roots.override_controls) {
+      for (auto driver : n.out_sorted_pins()) {
+        const auto mask = attrs::signal_clock | (protect_reset ? attrs::signal_reset : 0);
+        if (gu::signal_roles_of(driver) & mask) {
+          protect(protect, driver);
+        }
+      }
+    }
     for (auto sink : n.inp_sorted_pins()) {
       std::string name(sink.get_pin_name());
       if (io) {
@@ -149,29 +177,54 @@ std::set<std::string> protected_buffers(hhds::Graph& graph, const Inventory& cel
           }
         }
       }
-      auto lower = name;
-      std::transform(lower.begin(), lower.end(), lower.begin(), [](unsigned char c) { return std::tolower(c); });
       const auto op  = gu::type_op_of(n);
       const auto off = sink.get_port_id() % Ntype::Memory_port_stride;
-      if ((op == Ntype_op::Memory && (off == 2 || off == 14))
-          || ((op == Ntype_op::Flop || op == Ntype_op::Latch)
-              && (Ntype::get_sink_name(op, sink.get_port_id()) == "clock_pin"
-                  || (protect_reset && Ntype::get_sink_name(op, sink.get_port_id()) == "reset_pin")))
-          || (io && special.contains(std::string(io->get_name())) && special.at(std::string(io->get_name())).contains(name))
-          || lower.find("clock") != std::string::npos || lower.find("clk") != std::string::npos
-          || (protect_reset && lower.find("reset") != std::string::npos)
-          || (protect_reset && lower.find("rst") != std::string::npos)) {
+      if (!roots.override_controls
+          && ((op == Ntype_op::Memory && (off == 2 || off == 14))
+              || ((op == Ntype_op::Flop || op == Ntype_op::Latch)
+                  && (Ntype::get_sink_name(op, sink.get_port_id()) == "clock_pin"
+                      || (protect_reset && Ntype::get_sink_name(op, sink.get_port_id()) == "reset_pin")))
+              || (io && special.contains(std::string(io->get_name())) && special.at(std::string(io->get_name())).contains(name)))) {
         for (auto driver : sink.get_driver_pins()) {
           protect(protect, driver);
         }
       }
     }
   }
+  // A control tree can branch into a buffered data-looking sink. Protect all
+  // unary distribution branches, not just the ancestry of a recognized leaf.
+  std::unordered_map<std::string, std::vector<std::string>> branches;
+  for (auto n : graph.body().nodes()) {
+    const auto* cell = combinational(n, cells);
+    if (!cell || cell->inputs.size() != 1) {
+      continue;
+    }
+    const auto truth = liberty::cell_truth(*cell);
+    if (!truth || (*truth != 0xaaaaaaaaaaaaaaaaULL && *truth != 0x5555555555555555ULL)) {
+      continue;
+    }
+    for (auto driver : n.get_sink_pin(cell->inputs.front()).get_driver_pins()) {
+      const auto from = driver.get_master_node();
+      const auto key  = from.is_input_node() ? "@port:" + std::string(driver.get_pin_name()) : std::string(from.get_name());
+      branches[key].emplace_back(n.get_name());
+    }
+  }
+  std::vector<std::string> pending(protected_names.begin(), protected_names.end());
+  for (size_t i = 0; i < pending.size(); ++i) {
+    if (auto found = branches.find(pending[i]); found != branches.end()) {
+      for (const auto& name : found->second) {
+        if (protected_names.insert(name).second) {
+          pending.push_back(name);
+        }
+      }
+    }
+  }
   return protected_names;
 }
-std::set<std::string> protected_buffers(hhds::Graph& graph, const Inventory& cells, const std::string& libs, bool protect_reset) {
+std::set<std::string> protected_buffers(hhds::Graph& graph, const Inventory& cells, const std::string& libs, bool protect_reset,
+                                        const std::string& control_ports) {
   auto special = scan_special_pins(libs, protect_reset);
-  return protected_buffers(graph, cells, special, protect_reset);
+  return protected_buffers(graph, cells, special, protect_reset, control_ports);
 }
 std::pair<double, double> wire_rc(const Options& options, const physical::Technology& tech) {
   const auto rc
@@ -634,6 +687,7 @@ void change_master(Node n, const Buffer& from, const Buffer& to) {
     gu::drop_drivers(p);
   }
   const auto old_output = output(n, from);
+  const auto old_roles  = gu::signal_roles_of(old_output);
   for (auto p : targets) {
     p.del_sink(old_output);
   }
@@ -643,6 +697,7 @@ void change_master(Node n, const Buffer& from, const Buffer& to) {
   }
   auto out = n.create_driver_pin(to.output);
   gu::set_bits(out, 1);
+  gu::add_signal_roles(out, old_roles);
   for (auto p : targets) {
     p.connect_driver(out);
   }
@@ -1307,7 +1362,7 @@ static Floorplan_resize resize_floorplan(Result& state, const Options& options, 
                                          const Floorplan_library& library) {
   const auto& tech            = library.tech;
   const auto& cells           = library.cells;
-  const auto  protected_names = protected_buffers(*state.graph, cells, library.special, !options.repair_reset);
+  const auto  protected_names = protected_buffers(*state.graph, cells, library.special, true, options.control_ports);
   const auto  candidates      = edits(*state.graph, cells, before, protected_names, state, options, tech, &library.drives);
   const auto  saved           = state.floorplan;
   struct Change {
@@ -1430,7 +1485,7 @@ Floorplan_resize repair_floorplan(Result& state, const Options& options, const T
       if (!graph) {
         throw std::runtime_error("cannot clone FP electrical sweep");
       }
-      const auto  protected_names = protected_buffers(*state.graph, cells, scanned.special, !options.repair_reset);
+      const auto            protected_names = protected_buffers(*state.graph, cells, scanned.special, true, options.control_ports);
       auto        candidates = edits(*state.graph, cells, result.timing, protected_names, state, options, tech, &scanned.drives);
       Apply_index index(*graph, state);
       std::set<std::string> visited;
@@ -1496,7 +1551,7 @@ Floorplan_resize repair_floorplan(Result& state, const Options& options, const T
   unsigned individual          = 0;  // the forest batch above is not charged against the individual trials
   unsigned individual_accepted = 0;
   while (individual < 8 && individual_accepted < 4) {
-    const auto protected_names = protected_buffers(*state.graph, cells, scanned.special, !options.repair_reset);
+    const auto protected_names = protected_buffers(*state.graph, cells, scanned.special, true, options.control_ports);
     const auto candidates      = edits(*state.graph, cells, result.timing, protected_names, state, options, tech, &scanned.drives);
     bool       progress        = false;
     for (const auto& edit : candidates) {
@@ -1597,7 +1652,7 @@ Repair_result repair_buffers(Result initial, const Options& requested, const Eva
   const auto              tech            = physical::read_lef(options.lefs);
   const auto              cells           = inventory(options, tech);
   auto                    score           = prior_timing ? std::move(*prior_timing) : evaluate(result.placed);
-  const auto              protected_names = protected_buffers(*result.placed.graph, cells, options.liberty, !options.repair_reset);
+  const auto protected_names = protected_buffers(*result.placed.graph, cells, options.liberty, true, options.control_ports);
   std::set<std::string>   tried;
   rapidjson::StringBuffer trace;
   rapidjson::Writer<rapidjson::StringBuffer> w(trace);

@@ -1883,6 +1883,17 @@ bool Region_writer::write(const livehd::partition::Region_body& rb, const Region
   }
   trace_stage("readback-fanins");
 
+  for (const auto& control : blast.control_signals) {
+    if (control.output >= mapped.outputs.size()) {
+      throw std::runtime_error("mapped control-role output is missing");
+    }
+    auto driver = get_net_driver(mapped.outputs[control.output]);
+    if (driver.is_invalid()) {
+      throw std::runtime_error("mapped control-role output has no driver");
+    }
+    gu::add_signal_roles(driver, control.roles);
+  }
+
   // pass 3: POs -> reassemble multi-bit outputs (one Concat). Match by
   // creation order (po_order), consistent with the PI readback.
   std::vector<std::vector<hhds::Pin_class>> out_bits(rb.outputs.size());
@@ -1891,20 +1902,23 @@ bool Region_writer::write(const livehd::partition::Region_body& rb, const Region
     out_bits[po].resize(w);
   }
   if (mapped.outputs.size()
-      != po_order.size() + bbox_po.size() + blast.arst_pos + blast.icg_pos + blast.latch_pos + blast.dclk_pos + (has_dummy_po ? 1 : 0)) {
+      != po_order.size() + bbox_po.size() + blast.arst_pos + blast.icg_pos + blast.latch_pos + blast.dclk_pos
+             + blast.control_signals.size() + (has_dummy_po ? 1 : 0)) {
     livehd::diag::warn("pass.abc", "abc-readback", "internal")
         .msg(
             "pass.abc: region '{}': mapped PO count {} != created {} (region {} + bbox {} + async reset {} + clock-gate "
-            "enable {} + latch cell {} + derived clock {}) — read-back misaligned",
+            "enable {} + latch cell {} + derived clock {} + control role {}) — read-back misaligned",
             rb.module_name,
             mapped.outputs.size(),
-            po_order.size() + bbox_po.size() + blast.arst_pos + blast.icg_pos + blast.latch_pos + blast.dclk_pos,
+            po_order.size() + bbox_po.size() + blast.arst_pos + blast.icg_pos + blast.latch_pos + blast.dclk_pos
+                + blast.control_signals.size(),
             po_order.size(),
             bbox_po.size(),
             blast.arst_pos,
             blast.icg_pos,
             blast.latch_pos,
-            blast.dclk_pos)
+            blast.dclk_pos,
+            blast.control_signals.size())
         .emit();
   }
   for (int i = 0; i < static_cast<int>(mapped.outputs.size()); ++i) {

@@ -832,6 +832,25 @@ inline void assert_pin_attr_role([[maybe_unused]] const hhds::Pin_class& pin) {
   }
 }
 
+inline uint8_t signal_roles_of(const hhds::Pin_class& pin) {
+  if (pin.is_invalid() || pin.is_const()) {
+    return 0;
+  }
+  assert_pin_attr_role<attrs::signal_roles_t>(pin);
+  auto role = pin.attr(attrs::signal_roles);
+  return role.has() ? role.get() : 0;
+}
+inline void add_signal_roles(const hhds::Pin_class& pin, uint8_t roles) {
+  if (pin.is_invalid() || pin.is_const() || !roles) {
+    return;
+  }
+  assert_pin_attr_role<attrs::signal_roles_t>(pin);
+  pin.attr(attrs::signal_roles).set(signal_roles_of(pin) | roles);
+}
+inline void carry_signal_roles(const hhds::Pin_class& from, const hhds::Pin_class& to) {
+  add_signal_roles(to, signal_roles_of(from));
+}
+
 // Per-pin bit width (plain int32). Storing 0 leaves the attribute untouched
 // logically. `bits` is a DRIVER-pin property; a sink's width is its driver's,
 // read via `bits_of(driver_of(sink))` (see assert_pin_attr_role above).

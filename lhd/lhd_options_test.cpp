@@ -500,19 +500,36 @@ TEST(LhdOptions, PassCpropRefusesNonClassicEngine) {
 TEST(LhdOptions, RecommendedSharedDefaults) {
   const auto listed = lhd::list_set_options();
   for (const auto& [key, value] : std::vector<std::pair<std::string, std::string>>{
-           {"compile.specialize_modules",   "true"},
-           {       "pass.abc.area_relax",      "0"},
-           {       "pass.abc.max_fanout",     "32"},
-           {          "synth.delay_frac",    "0.4"},
-           {           "synth.partition", "coarse"},
-           {  "synth.place.reset_fanout",     "32"},
-           {        "synth.place.resize",   "true"},
-           {         "synth.state_sweep",   "true"},
-           {     "synth.merge_registers",   "true"},
-           {    "synth.place.io_resynth",      "5"}
+           {                "compile.specialize_modules",   "true"},
+           {                       "pass.abc.area_relax",      "0"},
+           {                       "pass.abc.max_fanout",     "32"},
+           {                          "synth.delay_frac",    "0.4"},
+           {                           "synth.partition", "coarse"},
+           {                  "synth.place.reset_fanout",      "0"},
+           {                        "synth.place.resize",   "true"},
+           {                          "synth.place.halo",      "5"},
+           {                   "synth.place.route.model",   "rsmt"},
+           {             "synth.place.legalize.terminal",   "true"},
+           {  "synth.place.legalize.critical_pair_limit",    "256"},
+           {     "synth.place.legalize.local_pair_limit",      "0"},
+           { "synth.place.legalize.joint_minimize_total",   "true"},
+           {"synth.place.legalize.remainder_wire_weight",      "4"},
+           {                         "synth.state_sweep",   "true"},
+           {                     "synth.merge_registers",   "true"},
+           {                    "synth.place.io_resynth",      "5"}
   }) {
     const auto option = std::find_if(listed.begin(), listed.end(), [&](const auto& o) { return o.name == key; });
     ASSERT_NE(option, listed.end()) << key;
     EXPECT_EQ(option->default_value, value) << key;
+  }
+}
+
+TEST(LhdOptions, WarpspaceStagesAreIndependentAndOptIn) {
+  const auto options = lhd::list_set_options();
+  for (const auto& stage : {std::string("fp"), std::string("macro")}) {
+    const auto name  = "synth.place." + stage + ".warpspace";
+    const auto found = std::find_if(options.begin(), options.end(), [&](const auto& option) { return option.name == name; });
+    ASSERT_NE(found, options.end());
+    EXPECT_EQ(found->default_value, "false");
   }
 }

@@ -28,6 +28,7 @@ Semantic_result import_semantic_region(const synth::Lnet& net, const synth::Sour
   }
   if (net.size() > max_nodes || net.outputs().size() > max_nodes || source.sources.size() > max_nodes
       || source.bits.size() > max_nodes || source.clocks.size() > max_nodes || source.controls.size() > max_nodes
+      || source.control_signals.size() > max_nodes
       || !work.spend(source.sources.size() + source.bits.size() + source.clocks.size() + source.controls.size())) {
     return exhausted();
   }

@@ -53,6 +53,7 @@ def run(case, args, output):
         'synth.place.final.iterations': args.iterations, 'synth.place.bins': 16,
         'lhd.incremental': 'false', 'lhd.jobs': 1,
     }
+    settings.update({entry.split('=', 1)[0]: entry.split('=', 1)[1] for entry in args.set})
     # One-macro tiles must qualify as hierarchy candidates (the default of 2 admits only 3+ macros).
     settings['synth.place.fp.min_macros'] = args.min_macros
     if args.snap_mode:
@@ -164,6 +165,7 @@ def main():
     parser.add_argument('--iterations', type=int, default=1500)
     parser.add_argument('--min-macros', type=int, default=0,
                         help='synth.place.fp.min_macros: a hierarchy candidate needs more macros than this; 0 makes each one-macro tile a candidate')
+    parser.add_argument('--set', action='append', default=[], help='additional lhd setting KEY=VALUE')
     parser.add_argument('--snap-mode', choices=['alignment', 'symmetry'], help='synth.place.macro.snap_mode (flow default: alignment)')
     parser.add_argument('--timeout', type=int, default=3600)
     parser.add_argument('--max-pattern-rms', type=float)

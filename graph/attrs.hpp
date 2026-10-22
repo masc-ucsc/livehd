@@ -134,6 +134,15 @@ struct ctrl_stats_t {
 };
 inline constexpr ctrl_stats_t ctrl_stats{};
 
+// Semantic signal roles survive mapping even when synchronous reset is folded
+// into a register's data cone. Bits may combine when equivalent nets merge.
+inline constexpr uint8_t signal_clock = 1, signal_reset = 2;
+struct signal_roles_t {
+  using value_type = uint8_t;
+  using storage    = hhds::flat_storage;
+};
+inline constexpr signal_roles_t signal_roles{};
+
 // Region identity carried by a pass.abc mapped body. ABC synthesizes one
 // module per (definition, color); keeping the module name on the graph input
 // lets a later whole-design OpenTimer flatten recover that partition identity
@@ -403,6 +412,8 @@ template <typename Tag>
 inline constexpr Attr_kind attr_kind = Attr_kind::any_pin;
 
 template <>
+inline constexpr Attr_kind attr_kind<signal_roles_t> = Attr_kind::driver_pin;
+template <>
 inline constexpr Attr_kind attr_kind<bits_t> = Attr_kind::driver_pin;
 template <>
 inline constexpr Attr_kind attr_kind<pin_signed_t> = Attr_kind::driver_pin;
@@ -499,6 +510,7 @@ inline constexpr Attr_kind attr_kind<lut_t> = Attr_kind::node;
   X(pin_offset)                     \
   X(pin_name)                       \
   X(pin_delay)                      \
+  X(signal_roles)                   \
   X(pin_signed)                     \
   X(color)                          \
   X(critical)                       \

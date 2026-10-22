@@ -113,6 +113,40 @@ protected:
   }
 };
 
+TEST_F(SourceState, RegisteredSynchronousResetKeepsItsRoleAfterDataMuxLowering) {
+  auto root    = flop("unrelated_name");
+  auto payload = flop("payload");
+  connect(payload, "reset_pin", root.get_driver_pin(0));
+  constant(payload, "initial", 0);
+  connect(payload, "enable", in("en"));
+  ready(payload.get_driver_pin(0));
+  for (bool logical : {false, true}) {
+    Blast_options options;
+    options.logical_state = logical;
+    const auto result     = blast(options);
+    ASSERT_EQ(result.status, Region_blast::Status::blasted);
+    ASSERT_TRUE(result.source_state);
+    ASSERT_EQ(result.control_signals.size(), 2);
+    ASSERT_EQ(result.source_state->control_signals.size(), 2);
+    ASSERT_TRUE(validate_state_controls(*result.source_state, result.lnet));
+    unsigned resets = 0, clocks = 0;
+    for (const auto& signal : result.control_signals) {
+      const auto id = result.lnet.outputs().at(signal.output).node;
+      if (signal.roles == attrs::signal_reset) {
+        ++resets;
+        auto found = std::find_if(result.flops.begin(), result.flops.end(), [&](const auto& f) { return f.node == root; });
+        ASSERT_NE(found, result.flops.end());
+        EXPECT_EQ(id, found->qbits.front());
+      } else {
+        EXPECT_EQ(signal.roles, attrs::signal_clock);
+        ++clocks;
+      }
+    }
+    EXPECT_EQ(resets, 1);
+    EXPECT_EQ(clocks, 1);
+  }
+}
+
 TEST_F(SourceState, SourceClassificationDoesNotDependOnRegisterMapping) {
   auto n = flop("r", 2);
   constant(n, "posclk", 0);
@@ -430,6 +464,9 @@ TEST_F(SourceState, SynchronousResetEnableAndQnEncodingHaveSemanticD) {
               values[id] = (x >> 2) & 1;
             } else if (name == "rst_b0") {
               values[id] = (x >> 3) & 1;
+            } else if (name == "clk_b0") {
+              // The preserved clock-role output adds a PI, but must not affect D.
+              values[id] = x & 1;
             } else {
               ADD_FAILURE() << name;
             }

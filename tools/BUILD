@@ -9,7 +9,7 @@ cc_binary(
     name = "warpspace",
     srcs = ["warpspace.cpp"],
     copts = COPTS,
-    deps = ["@highs//:highs", "@zlib//:zlib", "@rapidjson"],
+    deps = ["//pass/place:density_warp", "@zlib//:zlib", "@rapidjson"],
 )
 
 py_test(
@@ -49,6 +49,12 @@ cc_binary(
         "//pass/place",
         "@rapidjson",
     ],
+)
+
+cc_binary(
+    name = "terminal_legalize",
+    srcs = ["terminal_legalize.cpp"],
+    deps = ["//pass/place:terminal_legalize", "//inou/lefdef:inou_lefdef", "@rapidjson"],
 )
 
 # An empty Xcode version list selects apple_support's Command Line Tools

@@ -31,6 +31,7 @@ protected:
   void                                                 SetUp() override {
     // Repair fixtures use a controlled plain frame, independent of the
     // production floorplan/macro pipeline and its density policy.
+    options.terminal_legalize = false;  // Exercise the post-placement repair API.
     options.fp_place = options.final_cells = options.macro_snap = false;
     options.scale_macro_density = options.exact_macro_density = options.adaptive_density = options.routability = false;
     options.macro_overlap_weight = options.macro_jitter = 0;
@@ -1184,7 +1185,8 @@ TEST_F(Buffer_repair, TimingWeightsExcludeClockNetsAndRevertWorsePlacements) {
   for (const auto& weight : report["rounds"][0]["weights"].GetObject()) {
     peak = std::max(peak, weight.value.GetDouble());
   }
-  EXPECT_DOUBLE_EQ(peak, 1.5);  // 0.75 * old unit weight + 0.25 * target 3.
+  // The entire buffered clock, including its upstream port net, is excluded.
+  EXPECT_DOUBLE_EQ(peak, 1);
   for (const auto& round : report["rounds"].GetArray()) {
     EXPECT_EQ(round["weights"]["clock_buffer:X"].GetDouble(), 1);
     EXPECT_FALSE(round["accepted"].GetBool());
@@ -1264,11 +1266,33 @@ TEST_F(Buffer_repair, ProtectsClockLogicThroughAliasesAndBuffers) {
   report.Parse(result.report.c_str());
   EXPECT_EQ(report["attempts"].GetUint(), 0);
 }
-TEST_F(Buffer_repair, ResetLogicIsProtectedUnlessRepairResetIsEnabled) {
+TEST_F(Buffer_repair, ExplicitControlRootProtectsEveryBufferedBranch) {
+  auto root   = gate("sky130_fd_sc_hd__buf_1", "root", graph->get_input_pin("a"));
+  auto first  = gate("sky130_fd_sc_hd__inv_1", "first", root);
+  auto second = gate("sky130_fd_sc_hd__buf_1", "second", root);
+  graph->get_output_pin("y").connect_driver(first);
+  (void)second;
+  options.control_ports = "a";
+  const auto evaluate   = [&](const Result& r) {
+    Timing_feedback feedback;
+    feedback.delay = 10 * r.floorplan.components.size();
+    feedback.area  = r.floorplan.components.size();
+    return feedback;
+  };
+  auto initial = place(*graph, flat, options);
+  auto result  = repair_buffers(std::move(initial), options, evaluate);
+  EXPECT_EQ(count(result.placed, "root"), 1);
+  EXPECT_EQ(count(result.placed, "first"), 1);
+  EXPECT_EQ(count(result.placed, "second"), 1);
+  rapidjson::Document report;
+  report.Parse(result.report.c_str());
+  EXPECT_EQ(report["attempts"].GetUint(), 0);
+}
+
+TEST_F(Buffer_repair, ResetLogicIsProtectedAndRepairOverrideIsRejected) {
   // A buffer chain whose only load is the reset pin of a state cell: the cone is
   // protected like clock logic, so a high-fanout reset net would never be sized
-  // or buffered. synth.place.repair.reset lifts that for reset sinks only (the
-  // clock cone of the same cell stays protected).
+  // or buffered. The former reset-repair override must now be rejected.
   std::filesystem::create_directories(options.output_dir);
   const auto slurp = [](const std::string& path) {
     std::ifstream input(path);
@@ -1363,10 +1387,10 @@ TEST_F(Buffer_repair, ResetLogicIsProtectedUnlessRepairResetIsEnabled) {
   EXPECT_EQ(report["attempts"].GetUint(), 0);
 
   options.repair_reset = true;
-  auto       replaced  = place(*graph, flat, options);
-  const auto repaired  = repair_buffers(std::move(replaced), options, evaluate);
-  EXPECT_EQ(count(repaired.placed, "reset_buffer"), 0);
-  EXPECT_EQ(count(repaired.placed, "reset_inverter"), 1);
+  EXPECT_THROW((void)place(*graph, flat, options), std::invalid_argument);
+  options.repair_reset = false;
+  options.reset_fanout = 32;
+  EXPECT_THROW((void)place(*graph, flat, options), std::invalid_argument);
 }
 TEST_F(Buffer_repair, RejectsWorseTrialsAndRebuildsEveryFanoutBranch) {
   auto root = gate("sky130_fd_sc_hd__buf_1", "root", graph->get_input_pin("a"));

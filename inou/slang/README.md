@@ -132,7 +132,11 @@ Key invariants the lowering maintains:
   `clock_pin`/`posclk` attrs; extracted async-reset rungs become
   `initial`/`reset_pin`/`sync`/`negreset` attrs. Constant reset assignments to
   concatenations split recursively by destination width and signedness;
-  packed slices use the same offsets as ordinary writes. A constant scalar declaration
+  packed slices use the same offsets as ordinary writes. Synchronous constant
+  reset conditionals also preserve these attributes when several independent
+  nonblocking conditionals share one clocked block. Their original guards stay
+  in the data logic; blocks with overlapping destinations or blocking writes
+  retain ordinary procedural lowering. A constant scalar declaration
   initializer or simple `initial q = CONST` on a register without such a reset
   becomes the implicit-module-reset value and emits `initial-without-reset`,
   because formal equivalence can differ from reset-less hardware. A register

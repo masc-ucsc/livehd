@@ -106,28 +106,6 @@ Pin_adjust_stats adjust_fp_pins(dp::Design& d, physical::Floorplan& fp, const st
   for (Point p : slots) {
     slot_position.push_back(position(p));
   }
-  // Ideal clocks are masked from GP's wirelength objective. IO assignment
-  // still needs their actual sink distribution; a sink-centroid objective
-  // avoids HPWL's flat interior (and its arbitrary first-slot corner choice).
-  std::vector<std::optional<Point>> clock_centers(d.net_mask.size());
-  for (size_t net = 0; net < d.net_mask.size(); ++net) {
-    if (d.net_mask[net]) {
-      continue;
-    }
-    double x = 0, y = 0;
-    int    sinks = 0;
-    for (int k = d.flat_net2pin_start[net]; k < d.flat_net2pin_start[net + 1]; ++k) {
-      const int p = d.flat_net2pin[k], n = d.pin2node[p];
-      if (size_t(n) < first) {
-        x += d.node_x[n] + d.pin_offset_x[p];
-        y += d.node_y[n] + d.pin_offset_y[p];
-        ++sinks;
-      }
-    }
-    if (sinks) {
-      clock_centers[net] = Point{x / sinks, y / sinks};
-    }
-  }
   std::vector<std::vector<int>>    incident(count);
   std::vector<std::vector<Bounds>> bounds(count);
   for (size_t i = 0; i < count; ++i) {
@@ -136,15 +114,10 @@ Pin_adjust_stats adjust_fp_pins(dp::Design& d, physical::Floorplan& fp, const st
       nets.insert(d.pin2net[d.flat_node2pin[k]]);
     }
     for (int net : nets) {
-      if (!d.net_mask[net] && !clock_centers[net]) {
+      if (!d.net_mask[net]) {
         continue;
       }
       incident[i].push_back(net);
-      if (clock_centers[net]) {
-        const auto [x, y] = *clock_centers[net];
-        bounds[i].push_back({x, y, x, y, 1});
-        continue;
-      }
       Bounds b{INFINITY, INFINITY, -INFINITY, -INFINITY, d.net_weights[net]};
       for (int k = d.flat_net2pin_start[net]; k < d.flat_net2pin_start[net + 1]; ++k) {
         const int p = d.flat_net2pin[k], n = d.pin2node[p];
@@ -174,16 +147,6 @@ Pin_adjust_stats adjust_fp_pins(dp::Design& d, physical::Floorplan& fp, const st
   const auto net_cost = [&](const std::vector<int>& nets) {
     double value = 0;
     for (int net : nets) {
-      if (clock_centers[net]) {
-        const auto [cx, cy] = *clock_centers[net];
-        for (int k = d.flat_net2pin_start[net]; k < d.flat_net2pin_start[net + 1]; ++k) {
-          const auto node = size_t(d.pin2node[d.flat_net2pin[k]]);
-          if (node >= first) {
-            value += std::abs(xy[node - first].first - cx) + std::abs(xy[node - first].second - cy);
-          }
-        }
-        continue;
-      }
       double xl = INFINITY, yl = INFINITY, xh = -INFINITY, yh = -INFINITY;
       for (int k = d.flat_net2pin_start[net]; k < d.flat_net2pin_start[net + 1]; ++k) {
         const int    p = d.flat_net2pin[k], n = d.pin2node[p];

@@ -28,6 +28,7 @@ protected:
   std::unique_ptr<livehd::opentimer::Physical_session> session;
   double                                               period_ns = 10;
   void                                                 SetUp() override {
+    options.terminal_legalize = false;  // These fixtures exercise post-placement sizing.
     options.fp_place = options.final_cells = options.macro_snap = false;
     options.scale_macro_density = options.exact_macro_density = options.adaptive_density = options.routability = false;
     options.macro_overlap_weight = options.macro_jitter = 0;

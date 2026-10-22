@@ -4,6 +4,10 @@ load("//tools:copt_default.bzl", "COPTS")
 filegroup(
     name = "place_srcs",
     srcs = [
+        "density_warp.cpp",
+        "density_warp.hpp",
+        "warpspace.cpp",
+        "warpspace.hpp",
         "color_centroids.cpp",
         "color_centroids.hpp",
         "h2d.cpp",
@@ -18,6 +22,8 @@ filegroup(
         "memory_proxy.hpp",
         "pin_adjust.cpp",
         "pin_adjust.hpp",
+        "prects_networks.cpp",
+        "prects_networks.hpp",
         "place.cpp",
         "place.hpp",
         "repair.cpp",
@@ -34,9 +40,13 @@ filegroup(
         "resynthesize.cpp",
         "steiner_repair.cpp",
         "steiner_repair.hpp",
+        "routing_tracks.cpp",
         "technology_rc.cpp",
+        "routing_tracks.hpp",
         "technology_rc.hpp",
         "timing_place.cpp",
+        "terminal_legalize.cpp",
+        "terminal_legalize.hpp",
     ],
     visibility = ["//visibility:public"],
 )
@@ -84,6 +94,7 @@ cc_library(
         "resize_engine.cpp",
         "resynthesize.cpp",
         "steiner_repair.cpp",
+        "routing_tracks.cpp",
         "technology_rc.cpp",
         "timing_place.cpp",
     ],
@@ -101,13 +112,17 @@ cc_library(
         "reset_tree.hpp",
         "resize_engine.hpp",
         "steiner_repair.hpp",
+        "routing_tracks.hpp",
         "technology_rc.hpp",
         ":place_salt",
     ],
     copts = COPTS,
     visibility = ["//visibility:public"],
     deps = [
+        ":warpspace",
+        ":prects_networks",
         ":satlegalize",
+        ":terminal_legalize",
         "//core",
         "//graph",
         "//inou/lefdef:inou_lefdef",
@@ -240,11 +255,26 @@ cc_library(
     deps = ["@cvc5//:sat_solver"],
 )
 cc_library(
+    name = "terminal_legalize",
+    srcs = ["terminal_legalize.cpp"],
+    hdrs = ["terminal_legalize.hpp"],
+    copts = COPTS,
+    visibility = ["//visibility:public"],
+    deps = [":warpspace", ":prects_networks", ":satlegalize", ":sat_solver", "//core", "//inou/lefdef:inou_lefdef", "@dreamplace//dreamplace/native:placer", "@rapidjson"],
+)
+cc_test(
+    name = "terminal_legalize_test",
+    size = "small",
+    srcs = ["terminal_legalize_test.cpp"],
+    copts = COPTS,
+    deps = [":terminal_legalize", "@googletest//:gtest_main"],
+)
+cc_library(
     name = "satlegalize",
     srcs = ["satlegalize.cpp"],
     hdrs = ["satlegalize.hpp"],
     copts = COPTS,
-    deps = [":sat_solver", "//core", "//inou/lefdef:inou_lefdef"],
+    deps = [":prects_networks", ":sat_solver", "//core", "//inou/lefdef:inou_lefdef"],
 )
 cc_test(
     name = "sat_solver_test",
@@ -256,7 +286,7 @@ cc_test(
     name = "satlegalize_test",
     srcs = ["satlegalize_test.cpp"],
     copts = COPTS,
-    deps = [":satlegalize", "@googletest//:gtest_main"],
+    deps = [":prects_networks", ":satlegalize", "@googletest//:gtest_main"],
 )
 
 cc_test(
@@ -265,4 +295,52 @@ cc_test(
     srcs = ["macro_tracks_test.cpp"],
     copts = COPTS,
     deps = [":place", "@googletest//:gtest_main"],
+)
+
+cc_library(
+    name = "prects_networks",
+    srcs = ["prects_networks.cpp"],
+    hdrs = ["prects_networks.hpp"],
+    copts = COPTS,
+    visibility = ["//visibility:public"],
+    deps = ["//core", "//inou/lefdef:inou_lefdef", "//pass/liberty:liberty_dff"],
+)
+cc_test(
+    name = "prects_networks_test",
+    size = "small",
+    srcs = ["prects_networks_test.cpp"],
+    copts = COPTS,
+    deps = [":prects_networks", "@googletest//:gtest_main"],
+)
+
+cc_test(
+    name = "routing_tracks_test",
+    size = "small",
+    srcs = ["routing_tracks_test.cpp"],
+    copts = COPTS,
+    deps = [":place", "@googletest//:gtest_main"],
+)
+
+cc_library(
+    name = "density_warp",
+    srcs = ["density_warp.cpp"],
+    hdrs = ["density_warp.hpp"],
+    copts = COPTS,
+    visibility = ["//visibility:public"],
+    deps = ["@highs//:highs"],
+)
+
+cc_library(
+    name = "warpspace",
+    srcs = ["warpspace.cpp"],
+    hdrs = ["warpspace.hpp"],
+    copts = COPTS,
+    deps = [":density_warp", "@dreamplace//dreamplace/native:placer", "@rapidjson"],
+)
+
+cc_test(
+    name = "warpspace_test",
+    srcs = ["warpspace_test.cpp"],
+    copts = COPTS,
+    deps = [":warpspace", "@googletest//:gtest_main"],
 )

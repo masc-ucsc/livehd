@@ -186,7 +186,7 @@ TEST_F(PassSynth, PublicLogicalEntryEmitsStateWithoutAbcOrLibertyAndReleasesScra
     EXPECT_STREQ(endpoints[0]["name"].GetString(), "state");
     EXPECT_TRUE(fs::exists(root + "/qor.json.provenance/manifest.json"));
     const auto& artifact = report["regions"][0]["artifact"];
-    EXPECT_EQ(artifact["version"].GetUint(), 1U);
+    EXPECT_EQ(artifact["version"].GetUint(), 2U);
     if (i == 0) {
       first_artifact = artifact["path"].GetString();
     }
