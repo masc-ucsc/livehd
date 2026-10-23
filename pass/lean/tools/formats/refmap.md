@@ -118,8 +118,9 @@ followed by `__target<index>`.
 
 `cache` reuses an LRAT proof already in `<work>` when the obligation's CNF there is
 byte-identical, without running the solver. The verified check re-checks every proof
-either way, so the cache saves solver time only. Use it to emit a verdict file from a round
-that has already solved everything.
+either way, so the cache saves solver time only. A satisfiable or failed obligation leaves no
+LRAT file (the solver writes one on any answer), so a counterexample is found again. Use it to
+emit a verdict file from a round that has already solved everything.
 
 ## Theorem files
 

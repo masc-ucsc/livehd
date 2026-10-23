@@ -71,7 +71,8 @@ inductive SatAnswer | unsat (proof : ByteArray) | sat (model : String) | failed 
 /-- Write `φ`'s CNF, run the solver, return its LRAT proof bytes. With `cache`, an LRAT
 proof already in `work` is reused when the CNF there is byte-identical (no solver run); the
 checker re-checks every proof either way, so a stale or wrong one is rejected, never
-trusted. -/
+trusted. A satisfiable or failed answer deletes the LRAT file, so the cache only ever finds
+the solver's proofs. -/
 def solve (solver : String) (work : System.FilePath) (tag : String) (φ : BVLogicalExpr)
     (extra : Array String := #[]) (cache : Bool := false) : IO (SatAnswer × Nat × Nat × Nat) := do
   let t0 ← IO.monoMsNow
@@ -94,7 +95,10 @@ def solve (solver : String) (work : System.FilePath) (tag : String) (φ : BVLogi
   let t2 ← IO.monoMsNow
   if out.stdout.startsWith "s UNSATISFIABLE" then
     return (.unsat (← IO.FS.readBinFile lratPath), t1 - t0, t2 - t1, nClauses)
-  else if out.stdout.startsWith "s SATISFIABLE" then
+  -- no proof: the solver writes its LRAT file on any answer, and `cache` must never take
+  -- what it left for one
+  if ← lratPath.pathExists then IO.FS.removeFile lratPath
+  if out.stdout.startsWith "s SATISFIABLE" then
     return (.sat out.stdout, t1 - t0, t2 - t1, nClauses)
   else
     return (.failed s!"solver exit {out.exitCode}: {out.stdout.take 200}{out.stderr.take 200}",
