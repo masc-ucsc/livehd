@@ -47,6 +47,29 @@ namespace gu = livehd::graph_util;
 }
 
 namespace {
+// The operand of `EQ(x, 0)` for a ONE-bit x: the logical inverse the e-graph engine writes for a complemented bit
+// (Get_mask(Not(x), 0, 1) becomes EQ(x, 0)). Invalid for every other node.
+hhds::Pin_class inverted_bit_operand(const hhds::Node_class& m) {
+  if (gu::type_op_of(m) != Ntype_op::EQ) {
+    return {};
+  }
+  hhds::Pin_class var;
+  size_t          operands = 0, zeros = 0;
+  for (auto sink : m.inp_sorted_pins()) {
+    const auto d = sink.get_driver_pin();
+    ++operands;
+    if (d.is_const() && !gu::const_of(d).has_unknowns() && gu::const_of(d).is_known_zero()) {
+      ++zeros;
+    } else {
+      var = d;
+    }
+  }
+  if (operands != 2 || zeros != 1 || var.is_invalid() || var.is_const() || std::max(1, gu::real_width(var)) != 1) {
+    return {};
+  }
+  return var;
+}
+
 // Nearest user-visible signal name for `n`. Synthesis-stage nodes are mostly
 // UNNAMED (only what the source named keeps a name attr), so `debug_name`
 // alone -- "shl_10620" -- tells a user nothing. Anchor on a real signal
@@ -650,6 +673,11 @@ Region_blast blast_region(const livehd::partition::Region_body& rb, const Blast_
         }
         low ^= op == Ntype_op::Not;
         src  = a;
+        continue;
+      }
+      if (const auto inverted = inverted_bit_operand(m); !inverted.is_invalid()) {
+        low ^= true;
+        src  = inverted;
         continue;
       }
       if (op == Ntype_op::Get_mask) {

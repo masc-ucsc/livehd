@@ -259,7 +259,7 @@ void Pass_lec::setup() {
   m.add_label_optional("preflight_engine",
                        "INTERNAL cprop engine of the LEC preflight (the value-preserving re-simplify after hierarchy "
                        "inlining): classic | aegraph | aegraph+classic. Unset, it follows compile.cprop.engine "
-                       "(default classic). aegraph stamps every cell it creates or the preflight falls back to classic "
+                       "(default aegraph). aegraph stamps every cell it creates or the preflight falls back to classic "
                        "for that graph. Salted into //lhd:formal_salt",
                        "");
   m.add_label_optional("phase_sched",

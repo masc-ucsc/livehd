@@ -23,7 +23,8 @@ fail() {
   exit 1
 }
 
-"$LHD" compile "$PRP" \
+# Pinned to the classic engine: the test covers Cprop::try_find_single_driver_pin.
+"$LHD" compile "$PRP" --set compile.cprop.engine=classic \
   --emit verilog:"$W/bitread.gen.v" --workdir "$W/w" --result-json "$W/r.json" -q 2>/dev/null \
   || fail "compile of setmask_bitread.prp failed"
 [ -s "$W/bitread.gen.v" ] || fail "compile produced empty netlist"
@@ -54,7 +55,7 @@ folds_to y2 c || fail "bit-2 read did not fold to c (Set_mask chain resolver reg
 # plus a zero sign bit). Writing it into low mask [0,95) over zero cannot alter
 # it. Cprop must remove that Set_mask instead of leaving a 95-bit mask/splice in
 # either generated Verilog or the simulator C++.
-"$LHD" compile "$IDENTITY_PRP" \
+"$LHD" compile "$IDENTITY_PRP" --set compile.cprop.engine=classic \
   --emit verilog:"$W/identity.gen.v" --workdir "$W/identity-w" --result-json "$W/identity.json" -q 2>/dev/null \
   || fail "compile of setmask_identity.prp failed"
 [ -s "$W/identity.gen.v" ] || fail "identity compile produced empty netlist"

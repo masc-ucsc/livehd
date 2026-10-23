@@ -1,0 +1,8 @@
+/*
+:name: aeg_sum_chain_shared_1
+:type: lec
+:set: compile.cprop.engine=aegraph
+:compile_grep: aegraph-rule getmask_sum_chain tried=[0-9]+ matched=[1-9][0-9]* applied=[1-9][0-9]* extracted=0
+*/
+// HEADER-ONLY variant: aeg_sum_chain_shared.prp compiled by the acyclic e-graph engine. The rule matches and builds the merged
+// sums, and the extraction keeps none of them (extracted=0): the shared window stays one adder.

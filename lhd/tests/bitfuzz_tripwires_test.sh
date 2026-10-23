@@ -70,7 +70,8 @@ import pathlib
 import sys
 
 steps = [path.stem.split("_lhd_", 1)[-1] for path in sorted(pathlib.Path(sys.argv[1]).glob("*.log"))]
-assert steps.index("lnast_tolg") < steps.index("pass_bitfuzz") < steps.index("pass_cprop") < steps.index("pass_bitwidth"), steps
+engine = "pass_aegraph" if "pass_aegraph" in steps else "pass_cprop"  # the default engine, else classic
+assert steps.index("lnast_tolg") < steps.index("pass_bitfuzz") < steps.index(engine) < steps.index("pass_bitwidth"), steps
 PY
 
   for ref in "$d"/ref/*.v; do

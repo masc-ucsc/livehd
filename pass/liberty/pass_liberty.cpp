@@ -140,9 +140,12 @@ bool model_cell(hhds::GraphLibrary& outlib, Mio_Gate_t* g) {
     gu::set_unsign(d);
     return d;
   };
+  // The logical inverse of a one-bit pin: EQ(a, 0), not Not(a) (the complement of an unbounded integer is -1 or -2, nonzero for
+  // every 0/1 input, so once the model is inlined next to a latch or a mux that reads it as a condition it would be constant).
   auto inv = [&](hhds::Pin_class a) {
-    auto n = gu::create_typed_node(*body, Ntype_op::Not);
-    a.connect_sink(gu::setup_sink_by_name(n, "a"));
+    auto n = gu::create_typed_node(*body, Ntype_op::EQ);
+    gu::setup_sink_pid(n, 0).connect_driver(a);
+    gu::setup_sink_pid(n, 0).connect_driver(gu::create_const(*body, *Dlop::create_integer(0)));
     return one_bit(n.create_driver_pin(0));
   };
   auto reduce = [&](const std::vector<hhds::Pin_class>& ins, Ntype_op op) -> hhds::Pin_class {

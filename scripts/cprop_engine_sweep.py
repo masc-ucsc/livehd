@@ -54,8 +54,8 @@ SIBLING BENCHMARK REPOS (manual, never in //...): the same engine selector, simu
     any sim flow       LHDTRACK_CPROP_ENGINE=aegraph lhdtrack run ...          (every sim_lhd_* flow, both lhd sim legs)
     free-form sets     LHDTRACK_SIM_SET="compile.cprop.engine=aegraph compile.cprop.engine_slots=first"  (sim)
                        LHDTRACK_LHD_SET="compile.cprop.engine=aegraph"                                   (synth/lec)
-                       COST PROFILE for a simulation row: add compile.aegraph.cost=sim (or =auto, which is sim under `lhd sim`) to
-                       LHDTRACK_SIM_SET / BENCH_PYROPE_SETS / CORE_SIM_SETS; the default profile is synth for every command
+                       COST PROFILE for a simulation row: nothing to add under `lhd sim` (the default `auto` picks sim there); to force it elsewhere add compile.aegraph.cost=sim to
+                       LHDTRACK_SIM_SET / BENCH_PYROPE_SETS / CORE_SIM_SETS; every other command gets synth
     LEC of the netlist is the existing lec_netlist flow: it proves the engine's mapped design against the
     source, so run it with the same LHDTRACK_EXTRA_FLOWS to get the B==source leg for the synthesis row.
 
@@ -98,7 +98,7 @@ HOW IT MEASURES (the A/B contract of the design doc)
   * the GATE G3 table (printed under "gate G3 (synthesis)" with --synth): per fixture aegraph/classic of the ABC gates, area,
     max_delay and pred_aig (qor.abc.total of `lhd synth` with the in-repo test.lib), geomean / worst / better / worse / sums.
     Corpora: equiv|sim|lgraph|path:DIR, and lhdtrack:DIR for the sibling ../lhdtrack designs (tests/<name>/pyrope/<top>.prp,
-    top from design.toml). `--synth-cost` / `--sim-cost` pick compile.aegraph.cost of the legs (default synth / sim).
+    top from design.toml). `--synth-cost` / `--sim-cost` pin compile.aegraph.cost of the legs (default synth / sim; `auto` = the automatic choice).
   * `--sim` records `static instr`: the machine instructions of the compiled design (objdump of the
     `sim/*.llvm.o` color kernels and `sim/obj/*.o`, minus the driver and tuning stubs). A color kernel is
     straight-line code run once per cycle, so this is the per-cycle budget; it stands in for the perf
@@ -233,7 +233,7 @@ def declared_stem_top(prp):
 def corpus_files(corpus):
     if corpus.startswith("lhdtrack:"):
         # ../lhdtrack (a sibling repo, manual): every tests/<name>/pyrope/<top>.prp, top from design.toml
-        root = os.path.join(corpus[9:], "tests")
+        root = os.path.join(os.path.abspath(corpus[9:]), "tests")
         out = []
         for name in sorted(os.listdir(root)) if os.path.isdir(root) else []:
             toml = os.path.join(root, name, "design.toml")
@@ -537,7 +537,7 @@ def static_instructions(workdir):
             out = subprocess.run(["objdump", "-d", "--no-show-raw-insn", o], capture_output=True, text=True, timeout=120).stdout
         except (OSError, subprocess.TimeoutExpired):
             return None, None
-        n = sum(1 for line in out.splitlines() if re.match(r"^\s+[0-9a-f]+:\t", line))
+        n = sum(1 for line in out.splitlines() if re.match(r"^\s+[0-9a-f]+:\s+\S", line))
         total += n
         kernel += n if o.endswith(".llvm.o") else 0
     return total, kernel

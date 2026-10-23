@@ -1,5 +1,6 @@
 /*
 :name: hotmux_unique
+:set: compile.cprop.engine=classic
 :type: compile equiv
 :verilog_top: hotmux_unique.dec
 :pyrope_top: dec

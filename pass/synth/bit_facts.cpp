@@ -206,6 +206,22 @@ std::vector<bool> facts_core(const hhds::Pin_class& pin, int width, int depth, i
     }
     return zero;
   }
+  if (op == Ntype_op::Set_mask) {
+    // a with the window [lo, hi) replaced by the low hi-lo bits of value: the window takes the value's facts, every other bit
+    // the base's (the e-graph engine's spelling of a partial write; the classic engine's is a Concat of Get_mask lanes)
+    const auto a     = gu::get_driver_of_sink_name(node, "a");
+    const auto value = gu::get_driver_of_sink_name(node, "value");
+    const auto range = gu::bit_range(node);
+    if (!a.is_invalid() && !value.is_invalid() && range && range->second <= (1 << 24)) {
+      const auto [l, h] = *range;
+      const auto za     = facts(a, width, depth + 1, budget);
+      const auto zv     = facts(value, h - l, depth + 1, budget);
+      for (int i = 0; i < width; ++i) {
+        zero[static_cast<size_t>(i)] = (i >= l && i < h) ? zv[static_cast<size_t>(i - l)] : za[static_cast<size_t>(i)];
+      }
+    }
+    return zero;
+  }
   if (op == Ntype_op::Get_mask) {
     // the half-open window [lo, hi) of a, as a non-negative value
     const auto a     = gu::get_driver_of_sink_name(node, "a");

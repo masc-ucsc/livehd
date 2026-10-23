@@ -1,5 +1,6 @@
 /*
 :name: aeg_loop_guard_accum
+:set: compile.cprop.engine=classic
 :type: lec
 :lec_set: formal.engine=ind
 */

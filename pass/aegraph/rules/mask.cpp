@@ -288,7 +288,8 @@ AEG_NATIVE_RULE(getmask_sum_chain, simplify, 37, Ntype_op::Get_mask) {
   }
   ctx.grant_fuel(terms.size() * 8);
   std::vector<Operand> merged;
-  bool                 peeled = false;
+  bool                 peeled        = false;
+  bool                 private_inner = true;  // every merged window is read by this Sum only
   for (const auto& t : terms) {
     const Enode* inner = nullptr;
     Class_id     y     = kNoClass;
@@ -321,12 +322,21 @@ AEG_NATIVE_RULE(getmask_sum_chain, simplify, 37, Ntype_op::Get_mask) {
       // a subtracted Sum operand under a subtracted slot adds back: flip the bank when the slot is subtracted
       merged.push_back(Operand{t.bank == 0 ? o.bank : (o.bank == 0 ? uint32_t{1} : uint32_t{0}), o.cls});
     }
-    peeled = true;
+    peeled        = true;
+    private_inner = private_inner && ctx.single_use(t.cls) && ctx.single_use(y);  // the window AND the sum under it
   }
   if (!peeled) {
     return;
   }
-  out.subsume(make_get_mask(ctx, ctx.make_bank(Ntype_op::Sum, std::move(merged)), 0, hi));
+  // A window other cells read exists either way: merging it into this Sum would add a second adder over the same
+  // operands (br_credit_counter: value + incr feeds a compare and two subtractions). Offer the merged form as an
+  // alternative and let the sharing-aware extraction decide.
+  const Class_id merged_window = make_get_mask(ctx, ctx.make_bank(Ntype_op::Sum, std::move(merged)), 0, hi);
+  if (private_inner) {
+    out.subsume(merged_window);
+  } else {
+    out.add(merged_window);
+  }
 }
 
 // A window that spans several lanes of a Concat only this Get_mask reads is the Concat of the covered pieces:

@@ -451,21 +451,20 @@ inline std::vector<bool> follows_bitwidth(const std::vector<std::pair<std::strin
   }
   return after;
 }
-// `compile.cprop.engine` (classic|aegraph|aegraph+classic, default classic) and
+// `compile.cprop.engine` (classic|aegraph|aegraph+classic, default aegraph) and
 // `compile.cprop.engine_slots` (both|first|second, default both), resolved from
 // the --set entries (last wins). At least one engine always runs: there is no
 // "none" value. Validated eagerly by check_known_set_passes.
 struct Cprop_engine {
-  std::string engine = "classic";
+  std::string engine = "aegraph";
   std::string slots  = "both";
 };
 Cprop_engine             resolve_cprop_engine(const Options& opts);
 // The EPRP methods that run in compile cprop slot `slot` (0 = before
 // pass.legalize, 1 = after enableopt), in order.
 std::vector<std::string> cprop_slot_methods(const Cprop_engine& choice, int slot);
-// `compile.aegraph.cost` (synth|sim|auto, default synth) resolved to the profile pass.aegraph runs:
-// `auto` is `sim` under `lhd sim` and `synth` everywhere else. The default stays `synth` for every command
-// (a documented default), so `auto` is the opt-in that follows the command.
+// `compile.aegraph.cost` (synth|sim|auto, default auto: sim under `lhd sim`, synth elsewhere) resolved to the profile pass.aegraph runs:
+// `auto` is `sim` under `lhd sim` and `synth` everywhere else; an explicit synth|sim overrides it.
 std::string              resolve_aegraph_cost(const Options& opts);
 // The engine identity the compile-cache descriptor names ("classic" or
 // "aegraph+classic:first:cost=sim", ...): what the resolved schedule actually runs, including the resolved

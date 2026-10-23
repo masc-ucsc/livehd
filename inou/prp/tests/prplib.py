@@ -64,7 +64,10 @@ class PrpRunner:
         # `compile_sets` ride ONLY the compile (and sim) of the design under test.
         # Unlike `equiv_sets` they are never appended to `lhd lec` and never to the
         # compile of a golden Verilog, so an A/B run puts exactly the DUT through
-        # the selected engine: the reference side stays the classic compile.
+        # the selected engine: the reference side keeps its own flags (the engine A/B fixtures pin
+        # their base to `:set: compile.cprop.engine=classic`). aegraph is the default engine, so
+        # `--aegraph` is explicit rather than needed; use compile.cprop.engine=classic to run a
+        # fixture's design under test through the classic engine.
         # `--aegraph` selects the e-graph engine for the whole fixture;
         # LHD_PRP_COMPILE_SETS="k=v k2=v2" forces any compile sets on every fixture
         # of an existing target (`bazel test --test_env=LHD_PRP_COMPILE_SETS=

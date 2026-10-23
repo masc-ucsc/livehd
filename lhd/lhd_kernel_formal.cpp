@@ -132,7 +132,7 @@ bool mixed_loop_structural_identity(hhds::Graph* compact, hhds::Graph* unrolled,
       return false;
     }
   }
-  // Preflight contract (no pass.bitwidth follows): the process-wide fold engine, classic by default.
+  // Preflight contract (no pass.bitwidth follows): the process-wide fold engine, aegraph by default.
   livehd::Fold_options fold;
   fold.bitwidth_follows = false;
   fold.site             = "formal.semdiff";
@@ -5776,7 +5776,7 @@ void lec_command(Options& opts, Result& res) {
       // Under the run deadline, checked between graphs (a cprop of one graph
       // cannot stop part-way): on cva6 this step alone ran ~7 min.
       // formal.lec.preflight_engine: the cprop engine of this re-simplify (INTERNAL). Unset, it follows the
-      // process-wide fold engine (compile.cprop.engine, classic by default); set, it overrides it.
+      // process-wide fold engine (compile.cprop.engine, aegraph by default); set, it overrides it.
       const std::string preflight_label  = label("preflight_engine", "");
       auto               preflight_engine = livehd::fold_engine();
       if (!preflight_label.empty()) {

@@ -1,5 +1,6 @@
 /*
 :name: aeg_xor_bool_one
+:set: compile.cprop.engine=classic
 :type: lec
 */
 // PYROPE-vs-PYROPE group, the fixture of the aegraph rule `xor_bool_one`

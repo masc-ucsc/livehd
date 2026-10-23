@@ -132,6 +132,8 @@ protected:
   // re-attaches the low part. true = node replaced.
   bool low_lane(hhds::Node_class& node);
   bool low_lanes_ = false;
+  // mux_share_pass: also flatten Mux trees into a Hotmux over path conjunctions (see share_mux_regions).
+  bool hotmux_trees_ = true;
   // The constructor's `low_lanes` opt-in doubles as "bitwidth runs after this
   // sweep": rewrites that mint cells with no width stamp (low-lane narrowing,
   // the accumulation guard in scalar_mux) run only then. Bitwidth_rewrite
@@ -154,6 +156,9 @@ public:
   // cells with no width stamp, so only callers that run bitwidth afterwards
   // set it.
   explicit Cprop(bool low_lanes) : low_lanes_(low_lanes) {}
+  // Off for a simulation target: the Hotmux-over-path-conjunctions flattening of mux_share costs more host
+  // instructions than the Mux tree it replaces (dino -4%, picorv32 -5% kernel instructions without it).
+  void set_hotmux_trees(bool on) { hotmux_trees_ = on; }
   // The accumulation-guard rewrite in scalar_mux (`mux(s, a, a OP x)` ->
   // `a OP mux(s, id, x)`) is a ROLLED-LOOP rule: it turns a loop body's
   // guarded update into an associative reduction of its carry, which is what
@@ -193,6 +198,9 @@ namespace livehd {
 int  low_lane_bits(const hhds::Pin_class& pin);
 // Disjoint mux regions: ordinary cprop leaves destination-Q regions intact;
 // enableopt exclusively owns their feedback-to-enable transformation.
+// `hotmux_trees` off keeps the Mux trees whose flattening would need a Hotmux over path conjunctions (3 or more
+// distinct values): that form saves data selects and pays predicate gates, which wins in hardware and loses in a
+// simulator. The single-select two-value rewrite always runs.
 void share_mux_regions(hhds::Graph& graph, bool state_context,
-                       const std::function<bool(const hhds::Pin_class&)>& boolean_fact = {});
+                       const std::function<bool(const hhds::Pin_class&)>& boolean_fact = {}, bool hotmux_trees = true);
 }  // namespace livehd

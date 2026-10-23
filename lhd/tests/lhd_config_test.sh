@@ -38,14 +38,14 @@ grep -q "resolved order: attributes typecheck constprop" "$W/w2/logs/"*upass*.lo
 printf '[upass]\nverifier = false\n' > "$W/sane.toml"
 "$LHD" compile "$PRP" --config "$W/sane.toml" --emit verilog:"$W/v3.v" --workdir "$W/w3" -q --result-json "$W/r3.json" \
   || fail "compile with a sane config exited non-zero: $(cat "$W/r3.json" 2>/dev/null)"
-grep -q 'pass.cprop' "$W/r3.json" || fail "compile did not run pass.cprop"
+grep -q 'pass.aegraph' "$W/r3.json" || fail "the default engine is the e-graph one (pass.aegraph): $(cat "$W/r3.json")"
 grep -q 'pass.bitwidth' "$W/r3.json" || fail "compile did not run pass.bitwidth"
 # A bare ln: emit produces no graphs and must still pass.
 "$LHD" compile "$PRP" --config "$W/sane.toml" --emit-dir ln:"$W/lns/" --workdir "$W/w4" -q --result-json "$W/r4.json" \
   || fail "compile --emit-dir ln: with a config exited non-zero: $(cat "$W/r4.json" 2>/dev/null)"
 
 # compile.cprop.engine swaps the method in the cprop slots (the kernel
-# dispatches): classic runs pass.cprop only, aegraph pass.aegraph only,
+# dispatches; aegraph is the default): classic runs pass.cprop only, aegraph pass.aegraph only,
 # aegraph+classic runs both, and engine_slots limits which slot follows. At
 # least one engine always runs, so pass.cprop or pass.aegraph is always there.
 count_steps() { grep -o '"recipe":\[[^]]*\]' "$1" | grep -o "\"pass\.$2[ \"]" | wc -l; }
@@ -54,7 +54,7 @@ run_engine() {
   "$LHD" compile "$PRP" --config "$W/sane.toml" "$@" --emit verilog:"$W/e_$tag.v" --workdir "$W/e_$tag" -q --result-json "$W/e_$tag.json" \
     || fail "engine=$tag compile failed: $(cat "$W/e_$tag.json" 2>/dev/null)"
 }
-run_engine classic
+run_engine classic --set compile.cprop.engine=classic
 [ "$(count_steps "$W/e_classic.json" cprop)" -eq 2 ] || fail "classic must run pass.cprop twice: $(cat "$W/e_classic.json")"
 [ "$(count_steps "$W/e_classic.json" aegraph)" -eq 0 ] || fail "classic must not run pass.aegraph"
 run_engine aegraph --set compile.cprop.engine=aegraph

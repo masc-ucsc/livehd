@@ -1,5 +1,6 @@
 /*
 :name: aeg_getmask_drop_terms
+:set: compile.cprop.engine=classic
 :type: lec
 */
 // PYROPE-vs-PYROPE group, the fixture of the aegraph rule `getmask_drop_terms` (pass/aegraph/rules/mask.cpp): a window of

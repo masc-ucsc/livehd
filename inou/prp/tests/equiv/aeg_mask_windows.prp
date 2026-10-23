@@ -1,5 +1,6 @@
 /*
 :name: aeg_mask_windows
+:set: compile.cprop.engine=classic
 :type: lec
 */
 // PYROPE-vs-PYROPE group, the fixture of the aegraph window rules (pass/aegraph/rules/mask.rules and

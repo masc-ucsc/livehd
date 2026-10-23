@@ -129,7 +129,9 @@ def cold_run(label, directory):
     value, report = synth(label, directory)
     assert not any(row["cache_reused"] for row in report["regions"]), (label, report["cache"])
     assert report["cache"]["replayed_search_work"] == 0, (label, report["cache"])
-    assert value["qor"]["abc"]["incremental"]["hits"] == 0, (label, value["qor"]["abc"]["incremental"])
+    # A fresh workdir replays nothing from an earlier run. The one hit allowed is WITHIN the run: `right` and `spare` are the
+    # same function and the e-graph engine canonicalizes them to the same region body, so the second maps from the first.
+    assert value["qor"]["abc"]["incremental"]["hits"] <= 1, (label, value["qor"]["abc"]["incremental"])
     return value, report
 
 

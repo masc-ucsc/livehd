@@ -1,5 +1,6 @@
 /*
 :name: aeg_div_rem
+:set: compile.cprop.engine=classic
 :type: lec
 */
 // PYROPE-vs-PYROPE group, the fixture of the aegraph Div/Rem rules (pass/aegraph/rules/div.rules, Q2).

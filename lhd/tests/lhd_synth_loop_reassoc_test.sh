@@ -34,7 +34,9 @@ PY
 synth() {  # synth <mapper> <mode> [--set k=v...]
   local mapper=$1 mode=$2
   shift 2
-  "$LHD" synth lg:"$W/src" --top "$TOP" --set synth.liberty="$LIB" --stats "$@" \
+  # The merge checks below are about pass/synth/reassoc.cpp, so the legs run the classic engine (whose loop cleanup leaves the
+  # expanded chains for reassoc); the e-graph engine flattens them itself, see the default-engine leg after the loop.
+  "$LHD" synth lg:"$W/src" --top "$TOP" --set synth.liberty="$LIB" --stats --set compile.cprop.engine=classic "$@" \
     --set synth.mapper="$mapper" --set lhd.jobs=1 --emit-dir lg:"$W/net_${mapper}_$mode" \
     --workdir "$W/synth_${mapper}_$mode" --result-json "$W/synth_${mapper}_$mode.json" >"$W/synth_${mapper}_$mode.log" 2>&1 ||
     { cat "$W/synth_${mapper}_$mode.log"; exit 1; }
@@ -60,4 +62,21 @@ for mapper in abc usyn; do
   grep -q '"verdict":"proven-' "$W/lec_$mapper.json" ||
     { echo "FAIL: $mapper: mapped netlist not PROVEN: $(cat "$W/lec_$mapper.json")" >&2; exit 1; }
 done
-echo "PASS: loop accumulator chains reassociate for abc, map shallower, and prove (abc + usyn)"
+
+# The DEFAULT engine (e-graph): its flatten rule merges the same-colored expanded chains itself, so the mapped delay must be
+# at least as good as the classic engine plus reassoc, with reassoc finding nothing left to merge, and the netlist proves.
+"$LHD" synth lg:"$W/src" --top "$TOP" --set synth.liberty="$LIB" --stats --set synth.mapper=abc --set lhd.jobs=1 \
+  --emit-dir lg:"$W/net_default" --workdir "$W/synth_default" --result-json "$W/synth_default.json" >"$W/synth_default.log" 2>&1 ||
+  { cat "$W/synth_default.log"; exit 1; }
+grep -rhq 'reassoc: guarded=0 trees=0 absorbed=0$' "$W/synth_default/logs" ||
+  { echo "FAIL: default engine: reassoc still had chains to merge: $(grep -rh 'reassoc:' "$W/synth_default/logs")" >&2; exit 1; }
+dflt=$(delay "$W/synth_default.json")
+on=$(delay "$W/synth_abc_on.json")
+python3 -c "import sys; d, on = float('$dflt'), float('$on'); sys.exit(0 if d <= on * 1.02 else 1)" ||
+  { echo "FAIL: default engine delay $dflt is worse than classic + reassoc $on" >&2; exit 1; }
+run lec --set formal.effort=proof --impl lg:"$W/net_default" --ref lg:"$W/src" --lib lg:"$W/models" \
+  --top "$TOP" --workdir "$W/lec_default" --result-json "$W/lec_default.json"
+grep -q '"verdict":"proven-' "$W/lec_default.json" ||
+  { echo "FAIL: default engine: mapped netlist not PROVEN: $(cat "$W/lec_default.json")" >&2; exit 1; }
+echo "default engine: delay $dflt (classic + reassoc $on)"
+echo "PASS: loop accumulator chains reassociate for abc, map shallower, and prove (abc + usyn); the default engine merges them itself"

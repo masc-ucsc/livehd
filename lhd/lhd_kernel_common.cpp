@@ -1498,14 +1498,14 @@ void check_known_set_passes(const Options& opts) {
       if (value != "classic" && value != "aegraph" && value != "aegraph+classic") {
         throw Lhd_error{"usage",
                         std::format("--set/--config compile.cprop.engine expects classic|aegraph|aegraph+classic, got '{}'", value),
-                        "classic is the default; aegraph+classic runs the e-graph engine and then classic in each slot"};
+                        "aegraph is the default; classic is the reference engine; aegraph+classic runs the e-graph engine and then classic in each slot"};
       }
     }
     if (pass == "compile.aegraph" && flag == "cost") {
       if (value != "synth" && value != "sim" && value != "auto") {
         throw Lhd_error{"usage",
                         std::format("--set/--config compile.aegraph.cost expects synth|sim|auto, got '{}'", value),
-                        "synth is the default; sim prices the LLVM simulator backend; auto is sim under `lhd sim`, else synth"};
+                        "auto is the default: sim under `lhd sim`, synth for every other command; an explicit synth|sim overrides it"};
       }
     }
     if (pass == "compile.cprop" && flag == "engine_slots") {
@@ -1761,7 +1761,7 @@ std::vector<std::string> cprop_slot_methods(const Cprop_engine& choice, int slot
 }
 
 std::string resolve_aegraph_cost(const Options& opts) {
-  std::string cost = "synth";
+  std::string cost = "auto";  // unset: follow the command (sim under `lhd sim`, synth elsewhere); an explicit value wins
   for (const auto& [key, value] : opts.sets) {
     if (key == "compile.aegraph.cost") {
       cost = value;

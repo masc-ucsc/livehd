@@ -1,5 +1,6 @@
 /*
 :name: aeg_bit_reduction_rows
+:set: compile.cprop.engine=classic
 :type: lec
 */
 // PYROPE-vs-PYROPE group, the fixture of the bit-row reductions of the aegraph post step (Cprop::vectorize_bit_reductions

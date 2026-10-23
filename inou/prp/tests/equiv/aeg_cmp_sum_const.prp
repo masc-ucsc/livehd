@@ -1,0 +1,17 @@
+/*
+:name: aeg_cmp_sum_const
+:set: compile.cprop.engine=classic
+:type: lec
+*/
+// PYROPE-vs-PYROPE group, the fixture of the aegraph rules that move a constant across a comparison
+// (pass/aegraph/rules/arith.rules, Cranelift icmp.isle): `(x + c) == d` is `x == d - c`, the same for < and >, and the
+// wrapped counter compare `((x + c) mod 2^n) == d` is `(x mod 2^n) == (d - c) mod 2^n`. A difference tested against zero is an
+// equality. REFERENCE = classic engine; `_1` = e-graph engine.
+pub comb top(a:U8, b:U8, n:U8) -> (e:Bool, l:Bool, g:Bool, w:Bool, d:Bool, m:Bool) {
+  e = (a + 3) == 10
+  l = (a - 5) < 20
+  g = 40 > (a + 7)
+  w = ((a + 3)#[0..<8]) == 1
+  d = (a - b) == 0
+  m = ((a - b)#[0..<8]) == 0
+}

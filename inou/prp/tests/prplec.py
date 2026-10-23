@@ -277,7 +277,7 @@ def _run_pair(runner, tmp_dir, base_test, var_test, verbose=False):
     impl = _Side('impl', var_src, _sets(var_test) if var_test.params.get('set') else ref.sets)
     # Harness-wide compile sets (--aegraph / LHD_PRP_COMPILE_SETS) go to the IMPL
     # side only, which makes the two sides differ and pre-compiles each: the
-    # reference stays the classic compile, so a pair proves "engine == classic".
+    # reference keeps its own flags (the engine A/B bases pin classic), so a pair proves "engine == classic".
     forced = False
     if runner.compile_sets:
         if impl.sets == ref.sets:

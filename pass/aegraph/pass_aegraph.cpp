@@ -59,9 +59,10 @@ void Pass_aegraph::setup() {
                         "32");
   m1.add_label_optional("cost",
                         "synth|sim|auto: the extraction cost profile (pass/aegraph/cost/<name>.cost). synth: gates, width-aware, "
-                        "wiring free (default). sim: instructions of the LLVM-emitted simulator, word-quantized. auto: sim under "
-                        "`lhd sim`, else synth. An alt rule's result is kept only when the profile prices it strictly lower",
-                        "synth");
+                        "wiring free. sim: instructions of the LLVM-emitted simulator, word-quantized. auto (default): sim under "
+                        "`lhd sim`, synth for every other command (`lhd compile` alone gets synth); an explicit synth|sim overrides. "
+                        "An alt rule's result is kept only when the profile prices it strictly lower",
+                        "auto");
   m1.add_label_optional("choices", "off|const|expr: whether '?' choice rules are active (no choice rules exist yet)", "off");
 
   register_pass(m1);
@@ -100,6 +101,7 @@ livehd::aegraph::Options graph_options(livehd::aegraph::Options options, bool lo
 
 namespace livehd::aegraph {
 Stats optimize_body(Cprop& cp, const std::shared_ptr<hhds::Graph>& g, const Options& options) {
+  cp.set_hotmux_trees(options.cost != Options::Cost::sim);
   const auto stats = optimize(g, [&](const std::vector<hhds::Node_class>& cyclic) { cp.do_scalar(g, cyclic); }, options);
   livehd::aegraph_profile::Timer post(livehd::aegraph_profile::post);
   if (stats.refused != 0) {
@@ -132,7 +134,7 @@ void Pass_aegraph::optimize(Eprp_var& var) {
                                                        var.get("eclass_limit", "5"),
                                                        var.get("extractor_fuel", "500"),
                                                        var.get("edge_budget", "32"),
-                                                       var.get("cost", "synth"),
+                                                       var.get("cost", "auto"),
                                                        var.get("choices", "off"));
   // One cprop-summary record per graph (indexed like var.graphs), emitted
   // serially after the workers join so the order is the graph order.

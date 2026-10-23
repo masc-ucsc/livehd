@@ -30,9 +30,11 @@ void Pass_cprop::setup() {
 
   m1.add_label_optional("engine",
                         "classic|aegraph|aegraph+classic: the constant-propagation engine the compile schedule runs in place of "
-                        "(or before) pass.cprop. classic is the default and always remains the reference. At least one engine "
+                        "(or before) pass.cprop. aegraph is the default; classic remains available as the reference. At least one engine "
                         "always runs. The kernel dispatches (compile_graph_passes), so this method only ever sees classic",
-                        "classic");
+                        // The LISTED default is the compile pipeline's (`lhd list options`): the kernel runs aegraph unless told
+                        // otherwise. A bare `lhd pass cprop` still means this pass, i.e. classic (see optimize below).
+                        "aegraph");
   m1.add_label_optional("engine_slots",
                         "both|first|second: which of the two compile cprop slots (the first, before pass.legalize, and the "
                         "second, after enableopt) follow compile.cprop.engine; the other slot stays classic",

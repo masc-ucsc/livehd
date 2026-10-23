@@ -1,6 +1,7 @@
 // This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 
 #include <limits>
+#include <map>
 #include <optional>
 #include <vector>
 
@@ -54,10 +55,26 @@ class Mux_sharing {
     size_t index;
     bool   internal;
   };
+  // One conjunct of a path condition: the control of ONE arm (positive), or the negated OR of the controls of
+  // every arm that was passed over (negative). Keeping the conjuncts, not just their AND, lets a later positive
+  // equality drop the negative ones it already implies.
+  struct Literal {
+    std::vector<Pin>                        arms;
+    bool                                    positive;
+    std::optional<livehd::muxctx::Equality> equal;    // positive: the single arm is `v == k`
+    std::vector<livehd::muxctx::Equality>   unequal;  // negative: every arm is `v == k`
+    bool                                    unequal_all = false;
+  };
+  // A path is a persistent list: siblings share their prefix, and each node memoizes the conjunction up to it.
+  struct Path_node {
+    size_t literal;
+    size_t parent;
+    Pin    condition;
+  };
   struct Visit {
-    size_t              candidate;
-    std::vector<Target> targets;
-    Pin                 active;
+    size_t                     candidate;
+    std::vector<Target>        targets;
+    size_t                     path = absent;
     livehd::muxctx::Path_facts facts;
   };
   struct Group {
@@ -65,17 +82,120 @@ class Mux_sharing {
     std::vector<Pin> conditions;
   };
 
-  hhds::Graph&                                                  graph;
-  bool                                                          state_context;
-  std::function<bool(const Pin&)>                               boolean_fact;
-  Pin                                                           zero;
-  Pin                                                           one;
-  std::vector<Candidate>                                        candidates;
-  absl::flat_hash_map<hhds::Class_index, size_t>                candidate_ids;
-  absl::flat_hash_map<hhds::Class_index, size_t>                value_ids;
-  absl::flat_hash_map<Pin, size_t, Value_hash, Value_equal>     values;
+  hhds::Graph&                                              graph;
+  bool                                                      state_context;
+  bool                                                      hotmux_trees;
+  std::function<bool(const Pin&)>                           boolean_fact;
+  Pin                                                       zero;
+  Pin                                                       one;
+  std::vector<Candidate>                                    candidates;
+  absl::flat_hash_map<hhds::Class_index, size_t>            candidate_ids;
+  absl::flat_hash_map<hhds::Class_index, size_t>            value_ids;
+  absl::flat_hash_map<Pin, size_t, Value_hash, Value_equal> values;
 
   bool exclusive(const Candidate& c) { return livehd::muxctx::exclusive(c.node); }
+
+  std::map<std::pair<bool, std::vector<size_t>>, size_t> literal_ids;
+  std::vector<Literal>                                   literals;
+  std::vector<Pin>                                       literal_pins;
+  std::vector<Path_node>                                 path_nodes;
+
+  size_t literal_id(std::vector<Pin> arms, bool positive) {
+    std::vector<size_t> key;
+    for (const auto& p : arms) {
+      key.push_back(p.get_class_index().value);
+    }
+    auto [it, fresh] = literal_ids.try_emplace({positive, std::move(key)}, literals.size());
+    if (fresh) {
+      Literal lit{std::move(arms), positive, {}, {}, false};
+      if (positive) {
+        if (lit.arms.size() == 1) {
+          lit.equal = livehd::muxctx::equality(lit.arms.front());
+        }
+      } else {
+        lit.unequal_all = true;
+        for (const auto& arm : lit.arms) {
+          if (const auto eq = livehd::muxctx::equality(arm)) {
+            lit.unequal.push_back(*eq);
+          } else {
+            lit.unequal_all = false;
+            break;
+          }
+        }
+      }
+      literals.push_back(std::move(lit));
+      literal_pins.emplace_back();
+    }
+    return it->second;
+  }
+
+  Pin literal_pin(size_t id) {
+    if (literal_pins[id].is_invalid()) {
+      const auto& lit  = literals[id];
+      literal_pins[id] = lit.positive ? lit.arms.front() : negate(lit.arms.size() == 1 ? lit.arms.front() : disjunction(lit.arms));
+    }
+    return literal_pins[id];
+  }
+
+  // A positive `v == k` makes a negative literal redundant when every equality of its OR compares the same v with
+  // another constant: v == k already excludes each of them.
+  bool implies_negation(const Literal& positive, const Literal& negative) const {
+    if (!positive.equal || !negative.unequal_all) {
+      return false;
+    }
+    for (const auto& other : negative.unequal) {
+      if (other.value != positive.equal->value || other.constant == positive.equal->constant) {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  size_t append(size_t parent, size_t literal) {
+    path_nodes.push_back({literal, parent, {}});
+    return path_nodes.size() - 1;
+  }
+
+  // The path with `literal` appended, minus the earlier conjuncts it makes redundant.
+  size_t extend_path(size_t path, size_t literal) {
+    const auto& lit = literals[literal];
+    if (lit.equal) {
+      bool redundant = false;
+      for (size_t at = path; at != absent && !redundant; at = path_nodes[at].parent) {
+        redundant = implies_negation(lit, literals[path_nodes[at].literal]);
+      }
+      if (redundant) {
+        std::vector<size_t> kept;
+        for (size_t at = path; at != absent; at = path_nodes[at].parent) {
+          if (!implies_negation(lit, literals[path_nodes[at].literal])) {
+            kept.push_back(path_nodes[at].literal);
+          }
+        }
+        size_t rebuilt = absent;
+        for (size_t i = kept.size(); i-- > 0;) {
+          rebuilt = append(rebuilt, kept[i]);
+        }
+        return append(rebuilt, literal);
+      }
+    }
+    return append(path, literal);
+  }
+
+  Pin path_condition(size_t path) {
+    if (path == absent) {
+      return one;
+    }
+    std::vector<size_t> pending;
+    for (size_t at = path; at != absent && path_nodes[at].condition.is_invalid(); at = path_nodes[at].parent) {
+      pending.push_back(at);
+    }
+    for (size_t i = pending.size(); i-- > 0;) {
+      auto&      node   = path_nodes[pending[i]];
+      const auto before = node.parent == absent ? one : path_nodes[node.parent].condition;
+      node.condition    = conjunction(before, literal_pin(node.literal));
+    }
+    return path_nodes[path].condition;
+  }
 
   size_t value_id(Pin p) {
     auto [it, fresh] = value_ids.try_emplace(p.get_class_index(), 0);
@@ -414,7 +534,7 @@ class Mux_sharing {
       return;
     }
     std::vector<Visit> visits{
-        {root_id, {}, one, {}}
+        {root_id, {}, absent, {}}
     };
     std::vector<Group>                  groups;
     absl::flat_hash_map<size_t, size_t> group_ids;
@@ -429,7 +549,7 @@ class Mux_sharing {
         auto child = candidate_ids.find(p.get_master_node().get_class_index());
         if (!p.is_const() && child != candidate_ids.end() && candidates[child->second].parent == id) {
           targets.push_back({visits.size(), true});
-          visits.push_back({child->second, {}, {}, {}});
+          visits.push_back({child->second, {}, absent, {}});
         } else {
           ++terminals;
           auto [it, fresh] = group_ids.try_emplace(value_id(p), groups.size());
@@ -480,6 +600,9 @@ class Mux_sharing {
       two_group_tree(root, visits, groups);
       return;
     }
+    if (!hotmux_trees) {
+      return;  // a Hotmux of path conjunctions trades data selects for predicate gates: a loss for a simulator
+    }
     // A selection among PROVEN 0/1 values stays the Mux nest it is. Flattening
     // pays one conjunction per path and one disjunction per value -- 1-bit
     // predicate gates, as wide as the data -- to save 1-bit selects, and the
@@ -517,24 +640,39 @@ class Mux_sharing {
         const auto known = visit.facts.truth(control, condition);
         controls.push_back(known ? (*known ? one : zero) : boolean(control));
       }
-      const auto fallback = negate(disjunction(controls));
-      controls.push_back(fallback);
-      for (size_t j = 0; j < controls.size(); ++j) {
-        auto facts = visit.facts;
+      for (size_t j = 0; j <= controls.size(); ++j) {
+        auto             facts = visit.facts;
+        // The conjunct this branch adds to the path: nothing when it always holds, `dead` when it never can.
+        std::vector<Pin> arms;
+        bool             dead = false;
         if (j < c.arms.size()) {
           facts.assume(c.arms[j].first, true, condition);
+          dead = controls[j] == zero;
+          if (controls[j] != one) {
+            arms.push_back(controls[j]);
+          }
         } else {
           for (const auto& arm : c.arms) {
             facts.assume(arm.first, false, condition);
           }
+          for (const auto& control : controls) {
+            dead = dead || control == one;
+            if (control != zero) {
+              arms.push_back(control);
+            }
+          }
         }
-        const auto active = facts.reachable() ? conjunction(visit.active, controls[j]) : zero;
+        const bool reachable = facts.reachable() && !dead;
+        size_t     path      = visit.path;
+        if (reachable && !arms.empty()) {
+          path = extend_path(path, literal_id(std::move(arms), j < c.arms.size()));
+        }
         const auto target = visit.targets[j];
         if (target.internal) {
-          visits[target.index].active = active;
-          visits[target.index].facts  = facts;
+          visits[target.index].path  = path;
+          visits[target.index].facts = facts;
         } else {
-          groups[target.index].conditions.push_back(active);
+          groups[target.index].conditions.push_back(reachable ? path_condition(path) : zero);
         }
       }
     }
@@ -590,8 +728,8 @@ class Mux_sharing {
   }
 
 public:
-  explicit Mux_sharing(hhds::Graph& g, bool state, const std::function<bool(const Pin&)>& proof)
-      : graph(g), state_context(state), boolean_fact(proof ? proof : livehd::cprop_value::is_bool01) {
+  explicit Mux_sharing(hhds::Graph& g, bool state, const std::function<bool(const Pin&)>& proof, bool hotmux)
+      : graph(g), state_context(state), hotmux_trees(hotmux), boolean_fact(proof ? proof : livehd::cprop_value::is_bool01) {
     zero = gu::create_const(graph, *Dlop::create_integer(0));
     one  = gu::create_const(graph, *Dlop::create_integer(1));
   }
@@ -608,9 +746,10 @@ public:
 
 void Cprop::mux_share_pass() {
   livehd::cprop_profile::Timer timer(livehd::cprop_profile::sharing);
-  livehd::share_mux_regions(*current_graph, false);
+  livehd::share_mux_regions(*current_graph, false, {}, hotmux_trees_);
 }
 
-void livehd::share_mux_regions(hhds::Graph& graph, bool state_context, const std::function<bool(const Pin&)>& boolean_fact) {
-  Mux_sharing(graph, state_context, boolean_fact).run();
+void livehd::share_mux_regions(hhds::Graph& graph, bool state_context, const std::function<bool(const Pin&)>& boolean_fact,
+                               bool hotmux_trees) {
+  Mux_sharing(graph, state_context, boolean_fact, hotmux_trees).run();
 }

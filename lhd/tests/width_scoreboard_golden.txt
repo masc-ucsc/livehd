@@ -6,7 +6,7 @@ bitrange_dyn 43 5
 bitrange_dyn_narrow 40 5
 codeblock_expr 32 3
 arr2d_dyn_sel 88 9
-arr_comb_tmp 11 8
+arr_comb_tmp 9 7
 array_bitview_runtime 224 14
 bit_sel_sext 55 7
 bitsel_dyn 43 6

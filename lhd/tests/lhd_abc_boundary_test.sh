@@ -83,7 +83,9 @@ run() {
 [ -f "$PRP" ] || fail "missing fixture $PRP"
 [ -f "$LIB" ] || fail "missing liberty $LIB"
 
-run compile "$PRP" --top "$TOP" --emit-dir lg:"$W/lg" --workdir "$W/w1"
+# Pinned to the classic engine: this fixture is about the NAND of region 1 crossing into region 2, and the e-graph engine
+# (correctly) absorbs that inversion into the consumer's mux arms, so no NAND is left to size.
+run compile "$PRP" --top "$TOP" --set compile.cprop.engine=classic --emit-dir lg:"$W/lg" --workdir "$W/w1"
 
 # 1. boundary on: with the budget propagated back across the hierarchy, the
 # driver region takes the stronger NAND
@@ -180,7 +182,7 @@ grep -q "NAND2x2" "$W/v_off/${TOP}__c1.v" && fail "boundary=false sized the cros
 PRP2=inou/prp/tests/pyrope/abc_pi_fanout.prp
 TOP2=abc_pi_fanout.abc_pi_fanout
 [ -f "$PRP2" ] || fail "missing fixture $PRP2"
-run compile "$PRP2" --top "$TOP2" --emit-dir lg:"$W/lg2" --workdir "$W/w2"
+run compile "$PRP2" --top "$TOP2" --set compile.cprop.engine=classic --emit-dir lg:"$W/lg2" --workdir "$W/w2"
 run pass "$MAPPER" --top "$TOP2" lg:"$W/lg2" --emit-dir lg:"$W/net_fan" --set synth.liberty="$LIB" --workdir "$W/w_fan"
 run compile lg:"$W/net_fan" --top "$TOP2" --emit-dir verilog:"$W/v_fan" --workdir "$W/wv_fan"
 n=$(cat "$W/v_fan/"*.v | grep -cE '^\s*BUFx1\s')

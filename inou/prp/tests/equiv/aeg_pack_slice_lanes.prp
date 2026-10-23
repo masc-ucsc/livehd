@@ -1,5 +1,6 @@
 /*
 :name: aeg_pack_slice_lanes
+:set: compile.cprop.engine=classic
 :type: lec
 */
 // PYROPE-vs-PYROPE group, the fixture of the aegraph post step that folds a slice of

@@ -1,5 +1,6 @@
 /*
 :name: aeg_getmask_sum_chain
+:set: compile.cprop.engine=classic
 :type: lec
 */
 // PYROPE-vs-PYROPE group, the fixture of the aegraph rule `getmask_sum_chain` (pass/aegraph/rules/mask.cpp): the low

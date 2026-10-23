@@ -1,5 +1,6 @@
 /*
 :name: loop_carry_kinds
+:set: compile.cprop.engine=classic
 :type: lec
 :lec_set: formal.engine=ind
 */

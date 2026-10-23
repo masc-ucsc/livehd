@@ -1,5 +1,6 @@
 /*
 :name: aeg_and_stamped_lanes
+:set: compile.cprop.engine=classic
 :type: lec
 :lec_top: top
 */

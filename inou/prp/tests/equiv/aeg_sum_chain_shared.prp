@@ -1,0 +1,16 @@
+/*
+:name: aeg_sum_chain_shared
+:set: compile.cprop.engine=classic
+:type: lec
+*/
+// PYROPE-vs-PYROPE group, the fixture of the SHARED case of the aegraph rule `getmask_sum_chain`
+// (pass/aegraph/rules/mask.cpp): the windowed sum t = (v + inc) mod 32 feeds two subtractions and a compare (the shape of
+// bedrock's br_credit_counter). Merging t into each subtraction would add two more adders over v and inc, so the rule only
+// offers the merged form as an alternative and the sharing-aware extraction keeps t. REFERENCE = classic engine; `_1` =
+// e-graph engine.
+pub comb top(v:U5, inc:U3, w:U5, x:U5) -> (a:U5, b:U5, c:Bool) {
+  const t = (v + inc)#[0..<5]
+  a = (t - w)#[0..<5]
+  b = (t - x)#[0..<5]
+  c = t > w
+}

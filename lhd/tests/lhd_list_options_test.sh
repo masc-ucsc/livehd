@@ -54,12 +54,12 @@ echo "$out" | grep -q '"name":"pass.abc.unroll_carry","method":"pass.abc","defau
   || fail "ABC carry expansion default missing: $out"
 # Compile-only passes live under compile.*; lec/pass passes keep their own namespace.
 echo "$out" | grep -q '"name":"compile.bitwidth.max_iterations"' || fail "compile.bitwidth.* missing: $out"
-# compile.cprop.engine: the engine selector. Default classic, a registered
-# pass.cprop label; the aegraph shares the knobs (one spelling each), so
+# compile.cprop.engine: the engine selector. Default aegraph, a registered
+# pass.cprop label (the compile pipeline's default is the aegraph); the aegraph shares the knobs (one spelling each), so
 # pass.aegraph's low_lanes/loop_hoist/engine labels are INTERNAL (unlisted) and
 # the spelling compile.aegraph.<shared> is rejected with the compile.cprop one.
-echo "$out" | grep -q '"name":"compile.cprop.engine","method":"pass.cprop","default":"classic"' \
-  || fail "compile.cprop.engine must default classic: $out"
+echo "$out" | grep -q '"name":"compile.cprop.engine","method":"pass.cprop","default":"aegraph"' \
+  || fail "compile.cprop.engine must list the pipeline default aegraph: $out"
 echo "$out" | grep -q '"name":"compile.cprop.engine_slots","method":"pass.cprop","default":"both"' \
   || fail "compile.cprop.engine_slots must default both: $out"
 echo "$out" | grep -Eq '"name":"compile.aegraph.(low_lanes|loop_hoist|engine|engine_slots)"' \

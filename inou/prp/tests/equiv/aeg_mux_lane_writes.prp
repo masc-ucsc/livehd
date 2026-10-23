@@ -1,5 +1,6 @@
 /*
 :name: aeg_mux_lane_writes
+:set: compile.cprop.engine=classic
 :type: lec
 */
 // PYROPE-vs-PYROPE group, the fixture of the aegraph lane-write rules (pass/aegraph/rules/mux.cpp

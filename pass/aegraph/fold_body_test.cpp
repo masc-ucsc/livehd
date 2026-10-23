@@ -74,7 +74,8 @@ TEST(FoldBody, EveryEngineFoldsTheBodyAndIsCountedUnderItsSite) {
     livehd::Fold_options options;
     options.site = "test.site";
     livehd::fold_body(g, engine, options);
-    EXPECT_EQ(count_op(g, Ntype_op::Sum), 1u) << livehd::fold_engine_name(engine) << ": the constant Sum folds, the shared pair merges";
+    EXPECT_EQ(count_op(g, Ntype_op::Sum), engine == livehd::Fold_engine::classic ? 1u : 0u)
+        << livehd::fold_engine_name(engine) << ": the constant Sum folds, the shared pair merges (x + x is x << 1 in the e-graph)";
     EXPECT_EQ(livehd::fold_count("test.site", engine), 1u) << livehd::fold_engine_name(engine);
     livehd::lec::Lec_options lec;
     lec.cones   = "false";
@@ -100,7 +101,7 @@ TEST(FoldBody, ProcessWideEngineIsTheDefaultAndClassicUntilSet) {
   auto h = make(lib, "fold_global2");
   livehd::fold_body(h, options);
   EXPECT_EQ(livehd::fold_count("test.global", livehd::Fold_engine::aegraph), 1u);
-  EXPECT_EQ(count_op(h, Ntype_op::Sum), 1u);
+  EXPECT_EQ(count_op(h, Ntype_op::Sum), 0u);  // the shared pair merges into x + x, which the e-graph writes as x << 1
 }
 
 TEST(FoldBody, PreflightFoldStampsEveryCellItCreates) {
@@ -135,7 +136,7 @@ TEST(FoldBody, FoldGraphsRunsTheMethodsOfTheEngine) {
     Eprp_var           var;
     var.graphs.push_back(g);
     livehd::fold_graphs(var, engine, "test.graphs");
-    EXPECT_EQ(count_op(g, Ntype_op::Sum), 1u) << livehd::fold_engine_name(engine);
+    EXPECT_EQ(count_op(g, Ntype_op::Sum), engine == livehd::Fold_engine::classic ? 1u : 0u) << livehd::fold_engine_name(engine);
     EXPECT_EQ(livehd::fold_count("test.graphs", engine), 1u);
   }
 }

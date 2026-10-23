@@ -1,5 +1,6 @@
 /*
 :name: aeg_wide_gather
+:set: compile.cprop.engine=classic
 :type: lec
 */
 // PYROPE-vs-PYROPE group, the fixture of the arity-sized member fuel of the aegraph rule `or_shifted_windows`

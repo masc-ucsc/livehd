@@ -1,0 +1,8 @@
+/*
+:name: aeg_cmp_sum_const_1
+:type: lec
+:set: compile.cprop.engine=aegraph
+:compile_grep: aegraph-rule eq_sum_const_add .*extracted=[1-9]
+:compile_grep: aegraph-rule eq_diff_zero .*extracted=[1-9]
+*/
+// HEADER-ONLY variant: aeg_cmp_sum_const.prp compiled by the acyclic e-graph engine; the greps show the rules did the work.

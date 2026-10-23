@@ -1,5 +1,6 @@
 /*
 :name: aeg_wide_packed_fields
+:set: compile.cprop.engine=classic
 :type: lec
 */
 // PYROPE-vs-PYROPE group, the fixture of the wide-lane fix of the aegraph lane layout (pass/aegraph/runtime/analyses.cpp):

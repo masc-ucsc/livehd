@@ -1,5 +1,6 @@
 /*
 :name: aeg_or_pack_to_concat
+:set: compile.cprop.engine=classic
 :type: lec
 */
 // PYROPE-vs-PYROPE group, the fixture of the aegraph rule `or_pack_to_concat` (pass/aegraph/rules/mask.cpp): an Or of

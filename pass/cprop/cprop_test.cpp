@@ -1685,6 +1685,82 @@ TEST(CpropMuxSharing, PriorityTreePreservesEveryControlCombination) {
   }
 }
 
+// `match op { == 0 {A} == 1 {B} == 2 {A} == 3 {B} else {C} }`: every arm compares the same value with its own
+// constant, so arm i is taken exactly when op == i. The flattened Hotmux must read the direct comparison, not
+// "op != 0 and op != 1 and ... and op == i" (a priority decode that grows with the arm index).
+TEST(CpropMuxSharing, ExclusiveEqualityChainDropsTheImpliedPriorityTerms) {
+  Mux_graph f("eq_chain", 1, 32, false, true);
+  auto      sel  = f.controls[0];
+  auto      root = f.constant(77);
+  for (int i = 3; i >= 0; --i) {
+    root = f.mux(f.eq(sel, i), root, i % 2 ? f.b : f.a);
+  }
+  root.connect_sink(f.graph->get_output_pin("out"));
+  Cprop{}.do_trans(f.graph);
+  EXPECT_EQ(f.count(Ntype_op::Hotmux), 1);
+  EXPECT_EQ(f.count(Ntype_op::Mux), 0);
+  // Four `op == i` comparisons and no `(op == i) == 0` negation or And of them.
+  EXPECT_EQ(f.count(Ntype_op::And), 0);
+  size_t negations = 0;
+  for (auto n : f.graph->body().nodes()) {
+    if (gu::type_op_of(n) == Ntype_op::EQ) {
+      for (auto sink : n.inp_sorted_pins()) {
+        negations += sink.get_driver_pin().is_const() && gu::const_of(sink.get_driver_pin()).is_known_zero() ? 1 : 0;
+      }
+    }
+  }
+  EXPECT_LE(negations, 1);  // `op == 0` itself, never the negation of another comparison
+  for (int64_t op = 0; op < 6; ++op) {
+    Test_values values;
+    values.emplace(sel.get_class_index().value, op);
+    values.emplace(f.a.get_class_index().value, 10);
+    values.emplace(f.b.get_class_index().value, 20);
+    EXPECT_EQ(mux_eval(f.output(), values), op < 4 ? (op % 2 ? 20 : 10) : 77) << op;
+  }
+}
+
+// A simulator target keeps the Mux tree: the Hotmux over path conjunctions saves data selects and pays predicate
+// gates, which loses in host instructions. The same graph flattens when the flag is on.
+TEST(CpropMuxSharing, HotmuxTreesCanBeLeftAloneForASimulatorTarget) {
+  for (bool hotmux : {false, true}) {
+    Mux_graph f(hotmux ? "eq_chain_hot" : "eq_chain_mux", 1, 32, false, true);
+    auto      sel  = f.controls[0];
+    auto      root = f.constant(77);
+    for (int i = 3; i >= 0; --i) {
+      root = f.mux(f.eq(sel, i), root, i % 2 ? f.b : f.a);
+    }
+    root.connect_sink(f.graph->get_output_pin("out"));
+    livehd::share_mux_regions(*f.graph, false, {}, hotmux);
+    EXPECT_EQ(f.count(Ntype_op::Hotmux), hotmux ? 1 : 0);
+    EXPECT_EQ(f.count(Ntype_op::Mux), hotmux ? 0 : 4);
+  }
+}
+
+// The same chain over two DIFFERENT values is not exclusive, so every "not taken before" term must stay.
+TEST(CpropMuxSharing, EqualityChainOverDifferentValuesKeepsThePriorityTerms) {
+  Mux_graph      f("eq_chain_mixed", 2, 32, false, true);
+  auto           x            = f.controls[0];
+  auto           y            = f.controls[1];
+  auto           root         = f.constant(77);
+  const Test_pin selectors[4] = {x, y, x, y};
+  for (int i = 3; i >= 0; --i) {
+    root = f.mux(f.eq(selectors[i], 1), root, i % 2 ? f.b : f.a);
+  }
+  root.connect_sink(f.graph->get_output_pin("out"));
+  Cprop{}.do_trans(f.graph);
+  for (int64_t xv = 0; xv < 3; ++xv) {
+    for (int64_t yv = 0; yv < 3; ++yv) {
+      Test_values values;
+      values.emplace(x.get_class_index().value, xv);
+      values.emplace(y.get_class_index().value, yv);
+      values.emplace(f.a.get_class_index().value, 10);
+      values.emplace(f.b.get_class_index().value, 20);
+      const int64_t expected = xv == 1 ? 10 : yv == 1 ? 20 : 77;
+      EXPECT_EQ(mux_eval(f.output(), values), expected) << xv << "," << yv;
+    }
+  }
+}
+
 TEST(CpropMuxSharing, HotmuxGroupsOnlyEstablishedExclusiveControls) {
   for (int proof : {0, 1, 2, 3}) {
     for (bool fallback : {false, true}) {

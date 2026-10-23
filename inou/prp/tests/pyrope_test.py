@@ -29,7 +29,7 @@ parser.add_argument('--bitfuzz', action='store_true', help='strip internal width
 parser.add_argument('--with-bitfuzz', action='store_true', help='after the plain run passes, rerun the same fixture with --bitfuzz')
 
 # The e-graph constant-propagation engine (pass.aegraph) for the design under
-# test only: the reference side and any golden Verilog stay on the classic engine.
+# test only: the reference side and any golden Verilog keep their own flags (aegraph is the default engine).
 # Same as LHD_PRP_COMPILE_SETS=compile.cprop.engine=aegraph (see prplib.py).
 parser.add_argument('--aegraph', action='store_true', help='compile the design under test with compile.cprop.engine=aegraph')
 

@@ -29,3 +29,11 @@
   => (SRA x (k (+ a b)))
   :example (SRA (SRA $x 2) 3)
   :doc "SRA(SRA(x, a), b) = SRA(x, a + b): floor division by 2^a then 2^b is floor division by 2^(a+b).")
+
+;; ---- a low window of a sign extension is a window of the source ----
+(simplify getmask_sext_low 30
+  (Get_mask (Sext x (k b)) (k lo) (k hi))
+  :when (>= b 1) (>= lo 0) (> hi lo) (<= hi b)
+  => (Get_mask x (k lo) (k hi))
+  :example (Get_mask (Sext $x 8) 2 6)
+  :doc "Sext(x, b) keeps x's low b bits unchanged, so a window that ends at or below bit b reads x directly.")

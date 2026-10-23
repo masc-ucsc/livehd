@@ -1,5 +1,6 @@
 /*
 :name: runtime_index_store_lanes
+:set: compile.cprop.engine=classic
 :type: lec
 :lec_top: runtime_index_store_lanes
 */

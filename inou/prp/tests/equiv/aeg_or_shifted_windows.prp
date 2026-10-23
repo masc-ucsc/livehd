@@ -1,5 +1,6 @@
 /*
 :name: aeg_or_shifted_windows
+:set: compile.cprop.engine=classic
 :type: lec
 */
 // PYROPE-vs-PYROPE group, the fixture of the aegraph rule `or_shifted_windows` (pass/aegraph/rules/mask.cpp):

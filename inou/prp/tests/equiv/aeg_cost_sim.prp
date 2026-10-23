@@ -1,5 +1,6 @@
 /*
 :name: aeg_cost_sim
+:set: compile.cprop.engine=classic
 :type: lec
 */
 // PYROPE-vs-PYROPE group, the fixture of the cost profile choice (pass/aegraph/cost/*.cost, milestone I): a divide

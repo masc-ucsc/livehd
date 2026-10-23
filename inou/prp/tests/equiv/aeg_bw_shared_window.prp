@@ -1,5 +1,6 @@
 /*
 :name: aeg_bw_shared_window
+:set: compile.cprop.engine=classic
 :type: lec
 */
 // PYROPE-vs-PYROPE group, the fixture of a bitwidth_rewrite bug the e-graph engine exposed. Two chained

@@ -269,15 +269,82 @@ TEST(Aegraph, CommutativeBanksAreSortedAndMultiplicityIsKept) {
   auto               b  = g->get_input_pin("i1");
   auto               s1 = binop(g, Ntype_op::Sum, a, b);
   auto               s2 = binop(g, Ntype_op::Sum, b, a);  // same multiset, other order
-  auto               d  = binop(g, Ntype_op::Sum, a, a);  // 2a: multiplicity matters
+  auto               d  = binop(g, Ntype_op::Sum, a, a);  // 2a: multiplicity matters (and sum_double writes it a << 1)
   s1.connect_sink(g->get_output_pin("o0"));
   s2.connect_sink(g->get_output_pin("o1"));
   d.connect_sink(g->get_output_pin("o2"));
   const auto stats = livehd::aegraph::optimize(g, {}, checked());
   EXPECT_EQ(stats.cse_merged, 1u);
-  EXPECT_EQ(count_op(g, Ntype_op::Sum), 2u);
+  EXPECT_EQ(count_op(g, Ntype_op::Sum), 1u);  // a + b once; a + a became a << 1
   EXPECT_TRUE(out_driver(g, "o0") == out_driver(g, "o1"));
   EXPECT_FALSE(out_driver(g, "o0") == out_driver(g, "o2"));
+}
+
+// The br_credit_counter shape: t = (v + inc) & 31 is read by a compare and by two subtractions. Merging the windowed
+// sum into each subtraction (getmask_sum_chain) would build two more adders over the same v and inc, so a window other
+// cells read keeps its sum: one adder for v + inc, one per subtraction.
+TEST(Aegraph, ASharedWindowedSumIsNotAddedAgainInEachConsumer) {
+  hhds::GraphLibrary lib;
+  auto               g = io_graph(lib, "shared_window_sum", 4, 3);
+  const auto         window = [&](const hhds::Pin_class& x) {
+    auto m = gu::create_typed_node(*g, Ntype_op::Get_mask);
+    gu::connect_mask_operands(m, x, 0, 5);
+    gu::set_ubits(m.create_driver_pin(0), 5);
+    return m.create_driver_pin(0);
+  };
+  const auto diff = [&](const hhds::Pin_class& x, const hhds::Pin_class& y) {
+    auto n = gu::create_typed_node(*g, Ntype_op::Sum);
+    x.connect_sink(gu::setup_sink_by_name(n, "as"));
+    y.connect_sink(gu::setup_sink_by_name(n, "bs"));
+    gu::set_ubits(n.create_driver_pin(0), 8);
+    return n.create_driver_pin(0);
+  };
+  // 5-bit operands, so the merged sums would be no wider than the window (the condition of getmask_sum_chain)
+  const auto v = window(g->get_input_pin("i0")), inc = window(g->get_input_pin("i1")), w = window(g->get_input_pin("i2"));
+  const auto x = window(g->get_input_pin("i3"));
+  auto       t = window(binop(g, Ntype_op::Sum, v, inc));
+  window(diff(t, w)).connect_sink(g->get_output_pin("o0"));
+  window(diff(t, x)).connect_sink(g->get_output_pin("o1"));
+  binop(g, Ntype_op::GT, t, w).connect_sink(g->get_output_pin("o2"));
+  livehd::aegraph::optimize(g, {}, checked());
+  size_t sums = 0, operands = 0;
+  for (auto node : g->body().nodes()) {
+    if (gu::type_op_of(node) != Ntype_op::Sum) {
+      continue;
+    }
+    ++sums;
+    for (auto sink : node.inp_sorted_pins()) {
+      operands += sink.get_driver_pins().size();
+    }
+  }
+  EXPECT_EQ(sums, 3u);
+  EXPECT_EQ(operands, 6u) << "each subtraction adds one operand to the shared sum, not v and inc again";
+}
+
+// `match op { == 0 {A} == 1 {B} == 2 {A} == 3 {B} else {C} }`: the post steps flatten the Mux chain into one Hotmux whose
+// controls read `op == k` directly (an equality chain needs no priority decode). The hardware profile keeps that Hotmux; the
+// simulation profile keeps the Mux chain, because the flattening costs predicate gates the simulator pays for.
+TEST(Aegraph, TheSimProfileKeepsTheMuxChainTheSynthProfileFlattens) {
+  for (const bool sim : {false, true}) {
+    hhds::GraphLibrary lib;
+    auto               g    = io_graph(lib, sim ? "eq_chain_sim" : "eq_chain_synth", 3, 1);
+    auto               root = konst(g, 77);
+    for (int k = 3; k >= 0; --k) {
+      auto mux = gu::create_typed_node(*g, Ntype_op::Mux);
+      binop(g, Ntype_op::EQ, g->get_input_pin("i0"), konst(g, k)).connect_sink(mux.create_sink_pin(0));
+      root.connect_sink(mux.create_sink_pin(1));
+      g->get_input_pin(k % 2 ? "i1" : "i2").connect_sink(mux.create_sink_pin(2));
+      gu::set_ubits(mux.create_driver_pin(0), 8);
+      root = mux.create_driver_pin(0);
+    }
+    root.connect_sink(g->get_output_pin("o0"));
+    Cprop                    cp{true};
+    livehd::aegraph::Options options;
+    options.cost = sim ? livehd::aegraph::Options::Cost::sim : livehd::aegraph::Options::Cost::synth;
+    livehd::aegraph::optimize_body(cp, g, options);
+    EXPECT_EQ(count_op(g, Ntype_op::Hotmux), sim ? 0u : 1u);
+    EXPECT_EQ(count_op(g, Ntype_op::Mux), sim ? 4u : 0u);
+  }
 }
 
 // The subtract bank is a different bank: a-b is not b-a, and neither is a+b.

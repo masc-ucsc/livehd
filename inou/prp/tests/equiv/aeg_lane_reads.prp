@@ -1,5 +1,6 @@
 /*
 :name: aeg_lane_reads
+:set: compile.cprop.engine=classic
 :type: lec
 */
 // PYROPE-vs-PYROPE group, the fixture of the aegraph packed-read rules (pass/aegraph/rules/mask.cpp sra_lane,

@@ -1,5 +1,6 @@
 /*
 :name: aeg_pack_rdy_vld
+:set: compile.cprop.engine=classic
 :type: lec
 */
 // PYROPE-vs-PYROPE group, in the style of br_amba_axi_demux: a ready/valid network whose packed ready vector

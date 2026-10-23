@@ -32,3 +32,131 @@
   => (EQ x 0)
   :example (Xor (EQ $x 0) 1)
   :doc "x ^ 1 = EQ(x, 0) for a 0/1 value x.")
+
+;; ---- complements (Cranelift bitops.isle: x & ~x, x | ~x, x ^ ~x; arithmetic.isle: x + ~x) ----
+;; Not(x) = -x - 1 over the unbounded integers, so each identity below is exact at any width.
+
+(simplify and_not_self 40
+  (And (as x (Not x) ..r))
+  => 0
+  :example (And $x (Not $x) $y)
+  :doc "x & ~x = 0: the complement clears every bit x sets, so the whole And is 0.")
+
+(simplify or_not_self 40
+  (Or (as x (Not x) ..r))
+  => -1
+  :example (Or $x (Not $x) $y)
+  :doc "x | ~x = -1 (all ones): the whole Or is -1.")
+
+(simplify xor_not_self 40
+  (Xor (as x (Not x) ..r))
+  => (Xor (as -1 ..r))
+  :example (Xor $x (Not $x) $y)
+  :doc "x ^ ~x = -1, which stays in the bank as the constant -1 (a complement of the rest).")
+
+(simplify sum_not_self 40
+  (Sum (as x (Not x) ..r) (bs ..s))
+  => (Sum (as -1 ..r) (bs ..s))
+  :example (Sum (as $x (Not $x) $y) (bs $z))
+  :doc "x + ~x = -1: the pair collapses to the constant -1.")
+
+;; ---- x + x: a shift is wiring ----
+;; An alt, not a simplify: it builds a shift next to the one-operand Sum it leaves. The hardware profile prices a shift by a
+;; constant at zero and an adder per bit, so it wins there; the simulator profile keeps the add.
+(alt sum_double 40
+  (Sum (as x x ..r) (bs ..s))
+  => (Sum (as (SHL x 1) ..r) (bs ..s))
+  :example (Sum (as $x $x $y) (bs $z))
+  :doc "x + x = x << 1: one adder fewer in hardware (the shift by a constant is wiring).")
+
+;; ---- comparisons against a constant through an add (Cranelift icmp.isle: (x + c1) == c2 -> x == c2 - c1) ----
+;; The unbounded integers never wrap, so moving the constant across the comparison is exact for EQ, LT and GT alike. A window
+;; (the wrap of a sized add) only allows it for equality, modulo 2^n.
+
+(alt eq_sum_const_add 30
+  (EQ (Sum (as x (k c))) (k d))
+  => (EQ x (k (- d c)))
+  :example (EQ (Sum $x 3) 10)
+  :doc "(x + c) == d is x == d - c.")
+
+(simplify eq_sum_const_sub 30
+  (EQ (Sum (as x) (bs (k c))) (k d))
+  => (EQ x (k (+ d c)))
+  :example (EQ (Sum (as $x) (bs 3)) 10)
+  :doc "(x - c) == d is x == d + c.")
+
+(alt lt_sum_const_add 30
+  (LT (Sum (as x (k c))) (k d))
+  => (LT x (k (- d c)))
+  :example (LT (Sum $x 3) 10)
+  :doc "(x + c) < d is x < d - c.")
+
+(alt lt_sum_const_sub 30
+  (LT (Sum (as x) (bs (k c))) (k d))
+  => (LT x (k (+ d c)))
+  :example (LT (Sum (as $x) (bs 3)) 10)
+  :doc "(x - c) < d is x < d + c.")
+
+(simplify lt_const_sum_add 30
+  (LT (k d) (Sum (as x (k c))))
+  => (LT (k (- d c)) x)
+  :example (LT 10 (Sum $x 3))
+  :doc "d < (x + c) is d - c < x.")
+
+(simplify lt_const_sum_sub 30
+  (LT (k d) (Sum (as x) (bs (k c))))
+  => (LT (k (+ d c)) x)
+  :example (LT 10 (Sum (as $x) (bs 3)))
+  :doc "d < (x - c) is d + c < x.")
+
+(alt gt_sum_const_add 30
+  (GT (Sum (as x (k c))) (k d))
+  => (GT x (k (- d c)))
+  :example (GT (Sum $x 3) 10)
+  :doc "(x + c) > d is x > d - c.")
+
+(alt gt_sum_const_sub 30
+  (GT (Sum (as x) (bs (k c))) (k d))
+  => (GT x (k (+ d c)))
+  :example (GT (Sum (as $x) (bs 3)) 10)
+  :doc "(x - c) > d is x > d + c.")
+
+(simplify gt_const_sum_add 30
+  (GT (k d) (Sum (as x (k c))))
+  => (GT (k (- d c)) x)
+  :example (GT 10 (Sum $x 3))
+  :doc "d > (x + c) is d - c > x.")
+
+(simplify gt_const_sum_sub 30
+  (GT (k d) (Sum (as x) (bs (k c))))
+  => (GT (k (+ d c)) x)
+  :example (GT 10 (Sum (as $x) (bs 3)))
+  :doc "d > (x - c) is d + c > x.")
+
+(simplify eq_masked_sum_const_add 30
+  (EQ (Get_mask (Sum (as x (k c))) 0 (k n)) (k d))
+  :when (> n 0) (<= n 62) (>= d 0) (< d (pow2 n))
+  => (EQ (Get_mask x 0 (k n)) (k (band (- d c) (mask_of n))))
+  :example (EQ (Get_mask (Sum $x 3) 0 8) 10)
+  :doc "(x + c) mod 2^n == d is x mod 2^n == (d - c) mod 2^n: the wrapped counter compare without the adder.")
+
+(simplify eq_masked_sum_const_sub 30
+  (EQ (Get_mask (Sum (as x) (bs (k c))) 0 (k n)) (k d))
+  :when (> n 0) (<= n 62) (>= d 0) (< d (pow2 n))
+  => (EQ (Get_mask x 0 (k n)) (k (band (+ d c) (mask_of n))))
+  :example (EQ (Get_mask (Sum (as $x) (bs 3)) 0 8) 10)
+  :doc "(x - c) mod 2^n == d is x mod 2^n == (d + c) mod 2^n.")
+
+;; ---- a difference tested against zero is an equality ----
+(simplify eq_diff_zero 30
+  (EQ (Sum (as x) (bs y)) 0)
+  => (EQ x y)
+  :example (EQ (Sum (as $x) (bs $y)) 0)
+  :doc "x - y == 0 is x == y: a subtractor and a zero detect become an equality compare.")
+
+(alt eq_masked_diff_zero 30
+  (EQ (Get_mask (Sum (as x) (bs y)) 0 (k n)) 0)
+  :when (> n 0)
+  => (EQ (Get_mask x 0 (k n)) (Get_mask y 0 (k n)))
+  :example (EQ (Get_mask (Sum (as $x) (bs $y)) 0 8) 0)
+  :doc "(x - y) mod 2^n == 0 is x mod 2^n == y mod 2^n.")

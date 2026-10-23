@@ -1673,6 +1673,19 @@ std::shared_ptr<hhds::GraphIO> create_icg_io(hhds::GraphLibrary& outlib, const I
   return io;
 }
 
+// The logical negation of a one-bit control: EQ(p, 0), a 0/1 result. Not(p) is the COMPLEMENT of the unbounded integer p (-1 or -2
+// for a 0/1 p), nonzero for every value, so a width stamp on it does not make it a condition: a pin that reads its operand as
+// one (a latch or flop enable, a reset) must never be driven by a Not, or the e-graph engine rightly proves it constant.
+hhds::Pin_class logical_not(hhds::Graph& body, const hhds::Pin_class& p) {
+  auto n = gu::create_typed_node(body, Ntype_op::EQ);
+  gu::setup_sink_pid(n, 0).connect_driver(p);
+  gu::setup_sink_pid(n, 0).connect_driver(gu::create_const(body, *Dlop::create_integer(0)));
+  auto out = n.create_driver_pin(0);
+  gu::set_bits(out, 1);
+  gu::set_unsign(out);
+  return out;
+}
+
 void emit_icg_model(hhds::GraphLibrary& outlib, const Icg_cell& icg) {
   if (outlib.find_io(icg.name)) {
     return;  // already modeled
@@ -1695,13 +1708,12 @@ void emit_icg_model(hhds::GraphLibrary& outlib, const Icg_cell& icg) {
   }
   // Transparent while CLK is low: an active-high enable driven by !CLK (the
   // polarity spelling every reader and match_icg_def agree on).
-  auto nclk = gu::create_typed_node(*body, Ntype_op::Not);
-  clk.connect_sink(gu::setup_sink_by_name(nclk, "a"));
+  const auto nclk = logical_not(*body, clk);
   auto L  = gu::create_typed_node(*body, Ntype_op::Latch);
   auto Lq = bit1(L.create_driver_pin(0));
   L.attr(hhds::attrs::name).set("IQ");
   d.connect_sink(gu::setup_sink_by_name(L, "din"));
-  bit1(nclk.create_driver_pin(0)).connect_sink(gu::setup_sink_by_name(L, "enable"));
+  bit1(nclk).connect_sink(gu::setup_sink_by_name(L, "enable"));
   auto g = gu::create_typed_node(*body, Ntype_op::And);
   clk.connect_sink(gu::setup_sink_pid(g, 0));
   Lq.connect_sink(gu::setup_sink_pid(g, 0));
@@ -1761,12 +1773,7 @@ void emit_dff_model(hhds::GraphLibrary& outlib, const Dff_cell& dff) {
   } else if (!dff.en_low) {
     body->get_input_pin(dff.clk_pin).connect_sink(gu::setup_sink_by_name(F, "enable"));
   } else {
-    auto N = gu::create_typed_node(*body, Ntype_op::Not);
-    body->get_input_pin(dff.clk_pin).connect_sink(gu::setup_sink_by_name(N, "a"));
-    auto nen = N.create_driver_pin(0);
-    gu::set_bits(nen, 1);
-    gu::set_unsign(nen);
-    nen.connect_sink(gu::setup_sink_by_name(F, "enable"));
+    logical_not(*body, body->get_input_pin(dff.clk_pin)).connect_sink(gu::setup_sink_by_name(F, "enable"));
   }
   hhds::Pin_class din = body->get_input_pin(dff.d_pin);
   if (dff.q_inverted) {
@@ -1801,9 +1808,12 @@ void emit_dff_model(hhds::GraphLibrary& outlib, const Dff_cell& dff) {
     };
     auto konst = [&](int v) { return gu::create_const(*body, *Dlop::create_integer(v)); };
     auto node1 = [&](Ntype_op op, const std::vector<hhds::Pin_class>& ins) {
+      if (op == Ntype_op::Not) {
+        return logical_not(*body, ins.front());  // reset polarity: read as a condition
+      }
       auto n = gu::create_typed_node(*body, op);
       for (const auto& p : ins) {
-        p.connect_sink(op == Ntype_op::Not ? gu::setup_sink_by_name(n, "a") : gu::setup_sink_pid(n, 0));
+        p.connect_sink(gu::setup_sink_pid(n, 0));
       }
       return one_bit(n.create_driver_pin(0));
     };

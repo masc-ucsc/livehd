@@ -326,6 +326,20 @@ std::optional<std::vector<bool>> observed_bits(const hhds::Pin_class& dout, int 
   for (const auto& edge : dout.out_edges()) {
     const auto sink = edge.sink;
     const auto node = sink.get_master_node();
+    // A partial write `Set_mask(dout, lo, hi, v)` (the e-graph engine's spelling of a read-modify-write; the classic engine's
+    // is a Concat of Get_mask lanes) observes every bit of dout OUTSIDE its window, and reads nothing of dout inside it.
+    if (gu::type_op_of(node) == Ntype_op::Set_mask && Ntype::get_sink_name(Ntype_op::Set_mask, sink.get_port_id()) == "a") {
+      const auto range = gu::bit_range(node);
+      if (!range) {
+        return std::nullopt;
+      }
+      for (int b = 0; b < width; ++b) {
+        if (b < range->first || b >= range->second) {
+          seen[static_cast<size_t>(b)] = true;
+        }
+      }
+      continue;
+    }
     if (gu::type_op_of(node) != Ntype_op::Get_mask || Ntype::get_sink_name(Ntype_op::Get_mask, sink.get_port_id()) != "a") {
       return std::nullopt;
     }

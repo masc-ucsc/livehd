@@ -335,7 +335,7 @@ TEST(LhdOptions, CpropEngineDispatch) {
     return out;
   };
   using V = std::vector<std::string>;
-  EXPECT_EQ(methods({}), (V{"pass.cprop", "pass.cprop"}));
+  EXPECT_EQ(methods({}), (V{"pass.aegraph", "pass.aegraph"})) << "the e-graph engine is the default";
   EXPECT_EQ(methods({
                 {"compile.cprop.engine", "classic"}
   }),
@@ -371,30 +371,40 @@ TEST(LhdOptions, CpropEngineDispatch) {
             (V{"pass.cprop", "pass.cprop"}));
 
   lhd::Options opts;
+  EXPECT_EQ(lhd::cprop_engine_descriptor(opts), "aegraph:both:cost=synth") << "aegraph is the default engine";
+  opts.sets.emplace_back("compile.cprop.engine", "classic");
   EXPECT_EQ(lhd::cprop_engine_descriptor(opts), "classic");
   opts.sets.emplace_back("compile.cprop.engine", "aegraph+classic");
   opts.sets.emplace_back("compile.cprop.engine_slots", "first");
   EXPECT_EQ(lhd::cprop_engine_descriptor(opts), "aegraph+classic:first:cost=synth");
 }
 
-// compile.aegraph.cost: the default stays synth for every command (a documented default); `auto` is the opt-in that
-// follows the command; the RESOLVED profile is what the compile-cache descriptor names, so an engine run under the
+// compile.aegraph.cost: the default is `auto`, which follows the command (sim under `lhd sim`, synth elsewhere, so a bare
+// `lhd compile` gets synth); an explicit value overrides it; the RESOLVED profile is what the compile-cache descriptor names, so an engine run under the
 // sim profile never replays a synth-profile graph.
 TEST(LhdOptions, AegraphCostProfileIsResolvedAndNamedInTheDescriptor) {
   lhd::Options opts;
   opts.command = "sim";
   opts.sets.emplace_back("compile.cprop.engine", "aegraph");
-  EXPECT_EQ(lhd::resolve_aegraph_cost(opts), "synth") << "no auto-selection: the documented default is synth for every command";
-  EXPECT_EQ(lhd::cprop_engine_descriptor(opts), "aegraph:both:cost=synth");
-  opts.sets.emplace_back("compile.aegraph.cost", "auto");
-  EXPECT_EQ(lhd::resolve_aegraph_cost(opts), "sim");
+  EXPECT_EQ(lhd::resolve_aegraph_cost(opts), "sim") << "unset: automatic, sim under `lhd sim`";
   EXPECT_EQ(lhd::cprop_engine_descriptor(opts), "aegraph:both:cost=sim");
   opts.command = "compile";
-  EXPECT_EQ(lhd::resolve_aegraph_cost(opts), "synth");
+  EXPECT_EQ(lhd::resolve_aegraph_cost(opts), "synth") << "unset: a bare compile gets synth";
   EXPECT_EQ(lhd::cprop_engine_descriptor(opts), "aegraph:both:cost=synth");
+  for (const char* command : {"synth", "lec", "formal"}) {
+    opts.command = command;
+    EXPECT_EQ(lhd::resolve_aegraph_cost(opts), "synth") << command;
+  }
+  opts.command = "sim";
+  opts.sets.emplace_back("compile.aegraph.cost", "synth");
+  EXPECT_EQ(lhd::resolve_aegraph_cost(opts), "synth") << "an explicit value overrides the automatic choice under `lhd sim`";
+  opts.sets.emplace_back("compile.aegraph.cost", "auto");
+  EXPECT_EQ(lhd::resolve_aegraph_cost(opts), "sim") << "last --set wins";
+  opts.command = "compile";
   opts.sets.emplace_back("compile.aegraph.cost", "sim");
   EXPECT_EQ(lhd::cprop_engine_descriptor(opts), "aegraph:both:cost=sim") << "last --set wins, any command";
   lhd::Options classic;
+  classic.sets.emplace_back("compile.cprop.engine", "classic");
   classic.sets.emplace_back("compile.aegraph.cost", "sim");
   EXPECT_EQ(lhd::cprop_engine_descriptor(classic), "classic") << "the profile only matters when an aegraph step runs";
 }

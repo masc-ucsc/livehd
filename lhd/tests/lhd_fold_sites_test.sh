@@ -141,9 +141,9 @@ for engine in classic aegraph aegraph+classic; do
   esac
 done
 
-# The default is classic: no setting, no e-graph fold anywhere.
+# The default is the e-graph engine: no setting, the LEC preflight folds with aegraph; an explicit classic folds with classic.
 "$LHD" lec --ref "$W/hier.prp" --impl "$W/flat.prp" --top top --workdir "$W/lec_default" -q >/dev/null 2>"$W/lec_default.log" || fail "default lec failed"
-expect classic formal.lec.preflight "$W/lec_default.log"
+expect aegraph formal.lec.preflight "$W/lec_default.log"
 
 # The synthesis region cache never mixes engines: one workdir, same source. A run under a different engine than the one
 # that filled the cache replays nothing (it is salted by engine), and a repeat under the same engine hits every region.
