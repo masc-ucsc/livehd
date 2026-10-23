@@ -49,59 +49,60 @@ struct Options {
   std::string                                         floorplan, output_dir, cache_dir;
   std::string                                         liberty, tech_rc_file, tracks_file;
   std::string                                         macro_mode = "none";
-  Warp_options                                        fp_warp{.weight = 1}, macro_warp;
-  bool                                                fp_place = false, fp_snap_enabled = true;
-  bool                                  fp_colors           = false;  // eligible color leaves; never independently centroid-snapped
-  std::string                           fp_color_source     = "synthesis";
-  bool                                  analyze_colors_only = false;  // diagnostic: no GP/LG/STA or cache
-  double                                fp_color_maximum    = 30000;  // memory-first logic area in equivalent cells
-  double                                fp_color_minimum    = -1;     // inherit fp_minimum; physical member area only
-  bool                                  fp_pin_adjust       = true;
-  int                                   fp_pin_interval     = 50;
-  double                                fp_pin_step = .01, fp_pin_improvement = .001;  // perimeter fraction, relative gain
-  bool                                  macro_pin_adjust   = true;
-  int                                   macro_pin_interval = 50;
-  double                                macro_pin_step = .01, macro_pin_improvement = .001;
-  int                                   fp_iterations = 1500, fp_min_copies = 4, fp_min_macros = 2;
-  int                                   fp_timing_interval      = 50;
-  double                                fp_timing_movement      = 0;  // RMS bin movement; 0 keeps fixed cadence
-  bool                                  fp_timing_after_density = false;
-  double                                timing_fraction         = .2;  // worst-slack fraction of timed non-clock nets
-  double                                timing_max_weight = 5, timing_smoothing = .5;
-  double                                timing_exponent             = 1;  // convex criticality curve; 1 preserves linear weights
-  double                                timing_spread_weight        = 0;  // [0,1] protection from extra routing/local spreading
-  int                                                 macro_timing_interval       = 50;
+  Warp_options                      fp_warp{.weight = 1}, macro_warp{.weight = .7, .start_stability = .2, .refresh_interval = 25};
+  DreamPlace::native::MagnetOptions macro_magnet;
+  bool                              fp_place = false, fp_snap_enabled = true;
+  bool                              fp_colors           = false;  // eligible color leaves; never independently centroid-snapped
+  std::string                       fp_color_source     = "synthesis";
+  bool                              analyze_colors_only = false;  // diagnostic: no GP/LG/STA or cache
+  double                            fp_color_maximum    = 30000;  // memory-first logic area in equivalent cells
+  double                            fp_color_minimum    = -1;     // inherit fp_minimum; physical member area only
+  bool                              fp_pin_adjust       = true;
+  int                               fp_pin_interval     = 50;
+  double                            fp_pin_step = .01, fp_pin_improvement = .001;  // perimeter fraction, relative gain
+  bool                              macro_pin_adjust   = true;
+  int                               macro_pin_interval = 50;
+  double                            macro_pin_step = .01, macro_pin_improvement = .001;
+  int                               fp_iterations = 1500, fp_min_copies = 4, fp_min_macros = 2;
+  int                               fp_timing_interval      = 50;
+  double                            fp_timing_movement      = 0;  // RMS bin movement; 0 keeps fixed cadence
+  bool                              fp_timing_after_density = false;
+  double                            timing_fraction         = .2;  // worst-slack fraction of timed non-clock nets
+  double                            timing_max_weight = 5, timing_smoothing = .5;
+  double                            timing_exponent             = 1;  // convex criticality curve; 1 preserves linear weights
+  double                            timing_spread_weight        = 0;  // [0,1] protection from extra routing/local spreading
+  int                               macro_timing_interval       = 50;
   // Opt-in fresh timing displacement protection, bounded to 100x.
-  double                                              legalize_timing_strength    = 0;
-  double                                              legalize_timing_threshold   = 0;
-  unsigned                                            legalize_timing_corrections = 0;
-  bool                                                terminal_legalize           = true;
-  Busorder_options                                    busorder;
-  Boundary_pin_options                                boundarypins;
-  Terminal_legalize_options                           terminal_legalize_options;
-  int                                                 fp_timing_max_updates = 10;
-  bool                                                fp_resize             = false;
-  bool                                  repair_reset   = false;  // retired: true is rejected before pre-CTS optimization
+  double                            legalize_timing_strength    = 0;
+  double                            legalize_timing_threshold   = 0;
+  unsigned                          legalize_timing_corrections = 0;
+  bool                              terminal_legalize           = true;
+  Busorder_options                  busorder;
+  Boundary_pin_options              boundarypins;
+  Terminal_legalize_options         terminal_legalize_options;
+  int                               fp_timing_max_updates = 10;
+  bool                              fp_resize             = false;
+  bool                              repair_reset          = false;  // retired: true is rejected before pre-CTS optimization
   // synth.place.resize.engine: "new" = path-based sizing/buffering on the
   // incremental what-if timer (resize_engine.hpp); "legacy" = batch sweeps.
-  std::string                           resize_engine  = "legacy";
-  bool                                  resize_vt_swap = false;  // allow same-footprint swaps across Liberty files (multi-VT)
-  std::vector<std::string>              resize_dont_use;         // glob patterns never chosen as a new master
+  std::string                       resize_engine         = "legacy";
+  bool                              resize_vt_swap        = false;  // allow same-footprint swaps across Liberty files (multi-VT)
+  std::vector<std::string>          resize_dont_use;                // glob patterns never chosen as a new master
   // What-if handle of the timer behind fp_evaluate/evaluate (required by engine=new).
-  livehd::timing::Whatif*               whatif       = nullptr;
+  livehd::timing::Whatif*           whatif       = nullptr;
   // Legacy reset-tree control retained for a clear diagnostic on nonzero values.
-  unsigned                              reset_fanout = 0;  // retired: pre-CTS control nets are never buffered
-  std::string                           control_ports;     // override optional roots; recognized resets stay excluded
-  Evaluate                              fp_evaluate;
-  double                                fp_minimum = 3000, fp_attraction = .25, fp_repulsion = 5, fp_anchor = .25;
-  bool                                  fp_distance_attraction = true;
-  bool                                  fp_anchor_macros_only  = false;  // frozen targets; retain all-member normalization
-  double                                fp_attraction_outside  = 4;      // additional stiffness beyond the centroid circle
-  double                                fp_align_weight = 0, fp_align_sigma = .25;
-  int                                   fp_align_start = 100, fp_align_full = 500;
-  double                                fp_parent_weight = 0, fp_parent_outside = 4;
-  DreamPlace::native::FloorplanOptions  fp_snap;
-  DreamPlace::native::macro::Parameters macro_parameters;
+  unsigned                          reset_fanout = 0;  // retired: pre-CTS control nets are never buffered
+  std::string                       control_ports;     // override optional roots; recognized resets stay excluded
+  Evaluate                          fp_evaluate;
+  double                            fp_minimum = 3000, fp_attraction = .25, fp_repulsion = 5, fp_anchor = .25;
+  bool                              fp_distance_attraction = true;
+  bool                              fp_anchor_macros_only  = false;  // frozen targets; retain all-member normalization
+  double                            fp_attraction_outside  = 4;      // additional stiffness beyond the centroid circle
+  double                            fp_align_weight = 0, fp_align_sigma = .25;
+  int                               fp_align_start = 100, fp_align_full = 500;
+  double                            fp_parent_weight = 0, fp_parent_outside = 4;
+  DreamPlace::native::FloorplanOptions                       fp_snap;
+  DreamPlace::native::macro::Parameters                      macro_parameters;
   std::shared_ptr<const DreamPlace::native::macro::Topology> macro_topology;
   // In-process ECO reference; independent of persistent-cache admission.
   std::shared_ptr<const physical::Floorplan>                 previous;
@@ -121,16 +122,20 @@ struct Options {
   double                                                     halo_x = -1, halo_y = -1;
   // Unset preserves the macro halo for cells. Applied only after the macro frame is fixed.
   std::optional<std::pair<double, double>>                   cell_halo;
-  bool        cell_stage               = false;  // internal explicit final/placed context; never inferred from an ECO frame
-  bool        scale_macro_density      = true;
-  bool        dynamic_bins             = false;
+  bool        cell_stage                = false;  // internal explicit final/placed context; never inferred from an ECO frame
+  bool        scale_macro_density       = true;
+  bool        dynamic_bins              = false;
+  bool        macro_fill_cell_space     = false;  // complement of cell-density target
+  double      macro_filler_fraction     = 0;      // macro GP only; physical macro dimensions
   bool        virtual_fillers           = true;
   int         virtual_filler_max_count  = 0;
-  double      virtual_filler_fraction  = 1;
+  double      virtual_filler_fraction   = 1;
   double      virtual_filler_cell_scale = 1, virtual_filler_bin_fraction = .25;
   int         bin_max = 512, local_density_bins = 512;
   double      local_density_weight = 0, local_density_range = 4, local_density_jitter = .01;
+  double      local_density_target = -1;  // -1 inherits the global density target
   double      macro_cell_density_weight = 0;  // standard-cell pressure on macros during macro GP only
+  double      macro_cell_density_reach = 2;   // screening length / largest physical SRAM side
   double      macro_density_pull_weight = 0, macro_density_pull_range = 4;
   bool        automatic_bins = false, exact_macro_density = true, adaptive_density = true, routability = true;
   std::string route_model = "rsmt";
@@ -154,8 +159,8 @@ struct Options {
   double                               fixed_macro_overlap_weight = 0;
   double                               wirelength_gamma_end       = .05;  // experimental; existing smoothing schedule by default
   int                                  detailed_iterations        = 2;
-  bool                                 macro_detailed_place       = true;  // cell detail while macros are movable
-  bool                                 macro_legalize_cells       = true;  // false leaves macro-stage cells at GP poses
+  bool                                 macro_detailed_place       = true;   // cell detail while macros are movable
+  bool                                 macro_legalize_cells       = true;   // false leaves macro-stage cells at GP poses
   bool                                 final_independent_timing   = false;  // synthesis weights, then density-gated final STA
   bool                                 exact_cell_density         = false;
   bool                                 density_upper_bound        = false;  // experimental filler-free upper-bound penalty
@@ -180,7 +185,7 @@ struct Options {
   // Opt-in: an unknown (X) constant bit that reaches a physical net is a synthesis
   // don't-care (`assign y = 'x`), so any value is a legal refinement; tie it low
   // instead of refusing the placement. Off keeps the refusal.
-  bool                unknown_const_zero = false;
+  bool                unknown_const_zero     = false;
   // Geometry-only replay: retain characterized imported shared tie masters/nets.
   // Logical constants still receive real per-load physical sources.
   bool                preserve_imported_ties = false;
@@ -188,7 +193,7 @@ struct Options {
 DreamPlace::native::RoutePolicy resolve_route_policy(const Options&, const Stage_route&);
 void                            initialize_route_tables();
 struct Macro_gp_timing {
-  Timing_feedback                                timing;
+  Timing_feedback                                  timing;
   std::shared_ptr<physical::Parasitics>            parasitics;
   std::map<std::string, std::pair<double, double>> pin_locations;
 };

@@ -156,10 +156,16 @@ void Physical_cache::publish(const fs::path& net, const fs::path& place) {
                            "qor.json",
                            "io_resynth.json",
                            "memory_proxies.lef",
+                           "magnet.json",
+                           "macro_animation.html",
+                           "macro/gp_history.json",
+                           "macro/gp_history.jsonl",
+                           "macro/fixed.def",
                            "route_options.json",
                            "sat_route_grid.json",
                            "sat_route_guard.json"}) {
     if (fs::is_regular_file(place / name)) {
+      fs::create_directories((pending / "artifacts/place" / name).parent_path());
       fs::copy_file(place / name, pending / "artifacts/place" / name);
     }
   }

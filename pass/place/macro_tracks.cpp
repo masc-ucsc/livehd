@@ -7,6 +7,7 @@
 #include <map>
 #include <numeric>
 #include <optional>
+#include <set>
 #include <stdexcept>
 #include <tuple>
 
@@ -394,6 +395,103 @@ bool coherent_macro_tracks(const ph::Technology& tech, const ph::Floorplan& layo
 }
 
 }  // namespace
+std::function<bool(const std::vector<ph::Component>&)> make_rigid_macro_track_checker(const ph::Technology& tech,
+                                                                                      const ph::Floorplan&  layout) {
+  using Key = std::tuple<std::string, ph::Orientation, int64_t, int64_t>;
+  return [&tech,
+          &layout,
+          profiles = std::map<std::pair<std::string, ph::Orientation>, Profile>{},
+          results  = std::map<std::vector<Key>, bool>{}](const std::vector<ph::Component>& cells) mutable {
+    if (cells.empty()) {
+      throw std::invalid_argument("empty rigid routing-track proposal");
+    }
+    int64_t xl = cells.front().place.x, yl = cells.front().place.y;
+    for (const auto& c : cells) {
+      xl = std::min(xl, c.place.x);
+      yl = std::min(yl, c.place.y);
+    }
+    std::vector<Key> key;
+    for (const auto& c : cells) {
+      key.emplace_back(c.macro, c.place.orientation, c.place.x - xl, c.place.y - yl);
+    }
+    std::sort(key.begin(), key.end());
+    if (const auto found = results.find(key); found != results.end()) {
+      return found->second;
+    }
+    const auto grid      = std::max<int64_t>(1, std::llround(tech.manufacturing_grid * tech.dbu));
+    int64_t    period[2] = {grid, grid};
+    struct Member {
+      const Profile* p;
+      int64_t        offset[2];
+    };
+    std::vector<Member> members;
+    for (const auto& [name, orientation, x, y] : key) {
+      if (x % grid || y % grid) {
+        return results.emplace(key, false).first->second;
+      }
+      const auto id = std::pair{name, orientation};
+      if (!profiles.contains(id)) {
+        auto c              = cells.front();
+        c.macro             = name;
+        c.place.orientation = orientation;
+        profiles.emplace(id, profile(tech, layout, c));
+      }
+      const auto& p = profiles.at(id);
+      members.push_back({
+          &p,
+          {x, y}
+      });
+      for (int axis = 0; axis < 2; ++axis) {
+        const auto factor = p.period[axis] / std::gcd(period[axis], p.period[axis]);
+        if (factor > 65536 / period[axis]) {
+          throw std::runtime_error("rigid macro routing-track period exceeds bounded phase search");
+        }
+        period[axis] *= factor;
+      }
+    }
+    // Intersect single-axis phase domains before combining mixed-layer pin
+    // coverage. Equivalent coverage needs only one representative per axis.
+    std::set<std::string> coverage[2];
+    for (int axis = 0; axis < 2; ++axis) {
+      for (int64_t phase = 0; phase < period[axis]; phase += grid) {
+        std::string served;
+        bool        valid = true;
+        for (const auto& m : members) {
+          const auto  value  = (phase + m.offset[axis] % m.p->period[axis]) % m.p->period[axis];
+          const auto& phases = m.p->phases[axis];
+          const auto  found
+              = std::lower_bound(phases.begin(), phases.end(), value, [](const auto& entry, int64_t v) { return entry.value < v; });
+          if (found == phases.end() || found->value != value) {
+            valid = false;
+            break;
+          }
+          for (char pin : found->coverage) {
+            served.push_back(pin & 1);
+          }
+        }
+        if (valid) {
+          coverage[axis].insert(std::move(served));
+        }
+      }
+      if (coverage[axis].empty()) {
+        return results.emplace(key, false).first->second;
+      }
+    }
+    for (const auto& x : coverage[0]) {
+      for (const auto& y : coverage[1]) {
+        bool valid = true;
+        for (size_t i = 0; i < x.size(); ++i) {
+          valid &= (x[i] | y[i]) != 0;
+        }
+        if (valid) {
+          return results.emplace(key, true).first->second;
+        }
+      }
+    }
+    return results.emplace(key, false).first->second;
+  };
+}
+
 void legalize_macro_tracks_impl(const ph::Technology& tech, const ph::Floorplan& layout, std::vector<ph::Component>& cells,
                                 int64_t halo_x, int64_t halo_y, bool move_macros, bool repack) {
   if (layout.rows.empty()) {
@@ -554,6 +652,114 @@ void legalize_macro_tracks(const ph::Technology& tech, const ph::Floorplan& layo
       throw;
     }
   }
+}
+
+void legalize_rigid_macro_tracks(const ph::Technology& tech, const ph::Floorplan& layout, std::vector<ph::Component>& cells,
+                                 const std::vector<uint64_t>& ids, int64_t hx, int64_t hy, bool move) {
+  if (ids.size() != cells.size()) {
+    throw std::invalid_argument("rigid track group id size mismatch");
+  }
+  ph::Technology                   proxy_tech = tech;
+  std::vector<ph::Component>       proxies;
+  std::vector<std::vector<size_t>> members;
+  std::map<uint64_t, size_t>       groups;
+  for (size_t i = 0; i < cells.size(); ++i) {
+    if (!ids[i]) {
+      proxies.push_back(cells[i]);
+      members.push_back({i});
+    } else if (const auto found = groups.find(ids[i]); found != groups.end()) {
+      members[found->second].push_back(i);
+    } else {
+      groups.emplace(ids[i], proxies.size());
+      proxies.push_back(cells[i]);
+      members.push_back({i});
+    }
+  }
+  const auto fixed = [](const auto& c) { return c.place.status == ph::Status::FIXED || c.place.status == ph::Status::LOCKED; };
+  std::map<std::pair<std::string, ph::Orientation>, Profile> member_profiles;
+  for (size_t j = 0; j < proxies.size(); ++j) {
+    if (!ids[members[j].front()]) {
+      continue;
+    }
+    auto&   proxy = proxies[j];
+    int64_t xl = proxy.place.x, yl = proxy.place.y;
+    int64_t xh = xl + proxy.place.width, yh = yl + proxy.place.height;
+    for (const auto i : members[j]) {
+      const auto& c = cells[i];
+      if (tech.macros.at(c.macro).klass.starts_with("CORE") || fixed(c) != fixed(proxy)) {
+        throw std::invalid_argument("rigid track group contains incompatible placement objects");
+      }
+      xl = std::min(xl, c.place.x);
+      yl = std::min(yl, c.place.y);
+      xh = std::max(xh, c.place.x + c.place.width);
+      yh = std::max(yh, c.place.y + c.place.height);
+    }
+    ph::Macro master;
+    master.klass  = "BLOCK";
+    master.width  = double(xh - xl) / tech.dbu;
+    master.height = double(yh - yl) / tech.dbu;
+    for (const auto i : members[j]) {
+      const auto& c   = cells[i];
+      const auto& m   = tech.macros.at(c.macro);
+      const auto  key = std::pair{c.macro, c.place.orientation};
+      if (!member_profiles.contains(key)) {
+        member_profiles.emplace(key, profile(tech, layout, c));
+      }
+      const auto& supported = member_profiles.at(key).pins;
+      for (const auto& [name, pin] : m.pins) {
+        // Preserve the standalone abstract's supported-pin contract. Reusing
+        // every raw pin can choose a different best-effort phase for the
+        // union and discard pins that an original member still requires.
+        if (std::none_of(supported.begin(), supported.end(), [&](const auto& p) { return p.name == name; })) {
+          continue;
+        }
+        auto transformed = pin;
+        for (auto& shape : transformed.shapes) {
+          const auto a
+              = ph::orient_point(shape.rect.xl + m.origin_x, shape.rect.yl + m.origin_y, m.width, m.height, c.place.orientation);
+          const auto b
+              = ph::orient_point(shape.rect.xh + m.origin_x, shape.rect.yh + m.origin_y, m.width, m.height, c.place.orientation);
+          const double dx = double(c.place.x - xl) / tech.dbu;
+          const double dy = double(c.place.y - yl) / tech.dbu;
+          shape.rect      = {dx + std::min(a.first, b.first),
+                             dy + std::min(a.second, b.second),
+                             dx + std::max(a.first, b.first),
+                             dy + std::max(a.second, b.second)};
+        }
+        master.pins.emplace(std::to_string(i) + ":" + name, std::move(transformed));
+      }
+    }
+    auto name = "__livehd_rigid_tracks_" + std::to_string(ids[members[j].front()]);
+    while (proxy_tech.macros.contains(name)) {
+      name += "_";
+    }
+    proxy_tech.macros.emplace(name, std::move(master));
+    proxy.macro             = name;
+    proxy.place.x           = xl;
+    proxy.place.y           = yl;
+    proxy.place.width       = xh - xl;
+    proxy.place.height      = yh - yl;
+    proxy.place.orientation = ph::Orientation::N;
+  }
+  const auto before = proxies;
+  legalize_macro_tracks(proxy_tech, layout, proxies, hx, hy, move);
+  auto result = cells;
+  for (size_t j = 0; j < proxies.size(); ++j) {
+    const int64_t dx = proxies[j].place.x - before[j].place.x;
+    const int64_t dy = proxies[j].place.y - before[j].place.y;
+    for (const auto i : members[j]) {
+      result[i].place.x += dx;
+      result[i].place.y += dy;
+    }
+  }
+  // Verify original member pin profiles independently before writing anything.
+  // Pin phases that cannot coexist inside a frozen group reject atomically.
+  auto audit = result;
+  for (auto& c : audit) {
+    c.place.status = ph::Status::FIXED;
+  }
+  legalize_macro_tracks(tech, layout, audit, hx, hy, false);
+  cells = std::move(result);
 }
 
 }  // namespace livehd::placement

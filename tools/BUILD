@@ -57,6 +57,22 @@ cc_binary(
     deps = ["//pass/place:terminal_legalize", "//inou/lefdef:inou_lefdef", "@rapidjson"],
 )
 
+cc_binary(
+    name = "placement_metrics",
+    srcs = ["placement_metrics.cpp"],
+    copts = COPTS,
+    deps = ["//pass/place:prects_networks", "//inou/lefdef:inou_lefdef", "@rapidjson"],
+)
+
+py_test(
+    name = "placement_metrics_smoke",
+    srcs = ["placement_metrics_smoke.py"],
+    args = ["$(location :placement_metrics)", "$(location :rudy_metrics)"],
+    data = [":placement_metrics", ":rudy_metrics"],
+    legacy_create_init = 0,
+    timeout = "short",
+)
+
 # An empty Xcode version list selects apple_support's Command Line Tools
 # toolchain, without discovering an unrelated /Applications/Xcode.app.
 xcode_config(

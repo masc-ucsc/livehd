@@ -149,3 +149,6 @@ generated/master_port/
 /todo/livehd/simulator-generation-matrix.html
 # Results belong under /repros/; prevent older report scripts from adding them here.
 /todo/livehd/placement-results/
+
+# Local benchmark report; canonical results live under repros/.
+/docs/partial_route.html

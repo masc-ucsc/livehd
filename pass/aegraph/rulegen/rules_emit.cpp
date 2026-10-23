@@ -216,7 +216,9 @@ private:
       if (spec == nullptr) {
         emit("if (" + cnt + " != 0) " + fail);
       } else if (spec->has_rest) {
-        emit("if (" + cnt + " < " + std::to_string(spec->elems.size()) + ") " + fail);
+        if (!spec->elems.empty()) {
+          emit("if (" + cnt + " < " + std::to_string(spec->elems.size()) + ") " + fail);
+        }
       } else {
         emit("if (" + cnt + " != " + std::to_string(spec->elems.size()) + ") " + fail);
       }

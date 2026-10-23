@@ -25,6 +25,11 @@ protected:
     write("place/sat_route_grid.json", "{\"bins_x\":128,\"horizontal\":[0.5]}");
     write("place/sat_route_guard.json", "{\"accepted\":true}");
     write("place/io_resynth.json", "{\"boundary_ps\":213.3134765625}");
+    write("place/magnet.json", "{\"groups\":[{\"id\":1,\"members\":[\"red/ram\",\"blue/ram\"]}]}");
+    write("place/macro_animation.html", "<!doctype html><title>Measured macro frames</title>");
+    write("place/macro/fixed.def", "ordinary fixed member coordinates");
+    write("place/macro/gp_history.json", "{\"magnet_round\":1}");
+    write("place/macro/gp_history.jsonl", "{\"macro_move_max\":0.01}\n");
   }
   void write(const fs::path& path, const std::string& text) {
     fs::create_directories((root / path).parent_path());
@@ -55,6 +60,13 @@ TEST_F(PhysicalCache, RestoresTheCompleteRepairedGenerationAcrossFreshInstances)
     EXPECT_EQ((std::string{std::istreambuf_iterator<char>(guard), {}}), "{\"accepted\":true}");
     std::ifstream timing(root / "restored/place/io_resynth.json");
     EXPECT_EQ((std::string{std::istreambuf_iterator<char>(timing), {}}), "{\"boundary_ps\":213.3134765625}");
+    for (const auto* name :
+         {"magnet.json", "macro_animation.html", "macro/fixed.def", "macro/gp_history.json", "macro/gp_history.jsonl"}) {
+      std::ifstream original(root / "place" / name), restored(root / "restored/place" / name);
+      ASSERT_TRUE(restored) << name;
+      EXPECT_EQ((std::string{std::istreambuf_iterator<char>(original), {}}),
+                (std::string{std::istreambuf_iterator<char>(restored), {}}));
+    }
   }
 }
 

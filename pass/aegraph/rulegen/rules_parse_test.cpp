@@ -205,6 +205,18 @@ TEST(RulegenLint, NamesGuardsAndAnalyses) {
 
 // ---- emitters ----------------------------------------------------------------------
 
+TEST(RulegenEmit, RestOnlyBankDoesNotEmitUnsignedComparisonWithZero) {
+  const auto p = parse_text(R"(
+(simplify sum_not_self (Sum (as x (Not x) ..r) (bs ..s))
+  => (Sum (as -1 ..r) (bs ..s))
+  :example (Sum (as $x (Not $x) $y) (bs $z)))
+)");
+  ASSERT_TRUE(p.diags.empty());
+  const auto cpp = emit_rules_cpp(p.file, p.analyses);
+  EXPECT_EQ(cpp.find(" < 0)"), std::string::npos);
+  EXPECT_NE(cpp.find(" < 2)"), std::string::npos);
+}
+
 TEST(RulegenEmit, DeterministicAndLineMapped) {
   const char* text = R"(
 (simplify not_not 30 (Not (Not x)) => x :example (Not (Not $x)))

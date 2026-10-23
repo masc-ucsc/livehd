@@ -112,6 +112,16 @@ cell LEFs under `physical/lef/`, and writes their relative paths to `lefs.json`
 synthesis invocation; downstream independent timing analysis is separate.
 An unmet GP overflow target is reported even when legalization succeeds.
 
+Native unweighted HPWL omits both clock and reset distribution nets. For an
+external comparison that omits only clocks and retains physical reset wiring,
+`//tools:placement_metrics` reads the exported DEF, ordered LEFs, Liberty and
+native `qor.json` control-role metadata. Its `clock_excluded_hpwl_um` uses the
+same pin geometry for either placer; `reset_cut_nets` identifies reset wiring
+to exclude from external timing before propagation. `--check-native` verifies
+the control-net census and native data HPWL (within 0.001 µm). Explicit control
+overrides lack the required clock-role metadata and are rejected by this tool.
+The tool does not perform STA or modify placement.
+
 GP also waits for timing-weighted HPWL and routability after geometry/density
 settle. `synth.place.post_density_factor=4` allows up to four times the first
 eligible iteration count as **additional** iterations (40 becomes a deadline
@@ -926,13 +936,32 @@ nonoverflowing placement arithmetic; arbitrary complex NaN/Inf recovery is not
 claimed. Profiles and measurement records are in
 `tmp/remote_sync_20261021/poisson_perf/`.
 
-`synth.place.macro.cell_density_weight=0` independently controls local
+`synth.place.local_density_target=-1` inherits the global placement density
+for the extra cell-to-cell spreading field. An explicit value in `[0,1]`
+sets an independent local overpopulation threshold and its physical force
+reference; it does not change the global density target or the raw cell sources
+in the separate cell-to-memory field. For example, target `0.05` and weight
+`0.75` spread cells above 5% local density while global GP can still target
+`0.5`. Range stays in local-grid bin pitches. Reports record the resolved
+local target and configured weight, and active target changes invalidate
+placement caches. The default retains the previous behavior.
+
+`synth.place.macro.cell_density_weight=0` independently controls long-range
 standard-cell pressure on movable macros. Positive values enable it during
 macro GP only. FP, the automatic IO preview, and final cell placement disable
 this field; final cell placement keeps macros fixed.
 The source is real standard-cell area, including below-target density, so a
 macro can prefer a quieter neighborhood before cells exceed the soft target.
-The screened field uses `local_density_bins` and `local_density_range` and is
+`synth.place.macro.cell_density_reach=2` sets its screening length to twice
+the longest physical SRAM side, excluding halo padding. This is a gradual
+decay length, not a hard distance cutoff. The grid uses `local_density_bins`;
+`local_density_range` continues to control cell-to-cell spreading separately.
+Weak contributions from all real cells add linearly, without a minimum
+cell-area requirement. The coefficient is calibrated once against ordinary
+macro force per netlist; it is not renormalized down as the field accumulates.
+A physical reference floor prevents sparse numerical noise from being
+amplified during calibration. Equal pressure on opposite sides can still
+cancel, as expected. The field is
 integrated over each halo-padded macro footprint rather than sampled only at
 its center. Macros never emit this local field: it adds no macro-to-macro
 distance repulsion. Existing global density, RUDY pressure and overlap/halo
@@ -1109,8 +1138,8 @@ directly also changes that prototype. Use the automatic option when comparing
 only the final GP grid. Historical 256-bin measurements are retained as
 evidence, but the automatic planner no longer chooses that resolution.
 
-The sibling DREAMPlace checkout used by `MODULE.bazel` is committed at
-`7b9b496`. Build with `bazel build -c opt //lhd:lhd`; the native library needs
+`MODULE.bazel` pins the published DREAMPlace implementation. Build with
+`bazel build -c opt //lhd:lhd`; the native library needs
 no Torch or Python. The focused integration check is
 `bazel test -c opt @dreamplace//dreamplace/native/... //pass/place:all
 //inou/lefdef:physical_test //pass/partition:flatten_test
@@ -1142,6 +1171,139 @@ End-of-GP macro snap still uses the original hierarchy/size groups.
 GP history records `align_pairs`, `align_residual`, `align_ramp`, and the peak
 applied L1 `align_force` in each sampling window. Alignment residual alone does
 not establish QoR; compare final WNS/TNS, HPWL, RUDY, and legalization displacement.
+
+### Global rigid macro magnetization (opt-in)
+
+`synth.place.macro.magnet=true` enables opportunistic merges during the staged
+native macro solve. Selection is global: equal padded shapes may pair across
+masters, synthesis colors and hierarchy. Shape keys come from stored dimensions,
+so fractional GP origins cannot split a shape class through coordinate rounding.
+The default remains `false`; real-design comparisons are still in progress.
+With magnet enabled, `synth.place.fp=false` and `synth.place.final=false`
+run macro_plan only, including macro snap. Set `macro.legalize_cells=false`
+and `macro.detailed=false` for a preview without cell legalization/detail.
+Periodic timing feedback remains active during macro GP; the CLI skips the
+initial timing seed, post-placement repair and final independent STA in this
+mode. No macro timing weights are carried into a subsequent final placement.
+
+A selected batch replaces pairs with actual union nodes. Pins are re-offset,
+internal nets are masked for placement, and groups of groups flatten their
+member offsets. The union retains two ordinary halos between member bodies and
+one halo outside. Density, routing feedback, pulls, alignment, snap and macro LP
+see that single rectangle. Members keep their original orientations; a group
+cannot flip. Momentum and temporary particles restart at current positions,
+with the original filler geometry retained across contractions.
+
+Routing-model decisions, accepted routing probes, timing observations and the
+original density-continuation deadline survive group restarts within macro_plan.
+HPWL/inflation convergence samples restart because their geometry changed.
+A deferred timing callback preserves the last measured violation; only a new
+estimate can clear it. The final frozen-macro relaxation adds no STA callbacks
+and retains these diagnostics. A subsequent placement stage starts with fresh
+timing state.
+
+| Control suffix under `synth.place.macro.` | Default | Meaning |
+| --- | --- | --- |
+| `magnet_settle_window` | `10` | Movement observation window |
+| `magnet_start_displacement` | `0.10` | One-shot global maximum macro motion threshold |
+| `magnet_before_snap` | `false` | Run ordinary GP, then merge only immediately before macro snap; no GP restart |
+| `magnet_settle_displacement` | `0.05` | Each candidate macro center excursion / its own smaller extent |
+| `magnet_max_gap` | `1` | Gap limit / shared macro extent |
+| `magnet_density_fraction` | `0.25` | Gap cell-density limit / global cell density |
+| `magnet_max_per_round` | `0` | Independent merges per round; zero is unbounded |
+| `magnet_max_rounds` | `0` | Successful rounds; zero is unbounded |
+
+Timing checkpoints, applied pull replacements, terminal moves, merges and snap
+reset the settling gate. A complete motion window is required after an event. Each candidate macro must
+individually satisfy the 5% motion limit over that window. An unrelated moving
+macro cannot block the pair after the global gate opens. The global maximum/RMS use each macro's own smaller
+dimension. Search starts only after a complete movement window has global maximum
+motion at most 10%, then continues using the 5% per-object checks even if global
+motion rises. There is no density/overflow prerequisite for magnetization.
+Opening this one-shot latch preserves motion history. Reports record every
+iteration's global maximum/RMS, window validity and the crossing; animation pull events
+identify actually applied warpspace anchor updates. There is no additional
+cooldown or future-event lookahead. Candidates sort
+by gap density, displacement and stable node order. Only mutually independent
+pairs enter a batch. GP-only and H2D modes reject the option.
+
+For the late-only comparison, `magnet_before_snap=true` leaves GP forces and
+stopping rules unchanged, then applies geometry/density/track checks to the
+frozen final geometry before snap. It does not require motion windows or rerun
+GP after merging. `synth.place.final=false` also supports a no-magnet macro-only
+preview: it skips the timing seed, post-placement repair and final STA, retains
+internal macro timing, and records macro/density playback when snapshots are on.
+
+For offset candidates, the gap region joins corresponding endpoints of the two
+facing padded edges. Equal-shape macros form a parallelogram; aligned edges form
+a rectangle. Density counts cell footprint area inside this region, excluding
+the unused corners of its bounding box. Small searches clip individual cells;
+larger searches weight the auxiliary density bins by their clipped region area.
+The global reference is movable standard-cell area divided by core area minus
+physical macro-body union area, excluding halos. Overlapping macros are counted
+once. A global density of 0.4 with ratio 0.25 gives a gap limit of 0.1, independent
+of the GP target density. Any other macro intersecting the trapezoid blocks the
+pair. The half-extent orthogonal offset limit remains a separate eligibility check.
+The merge preserves the area-weighted center where feasible. Near a core edge,
+the complete padded proposal moves by the minimum whole-block translation into
+the core; a union too large to fit is rejected. Each stable GP sample rechecks candidates, including after a no-pair result:
+cell motion can empty a gap without moving its macros. Macro GP uses an adaptive
+momentum restart when extrapolation would move macros against the local descent
+direction, retaining routing pressure while reducing channel oscillation.
+
+Before selecting a merge, a cached routing-phase preflight intersects the
+original members' supported pin profiles at their proposed rigid offsets. It
+combines mixed-layer pin coverage across both axes; a single common translation
+must serve every supported pin. Incompatible offsets report
+`routing_track_phase` without interrupting GP. The cache keys include master,
+orientation and relative member origins, independent of hierarchy and absolute
+position. Pinless macros still respect the manufacturing grid.
+
+Track correction profiles a group as one union using each original member's
+supported oriented LEF pins, applies a common translation, then independently
+checks the original pin profiles. A standalone abstract's existing best-effort
+pin selection is preserved rather than reselected over all raw union pins.
+Expansion precedes the fixed-macro handoff. Final placement receives
+ordinary fixed members and the existing cell-halo behavior. Group ids are
+diagnostic and do not become persistent physical constraints.
+
+`W/synth/place/magnet.json` records attempts, candidate decisions, events,
+membership and sampled macro/density frames. `macro_animation.html` plays those
+frames with stepping and group outlines; it draws no individual cells. The
+recorded-decision selector returns to the search frame and overlays the tested
+gap region and proposed padded union, with the rejection reason and core
+translation. Multiple before-snap merge batches at one GP iteration select
+their own pre-merge pose; an unrecorded decision pose has no overlay. The feedback
+selector jumps to timing, warpspace, merge and snap events. The status shows the
+last measured macro-stability step separately from the global/local magnet gates.
+Interior gaps inside group outlines reserve both member halos. The background
+contains movable standard-cell footprints, excluding macros, halos
+and fillers. GP history includes round/group counts, movement max/RMS and the
+last instability iteration. QoR reports group/member counts, largest shape,
+magnet time and whether the stage stopped settled. A hard iteration cap can
+leave the stage unsettled even after legal macro snap.
+
+The **macro stability** metric is the sum of Euclidean center movements over
+all physical SRAMs between consecutive GP iterations, normalized to the largest
+such sum in iterations 1–50. Lower percentages mean less motion; 100% is that
+initial reference peak. Rigid-group members count separately, so magnetization
+does not artificially reduce the population. The absolute sum is recorded in
+`motion_history.center_step_sum_dbu`, with `center_step_valid` and
+`physical_macro_count`. Merge/snap jumps are separate actions, not GP steps.
+This movement metric does not certify spreading, overlap freedom or convergence.
+Warpspace uses this metric for its one-shot start gate described below. The
+magnetization global/local movement gates remain separate.
+Export the plot, all-step CSV and standalone HTML with:
+
+```sh
+python3 tools/macro_magnet_motion.py W/synth/place/magnet.json \
+  --output W/macro_stability --title 'CNN macro stability'
+```
+
+`tools/macro_magnet_gallery.py --output gallery.html --entry NAME=W/synth/place`
+indexes available replays. Repeat `--entry` for multiple designs and add
+`--watch-seconds 14400` to update the gallery as their macro stages finish.
+The index links an animation only after the producer has finished writing it.
 
 ### Macro legalization snap algorithms
 
@@ -1757,7 +1919,7 @@ particular, HPWL is only a lower bound on Steiner length; the draft's universal
 an independent Manhattan spanning-tree bound instead.
 
 
-The evaluation and measured defaults decision are recorded in
+The design and evaluation protocol are documented in
 [`todo/livehd/3r-route.html`](../../todo/livehd/3r-route.html). The global-swap
 kernel caches high-degree net extrema and current-position net HPWL to preserve
 exact proposal costs while avoiding repeated full-pin scans. Sparse flat HHDS attributes persist in sorted
@@ -1821,32 +1983,7 @@ key `eco_connectivity_weight`. Enabled `qor.eco.connectivity` telemetry records
 net/pin and candidate counts; `search_seconds` covers the complete fast ECO
 legalization, including its setup and legality check.
 
-### 2p HighTide evaluation
-
-The [CNN, Eyeriss and Coral evaluation](../../repros/2p_eval_20261020/comparison.html)
-records frozen tools, original constraints, normalized inputs, concurrent runtime,
-placement checks, tie/IO persistence and same-GP E/F comparisons. All three native
-full flows complete legally; comparison with cached OpenROAD whole flows is mixed
-and uses different final netlists. Large centroid FP was disabled after a circle-fit
-precondition failed. That evaluation exposed native macro-frame pin-access failures.
-The subsequent [CTS-to-route evaluation](../../repros/route_eval_20261021/comparison.html)
-fixes track-phase alignment and macro preservation, with passing full-path access
-checks on all three designs; routed quality comparisons remain in progress.
-
-For the measured same-GP legalization/detail replay with resizing disabled,
-`legalize.timing_strength=8`, `legalize.timing_threshold=0.5` and
-`legalize.timing_corrections=1` improve common setup WNS/TNS and native electrical
-counts across CNN and Eyeriss. The extra eight GP iterations raise replay runtime
-from 222 to 396 seconds on CNN and 385 to 656 seconds on Eyeriss. A second correction
-is rejected on both designs and leaves the identical final DEF. This combined
-opt-in choice has not been evaluated through the subsequent full repair flow;
-existing defaults remain zero. Fixed row/interval search caps were not swept.
-
-All 12 SAT backend/encoding cases and six adaptive probes retain zero alignments
-and match their ordinary E8 control exactly. These measurements support safe
-fallback, with no backend winner or routed QoR gain. The solver remains experimental.
-Measured bin5 raw stage DEFs are preserved with audited row-orientation views; final
-reviewed bin6 changes only the stage serializer, its regression and documentation.
+### ECO diagnostics
 
 For ECO diagnostics, `placement::Options::eco_trace_cells` accepts exact edited
 cell names (empty by default). A successful fast row-gap legalization records
@@ -2054,18 +2191,48 @@ Macro GP replaces absolute virtual center targets at safe iteration boundaries,
 independently of STA. The native optimizer holds them between refreshes, adds a
 separate bounded distance-pull objective, and restarts momentum after replacement.
 The force uses the ordinary macro-force reference and retains displacement
-magnitude below one macro dimension. These pulls never enter physical nets,
-RUDY demand, STA, DEF, or final-cell placement. A topology replacement clears
-native pull state. Solver failure clears the affected pulls atomically; FP
+magnitude using a shared macro-length reference. These pulls never enter physical nets,
+RUDY demand, STA, DEF, or final-cell placement. A topology replacement drops anchors of merged members and preserves untouched
+macro anchors until the next scheduled refresh. Solver failure clears the affected pulls atomically; FP
 failure retains the original target snapshot and reports its reason.
 
 Each stage has `.warpspace.bins=16` (2..64), `.iterations=2` (1..6), and
 `.seconds=3` (per-axis solve limit, up to 30). The filter remains 32 bins,
 independent of solve-grid resolution. FP `.weight=1` scales target movement;
-macro `.weight=0.25` sets relative pull strength (both 0..1). Macro
-`.warmup=0.1` and `.updates=10` schedule at most ten attempts after the first
-10% of its iteration budget. Early convergence is never delayed to meet a quota.
-FP runs once. Zero macro weight skips field work and optimizer restarts.
+macro `.weight=0.7` is a constant relative pull strength (both 0..1). Macro
+pull strength uses a common preconditioned wirelength/density reference and
+shared distance normalization, so equal anchor offsets have equal pull-only
+center response across memory sizes. It is independent of the optional local
+cell-density objective.
+
+Macro `.start_stability=0.20` opens a one-shot gate once the mean of the last
+`.stability_window=10` absolute macro-center step sums is below 20% of the peak
+in the first 50 GP steps. It cannot start before the first 50 reference steps.
+Once open, `.refresh_interval=25` refreshes the target field every 25 GP steps
+at constant strength until GP ends. Subsequent stability changes never reduce
+strength or suspend refreshes. These parameters are configurable. The trace
+records the measured stability for inspection; it does not adapt strength.
+
+With `.refresh_interval=0`, the older `.updates=10` attempt budget determines
+cadence. `.start_stability=0` selects `.warmup=0.1` instead of the motion gate.
+The alternative `.once_after_density=true` mode requires `.start_stability=0`.
+Early convergence is never delayed to meet a quota. A target refresh at the
+final GP step is skipped because no subsequent optimizer step would consume it.
+For macro GP only, `synth.place.macro.filler_fraction=0.125` selects particles
+with width and height one-eighth of the smallest physical memory by body area.
+Macro halos are excluded from this size reference. These particles bypass the
+cell-resolution bin cap while keeping the existing total filler area budget;
+`virtual_filler_max_count` can still enlarge them if explicitly requested.
+`0` preserves cell-derived sizing. The option does not enable fillers: use
+`synth.place.virtual_fillers=true` for the experiment. FP and final cells retain
+their existing cell-derived particles. Particle dimensions/count are reported in
+QoR, and the macro fraction enters reuse keys.
+
+`macro_warp_stability.jsonl` records the constant weight, refresh interval,
+observed window mean and first-50 reference. Replay and stability plots expose
+the same trace. The experimental strength-reduction and upward-ramp controls
+have been removed. FP runs once. Zero macro weight skips field work and
+optimizer restarts.
 All enabled policy values and algorithm version enter placement
 reuse keys; disabled stages do no field work.
 
@@ -2115,30 +2282,18 @@ and IO frame. FP centroid targets and macro warp pulls end with `macro_plan`;
 they are not saved as final-cell objectives or GP continuation state. Final
 legalizer remainder warping remains an independent option.
 
-### Routability option review (2026-10-22)
+### Routability evaluation
 
-The CNN, Eyeriss and BlackParrot uno trials do not establish a new universal
-routed winner. Keep the previously selected defaults: RSMT routing estimation,
-5 µm macro halos, terminal legalization, 256 critical pairs, no local pairs,
-joint total minimization, remainder wire weight 4, and SAT budgets of 1000 ms
-and 10,000,000 conflicts. FP, macro and remainder warps remain opt-in; neither
-repeated nor once-after-density anchors consistently improved the evaluated
-cases.
+Keep per-design parameter sweeps, measured QoR, performance profiles and routed
+comparisons under ignored `repros/`, and share selected reports separately.
+Evaluate density guidance against completed CTS, detailed routing and extracted
+timing before choosing settings. A hard density cap cannot be lower than the
+configured target. Pre-route density alone does not establish a routed gain.
+FP, macro and remainder warps remain opt-in.
 
-The explicitly approved 2026-10-23 default update replaces the fixed 5 µm halo
-with `synth.place.halo=auto` (ten selected placement-row heights), while retaining
-explicit micron overrides. FP and macro IO bus adjustment now default on. The
-routing comparisons above did not evaluate this new automatic halo policy.
-
-At fixed GP seeds, a 128-bin grid, target density 0.2 and hard cap 0.3, remainder
-padding 3 and critical padding 3 eliminated 5 µm bins above 80% occupancy in
-CNN, Eyeriss and BlackParrot uno. However, critical padding worsened estimated
-WNS by 0.83, 0.07 and 53.66 ps respectively, and Eyeriss TNS worsened about 3.2%.
-Remainder-only padding 3 also worsened BlackParrot TNS despite unchanged WNS.
-These stay per-design trial settings, not global defaults. A hard cap of 0.3
-also cannot replace the general default while the default target density is
-0.5. Post-CTS density and completed detailed routing plus extraction determine
-whether to promote any of these settings; pre-route density alone is insufficient.
+The automatic macro halo (`synth.place.halo=auto`) uses ten selected
+placement-row heights; explicit micron overrides remain supported. FP and
+macro IO bus adjustment default on.
 
 ### Experimental final-placement bus ordering
 
@@ -2270,3 +2425,28 @@ Its `pairs` list identifies input/output anchors (zero-based rows in `pins.tsv`)
 rectangle, intermediate cell (or -1), and outcome. These are actual virtual-pin
 alignment counts before GP, maintained throughout GP; the separate unconstrained
 physical-net RSMT diagnostic does not measure compliance with those assignments.
+
+For controlled macro spreading experiments, `synth.place.macro.fill_cell_space=true`
+sets nominal filler body area to `(1-density) * cell_space * virtual_filler_fraction`.
+Cell space is core area minus reserved physical macro bodies and fixed ordinary
+obstacles; macro halos and current overlaps do not change that reservation.
+The existing positive `virtual_filler_fraction` selects the requested budget
+multiplier (for example 1, .75, or .5). This opt-in mode is cleared before final
+cell placement, and does not change the default filler budget.
+
+Macro warpspace pulls compensate the GP preconditioner
+`max(1, pin_degree + density_weight * padded_area)`. Their common force reference
+is the mean preconditioned ordinary macro gradient, before optional objectives.
+Every anchor uses the same characteristic length (mean maximum anchored-macro
+dimension), with a common far-target cap. Thus equal center-to-anchor offsets
+and strength give equal pull-only center gradients regardless of macro area
+or pin degree. Ordinary wirelength, density, and boundary projection still
+contribute to the final movement. The placement cache version distinguishes
+this behavior from the earlier size-dependent normalization.
+
+Macro targets are projected into center bounds that fit the full physical
+body plus halo inside the core, intersected with any node position box.
+The macro can reach the edge; its center cannot cross the body/halo boundary.
+Per-refresh JSON retains raw displacement as `raw_dx/raw_dy`, the actual applied
+projected displacement, and `projected_samples`. FP cell/centroid targets keep
+their existing behavior.

@@ -266,6 +266,26 @@ TEST(Warpspace, InvalidFieldClearsPullsAtomically) {
   ASSERT_TRUE(result);
   EXPECT_TRUE(result->empty());
 }
+TEST(Warpspace, SixHundredStepPreviewStartsAtFourHundredAndRefreshesEveryTwentyFive) {
+  const auto   d = fixture();
+  Warp_options o;
+  o.enabled    = true;
+  o.bins       = 4;
+  o.iterations = 1;
+  o.seconds    = 1;
+  o.warmup     = 2. / 3.;
+  o.updates    = 8;
+  Macro_warp       controller(o, 600, std::string(std::getenv("TEST_TMPDIR")) + "/preview_600");
+  std::vector<int> applied;
+  for (int iteration = 1; iteration <= 600; ++iteration) {
+    if (auto update = controller.refresh(d, {0}, iteration)) {
+      ASSERT_EQ(update->size(), 1);
+      applied.push_back(iteration);
+    }
+  }
+  EXPECT_EQ(applied, (std::vector<int>{400, 425, 450, 475, 500, 525, 550, 575}));
+  controller.finish(600);
+}
 }  // namespace livehd::placement
 
 namespace livehd::placement {
@@ -297,5 +317,134 @@ TEST(Warpspace, CellSamplesExcludeMacrosAndFixedCells) {
   EXPECT_EQ(field.delta.size(), 1);
   EXPECT_THROW(placement_warp(d, {0}, o, true), std::invalid_argument);
   EXPECT_THROW(placement_warp(d, {2}, o, true), std::invalid_argument);
+}
+}  // namespace livehd::placement
+
+namespace livehd::placement {
+TEST(Warpspace, StabilityStartOpensOnceThenStrengthStaysConstant) {
+  const auto   d = fixture();
+  Warp_options o;
+  o.enabled          = true;
+  o.bins             = 4;
+  o.iterations       = 1;
+  o.seconds          = 1;
+  o.weight           = .7;
+  o.start_stability  = .2;
+  o.refresh_interval = 25;
+  o.updates          = 1;
+  Macro_warp          controller(o, 150, std::string(std::getenv("TEST_TMPDIR")) + "/stability_start");
+  std::vector<int>    applied;
+  std::vector<double> weights;
+  for (int i = 1; i <= 150; ++i) {
+    if (auto update = controller.refresh(d, {0}, i)) {
+      ASSERT_FALSE(update->empty());
+      applied.push_back(i);
+      weights.push_back(update->front().weight);
+    }
+    controller.observe_motion(i, i <= 50 ? 100 : i < 70 ? 20 : i < 100 ? 19 : 1000, true);
+  }
+  EXPECT_EQ(applied, (std::vector<int>{71, 96, 121, 146}));
+  ASSERT_EQ(weights.size(), 4);
+  EXPECT_DOUBLE_EQ(weights[0], .7);
+  EXPECT_DOUBLE_EQ(weights[1], .7);
+  EXPECT_DOUBLE_EQ(weights[2], .7);
+  EXPECT_DOUBLE_EQ(weights[3], .7);
+  // No defined reference is not evidence of stability.
+  Macro_warp zero(o, 150, std::string(std::getenv("TEST_TMPDIR")) + "/zero_reference");
+  for (int i = 1; i < 150; ++i) {
+    EXPECT_FALSE(zero.refresh(d, {0}, i));
+    zero.observe_motion(i, 0, true);
+  }
+}
+}  // namespace livehd::placement
+
+namespace livehd::placement {
+TEST(Warpspace, MacroTargetsRespectFullBodyHaloAndPositionBox) {
+  auto d           = fixture();
+  d.node_size_x[0] = 40;
+  d.node_size_y[0] = 20;
+  d.node_x[0]      = 10;
+  d.node_y[0]      = 10;
+  d.node_halo_x    = {3, 0, 0};
+  d.node_halo_y    = {4, 0, 0};
+  Warp_field field;
+  field.delta.emplace(0, warp::Point{1000, -1000});
+  project_warp_macro_targets(field, d);
+  EXPECT_TRUE(field.macro_targets_projected);
+  EXPECT_EQ(field.projected_samples, 1);
+  EXPECT_DOUBLE_EQ(field.unprojected_delta.at(0).x, 1000);
+  EXPECT_DOUBLE_EQ(30 + field.delta.at(0).x, 77);
+  EXPECT_DOUBLE_EQ(20 + field.delta.at(0).y, 14);
+  d.node_boxes = {
+      {20, 20, 30, 30},
+      { 0,  0, 90, 90},
+      { 0,  0, 90, 90}
+  };
+  field.delta.at(0) = {1000, -1000};
+  project_warp_macro_targets(field, d);
+  EXPECT_DOUBLE_EQ(30 + field.delta.at(0).x, 50);
+  EXPECT_DOUBLE_EQ(20 + field.delta.at(0).y, 30);
+  field.delta.at(0) = {10.1, 10.2};  // A reachable target is unchanged.
+  project_warp_macro_targets(field, d);
+  EXPECT_EQ(field.projected_samples, 0);
+  EXPECT_EQ(field.delta.at(0).x, 10.1);
+  EXPECT_EQ(field.delta.at(0).y, 10.2);
+  d.node_size_x[0] = 100;
+  EXPECT_THROW(project_warp_macro_targets(field, d), std::runtime_error);
+}
+}  // namespace livehd::placement
+
+namespace livehd::placement {
+TEST(Warpspace, ProgrammableIntervalContinuesBeyondLegacyBudget) {
+  const auto   d = fixture();
+  Warp_options o;
+  o.enabled          = true;
+  o.weight           = .7;
+  o.refresh_interval = 7;
+  o.warmup           = 0;
+  o.updates          = 1;
+  o.bins             = 4;
+  o.iterations       = 1;
+  o.seconds          = 1;
+  Macro_warp       controller(o, 31, std::string(std::getenv("TEST_TMPDIR")) + "/periodic_constant");
+  std::vector<int> applied;
+  for (int i = 1; i <= 31; ++i) {
+    if (auto pulls = controller.refresh(d, {0}, i)) {
+      ASSERT_FALSE(pulls->empty());
+      EXPECT_DOUBLE_EQ(pulls->front().weight, .7);
+      applied.push_back(i);
+    }
+  }
+  EXPECT_EQ(applied, (std::vector<int>{1, 8, 15, 22, 29}));
+  o.refresh_interval = -1;
+  EXPECT_THROW(validate_warp_options(o), std::invalid_argument);
+}
+TEST(Warpspace, StartGateRequiresCompleteMotionWindowButNeverClosesAgain) {
+  const auto   d = fixture();
+  Warp_options o;
+  o.enabled          = true;
+  o.weight           = .7;
+  o.start_stability  = .2;
+  o.refresh_interval = 25;
+  o.bins             = 4;
+  o.iterations       = 1;
+  o.seconds          = 1;
+  Macro_warp controller(o, 150, std::string(std::getenv("TEST_TMPDIR")) + "/constant_reset");
+  for (int i = 1; i <= 50; ++i) {
+    controller.observe_motion(i, 100, true);
+  }
+  EXPECT_FALSE(controller.refresh(d, {0}, 51));
+  controller.observe_motion(70, 0, false);
+  for (int i = 71; i < 80; ++i) {
+    controller.observe_motion(i, 9, true);
+  }
+  EXPECT_FALSE(controller.refresh(d, {0}, 80));
+  controller.observe_motion(80, 9, true);
+  ASSERT_TRUE(controller.refresh(d, {0}, 81));
+  controller.observe_motion(90, 0, false);
+  auto again = controller.refresh(d, {0}, 106);
+  ASSERT_TRUE(again);
+  ASSERT_FALSE(again->empty());
+  EXPECT_DOUBLE_EQ(again->front().weight, .7);
 }
 }  // namespace livehd::placement

@@ -18,7 +18,12 @@ magnetization alternate with DREAMPlace relaxation, so the global placer adapts 
 each clustering decision instead of a separate macro-clustering phase deciding
 arrays up front. Regularity emerges incrementally wherever the placement already
 wanted it.</p>
-<p><span class="status">Planned; rulings settled 2026-10-22, nothing implemented</span>
+<p><strong>Global scope:</strong> magnetization is independent of synthesis
+color, master identity and hierarchy. A magnetized set owns one physical macro
+node for placement, density, routing feedback, snap and legalization. Member
+identities and rigid offsets are used for expansion and diagnostics, not as
+separately movable placement objects.</p>
+<p><span class="status">Implementation in progress; rulings settled 2026-10-22</span>
 The default staged flow (<code>synth.place.macro=none</code> with movable macros:
 macro GP → fixed macros → final cells) is the target. H2D keeps its own topology
 groups and is out of scope.</p>
@@ -47,19 +52,32 @@ pseudo-nets or seed search.</li>
 <ol>
 <li><strong>Rounds, not single pairs.</strong> A magnetization round may merge
 several pairs at once as long as the pairs are mutually independent (no shared
-member, no overlapping gap rectangles). Strictly one pair per relaxation was
+member, no conflicting gap regions). Strictly one pair per relaxation was
 rejected: Eyeriss has 1040 SRAMs, so one-at-a-time would need about a thousand
 relaxations. A cap knob keeps one-per-round available for experiments.</li>
 <li><strong>Stability gate, not an iteration count.</strong> There is no native
-notion of "stable"; the proxy in <code>macro_plan</code> is macro movement over the
-last iterations. Every instability-inducing event — timing checkpoint, anchor
+notion of "stable"; the proxy in <code>macro_plan</code> is movement of each
+candidate macro or meta-macro over the last iterations, normalized by its own
+smaller physical dimension. Both candidates must pass; movement elsewhere does
+not veto them. Every instability-inducing event — timing checkpoint, anchor
 (macro pull) refresh, terminal pin update, snap, and a magnetization round
 itself — resets the gate. A magnetization round never coincides with another
 event, and the macro stage must not stop until macros have settled after the
 last event.</li>
-<li><strong>Start late enough.</strong> Magnetization is armed only once GP
-density overflow has fallen below <code>magnet_overflow</code> (default 0.2, before
-the normal 0.1 stop target) and the stability gate has opened once.</li>
+<li><strong>Start when globally stable, then check each pair.</strong> Per the
+latest CNN experiment request, the first complete motion window with global
+maximum displacement ≤10% opens a one-shot start gate. Subsequent pairs must
+each satisfy the 5% local threshold; unrelated movement cannot close the start
+gate. There is no overflow prerequisite, extra cooldown, or future-event quiet
+window. Applied feedback and merges reset the local motion history. The separate
+absolute center-step sum, normalized to its peak in the first 50 GP iterations,
+is independent of the magnet gate. It opens the configurable macro-warpspace start gate (default 20% after the
+first 50 reference steps). The current warpspace coefficient stays at a
+programmable constant (default 0.7), with target refresh every configured GP
+interval (default 25), independent of subsequent stability. Adaptive strength
+controllers were removed after the CNN spreading previews. An opt-in before-snap experiment instead finishes ordinary
+GP and searches frozen geometry immediately before macro snap/LP, without a
+motion gate or any post-merge GP.</li>
 <li><strong>A magnetized group is one macro.</strong> Inside <code>macro_plan</code>
 the group is a single movable node (union rectangle, re-offset pins, rigid member
 offsets): density, overlap repulsion, RUDY, alignment force, macro pulls, snap and
@@ -78,12 +96,18 @@ an existing 2×1 group (different shape); groups grow by doubling-shaped merges
 <li><strong>Selection.</strong> Candidates come from the existing strip index.
 A pair is eligible when the gap along the merge axis is at most
 <code>magnet_max_gap × extent</code> (default 1.0), the orthogonal center offset is
-below half the shared extent, and the standard-cell density inside the gap
-rectangle is at most <code>magnet_density_fraction × synth.place.density</code>
-(default 0.125, so 0.0625 absolute at target 0.5). Score: lowest gap density
+below half the shared extent, and the standard-cell density inside the region
+joining the facing padded edges is at most <code>magnet_density_fraction × global_cell_density</code>
+(default 0.25, so 0.1 absolute at global density 0.4). Global cell density is
+movable standard-cell area divided by core area minus the union of physical macro
+bodies; halos are excluded and overlaps count once. No other macro may intersect
+the trapezoid. Score: lowest gap density
 first, then smallest total displacement; greedy, independent pairs only.</li>
 <li><strong>Merge pose.</strong> Align on the merge axis, keep the pair's
-area-weighted center where it was, place members at two-halo spacing. Cells in
+area-weighted center where feasible, place members at two-halo spacing. If the
+ideal pose extends beyond the core but the padded union fits, translate the
+whole proposal by the minimum amount into the core. This preserves rigid member
+spacing; unions too large for the core remain ineligible. Cells in
 the gap are not moved; the next relaxation pushes them out.</li>
 <li><strong>Coexists with alignment force and snap.</strong> Both stay on by
 default. A group gets a shape signature as its alignment class so the well force
@@ -123,24 +147,27 @@ nodes so target density and overflow stay comparable before and after a merge.</
 <li>Add a macro-movement metric per iteration: max and RMS displacement of
 movable macro centers (groups count once) over a window of
 <code>magnet_settle_window</code> iterations (default 10), normalized by the
-smallest movable macro extent. Record in <code>GpSample</code>/
+each macro's own smaller physical extent. Record in <code>GpSample</code>/
 <code>gp_history.json</code> as <code>macro_move_max</code>, <code>macro_move_rms</code>.</li>
 <li>Define a single <em>instability event</em> hook inside native GP that every
 disturbing action reports: timing checkpoint applied, macro pull replacement,
 terminal update, magnetization round. Store the last-event iteration.</li>
 <li>Gate: a magnetization round may run at iteration <var>i</var> only if
-overflow ≤ <code>magnet_overflow</code>, <var>i</var> − last_event ≥
-<code>magnet_settle_iterations</code> (default 20), <code>macro_move_max</code>
-over the window ≤ <code>magnet_settle_displacement</code> (default 0.02), and no
-scheduled checkpoint/pull/terminal event falls within the next
-<code>magnet_settle_window</code> iterations (defer the round, never share the
-iteration).</li>
+a complete post-event motion window exists and <em>both candidate macros</em>
+individually move ≤ <code>magnet_settle_displacement</code> (default 0.05) of their
+own smaller physical dimension. An unrelated unstable macro cannot block them.
+The global maximum opens the one-shot 10% start gate; maximum/RMS also remain
+diagnostics and whole-placement stopping checks. No overflow, extra age, or
+future-event test applies.</li>
 <li>Stop criterion: normal convergence (overflow ≤ <code>stop_overflow</code>,
-HPWL tolerance) <em>and</em> the gate conditions above satisfied after the last
-event. Respect the existing iteration cap; at the cap, report that settling was
+HPWL tolerance) <em>and</em> all macro objects settled after the last event.
+This whole-placement stop check does not gate individual merges. Respect the
+existing iteration cap; at the cap, report that settling was
 not reached rather than claiming convergence.</li>
 <li>Rounds continue opportunistically until no eligible pair exists or
 <code>magnet_max_rounds</code> (default 0 = unbounded) is reached.</li>
+<li>A no-pair result is specific to its geometry and cell-density snapshot. Recheck
+at each stable GP sample, including when only cells move out of a corridor.</li>
 </ul></li>
 <li id="C"><strong>C — Candidate search and gap density.</strong>
 <ul>
@@ -149,19 +176,28 @@ class with a shape signature (padded width, height) for magnet candidates;
 keep the same-master class for the alignment force except that groups use the
 shape signature (ruling 9).</li>
 <li>For each neighbor pair with equal shape, consider both axes whose gap and
-orthogonal-offset limits hold; compute the gap rectangle between facing padded
-edges spanning the shared extent.</li>
+orthogonal-offset limits hold; compute the quadrilateral joining corresponding
+endpoints of the facing padded edges. Per user feedback on 2026-10-22, offset
+pairs use this slanted gap region, not its bounding rectangle or only the shared
+projection. Equal-shape pairs form a parallelogram; aligned pairs form a rectangle.
+Overlapping/touching facing edges have no positive gap area.</li>
 <li>Standard-cell density in the gap: sum of movable standard-cell area overlap
 (no macros, no fillers, no halo padding) divided by gap area, from a summed-area
-table over the auxiliary grid as used by <code>density_pull</code>. Exact
-per-cell clipping is acceptable if the candidate count is small; measure.</li>
+table over the auxiliary grid for aligned pairs. Offset regions weight bins by
+polygon intersection area. Exact per-cell polygon clipping is used if the
+candidate count and design are small; measure.</li>
 <li>Eligibility and score per ruling 7. Independence: a chosen pair excludes
-any other pair sharing a member or whose gap rectangle intersects a chosen
+any other pair sharing a member or whose gap region intersects a chosen
 pair's merged rectangle. Apply <code>magnet_max_per_round</code> (default 0 =
 all independent eligible pairs).</li>
-<li>Reject (and report the reason) when the merged rectangle would leave the
-core, overlap a fixed macro, or when either candidate currently participates in a
+<li>Reject (and report the reason) when the padded merged rectangle cannot fit
+the core, its proposed pose overlaps a fixed macro, or either candidate participates in a
 pending macro pull replacement in the same iteration.</li>
+<li>Before selecting a pair, verify that its frozen member offsets admit one
+common routing/manufacturing phase for all original supported pin profiles.
+Intersect single-axis domains and combine mixed-layer pin coverage across both
+axes. Cache by master, orientation and relative offsets; an incompatible proposal
+reports <code>routing_track_phase</code> and leaves GP running.</li>
 </ul></li>
 <li id="D"><strong>D — Round execution and relaxation.</strong>
 <ul>
@@ -180,17 +216,23 @@ nodes).</li>
 <li id="E"><strong>E — Options, reports and cache keys.</strong>
 <ul>
 <li>Opt-in control <code>synth.place.macro.magnet=false</code> plus
-<code>synth.place.macro.magnet_overflow=0.2</code>,
-<code>magnet_settle_iterations=20</code>, <code>magnet_settle_window=10</code>,
-<code>magnet_settle_displacement=0.02</code>, <code>magnet_max_gap=1.0</code>,
-<code>magnet_density_fraction=0.125</code>, <code>magnet_max_per_round=0</code>,
+<code>synth.place.macro.magnet_start_displacement=0.10</code>,
+<code>synth.place.macro.magnet_before_snap=false</code>,
+<code>synth.place.macro.magnet_settle_window=10</code>,
+<code>magnet_settle_displacement=0.05</code>, <code>magnet_max_gap=1.0</code>,
+<code>magnet_density_fraction=0.25</code>, <code>magnet_max_per_round=0</code>,
 <code>magnet_max_rounds=0</code>. Register in the CLI registry, validation,
 <code>lhd describe</code>, stage configuration and placement cache hashing
 (same path as the warpspace options). Requires movable macros and the staged
-flow; GP-only placement and H2D reject it with a clear message.</li>
+flow; GP-only placement and H2D reject it with a clear message. With FP and
+final disabled, expose macro_plan alone through snap for animation inspection;
+retain internal GP timing but skip the initial timing seed, post-snap repair
+and final independent STA.</li>
 <li><code>W/synth/place/magnet.json</code>: per round the iteration, overflow,
 settle metric, chosen pairs (members, axis, gap, gap density, displacement),
 rejected candidates with reasons, and final group membership. Add
+the tested gap polygon, proposed padded union and any whole-block core
+translation so replay can expose the actual decision geometry. Add
 <code>magnet_round</code>, <code>magnet_groups</code>, <code>macro_move_max</code>,
 <code>macro_move_rms</code> and <code>last_instability_iteration</code> to
 <code>gp_history.json</code> and the live JSONL samples; add
@@ -221,10 +263,10 @@ member orders; density/overflow equality before and after a merge of an
 isolated pair; atomic rejection (fixed overlap, out of core); expansion
 round-trip; group-of-groups offset composition; frozen orientation rejection.</li>
 <li>Scheduler tests with a synthetic GP: no round on a checkpoint or pull
-iteration; deferral when an event is due within the window; gate re-arming
+iteration; gate re-arming
 after each event; stop refused while unsettled; cap reached reports unsettled.</li>
 <li>Candidate tests: equal-shape only (a 2×1 group never pairs with a single),
-gap-density gate relative to target density, independence of chosen pairs,
+gap-density gate relative to measured global cell density, independence of chosen pairs,
 tie-breaking determinism.</li>
 <li>LiveHD regularity suite (<code>pass/place/tests/regularity</code>): mesh
 2×2 and 4×4 SRAM arrays with sparse logic between memories must end as one or a
@@ -232,8 +274,8 @@ few groups with legal placement, zero TNS and HPWL not worse than magnet off by
 more than a documented bound; a dense-logic variant must produce zero groups.</li>
 <li>Legality: existing OpenROAD placement check and expanded-box audit pass on
 all regularity cases with magnet on; member clearance audit from F.</li>
-<li>Keep every new test under the repository time limits (opt &lt; 30 s, dbg
-&lt; 90 s); prefer fixtures over bespoke scripts.</li>
+<li>Keep every new test under the repository time limits (opt &lt; 20 s, dbg
+&lt; 60 s); prefer fixtures over bespoke scripts.</li>
 </ul></li>
 <li id="H"><strong>H — Evaluation.</strong>
 <ul>
@@ -243,6 +285,10 @@ seconds, final HPWL, RUDY peak, legalization displacement, estimated WNS/TNS,
 and the independent halo audit. Record in a dated
 <code>repros/placement-results/*-magnet-*/comparison.html</code> with pre/post
 legalization PNGs showing group outlines.</li>
+<li>Provide a playback animation of macro movement over the computed regional
+standard-cell density map. Do not draw individual cells. Mark timing/anchor
+feedback, magnetization and snap events (including rejected/no-snap decisions),
+and allow stepping through the frames for visual review.</li>
 <li>Sweep <code>magnet_density_fraction</code> ∈ {1/16, 1/8, 1/4} and
 <code>magnet_settle_displacement</code> ∈ {0.01, 0.02, 0.05} on Eyeriss; report
 rounds vs runtime.</li>
@@ -252,6 +298,14 @@ alone do not justify flipping the default.</li>
 </ul></li>
 </ul>
 
+<h2>Implementation notes</h2>
+<p>The implementation includes physical rigid-group contraction and expansion,
+member-offset preservation, geometry checks, per-object motion tracking, and
+macro-only playback over measured cell-density maps. Tests cover group
+composition, orientation, boundaries and fixed-macro handoff.</p>
+<p>Benchmark measurements, parameter sweeps, performance profiles, plots and
+animations belong under <code>repros/</code> and are shared separately through
+ChatGPT. Intermediate results are not maintained in versioned documentation.</p>
 <h2>Design notes</h2>
 <h3>Why a node merge and not a constraint</h3>
 <p>Keeping members as separate nodes with a projected shared displacement would

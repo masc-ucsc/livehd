@@ -386,42 +386,77 @@ TEST(Placement, MacroCellWorkCanBeDeferredWithoutSkippingGpTimingOrFinalLegaliza
   auto signal = graph->get_input_pin("a");
   gu::set_bits(signal, 1);
   for (int i = 0; i < 3; ++i) {
-    auto cell_io = source.create_io(i ? "sky130_fd_sc_hd__buf_1" : "sky130_fd_sc_hd__inv_1");
-    cell_io->add_input("A", 0);
-    cell_io->add_output(i ? "X" : "Y", 0);
+    const auto master  = i ? "sky130_fd_sc_hd__buf_1" : "sky130_fd_sc_hd__inv_1";
+    auto       cell_io = source.find_io(master);
+    if (!cell_io) {
+      cell_io = source.create_io(master);
+      cell_io->add_input("A", 0);
+      cell_io->add_output(i ? "X" : "Y", 0);
+    }
     auto cell = gu::create_typed_node(*graph, Ntype_op::Sub);
     cell.set_subnode(cell_io);
     cell.set_name("cell" + std::to_string(i));
+    cell.attr(attrs::synth_color_group).set("macro_detail_group");
     cell.create_sink_pin("A").connect_driver(signal);
     signal = cell.create_driver_pin(i ? "X" : "Y");
     gu::set_bits(signal, 1);
   }
   graph->get_output_pin("y").connect_driver(signal);
-  for (const auto& [detail, independent, legalize, terminal] : {std::tuple{true, false, true, false},
-                                                               std::tuple{false, false, true, false},
-                                                               std::tuple{false, true, true, false},
-                                                               std::tuple{false, true, false, false},
-                                                               std::tuple{false, true, false, true}}) {
-    auto options                 = plain_options();
-    options.lefs                 = {"inou/lefdef/tests/data/sky130hd.tlef", lef_path};
-    options.output_dir           = (root / (terminal ? "macro_only_terminal" : !legalize ? "macro_only"
-                                            : detail ? "enabled" : independent ? "independent" : "disabled")).string();
-    options.core                 = {0, 0, 30, 30};
-    options.density              = .5;
-    options.iterations           = 20;
-    options.bins                 = 2;
-    options.snapshots            = true;
-    options.final_cells          = true;
-    options.macro_detailed_place = detail;
-    options.macro_legalize_cells = legalize;
-    options.terminal_legalize = terminal;
-    options.final_independent_timing = independent;
-    options.macro_timing_interval = 10;
-    options.net_weights["cell0:Y"] = 2;
-    bool macro_complete = false, checked_final_weights = false;
-    double macro_weight = 0;
+  for (const auto& [detail, independent, legalize, terminal, fp] : {
+           std::tuple{ true, false,  true, false, false},
+           std::tuple{false, false,  true, false, false},
+           std::tuple{false,  true,  true, false, false},
+           std::tuple{false,  true, false, false, false},
+           std::tuple{false,  true, false,  true, false},
+           std::tuple{false,  true, false,  true,  true}
+  }) {
+    auto options       = plain_options();
+    options.lefs       = {"inou/lefdef/tests/data/sky130hd.tlef", lef_path};
+    options.output_dir = (root
+                          / (fp            ? "fp_macro_only_terminal"
+                             : terminal    ? "macro_only_terminal"
+                             : !legalize   ? "macro_only"
+                             : detail      ? "enabled"
+                             : independent ? "independent"
+                                           : "disabled"))
+                             .string();
+    options.core                  = {0, 0, 30, 30};
+    options.density               = .5;
+    options.macro_filler_fraction = .125;
+    options.macro_fill_cell_space = true;
+    options.iterations            = 20;
+    const bool warp_preview       = !legalize && !terminal;
+    if (warp_preview) {
+      options.iterations = options.min_iterations = 100;
+      options.macro_warp.enabled                  = true;
+      options.macro_warp.weight                   = 1;
+      options.macro_warp.start_stability          = 0;
+      options.macro_warp.refresh_interval         = 20;
+      options.macro_warp.bins                     = 4;
+      options.macro_warp.iterations               = 1;
+      options.macro_warp.seconds                  = 1;
+      options.macro_warp.warmup                   = .6;
+      options.macro_warp.updates                  = 2;
+    }
+    options.bins     = 2;
+    options.fp_place = options.fp_colors = fp;
+    options.fp_color_minimum             = 0;
+    options.fp_iterations                = 20;
+    options.fp_timing_interval           = 10;
+    options.macro_cell_density_weight    = fp ? 2 : 0;
+    options.local_density_bins           = 8;
+    options.snapshots                    = true;
+    options.final_cells                  = true;
+    options.macro_detailed_place         = detail;
+    options.macro_legalize_cells         = legalize;
+    options.terminal_legalize            = terminal;
+    options.final_independent_timing     = independent;
+    options.macro_timing_interval        = 10;
+    options.net_weights["cell0:Y"]       = 2;
+    bool     macro_complete = false, checked_final_weights = false;
+    double   macro_weight       = 0;
     unsigned macro_timing_calls = 0;
-    options.fp_evaluate = [&](const Result& checkpoint) {
+    options.fp_evaluate         = [&](const Result& checkpoint) {
       if (!macro_complete) {
         ++macro_timing_calls;
       }
@@ -435,7 +470,7 @@ TEST(Placement, MacroCellWorkCanBeDeferredWithoutSkippingGpTimingOrFinalLegaliza
     };
     physical::Floorplan macro_frame;
     options.after_stage = [&](Placement_stage stage, const Result& result) {
-      if (legalize || stage != Placement_stage::macro) {
+      if (stage == Placement_stage::final || (stage == Placement_stage::macro && legalize)) {
         EXPECT_NO_THROW(check_legality(physical::read_lef(options.lefs), result.floorplan));
       }
       if (stage == Placement_stage::macro) {
@@ -444,18 +479,42 @@ TEST(Placement, MacroCellWorkCanBeDeferredWithoutSkippingGpTimingOrFinalLegaliza
         rapidjson::Document q;
         q.Parse(result.qor.c_str());
         EXPECT_EQ(q["cells_legalized"].GetBool(), legalize);
-        if (!legalize) {
+        EXPECT_DOUBLE_EQ(q["macro_filler_fraction"].GetDouble(), .125);
+        EXPECT_TRUE(q["macro_fill_cell_space"].GetBool());
+        if (warp_preview) {
+          std::ifstream trace(options.output_dir + "/macro/macro_warp_stability.jsonl");
+          std::string   last, line;
+          while (std::getline(trace, line)) {
+            last = line;
+          }
+          rapidjson::Document decision;
+          decision.Parse(last.c_str());
+          EXPECT_FALSE(decision.HasParseError());
+          const bool has_fraction = decision.IsObject() && decision.HasMember("macro_stability_fraction");
+          EXPECT_TRUE(has_fraction);
+          // A replay recorder must not deliver a second same-step callback,
+          // which would rebase the controller's window at every GP iteration.
+          if (has_fraction) {
+            EXPECT_TRUE(decision["macro_stability_fraction"].IsNumber());
+            EXPECT_EQ(decision["iteration"].GetInt(), 80);
+          }
+        }
+        if (!legalize && result.macro_gp_timing) {
           EXPECT_NE(result.macro_gp_timing->parasitics, nullptr);
         }
-        macro_frame = result.floorplan;
+        macro_frame  = result.floorplan;
         macro_weight = result.net_weights.at("cell0:Y");
         EXPECT_GT(macro_weight, 2);
         macro_complete = true;
       }
       return false;
     };
-    hhds::GraphLibrary placed;
-    const auto result = place(*graph, placed, options);
+    hhds::GraphLibrary  placed;
+    const auto          result = place(*graph, placed, options);
+    rapidjson::Document final_qor;
+    final_qor.Parse(result.qor.c_str());
+    EXPECT_DOUBLE_EQ(final_qor["macro_filler_fraction"].GetDouble(), 0);
+    EXPECT_FALSE(final_qor["macro_fill_cell_space"].GetBool());
     EXPECT_NO_THROW(check_legality(physical::read_lef(options.lefs), result.floorplan));
     ASSERT_FALSE(macro_frame.components.empty());
     EXPECT_TRUE(checked_final_weights);
@@ -463,22 +522,178 @@ TEST(Placement, MacroCellWorkCanBeDeferredWithoutSkippingGpTimingOrFinalLegaliza
     EXPECT_EQ(std::filesystem::exists(options.output_dir + "/macro/after_detailed.def"), detail);
     EXPECT_EQ(std::filesystem::exists(options.output_dir + "/after_detailed.def"), !terminal);
     EXPECT_TRUE(std::filesystem::exists(options.output_dir + "/after_legalization.def"));
+    if (fp) {
+      const auto read_report = [&](const std::string& name) {
+        std::ifstream       file(options.output_dir + "/" + name);
+        const std::string   text{std::istreambuf_iterator<char>(file), {}};
+        rapidjson::Document report;
+        report.Parse(text.c_str());
+        return report;
+      };
+      auto fp_report = read_report("macro/fp_place.json");
+      ASSERT_FALSE(fp_report.HasParseError());
+      EXPECT_TRUE(fp_report["fixed_targets_enabled"].GetBool());
+      auto macro_gp = read_report("macro/gp_history.json");
+      auto final_gp = read_report("gp_history.json");
+      ASSERT_FALSE(macro_gp.HasParseError());
+      ASSERT_FALSE(final_gp.HasParseError());
+      EXPECT_DOUBLE_EQ(macro_gp["macro_cell_density_weight"].GetDouble(), 2);
+      EXPECT_DOUBLE_EQ(final_gp["macro_cell_density_weight"].GetDouble(), 0);
+    }
     const auto handoff = physical::read_def(options.output_dir + "/macro/fixed.def");
     EXPECT_EQ(handoff.components.size(), detail ? 3 : 1);
     EXPECT_EQ(result.floorplan.components.size(), 3);
     if (!detail) {
       EXPECT_TRUE(handoff.nets.empty());
     }
-    const auto before = std::find_if(macro_frame.components.begin(), macro_frame.components.end(),
-                                     [](const auto& c) { return c.name == "cell0"; });
-    const auto after = std::find_if(result.floorplan.components.begin(), result.floorplan.components.end(),
-                                    [](const auto& c) { return c.name == "cell0"; });
+    const auto before = std::find_if(macro_frame.components.begin(), macro_frame.components.end(), [](const auto& c) {
+      return c.name == "cell0";
+    });
+    const auto after  = std::find_if(result.floorplan.components.begin(), result.floorplan.components.end(), [](const auto& c) {
+      return c.name == "cell0";
+    });
     ASSERT_NE(before, macro_frame.components.end());
     ASSERT_NE(after, result.floorplan.components.end());
     EXPECT_EQ(before->place.x, after->place.x);
     EXPECT_EQ(before->place.y, after->place.y);
     EXPECT_EQ(before->place.orientation, after->place.orientation);
   }
+}
+TEST(Placement, GlobalMagnetStageExpandsMembersBeforeTheFixedMacroHandoff) {
+  const auto root = std::filesystem::path(std::getenv("TEST_TMPDIR")) / "global_magnet_stage";
+  std::filesystem::create_directories(root);
+  const auto    lef = root / "macros.lef";
+  std::ofstream output(lef);
+  output << "VERSION 5.8 ;\n";
+  for (const auto* name : {"red_ram", "blue_ram"}) {
+    output << "MACRO " << name << R"(
+ CLASS BLOCK ; ORIGIN 0 0 ; SIZE 1.38 BY 2.72 ; SYMMETRY X Y ;
+ PIN A
+ DIRECTION INPUT ; PORT LAYER li1 ; RECT 0.1 0.1 1.2 2.6 ; END
+ END A
+ PIN Y
+ DIRECTION OUTPUT ; PORT LAYER li1 ; RECT 0.1 0.1 1.2 2.6 ; END
+ END Y
+END )" << name
+           << '\n';
+  }
+  output << "END LIBRARY\n";
+  output.close();
+  hhds::GraphLibrary source;
+  auto               io = source.create_io("global_magnet_stage");
+  io->add_input("a", 0);
+  io->set_bits("a", 1);
+  io->add_output("y", 0);
+  io->set_bits("y", 1);
+  auto graph  = io->create_graph();
+  auto signal = graph->get_input_pin("a");
+  gu::set_bits(signal, 1);
+  for (const auto* name : {"red_ram", "blue_ram"}) {
+    auto master = source.create_io(name);
+    master->add_input("A", 0);
+    master->add_output("Y", 0);
+    auto cell = gu::create_typed_node(*graph, Ntype_op::Sub);
+    cell.set_subnode(master);
+    cell.set_name(name);
+    cell.attr(attrs::synth_color_group).set(name);
+    cell.create_sink_pin("A").connect_driver(signal);
+    signal = cell.create_driver_pin("Y");
+    gu::set_bits(signal, 1);
+  }
+  graph->get_output_pin("y").connect_driver(signal);
+  auto options                 = plain_options();
+  options.lefs                 = {"inou/lefdef/tests/data/sky130hd.tlef", "inou/lefdef/tests/data/sky130hd.lef", lef.string()};
+  options.output_dir           = (root / "out").string();
+  options.core                 = {0, 0, 50, 50};
+  options.iterations           = 160;
+  options.final_iterations     = 20;
+  options.bins                 = 8;
+  options.final_cells          = true;
+  options.macro_magnet.enabled = true;
+  options.macro_magnet.settle_displacement = 1;
+  options.macro_magnet.max_gap             = 100;  // Admit the tiny fixture's initial IO-driven separation.
+  options.macro_legalize_cells = options.macro_detailed_place = false;
+  options.final_independent_timing                            = true;
+  options.density_upper_bound                                 = true;
+  options.halo_x                                              = .46;
+  options.halo_y                                              = 2.72;
+  hhds::GraphLibrary placed;
+  const auto         result = place(*graph, placed, options);
+  EXPECT_NO_THROW(check_legality(physical::read_lef(options.lefs), result.floorplan, options));
+  ASSERT_EQ(result.floorplan.components.size(), 2);
+  for (const auto& component : result.floorplan.components) {
+    EXPECT_EQ(component.place.status, physical::Status::FIXED);
+  }
+  const auto handoff = physical::read_def(options.output_dir + "/macro/fixed.def");
+  ASSERT_EQ(handoff.components.size(), result.floorplan.components.size());
+  for (size_t i = 0; i < handoff.components.size(); ++i) {
+    EXPECT_EQ(handoff.components[i].name, result.floorplan.components[i].name);
+    EXPECT_EQ(handoff.components[i].macro, result.floorplan.components[i].macro);
+    EXPECT_EQ(handoff.components[i].place.x, result.floorplan.components[i].place.x);
+    EXPECT_EQ(handoff.components[i].place.y, result.floorplan.components[i].place.y);
+    EXPECT_EQ(handoff.components[i].place.orientation, result.floorplan.components[i].place.orientation);
+    EXPECT_EQ(handoff.components[i].place.status, result.floorplan.components[i].place.status);
+  }
+  EXPECT_TRUE(std::filesystem::exists(options.output_dir + "/magnet.json"));
+  EXPECT_TRUE(std::filesystem::exists(options.output_dir + "/macro_animation.html"));
+  rapidjson::Document qor;
+  qor.Parse(result.qor.c_str());
+  ASSERT_TRUE(qor.HasMember("macro_magnet"));
+  EXPECT_EQ(qor["macro_magnet"]["groups"].GetUint64(), 1);
+  EXPECT_EQ(qor["macro_magnet"]["members"].GetUint64(), 2);
+  options.final_cells        = false;
+  options.output_dir         = (root / "macro_only").string();
+  options.snapshots          = false;
+  options.macro_warp.enabled = true;
+  int completed              = 0;
+  options.after_stage        = [&](Placement_stage stage, const Result&) {
+    EXPECT_EQ(stage, Placement_stage::macro);
+    ++completed;
+    return false;
+  };
+  hhds::GraphLibrary macro_only_library;
+  const auto         macro_only = place(*graph, macro_only_library, options);
+  EXPECT_EQ(completed, 1);
+  EXPECT_FALSE(std::filesystem::exists(options.output_dir + "/macro"));
+  EXPECT_TRUE(std::filesystem::exists(options.output_dir + "/macro_animation.html"));
+  EXPECT_TRUE(std::filesystem::exists(options.output_dir + "/warp_nodes.tsv"));
+  rapidjson::Document macro_report;
+  macro_report.Parse(macro_only.qor.c_str());
+  ASSERT_TRUE(macro_report.HasMember("macro_magnet"));
+  EXPECT_EQ(macro_report["macro_magnet"]["members"].GetUint64(), 2);
+  options.macro_magnet.enabled = false;
+  options.terminal_legalize    = true;  // final-stage default must not enter a macro-only preview
+  options.snapshots            = true;
+  options.output_dir           = (root / "macro_only_no_magnet").string();
+  std::filesystem::create_directories(options.output_dir);
+  std::ofstream(options.output_dir + "/macro_warp_stability.jsonl") << "stale trace from an earlier solve\n";
+  completed                    = 0;
+  hhds::GraphLibrary ordinary_macro_library;
+  const auto         ordinary_macro = place(*graph, ordinary_macro_library, options);
+  EXPECT_EQ(completed, 1);
+  rapidjson::Document ordinary_qor;
+  ordinary_qor.Parse(ordinary_macro.qor.c_str());
+  ASSERT_FALSE(ordinary_qor.HasParseError());
+  EXPECT_FALSE(ordinary_qor["cells_legalized"].GetBool());
+  EXPECT_FALSE(ordinary_qor.HasMember("macro_magnet"));
+  std::ifstream       replay_file(options.output_dir + "/magnet.json");
+  const std::string   replay_text{std::istreambuf_iterator<char>(replay_file), {}};
+  rapidjson::Document replay;
+  replay.Parse(replay_text.c_str());
+  ASSERT_FALSE(replay.HasParseError());
+  EXPECT_FALSE(replay["enabled"].GetBool());
+  EXPECT_TRUE(replay["groups"].Empty());
+  ASSERT_FALSE(replay["motion_history"].Empty());
+  EXPECT_EQ(replay["motion_history"][0]["physical_macro_count"].GetInt(), 2);
+  EXPECT_FALSE(replay["motion_history"][0]["center_step_valid"].GetBool());
+  EXPECT_EQ(replay["macro_stability"]["reference_iterations"].GetInt(), 50);
+  bool saw_valid_motion = false;
+  for (const auto& sample : replay["motion_history"].GetArray()) {
+    saw_valid_motion |= sample["center_step_valid"].GetBool();
+  }
+  EXPECT_TRUE(saw_valid_motion);
+  EXPECT_GT(replay["frames"].Size(), 1);
+  EXPECT_TRUE(std::filesystem::exists(options.output_dir + "/macro_animation.html"));
 }
 TEST(Placement, RepulsionControlsRejectUnsupportedH2dCombination) {
   hhds::GraphLibrary source, scratch;
@@ -590,10 +805,14 @@ TEST(Placement, TechnologyClockPinsAreExcludedOnlyFromPlacementCost) {
 }
 TEST(Placement, TimingCheckpointsCarryConnectivityForAutomaticResetCuts) {
   for (unsigned mode = 0; mode < 4; ++mode) {
-    const bool floorplan = mode & 1;
+    const bool         floorplan = mode & 1;
     hhds::GraphLibrary source, flat;
-    auto io = source.create_io("checkpoint_controls");
-    for (const auto& [name, port] : std::vector<std::pair<std::string, unsigned>>{{"clk", 0}, {"trigger", 1}, {"data", 2}}) {
+    auto               io = source.create_io("checkpoint_controls");
+    for (const auto& [name, port] : std::vector<std::pair<std::string, unsigned>>{
+             {    "clk", 0},
+             {"trigger", 1},
+             {   "data", 2}
+    }) {
       io->add_input(name, port);
       io->set_bits(name, 1);
     }
@@ -640,12 +859,12 @@ TEST(Placement, TimingCheckpointsCarryConnectivityForAutomaticResetCuts) {
     },
                   "Y");
     graph->get_output_pin("y").connect_driver(y);
-    auto options       = plain_options();
-    options.liberty    = "inou/lefdef/tests/data/sky130hd.lib";
-    options.lefs       = {"inou/lefdef/tests/data/sky130hd.tlef", "inou/lefdef/tests/data/sky130hd.lef"};
-    options.output_dir = std::string(std::getenv("TEST_TMPDIR")) + (floorplan ? "/checkpoint_fp" : "/checkpoint_final");
-    options.output_dir += std::to_string(mode);
-    options.control_ports = mode & 2 ? "clk" : "";
+    auto options           = plain_options();
+    options.liberty        = "inou/lefdef/tests/data/sky130hd.lib";
+    options.lefs           = {"inou/lefdef/tests/data/sky130hd.tlef", "inou/lefdef/tests/data/sky130hd.lef"};
+    options.output_dir     = std::string(std::getenv("TEST_TMPDIR")) + (floorplan ? "/checkpoint_fp" : "/checkpoint_final");
+    options.output_dir    += std::to_string(mode);
+    options.control_ports  = mode & 2 ? "clk" : "";
     std::filesystem::create_directories(options.output_dir);
     const auto sdc = options.output_dir + "/timing.sdc";
     std::ofstream(sdc) << "create_clock -name clk -period 10 [get_ports clk]\n"
@@ -1075,10 +1294,21 @@ TEST(Placement, MappedBusGraphLegalityRcAndReuse) {
     spread.dynamic_bins = true;
     spread.bin_max = spread.local_density_bins = 32;
     spread.local_density_weight                = 8;
+    spread.local_density_target                = .05;
     hhds::GraphLibrary spread_library;
     const auto         result = place(*graph, spread_library, spread);
     EXPECT_EQ(result.floorplan.components.size(), placed.floorplan.components.size());
     EXPECT_NE(result.qor.find("\"legal\":true"), std::string::npos);
+    std::ifstream spread_report(spread.output_dir + "/gp_history.json");
+    const std::string spread_text{std::istreambuf_iterator<char>(spread_report), {}};
+    rapidjson::Document spread_json;
+    spread_json.Parse(spread_text.c_str());
+    ASSERT_FALSE(spread_json.HasParseError());
+    EXPECT_EQ(spread_json["local_density_target"].GetDouble(), .05);
+    EXPECT_EQ(spread_json["local_density_weight"].GetDouble(), 8);
+    auto invalid = spread;
+    invalid.local_density_target = -.2;
+    EXPECT_THROW(place(*graph, spread_library, invalid), std::invalid_argument);
   }
   EXPECT_FALSE(placed.parasitics->nets.empty());
   EXPECT_TRUE(std::filesystem::exists(root / "place/out.def"));
@@ -1111,8 +1341,8 @@ TEST(Placement, MappedBusGraphLegalityRcAndReuse) {
   const auto         constrained = place(*graph, with_floorplan, imported);
   const auto&        original    = fixed.components.front();
   const auto         found       = std::find_if(constrained.floorplan.components.begin(),
-                                                constrained.floorplan.components.end(),
-                                                [&](const auto& c) { return c.name == original.name; });
+                                  constrained.floorplan.components.end(),
+                                  [&](const auto& c) { return c.name == original.name; });
   ASSERT_NE(found, constrained.floorplan.components.end());
   EXPECT_EQ(found->place, original.place);
   EXPECT_EQ(constrained.floorplan.terminals, fixed.terminals);
@@ -1306,12 +1536,12 @@ TEST(Placement, ConstantDriversUseLibertyPolarityAndPhysicalCandidates) {
   const auto         graph   = both_constants(source);
   const auto         options = tie_options("separate",
                                            {
-                                               {"disabled", {{"p", true}}, 0.46, true, true},
-                                               {"absent_lef", {{"p", true}}, 0.46, false},
-                                               {"absent_geometry", {{"p", true}}, 0.46, true, false, false},
-                                               {"z_high", {{"p", true}}},
-                                               {"a_high", {{"upper", true}}},
-                                               {"low_driver", {{"lower", false}}},
+                                       {"disabled", {{"p", true}}, 0.46, true, true},
+                                       {"absent_lef", {{"p", true}}, 0.46, false},
+                                       {"absent_geometry", {{"p", true}}, 0.46, true, false, false},
+                                       {"z_high", {{"p", true}}},
+                                       {"a_high", {{"upper", true}}},
+                                       {"low_driver", {{"lower", false}}},
   });
   const auto         placed  = place(*graph, flat, options);
   for (const auto& c : placed.floorplan.components) {
@@ -1362,7 +1592,7 @@ static std::shared_ptr<hhds::Graph> shared_imported_ties(hhds::GraphLibrary& sou
     io->set_bits(name, 1);
   }
   auto graph = io->create_graph();
-  auto inv = source.create_io("sky130_fd_sc_hd__inv_1");
+  auto inv   = source.create_io("sky130_fd_sc_hd__inv_1");
   inv->add_input("A", 0);
   inv->add_output("Y", 0);
   for (bool high : {false, true}) {
@@ -1388,21 +1618,27 @@ static std::shared_ptr<hhds::Graph> shared_imported_ties(hhds::GraphLibrary& sou
 }
 TEST(Placement, PreserveImportedSharedTieMastersAndGraphPhysicalEndpoints) {
   hhds::GraphLibrary source;
-  const auto graph = shared_imported_ties(source);
-  auto options = tie_options("preserve_imported", {{"TIEHI", {{"H", true}}}, {"TIELO", {{"L", false}}}});
+  const auto         graph       = shared_imported_ties(source);
+  auto               options     = tie_options("preserve_imported",
+                                               {
+                                 {"TIEHI",  {{"H", true}}},
+                                 {"TIELO", {{"L", false}}}
+  });
   options.preserve_imported_ties = true;
-  options.cache_dir = options.output_dir + "/cache";
+  options.cache_dir              = options.output_dir + "/cache";
   const std::map<std::string, std::string> expected_masters{
-      {"shared_high", "TIEHI"},
-      {"shared_low",  "TIELO"},
-      {"high_load",   "sky130_fd_sc_hd__inv_1"},
-      {"low_load",    "sky130_fd_sc_hd__inv_1"}};
+      {"shared_high",                  "TIEHI"},
+      { "shared_low",                  "TIELO"},
+      {  "high_load", "sky130_fd_sc_hd__inv_1"},
+      {   "low_load", "sky130_fd_sc_hd__inv_1"}
+  };
   using Endpoints = std::set<std::pair<std::string, std::string>>;
   const std::multiset<Endpoints> expected_nets{
       {{"shared_high", "H"}, {"PIN", "high_a"}, {"PIN", "high_b"}, {"high_load", "A"}},
       {{"shared_low", "L"}, {"PIN", "low_a"}, {"PIN", "low_b"}, {"low_load", "A"}},
       {{"high_load", "Y"}, {"PIN", "high_loaded"}},
-      {{"low_load", "Y"}, {"PIN", "low_loaded"}}};
+      {{"low_load", "Y"}, {"PIN", "low_loaded"}}
+  };
   const auto check = [&](const Result& placed) {
     std::map<std::string, std::string> masters;
     for (const auto& c : placed.floorplan.components) {
@@ -1442,20 +1678,20 @@ TEST(Placement, PreserveImportedSharedTieMastersAndGraphPhysicalEndpoints) {
     EXPECT_TRUE(qor["preserve_imported_ties"].GetBool());
   };
   hhds::GraphLibrary flat;
-  const auto first = place(*graph, flat, options);
+  const auto         first = place(*graph, flat, options);
   check(first);
   // Shared sources must not follow whichever single user happens to be last.
   // A timing snapshot and a warm placement retain the same exact topology.
-  auto retained = options;
-  retained.previous = std::make_shared<physical::Floorplan>(first.floorplan);
+  auto retained             = options;
+  retained.previous         = std::make_shared<physical::Floorplan>(first.floorplan);
   retained.retain_placement = true;
   hhds::GraphLibrary kept;
-  const auto snapshot = place(*first.graph, kept, retained);
+  const auto         snapshot = place(*first.graph, kept, retained);
   check(snapshot);
   for (const auto& c : snapshot.floorplan.components) {
-    const auto old = std::find_if(first.floorplan.components.begin(),
-                                  first.floorplan.components.end(),
-                                  [&](const auto& x) { return x.name == c.name; });
+    const auto old = std::find_if(first.floorplan.components.begin(), first.floorplan.components.end(), [&](const auto& x) {
+      return x.name == c.name;
+    });
     ASSERT_NE(old, first.floorplan.components.end());
     EXPECT_EQ(c.place.x, old->place.x);
     EXPECT_EQ(c.place.y, old->place.y);
@@ -1463,16 +1699,16 @@ TEST(Placement, PreserveImportedSharedTieMastersAndGraphPhysicalEndpoints) {
   hhds::GraphLibrary warm;
   check(place(*graph, warm, options));
   const auto environment = [&] {
-    std::ifstream file(options.cache_dir + "/placement.json");
-    const std::string text{std::istreambuf_iterator<char>(file), {}};
+    std::ifstream       file(options.cache_dir + "/placement.json");
+    const std::string   text{std::istreambuf_iterator<char>(file), {}};
     rapidjson::Document doc;
     doc.Parse(text.c_str());
     return std::string(doc["environment"].GetString());
   };
-  const auto preserved_key = environment();
+  const auto preserved_key       = environment();
   options.preserve_imported_ties = false;
   hhds::GraphLibrary split_library;
-  const auto split = place(*graph, split_library, options);
+  const auto         split = place(*graph, split_library, options);
   EXPECT_NE(environment(), preserved_key);
   EXPECT_EQ(split.floorplan.components.size(), 8);
   EXPECT_EQ(split.floorplan.nets.size(), 8);
@@ -1482,12 +1718,12 @@ TEST(Placement, PreserveImportedSharedTieMastersAndGraphPhysicalEndpoints) {
 }
 TEST(Placement, PreserveSharedTieDoesNotLocalizeItsOtherSingleLoadOutput) {
   hhds::GraphLibrary source, flat;
-  auto io = source.create_io("dual_tie");
+  auto               io = source.create_io("dual_tie");
   for (const auto* name : {"high_a", "high_b", "low"}) {
     io->add_output(name, io->get_output_pin_decls().size());
     io->set_bits(name, 1);
   }
-  auto graph = io->create_graph();
+  auto graph  = io->create_graph();
   auto master = source.create_io("DUAL_TIE");
   master->add_output("H", 0);
   master->add_output("L", 1);
@@ -1497,16 +1733,19 @@ TEST(Placement, PreserveSharedTieDoesNotLocalizeItsOtherSingleLoadOutput) {
   node.set_subnode(master);
   node.set_name("shared");
   auto high = node.create_driver_pin("H");
-  auto low = node.create_driver_pin("L");
+  auto low  = node.create_driver_pin("L");
   gu::set_bits(high, 1);
   gu::set_bits(low, 1);
   graph->get_output_pin("high_a").connect_driver(high);
   graph->get_output_pin("high_b").connect_driver(high);
   graph->get_output_pin("low").connect_driver(low);
-  auto options = tie_options("preserve_dual", {{"DUAL_TIE", {{"H", true}, {"L", false}}}});
+  auto options                   = tie_options("preserve_dual",
+                                               {
+                                 {"DUAL_TIE", {{"H", true}, {"L", false}}}
+  });
   options.preserve_imported_ties = true;
-  options.snapshots = true;
-  const auto result = place(*graph, flat, options);
+  options.snapshots              = true;
+  const auto result              = place(*graph, flat, options);
   ASSERT_EQ(result.floorplan.components.size(), 1);
   EXPECT_EQ(result.floorplan.components.front().name, "shared");
   EXPECT_EQ(result.floorplan.components.front().macro, "DUAL_TIE");
@@ -1519,9 +1758,13 @@ TEST(Placement, PreserveSharedTieDoesNotLocalizeItsOtherSingleLoadOutput) {
 }
 TEST(Placement, PreserveImportedTiesStillMaterializesLogicalConstantsPerLoad) {
   hhds::GraphLibrary source, flat;
-  auto options = tie_options("preserve_logical", {{"TIEHI", {{"H", true}}}, {"TIELO", {{"L", false}}}});
+  auto               options     = tie_options("preserve_logical",
+                                               {
+                                 {"TIEHI",  {{"H", true}}},
+                                 {"TIELO", {{"L", false}}}
+  });
   options.preserve_imported_ties = true;
-  const auto placed = place(*both_constants(source), flat, options);
+  const auto placed              = place(*both_constants(source), flat, options);
   EXPECT_EQ(std::count_if(placed.floorplan.components.begin(),
                           placed.floorplan.components.end(),
                           [](const auto& cell) { return cell.name.starts_with("__place_tiehi"); }),
@@ -1531,9 +1774,9 @@ TEST(Placement, PreserveImportedTiesStillMaterializesLogicalConstantsPerLoad) {
                           [](const auto& cell) { return cell.name.starts_with("__place_tielo"); }),
             1);
   for (const auto& net : placed.floorplan.nets) {
-    const bool tie = std::any_of(net.connections.begin(),
-                                 net.connections.end(),
-                                 [](const auto& pin) { return pin.instance.starts_with("__place_tie"); });
+    const bool tie = std::any_of(net.connections.begin(), net.connections.end(), [](const auto& pin) {
+      return pin.instance.starts_with("__place_tie");
+    });
     if (tie) {
       EXPECT_EQ(net.connections.size(), 2);
     }
@@ -1544,8 +1787,8 @@ TEST(Placement, RetainedOriginalNetlistRecreatesSavedTieCells) {
   const auto         graph   = both_constants(source);
   auto               options = tie_options("retain_ties",
                                            {
-                                               {"tie_lo", {{"lo", false}}},
-                                               {"tie_hi",  {{"hi", true}}}
+                                 {"tie_lo", {{"lo", false}}},
+                                 {"tie_hi",  {{"hi", true}}}
   });
   const auto         placed  = place(*graph, flat, options);
   options.previous           = std::make_shared<physical::Floorplan>(placed.floorplan);
@@ -1651,7 +1894,7 @@ TEST(Placement, DualConstantDriverDeclaresAndPreservesAllLibraryOutputs) {
   const auto         graph   = both_constants(source);
   const auto         options = tie_options("dual",
                                            {
-                                               {"supply_pair", {{"plus", true}, {"minus", false}}}
+                                       {"supply_pair", {{"plus", true}, {"minus", false}}}
   });
   const auto         placed  = place(*graph, flat, options);
   ASSERT_EQ(flat.find_io("supply_pair")->get_output_pin_decls().size(), 2);
@@ -1675,7 +1918,7 @@ TEST(Placement, MissingConstantModelNeverGuessesFromLefOrPinName) {
     const auto         graph   = both_constants(source);
     auto               options = tie_options("missing_" + std::to_string(empty_library),
                                              {
-                                                 {"only_high", {{"not_a_conventional_pin", true}}}
+                                   {"only_high", {{"not_a_conventional_pin", true}}}
     });
     if (empty_library) {
       options.liberty.clear();
@@ -1699,7 +1942,7 @@ TEST(Placement, ConstantDriverWithoutSymmetryXAvoidsFlippedRows) {
     const auto         graph   = tie_graph(source);
     const auto         options = tie_options("flipless_only",
                                              {
-                                                 {"flipless_high", {{"p", true}}, 0.46, true, false, true, false}
+                                         {"flipless_high", {{"p", true}}, 0.46, true, false, true, false}
     });
     const auto         placed  = place(*graph, flat, options);
     EXPECT_TRUE(all_n(placed.floorplan));
@@ -1711,8 +1954,8 @@ TEST(Placement, ConstantDriverWithoutSymmetryXAvoidsFlippedRows) {
   const auto         sym_graph   = tie_graph(sym_source);
   const auto         sym_options = tie_options("flipless_smaller",
                                                {
-                                                   {"flipless_high", {{"p", true}}, 0.46, true, false, true, false},
-                                                   {"flippable_high", {{"p", true}}},
+                                           {"flipless_high", {{"p", true}}, 0.46, true, false, true, false},
+                                           {"flippable_high", {{"p", true}}},
   });
   {  // A larger X-symmetric tie outranks a smaller non-flippable one; rows still alternate.
     const auto placed = place(*sym_graph, sym_flat, sym_options);
@@ -1733,7 +1976,7 @@ TEST(Placement, ConstantDriverWithoutSymmetryXAvoidsFlippedRows) {
     const auto         graph   = tie_graph(source);
     auto               options = tie_options("flipless_def",
                                              {
-                                                 {"flipless_high", {{"p", true}}, 0.46, true, false, true, false}
+                                   {"flipless_high", {{"p", true}}, 0.46, true, false, true, false}
     });
     options.floorplan          = def.string();
     try {
@@ -1747,7 +1990,7 @@ TEST(Placement, ConstantDriverWithoutSymmetryXAvoidsFlippedRows) {
      // now needs the non-flippable tie falls back to all-N, exactly as cold.
     auto options      = tie_options("flipless_cached",
                                     {
-                                        {"flipless_high", {{"p", true}}, 0.46, true, false, true, false}
+                                   {"flipless_high", {{"p", true}}, 0.46, true, false, true, false}
     });
     options.cache_dir = options.output_dir + "/cache";
     hhds::GraphLibrary first_source, first_flat;
@@ -3545,6 +3788,9 @@ TEST(Placement, PlacementColorsUseLibertyRolesAndPinsMoveWithoutSta) {
     auto macro_history = read_json("gp_history.json");
     ASSERT_FALSE(macro_history.HasParseError());
     EXPECT_EQ(macro_history["macro_cell_density_weight"].GetDouble(), o.macro_cell_density_weight);
+    EXPECT_EQ(macro_history["macro_cell_density_reach"].GetDouble(), 2);
+    EXPECT_GT(macro_history["macro_cell_density_screening_length_dbu"].GetDouble(), 0);
+    EXPECT_GT(macro_history["macro_cell_density_coefficient"].GetDouble(), 0);
     EXPECT_GT(macro_history["macro_cell_density_seconds"].GetDouble(), 0);
     EXPECT_GT(macro_history["macro_density_pull_seconds"].GetDouble(), 0);
     for (auto node : graph->body().nodes()) {
@@ -3611,12 +3857,12 @@ TEST(Placement, PlacementColorsUseLibertyRolesAndPinsMoveWithoutSta) {
     io_options.output_dir                = (dir / "io_without_pressure").string();
     io_options.macro_cell_density_weight = io_options.macro_density_pull_weight = 0;
     hhds::GraphLibrary plain_flat;
-    const auto        plain_io = place(*graph, plain_flat, io_options);
+    const auto         plain_io          = place(*graph, plain_flat, io_options);
     io_options.output_dir                = (dir / "io_with_pressure").string();
     io_options.macro_cell_density_weight = o.macro_cell_density_weight;
     io_options.macro_density_pull_weight = o.macro_density_pull_weight;
     hhds::GraphLibrary pressure_flat;
-    const auto        pressure_io = place(*graph, pressure_flat, io_options);
+    const auto         pressure_io = place(*graph, pressure_flat, io_options);
     ASSERT_EQ(plain_io.floorplan.terminals.size(), pressure_io.floorplan.terminals.size());
     for (size_t i = 0; i < plain_io.floorplan.terminals.size(); ++i) {
       const auto& plain    = plain_io.floorplan.terminals[i];
@@ -3825,8 +4071,8 @@ TEST(Placement, SharedCharacterizedTiesSplitEveryPhysicalBitAndPersist) {
   graph->get_output_pin("k").connect_driver(gu::create_const(*graph, *Dlop::from_pyrope("0ub11")));
   auto options      = tie_options("local_shared_bits",
                                   {
-                                      {"source_cell",   {{"power", true}}},
-                                      {"ground_cell", {{"ground", false}}}
+                                 {"source_cell",   {{"power", true}}},
+                                 {"ground_cell", {{"ground", false}}}
   });
   options.cache_dir = options.output_dir + "/cache";
   const auto first  = place(*graph, flat, options);
@@ -4023,7 +4269,7 @@ TEST(Placement, RemovingFirstConstantUserKeepsOtherTieIdentities) {
   auto               graph   = tie_graph(source);
   auto               options = tie_options("stable_removed_user",
                                            {
-                                               {"high_cell", {{"high", true}}}
+                                 {"high_cell", {{"high", true}}}
   });
   options.cache_dir          = options.output_dir + "/cache";
   const auto first           = place(*graph, flat, options);
@@ -4489,7 +4735,7 @@ END LIBRARY
   EXPECT_THROW(place(*graph, ambiguous_library, options), std::invalid_argument);
   options.final_cells = true;
   options.cache_dir.clear();
-  options.output_dir = (dir / "staged").string();
+  options.output_dir      = (dir / "staged").string();
   options.fp_warp.enabled = options.macro_warp.enabled = true;
   hhds::GraphLibrary  staged_library;
   const auto          staged = place(*graph, staged_library, options);
@@ -4661,3 +4907,13 @@ TEST(Placement, RouteGridUsesFreshTimingAndSamePhysicalSnapshotWithSatOffOrOn) {
   }
 }
 }  // namespace livehd::placement
+
+TEST(Placement, MacroWarpDefaultsUseConstantStrengthAndStabilityStart) {
+  const livehd::placement::Options o;
+  EXPECT_DOUBLE_EQ(o.macro_warp.weight, .7);
+  EXPECT_DOUBLE_EQ(o.macro_warp.start_stability, .2);
+  EXPECT_EQ(o.macro_warp.refresh_interval, 25);
+  EXPECT_DOUBLE_EQ(o.fp_warp.weight, 1);
+  EXPECT_DOUBLE_EQ(o.fp_warp.start_stability, 0);
+  EXPECT_EQ(o.fp_warp.refresh_interval, 0);
+}

@@ -219,7 +219,7 @@ livehd::placement::Options placement_options(const Options& opts) {
     auto&      policy = stage == "fp" ? out.fp_warp : out.macro_warp;
     const auto key    = "place." + stage + ".warpspace";
     policy.enabled    = truthy(synth_set(opts, key, "false"));
-    policy.weight     = number(key + ".weight", stage == "fp" ? "1" : "0.25");
+    policy.weight     = number(key + ".weight", stage == "fp" ? "1" : "0.7");
     policy.bins       = integer(key + ".bins", "16");
     policy.iterations = integer(key + ".iterations", "2");
     policy.seconds    = number(key + ".seconds", "3");
@@ -227,10 +227,13 @@ livehd::placement::Options placement_options(const Options& opts) {
       policy.once_after_density = truthy(synth_set(opts, key + ".once_after_density", "false"));
       policy.updates            = integer(key + ".updates", "10");
       policy.warmup             = number(key + ".warmup", "0.1");
+      policy.start_stability    = number(key + ".start_stability", "0.20");
+      policy.stability_window   = integer(key + ".stability_window", "10");
+      policy.refresh_interval   = integer(key + ".refresh_interval", "25");
     }
     livehd::placement::validate_warp_options(policy);
   }
-  out.terminal_legalize           = truthy(synth_set(opts, "place.legalize.terminal", "true"));
+  out.terminal_legalize                = truthy(synth_set(opts, "place.legalize.terminal", "true"));
   out.boundarypins.enabled             = truthy(synth_set(opts, "place.boundarypins", "false"));
   out.boundarypins.split               = truthy(synth_set(opts, "place.boundarypins.split", "true"));
   out.boundarypins.order               = truthy(synth_set(opts, "place.boundarypins.order", "false"));
@@ -328,19 +331,19 @@ livehd::placement::Options placement_options(const Options& opts) {
   if (!out.floorplan.empty() && (!out.die.empty() || !out.core.empty())) {
     throw Lhd_error{"usage", "synth.place.die/core cannot be combined with synth.place.floorplan", "supply one frame source"};
   }
-  out.density               = number("place.density", "0.5");
-  out.iterations            = integer("place.iterations", "1500");
-  out.min_iterations        = integer("place.min_iterations", "40");
-  out.post_density_factor   = integer("place.post_density_factor", "4");
-  out.convergence_tolerance = number("place.convergence_tolerance", "0.01");
-  out.detailed_iterations   = integer("place.detailed_iterations", "2");
-  out.macro_detailed_place  = truthy(synth_set(opts, "place.macro.detailed", "true"));
-  out.macro_legalize_cells  = truthy(synth_set(opts, "place.macro.legalize_cells", "true"));
+  out.density                  = number("place.density", "0.5");
+  out.iterations               = integer("place.iterations", "1500");
+  out.min_iterations           = integer("place.min_iterations", "40");
+  out.post_density_factor      = integer("place.post_density_factor", "4");
+  out.convergence_tolerance    = number("place.convergence_tolerance", "0.01");
+  out.detailed_iterations      = integer("place.detailed_iterations", "2");
+  out.macro_detailed_place     = truthy(synth_set(opts, "place.macro.detailed", "true"));
+  out.macro_legalize_cells     = truthy(synth_set(opts, "place.macro.legalize_cells", "true"));
   out.final_independent_timing = truthy(synth_set(opts, "place.final.independent_timing", "false"));
-  out.satlegalize           = truthy(synth_set(opts, "place.satlegalize", "false"));
-  auto& sat                 = out.satlegalize_options;
-  sat.backend               = synth_set(opts, "place.satlegalize.backend", "cadical");
-  sat.encoding              = synth_set(opts, "place.satlegalize.encoding", "candidate");
+  out.satlegalize              = truthy(synth_set(opts, "place.satlegalize", "false"));
+  auto& sat                    = out.satlegalize_options;
+  sat.backend                  = synth_set(opts, "place.satlegalize.backend", "cadical");
+  sat.encoding                 = synth_set(opts, "place.satlegalize.encoding", "candidate");
   if ((sat.backend != "cadical" && sat.backend != "cms-cnf" && sat.backend != "cms-xor")
       || (sat.encoding != "candidate" && sat.encoding != "binary")) {
     throw Lhd_error{"usage",
@@ -390,26 +393,30 @@ livehd::placement::Options placement_options(const Options& opts) {
       || out.fixed_macro_overlap_weight < 0) {
     throw Lhd_error{"usage", "invalid synth.place cell-placement controls", ""};
   }
-  out.bins                      = integer("place.bins", "64");
-  out.dynamic_bins              = truthy(synth_set(opts, "place.dynamic_bins", "false"));
+  out.bins                        = integer("place.bins", "64");
+  out.dynamic_bins                = truthy(synth_set(opts, "place.dynamic_bins", "false"));
+  out.macro_fill_cell_space       = truthy(synth_set(opts, "place.macro.fill_cell_space", "false"));
+  out.macro_filler_fraction       = number("place.macro.filler_fraction", "0");
   out.virtual_fillers             = truthy(synth_set(opts, "place.virtual_fillers", "true"));
   out.virtual_filler_max_count    = integer("place.virtual_filler_max_count", "0");
-  out.virtual_filler_fraction   = number("place.virtual_filler_fraction", "1");
+  out.virtual_filler_fraction     = number("place.virtual_filler_fraction", "1");
   out.virtual_filler_cell_scale   = number("place.virtual_filler_cell_scale", "1");
   out.virtual_filler_bin_fraction = number("place.virtual_filler_bin_fraction", "0.25");
-  out.bin_max                   = integer("place.bin_max", "512");
-  out.local_density_weight      = number("place.local_density_weight", "0");
-  out.local_density_bins        = integer("place.local_density_bins", "512");
-  out.local_density_range       = number("place.local_density_range", "4");
-  out.local_density_jitter      = number("place.local_density_jitter", "0.01");
-  out.macro_cell_density_weight = number("place.macro.cell_density_weight", "0");
-  out.macro_density_pull_weight = number("place.macro.density_pull_weight", "0");
-  out.macro_density_pull_range  = number("place.macro.density_pull_range", "4");
-  out.scale_macro_density       = truthy(synth_set(opts, "place.scale_macro_density", "true"));
-  out.automatic_bins            = truthy(synth_set(opts, "place.auto_bins", "false"));
-  out.exact_macro_density       = truthy(synth_set(opts, "place.exact_macro_density", "true"));
-  out.adaptive_density          = truthy(synth_set(opts, "place.adaptive_density", "true"));
-  const auto unknown_const      = synth_set(opts, "place.unknown_const", "error");
+  out.bin_max                     = integer("place.bin_max", "512");
+  out.local_density_weight        = number("place.local_density_weight", "0");
+  out.local_density_target        = number("place.local_density_target", "-1");
+  out.local_density_bins          = integer("place.local_density_bins", "512");
+  out.local_density_range         = number("place.local_density_range", "4");
+  out.local_density_jitter        = number("place.local_density_jitter", "0.01");
+  out.macro_cell_density_weight   = number("place.macro.cell_density_weight", "0");
+  out.macro_cell_density_reach    = number("place.macro.cell_density_reach", "2");
+  out.macro_density_pull_weight   = number("place.macro.density_pull_weight", "0");
+  out.macro_density_pull_range    = number("place.macro.density_pull_range", "4");
+  out.scale_macro_density         = truthy(synth_set(opts, "place.scale_macro_density", "true"));
+  out.automatic_bins              = truthy(synth_set(opts, "place.auto_bins", "false"));
+  out.exact_macro_density         = truthy(synth_set(opts, "place.exact_macro_density", "true"));
+  out.adaptive_density            = truthy(synth_set(opts, "place.adaptive_density", "true"));
+  const auto unknown_const        = synth_set(opts, "place.unknown_const", "error");
   if (unknown_const != "error" && unknown_const != "zero") {
     throw Lhd_error{"usage", "synth.place.unknown_const must be error or zero", ""};
   }
@@ -419,7 +426,7 @@ livehd::placement::Options placement_options(const Options& opts) {
   out.route_model            = synth_set(opts, "place.route.model", "rsmt");
   out.route_degree           = integer("place.route.degree", "40");
   out.route_accuracy         = integer("place.route.accuracy", "3");
-  const auto read_route  = [&](livehd::placement::Stage_route& stage, const std::string& name) {
+  const auto read_route      = [&](livehd::placement::Stage_route& stage, const std::string& name) {
     const auto prefix             = "place." + name + ".route.";
     stage.model                   = synth_set(opts, prefix + "model", "inherit");
     stage.policy.switch_overflow  = number(prefix + "switch", "0.05");
@@ -590,7 +597,9 @@ livehd::placement::Options placement_options(const Options& opts) {
   out.fp_snap.symmetry_tolerance  = number("place.fp.symmetry", "1");
   out.fp_snap.max_displacement    = number("place.fp.max_displacement", "1");
   if (out.fp_min_macros < 0) {
-    throw Lhd_error{"usage", "synth.place.fp.min_macros must be at least 0", "a candidate needs more than this many movable macros"};
+    throw Lhd_error{"usage",
+                    "synth.place.fp.min_macros must be at least 0",
+                    "a candidate needs more than this many movable macros"};
   }
   if (out.fp_min_copies < 2) {
     throw Lhd_error{"usage", "synth.place.fp.min_copies must be at least 2", "copies are counted separately per hierarchy parent"};
@@ -610,13 +619,32 @@ livehd::placement::Options placement_options(const Options& opts) {
   if (out.macro_mode != "none" && out.macro_mode != "h2d") {
     throw Lhd_error{"usage", "synth.place.macro must be none or h2d", ""};
   }
-  out.macro_align_weight                     = number("place.macro.align_weight", "25");
-  out.macro_align_sigma                      = number("place.macro.align_sigma", "0.25");
-  out.macro_align_overlap_boost              = number("place.macro.align_overlap_boost", "0");
-  out.macro_align_start                      = integer("place.macro.align_start", "100");
-  out.macro_align_full                       = integer("place.macro.align_full", "500");
-  out.macro_align_nearest                    = truthy(synth_set(opts, "place.macro.align_nearest", "false"));
-  out.macro_align_global                     = truthy(synth_set(opts, "place.macro.align_global", "true"));
+  out.macro_align_weight               = number("place.macro.align_weight", "25");
+  out.macro_align_sigma                = number("place.macro.align_sigma", "0.25");
+  out.macro_align_overlap_boost        = number("place.macro.align_overlap_boost", "0");
+  out.macro_align_start                = integer("place.macro.align_start", "100");
+  out.macro_align_full                 = integer("place.macro.align_full", "500");
+  out.macro_align_nearest              = truthy(synth_set(opts, "place.macro.align_nearest", "false"));
+  out.macro_align_global               = truthy(synth_set(opts, "place.macro.align_global", "true"));
+  out.macro_magnet.enabled             = truthy(synth_set(opts, "place.macro.magnet", "false"));
+  out.macro_magnet.before_snap         = truthy(synth_set(opts, "place.macro.magnet_before_snap", "false"));
+  out.macro_magnet.start_displacement  = number("place.macro.magnet_start_displacement", "0.10");
+  out.macro_magnet.settle_window       = integer("place.macro.magnet_settle_window", "10");
+  out.macro_magnet.settle_displacement = number("place.macro.magnet_settle_displacement", "0.05");
+  out.macro_magnet.max_gap             = number("place.macro.magnet_max_gap", "1");
+  out.macro_magnet.density_fraction    = number("place.macro.magnet_density_fraction", "0.25");
+  out.macro_magnet.max_per_round       = integer("place.macro.magnet_max_per_round", "0");
+  out.macro_magnet.max_rounds          = integer("place.macro.magnet_max_rounds", "0");
+  try {
+    out.macro_magnet.validate();
+  } catch (const std::invalid_argument& error) {
+    throw Lhd_error{"usage", error.what(), "check synth.place.macro.magnet_* controls"};
+  }
+  if (out.macro_magnet.enabled && (out.macro_mode != "none" || !out.full)) {
+    throw Lhd_error{"usage",
+                    "macro magnet requires native full placement",
+                    "use synth.place.macro=none; final=false stops after macro_plan"};
+  }
   out.macro_snap                             = truthy(synth_set(opts, "place.macro.snap", out.full ? "true" : "false"));
   out.macro_snap_mode                        = synth_set(opts, "place.macro.snap_mode", "alignment");
   out.macro_snap_options.alignment_tolerance = number("place.macro.snap_alignment", "1");
@@ -909,6 +937,7 @@ void synth_command(Options& opts, Result& res) {
   // Timing weights are the normal full-placement objective. Synthesis-only
   // and GP-only commands do not enter the full-placement refinement loop.
   const bool run_timing_place = truthy(synth_set(opts, "place.timing_driven", run_place && place_options.full ? "true" : "false"));
+  const bool macro_plan_only  = run_place && place_options.full && !place_options.final_cells;
   const int  timing_rounds    = std::stoi(synth_set(opts, "place.timing_rounds", "3"));
   if (timing_rounds < 1 || timing_rounds > 8) {
     throw Lhd_error{"usage", "synth.place.timing_rounds expects 1..8", ""};
@@ -976,7 +1005,8 @@ void synth_command(Options& opts, Result& res) {
     throw Lhd_error{"usage", "synth.place.io_resynth requires ABC full placement and OpenTimer", "use 0 to disable"};
   }
   std::shared_ptr<livehd::synth::Io_store> io_store;
-  if (io_resynth_percent > 0 && user_workdir && run_place && place_options.full && run_sta && mapper_method == "pass.abc") {
+  if (!macro_plan_only && io_resynth_percent > 0 && user_workdir && run_place && place_options.full && run_sta
+      && mapper_method == "pass.abc") {
     const auto period = sdc.empty() ? std::nullopt : sdc_min_clock_period_ps(sdc, liberty);
     if (!period) {
       throw Lhd_error{"usage", "synth.place.io_resynth needs a resolvable SDC clock period", "set synth.sdc or disable io_resynth"};
@@ -1225,10 +1255,10 @@ void synth_command(Options& opts, Result& res) {
       if (!first) {
         groups += ",";
       }
-      first      = false;
-      groups    += "{\"module\":" + livehd::synth_attr::quote(graph->get_name())
-                   + ",\"physical_instances\":" + std::to_string(occurrences[graph->get_gid()]) + ",\"specialized\":"
-                   + (graph->get_name().find("__s_") != std::string_view::npos ? "true" : "false") + ",\"coloring\":";
+      first   = false;
+      groups += "{\"module\":" + livehd::synth_attr::quote(graph->get_name())
+                + ",\"physical_instances\":" + std::to_string(occurrences[graph->get_gid()]) + ",\"specialized\":"
+                + (graph->get_name().find("__s_") != std::string_view::npos ? "true" : "false") + ",\"coloring\":";
       auto info  = graph->get_input_node().attr(livehd::attrs::coloring_info);
       groups    += info.has() ? std::string(info.get()) : "{}";
       if (auto policy = graph->get_input_node().attr(livehd::attrs::synth_policy); policy.has()) {
@@ -1243,9 +1273,9 @@ void synth_command(Options& opts, Result& res) {
         member_first    = false;
         const auto sid  = node.attr(hhds::attrs::srcid).has() ? node.attr(hhds::attrs::srcid).get() : 0;
         groups         += std::format("{{\"node\":{},\"color\":{},\"source_id\":{}",
-                                      node.get_debug_nid(),
-                                      livehd::graph_util::node_color_of(node),
-                                      sid);
+                              node.get_debug_nid(),
+                              livehd::graph_util::node_color_of(node),
+                              sid);
         // The source locator turns the id into the file and line a person can open.
         if (sid != 0) {
           const auto span = graph->source_locator().resolve_spans(static_cast<hhds::SourceId>(sid)).primary;
@@ -1428,9 +1458,9 @@ void synth_command(Options& opts, Result& res) {
       std::string phase_log;
       // The session runs in-process (no run_step), so keep Liberty/timer prints off the protocol stdout here.
       // Nested redirects (calls from inside place()/repair, already logged) restore correctly.
-      const auto  timing_log = next_log_path(opts, "pass.opentimer.incremental");
+      const auto  timing_log  = next_log_path(opts, "pass.opentimer.incremental");
       const auto  timing_tech = livehd::physical::read_lef(place_options.lefs);
-      const auto  evaluate   = [&](const livehd::placement::Result& state) {
+      const auto  evaluate    = [&](const livehd::placement::Result& state) {
         Phase_timer   phase(res, "pass.opentimer.incremental");
         Stdout_to_log redirect(timing_log);
         const auto    controls = livehd::placement::prects_networks(timing_tech, state.floorplan, state.prects);
@@ -1475,12 +1505,13 @@ void synth_command(Options& opts, Result& res) {
       if (io_flow && !place_options.macro_legalize_cells && !place_options.fp_evaluate) {
         // Resynthesis still needs one selected GP measurement when periodic
         // placement timing is disabled. It replaces the post-macro STA call.
-        place_options.fp_evaluate          = evaluate;
+        place_options.fp_evaluate           = evaluate;
         place_options.macro_timing_interval = 0;
       }
-      if (run_timing_place) {
-        auto seed_options        = place_options;
-        seed_options.timing_seed = true;
+      if (run_timing_place && !macro_plan_only) {
+        auto seed_options                 = place_options;
+        seed_options.timing_seed          = true;
+        seed_options.macro_magnet.enabled = false;
         seed_options.cache_dir.clear();
         seed_options.output_dir += "/post_synth";
         Phase_timer phase(res, "pass.place.post_synth_timing");
@@ -1559,7 +1590,7 @@ void synth_command(Options& opts, Result& res) {
       // should replace the completed-stage feedback.
       place_options.after_stage = {};
       place_options.restart_seed.reset();
-      if ((run_resize || run_timing_place || run_resynth) && !place_options.terminal_legalize) {
+      if (!macro_plan_only && (run_resize || run_timing_place || run_resynth) && !place_options.terminal_legalize) {
         // Every round/trial below re-runs placement (and resynth a fresh ABC frame
         // per cone): keep their output off the protocol stdout, as for pass.place.
         phase_step = "pass.place.optimize";
@@ -1703,7 +1734,7 @@ void synth_command(Options& opts, Result& res) {
   // ---- 4. STA -----------------------------------------------------------------
   const std::string timing_path = root + "/timing.json";
   std::string       sta_qor;
-  if (run_sta) {
+  if (run_sta && !macro_plan_only) {
     std::string files = liberty;
     if (!sdc.empty()) {
       files += "," + sdc;
@@ -1785,7 +1816,7 @@ void synth_command(Options& opts, Result& res) {
   // consumer checks each report kind before reading its fields. USYN mapping
   // uses technology-map; logical-only output has abc:null and no STA report.
   const auto timing_target = timing_target_json(abc_qor, sta_qor, sdc);
-  res.qor_json = std::format(R"({{"schema_version":1,"kind":"synth","top":"{}","abc":{}{}{}{}}})",
+  res.qor_json             = std::format(R"({{"schema_version":1,"kind":"synth","top":"{}","abc":{}{}{}{}}})",
                              json_escape_min(top),
                              abc_qor.empty() ? std::string{"null"} : abc_qor,
                              sta_qor.empty() ? std::string{} : std::format(R"(,"sta":{})", sta_qor),
@@ -1804,7 +1835,7 @@ void synth_command(Options& opts, Result& res) {
     std::error_code ec;
     // A logical-only run does not produce timing: never export a timing.json
     // left by an earlier mapped run in the same workdir.
-    for (const auto& src : {qor_path, run_sta ? timing_path : std::string{}, report_path}) {
+    for (const auto& src : {qor_path, run_sta && !macro_plan_only ? timing_path : std::string{}, report_path}) {
       if (src.empty()) {
         continue;
       }

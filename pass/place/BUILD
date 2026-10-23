@@ -23,6 +23,8 @@ filegroup(
         "macro_tracks.cpp",
         "macro_snap.hpp",
         "macro_tracks.hpp",
+        "magnet_report.cpp",
+        "magnet_report.hpp",
         "memory_proxy.cpp",
         "memory_proxy.hpp",
         "pin_adjust.cpp",
@@ -94,6 +96,7 @@ cc_library(
         "io_timing.cpp",
         "macro_snap.cpp",
         "macro_tracks.cpp",
+        "magnet_report.cpp",
         "memory_proxy.cpp",
         "pin_adjust.cpp",
         "place.cpp",
@@ -114,6 +117,7 @@ cc_library(
         "io_timing.hpp",
         "macro_snap.hpp",
         "macro_tracks.hpp",
+        "magnet_report.hpp",
         "memory_proxy.hpp",
         "pin_adjust.hpp",
         "place.hpp",
@@ -329,6 +333,14 @@ cc_test(
     srcs = ["macro_tracks_test.cpp"],
     copts = COPTS,
     deps = [":place", "@googletest//:gtest_main"],
+)
+
+cc_test(
+    name = "magnet_report_test",
+    size = "small",
+    srcs = ["magnet_report_test.cpp"],
+    copts = COPTS,
+    deps = [":place", "@googletest//:gtest_main", "@rapidjson"],
 )
 
 cc_library(

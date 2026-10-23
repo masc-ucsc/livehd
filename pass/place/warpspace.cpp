@@ -16,11 +16,15 @@ namespace dp = DreamPlace::native;
 void validate_warp_options(const Warp_options& o) {
   if (o.bins < 2 || o.bins > 64 || !o.iterations || o.iterations > 6 || !o.updates || o.updates > 30 || !std::isfinite(o.weight)
       || o.weight < 0 || o.weight > 1 || !std::isfinite(o.warmup) || o.warmup < 0 || o.warmup >= 1 || !std::isfinite(o.seconds)
-      || o.seconds <= 0 || o.seconds > 30 || !std::isfinite(o.dbu_per_um) || o.dbu_per_um <= 0) {
+      || o.seconds <= 0 || o.seconds > 30 || !std::isfinite(o.dbu_per_um) || o.dbu_per_um <= 0 || !std::isfinite(o.start_stability)
+      || o.start_stability < 0 || o.start_stability > 1 || !o.stability_window || o.stability_window > 100 || o.refresh_interval < 0
+      || (o.start_stability > 0 && o.once_after_density)) {
     throw std::invalid_argument(
-        "invalid warpspace policy: bins 2..64, iterations 1..6, updates 1..30, weight 0..1, warmup [0,1), seconds (0,30]");
+        "invalid warpspace policy: bins 2..64, iterations 1..6, updates 1..30, weight 0..1, warmup [0,1), seconds (0,30], "
+        "start stability [0,1], stability window 1..100, refresh interval >=0; motion and density start gates are exclusive");
   }
 }
+
 Warp_field placement_warp(const dp::Design& d, const std::vector<int>& memories, const Warp_options& o, bool sample_cells) {
   validate_warp_options(o);
   const auto nodes = d.node_x.size();
@@ -98,6 +102,35 @@ Warp_field placement_warp(const dp::Design& d, const std::vector<int>& memories,
     field.delta.emplace(n, mapped * units - center);
   }
   return field;
+}
+void project_warp_macro_targets(Warp_field& field, const dp::Design& d) {
+  field.unprojected_delta       = field.delta;
+  field.macro_targets_projected = true;
+  field.projected_samples       = 0;
+  for (auto& [n, delta] : field.delta) {
+    const double      w = d.node_size_x.at(n), h = d.node_size_y.at(n);
+    const double      hx = d.node_halo_x.empty() ? 0 : d.node_halo_x.at(n);
+    const double      hy = d.node_halo_y.empty() ? 0 : d.node_halo_y.at(n);
+    const warp::Point center{d.node_x.at(n) + w / 2, d.node_y.at(n) + h / 2};
+    double            xl = d.layout.xl + hx + w / 2, xh = d.layout.xh - hx - w / 2;
+    double            yl = d.layout.yl + hy + h / 2, yh = d.layout.yh - hy - h / 2;
+    if (!d.node_boxes.empty()) {
+      const auto& box = d.node_boxes.at(n);
+      xl              = std::max(xl, box.xl + w / 2);
+      xh              = std::min(xh, box.xh + w / 2);
+      yl              = std::max(yl, box.yl + h / 2);
+      yh              = std::min(yh, box.yh + h / 2);
+    }
+    if (xl > xh || yl > yh) {
+      throw std::runtime_error("warpspace macro has no feasible center region");
+    }
+    const warp::Point target{std::clamp(center.x + delta.x, xl, xh), std::clamp(center.y + delta.y, yl, yh)};
+    const auto        raw_target = center + delta;
+    if (raw_target.x < xl || raw_target.x > xh || raw_target.y < yl || raw_target.y > yh) {
+      ++field.projected_samples;
+      delta = target - center;
+    }
+  }
 }
 std::vector<Warp_centroid_shift> shift_warp_centroids(const dp::Design& d, const std::map<int, warp::Point>& samples,
                                                       std::vector<dp::FloorplanCircle>& targets, double gain) {
@@ -188,6 +221,10 @@ void write_warp_field(const Warp_field& f, const Warp_options& o, const std::str
   w.StartObject();
   w.Key("algorithm");
   w.String("density-warp-v3-scaled");
+  w.Key("macro_targets_projected");
+  w.Bool(f.macro_targets_projected);
+  w.Key("projected_samples");
+  w.Uint(f.projected_samples);
   w.Key("field_area_units");
   w.String("um2");
   w.Key("sample_coordinate_units");
@@ -282,6 +319,12 @@ void write_warp_field(const Warp_field& f, const Warp_options& o, const std::str
     w.StartObject();
     w.Key("node");
     w.Int(n);
+    if (auto raw = f.unprojected_delta.find(n); raw != f.unprojected_delta.end()) {
+      w.Key("raw_dx");
+      w.Double(raw->second.x);
+      w.Key("raw_dy");
+      w.Double(raw->second.y);
+    }
     w.Key("dx");
     w.Double(delta.x);
     w.Key("dy");
@@ -301,19 +344,92 @@ Macro_warp::Macro_warp(Warp_options o, int budget, std::string path)
   validate_warp_options(o);
   next   = std::max(1, int(std::ceil(budget * o.warmup)));
   stride = std::max(1, int(std::ceil(double(std::max(0, budget - next)) / o.updates)));
+  if (o.start_stability > 0) {
+    // The first 50 GP steps establish the reference; a completed window can
+    // first start warpspace at step 51. Its cadence is independent of warmup.
+    next   = 51;
+    stride = std::max(1, int(std::ceil(double(budget) / o.updates)));
+  }
+  if (o.refresh_interval > 0) {
+    stride = o.refresh_interval;
+  }
+}
+void Macro_warp::observe_motion(int iteration, double sum, bool valid) {
+  if (!valid || iteration != motion_iteration + 1) {
+    recent_motion.clear();
+  }
+  motion_iteration = iteration;
+  if (!valid) {
+    return;
+  }
+  if (!std::isfinite(sum) || sum < 0) {
+    throw std::invalid_argument("invalid macro stability center-step sum");
+  }
+  if (iteration >= 1 && iteration <= 50) {
+    reference_peak = std::max(reference_peak, sum);
+  }
+  recent_motion.push_back(sum);
+  if (recent_motion.size() > options.stability_window) {
+    recent_motion.pop_front();
+  }
 }
 std::optional<std::vector<dp::MacroPull>> Macro_warp::refresh(const dp::Design& d, const std::vector<int>& ids, int iteration) {
   if (!options.enabled || options.weight == 0 || ids.empty() || iteration < next || iteration >= iteration_budget
       || (options.once_after_density && iteration > iteration_budget - 20) || iteration == last
-      || attempts >= (options.once_after_density ? 1U : options.updates)) {
+      || (options.once_after_density ? attempts >= 1 : options.refresh_interval == 0 && attempts >= options.updates)) {
     return std::nullopt;
   }
+  std::optional<double> stability;
+  const bool            complete = reference_peak > 0 && motion_iteration >= 50 && motion_iteration == iteration - 1
+                        && recent_motion.size() == options.stability_window
+                        && motion_iteration - int(options.stability_window) >= last;
+  if (complete) {
+    stability = std::accumulate(recent_motion.begin(), recent_motion.end(), 0.) / recent_motion.size() / reference_peak;
+  }
+  if (!attempts && options.start_stability > 0 && (!stability || *stability >= options.start_stability)) {
+    return std::nullopt;
+  }
+  {
+    rapidjson::StringBuffer                    b;
+    rapidjson::Writer<rapidjson::StringBuffer> w(b);
+    w.StartObject();
+    w.Key("iteration");
+    w.Int(iteration);
+    w.Key("previous_weight");
+    w.Double(options.weight);
+    w.Key("weight");
+    w.Double(options.weight);
+    w.Key("decision");
+    w.String(attempts ? "constant" : "initial");
+    w.Key("macro_stability_fraction");
+    if (stability) {
+      w.Double(*stability);
+    } else {
+      w.Null();
+    }
+    w.Key("reference_peak_dbu");
+    w.Double(reference_peak);
+    w.Key("window");
+    w.Uint(options.stability_window);
+    w.Key("policy");
+    w.String("constant");
+    w.Key("refresh_interval");
+    w.Int(stride);
+    w.Key("start_stability_target");
+    w.Double(options.start_stability);
+    w.EndObject();
+    std::ofstream log(prefix + "_stability.jsonl", std::ios::app);
+    if (!(log << b.GetString() << '\n')) {
+      throw std::runtime_error("cannot write warpspace stability trace");
+    }
+  }
   last = iteration;
-  next = iteration + stride;
+  next = iteration_budget - iteration <= stride ? iteration_budget : iteration + stride;
   ++attempts;
   const auto started = warp::Clock::now();
   try {
-    auto                       field = placement_warp(d, ids, options);
+    auto field = placement_warp(d, ids, options);
+    project_warp_macro_targets(field, d);
     std::vector<dp::MacroPull> pulls;
     for (const auto& [n, delta] : field.delta) {
       pulls.push_back(
@@ -346,11 +462,14 @@ std::optional<std::vector<dp::MacroPull>> Macro_warp::refresh(const dp::Design& 
 }
 void Macro_warp::finish(int actual) const {
   save(prefix + "_summary.json",
-       "{\"attempts\":" + std::to_string(attempts) + ",\"successes\":" + std::to_string(successes) + ",\"once_after_density\":"
-           + (options.once_after_density ? "true" : "false") + ",\"last_anchor_iteration\":" + std::to_string(last)
+       "{\"attempts\":" + std::to_string(attempts) + ",\"successes\":" + std::to_string(successes)
+           + ",\"policy\":\"constant\",\"weight\":" + std::to_string(options.weight) + ",\"refresh_interval\":"
+           + std::to_string(stride) + ",\"once_after_density\":" + (options.once_after_density ? "true" : "false")
+           + ",\"last_anchor_iteration\":" + std::to_string(last)
            + ",\"iterations_after_anchor\":" + std::to_string(last < 0 ? 0 : std::max(0, actual - last))
-           + ",\"actual_iterations\":" + std::to_string(actual) + ",\"budget\":" + std::to_string(options.updates)
-           + ",\"iteration_budget\":" + std::to_string(iteration_budget) + ",\"early_termination\":"
-           + (actual < iteration_budget ? "true" : "false") + ",\"seconds\":" + std::to_string(elapsed_seconds) + "}");
+           + ",\"actual_iterations\":" + std::to_string(actual) + ",\"legacy_update_budget\":" + std::to_string(options.updates)
+           + ",\"start_stability_target\":" + std::to_string(options.start_stability) + ",\"iteration_budget\":"
+           + std::to_string(iteration_budget) + ",\"early_termination\":" + (actual < iteration_budget ? "true" : "false")
+           + ",\"seconds\":" + std::to_string(elapsed_seconds) + "}");
 }
 }  // namespace livehd::placement
