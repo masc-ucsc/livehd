@@ -654,6 +654,8 @@ private:
   std::deque<Fwd_view>             fwd_cache_;
   // Cone digest per (graph, property occ): the same in every cycle's encode.
   absl::flat_hash_map<std::string, std::string> digest_memo_;
+  // Same key: a property's cone stats and reached inputs (the cone is per graph, not per cycle).
+  absl::flat_hash_map<std::string, std::pair<Encoded::Cone_stats, std::vector<std::string>>> cone_memo_;
 
   // Fit `v` to exactly `width` bits: sign/zero-extend (per v.is_signed) when
   // widening, low-bit Extract when narrowing.

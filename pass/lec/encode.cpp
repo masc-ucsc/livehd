@@ -4267,10 +4267,13 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
       std::string raw = nm.empty() ? std::string{"assert"} : std::string{nm};
       out.outputs[std::string("\x04") + "prop:" + std::to_string(occ) + "\x1f" + raw] = cv;
       {
-        std::vector<std::string> reached;
-        out.prop_cone[occ]        = cone_of(cond_drv, reached);
-        out.prop_cone_inputs[occ] = std::move(reached);
         const auto mk = std::to_string(reinterpret_cast<uintptr_t>(g)) + ":" + std::to_string(occ);
+        auto [cit, cfresh] = cone_memo_.try_emplace(mk);
+        if (cfresh) {
+          cit->second.first = cone_of(cond_drv, cit->second.second);
+        }
+        out.prop_cone[occ]        = cit->second.first;
+        out.prop_cone_inputs[occ] = cit->second.second;
         auto [dit, fresh] = digest_memo_.try_emplace(mk);
         if (fresh) {
           dit->second = cone_digest_over({cond_drv});
