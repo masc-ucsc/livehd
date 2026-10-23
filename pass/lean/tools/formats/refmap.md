@@ -111,7 +111,9 @@ slot b !out:ph_o resp:in:x obs:out:rb_o
 
 A step counterexample is written to `<work>/cti_<target>.txt`. It lists the slots that fired,
 the nonzero inputs of both cycles, the spec registers on which the spec after the cycle
-differs from the map at `n+1`, the map at `n`, and the implementation's registers at `n`.
+differs from the map at `n+1`, the map at `n`, and the implementation's registers at `n`. A
+target name longer than 120 characters (a group lists its registers) is cut to its first 80,
+followed by `__target<index>`.
 `<work>/refmap_table.tsv` (`specfacts_table.tsv`) has clauses and solver time per obligation.
 
 `cache` reuses an LRAT proof already in `<work>` when the obligation's CNF there is
