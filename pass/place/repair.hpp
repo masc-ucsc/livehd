@@ -36,10 +36,25 @@ Floorplan_resize resize_floorplan(Result& state, const Options& options, const T
 // refresh must rebuild the physical view after topology changes without legalization.
 Floorplan_resize repair_floorplan(Result& state, const Options& options, const Timing_feedback& before, const Evaluate& evaluate,
                                   const std::function<void(Result&)>& refresh);
+// Final-GP topology edits at overlapping coordinates. Checkpoint 1 measures only;
+// later calls use a slack dead band and two-checkpoint cooldown. Existing chains
+// are preserved during insertion; removal is a separate conservative trial.
+struct Gp_buffer_history {
+  unsigned                        checkpoints = 0;
+  std::map<std::string, unsigned> edited;
+};
+// Restoring a rejected trial retains the accepted state's RC and pin locations;
+// only the caller's physical view needs to be restored.
+enum class Gp_refresh { edited, restore };
+Floorplan_resize repair_gp_buffers(Result& state, const Options& options, const Timing_feedback& before, const Evaluate& evaluate,
+                                   const std::function<void(Result&, Gp_refresh)>& refresh, Gp_buffer_history& history);
 // Design-wide sizing/forest sweeps with transactional bisection and a bounded
 // fallback search. Every accepted batch has fresh legal placement, RC and STA.
 bool             timing_improves(const Timing_feedback& before, const Timing_feedback& after);
 Repair_result    timing_place(Result initial, const Options& options, const Evaluate& evaluate, unsigned rounds);
+// Complete the accepted optimization result with zero-GP terminal legalization,
+// fresh RC/STA, and the exact repaired netlist. Does not insert or resize cells.
+Repair_result    finalize_placement(const Result& initial, const Options& options, const Evaluate& evaluate);
 enum class Repair_scope { all, sizing, design, forest, recovery };  // forest skips sizing/area recovery
 // prior must describe exactly initial under the same timing constraints/model.
 Repair_result repair_buffers(Result initial, const Options& options, const Evaluate& evaluate,

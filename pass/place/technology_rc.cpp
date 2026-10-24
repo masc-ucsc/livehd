@@ -89,12 +89,25 @@ Units liberty_units(const std::string& path) {
 bool valid(const Rc& rc) { return rc.r >= 0 && rc.c >= 0 && std::isfinite(rc.r) && std::isfinite(rc.c); }
 }  // namespace
 Wire_rc technology_wire_rc(const physical::Technology& tech, const std::string& liberty, const std::string& rc_file,
-                           double resistance, double capacitance) {
+                           double resistance, double capacitance, double rc_pessimism) {
+  if (!std::isfinite(rc_pessimism) || rc_pessimism < 1) {
+    throw std::invalid_argument("rc_pessimism must be finite and at least 1");
+  }
+  const auto pessimize = [factor = std::sqrt(rc_pessimism)](Wire_rc wire) {
+    wire.horizontal_r *= factor;
+    wire.horizontal_c *= factor;
+    wire.vertical_r   *= factor;
+    wire.vertical_c   *= factor;
+    if (!valid({wire.horizontal_r, wire.horizontal_c}) || !valid({wire.vertical_r, wire.vertical_c})) {
+      throw std::invalid_argument("rc_pessimism overflows wire RC coefficients");
+    }
+    return wire;
+  };
   if (resistance >= 0 && capacitance >= 0) {
     if (!valid({resistance, capacitance})) {
       throw std::runtime_error("invalid explicit wire RC");
     }
-    return {resistance, capacitance, resistance, capacitance, "explicit wire_rc"};
+    return pessimize({resistance, capacitance, resistance, capacitance, "explicit wire_rc"});
   }
   std::map<std::string, Rc> layers;
   for (const auto& [name, l] : tech.layers) {
@@ -207,7 +220,7 @@ Wire_rc technology_wire_rc(const physical::Technology& tech, const std::string& 
       }
     }
     if (signal) {
-      return {signal->r, signal->c, signal->r, signal->c, rc_file};
+      return pessimize({signal->r, signal->c, signal->r, signal->c, rc_file});
     }
   }
   std::optional<Rc> horizontal;
@@ -220,7 +233,7 @@ Wire_rc technology_wire_rc(const physical::Technology& tech, const std::string& 
     if (!horizontal && l.direction == "HORIZONTAL") {
       horizontal = it->second;
     } else if (horizontal && l.direction == "VERTICAL") {
-      return {horizontal->r, horizontal->c, it->second.r, it->second.c, rc_file.empty() ? "LEF" : rc_file};
+      return pessimize({horizontal->r, horizontal->c, it->second.r, it->second.c, rc_file.empty() ? "LEF" : rc_file});
     }
   }
   throw std::runtime_error(

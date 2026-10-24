@@ -44,8 +44,11 @@ protected:
   ankerl::unordered_dense::set<hhds::Gid> opaque_gids_;
 
   ot::Timer                                           timer;
-  livehd::timing::Feedback*                           feedback_              = nullptr;
-  size_t                                              physical_updated_nets_ = 0;
+  livehd::timing::Feedback*                           feedback_                   = nullptr;
+  size_t                                              physical_updated_nets_      = 0;
+  double                                              timing_propagation_seconds_ = 0;
+  size_t                                              timing_update_calls_        = 0;
+  void                                                update_timing_profiled();
   // Persistent physical sessions name gates independently of scratch graph indices.
   std::map<std::string, std::string>                  physical_instances_;
   std::shared_ptr<const livehd::physical::Parasitics> previous_physical_rc_;
@@ -243,7 +246,11 @@ public:
   struct Statistics {
     unsigned evaluations = 0, builds = 0;
     size_t   repowered_gates = 0, inserted_gates = 0, removed_gates = 0, updated_nets = 0;
-    double   seconds = 0;
+    double   seconds            = 0;
+    // Disjoint wall-time buckets; reconciliation excludes propagation below.
+    double   validation_seconds = 0, reconcile_seconds = 0, exclusions_seconds = 0;
+    double   propagation_seconds = 0, feedback_seconds = 0;
+    size_t   update_calls = 0;
   };
   explicit Physical_session(const Eprp_var& options);
   ~Physical_session();

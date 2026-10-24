@@ -380,8 +380,8 @@ TEST(LhdOptions, CpropEngineDispatch) {
 }
 
 // compile.aegraph.cost: the default is `auto`, which follows the command (sim under `lhd sim`, synth elsewhere, so a bare
-// `lhd compile` gets synth); an explicit value overrides it; the RESOLVED profile is what the compile-cache descriptor names, so an engine run under the
-// sim profile never replays a synth-profile graph.
+// `lhd compile` gets synth); an explicit value overrides it; the RESOLVED profile is what the compile-cache descriptor names, so an
+// engine run under the sim profile never replays a synth-profile graph.
 TEST(LhdOptions, AegraphCostProfileIsResolvedAndNamedInTheDescriptor) {
   lhd::Options opts;
   opts.command = "sim";
@@ -520,8 +520,13 @@ TEST(LhdOptions, RecommendedSharedDefaults) {
            {                          "synth.place.halo",   "auto"},
            {                 "synth.place.fp.pin_adjust",   "true"},
            {              "synth.place.macro.pin_adjust",   "true"},
+           {            "synth.place.final.timing_start",    "200"},
+           {         "synth.place.final.timing_schedule",  "fixed"},
+           {                     "synth.place.resize.gp",   "true"},
+           {              "synth.place.resize.gp_margin",   "0.01"},
+           {              "synth.place.resize.gp_trials",      "4"},
            {                   "synth.place.route.model",   "rsmt"},
-           {             "synth.place.legalize.terminal",   "true"},
+           {                  "synth.place.rc_pessimism",      "1"},
            {  "synth.place.legalize.critical_pair_limit",    "256"},
            {     "synth.place.legalize.local_pair_limit",      "0"},
            { "synth.place.legalize.joint_minimize_total",   "true"},

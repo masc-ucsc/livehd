@@ -397,6 +397,61 @@ not use virtual-buffer timing. Reports are in
 `initial_timing_source` identify the post-synthesis seed. Missing constrained data
 nets are reported as an error when timing-driven placement is requested.
 
+With `synth.place.resize=true`, `synth.place.resize.gp=true` now enables real
+buffer insertion/removal at final-cell GP timing checkpoints. The first GP
+checkpoint only measures timing. From the second checkpoint, repair trials split
+nets and create movable, physically sized buffers at Steiner seeds; accepted
+changes resume GP before legalization. Macro GP and speculative A/B scoring do
+not edit topology. The post-placement resize/repair and mandatory final
+legalization still run. Set `synth.place.resize.gp=false` to retain only that
+post-placement repair. A zero macro timing interval uses a 50-iteration cadence
+when GP repair is enabled. Cell-jump propagation ends at the first actual final-GP
+timing evaluation; pending depths are skipped, so deeper jump settings can coexist
+with GP buffer repair. `synth.place.final.timing_start=200` delays final-GP
+checkpoints and adaptive A/B timing until at least 200 GP iterations have run.
+The regular cadence is 50 iterations, so the first update normally occurs at
+200 and buffer repair can begin at 250; density gating can delay both. Short
+runs still produce end-of-placement timing and legalization priorities, but do
+not perform early in-loop buffer repair. Synthesis timing may seed initial net
+weights before GP; it does not trigger this placement-timing cutoff. The
+`physical_repair` diagnostic accepts the same setting as `final_timing_start`.
+A future stability-based trigger is tracked in
+[3r-route](../../todo/livehd/3r-route.html#timing-warmup).
+
+`synth.place.resize.gp_margin=0.01` is a dimensionless slack dead band, a fraction
+of the shortest constrained clock period. Without a clock it uses estimated
+maximum path delay; without either positive scale it skips GP repair. There is
+no absolute-time floor. Insertion requires slack below the negative margin or
+an electrical load/slew ratio above 1.1. Removal requires slack above the positive
+margin on the upstream driver, buffer output and sinks, and fresh timing must
+retain the margin on the surviving upstream driver. Accepted edits must improve
+existing timing/electrical/area criteria without worsening setup or electrical
+violations. Edited drivers and new buffers are protected for the next two GP
+repair checkpoints. Insertion retains existing chains so it cannot bypass the
+removal hysteresis. Traces `gp_buffer_repair_<iteration>.json` record the relative
+margin, timing scale, proposals and acceptance. The diagnostic `physical_repair`
+JSON equivalents are `gp_resize` and `gp_buffer_margin`; its former
+`virtual_timing` clone-and-discard mode has been removed.
+
+`synth.place.resize.gp_trials=4` bounds the attempts in each insertion/removal
+phase, including rejected-batch bisection (range 1–16). The replay spelling is
+`gp_buffer_trials`. A budget of 1 tests the full candidate batch once per phase;
+it preserves timing/electrical acceptance but gives up useful partial batches
+when the full proposal fails. The default remains 4. Rejected trials restore
+the accepted physical view and reuse its unchanged RC and pin locations.
+Trial traces separate graph preparation, physical/RC refresh, timing, and
+restore seconds so runtime experiments can distinguish those costs.
+
+`synth.place.final.timing_schedule=late` is an opt-in cadence experiment; the
+default `fixed` keeps the current schedule. After the timing warm-up, `late`
+uses four times `macro.timing_interval` during the first half of the remaining
+GP budget, twice that interval in the next quarter, and the normal interval in
+the last quarter. The first eligible measurement and forced/final timing are
+never skipped by this schedule; the existing movement/density gates still
+apply. With warm-up 200, interval 50 and 1000 iterations, ordinary checkpoints
+are 200, 400, 600, 700, 800, 850, 900, 950 and 1000. Buffer repair starts on the
+second measurement as before. Replay spelling: `final_timing_schedule`.
+
 The initial weights are copied into floorplan GP, macro GP and final cell GP.
 `synth.place.timing_fraction=0.2` selects the worst 20% of constrained non-clock
 nets, rounded up to at least one net. It applies to the initial zero-wire weights,
@@ -1080,8 +1135,8 @@ timed (OpenSTA's default).
 The weighting follows [OpenROAD GPL's slack weighting](https://openroad.readthedocs.io/en/latest/main/src/gpl/README.html),
 and buffer repair follows its [removal, rebuffering and timing-check sequence](https://openroad.readthedocs.io/en/latest/main/src/rsz/README.html).
 No stock-DREAMPlace QoR parity or large-design scalability has been established
-by the small fixtures. Macro placement, routed RC, virtual buffering, continuous
-optimizer checkpoints and cross-process optimizer-state reuse remain follow-ups.
+by the small fixtures. Routed-RC feedback and cross-process optimizer-state reuse remain follow-ups.
+Final-GP buffer checkpoints use estimated placement RC.
 
 The host pins DREAMPlace's shipped BUILD files and uses a plain LEMON archive
 with the registry compatibility patches, avoiding root-only Bzlmod overrides.
@@ -1696,6 +1751,84 @@ core, SRAM frame, IO frame, cell masters or net connectivity during placement.
 The density/obstacle controls remain experimental; timing and legalizer movement
 must be checked on each design before adopting a different default.
 
+The diagnostic also accepts an experimental final-GP macro-transparency schedule:
+`macro_transparency_cycles=0` disables cycling, `macro_transparency_warmup=100`
+sets the initial opaque iterations, and `macro_transparency_period=20` sets
+both transparent and opaque phase lengths. With five cycles, iterations 1–100
+are opaque, 101–120 transparent, 121–140 opaque, and so on through iteration
+300; all remaining iterations are opaque. The total budget must include at
+least one additional opaque period after the cycles. Early convergence and
+selected-iterate restoration cannot bypass this settling period.
+
+For the fully transparent diagnostic, set `macro_transparency_always=true`
+(default false) with zero cycles. Macros remain transparent from the first GP
+iteration through the last; there is no opaque settling phase. Density feedback
+and checkpoint gating then use capacity with fixed macro/mask areas omitted.
+`overflow` reports this diagnostic model, while `raw_overflow` still reports
+physical occupancy. Pins retain their original offsets and connectivity. Inspect
+`before_legalization.def` for the transparent result: normal legalization still
+uses the physical macro obstacles, so its output is a different diagnostic.
+In this mode `macro_transparency_period` controls snapshot frequency only.
+
+Cell-only spreading can be combined with transparency: `local_density_weight`
+sets its strength, `local_density_range` its decay length in local-bin pitches,
+and `local_density_bins` its independent grid. Transparent macro/mask bodies do
+not subtract local capacity. `local_density_target=-1` inherits global density;
+an explicit value in 0..1 sets a separate real-cell target without changing
+filler population or the global target. Zero emits pressure from all real-cell
+density. Set `local_density_jitter=0` when comparing the same imported seed.
+
+Transparent phases zero fixed macro density charge, including macro-shaped
+row-exclusion masks, and disable the explicit fixed-macro overlap penalty and
+routing macro blockage/pin-access model. Fixed coordinates, physical dimensions,
+actual macro pins, connectivity, and final legalization obstacles remain intact.
+Filler count and dimensions stay fixed; effective filler charge compensates for
+the temporarily available area. Each switch clears routing inflation, restarts
+optimizer momentum, and invalidates stale selected-iterate/stability history.
+The density-weight and wirelength-smoothing schedules continue normally.
+
+This experiment requires fixed macros, disabled movable-macro density forces,
+and a single GP call without external continuation or topology replacement. It is not
+an `fp_plan` or `macro_plan` control. `cell_jump=1` may retain a supplied
+pin-adjacent DEF seed without later graph-depth jumps; see [cell-jump
+continuation](cell_jump.md). No cells are directly relocated by transparency.
+GP progress includes `macro_opacity` (zero or one). The diagnostic writes a
+`macro_transparency/nodes.tsv` map and phase-boundary `iterationN.bin` files:
+native-endian doubles, all movable x coordinates followed by all movable y
+coordinates, in DBU and node-map order. Macro opacity affects optimization only;
+reported raw physical overflow and final legality use the original fixed geometry.
+
+The alternative diagnostic `vanished_memory=true` (default false) starts final
+GP with fixed macro/mask bodies absent through iteration 100. At iteration 101,
+the exclusion rectangle is 1% of the original width and height, centered on the
+original body; each dimension grows by one percentage point per iteration until
+full size at 200. Thus iteration 110 has 10% width and height (1% area). Physical
+macro positions, sizes, pin offsets and connectivity never change. Global and
+local density capacity, explicit overlap pressure and routing obstacles use the
+same centered footprint. Filler charge tracks its available area without
+changing filler count or size. Routing is refreshed at every growth step when
+the usual density gate permits it.
+
+The configured `local_density_weight` is held through iteration 100, then drops
+by 0.05 per iteration starting at 101, clamped to
+`vanished_memory_local_floor` (default 0). The floor must be finite, nonnegative
+and no larger than the starting local weight. A starting weight of 0.67 becomes
+0.62 at 101 and zero at 114 with the default floor; a floor of 0.1 is reached at
+112 and retains that local spreading force through the end of GP. This floor
+does not disable virtual fillers: set `virtual_fillers=false` explicitly when
+testing without them. The budget must allow at least 20 settling steps
+after both memory growth and the local-weight ramp finish. This option cannot be combined with the alternating or always
+transparent schedules, movable macros, external continuation or topology
+replacement. It does not enable itself in `fp_plan`/`macro_plan`. Default local
+weight is unchanged; configure it explicitly for the experiment.
+
+Progress adds `macro_exclusion_scale` (linear extent, not area or fractional
+opacity) and the effective `local_density_weight`. Raw overflow retains the full
+physical geometry; model overflow and checkpoint gating use the growing body.
+The snapshot period is `macro_transparency_period`, throughout the GP solve.
+Optimizer momentum restarts at the first growth step, full-size restoration,
+and the start/end of the local ramp, rather than restarting every growth step.
+
 ### Placement-color leaves and adaptive IOs
 
 The opt-in controls below extend FP without changing existing defaults.
@@ -2001,16 +2134,18 @@ behavior.
 
 ## Terminal legalization
 
-Terminal legalization defaults to `synth.place.legalize.terminal=true`. After final cell GP, the terminal
+Terminal legalization is mandatory for the final cell handoff. After GP and enabled sizing/buffer repair, the terminal
 legalizer selects timed critical nets, jointly solves eligible critical pairs,
 places the remaining selected critical cells, tries local pairs within a smaller
 occupancy budget, and redistributes the remaining cells across the full core.
-It replaces final detail placement, tie relocation and post-GP sizing/repair/
-resynthesis. Earlier GP/macro work still runs. OpenROAD receives ordinary PLACED
+It runs after optimization, using the accepted repaired netlist, without another GP solve.
+`synth.place.resize=true` enables sizing and buffer repair independently; the obsolete
+`synth.place.legalize.terminal` switch has been removed. Intermediate optimization
+trials still receive legal placement and fresh timing before acceptance. OpenROAD receives ordinary PLACED
 cells and may modify them starting at CTS. Local-pair alignment is disabled by
 default (`local_pair_limit=0`). The SAT budget defaults to 1000 ms and 10000000
-conflicts, and the replay tool defaults to a 5 µm macro halo in each direction,
-matching native placement. Without timing feedback there are no timed nets to
+conflicts. The replay tool defaults to a 5 µm macro halo in each direction;
+native placement resolves its automatic halo from ten placement-row heights. Without timing feedback there are no timed nets to
 protect; geometric legalization still runs. GP-only mode omits legalization.
 For very small cores, native placement bounds the inherited routing-grid counts so bins
 are at least one row high and wide enough to hold the widest cell under the hard
@@ -2409,21 +2544,30 @@ rectangle. Adjacent sides, corners, masked controls, multi-cell paths and local
 pieces containing multiple real pins are excluded. This is a connectivity
 heuristic, not a timing-arc or via-delay model.
 
-The output pin takes the input pin's coordinate along its existing edge: equal
-Y for left/right passage and equal X for bottom/top passage. Connected alignment
-chains are handled together; upstream roots remain fixed. Conflicting roots or
-cycles are skipped. A chain is also skipped if it would change any bus's existing
-relative order, violate site-pitch spacing, leave an atomic edge segment, or move
-into a real macro. Bus order always takes precedence. No real cell moves during
-pin assignment. The assigned virtual pins then stay fixed during the extra GP
-iterations; the ordinary physical-net model is restored before legalization.
+For a direct wire, the output boundary pin takes the input boundary pin's
+coordinate along its existing edge. For a one-cell path, both boundary pins move:
+the input boundary pin aligns with the cell's physical input pin, and the output
+boundary pin aligns with its physical output pin. Left/right passage uses each
+cell pin's Y coordinate; bottom/top passage uses each pin's X coordinate. Native
+pin offsets already include cell orientation. The two boundary coordinates may
+differ; no artificial straight line is forced through the cell.
+
+Connected groups are handled atomically. Conflicting targets or cycles are
+skipped, as are moves that change bus order, violate site-pitch spacing, leave an
+atomic edge segment, or enter a real macro. A conflict at either boundary leaves
+the whole group's pins unchanged. Bus order takes precedence. No real cell moves
+during pin assignment. The assigned virtual pins stay fixed during extra GP,
+but real cells remain movable, so their actual pin alignment can change during
+GP or legalization. The ordinary physical-net model is restored before
+legalization.
 
 `boundarypins/report.json` includes a `pinalign` object with direct/one-cell
 candidate counts, accepted pair counts (already aligned versus newly aligned),
 moved-pin counts, and rejection reasons.
 Its `pairs` list identifies input/output anchors (zero-based rows in `pins.tsv`),
-rectangle, intermediate cell (or -1), and outcome. These are actual virtual-pin
-alignment counts before GP, maintained throughout GP; the separate unconstrained
+rectangle, intermediate cell (or -1), temporary cell-pin IDs, assignment-time
+cell-pin target coordinates, and outcome. Counts describe assignment-time
+alignment; virtual targets stay fixed through GP but real cell pins may move; the separate unconstrained
 physical-net RSMT diagnostic does not measure compliance with those assignments.
 
 For controlled macro spreading experiments, `synth.place.macro.fill_cell_space=true`
@@ -2450,3 +2594,91 @@ The macro can reach the edge; its center cannot cross the body/halo boundary.
 Per-refresh JSON retains raw displacement as `raw_dx/raw_dy`, the actual applied
 projected displacement, and `projected_samples`. FP cell/centroid targets keep
 their existing behavior.
+### Experimental within-run GP A/B search
+
+`physical_repair` accepts opt-in `gp_ab=true` for final fixed-macro cell
+placement, with timing feedback, RSMT routability, virtual fillers, and
+`local_density_jitter=0`. It is incompatible with moving boundary terminals,
+cell-jump propagation and macro-placement forces. It also requires
+`gp_resize=false`: its optimizer snapshots assume fixed topology. Ordinary
+post-placement resizing remains available with `resize=true`. The driver rejects
+the incompatible combination before placement starts. Existing defaults are unchanged.
+
+After iteration `gp_ab_start` (220), every `gp_ab_interval` (40) iterations,
+the native solver branches from one full GP checkpoint. `gp_ab_rounds=0`
+(the default) keeps adapting until the final settling window; a positive value
+optionally caps the number of decisions. Each branch executes `gp_ab_steps` (3, range 1–3) steps. Candidates
+are unchanged/lower/higher, alternating effective filler charge and local
+repulsion. Changes are `gp_ab_filler_step` (0.2) and `gp_ab_local_step` (0.1),
+clamped to [0,1]; duplicate boundary candidates are omitted. Filler particle
+count/size stays constant. All branches share cells, filler coordinates, routing
+inflation, density normalization and timing weights; momentum restarts equally
+for all candidates at the objective boundary. Only the winner's full state is
+retained, including its tuning values. Smoothing follows the whole-run schedule.
+The final 20 iterations are reserved for settling, and normal legalization runs
+once at the end. With vanished memories, search starts only after full opacity.
+
+Native trials run concurrently within the configured thread budget. Timing
+scoring runs serially through the host timer, without updating shared net weights
+or committing losing-trial placements. Normal timing feedback resumes on the
+selected trajectory. Selection filters near-best candidates in this order:
+RSMT-RUDY overflow (1% relative tie band), WNS (1%), unweighted active-net HPWL
+(0.5%), TNS (1%). Exact ties retain the unchanged candidate. Physical density is
+reported separately. Clocks/resets use the same preCTS exclusions as ordinary GP.
+
+`initial/gp_ab.jsonl` records every parent and candidate score, parameter values,
+selected candidate, comparison tolerances and decisive metric. It is a preCTS
+proxy experiment, not a routing-success claim. Candidate timing is in ns and
+HPWL in µm. Normal GP history and snapshots contain only the chosen trajectory.
+
+Trial scores also report `route_unroutable_nets`, `route_blocked_pins`,
+`route_measured_nets`, `route_congestion_overflow`, `route_peak_utilization`,
+and `route_detour_wirelength_um`. The congestion-only term subtracts the
+existing (unroutable nets + blocked pins)/routing-bin-count penalty from
+combined RUDY overflow. These counts describe the estimator's opaque-macro
+free-space model, not detailed-route failures; pre-legalization overlap can
+cause them. They are diagnostic fields, not an additional ranking term.
+Trial scoring does not overwrite the main trajectory's routing-history counters.
+
+For a separate macro-frame experiment, `physical_repair` supports
+`macro_only=true` together with `floorplan_place=true`, `fp_place=false`, and
+`final_cells=false`. This selects the production macro stage and exports legal
+macros with provisional cell positions; it does not certify final cell legality.
+Final-cell controls (cell halo, cell jumps, memory transparency, GP A/B search)
+are rejected in this mode. Rebuild row cuts and physical tapcells around the new
+macro positions before preparing a separate fixed-frame final-cell solve.
+
+## Placement RC pessimism
+
+`synth.place.rc_pessimism` (diagnostic JSON: `rc_pessimism`) defaults to `1` and
+must be finite and at least 1. Wire resistance and capacitance each scale by the
+square root of this value, so `2` doubles the wire RC product. Liberty pin loads
+and cell timing tables remain unchanged. The scaled wire model is shared by
+placement STA, timing weights, buffer planning, sizing and IO timing.
+`wire_rc.json` records the multiplier and effective coefficients. Compare
+variants with a common nominal RC model or extracted post-route timing; their
+pessimistic optimization slacks are not directly comparable.
+
+
+### Imported placement masks and SRAM-channel repair
+
+Fixed-frame replay distinguishes reserved pinless BLOCK instances by name:
+`__lhd_frame_mask_soft_*` are initial-placement-only soft blockages;
+other `__lhd_frame_mask_*` instances are hard missing-row/site exclusions.
+The adapter must split overlapping soft regions and row cuts into disjoint
+rectangles after subtracting real fixed footprints. Historical adapters that
+merged both into hard masks must be regenerated; the original semantics cannot
+be recovered from those rectangles alone.
+
+Both mask types contribute GP density, including the vanished-memory schedule,
+but neither blocks RSMT/RUDY routing or macro routing-channel pressure.
+Soft masks release their sites for native detail, ECO buffer repair, SAT and
+terminal legalization. Hard masks and physical SRAMs remain obstacles.
+Masks receive no additional macro halo. Reserved mask names require fixed,
+pinless, non-CORE geometry in N orientation, and masks never enter the physical
+netlist handed back to OpenROAD. The native API carries an explicit
+`node_placement_mask` type through topology replacements and rigid remapping.
+
+GP buffer-repair traces include `rejection_reasons` so timing rejection can be
+distinguished from absence of legal placement sites. Counts of inserted buffers
+alone do not show whether repeaters can occupy SRAM channels.

@@ -10,6 +10,7 @@
 #include <format>
 #include <fstream>
 #include <functional>
+#include <iomanip>
 #include <limits>
 #include <map>
 #include <mutex>
@@ -325,6 +326,8 @@ std::string environment_key(const Options& o, const ph::Technology& tech) {
   if (!o.floorplan.empty()) {
     h = hash_text(file_text(o.floorplan), h);
   }
+  h = hash_text("placement-mask-semantics-v2", h);
+  h = hash_text(std::format("rc_pessimism:{}", o.rc_pessimism), h);
   if (!o.tech_rc_file.empty()) {
     h = hash_text(file_text(o.tech_rc_file), h);
   }
@@ -440,7 +443,7 @@ std::string environment_key(const Options& o, const ph::Technology& tech) {
   if (o.legalize_timing_strength > 0) {
     h = hash_text(std::format("timing-legalize:{}:{}", o.legalize_timing_strength, o.legalize_timing_threshold), h);
   }
-  if (o.terminal_legalize) {
+  if (!o.optimization_pending) {
     const auto& t = o.terminal_legalize_options;
     if (t.remainder_warp.enabled) {
       h = hash_text(std::format("remainder-warp:{}:{}:{}:{}",
@@ -496,6 +499,35 @@ std::string environment_key(const Options& o, const ph::Technology& tech) {
   if (o.fixed_macro_overlap_weight > 0) {
     h = hash_text(std::format("fixed-macro-overlap:{}", o.fixed_macro_overlap_weight), h);
   }
+  if (o.cell_jump.depth > 1) {
+    const auto& jump = o.cell_jump;
+    h                = hash_text(std::format("cell-jump:{}:{}:{}:{}", jump.depth, jump.settle, jump.interval, jump.fix_period), h);
+  }
+  if (o.gp_search.enabled) {
+    const auto& a = o.gp_search;
+    h             = hash_text(std::format("gp_ab_v1:{}:{}:{}:{}:{}:{}:{}:{}:{}",
+                              a.start,
+                              a.interval,
+                              a.steps,
+                              a.rounds,
+                              a.filler_step,
+                              a.local_step,
+                              a.route_tolerance,
+                              a.timing_tolerance,
+                              a.hpwl_tolerance),
+                  h);
+  }
+  if (o.vanished_memory) {
+    h = hash_text(std::format("vanished_memory_v3:{}", o.vanished_memory_local_floor), h);
+  }
+  if (o.macro_transparency.enabled()) {
+    h = hash_text(std::format("macro-transparency:{}:{}:{}:{}",
+                              o.macro_transparency.cycles,
+                              o.macro_transparency.warmup,
+                              o.macro_transparency.period,
+                              o.macro_transparency.always),
+                  h);
+  }
   if (o.eco_connectivity_weight > 0) {
     h = hash_text(std::format("eco-connectivity:{}", o.eco_connectivity_weight), h);
   }
@@ -508,6 +540,8 @@ std::string environment_key(const Options& o, const ph::Technology& tech) {
   if (!o.macro_legalize_cells) {
     h = hash_text("macro-legalize-cells:false", h);
   }
+  h = hash_text(std::format("final-timing-start:{}", o.final_timing_start), h);
+  h = hash_text("final-timing-schedule:" + o.final_timing_schedule, h);
   if (o.final_independent_timing) {
     h = hash_text("final-independent-timing:true", h);
   }
@@ -557,13 +591,14 @@ std::string environment_key(const Options& o, const ph::Technology& tech) {
                   h);
   }
   if (o.dynamic_bins || o.local_density_weight > 0 || o.macro_cell_density_weight > 0 || o.macro_density_pull_weight > 0) {
-    h = hash_text(std::format("local-spread:{}:{}:{}:{}:{}:{}",
+    h = hash_text(std::format("local-spread:{}:{}:{}:{}:{}:{}:{}",
                               o.dynamic_bins,
                               o.bin_max,
                               o.local_density_weight,
                               o.local_density_bins,
                               o.local_density_range,
-                              o.local_density_jitter),
+                              o.local_density_jitter,
+                              o.local_density_target),
                   h);
   }
   if (o.macro_cell_density_weight > 0) {
@@ -585,6 +620,13 @@ std::string environment_key(const Options& o, const ph::Technology& tech) {
     h = hash_text(std::format("centroid-copies:per-parent:{}", o.fp_min_copies), h);
     if (o.fp_min_macros != 2) {
       h = hash_text(std::format("centroid-min-macros:{}", o.fp_min_macros), h);
+    }
+  }
+  if (o.gp_resize) {
+    h = hash_text(std::format("gp-buffer-repair:{}", o.gp_buffer_margin), h);
+    h = hash_text(std::format("gp-buffer-trials:{}", o.gp_buffer_trials), h);
+    for (const auto& pattern : o.resize_dont_use) {
+      h = hash_text("gp-dont-use:" + pattern, h);
     }
   }
   if (o.fp_place) {
@@ -1324,10 +1366,14 @@ void make_arrays(View& v, const ph::Technology& tech) {
     }
     d.node_blocked_capacity_h.push_back(blocked_h);
     d.node_blocked_capacity_v.push_back(blocked_v);
+    const auto mask = ph::placement_mask({c.name, c.macro, c.place}, tech);
+    d.node_placement_mask.push_back(mask == ph::Placement_mask::none   ? dp::PlacementMask::none
+                                    : mask == ph::Placement_mask::soft ? dp::PlacementMask::soft
+                                                                       : dp::PlacementMask::hard);
     d.node_macro.push_back(!standard);
     d.node_inflatable.push_back(standard);
-    d.node_halo_x.push_back(standard ? 0 : v.halo_x);
-    d.node_halo_y.push_back(standard ? 0 : v.halo_y);
+    d.node_halo_x.push_back(standard || mask != ph::Placement_mask::none ? 0 : v.halo_x);
+    d.node_halo_y.push_back(standard || mask != ph::Placement_mask::none ? 0 : v.halo_y);
     if (oriented) {
       d.node_orientation.push_back(native_orientation(c.place.orientation));
     }
@@ -1346,6 +1392,7 @@ void make_arrays(View& v, const ph::Technology& tech) {
     d.node_blocked_capacity_h.push_back(0);
     d.node_blocked_capacity_v.push_back(0);
     d.node_macro.push_back(0);
+    d.node_placement_mask.push_back(dp::PlacementMask::none);
     d.node_inflatable.push_back(0);
     d.node_halo_x.push_back(0);
     d.node_halo_y.push_back(0);
@@ -1669,6 +1716,9 @@ bool align_macro_geometry(const View& v, const ph::Technology& tech, dp::Design&
   std::vector<size_t>        indexes;
   std::vector<uint64_t>      rigid_ids;
   for (size_t i = 0; i < v.cells.size(); ++i) {
+    if (physical.placement_mask(i) == dp::PlacementMask::soft) {
+      continue;
+    }
     const bool macro = physical.node_macro[i];
     if (!macro && i < static_cast<size_t>(physical.num_movable)) {
       continue;
@@ -2454,10 +2504,14 @@ ph::Rc_net steiner_rc(std::string driver, const std::vector<std::pair<std::strin
 namespace {
 std::shared_ptr<ph::Parasitics> estimate_rc(const View& v, const ph::Technology& tech, const Options& options,
                                             std::map<std::string, std::pair<double, double>>& pin_locations) {
-  auto result         = std::make_shared<ph::Parasitics>();
-  result->approximate = !options.full;
-  const auto wire
-      = technology_wire_rc(tech, options.liberty, options.tech_rc_file, options.resistance_ohm_um, options.capacitance_ff_um);
+  auto result               = std::make_shared<ph::Parasitics>();
+  result->approximate       = !options.full;
+  const auto   wire         = technology_wire_rc(tech,
+                                       options.liberty,
+                                       options.tech_rc_file,
+                                       options.resistance_ohm_um,
+                                       options.capacitance_ff_um,
+                                       options.rc_pessimism);
   const double horizontal_r = wire.horizontal_r, horizontal_c = wire.horizontal_c;
   const double vertical_r = wire.vertical_r, vertical_c = wire.vertical_c;
   {
@@ -2466,6 +2520,10 @@ std::shared_ptr<ph::Parasitics> estimate_rc(const View& v, const ph::Technology&
     json.StartObject();
     json.Key("model");
     json.String("estimated_FLUTE_Steiner_RC");
+    json.Key("rc_pessimism");
+    json.Double(options.rc_pessimism);
+    json.Key("wire_r_c_scale");
+    json.Double(std::sqrt(options.rc_pessimism));
     json.Key("source");
     json.String(wire.source.c_str());
     json.Key("resistance_units");
@@ -2886,10 +2944,14 @@ bool legalize_edits(View& v, const ph::Technology& tech, const ph::Floorplan& re
   std::vector<Ann_place> obstacles;
   std::vector<size_t>    edits;
   for (size_t i = 0; i < v.cells.size(); ++i) {
-    const auto& c = v.cells[i];
+    const auto& c    = v.cells[i];
+    const auto  mask = ph::placement_mask({c.name, c.macro, c.place}, tech);
+    if (mask == ph::Placement_mask::soft) {
+      continue;
+    }
     if (!dirty.contains(c.name) || c.locked || c.place.status == Status::FIXED || c.place.status == Status::LOCKED) {
       auto obstacle = c.place;
-      if (!tech.macros.at(c.macro).klass.starts_with("CORE")) {
+      if (mask == ph::Placement_mask::none && !tech.macros.at(c.macro).klass.starts_with("CORE")) {
         obstacle.x      -= v.halo_x;
         obstacle.y      -= v.halo_y;
         obstacle.width  += 2 * v.halo_x;
@@ -3312,7 +3374,7 @@ void check_legality(const ph::Technology& tech, const ph::Floorplan& fp, double 
     const int64_t xl = fp.rows.front().x, yl = fp.rows.front().y;
     const int64_t xh = xl + fp.rows.front().count * sw, yh = fp.rows.back().y + rh;
     for (auto& c : padded.components) {
-      if (!tech.macros.at(c.macro).klass.starts_with("CORE")) {
+      if (ph::placement_mask(c, tech) == ph::Placement_mask::none && !tech.macros.at(c.macro).klass.starts_with("CORE")) {
         auto& p = c.place;
         // A fixed macro may touch a core edge. Its physical body must fit,
         // while clearance outside the core has no placeable area to reserve.
@@ -3364,6 +3426,9 @@ void check_legality(const ph::Technology& tech, const ph::Floorplan& fp, double 
         throw std::runtime_error("cell orientation differs from row: " + a.name);
       }
     }
+    if (ph::placement_mask(a, tech) == ph::Placement_mask::soft) {
+      continue;
+    }
     // Rows below are bucket indices only; macros need not be row-aligned.
     for (int64_t row = (a.place.y - yl) / rh; row * rh + yl < a.place.y + a.place.height; ++row) {
       by_row[row].push_back(i);
@@ -3389,6 +3454,9 @@ void check_legality(const ph::Technology& tech, const ph::Floorplan& fp, double 
 
 Options final_cell_options(const Options& options) {
   validate_cell_halo(options);
+  if (options.gp_buffer_trials < 1 || options.gp_buffer_trials > 16) {
+    throw std::invalid_argument("GP buffer trial budget must be between 1 and 16");
+  }
   if (!options.cell_halo) {
     return options;  // Unset must preserve every existing staged/default decision.
   }
@@ -3561,6 +3629,15 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
   }
   const auto& options = automatic_options ? *automatic_options : requested;
   validate_cell_halo(options);
+  if (options.final_timing_start < 0) {
+    throw std::invalid_argument("final placement timing start must be nonnegative");
+  }
+  if (options.final_timing_schedule != "fixed" && options.final_timing_schedule != "late") {
+    throw std::invalid_argument("final timing schedule must be fixed or late");
+  }
+  if (!std::isfinite(options.gp_buffer_margin) || options.gp_buffer_margin < 0 || options.gp_buffer_margin > 1) {
+    throw std::invalid_argument("GP buffer relative slack margin must be finite and in [0,1]");
+  }
   if (!std::isfinite(options.eco_connectivity_weight) || options.eco_connectivity_weight < 0
       || options.eco_connectivity_weight > 100) {
     throw std::invalid_argument("ECO connectivity weight must be finite and between 0 and 100");
@@ -3589,7 +3666,7 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
   if (options.legalize_timing_corrections > 2) {
     throw std::invalid_argument("timing correction budget must be 0..2");
   }
-  if (options.full && options.terminal_legalize && (options.satlegalize || options.legalize_timing_corrections)) {
+  if (options.full && !options.optimization_pending && (options.satlegalize || options.legalize_timing_corrections)) {
     throw std::invalid_argument("terminal legalization replaces local satlegalize/timing corrections");
   }
   if (!std::isfinite(options.legalize_timing_strength) || options.legalize_timing_strength < 0
@@ -3973,7 +4050,7 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
       area            += (sinks.size() - 1) * double(cell->place.width) * cell->place.height;
     }
   }
-  v.halo_x = macro_halo(cell_halo_x, tech.dbu, sw);
+  v.halo_x              = macro_halo(cell_halo_x, tech.dbu, sw);
   v.halo_y              = macro_halo(cell_halo_y, tech.dbu, rh);
   double occupancy_area = area;
   for (const auto& c : v.cells) {
@@ -4891,6 +4968,10 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
                           s.route_peak_utilization,
                           s.macro_routing_force,
                           s.macro_routing_channels);
+      line += std::format(",\"macro_opacity\":{},\"macro_exclusion_scale\":{},\"local_density_weight\":{}",
+                          s.macro_opacity,
+                          s.macro_exclusion_scale,
+                          s.local_density_weight);
       line += std::format(
           R"(,"magnet_round":{},"magnet_groups":{},"macro_move_max":{},"macro_move_rms":{},"last_instability_iteration":{})",
           s.magnet_round,
@@ -4928,8 +5009,8 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
       progress->flush();
     };
   }
-  std::vector<CentroidSample>                   centroid_initial, centroid_gp;
-  dp::Result                                    metrics, fp_metrics;
+  std::vector<CentroidSample> centroid_initial, centroid_gp;
+  dp::Result                  metrics, fp_metrics;
   // Diagnostics describe this solve only, including when a reused output
   // directory previously had warpspace enabled and now has it disabled.
   fs::remove(options.output_dir + "/macro_warp_stability.jsonl");
@@ -4946,7 +5027,7 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
   if (options.macro_magnet.enabled && !movable_macros) {
     throw std::invalid_argument("macro magnet requires movable macros");
   }
-  const bool terminal_active = options.full && options.terminal_legalize && !options.fp_place
+  const bool terminal_active = options.full && !options.optimization_pending && !options.fp_place
                                && options.completed_stage == Placement_stage::final && !options.timing_seed
                                && !options.retain_placement && !options.analyze_colors_only;
   // Optional centroid FP still feeds this macro stage. It must not enable
@@ -5706,7 +5787,7 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
     // The second mixed-size solve must refresh its own RC/criticalities. FP
     // weights alone become stale as macros settle around the frozen centroids.
     // This callback changes only the objective: macro geometry, centroid targets
-    // and graph topology stay owned by the native solver. Resizing remains FP-only.
+    // and graph topology stay unchanged in macro GP. Final GP may repair buffers.
     std::map<std::string, Point> macro_timed_positions;
     unsigned                     macro_checkpoints       = 0;
     bool                         macro_checkpoint_forced = false;
@@ -5714,22 +5795,45 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
       control.terminal_interval = options.macro_pin_interval;
       control.terminal_update   = pin_updater(true);
     }
-    const bool      final_timing = !defer_macro_cells && !movable_macros && !options.fp_place;
-    Timing_feedback final_gp_timing;
-    const char*     timing_stage          = final_timing ? "final" : "macro";
-    bool            legal_timing_snapshot = false;
-    bool            save_macro_gp_timing  = false;
+    const bool        final_timing = !defer_macro_cells && !movable_macros && !options.fp_place;
+    Timing_feedback   final_gp_timing, trial_gp_timing;
+    Gp_buffer_history gp_buffer_history;
+    const bool        gp_repair                   = final_timing && options.gp_resize && control.max_iterations > 0;
+    bool              final_gp_timing_started     = false;
+    int               last_final_timing_iteration = -1;
+    bool              trial_scoring               = false;
+    const char*       timing_stage                = final_timing ? "final" : "macro";
+    bool              legal_timing_snapshot       = false;
+    bool              save_macro_gp_timing        = false;
     if ((movable_macros || final_timing || defer_macro_cells) && options.fp_evaluate
-        && (options.macro_timing_interval > 0 || (defer_macro_cells && options.after_stage))) {
-      control.checkpoint_interval      = options.macro_timing_interval;
-      control.checkpoint_final         = true;
+        && (options.macro_timing_interval > 0 || gp_repair || (defer_macro_cells && options.after_stage))) {
+      control.checkpoint_interval = gp_repair && options.macro_timing_interval == 0 ? 50 : options.macro_timing_interval;
+      control.checkpoint_final    = true;
+      control.checkpoint_start    = final_timing ? options.final_timing_start : 0;
+      if (final_timing && control.checkpoint_interval > 0) {
+        // Do not converge into final timing before completing the warm-up,
+        // except when the user explicitly requested a shorter diagnostic run.
+        control.min_iterations = std::max(control.min_iterations, std::min(control.max_iterations, options.final_timing_start));
+      }
       control.checkpoint_after_density = options.fp_timing_after_density || (final_timing && options.final_independent_timing);
       control.checkpoint_observer      = [&](const dp::GpCheckpointSample& sample) { macro_checkpoint_forced = sample.forced; };
       control.checkpoint               = [&](const dp::Design& physical, int iteration) {
-        const auto   started  = std::chrono::steady_clock::now();
-        const bool   final    = macro_checkpoint_forced || iteration == control.max_iterations;
+        const auto started = std::chrono::steady_clock::now();
+        const bool final   = macro_checkpoint_forced || iteration == control.max_iterations;
+        if (final_timing && options.final_timing_schedule == "late" && !trial_scoring && !final
+            && last_final_timing_iteration >= 0) {
+          // Start with sparse timing after warm-up, then increase cadence in
+          // the last half/quarter. Forced/final scoring is always fresh.
+          const double timing_progress
+              = double(iteration - options.final_timing_start) / std::max(1, control.max_iterations - options.final_timing_start);
+          const int multiple = timing_progress < .5 ? 4 : timing_progress < .75 ? 2 : 1;
+          if (int64_t(iteration) - last_final_timing_iteration < int64_t(control.checkpoint_interval) * multiple) {
+            return dp::GpUpdate{};
+          }
+        }
         const double movement = checkpoint_movement(physical, v.cells, macro_timed_positions, options.bins);
-        if (defer_timing_checkpoint(options, macro_checkpoints, final, iteration, control.max_iterations, movement)) {
+        if (!trial_scoring
+            && defer_timing_checkpoint(options, macro_checkpoints, final, iteration, control.max_iterations, movement)) {
           return dp::GpUpdate{};
         }
         auto view   = v;
@@ -5767,11 +5871,65 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
         for (const auto& t : view.fp.terminals) {
           checkpoint.parasitics->terminals.push_back({t.name, t.x, t.y});
         }
-        const auto timing = prects_data_timing(options.fp_evaluate(checkpoint), v.ignored);
-        final_gp_timing   = timing;
+        // Propagation belongs to untimed GP. Do not defer STA to finish jumps.
+        final_gp_timing_started |= final_timing;
+        auto timing              = prects_data_timing(options.fp_evaluate(checkpoint), v.ignored);
+        if (trial_scoring) {
+          trial_gp_timing = timing;
+          return dp::GpUpdate{};  // Losing branches never refresh shared weights or timing history.
+        }
+        dp::GpUpdate topology_update;
+        topology_update.stop_movable_updates = final_gp_timing_started;
+        // Only the native optimizer consumes replacements. A/B scoring and
+        // pre/post-legalization STA callbacks must never mutate connectivity.
+        if (gp_repair && !legal_timing_snapshot && !final && iteration > 0) {
+          const auto baseline          = view;
+          const auto baseline_owner    = result.fp_library;
+          checkpoint.fp_buffer_origins = result.fp_buffer_origins;
+          const auto refresh           = [&](Result& state, Gp_refresh kind) {
+            refresh_floorplan_view(view, baseline, state, tech, options.unknown_const_zero);
+            if (kind == Gp_refresh::restore) {
+              return;  // Accepted RC and pin locations already describe this view.
+            }
+            state.pin_locations.clear();
+            state.parasitics = estimate_rc(view, tech, rc_options, state.pin_locations);
+            for (const auto& c : view.cells) {
+              state.parasitics->cells.push_back({c.name,
+                                                 c.place.x,
+                                                 c.place.y,
+                                                 static_cast<unsigned>(c.place.orientation),
+                                                 c.macro,
+                                                 c.place.width,
+                                                 c.place.height});
+            }
+            for (const auto& t : view.fp.terminals) {
+              state.parasitics->terminals.push_back({t.name, t.x, t.y});
+            }
+          };
+          const auto evaluate = [&](const Result& state) { return prects_data_timing(options.fp_evaluate(state), view.ignored); };
+          const auto repaired = repair_gp_buffers(checkpoint, options, timing, evaluate, refresh, gp_buffer_history);
+          timing              = repaired.timing;
+          std::ofstream(options.output_dir + "/gp_buffer_repair_" + std::to_string(iteration) + ".json") << repaired.report;
+          if (repaired.repair_accepted) {
+            result.graph             = checkpoint.graph;
+            result.fp_library        = checkpoint.fp_library;
+            result.fp_buffer_origins = checkpoint.fp_buffer_origins;
+            for (const auto& c : view.cells) {
+              const auto old = baseline.cell.find(c.name);
+              topology_update.previous_node.push_back(old == baseline.cell.end() ? -1 : int(old->second));
+            }
+            for (size_t i = 0; i < view.fp.terminals.size(); ++i) {
+              topology_update.previous_node.push_back(baseline.cells.size() + i);
+            }
+            v                           = view;
+            topology_update.replacement = v.design;
+          }
+        }
+        final_gp_timing             = timing;
+        last_final_timing_iteration = iteration;
         refresh_timing_weights(checkpoint, options, timing);
-        v.weights = checkpoint.net_weights;
-        dp::GpUpdate update;
+        v.weights           = checkpoint.net_weights;
+        dp::GpUpdate update = std::move(topology_update);
         for (const auto& driver : v.drivers) {
           const auto name = driver.instance == "PIN" ? driver.pin : driver.instance + ":" + driver.pin;
           update.net_weights.push_back(v.weights.contains(name) ? v.weights.at(name) : 1.);
@@ -5781,7 +5939,7 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
         }
         macro_timed_positions.clear();
         for (size_t i = 0; i < v.cells.size(); ++i) {
-          macro_timed_positions.emplace(v.cells[i].name, Point{physical.node_x[i], physical.node_y[i]});
+          macro_timed_positions.emplace(v.cells[i].name, Point{view.cells[i].place.x, view.cells[i].place.y});
         }
         ++macro_checkpoints;
         std::ofstream trace(options.output_dir + "/" + timing_stage + "_timing.jsonl",
@@ -5838,7 +5996,123 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
         if (!weights_file) {
           throw std::runtime_error("cannot write placement weight report");
         }
+        if (update.replacement) {
+          update.replacement->net_weights = std::move(update.net_weights);
+          v.design.net_weights            = update.replacement->net_weights;
+        }
         return update;
+      };
+    }
+    if (final_timing && options.gp_search.enabled) {
+      if (!control.checkpoint || options.boundarypins.enabled || options.busorder.enabled || options.cell_jump.depth > 1) {
+        throw std::invalid_argument("gp_ab requires timing feedback and fixed terminals, with cell_jump at most one");
+      }
+      control.gp_search    = options.gp_search;
+      control.trial_timing = [&](const dp::Design& physical) {
+        // The timer owns mutable incremental caches. Score serially, restore
+        // host graph placements, and leave net weights/normal checkpoints alone.
+        std::vector<Ann_place> saved;
+        saved.reserve(v.cells.size());
+        for (const auto& c : v.cells) {
+          saved.push_back(c.node.attr(attrs::place).get());
+        }
+        const auto restore = [&] {
+          trial_scoring = false;
+          for (size_t i = 0; i < v.cells.size(); ++i) {
+            v.cells[i].node.attr(attrs::place).set(saved[i]);
+          }
+        };
+        trial_scoring = true;
+        try {
+          control.checkpoint(physical, -1);
+        } catch (...) {
+          restore();
+          throw;
+        }
+        restore();
+        if (!trial_gp_timing.wns || !trial_gp_timing.tns || !std::isfinite(*trial_gp_timing.wns)
+            || !std::isfinite(*trial_gp_timing.tns) || !(trial_gp_timing.time_unit_ps > 0)) {
+          throw std::runtime_error("gp_ab requires finite WNS/TNS and a timing unit for every trial");
+        }
+        const double ns = trial_gp_timing.time_unit_ps / 1000.;
+        return std::pair{*trial_gp_timing.wns * ns, *trial_gp_timing.tns * ns};
+      };
+      control.trial_observer = [&](const dp::GpTrialSample& sample) {
+        rapidjson::StringBuffer                    buffer;
+        rapidjson::Writer<rapidjson::StringBuffer> json(buffer);
+        json.StartObject();
+        json.Key("iteration");
+        json.Int(sample.iteration);
+        json.Key("steps");
+        json.Int(sample.steps);
+        json.Key("round");
+        json.Int(sample.round);
+        json.Key("parameter");
+        json.String(sample.adjusting_fillers ? "filler_charge" : "local_density_weight");
+        json.Key("selected");
+        json.Int(sample.selected);
+        json.Key("reason");
+        json.String(sample.reason.c_str());
+        json.Key("priority");
+        json.String("rsmt_rudy,wns,hpwl,tns");
+        json.Key("relative_tie_bands");
+        json.StartArray();
+        for (double t : {options.gp_search.route_tolerance,
+                         options.gp_search.timing_tolerance,
+                         options.gp_search.hpwl_tolerance,
+                         options.gp_search.timing_tolerance}) {
+          json.Double(t);
+        }
+        json.EndArray();
+        const auto score = [&](const dp::GpTrialScore& q) {
+          json.StartObject();
+          json.Key("rsmt_rudy_overflow");
+          json.Double(q.route_overflow);
+          json.Key("wns_ns");
+          json.Double(q.wns);
+          json.Key("hpwl_um");
+          json.Double(q.hpwl / tech.dbu);
+          json.Key("tns_ns");
+          json.Double(q.tns);
+          json.Key("physical_overflow");
+          json.Double(q.physical_overflow);
+          json.Key("route_unroutable_nets");
+          json.Int(q.route_unroutable_nets);
+          json.Key("route_blocked_pins");
+          json.Int(q.route_blocked_pins);
+          json.Key("route_measured_nets");
+          json.Int(q.route_measured_nets);
+          json.Key("route_congestion_overflow");
+          json.Double(q.route_congestion_overflow);
+          json.Key("route_peak_utilization");
+          json.Double(q.route_peak_utilization);
+          json.Key("route_detour_wirelength_um");
+          json.Double(q.route_detour_wirelength / tech.dbu);
+          json.EndObject();
+        };
+        json.Key("parent");
+        score(sample.before);
+        json.Key("candidates");
+        json.StartArray();
+        for (size_t i = 0; i < sample.settings.size(); ++i) {
+          json.StartObject();
+          json.Key("filler_charge");
+          json.Double(sample.settings[i].filler_charge);
+          json.Key("local_density_weight");
+          json.Double(sample.settings[i].local_weight);
+          json.Key("selected");
+          json.Bool(i == size_t(sample.selected));
+          json.Key("score");
+          score(sample.scores[i]);
+          json.EndObject();
+        }
+        json.EndArray();
+        json.EndObject();
+        std::ofstream trace(options.output_dir + "/gp_ab.jsonl", sample.round ? std::ios::app : std::ios::trunc);
+        trace << buffer.GetString() << '\n';
+        if (!trace) {
+          throw std::runtime_error("cannot write GP A/B trial trace");
+        }
       };
     }
     if (defer_macro_cells && options.after_stage && control.checkpoint) {
@@ -6161,6 +6435,115 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
     // receive zero here because their physical macros are fixed.
     control.filler_macro_fraction = movable_macros ? options.macro_filler_fraction : 0;
     control.filler_cell_space     = movable_macros && options.macro_fill_cell_space;
+    if (final_timing && (options.macro_transparency.enabled() || options.vanished_memory)) {
+      control.vanished_memory             = options.vanished_memory;
+      control.vanished_memory_local_floor = options.vanished_memory_local_floor;
+      control.macro_transparency          = options.macro_transparency;
+      const auto prior_observer           = control.observer;
+      const int  prior_interval           = control.observer_interval;
+      const int  snapshot_start
+          = (options.macro_transparency.always || options.vanished_memory) ? 0 : options.macro_transparency.warmup;
+      const auto cycle_end = (options.macro_transparency.always || options.vanished_memory)
+                                 ? std::int64_t(control.max_iterations)
+                                 : std::int64_t(options.macro_transparency.warmup)
+                                       + 2 * std::int64_t(options.macro_transparency.period) * options.macro_transparency.cycles;
+      fs::create_directories(options.output_dir + "/macro_transparency");
+      std::ofstream nodes(options.output_dir + "/macro_transparency/nodes.tsv");
+      nodes << "index\tname\tx_dbu\ty_dbu\twidth_dbu\theight_dbu\tmovable\tmacro\n";
+      for (size_t i = 0; i < v.cells.size(); ++i) {
+        nodes << std::setprecision(17) << i << '\t' << v.cells[i].name << '\t' << v.design.node_x[i] << '\t' << v.design.node_y[i]
+              << '\t' << v.design.node_size_x[i] << '\t' << v.design.node_size_y[i] << '\t' << (i < size_t(v.design.num_movable))
+              << '\t' << unsigned(v.design.node_macro[i]) << '\n';
+      }
+      if (!nodes) {
+        throw std::runtime_error("cannot write macro transparency node map");
+      }
+      control.observer_interval = std::gcd(prior_interval, options.macro_transparency.period);
+      if (snapshot_start > 0) {
+        control.observer_interval = std::gcd(control.observer_interval, snapshot_start);
+      }
+      control.observer = [&, prior_observer, prior_interval, cycle_end, snapshot_start](const dp::Design&  physical,
+                                                                                        dp::PlacementStage stage,
+                                                                                        int                iteration) {
+        if (prior_observer
+            && (stage != dp::PlacementStage::global_placement || iteration % prior_interval == 0
+                || iteration == control.max_iterations)) {
+          prior_observer(physical, stage, iteration);
+        }
+        if (stage != dp::PlacementStage::global_placement || iteration < snapshot_start || iteration > cycle_end
+            || (iteration - snapshot_start) % options.macro_transparency.period) {
+          return;
+        }
+        // Local diagnostic format: native-endian doubles, all movable x then y;
+        // node order and physical sizes are recorded once in nodes.tsv.
+        std::ofstream positions(options.output_dir + "/macro_transparency/iteration" + std::to_string(iteration) + ".bin",
+                                std::ios::binary);
+        const auto    bytes = std::streamsize(physical.num_movable) * sizeof(double);
+        positions.write(reinterpret_cast<const char*>(physical.node_x.data()), bytes);
+        positions.write(reinterpret_cast<const char*>(physical.node_y.data()), bytes);
+        if (!positions) {
+          throw std::runtime_error("cannot write macro transparency positions");
+        }
+      };
+    }
+    std::optional<Cell_jump> cell_jump;
+    if (final_timing && options.cell_jump.depth > 1) {
+      std::vector<int> jump_macros;
+      for (int i = v.design.num_movable; i < int(v.cells.size()); ++i) {
+        if (v.design.node_macro[i] && !v.cells[i].name.starts_with("__lhd_frame_mask_")) {
+          jump_macros.push_back(i);
+        }
+      }
+      cell_jump.emplace(options.cell_jump, std::move(jump_macros));
+      control.movable_interval = std::gcd(options.cell_jump.settle, options.cell_jump.interval);
+      if (!control.checkpoint) {
+        control.min_iterations = std::max(control.min_iterations,
+                                          int(options.cell_jump.settle + (options.cell_jump.depth - 2) * options.cell_jump.interval
+                                              + std::max(options.cell_jump.interval, options.cell_jump.fix_period + 1)));
+        if (control.min_iterations > control.max_iterations) {
+          throw std::invalid_argument("cell_jump iteration budget must include the requested depth and settling interval");
+        }
+      }
+      control.movable_update = [&](const dp::Design& snapshot, int iteration) {
+        if (final_gp_timing_started) {
+          return std::vector<dp::MovablePosition>{};
+        }
+        const auto previous_samples = cell_jump->samples().size();
+        auto       moves            = cell_jump->update(snapshot, iteration);
+        if (cell_jump->samples().size() != previous_samples) {
+          const auto& s = cell_jump->samples().back();
+          fs::create_directories(options.output_dir);
+          std::ofstream report(options.output_dir + "/cell_jump.jsonl", previous_samples ? std::ios::app : std::ios::trunc);
+          report << std::format(
+              R"({{"iteration":{},"depth":{},"roots":{},"candidates":{},"crossing_cells":{},"moved":{},"unavailable":{},"crossing_edges_before":{},"crossing_edges_after":{},"total_displacement_um":{},"maximum_displacement_um":{}}})",
+              s.iteration,
+              s.depth,
+              s.roots,
+              s.candidates,
+              s.crossing_cells,
+              s.moved,
+              s.unavailable,
+              s.crossing_edges_before,
+              s.crossing_edges_after,
+              s.total_displacement / tech.dbu,
+              s.maximum_displacement / tech.dbu)
+                 << '\n';
+          std::ofstream detail(options.output_dir + "/cell_jump_moves.tsv", previous_samples ? std::ios::app : std::ios::trunc);
+          if (!previous_samples) {
+            detail << "iteration\tdepth\tcell\told_x_dbu\told_y_dbu\tx_dbu\ty_dbu\tfix_period\n";
+          }
+          for (const auto& move : moves) {
+            detail << std::setprecision(17) << iteration << '\t' << s.depth << '\t' << v.cells[move.node].name << '\t'
+                   << snapshot.node_x[move.node] << '\t' << snapshot.node_y[move.node] << '\t' << move.x << '\t' << move.y << '\t'
+                   << move.fix_iterations << '\n';
+          }
+          if (!report || !detail) {
+            throw std::runtime_error("cannot write cell_jump diagnostics");
+          }
+        }
+        return moves;
+      };
+    }
     std::optional<Macro_warp> macro_warp;
     if (options.macro_warp.enabled && movable_macros && !warp_memories(v.design).empty()) {
       write_warp_nodes();
@@ -7593,6 +7976,12 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
       json.Double(s.model_density);
       json.Key("filler_charge_scale");
       json.Double(s.filler_charge_scale);
+      json.Key("macro_opacity");
+      json.Double(s.macro_opacity);
+      json.Key("macro_exclusion_scale");
+      json.Double(s.macro_exclusion_scale);
+      json.Key("local_density_weight");
+      json.Double(s.local_density_weight);
       json.Key("macro_overlap_pairs");
       json.Uint64(s.macro_overlaps);
       json.Key("macro_stack_pairs");
@@ -8190,6 +8579,18 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
 }
 
 Result place(hhds::Graph& source, hhds::GraphLibrary& library, const Options& requested) {
+  if (requested.gp_search.enabled && requested.gp_resize) {
+    throw std::invalid_argument("gp_ab requires fixed topology; disable gp_resize (post-placement resize remains available)");
+  }
+  if (!std::isfinite(requested.rc_pessimism) || requested.rc_pessimism < 1) {
+    throw std::invalid_argument("rc_pessimism must be finite and at least 1");
+  }
+  if (!std::isfinite(requested.vanished_memory_local_floor) || requested.vanished_memory_local_floor < 0
+      || requested.vanished_memory_local_floor > requested.local_density_weight
+      || (requested.vanished_memory_local_floor != 0 && !requested.vanished_memory)) {
+    throw std::invalid_argument(
+        "vanished_memory_local_floor requires vanished_memory and a value from zero to local_density_weight");
+  }
   if (requested.reset_fanout || requested.repair_reset) {
     throw std::invalid_argument(
         "pre-CTS clock/reset sizing and buffering are disabled; reset_fanout must be 0 and repair_reset false");
@@ -8223,9 +8624,7 @@ Result place(hhds::Graph& source, hhds::GraphLibrary& library, const Options& re
     throw std::invalid_argument("invalid final cell iteration budget");
   }
   bool stage_macros = false;
-  if ((options.after_stage || options.cell_halo || options.terminal_legalize || options.macro_magnet.enabled || !options.final_cells
-       || options.busorder.enabled || options.boundarypins.enabled)
-      && !options.fp_place && options.full && !options.timing_seed && !options.cell_stage && !options.lefs.empty()) {
+  if (!options.fp_place && options.full && !options.timing_seed && !options.cell_stage && !options.lefs.empty()) {
     const auto technology = ph::read_lef(options.lefs);
     for (const auto& graph : source.definitions().graphs()) {
       for (auto node : graph->body().nodes()) {

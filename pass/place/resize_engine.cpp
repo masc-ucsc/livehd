@@ -132,8 +132,12 @@ std::shared_ptr<const Library> build_library(const Options& options) {
   std::sort(lib->buffers.begin(), lib->buffers.end(), [](const auto* a, const auto* b) {
     return std::tie(a->area, a->name) < std::tie(b->area, b->name);
   });
-  lib->wire
-      = technology_wire_rc(lib->tech, options.liberty, options.tech_rc_file, options.resistance_ohm_um, options.capacitance_ff_um);
+  lib->wire  = technology_wire_rc(lib->tech,
+                                 options.liberty,
+                                 options.tech_rc_file,
+                                 options.resistance_ohm_um,
+                                 options.capacitance_ff_um,
+                                 options.rc_pessimism);
   lib->r_dbu = (lib->wire.horizontal_r + lib->wire.vertical_r) / 2 / lib->tech.dbu;
   lib->c_dbu = (lib->wire.horizontal_c + lib->wire.vertical_c) / 2 / lib->tech.dbu;
   return lib;
@@ -149,11 +153,12 @@ std::shared_ptr<const Library> library(const Options& options) {
   for (const auto& p : options.resize_dont_use) {
     key += "|!" + p;
   }
-  key += std::format("|{}|{}|{}|{}",
+  key += std::format("|{}|{}|{}|{}|{}",
                      options.resize_vt_swap,
                      options.repair_reset,
                      options.resistance_ohm_um,
-                     options.capacitance_ff_um);
+                     options.capacitance_ff_um,
+                     options.rc_pessimism);
   std::scoped_lock guard(lock);
   if (const auto it = cache.find(key); it != cache.end()) {
     return it->second;

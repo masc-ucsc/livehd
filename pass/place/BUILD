@@ -9,6 +9,8 @@ filegroup(
         "busorder.cpp",
         "boundary_pins.hpp",
         "busorder.hpp",
+        "cell_jump.cpp",
+        "cell_jump.hpp",
         "density_warp.cpp",
         "density_warp.hpp",
         "warpspace.cpp",
@@ -88,6 +90,7 @@ genrule(
 cc_library(
     name = "place",
     srcs = [
+        "cell_jump.cpp",
         "boundary_pins.cpp",
         "pinalign.cpp",
         "busorder.cpp",
@@ -110,6 +113,7 @@ cc_library(
         "timing_place.cpp",
     ],
     hdrs = [
+        "cell_jump.hpp",
         "boundary_pins.hpp",
         "busorder.hpp",
         "color_centroids.hpp",
@@ -159,6 +163,14 @@ cc_test(
     name = "pinalign_test",
     size = "small",
     srcs = ["pinalign_test.cpp"],
+    copts = COPTS,
+    deps = [":place", "@googletest//:gtest_main"],
+)
+
+cc_test(
+    name = "cell_jump_test",
+    size = "small",
+    srcs = ["cell_jump_test.cpp"],
     copts = COPTS,
     deps = [":place", "@googletest//:gtest_main"],
 )

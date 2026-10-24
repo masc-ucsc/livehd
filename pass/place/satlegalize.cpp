@@ -283,7 +283,7 @@ std::vector<Pair> pairs(const ph::Technology& tech, const ph::Floorplan& fp, con
       continue;
     }
     const auto& net       = fp.nets[n];
-    const bool clock_net = std::any_of(net.connections.begin(), net.connections.end(), [&](const auto& connection) {
+    const bool  clock_net = std::any_of(net.connections.begin(), net.connections.end(), [&](const auto& connection) {
       auto pin = timing.pins.find(connection.instance == "PIN" ? connection.pin : connection.instance + ":" + connection.pin);
       if (pin == timing.pins.end() && connection.instance != "PIN") {
         pin = timing.pins.find(connection.instance + "/" + connection.pin);
@@ -394,9 +394,13 @@ std::vector<Interval> subtract(const std::vector<Interval>& available, const std
   return result;
 }
 ph::Rect obstacle_bounds(const ph::Technology& tech, const ph::Component& cell, const Satlegalize_options& options) {
+  const auto mask = ph::placement_mask(cell, tech);
+  if (mask == ph::Placement_mask::soft) {
+    return {};
+  }
   auto       box   = bounds(cell.place);
   const auto macro = tech.macros.find(cell.macro);
-  if (macro == tech.macros.end() || !macro->second.klass.starts_with("CORE")) {
+  if (mask == ph::Placement_mask::none && (macro == tech.macros.end() || !macro->second.klass.starts_with("CORE"))) {
     box.xl -= options.macro_halo_x_dbu;
     box.xh += options.macro_halo_x_dbu;
     box.yl -= options.macro_halo_y_dbu;
@@ -1034,6 +1038,9 @@ Satlegalize_report satlegalize(const ph::Technology& tech, ph::Floorplan& fp, co
     std::vector<ph::Rect> obstacles;
     std::vector<size_t>   obstruction_indexes;
     for (size_t i = 0; i < fp.components.size(); ++i) {
+      if (ph::placement_mask(fp.components[i], tech) == ph::Placement_mask::soft) {
+        continue;
+      }
       const auto box = advanced ? obstacle_bounds(tech, fp.components[i], options) : bounds(fp.components[i].place);
       if (!intersects(box, domain)) {
         continue;
@@ -1478,7 +1485,7 @@ Satlegalize_report satlegalize(const ph::Technology& tech, ph::Floorplan& fp, co
           }
         }
         const double new_hpwl = hpwl(fp, hpwl_index, &incident_nets);
-        const bool valid = density_valid && new_hpwl <= old_hpwl * (1 + options.boundary_growth) + 1
+        const bool   valid    = density_valid && new_hpwl <= old_hpwl * (1 + options.boundary_growth) + 1
                            && aligned(tech, fp, proposed, fp.components[proposed.first].place, fp.components[proposed.second].place)
                            && satlegalize_preserved(tech, fp, report);
         if (!valid) {

@@ -43,13 +43,36 @@ Eprp_var timing_options(const std::string& liberty, const std::string& sdc, cons
   return options;
 }
 pl::Timing_feedback evaluate_timing(const pl::Result& placed, livehd::opentimer::Physical_session& session, unsigned& serial,
-                                    const ph::Technology* placement_tech = nullptr) {
+                                    const ph::Technology* placement_tech = nullptr, const std::string& profile_path = {}) {
+  const auto started = std::chrono::steady_clock::now();
+  const auto before  = session.statistics();
   ++serial;
+  pl::Timing_feedback result;
   if (placement_tech) {
     const auto controls = pl::prects_networks(*placement_tech, placed.floorplan, placed.prects);
-    return pl::prects_data_timing(session.evaluate(placed.graph, placed.parasitics, controls.timing_cuts), controls);
+    result              = pl::prects_data_timing(session.evaluate(placed.graph, placed.parasitics, controls.timing_cuts), controls);
+  } else {
+    result = session.evaluate(placed.graph, placed.parasitics);
   }
-  return session.evaluate(placed.graph, placed.parasitics);
+  if (!profile_path.empty()) {
+    const auto&   after = session.statistics();
+    std::ofstream out(profile_path, std::ios::app);
+    out << "{\"evaluation\":" << serial
+        << ",\"wall_s\":" << std::chrono::duration<double>(std::chrono::steady_clock::now() - started).count()
+        << ",\"engine_s\":" << after.seconds - before.seconds
+        << ",\"validation_s\":" << after.validation_seconds - before.validation_seconds
+        << ",\"reconcile_s\":" << after.reconcile_seconds - before.reconcile_seconds
+        << ",\"exclusions_s\":" << after.exclusions_seconds - before.exclusions_seconds
+        << ",\"propagation_s\":" << after.propagation_seconds - before.propagation_seconds
+        << ",\"feedback_s\":" << after.feedback_seconds - before.feedback_seconds
+        << ",\"update_calls\":" << after.update_calls - before.update_calls
+        << ",\"updated_rc_nets\":" << after.updated_nets - before.updated_nets << ",\"rc_nets\":" << placed.parasitics->nets.size()
+        << "}\n";
+    if (!out) {
+      throw std::runtime_error("cannot write timing profile");
+    }
+  }
+  return result;
 }
 
 // Import the mapped DEF connectivity directly: no HDL optimization may delete
@@ -275,6 +298,11 @@ int main(int argc, char** argv) {
         value = config[key].GetBool();
       }
     };
+    bool macro_only = false;
+    boolean_option("macro_only", macro_only);
+    if (macro_only && !floorplan_mode) {
+      throw std::invalid_argument("macro_only requires floorplan_place");
+    }
     if (config.HasMember("eco_trace_cells")) {
       if (!config["eco_trace_cells"].IsArray()) {
         throw std::invalid_argument("eco_trace_cells requires an array of exact cell names");
@@ -315,6 +343,7 @@ int main(int argc, char** argv) {
       sizing_forest = scope == "sizing_forest";
     }
     number_option("density", options.density);
+    number_option("rc_pessimism", options.rc_pessimism);
     integer_option("bins", options.bins);
     integer_option("threads", options.threads);
     integer_option("final_iterations", options.final_iterations);
@@ -323,7 +352,34 @@ int main(int argc, char** argv) {
     integer_option("bin_max", options.bin_max);
     boolean_option("auto_bins", options.automatic_bins);
     number_option("local_density_weight", options.local_density_weight);
+    number_option("local_density_target", options.local_density_target);
     integer_option("local_density_bins", options.local_density_bins);
+    boolean_option("gp_ab", options.gp_search.enabled);
+    integer_option("gp_ab_start", options.gp_search.start);
+    integer_option("gp_ab_interval", options.gp_search.interval);
+    integer_option("gp_ab_steps", options.gp_search.steps);
+    integer_option("gp_ab_rounds", options.gp_search.rounds);
+    number_option("gp_ab_filler_step", options.gp_search.filler_step);
+    number_option("gp_ab_local_step", options.gp_search.local_step);
+    if (options.gp_search.enabled && !(config.HasMember("cell_place") && config["cell_place"].GetBool())) {
+      throw std::invalid_argument("gp_ab requires final cell_place");
+    }
+    boolean_option("vanished_memory", options.vanished_memory);
+    number_option("vanished_memory_local_floor", options.vanished_memory_local_floor);
+    if (options.vanished_memory_local_floor != 0 && !options.vanished_memory) {
+      throw std::invalid_argument("vanished_memory_local_floor requires vanished_memory");
+    }
+    boolean_option("macro_transparency_always", options.macro_transparency.always);
+    integer_option("macro_transparency_cycles", options.macro_transparency.cycles);
+    integer_option("macro_transparency_warmup", options.macro_transparency.warmup);
+    integer_option("macro_transparency_period", options.macro_transparency.period);
+    if (options.macro_transparency.cycles < 0 || options.macro_transparency.warmup < 0 || options.macro_transparency.period <= 0) {
+      throw std::invalid_argument("invalid macro transparency schedule");
+    }
+    if ((options.macro_transparency.enabled() || options.vanished_memory)
+        && !(config.HasMember("cell_place") && config["cell_place"].GetBool())) {
+      throw std::invalid_argument("macro transparency requires final cell_place");
+    }
     number_option("local_density_range", options.local_density_range);
     number_option("local_density_jitter", options.local_density_jitter);
     boolean_option("virtual_fillers", options.virtual_fillers);
@@ -355,7 +411,9 @@ int main(int argc, char** argv) {
       options.timing_max_weight = config["timing_max_weight"].GetDouble();
     }
     boolean_option("satlegalize", options.satlegalize);
-    boolean_option("terminal_legalize", options.terminal_legalize);
+    if (config.HasMember("terminal_legalize")) {
+      throw std::invalid_argument("terminal_legalize was removed; final legalization is mandatory and resize is independent");
+    }
     boolean_option("boundarypins", options.boundarypins.enabled);
     boolean_option("boundarypins_split", options.boundarypins.split);
     boolean_option("boundarypins_order", options.boundarypins.order);
@@ -388,6 +446,19 @@ int main(int argc, char** argv) {
     };
     auto& sat_options = options.satlegalize_options;
     sat_limit("boundarypins_iterations", options.boundarypins.iterations);
+    sat_limit("cell_jump", options.cell_jump.depth);
+    sat_limit("cell_jump_settle", options.cell_jump.settle);
+    sat_limit("cell_jump_interval", options.cell_jump.interval);
+    sat_limit("cell_jump_fix_period", options.cell_jump.fix_period);
+    if (options.cell_jump.depth > 4 || !options.cell_jump.settle || !options.cell_jump.interval) {
+      throw std::invalid_argument("cell_jump requires depth 0..4 and positive settle/interval");
+    }
+    if (options.cell_jump.depth > 1
+        && (!(config.HasMember("cell_place") && config["cell_place"].GetBool())
+            || !(config.HasMember("restart_seed_def") && config["restart_seed_def"].GetBool()))) {
+      throw std::invalid_argument(
+          "experimental cell_jump propagation requires final cell_place and a distance-one restart_seed_def");
+    }
     sat_limit("busorder_iterations", options.busorder.iterations);
     sat_limit("busorder_refresh", options.busorder.refresh);
     sat_limit("busorder_max_cells", options.busorder.max_cells);
@@ -466,6 +537,10 @@ int main(int argc, char** argv) {
     }
     if (config.HasMember("routability_macro_range")) {
       options.routability_macro_range = config["routability_macro_range"].GetDouble();
+    }
+    integer_option("final_timing_start", options.final_timing_start);
+    if (config.HasMember("final_timing_schedule")) {
+      options.final_timing_schedule = text("final_timing_schedule");
     }
     if (config.HasMember("macro_timing_interval")) {
       options.macro_timing_interval = config["macro_timing_interval"].GetInt();
@@ -682,7 +757,7 @@ int main(int argc, char** argv) {
         boolean_option("fp_snap", options.fp_snap_enabled);
         // Request the production macro-to-cell handoff even when the
         // diagnostic disables centroid FP. No resynthesis restart is needed.
-        options.after_stage                                         = [](pl::Placement_stage, const pl::Result&) { return false; };
+        options.after_stage = [](pl::Placement_stage, const pl::Result&) { return false; };
         // Diagnostic comparisons use the same mapped inputs/timing policy
         // while selecting the production FP/color switches independently.
         if (config.HasMember("macro_align_global")) {
@@ -782,6 +857,17 @@ int main(int argc, char** argv) {
           options.fp_resize = config["fp_resize"].GetBool();
         }
       }
+      if (macro_only) {
+        if (options.fp_place || options.final_cells || options.cell_halo || options.gp_search.enabled || options.vanished_memory
+            || options.macro_transparency.enabled() || options.cell_jump.depth) {
+          throw std::invalid_argument("macro_only requires fp_place=false, final_cells=false and no final-cell controls");
+        }
+        // Use the production macro stage, then export its legal macro frame.
+        // Physical rows/tapcells can be rebuilt before a separate final solve.
+        options.completed_stage      = pl::Placement_stage::macro;
+        options.macro_legalize_cells = false;
+        options.macro_detailed_place = false;
+      }
       if (!floorplan_mode && options.cell_halo) {
         // This diagnostic mode already supplies the fixed macro frame; only
         // its final cell GP is requested, without another macro-stage solve.
@@ -799,9 +885,11 @@ int main(int argc, char** argv) {
         return 0;
       }
       livehd::opentimer::Physical_session timing_session(timing_options(options.liberty, sdc, top));
-      options.whatif            = &timing_session.whatif();
-      unsigned     serial       = 0;
-      const auto   raw_evaluate = [&](const pl::Result& placed) { return evaluate_timing(placed, timing_session, serial, &tech); };
+      options.whatif          = &timing_session.whatif();
+      unsigned   serial       = 0;
+      const auto raw_evaluate = [&](const pl::Result& placed) {
+        return evaluate_timing(placed, timing_session, serial, &tech, root + "/timing_profile.jsonl");
+      };
       pl::Evaluate evaluate     = raw_evaluate;
       const auto   start        = std::chrono::steady_clock::now();
       auto         seed_options = options;
@@ -825,29 +913,27 @@ int main(int argc, char** argv) {
       if (timing_driven) {
         options.fp_evaluate = raw_evaluate;
       }
-      const auto seeded = std::chrono::steady_clock::now();
-      auto       state  = pl::place(*source, placed_library, options);
-      ph::write_def(state.floorplan, root + "/initial.def");
-      const auto placed         = std::chrono::steady_clock::now();
-      unsigned   virtual_serial = 0;
-      if (config.HasMember("virtual_timing") && config["virtual_timing"].GetBool()) {
-        evaluate = [&](const pl::Result& candidate) {
-          auto virtual_options       = options;
-          virtual_options.output_dir = root + "/virtual_" + std::to_string(virtual_serial++);
-          auto sized                 = pl::repair_buffers(candidate, virtual_options, raw_evaluate, pl::Repair_scope::sizing);
-          std::ofstream(virtual_options.output_dir + "/virtual_sizing.json") << sized.report;
-          auto virtual_result
-              = pl::repair_buffers(std::move(sized.placed), virtual_options, raw_evaluate, pl::Repair_scope::forest);
-          std::ofstream(virtual_options.output_dir + "/virtual_repair.json") << virtual_result.report;
-          // The temporary graph dies here. GP receives timing keyed by original
-          // surviving pins, while masters, buffers and connectivity stay frozen.
-          return raw_evaluate(virtual_result.placed);
-        };
+      const auto seeded            = std::chrono::steady_clock::now();
+      const bool run_resize        = config.HasMember("resize") && config["resize"].GetBool();
+      const auto timing_rounds     = config.HasMember("timing_rounds") ? config["timing_rounds"].GetUint() : 0;
+      options.optimization_pending = run_resize || timing_rounds;
+      if (config.HasMember("virtual_timing")) {
+        throw std::invalid_argument("virtual_timing was removed; use resize with gp_resize for real GP buffer repair");
       }
-      const auto        timing_rounds = config.HasMember("timing_rounds") ? config["timing_rounds"].GetUint() : 0;
-      const bool        run_resize    = !options.terminal_legalize && config.HasMember("resize") && config["resize"].GetBool();
+      options.gp_resize = run_resize && (!config.HasMember("gp_resize") || config["gp_resize"].GetBool());
+      integer_option("gp_buffer_trials", options.gp_buffer_trials);
+      if (config.HasMember("gp_buffer_margin")) {
+        options.gp_buffer_margin = config["gp_buffer_margin"].GetDouble();
+      }
+      if (options.gp_resize) {
+        options.fp_evaluate = raw_evaluate;
+      }
+      auto state = pl::place(*source, placed_library, options);
+      options.restart_seed.reset();
+      ph::write_def(state.floorplan, root + "/initial.def");
+      const auto        placed = std::chrono::steady_clock::now();
       pl::Repair_result refined;
-      if (timing_rounds && !options.terminal_legalize) {
+      if (timing_rounds) {
         refined = pl::timing_place(std::move(state), options, evaluate, timing_rounds);
       } else {
         refined.placed = std::move(state);
@@ -859,6 +945,7 @@ int main(int argc, char** argv) {
       const bool        new_engine = options.resize_engine == "new";
       if (run_resize && new_engine) {
         repaired = pl::resize_placed(std::move(refined.placed), options, evaluate);
+        std::ofstream(root + "/repair.json") << repaired.report;
       } else if (run_resize) {
         sized
             = pl::repair_buffers(std::move(refined.placed), options, evaluate, pl::Repair_scope::sizing, std::move(refined.timing));
@@ -870,8 +957,13 @@ int main(int argc, char** argv) {
             = pl::repair_buffers(std::move(sized.placed), options, evaluate, pl::Repair_scope::design, std::move(sized.timing));
         std::ofstream(root + "/repair.json") << repaired.report;
       }
-      const auto repaired_at    = std::chrono::steady_clock::now();
-      auto&      result         = run_resize ? repaired.placed : refined.placed;
+      const auto        repaired_at = std::chrono::steady_clock::now();
+      auto&             optimized   = run_resize ? repaired.placed : refined.placed;
+      pl::Repair_result finalized;
+      if (options.optimization_pending) {
+        finalized = pl::finalize_placement(optimized, options, raw_evaluate);
+      }
+      auto&      result         = options.optimization_pending ? finalized.placed : optimized;
       const auto final_feedback = raw_evaluate(result);
       pl::refresh_timing_weights(result, options, final_feedback);
       const auto                                 timed_at = std::chrono::steady_clock::now();
@@ -887,10 +979,10 @@ int main(int argc, char** argv) {
         throw std::runtime_error("cannot write net_weights");
       }
       const auto                                 membership = pl::timing_weights(*result.parasitics,
-                                                                                 final_feedback,
-                                                                                 options.timing_fraction,
-                                                                                 options.timing_max_weight,
-                                                                                 options.timing_exponent);
+                                                 final_feedback,
+                                                 options.timing_fraction,
+                                                 options.timing_max_weight,
+                                                 options.timing_exponent);
       rapidjson::StringBuffer                    final_weights_json;
       rapidjson::Writer<rapidjson::StringBuffer> final_weights(final_weights_json);
       final_weights.StartObject();
@@ -1096,7 +1188,7 @@ int main(int argc, char** argv) {
     livehd::opentimer::Physical_session timing_session(timing_options(options.liberty, sdc, top));
     options.whatif      = &timing_session.whatif();
     const auto evaluate = [&](const pl::Result& placed) {
-      return evaluate_timing(placed, timing_session, serial, prects_timing ? &tech : nullptr);
+      return evaluate_timing(placed, timing_session, serial, prects_timing ? &tech : nullptr, root + "/timing_profile.jsonl");
     };
     if (options.retain_placement && (!config.HasMember("export_rc") || config["export_rc"].GetBool())) {
       std::ofstream(root + "/parasitics.json") << ph::serialize_parasitics(*state.parasitics);
@@ -1213,12 +1305,12 @@ int main(int argc, char** argv) {
     const auto sized  = std::chrono::steady_clock::now();
     auto       repair = forest_only ? std::move(sizing)
                                     : pl::repair_buffers(std::move(sizing.placed),
-                                                         options,
-                                                         evaluate,
-                                                         sizing_forest  ? pl::Repair_scope::forest
+                                                   options,
+                                                   evaluate,
+                                                   sizing_forest  ? pl::Repair_scope::forest
                                                          : repair_first ? pl::Repair_scope::sizing
                                                                         : pl::Repair_scope::design,
-                                                         std::move(sizing.timing));
+                                                   std::move(sizing.timing));
     if (!forest_only) {
       std::ofstream(root + (repair_first ? "/resize.json" : "/repair.json")) << repair.report;
     }

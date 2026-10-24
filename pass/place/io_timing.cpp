@@ -55,8 +55,12 @@ std::map<std::string, synth::Io_environment> Io_timing_flow::harvest(const Resul
   std::map<std::string, synth::Io_environment> result;
   const auto                                   modules = regions(*source_);
   const auto                                   tech    = physical::read_lef(options_.lefs);
-  const auto                                   rc
-      = technology_wire_rc(tech, options_.liberty, options_.tech_rc_file, options_.resistance_ohm_um, options_.capacitance_ff_um);
+  const auto                                   rc      = technology_wire_rc(tech,
+                                     options_.liberty,
+                                     options_.tech_rc_file,
+                                     options_.resistance_ohm_um,
+                                     options_.capacitance_ff_um,
+                                     options_.rc_pessimism);
   std::map<std::string, std::set<std::string>> controls;
   auto                                         flops = liberty::scan_dff_cells(options_.liberty);
   for (const auto& c : liberty::scan_async_dff_cells(options_.liberty)) {

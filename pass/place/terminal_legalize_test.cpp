@@ -1148,3 +1148,40 @@ TEST(TerminalLegalize, RemainderWarpKeepsCriticalLocksAndOriginalReport) {
   }
 }
 }  // namespace livehd::placement
+
+namespace livehd::placement {
+TEST(TerminalLegalize, SoftChannelAllowsBufferButHardMasksAndSramRemainBlocked) {
+  Fixture f(20, 4);
+  f.options.bins_x = f.options.bins_y = 1;
+  f.options.padding_sites             = 0;
+  f.options.critical_fraction         = 0;
+  auto& mask                          = f.tech.macros["mask"];
+  mask.klass                          = "BLOCK";
+  mask.width                          = 8;
+  mask.height                         = 4;
+  auto& soft                          = f.tech.macros["soft"];
+  soft.klass                          = "BLOCK";
+  soft.width                          = 4;
+  soft.height                         = 4;
+  const auto buffer                   = f.cell(9, 1);
+  const auto left = f.cell(0, 0, "mask"), middle = f.cell(8, 0, "soft"), right = f.cell(12, 0, "mask");
+  for (auto i : {left, middle, right}) {
+    f.fp.components[i].place.status = physical::Status::FIXED;
+  }
+  f.fp.components[left].name   = "__lhd_frame_mask_hard_0";
+  f.fp.components[middle].name = "__lhd_frame_mask_soft_0";
+  f.fp.components[right].name  = "sram";
+  const auto masks             = f.fp.components;
+  const auto report            = terminal_legalize(f.tech, f.fp, f.timing, f.options);
+  EXPECT_GE(f.fp.components[buffer].place.x, 800);
+  EXPECT_LE(f.fp.components[buffer].place.x + 100, 1200);
+  EXPECT_DOUBLE_EQ(report.bins[0].capacity, 4 * 4 * 10000);
+  for (auto i : {left, middle, right}) {
+    EXPECT_EQ(f.fp.components[i], masks[i]);
+  }
+  auto hard                    = f.fp;
+  hard.components[middle].name = "__lhd_frame_mask_hard_1";
+  EXPECT_THROW(terminal_legalize(f.tech, hard, f.timing, f.options), std::runtime_error);
+}
+
+}  // namespace livehd::placement

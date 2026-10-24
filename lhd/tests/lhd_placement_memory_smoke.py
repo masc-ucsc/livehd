@@ -47,8 +47,7 @@ assert (root/'physical/out.def').is_file()
 warm = synth('warm')
 assert warm['qor']['place']['incremental']['hit'], warm['qor']['place']
 assert warm['qor']['sta']['designs'][0]['max_delay'] == sta['max_delay']
-timed = synth('timed', ['--set', 'synth.place.legalize.terminal=false',
-                       '--set', 'synth.place.timing_driven=true', '--set', 'synth.place.timing_rounds=2'])
+timed = synth('timed', ['--set', 'synth.place.timing_driven=true', '--set', 'synth.place.timing_rounds=2'])
 assert timed['qor']['place']['timing_driven']['initial_timing_source'] == 'post_synthesis_zero_wire'
 resized = synth('resize', ['--set', 'synth.place.resize=true'])
 assert resized['qor']['place']['legal'], resized

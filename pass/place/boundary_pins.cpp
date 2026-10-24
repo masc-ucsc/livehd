@@ -40,6 +40,7 @@ int append_anchor(dp::Design& d, Point p) {
   append(d.node_centroid_color, -1);
   append(d.centroid_node_area, 0.);
   append(d.node_macro, 0);
+  append(d.node_placement_mask, DreamPlace::native::PlacementMask::none);
   append(d.node_align_class, -1);
   append(d.node_snap_class, -1);
   append(d.node_blocked_capacity_h, 0.);
@@ -678,6 +679,16 @@ void Boundary_pins::write() const {
     j.Int(p.rectangle);
     j.Key("cell");
     j.Int(p.cell);
+    j.Key("input_cell_pin");
+    j.Int(p.input_cell_pin);
+    j.Key("output_cell_pin");
+    j.Int(p.output_cell_pin);
+    if (p.cell >= 0) {
+      j.Key("input_target_dbu");
+      j.Double(p.input_target);
+      j.Key("output_target_dbu");
+      j.Double(p.output_target);
+    }
     j.Key("outcome");
     j.String(p.outcome.c_str());
     j.EndObject();

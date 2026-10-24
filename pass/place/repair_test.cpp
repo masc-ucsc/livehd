@@ -31,7 +31,7 @@ protected:
   void                                                 SetUp() override {
     // Repair fixtures use a controlled plain frame, independent of the
     // production floorplan/macro pipeline and its density policy.
-    options.terminal_legalize = false;  // Exercise the post-placement repair API.
+    options.optimization_pending = true;  // Exercise the post-placement repair API.
     options.fp_place = options.final_cells = options.macro_snap = false;
     options.scale_macro_density = options.exact_macro_density = options.adaptive_density = options.routability = false;
     options.macro_overlap_weight = options.macro_jitter = 0;
@@ -43,6 +43,7 @@ protected:
     options.liberty                 = "inou/lefdef/tests/data/sky130hd.lib";
     options.iterations              = 10;
     options.macro_timing_interval   = 0;  // Existing repair fixtures isolate FP or post-placement repair.
+    options.final_timing_start      = 0;  // Short fixture: exercise in-loop timing.
     options.bins                    = 8;
     options.output_dir
         = std::string(std::getenv("TEST_TMPDIR")) + "/" + ::testing::UnitTest::GetInstance()->current_test_info()->name();
@@ -172,6 +173,167 @@ protected:
     }
   }
 };
+TEST_F(Buffer_repair, LateTimingScheduleKeepsWarmupAndIncreasesFrequencyNearEnd) {
+  auto root = gate("sky130_fd_sc_hd__buf_1", "root", graph->get_input_pin("a"));
+  graph->get_output_pin("y").connect_driver(gate("sky130_fd_sc_hd__inv_1", "sink", root));
+  options.virtual_fillers = false;
+  options.iterations = options.min_iterations = 12;
+  options.post_density_factor                 = 0;
+  options.final_timing_start                  = 2;
+  options.macro_timing_interval               = 1;
+  options.final_timing_schedule               = "late";
+  options.fp_evaluate                         = [&](const Result& state) { return timing(state); };
+  const auto    placed                        = place(*graph, flat, options);
+  std::ifstream trace(options.output_dir + "/final_timing.jsonl");
+  std::set<int> iterations;
+  for (std::string line; std::getline(trace, line);) {
+    rapidjson::Document d;
+    d.Parse(line.c_str());
+    ASSERT_FALSE(d.HasParseError());
+    iterations.insert(d["iteration"].GetInt());
+  }
+  EXPECT_EQ(iterations, (std::set<int>{2, 6, 8, 10, 11, 12}));
+  EXPECT_NO_THROW(timing(placed));
+  equivalent(placed);
+}
+TEST_F(Buffer_repair, FinalGpBuffersAfterFirstCheckpointAndPreservesExistingChains) {
+  auto root = gate("sky130_fd_sc_hd__buf_1", "root", graph->get_input_pin("a"));
+  for (unsigned i = 0; i < 6; ++i) {
+    const auto name = i ? "y" + std::to_string(i) : std::string("y");
+    if (i) {
+      graph->get_io()->add_output(name, i);
+      graph->get_io()->set_bits(name, 1);
+    }
+    graph->get_output_pin(name).connect_driver(gate("sky130_fd_sc_hd__inv_1", "sink" + std::to_string(i), root));
+  }
+  options.gp_resize       = true;
+  options.virtual_fillers = false;
+  // Depth two runs at iteration one. Timing starts at two, so depths three
+  // and four must not inspect the subsequently repaired topology.
+  options.cell_jump       = {.depth = 4, .settle = 1, .interval = 2, .fix_period = 1};
+  options.core = options.die    = {0, 0, 500, 50};
+  options.resistance_ohm_um     = 1000;
+  options.capacitance_ff_um     = 10;
+  options.macro_timing_interval = 2;
+  options.final_timing_start    = 0;  // Short fixture: exercise in-loop timing.
+  options.iterations = options.min_iterations = 12;
+  options.post_density_factor                 = 0;
+  options.fp_evaluate                         = [&](const Result& state) {
+    auto score          = timing(state);  // Check real RC provenance on every trial.
+    options.whatif      = &timing_session->whatif();
+    const auto inserted = count(state, "__place_rebuffer");
+    score.delay         = inserted ? 1 : 2;
+    score.area          = inserted ? 0 : 100;
+    score.wns = score.tns   = -1;
+    score.hold_wns          = 0;
+    score.violations        = 0;
+    score.electrical_excess = 0;
+    for (auto& [name, pin] : score.pins) {
+      (void)name;
+      pin.slack = -.1 * options.whatif->clock_period() / score.time_unit_ps;
+    }
+    return score;
+  };
+  const auto    placed = place(*graph, flat, options);
+  std::ifstream jumps(options.output_dir + "/cell_jump.jsonl");
+  std::string   jump_line;
+  ASSERT_TRUE(std::getline(jumps, jump_line));
+  rapidjson::Document jump;
+  jump.Parse(jump_line.c_str());
+  ASSERT_FALSE(jump.HasParseError());
+  EXPECT_EQ(jump["iteration"].GetInt(), 1);
+  EXPECT_EQ(jump["depth"].GetUint(), 2U);
+  EXPECT_FALSE(std::getline(jumps, jump_line));
+  EXPECT_GT(count(placed, "__place_rebuffer"), 0U);
+  EXPECT_EQ(count(placed, "root"), 1U);
+  equivalent(placed);
+  check_legality(physical::read_lef(options.lefs), placed.floorplan);
+  EXPECT_EQ(count(Result{.graph = graph}, "__place_rebuffer"), 0U);
+  std::ifstream       first(options.output_dir + "/gp_buffer_repair_2.json");
+  const std::string   report{std::istreambuf_iterator<char>(first), {}};
+  rapidjson::Document d;
+  d.Parse(report.c_str());
+  ASSERT_FALSE(d.HasParseError()) << report;
+  EXPECT_TRUE(d["measurement_only"].GetBool());
+  std::ifstream     second(options.output_dir + "/gp_buffer_repair_4.json");
+  const std::string changes{std::istreambuf_iterator<char>(second), {}};
+  d.Parse(changes.c_str());
+  ASSERT_FALSE(d.HasParseError());
+  EXPECT_EQ(d["checkpoint"].GetUint(), 2U);
+  EXPECT_STREQ(d["scale"].GetString(), "shortest_clock_period");
+  EXPECT_DOUBLE_EQ(d["margin_ps"].GetDouble(), .01 * d["scale_ps"].GetDouble());
+  ASSERT_FALSE(d["trials"].Empty());
+  EXPECT_TRUE(d["trials"][0]["accepted"].GetBool()) << changes;
+  // The edit cannot immediately be undone/rebuilt at the next checkpoint.
+  std::ifstream     third(options.output_dir + "/gp_buffer_repair_6.json");
+  const std::string cooldown{std::istreambuf_iterator<char>(third), {}};
+  d.Parse(cooldown.c_str());
+  ASSERT_FALSE(d.HasParseError());
+  for (const auto& trial : d["trials"].GetArray()) {
+    EXPECT_FALSE(trial["accepted"].GetBool());
+  }
+}
+TEST_F(Buffer_repair, FinalGpRemovalRequiresMarginAndTimingAcceptanceAndCanBeDisabled) {
+  auto b = gate("sky130_fd_sc_hd__buf_1", "buffer", graph->get_input_pin("a"));
+  graph->get_output_pin("y").connect_driver(gate("sky130_fd_sc_hd__inv_1", "sink", b));
+  options.macro_timing_interval = 2;
+  options.final_timing_start    = 0;  // Short fixture: exercise in-loop timing.
+  options.iterations = options.min_iterations = 8;
+  options.post_density_factor                 = 0;
+  const auto directory                        = options.output_dir;
+  for (unsigned mode = 0; mode < 4; ++mode) {
+    options.output_dir       = directory + "/" + std::to_string(mode);
+    options.gp_resize        = mode != 0;
+    options.gp_buffer_trials = mode == 2 ? 1 : 4;
+    // Timing precedes the default jump schedule, even with GP repair disabled.
+    // The short run need not budget for depths that timing will cancel.
+    options.cell_jump.depth  = 4;
+    options.fp_evaluate      = [&](const Result& state) {
+      auto score           = timing(state);
+      options.whatif       = &timing_session->whatif();
+      const double period  = options.whatif->clock_period();
+      const bool   present = count(state, "buffer");
+      score.delay          = present ? 2 : mode == 2 ? 3 : 1;
+      score.area           = present ? 2 : 1;
+      score.wns = score.tns   = 0;
+      score.hold_wns          = 0;
+      score.violations        = 0;
+      score.electrical_excess = 0;
+      for (auto& [name, pin] : score.pins) {
+        (void)name;
+        pin.slack   = (mode == 1 ? .005 : .05) * period / score.time_unit_ps;
+        pin.load_ff = 0;
+        pin.slew    = 0;
+      }
+      return score;
+    };
+    hhds::GraphLibrary owner;
+    const auto         placed = place(*graph, owner, options);
+    EXPECT_FALSE(std::filesystem::exists(options.output_dir + "/cell_jump.jsonl"));
+    EXPECT_EQ(count(placed, "buffer"), mode == 3 ? 0U : 1U) << mode;
+    if (mode == 2) {
+      // A rejected removal must preserve the accepted circuit even when the
+      // budget ends immediately, with no later trial to rebuild its RC.
+      std::ifstream       checkpoint(options.output_dir + "/gp_buffer_repair_4.json");
+      const std::string   report{std::istreambuf_iterator<char>(checkpoint), {}};
+      rapidjson::Document d;
+      d.Parse(report.c_str());
+      ASSERT_FALSE(d.HasParseError()) << report;
+      unsigned removals = 0;
+      for (const auto& trial : d["trials"].GetArray()) {
+        if (std::string_view(trial["kind"].GetString()) == "remove") {
+          ++removals;
+          EXPECT_FALSE(trial["accepted"].GetBool());
+        }
+      }
+      EXPECT_EQ(removals, 1U);
+      EXPECT_NO_THROW(timing(placed));  // Validate restored RC/graph provenance.
+    }
+    equivalent(placed);
+    check_legality(physical::read_lef(options.lefs), placed.floorplan);
+  }
+}
+
 TEST_F(Buffer_repair, SingleCellLegalizationKeepsEveryExistingNeighborFixed) {
   // The production stage selection must also preserve an explicit ECO frame.
   options.fp_place = options.final_cells = true;
@@ -800,6 +962,7 @@ TEST_F(Buffer_repair, FloorplanAndMacroTimingApplyCriticalityCurve) {
   enable_floorplan();
   options.fp_resize             = false;
   options.macro_timing_interval = 10;
+  options.final_timing_start    = 0;  // Short fixture: exercise in-loop timing.
   options.iterations            = 60;
   options.timing_fraction       = 1;
   options.timing_exponent       = 3;
@@ -1319,11 +1482,11 @@ TEST_F(Buffer_repair, ResetLogicIsProtectedAndRepairOverrideIsRejected) {
   };
   // A reset-pin clone of the plain flop: same geometry and timing plus RESET_B.
   auto       lef        = clone_cell(slurp(options.lefs[1]),
-                                     "MACRO sky130_fd_sc_hd__dfxtp_1\n",
-                                     "END sky130_fd_sc_hd__dfxtp_1\n",
-                                     "  PIN RESET_B\n    DIRECTION INPUT ;\n    USE SIGNAL ;\n    PORT\n      LAYER li1 ;\n"
+                        "MACRO sky130_fd_sc_hd__dfxtp_1\n",
+                        "END sky130_fd_sc_hd__dfxtp_1\n",
+                        "  PIN RESET_B\n    DIRECTION INPUT ;\n    USE SIGNAL ;\n    PORT\n      LAYER li1 ;\n"
                                      "        RECT 3.370 0.715 3.650 1.665 ;\n    END\n  END RESET_B\n",
-                                     "  PIN VGND\n");
+                        "  PIN VGND\n");
   auto       lib        = slurp(options.liberty);
   const auto cell_start = lib.find("cell (\"sky130_fd_sc_hd__dfxtp_1\") {");
   ASSERT_NE(cell_start, std::string::npos);
@@ -1902,6 +2065,20 @@ TEST_F(Buffer_repair, RepairsDownstreamForestOfFixedMacroWithoutMovingIt) {
   }
   equivalent(result.placed);
   check_legality(physical::read_lef(options.lefs), result.placed.floorplan);
+  options.density                                     = .5;
+  options.terminal_legalize_options.padding_sites     = 0;
+  options.terminal_legalize_options.critical_fraction = 0;
+  const auto finalized = finalize_placement(result.placed, options, [&](const Result& state) { return timing(state); });
+  EXPECT_EQ(count(finalized.placed, "__place_rebuffer"), count(result.placed, "__place_rebuffer"));
+  EXPECT_EQ(finalized.placed.floorplan.components.size(), result.placed.floorplan.components.size());
+  for (const auto& cell : finalized.placed.floorplan.components) {
+    if (cell.name == "macro") {
+      EXPECT_EQ(cell.place, macro_position);
+    }
+  }
+  EXPECT_TRUE(std::filesystem::exists(options.output_dir + "/final/terminal_legalize.json"));
+  equivalent(finalized.placed);
+  check_legality(physical::read_lef(options.lefs), finalized.placed.floorplan);
 }
 TEST_F(Buffer_repair, BuffersEveryBitOfFixedMacroOutput) {
   std::filesystem::create_directories(options.output_dir);

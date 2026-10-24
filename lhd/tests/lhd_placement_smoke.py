@@ -112,7 +112,6 @@ disabled = run('disabled', ['--set', 'synth.place=true', '--set', 'lhd.increment
 assert not disabled['qor']['place']['incremental']['enabled']
 assert not disabled['qor']['place'].get('reused_final_state', False)
 # The remaining optimization legs exercise the native final legalizer and outer recovery loop.
-base += ['--set', 'synth.place.legalize.terminal=false']
 timed = run('timing_driven', ['--set', 'synth.place=true',
                             '--set', 'synth.place.timing_driven=true', '--set', 'synth.place.timing_rounds=2'])
 assert timed['qor']['place']['legal'] and len(timed['qor']['place']['timing_driven']['rounds']) == 2
@@ -173,7 +172,8 @@ assert route_guided['qor']['place']['legal'], route_guided
 assert route_guided['qor']['place']['satlegalize']['fixed_regions']['routing_grid'], route_guided
 assert route_guided['qor']['place']['satlegalize']['route_peak_floor'] == 1, route_guided
 assert route_guided['qor']['place']['satlegalize']['max_moved_cells'] == 8, route_guided
-run('bad_route_grid_model', ['--set', 'synth.place=true', '--set', 'synth.place.satlegalize.route_grid=true'], False)
+run('bad_route_grid_model', ['--set', 'synth.place=true', '--set', 'synth.place.route.model=rudy',
+                             '--set', 'synth.place.satlegalize.route_grid=true'], False)
 run('bad_route_grid_region', route_grid_options + ['--set', 'synth.place.satlegalize.region_size=40'], False)
 
 for setting in ['region_size=0,40', 'region_size=nan,40', 'spill_slack_margin_ps=-1', 'max_cells=65537',

@@ -18,12 +18,12 @@ lib = Path('inou/lefdef/tests/data')
 base = ['lhd/lhd', 'synth', str(source), '--top', 'dut',
         '--set', f'synth.liberty={lib}/sky130hd.lib',
         '--set', f'synth.lef={lib}/sky130hd.tlef,{lib}/sky130hd.lef',
-        '--set', f'synth.sdc={sdc}', '--set', 'synth.place.iterations=30',
+        '--set', f'synth.sdc={sdc}',
         '--set', 'synth.place.bins=8', '--set', 'synth.place.timing_rounds=1', '-q']
 
-def run(name, extra, success=True, expect=None):
+def run(name, extra, success=True, expect=None, iterations=30):
     report = root / (name + '.json')
-    p = subprocess.run(base + extra + ['--workdir', str(root/name), '--result-json', str(report)],
+    p = subprocess.run(base + ['--set', f'synth.place.iterations={iterations}'] + extra + ['--workdir', str(root/name), '--result-json', str(report)],
                        capture_output=True, text=True, timeout=10)
     assert report.exists(), (name, p.returncode, p.stdout, p.stderr)
     data = json.loads(report.read_text())
@@ -34,19 +34,42 @@ def run(name, extra, success=True, expect=None):
         assert expect in error['message'], (name, expect, error)
     return data
 
-native = run('terminal_default', ['--set', 'synth.place=true'])
+run('invalid_gp_margin', ['--set', 'synth.place=true', '--set', 'synth.place.resize.gp_margin=1.5'],
+    success=False, expect='resize.gp_margin')
+native = run('terminal_default', ['--set', 'synth.place=true', '--set', 'synth.place.macro.timing_interval=5',
+                                  '--set', 'synth.place.final.timing_start=5'])
+first_gp_repair = json.loads((root/'terminal_default/synth/place/gp_buffer_repair_5.json').read_text())
+assert first_gp_repair['measurement_only'] and first_gp_repair['trials'] == [], first_gp_repair
+second_gp_repair = json.loads((root/'terminal_default/synth/place/gp_buffer_repair_10.json').read_text())
+assert second_gp_repair['checkpoint'] == 2 and second_gp_repair['margin_fraction'] == .01, second_gp_repair
+assert second_gp_repair['scale'] == 'shortest_clock_period', second_gp_repair
+run('gp_repair_disabled', ['--set', 'synth.place=true', '--set', 'synth.place.macro.timing_interval=5',
+                           '--set', 'synth.place.final.timing_start=5',
+                           '--set', 'synth.place.resize.gp=false'])
+assert not list((root/'gp_repair_disabled/synth/place').rglob('gp_buffer_repair_*.json'))
+
+run('timing_warmup', ['--set', 'synth.place=true',
+                      '--set', 'synth.place.min_iterations=260'], iterations=260)
+repair_files = sorted((root/'timing_warmup/synth/place').glob('gp_buffer_repair_*.json'))
+assert [p.name for p in repair_files] == ['gp_buffer_repair_200.json', 'gp_buffer_repair_250.json'], repair_files
+assert json.loads(repair_files[0].read_text())['measurement_only']
+assert json.loads(repair_files[1].read_text())['checkpoint'] == 2
+run('invalid_timing_start', ['--set', 'synth.place=true', '--set', 'synth.place.final.timing_start=-1'],
+    success=False, expect='timing_start')
+
 assert native['qor']['place']['legal'], native
-terminal = json.loads((root/'terminal_default/synth/place/terminal_legalize.json').read_text())
+terminal = json.loads((root/'terminal_default/synth/place/final/terminal_legalize.json').read_text())
 assert terminal['remainder_wire_weight'] == 4 and terminal['joint_minimize_total'], terminal
 assert terminal['timed_nets'] > 0 and terminal['critical_nets'] > 0, terminal
-legal_timing = [json.loads(line) for line in (root/'terminal_default/synth/place/legalize_timing.jsonl').read_text().splitlines()]
+legal_timing = [json.loads(line) for line in (root/'terminal_default/synth/place/final/legalize_timing.jsonl').read_text().splitlines()]
 assert [entry['stage'] for entry in legal_timing] == ['global_placement', 'legalization'], legal_timing
 assert all(entry['wns'] is not None and entry['tns'] is not None for entry in legal_timing), legal_timing
 
 assert json.loads((root/'terminal_default/synth/place/route_options.json').read_text())['stages']['final']['model'] == 'rsmt'
 phases = [p['name'] for p in native['phases']]
 assert 'pass.place.post_synth_timing' in phases, phases
-assert 'pass.place.timing_driven' not in phases and 'pass.place.resize' not in phases, phases
+assert 'pass.place.timing_driven' in phases and 'pass.place.resize' in phases, phases
+assert phases.index('pass.place.resize') < phases.index('pass.place.final_legalize'), phases
 # Explicit router grids must survive the generated frame and DEF handoff.
 tracks = root / 'tracks.tcl'
 tracks.write_text('make_tracks met1 -x_offset .17 -x_pitch .34 -y_offset .17 -y_pitch .34\n')
@@ -60,8 +83,7 @@ assert native_debug['qor']['place']['legal'], native_debug
 assert json.loads((root/'terminal_debug/synth/place/terminal_legalize.json').read_text())['timed_nets'] == 0
 run('terminal_gp_only', ['--set', 'synth.place=true', '--set', 'synth.place.mode=gp'])
 assert not (root/'terminal_gp_only/synth/place/terminal_legalize.json').exists()
-# The remaining cases exercise the explicitly selected legacy timing-refinement flow.
-base += ['--set', 'synth.place.legalize.terminal=false']
+# Timing refinement and resizing now run before mandatory final legalization.
 timed = run('default', ['--set', 'synth.place=true'])
 q = timed['qor']['place']
 assert q['legal'] and q['preserve_imported_ties'] is False, q

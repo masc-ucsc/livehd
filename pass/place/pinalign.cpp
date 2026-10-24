@@ -91,9 +91,9 @@ Pin_align_stats align_boundary_pins(Boundary_pin_model& model, const std::vector
     const double lo = ea.axis == 0 ? r.xl : r.yl, hi = ea.axis == 0 ? r.xh : r.yh;
     return (ea.position == lo && eb.position == hi) || (ea.position == hi && eb.position == lo);
   };
-  std::set<std::tuple<int, int, int, int>> candidates;
+  std::set<std::tuple<int, int, int, int, int, int>> candidates;
   struct Cell_paths {
-    std::vector<int> inputs, outputs;
+    std::vector<std::pair<int, int>> inputs, outputs;  // anchor and physical cell pin
   };
   std::map<std::pair<int, int>, Cell_paths> cells;
   for (int n = 0; n < nets; ++n) {
@@ -119,7 +119,7 @@ Pin_align_stats align_boundary_pins(Boundary_pin_model& model, const std::vector
     if (real[n].empty() && inputs.size() == 1) {
       for (int b : outputs) {
         if (opposite(inputs[0], b, box)) {
-          candidates.emplace(inputs[0], b, box, -1);
+          candidates.emplace(inputs[0], b, box, -1, -1, -1);
         }
       }
     }
@@ -137,16 +137,18 @@ Pin_align_stats align_boundary_pins(Boundary_pin_model& model, const std::vector
     }
     auto& paths = cells[{box, node}];
     if (model.pin_is_driver[pin]) {
-      paths.outputs.insert(paths.outputs.end(), outputs.begin(), outputs.end());
+      for (int a : outputs) {
+        paths.outputs.emplace_back(a, pin);
+      }
     } else if (inputs.size() == 1) {
-      paths.inputs.push_back(inputs[0]);
+      paths.inputs.emplace_back(inputs[0], pin);
     }
   }
   for (const auto& [key, paths] : cells) {
-    for (int a : paths.inputs) {
-      for (int b : paths.outputs) {
+    for (auto [a, input_pin] : paths.inputs) {
+      for (auto [b, output_pin] : paths.outputs) {
         if (opposite(a, b, key.first)) {
-          candidates.emplace(a, b, key.first, key.second);
+          candidates.emplace(a, b, key.first, key.second, input_pin, output_pin);
         }
       }
     }
@@ -160,8 +162,17 @@ Pin_align_stats align_boundary_pins(Boundary_pin_model& model, const std::vector
     }
     return n;
   };
-  for (auto [a, b, box, cell] : candidates) {
-    stats.pairs.push_back({a, b, box, cell, {}});
+  for (auto [a, b, box, cell, input_pin, output_pin] : candidates) {
+    Pin_align_pair pair{a, b, box, cell, {}, input_pin, output_pin};
+    if (cell >= 0) {
+      // Native offsets already include the physical cell orientation.
+      const bool   vertical_edge = model.edges[model.anchors[a].edge].axis == 0;
+      const auto&  offsets       = vertical_edge ? d.pin_offset_y : d.pin_offset_x;
+      const double origin        = vertical_edge ? d.node_y[cell] : d.node_x[cell];
+      pair.input_target          = origin + offsets[input_pin];
+      pair.output_target         = origin + offsets[output_pin];
+    }
+    stats.pairs.push_back(pair);
     if (cell < 0) {
       ++stats.direct;
     } else {
@@ -177,37 +188,48 @@ Pin_align_stats align_boundary_pins(Boundary_pin_model& model, const std::vector
     const auto& p = model.anchors[a];
     return model.edges[p.edge].axis == 0 ? p.y : p.x;
   };
+  constexpr double tolerance = 1e-6;  // native coordinates; tolerate floating point sums
+  const auto       aligned   = [&](const Pin_align_pair& p) {
+    return p.cell < 0
+                       ? std::abs(coord(p.input) - coord(p.output)) <= tolerance
+                       : std::abs(coord(p.input) - p.input_target) <= tolerance && std::abs(coord(p.output) - p.output_target) <= tolerance;
+  };
   std::vector<bool> was_aligned;
   for (const auto& p : stats.pairs) {
-    was_aligned.push_back(coord(p.input) == coord(p.output));
+    was_aligned.push_back(aligned(p));
   }
   const double pitch = std::max(1., std::ceil(d.layout.site_width));
   for (const auto& [component, links] : components) {
     (void)component;
-    std::map<int, std::set<int>> next;
-    std::map<int, int>           degree;
-    std::set<int>                touched;
+    std::map<int, std::vector<int>> next;  // outgoing pair indices
+    std::map<int, int>              degree;
+    std::map<int, double>           targets;
+    std::set<int>                   touched;
+    std::string                     failure;
+    const auto                      constrain = [&](int anchor, double coordinate) {
+      const auto [it, inserted] = targets.try_emplace(anchor, coordinate);
+      if (!inserted && std::abs(it->second - coordinate) > tolerance) {
+        failure = "ambiguous";
+      }
+    };
     for (int k : links) {
       const auto& p = stats.pairs[k];
       degree.try_emplace(p.input, 0);
-      degree.try_emplace(p.output, 0);
-      if (next[p.input].insert(p.output).second) {
-        ++degree[p.output];
-      }
+      ++degree[p.output];
+      next[p.input].push_back(k);
+      touched.insert(model.anchors[p.input].edge);
       touched.insert(model.anchors[p.output].edge);
+      if (p.cell >= 0) {
+        constrain(p.input, p.input_target);
+        constrain(p.output, p.output_target);
+      }
     }
     std::queue<int> ready;
-    double          target      = 0;
-    bool            have_target = false;
-    std::string     failure;
     for (auto [a, incoming] : degree) {
       if (!incoming) {
         ready.push(a);
-        if (have_target && coord(a) != target) {
-          failure = "ambiguous";
-        }
-        target      = coord(a);
-        have_target = true;
+        // Cell-connected inputs may move; a direct-wire-only root stays fixed.
+        targets.try_emplace(a, coord(a));
       }
     }
     unsigned visited   = 0;
@@ -216,23 +238,32 @@ Pin_align_stats align_boundary_pins(Boundary_pin_model& model, const std::vector
       int a = ready.front();
       ready.pop();
       ++visited;
-      for (int b : next[a]) {
-        if (!--remaining[b]) {
-          ready.push(b);
+      for (int k : next[a]) {
+        const auto& p = stats.pairs[k];
+        if (p.cell < 0) {
+          constrain(p.output, targets.at(a));
+        }
+        if (!--remaining[p.output]) {
+          ready.push(p.output);
         }
       }
     }
-    if (!have_target || visited != degree.size()) {
+    if (visited != degree.size()) {
       failure = "ambiguous";
     }
-    const auto proposed = [&](int a) { return degree.contains(a) && degree.at(a) > 0 ? target : coord(a); };
-    const auto changed  = [&](int a) { return proposed(a) != coord(a); };
+    const auto proposed = [&](int a) {
+      const auto it = targets.find(a);
+      return it == targets.end() ? coord(a) : it->second;
+    };
+    const auto changed = [&](int a) { return proposed(a) != coord(a); };
     if (failure.empty()) {
       for (auto [a, incoming] : degree) {
-        if (!incoming || !changed(a)) {
+        (void)incoming;
+        if (!changed(a)) {
           continue;
         }
-        const auto& e = model.edges[model.anchors[a].edge];
+        const auto&  e      = model.edges[model.anchors[a].edge];
+        const double target = proposed(a);
         if (target < e.low + pitch || target > e.high - pitch) {
           failure = "range";
           break;
@@ -296,8 +327,10 @@ Pin_align_stats align_boundary_pins(Boundary_pin_model& model, const std::vector
     }
     if (failure.empty()) {
       for (auto [a, incoming] : degree) {
-        if (incoming && changed(a)) {
-          auto& p = model.anchors[a];
+        (void)incoming;
+        if (changed(a)) {
+          const double target = proposed(a);
+          auto&        p      = model.anchors[a];
           if (model.edges[p.edge].axis == 0) {
             p.y = target;
           } else {
@@ -328,7 +361,7 @@ Pin_align_stats align_boundary_pins(Boundary_pin_model& model, const std::vector
     }
   }
   for (const auto& p : stats.pairs) {
-    if (p.outcome == "aligned" && coord(p.input) != coord(p.output)) {
+    if (p.outcome == "aligned" && !aligned(p)) {
       throw std::runtime_error("pinalign chain lost an accepted alignment");
     }
   }

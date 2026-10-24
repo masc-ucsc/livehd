@@ -38,6 +38,8 @@ Boundary_pin_order_stats order_boundary_pins(Boundary_pin_model&, const std::vec
 struct Pin_align_pair {
   int         input = -1, output = -1, rectangle = -1, cell = -1;
   std::string outcome;
+  int         input_cell_pin = -1, output_cell_pin = -1;  // temporary split-model pin IDs
+  double      input_target = 0, output_target = 0;        // cell-pin tangent coordinates at assignment
 };
 struct Pin_align_stats {
   unsigned                    direct = 0, one_cell = 0, aligned = 0, already_aligned = 0, moved = 0;

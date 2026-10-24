@@ -1823,7 +1823,7 @@ void Pass_opentimer::build_circuit(const std::shared_ptr<hhds::Graph>& g) {
         const auto name = sink_pin_name_of(node, sink);
         const bool data = name.ends_with("din") || (op != Ntype_op::Latch && name.ends_with("enable")) || name == "update"
                           || name.ends_with("addr");
-        const auto off  = sink.get_port_id() % Ntype::Memory_port_stride;
+        const auto off             = sink.get_port_id() % Ntype::Memory_port_stride;
         const bool memory_physical = physical_rc_ && op == Ntype_op::Memory
                                      && (off == 0 || off == 2 || off == 3 || off == 4 || off == 12 || off == 13 || off == 14);
         if (!data && !memory_physical) {
@@ -2142,7 +2142,7 @@ std::string Pass_opentimer::clock_qor_json() {
 }
 
 double Pass_opentimer::endpoint_tns(ot::Split split) {
-  timer.update_timing();
+  update_timing_profiled();
   std::map<std::string, float> endpoints;
   const auto                   add = [&](const std::string& name, std::optional<float> slack) {
     if (!slack || !std::isfinite(*slack)) {
@@ -2182,10 +2182,17 @@ double Pass_opentimer::endpoint_tns(ot::Split split) {
   return total;
 }
 
+void Pass_opentimer::update_timing_profiled() {
+  const auto start = std::chrono::steady_clock::now();
+  timer.update_timing();
+  timing_propagation_seconds_ += std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count();
+  ++timing_update_calls_;
+}
+
 void Pass_opentimer::compute_timing(const std::shared_ptr<hhds::Graph>& g) {
   TRACE_EVENT("pass", "OPENTIMER_compute_timing");
 
-  timer.update_timing();
+  update_timing_profiled();
 
   // OpenTimer logs and skips a connect_pin whose pin/net is absent, but does
   // not return an error to its caller. Never publish QoR from such a partial
@@ -2246,8 +2253,9 @@ void Pass_opentimer::compute_timing(const std::shared_ptr<hhds::Graph>& g) {
       continue;
     }
 
-    const auto physical_name = physical_instances_.empty() ? physical_instances_.end() : physical_instances_.find(std::string(node.get_name()));
-    auto       instance_name = physical_name != physical_instances_.end() ? physical_name->second : inst_of(node, hier_mode_);
+    const auto physical_name
+        = physical_instances_.empty() ? physical_instances_.end() : physical_instances_.find(std::string(node.get_name()));
+    auto instance_name = physical_name != physical_instances_.end() ? physical_name->second : inst_of(node, hier_mode_);
     inst2node.emplace(instance_name, node);
 
     Color_qor* color_row = nullptr;
@@ -2520,12 +2528,12 @@ void Pass_opentimer::compute_timing(const std::shared_ptr<hhds::Graph>& g) {
           const bool rise_pair = arc.cell_rise && arc.rise_transition;
           const bool fall_pair = arc.cell_fall && arc.fall_transition;
           const bool no_delay  = type == ot::TimingType::MIN_PULSE_WIDTH || type == ot::TimingType::MINIMUM_PERIOD
-                                 || type == ot::TimingType::MAX_CLOCK_TREE_PATH || type == ot::TimingType::MIN_CLOCK_TREE_PATH;
-          const bool tables    = no_delay                                                            ? true
-                                 : type == ot::TimingType::COMBINATIONAL_RISE                        ? rise_pair
-                                 : type == ot::TimingType::COMBINATIONAL_FALL                        ? fall_pair
-                                 : (type == ot::TimingType::PRESET || type == ot::TimingType::CLEAR) ? (rise_pair || fall_pair)
-                                                                                                     : (rise_pair && fall_pair);
+                                || type == ot::TimingType::MAX_CLOCK_TREE_PATH || type == ot::TimingType::MIN_CLOCK_TREE_PATH;
+          const bool tables = no_delay                                                            ? true
+                              : type == ot::TimingType::COMBINATIONAL_RISE                        ? rise_pair
+                              : type == ot::TimingType::COMBINATIONAL_FALL                        ? fall_pair
+                              : (type == ot::TimingType::PRESET || type == ot::TimingType::CLEAR) ? (rise_pair || fall_pair)
+                                                                                                  : (rise_pair && fall_pair);
           if (!arc.is_constraint() && !tables) {
             timing_cells_complete = false;
             incomplete_cell
@@ -2542,8 +2550,7 @@ void Pass_opentimer::compute_timing(const std::shared_ptr<hhds::Graph>& g) {
   }
   if (feedback_) {
     if (!timing_cells_complete || !area_cells_complete) {
-      throw std::runtime_error("physical timing requires complete cell timing and area feedback (e.g. " + incomplete_cell
-                               + ")");
+      throw std::runtime_error("physical timing requires complete cell timing and area feedback (e.g. " + incomplete_cell + ")");
     }
     feedback_->delay = max_delay;
     feedback_->area  = known_area;
@@ -2979,7 +2986,7 @@ void Pass_opentimer::write_qor() const {
 void Pass_opentimer::compute_power(const std::shared_ptr<hhds::Graph>& g) {
   TRACE_EVENT("pass", "OPENTIMER_compute_power");
 
-  timer.update_timing();
+  update_timing_profiled();
 
   const auto& gates = timer.gates();
 

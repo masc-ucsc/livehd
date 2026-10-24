@@ -35,7 +35,6 @@
 // as a cold one (the abc region digest is content-based, the coloring is
 // seeded and deterministic).
 
-#include "debug_env.hpp"
 #include <algorithm>
 #include <cmath>
 #include <cstdlib>
@@ -51,14 +50,15 @@
 #include <string_view>
 #include <vector>
 
-#include "liberty_dff.hpp"
 #include "absl/container/flat_hash_set.h"
 #include "absl/strings/str_split.h"
 #include "attrs.hpp"
+#include "debug_env.hpp"
 #include "diag.hpp"
 #include "export_file.hpp"
 #include "graph_library_singleton.hpp"
 #include "lhd_kernel_internal.hpp"
+#include "liberty_dff.hpp"
 #include "node_util.hpp"
 #include "pass.hpp"
 #include "pass/opentimer/pass_opentimer.hpp"
@@ -233,7 +233,6 @@ livehd::placement::Options placement_options(const Options& opts) {
     }
     livehd::placement::validate_warp_options(policy);
   }
-  out.terminal_legalize                = truthy(synth_set(opts, "place.legalize.terminal", "true"));
   out.boundarypins.enabled             = truthy(synth_set(opts, "place.boundarypins", "false"));
   out.boundarypins.split               = truthy(synth_set(opts, "place.boundarypins.split", "true"));
   out.boundarypins.order               = truthy(synth_set(opts, "place.boundarypins.order", "false"));
@@ -340,10 +339,18 @@ livehd::placement::Options placement_options(const Options& opts) {
   out.macro_detailed_place     = truthy(synth_set(opts, "place.macro.detailed", "true"));
   out.macro_legalize_cells     = truthy(synth_set(opts, "place.macro.legalize_cells", "true"));
   out.final_independent_timing = truthy(synth_set(opts, "place.final.independent_timing", "false"));
-  out.satlegalize              = truthy(synth_set(opts, "place.satlegalize", "false"));
-  auto& sat                    = out.satlegalize_options;
-  sat.backend                  = synth_set(opts, "place.satlegalize.backend", "cadical");
-  sat.encoding                 = synth_set(opts, "place.satlegalize.encoding", "candidate");
+  out.final_timing_start       = integer("place.final.timing_start", "200");
+  out.final_timing_schedule    = synth_set(opts, "place.final.timing_schedule", "fixed");
+  if (out.final_timing_schedule != "fixed" && out.final_timing_schedule != "late") {
+    throw Lhd_error{"usage", "synth.place.final.timing_schedule expects fixed or late", ""};
+  }
+  if (out.final_timing_start < 0) {
+    throw Lhd_error{"usage", "synth.place.final.timing_start must be nonnegative", "use a GP iteration count"};
+  }
+  out.satlegalize = truthy(synth_set(opts, "place.satlegalize", "false"));
+  auto& sat       = out.satlegalize_options;
+  sat.backend     = synth_set(opts, "place.satlegalize.backend", "cadical");
+  sat.encoding    = synth_set(opts, "place.satlegalize.encoding", "candidate");
   if ((sat.backend != "cadical" && sat.backend != "cms-cnf" && sat.backend != "cms-xor")
       || (sat.encoding != "candidate" && sat.encoding != "binary")) {
     throw Lhd_error{"usage",
@@ -560,6 +567,15 @@ livehd::placement::Options placement_options(const Options& opts) {
   if (out.resize_engine != "new" && out.resize_engine != "legacy") {
     throw Lhd_error{"usage", "invalid synth.place.resize.engine: " + out.resize_engine, "expected new or legacy"};
   }
+  out.gp_resize        = truthy(synth_set(opts, "place.resize.gp", "true"));
+  out.gp_buffer_trials = integer("place.resize.gp_trials", "4");
+  if (out.gp_buffer_trials < 1 || out.gp_buffer_trials > 16) {
+    throw Lhd_error{"usage", "synth.place.resize.gp_trials expects an integer in [1,16]", ""};
+  }
+  out.gp_buffer_margin = number("place.resize.gp_margin", "0.01");
+  if (!std::isfinite(out.gp_buffer_margin) || out.gp_buffer_margin < 0 || out.gp_buffer_margin > 1) {
+    throw Lhd_error{"usage", "synth.place.resize.gp_margin expects a fraction in [0,1]", ""};
+  }
   out.resize_vt_swap = truthy(synth_set(opts, "place.resize.vt_swap", "false"));
   for (const auto& pattern : absl::StrSplit(synth_set(opts, "place.resize.dont_use", ""), ',', absl::SkipWhitespace())) {
     out.resize_dont_use.emplace_back(pattern);
@@ -703,6 +719,10 @@ livehd::placement::Options placement_options(const Options& opts) {
   out.tracks_file = synth_set(opts, "place.tracks", "");
   if (!out.tracks_file.empty()) {
     check_inputs_exist({out.tracks_file});
+  }
+  out.rc_pessimism = number("place.rc_pessimism", "1");
+  if (!std::isfinite(out.rc_pessimism) || out.rc_pessimism < 1) {
+    throw Lhd_error{"usage", "invalid synth.place.rc_pessimism", "expected a finite multiplier >=1"};
   }
   out.tech_rc_file = synth_set(opts, "place.tech_rc", "");
   if (!out.tech_rc_file.empty()) {
@@ -933,7 +953,8 @@ void synth_command(Options& opts, Result& res) {
   const bool        run_place     = truthy(synth_set(opts, "place", "false"));
   auto              place_options = run_place ? placement_options(opts) : livehd::placement::Options{};
   const bool        run_resynth   = truthy(synth_set(opts, "place.resynth", "false"));
-  const bool run_resize = truthy(synth_set(opts, "place.resize", run_place && run_sta && place_options.full ? "true" : "false"));
+  const bool run_resize   = truthy(synth_set(opts, "place.resize", run_place && run_sta && place_options.full ? "true" : "false"));
+  place_options.gp_resize = run_resize && place_options.gp_resize;
   // Timing weights are the normal full-placement objective. Synthesis-only
   // and GP-only commands do not enter the full-placement refinement loop.
   const bool run_timing_place = truthy(synth_set(opts, "place.timing_driven", run_place && place_options.full ? "true" : "false"));
@@ -1322,10 +1343,12 @@ void synth_command(Options& opts, Result& res) {
     labels["state_sweep"]     = synth_set(opts, "state_sweep", "true");
     labels["merge_registers"] = synth_set(opts, "merge_registers", "true");
     // Clock gating needs the Liberty's integrated clock-gate cell: without one the gated registers' clock would be computed
-    // logic and the registers would stay native flops (no mapped DFF, no timing). The library decides, the user can still say false.
-    labels["clock_gate"] = synth_set(opts, "clock_gate", "true") == "true" && !livehd::liberty::resolve_dff_cells(liberty, "").icg_ladder.empty()
-                               ? "true"
-                               : "false";
+    // logic and the registers would stay native flops (no mapped DFF, no timing). The library decides, the user can still say
+    // false.
+    labels["clock_gate"]
+        = synth_set(opts, "clock_gate", "true") == "true" && !livehd::liberty::resolve_dff_cells(liberty, "").icg_ladder.empty()
+              ? "true"
+              : "false";
     labels["clock_gate_min_bits"] = synth_set(opts, "clock_gate_min_bits", "16");
     labels["clock_gate_depth"]    = synth_set(opts, "clock_gate_depth", "1");
     // Each mapper receives its own labels. Native USYN does not inherit
@@ -1386,6 +1409,7 @@ void synth_command(Options& opts, Result& res) {
   livehd::placement::Repair_result    design_repaired;
   livehd::placement::Repair_result    timed_placement;
   livehd::placement::Repair_result    resynthesized;
+  livehd::placement::Repair_result    finalized;
   std::string                         place_qor;
   const std::string                   place_qor_path = root + "/place/qor.json";
   if (run_place) {
@@ -1496,9 +1520,11 @@ void synth_command(Options& opts, Result& res) {
               .emit();
         }
       };
+      place_options.optimization_pending = !macro_plan_only && (run_resize || run_timing_place || run_resynth);
       hhds::GraphLibrary seed_library;
       auto               placement_input = *found;
-      if (run_timing_place && (place_options.fp_timing_interval > 0 || place_options.macro_timing_interval > 0)) {
+      if ((run_timing_place && (place_options.fp_timing_interval > 0 || place_options.macro_timing_interval > 0))
+          || place_options.gp_resize) {
         place_options.fp_evaluate = evaluate;
         place_options.fp_resize   = run_resize;
       }
@@ -1590,7 +1616,7 @@ void synth_command(Options& opts, Result& res) {
       // should replace the completed-stage feedback.
       place_options.after_stage = {};
       place_options.restart_seed.reset();
-      if (!macro_plan_only && (run_resize || run_timing_place || run_resynth) && !place_options.terminal_legalize) {
+      if (!macro_plan_only && (run_resize || run_timing_place || run_resynth)) {
         // Every round/trial below re-runs placement (and resynth a fresh ABC frame
         // per cone): keep their output off the protocol stdout, as for pass.place.
         phase_step = "pass.place.optimize";
@@ -1646,6 +1672,14 @@ void synth_command(Options& opts, Result& res) {
         phase_step.clear();
         phase_log.clear();
         set_crash_context({}, {});
+      }
+      if (place_options.optimization_pending) {
+        Phase_timer   phase(res, "pass.place.final_legalize");
+        const auto    final_log = next_log_path(opts, "pass.place.final_legalize");
+        Stdout_to_log redirect(final_log);
+        finalized = livehd::placement::finalize_placement(placed, place_options, evaluate);
+        placed    = std::move(finalized.placed);
+        res.recipe_steps.emplace_back("pass.place.final_legalize");
       }
       net.graphs = {placed.graph};
       if (io_flow) {

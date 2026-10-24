@@ -3,6 +3,7 @@
 #include <cstdint>
 #include <map>
 #include <set>
+#include <stdexcept>
 #include <string>
 #include <vector>
 
@@ -65,6 +66,21 @@ struct Component {
   Ann_place   place;
   friend bool operator==(const Component&, const Component&) = default;
 };
+// Reserved pinless masks emitted by the fixed-frame replay adapter. Old masks
+// are hard; the soft prefix preserves initial-placement-only blockages. These
+// are placement constraints, not physical macros or routing obstructions.
+enum class Placement_mask { none, hard, soft };
+inline Placement_mask placement_mask(const Component& c, const Technology& tech) {
+  if (!c.name.starts_with("__lhd_frame_mask_")) {
+    return Placement_mask::none;
+  }
+  const auto m = tech.macros.find(c.macro);
+  if (m == tech.macros.end() || m->second.klass.starts_with("CORE") || !m->second.pins.empty()
+      || (c.place.status != Status::FIXED && c.place.status != Status::LOCKED) || c.place.orientation != Orientation::N) {
+    throw std::invalid_argument("placement mask must be fixed, pinless BLOCK geometry in N orientation: " + c.name);
+  }
+  return c.name.starts_with("__lhd_frame_mask_soft_") ? Placement_mask::soft : Placement_mask::hard;
+}
 struct Terminal {
   std::string        name, net, direction;
   int64_t            x = 0, y = 0;

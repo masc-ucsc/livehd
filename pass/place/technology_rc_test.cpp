@@ -1,9 +1,11 @@
 // This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 #include "technology_rc.hpp"
 
+#include <cmath>
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
+#include <limits>
 #include <queue>
 #include <vector>
 
@@ -27,6 +29,27 @@ struct Technology_rc : ::testing::Test {
     return path.string();
   }
 };
+TEST_F(Technology_rc, PessimismScalesWireProductAndPreservesDefault) {
+  const auto nominal   = technology_wire_rc(tech, "", "", 3, 4);
+  const auto unchanged = technology_wire_rc(tech, "", "", 3, 4, 1);
+  EXPECT_DOUBLE_EQ(nominal.horizontal_r, unchanged.horizontal_r);
+  EXPECT_DOUBLE_EQ(nominal.vertical_c, unchanged.vertical_c);
+  for (double factor : {1.5, 2.}) {
+    const auto wire = technology_wire_rc(tech, "", "", 3, 4, factor);
+    EXPECT_DOUBLE_EQ(wire.horizontal_r, 3 * std::sqrt(factor));
+    EXPECT_DOUBLE_EQ(wire.horizontal_c, 4 * std::sqrt(factor));
+    EXPECT_NEAR(wire.horizontal_r * wire.horizontal_c, 12 * factor, 1e-12);
+    EXPECT_NEAR(wire.vertical_r * wire.vertical_c, 12 * factor, 1e-12);
+  }
+  const auto file
+      = write("rc.tcl", "set_cmd_units -resistance ohm -capacitance ff\nset_wire_rc -signal -resistance 3 -capacitance 4\n");
+  const auto characterized = technology_wire_rc(tech, "", file, -1, -1, 2);
+  EXPECT_DOUBLE_EQ(characterized.horizontal_r, 3 * std::sqrt(2.));
+  EXPECT_DOUBLE_EQ(characterized.vertical_c, 4 * std::sqrt(2.));
+  for (double invalid : {0., -1., .5, std::numeric_limits<double>::infinity(), std::numeric_limits<double>::quiet_NaN()}) {
+    EXPECT_THROW(technology_wire_rc(tech, "", "", 3, 4, invalid), std::invalid_argument);
+  }
+}
 TEST_F(Technology_rc, ExplicitOverrideAndLefFallbackKeepTheirUnits) {
   const auto explicit_rc = technology_wire_rc(tech, "", "missing", 3, 4);
   EXPECT_EQ(explicit_rc.horizontal_r, 3);

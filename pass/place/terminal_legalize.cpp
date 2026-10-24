@@ -373,11 +373,16 @@ struct Model {
       }
       original.push_back(c.place);
       preferred.push_back(c.place);
+      const auto mask = ph::placement_mask(c, tech);
+      if (mask == ph::Placement_mask::soft) {
+        installed[i] = true;
+        continue;
+      }
       const bool core = master->second.klass.starts_with("CORE");
       movable[i]      = core && !fixed(c.place);
       if (!core || fixed_physical_cell(c, master->second)) {
         auto b = box(c.place);
-        if (!core) {
+        if (!core && mask == ph::Placement_mask::none) {
           b.xl -= options.macro_halo_x_dbu;
           b.xh += options.macro_halo_x_dbu;
           b.yl -= options.macro_halo_y_dbu;
@@ -706,7 +711,7 @@ struct Model {
       std::vector<size_t> order = remaining;
       d.num_movable             = int(order.size());
       for (size_t i = 0; i < installed.size(); ++i) {
-        if (installed[i]) {
+        if (installed[i] && ph::placement_mask(fp.components[i], tech) != ph::Placement_mask::soft) {
           order.push_back(i);
         }
       }

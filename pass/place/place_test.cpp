@@ -29,15 +29,15 @@ namespace {
 // Fixtures for the independent plain/H2D/ECO paths pin their original controls.
 Options plain_options() {
   Options o;
-  o.terminal_legalize = false;  // These fixtures exercise the legacy final-placement paths.
-  o.fp_place          = false;
+  o.optimization_pending = true;  // These fixtures exercise the legacy final-placement paths.
+  o.fp_place             = false;
   o.fp_pin_adjust = o.macro_pin_adjust = false;
   o.final_cells                        = false;
   o.macro_snap                         = false;
   o.macro_align_weight                 = 0;
   o.macro_align_global                 = false;
-  o.utilization        = .5;
-  o.density            = .8;
+  o.utilization                        = .5;
+  o.density                            = .8;
   o.halo_x = o.halo_y   = 0;
   o.iterations          = 500;
   o.bins                = 32;
@@ -92,8 +92,8 @@ TEST(Placement, ExperimentalBoundaryRefinementsRunOnlyAtTheFinalStage) {
     for (bool terminal : {false, true}) {
       for (auto stage : {Placement_stage::macro, Placement_stage::final}) {
         hhds::GraphLibrary placed;
-        options.terminal_legalize = terminal;
-        options.completed_stage   = stage;
+        options.optimization_pending = !terminal;
+        options.completed_stage      = stage;
         options.output_dir = std::format("{}/busorder_stages_{}_{}_{}", std::getenv("TEST_TMPDIR"), mode, terminal, int(stage));
         std::filesystem::remove_all(options.output_dir);
         const auto result = place(*graph, placed, options);
@@ -238,15 +238,15 @@ TEST(Placement, TerminalLegalizerIsLastAndPreservesItsExactOutput) {
     gu::set_bits(signal, 1);
   }
   graph->get_output_pin("y").connect_driver(signal);
-  auto options              = plain_options();
-  options.lefs              = {"inou/lefdef/tests/data/sky130hd.tlef", "inou/lefdef/tests/data/sky130hd.lef"};
-  options.output_dir        = std::string(std::getenv("TEST_TMPDIR")) + "/terminal_rows";
-  options.iterations        = 0;
-  options.snapshots         = true;
-  options.bins              = 4;
-  options.density           = .5;
-  options.utilization       = .15;
-  options.terminal_legalize = true;
+  auto options                 = plain_options();
+  options.lefs                 = {"inou/lefdef/tests/data/sky130hd.tlef", "inou/lefdef/tests/data/sky130hd.lef"};
+  options.output_dir           = std::string(std::getenv("TEST_TMPDIR")) + "/terminal_rows";
+  options.iterations           = 0;
+  options.snapshots            = true;
+  options.bins                 = 4;
+  options.density              = .5;
+  options.utilization          = .15;
+  options.optimization_pending = false;
   options.terminal_legalize_options.critical_fraction = 0;
   bool later_callback                                 = false;
   options.after_stage                                 = [&](Placement_stage, const Result&) {
@@ -449,10 +449,11 @@ TEST(Placement, MacroCellWorkCanBeDeferredWithoutSkippingGpTimingOrFinalLegaliza
     options.final_cells                  = true;
     options.macro_detailed_place         = detail;
     options.macro_legalize_cells         = legalize;
-    options.terminal_legalize            = terminal;
+    options.optimization_pending         = !terminal;
     options.final_independent_timing     = independent;
     options.macro_timing_interval        = 10;
     options.net_weights["cell0:Y"]       = 2;
+    options.final_timing_start           = 0;  // Short fixture: exercise in-loop timing.
     bool     macro_complete = false, checked_final_weights = false;
     double   macro_weight       = 0;
     unsigned macro_timing_calls = 0;
@@ -662,12 +663,12 @@ END )" << name
   ASSERT_TRUE(macro_report.HasMember("macro_magnet"));
   EXPECT_EQ(macro_report["macro_magnet"]["members"].GetUint64(), 2);
   options.macro_magnet.enabled = false;
-  options.terminal_legalize    = true;  // final-stage default must not enter a macro-only preview
+  options.optimization_pending = false;  // final-stage default must not enter a macro-only preview
   options.snapshots            = true;
   options.output_dir           = (root / "macro_only_no_magnet").string();
   std::filesystem::create_directories(options.output_dir);
   std::ofstream(options.output_dir + "/macro_warp_stability.jsonl") << "stale trace from an earlier solve\n";
-  completed                    = 0;
+  completed = 0;
   hhds::GraphLibrary ordinary_macro_library;
   const auto         ordinary_macro = place(*graph, ordinary_macro_library, options);
   EXPECT_EQ(completed, 1);
@@ -885,6 +886,7 @@ TEST(Placement, TimingCheckpointsCarryConnectivityForAutomaticResetCuts) {
     options.bins                     = 4;
     options.fp_resize                = false;
     options.fp_timing_interval = options.macro_timing_interval = 1;
+    options.final_timing_start                                 = 0;  // Short fixture: exercise in-loop timing.
     unsigned   calls = 0, floorplan_stages = 0;
     const auto check = [&](const Result& state) {
       EXPECT_EQ(state.floorplan.nets.size(), 5);
@@ -1299,14 +1301,14 @@ TEST(Placement, MappedBusGraphLegalityRcAndReuse) {
     const auto         result = place(*graph, spread_library, spread);
     EXPECT_EQ(result.floorplan.components.size(), placed.floorplan.components.size());
     EXPECT_NE(result.qor.find("\"legal\":true"), std::string::npos);
-    std::ifstream spread_report(spread.output_dir + "/gp_history.json");
-    const std::string spread_text{std::istreambuf_iterator<char>(spread_report), {}};
+    std::ifstream       spread_report(spread.output_dir + "/gp_history.json");
+    const std::string   spread_text{std::istreambuf_iterator<char>(spread_report), {}};
     rapidjson::Document spread_json;
     spread_json.Parse(spread_text.c_str());
     ASSERT_FALSE(spread_json.HasParseError());
     EXPECT_EQ(spread_json["local_density_target"].GetDouble(), .05);
     EXPECT_EQ(spread_json["local_density_weight"].GetDouble(), 8);
-    auto invalid = spread;
+    auto invalid                 = spread;
     invalid.local_density_target = -.2;
     EXPECT_THROW(place(*graph, spread_library, invalid), std::invalid_argument);
   }
@@ -2405,8 +2407,9 @@ END LIBRARY
     options.cell_halo               = std::pair{11 * height, 0.};
     hhds::GraphLibrary invalid;
     EXPECT_THROW(place(*graph, invalid, options), std::invalid_argument);
-    options.cell_halo   = std::pair{0., 0.};
-    options.final_cells = options.terminal_legalize = true;
+    options.cell_halo            = std::pair{0., 0.};
+    options.final_cells          = true;
+    options.optimization_pending = false;
     EXPECT_FALSE(run(options, 0, 0));
     rapidjson::Document flow;
     std::ifstream       file(options.output_dir + "/flow.json");
@@ -2527,6 +2530,104 @@ END LIBRARY
   const auto         eco = place(*graph, eco_library, o);
   check(eco);
 }
+TEST(Placement, EcoBufferRemainsInSoftMaskChannel) {
+  const auto root = std::filesystem::path(std::getenv("TEST_TMPDIR")) / "soft_mask_eco";
+  std::filesystem::create_directories(root);
+  std::ofstream(root / "masks.lef") << R"(VERSION 5.8 ;
+MACRO hard_mask
+ CLASS BLOCK ; SIZE 3.68 BY 10.88 ;
+END hard_mask
+MACRO soft_mask
+ CLASS BLOCK ; SIZE 5.52 BY 10.88 ;
+END soft_mask
+END LIBRARY
+)";
+  hhds::GraphLibrary source, placed;
+  auto               io = source.create_io("mask_eco");
+  io->add_input("a", 0);
+  io->add_output("y", 0);
+  io->set_bits("a", 1);
+  io->set_bits("y", 1);
+  auto graph = io->create_graph();
+  auto buf   = source.create_io("sky130_fd_sc_hd__buf_1");
+  buf->add_input("A", 0);
+  buf->add_output("X", 0);
+  physical::Floorplan frame;
+  frame.design = "mask_eco";
+  frame.dbu    = 1000;
+  frame.die    = {0, 0, 12880, 10880};
+  for (int row = 0; row < 4; ++row) {
+    frame.rows.push_back({"row" + std::to_string(row),
+                          "unithd",
+                          0,
+                          row * 2720,
+                          28,
+                          460,
+                          row % 2 ? physical::Orientation::FS : physical::Orientation::N});
+  }
+  for (const auto& [name, master, x, width] : std::vector<std::tuple<std::string, std::string, int, int>>{
+           {"__lhd_frame_mask_hard_0", "hard_mask",    0, 3680},
+           {"__lhd_frame_mask_soft_0", "soft_mask", 3680, 5520},
+           {"__lhd_frame_mask_hard_1", "hard_mask", 9200, 3680}
+  }) {
+    auto type = source.find_io(master);
+    if (!type) {
+      type = source.create_io(master);
+    }
+    auto n = gu::create_typed_node(*graph, Ntype_op::Sub);
+    n.set_subnode(type);
+    n.set_name(name);
+    Ann_place pose(x, 0, width, 10880);
+    pose.status = physical::Status::FIXED;
+    n.attr(attrs::place).set(pose);
+    frame.components.push_back({name, master, pose});
+  }
+  auto buffer = gu::create_typed_node(*graph, Ntype_op::Sub);
+  buffer.set_subnode(buf);
+  buffer.set_name("new_repeater");
+  auto input = graph->get_input_pin("a");
+  gu::set_bits(input, 1);
+  buffer.create_sink_pin("A").connect_driver(input);
+  auto output = buffer.create_driver_pin("X");
+  gu::set_bits(output, 1);
+  graph->get_output_pin("y").connect_driver(output);
+  Ann_place seed(4600, 0, 1840, 2720);
+  seed.status = physical::Status::PLACED;
+  buffer.attr(attrs::place).set(seed);
+  auto o           = plain_options();
+  o.lefs           = {"inou/lefdef/tests/data/sky130hd.tlef", "inou/lefdef/tests/data/sky130hd.lef", (root / "masks.lef").string()};
+  o.output_dir     = (root / "placed").string();
+  o.iterations     = 0;
+  o.bins           = 2;
+  o.previous       = std::make_shared<physical::Floorplan>(frame);
+  o.legalize_cells = true;
+  o.changed_cells  = {"new_repeater"};
+  const auto result = place(*graph, placed, o);
+  const auto tech   = physical::read_lef(o.lefs);
+  EXPECT_NO_THROW(check_legality(tech, result.floorplan));
+  const auto found = std::find_if(result.floorplan.components.begin(), result.floorplan.components.end(), [](const auto& c) {
+    return c.name == "new_repeater";
+  });
+  ASSERT_NE(found, result.floorplan.components.end());
+  EXPECT_EQ(found->place.x, seed.x);
+  EXPECT_EQ(found->place.y, seed.y);
+  EXPECT_NE(result.qor.find("\"single_cell\":true"), std::string::npos);
+  for (const auto& old : frame.components) {
+    const auto current = std::find_if(result.floorplan.components.begin(), result.floorplan.components.end(), [&](const auto& c) {
+      return c.name == old.name;
+    });
+    ASSERT_NE(current, result.floorplan.components.end());
+    EXPECT_EQ(*current, old);
+  }
+  auto hard = result.floorplan;
+  for (auto& c : hard.components) {
+    if (c.name == "__lhd_frame_mask_soft_0") {
+      c.name = "__lhd_frame_mask_hard_2";
+    }
+  }
+  EXPECT_THROW(check_legality(tech, hard), std::runtime_error);
+}
+
 TEST(Placement, MultiCellEcoGapSearchMatchesExhaustiveSites) {
   hhds::GraphLibrary source, flat;
   auto               io = source.create_io("eco_gap_search");
@@ -4190,6 +4291,7 @@ TEST(Placement, FreshLegalizationTimingRanksPositiveSlackPaths) {
   options.iterations                = 0;
   options.snapshots                 = true;
   options.macro_timing_interval     = 1;
+  options.final_timing_start        = 0;  // Short fixture: exercise in-loop timing.
   options.legalize_timing_strength  = 20;
   options.legalize_timing_threshold = .5;
   unsigned calls                    = 0;
@@ -4863,6 +4965,7 @@ TEST(Placement, RouteGridUsesFreshTimingAndSamePhysicalSnapshotWithSatOffOrOn) {
     options.routability                    = true;
     options.route_model                    = "rsmt";
     options.macro_timing_interval          = 1;
+    options.final_timing_start              = 0;  // Short fixture: exercise in-loop timing.
     options.satlegalize                    = sat;
     options.satlegalize_options.route_grid = true;
     options.satlegalize_options.max_cells  = 65536;
@@ -4916,4 +5019,18 @@ TEST(Placement, MacroWarpDefaultsUseConstantStrengthAndStabilityStart) {
   EXPECT_DOUBLE_EQ(o.fp_warp.weight, 1);
   EXPECT_DOUBLE_EQ(o.fp_warp.start_stability, 0);
   EXPECT_EQ(o.fp_warp.refresh_interval, 0);
+}
+
+TEST(Placement, AdaptiveSearchRejectsTopologyChangingGpRepairBeforePlacement) {
+  hhds::GraphLibrary source, placed;
+  auto graph = source.create_io("adaptive_repair")->create_graph();
+  livehd::placement::Options options;
+  options.gp_search.enabled = true;
+  options.gp_resize = true;
+  try {
+    livehd::placement::place(*graph, placed, options);
+    FAIL() << "adaptive search accepted topology-changing repair";
+  } catch (const std::invalid_argument& error) {
+    EXPECT_NE(std::string(error.what()).find("disable gp_resize"), std::string::npos);
+  }
 }

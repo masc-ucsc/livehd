@@ -125,8 +125,8 @@ std::set<std::string> protected_buffers(hhds::Graph& graph, const Inventory& cel
   for (const auto& port : roots.ports) {
     protected_names.insert("@port:" + port);
   }
-  std::set<uint64_t>    visited;
-  const auto            protect = [&](auto&& self, Pin driver) -> void {
+  std::set<uint64_t> visited;
+  const auto         protect = [&](auto&& self, Pin driver) -> void {
     if (driver.is_invalid() || driver.is_const()) {
       return;
     }
@@ -227,8 +227,12 @@ std::set<std::string> protected_buffers(hhds::Graph& graph, const Inventory& cel
   return protected_buffers(graph, cells, special, protect_reset, control_ports);
 }
 std::pair<double, double> wire_rc(const Options& options, const physical::Technology& tech) {
-  const auto rc
-      = technology_wire_rc(tech, options.liberty, options.tech_rc_file, options.resistance_ohm_um, options.capacitance_ff_um);
+  const auto rc = technology_wire_rc(tech,
+                                     options.liberty,
+                                     options.tech_rc_file,
+                                     options.resistance_ohm_um,
+                                     options.capacitance_ff_um,
+                                     options.rc_pessimism);
   return {std::max(rc.horizontal_r, rc.vertical_r), std::max(rc.horizontal_c, rc.vertical_c)};
 }
 double wire_limit(const Buffer& b, double r, double c) {
@@ -819,7 +823,8 @@ struct Apply_index {
 };
 std::optional<Buffer_tree> apply(hhds::Graph& graph, const Inventory& cells, const Edit& edit,
                                  const std::set<std::string>& protected_names, const Result& placed, const Timing_feedback& timing,
-                                 const Options& options, const physical::Technology& tech, Apply_index* shared = nullptr) {
+                                 const Options& options, const physical::Technology& tech, Apply_index* shared = nullptr,
+                                 bool preserve_chains = false) {
   std::optional<Apply_index> owned;
   if (!shared) {
     owned.emplace(graph, placed);
@@ -886,7 +891,7 @@ std::optional<Buffer_tree> apply(hhds::Graph& graph, const Inventory& cells, con
         // can replace an existing shallow backbone with a long wire-minimal
         // path. Single-load chains remain removable/rebuildable as a unit.
         if (const auto* next = buffer(node, cells);
-            next && !fixed(node) && leaf.width == 1 && sinks(output(node, *next)).size() <= 1) {
+            next && !preserve_chains && !fixed(node) && leaf.width == 1 && sinks(output(node, *next)).size() <= 1) {
           removed.push_back(node);
           pending.push_back(physical_label(output(node, *next)));
         } else if (leaf_set.insert(point.pin).second) {
@@ -973,7 +978,7 @@ std::optional<Buffer_tree> apply(hhds::Graph& graph, const Inventory& cells, con
           cell.max_capacitance_ff.value_or(std::numeric_limits<double>::infinity()) * .9,
           wire_limit(cell, r, c) * tech.dbu,
           cell.max_fanout ? static_cast<unsigned>(std::clamp(*cell.max_fanout, 1.0, double(std::max<size_t>(2, locations.size()))))
-                          : static_cast<unsigned>(std::max<size_t>(2, locations.size())),
+                                         : static_cast<unsigned>(std::max<size_t>(2, locations.size())),
           cell.intrinsic_ps,
           cell.resistance_ohm,
           cell.area};
@@ -1631,6 +1636,362 @@ Floorplan_resize repair_floorplan(Result& state, const Options& options, const T
   // The FP caller refreshes the checkpoint weights from result.timing.
   return result;
 }
+Floorplan_resize repair_gp_buffers(Result& state, const Options& options, const Timing_feedback& before, const Evaluate& evaluate,
+                                   const std::function<void(Result&, Gp_refresh)>& refresh, Gp_buffer_history& history) {
+  Floorplan_resize result;
+  result.timing = before;
+  ++history.checkpoints;
+  if (history.checkpoints == 1) {
+    result.report = R"({"checkpoint":1,"measurement_only":true,"trials":[]})";
+    return result;
+  }
+  const auto   library   = read_floorplan_library(options);
+  const auto&  cells     = library.cells;
+  const double period_ps = options.whatif ? options.whatif->clock_period() : 0;
+  const double scale_ps  = period_ps > 0 ? period_ps : before.delay * before.time_unit_ps;
+  if (!(std::isfinite(scale_ps) && scale_ps > 0)) {
+    result.report = R"({"skipped":"no_positive_clock_period_or_path_delay","trials":[]})";
+    return result;
+  }
+  const double margin = options.gp_buffer_margin * scale_ps;
+  const auto   ready  = [&](const std::string& name) {
+    const auto it = history.edited.find(name);
+    return it == history.edited.end() || history.checkpoints - it->second > 2;
+  };
+  rapidjson::StringBuffer                    text;
+  rapidjson::Writer<rapidjson::StringBuffer> w(text);
+  w.StartObject();
+  w.Key("checkpoint");
+  w.Uint(history.checkpoints);
+  w.Key("margin_fraction");
+  w.Double(options.gp_buffer_margin);
+  w.Key("scale");
+  w.String(period_ps > 0 ? "shortest_clock_period" : "estimated_max_delay");
+  w.Key("scale_ps");
+  w.Double(scale_ps);
+  w.Key("margin_ps");
+  w.Double(margin);
+  w.Key("cooldown_checkpoints");
+  w.Uint(2);
+  w.Key("trials_per_phase");
+  w.Int(options.gp_buffer_trials);
+  w.Key("trials");
+  w.StartArray();
+  // Recompute candidates after insertion: a removal must see the accepted tree.
+  unsigned attempts = 0;
+  for (bool removal : {false, true}) {
+    const auto phase_state     = state;
+    const auto protected_names = protected_buffers(*state.graph, cells, library.special, true, options.control_ports);
+    const auto candidates
+        = edits(*state.graph, cells, result.timing, protected_names, state, options, library.tech, &library.drives);
+    Apply_index           index(*state.graph, state);
+    std::vector<Edit>     selected;
+    std::set<std::string> roots;
+    for (const auto& candidate : candidates) {
+      if (candidate.kind != (removal ? "remove" : "tree")) {
+        continue;
+      }
+      const auto  node   = index.nodes.find(candidate.node);
+      std::string driver = candidate.driver;
+      std::string upstream;
+      if (removal) {
+        if (node == index.nodes.end()) {
+          continue;
+        }
+        const auto* cell = buffer(node->second, cells);
+        if (!cell) {
+          continue;
+        }
+        driver               = physical_label(output(node->second, *cell));
+        const auto input_pin = physical_label(node->second.get_sink_pin(cell->inputs.front()));
+        const auto parent    = index.pin_driver.find(input_pin);
+        if (parent == index.pin_driver.end()) {
+          continue;
+        }
+        upstream = parent->second;
+      }
+      if (!ready(driver) || !ready(candidate.node) || (!upstream.empty() && !ready(upstream))) {
+        continue;
+      }
+      const auto feedback = result.timing.pins.find(driver);
+      if (feedback == result.timing.pins.end() || feedback->second.clock) {
+        continue;
+      }
+      const double slack = feedback->second.slack.value_or(-std::numeric_limits<double>::infinity()) * result.timing.time_unit_ps;
+      bool         eligible = false;
+      if (removal) {
+        const auto parent = result.timing.pins.find(upstream);
+        eligible          = slack > margin && parent != result.timing.pins.end() && !parent->second.clock && parent->second.slack
+                   && *parent->second.slack * result.timing.time_unit_ps > margin;
+        // Require positive margin on every sink, including branches. Unknown
+        // timing is not evidence that a buffer is safe to remove.
+        if (const auto net = index.nets.find(driver); net != index.nets.end()) {
+          for (const auto& p : net->second->nodes) {
+            if (p.pin.empty()) {
+              continue;
+            }
+            const auto f = result.timing.pins.find(p.pin);
+            eligible &= f != result.timing.pins.end() && f->second.slack && *f->second.slack * result.timing.time_unit_ps > margin;
+          }
+        } else {
+          eligible = false;
+        }
+      } else {
+        // Negative slack beyond the dead band, or a clear electrical violation.
+        eligible = feedback->second.slack && slack < -margin;
+        if (node != index.nodes.end()) {
+          if (const auto* cell = combinational(node->second, cells)) {
+            eligible |= drive_stress(*cell, feedback->second, result.timing.time_unit_ps) > 1.1;
+          }
+        }
+      }
+      if (eligible && roots.insert(removal ? upstream : driver).second) {
+        selected.push_back(candidate);
+      }
+    }
+    // Bounded batch bisection keeps a bad large proposal from suppressing all
+    // useful edits. Each branch starts from the latest accepted state.
+    std::vector<std::vector<Edit>> pending;
+    if (!selected.empty()) {
+      pending.push_back(std::move(selected));
+    }
+    const unsigned limit = attempts + options.gp_buffer_trials;
+    while (!pending.empty() && attempts < limit) {
+      const auto trial_started = std::chrono::steady_clock::now();
+      auto       batch         = std::move(pending.back());
+      pending.pop_back();
+      ++attempts;
+      ++result.repair_proposed;
+      auto   owner = std::make_shared<hhds::GraphLibrary>();
+      Result trial = state;
+      trial.graph
+          = partition::flatten_hierarchy(state.graph.get(), owner.get(), state.graph->get_name(), nullptr, false, {}, {}, true);
+      trial.fp_library = std::move(owner);
+      Apply_index              draft(*trial.graph, state);
+      unsigned                 changed  = 0;
+      unsigned                 inserted = 0;
+      std::vector<std::string> skipped;
+      std::vector<std::string> touched;
+      for (const auto& candidate : batch) {
+        // A prior accepted branch may have removed this cell.
+        if (removal && !draft.nodes.contains(candidate.node)) {
+          continue;
+        }
+        try {
+          const auto tree
+              = apply(*trial.graph, cells, candidate, protected_names, state, result.timing, options, library.tech, &draft, true);
+          if (!removal && !tree) {
+            continue;
+          }
+          ++changed;
+          if (tree) {
+            inserted += tree->buffers.size();
+          }
+          touched.push_back(candidate.node);
+          if (!candidate.driver.empty()) {
+            touched.push_back(candidate.driver);
+          }
+          if (removal) {
+            const auto old = index.nodes.find(candidate.node);
+            if (old != index.nodes.end()) {
+              const auto* cell      = buffer(old->second, cells);
+              const auto  input_pin = physical_label(old->second.get_sink_pin(cell->inputs.front()));
+              if (index.pin_driver.contains(input_pin)) {
+                touched.push_back(index.pin_driver.at(input_pin));
+              }
+            }
+          }
+        } catch (const std::runtime_error& error) {
+          if (skipped.size() < 16) {
+            skipped.push_back(candidate.node + ": " + error.what());
+          }
+        }
+      }
+      const auto prepared   = std::chrono::steady_clock::now();
+      double     rc_seconds = 0, timing_seconds = 0;
+      bool       keep  = false;
+      auto       after = result.timing;
+      if (changed) {
+        trial.net_weights = std::move(draft.weights);
+        trial.fp_buffer_origins.insert(draft.origins.begin(), draft.origins.end());
+        refresh(trial, Gp_refresh::edited);
+        const auto refreshed = std::chrono::steady_clock::now();
+        after                = evaluate(trial);
+        const auto evaluated = std::chrono::steady_clock::now();
+        rc_seconds           = std::chrono::duration<double>(refreshed - prepared).count();
+        timing_seconds       = std::chrono::duration<double>(evaluated - refreshed).count();
+        keep                 = retain(result.timing, after);
+        if (removal) {
+          for (const auto& driver : touched) {
+            if (driver.find(':') == std::string::npos && !after.pins.contains(driver)) {
+              continue;
+            }
+            const auto f = after.pins.find(driver);
+            if (f == after.pins.end() || !f->second.slack || *f->second.slack * after.time_unit_ps <= margin) {
+              keep = false;
+            }
+          }
+        }
+      }
+      w.StartObject();
+      w.Key("kind");
+      w.String(removal ? "remove" : "insert");
+      w.Key("candidates");
+      w.Uint64(batch.size());
+      w.Key("changed");
+      w.Uint(changed);
+      w.Key("buffers_inserted");
+      w.Uint(inserted);
+      w.Key("buffers_removed");
+      w.Uint(removal ? changed : 0);
+      w.Key("skipped");
+      w.StartArray();
+      for (const auto& message : skipped) {
+        w.String(message.c_str());
+      }
+      w.EndArray();
+      w.Key("accepted");
+      w.Bool(keep);
+      w.Key("rejection_reasons");
+      w.StartArray();
+      if (!keep) {
+        if (!changed) {
+          w.String("no_edits");
+        } else {
+          const auto failures = retention_failures(result.timing, after);
+          for (const auto reason : failures) {
+            w.String(reason.data(), reason.size());
+          }
+          if (failures.empty() && removal) {
+            w.String("removal_slack_margin");
+          }
+        }
+      }
+      w.EndArray();
+      w.Key("before_delay");
+      w.Double(result.timing.delay);
+      w.Key("after_delay");
+      w.Double(after.delay);
+      w.Key("prepare_s");
+      w.Double(std::chrono::duration<double>(prepared - trial_started).count());
+      w.Key("placement_rc_s");
+      w.Double(rc_seconds);
+      w.Key("timing_s");
+      w.Double(timing_seconds);
+      w.Key("restore_s");
+      const auto restore_started = std::chrono::steady_clock::now();
+      if (!keep && changed) {
+        // Trials own separate graphs and RC. The accepted snapshot was not
+        // mutated, so rebuilding its RC would repeat identical work.
+        refresh(state, Gp_refresh::restore);
+      }
+      w.Double(std::chrono::duration<double>(std::chrono::steady_clock::now() - restore_started).count());
+      w.EndObject();
+      if (keep) {
+        state.graph             = trial.graph;
+        state                   = std::move(trial);
+        result.timing           = std::move(after);
+        result.repair_accepted += changed;
+        for (const auto& name : touched) {
+          history.edited[name] = history.checkpoints;
+        }
+        for (const auto& [name, origin] : draft.origins) {
+          (void)origin;
+          history.edited[name] = history.checkpoints;
+          const auto node      = draft.nodes.find(name);
+          if (node != draft.nodes.end()) {
+            history.edited[physical_label(output(node->second, *buffer(node->second, cells)))] = history.checkpoints;
+          }
+        }
+      } else {
+        if (batch.size() > 1) {
+          const auto middle = batch.begin() + batch.size() / 2;
+          pending.emplace_back(batch.begin(), middle);
+          pending.emplace_back(middle, batch.end());
+        }
+      }
+    }
+  }
+  w.EndArray();
+  w.EndObject();
+  result.report = text.GetString();
+  return result;
+}
+
+Repair_result finalize_placement(const Result& initial, const Options& requested, const Evaluate& evaluate) {
+  if (!initial.graph || !requested.full) {
+    throw std::invalid_argument("final legalization requires a placed graph in full mode");
+  }
+  auto options                 = final_cell_options(requested);
+  options.optimization_pending = false;
+  options.gp_resize            = false;
+  options.completed_stage      = Placement_stage::final;
+  options.cell_stage           = true;
+  options.fp_place = options.final_cells = options.timing_seed = options.retain_placement = false;
+  options.macro_mode                                                                      = "none";
+  options.macro_snap                                                                      = false;
+  options.macro_align_weight = options.macro_cell_density_weight = options.macro_density_pull_weight = 0;
+  options.fp_pin_adjust = options.macro_pin_adjust = false;
+  options.after_stage                              = {};
+  options.fp_resize                                = false;
+  options.fp_evaluate                              = evaluate;
+  options.iterations = options.min_iterations = options.final_iterations = options.io_iterations = options.schedule_iterations = 0;
+  options.post_density_factor                                                                                                  = 0;
+  options.vanished_memory             = false;
+  options.vanished_memory_local_floor = 0;
+  options.macro_transparency          = {};
+  options.gp_search.enabled           = false;
+  options.cell_jump                   = {};
+  options.fp_warp.enabled = options.macro_warp.enabled = false;
+  options.satlegalize                                  = false;
+  options.legalize_timing_corrections                  = 0;
+  options.legalize_cells                               = false;
+  options.previous.reset();
+  options.changed_cells.clear();
+  options.cache_dir.clear();
+  options.net_weights = initial.net_weights;
+  options.output_dir  = requested.output_dir + "/final";
+  fs::create_directories(options.output_dir);
+  auto frame = initial.floorplan;
+  // Preserve IO locations while rebuilding RC and legalizing the repaired cells.
+  for (auto& terminal : frame.terminals) {
+    options.stage_pin_status[terminal.name] = terminal.status;
+    terminal.status                         = physical::Status::FIXED;
+  }
+  options.floorplan = options.output_dir + "/input.def";
+  physical::write_def(frame, options.floorplan);
+  options.restart_seed = std::make_shared<physical::Floorplan>(frame);
+  Repair_result result;
+  auto          library = std::make_unique<hhds::GraphLibrary>();
+  result.placed         = place(*initial.graph, *library, options);
+  result.libraries.push_back(std::move(library));
+  check_placed_legality(result.placed, options);
+  result.timing = evaluate(result.placed);
+  result.report = "{\"stage\":\"final_legalization\",\"gp_iterations\":0}";
+  // Keep optimization diagnostics, replacing geometry/RC metrics with the final
+  // result. Both the pre-final and final reports remain in their stage directory.
+  rapidjson::Document prior, final;
+  prior.Parse(initial.qor.c_str());
+  final.Parse(result.placed.qor.c_str());
+  if (prior.IsObject() && final.IsObject()) {
+    for (auto it = prior.MemberBegin(); it != prior.MemberEnd(); ++it) {
+      if (!final.HasMember(it->name)) {
+        final.AddMember(rapidjson::Value(it->name, final.GetAllocator()),
+                        rapidjson::Value(it->value, final.GetAllocator()),
+                        final.GetAllocator());
+      }
+    }
+    final.AddMember("before_final_legalization", rapidjson::Value(prior, final.GetAllocator()), final.GetAllocator());
+    rapidjson::StringBuffer                    buffer;
+    rapidjson::Writer<rapidjson::StringBuffer> writer(buffer);
+    final.Accept(writer);
+    result.placed.qor = buffer.GetString();
+  }
+  physical::write_def(result.placed.floorplan, requested.output_dir + "/out.def");
+  std::ofstream(requested.output_dir + "/qor.json") << result.placed.qor << '\n';
+  return result;
+}
+
 Repair_result repair_buffers(Result initial, const Options& requested, const Evaluate& evaluate, Repair_scope scope,
                              std::optional<Timing_feedback> prior_timing) {
   std::optional<Options> resolved_options;
@@ -1757,13 +2118,13 @@ Repair_result repair_buffers(Result initial, const Options& requested, const Eva
         try {
           hhds::GraphLibrary draft;
           auto               graph = partition::flatten_hierarchy(result.placed.graph.get(),
-                                                                  &draft,
-                                                                  result.placed.graph->get_name(),
-                                                                  nullptr,
-                                                                  false,
+                                                    &draft,
+                                                    result.placed.graph->get_name(),
+                                                    nullptr,
+                                                    false,
                                                                   {},
                                                                   {},
-                                                                  true);
+                                                    true);
           if (!graph) {
             throw std::runtime_error("cannot clone electrical sweep");
           }
@@ -1955,13 +2316,13 @@ Repair_result repair_buffers(Result initial, const Options& requested, const Eva
       try {
         hhds::GraphLibrary draft;
         auto               graph = partition::flatten_hierarchy(result.placed.graph.get(),
-                                                                &draft,
-                                                                result.placed.graph->get_name(),
-                                                                nullptr,
-                                                                false,
+                                                  &draft,
+                                                  result.placed.graph->get_name(),
+                                                  nullptr,
+                                                  false,
                                                                 {},
                                                                 {},
-                                                                true);
+                                                  true);
         if (!graph) {
           throw std::runtime_error("cannot clone buffer trial");
         }

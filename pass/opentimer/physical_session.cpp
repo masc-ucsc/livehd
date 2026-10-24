@@ -82,7 +82,7 @@ struct Physical_session::Impl : Pass_opentimer {
     apply_physical_rc(graph);
     prepare_critical_targets();
     apply_physical_captures();
-    timer.update_timing();
+    update_timing_profiled();
     for (const auto& net : physical_rc_->nets) {
       const auto* wire = timer.pins().at(pin_name(net.driver)).net();
       if (!wire) {
@@ -196,7 +196,7 @@ struct Physical_session::Impl : Pass_opentimer {
     // Flush gate edits before resolving newly inserted pins. Constraints and
     // unchanged gates remain in this same Timer throughout candidate rollback.
     if (changed) {
-      timer.update_timing();
+      update_timing_profiled();
     }
     // Resizing and coordinate-only updates preserve net membership. Avoid
     // reconstructing a million-pin connection map for those common calls.
@@ -249,7 +249,7 @@ struct Physical_session::Impl : Pass_opentimer {
 
   void finish_update(const std::shared_ptr<hhds::Graph>& graph, bool changed) {
     if (changed) {
-      timer.update_timing();
+      update_timing_profiled();
       apply_case_analysis();
       exclusions_dirty = true;
       std::vector<std::string> ideal;
@@ -763,7 +763,7 @@ struct Physical_session::Impl : Pass_opentimer {
       // Restore the SDC/Liberty masks before replacing our private subset.
       apply_case_analysis();
     }
-    timer.update_timing();
+    update_timing_profiled();
     std::unordered_set<std::string> roots;
     for (const auto& net : physical_rc_->nets) {
       if (exclusions.contains(net.driver)) {
@@ -790,9 +790,14 @@ struct Physical_session::Impl : Pass_opentimer {
       throw std::invalid_argument("physical timing requires a graph and in-memory RC");
     }
     discard_whatif();
-    const auto start = std::chrono::steady_clock::now();
-    physical_rc_     = std::move(rc);
+    const auto start               = std::chrono::steady_clock::now();
+    const auto initial_propagation = timing_propagation_seconds_;
+    const auto initial_updates     = timing_update_calls_;
+    physical_rc_                   = std::move(rc);
     validate_physical_rc(graph);
+    auto phase_start                            = std::chrono::steady_clock::now();
+    stats.validation_seconds                   += std::chrono::duration<double>(phase_start - start).count();
+    double                   phase_propagation  = timing_propagation_seconds_;
     livehd::timing::Feedback result;
     feedback_ = &result;
     try {
@@ -802,10 +807,25 @@ struct Physical_session::Impl : Pass_opentimer {
       } else {
         update(graph);
       }
+      auto phase_end = std::chrono::steady_clock::now();
+      stats.reconcile_seconds
+          += std::chrono::duration<double>(phase_end - phase_start).count() - (timing_propagation_seconds_ - phase_propagation);
+      phase_start       = phase_end;
+      phase_propagation = timing_propagation_seconds_;
       apply_data_exclusions(exclusions);
+      phase_end = std::chrono::steady_clock::now();
+      stats.exclusions_seconds
+          += std::chrono::duration<double>(phase_end - phase_start).count() - (timing_propagation_seconds_ - phase_propagation);
+      phase_start       = phase_end;
+      phase_propagation = timing_propagation_seconds_;
       compute_timing(graph);
-      previous_physical_rc_  = physical_rc_;
-      stats.updated_nets    += physical_updated_nets_;
+      phase_end = std::chrono::steady_clock::now();
+      stats.feedback_seconds
+          += std::chrono::duration<double>(phase_end - phase_start).count() - (timing_propagation_seconds_ - phase_propagation);
+      stats.propagation_seconds += timing_propagation_seconds_ - initial_propagation;
+      stats.update_calls        += timing_update_calls_ - initial_updates;
+      previous_physical_rc_      = physical_rc_;
+      stats.updated_nets        += physical_updated_nets_;
       ++stats.evaluations;
       stats.seconds += std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count();
     } catch (...) {

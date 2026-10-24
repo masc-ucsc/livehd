@@ -17,7 +17,7 @@ struct Wire_rc {
 // commands are parsed as data and never executed. Unspecified units come from
 // the first Liberty library header, matching its technology command units.
 Wire_rc          technology_wire_rc(const physical::Technology& tech, const std::string& liberty, const std::string& rc_file,
-                                    double resistance = -1, double capacitance = -1);
+                                    double resistance = -1, double capacitance = -1, double rc_pessimism = 1);
 // One net's FLUTE Steiner RC exactly as placement RC estimation builds it, from
 // pin labels and positions in DBU (pins[0] is normally the driver). Above 1000
 // distinct locations it joins spatial FLUTE groups, retains an acyclic

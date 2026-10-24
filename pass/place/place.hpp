@@ -11,6 +11,7 @@
 
 #include "boundary_pins.hpp"
 #include "busorder.hpp"
+#include "cell_jump.hpp"
 #include "core/physical_rc.hpp"
 #include "core/timing_feedback.hpp"
 #include "core/timing_whatif.hpp"
@@ -72,37 +73,51 @@ struct Options {
   double                            timing_exponent             = 1;  // convex criticality curve; 1 preserves linear weights
   double                            timing_spread_weight        = 0;  // [0,1] protection from extra routing/local spreading
   int                               macro_timing_interval       = 50;
+  int                                   final_timing_start          = 200;      // GP warm-up before placement STA
+  std::string                           final_timing_schedule       = "fixed";  // fixed | late (4x, 2x, 1x cadence)
   // Opt-in fresh timing displacement protection, bounded to 100x.
   double                            legalize_timing_strength    = 0;
   double                            legalize_timing_threshold   = 0;
   unsigned                          legalize_timing_corrections = 0;
-  bool                              terminal_legalize           = true;
+  // Internal lifecycle state: optimization trials need legal snapshots before
+  // the mandatory final legalization. Never exposed as a user option.
+  bool                                  optimization_pending        = false;
   Busorder_options                  busorder;
   Boundary_pin_options              boundarypins;
-  Terminal_legalize_options         terminal_legalize_options;
-  int                               fp_timing_max_updates = 10;
-  bool                              fp_resize             = false;
-  bool                              repair_reset          = false;  // retired: true is rejected before pre-CTS optimization
+  Cell_jump_options                     cell_jump;                // diagnostic: extend a supplied distance-one seed
+  bool                                  vanished_memory = false;  // final-GP centered memory growth and local-pressure ramp
+  double                                vanished_memory_local_floor = 0;
+  DreamPlace::native::GpSearch          gp_search;           // opt-in final-GP A/B trials
+  DreamPlace::native::MacroTransparency macro_transparency;  // diagnostic final-GP barrier schedule
+  Terminal_legalize_options             terminal_legalize_options;
+  int                                   fp_timing_max_updates = 10;
+  bool                                  fp_resize             = false;
+  // Resolved by the driver: enabled with resize unless explicitly disabled.
+  bool                                  gp_resize             = false;
+  int                                   gp_buffer_trials      = 4;    // maximum attempts per insertion/removal phase
+  double                                gp_buffer_margin      = .01;  // fraction of clock period (path delay without clocks)
+
+  bool                                  repair_reset   = false;  // retired: true is rejected before pre-CTS optimization
   // synth.place.resize.engine: "new" = path-based sizing/buffering on the
   // incremental what-if timer (resize_engine.hpp); "legacy" = batch sweeps.
-  std::string                       resize_engine         = "legacy";
-  bool                              resize_vt_swap        = false;  // allow same-footprint swaps across Liberty files (multi-VT)
-  std::vector<std::string>          resize_dont_use;                // glob patterns never chosen as a new master
+  std::string                           resize_engine  = "legacy";
+  bool                                  resize_vt_swap = false;  // allow same-footprint swaps across Liberty files (multi-VT)
+  std::vector<std::string>              resize_dont_use;         // glob patterns never chosen as a new master
   // What-if handle of the timer behind fp_evaluate/evaluate (required by engine=new).
-  livehd::timing::Whatif*           whatif       = nullptr;
+  livehd::timing::Whatif*               whatif       = nullptr;
   // Legacy reset-tree control retained for a clear diagnostic on nonzero values.
-  unsigned                          reset_fanout = 0;  // retired: pre-CTS control nets are never buffered
-  std::string                       control_ports;     // override optional roots; recognized resets stay excluded
-  Evaluate                          fp_evaluate;
-  double                            fp_minimum = 3000, fp_attraction = .25, fp_repulsion = 5, fp_anchor = .25;
-  bool                              fp_distance_attraction = true;
-  bool                              fp_anchor_macros_only  = false;  // frozen targets; retain all-member normalization
-  double                            fp_attraction_outside  = 4;      // additional stiffness beyond the centroid circle
-  double                            fp_align_weight = 0, fp_align_sigma = .25;
-  int                               fp_align_start = 100, fp_align_full = 500;
-  double                            fp_parent_weight = 0, fp_parent_outside = 4;
-  DreamPlace::native::FloorplanOptions                       fp_snap;
-  DreamPlace::native::macro::Parameters                      macro_parameters;
+  unsigned                              reset_fanout = 0;  // retired: pre-CTS control nets are never buffered
+  std::string                           control_ports;     // override optional roots; recognized resets stay excluded
+  Evaluate                              fp_evaluate;
+  double                                fp_minimum = 3000, fp_attraction = .25, fp_repulsion = 5, fp_anchor = .25;
+  bool                                  fp_distance_attraction = true;
+  bool                                  fp_anchor_macros_only  = false;  // frozen targets; retain all-member normalization
+  double                                fp_attraction_outside  = 4;      // additional stiffness beyond the centroid circle
+  double                                fp_align_weight = 0, fp_align_sigma = .25;
+  int                                   fp_align_start = 100, fp_align_full = 500;
+  double                                fp_parent_weight = 0, fp_parent_outside = 4;
+  DreamPlace::native::FloorplanOptions  fp_snap;
+  DreamPlace::native::macro::Parameters macro_parameters;
   std::shared_ptr<const DreamPlace::native::macro::Topology> macro_topology;
   // In-process ECO reference; independent of persistent-cache admission.
   std::shared_ptr<const physical::Floorplan>                 previous;
@@ -133,9 +148,9 @@ struct Options {
   double      virtual_filler_cell_scale = 1, virtual_filler_bin_fraction = .25;
   int         bin_max = 512, local_density_bins = 512;
   double      local_density_weight = 0, local_density_range = 4, local_density_jitter = .01;
-  double      local_density_target = -1;  // -1 inherits the global density target
-  double      macro_cell_density_weight = 0;  // standard-cell pressure on macros during macro GP only
-  double      macro_cell_density_reach = 2;   // screening length / largest physical SRAM side
+  double      local_density_target      = -1;  // -1 inherits the global density target
+  double      macro_cell_density_weight = 0;   // standard-cell pressure on macros during macro GP only
+  double      macro_cell_density_reach  = 2;   // screening length / largest physical SRAM side
   double      macro_density_pull_weight = 0, macro_density_pull_range = 4;
   bool        automatic_bins = false, exact_macro_density = true, adaptive_density = true, routability = true;
   std::string route_model = "rsmt";
@@ -155,6 +170,7 @@ struct Options {
   int                                  schedule_iterations = 500, io_iterations = 500;
   double                               cohesion          = 0;
   double                               resistance_ohm_um = -1, capacitance_ff_um = -1;
+  double                               rc_pessimism = 1;  // wire R and C each scale by sqrt(factor)
   int                                  iterations = 1500, bins = 64, threads = 1;
   double                               fixed_macro_overlap_weight = 0;
   double                               wirelength_gamma_end       = .05;  // experimental; existing smoothing schedule by default

@@ -66,7 +66,7 @@ struct Fixture {
   Pin_align_stats run(const std::vector<int>& macros = {}) { return align_boundary_pins(m, mesh, bits, macros); }
 };
 }  // namespace
-TEST(Pinalign, DirectAndOneCellMoveOnlyOutputVirtualPin) {
+TEST(Pinalign, DirectWireKeepsInputWhileOneCellMovesBothVirtualPins) {
   for (bool cell : {false, true}) {
     Fixture    f(cell);
     const auto old = f.m.design;
@@ -74,10 +74,10 @@ TEST(Pinalign, DirectAndOneCellMoveOnlyOutputVirtualPin) {
     EXPECT_EQ(s.direct, cell ? 0u : 1u);
     EXPECT_EQ(s.one_cell, cell ? 1u : 0u);
     ASSERT_EQ(s.aligned, 1u);
-    EXPECT_EQ(s.moved, 1u);
+    EXPECT_EQ(s.moved, cell ? 2u : 1u);
     EXPECT_EQ(s.already_aligned, 0u);
-    EXPECT_EQ(f.m.anchors[0].y, 20);
-    EXPECT_EQ(f.m.anchors[1].y, 20);
+    EXPECT_EQ(f.m.anchors[0].y, cell ? 50 : 20);
+    EXPECT_EQ(f.m.anchors[1].y, cell ? 50 : 20);
     EXPECT_EQ(f.m.anchors[1].x, 70);
     for (int n = 0; n < 3; ++n) {
       EXPECT_EQ(f.m.design.node_x[n], old.node_x[n]);
@@ -193,16 +193,89 @@ TEST(Pinalign, ConnectedChainIsAlignedAtomically) {
   EXPECT_EQ(blocked.m.anchors[1].y, 60);
   EXPECT_EQ(blocked.m.anchors[2].y, 80);
 }
-TEST(Pinalign, ConflictingOneCellInputsAreAmbiguous) {
-  Fixture   f(true);
-  const int a = f.anchor(30, 40, 2);
-  f.net({0, a}, 0, 2, 0);
-  f.net({a, 1}, 1, 2, -1);
-  auto s = f.run();
+TEST(Pinalign, ConflictingTargetsForSharedCellInputSkipTheWholeGroup) {
+  Fixture f(true);
+  // The same boundary pin fans into two distinct cell pins with different Y.
+  f.net({3, 1}, 1, 0, -1);
+  f.m.design.pin_offset_y.back() = .5;
+  auto s                         = f.run();
   EXPECT_EQ(s.one_cell, 2u);
   EXPECT_EQ(s.ambiguous, 2u);
   EXPECT_EQ(s.aligned, 0u);
+  EXPECT_EQ(f.m.anchors[0].y, 20);
   EXPECT_EQ(f.m.anchors[1].y, 60);
+}
+TEST(Pinalign, OneCellUsesDistinctOrientedPhysicalPinCoordinatesOnBothAxes) {
+  for (bool vertical : {false, true}) {
+    for (bool mirrored : {false, true}) {
+      Fixture f(true);
+      auto&   d        = f.m.design;
+      d.node_size_x[1] = d.node_size_y[1] = 10;
+      d.node_orientation.assign(d.node_x.size(), DreamPlace::native::Orientation::N);
+      d.node_orientation[1] = mirrored ? DreamPlace::native::Orientation::FN : DreamPlace::native::Orientation::N;
+      // Offsets are already orientation-transformed, as supplied by LiveHD.
+      double input = mirrored ? 7.5 : 2.5, output = mirrored ? 2.5 : 7.5;
+      d.pin_offset_y[3] = input;
+      d.pin_offset_y[4] = output;
+      if (vertical) {
+        for (auto& r : f.mesh) {
+          std::swap(r.xl, r.yl);
+          std::swap(r.xh, r.yh);
+        }
+        for (auto& p : f.m.anchors) {
+          std::swap(p.x, p.y);
+        }
+        std::swap(d.node_x, d.node_y);
+        std::swap(d.pin_offset_x, d.pin_offset_y);
+      }
+      const auto old_x = d.node_x, old_y = d.node_y;
+      auto       s = f.run();
+      ASSERT_EQ(s.aligned, 1u);
+      EXPECT_EQ(s.moved, 2u);
+      EXPECT_EQ(vertical ? f.m.anchors[0].x : f.m.anchors[0].y, 50 + input);
+      EXPECT_EQ(vertical ? f.m.anchors[1].x : f.m.anchors[1].y, 50 + output);
+      EXPECT_EQ(vertical ? f.m.anchors[0].y : f.m.anchors[0].x, 30);
+      EXPECT_EQ(vertical ? f.m.anchors[1].y : f.m.anchors[1].x, 70);
+      EXPECT_EQ(s.pairs[0].input_cell_pin, 3);
+      EXPECT_EQ(s.pairs[0].output_cell_pin, 4);
+      for (int n = 0; n < 3; ++n) {
+        EXPECT_EQ(d.node_x[n], old_x[n]);
+        EXPECT_EQ(d.node_y[n], old_y[n]);
+      }
+    }
+  }
+}
+TEST(Pinalign, ConflictOnEitherCellBoundaryLeavesBothPinsUnchanged) {
+  for (bool input_side : {false, true}) {
+    Fixture f(true);
+    f.bits.push_back({input_side ? "data" : "result", 1});
+    f.anchor(input_side ? 30 : 70, input_side ? 40 : 55, 2);
+    auto s = f.run();
+    EXPECT_EQ(s.order_conflicts, 1u);
+    EXPECT_EQ(s.aligned, 0u);
+    EXPECT_EQ(f.m.anchors[0].y, 20);
+    EXPECT_EQ(f.m.anchors[1].y, 60);
+  }
+}
+TEST(Pinalign, CellOutputCoordinatePropagatesThroughADirectWireChain) {
+  Fixture f(true);
+  f.mesh = {
+      { 0, 0,  30, 100, 0},
+      {30, 0,  70, 100, 0},
+      {70, 0,  80, 100, 0},
+      {80, 0, 100, 100, 0}
+  };
+  f.m.design.pin_offset_y[3] = .25;
+  f.m.design.pin_offset_y[4] = .75;
+  int last                   = f.anchor(80, 80, 1);
+  f.m.design.net_mask.back() = 0;
+  f.net({4, last}, 2, 1, -1);
+  f.net({last, 2}, 3, 1, -1);
+  auto s = f.run();
+  ASSERT_EQ(s.aligned, 2u);
+  EXPECT_EQ(f.m.anchors[0].y, 50.25);
+  EXPECT_EQ(f.m.anchors[1].y, 50.75);
+  EXPECT_EQ(f.m.anchors[2].y, 50.75);
 }
 TEST(Pinalign, SplitMetadataRetainsOriginalDriverAndLocalRegions) {
   DreamPlace::native::Design d;

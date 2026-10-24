@@ -22,6 +22,29 @@ Existing user defaults remain unchanged: <code>route.model=rudy</code>.</p>
 <p>Store benchmark statistics, stage snapshots and performance records under
 <code>repros/</code>; share selected reports and images through ChatGPT.
 Generated evaluation results do not belong in versioned documentation.</p>
+
+<h2 id="timing-warmup">TODO: start final-GP timing when placement settles</h2>
+<p>For now, <code>synth.place.final.timing_start=200</code> prevents in-loop
+placement timing and adaptive A/B timing measurements during the first 200 GP
+iterations. At the normal 50-iteration cadence, the first checkpoint refreshes
+criticalities at 200; real buffer repair can begin at 250. Cell jumps are allowed
+only before the first actual placement timing evaluation. End-of-placement
+reports and legalization priorities remain available for short diagnostic runs.</p>
+<ul>
+  <li>Replace or supplement the fixed warm-up with a sustained stability check
+  on the relative rate of HPWL decrease and/or RSMT-RUDY improvement over a
+  rolling window. Avoid technology-specific absolute wirelength thresholds.</li>
+  <li>Distinguish slow improvement from a short plateau or oscillation; require
+  several stable samples. Reset the window after cell jumps or major macro
+  exclusion, density-force, or topology changes.</li>
+  <li>Interpret routability only with meaningful macro geometry and comparable
+  routing capacity; track unreachable nets and blocked pins separately from
+  congestion overflow. Consider a bounded fallback if stability never arrives.</li>
+  <li>Trace the measured slopes, window, trigger reason, and first timing/repair
+  iteration. Compare against the fixed 200-iteration control on CNN and Eyeriss,
+  including runtime, buffer churn, and OpenROAD CTS-to-route timing and DRCs.</li>
+</ul>
+
 <h2>Depends on</h2>
 <p>Nothing outstanding must finish first. This extends the routability flow of
 <a class="xref" href="3p-placement.html">3p-placement</a>; the current behavior is
