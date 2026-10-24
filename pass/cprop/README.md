@@ -53,7 +53,7 @@ widening, pack or shift of an invariant mints no gate and would only add a
 bound input per instance. A body also instantiated as an ordinary Sub is
 left alone (that call's inputs may all vary); a cone reading an input some
 instance leaves unconnected stays. Sweeps repeat while a hoisted cone lands
-in a parent that is itself a body. `LIVEHD_LOOP_HOIST_DEBUG=1` prints each
+in a parent that is itself a body. `LHD_LOOP_HOIST_DEBUG=1` prints each
 move; `--set compile.cprop.loop_hoist=false` disables it. On the lhdtrack
 `for`-loop designs the bodies are ordinal-indexed slices with little
 invariant computation, so the move is neutral there; the rolled form's

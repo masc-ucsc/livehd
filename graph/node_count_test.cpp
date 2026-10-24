@@ -152,16 +152,16 @@ TEST(NodeCount, PrunedSkipsOpaqueChild) {
 // the gate (returns the max so no count can exceed it), and an unset/garbage
 // value falls back to the ~1M default.
 TEST(NodeCount, ThresholdEnvOverride) {
-  ::setenv("LIVEHD_LARGE_DESIGN_NODES", "5", 1);
+  ::setenv("LHD_LARGE_DESIGN_NODES", "5", 1);
   EXPECT_EQ(large_design_node_threshold(), 5u);
 
-  ::setenv("LIVEHD_LARGE_DESIGN_NODES", "0", 1);
+  ::setenv("LHD_LARGE_DESIGN_NODES", "0", 1);
   EXPECT_EQ(large_design_node_threshold(), UINT64_MAX) << "0 disables the gate";
 
-  ::setenv("LIVEHD_LARGE_DESIGN_NODES", "not-a-number", 1);
+  ::setenv("LHD_LARGE_DESIGN_NODES", "not-a-number", 1);
   EXPECT_EQ(large_design_node_threshold(), livehd::graph_util::large_design_nodes_default)
       << "garbage falls back to the default";
 
-  ::unsetenv("LIVEHD_LARGE_DESIGN_NODES");
+  ::unsetenv("LHD_LARGE_DESIGN_NODES");
   EXPECT_EQ(large_design_node_threshold(), livehd::graph_util::large_design_nodes_default);
 }

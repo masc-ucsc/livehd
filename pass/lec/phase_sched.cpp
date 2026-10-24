@@ -13,6 +13,7 @@
 
 #include "absl/container/flat_hash_set.h"
 #include "cell.hpp"
+#include "debug_env.hpp"
 #include "latch_contract.hpp"
 #include "node_util.hpp"
 
@@ -464,7 +465,7 @@ Phase_plan plan_phases(hhds::Graph* g, const absl::flat_hash_map<std::string, bo
       }
     }
     if (!interesting) {
-      if (std::getenv("LEC_PHASE_PLAN") != nullptr) {
+      if (livehd::debug::env<"LHD_LEC_PHASE_PLAN">() != nullptr) {
         std::fprintf(stderr,
                      "[LEC_PLAN] %-46s FAST-REJECT (no latch / negedge / Clock_cell anywhere)\n",
                      std::string{g->get_name()}.c_str());
@@ -774,10 +775,10 @@ Phase_plan plan_phases(hhds::Graph* g, const absl::flat_hash_map<std::string, bo
            + "` is clocked by a bit of a multi-bit input that the clock walk cannot identify; the phase schedule "
              "cannot tell which bit of the bus it commits on");
   }
-  // LEC_PHASE_LOG-style diagnostic, emitted LAST: `multi`, `n_roots` and the
+  // LHD_LEC_PHASE_LOG-style diagnostic, emitted LAST: `multi`, `n_roots` and the
   // refusals are all decided above, and printing before they are set reports a
   // plan that does not exist (it cost an hour of chasing a phantom `multi=0`).
-  if (std::getenv("LEC_PHASE_PLAN") != nullptr) {
+  if (livehd::debug::env<"LHD_LEC_PHASE_PLAN">() != nullptr) {
     std::fprintf(stderr,
                  "[LEC_PLAN] %-46s %s roots=%d multi=%d needs_plan=%d multi_root=%d ok=%d %s\n",
                  std::string{g->get_name()}.c_str(),

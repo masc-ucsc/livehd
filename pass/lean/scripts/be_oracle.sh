@@ -28,7 +28,7 @@ FIXTURE="$OUT/BeOracle.lean"
 
 rm -f -- "$FIXTURE"
 echo "[be-oracle] generating $FIXTURE"
-LEAN_BE_FIXTURE="$FIXTURE" "$TEST_BIN" \
+LHD_LEAN_BE_FIXTURE="$FIXTURE" "$TEST_BIN" \
   --gtest_filter='DesignScanClocks.ByteEnableAndForwardingValueOracle' > "$OUT/generate.log" 2>&1
 [[ -s "$FIXTURE" ]] || { echo "[be-oracle] FAIL: no fixture; see $OUT/generate.log" >&2; exit 1; }
 

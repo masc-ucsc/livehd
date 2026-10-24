@@ -6,6 +6,7 @@
 #include <string_view>
 #include <vector>
 
+#include "clock_gate.hpp"  // //graph
 #include "hhds/graph.hpp"
 #include "loop_cleanup.hpp"
 #include "preparation_budget.hpp"
@@ -27,6 +28,7 @@ struct Prepared_design {
   Reassoc_stats                             reassoc;  // what `reassociate_loops` merged
   Register_merge_stats                      merged;   // what `merge_registers` merged
   State_sweep_stats                         sweep;    // what `state_sweep` removed
+  clock_gate::Clock_gate_stats              gating;   // what `clock_gate` collapsed and inferred
 };
 
 // What prepare_design reassociates among the cells a loop expansion minted.
@@ -57,6 +59,11 @@ enum class Loop_reassoc {
 struct State_options {
   bool             state_sweep     = false;
   bool             merge_registers = false;
+  // synth.clock_gate: collapse the existing Clock_cells and gate registers that share enable conjuncts (clock_gate.hpp). The
+  // minimum bits a gate must cover and the chain depth are synth.clock_gate_min_bits / synth.clock_gate_depth.
+  bool             clock_gate          = false;
+  uint32_t         clock_gate_min_bits = 16;
+  uint32_t         clock_gate_depth    = 1;
   std::string_view top;  // the definition whose outputs the sweep must keep in full
 };
 std::unique_ptr<Prepared_design> prepare_design(std::span<const std::shared_ptr<hhds::Graph>> sources, bool unroll_carry,

@@ -2064,6 +2064,90 @@ TEST(SimColorPlan, ZeroPaddedConcatDoesNotOverlapAnotherPackedField) {
   }
 }
 
+// Work that feeds only flops clocked by one plain Clock_cell is owned by that cell (so an emitter can skip it while the gate is
+// closed); work something else also reads, the cell itself, and a flop on an asynchronous reset are not.
+TEST(SimColorPlan, ClockGatedConeIsOwnedByItsCell) {
+  auto& lib = livehd::Hhds_graph_library::instance("lgdb_color_plan_gate_cone");
+  auto  io  = lib.create_io("gate_cone");
+  io->add_input("clk", 0);
+  io->add_input("en", 1);
+  io->add_input("a", 2);
+  io->add_input("b", 3);
+  io->add_output("q0", 4);
+  io->add_output("q1", 5);
+  io->add_output("s", 6);
+  auto graph = io->create_graph();
+
+  const auto op = [&](Ntype_op kind, const hhds::Pin_class& x, const hhds::Pin_class& y) {
+    auto node = gu::create_typed_node(*graph, kind);
+    gu::setup_sink_pid(node, 0).connect_driver(x);
+    gu::setup_sink_pid(node, 0).connect_driver(y);
+    auto out = node.create_driver_pin(0);
+    gu::set_bits(out, 8);
+    return out;
+  };
+  auto cell = gu::create_typed_node(*graph, Ntype_op::Clock_cell);
+  graph->get_input_pin("clk").connect_sink(gu::setup_sink_by_name(cell, "clk_ref"));
+  graph->get_input_pin("en").connect_sink(gu::setup_sink_by_name(cell, "en"));
+  auto gclk = cell.create_driver_pin(0);
+  gu::set_bits(gclk, 1);
+
+  auto owned_a  = op(Ntype_op::Xor, graph->get_input_pin("a"), graph->get_input_pin("b"));
+  auto owned_b  = op(Ntype_op::And, owned_a, graph->get_input_pin("a"));
+  auto shared   = op(Ntype_op::Or, graph->get_input_pin("a"), graph->get_input_pin("b"));
+  auto flop0    = gu::create_typed_node(*graph, Ntype_op::Flop, 8);
+  auto flop1    = gu::create_typed_node(*graph, Ntype_op::Flop, 8);
+  gclk.connect_sink(gu::setup_sink_by_name(flop0, "clock_pin"));
+  owned_b.connect_sink(gu::setup_sink_by_name(flop0, "din"));
+  gclk.connect_sink(gu::setup_sink_by_name(flop1, "clock_pin"));
+  shared.connect_sink(gu::setup_sink_by_name(flop1, "din"));
+  flop0.create_driver_pin(0).connect_sink(graph->get_output_pin("q0"));
+  flop1.create_driver_pin(0).connect_sink(graph->get_output_pin("q1"));
+  shared.connect_sink(graph->get_output_pin("s"));  // observed whether or not the gate is open
+
+  auto plan = livehd::sim::Color_plan::discover(graph.get());
+  ASSERT_TRUE(plan.summary().color_dag_acyclic);
+  size_t cell_version = plan.version_sites().size();
+  for (size_t i = 0; i < plan.version_sites().size(); ++i) {
+    if (gu::type_op_of(plan.sites()[plan.version_sites()[i].base_site].node) == Ntype_op::Clock_cell) {
+      cell_version = i;
+    }
+  }
+  ASSERT_LT(cell_version, plan.version_sites().size());
+  size_t owned = 0;
+  for (size_t i = 0; i < plan.version_sites().size(); ++i) {
+    const auto& version = plan.version_sites()[i];
+    const auto  kind    = gu::type_op_of(plan.sites()[version.base_site].node);
+    if (kind == Ntype_op::Xor || kind == Ntype_op::And) {
+      EXPECT_EQ(version.gate_owner, cell_version);
+    } else if (kind == Ntype_op::Or || kind == Ntype_op::Clock_cell) {
+      EXPECT_EQ(version.gate_owner, livehd::sim::Color_plan::invalid_index);
+    } else if (kind == Ntype_op::Flop && version.role == livehd::sim::Color_plan::Version_role::state_update) {
+      EXPECT_EQ(version.gate_owner, cell_version);
+    }
+    owned += version.gate_owner == cell_version ? 1 : 0;
+  }
+  EXPECT_EQ(owned, 4U);  // Xor, And and both flop updates
+  // Coarsening never mixes an owned version with an unowned one.
+  for (const auto& color : plan.colors()) {
+    for (const size_t member : color.members) {
+      EXPECT_EQ(plan.version_sites()[member].gate_owner, plan.version_sites()[color.members.front()].gate_owner);
+    }
+  }
+  // The cell's activation is ready before every piece of the work it gates.
+  std::set<size_t> after_cell;
+  for (const auto& edge : plan.version_dependencies()) {
+    if (edge.producer == cell_version) {
+      after_cell.insert(edge.consumer);
+    }
+  }
+  for (size_t i = 0; i < plan.version_sites().size(); ++i) {
+    if (plan.version_sites()[i].gate_owner == cell_version) {
+      EXPECT_TRUE(after_cell.contains(i));
+    }
+  }
+}
+
 TEST(SimColorPlan, StateActionsMergeWithinTheirExecutionSlot) {
   auto fixture = make_flop_feeds_high_latch("singleton_state");
   auto plan    = livehd::sim::Color_plan::discover(fixture.graph.get());

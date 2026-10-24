@@ -47,7 +47,7 @@ Newer chisel/firrtl generation: (like using until reserved SV keyword)
 The fused flow — compile -> `pass color synth` -> `pass abc` -> `pass
 opentimer` over one in-memory design. `--top` takes the bare entity, one
 Liberty feeds both abc and opentimer (`synth.liberty`, default
-`$HAGENT_TECH_DIR/sky130_fd_sc_hd__tt_025C_1v80.lib`), and with a `--workdir`
+`$LHD_TECH_DIR/sky130_fd_sc_hd__tt_025C_1v80.lib`), and with a `--workdir`
 the compiled design, the mapped netlist and both reports land under
 `W/synth/` while a re-run reuses everything unchanged (compile cache +
 `abc_cache/`; `--set lhd.incremental=false` forces an honest cold run with the
@@ -72,7 +72,7 @@ to look at an intermediate.
 
 The frequency-optimization loop primitives on `xs_core_prp/Alu.prp` (imports
 resolve from sibling files in the same directory). `pass abc` uses
-`$HAGENT_TECH_DIR/sky130_fd_sc_hd__tt_025C_1v80.lib` by default; add
+`$LHD_TECH_DIR/sky130_fd_sc_hd__tt_025C_1v80.lib` by default; add
 `--set synth.liberty=FILE` for another Liberty.
 
 ```
@@ -87,7 +87,7 @@ resolve from sibling files in the same directory). `pass abc` uses
 # accurate scorer: OpenTimer STA on ONE mapped module (pick a hot region from
 # qor.json, e.g. SubModule) -> alu_w/timing.json {max_delay, critical_pin,
 # critical_src "file:line", endpoints[]}
-./bazel-bin/lhd/lhd pass opentimer --top 'SubModule.SubModule__c0' lg:alu_net $HAGENT_TECH_DIR/sky130_fd_sc_hd__tt_025C_1v80.lib --workdir alu_w
+./bazel-bin/lhd/lhd pass opentimer --top 'SubModule.SubModule__c0' lg:alu_net $LHD_TECH_DIR/sky130_fd_sc_hd__tt_025C_1v80.lib --workdir alu_w
 ```
 
 The loop gate (only LEC-passing edits survive). `lhd lec` reads `.prp` sides
@@ -140,7 +140,7 @@ file:line, endpoints[]):
 
 ```
 ./bazel-bin/lhd/lhd pass opentimer --top ALU.ALU__c0 \
-    lg:dino_lg_abc $HAGENT_TECH_DIR/sky130_fd_sc_hd__tt_025C_1v80.lib --workdir dino_wd
+    lg:dino_lg_abc $LHD_TECH_DIR/sky130_fd_sc_hd__tt_025C_1v80.lib --workdir dino_wd
 #   -> {"module":"ALU.ALU__c0","max_delay":25.0,"critical_pin":"g2975_...o32ai_1:Y",
 #       "critical_src":"dino_prp/ALU.prp:2", ...}
 ```
@@ -156,7 +156,7 @@ inputs):
 
 ```
 ./bazel-bin/lhd/lhd pass opentimer --top PipelinedDualIssueCPU \
-    lg:dino_lg_abc $HAGENT_TECH_DIR/sky130_fd_sc_hd__tt_025C_1v80.lib --workdir dino_wd
+    lg:dino_lg_abc $LHD_TECH_DIR/sky130_fd_sc_hd__tt_025C_1v80.lib --workdir dino_wd
 #   -> {"module":"PipelinedDualIssueCPU.PipelinedDualIssueCPU","max_delay":45.5,
 #       "critical_pin":"...pipeA_ex_mem.u_StageReg_6.StageReg_6__c1.g...:X",
 #       "critical_src":"dino_prp/StageReg_6.prp:13", ...}  # a cross-module cone

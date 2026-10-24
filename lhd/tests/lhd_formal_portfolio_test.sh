@@ -94,13 +94,13 @@ grep -qE "^formal verify: 'inv.inv' PROVEN-(full|bounded)" "$OUT" || fail "engin
 
 # Step 6's run (see below) is launched now so its 12 s wall wait overlaps step 5's.
 rm -rf "$W/wd6"
-LIVEHD_LEC_RACER_STALL_ONLY=0 LIVEHD_LEC_RACER_STALL_S=60 "$LHD" formal verify "$W/portfolio.prp" --top portfolio \
+LHD_LEC_RACER_STALL_ONLY=0 LHD_LEC_RACER_STALL_S=60 "$LHD" formal verify "$W/portfolio.prp" --top portfolio \
   --workdir "$W/wd6" --set formal.bound=10 --set formal.timeout=1 --set formal.min_timeout=1 >"$W/out6" 2>&1 &
 WD6_PID=$!
 
 # 5. bmc-first WALL-KILLED, ind-first survives. The race deadline SIGKILLs a
 #    strategy stuck past formal.timeout (cvc5 preprocessing is not covered by its
-#    own limit); LIVEHD_LEC_RACER_STALL_ONLY=0 stalls just bmc-first so it is the
+#    own limit); LHD_LEC_RACER_STALL_ONLY=0 stalls just bmc-first so it is the
 #    one killed (deadline = max(1+1+10, 3x1) = 12 s). The survivor ran at the
 #    SHALLOW ind-first bound, so its bounded-Proven of `a != 5` (true only to
 #    cycle ~2; the bug is at cycle 7) must NOT be adopted as the run's verdict:
@@ -108,7 +108,7 @@ WD6_PID=$!
 #    unbounded twin invariant stays PROVEN-full, the shallow one becomes
 #    TIMEOUT-time ("proven to cycle k"), so the run is TIMEOUT-time: exit 0 with
 #    a formal-timeout-time warning (owner ruling), never a PROVEN-* headline.
-LIVEHD_LEC_RACER_STALL_ONLY=0 LIVEHD_LEC_RACER_STALL_S=60 "$LHD" formal verify "$W/portfolio.prp" --top portfolio \
+LHD_LEC_RACER_STALL_ONLY=0 LHD_LEC_RACER_STALL_S=60 "$LHD" formal verify "$W/portfolio.prp" --top portfolio \
   --set formal.bound=10 --set formal.timeout=1 --set formal.min_timeout=1 >"$OUT" 2>&1
 RC=$?
 [ "$RC" -eq 0 ] || fail "a wall-killed bmc-first is a TIMEOUT-time run (rc 0), not a refusal or refute (rc=$RC): $(cat "$OUT")"
@@ -167,7 +167,7 @@ done
 # Explicit proof effort uses one wall allowance even with a cache and jobs=1.
 # The outer worker's cache traffic must survive that extra process boundary.
 for engine in auto bmc; do
-  LIVEHD_LEC_RACER_STALL_S=5 "$LHD" formal verify "$W/inv.prp" --top inv \
+  LHD_LEC_RACER_STALL_S=5 "$LHD" formal verify "$W/inv.prp" --top inv \
     --set formal.effort=proof --set formal.timeout=1 --set lhd.jobs=1 \
     --set "formal.engine=$engine" --workdir "$W/proof-$engine" >"$OUT" 2>&1
   RC=$?

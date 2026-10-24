@@ -308,7 +308,7 @@ class PrpRunner:
         # are read from a JSONL file — structured + crash-safe, so it survives
         # the dbg abort that a fatal error triggers. Under lhd the sink path
         # is the declared `--emit diagnostics:` slot (the kernel ignores the
-        # old LIVEHD_DIAG env: no ambient state).
+        # old LHD_DIAG env: no ambient state).
         cmd       = self.gen_lhd_cmd(test, 'error')
         safe_name = self._safe_name(test)
         diag_path = os.path.join(tmp_dir, 'diag_{}.jsonl'.format(safe_name))

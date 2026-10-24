@@ -205,7 +205,7 @@ every connected arm and, for an n-ary Mux, a selector provably in range (Q1).
 values; whenever the runtime says an analysis holds, its `:spec` from the declaration must hold on the
 values, the lane layout is checked window by window against `Get_mask`, and the polarity against the
 values; it also fails when `analyses.decl` and the `AEG_ANALYSIS` registry disagree
-(`AEG_FUZZ_SEED`, `AEG_ANALYSES_GRAPHS`, `AEG_ANALYSES_VERBOSE=1` for per-analysis counts).
+(`LHD_AEG_FUZZ_SEED`, `LHD_AEG_ANALYSES_GRAPHS`, `LHD_AEG_ANALYSES_VERBOSE=1` for per-analysis counts).
 
 ### Every fold site follows the engine (`livehd::fold_body`)
 
@@ -451,8 +451,8 @@ warning.
   `explain` names, the `aegraph-rule` census record.
 * `aeg_fuzz_<group>_smoke`: per rule, LHS vs RHS on random values with the engine's own folds
   (`aegraph::eval_op`, the table the constant analysis uses): small values, 64-bit extremes and
-  values up to ~130 bits, negatives included, 1000 samples (`AEG_FUZZ_SAMPLES`), fixed seed
-  (`AEG_FUZZ_SEED`, echoed on failure). A rule with a `?` on the left is checked in refinement
+  values up to ~130 bits, negatives included, 1000 samples (`LHD_AEG_FUZZ_SAMPLES`), fixed seed
+  (`LHD_AEG_FUZZ_SEED`, echoed on failure). A rule with a `?` on the left is checked in refinement
   mode (every known LHS bit kept, no new `?`); a choice arm with its assignment substituted. The
   sampler must find a legal assignment for 90% of the samples (a guard it cannot satisfy would
   make the check vacuous). `*_example_fires`: the `:example` term is built as a micro-LGraph and
@@ -462,7 +462,7 @@ warning.
   mixed; `(k c)` values from a fixed pool filtered by the guards; a `bool01`-guarded variable is a
   1-bit input; `..r` rests of 0 or 1 operands. Every node is stamped with its own width bound and the
   outputs compare 2 bits wider than the widest node, so nothing truncates. At most 8 instances per
-  rule, picked by a fixed per-rule hash (`AEG_PROVE_FULL=1` runs all; `AEG_PROVE_DEBUG=1` dumps the
+  rule, picked by a fixed per-rule hash (`LHD_AEG_PROVE_FULL=1` runs all; `LHD_AEG_PROVE_DEBUG=1` dumps the
   two graphs of each instance). Unknown/timeout and encoder refusals are a pass, Refuted fails and
   prints the instance and the counterexample. This is bounded evidence, not a proof for all widths:
   `RULES.md` calls the tier `bv-swept`. A `?`-literal or choice rule is covered by the fuzz.
@@ -589,7 +589,7 @@ always an A/B number.
   optimized outputs must be among the original's outputs under ALL values of its
   literals (one value per literal at all its uses). `prove_equal` only annotates
   a vector mismatch, plus once per run on a literal-free iteration.
-  `AEG_FUZZ_ITERS` (default 1000) and `AEG_FUZZ_SEED` rescale and reproduce a run.
+  `LHD_AEG_FUZZ_ITERS` (default 1000) and `LHD_AEG_FUZZ_SEED` rescale and reproduce a run.
 * **`scripts/cprop_engine_sweep.py`** is the numbers table: per fixture and engine
   ms, RSS, nodes in/out, nodes per op, creates, bytes, plus `--lec` (A==B and
   B==source), `--determinism`, `--synth` (gates/area/delay/pred_aig), `--sim`

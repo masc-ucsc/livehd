@@ -98,7 +98,7 @@ TEST(DesignScan, BankedSumPreservesEveryOperandIncludingDuplicates) {
     result += (i < n.op.parameter ? 1 : -1) * std::stoi(it->const_int);
   }
   EXPECT_EQ(result, 41);
-  if (const char* path = std::getenv("LEAN_BANKED_SUM_FIXTURE")) {
+  if (const char* path = std::getenv("LHD_LEAN_BANKED_SUM_FIXTURE")) {
     std::ofstream out(path);
     emit_design_cert(design, cert, out);
     out << R"(
@@ -282,7 +282,7 @@ TEST(DesignScan, HotmuxLowersToPriorityMuxChain) {
 // control whose bit 0 is clear (the counterexample a bit-0 predicate fails),
 // and OVERLAPPING controls (one-hot violated, first-active must win).
 //
-// Set LEAN_HOTMUX_FIXTURE to a path; pass/lean/scripts/hotmux_oracle.sh runs it.
+// Set LHD_LEAN_HOTMUX_FIXTURE to a path; pass/lean/scripts/hotmux_oracle.sh runs it.
 TEST(DesignScan, HotmuxValueOracle) {
   auto& lib = livehd::Hhds_graph_library::instance("lgdb_scan_hotmux_oracle");
   auto  io  = lib.create_io("hotmux_oracle");
@@ -308,9 +308,9 @@ TEST(DesignScan, HotmuxValueOracle) {
   const auto cert   = build_certificate(design, {});
   ASSERT_EQ(design.inputs.size(), 3u);
 
-  const char* path = std::getenv("LEAN_HOTMUX_FIXTURE");
+  const char* path = std::getenv("LHD_LEAN_HOTMUX_FIXTURE");
   if (path == nullptr) {
-    GTEST_SKIP() << "set LEAN_HOTMUX_FIXTURE to emit the Lean oracle";
+    GTEST_SKIP() << "set LHD_LEAN_HOTMUX_FIXTURE to emit the Lean oracle";
   }
   std::ofstream out(path);
   emit_design_cert(design, cert, out);
@@ -386,9 +386,9 @@ TEST(DesignScan, HotmuxSignedValueOracle) {
   const auto cert   = build_certificate(design, {});
   ASSERT_EQ(design.inputs.size(), inputs.size());
   ASSERT_EQ(design.outputs.size(), 2u);
-  const char* path = std::getenv("LEAN_HOTMUX_SIGNED_FIXTURE");
+  const char* path = std::getenv("LHD_LEAN_HOTMUX_SIGNED_FIXTURE");
   if (!path) {
-    GTEST_SKIP() << "set LEAN_HOTMUX_SIGNED_FIXTURE to emit the Lean value checks";
+    GTEST_SKIP() << "set LHD_LEAN_HOTMUX_SIGNED_FIXTURE to emit the Lean value checks";
   }
   std::ofstream out(path);
   emit_design_cert(design, cert, out);
@@ -501,7 +501,7 @@ TEST(DesignScan, EndpointMasksPreserveExtractionAndReplacement) {
       EXPECT_EQ(operands[1].driver.width, hi == 67 ? 68 : hi);
       EXPECT_EQ(operands[1].driver.value, mask_window_const(lo, hi).to_decimal_string());
       const auto cert = build_certificate(design, {});
-      if (const char* dir = std::getenv("LEAN_MASK_ORACLES")) {
+      if (const char* dir = std::getenv("LHD_LEAN_MASK_ORACLES")) {
         std::ofstream      out(std::string(dir) + "/" + name + ".lean");
         std::ostringstream emitted;
         emit_design_cert(design, cert, emitted);
@@ -629,7 +629,7 @@ TEST(DesignScan, ConcatLowersDeclaredWindowsWithoutMutatingGraph) {
     const auto again = scan_design(*g, {});
     emit_design_cert(again, build_certificate(again, {}), second);
     EXPECT_EQ(first.str(), second.str());
-    if (const char* dir = std::getenv("LEAN_CONCAT_ORACLES")) {
+    if (const char* dir = std::getenv("LHD_LEAN_CONCAT_ORACLES")) {
       std::ofstream out(std::string(dir) + "/" + name + ".lean");
       out << first.str();
       out << "\ndef laneA (a : Nat) : Int :=\n  let v : Int := Int.ofNat (a % 2^" << c.a_bits << ")\n  (";
@@ -773,9 +773,9 @@ TEST(DesignScan, ActiveLowAsyncResetSurvivesResizingAndControlsNextState) {
     EXPECT_TRUE(cert.sources[0].async_reset);
     EXPECT_TRUE(cert.sources[0].reset_active_low);
     // Optional end-to-end Lean oracle, always written under the caller's project
-    // runtime directory. Run this test with LEAN_RESET_FIXTURE=<path>.lean, then
+    // runtime directory. Run this test with LHD_LEAN_RESET_FIXTURE=<path>.lean, then
     // elaborate that file with the compiler library on LEAN_PATH.
-    if (const char* path = std::getenv("LEAN_RESET_FIXTURE")) {
+    if (const char* path = std::getenv("LHD_LEAN_RESET_FIXTURE")) {
       std::ofstream out(path);
       emit_design_cert(design, cert, out);
       out << R"(
@@ -1239,13 +1239,13 @@ TEST(DesignScanClocks, TwoDomainValueOracle) {
   ASSERT_EQ(design.flops.size(), 2u);
   ASSERT_NE(design.flops[0].clock_ordinal, design.flops[1].clock_ordinal);
 
-  const char* path = std::getenv("LEAN_CLOCK_FIXTURE");
+  const char* path = std::getenv("LHD_LEAN_CLOCK_FIXTURE");
   if (path == nullptr) {
-    GTEST_SKIP() << "set LEAN_CLOCK_FIXTURE to emit the Lean oracle";
+    GTEST_SKIP() << "set LHD_LEAN_CLOCK_FIXTURE to emit the Lean oracle";
   }
   std::ofstream out(path);
   emit_design_cert(design, cert, out);
-  write_scanner_dcert("D4_CLOCK_DCERT", cert);
+  write_scanner_dcert("LHD_D4_CLOCK_DCERT", cert);
 
   // Input ordinals are the index in design.inputs, which is scanned order, not
   // declaration order -- build the argument vector from the scan.
@@ -1407,9 +1407,9 @@ TEST(DesignScanClocks, QuietClockResetValueOracle) {
   }
   ASSERT_EQ(n_async, 2) << "the scan lost the sync/async distinction";
 
-  const char* path = std::getenv("LEAN_RESET_FIXTURE");
+  const char* path = std::getenv("LHD_LEAN_RESET_FIXTURE");
   if (path == nullptr) {
-    GTEST_SKIP() << "set LEAN_RESET_FIXTURE to emit the Lean oracle";
+    GTEST_SKIP() << "set LHD_LEAN_RESET_FIXTURE to emit the Lean oracle";
   }
   std::ofstream out(path);
   emit_design_cert(design, cert, out);
@@ -1742,11 +1742,11 @@ TEST(DesignScanClocks, MemoryNonDefaultDomainCertificate) {
          "commit domain, and a defaulted field would satisfy it silently";
   // The clock table the ordinal indexes into, so the row can be read.
   ASSERT_LT(cert.memories[0].clock, cert.clocks.size());
-  write_scanner_dcert("D4_MEM_B_DCERT", cert);
+  write_scanner_dcert("LHD_D4_MEM_B_DCERT", cert);
   // The Lean literal for the SAME certificate, so the parity gate can compare
   // the two emitters on a multi-domain design rather than only on one-clock
   // production artifacts.
-  if (const char* lit = std::getenv("D4_MEM_B_FIXTURE")) {
+  if (const char* lit = std::getenv("LHD_D4_MEM_B_FIXTURE")) {
     std::ofstream lout(lit);
     emit_design_cert(design, cert, lout);
   }
@@ -1763,13 +1763,13 @@ TEST(DesignScanClocks, MemoryQuietDomainValueOracle) {
   const auto cert = build_certificate(design, {});
   ASSERT_GE(design.clocks.size(), 1u);
 
-  const char* path = std::getenv("LEAN_MEM_FIXTURE");
+  const char* path = std::getenv("LHD_LEAN_MEM_FIXTURE");
   if (path == nullptr) {
-    GTEST_SKIP() << "set LEAN_MEM_FIXTURE to emit the Lean oracle";
+    GTEST_SKIP() << "set LHD_LEAN_MEM_FIXTURE to emit the Lean oracle";
   }
   std::ofstream out(path);
   emit_design_cert(design, cert, out);
-  write_scanner_dcert("D4_MEM_DCERT", cert);
+  write_scanner_dcert("LHD_D4_MEM_DCERT", cert);
   // Record what the scan actually resolved, so the oracle's assertions can be
   // read against it rather than against what the fixture intended.
   out << "\n-- scan: " << design.clocks.size() << " clock(s), " << design.memories.size()
@@ -1972,9 +1972,9 @@ TEST(DesignScanClocks, ByteEnableAndForwardingValueOracle) {
   }
   ASSERT_TRUE(has_be) << "wensize=4 did not lower to MemWriteBE; the fixture tests nothing";
 
-  const char* path = std::getenv("LEAN_BE_FIXTURE");
+  const char* path = std::getenv("LHD_LEAN_BE_FIXTURE");
   if (path == nullptr) {
-    GTEST_SKIP() << "set LEAN_BE_FIXTURE to emit the Lean oracle";
+    GTEST_SKIP() << "set LHD_LEAN_BE_FIXTURE to emit the Lean oracle";
   }
   std::ofstream out(path);
   emit_design_cert(design, cert, out);
@@ -2802,9 +2802,9 @@ TEST(DesignScanClocks, PerReadRowForwardingValueOracle) {
   ASSERT_EQ(images, 1u) << "both ports read ONE image";
   ASSERT_TRUE(cert.flops.empty()) << "asynchronous reads are values, not registers";
 
-  const char* path = std::getenv("LEAN_ROW_FIXTURE");
+  const char* path = std::getenv("LHD_LEAN_ROW_FIXTURE");
   if (path == nullptr) {
-    GTEST_SKIP() << "set LEAN_ROW_FIXTURE to emit the Lean oracle";
+    GTEST_SKIP() << "set LHD_LEAN_ROW_FIXTURE to emit the Lean oracle";
   }
   std::ofstream out(path);
   emit_design_cert(design, cert, out);
@@ -2944,9 +2944,9 @@ TEST(DesignScanClocks, TwoWriteTwoReadCollisionValueOracle) {
   // forwarding rows below would be testing a single shared value.
   ASSERT_EQ(cert.flops.size(), 2u) << "expected one read register per synchronous read port";
 
-  const char* path = std::getenv("LEAN_COLLIDE_FIXTURE");
+  const char* path = std::getenv("LHD_LEAN_COLLIDE_FIXTURE");
   if (path == nullptr) {
-    GTEST_SKIP() << "set LEAN_COLLIDE_FIXTURE to emit the Lean oracle";
+    GTEST_SKIP() << "set LHD_LEAN_COLLIDE_FIXTURE to emit the Lean oracle";
   }
   std::ofstream out(path);
   emit_design_cert(design, cert, out);
@@ -3138,9 +3138,9 @@ TEST(DesignScanClocks, WideMatrixHighBitForwardingValueOracle) {
   ASSERT_EQ(cert.memories.size(), 1u);
   ASSERT_EQ(cert.flops.size(), 2u) << "expected one read register per synchronous read port";
 
-  const char* path = std::getenv("LEAN_WIDE_COLLIDE_FIXTURE");
+  const char* path = std::getenv("LHD_LEAN_WIDE_COLLIDE_FIXTURE");
   if (path == nullptr) {
-    GTEST_SKIP() << "set LEAN_WIDE_COLLIDE_FIXTURE to emit the Lean oracle";
+    GTEST_SKIP() << "set LHD_LEAN_WIDE_COLLIDE_FIXTURE to emit the Lean oracle";
   }
   std::ofstream out(path);
   emit_design_cert(design, cert, out);

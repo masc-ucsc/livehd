@@ -3589,7 +3589,7 @@ void Cgen_verilog::create_combinational(std::shared_ptr<File_output> fout, hhds:
               residual.size())
           .hint(
               "a genuine per-bit self dependency (e.g. `w = w + 1`), or a packed self-reference lnast.tolg could "
-              "not split -- run with LIVEHD_SIM_SPLIT_DEBUG=1")
+              "not split -- run with LHD_SIM_SPLIT_DEBUG=1")
           .emit();
     }
   }

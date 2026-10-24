@@ -234,18 +234,22 @@ uint64_t arm_address_space_limit(uint64_t budget) {
 }
 
 uint64_t configured_budget_bytes() {
-  int budget_mb = 0;
-  if (const char* env = std::getenv("LIVEHD_MEMORY_BUDGET_MB"); env != nullptr && *env != '\0') {
-    int         v   = 0;
-    const char* end = env;
-    while (*end != '\0') {
-      ++end;
+  // The override is a process-startup setting; region/racer admission must
+  // not repeatedly scan the environment. Keep the physical ceiling live.
+  static const int budget_mb = [] {
+    if (const char* env = std::getenv("LHD_MEMORY_BUDGET_MB"); env != nullptr && *env != '\0') {
+      int         v   = 0;
+      const char* end = env;
+      while (*end != '\0') {
+        ++end;
+      }
+      auto [p, ec] = std::from_chars(env, end, v);
+      if (ec == std::errc{} && p == end && v >= 0) {
+        return v;  // 0 is a valid "use the default budget" value
+      }
     }
-    auto [p, ec] = std::from_chars(env, end, v);
-    if (ec == std::errc{} && p == end && v >= 0) {
-      budget_mb = v;  // 0 is a valid "use the default budget" value
-    }
-  }
+    return 0;
+  }();
   const auto ceiling   = budget_bytes(0);
   const auto requested = budget_bytes(budget_mb);
   return ceiling == 0 ? requested : std::min(requested, ceiling);

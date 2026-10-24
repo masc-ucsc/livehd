@@ -262,9 +262,27 @@ void validate_cell_halo(const Options& options) {
           || options.cell_halo->second < 0)) {
     throw std::invalid_argument("cell halo must be finite and nonnegative");
   }
-  if (options.cell_halo && (options.cell_halo->first > options.halo_x || options.cell_halo->second > options.halo_y)) {
+  if (options.cell_halo
+      && ((options.halo_x >= 0 && options.cell_halo->first > options.halo_x)
+          || (options.halo_y >= 0 && options.cell_halo->second > options.halo_y))) {
     throw std::invalid_argument("cell halo cannot exceed macro halo on either axis");
   }
+}
+Options resolve_macro_halo(const Options& options, double row_height) {
+  auto resolved = options;
+  if (resolved.halo_x == -1 || resolved.halo_y == -1) {
+    if (!std::isfinite(row_height) || row_height <= 0) {
+      throw std::invalid_argument("automatic macro halo requires a positive placement-row height");
+    }
+    if (resolved.halo_x == -1) {
+      resolved.halo_x = 10 * row_height;
+    }
+    if (resolved.halo_y == -1) {
+      resolved.halo_y = 10 * row_height;
+    }
+  }
+  validate_cell_halo(resolved);
+  return resolved;
 }
 void check_macro_halo(const ph::Technology& tech, const ph::Floorplan& fp, const Options& options) {
   if (!options.cell_stage || !options.cell_halo || options.timing_seed || options.retain_placement) {
@@ -3359,8 +3377,8 @@ void check_placed_legality(const Result& result, const Options& options) {
   }
   check_legality(tech, result.floorplan, final_cell_options(options));
 }
-void check_legality(const ph::Technology& tech, const ph::Floorplan& fp, const Options& options) {
-  validate_cell_halo(options);
+void check_legality(const ph::Technology& tech, const ph::Floorplan& fp, const Options& requested) {
+  const auto options = resolve_macro_halo(requested, fp.rows.empty() ? 0 : tech.sites.at(fp.rows.front().site).height);
   check_macro_halo(tech, fp, options);
   const auto [x, y] = effective_halo(options);
   check_legality(tech, fp, x, y);
@@ -3496,9 +3514,21 @@ static bool defer_timing_checkpoint(const Options& options, unsigned done, bool 
   const unsigned quota = std::max(1, int(std::ceil(double(options.fp_timing_max_updates - 1) * iteration / max_iterations)));
   return done >= quota || movement < options.fp_timing_movement;
 }
-static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, const Options& options) {
+static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, const Options& requested) {
+  std::optional<Options> automatic_options;
+  if (requested.halo_x == -1 || requested.halo_y == -1) {
+    automatic_options = requested;
+    // Resolving geometry must not clone the caller's stateful callbacks.
+    if (requested.after_stage) {
+      automatic_options->after_stage
+          = [&requested](Placement_stage stage, const Result& state) { return requested.after_stage(stage, state); };
+    }
+    if (requested.fp_evaluate) {
+      automatic_options->fp_evaluate = [&requested](const Result& state) { return requested.fp_evaluate(state); };
+    }
+  }
+  const auto& options = automatic_options ? *automatic_options : requested;
   validate_cell_halo(options);
-  const auto [cell_halo_x, cell_halo_y] = effective_halo(options);
   if (!std::isfinite(options.eco_connectivity_weight) || options.eco_connectivity_weight < 0
       || options.eco_connectivity_weight > 100) {
     throw std::invalid_argument("ECO connectivity weight must be finite and between 0 and 100");
@@ -3510,7 +3540,8 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
       || !(options.density > 0 && options.density <= 1) || options.iterations < 0 || options.bins < 2 || options.threads < 1) {
     throw std::invalid_argument("invalid placement utilization/aspect/density/iteration/bin/thread settings");
   }
-  if (!std::isfinite(options.halo_x) || !std::isfinite(options.halo_y) || options.halo_x < 0 || options.halo_y < 0) {
+  if (!std::isfinite(options.halo_x) || !std::isfinite(options.halo_y) || (options.halo_x < 0 && options.halo_x != -1)
+      || (options.halo_y < 0 && options.halo_y != -1)) {
     throw std::invalid_argument("invalid macro halo");
   }
   for (const auto* frame : {&options.die, &options.core}) {
@@ -3785,7 +3816,18 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
   if (sw <= 0 || rh <= 0) {
     throw std::runtime_error("invalid LEF SITE dimensions");
   }
-  const auto bus_endpoint = [&](Pin pin, int bit) {
+  std::optional<ph::Floorplan> imported_frame;
+  if (!options.floorplan.empty()) {
+    imported_frame = ph::read_def(options.floorplan);
+  }
+  const auto* halo_frame = imported_frame ? &*imported_frame : options.previous.get();
+  const auto  row_height
+      = halo_frame && !halo_frame->rows.empty() ? tech.sites.at(halo_frame->rows.front().site).height : site.height;
+  if (automatic_options) {
+    *automatic_options = resolve_macro_halo(options, row_height);
+  }
+  const auto [cell_halo_x, cell_halo_y] = effective_halo(options);
+  const auto bus_endpoint               = [&](Pin pin, int bit) {
     const auto endpoint = resolver.bit(pin, bit);
     if (options.busorder.enabled || options.boundarypins.enabled) {
       if (const auto name = pin.attr(attrs::pin_name); name.has()) {
@@ -3890,11 +3932,14 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
     }
   }
   v.halo_x = macro_halo(cell_halo_x, tech.dbu, sw);
-  v.halo_y = macro_halo(cell_halo_y, tech.dbu, rh);
+  v.halo_y              = macro_halo(cell_halo_y, tech.dbu, rh);
+  double occupancy_area = area;
   for (const auto& c : v.cells) {
     if (!tech.macros.at(c.macro).klass.starts_with("CORE")) {
       max_width  = std::max(max_width, c.place.width + 2 * v.halo_x);
       max_height = std::max(max_height, c.place.height + 2 * v.halo_y);
+      occupancy_area
+          += double(c.place.width + 2 * v.halo_x) * (c.place.height + 2 * v.halo_y) - double(c.place.width) * c.place.height;
     }
   }
   auto env = environment_key(options, tech);
@@ -3946,7 +3991,9 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
   } else if (options.floorplan.empty()) {
     int64_t columns = 0, rows = 0, origin_x = 0, origin_y = 0;
     if (options.die.empty() && options.core.empty()) {
-      const double core_area = area / options.utilization;
+      // A large halo can consume the complete minimum-width frame. Reserve
+      // density capacity for padded macros as well as the real standard cells.
+      const double core_area = std::max(area / options.utilization, occupancy_area / options.density);
       columns                = std::max<int64_t>(std::ceil(std::sqrt(core_area * options.aspect) / sw), (max_width + sw - 1) / sw);
       rows = std::max<int64_t>({2, static_cast<int64_t>(std::ceil(core_area / (columns * sw * rh))), (max_height + rh - 1) / rh});
       v.fp.die = {0, 0, double(columns * sw), double(rows * rh)};
@@ -3996,7 +4043,7 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
                            flip && row % 2 ? Orientation::FS : Orientation::N});
     }
   } else {
-    v.fp = ph::read_def(options.floorplan);
+    v.fp = *imported_frame;
     if (v.fp.design != source.get_name()) {
       throw std::runtime_error("floorplan DEF DESIGN differs from selected top");
     }
@@ -4939,12 +4986,12 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
     }
   };
   std::optional<Terminal_legalize_report> terminal_report;
-  const bool macro_pin_adjust = options.macro_pin_adjust && movable_macros;
+  const bool macro_pin_adjust = options.macro_pin_adjust && movable_macros && !options.previous && !options.timing_seed;
   const bool adjustable_io
-      = options.fp_place && options.fp_pin_adjust
+      = v.centroids && options.fp_pin_adjust
         && std::any_of(v.fp.terminals.begin(), v.fp.terminals.end(), [](const auto& t) { return t.status != Status::FIXED; });
   double io_pitch = 1;
-  if ((options.fp_place && options.fp_pin_adjust) || macro_pin_adjust) {
+  if ((v.centroids && options.fp_pin_adjust) || macro_pin_adjust) {
     for (const auto& t : v.fp.terminals) {
       for (const auto& shape : t.shapes) {
         const auto&  layer  = tech.layers.at(shape.layer);
@@ -5126,8 +5173,8 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
       prototype.centroid_adaptive_repulsion = false;
       metrics                               = dp::place(v.design, prototype);
       capture(v, tech, false);
-      if ((options.fp_place && options.fp_pin_adjust) || macro_pin_adjust) {
-        adjust_pins(v.design, 0, true, !(options.fp_place && options.fp_pin_adjust));
+      if ((v.centroids && options.fp_pin_adjust) || macro_pin_adjust) {
+        adjust_pins(v.design, 0, true, !(v.centroids && options.fp_pin_adjust));
       } else {
         assign_io(v);
       }
@@ -7969,12 +8016,13 @@ Result place(hhds::Graph& source, hhds::GraphLibrary& library, const Options& re
   macro_options.final_cells        = false;
   macro_options.completed_stage    = Placement_stage::macro;
   macro_options.cache_dir.clear();
-  macro_options.output_dir += "/macro";
-  const auto start          = std::chrono::steady_clock::now();
-  auto       macro          = place_single(source, macro_library, macro_options);
-  const auto macro_end      = std::chrono::steady_clock::now();
-  const auto tech           = ph::read_lef(options.lefs);
-  int        fixed_macros   = 0;
+  macro_options.output_dir  += "/macro";
+  const auto start           = std::chrono::steady_clock::now();
+  auto       macro           = place_single(source, macro_library, macro_options);
+  const auto macro_end       = std::chrono::steady_clock::now();
+  const auto tech            = ph::read_lef(options.lefs);
+  const auto staged_options  = resolve_macro_halo(options, tech.sites.at(macro.floorplan.rows.front().site).height);
+  int        fixed_macros    = 0;
   for (auto& c : macro.floorplan.components) {
     const auto master = tech.macros.find(c.macro);
     if (master == tech.macros.end() || !master->second.klass.starts_with("CORE")) {
@@ -7997,7 +8045,7 @@ Result place(hhds::Graph& source, hhds::GraphLibrary& library, const Options& re
   }
   const auto frame = macro_options.output_dir + "/fixed.def";
   ph::write_def(macro.floorplan, frame);
-  auto cell_options             = final_cell_options(options);
+  auto cell_options             = final_cell_options(staged_options);
   cell_options.stage_pin_status = std::move(pin_status);
   if (!options.final_independent_timing) {
     cell_options.net_weights = macro.net_weights;
@@ -8047,8 +8095,8 @@ Result place(hhds::Graph& source, hhds::GraphLibrary& library, const Options& re
   if (options.cell_halo) {
     text.pop_back();
     text += std::format(R"(,"macro_halo_um":[{},{}],"cell_halo_um":[{},{}]}})",
-                        options.halo_x,
-                        options.halo_y,
+                        staged_options.halo_x,
+                        staged_options.halo_y,
                         options.cell_halo->first,
                         options.cell_halo->second);
   }

@@ -21,6 +21,7 @@
 #include <unordered_set>
 
 #include "attrs.hpp"
+#include "debug_env.hpp"
 #include "node_util.hpp"
 #include "pass/partition/flatten.hpp"
 #include "rapidjson/document.h"
@@ -236,7 +237,7 @@ public:
       auto t = Clock::now();
       std::cout << std::format("resize: plan start wns {:.2f} tns {:.1f} margin {:.1f}\n", wns_, tns_, margin_) << std::flush;
       // LHD_RESIZE_PHASES (debug): subset of "eta" (electrical, timing, area).
-      const char*       phases_env = std::getenv("LHD_RESIZE_PHASES");
+      const char*       phases_env = livehd::debug::env<"LHD_RESIZE_PHASES">();
       const std::string phases     = phases_env ? phases_env : "eta";
       if (phases.find('e') != std::string::npos) {
         electrical_phase();
@@ -327,7 +328,7 @@ private:
   unsigned    reject_slack_ = 0, reject_wns_ = 0, reject_tns_ = 0, reject_electrical_ = 0, no_moves_ = 0;
   unsigned    generated_[5]  = {0, 0, 0, 0, 0};
   std::string stop_reason_   = "none";
-  bool        debug_         = std::getenv("LHD_RESIZE_DEBUG") != nullptr;
+  bool        debug_         = livehd::debug::env<"LHD_RESIZE_DEBUG">() != nullptr;
   unsigned    debug_printed_ = 0;
 
   // ---- model -------------------------------------------------------------

@@ -35,6 +35,7 @@
 // as a cold one (the abc region digest is content-based, the coloring is
 // seeded and deterministic).
 
+#include "debug_env.hpp"
 #include <algorithm>
 #include <cmath>
 #include <cstdlib>
@@ -50,6 +51,7 @@
 #include <string_view>
 #include <vector>
 
+#include "liberty_dff.hpp"
 #include "absl/container/flat_hash_set.h"
 #include "absl/strings/str_split.h"
 #include "attrs.hpp"
@@ -94,16 +96,16 @@ std::string physical_descriptor(const Options& opts) {
   }
   // Experimental process-level overrides must not silently replay a different
   // physical/synthesis policy. Normal runs leave these unset.
-  for (const auto* name : {"ABC_INCR_COMPARE_ONLY",
-                           "ABC_INCR_DISABLE",
-                           "ABC_INCR_NO_BLACKBOX",
-                           "ABC_INCR_NO_TRAVERSAL",
-                           "LHD_NATIVE_PLACE",
-                           "LHD_RESIZE_PHASES",
-                           "OMP_NUM_THREADS",
-                           "LHD_MEM_BUDGET_MB"}) {
+  const std::pair<const char*, const char*> env_overrides[] = {
+      {"LHD_ABC_INCR_COMPARE_ONLY", livehd::debug::env<"LHD_ABC_INCR_COMPARE_ONLY">()},
+      { "LHD_ABC_INCR_NO_BLACKBOX",  livehd::debug::env<"LHD_ABC_INCR_NO_BLACKBOX">()},
+      {"LHD_ABC_INCR_NO_TRAVERSAL", livehd::debug::env<"LHD_ABC_INCR_NO_TRAVERSAL">()},
+      {        "LHD_RESIZE_PHASES",         livehd::debug::env<"LHD_RESIZE_PHASES">()},
+      {          "OMP_NUM_THREADS",                    std::getenv("OMP_NUM_THREADS")},
+      {     "LHD_MEMORY_BUDGET_MB",               std::getenv("LHD_MEMORY_BUDGET_MB")},
+  };
+  for (const auto& [name, value] : env_overrides) {
     w.String(name);
-    const auto* value = std::getenv(name);
     w.String(value ? value : "");
   }
   w.EndArray();
@@ -175,9 +177,9 @@ livehd::placement::Options placement_options(const Options& opts) {
   };
   std::string lefs = synth_set(opts, "lef", "");
   if (lefs.empty()) {
-    const char* tech = std::getenv("HAGENT_TECH_DIR");
+    const char* tech = std::getenv("LHD_TECH_DIR");
     if (tech == nullptr || *tech == '\0') {
-      throw Lhd_error{"missing_file", "placement needs synth.lef or $HAGENT_TECH_DIR", "set synth.lef=tech.lef,cells.lef"};
+      throw Lhd_error{"missing_file", "placement needs synth.lef or $LHD_TECH_DIR", "set synth.lef=tech.lef,cells.lef"};
     }
     lefs = (fs::path(tech) / "../techlef/sky130_fd_sc_hd__nom.tlef").string() + ","
            + (fs::path(tech) / "../lef/sky130_fd_sc_hd.lef").string();
@@ -487,13 +489,16 @@ livehd::placement::Options placement_options(const Options& opts) {
     }
     return std::pair{x, y};
   };
-  const auto halo      = parse_halo(synth_set(opts, "place.halo", "5"), "place.halo");
-  out.halo_x           = halo.first;
-  out.halo_y           = halo.second;
+  const auto halo_text = synth_set(opts, "place.halo", "auto");
+  if (halo_text != "auto") {
+    const auto halo = parse_halo(halo_text, "place.halo");
+    out.halo_x      = halo.first;
+    out.halo_y      = halo.second;
+  }
   const auto cell_halo = synth_set(opts, "place.cell_halo", "");
   if (!cell_halo.empty()) {
     out.cell_halo = parse_halo(cell_halo, "place.cell_halo");
-    if (out.cell_halo->first > out.halo_x || out.cell_halo->second > out.halo_y) {
+    if ((out.halo_x >= 0 && out.cell_halo->first > out.halo_x) || (out.halo_y >= 0 && out.cell_halo->second > out.halo_y)) {
       throw Lhd_error{"usage", "invalid synth.place.cell_halo", "each axis must not exceed synth.place.halo"};
     }
   }
@@ -524,11 +529,11 @@ livehd::placement::Options placement_options(const Options& opts) {
   out.fp_color_source       = synth_set(opts, "place.fp.color_source", "synthesis");
   out.fp_color_minimum      = number("place.fp.color_minimum", "-1");
   out.fp_color_maximum      = number("place.fp.color_maximum", "30000");
-  out.fp_pin_adjust         = truthy(synth_set(opts, "place.fp.pin_adjust", "false"));
+  out.fp_pin_adjust         = truthy(synth_set(opts, "place.fp.pin_adjust", "true"));
   out.fp_pin_interval       = integer("place.fp.pin_interval", "50");
   out.fp_pin_step           = number("place.fp.pin_step", "0.01");
   out.fp_pin_improvement    = number("place.fp.pin_improvement", "0.001");
-  out.macro_pin_adjust      = truthy(synth_set(opts, "place.macro.pin_adjust", "false"));
+  out.macro_pin_adjust      = truthy(synth_set(opts, "place.macro.pin_adjust", "true"));
   out.macro_pin_interval    = integer("place.macro.pin_interval", "50");
   out.macro_pin_step        = number("place.macro.pin_step", "0.01");
   out.macro_pin_improvement = number("place.macro.pin_improvement", "0.001");
@@ -853,7 +858,7 @@ std::string synth_set(const Options& opts, std::string_view flag, std::string_vi
 }
 
 // Resolve THE Liberty: synth.liberty, else the sky130 default under
-// $HAGENT_TECH_DIR. `synth.liberty` is the ONE spelling every Liberty reader
+// $LHD_TECH_DIR. `synth.liberty` is the ONE spelling every Liberty reader
 // shares -- `lhd synth` (pass.abc + pass.opentimer) and the standalone
 // `lhd pass abc` / `lhd pass opentimer` all resolve through here, so no two
 // of them can ever fall back to a different file. A missing library is a
@@ -861,19 +866,19 @@ std::string synth_set(const Options& opts, std::string_view flag, std::string_vi
 std::string resolve_liberty(const Options& opts) {
   std::string lib = synth_set(opts, "liberty", "");
   if (lib.empty()) {
-    if (const char* tech = std::getenv("HAGENT_TECH_DIR"); tech != nullptr && *tech != '\0') {
+    if (const char* tech = std::getenv("LHD_TECH_DIR"); tech != nullptr && *tech != '\0') {
       lib = (fs::path(tech) / std::string{kSynthDefaultLiberty}).string();
     }
   }
   if (lib.empty()) {
     throw Lhd_error{"missing_file",
-                    "no Liberty cell library: neither --set synth.liberty nor $HAGENT_TECH_DIR is set",
-                    "pass --set synth.liberty=cells.lib, or point HAGENT_TECH_DIR at a sky130 PDK (install one with `ciel`)"};
+                    "no Liberty cell library: neither --set synth.liberty nor $LHD_TECH_DIR is set",
+                    "pass --set synth.liberty=cells.lib, or point LHD_TECH_DIR at a sky130 PDK (install one with `ciel`)"};
   }
   if (!fs::is_regular_file(lib)) {
     throw Lhd_error{"missing_file",
                     std::format("Liberty cell library not found: {}", lib),
-                    "pass --set synth.liberty=cells.lib, or point HAGENT_TECH_DIR at a sky130 PDK (install one with `ciel`)"};
+                    "pass --set synth.liberty=cells.lib, or point LHD_TECH_DIR at a sky130 PDK (install one with `ciel`)"};
   }
   return lib;
 }
@@ -1286,6 +1291,13 @@ void synth_command(Options& opts, Result& res) {
     labels["specialize"]      = synth_set(opts, "specialize", "true");
     labels["state_sweep"]     = synth_set(opts, "state_sweep", "true");
     labels["merge_registers"] = synth_set(opts, "merge_registers", "true");
+    // Clock gating needs the Liberty's integrated clock-gate cell: without one the gated registers' clock would be computed
+    // logic and the registers would stay native flops (no mapped DFF, no timing). The library decides, the user can still say false.
+    labels["clock_gate"] = synth_set(opts, "clock_gate", "true") == "true" && !livehd::liberty::resolve_dff_cells(liberty, "").icg_ladder.empty()
+                               ? "true"
+                               : "false";
+    labels["clock_gate_min_bits"] = synth_set(opts, "clock_gate_min_bits", "16");
+    labels["clock_gate_depth"]    = synth_set(opts, "clock_gate_depth", "1");
     // Each mapper receives its own labels. Native USYN does not inherit
     // ABC optimization settings; standalone dispatch uses the same rule.
     merge_mapper_sets(opts, mapper_method, labels);

@@ -283,21 +283,24 @@ struct Physical_session::Impl : Pass_opentimer {
     std::unordered_map<std::string, std::string>                     resized;  // instance -> current master
     std::unordered_map<std::string, livehd::physical::Rc_net>        rc_now;   // driver label -> current what-if RC
     std::unordered_map<std::string, const livehd::physical::Rc_net*> base;     // evaluated RC by driver
-    const livehd::physical::Parasitics*                              base_owner = nullptr;
-    size_t                                                           serial     = 0;
+    // The index stores pointers into this snapshot. Retain its ownership until
+    // the next reindex: evaluations without what-if work may otherwise free it
+    // and reuse its address, making the identity check accept dangling entries.
+    std::shared_ptr<const livehd::physical::Parasitics>              base_owner;
+    size_t                                                           serial = 0;
     std::unordered_map<std::string, std::string>                     rc_labels;  // timer net -> physical driver
     std::set<std::string>                                            pending_rc;
 
     explicit Whatif_impl(Impl& owner) : s(owner) {}
 
     void index_base() {
-      if (base_owner == s.previous_physical_rc_.get()) {
+      if (base_owner == s.previous_physical_rc_) {
         return;
       }
       base.clear();
       rc_labels.clear();
       pending_rc.clear();
-      base_owner = s.previous_physical_rc_.get();
+      base_owner = s.previous_physical_rc_;
       if (base_owner) {
         for (const auto& net : base_owner->nets) {
           base.emplace(net.driver, &net);

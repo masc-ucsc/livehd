@@ -10,6 +10,7 @@
 #include "absl/container/flat_hash_set.h"
 #include "attr_carry.hpp"
 #include "cell.hpp"
+#include "debug_env.hpp"
 #include "node_util.hpp"
 
 namespace livehd::cprop {
@@ -362,7 +363,7 @@ bool Hoister::run() {
 
 Loop_hoist_stats hoist_loop_invariants(const std::vector<std::shared_ptr<hhds::Graph>>& graphs) {
   Loop_hoist_stats stats;
-  const bool       debug = ::getenv("LIVEHD_LOOP_HOIST_DEBUG") != nullptr;
+  const bool       debug = livehd::debug::env<"LHD_LOOP_HOIST_DEBUG">() != nullptr;
   // A body's new port must be driven by EVERY parent. Parents are found only
   // in `graphs`, so the move is sound only when `graphs` is each touched
   // library's whole graph set: a parent left outside (an unloaded unit, a

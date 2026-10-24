@@ -16,6 +16,8 @@
 #include <format>
 #include <print>
 #include <thread>
+
+#include "debug_env.hpp"
 #if defined(__APPLE__)
 #include <malloc/malloc.h>
 #elif defined(__GLIBC__)
@@ -706,7 +708,7 @@ bool Region_driver::over_budget(std::string_view region, uint64_t rss_before, si
                                         coordinator_->parallel_stats_.limit))
         : (!over_growth && over_total)
             ? std::format(
-                  "process physical-memory ceiling {} MiB (LIVEHD_MEMORY_BUDGET_MB, else physical minus reserve; Darwin "
+                  "process physical-memory ceiling {} MiB (LHD_MEMORY_BUDGET_MB, else physical minus reserve; Darwin "
                   "RLIMIT_AS has separate VA-only allocator headroom) -- the whole-PROCESS footprint, not this color's growth",
                   mib(total_ceiling))
         : opts_.memory_budget_mb > 0 ? std::format("per-color growth budget {} MiB (pass.abc.memory_budget_mb)", mib(budget))
@@ -1384,9 +1386,9 @@ void Region_driver::map_region(const livehd::partition::Region_body& rb) {
     recipe += "|source=" + hint;
   }
   hhds::Graph* pre_g = (incr_ != nullptr && rb.reuse_eligible) ? rb.pre_body : nullptr;
-  // EXPERIMENTAL (ABC_INCR_COMPARE_ONLY): exercise compare/store with NO ABC -- a
+  // EXPERIMENTAL (LHD_ABC_INCR_COMPARE_ONLY): exercise compare/store with NO ABC -- a
   // fast diagnostic for why a region misses on a comment edit.
-  if (incr_ != nullptr && std::getenv("ABC_INCR_COMPARE_ONLY") != nullptr) {
+  if (incr_ != nullptr && livehd::debug::env<"LHD_ABC_INCR_COMPARE_ONLY">() != nullptr) {
     bool hit = false;
     if (pre_g != nullptr) {
       hit = incr_->lookup_compare(rb, pre_g, recipe).hit;
@@ -1416,7 +1418,7 @@ void Region_driver::map_region(const livehd::partition::Region_body& rb) {
         evidence = incr_->read_evidence(*res.row);
         res.hit  = evidence && opts_.evidence_valid(res.row->module, *evidence);
       }
-      const bool incr_dbg = std::getenv("ABC_INCR_DEBUG") != nullptr;
+      const bool incr_dbg = livehd::debug::env<"LHD_ABC_INCR_DEBUG">() != nullptr;
       if (incr_dbg && res.hit && opts_.evidence_valid && !evidence) {
         std::print("[abc-incr] MISS {} -- cached evidence unreadable\n", rb.module_name);
       } else if (incr_dbg && res.row != nullptr && !res.hit) {
@@ -1453,11 +1455,11 @@ void Region_driver::map_region(const livehd::partition::Region_body& rb) {
         return;
       }
     }
-    if (pre_g == nullptr && std::getenv("ABC_INCR_DEBUG") != nullptr) {
+    if (pre_g == nullptr && livehd::debug::env<"LHD_ABC_INCR_DEBUG">() != nullptr) {
       std::print("[abc-incr] MISS {} -- no pre-abc body\n", rb.module_name);
     }
     incr_->note_miss();
-  } else if (incr_ != nullptr && std::getenv("ABC_INCR_DEBUG") != nullptr) {
+  } else if (incr_ != nullptr && livehd::debug::env<"LHD_ABC_INCR_DEBUG">() != nullptr) {
     std::print("[abc-incr] MISS {} -- reuse-ineligible region\n", rb.module_name);
   }
 

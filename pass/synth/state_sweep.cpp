@@ -4,10 +4,10 @@
 #include <algorithm>
 #include <bit>
 #include <cstdlib>
-#include <format>
-#include <print>
 #include <deque>
+#include <format>
 #include <limits>
+#include <print>
 #include <string>
 #include <vector>
 
@@ -15,6 +15,7 @@
 #include "absl/container/flat_hash_set.h"
 #include "attr_carry.hpp"
 #include "bus_name.hpp"
+#include "debug_env.hpp"
 #include "node_util.hpp"
 #include "specialize.hpp"
 
@@ -277,7 +278,7 @@ private:
     if (!solve()) {
       return std::nullopt;
     }
-    if (std::getenv("LIVEHD_STATE_SWEEP_DEBUG") != nullptr) {
+    if (livehd::debug::env<"LHD_STATE_SWEEP_DEBUG">() != nullptr) {
       for (auto& def : defs_) {
         std::string outs;
         for (const auto& [port, m] : def.out_demand) {
@@ -991,9 +992,9 @@ private:
     }
   }
 
-  // LIVEHD_STATE_SWEEP_TRACE=<part of a cell or register name>, or =<whole name>: why do the matching cells stay observed?
+  // LHD_STATE_SWEEP_TRACE=<part of a cell or register name>, or =<whole name>: why do the matching cells stay observed?
   void trace_node(Def& def, const hhds::Node_class& node) {
-    static const char* want = std::getenv("LIVEHD_STATE_SWEEP_TRACE");
+    static const char* want = livehd::debug::env<"LHD_STATE_SWEEP_TRACE">();
     if (want == nullptr) {
       return;
     }

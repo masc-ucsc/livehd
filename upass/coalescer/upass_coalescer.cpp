@@ -10,6 +10,7 @@
 #include <utility>
 #include <vector>
 
+#include "debug_env.hpp"
 #include "lnast.hpp"
 #include "lnast_ntype.hpp"
 #include "str_tools.hpp"
@@ -256,7 +257,7 @@ void uPass_coalescer::park_current(const std::string& lhs) {
 }
 
 void uPass_coalescer::end_run() {
-  if (std::getenv("LIVEHD_UPASS_STATS") == nullptr) {
+  if (livehd::debug::env<"LHD_UPASS_STATS">() == nullptr) {
     return;
   }
   const auto& ln = lm->get_lnast();

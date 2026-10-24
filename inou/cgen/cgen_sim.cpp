@@ -56,6 +56,7 @@
 #include <print>
 #include <regex>
 #include <set>
+#include <span>
 #include <string>
 #include <tuple>
 #include <vector>
@@ -66,14 +67,16 @@
 #include "absl/strings/escaping.h"
 #include "absl/strings/str_cat.h"
 #include "attrs.hpp"
-#include "hhds/attrs/srcid.hpp"
 #include "cell.hpp"  // Ntype / Ntype_op
 #include "cgen_llvm.hpp"
-#include "cgen_salt.hpp"  // livehd::kCgenSrcSalt — emitter content hash (L2)
-#include "cpp_ident.hpp"  // livehd::cpp_ident — THE shared RTL-name -> C++ identifier rule
+#include "cgen_salt.hpp"   // livehd::kCgenSrcSalt — emitter content hash (L2)
+#include "clock_gate.hpp"  // //graph — share flop enables behind one clock gate
+#include "cpp_ident.hpp"   // livehd::cpp_ident — THE shared RTL-name -> C++ identifier rule
+#include "debug_env.hpp"
 #include "diag.hpp"       // livehd::diag::err — Stage 0 comb-loop safety net
 #include "file_name.hpp"  // livehd::unit_file_stem — the shared long-name policy
 #include "hash_util.hpp"
+#include "hhds/attrs/srcid.hpp"
 #include "inline_sub.hpp"      // //graph — splice a small loop's replicas into the body that held the loop
 #include "latch_contract.hpp"  // //graph — clock_op_of (the ONE shared ICG recognizer)
 #include "node_util.hpp"
@@ -4210,9 +4213,16 @@ std::string Cgen_sim::generation_key(hhds::Graph* g, bool color_root) {
 
 Cgen_sim::Sim_env Cgen_sim::Sim_env::read() {
   Sim_env env;
-  env.nogate   = ::getenv("LIVEHD_SIM_NOGATE") != nullptr;
-  env.nolazy   = ::getenv("LIVEHD_SIM_NOLAZY") != nullptr;
-  env.noinline = ::getenv("LIVEHD_SIM_NOINLINE") != nullptr;
+  env.nogate   = ::getenv("LHD_SIM_NOGATE") != nullptr;
+  env.nolazy   = ::getenv("LHD_SIM_NOLAZY") != nullptr;
+  env.noinline = ::getenv("LHD_SIM_NOINLINE") != nullptr;
+  env.nocg     = ::getenv("LHD_SIM_NOCLOCKGATE") != nullptr;
+  if (const char* mb = ::getenv("LHD_SIM_CLOCKGATE_MIN_BITS"); mb != nullptr) {
+    env.cg_bits = static_cast<uint32_t>(std::strtoul(mb, nullptr, 10)) & 0xffffu;
+  }
+  if (const char* mc = ::getenv("LHD_SIM_CLOCKGATE_MIN_CONE"); mc != nullptr) {
+    env.cg_cone = static_cast<uint32_t>(std::strtoul(mc, nullptr, 10)) & 0xffffu;
+  }
   return env;
 }
 
@@ -4548,6 +4558,19 @@ bool Cgen_sim::prepare_graph(const std::shared_ptr<hhds::Graph>& graph) {
   if (auto [pit, fresh] = prepared.try_emplace(g, graph, false); !fresh) {
     return pit->second.second;
   }
+  // Registers that share an enable (or a conjunct of one) get ONE clock gate; the step below folds the gate into a commit guard,
+  // and the color scheduler runs a gated register's cone only while the gate is open. Default on (LHD_SIM_NOCLOCKGATE=1 opts
+  // out). The body is this simulator's private copy, so the compile graph and the LEC reference keep their enables. `min_cone`
+  // keeps out a register fed from a port, which has no cone to skip.
+  if (!env_.nocg) {
+    if (const auto st = livehd::clock_gate::infer_clock_gates(std::span{&graph, 1},
+                                                              {.min_bits = env_.cg_bits, .min_cone = env_.cg_cone, .depth = 1});
+        st.has_value() && st->gates > 0) {
+      livehd::diag::info("inou.cgen.sim", "clock-gated", "progress")
+          .msg("`{}`: clock gating inferred {} gate(s) over {} register(s) ({} bit(s))", gname, st->gates, st->registers, st->bits)
+          .emit();
+    }
+  }
   // Bring an instantiated clock-gate cell's gate INTO this body — the same
   // pre-step pass.single_edge and the formal commands run.
   //
@@ -4660,7 +4683,7 @@ bool Cgen_sim::prepare_graph(const std::shared_ptr<hhds::Graph>& graph) {
   int inlined_gate_cells = 0;
   for (int round = 0; round < 8; ++round) {
     const int ncg = livehd::latch_contract::inline_clock_gate_cells(g, "inou.cgen.sim");
-    if (::getenv("LIVEHD_SIM_CLK_DEBUG") != nullptr) {
+    if (livehd::debug::env<"LHD_SIM_CLK_DEBUG">() != nullptr) {
       std::fprintf(stderr, "[icgdbg] %s: gate-cell round %d inlined %d\n", gname.c_str(), round, ncg);
     }
     if (ncg == 0) {
@@ -5047,7 +5070,7 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
         clock_nets.insert("\x01implicit");  // an identity wrapper, not a gate: ticks with the reference
         continue;
       }
-      if (::getenv("LIVEHD_SIM_CLK_DEBUG") != nullptr) {
+      if (livehd::debug::env<"LHD_SIM_CLK_DEBUG">() != nullptr) {
         auto        cone = livehd::latch_contract::clock_op_of(d, design_clocks);
         std::string dbg  = absl::StrCat("[clkdbg] flop ",
                                        debug_name(node),
@@ -7304,7 +7327,7 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
                            && std::ranges::all_of(flops, [](const auto& f) { return !f.is_latch && f.posedge; });
   bool direct_color_supported = color_root;
   if (direct_color_supported) {
-    const bool  color_debug      = std::getenv("LIVEHD_SIM_COLOR_DEBUG") != nullptr;
+    const bool  color_debug      = livehd::debug::env<"LHD_SIM_COLOR_DEBUG">() != nullptr;
     const auto& hierarchy_clocks = hierarchy_clocks_for_root();
     for (const auto& color : color_plan_->colors()) {
       for (const size_t member : color.members) {
@@ -7433,7 +7456,7 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
     }
   }
 
-  if (std::getenv("LIVEHD_SIM_COLOR_DEBUG") != nullptr && color_root) {
+  if (livehd::debug::env<"LHD_SIM_COLOR_DEBUG">() != nullptr && color_root) {
     std::fprintf(stderr,
                  "[color-direct] module=%s supported=%s runtime=%s versions=%zu colors=%zu\n",
                  gname.c_str(),
@@ -9336,7 +9359,7 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
       // state-only outputs of ANY sub the schedule sees on a word-level cycle is
       // sound for exactly the Moore reason, output by output.
       const bool on_cycle = sched_cycle.contains(s.node);
-      if (::getenv("LIVEHD_SIM_SPLIT_DEBUG") != nullptr) {
+      if (livehd::debug::env<"LHD_SIM_SPLIT_DEBUG">() != nullptr) {
         std::fprintf(stderr,
                      "[splitdbg] %s: sub %s on_cycle=%d fed_back=%zu negedge=%d moore=%d\n",
                      gname.c_str(),
@@ -10116,7 +10139,7 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
     // materializes instead; that also ends the taint for its own consumers,
     // which is why testing the DIRECT drivers is enough.
     //
-    // A node with fan-out > 1 (or a huge tree, or under LIVEHD_SIM_NOINLINE for
+    // A node with fan-out > 1 (or a huge tree, or under LHD_SIM_NOINLINE for
     // debuggability) still materializes, with `= expr` so the hlop cross-width
     // ctor's EXPLICIT keyword keeps its job: a node_expr that does not land at
     // the declared width fails the build instead of silently truncating and
@@ -10208,7 +10231,7 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
         // left for operand() to report as the loud combinational-loop diagnostic
         // (unbounded self-recursion here stack-overflowed on BusyTable_1/Dispatch,
         // any comb cycle reaching a Memory operand; repro sim_loop_mem_prefetch).
-        if (::getenv("LIVEHD_SIM_SPLIT_DEBUG") != nullptr && !demand_stack.empty()) {
+        if (livehd::debug::env<"LHD_SIM_SPLIT_DEBUG">() != nullptr && !demand_stack.empty()) {
           std::string chain;
           for (const auto& d2 : demand_stack) {
             chain += d2 + " -> ";
@@ -10222,7 +10245,7 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
       }
       auto n   = drv.get_master_node();
       auto nop = type_op_of(n);
-      if (::getenv("LIVEHD_SIM_SPLIT_DEBUG2") != nullptr && !demand_stack.empty()) {
+      if (livehd::debug::env<"LHD_SIM_SPLIT_DEBUG2">() != nullptr && !demand_stack.empty()) {
         std::fprintf(stderr, "[splitdbg]   walk %s (%s)\n", debug_name(n).c_str(), op_name(nop));
       }
       if (nop == Ntype_op::Sub) {
@@ -12543,6 +12566,22 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
       condition_owner_cache.emplace(path, livehd::sim::Color_plan::invalid_index);
       return livehd::sim::Color_plan::invalid_index;
     };
+    // A clock gate's activation as the run loop reads it: the boolean its Clock_cell color stored in the boundary slot.
+    absl::flat_hash_map<size_t, size_t> gate_slot;
+    for (size_t slot_index = 0; slot_index < color_plan_->boundary_slots().size(); ++slot_index) {
+      const auto& slot = color_plan_->boundary_slots()[slot_index];
+      if (slot.kind == livehd::sim::Color_plan::Boundary_kind::color_value && slot.width == 1 && slot.producer_extract_hi == 0
+          && slot.producer_shift == 0 && slot.producer_version != livehd::sim::Color_plan::invalid_index) {
+        gate_slot.try_emplace(slot.producer_version, slot_index);
+      }
+    }
+    const auto gate_predicate = [&](size_t gate) -> std::string {
+      const auto found = gate_slot.find(gate);
+      if (found == gate_slot.end() || direct_slot_read[found->second].empty()) {
+        return {};
+      }
+      return absl::StrCat(direct_slot_read[found->second], ".is_known_true()");
+    };
     std::vector<size_t> direct_color_condition(color_plan_->colors().size(), livehd::sim::Color_plan::invalid_index);
     for (size_t color_index = 0; color_index < color_plan_->colors().size(); ++color_index) {
       size_t owner             = livehd::sim::Color_plan::invalid_index;
@@ -12556,6 +12595,19 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
         } else if (owner != member_owner) {
           owner = livehd::sim::Color_plan::invalid_index;
           break;  // a coarsened color crossing the control boundary runs unconditionally
+        }
+      }
+      // A waveform or observation build shows the skipped cone's nets, so they keep running while the gate is closed.
+      if (owner == livehd::sim::Color_plan::invalid_index && !vcd_on && !observation_on
+          && !color_plan_->colors()[color_index].members.empty()) {
+        // Wholly owned by one clock gate (see Version_site::gate_owner): the color runs only while the cell's activation, which an
+        // earlier color published into its slot, is high. The dirty bit stays set meanwhile, exactly as for a conditional call.
+        const size_t gate = color_plan_->version_sites()[color_plan_->colors()[color_index].members.front()].gate_owner;
+        if (gate != livehd::sim::Color_plan::invalid_index
+            && std::ranges::all_of(color_plan_->colors()[color_index].members,
+                                   [&](size_t member) { return color_plan_->version_sites()[member].gate_owner == gate; })
+            && !gate_predicate(gate).empty()) {
+          owner = color_plan_->sites().size() + gate;
         }
       }
       direct_color_condition[color_index] = owner;
@@ -12572,7 +12624,11 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
       const auto [phase_it, inserted] = condition_phase_index.try_emplace({owner, slot}, direct_condition_phases.size());
       const size_t phase              = phase_it->second;
       if (inserted) {
-        direct_condition_phases.push_back({owner, slot, direct_condition_predicate[owner], {}});
+        direct_condition_phases.push_back({owner,
+                                           slot,
+                                           owner >= color_plan_->sites().size() ? gate_predicate(owner - color_plan_->sites().size())
+                                                                                : direct_condition_predicate[owner],
+                                           {}});
       }
       direct_condition_phases[phase].colors.push_back(color_index);
       direct_color_condition_phase[color_index] = phase;
@@ -13126,7 +13182,7 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
     std::map<std::string, size_t> llvm_data_eligibility;
     std::map<std::string, size_t> llvm_state_eligibility;
     std::map<std::string, size_t> llvm_color_rejections;
-    const bool                    llvm_state_debug = std::getenv("LIVEHD_SIM_LLVM_STATE_DEBUG") != nullptr;
+    const bool                    llvm_state_debug = livehd::debug::env<"LHD_SIM_LLVM_STATE_DEBUG">() != nullptr;
     const auto                    pure_data_member = [&](const size_t member) {
       const auto reject_data = [&](std::string_view reason) {
         if (llvm_state_debug) {

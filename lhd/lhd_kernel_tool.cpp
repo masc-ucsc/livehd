@@ -18,6 +18,7 @@
 #include "absl/container/flat_hash_set.h"
 #include "color_common.hpp"
 #include "critical_identity.hpp"
+#include "debug_env.hpp"
 #include "graph_library_singleton.hpp"
 #include "hhds/graph.hpp"
 #include "lhd_kernel_internal.hpp"
@@ -991,7 +992,7 @@ bool tool_same_semantic_attrs(hhds::Graph* a, hhds::Graph* b, std::string* why) 
       };
       // LHD_H5_DUMP=<prefix>: write the two difference lists in full, for
       // deciding whether a large difference is semantic or just renaming.
-      if (const char* dump = std::getenv("LHD_H5_DUMP"); dump != nullptr && *dump != '\0') {
+      if (const char* dump = livehd::debug::env<"LHD_H5_DUMP">(); dump != nullptr && *dump != '\0') {
         const auto spill = [&](const char* side, const std::vector<std::string>& v) {
           std::ofstream ofs(std::format("{}.{}.txt", dump, side));
           for (const auto& line : v) {

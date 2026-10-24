@@ -753,7 +753,7 @@ void pass_command(Options& opts, Result& res) {
       throw Lhd_error{"usage", "pass liberty supports: gensim [file.lib] --emit-dir lg:DIR", ""};
     }
     // The .lib positional is optional: with none, gensim reads THE Liberty
-    // (`--set synth.liberty`, else the $HAGENT_TECH_DIR default) like every
+    // (`--set synth.liberty`, else the $LHD_TECH_DIR default) like every
     // other Liberty reader, so one spelling serves the whole flow.
     const std::string lib_file = opts.files.size() > 2 ? opts.files[2] : resolve_liberty(opts);
     check_inputs_exist({lib_file});
@@ -948,7 +948,7 @@ void pass_command(Options& opts, Result& res) {
       labels["qor"] = ephemeral_qor.empty() ? (fs::path(opts.workdir) / "qor.json").string() : ephemeral_qor;
     }
     merge_mapper_sets(opts, method, labels);
-    // THE Liberty (synth.liberty, else the $HAGENT_TECH_DIR default): the one
+    // THE Liberty (synth.liberty, else the $LHD_TECH_DIR default): the one
     // spelling every Liberty reader shares, so `lhd pass abc` and a later
     // `lhd pass opentimer` on the same netlist can never be handed different
     // cells. Set AFTER merge_sets because `pass.abc.library` is not a user knob
@@ -1011,7 +1011,7 @@ void pass_command(Options& opts, Result& res) {
     // `files` is a kernel-managed label, so the kernel builds it here.
     std::vector<std::string> tfiles(opts.files.begin() + 1, opts.files.end());
     // No positional .lib: fall back to THE Liberty (synth.liberty, else the
-    // $HAGENT_TECH_DIR default) -- the same file `lhd pass abc` mapped with, so
+    // $LHD_TECH_DIR default) -- the same file `lhd pass abc` mapped with, so
     // one `--set synth.liberty=cells.lib` carries a hand-driven map -> STA flow
     // exactly as it carries `lhd synth`.
     // Use the SAME predicate pass.opentimer classifies the positionals with

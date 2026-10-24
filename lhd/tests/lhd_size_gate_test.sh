@@ -2,14 +2,14 @@
 # This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 #
 # No up-front design-size gate (owner ruling 2026-10-14). pass.abc and lec used
-# to refuse a flattened design over ~1M nodes (LIVEHD_LARGE_DESIGN_NODES) unless
+# to refuse a flattened design over ~1M nodes (LHD_LARGE_DESIGN_NODES) unless
 # pass.abc.allow_oversize / formal.allow_oversize was set. Both options and both
 # gates are gone: every design is ATTEMPTED, and memory exhaustion is caught by
 # the memory backstop (RLIMIT_AS, the per-region admission) and reported as
 # TIMEOUT-memory instead of a crash. Only pass.color still WARNS about a large
 # flattened design, since that is advice, not a refusal.
 #
-# The threshold is pinned tiny via LIVEHD_LARGE_DESIGN_NODES=1, so this small
+# The threshold is pinned tiny via LHD_LARGE_DESIGN_NODES=1, so this small
 # design is "over" it. Asserts:
 #   1. pass.color WARNS but still succeeds (exit 0) on an over-threshold design
 #   2. pass.abc whole-design flatten is ATTEMPTED: a netlist, no large-design refusal
@@ -56,7 +56,7 @@ run compile "$PRP" --top "$TOP" --emit-dir lg:"$W/lg" --workdir "$W/w1"
 # ---------------------------------------------------------------------------
 # 1. pass.color: a WARNING, not a failure -- coloring is fine at any size.
 # ---------------------------------------------------------------------------
-LIVEHD_LARGE_DESIGN_NODES=1 "$LHD" pass color flat --top "$TOP" lg:"$W/lg" \
+LHD_LARGE_DESIGN_NODES=1 "$LHD" pass color flat --top "$TOP" lg:"$W/lg" \
   --emit diagnostics:"$W/color.jsonl" --workdir "$W/w2" -q --result-json "$W/color.json" \
   || fail "pass.color must WARN, not fail, on a large design"
 grep -q '"code":"large-design"' "$W/color.jsonl" \
@@ -69,7 +69,7 @@ run pass color flat --top "$TOP" lg:"$W/lg" --workdir "$W/w2b"  # (re-color for 
 # ---------------------------------------------------------------------------
 # 2. pass.abc whole-design flatten over the threshold: ATTEMPTED, not refused.
 # ---------------------------------------------------------------------------
-LIVEHD_LARGE_DESIGN_NODES=1 "$LHD" pass abc --top "$TOP" lg:"$W/lg" \
+LHD_LARGE_DESIGN_NODES=1 "$LHD" pass abc --top "$TOP" lg:"$W/lg" \
   --emit-dir lg:"$W/abc_flat" --set synth.liberty="$LIB" --set abc.flatten=true \
   --emit diagnostics:"$W/abc.jsonl" --workdir "$W/w3" -q --result-json "$W/abc.json" \
   || fail "pass.abc refused an over-threshold whole-design flatten: $(cat "$W/abc.json" 2>/dev/null)"
@@ -89,7 +89,7 @@ rejected abc_short pass abc --top "$TOP" lg:"$W/lg" --emit-dir lg:"$W/abc_reject
 # ---------------------------------------------------------------------------
 # 4. per-def abc (flatten=false) maps the same over-threshold design.
 # ---------------------------------------------------------------------------
-LIVEHD_LARGE_DESIGN_NODES=1 run pass abc --top "$TOP" lg:"$W/lg" --emit-dir lg:"$W/abc_perdef" \
+LHD_LARGE_DESIGN_NODES=1 run pass abc --top "$TOP" lg:"$W/lg" --emit-dir lg:"$W/abc_perdef" \
   --set synth.liberty="$LIB" --set abc.flatten=false --workdir "$W/w5"
 [ -n "$(ls -A "$W/abc_perdef" 2>/dev/null)" ] || fail "per-def abc produced no netlist"
 
@@ -99,7 +99,7 @@ LIVEHD_LARGE_DESIGN_NODES=1 run pass abc --top "$TOP" lg:"$W/lg" --emit-dir lg:"
 #    designs are dropped structurally before any encode. effort=proof: the
 #    default sampled effort would only report TESTED-sampled.
 # ---------------------------------------------------------------------------
-LIVEHD_LARGE_DESIGN_NODES=1 "$LHD" lec --impl "$PRP" --ref "$PRP" \
+LHD_LARGE_DESIGN_NODES=1 "$LHD" lec --impl "$PRP" --ref "$PRP" \
   --impl-top "$TOP" --ref-top "$TOP" --set formal.lec.semdiff=none --set formal.effort=proof \
   --workdir "$W/w6" -q --result-json "$W/lec.json" 2>/dev/null
 rc=$?

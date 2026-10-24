@@ -155,6 +155,10 @@ public:
     // Coarsening may never cross this boundary: doing so would erase the
     // activation contract and force an otherwise idle region to execute.
     size_t         control_owner   = invalid_index;
+    // The Clock_cell VERSION whose closed gate makes this work dead: the version feeds only (through value uses) flops clocked by that
+    // plain cell, so while the cell's sampled enable is low none of it is observed. Coarsening never merges versions with different
+    // owners, so a color is either wholly skippable under one gate or not at all; the cell's version precedes every owned one.
+    size_t         gate_owner      = invalid_index;
     hhds::Port_id  output_port     = 0;  // data versions may split a multi-output node by protocol port
     State_version  version         = State_version::pre_rise;
     Execution_slot slot            = Execution_slot::pre_rise_eval;

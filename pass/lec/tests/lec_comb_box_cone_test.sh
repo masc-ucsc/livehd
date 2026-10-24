@@ -62,7 +62,7 @@ build() {  # $1=src $2=out
 build ref.sv  ref
 build impl.sv impl
 
-LEC_CONE_LOG=1 $LHD lec --set formal.effort=proof --impl "lg:$WORK/impl" --ref "lg:$WORK/ref" --top cbx \
+LHD_LEC_CONE_LOG=1 $LHD lec --set formal.effort=proof --impl "lg:$WORK/impl" --ref "lg:$WORK/ref" --top cbx \
    --workdir "$WORK/q_$$" --set formal.lec.semdiff=none --set formal.timeout=30 \
    > "$WORK/out.txt" 2> "$WORK/err.txt"
 

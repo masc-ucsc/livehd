@@ -10,7 +10,7 @@
 //
 // THIS PAIR PROVES TODAY, and that is expected: at 15 lines cvc5 discharges the
 // one cut the cone pass could not, so the VERDICT is fine. What the fixture
-// pins is the mechanism, which is already visible with LEC_CONE_LOG=1:
+// pins is the mechanism, which is already visible with LHD_LEC_CONE_LOG=1:
 //     [LEC_CONE] nxt:acc   DIFF   abc  pis=9 ands=29
 //     ... cones: 1/2 PROVEN (residue 1: 1 diff); decomposed (1 cuts each UNSAT)
 // The cone-pass property itself is gated by //pass/lec:lec_comb_box_cone_test,

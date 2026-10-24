@@ -1,7 +1,6 @@
 // This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 
 #include "latch_contract.hpp"
-#include "mask_eval.hpp"
 
 #include <algorithm>
 #include <string>
@@ -11,8 +10,10 @@
 #include "absl/container/flat_hash_map.h"
 #include "absl/container/flat_hash_set.h"
 #include "cell.hpp"
+#include "debug_env.hpp"
 #include "diag.hpp"
 #include "inline_sub.hpp"
+#include "mask_eval.hpp"
 
 namespace livehd::latch_contract {
 
@@ -1932,7 +1933,7 @@ int inline_clock_gate_cells(hhds::Graph* g, std::string_view from_pass, const st
   int done = 0;
   for (const auto& c : cells) {  // never mutate while iterating fast_class
     const bool ok = gu::inline_sub_instance(g, c, from_pass);
-    if (::getenv("LIVEHD_SIM_CLK_DEBUG") != nullptr) {
+    if (livehd::debug::env<"LHD_SIM_CLK_DEBUG">() != nullptr) {
       std::fprintf(stderr,
                    "[icgdbg] %s: inline cell %s -> %s\n",
                    std::string{g->get_name()}.c_str(),
@@ -2421,24 +2422,15 @@ std::optional<Icg_def_match> match_icg_driver(hhds::Pin_class inner, bool& abort
   if (op_ph.net.is_invalid() || gu::is_graph_input_pin(op_ph.net) || op_ph.net.is_const()) {
     return std::nullopt;
   }
-  auto       gate    = op_ph.net.get_master_node();
-  const auto gate_op = gu::type_op_of(gate);
-  // TWO flavours, and the design corpus has both. `clk & en_latch` (enable
-  // latched while the clock is LOW, output idles low) is the ordinary ICG;
-  // `clk | ~en_latch` (enable latched while the clock is HIGH, output idles
-  // high) is minion's prim_clk_gate_n. They gate the SAME reference edges --
-  // neither output moves while the enable is deasserted -- so the only
-  // difference is the enable's sample point, recorded as `invert`.
-  if (gate_op != Ntype_op::And && gate_op != Ntype_op::Or) {
+  auto       gate        = op_ph.net.get_master_node();
+  const auto raw_gate_op = gu::type_op_of(gate);
+  if (raw_gate_op != Ntype_op::And && raw_gate_op != Ntype_op::Or) {
     return std::nullopt;
   }
-  if (op_ph.inverted) {
-    // An inversion between the gate and the output (`~(clk & en)`) is a
-    // genuinely inverted CLOCK, not a flavour: its consumers commit on the
-    // opposite reference edge. Not modelled -- leave it to the derived-clock
-    // refusal rather than fold it into `invert`, whose meaning is the flavour.
-    return std::nullopt;
-  }
+  // Technology mapping may spell clk & L as NOR(~clk, ~L). Normalize
+  // De Morgan polarity before classifying the two operands. An inversion
+  // of the actual clock still fails the operand-polarity check below.
+  const auto      gate_op = op_ph.inverted ? (raw_gate_op == Ntype_op::And ? Ntype_op::Or : Ntype_op::And) : raw_gate_op;
   // Split the And's operands into "the one holding a latch below it" (the
   // enable) and "the bare input port" (the clock). This is the STRUCTURAL
   // anchor that replaces the name heuristic: a gate cell's own body holds no
@@ -2457,7 +2449,7 @@ std::optional<Icg_def_match> match_icg_driver(hhds::Pin_class inner, bool& abort
     // are different gates. Accepting them dropped the inversion, so a design
     // whose gate enable was inverted came back PROVEN against the original.
     if (!ph.net.is_invalid() && gu::is_graph_input_pin(ph.net)) {
-      if (ph.inverted) {
+      if (ph.inverted != op_ph.inverted) {
         abort = true;
         return std::nullopt;
       }
@@ -2466,7 +2458,7 @@ std::optional<Icg_def_match> match_icg_driver(hhds::Pin_class inner, bool& abort
       continue;
     }
     if (!ph.net.is_invalid() && !ph.net.is_const() && gu::type_op_of(ph.net.get_master_node()) == Ntype_op::Latch) {
-      if (ph.inverted != (gate_op == Ntype_op::Or)) {
+      if (ph.inverted != ((gate_op == Ntype_op::Or) != op_ph.inverted)) {
         abort = true;
         return std::nullopt;
       }

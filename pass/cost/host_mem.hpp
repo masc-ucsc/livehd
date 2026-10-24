@@ -104,9 +104,10 @@ namespace livehd::cost {
 // header: it protects the host, it does not produce a clean error.
 [[nodiscard]] uint64_t arm_address_space_limit(uint64_t budget);
 
-// The budget this process is configured for: env LIVEHD_MEMORY_BUDGET_MB when
+// The budget this process is configured for: env LHD_MEMORY_BUDGET_MB when
 // set (clamped to physical - reserve), else budget_bytes(0) = physical - reserve. 0 means "unenforceable -- do
-// not gate". Reads only the environment and syscalls.
+// not gate". The environment override is read once per process; the physical
+// ceiling is rechecked on each call.
 [[nodiscard]] uint64_t configured_budget_bytes();
 
 // Convenience wrapper for process startup: resolve the budget

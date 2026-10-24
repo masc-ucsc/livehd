@@ -1,0 +1,17 @@
+// synth.clock_gate fixture (lhd_clock_gate_test.sh): a CASCADE of user clock gates. c2 checks `a & b` below c1 which already checks
+// `a` (only `b` is new), and c3 checks `a` again below c1 (nothing new, so it IS c1). Collapsing leaves two gates on `clk`
+// and no cascade.
+pub mod cg_chain(clk:Clock, a:U1, b:U1, d:U8) -> (q0:U8@[], q1:U8@[], q2:U8@[]) {
+  const c1 = Clock(clock_pin=clk, enable=a != 0)
+  const c2 = Clock(clock_pin=c1, enable=(a & b) != 0)
+  const c3 = Clock(clock_pin=c1, enable=a != 0)
+  reg r0:U8:[clock_pin=c2] = 0
+  reg r1:U8:[clock_pin=c3] = 0
+  reg r2:U8:[clock_pin=c1] = 0
+  r0 = d
+  r1 = (d + 1)#[0..<8]
+  r2 = (d + 2)#[0..<8]
+  q0 = r0
+  q1 = r1
+  q2 = r2
+}

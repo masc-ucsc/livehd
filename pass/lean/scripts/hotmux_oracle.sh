@@ -33,7 +33,7 @@ fi
 # fixture from an earlier binary satisfy this run.
 rm -f -- "${fixtures[@]}"
 echo "[hotmux-oracle] generating $FIXTURE"
-LEAN_HOTMUX_FIXTURE="$FIXTURE" LEAN_HOTMUX_SIGNED_FIXTURE="$SIGNED_FIXTURE" \
+LHD_LEAN_HOTMUX_FIXTURE="$FIXTURE" LHD_LEAN_HOTMUX_SIGNED_FIXTURE="$SIGNED_FIXTURE" \
   "$TEST_BIN" --gtest_filter='DesignScan.HotmuxValueOracle:DesignScan.HotmuxSignedValueOracle' >"$OUT/generate.log" 2>&1
 
 cases=0

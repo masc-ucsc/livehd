@@ -1,0 +1,727 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Shared unate synthesis and domino backend</title>
+<link rel="stylesheet" href="../todo.css">
+</head>
+<body>
+<nav><a href="../index.html">LiveHD TODO</a></nav>
+<main>
+<h1><strong class="item-id">synth-unate</strong> Shared unate synthesis and domino backend</h1>
+<p>Implement <a href="../../synth_domino.md">synth_domino.md</a> with the broader
+<a href="../../domino.md">domino.md</a> design as a separate <code>pass/synth</code>
+path alongside ABC. U0 is the first milestone; the complete objective remains open.</p>
+<p><strong>Review checkpoint (2026-09-22, revised by U1):</strong> the static path
+is unate-first: fewest-function decomposition with unbounded depth, ABC function
+mapping/stitching (tmap only), synthesis coloring, per-region ABC fallback, and
+independent <code>pass.synth</code>/<code>pass.abc</code> comparison with a separate
+<code>lhd lec</code>. The fused
+<code>lhd synth --set synth.mapper=synth|abc</code> switch selects either path.
+See <a href="../../pass/synth/README.md">review commands and scope</a>.
+The pending items below remain recorded for later work; they do not extend this
+review checkpoint. Physical domino work is deferred.</p>
+
+<h2>Depends on</h2>
+<p>U0 reuses the existing region bit blast and mapped-cell readback. The physical
+domino backend is gated by D0 evidence and the D1 clock, capture and cell contracts.</p>
+
+<h2>Subtasks — pending</h2>
+<ul class="subtasks">
+<li><strong>U1 — LANDED 2026-09-22: unate-first flow; ABC is tmap only (owner direction).</strong>
+Every region now decomposes into the <em>fewest</em> unate functions over dual-rail
+inputs (one recipe: <code>support=6, literals=16, series=4</code>, depth unbounded,
+<code>pass.synth.max_depth=0</code>); ABC maps each function on its own
+(<code>strash; &amp;get -n; &amp;nf; &amp;put -o</code>, untimed, template-cached) and the
+stitched region replaces <code>pass.abc</code>'s flow (only the
+<code>buffer</code>/<code>dnsize</code> tail and the boundary re-size follow). Removed:
+the per-region ABC baseline competition, the region SAT miters, the whole-design
+CVC5 gate, the second full ABC design map, whole-design QoR selection, staging and
+rollback, and ware trials under this mapper. Verification is a separate
+<code>lhd lec</code>. With unbounded depth an exhausted search falls back to fan-in
+cuts, so every cone decomposes. Measured on lhdsuite dino (sky130): 80/80 regions
+unate, tmap 0.2 s (152k template hits / 89 misses), area 969k vs ABC 315k. Open, in
+order: <strong>U1a</strong> the cut search does not scale (20k-170k work units per node;
+big regions fall back to fan-in cuts: 276k fallback rails on dino, the barrel wares
+up to 7x ABC); <strong>U1b</strong> even fully decomposed regions are 1.2x ABC: a
+complemented source rail becomes a real inverter and per-function tmap cannot fold
+it into a NAND/NOR (a NAND driver maps to 4 cells); <strong>U1c</strong> with a time
+budget every template miss still spawns a worker that re-reads the Liberty (a
+persistent worker). R1-R3 below concerned the removed gate and are superseded.</li>
+<li><strong>Q1 — LANDED 2026-09-22: dynamic word select no longer builds a full barrel.</strong>
+<code>v[index]</code> over an unpacked array lowers to a shift by the affine amount
+<code>index*stride + bias</code> (e.g. <code>(select &lt;&lt; 5) + 32</code>). The shift was
+enclosed as a <code>ware</code> module with the amount as an opaque input, and the
+blaster's affine word-select only matched <code>Mult</code> and only under an in-region
+<code>Get_mask</code>, so bedrock <code>br_flow_mux_select</code> mapped a 160-bit,
+8-stage barrel: 1744 gates, 6.5x yosys' combinational area. Now the ware rebuilds the
+affine amount inside its body from the narrow index (<code>pass/abc/ware_module.cpp</code>),
+the recognizer accepts <code>SHL</code> by a constant, and it keys on a narrow DEMAND
+rather than a sliced one. 1744 -&gt; 293 gates, area 136.8 -&gt; 29.6 (yosys 29.3), period
+345 -&gt; 213 ps. Fixture: <code>inou/prp/tests/abc/dynamic_word_select.sv</code>.</li>
+<li><strong>Q2 — LANDED 2026-09-22: a 1% delay tie band in candidate selection.</strong>
+<code>timing_better</code> compared delays exactly, so with a missed budget (every
+lhdtrack design at 400 ps) area was unreachable and the gate discarded a 1.6% area win
+for a 0.026 ps delay "loss", while publishing a +2.7% area candidate that OpenSTA timed
+SLOWER. New <code>pass.synth.delay_tolerance</code> (percent, default 1): delays inside
+the band tie and area decides; meeting vs missing stays strict. In the cache key.</li>
+<li><strong>Q3 — primary inputs are timed against a weak stand-in driver.</strong>
+With no <code>set_driving_cell</code> in the SDC, OpenSTA treats primary inputs as IDEAL,
+but <code>pass.abc</code> models every region input -- primary or flop-driven -- with
+<code>boundary_drive</code> (the smallest buffer), so it builds fanout trees the judge
+never needed. <code>br_mux_bin_structured_gates</code>: 219 of 314 ps sit in a 4-stage
+buffer tree on <code>select</code>; yosys drives fanout 276 straight from the port (164 ps).
+<code>boundary_drive=none</code> globally gives -43% period and -5% area there, but
+regresses <code>br_fifo_shared_*</code> 745 -&gt; 2099 ps because FLOP-driven region inputs
+really are weak. Fix: ideal only for the design's primary inputs. The patched ABC falls
+back to the frame-wide driving cell for a NULL per-PI entry, so this needs either an
+"ideal" sentinel in <code>SC_Bnd</code> or a per-region frame driving cell, plus the
+matching change in Phase B's <code>pi_driver</code> ("a primary input of the design").</li>
+<li><strong>Q4 — the area-first objective picks ASAP7 hold buffers.</strong>
+Once a region meets its budget the sizing is area-first and the smallest buffer is
+<code>HB1xp67</code> (a weak x0.67 hold buffer); its family gets SLOWER with size, so
+upsizing inside it cannot recover speed. LiveHD instantiates 16-357 per design, yosys
+none. Marking <code>HB*</code> dont_use: <code>mux_bin</code> 314 -&gt; 191 ps at +1.5%
+area; <code>fifo</code> -1% period, +1.3% area. Correct under an area-first objective,
+so not forced; revisit if lhdtrack's minimum-period metric should win ties.</li>
+<li><strong>Q5 — bedrock arbiters hand ABC ~2x the logic yosys does.</strong>
+<code>br_arb_weighted_rr</code>: even UNTIMED LiveHD maps 135.5 vs yosys' 87.9 um^2
+combinational; one region holds ~2036 GE before mapping vs ~1050 two-input gates in
+yosys. yosys' coarse pass shares comparisons into 48 <code>$alu</code> and 16
+<code>$macc</code> cells; LiveHD lowers 16 <code>LT</code> and 207 <code>EQ</code>
+individually. Word-level resource sharing in the shared front end; neither mapper can
+recover it locally. <code>br_arb_weighted_lru</code> additionally has 336 vs 200
+flops.</li>
+<li><strong>R1 — LANDED 2026-09-22, SUPERSEDED by U1 (the gate is gone; <code>proof_prep</code> stays for <code>lhd lec</code>): the gate proves a latch-based clock gate.</strong>
+<code>prove_design</code> queried the raw graphs, skipping the preparation
+<code>lhd lec</code> runs, so on logikbench <code>basic/icg</code> the flops kept a
+derived clock (the gate's AND and the flop land in different synthesis regions),
+induction refused it, and the auto ladder's BMC leg compared independent synthetic
+power-on values -- <code>q(ref=254 impl=0)</code> with the clock held low -- and the
+refutation was fatal. Fixed by sharing <code>lhd lec</code>'s preparation instead of
+copying it: <code>pass/single_edge/proof_prep.{hpp,cpp}</code> now owns the helpers
+and <code>prepare_time_base()</code> (clock-cone cell inlining, Clock_cell
+recognition, gated-clock -&gt; flop-enable fold, one single-edge time base), plus
+<code>inline_instances_missing_from_other_side()</code>. <code>lhd lec</code> and the
+gate both call them. <code>proof_accepts</code> now uses the engine's own
+<code>livehd::lec::internal_state_only</code> rule (exported from
+<code>query.hpp</code>): a Proven whose only unmatched cuts are one-sided internal
+state is sound, which is what <code>lhd lec</code> already accepted. icg now proves
+unbounded; it keeps ABC only because area ties (57 vs 57). Regression:
+<code>inou/prp/tests/abc/clock_gate_latch.v</code> (both mappers) and a verdict pin
+in <code>lhd_unate_smoke</code>.</li>
+<li><strong>R1a — inline latch+AND gates reach only a BOUNDED proof, in <code>lhd lec</code> too.</strong>
+When the gate is written inline in the flop's own module (not an instantiated
+cell), both <code>lhd lec</code> and the gate end in
+<code>bmc BOUNDED-Proven</code>, so pass.synth keeps ABC. An engine limitation,
+not a pass.synth one; publishing would need the fold to cover the inline shape.</li>
+<li><strong>R1b — the phase-schedule path never cross-checks root clocks</strong> (an <code>lhd lec</code> engine item; still open).
+<code>prove_equal</code> builds <code>ref_plan</code>/<code>impl_plan</code>
+(query.cpp near 4361 and 6150) and checks each <code>.ok</code> alone, never that the
+two are rooted on the same clock. In the icg failure the ref was rooted on
+<code>clk</code> and the impl on the gated net -- two time bases, silently compared.
+That is a false-PROVEN hazard as much as a false-refute one. A raw
+<code>root_clock</code> compare is too broad (a derived root is keyed per graph), so
+restrict it to the asymmetric case: one side a named input root, the other a
+derived one -&gt; Unknown naming both.</li>
+<li><strong>R1c — SUPERSEDED by U1 (no gate): confirm a refutation before it is fatal.</strong>
+Every other refutation consumer confirms first (collapse -&gt; flat re-solve;
+tier-2 pairs dropped and re-solved; trusted-box refutes demoted). The gate still
+fatals on one unconfirmed query. <code>bounded</code> and <code>unmatched_*</code>
+cannot discriminate (on a Refuted they are "has state" and always empty), but the
+archived reproducer can: replay <code>failure.json</code>'s <code>reproduce</code>
+argv and fatal only if it also refutes (fail closed if it cannot run).
+<code>full_driver_failure_smoke</code> already asserts that replay refutes a real
+miscompile.</li>
+<li><strong>R2 — SUPERSEDED by U1 (no gate, no second ABC map): the no-op path pays for a full proof.</strong>
+<code>opts.publication_gate</code> unconditionally runs gensim, the whole-design
+CVC5 proof, an independent whole-design ABC map and two OpenTimer runs even when
+no region installed a unate candidate, so the published netlist is byte-for-byte
+ABC. Measured 3.7x-5.0x wall versus <code>synth.mapper=abc</code> on
+trivial.v / an 8-bit adder / hier_seq.prp; on logikbench basic the geomean
+runtime is 1.94x lhd+abc. The new <code>unate_regions</code> report member is
+the predicate to gate on, but it MUST count cache-replayed regions too
+(<code>opts.alternative_replay</code>): a warm all-hit run can carry a unate
+winner with an empty <code>regions_searched</code>, and skipping the gate there
+would publish an unverified netlist. Changing <code>published</code> /
+<code>full_design.verdict</code> to express "not required" also breaks
+<code>summarize.py</code> and five smoke tests that cross-check the two-valued
+schema, so the schema change has to land with its consumers.</li>
+<li><strong>R3 — SUPERSEDED by U1 (no per-region baseline comparison): per-region <code>baseline_area</code> is pre-readback.</strong>
+It records ABC's mapped area before readback, so a region that passes through
+unchanged still shows a phantom unate win in the per-region rows. The
+whole-design gate is unaffected (it measures both final networks), but the
+per-region reporting overstates.</li>
+<li><strong>R4 — ware retries are attributed as separate regions.</strong>
+pass.abc calls the region callback once per ware architecture trial, so one
+region emits several <code>regions_searched</code> rows with no trial
+discriminator (3 rows for an 8-bit adder, 6 for a multiplier).
+<code>summarize.py</code> now folds them as retries (denominators counted once,
+effort summed), but the fidelity fix is to plumb the ware candidate label
+through <code>Map_options::Alternative_resources</code> and emit a
+<code>trial</code> field. Until then the unate search is genuinely re-run from
+scratch for every losing architecture.</li>
+<li><strong>R5 — report sidecars depend on a <code>qor</code> path.</strong>
+The proof/publication report and both timing reports are only published when a
+<code>qor</code> path is given, while the witness and provenance are published
+regardless. Worse, <code>--stats</code> without <code>--workdir</code> points
+<code>qor</code> at an ephemeral scratch sidecar, so adding <code>--stats</code>
+silently MOVES the witness/provenance into a directory deleted at exit. Fix both
+together by resolving one public base and guarding each artifact with
+<code>fs::exists</code>.</li>
+<li><strong>R6 — forked helpers inside pass/synth.</strong>
+<code>abc_timing_qor</code> is a verbatim fork of
+<code>livehd::abc::physical_flow_qor</code>; the bounded-wire transport helpers
+(<code>require</code>/<code>text</code>/the SOP grammar) are spelled three times
+across <code>abc_network_wire.cpp</code>, <code>abc_region_proof.cpp</code> and
+<code>abc_flow_worker.cpp</code>. Deduplicate into
+<code>mapping_wire.hpp</code> with a non-throwing
+<code>sop_error()</code> so each caller keeps its own exception classification.</li>
+<li><strong>R7 — two wall-clock-sensitive tests flake under load.</strong>
+<code>//pass/synth:abc_worker_test</code>
+(<code>DeadlineAndCancellationKillAndReapOnlyTheOwnedWorker</code>, asserts
+<code>elapsed &lt; 2</code>) and <code>//pass/synth:region_replay_smoke</code>
+(<code>test_missing_failed_...</code>, a 5 s replay deadline) both fail when the
+machine is busy and pass when run serially. Measured 2026-09-22 with 26
+concurrent tests: 3.5 s against a 2 s bound. Give them load-independent bounds
+or mark them <code>exclusive</code>.</li>
+<li><strong>R8 — <code>pass.synth</code> refines partition boundaries twice.</strong>
+On an identical all-hit incremental run pass.abc runs the boundary refinement
+once and pass.synth runs it twice (it maps a candidate and an independent ABC
+baseline). <code>lhd/tests/lhd_abc_boundary_test.sh</code> therefore gates its
+count assertion on <code>MAPPER=abc</code>; un-gate it once this is fixed.</li>
+<li><strong>D — complete QoR selection.</strong> Region and whole-design
+selection now exist (D-local and D-whole below). Extend complete coverage to native
+state overhead, physical/multiple-clock constraints and remapped parasitics.
+Single virtual-clock combinational I/O coverage is implemented (D-clock below).
+Independent structural denominators and sharing evaluation now exist (G13).
+Per-recipe search and variant mapping costs now exist (D-effort below), with an
+enclosing CLI command interval (D-command below) and external process sampling
+(D-external below). Extend accounting to missed/orphaned children, baseline and candidate
+area/timing, physical coverage and duplication, including fatal failed attempts.
+Region wins alone do not establish whole-design wins.</li>
+<li><strong>E — publication hardening.</strong> The production full-design CVC5
+gate and staged replacement now exist (E1 below). Expand mixed-reader and
+occurrence-specialization coverage beyond the static parameter/shared-reader
+cases in E6, and extend full-driver failure injection
+beyond the cached-netlist mismatch covered by E5. Full-design refutations now archive
+the exact prepared solver inputs and replay through ordinary CVC5 LEC (E4 below).
+Stitched-region refutations now
+retain replayable physical network snapshots (E3 below). Current replacement rollback does
+not provide crash recovery or concurrent-reader isolation.</li>
+<li><strong>F — bounded effort and reuse.</strong> Shared cooperative region
+admission now covers unate search and per-function calls (F1 below). Time-budgeted
+function mapping, stitched-region proof and complete baseline mapping have killable
+workers (F5/F6/F9 below). Extend hard interruption to parent-frame setup/library loading, original-region import,
+stitching and boundary refinement, and extend whole-invocation accounting
+through model generation, full-design proof, independent baseline mapping, STA
+and publication, including owned child processes.
+Private staging-library lifetimes are now scoped (F2 below), and bounded
+function-template reuse is implemented (F3 below). Cached netlists now replay
+their original decisions and witnesses (F4 below), under the single
+<code>lhd.incremental</code> switch.</li>
+<li><strong>G — optimizer recovery and reproducible evaluation.</strong> Local
+structural recovery, cut diversity and exact selection over small retained-choice
+closures now exist (G1–G3 below), with bounded related-choice recovery for
+larger regions (G5), verified paid-divisor re-expression (G7), and rescue of
+uncovered outputs using existing divisors (G8). Shared cofactor encoding synthesis
+for small output groups now exists (G10), extended to two disjoint bound sets
+(G11), with bounded associative regrouping (G14) and depth-relaxed hierarchies
+(G15). Add reshaping beyond associative cones, more than two cofactor bound sets, larger
+source groups and wider class encodings. Bounded minimum-width class-code
+assignment search now exists (G17).
+Searched and reused candidates export independently checkable witnesses (G4 below).
+Bounded input snapshots and exact CLI context now exist (G12), with independent
+structural evaluation and failed-search source records (G13). Complete certified
+frontend dependency closure, benchmark corpus/register-cut provenance beyond
+the actual ABC-region manifests now archived by G16, and
+rejection archives beyond the current region decision/witness records.
+Exact source-bounded image care (G6) and bounded symbolic image/dependency
+queries (G9) are implemented. Richer completion/form enumeration remains pending.</li>
+<li><strong>H — later domino track D0–D5.</strong> Reproduce the survey and register
+cones; settle the physical interface before introducing a Domino op; then implement
+oracle/care proofs, phase/rail closure, atomic mixed-network claims, sharing,
+ware templates and bounded placement/remap. No physical domino claim is implemented.</li>
+</ul>
+
+<h2>Subtasks — landed</h2>
+<ul class="subtasks">
+<li><strong>F9 — killable complete baseline mapping.</strong>
+Positive synth region time budgets now route both original-region mapping and
+the independent fallback baseline through one child per complete ABC flow.
+Bounded transport preserves ordered ports, local AIG/SOP functions, mapped cell
+signatures, sharing, latches, barrier buffers and physical boundary environments.
+The child retains live GIA undo state across sizing/recovery/candidate phases;
+the parent validates a complete result before replacing its current network.
+The remaining region deadline includes transport, and parent-plus-active-child
+memory feeds the region admission gate. Successful QoR rows record current
+baseline worker observations; warm cache hits do not invent new worker work.
+Tests compare actual in-process/child networks and timing, interrupt a command
+after ABC entry, verify child reaping, reject malformed/cancelled snapshots,
+and exercise sequential full-design CVC5 proof plus preservation of published
+outputs after a driver timeout. Untimed mapping and boundary refinement remain
+cooperative; this does not establish a whole-invocation deadline.</li>
+<li><strong>F8 — baseline flow executor and phase admission.</strong>
+The initial ABC mapping, conditional sizing ladder, GIA undo-based area recovery
+and independent area candidate now share one executor. Resolved commands and
+policy travel separately from the graph importer; temporary networks have scoped
+ownership. Region time and memory checks surround commands and timing and stop
+later phases before readback/publication. Focused tests cover entry/post-map/area
+refusal, command failure, delay-first ties and retained live GIA state; the
+existing end-to-end budget and area regression checks the mapper policy.
+The ordinary executor uses cooperative admission; F9 runs this complete phase
+in an isolated worker for time-budgeted synth invocations.</li>
+<li><strong>G17 — bounded alternative cofactor class codes.</strong>
+The encoding engine now searches injective minimum-width class-to-code assignments,
+starting with discovery-order codes. Its explicit per-proposal bound participates
+in cache identity and witness metadata; reports include evaluated assignments and
+whether enumeration was capped. Each trial rebuilds total encoders and decoder
+care/completions, with independent dependency and whole-network proofs. A regression
+recovers a two-level network under a literal bound by replacing expensive binary
+class bits with OR/AND encoders. Tests exhaust the 24 assignments for three classes,
+exercise two-set enumeration, check actual mapped cells over all source assignments,
+and independently verify the generated witness (including corruption rejection).
+CLI checks cover full-design CVC5, warm reuse, invalid bounds and cache invalidation.
+The search retains the first feasible code assignment; broader physical selection,
+wider codes and more than two bound sets remain pending.</li>
+<li><strong>E6/F7 — shared-instance edits and generation-safe region reuse.</strong>
+Guarded CLI regressions cover three differently wired occurrences, opposite
+output polarities, two warm runs, comment-only changes and a parameter change
+in just one occurrence. Fresh synthesis and an independent flat RTL reference
+both pass ordinary CVC5 LEC. Virtual-flat single-color regions now retain their
+cache comparison body; explicit whole-design flattening retains its memory-saving
+policy. Definition-preserving runs reuse the unchanged specialization even when
+elaboration renames it after assigning its former name to changed logic. A lazy
+private view keeps the previous saved generation available for exact comparison
+until mapping finishes; it is discarded before freezing mapped bodies. Tests
+check correct witness/QoR ownership and prevent resurrecting old metadata after
+freeze. Virtual coloring now projects separate occurrence colors onto shared
+definitions and flattening recovers them. Nested-path tests cover save/load,
+recoloring, clearing and preserved boundaries; a small-color CLI run requires
+mixed hits/misses after one instance changes. That run exposed an unsafe cache
+copy when the same named IO acquired different numeric port IDs: such entries
+now miss and remap. Explicit port-permutation transport and physical mixed-network
+claims remain pending.</li>
+<li><strong>D-refuted — retained costs for fatal stitched-region mismatches.</strong>
+The failure manifest binds a bounded observation artifact containing every
+completed recipe search, prior mapping attempts and the refuted mapping phase.
+Searches completed before mapping include costs for recipes whose mapping is
+never reached after the defect. Independent replay validates artifact hashes,
+attribution and phase time/memory bounds, keeping resource observations separate
+from the newly computed SAT verdict. Oversized observations are explicitly
+omitted without losing the network reproducer. Tests cover a prior unsupported
+recipe, a fatal mapped variant, a later searched-only recipe, corruption and
+size refusal, through both in-process and isolated proof paths. Scope ends at
+refutation before archival; invalid decompositions,
+fragment defects and full-design failures still need comparable cost records.</li>
+<li><strong>D-external — external command measurement and guard.</strong>
+The serial <code>measure_synth</code> launcher records spawn-through-root-reap
+wall time, sequential process-tree footprint samples, exact argv/cwd and logs.
+Current-parentage traversal includes separate process groups; bounded samples,
+missing readings and peak-contributing process identities remain explicit.
+Deadline, sampled memory, interrupt and scan-cap stops target the owned tree,
+retain failure evidence and reap the root. Regression cases cover separate-group
+children, time/memory stops, preservation of an unrelated process, command/spawn
+failures, fresh-archive enforcement and real cold/warm synthesis. This is sampled
+measurement, not an exact simultaneous peak or a hard resource ceiling. Already
+orphaned separate-group children, executable-content binding and crash-safe
+publication remain outside this wrapper's guarantees.</li>
+<li><strong>D-command — enclosing synthesis command observation.</strong>
+The CLI result for either synthesis mapper and standalone synth/ABC passes
+records wall time from main entry to final result emission, including handled
+failures. It covers frontend/setup work, all retries, proof, independent baseline,
+STA, publication and output exports. Parent peak RSS is identified separately;
+process-tree peak remains explicitly unavailable. The summarizer can bind a
+successful fused command envelope to its exact embedded unate report, validate
+phase-time containment and retain the enclosing observation. Failed envelopes
+cannot be attached to an older published report. Tests cover ordinary ABC,
+alternative cold/warm runs, standalone exhausted search and a fatal refutation.
+Loader startup, final envelope I/O, exit and guard stops are observed separately
+by D-external; the CLI envelope itself has no aggregate process-tree peak.</li>
+<li><strong>D-effort — per-recipe and mapping-variant measurements.</strong>
+Completed region reports retain non-overlapping search and mapping intervals,
+including unsupported/exhausted attempts and candidates that lose QoR selection.
+Shared search is charged once per recipe; every physical mapping variant gets
+its own interval. Memory observations sum simultaneous parent/active-worker
+footprints and retain unavailable-sample counts. The summarizer checks attribution
+and region bounds, separates current measurements from historical cache replay,
+and marks legacy effort unavailable. Cold/warm worker and exhausted-search CLI
+checks cover these records. Whole-invocation/process-tree peaks and fatal-attempt
+resource archives remain pending; sampled footprints are not allocation deltas.</li>
+<li><strong>E5 — full-driver cached mismatch rejection and recovery.</strong>
+A test-only injector changes a cached mapped output while preserving lookup
+metadata and archived witnesses. The complete <code>lhd synth</code> command
+must reuse that body and reject it at the full-design proof gate. Content
+snapshots require unchanged published netlists, reports, provenance, templates
+and both candidate/baseline caches. The retained counterexample replays through
+ordinary CVC5 LEC without changing its archive; disabling the single incremental
+switch produces a fresh proved candidate while retaining failed staging.
+Other driver failure points and crash/concurrent-reader isolation remain open.</li>
+<li><strong>E4 — exact full-design refutation replay.</strong>
+The proof gate archives its live private solver inputs before destroying them,
+including expanded state models and remaining body-less cell declarations.
+The archive contains reference/candidate closures, models, counterexample,
+producer revision and ordinary <code>lhd lec</code> arguments with a finite
+timeout and reuse disabled. The original stitched candidate stays in staging.
+Combinational and sequential mismatch tests destroy their original libraries
+before replaying through the CLI; successful proofs do not invoke the sink,
+and archive errors propagate rather than publishing fallback. Full-driver
+cached-netlist mismatch injection is covered by E5.</li>
+<li><strong>G16 — ordered ABC register-cut manifests.</strong>
+Source-schema-2 records bind ordered CI/CO names and source-node IDs to primary,
+state or opaque region endpoints. State entries pair current-state CIs with
+next-state COs and preserve all four ABC initialization classes. The independent
+checker validates the metadata digest, ordering and pairings; the summarizer
+separates reported state-cut counts from Boolean coverage. Older source records
+remain readable with unavailable boundary metadata. Cold/warm sequential CLI
+checks require exactly one paired state cut, and cache replay retains names
+explicitly scoped to the original search. Bounded capture polls region admission.
+This does not certify RTL clock/reset mapping, top-level port identity, benchmark
+construction or physical domino phase legality.</li>
+<li><strong>D-rejected — physical measurements survive proof refusal.</strong>
+Whole-design candidate and independently mapped ABC measurements now run after
+inconclusive/admission-refused full-design proofs as well as accepted proofs.
+Both raw timing reports and normalized coverage/area/timing remain available.
+The publication report separates proof acceptance from QoR acceptance; both are
+required, and rejected candidates cannot publish cache rows. The CLI regression
+requires a QoR-accepted candidate with a refused proof to retain measurements,
+publish the equivalent ABC fallback and leave candidate cache rows private.
+The independent summarizer checks these gate relationships without upgrading
+reported physical results into independently verified claims. Refutations still
+stop and retain defect artifacts instead of continuing this comparison.</li>
+<li><strong>E3 — replayable stitched-region refutations.</strong>
+Both worker and in-process refutations archive the actual ordered networks,
+including mapped gate semantics, in the failed staging directory. A manifest
+binds the bounded request by SHA-256 and records region, recipe, variant and
+producer revision. The replay command needs no RTL, Liberty or synthesis cache;
+it checks the binding and recomputes SAT under a finite deadline. Tests replay
+after the original networks are destroyed, reject altered/malformed artifacts,
+and inject a broken backend through the production stitch gate. Refutation and
+archive-write failure both remain fatal and preserve the incumbent.
+Full-driver fault injection, fragment-only failure archives and malformed
+snapshot evidence remain pending.</li>
+<li><strong>E2 — private state-model proof preparation.</strong>
+The full-design gate copies design closures and body-less standard-cell IO
+declarations into private libraries, then inlines stateful Liberty models before
+state correspondence. Single-flop models preserve instance state identity;
+expansion is charged per occurrence against the joint proof-node budget.
+Tests prove a valid state model, refute inverted data, preserve caller graphs,
+refuse exhausted expansion budgets, and require cold/warm sequential CLI proof.
+This does not extend the physical timing coverage claimed by D.</li>
+<li><strong>F6 — killable stitched-region proof.</strong>
+Time-budgeted candidates snapshot the actual reference AIG and exported mapped
+network with ordered CI/CO ports, repeated outputs, constants and edge polarity.
+A private worker reconstructs both networks and runs strashing and miter SAT
+under the region's remaining deadline and parent-plus-child memory admission.
+Bounded versioned records reject malformed or oversized graphs; cancellation
+and worker failures cannot become a proof, and refutations remain fatal.
+Tests include equivalent rewiring, deliberate output corruption, malformed SOPs,
+deadline refusal and missing responses. Parent-side snapshot/export work
+and whole-invocation accounting remain pending; F9 covers complete baseline flows.</li>
+<li><strong>F5 — killable function-mapping workers.</strong>
+Positive region time budgets route uncached function mapping through a self-exec
+worker. The parent applies the remaining region time to startup, transport,
+Liberty loading, ABC mapping/sizing and fragment SAT, then kills and reaps only
+its owned process group on exhaustion. Bounded versioned records carry ordered
+ports, timing and proved fragments; failed/incomplete responses never enter the
+template cache. Parent-plus-active-worker memory samples feed existing admission
+limits with explicit scope and missing-sample counters. Tests exercise real
+mapping, deadline/cancellation/memory refusal, reaping, malformed/missing worker
+results and recovery, plus cold/warm CLI proof and witness checking. Untimed
+functions and later invocation stages remain outside this hard worker boundary;
+F9 adds a separate complete-baseline worker.</li>
+<li><strong>G15 — hierarchical depth relaxation and encoder witnesses.</strong>
+Associative regrouping now uses three/four-level recipes by constructing a
+shared hierarchy of total encoder functions. Rail demand propagates backward;
+producer-order emission charges actual twins and checks every function's
+complexity and dependency depth. Recognition is bounded by 256 source literals
+and the recipe capacity; at most 256 encoder definitions are admitted.
+Schema-5 evidence allows only original primary sources and earlier encoders,
+rejects cycles and internal-source shortcuts, and proves the original outputs.
+Older flat witnesses remain supported. Tests cover signed 27-/28-source cones,
+four-level two-input reductions, polarity sharing, malformed definitions and
+exhausted proof budgets. The CLI exercises failed two/three-level recipes,
+verified four-level mapping, complete CVC5 proof and independent cold/warm
+witness replay. Arbitrary Boolean reshaping and alternative partitions remain
+pending.</li>
+<li><strong>G14 — bounded associative depth regrouping.</strong>
+After structural/divisor and cofactor searches fail, signed AND/OR output cones
+can be regrouped into shared source-based encoders and two-level decoders.
+Actual positive/negative rails, literal limits, series limits and depth are
+charged. Exact original-source dependency proofs and the complete witness gate
+are mandatory, including bounded symbolic proofs above 12 sources. Tests cover
+16-input chains with shared twins, signed OR cones, constants, corrupted encoder
+definitions, exhausted work and symbolic/output limits; the CLI checks mapping,
+full-design proof, independent evidence and cache invalidation/reuse.
+This initial two-level stage is extended to bounded hierarchies by G15.
+It requires all outputs to be recognized; general Boolean reshaping and
+partition search remain pending.</li>
+<li><strong>G13 — independent structural evaluation and failed-search sources.</strong>
+Each imported region archives its original Boolean DAG even when search finds no
+decomposition. Source and decomposition records have distinct kinds and cache
+replay bindings. Reports define endpoint-occurrence denominators, direct-source
+and source-free exclusions, shared reads, twin pairs, literal/port costs and
+reachable/unused producers. An independent summarizer checks the Boolean
+witnesses and reconstructs these counts, pools each region once, and avoids
+counting recovered variants as additional output coverage. Reused search times
+remain historical; physical QoR and full-design proof verdicts remain explicitly
+reported rather than independently re-proved. Tests reject corrupted counts,
+bindings and witnesses, check cold/warm consistency and source-only failures,
+and keep truncated archives incomplete with no unverified coverage credit.
+These are region-boundary structural metrics, not unique design endpoints,
+physical duplication or domino coverage. Whole-invocation/process-tree metrics
+and benchmark/register-cut provenance remain pending.</li>
+<li><strong>G12 — bounded input snapshots and invocation provenance.</strong>
+Each mapped invocation captures the kernel-observed sources, config, libraries,
+constraints and IR inputs immediately before mapping. SHA-256 identifies copied
+bytes; the manifest records exact CLI tokens, working directory, resolved
+reader/top/seed, effective settings, mapping labels, prior steps and engine build
+salts. Capture is refreshed on cache hits and commits or rolls back with the
+other synthesis artifacts; fused report exports include the archive. File-entry
+and attempted-byte bounds, missing inputs, changing reads and directory-symlink
+refusal are explicit. Independent checks validate blob integrity and report
+binding; cold/warm, comment/semantic edits, config inputs, standalone IR inputs,
+truncation and preserved publication on failure have regressions. This is not an
+atomic snapshot of frontend reads or a certified dependency closure; complete
+benchmark/register-cut provenance and replay remain pending.</li>
+<li><strong>G11 — two disjoint cofactor bound sets.</strong>
+After the single-set search, bounded pair proposals synthesize independent
+encoder groups shared by all admitted outputs. Each group's cofactor classes
+are computed against every remaining source, including the other group; exact
+dependency queries then prove that the combined codes and free sources determine
+each original output. Every demanded rail, literal/series limit and actual
+dependency depth is checked before whole-network verification. The separate
+pair bound and counters appear in reports, cache identity and witness metadata.
+Regressions cover two shared parity encoders where no single set can succeed,
+two three-class groups with a proved nine-code image, both required polarities,
+repeated outputs, incorrect definitions, proposal and
+final-proof exhaustion, physical mapping, full-design proof, independent archive
+verification, warm replay and option-driven cache invalidation. More than two
+sets, overlapping sets and alternative class-code assignments remain pending.</li>
+<li><strong>G10 — new shared cofactor encoding functions.</strong>
+After an incomplete structural/divisor cover, bounded proposals partition up to
+12 original sources into one bound set and free sources for up to eight outputs.
+Joint cofactor signatures define classes and shared encoder bits; information
+count alone never authorizes a decomposition. Every demanded encoder rail and
+decoder must meet support, literal, series and actual-depth bounds. Exact
+dependency/care proofs and final original-output reconstruction precede any
+publishable candidate. The candidate follows the existing mapping, region SAT,
+full-design CVC5 and whole-design QoR gates. Schema-4 archives retain total
+encoder definitions on original sources without changing the source digest;
+the separate checker recomposes and checks them. Proposal bounds, counters and
+outcomes are reported and retained in cache identity and witness metadata.
+Regressions invent a shared parity encoder with both rails, exercise three-class
+two-bit and zero-bit decompositions, reject corrupt definitions/care, distinguish
+proposal/work exhaustion, and check physical mapping, full proof and warm replay.
+This bounded first-feasible engine claims no optimum. G11 adds two disjoint
+bound sets; alternative class codes and larger source groups remain pending.</li>
+<li><strong>D-clock — single virtual-clock combinational I/O coverage.</strong>
+The SDC reader resolves explicit min/max and rise/fall I/O delays against one
+ideal virtual clock: setup required arrival is period minus output delay, and
+hold required arrival is the negative minimum output delay. Both corner
+libraries must provide cell timing, every primary I/O must be constrained, and
+native state/physical clocks/sequential arcs remain uncertified. Whole-design
+QoR includes external output delay and rejects new or worsened hold violations.
+Cold/warm synthesis and STA-cache regressions preserve coverage and slack metrics;
+a changed output delay changes setup slack and the selection metric while
+preserving hold. Physical/multiple clocks and remapped parasitics remain pending.</li>
+<li><strong>G9 — bounded symbolic image and dependency queries.</strong>
+Above the enumeration threshold, exact reduced ordered decision diagrams prove
+reachable divisor tuples and root constancy over their original-source blocks.
+Queries admit at most 256 original sources and a configurable nonterminal-node
+bound; unique/apply tables, recursive work and cooperative resource admission
+are bounded. Refuted dependencies, allocation/source refusal and work exhaustion
+remain distinct. Partial relations never authorize don't-cares or recovery.
+The production verifier rechecks source relations; the separate Python checker
+uses an independent AND/OR/complement implementation. Reports and witness
+metadata retain the symbolic bound and counters, and cache identity includes it.
+Regressions compare both engines to exhaustive small-cone evaluation, prove a
+16-source correlation, reject corrupted care/dependencies, and exercise limits.
+A 13-input RTL dependency passes mapping, full-design proof, independent witness
+checking, warm reuse and cache invalidation on disabling symbolic queries.
+Variable reordering and alternate symbolic solvers are not implemented; a
+bounded diagram can still refuse a cone and retain the existing fallback.</li>
+<li><strong>G8 — rescue uncovered outputs through existing divisors.</strong>
+A separate bounded search runs before initial network emission when a structural
+recipe leaves outputs uncovered. Up to eight preceding producers with a
+shallower realizable rail supply dependency proposals; exact source-space
+proofs authorize total completions, and depth/area-flow ranking chooses a cover.
+Retained alternatives remain eligible for local/joint selection. Feasibility
+requires complete network emission and witness verification; exhaustion before
+that proof publishes no incumbent. Repeated outputs share their recovered root.
+The <code>cover_limit</code> bound, counters and outcomes are reported and bound
+to cache keys and witness metadata. Regression coverage includes a four-input
+AND chain rescued within two levels using a separate <code>c &amp; d</code>
+producer, exact equivalence, proposal/source/work limits and proof exhaustion.
+A distributive RTL fixture exercises recovery through physical mapping, full-design
+proof, independently checked witnesses, warm replay and option-driven cache invalidation.
+This implements recovery with existing functions; G10 adds new encoding synthesis.
+G9 extends dependency proofs to larger source cones.</li>
+<li><strong>G7 — proved paid-divisor re-expression.</strong> A bounded pool of
+preceding producers in the verified incumbent supplies constant, singleton,
+pair and support-replacement proposals. Original-source evaluation proves a
+function is constant on every block induced by its ordered divisors; a conflicting
+pair rejects the proposal, while limits remain inconclusive. Total completions
+retain exact care/source witnesses and explicit rail demand. Strict improvements
+must reduce the complete shared network's structural cost, preserve depth and
+pass independent composition checks. The final divisor variant participates in
+physical mapping and whole-design QoR selection. Schema-3 archives and the
+separate checker prove nonseparating dependencies, including warm reuse. A
+regression reuses an OR outside another output's fan-in, reducing four function
+producers to two; work limits preserve the seed or last verified improvement.
+This stage requires a verified incumbent; G8 can rescue an incomplete
+initial cover using existing divisors. Neither stage constructs new encoding functions.</li>
+<li><strong>G6 — exact image care and verified total completions.</strong>
+A configurable original-source bound admits exhaustive image computation for
+ordered cut leaves; larger cones retain total care. The SOP oracle uses onset
+plus don't-care minterms and freezes each selected form into a total completion
+before shrinking support, calculating rail demand or mapping. Total-care and
+image-aware alternatives participate in shared recovery. Production verification
+and the separate Python checker recompute the source image and check both
+on-image source agreement and off-image form/completion agreement. Schema-2
+witnesses preserve care masks, source closures and the configured bound, including
+warm replay. Tests exhaust all 6,561 three-input partial functions, prove a
+correlated XOR can use an OR completion without unnecessary twins, reject
+corrupted images/completions/source closures and exercise mapped CLI proofs.
+No symbolic large-cone image solver or exhaustive completion optimizer is claimed.</li>
+<li><strong>G5 — bounded joint recovery within larger regions.</strong> When the
+full retained-choice product exceeds its cap, deterministic windows prioritize
+potentially shared rails and direct producer/reader dependencies. Each admitted
+window enumerates all choices of its variables, freezing outside choices at the
+latest verified incumbent. Every trial rebuilds the full shared dependency
+closure; strict improvements must pass the existing independent witness proof.
+Reports distinguish complete region enumeration from bounded window sweeps and
+never claim a global optimum or fixed point for the latter. The shared work and
+resource budget, explicit window count and per-window combination limit bound
+effort. A 45-node, nine-output fixture improves from 21 to 18 non-source nodes
+beyond local recovery; limits, late exhaustion, exported witnesses and mapped
+CLI equivalence are covered.</li>
+<li><strong>F4 — decisions and witnesses follow netlist reuse.</strong> Each exact
+structurally compared cache row carries a bounded, lazily loaded attachment,
+published with its netlist snapshot. Warm reports preserve winning recipes and
+alternatives, label search metrics historical and distinguish new searches from
+reused decisions. Replayed witnesses receive current archive indices while
+retaining original provenance; renamed and mixed fresh/reused regions are
+supported. Missing/corrupt attachments force a miss; replay respects current
+archive limits. Tests cover staged persistence, rename, corruption, mixed
+record numbering, cold/warm driver reports and independent witness checking.
+Whole-design proof and QoR gates still run on hits.</li>
+<li><strong>G4 — exported total-care witnesses and independent checker.</strong>
+Bounded JSONL records preserve source Boolean tables and their identity digest,
+producer revision, search recipes/bounds, separating cuts, selected completions,
+rail producers and per-output correspondence. A separate Python checker proves
+composition over independent cut inputs without importing optimizer code or ABC.
+It checks constants, source inversion, internal twins, support shrinking, wide
+tables and recipe/metadata limits; corrupted records and exhausted checking
+budgets have distinct outcomes. Initial/local/joint CLI archives are checked,
+exported with report sidecars, and included in publication rollback. Omitted
+records are explicit. Archives cover searched and reused candidates; full
+benchmark/invocation provenance remains pending.</li>
+<li><strong>G3 — bounded exact joint selection.</strong> The optimizer follows all
+retained alternatives' possible rail dependencies, admits the complete choice
+product only within an explicit combination cap, and exhaustively recounts the
+shared closure. Depth checks and independent witnesses gate strict improvements.
+Initial, local and joint candidates all reach physical mapping. Only completed
+enumeration claims minimum structural cost over that retained space; caps and
+interruptions preserve verified incumbents without an optimum claim. Tests
+cover all four choices of a small shared network, a seven-to-six producer
+improvement beyond eight local sweeps, all input assignments, deterministic
+randomized witnesses, combination/work caps and CLI variant/proof reports.
+Larger regions currently skip joint enumeration instead of splitting into
+independently solved clusters.</li>
+<li><strong>F3 — reusable verified function templates.</strong> A backend-neutral
+cache preserves exact ordered function/rail/environment/limit keys and compares
+Liberty contents plus backend/source versions. Identical functions receive
+separate cell instances and costs. Bounded persistent snapshots share the single
+incremental switch and the existing staged publication transaction. Failed
+mappings are not cached; malformed or stale snapshots become cold misses.
+Tests cover context/key invalidation, corruption, cancellation, bounded eviction,
+distinct signal instances, real NLDM load changes, CLI reuse after a region
+recipe change, incremental-off behavior and publication failure preserving the
+previous snapshot. Region and full-design proof/QoR gates still apply.</li>
+<li><strong>G2 — diverse bounded cut retention.</strong> Partial cut merges retain
+a deterministic mix of size, estimated depth and area-flow priorities, skipping
+duplicate selections within the existing cut limit and charging ranking work to
+the shared budget. Reports identify the policy and limit. A two-cut regression
+finds a two-level AND8 cover where size-only retention exhausts; a reconvergent
+fixture uses eight producers versus nine with size/depth priorities alone.
+Exhaustive fixture evaluation, independent witnesses, randomized narrow cut
+limits and deterministic exhaustion are checked. This is heuristic structural
+diversity, not functional decomposition or exhaustive cut enumeration.</li>
+<li><strong>G1 — bounded structural shared-area recovery.</strong> Retained
+cut/form alternatives are tried per demanded rail, with a complete shared-DAG
+recount including twins and source inverters. Strict gate/literal/port cost
+improvements must pass recomputed depth limits and independent witness checks.
+The initial and final recovered networks both reach physical mapping/QoR
+comparison. Work exhaustion retains verified incumbents. Tests cover shared
+producer reuse, a six-to-five producer reduction, exhaustive small-fixture
+equivalence, randomized determinism, budget exhaustion and CLI variant reports.
+The recount is exact for each trial; the bounded local search does not prove
+global optimality or implement functional/image-don't-care decomposition.</li>
+<li><strong>F2 — scoped staging-library ownership.</strong> Candidate, baseline
+and generated model libraries are registered before use and released after
+their graph handles and deferred cache snapshots. Existing permanent entries
+cannot be taken over by a scope. Directory spellings with trailing separators
+share one registry key. Tests check repeated save/load scopes, weak IO lifetime,
+exception cleanup, and repeated cold/warm synthesis, proof refusal and failed
+publication in one process. Failed transactions retain their on-disk evidence.</li>
+<li><strong>F1 — shared resource checkpoints.</strong> The alternative optimizer
+inherits the original region's entry footprint and elapsed baseline time. Memory
+growth, process physical-memory and wall-time gates span import, structural
+search, both mapping sweeps, backend commands, stitching and proof. Exhaustion
+discards partial mappings and records the limit and sampled usage. Deterministic
+tests exercise time/growth/process limits, missing samples, cancelled search,
+no subsequent backend call, and private-session reuse after cancellation.
+Individual ABC calls remain blocking; these are cooperative checkpoints.</li>
+<li><strong>A — initial static unate core.</strong> Dynamic function tables through
+12 logical inputs, bounded ordered recipes, prime SOP forms, explicit source
+inverters and internal twins, stable occurrence identity, shared DAG emission,
+support-shrinking witnesses and independent local composition verification.
+All four-input functions and randomized DAGs have focused regression coverage.</li>
+<li><strong>B — initial interchangeable tmap and stitching.</strong> Backend-neutral
+ordered-port cell fragments, a private ABC session, bounded SAT proof of the
+exported fragment on all rail assignments, and one mapped instance per selected
+DAG node. The stitched ABC region is proved with independent state inputs.</li>
+<li><strong>C — CLI and initial selection.</strong> <code>lhd pass synth</code> and
+<code>lhd synth --set synth.mapper=synth</code>, explicit untimed area comparison,
+ABC fallback, source/recipe-salted region caching, structured search reports, and
+repo-owned integration checks for selection, relaxation, cold/warm/comment/semantic
+edits, fresh oracle, exhausted search, and unchanged reset/enable state.</li>
+<li><strong>E1 — production proof and staged publication.</strong> Complete,
+unbounded CVC5 proof now gates candidate publication after final transforms,
+including cache hits. Inconclusive/admission-refused results rerun ordinary ABC;
+refutations retain graph/model artifacts, witness traces and reproduction
+arguments. Private cache snapshots, netlists and reports are serialized before
+replacement; ordinary replacement failures restore prior destinations. Focused
+tests cover a refuted design, rejected bounded/incomplete proofs, proof-budget
+fallback, deferred cache visibility, frozen pre-transform cache bodies, preserved
+prior output, hierarchy and replacement rollback.</li>
+<li><strong>D-local — static function timing and region selection.</strong> The ABC
+adapter now consumes ordered input-driver/arrival, load and required-time
+environments. Two bounded mapping sweeps include mapped sink capacitances and
+all readers of shared producers. Stitched-region NLDM timing uses the baseline's
+boundary table; explicit budget/area and unbudgeted Pareto policies govern
+selection. Tests cover arrival/load sensitivity, port order, shared fanout,
+selection decisions and timed synthesis through the full-design CVC5 gate.
+This static subtask does not discharge the physical domino D1 gate in the plan.</li>
+<li><strong>D-whole — final whole-design comparison.</strong> A separately mapped
+ABC baseline and the proved candidate are measured after final transforms using
+OpenTimer, the same Liberty/SDC/SPEF inputs and output load. Physical cell area
+counts flattened occurrences, and timing spans region/module boundaries. Budget
+and Pareto policies gate publication; incomplete state/logic/constraint coverage
+retains ABC. Both raw reports and normalized metrics are published together.
+Focused checks cover common SDC arrivals, timing units, coverage refusal, report
+export, physical output-load sensitivity and load cache invalidation. Clock-relative constraints and SPEF
+coverage remain explicitly unvalidated.</li>
+</ul>
+
+<h2>Design notes</h2>
+<p><a href="../../pass/synth/README.md">Directory guide</a> describes implementation
+boundaries and commands. <code>pass.synth.*</code> and <code>synth.*</code> are distinct
+namespaces. Logical depth is not a physical timing result; the whole-design proof
+status is reported separately from region proofs. Tests are serialized and stay
+within the repository.</p>
+</main>
+</body>
+</html>

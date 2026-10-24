@@ -15,7 +15,7 @@
 //   prove_bv      the bv proof tier: micro-LGraphs of the instantiated LHS and RHS proven equal
 //                 by lec::prove_equal.
 //
-// Seeds: AEG_FUZZ_SEED (default fixed), AEG_FUZZ_SAMPLES (default 1000), AEG_PROVE_FULL=1 for
+// Seeds: LHD_AEG_FUZZ_SEED (default fixed), LHD_AEG_FUZZ_SAMPLES (default 1000), LHD_AEG_PROVE_FULL=1 for
 // every instance instead of at most 8 per rule.
 
 #include <cstddef>

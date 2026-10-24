@@ -1,0 +1,288 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ABC Synthesis and Technology Mapping</title>
+<meta name="description" content="Region-based ABC synthesis: AIG rewriting, LUT and SOP restructuring, structural choices, technology mapping and physical sizing.">
+<style>
+:root {
+  --bg: #fdfdfb;
+  --fg: #1d1d1f;
+  --muted: #5c5c63;
+  --rule: #b9b9bf;
+  --soft: #eeeeea;
+  --accent: #1f4e8c;
+  --code-bg: #f1f1ee;
+  --fig-fill: #f3f5f9;
+  --fig-fill-2: #e3eaf5;
+  --fig-fill-3: #f7ecdf;
+  --fig-stroke: #3a3a40;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #17181b;
+    --fg: #e6e6e3;
+    --muted: #a3a3aa;
+    --rule: #4a4b52;
+    --soft: #24252a;
+    --accent: #8fb4ec;
+    --code-bg: #25262b;
+    --fig-fill: #22252c;
+    --fig-fill-2: #26324a;
+    --fig-fill-3: #3a2f22;
+    --fig-stroke: #c9c9cf;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #17181b;
+  --fg: #e6e6e3;
+  --muted: #a3a3aa;
+  --rule: #4a4b52;
+  --soft: #24252a;
+  --accent: #8fb4ec;
+  --code-bg: #25262b;
+  --fig-fill: #22252c;
+  --fig-fill-2: #26324a;
+  --fig-fill-3: #3a2f22;
+  --fig-stroke: #c9c9cf;
+}
+* { box-sizing: border-box; }
+html { background: var(--bg); }
+body {
+  background: var(--bg);
+  color: var(--fg);
+  font: 16px/1.58 "Charter", "Iowan Old Style", "Palatino Linotype", Georgia, "Times New Roman", serif;
+  max-width: 50rem;
+  margin: 0 auto;
+  padding: 2.5rem 16px 4rem;
+  overflow-x: hidden;
+}
+p, li { hyphens: auto; }
+@media (min-width: 640px) { p { text-align: justify; } }
+h1 {
+  font-size: 1.65rem;
+  line-height: 1.25;
+  text-align: center;
+  margin: 0 0 .4rem;
+  font-weight: 600;
+}
+.subtitle { text-align: center; color: var(--muted); font-style: italic; margin: 0 0 2.2rem; }
+h2 {
+  font: 600 1.02rem/1.3 -apple-system, "Segoe UI", Roboto, sans-serif;
+  text-transform: uppercase;
+  letter-spacing: .06em;
+  margin: 2.6rem 0 .8rem;
+  padding-top: .6rem;
+  border-top: 1px solid var(--rule);
+}
+h3 {
+  font: 600 1rem/1.3 -apple-system, "Segoe UI", Roboto, sans-serif;
+  margin: 1.8rem 0 .5rem;
+}
+h4 { font-size: 1rem; font-style: italic; font-weight: 600; margin: 1.2rem 0 .3rem; }
+.secnum { color: var(--accent); margin-right: .45em; }
+code, .mono {
+  font-family: "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
+  font-size: .86em;
+  background: var(--code-bg);
+  padding: .05em .28em;
+  border-radius: 3px;
+  overflow-wrap: anywhere;
+}
+var { font-style: italic; }
+.def, .prop {
+  margin: 1rem 0;
+  padding: .1rem 0 .1rem .9rem;
+  border-left: 3px solid var(--accent);
+}
+.def p, .prop p { margin: .35rem 0; }
+.def .lead, .prop .lead { font-weight: 600; font-style: normal; }
+.def em.b, .prop em.b { font-style: italic; }
+.eq {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  margin: .9rem 0;
+  overflow-x: auto;
+}
+.eq-body { flex: 1; text-align: center; white-space: nowrap; font-size: 1.02em; }
+.eq-num { color: var(--muted); }
+.cap { font-size: .9em; color: var(--fg); margin: .5rem 0 0; text-align: left; }
+.cap b { font-variant: small-caps; letter-spacing: .02em; }
+figure { margin: 1.6rem 0; }
+figure svg { width: 100%; height: auto; display: block; }
+.scroll { overflow-x: auto; margin: 1rem 0; }
+table {
+  border-collapse: collapse;
+  width: 100%;
+  font-size: .9em;
+  line-height: 1.4;
+}
+caption {
+  caption-side: top;
+  font-variant: small-caps;
+  letter-spacing: .03em;
+  padding-bottom: .45rem;
+  text-align: center;
+}
+caption .tcap { display: block; font-variant: normal; letter-spacing: 0; font-style: italic; margin-top: .1rem; }
+thead th { border-top: 1.5px solid var(--fg); border-bottom: 1px solid var(--fg); font-weight: 600; }
+tbody tr:last-child td { border-bottom: 1.5px solid var(--fg); }
+th, td { padding: .32rem .55rem; text-align: left; vertical-align: top; }
+td.num, th.num { text-align: right; white-space: nowrap; }
+.algo {
+  margin: 1.3rem 0;
+  border-top: 1.5px solid var(--fg);
+  border-bottom: 1.5px solid var(--fg);
+  font-size: .92em;
+}
+.algo-title { padding: .35rem 0; border-bottom: 1px solid var(--fg); }
+.algo-title b { margin-right: .4em; }
+.algo-body {
+  margin: 0;
+  padding: .4rem 0 .5rem 2.4rem;
+  counter-reset: line;
+  overflow-x: auto;
+}
+.algo-body li {
+  list-style: none;
+  counter-increment: line;
+  position: relative;
+  white-space: pre-wrap;
+  text-align: left;
+  hyphens: none;
+}
+.algo-body li::before {
+  content: counter(line);
+  position: absolute;
+  left: -2.1rem;
+  width: 1.6rem;
+  text-align: right;
+  color: var(--muted);
+  font-size: .85em;
+}
+.algo-body .in1 { padding-left: 1.4em; }
+.algo-body .in2 { padding-left: 2.8em; }
+.algo-body .in3 { padding-left: 4.2em; }
+.kw { font-weight: 700; }
+.cm { color: var(--muted); font-style: italic; }
+.io { font-size: .92em; padding: .25rem 0; border-bottom: 1px solid var(--rule); }
+ul.tight, ol.tight { margin: .4rem 0; padding-left: 1.4rem; }
+ul.tight li, ol.tight li { margin: .15rem 0; }
+.note { color: var(--muted); font-size: .92em; }
+a { color: var(--accent); }
+</style>
+</head>
+<body>
+<h1>Region-Based ABC Synthesis<br>and Technology Mapping</h1>
+<p class="subtitle">AIG rewriting, LUT and SOP restructuring, structural choices and physical sizing</p>
+<p class="note"><a href="synthesis.html">Shared synthesis flow and options</a> &middot; <a href="synth_usyn.html">uSyn synthesis</a></p>
+
+<!-- ===================================================================== -->
+<h2 id="motivation"><span class="secnum">1</span>Motivation and Contribution</h2>
+
+<p>ABC [1] optimizes each synthesis region as a shared Boolean network, then covers the selected network with standard cells. Different factorizations of the same function expose different mapping cuts: a small AIG can map poorly, while a larger but shallower alternative can meet a delay target. LiveHD combines ABC's established rewriting, structural-choice and LUT/SOP algorithms with bounded regions, stable source-state correspondence, incremental reuse and a partition-boundary timing environment.</p>
+<p>This page follows the same progression as <a href="synth_usyn.html">the uSyn description</a>: network construction, logical optimization, candidate selection, realization, mapping trials and resource control. Coloring, preparation, the Lnet interface and read-back ownership belong to <a href="synthesis.html">the shared synthesis flow</a> (cited as [S&nbsp;&sect;<var>n</var>]). The <a href="../pass/abc/README.md">ABC reference</a> documents implementation options.</p>
+
+<!-- ===================================================================== -->
+<h2 id="regions"><span class="secnum">2</span>Regions and the Logical Network</h2>
+
+<p>The ABC coloring profile builds &Gamma;-bounded regions and separate arithmetic modules [S &sect;2.4]. The shared blaster translates a region into a RAW Lnet [S &sect;3.3]; the backend replays it into an ABC netlist object-for-object in creation order. ABC preserves the input/output order used to reconnect packed ports and named register bits. Memories retained by the memory policy and unsupported state/control structures stay behind native boundaries [S &sect;3.2&ndash;3.3].</p>
+<p>The working representation is an <em>AIG</em>, a directed acyclic graph of two-input AND nodes and complemented edges. Structural hashing merges identical nodes. XORs, muxes and arithmetic are represented by their Boolean expansions; the imported structure is a starting point for synthesis, not a prescribed cell topology. Built-in flows preserve register boundaries and do not retime or merge registers, keeping the state correspondence used by independent LEC.</p>
+
+<!-- ===================================================================== -->
+<h2 id="optimization"><span class="secnum">3</span>Logic Optimization and Network Topologies</h2>
+
+<p>The delay and area flows (Table I) combine AIG rewriting and choice computation [2, 3], don't-care resynthesis [4] and SOP balancing [5], and end in <code>&amp;nf</code> on a unit-delay gate library, so the mapper minimizes depth on the smallest cells and every physical decision is left to gate sizing with the Liberty timing model. No built-in flow retimes: moving registers would break the register-name correspondence of equivalence checking and could change latency. <code>&amp;put -o</code> shares a gate that drives several outputs through output-only buffers, which the read-back removes again.</p>
+
+<div class="scroll">
+<table>
+<caption>Table I<span class="tcap">Built-in ABC flows</span></caption>
+<thead><tr><th>Flow</th><th>Commands</th><th>Used when</th></tr></thead>
+<tbody>
+<tr><td>Area</td><td><code>strash; &amp;get -n; &amp;fraig -x -C 500; &amp;put; dc2; strash; &amp;get -n; &amp;dch -f -C 500; &amp;nf {D}; &amp;put -o</code></td><td>No delay target; the area candidate</td></tr>
+<tr><td>Delay</td><td><code>strash; &amp;get -n; &amp;sweep</code>; two rounds of <code>&amp;synch2 -K 6 -C 500; &amp;if -m -K 6; &amp;mfs; &amp;save; &amp;dch -C 500; &amp;if -m -K 6; &amp;mfs; &amp;save; &amp;load; &amp;st</code> with <code>&amp;sopb -R 10 -C 4</code> between them; then <code>&amp;nf {D}; &amp;put -o</code></td><td>A delay target is set and no user flow</td></tr>
+<tr><td>Large</td><td><code>strash; &amp;get -n; &amp;nf {D}; &amp;put</code></td><td>Region of at least <code>large_ge</code> (200,000) GE; no area candidate</td></tr>
+<tr><td>Map only</td><td><code>strash; &amp;get -n; [&amp;st;] &amp;nf {D}; &amp;put -o</code></td><td>tmap provider (<code>pass.usyn</code>); <code>&amp;st</code> only when the remap of Alg. 2 applies</td></tr>
+<tr><td>Tail</td><td><code>buffer -N {F}; dnsize {B}</code> (<code>upsize {B}</code> before <code>dnsize</code> in the timed area candidate)</td><td>After every built-in, large or map-only flow, when <code>max_fanout</code> <var>F</var> (16) &ne; 0 and the library has NLDM tables; never after a user <code>flow</code></td></tr>
+</tbody>
+</table>
+</div>
+<h3>AIG, LUT, SOP and structural choices</h3>
+<p>The area recipe uses bounded FRAIG reduction, <code>dc2</code> resynthesis and <code>&amp;dch</code> structural choices before covering. The delay recipe alternates AIG restructuring with 6-input LUT mapping (<code>&amp;if</code>) and local don't-care resynthesis (<code>&amp;mfs</code>), saves competing networks, and uses <code>&amp;load</code> to recover the selected result. <code>&amp;sopb</code> exposes a balanced SOP topology between the two rounds. LUTs here are temporary logic-optimization units; the final output is a standard-cell network.</p>
+<p>Structural choices retain equivalent AIG implementations so mapping can explore cuts beyond one factoring [3]. This differs from uSyn's native extraction: uSyn picks a complete XAG before requesting mapping, whereas ABC's choice-aware flow carries alternatives into its covering stage. Neither method guarantees a globally optimal mapped network.</p>
+<div class="algo">
+<div class="algo-title"><b>Algorithm 1</b> Optimize and map one ABC region</div>
+<ol class="algo-body">
+<li>replay the RAW Lnet; resolve the region recipe, physical budget and boundary environment</li>
+<li>preserve the unmapped network if a timed area candidate is eligible</li>
+<li>choose area, delay, large-region or explicit user flow (Table I)</li>
+<li>run its logical restructuring; retain/select equivalent alternatives within that recipe</li>
+<li>cover with <code>&amp;nf</code>; buffer and size under the applicable physical budget</li>
+<li>compare the timed area candidate when eligible; return a complete cell netlist</li>
+</ol>
+</div>
+<p><b>Recipe selection.</b> The requested objective selects an area-oriented or delay-oriented recipe. A timed area candidate may compete with the delay realization when both can be compared under the same physical budget. The mapping-only provider uses the covering and physical stages after native uSyn synthesis, without selecting an additional ABC Boolean-optimization recipe.</p>
+
+<!-- ===================================================================== -->
+<h2 id="selection"><span class="secnum">4</span>Candidate Selection and Per-Region Budget</h2>
+
+<p>With a delay target <var>T</var>, a region with registers must also absorb the launch clock-to-output delay and the capture setup time, which ABC's combinational timer does not see. The region budget is</p>
+
+<div class="eq"><span class="eq-body"><var>B</var> = &lfloor;<var>T</var> &minus; <var>m</var>&rfloor; if <var>R</var> has registers, &nbsp; &lfloor;<var>T</var>&rfloor; otherwise, &nbsp;&nbsp; <var>m</var> = <var>t</var><sub>clk&rarr;Q</sub> + <var>t</var><sub>setup</sub> of the flip-flop cell (<code>reg_margin=auto</code>)</span><span class="eq-num">(1)</span></div>
+
+<p>The ladder needs a tool-owned flow, an NLDM library and <var>B</var> &gt; 0; the area candidate additionally needs the built-in flow, a region below <code>large_ge</code> and <code>area_flow</code> &ne; <code>none</code>. A budget is not "as fast as possible": after the flow, a budget ladder spends measured slack on area (Algorithm 2), with an area-recovery remap only when the slack <var>s</var> = 100(<var>B</var>/<var>d</var> &minus; 1) is at least 25% (relaxation min(<var>s</var>, 200)). Each region resolves its objective and resource limits before candidate construction, so competing recipes share a consistent comparison context.</p>
+
+<div class="algo">
+<div class="algo-title"><b>Algorithm 2</b> Budget ladder and area candidate; <var>d</var>(<var>N</var>), <var>a</var>(<var>N</var>) = timed delay and area</div>
+<ol class="algo-body">
+<li><span class="kw">if</span> the area candidate applies <span class="kw">then</span> <var>N</var><sub>0</sub> &larr; copy of the unmapped network</li>
+<li><var>N</var> &larr; flow(network); <span class="kw">if</span> no budget <span class="kw">then return</span> <var>N</var></li>
+<li><span class="kw">if</span> <var>d</var>(<var>N</var>) &gt; <var>B</var> <span class="kw">then</span> size up and down within <var>B</var>; if still late, size without a bound</li>
+<li><span class="kw">else if</span> the flow is remappable <span class="kw">and</span> <var>s</var> &ge; 25 <span class="kw">then</span> undo the map; remap with relaxation; buffer; size down within <var>B</var>; repair by up/down sizing if late</li>
+<li><span class="kw">if</span> <var>N</var><sub>0</sub> exists <span class="kw">and</span> <var>d</var>(<var>N</var>) &le; <var>B</var> <span class="kw">then</span> <var>N<sub>A</sub></var> &larr; area flow(<var>N</var><sub>0</sub>); keep it iff <var>d</var>(<var>N<sub>A</sub></var>) &le; <var>B</var> and <var>a</var>(<var>N<sub>A</sub></var>) &lt; <var>a</var>(<var>N</var>)</li>
+</ol>
+</div>
+
+<!-- ===================================================================== -->
+<h2 id="realization"><span class="secnum">5</span>Mapped Realization and Read-Back</h2>
+
+<p>ABC's mapped network is converted into the backend-neutral cell netlist: every gate is a cell instance with its fanins in pin order, an unreadable gate is a hard error, and a flop cell with only an inverted output absorbs the inversion (the latch stores &not;<var>D</var> under the built-in flows, or the root gate is swapped for its inverting twin). Each crossing latch becomes a flip-flop sized from its output fanout, because fanout buffering never buffers a register output; the clear/preset flops, ICGs and latch cells of [S &sect;3.3] are emitted from the library's state-cell ladders, and per-bit cells keep the names <code>reg[i]</code> that equivalence checking matches. The region writer ([S &sect;3.4]) does the rest.</p>
+<p>Standard-cell covering and physical sizing have different objectives: the unit-delay gate library guides logic depth, while Liberty NLDM surfaces guide buffering, drive strength and the physical budget. Output-only identity buffers are aliased by the shared writer; functional cells and source register roots remain explicit. The same mapping/read-back machinery serves the uSyn provider with Boolean synthesis and ABC's second area recipe disabled [S &sect;5].</p>
+
+<!-- ===================================================================== -->
+<h2 id="boundary"><span class="secnum">6</span>Partition-Boundary Environment</h2>
+
+<p>Isolated-region mapping omits crossing-net loads and input drive constraints. To account for these dependencies without requiring simultaneous mapping of all regions, the method supplies a boundary environment in two phases. <em>Phase A</em>, before mapping, derives estimates from the source graph and library: an output port <var>p</var> sees</p>
+
+<div class="eq"><span class="eq-body">load(<var>p</var>) = ext(<var>p</var>) &middot; <span style="text-decoration:overline">C</span> + [<var>p</var> drives a primary output] &middot; <var>C</var><sub>io</sub></span><span class="eq-num">(2)</span></div>
+
+<p>where ext(<var>p</var>) counts sinks outside the region and <span style="text-decoration:overline">C</span> is the mean input capacitance of small cells, and every input is driven by a stand-in small buffer that also drives the fanout trees built for inputs. <em>Phase B</em> runs once every region is mapped, when a delay target exists and the library has NLDM tables: the exact load of every crossing net (the sum of the pin capacitances it drives, followed across instance ports) and its real driving cell replace the estimates, and each region is re-sized in place within its budget. Further rounds propagate arrivals across the hierarchy; one round makes the loads and drivers exact. Phase B is skipped when every region was reused.</p>
+
+<!-- ===================================================================== -->
+<h2 id="trials"><span class="secnum">7</span>Technology Mapping and Architecture Trials</h2>
+
+<p>After the whole design is mapped, regions with automatic adders, multipliers or shifters (and wide comparisons) re-map their pre-mapping body under the alternative lowerings (at most eleven trials: 3 adders &times; 2 multipliers &times; 2 barrels, minus the baseline) and re-score the design: area over every instance and, under a delay target, the endpoint delays of a network stitched across region boundaries. Under a target only regions on the worst stitched path are tried. A candidate is kept if its sorted endpoint delays are lexicographically better (differences below 0.1% tie), or if they tie and its area is smaller. Because every trial re-scores the whole design, the step is skipped when the design exceeds <code>ware_max_cells</code> (200,000 mapped cells) and stops at the first time or memory refusal; regions above <code>large_ge</code> are not tried. Trials reuse retained pre-mapping snapshots (bounded per region and in total) and their own cache rows, never the baseline's. The tmap provider turns trials off.</p>
+
+<!-- ===================================================================== -->
+<h2 id="budgets"><span class="secnum">8</span>Budgets, Reuse and Determinism</h2>
+
+<p>The shared driver [S &sect;3.5] reuses mapped regions only when both the input structure and effective recipe agree. Library contents, producer salts, state-cell selection, boundary settings and physical budgets participate in identity. Parallel lanes use private ABC sessions; translation, cache access and graph publication remain serialized, with results published in partition order.</p>
+<p>Memory admission and configured time limits bound region execution and whole-design trials. Large regions take the shorter flow of Table I and do not receive architecture trials or the second area candidate. A refusal or unsupported read-back is a failed mapping, not a successful partial netlist. Built-in synthesis uses bounded ABC proof work; the reconstructed netlist retains state correspondence for independent whole-design equivalence checking.</p>
+
+<!-- ===================================================================== -->
+<h2 id="positioning"><span class="secnum">9</span>Positioning Relative to Prior Work</h2>
+
+<p>DAG-aware rewriting [2], structural choices [3], don't-care resynthesis [4] and SOP balancing [5] supply the logic algorithms. LiveHD's organization puts them behind a backend-neutral region interface and adds stable partitioning, reuse, boundary refinement and whole-design architecture evaluation. The native uSyn alternative shares that infrastructure but optimizes register-rooted endpoint functions and residual CMOS logic before invoking mapping only. Their search units, costs and candidate-selection points differ [S &sect;4].</p>
+
+<h2>References</h2>
+<ol class="tight refs">
+<li>R. Brayton, A. Mishchenko. ABC: An academic industrial-strength verification tool. <i>CAV</i>, 2010.</li>
+<li>A. Mishchenko, S. Chatterjee, R. Brayton. DAG-aware AIG rewriting: A fresh look at combinational logic synthesis. <i>DAC</i>, 2006.</li>
+<li>S. Chatterjee, A. Mishchenko, R. Brayton, X. Wang, T. Kam. Reducing structural bias in technology mapping. <i>IEEE TCAD</i>, 25(12), 2006.</li>
+<li>A. Mishchenko, R. Brayton, J.-H. R. Jiang, S. Jang. Scalable don't-care-based logic optimization and resynthesis. <i>FPGA</i>, 2009.</li>
+<li>A. Mishchenko, R. Brayton, S. Jang, V. Kravets. Delay optimization using SOP balancing. <i>ICCAD</i>, 2011.</li>
+</ol>
+</body>
+</html>

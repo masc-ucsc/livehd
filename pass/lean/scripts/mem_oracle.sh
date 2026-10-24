@@ -28,7 +28,7 @@ FIXTURE="$OUT/MemOracle.lean"
 
 rm -f -- "$FIXTURE"
 echo "[mem-oracle] generating $FIXTURE"
-LEAN_MEM_FIXTURE="$FIXTURE" "$TEST_BIN" \
+LHD_LEAN_MEM_FIXTURE="$FIXTURE" "$TEST_BIN" \
   --gtest_filter='DesignScanClocks.MemoryQuietDomainValueOracle' > "$OUT/generate.log" 2>&1
 [[ -s "$FIXTURE" ]] || { echo "[mem-oracle] FAIL: no fixture; see $OUT/generate.log" >&2; exit 1; }
 

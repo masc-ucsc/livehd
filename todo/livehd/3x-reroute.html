@@ -1,0 +1,483 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>TODO 3x-reroute — Aligned pre-CTS setup and partial pre-routing before the OpenROAD handoff</title>
+<link rel="stylesheet" href="../todo.css">
+</head>
+<body>
+<nav><span class="brand">LiveHD TODO</span><a href="../index.html">← All tasks</a></nav>
+<main>
+<h1><strong class="item-id">3x-reroute</strong> Aligned pre-CTS setup and partial pre-routing before the OpenROAD handoff</h1>
+<p>Move the physical preparation that OpenROAD performs between the LiveHD DEF
+import and CTS into LiveHD, so the handoff DEF is already a complete
+<code>3_place</code>-equivalent: cut rows, tap and endcap cells, routing tracks,
+tie cells, and the power grid itself, generated from a built-in per-technology
+profile (<code>pg_asap7</code>, <code>pg_sky130</code>, …) rather than a
+configurable script. On that aligned frame, LiveHD then routes a bounded class of
+nets itself and hands them over as <code>FIXED</code> wiring. OpenROAD keeps
+everything that needs a propagated clock or real wires: CTS, post-CTS repair,
+global/detailed routing of the remaining nets, power-grid checking and signoff.</p>
+<p><span class="status">Plan ruled — not implemented; all rulings Q1–Q11 decided 2026-10-23</span>
+Drafted 2026-10-23. Ruling 2026-10-23: LiveHD builds the power grid from a
+hardcoded generator plus per-technology profiles (see <em>Power grid profiles</em>).
+Everything here is opt-in; default handoff behavior does not change until the
+LiteEth evaluation (X6) passes.</p>
+
+<h2>Depends on</h2>
+<p>Legal final placement from <a class="xref" href="3p-placement.html">3p-placement</a>
+and the final legalization of <a class="xref" href="3s-terminal-legalize.html">3s-terminal-legalize</a>
+(nothing moves after pre-routing). The track-capacity model of
+<a class="xref" href="3r-route.html">3r-route</a> is reused for the pre-route
+occupancy grid. The OpenROAD inspection issues in
+<a class="xref" href="2p-plan.html">2p-plan</a> (local ties, IO/clock pins) must
+not be regressed. The measurement harness is the frozen
+<code>repros/route_compare_20261019</code> flow (<code>handoff.tcl</code>,
+<code>run.py</code>, ORFS <code>cts.tcl</code> → <code>final_report.tcl</code>).</p>
+
+<h2>Why</h2>
+<ul>
+  <li><strong>The handoff re-legalizes.</strong> Today <code>handoff.tcl</code> runs
+  <code>make_tracks</code>, <code>tapcell</code> and <code>pdngen</code> on the
+  imported DEF, then calls <code>detailed_placement</code> because taps and row
+  cuts overlap otherwise legal LiveHD cells. <code>handoff_cleanup.json</code>
+  records that displacement separately, but it still perturbs the placement
+  LiveHD closed timing on, and it makes any LiveHD wire impossible: a moved cell
+  disconnects from its wire. Alignment is the precondition for pre-routing, and
+  it is worth having on its own (zero handoff displacement).</li>
+  <li><strong>LiveHD decisions do not survive the router.</strong> Steiner repair
+  topologies, bus ordering and pin alignment are placement-side hints; FastRoute
+  and TritonRoute are free to ignore them. A wire LiveHD owns keeps the decision.</li>
+  <li><strong>Routing runtime.</strong> On the LiteEth pair the native arm spends
+  1,050 s in final routing versus 730 s for the OpenROAD arm. Most nets in these
+  designs are short two- or three-pin nets. Pre-routing them removes work from
+  global and detailed routing and turns their RC from an estimate into a fact for
+  LiveHD's own timing.</li>
+  <li><strong>OpenROAD already supports the contract.</strong> A DEF net may carry
+  <code>+ FIXED</code> wiring; the global router skips any net that already has
+  wires and applies the wire shapes as obstructions
+  (<code>findNetsObstructions</code>); TritonRoute never rips up a
+  <code>FIXED</code> net and uses its shapes as fixed obstacles; the resizer honors
+  <code>dont_touch</code> on nets and instances; detailed placement skips
+  <code>FIRM</code>/<code>LOCKED</code> instances. No OpenROAD change is required
+  for phase 1.</li>
+</ul>
+
+<h2>Division of work after this task</h2>
+<table>
+<tr><th>Step</th><th>Today</th><th>After 3x-reroute</th></tr>
+<tr><td>Rows, tracks, IO pins, tie cells, macro frame</td><td>LiveHD (tracks from the literal <code>make_tracks</code> import)</td><td>LiveHD, unchanged; tracks parity audited (X1)</td></tr>
+<tr><td>Row cuts around macros, tap and endcap cells</td><td>OpenROAD <code>tapcell</code> in the handoff, then re-legalization</td><td>LiveHD emits them as <code>FIXED</code> components; handoff skips <code>tapcell</code> when present</td></tr>
+<tr><td>Power grid</td><td>OpenROAD <code>pdngen</code> after import</td><td>LiveHD generates it from the technology's <code>pg_*</code> profile and emits routed SPECIALNETS; the handoff's existing preserve-grid branch runs <code>global_connect</code> only. OpenROAD still checks it (<code>check_power_grid</code>, <code>analyze_power_grid</code>, <code>-repair_pdn_vias</code>)</td></tr>
+<tr><td>Pre-CTS timing repair</td><td>LiveHD (<code>synth.place.resize</code>)</td><td>LiveHD, unchanged; runs before pre-routing</td></tr>
+<tr><td>Signal routing</td><td>OpenROAD GRT + DRT, all nets</td><td>LiveHD routes an eligible subset as <code>FIXED</code>; OpenROAD routes the rest around them</td></tr>
+<tr><td>CTS, post-CTS setup/hold repair, antenna, fill, extraction, signoff</td><td>OpenROAD</td><td>OpenROAD, unchanged</td></tr>
+</table>
+
+<h2>Facts to confirm first (X0)</h2>
+<ul>
+  <li><strong>Tap pattern.</strong> Reproduce OpenROAD's <code>tapcell -distance 25</code>
+  with the asap7 tap/endcap master and <code>MACRO_ROWS_HALO</code> row cuts
+  bit-identically: same row segments, same site indices, same orientations.
+  Verify by running <code>tapcell</code> on a LiveHD DEF without taps and diffing the
+  component list against LiveHD's own insertion on three designs (LFSR, LiteEth,
+  CNN). Any mismatch blocks X1; do not approximate.</li>
+  <li><strong>Which router paths key on wire type.</strong> FastRoute skips a net
+  with any wire (<code>!net->hasWires()</code>) and obstructs on any wire; but
+  <code>isDetailedRouted()</code> requires type <code>ROUTED</code>, and the CUGR
+  demand adoption and <code>updateEdgesUsage</code> use that predicate. Confirm the
+  ORFS default (FastRoute, no CUGR) treats <code>FIXED</code> wires correctly in
+  <code>global_route</code>, <code>-start/-end_incremental</code> and
+  <code>repair_antennas</code>. If any path misbehaves, the fallback is to emit
+  <code>ROUTED</code> wires plus <code>dont_touch</code> and accept that TritonRoute
+  may rip them up only when it has guides, which it will not have.</li>
+  <li><strong>Fixed-versus-fixed checking.</strong> TritonRoute's DRC skips pairs
+  where both shapes are fixed, and the power grid is special-net wiring. A short
+  between a LiveHD wire and a grid stripe would therefore be silent downstream.
+  Since both now come from LiveHD, the X2 oracle checks them against each other;
+  still confirm whether <code>check_drc</code> reports fixed-vs-special violations
+  so X5 knows what the independent check covers.</li>
+  <li><strong>Grid import.</strong> Confirm that <code>read_def</code> of routed
+  SPECIALNETS with DEF <code>VIAS</code> (via arrays from <code>VIARULE GENERATE</code>)
+  reproduces <code>pdngen</code>'s shapes on LFSR, that the handoff's
+  <code>existing_pdn</code> branch then connects every cell and macro PG pin
+  (<code>check_power_grid</code> clean), and that <code>analyze_power_grid</code>
+  matches the pdngen arm within noise.</li>
+  <li><strong>Connectivity of fixed nets.</strong> TritonRoute does not verify that a
+  <code>FIXED</code> net actually touches all its pins. Confirm what
+  <code>design_is_routed</code> and <code>check_antennas</code> do with such a net, and
+  whether OpenRCX extracts it normally (it should: extraction walks dbWire).</li>
+  <li><strong>Parasitics before extraction.</strong> <code>estimate_parasitics
+  -global_routing</code> uses guides. Confirm what RC a wired, guide-less net gets in
+  the CTS and GRT repair stages (placement estimate, wire-based, or zero), because
+  post-CTS <code>repair_timing</code> ranks paths through those nets with it.</li>
+  <li><strong>Vias in DEF.</strong> <code>+ FIXED</code> paths name vias. Confirm whether
+  the asap7 technology LEF provides fixed <code>VIA</code> definitions usable from
+  DEF, or whether LiveHD must emit a DEF <code>VIAS</code> section generated from
+  <code>VIARULE GENERATE</code> (TritonRoute generates its own via masters; the
+  handoff must not depend on their names).</li>
+  <li><strong>Handoff legalization and locked cells.</strong> Confirm that
+  <code>detailed_placement</code> in <code>handoff.tcl</code>, <code>cts.tcl</code> and
+  <code>global_route.tcl</code> never moves a <code>FIRM</code> instance, and that
+  <code>check_placement</code> accepts a <code>FIRM</code> standard cell on a cut row.</li>
+</ul>
+
+<h2>Rulings (all decided 2026-10-23)</h2>
+<table>
+<tr><th>#</th><th>Question</th><th>Proposed default</th></tr>
+<tr><td>Q1</td><td>Where does the power-grid geometry come from before pre-routing?</td>
+<td><strong>Ruled 2026-10-23:</strong> LiveHD builds the grid. One hardcoded
+generator (followpin rails, straight stripes, via arrays at intersections, macro
+avoidance with halo, macro PG connection) driven by a built-in per-technology
+profile; no Tcl, no reservation parser. Anything outside that topology (rings,
+power switches, multiple voltage domains, sroute) is rejected explicitly and
+disables the grid and pre-routing for that platform. Details under
+<em>Power grid profiles</em>.</td></tr>
+<tr><td>Q2</td><td>Does LiveHD insert real tap/endcap components or only reserve their sites?</td>
+<td><strong>Ruled 2026-10-23:</strong> insert real <code>FIXED</code> components with
+the platform tap master; the handoff skips <code>TAPCELL_TCL</code> when instances
+of that master already exist. Reserving sites was rejected: it still requires the
+exact pattern and leaves the re-legalization step in place.</td></tr>
+<tr><td>Q3</td><td>Wire type of pre-routed nets.</td>
+<td><strong>Ruled 2026-10-23:</strong> <code>FIXED</code> only in phase 1. LiveHD owns
+correctness of those nets end to end. A <code>ROUTED</code>-plus-guides mode
+(OpenROAD may repair them) stays phase 2.</td></tr>
+<tr><td>Q4</td><td>Which nets are eligible?</td>
+<td><strong>Ruled 2026-10-23:</strong> every signal net whose pins are all on
+standard cells is eligible, with no pin-count or length limit. Excluded: nets with
+a macro pin or an IO terminal, clock, reset, tie nets, and nets inside a
+<code>dont_touch</code> cone. Eligibility is not a promise to route: the pre-router
+tries nets shortest-first and any net it cannot route within its budget, its
+rule oracle, the Q7 headroom or the Q5 margins stays with OpenROAD.
+<code>preroute.max_rows</code>/<code>max_sites</code> remain as optional caps,
+default unlimited. Multi-pin nets use a FLUTE Steiner topology; long nets get
+LiveHD's own repeaters (existing Steiner repair) locked with them. Channel nets
+(Q11) remain phase 2 only because they need the channel layers.</td></tr>
+<tr><td>Q5</td><td>Timing margin for eligibility, since a <code>dont_touch</code> net can never receive a post-CTS hold or setup fix.</td>
+<td><strong>Ruled 2026-10-23:</strong> LiveHD guarantees the timing of every
+pre-routed net; OpenROAD must never add buffers to or resize along one. Exclude a
+net unless LiveHD's pre-CTS placement-RC timing shows setup slack ≥
+<code>preroute.setup_margin</code> (default 20 ps) and hold slack ≥
+<code>preroute.hold_margin</code> (default: two <code>HOLD_BUF_CELL</code> delays at
+nominal load, read from Liberty) on every path through it. Clock skew after CTS is
+unknown pre-CTS; the margins are the price of locking, and a pre-routed net that
+later fails timing is a LiveHD mistake to be fixed in LiveHD, not patched
+downstream. The LiteEth evaluation (X6) may tune the defaults.</td></tr>
+<tr><td>Q6</td><td>Layers.</td>
+<td><strong>Ruled 2026-10-23:</strong> any routing layer the technology allows for
+signals is fair game for a <code>dont_touch</code> pre-route, within the platform's
+signal layer range (asap7: M2–M7). No LiveHD-side layer cap. The pre-router picks
+layers by cost: lower layers for short nets, upper layers for long nets where the
+RC pays for the vias, and the Q7 headroom bound applies per layer and gcell so
+clock layers (<code>MIN_CLK_ROUTING_LAYER</code> and up) and IO pin layers keep room
+for CTS and OpenROAD's router. <code>preroute.layers=M2-M7</code> remains as an
+optional restriction for experiments, default the full signal range.</td></tr>
+<tr><td>Q7</td><td>Capacity headroom left for OpenROAD.</td>
+<td><strong>Ruled 2026-10-23:</strong> leaving enough room for TritonRoute is
+LiveHD's responsibility and LiveHD's fault when it fails; there is no downstream
+safety net and no contract that OpenROAD must succeed regardless. LiveHD must
+therefore be conservative: pre-routes may occupy at most
+<code>preroute.capacity</code> (default 0.30) of the usable tracks of any gcell on
+each layer, counted after grid and macro obstructions, and the RUDY/RSMT demand
+of the remaining nets in that gcell must stay below the layer capacity minus the
+pre-routed share. Exceeding either bound rejects the net, never reroutes a
+neighbour. A routed-flow failure (overflow, unrouted nets, DRC) in the pre-route
+arm is reported as a LiveHD defect and tightens the default, not as an OpenROAD
+limitation.</td></tr>
+<tr><td>Q8</td><td>Lock policy.</td>
+<td><strong>Ruled 2026-10-23:</strong> the DEF is self-describing; there is no
+sidecar. Every instance touched by a pre-routed net is written as a
+<code>FIXED</code> component (imports as <code>FIRM</code>, which detailed placement
+never moves). The handoff derives the rest: every net carrying <code>FIXED</code>
+wiring is <code>set_dont_touch</code> before any repair step, and the handoff fails
+if such a net has an instance that is not <code>FIRM</code>. The routers need no
+marks (FastRoute skips wired nets and obstructs on them; TritonRoute never rips
+up <code>FIXED</code> wiring); the derived <code>dont_touch</code> exists solely for
+the resizer, which is otherwise blind to wires and would split or resize the net
+silently. No other instance changes status.</td></tr>
+<tr><td>Q9</td><td>Defaults and naming.</td>
+<td><strong>Ruled 2026-10-23:</strong> <code>synth.place.handoff.taps=false|true</code>,
+<code>synth.place.pg=off|auto|asap7|sky130|…</code> (<code>off</code> disables the
+grid and therefore pre-routing; <code>auto</code> picks the profile from the
+technology LEF and errors when none matches), flat <code>synth.place.pg.*</code>
+overrides, <code>synth.place.preroute=false|true</code> and the
+<code>synth.place.preroute.*</code> knobs above. All off by default. Placement
+cache identity includes every one of them; a pre-route is cached with the final
+placement it belongs to.</td></tr>
+<tr><td>Q11</td><td>Signal channels through power-grid metal.</td>
+<td><strong>Ruled 2026-10-23 (intent):</strong> the generator can give up part of
+the upper-layer power metal to long communication signals. Two patch styles, both
+profile data: <em>slot skip</em> (a stripe position left empty over an extent, its
+via stacks dropped) and <em>gap</em> (a stripe cut over a short length with legal
+end spacing and minimum area). A patch may never isolate a stripe island
+(<code>check_power_grid</code> clean) and its IR-drop cost against the unpatched grid
+is reported and bounded by <code>pg.channel.max_ir_drop</code>. The concept is
+technology-independent; the legal geometry (layers, rules) comes from the profile
+and the LEF. Reference profiles ship with channels off so Q10 parity holds.</td></tr>
+<tr><td>Q10</td><td>Must a profile reproduce the ORFS reference grid exactly?</td>
+<td><strong>Ruled 2026-10-23:</strong> yes for every technology that has an ORFS reference arm. Each built-in profile
+is transcribed once from the platform's pdn file with the ORFS commit recorded,
+and X5 diffs its shapes against <code>pdngen</code> output on one design.
+Otherwise a LiveHD-versus-OpenROAD comparison measures a grid difference.</td></tr>
+</table>
+
+<h2>Power grid profiles</h2>
+<p>The generator is one algorithm; technologies differ only in data. A profile is
+a C++ struct registered by name (<code>pg_asap7</code>, <code>pg_sky130</code>),
+selected by <code>synth.place.pg</code> or auto-detected from the technology LEF.
+Whatever the LEF already states is derived, not configured: followpin layer and
+width from the standard cell PG pin geometry, rail pitch from the site height,
+via arrays from <code>VIARULE GENERATE</code>, macro PG pins from the macro LEF.
+The profile holds only what cannot be derived.</p>
+<table>
+<tr><th>Field</th><th>Meaning</th><th><code>pg_asap7</code> (from ORFS <code>grid_strategy-M1-M2-M5-M6.tcl</code>)</th></tr>
+<tr><td><code>rails_start_with</code></td><td>Polarity of the bottom row rail</td><td>POWER</td></tr>
+<tr><td><code>followpin_layers</code></td><td>Layers that carry rails along rows (width from LEF, 0.018 here)</td><td>M1, M2</td></tr>
+<tr><td><code>stripes[]</code></td><td>Per layer: width, spacing, pitch, offset</td><td>M5 0.12/0.072/5.4/0.300; M6 0.288/0.096/5.4/0.513</td></tr>
+<tr><td><code>connect[]</code></td><td>Layer pairs joined by via arrays at every intersection</td><td>M1–M2, M2–M5, M5–M6</td></tr>
+<tr><td><code>pin_layer</code></td><td>Layer whose stripes become top-level PG pins</td><td>M6</td></tr>
+<tr><td><code>macro.halo</code>, <code>macro.connect[]</code></td><td>Clearance around macros and the layer pair that reaches macro PG pins, per orientation class</td><td>2.0 µm; M4–M5 for R0/R180/MX/MY and for the rotated class</td></tr>
+<tr><td><code>nets</code></td><td>Power and ground net names and the cell pin patterns they connect</td><td>VDD ← VDD/VDDPE/VDDCE; VSS ← VSS/VSSE</td></tr>
+<tr><td><code>channels[]</code></td><td>Optional signal channels in grid layers: layer, style (<code>skip</code> or <code>gap</code>), width in tracks, placement (every N-th stripe slot, or explicit extents), maximum fraction of stripes removed; per-technology limits on which layers allow it and the minimum surviving stripe length</td><td>none (reference parity); candidate for evaluation: M6 skip, every 4th slot</td></tr>
+</table>
+<ul>
+  <li><strong>Ruled 2026-10-23:</strong> flat overrides use the same field names
+  (<code>synth.place.pg.stripe=M5:0.12:0.072:5.4:0.300</code>, repeatable) so a
+  pitch can be tried without a rebuild. Plain options only; no scripting layer and
+  no conditional or computed configuration.</li>
+  <li><strong>Ruled 2026-10-23:</strong> grid validation stays in OpenROAD.
+  <code>check_power_grid</code> (connectivity) and <code>analyze_power_grid</code>
+  (IR drop) are the acceptance checks; LiveHD does not implement its own IR
+  solver or connectivity checker beyond the unit tests of the generator.</li>
+  <li>A profile may declare <code>unsupported</code> features it knows the reference
+  platform uses (rings, switches); selecting it then errors with the reason
+  instead of generating a different grid.</li>
+  <li>Stripe placement avoids macros and memory proxies by the halo, extends to the
+  core boundary, and snaps to the layer's track grid; followpins are cut at row
+  cuts. Via arrays are sized by the intersection and the <code>VIARULE</code>
+  limits, like pdngen's default.</li>
+  <li>Grid shapes enter the same occupancy grid the pre-router uses (X3), so a
+  signal/grid short is a LiveHD-side failure caught by the X2 oracle.</li>
+  <li>Channels (Q11) are generated with the grid, so their freed tracks are
+  visible to the pre-router, to the RUDY capacity model and, if LiveHD routes
+  nothing there, to OpenROAD's router. A channel is therefore measurable on its
+  own: IR-drop cost versus routed timing of the long nets that end up in it.</li>
+</ul>
+
+<h2>Subtasks</h2>
+<ul class="subtasks">
+  <li id="X0"><strong>X0 — Facts and baselines.</strong>
+    <ul>
+      <li>Resolve every item in <em>Facts to confirm first</em> with a reproducible
+      script under <code>repros/</code>; record the OpenROAD commit used.</li>
+      <li>Baseline the three designs through the frozen harness unchanged:
+      handoff displacement, GRT overflow, DRT runtime and DRC count, routed wire
+      and via count per layer, extracted setup/hold WNS/TNS. These are the numbers
+      X6 compares against.</li>
+      <li>Net census per design: all-standard-cell signal nets by pin count and
+      HPWL bucket, and the fraction remaining after the Q5 timing margins. This
+      sets the expected pre-routed share and tells which buckets matter for the
+      router budget.</li>
+    </ul>
+  </li>
+  <li id="X1"><strong>X1 — Aligned pre-CTS setup in LiveHD.</strong>
+    <ul>
+      <li>Row cuts: cut rows around fixed macros and memory proxies with the
+      platform halo, producing the same row segments OpenROAD's <code>tapcell</code>
+      would. Emit cut rows in the DEF instead of full rows.</li>
+      <li>Taps and endcaps: insert <code>FIXED</code> components per the X0-verified
+      pattern after final legalization; they participate in density, overlap and
+      site checks like any fixed object. Name them so <code>write_verilog
+      -remove_cells [find_physical_only_masters]</code> drops them as today.</li>
+      <li>Tracks: audit that LiveHD's <code>TRACKS</code> records equal OpenROAD's
+      <code>make_tracks</code> output on the same die (origin rounding, M2 multi-offset
+      records). Fix the importer if not.</li>
+      <li>Power grid (Q1): <code>pass/place/power_grid.cpp</code> with the generator,
+      the profile registry (<code>pg_asap7</code> first, <code>pg_sky130</code> when a
+      sky130 arm exists) and auto-detection; emits routed SPECIALNETS plus DEF
+      <code>VIAS</code>, records <code>synth/place/power_grid.json</code> (per-layer
+      length, via counts, macros avoided, unconnected PG pins = must be zero).
+      Unit tests: rail count equals row count plus one, stripe positions against
+      the profile arithmetic, via arrays within <code>VIARULE</code> limits, macro
+      halo respected, and a shape diff against a saved <code>pdngen</code> DEF for LFSR.</li>
+      <li>Channels (Q11): implement <code>skip</code> first, <code>gap</code> second;
+      both reject any configuration that would leave a stripe segment below
+      minimum area or disconnect a stripe. Record removed stripe length, dropped
+      via stacks and the freed track count per layer in <code>power_grid.json</code>.
+      Evaluate channels alone before any channel pre-route: same placement,
+      channels off versus on, OpenROAD routes everything; report IR drop,
+      long-net slack and routed wire length.</li>
+      <li>Handoff script: skip <code>TAPCELL_TCL</code> when the tap master is already
+      instantiated; mark every net with <code>FIXED</code> wiring <code>dont_touch</code>
+      and fail if one of its instances is not <code>FIRM</code>; the existing <code>existing_pdn</code>
+      branch already skips <code>pdngen</code> when special wires are present, so
+      only add <code>check_power_grid</code> after <code>global_connect</code>; keep
+      the <code>detailed_placement</code> fallback but fail the run if it moves
+      anything when taps were supplied. Acceptance: <code>handoff_cleanup.json</code>
+      reports zero moved instances on all three designs,
+      <code>check_placement</code> and <code>check_power_grid</code> pass.</li>
+    </ul>
+  </li>
+  <li id="X2"><strong>X2 — Pin access and rule oracle.</strong>
+    <ul>
+      <li>Extend the LEF reader (<code>inou/lefdef/physical.cpp</code>, <code>Layer</code>)
+      with the rule subset the pre-router needs: spacing (table and EOL), minimum
+      area, minimum step, via cut size/spacing/enclosure, and <code>VIARULE
+      GENERATE</code>. Anything the oracle cannot model makes the net ineligible.</li>
+      <li>Pin access: for each master pin on M1, enumerate on-track M2 crossings
+      whose V1 enclosure and spacing to neighbouring pin shapes are satisfied
+      without any assumption about the neighbouring cell. Pins with no such point
+      are ineligible. Compare the resulting access points against OpenROAD
+      <code>pin_access</code> on the same instances and report the agreement rate;
+      LiveHD's set must be a subset.</li>
+      <li>Unit tests on synthetic two-cell cases per rule, plus a fuzz that routes
+      random eligible pairs and asserts the oracle against a KLayout or
+      <code>check_drc</code> run (whichever X0 shows reports fixed shapes).</li>
+    </ul>
+  </li>
+  <li id="X3"><strong>X3 — Pre-router.</strong>
+    <ul>
+      <li>Occupancy grid per layer at track granularity, seeded with macro
+      obstructions, power-grid shapes (X1), tap cells and pin shapes; gcell capacity
+      accounting shared with the 3r-route RUDY model.</li>
+      <li>Candidate ordering: shortest first, then by slack margin descending, so
+      the easy nets go in before contention. Each net gets a bounded search: L and
+      Z patterns on M2/M3 with on-track vias for two-pin nets; a FLUTE Steiner
+      topology routed edge by edge for multi-pin nets; then a bounded maze within
+      the net's expanded box. Long nets are first repeated by the existing Steiner
+      repair using the pre-route layer RC, and the repeaters are placed on free
+      legal sites and locked. Failure at any step leaves the whole net to OpenROAD
+      and removes its repeaters; nothing already routed is ever ripped up.</li>
+      <li>Per-net search budget (<code>preroute.budget_ms</code>) and a whole-stage
+      deadline, so the pre-router cannot dominate placement runtime on large
+      designs; the census in X0 and <code>preroute.json</code> report the share
+      routed versus attempted by pin count and length bucket.</li>
+      <li>Every accepted route is checked by the X2 oracle against all existing
+      shapes, the Q7 headroom bounds, and the Q5 margins recomputed with the wire's
+      actual RC through the existing physical RC and OpenTimer session.</li>
+      <li>Outputs: <code>synth/place/preroute.json</code> (counts, per-layer length,
+      vias, rejections by reason, runtime) and the lock list.</li>
+    </ul>
+  </li>
+  <li id="X4"><strong>X4 — Emission.</strong>
+    <ul>
+      <li>DEF writer: <code>+ FIXED</code> paths per net, a <code>VIAS</code> section
+      if X0 requires one, <code>FIRM</code> status on locked components, cut rows and
+      tap components; DEF re-read round-trips bit-identically through
+      <code>read_def</code>.</li>
+      <li>No sidecar (Q8): the DEF carries <code>FIXED</code> components and
+      <code>FIXED</code> wiring; the handoff derives <code>dont_touch</code> from the
+      wiring and verifies the component status.</li>
+      <li>Placement QoR gains a <code>preroute</code> member; the cache stores the
+      pre-route with the placement and replays it on a hit.</li>
+    </ul>
+  </li>
+  <li id="X5"><strong>X5 — Independent validation.</strong>
+    <ul>
+      <li>OpenROAD Tcl check run right after import: every pre-routed net's wire
+      touches every one of its pins (open check), and no wire shape intersects a
+      special-net shape or another net's wire within spacing (short check), since
+      TritonRoute will not report either. Zero tolerance.</li>
+      <li>Grid acceptance: <code>check_power_grid</code> clean for every PG net;
+      <code>analyze_power_grid</code> worst IR drop within noise of the pdngen arm on
+      the same placement; one-time shape diff of the LiveHD grid against
+      <code>pdngen</code> for each built-in profile (Q10), repeated whenever the
+      profile or the ORFS reference commit changes.</li>
+      <li>Post-route: <code>check_drc</code> plus the ORFS DRC report must be zero, all
+      nets routed, and the extracted netlist must carry the pre-routed wires
+      unchanged (hash the FIXED paths before and after).</li>
+    </ul>
+  </li>
+  <li id="X6"><strong>X6 — Evaluation and acceptance.</strong>
+    <ul>
+      <li>LiteEth first (routes cleanly today), then CNN, then Eyeriss, through
+      the frozen harness with identical netlist, frame, SDC and downstream policy.
+      Arms: baseline handoff; aligned handoff without pre-routing; aligned handoff
+      with pre-routing.</li>
+      <li>Accept alignment alone when handoff displacement is zero and all other
+      metrics are within noise. Accept pre-routing when: zero DRC, all nets routed,
+      extracted setup and hold WNS/TNS not worse than the aligned arm, and
+      GRT+DRT wall time or total routed wire length improves. Report pre-routed
+      share, per-layer usage, GRT overflow and runtime of the pre-router itself.
+      A timing loss on any design rejects the default-on proposal, not the
+      opt-in feature.</li>
+    </ul>
+  </li>
+  <li id="X7"><strong>X7 — Phase 2 (not scheduled).</strong>
+    <ul>
+      <li>Critical and bus nets: pre-route the Steiner-repaired and bus-ordered nets
+      with M4 escapes, with an explicit measurement of what locking them costs in
+      post-CTS repair.</li>
+      <li>Channel nets: select long communication nets (length above
+      <code>preroute.channel.min_length</code>, typically macro-to-macro or
+      block-to-block links), size and repeat them with the existing Steiner repair
+      on the channel layer's RC, lock the repeaters, and route them as
+      <code>FIXED</code> wide wires inside Q11 channels with escapes down to the
+      pins. Acceptance adds: channel-net slack versus the OpenROAD-routed arm, and
+      IR drop within the Q11 bound.</li>
+      <li><code>ROUTED</code> wires plus LiveHD-written guides, so OpenROAD may
+      incrementally repair a pre-routed net instead of being forbidden to.</li>
+      <li>Clock pre-routing requires a LiveHD CTS and is out of scope for this
+      task.</li>
+    </ul>
+  </li>
+</ul>
+
+<h2>Design notes</h2>
+<ul>
+  <li>Order inside LiveHD is fixed: final legalization → pre-CTS repair → tap
+  insertion → power grid → pre-routing → DEF. Nothing may move a cell after
+  pre-routing; any later ECO invalidates the pre-route and must drop it (the cache
+  identity makes this automatic).</li>
+  <li>A pre-routed net is a contract, not a hint. The handoff must make it
+  impossible for OpenROAD to half-honor it: locked cells, derived dont_touch
+  nets, and a validation step that fails the run instead of warning. The
+  information lives only in the DEF, so nothing can drift out of sync.</li>
+  <li>The grid is deliberately not configurable beyond its profile fields. pdngen
+  is general because it serves every ORFS platform; this generator serves one
+  flow with one topology. A platform that needs more disables the grid and
+  pre-routing rather than getting an approximation.</li>
+  <li>Grid shapes and signal pre-routes share one occupancy grid and one rule
+  oracle, which is what makes the fixed-versus-fixed blind spot of the downstream
+  DRC acceptable.</li>
+  <li>Pre-routing is the last step, so its wires are the only ones whose RC LiveHD
+  knows exactly. Feeding that RC back into the final timing snapshot improves the
+  pre-CTS/routed correlation measured in 3r-route even when no QoR is gained.</li>
+  <li>Channels trade IR drop for wide, low-resistance signal metal. The grid is a
+  mesh, so a single skipped slot or gap is a local resistance increase, not a
+  connectivity loss; the budget is design-dependent, which is why the measurement
+  is <code>analyze_power_grid</code> on the actual placement rather than a rule.</li>
+  <li>Keep clock and reset nets, IO nets and macro-pin nets out of phase 1: clocks
+  do not exist as trees yet, IO pins sit on M4/M5, and macro pins have their own
+  access rules.</li>
+</ul>
+
+<h2>Implementation entry points</h2>
+<ul>
+  <li><a href="../../inou/lefdef/physical.cpp">inou/lefdef/physical.cpp</a> /
+  <a href="../../inou/lefdef/physical.hpp">physical.hpp</a>: DEF writer
+  (<code>NETS</code> section, component status, rows), LEF <code>Layer</code> rules,
+  new <code>VIAS</code> support.</li>
+  <li><a href="../../pass/place/routing_tracks.cpp">pass/place/routing_tracks.cpp</a>:
+  the literal <code>make_tracks</code> parser; new <code>pass/place/power_grid.cpp</code>
+  / <code>power_grid_profiles.cpp</code> for the generator and the <code>pg_*</code>
+  registry.</li>
+  <li><a href="../../pass/place/place.cpp">pass/place/place.cpp</a>: final-stage
+  sequencing, <code>out.def</code> emission, cache identity;
+  <a href="../../pass/place/steiner_repair.cpp">steiner_repair.cpp</a> and
+  <a href="../../pass/place/technology_rc.cpp">technology_rc.cpp</a> for FLUTE and
+  wire RC; <a href="../../pass/place/satlegalize.cpp">satlegalize.cpp</a>
+  (<code>route_grid</code>) for the existing track-grid model.</li>
+  <li><a href="../../lhd/lhd.hpp">lhd/lhd.hpp</a>,
+  <a href="../../lhd/lhd_kernel_synth.cpp">lhd/lhd_kernel_synth.cpp</a>: options and
+  the DEF export slot (sidecar copy).</li>
+  <li><code>repros/route_compare_20261019/handoff.tcl</code> and <code>run.py</code>:
+  tap skip, derived dont_touch, the X5 checks, new arms.</li>
+  <li><a href="../../pass/place/README.md">pass/place/README.md</a>: document
+  the options, the lock contract and the validation steps.</li>
+</ul>
+</main>
+<footer>LiveHD TODO · 3x-reroute</footer>
+</body>
+</html>

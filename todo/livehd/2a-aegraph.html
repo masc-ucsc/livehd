@@ -914,7 +914,7 @@ and are merged after the workers join.</li>
   census.</li>
   </ul></li>
 <li><strong><code>aeg_fuzz_&lt;group&gt;_smoke</code></strong> (about 1000 samples
-per rule, fixed seed, <code>AEG_FUZZ_SEED</code> to override, the seed echoed on
+per rule, fixed seed, <code>LHD_AEG_FUZZ_SEED</code> to override, the seed echoed on
 failure, well under 1 s in <code>-c opt</code>):
   <ul>
   <li>LHS/RHS equality under the Dlop evaluator on unbounded values up to about
@@ -940,7 +940,7 @@ the LEC encoder on random single ops, so the two semantics cannot drift.</li>
   truncation. Otherwise a rule that only holds modulo 2^w would pass.</li>
   <li>Guards are miter assumptions.</li>
   <li>At most 8 instances per rule by default, picked by a fixed per-rule hash;
-  <code>AEG_PROVE_FULL=1</code> runs the full sweep.</li>
+  <code>LHD_AEG_PROVE_FULL=1</code> runs the full sweep.</li>
   <li>Per-group wall time is asserted under 25 s in opt.</li>
   <li>Per the test ruling, timeout or Unknown is PASS, and Refuted is FAIL with
   the counterexample printed as a rule instance.</li>
@@ -1085,7 +1085,7 @@ twin group next to <code>-bitfuzz</code> (<code>inou/prp/BUILD:600-603</code>,
   through the aegraph too.</li>
   </ul></li>
 <li><strong>Random-DAG differential fuzzer</strong> (<code>aeg_diff_smoke</code>,
-under 4 s in opt; <code>AEG_FUZZ_ITERS</code> raises the count).
+under 4 s in opt; <code>LHD_AEG_FUZZ_ITERS</code> raises the count).
   <ul>
   <li>It generates random unbounded-integer DAGs over the comb vocabulary,
   including <code>?</code> literals.</li>
@@ -1338,7 +1338,7 @@ is immutable and is not edited.</li>
     literals (one value per literal at all its uses, so a split literal fails).
     <code>prove_equal</code> only annotates a mismatch and runs once per run on one
     literal-free iteration. Default 1000 iterations (0.4 s under <code>-c opt</code>);
-    <code>AEG_FUZZ_ITERS</code> / <code>AEG_FUZZ_SEED</code> rescale and reproduce.
+    <code>LHD_AEG_FUZZ_ITERS</code> / <code>LHD_AEG_FUZZ_SEED</code> rescale and reproduce.
     Validation run: 80000 iterations (4 seeds x 20000, about 300000 original nodes
     per seed), 0 failures for both engines. It found one oracle bug on the way (Dlop's
     <code>sext_op</code> takes the sign-bit position, the graph's Sext takes the bit
@@ -1687,7 +1687,7 @@ is immutable and is not edited.</li>
     <li><strong>Tests.</strong> Fuzz per rule: LHS against RHS on values from small
     integers to ~130 bits with the engine's own folds (<code>aegraph::eval_op</code>,
     which exposes the constant analysis' <code>fold_node</code>), 1000 samples, seed
-    <code>AEG_FUZZ_SEED</code> echoed on failure, <code>?</code> refinement mode and choice arms with
+    <code>LHD_AEG_FUZZ_SEED</code> echoed on failure, <code>?</code> refinement mode and choice arms with
     their assignment substituted (exercised on inline rules in
     <code>rules_parse_test</code>; no production rule has a <code>?</code> yet), and "example
     fires" through the real engine with <code>rules_only=&lt;rule&gt;</code> and
@@ -1695,7 +1695,7 @@ is immutable and is not edited.</li>
     <code>lec::prove_equal</code> at widths 1, 2, 3, 8, 16, 65 (signed, unsigned, mixed),
     at most 8 instances per rule picked by a per-rule hash. Measured: every default
     group test runs in 0.1–0.6 s in opt and 0.2–0.6 s in dbg (limits 25 s and 90 s,
-    asserted per group by a last <code>zz_wall_time</code> test). <code>AEG_PROVE_FULL=1</code>
+    asserted per group by a last <code>zz_wall_time</code> test). <code>LHD_AEG_PROVE_FULL=1</code>
     sweeps every instance: 18 to 2592 per rule, all proven, the whole shift group in
     39 s. <code>rules_parse_test</code> (19 tests) checks the reader, the parser, every
     lint with a failing and a passing rule, emitter determinism, and that the drivers
@@ -2427,6 +2427,7 @@ Compiler", EGRAPHS'23 keynote
   <code>inou/prp/tests/prplec.py</code>, <code>inou/prp/tests/prplib.py</code>,
   <code>scripts/bitfuzz_sweep.py</code>.</li>
   </ul></li>
+<li><span class="status landed">landed 2026-10-23 (uncommitted)</span> <strong>Clock-gate inference</strong> (user request: share the enable logic of several registers behind one ICG). <code>graph/clock_gate.{hpp,cpp}</code> (namespace <code>livehd::clock_gate</code>): <code>infer_clock_gates</code> moves registers that share an enable conjunct behind one <code>Clock_cell</code> (greedy by bits covered; sync-reset groups get <code>common | reset</code>; <code>depth</code> 1 by default because <code>pass.lec</code> recognizes an inline ICG only on a graph-input clock, so a cascade of inferred gates is refuted although iverilog agrees it is right), and <code>collapse_clock_gates</code> flattens user cascades to one level from the root clock, merges identical gates and drops register enables a gate already implies. Synthesis runs it in <code>design_prepare</code> (<code>synth.clock_gate</code> true, <code>_min_bits</code> 16, <code>_depth</code> 1) and the kernel turns it off for a Liberty without an ICG cell (the gated flops would be native and uncounted). lhdtrack with sky130: area geomean 0.948 (4 designs worse, worst <code>br_multi_xfer_reg_fwd</code> +10.7%), delay neutral; picorv32 -3%. Tests: <code>pass/synth:clock_gate_smoke</code> (17, includes LEC equivalence and a mutation-checked aliasing regression), <code>lhd_clock_gate_test.sh</code>. <strong>Simulator: default on</strong> (<code>LHD_SIM_NOCLOCKGATE=1</code> opts out; thresholds <code>LHD_SIM_CLOCKGATE_MIN_BITS</code> 16 and <code>_MIN_CONE</code> 16). The first attempt only added overhead (a rarely-open 8-register multiply cone 1.46x SLOWER; dino 4-7x slower before <code>min_cone</code>, because a child's port-fed register gates nothing yet its clock-enable state split the parent schedule from 2 to 14-20 colors) since only the legacy <code>emit_flop_next</code> lazy guard skipped a closed gate's cone while the default color/LLVM path evaluated every din color. Fix: <code>Color_plan</code> computes <code>Version_site::gate_owner</code> (a reverse Kahn over the value uses: a version whose consumers are all flops of one plain posedge <code>Clock_cell</code>, or owned versions of it, and which no output observes; async-reset flops excluded), orders the cell's version before every owned one, and never coarsens across owners; the emitter wraps a wholly owned color in <code>if (&lt;cell activation slot&gt;.is_known_true())</code> around its dirty test, so the dirty bit survives a closed gate (the existing conditional-region phase). Result: the cone benchmark 0.83 s -> 0.173 s (4.8x), dino unchanged (nothing to gate), picorv32 4 gates. Tests: <code>SimColorPlan.ClockGatedConeIsOwnedByItsCell</code>, <code>//inou/prp:prp-sim-clock_gate_inferred_cone</code> (enable-form golden; mutation-checked by inverting the predicate).</li>
 <li>Related plan: <a class="xref" href="2s-satopt.html">2s-satopt</a>. Satopt runs
 after cprop and reuses <code>share_mux_regions</code>, <code>low_lane_bits</code>
 and the opshare helpers, which stay on classic.</li>

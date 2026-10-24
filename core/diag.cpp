@@ -314,13 +314,13 @@ void Sink::init_output() {
   }
   configured_ = true;
 
-  // LIVEHD_DIAG selects the channels (see diagnostics.md §2.1):
+  // LHD_DIAG selects the channels (see diagnostics.md §2.1):
   //   unset / "both"  -> human to stderr AND JSONL to diag.jsonl   (default)
   //   "jsonl"         -> JSONL to diag.jsonl only (no human)
   //   "stderr" / "-"  -> human to stderr only (no file)
   //   "off" / "none"  -> silent
   //   <path>          -> human to stderr AND JSONL to <path>
-  const char*      env = std::getenv("LIVEHD_DIAG");
+  const char*      env = std::getenv("LHD_DIAG");
   std::string_view v   = (env && env[0]) ? env : "both";
   if (v == "off" || v == "none") {
     human_stderr_ = false;

@@ -98,7 +98,7 @@ they are **never** allowed to degrade:
 
 The loop may run on a different machine, so the tech library must be
 **discovered, never assumed**. Today `bench/common.sh:382` reads a
-pre-exported `HAGENT_TECH_DIR` and `README.md:39` tells the user to
+pre-exported `LHD_TECH_DIR` and `README.md:39` tells the user to
 `find ~/.ciel`. Replace that with `ciel`-driven resolution.
 
 Measured on this box:
@@ -125,13 +125,13 @@ $ ciel path --pdk-family sky130 <hash>   # hash -> directory
    `ciel output --pdk-family sky130`.
 3. **If the newest-by-date and the enabled version disagree, hard-fail** with
    both hashes and let a human decide. Never silently pick one.
-4. `HAGENT_TECH_DIR = $(ciel path --pdk-family sky130 <hash>)/sky130A/libs.ref/sky130_fd_sc_hd/lib`,
+4. `LHD_TECH_DIR = $(ciel path --pdk-family sky130 <hash>)/sky130A/libs.ref/sky130_fd_sc_hd/lib`,
    verified to contain `sky130_fd_sc_hd__tt_025C_1v80.lib`.
-5. **Never fall back to a pre-set `HAGENT_TECH_DIR`** — a stale env var is
+5. **Never fall back to a pre-set `LHD_TECH_DIR`** — a stale env var is
    exactly the failure this replaces (see below).
 6. Record the chosen **version hash in every result JSON** (§4.4).
 
-> ⚠ **Finding, blocks the baseline.** On this box `HAGENT_TECH_DIR` is currently
+> ⚠ **Finding, blocks the baseline.** On this box `LHD_TECH_DIR` is currently
 > exported to `…/versions/e3262351…` — the **2025.10.15** PDK — while the latest
 > and `ciel`-enabled version is `e8daeda7…` (**2026.06.11**). The rule above
 > will change the library under the flow. **All pre-existing QoR numbers are
@@ -176,7 +176,7 @@ comparable across machines.
 ### M0.2 — `ciel` PDK resolution
 
 Implement §3 in `bench/common.sh`, update `README.md:39` and the
-`FAIL: HAGENT_TECH_DIR …` message. Keep the bazel `--test_env` passthrough for
+`FAIL: LHD_TECH_DIR …` message. Keep the bazel `--test_env` passthrough for
 CI, but resolve rather than require.
 
 ### M0.3 — the opentimer gate (R3)
@@ -680,6 +680,6 @@ lhd pass abc  --top <Top>.<Top> lg:lg_p1 --emit-dir lg:net_pass1 --workdir W --r
 plus, new in M0.3:
 
 ```bash
-lhd pass opentimer --top <Top>.<Top> lg:net_pass2 "$HAGENT_TECH_DIR/sky130_fd_sc_hd__tt_025C_1v80.lib" --workdir W
+lhd pass opentimer --top <Top>.<Top> lg:net_pass2 "$LHD_TECH_DIR/sky130_fd_sc_hd__tt_025C_1v80.lib" --workdir W
 # => W/timing.json  -> METRIC <alg>_sta_delay
 ```

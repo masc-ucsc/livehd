@@ -62,7 +62,7 @@ these defaults.
 `lhd synth --set synth.place=true` runs CPU DREAMPlace between mapping and STA.
 The default remains false. `synth.lef` is a comma-separated tech LEF and cell/macro
 LEFs; its sky130HD fallback is next to the Liberty directory in
-`HAGENT_TECH_DIR`. Locate installed PDKs with `ciel ls --pdk sky130A` and
+`LHD_TECH_DIR`. Locate installed PDKs with `ciel ls --pdk sky130A` and
 `ciel path --pdk sky130A VERSION`.
 
 `place.cpp` flattens into a separate library without editing the input, resolves
@@ -215,9 +215,13 @@ rather than moved. Synthesized memory proxies carry abstract RC geometry and
 are excluded from routing-track alignment. This correction adds no option or
 default change.
 
-`synth.place.halo=H` reserves H microns per side around every non-CORE LEF
+`synth.place.halo=auto` (the default) reserves ten selected placement-row heights
+per side. An imported or previous frame uses its row SITE; a generated frame
+uses the selected mapped-cell SITE. The resolved value is recorded in QoR and
+rounded outward to site/row pitches before placement and legality checks.
+An explicit `synth.place.halo=H` reserves H microns per side around every non-CORE LEF
 macro, including native-memory BLOCK proxies. `synth.place.halo=X,Y` selects
-horizontal and vertical clearance separately; the default is 5 µm per side. Clearance
+horizontal and vertical clearance separately, including an explicit zero. Clearance
 rounds up to the technology's site width and row height. CORE standard cells
 receive no halo. Physical dimensions, pin offsets and reported physical area
 remain unchanged; private padded occupancy participates in density, legalization
@@ -228,8 +232,10 @@ For FIXED/LOCKED macros, halo exclusion is clipped at the core boundary while
 the physical body must remain inside and all internal clearance is preserved.
 Native movable macros keep their complete halo inside the core. Requested
 microns and effective DBU clearance are recorded in placement QoR. Floorplan
-utilization continues to use physical area, so halo occupancy can exceed the
-requested density target even when physical utilization is low.
+utilization continues to use physical area. Generated cores also reserve
+capacity for padded macro occupancy at the target density, so a large halo
+cannot consume the entire frame and strand the standard cells. Explicit
+die/core or imported outlines remain authoritative and may still be infeasible.
 
 `synth.place.cell_halo=H` or `X,Y` optionally selects a separate clearance for
 standard cells around fixed macros during final cell placement and subsequent
@@ -2017,6 +2023,13 @@ connectivity from the placement view before automatic clock/reset classification
 otherwise reset cuts would disappear while the placement objective still ignored
 those nets. Clock launch/capture timing and functional data paths remain timed.
 
+FP and macro IO adjustment are enabled by default: `synth.place.fp.pin_adjust=true`
+and `synth.place.macro.pin_adjust=true`. Explicit `false` disables either phase;
+FIXED pins remain fixed, and final placement retains the selected fixed IO frame.
+A supplied previous/ECO frame does not re-enter fresh FP or macro IO adjustment.
+The default update interval is 50 iterations, step is 0.01 of perimeter and
+minimum relative improvement is 0.001 in both phases.
+
 ### Density-warp targets (experimental, opt-in)
 
 `synth.place.fp.warpspace=false` and `synth.place.macro.warpspace=false`
@@ -2111,6 +2124,11 @@ joint total minimization, remainder wire weight 4, and SAT budgets of 1000 ms
 and 10,000,000 conflicts. FP, macro and remainder warps remain opt-in; neither
 repeated nor once-after-density anchors consistently improved the evaluated
 cases.
+
+The explicitly approved 2026-10-23 default update replaces the fixed 5 µm halo
+with `synth.place.halo=auto` (ten selected placement-row heights), while retaining
+explicit micron overrides. FP and macro IO bus adjustment now default on. The
+routing comparisons above did not evaluate this new automatic halo policy.
 
 At fixed GP seeds, a 128-bin grid, target density 0.2 and hard cap 0.3, remainder
 padding 3 and critical padding 3 eliminated 5 µm bins above 80% occupancy in

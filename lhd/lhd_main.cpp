@@ -8,6 +8,7 @@
 #include <cstdlib>
 #include <exception>
 
+#include "debug_env.hpp"
 #include "diag.hpp"
 #include "host_mem.hpp"
 #include "iassert.hpp"
@@ -50,7 +51,7 @@ int main(int argc, char** argv) {
   // otherwise grow to hundreds of GB and take the machine down through swap/
   // jetsam) hits an address-space ceiling and dies alone instead. Inherited
   // across fork+exec, so this one call also bounds yosys and any re-invoked
-  // `lhd`. Silent by default; LIVEHD_MEMORY_DEBUG reports the armed ceiling.
+  // `lhd`. Silent by default; LHD_MEMORY_DEBUG reports the armed ceiling.
   // This is a backstop, not a clean error by itself. What makes it clean: pass/abc's
   // sampled admission refuses a region before it allocates, the std::bad_alloc a
   // failed allocation raises is caught at the pass.abc/pass.usyn entry (a
@@ -62,7 +63,8 @@ int main(int argc, char** argv) {
   // unchecked ABC/solver malloc) is diagnosed TIMEOUT-memory by the crash
   // reporter above, not "a livehd bug". There is no design-size gate and no
   // override flag.
-  if (const uint64_t limit = livehd::cost::install_memory_backstop(); limit != 0 && std::getenv("LIVEHD_MEMORY_DEBUG") != nullptr) {
+  if (const uint64_t limit = livehd::cost::install_memory_backstop();
+      limit != 0 && livehd::debug::env<"LHD_MEMORY_DEBUG">() != nullptr) {
     std::fprintf(stderr, "lhd: memory backstop armed (RLIMIT_AS = %llu MiB)\n", static_cast<unsigned long long>(limit >> 20));
   }
 

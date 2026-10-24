@@ -165,7 +165,7 @@ TEST(HostMem, ChildShareTightensTheInheritedLimit) {
   const pid_t pid = ::fork();
   ASSERT_GE(pid, 0) << "fork failed";
   if (pid == 0) {
-    ::setenv("LIVEHD_MEMORY_BUDGET_MB", "4096", 1);
+    ::setenv("LHD_MEMORY_BUDGET_MB", "4096", 1);
     const uint64_t parent_limit = livehd::cost::install_memory_backstop();  // Darwin: vsize + budget + VA slack
     if (parent_limit == 0) {
       _exit(10);  // could not arm at all
@@ -193,7 +193,7 @@ TEST(HostMem, ChildShareEnforcesTheDividedBudget) {
   const pid_t pid = ::fork();
   ASSERT_GE(pid, 0) << "fork failed";
   if (pid == 0) {
-    ::setenv("LIVEHD_MEMORY_BUDGET_MB", "1024", 1);  // 1 GiB total => 256 MiB per racer
+    ::setenv("LHD_MEMORY_BUDGET_MB", "1024", 1);  // 1 GiB total => 256 MiB per racer
     if (livehd::cost::arm_child_share(4) == 0) {
       _exit(10);
     }
@@ -216,7 +216,7 @@ TEST(HostMem, InstallBackstopArmsFromEnvInChild) {
   const pid_t pid = ::fork();
   ASSERT_GE(pid, 0) << "fork failed";
   if (pid == 0) {
-    ::setenv("LIVEHD_MEMORY_BUDGET_MB", "4096", 1);  // 4 GiB headroom
+    ::setenv("LHD_MEMORY_BUDGET_MB", "4096", 1);  // 4 GiB headroom
     _exit(livehd::cost::install_memory_backstop() != 0 ? 42 : 11);
   }
   int status = 0;
@@ -226,18 +226,23 @@ TEST(HostMem, InstallBackstopArmsFromEnvInChild) {
 }
 
 TEST(HostMem, ConfiguredBudgetCannotRaiseThePhysicalCeiling) {
-  const pid_t pid = ::fork();
-  ASSERT_GE(pid, 0);
-  if (pid == 0) {
-    ::setenv("LIVEHD_MEMORY_BUDGET_MB", "2147483647", 1);
-    if (livehd::cost::configured_budget_bytes() != livehd::cost::budget_bytes(0)) {
-      _exit(10);
+  for (const bool small : {false, true}) {
+    const pid_t pid = ::fork();
+    ASSERT_GE(pid, 0);
+    if (pid == 0) {
+      ::setenv("LHD_MEMORY_BUDGET_MB", small ? "1" : "2147483647", 1);
+      const auto expected = small ? kMiB : livehd::cost::budget_bytes(0);
+      if (livehd::cost::configured_budget_bytes() != expected) {
+        _exit(10);
+      }
+      // Admission keeps the startup override even if another library mutates
+      // the process environment between regions.
+      ::setenv("LHD_MEMORY_BUDGET_MB", small ? "2147483647" : "1", 1);
+      _exit(livehd::cost::configured_budget_bytes() == expected ? 42 : 11);
     }
-    ::setenv("LIVEHD_MEMORY_BUDGET_MB", "1", 1);
-    _exit(livehd::cost::configured_budget_bytes() == kMiB ? 42 : 11);
+    int status = 0;
+    ASSERT_EQ(pid, ::waitpid(pid, &status, 0));
+    ASSERT_TRUE(WIFEXITED(status));
+    EXPECT_EQ(42, WEXITSTATUS(status));
   }
-  int status = 0;
-  ASSERT_EQ(pid, ::waitpid(pid, &status, 0));
-  ASSERT_TRUE(WIFEXITED(status));
-  EXPECT_EQ(42, WEXITSTATUS(status));
 }

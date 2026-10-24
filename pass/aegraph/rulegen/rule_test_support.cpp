@@ -1,4 +1,5 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
+#include "debug_env.hpp"
 #include "rulegen/rule_test_support.hpp"
 
 #include <algorithm>
@@ -1092,7 +1093,7 @@ std::unique_ptr<Side> build_side(const std::vector<In>& ins, const Pat& root, co
   return side;
 }
 
-// AEG_PROVE_DEBUG=1: the two micro-graphs of every instance, one line per node.
+// LHD_AEG_PROVE_DEBUG=1: the two micro-graphs of every instance, one line per node.
 std::string dump_graph(const std::shared_ptr<hhds::Graph>& g) {
   std::string t;
   for (auto node : g->body().nodes()) {
@@ -1210,7 +1211,7 @@ Proof_result prove_instance(const Rule& rule, const Analyses& analyses, const Sk
   const auto lg   = build_side(ins, rule.lhs, analyses, inst, env, rest_inputs, wide);
   const auto rg   = build_side(ins, rhs, analyses, inst, env, rest_inputs, wide);
 
-  if (std::getenv("AEG_PROVE_DEBUG") != nullptr) {
+  if (livehd::debug::env<"LHD_AEG_PROVE_DEBUG">() != nullptr) {
     std::printf("  [debug] instance %s\n  lhs:\n%s  rhs:\n%s", inst.text().c_str(), dump_graph(lg->g).c_str(),
                 dump_graph(rg->g).c_str());
   }
@@ -1409,10 +1410,10 @@ void Rule_check::fuzz_equal(const char* path, const char* rules, const char* ana
   if (r == nullptr) {
     return;
   }
-  const auto seed    = env_u64("AEG_FUZZ_SEED", 0x5eed0e01ULL);
-  const auto samples = env_u64("AEG_FUZZ_SAMPLES", 1000);
+  const auto seed    = env_u64("LHD_AEG_FUZZ_SEED", 0x5eed0e01ULL);
+  const auto samples = env_u64("LHD_AEG_FUZZ_SAMPLES", 1000);
   const auto report  = livehd::aegraph::rulegen::testing::fuzz_equal(*r, p.analyses, seed, samples);
-  EXPECT_TRUE(report.failure.empty()) << report.failure << "\n  reproduce with AEG_FUZZ_SEED=" << seed;
+  EXPECT_TRUE(report.failure.empty()) << report.failure << "\n  reproduce with LHD_AEG_FUZZ_SEED=" << seed;
   EXPECT_GE(report.samples + report.skipped, samples) << "every sample is compared or accounted for";
   EXPECT_GE(report.samples * 10, samples * r->arms.size() * 9)
       << "the sampler found a legal assignment for fewer than 90% of the samples (" << report.skipped
@@ -1449,7 +1450,7 @@ void Rule_check::prove_bv(const char* path, const char* rules, const char* analy
   if (r == nullptr) {
     return;
   }
-  const bool full  = env_u64("AEG_PROVE_FULL", 0) != 0;
+  const bool full  = env_u64("LHD_AEG_PROVE_FULL", 0) != 0;
   const double used = std::chrono::duration<double>(std::chrono::steady_clock::now() - group_start()).count();
   const double left = std::max(1.0, (full ? 3600.0 : kWallBudget * 0.8) - used);
   const auto report = livehd::aegraph::rulegen::testing::prove_bv(*r, p.analyses, full, left);
@@ -1461,7 +1462,7 @@ void Rule_check::prove_bv(const char* path, const char* rules, const char* analy
 
 void Rule_check::wall_time(const char* what) {
   const double elapsed = std::chrono::duration<double>(std::chrono::steady_clock::now() - group_start()).count();
-  if (env_u64("AEG_PROVE_FULL", 0) == 0) {
+  if (env_u64("LHD_AEG_PROVE_FULL", 0) == 0) {
     EXPECT_LT(elapsed, kWallBudget) << what << " took " << elapsed << " s (budget " << kWallBudget << " s)";
   }
 }
@@ -1875,7 +1876,7 @@ std::string analyses_sound(const Analyses& analyses, uint64_t seed, size_t graph
   if (checked != nullptr) {
     *checked = count;
   }
-  if (std::getenv("AEG_ANALYSES_VERBOSE") != nullptr) {
+  if (livehd::debug::env<"LHD_AEG_ANALYSES_VERBOSE">() != nullptr) {
     for (const auto& [name, n] : per) {
       std::printf("[ analyses ]   %-14s %zu positive claims\n", name.c_str(), n);
     }

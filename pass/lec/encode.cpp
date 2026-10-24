@@ -3,14 +3,15 @@
 #include "encode.hpp"
 
 #include <algorithm>
-#include <tuple>
 #include <cctype>
 #include <concepts>
 #include <cstdint>
 #include <format>
+#include <functional>
 #include <memory>
 #include <optional>
 #include <string>
+#include <tuple>
 #include <type_traits>
 #include <vector>
 
@@ -18,9 +19,8 @@
 #include "absl/container/flat_hash_set.h"
 #include "attrs.hpp"
 #include "cell.hpp"
+#include "debug_env.hpp"
 #include "hhds/attrs/srcid.hpp"
-#include <functional>
-
 #include "hhds/source_locator.hpp"
 #include "hlop/dlop.hpp"
 #include "latch_contract.hpp"  // Design_clocks::name_looks_like_clock (the ICG clock-operand disambiguator)
@@ -1914,7 +1914,7 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
     out.cone_seed[nm] = qpin;
     Val  v          = seed_state(nm, w, sgn);
     bool was_shared = shared_inputs != nullptr && shared_inputs->find(nm) != shared_inputs->end();
-    if (const char* dump_enc = std::getenv("LEC_DUMP_ENC");
+    if (const char* dump_enc = livehd::debug::env<"LHD_LEC_DUMP_ENC">();
         dump_enc != nullptr && (dump_enc[0] == '\0' || nm.find(dump_enc) != std::string::npos)) {
       std::fprintf(stderr,
                    "[LEC_ENC pfx=%s] flop hier='%s' key='%s' w=%d sgn=%d shared=%d xmask=%d term=%s\n",
@@ -3005,7 +3005,7 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
               && box_dead_inputs_->contains(bk.substr(0, bk.find('#')) + ":" + port)) {
             continue;
           }
-          if (const char* de = std::getenv("LEC_DUMP_ENC"); de != nullptr && std::string_view(de) == "bbin") {
+          if (const char* de = livehd::debug::env<"LHD_LEC_DUMP_ENC">(); de != nullptr && std::string_view(de) == "bbin") {
             std::string ts = v.term.toString();
             if (ts.size() > 700) {
               ts = ts.substr(0, 200) + " ...LEAVES... " + ts.substr(ts.size() - 500);
@@ -4053,7 +4053,7 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
       {
         static const std::set<uint64_t> dbg_nodes = [] {
           std::set<uint64_t> s;
-          if (const char* e = std::getenv("LEC_DBG_NIDS")) {
+          if (const char* e = livehd::debug::env<"LHD_LEC_DBG_NIDS">()) {
             std::string str(e), cur;
             for (char c : str) {
               if (c == ',') {
@@ -5092,7 +5092,7 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
         }
       }
       out.outputs[std::string("\x01nxt:") + key] = nv;
-      if (const char* dump_enc = std::getenv("LEC_DUMP_ENC");
+      if (const char* dump_enc = livehd::debug::env<"LHD_LEC_DUMP_ENC">();
           dump_enc != nullptr && dump_enc[0] != '\0' && nm.find(dump_enc) != std::string::npos) {
         std::string ts = nval.toString();
         if (ts.size() > 4000) {

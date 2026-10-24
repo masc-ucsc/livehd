@@ -81,9 +81,9 @@ PY
   FIXTURES+=("$FIXTURE")
 }
 
-run_fixture CollideOracle     LEAN_COLLIDE_FIXTURE \
+run_fixture CollideOracle     LHD_LEAN_COLLIDE_FIXTURE \
   'DesignScanClocks.TwoWriteTwoReadCollisionValueOracle'
-run_fixture WideCollideOracle LEAN_WIDE_COLLIDE_FIXTURE \
+run_fixture WideCollideOracle LHD_LEAN_WIDE_COLLIDE_FIXTURE \
   'DesignScanClocks.WideMatrixHighBitForwardingValueOracle'
 
 # THE WIDE FIXTURE MUST ACTUALLY BE WIDE. 2 reads x 32 writes puts the top cell

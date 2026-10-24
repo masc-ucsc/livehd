@@ -16,6 +16,7 @@
 #include <vector>
 
 #include "bus_name.hpp"
+#include "debug_env.hpp"
 #include "dlop.hpp"
 #include "hlop/memory_init.hpp"
 #include "slang/ast/ASTVisitor.h"
@@ -6027,7 +6028,8 @@ void Slang_context::lower_members(const slang::ast::Scope& scope) {
         // Nested fields are flattened scalar leaves since the Type-B bundle
         // work, so leaf<->whole round-trips cleanly for them too.
         const auto use = struct_use_of(ns);
-        if (const char* dbg = std::getenv("SLANG_DUMP_NETINIT"); dbg != nullptr && ns.name.find(dbg) != std::string_view::npos) {
+        if (const char* dbg = livehd::debug::env<"LHD_SLANG_DUMP_NETINIT">();
+            dbg != nullptr && ns.name.find(dbg) != std::string_view::npos) {
           std::fprintf(stderr,
                        "[SLANG_NETINIT] '%s' scalar_struct=%d all_scalar=%d field_read=%d deep_access=%d "
                        "whole_copied=%d deep_written=%d\n",
@@ -6040,7 +6042,7 @@ void Slang_context::lower_members(const slang::ast::Scope& scope) {
                        use.deep_written ? 1 : 0);
         }
         if (is_scalar_struct_var(ns)
-            && (std::getenv("SLANG_NETINIT_OLDGATE") == nullptr || struct_is_all_scalar(ns) || use.field_read)) {
+            && (livehd::debug::env<"LHD_SLANG_NETINIT_OLDGATE">() == nullptr || struct_is_all_scalar(ns) || use.field_read)) {
           current_assign_nonblocking_ = false;
           if (assign_struct_whole(ns, *ns.getInitializer())) {
             clear_pending_loc();

@@ -37,6 +37,7 @@
 #include "cone_abc.hpp"
 #include "cone_expand.hpp"
 #include "cprop.hpp"
+#include "debug_env.hpp"
 #include "encode.hpp"
 #include "fork_race.hpp"
 #include "fresh_solver.hpp"
@@ -1950,7 +1951,7 @@ Split_pick pick_split_signal(hhds::Graph* g, const std::string& requested, int e
   // returned an empty range; hhds fixed that — see graph_test
   // test_get_master_node_edges — so a backward walk would now be correct, just
   // less efficient than this pass.)
-  const bool                                  dbg = std::getenv("LEC_SPLIT_LOG") != nullptr;
+  const bool                                  dbg = livehd::debug::env<"LHD_LEC_SPLIT_LOG">() != nullptr;
   absl::flat_hash_map<std::string, long long> score;
   std::vector<std::string>                    cand;  // candidate index (bitmask, cap 64)
   absl::flat_hash_map<std::string, int>       cand_idx;
@@ -3913,7 +3914,7 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
       force_multi_clock = common.size() >= 2;
     }
   }
-  if (std::getenv("LEC_DUMP_COLLAPSE") != nullptr) {
+  if (livehd::debug::env<"LHD_LEC_DUMP_COLLAPSE">() != nullptr) {
     // Debug-only: the expanded collapse set and each side's entity resolution
     // for it, then (scan_boxes below) every Sub instance's box decision.
     for (const auto& d : opts.collapse) {
@@ -4036,7 +4037,7 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
   bool                                                    nk_collision = false;
   auto                                                    scan_boxes   = [&](hhds::Graph* g, bool in_ref) {
     for (auto node : g->occurrences(collapse_gids_ptr).nodes(hhds::Node_order::forward)) {
-      if (graph_util::type_op_of(node) == Ntype_op::Sub && std::getenv("LEC_DUMP_COLLAPSE") != nullptr) {
+      if (graph_util::type_op_of(node) == Ntype_op::Sub && livehd::debug::env<"LHD_LEC_DUMP_COLLAPSE">() != nullptr) {
         auto dsio = node.get_subnode_io();
         std::fprintf(stderr,
                      "[LEC_COLLAPSE] %s occ-walk sub '%s' def '%s' has_out_edges=%d\n",
@@ -4058,7 +4059,7 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
       // their boxes to correspond), else the full per-side name.
       const std::string defkey         = canon_def(in_ref, defname);
       const bool        force_collapse = collapse_ptr != nullptr && collapse_ptr->count(defname) > 0;
-      if (std::getenv("LEC_DUMP_COLLAPSE") != nullptr) {
+      if (livehd::debug::env<"LHD_LEC_DUMP_COLLAPSE">() != nullptr) {
         std::fprintf(stderr,
                      "[LEC_COLLAPSE] %s sub '%s' def '%s' key '%s' body=%d force_collapse=%d lib=%d\n",
                      in_ref ? "ref " : "impl",
@@ -4134,7 +4135,7 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
       if (!(in_ref ? seen_ref_nk : seen_impl_nk).insert(nk).second) {
         nk_collision = true;
       }
-      if (std::getenv("LEC_DUMP_COLLAPSE") != nullptr) {
+      if (livehd::debug::env<"LHD_LEC_DUMP_COLLAPSE">() != nullptr) {
         std::fprintf(stderr,
                      "[LEC_COLLAPSE] box %s def '%s' inst '%s' (walk order %zu)\n",
                      in_ref ? "ref " : "impl",
@@ -4927,7 +4928,7 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
       }
     }
   }
-  if (std::getenv("LEC_DUMP_MEMS") != nullptr) {
+  if (livehd::debug::env<"LHD_LEC_DUMP_MEMS">() != nullptr) {
     auto dump = [](const std::vector<Mem_census_entry>& census, const Io_name_map<std::string>& keys, const char* side) {
       for (const auto& e : census) {
         std::fprintf(stderr,
@@ -5309,7 +5310,7 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
     int w_wide    = 0;
   };
   absl::flat_hash_map<std::string, State_window> state_windows;
-  if (std::getenv("LEC_WINDOW_OFF") == nullptr) {
+  if (livehd::debug::env<"LHD_LEC_WINDOW_OFF">() == nullptr) {
     Io_name_map<int> sw[2];
     for (int s = 0; s < 2; ++s) {
       for (auto node : (s == 0 ? ref : impl)->occurrences(collapse_gids_ptr).nodes()) {
@@ -5376,7 +5377,7 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
           continue;  // bit-0 alignment already is this window
         }
         state_windows.emplace(key, State_window{s, lo, w_narrow, w_wide});
-        if (std::getenv("LEC_DUMP_OBS") != nullptr) {
+        if (livehd::debug::env<"LHD_LEC_DUMP_OBS">() != nullptr) {
           std::fprintf(stderr,
                        "[LEC_WINDOW] %s: %s[%d:%d] (live bits %d..%d of %d) <-> %d-bit %s\n",
                        key.c_str(),
@@ -5888,7 +5889,7 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
         }
       }
       unpaired_state_n = unpaired_state.size();
-      if (std::getenv("LEC_DUMP_FLOPS") != nullptr) {
+      if (livehd::debug::env<"LHD_LEC_DUMP_FLOPS">() != nullptr) {
         auto dump_keys = [&](hhds::Graph* g, const char* tag) {
           std::set<std::string> keys;
           for (auto node : g->grouped_hierarchy().nodes()) {  // sorted std::set + debug-only: order-free
@@ -6151,7 +6152,7 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
       }
     }
     std::vector<std::pair<std::string, cvc5::Term>> dbg_init;
-    if (std::getenv("LEC_DUMP_WIT") != nullptr) {
+    if (livehd::debug::env<"LHD_LEC_DUMP_WIT">() != nullptr) {
       for (const auto& [k, v] : ref_state) {
         dbg_init.emplace_back("init:" + k, v.term);
       }
@@ -6361,7 +6362,7 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
           ref_mem[mkey]  = arr;
           impl_mem[mkey] = arr;
           bridged_mem_keys.insert(mkey);
-          if (std::getenv("LEC_DUMP_FLOPS") != nullptr) {
+          if (livehd::debug::env<"LHD_LEC_DUMP_FLOPS">() != nullptr) {
             std::fprintf(stderr,
                          "[LEC_MEMBANK bmc] memory '%s' (%dx%d) initial array tied to its storage-flop bank (%s)\n",
                          mc.name.c_str(),
@@ -6595,7 +6596,7 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
     // canonical key (identical on both designs). On REFUTE the EARLIEST diverging
     // state cut is the ROOT that a diverging output merely inherits. Pure read-only
     // (getValue on already-solved terms — no new SMT terms, no UNKNOWN risk), so it
-    // replaces the env-gated LEC_DUMP_WIT/keep() debug path for localization.
+    // replaces the env-gated LHD_LEC_DUMP_WIT/keep() debug path for localization.
     struct Wit_state {
       int         cyc;
       std::string key;
@@ -6723,7 +6724,7 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
           continue;
         }
         it->second.x_mask = tm.mkTerm(cvc5::Kind::BITVECTOR_NOT, {tm.mkBitVector(static_cast<uint32_t>(it->second.width), 0)});
-        if (std::getenv("LEC_DUMP_FLOPS") != nullptr) {
+        if (livehd::debug::env<"LHD_LEC_DUMP_FLOPS">() != nullptr) {
           std::fprintf(stderr, "[LEC_RESET_WRITTEN] %s: pre-reset value tracked as X on the reference\n", key.c_str());
         }
       }
@@ -6813,7 +6814,7 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
         }
         ref_uninit_flops = std::move(keep_flops);
         adopt_mems       = std::move(keep_mems);
-        if (std::getenv("LEC_DUMP_MEMS") != nullptr) {
+        if (livehd::debug::env<"LHD_LEC_DUMP_MEMS">() != nullptr) {
           for (const auto& key : adopt_mems) {
             std::fprintf(stderr,
                          "[LEC_RESET_REFINE] memory %s: uninitialized on the reference, reset on the implementation; the "
@@ -6828,7 +6829,7 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
         for (const auto& key : ref_uninit_flops) {
           if (!ref_written.contains(key) && (impl_reset_pin_flops.contains(key) || impl_written.contains(key))) {
             adopt_flops.insert(key);
-            if (std::getenv("LEC_DUMP_FLOPS") != nullptr) {
+            if (livehd::debug::env<"LHD_LEC_DUMP_FLOPS">() != nullptr) {
               std::fprintf(stderr,
                            "[LEC_RESET_REFINE] %s: uninitialized on the reference, reset on the implementation; the checked "
                            "window starts at the implementation's value\n",
@@ -7213,7 +7214,7 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
           sampler.add_state_diff(k, cyc, tm.mkTerm(cvc5::Kind::DISTINCT, {rfit, ifit}));
         }
       }
-      if (std::getenv("LEC_DUMP_WIT") != nullptr) {
+      if (livehd::debug::env<"LHD_LEC_DUMP_WIT">() != nullptr) {
         auto keep = [&](const std::string& k) {
           return k.find("exmem") != std::string::npos || k.find("ex_mem") != std::string::npos
                  || k.find("idex") != std::string::npos || k.find("id_ex") != std::string::npos || k == "pc"
@@ -7458,9 +7459,9 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
     // complex pipeline. Proving each diff UNSAT independently is the SAME proof
     // (OR is UNSAT iff every disjunct is) but each query is small and focused, so
     // the easy outputs discharge instantly and only the genuinely-hard cone is
-    // ever the bottleneck. Opt-in via LEC_DECOMP; on the first SAT/unknown we fall
+    // ever the bottleneck. Opt-in via LHD_LEC_DECOMP; on the first SAT/unknown we fall
     // through to the monolithic solve so the existing witness path is unchanged.
-    if (sampled_mismatch.isNull() && (lec_decompose_try(opts.decompose) || std::getenv("LEC_DECOMP") != nullptr)) {
+    if (sampled_mismatch.isNull() && (lec_decompose_try(opts.decompose) || livehd::debug::env<"LHD_LEC_DECOMP">() != nullptr)) {
       bool        all_unsat = true;
       std::string cut_why;  // why the first non-discharged cut did not discharge
       for (const auto& [dn, dt] : decomp_diffs) {
@@ -7529,7 +7530,7 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
       } else {
         res.verdict = Verdict::Refuted;
       }
-      if (std::getenv("LEC_DUMP_WIT") != nullptr) {
+      if (livehd::debug::env<"LHD_LEC_DUMP_WIT">() != nullptr) {
         for (const auto& [nm, t] : dbg_init) {
           cvc5::Term vv = solver.getValue(t);
           if (!vv.isNull()) {
@@ -7802,7 +7803,7 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
     const auto* ind_impl_forest = opts.clock_forest_impl.empty() ? ind_forest : &opts.clock_forest_impl;
     ind_ref_plan                = plan_phases(ref, collapse_ptr, ind_forest);
     ind_impl_plan               = plan_phases(impl, collapse_ptr, ind_impl_forest);
-    if (std::getenv("LEC_PHASE_LOG") != nullptr) {
+    if (livehd::debug::env<"LHD_LEC_PHASE_LOG">() != nullptr) {
       std::fprintf(stderr, "[LEC_PHASE] ref plan:  %s\n", ind_ref_plan.describe().c_str());
       std::fprintf(stderr, "[LEC_PHASE] impl plan: %s\n", ind_impl_plan.describe().c_str());
     }
@@ -8251,7 +8252,7 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
         }
         bridges.push_back(std::move(br));
         used.insert(mkey);
-        if (std::getenv("LEC_DUMP_FLOPS") != nullptr) {
+        if (livehd::debug::env<"LHD_LEC_DUMP_FLOPS">() != nullptr) {
           std::fprintf(stderr,
                        "[LEC_MEMBANK ind] memory '%s' (%dx%d) paired with its storage-flop bank (%s)\n",
                        mrec.name.c_str(),
@@ -8779,7 +8780,7 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
           solver.assertFormula(d.term);
           const auto sr = solve_check();
           solver.pop();
-          if (!sr.isUnsat() && std::getenv("LEC_PHASE_STEP_LOG") != nullptr) {
+          if (!sr.isUnsat() && livehd::debug::env<"LHD_LEC_PHASE_STEP_LOG">() != nullptr) {
             std::fprintf(stderr,
                          "[LEC_PHASE_STEP] ms=%d cut=%d/%zu %s %s\n",
                          ms,
@@ -8967,7 +8968,7 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
     std::set<std::string>                           only_ref, only_impl;
     cvc5::Term                                      pbad;
     int                                             pchecks = 0;
-    std::vector<std::pair<std::string, cvc5::Term>> pdiffs;  // labelled, for LEC_PHASE_LOG
+    std::vector<std::pair<std::string, cvc5::Term>> pdiffs;  // labelled, for LHD_LEC_PHASE_LOG
     std::string                                     plabel;
     auto                                            add_diff = [&](const Val& a, const Val& b) {
       const int  w  = std::max(a.width, b.width);
@@ -9066,10 +9067,10 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
         return res;
       }
     }
-    // LEC_PHASE_LOG=1: report which compare point survives, one query each. The
+    // LHD_LEC_PHASE_LOG=1: report which compare point survives, one query each. The
     // composed period has no cone pass behind it, so without this a SAT verdict
     // names nothing.
-    if (std::getenv("LEC_PHASE_LOG") != nullptr) {
+    if (livehd::debug::env<"LHD_LEC_PHASE_LOG">() != nullptr) {
       for (const auto& [lbl, d] : pdiffs) {
         solver.push();
         solver.assertFormula(d);
@@ -9179,7 +9180,7 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
   // true whenever full equality is). Only this single-step arm reduces; the
   // phase-composed step above keeps full cuts.
   absl::flat_hash_map<std::string, Obs_plan> obs_plan;
-  if (opts.assumptions == nullptr && std::getenv("LEC_OBS_OFF") == nullptr) {
+  if (opts.assumptions == nullptr && livehd::debug::env<"LHD_LEC_OBS_OFF">() == nullptr) {
     // Current-state symbols some OTHER shared entry is built from (a bit-blast
     // or packed/scalar bridge slices one): freeing their bits would split the
     // two readings of one state, so those cuts stay whole.
@@ -9240,7 +9241,7 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
     if (!cands.empty()) {
       obs_plan = plan_observability(re, ie, cands);
     }
-    if (std::getenv("LEC_DUMP_OBS") != nullptr) {
+    if (livehd::debug::env<"LHD_LEC_DUMP_OBS">() != nullptr) {
       std::fprintf(stderr, "[LEC_OBS] %zu candidate cut(s), %zu reduced\n", cands.size(), obs_plan.size());
     }
     if (!obs_plan.empty()) {
@@ -9295,7 +9296,7 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
         std::sort(keys.begin(), keys.end());
         res.detail += "; observability: " + std::to_string(freed) + " unobservable state bit(s) of "
                       + std::to_string(obs_plan.size()) + " cut(s) left out of the obligation {" + join_capped(keys) + "}";
-        if (std::getenv("LEC_DUMP_OBS") != nullptr) {
+        if (livehd::debug::env<"LHD_LEC_DUMP_OBS">() != nullptr) {
           for (const auto& [key, p] : obs_plan) {
             std::string kept;
             for (size_t i = 0; i < p.keep.size(); ++i) {
@@ -9619,7 +9620,7 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
       // One front end modeled this array as ONE bulk `q <= d` and the other as
       // per-entry write ports. Not decomposable, and worth naming: the array cut
       // that remains is a real cross-model comparison, not a missing feature.
-      if (std::getenv("LEC_CONE_LOG") != nullptr) {
+      if (livehd::debug::env<"LHD_LEC_CONE_LOG">() != nullptr) {
         std::fprintf(stderr,
                      "[LEC_CONE] memcut %-24s bulk update on %s side only\n",
                      key.c_str(),
@@ -9660,12 +9661,12 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
     }
     return true;
   };
-  // Why a memory cut could not be decomposed, for LEC_CONE_LOG. An array cut
+  // Why a memory cut could not be decomposed, for LHD_LEC_CONE_LOG. An array cut
   // left whole is the single most expensive obligation in the run, so when one
   // shows up in the residue the first question is always which precondition
   // failed.
   auto cone_log = [](const std::string& key, std::string_view why) {
-    if (std::getenv("LEC_CONE_LOG") != nullptr) {
+    if (livehd::debug::env<"LHD_LEC_CONE_LOG">() != nullptr) {
       std::fprintf(stderr, "[LEC_CONE] memcut %-24s NOT decomposed: %s\n", key.c_str(), std::string(why).c_str());
     }
   };
@@ -10025,7 +10026,7 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
       };
       const auto ref_addr_groups  = address_groups(rrd);
       const auto impl_addr_groups = address_groups(ird);
-      if (std::getenv("LEC_CONE_LOG") != nullptr) {
+      if (livehd::debug::env<"LHD_LEC_CONE_LOG">() != nullptr) {
         std::fprintf(stderr,
                      "[LEC_CONE] %s read addresses: %zu/%zu groups from %zu/%zu ports\n",
                      key.c_str(),
@@ -10375,7 +10376,7 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
         sub_pending.push_back(k);
         sub_terms.push_back(simplified);
       }
-      if (std::getenv("LEC_CONE_LOG") != nullptr && !initial_shared_merge.empty()) {
+      if (livehd::debug::env<"LHD_LEC_CONE_LOG">() != nullptr && !initial_shared_merge.empty()) {
         std::fprintf(stderr,
                      "[LEC_CONE] -- exact-read rewrite: %zu packed slice(s), %zu structural + %zu simplified port proof(s), "
                      "%zu pending\n",
@@ -10633,7 +10634,7 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
         }
       }
     }
-    if (std::getenv("LEC_CONE_LOG") != nullptr && !congruence_terms.empty()) {
+    if (livehd::debug::env<"LHD_LEC_CONE_LOG">() != nullptr && !congruence_terms.empty()) {
       std::fprintf(stderr,
                    "[LEC_CONE] congruence: %zu/%zu output jobs discharged from %zu operand lemmas\n",
                    congruence_proven,
@@ -10674,7 +10675,7 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
           slice_solver.setOption("arrays-prop", "1");
           slice_solver.setOption("tlimit-per", "500");
           slice_solver.assertFormula(group);
-          if (std::getenv("LEC_CONE_LOG") != nullptr) {
+          if (livehd::debug::env<"LHD_LEC_CONE_LOG">() != nullptr) {
             std::fprintf(stderr, "[LEC_CONE] fresh slice %s jobs %zu..%zu\n", ind_diffs[parent].first.c_str(), first, last);
           }
           if (acc != nullptr) {
@@ -10714,7 +10715,7 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
         r1[job] = Cone_verdict::Proven;
       }
     }
-    if (std::getenv("LEC_CONE_LOG") != nullptr) {
+    if (livehd::debug::env<"LHD_LEC_CONE_LOG">() != nullptr) {
       int addr_ok = 0;
       for (size_t k = 0; k < merge_obl.size(); ++k) {
         addr_ok += addr_v[k] == Cone_verdict::Proven ? 1 : 0;
@@ -10773,7 +10774,7 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
                          : any_refuted     ? Cone_verdict::Refuted
                          : any_unsupported ? Cone_verdict::Unsupported
                                            : Cone_verdict::Unknown;
-      if (std::getenv("LEC_CONE_LOG") != nullptr && direct_jobs_of.at(parent).size() > 1) {
+      if (livehd::debug::env<"LHD_LEC_CONE_LOG">() != nullptr && direct_jobs_of.at(parent).size() > 1) {
         std::fprintf(stderr,
                      "[LEC_CONE] -- split %-40s %zu/%zu proven, %zu undecided\n",
                      ind_diffs[parent].first.c_str(),
@@ -10844,7 +10845,7 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
       return m;
     };
     Cone_merge_map merge = build_merge();
-    if (std::getenv("LEC_CONE_LOG") != nullptr && !merge_cands.empty()) {
+    if (livehd::debug::env<"LHD_LEC_CONE_LOG">() != nullptr && !merge_cands.empty()) {
       std::fprintf(stderr, "[LEC_CONE] -- enabled %zu/%zu discharged read-port merge(s)\n", merge.size(), merge_cands.size());
     }
     // ---- round 2a: unresolved memory obligations get the wider merge set ------
@@ -10957,7 +10958,7 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
           continue;
         }
         auto it = bbin_tot_ok.find(ind_diffs[i].first.substr(kLeaf.size()));
-        if (std::getenv("LEC_CONE_LOG") != nullptr) {
+        if (livehd::debug::env<"LHD_LEC_CONE_LOG">() != nullptr) {
           const std::string got = it == bbin_tot_ok.end() ? std::string{"no bbin group"}
                                                           : std::to_string(it->second.second) + "/"
                                                                 + std::to_string(it->second.first) + " inputs proven";
@@ -10973,7 +10974,7 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
       }
     }
 
-    if (std::getenv("LEC_CONE_LOG") != nullptr) {
+    if (livehd::debug::env<"LHD_LEC_CONE_LOG">() != nullptr) {
       for (size_t k = 0; k < n_sub; ++k) {
         std::fprintf(stderr, "[LEC_CONE] sub %-56s %s\n", subs[k].label.c_str(), std::string{cone_verdict_name(sub_v[k])}.c_str());
       }
@@ -11236,9 +11237,9 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
   // cut's diff UNSAT independently is the SAME proof (OR UNSAT iff every disjunct
   // is) but each query is a small, focused combinational cone, so the easy cuts
   // discharge instantly and only the genuinely-hard ones (the branch/forwarding
-  // cone) are ever the bottleneck. Opt-in via LEC_DECOMP; any SAT/unknown falls
+  // cone) are ever the bottleneck. Opt-in via LHD_LEC_DECOMP; any SAT/unknown falls
   // through to the monolithic solve so the witness path is unchanged.
-  if ((lec_decompose_try(opts.decompose) || std::getenv("LEC_DECOMP") != nullptr) && !ind_diffs.empty()) {
+  if ((lec_decompose_try(opts.decompose) || livehd::debug::env<"LHD_LEC_DECOMP">() != nullptr) && !ind_diffs.empty()) {
     int                      proven  = 0;
     bool                     any_sat = false;
     std::vector<std::string> hard;
@@ -11260,7 +11261,7 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
           hard_why = "; first undecided cut " + dn + cvc5_undecided_detail(dr, opts.timeout);
         }
       }
-      if (std::getenv("LEC_DECOMP_LOG") != nullptr) {
+      if (livehd::debug::env<"LHD_LEC_DECOMP_LOG">() != nullptr) {
         std::fprintf(stderr,
                      "[LEC_CUT] %-44s %-8s %lldms\n",
                      dn.c_str(),
@@ -11588,7 +11589,7 @@ std::vector<Port_fit> unfit_sub_ports(const Graphs& graphs, const hhds::Graph* r
 
 // Scratch graphs only (the fit rewires every unfit boundary in place).
 void fit_sub_port_widths(const std::vector<std::shared_ptr<hhds::Graph>>& graphs, const hhds::Graph* root) {
-  const bool dump = std::getenv("LEC_DUMP_FIT") != nullptr;
+  const bool dump = livehd::debug::env<"LHD_LEC_DUMP_FIT">() != nullptr;
   for (const auto step : {Fit_step::net, Fit_step::port}) {
     // One fit per (graph, driver, width, sign): an instance output read by
     // several sinks is spelled once and fanned out, as cgen declares the net
@@ -12595,7 +12596,7 @@ std::string verify_obligation_key(const std::vector<cvc5::Term>& assertions, con
   auto key = std::format("verify:{:016x}{:016x}", h0, h1);
   // LHD_FORMAL_KEY_DUMP=<file>: append the serialized obligation behind each
   // key, so two runs that should have hit can be diffed term by term.
-  if (const char* dump = std::getenv("LHD_FORMAL_KEY_DUMP"); dump != nullptr && *dump != '\0') {
+  if (const char* dump = livehd::debug::env<"LHD_FORMAL_KEY_DUMP">(); dump != nullptr && *dump != '\0') {
     if (std::ofstream f(dump, std::ios::app); f) {
       f << "== " << key << " scope=" << scope << "\n";
       for (const auto& h : hyps) {
@@ -13255,7 +13256,7 @@ static Verify_result prove_properties_impl(hhds::Graph* design, const Lec_option
   // mode). ~100x faster than bitblast-internal on the multiplier benchmark, with
   // identical verdicts. LHD_VERIFY_BV_SOLVER (local experiment only) overrides it.
   if (!has_mem) {
-    const char* bvs = std::getenv("LHD_VERIFY_BV_SOLVER");
+    const char* bvs = livehd::debug::env<"LHD_VERIFY_BV_SOLVER">();
     if (bvs != nullptr && *bvs != '\0') {
       solver.setOption("bv-solver", bvs);
     } else {
@@ -13265,7 +13266,7 @@ static Verify_result prove_properties_impl(hhds::Graph* design, const Lec_option
     }
   }
   // LHD_VERIFY_CVC5_OPTS="name=value;name=value" (local experiment only).
-  if (const char* xo = std::getenv("LHD_VERIFY_CVC5_OPTS"); xo != nullptr) {
+  if (const char* xo = livehd::debug::env<"LHD_VERIFY_CVC5_OPTS">(); xo != nullptr) {
     std::string_view rest{xo};
     while (!rest.empty()) {
       auto semi = rest.find(';');
@@ -13847,7 +13848,7 @@ static Verify_result prove_properties_impl(hhds::Graph* design, const Lec_option
   std::vector<Wit_in> wit_ins;
   // Debug (LHD_WITNESS_DUMP=<file>): on a cvc5 refute, every input and every
   // register value of the trace, per cycle, for replay on the ABC model.
-  const char*                   wdump = std::getenv("LHD_WITNESS_DUMP");
+  const char*                   wdump = livehd::debug::env<"LHD_WITNESS_DUMP">();
   std::vector<Io_name_map<Val>> dbg_state;
   // Structured trace up to (and including) the violating cycle — model values
   // are only valid right after the SAT checkSatAssuming, so extract eagerly.
@@ -13927,7 +13928,7 @@ static Verify_result prove_properties_impl(hhds::Graph* design, const Lec_option
   std::string vac_base;  // assume cones + setup + depth, for the vacuity memo
   // ABC bmc3 pre-pass: opt-in (formal.abc, or a reuse/pdr/abc_mem option).
   // LHD_VERIFY_ABC=0 forces it off.
-  const char* abc_env     = std::getenv("LHD_VERIFY_ABC");
+  const char* abc_env     = livehd::debug::env<"LHD_VERIFY_ABC">();
   const bool  abc_bmc_on  = (abc_env == nullptr || std::string_view{abc_env} != "0")
                          && (opts.abc || opts.seq_reuse != 0 || opts.pdr || opts.abc_mem);
   absl::flat_hash_set<std::string> abc_vac_ok;  // scopes whose assumes ABC showed consistent over the window
@@ -14059,7 +14060,7 @@ static Verify_result prove_properties_impl(hhds::Graph* design, const Lec_option
       // otherwise the per-obligation loop below runs unchanged.
       // LHD_VERIFY_BATCH=0 turns it off (local experiment knob).
       absl::flat_hash_set<size_t> batch_done;
-      const char*                 batch_env = std::getenv("LHD_VERIFY_BATCH");
+      const char*                 batch_env = livehd::debug::env<"LHD_VERIFY_BATCH">();
       if (mon == nullptr && (batch_env == nullptr || std::string_view{batch_env} != "0")) {
         std::vector<size_t>      bix;
         std::vector<cvc5::Term>  bads;
@@ -14615,7 +14616,7 @@ static Verify_result prove_properties_impl(hhds::Graph* design, const Lec_option
       Encoded                 ae = enc.encode(design, &ash, "ab_", &amem, &areads);
       ok                         = ae.ok && (ae.equalities.empty() || opts.abc_mem);
       sm.inexact                 = !mem.empty() || !ae.equalities.empty() || !reads.empty();
-      if (std::getenv("LHD_REUSE_DEBUG") != nullptr) {
+      if (livehd::debug::env<"LHD_REUSE_DEBUG">() != nullptr) {
         for (const auto& [k, t] : mem) {
           std::fprintf(stderr, "abcmem: mem %s sort=%s kind=%s next=%d\n", k.c_str(), t.getSort().toString().c_str(),
                        std::format("{}", static_cast<int>(t.getKind())).c_str(), ae.next_mem.contains(k) ? 1 : 0);
@@ -15316,7 +15317,7 @@ static Verify_result prove_properties_impl(hhds::Graph* design, const Lec_option
         if (opts.compile_resource_limit > 0) {
           iso->setOption("rlimit-per", std::to_string(opts.compile_resource_limit));
         }
-        if (const char* bvs = std::getenv("LHD_VERIFY_BV_SOLVER"); bvs != nullptr && *bvs != '\0') {
+        if (const char* bvs = livehd::debug::env<"LHD_VERIFY_BV_SOLVER">(); bvs != nullptr && *bvs != '\0') {
           iso->setOption("bv-solver", bvs);
         } else {
           iso->setOption("bv-solver", "bitblast");
@@ -15829,7 +15830,7 @@ static Verify_result prove_properties_impl(hhds::Graph* design, const Lec_option
     if (!has_mem) {
       gso.emplace(tm);
       gso->setLogic("QF_BV");
-      if (const char* bvs = std::getenv("LHD_VERIFY_BV_SOLVER"); bvs != nullptr && *bvs != '\0') {
+      if (const char* bvs = livehd::debug::env<"LHD_VERIFY_BV_SOLVER">(); bvs != nullptr && *bvs != '\0') {
         gso->setOption("bv-solver", bvs);
       } else {
         gso->setOption("bv-solver", "bitblast");

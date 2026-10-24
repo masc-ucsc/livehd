@@ -11,7 +11,7 @@ OUT="$(cd "$OUT" && pwd)"
 CASE_DIR="$(mktemp -d "$OUT/fixtures.XXXXXXXX")"
 export TMPDIR="$CASE_DIR/runtime_tmp" TMP="$CASE_DIR/runtime_tmp" TEMP="$CASE_DIR/runtime_tmp"
 mkdir -p "$TMPDIR"
-LEAN_NARY_BRIDGE_OUTPUT="$CASE_DIR" LEAN_OR_BRIDGE_OUTPUT="$CASE_DIR" "$TEST_BIN" \
+LHD_LEAN_NARY_BRIDGE_OUTPUT="$CASE_DIR" LHD_LEAN_OR_BRIDGE_OUTPUT="$CASE_DIR" "$TEST_BIN" \
   --gtest_filter=LegacyModel.NaryMixedWidthBridgeFixtures:LegacyModel.LargeOrBridgeFixtures >"$CASE_DIR/generate.log" 2>&1
 fixtures=("$CASE_DIR/"*_Lgraph.lean)
 if [[ "${#fixtures[@]}" != 14 ]]; then

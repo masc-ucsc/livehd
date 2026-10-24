@@ -13,7 +13,7 @@
 
 namespace {
 std::filesystem::path fixture_root() {
-  if (const char* path = std::getenv("ISABELLE_EMISSION_FIXTURES")) {
+  if (const char* path = std::getenv("LHD_ISABELLE_EMISSION_FIXTURES")) {
     return path;
   }
   if (const char* path = std::getenv("TEST_TMPDIR")) {

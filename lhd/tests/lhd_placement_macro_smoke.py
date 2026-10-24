@@ -47,7 +47,7 @@ endmodule
 """)
 base=['lhd/lhd','synth',str(source),'--top','top','--workdir',str(root/'W'),'--set',f'synth.liberty={library}','--set',f'synth.lef={data}/sky130hd.tlef,{data}/sky130hd.lef,{lef}','--set','synth.opentimer=false','--set','synth.place.timing_driven=false','--set','compile.specialize_modules=true','--set','synth.place=true','--set','synth.place.macro=h2d','--set','synth.place.utilization=0.1','--set','synth.place.density=0.5','--set','synth.place.halo=0.5','--set','synth.place.iterations=10','--set','synth.place.bins=8','--set','synth.place.macro.K=2','--set','synth.place.macro.iters_per_outer=5','--set','synth.place.macro.evals=4','--set','synth.place.macro.seed_sa_evals=4','-q']
 # H2D and the older isolated-stage checks pin the old plain controls.
-base += [x for key,value in {'fp':'false','final':'false','macro.snap':'false','macro.align_weight':'0','scale_macro_density':'false','exact_macro_density':'false','adaptive_density':'false','routability':'false','macro_overlap':'0','macro_jitter':'0','schedule_iterations':'0','io_iterations':'0'}.items() for x in ['--set','synth.place.'+key+'='+value]]
+base += [x for key,value in {'fp':'false','fp.pin_adjust':'false','legalize.terminal':'false','macro.pin_adjust':'false','final':'false','macro.snap':'false','macro.align_weight':'0','scale_macro_density':'false','exact_macro_density':'false','adaptive_density':'false','routability':'false','macro_overlap':'0','macro_jitter':'0','schedule_iterations':'0','io_iterations':'0'}.items() for x in ['--set','synth.place.'+key+'='+value]]
 def run(name,extra=(),success=True):
  result=root/(name+'.json')
  overrides={extra[i+1].split('=',1)[0] for i in range(len(extra)-1) if extra[i]=='--set'}
@@ -131,13 +131,13 @@ module top(input clk,we,input [2:0] a,input [4:0] d,output [9:0] q);
  bank u1(.clk(clk),.we(we),.a(a),.d(d),.q(q[9:5]));
 endmodule
 """)
-common=['--set','synth.place.fp.minimum=1000','--set','synth.place.fp.min_copies=2','--set','lhd.incremental=false','--set','synth.place.iterations=40','--set','synth.place.bins=64','--set','synth.place.io_iterations=10','--set','synth.place.snapshots=true']
+common=['--set','synth.place.fp.minimum=1000','--set','synth.place.fp.min_copies=2','--set','lhd.incremental=false','--set','synth.place.iterations=40','--set','synth.place.bins=32','--set','synth.place.io_iterations=10','--set','synth.place.snapshots=true']
 run('centroid_baseline',common+['--set','synth.place.macro=none'])
 baseline_frame=json.loads((root/'W/synth/place/gp.json').read_text())
 # Floorplan GP and snap are independent of the legacy macro experiment mode.
 run('fp_snap',common+['--set','synth.place.macro=none','--set','synth.place.fp=true','--set','synth.place.fp.iterations=40'])
 fp=json.loads((root/'W/synth/place/fp_place.json').read_text())
-assert fp['mode']=='fp-snap-frozen-targets' and fp['bins']==64 and len(fp['candidates'])==2,fp
+assert fp['mode']=='fp-snap-frozen-targets' and fp['bins']==32 and len(fp['candidates'])==2,fp
 assert fp['fp_iterations']>0 and fp['refinement_repulsion_weight']==0 and fp['fixed_anchor_weight']>0,fp
 assert (root/'W/synth/place/fp_gp.json').is_file() and (root/'W/synth/place/gp.json').is_file()
 assert all(len(c[k])==2 for c in fp['candidates'] for k in ['before','target','refinement_gp','legal']),fp
@@ -241,15 +241,17 @@ assert not re.search(r'^- \S+ sky130_fd_sc_\S+ \+ FIXED',text,re.M)
 print('Opt-in 3-pass flow, both snaps, 3K/four-per-parent/64 bins and fixed macro frames pass')
 
 base[base.index(str(root/'W'))]=str(root/'default_W')
-run('default_single_pass',['--set',f'synth.place.tech_rc={tech_rc}','--set','lhd.incremental=false','--set','synth.place.iterations=40','--set','synth.place.io_iterations=10','--set','synth.place.snapshots=true'])
+run('default_macro_cells',['--set',f'synth.place.tech_rc={tech_rc}','--set','lhd.incremental=false','--set','synth.place.iterations=40','--set','synth.place.io_iterations=10','--set','synth.place.snapshots=true'])
 p=root/'default_W/synth/place'
 assert (p/'gp.json').is_file() and (p/'out.def').is_file()
-assert not (p/'flow.json').exists() and not (p/'macro').exists()
-assert json.loads((p/'alignment.json').read_text())['snap']
-print('Default single mixed-size pass retains macro snap without FP anchors')
+flow=json.loads((p/'flow.json').read_text())
+assert flow['mode']=='macro-cells' and flow['fixed_macros']==24,flow
+assert not (p/'macro/fp_place.json').exists()
+assert json.loads((p/'macro/alignment.json').read_text())['snap']
+print('Default macro/cell stages retain macro snap without FP anchors')
 run('hierarchy_regular_snap',['--set',f'synth.place.tech_rc={tech_rc}','--set','lhd.incremental=false','--set','synth.place.iterations=40','--set','synth.place.io_iterations=10','--set','synth.place.snapshots=true','--set','synth.place.macro.snap_mode=symmetry'])
-a=json.loads((p/'alignment.json').read_text())
-assert a['snap_mode']=='symmetry' and a['snap'] and not (p/'flow.json').exists(),a
+a=json.loads((p/'macro/alignment.json').read_text())
+assert a['snap_mode']=='symmetry' and a['snap'],a
 classes={n['node']:n['class'] for n in a['snap_classes']}
 assert len(classes)==24 and len(set(classes.values()))==4,a['snap_classes']
 for left,right,axis,offset in a['soft_constraints']:

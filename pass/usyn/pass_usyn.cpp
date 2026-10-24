@@ -34,10 +34,9 @@ static Pass_plugin plugin("pass_usyn", Pass_usyn::setup);
 namespace {
 // Keep old spellings registered only to produce directed migration errors.
 constexpr std::string_view obsolete[]
-    = {"support",          "literals",   "series",        "domino_overhead", "cmos_factor", "static_overhead",
-       "nonunate_penalty", "cover_cuts", "domino_levels", "depth_slack",     "duplicate",   "cover_memories",
-       "fanout_boundary",  "abc",        "fallback",      "recovery_rounds", "flow",        "area_flow",
-       "large_flow",       "large_ge",   "ware_trials"};
+    = {"support",    "literals",        "series",      "domino_overhead", "cmos_factor",    "static_overhead", "nonunate_penalty",
+       "cover_cuts", "domino_levels",   "depth_slack", "duplicate",       "cover_memories", "fanout_boundary", "abc",
+       "fallback",   "recovery_rounds", "flow",        "area_flow",       "large_flow",     "large_ge",        "ware_trials"};
 
 template <typename T>
 bool parse(std::string_view text, T& value) {
@@ -242,13 +241,25 @@ bool read_options(const Eprp_var& var, Options& options) {
   }
   options.design.max_source_nodes = logical.max_nodes;
   options.design.specialize       = std::string(var.get_stage("specialize", "true")) != "false";
-  for (const auto& [switch_name, switch_value] : {std::pair{"state_sweep", &options.design.state_sweep},
-                                              std::pair{"merge_registers", &options.design.merge_registers}}) {
+  for (const auto& [switch_name, switch_value] : {
+           std::pair{    "state_sweep",     &options.design.state_sweep},
+           std::pair{"merge_registers", &options.design.merge_registers},
+           std::pair{     "clock_gate",      &options.design.clock_gate}
+  }) {
     const auto text = std::string(var.get_stage(switch_name, "false"));
     if (text != "true" && text != "false") {
       return invalid_option(switch_name, "true|false");
     }
     *switch_value = text == "true";
+  }
+  for (const auto& [name, value, fallback] : {
+           std::tuple{"clock_gate_min_bits", &options.design.clock_gate_min_bits, 16},
+           std::tuple{   "clock_gate_depth",    &options.design.clock_gate_depth,  1}
+  }) {
+    const auto text = std::string(var.get_stage(name, std::to_string(fallback)));
+    if (!parse(text, *value) || *value == 0) {
+      return invalid_option(name, "a positive 32-bit whole number");
+    }
   }
   {
     const auto text = std::string(var.get_stage("unroll_carry", "true"));
@@ -257,9 +268,9 @@ bool read_options(const Eprp_var& var, Options& options) {
     }
     options.design.unroll_carry = text == "true";
   }
-  options.design.cost_policy      = std::string(var.get_stage("cost_mode", "proxy"));
+  options.design.cost_policy   = std::string(var.get_stage("cost_mode", "proxy"));
   // EXPERIMENT: literal-network statistics, one JSON line per region (literal_stats.hpp).
-  options.design.literal_stats    = std::string(var.get_stage("literal_stats", ""));
+  options.design.literal_stats = std::string(var.get_stage("literal_stats", ""));
   {
     const auto text = std::string(var.get_stage("literal_extract", "0"));
     if (text != "0" && text != "1" && text != "2" && text != "3") {
@@ -281,11 +292,11 @@ bool read_options(const Eprp_var& var, Options& options) {
   if (!options.design.cache.directory.empty()) {
     options.mapping.cache_directory = (options.design.cache.directory / "tmap").string();
   }
-  options.design.cache.context
-      = std::to_string(options.mapping.memory_budget_mb) + "/" + std::to_string(options.mapping.time_budget_ms) + "/unroll-"
-        + (options.design.unroll_carry ? "1" : "0");
-  endpoint.cost_nodes = logical.max_nodes;
-  residual.max_nodes  = logical.max_nodes;
+  options.design.cache.context = std::to_string(options.mapping.memory_budget_mb) + "/"
+                                 + std::to_string(options.mapping.time_budget_ms) + "/unroll-"
+                                 + (options.design.unroll_carry ? "1" : "0");
+  endpoint.cost_nodes          = logical.max_nodes;
+  residual.max_nodes           = logical.max_nodes;
   return true;
 }
 
@@ -321,7 +332,7 @@ bool mapped_better(const livehd::synth::Mapped_cost& candidate, const livehd::sy
       .msg("{}: pass.usyn ran out of memory (an allocation failed) under {}",
            livehd::lec::outcome_word(livehd::lec::Outcome::Timeout_memory),
            budget == 0 ? std::string{"the host's memory (no process memory budget could be computed)"}
-                       : std::format("the process memory budget of {} MiB (the RLIMIT_AS backstop: LIVEHD_MEMORY_BUDGET_MB, "
+                       : std::format("the process memory budget of {} MiB (the RLIMIT_AS backstop: LHD_MEMORY_BUDGET_MB, "
                                      "else physical RAM minus max(2 GiB, 25%))",
                                      budget >> 20))
       .hint("color into smaller regions and synthesize those, or synthesize on a host with more memory")
@@ -363,13 +374,20 @@ void Pass_usyn::setup() {
                        "narrow each register to its highest observed bit, on the private copy (default false; the "
                        "synth.state_sweep spelling)",
                        "false");
+  m.add_label_optional("clock_gate",
+                       "true|false: infer clock gates and collapse existing ones on the private copy (default false; the "
+                       "synth.clock_gate spelling; pass/synth/clock_gate.hpp)",
+                       "false");
+  m.add_label_optional("clock_gate_min_bits", "the fewest register bits a new clock gate must cover (default 16)", "16");
+  m.add_label_optional("clock_gate_depth", "how many clock gates may be chained (default 1)", "1");
   m.add_label_optional("merge_registers",
                        "true|false: merge registers that are the same machine on the private copy (default false; the "
                        "synth.merge_registers spelling)",
                        "false");
-  m.add_label_optional("adder",
-                       "Native arithmetic: auto (Brent-Kung wide sums, comparisons and multiplier carry), rca, cska, cla, prefix or brent",
-                       "auto");
+  m.add_label_optional(
+      "adder",
+      "Native arithmetic: auto (Brent-Kung wide sums, comparisons and multiplier carry), rca, cska, cla, prefix or brent",
+      "auto");
   m.add_label_optional("tune_profile", "internal synth.tune.profile", "auto");
   m.add_label_optional("tune_validate", "internal synth.tune.validate", "structural");
   m.add_label_optional("tune_file", "internal synth.tune.file", "");
@@ -383,7 +401,8 @@ void Pass_usyn::setup() {
   m.add_label_optional("block_size", "Shared CSKA/CLA width (alias of adder_block)", "");
   m.add_label_optional("adder_block", "Native CSKA/CLA group width (0: derive from operating width)", "0");
   m.add_label_optional("multiplier",
-                       "Native partial-product summation: auto (tdm by default; explored under synth.tune.profile=on), csa (carry-save), tree, array or tdm (three-greedy column compression)",
+                       "Native partial-product summation: auto (tdm by default; explored under synth.tune.profile=on), csa "
+                       "(carry-save), tree, array or tdm (three-greedy column compression)",
                        "auto");
   m.add_label_optional("mux_lowering",
                        "Indexed mux lowering: decode or experimental tree; predicates retain nonzero semantics",
@@ -560,11 +579,11 @@ void Pass_usyn::synthesize(Eprp_var& var) {
   options.design.tune_patience = static_cast<uint32_t>(std::stoul(std::string(var.get_stage("tune_patience", "3"))));
   options.design.tune_time_ms  = std::stoull(std::string(var.get_stage("tune_time_ms", "60000")));
   options.design.tune_store    = std::make_shared<livehd::synth::Tune_store>(std::string(var.get_stage("tune_dir", "")),
-                                                                          std::string(var.get_stage("tune_file", "")),
-                                                                          std::string(var.get_stage("tune_export", "")),
-                                                                          var.get_stage("tune_persist", "true") != "false",
-                                                                          options.design.tune_profile != "off",
-                                                                          options.design.tune_validate);
+                                                                             std::string(var.get_stage("tune_file", "")),
+                                                                             std::string(var.get_stage("tune_export", "")),
+                                                                             var.get_stage("tune_persist", "true") != "false",
+                                                                             options.design.tune_profile != "off",
+                                                                             options.design.tune_validate);
   const auto                   requested_top = var.get("top", "");
   std::shared_ptr<hhds::Graph> top;
   for (const auto& graph : var.graphs) {
@@ -621,9 +640,10 @@ void Pass_usyn::synthesize(Eprp_var& var) {
     std::error_code ec;
     fs::remove_all(provenance_staging.path, ec);
   }
-  const auto provenance
-      = usyn::archive_provenance(provenance_staging.path, var.get("invocation_context", ""), std::to_string(livehd::fold_salt_mix(usyn::kUsynSrcSalt)));
-  const auto start   = std::chrono::steady_clock::now();
+  const auto provenance = usyn::archive_provenance(provenance_staging.path,
+                                                   var.get("invocation_context", ""),
+                                                   std::to_string(livehd::fold_salt_mix(usyn::kUsynSrcSalt)));
+  const auto start      = std::chrono::steady_clock::now();
   const auto elapsed = [&] { return std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - start).count(); };
   usyn::Resource_budget resources;
   resources.entry_bytes         = livehd::cost::process_footprint_bytes();
@@ -810,7 +830,7 @@ void Pass_usyn::synthesize(Eprp_var& var) {
     policy.min_timeout       = 1;
     policy.hard_timeout_mult = 2;
     const auto prove         = [&](hhds::Graph* ref, hhds::Graph* impl, std::string_view name) {
-      const auto result = livehd::lec::prove_equal_isolated(ref, impl, policy);
+      const auto result  = livehd::lec::prove_equal_isolated(ref, impl, policy);
       // Only an unbounded proof authorizes the tuned choice; every other
       // outcome (bounded, vacuous, a timeout, the pinned ind engine giving up)
       // keeps the untuned one.

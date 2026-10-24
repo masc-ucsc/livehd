@@ -111,7 +111,10 @@ assert rc['qor']['sta']['designs'][0]['max_delay'] != sta['max_delay']
 disabled = run('disabled', ['--set', 'synth.place=true', '--set', 'lhd.incremental=false'])
 assert not disabled['qor']['place']['incremental']['enabled']
 assert not disabled['qor']['place'].get('reused_final_state', False)
-timed = run('timing_driven', ['--set', 'synth.place=true', '--set', 'synth.place.timing_driven=true', '--set', 'synth.place.timing_rounds=2'])
+# The remaining optimization legs exercise the native final legalizer and outer recovery loop.
+base += ['--set', 'synth.place.legalize.terminal=false']
+timed = run('timing_driven', ['--set', 'synth.place=true',
+                            '--set', 'synth.place.timing_driven=true', '--set', 'synth.place.timing_rounds=2'])
 assert timed['qor']['place']['legal'] and len(timed['qor']['place']['timing_driven']['rounds']) == 2
 td = timed['qor']['place']['timing_driven']
 assert td['initial_timing_source'] == 'post_synthesis_zero_wire' and max(td['initial_weights'].values()) > 1, td
@@ -235,14 +238,14 @@ for label, value, expected in [('zero', '0', (0, 0)), ('xy', '1.1,2.2', (1.1, 2.
     placement = data['qor']['place']
     assert placement['legal'] and placement['cell_halo']['active'], placement
     assert (placement['halo']['x_um'], placement['halo']['y_um']) == expected, placement
-    assert placement['macro_halo']['x_um'] == placement['macro_halo']['y_um'] == 5, placement
+    assert placement['macro_halo']['x_um'] == placement['macro_halo']['y_um'] == 10 * 2.72, placement
 cell_warm = run('cell_halo_warm', ['--set', 'synth.place=true', '--set', 'synth.place.cell_halo=1.1,2.2'])
 assert cell_warm['qor']['place']['incremental']['hit'], cell_warm
 cell_changed = run('cell_halo_changed', ['--set', 'synth.place=true', '--set', 'synth.place.cell_halo=0'])
 assert not cell_changed['qor']['place'].get('reused_final_state', False), cell_changed
 inherited = run('cell_halo_inherited', ['--set', 'synth.place=true', '--set', 'synth.place.cell_halo='])
 assert 'cell_halo' not in inherited['qor']['place'] and 'macro_halo' not in inherited['qor']['place'], inherited
-for value in ['-1', '1,-2', 'nan', '6', '1,6']:
+for value in ['-1', '1,-2', 'nan', '28', '1,28']:
     run('bad_cell_halo_' + value.replace(',', '_'), ['--set', 'synth.place=true',
         '--set', 'synth.place.cell_halo=' + value], False)
 print('placement: legal DEF, bus connectivity, RC timing, warm/cold reuse, GP/default controls passed')

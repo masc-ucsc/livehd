@@ -115,7 +115,16 @@ assert fp['timing_resized_cells'] == 0, fp
 assert fp['centroid_align_weight'] == 0 and fp['centroid_align_seconds'] == 0, fp
 assert fp['centroid_parent_weight'] == 0 and fp['centroid_parent_seconds'] == 0, fp
 assert not fp['fixed_anchor_macros_only'], fp
-assert not fp['macro_pin_adjust_enabled'] and fp['macro_pin_updates'] == 0, fp
+assert fp['pin_adjust_enabled'] and fp['pin_updates'] > 0, fp
+assert fp['macro_pin_adjust_enabled'], fp
+run('fp_disabled_pins', ['--set', 'synth.place=true', '--set', 'synth.place.halo=0',
+                         '--set', 'synth.place.fp=true', '--set', 'synth.place.fp.colors=true',
+                         '--set', 'synth.place.fp.minimum=0', '--set', 'synth.place.fp.iterations=60',
+                         '--set', 'synth.place.utilization=0.1',
+                         '--set', 'synth.place.fp.pin_adjust=false', '--set', 'synth.place.macro.pin_adjust=false'])
+disabled_pins = json.loads((root/'fp_disabled_pins/synth/place/macro/fp_place.json').read_text())
+assert not disabled_pins['pin_adjust_enabled'] and disabled_pins['pin_updates'] == 0, disabled_pins
+assert not disabled_pins['macro_pin_adjust_enabled'] and disabled_pins['macro_pin_updates'] == 0, disabled_pins
 assert fp['routability_macro_weight'] == 1 and fp['routability_macro_range'] == 2, fp
 alignment = json.loads((root/'fp_macro/synth/place/macro/alignment.json').read_text())
 assert alignment['global_same_master'] and alignment['weight'] == 25 and alignment['sigma'] == .25, alignment

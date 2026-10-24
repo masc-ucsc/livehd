@@ -727,7 +727,7 @@ struct Synth_set_option {
   std::string_view help;
 };
 
-// The Liberty file `synth.liberty` resolves to under $HAGENT_TECH_DIR when the
+// The Liberty file `synth.liberty` resolves to under $LHD_TECH_DIR when the
 // knob is empty. ONE default, reached through resolve_liberty by every Liberty
 // reader (`lhd synth`, `lhd pass abc`, `lhd pass opentimer`).
 inline constexpr std::string_view kSynthDefaultLiberty = "sky130_fd_sc_hd__tt_025C_1v80.lib";
@@ -772,7 +772,7 @@ inline constexpr Synth_set_option kSynthSetOptions[] = {
     {"lef",
      "",
      Synth_set_option::Kind::file,
-     "comma-separated tech LEF then cell/macro LEFs; empty uses sky130HD beside $HAGENT_TECH_DIR"},
+     "comma-separated tech LEF then cell/macro LEFs; empty uses sky130HD beside $LHD_TECH_DIR"},
     {"place.mode",
      "full",
      Synth_set_option::Kind::file,
@@ -796,9 +796,9 @@ inline constexpr Synth_set_option kSynthSetOptions[] = {
      Synth_set_option::Kind::file,
      "soft synthesis-color cohesion coefficient in inverse microns; zero disables"},
     {"place.halo",
-     "5",
+     "auto",
      Synth_set_option::Kind::file,
-     "non-CORE macro clearance per side in microns: H or X,Y (site/row rounded up)"},
+     "non-CORE macro clearance per side: auto = 10 placement-row heights, or H / X,Y microns (site/row rounded up)"},
     {"place.cell_halo",
      "",
      Synth_set_option::Kind::file,
@@ -899,7 +899,7 @@ inline constexpr Synth_set_option kSynthSetOptions[] = {
      "-1",
      Synth_set_option::Kind::file,
      "color centroid minimum physical equivalent area; -1 inherits fp.minimum"},
-    {"place.fp.pin_adjust", "false", Synth_set_option::Kind::boolean, "adjust ordered IO buses along the perimeter during FP"},
+    {"place.fp.pin_adjust", "true", Synth_set_option::Kind::boolean, "adjust ordered IO buses along the perimeter during FP"},
     {"place.fp.pin_interval", "50", Synth_set_option::Kind::integer, "FP IO adjustment interval, independently of STA"},
     {"place.fp.pin_step",
      "0.01",
@@ -909,7 +909,7 @@ inline constexpr Synth_set_option kSynthSetOptions[] = {
      "0.001",
      Synth_set_option::Kind::file,
      "minimum relative wirelength improvement for IO moves/reversal"},
-    {"place.macro.pin_adjust", "false", Synth_set_option::Kind::boolean, "adjust ordered IO buses during movable-macro GP"},
+    {"place.macro.pin_adjust", "true", Synth_set_option::Kind::boolean, "adjust ordered IO buses during movable-macro GP"},
     {"place.macro.pin_interval", "50", Synth_set_option::Kind::integer, "macro GP IO adjustment interval, independently of STA"},
     {"place.macro.pin_step", "0.01", Synth_set_option::Kind::file, "maximum per-pin macro GP travel as a perimeter fraction"},
     {"place.macro.pin_improvement",
@@ -1553,7 +1553,7 @@ inline constexpr Synth_set_option kSynthSetOptions[] = {
      Synth_set_option::Kind::file,
      "PATH -- THE Liberty .lib, for every command that reads one: `lhd synth`, `lhd pass abc` (maps to its cells) "
      "and `lhd pass opentimer` (times with it, when no .lib positional is given). Empty = "
-     "$HAGENT_TECH_DIR/sky130_fd_sc_hd__tt_025C_1v80.lib (install a PDK with `ciel`). It is the ONE spelling -- a "
+     "$LHD_TECH_DIR/sky130_fd_sc_hd__tt_025C_1v80.lib (install a PDK with `ciel`). It is the ONE spelling -- a "
      "`pass.abc.library` --set is refused -- so no two readers in a flow can land on different cells"},
     {"opentimer",
      "true",
@@ -1583,6 +1583,23 @@ inline constexpr Synth_set_option kSynthSetOptions[] = {
      Synth_set_option::Kind::boolean,
      "opt in to merging registers that are the same machine (same clock, enable, reset, reset value, width and D driver) on the "
      "mapper's private copy, repeating until nothing merges: Yosys's opt_merge on flops. Enabled by default"},
+    {"clock_gate",
+     "true",
+     Synth_set_option::Kind::boolean,
+     "clock gating on the mapper's private copy: registers on one clock whose enables share a conjunct move behind one Clock_cell "
+     "(an ICG: a latch and an AND, or the library's integrated cell) carrying the shared part, keeping only the rest as their own "
+     "enable; existing Clock_cells are collapsed (a gate in a row whose enable the gates above already check is removed, equal "
+     "gates merge). The common part is the safe one to gate: pushing it back into per-register enables later is the easy direction"},
+    {"clock_gate_min_bits",
+     "16",
+     Synth_set_option::Kind::integer,
+     "synth.clock_gate: the fewest register bits a new gate must cover (a gate replaces one enable mux per bit; lhdtrack on sky130: "
+     "16 keeps the -5% area and loses almost nothing, 8 adds a few small designs that get larger)"},
+    {"clock_gate_depth",
+     "1",
+     Synth_set_option::Kind::integer,
+     "synth.clock_gate: how many gates may be chained clock -> gate -> gate -> register, each factoring the next shared conjunct (default 1: pass.lec "
+     "cannot prove a mapped cascade of inferred gates yet)"},
     {"sdc", "", Synth_set_option::Kind::file, "PATH -- optional .sdc timing constraints handed to pass.opentimer"},
     {"spef", "", Synth_set_option::Kind::file, "PATH -- optional .spef parasitics handed to pass.opentimer"},
 };

@@ -1,0 +1,112 @@
+/*
+:name: clock_gate_inferred_cone
+:type: simulation
+*/
+// Registers that share an enable sit behind one inferred clock gate, and the work that feeds only them (their next-state cones)
+// is skipped while the gate is closed. Whatever the schedule skips, the registers must still hold, then load, exactly as the
+// plain enable says: a closed gate keeps the old value, an open one loads the cone's result computed from THIS period's inputs.
+pub mod clock_gate_inferred_cone(en:Bool, sel:Bool, x:U16, y:U16) -> (sum:U16@[0], other:U16@[0]) {
+  reg r0:U16 = 0
+  reg r1:U16 = 0
+  reg r2:U16 = 0
+  reg r3:U16 = 0
+  reg plain:U16 = 0
+  sum   = r0 ^ r1 ^ r2 ^ r3
+  other = plain
+  if en {
+    wrap r0 = ((r0 * x) + (y ^ r3)) ^ (x >> 3)
+    wrap r1 = ((r1 * y) + (x ^ r0)) ^ (y >> 5)
+    wrap r2 = ((r2 * x) + (y ^ r1)) ^ (x >> 7)
+    if sel {
+      wrap r3 = ((r3 * y) + (x ^ r2)) ^ (y >> 2)
+    }
+  }
+  wrap plain = plain + x
+}
+
+test clock_gate_inferred_cone.matches_the_enable_form {
+  mut dut = clock_gate_inferred_cone
+  mut g0 = 0
+  mut g1 = 0
+  mut g2 = 0
+  mut g3 = 0
+  mut gp = 0
+  tick 96 {
+    dut.en  = (clock % 5) == 0 or (clock % 7) == 3
+    dut.sel = (clock & 1) == 0
+    dut.x   = (clock * 2654435761) ^ 40503
+    dut.y   = (clock * 40503) ^ 2654435761
+    const x = dut.x
+    const y = dut.y
+    // golden: every cone reads the PRE-edge values
+    const o0 = g0
+    const o1 = g1
+    const o2 = g2
+    const o3 = g3
+    if dut.en {
+      g0 = (((o0 * x) + (y ^ o3)) ^ (x >> 3)) & 65535
+      g1 = (((o1 * y) + (x ^ o0)) ^ (y >> 5)) & 65535
+      g2 = (((o2 * x) + (y ^ o1)) ^ (x >> 7)) & 65535
+      if dut.sel {
+        g3 = (((o3 * y) + (x ^ o2)) ^ (y >> 2)) & 65535
+      }
+    }
+    gp = (gp + x) & 65535
+    step
+    assert(dut.sum == (g0 ^ g1 ^ g2 ^ g3), "gated registers disagree with the enable form")
+    assert(dut.other == gp, "the ungated register disagrees")
+  }
+}
+
+// The same, with a synchronous reset (it beats the enable, so the gate must open for it) and a second, nested conjunct.
+pub mod clock_gate_inferred_reset(en:Bool, sel:Bool, x:U16, y:U16) -> (sum:U16@[0]) {
+  reg a0:U16 = 5
+  reg a1:U16 = 9
+  reg a2:U16 = 17
+  reg a3:U16 = 33
+  sum = a0 ^ a1 ^ a2 ^ a3
+  if en {
+    wrap a0 = ((a0 * x) + (y ^ a3)) ^ (x >> 3)
+    wrap a1 = ((a1 * y) + (x ^ a0)) ^ (y >> 5)
+    if sel {
+      wrap a2 = ((a2 * x) + (y ^ a1)) ^ (x >> 7)
+      wrap a3 = ((a3 * y) + (x ^ a2)) ^ (y >> 2)
+    }
+  }
+}
+
+test clock_gate_inferred_reset.reset_beats_a_closed_gate {
+  mut dut = clock_gate_inferred_reset
+  mut g0 = 5
+  mut g1 = 9
+  mut g2 = 17
+  mut g3 = 33
+  tick 120 {
+    dut.reset = clock == 0 or clock == 41 or clock == 42 or clock == 77
+    dut.en    = (clock % 3) == 0 or (clock % 11) == 4
+    dut.sel   = (clock % 4) < 2
+    dut.x     = (clock * 2654435761) ^ 40503
+    dut.y     = (clock * 40503) ^ 2654435761
+    const x  = dut.x
+    const y  = dut.y
+    const o0 = g0
+    const o1 = g1
+    const o2 = g2
+    const o3 = g3
+    if dut.reset {
+      g0 = 5
+      g1 = 9
+      g2 = 17
+      g3 = 33
+    } elif dut.en {
+      g0 = (((o0 * x) + (y ^ o3)) ^ (x >> 3)) & 65535
+      g1 = (((o1 * y) + (x ^ o0)) ^ (y >> 5)) & 65535
+      if dut.sel {
+        g2 = (((o2 * x) + (y ^ o1)) ^ (x >> 7)) & 65535
+        g3 = (((o3 * y) + (x ^ o2)) ^ (y >> 2)) & 65535
+      }
+    }
+    step
+    assert(dut.sum == (g0 ^ g1 ^ g2 ^ g3), "gated registers with a synchronous reset disagree with the enable form")
+  }
+}

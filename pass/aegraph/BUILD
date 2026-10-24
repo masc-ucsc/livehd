@@ -52,6 +52,7 @@ cc_library(
     name = "fold_engine",
     srcs = ["fold_engine.cpp"],
     hdrs = ["fold_engine.hpp"],
+    deps = ["//core:debug_env"],
     copts = COPTS,
     includes = ["."],
     visibility = ["//visibility:public"],

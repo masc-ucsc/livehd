@@ -65,7 +65,7 @@ assert result['lec']['sampling']['vectors'] < 512, result
 
 # Stalling both engine types exercises a parent-enforced deadline, independent
 # of design/CPU speed. No solver result can dispatch the sampler in proof mode.
-env = dict(os.environ, LIVEHD_LEC_RACER_STALL_S='5')
+env = dict(os.environ, LHD_LEC_RACER_STALL_S='5')
 start = time.monotonic()
 proc, result = run('timeout', ['formal.effort=proof', 'formal.timeout=1',
                              'lhd.jobs=1', 'formal.lec.int_blast=off',

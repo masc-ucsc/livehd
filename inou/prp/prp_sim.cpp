@@ -23,6 +23,7 @@
 #include <vector>
 
 #include "cpp_ident.hpp"  // livehd::cpp_ident — the SAME rule cgen_sim declares members with
+#include "debug_env.hpp"
 #include "file_output.hpp"
 #include "hash_util.hpp"  // fnv1a64: the once-per-program key of a testbench `?` literal
 #include "prp_ast_facade.hpp"
@@ -32,8 +33,8 @@
 #include "prpparse/source_buffer.hpp"
 #include "rapidjson/document.h"  // 2f-sim B0: read cgen_sim's <stem>.iface.json manifests
 #include "sim_plusargs_rt.hpp"
-#include "sim_tune_rt.hpp"       // `?`-literal + tune-hash helper text, shared verbatim with inou.cgen.sim
-#include "str_tools.hpp"         // canonical_escaped_ident: `foo` == foo
+#include "sim_tune_rt.hpp"  // `?`-literal + tune-hash helper text, shared verbatim with inou.cgen.sim
+#include "str_tools.hpp"    // canonical_escaped_ident: `foo` == foo
 
 namespace prp_sim {
 
@@ -333,7 +334,7 @@ void expand_catalog(const Dut& d, const std::string& prefix, const std::map<std:
   }
 }
 
-// DEBUG (PRP_SIM_DUMP=1): recursive s-expression dump of a test subtree.
+// DEBUG (LHD_PRP_SIM_DUMP=1): recursive s-expression dump of a test subtree.
 void dump_node(const std::string& src, TSNode n, int depth) {
   if (ts_node_is_null(n)) {
     return;
@@ -4148,7 +4149,7 @@ int for_each_test(const std::string& file, const std::string& test_sel, std::str
     if (!test_sel.empty() && name != str_tools::canonical_escaped_path(test_sel)) {
       continue;
     }
-    if (std::getenv("PRP_SIM_DUMP") != nullptr) {
+    if (livehd::debug::env<"LHD_PRP_SIM_DUMP">() != nullptr) {
       dump_node(src_out, c, 0);
     }
     on_test(c, name, file_consts);

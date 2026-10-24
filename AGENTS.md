@@ -126,6 +126,29 @@ after a rebuild and read the second number, and never rebuild in the middle of a
 measurement sweep — a cold pass stored under salt A and a warm pass loaded under
 salt B looks exactly like "the cache forgot everything".
 
+## Environment variables (`getenv`)
+
+- LiveHD-owned environment controls are for developer debugging, tracing,
+  profiling, or test fault injection only. Use `LHD_<UPPER_SNAKE_CASE>` names;
+  update callers, scripts, tests, and documentation together when renaming one.
+- User-facing behavior belongs in typed CLI/config options (`--set`), not new
+  environment switches. Preserve existing defaults.
+- Never call `getenv` in a node/pin traversal, solver loop, emission loop, or
+  other hot path. Use `livehd::debug::env<"LHD_NAME">()` from
+  `core/debug_env.hpp`: it owns and caches each value once per process,
+  including an unset value. Debug controls remain available in optimized
+  builds. Set them before starting the process; later environment mutations
+  do not update a cached control.
+- A debug/test switch intentionally varied between invocations in one process
+  may instead be read once at that invocation's setup boundary. Carry the
+  snapshot through the operation (and its cache key when it changes output).
+  Do not re-read it while processing the design.
+- External process interfaces (`PATH`, `CXX`, `SOURCE_DATE_EPOCH`, Bazel
+  `RUNFILES_DIR`/`TEST_*`, etc.) retain their standard names and may be read at
+  setup boundaries. Existing tool/technology/source-path discovery and the
+  host memory safety cap are bootstrap exceptions; keep their LiveHD-owned names
+  under `LHD_*`. Do not extend these exceptions to add runtime feature knobs.
+
 ## Compiler Warnings Policy
 
 Always fix source code — never add `-Wno-*` flags to BUILD files. Exception: external deps in `MODULE.bazel`.
@@ -178,7 +201,7 @@ false loop is a structural repair, not a default, and stays.)
 - **Single test (harness)**: `python3 inou/prp/tests/pyrope_test.py -i inou/prp/tests/<dir>/<test>.prp`
 - **Direct pipeline (comptime)**: `./bazel-bin/lhd/lhd compile <test>.prp --set upass.verifier=true --set upass.verifier_pass=1 --set upass.verifier_fail=0 --emit-dir lnast-dump:dumps/ --workdir w` (the post-upass LNAST text lands in `dumps/*.lnast`; uPass stdout diagnostics in `w/logs/*pass_upass*.log`)
 - Test header `:type:` selects the pipeline (`parsing`, `lnast`, `upass`, `comptime`, `lgraph`, `compile`); `:verifier_pass:` / `:verifier_fail:` set expected cassert tallies for `comptime`.
-- **Expected-failure tests** (`:type: error`, in `inou/prp/tests/errors/`): the program **must** emit a compile error (a diagnostic — see the *Diagnostics* section of the [LiveHD docs](https://masc-ucsc.github.io/docs/livehd/02-usage/)). The header's `:error:` and `:help:` values are matched (Python `re.search`, with a literal-substring fallback when the value is not a valid regex — so `')'` works) against the emitted diagnostic's `message` and `hint`. A compile error exits non-zero cleanly (no abort) in every build mode. To pin the **line**, put a `locate_error_here` comment on the expected-error line — the harness checks the diagnostic's `start_line` matches it (a marker survives inserting/removing lines above, unlike a hard-coded number; the token `locate_error_here` is reserved — don't use it in prose, and only use it when the diagnostic actually carries a span — many `upass` errors don't yet). Diagnostics are read from the JSONL file declared via `lhd --emit diagnostics:PATH` (the hermetic kernel ignores the old `LIVEHD_DIAG` env). Each `tests/errors/*.prp` auto-generates a `prp-<name>` `bazel test` target, except the fixtures listed in `_ERR_MERGED` in `inou/prp/BUILD`, which run together inside one `prp-errors-<group>` target (the harness takes a repeated `-i`, each fixture prints its own result line, and a failing one is named in the log); run any one of them by hand with the single-test command above. Example:
+- **Expected-failure tests** (`:type: error`, in `inou/prp/tests/errors/`): the program **must** emit a compile error (a diagnostic — see the *Diagnostics* section of the [LiveHD docs](https://masc-ucsc.github.io/docs/livehd/02-usage/)). The header's `:error:` and `:help:` values are matched (Python `re.search`, with a literal-substring fallback when the value is not a valid regex — so `')'` works) against the emitted diagnostic's `message` and `hint`. A compile error exits non-zero cleanly (no abort) in every build mode. To pin the **line**, put a `locate_error_here` comment on the expected-error line — the harness checks the diagnostic's `start_line` matches it (a marker survives inserting/removing lines above, unlike a hard-coded number; the token `locate_error_here` is reserved — don't use it in prose, and only use it when the diagnostic actually carries a span — many `upass` errors don't yet). Diagnostics are read from the JSONL file declared via `lhd --emit diagnostics:PATH` (the hermetic kernel ignores the old `LHD_DIAG` env). Each `tests/errors/*.prp` auto-generates a `prp-<name>` `bazel test` target, except the fixtures listed in `_ERR_MERGED` in `inou/prp/BUILD`, which run together inside one `prp-errors-<group>` target (the harness takes a repeated `-i`, each fixture prints its own result line, and a failing one is named in the log); run any one of them by hand with the single-test command above. Example:
   ```
   /*
   :name: unbalance

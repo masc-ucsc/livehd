@@ -37,6 +37,7 @@
 <li><a href="livehd/3p-placement.html">3p-placement</a> — pending: independent QoR/scaling validation, Steiner repair quality, broader floorplans and RC, optimizer/incremental reuse, cone extensions and macro placement; soft color macros unscheduled</li>
 <li><a href="livehd/3r-route.html">3r-route</a> — future plan: RSMT-RUDY (FLUTE) congestion estimator selectable per placement stage; Rudy first, one-way switch to RSMT-RUDY at a congestion level, optional fast global router later</li>
 <li><a href="livehd/3s-terminal-legalize.html">3s-terminal-legalize</a> — opt-in final legalization: critical locks, SAT pin alignment, hard bin capacity and whitespace; four-design routing evaluation</li>
+<li><a href="livehd/3x-reroute.html">3x-reroute</a> — plan ruled 2026-10-23, not implemented: LiveHD emits cut rows, taps/endcaps and the power grid (hardcoded generator + per-technology pg_asap7/pg_sky130 profiles, ruled 2026-10-23) with optional signal channels through upper power metal, so the handoff needs no re-legalization, then pre-routes standard-cell nets as FIXED wiring; OpenROAD keeps CTS, repair, routing of the rest and grid checks</li>
 <li><a href="livehd/4c.html">4c</a></li>
 <li><a href="livehd/4f-fluid-lec.html">4f-fluid-lec</a></li>
 <li><a href="livehd/domino.html">domino</a> — the gate model and rail model for pass.usyn, then the domino backend; P0..P2 landed, P3..P6 pending</li>

@@ -42,10 +42,10 @@
 // the deadline killed leaves results[i] == R{}, done[i] == false and
 // timed_out[i] == true.
 //
-// TEST HOOK: LIVEHD_LEC_RACER_STALL_S=<secs> makes every racer sleep that long
+// TEST HOOK: LHD_LEC_RACER_STALL_S=<secs> makes every racer sleep that long
 // before running its method — the stand-in for a cvc5 preprocessing step that
 // never returns, so the deadline path is testable end to end.
-// LIVEHD_LEC_RACER_STALL_ONLY=<i> limits the stall to racer i, so a test can
+// LHD_LEC_RACER_STALL_ONLY=<i> limits the stall to racer i, so a test can
 // wall-kill one strategy while its sibling finishes (verify: 0 = bmc-first).
 // `racer_id_base` offsets that id for a caller that runs its methods as
 // successive one-racer races (verify's cache-active path: bmc-first = 0, then
@@ -92,6 +92,7 @@
 #include <string_view>
 #include <vector>
 
+#include "debug_env.hpp"
 #include "host_mem.hpp"
 #include "job_manager.hpp"
 #include "query.hpp"
@@ -261,12 +262,12 @@ inline void watch_parent(pid_t parent) {
 }
 
 inline void maybe_test_stall(int i) {
-  if (const char* only = std::getenv("LIVEHD_LEC_RACER_STALL_ONLY"); only != nullptr && *only != '\0') {
+  if (const char* only = std::getenv("LHD_LEC_RACER_STALL_ONLY"); only != nullptr && *only != '\0') {
     if (std::strtol(only, nullptr, 10) != i) {
       return;  // stall just the named racer (e.g. 0 = verify's bmc-first)
     }
   }
-  if (const char* s = std::getenv("LIVEHD_LEC_RACER_STALL_S"); s != nullptr && *s != '\0') {
+  if (const char* s = std::getenv("LHD_LEC_RACER_STALL_S"); s != nullptr && *s != '\0') {
     const long secs = std::strtol(s, nullptr, 10);
     if (secs > 0) {
       ::sleep(static_cast<unsigned>(secs));
@@ -401,7 +402,7 @@ Race_result<R> fork_race(int nmethods, const std::function<R(int)>& run_method, 
       // Sized by how many racers can be RESIDENT at once (TIME SLICING), not
       // just running: a stopped racer keeps its memory.
       if (const uint64_t share = livehd::cost::arm_child_share(share_ways);
-          share != 0 && std::getenv("LIVEHD_MEMORY_DEBUG") != nullptr) {
+          share != 0 && livehd::debug::env<"LHD_MEMORY_DEBUG">() != nullptr) {
         std::fprintf(stderr,
                      "lec: racer %d/%d capped (RLIMIT_AS = %llu MiB)\n",
                      i,

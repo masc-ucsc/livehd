@@ -16,6 +16,7 @@
 #include <utility>
 
 #include "cgen_salt.hpp"
+#include "debug_env.hpp"
 #include "file_output.hpp"
 #include "llvm/ADT/APInt.h"
 #include "llvm/ADT/ArrayRef.h"
@@ -69,7 +70,7 @@ namespace {
 // LHD_LLVM_TIME_PASSES_DIR optionally saves one report per kernel or host
 // module; this survives lhd discarding successful host-build stderr.
 class Llvm_pass_profile {
-  bool                                  enabled_ = std::getenv("LHD_LLVM_TIME_PASSES") != nullptr;
+  bool                                  enabled_ = livehd::debug::env<"LHD_LLVM_TIME_PASSES">() != nullptr;
   std::string_view                      stage_;
   std::string_view                      path_;
   llvm::PassInstrumentationCallbacks    callbacks_;
@@ -86,7 +87,7 @@ public:
       started_ = marked_        = Clock::now();
       llvm::TimePassesIsEnabled = true;
       llvm::EnableStatistics();
-      if (const char* directory = std::getenv("LHD_LLVM_TIME_PASSES_DIR")) {
+      if (const char* directory = livehd::debug::env<"LHD_LLVM_TIME_PASSES_DIR">()) {
         const auto filename = std::filesystem::path(directory)
                               / (std::filesystem::path(path).filename().string() + "." + std::string(stage) + ".log");
         std::error_code ec;

@@ -158,7 +158,7 @@ information.
   selects a shared wall deadline for that command.
 
 - **Observability: unobservable flop bits leave the obligation** (`observe.cpp`,
-  single-step inductive miter; `LEC_OBS_OFF=1` disables, `LEC_DUMP_OBS=1` lists
+  single-step inductive miter; `LHD_LEC_OBS_OFF=1` disables, `LHD_LEC_DUMP_OBS=1` lists
   the kept bits). A flop bit is observable iff it reaches a compared obligation
   that is not a candidate cut's next state -- a primary output, a box input, a
   property, a memory port/next state, another cut's (bridged) next state --
@@ -381,7 +381,7 @@ information.
   fed 32 bits) is affected: `prove_equal` copies that side into private scratch
   and spells each such boundary as the `Get_mask`/`Sext` the connection performs
   before anything inlines it, and again after compact-loop materialization.
-  `LEC_DUMP_FIT=1` lists each fit. The kernel's asymmetric-hierarchy inline
+  `LHD_LEC_DUMP_FIT=1` lists each fit. The kernel's asymmetric-hierarchy inline
   (`inline_instances_missing_from_other_side`) dissolves instances BEFORE
   pass/lec sees them, so the splice keeps the same fit itself:
   `graph_util::inline_sub_instance` spells an unfit input as the callee port

@@ -7,7 +7,7 @@ LHD=lhd/lhd
 LIB=inou/prp/tests/abc/test.lib
 W="${TEST_TMPDIR:-/tmp/lhd_unate_$$}"
 mkdir -p "$W"
-unset HAGENT_TECH_DIR
+unset LHD_TECH_DIR
 run() { "$LHD" "$@" -q --result-json "$W/result.json" >"$W/stdout" 2>"$W/stderr" || { cat "$W/result.json" "$W/stderr"; exit 1; }; }
 cat > "$W/pipe.v" <<'VERILOG'
 module pipe(input clk,a,b,c,en,rst, output reg q, output z);
@@ -41,11 +41,11 @@ import hashlib,json,pathlib,sys
 original,exported=map(pathlib.Path,sys.argv[1:])
 for region in json.loads((exported/'qor.json.usyn.json').read_text())['regions']:
     artifact=region['artifact']
-    assert artifact['version']==1,artifact
+    assert artifact['version']==2,artifact
     path=pathlib.Path(artifact['path'])
     data=(exported/path).read_bytes()
     assert data==(original/path).read_bytes()
-    assert data[:8]==b'USYN\x01\x00\x00\x00'
+    assert data[:8]==b'USYN\x02\x00\x00\x00'
     assert path.stem==hashlib.sha256(data).hexdigest(),path
 PY
 python3 pass/usyn/check_provenance.py "$W/logical/synth/qor.json.provenance" --report "$W/logical/synth/qor.json.usyn.json"

@@ -7,6 +7,8 @@
 #include <cstdlib>
 #include <string_view>
 
+#include "debug_env.hpp"
+
 namespace livehd::cprop_profile {
 enum Phase { order, range, footprint, dead, state, scalar, pack, fresh, cse, sharing, vectorize, count };
 inline constexpr std::array<const char*, count> names{
@@ -40,7 +42,7 @@ class Invocation {
   Profile          profile;
   Profile*         previous = active;
   std::string_view name;
-  bool             enabled = std::getenv("LHD_CPROP_PROFILE") != nullptr;
+  bool             enabled = livehd::debug::env<"LHD_CPROP_PROFILE">() != nullptr;
 
 public:
   explicit Invocation(std::string_view n) : name(n) {

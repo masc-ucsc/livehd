@@ -13,6 +13,7 @@
 #include <type_traits>
 
 #include "absl/container/flat_hash_set.h"
+#include "debug_env.hpp"
 #include "fresh_solver.hpp"
 #include "solver_profile.hpp"
 #include "term_sim.hpp"
@@ -325,7 +326,7 @@ Input_sampler::Outcome Input_sampler::run(Solver& solver, const cvc5::Term& bad,
   constexpr uint64_t  kRejectStreak   = 256;       // steps in a row no assumption admits: stop
   constexpr size_t    kMaxSearchTerms = 25000;     // a reduced cone this large is not a cheap search: narrow or skip it
   std::mt19937_64     rng(0x6c68645f74657374ULL);  // fixed seed: reproducible samples
-  const bool          trace_steps = std::getenv("LEC_SAMPLE_TRACE") != nullptr;  // debug: one stderr line per search
+  const bool          trace_steps = livehd::debug::env<"LHD_LEC_SAMPLE_TRACE">() != nullptr;  // debug: one stderr line per search
 
   const auto&      leaves = sim.leaves();
   std::vector<int> leaf_cycle(leaves.size(), -1);  // an input leaf's cycle; -1 for every other free symbol

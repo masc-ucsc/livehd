@@ -1630,7 +1630,7 @@ sh_test(
 ) for suffix, mapper in _MAPPERS]
 
 # No up-front design-size gate (ruling 2026-10-14): pass.color still warns about
-# a flattened design over LIVEHD_LARGE_DESIGN_NODES (pinned tiny here), but
+# a flattened design over LHD_LARGE_DESIGN_NODES (pinned tiny here), but
 # pass.abc and lec ATTEMPT it, and the removed pass.abc/formal allow_oversize
 # options are usage errors rather than silently accepted.
 sh_test(
@@ -1819,6 +1819,18 @@ _ICG_CASES = [
     name = "lhd_abc_icg_test" + suffix,
     tests = [":lhd_abc_icg_test" + suffix + "_" + tag for tag, _case, _check in _ICG_CASES],
 ) for suffix, _mapper in _MAPPERS]
+
+# synth.clock_gate: shared register enables become clock gates and user gate cascades collapse; the mapped netlist is PROVEN.
+sh_test(
+    name = "lhd_clock_gate_test",
+    size = "medium",
+    srcs = ["lhd_clock_gate_test.sh"],
+    data = _FLOW_DATA + [
+        "abc_icg_q.lib",
+        "clock_gate_chain.prp",
+        "clock_gate_share.v",
+    ],
+)
 
 # pass.abc.derived_clock: registers on a clock computed inside their region map to
 # DFF cells driven by the mapped clock logic; the default keeps them native.

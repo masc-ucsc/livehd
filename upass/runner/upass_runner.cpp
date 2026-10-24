@@ -71,6 +71,7 @@
 #include "absl/strings/str_join.h"
 #include "array_dim.hpp"
 #include "call_resolver.hpp"
+#include "debug_env.hpp"
 #include "decl_facts.hpp"
 #include "default_prologue.hpp"
 #include "diag.hpp"
@@ -81,8 +82,8 @@
 #include "lsp_index.hpp"
 #include "op_kind_rules.hpp"
 #include "range_bits.hpp"
-#include "synth_policy.hpp"
 #include "ssa_demote.hpp"
+#include "synth_policy.hpp"
 
 namespace {
 
@@ -412,7 +413,7 @@ uPass_runner::uPass_runner(std::shared_ptr<upass::Lnast_manager>& _lm, const std
     std::print("\n");
   }
 
-  dispatch_stats_ = std::getenv("LIVEHD_UPASS_STATS") != nullptr;
+  dispatch_stats_ = livehd::debug::env<"LHD_UPASS_STATS">() != nullptr;
 
   // dce:mark — lg-only flows skip the post-DCE staging rebuild (see
   // dead_code_eliminate_staging); tolg skips the marked statements instead.
@@ -17496,7 +17497,7 @@ void uPass_runner::run() {
   // upass_lnast_shared_decide_test.sh) grep for.
   std::print("uPass - walk complete\n");
   if (dispatch_stats_) {
-    // LIVEHD_UPASS_STATS breakdown. stderr, not stdout: run_step redirects
+    // LHD_UPASS_STATS breakdown. stderr, not stdout: run_step redirects
     // stdout into the per-step log; stats should land on the terminal.
     const auto walk_s
         = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - walk_t0).count() / 1e3;

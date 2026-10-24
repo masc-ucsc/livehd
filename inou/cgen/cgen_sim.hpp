@@ -483,14 +483,23 @@ private:
   // `*_DEBUG` variables only print, and stay unkeyed). Read ONCE, here: lhd
   // runs passes in-process, so a setenv between the pre-plan probe and the
   // emitter must not split the key from the code. Folded into EVERY module's
-  // key -- LIVEHD_SIM_NOGATE shapes the header of any module holding a rolled
+  // key -- LHD_SIM_NOGATE shapes the header of any module holding a rolled
   // loop, and the other two the period body of non-runtime roots and compact
   // kernels -- and into the tune-id `structure` string.
   struct Sim_env {
-    bool                   nogate   = false;  // LIVEHD_SIM_NOGATE: no quiescent-subtree gating of loop/period bodies
-    bool                   nolazy   = false;  // LIVEHD_SIM_NOLAZY: no lazy guarded next-state / write staging
-    bool                   noinline = false;  // LIVEHD_SIM_NOINLINE: no single-use forestation
-    [[nodiscard]] uint32_t bits() const { return (nogate ? 1u : 0u) | (nolazy ? 2u : 0u) | (noinline ? 4u : 0u); }
+    bool                   nogate   = false;  // LHD_SIM_NOGATE: no quiescent-subtree gating of loop/period bodies
+    bool                   nolazy   = false;  // LHD_SIM_NOLAZY: no lazy guarded next-state / write staging
+    bool                   noinline = false;  // LHD_SIM_NOINLINE: no single-use forestation
+    bool                   nocg     = false;  // LHD_SIM_NOCLOCKGATE: no clock-gate inference over shared flop enables
+    uint32_t               cg_bits  = 16;     // LHD_SIM_CLOCKGATE_MIN_BITS: smallest gated register group worth a gate
+    uint32_t               cg_cone  = 16;     // LHD_SIM_CLOCKGATE_MIN_CONE: fewest nodes a closed gate must skip
+    [[nodiscard]] uint64_t bits() const {
+      // Only a deviation from the defaults enters the key, so a default build keeps the small one. The gating thresholds shape the
+      // code only while gating is on.
+      const bool     tuned = !nocg && (cg_bits != 16 || cg_cone != 16);
+      const uint64_t gate  = tuned ? ((static_cast<uint64_t>(cg_bits) << 8) | (static_cast<uint64_t>(cg_cone) << 24)) : 0u;
+      return (nogate ? 1u : 0u) | (nolazy ? 2u : 0u) | (noinline ? 4u : 0u) | (nocg ? 8u : 0u) | gate;
+    }
     static Sim_env         read();
   };
   const Sim_env env_;

@@ -73,7 +73,7 @@ run() {  # run <impl> [extra --set ...]; sets OUT and RC
 }
 ck() { if eval "$2"; then echo "ok: $1"; else echo "FAIL: $1 (rc=$RC)"; echo "$OUT" | grep "^lec" | tail -3; fail=1; fi; }
 
-LEC_SAMPLE_TRACE=1 run alt.v
+LHD_LEC_SAMPLE_TRACE=1 run alt.v
 ck "equivalent: TESTED-sampled, exit 0" '[ "$RC" -eq 0 ] && echo "$OUT" | grep -q "^lec: .m. TESTED-sampled("'
 n=$(echo "$OUT" | sed -n "s/^lec: .m. TESTED-sampled(\([0-9]*\)).*/\1/p" | head -1)
 ck "equivalent: the test level's 2048 vectors" '[ -n "$n" ] && [ "$n" -ge 2048 ]'

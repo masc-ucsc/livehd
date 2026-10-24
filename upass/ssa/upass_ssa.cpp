@@ -19,6 +19,7 @@
 #include "absl/container/flat_hash_map.h"
 #include "absl/container/flat_hash_set.h"
 #include "array_dim.hpp"
+#include "debug_env.hpp"
 #include "diag.hpp"
 #include "hlop/dlop.hpp"
 #include "io_port_rules.hpp"
@@ -1652,7 +1653,7 @@ void uPass_ssa::run(const std::shared_ptr<Lnast>& lnast, const std::vector<std::
     lnast->set_stream_ssa(true);
     lnast->set_stream_ssa_names(std::move(stream_ssa_names));
   }
-  if (std::getenv("LIVEHD_UPASS_STATS") != nullptr) {
+  if (livehd::debug::env<"LHD_UPASS_STATS">() != nullptr) {
     std::print(stderr,
                "uPass stats [ssa]: unit={} rebuild={} stream={} origin={} stale={} composite_ports={} tuple_port_rewrite={} "
                "tuple_reason={} repeated={}\n",

@@ -17,7 +17,8 @@
 
 #include "absl/container/flat_hash_map.h"
 #include "absl/container/flat_hash_set.h"
-#include "cell.hpp"       // Ntype / Ntype_op
+#include "cell.hpp"  // Ntype / Ntype_op
+#include "debug_env.hpp"
 #include "diag.hpp"       // livehd::diag::warn / err (cap diagnostic, retired-entry trip-wire)
 #include "node_util.hpp"  // livehd::graph_util::* helpers
 
@@ -97,7 +98,7 @@ static int split_selfref_pass(hhds::Graph* g, int& unresolved_out, unsigned& sto
   std::sort(comb_nodes.begin(), comb_nodes.end(), [](const auto& a, const auto& b) {
     return a.get_debug_nid() < b.get_debug_nid();
   });
-  if (std::getenv("LIVEHD_SIM_SPLIT_DEBUG") != nullptr) {
+  if (livehd::debug::env<"LHD_SIM_SPLIT_DEBUG">() != nullptr) {
     std::print(stderr, "split[dbg]: {} comb node(s), {} on a word-level cycle\n", comb_nodes.size(), in_cycle.size());
     for (auto& n : in_cycle) {
       std::print(stderr, "split[dbg]:   on-cycle {}\n", gu::debug_name(n));
@@ -304,9 +305,9 @@ static int split_selfref_pass(hhds::Graph* g, int& unresolved_out, unsigned& sto
   const int     global_cap     = 16384 + 8 * static_cast<int>(comb_nodes.size());
   int           created        = 0;  // per-reader (reset at each reader below)
   int           total_created  = 0;  // global (never reset)
-  // LIVEHD_SIM_SPLIT_DEBUG=1 traces every reader attempt + the deepest resolve
+  // LHD_SIM_SPLIT_DEBUG=1 traces every reader attempt + the deepest resolve
   // refusal (op, slice) -- the fast way to see WHY a pack did not split.
-  const bool    split_dbg      = std::getenv("LIVEHD_SIM_SPLIT_DEBUG") != nullptr;
+  const bool    split_dbg      = livehd::debug::env<"LHD_SIM_SPLIT_DEBUG">() != nullptr;
   absl::flat_hash_map<std::tuple<hhds::Class_index, int, int>, hhds::Pin_class> memo;
   // A (pin,slice) already on the RESOLUTION STACK means this slice depends on
   // itself -- a GENUINE bit-level cycle: fail it permanently. That makes the
@@ -2034,7 +2035,7 @@ int split_packed_selfref_wire(hhds::Graph* g, const hhds::Node_class& buffer, co
   if (g == nullptr || buffer.is_invalid() || driver.is_invalid() || early_readers.empty()) {
     return 0;
   }
-  const bool debug = std::getenv("LIVEHD_SIM_SPLIT_DEBUG") != nullptr;
+  const bool debug = livehd::debug::env<"LHD_SIM_SPLIT_DEBUG">() != nullptr;
   if (debug) {
     std::print("split[wire]: buffer={} driver={} early={}\n",
                debug_name(buffer),

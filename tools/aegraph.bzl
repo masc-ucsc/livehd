@@ -9,11 +9,11 @@ One call turns `rules/<group>.rules` files into
                             rules register themselves through runtime/match.hpp, so nothing else
                             (registry, knobs, counters, census) needs a hand edit;
   * `aeg_fuzz_<group>_smoke`  per group: LHS/RHS equality fuzz on Dlop values (~1000 samples per
-                            rule, fixed seed, AEG_FUZZ_SEED to override), the `?` refinement mode,
+                            rule, fixed seed, LHD_AEG_FUZZ_SEED to override), the `?` refinement mode,
                             choice arms with their assignment substituted, and "the example fires";
   * `aeg_prove_<group>_smoke` per group: the bv proof tier (micro-LGraphs proven equal by
                             lec::prove_equal at widths {1,2,3,8,16,65}, <= 8 instances per rule,
-                            AEG_PROVE_FULL=1 for all);
+                            LHD_AEG_PROVE_FULL=1 for all);
   * `<name>_md_fresh`       staleness test of the checked-in RULES.md, which is generated too;
     `<name>_refresh`        `bazel run` target that rewrites the checked-in RULES.md.
 

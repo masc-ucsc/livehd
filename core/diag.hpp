@@ -148,7 +148,7 @@ public:
   // Append + accumulate, then write per the active output config.
   // Deduplicates (code, span, message) within a step.
   //
-  // Output is controlled by the env var LIVEHD_DIAG (read once, overridable via
+  // Output is controlled by the env var LHD_DIAG (read once, overridable via
   // the setters below — the CLI will set them explicitly):
   //   unset / "both"  -> human (`to_text`) to stderr AND JSONL to diag.jsonl  (default)
   //   "jsonl"         -> JSONL to diag.jsonl only (no human)

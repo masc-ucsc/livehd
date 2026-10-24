@@ -1,7 +1,6 @@
 // This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 
 #include "pass_abc.hpp"
-#include "fold_engine.hpp"
 
 #include <charconv>
 #include <cstdlib>
@@ -24,6 +23,7 @@
 #include "abc_satopt.hpp"
 #include "design_prepare.hpp"
 #include "diag.hpp"
+#include "fold_engine.hpp"
 #include "graph_library_singleton.hpp"
 #include "host_mem.hpp"
 #include "json_util.hpp"
@@ -80,6 +80,18 @@ void Pass_abc::add_mapping_labels(Eprp_method& m) {
                        "(default false; the synth.state_sweep spelling). Yosys does the same by flattening and opt_clean; "
                        "pass/synth/state_sweep.hpp tracks the demand per bit across the instance hierarchy",
                        "false");
+  m.add_label_optional(
+      "clock_gate",
+      "true|false: infer clock gates on the private copy: registers on one clock whose enables share a conjunct move "
+      "behind one Clock_cell, and existing Clock_cells in a row whose enable the gates above already check collapse "
+      "(default false; the synth.clock_gate spelling; pass/synth/clock_gate.hpp)",
+      "false");
+  m.add_label_optional("clock_gate_min_bits",
+                       "the fewest register bits a new clock gate must cover (default 16; the synth.clock_gate_min_bits spelling)",
+                       "16");
+  m.add_label_optional("clock_gate_depth",
+                       "how many clock gates may be chained (default 1; the synth.clock_gate_depth spelling)",
+                       "1");
   m.add_label_optional("merge_registers",
                        "true|false: merge registers that are the same machine (same clock, enable, reset, reset value, width and "
                        "D driver) on the private copy, repeating until nothing merges (default false; the synth.merge_registers "
@@ -94,7 +106,7 @@ void Pass_abc::add_mapping_labels(Eprp_method& m) {
   m.add_label_optional("out", "output graph_library directory (the --emit-dir lg: slot)", "");
   m.add_label_optional("library",
                        "INTERNAL kernel-plumbed Liberty .lib for read_lib: the lhd CLI resolves it from `--set synth.liberty` "
-                       "(empty => $HAGENT_TECH_DIR/sky130_fd_sc_hd__tt_025C_1v80.lib), so pass.abc, pass.opentimer and `lhd "
+                       "(empty => $LHD_TECH_DIR/sky130_fd_sc_hd__tt_025C_1v80.lib), so pass.abc, pass.opentimer and `lhd "
                        "synth` all read ONE Liberty. There is no `pass.abc.library` --set",
                        "");
   m.add_label_optional(
@@ -353,7 +365,7 @@ namespace {
 // Default Liberty path for a direct EPRP call that passes no `library` label
 // (the lhd CLI always resolves `synth.liberty` and plumbs it in).
 std::string default_library() {
-  const char* tech = std::getenv("HAGENT_TECH_DIR");
+  const char* tech = std::getenv("LHD_TECH_DIR");
   if (tech == nullptr || tech[0] == '\0') {
     return {};
   }
@@ -785,7 +797,7 @@ void emit_qor(const std::vector<livehd::abc::Region_qor>& qor, std::string_view 
       .msg("{}: pass.abc ran out of memory (an allocation failed) under {}",
            livehd::lec::outcome_word(livehd::lec::Outcome::Timeout_memory),
            budget == 0 ? std::string{"the host's memory (no process memory budget could be computed)"}
-                       : std::format("the process memory budget of {} MiB (the RLIMIT_AS backstop: LIVEHD_MEMORY_BUDGET_MB, "
+                       : std::format("the process memory budget of {} MiB (the RLIMIT_AS backstop: LHD_MEMORY_BUDGET_MB, "
                                      "else physical RAM minus max(2 GiB, 25%))",
                                      budget >> 20))
       .hint(
@@ -828,12 +840,26 @@ void Pass_abc::map_with(Eprp_var& var, const std::function<void(livehd::abc::Map
         .emit();
     return;
   }
-  for (const char* name : {"state_sweep", "merge_registers"}) {
+  for (const char* name : {"state_sweep", "merge_registers", "clock_gate"}) {
     // A misspelt switch must not silently leave the dead state in the netlist.
     const auto text = var.get(name, "false");
     if (text != "true" && text != "false") {
       livehd::diag::err("pass.abc", "bad-register-cleanup", "syntax")
           .msg("pass.abc.{} expects true|false, got '{}'", name, text)
+          .emit();
+      return;
+    }
+  }
+  uint32_t clock_gate_min_bits = 16, clock_gate_depth = 1;
+  for (const auto& [name, value] : {
+           std::pair{"clock_gate_min_bits", &clock_gate_min_bits},
+           std::pair{   "clock_gate_depth",    &clock_gate_depth}
+  }) {
+    const auto text      = std::string(var.get(name, std::to_string(*value)));
+    const auto [end, ec] = std::from_chars(text.data(), text.data() + text.size(), *value);
+    if (ec != std::errc{} || end != text.data() + text.size() || *value == 0) {
+      livehd::diag::err("pass.abc", "bad-clock-gate", "syntax")
+          .msg("pass.abc.{} expects a positive 32-bit whole number, got '{}'", name, text)
           .emit();
       return;
     }
@@ -847,7 +873,10 @@ void Pass_abc::map_with(Eprp_var& var, const std::function<void(livehd::abc::Map
                                       reassoc_text == "true" ? livehd::synth::Loop_reassoc::all : livehd::synth::Loop_reassoc::none,
                                       livehd::synth::State_options{.state_sweep     = var.get("state_sweep", "false") == "true",
                                                                    .merge_registers = var.get("merge_registers", "false") == "true",
-                                                                   .top             = var.get("top", "")});
+                                                                   .clock_gate      = var.get("clock_gate", "false") == "true",
+                                                                   .clock_gate_min_bits = clock_gate_min_bits,
+                                                                   .clock_gate_depth    = clock_gate_depth,
+                                                                   .top                 = var.get("top", "")});
   if (!prepared) {
     return;
   }
@@ -1236,7 +1265,7 @@ void Pass_abc::map_with(Eprp_var& var, const std::function<void(livehd::abc::Map
   }
   if (library.empty()) {
     livehd::diag::err("pass.abc", "no-library", "unsupported")
-        .msg("pass.abc needs a Liberty file: set --set synth.liberty=<file.lib> (or export HAGENT_TECH_DIR)")
+        .msg("pass.abc needs a Liberty file: set --set synth.liberty=<file.lib> (or export LHD_TECH_DIR)")
         .fatal();
     return;
   }
@@ -1361,16 +1390,17 @@ void Pass_abc::map_with(Eprp_var& var, const std::function<void(livehd::abc::Map
     // Salt on the RESOLVED cell: an unresolved pick (no DFF in the library, or
     // an unknown `dff_cell` name) falls back to the raw option so the two
     // failure shapes stay distinct keys too.
-    const std::string dff_desc = livehd::liberty::dff_selection_descriptor(dff_sel, opts.dff_cell) + (opts.drop_init ? "+drop_init" : "")
-                                 + (opts.derived_clock ? "+derived_clock" : "");
-    incr                       = std::make_shared<livehd::synth::Region_cache>(cache_dir,
-                                                         livehd::synth::Region_cache::make_salt(livehd::fold_salt_mix(livehd::abc::kAbcSrcSalt),
-                                                                                                opts.library,
-                                                                                                opts.map_register,
-                                                                                                opts.memory_fold,
-                                                                                                opts.memory_max_bits,
-                                                                                                dff_desc),
-                                                         false);
+    const std::string dff_desc = livehd::liberty::dff_selection_descriptor(dff_sel, opts.dff_cell)
+                                 + (opts.drop_init ? "+drop_init" : "") + (opts.derived_clock ? "+derived_clock" : "");
+    incr                       = std::make_shared<livehd::synth::Region_cache>(
+        cache_dir,
+        livehd::synth::Region_cache::make_salt(livehd::fold_salt_mix(livehd::abc::kAbcSrcSalt),
+                                               opts.library,
+                                               opts.map_register,
+                                               opts.memory_fold,
+                                               opts.memory_max_bits,
+                                               dff_desc),
+        false);
   }
 
   // A whole-design flatten maps ONE region and its netlist must hold exactly one

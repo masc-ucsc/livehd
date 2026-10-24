@@ -48,6 +48,7 @@ genrule(
     name = "synth_salt",
     srcs = [
         ":synth_srcs",
+        "//core:debug_env_srcs",
         "//graph",
         "//core:bus_name_srcs",  # per-bit register names (x[i])
         "//ware:cgen_memory_rtl",
@@ -233,6 +234,19 @@ cc_test(
     deps = [
         ":synth",
         "//graph",
+        "@googletest//:gtest_main",
+        "@hhds//hhds:graph",
+    ],
+)
+
+cc_test(
+    name = "clock_gate_smoke",
+    srcs = ["clock_gate_smoke.cpp"],
+    copts = COPTS,
+    deps = [
+        ":synth",
+        "//graph",
+        "//pass/lec:lec_query",
         "@googletest//:gtest_main",
         "@hhds//hhds:graph",
     ],

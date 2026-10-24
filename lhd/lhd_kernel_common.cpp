@@ -597,7 +597,7 @@ static void crash_handler(int sig, siginfo_t* info, void* uctx) {
       crash_write("\n");
     }
     crash_write(
-        "lhd: hint: run on a host with more memory or a larger LIVEHD_MEMORY_BUDGET_MB, lower "
+        "lhd: hint: run on a host with more memory or a larger LHD_MEMORY_BUDGET_MB, lower "
         "pass.abc.memory_budget_mb so admission refuses earlier, or color/decompose into smaller pieces\n");
     ::_exit(::getpid() != crash_main_pid_ ? livehd::lec::kChildExitBadAlloc : 7);
   }

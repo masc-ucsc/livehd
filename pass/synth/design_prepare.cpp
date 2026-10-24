@@ -7,6 +7,7 @@
 
 #include "absl/container/flat_hash_map.h"
 #include "absl/container/flat_hash_set.h"
+#include "clock_gate.hpp"  // //graph
 #include "diag.hpp"
 #include "node_util.hpp"
 #include "pass_partition.hpp"
@@ -345,6 +346,32 @@ std::unique_ptr<Prepared_design> prepare_design(std::span<const std::shared_ptr<
     }
   }
   uint64_t clock_cells = 0;
+  // synth.clock_gate: tidy the existing gates and factor the enables registers share into new ones, before the Clock_cells are
+  // spelled structurally below. After the carried loops are prepared: registers a loop expansion mints share enables too.
+  if (state.clock_gate) {
+    const auto gated = clock_gate::infer_clock_gates(
+        result->definitions,
+        {.min_bits = state.clock_gate_min_bits, .depth = state.clock_gate_depth},
+        [budget](std::string_view stage, uint64_t work) { return admit_preparation(budget, stage, work); });
+    if (!gated) {
+      return {};
+    }
+    result->gating = *gated;
+    if (gated->gates + gated->collapsed + gated->duplicates + gated->redundant > 0) {
+      livehd::diag::info(from_pass, "clock-gated", "progress")
+          .msg("{}: clock gating inferred {} gate(s) over {} register(s) ({} bit(s); {} enable(s) absorbed), collapsed {} gate(s), merged "
+               "{} duplicate gate(s), dropped {} implied enable conjunct(s)",
+               from_pass,
+               gated->gates,
+               gated->registers,
+               gated->bits,
+               gated->enables,
+               gated->collapsed,
+               gated->duplicates,
+               gated->redundant)
+          .emit();
+    }
+  }
   for (const auto& graph : result->definitions) {
     const auto expanded = expand_plain_clock_cells(graph.get(), budget);
     if (!expanded) {

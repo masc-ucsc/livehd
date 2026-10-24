@@ -58,7 +58,7 @@ H() {  # $1..=extra lhd lec args ; sets RC/OUT ; ONE shared workdir (the cache)
 # then BUILDS AND RUNS it -- ~5.5s of host clang per refutation. Nothing here
 # reads that replay, so keep the witness (simfail_*.prp/.json is still written)
 # and skip only its host build.
-  OUT=$(LEC_PHASE_PLAN=1 "$LHD" lec --set formal.effort=proof "$@" --set formal.simfail_run=false --top top  --workdir "$WD" 2>&1); RC=$?
+  OUT=$(LHD_LEC_PHASE_PLAN=1 "$LHD" lec --set formal.effort=proof "$@" --set formal.simfail_run=false --top top  --workdir "$WD" 2>&1); RC=$?
 }
 
 # 1) Cold run A vs B: nothing cached yet; verdicts get stored.
@@ -235,8 +235,8 @@ pub mod br_delay(clk:Clock, `in`:U8, rst:U1) -> (out:U8@[], out_stages:U40@[]) {
 EOF
 WDH="$WORK/wdh"; rm -rf "$WDH"; mkdir -p "$WDH"
 D() { "$LHD" lec --set formal.effort=proof --ref "verilog:$WORK/dly.v" --impl "pyrope:$WORK/$1" --top br_delay --workdir "$2" 2>&1 | tee "$2.log" | grep "^lec: '" | tail -1; }
-# LEC_WINDOW_OFF disables slice pairing, so i32 can only reach a bounded pass.
-OUT=$(LEC_WINDOW_OFF=1 D i32.prp "$WDH")
+# LHD_LEC_WINDOW_OFF disables slice pairing, so i32 can only reach a bounded pass.
+OUT=$(LHD_LEC_WINDOW_OFF=1 D i32.prp "$WDH")
 if ! echo "$OUT" | grep -q "PROVEN-bounded(6)"; then echo "FAIL: i32 without state windows should be bounded: $OUT"; tail -25 "$WDH.log"; fail=1
 elif ! python3 -c 'import json,sys; h=json.load(open(sys.argv[1])).get("hints",{}); sys.exit(any(v.get("engine")=="bmc" for v in h.values()))' \
     "$WDH/formal_cache.json"; then echo "FAIL: a bounded pass was stored as the winning strategy"; fail=1

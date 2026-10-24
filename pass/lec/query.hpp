@@ -386,7 +386,7 @@ struct Lec_options {
                                              //          unresolved residue as Undecided, NEVER run the
                                              //          monolithic solve (the diagnostic mode to isolate the
                                              //          hard cone fast, e.g. a wide ALU/barrel-shift cone
-                                             //          that needs SAT-sweeping). LEC_DECOMP_LOG=1 logs each
+                                             //          that needs SAT-sweeping). LHD_LEC_DECOMP_LOG=1 logs each
                                              //          cut's PROVEN/DIFF/unknown verdict.
                                              //   false : monolithic OR-miter only (one big checkSat).
                                              // on/1 == true, off/0 == false.

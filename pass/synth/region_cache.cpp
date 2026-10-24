@@ -19,6 +19,7 @@
 #include "absl/container/flat_hash_map.h"
 #include "absl/container/flat_hash_set.h"
 #include "cell.hpp"  // Ntype_op
+#include "debug_env.hpp"
 #include "diag.hpp"
 #include "graph_library_singleton.hpp"
 #include "hash_util.hpp"
@@ -35,11 +36,11 @@ namespace {
 
 namespace gu = livehd::graph_util;
 
-// ABC_INCR_DEBUG: print, per region, which compare gate rejected a reuse. A
+// LHD_ABC_INCR_DEBUG: print, per region, which compare gate rejected a reuse. A
 // reuse-eligible region that misses on a comment-only edit is a bug or a
 // determinism gap; this makes the gate visible.
 [[nodiscard]] bool incr_debug() {
-  static const bool on = std::getenv("ABC_INCR_DEBUG") != nullptr;
+  static const bool on = livehd::debug::env<"LHD_ABC_INCR_DEBUG">() != nullptr;
   return on;
 }
 
@@ -362,9 +363,9 @@ Region_cache::Compare_result Region_cache::lookup_compare(const livehd::partitio
     livehd::semdiff::Semdiff_options so;
     so.matching_names    = true;
     so.matching_io_names = !cross_name;
-    so.blackbox_subs     = std::getenv("ABC_INCR_NO_BLACKBOX") == nullptr;
+    so.blackbox_subs     = livehd::debug::env<"LHD_ABC_INCR_NO_BLACKBOX">() == nullptr;
     if (!livehd::semdiff::structural_identical(cached_pre.get(), pre_body, so)) {
-      bool rescued = std::getenv("ABC_INCR_NO_TRAVERSAL") == nullptr
+      bool rescued = livehd::debug::env<"LHD_ABC_INCR_NO_TRAVERSAL">() == nullptr
                      && livehd::semdiff::structural_equivalent_traversal(cached_pre.get(), pre_body, so);
       if (!rescued) {
         if (incr_debug()) {

@@ -820,21 +820,90 @@ TEST(CgenSim, TuneVectorKeysOnlyTheRoot) {
 
 // The emitter-debug env switches change emitted code, so they are keyed (on
 // every module) and stamped into the tune-id structure string.
+TEST(CgenSim, ClockGatePreparationUsesTheEmitterEnvironmentSnapshot) {
+  struct Restore_env {
+    const char*                name;
+    std::optional<std::string> value;
+    explicit Restore_env(const char* key) : name(key) {
+      if (const char* old = std::getenv(name)) {
+        value = old;
+      }
+    }
+    ~Restore_env() {
+      if (value) {
+        ::setenv(name, value->c_str(), 1);
+      } else {
+        ::unsetenv(name);
+      }
+    }
+  } restore_gate("LHD_SIM_NOCLOCKGATE"), restore_bits("LHD_SIM_CLOCKGATE_MIN_BITS"), restore_cone("LHD_SIM_CLOCKGATE_MIN_CONE");
+  ASSERT_EQ(::setenv("LHD_SIM_CLOCKGATE_MIN_BITS", "16", 1), 0);
+  ASSERT_EQ(::setenv("LHD_SIM_CLOCKGATE_MIN_CONE", "0", 1), 0);
+  for (const bool disabled : {false, true}) {
+    const std::string name    = disabled ? "clock_gate_snapshot_off" : "clock_gate_snapshot_on";
+    auto&             library = livehd::Hhds_graph_library::instance("lgdb_" + name);
+    auto              io      = library.create_io(name);
+    io->add_input("clk", 0);
+    io->add_input("en", 1);
+    io->add_input("d", 2);
+    io->add_output("q", 3);
+    for (const char* port : {"clk", "en", "d", "q"}) {
+      io->set_bits(port, std::string_view(port) == "d" || std::string_view(port) == "q" ? 32 : 1);
+      io->set_unsign(port, true);
+    }
+    auto graph = io->create_graph();
+    auto flop  = gu::create_typed_node(*graph, Ntype_op::Flop, 32);
+    graph->get_input_pin("clk").connect_sink(gu::setup_sink_by_name(flop, "clock_pin"));
+    graph->get_input_pin("en").connect_sink(gu::setup_sink_by_name(flop, "enable"));
+    graph->get_input_pin("d").connect_sink(gu::setup_sink_by_name(flop, "din"));
+    flop.create_driver_pin(0).connect_sink(graph->get_output_pin("q"));
+    if (disabled) {
+      ASSERT_EQ(::setenv("LHD_SIM_NOCLOCKGATE", "1", 1), 0);
+    } else {
+      ASSERT_EQ(::unsetenv("LHD_SIM_NOCLOCKGATE"), 0);
+    }
+    std::filesystem::create_directories(name);
+    Cgen_sim emitter(name, "", name, "false");
+    // A later mutation must change neither the code policy nor its generation key.
+    if (disabled) {
+      ASSERT_EQ(::unsetenv("LHD_SIM_NOCLOCKGATE"), 0);
+    } else {
+      ASSERT_EQ(::setenv("LHD_SIM_NOCLOCKGATE", "1", 1), 0);
+    }
+    ASSERT_TRUE(emitter.prepare_graph(graph));
+    size_t gates = 0;
+    for (auto node : graph->body().nodes()) {
+      gates += gu::type_op_of(node) == Ntype_op::Clock_cell;
+    }
+    EXPECT_EQ(gates, disabled ? 0U : 1U);
+  }
+}
+
 TEST(CgenSim, TuneEnvSwitchesAreKeyed) {
   const std::string tag = "tune_env";
   const auto        h   = make_tune_hierarchy(tag);
   emit_hierarchy(h, tag + "_plain", {});
-  ASSERT_EQ(::setenv("LIVEHD_SIM_NOLAZY", "1", 1), 0);
+  ASSERT_EQ(::setenv("LHD_SIM_NOLAZY", "1", 1), 0);
   emit_hierarchy(h, tag + "_nolazy", {});
-  ASSERT_EQ(::unsetenv("LIVEHD_SIM_NOLAZY"), 0);
+  ASSERT_EQ(::unsetenv("LHD_SIM_NOLAZY"), 0);
   for (const auto* mod : {"tune_env_top", "tune_env_child"}) {
     const auto plain  = gen_key_of(tag + "_plain", mod);
     const auto nolazy = gen_key_of(tag + "_nolazy", mod);
     ASSERT_EQ(plain.size(), 16u) << mod;
     EXPECT_NE(plain, nolazy) << mod;
   }
-  EXPECT_NE(slurp(std::filesystem::path(tag + "_plain") / "tune_env_top.tune-id.cpp").find("-simgen-66-e0\""), std::string::npos);
-  EXPECT_NE(slurp(std::filesystem::path(tag + "_nolazy") / "tune_env_top.tune-id.cpp").find("-simgen-66-e2\""), std::string::npos);
+  // Other emitter controls (including clock-gating thresholds) also occupy
+  // bits in this stamp. NOLAZY must change exactly its own bit.
+  const auto       plain_id  = slurp(std::filesystem::path(tag + "_plain") / "tune_env_top.tune-id.cpp");
+  const auto       nolazy_id = slurp(std::filesystem::path(tag + "_nolazy") / "tune_env_top.tune-id.cpp");
+  const std::regex stamp{"-simgen-[0-9]+-e([0-9]+)"};
+  std::smatch      plain_stamp, nolazy_stamp;
+  ASSERT_TRUE(std::regex_search(plain_id, plain_stamp, stamp));
+  ASSERT_TRUE(std::regex_search(nolazy_id, nolazy_stamp, stamp));
+  const auto plain_bits  = std::stoull(plain_stamp[1]);
+  const auto nolazy_bits = std::stoull(nolazy_stamp[1]);
+  EXPECT_EQ(plain_bits & 2u, 0u);
+  EXPECT_EQ(nolazy_bits, plain_bits | 2u);
 }
 
 // `<stem>.tune-id.cpp` exists exactly for executable roots, is self-contained,

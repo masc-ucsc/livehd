@@ -56,10 +56,10 @@ struct Options {
   bool                                  analyze_colors_only = false;  // diagnostic: no GP/LG/STA or cache
   double                                fp_color_maximum    = 30000;  // memory-first logic area in equivalent cells
   double                                fp_color_minimum    = -1;     // inherit fp_minimum; physical member area only
-  bool                                  fp_pin_adjust       = false;
+  bool                                  fp_pin_adjust       = true;
   int                                   fp_pin_interval     = 50;
   double                                fp_pin_step = .01, fp_pin_improvement = .001;  // perimeter fraction, relative gain
-  bool                                  macro_pin_adjust   = false;
+  bool                                  macro_pin_adjust   = true;
   int                                   macro_pin_interval = 50;
   double                                macro_pin_step = .01, macro_pin_improvement = .001;
   int                                   fp_iterations = 1500, fp_min_copies = 4, fp_min_macros = 2;
@@ -117,7 +117,8 @@ struct Options {
   // An imported `floorplan` (also what the staged macro/cell passes feed themselves) wins over both.
   std::vector<double>                                        die, core;
   double                                                     stop_overflow = .1, initial_density_weight = .01;
-  double                                                     halo_x = 5, halo_y = 5;  // microns per side, non-CORE macros only
+  // -1 resolves to ten placement-row heights; nonnegative values are explicit microns per side.
+  double                                                     halo_x = -1, halo_y = -1;
   // Unset preserves the macro halo for cells. Applied only after the macro frame is fixed.
   std::optional<std::pair<double, double>>                   cell_halo;
   bool        cell_stage               = false;  // internal explicit final/placed context; never inferred from an ECO frame

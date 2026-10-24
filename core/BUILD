@@ -32,6 +32,19 @@ cc_library(
     deps = ["@llvm-project//llvm:Support"],
 )
 
+filegroup(
+    name = "debug_env_srcs",
+    srcs = ["debug_env.hpp"],
+    visibility = ["//visibility:public"],
+)
+
+cc_library(
+    name = "debug_env",
+    hdrs = ["debug_env.hpp"],
+    includes = ["."],
+    visibility = ["//visibility:public"],
+)
+
 cc_library(
     name = "core",
     srcs = glob(
@@ -43,7 +56,7 @@ cc_library(
     ),
     hdrs = glob(
         ["*.hpp"],
-        exclude = ["file_name.hpp"],
+        exclude = ["file_name.hpp", "debug_env.hpp"],
     ),
     copts = ["-std=c++23"] + COPTS,
     defines = select({
@@ -59,6 +72,7 @@ cc_library(
     linkopts = ["-lpthread"],
     visibility = ["//visibility:public"],
     deps = [
+        ":debug_env",
         "@hhds//hhds:core",  # diag Span/excerpts ride the hhds source locator
         "@hlop//hlop:hlop",
         "@abseil-cpp//absl/container:btree",
@@ -96,6 +110,7 @@ filegroup(
     name = "formal_srcs",
     srcs = [
         ":bus_name_srcs",
+        ":debug_env_srcs",
         "hash_util.hpp",
         "state_match.hpp",
         "str_tools.hpp",
@@ -148,6 +163,7 @@ cc_test(
     name = "core_unit_test",
     srcs = [
         "tests/bus_name_test.cpp",
+        "tests/debug_env_smoke.cpp",
         "tests/file_name_test.cpp",
         "tests/util_smoke.cpp",
         "tests/worker_pool_test.cpp",

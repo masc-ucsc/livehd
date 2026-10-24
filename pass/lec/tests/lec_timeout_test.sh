@@ -115,7 +115,7 @@ run_lec() {  # $1=name $2=formal.timeout secs $3=outer kill secs
 # --- wall deadline on the forked ind|bmc race (fork_race) ---
 # cvc5's tlimit-per does not cover its own preprocessing (push/NonClausalSimp),
 # so a racer stuck there used to hold `lhd lec` FOREVER (formal.timeout=60 ran
-# 15+ minutes on a netlist LEC). LIVEHD_LEC_RACER_STALL_S makes every racer
+# 15+ minutes on a netlist LEC). LHD_LEC_RACER_STALL_S makes every racer
 # sleep before solving -- the stand-in for that stuck child. With
 # formal.timeout=1 and min_timeout=1 the race deadline is 1 + 1 + 10 s grace =
 # 12 s: the run must come back TIMEOUT naming the deadline well inside the 25 s
@@ -134,7 +134,7 @@ endmodule
 EOF2
 (
   s0=$(date +%s)
-  LIVEHD_LEC_RACER_STALL_S=60 "$LHD" lec --set formal.effort=proof --ref "$WORK/stall_ref.v" --impl "$WORK/stall_impl.v" --top foo \
+  LHD_LEC_RACER_STALL_S=60 "$LHD" lec --set formal.effort=proof --ref "$WORK/stall_ref.v" --impl "$WORK/stall_impl.v" --top foo \
     --set formal.lec.hier=false --set formal.lec.decompose=false --set formal.timeout=1 --set formal.min_timeout=1 \
     --workdir "$WORK/w_stall_race" > "$WORK/out_stall.txt" 2>&1 &
   spid=$!
@@ -153,7 +153,7 @@ stall_bg=$!
 # --- a wall-killed BMC racer must not cancel the int-blast retry of a genuine ind give-up ---
 # A registered multiply reassociation: bit-blasted ind gives up at formal.timeout
 # (cvc5's own time limit -- a genuine give-up), and int_blast=auto's retry proves
-# it as unbounded integers in well under a second. LIVEHD_LEC_RACER_STALL_ONLY=1
+# it as unbounded integers in well under a second. LHD_LEC_RACER_STALL_ONLY=1
 # stalls just the bmc racer (the stand-in for a bmc stuck in one eager CaDiCaL
 # solve), so the race deadline kills bmc ONLY. The retry exists for the IND leg's
 # give-up, so it must still run: the verdict must stay PROVEN via the int-blast
@@ -171,7 +171,7 @@ endmodule
 EOF2
 (
   s0=$(date +%s)
-  LIVEHD_LEC_RACER_STALL_ONLY=1 LIVEHD_LEC_RACER_STALL_S=60 "$LHD" lec --set formal.effort=proof --ref "$WORK/ibstall_ref.v" --impl "$WORK/ibstall_impl.v" \
+  LHD_LEC_RACER_STALL_ONLY=1 LHD_LEC_RACER_STALL_S=60 "$LHD" lec --set formal.effort=proof --ref "$WORK/ibstall_ref.v" --impl "$WORK/ibstall_impl.v" \
     --top foo --set formal.lec.hier=false --set formal.lec.decompose=false --set formal.timeout=1 --set formal.min_timeout=1 \
     --workdir "$WORK/w_ibstall" > "$WORK/out_ibstall.txt" 2>&1 &
   ipid=$!

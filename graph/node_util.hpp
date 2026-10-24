@@ -1601,12 +1601,12 @@ inline void for_each_memory_clock_driver(const hhds::Node_class& node, Fn&& fn) 
 // "Very large flattened design" threshold, in nodes. Default ~1M: below this,
 // whole-design ABC/LEC is routinely fine; well above it, a flat run risks
 // hundreds of GB (a flat XSCore run reached 221 GB). Overridable via the env var
-// LIVEHD_LARGE_DESIGN_NODES (0 disables the warning; also lets a test exercise
+// LHD_LARGE_DESIGN_NODES (0 disables the warning; also lets a test exercise
 // it on a small design). Read once per pass, not per node.
 inline constexpr uint64_t large_design_nodes_default = 1'000'000;
 
 [[nodiscard]] inline uint64_t large_design_node_threshold() {
-  if (const char* env = std::getenv("LIVEHD_LARGE_DESIGN_NODES"); env != nullptr && *env != '\0') {
+  if (const char* env = std::getenv("LHD_LARGE_DESIGN_NODES"); env != nullptr && *env != '\0') {
     char*                    end = nullptr;
     const unsigned long long v   = std::strtoull(env, &end, 10);
     if (end != env && *end == '\0') {

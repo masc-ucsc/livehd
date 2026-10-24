@@ -29,12 +29,13 @@ namespace {
 // Fixtures for the independent plain/H2D/ECO paths pin their original controls.
 Options plain_options() {
   Options o;
-  o.terminal_legalize  = false;  // These fixtures exercise the legacy final-placement paths.
-  o.fp_place           = false;
-  o.final_cells        = false;
-  o.macro_snap         = false;
-  o.macro_align_weight = 0;
-  o.macro_align_global = false;
+  o.terminal_legalize = false;  // These fixtures exercise the legacy final-placement paths.
+  o.fp_place          = false;
+  o.fp_pin_adjust = o.macro_pin_adjust = false;
+  o.final_cells                        = false;
+  o.macro_snap                         = false;
+  o.macro_align_weight                 = 0;
+  o.macro_align_global                 = false;
   o.utilization        = .5;
   o.density            = .8;
   o.halo_x = o.halo_y   = 0;
@@ -2036,6 +2037,142 @@ END LIBRARY
   EXPECT_EQ(result.floorplan.components, warm.floorplan.components);
   for (const auto* name : {"ram0:Z", "ram1:Z"}) {
     EXPECT_EQ(result.pin_locations.at(name), warm.pin_locations.at(name)) << name;
+  }
+}
+TEST(Placement, AutomaticHaloUsesPlacementRowHeightAndPreservesOverrides) {
+  const auto dir = std::filesystem::path(std::getenv("TEST_TMPDIR")) / "automatic_halo";
+  std::filesystem::create_directories(dir);
+  std::ifstream     technology("inou/lefdef/tests/data/sky130hd.tlef");
+  std::stringstream technology_text;
+  technology_text << technology.rdbuf();
+  auto       technology_lef = technology_text.str();
+  const auto grid           = technology_lef.find("MANUFACTURINGGRID 0.005");
+  ASSERT_NE(grid, std::string::npos);
+  technology_lef.replace(grid, std::string("MANUFACTURINGGRID 0.005").size(), "MANUFACTURINGGRID 0.001");
+  const auto tech_lef = dir / "tech.lef";
+  std::ofstream(tech_lef) << technology_lef;
+  hhds::GraphLibrary source;
+  auto               io = source.create_io("automatic_halo");
+  io->add_input("a", 0);
+  io->add_output("y", 0);
+  io->set_bits("a", 1);
+  io->set_bits("y", 1);
+  auto graph = io->create_graph();
+  auto cell = source.create_io("halo_cell"), ram = source.create_io("halo_ram");
+  auto signal = graph->get_input_pin("a");
+  gu::set_bits(signal, 1);
+  for (const auto& master : {ram, cell}) {
+    master->add_input("A", 0);
+    master->add_output("Y", 0);
+    auto node = gu::create_typed_node(*graph, Ntype_op::Sub);
+    node.set_subnode(master);
+    node.set_name(std::string(master->get_name()));
+    node.create_sink_pin("A").connect_driver(signal);
+    signal = node.create_driver_pin("Y");
+    gu::set_bits(signal, 1);
+  }
+  graph->get_output_pin("y").connect_driver(signal);
+  for (const auto& [name, width, height] : {
+           std::tuple{    "asap7", .054,  .270},
+           std::tuple{"nangate45", .190, 1.400},
+           std::tuple{ "sky130hd", .460, 2.720}
+  }) {
+    SCOPED_TRACE(name);
+    const auto lef = dir / (std::string(name) + ".lef");
+    std::ofstream(lef) << std::format(R"(VERSION 5.8 ;
+SITE aaa_unused
+ CLASS CORE ; SIZE 0.001 BY 0.001 ;
+END aaa_unused
+SITE halo_site
+ CLASS CORE ; SIZE {} BY {} ; SYMMETRY Y ;
+END halo_site
+MACRO halo_cell
+ CLASS CORE ; SITE halo_site ; SIZE {} BY {} ; SYMMETRY X Y ;
+ PIN A
+ DIRECTION INPUT ; USE SIGNAL ; PORT LAYER met1 ; RECT 0 0 {} {} ; END
+ END A
+ PIN Y
+ DIRECTION OUTPUT ; USE SIGNAL ; PORT LAYER met1 ; RECT 0 0 {} {} ; END
+ END Y
+END halo_cell
+MACRO halo_ram
+ CLASS BLOCK ; SIZE {} BY {} ; SYMMETRY X Y ;
+ PIN A
+ DIRECTION INPUT ; USE SIGNAL ; PORT LAYER met1 ; RECT 0 0 {} {} ; END
+ END A
+ PIN Y
+ DIRECTION OUTPUT ; USE SIGNAL ; PORT LAYER met1 ; RECT 0 0 {} {} ; END
+ END Y
+END halo_ram
+END LIBRARY
+)",
+                                      width,
+                                      height,
+                                      2 * width,
+                                      height,
+                                      width,
+                                      height,
+                                      width,
+                                      height,
+                                      3 * height,
+                                      4 * height,
+                                      width,
+                                      height,
+                                      3 * height,
+                                      4 * height);
+    for (auto node : graph->body().nodes()) {
+      if (node.get_subnode_io() == ram) {
+        Ann_place pose(std::llround(20 * height / width) * std::llround(width * 1000),
+                       std::llround(20 * height * 1000),
+                       std::llround(3 * height * 1000),
+                       std::llround(4 * height * 1000));
+        pose.status = physical::Status::FIXED;
+        node.attr(attrs::place).set(pose);
+      }
+    }
+    auto options   = plain_options();
+    options.lefs   = {tech_lef.string(), lef.string()};
+    options.halo_x = options.halo_y = -1;
+    options.iterations              = 0;
+    options.density                 = .5;
+    options.bins                    = 4;
+    options.core                    = {0, 0, 60 * height, 60 * height};
+    options.output_dir              = (dir / name).string();
+    options.cache_dir               = (dir / (std::string(name) + "_cache")).string();
+    const auto run                  = [&](const Options& run_options, double x, double y) {
+      hhds::GraphLibrary  flat;
+      auto                placed = place(*graph, flat, run_options);
+      rapidjson::Document qor;
+      qor.Parse(placed.qor.c_str());
+      EXPECT_DOUBLE_EQ(qor["halo"]["x_um"].GetDouble(), x);
+      EXPECT_DOUBLE_EQ(qor["halo"]["y_um"].GetDouble(), y);
+      EXPECT_EQ(qor["halo"]["x_dbu"].GetInt64(), std::llround(std::ceil(x / width - 1e-9) * width * 1000));
+      EXPECT_EQ(qor["halo"]["y_dbu"].GetInt64(), std::llround(std::ceil(y / height - 1e-9) * height * 1000));
+      EXPECT_NO_THROW(check_placed_legality(placed, run_options));
+      return qor["incremental"]["hit"].GetBool();
+    };
+    EXPECT_FALSE(run(options, 10 * height, 10 * height));
+    EXPECT_TRUE(run(options, 10 * height, 10 * height));
+    options.halo_x = options.halo_y = 0;
+    EXPECT_FALSE(run(options, 0, 0));
+    options.halo_x = 2 * height;
+    options.halo_y = height;
+    EXPECT_FALSE(run(options, 2 * height, height));
+    options.halo_x = options.halo_y = -1;
+    options.cell_halo               = std::pair{11 * height, 0.};
+    hhds::GraphLibrary invalid;
+    EXPECT_THROW(place(*graph, invalid, options), std::invalid_argument);
+    options.cell_halo   = std::pair{0., 0.};
+    options.final_cells = options.terminal_legalize = true;
+    EXPECT_FALSE(run(options, 0, 0));
+    rapidjson::Document flow;
+    std::ifstream       file(options.output_dir + "/flow.json");
+    std::stringstream   text;
+    text << file.rdbuf();
+    flow.Parse(text.str().c_str());
+    ASSERT_TRUE(flow.HasMember("macro_halo_um"));
+    EXPECT_DOUBLE_EQ(flow["macro_halo_um"][0].GetDouble(), 10 * height);
+    EXPECT_DOUBLE_EQ(flow["macro_halo_um"][1].GetDouble(), 10 * height);
   }
 }
 TEST(Placement, MacroHaloSpacingPinsCacheAndEco) {
@@ -4433,6 +4570,10 @@ TEST(Placement, UnsetCellHaloPreservesStatefulCallbackAcrossCalls) {
   options.output_dir += "_second";
   const auto second   = place(*graph, second_library, options);
   EXPECT_EQ(options.after_stage.target<Observer>()->calls, 2);
+  options.halo_x = options.halo_y = -1;
+  hhds::GraphLibrary automatic_library;
+  EXPECT_NO_THROW(place(*graph, automatic_library, options));
+  EXPECT_EQ(options.after_stage.target<Observer>()->calls, 3);
   EXPECT_EQ(first.floorplan.components, second.floorplan.components);
 }
 }  // namespace livehd::placement

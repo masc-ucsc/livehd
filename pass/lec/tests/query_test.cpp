@@ -1467,25 +1467,25 @@ namespace {
 struct Scoped_racer_stall {
   std::optional<std::string> seconds, only;
   Scoped_racer_stall() {
-    if (const char* value = std::getenv("LIVEHD_LEC_RACER_STALL_S")) {
+    if (const char* value = std::getenv("LHD_LEC_RACER_STALL_S")) {
       seconds = value;
     }
-    if (const char* value = std::getenv("LIVEHD_LEC_RACER_STALL_ONLY")) {
+    if (const char* value = std::getenv("LHD_LEC_RACER_STALL_ONLY")) {
       only = value;
     }
-    ::setenv("LIVEHD_LEC_RACER_STALL_S", "60", 1);
-    ::setenv("LIVEHD_LEC_RACER_STALL_ONLY", "0", 1);
+    ::setenv("LHD_LEC_RACER_STALL_S", "60", 1);
+    ::setenv("LHD_LEC_RACER_STALL_ONLY", "0", 1);
   }
   ~Scoped_racer_stall() {
     if (seconds) {
-      ::setenv("LIVEHD_LEC_RACER_STALL_S", seconds->c_str(), 1);
+      ::setenv("LHD_LEC_RACER_STALL_S", seconds->c_str(), 1);
     } else {
-      ::unsetenv("LIVEHD_LEC_RACER_STALL_S");
+      ::unsetenv("LHD_LEC_RACER_STALL_S");
     }
     if (only) {
-      ::setenv("LIVEHD_LEC_RACER_STALL_ONLY", only->c_str(), 1);
+      ::setenv("LHD_LEC_RACER_STALL_ONLY", only->c_str(), 1);
     } else {
-      ::unsetenv("LIVEHD_LEC_RACER_STALL_ONLY");
+      ::unsetenv("LHD_LEC_RACER_STALL_ONLY");
     }
   }
 };

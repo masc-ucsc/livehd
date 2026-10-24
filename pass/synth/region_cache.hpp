@@ -112,7 +112,7 @@ public:
   bool store(const livehd::partition::Region_body& rb, hhds::GraphLibrary& pre_lib, std::string_view pre_name, const Region_qor& q,
              std::string_view recipe, hhds::GraphLibrary* outlib);
 
-  // Diagnostic (ABC_INCR_COMPARE_ONLY): snapshot ONLY the pre-abc body + a row
+  // Diagnostic (LHD_ABC_INCR_COMPARE_ONLY): snapshot ONLY the pre-abc body + a row
   // (no mapped body, no ABC), so a second compare-only run can exercise the
   // rebuild/copy/save/load/compare path without paying for ABC.
   bool store_pre(const livehd::partition::Region_body& rb, hhds::GraphLibrary& pre_lib, std::string_view pre_name,

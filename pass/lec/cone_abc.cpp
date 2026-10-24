@@ -30,6 +30,7 @@
 #include <utility>
 #include <vector>
 
+#include "debug_env.hpp"
 #include "fork_race.hpp"
 #include "pass/synth/arith.hpp"
 
@@ -2255,7 +2256,7 @@ Seq_answer seq_bmc_one(const Seq_model& m, size_t pix, int timeout_s) {
         const auto u = n.rfind("_b");
         return n.starts_with("init:") || (u != std::string::npos && real.contains(n.substr(0, u)));
       });
-      if (!ans.exact && std::getenv("LHD_REUSE_DEBUG") != nullptr) {
+      if (!ans.exact && livehd::debug::env<"LHD_REUSE_DEBUG">() != nullptr) {
         for (const auto& n : cm->pis) {
           const auto u = n.rfind("_b");
           if (!n.starts_with("init:") && (u == std::string::npos || !real.contains(n.substr(0, u)))) {
@@ -2273,8 +2274,8 @@ Seq_answer seq_bmc_one(const Seq_model& m, size_t pix, int timeout_s) {
 
   // Cross-version reuse and PDR (mode 0), on the property's own cone.
   std::optional<Lit_model> lm;
-  const bool               dbg = std::getenv("LHD_REUSE_DEBUG") != nullptr;
-  const char* replay_file = std::getenv("LHD_REPLAY");
+  const bool               dbg         = livehd::debug::env<"LHD_REUSE_DEBUG">() != nullptr;
+  const char*              replay_file = livehd::debug::env<"LHD_REPLAY">();
   if (p.mode == 0 && (!p.store.empty() || p.pdr || replay_file != nullptr)) {
     lm = extract_model(ntk, target, ok, reg_name, ans.exact);
     if (dbg) {

@@ -20,6 +20,7 @@
 #include "cprop_muxctx.hpp"
 #include "cprop_profile.hpp"
 #include "cprop_value.hpp"
+#include "debug_env.hpp"
 #include "hhds/graph.hpp"
 #include "hlop/dlop.hpp"
 #include "mask_eval.hpp"
@@ -1906,7 +1907,7 @@ void Cprop::replace_all_inputs_const(hhds::Node_class& node, Inp_pins& inp_edges
     for (auto& e : inp_edges_ordered) {
       result = result.xor_op(const_of(e.get_driver_pin()));
     }
-    if (std::getenv("LHD_DBG_XOR")) {
+    if (livehd::debug::env<"LHD_DBG_XOR">()) {
       std::fprintf(stderr, "DBG xor nid=%llu n=%zu ->", (unsigned long long)node.get_debug_nid(), inp_edges_ordered.size());
       for (auto& e : inp_edges_ordered) {
         std::fprintf(stderr, " [pid=%u v=%s]", (unsigned)e.get_port_id(), const_of(e.get_driver_pin()).to_pyrope().c_str());

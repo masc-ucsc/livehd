@@ -55,8 +55,8 @@ Remaining native synthesis work is tracked in [2u-usyn](../../todo/livehd/2u-usy
    flattening and `opt_clean` bit-wise; without it LiveHD maps and places dead
    counters, unread CSR words and the unused upper half of wide primitive outputs
    (liteeth: 18% of the mapped cells). `lhd synth --stats`/the step log report what
-   went (`state-swept`), `LIVEHD_STATE_SWEEP_DEBUG=1` dumps the per-definition
-   output demand and `LIVEHD_STATE_SWEEP_TRACE=<register name part>` prints why a
+   went (`state-swept`), `LHD_STATE_SWEEP_DEBUG=1` dumps the per-definition
+   output demand and `LHD_STATE_SWEEP_TRACE=<register name part>` prints why a
    register stays observed. Covered by `//pass/synth:state_sweep_test` and, with an
    unbounded LEC proof of the mapped result, `//lhd/tests:lhd_state_sweep_test`.
    **Relation to `compile.sweep`** (`pass/sweep`, which also deletes unobserved flop bits and
@@ -78,6 +78,14 @@ Remaining native synthesis work is tracked in [2u-usyn](../../todo/livehd/2u-usy
    twin read-data registers of NVDLA's SRAM wrappers are 528 of partition_a's flops. The
    survivor keeps its own name; the LEC proof of the merged netlist is a bounded one (the
    twin has no counterpart left to pair), see `//lhd/tests:lhd_state_sweep_test`.
+   **Clock gating** (`synth.clock_gate`, default true under `lhd synth` when the Liberty has an ICG cell, else forced off: gated flops would stay native and uncounted; `synth.clock_gate_min_bits` 16, `synth.clock_gate_depth` 1; the algorithm is `graph/clock_gate.hpp`, shared with the simulator).
+   Registers on one clock whose enables share a conjunct move behind one `Clock_cell` (an ICG: the mappers spell it `clk & latch(en)`
+   and map it onto the Liberty's integrated cell), keeping only the rest of their enable; a register with a synchronous reset sits behind
+   `common | reset`, because the reset wins over the enable. The user's own Clock_cells in a row collapse: a gate whose enable the gates
+   above already check is that gate, and one with something new becomes a single gate from the root clock (pass.lec proves the single
+   level and not a cascade of inline gates). `lhd_clock_gate_test.sh` proves the mapped netlists; picorv32: 15 gates over 77 registers,
+   -3% area after ABC. The simulator runs the same inference on its private copy of each module (default on, `LHD_SIM_NOCLOCKGATE=1` opts out; `LHD_SIM_CLOCKGATE_MIN_BITS`/`_MIN_CONE`, both 16, tune it): `min_cone` withholds a gate whose registers' exclusive next-state cone is smaller, since a register fed from a port has nothing to skip. Work that feeds only flops of one plain `Clock_cell` is owned by it (`Color_plan::Version_site::gate_owner`; the cell's version is ordered first and coarsening never mixes owners), so the color scheduler wraps such a color in `if (<cell activation slot>)` and keeps its dirty bit while the gate is closed.
+
 2. **Modules.** `ware_module.cpp` extracts width-specialized arithmetic
    modules, `memory_module.cpp` lowers small or many-ported memories, and
    `loop_cleanup.cpp` prepares compact loops. An expanded iteration takes its

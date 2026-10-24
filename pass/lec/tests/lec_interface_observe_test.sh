@@ -27,7 +27,7 @@
 #   8. a one-sided OUTPUT (always a mismatch)
 # The check is linear: a forward walk per input under a SHARED step budget,
 # then one backward pass from every compared point for the rest. Cases 1-7
-# are rerun with the forward budget at 0 (LIVEHD_LEC_IFACE_FORWARD_BUDGET), so
+# are rerun with the forward budget at 0 (LHD_LEC_IFACE_FORWARD_BUDGET), so
 # the backward pass must give the same answers. And it runs under the run's
 # wall deadline: one reached there is TIMEOUT-time, exit 0 (the cva6 netlist
 # spent >80 min in this pre-check before any deadline was armed).
@@ -179,19 +179,19 @@ cases "" "it reaches an output there)"
 observable "one-sided output"     extra_out.v plain.v     "output .z. only in ref"
 
 # --- the backward pass alone (forward budget 0) must agree ------------------------
-export LIVEHD_LEC_IFACE_FORWARD_BUDGET=0
+export LHD_LEC_IFACE_FORWARD_BUDGET=0
 cases " [backward]" "it reaches a compared point there)"
-unset LIVEHD_LEC_IFACE_FORWARD_BUDGET
+unset LHD_LEC_IFACE_FORWARD_BUDGET
 
 # --- the wall deadline bounds the pre-check: TIMEOUT-time, exit 0 ---------------
-export LIVEHD_LEC_IFACE_DEADLINE_MS=0
+export LHD_LEC_IFACE_DEADLINE_MS=0
 run read_out.v plain.v
 ck "deadline in the interface check: TIMEOUT-time, exit 0" \
   '[ "$RC" -eq 0 ] && echo "$OUT" | grep -q "^lec: .m. TIMEOUT-time (.*hit formal.timeout=.* in the top-interface check"'
 run plain.v plain.v
 ck "matching interfaces never walk (no deadline to hit): PROVEN-full" \
   '[ "$RC" -eq 0 ] && echo "$OUT" | grep -q "^lec: .m. PROVEN-full"'
-unset LIVEHD_LEC_IFACE_DEADLINE_MS
+unset LHD_LEC_IFACE_DEADLINE_MS
 
 if [ $fail -ne 0 ]; then echo "lec_interface_observe_test: FAILED"; exit 1; fi
 echo "lec_interface_observe_test: PASSED"

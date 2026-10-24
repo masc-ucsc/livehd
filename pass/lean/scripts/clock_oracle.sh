@@ -29,7 +29,7 @@ FIXTURE="$OUT/ClockOracle.lean"
 # filter can exit zero without running a test.
 rm -f -- "$FIXTURE"
 echo "[clock-oracle] generating $FIXTURE"
-LEAN_CLOCK_FIXTURE="$FIXTURE" "$TEST_BIN" \
+LHD_LEAN_CLOCK_FIXTURE="$FIXTURE" "$TEST_BIN" \
   --gtest_filter='DesignScanClocks.TwoDomainValueOracle' > "$OUT/generate.log" 2>&1
 
 [[ -s "$FIXTURE" ]] || { echo "[clock-oracle] FAIL: no fixture; see $OUT/generate.log" >&2; exit 1; }

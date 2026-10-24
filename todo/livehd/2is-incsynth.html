@@ -1,0 +1,431 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>TODO 2is-incsynth — placement-aware incremental color resynthesis</title>
+<link rel="stylesheet" href="../todo.css">
+</head>
+<body>
+<nav><span class="brand">LiveHD TODO</span><a href="../index.html">← All tasks</a></nav>
+<main>
+<h1><strong class="item-id">2is-incsynth</strong> Placement-aware incremental color resynthesis</h1>
+<p>Close the loop between placement and synthesis per color. Every placement stage
+saves the timing it measured at each color's IO pins (the equivalent of SDC
+<code>set_input_delay</code>/<code>set_output_delay</code> for the color) and a
+per-color wire-load table derived from the placed RC. A color whose critical path
+moves because of those IO delays is resynthesized as a whole, starting from its
+already mapped netlist, with the delays and the wire load applied. The first
+synthesis of a run uses its normal configured flow with zero IO delays; the loop closes
+once, automatically, after the first placement stage of a run, and the user drives
+further iterations by re-running <code>lhd synth</code> on the same workdir.</p>
+<p><span class="status">Implementation and focused validation in progress</span>
+The typed placement-stage feedback, scoped ABC wire loads, mapped-body remap,
+bounded CEC, cache update and single-restart orchestration are implemented.
+End-to-end QoR evaluation and architecture reselection (I9) remain pending.
+Re-evaluate the placement feedback with the corrected interconnect timing model;
+the hierarchy-FP case must also validate centroid feasibility after cell growth
+from resizing/resynthesis. Gate-level color remapping does not yet reconsider
+the semantic arithmetic/shift implementation alternatives of I9.
+Persistent placement feedback is bound to the timing-engine source identity;
+a timer change clears old measurements before the pre-placement trigger while
+retaining the mapping's used constraints and geometry-derived wire tables.
+ABC is the only mapper in scope; usyn is a follow-on (I8).</p>
+
+<h2>Depends on</h2>
+<p>Nothing outstanding must finish first. It builds on three landed pieces:
+<a class="xref" href="2b-boundary.html">2b-boundary</a> (the per-region
+<code>SC_Bnd</code> environment: per-PI driver/arrival, per-PO load/virtual delay;
+<code>pass/abc/abc_boundary.hpp</code>), the incremental region cache
+(<code>pass/synth/region_cache.hpp</code>, one row per region module
+<code>&lt;top&gt;__c&lt;color&gt;</code> under <code>&lt;workdir&gt;/abc_cache</code>) and
+the staged native placement of <a class="xref" href="3p-placement.html">3p-placement</a>
+(<code>placement::place()</code> runs FP+macro as one <code>place_single</code> and the
+final cells as a second one). The placed-cone resynthesis
+(<code>synth.place.resynth</code>, <code>resynthesize_cones</code>) stays as is: it
+resynthesizes up to four small cones with local placement; this task resynthesizes
+whole colors between placement stages.</p>
+
+<h2>Why</h2>
+<p>Synthesis cuts the design into colors (<code>pass/color</code>) and maps each color
+as its own module. A color's ports are ABC primary inputs and outputs, and today
+they carry zero input and output delay: the partition may cut a path anywhere
+between two flops, yet every color is mapped as if the path started and ended at its
+ports. The built-in flow optimizes area (the delay budget only drives the sizing
+tail, and <code>&amp;nf -D</code> is ignored by ABC), there is no realistic frequency
+target per color beyond <code>period - reg_margin</code>, and nothing from placement
+(wire RC, real arrivals) ever reaches the mapper. <code>refine_boundaries</code>
+(Phase B of 2b-boundary) already propagates arrival/required times across regions
+and re-sizes cells, but from the stitched netlist with zero wire load, and it swaps
+cells only; it never re-maps a color.</p>
+<p>This is acceptable while synthesis and placement are independent. With
+placement-aware synthesis the color must be mapped against what the placer measured:
+its real IO arrivals/required times and the average interconnect its nets see.</p>
+
+<h2>Rulings (decided 2026-10-19)</h2>
+<ol>
+  <li><strong>IO timing</strong> is, per color port bit, the placed-STA
+  <em>input arrival</em> (color inputs) and <em>output required</em> (color
+  outputs), in ps relative to the clock: the SDC
+  <code>set_input_delay</code>/<code>set_output_delay</code> equivalents fed to the
+  ABC (later usyn) delay feedback. Loads and slews are not part of this contract;
+  interconnect goes through the wire-load table.</li>
+  <li><strong>Resynthesis starts from the color's mapped netlist</strong>, not from the
+  RTL partition: the mapped body is read back into the mapper, the IO delays and the
+  wire load are added, and the full flow runs again (the mapped structure is the
+  starting point, the mapper may restructure it).</li>
+  <li><strong>Trigger = criticality, not delta.</strong> A color is resynthesized only
+  when applying the newly measured IO delays to its last synthesized netlist makes a
+  path critical (violating, or within the margin of the period) <em>and</em> the IO
+  delay on that path changed by more than the option (default 5% of the period).
+  Removing an input delay never triggers; adding an output delay that still leaves
+  slack never triggers. A color that stays non-critical is never resynthesized,
+  however much its IO numbers moved. Since the first synthesis assumes 0/0, the
+  first placement will fire on essentially every color that is already near
+  critical.</li>
+  <li><strong>Stage precedence and netlist identity.</strong> Within a run: final
+  overrides macro overrides FP. Across runs, the stored IO delays are bound to the
+  color's synthesized netlist: an incremental hit keeps the stored last-final
+  numbers and FP does not retrigger on an unchanged design; a changed color (cache
+  miss, resynthesized from RTL) has its IO delays deleted and is treated as
+  first-seen, so the next FP/macro step will likely fire for it. The wire-load tables
+  survive RTL changes: they are a property of the technology and the color's average
+  connectivity, not of the netlist.</li>
+  <li><strong>Restart the first stage reached.</strong> After a resynthesis, placement
+  restarts at the stage that ran first in this run: <code>fp_plan</code> when FP ran,
+  the macro stage when there is no FP, or the final cell placement when the block has
+  no macros. The remaining stages then follow.</li>
+  <li><strong>Once per run, then warnings.</strong> The automatic resynthesis fires at
+  most once per run, right after the first placement stage. Later stages only save
+  their timing and print a warning for colors that would fire. The next iteration is
+  the user re-running <code>lhd synth</code> on the same workdir: synthesis is an
+  incremental hit, the stored timing (last final) is compared with what each color
+  was last synthesized with, and critical colors are resynthesized before placement
+  starts (then rule 5 applies).</li>
+  <li><strong>One knob, workdir required.</strong>
+  <code>synth.place.io_resynth=&lt;percent&gt;</code>, default 5, is both the
+  critical-path threshold and the switch; 0 disables the trigger and the warning.
+  All state lives under <code>--workdir</code>; without a workdir nothing is stored
+  and nothing fires, and a nonzero explicit <code>io_resynth</code> without a workdir
+  is a usage error.</li>
+  <li><strong>RC feedback = one Liberty <code>wire_load</code> model per color.</strong>
+  ABC's SCL timer honors <code>wire_load</code> tables (fanout count to wire length,
+  times a capacitance per length, with slope extrapolation) through the
+  <code>-c</code> flag of <code>buffer</code>/<code>upsize</code>/<code>dnsize</code>/
+  <code>stime</code> (<code>../abc/src/map/scl/sclLoad.c</code>,
+  <code>Abc_SclFindWireLoadModel</code>). One table per color, because colors differ
+  in average connectivity even on the same technology. Capacitance only for now.</li>
+  <li><strong>ABC only.</strong> usyn consumes the same stored inputs later (I8).</li>
+</ol>
+
+<h2>Facts to confirm first (I0)</h2>
+<ul>
+  <li><strong>Flat pin to region port.</strong> Placement flattens the mapped netlist
+  (<code>partition::flatten_hierarchy</code>, <code>pass/place/place.cpp</code> near the
+  <code>cannot flatten mapped netlist</code> refusal) and the STA keys its per-pin
+  report by flat pin name (<code>Timing_feedback::pins</code>,
+  <code>pass/place/repair.hpp</code>). Mapped cells carry
+  <code>attrs::synth_region_id</code>, which <code>pass.opentimer</code> already uses
+  for its per-region <code>Color_qor</code> rows. What is missing is the map from a
+  crossing net (driver region differs from a sink region) back to
+  <em>(region module, port name, bit)</em>. Confirm whether the content-stable port
+  names of the region modules survive into the flat net names, or whether the
+  <code>Flat_origin_map</code> argument of <code>flatten_hierarchy</code> (placement
+  passes <code>nullptr</code> today) gives that map for free.</li>
+  <li><strong>Mapped-body import.</strong> Phase B already re-imports every region's
+  mapped body into an ABC netlist (<code>abc_boundary.cpp</code>, the
+  <code>Abc_NtkToLogic</code>/<code>Abc_NtkDupDfs</code> path). Confirm that
+  <code>strash</code> of that network plus the built-in flow and a region-writer
+  emission into a scratch module, followed by <code>copy_body_from</code> into the
+  region module (the cache's restore path), keeps port names and the LEC twin
+  contract. Latches (<code>plan.preserves_latches</code>) and the QN encoding gate
+  (<code>builtin_flow_</code>) must hold on the re-import exactly as on a cold map.</li>
+  <li><strong>Where the mapper sees IO delays.</strong> <code>&amp;nf</code> ignores
+  <code>-D</code> and has no arrival input; the IO delays act through the
+  <code>SC_Bnd</code> table on the sizing/buffering tail, on
+  <code>time_ntk</code> (the budget judgement that drives the
+  <code>area_relax_pct</code> re-map ladder) and on the exact re-size. Confirm the
+  ladder reads the same timed slack the table changes, so a color that is now over
+  budget because of its arrivals is re-mapped for delay instead of relaxed for area.
+  Record the gap (structural mapping is arrival-blind) in I8.</li>
+  <li><strong>Units.</strong> Stored times are ps; <code>Boundary_table::set_pi/set_po</code>
+  take ps; the STA report carries <code>time_unit_ps</code>; the Liberty wire_load
+  lengths are in the library's length unit and <code>cap</code> in its capacitance
+  unit per length. Pin the conversions once (placement's <code>Wire_rc</code> is
+  ohm/um and fF/um).</li>
+  <li><strong>Stage names.</strong> The FP stage and the macro stage both live inside
+  the first <code>place_single</code> (<code>fp_place</code>, <code>macro_mode</code>);
+  the final cell placement is the second. Pin which stage is "first reached" for the
+  four combinations (FP+macro+final, macro+final, final only, GP-only mode where the
+  loop is off).</li>
+  <li><strong>Per-lane libraries.</strong> Every parallel mapping lane has its own ABC
+  frame and <code>read_lib</code>, so a per-color <code>SC_WireLoad</code> injected into
+  the lane's <code>SC_Lib</code> cannot leak across colors mapped in parallel. Confirm,
+  and confirm the injection is removed before the next region of the same lane.</li>
+</ul>
+
+<h2>Subtasks</h2>
+<ul class="subtasks">
+  <li id="I1"><strong>I1 — Harvest per-color IO timing from each placement stage.</strong>
+    <ul>
+      <li>After every completed stage (FP, macro, final) run the placed STA the stage
+      already runs (<code>evaluate()</code> in <code>lhd_kernel_synth.cpp</code>, or the
+      FP checkpoint's final evaluation) and reduce <code>Timing_feedback::pins</code>
+      to crossing nets: per region module, per input port bit the arrival at the
+      sink pin inside the region, per output port bit the required time at the
+      driver pin inside the region. Clock and reset nets are excluded (they are
+      ideal in the mapper too). A primary input/output of the top keeps its SDC
+      delay.</li>
+      <li>Store under <code>&lt;workdir&gt;/abc_cache/io_timing.json</code>:
+      <code>{schema, period_ps, regions: {module: {netlist: &lt;cache digest&gt;,
+      used: {in: {port: ps}, out: {port: ps}}, placed: {stage, run_id, in: {...},
+      out: {...}}}}}</code>. <code>used</code> is what the color's current mapped
+      body was synthesized with (absent after a cold map = 0/0);
+      <code>placed</code> is the latest measurement, replaced only by a stage of
+      equal or higher rank in the same run or by any stage of a later run whose
+      netlist digest still matches (ruling 4).</li>
+      <li>Bind to netlist identity through the region cache row: on a cache miss or
+      a cold map the region's entry is deleted; on a hit it is kept. The wire-load
+      entry (I4) is never deleted by a miss.</li>
+      <li>Emit a per-stage diagnostic row per color: ports, worst input arrival,
+      worst output required, and how many bits moved past the threshold.</li>
+    </ul>
+  </li>
+  <li id="I2"><strong>I2 — Trigger: criticality under the new IO delays.</strong>
+    <ul>
+      <li>For each color with a stored <code>placed</code> entry, re-time its mapped
+      body with the SCL timer (<code>Abc_SclManStart</code> as in Phase B) under a
+      <code>Boundary_table</code> filled from <code>placed</code> plus the color's
+      wire load, against the region budget (<code>region_budget</code>). The result
+      is the color's worst slack with the measured environment.</li>
+      <li>Fire when (a) that slack is negative or within
+      <code>io_resynth</code>% of the period, and (b) on that critical path the IO
+      delay changed by more than <code>io_resynth</code>% of the period versus
+      <code>used</code>. A tightening with slack left, or a loosening, never fires.
+      Removing a delay never fires (ruling 3).</li>
+      <li>The same evaluation produces the end-of-stage warning when the stage is not
+      the first of the run (ruling 6): one line per color that would fire, with the
+      path endpoints and the delta.</li>
+      <li>Keep the check cheap: it is one SCL timing pass per color on an already
+      mapped body, no mapping. Record its time in the QoR.</li>
+    </ul>
+  </li>
+  <li id="I3"><strong>I3 — Whole-color resynthesis from the mapped netlist (ABC).</strong>
+    <ul>
+      <li>New backend entry next to <code>refine_boundaries</code>:
+      <code>resynthesize_regions(outlib, top, selection)</code>. Per selected
+      color: import the mapped body (Phase B's path), <code>strash</code>, install the
+      <code>Boundary_table</code> from <code>placed</code> (PI arrival; PO virtual
+      delay = budget − required) with the static loads/drivers of Phase A and the
+      color's wire load (I4), then run the region's resolved built-in flow with its
+      <code>{B}</code> budget and the sizing tail with <code>-c</code>. Emit through
+      the region writer into a scratch module and <code>copy_body_from</code> into
+      the region module, as the cache restore does, so ports and the LEC twin
+      wiring are untouched.</li>
+      <li>Accept the result only when the timed slack under the same environment is
+      not worse than the starting body's (I2 measured it); otherwise keep the old
+      body and report "no gain". This bounds oscillation together with ruling 6.</li>
+      <li>Update the cache row: same pre-body, same recipe, new mapped body, and a
+      new <code>io_env</code> field (digest of the IO delays and the wire load the
+      body was mapped under). The row's recipe gate stays byte-identical, so a later
+      cold run still hits the pre-body compare; <code>io_env</code> is informational
+      for the restore and is what I1 copies into <code>used</code>. This respects the
+      incremental-cache naming ruling: no new names enter the key.</li>
+      <li>Run the LEC twin on the resynthesized color like a cold map does, and the
+      existing memory/time admission.</li>
+      <li>Then re-run <code>refine_boundaries</code> once over the whole decomposition:
+      the neighbours' drivers and loads changed.</li>
+    </ul>
+  </li>
+  <li id="I4"><strong>I4 — Per-color wire-load table from the placed RC.</strong>
+    <ul>
+      <li>From the stage's <code>Parasitics</code> and the placed geometry, bucket
+      every data net whose driver cell is in the color by sink count and average its
+      wire length (Steiner length when available, HPWL otherwise). The table is
+      <code>fanout → average length</code> for the observed fanouts (interpolated
+      between, extrapolated past the largest with ABC's slope), <code>cap</code> =
+      the technology capacitance per length (placement's <code>Wire_rc</code>, the
+      same source as the STA RC), <code>resistance</code> recorded but unused.</li>
+      <li>Store under <code>&lt;workdir&gt;/abc_cache/wire_load.json</code> per color,
+      plus a design-wide table (all nets) used for a color that has no table yet
+      (new color after an RTL change) and for the first synthesis of a later run.
+      Tables persist across RTL changes (ruling 4) and are replaced by the latest
+      stage of equal or higher rank, like I1.</li>
+      <li>Injection: before a region's flow, add an <code>SC_WireLoad</code> named
+      <code>lhd_&lt;module&gt;</code> to the lane's <code>SC_Lib</code> and set
+      <code>default_wire_load</code>; remove it after the region. Append
+      <code>-c</code> to the built-in tails (<code>buffer</code>, <code>upsize</code>,
+      <code>dnsize</code>) and pass <code>fUseWireLoads</code> to the
+      <code>Abc_SclManStart</code> calls of <code>time_ntk</code>, I2 and Phase B. A
+      user-authored <code>flow</code> string is left alone (documented).</li>
+      <li>The wire load joins the <code>io_env</code> digest of I3, not the recipe
+      gate, so cold runs keep hitting the cache.</li>
+      <li>Report per color: fanout histogram, average length, the table used, and
+      the area/delay delta between the no-wire-load and wire-load timing of the same
+      body, so the effect is visible before any resynthesis.</li>
+    </ul>
+  </li>
+  <li id="I5"><strong>I5 — Flow orchestration in <code>lhd synth</code>.</strong>
+    <ul>
+      <li>Expose the placement stages: split <code>placement::place()</code> so the
+      kernel can run "first stage" and "remaining stages" separately, or add a
+      stage hook <code>Options::after_stage(stage, Result&amp;) → restart?</code>.
+      The restart re-runs the stage from its own seed (FP from the previous FP
+      positions, macro from the previous macro frame, final from the previous final)
+      with the resynthesized colors' cells re-mapped by name where names survived
+      and placed fresh otherwise. Surviving cells and SRAMs receive movable
+      starting coordinates only: do not copy fixed status, lock unchanged
+      colors, or constrain their movement. Only the first placement-stage
+      trigger receives this seed; a saved-feedback trigger before placement
+      has no current placement to reuse. Report reused cells/macros and new
+      cells in the restarted stage's <code>restart_seed.json</code>.</li>
+      <li>Sequence per run with a workdir and <code>io_resynth &gt; 0</code>:
+      synth (incremental) → pre-placement check (I2, fires only when a stored
+      <code>placed</code> entry exists from an earlier run) → optional resynthesis
+      (I3) → first stage → save (I1, I4) → check (I2) → optional resynthesis
+      (once per run) → restart first stage (ruling 5) → save → remaining stages,
+      each saving and warning → final STA as today.</li>
+      <li><code>synth.place.io_resynth</code> in <code>lhd/lhd.hpp</code>
+      (<code>Synth_set_option</code> table), with the usage error "needs
+      --workdir" when set nonzero without one, and the existing refusal when
+      placement is not in full mode with OpenTimer. GP-only placement and
+      <code>timing_seed</code> runs never store or fire.</li>
+      <li>Crash context and logs: the resynthesis runs under the
+      <code>pass.place.optimize</code> redirect like the cone resynthesis
+      (DREAMPlace and ABC print to stdout, which is the result protocol).</li>
+      <li>Resolved-options JSON and <code>qor.json</code> gain an
+      <code>io_resynth</code> member: colors checked, fired, accepted, rejected,
+      the restarted stage, time spent, and the warning list.</li>
+    </ul>
+  </li>
+  <li id="I6"><strong>I6 — Reports and documentation.</strong>
+    <ul>
+      <li><code>synth/place/io_resynth.json</code>: per color, per stage: used vs
+      placed IO delays (worst and count over threshold), slack before/after,
+      decision, wire-load summary.</li>
+      <li><code>pass/place/README.md</code> and <code>pass/abc/README.md</code>: the
+      two-pass flow, the once-per-run rule, how to iterate (re-run on the same
+      workdir), the file schemas, and the ABC facts (<code>-c</code>,
+      <code>&amp;nf</code> arrival-blind).</li>
+      <li><code>lhd describe synth.place.io_resynth</code> text.</li>
+    </ul>
+  </li>
+  <li id="I7"><strong>I7 — Tests.</strong>
+    <ul>
+      <li>Unit: crossing-net to region-port reduction on a two-color fixture; the
+      precedence/identity rules of I1 on synthetic <code>io_timing.json</code>
+      histories (same run FP→final, next run FP after final, miss deletes, hit
+      keeps); the trigger math of I2 on hand-built slack tables (tighten with slack,
+      loosen, remove, critical+delta); the wire-load table construction and ABC's
+      interpolation/extrapolation against <code>Abc_SclFindWireCaps</code>.</li>
+      <li>ABC: a mapped region re-imported, resynthesized under a chosen
+      <code>SC_Bnd</code> and wire load, LEC-proven against the original body
+      (<code>lhd lec</code>, &lt; 2 min, timeout = pass per the LEC rulings);
+      <code>-c</code> changes the timed delay of a fixed body by the expected
+      amount.</li>
+      <li>Flow: a small design with macros and one without (sky130, LEF from the
+      existing placement tests), <code>--workdir</code>, full placement: run 1 fires
+      after FP and restarts FP; run 2 without an RTL change fires nothing at FP and
+      uses the last final; an RTL edit in one color clears only that color's IO
+      delays and fires for it; <code>io_resynth=0</code> runs the old flow
+      byte-for-byte on the netlist; no workdir plus explicit nonzero is a usage
+      error. Verify a restart preserves initial coordinates but leaves both
+      cells and macros free to move. Keep each under the repository's
+      20 s opt / 60 s dbg limits.</li>
+      <li>QoR: on the placement QoR set of 3p-placement, record post-final WNS/TNS
+      and area with <code>io_resynth</code> 0 and 5, and the time added by the check
+      and the resynthesis.</li>
+    </ul>
+  </li>
+  <li id="I8"><strong>I8 — Follow-on (not in this task).</strong>
+    <ul>
+      <li>usyn: consume <code>placed</code> IO delays as per-output required times
+      and per-input arrivals in its cover, and the per-color wire load as a
+      per-fanout capacitance in its cost proxy.</li>
+      <li>Arrival-aware structural mapping in ABC (<code>&amp;nf</code> ignores
+      arrivals; evaluate <code>map -D</code> with <code>set_input_arrival</code>-style
+      tables, or a required-time-driven <code>&amp;if</code> cover).</li>
+      <li>Wire resistance in the model (Elmore delay add per pin, or a resistance
+      field once ABC uses it).</li>
+      <li>More than one automatic iteration per run, if the QoR data of I7 shows a
+      second round pays.</li>
+    </ul>
+  </li>
+  <li id="I9"><strong>I9 — Reconsider complex-cell architectures during critical resynthesis.</strong>
+    <ul>
+      <li>Placement feedback must also reconsider the existing alternative
+      implementations of sums/adders, multipliers, comparators and variable
+      shifts. Resizing a mapped RCA cannot substitute for trying a faster carry
+      architecture, and a shifter or multiplier choice made for area can become
+      wrong once the placed boundary consumes its slack.</li>
+      <li>Retain the semantic ware specialization and its legal selector set
+      before mapping. Use the existing ware candidate builders and resource
+      admission rather than trying to recognize arithmetic from a gate netlist.
+      An explicit source/global implementation choice remains pinned; automatic
+      choices may be reconsidered. Do not restart synthesis of unrelated RTL.</li>
+      <li>Only triggered colors explore alternatives. Start with the current
+      mapped-body remap, then trial bounded architecture candidates under the
+      <em>same</em> placed per-port arrivals/required times and per-color wire
+      load. Include interacting adder/multiplier/shifter choices through the
+      existing bounded selector product. Share the batch's time/memory budget,
+      not an independent unlimited budget per candidate.</li>
+      <li>Prioritize timing as criticality grows: accept a candidate that reduces
+      the violating/near-critical path delay; use area to choose between candidates
+      with comparable timing or recovered slack. Never accept worse constrained
+      timing in exchange for area. Keep native state, macros, port identities and
+      latency unchanged, and require bounded equivalence at effort=test before
+      publishing a replacement. Unproven candidates leave the original intact.</li>
+      <li>Persist the selected mapped body through the normal cache update,
+      retaining the original pre-body/recipe gate. Record candidate family,
+      selector, delay/slack, area, proof outcome, time and rejection reason in
+      <code>io_resynth.json</code>. Re-run the ordinary exact boundary refinement
+      once after the batch, then restart placement as in I5.</li>
+      <li>Tests: synthetic adder/multiplier/shifter regions whose preferred
+      implementation changes under tighter placed IO timing; explicit pinned
+      implementations stay fixed; no trigger does no exploration; rejected or
+      unproven candidates do not change the body/cache. Compare area and final
+      placed WNS/TNS against mapped-body-only resynthesis under identical seeds.</li>
+    </ul>
+  </li>
+</ul>
+
+<h2>Options</h2>
+<table>
+  <tr><th>Option</th><th>Default</th><th>Meaning</th></tr>
+  <tr><td><code>synth.place.io_resynth</code></td><td>5</td><td>Percent of the clock period. A color is resynthesized when its critical path under the placed IO delays is violating or within this margin and the IO delay on that path moved by more than this versus the last synthesis. 0 disables the trigger and the end-of-stage warning. Nonzero needs <code>--workdir</code>.</td></tr>
+</table>
+<p>No other new knob. The wire-load feedback is part of the same switch: it is
+measured whenever <code>io_resynth &gt; 0</code> and consumed by every resynthesis
+and by the first synthesis of a later run that finds a table in the workdir.</p>
+
+<h2>Files</h2>
+<ul>
+  <li><code>lhd/lhd_kernel_synth.cpp</code>: orchestration (I5), option parsing, QoR members.</li>
+  <li><code>lhd/lhd.hpp</code>: the option row and describe text.</li>
+  <li><code>pass/place/place.hpp</code>, <code>pass/place/place.cpp</code>: stage split or stage hook; wire-length histogram per color from the placed view.</li>
+  <li><code>pass/place/repair.hpp</code> (or a new <code>pass/place/io_timing.hpp</code>): crossing-net reduction of <code>Timing_feedback</code> to region ports.</li>
+  <li><code>pass/synth/region_cache.hpp/.cpp</code>: <code>io_env</code> row field, <code>io_timing.json</code> and <code>wire_load.json</code> next to <code>abc_cache.json</code>.</li>
+  <li><code>pass/synth/region_driver.hpp/.cpp</code>: <code>resynthesize_regions</code> entry, I2 check.</li>
+  <li><code>pass/abc/abc_boundary.cpp</code>, <code>pass/abc/abc_backend.cpp</code>: mapped-body re-import to a flow input, <code>SC_WireLoad</code> injection, <code>-c</code> tails, <code>fUseWireLoads</code> in <code>time_ntk</code>.</li>
+  <li><code>pass/opentimer</code>: no change expected; the per-pin report already carries arrival/required/slack.</li>
+</ul>
+
+<h2>Risks</h2>
+<ul>
+  <li><strong>Oscillation.</strong> A resynthesized color changes its neighbours'
+  loads and the placement; bounded by once per run, the accept-only-if-not-worse
+  rule of I3 and the user-driven next iteration.</li>
+  <li><strong>Placement restart cost.</strong> The restarted first stage is a full
+  stage; the seed from the previous positions should make it cheaper, to be
+  measured in I7.</li>
+  <li><strong>Cache identity.</strong> The mapped body changes while the pre-body and
+  recipe stay the same; the <code>io_env</code> field must make the restore and the
+  <code>used</code> bookkeeping unambiguous, and the LEC twin must be refreshed on
+  every resynthesis.</li>
+  <li><strong>Arrival-blind mapper.</strong> Until I8, the structural change comes from
+  the budget ladder and the sizing tail, not from per-input arrivals; the gain may
+  be smaller than a true timing-driven map.</li>
+</ul>
+</main>
+</body>
+</html>

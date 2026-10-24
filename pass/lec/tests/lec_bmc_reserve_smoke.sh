@@ -24,7 +24,7 @@ endmodule
 (w/'bad.v').write_text(src.replace('q ^ a','q ^ ~a'))
 with (w/'compile.log').open('w') as log:
  subprocess.run([lhd,'compile',str(w/'cell.v'),'--top','budget_cell','--emit-dir',f'lg:{w}/models','--workdir',str(w/'cell-work')],stdout=log,stderr=subprocess.STDOUT,check=True,timeout=10)
-env=dict(os.environ,LIVEHD_LEC_RACER_STALL_S='60',LIVEHD_LEC_RACER_STALL_ONLY='0')
+env=dict(os.environ,LHD_LEC_RACER_STALL_S='60',LHD_LEC_RACER_STALL_ONLY='0')
 for tag,impl,verdict in [('equal','ref.v','proven-bounded'),('bug','bad.v','refuted-cex')]:
  cmd=[lhd,'lec','--set','formal.effort=proof','--ref',str(w/'ref.v'),'--impl',str(w/impl),'--top','top','--lib',f'lg:{w}/models','--workdir',str(w/tag),'--result-json',str(w/(tag+'.json'))]
  for setting in ['formal.lec.semdiff=none','lhd.jobs=2','formal.timeout=2','formal.min_timeout=1','formal.lec.int_blast=off','formal.simfail_run=false']:

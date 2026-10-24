@@ -119,7 +119,7 @@ TEST(LegacyModel, NaryMixedWidthBridgeFixtures) {
       {       "sum_mixed", ScanOp::Sum,  4,  2,  8},
       {"sum_subtract_all", ScanOp::Sum,  3,  0,  8},
   };
-  const char* destination = std::getenv("LEAN_NARY_BRIDGE_OUTPUT");
+  const char* destination = std::getenv("LHD_LEAN_NARY_BRIDGE_OUTPUT");
   for (const auto& shape : shapes) {
     SCOPED_TRACE(shape.name);
     DesignScan d;
@@ -195,7 +195,7 @@ TEST(LegacyModel, LargeOrBridgeFixtures) {
         << "example : (" << d.name << "_comb default).out_y = 0 := by native_decide\n"
         << "example : (" << d.name << "_comb { (default : " << d.name << "_in) with in_x0 := 1 }).out_y = 1 := by native_decide\n"
         << "end " << d.name << "_Lgraph\n";
-    if (const char* destination = std::getenv("LEAN_OR_BRIDGE_OUTPUT")) {
+    if (const char* destination = std::getenv("LHD_LEAN_OR_BRIDGE_OUTPUT")) {
       const auto path = std::filesystem::path(destination) / (d.name + "_Lgraph.lean");
       write_atomic(path.string(), [&](std::ostream& stream) { stream << out.str(); });
     }
@@ -245,7 +245,7 @@ TEST(LegacyModel, PartialChunkExperimentMakesNoWholeGraphClaim) {
 // Optional saved artifacts use a caller-supplied project-local directory. They
 // exercise semantic deltas with an independent Lean interpreter/compiler oracle.
 TEST(LegacyModel, ArithmeticAndSimultaneousStateOracleFixtures) {
-  const char*             destination = std::getenv("LEAN_LEGACY_OUTPUT");
+  const char*             destination = std::getenv("LHD_LEAN_LEGACY_OUTPUT");
   std::vector<DesignScan> designs;
   for (const auto& [name, op, width] : std::vector<std::tuple<std::string, ScanOp, uint32_t>>{
            {  "tiny_div_narrow",  ScanOp::Div,  4},
@@ -353,7 +353,7 @@ TEST(LegacyModel, ConstantChunksUseSymbolicComposition) {
   emit_design_cert(d, c, verified);
   EXPECT_NE(legacy.str().find("LegacyCertWF.chunk_of_constants"), std::string::npos);
   EXPECT_EQ(legacy.str().find("by eval"), std::string::npos);
-  if (const char* destination = std::getenv("LEAN_LEGACY_OUTPUT")) {
+  if (const char* destination = std::getenv("LHD_LEAN_LEGACY_OUTPUT")) {
     for (const auto& [mode, text] : std::vector<std::pair<std::string, std::string>>{
              {  "legacy",   legacy.str()},
              {"verified", verified.str()}

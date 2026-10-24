@@ -17,7 +17,7 @@
 //
 // prove_equal runs only to confirm a vector mismatch (the failure message says
 // whether the prover agrees), plus once per run on one random literal-free
-// iteration. AEG_FUZZ_ITERS raises the iteration count, AEG_FUZZ_SEED fixes the
+// iteration. LHD_AEG_FUZZ_ITERS raises the iteration count, LHD_AEG_FUZZ_SEED fixes the
 // seed (the failure message prints both).
 #include <algorithm>
 #include <bit>
@@ -456,8 +456,8 @@ std::string proof_text(const std::shared_ptr<hhds::Graph>& ref, const std::share
 }
 
 TEST(AegDiff, RandomDagsClassicAndAegraphRefineTheOriginal) {
-  const uint64_t iters = env_u64("AEG_FUZZ_ITERS", 1000);
-  const uint64_t seed  = env_u64("AEG_FUZZ_SEED", 0x5eed0001);
+  const uint64_t iters = env_u64("LHD_AEG_FUZZ_ITERS", 1000);
+  const uint64_t seed  = env_u64("LHD_AEG_FUZZ_SEED", 0x5eed0001);
   std::mt19937_64 pick_rng(seed ^ 0x9e3779b97f4a7c15ULL);
   const uint64_t prove_iteration = pick_rng() % iters;
   bool           proved          = false;
@@ -466,8 +466,8 @@ TEST(AegDiff, RandomDagsClassicAndAegraphRefineTheOriginal) {
 
   for (uint64_t it = 0; it < iters; ++it) {
     const uint64_t dag_seed = seed + it * 0x10001ULL;
-    SCOPED_TRACE("AEG_FUZZ_SEED=" + std::to_string(seed) + " iteration=" + std::to_string(it)
-                 + " (AEG_FUZZ_ITERS=" + std::to_string(iters) + ")");
+    SCOPED_TRACE("LHD_AEG_FUZZ_SEED=" + std::to_string(seed) + " iteration=" + std::to_string(it)
+                 + " (LHD_AEG_FUZZ_ITERS=" + std::to_string(iters) + ")");
     hhds::GraphLibrary lib_orig, lib_classic, lib_aegraph;
     Dag                dag(dag_seed);
     dag.build(lib_orig, "fz");

@@ -8,6 +8,7 @@
 #include <cstdlib>
 
 #include "absl/container/flat_hash_set.h"
+#include "debug_env.hpp"
 
 namespace livehd::lec {
 
@@ -701,7 +702,7 @@ absl::flat_hash_map<std::string, Obs_plan> plan_observability(const Encoded& re,
     }
   };
 
-  const bool dbg = std::getenv("LEC_DUMP_OBS") != nullptr;
+  const bool dbg = livehd::debug::env<"LHD_LEC_DUMP_OBS">() != nullptr;
   if (dbg) {
     // Roots only: which cut bits each side's obligations read directly.
     for (int s = 0; s < 2; ++s) {

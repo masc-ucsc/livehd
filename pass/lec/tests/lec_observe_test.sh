@@ -12,7 +12,7 @@
 # one. This test pins both directions:
 #   1. DEAD bits that differ between the sides: the unbounded inductive engine
 #      PROVES (and says so), and the same run with the reduction disabled
-#      (LEC_OBS_OFF) does NOT -- the fixture really needs it.
+#      (LHD_LEC_OBS_OFF) does NOT -- the fixture really needs it.
 #   2. LIVE bits (observable only through another register, or through the
 #      register's own next state): the inductive engine alone must never
 #      PROVE a variant that drops them, and `auto` must REFUTE it.
@@ -126,7 +126,7 @@ reject_proven() {  # $1=label $2=line: anything but a PROVEN-full/-bounded(n) (o
 
 expect "dead bits prove under ind" "$(run dead_ref.prp dead_impl.prp ind)" \
   " PROVEN-full " "observability: 8 unobservable state bit"
-reject_proven "dead bits without the reduction (LEC_OBS_OFF)" "$(run dead_ref.prp dead_impl.prp ind LEC_OBS_OFF=1)"
+reject_proven "dead bits without the reduction (LHD_LEC_OBS_OFF)" "$(run dead_ref.prp dead_impl.prp ind LHD_LEC_OBS_OFF=1)"
 
 for v in live_self live_chain; do
   reject_proven "$v under ind" "$(run live_ref.prp $v.prp ind)"

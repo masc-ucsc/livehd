@@ -622,7 +622,7 @@ The option namespace matches the command path (`lhd pass abc`); after the
 
 The Liberty `.lib` handed to `read_lib` is **not** a `pass.abc` option: there is
 one Liberty spelling for the whole CLI, `--set synth.liberty=…` (empty resolves
-to `$HAGENT_TECH_DIR/sky130_fd_sc_hd__tt_025C_1v80.lib`), so `pass.abc`,
+to `$LHD_TECH_DIR/sky130_fd_sc_hd__tt_025C_1v80.lib`), so `pass.abc`,
 `pass.opentimer` and `lhd synth` all read the same file. The kernel plumbs it
 into pass.abc's internal `library` label; `--set pass.abc.library=…` is refused.
 Automatic ware selection has no global flag either — it is per family

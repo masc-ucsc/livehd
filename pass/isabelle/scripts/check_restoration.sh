@@ -18,7 +18,7 @@ printf 'ISABELLE_JAVA_SYSTEM_OPTIONS="$ISABELLE_JAVA_SYSTEM_OPTIONS -Djava.io.tm
 
 # A new directory ensures a missing test cannot reuse old generated theories.
 cases="$(mktemp -d "$OUT/cases.XXXXXXXXXX")"
-ISABELLE_EMISSION_FIXTURES="$cases" "$TEST_BIN" > "$OUT/generate.log" 2>&1
+LHD_ISABELLE_EMISSION_FIXTURES="$cases" "$TEST_BIN" > "$OUT/generate.log" 2>&1
 python3 "$ROOT/pass/isabelle/scripts/bakeoff_gen.py" eqns 32 > "$cases/Bake.thy"
 cat > "$cases/ROOT" <<'ROOT_EOF'
 session IsabelleRestoration = "LGraph-Translation-Correctness" +

@@ -21,11 +21,12 @@
 #include "absl/container/flat_hash_map.h"
 #include "absl/container/flat_hash_set.h"
 #include "absl/strings/str_join.h"
-#include "fold_body.hpp"
-#include "pass_aegraph.hpp"
+#include "cone_abc.hpp"
+#include "debug_env.hpp"
 #include "diag.hpp"
 #include "encode.hpp"
 #include "file_utils.hpp"
+#include "fold_body.hpp"
 #include "formal_blocks.hpp"
 #include "formal_cache.hpp"
 #include "formal_salt.hpp"
@@ -40,9 +41,9 @@
 #include "node_util.hpp"
 #include "occurrence_materialize.hpp"
 #include "pass.hpp"
+#include "pass_aegraph.hpp"
 #include "pass_single_edge.hpp"
 #include "proof_prep.hpp"
-#include "cone_abc.hpp"
 #include "query.hpp"
 #include "semdiff.hpp"
 #include "solve_stats.hpp"
@@ -337,7 +338,7 @@ public:
 
   explicit Lec_input_observability(std::chrono::steady_clock::time_point deadline) : deadline_(deadline) {
     // Test hook: a forward budget of 0 sends every input to the backward pass.
-    if (const char* b = std::getenv("LIVEHD_LEC_IFACE_FORWARD_BUDGET"); b != nullptr) {
+    if (const char* b = livehd::debug::env<"LHD_LEC_IFACE_FORWARD_BUDGET">(); b != nullptr) {
       forward_budget_ = std::strtoull(b, nullptr, 10);
     }
   }
@@ -2246,7 +2247,7 @@ static livehd::lec::Query_result lec_hierarchical(Result& res, Eprp_var& ref_var
     return forest;
   };
   auto dump_forest = [](const char* tag, const livehd::lec::Clock_forest& f) {
-    if (std::getenv("LEC_PHASE_PLAN") == nullptr) {
+    if (livehd::debug::env<"LHD_LEC_PHASE_PLAN">() == nullptr) {
       return;
     }
     for (const auto& [d, row] : f.port_root) {
@@ -5422,7 +5423,7 @@ void lec_command(Options& opts, Result& res) {
   // Checked before any solve or cache lookup; widths never matter.
   {
     auto iface_deadline = run_deadline;
-    if (const char* ms = std::getenv("LIVEHD_LEC_IFACE_DEADLINE_MS"); ms != nullptr) {  // test hook
+    if (const char* ms = livehd::debug::env<"LHD_LEC_IFACE_DEADLINE_MS">(); ms != nullptr) {  // test hook
       iface_deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(std::atoll(ms));
     }
     const auto iface = lec_top_interface(ref_g.get(), impl_g.get(), iface_deadline);
@@ -5821,7 +5822,7 @@ void lec_command(Options& opts, Result& res) {
         return;
       }
     }
-    if (std::getenv("LEC_DUMP_COLLAPSE") != nullptr) {
+    if (livehd::debug::env<"LHD_LEC_DUMP_COLLAPSE">() != nullptr) {
       for (auto* side : {ref_g.get(), impl_g.get()}) {
         // The same instances through the hierarchy view the encoder walks.
         for (auto hn : side->grouped_hierarchy().nodes()) {
@@ -6677,7 +6678,7 @@ void lec_command(Options& opts, Result& res) {
         break;
       case livehd::lec::Outcome::Timeout_memory:
         msg  = std::format("'{}' ran out of memory before a verdict; equivalence is neither proved nor refuted", name);
-        hint = "run on a host with more memory (or a larger LIVEHD_MEMORY_BUDGET_MB), or decompose the check";
+        hint = "run on a host with more memory (or a larger LHD_MEMORY_BUDGET_MB), or decompose the check";
         break;
       case livehd::lec::Outcome::Refuted_cex:
         msg  = std::format("'{}' is not equivalent ({} vs {})", name, opts.impl_path, opts.ref_path);
@@ -9376,7 +9377,7 @@ void formal_verify_command(Options& opts, Result& res) {
       break;
     case livehd::lec::Outcome::Timeout_memory:
       msg  = std::format("'{}' ran out of memory before every obligation was decided", name);
-      hint = std::format("{}. Run on a host with more memory (or a larger LIVEHD_MEMORY_BUDGET_MB), or lower formal.bound",
+      hint = std::format("{}. Run on a host with more memory (or a larger LHD_MEMORY_BUDGET_MB), or lower formal.bound",
                          r.detail);
       break;
     case livehd::lec::Outcome::Refuted_cex:

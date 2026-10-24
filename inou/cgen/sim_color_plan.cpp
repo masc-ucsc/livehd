@@ -29,6 +29,7 @@
 #include "absl/container/flat_hash_set.h"
 #include "absl/container/node_hash_map.h"
 #include "absl/container/node_hash_set.h"
+#include "debug_env.hpp"
 #include "file_output.hpp"
 #include "hash_util.hpp"
 #include "latch_contract.hpp"
@@ -1496,7 +1497,7 @@ Color_plan Color_plan::discover(hhds::Graph* root, bool include_observations, bo
   while (!pending.empty()) {
     const size_t i = pending.front();
     pending.pop();
-    if (std::getenv("LHD_SIM_PLAN_DEBUG") != nullptr && plan.sites_[i].kind == Site_kind::loop_control) {
+    if (livehd::debug::env<"LHD_SIM_PLAN_DEBUG">() != nullptr && plan.sites_[i].kind == Site_kind::loop_control) {
       for (const auto& edge_sink : plan.sites_[i].node.inp_sorted_pins()) {
         for (const auto& edge_drv : edge_sink.get_driver_pins()) {
           const auto drv = edge_drv.get_master_node();
@@ -1538,7 +1539,7 @@ Color_plan Color_plan::discover(hhds::Graph* root, bool include_observations, bo
     plan.sites_[i].live = true;
   }
   plan.summary_.live_sites = live.size();
-  if (std::getenv("LHD_SIM_PLAN_DEBUG") != nullptr) {
+  if (livehd::debug::env<"LHD_SIM_PLAN_DEBUG">() != nullptr) {
     for (size_t i = 0; i < plan.sites_.size(); ++i) {
       const auto& st = plan.sites_[i];
       std::print(stderr,
@@ -2439,7 +2440,7 @@ Color_plan Color_plan::discover(hhds::Graph* root, bool include_observations, bo
     // output-slice summary and bind the exact leaf value.
     const auto& consumer_base          = plan.sites_[plan.version_sites_[consumer].base_site];
     const auto  consumer_op            = gu::type_op_of(consumer_base.node);
-    const bool  slice_debug            = std::getenv("LIVEHD_SIM_COLOR_DEBUG") != nullptr;
+    const bool  slice_debug            = livehd::debug::env<"LHD_SIM_COLOR_DEBUG">() != nullptr;
     uint32_t    output_boundary_width  = 0;
     bool        output_boundary_unsign = gu::is_unsign(use_driver);
     if (consumer_op == Ntype_op::Get_mask && use_sink.get_port_id() == Ntype::get_sink_pid(Ntype_op::Get_mask, "a")) {
@@ -4232,6 +4233,105 @@ Color_plan Color_plan::discover(hhds::Graph* root, bool include_observations, bo
     }
   }
 
+  // Clock-gated cones. A flop clocked by a plain Clock_cell commits only while the cell's sampled enable is high, so a version that
+  // feeds NOTHING but such flops (all of one cell) is dead while the gate is closed: an emitter may skip its whole color and keep
+  // the activation pending. `gate_owner` records the cell's version; the cell's version is ordered before every owned one (the
+  // emitter reads the cell's activation slot when it decides to run the color), and coarsening never mixes owners (below).
+  {
+    const size_t nversions = plan.version_sites_.size();
+    std::vector<std::vector<size_t>> consumers(nversions), producers(nversions);
+    std::vector<std::vector<size_t>> clock_uses(nversions);  // value uses arriving on a flop's clock pin
+    std::vector<char>                pinned(nversions, 0);
+    const auto                       flop_clock_sink = Ntype::get_sink_pid(Ntype_op::Flop, "clock_pin");
+    for (const auto& use : plan.value_uses_) {
+      if (use.top_input || use.producer_version == Color_plan::invalid_index || use.consumer_version == Color_plan::invalid_index
+          || use.producer_version >= nversions || use.consumer_version >= nversions) {
+        continue;
+      }
+      consumers[use.producer_version].push_back(use.consumer_version);
+      producers[use.consumer_version].push_back(use.producer_version);
+      if (use.consumer_port == flop_clock_sink) {
+        clock_uses[use.consumer_version].push_back(use.producer_version);
+      }
+    }
+    for (const auto& output : output_uses) {
+      if (output.producer != Color_plan::invalid_index && output.producer < nversions) {
+        pinned[output.producer] = 1;
+      }
+    }
+    for (const auto& input : input_uses) {
+      if (input.producer != Color_plan::invalid_index && input.producer < nversions) {
+        pinned[input.producer] = 1;
+      }
+    }
+    const auto plain_cell = [&](const hhds::Occurrence_node& node) {
+      const auto base   = node.base_node();
+      const auto invert = gu::get_driver_of_sink_name(base, "invert");
+      const auto divide = gu::get_driver_of_sink_name(base, "div");
+      return (invert.is_invalid() || invert.is_known_false())
+             && (divide.is_invalid() || (divide.is_const() && gu::const_of(divide).is_just_i64() && gu::const_of(divide).to_just_i64() == 1));
+    };
+    const auto is_rise_only = [](const Version_site& ver) {
+      return ver.slot == Execution_slot::pre_rise_eval && ver.version == State_version::pre_rise;
+    };
+    std::vector<size_t> remaining(nversions, 0);
+    std::vector<size_t> work;
+    for (size_t v = 0; v < nversions; ++v) {
+      remaining[v] = consumers[v].size();
+      if (remaining[v] == 0) {
+        work.push_back(v);
+      }
+      const auto& version = plan.version_sites_[v];
+      const auto& site    = plan.sites_[version.base_site];
+      if (version.role != Version_role::state_update || gu::type_op_of(site.node) != Ntype_op::Flop || !is_rise_only(version)
+          || clock_uses[v].size() != 1) {
+        continue;
+      }
+      const size_t cell = clock_uses[v].front();
+      if (!is_rise_only(plan.version_sites_[cell])
+          || gu::type_op_of(plan.sites_[plan.version_sites_[cell].base_site].node) != Ntype_op::Clock_cell
+          || !plain_cell(plan.sites_[plan.version_sites_[cell].base_site].node)) {
+        continue;
+      }
+      // An asynchronous reset lands whether or not the gate lets an edge through; a negative edge or a divided clock has other timing.
+      const auto base     = site.node.base_node();
+      const auto async    = gu::get_driver_of_sink_name(base, "async");
+      const auto posclk   = gu::get_driver_of_sink_name(base, "posclk");
+      if ((!async.is_invalid() && !async.is_known_false()) || (!posclk.is_invalid() && !posclk.is_known_true())) {
+        continue;
+      }
+      plan.version_sites_[v].gate_owner = cell;
+    }
+    // Reverse Kahn: a version is owned once every one of its consumers is owned by the same cell.
+    while (!work.empty()) {
+      const size_t v = work.back();
+      work.pop_back();
+      auto&        version = plan.version_sites_[v];
+      const auto&  site    = plan.sites_[version.base_site];
+      if (version.gate_owner == Color_plan::invalid_index && version.role == Version_role::data && site.kind == Site_kind::data
+          && is_rise_only(version) && !version.latch_settle && !version.latch_input && !pinned[v] && !consumers[v].empty()) {
+        const auto op = gu::type_op_of(site.node);
+        if (op != Ntype_op::Clock_cell && op != Ntype_op::Memory && op != Ntype_op::Sub && op != Ntype_op::Latch) {
+          const size_t owner = plan.version_sites_[consumers[v].front()].gate_owner;
+          if (owner != Color_plan::invalid_index
+              && std::ranges::all_of(consumers[v], [&](size_t c) { return plan.version_sites_[c].gate_owner == owner; })) {
+            version.gate_owner = owner;
+          }
+        }
+      }
+      for (const size_t producer : producers[v]) {
+        if (--remaining[producer] == 0) {
+          work.push_back(producer);
+        }
+      }
+    }
+    for (size_t v = 0; v < nversions; ++v) {
+      if (plan.version_sites_[v].gate_owner != Color_plan::invalid_index) {
+        add_version_edge(plan.version_sites_[v].gate_owner, v, 0);
+      }
+    }
+  }
+
   // Validate and order the fine-color DAG. Slot order is a hard legality
   // constraint even when two colors have no explicit value edge; the later
   // Schedule construction uses one barrier/control boundary between slots
@@ -5139,6 +5239,7 @@ Color_plan Color_plan::discover(hhds::Graph* root, bool include_observations, bo
     const auto lhs_version = members[lhs].front();
     const auto rhs_version = members[rhs].front();
     return plan.version_sites_[lhs_version].control_owner != plan.version_sites_[rhs_version].control_owner
+           || plan.version_sites_[lhs_version].gate_owner != plan.version_sites_[rhs_version].gate_owner
            || runtime_owner(lhs_version) != runtime_owner(rhs_version)
            || site_module_owner[plan.version_sites_[lhs_version].base_site]
                   != site_module_owner[plan.version_sites_[rhs_version].base_site];

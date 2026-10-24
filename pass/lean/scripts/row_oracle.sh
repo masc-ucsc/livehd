@@ -27,7 +27,7 @@ FIXTURE="$OUT/RowOracle.lean"
 
 rm -f -- "$FIXTURE"
 echo "[row-oracle] generating $FIXTURE"
-LEAN_ROW_FIXTURE="$FIXTURE" "$TEST_BIN" \
+LHD_LEAN_ROW_FIXTURE="$FIXTURE" "$TEST_BIN" \
   --gtest_filter='DesignScanClocks.PerReadRowForwardingValueOracle' > "$OUT/generate.log" 2>&1
 [[ -s "$FIXTURE" ]] || { echo "[row-oracle] FAIL: no fixture; see $OUT/generate.log" >&2; exit 1; }
 

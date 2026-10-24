@@ -140,7 +140,7 @@ assert result['lec']['verdict'] == 'proven-bounded' and result['lec']['bounded']
 
 # The parent enforces timeout even when the solver has not started sampling.
 # Existing worker-stall hook makes this independent of CPU speed or design cost.
-stall_env = dict(os.environ, LIVEHD_LEC_RACER_STALL_S='4', LIVEHD_LEC_RACER_STALL_ONLY='1')
+stall_env = dict(os.environ, LHD_LEC_RACER_STALL_S='4', LHD_LEC_RACER_STALL_ONLY='1')
 proc, result = run('test', extra=['--set', 'formal.timeout=1', '--set', 'formal.min_timeout=10',
                                 '--set', 'formal.hard_timeout_mult=0'],
                    env=stall_env, expect=0, name='sample-timeout')

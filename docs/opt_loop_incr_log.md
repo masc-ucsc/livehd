@@ -156,7 +156,7 @@ MATRIX_CONFIG_ID=<lever-name> ./bench/matrix.sh xs_renametable compile synth sim
 
 Each `matrix.sh` run produces one row per (phase, mode), stamps it into
 `bench/ledger.jsonl`, and re-renders `docs/current_opt_loop_incr.html` after
-**every** row (H6b). Pin `PDK_VERSION` **and** `HAGENT_TECH_DIR` together before
+**every** row (H6b). Pin `PDK_VERSION` **and** `LHD_TECH_DIR` together before
 you start (T14) or the synth columns will be stamped with a library they did not
 run against.
 
@@ -987,7 +987,7 @@ incremental scenario:
   this most — it is the I3 guardrail, and a guardrail with an unmeasured noise
   floor cannot reject anything.
 - **PDK resolution** comes from `opt_loop_synth` §3 (`ciel`-driven, never a
-  pre-exported `HAGENT_TECH_DIR`). Synthesis rows here are affected by it, so
+  pre-exported `LHD_TECH_DIR`). Synthesis rows here are affected by it, so
   stamp `pdk_version` in every row; adopt that resolution rather than
   reimplementing it.
 
@@ -1531,7 +1531,7 @@ The work, in order:
 > needed and would break this ring without touching the splitter.
 
 > **So the next step is `split_selfref` rule COVERAGE, not the planner.** Run
-> `LIVEHD_SIM_SPLIT_DEBUG=1` (output lands in `<workdir>/logs/*pass_cprop*.log`,
+> `LHD_SIM_SPLIT_DEBUG=1` (output lands in `<workdir>/logs/*pass_cprop*.log`,
 > not the terminal) and attack the operand shapes that refuse; on `Rob` the
 > refusals propagate through `And` (174,816) and `Or` (86,037), whose descent
 > rules have disjointness preconditions that are failing.
@@ -2351,10 +2351,10 @@ Seven of its nine bazel scenarios pass; the two `*_synth` ones fail only on T15.
   COLD run is the one-line diagnostic.
 - **T14 — the two harnesses resolve the PDK differently, so they can disagree
   about which library a number came from.** `bench/common.sh`'s
-  `require_tech_dir` deliberately ignores an inherited `HAGENT_TECH_DIR` and
+  `require_tech_dir` deliberately ignores an inherited `LHD_TECH_DIR` and
   takes whatever `ciel` currently has enabled, so **every `bazel test
   //bench:*_synth` runs against `ciel current`**. `bench/matrix.sh` honours an
-  explicit pin, but only when `PDK_VERSION` **and** `HAGENT_TECH_DIR` are
+  explicit pin, but only when `PDK_VERSION` **and** `LHD_TECH_DIR` are
   exported *together* — set one alone and it silently re-resolves through ciel.
   A session that inherits `e3262351…` from a shell profile while `ciel current`
   says `e8daeda7…` therefore gets bazel benches on one library and a matrix on

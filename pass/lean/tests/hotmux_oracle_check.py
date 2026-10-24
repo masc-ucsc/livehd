@@ -28,11 +28,11 @@ def main():
         test_bin.write_text('''#!/bin/bash
 set -eu
 [[ "$MODE" == missing ]] && exit 0
-printf 'import LeanSemanticPrimitives.Compiler.CompileDesign\\n' > "$LEAN_HOTMUX_FIXTURE"
+printf 'import LeanSemanticPrimitives.Compiler.CompileDesign\\n' > "$LHD_LEAN_HOTMUX_FIXTURE"
 [[ "$MODE" == empty ]] && exit 0
-printf 'example : True := by trivial\\n' >> "$LEAN_HOTMUX_FIXTURE"
+printf 'example : True := by trivial\\n' >> "$LHD_LEAN_HOTMUX_FIXTURE"
 [[ "$MODE" == unsigned_only ]] && exit 0
-cp "$LEAN_HOTMUX_FIXTURE" "$LEAN_HOTMUX_SIGNED_FIXTURE"
+cp "$LHD_LEAN_HOTMUX_FIXTURE" "$LHD_LEAN_HOTMUX_SIGNED_FIXTURE"
 ''')
         test_bin.chmod(0o755)
         lake = project / 'lake'

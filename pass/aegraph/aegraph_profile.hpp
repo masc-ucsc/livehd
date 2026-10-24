@@ -19,6 +19,8 @@
 #include <cstdlib>
 #include <string_view>
 
+#include "debug_env.hpp"
+
 namespace livehd::aegraph_profile {
 enum Phase { prepass, build, rules, extract, elaborate, post, count };
 inline constexpr std::array<const char*, count> names{"prepass", "build", "rules", "extract", "elaborate", "post"};
@@ -53,7 +55,7 @@ class Invocation {
   Profile          profile;
   Profile*         previous = active;
   std::string_view name;
-  bool             enabled = std::getenv("LHD_AEGRAPH_PROFILE") != nullptr;
+  bool             enabled = livehd::debug::env<"LHD_AEGRAPH_PROFILE">() != nullptr;
 
 public:
   explicit Invocation(std::string_view n) : name(n) {

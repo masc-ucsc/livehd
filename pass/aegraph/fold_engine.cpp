@@ -7,6 +7,8 @@
 #include <map>
 #include <mutex>
 
+#include "debug_env.hpp"
+
 namespace livehd {
 
 namespace {
@@ -24,7 +26,7 @@ Counters& counters() {
 }
 
 bool log_enabled() {
-  static const bool on = std::getenv("LHD_FOLD_BODY_LOG") != nullptr;
+  static const bool on = livehd::debug::env<"LHD_FOLD_BODY_LOG">() != nullptr;
   return on;
 }
 }  // namespace

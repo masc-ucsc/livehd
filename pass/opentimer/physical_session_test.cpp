@@ -357,6 +357,29 @@ TEST_F(PhysicalSession, InvalidCandidateDoesNotPoisonTheRetainedNetlist) {
 }
 }  // namespace
 namespace {
+TEST_F(PhysicalSession, WhatifIndexRetainsItsRcSnapshotAcrossEvaluations) {
+  Circuit                             circuit(false, false);
+  livehd::opentimer::Physical_session session(options);
+  session.evaluate(circuit.graph, circuit.rc);
+  auto&      whatif = session.whatif();
+  const auto mark   = whatif.mark();
+  whatif.set_net(circuit.rc->nets.front());
+  whatif.rollback(mark);
+  std::weak_ptr<const livehd::physical::Parasitics> indexed = circuit.rc;
+  circuit.rc                                                = std::make_shared<livehd::physical::Parasitics>(*circuit.rc);
+  session.evaluate(circuit.graph, circuit.rc);
+  // The cached net pointers must stay valid even when a checkpoint does no
+  // what-if work. An allocator may reuse a released snapshot's address.
+  EXPECT_FALSE(indexed.expired());
+  whatif.set_net(circuit.rc->nets.front());
+  EXPECT_TRUE(indexed.expired());
+  whatif.rollback(mark);
+  livehd::opentimer::Physical_session fresh(options);
+  const auto                          expected = fresh.evaluate(circuit.graph, circuit.rc);
+  ASSERT_TRUE(expected.wns);
+  EXPECT_NEAR(whatif.wns(), *expected.wns * expected.time_unit_ps, 1e-3);
+}
+
 TEST_F(PhysicalSession, WhatifResizeBufferAndRollbackMatchFreshTiming) {
   Circuit                             initial(false, false), strong(true, false), buffered(false, true);
   livehd::opentimer::Physical_session session(options);

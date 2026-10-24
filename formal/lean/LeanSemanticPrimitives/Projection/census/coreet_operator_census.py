@@ -21,7 +21,7 @@ INPUTS
 
   --generated   directory of generated CORE-ET models, one subdir per module,
                 each holding `<mod>/lean/<mod>_Lgraph.lean`
-                (default: $LIVEHD_NEW_ROOT/generated/core-et, else ../livehd-new next to this repo)
+                (default: $LHD_NEW_ROOT/generated/core-et, else ../livehd-new next to this repo)
   <generated>/coreet_census.tsv
                 tab-separated, with a `module` and a `verdict` column.
                 FILTER: verdict == "READY".
@@ -129,7 +129,7 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument('--generated',
-                    default=os.path.join(os.environ.get('LIVEHD_NEW_ROOT', os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), *(['..'] * 6), 'livehd-new'))), 'generated/core-et'))
+                    default=os.path.join(os.environ.get('LHD_NEW_ROOT', os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), *(['..'] * 6), 'livehd-new'))), 'generated/core-et'))
     ap.add_argument('--interpreter',
                     default=os.path.join(here, '..', 'HardwareInterpreter.lean'))
     a = ap.parse_args()

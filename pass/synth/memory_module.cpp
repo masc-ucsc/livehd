@@ -16,6 +16,7 @@
 #include "attr_carry.hpp"
 #include "bit_facts.hpp"
 #include "bus_name.hpp"
+#include "debug_env.hpp"
 #include "diag.hpp"
 #include "file_utils.hpp"
 #include "fold_body.hpp"
@@ -40,7 +41,7 @@ struct Scratch {
     path = p;
   }
   ~Scratch() {
-    if (std::getenv("LHD_MEMORY_KEEP_SCRATCH") != nullptr) {
+    if (livehd::debug::env<"LHD_MEMORY_KEEP_SCRATCH">() != nullptr) {
       return;  // debugging: keep the generated RTL and yosys script for inspection
     }
     std::error_code ec;
@@ -52,7 +53,7 @@ struct Scratch {
 // layouts. Use the same roots as inou.yosys's bundled-script resolver.
 fs::path memory_rtl_dir() {
   std::vector<fs::path> roots{fs::current_path()};
-  for (auto env : {"LIVEHD_SOURCE_ROOT", "BUILD_WORKSPACE_DIRECTORY", "RUNFILES_DIR", "TEST_SRCDIR"}) {
+  for (auto env : {"LHD_SOURCE_ROOT", "BUILD_WORKSPACE_DIRECTORY", "RUNFILES_DIR", "TEST_SRCDIR"}) {
     if (const auto* p = std::getenv(env); p && *p) {
       roots.emplace_back(p);
       // livehd's own repo directory inside the runfiles tree. `_main` is the

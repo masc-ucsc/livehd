@@ -28,7 +28,7 @@ FIXTURE="$OUT/ResetOracle.lean"
 
 rm -f -- "$FIXTURE"
 echo "[reset-oracle] generating $FIXTURE"
-LEAN_RESET_FIXTURE="$FIXTURE" "$TEST_BIN" \
+LHD_LEAN_RESET_FIXTURE="$FIXTURE" "$TEST_BIN" \
   --gtest_filter='DesignScanClocks.QuietClockResetValueOracle' > "$OUT/generate.log" 2>&1
 [[ -s "$FIXTURE" ]] || { echo "[reset-oracle] FAIL: no fixture; see $OUT/generate.log" >&2; exit 1; }
 

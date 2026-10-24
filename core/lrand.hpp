@@ -14,6 +14,8 @@
 #include <limits>
 #include <sstream>
 #include <type_traits>
+
+#include "debug_env.hpp"
 // #include <random>
 #include <utility>
 // #include <stdlib.h>
@@ -37,7 +39,7 @@ public:
       return seed.uniform<size_t>();
     }
 
-    const char* lbench_seed = getenv("LBENCH_SEED");
+    const char* lbench_seed = livehd::debug::env<"LHD_LBENCH_SEED">();
     if (lbench_seed) {
       seed.seed(std::atoi(lbench_seed));
     }
