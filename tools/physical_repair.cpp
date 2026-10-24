@@ -5,6 +5,7 @@
 #include <chrono>
 #include <cmath>
 #include <filesystem>
+#include <format>
 #include <fstream>
 #include <iomanip>
 #include <iostream>
@@ -365,6 +366,9 @@ int main(int argc, char** argv) {
       throw std::invalid_argument("gp_ab requires final cell_place");
     }
     boolean_option("vanished_memory", options.vanished_memory);
+    number_option("vanished_memory_initial_scale", options.vanished_memory_initial_scale);
+    integer_option("vanished_memory_growth_iterations", options.vanished_memory_growth_iterations);
+    integer_option("vanished_memory_start", options.vanished_memory_start);
     number_option("vanished_memory_local_floor", options.vanished_memory_local_floor);
     if (options.vanished_memory_local_floor != 0 && !options.vanished_memory) {
       throw std::invalid_argument("vanished_memory_local_floor requires vanished_memory");
@@ -928,7 +932,68 @@ int main(int argc, char** argv) {
       if (options.gp_resize) {
         options.fp_evaluate = raw_evaluate;
       }
-      auto state = pl::place(*source, placed_library, options);
+      int trace_interval = 0, stop_iteration = 0;
+      integer_option("gp_trace_interval", trace_interval);
+      integer_option("gp_stop_iteration", stop_iteration);
+      if (trace_interval < 0 || stop_iteration < 0 || stop_iteration > options.iterations
+          || (stop_iteration && (!trace_interval || stop_iteration % trace_interval))
+          || ((trace_interval || stop_iteration) && floorplan_mode)) {
+        throw std::invalid_argument(
+            "GP trace requires cell_place, nonnegative interval and a stop divisible by the interval within the GP budget");
+      }
+      struct Trace_stop {};
+      std::unique_ptr<livehd::opentimer::Physical_session> trace_session;
+      unsigned                                             trace_serial = 0;
+      if (trace_interval) {
+        trace_session = std::make_unique<livehd::opentimer::Physical_session>(timing_options(options.liberty, sdc, top));
+        options.gp_observer_interval = trace_interval;
+        options.min_iterations       = std::max(options.min_iterations, stop_iteration);
+        options.gp_observer          = [&](const pl::Result& snapshot, const pl::Gp_observation& sample) {
+          const auto begin  = std::chrono::steady_clock::now();
+          const auto timing = evaluate_timing(snapshot, *trace_session, trace_serial, &tech, root + "/observation_profile.jsonl");
+          const auto value  = [](std::optional<double> v, double scale) {
+            return v && std::isfinite(*v) ? std::format("{}", *v * scale) : std::string("null");
+          };
+          std::ofstream out(root + "/gp_observations.jsonl", std::ios::app);
+          out << std::format(
+              R"({{"iteration":{},"wns_ns":{},"tns_us":{},"hpwl_um":{},"macro_scale":{},"route_overflow":{},"opaque_route_overflow":{},"route_peak":{},"opaque_route_peak":{},"unroutable_nets":{},"opaque_unroutable_nets":{},"blocked_pins":{},"opaque_blocked_pins":{},"timing_seconds":{}}})",
+              sample.iteration,
+              value(timing.wns, timing.time_unit_ps / 1000),
+              value(timing.tns, timing.time_unit_ps / 1e6),
+              sample.hpwl_um,
+              sample.macro_scale,
+              sample.route_overflow,
+              sample.opaque_route_overflow,
+              sample.route_peak,
+              sample.opaque_route_peak,
+              sample.unroutable_nets,
+              sample.opaque_unroutable_nets,
+              sample.blocked_pins,
+              sample.opaque_blocked_pins,
+              std::chrono::duration<double>(std::chrono::steady_clock::now() - begin).count())
+              << '\n';
+          out.close();
+          if (!out) {
+            throw std::runtime_error("cannot write GP observation");
+          }
+          if (sample.iteration == stop_iteration) {
+            // This DEF is an overlapping GP diagnostic, never a legal handoff.
+            ph::write_def(snapshot.floorplan, root + "/gp_stop.def");
+            throw Trace_stop{};
+          }
+        };
+      }
+      pl::Result state;
+      try {
+        state = pl::place(*source, placed_library, options);
+      } catch (const Trace_stop&) {
+        std::ofstream(root + "/gp_stop.json") << std::format(
+            R"({{"iteration":{},"samples":{},"legalized":false,"post_gp_repair":false}})",
+            stop_iteration,
+            trace_serial) << '\n';
+        return 0;
+      }
+
       options.restart_seed.reset();
       ph::write_def(state.floorplan, root + "/initial.def");
       const auto        placed = std::chrono::steady_clock::now();

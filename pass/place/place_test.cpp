@@ -4281,6 +4281,77 @@ TEST(Placement, BeforeLegalizeReceivesPhysicalHaloCoordinatesAndPreservesAnchors
   EXPECT_EQ(d.node_y[1], 1);
 }
 
+TEST(Placement, ObservationalGpSamplingPreservesPlacementAndTimingSchedule) {
+  hhds::GraphLibrary source, baseline_library, observed_library;
+  auto               graph   = tie_graph(source, false);
+  auto               options = plain_options();
+  options.liberty            = "inou/lefdef/tests/data/sky130hd.lib";
+  options.lefs               = {"inou/lefdef/tests/data/sky130hd.tlef", "inou/lefdef/tests/data/sky130hd.lef"};
+  options.output_dir         = std::string(std::getenv("TEST_TMPDIR")) + "/gp_observation_baseline";
+  options.iterations = options.min_iterations = 40;
+  options.bins                                = 4;
+  options.threads                             = 1;
+  options.final_timing_start                  = 20;
+  options.macro_timing_interval               = 10;
+  unsigned timing_calls                       = 0;
+  options.fp_evaluate                         = [&](const Result&) {
+    ++timing_calls;
+    Timing_feedback timing;
+    timing.time_unit_ps = 1;
+    timing.delay        = 10;
+    timing.wns          = -1;
+    timing.tns          = -2;
+    return timing;
+  };
+  const auto baseline           = place(*graph, baseline_library, options);
+  const auto baseline_calls     = timing_calls;
+  timing_calls                  = 0;
+  options.output_dir           += "_observed";
+  options.gp_observer_interval  = 10;
+  std::vector<int> iterations;
+  options.gp_observer = [&](const Result& snapshot, const Gp_observation& sample) {
+    iterations.push_back(sample.iteration);
+    EXPECT_TRUE(snapshot.parasitics);
+    EXPECT_FALSE(snapshot.floorplan.components.empty());
+    EXPECT_DOUBLE_EQ(sample.macro_scale, 1);
+    EXPECT_DOUBLE_EQ(sample.route_overflow, sample.opaque_route_overflow);
+    EXPECT_GE(sample.hpwl_um, 0);
+  };
+  const auto observed = place(*graph, observed_library, options);
+  EXPECT_EQ(iterations, (std::vector<int>{10, 20, 30, 40}));
+  EXPECT_EQ(timing_calls, baseline_calls);
+  EXPECT_EQ(observed.net_weights, baseline.net_weights);
+  ASSERT_EQ(observed.floorplan.components.size(), baseline.floorplan.components.size());
+  for (size_t i = 0; i < baseline.floorplan.components.size(); ++i) {
+    const auto& a = baseline.floorplan.components[i];
+    const auto& b = observed.floorplan.components[i];
+    EXPECT_EQ(a.name, b.name);
+    EXPECT_EQ(a.place.x, b.place.x);
+    EXPECT_EQ(a.place.y, b.place.y);
+    EXPECT_EQ(a.place.orientation, b.place.orientation);
+  }
+  options.macro_transparency.cycles = 1;
+  options.macro_transparency.warmup = 10;
+  options.macro_transparency.period = 10;
+  std::vector<double> scales;
+  options.gp_observer = [&](const Result&, const Gp_observation& sample) { scales.push_back(sample.macro_scale); };
+  hhds::GraphLibrary cycled_library;
+  place(*graph, cycled_library, options);
+  EXPECT_EQ(scales, (std::vector<double>{1, 0, 1, 1}));
+  options.macro_transparency = {};
+  struct Stop {};
+  iterations.clear();
+  options.gp_observer = [&](const Result&, const Gp_observation& sample) {
+    iterations.push_back(sample.iteration);
+    if (sample.iteration == 20) {
+      throw Stop{};
+    }
+  };
+  hhds::GraphLibrary stopped;
+  EXPECT_THROW(place(*graph, stopped, options), Stop);
+  EXPECT_EQ(iterations, (std::vector<int>{10, 20}));
+}
+
 TEST(Placement, FreshLegalizationTimingRanksPositiveSlackPaths) {
   hhds::GraphLibrary source, flat;
   auto               graph          = tie_graph(source, false);

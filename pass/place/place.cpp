@@ -518,7 +518,12 @@ std::string environment_key(const Options& o, const ph::Technology& tech) {
                   h);
   }
   if (o.vanished_memory) {
-    h = hash_text(std::format("vanished_memory_v3:{}", o.vanished_memory_local_floor), h);
+    h = hash_text(std::format("vanished_memory_v5:{}:{}:{}:{}",
+                              o.vanished_memory_local_floor,
+                              o.vanished_memory_initial_scale,
+                              o.vanished_memory_growth_iterations,
+                              o.vanished_memory_start),
+                  h);
   }
   if (o.macro_transparency.enabled()) {
     h = hash_text(std::format("macro-transparency:{}:{}:{}:{}",
@@ -3629,6 +3634,9 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
   }
   const auto& options = automatic_options ? *automatic_options : requested;
   validate_cell_halo(options);
+  if (options.gp_observer_interval < 0 || (options.gp_observer && options.gp_observer_interval == 0)) {
+    throw std::invalid_argument("GP observation requires a positive interval");
+  }
   if (options.final_timing_start < 0) {
     throw std::invalid_argument("final placement timing start must be nonnegative");
   }
@@ -6438,6 +6446,9 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
     if (final_timing && (options.macro_transparency.enabled() || options.vanished_memory)) {
       control.vanished_memory             = options.vanished_memory;
       control.vanished_memory_local_floor = options.vanished_memory_local_floor;
+      control.vanished_memory_initial_scale     = options.vanished_memory_initial_scale;
+      control.vanished_memory_growth_iterations = options.vanished_memory_growth_iterations;
+      control.vanished_memory_start             = options.vanished_memory_start;
       control.macro_transparency          = options.macro_transparency;
       const auto prior_observer           = control.observer;
       const int  prior_interval           = control.observer_interval;
@@ -6484,6 +6495,101 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
         if (!positions) {
           throw std::runtime_error("cannot write macro transparency positions");
         }
+      };
+    }
+    if (final_timing && options.gp_observer && control.max_iterations > 0) {
+      fs::create_directories(options.output_dir);
+      const auto prior          = control.observer;
+      const int  prior_interval = control.observer_interval;
+      control.observer_interval = std::gcd(prior_interval, options.gp_observer_interval);
+      int last_observed         = -1;
+      // Keep duplicate-suppression state alive with the callback itself.
+      control.observer          = [&, prior, prior_interval, last_observed](const dp::Design&  physical,
+                                                                   dp::PlacementStage stage,
+                                                                   int                iteration) mutable {
+        if (prior
+            && (stage != dp::PlacementStage::global_placement || iteration % prior_interval == 0
+                || iteration == control.max_iterations)) {
+          prior(physical, stage, iteration);
+        }
+        if (stage != dp::PlacementStage::global_placement || iteration <= 0 || iteration % options.gp_observer_interval
+            || iteration == last_observed) {
+          return;
+        }
+        last_observed = iteration;
+        auto view     = v;
+        view.design   = physical;
+        // Node handles share the private placement graph. Restore annotations
+        // even if the observer throws to terminate a diagnostic run.
+        struct Restore {
+          std::vector<std::pair<Node, std::optional<Ann_place>>> poses;
+          ~Restore() {
+            for (auto& [node, pose] : poses) {
+              if (pose) {
+                node.attr(attrs::place).set(*pose);
+              } else {
+                node.attr(attrs::place).del();
+              }
+            }
+          }
+        } restore;
+        restore.poses.reserve(view.cells.size());
+        for (size_t i = 0; i < view.cells.size(); ++i) {
+          auto&      cell = view.cells[i];
+          const auto attr = cell.node.attr(attrs::place);
+          restore.poses.emplace_back(cell.node, attr.has() ? std::optional<Ann_place>(attr.get()) : std::nullopt);
+          cell.place.x = std::llround(physical.node_x[i]);
+          cell.place.y = std::llround(physical.node_y[i]);
+          cell.node.attr(attrs::place).set(cell.place);
+        }
+        Result checkpoint;
+        checkpoint.prects      = v.prects;
+        checkpoint.graph       = result.graph;
+        checkpoint.fp_library  = result.fp_library;
+        checkpoint.net_weights = v.weights;
+        checkpoint.floorplan   = view.fp;
+        snapshot_nets(checkpoint.floorplan, view);
+        checkpoint.floorplan.components.clear();
+        auto rc_options       = options;
+        rc_options.full       = false;
+        checkpoint.parasitics = estimate_rc(view, tech, rc_options, checkpoint.pin_locations);
+        for (const auto& c : view.cells) {
+          checkpoint.floorplan.components.push_back({c.name, c.macro, c.place});
+          checkpoint.parasitics->cells.push_back(
+              {c.name, c.place.x, c.place.y, static_cast<unsigned>(c.place.orientation), c.macro, c.place.width, c.place.height});
+        }
+        for (const auto& t : view.fp.terminals) {
+          checkpoint.parasitics->terminals.push_back({t.name, t.x, t.y});
+        }
+        Gp_observation sample;
+        sample.iteration   = iteration;
+        sample.hpwl_um     = dp::hpwl(physical) / tech.dbu;
+        sample.macro_scale = options.vanished_memory ? dp::vanished_memory_scale(iteration,
+                                                                                 options.vanished_memory_initial_scale,
+                                                                                 options.vanished_memory_growth_iterations,
+                                                                                 options.vanished_memory_start)
+                                                              : (dp::macro_transparent(options.macro_transparency, iteration - 1) ? 0 : 1);
+        dp::RudyOptions routing;
+        routing.bins_x = routing.bins_y = control.auxiliary_bins ? control.auxiliary_bins : options.bins;
+        routing.horizontal_capacity     = control.route_capacity_h;
+        routing.vertical_capacity       = control.route_capacity_v;
+        routing.macro_blockages = routing.pin_access = true;
+        routing.model                                = dp::RudyModel::rsmt;
+        routing.degree                               = control.route.degree;
+        routing.accuracy                             = control.route.accuracy;
+        routing.initialize                           = control.route_initialize;
+        const auto opaque                            = dp::rudy(physical, routing);
+        routing.fixed_macro_scale                    = sample.macro_scale;
+        const auto effective                         = sample.macro_scale == 1 ? opaque : dp::rudy(physical, routing);
+        sample.route_overflow                        = effective.overflow;
+        sample.opaque_route_overflow                 = opaque.overflow;
+        sample.route_peak                            = effective.max_utilization;
+        sample.opaque_route_peak                     = opaque.max_utilization;
+        sample.unroutable_nets                       = effective.unroutable_nets;
+        sample.opaque_unroutable_nets                = opaque.unroutable_nets;
+        sample.blocked_pins                          = effective.blocked_pins;
+        sample.opaque_blocked_pins                   = opaque.blocked_pins;
+        options.gp_observer(checkpoint, sample);
       };
     }
     std::optional<Cell_jump> cell_jump;
@@ -8584,6 +8690,17 @@ Result place(hhds::Graph& source, hhds::GraphLibrary& library, const Options& re
   }
   if (!std::isfinite(requested.rc_pessimism) || requested.rc_pessimism < 1) {
     throw std::invalid_argument("rc_pessimism must be finite and at least 1");
+  }
+  if (!std::isfinite(requested.vanished_memory_initial_scale) || requested.vanished_memory_initial_scale < 0
+      || requested.vanished_memory_initial_scale > 1 || requested.vanished_memory_growth_iterations < 1
+      || requested.vanished_memory_growth_iterations > 1000000 || requested.vanished_memory_start < 0
+      || requested.vanished_memory_start > 1000000
+      || (!requested.vanished_memory
+          && (requested.vanished_memory_initial_scale != .6 || requested.vanished_memory_growth_iterations != 25
+              || requested.vanished_memory_start != 70))) {
+    throw std::invalid_argument(
+        "vanished_memory initial scale must be in [0,1], growth iterations in [1,1000000], start in [0,1000000]; nondefaults "
+        "require vanished_memory");
   }
   if (!std::isfinite(requested.vanished_memory_local_floor) || requested.vanished_memory_local_floor < 0
       || requested.vanished_memory_local_floor > requested.local_density_weight

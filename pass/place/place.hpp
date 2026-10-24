@@ -40,7 +40,20 @@ struct Stage_route {
   std::string                     model = "inherit";
   DreamPlace::native::RoutePolicy policy;
 };
+// Read-only diagnostic sample. Both routing measurements use the same pins;
+// opaque_* uses full physical macro bodies even during memory growth.
+struct Gp_observation {
+  int    iteration   = 0;
+  double macro_scale = 1, hpwl_um = 0;
+  double route_overflow = 0, opaque_route_overflow = 0;
+  double route_peak = 0, opaque_route_peak = 0;
+  int    unroutable_nets = 0, opaque_unroutable_nets = 0;
+  int    blocked_pins = 0, opaque_blocked_pins = 0;
+};
 struct Options {
+  // Diagnostic-only, synchronous observation; never supplies optimizer feedback.
+  std::function<void(const Result&, const Gp_observation&)> gp_observer;
+  int                                                       gp_observer_interval = 0;
   // Internal staged-flow freeze: restore user pin constraints before persistence.
   std::map<std::string, physical::Status>             stage_pin_status;
   std::function<bool(Placement_stage, const Result&)> after_stage;
@@ -87,6 +100,9 @@ struct Options {
   Cell_jump_options                     cell_jump;                // diagnostic: extend a supplied distance-one seed
   bool                                  vanished_memory = false;  // final-GP centered memory growth and local-pressure ramp
   double                                vanished_memory_local_floor = 0;
+  double                                vanished_memory_initial_scale     = .6;
+  int                                   vanished_memory_growth_iterations = 25;
+  int                                   vanished_memory_start             = 70;
   DreamPlace::native::GpSearch          gp_search;           // opt-in final-GP A/B trials
   DreamPlace::native::MacroTransparency macro_transparency;  // diagnostic final-GP barrier schedule
   Terminal_legalize_options             terminal_legalize_options;

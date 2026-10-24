@@ -1799,28 +1799,29 @@ coordinates, in DBU and node-map order. Macro opacity affects optimization only;
 reported raw physical overflow and final legality use the original fixed geometry.
 
 The alternative diagnostic `vanished_memory=true` (default false) starts final
-GP with fixed macro/mask bodies absent through iteration 100. At iteration 101,
-the exclusion rectangle is 1% of the original width and height, centered on the
-original body; each dimension grows by one percentage point per iteration until
-full size at 200. Thus iteration 110 has 10% width and height (1% area). Physical
-macro positions, sizes, pin offsets and connectivity never change. Global and
-local density capacity, explicit overlap pressure and routing obstacles use the
-same centered footprint. Filler charge tracks its available area without
-changing filler count or size. Routing is refreshed at every growth step when
-the usual density gate permits it.
+GP with fixed macro/mask exclusion rectangles at 60% of their original width
+and height (36% area), centered on the original bodies. Hold this size through
+iteration 70, then grow linearly over 25 steps: iteration 71 uses 61.6%,
+iteration 75 uses 68%, and iteration 95 reaches full size. Physical macro
+positions, sizes, pin offsets and connectivity never change. Global and local
+density capacity, explicit overlap pressure and routing obstacles use the same
+centered footprint. Filler charge tracks its available area without changing
+filler count or size. Routing is refreshed at every growth step when the usual
+density gate permits it.
 
-The configured `local_density_weight` is held through iteration 100, then drops
-by 0.05 per iteration starting at 101, clamped to
+The configured `local_density_weight` is held through iteration 70, then drops
+by 0.05 per iteration starting at 71, clamped to
 `vanished_memory_local_floor` (default 0). The floor must be finite, nonnegative
 and no larger than the starting local weight. A starting weight of 0.67 becomes
-0.62 at 101 and zero at 114 with the default floor; a floor of 0.1 is reached at
-112 and retains that local spreading force through the end of GP. This floor
+0.62 at 71 and zero at 84 with the default floor; a floor of 0.1 is reached at
+82 and retains that local spreading force through the end of GP. This floor
 does not disable virtual fillers: set `virtual_fillers=false` explicitly when
-testing without them. The budget must allow at least 20 settling steps
-after both memory growth and the local-weight ramp finish. This option cannot be combined with the alternating or always
-transparent schedules, movable macros, external continuation or topology
-replacement. It does not enable itself in `fp_plan`/`macro_plan`. Default local
-weight is unchanged; configure it explicitly for the experiment.
+testing without them. The budget must allow at least 20 settling steps after
+both memory growth and the local-weight ramp finish. This option cannot be
+combined with the alternating or always transparent schedules, movable macros,
+external continuation or topology replacement. It does not enable itself in
+`fp_plan`/`macro_plan`. Default local weight is unchanged; configure it explicitly
+for the experiment.
 
 Progress adds `macro_exclusion_scale` (linear extent, not area or fractional
 opacity) and the effective `local_density_weight`. Raw overflow retains the full
@@ -2682,3 +2683,35 @@ netlist handed back to OpenROAD. The native API carries an explicit
 GP buffer-repair traces include `rejection_reasons` so timing rejection can be
 distinguished from absence of legal placement sites. Counts of inserted buffers
 alone do not show whether repeaters can occupy SRAM channels.
+
+### Partial-size memory starts
+
+The diagnostic replay accepts `vanished_memory_initial_scale` (default 0.6),
+`vanished_memory_growth_iterations` (default 25), and `vanished_memory_start`
+(default 70) with `vanished_memory=true`. The initial scale is a fraction of
+both width and height, centered on the fixed memory; 0.6 therefore reserves
+36% of its full area. Pins and physical dimensions remain fixed. Hold this
+footprint through the configured start, then grow linearly to full size over
+the configured duration. The default reaches full size at iteration 95.
+Allow at least 20 fully opaque settling iterations afterward. Local-density
+decay begins on the same step as memory growth. Routing obstacles, density
+charge and filler accounting follow the same footprint. Vanished memory
+remains disabled unless requested.
+
+Diagnostic `physical_repair` replays accept `gp_trace_interval` (default 0,
+disabled) and `gp_stop_iteration` (default 0, no early stop). The trace uses a
+separate timing session and records WNS/TNS, HPWL and fresh RSMT-RUDY every
+interval in `gp_observations.jsonl`, without updating placement weights or
+triggering repair. Routing is measured with both the current memory footprint
+and full opaque physical macros. Clock/reset exclusions match normal timing.
+A positive stop must be a multiple of the trace interval within `iterations`;
+it exits at that GP step, before legalization or post-GP repair, writing
+`gp_stop.json` and an explicitly unlegalized `gp_stop.def`. Keeping `iterations`
+unchanged preserves the original late timing schedule during short traces.
+The diagnostic timing cost is recorded separately in `observation_profile.jsonl`.
+
+`vanished_memory_start` controls the held initial-memory phase (default 70).
+Growth and the existing local-density decay both begin on the following GP
+iteration; the footprint reaches full size at start + growth iterations.
+The setting is diagnostic and requires `vanished_memory` when nondefault.
+It does not move the independent final-placement timing warm-up.
