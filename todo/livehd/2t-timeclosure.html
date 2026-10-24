@@ -1,0 +1,533 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>TODO 2t-timeclosure — timing closure inside global placement</title>
+<link rel="stylesheet" href="../todo.css">
+</head>
+<body>
+<nav><span class="brand">LiveHD TODO</span><a href="../index.html">← All tasks</a></nav>
+<main>
+<h1><strong class="item-id">2t-timeclosure</strong> Timing closure inside global placement</h1>
+<p>Implement a single-threaded, non-ML timing loop in native DREAMPlace GP:
+optimize achievable period with a LiveHD timing proxy, model buffering and reserve
+its space early, then materialize buffers and resize cells in phase 7.</p>
+<p><span class="status">Implementation plan — reviewed 2026-10-24; not implemented</span>
+The design rationale and algorithm references are in
+<a href="timing_closure_plan.md">timing_closure_plan.md</a>.
+This page translates that proposal into ordered deliverables, integration points,
+review resolutions and acceptance checks. Constants are initial experiment values,
+not validated settings or approval to change existing defaults.</p>
+<p><strong>First delivery:</strong> complete <a href="#A">A</a>–<a href="#C">C</a>
+and the observation/replay part of <a href="#H">H</a>. Establish trustworthy proxy
+timing and gate decisions before enabling forces or graph edits. The core loop
+must work with resynthesis disabled; <a href="#K">K</a> adds it independently.</p>
+
+<h2>Depends on</h2>
+<ul>
+<li><a class="xref" href="3p-placement.html">3p-placement</a> supplies the native
+placement stages, mapped physical graph, technology RC, checkpoints and export.
+Reuse the implemented interfaces; this task does not wait for every outstanding
+placement experiment.</li>
+<li><a class="xref" href="3r-route.html">3r-route</a> supplies RSMT-RUDY and
+full-footprint congestion measurements. Its pending
+<a href="3r-route.html#timing-warmup">stability-based timing warm-up</a> is implemented
+by H for the new loop, avoiding a second independent gate controller.</li>
+<li><a class="xref" href="2p-plan.html#E">2p-plan E</a> and
+<a class="xref" href="3s-terminal-legalize.html">3s-terminal-legalize</a> supply
+legalization and timing protection for the phase-7 handoff. Existing legalizers
+remain usable; optional SAT alignment is not a prerequisite.</li>
+<li><a class="xref" href="2is-incsynth.html">2is-incsynth</a> is needed only for K:
+reuse color environments, mapped-body remapping and equivalence checks. Its
+once-per-run policy remains the legacy policy.</li>
+</ul>
+
+<h2>Subtasks — pending</h2>
+<ul class="subtasks">
+<li id="A"><strong>A — Freeze the integration contract and reference runs.</strong>
+<ul>
+<li>Capture current CNN and Eyeriss inputs, exact source/dependency revisions,
+Liberty/LEF/SDC/RC, macro and IO positions, options, thread count, netlist and timing
+coverage. Save current GP histories, final legal placement, repair counts and
+timing/runtime as the control. Use matched saved inputs for subsequent ablations.</li>
+<li>Introduce an explicitly opt-in policy, provisionally
+<code>synth.place.timeclosure=false</code>, with typed settings under that namespace.
+Keep existing timing, repair, resynthesis and iteration defaults unchanged when
+off. Reject conflicting explicit settings with a diagnostic; define which old
+checkpoint/outer-repair policies the new mode replaces so both cannot run.</li>
+<li>Scope the seven-phase controller to final-cell GP, including its existing
+vanished-memory exclusion ramp. Macro coordinates and physical sizes remain fixed;
+the ramp changes their GP exclusion model. FP/macro placement retain their current
+handoff. The timing proxy can be shared, but expanding this controller to movable
+macro GP requires a separate geometry/invalidation decision.</li>
+<li>Keep the new GP loop entirely in memory and on one CPU thread. OpenTimer and
+OpenSTA run only in offline comparison or after GP, never as a hidden per-sample,
+trial-scoring or fallback timer. Audit legacy callbacks and worker paths. Define
+unsupported timing coverage explicitly rather than assigning missing paths zero delay.</li>
+<li><strong>Exit:</strong> an option/phase compatibility table, reproducible control
+artifacts, and predeclared numerical, fidelity and QoR acceptance thresholds for M.
+An off-mode replay preserves current behavior. No threshold is selected after
+seeing which candidate wins.</li>
+</ul></li>
+
+<li id="B"><strong>B — Build the late-mode LGraph timing proxy.</strong>
+<ul>
+<li>Keep the mapped LGraph authoritative. Add instance-aware node/pin identities,
+DREAMPlace-to-LGraph maps, two-transition pin state, arc data and topology/model
+generation IDs. Current <code>core/timing_feedback.hpp</code> exposes scalar pin
+summaries; retain those consumers while adding an explicit rise/fall proxy result.</li>
+<li>Use HHDS ordered body/hierarchy traversals, with cell/net arc propagation
+inside each visit. The proposal's <code>forward()</code>/<code>backward()</code> are
+conceptual: current APIs use <code>nodes(hhds::Node_order::forward)</code> and
+<code>nodes(hhds::Node_order::reverse)</code>. Validate state cuts and reject
+unresolved combinational cycles; the iterator's cycle tail is not a timing DAG.
+Rebuild affected ordering/maps after topology edits, outside active walks.</li>
+<li>Implement late arrival, slew and backward required time separately for rise
+and fall, positive/negative/non-unate arcs, and worst-predecessor records.
+Use NLDM delay/transition tables with consistent Liberty units, thresholds,
+conditional arcs and pin loads. Cell delay is an approximation through its input
+slew/effective-load model, not an exact reference.</li>
+<li>Handle clock-to-Q, setup, ideal-clock offsets, constrained IOs, constants,
+clock/reset exclusions and characterized memory boundaries explicitly. Report
+native memories with zero internal delay as estimated. Establish the supported
+single-clock constraint subset first; multi-clock/generated-clock, latch borrowing
+and incomplete libraries cannot silently produce a certified Fmax.</li>
+<li><strong>Exit:</strong> analytic tiny circuits and offline OpenTimer comparisons
+with identical inputs, first at zero wire RC and then identical serialized RC.
+Compare common endpoints/transitions, loads, slew, required times and critical-set
+ranking, not just each engine's independently selected worst path.</li>
+</ul></li>
+
+<li id="C"><strong>C — Add continuous wire timing, calibration and incremental updates.</strong>
+<ul>
+<li>Reuse <code>technology_wire_rc()</code> and <code>steiner_rc()</code> for units,
+technology provenance and FLUTE construction. Unbuffered nets use the continuous
+driver-to-sink star; virtual-buffer nets use their frozen topology with positions
+following edge endpoints. Keep topology fixed between optimization checkpoints.</li>
+<li>At the first phase-3 checkpoint, calibrate against Steiner RC. Cache a net wire
+load ratio and per-sink compensation; scale <em>wire</em> capacitance only, then add
+the actual library pin capacitances. Handle zero-length/coincident pins without
+division by zero. Refresh on each 0.1 <em>density</em>-overflow decrease and on
+dirty events; route overflow is a different metric.</li>
+<li>Track individual pin displacement, membership, orientation/pin-offset changes,
+size/Vt/load changes, macro/halo geometry, RC policy and virtual-tree revisions.
+Bounding-box movement alone misses an internal sink moving within unchanged
+extrema. Cache geometric terms across resizing only when valid; recompute
+load-dependent compensation, driver timing and slew when their inputs change.</li>
+<li>Propagate arrival/slew dirtiness forward and required-time dirtiness backward.
+Rebasing changes required times even if no pin moved. Compare incremental updates
+with a fresh full evaluation, including insertion/removal and rollback. Measure
+both visited nodes and recomputed arcs: skipping arithmetic in a full traversal
+does not make its traversal cost sublinear.</li>
+<li>Version deterministic local/long/gap/over-macro/high-fanout classifications and
+their precedence. Fit wire-delay factors per technology/routing setup using
+disjoint routed designs; use a separate pessimistic capacitance model for absolute
+slew/max-cap checks. Refit when that setup changes.</li>
+<li><strong>Exit:</strong> full/incremental agreement, stable timing between
+calibrations, and held-out per-style ranking/near-critical-set results. No borrowed
+paper error percentage becomes a LiveHD accuracy guarantee.</li>
+</ul></li>
+
+<li id="D"><strong>D — Define the period objective and shared LR state.</strong>
+<ul>
+<li>Compute achievable period <code>T*</code> with the supported launch/capture,
+setup and IO constraints. For a fully covered single-period setup model,
+<code>T* = T_SDC − worst_setup_slack</code>; raw maximum arrival alone omits
+capture/output requirements. Record both fixed-SDC slack and rebased optimization
+slack. Select endpoints within <code>ε·T*</code> of the worst endpoint and optimize
+toward <code>(1−ε)·T*</code>, initially <code>ε=0.10</code>.</li>
+<li>Implement numerically stable log-sum-exp and normalized rise/fall arc
+multipliers, with endpoint mass summing to one and node flow conservation.
+Normalize delay/path weights so changing ps to ns does not change placement.
+Update multipliers from phase 3 even though actual size selection waits for phase 7.</li>
+<li>Specify the LR-to-DP interface mathematically: physical required-time
+feasibility and absolute electrical limits remain distinct from the multiplier
+cost. Do not treat a dimensionless multiplier as a time offset. Share that state
+between pin weights, buffering selection and sizing.</li>
+<li>Guard the best <code>T*</code>, equivalently fixed-reference worst setup slack,
+not WNS measured against a moving target or the soft-window sum. Compare candidate
+and retained state under the same timing/calibration generation and compatible
+density/legality conditions. Shrink the softmax temperature after a rejected
+regression; keep rejection tolerance above measured repeatability noise.</li>
+<li><strong>Exit:</strong> an infeasible 1 ns request on a roughly 6 ns fixture
+concentrates work near the worst paths; window-sum improvement cannot accept a
+worse worst path. Cover path-rank swaps, empty/unconstrained endpoint sets,
+zero-delay circuits, unit changes and temperature bounds.</li>
+</ul></li>
+
+<li id="E"><strong>E — Implement buffering candidates by net class.</strong>
+<ul>
+<li>Build a common candidate/tree interface containing topology, cell choices,
+positions, cap, required time, slew, area and resource demand. Short unblocked nets
+stay unbuffered when electrically feasible; a length cutoff never overrides an
+actual pin-load or slew violation.</li>
+<li>For long unblocked nets, use the early linear buffered-delay estimate, fitted
+against this proxy's discrete-library van Ginneken solutions. The late tree DP
+supports multiple buffer types. Compare early delay and reserved area with the
+real tree before materialization.</li>
+<li>For blockage-crossing fanout ≤3, implement Chen–Pedram–Buch on the extended
+Hanan graph, retaining the full nondominated frontier rather than keep-two/early
+exit heuristics. Replace fixed-gain estimates with library NLDM stages for late
+selection. For larger fanout, implement BEN-style tile rerouting followed by
+resource-aware van Ginneken. Measure the crossover at fanout 4 instead of treating
+3 as a proven optimum.</li>
+<li>First try critical-sink isolation on high-fanout critical nets: decouple
+noncritical sinks while retaining the critical connection. Verify the new buffer
+input load and every affected sink. Critical candidates maximize required time;
+off-window candidates minimize area then wirelength while remaining outside the
+window and satisfying electrical constraints.</li>
+<li>Make DP slew feasibility explicit for NLDM input-slew dependence; justify
+discretization and dominance before pruning. Bound state count/time and report
+budget exhaustion separately from infeasibility. A bounded search may keep a
+previous feasible candidate, but cannot claim the unrestricted optimum.</li>
+<li><strong>Exit:</strong> exhaustive tiny-tree comparisons, multiple cell types,
+fanout 1–4, critical isolation, and a feasible/infeasible slew crossing. Cache
+Hanan geometry and measure frontier size and runtime on representative dirty nets.</li>
+</ul></li>
+
+<li id="F"><strong>F — Model gap capacity and competing virtual buffer demand.</strong>
+<ul>
+<li>After full macro exclusions are established, build the union of halo-grown
+macro rectangles, gap connectivity and legal buffer sites. Decompose nonrectangular
+obstacles consistently. Count discrete row sites for narrow gaps, respecting buffer
+footprints and a legalization margin; zero-capacity gaps are wire-only.</li>
+<li>Distinguish buffer placement exclusions from routing obstructions. Over-macro
+wires require legal layers, characterized upper-layer RC and crossing capacity.
+Current native RUDY treats macro bodies as opaque; extend its capacity model in
+DREAMPlace before claiming consistency with over-macro buffering. Do not invent
+upper-layer RC when technology data is missing.</li>
+<li>Price gap slots and crossing capacity by current demand plus history. Negotiate
+critical/window nets first; other nets pay the congestion surcharge. Promote a net
+when it enters the window. Never divide by zero slots, and never price away a hard
+slew/cap or routing obstruction.</li>
+<li>Return reservations and bounded gap-entry pseudo-nets for G. Reserve only
+predicted or electrically mandatory buffers. Account for shared gaps/halo unions
+once, and release demand when candidates disappear. Limit negotiation rounds and
+report unmet demand rather than manufacturing capacity.</li>
+<li><strong>Exit:</strong> competing nets cannot each claim the same last slot;
+one-site, zero-slot, L/T-shaped and overlapping-halo fixtures have consistent
+capacity. An over-macro span beyond its electrical limit is rejected.</li>
+</ul></li>
+
+<li id="G"><strong>G — Add per-pin timing forces and virtual density reservations.</strong>
+<ul>
+<li>Extend the native DREAMPlace objective with a smoothed weighted
+driver-to-sink distance term alongside existing wirelength/density. Expose pin
+weights and driver indices through a typed checkpoint update; a per-net scalar
+cannot express this. Use LR plus worst-path <code>delay/k²</code> contributions,
+attributed to the influencing sink/input pin.</li>
+<li>Normalize graph and path components; start experiments at <code>α=0.5</code>
+and global RCWL weight <code>t=0.25</code>. Bound the per-pin blend factor to
+<code>[0,1]</code> and weights to finite nonnegative values. Clear obsolete weights
+and identities when paths leave the window or topology changes.</li>
+<li>Apply gap reservations through one density accounting path. Adding reserved
+charge and independently subtracting the same capacity would double count it.
+Convert reservation to physical occupancy exactly once when a buffer activates;
+reconcile filler charge, local target density and RUDY inflation at that boundary.</li>
+<li>Give critical gap-entry pulls priority over their conflicting straight
+driver-to-sink pull, with bounded strength relative to the net's timing force.
+Cap congestion inflation around critical buffers; retain ordinary congestion
+pricing for others. Recompute reservations and pulls together at checkpoints.</li>
+<li><strong>Exit:</strong> finite-difference gradient checks, translation/unit
+checks, selective attraction on a two-sink net, no force from removed pins, and
+area conservation across reserve/activate/remove cycles. Measure non-window HPWL
+and overflow, not only the critical path.</li>
+</ul></li>
+
+<li id="H"><strong>H — Implement and replay the latched phase controller.</strong>
+<ul>
+<li>Implement the seven phases and gate table below as one controller with
+independent memory/RUDY latches, feature dwells, metric histories and a global
+iteration count. Read-only sampling every <code>c</code> iterations cannot modify
+cells, weights, multipliers or buffering decisions.</li>
+<li>Use Theil–Sen slope, residual MAD, history range and turning-point checks as
+specified in the Markdown. Make integer cadence explicit: with <code>N=5</code>,
+evaluate every <code>ceil(N/2)=3</code> samples, require two passing evaluations,
+and define overlapping three-sample halves for the turning-point test.</li>
+<li>During dwell, sample/log but do not evaluate gates. Restart affected histories
+after dwell or changes to timing model, topology or geometry. Label raw versus
+virtual-buffer timing; never combine them in one trend. Define an empty/empty
+endpoint-set Jaccard score as one and empty/nonempty as zero.</li>
+<li>Separate cheap sampling, decision checkpoints and expensive Steiner refresh.
+Checkpoints update the frozen forces/virtual solutions; correction refresh also
+occurs at overflow milestones and dirty events. Add a maximum correction age so
+a flat or rising overflow does not indefinitely retain stale geometry.</li>
+<li>Replay existing CNN/Eyeriss traces before live trials. Deadlines force a
+decision, not completion of prerequisites: reserve ramp/settle and timing-response
+time before repair, skip optional resynthesis when it does not fit, and report
+unmet preconditions or budget exhaustion explicitly. Never extend the hard budget
+through restarts, rollback, dwell or post-density continuation.</li>
+<li><strong>Exit:</strong> deterministic trace tests for plateaus, persistent
+slopes, noise, turning points, zero ranges, missing samples, simultaneous gates,
+short budgets and topology resets. Confirm live trajectories after replay;
+replay alone cannot predict the consequences of changed activation times.</li>
+</ul></li>
+
+<li id="I"><strong>I — Materialize and remove buffers transactionally in phase 7.</strong>
+<ul>
+<li>Add a bounded preallocated buffer-node/pin/net pool to DREAMPlace. Existing
+<code>node_placement_mask</code> describes placement obstacles, not inactive cells;
+it is insufficient for this pool. Inactive entries must contribute to no
+wirelength, density, filler sizing, routability, legalization or exported netlist.</li>
+<li>Activate critical batches at DP seeds and splice matching LGraph nets while
+preserving instance/region/color provenance and polarity. Refresh pin maps and
+topology generations atomically. Keep gap pulls active as appropriate. Define pool
+exhaustion as a bounded, reported outcome; do not silently rebuild placedb in the
+hot loop or leave a partially applied graph edit.</li>
+<li>At phase-7 checkpoints, rip up/re-buffer dirty repair-owned trees, deactivate
+unused entries, and retain the old feasible solution unless the candidate clears
+the improvement margin. Protect functional/clock/reset cells and distinguish
+pre-existing buffers from removable repair-owned ones. Recheck slew, cap, gap
+membership and buffer drift after movement.</li>
+<li>Checkpoint graph deltas, masters, positions, pool occupancy, topology maps,
+LR/weight state, virtual trees, density/fillers and relevant optimizer state.
+Restoring only buffers and multipliers cannot reproduce the best timing after
+cells have moved. Restore or deliberately restart GP momentum consistently, while
+the budget counter and phase latches remain monotonic.</li>
+<li>At virtual-to-real transition, compare both models at identical coordinates;
+record delay, critical-set and area jumps. Reservation reduces overflow shock but
+does not prove it is zero when real footprints or sizing differ.</li>
+<li><strong>Exit:</strong> exact connectivity/polarity checks, repeated pool reuse,
+insertion/removal rollback, rejected-batch restoration, no stale timing identities,
+and full recomputation matching the retained state. Equivalence covers net splits
+and any nontrivial buffer-chain rewrite.</li>
+</ul></li>
+
+<li id="J"><strong>J — Couple discrete LR sizing and area recovery to phase 7.</strong>
+<ul>
+<li>Enumerate functionally equivalent library masters with compatible pins,
+state/clock behavior and available LEF geometry. In forward order, minimize
+LR-weighted arc delay plus area/leakage cost using the shared D state. Update load,
+input slew, geometry, pin offsets and upstream/downstream timing dependencies.</li>
+<li>Alternate bounded sizing and buffering batches; use the same worst-period
+guard and electrical feasibility checks. Off-window recovery may downsize or remove
+buffers only while the affected paths remain outside the window. Record promotion,
+oscillation and accepted/rejected changes.</li>
+<li>Keep Vt swaps after legalization as proposed, requiring available equivalent
+masters and preserved legality. Missing leakage data is reported, not replaced by
+zero. Do not mutate cell sizes in phases 1–6 through a leftover legacy repair hook.</li>
+<li><strong>Exit:</strong> load-sensitive repowering, a newly critical neighbor,
+area recovery, no feasible equivalent master, missing leakage and rollback cases.
+Show convergence/runtime and worst-period behavior against buffering-only and
+sizing-only ablations.</li>
+</ul></li>
+
+<li id="K"><strong>K — Optional cumulative resynthesis in phases 4–5.</strong>
+<ul>
+<li>Keep this independently disabled during core-loop bring-up. Select persistent
+window-critical colors using the buffered phase-3 environment; reuse
+<code>io_timing.cpp</code> and the existing ABC provider/equivalence path. Carry
+virtual estimates as boundary constraints, without materializing those buffers.</li>
+<li>The new multi-round scheduler is a separate opt-in policy from the existing
+once-per-run <code>io_resynth</code> behavior. Define interaction with stage restarts
+and saved feedback explicitly. Admission includes remap cost, dwell, stabilization
+and the reserved phase-7 interval; serialize synthesis jobs and monitor memory.</li>
+<li>Accept a replacement only after equivalence and same-environment timing checks;
+inconclusive proof is not acceptance. Accepted subblocks remain cumulative as in
+the source proposal. Each acceptance begins a new topology epoch: invalidate
+proxy/maps/calibration/pool mappings and start a new best-WNS snapshot within that
+epoch. A later rollback cannot restore an obsolete pre-resynthesis netlist.</li>
+<li>Retain cross-epoch measurements for reporting, stop further rounds when settled
+improvement is within noise, and never claim a cross-epoch global-best rollback
+that the cumulative policy does not support. Preserve surviving placement seeds
+without accidentally locking movable cells.</li>
+<li><strong>Exit:</strong> disabled/no-options/budget-denied/proof-inconclusive paths,
+two cumulative rounds, topology-safe rollback and phase-7 operation both with and
+without resynthesis. Reuse/cache records identify the proxy/model generation.</li>
+</ul></li>
+
+<li id="L"><strong>L — Preserve improvements through legalization, routing and hold ECO.</strong>
+<ul>
+<li>After GP, legalize the retained real netlist with fresh timing priorities;
+preserve fixed macro/IO geometry, rows/sites, orientation and buffer exclusions.
+Recheck actual gap occupancy, displacement, slew and cap. Dirty displaced trees
+get bounded re-buffer/ECO legalization with reduced gap capacity and fresh timing.</li>
+<li>Evaluate permitted Vt swaps, then export matching graph/Verilog/DEF and
+provenance. Compare pre-legalization, post-legalization, post-repair and post-route
+timing on the same identities. Independent OpenTimer after GP and OpenROAD
+CTS/route/extraction provide validation, not in-loop feedback.</li>
+<li>Treat post-route multi-corner hold repair as its own delivery milestone.
+First establish corner/clock/parasitic coverage and setup guards; then evaluate
+useful-skew setup/hold optimization, compatible downsizing/high-Vt, shared-fanin
+delay insertion, and legal free-metal detours in the source's order. Clock or wire
+edits require reanalysis/extraction at every affected corner.</li>
+<li><strong>Exit:</strong> independent legality and connectivity checks, routed
+setup results, and explicit hold residuals per corner. Best-effort hold repair may
+remain incomplete; estimated Fmax, legal placement, clean routing and multi-corner
+closure are separate outcomes.</li>
+</ul></li>
+
+<li id="M"><strong>M — Run the acceptance matrix and publish reproducible evidence.</strong>
+<ul>
+<li>Use tiny hermetic fixtures for proxy semantics, dirty propagation, DP frontiers,
+geometry, force gradients, controller gates and transactions. Keep optimized tests
+under 20 seconds and cap each regression invocation at 30 seconds. Large CNN,
+Eyeriss and dataset evaluations remain explicit benchmark workflows, never default
+tests that reach into sibling benchmark repositories. Contract files stay immutable.</li>
+<li>Validate endpoint ranking within the true/predicted near-critical sets with
+per-style Kendall τ, set overlap, bias and electrical-limit coverage. Separate
+zero-wire model checks, identical-RC engine checks and placed-to-routed prediction.
+Freeze calibration on training designs and score held-out designs/setup combinations.</li>
+<li>Run matched CNN and Eyeriss controls and incremental ablations: current loop;
+proxy-only observation; pin weighting; virtual buffering/gap reservations;
+phase-7 buffers; sizing/recovery; optional resynthesis. Match starting netlists,
+macro/IO frames, technology and total GP budget. Compare phase-7 absence as a
+diagnostic, never as the finished implementation.</li>
+<li>Report achievable period/Fmax and fixed-SDC setup WNS as the primary timing
+outcome. Also report window spread/TNS, area/leakage, slew/cap count and excess,
+buffer count/churn, gap overuse, HPWL, congestion, legality, routed DRC/unrouted
+nets, wall time, peak process-tree RSS and time per proxy/FLUTE/DP/GP stage.
+SDC TNS is diagnostic, not the optimization acceptance objective.</li>
+<li>Repeat enough matched CPU runs to measure noise; test scaling of full graph
+walks, dirty-net fractions, path extraction and buffer frontiers. Retain failed,
+timeout and budget-limited runs. Tune the proposal's constants with both CNN and
+Eyeriss, then confirm with held-out data and routed timing.</li>
+<li><strong>Exit:</strong> all required correctness checks pass, no unreported
+coverage or electrical failures, and the predeclared QoR/runtime criteria from A
+are met. Record results under ignored <code>repros/timeclosure_&lt;date&gt;/</code>,
+with commands, hashes, traces and before/after snapshots; link selected reports
+here. Do not promote the new mode to a default without explicit approval.</li>
+</ul></li>
+</ul>
+
+<h2>Subtasks — landed</h2>
+<p>None yet. Existing placement and timing infrastructure is a starting point,
+not evidence that this new loop has been implemented or validated.</p>
+
+<h2>Design notes</h2>
+<h3 id="sequence">Implementation order and ownership</h3>
+<p><strong>A → B → C</strong> establishes the reference model. Implement D and H
+against those measurements; H first runs as an observer. E → F and G supply the
+virtual phase-3 loop. Integrate I → J only after virtual/real agreement and rollback
+checks pass. K is optional. L and M establish end-to-end acceptance; their test
+fixtures and reporting should be built alongside each earlier step.</p>
+<table>
+<caption>Existing seams and proposed responsibilities</caption>
+<thead><tr><th>Owner / inspected seam</th><th>Work</th></tr></thead>
+<tbody>
+<tr><td><code>pass/place/place.cpp</code>, <code>place.hpp</code>,
+<code>repair.hpp</code>, <code>timing_place.cpp</code></td><td>Host the new proxy,
+controller, buffering/LR state and transactions in focused modules. Reuse physical
+identities and repair provenance; replace the selected mode's legacy callbacks.</td></tr>
+<tr><td><code>pass/place/technology_rc.hpp</code>,
+<code>core/physical_rc.hpp</code>, <code>core/timing_feedback.hpp</code></td><td>Reuse
+characterized RC and in-memory feedback; add transition-resolved proxy state,
+coverage and model-generation metadata.</td></tr>
+<tr><td><code>pass/opentimer/README.md</code> / <code>Physical_session</code></td><td>Offline
+oracle for matched-RC regressions and final analysis. Existing incremental timing
+is useful validation infrastructure, but is not the new GP timer.</td></tr>
+<tr><td><code>../DREAMPlace/dreamplace/native/placement.hpp</code>:
+<code>GpUpdate</code>, <code>GpState</code>, <code>GpSample</code></td><td>Add per-pin
+forces, resource reservations, active pool entries and safe checkpoint/control
+updates. The existing replacement path restarts momentum; its presence does not
+provide an inactive pool or complete transactional rollback.</td></tr>
+<tr><td><code>../DREAMPlace/dreamplace/native/rudy.hpp</code></td><td>Expose consistent
+full-footprint measurements and layer-aware crossing capacity where required.</td></tr>
+<tr><td><code>lhd/lhd_kernel_synth.cpp</code>, typed option registry and salts</td><td>Wire
+the opt-in policy, capability checks, stage boundaries and persisted generations.
+Include proxy/calibration/library/SDC/RC/settings identities in affected caches;
+continue using the single <code>lhd.incremental</code> switch.</td></tr>
+</tbody>
+</table>
+<p>Make DREAMPlace/HHDS/OpenTimer changes in their owning sibling repositories.
+Use local overrides during co-development, then consume published commits through
+<code>MODULE.bazel</code>. Never patch fetched Bazel external copies. No dependency
+pin, implementation or existing default is changed by this planning task.</p>
+
+<h3 id="schedule">Runtime phases and gates</h3>
+<p>The iteration budget counts final-cell GP work across all continuations.
+Initial experimental budgets are <code>B=800</code>, or <code>B=1000</code> with
+optional resynthesis, reserving <code>R=0.25B</code> for phase 7. These are new-mode
+trial settings, not replacements for existing placement defaults. Hard budget
+exhaustion still leads to legalization/reporting with an explicit incomplete status.</p>
+<table>
+<thead><tr><th>Phase / gate</th><th>Stability and prerequisites</th><th>Action</th></tr></thead>
+<tbody>
+<tr><td>1 — Initial placement</td><td>Observe raw proxy timing and full-footprint
+RUDY; no timing forces.</td><td>Wirelength/density/fillers/local spreading.</td></tr>
+<tr><td>2 — Memory and RUDY, independent latches</td><td>Period/window TNS/HPWL
+stable, or latest start 0.25B.</td><td>Start enabled memory-exclusion ramp and
+RSMT-RUDY feedback, with separate dwells.</td></tr>
+<tr><td>3 — Timing activation</td><td>RUDY/HPWL stable; RUDY active and memory
+ramp complete. Target latest start 0.45B, with prerequisites scheduled to fit.</td>
+<td>First Steiner calibration, virtual buffers/reservations and pin weights.
+With resynthesis enabled, leave at stability or roughly 0.3 density overflow.</td></tr>
+<tr><td>4–5 — Optional resynthesis</td><td>Period, window TNS and near-critical set
+stable; a complete round fits before B−R.</td><td>Admit cumulative rounds, dwell
+20–50 iterations and return to phase-3 stabilization.</td></tr>
+<tr><td>6 — Final stabilization</td><td>Period/window TNS/HPWL/RUDY stable or
+repair deadline.</td><td>Continue virtual timing. Without resynthesis, merge
+phases 3 and 6 and omit the resynthesis overflow floor.</td></tr>
+<tr><td>7 — Repair</td><td>Timing has had a response interval; resynthesis done
+or skipped. Start no later than B−R if prerequisites can be satisfied.</td><td>Real
+buffer/sizing batches, removal and per-batch dwell; no pre-legalization Vt swaps.</td></tr>
+<tr><td>End</td><td>Period/HPWL/RUDY stable with phase 7 active, or hard budget.</td>
+<td>Legalization, Vt evaluation, routing and independent timing; post-route hold ECO.</td></tr>
+</tbody>
+</table>
+<p>Initial controller values: <code>c=10</code>, <code>N=5</code>,
+<code>H=50</code>, <code>θ=0.03</code>, <code>k=2</code>, endpoint Jaccard ≥0.9.
+For a scalar metric, pass when <code>|s|·H ≤ max(θR_history, kσ)</code> and there
+is no significant turning point; require two passes. Use distinct names for
+history range and the repair reserve. Log each gate's values, slope, noise, range,
+reason, dwell, model epoch and remaining budget. Full-footprint route overflow,
+current-footprint route overflow and density overflow are separate fields.</p>
+
+<h3 id="review">Review resolutions and remaining decisions</h3>
+<table>
+<thead><tr><th>Proposal issue</th><th>Implementation treatment</th></tr></thead>
+<tbody>
+<tr><td>Rebased WNS versus achieved period</td><td>Use rebasing for optimization
+priority; compare fixed-reference worst slack or T* for acceptance. Include setup,
+clock and IO requirements before calling the result a period/Fmax.</td></tr>
+<tr><td>“Netlist changes come last” versus optional phases 4–5</td><td>Buffers and
+sizing wait until phase 7. Explicitly enabled resynthesis is the earlier topology
+exception; ordinary phases 3–6 buffering remains virtual.</td></tr>
+<tr><td>Best-WNS rollback versus cumulative resynthesis</td><td>Rollback is complete
+within a topology epoch. Accepted resynthesis begins a new epoch and is not undone
+by restoring an old buffer/size snapshot.</td></tr>
+<tr><td>Continuous model versus checkpoint-only work</td><td>Frozen topology and
+forces are used between decision checkpoints; positions still change continuously.
+Sampling, decisions and Steiner refresh have separate cadences.</td></tr>
+<tr><td>Corrections that “survive sizing”</td><td>Only load-independent geometry is
+reused unconditionally. Library pin caps are not scaled by a wire-length ratio;
+load/slew-dependent terms are invalidated or reevaluated.</td></tr>
+<tr><td>Pin-weight smoothing</td><td>The stated exponential η formula can exceed
+one. Normalize its inputs and clamp the blend before using it as smoothing;
+test large jumps and publish this implementation refinement.</td></tr>
+<tr><td>GPU run-to-run noise in the rationale</td><td>This implementation targets
+native CPU placement with one thread. Measure its actual repeatability; do not
+assume GPU noise numbers apply.</td></tr>
+<tr><td>Calibration designs</td><td>Still to select in A/C: representative routed
+gap/over-macro cases for each technology and routing setup, with a held-out split.
+Missing styles remain uncovered; sky130 calibration is not portable to ASAP7.</td></tr>
+<tr><td>Acceptance thresholds</td><td>Still to freeze in A from baseline coverage,
+runtime and repeatability. The plan specifies the measurements, not fabricated
+accuracy or speed claims. Gate tuning is evaluated on CNN and Eyeriss.</td></tr>
+</tbody>
+</table>
+
+<h3 id="sources">Source review</h3>
+<p>Keep the full bibliography in <a href="timing_closure_plan.md#references">the
+Markdown reference list</a>. A focused check of
+<a href="https://bunchgrape.github.io/docs/iccad24_tdp.pdf">Fu et al., ICCAD 2024,
+sections 3.3–3.4</a> supports hybrid pin weighting and cached RC correction. Its
+calibration derivation isolates wire capacitance; it also retains a Steiner
+impulse reference for slew. Implementing just a load ratio and delay offset
+therefore needs a separate slew-fidelity check. The paper's overflow-triggered
+calibration is distinct from the phase-3 activation proposed here.</p>
+<p>The <a href="https://github.com/TimingPredict/Dataset">TimingPredict dataset
+documentation</a> lists 21 sky130/OpenROAD circuits with raw Verilog, DEF, SDC,
+SPEF and SDF. It is an offline fidelity source, not a default regression dependency
+or evidence of coverage for macro-gap routing styles. Download availability,
+reproducible tool/library versions and the relevant design coverage must be checked
+before using it. Remaining buffering/LR/hold bibliography entries, especially those
+marked unverified in the Markdown, require primary-source verification during
+their implementation milestones; no optimality or signoff claim follows from
+their inclusion in the proposal.</p>
+</main>
+<footer>Plan reviewed 2026-10-24. Move completed subtasks to “landed” with their
+original letters; keep measurements and generated artifacts under repros/.</footer>
+</body>
+</html>
