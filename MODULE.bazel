@@ -120,7 +120,7 @@ bazel_dep(name = "libffi", version = "3.4.7.bcr.5")
 # GMP symbols undefined (they are not bundled, to avoid the LGPL libgmp.a); they
 # are satisfied at the final `lhd` link by this hermetic BCR build of GMP (no
 # dependency on a system/homebrew libgmp). See packages/cvc5.BUILD.
-bazel_dep(name = "gmp", version = "6.3.0.bcr.2")
+bazel_dep(name = "gmp", version = "6.3.0.bcr.3")
 
 # iassert / hlop / hhds — the masc-ucsc sibling libraries, fetched as PLAIN
 # git repos (use_repo_rule), NOT as bazel_dep + git_override. A git_override
