@@ -61,7 +61,7 @@ python3 -I pass/lean/scripts/d3_master_corpus.py \
 python3 -I pass/lean/scripts/d3_manifest.py \
   --coreet-certs generated/master_port/d3_corpus/master_coreet/lean \
   --cva6-certs   generated/master_port/d3_corpus/master_cva6/lean \
-  --out IR_Semantics/manifests/master
+  --out pass/lean/Lgraph_IR_Semantics_Simulator/manifests/master
 ```
 
 `d3_manifest.py` run with its defaults still regenerates the canonical manifests

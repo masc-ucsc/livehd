@@ -31,7 +31,7 @@ set -uo pipefail
 # Usage: coreet_full_flow.sh <module-list-file> [jobs]
 #   COREET_ROOT=...  OUT=...
 
-R="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+R="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../../.." && pwd)"
 LIST="${1:?usage: coreet_full_flow.sh <module-list-file> [jobs]}"
 JOBS="${2:-4}"
 OUT="${OUT:-$R/generated/master_port/ff}"
@@ -69,7 +69,7 @@ one() {
   # exports, and an export is not an RTL equivalence result.
   COREET_TOP="$m" OUT="$mo" LEAN_MODE=verified_compiler RUN_LEAN="$RUN_LEAN" \
     RUN_LEC_GATE=false \
-    timeout "${MODULE_TIMEOUT:-3600}" bash "$R/IR_Semantics/scripts/run_coreet_module_lean.sh" \
+    timeout "${MODULE_TIMEOUT:-3600}" bash "$R/pass/lean/Lgraph_IR_Semantics_Simulator/scripts/run_coreet_module_lean.sh" \
     > "$OUT/$m.exp.log" 2>&1
   local rc=$?
   local lean; lean="$(find "$mo" -name "${m}_Lgraph.lean" 2>/dev/null | head -1)"

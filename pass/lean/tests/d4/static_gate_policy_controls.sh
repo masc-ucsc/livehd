@@ -2,7 +2,7 @@
 # ONE static-gate policy for verified_compiler output, and the shape rule that
 # policy actually needs.
 #
-# WHAT WENT WRONG.  `IR_Semantics/scripts/run_coreet_module_lean.sh` kept its own inline copy
+# WHAT WENT WRONG.  `pass/lean/Lgraph_IR_Semantics_Simulator/scripts/run_coreet_module_lean.sh` kept its own inline copy
 # of the verified_compiler gates, and that copy drifted: it demanded
 # `nodes > 0`. A design whose outputs are ALL constant-driven has zero COMPUTED
 # nodes and is perfectly valid -- `null_vpu` (10 sources, 0 nodes) and
@@ -18,7 +18,7 @@ set -uo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT="$(cd "$HERE/../../../.." && pwd)"
 GATE="$ROOT/pass/lean/scripts/vc_gates.py"
-EMIT="$ROOT/IR_Semantics/scripts/run_coreet_module_lean.sh"
+EMIT="$ROOT/pass/lean/Lgraph_IR_Semantics_Simulator/scripts/run_coreet_module_lean.sh"
 
 fails=0
 ok()  { printf 'PASS  %s\n' "$1"; }

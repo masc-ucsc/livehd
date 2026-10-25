@@ -3,7 +3,7 @@
 
 Why this exists
 ---------------
-The imported corpora named in IR_Semantics/manifests/PROVENANCE.tsv were emitted
+The imported corpora named in pass/lean/Lgraph_IR_Semantics_Simulator/manifests/PROVENANCE.tsv were emitted
 before the D2 clock work.  Every one of them -- 85 CORE-ET and 46 CVA6 -- ends
 in the pre-D2 trailer
 

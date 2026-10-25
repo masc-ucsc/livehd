@@ -1,12 +1,15 @@
-# IR_Semantics — the Direction-2 (IR-as-semantics) working tree
+# Lgraph_IR_Semantics_Simulator — the Direction-2 (IR-as-semantics) working tree
 
 What this direction owns that is NOT shared with the rest of LiveHD: the
 corpus it measures, the measurements themselves, and the tooling that produces
 them. The implementation is deliberately **not** here — see "What stayed, and
 why" below.
 
+**The simulator itself is `formal/lean/LeanSemanticPrimitives/Compiler/`**, not
+this folder. The name says what this tree belongs to, not what it contains.
+
 ```text
-IR_Semantics/
+pass/lean/Lgraph_IR_Semantics_Simulator/
   manifests/   the corpora, and the per-module parameters needed to elaborate
                them (MODULE_PARAMS.tsv, coreet_*.tsv, cva6_*.tsv, PROVENANCE)
   evidence/    what was measured: censuses, sweeps, the gated-module ledger,
@@ -28,7 +31,7 @@ IR_Semantics/
 
 Regenerate the ledger with:
 
-    IR_Semantics/scripts/coverage_ledger.py --base IR_Semantics/evidence/CENSUS_MASTER_122.tsv
+    pass/lean/Lgraph_IR_Semantics_Simulator/scripts/coverage_ledger.py --base pass/lean/Lgraph_IR_Semantics_Simulator/evidence/CENSUS_MASTER_122.tsv
 
 ## What stayed, and why
 
@@ -44,10 +47,14 @@ break them:
 | the proof tools | `pass/lean/tools/` | upstream's HDLProof engine, actively developed |
 | the bazel test data | `pass/lean/tests/` | wired into test targets |
 
-`pass/lean/README.md` documents the exporter; the Lean layers are
-`DesignSemantics` (`interpretDesign`, the reference), `DirectSemantics` /
-`DirectTrace` (the checked stepper) and `CompileDesign*` (the compiled path),
-tied together by `DirectVsCompiled`.
+`pass/lean/README.md` documents the exporter, and links back here. The Lean
+layers are `DesignSemantics` (`interpretDesign`, the reference),
+`DirectSemantics` / `DirectTrace` (the checked stepper) and `CompileDesign*`
+(the compiled path), tied together by `DirectVsCompiled`.
+
+This tree sits under `pass/lean/` because that is the pass whose output it
+measures. It was briefly at the repository root; nothing outside should refer
+to that path any more.
 
 ## The boundary this direction does not close
 

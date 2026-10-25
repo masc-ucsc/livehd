@@ -11,9 +11,9 @@ set -uo pipefail
 # Emits a TSV work-list.  The LEC gate is skipped here (it runs per module
 # before proving); this is a triage pass, not a verification pass.
 #
-# Usage: IR_Semantics/scripts/coreet_census_sweep.sh <module-list-file> [jobs]
+# Usage: pass/lean/Lgraph_IR_Semantics_Simulator/scripts/coreet_census_sweep.sh <module-list-file> [jobs]
 
-ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../../.." && pwd)"
 LIST="${1:?usage: coreet_census_sweep.sh <module-list> [jobs]}"
 JOBS="${2:-6}"
 OUTDIR="$ROOT/generated/core-et"
@@ -28,7 +28,7 @@ classify_one() {
   local stage=filelist verdict=FAIL nodes= flops= maxw= slots=1 detail=
 
   if ! COREET_TOP="$m" RUN_LEC_GATE=false STOP_AFTER=lean \
-       "$ROOT/IR_Semantics/scripts/run_coreet_module_lean.sh" > "$OUTDIR/$m.sweep.log" 2>&1; then
+       "$ROOT/pass/lean/Lgraph_IR_Semantics_Simulator/scripts/run_coreet_module_lean.sh" > "$OUTDIR/$m.sweep.log" 2>&1; then
     # Where did it stop, and why?  A named diagnostic beats an exit code.
     if   [[ ! -s "$log/filelist.log" && ! -r "$log/lhd_compile.log" ]]; then
       stage=filelist; detail="$(tail -1 "$OUTDIR/$m.sweep.log" 2>/dev/null | cut -c1-120)"

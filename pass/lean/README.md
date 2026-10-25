@@ -65,6 +65,24 @@ Per design the pass writes `<Top>_Lgraph.lean` and `<Top>_io.json`;
 `verified_compiler` also writes `<Top>.dcert`.  The files are published as one
 group: if emission fails, the previous set is kept.
 
+## Where the IR-as-semantics (Direction 2) work lives
+
+`Lgraph_IR_Semantics_Simulator/` — beside this file — holds everything that
+direction owns and the rest of LiveHD does not: the corpora it measures
+(`manifests/`), the measurements (`evidence/`: the CORE-ET censuses, the
+sweeps, `GATED_MODULES.tsv`, and the write-ups of individual findings) and the
+tooling that produces them (`scripts/`: `run_coreet_module_lean.sh` and the
+`coreet_*` helpers, `coverage_ledger.py`, and the RTL-vs-regenerated
+differential).
+
+It holds **no compiled code**, deliberately. The exporter is the `.cpp|hpp`
+files documented above, and the semantics it targets is
+`formal/lean/LeanSemanticPrimitives/Compiler/` — `interpretDesign`,
+`directStep` and `compileDesign`, with `DirectVsCompiled` tying them together.
+Both are shared with the D3, D4 and projection directions, which is why
+neither moved.  `Lgraph_IR_Semantics_Simulator/README.md` records that split
+and what each link in the chain is actually checked by.
+
 ## Lean Support Library and Emitted Model
 
 - `formal/lean` builds a Lean package named `LeanSemanticPrimitives`.

@@ -1,6 +1,6 @@
 # The v2v differential compared bits the design does not have
 
-`IR_Semantics/scripts/v2v_verilator_diff.py` drives the original and the regenerated Verilog
+`pass/lean/Lgraph_IR_Semantics_Simulator/scripts/v2v_verilator_diff.py` drives the original and the regenerated Verilog
 with identical stimulus and diffs one line of outputs per cycle. It did two
 things that Verilator does not define:
 
@@ -63,11 +63,11 @@ narrowed port would have been masked away silently.
   differed from the RTL, which points at the RTL-side model rather than at the
   compiler.
 * Nothing here changes the corpus count. `txfmaexp_top` already exports on
-  master (`IR_Semantics/evidence/CENSUS_MASTER_122.tsv`).
+  master (`pass/lean/Lgraph_IR_Semantics_Simulator/evidence/CENSUS_MASTER_122.tsv`).
 
 ## Reproducing
 
-    IR_Semantics/scripts/v2v_verilator_diff.py --top txfmaexp_top \
+    pass/lean/Lgraph_IR_Semantics_Simulator/scripts/v2v_verilator_diff.py --top txfmaexp_top \
       --orig <anchor.sv> --orig-flags "-F <coreet filelist>" \
       --gen <regenerated .v> --cycles 200000
 

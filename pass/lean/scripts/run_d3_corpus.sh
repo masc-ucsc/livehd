@@ -12,7 +12,7 @@
 #
 # Four corpora, two pairs
 # -----------------------
-#   coreet        the IMPORTED CORE-ET corpus, pinned by IR_Semantics/manifests/
+#   coreet        the IMPORTED CORE-ET corpus, pinned by pass/lean/Lgraph_IR_Semantics_Simulator/manifests/
 #   cva6          the IMPORTED frozen CVA6-30 corpus, likewise
 #   coreet-master the corpus THIS worktree emitted, pinned by manifests/master/
 #   cva6-master   likewise
@@ -21,7 +21,7 @@
 # emitted trailer applies `compileAndRun` at the old arity, so every one of them
 # stops at the `typecheck` gate.  Running them is still the measurement that
 # establishes that boundary, which is why they stay.  The master pair is what
-# can reach `agree`.  See IR_Semantics/manifests/master/README.md.
+# can reach `agree`.  See pass/lean/Lgraph_IR_Semantics_Simulator/manifests/master/README.md.
 #
 # In both cases the corpus is the one the manifest's sha256 column names, never
 # whatever happens to be in a directory: a run against the wrong bytes is a
@@ -68,21 +68,21 @@ shift || true
 LIVEHD_NEW_ROOT="${LIVEHD_NEW_ROOT:-$ROOT/../livehd-new}"
 case "$CORPUS" in
   coreet)
-    MANIFEST="IR_Semantics/manifests/coreet_122.tsv"
+    MANIFEST="pass/lean/Lgraph_IR_Semantics_Simulator/manifests/coreet_122.tsv"
     CERTS="$LIVEHD_NEW_ROOT/generated/vc_sweep2/lean"
-    WHERE="the imported corpus named in IR_Semantics/manifests/PROVENANCE.tsv; set LIVEHD_NEW_ROOT to the checkout that holds it" ;;
+    WHERE="the imported corpus named in pass/lean/Lgraph_IR_Semantics_Simulator/manifests/PROVENANCE.tsv; set LIVEHD_NEW_ROOT to the checkout that holds it" ;;
   cva6)
-    MANIFEST="IR_Semantics/manifests/cva6_30.tsv"
+    MANIFEST="pass/lean/Lgraph_IR_Semantics_Simulator/manifests/cva6_30.tsv"
     CERTS="$LIVEHD_NEW_ROOT/generated/cva6_vc/lean"
-    WHERE="the imported corpus named in IR_Semantics/manifests/PROVENANCE.tsv; set LIVEHD_NEW_ROOT to the checkout that holds it" ;;
+    WHERE="the imported corpus named in pass/lean/Lgraph_IR_Semantics_Simulator/manifests/PROVENANCE.tsv; set LIVEHD_NEW_ROOT to the checkout that holds it" ;;
   coreet-master)
-    MANIFEST="IR_Semantics/manifests/master/coreet_122.tsv"
+    MANIFEST="pass/lean/Lgraph_IR_Semantics_Simulator/manifests/master/coreet_122.tsv"
     CERTS="$ROOT/generated/master_port/d3_corpus/master_coreet/lean"
-    WHERE="built by pass/lean/scripts/d3_master_corpus.py; see IR_Semantics/manifests/master/README.md for the command" ;;
+    WHERE="built by pass/lean/scripts/d3_master_corpus.py; see pass/lean/Lgraph_IR_Semantics_Simulator/manifests/master/README.md for the command" ;;
   cva6-master)
-    MANIFEST="IR_Semantics/manifests/master/cva6_30.tsv"
+    MANIFEST="pass/lean/Lgraph_IR_Semantics_Simulator/manifests/master/cva6_30.tsv"
     CERTS="$ROOT/generated/master_port/d3_corpus/master_cva6/lean"
-    WHERE="built by pass/lean/scripts/d3_master_corpus.py; see IR_Semantics/manifests/master/README.md for the command" ;;
+    WHERE="built by pass/lean/scripts/d3_master_corpus.py; see pass/lean/Lgraph_IR_Semantics_Simulator/manifests/master/README.md for the command" ;;
   *) echo "usage: $0 <coreet|cva6|coreet-master|cva6-master> [extra d3_sweep args...]" >&2; exit 2 ;;
 esac
 

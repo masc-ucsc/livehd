@@ -15,12 +15,12 @@ set -uo pipefail
 #     mandatory and the CVA6 runner omits.
 #
 # Usage:
-#   COREET_TOP=intpipe_alu IR_Semantics/scripts/run_coreet_module_lean.sh
+#   COREET_TOP=intpipe_alu pass/lean/Lgraph_IR_Semantics_Simulator/scripts/run_coreet_module_lean.sh
 # Useful env: RUN_LEAN, RUN_LEC_GATE, LEC_STRICT, LEAN_EMIT_CERT,
 #             LEAN_EMIT_FAST_BRIDGE, OUT, LEAN_JOBS, LEAN_CPUSET, STOP_AFTER
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-LIVEHD_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
+LIVEHD_ROOT="$(cd "$SCRIPT_DIR/../../../.." && pwd)"
 
 COREET_ROOT="${COREET_ROOT:?set COREET_ROOT to the read-only CORE-ET checkout}"
 TOP="${COREET_TOP:?set COREET_TOP=<module>}"
@@ -89,7 +89,7 @@ printf '// Empty anchor. Real CORE-ET sources arrive via yosys.filelist_file.\n'
 } > "$LOG_DIR/preflight.log"
 
 # ---------------------------------------------------------------------------
-# Per-module elaboration parameters (IR_Semantics/manifests/MODULE_PARAMS.tsv).
+# Per-module elaboration parameters (pass/lean/Lgraph_IR_Semantics_Simulator/manifests/MODULE_PARAMS.tsv).
 #
 # A parameterized module elaborated as a TOP has no parameters. For
 # `txfma_adder` -- `parameter int unsigned Width = 0` -- that gives
@@ -105,7 +105,7 @@ printf '// Empty anchor. Real CORE-ET sources arrive via yosys.filelist_file.\n'
 # Giving them to only one elaborates two different designs and refutes them
 # against each other with nothing wrong in the tool.
 # ---------------------------------------------------------------------------
-PARAMS_TSV="${COREET_PARAMS_TSV:-$LIVEHD_ROOT/IR_Semantics/manifests/MODULE_PARAMS.tsv}"
+PARAMS_TSV="${COREET_PARAMS_TSV:-$LIVEHD_ROOT/pass/lean/Lgraph_IR_Semantics_Simulator/manifests/MODULE_PARAMS.tsv}"
 declare -a MODULE_PARAMS=()
 if [[ -r "$PARAMS_TSV" ]]; then
   while IFS=$'\t' read -r _m _flags _why; do

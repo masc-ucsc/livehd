@@ -61,7 +61,7 @@ emit_one() {
   local rc=0
   timeout "$EMIT_TIMEOUT" env LEAN_MODE=verified_compiler RUN_LEAN=false RUN_LEC_GATE=false STOP_AFTER=lean \
     COREET_TOP="$m" OUT="$OUTDIR/mod/$m" \
-    "$ROOT/IR_Semantics/scripts/run_coreet_module_lean.sh" > "$log" 2>&1 || rc=$?
+    "$ROOT/pass/lean/Lgraph_IR_Semantics_Simulator/scripts/run_coreet_module_lean.sh" > "$log" 2>&1 || rc=$?
 
   local f
   f="$(find "$OUTDIR/mod/$m" -name "${m}_Lgraph.lean" 2>/dev/null | head -1)"
@@ -107,7 +107,7 @@ legacy_one() {
   local rc=0
   timeout "$EMIT_TIMEOUT" env LEAN_MODE=legacy LEAN_EMIT_FAST_BRIDGE=false RUN_LEAN=false \
     RUN_LEC_GATE=false STOP_AFTER=lean COREET_TOP="$m" OUT="$OUTDIR/legacy/$m" \
-    "$ROOT/IR_Semantics/scripts/run_coreet_module_lean.sh" > "$log" 2>&1 || rc=$?
+    "$ROOT/pass/lean/Lgraph_IR_Semantics_Simulator/scripts/run_coreet_module_lean.sh" > "$log" 2>&1 || rc=$?
   local f
   f="$(find "$OUTDIR/legacy/$m" -name "${m}_Lgraph.lean" 2>/dev/null | head -1)"
   if [[ "$rc" -eq 0 && -n "$f" && -s "$f" ]]; then

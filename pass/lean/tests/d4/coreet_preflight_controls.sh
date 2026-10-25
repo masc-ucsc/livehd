@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Controls for IR_Semantics/scripts/coreet_preflight.sh.
+# Controls for pass/lean/Lgraph_IR_Semantics_Simulator/scripts/coreet_preflight.sh.
 #
 # The sweep used to require only that the substitution map EXISTED.  That says
 # nothing about which checkout the derived sources came from, whether it has
@@ -11,8 +11,8 @@
 set -uo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT="$(cd "$HERE/../../../.." && pwd)"
-PRE="$ROOT/IR_Semantics/scripts/coreet_preflight.sh"
-PATCHER="$ROOT/IR_Semantics/scripts/coreet_patch_srcs.py"
+PRE="$ROOT/pass/lean/Lgraph_IR_Semantics_Simulator/scripts/coreet_preflight.sh"
+PATCHER="$ROOT/pass/lean/Lgraph_IR_Semantics_Simulator/scripts/coreet_patch_srcs.py"
 REAL_ROOT="${COREET_ROOT:-/HOMEROOT/projects/core-et}"
 REAL_DERIVED="$ROOT/generated/core-et/patched_src"
 

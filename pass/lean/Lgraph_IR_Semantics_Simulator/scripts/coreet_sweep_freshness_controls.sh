@@ -10,8 +10,8 @@ set -uo pipefail
 #
 # Usage: coreet_sweep_freshness_controls.sh
 
-R="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-SWEEP="$R/IR_Semantics/scripts/coreet_full_flow.sh"
+R="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../../.." && pwd)"
+SWEEP="$R/pass/lean/Lgraph_IR_Semantics_Simulator/scripts/coreet_full_flow.sh"
 T="$R/generated/pass_lean_runtime_tmp/sweep_freshness"
 rm -rf "$T"; mkdir -p "$T"
 rc=0
@@ -21,7 +21,7 @@ printf 'mod_one\nmod_two\n' > "$T/list.txt"
 #
 # The first version of these controls wrote a stub at $T/bin/ and set STUB_FAIL,
 # which changed nothing: coreet_full_flow.sh invokes
-# "$R/IR_Semantics/scripts/run_coreet_module_lean.sh" by ABSOLUTE path, so the stub was never
+# "$R/pass/lean/Lgraph_IR_Semantics_Simulator/scripts/run_coreet_module_lean.sh" by ABSOLUTE path, so the stub was never
 # reached and the "aborted worker" case was not being exercised at all.
 #
 # So the controls run against a COPY of the sweep in an isolated tree, whose
@@ -29,16 +29,16 @@ printf 'mod_one\nmod_two\n' > "$T/list.txt"
 # script is not modified, and the copy differs only in where it lives.
 PROJ="$T/proj"
 mkdir -p "$PROJ/scripts"
-cp "$SWEEP" "$PROJ/IR_Semantics/scripts/coreet_full_flow.sh"
-cat > "$PROJ/IR_Semantics/scripts/run_coreet_module_lean.sh" <<'STUB'
+cp "$SWEEP" "$PROJ/pass/lean/Lgraph_IR_Semantics_Simulator/scripts/coreet_full_flow.sh"
+cat > "$PROJ/pass/lean/Lgraph_IR_Semantics_Simulator/scripts/run_coreet_module_lean.sh" <<'STUB'
 #!/usr/bin/env bash
 # Stand-in worker. Exits nonzero when STUB_FAIL=1 so the sweep records a
 # failure row rather than a pass.
 [[ "${STUB_FAIL:-0}" == 1 ]] && exit 3
 exit 0
 STUB
-chmod +x "$PROJ/IR_Semantics/scripts/run_coreet_module_lean.sh"
-SWEEP="$PROJ/IR_Semantics/scripts/coreet_full_flow.sh"
+chmod +x "$PROJ/pass/lean/Lgraph_IR_Semantics_Simulator/scripts/run_coreet_module_lean.sh"
+SWEEP="$PROJ/pass/lean/Lgraph_IR_Semantics_Simulator/scripts/coreet_full_flow.sh"
 R="$PROJ"
 
 run() {  # <case> [env...] ; echoes "exit=<n> marker=<COMPLETE|INCOMPLETE|none>"
