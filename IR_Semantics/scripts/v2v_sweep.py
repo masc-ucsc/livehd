@@ -4,7 +4,7 @@
 # v2v_sweep — run v2v_verilator_diff.py over every module a design and its
 # LiveHD regeneration BOTH declare, and summarize.
 #
-#   scripts/v2v_sweep.py --gen /tmp/minion_gen.v --orig-flags "-F filelist.f -DSYNTHESIS" \
+#   IR_Semantics/scripts/v2v_sweep.py --gen /tmp/minion_gen.v --orig-flags "-F filelist.f -DSYNTHESIS" \
 #                        --sources-from filelist.f [--cycles 60] [--jobs 4]
 #
 # WHY THE INTERSECTION MATTERS. LiveHD\'s emission also contains its own memory

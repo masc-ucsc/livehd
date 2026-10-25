@@ -41,7 +41,7 @@ if [ -n "${FP_FILELIST:-}" ]; then
   [ -r "$FP_FILELIST" ] || { echo "$ROW/$ATTEMPT: NO FILELIST $FP_FILELIST"; exit 2; }
   cp "$FP_FILELIST" "$FL"
   echo "adapter filelist $FP_FILELIST sha256=$(sha256sum "$FP_FILELIST" | cut -d' ' -f1)" > "$B/filelist.log"
-elif ! timeout 600 bash "$SNAP/scripts/coreet_filelist.sh" "$UNIT" "$FL" > "$B/filelist.log" 2>&1; then
+elif ! timeout 600 bash "$SNAP/IR_Semantics/scripts/coreet_filelist.sh" "$UNIT" "$FL" > "$B/filelist.log" 2>&1; then
   echo "$ROW/$ATTEMPT: BLOCKED at filelist -- $(tail -1 "$B/filelist.log")"; exit 2
 fi
 INC=$(grep -m1 "^+incdir+" "$FL" | sed "s/^+incdir+/-I /")

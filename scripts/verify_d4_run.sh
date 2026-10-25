@@ -160,7 +160,7 @@ rehash "module list"     "$(pf module_list_sha256)"            "$LIST" fatal
 # hash passed.
 if [[ "$CORPUS_RUN" == "coreet" ]]; then
   rehash "CORE-ET patcher" "$(pf coreet_patch_script_sha256)" \
-         "$ROOT_REPO/scripts/coreet_patch_srcs.py" fatal
+         "$ROOT_REPO/IR_Semantics/scripts/coreet_patch_srcs.py" fatal
 fi
 if [[ "$CORPUS_RUN" == "cva6" ]]; then
   rehash "foundation"      "$(pf cva6_foundation_sha256)"        "$(pf cva6_foundation)" fatal
@@ -180,7 +180,7 @@ if [[ "$CORPUS_RUN" == "coreet" ]]; then
   # own arithmetic. Read-only: staging is a temporary directory and the
   # consumed one is never written.
   cdir="$(pf coreet_derived_dir)"; crec="$(pf coreet_derived_aggregate_sha256)"
-  croot="$(pf coreet_root_canonical)"; cpatch="$ROOT_REPO/scripts/coreet_patch_srcs.py"
+  croot="$(pf coreet_root_canonical)"; cpatch="$ROOT_REPO/IR_Semantics/scripts/coreet_patch_srcs.py"
   if [[ -z "$crec" || -z "$croot" || ! -r "$cpatch" ]]; then
     bad "RECOMPUTED derived CORE-ET sources: cannot re-derive (aggregate '${crec:-<absent>}', root '${croot:-<absent>}')"
   elif [[ ! -d "$croot" ]]; then

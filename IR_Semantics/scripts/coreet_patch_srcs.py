@@ -31,13 +31,13 @@ degenerate model that still compiles, so every step hard-fails instead.
 """
 import os, re, sys, hashlib
 
-ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 # The output directory is overridable so a caller can derive into FRESH staging
 # and compare, rather than writing straight over the directory a sweep consumes.
 # Checking an embedded source-hash header is not enough on its own: a derived
 # body can be edited with that header left intact.  Regenerating and comparing
 # byte for byte is what actually shows the consumed files are this generator's
-# output -- which is exactly what `scripts/coreet_preflight.sh` does, and it
+# output -- which is exactly what `IR_Semantics/scripts/coreet_preflight.sh` does, and it
 # cannot do it without this seam.  Taken from pinned D4
 # f6ad1fe29f8f15aeda045115864fd81a34c33aef; master's requirement that
 # COREET_ROOT be set EXPLICITLY is kept, because the pinned copy defaulted it
@@ -154,7 +154,7 @@ def patch_file(rel, idents, coreet_root):
 
     if not moved:
         raise SystemExit(f"FATAL: {rel} needed no move -- upstream changed; "
-                         f"re-check scripts/coreet_patch_srcs.py")
+                         f"re-check IR_Semantics/scripts/coreet_patch_srcs.py")
 
     # The patch must be a PURE REORDER.  If this ever fails, the transformation
     # changed content and the derived file can no longer stand in for the source.
@@ -170,7 +170,7 @@ def patch_file(rel, idents, coreet_root):
     out = os.path.join(OUTDIR, os.path.basename(rel))
     os.makedirs(OUTDIR, exist_ok=True)
     body = "".join(lines)
-    hdr = ("// DERIVED by scripts/coreet_patch_srcs.py -- do not edit.\n"
+    hdr = ("// DERIVED by IR_Semantics/scripts/coreet_patch_srcs.py -- do not edit.\n"
            f"// source: {rel}\n"
            f"// sha256(source): {hashlib.sha256(''.join(original).encode()).hexdigest()[:16]}\n"
            "// change: pure reorder, declaration moved above first use --\n"
@@ -208,7 +208,7 @@ def type_outputs(rel, coreet_root):
 
     if n == 0:
         raise SystemExit(f"FATAL: {rel} has no untyped output to type -- upstream "
-                         f"changed; re-check scripts/coreet_patch_srcs.py")
+                         f"changed; re-check IR_Semantics/scripts/coreet_patch_srcs.py")
     # The ONLY difference may be an inserted `logic` token on `output` lines.
     if len(lines) != len(original):
         raise SystemExit(f"FATAL: {rel} line count changed -- refusing to emit")
@@ -219,7 +219,7 @@ def type_outputs(rel, coreet_root):
 
     out = os.path.join(OUTDIR, os.path.basename(rel))
     os.makedirs(OUTDIR, exist_ok=True)
-    hdr = ("// DERIVED by scripts/coreet_patch_srcs.py -- do not edit.\n"
+    hdr = ("// DERIVED by IR_Semantics/scripts/coreet_patch_srcs.py -- do not edit.\n"
            f"// source: {rel}\n"
            f"// sha256(source): {hashlib.sha256(''.join(original).encode()).hexdigest()[:16]}\n"
            f"// change: added an explicit `logic` type to {n} untyped ANSI output port(s).\n"
@@ -281,7 +281,7 @@ def explicit_imports(rel, pairs, coreet_root, derived):
         raise SystemExit(f"FATAL: {rel} explicit-import adapter changed more than import lines")
     out = os.path.join(OUTDIR, os.path.basename(rel))
     os.makedirs(OUTDIR, exist_ok=True)
-    hdr = ("// DERIVED by scripts/coreet_patch_srcs.py -- do not edit.\n"
+    hdr = ("// DERIVED by IR_Semantics/scripts/coreet_patch_srcs.py -- do not edit.\n"
            f"// change: explicit import(s) {'; '.join(done)}\n"
            "// reason: two wildcard-imported packages declare the name; slang\n"
            "//         refuses the ambiguity.  The packages alias one value (checked).\n")

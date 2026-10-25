@@ -26,7 +26,7 @@
 # modules would make it a clean family slice at 124; that is a scope change,
 # not a correction, so it is recorded here rather than taken.
 #
-# One list, two consumers: the D4/DCERT2 sweep and scripts/coverage_ledger.py.
+# One list, two consumers: the D4/DCERT2 sweep and IR_Semantics/scripts/coverage_ledger.py.
 # A second copy would be one more thing to drift.
 core_top
 debug_breakpoint

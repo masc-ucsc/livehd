@@ -89,7 +89,7 @@ generated/master_port/
 
 # Derived trees, never source. `generated/` is run output and the imported
 # corpora (whose identity is pinned per certificate by the sha256 column of
-# pass/lean/manifests/*.tsv, not by git); `temp/` is the scratch root the tests
+# IR_Semantics/manifests/*.tsv, not by git); `temp/` is the scratch root the tests
 # and drivers create under the project; `Gen/` is the per-design Lean models the
 # D3 reifier emits, for the same reason /formal/lean/Sims/ is ignored above.
 # Nothing under any of the three has ever been tracked. The four narrower
@@ -128,6 +128,12 @@ generated/master_port/
 /pass/lean/**/*_PROVENANCE.md
 /pass/lean/**/*_REFACTOR.md
 /pass/lean/**/*_LOG.md
+/IR_Semantics/**/*_PLAN.md
+/IR_Semantics/**/*_AUDIT.md
+/IR_Semantics/**/*_LEDGER*.md
+/IR_Semantics/**/*_STATUS.md
+/IR_Semantics/**/*_BUGS.md
+/IR_Semantics/**/*_LOG.md
 /pass/isabelle/**/*_BUGS.md
 /formal/**/*_PLAN.md
 /formal/**/*_NOTES.md

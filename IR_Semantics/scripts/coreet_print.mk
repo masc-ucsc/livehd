@@ -7,7 +7,7 @@
 #
 # Usage (never writes into core-et -- an explicit goal means no build runs):
 #   make -C <core-et>/dv/rtlcosim/<module> \
-#        -f Makefile -f <livehd>/scripts/coreet_print.mk \
+#        -f Makefile -f <livehd>/IR_Semantics/scripts/coreet_print.mk \
 #        --no-print-directory print-NEW_RTL_FINAL
 #
 # NEW_RTL_FINAL is what mk/rtlcosim.mk actually hands verilator: NEW_RTL plus

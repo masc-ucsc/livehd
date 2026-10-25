@@ -37,9 +37,9 @@ always over the full list.
 
 | list | contents |
 |---|---|
-| `coreet_122.list` | CORE-ET blocks, generated from `pass/lean/SWEEP_b1-b2.tsv` column 1 (`tail -n +2 pass/lean/SWEEP_b1-b2.tsv \| cut -f1 \| sort`) |
+| `coreet_122.list` | CORE-ET blocks, generated from `IR_Semantics/evidence/SWEEP_b1-b2.tsv` column 1 (`tail -n +2 IR_Semantics/evidence/SWEEP_b1-b2.tsv \| cut -f1 \| sort`) |
 | `cva6_78.list` | the CVA6 core hierarchy reachable from module `cva6` |
-| `cva6_30.list` | the canonical 30 CVA6 blocks (`pass/lean/manifests/cva6_30_frozen.tsv`) |
+| `cva6_30.list` | the canonical 30 CVA6 blocks (`IR_Semantics/manifests/cva6_30_frozen.tsv`) |
 | `pilot_*.list`, `*_tensor_load.list`, `cva6_unpacked_bridge.list`, `coreet_emission_fanout.list` | small subsets used by focused runs |
 
 ## Recorded results
