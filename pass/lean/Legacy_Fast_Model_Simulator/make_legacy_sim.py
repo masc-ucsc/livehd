@@ -1,63 +1,95 @@
 #!/usr/bin/env python3
 """Generate a runnable simulator driver for a LEGACY `<Top>_Lgraph.lean`.
 
-The legacy route emits the design as ordinary Lean definitions -- `<Top>_comb`,
+The legacy route emits the design as ordinary executable Lean -- `<Top>_comb`,
 `<Top>_next`, `<Top>_step` over `<Top>_in` / `<Top>_state` / `<Top>_out` records.
-Those are executable Lean, but nothing in the route ever CALLED them: the column
-has only ever been checked by elaborating the file.  This writes the missing
-`main`, so a legacy row can be run for N cycles and its trace compared against
-the other routes' simulators.
+Those are executable, but nothing in the route ever CALLED them: the column has
+only ever been checked by elaborating the generated file.  This writes the
+missing `main`, so a legacy row can be run for N cycles.
 
-It emits no semantics.  Every value printed comes from the generated
-`<Top>_step`; this file only feeds it inputs and prints what comes back.
+It emits no semantics.  Every value printed comes back from `<Top>_step`; this
+file only feeds inputs in and prints what comes out.
 
-THE 256-FIELD LIMIT IS WHY THIS CAN FAIL ON SOME ROWS.  The state record holds
-one field per flop, and `LEAN_MAX_CTOR_FIELDS` is 256 in every Lean 4 toolchain.
-Elaboration of a wider record succeeds and its proofs stand; only CODE
-GENERATION fails, with "constructor '<Top>_state.mk' has too many fields".  So a
-row above the cap can still deliver a proven certificate and cannot deliver an
-executable.  This script reports that distinction rather than hiding it.
+FIELD NAMES COME FROM THE LEAN FILE, NOT FROM THE `_io.json` SIDECAR.  The
+emitter prefixes and escapes them -- RTL `vm_enabled_o` becomes record field
+`out_vm_enabled_o`, and a bit-slice like `ptw_req_data_q[35:0]` becomes
+`st_ptw_req_data_q_x5b_35_x3a_0_x5d_`.  Generating against the sidecar's RTL
+names produces a file that does not compile, so the structures are parsed from
+the generated source, which is authoritative by construction.
 
-Usage:  make_legacy_sim.py <Top>_io.json [--cycles N] [--out DIR]
-Writes  <Top>_LegacySim.lean next to the design file (or in --out).
+THE 256-FIELD LIMIT.  The state record holds one field per flop, and
+`LEAN_MAX_CTOR_FIELDS` is 256 in every Lean 4 toolchain.  A wider record still
+ELABORATES and its proofs stand; only CODE GENERATION fails, with
+"constructor '<Top>_state.mk' has too many fields".  Above the cap a row can
+deliver a proven certificate and cannot deliver an executable.  This script
+reports that rather than hiding it.
+
+Usage:  make_legacy_sim.py <Top>_Lgraph.lean [--cycles N] [--out DIR]
 """
-import argparse, json, pathlib, sys
+import argparse, pathlib, re, sys
+
+
+def fields(text: str, struct: str) -> list[tuple[str, int]]:
+    """[(field name, width)] for `structure <struct> where`, in declared order."""
+    m = re.search(r"^structure %s where$" % re.escape(struct), text, re.M)
+    if not m:
+        return []
+    out = []
+    for line in text[m.end():].split("\n")[1:]:
+        if line.startswith("deriving") or (line and not line.startswith("  ")):
+            break
+        f = re.match(r"\s+(\w+)\s*:\s*BitVec\s+(\d+)\s*$", line)
+        if f:
+            out.append((f.group(1), int(f.group(2))))
+    return out
 
 
 def main() -> int:
     ap = argparse.ArgumentParser()
-    ap.add_argument("io_json")
+    ap.add_argument("lean_file")
     ap.add_argument("--cycles", type=int, default=8)
     ap.add_argument("--out", default=None)
     a = ap.parse_args()
 
-    meta = json.loads(pathlib.Path(a.io_json).read_text())
-    top = meta["top"]
-    src = pathlib.Path(a.io_json).parent
-    dst = pathlib.Path(a.out) if a.out else src
+    src = pathlib.Path(a.lean_file)
+    text = src.read_text()
+    m = re.search(r"^namespace (\w+)_Lgraph$", text, re.M)
+    if not m:
+        print(f"{src}: no `namespace <Top>_Lgraph` -- not a legacy emission", file=sys.stderr)
+        return 2
+    top = m.group(1)
+
+    ins = fields(text, f"{top}_in")
+    outs = fields(text, f"{top}_out")
+    # the state record also carries memories, which are not `BitVec`; count every
+    # declared field, because the constructor limit counts all of them
+    st = re.search(r"^structure %s_state where$" % re.escape(top), text, re.M)
+    nstate = 0
+    if st:
+        for line in text[st.end():].split("\n")[1:]:
+            if line.startswith("deriving") or (line and not line.startswith("  ")):
+                break
+            if re.match(r"\s+\w+\s*:", line):
+                nstate += 1
+    if not ins or not outs:
+        print(f"{src}: could not parse {top}_in/{top}_out", file=sys.stderr)
+        return 2
+
+    dst = pathlib.Path(a.out) if a.out else src.parent
     dst.mkdir(parents=True, exist_ok=True)
 
-    nfields = len(meta.get("flops", []))
-    ins = meta.get("inputs", [])
-    outs = meta.get("outputs", [])
-
-    # Inputs are supplied positionally by ordinal, so the driver stays valid when a
-    # port is renamed.  `used_by_model` ports the model ignores are still set: the
-    # record demands every field.
-    in_fields = "\n".join(
-        f"    {i['name']} := inputBit cyc {i['ordinal']} {i['width']}" for i in sorted(ins, key=lambda x: x["ordinal"])
-    )
-    out_prints = " ++ \" \" ++ ".join(f"toString (o.{o['name']}).toNat" for o in sorted(outs, key=lambda x: x["ordinal"])) or '""'
+    in_fields = "\n".join(f"    {n} := stim cyc {i} {w}" for i, (n, w) in enumerate(ins))
+    out_prints = ' ++ " " ++ '.join(f"toString (o.{n}).toNat" for n, _ in outs)
 
     lean = f'''-- GENERATED by pass/lean/Legacy_Fast_Model_Simulator/make_legacy_sim.py
--- Runs the legacy fast model `{top}_step` for N cycles and prints each cycle.
+-- Runs the legacy fast model `{top}_step` for {a.cycles} cycles.
 import {top}_Lgraph
 open {top}_Lgraph
 
--- A deterministic stimulus: bit `k` of the cycle counter, so every input port
--- toggles on a different period and the trace is not all-zero.  Replace this
--- function to drive a real vector; nothing else here needs to change.
-def inputBit (cyc ord w : Nat) : BitVec w :=
+-- A deterministic stimulus: every port gets a different period, so the trace is
+-- not all-zero.  Replace this one function to drive a real vector; nothing else
+-- here needs to change.
+def stim (cyc ord w : Nat) : BitVec w :=
   BitVec.ofNat w ((cyc + ord) % (2 ^ (min w 8)))
 
 def mkIn (cyc : Nat) : {top}_in := {{
@@ -72,16 +104,16 @@ partial def run : Nat -> Nat -> {top}_state -> IO Unit
       run n (cyc + 1) s'
 
 def main : IO Unit := do
-  IO.println "top {top} cycles {a.cycles} flops {nfields}"
+  IO.println "top {top} cycles {a.cycles} inputs {len(ins)} outputs {len(outs)} state {nstate}"
   run {a.cycles} 0 (default : {top}_state)
 '''
     p = dst / f"{top}_LegacySim.lean"
     p.write_text(lean)
     print(f"wrote {p}")
-    print(f"  top={top} inputs={len(ins)} outputs={len(outs)} flops={nfields} cycles={a.cycles}")
-    if nfields > 256:
-        print(f"  NOTE: {nfields} flops exceeds LEAN_MAX_CTOR_FIELDS=256.")
-        print("        Elaboration and the proofs will still succeed; code generation will not.")
+    print(f"  top={top} inputs={len(ins)} outputs={len(outs)} state_fields={nstate} cycles={a.cycles}")
+    if nstate > 256:
+        print(f"  NOTE: {nstate} state fields exceeds LEAN_MAX_CTOR_FIELDS=256.")
+        print("        Elaboration and the proofs still succeed; code generation will not.")
     return 0
 
 
