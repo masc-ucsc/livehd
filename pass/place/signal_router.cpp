@@ -109,9 +109,10 @@ Signal_route_proposals Signal_router::try_route(const ph::Net& net, const Signal
     result.reason = "alignment layer excluded by routing profile";
     return result;
   }
+  const auto expired = [&] { return std::chrono::steady_clock::now() >= request.limits.deadline; };
   // All proposal strategies require search work. Reject exhausted requests
   // before constructing the whole-frame pin-access guard.
-  if (std::chrono::steady_clock::now() >= request.limits.deadline) {
+  if (expired()) {
     result.timed_out = true;
     result.reason    = "route deadline";
     return result;
@@ -122,7 +123,6 @@ Signal_route_proposals Signal_router::try_route(const ph::Net& net, const Signal
   }
   struct Access_deadline {};
   std::unique_ptr<Pin_escape_guard> local_escapes;
-  const auto                        expired = [&] { return std::chrono::steady_clock::now() >= request.limits.deadline; };
   const auto*                       escapes = pin_escapes_;
   if (!escapes) {
     try {
@@ -180,7 +180,7 @@ Signal_route_proposals Signal_router::try_route(const ph::Net& net, const Signal
   std::string access_rejection;
   bool        rejected_parallel = false;
   const auto  rejected          = [&](Signal_route_geometry& candidate) {
-    if (std::chrono::steady_clock::now() >= request.limits.deadline) {
+    if (expired()) {
       result.timed_out = true;
       return true;
     }
@@ -205,7 +205,7 @@ Signal_route_proposals Signal_router::try_route(const ph::Net& net, const Signal
         continue;  // Short via pads are not long parallel runs.
       }
       for (auto id : occupancy_.query(shape.layer, r, static_cast<int64_t>(std::ceil(2 * width)), net.name)) {
-        if (std::chrono::steady_clock::now() >= request.limits.deadline) {
+        if (expired()) {
           result.timed_out = true;
           return true;
         }
