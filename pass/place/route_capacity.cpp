@@ -10,7 +10,10 @@
 namespace livehd::placement {
 namespace ph = physical;
 namespace {
-bool inside(const ph::Rect& a, const ph::Rect& b) { return a.xl <= b.xl && a.yl <= b.yl && a.xh >= b.xh && a.yh >= b.yh; }
+// True when a lies farther than d from b along either axis.
+bool apart(const ph::Rect& a, const ph::Rect& b, double d) {
+  return a.xl > b.xh + d || a.xh < b.xl - d || a.yl > b.yh + d || a.yh < b.yl - d;
+}
 }  // namespace
 Route_capacity::Route_capacity(const ph::Technology& tech, const ph::Floorplan& fp, const ph::Routing_occupancy& obstacles,
                                Route_capacity_grid grid, const std::function<void()>& checkpoint)
@@ -27,7 +30,7 @@ Route_capacity::Route_capacity(const ph::Technology& tech, const ph::Floorplan& 
       throw std::invalid_argument("invalid capacity bounds");
     }
   }
-  if (grid_.bounds.xl >= grid_.bounds.xh || grid_.bounds.yl >= grid_.bounds.yh || !inside(fp.die, grid_.bounds)) {
+  if (grid_.bounds.empty() || !fp.die.contains(grid_.bounds)) {
     throw std::invalid_argument("capacity bounds outside die");
   }
   const double dx = (grid_.bounds.xh - grid_.bounds.xl) / grid_.bins_x, dy = (grid_.bounds.yh - grid_.bounds.yl) / grid_.bins_y;
@@ -52,12 +55,12 @@ Route_capacity::Route_capacity(const ph::Technology& tech, const ph::Floorplan& 
     if (!horizontal && layer.direction != "VERTICAL") {
       throw std::invalid_argument("unknown capacity layer direction");
     }
-    const auto   clearance = rules_.clearance(name);
-    const double width     = layer.width * fp.dbu;
-    if (!clearance || !std::isfinite(width) || width <= 0 || width > INT32_MAX || width != std::round(width)
-        || int64_t(width) % 2) {
+    const auto clearance = rules_.clearance(name);
+    const auto nominal   = ph::wire_width_dbu(layer, fp.dbu);
+    if (!clearance || !nominal) {
       throw std::invalid_argument("unsupported capacity layer rules");
     }
+    const double width = *nominal;
     layers_.emplace(name, Layer_index{cells_.size(), double(*clearance) + width / 2 + 1});
     std::set<int64_t> coordinates;
     const double      lo = horizontal ? grid_.bounds.yl : grid_.bounds.xl, hi = horizontal ? grid_.bounds.yh : grid_.bounds.xh;
@@ -65,12 +68,10 @@ Route_capacity::Route_capacity(const ph::Technology& tech, const ph::Floorplan& 
       if (t.layer != name || t.axis != (horizontal ? "Y" : "X")) {
         continue;
       }
-      if (t.mask || t.same_mask || t.step <= 0 || t.count <= 0 || t.step > INT32_MAX || t.count > INT32_MAX || t.start < INT32_MIN
-          || t.start > INT32_MAX) {
+      if (!t.supported()) {
         throw std::invalid_argument("unsupported capacity tracks");
       }
-      const auto first = std::max<int64_t>(0, std::ceil((lo + width / 2 - t.start) / t.step));
-      const auto last  = std::min<int64_t>(t.count - 1, std::floor((hi - width / 2 - t.start) / t.step));
+      const auto [first, last] = t.index_range(lo + width / 2, hi - width / 2);
       if (last - first > 1000000) {
         throw std::invalid_argument("oversized capacity track set");
       }
@@ -136,8 +137,7 @@ Route_capacity::Route_capacity(const ph::Technology& tech, const ph::Floorplan& 
               continue;
             }
             const auto& footprint = track->footprint;
-            if (obstacle.rect.xl > footprint.rect.xh + *clearance || obstacle.rect.xh < footprint.rect.xl - *clearance
-                || obstacle.rect.yl > footprint.rect.yh + *clearance || obstacle.rect.yh < footprint.rect.yl - *clearance) {
+            if (apart(obstacle.rect, footprint.rect, *clearance)) {
               continue;
             }
             if (!rules_.spacing(footprint, obstacle).legal) {
@@ -180,15 +180,12 @@ void Route_capacity::add_obstructions(const ph::Routing_occupancy& added, const 
         checkpoint();
       }
       auto& cell = cells_[index];
-      if (!cell.report.usable_tracks || obstacle.rect.xl > cell.bounds.xh + reach
-          || obstacle.rect.xh < cell.bounds.xl - reach || obstacle.rect.yl > cell.bounds.yh + reach
-          || obstacle.rect.yh < cell.bounds.yl - reach) {
+      if (!cell.report.usable_tracks || apart(obstacle.rect, cell.bounds, reach)) {
         continue;
       }
       for (auto& track : cell.tracks) {
         const auto& r = track.footprint.rect;
-        if (!track.usable || obstacle.rect.xl > r.xh + clearance || obstacle.rect.xh < r.xl - clearance
-            || obstacle.rect.yl > r.yh + clearance || obstacle.rect.yh < r.yl - clearance) {
+        if (!track.usable || apart(obstacle.rect, r, clearance)) {
           continue;
         }
         if (!rules_.spacing(track.footprint, obstacle).legal) {
@@ -346,7 +343,7 @@ Route_capacity_trial Route_capacity::check_impl(const std::vector<ph::Shape>& sh
         return fail("invalid capacity shape");
       }
     }
-    if (s.rect.xl >= s.rect.xh || s.rect.yl >= s.rect.yh || !inside(grid_.bounds, s.rect)) {
+    if (s.rect.empty() || !grid_.bounds.contains(s.rect)) {
       return fail("capacity shape outside grid");
     }
     bool        touched = false;
@@ -366,9 +363,7 @@ Route_capacity_trial Route_capacity::check_impl(const std::vector<ph::Shape>& sh
           const auto& track = cell.tracks[t];
           // The layer reach bounds every supported spacing rule. Coarse bins
           // contain many tracks too far away to interact with this wire.
-          const auto& rect = track.footprint.rect;
-          if (s.rect.xl > rect.xh + layer.reach || s.rect.xh < rect.xl - layer.reach
-              || s.rect.yl > rect.yh + layer.reach || s.rect.yh < rect.yl - layer.reach) {
+          if (apart(s.rect, track.footprint.rect, layer.reach)) {
             continue;
           }
           if (rules_.spacing(track.footprint, s).legal) {

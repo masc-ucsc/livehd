@@ -44,21 +44,11 @@ std::function<bool(const physical::Component&)> repeater_wire_filter(const physi
       Bounds               bounds;
       const auto include = [&](const physical::Shape& shape) {
         auto [it, inserted] = bounds.try_emplace(shape.layer, body);
-        auto& box           = it->second;
-        for (const auto x : {shape.rect.xl, shape.rect.xh}) {
-          for (const auto y : {shape.rect.yl, shape.rect.yh}) {
-            const auto   xy = physical::orient_point(x + master.origin_x,
-                                                   y + master.origin_y,
-                                                   master.width,
-                                                   master.height,
-                                                   cell.place.orientation);
-            const double px = xy.first * dbu, py = xy.second * dbu;
-            box.xl = std::min(box.xl, px);
-            box.xh = std::max(box.xh, px);
-            box.yl = std::min(box.yl, py);
-            box.yh = std::max(box.yh, py);
-          }
-        }
+        const auto r        = physical::orient_rect(shape.rect.translated(master.origin_x, master.origin_y),
+                                             master.width,
+                                             master.height,
+                                             cell.place.orientation);
+        it->second          = it->second.hull({r.xl * dbu, r.yl * dbu, r.xh * dbu, r.yh * dbu});
       };
       for (const auto& [name, pin] : master.pins) {
         for (const auto& shape : pin.shapes) {
@@ -92,10 +82,8 @@ std::function<bool(const physical::Component&)> repeater_wire_filter(const physi
       if (!clearance->second) {
         throw std::invalid_argument("cannot prove repeater clearance to existing wiring on " + layer);
       }
-      const physical::Rect box{local.xl + cell.place.x, local.yl + cell.place.y,
-                               local.xh + cell.place.x, local.yh + cell.place.y};
       // Reserve body and any pin/OBS overhang on every layer the cell occupies.
-      if (!occupied->query(layer, box, *clearance->second).empty()) {
+      if (!occupied->query(layer, local.translated(cell.place.x, cell.place.y), *clearance->second).empty()) {
         return false;
       }
     }

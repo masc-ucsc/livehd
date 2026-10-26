@@ -12,11 +12,6 @@
 
 namespace livehd::physical {
 namespace {
-bool contact(const Rect& a, const Rect& b, bool cut = false) {
-  const auto x = std::min(a.xh, b.xh) - std::max(a.xl, b.xl);
-  const auto y = std::min(a.yh, b.yh) - std::max(a.yl, b.yl);
-  return cut ? x > 0 && y > 0 : x >= 0 && y >= 0 && (x > 0 || y > 0);
-}
 struct Connections {
   std::vector<size_t> parent;
   size_t              add() {
@@ -59,7 +54,7 @@ Route_connectivity check_route_connectivity(const Technology& tech, const Floorp
       const auto node = graph.add();
       if (tech.layers.contains(s.layer)) {
         for (auto id : index.query(s.layer, s.rect, 0)) {
-          if (contact(s.rect, index.at(id).shape.rect)) {
+          if (s.rect.touches(index.at(id).shape.rect)) {
             graph.join(node, nodes[id]);
           }
         }
@@ -105,7 +100,7 @@ Route_connectivity check_route_connectivity(const Technology& tech, const Floorp
               has_cut = true;
               std::set<std::string> reached;
               for (size_t j = 0; j < shapes.size(); ++j) {
-                if (tech.layers.contains(shapes[j].layer) && contact(shapes[i].rect, shapes[j].rect, true)) {
+                if (tech.layers.contains(shapes[j].layer) && shapes[i].rect.overlaps(shapes[j].rect)) {
                   reached.insert(shapes[j].layer);
                   graph.join(piece_nodes[i], piece_nodes[j]);
                 }

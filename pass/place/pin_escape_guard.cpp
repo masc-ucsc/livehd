@@ -6,6 +6,7 @@
 #include <map>
 #include <stdexcept>
 
+#include "inou/lefdef/cut_rules.hpp"
 #include "inou/lefdef/routing_connectivity.hpp"
 #include "inou/lefdef/routing_geometry.hpp"
 
@@ -107,28 +108,23 @@ Pin_escape_guard::Pin_escape_guard(const ph::Technology& tech, const ph::Floorpl
              return tech.layers.contains(shape.layer) && std::isfinite(r.xl) && std::isfinite(r.yl) && std::isfinite(r.xh)
                     && std::isfinite(r.yh) && r.xl < r.xh && r.yl < r.yh;
            })) {
-      const auto& first = pin->second.shapes.front().rect;
-      bounds            = {first.xl + m.origin_x, first.yl + m.origin_y, first.xh + m.origin_x, first.yh + m.origin_y};
+      bounds = pin->second.shapes.front().rect.translated(m.origin_x, m.origin_y);
     }
     for (const auto& shape : pin->second.shapes) {
-      bounds.xl = std::min(bounds.xl, shape.rect.xl + m.origin_x);
-      bounds.yl = std::min(bounds.yl, shape.rect.yl + m.origin_y);
-      bounds.xh = std::max(bounds.xh, shape.rect.xh + m.origin_x);
-      bounds.yh = std::max(bounds.yh, shape.rect.yh + m.origin_y);
+      bounds = bounds.hull(shape.rect.translated(m.origin_x, m.origin_y));
     }
-    const auto [x0, y0] = ph::orient_point(bounds.xl, bounds.yl, m.width, m.height, place.orientation);
-    const auto [x1, y1] = ph::orient_point(bounds.xh, bounds.yh, m.width, m.height, place.orientation);
-    ph::Rect region{std::floor(place.x + std::min(x0, x1) * frame.dbu),
-                    std::floor(place.y + std::min(y0, y1) * frame.dbu),
-                    std::ceil(place.x + std::max(x0, x1) * frame.dbu),
-                    std::ceil(place.y + std::max(y0, y1) * frame.dbu)};
+    const auto     local = ph::orient_rect(bounds, m.width, m.height, place.orientation);
+    const ph::Rect region{std::floor(place.x + local.xl * frame.dbu),
+                          std::floor(place.y + local.yl * frame.dbu),
+                          std::ceil(place.x + local.xh * frame.dbu),
+                          std::ceil(place.y + local.yh * frame.dbu)};
     for (auto v : {region.xl, region.yl, region.xh, region.yh}) {
       if (!std::isfinite(v) || std::abs(v) > INT32_MAX) {
         incomplete_reason_ = "invalid unresolved pin bounds";
         return;
       }
     }
-    if (place.status == ph::Status::UNPLACED || region.xl >= region.xh || region.yl >= region.yh) {
+    if (place.status == ph::Status::UNPLACED || region.empty()) {
       incomplete_reason_ = "unplaced or empty unresolved pin bounds";
       return;
     }
@@ -235,35 +231,21 @@ Pin_escape_guard::Pin_escape_guard(const ph::Technology& tech, const ph::Floorpl
             if (!tech.layers.contains(shape.layer)) {
               continue;
             }
-            const auto transform = [&](double x, double y) {
-              auto [ox, oy] = ph::orient_point(x + m.origin_x, y + m.origin_y, m.width, m.height, place.orientation);
-              return std::pair{place.x + ox * frame.dbu, place.y + oy * frame.dbu};
-            };
-            auto [x0, y0]      = transform(shape.rect.xl, shape.rect.yl);
-            auto [x1, y1]      = transform(shape.rect.xh, shape.rect.yh);
+            auto box           = ph::placed_rect(m, place, frame.dbu, shape.rect);
             bool representable = true;
-            for (auto v : {x0, y0, x1, y1}) {
-              representable &= std::isfinite(v) && std::abs(v) <= INT32_MAX && std::abs(v - std::round(v)) <= 1e-6;
+            for (auto* v : {&box.xl, &box.yl, &box.xh, &box.yh}) {
+              representable &= std::isfinite(*v) && std::abs(*v) <= INT32_MAX && std::abs(*v - std::round(*v)) <= 1e-6;
+              *v             = std::round(*v);
             }
-            if (!representable) {
-              continue;
-            }
-            const ph::Rect box{std::round(std::min(x0, x1)),
-                               std::round(std::min(y0, y1)),
-                               std::round(std::max(x0, x1)),
-                               std::round(std::max(y0, y1))};
-            if (!std::isfinite(box.xl) || !std::isfinite(box.xh) || !std::isfinite(box.yl) || !std::isfinite(box.yh)
-                || box.xl >= box.xh || box.yl >= box.yh) {
+            if (!representable || box.empty()) {
               continue;
             }
             for (auto id : occupancy.query(shape.layer, box, 0)) {
               if (checkpoint) {
                 checkpoint();
               }
-              const auto  wire = occupancy.at(id);
-              const auto& r    = wire.shape.rect;
-              if (wire.routed && wire.net == net.name && std::min(box.xh, r.xh) > std::max(box.xl, r.xl)
-                  && std::min(box.yh, r.yh) > std::max(box.yl, r.yl)) {
+              const auto wire = occupancy.at(id);
+              if (wire.routed && wire.net == net.name && box.overlaps(wire.shape.rect)) {
                 supply_attached = true;
                 break;
               }
@@ -316,21 +298,13 @@ Pin_escape_guard::Pin_escape_guard(const ph::Technology& tech, const ph::Floorpl
         if (via_cut == shapes.end()) {
           throw std::logic_error("pin escape has no " + layers_.cut + " cut");
         }
-        auto shape     = *via_cut;
-        shape.rect.xl += point.x;
-        shape.rect.xh += point.x;
-        shape.rect.yl += point.y;
-        shape.rect.yh += point.y;
-        const auto upper
+        const ph::Shape shape{via_cut->layer, via_cut->rect.translated(point.x, point.y)};
+        const auto      upper
             = std::find_if(shapes.begin(), shapes.end(), [&](const auto& item) { return item.layer == layers_.escape; });
         if (upper == shapes.end()) {
           throw std::logic_error("pin escape has no " + layers_.escape + " landing");
         }
-        auto landing       = *upper;
-        landing.rect.xl   += point.x;
-        landing.rect.xh   += point.x;
-        landing.rect.yl   += point.y;
-        landing.rect.yh   += point.y;
+        const ph::Shape landing{upper->layer, upper->rect.translated(point.x, point.y)};
         // OpenROAD's standard-cell access check requires a preferred-direction
         // escape three wire widths long, with a half-width end cap. Preserve
         // either direction independently; blocking one must not retire both.
@@ -444,10 +418,8 @@ bool Pin_escape_guard::compatible(size_t group, const std::set<size_t>& blocked,
         if (same_net && point.cut.rect == other.cut.rect) {
           continue;
         }
-        const auto dx = std::max({point.cut.rect.xl - other.cut.rect.xh, other.cut.rect.xl - point.cut.rect.xh, 0.});
-        const auto dy = std::max({point.cut.rect.yl - other.cut.rect.yh, other.cut.rect.yl - point.cut.rect.yh, 0.});
-        if ((!same_net && !rules_.spacing(point.landing, other.landing).legal) || (dx == 0 && dy == 0)
-            || (dx < cut_clearance_ && dy < cut_clearance_)) {
+        if ((!same_net && !rules_.spacing(point.landing, other.landing).legal)
+            || ph::violates_cut_spacing(point.cut.rect, other.cut.rect, cut_clearance_)) {
           legal = false;
           break;
         }
@@ -535,10 +507,7 @@ Pin_escape_trial Pin_escape_guard::check(const std::vector<ph::Shape>& shapes, c
         collides = !rules_.spacing(point.escape, shape).legal || !rules_.spacing(point.landing, shape).legal
                    || !rules_.spacing(point.probe, shape).legal;
       } else {
-        const auto& box = point.cut.rect;
-        const auto  dx  = std::max({box.xl - shape.rect.xh, shape.rect.xl - box.xh, 0.});
-        const auto  dy  = std::max({box.yl - shape.rect.yh, shape.rect.yl - box.yh, 0.});
-        collides        = (dx == 0 && dy == 0) || (dx < cut_clearance_ && dy < cut_clearance_);
+        collides = ph::violates_cut_spacing(point.cut.rect, shape.rect, cut_clearance_);
       }
       if (!collides) {
         continue;

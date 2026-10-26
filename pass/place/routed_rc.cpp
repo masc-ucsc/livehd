@@ -24,7 +24,11 @@ bool on(const Point& p, const Segment& s) {
   const auto& [layer, x, y] = p;
   return layer == s.layer && (s.horizontal ? y : x) == s.cross && (s.horizontal ? x : y) >= s.lo && (s.horizontal ? x : y) <= s.hi;
 }
-Point at(const Segment& s, int64_t along) { return {s.layer, s.horizontal ? along : s.cross, s.horizontal ? s.cross : along}; }
+Point    at(const Segment& s, int64_t along) { return {s.layer, s.horizontal ? along : s.cross, s.horizontal ? s.cross : along}; }
+ph::Rect metal(const Segment& s) {
+  return s.horizontal ? ph::Rect{double(s.lo), s.cross - s.width / 2, double(s.hi), s.cross + s.width / 2}
+                      : ph::Rect{s.cross - s.width / 2, double(s.lo), s.cross + s.width / 2, double(s.hi)};
+}
 }  // namespace
 ph::Rc_net routed_rc(const ph::Technology& tech, const ph::Floorplan& fp, const ph::Net& net, const std::string& driver,
                      const std::vector<Route_rc_pin>& pins, const Route_technology_rc& rc, const ph::Route_components* components) {
@@ -63,13 +67,8 @@ ph::Rc_net routed_rc(const ph::Technology& tech, const ph::Floorplan& fp, const 
       if (s.layer != p.layer) {
         continue;
       }
-      const auto point = [&](double x, double y) {
-        const auto [u, v] = ph::orient_point(x + m.origin_x, y + m.origin_y, m.width, m.height, c.place.orientation);
-        return std::pair{c.place.x + u * fp.dbu, c.place.y + v * fp.dbu};
-      };
-      const auto [x0, y0]  = point(s.rect.xl, s.rect.yl);
-      const auto [x1, y1]  = point(s.rect.xh, s.rect.yh);
-      contains            |= p.x > std::min(x0, x1) && p.x < std::max(x0, x1) && p.y > std::min(y0, y1) && p.y < std::max(y0, y1);
+      const auto r  = ph::placed_rect(m, c.place, fp.dbu, s.rect);
+      contains     |= p.x > r.xl && p.x < r.xh && p.y > r.yl && p.y < r.yh;
     }
     if (!contains) {
       throw std::invalid_argument("routed RC access is outside its physical pin");
@@ -165,13 +164,9 @@ ph::Rc_net routed_rc(const ph::Technology& tech, const ph::Floorplan& fp, const 
           }
           if (seen_vias.emplace(v.name, previous->x, previous->y, v.orientation).second) {
             vias.push_back({{layer, previous->x, previous->y}, {other, previous->x, previous->y}, resistance, {}});
-            for (auto pad : shapes) {
+            for (const auto& pad : shapes) {
               if (tech.layers.contains(pad.layer)) {
-                pad.rect.xl += previous->x;
-                pad.rect.xh += previous->x;
-                pad.rect.yl += previous->y;
-                pad.rect.yh += previous->y;
-                vias.back().pads.push_back(std::move(pad));
+                vias.back().pads.push_back({pad.layer, pad.rect.translated(previous->x, previous->y)});
               }
             }
           }
@@ -255,17 +250,9 @@ ph::Rc_net routed_rc(const ph::Technology& tech, const ph::Floorplan& fp, const 
       if (a.layer != b.layer) {
         continue;
       }
-      const auto box = [&](const Segment& e) {
-        const auto width = e.width;
-        return e.horizontal ? ph::Rect{double(e.lo), e.cross - width / 2, double(e.hi), e.cross + width / 2}
-                            : ph::Rect{e.cross - width / 2, double(e.lo), e.cross + width / 2, double(e.hi)};
-      };
-      const auto ar = box(a), br = box(b);
-      const auto ox      = std::min(ar.xh, br.xh) - std::max(ar.xl, br.xl);
-      const auto oy      = std::min(ar.yh, br.yh) - std::max(ar.yl, br.yl);
-      const bool touches = ox >= 0 && oy >= 0 && (ox > 0 || oy > 0);
+      const bool contact = metal(a).touches(metal(b));
       if (a.horizontal == b.horizontal) {
-        if (touches && a.cross != b.cross) {
+        if (contact && a.cross != b.cross) {
           throw std::invalid_argument("non-centerline parallel metal contact in routed RC");
         }
         continue;
@@ -273,7 +260,7 @@ ph::Rc_net routed_rc(const ph::Technology& tech, const ph::Floorplan& fp, const 
       Point cross{a.layer, a.horizontal ? b.cross : a.cross, a.horizontal ? a.cross : b.cross};
       if (on(cross, a) && on(cross, b)) {
         points.emplace(cross, 0);
-      } else if (touches) {
+      } else if (contact) {
         throw std::invalid_argument("non-centerline wire junction in routed RC");
       }
     }
@@ -284,13 +271,8 @@ ph::Rc_net routed_rc(const ph::Technology& tech, const ph::Floorplan& fp, const 
         if (s.layer != pad.layer) {
           continue;
         }
-        const auto     width = s.width;
-        const ph::Rect box   = s.horizontal ? ph::Rect{double(s.lo), s.cross - width / 2, double(s.hi), s.cross + width / 2}
-                                            : ph::Rect{s.cross - width / 2, double(s.lo), s.cross + width / 2, double(s.hi)};
-        const auto     ox    = std::min(box.xh, pad.rect.xh) - std::max(box.xl, pad.rect.xl);
-        const auto     oy    = std::min(box.yh, pad.rect.yh) - std::max(box.yl, pad.rect.yl);
-        const Point    origin{pad.layer, std::get<1>(v.a), std::get<2>(v.a)};
-        if (ox >= 0 && oy >= 0 && (ox > 0 || oy > 0) && !on(origin, s)) {
+        const Point origin{pad.layer, std::get<1>(v.a), std::get<2>(v.a)};
+        if (metal(s).touches(pad.rect) && !on(origin, s)) {
           // A width transition can split a continuous centerline inside the
           // via pad. Its adjacent section still reaches this via through the
           // widened section; do not mistake that for an offset contact.
