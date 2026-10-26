@@ -3,6 +3,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <ranges>
 #include <tuple>
 
 #include "checks.hpp"
@@ -42,18 +43,70 @@ std::set<std::string> worst_drivers(const late::Result& timing, const timeclosur
   }
   return result;
 }
-void refresh_context(Allocation_net& net, const Checkpoint_input& input, const std::map<std::string, size_t>& pins,
-                     const std::map<std::string, const physical::Rc_net*>& wires, const std::map<std::string, std::string>& masters,
-                     const std::map<std::pair<std::string, unsigned>, double>& mass, double optimization_period,
-                     double reference_period, double units, const late::Driver_options& driver) {
+// Native/physical lookups shared by demand discovery and context refresh.
+struct Checkpoint_view {
+  timeclosure::Period_objective                      objective;
+  std::set<std::string>                              critical;
+  std::map<std::string, double>                      window;  // driver -> fresh raw LR severity
+  std::map<std::string, size_t>                      pins;
+  std::map<std::string, const physical::Rc_net*>     wires;
+  std::map<std::string, std::string>                 masters;
+  std::map<std::pair<std::string, unsigned>, double> mass;  // sink/transition LR mass
+};
+Checkpoint_view checkpoint_view(const Checkpoint_input& input) {
+  Checkpoint_view view;
+  view.objective = timeclosure::proxy_objective(input.timing, input.weights.objective);
+  view.critical  = worst_drivers(input.timing, view.objective);
+  for (const auto& w : std::views::values(input.weights.pins)) {
+    view.window[w.driver] = std::max(view.window[w.driver], w.raw);
+  }
+  for (size_t i = 0; i < input.timing.pins.size(); ++i) {
+    require(view.pins.emplace(input.timing.pins[i].name, i).second, "duplicate native checkpoint pin");
+  }
+  for (const auto& net : input.parasitics.nets) {
+    require(view.wires.emplace(net.driver, &net).second, "duplicate checkpoint RC driver");
+  }
+  for (const auto& c : input.parasitics.cells) {
+    require(view.masters.emplace(c.name, c.master).second, "duplicate checkpoint physical instance");
+  }
+  const auto& graph = *input.timing.feasible_graph;
+  for (size_t i = 0; i < graph.arcs.size(); ++i) {
+    if (graph.arcs[i].wire) {
+      const auto& sink                                                = graph.vertices[graph.arcs[i].to];
+      view.mass[{input.timing.pins[sink.pin].name, sink.transition}] += view.objective.arc_mass[i];
+    }
+  }
+  return view;
+}
+// Fresh class and LR severity of an RC owner, counted into demand.
+void classify(Allocation_net& net, const Checkpoint_view& view, Checkpoint_demand& demand) {
+  const auto severity = view.window.find(net.owner);
+  net.classification  = view.critical.contains(net.owner) ? Net_class::critical
+                        : severity != view.window.end()   ? Net_class::window
+                                                          : Net_class::outside_window;
+  net.severity        = severity != view.window.end() ? severity->second : 0;
+  if (net.classification == Net_class::critical) {
+    ++demand.critical_nets;
+  } else if (net.classification == Net_class::window) {
+    ++demand.window_nets;
+  } else {
+    ++demand.outside_nets;
+  }
+}
+void refresh_context(Allocation_net& net, const Checkpoint_input& input, const Checkpoint_view& view, double units,
+                     const late::Driver_options& driver) {
   if (!net.context) {
     return;
   }
-  auto&      c      = *net.context;
-  const auto output = c.driver.name + ":" + c.driver.model.output;
-  const auto source = c.driver.name + ":" + c.driver.model.input;
+  const auto&  pins                = view.pins;
+  const auto&  masters             = view.masters;
+  const double optimization_period = view.objective.optimization_period;
+  const double reference_period    = *input.timing.feasible_graph->reference_period_ps;
+  auto&        c                   = *net.context;
+  const auto   output              = c.driver.name + ":" + c.driver.model.output;
+  const auto   source              = c.driver.name + ":" + c.driver.model.input;
   require(output == net.owner, "checkpoint source identity differs from net owner");
-  if (!pins.contains(source) || !pins.contains(output) || !wires.contains(output)) {
+  if (!pins.contains(source) || !pins.contains(output) || !view.wires.contains(output)) {
     net.context.reset();
     return;
   }
@@ -78,7 +131,7 @@ void refresh_context(Allocation_net& net, const Checkpoint_input& input, const s
   };
   c.driver.output = position(output);
   std::set<std::string> expected, observed;
-  for (const auto& pin : wires.at(output)->nodes) {
+  for (const auto& pin : view.wires.at(output)->nodes) {
     if (!pin.pin.empty() && pin.pin != output) {
       require(expected.insert(pin.pin).second, "duplicate physical sink in current RC");
     }
@@ -98,69 +151,23 @@ void refresh_context(Allocation_net& net, const Checkpoint_input& input, const s
       const auto& state = input.timing.pins[pins.at(sink.name)].transitions[t];
       sink.required_ps[t]
           = state.required_ps ? std::optional<double>(*state.required_ps + optimization_period - reference_period) : std::nullopt;
-      const auto found   = mass.find({sink.name, t});
-      sink.multiplier[t] = found == mass.end() ? 0 : found->second;
+      const auto found   = view.mass.find({sink.name, t});
+      sink.multiplier[t] = found == view.mass.end() ? 0 : found->second;
     }
   }
   require(expected == observed, "checkpoint context omits/changes original sink membership");
   c.normalization_period_ps = *input.timing.achievable_period_ps;
   c.driver_options          = driver;
 }
-Checkpoint_demand refresh_nets(const Checkpoint_input& input, std::vector<Allocation_net> nets, const late::Driver_options& driver,
-                               double units) {
+Checkpoint_demand refresh_nets(const Checkpoint_input& input, const Checkpoint_view& view, std::vector<Allocation_net> nets,
+                               const late::Driver_options& driver, double units) {
   Checkpoint_demand result;
   require(input.timing.characterized_boundary_policy == driver.characterized_boundary
               && input.timing.bounded_boundary_policy == driver.bounded_boundary,
           "checkpoint driver policy differs from native timing");
-  const auto                    objective = timeclosure::proxy_objective(input.timing, input.weights.objective);
-  const auto                    critical  = worst_drivers(input.timing, objective);
-  std::map<std::string, double> window;
-  for (const auto& [pin, w] : input.weights.pins) {
-    (void)pin;
-    window[w.driver] = std::max(window[w.driver], w.raw);
-  }
-  std::map<std::string, size_t> pins;
-  for (size_t i = 0; i < input.timing.pins.size(); ++i) {
-    require(pins.emplace(input.timing.pins[i].name, i).second, "duplicate native checkpoint pin");
-  }
-  std::map<std::string, const physical::Rc_net*> wires;
-  for (const auto& net : input.parasitics.nets) {
-    require(wires.emplace(net.driver, &net).second, "duplicate checkpoint RC driver");
-  }
-  std::map<std::string, std::string> masters;
-  for (const auto& c : input.parasitics.cells) {
-    require(masters.emplace(c.name, c.master).second, "duplicate checkpoint physical instance");
-  }
-  std::map<std::pair<std::string, unsigned>, double> mass;
-  const auto&                                        graph = *input.timing.feasible_graph;
-  for (size_t i = 0; i < graph.arcs.size(); ++i) {
-    if (graph.arcs[i].wire) {
-      const auto& sink                                           = graph.vertices[graph.arcs[i].to];
-      mass[{input.timing.pins[sink.pin].name, sink.transition}] += objective.arc_mass[i];
-    }
-  }
   for (auto& net : nets) {
-    net.classification = critical.contains(net.owner) ? Net_class::critical
-                         : window.contains(net.owner) ? Net_class::window
-                                                      : Net_class::outside_window;
-    net.severity       = window.contains(net.owner) ? window.at(net.owner) : 0;
-    if (net.classification == Net_class::critical) {
-      ++result.critical_nets;
-    } else if (net.classification == Net_class::window) {
-      ++result.window_nets;
-    } else {
-      ++result.outside_nets;
-    }
-    refresh_context(net,
-                    input,
-                    pins,
-                    wires,
-                    masters,
-                    mass,
-                    objective.optimization_period,
-                    *graph.reference_period_ps,
-                    units,
-                    driver);
+    classify(net, view, result);
+    refresh_context(net, input, view, units, driver);
     if (!net.context) {
       ++result.missing_contexts;
     }
@@ -181,45 +188,17 @@ Checkpoint_demand discover_checkpoint_demand(const Checkpoint_input& input, cons
   require(std::isfinite(units) && units > 0 && max_nets > 0, "invalid checkpoint demand selection bounds/units");
   Checkpoint_demand result;
 #if DREAMPLACE_NATIVE_DENSITY_RESERVATION_API >= 1 && DREAMPLACE_NATIVE_PIN_TIMING_API >= 3
-  const auto                    objective = timeclosure::proxy_objective(input.timing, input.weights.objective);
-  const auto                    critical  = worst_drivers(input.timing, objective);
-  std::map<std::string, double> window;
-  for (const auto& [pin, weight] : input.weights.pins) {
-    (void)pin;
-    window[weight.driver] = std::max(window[weight.driver], weight.raw);
-  }
+  const auto            view = checkpoint_view(input);
   std::set<std::string> managed;
   if (input.previous) {
-    for (const auto& [owner, spans] : input.previous->allocation.sites.reservations()) {
-      (void)spans;
-      managed.insert(owner);
-    }
-  }
-  std::map<std::string, const physical::Rc_net*> wires;
-  std::map<std::string, size_t>                  pins;
-  std::map<std::string, std::string>             masters;
-  for (const auto& cell : input.parasitics.cells) {
-    require(masters.emplace(cell.name, cell.master).second, "duplicate demand physical instance");
-  }
-  for (size_t i = 0; i < input.timing.pins.size(); ++i) {
-    require(pins.emplace(input.timing.pins[i].name, i).second, "duplicate demand native pin");
+    const auto owners = std::views::keys(input.previous->allocation.sites.reservations());
+    managed.insert(owners.begin(), owners.end());
   }
   std::vector<Allocation_net> selected;
   for (const auto& wire : input.parasitics.nets) {
-    require(wires.emplace(wire.driver, &wire).second, "duplicate demand RC driver");
     Allocation_net net;
-    net.owner          = wire.driver;
-    net.classification = critical.contains(net.owner) ? Net_class::critical
-                         : window.contains(net.owner) ? Net_class::window
-                                                      : Net_class::outside_window;
-    net.severity       = window.contains(net.owner) ? window.at(net.owner) : 0;
-    if (net.classification == Net_class::critical) {
-      ++result.critical_nets;
-    } else if (net.classification == Net_class::window) {
-      ++result.window_nets;
-    } else {
-      ++result.outside_nets;
-    }
+    net.owner = wire.driver;
+    classify(net, view, result);
     if (net.classification != Net_class::outside_window || managed.contains(net.owner)) {
       selected.push_back(std::move(net));
     }
@@ -229,6 +208,8 @@ Checkpoint_demand discover_checkpoint_demand(const Checkpoint_input& input, cons
   });
   result.omitted_nets = selected.size() > max_nets ? selected.size() - max_nets : 0;
   selected.resize(std::min(selected.size(), max_nets));
+  const auto& pins    = view.pins;
+  const auto& masters = view.masters;
   for (auto& net : selected) {
     net.input_search_complete = false;
     const auto split          = net.owner.rfind(':');
@@ -255,7 +236,7 @@ Checkpoint_demand discover_checkpoint_demand(const Checkpoint_input& input, cons
     context.driver.name  = instance;
     context.driver.model = {masters.at(instance), source.substr(input_split + 1), net.owner.substr(split + 1)};
     bool supported       = true;
-    for (const auto& node : wires.at(net.owner)->nodes) {
+    for (const auto& node : view.wires.at(net.owner)->nodes) {
       if (node.pin.empty() || node.pin == net.owner) {
         continue;
       }
@@ -274,7 +255,7 @@ Checkpoint_demand discover_checkpoint_demand(const Checkpoint_input& input, cons
       net.context = std::move(context);
     }
   }
-  auto refreshed          = refresh_nets(input, std::move(selected), driver, units);
+  auto refreshed          = refresh_nets(input, view, std::move(selected), driver, units);
   result.nets             = std::move(refreshed.nets);
   result.missing_contexts = refreshed.missing_contexts;
   result.supported_api    = true;
@@ -292,7 +273,7 @@ Checkpoint_result prepare_checkpoint(const Checkpoint_input& input, const Checkp
   require(input.iteration >= settings.start, "joint checkpoint before configured activation");
   Checkpoint_result result;
 #if DREAMPLACE_NATIVE_DENSITY_RESERVATION_API >= 1 && DREAMPLACE_NATIVE_PIN_TIMING_API >= 3
-  auto  demand            = refresh_nets(input, problem.nets, driver, settings.native_units_per_um);
+  auto  demand            = refresh_nets(input, checkpoint_view(input), problem.nets, driver, settings.native_units_per_um);
   auto& nets              = demand.nets;
   result.critical_nets    = demand.critical_nets;
   result.window_nets      = demand.window_nets;
