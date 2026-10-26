@@ -45,6 +45,22 @@ refused = run('sta', base + ['--set', 'pass.usyn.physical=domino_provisional', '
 assert refused['error']['class'] == 'usage' and 'synth.opentimer=false' in refused['error']['hint'], refused['error']
 internal = run('internal', base + domino + ['--set', 'pass.usyn.lef=x.lef', '--workdir', str(root / 'R')], False)
 assert 'INTERNAL' in internal['error']['message'], internal['error']
+row_internal = run('internal_row', base + domino + ['--set', 'pass.usyn.row_access=x', '--workdir', str(root / 'R')], False)
+assert 'INTERNAL' in row_internal['error']['message'] and 'synth.place.row_access' in row_internal['error']['hint'], row_internal
+# Every consumer the profile does not support is a usage error before the
+# mapper runs; each names its own reason.
+abc = [a if a != 'synth.mapper=usyn' else 'synth.mapper=abc' for a in base]
+place_on = ['--set', 'synth.place=true', '--set', 'synth.place.timing_driven=false']
+for leg, args, needle in (
+        ('mapper', abc + domino, 'needs synth.mapper=usyn'),
+        ('timing_place', base + domino + ['--set', 'synth.place=true'], 'need OpenTimer'),  # timing-driven by default
+        ('resize', base + domino + place_on + ['--set', 'synth.place.resize=true'], 'need OpenTimer'),
+        ('resynth', base + domino + place_on + ['--set', 'synth.place.resynth=true'], 'need OpenTimer'),
+        ('pg', base + domino + place_on + ['--set', 'synth.place.pg=asap7'], 'synth.place.pg'),
+        ('busorder', base + domino + place_on + ['--set', 'synth.place.region.busorder=true'], 'single-row cells'),
+        ('boundarypins', base + domino + place_on + ['--set', 'synth.place.region.boundarypins=true'], 'single-row cells')):
+    error = run(f'refused_{leg}', args + ['--workdir', str(root / 'R')], False)['error']
+    assert error['class'] == 'usage' and needle in error['message'], (leg, error)
 
 # select=all: domino_clock comes from the SDC's one port clock.
 W = root / 'W'
