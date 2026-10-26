@@ -344,7 +344,11 @@ clock's period); `synth.place.stage_timing.require_complete` fails short of
 complete coverage and `.clock_uncertainty_ps` sets the full-cycle
 uncertainty. It writes `place/stage_timing.json` and `qor.place.stage_timing`
 and is never part of the placement cache identity. A netlist that keeps
-word-valued ports is timed on its bit-level DEF import. `//tools:stage_timing_probe`
+word-valued ports is timed on its bit-level DEF import, which also reads the
+placement's `memory_proxies.lef`: a native memory (USYN keeps every memory one
+block) is its virtual proxy macro there, without a Liberty model, so the
+report is `incomplete` (uncertified, `uncharacterized cell`) rather than a
+failure. `//tools:stage_timing_probe`
 reruns the same report offline on a saved placement, with coefficient
 overrides for sweeps that must not re-place.
 

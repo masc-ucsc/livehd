@@ -246,10 +246,17 @@ stage::Clock_spec stage_timing_clock(const std::string& port, const Eprp_var::Ep
 }
 // The stage timer of this run (2d-domplace E): the Liberty, the bundle's
 // provisional cells, the SDC or the clock spec and the placement LEFs, built
-// once for the report and every domino sizing trial.
+// once for the report and every domino sizing trial. A native memory is placed
+// as a virtual proxy macro (pass/place/memory_proxy.cpp) declared only in
+// `<place_dir>/memory_proxies.lef`; the bit-level DEF import of a netlist that
+// keeps the memory's word-valued ports needs that LEF too.
 std::unique_ptr<stage::Stage_timer> make_stage_timer(const std::string& liberty, const std::string& sdc, const std::string& top,
-                                                     const std::string& bundle, const std::vector<std::string>& lefs,
-                                                     const stage::Clock_spec& clock, double clock_uncertainty_ps) {
+                                                     const std::string& bundle, std::vector<std::string> lefs,
+                                                     const std::string& place_dir, const stage::Clock_spec& clock,
+                                                     double clock_uncertainty_ps) {
+  if (const auto proxy_lef = fs::path(place_dir) / "memory_proxies.lef"; fs::is_regular_file(proxy_lef)) {
+    lefs.push_back(proxy_lef.string());
+  }
   stage::Stage_timer_inputs inputs;
   std::string               first_liberty;
   for (const auto path : absl::StrSplit(liberty, absl::ByAnyChar(", \t\n"), absl::SkipEmpty())) {
@@ -2159,6 +2166,7 @@ void synth_command(Options& opts, Result& res) {
                                          top,
                                          bundle_path,
                                          place_options.lefs,
+                                         root + "/place",
                                          *stage_clock,
                                          stage_timing_uncertainty);
         }
@@ -2341,6 +2349,7 @@ void synth_command(Options& opts, Result& res) {
                                        top,
                                        bundle_path,
                                        place_options.lefs,
+                                       root + "/place",
                                        *stage_clock,
                                        stage_timing_uncertainty);
       }

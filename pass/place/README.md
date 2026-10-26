@@ -3850,6 +3850,11 @@ in the shipped ASAP7 Liberty are retained with recorded warnings, matching
 OpenSTA. A related output with no external net is bound through its real instance
 and IO declaration, without creating a pin or changing LGraph connectivity.
 
+An instance without a Liberty timing model (a native memory's proxy macro,
+`uncharacterized cell`) stays unbound and is listed as unsupported, which leaves
+the evaluation uncertified. A physical RC net it drives or loads is skipped or
+keeps that pin as wire capacitance only, rather than refusing the whole run.
+
 Zero-wire evaluation still includes actual pin/output loads. Optional in-memory
 `physical::Parasitics` supply connected resistor trees with wire-only capacitance;
 pin loads are added once per transition. `rc_tree.{hpp,cpp}` computes per-sink

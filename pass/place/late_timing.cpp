@@ -7,6 +7,7 @@
 #include <limits>
 #include <numeric>
 #include <queue>
+#include <set>
 #include <sstream>
 #include <stdexcept>
 #include <utility>
@@ -134,6 +135,9 @@ struct Proxy::Impl {
   std::vector<size_t>                   order;
   std::vector<std::string>              unsupported;
   std::vector<std::string>              warnings;
+  // Instances left unbound (uncharacterized, e.g. a native memory's proxy
+  // macro): their pins are not in the timing graph, already reported above.
+  std::set<std::string>                    opaque_cells;
   struct Logic {
     std::vector<std::string> variables;
     uint64_t                 truth = 0;
@@ -476,12 +480,14 @@ struct Proxy::Impl {
       const auto declaration = node.get_subnode_io();
       if (!declaration || declaration->get_graph()) {
         unsupported.push_back("native late timing requires mapped, flat cell instances: " + std::string(node.get_name()));
+        opaque_cells.emplace(node.get_name());
         continue;
       }
       const std::string master(declaration->get_name());
       const auto* const found = characterized(master);
       if (!found) {
         unsupported.push_back("uncharacterized cell: " + std::string(node.get_name()) + " (" + master + ")");
+        opaque_cells.emplace(node.get_name());
         continue;
       }
       const size_t cell = cells.size();
@@ -1448,10 +1454,23 @@ struct Proxy::Impl {
     }
     std::map<size_t, const physical::Rc_net*> physical_nets;
     std::vector<Star_net>                     star_nets;
+    // A pin of an unbound cell (a native memory's proxy macro): not in the
+    // timing graph, the cell is already reported unsupported.
+    const auto                                opaque_pin = [&](const std::string& pin) {
+      const auto colon = pin.rfind(':');
+      return colon != std::string::npos && opaque_cells.contains(pin.substr(0, colon));
+    };
     if (rc) {
       for (const auto& net : rc->nets) {
         const auto found = identities.find(net.driver);
         if (found == identities.end() || !nets.contains(found->second)) {
+          // A net an unbound cell drives, or whose only timed loads sit on one,
+          // has no timing arc here.
+          if (std::any_of(net.nodes.begin(), net.nodes.end(), [&](const physical::Rc_node& node) {
+                return opaque_pin(node.pin);
+              })) {
+            continue;
+          }
           throw std::invalid_argument("RC driver is absent from mapped connectivity: " + net.driver);
         }
         if (!physical_nets.emplace(found->second, &net).second) {
@@ -1484,6 +1503,9 @@ struct Proxy::Impl {
             continue;
           }
           const auto pin = identities.find(node.pin);
+          if (pin == identities.end() && opaque_pin(node.pin)) {
+            continue;  // an unbound cell's load: its wire capacitance stays, no pin load or arrival
+          }
           if (pin == identities.end() || std::find(sinks.begin(), sinks.end(), pin->second) == sinks.end()) {
             throw std::invalid_argument("physical RC sink differs from mapped connectivity: " + node.pin);
           }
