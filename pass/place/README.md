@@ -7,6 +7,46 @@ Enable `synth.place.fp=true` explicitly for centroid floorplanning and the separ
 macro-refinement/final-cell passes. The legacy `r8h2`/`r8h3` macro modes and manual
 macro-centroid diagnostic have been removed.
 
+## Spatial partitions: grid, region, bin
+
+Placement partitions the core in three roles. Each role has one option prefix
+and one C++ type; options and docs use exactly these names.
+
+| Role | Stage | Semantics | Options | C++ |
+|---|---|---|---|---|
+| `grid` | global GP (FP, macro, final) | Uniform tiles; cells deposit area/demand and read forces. No membership, never gates movement. | `synth.place.grid.*` | native `Options::bins_x/bins_y/auxiliary_bins` |
+| `region` | detail final, after final GP and before legalization | Irregular rectangles cut at fixed macro edges and IO bus spans, at most `region.max_cells` movable cells each. Explicit membership; crossings, virtual pins and bus order live on region edges. | `synth.place.region.*` | `Region_mesh` (`region_mesh.hpp`) |
+| `bin` | legalization | Uniform tiles with usable capacity (row sites minus macro halos and fixed WELLTAP/SPACER), before/after occupancy and a hard density cap. Membership by apportioned area. | `synth.place.legalize.bin.*`, `synth.place.satlegalize.bin.*` | `Capacity_bins` (`capacity_bins.hpp`) |
+
+| Option | Default | Meaning |
+|---|---|---|
+| `grid.density` | `64` | density-grid bins per axis |
+| `grid.density_mode` | `fixed` | `fixed`, `dynamic` (movable-area grid up to `grid.density_max`), or `macro` (32..64 from the macro size) |
+| `grid.density_max` | `512` | dynamic-grid cap per axis |
+| `grid.route` | `inherit` | the one routing grid for RUDY/RSMT/URoute, macro channel pressure, terminal bins and SAT route-grid bins; `inherit` = `grid.density` even in dynamic mode, or an explicit 2..1024 |
+| `grid.local` | `512` | local spreading grid per axis |
+| `region.max_cells` | `10000` | movable-cell cap per region rectangle |
+| `region.merge_um` | `5` | merge macro-edge/IO-span cut lines closer than this |
+| `region.busorder`, `region.boundarypins`, `region.pinalign` | `false` | the mesh consumers; their sub-options keep their names under the same prefix |
+| `legalize.bin.grid` | `route` | terminal legalization bins: the routing grid (bounded for tiny cores) or an explicit 1..1024 |
+| `legalize.bin.max_density` | `0.8` | hard terminal bin cap; must exceed the GP target |
+| `satlegalize.bin.size_um` | empty | fixed SAT bins `W,H` µm anchored at the die origin |
+| `satlegalize.bin.grid` | `none` | `route` uses the routing grid for SAT bins; excludes `bin.size_um` |
+
+Stage-scoped grids keep their names: `<stage>.warpspace.bins` (16) and
+`preroute.bins` (64). URoute resamples the routing grid through its fixed model
+resolution; that is not a partition option. The pre-3g spellings (`bins`,
+`dynamic_bins`, `auto_bins`, `bin_max`, `local_density_bins`, `busorder*`,
+`boundarypins*`, `pinalign`, `legalize.max_density`, `satlegalize.region_size`,
+`satlegalize.route_grid`) are accepted for one release: lhd rewrites them to the
+names above and emits a `deprecated-option` warning. Report JSON keys are
+unchanged until the aliases are removed.
+
+`Cell_criticality` (`cell_criticality.hpp`) computes the per-cell timing inputs
+the region and bin consumers share (min own-pin slack, clock contact, untimed
+pins); each consumer keeps its own movability rule. Bus order and boundary
+pins share `node_weight_criticality()`/`limit_displacement()`.
+
 `synth.place.io_resynth=5` enables placement-aware whole-color ABC resynthesis.
 At each completed stage, OpenTimer's in-memory pin arrivals/required times are
 reduced to region port bits; clock and reset nets are excluded. A near-critical
@@ -150,7 +190,7 @@ the stability window but never extend the continuation deadline. Satisfied
 density does not keep increasing the density penalty during this continuation.
 The GP/FP JSON records the deadline, budget exhaustion, and whether timing was
 observed; a legal placement stopped by the budget is not reported as converged.
-For the small full-sky130 trial, `synth.place.bins=16` and
+For the small full-sky130 trial, `synth.place.grid.density=16` and
 `synth.place.iterations=1500` reached the overflow target; the earlier 32-bin/500-iteration
 trial legalized but did not converge in GP. This is fixture evidence, not a
 universal tuning recommendation.
@@ -739,12 +779,13 @@ limits are undecided and never count as proven infeasibility. Accepted pairs
 remain relational constraints while the window is solved, rather than fixing
 absolute coordinates immediately.
 
-`synth.place.satlegalize.region_size=W,H` selects fixed regions in microns;
+`synth.place.satlegalize.bin.size_um=W,H` selects fixed SAT bins in microns
+(the `bin` role; reports call them fixed regions);
 one number selects a square. Empty preserves the original pair-centered
 windows. `spill_neighbors=true` enables noncritical overflow movement to
-less-dense adjacent regions and requires an explicit region size or `route_grid=true`. These are
+less-dense adjacent bins and requires `bin.size_um` or `bin.grid=route`. These are
 opt-in experiments; the existing defaults are unchanged. A 40 by 40 micron
-experiment uses `region_size=40,40` and an explicit cell budget large enough
+experiment uses `bin.size_um=40,40` and an explicit cell budget large enough
 for the full region (`max_cells` accepts up to 65536). Region size is never
 reduced to satisfy that budget.
 
@@ -772,11 +813,11 @@ overflow was removed or silently retrying a smaller region. Per-region reports
 include exact cell counts, bounds, capacity, density and accepted transfers;
 the bounded region-selection scope is recorded explicitly.
 
-`synth.place.satlegalize.route_grid=true` selects the exact final native
-RSMT-RUDY grid instead of physical `region_size`; the two are mutually exclusive.
-This opt-in requires explicit final-stage `route.model=rsmt`, routability,
-fixed bin counts (no `auto_bins`) and fresh timing feedback. The requested
-128 by 128 experiment uses `synth.place.bins=128`. These are **bin counts over
+`synth.place.satlegalize.bin.grid=route` selects the exact final native
+RSMT-RUDY routing grid (`grid.route`) instead of physical `bin.size_um`; the two are
+mutually exclusive. This opt-in requires explicit final-stage `route.model=rsmt`, routability,
+a non-macro density grid (no `grid.density_mode=macro`) and fresh timing feedback. The requested
+128 by 128 experiment uses `synth.place.grid.density=128`. These are **bin counts over
 the core**, not track counts. Dynamic density bins retain the configured
 auxiliary routing grid. Baseline runs can export the map with SAT disabled.
 
@@ -1160,7 +1201,7 @@ The native flow has two independent opt-in spreading controls:
   this field; macro density, halos and the existing overlap forces remain
   separate. The force repels separated cells as well as overlapping cells and
   decays over `synth.place.local_density_range=4` local-bin pitches.
-  `synth.place.local_density_bins=512` chooses its grid. Strength is relative
+  `synth.place.grid.local=512` chooses its grid. Strength is relative
   to the ordinary GP force, calibrated against target density and local-bin
   pitch rather than the current field magnitude. Only local area above the
   soft target emits charge; its distance-decaying field can push neighboring
@@ -1169,12 +1210,12 @@ The native flow has two independent opt-in spreading controls:
   Local spreading uses the native solver and can run alongside virtual density
   particles. It does not support external `GpState` continuation yet; in-process
   timing checkpoints work.
-- `synth.place.dynamic_bins=false` retains the configured density grid.
+- `synth.place.grid.density_mode=fixed` retains the configured density grid.
   When enabled, the ideal bin area is average movable-instance area divided by
   target density, following OpenROAD's rule. Power-of-two counts account for
-  core aspect ratio and are capped by `synth.place.bin_max=512` per axis
-  (32..1024, power of two). This differs from legacy `auto_bins`, which still
-  uses macro pitch and is limited to 32..64. The configured `place.bins` grid
+  core aspect ratio and are capped by `synth.place.grid.density_max=512` per axis
+  (32..1024, power of two). This differs from `grid.density_mode=macro`, which
+  uses macro pitch and is limited to 32..64. The configured `place.grid.density` grid
   remains in use for routing feedback, macro channel pressure, legalization
   and detailed placement, isolating the density-resolution experiment.
 
@@ -1222,7 +1263,7 @@ The source is real standard-cell area, including below-target density, so a
 macro can prefer a quieter neighborhood before cells exceed the soft target.
 `synth.place.macro.cell_density_reach=2` sets its screening length to twice
 the longest physical SRAM side, excluding halo padding. This is a gradual
-decay length, not a hard distance cutoff. The grid uses `local_density_bins`;
+decay length, not a hard distance cutoff. The grid uses `grid.local`;
 `local_density_range` continues to control cell-to-cell spreading separately.
 Weak contributions from all real cells add linearly, without a minimum
 cell-area requirement. The coefficient is calibrated once against ordinary
@@ -1373,7 +1414,7 @@ are independent controls for staged experiments (plain placement):
 
 | Option | Default | Behavior |
 |---|---|---|
-| `auto_bins` | `false` | Override `bins` with power-of-two grids, 32–64 per axis, targeting the smallest physical macro dimension; without macros use four average cell pitches. Automatic refinement is capped at twice the original 32-bin grid per axis. Resolve before halo padding. |
+| `grid.density_mode=macro` | `fixed` | Override `grid.density` with power-of-two grids, 32–64 per axis, targeting the smallest physical macro dimension; without macros use four average cell pitches. Automatic refinement is capped at twice the original 32-bin grid per axis. Resolve before halo padding. |
 | `exact_macro_density` | `false` | Remove the sqrt(2)-bin density smoothing floor for non-CORE macros; preserve physical footprint plus halo. |
 | `scale_macro_density` | `false` | Charge movable macro occupancy at target density, including in the overflow metric, and compensate filler area. Prevent a resolved, isolated macro from falsely violating a sub-unity target. |
 | `macro_overlap` | `0` | Squared macro intersection-area penalty on occupancy envelopes, normalized by each pair's minimum area to the power 1.5 for coordinate-unit invariance. |
@@ -1690,8 +1731,8 @@ Physical filler insertion, if a downstream implementation tool requires it, is
 outside LiveHD placement. The experimental `synth.place.filler_width` option was
 removed with virtual filler insertion.
 
-All future Eyeriss comparisons explicitly set `synth.place.bins=64` and
-`synth.place.auto_bins=false` for every GP stage. The native default grid is unchanged;
+All future Eyeriss comparisons explicitly set `synth.place.grid.density=64` and
+`synth.place.grid.density_mode=fixed` for every GP stage. The native default grid is unchanged;
 earlier mixed-grid results are historical.
 
 ### Optional floorplan, macro and cell passes
@@ -1992,7 +2033,7 @@ In this mode `macro_transparency_period` controls snapshot frequency only.
 
 Cell-only spreading can be combined with transparency: `local_density_weight`
 sets its strength, `local_density_range` its decay length in local-bin pitches,
-and `local_density_bins` its independent grid. Transparent macro/mask bodies do
+and `grid.local` its independent grid. Transparent macro/mask bodies do
 not subtract local capacity. `local_density_target=-1` inherits global density;
 an explicit value in 0..1 sets a separate real-cell target without changing
 filler population or the global target. Zero emits pressure from all real-cell
@@ -2385,7 +2426,8 @@ Controls under `synth.place.legalize.`:
 
 | Key | Default | Meaning |
 | --- | --- | --- |
-| `max_density` | 0.8 | Mandatory bin area cap; must exceed GP target density |
+| `bin.max_density` | 0.8 | Mandatory bin area cap; must exceed GP target density |
+| `bin.grid` | `route` | Bins per axis: the routing grid (`grid.route`, bounded for tiny cores) or an explicit 1..1024 used as given |
 | `critical_fraction` | 0.1 | Fraction of timed data nets selected globally |
 | `local_pair_fraction` | 0.5 | Local-pair occupancy budget relative to GP target |
 | `padding_sites` | 1 | Left/right reserved sites for remaining cells |
@@ -3280,15 +3322,17 @@ macro IO bus adjustment default on.
 
 ### Experimental final-placement bus ordering
 
-`place.busorder=false` is the default. Opt in with
-`--set synth.place.busorder=true` (or `"busorder": true` in a
+`place.region.busorder=false` is the default. Opt in with
+`--set synth.place.region.busorder=true` (or `"busorder": true` in a
 `physical_repair` configuration). Only the final cell stage uses it, between
 ordinary GP and legalization; macro and IO positions stay fixed.
 
-The mesh is built independently from that run's cell coordinates, macro edges,
-and IO bus spans. Cuts within 5 um merge; regions over 10,000 movable cells split
-along their longest dimension. Pruning alternates H/V candidates sorted by their
-initial neighbor distance, without reranking. The mesh then stays fixed.
+The region mesh (`Region_mesh`, built once per detail-final phase and shared
+with boundary pins and pin alignment) comes from that run's cell coordinates, macro edges,
+and IO bus spans. Cuts within `region.merge_um=5` um merge; regions over
+`region.max_cells=10000` movable cells split along their longest dimension.
+Pruning alternates H/V candidates sorted by their initial neighbor distance,
+without reranking. The mesh then stays fixed; `region_mesh.json` describes it.
 
 RSMT crossings supply soft adjacent-bit order constraints. Ascending and
 descending orders both work, including gaps in bit indices. Each virtual crossing
@@ -3300,15 +3344,13 @@ Clock/reset masks apply. Ambiguous branched crossings are measured but do not
 receive single-lane constraints. RSMT uses a deterministic HV realization where
 its branch is diagonal; these are placement estimates, not routed wires.
 
-Controls under `place.busorder.` (diagnostic JSON uses `busorder_` followed by the field):
+Controls under `place.region.busorder.` (diagnostic JSON uses `busorder_` followed by the field):
 
 | Option | Experimental default | Meaning |
 |---|---:|---|
 | `iterations` | 100 | Extra GP iteration budget |
 | `refresh` | 20 | Rebuild crossing constraints between chunks |
 | `weight` | 4 | Ordering strength; 0 is an extra-GP-only control |
-| `max_cells` | 10000 | Initial mesh cell cap |
-| `merge_um` | 5 | Merge distance for initial cuts |
 | `max_displacement_um` | 20 | Movement bound, reduced for timing-weighted cells |
 
 Each chunk starts with final wire smoothing and fresh optimizer state; existing
@@ -3328,24 +3370,24 @@ count, since new disorder can appear outside the original cohort.
 
 ### Experimental fixed boundary pins
 
-`--set synth.place.boundarypins=true` enables a separate final-GP experiment
-(default false), with `place.busorder=false`. The same independently built mesh
+`--set synth.place.region.boundarypins=true` enables a separate final-GP experiment
+(default false), with `place.region.busorder=false`. The same independently built mesh
 is used. All active signal nets are considered; clock/reset masks apply.
 
 Each RSMT branch is cut where it crosses rectangle boundaries. Connected pieces
 inside a rectangle become local placement nets, joined through fixed zero-area
 terminals at the original crossing coordinates. Separate reentries into one
 rectangle remain separate connected pieces. Exterior pieces retain real fixed
-IO terminals. With `place.boundarypins.order=false` (default), crossing positions
+IO terminals. With `place.region.boundarypins.order=false` (default), crossing positions
 are unchanged. There is no cell fence or clock/reset sizing. Nets above the bounded 1,000-pin routing limit remain unsplit and are
 reported. Virtual pins consume no area and never enter STA, legalization, DEF or
 LGraph; only real movable cell coordinates are copied out of the temporary model.
 
-The default extra budget is 50 iterations (`place.boundarypins.iterations`).
-`place.boundarypins.split=false` runs the matched extra-GP control without virtual
+The default extra budget is 50 iterations (`place.region.boundarypins.iterations`).
+`place.region.boundarypins.split=false` runs the matched extra-GP control without virtual
 pins. Both use final wire smoothing, the same optimizer startup and a 20 um
 movement bound reduced by original timing weights
-(`place.boundarypins.max_displacement_um`). Pin coordinates and the partition
+(`place.region.boundarypins.max_displacement_um`). Pin coordinates and the partition
 are frozen throughout this extra phase. Its last result is legalized normally,
 including when placement metrics regress: this experiment measures pin overhead
 and does not use the bus-order candidate selector.
@@ -3357,7 +3399,7 @@ HPWL. `boundarypins/pins.tsv` gives the immutable boundary-pin locations for PNG
 overlays. Diagnostic JSON uses `boundarypins`, `boundarypins_split`,
 `boundarypins_iterations` and `boundarypins_max_displacement_um`.
 
-`place.boundarypins.order=true` uses the same prefix-minimum slot-assignment
+`place.region.boundarypins.order=true` uses the same prefix-minimum slot-assignment
 solver as top-level IO initialization to order bus lanes and minimize weighted
 split-net HPWL. Each virtual pin stays on its original atomic rectangle edge;
 there is no perimeter rotation or pin-to-pin ordering force. Per-bus assignment
@@ -3379,10 +3421,10 @@ timing weights; the main QoR HPWL remains the unweighted physical-net metric.
 
 ### Experimental opposite-edge pin alignment
 
-`--set synth.place.pinalign=true` enables the split-boundary-pin model in the
+`--set synth.place.region.pinalign=true` enables the split-boundary-pin model in the
 final cell placement stage only (default false). It requires
-`place.boundarypins.split=true` and can be combined with
-`place.boundarypins.order=true`. It does not run during floorplan or macro
+`place.region.boundarypins.split=true` and can be combined with
+`place.region.boundarypins.order=true`. It does not run during floorplan or macro
 placement. Diagnostic JSON uses `pinalign`.
 
 After optional bus ordering, the pass follows each split net from its original

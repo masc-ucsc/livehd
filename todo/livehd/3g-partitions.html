@@ -10,7 +10,47 @@
 <nav><span class="brand">LiveHD TODO</span><a href="../index.html">← All tasks</a></nav>
 <main>
 <h1><strong class="item-id">3g-partitions</strong> One vocabulary and shared code for placement grids, regions and bins</h1>
-<p><span class="status">Plan drafted 2026-10-25, not implemented; names pending review against in-flight patches</span></p>
+<p><span class="status">Implemented 2026-10-25 (steps 1&ndash;6); step 7 (new detail-final features) remains open</span></p>
+
+<h2>What landed</h2>
+<ul>
+<li><strong>Re-survey.</strong> After the pending patches merged, the only new partition is
+<code>preroute.bins</code> (64, the pre-route capacity/RSMT grid). It stays stage-scoped, like
+<code>&lt;stage&gt;.warpspace.bins</code>. The name tables below were applied as written.</li>
+<li><strong>Region_mesh</strong> (<code>pass/place/region_mesh.{hpp,cpp}</code>): built once in
+place.cpp, passed by const reference to Busorder and Boundary_pins; the throwaway partition Busorder
+is gone. It records explicit membership and writes <code>region_mesh.json</code>; the
+busorder/boundarypins reports keep their mesh blocks unchanged.</li>
+<li><strong>Capacity_bins</strong> (<code>pass/place/capacity_bins.hpp</code>): the terminal
+legalizer's grid geometry, apportioned deposit, joint capacity check and ring scan.
+<code>Terminal_legalize_report::bins</code> is its <code>Capacity_bin</code> vector; reports are byte-identical.</li>
+<li><strong>Cell_criticality</strong> (<code>pass/place/cell_criticality.{hpp,cpp}</code>, ruling R2
+alternative): shared slack/clock/untimed inputs for SAT spill (eligibility and diagnostic
+evidence) and terminal slacks; <code>node_weight_criticality()</code>/<code>limit_displacement()</code>
+for bus order and boundary pins; <code>timing::Feedback::find_pin</code> for the pin lookup.</li>
+<li><strong>Options</strong>: every name in the table below, plus <code>legalize.bin.grid</code> and
+<code>satlegalize.bin.grid=none|route</code>. Old spellings are DEPRECATED registry entries; lhd rewrites
+them before use and emits a <code>deprecated-option</code> diagnostic. <code>grid.route=N</code>
+is independent of the density count (R4). R3: the mesh is built only when a consumer is enabled.</li>
+<li><strong>Docs</strong>: docs/placer.html (glossary, grid/region/bin panels) and the README partition section.</li>
+</ul>
+<h2>Deviations from the plan</h2>
+<ul>
+<li>The SAT fixed-region path was <em>not</em> ported to Capacity_bins. SAT capacity counts every
+non-movable component (also fixed logic cells) as an obstacle and uses exact geometry. Terminal
+capacity rounds to sites and counts fixed logic as occupancy. One function for both would change
+SAT results, and steps 2&ndash;4 must not change behavior.</li>
+<li>Cell_criticality has no <code>protected_cell</code> or <code>mobility</code> fields. Protection
+(critical locks, accepted alignment endpoints) changes during each transaction, so it stays in each
+consumer. GP mobility is computed inside DREAMPlace from the same net weights as
+<code>node_weight_criticality()</code>. Each consumer computes its own Cell_criticality, because SAT
+reads prects-filtered feedback and terminal legalization reads raw feedback with ignored nets.</li>
+<li>No resolved-options JSON exists, so the deprecation warning goes to the diagnostics stream.
+<code>dynamic_bins</code>/<code>auto_bins</code> could be combined, so they only warn and are read
+when <code>grid.density_mode</code> is absent. Diagnostic JSON keys (<code>dynamic_bins</code>,
+<code>fixed_regions</code>, &hellip;) are unchanged so report parsers keep working. They move
+when the aliases are removed.</li>
+</ul>
 
 <p><strong>Pending patches warning.</strong> Several placement patches are in flight that are
 <em>not</em> in the local tree (they live in other sessions/branches and have not been merged).
