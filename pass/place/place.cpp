@@ -1436,6 +1436,16 @@ void snapshot_nets(ph::Floorplan& frame, const View& v) {
     }
   }
 }
+// The view's frame with its current mapped nets and cell poses, as timing
+// and repair callbacks receive a placement checkpoint.
+void snapshot_frame(ph::Floorplan& frame, const View& v) {
+  frame = v.fp;
+  snapshot_nets(frame, v);
+  frame.components.clear();
+  for (const auto& c : v.cells) {
+    frame.components.push_back({c.name, c.macro, c.place});
+  }
+}
 void make_arrays(View& v, const ph::Technology& tech) {
   v.design             = {};
   const bool  oriented = v.native_orientations || std::any_of(v.cells.begin(), v.cells.end(), [&](const auto& c) {
@@ -1854,12 +1864,9 @@ void refresh_floorplan_view(View& v, const View& baseline, Result& state, const 
     }
   }
   make_arrays(v, tech);
-  state.floorplan = v.fp;
-  snapshot_nets(state.floorplan, v);
-  state.floorplan.components.clear();
+  snapshot_frame(state.floorplan, v);
   for (const auto& c : v.cells) {
     c.node.attr(attrs::place).set(c.place);
-    state.floorplan.components.push_back({c.name, c.macro, c.place});
   }
 }
 // Routing-track correction belongs between macro legalization and row packing.
@@ -6285,12 +6292,7 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
           checkpoint.net_weights       = v.weights;
           checkpoint.fp_library        = result.fp_library;
           checkpoint.fp_buffer_origins = result.fp_buffer_origins;
-          checkpoint.floorplan         = v.fp;
-          snapshot_nets(checkpoint.floorplan, v);
-          checkpoint.floorplan.components.clear();
-          for (const auto& c : v.cells) {
-            checkpoint.floorplan.components.push_back({c.name, c.macro, c.place});
-          }
+          snapshot_frame(checkpoint.floorplan, v);
           const auto baseline       = v;
           const auto baseline_owner = result.fp_library;
           const auto refresh        = [&](Result& state) {
@@ -6385,15 +6387,12 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
         checkpoint.prects     = v.prects;
         checkpoint.graph      = result.graph;
         checkpoint.fp_library = result.fp_library;
-        checkpoint.floorplan  = view.fp;
-        snapshot_nets(checkpoint.floorplan, view);
-        checkpoint.floorplan.components.clear();
+        snapshot_frame(checkpoint.floorplan, view);
         auto rc_options       = options;
         rc_options.full       = false;
         checkpoint.parasitics = estimate_rc(view, tech, rc_options, checkpoint.pin_locations);
         for (const auto& c : view.cells) {
           c.node.attr(attrs::place).set(c.place);
-          checkpoint.floorplan.components.push_back({c.name, c.macro, c.place});
         }
         record_poses(*checkpoint.parasitics, view);
         if (options.after_stage(Placement_stage::floorplan, checkpoint)) {
@@ -6555,16 +6554,11 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
         checkpoint.graph       = result.graph;
         checkpoint.net_weights = v.weights;
         checkpoint.fp_library  = result.fp_library;
-        checkpoint.floorplan   = view.fp;
-        snapshot_nets(checkpoint.floorplan, view);
-        checkpoint.floorplan.components.clear();
+        snapshot_frame(checkpoint.floorplan, view);
         auto rc_options = options;
         rc_options.full = false;
         fs::create_directories(options.output_dir);
         checkpoint.parasitics = estimate_rc(view, tech, rc_options, checkpoint.pin_locations);
-        for (const auto& c : view.cells) {
-          checkpoint.floorplan.components.push_back({c.name, c.macro, c.place});
-        }
         record_poses(*checkpoint.parasitics, view);
         // Propagation belongs to untimed GP. Do not defer STA to finish jumps.
         final_gp_timing_started |= final_timing;
@@ -7226,9 +7220,7 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
         checkpoint.graph       = result.graph;
         checkpoint.fp_library  = result.fp_library;
         checkpoint.net_weights = v.weights;
-        checkpoint.floorplan   = view.fp;
-        snapshot_nets(checkpoint.floorplan, view);
-        checkpoint.floorplan.components.clear();
+        snapshot_frame(checkpoint.floorplan, view);
         auto rc_options = options;
         rc_options.full = false;
         Rc_reuse_stats reuse;
@@ -7240,9 +7232,6 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
               || fresh->approximate != checkpoint.parasitics->approximate || fresh_locations != checkpoint.pin_locations) {
             throw std::runtime_error("reused checkpoint RC differs from fresh full construction");
           }
-        }
-        for (const auto& c : view.cells) {
-          checkpoint.floorplan.components.push_back({c.name, c.macro, c.place});
         }
         record_poses(*checkpoint.parasitics, view);
         Gp_observation sample;
