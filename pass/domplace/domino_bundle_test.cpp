@@ -162,8 +162,9 @@ TEST(DominoBundle, RefusalsLeaveNoBundle) {
   Fixture    f;
   const auto dir = fs::path(testing::TempDir()) / "bundle_refused";
   ASSERT_TRUE(generate_domino_bundle(f.design, f.inputs, dir).ok);
+  // Abstracts drawn for another cell than the reference inverter.
   auto other              = f.inputs;
-  other.geometry.inverter = "sky130_fd_sc_hd__buf_1";
+  other.geometry          = geometry_inputs(f.tech, "sky130_fd_sc_hd__buf_1", domino_route_policy(f.tech, nullptr));
   const auto refused      = generate_domino_bundle(f.design, other, dir);
   EXPECT_FALSE(refused.ok);
   EXPECT_NE(refused.reason.find("reference inverter"), std::string::npos) << refused.reason;

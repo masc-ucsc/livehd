@@ -50,7 +50,7 @@ std::optional<Bundle_design> collect_domino_design(const usyn::Logical_design& d
 
 struct Bundle_inputs {
   const Domino_reference*                          reference = nullptr;
-  Geometry_inputs                                  geometry;    // the reference inverter must be reference->inverter
+  Geometry_inputs                                  geometry;    // its footprint's inverter must be reference->inverter
   std::string                                      technology;  // the route policy's source (domino_route_policy)
   Stage_model                                      stage;       // its clock; coefficients the bundle cannot derive stay null
   // Hand-set evaluate and precharge delays in FO4 of the reference inverter;

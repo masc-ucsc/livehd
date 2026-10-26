@@ -16,9 +16,25 @@ namespace livehd::domplace {
 // Provisional two-row LEF abstracts for domino masters (2d-domplace C) and the
 // transformed pin-access check that F repeats on placed frames.
 //
+// One PG edge rail of the reference inverter in rail-local DBU: y about the
+// row edge, xl as the overhang before x = 0 and xh as the overhang past the
+// width.
+struct Domino_edge_rail {
+  std::string                  pin, use;
+  std::vector<physical::Shape> shapes;
+};
+// The reference inverter's LEF geometry, resolved once: A_NOT on the LEF
+// basis, the core SITE and the PG rail pattern the abstracts repeat.
+struct Domino_footprint {
+  std::string                     inverter;  // the LEF macro it was resolved from
+  std::string                     site;
+  int64_t                         site_width = 0, row_height = 0, grid = 1, area = 0;  // DBU, area in DBU^2
+  std::array<Domino_edge_rail, 2> rails;                                               // bottom (y = 0) and top (y = H) edges
+  int64_t                         rail_reach = 0;                                      // farthest rail extent from its edge
+};
 struct Geometry_inputs {
   const physical::Technology*     tech = nullptr;
-  std::string                     inverter;        // named reference inverter: A_NOT, core SITE, PG rail pattern
+  Domino_footprint                footprint;
   physical::Pin_access_layers     access;          // vertical pin metal, horizontal escape, cut
   std::string                     vertical_layer;  // stand-in vertical-access check layer
   physical::Row_access_convention row_access;
@@ -29,9 +45,11 @@ struct Geometry_inputs {
 // via joining the two, branch = layer 2. `source` records the choice
 // ("tech-profile:<name>" or "lef-stack"). A stack too short to derive throws.
 physical::Route_policy              domino_route_policy(const physical::Technology&, std::string* source);
-// From a Tech_profile route policy: access and branch_layer (the stand-in
-// vertical-access layer). Technologies without a profile pass a Route_policy.
-Geometry_inputs geometry_inputs(const physical::Technology&, std::string inverter, const physical::Route_policy&,
+// The named reference inverter's footprint (it must be a one-row CORE cell
+// on a LEF SITE with distinct PG rails on both row edges, else this throws),
+// with the route policy's access and branch_layer (the stand-in
+// vertical-access layer).
+Geometry_inputs geometry_inputs(const physical::Technology&, const std::string& inverter, const physical::Route_policy&,
                                 physical::Row_access_convention = {});
 // Template t0: local row h has the access of core row h, so t0 fits N on the
 // bottom core row (and FS on odd rows of generated N/FS frames).
@@ -61,7 +79,7 @@ struct Domino_variant_geometry {
 // reference.registers[variant], charged once. Variants share the PDN term.
 // width_override (DBU, whole sites) keeps the layout unchanged so a narrow
 // width can be refused by check_domino_access. Invalid inputs, including a
-// reference inverter other than in.inverter, throw.
+// reference inverter other than the footprint's, throw.
 Domino_variant_geometry generate_domino_macro(const usyn::Physical_cell_interface& cell, const usyn::Gate_formula::Metrics& pdn,
                                               const Domino_reference& reference, size_t variant, const Geometry_inputs& in,
                                               std::optional<int64_t> width_override = {});
@@ -86,6 +104,9 @@ struct Access_check {
 // that row) or the stand-in vertical rule (a strip in that row holding a
 // vertical_layer wire on a track, at least one escape pitch long), and PG
 // rails must lie on all three row edges. Tracks come from the LEF pitch and
-// offset with the first core row and site at the lattice origin.
-Access_check check_domino_access(const Geometry_inputs&, const physical::Macro&, const std::array<physical::Row_access, 2>& halves);
+// offset with the first core row and site at the lattice origin. `scratch` is
+// a caller-owned copy of the technology that the check adds its master to;
+// one copy serves every call.
+Access_check check_domino_access(const Geometry_inputs&, const physical::Macro&, const std::array<physical::Row_access, 2>& halves,
+                                 physical::Technology& scratch);
 }  // namespace livehd::domplace

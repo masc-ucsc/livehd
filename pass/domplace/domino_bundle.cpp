@@ -119,13 +119,7 @@ Bundle_result generate_domino_bundle(const Bundle_design& design, const Bundle_i
     const auto& reference = *inputs.reference;
     const auto& tech      = *inputs.geometry.tech;
     auto&       notes     = result.diagnostics;
-    const auto  inv_macro = tech.macros.find(inputs.geometry.inverter);
-    if (inputs.geometry.inverter != reference.inverter.name || inv_macro == tech.macros.end()
-        || !tech.sites.contains(inv_macro->second.site)) {
-      throw std::invalid_argument("the reference inverter " + reference.inverter.name
-                                  + " must be the geometry inverter on a LEF site");
-    }
-    const auto& site = inv_macro->second.site;
+    const auto& site      = inputs.geometry.footprint.site;  // checked when the footprint was resolved
     fs::create_directories(out_dir);
 
     // FO4 of the reference inverter, a labeled estimate: its first-slew
@@ -179,6 +173,7 @@ Bundle_result generate_domino_bundle(const Bundle_design& design, const Bundle_i
     // Abstracts, access checks and models of every master and variant.
     std::vector<std::vector<Variant>> variants(design.masters.size());
     std::map<std::string, ph::Macro>  macros;
+    auto                              scratch = tech;  // every access check adds its master here
     std::set<std::string>             unsupported;
     std::string                       verilog
         = std::format("// Provisional domino models (model v{}): cycle-level next state only.\n", kDominoModelVersion);
@@ -196,7 +191,7 @@ Bundle_result generate_domino_bundle(const Bundle_design& design, const Bundle_i
           auto& variant    = variants[m].emplace_back();
           variant.cell     = domino_interface(master, v);
           variant.geometry = generate_domino_macro(variant.cell, *metrics, reference, v, inputs.geometry);
-          variant.access   = check_domino_access(inputs.geometry, variant.geometry.macro, variant.geometry.halves);
+          variant.access   = check_domino_access(inputs.geometry, variant.geometry.macro, variant.geometry.halves, scratch);
           if (!variant.access.failures.empty()) {
             result.reason = std::format("{}: pin access check failed: {}", variant.cell.name, variant.access.failures.front());
             fs::remove_all(out_dir, ec);

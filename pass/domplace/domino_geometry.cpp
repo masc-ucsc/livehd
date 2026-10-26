@@ -49,44 +49,29 @@ Lattice lattice(const ph::Technology& tech, const std::string& name, bool x, con
   }
   return result;
 }
-// One PG edge rail of the reference cell in rail-local DBU: y about the row
-// edge, xl as the overhang before x = 0 and xh as the overhang past the width.
-struct Edge_rail {
-  std::string            pin, use;
-  std::vector<ph::Shape> shapes;
-};
-struct Reference {
-  std::string              site;
-  int64_t                  site_width = 0, row_height = 0, grid = 1, area = 0;  // DBU, area in DBU^2
-  std::array<Edge_rail, 2> rails;                                               // bottom (y = 0) and top (y = H) edges
-  int64_t                  rail_reach = 0;                                      // farthest rail extent from its edge
-};
-Reference reference(const Geometry_inputs& in) {
-  if (!in.tech) {
-    refuse("no technology");
-  }
-  const auto& tech = *in.tech;
-  const auto  it   = tech.macros.find(in.inverter);
+Domino_footprint footprint(const ph::Technology& tech, const std::string& inverter) {
+  const auto it = tech.macros.find(inverter);
   if (it == tech.macros.end()) {
-    refuse("reference inverter is absent from LEF: " + in.inverter);
+    refuse("reference inverter is absent from LEF: " + inverter);
   }
   const auto& m    = it->second;
   const auto  site = tech.sites.find(m.site);
   if (m.klass != "CORE" || m.virtual_proxy || site == tech.sites.end()) {
-    refuse("reference inverter must be a CORE cell on a LEF SITE: " + in.inverter);
+    refuse("reference inverter must be a CORE cell on a LEF SITE: " + inverter);
   }
   const auto grid = ph::manufacturing_grid_dbu(tech, tech.dbu);
   if (!grid) {
     refuse("unsupported manufacturing grid");
   }
-  Reference r;
+  Domino_footprint r;
+  r.inverter       = inverter;
   r.site           = m.site;
   r.site_width     = to_dbu(site->second.width, tech.dbu, "site width");
   r.row_height     = to_dbu(site->second.height, tech.dbu, "site height");
   r.grid           = *grid;
-  const auto width = to_dbu(m.width, tech.dbu, in.inverter + " width");
-  if (r.site_width <= 0 || width <= 0 || to_dbu(m.height, tech.dbu, in.inverter + " height") != r.row_height) {
-    refuse("reference inverter must be one site row high: " + in.inverter);
+  const auto width = to_dbu(m.width, tech.dbu, inverter + " width");
+  if (r.site_width <= 0 || width <= 0 || to_dbu(m.height, tech.dbu, inverter + " height") != r.row_height) {
+    refuse("reference inverter must be one site row high: " + inverter);
   }
   r.area = width * r.row_height;
   for (const auto& [name, pin] : m.pins) {
@@ -95,7 +80,7 @@ Reference reference(const Geometry_inputs& in) {
     }
     for (const auto& shape : pin.shapes) {
       const auto local = shape.rect.translated(m.origin_x, m.origin_y);
-      const auto what  = in.inverter + "/" + name;
+      const auto what  = inverter + "/" + name;
       const auto xl = to_dbu(local.xl, tech.dbu, what), xh = to_dbu(local.xh, tech.dbu, what);
       const auto yl = to_dbu(local.yl, tech.dbu, what), yh = to_dbu(local.yh, tech.dbu, what);
       // Edge rails span the cell and are centered on a row edge; wells are not rails.
@@ -106,7 +91,7 @@ Reference reference(const Geometry_inputs& in) {
       const auto center = edge * r.row_height;
       auto&      rail   = r.rails[edge];
       if (!rail.pin.empty() && rail.pin != name) {
-        refuse("two PG pins share one rail edge of " + in.inverter);
+        refuse("two PG pins share one rail edge of " + inverter);
       }
       rail.pin = name;
       rail.use = pin.use;
@@ -118,7 +103,7 @@ Reference reference(const Geometry_inputs& in) {
     }
   }
   if (r.rails[0].pin.empty() || r.rails[1].pin.empty() || r.rails[0].pin == r.rails[1].pin) {
-    refuse("reference inverter needs distinct PG rails on both row edges: " + in.inverter);
+    refuse("reference inverter needs distinct PG rails on both row edges: " + inverter);
   }
   return r;
 }
@@ -128,7 +113,7 @@ ph::Rect microns(const ph::Rect& r, int64_t dbu) {
 }
 // The inverter's rails as in local row 0 and in their FS image in local row 1
 // (y -> 2H - y), stretched to the cell width: bottom polarity at 0 and 2H.
-void add_pg_pins(ph::Macro& m, const Reference& r, int64_t width, int64_t dbu) {
+void add_pg_pins(ph::Macro& m, const Domino_footprint& r, int64_t width, int64_t dbu) {
   const auto h = r.row_height;
   for (int edge = 0; edge < 2; ++edge) {
     const auto& rail = r.rails[edge];
@@ -316,9 +301,9 @@ ph::Route_policy domino_route_policy(const ph::Technology& tech, std::string* so
   }
   return route;
 }
-Geometry_inputs geometry_inputs(const ph::Technology& tech, std::string inverter, const ph::Route_policy& route,
+Geometry_inputs geometry_inputs(const ph::Technology& tech, const std::string& inverter, const ph::Route_policy& route,
                                 ph::Row_access_convention convention) {
-  return {&tech, std::move(inverter), route.access, route.branch_layer, std::move(convention)};
+  return {&tech, footprint(tech, inverter), route.access, route.branch_layer, std::move(convention)};
 }
 std::array<Row_access, 2> template_halves(const ph::Row_access_convention& convention) {
   return {convention.at(0), convention.at(1)};
@@ -326,11 +311,14 @@ std::array<Row_access, 2> template_halves(const ph::Row_access_convention& conve
 Domino_variant_geometry generate_domino_macro(const usyn::Physical_cell_interface& pins, const usyn::Gate_formula::Metrics& pdn,
                                               const Domino_reference& reference_cells, size_t variant, const Geometry_inputs& in,
                                               std::optional<int64_t> width_override) {
-  const auto  ref  = reference(in);
+  if (!in.tech) {
+    refuse("no technology");
+  }
+  const auto& ref  = in.footprint;
   const auto& tech = *in.tech;
   const auto  dbu  = tech.dbu;
-  if (reference_cells.inverter.name != in.inverter) {
-    refuse("the reference inverter " + reference_cells.inverter.name + " is not the geometry inverter " + in.inverter);
+  if (reference_cells.inverter.name != ref.inverter) {
+    refuse("the reference inverter " + reference_cells.inverter.name + " is not the geometry inverter " + ref.inverter);
   }
   if (variant >= reference_cells.registers.size()) {
     refuse(std::format("no register for drive variant {} of {}", variant, pins.name));
@@ -428,9 +416,10 @@ Domino_variant_geometry generate_domino_macro(const usyn::Physical_cell_interfac
   g.a_footprint_um2 = double(g.width) * double(g.height) / dbu2;
   return g;
 }
-Access_check check_domino_access(const Geometry_inputs& in, const ph::Macro& m, const std::array<Row_access, 2>& halves) {
+Access_check check_domino_access(const Geometry_inputs& in, const ph::Macro& m, const std::array<Row_access, 2>& halves,
+                                 ph::Technology& scratch) {
   Access_check out;
-  const auto   ref  = reference(in);
+  const auto&  ref  = in.footprint;
   const auto   dbu  = in.tech->dbu;
   const auto   sw   = ref.site_width;
   const auto   h    = ref.row_height;
@@ -462,7 +451,7 @@ Access_check check_domino_access(const Geometry_inputs& in, const ph::Macro& m, 
     return out;
   }
   const auto signal_pins = outline_clean_pins(m, in.access.pin, dbu, *w, h, out.failures);
-  auto       tech        = *in.tech;
+  auto&      tech        = scratch;
   tech.macros.insert_or_assign(kCheckMaster, m);
   // Frame with LEF-pitch tracks; the first core row and site sit at the origin.
   const auto                   margin = 2 * (*w + std::max({v.pitch, pin.pitch, escape.pitch}));

@@ -134,6 +134,11 @@ std::string temp_lef(const std::string& name, const std::string& text) {
   std::ofstream(path) << text;
   return path.string();
 }
+// The access check with a scratch copy of the technology, as the bundle keeps one.
+Access_check check(const Geometry_inputs& in, const ph::Macro& m, const std::array<ph::Row_access, 2>& halves) {
+  auto scratch = *in.tech;
+  return check_domino_access(in, m, halves, scratch);
+}
 bool has_failure(const Access_check& c, const std::string& prefix, const std::string& text) {
   return std::any_of(c.failures.begin(), c.failures.end(), [&](const auto& f) {
     return f.starts_with(prefix) && f.find(text) != std::string::npos;
@@ -279,7 +284,7 @@ TEST(DominoGeometry, SyntheticAccessHoldsForBothParitiesFlipsPhasesAndDrives) {
       const auto g
           = generate_domino_macro(pins(master.base, master.rails, variant), pdn(master.n_pdn), kSyntheticCells, variant, in);
       SCOPED_TRACE(g.name);
-      const auto c = check_domino_access(in, g.macro, g.halves);
+      const auto c = check(in, g.macro, g.halves);
       EXPECT_TRUE(c.ok);
       EXPECT_TRUE(c.failures.empty()) << c.failures.front();
       EXPECT_TRUE(c.unsupported.empty());
@@ -300,7 +305,7 @@ TEST(DominoGeometry, SyntheticAccessHoldsForBothParitiesFlipsPhasesAndDrives) {
   EXPECT_EQ(wide.w_area, 21 * 54);
   EXPECT_EQ(wide.w_pin, 16 * 72);
   EXPECT_EQ(wide.width, 22 * 54);
-  EXPECT_TRUE(check_domino_access(in, wide.macro, wide.halves).ok);
+  EXPECT_TRUE(check(in, wide.macro, wide.halves).ok);
 }
 TEST(DominoGeometry, MirroredStartsKeepVerticalAccessOnAnUnevenTrackOffset) {
   // M3 tracks 6 nm off the site grid: neither 0 nor half of gcd(54, 36), so a
@@ -311,7 +316,7 @@ TEST(DominoGeometry, MirroredStartsKeepVerticalAccessOnAnUnevenTrackOffset) {
   tech.layers.at("M3").offset_y = .006;
   const auto in                 = geometry_inputs(tech, "INVx1", kSyntheticRoute);
   const auto g                  = generate_domino_macro(pins("__lhd_domino_ab", 4), pdn(4), kSyntheticCells, 0, in);
-  const auto c                  = check_domino_access(in, g.macro, g.halves);
+  const auto c                  = check(in, g.macro, g.halves);
   EXPECT_TRUE(c.failures.empty()) << c.failures.front();
   EXPECT_TRUE(c.ok);
   ASSERT_EQ(c.cases.size(), 8u);
@@ -324,7 +329,7 @@ TEST(DominoGeometry, MissingSymmetryXIsRefused) {
   const auto in      = geometry_inputs(tech, "INVx1", kSyntheticRoute);
   auto       g       = generate_domino_macro(pins("__lhd_domino_ab", 4), pdn(4), kSyntheticCells, 0, in);
   g.macro.symmetry_x = false;
-  const auto c       = check_domino_access(in, g.macro, g.halves);
+  const auto c       = check(in, g.macro, g.halves);
   EXPECT_FALSE(c.ok);
   EXPECT_TRUE(has_failure(c, "macro:", "SYMMETRY X"));
 }
@@ -335,7 +340,7 @@ TEST(DominoGeometry, TooNarrowLayoutIsRefusedNamingThePin) {
   EXPECT_EQ(fit.width, 14 * 54);
   const auto narrow = generate_domino_macro(pins("__lhd_domino_ab", 4), pdn(4), kSyntheticCells, 0, in, 6 * 54);
   EXPECT_EQ(narrow.width, 6 * 54);
-  const auto c = check_domino_access(in, narrow.macro, narrow.halves);
+  const auto c = check(in, narrow.macro, narrow.halves);
   EXPECT_FALSE(c.ok);
   EXPECT_TRUE(has_failure(c, "Q:", "outside"));
   EXPECT_FALSE(has_failure(c, "R0:", "outside"));
@@ -349,7 +354,7 @@ TEST(DominoGeometry, AccessFailuresNameThePinRowOrientationAndPhase) {
     // Off one x-phase's vertical track in the vertical-access row.
     auto m                         = g.macro;
     m.pins.at("R1").shapes[1].rect = m.pins.at("R1").shapes[1].rect.translated(.009, 0);
-    const auto c                   = check_domino_access(in, m, g.halves);
+    const auto c                   = check(in, m, g.halves);
     EXPECT_TRUE(has_failure(c, "R1:", "no vertical access"));
     EXPECT_TRUE(has_failure(c, "R1: start row 0 N x-phase 1:", "core row 1"));
     EXPECT_FALSE(has_failure(c, "R1: start row 0 N x-phase 0:", ""));
@@ -363,7 +368,7 @@ TEST(DominoGeometry, AccessFailuresNameThePinRowOrientationAndPhase) {
         "M2",
         {clk.xl - .05, 0, clk.xh + .05, .27}
     });
-    const auto c = check_domino_access(in, m, g.halves);
+    const auto c = check(in, m, g.halves);
     EXPECT_TRUE(has_failure(c, "CLK: start row 0 N x-phase 0:", "no horizontal access in core row 0"));
     EXPECT_TRUE(has_failure(c, "CLK: start row 1 FS", "no horizontal access in core row 2"));
     EXPECT_FALSE(has_failure(c, "R0:", ""));
@@ -376,7 +381,7 @@ TEST(DominoGeometry, AccessFailuresNameThePinRowOrientationAndPhase) {
         "M1",
         {0, .1, .1, .12}
     });
-    const auto c = check_domino_access(in, m, g.halves);
+    const auto c = check(in, m, g.halves);
     EXPECT_TRUE(has_failure(c, "PG: start row 0 N", "no rail on core row edge 1"));
     EXPECT_TRUE(has_failure(c, "PG: start row 1 FS", "no rail on core row edge 2"));
   }
@@ -392,14 +397,14 @@ TEST(DominoGeometry, OwnerConventionSelectsTheTemplateRows) {
   EXPECT_EQ(g.halves, (std::array{ph::Row_access::vertical, ph::Row_access::horizontal}));
   // Shape 0 (the RC point) moves to the horizontal-access local row 1.
   EXPECT_GE(g.macro.pins.at("R0").shapes[0].rect.yl, .27);
-  EXPECT_TRUE(check_domino_access(in, g.macro, g.halves).ok);
+  EXPECT_TRUE(check(in, g.macro, g.halves).ok);
 }
 TEST(DominoGeometry, Sky130EngineRefusalIsUnverifiedNotPassed) {
   // The pin-access engine fails closed on sky130 mcon ENCLOSURE rules; the
   // vertical rule, outline and PG checks still run and pass.
   const auto in = geometry_inputs(sky130(), kInv, kSky130Route);
   const auto g  = generate_domino_macro(pins("__lhd_domino_ab", 4), pdn(4), kSky130Cells, 0, in);
-  const auto c  = check_domino_access(in, g.macro, g.halves);
+  const auto c  = check(in, g.macro, g.halves);
   EXPECT_FALSE(c.ok);
   EXPECT_TRUE(c.failures.empty()) << c.failures.front();
   EXPECT_EQ(c.unsupported, std::vector<std::string>{"unsupported mcon cut rules"});
@@ -414,10 +419,12 @@ TEST(DominoGeometry, InvalidInputsThrow) {
   EXPECT_THROW(generate_domino_macro(pins("m", 0), pdn(2), kSyntheticCells, 0, in), std::invalid_argument);
   EXPECT_THROW(generate_domino_macro(pins("m", 2), pdn(2), kSyntheticCells, 3, in), std::invalid_argument);
   EXPECT_THROW(generate_domino_macro(pins("m", 2), pdn(2), cells("INVx2", {"DFFx1"}), 0, in), std::invalid_argument);
-  auto bad     = in;
-  bad.inverter = "DFFx9";
-  EXPECT_THROW(generate_domino_macro(pins("m", 2), pdn(2), cells("DFFx9", {"DFFx1"}), 0, bad), std::invalid_argument);
-  bad                = in;
+  // The footprint is resolved once: a missing or non-CORE inverter is refused there.
+  EXPECT_THROW(geometry_inputs(tech, "DFFx9", kSyntheticRoute), std::invalid_argument);
+  auto block                     = tech;
+  block.macros.at("INVx1").klass = "BLOCK";
+  EXPECT_THROW(geometry_inputs(block, "INVx1", kSyntheticRoute), std::invalid_argument);
+  auto bad           = in;
   bad.vertical_layer = "M9";
   EXPECT_THROW(generate_domino_macro(pins("m", 2), pdn(2), kSyntheticCells, 0, bad), std::invalid_argument);
   auto clash     = pins("m", 2);
