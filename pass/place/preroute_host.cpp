@@ -8,6 +8,7 @@
 #include <format>
 #include <fstream>
 #include <stdexcept>
+#include <tuple>
 
 #include "attrs.hpp"
 #include "core/hash_util.hpp"
@@ -22,6 +23,7 @@
 #include "rapidjson/document.h"
 #include "rapidjson/stringbuffer.h"
 #include "rapidjson/writer.h"
+#include "track_capacity.hpp"
 
 namespace livehd::placement {
 namespace {
@@ -110,10 +112,9 @@ void preroute_placed(Result& placed, const Options& options, const Evaluate& eva
   route.demand.degree                                    = options.route_degree;
   route.demand.accuracy                                  = options.route_accuracy;
   route.demand.initialize                                = initialize_route_tables;
-  route.demand.horizontal_capacity = route.demand.vertical_capacity = 0;
-  route.straight_only                                               = options.satlegalize_route;
-  route.critical_fraction                                           = options.satlegalize_route_critical_fraction;
-  route.capacity.count_only_usable_tracks                           = route.straight_only;
+  route.straight_only                                    = options.satlegalize_route;
+  route.critical_fraction                                = options.satlegalize_route_critical_fraction;
+  route.capacity.count_only_usable_tracks                = route.straight_only;
   if (route.straight_only) {
     for (const auto& net : placed.floorplan.nets) {
       std::set<std::string> pins;
@@ -132,17 +133,16 @@ void preroute_placed(Result& placed, const Options& options, const Evaluate& eva
   if (route.straight_only) {
     capacity_layers.insert(capacity_layers.begin(), route_layers.access.pin);
   }
+  route.capacity.layers = capacity_layers;
   for (const auto& name : capacity_layers) {
-    const auto& layer = tech.layers.at(name);
-    route.capacity.layers.push_back(name);
-    if (layer.direction == "HORIZONTAL" && layer.pitch_y > 0) {
-      route.demand.horizontal_capacity += 1 / (layer.pitch_y * tech.dbu);
-    } else if (layer.direction == "VERTICAL" && layer.pitch_x > 0) {
-      route.demand.vertical_capacity += 1 / (layer.pitch_x * tech.dbu);
-    } else {
+    const auto& layer      = tech.layers.at(name);
+    const bool  horizontal = layer.direction == "HORIZONTAL" && layer.pitch_y > 0;
+    const bool  vertical   = layer.direction == "VERTICAL" && layer.pitch_x > 0;
+    if (!horizontal && !vertical) {
       throw std::invalid_argument("pre-route signal layer lacks preferred pitch");
     }
   }
+  std::tie(route.demand.horizontal_capacity, route.demand.vertical_capacity) = lef_track_capacity(tech, capacity_layers);
   std::optional<Result> signal_first;
   if (options.satlegalize_pg_after) {
     route.deferred_pg           = power_grid_profile(tech_profile);

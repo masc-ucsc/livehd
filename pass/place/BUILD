@@ -79,7 +79,7 @@ cc_library(
     hdrs = ["preroute_host.hpp"],
     copts = COPTS,
     visibility = ["//visibility:public"],
-    deps = [":place", ":prects_networks", ":preroute", ":preroute_repair", "//core", "//graph", "//pass/liberty:liberty_dff", "//pass/partition:flatten", "@dreamplace", "@rapidjson"],
+    deps = [":place", ":prects_networks", ":preroute", ":preroute_repair", ":track_capacity", "//core", "//graph", "//pass/liberty:liberty_dff", "//pass/partition:flatten", "@dreamplace", "@rapidjson"],
 )
 
 cc_library(
