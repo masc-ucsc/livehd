@@ -37,12 +37,7 @@ Refusal start_refusal(const ph::Macro& m, const std::string& master, size_t rows
   if (rows != t->second.half.size()) {
     throw std::invalid_argument("multirow row-access template needs a two-row master: " + master);
   }
-  for (size_t half = 0; half < rows; ++half) {
-    if (options.access->at(ph::placed_row_of_half(band, rows, half, o)) != t->second.half[half]) {
-      return Refusal::access;
-    }
-  }
-  return Refusal::none;
+  return ph::row_access_matches(*options.access, band, o, t->second.half) ? Refusal::none : Refusal::access;
 }
 // Append the gaps of row, shifted by offset sites, that overlap [lo, hi).
 void gaps_within(const Row_gaps& row, int64_t offset, int64_t lo, int64_t hi, std::vector<Interval>& out) {
