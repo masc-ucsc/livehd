@@ -213,6 +213,7 @@ cc_library(
     deps = [
         ":contract",
         ":domino_reference",
+        ":physical_eligibility",
         ":physical_select",
         "//pass/usyn:usyn_semantic",
         "@rapidjson",

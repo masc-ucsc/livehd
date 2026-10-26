@@ -8,6 +8,7 @@
 #include <stdexcept>
 
 #include "json_writer.hpp"
+#include "physical_eligibility.hpp"
 #include "stage_model.hpp"
 
 namespace livehd::domplace {
@@ -84,7 +85,7 @@ std::string physical_report(const usyn::Logical_design& design, const Physical_r
   }
 
   uint64_t                        states = 0, eligible = 0, converted = 0;
-  std::map<std::string, uint64_t> reasons;
+  std::map<std::string, uint64_t> reasons, barriers;
   std::set<std::string>           masters;
   double                          estimate = 0, rails = 0, footprint = 0;
   bool                            rounded      = true;  // every converted cell has a bundle footprint
@@ -95,6 +96,11 @@ std::string physical_report(const usyn::Logical_design& design, const Physical_r
   for (const auto& region : design.regions) {
     if (!region.physical) {
       continue;
+    }
+    for (const auto& row : region.selected.source.sources) {
+      if (const auto barrier = barrier_reason(region.selected.source, row)) {
+        ++barriers[std::string(reason_code(*barrier))];
+      }
     }
     for (const auto& s : region.physical->states) {
       ++states;
@@ -131,6 +137,14 @@ std::string physical_report(const usyn::Logical_design& design, const Physical_r
     number(w, reason.c_str(), count);
   }
   w.EndObject();
+  // Native barrier rows (a memory, an opaque instance, a latch, an ICG) by
+  // reason code: never a state, never converted, outside `states`.
+  w.Key("barriers");
+  w.StartObject();
+  for (const auto& [reason, count] : barriers) {
+    number(w, reason.c_str(), count);
+  }
+  w.EndObject();
   w.EndObject();
   // U21: registers folded onto their root clock by recognized gate kind, gated
   // registers left alone by reason (the eligibility rows repeat it), and the
@@ -159,6 +173,17 @@ std::string physical_report(const usyn::Logical_design& design, const Physical_r
     }
     w.StartObject();
     text(w, "module", region.module_name);
+    w.Key("barriers");
+    w.StartArray();
+    for (const auto& row : region.selected.source.sources) {
+      if (const auto barrier = barrier_reason(region.selected.source, row)) {
+        w.StartObject();
+        text(w, "name", row.name);
+        text(w, "reason", std::string(reason_code(*barrier)));
+        w.EndObject();
+      }
+    }
+    w.EndArray();
     w.Key("endpoints");
     w.StartArray();
     for (const auto& s : region.physical->states) {

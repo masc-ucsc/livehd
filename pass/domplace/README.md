@@ -82,6 +82,12 @@ reports its reason code (`reason.hpp`).
 | Clock port is not `domino_clock` | retained | `clock-domain` |
 | Clock is a port of a preserved definition (each instance may clock it from a different root) | retained | `definition-clock` |
 | Memory or opaque scope, transparent latch, ICG latch | retained (barrier) | `memory` / `opaque` / `transparent-latch` / `icg` |
+
+A native barrier is never a frozen state: USYN keeps a memory one native block
+(it is not bit-blasted into registers), so it has no endpoint row. The report
+lists every barrier row of a region (`regions[].barriers`, its source label and
+code) and counts them by code in `totals.barriers`, outside `states`. A memory
+is always `memory`.
 | One-literal endpoint | retained unless `domino_identity=true` | `identity-endpoint` |
 | No support after cofactoring | always retained | `constant-endpoint` |
 | No positive-output formula within stack, branches and inputs | retained | `polarity-illegal` |
@@ -425,9 +431,19 @@ instance its Liberty-basis estimate.
 `<qor>.usyn.json` reports `output` as `logical-mixed`/`mapped-mixed`,
 `physical_profile`, and a `physical` block: settings, reference cells, totals
 by reason with both area bases (`a_domino_estimate` on the Liberty basis,
-`a_footprint_um2` from the bundle's rounded LEF footprints), one row per state
+`a_footprint_um2` from the bundle's rounded LEF footprints), native barriers
+by code (`totals.barriers`, per region `barriers`), one row per state
 with its master, `n_pdn`, `x`, area terms and rails, and the published bundle.
 Areas are proxies, not characterized PPA.
+
+Each converted instance is named after its state, also through the U21 enable
+fold and the U22 RST pin, and placement keeps that name under transparent
+region scopes (pass/place), so `lhd lec` pairs every domino storage with its
+source register by name. `lhd_usyn_memory_lec_smoke.py` checks that with an
+enable, synchronous resets and a Liberty clock gate (no unpaired state,
+PROVEN-full), and that a memory stays a `memory` barrier. A placement that
+holds both two-row domino cells and a memory proxy macro is not supported yet
+(the macro stage refuses movable two-row cells).
 
 ## lhd
 

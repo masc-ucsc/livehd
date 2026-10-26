@@ -38,6 +38,13 @@ struct Eligibility {
   std::optional<uint32_t>             clock_root, gated_clock, gate_enable;  // gate_enable: any folded register
   std::optional<usyn::Physical_reset> reset;                                 // a candidate's storage reset (U22)
 };
+// The code of a source row that is a native barrier, not a register: a
+// memory (its scope or role), an opaque/hierarchy row, a transparent latch or
+// an ICG. Such a row is never a convertible state; nullopt for a register.
+// physical_eligibility checks it first, and the report lists every barrier row
+// of a region with it (a native memory has no state bit, so no endpoint row).
+std::optional<Reason> barrier_reason(const synth::Source_state_table& table, const synth::Source_state& source);
+
 std::vector<Eligibility> physical_eligibility(const usyn::Stateful_region& region, std::span<const std::string> input_names,
                                               std::string_view clock, std::span<const usyn::Physical_hint> gating = {});
 

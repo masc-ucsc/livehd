@@ -30,6 +30,22 @@ std::optional<size_t> clock_input(const usyn::Stateful_region& region, uint32_t 
 }
 }  // namespace
 
+std::optional<Reason> barrier_reason(const synth::Source_state_table& table, const synth::Source_state& s) {
+  if (table.scope == State_scope::memory || s.role == State_role::memory) {
+    return Reason::memory;
+  }
+  if (table.scope == State_scope::opaque || s.role == State_role::opaque || s.role == State_role::hierarchy) {
+    return Reason::opaque;
+  }
+  if (s.role == State_role::transparent_latch) {
+    return Reason::transparent_latch;
+  }
+  if (s.role == State_role::icg) {
+    return Reason::icg;
+  }
+  return std::nullopt;
+}
+
 std::vector<Eligibility> physical_eligibility(const usyn::Stateful_region& region, std::span<const std::string> input_names,
                                               std::string_view clock, std::span<const usyn::Physical_hint> gating) {
   if (!region.frozen || region.state_bits.size() != region.frozen->state.size()) {
@@ -58,17 +74,8 @@ std::vector<Eligibility> physical_eligibility(const usyn::Stateful_region& regio
     }
     row.reason = [&] {
       // Barriers first: their clock fields are not register semantics.
-      if (source.scope == State_scope::memory || s.role == State_role::memory) {
-        return Reason::memory;
-      }
-      if (source.scope == State_scope::opaque || s.role == State_role::opaque || s.role == State_role::hierarchy) {
-        return Reason::opaque;
-      }
-      if (s.role == State_role::transparent_latch) {
-        return Reason::transparent_latch;
-      }
-      if (s.role == State_role::icg) {
-        return Reason::icg;
+      if (const auto barrier = barrier_reason(source, s)) {
+        return *barrier;
       }
       if (!s.clock_edge_known) {
         return Reason::unknown_edge;
