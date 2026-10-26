@@ -5276,6 +5276,7 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
   }
   make_arrays(v, tech);
   dp::Options control;
+  double      feature_capacity_h = 0, feature_capacity_v = 0;
   control.max_iterations  = options.iterations;
   control.centroid_weight = v.centroids ? .25 : 0;
   // Fail early only where the final track check will run; timing seeds and
@@ -5390,8 +5391,8 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
                     uroute_id(v),
                     nx,
                     ny,
-                    control.route_capacity_h,
-                    control.route_capacity_v);
+                    feature_capacity_h,
+                    feature_capacity_v);
     };
   }
   if (control.route.model == dp::RouteModel::off) {
@@ -5405,18 +5406,24 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
       = options.routability
         && (control.routability || (options.fp_place && route_policy(options, options.fp_route).model != dp::RouteModel::off));
   if (resolved_uroute.export_features || route_capacity_required) {
-    control.route_capacity_h = control.route_capacity_v = 0;
     for (const auto& name : tech.routing_layers) {
       const auto& l = tech.layers.at(name);
       if (l.direction == "HORIZONTAL" && l.pitch_y > 0) {
-        control.route_capacity_h += 1 / (l.pitch_y * tech.dbu);
+        feature_capacity_h += 1 / (l.pitch_y * tech.dbu);
       }
       if (l.direction == "VERTICAL" && l.pitch_x > 0) {
-        control.route_capacity_v += 1 / (l.pitch_x * tech.dbu);
+        feature_capacity_v += 1 / (l.pitch_x * tech.dbu);
       }
     }
-    if (route_capacity_required && !(control.route_capacity_h > 0 && control.route_capacity_v > 0)) {
+    if (route_capacity_required && !(feature_capacity_h > 0 && feature_capacity_v > 0)) {
       throw std::runtime_error("routability requires horizontal and vertical LEF routing pitches");
+    }
+    // Feature export retains missing physical capacity as zero. Inactive
+    // routing and timing observers keep the native defaults when the LEF
+    // cannot supply both directions.
+    if (feature_capacity_h > 0 && feature_capacity_v > 0) {
+      control.route_capacity_h = feature_capacity_h;
+      control.route_capacity_v = feature_capacity_v;
     }
   }
   control.legalize       = false;
@@ -5977,8 +5984,8 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
                         uroute_id(v),
                         nx,
                         ny,
-                        fp_control.route_capacity_h,
-                        fp_control.route_capacity_v);
+                        feature_capacity_h,
+                        feature_capacity_v);
         };
       }
       fp_control.routability = fp_control.improved_routability
@@ -9012,8 +9019,8 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
                   uroute_id(snapshot),
                   nx,
                   ny,
-                  control.route_capacity_h,
-                  control.route_capacity_v);
+                  feature_capacity_h,
+                  feature_capacity_v);
   }
   if (metrics.uroute_skipped.empty()) {
     metrics.uroute_skipped = selected_uroute.skipped;

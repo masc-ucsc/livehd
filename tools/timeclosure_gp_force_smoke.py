@@ -73,6 +73,10 @@ set_output_delay 0 -clock [get_clocks {sys}] -add_delay [get_ports {z}]
         run = subprocess.run([binary, config], capture_output=True, text=True)
         assert run.returncode == 0, run.stderr
         summary = json.loads((root/'force/summary.json').read_text())
+        # The one-direction fixture cannot certify vertical routing capacity.
+        # Feature export must preserve that absence without breaking observers.
+        exported = json.loads((root/'force/placement/uroute_export/metadata.json').read_text())
+        assert exported['capacity_h'] > 0 and exported['capacity_v'] == 0, exported
         assert summary['mode'] == 'exact_netlist_native_pin_force_gp_experiment'
         assert summary['optimizer_feedback_enabled'] and summary['legalized']
         assert not summary['synthesis_resynthesis'] and not summary['accepted_for_optimization']
