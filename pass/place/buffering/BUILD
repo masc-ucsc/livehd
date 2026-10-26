@@ -14,7 +14,7 @@ cc_library(
     testonly = True,
     hdrs = ["checkpoint_fixture.hpp"],
     copts = COPTS,
-    deps = [":checkpoint", "//pass/place/forces:gp_timing", "//pass/place:place"],
+    deps = [":checkpoint", "//pass/place/forces:gp_timing", "//pass/place:place", "//pass/place:timing_circuit_fixture"],
 )
 
 cc_library(
@@ -205,6 +205,6 @@ cc_test(
 
 filegroup(
     name = "timing_sources",
-    srcs = glob(["*.cpp", "*.hpp"], exclude = ["*_test.cpp"]),
+    srcs = glob(["*.cpp", "*.hpp"], exclude = ["*_test.cpp", "*_fixture.hpp"]),
     visibility = ["//visibility:public"],
 )

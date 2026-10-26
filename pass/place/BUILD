@@ -194,7 +194,16 @@ cc_test(
     size = "small",
     srcs = ["late_timing_test.cpp"],
     copts = COPTS,
-    deps = [":late_timing", "@googletest//:gtest_main"],
+    deps = [":late_timing", ":timing_circuit_fixture", "@googletest//:gtest_main"],
+)
+
+cc_library(
+    name = "timing_circuit_fixture",
+    testonly = True,
+    hdrs = ["timing_circuit_fixture.hpp"],
+    copts = COPTS,
+    visibility = ["//pass/place:__subpackages__"],
+    deps = ["//graph", "//pass/liberty:timing_model"],
 )
 
 cc_library(

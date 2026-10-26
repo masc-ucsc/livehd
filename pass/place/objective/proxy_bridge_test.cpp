@@ -6,7 +6,7 @@
 #include <stdexcept>
 
 #include "gtest/gtest.h"
-#include "node_util.hpp"
+#include "pass/place/timing_circuit_fixture.hpp"
 
 namespace tc    = livehd::placement::timeclosure;
 namespace late  = livehd::placement::late;
@@ -30,40 +30,9 @@ library(test){time_unit:"1ps";capacitive_load_unit(1,ff);default_input_pin_cap:1
  cell_rise(scalar){values("10");}cell_fall(scalar){values("20");}
  rise_transition(scalar){values("2");}fall_transition(scalar){values("3");}}}}
 })";
-struct Circuit {
-  hhds::GraphLibrary                    owner;
-  std::shared_ptr<const model::Library> library = std::make_shared<model::Library>(model::parse(models));
-  std::shared_ptr<hhds::Graph>          graph;
-  Circuit(std::initializer_list<std::string> inputs, std::initializer_list<std::string> outputs) {
-    auto io = owner.create_io("objective_bridge");
-    for (const auto& name : inputs) {
-      io->add_input(name, io->get_input_pin_decls().size());
-      io->set_bits(name, 1);
-    }
-    for (const auto& name : outputs) {
-      io->add_output(name, io->get_output_pin_decls().size());
-      io->set_bits(name, 1);
-    }
-    graph = io->create_graph();
-  }
-  hhds::Node_class cell(const std::string& name, const std::string& master) {
-    auto io = owner.find_io(master);
-    if (!io) {
-      io = owner.create_io(master);
-      for (const auto& [pin, decl] : library->cells.at(master).pins) {
-        if (decl.direction == "input") {
-          io->add_input(pin, io->get_input_pin_decls().size());
-        } else {
-          io->add_output(pin, io->get_output_pin_decls().size());
-        }
-        io->set_bits(pin, 1);
-      }
-    }
-    auto node = livehd::graph_util::create_typed_node(*graph, Ntype_op::Sub);
-    node.set_name(name);
-    node.set_subnode(io);
-    return node;
-  }
+struct Circuit : livehd::placement::test_fixture::Timing_circuit {
+  Circuit(std::initializer_list<std::string> inputs, std::initializer_list<std::string> outputs)
+      : Timing_circuit(models, "objective_bridge", inputs, outputs) {}
 };
 struct Reconvergent : Circuit {
   Reconvergent() : Circuit({"clk"}, {"z"}) {

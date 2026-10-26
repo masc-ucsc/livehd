@@ -4,15 +4,21 @@
 #include <limits>
 
 #include "gtest/gtest.h"
-#include "node_util.hpp"
+#include "pass/place/timing_circuit_fixture.hpp"
 
 namespace tc    = livehd::placement::timeclosure;
 namespace late  = livehd::placement::late;
 namespace model = livehd::liberty::timing;
 namespace {
-struct Circuit {
-  hhds::GraphLibrary                               owner;
-  std::shared_ptr<hhds::Graph>                     graph;
+std::string library_text(bool tied) {
+  return R"(library(test){time_unit:"1ps";capacitive_load_unit(1,ff);default_input_pin_cap:1;
+cell(BUF){pin(A){direction:input;capacitance:2;}pin(Y){direction:output;function:A;
+timing(){related_pin:A;timing_sense:positive_unate;
+cell_rise(scalar){values("5");}cell_fall(scalar){values(")"
+         + std::string(tied ? "5" : "7") + R"(");}
+rise_transition(scalar){values("1");}fall_transition(scalar){values("1");}}}}})";
+}
+struct Circuit : livehd::placement::test_fixture::Timing_circuit {
   tc::Gp_timing_settings                           settings;
   livehd::physical::Parasitics                     rc;
   std::map<std::string, std::pair<double, double>> locations{
@@ -21,30 +27,9 @@ struct Circuit {
       {"u:Y", {2000, 0}},
       {  "z", {3000, 0}}
   };
-  Circuit(bool tied = false) {
-    const std::string text = R"(library(test){time_unit:"1ps";capacitive_load_unit(1,ff);default_input_pin_cap:1;
-cell(BUF){pin(A){direction:input;capacitance:2;}pin(Y){direction:output;function:A;
-timing(){related_pin:A;timing_sense:positive_unate;
-cell_rise(scalar){values("5");}cell_fall(scalar){values(")"
-                             + std::string(tied ? "5" : "7") + R"(");}
-rise_transition(scalar){values("1");}fall_transition(scalar){values("1");}}}}})";
-    settings.models = std::make_shared<model::Library>(model::parse(text));
-    auto io         = owner.create_io("gp_session");
-    io->add_input("a", 0);
-    io->add_input("clk", 1);
-    io->add_output("z", 0);
-    for (const auto& name : {"a", "clk", "z"}) {
-      io->set_bits(name, 1);
-    }
-    graph    = io->create_graph();
-    auto buf = owner.create_io("BUF");
-    buf->add_input("A", 0);
-    buf->add_output("Y", 0);
-    buf->set_bits("A", 1);
-    buf->set_bits("Y", 1);
-    auto node = livehd::graph_util::create_typed_node(*graph, Ntype_op::Sub);
-    node.set_name("u");
-    node.set_subnode(buf);
+  Circuit(bool tied = false) : Timing_circuit(library_text(tied), "gp_session", {"a", "clk"}, {"z"}) {
+    settings.models = library;
+    auto node       = cell("u", "BUF");
     node.create_sink_pin("A").connect_driver(graph->get_input_pin("a"));
     graph->get_output_pin("z").connect_driver(node.create_driver_pin("Y"));
     settings.constraints.clocks["main"] = {.period_ps = 100, .roots = {"clk"}};

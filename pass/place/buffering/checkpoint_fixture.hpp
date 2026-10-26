@@ -9,9 +9,9 @@
 #include <vector>
 
 #include "checkpoint.hpp"
-#include "node_util.hpp"
 #include "pass/place/forces/gp_timing.hpp"
 #include "pass/place/place.hpp"
+#include "pass/place/timing_circuit_fixture.hpp"
 
 // Two-cell native timing/buffering fixture shared by the checkpoint and
 // producer tests: u (D) drives v (S) across a 10x2 um frame, with one
@@ -22,47 +22,27 @@ namespace dp   = DreamPlace::native;
 namespace tc   = livehd::placement::timeclosure;
 namespace late = livehd::placement::late;
 namespace m    = livehd::liberty::timing;
-struct Fixture {
-  hhds::GraphLibrary                               owner;
-  std::shared_ptr<hhds::Graph>                     graph;
-  tc::Gp_timing_settings                           timing_settings;
-  b::Checkpoint_settings                           settings;
-  dp::Design                                       physical;
-  livehd::physical::Parasitics                     rc;
-  std::map<std::string, std::pair<double, double>> locations;
-  late::Result                                     timing;
-  std::string                                      liberty;
-  tc::Pin_weights                                  weights;
-  b::Gap_force_payload                             base;
-  Fixture() {
-    const std::string text = R"(library(test){time_unit:"1ps";capacitive_load_unit(1,ff);default_input_pin_cap:0;
+inline const char* fixture_liberty() {
+  return R"(library(test){time_unit:"1ps";capacitive_load_unit(1,ff);default_input_pin_cap:0;
 cell(D){pin(A){direction:input;capacitance:1;}pin(Y){direction:output;function:A;max_capacitance:1;
 timing(){related_pin:A;timing_sense:positive_unate;cell_rise(scalar){values("5");}cell_fall(scalar){values("7");}rise_transition(scalar){values("1");}fall_transition(scalar){values("1");}}}}
 cell(B){pin(A){direction:input;capacitance:1;}pin(Y){direction:output;function:A;max_capacitance:100;
 timing(){related_pin:A;timing_sense:positive_unate;cell_rise(scalar){values("1");}cell_fall(scalar){values("1");}rise_transition(scalar){values("1");}fall_transition(scalar){values("1");}}}}
 cell(S){pin(A){direction:input;capacitance:4;}pin(Y){direction:output;function:A;max_capacitance:100;
 timing(){related_pin:A;timing_sense:positive_unate;cell_rise(scalar){values("3");}cell_fall(scalar){values("2.5");}rise_transition(scalar){values("1");}fall_transition(scalar){values("1");}}}}})";
-    liberty                = text;
-    timing_settings.models = std::make_shared<m::Library>(m::parse(text));
-    auto io                = owner.create_io("joint_checkpoint");
-    io->add_input("a", 0);
-    io->add_input("clk", 1);
-    io->add_output("z", 0);
-    for (const auto& n : {"a", "clk", "z"}) {
-      io->set_bits(n, 1);
-    }
-    graph           = io->create_graph();
-    const auto cell = [&](const char* name, const char* master) {
-      auto body = owner.create_io(master);
-      body->add_input("A", 0);
-      body->add_output("Y", 0);
-      body->set_bits("A", 1);
-      body->set_bits("Y", 1);
-      auto n = livehd::graph_util::create_typed_node(*graph, Ntype_op::Sub);
-      n.set_name(name);
-      n.set_subnode(body);
-      return n;
-    };
+}
+struct Fixture : livehd::placement::test_fixture::Timing_circuit {
+  tc::Gp_timing_settings                           timing_settings;
+  b::Checkpoint_settings                           settings;
+  dp::Design                                       physical;
+  livehd::physical::Parasitics                     rc;
+  std::map<std::string, std::pair<double, double>> locations;
+  late::Result                                     timing;
+  std::string                                      liberty = fixture_liberty();
+  tc::Pin_weights                                  weights;
+  b::Gap_force_payload                             base;
+  Fixture() : Timing_circuit(fixture_liberty(), "joint_checkpoint", {"a", "clk"}, {"z"}) {
+    timing_settings.models = library;
     auto u = cell("u", "D"), v = cell("v", "S");
     u.create_sink_pin("A").connect_driver(graph->get_input_pin("a"));
     v.create_sink_pin("A").connect_driver(u.create_driver_pin("Y"));

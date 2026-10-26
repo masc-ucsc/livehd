@@ -31,7 +31,7 @@ cc_test(
     size = "small",
     srcs = ["proxy_bridge_test.cpp"],
     copts = COPTS,
-    deps = [":proxy_bridge", "@googletest//:gtest_main"],
+    deps = [":proxy_bridge", "//pass/place:timing_circuit_fixture", "@googletest//:gtest_main"],
 )
 
 filegroup(

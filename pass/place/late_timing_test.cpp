@@ -7,7 +7,7 @@
 #include <string_view>
 
 #include "gtest/gtest.h"
-#include "node_util.hpp"
+#include "timing_circuit_fixture.hpp"
 
 namespace late = livehd::placement::late;
 namespace nldm = livehd::liberty::timing;
@@ -43,40 +43,9 @@ library(test) {time_unit:"1ps";capacitive_load_unit(1,ff);default_input_pin_cap:
     }}
   }
 })";
-struct Circuit {
-  hhds::GraphLibrary                   owner;
-  std::shared_ptr<const nldm::Library> library = std::make_shared<nldm::Library>(nldm::parse(models));
-  std::shared_ptr<hhds::Graph>         graph;
-  Circuit(std::initializer_list<std::string> inputs, std::initializer_list<std::string> outputs) {
-    auto io = owner.create_io("late_timing");
-    for (const auto& name : inputs) {
-      io->add_input(name, io->get_input_pin_decls().size());
-      io->set_bits(name, 1);
-    }
-    for (const auto& name : outputs) {
-      io->add_output(name, io->get_output_pin_decls().size());
-      io->set_bits(name, 1);
-    }
-    graph = io->create_graph();
-  }
-  hhds::Node_class cell(const std::string& instance, const std::string& master) {
-    auto io = owner.find_io(master);
-    if (!io) {
-      io = owner.create_io(master);
-      for (const auto& [name, pin] : library->cells.at(master).pins) {
-        if (pin.direction == "input") {
-          io->add_input(name, io->get_input_pin_decls().size());
-        } else {
-          io->add_output(name, io->get_output_pin_decls().size());
-        }
-        io->set_bits(name, 1);
-      }
-    }
-    auto node = livehd::graph_util::create_typed_node(*graph, Ntype_op::Sub);
-    node.set_name(instance);
-    node.set_subnode(io);
-    return node;
-  }
+struct Circuit : livehd::placement::test_fixture::Timing_circuit {
+  Circuit(std::initializer_list<std::string> inputs, std::initializer_list<std::string> outputs)
+      : Timing_circuit(models, "late_timing", inputs, outputs) {}
 };
 const late::Pin_result& pin(const late::Result& result, std::string_view name) {
   const auto found = std::find_if(result.pins.begin(), result.pins.end(), [&](const auto& value) { return value.name == name; });

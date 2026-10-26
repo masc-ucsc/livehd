@@ -65,7 +65,7 @@ cc_test(
     size = "small",
     srcs = ["gp_timing_test.cpp"],
     copts = COPTS,
-    deps = [":gp_timing", "@googletest//:gtest_main"],
+    deps = [":gp_timing", "//pass/place:timing_circuit_fixture", "@googletest//:gtest_main"],
 )
 
 cc_library(
