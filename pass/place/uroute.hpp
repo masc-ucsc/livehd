@@ -2,6 +2,7 @@
 #pragma once
 
 #include <filesystem>
+#include <functional>
 #include <memory>
 #include <string>
 #include <string_view>
@@ -56,4 +57,9 @@ void        validate_uroute_options(const Uroute_options&);
 // last, so an offline reader can verify hashes before ingesting an export.
 void export_uroute(const std::filesystem::path&, const DreamPlace::native::Design&, const Uroute_identity&, int bins_x, int bins_y,
                    double capacity_h, double capacity_v);
+// Native route-probe observer exporting each probed physical snapshot to
+// directory. The stage identity is evaluated when the probe fires.
+std::function<void(const DreamPlace::native::Design&, int, int)> uroute_probe_exporter(std::filesystem::path            directory,
+                                                                                       std::function<Uroute_identity()> identity,
+                                                                                       double capacity_h, double capacity_v);
 }  // namespace livehd::placement

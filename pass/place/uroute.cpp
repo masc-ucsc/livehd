@@ -379,6 +379,16 @@ Uroute_selection   Uroute_pool::select(const dp::UrouteMaps& query, const Uroute
   return result;
 }
 
+std::function<void(const dp::Design&, int, int)> uroute_probe_exporter(fs::path                         directory,
+                                                                       std::function<Uroute_identity()> identity, double capacity_h,
+                                                                       double capacity_v) {
+  return [directory = std::move(directory), identity = std::move(identity), capacity_h, capacity_v](const dp::Design& physical,
+                                                                                                    int               nx,
+                                                                                                    int               ny) {
+    export_uroute(directory, physical, identity(), nx, ny, capacity_h, capacity_v);
+  };
+}
+
 void export_uroute(const fs::path& directory, const dp::Design& design, const Uroute_identity& id, int nx, int ny,
                    double capacity_h, double capacity_v) {
   if (!std::isfinite(capacity_h) || !std::isfinite(capacity_v) || capacity_h < 0 || capacity_v < 0

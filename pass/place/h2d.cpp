@@ -248,15 +248,11 @@ Macro_run place_macros(dp::Design& d, const std::vector<mp::NodeInfo>& info, con
   cells.route_initialize = initialize_route_tables;
   o.uroute_selection.apply(cells);
   if (o.uroute.export_features && cells.route.probe && !o.uroute_stage_identity.top.empty()) {
-    cells.route_probe_observer = [&](const dp::Design& physical, int nx, int ny) {
-      export_uroute(fs::path(o.output_dir) / "uroute_export/macro_probe",
-                    physical,
-                    o.uroute_stage_identity,
-                    nx,
-                    ny,
-                    p.route_cap_h,
-                    p.route_cap_v);
-    };
+    cells.route_probe_observer = uroute_probe_exporter(
+        fs::path(o.output_dir) / "uroute_export/macro_probe",
+        [identity = o.uroute_stage_identity] { return identity; },
+        p.route_cap_h,
+        p.route_cap_v);
   }
   cells.max_iterations = o.iterations;
   cells.bins_x = cells.bins_y = o.bins;

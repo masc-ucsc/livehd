@@ -5571,18 +5571,6 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
       = route_policy(options, options.completed_stage == Placement_stage::macro ? options.macro_route : options.final_route);
   control.route_initialize = initialize_flute_tables;
   selected_uroute.apply(control);
-  if (resolved_uroute.export_features && control.route.probe) {
-    const auto stage             = options.completed_stage == Placement_stage::macro ? "macro_probe" : "final_probe";
-    control.route_probe_observer = [&, stage](const dp::Design& physical, int nx, int ny) {
-      export_uroute(fs::path(options.output_dir) / "uroute_export" / stage,
-                    physical,
-                    uroute_id(v),
-                    nx,
-                    ny,
-                    feature_capacity_h,
-                    feature_capacity_v);
-    };
-  }
   if (control.route.model == dp::RouteModel::off) {
     control.routability = control.improved_routability = false;
   }
@@ -5605,6 +5593,19 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
       control.route_capacity_h = feature_capacity_h;
       control.route_capacity_v = feature_capacity_v;
     }
+  }
+  // Probe snapshots export with the final feature capacities and the current
+  // stage identity.
+  const auto probe_exporter = [&](std::string_view stage) {
+    return uroute_probe_exporter(
+        fs::path(options.output_dir) / "uroute_export" / stage,
+        [&] { return uroute_id(v); },
+        feature_capacity_h,
+        feature_capacity_v);
+  };
+  if (resolved_uroute.export_features && control.route.probe) {
+    control.route_probe_observer
+        = probe_exporter(options.completed_stage == Placement_stage::macro ? "macro_probe" : "final_probe");
   }
   control.legalize       = false;
   control.detailed_place = false;
@@ -6167,15 +6168,7 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
       fp_control.route                     = route_policy(options, options.fp_route);
       fp_control.route_probe_observer      = {};
       if (resolved_uroute.export_features && fp_control.route.probe) {
-        fp_control.route_probe_observer = [&](const dp::Design& physical, int nx, int ny) {
-          export_uroute(fs::path(options.output_dir) / "uroute_export/fp_probe",
-                        physical,
-                        uroute_id(v),
-                        nx,
-                        ny,
-                        feature_capacity_h,
-                        feature_capacity_v);
-        };
+        fp_control.route_probe_observer = probe_exporter("fp_probe");
       }
       fp_control.routability = fp_control.improved_routability
           = options.routability && fp_control.route.model != dp::RouteModel::off;
