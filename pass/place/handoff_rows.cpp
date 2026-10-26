@@ -368,8 +368,7 @@ std::optional<std::vector<physical::Component>> reserve_repeater_sites(const ph:
                                                                        const std::vector<Repeater_site_request>& requests,
                                                                        std::chrono::steady_clock::time_point     deadline) {
   if (frame.dbu <= 0 || !std::isfinite(frame.die.xl) || !std::isfinite(frame.die.yl) || !std::isfinite(frame.die.xh)
-      || !std::isfinite(frame.die.yh) || frame.die.xl >= frame.die.xh || frame.die.yl >= frame.die.yh
-      || deadline == std::chrono::steady_clock::time_point::max()) {
+      || !std::isfinite(frame.die.yh) || frame.die.empty() || deadline == std::chrono::steady_clock::time_point::max()) {
     throw std::invalid_argument("repeater sites require a valid die, DBU and finite deadline");
   }
   const auto expired   = [&] { return std::chrono::steady_clock::now() >= deadline; };

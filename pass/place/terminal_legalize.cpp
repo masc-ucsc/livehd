@@ -762,11 +762,7 @@ struct Model {
     ph::Rect region = box(original[pair.first]);
     for (const auto* choices : {&a, &b}) {
       for (const auto& choice : *choices) {
-        const auto r = box(choice.place);
-        region.xl    = std::min(region.xl, r.xl);
-        region.yl    = std::min(region.yl, r.yl);
-        region.xh    = std::max(region.xh, r.xh);
-        region.yh    = std::max(region.yh, r.yh);
+        region = region.hull(box(choice.place));
       }
     }
     std::set<size_t> fixed_obstacles;
@@ -1138,10 +1134,7 @@ struct Model {
           track_uses.push_back({e, solver.new_variable(), w.corridor});
         } else {
           auto& common = track_uses[it->second].common.rect;
-          common.xl    = std::max(common.xl, r.xl);
-          common.yl    = std::max(common.yl, r.yl);
-          common.xh    = std::min(common.xh, r.xh);
-          common.yh    = std::min(common.yh, r.yh);
+          common       = common.intersection(r);
         }
         solver.clause({-enabled[e], -a.literals[w.first], -b.literals[w.second], track_uses[it->second].literal});
       }

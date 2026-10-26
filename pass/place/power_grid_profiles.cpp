@@ -53,7 +53,7 @@ std::vector<Pg_channel> parse_pg_channels(std::string_view text) {
         throw std::invalid_argument("PG channel coordinates must be finite numbers in microns");
       }
     }
-    if (channel.region.xl >= channel.region.xh || channel.region.yl >= channel.region.yh) {
+    if (channel.region.empty()) {
       throw std::invalid_argument("PG channel requires xl<xh and yl<yh");
     }
     result.push_back(std::move(channel));

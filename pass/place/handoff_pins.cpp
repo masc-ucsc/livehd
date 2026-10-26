@@ -15,7 +15,7 @@ namespace livehd::placement {
 namespace ph = physical;
 std::vector<ph::Terminal> handoff_pins(const ph::Technology& tech, const ph::Floorplan& fp, const std::string& horizontal_layer,
                                        const std::string& vertical_layer) {
-  if (fp.dbu <= 0 || fp.dbu != tech.dbu || fp.die.xl >= fp.die.xh || fp.die.yl >= fp.die.yh) {
+  if (fp.dbu <= 0 || fp.dbu != tech.dbu || fp.die.empty()) {
     throw std::invalid_argument("IO handoff requires a valid die and matching DBU");
   }
   for (double bound : {fp.die.xl, fp.die.yl, fp.die.xh, fp.die.yh}) {

@@ -943,10 +943,7 @@ Satlegalize_report satlegalize(const ph::Technology& tech, ph::Floorplan& fp, co
       domain = window;
       for (const auto& tile : tiles) {
         if (area(tile) > 0) {
-          domain = {std::min(domain.xl, tile.xl),
-                    std::min(domain.yl, tile.yl),
-                    std::max(domain.xh, tile.xh),
-                    std::max(domain.yh, tile.yh)};
+          domain = domain.hull(tile);
         }
       }
     }

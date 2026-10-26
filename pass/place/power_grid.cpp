@@ -24,7 +24,7 @@ void    require_rect(const ph::Rect& r) {
   integer(r.yl);
   integer(r.xh);
   integer(r.yh);
-  if (r.xl >= r.xh || r.yl >= r.yh) {
+  if (r.empty()) {
     throw std::invalid_argument("empty power-grid rectangle");
   }
 }
