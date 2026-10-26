@@ -94,10 +94,16 @@ void unique_members(const Json& root) {
     }
   }
 }
+// Interchange versions written by export_uroute and required of each sample.
+constexpr std::array<std::pair<const char*, std::uint32_t>, 3> interchange_versions{
+    {{"feature_version", dp::uroute_feature_version},
+     {"label_version", dp::uroute_label_version},
+     {"arch_version", dp::uroute_arch_version}}
+};
 bool versions(const Json& object) {
-  for (const auto* name : {"feature_version", "label_version", "arch_version"}) {
+  for (const auto& [name, version] : interchange_versions) {
     const auto& v = field(object, name);
-    if (!v.IsUint() || v.GetUint() != 1) {
+    if (!v.IsUint() || v.GetUint() != version) {
       return false;
     }
   }
@@ -141,7 +147,9 @@ double floorplan_distance(const Uroute_identity& a, const Uroute_identity& b) {
          + (a.macro_signature == b.macro_signature ? 0 : 1);
 }
 void check_features(const dp::UrouteMaps& m) {
-  if (m.channels != 4 || !m.normalized || m.bins_x != 256 || m.bins_y != 256 || m.values.size() != 4 * 256 * 256) {
+  constexpr int bins = dp::uroute_network_bins;
+  if (m.channels != dp::uroute_feature_channels || !m.normalized || m.bins_x != bins || m.bins_y != bins
+      || m.values.size() != size_t(dp::uroute_feature_channels) * bins * bins) {
     throw std::runtime_error("URoute requires normalized four-channel 256x256 features");
   }
   for (float v : m.values) {
@@ -256,7 +264,8 @@ Uroute_pool::Uroute_pool(Uroute_options options) {
       sample.labels   = labels;
       check_features(dp::read_uroute_maps(features));
       const auto label_maps = dp::read_uroute_maps(labels);
-      if (label_maps.channels != 3 || label_maps.normalized || label_maps.bins_x != 256 || label_maps.bins_y != 256) {
+      if (label_maps.channels != dp::uroute_label_channels || label_maps.normalized || label_maps.bins_x != dp::uroute_network_bins
+          || label_maps.bins_y != dp::uroute_network_bins) {
         throw std::runtime_error("URoute labels must contain three raw 256x256 maps");
       }
       d->samples.push_back(std::move(sample));
@@ -445,9 +454,9 @@ void export_uroute(const fs::path& directory, const dp::Design& design, const Ur
   rapidjson::StringBuffer                    buffer;
   rapidjson::Writer<rapidjson::StringBuffer> out(buffer);
   out.StartObject();
-  for (const auto* key : {"feature_version", "label_version", "arch_version"}) {
+  for (const auto& [key, version] : interchange_versions) {
     out.Key(key);
-    out.Int(1);
+    out.Uint(version);
   }
   out.Key("top");
   out.String(id.top.c_str());
@@ -470,8 +479,8 @@ void export_uroute(const fs::path& directory, const dp::Design& design, const Ur
   out.EndArray();
   out.Key("network_grid");
   out.StartArray();
-  out.Int(256);
-  out.Int(256);
+  out.Int(dp::uroute_network_bins);
+  out.Int(dp::uroute_network_bins);
   out.EndArray();
   out.Key("capacity_h");
   out.Double(capacity_h);

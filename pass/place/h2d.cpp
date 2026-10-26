@@ -174,16 +174,10 @@ Macro_run place_macros(dp::Design& d, const std::vector<mp::NodeInfo>& info, con
       if (!json.HasMember("route_model") || !json["route_model"].IsString()) {
         throw std::invalid_argument("cached macro route model missing");
       }
-      const std::string model  = json["route_model"].GetString();
-      const auto        active = model == "uroute" ? dp::RouteModel::uroute
-                                 : model == "rsmt" ? dp::RouteModel::rsmt
-                                 : model == "rudy" ? dp::RouteModel::rudy
-                                                   : dp::RouteModel::off;
-      const bool        latches
-          = policy.model == dp::RouteModel::automatic
-            || (policy.probe && (policy.model == dp::RouteModel::rudy || policy.probe_model == dp::RouteModel::uroute));
-      if ((model != "off" && model != "rudy" && model != "rsmt" && model != "uroute")
-          || (latches ? active == dp::RouteModel::off : active != policy.model)) {
+      // Reports record the model actually used, never the automatic policy.
+      const auto active = dp::route_model_from_name(json["route_model"].GetString());
+      if (active == dp::RouteModel::automatic
+          || (dp::route_latches(policy) ? active == dp::RouteModel::off : active != policy.model)) {
         throw std::invalid_argument("cached macro route model inconsistent with policy");
       }
       auto topology  = mp::cached_topology(text, d, info, p);
@@ -286,11 +280,8 @@ void write_macro_report(const Macro_run& run, const dp::Design& d, const std::ve
                                 result.resolved.route_cap_h,
                                 result.resolved.route_cap_v};
   const auto      policy = resolve_route_policy(o, o.macro_route);
-  const bool latches = policy.model == dp::RouteModel::automatic
-                       || (policy.probe && (policy.model == dp::RouteModel::rudy || policy.probe_model == dp::RouteModel::uroute));
-  const auto active  = latches ? run.result.placement.route_model : policy.model;
-  route_options.model
-      = active == dp::RouteModel::rsmt || active == dp::RouteModel::uroute ? dp::RudyModel::rsmt : dp::RudyModel::bbox;
+  const auto      active = dp::route_latches(policy) ? run.result.placement.route_model : policy.model;
+  route_options.model      = mp::route_score_model(active);
   route_options.degree     = policy.degree;
   route_options.accuracy   = policy.accuracy;
   route_options.initialize = initialize_route_tables;

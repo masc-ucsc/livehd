@@ -2453,19 +2453,7 @@ Uroute_options resolve_uroute_options(Uroute_options resolved_uroute) {
 dp::RoutePolicy route_policy(const Options& options, const Stage_route& stage) {
   auto       policy = stage.policy;
   const auto model  = stage.model == "inherit" ? options.route_model : stage.model;
-  if (model == "off") {
-    policy.model = dp::RouteModel::off;
-  } else if (model == "rudy") {
-    policy.model = dp::RouteModel::rudy;
-  } else if (model == "rsmt") {
-    policy.model = dp::RouteModel::rsmt;
-  } else if (model == "uroute") {
-    policy.model = dp::RouteModel::uroute;
-  } else if (model == "auto") {
-    policy.model = dp::RouteModel::automatic;
-  } else {
-    throw std::invalid_argument("invalid route model: " + model);
-  }
+  policy.model      = dp::route_model_from_name(model);
   // Learned feedback is a final-cell rung. Earlier stages can opt into the
   // same model through their bounded convergence probe.
   if (model == "uroute") {
@@ -2474,15 +2462,7 @@ dp::RoutePolicy route_policy(const Options& options, const Stage_route& stage) {
   policy.uroute_ladder = &stage == &options.final_route;
   policy.degree        = options.route_degree;
   policy.accuracy      = options.route_accuracy;
-  if (!std::isfinite(policy.switch_overflow) || !std::isfinite(policy.target_overflow) || policy.target_overflow < 0
-      || policy.target_overflow > policy.switch_overflow || policy.hold < 1 || policy.hold > 1000 || policy.degree < 2
-      || policy.degree > 1000 || policy.accuracy < 1 || policy.accuracy > 10 || policy.probe_iterations < 1
-      || policy.probe_iterations > 10000 || !std::isfinite(policy.uroute_switch_overflow) || policy.uroute_switch_overflow < 0
-      || policy.uroute_hold < 1 || policy.uroute_hold > 1000
-      || (policy.model == dp::RouteModel::automatic && policy.uroute_ladder
-          && policy.uroute_switch_overflow > policy.switch_overflow)) {
-    throw std::invalid_argument("invalid route switch/target, hold, FLUTE options or probe budget");
-  }
+  dp::validate_route_policy(policy);
   return policy;
 }
 }  // namespace
@@ -2492,9 +2472,7 @@ DreamPlace::native::RoutePolicy resolve_route_policy(const Options& options, con
 // True when any stage can evaluate the learned model (rung, ladder or probe).
 static bool uroute_requested_by(const Options& options) {
   for (const auto* stage : {&options.fp_route, &options.macro_route, &options.final_route}) {
-    const auto policy = route_policy(options, *stage);
-    if (policy.model == dp::RouteModel::uroute || (policy.model == dp::RouteModel::automatic && policy.uroute_ladder)
-        || (policy.probe && policy.probe_model == dp::RouteModel::uroute)) {
+    if (dp::uroute_requested(route_policy(options, *stage))) {
       return true;
     }
   }
