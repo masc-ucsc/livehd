@@ -465,7 +465,9 @@ genrule(
     name = "place_salt",
     srcs = [
         ":place_srcs",
+        ":preroute_srcs",
         "//:MODULE.bazel",
+        "//inou/lefdef:physical_srcs",
         "//packages:cvc5_sat.cpp",
         "//packages:cvc5_repo.bzl",
         "//packages:cvc5_src.BUILD",
