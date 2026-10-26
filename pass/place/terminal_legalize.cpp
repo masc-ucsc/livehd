@@ -292,10 +292,7 @@ struct Model {
       }
       rows.push_back({i, r.x, r.y, r.step, h, r.count, {{lo, hi}}});
       max_row_height = std::max<int64_t>(max_row_height, h);
-      bounds.xl      = std::min(bounds.xl, double(r.x + lo * r.step));
-      bounds.xh      = std::max(bounds.xh, double(r.x + hi * r.step));
-      bounds.yl      = std::min(bounds.yl, double(r.y));
-      bounds.yh      = std::max(bounds.yh, double(r.y + h));
+      bounds         = bounds.hull({double(r.x + lo * r.step), double(r.y), double(r.x + hi * r.step), double(r.y + h)});
     }
     if (rows.empty()) {
       throw std::invalid_argument("terminal legalization has no usable rows");
@@ -1547,10 +1544,7 @@ struct Model {
                     -std::numeric_limits<double>::infinity()};
     for (const auto* choices : {&ca, &cb}) {
       for (const auto& c : *choices) {
-        region.xl = std::min(region.xl, double(c.place.x));
-        region.yl = std::min(region.yl, double(c.place.y));
-        region.xh = std::max(region.xh, double(c.place.x + c.place.width));
-        region.yh = std::max(region.yh, double(c.place.y + c.place.height));
+        region = region.hull(box(c.place));
       }
     }
     std::vector<size_t> pair_obstacles;

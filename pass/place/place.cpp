@@ -3412,10 +3412,7 @@ dp::Result local_place(View& v, const ph::Technology& tech, const Options& optio
                   -std::numeric_limits<double>::infinity(),
                   -std::numeric_limits<double>::infinity()};
   const auto include = [&](const Ann_place& p) {
-    bounds.xl = std::min(bounds.xl, double(p.x));
-    bounds.yl = std::min(bounds.yl, double(p.y));
-    bounds.xh = std::max(bounds.xh, double(p.x + p.width));
-    bounds.yh = std::max(bounds.yh, double(p.y + p.height));
+    bounds = bounds.hull({double(p.x), double(p.y), double(p.x + p.width), double(p.y + p.height)});
   };
   for (const auto& c : v.cells) {
     current.insert(c.name);

@@ -121,10 +121,7 @@ Power_grid_plan plan_power_grid(const ph::Technology& tech, const ph::Floorplan&
     }
     row_height = height;
     row_spans[row.y].emplace_back(row.x, xend);
-    plan.core.xl = std::min(plan.core.xl, double(row.x));
-    plan.core.yl = std::min(plan.core.yl, double(row.y));
-    plan.core.xh = std::max(plan.core.xh, double(xend));
-    plan.core.yh = std::max(plan.core.yh, double(yend));
+    plan.core = plan.core.hull({double(row.x), double(row.y), double(xend), double(yend)});
     if (!rails.contains(row.site)) {
       rails.emplace(row.site, site_rails(tech, profile, row.site, fp.dbu));
     }
