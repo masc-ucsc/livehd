@@ -122,7 +122,13 @@ TEST(StageTiming, EveryLaunchCaptureClassIsHandComputable) {
   EXPECT_EQ(timing.excluded, 3U);
   EXPECT_TRUE(timing.unmeasured.empty());
   EXPECT_EQ(timing.feedback.delay, 68);
-  EXPECT_EQ(timing.feedback.wns, 16);
+  // Feedback slack is in period terms (slack / capture fraction): WNS is
+  // 100 - 68; ff1.Q meets ff1.D at 62 but d1.R0 at 19 of a half cycle (38);
+  // d1.Q meets d1.R1 at 26 and d2.R0 at 16 (32), d2.Q only ff2.D (70).
+  EXPECT_EQ(timing.feedback.wns, 32);
+  EXPECT_EQ(timing.feedback.pins.at("ff1:Q").slack, 38);
+  EXPECT_EQ(timing.feedback.pins.at("d1:Q").slack, 32);
+  EXPECT_EQ(timing.feedback.pins.at("d2:Q").slack, 70);
   const auto doc = parse(timing);
   for (const auto& [launch, capture, endpoints, wns, period] : {
            std::tuple{  "flop",   "flop", 1U, 62., 38.},

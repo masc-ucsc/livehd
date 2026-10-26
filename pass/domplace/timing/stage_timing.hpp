@@ -71,8 +71,10 @@ struct Stage_timing {
   std::vector<std::string> reasons;     // why the status is not complete
   std::optional<double>    c_clk_ff;    // clock-pin capacitance over every clock; absent if one is missing
   // For sizing: delay = period_ps, area on the LEF footprint basis (Liberty
-  // when the DBU is unknown), native electrical violation count. Empty
-  // unless period_ps is present.
+  // when the DBU is unknown), native electrical violation count. Slack is in
+  // period terms: a pin's slack, WNS and TNS divide each requirement's slack
+  // by its capture fraction (a half-cycle ps costs two of period), while the
+  // report keeps the raw slack. Empty unless period_ps is present.
   livehd::timing::Feedback feedback;
   std::string              json;  // stage_timing.json, schema 1
 };

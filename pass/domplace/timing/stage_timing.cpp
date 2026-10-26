@@ -576,6 +576,36 @@ Stage_timing evaluate_stage_timing(const hhds::Graph& graph, const physical::Par
     out.feedback.area          = footprint.value_or(liberty_area);
     out.feedback.violations    = static_cast<unsigned>(violations.size());
     out.feedback.source_report = "native_stage_timing";
+    if (all.fractional_endpoints) {
+      // Period-terms slack: per capture fraction, the pin slack against only
+      // that budget's requirements, divided by the fraction.
+      std::set<double> fractions{1.};
+      for (const auto& [cell, budget] : provisional->capture) {
+        (void)cell;
+        fractions.insert(budget.fraction);
+      }
+      std::vector<std::optional<double>> scaled(all.pins.size());
+      for (const double fraction : fractions) {
+        const auto split = proxy.evaluate(parasitics, nullptr, {.capture_filter = [fraction](double f) { return f == fraction; }});
+        for (size_t i = 0; i < split.pins.size(); ++i) {
+          if (const auto slack = worst_slack(split.pins[i])) {
+            scaled[i] = std::min(scaled[i].value_or(slack->value / fraction), slack->value / fraction);
+          }
+        }
+      }
+      out.feedback.wns.reset();
+      out.feedback.tns = 0.;
+      for (size_t i = 0; i < all.pins.size(); ++i) {
+        if (!scaled[i]) {
+          continue;
+        }
+        out.feedback.pins[all.pins[i].name].slack = scaled[i];
+        if (all.pins[i].endpoint) {
+          out.feedback.wns   = std::min(out.feedback.wns.value_or(*scaled[i]), *scaled[i]);
+          *out.feedback.tns += std::min(0., *scaled[i]);
+        }
+      }
+    }
   }
 
   // The report.
