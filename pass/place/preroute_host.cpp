@@ -227,28 +227,29 @@ void preroute_placed(Result& placed, const Options& options, const Evaluate& eva
   size_t           accepted = 0, attempted = 0, via_count = 0;
   using Counts = std::array<size_t, 3>;  // mapped nets, search attempted, accepted
   std::map<std::string, Counts> pin_buckets, length_buckets;
-  std::map<std::string, size_t> rejections;
-  std::map<std::string, double> layer_lengths;
-  const auto                    lengths_json = [&](const auto& lengths) {
+  std::map<std::string, uint64_t> rejections;
+  std::map<std::string, double>   layer_lengths;
+  // A string-keyed map of lengths, times or counts as one JSON object.
+  const auto map_json = [&](const auto& values) {
     rapidjson::Value object(rapidjson::kObjectType);
-    for (const auto& [layer, length] : lengths) {
-      object.AddMember(rapidjson::Value(layer.c_str(), alloc), rapidjson::Value(length), alloc);
+    for (const auto& [key, value] : values) {
+      object.AddMember(rapidjson::Value(key.c_str(), alloc), rapidjson::Value(value), alloc);
     }
     return object;
   };
-  report.AddMember("phase_runtime_ms", lengths_json(routed.timings_ms), alloc);
+  report.AddMember("phase_runtime_ms", map_json(routed.timings_ms), alloc);
   for (const auto& record : routed.records) {
     rapidjson::Value entry(rapidjson::kObjectType);
     entry.AddMember("net", rapidjson::Value(record.net.c_str(), alloc), alloc);
     entry.AddMember("pin_count", uint64_t(record.pin_count), alloc);
     entry.AddMember("attempted", record.attempted, alloc);
     if (record.attempted) {
-      entry.AddMember("runtime_ms", lengths_json(record.timings_ms), alloc);
+      entry.AddMember("runtime_ms", map_json(record.timings_ms), alloc);
     }
     entry.AddMember("estimated_length_um",
                     std::isfinite(record.estimated_length_um) ? rapidjson::Value(record.estimated_length_um) : rapidjson::Value(),
                     alloc);
-    entry.AddMember("layer_wire_length_um", lengths_json(record.layer_wire_length_um), alloc);
+    entry.AddMember("layer_wire_length_um", map_json(record.layer_wire_length_um), alloc);
     entry.AddMember("accepted", record.accepted, alloc);
     if (record.timing_at_acceptance) {
       const auto&      trial = *record.timing_at_acceptance;
@@ -314,18 +315,14 @@ void preroute_placed(Result& placed, const Options& options, const Evaluate& eva
     }
     return object;
   };
-  rapidjson::Value rejection_json(rapidjson::kObjectType);
-  for (const auto& [reason, count] : rejections) {
-    rejection_json.AddMember(rapidjson::Value(reason.c_str(), alloc), rapidjson::Value(uint64_t(count)), alloc);
-  }
   report.AddMember("mapped_nets", uint64_t(routed.records.size()), alloc);
   report.AddMember("attempted_nets", uint64_t(attempted), alloc);
   report.AddMember("accepted_nets", uint64_t(accepted), alloc);
   report.AddMember("vias", uint64_t(via_count), alloc);
-  report.AddMember("layer_wire_length_um", lengths_json(layer_lengths), alloc);
+  report.AddMember("layer_wire_length_um", map_json(layer_lengths), alloc);
   report.AddMember("by_pin_count", buckets_json(pin_buckets), alloc);
   report.AddMember("by_estimated_length_um", buckets_json(length_buckets), alloc);
-  report.AddMember("rejections", rejection_json, alloc);
+  report.AddMember("rejections", map_json(rejections), alloc);
   report.AddMember("nets", records, alloc);
   // Diagnostic provenance for matched controls. Production handoff locks still
   // come from DEF; this report is not needed to preserve fixed wiring.
