@@ -5,6 +5,7 @@
 
 #include "artifact.hpp"
 #include "cmos_cleanup.hpp"
+#include "physical_emission.hpp"
 #include "semantic_region.hpp"
 
 namespace livehd::usyn {
@@ -44,5 +45,22 @@ Logical_module_result write_logical_module(const Stateful_region& region, std::s
 // Replay a validated standalone artifact. The output is behavioral CMOS even
 // when the recorded target is DOMINO; this is not a physical cell emitter.
 Logical_module_result write_logical_module(const Frozen_region& region, Budget& work, uint32_t max_nodes = 2000000);
+
+// The mixed physical module of the provisional domino profile (2d-domplace D).
+// The frozen netlist is still expanded and validated as for
+// write_logical_module, which stays the CMOS/LEC reference. Every converted
+// state of `physical` becomes one body-less Sub of its cell interface, named
+// after the state with its source span, whose output drives the old Q
+// consumers; its Flop and the D cone only it used are not emitted. Each rail
+// pin is driven by its frozen native producer (a complemented producer through
+// an explicit inverter) and CLK by the state's clock control. Retained states
+// keep their Flops. Ports are those of write_logical_module.
+Logical_module_result write_physical_module(const Stateful_region& region, const Physical_emission& physical, std::string_view name,
+                                            Budget& work, uint32_t max_nodes = 2000000, const Cmos_cleanup* cleanup = nullptr);
+
+// The body-less declaration of a physical cell in `library`: port ids rails
+// 1..k, the clock k+1 and the output k+2 as a loop break, through the named
+// cell declaration path. A same-named module with a body throws.
+std::shared_ptr<hhds::GraphIO> declare_physical_cell(hhds::GraphLibrary& library, const Physical_cell_interface& cell);
 
 }  // namespace livehd::usyn

@@ -117,7 +117,6 @@ cc_library(
     deps = [
         "//core",
         "//graph",
-        "//pass/liberty:liberty_dff",
         "//pass/usyn:usyn_logic",
         "//pass/usyn:usyn_semantic",
         "@hhds//hhds:core",
@@ -133,6 +132,7 @@ cc_test(
         ":domino_cell",
         "//core",
         "//graph",
+        "//pass/usyn:usyn_semantic",
         "@googletest//:gtest_main",
         "@hhds//hhds:core",
     ],

@@ -5,6 +5,7 @@
 #include <stdexcept>
 
 #include "gtest/gtest.h"
+#include "logical_writer.hpp"
 #include "node_util.hpp"
 #include "provisional_cell.hpp"
 
@@ -106,7 +107,7 @@ TEST(DominoCell, DeclarationPortsLoopBreakAndCollision) {
   EXPECT_EQ(cell.rails, (std::vector<std::string>{"R0", "R1", "R2"}));
 
   hhds::GraphLibrary library;
-  const auto         decl = declare_domino_cell(library, cell);
+  const auto         decl = usyn::declare_physical_cell(library, cell);
   ASSERT_TRUE(decl);
   EXPECT_FALSE(decl->has_graph());
   for (const auto& [name, id] : {
@@ -122,11 +123,11 @@ TEST(DominoCell, DeclarationPortsLoopBreakAndCollision) {
   ASSERT_TRUE(decl->has_output("Q"));
   EXPECT_EQ(decl->get_output_port_id("Q"), 5);
   EXPECT_TRUE(decl->is_loop_break("Q"));
-  EXPECT_EQ(declare_domino_cell(library, cell)->get_gid(), decl->get_gid());  // idempotent
+  EXPECT_EQ(usyn::declare_physical_cell(library, cell)->get_gid(), decl->get_gid());  // idempotent
 
   hhds::GraphLibrary bodied;
   (void)bodied.create_io(cell.name)->create_graph();
-  EXPECT_THROW((void)declare_domino_cell(bodied, cell), std::runtime_error);
+  EXPECT_THROW((void)usyn::declare_physical_cell(bodied, cell), std::runtime_error);
 }
 
 TEST(DominoCell, ModelsImplementTheMasterFunction) {
@@ -140,7 +141,7 @@ TEST(DominoCell, ModelsImplementTheMasterFunction) {
   const auto io = models.find_io(cell.name);
   ASSERT_TRUE(io && io->has_graph());
   hhds::GraphLibrary netlist;
-  const auto         decl = declare_domino_cell(netlist, cell);
+  const auto         decl = usyn::declare_physical_cell(netlist, cell);
   ASSERT_EQ(io->get_input_pin_decls().size(), decl->get_input_pin_decls().size());
   for (size_t i = 0; i < decl->get_input_pin_decls().size(); ++i) {
     EXPECT_EQ(io->get_input_pin_decls()[i].name, decl->get_input_pin_decls()[i].name);

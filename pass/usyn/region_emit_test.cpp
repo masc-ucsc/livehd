@@ -3,6 +3,7 @@
 
 #include <iostream>
 #include <map>
+#include <set>
 
 #include "gtest/gtest.h"
 #include "hhds/attrs/name.hpp"
@@ -516,5 +517,97 @@ TEST_F(RegionEmit, CompactLoopRetainsDescriptorSeedAndCarryEdge) {
   EXPECT_NO_THROW(neo.subnode_group().validate());
 }
 
+}  // namespace
+}  // namespace livehd::usyn
+
+namespace livehd::usyn {
+namespace {
+TEST_F(RegionEmit, PhysicalCellsAreClonedByNameWithEveryDriver) {
+  // r <= a[0] & en on clk, selected in one phase and converted with its
+  // frozen DominoLatch rails, as pass/domplace does.
+  auto mask = gu::create_get_mask(*graph, input("a"), 0, 1);
+  nodes.push_back(mask);
+  auto a0 = mask.create_driver_pin(0);
+  gu::set_ubits(a0, 1);
+  auto both = node(Ntype_op::And, "both", 1);
+  a0.connect_sink(gu::setup_sink_pid(both, 0));
+  input("en").connect_sink(gu::setup_sink_pid(both, 0));
+  auto flop = node(Ntype_op::Flop, "r", 1);
+  connect(flop, "din", both.get_driver_pin(0));
+  connect(flop, "clock_pin", input("clk"));
+  output("q", flop.get_driver_pin(0));
+  auto b = blast();
+  ASSERT_EQ(b.status, synth::Region_blast::Status::blasted);
+  Logical_options options;
+  options.endpoint.clock_phases = 1;
+  Budget work{100000000};
+  auto   selected = synthesize_stateful_region(b.lnet, *b.source_state, synth::State_target::cmos, options, work);
+  ASSERT_TRUE(selected.region) << selected.reason;
+  const auto&       net  = *selected.region->frozen;
+  const auto&       cell = net.cells.at(*net.state.at(0).domino_latch);
+  Physical_emission physical;
+  auto&             state = physical.states.emplace_back();
+  state.decision          = Physical_decision::domino;
+  auto& interface         = physical.cells.emplace_back();
+  interface.name          = "__lhd_domino_emit_v0_t0";
+  for (const auto& rail : cell.rails) {
+    state.rails.push_back({
+        rail.input,
+        false,
+        {rail.producer.index, rail.producer.inverted}
+    });
+    interface.rails.push_back("R" + std::to_string(interface.rails.size()));
+  }
+  Budget emit_work{1000000};
+  auto   result = emit_logical_region(rb, b, *selected.region, emit_work, 2000000, nullptr, {}, &physical);
+  ASSERT_EQ(result.status, Status::feasible) << result.reason;
+  const auto decl = destination.find_io(interface.name);
+  ASSERT_TRUE(decl);
+  EXPECT_FALSE(decl->has_graph());
+  EXPECT_TRUE(decl->is_loop_break("Q"));
+  std::vector<hhds::Node_class> subs;
+  uint32_t                      flops = 0;
+  for (auto n : body->body().nodes()) {
+    flops += gu::type_op_of(n) == Ntype_op::Flop;
+    if (gu::type_op_of(n) == Ntype_op::Sub) {
+      subs.push_back(n);
+    }
+  }
+  EXPECT_EQ(flops, 0U);
+  ASSERT_EQ(subs.size(), 1U);
+  const auto sub = subs.front();
+  EXPECT_EQ(sub.get_subnode_io(), decl);
+  EXPECT_EQ(gu::node_name_of(sub), "r");
+  EXPECT_EQ(body->get_output_pin("q").get_driver_pin(), sub.get_driver_pin(decl->get_output_port_id("Q")));
+  EXPECT_EQ(sub.get_sink_pin(decl->get_input_port_id("CLK")).get_driver_pin(), body->get_input_pin("clk"));
+  std::set<std::string> rails;
+  for (const auto& rail : interface.rails) {
+    const auto driver = sub.get_sink_pin(decl->get_input_port_id(rail)).get_driver_pin();
+    ASSERT_FALSE(driver.is_invalid()) << rail;
+    rails.insert(gu::is_graph_input_pin(driver) ? std::string(gu::pin_name_of(driver))
+                                                : std::string(Ntype::get_name(gu::type_op_of(driver.get_master_node()))));
+  }
+  EXPECT_EQ(rails, (std::set<std::string>{"en", "get_mask"}));
+
+  // Binding the instance by name to a module with a body is refused.
+  hhds::GraphLibrary clash;
+  auto               region = clash.create_io("region");
+  for (const auto& d : destination.find_io("region")->get_input_pin_decls()) {
+    region->add_input(d.name, d.port_id);
+    region->set_bits(d.name, d.bits);
+  }
+  for (const auto& d : destination.find_io("region")->get_output_pin_decls()) {
+    region->add_output(d.name, d.port_id);
+    region->set_bits(d.name, d.bits);
+  }
+  auto fresh = region->create_graph();
+  (void)clash.create_io(interface.name)->create_graph();
+  auto other = rb;
+  other.body = fresh.get();
+  Budget refused_work{1000000};
+  auto   refused = emit_logical_region(other, b, *selected.region, refused_work, 2000000, nullptr, {}, &physical);
+  EXPECT_EQ(refused.status, Status::invalid);
+  EXPECT_NE(refused.reason.find("collides"), std::string::npos) << refused.reason;
+}
 }  // namespace
 }  // namespace livehd::usyn

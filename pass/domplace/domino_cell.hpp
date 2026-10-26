@@ -36,13 +36,9 @@ std::optional<Domino_master> make_domino_master(const usyn::Gate_formula& formul
 // `<base>_v<variant>_t<template>` with pins R*, CLK and Q.
 usyn::Physical_cell_interface domino_interface(const Domino_master& master, size_t variant, uint32_t geometry_template = 0);
 
-// Create or find the body-less declaration (port ids R* 1..k, CLK k+1, Q k+2
-// with loop_break), through declare_memory_cells: a same-named module with a
-// body throws instead of binding instances to it.
-std::shared_ptr<hhds::GraphIO> declare_domino_cell(hhds::GraphLibrary& library, const usyn::Physical_cell_interface& cell);
-
 // A behavioral model for simulation and LEC, emitted into a separate model
-// library and never into the netlist: the same IO names and ids, and one
+// library and never into the netlist: the same IO names and ids as the netlist
+// declaration (usyn::declare_physical_cell), and one
 // Flop(din = formula over the rail pins, clock_pin = CLK) driving Q, so a
 // single-flop splice names the state after the instance. No initial value (v1
 // converts no initialized state). No-op when the model already exists.

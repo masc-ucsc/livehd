@@ -1,8 +1,10 @@
 // This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 #include "logical_writer.hpp"
 
+#include <format>
 #include <iostream>
 #include <map>
+#include <set>
 
 #include "gtest/gtest.h"
 #include "hhds/attrs/srcid.hpp"
@@ -141,6 +143,232 @@ protected:
     return synth::blast_region(rb, options, {});
   }
 };
+
+// A frozen one-phase region from the real selection pipeline:
+// r1 <= (a & b) | (c & d), r2 <= en ? a : r2 (binate in en) and r3 <= a, all
+// clocked by port clk. Outputs: the three Qs and a ^ b.
+Stateful_region one_phase() {
+  Lnet                      net;
+  const auto                a = net.add_input("a"), b = net.add_input("b"), c = net.add_input("c"), d = net.add_input("d");
+  const auto                en = net.add_input("en"), clk = net.add_input("clk");
+  synth::Source_state_table table;
+  table.logical_boundary = true;
+  table.source_graph     = "source";
+  const std::array<std::string, 3> names{"r1", "r2", "r3"};
+  for (uint32_t i = 0; i < names.size(); ++i) {
+    synth::Source_state row;
+    row.node            = 10 + i;
+    row.name            = names[i];
+    row.bits            = 1;
+    row.width_known     = true;
+    row.stages          = 1;
+    row.translated_bits = 1;
+    row.role            = synth::State_role::register_candidate;
+    row.clock.present   = true;
+    row.clock.bits      = 1;
+    row.span.file       = "rtl/one.v";
+    row.span.start_line = 5 + i;
+    table.sources.push_back(row);
+    const auto k = net.add_latch(names[i], 'x');
+    table.bits.push_back({
+        i,
+        0,
+        0,
+        k,
+        names[i],
+        {net.latch(k).q, false},
+        {}
+    });
+  }
+  const std::array<Lid, 3> next{net.add_lut({net.add_lut({a, b}, 8), net.add_lut({c, d}, 8)}, 14),
+                                net.add_lut({en, a, net.latch(1).q}, 0xD8),
+                                a};
+  for (uint32_t i = 0; i < next.size(); ++i) {
+    net.set_latch_input(i, next[i]);
+    table.bits[i].d = {next[i], false};
+    net.add_output(net.latch(i).q, "q" + std::to_string(i));
+  }
+  net.add_output(net.add_lut({a, b}, Lnet::kXor2), "x");
+  for (uint32_t i = 0; i < names.size(); ++i) {
+    table.controls.push_back({i, synth::State_control_kind::clock, {static_cast<uint32_t>(net.outputs().size())}});
+    net.add_output(clk, "control");
+  }
+  Logical_options options;
+  options.endpoint.clock_phases = 1;
+  Budget work{100000000};
+  auto   result = synthesize_stateful_region(net, table, synth::State_target::cmos, options, work);
+  EXPECT_TRUE(result.region) << result.reason;
+  return std::move(*result.region);
+}
+
+// Convert `states` with their frozen DominoLatch rails, as pass/domplace does.
+Physical_emission convert(const Stateful_region& region, const std::set<uint32_t>& states) {
+  Physical_emission emission;
+  const auto&       net = *region.frozen;
+  for (uint32_t i = 0; i < net.state.size(); ++i) {
+    auto& state  = emission.states.emplace_back();
+    state.state  = i;
+    state.reason = "area";
+    if (!states.contains(i)) {
+      continue;
+    }
+    const auto& cell = net.cells.at(*net.state[i].domino_latch);
+    state.decision   = Physical_decision::domino;
+    state.formula    = cell.formula;
+    state.metrics    = cell.metrics;
+    state.cell       = static_cast<uint32_t>(emission.cells.size());
+    auto& interface  = emission.cells.emplace_back();
+    interface.name   = std::format("__lhd_domino_test{}_v0_t0", i);
+    for (const auto& rail : cell.rails) {
+      EXPECT_EQ(rail.producer.space, Endpoint_ref::Space::native);
+      state.rails.push_back({
+          rail.input,
+          rail.producer.inverted != cell.inputs[rail.input].inverted,
+          {rail.producer.index, rail.producer.inverted}
+      });
+      interface.rails.push_back(std::format("R{}", interface.rails.size()));
+    }
+  }
+  return emission;
+}
+
+// Values of a frozen native signal and of an emitted module pin under one
+// assignment of the region inputs and current state values.
+bool native_value(const Xag& graph, Xsignal signal, const std::vector<bool>& sources) {
+  const auto& node  = graph.node(signal.id);
+  bool        value = false;
+  switch (node.kind) {
+    case Xag::Kind::constant: value = false; break;
+    case Xag::Kind::source  : value = sources.at(node.source_index); break;
+    case Xag::Kind::and_gate:
+      value = native_value(graph, node.inputs[0], sources) && native_value(graph, node.inputs[1], sources);
+      break;
+    case Xag::Kind::xor_gate:
+      value = native_value(graph, node.inputs[0], sources) != native_value(graph, node.inputs[1], sources);
+      break;
+  }
+  return value != signal.inverted;
+}
+bool module_value(hhds::Pin_class pin, const std::map<std::string, bool>& inputs, const std::map<std::string, bool>& state) {
+  if (pin.is_const()) {
+    return !gu::const_of(pin).is_known_zero();
+  }
+  if (gu::is_graph_input_pin(pin)) {
+    return inputs.at(std::string(gu::pin_name_of(pin)));
+  }
+  const auto node = pin.get_master_node();
+  const auto op   = gu::type_op_of(node);
+  if (op == Ntype_op::Flop || op == Ntype_op::Sub) {
+    return state.at(std::string(gu::node_name_of(node)));
+  }
+  EXPECT_TRUE(op == Ntype_op::And || op == Ntype_op::Xor) << Ntype::get_name(op);
+  bool value = op == Ntype_op::And;
+  for (const auto& operand : gu::inp_sink_drivers(node)) {
+    const auto v = module_value(operand.driver, inputs, state);
+    value        = op == Ntype_op::And ? value && v : value != v;
+  }
+  return value;
+}
+
+TEST_F(LogicalWriter, PhysicalModuleReplacesConvertedFlopsWithCellInstances) {
+  const auto region = one_phase();
+  ASSERT_TRUE(region.frozen);
+  const auto& net      = *region.frozen;
+  const auto  physical = convert(region, {0, 1});
+  Budget      work{10000000};
+  auto        plain = write_logical_module(region, "plain", work);
+  auto        mixed = write_physical_module(region, physical, "mixed", work);
+  ASSERT_TRUE(plain.module) << plain.reason;
+  ASSERT_TRUE(mixed.module) << mixed.reason;
+  auto& module = *mixed.module;
+  // Ports are those of the CMOS reference; the rails stay internal.
+  EXPECT_EQ(module.inputs, plain.module->inputs);
+  EXPECT_EQ(module.outputs, plain.module->outputs);
+  ASSERT_EQ(module.state.size(), 3U);
+  uint32_t flops = 0;
+  for (auto node : module.graph->body().nodes()) {
+    flops += gu::type_op_of(node) == Ntype_op::Flop;
+  }
+  EXPECT_EQ(flops, 1U);  // only the retained r3
+  for (uint32_t i = 0; i < 3; ++i) {
+    const auto node = module.state[i];
+    EXPECT_EQ(gu::node_name_of(node), net.state[i].name);
+    EXPECT_TRUE(node.attr(hhds::attrs::srcid).has());
+    if (i == 2) {
+      EXPECT_EQ(gu::type_op_of(node), Ntype_op::Flop);
+      continue;
+    }
+    ASSERT_EQ(gu::type_op_of(node), Ntype_op::Sub);
+    const auto  decl = node.get_subnode_io();
+    const auto& cell = physical.cells[physical.states[i].cell];
+    ASSERT_TRUE(decl);
+    EXPECT_EQ(decl->get_name(), cell.name);
+    EXPECT_FALSE(decl->has_graph());
+    EXPECT_TRUE(decl->is_loop_break(cell.output));
+    EXPECT_EQ(module.library.find_io(cell.name), decl);
+    // CLK is the state's clock control: the clk port.
+    EXPECT_EQ(gu::pin_name_of(node.get_sink_pin(decl->get_input_port_id(cell.clock)).get_driver_pin()), "__usyn_i5");
+  }
+  // Every rail carries its frozen producer, a complemented one through an
+  // explicit inverter, and every output keeps its function, under every
+  // assignment of the six inputs and three states.
+  bool complemented = false;
+  for (const auto& rail : physical.states[1].rails) {
+    complemented |= rail.producer.inverted;
+  }
+  EXPECT_TRUE(complemented);  // !en
+  for (uint32_t x = 0; x < 512; ++x) {
+    std::vector<bool>           sources(net.native.input_names().size());
+    std::map<std::string, bool> inputs, state;
+    for (size_t i = 0; i < net.inputs.size(); ++i) {
+      const bool v                                            = (x >> i) & 1;
+      sources[net.native.node(net.inputs[i].id).source_index] = v;
+      inputs[module.inputs[i]]                                = v;
+    }
+    for (size_t i = 0; i < net.state.size(); ++i) {
+      const bool v                                             = (x >> (6 + i)) & 1;
+      sources[net.native.node(net.state[i].q.id).source_index] = v;
+      state[net.state[i].name]                                 = v;
+    }
+    for (uint32_t i : {0U, 1U}) {
+      const auto  node = module.state[i];
+      const auto& cell = physical.cells[physical.states[i].cell];
+      const auto  decl = node.get_subnode_io();
+      for (size_t k = 0; k < cell.rails.size(); ++k) {
+        const auto driver = node.get_sink_pin(decl->get_input_port_id(cell.rails[k])).get_driver_pin();
+        ASSERT_EQ(module_value(driver, inputs, state), native_value(net.native, physical.states[i].rails[k].producer, sources))
+            << net.state[i].name << " R" << k << " x=" << x;
+      }
+    }
+    for (size_t o = 0; o < module.outputs.size(); ++o) {
+      ASSERT_EQ(module_value(module.graph->get_output_pin(module.outputs[o]).get_driver_pin(), inputs, state),
+                native_value(net.native, net.outputs[o].signal, sources))
+          << module.outputs[o];
+    }
+    ASSERT_EQ(module_value(gu::get_driver_of_sink_name(module.state[2], "din"), inputs, state),
+              native_value(net.native, net.state[2].reference_d, sources));
+  }
+}
+
+TEST_F(LogicalWriter, PhysicalModuleRefusesMismatchedEmissions) {
+  const auto region   = one_phase();
+  auto       physical = convert(region, {0});
+  Budget     work{10000000};
+  auto       shorter = physical;
+  shorter.states.pop_back();
+  EXPECT_FALSE(write_physical_module(region, shorter, "m", work).module);
+  auto wrong = physical;
+  wrong.cells[0].rails.pop_back();
+  EXPECT_FALSE(write_physical_module(region, wrong, "m", work).module);
+  auto outside                        = physical;
+  outside.states[0].rails[0].producer = {static_cast<Id>(region.frozen->native.size() + 5), false};
+  EXPECT_FALSE(write_physical_module(region, outside, "m", work).module);
+  // The cell captures on the positive edge only.
+  auto negative                        = region;
+  negative.source.sources[0].neg_clock = true;
+  EXPECT_TRUE(write_logical_module(negative, "m", work).module);
+  EXPECT_FALSE(write_physical_module(negative, physical, "m", work).module);
+}
 
 TEST_F(LogicalWriter, NativeGraphPreservesFunctionsStateControlsAndSourceNames) {
   for (bool async : {false, true}) {

@@ -8,7 +8,7 @@
 #include "cell.hpp"
 #include "dlop.hpp"
 #include "hash_util.hpp"
-#include "liberty_dff.hpp"
+#include "logical_writer.hpp"
 #include "node_util.hpp"
 #include "provisional_cell.hpp"
 
@@ -79,26 +79,12 @@ usyn::Physical_cell_interface domino_interface(const Domino_master& master, size
   return cell;
 }
 
-std::shared_ptr<hhds::GraphIO> declare_domino_cell(hhds::GraphLibrary& library, const usyn::Physical_cell_interface& cell) {
-  // The named-cell declaration path: sequential port ids, 1-bit unsigned pins,
-  // the clocked output as a loop break, and the bodied-collision refusal.
-  liberty::Memory_cell decl;
-  decl.name = cell.name;
-  for (const auto& rail : cell.rails) {
-    decl.pins.push_back({.name = rail, .direction = "input"});
-  }
-  decl.pins.push_back({.name = cell.clock, .direction = "input", .clock_input = true});
-  decl.pins.push_back({.name = cell.output, .direction = "output", .clocked = true});
-  liberty::declare_memory_cells(library, {decl});
-  return library.find_io(cell.name);
-}
-
 void emit_domino_model(hhds::GraphLibrary& models, const Domino_master& master, const usyn::Physical_cell_interface& cell) {
   check_interface(master, cell);
   if (const auto existing = models.find_io(cell.name); existing && existing->has_graph()) {
     return;
   }
-  auto       io      = declare_domino_cell(models, cell);
+  auto       io      = usyn::declare_physical_cell(models, cell);
   auto       body    = io->create_graph();
   const auto one_bit = [](hhds::Pin_class pin) {
     gu::set_ubits(pin, 1);

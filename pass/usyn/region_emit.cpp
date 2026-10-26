@@ -11,8 +11,8 @@ namespace livehd::usyn {
 namespace gu = graph_util;
 
 Region_emission emit_logical_region(const partition::Region_body& rb, const synth::Region_blast& blast,
-                                    const Stateful_region& selected, Budget& work, uint32_t max_nodes,
-                                    const Cmos_cleanup* cleanup, std::span<const Literal_rewrite> literal) {
+                                    const Stateful_region& selected, Budget& work, uint32_t max_nodes, const Cmos_cleanup* cleanup,
+                                    std::span<const Literal_rewrite> literal, const Physical_emission* physical) {
   const auto invalid   = [](std::string reason) { return Region_emission{Status::invalid, std::move(reason)}; };
   const auto exhausted = [] { return Region_emission{Status::search_exhausted, "region emission budget"}; };
   if (!rb.body || !rb.src || rb.body == rb.src || !blast.logical_state || blast.status != synth::Region_blast::Status::blasted
@@ -40,7 +40,11 @@ Region_emission emit_logical_region(const partition::Region_body& rb, const synt
       return invalid("region output is not declared on the destination");
     }
   }
-  auto logical = write_logical_module(selected, "__usyn_logical", work, max_nodes, cleanup, literal);
+  if (physical && !literal.empty()) {
+    return invalid("physical emission does not support literal rewrites");
+  }
+  auto logical = physical ? write_physical_module(selected, *physical, "__usyn_logical", work, max_nodes, cleanup)
+                          : write_logical_module(selected, "__usyn_logical", work, max_nodes, cleanup, literal);
   if (!logical.module) {
     return {logical.status, std::move(logical.reason), std::move(logical.cmos_cleanup), std::move(logical.choices)};
   }
@@ -215,13 +219,35 @@ Region_emission emit_logical_region(const partition::Region_body& rb, const synt
     if (!work.spend()) {
       return exhausted();
     }
-    if (Ntype::has_multiple_driver_pins(gu::type_op_of(old))) {
+    // A body-less Sub is a physical cell instance (write_physical_module): its
+    // declaration is cloned by name and every declared output gets a driver.
+    const auto op   = gu::type_op_of(old);
+    const bool cell = op == Ntype_op::Sub && old.get_subnode_io() && !old.get_subnode_graph();
+    if (Ntype::has_multiple_driver_pins(op) && !cell) {
       return invalid("unexpected multi-output cell in logical CMOS module");
     }
-    auto neo     = clone_node(old, *module.graph);
-    auto old_pin = old.get_driver_pin(0), new_pin = neo.create_driver_pin(0);
-    gu::carry_pin_attrs(old_pin, new_pin);
-    logical_pins.emplace(old_pin, new_pin);
+    auto neo = clone_node(old, *module.graph);
+    if (cell) {
+      // Binding by name must never reach a module with a body.
+      auto child = partition::resolve_or_clone_subdef(library, old);
+      if (!child || child->has_graph()) {
+        return invalid(child ? "physical cell collides with a module that has a body: " + std::string(child->get_name())
+                             : std::string("physical cell declaration is missing from the output library"));
+      }
+      neo.set_subnode(child);
+      for (const auto& decl : child->get_output_pin_decls()) {
+        auto new_pin = neo.create_driver_pin(decl.port_id);
+        gu::set_bits(new_pin, decl.bits ? decl.bits : 1);
+        if (auto old_pin = old.try_get_driver_pin(decl.port_id); !old_pin.is_invalid()) {
+          gu::carry_pin_attrs(old_pin, new_pin);
+          logical_pins.emplace(old_pin, new_pin);
+        }
+      }
+    } else {
+      auto old_pin = old.get_driver_pin(0), new_pin = neo.create_driver_pin(0);
+      gu::carry_pin_attrs(old_pin, new_pin);
+      logical_pins.emplace(old_pin, new_pin);
+    }
     copied.emplace_back(old, neo);
   }
   const auto logical_driver = [&](hhds::Pin_class pin) -> hhds::Pin_class {

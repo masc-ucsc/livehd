@@ -1,8 +1,6 @@
 // This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 #include "logical_writer.hpp"
 
-#include "literal_stats.hpp"
-
 #include <algorithm>
 #include <array>
 #include <bit>
@@ -11,6 +9,8 @@
 
 #include "hhds/attrs/name.hpp"
 #include "hhds/attrs/srcid.hpp"
+#include "liberty_dff.hpp"
+#include "literal_stats.hpp"
 #include "node_util.hpp"
 
 namespace livehd::usyn {
@@ -19,7 +19,8 @@ namespace gu = graph_util;
 namespace {
 Logical_module_result write_module(const synth::Source_state_table& source, std::span<const uint32_t> state_bits,
                                    const Endpoint_netlist* frozen, const Xag_region* legacy, std::string_view name, Budget& work,
-                                   uint32_t max_nodes, const Cmos_cleanup* cleanup, std::span<const Literal_rewrite> literal = {}) {
+                                   uint32_t max_nodes, const Cmos_cleanup* cleanup, std::span<const Literal_rewrite> literal = {},
+                                   const Physical_emission* physical = nullptr) {
   Logical_module_result result;
   const auto            invalid = [&](std::string reason) {
     result.reason = std::move(reason);
@@ -60,6 +61,45 @@ Logical_module_result write_module(const synth::Source_state_table& source, std:
       for (const auto& s : expanded.state) d.push_back(s.d);
       result.literal_rewrites = apply_literal_rewrites(expanded.graph, d, literal);
       for (size_t i = 0; i < d.size(); ++i) expanded.state[i].d = d[i];
+    }
+  }
+  // A converted state's rails become protected outputs past the original
+  // ones, so cleanup and export keep their producers (and give a complemented
+  // one an explicit inverter); its D no longer roots the expansion, so logic
+  // only that D used is not emitted.
+  size_t                             original_outputs = expanded.outputs.size();
+  std::vector<const Physical_state*> converted;
+  std::vector<size_t>                rail_begin;
+  if (physical) {
+    if (!frozen || physical->states.size() != expanded.state.size()) {
+      return invalid("physical emission does not match the frozen state");
+    }
+    converted.assign(expanded.state.size(), nullptr);
+    rail_begin.assign(expanded.state.size(), 0);
+    for (size_t i = 0; i < physical->states.size(); ++i) {
+      const auto& state = physical->states[i];
+      if (!work.spend(state.rails.size() + 1)) {
+        return exhausted();
+      }
+      if (state.state != i) {
+        return invalid("physical emission state order does not match the frozen state");
+      }
+      if (state.decision != Physical_decision::domino) {
+        continue;
+      }
+      if (state.cell >= physical->cells.size() || state.rails.empty()
+          || state.rails.size() != physical->cells[state.cell].rails.size()) {
+        return invalid("invalid physical cell interface");
+      }
+      converted[i]  = &state;
+      rail_begin[i] = expanded.outputs.size();
+      for (size_t k = 0; k < state.rails.size(); ++k) {
+        if (state.rails[k].producer.id >= expanded.graph.size()) {
+          return invalid("physical rail producer outside the frozen netlist");
+        }
+        expanded.outputs.push_back({std::format("__domino_{}_r{}", i, k), state.rails[k].producer});
+      }
+      expanded.state[i].d = expanded.state[i].q;
     }
   }
   if (cleanup && cleanup->search) {
@@ -104,6 +144,9 @@ Logical_module_result write_module(const synth::Source_state_table& source, std:
   if (!synth::validate_state_controls(source, net) || state_bits.size() != net.latches().size()
       || source.bits.size() != net.latches().size()) {
     return invalid("invalid logical state/control correspondence");
+  }
+  if (!physical) {
+    original_outputs = net.outputs().size();
   }
   // Reserve the writer's worst case before creating the private graph
   // (logical_emission_nodes; constants are pooled pins, not nodes). Semantic
@@ -179,7 +222,7 @@ Logical_module_result write_module(const synth::Source_state_table& source, std:
     io->set_bits(module->inputs.back(), 1);
     io->set_unsign(module->inputs.back(), true);
   }
-  for (size_t i = 0; i < net.outputs().size(); ++i) {
+  for (size_t i = 0; i < original_outputs; ++i) {
     if (!work.spend()) {
       return exhausted();
     }
@@ -228,9 +271,25 @@ Logical_module_result write_module(const synth::Source_state_table& source, std:
     if (!work.spend()) {
       return exhausted();
     }
-    auto node = gu::create_typed_node(graph, Ntype_op::Flop);
+    hhds::Node_class node;
+    hhds::Pin_class  q;
+    if (!converted.empty() && converted[i]) {
+      const auto&                    cell = physical->cells[converted[i]->cell];
+      std::shared_ptr<hhds::GraphIO> decl;
+      try {
+        decl = declare_physical_cell(module->library, cell);
+      } catch (const std::exception& error) {
+        return invalid(error.what());
+      }
+      node = gu::create_typed_node(graph, Ntype_op::Sub);
+      node.set_subnode(decl);
+      q = node.create_driver_pin(decl->get_output_port_id(cell.output));
+      gu::set_ubits(q, 1);
+    } else {
+      node = gu::create_typed_node(graph, Ntype_op::Flop);
+      q    = output(node);
+    }
     node.attr(hhds::attrs::name).set(net.latch(i).name);
-    auto q = output(node);
     gu::set_pin_name(q, net.latch(i).name);
     pins[net.latch(i).q] = q;
     module->state.push_back(node);
@@ -352,6 +411,21 @@ Logical_module_result write_module(const synth::Source_state_table& source, std:
     const auto  node = module->state[i];
     const auto& bit  = source.bits[state_bits[i]];
     const auto& row  = source.sources[bit.source];
+    if (!converted.empty() && converted[i]) {
+      // Physical eligibility admits only a plain positive-edge clock.
+      const auto& cell  = physical->cells[converted[i]->cell];
+      const auto  clock = controls[bit.source][static_cast<size_t>(synth::State_control_kind::clock)];
+      if (row.neg_clock || row.async_reset || row.power_on || !row.clock.present || row.clock.constant || clock.is_invalid()
+          || !work.spend(cell.rails.size())) {
+        return invalid("a converted physical state needs a plain positive-edge clock control");
+      }
+      const auto decl = node.get_subnode_io();
+      for (size_t k = 0; k < cell.rails.size(); ++k) {
+        pins[net.outputs()[rail_begin[i] + k].node].connect_sink(node.create_sink_pin(decl->get_input_port_id(cell.rails[k])));
+      }
+      clock.connect_sink(node.create_sink_pin(decl->get_input_port_id(cell.clock)));
+      continue;
+    }
     connect(node, "din", pins[net.latch(i).d]);
     const auto attach = [&](std::string_view pin, const synth::Source_signal& signal, synth::State_control_kind kind) {
       if (signal.present) {
@@ -382,7 +456,7 @@ Logical_module_result write_module(const synth::Source_state_table& source, std:
       connect(node, "initial", value);
     }
   }
-  for (size_t end = net.outputs().size(); end != 0; --end) {
+  for (size_t end = original_outputs; end != 0; --end) {
     const auto i = end - 1;
     if (!work.spend()) {
       return exhausted();
@@ -412,6 +486,30 @@ Logical_module_result write_logical_module(const Stateful_region& region, std::s
 
 Logical_module_result write_logical_module(const Frozen_region& region, Budget& work, uint32_t max_nodes) {
   return write_module(region.source, region.state_bits, &region.netlist, nullptr, region.module_name, work, max_nodes, nullptr);
+}
+
+Logical_module_result write_physical_module(const Stateful_region& region, const Physical_emission& physical, std::string_view name,
+                                            Budget& work, uint32_t max_nodes, const Cmos_cleanup* cleanup) {
+  if (!region.frozen) {
+    Logical_module_result result;
+    result.reason = "physical emission requires a frozen netlist";
+    return result;
+  }
+  return write_module(region.source, region.state_bits, &*region.frozen, nullptr, name, work, max_nodes, cleanup, {}, &physical);
+}
+
+std::shared_ptr<hhds::GraphIO> declare_physical_cell(hhds::GraphLibrary& library, const Physical_cell_interface& cell) {
+  // The named-cell declaration path: sequential port ids, 1-bit unsigned pins,
+  // the clocked output as a loop break, and the bodied-collision refusal.
+  liberty::Memory_cell decl;
+  decl.name = cell.name;
+  for (const auto& rail : cell.rails) {
+    decl.pins.push_back({.name = rail, .direction = "input"});
+  }
+  decl.pins.push_back({.name = cell.clock, .direction = "input", .clock_input = true});
+  decl.pins.push_back({.name = cell.output, .direction = "output", .clocked = true});
+  liberty::declare_memory_cells(library, {decl});
+  return library.find_io(cell.name);
 }
 
 }  // namespace livehd::usyn

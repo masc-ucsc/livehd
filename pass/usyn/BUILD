@@ -287,6 +287,7 @@ cc_library(
         ":usyn_logic",
         "//graph",
         "//pass/aegraph:fold_engine",  # the engine is part of the cache salt
+        "//pass/liberty:liberty_dff",  # the physical cell declaration path
         "//pass/partition:pass_partition",
         "//pass/synth",
         "//pass/synth:lnet",

@@ -20,8 +20,12 @@ struct Region_emission {
 // No added hierarchy, Liberty, ABC or solver. Source graph is read-only.
 // Serialize graph access. On refusal the caller must discard its fresh output
 // library; like partition's other body builders, this may leave a partial body.
+// A non-null `physical` emits write_physical_module instead: each converted
+// state is a body-less provisional cell instance whose declaration is cloned
+// into the destination library by name.
 Region_emission emit_logical_region(const partition::Region_body& region, const synth::Region_blast& blast,
                                     const Stateful_region& selected, Budget& work, uint32_t max_nodes = 2000000,
-                                    const Cmos_cleanup* cleanup = nullptr, std::span<const Literal_rewrite> literal = {});
+                                    const Cmos_cleanup* cleanup = nullptr, std::span<const Literal_rewrite> literal = {},
+                                    const Physical_emission* physical = nullptr);
 
 }  // namespace livehd::usyn
