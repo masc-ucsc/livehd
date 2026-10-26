@@ -2944,6 +2944,20 @@ sh_test(
     ],
 )
 
+# 2d-domplace H cases: unsupported (retained) states, a complemented rail, a
+# converted Q shared by an output port and other domino rails, an endpoint
+# wider than one gate, LEC of the placed netlist, and warm/model-knob replay.
+sh_test(
+    name = "lhd_domplace_cases_smoke",
+    size = "small",
+    timeout = "short",
+    srcs = ["lhd_domplace_cases_smoke.py"],
+    data = [
+        "//inou/lefdef:test_data",
+        "//lhd",
+    ],
+)
+
 # 2d-domplace: the opt-in provisional domino profile through lhd synth -- the
 # mixed netlist, the model bundle, usage refusals, sequential LEC with the
 # bundle's models (and not without them), and two-row placement to DEF/LEF.
