@@ -2558,7 +2558,9 @@ obstacles while nearest-whitespace ECO legalization re-places the displaced
 and other edited single-row cells. Any failure throws `Multirow_failure` with
 nothing committed; the two-row ECO never falls back to windowed
 re-placement. `qor.multirow_eco` reports outcomes, released and grown sites
-(over both rows), displaced cells and the largest displacement.
+(over both rows), displaced cells and the largest displacement of that one
+place() call; `qor.domino_sizing.eco` sums them over the accepted sizing
+trials.
 
 Those transactions come from `custom_sizing.hpp` (`size_custom_placed`,
 lhd `synth.place.domino_sizing`). `Options::custom_cells` (`custom_cells.hpp`,

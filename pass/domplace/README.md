@@ -185,8 +185,10 @@ failure, such as a variant whose register leaves the stage period
 unmeasured (`rejected_failed`, with its reason). `.trials` (default 64) bounds
 the trials. The netlist is always variant 0 at synthesis, so a down-size
 only follows an up-size. `place/domino_sizing.json` and
-`qor.place.domino_sizing` list each trial, the variant counts and the C_clk
-change from the catalog's labeled `clock_ff`. With sizing on, the stage
+`qor.place.domino_sizing` list each trial (with its two-row ECO block), the
+variant counts, the C_clk change from the catalog's labeled `clock_ff`, and
+`eco`, the two-row ECO summed over the accepted trials
+(`qor.place.multirow_eco` describes only the last ECO place() call). With sizing on, the stage
 timing settings and the stage-timing code salt join the physical cache key.
 
 ## Code
@@ -300,7 +302,8 @@ RSS of its whole process tree (sampled from `/proc`), LEC against the RTL
 (gensim cell models, plus the bundle models for arm 3), a status class
 (`ok`, `unproven`, `unsupported`, `infeasible` for a packing failure,
 `timeout`, `failed`), coverage, area on both bases (rail inverters are
-netlist cells and are counted once), `qor.place.multirow`/`multirow_eco`,
+netlist cells and are counted once), `qor.place.multirow`/`multirow_eco`
+(with sizing, the ECO displacement is `domino_sizing.eco`'s total),
 the stage period, classes and C_clk, HPWL and sizing counts. `--warm` reruns
 each leg twice in its workdir and records the second. Output goes to the
 ignored `repros/domplace_<date>/`: `manifest.json` (HEAD, dirty-diff hash,

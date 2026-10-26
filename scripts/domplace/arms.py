@@ -168,8 +168,10 @@ def leg_metrics(args, leg_dir, result, arm):
     physical = qor.get('usyn', {}).get('physical')
     metrics['coverage'] = physical.get('totals') if physical else None
     sizing = place.get('domino_sizing')
+    # qor.place.multirow_eco is only the last ECO place() call's; the sizing
+    # block sums the two-row ECO over its accepted trials.
     metrics['sizing'] = {'counts': sizing.get('counts'), 'variants': sizing.get('variants'),
-                         'clock': sizing.get('clock')} if sizing else None
+                         'clock': sizing.get('clock'), 'eco': sizing.get('eco')} if sizing else None
     stage = leg_dir / 'W/synth/place/stage_timing.json'
     if stage.is_file():
         report = json.loads(stage.read_text())
@@ -237,9 +239,10 @@ TSV = ['leg', 'arm_name', 'status', 'lec', 'wall_s', 'peak_rss_mib', 'converted'
 def tsv_row(e):
     coverage, area, stage = e.get('coverage') or {}, e.get('area') or {}, e.get('stage_timing') or {}
     sizing, warm = (e.get('sizing') or {}).get('counts') or {}, e.get('warm') or {}
+    eco = (e.get('sizing') or {}).get('eco') or e.get('multirow_eco') or {}
     values = [e['leg'], e['arm_name'], e['status'], e.get('lec'), e['wall_s'], e['peak_rss_mib'], coverage.get('converted'),
               coverage.get('eligible'), area.get('lef_um2'), area.get('domino_lef_um2'), area.get('liberty_um2'), e.get('legal'),
-              (e.get('multirow') or {}).get('cells'), (e.get('multirow_eco') or {}).get('displaced_cells'), e.get('hpwl_um'),
+              (e.get('multirow') or {}).get('cells'), eco.get('displaced_cells'), e.get('hpwl_um'),
               stage.get('status'), stage.get('period_ps'), stage.get('limiting'), stage.get('c_clk_ff'), sizing.get('trials'),
               warm.get('wall_s'), warm.get('peak_rss_mib')]
     return '\t'.join('' if v is None else f'{v:.4f}' if isinstance(v, float) else str(v) for v in values)

@@ -2,6 +2,7 @@
 #include "custom_sizing.hpp"
 
 #include <algorithm>
+#include <array>
 #include <chrono>
 #include <cmath>
 #include <filesystem>
@@ -15,6 +16,7 @@
 #include <tuple>
 
 #include "multirow.hpp"
+#include "rapidjson/document.h"
 #include "rapidjson/stringbuffer.h"
 #include "rapidjson/writer.h"
 #include "repair_internal.hpp"
@@ -119,6 +121,51 @@ std::optional<double> clock_ff(const std::map<std::string, Custom_instance>& ins
   }
   return total;
 }
+// The two-row ECO of the accepted trials. Each trial's place() reports only
+// its own ECO (qor.multirow_eco), so the run's total is summed here.
+struct Eco_total {
+  unsigned                        accepted_trials = 0;
+  uint64_t                        cells = 0, displaced_cells = 0;
+  int64_t                         released_sites = 0, grown_sites = 0;
+  double                          max_displacement_um = 0;
+  std::map<std::string, uint64_t> outcomes;
+};
+constexpr std::array kEcoOutcomes{Multirow_eco_cell::Outcome::in_place,
+                                  Multirow_eco_cell::Outcome::shifted,
+                                  Multirow_eco_cell::Outcome::displaced,
+                                  Multirow_eco_cell::Outcome::re_anchored};
+// Writes a trial's ECO block as "eco" (null without one) and, when `total`
+// is given, adds it there.
+void                 trial_eco(Writer& w, const std::string& qor, Eco_total* total) {
+  rapidjson::Document doc;
+  doc.Parse(qor.c_str());
+  w.Key("eco");
+  if (doc.HasParseError() || !doc.IsObject() || !doc.HasMember("multirow_eco") || !doc["multirow_eco"].IsObject()) {
+    w.Null();
+    return;
+  }
+  const auto& block = doc["multirow_eco"];
+  block.Accept(w);
+  if (!total) {
+    return;
+  }
+  const auto count = [&](std::string_view key) -> int64_t {
+    const auto it = block.FindMember(rapidjson::StringRef(key.data(), key.size()));
+    return it != block.MemberEnd() && it->value.IsInt64() ? it->value.GetInt64() : 0;
+  };
+  ++total->accepted_trials;
+  total->cells           += static_cast<uint64_t>(count("cells"));
+  total->displaced_cells += static_cast<uint64_t>(count("displaced_cells"));
+  total->released_sites  += count("released_sites");
+  total->grown_sites     += count("grown_sites");
+  if (const auto it = block.FindMember("max_displacement_um"); it != block.MemberEnd() && it->value.IsNumber()) {
+    total->max_displacement_um = std::max(total->max_displacement_um, it->value.GetDouble());
+  }
+  for (const auto outcome : kEcoOutcomes) {
+    total->outcomes[std::string(multirow_eco_outcome_name(outcome))]
+        += static_cast<uint64_t>(count(multirow_eco_outcome_name(outcome)));
+  }
+}
 double period_ps(const Timing_feedback& f) { return f.delay * f.time_unit_ps; }
 // No more electrical violations, and with as many no larger an excess:
 // resize_accepts' electrical gate.
@@ -186,6 +233,7 @@ Repair_result size_custom_placed(Result legal, const Options& requested, const E
   std::set<std::string>           up_rejected, down_rejected, buffered, moved_up, moved_down;
   std::map<std::string, unsigned> tally;
   unsigned                        trials = 0;
+  Eco_total                       eco;
   rapidjson::StringBuffer         log;
   Writer                          w(log);
   w.StartArray();
@@ -316,6 +364,7 @@ Repair_result size_custom_placed(Result legal, const Options& requested, const E
       w.String(outcome);
       if (trial) {
         feedback(w, "timing", trial->timing);
+        trial_eco(w, trial->placed.qor, keep ? &eco : nullptr);
       } else {
         w.Key("failure");
         w.String(failure.c_str());
@@ -371,6 +420,28 @@ Repair_result size_custom_placed(Result legal, const Options& requested, const E
     r.Key(key);
     r.Uint(tally[key]);
   }
+  r.EndObject();
+  // The two-row ECO over the accepted trials (qor.multirow_eco is only the
+  // last place() call's).
+  r.Key("eco");
+  r.StartObject();
+  r.Key("accepted_trials");
+  r.Uint(eco.accepted_trials);
+  r.Key("cells");
+  r.Uint64(eco.cells);
+  for (const auto outcome : kEcoOutcomes) {
+    const auto name = multirow_eco_outcome_name(outcome);
+    r.Key(name.data(), static_cast<rapidjson::SizeType>(name.size()));
+    r.Uint64(eco.outcomes[std::string(name)]);
+  }
+  r.Key("released_sites");
+  r.Int64(eco.released_sites);
+  r.Key("grown_sites");
+  r.Int64(eco.grown_sites);
+  r.Key("displaced_cells");
+  r.Uint64(eco.displaced_cells);
+  r.Key("max_displacement_um");
+  r.Double(eco.max_displacement_um);
   r.EndObject();
   r.Key("variants");
   r.StartObject();

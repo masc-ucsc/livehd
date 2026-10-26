@@ -269,6 +269,17 @@ TEST(CustomSizing, UpSizesDisplaceNeighborsThenTheOutputIsBuffered) {
   EXPECT_EQ(report["counts"]["up_accepted"].GetUint(), 2U);
   EXPECT_EQ(report["counts"]["buffer_accepted"].GetUint(), 1U);
   EXPECT_EQ(report["counts"]["rejected_packing"].GetUint(), 1U);
+  // The ECO total sums the accepted trials (the buffer's ECO moves no
+  // two-row cell); qor.multirow_eco is the buffer trial's alone.
+  const auto& eco = report["eco"];
+  EXPECT_EQ(eco["accepted_trials"].GetUint(), 3U);
+  EXPECT_EQ(eco["cells"].GetUint64(), 2U);
+  EXPECT_GE(eco["displaced_cells"].GetUint64(), 1U);
+  EXPECT_EQ(eco["grown_sites"].GetInt64(), 12);  // 16 -> 19 -> 22 sites in both rows
+  EXPECT_EQ(eco["displaced_cells"].GetUint64(),
+            report["trials"][0]["eco"]["displaced_cells"].GetUint64() + report["trials"][1]["eco"]["displaced_cells"].GetUint64()
+                + report["trials"][3]["eco"]["displaced_cells"].GetUint64());
+  EXPECT_TRUE(report["trials"][2]["eco"].IsNull() || !report["trials"][2].HasMember("eco"));
   const auto& fp = sized.placed.floorplan;
   EXPECT_NO_THROW(check_legality(chain.tech, fp));
   EXPECT_EQ(at(fp, "c1").macro, variant(2));
@@ -294,6 +305,7 @@ TEST(CustomSizing, UpSizesDisplaceNeighborsThenTheOutputIsBuffered) {
   EXPECT_TRUE(qor.HasMember("domino_sizing"));
   EXPECT_TRUE(qor.HasMember("multirow"));  // the cold anchor report, carried
   EXPECT_TRUE(qor.HasMember("multirow_eco"));
+  EXPECT_EQ(qor["multirow_eco"]["cells"].GetUint64(), 0U);
   bool netlist_has_v2 = false;
   for (auto n : sized.placed.graph->body().nodes()) {
     if (n.get_name() == "c1") {
@@ -321,7 +333,13 @@ TEST(CustomSizing, DownSizesReleaseSitesAndARejectedGrowthChangesNothing) {
   EXPECT_NO_THROW(check_legality(chain.tech, down.placed.floorplan));
   const auto qor = parse(down.placed.qor);
   ASSERT_TRUE(qor.HasMember("multirow_eco"));
-  EXPECT_EQ(qor["multirow_eco"]["released_sites"].GetInt64(), 6);  // 19 -> 16 sites in both rows
+  EXPECT_EQ(qor["multirow_eco"]["released_sites"].GetInt64(), 6);  // 19 -> 16 sites in both rows: the last ECO only
+  // The run's ECO total covers both accepted trials (22 -> 19 -> 16).
+  EXPECT_EQ(report["eco"]["accepted_trials"].GetUint(), 2U);
+  EXPECT_EQ(report["eco"]["cells"].GetUint64(), 2U);
+  EXPECT_EQ(report["eco"]["in_place"].GetUint64(), 2U);
+  EXPECT_EQ(report["eco"]["released_sites"].GetInt64(), 12);
+  EXPECT_EQ(report["trials"][0]["eco"]["released_sites"].GetInt64(), 6);
   EXPECT_LT(down.timing->area, spare(cold).area);
 
   // A growth that cannot be packed anywhere is a rejected trial: the state,
