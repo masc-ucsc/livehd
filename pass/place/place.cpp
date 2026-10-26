@@ -5580,15 +5580,7 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
       = options.routability
         && (control.routability || (options.fp_place && route_policy(options, options.fp_route).model != dp::RouteModel::off));
   if (resolved_uroute.export_features || route_capacity_required) {
-    for (const auto& name : tech.routing_layers) {
-      const auto& l = tech.layers.at(name);
-      if (l.direction == "HORIZONTAL" && l.pitch_y > 0) {
-        feature_capacity_h += 1 / (l.pitch_y * tech.dbu);
-      }
-      if (l.direction == "VERTICAL" && l.pitch_x > 0) {
-        feature_capacity_v += 1 / (l.pitch_x * tech.dbu);
-      }
-    }
+    std::tie(feature_capacity_h, feature_capacity_v) = lef_track_capacity(tech);
     if (route_capacity_required && !(feature_capacity_h > 0 && feature_capacity_v > 0)) {
       throw std::runtime_error("routability requires horizontal and vertical LEF routing pitches");
     }

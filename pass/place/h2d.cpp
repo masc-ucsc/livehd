@@ -15,6 +15,7 @@
 #include "rapidjson/document.h"
 #include "rapidjson/stringbuffer.h"
 #include "rapidjson/writer.h"
+#include "routing_tracks.hpp"
 namespace livehd::placement {
 namespace dp = DreamPlace::native;
 namespace mp = dp::macro;
@@ -139,16 +140,7 @@ mp::Parameters macro_parameters(const Options& o, const physical::Technology& te
   if (!p.target_density) {
     p.target_density = o.density;
   }
-  double horizontal = 0, vertical = 0;
-  for (const auto& name : tech.routing_layers) {
-    const auto& layer = tech.layers.at(name);
-    if (layer.direction == "HORIZONTAL" && layer.pitch_y > 0) {
-      horizontal += 1 / (layer.pitch_y * tech.dbu);
-    }
-    if (layer.direction == "VERTICAL" && layer.pitch_x > 0) {
-      vertical += 1 / (layer.pitch_x * tech.dbu);
-    }
-  }
+  const auto [horizontal, vertical] = lef_track_capacity(tech);
   if (!p.route_cap_h) {
     p.route_cap_h = horizontal;
   }
