@@ -184,3 +184,26 @@ cc_library(
         "@rapidjson",
     ],
 )
+
+# Two-row LEF abstracts of domino variants and their row-aware pin-access check.
+cc_library(
+    name = "domino_geometry",
+    srcs = ["domino_geometry.cpp"],
+    hdrs = ["domino_geometry.hpp"],
+    copts = COPTS,
+    includes = ["."],
+    visibility = ["//visibility:public"],
+    deps = ["//inou/lefdef:inou_lefdef"],
+)
+
+cc_test(
+    name = "domino_geometry_test",
+    size = "small",
+    srcs = ["domino_geometry_test.cpp"],
+    copts = COPTS,
+    data = ["//inou/lefdef:test_data"],
+    deps = [
+        ":domino_geometry",
+        "@googletest//:gtest_main",
+    ],
+)
