@@ -3,7 +3,6 @@
 
 #include <algorithm>
 #include <cmath>
-#include <limits>
 #include <stdexcept>
 
 namespace livehd::physical {
@@ -21,7 +20,7 @@ Rect scaled(Rect r, double scale) {
        double(coordinate(r.yl * scale)),
        double(coordinate(r.xh * scale)),
        double(coordinate(r.yh * scale))};
-  if (r.xl >= r.xh || r.yl >= r.yh) {
+  if (r.empty()) {
     throw std::runtime_error("empty or inverted routing rectangle");
   }
   return r;

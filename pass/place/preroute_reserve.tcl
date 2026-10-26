@@ -121,7 +121,8 @@ proc livehd::preroute::_plan_route_space {} {
 proc livehd::preroute::reserve_fixed_route_space {} {
   set block [ord::get_db_block]
   set property [odb::dbStringProperty_find $block livehd_preroute_space_v1]
-  # _fixed_routes also rejects a recorded legacy lock policy.
+  # _fixed_routes rejects a legacy lock policy recorded in this property, so
+  # any record read below already has the endpoint_only policy.
   set scope [_fixed_routes]
   if {$property ne "NULL"} {
     set record [$property getValue]
