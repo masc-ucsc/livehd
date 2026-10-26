@@ -7340,6 +7340,35 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
               double(tech.dbu),
               wire.source
       });
+      // Native timing names physical pins as a top port or instance:pin.
+      const auto label        = [](const Endpoint& pin) { return pin.instance == "PIN" ? pin.pin : pin.instance + ":" + pin.pin; };
+      // Bind every weighted timing sink to its physical pin and net driver.
+      const auto bind_weights = [label](const std::vector<Endpoint>&                          pins,
+                                        const dp::Design&                                     physical,
+                                        const std::map<std::string, timeclosure::Pin_weight>& weights,
+                                        dp::PinTiming&                                        timing,
+                                        const std::string&                                    what) {
+        timing.driver.assign(physical.pin2node.size(), -1);
+        timing.weight.assign(physical.pin2node.size(), 0);
+        size_t matched = 0;
+        for (size_t p = 0; p < pins.size(); ++p) {
+          const auto found = weights.find(label(pins[p]));
+          if (found == weights.end()) {
+            continue;
+          }
+          const int net = physical.pin2net[p], driver = physical.flat_net2pin[physical.flat_net2pin_start[net]];
+          if (found->second.driver != label(pins[driver])) {
+            throw std::invalid_argument(what + " driver differs from physical net");
+          }
+          timing.driver[p] = driver;
+          timing.weight[p] = found->second.weight;
+          ++matched;
+        }
+        if (matched != weights.size()) {
+          throw std::invalid_argument(what + " pins lack exact physical binding");
+        }
+        return matched;
+      };
       if (config.legal_output_guard) {
         bool legal = false;
         try {
@@ -7384,27 +7413,8 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
         const auto    rc      = estimate_rc(v, tech, rc_options, locations, nullptr, nullptr, false);
         const auto    initial = session->startup_weights(*rc);
         dp::PinTiming bias;
-        bias.coefficient = config.startup_coefficient;
-        bias.driver.assign(v.design.pin2node.size(), -1);
-        bias.weight.assign(v.design.pin2node.size(), 0);
-        const auto pin_name = [](const Endpoint& pin) { return pin.instance == "PIN" ? pin.pin : pin.instance + ":" + pin.pin; };
-        size_t     matched  = 0;
-        for (size_t p = 0; p < v.pins.size(); ++p) {
-          const auto found = initial.weights.pins.find(pin_name(v.pins[p]));
-          if (found == initial.weights.pins.end()) {
-            continue;
-          }
-          const int net = v.design.pin2net[p], driver = v.design.flat_net2pin[v.design.flat_net2pin_start[net]];
-          if (found->second.driver != pin_name(v.pins[driver])) {
-            throw std::invalid_argument("startup timing driver differs from physical net");
-          }
-          bias.driver[p] = driver;
-          bias.weight[p] = found->second.weight;
-          ++matched;
-        }
-        if (matched != initial.weights.pins.size()) {
-          throw std::invalid_argument("startup timing pins lack exact physical binding");
-        }
+        bias.coefficient     = config.startup_coefficient;
+        const size_t matched = bind_weights(v.pins, v.design, initial.weights.pins, bias, "startup timing");
         if (initial.supported) {
           v.design.pin_timing = std::move(bias);
         }
@@ -7466,7 +7476,8 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
       const auto first = std::max<int64_t>(1, (int64_t(config.start) + config.interval - 1) / config.interval) * config.interval;
       control.min_iterations = std::max(control.min_iterations, int(std::min<int64_t>(control.max_iterations, first)));
       auto buffering_state   = std::make_shared<std::optional<buffering::Checkpoint_state>>();
-      control.checkpoint     = [&, session, rc_cache, trace, buffering_state](const dp::Design& physical, int iteration) {
+      control.checkpoint     = [&, session, rc_cache, trace, buffering_state, label, bind_weights](const dp::Design& physical,
+                                                                                               int               iteration) {
         auto view       = v;
         view.design     = physical;
         auto rc_options = options;
@@ -7505,27 +7516,7 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
         std::optional<buffering::Checkpoint_result> combined;
         const auto prepare = [&](const late::Result& fresh_timing, const timeclosure::Pin_weights& fresh_weights) {
           weights.coefficient = options.native_gp_timing->coefficient;
-          weights.driver.assign(physical.pin2node.size(), -1);
-          weights.weight.assign(physical.pin2node.size(), 0);
-          matched         = 0;
-          const auto name = [](const Endpoint& pin) { return pin.instance == "PIN" ? pin.pin : pin.instance + ":" + pin.pin; };
-          for (size_t p = 0; p < view.pins.size(); ++p) {
-            const auto found = fresh_weights.pins.find(name(view.pins[p]));
-            if (found == fresh_weights.pins.end()) {
-              continue;
-            }
-            ++matched;
-            const int net    = physical.pin2net[p];
-            const int driver = physical.flat_net2pin[physical.flat_net2pin_start[net]];
-            if (found->second.driver != name(view.pins[driver])) {
-              throw std::invalid_argument("native timing driver differs from physical pin binding");
-            }
-            weights.driver[p] = driver;
-            weights.weight[p] = found->second.weight;
-          }
-          if (matched != fresh_weights.pins.size()) {
-            throw std::invalid_argument("native timing pin absent from physical binding");
-          }
+          matched             = bind_weights(view.pins, physical, fresh_weights.pins, weights, "native timing");
 
 #if DREAMPLACE_NATIVE_DENSITY_RESERVATION_API >= 1 && DREAMPLACE_NATIVE_PIN_TIMING_API >= 3
           if (options.native_gp_buffering && iteration >= options.native_gp_buffering->start) {
@@ -7533,13 +7524,11 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
               throw std::invalid_argument("joint reservation refresh requires full macro exclusion");
             }
             std::map<std::string, int> drivers;
-            const auto                 pin_name
-                = [](const Endpoint& pin) { return pin.instance == "PIN" ? pin.pin : pin.instance + ":" + pin.pin; };
             for (size_t n = 0; n < physical.net_weights.size(); ++n) {
               if (physical.flat_net2pin_start[n] == physical.flat_net2pin_start[n + 1])
                 continue;
               const int p = physical.flat_net2pin[physical.flat_net2pin_start[n]];
-              drivers.emplace(pin_name(view.pins[p]), p);
+              drivers.emplace(label(view.pins[p]), p);
             }
             const buffering::Checkpoint_input input{physical,
                                                     fresh_timing,
@@ -7748,7 +7737,7 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
         const auto prior        = control.before_legalize;
         const auto strength     = config.legalization;
         const auto driver       = config.driver;
-        control.before_legalize = [&, session, prior, strength, driver](dp::Design& physical) {
+        control.before_legalize = [&, session, prior, strength, driver, label](dp::Design& physical) {
           if (prior) {
             prior(physical);
           }
@@ -7769,10 +7758,7 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
             throw std::invalid_argument("native legalization physical pin census differs");
           }
           for (size_t pin = 0; pin < view.pins.size(); ++pin) {
-            const auto& p = view.pins[pin];
-            binding.pins.push_back({p.instance == "PIN" ? p.pin : p.instance + ":" + p.pin,
-                                    size_t(physical.pin2node[pin]),
-                                    size_t(physical.pin2net[pin])});
+            binding.pins.push_back({label(view.pins[pin]), size_t(physical.pin2node[pin]), size_t(physical.pin2net[pin])});
           }
           for (size_t net = 0; net + 1 < physical.flat_net2pin_start.size(); ++net) {
             const auto begin = physical.flat_net2pin_start.at(net);
