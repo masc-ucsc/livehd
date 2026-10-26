@@ -403,6 +403,37 @@ TEST(Physical, OrientationTransforms) {
   EXPECT_EQ(orient_point(1, 2, 10, 20, Orientation::FN), (std::pair<double, double>{9, 2}));
   EXPECT_EQ(orient_point(1, 2, 10, 20, Orientation::W), (std::pair<double, double>{18, 1}));
 }
+TEST(Physical, SharedGeometryHelpers) {
+  const Rect a{0, 0, 10, 10}, b{10, 0, 20, 10}, c{10, 10, 20, 20};
+  EXPECT_TRUE(a.touches(b));
+  EXPECT_FALSE(a.overlaps(b));
+  EXPECT_FALSE(a.touches(c));  // A shared corner point does not connect.
+  EXPECT_TRUE(a.intersection(c).empty());
+  EXPECT_EQ(a.hull(c), (Rect{0, 0, 20, 20}));
+  EXPECT_EQ(orient_rect({1, 2, 3, 6}, 10, 20, Orientation::W), (Rect{14, 1, 18, 3}));
+  Macro macro;
+  macro.width    = 1;
+  macro.height   = 2;
+  macro.origin_x = 0.5;
+  Ann_place place(100, 200, 0, 0);
+  place.orientation = Orientation::FN;
+  EXPECT_EQ(placed_rect(macro, place, 1000, {0, 0, 0.25, 1}), (Rect{350, 200, 600, 1200}));
+  const Track track{"Y", "M2", 5, 4, 10};  // 5, 15, 25, 35
+  EXPECT_TRUE(track.supported());
+  EXPECT_EQ(track.index_range(6, 30), (std::pair<int64_t, int64_t>{1, 2}));
+  EXPECT_FALSE((Track{"Y", "M2", 5, 4, 10, 1}).supported());
+  Technology tech;
+  EXPECT_EQ(manufacturing_grid_dbu(tech, 1000), 1);
+  tech.manufacturing_grid = 0.005;
+  EXPECT_EQ(manufacturing_grid_dbu(tech, 1000), 5);
+  tech.manufacturing_grid = 0.0005;
+  EXPECT_FALSE(manufacturing_grid_dbu(tech, 1000));
+  Layer layer;
+  layer.width = 0.018;
+  EXPECT_EQ(wire_width_dbu(layer, 1000), 18);
+  layer.width = 0.019;
+  EXPECT_FALSE(wire_width_dbu(layer, 1000));  // Odd widths have half-DBU centerline edges.
+}
 TEST(Physical, RoutedSnapshotPreservesBlockagesWithoutPlacementAuthority) {
   const auto path = std::filesystem::path(std::getenv("TEST_TMPDIR")) / "snapshot_blockages.def";
   {

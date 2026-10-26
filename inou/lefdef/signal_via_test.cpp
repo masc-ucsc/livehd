@@ -53,6 +53,13 @@ TEST(SignalVia, ChecksBothMetalsAndSameNetCuts) {
   f.occupancy.insert({{"V2", {1027, 991, 1045, 1009}}, "other"});  // Exactly 18 DBU cut gap.
   EXPECT_TRUE(f.check().legal) << f.check().reason;
 }
+TEST(SignalVia, NewCutSetKeepsSpacingBetweenProposalCuts) {
+  Fixture        f;
+  Signal_cut_set cuts(f.tech, f.fp);
+  EXPECT_TRUE(cuts.add({"VIA23"}, 1000, 1000));
+  EXPECT_TRUE(cuts.add({"VIA23"}, 1036, 1000));   // Exactly 18 DBU cut gap.
+  EXPECT_FALSE(cuts.add({"VIA23"}, 1000, 1030));  // 12 DBU gap, even on one net.
+}
 TEST(SignalVia, RejectsUnsupportedCutRulesAndShadowing) {
   Fixture f;
   f.tech.cut_layers["V2"].properties["LEF58_SPACING"] = {"SPACING 0.018 ;"};
