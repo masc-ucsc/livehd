@@ -3,6 +3,7 @@
 #include <span>
 
 #include "routing_rules.hpp"
+#include "tech_profile.hpp"
 
 namespace livehd::physical {
 struct Pin_access_point {
@@ -10,11 +11,6 @@ struct Pin_access_point {
   std::string via;
   Shape       escape;       // minimum-area landing/escape rectangle, DEF DBU
   std::string pin_layer{};  // physical pin metal, independent of escape metal
-};
-// This access algorithm supports vertical pin metal and a horizontal escape.
-// Layer names and the connecting cut belong to the technology profile.
-struct Pin_access_layers {
-  std::string pin, escape, cut;
 };
 inline Pin_access_layers asap7_pin_access_layers() { return {"M1", "M2", "V1"}; }
 struct Pin_access_result {

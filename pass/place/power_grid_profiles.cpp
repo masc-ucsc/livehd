@@ -64,31 +64,15 @@ std::vector<Pg_channel> parse_pg_channels(std::string_view text) {
   }
   return result;
 }
-Pg_profile power_grid_profile(std::string_view name, const physical::Technology& tech) {
-  if (name == "auto") {
-    if (!tech.macros.contains("TAPCELL_ASAP7_75t_R") || !tech.sites.contains("asap7sc7p5t")) {
-      throw std::invalid_argument("cannot auto-detect a supported native power-grid profile");
-    }
-    name = "pg_asap7";
-  }
-  if (name == "asap7") {
-    name = "pg_asap7";
-  }
-  if (name != "pg_asap7") {
-    throw std::invalid_argument("unknown native power-grid profile: " + std::string(name));
+Pg_profile power_grid_profile(const physical::Tech_profile& profile) {
+  if (profile.pg.name.empty()) {
+    throw std::invalid_argument("technology profile has no native power-grid strategy: " + profile.name);
   }
   Pg_profile p;
-  p.name               = name;
-  p.reference_revision = "fb65d5b487d2afd443fc1892330f622c776a57ac";
-  p.reference_file     = "flow/platforms/asap7/openRoad/pdn/grid_strategy-M1-M2-M5-M6.tcl";
-  p.followpin_layers   = {"M1", "M2"};
-  p.stripes            = {{"M5", .120, .072, 5.4, .300}, {"M6", .288, .096, 5.4, .513}};
-  p.connect            = {{{"M1", "M2"}}, {{"M2", "M5"}}, {{"M5", "M6"}}};
-  p.pin_layer          = "M6";
-  p.macro_halo         = 2;
-  p.macro_connect      = {{{"M4", "M5"}}};
-  p.nets               = {"VDD", "VSS"};
-  p.pin_names          = {{{"VDD", "VDDPE", "VDDCE"}, {"VSS", "VSSE"}}};
+  static_cast<physical::Pg_strategy&>(p) = profile.pg;
   return p;
+}
+Pg_profile power_grid_profile(std::string_view name, const physical::Technology& tech) {
+  return power_grid_profile(physical::resolve_tech_profile(tech, name));
 }
 }  // namespace livehd::placement

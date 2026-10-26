@@ -1,12 +1,10 @@
 // This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 #pragma once
 #include "inou/lefdef/physical.hpp"
+#include "inou/lefdef/tech_profile.hpp"
 
 namespace livehd::placement {
-struct Pg_stripe {
-  std::string layer;
-  double      width = 0, spacing = 0, pitch = 0, offset = 0;  // microns
-};
+using Pg_stripe = physical::Pg_stripe;
 struct Pg_channel {
   std::string    layer, style;  // "skip" removes a complete slot; "gap" cuts its extent.
   physical::Rect region;        // microns, including the complete stripe width
@@ -14,23 +12,18 @@ struct Pg_channel {
 // Semicolon-separated style,layer,xl,yl,xh,yh entries, in microns.
 // Empty text disables channels; malformed/empty entries fail explicitly.
 std::vector<Pg_channel> parse_pg_channels(std::string_view);
-struct Pg_profile {
-  std::string                             name, reference_revision, reference_file;
-  std::vector<std::string>                followpin_layers;
-  std::vector<Pg_stripe>                  stripes;
-  std::vector<std::array<std::string, 2>> connect;
-  std::string                             pin_layer;
-  double                                  macro_halo = 0;
-  std::vector<std::array<std::string, 2>> macro_connect;
-  std::array<std::string, 2>              nets;  // power, ground
-  std::array<std::vector<std::string>, 2> pin_names;
-  std::vector<Pg_channel>                 channels;  // Empty in reference profiles.
-  bool                                    stripes_start_with_power = false;
-  std::vector<std::string>                unsupported;
+// A technology profile's reference strategy plus per-run channel options.
+struct Pg_profile : physical::Pg_strategy {
+  std::vector<Pg_channel>  channels;  // Empty in reference profiles.
+  bool                     stripes_start_with_power = false;
+  std::vector<std::string> unsupported;
   // Acceptance policy only: geometry generation does not perform IR analysis.
-  std::optional<double>                   channel_max_ir_drop_v;
+  std::optional<double>    channel_max_ir_drop_v;
 };
-// Explicit names or auto detection. Unknown platforms fail; no approximate grid.
+// The profile's reference strategy; profiles without one fail.
+Pg_profile power_grid_profile(const physical::Tech_profile&);
+// Technology profile/strategy names or auto detection (see resolve_tech_profile).
+// Unknown platforms fail; no approximate grid.
 Pg_profile power_grid_profile(std::string_view name, const physical::Technology&);
 struct Pg_metal {
   std::string    net, layer;

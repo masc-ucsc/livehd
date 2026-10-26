@@ -2,8 +2,8 @@ load("@rules_cc//cc:defs.bzl", "cc_library", "cc_test")
 load("//tools:copt_default.bzl", "COPTS")
 cc_library(
     name = "inou_lefdef",
-    srcs = ["route_graph_store.cpp", "route_store.cpp", "physical.cpp", "mapped_graph.cpp", "routing_geometry.cpp", "routing_rules.cpp", "pin_access.cpp", "routing_occupancy.cpp", "routing_connectivity.cpp", "signal_via.cpp", "cut_rules.cpp"],
-    hdrs = ["route_store.hpp", "physical.hpp", "mapped_graph.hpp", "routing_geometry.hpp", "routing_rules.hpp", "pin_access.hpp", "routing_occupancy.hpp", "routing_connectivity.hpp", "signal_via.hpp", "cut_rules.hpp"],
+    srcs = ["route_graph_store.cpp", "route_store.cpp", "physical.cpp", "mapped_graph.cpp", "routing_geometry.cpp", "routing_rules.cpp", "pin_access.cpp", "routing_occupancy.cpp", "routing_connectivity.cpp", "signal_via.cpp", "cut_rules.cpp", "tech_profile.cpp"],
+    hdrs = ["route_store.hpp", "physical.hpp", "mapped_graph.hpp", "routing_geometry.hpp", "routing_rules.hpp", "pin_access.hpp", "routing_occupancy.hpp", "routing_connectivity.hpp", "signal_via.hpp", "cut_rules.hpp", "tech_profile.hpp"],
     copts = COPTS,
     visibility = ["//visibility:public"],
     deps = ["//core", "//graph", "//third_party/misc/lef/lef", "//third_party/misc/def/def"],
@@ -45,6 +45,13 @@ cc_test(
 cc_test(
     name = "pin_access_test",
     srcs = ["pin_access_test.cpp"],
+    copts = COPTS,
+    deps = [":inou_lefdef", "@googletest//:gtest_main"],
+)
+
+cc_test(
+    name = "tech_profile_test",
+    srcs = ["tech_profile_test.cpp"],
     copts = COPTS,
     deps = [":inou_lefdef", "@googletest//:gtest_main"],
 )
