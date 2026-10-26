@@ -148,8 +148,9 @@ both bases.
 
 `lhd synth --set synth.place.stage_timing=true` runs it after placement,
 fresh or restored, with or without the profile, so every arm has the same
-timer: the clock is `pass.usyn.domino_clock` or the SDC's one clock port at
-its period; `synth.place.stage_timing.require_complete` fails short of
+timer: the clock is `synth.place.stage_timing.clock_port`, else
+`pass.usyn.domino_clock`, else the SDC's one clock port, at the SDC clock
+period; `synth.place.stage_timing.require_complete` fails short of
 complete coverage and `.clock_uncertainty_ps` sets the full-cycle
 uncertainty. It writes `place/stage_timing.json` and `qor.place.stage_timing`
 and is never part of the placement cache identity. A netlist that keeps

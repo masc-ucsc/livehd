@@ -170,22 +170,24 @@ std::string restored_io_report(const std::string& text) {
 }
 
 namespace stage = livehd::domplace::timing;
-// The stage-timing clock (2d-domplace E): pass.usyn.domino_clock, else the
-// SDC's one clock port, at the SDC's smallest clock period. The domino
-// schedule is a fixed T/2, so a waveform it cannot read or a non-50% one is
-// a usage error before synthesis.
-stage::Clock_spec stage_timing_clock(const Eprp_var::Eprp_dict& usyn_sets, const std::string& sdc, const std::string& liberty) {
+// The stage-timing clock (2d-domplace E): synth.place.stage_timing.clock_port,
+// else pass.usyn.domino_clock, else the SDC's one clock port, at the SDC's
+// smallest clock period. The domino schedule is a fixed T/2, so a waveform
+// it cannot read or a non-50% one is a usage error before synthesis.
+stage::Clock_spec stage_timing_clock(const std::string& port, const Eprp_var::Eprp_dict& usyn_sets, const std::string& sdc,
+                                     const std::string& liberty) {
   const auto        scanned = sdc.empty() ? std::nullopt : sdc_single_clock(sdc);
   stage::Clock_spec spec;
-  if (const auto it = usyn_sets.find("domino_clock"); it != usyn_sets.end() && !it->second.empty()) {
+  spec.port = port;
+  if (const auto it = usyn_sets.find("domino_clock"); spec.port.empty() && it != usyn_sets.end() && !it->second.empty()) {
     spec.port = it->second;
-  } else if (scanned) {
+  } else if (spec.port.empty() && scanned) {
     spec.port = scanned->port;
   }
   if (spec.port.empty()) {
     throw Lhd_error{"usage",
                     "synth.place.stage_timing needs one resolvable clock port",
-                    "give synth.sdc one create_clock on one port, or set pass.usyn.domino_clock with the domino profile"};
+                    "set synth.place.stage_timing.clock_port, or give synth.sdc one create_clock on one port"};
   }
   const auto period = sdc.empty() ? std::nullopt : sdc_min_clock_period_ps(sdc, liberty);
   if (!period) {
@@ -1284,17 +1286,19 @@ void synth_command(Options& opts, Result& res) {
       throw Lhd_error{"usage", "synth.place.stage_timing.clock_uncertainty_ps expects a non-negative number of ps", ""};
     }
   }
-  if (!run_stage_timing && (stage_timing_complete || stage_timing_uncertainty != 0)) {
+  const auto stage_timing_port = synth_set(opts, "place.stage_timing.clock_port", "");
+  if (!run_stage_timing && (stage_timing_complete || stage_timing_uncertainty != 0 || !stage_timing_port.empty())) {
     throw Lhd_error{"usage",
-                    "synth.place.stage_timing.require_complete and clock_uncertainty_ps need synth.place.stage_timing=true",
+                    "synth.place.stage_timing.require_complete, clock_uncertainty_ps and clock_port need "
+                    "synth.place.stage_timing=true",
                     ""};
   }
   std::optional<stage::Clock_spec> stage_clock;
   if (run_stage_timing) {
-    if (!run_place || macro_plan_only) {
-      throw Lhd_error{"usage", "synth.place.stage_timing needs a final placement", "set synth.place=true"};
+    if (!run_place || !place_options.full || macro_plan_only) {
+      throw Lhd_error{"usage", "synth.place.stage_timing needs a final placement", "set synth.place=true (full placement)"};
     }
-    stage_clock = stage_timing_clock(usyn_sets, sdc, liberty.empty() ? usyn_liberty : liberty);
+    stage_clock = stage_timing_clock(stage_timing_port, usyn_sets, sdc, liberty.empty() ? usyn_liberty : liberty);
   }
   {
     std::vector<std::string> extra;

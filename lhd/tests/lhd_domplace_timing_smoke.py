@@ -82,6 +82,13 @@ for leg, args, needle in (
          + ['--set', 'synth.place.stage_timing.clock_uncertainty_ps=-1'], 'non-negative')):
     error = run(leg, args + ['--workdir', str(root / 'U')], False)['error']
     assert error['class'] == 'usage' and needle in error['message'], (leg, error)
+# A clock the SDC scan cannot resolve can be named.
+named = run('named_port', synth(domp, 'domp', two) + stage_timing + ['--set', 'synth.place.stage_timing.clock_port=clk',
+                                                                     '--set', 'synth.opentimer=false',
+                                                                     '--workdir', str(root / 'N')])
+named_timing = report(root / 'N')
+assert list(named_timing['clocks']) == ['clk'] and named_timing['clocks']['clk']['roots'] == ['clk'], named_timing['clocks']
+assert named['qor']['place']['stage_timing']['status'] == 'partial', named['qor']['place']['stage_timing']
 
 # Arm 3: the domino profile with explicit coefficients. Unconstrained IO is
 # cut with listed reasons, so coverage is partial over the measured subset.
