@@ -5,6 +5,7 @@
 #include <string>
 #include <vector>
 
+#include "capacity_bins.hpp"
 #include "core/timing_feedback.hpp"
 #include "inou/lefdef/physical.hpp"
 #include "prects_networks.hpp"
@@ -32,12 +33,6 @@ struct Terminal_legalize_options {
   int64_t        macro_halo_x_dbu = 0, macro_halo_y_dbu = 0;
   // Zero disables that alignment stage, without disabling critical-cell locks.
   unsigned       critical_pair_limit = 256, local_pair_limit = 0;
-};
-struct Terminal_legalize_bin {
-  physical::Rect bounds;
-  // Capacity excludes macro keepouts and fixed WELLTAP/SPACER footprints;
-  // before/after count logic cells, including input-fixed and critical locks.
-  double         capacity = 0, before = 0, after = 0;
 };
 struct Terminal_legalize_cell {
   size_t    index = 0;
@@ -71,7 +66,7 @@ struct Terminal_legalize_report {
   size_t                              candidate_checks = 0, moved_cells = 0, crossed_cells = 0, max_bin_distance = 0;
   unsigned                            packing_retries = 0;
   double                              seconds = 0, max_displacement_dbu = 0, total_displacement_dbu = 0;
-  std::vector<Terminal_legalize_bin>  bins;
+  std::vector<Capacity_bin>           bins;  // logic occupancy includes input-fixed cells and critical locks
   std::vector<Terminal_legalize_cell> cells;
   // Final validated one-edge pin alignments; indices refer to the input frame.
   std::vector<Satlegalize_alignment>  alignments;

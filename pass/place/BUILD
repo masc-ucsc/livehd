@@ -351,6 +351,7 @@ filegroup(
         "busorder.hpp",
         "region_mesh.cpp",
         "region_mesh.hpp",
+        "capacity_bins.hpp",
         "cell_criticality.cpp",
         "cell_criticality.hpp",
         "cell_jump.cpp",
@@ -487,6 +488,14 @@ cc_test(
     srcs = ["region_mesh_test.cpp"],
     copts = COPTS,
     deps = [":region_mesh", "@googletest//:gtest_main"],
+)
+
+cc_library(
+    name = "capacity_bins",
+    hdrs = ["capacity_bins.hpp"],
+    copts = COPTS,
+    visibility = ["//visibility:public"],
+    deps = ["//inou/lefdef:inou_lefdef"],
 )
 
 cc_library(
@@ -738,7 +747,7 @@ cc_library(
     hdrs = ["terminal_legalize.hpp"],
     copts = COPTS,
     visibility = ["//visibility:public"],
-    deps = [":warpspace", ":prects_networks", ":satlegalize", ":sat_solver", "//core", "//inou/lefdef:inou_lefdef", "@dreamplace//dreamplace/native:placer", "@rapidjson"],
+    deps = [":capacity_bins", ":warpspace", ":prects_networks", ":satlegalize", ":sat_solver", "//core", "//inou/lefdef:inou_lefdef", "@dreamplace//dreamplace/native:placer", "@rapidjson"],
 )
 cc_test(
     name = "terminal_legalize_test",
