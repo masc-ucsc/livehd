@@ -600,7 +600,18 @@ same shape. Two causes of a divergence are repaired before the first query:
   declines, the single-product cells (`AND2`, `NAND2`, `NOR2`, `INV`, ...) whose
   output depends on a clock are spliced on every latch enable, so
   `AND2x1(clk, en_l)` in an `lg:` netlist is the same clock-role gate as
-  `clk & en_l` in the RTL or a re-read Verilog netlist.
+  `clk & en_l` in the RTL or a re-read Verilog netlist;
+- **clock cones that leave their definition** (proof_prep.cpp
+  `inline_hier_clock_lib_cells`): a gate kept as its own definition (NVDLA's
+  `CKLNQD12`, shared by two instances) clocks registers in other definitions,
+  so every register's clock cone is also walked across instance boundaries and
+  the combinational cells it reaches are spliced into the definitions holding
+  them. The spliced NAND2 + INV spelling `EQ(Or(EQ(clk,0), EQ(l,0)), 0)` is
+  re-pointed at `And(clk, l)` before inline-gate recognition
+  (`graph/latch_contract.cpp`), and a posedge register on an inverted clock
+  inside a definition (the gate's sampling flop) is scheduled at the fall
+  (the phase plan's fast reject used to miss it). `lhd/tests/lhd_lec_gated_clock_smoke.py`
+  pins both shapes after plain USYN.
 
 Known gaps, where the two forms can still be classified differently (observed
 as a false REFUTED):
