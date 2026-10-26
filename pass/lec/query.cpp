@@ -9391,6 +9391,15 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
           ind_merged.emplace(m.key, it->second);
         }
       }
+      if (livehd::debug::env<"LHD_LEC_DUMP_OBS">() != nullptr) {
+        for (const auto& k : lonely) {
+          auto it = ind_merged.find(k);
+          std::fprintf(stderr,
+                       "[LEC_MERGE] %s -> %s\n",
+                       k.c_str(),
+                       it == ind_merged.end() ? "(no twin among the paired registers)" : it->second.c_str());
+        }
+      }
     }
   }
 
