@@ -14,11 +14,9 @@ struct Pg_channel {
 std::vector<Pg_channel> parse_pg_channels(std::string_view);
 // A technology profile's reference strategy plus per-run channel options.
 struct Pg_profile : physical::Pg_strategy {
-  std::vector<Pg_channel>  channels;  // Empty in reference profiles.
-  bool                     stripes_start_with_power = false;
-  std::vector<std::string> unsupported;
+  std::vector<Pg_channel> channels;  // Empty in reference profiles.
   // Acceptance policy only: geometry generation does not perform IR analysis.
-  std::optional<double>    channel_max_ir_drop_v;
+  std::optional<double>   channel_max_ir_drop_v;
 };
 // The profile's reference strategy; profiles without one fail.
 Pg_profile power_grid_profile(const physical::Tech_profile&);

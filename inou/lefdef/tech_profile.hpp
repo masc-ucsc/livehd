@@ -39,6 +39,8 @@ struct Pg_strategy {
   std::vector<std::array<std::string, 2>> macro_connect;
   std::array<std::string, 2>              nets;  // power, ground
   std::array<std::vector<std::string>, 2> pin_names;
+  bool                                    stripes_start_with_power = false;
+  std::vector<std::string>                unsupported;  // Strategy features the generator lacks; must be empty.
 };
 // Process policy that LEF does not state: which layers, masters and reference
 // strategies the physical flow uses. Geometry, tracks, vias and DRC remain in
