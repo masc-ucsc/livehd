@@ -3682,12 +3682,8 @@ void check_legality(const ph::Technology& tech, const ph::Floorplan& fp, double 
       if (width <= 0 || height <= 0) {
         throw std::runtime_error("invalid LEF cell dimensions: " + c.macro);
       }
-      switch (c.place.orientation) {
-        case Orientation::W:
-        case Orientation::E:
-        case Orientation::FW:
-        case Orientation::FE: std::swap(width, height); break;
-        default             : break;
+      if (ph::swaps_axes(c.place.orientation)) {
+        std::swap(width, height);
       }
       if (c.place.width == 0) {
         c.place.width = width;
@@ -9187,8 +9183,10 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
   shape_io_perimeter_pins(v.fp);
   std::optional<ph::Floorplan> handoff_grid;
   Pg_channel_stats             handoff_channel_stats;
-  if (pg_profile && options.full && options.completed_stage == Placement_stage::final && !options.timing_seed
-      && !options.retain_placement && !options.fp_place) {
+  // Only a fresh final placement exports the physical handoff frame.
+  const bool final_handoff = options.full && options.completed_stage == Placement_stage::final && !options.timing_seed
+                             && !options.retain_placement && !options.fp_place;
+  if (pg_profile && final_handoff) {
     if (!handoff_rows.empty()) {
       v.fp.rows = handoff_rows;
     }
@@ -9904,12 +9902,10 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
     }
   }
   const auto def = options.output_dir + "/out.def";
-  if (pg_profile && options.full && options.completed_stage == Placement_stage::final && !options.timing_seed
-      && !options.retain_placement && !options.fp_place) {
+  if (handoff_grid) {
     v.fp = std::move(*handoff_grid);
     write_power_grid_report(v.fp, *pg_profile, options.output_dir + "/power_grid.json", &handoff_channel_stats);
-  } else if (options.full && options.completed_stage == Placement_stage::final && !options.timing_seed && !options.retain_placement
-             && !options.fp_place) {
+  } else if (final_handoff) {
     std::error_code error;
     fs::remove(options.output_dir + "/power_grid.json", error);
   }
@@ -10202,8 +10198,7 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
     }
   }
   result.prects = v.prects;
-  if (options.retain_preroute_design && options.full && options.completed_stage == Placement_stage::final && !options.timing_seed
-      && !options.retain_placement && !options.fp_place) {
+  if (options.retain_preroute_design && final_handoff) {
     auto snapshot    = std::make_shared<Preroute_design>();
     snapshot->design = std::move(v.design);
     snapshot->pin_labels.reserve(v.pins.size());
