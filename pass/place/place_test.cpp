@@ -759,6 +759,21 @@ TEST(Placement, TimingMaxWeightAboveNetWeightLimitIsRejectedUpFront) {
   options.timing_max_weight  = max_net_weight + 1;
   EXPECT_THROW((void)place(*graph, scratch, options), std::invalid_argument);
 }
+TEST(Placement, PartitionGridsAreValidatedUpFront) {
+  hhds::GraphLibrary source, scratch;
+  auto               io    = source.create_io("partition_validation");
+  auto               graph = io->create_graph();
+  for (const auto& edit : std::vector<std::function<void(Options&)>>{
+           [](Options& o) { o.region.max_cells = 0; },  // no region consumer enabled
+           [](Options& o) { o.region.merge_um = -1; },
+           [](Options& o) { o.route_bins = 1; },
+           [](Options& o) { o.legalize_bins = 1025; },
+       }) {
+    auto options = plain_options();
+    edit(options);
+    EXPECT_THROW((void)place(*graph, scratch, options), std::invalid_argument);
+  }
+}
 TEST(Placement, TechnologyClockPinsAreExcludedOnlyFromPlacementCost) {
   const auto root = std::filesystem::path(std::getenv("TEST_TMPDIR")) / "clock_cost";
   std::filesystem::create_directories(root);
