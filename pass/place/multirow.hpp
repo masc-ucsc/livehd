@@ -4,6 +4,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <map>
+#include <optional>
 #include <stdexcept>
 #include <string>
 #include <string_view>
@@ -26,10 +27,19 @@ namespace livehd::placement {
 // anchors never exceed a bin cap that terminal legalization checks for its
 // fixed input cells. The packer also keeps anchors off hard DEF placement
 // blockages, which terminal legalization does not consult.
+//
+// PG rail parity (pg_rails.hpp) is checked on every start: a master whose
+// edge rails do not match the rows of a start takes its rail twin there when
+// it has one (a geometry template of the same function, pins and footprint
+// with the other rail stack), else the start is refused.
 
-// Row-access classes of a master's local row halves, bottom half first.
+// Row-access classes of a master's local row halves, bottom half first, and
+// its rail twin: the master to use on starts whose PG rails are the other
+// parity (empty: none). A twin has the same SITE, size, SYMMETRY and signal
+// pins; only its PG rails differ.
 struct Multirow_template {
   std::array<physical::Row_access, 2> half;
+  std::string                         rail_twin = {};
 };
 struct Multirow_options {
   // With both set, a master with a template starts only where each local half
@@ -63,6 +73,7 @@ struct Multirow_report {
   size_t                       candidates  = 0;  // poses checked against the bin cap
   // Start-row parity, counted from the first core row (the row-access origin).
   size_t                       even_starts = 0, odd_starts = 0;
+  size_t                       rail_twins            = 0;  // anchors that took their rail twin
   size_t                       full_core_scans       = 0;  // cells without a pose in their window
   uint64_t                     work                  = 0;
   double                       total_displacement_um = 0, max_displacement_um = 0;  // Manhattan
@@ -77,18 +88,24 @@ size_t      multirow_rows(const physical::Technology&, const physical::Macro&);
 inline bool is_multirow_core(const physical::Technology& tech, const physical::Macro& m) { return multirow_rows(tech, m) != 0; }
 // The lowest row y of each SITE in the frame.
 std::map<std::string, int64_t> first_core_rows(const physical::Floorplan&);
-// Whether the multi-row master may start on fp.rows[start_row] with that row's
-// orientation: its LEF SYMMETRY must permit the orientation and, under a
-// template, each local half must land on a row of its access class. Rows count
-// from the master site's first core row (Multirow_options::core_origins). Row
-// availability is not checked.
+// The master that may start on fp.rows[start_row] with that row's
+// orientation: `master` itself, else its rail twin, else nullopt. Its LEF
+// SYMMETRY must permit the orientation; under a template each local half must
+// land on a row of its access class; and its PG rails must match the rows it
+// spans (the first row segment of the site at each row above; unknown rails
+// pass). Rows count from the master site's first core row
+// (Multirow_options::core_origins). Row availability is not checked.
+std::optional<std::string>     multirow_start_master(const physical::Technology&, const physical::Floorplan&, size_t start_row,
+                                                     const std::string& master, const Multirow_options&);
+// multirow_start_master gives `master` itself.
 bool multirow_start_allowed(const physical::Technology&, const physical::Floorplan&, size_t start_row, const std::string& master,
                             const Multirow_options&);
 // Anchor every movable multi-row CORE cell the options admit, widest first,
 // then by name. Each
 // takes the legal pose nearest its current one (Manhattan distance), within
-// the window or else anywhere in the core. Atomic: on failure throws
-// Multirow_failure and leaves fp unchanged.
+// the window or else anywhere in the core, and the master that pose needs
+// (itself or its rail twin). Atomic: on failure throws Multirow_failure and
+// leaves fp unchanged.
 Multirow_report anchor_multirow_cells(const physical::Technology&, physical::Floorplan&, const Multirow_options&);
 // FIXED -> PLACED for every anchor; throws std::invalid_argument when one is
 // no longer FIXED.

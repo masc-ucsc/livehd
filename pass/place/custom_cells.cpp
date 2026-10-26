@@ -110,16 +110,16 @@ std::shared_ptr<const Custom_catalog> custom_catalog(std::vector<Custom_variant>
   return catalog;
 }
 
-std::shared_ptr<hhds::GraphIO> declare_custom_cell(hhds::GraphLibrary& library, const hhds::GraphIO& like,
-                                                   const Custom_variant& to) {
-  require_interface(like, to);
-  if (const auto existing = library.find_io(to.name)) {
+namespace {
+// The body-less declaration `name` with like's pins, existing or new.
+std::shared_ptr<hhds::GraphIO> clone_declaration(hhds::GraphLibrary& library, const hhds::GraphIO& like, const std::string& name) {
+  if (const auto existing = library.find_io(name)) {
     if (existing->has_graph() || !same_pins(*existing, like)) {
-      throw std::invalid_argument("a different declaration already owns custom variant " + to.name);
+      throw std::invalid_argument("a different declaration already owns custom cell " + name);
     }
     return existing;
   }
-  auto io = library.create_io(to.name);
+  auto io = library.create_io(name);
   for (const auto& pin : like.get_input_pin_decls()) {
     io->add_input(pin.name, pin.port_id, pin.loop_break);
   }
@@ -135,6 +135,23 @@ std::shared_ptr<hhds::GraphIO> declare_custom_cell(hhds::GraphLibrary& library, 
     }
   }
   return io;
+}
+}  // namespace
+
+std::shared_ptr<hhds::GraphIO> declare_custom_cell(hhds::GraphLibrary& library, const hhds::GraphIO& like,
+                                                   const Custom_variant& to) {
+  require_interface(like, to);
+  return clone_declaration(library, like, to.name);
+}
+
+void change_custom_declaration(hhds::Node_class node, const std::string& name) {
+  const auto io = node.get_subnode_io();
+  if (!io || io->has_graph() || name.empty()) {
+    throw std::invalid_argument(std::format("instance {} is not of a body-less custom cell", node.get_name()));
+  }
+  if (io->get_name() != name) {
+    node.set_subnode(clone_declaration(*node.get_graph()->get_io()->get_library(), *io, name));
+  }
 }
 
 void change_custom_master(hhds::Node_class node, const Custom_variant& from, const Custom_variant& to) {

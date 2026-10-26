@@ -6,6 +6,7 @@
 #include <cstdint>
 #include <map>
 #include <optional>
+#include <span>
 #include <stdexcept>
 #include <string>
 #include <tuple>
@@ -14,6 +15,7 @@
 
 #include "capacity_bins.hpp"
 #include "multirow.hpp"
+#include "pg_rails.hpp"
 #include "require.hpp"
 #include "row_occupancy.hpp"
 
@@ -33,7 +35,7 @@ inline int64_t first_core_y(const ph::Floorplan& fp, const Multirow_options& opt
   require(it != origins.end(), "multirow packing found no row of the master's site");
   return it->second;
 }
-enum class Refusal : uint8_t { none, symmetry, access };
+enum class Refusal : uint8_t { none, symmetry, access, rails };
 // Why a k-row master may not start on core row `band` with orientation o.
 inline Refusal start_refusal(const ph::Macro& m, const std::string& master, size_t rows, size_t band, ph::Orientation o,
                              const Multirow_options& options) {
@@ -51,6 +53,54 @@ inline Refusal start_refusal(const ph::Macro& m, const std::string& master, size
     throw std::invalid_argument("multirow row-access template needs a two-row master: " + master);
   }
   return ph::row_access_matches(*options.access, band, o, t->second.half) ? Refusal::none : Refusal::access;
+}
+// The rail twin of a master under the options' templates; empty when none.
+inline const std::string& rail_twin(const Multirow_options& options, const std::string& master) {
+  static const std::string none;
+  if (!options.templates) {
+    return none;
+  }
+  const auto t = options.templates->find(master);
+  return t == options.templates->end() ? none : t->second.rail_twin;
+}
+// A twin is the same footprint with other PG rails: same SITE, size and
+// SYMMETRY. Anything else is a malformed template map.
+inline void require_twin(const ph::Technology& tech, const std::string& master, const std::string& twin) {
+  const auto a = tech.macros.find(master), b = tech.macros.find(twin);
+  if (a == tech.macros.end() || b == tech.macros.end() || a->second.site != b->second.site || a->second.width != b->second.width
+      || a->second.height != b->second.height || a->second.symmetry_x != b->second.symmetry_x
+      || a->second.symmetry_y != b->second.symmetry_y || a->second.klass != b->second.klass) {
+    throw std::invalid_argument("rail twin " + twin + " of " + master
+                                + " is not a LEF master of the same site, class, size and symmetry");
+  }
+}
+// The master that may start on core row `band` in orientation o over core rows
+// of the given orientations (bottom up): `master` itself, else its rail twin,
+// else nullptr with the refusal of the furthest stage either reached.
+inline const std::string* start_master(const ph::Technology& tech, const Pg_rail_model& rails, const std::string& master, size_t k,
+                                       size_t band, ph::Orientation o, std::span<const ph::Orientation> rows,
+                                       const Multirow_options& options, Refusal& why) {
+  why              = Refusal::none;
+  const auto& twin = rail_twin(options, master);
+  for (const auto* candidate : {&master, &twin}) {
+    if (candidate->empty()) {
+      continue;
+    }
+    if (candidate == &twin) {
+      require_twin(tech, master, twin);
+    }
+    const auto refusal = start_refusal(tech.macros.at(*candidate), *candidate, k, band, o, options);
+    if (refusal != Refusal::none) {
+      why = std::max(why, refusal);
+      continue;
+    }
+    if (rails.fit(*candidate, o, rows) == Rail_fit::mismatch) {
+      why = Refusal::rails;
+      continue;
+    }
+    return candidate;
+  }
+  return nullptr;
 }
 // Append the gaps of row, shifted by offset sites, that overlap [lo, hi).
 inline void gaps_within(const Row_gaps& row, int64_t offset, int64_t lo, int64_t hi, std::vector<Interval>& out) {
@@ -92,12 +142,13 @@ inline void require_controls(const ph::Technology& tech, const ph::Floorplan& fp
 struct Packer {
   // Search outcome counts for one cell; the furthest stage reached names the failure.
   struct Tally {
-    size_t starts = 0, symmetry = 0, access = 0, dense = 0;
+    size_t starts = 0, symmetry = 0, access = 0, rails = 0, dense = 0;
   };
   struct Pose {
-    Ann_place place;
-    int64_t   band;
-    double    cost;
+    Ann_place   place;
+    int64_t     band;
+    double      cost;
+    std::string master;  // the cell's master or its rail twin
   };
   struct Site_rows {
     int64_t                                origin = 0;  // y of the first core row
@@ -110,9 +161,10 @@ struct Packer {
   std::vector<Row_gaps>            rows;
   Capacity_bins                    grid;
   std::map<std::string, Site_rows> by_site;
+  Pg_rail_model                    rail_model;
 
   Packer(const ph::Technology& technology, ph::Floorplan& frame, const Multirow_options& controls)
-      : tech(technology), fp(frame), options(controls) {
+      : tech(technology), fp(frame), options(controls), rail_model(technology) {
     auto occupancy = row_occupancy(tech, fp, options.occupancy, "multirow packing", /*hard_exclusions=*/true);
     rows           = std::move(occupancy.rows);
     grid           = std::move(occupancy.grid);
@@ -142,6 +194,15 @@ struct Packer {
       span.push_back(&it->second);
     }
     return span;
+  }
+  // Orientations of a band span's core rows, bottom up: the start segment's,
+  // then the first segment of each row above.
+  std::vector<ph::Orientation> span_orientations(const Row_gaps& start, const std::vector<const std::vector<size_t>*>& span) const {
+    std::vector<ph::Orientation> orientations{fp.rows[start.source].orientation};
+    for (size_t h = 1; h < span.size(); ++h) {
+      orientations.push_back(fp.rows[rows[span[h]->front()].source].orientation);
+    }
+    return orientations;
   }
   // Free sites common to every row of a band span, as sites of its start row
   // segment, within [lo, hi). Other rows must share the start row's site grid;
@@ -202,9 +263,18 @@ struct Packer {
         ++tally.starts;
         const auto& start       = rows[s];
         const auto  orientation = fp.rows[start.source].orientation;
-        const auto  refusal     = start_refusal(m, c.macro, k, band, orientation, options);
-        if (refusal != Refusal::none) {
-          ++(refusal == Refusal::symmetry ? tally.symmetry : tally.access);
+        Refusal     refusal     = Refusal::none;
+        const auto* master      = start_master(tech,
+                                          rail_model,
+                                          c.macro,
+                                          k,
+                                          size_t(band),
+                                          orientation,
+                                          span_orientations(start, span),
+                                          options,
+                                          refusal);
+        if (!master) {
+          ++(refusal == Refusal::symmetry ? tally.symmetry : refusal == Refusal::access ? tally.access : tally.rails);
           continue;
         }
         const int64_t     pad       = options.occupancy.padding_sites;
@@ -242,7 +312,7 @@ struct Packer {
             p.orientation = orientation;
             p.status      = ph::Status::FIXED;
             if (grid.fits(p, nullptr, options.occupancy.max_density)) {
-              best = Pose{p, band, cost};
+              best = Pose{p, band, cost, *master};
               break;
             }
             ++tally.dense;
@@ -257,13 +327,14 @@ struct Packer {
     std::string reason;
     if (tally.dense) {
       reason = "every free pose exceeds the hard bin density cap " + std::to_string(options.occupancy.max_density);
-    } else if (tally.starts > tally.symmetry + tally.access) {
+    } else if (tally.starts > tally.symmetry + tally.access + tally.rails) {
       reason = "no free interval of " + std::to_string(c.place.width) + " DBU plus "
                + std::to_string(options.occupancy.padding_sites) + " padding sites per side is common to " + std::to_string(k)
                + " consecutive rows";
     } else if (tally.starts) {
       reason = "every start row is refused: " + std::to_string(tally.symmetry) + " orientations lack LEF SYMMETRY, "
-               + std::to_string(tally.access) + " starts miss the row-access template";
+               + std::to_string(tally.access) + " starts miss the row-access template, " + std::to_string(tally.rails)
+               + " starts have the other PG rail parity and no rail twin fits";
     } else {
       reason = "no " + std::to_string(k) + " consecutive core rows of site " + m.site;
     }
@@ -284,6 +355,10 @@ struct Packer {
     }
     const auto before = c.place;
     c.place           = pose->place;
+    if (pose->master != c.macro) {
+      c.macro = pose->master;  // same footprint and signal pins (require_twin)
+      ++report.rail_twins;
+    }
     reserve_gaps(rows, padded_rect(tech, c, options.occupancy.padding_sites));
     grid.deposit(c.place, true);
     report.anchors.push_back({cell, before});

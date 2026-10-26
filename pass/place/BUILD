@@ -596,10 +596,12 @@ cc_library(
         "multirow.cpp",
         "multirow_eco.cpp",
         "multirow_packer.hpp",
+        "pg_rails.cpp",
     ],
     hdrs = [
         "multirow.hpp",
         "multirow_eco.hpp",
+        "pg_rails.hpp",
     ],
     copts = COPTS,
     visibility = ["//visibility:public"],

@@ -20,7 +20,7 @@ namespace {
 namespace ph = physical;
 using multirow_internal::Packer;
 using multirow_internal::Refusal;
-using multirow_internal::start_refusal;
+using multirow_internal::start_master;
 using Outcome = Multirow_eco_cell::Outcome;
 
 // Movable single-row cells by row y, each row in ascending x: the cells a
@@ -93,8 +93,12 @@ Multirow_eco_cell place_edit(const ph::Technology& tech, ph::Floorplan& proposal
   entry.released_sites = std::max<int64_t>(0, old_sites - new_sites) * int64_t(k);
   entry.grown_sites    = std::max<int64_t>(0, new_sites - old_sites) * int64_t(k);
   const auto row       = start_row(proposal, c, m.site);
-  if (c.place.width <= edit.old_width && row && multirow_start_allowed(tech, proposal, *row, c.macro, options.anchor)) {
-    return entry;  // 1. in place: a subset of its legal footprint
+  if (c.place.width <= edit.old_width && row) {
+    if (const auto master = multirow_start_master(tech, proposal, *row, c.macro, options.anchor)) {
+      entry.rail_twin = *master != c.macro;
+      c.macro         = *master;
+      return entry;  // 1. in place: a subset of its legal footprint
+    }
   }
 
   // Every other multi-row cell is a fixed obstacle with its padding; the
@@ -124,8 +128,8 @@ Multirow_eco_cell place_edit(const ph::Technology& tech, ph::Floorplan& proposal
 
   // 2-3. Site-aligned x in its own start row, within shift_sites, free of
   // hard occupancy in every row it spans, nearest first, left first on ties.
-  std::vector<Ann_place> candidates;
-  const auto             height = c.place.height / int64_t(k);
+  std::vector<std::pair<Ann_place, std::string>> candidates;  // pose and the master it needs
+  const auto                                     height = c.place.height / int64_t(k);
   const auto&            site   = packer.site_rows(m.site, height);
   const auto             band   = (c.place.y - site.origin) / height;
   const auto             span
@@ -134,7 +138,17 @@ Multirow_eco_cell place_edit(const ph::Technology& tech, ph::Floorplan& proposal
     for (const size_t s : *span.front()) {
       const auto& start       = packer.rows[s];
       const auto  orientation = scratch.rows[start.source].orientation;
-      if (start_refusal(m, c.macro, k, band, orientation, options.anchor) != Refusal::none) {
+      Refusal     refusal     = Refusal::none;
+      const auto* master      = start_master(tech,
+                                        packer.rail_model,
+                                        c.macro,
+                                        k,
+                                        size_t(band),
+                                        orientation,
+                                        packer.span_orientations(start, span),
+                                        options.anchor,
+                                        refusal);
+      if (!master) {
         continue;
       }
       const int64_t sites = (c.place.width + start.step - 1) / start.step;
@@ -146,30 +160,33 @@ Multirow_eco_cell place_edit(const ph::Technology& tech, ph::Floorplan& proposal
           Ann_place p   = c.place;
           p.x           = start.x + j * start.step;
           p.orientation = orientation;
-          candidates.push_back(p);
+          candidates.emplace_back(p, *master);
         }
       }
     }
   }
-  std::sort(candidates.begin(), candidates.end(), [&](const Ann_place& a, const Ann_place& b) {
-    return std::tuple(std::abs(a.x - c.place.x), a.x) < std::tuple(std::abs(b.x - c.place.x), b.x);
+  std::sort(candidates.begin(), candidates.end(), [&](const auto& a, const auto& b) {
+    return std::tuple(std::abs(a.first.x - c.place.x), a.first.x) < std::tuple(std::abs(b.first.x - c.place.x), b.first.x);
   });
   // A pose that displaces nothing wins over any nearer one that displaces.
   std::optional<Ann_place> chosen;
+  std::string              chosen_master;
   std::vector<size_t>      overlapped;
-  for (const auto& p : candidates) {
+  for (const auto& [p, master] : candidates) {
     if (!fits(p)) {
       continue;
     }
     auto hit = overlaps(p);
     if (hit.empty()) {
       chosen        = p;
+      chosen_master = master;
       overlapped    = {};
       entry.outcome = p.x == c.place.x ? Outcome::in_place : Outcome::shifted;
       break;
     }
     if (!chosen && hit.size() <= options.bounds.max_displaced) {
       chosen        = p;
+      chosen_master = master;
       overlapped    = std::move(hit);
       entry.outcome = Outcome::displaced;
     }
@@ -189,8 +206,11 @@ Multirow_eco_cell place_edit(const ph::Technology& tech, ph::Floorplan& proposal
                              + std::to_string(options.bounds.max_displaced) + " single-row cells, and " + error.what());
     }
     chosen        = scratch.components[edit.cell].place;
+    chosen_master = scratch.components[edit.cell].macro;
     entry.outcome = Outcome::re_anchored;
   }
+  entry.rail_twin       = chosen_master != c.macro;
+  c.macro               = chosen_master;  // its rail twin where the new start needs the other parity
   entry.displacement_um = (std::abs(double(chosen->x - c.place.x)) + std::abs(double(chosen->y - c.place.y))) / double(tech.dbu);
   entry.displaced_cells = overlapped.size();
   c.place.x             = chosen->x;

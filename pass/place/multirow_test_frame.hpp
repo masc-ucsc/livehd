@@ -47,6 +47,45 @@ struct Multirow_frame {
     macro(name, "CORE", width, 2, true);
     templates[name] = {physical::Row_access::horizontal, physical::Row_access::vertical};
   }
+  // PG rails on M1 (pg_rails.hpp): the one-row "cell" has VSS (GROUND) on its
+  // bottom edge and VDD (POWER) on its top, so an N row has VSS below and an
+  // FS row VDD below. Without this call no master has rails and parity is
+  // unknown (unchecked).
+  void pg_rails() {
+    tech.routing_layers = {"M1"};
+    auto& cell          = tech.macros.at("cell");
+    cell.pins["VSS"]    = {"INOUT", "GROUND", {{"M1", {0, -.05, 1, .05}}}};
+    cell.pins["VDD"]    = {"INOUT", "POWER", {{"M1", {0, .95, 1, 1.05}}}};
+  }
+  // Rail template t of a two-row master: VSS on its outer edges and VDD in
+  // the middle for t0 (fits N starts), the reverse for t1 (FS starts).
+  void rails(const std::string& name, int t) {
+    auto&      m     = tech.macros.at(name);
+    const auto outer = [&](double y) {
+      return physical::Shape{
+          "M1",
+          {0, y - .05, m.width, y + .05}
+      };
+    };
+    m.pins[t ? "VDD" : "VSS"] = {
+        "INOUT",
+        t ? "POWER" : "GROUND",
+        {outer(0), outer(2)}
+    };
+    m.pins[t ? "VSS" : "VDD"] = {"INOUT", t ? "GROUND" : "POWER", {outer(1)}};
+  }
+  // A two-row master in t0 and its t1 rail twin `name`_t1, each the other's twin.
+  void twin_pair(const std::string& name, double width) {
+    for (const auto& [master, t] : {
+             std::pair{        name, 0},
+             {name + "_t1", 1}
+    }) {
+      two_row(master, width);
+      rails(master, t);
+    }
+    templates[name].rail_twin         = name + "_t1";
+    templates[name + "_t1"].rail_twin = name;
+  }
   void controls(Multirow_options& options) {
     options.access                  = &access;
     options.templates               = &templates;

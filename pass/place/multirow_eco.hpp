@@ -24,9 +24,11 @@ namespace livehd::placement {
 //      the whole core) that is free of single-row cells too: it displaces none.
 // "Overlap" includes the occupancy padding_sites kept free on both sides of the
 // new footprint in every row it spans, as the anchor prepass keeps them. Every
-// pose passes multirow_start_allowed; every pose but a kept one also passes
-// the hard bin density cap, counting every logic cell except the edited one
-// (displaced single-row cells at their current poses).
+// pose passes multirow_start_master, and the cell takes the master it names
+// (its rail twin where the start needs the other PG rail parity); every pose
+// but a kept one also passes the hard bin density cap, counting every logic
+// cell except the edited one (displaced single-row cells at their current
+// poses).
 struct Multirow_eco_bounds {
   unsigned shift_sites = 64, max_displaced = 16;
 };
@@ -42,7 +44,8 @@ struct Multirow_eco_cell {
   // Rounded sites summed over every row the cell spans.
   int64_t     released_sites = 0, grown_sites = 0;
   size_t      displaced_cells = 0;
-  double      displacement_um = 0;  // Manhattan
+  double      displacement_um = 0;      // Manhattan
+  bool        rail_twin       = false;  // took the rail twin of its edited master
 };
 struct Multirow_eco_report {
   std::vector<Multirow_eco_cell> cells;      // in processing order
@@ -52,7 +55,7 @@ std::string_view    multirow_eco_outcome_name(Multirow_eco_cell::Outcome);
 // `edited` name movable multi-row CORE cells of fp, each carrying its new
 // master and width at the pose `reference` (the frame before the edit) gives
 // it; every other cell keeps its own. On success the edited cells take their
-// new poses and keep their status; the displaced single-row cells keep their
+// new poses (and masters: the edited one or its rail twin) and keep their status; the displaced single-row cells keep their
 // overlapping poses for the caller to re-place. Atomic: on failure throws
 // Multirow_failure, naming the cell, and leaves fp unchanged. Usage errors
 // (unknown, fixed, single-row or unreferenced cells) throw

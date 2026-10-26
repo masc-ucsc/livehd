@@ -296,6 +296,55 @@ TEST(MultirowEco, TheStartRowOrientationAndTemplateAreKeptAtEvenAndOddStarts) {
   expect_accepted(plain, anchored);
 }
 
+TEST(MultirowEco, EveryPoseTakesTheRailTemplateOfItsStart) {
+  // With PG rails, t0 masters fit N starts and their t1 twins FS starts.
+  Fixture f(12, 6);
+  f.pg_rails();
+  f.twin_pair("pd", 3);
+  f.twin_pair("pd5", 5);
+  const auto odd = f.cell(4, 3, "pd_t1"), wrong = f.cell(4, 0, "pd_t1");
+  f.cell(7, 4, "cell", Status::FIXED);  // the odd cell grows left, keeping its start
+  const auto reference = f.edit({
+      {  odd, "pd5_t1"},
+      {wrong,     "pd"}
+  });
+  // A variant edit that names the other template at an unchanged pose (wrong
+  // sits on an N start as t1) keeps the pose and takes the twin.
+  f.at(wrong).macro    = "pd_t1";
+  const auto report    = f.run(reference, {odd, wrong});
+  ASSERT_EQ(report.cells.size(), 2);
+  EXPECT_EQ(f.at(odd).macro, "pd5_t1");
+  EXPECT_EQ(f.at(odd).place.y, 300);
+  EXPECT_EQ(f.at(wrong).macro, "pd");
+  EXPECT_EQ(f.at(wrong).place, reference.components[1].place);
+  for (const auto& entry : report.cells) {
+    EXPECT_EQ(entry.rail_twin, entry.name == wrong) << entry.name;
+  }
+  expect_accepted(f, report);
+
+  // A growth whose own row pair is full re-anchors across parities: the
+  // twin takes the even start.
+  Fixture g(12, 6);
+  g.pg_rails();
+  g.twin_pair("pd", 3);
+  g.twin_pair("pd5", 5);
+  const auto c = g.cell(4, 3, "pd_t1");
+  for (int x = 0; x < 12; ++x) {
+    if (x < 4 || x > 6) {
+      g.cell(x, 3, "cell", Status::FIXED);  // row 3 keeps only c's own sites
+    }
+  }
+  const auto previous = g.edit({
+      {c, "pd5_t1"}
+  });
+  const auto anchored = g.run(previous, {c});
+  EXPECT_EQ(anchored.cells.at(0).outcome, Outcome::re_anchored);
+  EXPECT_EQ(g.at(c).place.y % 200, 0);
+  EXPECT_EQ(g.at(c).macro, "pd5");
+  EXPECT_TRUE(anchored.cells.at(0).rail_twin);
+  expect_accepted(g, anchored);
+}
+
 TEST(MultirowEco, TheDisplacementBudgetIsHonored) {
   // Growing in place covers three single-row cells; within the budget they are
   // displaced, past it the packer re-anchors the cell where it displaces none.

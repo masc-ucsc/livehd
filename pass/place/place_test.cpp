@@ -148,17 +148,44 @@ TEST(Placement, RowLegalityAcceptsOnlyTechnologyPermittedHorizontalMirrors) {
   fp.components[0].place.orientation = Ann_place::Orientation::W;
   EXPECT_THROW(check_legality(tech, fp), std::runtime_error);
 }
+// A two-row copy of a one-row cell in PG rail template t (pg_rails.hpp): the
+// cell's PG shapes restacked so that local row edge e carries the cell's
+// bottom-edge rail when e + t is even and its top-edge rail otherwise. t0 fits
+// starts on N rows, t1 starts on FS rows.
+physical::Macro two_row_template(const physical::Macro& cell, int t) {
+  auto       m    = cell;
+  const auto row  = cell.height;
+  m.height       *= 2;
+  for (auto& [name, pin] : m.pins) {
+    if (pin.use != "POWER" && pin.use != "GROUND") {
+      continue;
+    }
+    std::vector<physical::Shape> shapes;
+    for (const auto& s : pin.shapes) {
+      const bool top = std::abs((s.rect.yl + s.rect.yh) / 2 - row) < std::abs((s.rect.yl + s.rect.yh) / 2);
+      for (int edge = 0; edge <= 2; ++edge) {
+        if (((edge + t) % 2 == 1) == top) {
+          auto copy = s;
+          copy.rect = copy.rect.translated(0, edge * row - (top ? row : 0));
+          shapes.push_back(copy);
+        }
+      }
+    }
+    pin.shapes = std::move(shapes);
+  }
+  return m;
+}
 TEST(Placement, RowLegalityChecksEveryBandOfTwoRowCells) {
   // A two-row CORE cell (a domino abstract) on the single-height core site is
-  // legal at both start parities with the start row's orientation, and every
-  // row band it spans is checked.
-  auto       tech            = physical::read_lef({"inou/lefdef/tests/data/sky130hd.tlef", "inou/lefdef/tests/data/sky130hd.lef"});
-  const auto sw              = std::llround(tech.sites.at("unithd").width * tech.dbu);
-  const auto rh              = std::llround(tech.sites.at("unithd").height * tech.dbu);
-  auto       tall            = tech.macros.at("sky130_fd_sc_hd__inv_1");
-  tall.height               *= 2;
-  tech.macros["two_row"]     = tall;
-  const auto          width  = std::llround(tall.width * tech.dbu);
+  // legal at both start parities with the start row's orientation and the
+  // rail template of that parity, and every row band it spans is checked.
+  auto        tech          = physical::read_lef({"inou/lefdef/tests/data/sky130hd.tlef", "inou/lefdef/tests/data/sky130hd.lef"});
+  const auto  sw            = std::llround(tech.sites.at("unithd").width * tech.dbu);
+  const auto  rh            = std::llround(tech.sites.at("unithd").height * tech.dbu);
+  const auto& inv           = tech.macros.at("sky130_fd_sc_hd__inv_1");
+  tech.macros["two_row"]    = two_row_template(inv, 0);
+  tech.macros["two_row_t1"] = two_row_template(inv, 1);
+  const auto          width = std::llround(inv.width * tech.dbu);
   physical::Floorplan fp;
   for (int r = 0; r < 4; ++r) {
     fp.rows.push_back(
@@ -175,8 +202,34 @@ TEST(Placement, RowLegalityChecksEveryBandOfTwoRowCells) {
     return fp.components.size() - 1;
   };
   const auto even = add("two_row", 0, 0, Ann_place::Orientation::N);
-  add("two_row", 4 * sw, rh, Ann_place::Orientation::FS);
+  const auto odd  = add("two_row_t1", 4 * sw, rh, Ann_place::Orientation::FS);
   EXPECT_NO_THROW(check_legality(tech, fp));
+  // The other template on either start puts a rail on the opposite polarity.
+  const auto expect_parity = [&](const char* why) {
+    try {
+      check_legality(tech, fp);
+      ADD_FAILURE() << "wrong rail parity accepted: " << why;
+    } catch (const std::runtime_error& error) {
+      EXPECT_NE(std::string(error.what()).find("rail parity"), std::string::npos) << error.what();
+    }
+  };
+  fp.components[odd].macro = "two_row";
+  expect_parity("t0 on an FS start");
+  fp.components[odd].macro  = "two_row_t1";
+  fp.components[even].macro = "two_row_t1";
+  expect_parity("t1 on an N start");
+  fp.components[even].macro = "two_row";
+  // A rail on one edge only is still checked; unknown row rails are refused.
+  auto one_rail             = tech;
+  one_rail.macros.at("two_row").pins.at("VPWR").shapes.clear();
+  one_rail.macros.at("two_row").pins.at("VGND").shapes.resize(1);  // the bottom edge alone
+  EXPECT_NO_THROW(check_legality(one_rail, fp));
+  for (auto& [name, m] : one_rail.macros) {
+    if (m.height < tech.macros.at("two_row").height) {
+      m.pins.erase("VPWR");  // no one-row cell gives the row rails
+    }
+  }
+  EXPECT_THROW(check_legality(one_rail, fp), std::runtime_error);
   // A single-row cell in the upper band of the even-start cell overlaps it.
   const auto upper = add("sky130_fd_sc_hd__inv_1", 0, rh, Ann_place::Orientation::FS);
   EXPECT_THROW(check_legality(tech, fp), std::runtime_error);
@@ -332,24 +385,26 @@ TEST(Placement, TerminalLegalizerIsLastAndPreservesItsExactOutput) {
 }
 
 // A chain of sky130 cells (12 by default) in which c1, c5, c9... are a
-// two-row copy of inv_1 named `master`, given in its own LEF, for full
-// placement through the terminal legalizer. `variants` instantiates other
-// A/Y masters (by cell index) whose LEF the caller supplies.
+// two-row copy of inv_1 named `master` in rail template t0, given in its own
+// LEF with its t1 rail twin `master`_t1, for full placement through the
+// terminal legalizer. `variants` instantiates other A/Y masters (by cell
+// index) whose LEF the caller supplies.
 constexpr const char* kDominoTwoRow = "__lhd_domino_two_row";
+const std::string     kDominoTwin   = std::string(kDominoTwoRow) + "_t1";
 struct Two_row_chain {
   std::vector<std::string>     lefs{"inou/lefdef/tests/data/sky130hd.tlef", "inou/lefdef/tests/data/sky130hd.lef"};
   hhds::GraphLibrary           source, flat;
   std::shared_ptr<hhds::Graph> graph;
   Options                      options = plain_options();
   explicit Two_row_chain(const std::string& master, unsigned cells = 12, const std::map<unsigned, std::string>& variants = {}) {
-    const auto tech  = physical::read_lef(lefs);
-    auto       tall  = tech.macros.at("sky130_fd_sc_hd__inv_1");
-    tall.height     *= 2;
-    const auto dir   = std::string(std::getenv("TEST_TMPDIR")) + "/" + master;
+    const auto  tech = physical::read_lef(lefs);
+    const auto& inv  = tech.macros.at("sky130_fd_sc_hd__inv_1");
+    const auto  dir  = std::string(std::getenv("TEST_TMPDIR")) + "/" + master;
     std::filesystem::create_directories(dir);
     std::ofstream(dir + "/two_row.lef") << physical::write_lef_macros(
         {
-            {master, tall}
+            {        master, two_row_template(inv, 0)},
+            {master + "_t1", two_row_template(inv, 1)}
     },
         tech.dbu);
     auto io = source.create_io("two_rows");
@@ -394,11 +449,18 @@ TEST(Placement, TwoRowCellsAreAnchoredBeforeTerminalLegalization) {
   // Movable two-row CORE cells (domino abstracts) go through the anchor
   // prepass, the unchanged terminal legalizer and release; the other final
   // legalizers refuse them.
+  // Each start takes the PG rail template its row needs: t0 on N rows, its
+  // twin t1 on FS rows, in the floorplan and the netlist alike.
   Two_row_chain chain(kDominoTwoRow);
   auto&         options                     = chain.options;
   options.row_access                        = physical::Row_access_convention{};
   options.multirow_templates[kDominoTwoRow] = {
-      {physical::Row_access::horizontal, physical::Row_access::vertical}
+      {physical::Row_access::horizontal, physical::Row_access::vertical},
+      kDominoTwin
+  };
+  options.multirow_templates[kDominoTwin] = {
+      {physical::Row_access::horizontal, physical::Row_access::vertical},
+      kDominoTwoRow
   };
   const auto result = place(*chain.graph, chain.flat, options);
   const auto all    = physical::read_lef(options.lefs);
@@ -406,7 +468,7 @@ TEST(Placement, TwoRowCellsAreAnchoredBeforeTerminalLegalization) {
   const auto rh      = std::llround(all.sites.at("unithd").height * all.dbu);
   size_t     two_row = 0;
   for (const auto& c : result.floorplan.components) {
-    if (c.macro != kDominoTwoRow) {
+    if (c.macro != kDominoTwoRow && c.macro != kDominoTwin) {
       continue;
     }
     ++two_row;
@@ -435,7 +497,7 @@ TEST(Placement, TwoRowCellsAreAnchoredBeforeTerminalLegalization) {
         })->y;
   auto seed = result.floorplan;
   for (auto& c : seed.components) {
-    if (c.macro == kDominoTwoRow) {
+    if (c.macro == kDominoTwoRow || c.macro == kDominoTwin) {
       c.place.y = bottom + rh;
     }
   }
@@ -447,9 +509,33 @@ TEST(Placement, TwoRowCellsAreAnchoredBeforeTerminalLegalization) {
   rapidjson::Document odd_qor;
   odd_qor.Parse(odd.qor.c_str());
   EXPECT_GE(odd_qor["multirow"]["odd_starts"].GetUint64(), 1U);
-  EXPECT_TRUE(std::any_of(odd.floorplan.components.begin(), odd.floorplan.components.end(), [](const auto& c) {
-    return c.macro == kDominoTwoRow && c.place.orientation == physical::Orientation::FS;
-  }));
+  EXPECT_EQ(odd_qor["multirow"]["rail_twins"].GetUint64(), odd_qor["multirow"]["odd_starts"].GetUint64());
+  std::map<std::string, std::string> instances;  // the placed netlist's masters
+  for (auto node : odd.graph->body().nodes()) {
+    if (const auto io = node.get_subnode_io()) {
+      instances[std::string(node.get_name())] = io->get_name();
+    }
+  }
+  size_t flipped = 0;
+  for (const auto& c : odd.floorplan.components) {
+    if (c.macro == kDominoTwoRow || c.macro == kDominoTwin) {
+      const bool fs  = c.place.orientation == physical::Orientation::FS;
+      flipped       += fs;
+      EXPECT_EQ(c.macro, fs ? kDominoTwin : kDominoTwoRow) << c.name;
+      EXPECT_EQ(instances.at(c.name), c.macro) << c.name;
+    }
+  }
+  EXPECT_GE(flipped, 1U);
+  // Without a twin the FS starts are refused: every anchor starts on an N row.
+  auto restricted                                         = odd_options;
+  restricted.multirow_templates[kDominoTwoRow].rail_twin  = "";
+  restricted.output_dir                                  += "_restricted";
+  const auto even_only                                    = place(*chain.graph, chain.flat, restricted);
+  EXPECT_NO_THROW(check_legality(all, even_only.floorplan));
+  rapidjson::Document even_qor;
+  even_qor.Parse(even_only.qor.c_str());
+  EXPECT_EQ(even_qor["multirow"]["odd_starts"].GetUint64(), 0U);
+  EXPECT_EQ(even_qor["multirow"]["rail_twins"].GetUint64(), 0U);
   EXPECT_NEAR(lef_hpwl_um(all, odd.floorplan), odd_qor["hpwl_um"].GetDouble(), 1e-6);
   // Every single-row path refuses them by name, each with its own reason.
   const auto previous = std::make_shared<const physical::Floorplan>(result.floorplan);
@@ -487,7 +573,12 @@ TEST(Placement, TwoRowPlacementsKeyTheCacheAndReuseItLegally) {
   const auto setup = [&](Two_row_chain& chain) {
     chain.options.row_access                        = physical::Row_access_convention{};
     chain.options.multirow_templates[kDominoTwoRow] = {
-        {physical::Row_access::horizontal, physical::Row_access::vertical}
+        {physical::Row_access::horizontal, physical::Row_access::vertical},
+        kDominoTwin
+    };
+    chain.options.multirow_templates[kDominoTwin] = {
+        {physical::Row_access::horizontal, physical::Row_access::vertical},
+        kDominoTwoRow
     };
     chain.options.cache_dir = cache;
   };
@@ -501,18 +592,30 @@ TEST(Placement, TwoRowPlacementsKeyTheCacheAndReuseItLegally) {
   Two_row_chain chain(kDominoTwoRow);
   setup(chain);
   const auto all           = physical::read_lef(chain.options.lefs);
+  size_t     flipped       = 0;  // two-row cells on FS starts over every run
   const auto expect_placed = [&](const Result& r, const char* what) {
     SCOPED_TRACE(what);
     EXPECT_NO_THROW(check_legality(all, r.floorplan));
     rapidjson::Document qor;
     qor.Parse(r.qor.c_str());
     EXPECT_NEAR(lef_hpwl_um(all, r.floorplan), qor["hpwl_um"].GetDouble(), 1e-6);
+    std::map<std::string, std::string> instances;
+    for (auto node : r.graph->body().nodes()) {
+      if (const auto io = node.get_subnode_io()) {
+        instances[std::string(node.get_name())] = io->get_name();
+      }
+    }
     for (const auto& c : r.floorplan.components) {
-      if (c.macro == kDominoTwoRow) {
+      if (c.macro == kDominoTwoRow || c.macro == kDominoTwin) {
         const auto row
             = std::find_if(r.floorplan.rows.begin(), r.floorplan.rows.end(), [&](const auto& x) { return x.y == c.place.y; });
         ASSERT_NE(row, r.floorplan.rows.end()) << c.name;
         EXPECT_EQ(c.place.orientation, row->orientation) << c.name;
+        // A restored placement still takes the template of its start row.
+        const bool fs  = row->orientation == physical::Orientation::FS;
+        flipped       += fs;
+        EXPECT_EQ(c.macro, fs ? kDominoTwin : kDominoTwoRow) << c.name;
+        EXPECT_EQ(instances.at(c.name), c.macro) << c.name;
       }
     }
   };
@@ -554,6 +657,56 @@ TEST(Placement, TwoRowPlacementsKeyTheCacheAndReuseItLegally) {
   expect_placed(place(*chain.graph, chain.flat, cataloged), "custom catalog");
   EXPECT_NE(environment(), key);
   EXPECT_NE(environment(), templated_key);
+}
+
+TEST(Placement, ARestoredPlacementTakesTheRailTemplateOfItsRows) {
+  // The netlist instantiates t0 only. A cold run anchors the twin on FS
+  // starts; a warm run restores those poses from the cache and must derive
+  // the twin again from the rows, in the floorplan and the netlist.
+  Two_row_chain chain(kDominoTwoRow, 40);
+  auto&         options = chain.options;
+  options.row_access    = physical::Row_access_convention{};
+  for (const auto& [master, twin] : {
+           std::pair{std::string(kDominoTwoRow),                kDominoTwin},
+           {               kDominoTwin, std::string(kDominoTwoRow)}
+  }) {
+    options.multirow_templates[master] = {
+        {physical::Row_access::horizontal, physical::Row_access::vertical},
+        twin
+    };
+  }
+  options.utilization  = .4;
+  options.output_dir  += "_restored";
+  options.cache_dir    = std::string(std::getenv("TEST_TMPDIR")) + "/two_row_rail_cache";
+  std::filesystem::create_directories(options.cache_dir);
+  const auto all              = physical::read_lef(options.lefs);
+  const auto expect_templates = [&](const Result& r) {
+    EXPECT_NO_THROW(check_legality(all, r.floorplan));
+    std::map<std::string, std::string> instances;
+    for (auto node : r.graph->body().nodes()) {
+      if (const auto io = node.get_subnode_io()) {
+        instances[std::string(node.get_name())] = io->get_name();
+      }
+    }
+    size_t flipped = 0;
+    for (const auto& c : r.floorplan.components) {
+      if (c.macro == kDominoTwoRow || c.macro == kDominoTwin) {
+        const bool fs  = c.place.orientation == physical::Orientation::FS;
+        flipped       += fs;
+        EXPECT_EQ(c.macro, fs ? kDominoTwin : kDominoTwoRow) << c.name;
+        EXPECT_EQ(instances.at(c.name), c.macro) << c.name;
+      }
+    }
+    return flipped;
+  };
+  const auto cold = place(*chain.graph, chain.flat, options);
+  ASSERT_GT(expect_templates(cold), 0U);
+  const auto          warm = place(*chain.graph, chain.flat, options);
+  rapidjson::Document qor;
+  qor.Parse(warm.qor.c_str());
+  EXPECT_TRUE(qor["incremental"]["hit"].GetBool());
+  EXPECT_EQ(expect_templates(warm), expect_templates(cold));
+  EXPECT_EQ(warm.floorplan.components, cold.floorplan.components);
 }
 
 TEST(Placement, TwoRowEcoSwapsVariantsAroundTheirNeighbors) {

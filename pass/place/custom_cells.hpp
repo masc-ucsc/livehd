@@ -56,4 +56,11 @@ std::shared_ptr<hhds::GraphIO> declare_custom_cell(hhds::GraphLibrary& library, 
 // or an instance that is not of `from`, throws std::invalid_argument and
 // leaves the instance unchanged.
 void                           change_custom_master(hhds::Node_class node, const Custom_variant& from, const Custom_variant& to);
+// Point an instance of a body-less custom declaration at `name`, declared with
+// the same pins (port ids, widths, sign, loop breaks) when absent: a geometry
+// template of the same cell, such as a multi-row master's rail twin, which
+// differs only in its physical PG rails. Every pin, edge and pin attribute
+// stays. A declaration with a body, or another declaration under `name` with
+// other pins, throws std::invalid_argument.
+void                           change_custom_declaration(hhds::Node_class node, const std::string& name);
 }  // namespace livehd::placement

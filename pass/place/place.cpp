@@ -48,6 +48,7 @@
 #include "pass/liberty/liberty_dff.hpp"
 #include "pass/partition/flatten.hpp"
 #include "pass/place/place_salt.hpp"
+#include "pg_rails.hpp"
 #include "pin_adjust.hpp"
 #include "pin_escape_guard.hpp"
 #include "power_grid.hpp"
@@ -610,6 +611,9 @@ std::string environment_key(const Options& o, const ph::Technology& tech) {
   for (const auto& [master, t] : o.multirow_templates) {
     h = hash_text(std::format("multirow-template:{}:{}:{}", master, ph::row_access_name(t.half[0]), ph::row_access_name(t.half[1])),
                   h);
+    if (!t.rail_twin.empty()) {
+      h = hash_text("multirow-rail-twin-v1:" + t.rail_twin, h);
+    }
   }
   if (o.multirow_eco) {
     h = hash_text(std::format("multirow-eco-v1:{}:{}", o.multirow_eco->shift_sites, o.multirow_eco->max_displaced), h);
@@ -3229,6 +3233,58 @@ Multirow_options anchor_controls(const Options& options, const Terminal_legalize
   anchors.admits       = livehd::is_provisional_domino_cell;
   return anchors;
 }
+// Cell i and its netlist instance take `macro`, the rail twin of its master
+// (same footprint and signal pins, the other PG rail stack).
+void take_rail_twin(View& v, size_t i, const std::string& macro) {
+  auto& c = v.cells[i];
+  if (c.macro != macro) {
+    change_custom_declaration(c.node, macro);
+    c.macro = macro;
+  }
+}
+// Each cell takes the master its component in frame has: the anchor prepass
+// and the two-row ECO pick the rail twin a start needs. frame lists v.cells
+// first, in order.
+void adopt_rail_twins(View& v, const ph::Floorplan& frame) {
+  for (size_t i = 0; i < v.cells.size(); ++i) {
+    take_rail_twin(v, i, frame.components.at(i).macro);
+  }
+}
+// Every placed multi-row cell with a rail twin takes the master the PG rails
+// of its rows need (a restored placement keeps the netlist's template).
+// Returns the cells switched.
+size_t sync_rail_twins(View& v, const ph::Technology& tech, const Options& options) {
+  if (options.multirow_templates.empty() || v.fp.rows.empty()) {
+    return 0;
+  }
+  const Pg_rail_model rails(tech);
+  const auto          rh       = std::llround(tech.sites.at(v.fp.rows.front().site).height * tech.dbu);
+  size_t              switched = 0;
+  for (size_t i = 0; i < v.cells.size(); ++i) {
+    const auto& c = v.cells[i];
+    const auto  t = options.multirow_templates.find(c.macro);
+    if (t == options.multirow_templates.end() || t->second.rail_twin.empty() || c.place.status == Status::UNPLACED
+        || c.place.height <= rh) {
+      continue;
+    }
+    std::vector<Orientation> rows;
+    for (int64_t y = c.place.y; y < c.place.y + c.place.height; y += rh) {
+      const auto row = std::find_if(v.fp.rows.begin(), v.fp.rows.end(), [&](const ph::Row& r) {
+        return r.y == y && c.place.x >= r.x && c.place.x < r.x + r.count * r.step;
+      });
+      if (row == v.fp.rows.end()) {
+        break;  // check_legality names a cell outside the rows
+      }
+      rows.push_back(row->orientation);
+    }
+    if (rows.size() * rh == size_t(c.place.height) && rails.fit(c.macro, c.place.orientation, rows) == Rail_fit::mismatch
+        && rails.fit(t->second.rail_twin, c.place.orientation, rows) == Rail_fit::fit) {
+      take_rail_twin(v, i, t->second.rail_twin);
+      ++switched;
+    }
+  }
+  return switched;
+}
 // Nearest-whitespace ECO legalization of the dirty single-row CORE cells
 // around every other cell. Multi-row obstacles keep multirow_padding_sites
 // free on both sides, as the two-row ECO (multirow_eco.hpp) keeps them.
@@ -3794,6 +3850,8 @@ void check_legality(const ph::Technology& tech, const ph::Floorplan& fp, double 
       intervals[i].prefix_xh = std::max(intervals[i].rect.xh, intervals[i - 1].prefix_xh);
     }
   }
+  // PG rail parity of multi-row cells (pg_rails.hpp), built on first use.
+  std::optional<Pg_rail_model> rails;
   for (size_t i = 0; i < fp.components.size(); ++i) {
     const auto& a = fp.components[i];
     if (a.place.status == Status::UNPLACED || a.place.x < xl || a.place.y < yl || a.place.x + a.place.width > xh
@@ -3807,6 +3865,7 @@ void check_legality(const ph::Technology& tech, const ph::Floorplan& fp, double 
       if ((p.y - yl) % rh || p.height <= 0 || p.height % rh || p.width <= 0) {
         throw std::runtime_error("cell off row/site: " + a.name);
       }
+      std::vector<Orientation> spanned;  // orientations of the rows it covers, bottom up
       for (int64_t y = p.y; y < p.y + p.height; y += rh) {
         const auto     band       = rows_at_y.find(y);
         const ph::Row* containing = nullptr;
@@ -3821,6 +3880,7 @@ void check_legality(const ph::Technology& tech, const ph::Floorplan& fp, double 
         if (!containing) {
           throw std::runtime_error("cell outside row segments/off site: " + a.name);
         }
+        spanned.push_back(containing->orientation);
         if (y != p.y) {
           continue;
         }
@@ -3831,6 +3891,23 @@ void check_legality(const ph::Technology& tech, const ph::Floorplan& fp, double 
                                 || (orientation == Orientation::S && p.orientation == Orientation::FS);
         if (p.orientation != orientation && !(macro.symmetry_y && mirrored_y)) {
           throw std::runtime_error("cell orientation differs from row: " + a.name);
+        }
+      }
+      if (spanned.size() > 1) {
+        // Its PG rails must land on rails of the same polarity (OpenROAD's
+        // check_placement rule); a master with rails is never passed unchecked.
+        if (!rails) {
+          rails.emplace(tech);
+        }
+        std::string why;
+        const auto  fit = rails->fit(a.macro, p.orientation, spanned, &why);
+        if (fit == Rail_fit::mismatch) {
+          throw std::runtime_error("multi-row cell PG rails differ from its rows (rail parity): " + a.name + ": " + why);
+        }
+        const auto& edges = rails->edges(a.macro);
+        if (fit == Rail_fit::unknown && std::any_of(edges.begin(), edges.end(), [](Pg_rail r) { return r != Pg_rail::none; })) {
+          throw std::runtime_error("cannot check the PG rail parity of multi-row cell " + a.name + ": no one-row CORE cell of site "
+                                   + macro.site + " has distinct rails on both edges");
         }
       }
     }
@@ -6095,6 +6172,7 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
           v.cells[i].locked = true;
         }
       }
+      adopt_rail_twins(v, frame);
       changed.insert(changed.end(), multirow_eco_report->displaced.begin(), multirow_eco_report->displaced.end());
       if (!legalize_edits(v,
                           tech,
@@ -8246,6 +8324,7 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
       terminal_report = terminal_legalize(tech, frame, final_gp_timing, terminal_options);
       if (multirow_report) {
         release_multirow_anchors(frame, *multirow_report);
+        adopt_rail_twins(v, frame);
       }
       sat_install(v.design, frame);
       metrics.legal                               = dp::is_legal(v.design);
@@ -9158,6 +9237,9 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
                              v.fp_coloring.colors.size());
     return result;
   }
+  // A restored or edited placement keeps the netlist's geometry template; the
+  // rows each two-row cell landed on decide its PG rail stack.
+  sync_rail_twins(v, tech, options);
   for (auto& c : v.cells) {
     c.node.attr(attrs::place).set(c.place);
     c.node.attr(attrs::placement_block).set(c.block);
@@ -10181,9 +10263,11 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
       constexpr std::array    outcomes{Outcome::in_place, Outcome::shifted, Outcome::displaced, Outcome::re_anchored};
       std::array<uint64_t, 4> counts{};
       int64_t                 released = 0, grown = 0;
+      uint64_t                rail_twins       = 0;
       double                  max_displacement = 0;
       for (const auto& cell : multirow_eco_report->cells) {
         ++counts[static_cast<size_t>(cell.outcome)];
+        rail_twins        += cell.rail_twin;
         released         += cell.released_sites;
         grown            += cell.grown_sites;
         max_displacement  = std::max(max_displacement, cell.displacement_um);
@@ -10196,6 +10280,7 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
       }
       block.AddMember("released_sites", released, allocator);
       block.AddMember("grown_sites", grown, allocator);
+      block.AddMember("rail_twins", rail_twins, allocator);
       block.AddMember("displaced_cells", static_cast<uint64_t>(multirow_eco_report->displaced.size()), allocator);
       block.AddMember("max_displacement_um", max_displacement, allocator);
       block.AddMember("shift_sites", options.multirow_eco->shift_sites, allocator);
@@ -10233,6 +10318,7 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
       multirow.AddMember("cells", static_cast<uint64_t>(multirow_report->anchors.size()), allocator);
       multirow.AddMember("even_starts", static_cast<uint64_t>(multirow_report->even_starts), allocator);
       multirow.AddMember("odd_starts", static_cast<uint64_t>(multirow_report->odd_starts), allocator);
+      multirow.AddMember("rail_twins", static_cast<uint64_t>(multirow_report->rail_twins), allocator);
       multirow.AddMember("candidates", static_cast<uint64_t>(multirow_report->candidates), allocator);
       multirow.AddMember("full_core_scans", static_cast<uint64_t>(multirow_report->full_core_scans), allocator);
       multirow.AddMember("work", multirow_report->work, allocator);

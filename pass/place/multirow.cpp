@@ -7,6 +7,7 @@
 #include <utility>
 
 #include "multirow_packer.hpp"
+#include "pg_rails.hpp"
 #include "require.hpp"
 #include "row_occupancy.hpp"
 
@@ -37,16 +38,58 @@ std::map<std::string, int64_t> first_core_rows(const ph::Floorplan& fp) {
   return origins;
 }
 
-bool multirow_start_allowed(const ph::Technology& tech, const ph::Floorplan& fp, size_t start_row, const std::string& master,
-                            const Multirow_options& options) {
+std::optional<std::string> multirow_start_master(const ph::Technology& tech, const ph::Floorplan& fp, size_t start_row,
+                                                 const std::string& master, const Multirow_options& options) {
   const auto& row = fp.rows.at(start_row);
   const auto& m   = tech.macros.at(master);
   const auto  k   = multirow_rows(tech, m);
   require(k != 0, "multirow start check needs a multi-row CORE master");
   const auto row_height = std::llround(tech.sites.at(m.site).height * tech.dbu);
   const auto offset     = row.y - first_core_y(fp, options, m.site);
-  return row.site == m.site && offset % row_height == 0
-         && start_refusal(m, master, k, offset / row_height, row.orientation, options) == Refusal::none;
+  if (row.site != m.site || offset % row_height != 0) {
+    return std::nullopt;
+  }
+  // The orientations of the rows the span covers: the first row segment of
+  // the site at each row above the start (a missing row refuses nothing here:
+  // row availability is not checked).
+  std::vector<ph::Orientation> orientations{row.orientation};
+  for (size_t h = 1; h < k; ++h) {
+    const auto above = std::find_if(fp.rows.begin(), fp.rows.end(), [&](const ph::Row& r) {
+      return r.site == m.site && r.y == row.y + int64_t(h) * row_height;
+    });
+    if (above == fp.rows.end()) {
+      orientations.clear();  // unknown span: rails are not judged
+      break;
+    }
+    orientations.push_back(above->orientation);
+  }
+  const Pg_rail_model rails(tech);
+  Refusal             refusal = Refusal::none;
+  if (orientations.empty()) {
+    for (const auto* candidate : {&master, &multirow_internal::rail_twin(options, master)}) {
+      if (!candidate->empty()
+          && start_refusal(tech.macros.at(*candidate), *candidate, k, offset / row_height, row.orientation, options)
+                 == Refusal::none) {
+        return *candidate;
+      }
+    }
+    return std::nullopt;
+  }
+  const auto* chosen = multirow_internal::start_master(tech,
+                                                       rails,
+                                                       master,
+                                                       k,
+                                                       size_t(offset / row_height),
+                                                       row.orientation,
+                                                       orientations,
+                                                       options,
+                                                       refusal);
+  return chosen ? std::optional<std::string>{*chosen} : std::nullopt;
+}
+
+bool multirow_start_allowed(const ph::Technology& tech, const ph::Floorplan& fp, size_t start_row, const std::string& master,
+                            const Multirow_options& options) {
+  return multirow_start_master(tech, fp, start_row, master, options) == master;
 }
 
 Multirow_report anchor_multirow_cells(const ph::Technology& tech, ph::Floorplan& fp, const Multirow_options& options) {
