@@ -61,7 +61,7 @@ endmodule
 // of a lane read), not the narrow affine form: the amount is `idx * 32`, whose five low
 // bits are 0. As an opaque module input those barrel stages are built anyway.
 module zb_select (
-  input  logic [511:0] v,
+  input  logic [127:0] v,
   input  logic [31:0]  idx,
   output logic [31:0]  o
 );
