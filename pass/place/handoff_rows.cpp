@@ -24,8 +24,6 @@ int64_t align(int64_t x, int64_t width, int64_t origin, bool left) {
   const double site = double(x - origin) / width;
   return origin + int64_t(left ? std::floor(site) : std::ceil(site)) * width;
 }
-bool overlaps(const ph::Rect& a, const ph::Rect& b) { return a.xl < b.xh && b.xl < a.xh && a.yl < b.yh && b.yl < a.yh; }
-bool contains(const ph::Rect& a, const ph::Rect& b) { return a.xl <= b.xl && a.yl <= b.yl && a.xh >= b.xh && a.yh >= b.yh; }
 }  // namespace
 
 std::vector<physical::Row> cut_macro_rows(const ph::Floorplan& frame, const ph::Technology& tech, int64_t halo_x, int64_t halo_y,
@@ -48,12 +46,8 @@ std::vector<physical::Row> cut_macro_rows(const ph::Floorplan& frame, const ph::
     }
     dbu(double(inst.place.x));
     dbu(double(inst.place.y));
-    switch (inst.place.orientation) {
-      case ph::Orientation::W:
-      case ph::Orientation::E:
-      case ph::Orientation::FW:
-      case ph::Orientation::FE: std::swap(width, height); break;
-      default                 : break;
+    if (ph::swaps_axes(inst.place.orientation)) {
+      std::swap(width, height);
     }
     const ph::Rect bounds{double(inst.place.x), double(inst.place.y), double(inst.place.x) + width, double(inst.place.y) + height};
     if (master.klass.starts_with("BLOCK") || master.virtual_proxy) {
@@ -72,21 +66,19 @@ std::vector<physical::Row> cut_macro_rows(const ph::Floorplan& frame, const ph::
     dbu(double(row.y));
     const auto& site = tech.sites.at(row.site);
     const auto  sw = dbu(site.width * frame.dbu), rh = dbu(site.height * frame.dbu);
-    if (sw <= 0 || rh <= 0 || row.step <= 0 || row.count <= 0 || row.orientation == ph::Orientation::W
-        || row.orientation == ph::Orientation::E || row.orientation == ph::Orientation::FW
-        || row.orientation == ph::Orientation::FE) {
+    if (sw <= 0 || rh <= 0 || row.step <= 0 || row.count <= 0 || ph::swaps_axes(row.orientation)) {
       throw std::runtime_error("row cutting requires horizontal rows with positive site dimensions");
     }
     const int64_t                            right = dbu(double(row.x) + double(row.count - 1) * row.step + sw);
     const ph::Rect                           bounds{double(row.x), double(row.y), double(right), double(row.y) + rh};
     std::vector<std::pair<int64_t, int64_t>> intervals;
     for (const auto& obstruction : blockages) {
-      if (overlaps(bounds, obstruction)) {
+      if (bounds.overlaps(obstruction)) {
         intervals.emplace_back(dbu(obstruction.xl), dbu(obstruction.xh));
       }
     }
     if (intervals.empty()
-        || std::any_of(fixed_cells.begin(), fixed_cells.end(), [&](const auto& cell) { return contains(bounds, cell); })) {
+        || std::any_of(fixed_cells.begin(), fixed_cells.end(), [&](const auto& cell) { return bounds.contains(cell); })) {
       result.push_back(row);
       continue;
     }
@@ -283,12 +275,8 @@ std::vector<ph::Component> row_taps(const ph::Floorplan& frame, const ph::Techno
     if (w <= 0 || h <= 0) {
       throw std::invalid_argument("fixed tap obstruction has invalid dimensions");
     }
-    switch (inst.place.orientation) {
-      case ph::Orientation::W:
-      case ph::Orientation::E:
-      case ph::Orientation::FW:
-      case ph::Orientation::FE: std::swap(w, h); break;
-      default                 : break;
+    if (ph::swaps_axes(inst.place.orientation)) {
+      std::swap(w, h);
     }
     const auto     x = dbu(double(inst.place.x)), y = dbu(double(inst.place.y));
     const ph::Rect rect{double(x), double(y), double(dbu(double(x) + w)), double(dbu(double(y) + h))};
@@ -406,12 +394,8 @@ std::optional<std::vector<physical::Component>> reserve_repeater_sites(const ph:
       throw std::invalid_argument("repeater reservation does not support nonzero LEF origins");
     }
     auto w = dimension(master.width), h = dimension(master.height);
-    switch (cell.place.orientation) {
-      case ph::Orientation::E:
-      case ph::Orientation::W:
-      case ph::Orientation::FE:
-      case ph::Orientation::FW: std::swap(w, h); break;
-      default                 : break;
+    if (ph::swaps_axes(cell.place.orientation)) {
+      std::swap(w, h);
     }
     occupied.push_back({double(cell.place.x), double(cell.place.y), double(cell.place.x) + w, double(cell.place.y) + h});
   }

@@ -23,10 +23,11 @@ std::vector<ph::Terminal> handoff_pins(const ph::Technology& tech, const ph::Flo
       throw std::invalid_argument("IO die exceeds supported DBU coordinates");
     }
   }
-  const double grid = tech.manufacturing_grid * fp.dbu;
-  if (!std::isfinite(grid) || grid < 1 || grid != std::round(grid)) {
+  const auto grid_dbu = tech.manufacturing_grid > 0 ? ph::manufacturing_grid_dbu(tech, fp.dbu) : std::nullopt;
+  if (!grid_dbu) {
     throw std::invalid_argument("IO handoff requires an integer manufacturing grid");
   }
+  const double grid = *grid_dbu;
   const auto adjustable = [](const ph::Terminal& t) {
     return t.status != ph::Status::FIXED && t.status != ph::Status::LOCKED && t.use != "POWER" && t.use != "GROUND";
   };

@@ -6,6 +6,7 @@
 #include <set>
 #include <stdexcept>
 #include <tuple>
+#include <type_traits>
 
 #include "inou/lefdef/cut_rules.hpp"
 #include "inou/lefdef/routing_geometry.hpp"
@@ -19,14 +20,6 @@
 namespace livehd::placement {
 namespace {
 namespace ph = physical;
-ph::Rect intersection(const ph::Rect& a, const ph::Rect& b) {
-  return {std::max(a.xl, b.xl), std::max(a.yl, b.yl), std::min(a.xh, b.xh), std::min(a.yh, b.yh)};
-}
-bool     nonempty(const ph::Rect& r) { return r.xl < r.xh && r.yl < r.yh; }
-ph::Rect merged(const ph::Rect& a, const ph::Rect& b) {
-  return {std::min(a.xl, b.xl), std::min(a.yl, b.yl), std::max(a.xh, b.xh), std::max(a.yh, b.yh)};
-}
-bool contains(const ph::Rect& a, const ph::Rect& b) { return a.xl <= b.xl && a.yl <= b.yl && a.xh >= b.xh && a.yh >= b.yh; }
 std::array<int64_t, 2> size(const ph::Rect& r) { return {std::llround(r.xh - r.xl), std::llround(r.yh - r.yl)}; }
 ph::Route_path         wire_path(const Pg_metal& s, const ph::Technology& tech, const std::string& shape) {
   const bool     horizontal = s.followpin || tech.layers.at(s.layer).direction == "HORIZONTAL";
@@ -95,21 +88,21 @@ static ph::Floorplan make_grid(const ph::Technology& tech, const ph::Floorplan& 
               })) {
             continue;
           }
-          const auto point = [&](double x, double y) {
-            auto [px, py]
-                = ph::orient_point(x + master.origin_x, y + master.origin_y, master.width, master.height, cell.place.orientation);
-            return std::pair{double(cell.place.x) + std::llround(px * input.dbu),
-                             double(cell.place.y) + std::llround(py * input.dbu)};
-          };
-          auto [x0, y0] = point(shape.rect.xl, shape.rect.yl);
-          auto [x1, y1] = point(shape.rect.xh, shape.rect.yh);
-          ph::Rect rect{std::min(x0, x1), std::min(y0, y1), std::max(x0, x1), std::max(y0, y1)};
-          if (!nonempty(rect) || !contains(input.die, rect)) {
+          // Snap the oriented contact to DBU before placing it.
+          const auto     local = ph::orient_rect(shape.rect.translated(master.origin_x, master.origin_y),
+                                             master.width,
+                                             master.height,
+                                             cell.place.orientation);
+          const ph::Rect rect{double(cell.place.x) + std::llround(local.xl * input.dbu),
+                              double(cell.place.y) + std::llround(local.yl * input.dbu),
+                              double(cell.place.x) + std::llround(local.xh * input.dbu),
+                              double(cell.place.y) + std::llround(local.yh * input.dbu)};
+          if (rect.empty() || !input.die.contains(rect)) {
             throw std::invalid_argument("invalid macro PG contact: " + cell.name + "/" + pin_name);
           }
           for (size_t id = grid_shapes; id < plan.metal.size(); ++id) {
             const auto& other = plan.metal[id];
-            if (other.net != profile.nets[n] && other.layer == shape.layer && nonempty(intersection(other.rect, rect))) {
+            if (other.net != profile.nets[n] && other.layer == shape.layer && other.rect.overlaps(rect)) {
               throw std::invalid_argument("overlapping macro power/ground pins: " + cell.name + "/" + pin_name);
             }
           }
@@ -225,8 +218,8 @@ static ph::Floorplan make_grid(const ph::Technology& tech, const ph::Floorplan& 
         if (b.layer != pair[1] || a.net != b.net) {
           continue;
         }
-        const auto overlap = intersection(a.rect, b.rect);
-        if (!nonempty(overlap)) {
+        const auto overlap = a.rect.intersection(b.rect);
+        if (overlap.empty()) {
           continue;
         }
         const auto x = std::llround((overlap.xl + overlap.xh) / 2), y = std::llround((overlap.yl + overlap.yh) / 2);
@@ -305,21 +298,17 @@ static ph::Floorplan make_grid(const ph::Technology& tech, const ph::Floorplan& 
           p.steps = {ph::Route_point{x, y, {}}, ph::Route_via{via_name}};
           paths(a.net).push_back(std::move(p));
           for (const auto& pad : pads.at(via_name)) {
-            auto r  = pad.rect;
-            r.xl   += x;
-            r.xh   += x;
-            r.yl   += y;
-            r.yh   += y;
-            if (!contains(out.die, r)) {
+            const auto r = pad.rect.translated(x, y);
+            if (!out.die.contains(r)) {
               throw std::invalid_argument("PG via landing pad lies outside die");
             }
-            if (macro_connection && pad.layer == a.layer && !contains(a.rect, r)) {
+            if (macro_connection && pad.layer == a.layer && !a.rect.contains(r)) {
               throw std::invalid_argument("PG via exceeds fixed macro pin contact");
             }
             stack_pads[pad.layer].push_back(r);
             for (auto id : {i, j}) {
               if (pad.layer == plan.metal[id].layer) {
-                attached[id] = attached[id] ? merged(*attached[id], r) : r;
+                attached[id] = attached[id] ? attached[id]->hull(r) : r;
               }
             }
           }
@@ -333,9 +322,9 @@ static ph::Floorplan make_grid(const ph::Technology& tech, const ph::Floorplan& 
           const auto& shapes = stack_pads.at(layer);
           auto        rect   = shapes.front();
           for (const auto& shape : shapes) {
-            rect = merged(rect, shape);
+            rect = rect.hull(shape);
           }
-          if (std::none_of(shapes.begin(), shapes.end(), [&](const auto& shape) { return contains(shape, rect); })) {
+          if (std::none_of(shapes.begin(), shapes.end(), [&](const auto& shape) { return shape.contains(rect); })) {
             patches.push_back({a.net, layer, rect, false});
           }
         }
@@ -374,7 +363,7 @@ static ph::Floorplan make_grid(const ph::Technology& tech, const ph::Floorplan& 
         shape.rect.xh = shape.layer == profile.pin_layer ? std::max(shape.rect.xh, ext.xh) : ext.xh;
       }
     }
-    if (!contains(out.die, shape.rect)) {
+    if (!out.die.contains(shape.rect)) {
       throw std::invalid_argument("native PG metal extends outside die");
     }
     if (!profile.channels.empty() && !shape.followpin) {
@@ -411,14 +400,18 @@ static ph::Floorplan make_grid(const ph::Technology& tech, const ph::Floorplan& 
         throw std::invalid_argument("channel removes every supply terminal for " + name);
       }
     }
+    std::vector<ph::Shape> regions;
+    for (const auto& channel : profile.channels) {
+      regions.push_back({channel.layer,
+                         {double(std::llround(channel.region.xl * out.dbu)),
+                          double(std::llround(channel.region.yl * out.dbu)),
+                          double(std::llround(channel.region.xh * out.dbu)),
+                          double(std::llround(channel.region.yh * out.dbu))}});
+    }
     for (const auto& net : out.special_nets) {
       for (const auto& shape : ph::route_geometry(tech, out, net, true)) {
-        for (const auto& channel : profile.channels) {
-          const ph::Rect region{double(std::llround(channel.region.xl * out.dbu)),
-                                double(std::llround(channel.region.yl * out.dbu)),
-                                double(std::llround(channel.region.xh * out.dbu)),
-                                double(std::llround(channel.region.yh * out.dbu))};
-          if (shape.layer == channel.layer && nonempty(intersection(shape.rect, region))) {
+        for (const auto& region : regions) {
+          if (shape.layer == region.layer && shape.rect.overlaps(region.rect)) {
             throw std::invalid_argument("PG wire or via landing re-enters a channel");
           }
         }
@@ -443,19 +436,20 @@ std::map<std::string, uint64_t> count_channel_tracks(const ph::Technology& tech,
   const auto before = ph::routing_occupancy(tech, reference, reference.dbu, {}, nullptr, ph::Signal_wires::include, channel_layers);
   const auto after  = ph::routing_occupancy(tech, patched, patched.dbu, {}, nullptr, ph::Signal_wires::include, channel_layers);
   std::map<std::string, std::set<int64_t>> freed;
-  const double                             grid = tech.manufacturing_grid ? tech.manufacturing_grid * patched.dbu : 1;
-  if (!std::isfinite(grid) || grid < 1 || grid > INT32_MAX || grid != std::round(grid)) {
+  const auto                               grid_dbu = ph::manufacturing_grid_dbu(tech, patched.dbu);
+  if (!grid_dbu) {
     throw std::invalid_argument("unrepresentable channel manufacturing grid");
   }
+  const double grid = *grid_dbu;
   for (const auto& channel : channels) {
-    auto&        found      = freed[channel.layer];
-    const auto&  layer      = tech.layers.at(channel.layer);
-    const bool   horizontal = layer.direction == "HORIZONTAL";
-    const double width      = layer.width * patched.dbu;
-    if ((!horizontal && layer.direction != "VERTICAL") || !std::isfinite(width) || width <= 0 || width > INT32_MAX
-        || width != std::round(width) || std::llround(width) % 2) {
+    auto&       found      = freed[channel.layer];
+    const auto& layer      = tech.layers.at(channel.layer);
+    const bool  horizontal = layer.direction == "HORIZONTAL";
+    const auto  nominal    = ph::wire_width_dbu(layer, patched.dbu);
+    if ((!horizontal && layer.direction != "VERTICAL") || !nominal) {
       throw std::invalid_argument("unsupported channel signal width/direction");
     }
+    const double width = *nominal;
     const auto reach = *rules.clearance(channel.layer);
     ph::Rect   region{channel.region.xl * patched.dbu,
                     channel.region.yl * patched.dbu,
@@ -466,11 +460,11 @@ std::map<std::string, uint64_t> count_channel_tracks(const ph::Technology& tech,
         throw std::invalid_argument("invalid channel accounting extent");
       }
     }
-    region         = intersection(region, patched.die);
+    region         = region.intersection(patched.die);
     const auto low = horizontal ? region.yl : region.xl, high = horizontal ? region.yh : region.xh;
     const auto start = std::ceil(((horizontal ? region.xl : region.yl) + reach) / grid) * grid;
     const auto end   = std::floor(((horizontal ? region.xh : region.yh) - reach) / grid) * grid;
-    if (!nonempty(region) || start >= end) {
+    if (region.empty() || start >= end) {
       continue;
     }
     bool has_tracks = false;
@@ -479,12 +473,10 @@ std::map<std::string, uint64_t> count_channel_tracks(const ph::Technology& tech,
         continue;
       }
       has_tracks = true;
-      if (track.mask || track.same_mask || track.step <= 0 || track.count <= 0 || track.step > INT32_MAX || track.count > INT32_MAX
-          || track.start < INT32_MIN || track.start > INT32_MAX) {
+      if (!track.supported()) {
         throw std::invalid_argument("unsupported channel track pattern");
       }
-      const auto first = std::max<int64_t>(0, std::ceil((low + width / 2 - track.start) / track.step));
-      const auto last  = std::min<int64_t>(track.count - 1, std::floor((high - width / 2 - track.start) / track.step));
+      const auto [first, last] = track.index_range(low + width / 2, high - width / 2);
       if (last - first > 1000000) {
         throw std::invalid_argument("oversized channel track set");
       }
@@ -603,11 +595,7 @@ ph::Floorplan make_power_grid(const ph::Technology& tech, const ph::Floorplan& i
         if (cut == tech.cut_layers.end()) {
           legal = rules.spacing(shape, obstacle.shape).legal;
         } else {
-          const auto& a  = shape.rect;
-          const auto& b  = obstacle.shape.rect;
-          const auto  dx = std::max({0., a.xl - b.xh, b.xl - a.xh});
-          const auto  dy = std::max({0., a.yl - b.yh, b.yl - a.yh});
-          legal          = !(dx == 0 && dy == 0) && !(dx < *reach && dy < *reach);
+          legal = !ph::violates_cut_spacing(shape.rect, obstacle.shape.rect, *reach);
         }
         if (!legal) {
           throw std::invalid_argument("power grid conflicts with retained signal " + name + " on " + shape.layer + " ("
@@ -629,13 +617,7 @@ ph::Floorplan make_power_grid(const ph::Technology& tech, const ph::Floorplan& i
           throw std::invalid_argument("cannot preserve unplaced signal IO during PG generation: " + terminal.name);
         }
         for (const auto& shape : terminal.shapes) {
-          const auto a = ph::orient_point(shape.rect.xl, shape.rect.yl, 0, 0, terminal.orientation);
-          const auto b = ph::orient_point(shape.rect.xh, shape.rect.yh, 0, 0, terminal.orientation);
-          check({shape.layer,
-                 {terminal.x + std::min(a.first, b.first),
-                  terminal.y + std::min(a.second, b.second),
-                  terminal.x + std::max(a.first, b.first),
-                  terminal.y + std::max(a.second, b.second)}},
+          check({shape.layer, ph::orient_rect(shape.rect, 0, 0, terminal.orientation).translated(terminal.x, terminal.y)},
                 "IO " + terminal.name);
         }
       }
@@ -694,6 +676,19 @@ void write_power_grid_report(const ph::Floorplan& fp, const Pg_profile& profile,
   }
   rapidjson::StringBuffer                    buffer;
   rapidjson::Writer<rapidjson::StringBuffer> report(buffer);
+  // A string-keyed map of lengths (double) or counts (uint64_t) as one object.
+  const auto object = [&](const auto& values) {
+    report.StartObject();
+    for (const auto& [key, value] : values) {
+      report.Key(key.c_str());
+      if constexpr (std::is_floating_point_v<std::decay_t<decltype(value)>>) {
+        report.Double(value);
+      } else {
+        report.Uint64(value);
+      }
+    }
+    report.EndObject();
+  };
   report.StartObject();
   report.Key("schema_version");
   report.Int(3);
@@ -738,31 +733,14 @@ void write_power_grid_report(const ph::Floorplan& fp, const Pg_profile& profile,
   if (stats) {
     report.StartObject();
     report.Key("removed_planned_stripe_length_um");
-    report.StartObject();
-    for (const auto& [layer, value] : stats->removed_planned_length_um) {
-      report.Key(layer.c_str());
-      report.Double(value);
-    }
-    report.EndObject();
-    const auto counts = [&](const char* name, const auto& values) {
-      report.Key(name);
-      report.StartObject();
-      for (const auto& [pair, value] : values) {
-        report.Key(pair.c_str());
-        report.Uint64(value);
-      }
-      report.EndObject();
-    };
-    counts("removed_stacks_by_layer_pair", stats->removed_stacks);
-    counts("added_stacks_by_layer_pair", stats->added_stacks);
+    object(stats->removed_planned_length_um);
+    report.Key("removed_stacks_by_layer_pair");
+    object(stats->removed_stacks);
+    report.Key("added_stacks_by_layer_pair");
+    object(stats->added_stacks);
     report.Key("freed_signal_tracks_by_layer");
     if (stats->freed_tracks) {
-      report.StartObject();
-      for (const auto& [layer, count] : *stats->freed_tracks) {
-        report.Key(layer.c_str());
-        report.Uint64(count);
-      }
-      report.EndObject();
+      object(*stats->freed_tracks);
     } else {
       report.Null();
     }
@@ -788,12 +766,7 @@ void write_power_grid_report(const ph::Floorplan& fp, const Pg_profile& profile,
   report.Key("via_definitions");
   report.Uint64(fp.vias.size());
   report.Key("wire_length_um");
-  report.StartObject();
-  for (const auto& [layer, value] : length) {
-    report.Key(layer.c_str());
-    report.Double(value);
-  }
-  report.EndObject();
+  object(length);
   report.Key("unconnected_pg_pins");
   report.Null();
   report.Key("independent_connectivity_verified");

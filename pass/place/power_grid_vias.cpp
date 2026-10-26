@@ -12,16 +12,10 @@
 namespace livehd::placement {
 namespace {
 namespace ph = physical;
-int64_t units(double um, int64_t dbu) {
-  const double v = um * dbu;
-  if (!std::isfinite(v) || v < 0 || v > std::numeric_limits<int32_t>::max() || std::abs(v - std::round(v)) > 1e-7) {
-    throw std::invalid_argument("PG via dimension is not representable in integer DBU");
-  }
-  return std::llround(v);
-}
 using ph::cut_classes;
 using ph::cut_enclosures;
 using ph::cut_table_spacing;
+using ph::exact_units;
 struct Candidate {
   std::string                          name, cut, rule;
   std::array<int64_t, 2>               size{}, pitch{};
@@ -31,7 +25,7 @@ struct Candidate {
 };
 std::array<int64_t, 2> enclosure(const ph::Via_rule_layer& layer, const ph::Layer& metal, int64_t dbu) {
   const auto e = layer.enclosure.value_or(std::array<double, 2>{0, 0});
-  auto       x = units(e[0], dbu), y = units(e[1], dbu);
+  auto       x = exact_units(e[0], dbu), y = exact_units(e[1], dbu);
   if ((metal.direction == "VERTICAL" && x > y) || (metal.direction == "HORIZONTAL" && x < y)) {
     std::swap(x, y);
   }
@@ -58,7 +52,7 @@ std::optional<Pg_via_array> build(Candidate c, const ph::Technology& tech, int64
     auto        table   = cut_table_spacing(cut, dbu, classes);
     int64_t     spacing = 0;
     for (double s : cut.spacing) {
-      spacing = std::max(spacing, units(s, dbu));
+      spacing = std::max(spacing, exact_units(s, dbu));
     }
     for (const auto& feature : cut.unsupported) {
       if (feature != "PROPERTY LEF58_CUTCLASS" && feature != "PROPERTY LEF58_SPACINGTABLE"
@@ -209,8 +203,8 @@ Pg_via_array make_pg_via(const ph::Technology& tech, int64_t dbu, const Pg_via_r
     c.rule       = name;
     c.cut        = cut->name;
     c.generated  = true;
-    c.size       = {units(cut->cut->xh - cut->cut->xl, dbu), units(cut->cut->yh - cut->cut->yl, dbu)};
-    c.pitch      = {units((*cut->spacing)[0], dbu), units((*cut->spacing)[1], dbu)};
+    c.size       = {exact_units(cut->cut->xh - cut->cut->xl, dbu), exact_units(cut->cut->yh - cut->cut->yl, dbu)};
+    c.pitch      = {exact_units((*cut->spacing)[0], dbu), exact_units((*cut->spacing)[1], dbu)};
     const auto a = enclosure(*lower, tech.layers.at(req.lower), dbu), b = enclosure(*upper, tech.layers.at(req.upper), dbu);
     c.enc         = {a[0], a[1], b[0], b[1]};
     c.lower_width = lower->width;
@@ -240,15 +234,15 @@ Pg_via_array make_pg_via(const ph::Technology& tech, int64_t dbu, const Pg_via_r
     Candidate c;
     c.name = name;
     c.cut  = cut->layer;
-    c.size = {units(cut->rect.xh - cut->rect.xl, dbu), units(cut->rect.yh - cut->rect.yl, dbu)};
+    c.size = {exact_units(cut->rect.xh - cut->rect.xl, dbu), exact_units(cut->rect.yh - cut->rect.yl, dbu)};
     if (std::abs(cut->rect.xh + cut->rect.xl) > 1e-12 || std::abs(cut->rect.yh + cut->rect.yl) > 1e-12) {
       throw std::invalid_argument("off-center PG fixed via is unsupported");
     }
     int metal = 0;
     for (const auto* shape : {lower, upper}) {
       const auto& r        = shape->rect;
-      c.enc[2 * metal]     = std::max(units(cut->rect.xl - r.xl, dbu), units(r.xh - cut->rect.xh, dbu));
-      c.enc[2 * metal + 1] = std::max(units(cut->rect.yl - r.yl, dbu), units(r.yh - cut->rect.yh, dbu));
+      c.enc[2 * metal]     = std::max(exact_units(cut->rect.xl - r.xl, dbu), exact_units(r.xh - cut->rect.xh, dbu));
+      c.enc[2 * metal + 1] = std::max(exact_units(cut->rect.yl - r.yl, dbu), exact_units(r.yh - cut->rect.yh, dbu));
       ++metal;
     }
     consider(c);

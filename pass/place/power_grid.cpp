@@ -20,7 +20,6 @@ int64_t integer(double value) {
   return std::llround(value);
 }
 int64_t dimension(double um, int64_t dbu) { return integer(um * dbu); }
-bool    overlaps(const ph::Rect& a, const ph::Rect& b) { return a.xl < b.xh && b.xl < a.xh && a.yl < b.yh && b.yl < a.yh; }
 void    require_rect(const ph::Rect& r) {
   integer(r.xl);
   integer(r.yl);
@@ -221,8 +220,7 @@ Power_grid_plan plan_power_grid(const ph::Technology& tech, const ph::Floorplan&
       throw std::invalid_argument("native power grid requires fixed macro locations");
     }
     auto width = dimension(master->second.width, fp.dbu), height = dimension(master->second.height, fp.dbu);
-    if (loc.orientation == ph::Orientation::W || loc.orientation == ph::Orientation::E || loc.orientation == ph::Orientation::FW
-        || loc.orientation == ph::Orientation::FE) {
+    if (ph::swaps_axes(loc.orientation)) {
       std::swap(width, height);
     }
     ph::Rect rect{double(loc.x) - halo, double(loc.y) - halo, double(loc.x) + width + halo, double(loc.y) + height + halo};
@@ -272,7 +270,7 @@ Power_grid_plan plan_power_grid(const ph::Technology& tech, const ph::Floorplan&
                                                           : ph::Rect{plan.core.xl, double(center - width / 2), plan.core.xh, double(center + width / 2)};
         std::vector<std::pair<double, double>> spans{{vertical ? rect.yl : rect.xl, vertical ? rect.yh : rect.xh}};
         for (const auto& [obstacle, blocked_layers] : obstacles) {
-          if (!blocked_layers.contains(stripe.layer) || !overlaps(rect, obstacle)) {
+          if (!blocked_layers.contains(stripe.layer) || !rect.overlaps(obstacle)) {
             continue;
           }
           const auto                             a = vertical ? obstacle.yl : obstacle.xl, b = vertical ? obstacle.yh : obstacle.xh;
@@ -320,10 +318,11 @@ Power_grid_plan plan_power_grid(const ph::Technology& tech, const ph::Floorplan&
       continue;
     }
     const auto width = dimension(spec->width, fp.dbu), spacing = dimension(spec->spacing, fp.dbu);
-    const auto grid = tech.manufacturing_grid == 0 ? 1 : dimension(tech.manufacturing_grid, fp.dbu);
-    if (grid <= 0) {
+    const auto grid_dbu = ph::manufacturing_grid_dbu(tech, fp.dbu);
+    if (!grid_dbu) {
       throw std::invalid_argument("invalid PG manufacturing grid");
     }
+    const auto grid = *grid_dbu;
     const auto rail_count = plan.metal.size();
     for (size_t i = 0; i < rail_count; ++i) {
       const auto rail = plan.metal[i];
@@ -368,7 +367,7 @@ Power_grid_plan plan_power_grid(const ph::Technology& tech, const ph::Floorplan&
         const ph::Rect rect{double(x - width / 2), boundary.yl, double(x + width / 2), boundary.yh};
         bool           blocked = false;
         for (const auto& [obstacle, layers] : obstacles) {
-          if (layers.contains(pair[1]) && overlaps(rect, obstacle)) {
+          if (layers.contains(pair[1]) && rect.overlaps(obstacle)) {
             blocked = true;
             break;
           }
@@ -416,12 +415,12 @@ Power_grid_plan plan_power_grid(const ph::Technology& tech, const ph::Floorplan&
                             double(dimension(channel.region.xh, fp.dbu)),
                             double(dimension(channel.region.yh, fp.dbu))};
       require_rect(region);
-      const double grid = tech.manufacturing_grid * fp.dbu;
-      if (!std::isfinite(grid) || grid < 1 || grid != std::round(grid)) {
+      const auto grid = tech.manufacturing_grid > 0 ? ph::manufacturing_grid_dbu(tech, fp.dbu) : std::nullopt;
+      if (!grid) {
         throw std::invalid_argument("channel requires an integer manufacturing grid");
       }
       for (auto coordinate : {region.xl, region.yl, region.xh, region.yh}) {
-        if (std::fmod(coordinate, grid) != 0) {
+        if (std::fmod(coordinate, double(*grid)) != 0) {
           throw std::invalid_argument("off-grid channel boundary");
         }
       }
@@ -432,7 +431,7 @@ Power_grid_plan plan_power_grid(const ph::Technology& tech, const ph::Floorplan&
       const bool            vertical = layer.direction == "VERTICAL";
       std::vector<Pg_metal> next;
       for (const auto& metal : plan.metal) {
-        if (metal.layer != channel.layer || !overlaps(metal.rect, region)) {
+        if (metal.layer != channel.layer || !metal.rect.overlaps(region)) {
           next.push_back(metal);
           continue;
         }
