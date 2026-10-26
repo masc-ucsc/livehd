@@ -81,6 +81,9 @@ std::vector<std::pair<uint32_t, Reason>> physical_eligibility(const usyn::Statef
         return Reason::gated_clock;
       }
       const auto input = clock_input(region, owner);
+      if (input && input_names.empty()) {
+        return Reason::definition_clock;  // each instance may clock this port from a different root
+      }
       if (!input || *input >= input_names.size() || input_names[*input].empty()) {
         return Reason::derived_clock;
       }

@@ -56,16 +56,17 @@ reports its reason code (`reason.hpp`).
 
 | Source state | v1 decision | Reason code |
 |---|---|---|
-| Positive edge, one-bit clock driven directly by a region input in the selected domain | candidate | — |
+| Positive edge, one-bit clock driven directly by a design-top input in the selected domain | candidate | — |
 | Enable or synchronous reset (already folded into D) | candidate | — |
 | Asynchronous reset | retained | `async-reset` |
 | Power-on initial value | retained | `initial-value` |
 | Negative edge | retained | `negative-edge` |
 | Unknown edge | retained | `unknown-edge` |
 | ICG-gated clock (the clock root is a recognized clock gate) | retained | `gated-clock` |
-| Clock control is not a direct region input | retained | `derived-clock` |
+| Clock control is not a direct design input (logic, an inverter, a divider or a crossing) | retained | `derived-clock` |
 | Multibit clock / constant or absent clock | retained | `multibit-clock` / `constant-clock` |
 | Clock port is not `domino_clock` | retained | `clock-domain` |
+| Clock is a port of a preserved definition (each instance may clock it from a different root) | retained | `definition-clock` |
 | Memory or opaque scope, transparent latch, ICG latch | retained (barrier) | `memory` / `opaque` / `transparent-latch` / `icg` |
 | One-literal endpoint | retained unless `domino_identity=true` | `identity-endpoint` |
 | No support after cofactoring | always retained | `constant-endpoint` |

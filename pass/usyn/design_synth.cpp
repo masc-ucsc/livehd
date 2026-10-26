@@ -116,10 +116,18 @@ Identity_names identity_names(const partition::Region_body& rb, const synth::Reg
   return names;
 }
 
-// The region port bit behind each Lnet input, indexed like the frozen inputs:
-// `port` for a one-bit port, `port[lane]` otherwise, and "" for a black-box or
-// clock-gate output.
-std::vector<std::string> region_input_names(const partition::Region_body& rb, const synth::Region_blast& blast) {
+// The design input bit behind each Lnet input, indexed like the frozen inputs:
+// `port` for a one-bit design input, `port[lane]` otherwise, and "" for a
+// black-box or clock-gate output or a crossing driven by other logic. Like
+// identity_names, only the design-top region names inputs: a definition
+// region's ports are not design inputs (each instance may drive them from a
+// different clock root), so it gets no names at all.
+std::vector<std::string> region_input_names(const partition::Region_body& rb, const synth::Region_blast& blast,
+                                            std::string_view top) {
+  const auto source = rb.src ? rb.src->get_name() : std::string_view{};
+  if (source != top && source != partition::flatten_scratch_name(top)) {
+    return {};
+  }
   std::vector<std::string> names(blast.lnet.inputs().size());
   for (size_t i = 0; i < blast.all_pi_order.size() && i < names.size(); ++i) {
     const auto& origin = blast.all_pi_order[i];
@@ -127,9 +135,10 @@ std::vector<std::string> region_input_names(const partition::Region_body& rb, co
       continue;
     }
     const auto [port, lane] = blast.pi_order[origin.index];
-    if (port < rb.inputs.size()) {
-      const auto& p = rb.inputs[port];
-      names[i]      = p.bits > 1 ? std::format("{}[{}]", p.name, lane) : p.name;
+    if (port < rb.inputs.size() && gu::is_graph_input_pin(rb.inputs[port].src_driver)) {
+      const auto& p    = rb.inputs[port];
+      const auto  name = gu::pin_name_of(p.src_driver);
+      names[i]         = p.bits > 1 ? std::format("{}[{}]", name, lane) : std::string{name};
     }
   }
   return names;
@@ -626,7 +635,7 @@ Design_result synthesize_cmos_design(const std::shared_ptr<hhds::Graph>& top, co
     // a cold search decide alike; it charges the structural allowance.
     std::optional<Physical_emission> physical;
     if (options.physical) {
-      physical = options.physical(*selected.region, region_input_names(rb, blast), work);
+      physical = options.physical(*selected.region, region_input_names(rb, blast, top->get_name()), work);
       if (work.resource_exhausted) {
         fail(Status::search_exhausted, rb.module_name + ": physical selection process admission");
         return;

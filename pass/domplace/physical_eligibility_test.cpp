@@ -2,6 +2,7 @@
 #include "physical_eligibility.hpp"
 
 #include <functional>
+#include <span>
 
 #include "gtest/gtest.h"
 
@@ -58,9 +59,10 @@ struct Fixture {
     net.state.push_back({name, init, q, q, usyn::unknown_clock_domain, {}});
     region.state_bits.push_back(index);
   }
-  std::vector<Reason> reasons(std::string_view clock = "clk") const {
+  std::vector<Reason> reasons(std::string_view clock = "clk") const { return reasons_of(names, clock); }
+  std::vector<Reason> reasons_of(std::span<const std::string> input_names, std::string_view clock) const {
     std::vector<Reason> result;
-    const auto          rows = physical_eligibility(region, names, clock);
+    const auto          rows = physical_eligibility(region, input_names, clock);
     for (uint32_t i = 0; i < rows.size(); ++i) {
       EXPECT_EQ(rows[i].first, i);
       result.push_back(rows[i].second);
@@ -131,6 +133,27 @@ TEST(PhysicalEligibility, EveryRetentionCodeHasItsOwnRow) {
   EXPECT_EQ(swapped[15], Reason::candidate);
 }
 
+TEST(PhysicalEligibility, DefinitionRegionClocksAreNotTracedToTheDesignRoot) {
+  // A region other than the design top has no design input names: a register
+  // on its clock port is retained even when the port is spelled like the
+  // selected clock, since each instance may drive it from another root.
+  Fixture f;
+  f.add(Fixture::direct);
+  f.add(Fixture::other_port);
+  f.add(Fixture::inverted);
+  f.add(Fixture::direct, [](auto& s) { s.icg = 0; });
+  f.add(Fixture::direct, [](auto& s) { s.async_reset = s.reset.present = true; });
+  const std::vector<Reason> expected{Reason::definition_clock,
+                                     Reason::definition_clock,
+                                     Reason::derived_clock,
+                                     Reason::gated_clock,
+                                     Reason::async_reset};
+  EXPECT_EQ(f.reasons_of({}, "clk"), expected);
+  // A top-region input that is not a design input (a crossing) has no name.
+  f.names[0].clear();
+  EXPECT_EQ(f.reasons()[0], Reason::derived_clock);
+}
+
 TEST(PhysicalEligibility, ScopeBarriersAndMalformedCorrespondence) {
   Fixture f;
   f.add(Fixture::direct);
@@ -157,7 +180,8 @@ TEST(ReasonCodes, SpellingsAreStableAndOnlyDominoCodesConvert) {
   EXPECT_EQ(reason_code(Reason::identity_endpoint), "identity-endpoint");
   EXPECT_EQ(reason_code(Reason::selection_budget), "selection-budget");
   EXPECT_EQ(reason_code(Reason::domino_area), "domino-area");
-  for (uint8_t r = 0; r <= static_cast<uint8_t>(Reason::selection_budget); ++r) {
+  EXPECT_EQ(reason_code(Reason::definition_clock), "definition-clock");
+  for (uint8_t r = 0; r <= static_cast<uint8_t>(Reason::definition_clock); ++r) {
     const auto reason = static_cast<Reason>(r);
     EXPECT_NE(reason_code(reason), "invalid");
     EXPECT_EQ(converts(reason), reason == Reason::domino_area || reason == Reason::domino_all);

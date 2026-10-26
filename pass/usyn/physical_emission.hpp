@@ -55,9 +55,10 @@ struct Physical_emission {
   std::vector<Physical_cell_interface> cells;   // unique by name
 };
 
-// Runs after freeze on every region, a logical cache hit included. Region input
-// names are indexed like frozen.inputs ("" for an input that is not a region
-// port bit). nullopt refuses the design.
+// Runs after freeze on every region, a logical cache hit included. Input names
+// are the design input bits behind frozen.inputs, indexed like them ("" for an
+// input that is not a design input bit); a region other than the design top
+// gets none (an empty span). nullopt refuses the design.
 using Physical_selector
     = std::function<std::optional<Physical_emission>(const Stateful_region&, std::span<const std::string> input_names, Budget&)>;
 

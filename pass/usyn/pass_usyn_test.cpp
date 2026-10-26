@@ -6,6 +6,8 @@
 #include <format>
 #include <fstream>
 #include <iterator>
+#include <map>
+#include <tuple>
 
 #include "artifact.hpp"
 #include "graph_library_singleton.hpp"
@@ -515,6 +517,126 @@ TEST_F(PassSynth, DominoProfileEmitsCellInstancesAndPublishesTheBundle) {
   run(var);
   ASSERT_FALSE(livehd::diag::sink().has_halting_errors());
   EXPECT_FALSE(fs::exists(root + "/qor.json.domino"));
+}
+
+// leaf(clk, d, e) -> q holds one register, held <= d & e. top keeps its own
+// register r <= a & b on clk and instantiates leaf twice, clocking one
+// instance from an inverter of clk and the other from a clk/2 divider.
+std::shared_ptr<hhds::Graph> derived_clock_children(hhds::GraphLibrary& library) {
+  const auto bit = [](hhds::Node_class node) {
+    auto pin = node.create_driver_pin(0);
+    gu::set_ubits(pin, 1);
+    return pin;
+  };
+  auto leaf_io = library.create_io("leaf");
+  leaf_io->add_input("clk", 1);
+  leaf_io->add_input("d", 2);
+  leaf_io->add_input("e", 3);
+  leaf_io->add_output("q", 4);
+  for (auto name : {"clk", "d", "e", "q"}) {
+    leaf_io->set_bits(name, 1);
+    leaf_io->set_unsign(name, true);
+  }
+  auto leaf = leaf_io->create_graph();
+  auto both = gu::create_typed_node(*leaf, Ntype_op::And);
+  auto held = gu::create_typed_node(*leaf, Ntype_op::Flop);
+  for (auto name : {"d", "e"}) {
+    leaf->get_input_pin(name).connect_sink(gu::setup_sink_pid(both, 0));
+  }
+  bit(both).connect_sink(gu::setup_sink_by_name(held, "din"));
+  leaf->get_input_pin("clk").connect_sink(gu::setup_sink_by_name(held, "clock_pin"));
+  auto held_q = bit(held);
+  gu::set_pin_name(held_q, "held");
+  held_q.connect_sink(leaf->get_output_pin("q"));
+
+  auto io = library.create_io("top");
+  io->add_input("a", 1);
+  io->add_input("b", 2);
+  io->add_input("clk", 3);
+  io->add_output("y", 4);
+  io->add_output("y0", 5);
+  io->add_output("y1", 6);
+  for (auto name : {"a", "b", "clk", "y", "y0", "y1"}) {
+    io->set_bits(name, 1);
+    io->set_unsign(name, true);
+  }
+  auto graph = io->create_graph();
+  auto conj  = gu::create_typed_node(*graph, Ntype_op::And);
+  for (auto name : {"a", "b"}) {
+    graph->get_input_pin(name).connect_sink(gu::setup_sink_pid(conj, 0));
+  }
+  auto r = gu::create_typed_node(*graph, Ntype_op::Flop);
+  bit(conj).connect_sink(gu::setup_sink_by_name(r, "din"));
+  graph->get_input_pin("clk").connect_sink(gu::setup_sink_by_name(r, "clock_pin"));
+  auto r_q = bit(r);
+  gu::set_pin_name(r_q, "r");
+  r_q.connect_sink(graph->get_output_pin("y"));
+  auto inverter = gu::create_typed_node(*graph, Ntype_op::Not);
+  graph->get_input_pin("clk").connect_sink(gu::setup_sink_by_name(inverter, "a"));
+  auto divider = gu::create_typed_node(*graph, Ntype_op::Flop);
+  graph->get_input_pin("clk").connect_sink(gu::setup_sink_by_name(divider, "clock_pin"));
+  auto div_q = bit(divider);
+  gu::set_pin_name(div_q, "div");
+  auto toggle = gu::create_typed_node(*graph, Ntype_op::Not);
+  div_q.connect_sink(gu::setup_sink_by_name(toggle, "a"));
+  bit(toggle).connect_sink(gu::setup_sink_by_name(divider, "din"));
+  for (const auto& [clock, output] : {
+           std::pair{bit(inverter), "y0"},
+           std::pair{        div_q, "y1"}
+  }) {
+    auto sub = gu::create_typed_node(*graph, Ntype_op::Sub);
+    sub.set_subnode(leaf_io);
+    clock.connect_sink(sub.create_sink_pin(1));
+    graph->get_input_pin("a").connect_sink(sub.create_sink_pin(2));
+    graph->get_input_pin("b").connect_sink(sub.create_sink_pin(3));
+    auto q = sub.create_driver_pin(4);
+    gu::set_ubits(q, 1);
+    q.connect_sink(graph->get_output_pin(output));
+  }
+  return graph;
+}
+
+TEST_F(PassSynth, DominoProfileRetainsRegistersClockedThroughADefinitionPort) {
+  // leaf's port is named like the selected clock, but its instances are
+  // clocked by an inverter and a divider: the shared definition is never
+  // converted, while top's own register on the design clock is.
+  hhds::GraphLibrary input;
+  Eprp_var           var;
+  var.graphs.push_back(derived_clock_children(input));
+  var.dict["qor"] = root + "/qor.json";
+  domino_profile(var, root);
+  const auto                output = root + "/hier-net";
+  Registry::Scoped_instance scope(output);
+  var.dict["out"]           = output;
+  var.dict["flatten"]       = "false";
+  var.dict["domino_select"] = "all";
+  run(var);
+  const auto& diagnostics = livehd::diag::sink().records();
+  ASSERT_FALSE(livehd::diag::sink().has_halting_errors()) << (diagnostics.empty() ? "" : diagnostics.back().message);
+  const auto report = read(root + "/qor.json.usyn.json");
+  ASSERT_FALSE(report.HasParseError());
+  // state -> (definition region?, decision, reason); top's regions are named after it.
+  std::map<std::string, std::tuple<bool, std::string, std::string>> decisions;
+  for (const auto& region : report["physical"]["regions"].GetArray()) {
+    for (const auto& endpoint : region["endpoints"].GetArray()) {
+      decisions[endpoint["name"].GetString()] = {std::string_view{region["module"].GetString()} == "leaf",
+                                                 endpoint["decision"].GetString(),
+                                                 endpoint["reason"].GetString()};
+    }
+  }
+  ASSERT_EQ(decisions.size(), 3U);
+  EXPECT_EQ(decisions["held"], std::make_tuple(true, std::string("retained_cmos"), std::string("definition-clock")));
+  EXPECT_EQ(decisions["r"], std::make_tuple(false, std::string("domino"), std::string("domino-all")));
+  EXPECT_EQ(std::get<1>(decisions["div"]), "retained_cmos");
+  const auto leaf = Registry::instance(output).find_io("leaf");
+  ASSERT_TRUE(leaf && leaf->get_graph());
+  uint32_t flops = 0, cells = 0;
+  for (auto node : leaf->get_graph()->body().nodes()) {
+    flops += gu::type_op_of(node) == Ntype_op::Flop;
+    cells += gu::type_op_of(node) == Ntype_op::Sub;
+  }
+  EXPECT_EQ(flops, 1U);
+  EXPECT_EQ(cells, 0U);
 }
 
 TEST_F(PassSynth, DominoProfileRequirementsAreExplicitUsageErrors) {
