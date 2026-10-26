@@ -962,6 +962,9 @@ std::optional<int64_t> manufacturing_grid_dbu(const Technology& tech, int64_t db
   const double grid = tech.manufacturing_grid * dbu;
   return grid < 1 ? std::nullopt : rounded_dbu(grid, 1e-9);
 }
+std::optional<int64_t> explicit_manufacturing_grid_dbu(const Technology& tech, int64_t dbu) {
+  return tech.manufacturing_grid > 0 ? manufacturing_grid_dbu(tech, dbu) : std::nullopt;
+}
 Technology read_lef(const std::vector<std::string>& paths) {
   std::scoped_lock lock(reader_mutex);
   LefContext       c;

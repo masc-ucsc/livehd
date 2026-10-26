@@ -23,7 +23,7 @@ std::vector<ph::Terminal> handoff_pins(const ph::Technology& tech, const ph::Flo
       throw std::invalid_argument("IO die exceeds supported DBU coordinates");
     }
   }
-  const auto grid_dbu = tech.manufacturing_grid > 0 ? ph::manufacturing_grid_dbu(tech, fp.dbu) : std::nullopt;
+  const auto grid_dbu = ph::explicit_manufacturing_grid_dbu(tech, fp.dbu);
   if (!grid_dbu) {
     throw std::invalid_argument("IO handoff requires an integer manufacturing grid");
   }

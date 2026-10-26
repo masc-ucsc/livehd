@@ -38,8 +38,7 @@ Signal_route_trial Signal_router::propose_maze(const ph::Net& net, const Signal_
   std::vector<std::string> layers;
   std::vector<double>      widths, half;
   std::vector<bool>        horizontal;
-  // Maze landings require an explicit LEF manufacturing grid.
-  const auto grid_dbu = tech_.manufacturing_grid > 0 ? ph::manufacturing_grid_dbu(tech_, frame_.dbu) : std::nullopt;
+  const auto grid_dbu = ph::explicit_manufacturing_grid_dbu(tech_, frame_.dbu);
   if (!grid_dbu) {
     return stage.fail("unsupported manufacturing grid");
   }

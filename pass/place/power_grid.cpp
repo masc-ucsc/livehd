@@ -404,7 +404,7 @@ Power_grid_plan plan_power_grid(const ph::Technology& tech, const ph::Floorplan&
                             double(dimension(channel.region.xh, fp.dbu)),
                             double(dimension(channel.region.yh, fp.dbu))};
       require_rect(region);
-      const auto grid = tech.manufacturing_grid > 0 ? ph::manufacturing_grid_dbu(tech, fp.dbu) : std::nullopt;
+      const auto grid = ph::explicit_manufacturing_grid_dbu(tech, fp.dbu);
       if (!grid) {
         throw std::invalid_argument("channel requires an integer manufacturing grid");
       }

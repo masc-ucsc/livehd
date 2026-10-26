@@ -329,8 +329,7 @@ Signal_route_trial Signal_router::propose_aligned_layer(const ph::Net& net, cons
       || tech_.layers.at(target).direction != (horizontal ? "HORIZONTAL" : "VERTICAL")) {
     return stage.fail("lift must preserve trunk direction");
   }
-  // Lifting requires an explicit LEF manufacturing grid.
-  const auto grid_dbu = tech_.manufacturing_grid > 0 ? ph::manufacturing_grid_dbu(tech_, frame_.dbu) : std::nullopt;
+  const auto grid_dbu = ph::explicit_manufacturing_grid_dbu(tech_, frame_.dbu);
   if (!grid_dbu) {
     return stage.fail("unsupported manufacturing grid");
   }

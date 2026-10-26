@@ -185,6 +185,8 @@ struct Technology {
 // Manufacturing grid in DBU: 1 when LEF leaves it unspecified, empty when it
 // is not a positive integral DBU within the signed 32-bit range.
 std::optional<int64_t> manufacturing_grid_dbu(const Technology&, int64_t dbu);
+// Like manufacturing_grid_dbu, but empty when LEF leaves the grid unspecified.
+std::optional<int64_t> explicit_manufacturing_grid_dbu(const Technology&, int64_t dbu);
 struct Row {
   std::string name, site;
   int64_t     x = 0, y = 0, count = 0, step = 0;
