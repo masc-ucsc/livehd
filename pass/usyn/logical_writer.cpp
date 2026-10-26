@@ -6,6 +6,7 @@
 #include <bit>
 #include <format>
 #include <set>
+#include <unordered_map>
 
 #include "hhds/attrs/name.hpp"
 #include "hhds/attrs/srcid.hpp"
@@ -17,6 +18,44 @@ namespace livehd::usyn {
 namespace gu = graph_util;
 
 namespace {
+// `root` with source `source` fixed at 1, rebuilt in `graph` (structural
+// hashing shares what does not depend on it). nullopt on work exhaustion.
+std::optional<Xsignal> cofactor_at_one(Xag& graph, Xsignal root, Id source, Budget& work) {
+  std::unordered_map<Id, Xsignal> mapped{
+      {     0, graph.constant(false)},
+      {source,  graph.constant(true)}
+  };
+  std::vector<std::pair<Id, bool>> stack{
+      {root.id, false}
+  };
+  while (!stack.empty()) {
+    const auto [id, expanded] = stack.back();
+    stack.pop_back();
+    if (mapped.contains(id)) {
+      continue;
+    }
+    if (!work.spend()) {
+      return std::nullopt;
+    }
+    const auto node = graph.node(id);  // a copy: building below may grow the node table
+    if (node.kind != Xag::Kind::and_gate && node.kind != Xag::Kind::xor_gate) {
+      mapped.emplace(id, Xsignal{id, false});
+      continue;
+    }
+    if (!expanded) {
+      stack.push_back({id, true});
+      stack.push_back({node.inputs[0].id, false});
+      stack.push_back({node.inputs[1].id, false});
+      continue;
+    }
+    const auto in = [&](Xsignal s) { return s.inverted ? ~mapped.at(s.id) : mapped.at(s.id); };
+    const auto a = in(node.inputs[0]), b = in(node.inputs[1]);
+    mapped.emplace(id, node.kind == Xag::Kind::and_gate ? graph.land(a, b) : graph.lxor(a, b));
+  }
+  const auto value = mapped.at(root.id);
+  return root.inverted ? ~value : value;
+}
+
 Logical_module_result write_module(const synth::Source_state_table& source, std::span<const uint32_t> state_bits,
                                    const Endpoint_netlist* frozen, const Xag_region* legacy, std::string_view name, Budget& work,
                                    uint32_t max_nodes, const Cmos_cleanup* cleanup, std::span<const Literal_rewrite> literal = {},
@@ -85,6 +124,15 @@ Logical_module_result write_module(const synth::Source_state_table& source, std:
         return invalid("physical emission state order does not match the frozen state");
       }
       if (state.decision != Physical_decision::domino) {
+        // A retained folded register keeps its gated clock, which already
+        // holds it: drop the redundant enable the fold put into D.
+        if (state.gate_enable && *state.gate_enable < expanded.inputs.size()) {
+          const auto d = cofactor_at_one(expanded.graph, expanded.state[i].d, expanded.inputs[*state.gate_enable].id, work);
+          if (!d) {
+            return exhausted();
+          }
+          expanded.state[i].d = *d;
+        }
         continue;
       }
       if (state.cell >= physical->cells.size() || state.rails.empty()

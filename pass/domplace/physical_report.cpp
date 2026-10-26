@@ -132,6 +132,24 @@ std::string physical_report(const usyn::Logical_design& design, const Physical_r
   }
   w.EndObject();
   w.EndObject();
+  // U21: registers folded onto their root clock by recognized gate kind, gated
+  // registers left alone by reason (the eligibility rows repeat it), and the
+  // gate instances/enable latches dropped once nothing read them.
+  w.Key("clock_gates");
+  w.StartObject();
+  for (const auto& [key, counts] : {
+           std::pair{ "folded",  &design.gated_folded},
+           std::pair{"refused", &design.gated_refused}
+  }) {
+    w.Key(key);
+    w.StartObject();
+    for (const auto& [name, count] : *counts) {
+      number(w, name.c_str(), count);
+    }
+    w.EndObject();
+  }
+  number(w, "dropped_gates", design.gated_dropped);
+  w.EndObject();
 
   w.Key("regions");
   w.StartArray();
@@ -150,6 +168,18 @@ std::string physical_report(const usyn::Logical_design& design, const Physical_r
       text(w, "name", region.selected.frozen->state.at(s.state).name);
       text(w, "decision", domino ? "domino" : "retained_cmos");
       text(w, "reason", s.reason);
+      if (s.clock_root || s.gated_clock) {
+        // A folded clock gate: the stage's CLK input and the CMOS clock input.
+        w.Key("clock_gate");
+        w.StartObject();
+        if (s.clock_root) {
+          number(w, "root_input", *s.clock_root);
+        }
+        if (s.gated_clock) {
+          number(w, "gated_input", *s.gated_clock);
+        }
+        w.EndObject();
+      }
       w.Key("master");
       if (domino) {
         json::string(w, region.physical->cells.at(s.cell).name);

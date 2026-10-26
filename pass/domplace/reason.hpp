@@ -37,7 +37,7 @@ enum class Reason : uint8_t {
   polarity_search,    // the positive-output search stopped at its own limits: no illegality proof
   // U21 clock gates (synth::fold_gated_clocks): a folded register converts on
   // its root clock with the gate's enable as a data input; these retain it.
-  enable_stack,        // the gate's hold (Q under its enable) did not fit the domino formula's stack/input caps
+  enable_stack,        // the hold (Q under one enable rail) does not fit the PDN's stack/input caps
   gated_chain,         // a gate on an already gated clock
   gated_unsafe,        // an AND/OR clock without a phase-safe enable storage (glitch safety not provable)
   gated_mixed,         // the gate's enable storage is sampled by another clock

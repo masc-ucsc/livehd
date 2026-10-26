@@ -52,6 +52,10 @@ struct Physical_state {
   // instead of the clock control; a retained register's clock_pin reads frozen
   // input gated_clock (the original gated clock) when it is set.
   std::optional<uint32_t>     clock_root, gated_clock;
+  // The folded gate's enable (a frozen input). A retained register's D drops
+  // the redundant enable the fold added (D with it at 1), as its gated clock
+  // already holds it.
+  std::optional<uint32_t>     gate_enable;
 };
 
 struct Physical_emission {

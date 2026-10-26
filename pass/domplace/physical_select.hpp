@@ -45,11 +45,11 @@ struct Select_context {
 // candidate retains CMOS with `selection-budget`. Every converted state names a variant-0 master interface. nullopt refuses the
 // region: no frozen netlist, a two-phase netlist, a phase-one Domino cell, or an inconsistent frozen cell.
 // A register on a folded clock gate (`gating`, U21) is a plain enable register
-// on its root clock (next = en ? f : Q): it converts only when the gate's
-// enable (one region input) and Q are direct formula inputs and the function
-// holds Q while the enable is off, i.e. the enable and the hold fit the stack
-// and input caps; else it retains CMOS with `enable-stack`. Its stage's CLK
-// is the root clock.
+// on its root clock (next = en ? f : Q). The selection cut keeps the PDN within
+// the stack and input caps, moving excess f upstream as for any register; it
+// converts only when the hold stays in the PDN (Q a direct input under one
+// enable rail that makes the function Q), else it retains CMOS with
+// `enable-stack`. Its stage's CLK is the root clock.
 std::optional<usyn::Physical_emission> select_physical(const usyn::Stateful_region& region,
                                                        std::span<const std::string> input_names, const Select_options& options,
                                                        const Select_context& context, usyn::Budget& work,

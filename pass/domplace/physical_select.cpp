@@ -113,117 +113,29 @@ Physical_function physical_function(const usyn::Frozen_cell& cell, Budget& work)
   return result;
 }
 
-// Whether the gate's enable reaches the domino as one data input with the hold
-// inside the PDN: the enable `en` and Q are direct inputs and the function is
-// Q itself under the disabled enable (next = en ? f : Q). The stack and input
-// caps can push the enable or the hold into upstream CMOS; then it is not.
-bool holds_under_enable(const Physical_function& f, Xsignal q, Xsignal en) {
-  const auto find = [&](Xsignal s) {
-    const auto it = std::find_if(f.inputs.begin(), f.inputs.end(), [&](Xsignal x) { return x.id == s.id; });
-    return it == f.inputs.end() ? std::optional<std::pair<uint32_t, bool>>{}
-                                : std::pair{static_cast<uint32_t>(it - f.inputs.begin()), it->inverted != s.inverted};
-  };
-  const auto qv = find(q), ev = find(en);
-  if (!qv || !ev || qv->first == ev->first) {
+// Whether the hold stays inside the PDN under one enable rail: Q is a direct
+// input and some other input (the gate's enable, or its conjunction with the
+// register's own enable) makes the function Q itself (next = en ? f : Q).
+bool holds_under_enable(const Physical_function& f, Xsignal q) {
+  const auto vq = std::find_if(f.inputs.begin(), f.inputs.end(), [&](Xsignal s) { return s.id == q.id; });
+  if (vq == f.inputs.end()) {
     return false;
   }
-  const auto m = static_cast<uint32_t>(f.inputs.size());
-  for (uint32_t y = 0; y < (1U << m); ++y) {
-    const bool enabled = (((y >> ev->first) & 1U) != 0) != ev->second;
-    if (!enabled && f.table.get(y) != ((((y >> qv->first) & 1U) != 0) != qv->second)) {
-      return false;
-    }
-  }
-  return true;
-}
-
-// U21's stack rule on the register's own function: next = en ? f : Q puts the
-// enable in series with f, so a data function whose best formula already
-// needs the whole stack cannot take the enable. f = D|en=1 over D's native
-// cone leaves (region inputs and registers); true when f fits the stack cap
-// but not one device less. nullopt when the cone is too wide to judge here
-// (or f does not fit at all): the caps restructure it regardless of the enable.
-std::optional<bool> enable_exceeds_stack(const usyn::Endpoint_netlist& net, uint32_t i, Xsignal en,
-                                         const usyn::Gate_constraints& gates, const usyn::Function_search_limits& limits,
-                                         Budget& work) {
-  constexpr uint32_t           kMaxLeaves = 12, kMaxCone = 4096;
-  std::vector<usyn::Id>        cone, leaves;
-  std::unordered_set<usyn::Id> seen;
-  std::vector<usyn::Id>        stack{net.state[i].reference_d.id};
-  while (!stack.empty()) {
-    const auto id = stack.back();
-    stack.pop_back();
-    if (!seen.insert(id).second || !work.spend()) {
-      continue;
-    }
-    const auto& node = net.native.node(id);
-    if (node.kind == Xag::Kind::and_gate || node.kind == Xag::Kind::xor_gate) {
-      cone.push_back(id);
-      stack.push_back(node.inputs[0].id);
-      stack.push_back(node.inputs[1].id);
-    } else if (node.kind == Xag::Kind::source) {
-      leaves.push_back(id);
-    }
-    if (cone.size() > kMaxCone || leaves.size() > kMaxLeaves) {
-      return std::nullopt;
-    }
-  }
-  const auto en_leaf = std::find(leaves.begin(), leaves.end(), en.id);
-  if (en_leaf == leaves.end() || work.exhausted) {
-    return std::nullopt;
-  }
-  std::swap(*en_leaf, leaves.back());  // the enable is the top variable
-  const auto n     = static_cast<uint32_t>(leaves.size());
-  const auto words = std::max<size_t>(1, (size_t{1} << n) / 64);
-  if (!work.spend(cone.size() * words)) {
-    return std::nullopt;
-  }
-  // Bit-parallel simulation over every leaf assignment (XAG ids are topological).
-  std::unordered_map<usyn::Id, std::vector<uint64_t>> value;
-  value.emplace(0, std::vector<uint64_t>(words, 0));
-  for (uint32_t v = 0; v < n; ++v) {
-    std::vector<uint64_t> w(words);
-    for (uint32_t y = 0; y < (1U << n); ++y) {
-      if ((y >> v) & 1U) {
-        w[y / 64] |= uint64_t{1} << (y % 64);
+  const auto m        = static_cast<uint32_t>(f.inputs.size());
+  const auto qi       = static_cast<uint32_t>(vq - f.inputs.begin());
+  const bool inverted = vq->inverted != q.inverted;
+  for (uint32_t v = 0; v < m; ++v) {
+    for (uint32_t b = 0; b < 2 && v != qi; ++b) {
+      bool hold = true;
+      for (uint32_t y = 0; y < (1U << m) && hold; ++y) {
+        hold = ((y >> v) & 1U) != b || f.table.get(y) == ((((y >> qi) & 1U) != 0) != inverted);
+      }
+      if (hold) {
+        return true;
       }
     }
-    value[leaves[v]] = std::move(w);
   }
-  std::sort(cone.begin(), cone.end());
-  const auto read = [&](Xsignal s, size_t k) {
-    const auto x = value.at(s.id)[k];
-    return s.inverted ? ~x : x;
-  };
-  for (const auto id : cone) {
-    const auto&           node = net.native.node(id);
-    std::vector<uint64_t> w(words);
-    for (size_t k = 0; k < words; ++k) {
-      const auto a = read(node.inputs[0], k), b = read(node.inputs[1], k);
-      w[k] = node.kind == Xag::Kind::and_gate ? a & b : a ^ b;
-    }
-    value[id] = std::move(w);
-  }
-  // f = D with the enable (variable n-1) set: the upper half of the table.
-  usyn::Truth_table f(n - 1);
-  for (uint32_t y = 0; y < (1U << (n - 1)); ++y) {
-    const auto z = y | (1U << (n - 1));
-    f.set(y, ((read(net.state[i].reference_d, z / 64) >> (z % 64)) & 1U) != 0);
-  }
-  auto positive   = limits;
-  positive.output = usyn::Output_polarity::positive;
-  auto tighter    = gates;
-  if (tighter.stack < 2) {
-    return std::nullopt;
-  }
-  --tighter.stack;
-  if (usyn::synthesize_gate(f, tighter, work, positive).formula) {
-    return false;
-  }
-  if (work.exhausted) {
-    return std::nullopt;
-  }
-  return usyn::synthesize_gate(f, gates, work, positive).formula ? std::optional<bool>{true} : std::nullopt;
+  return false;
 }
 
 // Which root reaches each native node: one state's D (its index), kShared when
@@ -273,7 +185,8 @@ std::optional<std::vector<uint32_t>> ownership(const usyn::Endpoint_netlist& net
 // Copied into a small XAG whose leaves are the cut, kept and shared nodes.
 usyn::Native_estimate exclusive_cone(const usyn::Endpoint_netlist& net, const usyn::Frozen_cell& cell,
                                      std::span<const Xsignal> producers, uint32_t i, const std::vector<uint32_t>& owner,
-                                     const usyn::Native_cost_model& model, Budget& work) {
+                                     const usyn::Native_cost_model& model, Budget& work,
+                                     std::optional<usyn::Id> enable_one = std::nullopt) {
   usyn::Native_estimate        result;
   std::unordered_set<usyn::Id> cut, kept, seen;
   std::vector<usyn::Id>        stack, nodes;
@@ -327,6 +240,9 @@ usyn::Native_estimate exclusive_cone(const usyn::Endpoint_netlist& net, const us
   std::unordered_map<usyn::Id, Xsignal> mapped{
       {0, small.constant(false)}
   };
+  if (enable_one) {
+    mapped.emplace(*enable_one, small.constant(true));  // a retained folded register drops the redundant enable
+  }
   const auto signal = [&](Xsignal s) {
     auto it = mapped.find(s.id);
     if (it == mapped.end()) {
@@ -379,12 +295,14 @@ std::optional<usyn::Physical_emission> select_physical(const usyn::Stateful_regi
     auto&      state       = emission.states.emplace_back();
     state.state            = i;
     state.gated_clock      = row.gated_clock;
+    state.gate_enable      = row.gate_enable;
     const auto retain      = [&](Reason reason) { state.reason = reason_code(reason); };
     // Exhaustion is sticky: this and every later candidate keeps CMOS.
     const auto out_of_work = [&] {
       state             = {};
       state.state       = i;
       state.gated_clock = row.gated_clock;
+      state.gate_enable = row.gate_enable;
       state.eligible    = true;
       exhausted      = true;
       retain(Reason::selection_budget);
@@ -429,21 +347,13 @@ std::optional<usyn::Physical_emission> select_physical(const usyn::Stateful_regi
       retain(Reason::constant_endpoint);
       continue;
     }
-    if (row.clock_root) {
-      // The gate's enable must reach the PDN as one rail beside Q, and the
-      // register's own function must leave the stack room for it.
-      const bool direct = row.gate_enable && *row.gate_enable < net.inputs.size()
-                          && holds_under_enable(function, net.state[i].q, net.inputs[*row.gate_enable]);
-      const auto exceeds = direct ? enable_exceeds_stack(net, i, net.inputs[*row.gate_enable], net.gates, options.functions, budget)
-                                  : std::nullopt;
-      if (budget.exhausted) {
-        out_of_work();
-        continue;
-      }
-      if (!direct || exceeds.value_or(false)) {
-        retain(Reason::enable_stack);
-        continue;
-      }
+    // A folded gate: the hold must stay in the PDN under one enable rail.
+    // The selection cut keeps en * f + !en * Q within the stack and input
+    // caps (excess f moves upstream, as for any register); when not even the
+    // hold fits, the register stays CMOS.
+    if (row.clock_root && !holds_under_enable(function, net.state[i].q)) {
+      retain(Reason::enable_stack);
+      continue;
     }
     if (!function.rewritten && !cell.formula.output_inverted) {
       state.formula = cell.formula;
@@ -482,8 +392,12 @@ std::optional<usyn::Physical_emission> select_physical(const usyn::Stateful_regi
       if (!owner) {
         owner = ownership(net, budget);
       }
-      const auto cone
-          = owner ? exclusive_cone(net, cell, function.inputs, i, *owner, *context.cmos, budget) : usyn::Native_estimate{};
+      // A folded register's CMOS keeps its gated clock, not the redundant enable.
+      const auto enable_one = row.clock_root && row.gate_enable && *row.gate_enable < net.inputs.size()
+                                  ? std::optional<usyn::Id>{net.inputs[*row.gate_enable].id}
+                                  : std::nullopt;
+      const auto cone       = owner ? exclusive_cone(net, cell, function.inputs, i, *owner, *context.cmos, budget, enable_one)
+                                    : usyn::Native_estimate{};
       if (!owner || cone.status == Status::search_exhausted || budget.exhausted) {
         out_of_work();
         continue;

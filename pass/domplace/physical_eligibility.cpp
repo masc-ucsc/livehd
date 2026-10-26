@@ -53,6 +53,9 @@ std::vector<Eligibility> physical_eligibility(const usyn::Stateful_region& regio
     if (folded && gating[owner].gclk_input >= 0) {
       row.gated_clock = static_cast<uint32_t>(gating[owner].gclk_input);
     }
+    if (folded && gating[owner].enable_input >= 0) {
+      row.gate_enable = static_cast<uint32_t>(gating[owner].enable_input);
+    }
     row.reason = [&] {
       // Barriers first: their clock fields are not register semantics.
       if (source.scope == State_scope::memory || s.role == State_role::memory) {
@@ -98,9 +101,6 @@ std::vector<Eligibility> physical_eligibility(const usyn::Stateful_region& regio
           return Reason::clock_domain;
         }
         row.clock_root = static_cast<uint32_t>(root);
-        if (gate.enable_input >= 0) {
-          row.gate_enable = static_cast<uint32_t>(gate.enable_input);
-        }
         return Reason::candidate;
       }
       if (s.icg >= 0) {
