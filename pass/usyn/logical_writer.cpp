@@ -18,12 +18,12 @@ namespace livehd::usyn {
 namespace gu = graph_util;
 
 namespace {
-// `root` with source `source` fixed at 1, rebuilt in `graph` (structural
+// `root` with node `source` fixed at `value`, rebuilt in `graph` (structural
 // hashing shares what does not depend on it). nullopt on work exhaustion.
-std::optional<Xsignal> cofactor_at_one(Xag& graph, Xsignal root, Id source, Budget& work) {
+std::optional<Xsignal> cofactor(Xag& graph, Xsignal root, Id source, bool value, Budget& work) {
   std::unordered_map<Id, Xsignal> mapped{
       {     0, graph.constant(false)},
-      {source,  graph.constant(true)}
+      {source, graph.constant(value)}
   };
   std::vector<std::pair<Id, bool>> stack{
       {root.id, false}
@@ -52,8 +52,8 @@ std::optional<Xsignal> cofactor_at_one(Xag& graph, Xsignal root, Id source, Budg
     const auto a = in(node.inputs[0]), b = in(node.inputs[1]);
     mapped.emplace(id, node.kind == Xag::Kind::and_gate ? graph.land(a, b) : graph.lxor(a, b));
   }
-  const auto value = mapped.at(root.id);
-  return root.inverted ? ~value : value;
+  const auto result = mapped.at(root.id);
+  return root.inverted ? ~result : result;
 }
 
 Logical_module_result write_module(const synth::Source_state_table& source, std::span<const uint32_t> state_bits,
@@ -127,7 +127,7 @@ Logical_module_result write_module(const synth::Source_state_table& source, std:
         // A retained folded register keeps its gated clock, which already
         // holds it: drop the redundant enable the fold put into D.
         if (state.gate_enable && *state.gate_enable < expanded.inputs.size()) {
-          const auto d = cofactor_at_one(expanded.graph, expanded.state[i].d, expanded.inputs[*state.gate_enable].id, work);
+          const auto d = cofactor(expanded.graph, expanded.state[i].d, expanded.inputs[*state.gate_enable].id, true, work);
           if (!d) {
             return exhausted();
           }
@@ -141,11 +141,37 @@ Logical_module_result write_module(const synth::Source_state_table& source, std:
       }
       converted[i]  = &state;
       rail_begin[i] = expanded.outputs.size();
+      // U22: no rail reads the reset, not even through upstream logic the
+      // selection cut shares with it: each producer is rebuilt with the reset
+      // net held inactive (the storage's RST overrides the stage meanwhile).
+      std::optional<Xsignal> reset_net;
+      if (state.reset) {
+        const auto& reset = *state.reset;
+        if (reset.source == Physical_reset::Source::input && reset.index < expanded.inputs.size()) {
+          reset_net = expanded.inputs[reset.index];
+        } else if (reset.source == Physical_reset::Source::state && reset.index < expanded.state.size()) {
+          reset_net = expanded.state[reset.index].q;
+        } else if (reset.source == Physical_reset::Source::control && reset.index < expanded.outputs.size()) {
+          reset_net = expanded.outputs[reset.index].signal;
+        } else {
+          return invalid("a converted physical state's reset net is outside the frozen netlist");
+        }
+      }
       for (size_t k = 0; k < state.rails.size(); ++k) {
-        if (state.rails[k].producer.id >= expanded.graph.size()) {
+        auto producer = state.rails[k].producer;
+        if (producer.id >= expanded.graph.size()) {
           return invalid("physical rail producer outside the frozen netlist");
         }
-        expanded.outputs.push_back({std::format("__domino_{}_r{}", i, k), state.rails[k].producer});
+        if (reset_net && reset_net->id != 0) {
+          // The net's inactive level, as the value of its node.
+          const bool inactive = state.reset->active_low != reset_net->inverted;
+          const auto rebuilt  = cofactor(expanded.graph, producer, reset_net->id, inactive, work);
+          if (!rebuilt) {
+            return exhausted();
+          }
+          producer = *rebuilt;
+        }
+        expanded.outputs.push_back({std::format("__domino_{}_r{}", i, k), producer});
       }
       expanded.state[i].d = expanded.state[i].q;
     }

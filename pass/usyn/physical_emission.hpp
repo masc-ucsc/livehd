@@ -22,9 +22,9 @@ enum class Physical_decision : uint8_t { domino, retained_cmos };
 struct Physical_cell_interface {
   std::string              name;   // __lhd_domino_<h16>_v<k>_t<t>
   std::vector<std::string> rails;  // "R0".."R{k-1}"
-  std::string              reset;  // "RST" when the storage has a reset (U22), declared after the rails
   std::string              clock  = "CLK";
   std::string              output = "Q";
+  std::string              reset;  // "RST" when the storage has a reset (U22); declared after the rails
 };
 
 // The output storage's reset of a converted stage (2d-domplace U22): the

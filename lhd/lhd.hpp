@@ -1094,6 +1094,17 @@ inline constexpr Synth_set_option kSynthSetOptions[] = {
      "",
      Synth_set_option::Kind::file,
      "stage timing clock port at the SDC clock period; empty: pass.usyn.domino_clock, else the SDC's one clock port"},
+    {"place.domino_reset_fanout",
+     "32",
+     Synth_set_option::Kind::integer,
+     "pass.usyn.physical=domino_provisional: a reset net that reaches a domino storage reset pin (RST) is dealt through "
+     "buffers of at most this many loads before placement, as the mapped CMOS nets are (pass.abc.max_fanout); 0 keeps it "
+     "unbuffered. Reset nets without a domino stay unbuffered (pre-CTS policy)"},
+    {"place.domino_rail_fanout",
+     "0",
+     Synth_set_option::Kind::integer,
+     "experiment, pass.usyn.physical=domino_provisional: the same pre-placement buffer tree for nets on domino data rails "
+     "(at most this many loads per buffer); 0 (default) leaves rails as the mapping emitted them"},
     {"place.domino_sizing",
      "false",
      Synth_set_option::Kind::boolean,

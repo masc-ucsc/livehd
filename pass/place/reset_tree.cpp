@@ -63,13 +63,16 @@ bool is_core_cell(Node n, const physical::Technology& tech) {
 }  // namespace
 
 Reset_tree_stats buffer_reset_nets(hhds::Graph& graph, const physical::Technology& tech, const std::string& liberty, unsigned cap,
-                                   const Constant_test& is_constant) {
+                                   const Constant_test& is_constant, const Reset_pins* triggers) {
   Reset_tree_stats stats;
   if (cap < 2) {
     return stats;
   }
   std::map<std::string, std::vector<std::string>> reset_pins;
-  for (const auto& cell : liberty::scan_async_dff_cells(liberty)) {
+  if (triggers) {
+    reset_pins = *triggers;
+  }
+  for (const auto& cell : triggers ? std::vector<liberty::Dff_cell>{} : liberty::scan_async_dff_cells(liberty)) {
     auto& pins = reset_pins[cell.name];
     for (const auto* pin : {&cell.reset0_pin, &cell.reset1_pin}) {
       if (!pin->empty() && std::find(pins.begin(), pins.end(), *pin) == pins.end()) {

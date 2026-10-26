@@ -1,7 +1,9 @@
 // This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 #pragma once
 #include <functional>
+#include <map>
 #include <string>
+#include <vector>
 
 #include "hhds/graph.hpp"
 #include "inou/lefdef/physical.hpp"
@@ -23,7 +25,11 @@ struct Reset_tree_stats {
 // of identity buffers), `cap` below 2 or a library without a flop/buffer does nothing. Idempotent.
 // `is_constant(driver)` says a driver resolves to a constant through bus wiring: the inactive pin of a
 // clear+preset flop is tied by such an alias, and a tree behind a tie cell would only add cells.
+// `triggers` (cell name -> reset pin names), when given, replaces the Liberty
+// asynchronous clear/preset pins as the pins whose nets are treed: the domino
+// storage reset (RST) pins of 2d-domplace U22.
 using Constant_test = std::function<bool(const hhds::Pin_class&)>;
+using Reset_pins    = std::map<std::string, std::vector<std::string>>;
 Reset_tree_stats buffer_reset_nets(hhds::Graph& graph, const physical::Technology& tech, const std::string& liberty, unsigned cap,
-                                   const Constant_test& is_constant = {});
+                                   const Constant_test& is_constant = {}, const Reset_pins* triggers = nullptr);
 }  // namespace livehd::placement

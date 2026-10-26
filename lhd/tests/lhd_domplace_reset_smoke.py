@@ -98,4 +98,21 @@ subprocess.run([lhd, 'lec', '--impl', f'lg:{work}/synth/net', '--ref', f'verilog
                 '--workdir', str(root / 'lec'), '--result-json', str(lec_json)], capture_output=True, timeout=20)
 lec = json.loads(lec_json.read_text())['lec']
 assert lec['verdict'] == 'proven-full' and not lec['bounded'], lec
+
+# The reset net stays CMOS and is buffered like a mapped net: two loads per
+# buffer turns rst's three RST pins into a tree, and the netlist still proves.
+tree_argv = [a.replace(str(work), str(root / 'T')).replace(str(result), str(root / 't.json')) for a in argv]
+tree_argv[tree_argv.index(f'verilog:{root}/out')] = f'verilog:{root}/tout'
+tree_argv += ['--set', 'synth.place.domino_reset_fanout=2']
+completed = subprocess.run(tree_argv, capture_output=True, text=True, timeout=25)
+tree = json.loads((root / 't.json').read_text())
+assert completed.returncode == 0, tree.get('error')
+assert tree['qor']['place']['domino_reset_tree']['nets'] == 1, tree['qor']['place']['domino_reset_tree']
+assert tree['qor']['place']['domino_reset_tree']['added'] >= 2, tree['qor']['place']['domino_reset_tree']
+subprocess.run([lhd, 'lec', '--impl', f'verilog:{root}/tout/rst.v', '--ref', f'verilog:{source}', '--lib', f'lg:{root}/cells',
+                '--lib', f'lg:{root}/T/synth/qor.json.domino/models', '--top', 'rst', '--set', 'formal.effort=proof',
+                '--set', 'formal.timeout=10', '--workdir', str(root / 'tlec'), '--result-json', str(lec_json)],
+               capture_output=True, timeout=20)
+lec = json.loads(lec_json.read_text())['lec']
+assert lec['verdict'] == 'proven-full' and not lec['bounded'], lec
 print('lhd_domplace_reset_smoke: ok')

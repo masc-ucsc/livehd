@@ -165,6 +165,15 @@ struct Options {
   livehd::timing::Whatif*               whatif       = nullptr;
   // Legacy reset-tree control retained for a clear diagnostic on nonzero values.
   unsigned                              reset_fanout = 0;  // retired: pre-CTS control nets are never buffered
+  // 2d-domplace U22: a net on domino storage reset (RST) pins, by LEF macro,
+  // is dealt through buffers of at most this many loads before placement, as
+  // mapped CMOS nets are (0: off). CMOS-only reset nets stay untreed.
+  unsigned                                        domino_reset_fanout = 0;
+  std::map<std::string, std::vector<std::string>> domino_reset_pins;
+  // Experiment (default 0, off): the same pre-placement fanout tree for nets on
+  // domino data rails, which the per-region mapping never buffers either.
+  unsigned                                        domino_rail_fanout = 0;
+  std::map<std::string, std::vector<std::string>> domino_rail_pins;
   std::string                           control_ports;     // override optional roots; recognized resets stay excluded
   Evaluate                              fp_evaluate;
   double                                fp_minimum = 3000, fp_attraction = .25, fp_repulsion = 5, fp_anchor = .25;
