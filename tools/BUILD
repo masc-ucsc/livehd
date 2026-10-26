@@ -176,7 +176,7 @@ cc_binary(
     name = "buffer_geometry_probe",
     srcs = ["buffer_geometry_probe.cpp"],
     copts = COPTS,
-    deps = ["//pass/place/buffering:producer", "//pass/place/buffering:checkpoint", "//pass/place:late_timing", "//inou/lefdef:inou_lefdef", "//pass/place/buffering:density", "//pass/place/buffering:gap_forces", "//pass/place/buffering:graph_search", "//pass/place/buffering:negotiation", "//pass/place/buffering:physical_sites", "@rapidjson", "@zlib//:zlib"],
+    deps = ["//pass/place/buffering:producer", "//pass/place/buffering:checkpoint", "//pass/place:late_timing", "//pass/place:require", "//inou/lefdef:inou_lefdef", "//pass/place/buffering:density", "//pass/place/buffering:gap_forces", "//pass/place/buffering:graph_search", "//pass/place/buffering:negotiation", "//pass/place/buffering:physical_sites", "@rapidjson", "@zlib//:zlib"],
 )
 
 py_test(

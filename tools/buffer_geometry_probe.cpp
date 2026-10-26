@@ -18,6 +18,7 @@
 #include "pass/place/buffering/negotiation.hpp"
 #include "pass/place/buffering/physical_sites.hpp"
 #include "pass/place/buffering/producer.hpp"
+#include "pass/place/require.hpp"
 #include "pass/place/sdc_subset.hpp"
 #include "rapidjson/document.h"
 #include "rapidjson/stringbuffer.h"
@@ -27,11 +28,7 @@
 namespace b  = livehd::placement::buffering;
 namespace dp = DreamPlace::native;
 namespace {
-void check(bool ok, const char* message) {
-  if (!ok) {
-    throw std::invalid_argument(message);
-  }
-}
+constexpr auto check = livehd::placement::require;
 std::string read(const std::string& path) {
   if (path.ends_with(".gz")) {
     gzFile input = gzopen(path.c_str(), "rb");
