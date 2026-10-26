@@ -148,6 +148,18 @@ TEST(LateTiming, HalfCycleCaptureScalesRequirementAndPeriod) {
   EXPECT_EQ(result.achievable_period_ps, 62);
   EXPECT_EQ(result.feedback().delay, 62);
   EXPECT_EQ(result.fractional_endpoints, 1);
+  // The capture filter keeps one budget's checks: the other endpoint keeps
+  // no requirement, and arrivals are unchanged.
+  const late::Proxy proxy(*circuit.graph, circuit.library, constraints, 0, 0, cells);
+  const auto        halves = proxy.evaluate(nullptr, nullptr, {.capture_filter = [](double f) { return f == .5; }});
+  const auto        fulls  = proxy.evaluate(nullptr, nullptr, {.capture_filter = [](double f) { return f == 1; }});
+  EXPECT_EQ(pin(halves, "p:R0").transitions[1].required_ps, 46);
+  EXPECT_FALSE(pin(halves, "ff:D").transitions[1].required_ps);
+  EXPECT_EQ(pin(halves, "ff:D").transitions[1].arrival_ps, pin(result, "ff:D").transitions[1].arrival_ps);
+  EXPECT_EQ(pin(fulls, "ff:D").transitions[1].required_ps, 87);
+  EXPECT_FALSE(pin(fulls, "p:R0").transitions[1].required_ps);
+  EXPECT_EQ(halves.fractional_endpoints, 1);
+  EXPECT_EQ(fulls.fractional_endpoints, 0);
 }
 
 TEST(LateTiming, MixedFullAndHalfEndpointsTakeTheLargerPeriod) {

@@ -962,6 +962,9 @@ struct Proxy::Impl {
         }
       }
       for (const auto& check : checks) {
+        if (options.capture_filter && !options.capture_filter(check.fraction)) {
+          continue;
+        }
         // Legacy policy: requirements apply unaligned to every endpoint
         // transition, reached or not; slack is taken after backward timing.
         if (legacy) {

@@ -113,6 +113,10 @@ struct Evaluation_options {
   // endpoint no seeded launch reaches is reported uncovered.
   std::function<bool(std::string_view cell)> launch_filter;
   bool                                       seed_inputs = true;
+  // Keep only the setup checks whose capture fraction (Capture_budget; 1 for
+  // Liberty cells and outputs) the filter accepts, so pin slack can be split
+  // by capture budget. The other endpoints keep no requirement.
+  std::function<bool(double fraction)>       capture_filter;
 };
 struct Result {
   struct Domain_state {
