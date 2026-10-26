@@ -505,7 +505,8 @@ void Pass_usyn::setup() {
   m.add_label_optional("physical",
                        "Opt-in provisional physical profile: none, or domino_provisional (one-phase domino stages beside "
                        "retained CMOS+DFF, with reason codes; the logical target stays cmos). Needs clock_phases=1, a "
-                       "Liberty, the LEFs and domino_clock; currently a dry run that reports the decisions and emits CMOS",
+                       "Liberty, the LEFs and domino_clock; converted states become body-less __lhd_domino_* cell "
+                       "instances, with their LEF/model bundle in <qor>.domino",
                        "none");
   m.add_label_optional("domino_select",
                        "domino_provisional choice: area (convert when the domino area estimate is below CMOS+DFF; a tie "
@@ -919,7 +920,7 @@ void Pass_usyn::synthesize(Eprp_var& var) {
       return;
     }
     domino_reference = std::make_shared<const livehd::domplace::Domino_reference>(std::move(*reference));
-    domino_report    = {domino_reference.get(), &options.domino, cmos->name, cmos->area, physical_work.consumed, true};
+    domino_report    = {domino_reference.get(), &options.domino, cmos->name, cmos->area, physical_work.consumed};
     options.design.physical
         = [reference = domino_reference,
            model     = native_model,

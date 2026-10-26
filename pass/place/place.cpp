@@ -5710,7 +5710,7 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
     if (macro_active) {
       refuse("the macro placement stage is not supported");
     }
-    if (options.full && !terminal_active && !options.timing_seed && !options.analyze_colors_only) {
+    if (options.full && !terminal_active && !options.timing_seed && !options.retain_placement && !options.analyze_colors_only) {
       refuse("native legalization outside the final stage is not supported");
     }
     if (options.satlegalize) {

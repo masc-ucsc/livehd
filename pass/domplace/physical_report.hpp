@@ -17,8 +17,7 @@ struct Physical_report_inputs {
   const Select_options*   options   = nullptr;
   std::string             cmos_register;  // the CMOS map's register pick
   double                  cmos_register_area = 0;
-  uint64_t                model_work         = 0;      // Liberty cost-model read charged to the profile
-  bool                    emitted            = false;  // false: a dry run, the netlist is still CMOS
+  uint64_t                      model_work         = 0;  // Liberty cost-model read charged to the profile
   // The published model bundle (directory name beside the report), if any.
   std::string              bundle;
   uint64_t                 bundle_macros = 0;

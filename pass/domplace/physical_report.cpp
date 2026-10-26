@@ -28,7 +28,7 @@ std::string physical_report(const usyn::Logical_design& design, const Physical_r
   w.StartObject();
   number(w, "schema", 1);
   text(w, "profile", "domino_provisional");
-  text(w, "emission", inputs.emitted ? "mixed" : "dry-run");
+  text(w, "emission", "mixed");
   text(w, "estimate", "liberty-area-proxy; not characterized PPA");
   number(w, "stage_model_version", kStageModelVersion);
   text(w, "select", inputs.options->policy == Select_options::Policy::all ? "all" : "area");
