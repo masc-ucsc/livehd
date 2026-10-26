@@ -2877,6 +2877,17 @@ std::shared_ptr<ph::Parasitics> estimate_rc(const View& v, const ph::Technology&
   result->identity = std::format("{:016x}", hash);
   return result;
 }
+// Attach the view's cell poses and IO terminal positions to its RC estimate,
+// as timing and repair consumers of a placement checkpoint expect them.
+void record_poses(ph::Parasitics& rc, const View& v) {
+  for (const auto& c : v.cells) {
+    rc.cells.push_back(
+        {c.name, c.place.x, c.place.y, static_cast<unsigned>(c.place.orientation), c.macro, c.place.width, c.place.height});
+  }
+  for (const auto& t : v.fp.terminals) {
+    rc.terminals.push_back({t.name, t.x, t.y});
+  }
+}
 struct CacheInfo {
   size_t reused = 0, changed = 0;
   bool   hit = false;
@@ -6292,18 +6303,7 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
             auto rc_options  = options;
             rc_options.full  = false;
             state.parasitics = estimate_rc(v, tech, rc_options, state.pin_locations);
-            for (const auto& c : v.cells) {
-              state.parasitics->cells.push_back({c.name,
-                                                 c.place.x,
-                                                 c.place.y,
-                                                 static_cast<unsigned>(c.place.orientation),
-                                                 c.macro,
-                                                 c.place.width,
-                                                 c.place.height});
-            }
-            for (const auto& t : v.fp.terminals) {
-              state.parasitics->terminals.push_back({t.name, t.x, t.y});
-            }
+            record_poses(*state.parasitics, v);
           };
           refresh(checkpoint);
           const auto evaluate = [&](const Result& state) {
@@ -6398,12 +6398,8 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
         for (const auto& c : view.cells) {
           c.node.attr(attrs::place).set(c.place);
           checkpoint.floorplan.components.push_back({c.name, c.macro, c.place});
-          checkpoint.parasitics->cells.push_back(
-              {c.name, c.place.x, c.place.y, static_cast<unsigned>(c.place.orientation), c.macro, c.place.width, c.place.height});
         }
-        for (const auto& terminal : view.fp.terminals) {
-          checkpoint.parasitics->terminals.push_back({terminal.name, terminal.x, terminal.y});
-        }
+        record_poses(*checkpoint.parasitics, view);
         if (options.after_stage(Placement_stage::floorplan, checkpoint)) {
           throw Placement_restart(checkpoint.floorplan, Placement_stage::floorplan);
         }
@@ -6572,12 +6568,8 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
         checkpoint.parasitics = estimate_rc(view, tech, rc_options, checkpoint.pin_locations);
         for (const auto& c : view.cells) {
           checkpoint.floorplan.components.push_back({c.name, c.macro, c.place});
-          checkpoint.parasitics->cells.push_back(
-              {c.name, c.place.x, c.place.y, static_cast<unsigned>(c.place.orientation), c.macro, c.place.width, c.place.height});
         }
-        for (const auto& t : view.fp.terminals) {
-          checkpoint.parasitics->terminals.push_back({t.name, t.x, t.y});
-        }
+        record_poses(*checkpoint.parasitics, view);
         // Propagation belongs to untimed GP. Do not defer STA to finish jumps.
         final_gp_timing_started |= final_timing;
         auto timing              = prects_data_timing(options.fp_evaluate(checkpoint), v.ignored);
@@ -6600,18 +6592,7 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
             }
             state.pin_locations.clear();
             state.parasitics = estimate_rc(view, tech, rc_options, state.pin_locations);
-            for (const auto& c : view.cells) {
-              state.parasitics->cells.push_back({c.name,
-                                                 c.place.x,
-                                                 c.place.y,
-                                                 static_cast<unsigned>(c.place.orientation),
-                                                 c.macro,
-                                                 c.place.width,
-                                                 c.place.height});
-            }
-            for (const auto& t : view.fp.terminals) {
-              state.parasitics->terminals.push_back({t.name, t.x, t.y});
-            }
+            record_poses(*state.parasitics, view);
           };
           const auto evaluate = [&](const Result& state) { return prects_data_timing(options.fp_evaluate(state), view.ignored); };
           const auto repaired = repair_gp_buffers(checkpoint, options, timing, evaluate, refresh, gp_buffer_history);
@@ -7266,12 +7247,8 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
         }
         for (const auto& c : view.cells) {
           checkpoint.floorplan.components.push_back({c.name, c.macro, c.place});
-          checkpoint.parasitics->cells.push_back(
-              {c.name, c.place.x, c.place.y, static_cast<unsigned>(c.place.orientation), c.macro, c.place.width, c.place.height});
         }
-        for (const auto& t : view.fp.terminals) {
-          checkpoint.parasitics->terminals.push_back({t.name, t.x, t.y});
-        }
+        record_poses(*checkpoint.parasitics, view);
         Gp_observation sample;
         if (rc_cache) {
           sample.rc_reuse          = reuse;
@@ -9224,13 +9201,7 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
       throw std::invalid_argument("native final legal timing rejected output: " + acceptance.reason);
     }
   }
-  for (const auto& c : v.cells) {
-    result.parasitics->cells.push_back(
-        {c.name, c.place.x, c.place.y, static_cast<unsigned>(c.place.orientation), c.macro, c.place.width, c.place.height});
-  }
-  for (const auto& t : v.fp.terminals) {
-    result.parasitics->terminals.push_back({t.name, t.x, t.y});
-  }
+  record_poses(*result.parasitics, v);
   result.graph->get_input_node().attr(attrs::placement_rc).set(ph::serialize_parasitics(*result.parasitics));
   fs::create_directories(options.output_dir);
   if (resolved_uroute.export_features && !options.timing_seed && !options.retain_placement
