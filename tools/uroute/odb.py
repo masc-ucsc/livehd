@@ -7,8 +7,8 @@ from pathlib import Path
 import shutil
 import subprocess
 
-from .features import Maps, grid
-from .maps import write
+from .features import grid
+from .maps import raw, write
 from .pool import canonical, file_sha
 
 
@@ -47,7 +47,7 @@ def overflow_map(path):
             raise ValueError('zero resource overflow disagrees with exported bins')
         if stream.read().strip():
             raise ValueError('trailing ODB overflow data')
-    maps = Maps(1, nx, ny, False, values, [(min(values), max(values))])
+    maps = raw([values], nx, ny)
     metadata = {'source': 'OpenDB dbGCellGrid usage/capacity', 'dbu_per_micron': dbu,
                 'core': [lx, ly, hx, hy], 'source_grid': [gx, gy], 'layers': layers,
                 'capacity_sum': capacity, 'usage_sum': usage, 'overflow_tracks_sum': overflow,

@@ -13,8 +13,8 @@ import math
 from pathlib import Path
 import re
 
-from .features import NETWORK_BINS, Maps, grid, resample
-from .maps import write
+from .features import NETWORK_BINS, grid, resample
+from .maps import raw, write
 
 TOKEN = re.compile(r'\\[^\s]+|"(?:\\.|[^"\\])*"|[()+;]|[^\s()+;]+')
 NUMBER = r'[-+]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][-+]?\d+)?'
@@ -175,10 +175,6 @@ def drc_markers(text, dbu):
     return result
 
 
-def raw_maps(channels, nx, ny):
-    return Maps(len(channels), nx, ny, False, [v for c in channels for v in c], [(min(c), max(c)) for c in channels])
-
-
 def verify_lengths(report, text, dbu):
     """Compare enabled nets against OpenROAD report_wire_length -detailed_route.
 
@@ -325,9 +321,9 @@ def extract(geometry, definition, drc, flute_lengths, nx=64, ny=64, ox=NETWORK_B
     detour = [s / w if w else 0. for s, w in zip(detour_sum, detour_weight)]
     grouped = [resample(c, nx, ny, ox, oy) for c in demand]
     utilization = [max(c[i] for c in grouped) for i in range(ox * oy)]
-    labels = raw_maps([utilization, resample(drc_map, nx, ny, ox, oy), resample(detour, nx, ny, ox, oy)], ox, oy)
+    labels = raw([utilization, resample(drc_map, nx, ny, ox, oy), resample(detour, nx, ny, ox, oy)], ox, oy)
     counts.pop('net_shape_lengths')
-    return labels, raw_maps(grouped, ox, oy), dict(counts, drc_markers=len(markers), drc_outside_core=outside,
+    return labels, raw(grouped, ox, oy), dict(counts, drc_markers=len(markers), drc_outside_core=outside,
                                                  nets=census, nominal_group_capacity_per_dbu=capacity,
                                                  route_grid=route_grid, network_grid=[ox, oy])
 

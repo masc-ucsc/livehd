@@ -23,6 +23,16 @@
 namespace dp = DreamPlace::native;
 namespace {
 using Value = rapidjson::Value;
+// Raw prediction maps; each channel's range is its own f32 extrema.
+dp::UrouteMaps raw_maps(int bins_x, int bins_y, const std::vector<std::vector<float>>& channels) {
+  dp::UrouteMaps result{int(channels.size()), bins_x, bins_y, false, {}, {}};
+  for (const auto& values : channels) {
+    const auto [lo, hi] = std::minmax_element(values.begin(), values.end());
+    result.ranges.push_back({*lo, *hi});
+    result.values.insert(result.values.end(), values.begin(), values.end());
+  }
+  return result;
+}
 double number(const Value& value) {
   if (!value.IsNumber()) {
     throw std::invalid_argument("expected numeric geometry value");
@@ -228,16 +238,10 @@ int main(int argc, char** argv) {
       }
       const dp::UrouteContext context(weights, std::move(support));
       const auto              prediction = context.predict(query);
-      dp::UrouteMaps          result{2, prediction.bins_x, prediction.bins_y, false, {}, {}};
-      for (const auto* values : {&prediction.utilization, &prediction.drc_density}) {
-        const size_t begin = result.values.size();
-        for (double value : *values) {
-          result.values.push_back(float(value));
-        }
-        const auto [lo, hi] = std::minmax_element(result.values.begin() + begin, result.values.end());
-        result.ranges.push_back({*lo, *hi});
-      }
-      dp::write_uroute_maps(argv[4], result);
+      const auto f32 = [](const std::vector<double>& values) { return std::vector<float>(values.begin(), values.end()); };
+      dp::write_uroute_maps(
+          argv[4],
+          raw_maps(prediction.bins_x, prediction.bins_y, {f32(prediction.utilization), f32(prediction.drc_density)}));
       return 0;
     }
     if (argc == 4 && std::string(argv[1]) == "trees") {
@@ -418,9 +422,7 @@ int main(int argc, char** argv) {
       } else {
         values = dp::uroute_infer(weights, query, support);
       }
-      const auto [lo, hi] = std::minmax_element(values.begin(), values.end());
-      dp::UrouteMaps output{1, query.bins_x, query.bins_y, false, values, {{*lo, *hi}}};
-      dp::write_uroute_maps(argv[argc - 1], output);
+      dp::write_uroute_maps(argv[argc - 1], raw_maps(query.bins_x, query.bins_y, {values}));
       return 0;
     }
     if (argc != 8 || std::string(argv[1]) != "features") {

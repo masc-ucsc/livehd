@@ -27,6 +27,11 @@ def validate(m):
                 raise ValueError("invalid URoute map value")
 
 
+def raw(channels, nx, ny):
+    """Unnormalized maps from per-channel value lists; ranges are their extrema."""
+    return Maps(len(channels), nx, ny, False, [v for c in channels for v in c], [(min(c), max(c)) for c in channels])
+
+
 def encode(m):
     # Round once at the interchange boundary, identically to native f32 output.
     payload = struct.pack(f"<{len(m.values)}f", *m.values)

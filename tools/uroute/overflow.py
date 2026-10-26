@@ -12,8 +12,8 @@ from pathlib import Path
 import re
 import time
 
-from .features import Maps, grid
-from .maps import write
+from .features import grid
+from .maps import raw, write
 from .pool import canonical, sha
 
 NUMBER = r'[-+]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][-+]?\d+)?'
@@ -91,7 +91,7 @@ def marker_map(text, core, dbu, bins=256):
         raise ValueError('empty marker report does not establish a measured zero-overflow map')
     if not all(math.isfinite(v) for v in values):
         raise ValueError('global-route diagnostic accumulation overflow')
-    return Maps(1, bins, bins, False, values, [(min(values), max(values))]), {
+    return raw([values], bins, bins), {
         'source': 'FastRoute aggregate 2D congestion marker report', 'core': list(core), 'dbu_per_micron': dbu,
         'directional_marker_counts': counts, 'emitted_counter_sums': sums,
         'units': 'emitted usage-minus-capacity counters; both directions summed and area-averaged over marker rectangles',
