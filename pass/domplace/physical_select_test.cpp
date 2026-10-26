@@ -325,6 +325,22 @@ TEST(PhysicalSelect, InvertedConvertedQIsNotFree) {
   EXPECT_EQ(run.emission->cells.size(), 2U);
 }
 
+TEST(PhysicalSelect, EqualFormulasShareOneMasterWithTheirOwnProducers) {
+  Builder    b;
+  const auto a = b.input("a"), c = b.input("c"), d = b.input("d"), e = b.input("e");
+  b.state("q0");
+  b.state("q1");
+  b.next(0, formula({lit(0), lit(1), series(0, 1)}), {a, c});
+  b.next(1, formula({lit(0), lit(1), series(0, 1)}), {d, e});
+  const auto run = select(b, all());
+  ASSERT_TRUE(run.emission);
+  EXPECT_EQ(run.reasons(), (std::vector<std::string>{"domino-all", "domino-all"}));
+  ASSERT_EQ(run.emission->cells.size(), 1U);
+  EXPECT_EQ(run.emission->states[0].cell, run.emission->states[1].cell);
+  EXPECT_EQ(run.emission->states[0].rails[0].producer, a);
+  EXPECT_EQ(run.emission->states[1].rails[0].producer, d);  // one master, its own pins
+}
+
 TEST(PhysicalSelect, AreaPolicyComparesBothSidesAndATieRetainsCmos) {
   Builder    b;
   const auto a = b.input("a"), c = b.input("c"), d = b.input("d"), e = b.input("e");

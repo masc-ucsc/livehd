@@ -158,6 +158,43 @@ TEST(DominoBundle, WritesARoundTrippingDeterministicBundle) {
   EXPECT_NE(read(first / kBundleVerilog).find("module " + f.design.instances[0].cell), std::string::npos);
 }
 
+TEST(DominoBundle, EqualMastersAreCollectedOnceWithEveryOwner) {
+  // Two converted states share a & b: one master, two instances naming their
+  // own original states.
+  usyn::Logical_design design;
+  auto&                region = design.regions.emplace_back();
+  region.module_name          = "top";
+  region.selected.frozen.emplace();
+  for (const auto* name : {"q0", "q1"}) {
+    region.selected.frozen->state.push_back({name, 'x', {}, {}, usyn::unknown_clock_domain, {}});
+  }
+  usyn::Gate_formula formula;
+  formula.nodes = {lit(0), lit(1), series(0, 1)};
+  usyn::Physical_emission emission;
+  emission.cells.push_back(domino_interface(master(formula.nodes, 2), 0));
+  for (uint32_t i = 0; i < 2; ++i) {
+    auto& state    = emission.states.emplace_back();
+    state.state    = i;
+    state.decision = usyn::Physical_decision::domino;
+    state.formula  = formula;
+    state.metrics  = *formula.metrics();
+  }
+  region.physical = emission;
+  usyn::Budget work{100000};
+  const auto   out = collect_domino_design(design, work);
+  ASSERT_TRUE(out);
+  ASSERT_EQ(out->masters.size(), 1U);
+  ASSERT_EQ(out->instances.size(), 2U);
+  EXPECT_EQ(out->instances[0].cell, emission.cells[0].name);
+  EXPECT_EQ(out->instances[1].cell, emission.cells[0].name);
+  EXPECT_EQ(out->instances[0].state, "q0");
+  EXPECT_EQ(out->instances[1].state, "q1");
+  EXPECT_EQ(out->instances[1].state_index, 1U);
+  // A selection that names another master than the formula rebuilds is a bug.
+  region.physical->cells[0].name = "__lhd_domino_0000000000000000_v0_t0";
+  EXPECT_THROW((void)collect_domino_design(design, work), std::logic_error);
+}
+
 TEST(DominoBundle, RefusalsLeaveNoBundle) {
   Fixture    f;
   const auto dir = fs::path(testing::TempDir()) / "bundle_refused";
