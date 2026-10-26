@@ -453,7 +453,7 @@ measured cell characteristics.</td></tr>
 </tbody>
 </table>
 
-<h3 id="decisions">Checkpoint-2 decisions (U1–U22)</h3>
+<h3 id="decisions">Checkpoint-2 decisions (U1–U24)</h3>
 <p><strong>U1 — ruled 2026-10-26:</strong> “we should have a reasonable delay
 proxy, considering inputs as more transistors stack.” Under
 <code>pass.usyn.physical=domino_provisional</code> every stage coefficient now has
@@ -496,13 +496,16 @@ characterization.</p>
 <tr><td>U19 PG rail parity</td><td>Found by the lfsr H5 run (OpenROAD DPL-0004 on exactly the FS-start dominoes; LiveHD's check did not model rails). Rows alternate N/FS, so a two-row cell's outer rail alternates with its start row. Every variant is written in rail templates <code>t0</code> (the reference inverter's bottom rail outside: N starts) and <code>t1</code> (its top rail outside: FS starts), with the same function, pins, drive and footprint; the rails derive from the inverter's PG pins and the row orientation. Placement swaps to the twin at anchoring, in the two-row ECO and on restore; <code>check_legality</code> checks the parity (<code>pass/place/pg_rails.hpp</code>). Templates were chosen over restricting starts to N rows: restriction halves the row pairs a tiny core offers. Sidecar schema 4. <code>synth.place.pg</code> is now allowed under the profile (one-row cells define the row rails).</td></tr>
 <tr><td>U20 tiny-core packing</td><td>The lfsr area-driven core (utilization 0.55, 104 sites by 21 rows, two-row cells 89% of the cell area) failed the anchor prepass on the bin density cap. Root cause: the fitted legalization grid kept one-row bins (4 x 21), so a two-row cell filled the full height of both bins it touched and each bin row held one cell; the cap quantized to cell widths. Neither the greedy pose order nor the core sizing was at fault (any start is usable with U19 templates, and 4 x 10 bins pack the same poses). Bins are now at least as tall as the tallest movable cell; single-row designs are unchanged.</td></tr>
 <tr><td>U21 clock-gated registers</td><td>Ruled 2026-10-26: support them in the profile. A converted gated register gets the gate's enable as a data input and the original, ungated clock on CLK, so the stage is an enable register (next = en ? f : Q) through the existing enable path. The gate stays for its remaining CMOS consumers and is dropped only when none is left. Sharing one ICG across dominos or generating clocks next to them is deferred (“in the future we may optimize to have a shared ICG ... but still not there”). Implemented by <code>synth::fold_gated_clocks</code> on the flat top before partitioning (latch-and and Liberty ICG; negedge-and and latch-or, which sample the enable at the falling edge, with <code>pass.usyn.domino_fall_gates</code>); refusals carry reason codes; <code>enable-stack</code> when the hold does not fit the PDN. Registers clocked through a preserved definition's port stay <code>definition-clock</code> (needs a per-instance enable port on the shared definition). The native timer now propagates ideal clocks through inverters, ICGs and recognized gates, with a clock-gating setup check on each enable.</td></tr>
-<tr><td>U22 reset network</td><td>Ruled 2026-10-26: “The reset network should not be converted to domino. I will keep this false path as a cmos.” A converted register's reset drives a storage <code>RST</code> pin (the source's kind, polarity and value), never a PDN rail: the formula is the data function, rails are rebuilt with the reset inactive, the reset net stays CMOS and is buffered before placement (<code>synth.place.domino_reset_fanout</code>, 32), the stage timer counts reset->domino as a false path. Synchronous and asynchronous resets are eligible (the lg model is a flop with that reset, exact for LEC); the area adds the Liberty's smallest async-reset register over the base register, else a labeled one-inverter estimate. Bundle schema 5.</td></tr>
+<tr><td>U22 reset network</td><td>Ruled 2026-10-26: “The reset network should not be converted to domino. I will keep this false path as a cmos.” A converted register's reset drives a storage <code>RST</code> pin (the source's kind, polarity and value), never a PDN rail: the formula is the data function, rails are rebuilt with the reset inactive, the reset net stays CMOS and is buffered before placement (<code>synth.place.domino_reset_fanout</code>, 32), the stage timer counts reset->domino as a false path. Synchronous and asynchronous resets are eligible (the lg model is a flop with that reset, exact for LEC); the area adds the Liberty's smallest async-reset register over the base register, else a labeled one-inverter estimate. Bundle schema 5. The domino-only reset tree of this entry was replaced by U23.</td></tr>
+<tr><td>U23 one reset tree</td><td>Ruled 2026-10-26: “All could buffer resets to simplify.” One pre-placement reset buffer tree for every mapper (abc, usyn, the domino profile), <code>synth.place.reset_fanout</code> (<code>pass/place/reset_tree.hpp</code>): every flat reset net with more than N cell loads is dealt through the library's smallest buffer, N loads per buffer, its data loads included. A reset net drives a Liberty clear/preset pin, a domino storage <code>RST</code> pin, or carries the synthesis reset role (a synchronous reset). It replaces the U22 special case: <code>synth.place.domino_reset_fanout</code> and <code>qor.place.domino_reset_tree</code> are removed (<code>qor.place.reset_tree</code> reports the one tree). <strong>Default changed:</strong> <code>synth.place.reset_fanout</code> 0 (a retired control that had to be 0; pre-CTS reset nets were never treed outside the domino profile) → 32. <code>synth.place.reset_fanout=0</code> turns it off. <code>synth.place.repair.reset</code> (sizing reset cones) stays retired, the tree's nets keep the pre-CTS placement exclusion, and the mapper region trees (<code>pass.abc.reset_fanout</code>, <code>pass.usyn.reset_fanout</code>, default 0) are unchanged and compose with it.</td></tr>
+<tr><td>U24 rail buffering</td><td>Ruled 2026-10-26: “Yes if it improves timing.” <strong>Default changed:</strong> <code>synth.place.domino_rail_fanout</code> 0 → 32 (the same tree on nets on domino data rails, buffers <code>__place_railtree*</code>; no effect without domino cells). Sweep on the frozen <code>lhd_dp_b97d5f6d</code>, ORFS frame, arm 3 (stage period, max-cap/max-transition violations, rail buffers): sha3 0: 3967 ps, 51/78; 16: 2210 ps, 0/0, 444; 32: 2226 ps, 0/0, 170; 64: 2661 ps, 69/62, 72. lfsr converts nothing under select=area (0 of 31 by area), so it was checked with select=all: 0/32/64 give 1287 ps (no rail above 32 loads), 16 gives 1294 ps with 4 buffers. 32 keeps the sha3 gain for 38% of the buffers of 16 and leaves lfsr unchanged.</td></tr>
 </tbody>
 </table>
 <p>U2–U13 and U16–U18 are the plan defaults in effect; they were not ruled
-separately and remain open to revision. U21 and U22 are recorded in
+separately and remain open to revision. U21, U22 and U24 are recorded in
 <a href="../../pass/domplace/README.md">pass/domplace/README.md</a> (Clock gates,
-Storage reset).</p>
+Storage reset, Rail buffering), U23 in <a href="../../pass/place/README.md">pass/place/README.md</a>
+(Reset buffer tree).</p>
 
 <h3 id="I">I — Row-access interface; routing implementation owned elsewhere</h3>
 <p>The routing implementation from the pre-plan's “pre-task 0” is outside this
@@ -683,13 +686,12 @@ a gated clock that crosses a definition port, and the LEC encoder cannot model a
 clocked by a body-less Liberty ICG instance. Mapped latch-based gates stay uncertified in
 the native timer (latch borrowing); ICG cells and flop-based gates are timed. Sharing one
 ICG across dominos (or local clock generation) is deferred by the ruling.</li>
-<li><strong>Reset network (U22).</strong> The domino reset nets are buffered before placement
-(<code>synth.place.domino_reset_fanout</code>, 32 loads per buffer, on under the profile); a CMOS
-async-reset net that shares a net with an RST pin is treed with it. Recovery/removal of an
-asynchronous RST is not checked (setup-only timer). High-fanout data rails are not buffered
-by the per-region mapping either (sha3 kept a 1344-pin control rail after U22);
-<code>synth.place.domino_rail_fanout</code> is the same tree for rails, an off-by-default
-experiment.</li>
+<li><strong>Reset network (U22, U23).</strong> Every reset net is buffered before placement
+(<code>synth.place.reset_fanout</code>, 32 loads per buffer, every mapper). Recovery/removal of an
+asynchronous reset is not checked (setup-only timer). The tree groups loads in instance-name order
+and its nets stay excluded from GP wirelength, so its buffers place by density alone: on sha3 the
+52 reset-tree nets span a median 84 µm HPWL on the 60 µm die. Domino data rails get the same tree
+(<code>synth.place.domino_rail_fanout</code>, 32, U24).</li>
 <li>Unrelated to this task, <code>//tools/uroute:inference_test</code> fails on the
 branch as before.</li>
 </ul>
