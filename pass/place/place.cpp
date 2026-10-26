@@ -1024,7 +1024,16 @@ public:
       throw std::runtime_error("cycle in physical wiring aliases");
     }
     auto     n     = p.get_master_node();
-    auto     input = [&](std::string_view name, int which) { return bit(gu::get_driver_of_sink_name(n, name), which, depth + 1); };
+    auto     input = [&](std::string_view name, int which) {
+      const auto driver = gu::get_driver_of_sink_name(n, name);
+      if (driver.is_invalid()) {
+        throw std::runtime_error(std::format("invalid physical wiring operand: {} input {} of {} is undriven",
+                                             gu::type_op_of(n) == Ntype_op::Sub ? "instance" : "wiring node",
+                                             name,
+                                             gu::debug_name(n)));
+      }
+      return bit(driver, which, depth + 1);
+    };
     Endpoint out;
     if (n.is_input_node()) {
       const auto io    = n.get_graph()->get_io();

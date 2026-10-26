@@ -35,6 +35,15 @@ designs = {
               '  always_ff @(posedge gclk) q2 <= (a | d) & b;\n'
               '  always_ff @(posedge clk) q3 <= (a & d) | b;\n'
               'endmodule\n',
+    # The gated clock is also data reaching an output: the gate must stay
+    # although its only register converts.
+    'dataread': 'module dataread(input clk, en, a, b, c, output reg q1, output y);\n'
+                '  logic en_l;\n'
+                '  always_latch if (!clk) en_l = en;\n'
+                '  wire gclk = clk & en_l;\n'
+                '  assign y = gclk & c;\n'
+                '  always_ff @(posedge gclk) q1 <= (a & b) | c;\n'
+                'endmodule\n',
     # A Liberty ICG instantiated by name, with its test enable (SCE); q4 is the
 # ungated twin of q3.
     'icg': 'module icg(input clk, en, te, a, b, c, d, output reg q1, q3, q4);\n'
@@ -149,6 +158,12 @@ for name in ('q1', 'q2'):
 assert 'dlxtn' not in netlist and 'dlxtp' not in netlist, 'the unread gate latch must be dropped'
 assert netlist.count('.CLK(clk)') == 3, netlist
 assert proven(work, 'inline', root / 'inline.v')
+
+# A gate whose clock is also read as data stays, and the netlist proves.
+work, physical, endpoints, netlist = synth('dataread')
+assert reasons(endpoints) == {'q1': 'domino-all'}, reasons(endpoints)
+assert physical['clock_gates']['dropped_gates'] == 0, physical['clock_gates']
+assert proven(work, 'dataread', root / 'dataread.v')
 
 # Liberty ICG with a test enable: both gated registers convert and the cell goes.
 work, physical, endpoints, netlist = synth('icg')

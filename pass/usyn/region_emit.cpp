@@ -407,12 +407,29 @@ Region_emission emit_logical_region(const partition::Region_body& rb, const synt
         if (depth > 8 || !work.spend()) {
           return false;
         }
+        // Every driver pin, port 0 (the node itself) included: out_sorted_pins
+        // alone skips it, and a gate's clock output can be port 0.
+        std::vector<hhds::Pin_class> drivers;
+        if (const auto io = n.get_subnode_io(); io && gu::type_op_of(n) == Ntype_op::Sub) {
+          for (const auto& decl : io->get_output_pin_decls()) {
+            if (const auto pin = n.try_get_driver_pin(decl.port_id); !pin.is_invalid()) {
+              drivers.push_back(pin);
+            }
+          }
+        } else if (const auto pin = n.try_get_driver_pin(0); !pin.is_invalid()) {
+          drivers.push_back(pin);
+        }
         for (const auto& pin : n.out_sorted_pins()) {
+          drivers.push_back(pin);
+        }
+        for (const auto& pin : drivers) {
           for (const auto& edge : pin.out_edges()) {
             const auto reader = edge.sink.get_master_node();
             const auto op     = gu::type_op_of(reader);
-            if (op == Ntype_op::IO || op == Ntype_op::Sub || op == Ntype_op::Flop || op == Ntype_op::Latch || op == Ntype_op::Memory
-                || reader == n) {
+            // A graph output (its IO node reads as no cell) or any state or
+            // hierarchy keeps the boundary alive.
+            if (gu::is_graph_output_pin(edge.sink) || op == Ntype_op::IO || op == Ntype_op::Invalid || op == Ntype_op::Sub
+                || op == Ntype_op::Flop || op == Ntype_op::Latch || op == Ntype_op::Memory || reader == n) {
               return false;
             }
             if (seen.insert(reader).second) {
