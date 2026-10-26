@@ -615,6 +615,7 @@ cc_library(
         ":terminal_legalize",
         "//core",
         "//graph",
+        "//inou/lefdef:index_union_find",
         "//inou/lefdef:inou_lefdef",
         "//pass/color:floorplan_color",
         "//pass/place/forces:gp_timing",

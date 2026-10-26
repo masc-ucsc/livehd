@@ -12,6 +12,7 @@
 #include <tuple>
 
 #include "cell_criticality.hpp"
+#include "inou/lefdef/index_union_find.hpp"
 #include "pin_adjust.hpp"
 #include "rapidjson/stringbuffer.h"
 #include "rapidjson/writer.h"
@@ -153,21 +154,14 @@ Boundary_pin_model split_boundary_nets(const dp::Design& original, const Region_
       return it->second;
     };
     std::map<std::pair<int, int>, int> vertices;
-    std::vector<int>                   parent;
+    physical::Index_union_find         sets;
     const auto                         vertex = [&](int box, int p) {
       auto [it, added] = vertices.emplace(std::pair{box, p}, vertices.size());
       if (added) {
-        parent.push_back(it->second);
+        sets.add();
       }
       regions[p].insert(box);
       return it->second;
-    };
-    const auto root = [&](int v) {
-      while (parent[v] != v) {
-        parent[v] = parent[parent[v]];
-        v         = parent[v];
-      }
-      return v;
     };
     const auto segment = [&](Point a, Point b) {
       if (a == b) {
@@ -186,8 +180,8 @@ Boundary_pin_model split_boundary_nets(const dp::Design& original, const Region_
       const auto   join  = [&](Point next) {
         const int box  = region({(prior.first + next.first) / 2, (prior.second + next.second) / 2});
         const int from = vertex(box, point(prior)), to = vertex(box, point(next));
-        parent[root(from)] = root(to);
-        prior              = next;
+        sets.merge(to, from);
+        prior = next;
       };
       for (auto it = cuts[axis].upper_bound(lo); it != cuts[axis].end() && *it < hi; ++it) {
         join(horizontal ? Point{*it, a.second} : Point{a.first, *it});
@@ -202,7 +196,7 @@ Boundary_pin_model split_boundary_nets(const dp::Design& original, const Region_
       segment(a, bend);
       segment(bend, b);
     }
-    std::map<int, std::vector<Pin>> pieces;
+    std::map<size_t, std::vector<Pin>> pieces;
     for (size_t i = 0; i < real.size(); ++i) {
       const Point p{double(std::llround(terminals[i].first)), double(std::llround(terminals[i].second))};
       const int   index = point(p);
@@ -210,7 +204,7 @@ Boundary_pin_model split_boundary_nets(const dp::Design& original, const Region_
       if (!regions[index].empty() && !regions[index].contains(box)) {
         box = *regions[index].begin();
       }
-      pieces[root(vertex(box, index))].push_back(real_pin(real[i]));
+      pieces[sets.find(vertex(box, index))].push_back(real_pin(real[i]));
     }
     const size_t old_anchors = result.anchors.size();
     for (size_t i = 0; i < coordinates.size(); ++i) {
@@ -220,7 +214,7 @@ Boundary_pin_model split_boundary_nets(const dp::Design& original, const Region_
       const int node = append_anchor(d, coordinates[i]);
       result.anchors.push_back({node, net, coordinates[i].first, coordinates[i].second});
       for (int box : regions[i]) {
-        pieces[root(vertices.at({box, int(i)}))].push_back({node, 0, 0});
+        pieces[sets.find(vertices.at({box, int(i)}))].push_back({node, 0, 0});
       }
     }
     if (old_anchors == result.anchors.size()) {
@@ -232,9 +226,9 @@ Boundary_pin_model split_boundary_nets(const dp::Design& original, const Region_
       emit(net, pins);
     } else {
       ++result.split_nets;
-      std::map<int, int> component_region;
+      std::map<size_t, int> component_region;
       for (const auto& [key, value] : vertices) {
-        component_region[root(value)] = key.first;
+        component_region[sets.find(value)] = key.first;
       }
       for (const auto& [component, pins] : pieces) {
         emit(net, pins, component_region.at(component));

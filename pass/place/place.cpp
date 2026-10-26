@@ -39,6 +39,7 @@
 #include "handoff_pins.hpp"
 #include "handoff_rows.hpp"
 #include "hash_util.hpp"
+#include "inou/lefdef/index_union_find.hpp"
 #include "macro_snap.hpp"
 #include "macro_tracks.hpp"
 #include "magnet_report.hpp"
@@ -3938,23 +3939,8 @@ Steiner_tree steiner_tree(const std::vector<Point>& points) {
     build(build, 0, terminals.size());
     // Coincident split points can close a cycle. Retain a spanning tree; all
     // original terminals remain connected and preserve their terminal IDs.
-    std::vector<unsigned> parent(result.points.size());
-    std::iota(parent.begin(), parent.end(), 0);
-    const auto root = [&](unsigned n) {
-      while (parent[n] != n) {
-        parent[n] = parent[parent[n]];
-        n         = parent[n];
-      }
-      return n;
-    };
-    std::erase_if(result.edges, [&](const auto& edge) {
-      const auto a = root(edge.first), b = root(edge.second);
-      if (a == b) {
-        return true;
-      }
-      parent[a] = b;
-      return false;
-    });
+    ph::Index_union_find sets(result.points.size());
+    std::erase_if(result.edges, [&](const auto& edge) { return !sets.merge(edge.second, edge.first); });
     return result;
   }
   std::vector<int> xs, ys;

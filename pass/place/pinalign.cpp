@@ -1,12 +1,12 @@
 // This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 #include <algorithm>
 #include <cmath>
-#include <numeric>
 #include <queue>
 #include <stdexcept>
 #include <tuple>
 
 #include "boundary_pins.hpp"
+#include "inou/lefdef/index_union_find.hpp"
 
 namespace livehd::placement {
 Pin_align_stats align_boundary_pins(Boundary_pin_model& model, const Region_mesh& mesh,
@@ -153,15 +153,7 @@ Pin_align_stats align_boundary_pins(Boundary_pin_model& model, const Region_mesh
       }
     }
   }
-  std::vector<int> parent(count);
-  std::iota(parent.begin(), parent.end(), 0);
-  const auto root = [&](int n) {
-    while (parent[n] != n) {
-      parent[n] = parent[parent[n]];
-      n         = parent[n];
-    }
-    return n;
-  };
+  physical::Index_union_find sets(count);
   for (auto [a, b, box, cell, input_pin, output_pin] : candidates) {
     Pin_align_pair pair{a, b, box, cell, {}, input_pin, output_pin};
     if (cell >= 0) {
@@ -178,11 +170,11 @@ Pin_align_stats align_boundary_pins(Boundary_pin_model& model, const Region_mesh
     } else {
       ++stats.one_cell;
     }
-    parent[root(b)] = root(a);
+    sets.merge(a, b);
   }
-  std::map<int, std::vector<int>> components;
+  std::map<size_t, std::vector<int>> components;
   for (size_t i = 0; i < stats.pairs.size(); ++i) {
-    components[root(stats.pairs[i].input)].push_back(i);
+    components[sets.find(stats.pairs[i].input)].push_back(i);
   }
   const auto coord = [&](int a) {
     const auto& p = model.anchors[a];
