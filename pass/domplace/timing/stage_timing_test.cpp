@@ -2,7 +2,10 @@
 #include "stage_timing.hpp"
 
 #include <algorithm>
+#include <map>
 #include <stdexcept>
+#include <string>
+#include <tuple>
 
 #include "domino_timing_fixture.hpp"
 #include "gtest/gtest.h"
@@ -334,6 +337,16 @@ TEST(StageTiming, ClockAccountingSumsSinksLoadsAndPlacementWire) {
   EXPECT_EQ(clock["wire_cap_ff"].GetDouble(), 3);
   EXPECT_EQ(clock["masters"]["FF"]["sinks"].GetUint(), 1U);
   EXPECT_EQ(clock["masters"][test::kDomino.c_str()]["cap_ff"].GetDouble(), 4);
+  // Per instance: each clock pin with its master (variant) and capacitance.
+  ASSERT_EQ(clock["sinks"].Size(), 2U);
+  std::map<std::string, std::tuple<std::string, std::string, double>> sinks;
+  for (const auto& sink : clock["sinks"].GetArray()) {
+    sinks[sink["pin"].GetString()] = {sink["master"].GetString(), sink["kind"].GetString(), sink["cap_ff"].GetDouble()};
+  }
+  EXPECT_EQ(sinks.at("ff:CLK"), std::make_tuple(std::string("FF"), std::string("cmos"), 3.));
+  EXPECT_EQ(sinks.at("d:CLK"), std::make_tuple(test::kDomino, std::string("domino"), 4.));
+  ASSERT_EQ(doc["stages"].Size(), 1U);
+  EXPECT_EQ(doc["stages"][0]["clock_cap_ff"].GetDouble(), 4);
   // Area: 2 + 6 um^2 of footprint, the domino's 4 um^2 from the bundle, and
   // the Liberty basis FF 10 + the domino estimate 3.5.
   EXPECT_EQ(doc["area"]["lef_footprint_um2"].GetDouble(), 8);

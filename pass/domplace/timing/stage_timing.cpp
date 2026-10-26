@@ -460,12 +460,18 @@ Stage_timing evaluate_stage_timing(const hhds::Graph& graph, const physical::Par
   // Clock accounting: sinks are the clock pins of sequential and domino
   // cells; net loads cover every clock-net driver (buffers included); wire
   // capacitance is the placement RC estimate of those nets.
+  struct Clock_sink {
+    std::string           pin, master;
+    bool                  domino = false;
+    std::optional<double> cap_ff;
+  };
   struct Clock_account {
     size_t                                           domino_sinks = 0, cmos_sinks = 0, missing = 0;
     double                                           sink_ff = 0, domino_ff = 0, cmos_ff = 0, net_load_ff = 0;
     std::optional<double>                            wire_ff;
     std::map<std::string, std::pair<size_t, double>> masters;  // sinks, capacitance
     std::set<std::string>                            drivers;
+    std::vector<Clock_sink>                          sinks;  // per instance, in pin order
   };
   std::map<std::string, Clock_account> clock_accounts;
   for (size_t i = 0; i < all.pins.size(); ++i) {
@@ -481,6 +487,7 @@ Stage_timing evaluate_stage_timing(const hhds::Graph& graph, const physical::Par
     }
     const auto& instance = instances.at(owner[i]);
     const auto  cap      = larger(pin_model[i]->capacitance_ff[0], pin_model[i]->capacitance_ff[1]);
+    account.sinks.push_back({pin.name, instance.master, instance.domino, cap});
     (instance.domino ? account.domino_sinks : account.cmos_sinks) += 1;
     auto& master                                                   = account.masters[instance.master];
     ++master.first;
@@ -833,6 +840,13 @@ Stage_timing evaluate_stage_timing(const hhds::Graph& graph, const physical::Par
     } else {
       w.Null();
     }
+    // This variant's labeled CLK load, as clock accounting sums it.
+    const auto clk = instance.pins.find(kDominoPins.clock);
+    real(w,
+         "clock_cap_ff",
+         clk != instance.pins.end() && pin_model[clk->second]
+             ? larger(pin_model[clk->second]->capacitance_ff[0], pin_model[clk->second]->capacitance_ff[1])
+             : std::nullopt);
     // Rails in pin order; an excluded rail is listed with its reason.
     w.Key("rails");
     w.StartArray();
@@ -943,6 +957,19 @@ Stage_timing evaluate_stage_timing(const hhds::Graph& graph, const physical::Par
       w.EndObject();
     }
     w.EndObject();
+    // Every clock sink: the instance's clock pin, its master (a domino
+    // master names its variant) and its capacitance.
+    w.Key("sinks");
+    w.StartArray();
+    for (const auto& clock_sink : account.sinks) {
+      w.StartObject();
+      text(w, "pin", clock_sink.pin);
+      text(w, "master", clock_sink.master);
+      text(w, "kind", clock_sink.domino ? "domino" : "cmos");
+      real(w, "cap_ff", clock_sink.cap_ff);
+      w.EndObject();
+    }
+    w.EndArray();
     w.EndObject();
   }
   w.EndObject();

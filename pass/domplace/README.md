@@ -142,9 +142,10 @@ coefficient null). `stage_timing.json` (schema 1) reports the model
 provenance, clocks, constraints, the period by class (flop, domino and input
 launches into flop, domino and output captures, from launch-filtered
 evaluations), coverage with `early: unknown` (setup only), every stage with
-its source state and path split, the endpoints, clock accounting (clock-pin
-and wire capacitance by domain and master), electrical limits and area on
-both bases.
+its source state, path split and CLK load, the endpoints, clock accounting
+(clock-pin capacitance per sink instance, summed by master, which names the
+domino variant, and by domain, plus the placement RC wire estimate; no CTS
+power or skew), electrical limits and area on both bases.
 
 `lhd synth --set synth.place.stage_timing=true` runs it after placement,
 fresh or restored, with or without the profile, so every arm has the same
