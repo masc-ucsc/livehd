@@ -2545,6 +2545,21 @@ legalization outside the final stage, the detail-final region mesh and ECO
 re-placement refuse explicitly, and a changed design places cold instead of
 re-placing around a cached reference; there is no DREAMPlace change.
 
+The one exception is the internal `Options::multirow_eco` (no lhd option),
+set by sizing transactions that swap two-row variants around a previous final
+placement (with `legalize_cells`). `multirow_eco.hpp` poses each edited
+two-row cell, widest first: a cell that is not wider keeps its pose; a wider
+one takes the nearest x of its own start row within `shift_sites` free of
+single-row cells, else the nearest one overlapping at most `max_displaced`
+single-row cells, else the packer's nearest pose for it alone, free of every
+cell. Poses keep the terminal `padding_sites` free, pass the row-access start
+check and the hard bin cap. The posed cells are then locked, padded
+obstacles while nearest-whitespace ECO legalization re-places the displaced
+and other edited single-row cells. Any failure throws `Multirow_failure` with
+nothing committed; the two-row ECO never falls back to windowed
+re-placement. `qor.multirow_eco` reports outcomes, released and grown sites
+(over both rows), displaced cells and the largest displacement.
+
 `terminal_legalize.json` records settings, bin capacities/areas, stage counts,
 SAT outcomes, retries and displacement. `terminal_legalize_cells.tsv` records
 critical membership, stage, slack and before/after coordinates. Normal placement

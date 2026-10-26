@@ -354,14 +354,15 @@ TEST(Placement, TerminalLegalizerIsLastAndPreservesItsExactOutput) {
 
 // A chain of sky130 cells (12 by default) in which c1, c5, c9... are a
 // two-row copy of inv_1 named `master`, given in its own LEF, for full
-// placement through the terminal legalizer.
+// placement through the terminal legalizer. `variants` instantiates other
+// A/Y masters (by cell index) whose LEF the caller supplies.
 constexpr const char* kDominoTwoRow = "__lhd_domino_two_row";
 struct Two_row_chain {
   std::vector<std::string>     lefs{"inou/lefdef/tests/data/sky130hd.tlef", "inou/lefdef/tests/data/sky130hd.lef"};
   hhds::GraphLibrary           source, flat;
   std::shared_ptr<hhds::Graph> graph;
   Options                      options = plain_options();
-  explicit Two_row_chain(const std::string& master, unsigned cells = 12) {
+  explicit Two_row_chain(const std::string& master, unsigned cells = 12, const std::map<unsigned, std::string>& variants = {}) {
     const auto tech  = physical::read_lef(lefs);
     auto       tall  = tech.macros.at("sky130_fd_sc_hd__inv_1");
     tall.height     *= 2;
@@ -378,17 +379,21 @@ struct Two_row_chain {
     io->add_output("y", 0);
     io->set_bits("y", 1);
     graph    = io->create_graph();
-    auto inv = source.create_io("sky130_fd_sc_hd__inv_1");
-    auto two = source.create_io(master);
-    for (const auto& cell : {inv, two}) {
-      cell->add_input("A", 0);
-      cell->add_output("Y", 0);
-    }
+    std::map<std::string, std::shared_ptr<hhds::GraphIO>> masters;
+    const auto                                            declare = [&](const std::string& name) {
+      auto& cell = masters[name];
+      if (!cell) {
+        cell = source.create_io(name);
+        cell->add_input("A", 0);
+        cell->add_output("Y", 0);
+      }
+      return cell;
+    };
     auto signal = graph->get_input_pin("a");
     gu::set_bits(signal, 1);
     for (unsigned i = 0; i < cells; ++i) {
       auto node = gu::create_typed_node(*graph, Ntype_op::Sub);
-      node.set_subnode(i % 4 == 1 ? two : inv);
+      node.set_subnode(declare(variants.contains(i) ? variants.at(i) : i % 4 == 1 ? master : "sky130_fd_sc_hd__inv_1"));
       node.set_name("c" + std::to_string(i));
       node.create_sink_pin("A").connect_driver(signal);
       signal = node.create_driver_pin("Y");
@@ -601,6 +606,170 @@ TEST(Placement, TwoRowPlacementsKeyTheCacheAndReuseItLegally) {
   expect_placed(place(*chain.graph, chain.flat, templated), "another template");
   EXPECT_NE(environment(), key);
   EXPECT_NE(environment(), renamed_key);
+}
+
+TEST(Placement, TwoRowEcoSwapsVariantsAroundTheirNeighbors) {
+  // c1 swaps to a wider variant of its two-row master (pins moved) around a
+  // reference frame with a single-row cell just past its padding; then back.
+  const std::string wide = std::string(kDominoTwoRow) + "_wide", huge = std::string(kDominoTwoRow) + "_huge";
+  Two_row_chain     chain(kDominoTwoRow);
+  const auto        dir   = std::filesystem::path(chain.options.output_dir).parent_path().string();
+  const auto        base  = physical::read_lef(chain.options.lefs);
+  const auto        write = [&](const std::string& name, unsigned sites, double pin_shift_um) {
+    auto macro  = base.macros.at(kDominoTwoRow);
+    macro.width = sites * base.sites.at("unithd").width;
+    for (auto& [pin_name, pin] : macro.pins) {
+      for (auto& shape : pin.shapes) {
+        shape.rect.xl += pin_shift_um;
+        shape.rect.xh += pin_shift_um;
+      }
+    }
+    std::ofstream(dir + "/" + name + ".lef") << physical::write_lef_macros(
+        {
+            {name, macro}
+    },
+        base.dbu);
+  };
+  write(wide, 6, base.sites.at("unithd").width);  // twice as wide, pins one site right
+  const auto setup = [&](Options& o, const std::string& out) {
+    o.lefs.push_back(dir + "/" + wide + ".lef");
+    o.row_access = physical::Row_access_convention{};
+    for (const auto& master : {std::string(kDominoTwoRow), wide, huge}) {
+      o.multirow_templates[master] = {
+          {physical::Row_access::horizontal, physical::Row_access::vertical}
+      };
+    }
+    o.output_dir = dir + "/" + out;
+  };
+  setup(chain.options, "cold");
+  const auto cold = place(*chain.graph, chain.flat, chain.options);
+  const auto all  = physical::read_lef(chain.options.lefs);
+  const auto sw = std::llround(all.sites.at("unithd").width * all.dbu), rh = std::llround(all.sites.at("unithd").height * all.dbu);
+
+  // The reference: the two-row cells at sites 2, 14 and 26 of rows 0-1; c0
+  // right past c1's padding site; the other cells on rows 2 and up.
+  auto reference = cold.floorplan;
+  std::sort(reference.rows.begin(), reference.rows.end(), [](const auto& a, const auto& b) { return a.y < b.y; });
+  ASSERT_GE(reference.rows.size(), 4U);
+  ASSERT_GE(reference.rows.front().count, 32);
+  ASSERT_EQ(chain.options.terminal_legalize_options.padding_sites, 1U);
+  unsigned next = 0;
+  for (auto& c : reference.components) {
+    const auto index = std::stoi(c.name.substr(1));
+    size_t     row   = 0;
+    int64_t    site  = 0;
+    if (c.macro == kDominoTwoRow) {
+      site = 2 + 12 * (index / 4);
+    } else if (index == 0) {
+      site = 6;
+    } else {
+      row  = 2 + next / 4;
+      site = 2 + 6 * (next++ % 4);
+    }
+    ASSERT_LT(row, reference.rows.size());
+    c.place.x           = reference.rows[row].x + site * sw;
+    c.place.y           = reference.rows[row].y;
+    c.place.orientation = reference.rows[row].orientation;
+    c.place.status      = physical::Status::PLACED;
+  }
+  EXPECT_NO_THROW(check_legality(all, reference));
+  const auto at = [](const physical::Floorplan& fp, const std::string& name) {
+    const auto it = std::find_if(fp.components.begin(), fp.components.end(), [&](const auto& c) { return c.name == name; });
+    if (it == fp.components.end()) {
+      throw std::out_of_range("no component " + name);
+    }
+    return *it;
+  };
+
+  Two_row_chain grown(kDominoTwoRow,
+                      12,
+                      {
+                          {1, wide}
+  });
+  auto&         eco = grown.options;
+  setup(eco, "grown");
+  eco.previous      = std::make_shared<const physical::Floorplan>(reference);
+  eco.changed_cells = {"c1"};
+  // Without the internal flag the single-row ECO refusal is unchanged.
+  try {
+    (void)place(*grown.graph, grown.flat, eco);
+    ADD_FAILURE() << "a two-row ECO ran without multirow_eco";
+  } catch (const std::invalid_argument& error) {
+    EXPECT_NE(std::string(error.what()).find("ECO legalization is single-row"), std::string::npos) << error.what();
+  }
+  eco.multirow_eco = Multirow_eco_bounds{.shift_sites = 0, .max_displaced = 16};
+  EXPECT_THROW((void)place(*grown.graph, grown.flat, eco), std::invalid_argument);  // needs legalize_cells
+  eco.legalize_cells = true;
+  const auto result  = place(*grown.graph, grown.flat, eco);
+  EXPECT_NO_THROW(check_legality(all, result.floorplan));
+  const auto c1 = at(result.floorplan, "c1"), c0 = at(result.floorplan, "c0");
+  EXPECT_EQ(c1.macro, wide);
+  EXPECT_EQ(c1.place.width, 6 * sw);
+  EXPECT_EQ(c1.place.height, 2 * rh);
+  EXPECT_EQ(c1.place.x, at(reference, "c1").place.x);  // grown in place
+  EXPECT_EQ(c1.place.y, at(reference, "c1").place.y);
+  EXPECT_EQ(c1.place.orientation, reference.rows.front().orientation);
+  EXPECT_GE(c0.place.x, c1.place.x + c1.place.width + sw);  // displaced past the padding
+  EXPECT_EQ(c0.place.y, c1.place.y);
+  for (const auto& c : result.floorplan.components) {
+    EXPECT_EQ(c.place.status, physical::Status::PLACED) << c.name;
+    if (c.name != "c0" && c.name != "c1") {
+      EXPECT_EQ(c.place, at(reference, c.name).place) << c.name;
+    }
+  }
+  rapidjson::Document qor;
+  qor.Parse(result.qor.c_str());
+  EXPECT_NEAR(lef_hpwl_um(all, result.floorplan), qor["hpwl_um"].GetDouble(), 1e-6);  // pins from the wide LEF
+  EXPECT_TRUE(qor["eco"]["used"].GetBool());
+  ASSERT_TRUE(qor.HasMember("multirow_eco"));
+  const auto& block = qor["multirow_eco"];
+  EXPECT_EQ(block["cells"].GetUint64(), 1U);
+  EXPECT_EQ(block["displaced"].GetUint64(), 1U);
+  EXPECT_EQ(block["grown_sites"].GetInt64(), 6);
+  EXPECT_EQ(block["displaced_cells"].GetUint64(), 1U);
+  EXPECT_EQ(block["shift_sites"].GetUint(), 0U);
+
+  // Back to the narrow variant: a down-size keeps the pose and releases the sites.
+  Two_row_chain narrow(kDominoTwoRow);
+  setup(narrow.options, "narrow");
+  narrow.options.previous       = std::make_shared<const physical::Floorplan>(result.floorplan);
+  narrow.options.changed_cells  = {"c1"};
+  narrow.options.legalize_cells = true;
+  narrow.options.multirow_eco   = Multirow_eco_bounds{};
+  const auto back               = place(*narrow.graph, narrow.flat, narrow.options);
+  EXPECT_NO_THROW(check_legality(all, back.floorplan));
+  EXPECT_EQ(at(back.floorplan, "c1").place, [&] {
+    auto p  = c1.place;
+    p.width = 3 * sw;
+    return p;
+  }());
+  rapidjson::Document back_qor;
+  back_qor.Parse(back.qor.c_str());
+  EXPECT_EQ(back_qor["multirow_eco"]["in_place"].GetUint64(), 1U);
+  EXPECT_EQ(back_qor["multirow_eco"]["released_sites"].GetInt64(), 6);
+  EXPECT_EQ(back_qor["multirow_eco"]["displaced_cells"].GetUint64(), 0U);
+  EXPECT_NEAR(lef_hpwl_um(all, back.floorplan), back_qor["hpwl_um"].GetDouble(), 1e-6);
+
+  // A growth that fits nowhere (a full row plus its padding) is rejected,
+  // never re-placed by local_place.
+  write(huge, unsigned(reference.rows.front().count), 0);
+  Two_row_chain rejected(kDominoTwoRow,
+                         12,
+                         {
+                             {1, huge}
+  });
+  setup(rejected.options, "rejected");
+  rejected.options.lefs.push_back(dir + "/" + huge + ".lef");
+  rejected.options.previous       = eco.previous;
+  rejected.options.changed_cells  = {"c1"};
+  rejected.options.legalize_cells = true;
+  rejected.options.multirow_eco   = Multirow_eco_bounds{};
+  try {
+    (void)place(*rejected.graph, rejected.flat, rejected.options);
+    ADD_FAILURE() << "an impossible two-row growth was placed";
+  } catch (const Multirow_failure& error) {
+    EXPECT_NE(std::string(error.what()).find("two-row ECO cannot place c1"), std::string::npos) << error.what();
+  }
 }
 
 TEST(Placement, LibraryTwoRowCellsKeepTheSingleRowPaths) {

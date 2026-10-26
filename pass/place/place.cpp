@@ -611,6 +611,9 @@ std::string environment_key(const Options& o, const ph::Technology& tech) {
     h = hash_text(std::format("multirow-template:{}:{}:{}", master, ph::row_access_name(t.half[0]), ph::row_access_name(t.half[1])),
                   h);
   }
+  if (o.multirow_eco) {
+    h = hash_text(std::format("multirow-eco-v1:{}:{}", o.multirow_eco->shift_sites, o.multirow_eco->max_displaced), h);
+  }
   if (o.pg != "none") {
     h = hash_text("native-pg-v1:" + o.pg, h);
   }
@@ -3188,8 +3191,43 @@ struct Eco_stats {
   size_t                 connectivity_nets = 0, connectivity_pins = 0, candidate_sites = 0, candidate_rows = 0;
   double                 connectivity_seconds = 0;
 };
+// An ECO re-places a cell that is new to the reference or whose master or
+// footprint changed.
+bool eco_dirty(const std::map<std::string, const ph::Component*>& reference, const Cell& c) {
+  const auto it = reference.find(c.name);
+  return it == reference.end() || it->second->macro != c.macro || it->second->place.width != c.place.width
+         || it->second->place.height != c.place.height;
+}
+// Terminal legalization's bin grid: an explicit legalize.bin.grid as given,
+// else the routing grid, bounded for tiny cores.
+void set_terminal_grid(const ph::Technology& tech, const ph::Floorplan& frame, const Options& options, int bins_x, int bins_y,
+                       Terminal_legalize_options& terminal) {
+  terminal.bins_x = bins_x;
+  terminal.bins_y = bins_y;
+  if (options.legalize_bins) {
+    terminal.bins_x = terminal.bins_y = options.legalize_bins;
+  } else {
+    fit_terminal_legalize_grid(tech, frame, terminal);
+  }
+}
+// The anchor prepass controls: the provisional domino masters and their
+// row-access templates, in terminal legalization's occupancy model.
+Multirow_options anchor_controls(const Options& options, const Terminal_legalize_options& terminal,
+                                 std::map<std::string, int64_t> core_origins) {
+  Multirow_options anchors;
+  anchors.access       = options.row_access ? &*options.row_access : nullptr;
+  anchors.templates    = &options.multirow_templates;
+  anchors.occupancy    = occupancy_controls(terminal);
+  anchors.core_origins = std::move(core_origins);
+  anchors.admits       = livehd::is_provisional_domino_cell;
+  return anchors;
+}
+// Nearest-whitespace ECO legalization of the dirty single-row CORE cells
+// around every other cell. Multi-row obstacles keep multirow_padding_sites
+// free on both sides, as the two-row ECO (multirow_eco.hpp) keeps them.
 bool legalize_edits(View& v, const ph::Technology& tech, const ph::Floorplan& reference, const std::vector<std::string>& forced,
-                    Eco_stats& stats, const std::vector<std::string>& trace_cells, double connectivity_weight) {
+                    Eco_stats& stats, const std::vector<std::string>& trace_cells, double connectivity_weight,
+                    unsigned multirow_padding_sites = 0) {
   const auto                                  connectivity_start = std::chrono::steady_clock::now();
   const std::set<std::string>                 traced(trace_cells.begin(), trace_cells.end());
   std::vector<Eco_trace>                      trace;
@@ -3200,9 +3238,7 @@ bool legalize_edits(View& v, const ph::Technology& tech, const ph::Floorplan& re
   }
   std::set<std::string> dirty(forced.begin(), forced.end());
   for (const auto& c : v.cells) {
-    const auto it = old.find(c.name);
-    if (it == old.end() || it->second->macro != c.macro || it->second->place.width != c.place.width
-        || it->second->place.height != c.place.height) {
+    if (eco_dirty(old, c)) {
       dirty.insert(c.name);
     }
   }
@@ -3223,6 +3259,10 @@ bool legalize_edits(View& v, const ph::Technology& tech, const ph::Floorplan& re
         obstacle.y      -= v.halo_y;
         obstacle.width  += 2 * v.halo_x;
         obstacle.height += 2 * v.halo_y;
+      } else if (multirow_padding_sites && is_multirow_core(tech, tech.macros.at(c.macro))) {
+        const auto padded = padded_rect(tech, {c.name, c.macro, c.place}, multirow_padding_sites);
+        obstacle.x        = std::llround(padded.xl);
+        obstacle.width    = std::llround(padded.xh - padded.xl);
       }
       obstacles.push_back(obstacle);
     } else if (!tech.macros.at(c.macro).klass.starts_with("CORE") || c.place.height != rh) {
@@ -3424,9 +3464,7 @@ dp::Result local_place(View& v, const ph::Technology& tech, const Options& optio
   };
   for (const auto& c : v.cells) {
     current.insert(c.name);
-    const auto it = old.find(c.name);
-    if (it == old.end() || it->second->macro != c.macro || it->second->place.width != c.place.width
-        || it->second->place.height != c.place.height) {
+    if (eco_dirty(old, c)) {
       dirty.insert(c.name);
     }
     if (dirty.contains(c.name)) {
@@ -5723,8 +5761,12 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
     if (options.busorder.enabled || options.boundarypins.enabled || options.boundarypins.align) {
       refuse("the detail-final region mesh (busorder, boundarypins) needs single-row cells");
     }
-    if (options.previous || !options.changed_cells.empty() || options.legalize_cells) {
-      refuse("ECO legalization is single-row");
+    if (!options.multirow_eco) {
+      if (options.previous || !options.changed_cells.empty() || options.legalize_cells) {
+        refuse("ECO legalization is single-row");
+      }
+    } else if (!options.previous || !options.legalize_cells) {
+      throw std::invalid_argument("the two-row ECO requires a previous placement and nearest-whitespace legalization");
     }
     // A changed design would re-place around a cached reference through the
     // same single-row ECO legalization. The cache must never fail a placement
@@ -5840,6 +5882,7 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
   };
   std::optional<Terminal_legalize_report> terminal_report;
   std::optional<Multirow_report>          multirow_report;
+  std::optional<Multirow_eco_report>      multirow_eco_report;
   std::vector<ph::Component>              handoff_cells;
   std::vector<ph::Row>                    handoff_rows;
   const bool macro_pin_adjust = options.macro_pin_adjust && movable_macros && !options.previous && !options.timing_seed;
@@ -5992,8 +6035,70 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
         }
       }
     }
-    if (options.legalize_cells
-        && legalize_edits(v, tech, *previous, changed, eco, options.eco_trace_cells, options.eco_connectivity_weight)) {
+    if (multirow_cells && options.multirow_eco) {
+      // The two-row ECO (multirow_eco.hpp) poses the edited two-row cells
+      // first; locked, with their padding, they are obstacles while
+      // nearest-whitespace legalization re-places the other edited cells and
+      // the single-row cells they displaced. It never reaches local_place,
+      // whose native GP and single-row legalization would split them.
+      std::map<std::string, const ph::Component*> old;
+      for (const auto& c : previous->components) {
+        old.emplace(c.name, &c);
+      }
+      const std::set<std::string> forced(changed.begin(), changed.end());
+      std::set<std::string>       edited;
+      auto                        frame = v.fp;
+      frame.components.clear();
+      for (const auto& c : v.cells) {
+        frame.components.push_back({c.name, c.macro, c.place});
+        if (!c.locked && c.place.status != Status::FIXED && c.place.status != Status::LOCKED
+            && livehd::is_provisional_domino_cell(c.macro) && is_multirow_core(tech, tech.macros.at(c.macro))
+            && (forced.contains(c.name) || eco_dirty(old, c))) {
+          edited.insert(c.name);
+        }
+      }
+      auto terminal             = options.terminal_legalize_options;
+      terminal.macro_halo_x_dbu = v.halo_x;
+      terminal.macro_halo_y_dbu = v.halo_y;
+      set_terminal_grid(tech,
+                        frame,
+                        options,
+                        route_grid_bins(control.auxiliary_bins, control.bins_x),
+                        route_grid_bins(control.auxiliary_bins, control.bins_y),
+                        terminal);
+      // No row is cut (handoff taps refuse a previous frame), so the frame's
+      // first core rows are the row-access origins.
+      multirow_eco_report = legalize_multirow_edits(tech,
+                                                    frame,
+                                                    *previous,
+                                                    {edited.begin(), edited.end()},
+                                                    {anchor_controls(options, terminal, {}), *options.multirow_eco});
+      for (size_t i = 0; i < v.cells.size(); ++i) {
+        v.cells[i].place = frame.components[i].place;
+        if (edited.contains(v.cells[i].name)) {
+          v.cells[i].locked = true;
+        }
+      }
+      changed.insert(changed.end(), multirow_eco_report->displaced.begin(), multirow_eco_report->displaced.end());
+      if (!legalize_edits(v,
+                          tech,
+                          *previous,
+                          changed,
+                          eco,
+                          options.eco_trace_cells,
+                          options.eco_connectivity_weight,
+                          terminal.padding_sites)) {
+        throw Multirow_failure("two-row ECO cannot re-place its single-row cells; no output committed");
+      }
+      for (auto& c : v.cells) {
+        if (edited.contains(c.name)) {
+          c.locked = false;  // movable again, PLACED in the output
+        }
+      }
+      make_arrays(v, tech);
+      metrics.legal = true;
+    } else if (options.legalize_cells
+               && legalize_edits(v, tech, *previous, changed, eco, options.eco_trace_cells, options.eco_connectivity_weight)) {
       metrics.legal = true;
     } else {
       metrics = local_place(v, tech, options, *previous, changed, eco);
@@ -6001,6 +6106,8 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
         cache = {0, hashes.size(), false};  // reused blocks were movable, as below
       }
     }
+  } else if (!cache.hit && multirow_cells && options.multirow_eco) {
+    throw std::invalid_argument("the two-row ECO requires the full-placement ECO branch (fixed IO, valid macro tracks)");
   } else if (!cache.hit) {
     if (!macro_active && !options.restart_seed) {
       // This prototype determines automatic IO locations. Keep it a plain GP
@@ -8106,26 +8213,19 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
       terminal_options.prects           = v.prects;
       terminal_options.route_drc        = options.satlegalize_route;
       terminal_options.route_vias       = options.satlegalize_route_vias ? tech_profile : nullptr;
-      terminal_options.bins_x           = route_grid_bins(control.auxiliary_bins, metrics.bins_x);
-      terminal_options.bins_y           = route_grid_bins(control.auxiliary_bins, metrics.bins_y);
       terminal_options.target_density   = options.density;
       terminal_options.macro_halo_x_dbu = v.halo_x;
       terminal_options.macro_halo_y_dbu = v.halo_y;
-      if (options.legalize_bins) {  // an explicit legalize.bin.grid is used as given
-        terminal_options.bins_x = terminal_options.bins_y = options.legalize_bins;
-      } else {
-        fit_terminal_legalize_grid(tech, frame, terminal_options);
-      }
+      set_terminal_grid(tech,
+                        frame,
+                        options,
+                        route_grid_bins(control.auxiliary_bins, metrics.bins_x),
+                        route_grid_bins(control.auxiliary_bins, metrics.bins_y),
+                        terminal_options);
       // Anchor the two-row cells first; terminal legalization packs the
       // single-row cells around them as fixed obstacles, then they are released.
       if (multirow_cells) {
-        Multirow_options anchors;
-        anchors.access           = options.row_access ? &*options.row_access : nullptr;
-        anchors.templates        = &options.multirow_templates;
-        anchors.occupancy        = occupancy_controls(terminal_options);
-        anchors.core_origins     = core_origins;
-        anchors.admits           = livehd::is_provisional_domino_cell;
-        multirow_report          = anchor_multirow_cells(tech, frame, anchors);
+        multirow_report = anchor_multirow_cells(tech, frame, anchor_controls(options, terminal_options, core_origins));
       }
       terminal_report = terminal_legalize(tech, frame, final_gp_timing, terminal_options);
       if (multirow_report) {
@@ -10059,6 +10159,33 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
       details.AddMember("trace", traces, trace_allocator);
     }
     json.AddMember("eco", rapidjson::Value(details, json.GetAllocator()), json.GetAllocator());
+    if (multirow_eco_report) {
+      // The two-row ECO; sites count every row a cell spans.
+      using Outcome = Multirow_eco_cell::Outcome;
+      constexpr std::array    outcomes{Outcome::in_place, Outcome::shifted, Outcome::displaced, Outcome::re_anchored};
+      std::array<uint64_t, 4> counts{};
+      int64_t                 released = 0, grown = 0;
+      double                  max_displacement = 0;
+      for (const auto& cell : multirow_eco_report->cells) {
+        ++counts[static_cast<size_t>(cell.outcome)];
+        released         += cell.released_sites;
+        grown            += cell.grown_sites;
+        max_displacement  = std::max(max_displacement, cell.displacement_um);
+      }
+      rapidjson::Value block(rapidjson::kObjectType);
+      block.AddMember("cells", static_cast<uint64_t>(multirow_eco_report->cells.size()), allocator);
+      for (const auto outcome : outcomes) {
+        const auto name = multirow_eco_outcome_name(outcome);
+        block.AddMember(rapidjson::StringRef(name.data(), name.size()), counts[static_cast<size_t>(outcome)], allocator);
+      }
+      block.AddMember("released_sites", released, allocator);
+      block.AddMember("grown_sites", grown, allocator);
+      block.AddMember("displaced_cells", static_cast<uint64_t>(multirow_eco_report->displaced.size()), allocator);
+      block.AddMember("max_displacement_um", max_displacement, allocator);
+      block.AddMember("shift_sites", options.multirow_eco->shift_sites, allocator);
+      block.AddMember("max_displaced", options.multirow_eco->max_displaced, allocator);
+      json.AddMember("multirow_eco", block, allocator);
+    }
     if (sat_report) {
       rapidjson::Value sat(rapidjson::kObjectType);
       sat.AddMember("stage", "final_cell", allocator);

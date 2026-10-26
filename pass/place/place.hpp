@@ -22,6 +22,7 @@
 #include "inou/lefdef/physical.hpp"
 #include "inou/lefdef/row_access.hpp"
 #include "multirow.hpp"
+#include "multirow_eco.hpp"
 #include "power_grid.hpp"
 #include "preroute_design.hpp"
 #include "rc_cache.hpp"
@@ -184,6 +185,11 @@ struct Options {
   // access class; without one, only LEF SYMMETRY filters starts.
   std::optional<physical::Row_access_convention>             row_access;
   std::map<std::string, Multirow_template>                   multirow_templates;  // by LEF macro
+  // Internal, no lhd option: with a previous frame and legalize_cells, edited
+  // two-row cells take the two-row ECO (multirow_eco.hpp) within these bounds
+  // instead of the refusal; nearest-whitespace legalization then re-places the
+  // single-row cells they displaced, and any failure throws Multirow_failure.
+  std::optional<Multirow_eco_bounds>                         multirow_eco;
   // Opt-in incident-net wirelength cost during nearest-whitespace ECO legalization (0..100).
   double                                                     eco_connectivity_weight = 0;
   // Diagnostic only: exact edited-cell names whose successful ECO seeds/sites are recorded in qor.eco.trace.
