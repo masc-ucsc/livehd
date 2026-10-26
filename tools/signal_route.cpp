@@ -122,7 +122,8 @@ int main(int argc, char** argv) {
       return checked.connected ? 0 : 2;
     }
     const auto                       occupancy = ph::routing_occupancy(tech, fp, fp.dbu);
-    livehd::placement::Signal_router router(tech, fp, occupancy);
+    const auto                       profile   = livehd::placement::signal_route_profile(ph::resolve_tech_profile(tech), tech);
+    livehd::placement::Signal_router router(tech, fp, occupancy, profile);
     const auto                       deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(budget_ms);
     if (probe) {
       const auto result = router.probe_route(*net,

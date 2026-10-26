@@ -342,14 +342,9 @@ Pin_access_result enumerate_pin_access(const Technology& tech, const Floorplan& 
                                        const std::string& own_net, const Pin_access_layers& layers) {
   return enumerate_pin_access_impl(tech, fp, cell, pin, {}, rules, budget, &occupancy, own_net, layers);
 }
-Pin_access_result enumerate_m1_pin_access(const Technology& tech, const Floorplan& fp, const Component& cell,
-                                          const std::string& pin, std::span<const Shape> obstacles, const Signal_metal_rules& rules,
-                                          size_t budget) {
-  return enumerate_pin_access_impl(tech, fp, cell, pin, obstacles, rules, budget, nullptr, {}, asap7_pin_access_layers());
-}
-Pin_access_result enumerate_m1_pin_access(const Technology& tech, const Floorplan& fp, const Component& cell,
-                                          const std::string& pin, const Routing_occupancy& occupancy,
-                                          const Signal_metal_rules& rules, size_t budget, const std::string& own_net) {
-  return enumerate_pin_access_impl(tech, fp, cell, pin, {}, rules, budget, &occupancy, own_net, asap7_pin_access_layers());
+Pin_access_result enumerate_pin_access(const Technology& tech, const Floorplan& fp, const Component& cell, const std::string& pin,
+                                       std::span<const Shape> obstacles, const Signal_metal_rules& rules, size_t budget,
+                                       const Pin_access_layers& layers) {
+  return enumerate_pin_access_impl(tech, fp, cell, pin, obstacles, rules, budget, nullptr, {}, layers);
 }
 }  // namespace livehd::physical

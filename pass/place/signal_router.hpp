@@ -94,16 +94,12 @@ public:
   // try_route builds a temporary guard against current occupancy within its budget.
   Signal_router(const physical::Technology&, const physical::Floorplan&, const physical::Routing_occupancy&, Signal_route_profile,
                 const Pin_escape_guard* = nullptr);
+  // Borrow a compiled oracle for repeated candidate checks; it must outlive this router.
   Signal_router(const physical::Technology&, const physical::Floorplan&, const physical::Routing_occupancy&,
                 const physical::Signal_metal_rules&, Signal_route_profile, const Pin_escape_guard* = nullptr);
   Signal_route_proposals try_route(const physical::Net&, const Signal_route_request&) const;
   // Returns a witness using the requested layer alternatives, without timing ranking.
   Signal_route_probe     probe_route(const physical::Net&, const Signal_route_request&) const;
-  // Existing ASAP7 callers retain their explicit first-platform defaults.
-  Signal_router(const physical::Technology&, const physical::Floorplan&, const physical::Routing_occupancy&);
-  // Borrow a compiled oracle for repeated candidate checks; it must outlive this router.
-  Signal_router(const physical::Technology&, const physical::Floorplan&, const physical::Routing_occupancy&,
-                const physical::Signal_metal_rules&);
   // Shares access, work and deadline budgets across all search stages.
   // Stay inside the retained corridor. An M2 witness may use legal V1 pin
   // access while retaining one horizontal signal trunk and no detour.

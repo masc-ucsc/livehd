@@ -53,6 +53,7 @@ Floorplan frame() {
   f.components.push_back({"u0", "cell", place});
   return f;
 }
+const Pin_access_layers& asap7_access() { return tech_profile("asap7").access; }
 
 TEST(PinEscapeGuard, ProtectClockAndSupplyPinsIncludingUnassignedAndWildcardPins) {
   for (const auto* use : {"CLOCK", "POWER", "GROUND"}) {
@@ -68,7 +69,7 @@ TEST(PinEscapeGuard, ProtectClockAndSupplyPinsIncludingUnassignedAndWildcardPins
         fp.special_nets.push_back(net);
       }
       auto             occupied = routing_occupancy(tech, fp, fp.dbu);
-      Pin_escape_guard guard(tech, fp, occupied, 1000);
+      Pin_escape_guard guard(tech, fp, occupied, 1000, {}, asap7_access());
       ASSERT_EQ(guard.protected_pins(), 1) << use << " mode=" << mode;
       EXPECT_TRUE(guard.check({}, "unrelated").legal);
       const auto blocked = guard.check(
@@ -95,7 +96,7 @@ TEST(PinEscapeGuard, PartialWiringDoesNotRetireUnconnectedPin) {
   net.wires.push_back({"FIXED", {path}});
   fp.nets.push_back(net);
   auto             occupied = routing_occupancy(tech, fp, fp.dbu);
-  Pin_escape_guard guard(tech, fp, occupied, 1000);
+  Pin_escape_guard guard(tech, fp, occupied, 1000, {}, asap7_access());
   ASSERT_EQ(guard.protected_pins(), 1);
   EXPECT_FALSE(guard
                    .check(
@@ -111,11 +112,11 @@ TEST(PinEscapeGuard, ExhaustedAccessSearchCannotSilentlyDropProtection) {
   auto fp   = frame();
   fp.nets.push_back({"unrouted", {{"u0", "A"}}, {}, "CLOCK"});
   auto             occupied = routing_occupancy(tech, fp, fp.dbu);
-  Pin_escape_guard bounded(tech, fp, occupied, 1);
+  Pin_escape_guard bounded(tech, fp, occupied, 1, {}, asap7_access());
   const auto       trial = bounded.check({}, "foreign");
   EXPECT_FALSE(trial.legal);
   EXPECT_NE(trial.reason.find("budget"), std::string::npos);
-  Pin_escape_guard sufficient(tech, fp, occupied, 1000);
+  Pin_escape_guard sufficient(tech, fp, occupied, 1000, {}, asap7_access());
   EXPECT_TRUE(sufficient.check({}, "foreign").legal);
 }
 
@@ -125,14 +126,14 @@ TEST(PinEscapeGuard, SupplyAttachmentRequiresActualRouteNotItsOwnPinRectangle) {
   auto fp                           = frame();
   fp.special_nets.push_back({"VDD", {{"u0", "A"}}, {}, "POWER"});
   auto             occupied = routing_occupancy(tech, fp, fp.dbu);
-  Pin_escape_guard unconnected(tech, fp, occupied, 1000);
+  Pin_escape_guard unconnected(tech, fp, occupied, 1000, {}, asap7_access());
   ASSERT_EQ(unconnected.protected_pins(), 1);
   occupied.insert({
       {"M1", {1018, 1027, 1036, 1243}},
       "VDD",
       true
   });
-  Pin_escape_guard connected(tech, fp, occupied, 1000);
+  Pin_escape_guard connected(tech, fp, occupied, 1000, {}, asap7_access());
   EXPECT_EQ(connected.protected_pins(), 0);
 }
 
@@ -147,7 +148,7 @@ TEST(PinEscapeGuard, UnsupportedControlAccessReservesItsCellButNotDistantRouting
     auto fp = frame();
     fp.nets.push_back({"control", {{"u0", "A"}}, {}, use});
     auto             occupied = routing_occupancy(tech, fp, fp.dbu);
-    Pin_escape_guard guard(tech, fp, occupied, 1000);
+    Pin_escape_guard guard(tech, fp, occupied, 1000, {}, asap7_access());
     EXPECT_EQ(guard.protected_pins(), 0);
     EXPECT_EQ(guard.unresolved_pins(), 1);
     // One shared reservation must protect each queried metal/cut layer with
@@ -216,7 +217,7 @@ TEST(PinEscapeGuard, UnsupportedControlAccessReservesItsCellButNotDistantRouting
       tech.vias["wide_upper"].shapes = {
           {"M8", {-1, -1, 1, 1}}
       };
-      Pin_escape_guard upper_via(tech, fp, occupied, 1000);
+      Pin_escape_guard upper_via(tech, fp, occupied, 1000, {}, asap7_access());
       EXPECT_TRUE(upper_via.check(outside, "foreign").legal);
       Generated_via generated;
       generated.layers      = {"M1", "V1", "M2"};
@@ -226,10 +227,10 @@ TEST(PinEscapeGuard, UnsupportedControlAccessReservesItsCellButNotDistantRouting
       generated.row_col     = std::array<int64_t, 2>{2, 3};
       generated.origin      = std::array<int64_t, 2>{400, 0};
       fp.vias.push_back({"wide", {}, generated});
-      Pin_escape_guard wide_via(tech, fp, occupied, 1000);
+      Pin_escape_guard wide_via(tech, fp, occupied, 1000, {}, asap7_access());
       EXPECT_TRUE(wide_via.check(outside, "foreign").legal);  // Unused DEF templates are not access candidates.
       tech.vias["VIA12"].shapes[1].rect = {-.4, -.009, .4, .009};
-      Pin_escape_guard large_access_via(tech, fp, occupied, 1000);
+      Pin_escape_guard large_access_via(tech, fp, occupied, 1000, {}, asap7_access());
       EXPECT_FALSE(large_access_via.check(outside, "foreign").legal);
     }
     // Existing same-net routing preserves this physical supply attachment.
@@ -239,7 +240,7 @@ TEST(PinEscapeGuard, UnsupportedControlAccessReservesItsCellButNotDistantRouting
           "control",
           true
       });
-      Pin_escape_guard attached(tech, fp, occupied, 1000);
+      Pin_escape_guard attached(tech, fp, occupied, 1000, {}, asap7_access());
       EXPECT_TRUE(attached
                       .check(
                           {
@@ -260,13 +261,14 @@ TEST(PinEscapeGuard, CumulativeBlocksRollbackAndLastAccess) {
   fp.nets.push_back(net);
   auto               occupied = routing_occupancy(tech, fp, fp.dbu);
   Signal_metal_rules rules(tech, fp);
-  auto               access = enumerate_m1_pin_access(tech, fp, fp.components[0], "A", occupied, rules, 1000, net.name);
+  auto               access
+      = enumerate_pin_access(tech, fp, fp.components[0], "A", occupied, rules, 1000, net.name, asap7_access());
   std::set<int64_t>  tracks;
   for (const auto& point : access.points) {
     tracks.insert(point.y);
   }
   ASSERT_GT(tracks.size(), 1);
-  Pin_escape_guard guard(tech, fp, occupied, 1000);
+  Pin_escape_guard guard(tech, fp, occupied, 1000, {}, asap7_access());
   ASSERT_EQ(guard.protected_pins(), 1);
   std::vector<Shape> all;
   for (auto y : tracks) {
@@ -302,7 +304,8 @@ TEST(PinEscapeGuard, PreserveEitherDirectionalRouterEscape) {
   fp.nets.push_back(net);
   auto               occupied = routing_occupancy(tech, fp, fp.dbu);
   Signal_metal_rules rules(tech, fp);
-  auto               access = enumerate_m1_pin_access(tech, fp, fp.components[0], "A", occupied, rules, 1000, net.name);
+  auto               access
+      = enumerate_pin_access(tech, fp, fp.components[0], "A", occupied, rules, 1000, net.name, asap7_access());
   ASSERT_EQ(access.points.size(), 1);
   const auto& point = access.points.front();
   // Short escapes clear both traces. Router probes extend 63 DBU from the
@@ -317,14 +320,14 @@ TEST(PinEscapeGuard, PreserveEitherDirectionalRouterEscape) {
   };
   EXPECT_TRUE(rules.spacing(point.escape, left).legal);
   EXPECT_TRUE(rules.spacing(point.escape, right).legal);
-  Pin_escape_guard guard(tech, fp, occupied, 1000);
+  Pin_escape_guard guard(tech, fp, occupied, 1000, {}, asap7_access());
   auto             trial = guard.check({left}, "left");
   ASSERT_TRUE(trial.legal) << trial.reason;
   guard.commit(trial);
   EXPECT_FALSE(guard.check({right}, "right").legal);
   EXPECT_TRUE(guard.check({right}, net.name).legal);
   occupied.insert({left, "existing"});
-  Pin_escape_guard rebuilt(tech, fp, occupied, 1000);
+  Pin_escape_guard rebuilt(tech, fp, occupied, 1000, {}, asap7_access());
   EXPECT_EQ(rebuilt.protected_pins(), 1);
   EXPECT_FALSE(rebuilt.check({right}, "right").legal);
 }
@@ -345,7 +348,8 @@ TEST(PinEscapeGuard, BareLandingEolMustSurviveAlongsideExtendedEscape) {
   fp.nets.push_back(net);
   auto               occupied = routing_occupancy(tech, fp, fp.dbu);
   Signal_metal_rules rules(tech, fp);
-  auto               access = enumerate_m1_pin_access(tech, fp, fp.components[0], "A", occupied, rules, 1000, net.name);
+  auto               access
+      = enumerate_pin_access(tech, fp, fp.components[0], "A", occupied, rules, 1000, net.name, asap7_access());
   ASSERT_FALSE(access.points.empty());
   const Shape trace{
       "M2",
@@ -359,11 +363,11 @@ TEST(PinEscapeGuard, BareLandingEolMustSurviveAlongsideExtendedEscape) {
     };
     EXPECT_FALSE(rules.spacing(landing, trace).legal);
   }
-  Pin_escape_guard guard(tech, fp, occupied, 1000);
+  Pin_escape_guard guard(tech, fp, occupied, 1000, {}, asap7_access());
   EXPECT_FALSE(guard.check({trace}, "foreign").legal);
   EXPECT_TRUE(guard.check({trace}, net.name).legal);
   occupied.insert({trace, "existing"});
-  Pin_escape_guard rebuilt(tech, fp, occupied, 1000);
+  Pin_escape_guard rebuilt(tech, fp, occupied, 1000, {}, asap7_access());
   EXPECT_EQ(rebuilt.protected_pins(), 0);  // No initially legal bare landing.
 }
 TEST(PinEscapeGuard, PreserveACompatibleWholeCellCombination) {
@@ -382,7 +386,7 @@ TEST(PinEscapeGuard, PreserveACompatibleWholeCellCombination) {
     fp.nets.push_back(net);
   }
   auto             occupied = routing_occupancy(tech, fp, fp.dbu);
-  Pin_escape_guard guard(tech, fp, occupied, 1000);
+  Pin_escape_guard guard(tech, fp, occupied, 1000, {}, asap7_access());
   ASSERT_EQ(guard.protected_pins(), 2);
   // Both pins retain individually legal access on Y=1045. Those landings
   // face each other with only 26 DBU between ends; the rule requires 31.
@@ -409,7 +413,7 @@ TEST(PinEscapeGuard, PreserveACompatibleWholeCellCombination) {
       {"Y", "M2", 1045, 3, 72}
   };
   auto             occupied_three = routing_occupancy(tech, fp, fp.dbu);
-  Pin_escape_guard cumulative(tech, fp, occupied_three, 1000);
+  Pin_escape_guard cumulative(tech, fp, occupied_three, 1000, {}, asap7_access());
   auto             first = cumulative.check(
       {
           {"M2", {900, 1180, 1200, 1198}}
@@ -444,7 +448,8 @@ TEST(PinEscapeGuard, CutSpacingAndRetiredNet) {
   fp.nets.push_back(net);
   auto               occupied = routing_occupancy(tech, fp, fp.dbu);
   Signal_metal_rules rules(tech, fp);
-  auto               access = enumerate_m1_pin_access(tech, fp, fp.components[0], "A", occupied, rules, 1000, net.name);
+  auto               access
+      = enumerate_pin_access(tech, fp, fp.components[0], "A", occupied, rules, 1000, net.name, asap7_access());
   ASSERT_FALSE(access.points.empty());
   std::vector<Shape> cuts;
   for (const auto& point : access.points) {
@@ -453,7 +458,7 @@ TEST(PinEscapeGuard, CutSpacingAndRetiredNet) {
         {double(point.x - 9), double(point.y - 9), double(point.x + 9), double(point.y + 9)}
     });
   }
-  Pin_escape_guard guard(tech, fp, occupied, 1000);
+  Pin_escape_guard guard(tech, fp, occupied, 1000, {}, asap7_access());
   EXPECT_FALSE(guard.check(cuts, "foreign").legal);
   auto own = guard.check(cuts, net.name);
   ASSERT_TRUE(own.legal);

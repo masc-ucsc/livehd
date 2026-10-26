@@ -64,9 +64,11 @@ void preroute_placed(Result& placed, const Options& options, const Evaluate& eva
   }
   auto tech = physical::read_lef(options.lefs);
   memory_proxies(*placed.graph, tech, options.liberty);
+  const auto&      tech_profile   = physical::resolve_tech_profile(tech, options.pg);
   auto&            timer          = *options.whatif;
   const auto       initial_timing = evaluate(placed);  // Repaired netlist and final legalized pin coordinates.
   Preroute_options route;
+  route.tech_profile           = tech_profile.name;
   route.per_net_budget         = std::chrono::milliseconds(cfg.budget_ms);
   route.timing.setup_margin_ps = cfg.setup_margin_ps;
   route.timing.hold_margin_ps  = cfg.hold_margin_ps;
@@ -124,8 +126,13 @@ void preroute_placed(Result& placed, const Options& options, const Evaluate& eva
       }
     }
   }
-  for (int metal = route.straight_only ? 1 : 2; metal <= 7; ++metal) {
-    const auto  name  = std::format("M{}", metal);
+  // Straight pin-layer segments are accounted alongside the signal layers.
+  const auto route_layers    = signal_route_profile(tech_profile, tech);
+  auto       capacity_layers = route_layers.signal_layers;
+  if (route.straight_only) {
+    capacity_layers.insert(capacity_layers.begin(), route_layers.access.pin);
+  }
+  for (const auto& name : capacity_layers) {
     const auto& layer = tech.layers.at(name);
     route.capacity.layers.push_back(name);
     if (layer.direction == "HORIZONTAL" && layer.pitch_y > 0) {
@@ -138,7 +145,7 @@ void preroute_placed(Result& placed, const Options& options, const Evaluate& eva
   }
   std::optional<Result> signal_first;
   if (options.satlegalize_pg_after) {
-    route.deferred_pg           = power_grid_profile(options.pg, tech);
+    route.deferred_pg           = power_grid_profile(tech_profile);
     route.deferred_pg->channels = options.pg_channels;
     signal_first                = placed;
     auto&                 base  = signal_first->floorplan;

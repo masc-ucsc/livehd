@@ -19,7 +19,6 @@ struct Terminal_legalize_options {
   Prects_library prects;
   Warp_options   remainder_warp{.weight = 1};
   unsigned       bins_x = 64, bins_y = 64;
-  bool           route_vias  = false;  // Permit checked M1-to-M2 endpoint access.
   bool           route_drc   = false;  // Full rectangular trace checks for the signal-routing experiment.
   double         max_density = .8, target_density = .5;
   double         remainder_wire_weight = 4;
@@ -33,6 +32,10 @@ struct Terminal_legalize_options {
   int64_t        macro_halo_x_dbu = 0, macro_halo_y_dbu = 0;
   // Zero disables that alignment stage, without disabling critical-cell locks.
   unsigned       critical_pair_limit = 256, local_pair_limit = 0;
+
+  // Permit checked pin-to-escape endpoint access with this technology profile's
+  // layers; null disables it.
+  const physical::Tech_profile* route_vias = nullptr;
 };
 struct Terminal_legalize_cell {
   size_t    index = 0;

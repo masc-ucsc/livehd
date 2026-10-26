@@ -1492,7 +1492,7 @@ bool satlegalize_route_preserved(const Satlegalize_route_quality& candidate, con
 
 std::vector<physical::Shape> satlegalize_pin_access_bounds(const physical::Technology& tech, const physical::Component& cell,
                                                            const Ann_place& place, const std::string& pin, int64_t dbu,
-                                                           bool allow_vias) {
+                                                           const physical::Tech_profile* via_profile) {
   std::vector<physical::Shape> result;
   const auto&                  macro = tech.macros.at(cell.macro);
   const auto                   found = macro.pins.find(pin);
@@ -1507,10 +1507,10 @@ std::vector<physical::Shape> satlegalize_pin_access_bounds(const physical::Techn
       }
     }
     // A broad-phase bound only: the via oracle verifies full pin enclosure
-    // and literal M2 tracks for every surviving pair of candidate poses.
-    if (allow_vias && shape.layer == "M1" && tech.layers.contains("M2")) {
-      if (auto rect = pin_access_rect(macro, shape, place, dbu, tech.layers.at("M2"))) {
-        result.push_back({"M2", *rect});
+    // and literal escape tracks for every surviving pair of candidate poses.
+    if (via_profile && shape.layer == via_profile->access.pin && tech.layers.contains(via_profile->access.escape)) {
+      if (auto rect = pin_access_rect(macro, shape, place, dbu, tech.layers.at(via_profile->access.escape))) {
+        result.push_back({via_profile->access.escape, *rect});
       }
     }
   }
@@ -1519,14 +1519,14 @@ std::vector<physical::Shape> satlegalize_pin_access_bounds(const physical::Techn
 
 bool satlegalize_aligned(const physical::Technology& tech, const physical::Floorplan& fp, const Satlegalize_alignment& pair,
                          const Ann_place& a, const Ann_place& b, const std::vector<size_t>& obstacles, physical::Shape* witness,
-                         const physical::Signal_metal_rules* route_rules, bool allow_vias) {
-  if (allow_vias && !route_rules) {
+                         const physical::Signal_metal_rules* route_rules, const physical::Tech_profile* via_profile) {
+  if (via_profile && !route_rules) {
     throw std::invalid_argument("SAT via access requires the routing rule oracle");
   }
   if (aligned(tech, fp, pair, a, b, &obstacles, witness, route_rules)) {
     return true;
   }
-  if (!allow_vias) {
+  if (!via_profile) {
     return false;
   }
   const auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(5);
@@ -1542,7 +1542,7 @@ bool satlegalize_aligned(const physical::Technology& tech, const physical::Floor
     }
     std::optional<std::pair<double, double>> result;
     for (const auto& shape : pin->second.shapes) {
-      if (shape.layer != "M1") {
+      if (shape.layer != via_profile->access.pin) {
         return {};
       }
       const auto rect = pin_rect(macro, shape, place, fp.dbu);
@@ -1633,7 +1633,7 @@ bool satlegalize_aligned(const physical::Technology& tech, const physical::Floor
   };
   probe.nets.push_back(net);
   const auto                occupancy = ph::routing_occupancy(tech, probe, fp.dbu);
-  const Signal_router       router(tech, probe, occupancy, *route_rules);
+  const Signal_router       router(tech, probe, occupancy, *route_rules, signal_route_profile(*via_profile, tech));
   // Bound this optional geometric predicate independently of solver fanout.
   const Signal_route_limits limits{1024, 256, deadline};
   const auto                result = router.probe_route(net, {limits, {}, false, true});

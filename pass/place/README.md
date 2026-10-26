@@ -653,11 +653,13 @@ the floorplan; conflicting installed rule definitions still fail validation.
 
 `Signal_route_profile` separates technology policy from route search: pin and
 escape layers, access cut, branch layer/cut, and ordered allowed signal layers.
-`asap7_signal_route_profile(tech)` retains the current M1 access and M2–M7 policy.
+`signal_route_profile(tech_profile, tech)` builds it from the technology profile
+(`physical::Tech_profile`, `inou/lefdef/tech_profile.hpp`; ASAP7 uses M1 access
+and M2–M7), stopping the signal layers at the first one the LEF lacks.
 Explicit profiles can use different layer/cut names; LEF supplies geometry and
 DRC, the floorplan supplies tracks, and `Route_technology_rc` supplies electrical
-characterization. `Preroute_options::route_profile` lets a host supply that policy;
-it is also used by the pin-escape guard. The current access/pattern algorithms
+characterization. `Preroute_options::tech_profile` selects the technology profile
+(`auto` detects it from the LEF); its policy is also used by the pin-escape guard. The current access/pattern algorithms
 require a horizontal escape and vertical branch, with modeled single-cut vias.
 This API separation is not certification of another PDK: its rules, power-grid
 profile, capacity/RC configuration and independent validation are still required.

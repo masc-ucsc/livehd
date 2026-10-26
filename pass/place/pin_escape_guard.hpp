@@ -64,11 +64,11 @@ class Pin_escape_guard {
   size_t                unresolved_pins_ = 0;
 
 public:
-  // An optional compiled rule oracle must match this frame and outlive the guard.
+  // Layers come from the technology profile. An optional compiled rule oracle
+  // must match this frame and outlive the guard.
   Pin_escape_guard(const physical::Technology&, const physical::Floorplan&, const physical::Routing_occupancy&,
-                   size_t access_budget, const std::function<void()>& checkpoint = {},
-                   physical::Pin_access_layers         layers = physical::asap7_pin_access_layers(),
-                   const physical::Signal_metal_rules* rules  = nullptr);
+                   size_t access_budget, const std::function<void()>& checkpoint, physical::Pin_access_layers layers,
+                   const physical::Signal_metal_rules* rules = nullptr);
   Pin_escape_trial check(const std::vector<physical::Shape>&, const std::string& net,
                          const std::function<bool()>& expired = {}) const;
   void             commit(const Pin_escape_trial&);

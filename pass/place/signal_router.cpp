@@ -26,11 +26,6 @@ void apply_signal_route_rules(ph::Floorplan& frame, const Signal_route_geometry&
   }
   frame.nondefault_rules.insert(geometry.nondefault_rules.begin(), geometry.nondefault_rules.end());
 }
-Signal_router::Signal_router(const ph::Technology& tech, const ph::Floorplan& frame, const ph::Routing_occupancy& occupancy)
-    : Signal_router(tech, frame, occupancy, asap7_signal_route_profile(tech)) {}
-Signal_router::Signal_router(const ph::Technology& tech, const ph::Floorplan& frame, const ph::Routing_occupancy& occupancy,
-                             const ph::Signal_metal_rules& rules)
-    : Signal_router(tech, frame, occupancy, rules, asap7_signal_route_profile(tech)) {}
 Signal_router::Signal_router(const ph::Technology& tech, const ph::Floorplan& frame, const ph::Routing_occupancy& occupancy,
                              Signal_route_profile profile, const Pin_escape_guard* pin_escapes)
     : tech_(tech)

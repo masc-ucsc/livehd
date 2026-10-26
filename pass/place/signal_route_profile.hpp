@@ -19,7 +19,8 @@ struct Signal_route_profile {
     return std::find(signal_layers.begin(), signal_layers.end(), layer) != signal_layers.end();
   }
 };
-// Explicit first supported platform. New nodes supply a separate profile;
-// routing algorithms and callers must not infer a process from layer spelling.
-Signal_route_profile asap7_signal_route_profile(const physical::Technology&);
+// The technology profile's routing policy. Signal layers stop at the first one
+// the technology lacks. Routing algorithms and callers must not infer a process
+// from layer spelling; tests may still supply other layer/cut names directly.
+Signal_route_profile signal_route_profile(const physical::Tech_profile&, const physical::Technology&);
 }  // namespace livehd::placement

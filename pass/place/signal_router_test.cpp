@@ -75,6 +75,7 @@ struct Fixture {
     }
     fp.nets.push_back(net);
   }
+  Signal_route_profile profile() const { return signal_route_profile(tech_profile("asap7"), tech); }
 };
 }  // namespace
 TEST(SignalRouter, ProfileAndNetRequestDoNotDependOnAsapLayerNames) {
@@ -213,7 +214,7 @@ TEST(SignalRouter, ProfileAndNetRequestDoNotDependOnAsapLayerNames) {
 TEST(SignalRouter, ProbeReturnsWitnessWithoutMutatingOrSearchingDetours) {
   Fixture              f;
   auto                 occupancy = routing_occupancy(f.tech, f.fp, 64);
-  Signal_router        router(f.tech, f.fp, occupancy);
+  Signal_router        router(f.tech, f.fp, occupancy, f.profile());
   Signal_route_request request{f.limits, {}, false, true};
   const auto           before = occupancy.size();
   auto                 probe  = router.probe_route(f.net, request);
@@ -244,7 +245,7 @@ TEST(SignalRouter, ProbeReturnsWitnessWithoutMutatingOrSearchingDetours) {
 TEST(SignalRouter, LongParallelExposureCanRejectLegalRouteWithoutMutatingOccupancy) {
   Fixture              f(2, 5000);
   auto                 occupancy = routing_occupancy(f.tech, f.fp, 64);
-  Signal_router        router(f.tech, f.fp, occupancy);
+  Signal_router        router(f.tech, f.fp, occupancy, f.profile());
   Signal_route_request request{f.limits, {}, false, true};
   auto                 clear = router.try_route(f.net, request);
   ASSERT_EQ(clear.candidates.size(), 1);
@@ -283,7 +284,7 @@ TEST(SignalRouter, LongParallelExposureCanRejectLegalRouteWithoutMutatingOccupan
 TEST(SignalRouter, ParallelExposureIgnoresOwnMetalAndDistantOrShortNeighbors) {
   Fixture              f(2, 5000);
   auto                 occupancy = routing_occupancy(f.tech, f.fp, 64);
-  Signal_router        router(f.tech, f.fp, occupancy);
+  Signal_router        router(f.tech, f.fp, occupancy, f.profile());
   Signal_route_request request{f.limits, {}, false, true};
   auto                 clear = router.try_route(f.net, request);
   ASSERT_EQ(clear.candidates.size(), 1);
@@ -313,7 +314,7 @@ TEST(SignalRouter, TryHardCannotBlockUnassignedClockOrSupplyAccess) {
     Fixture              f;
     auto                 occupied = routing_occupancy(f.tech, f.fp, 64);
     Signal_route_request request{f.limits, {}, false, true};
-    Signal_router        clear_router(f.tech, f.fp, occupied);
+    Signal_router        clear_router(f.tech, f.fp, occupied, f.profile());
     auto                 clear = clear_router.try_route(f.net, request);
     ASSERT_EQ(clear.candidates.size(), 1);
     request.corridor = clear.candidates.front().straight_corridor;
@@ -322,7 +323,7 @@ TEST(SignalRouter, TryHardCannotBlockUnassignedClockOrSupplyAccess) {
     // clears the M1 pin itself, but removes its only legal M2 via landing.
     f.tech.macros["cell"].pins["control"] = {"INPUT", use, {{"M1", {.072, .027, .090, .063}}}};
     occupied                              = routing_occupancy(f.tech, f.fp, 64);
-    Signal_router router(f.tech, f.fp, occupied);
+    Signal_router router(f.tech, f.fp, occupied, f.profile());
     for (bool hard : {false, true}) {
       request.try_hard = hard;
       auto blocked     = router.try_route(f.net, request);
@@ -338,7 +339,7 @@ TEST(SignalRouter, SpanSearchContinuesAfterAProtectedClockEscapeRejectsFirstTrac
   Fixture f;
   f.tech.macros["cell"].pins["CLK"] = {"INPUT", "CLOCK", {{"M1", {.072, .027, .090, .063}}}};
   auto          occupancy           = routing_occupancy(f.tech, f.fp, 64);
-  Signal_router router(f.tech, f.fp, occupancy);
+  Signal_router router(f.tech, f.fp, occupancy, f.profile());
   const auto    result = router.try_route(f.net, {f.limits, {}, false, true});
   ASSERT_EQ(result.candidates.size(), 1) << result.reason;
   ASSERT_TRUE(result.candidates.front().straight_corridor);
@@ -354,7 +355,7 @@ TEST(SignalRouter, StraightSatWitnessChecksMetalAndConnectionOrder) {
   };
   f.fp.tracks.push_back({"Y", "M1", 1050, 1, 36});
   auto          occupancy = routing_occupancy(f.tech, f.fp, 64);
-  Signal_router router(f.tech, f.fp, occupancy);
+  Signal_router router(f.tech, f.fp, occupancy, f.profile());
   const Shape   witness{
       "M1",
         {1041, 1041, 1559, 1059}
@@ -389,7 +390,7 @@ TEST(SignalRouter, StraightSatWitnessChecksMetalAndConnectionOrder) {
 TEST(SignalRouter, AlignedM2WitnessUsesViasWithoutEscapingItsTrackOrExtent) {
   Fixture       f;
   auto          occupancy = routing_occupancy(f.tech, f.fp, 64);
-  Signal_router router(f.tech, f.fp, occupancy);
+  Signal_router router(f.tech, f.fp, occupancy, f.profile());
   const Shape   corridor{
       "M2",
         {1000, 1036, 1550, 1054}
@@ -446,7 +447,7 @@ TEST(SignalRouter, AlignedLiftPreservesCentersAndUsesOnlyOneUpperTrunk) {
   // The upper vertical landings must also sit on legal tracks.
   f.fp.tracks.push_back({"X", "M3", 1000, 2000, 1});
   auto          occupancy = routing_occupancy(f.tech, f.fp, 64);
-  Signal_router router(f.tech, f.fp, occupancy);
+  Signal_router router(f.tech, f.fp, occupancy, f.profile());
   auto          base = router.propose_aligned(f.net,
                                               {
                                          "M2",
@@ -488,11 +489,11 @@ TEST(SignalRouter, AlignedLiftPreservesCentersAndUsesOnlyOneUpperTrunk) {
 TEST(SignalRouter, M2EndpointViasFailClosedForUnsupportedPinAccessRules) {
   Fixture f(2, 54);
   auto    occupancy = routing_occupancy(f.tech, f.fp, 64);
-  ASSERT_TRUE(Signal_router(f.tech, f.fp, occupancy).propose_span(f.net, f.limits).geometry);
+  ASSERT_TRUE(Signal_router(f.tech, f.fp, occupancy, f.profile()).propose_span(f.net, f.limits).geometry);
   auto& cut                            = f.tech.cut_layers.at("V1");
   cut.properties["LEF58_CUTCLASS"]     = {"CUTCLASS square WIDTH 0.018 ;"};
   cut.properties["LEF58_SPACINGTABLE"] = {"SPACINGTABLE DEFAULT 0.072 CUTCLASS square square - - ;"};
-  const auto rejected                  = Signal_router(f.tech, f.fp, occupancy).propose_span(f.net, f.limits);
+  const auto rejected                  = Signal_router(f.tech, f.fp, occupancy, f.profile()).propose_span(f.net, f.limits);
   EXPECT_FALSE(rejected.geometry);
   EXPECT_EQ(rejected.reason, "pin has no legal access");
   EXPECT_EQ(rejected.access_examined, 0);
@@ -502,11 +503,11 @@ TEST(SignalRouter, PatternsRespectLayerDirectionWithoutRightWayProperties) {
   f.tech.layers["M2"].rules.properties.clear();
   f.tech.layers["M3"] = f.tech.layers.at("M2");
   auto occupancy      = routing_occupancy(f.tech, f.fp, 64);
-  auto trial          = Signal_router(f.tech, f.fp, occupancy).propose_pattern(f.net, f.limits);
+  auto trial          = Signal_router(f.tech, f.fp, occupancy, f.profile()).propose_pattern(f.net, f.limits);
   EXPECT_FALSE(trial.geometry);
   EXPECT_EQ(trial.reason, "M2/M3 pattern requires horizontal/vertical layers");
   f.tech.layers["M2"].direction = "VERTICAL";
-  trial                         = Signal_router(f.tech, f.fp, occupancy).propose_span(f.net, f.limits);
+  trial                         = Signal_router(f.tech, f.fp, occupancy, f.profile()).propose_span(f.net, f.limits);
   EXPECT_FALSE(trial.geometry);
   EXPECT_EQ(trial.reason, "M2 span requires a horizontal layer");
 }
@@ -535,7 +536,7 @@ TEST(SignalRouter, ConnectsAllPinsWithoutMutatingPlacementOrOccupancy) {
     Fixture    f(count);
     auto       occupancy = routing_occupancy(f.tech, f.fp, 64);
     auto       before    = occupancy.size();
-    const auto result    = Signal_router(f.tech, f.fp, occupancy).propose_span(f.net, f.limits);
+    const auto result    = Signal_router(f.tech, f.fp, occupancy, f.profile()).propose_span(f.net, f.limits);
     ASSERT_TRUE(result.geometry) << result.reason;
     EXPECT_EQ(result.geometry->endpoints.size(), count);
     EXPECT_EQ(result.geometry->vias, count);
@@ -564,21 +565,21 @@ TEST(SignalRouter, AvoidsObstaclesBetweenEndpointsAndRejectsBlockedSpan) {
       {"M2", {1200, 1036, 1300, 1054}},
       "other"
   });
-  auto result = Signal_router(f.tech, f.fp, occupancy).propose_span(f.net, f.limits);
+  auto result = Signal_router(f.tech, f.fp, occupancy, f.profile()).propose_span(f.net, f.limits);
   ASSERT_TRUE(result.geometry) << result.reason;
   EXPECT_EQ(result.geometry->endpoints[0].y, 1081);
   occupancy.insert({
       {"M2", {1200, 1000, 1300, 1300}},
       "other"
   });
-  result = Signal_router(f.tech, f.fp, occupancy).propose_span(f.net, f.limits);
+  result = Signal_router(f.tech, f.fp, occupancy, f.profile()).propose_span(f.net, f.limits);
   EXPECT_FALSE(result.geometry);
   EXPECT_EQ(result.reason, "M2 span blocked");
 }
 TEST(SignalRouter, BoundsSearchAndRejectsIneligibleEndpoints) {
   Fixture       f;
   auto          occupancy = routing_occupancy(f.tech, f.fp, 64);
-  Signal_router router(f.tech, f.fp, occupancy);
+  Signal_router router(f.tech, f.fp, occupancy, f.profile());
   auto          limits = f.limits;
   limits.patterns      = 0;
   EXPECT_EQ(router.propose_span(f.net, limits).reason, "pattern budget");
@@ -599,7 +600,7 @@ TEST(SignalRouter, BoundsSearchAndRejectsIneligibleEndpoints) {
 TEST(SignalRouter, NewSameNetCutsMustRespectSpacing) {
   Fixture f(2, 20);
   auto    occupancy = routing_occupancy(f.tech, f.fp, 64);
-  auto    result    = Signal_router(f.tech, f.fp, occupancy).propose_span(f.net, f.limits);
+  auto    result    = Signal_router(f.tech, f.fp, occupancy, f.profile()).propose_span(f.net, f.limits);
   EXPECT_FALSE(result.geometry);
   EXPECT_EQ(result.reason, "M2 span blocked");
 }
@@ -618,7 +619,7 @@ TEST(SignalRouter, RoutesDifferentRowsThroughM3AndAvoidsBlockedTrunk) {
   f.fp.tracks.push_back({"Y", "M2", 1585, 6, 36});
   f.fp.tracks.push_back({"X", "M3", 9, 80, 36});
   auto          occupancy = routing_occupancy(f.tech, f.fp, 64);
-  Signal_router router(f.tech, f.fp, occupancy);
+  Signal_router router(f.tech, f.fp, occupancy, f.profile());
   EXPECT_FALSE(router.propose_span(f.net, f.limits).geometry);
   auto result = router.propose_pattern(f.net, f.limits);
   ASSERT_TRUE(result.geometry) << result.reason;
@@ -628,14 +629,14 @@ TEST(SignalRouter, RoutesDifferentRowsThroughM3AndAvoidsBlockedTrunk) {
       {"M3", {double(first_trunk - 9), 1300, double(first_trunk + 9), 1400}},
       "other"
   });
-  result = Signal_router(f.tech, f.fp, occupancy).propose_pattern(f.net, f.limits);
+  result = Signal_router(f.tech, f.fp, occupancy, f.profile()).propose_pattern(f.net, f.limits);
   ASSERT_TRUE(result.geometry) << result.reason;
   EXPECT_NE(std::get<Route_point>(result.geometry->paths.back().steps.front()).x, first_trunk);
   occupancy.insert({
       {"M3", {1000, 1300, 1600, 1400}},
       "other"
   });
-  EXPECT_FALSE(Signal_router(f.tech, f.fp, occupancy).propose_pattern(f.net, f.limits).geometry);
+  EXPECT_FALSE(Signal_router(f.tech, f.fp, occupancy, f.profile()).propose_pattern(f.net, f.limits).geometry);
   auto limits     = f.limits;
   limits.patterns = 0;
   EXPECT_FALSE(router.propose_pattern(f.net, limits).geometry);
@@ -661,7 +662,7 @@ TEST(SignalRouter, MultiRowTrunkConnectsEveryPinAndSharesSameTrackBranches) {
   };
   auto       occupancy = routing_occupancy(f.tech, f.fp, 64);
   const auto before    = occupancy.size();
-  auto       result    = Signal_router(f.tech, f.fp, occupancy).propose_pattern(f.net, f.limits);
+  auto       result    = Signal_router(f.tech, f.fp, occupancy, f.profile()).propose_pattern(f.net, f.limits);
   ASSERT_TRUE(result.geometry) << result.reason;
   EXPECT_EQ(result.geometry->endpoints.size(), 4);
   EXPECT_DOUBLE_EQ(result.geometry->wire_length_um,
@@ -678,11 +679,11 @@ TEST(SignalRouter, MultiRowTrunkConnectsEveryPinAndSharesSameTrackBranches) {
       {"M3", {0, 1800, 4000, 1900}},
       "other"
   });
-  EXPECT_FALSE(Signal_router(f.tech, f.fp, occupancy).propose_pattern(f.net, f.limits).geometry);
+  EXPECT_FALSE(Signal_router(f.tech, f.fp, occupancy, f.profile()).propose_pattern(f.net, f.limits).geometry);
   EXPECT_EQ(occupancy.size(), before + 1);
   auto limits     = f.limits;
   limits.deadline = std::chrono::steady_clock::now();
-  EXPECT_TRUE(Signal_router(f.tech, f.fp, occupancy).propose_pattern(f.net, limits).timed_out);
+  EXPECT_TRUE(Signal_router(f.tech, f.fp, occupancy, f.profile()).propose_pattern(f.net, limits).timed_out);
 }
 TEST(SignalRouter, MazeDetoursAroundBlockedSameRowWithoutPublishingFailures) {
   Fixture f;
@@ -707,7 +708,7 @@ TEST(SignalRouter, MazeDetoursAroundBlockedSameRowWithoutPublishingFailures) {
   const auto before = occupancy.size();
   auto       limits = f.limits;
   limits.patterns   = 10000;
-  Signal_router router(f.tech, f.fp, occupancy);
+  Signal_router router(f.tech, f.fp, occupancy, f.profile());
   EXPECT_FALSE(router.propose_span(f.net, limits).geometry);
   EXPECT_FALSE(router.propose_pattern(f.net, limits).geometry);
   const auto result = router.propose(f.net, limits);
@@ -778,7 +779,7 @@ TEST(SignalRouter, MazeUsesUpperLayersAcrossLowerLayerBarrier) {
   }
   auto limits       = f.limits;
   limits.patterns   = 20000;
-  const auto result = Signal_router(f.tech, f.fp, occupancy).propose(f.net, limits);
+  const auto result = Signal_router(f.tech, f.fp, occupancy, f.profile()).propose(f.net, limits);
   ASSERT_TRUE(result.geometry) << result.reason << " nodes=" << result.patterns_examined;
   EXPECT_GT(result.geometry->layer_wire_length_um.at("M7"), 0);
   auto routed = f.net;
@@ -824,7 +825,7 @@ TEST(SignalRouter, MazeUsesUpperLayersAcrossLowerLayerBarrier) {
   }
   f.tech.cut_layers["V5"].properties["LEF58_CUTCLASS"]  = {"CUTCLASS square WIDTH .018 ;"};
   f.tech.cut_layers["V5"].properties["LEF58_ENCLOSURE"] = {"ENCLOSURE CUTCLASS square EOL .01825 .005 .001 ;"};
-  const auto wide                                       = Signal_router(f.tech, f.fp, occupancy).propose_maze(f.net, limits);
+  const auto wide = Signal_router(f.tech, f.fp, occupancy, f.profile()).propose_maze(f.net, limits);
   ASSERT_TRUE(wide.geometry) << wide.reason;
   bool wider = false;
   for (const auto& path : wide.geometry->paths) {
@@ -857,14 +858,14 @@ TEST(SignalRouter, MazeUsesUpperLayersAcrossLowerLayerBarrier) {
         {"M1", 222}
     };
   }
-  const auto collision = Signal_router(f.tech, f.fp, occupancy).propose_maze(f.net, limits);
+  const auto collision = Signal_router(f.tech, f.fp, occupancy, f.profile()).propose_maze(f.net, limits);
   ASSERT_TRUE(collision.geometry) << collision.reason;
   for (const auto& [name, widths] : collision.geometry->nondefault_rules) {
     EXPECT_FALSE(f.fp.nondefault_rules.contains(name));
   }
   // Removing the M6/M7 transition must not silently jump the layer stack.
   f.tech.vias.erase("VIA67");
-  const auto rejected = Signal_router(f.tech, f.fp, occupancy).propose_maze(f.net, limits);
+  const auto rejected = Signal_router(f.tech, f.fp, occupancy, f.profile()).propose_maze(f.net, limits);
   EXPECT_FALSE(rejected.geometry);
   EXPECT_TRUE(f.fp.nets.front().wires.empty());
 }
@@ -892,7 +893,7 @@ TEST(SignalRouter, MultiPinSteinerMazeDetoursAndPublishesOnlyCompleteNet) {
   const auto before = occupancy.size();
   auto       limits = f.limits;
   limits.patterns   = 30000;
-  Signal_router router(f.tech, f.fp, occupancy);
+  Signal_router router(f.tech, f.fp, occupancy, f.profile());
   EXPECT_FALSE(router.propose_pattern(f.net, limits).geometry);
   auto result = router.propose(f.net, limits);
   ASSERT_TRUE(result.geometry) << result.reason;
@@ -959,7 +960,7 @@ TEST(SignalRouter, PatternExhaustionLeavesBudgetForMultiPinMaze) {
       {"M2", {1200, 900, 1300, 1300}},
       "blockage"
   });
-  Signal_router router(f.tech, f.fp, occupancy);
+  Signal_router router(f.tech, f.fp, occupancy, f.profile());
   auto          limits = f.limits;
   limits.patterns      = 20000;
   const auto pattern   = router.propose_pattern(f.net, limits);
@@ -1000,14 +1001,14 @@ TEST(SignalRouter, PatternEnforcesTableOnlySpacingBetweenNewCuts) {
       {"X", "M3",    9, 80,  36}
   };
   auto occupancy = routing_occupancy(f.tech, f.fp, 64);
-  ASSERT_TRUE(Signal_router(f.tech, f.fp, occupancy).propose_pattern(f.net, f.limits).geometry);
+  ASSERT_TRUE(Signal_router(f.tech, f.fp, occupancy, f.profile()).propose_pattern(f.net, f.limits).geometry);
   auto& cut = f.tech.cut_layers["V2"];
   cut.spacing.clear();
   cut.properties["LEF58_CUTCLASS"]     = {"CUTCLASS square WIDTH 0.018 ;"};
   cut.properties["LEF58_SPACINGTABLE"] = {"SPACINGTABLE DEFAULT 0.600 CUTCLASS square square - - ;"};
-  EXPECT_FALSE(Signal_router(f.tech, f.fp, occupancy).propose_pattern(f.net, f.limits).geometry);
+  EXPECT_FALSE(Signal_router(f.tech, f.fp, occupancy, f.profile()).propose_pattern(f.net, f.limits).geometry);
   // 540 nm center distance minus 18 nm cut width: exact 522 nm gap is legal.
   cut.properties["LEF58_SPACINGTABLE"] = {"SPACINGTABLE DEFAULT 0.522 CUTCLASS square square - - ;"};
-  EXPECT_TRUE(Signal_router(f.tech, f.fp, occupancy).propose_pattern(f.net, f.limits).geometry);
+  EXPECT_TRUE(Signal_router(f.tech, f.fp, occupancy, f.profile()).propose_pattern(f.net, f.limits).geometry);
 }
 }  // namespace livehd::placement

@@ -45,6 +45,7 @@ int main(int argc, char** argv) {
     }
     const auto tech   = ph::read_lef(lefs);
     const auto fp     = ph::read_def(def);
+    const auto& access = ph::resolve_tech_profile(tech).access;
     std::set<std::string> requested(instances.begin(), instances.end());
     if (requested.size() != instances.size() || requested.contains("")) {
       throw std::invalid_argument("empty or duplicate instance");
@@ -78,7 +79,7 @@ int main(int argc, char** argv) {
       w.Key("instance");
       w.String(instance.c_str());
       w.Key("scope");
-      w.String("M1 pin/M2 escape candidates; full-route acceptance remains separate");
+      w.String((access.pin + " pin/" + access.escape + " escape candidates; full-route acceptance remains separate").c_str());
       w.Key("signal_wires");
       w.String(signal_wires == ph::Signal_wires::include ? "included" : "excluded for diagnostic baseline");
       w.Key("obstacles");
@@ -91,7 +92,7 @@ int main(int argc, char** argv) {
         }
         const auto found = pin_nets.find({instance, name});
         const std::string own_net = found == pin_nets.end() ? std::string{} : found->second;
-        const auto result = ph::enumerate_m1_pin_access(tech, fp, *target, name, occupancy, rules, 10000, own_net);
+        const auto result = ph::enumerate_pin_access(tech, fp, *target, name, occupancy, rules, 10000, own_net, access);
         w.Key(name.c_str());
         w.StartObject();
         w.Key("examined");

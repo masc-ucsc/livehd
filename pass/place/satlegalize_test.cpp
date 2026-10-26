@@ -228,17 +228,18 @@ TEST(Satlegalize, LiftedM2WitnessRequiresLegalViasAndClearInstalledCorridor) {
   const Satlegalize_alignment        pair{0, 1, "A", "A"};
   const physical::Signal_metal_rules rules(tech, fp);
   physical::Shape                    witness;
+  const auto*                        vias = &physical::tech_profile("asap7");
   EXPECT_FALSE(satlegalize_aligned(tech, fp, pair, a, b, {0, 1}, &witness, &rules));
-  ASSERT_TRUE(satlegalize_aligned(tech, fp, pair, a, b, {0, 1}, &witness, &rules, true));
+  ASSERT_TRUE(satlegalize_aligned(tech, fp, pair, a, b, {0, 1}, &witness, &rules, vias));
   EXPECT_EQ(witness.layer, "M2");
   EXPECT_EQ(witness.rect.yl, 1036);
   EXPECT_TRUE(rules.rectangle(witness).legal);
-  const auto bounds = satlegalize_pin_access_bounds(tech, fp.components.front(), a, "A", fp.dbu, true);
+  const auto bounds = satlegalize_pin_access_bounds(tech, fp.components.front(), a, "A", fp.dbu, vias);
   EXPECT_TRUE(std::any_of(bounds.begin(), bounds.end(), [](const auto& shape) { return shape.layer == "M2"; }));
-  EXPECT_THROW(satlegalize_aligned(tech, fp, pair, a, b, {0, 1}, &witness, nullptr, true), std::invalid_argument);
+  EXPECT_THROW(satlegalize_aligned(tech, fp, pair, a, b, {0, 1}, &witness, nullptr, vias), std::invalid_argument);
   auto shifted  = b;
   shifted.y    += 270;
-  EXPECT_FALSE(satlegalize_aligned(tech, fp, pair, a, shifted, {0, 1}, &witness, &rules, true));
+  EXPECT_FALSE(satlegalize_aligned(tech, fp, pair, a, shifted, {0, 1}, &witness, &rules, vias));
   // Access at y=1045 straddles two pin rectangles. A bounds prefilter must
   // preserve their union rather than require enclosure in either rectangle.
   auto split_tech                                  = tech;
@@ -247,7 +248,7 @@ TEST(Satlegalize, LiftedM2WitnessRequiresLegalViasAndClearInstalledCorridor) {
       {"M1", {.018, .045, .036, .243}}
   };
   const physical::Signal_metal_rules split_rules(split_tech, fp);
-  ASSERT_TRUE(satlegalize_aligned(split_tech, fp, pair, a, b, {0, 1}, &witness, &split_rules, true));
+  ASSERT_TRUE(satlegalize_aligned(split_tech, fp, pair, a, b, {0, 1}, &witness, &split_rules, vias));
   EXPECT_EQ(witness.rect.yl, 1036);
   {
     auto clock_tech = tech;
@@ -260,7 +261,7 @@ TEST(Satlegalize, LiftedM2WitnessRequiresLegalViasAndClearInstalledCorridor) {
     // possible via escape must survive the neighboring signal alignment.
     clock_fp.nets.push_back({"clock", {{"a", "CLK"}}, {}, "CLOCK"});
     const physical::Signal_metal_rules clock_rules(clock_tech, clock_fp);
-    EXPECT_FALSE(satlegalize_aligned(clock_tech, clock_fp, pair, a, b, {0, 1}, &witness, &clock_rules, true));
+    EXPECT_FALSE(satlegalize_aligned(clock_tech, clock_fp, pair, a, b, {0, 1}, &witness, &clock_rules, vias));
   }
   auto& block        = tech.macros["block"];
   block.klass        = "BLOCK";
@@ -272,7 +273,7 @@ TEST(Satlegalize, LiftedM2WitnessRequiresLegalViasAndClearInstalledCorridor) {
   Ann_place obstacle(1200, 1000, 100, 300);
   obstacle.status = physical::Status::FIXED;
   fp.components.push_back({"obstacle", "block", obstacle});
-  EXPECT_FALSE(satlegalize_aligned(tech, fp, pair, a, b, {0, 1, 2}, &witness, &rules, true));
+  EXPECT_FALSE(satlegalize_aligned(tech, fp, pair, a, b, {0, 1, 2}, &witness, &rules, vias));
 }
 TEST(Satlegalize, RouteModeChecksSpacingBeforeAcceptingAnAlignment) {
   Fixture f;

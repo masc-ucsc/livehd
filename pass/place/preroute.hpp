@@ -25,8 +25,8 @@ struct Preroute_binding {
 std::vector<Preroute_binding> bind_preroute(const physical::Floorplan&, const physical::Parasitics&, const Preroute_design&,
                                             const std::set<std::string>& dont_touch_pins = {});
 struct Preroute_options {
-  // Explicit technology routing policy; absent retains the ASAP7 platform.
-  std::optional<Signal_route_profile>                 route_profile;
+  // Technology profile name, or "auto" to detect it from the technology passed in.
+  std::string                                         tech_profile = "auto";
   // Internal stage reuse only; the seed validates unchanged supply geometry.
   std::shared_ptr<const physical::Routing_power_grid> power_grid_occupancy;
   std::shared_ptr<const Route_capacity_seed>          capacity_seed;

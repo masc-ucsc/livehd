@@ -3886,6 +3886,12 @@ void check_placed_legality(const Result& result, const Options& options) {
   }
   check_legality(tech, result.floorplan, final_cell_options(options));
 }
+// Process policy for these options: an enabled native power grid names the
+// technology profile explicitly; otherwise it is detected from the LEF.
+static const ph::Tech_profile& placement_tech_profile(const ph::Technology& tech, const Options& options) {
+  const bool pg = options.pg != "none" && options.pg != "off";
+  return ph::resolve_tech_profile(tech, pg ? std::string_view(options.pg) : std::string_view("auto"));
+}
 void check_legality(const ph::Technology& tech, const ph::Floorplan& fp, const Options& requested) {
   const auto options = resolve_macro_halo(requested, fp.rows.empty() ? 0 : tech.sites.at(fp.rows.front().site).height);
   check_macro_halo(tech, fp, options);
@@ -4320,6 +4326,11 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
   }
   options.macro_parameters.validate();
   auto tech = ph::read_lef(options.lefs);
+  // Only features that need process policy resolve the technology profile.
+  const ph::Tech_profile* tech_profile = nullptr;
+  if (options.handoff_taps || options.satlegalize_route_vias || (options.pg != "none" && options.pg != "off")) {
+    tech_profile = &placement_tech_profile(tech, options);
+  }
   if (options.handoff_taps && !tech.macros.contains("TAPCELL_ASAP7_75t_R")) {
     throw std::invalid_argument("handoff taps currently require the ASAP7 TAPCELL_ASAP7_75t_R LEF master");
   }
@@ -4335,7 +4346,7 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
     if (!options.handoff_taps) {
       throw std::invalid_argument("synth.place.pg requires synth.place.handoff.taps=true");
     }
-    pg_profile                        = power_grid_profile(options.pg, tech);
+    pg_profile                        = power_grid_profile(*tech_profile);
     pg_profile->channels              = options.pg_channels;
     pg_profile->channel_max_ir_drop_v = options.pg_channel_max_ir_drop_v;
   }
@@ -8175,7 +8186,7 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
       auto terminal_options             = options.terminal_legalize_options;
       terminal_options.prects           = v.prects;
       terminal_options.route_drc        = options.satlegalize_route;
-      terminal_options.route_vias       = options.satlegalize_route_vias;
+      terminal_options.route_vias       = options.satlegalize_route_vias ? tech_profile : nullptr;
       terminal_options.bins_x           = route_grid_bins(control.auxiliary_bins, metrics.bins_x);
       terminal_options.bins_y           = route_grid_bins(control.auxiliary_bins, metrics.bins_y);
       terminal_options.target_density   = options.density;
@@ -10246,13 +10257,13 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
                                                          *route_occupancy,
                                                          1024,
                                                          std::function<void()>{},
-                                                         physical::asap7_pin_access_layers(),
+                                                         tech_profile->access,
                                                          &route_rules);
         router      = std::make_unique<Signal_router>(tech,
                                                  v.fp,
                                                  *route_occupancy,
                                                  route_rules,
-                                                 asap7_signal_route_profile(tech),
+                                                 signal_route_profile(*tech_profile, tech),
                                                  pin_escapes.get());
         for (const auto& net : v.fp.nets) {
           if (net.connections.size() == 2) {
@@ -10272,7 +10283,7 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
         const auto&                 b = v.fp.components.at(pair.second);
         physical::Shape             witness;
         const std::set<std::string> endpoints{a.name + ":" + pair.first_pin, b.name + ":" + pair.second_pin};
-        bool aligned = satlegalize_aligned(tech, v.fp, pair, a.place, b.place, obstacles, &witness, &route_rules, false);
+        bool aligned = satlegalize_aligned(tech, v.fp, pair, a.place, b.place, obstacles, &witness, &route_rules, nullptr);
         if (!aligned && router) {
           const auto net = two_pin_nets.find(endpoints);
           if (net != two_pin_nets.end()) {

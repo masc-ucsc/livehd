@@ -800,6 +800,7 @@ TEST_F(PhysicalSession, RepeaterProposalUsesRoutingRcAndOnlyAddsLegallyFixedCell
   tight.parasitics                         = std::make_shared<ph::Parasitics>(*state.parasitics);
   tight.parasitics->nets[1].wire_length_um = 1e6;
   pl::Preroute_options stage_options;
+  stage_options.tech_profile           = "asap7";
   stage_options.capacity.layers        = {layer};
   stage_options.per_net_budget         = std::chrono::milliseconds(2000);
   stage_options.timing.deadline        = std::chrono::steady_clock::now() + std::chrono::seconds(5);
@@ -963,6 +964,7 @@ TEST_F(PhysicalSession, IntegratedPreroutePublishesOnlyAcceptedGeometryAndRestor
   design.net_weights         = {1};
   design.build_maps();
   pl::Preroute_options opt;
+  opt.tech_profile   = "asap7";  // The synthetic M1/M2/V1 fixture follows its routing layers.
   opt.per_net_budget = std::chrono::milliseconds(2000);
   opt.capacity       = {
       fp.die,

@@ -168,7 +168,7 @@ static Preroute_result preroute_impl(const physical::Technology& tech, const phy
       throw std::invalid_argument("invalid or duplicate pre-route net mapping");
     }
   }
-  const auto      route_profile = options.route_profile.value_or(asap7_signal_route_profile(tech));
+  const auto      route_profile = signal_route_profile(physical::resolve_tech_profile(tech, options.tech_profile), tech);
   auto            phase_start   = std::chrono::steady_clock::now();
   Preroute_result result{frame, rc, {}, {}};
   const auto      phase = [&](const char* name) {
