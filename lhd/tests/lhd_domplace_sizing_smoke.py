@@ -152,11 +152,16 @@ assert report['clock']['delta_ff'] > 0, report['clock']  # the dfxtp_2 variant's
 bundle = root / 'W/grown/synth/qor.json.domino'
 sidecar = json.loads((bundle / 'domino_models.json').read_text())
 variants = {v['name']: v for m in sidecar['masters'] for v in m['variants']}
-v0, v1 = sorted(variants, key=lambda name: variants[name]['register'])
-assert variants[v1]['register'] == 'sky130_fd_sc_hd__dfxtp_2' and variants[v1]['width_dbu'] > variants[v0]['width_dbu']
 before = domplace_view.read_def(root / 'plain/out.def')
 after = domplace_view.read_def(root / 'grown/out.def')
 q1 = next(n for n in after.components if domplace_view.leaf(n) == 'q1')
+# The two rungs of q1's PG rail template (the one its start row needs).
+template = before.components[q1].macro.rpartition('_t')[2]
+assert before.components[q1].macro == domplace_view.rail_template(before.components[q1].macro,
+                                                                   before.rows[before.components[q1].y])
+v0, v1 = sorted((n for n in variants if n.endswith('_t' + template)), key=lambda name: variants[name]['register'])
+assert variants[v1]['register'] == 'sky130_fd_sc_hd__dfxtp_2' and variants[v1]['width_dbu'] > variants[v0]['width_dbu']
+assert variants[v0]['rail_twin'] in variants and variants[variants[v0]['rail_twin']]['register'] == variants[v0]['register']
 assert before.components[q1].macro == v0 and after.components[q1].macro == v1, (before.components[q1], after.components[q1])
 assert after.components[q1][1:4] == before.components[q1][1:4]  # grown in place, same rows and orientation
 assert after.components[q1].orientation == after.rows[after.components[q1].y]

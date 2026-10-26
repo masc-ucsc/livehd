@@ -18,7 +18,7 @@
 #include "rapidjson/writer.h"
 
 // Hand-computable fixtures for the provisional domino timing model: an inline
-// Liberty (scalar tables, 1 ps / 1 fF units) and a schema-3 bundle written to
+// Liberty (scalar tables, 1 ps / 1 fF units) and a schema-4 bundle written to
 // TEST_TMPDIR with chosen coefficients.
 namespace livehd::domplace::timing::test {
 // FF: clk-to-Q 10 rise / 20 fall, setup 5 rise / 8 fall, CLK 3 fF.
@@ -65,7 +65,7 @@ struct Sidecar {
       {  "precharge_margin_ps",  5}
   };
   // eval_delay_ps and precharge_ps are written into every variant's timing
-  // record (per-variant in schema 3); the rest into the stage model. Every
+  // record (per-variant since schema 3); the rest into the stage model. Every
   // coefficient's recorded source is `source`.
   std::string                                      source  = "logical-effort-estimate";
   std::optional<double>                            rail_ff = 2, clock_ff = 4, fo4 = 10;

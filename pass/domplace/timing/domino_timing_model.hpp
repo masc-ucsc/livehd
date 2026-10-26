@@ -32,7 +32,7 @@ struct Stage_values {
   std::optional<double> eval_delay_ps, precharge_ps, precharge_margin_ps;
 };
 
-// The timing part of a schema-2 bundle sidecar.
+// The timing part of a bundle sidecar (kBundleSchema).
 struct Domino_timing_view {
   std::string                        producer_salt, corner, clock, digest;  // digest: of the sidecar bytes
   uint32_t                           model_version = 0, stage_version = 0, bundle_schema = 0;

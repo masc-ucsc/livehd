@@ -90,8 +90,8 @@ const ph::Route_policy kSyntheticRoute{
     {"M1", "M2", "V1"},
     "M3", "V2", {}
 };
-usyn::Physical_cell_interface pins(const std::string& base, size_t rails, int variant = 0) {
-  usyn::Physical_cell_interface p{base + "_v" + std::to_string(variant) + "_t0", {}};
+usyn::Physical_cell_interface pins(const std::string& base, size_t rails, int variant = 0, int rail_template = 0) {
+  usyn::Physical_cell_interface p{base + "_v" + std::to_string(variant) + "_t" + std::to_string(rail_template), {}};
   for (size_t i = 0; i < rails; ++i) {
     p.rails.push_back("R" + std::to_string(i));
   }
@@ -286,6 +286,34 @@ TEST(DominoGeometry, TwoRowCoreAbstractWithEdgeRailsAndTrackStrips) {
   EXPECT_NEAR(vgnd[0], 0, 1e-9);
   EXPECT_NEAR(vgnd[1], 5.44, 1e-9);
   EXPECT_NEAR(vpwr[0], 2.72, 1e-9);
+  EXPECT_EQ(g.rail_template, 0u);
+  EXPECT_EQ(g.pg_rails, (std::array<std::string, 3>{"VGND", "VPWR", "VGND"}));
+
+  // Template t1, for FS starts: the inverter's top rail (VPWR) outside, the
+  // same function, signal pins, drive and footprint.
+  const auto t1 = generate_domino_macro(pins("__lhd_domino_ab", 4, 0, 1), pdn(4), kSky130Cells, 0, in, {}, 1);
+  EXPECT_EQ(t1.name, "__lhd_domino_ab_v0_t1");
+  EXPECT_EQ(t1.rail_template, 1u);
+  EXPECT_EQ(t1.pg_rails, (std::array<std::string, 3>{"VPWR", "VGND", "VPWR"}));
+  EXPECT_EQ(t1.width, g.width);
+  EXPECT_EQ(t1.halves, g.halves);
+  for (const auto* name : {"R0", "R1", "R2", "R3", "CLK", "Q"}) {
+    EXPECT_EQ(t1.macro.pins.at(name).shapes, m.pins.at(name).shapes) << name;
+  }
+  std::vector<double> t1_vpwr, t1_vgnd;
+  for (const auto& shape : t1.macro.pins.at("VPWR").shapes) {
+    t1_vpwr.push_back((shape.rect.yl + shape.rect.yh) / 2);
+  }
+  for (const auto& shape : t1.macro.pins.at("VGND").shapes) {
+    t1_vgnd.push_back((shape.rect.yl + shape.rect.yh) / 2);
+  }
+  ASSERT_EQ(t1_vpwr.size(), 2u);
+  ASSERT_EQ(t1_vgnd.size(), 1u);
+  EXPECT_NEAR(t1_vpwr[0], 0, 1e-9);
+  EXPECT_NEAR(t1_vpwr[1], 5.44, 1e-9);
+  EXPECT_NEAR(t1_vgnd[0], 2.72, 1e-9);
+  EXPECT_THROW(template_rails(in.footprint, 2), std::invalid_argument);
+  EXPECT_THROW(generate_domino_macro(pins("__lhd_domino_ab", 4), pdn(4), kSky130Cells, 0, in, {}, 2), std::invalid_argument);
 }
 TEST(DominoGeometry, RegenerationIsByteIdenticalAndRoundTripsThroughTheLefReader) {
   const auto in       = geometry_inputs(sky130(), kInv, kSky130Route);
@@ -293,14 +321,22 @@ TEST(DominoGeometry, RegenerationIsByteIdenticalAndRoundTripsThroughTheLefReader
     std::map<std::string, ph::Macro> macros;
     for (const auto& master : kMasters) {
       for (int variant = 0; variant < 3; ++variant) {
-        auto g = generate_domino_macro(pins(master.base, master.rails, variant), pdn(master.n_pdn), kSky130Cells, variant, in);
-        macros.emplace(g.name, std::move(g.macro));
+        for (int rail_template = 0; rail_template < 2; ++rail_template) {
+          auto g = generate_domino_macro(pins(master.base, master.rails, variant, rail_template),
+                                         pdn(master.n_pdn),
+                                         kSky130Cells,
+                                         variant,
+                                         in,
+                                         {},
+                                         uint32_t(rail_template));
+          macros.emplace(g.name, std::move(g.macro));
+        }
       }
     }
     return macros;
   };
   const auto macros = generate();
-  ASSERT_EQ(macros.size(), kMasters.size() * 3);
+  ASSERT_EQ(macros.size(), kMasters.size() * 3 * 2);  // both rail templates of every variant
   const auto text = write_lef_macros(macros, sky130().dbu);
   EXPECT_EQ(write_lef_macros(generate(), sky130().dbu), text);
   const auto back = ph::read_lef({kTlef, kLef, temp_lef("domino.lef", text)});
@@ -323,22 +359,31 @@ TEST(DominoGeometry, SyntheticAccessHoldsForBothParitiesFlipsPhasesAndDrives) {
   const auto in   = geometry_inputs(tech, "INVx1", kSyntheticRoute);
   for (const auto& master : kMasters) {
     for (int variant = 0; variant < 3; ++variant) {
-      const auto g
-          = generate_domino_macro(pins(master.base, master.rails, variant), pdn(master.n_pdn), kSyntheticCells, variant, in);
-      SCOPED_TRACE(g.name);
-      const auto c = check(in, g.macro, g.halves);
-      EXPECT_TRUE(c.ok);
-      EXPECT_TRUE(c.failures.empty()) << c.failures.front();
-      EXPECT_TRUE(c.unsupported.empty());
-      EXPECT_EQ(c.x_phases, 2u);
-      ASSERT_EQ(c.cases.size(), 8u);  // start rows 0 and 1 x N, FS, FN, S
-      for (const auto& k : c.cases) {
-        const bool even    = k.start_row % 2 == 0;
-        const bool flipped = k.orientation == ph::Orientation::FS || k.orientation == ph::Orientation::S;
-        EXPECT_EQ(k.compatible, even != flipped) << k.start_row << ph::orientation_name(k.orientation);
-        EXPECT_EQ(k.ok, k.compatible);
-        // Rails repeat the bottom polarity at 0 and 2H: wrong on odd starts.
-        EXPECT_EQ(k.pg_rows_match, k.compatible && even);
+      for (uint32_t rail_template = 0; rail_template < 2; ++rail_template) {
+        const auto g = generate_domino_macro(pins(master.base, master.rails, variant, int(rail_template)),
+                                             pdn(master.n_pdn),
+                                             kSyntheticCells,
+                                             variant,
+                                             in,
+                                             {},
+                                             rail_template);
+        SCOPED_TRACE(g.name);
+        const auto c = check(in, g.macro, g.halves);
+        EXPECT_TRUE(c.ok);
+        EXPECT_TRUE(c.failures.empty()) << c.failures.front();
+        EXPECT_TRUE(c.unsupported.empty());
+        EXPECT_EQ(c.x_phases, 2u);
+        ASSERT_EQ(c.cases.size(), 8u);  // start rows 0 and 1 x N, FS, FN, S
+        for (const auto& k : c.cases) {
+          const bool even    = k.start_row % 2 == 0;
+          const bool flipped = k.orientation == ph::Orientation::FS || k.orientation == ph::Orientation::S;
+          EXPECT_EQ(k.compatible, even != flipped) << k.start_row << ph::orientation_name(k.orientation);
+          // On alternating N/FS rows t0 (VSS outside) fits the N (even)
+          // starts and t1 (VDD outside) the FS (odd) starts.
+          EXPECT_EQ(k.pg_rows_match, k.compatible && even == (rail_template == 0));
+          EXPECT_EQ(k.ok, k.pg_rows_match);
+        }
+        EXPECT_EQ(c.parity, (std::array{rail_template == 0, rail_template == 1}));
       }
     }
   }
@@ -357,13 +402,22 @@ TEST(DominoGeometry, MirroredStartsKeepVerticalAccessOnAnUnevenTrackOffset) {
   tech.layers.at("M3").offset_x = .006;
   tech.layers.at("M3").offset_y = .006;
   const auto in                 = geometry_inputs(tech, "INVx1", kSyntheticRoute);
-  const auto g                  = generate_domino_macro(pins("__lhd_domino_ab", 4), pdn(4), kSyntheticCells, 0, in);
-  const auto c                  = check(in, g.macro, g.halves);
-  EXPECT_TRUE(c.failures.empty()) << c.failures.front();
-  EXPECT_TRUE(c.ok);
-  ASSERT_EQ(c.cases.size(), 8u);
-  for (const auto& k : c.cases) {
-    EXPECT_EQ(k.ok, k.compatible) << k.start_row << ph::orientation_name(k.orientation);
+  for (uint32_t rail_template = 0; rail_template < 2; ++rail_template) {
+    const auto g = generate_domino_macro(pins("__lhd_domino_ab", 4, 0, int(rail_template)),
+                                         pdn(4),
+                                         kSyntheticCells,
+                                         0,
+                                         in,
+                                         {},
+                                         rail_template);
+    const auto c = check(in, g.macro, g.halves);
+    EXPECT_TRUE(c.failures.empty()) << c.failures.front();
+    EXPECT_TRUE(c.ok);
+    ASSERT_EQ(c.cases.size(), 8u);
+    for (const auto& k : c.cases) {
+      EXPECT_EQ(k.ok, k.compatible && (k.start_row % 2 == 0) == (rail_template == 0))
+          << k.start_row << ph::orientation_name(k.orientation);
+    }
   }
 }
 TEST(DominoGeometry, MissingSymmetryXIsRefused) {
@@ -412,8 +466,14 @@ TEST(DominoGeometry, AccessFailuresNameThePinRowOrientationAndPhase) {
     });
     const auto c = check(in, m, g.halves);
     EXPECT_TRUE(has_failure(c, "CLK: start row 0 N x-phase 0:", "no horizontal access in core row 0"));
-    EXPECT_TRUE(has_failure(c, "CLK: start row 1 FS", "no horizontal access in core row 2"));
+    EXPECT_FALSE(has_failure(c, "CLK: start row 1 FS", ""));  // t0 does not start on FS rows
     EXPECT_FALSE(has_failure(c, "R0:", ""));
+    // The t1 template, with the same signal geometry, serves the FS starts.
+    auto t1         = generate_domino_macro(pins("__lhd_domino_ab", 4, 0, 1), pdn(4), kSyntheticCells, 0, in, {}, 1).macro;
+    t1.obstructions = m.obstructions;
+    const auto c1   = check(in, t1, g.halves);
+    EXPECT_TRUE(has_failure(c1, "CLK: start row 1 FS", "no horizontal access in core row 2"));
+    EXPECT_FALSE(has_failure(c1, "CLK: start row 0 N", ""));
   }
   {
     // PG access: the middle rail is required on every start.

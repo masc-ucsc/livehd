@@ -84,7 +84,8 @@ rows = fits.rows
 anchors = {domplace_view.leaf(n): c[:4] for n, c in fits.components.items() if c.macro.startswith(domplace_view.DOMINO_PREFIX)}
 assert sorted(anchors) == sorted(instances), anchors
 for state, (master, x, y, orientation) in anchors.items():
-    assert master == instances[state] and y % row_height == 0 and y + row_height in rows, (state, anchors[state])
+    assert master == domplace_view.rail_template(instances[state], rows[y]), (state, anchors[state])
+    assert y % row_height == 0 and y + row_height in rows, (state, anchors[state])
     assert orientation == rows[y], (state, orientation, rows[y])
     assert padding * site <= x and x + widths[master] * site <= (columns - padding) * site, (state, x)
 # Every anchor takes a row pair of its own; q2 has exactly one legal x.

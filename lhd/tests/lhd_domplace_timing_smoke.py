@@ -124,7 +124,7 @@ assert len(reasons) == summary['excluded'], (reasons, summary)
 classes = {(c['launch'], c['capture']): c for c in timing['classes']}
 assert ('domino', 'domino') in classes, classes  # q2.Q into its own rail
 model = timing['model']['provisional']
-assert model['bundle_schema'] == 3 and model['coefficients']['eval_delay_ps']['source'] == 'option', model
+assert model['bundle_schema'] == 4 and model['coefficients']['eval_delay_ps']['source'] == 'option', model
 stages = {s['stage_id'].rsplit('.', 1)[-1]: s for s in timing['stages']}
 assert sorted(stages) == ['q1', 'q2'], stages.keys()
 for leaf, stage in stages.items():

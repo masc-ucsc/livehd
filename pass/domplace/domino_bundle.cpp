@@ -75,7 +75,13 @@ struct Variant {
   usyn::Physical_cell_interface cell;
   Domino_variant_geometry       geometry;
   Access_check                  access;
+  size_t                        rung = 0;  // index into the reference register ladder
+  std::string                   twin;      // the other rail template of this rung
 };
+// Row orientations a rail template's bottom rail matches (template_rails).
+std::array<std::string_view, 2> start_orientations(uint32_t rail_template) {
+  return rail_template ? std::array<std::string_view, 2>{"FS", "S"} : std::array<std::string_view, 2>{"N", "FN"};
+}
 }  // namespace
 
 std::optional<Bundle_design> collect_domino_design(const usyn::Logical_design& design, usyn::Budget& work) {
@@ -216,20 +222,38 @@ Bundle_result generate_domino_bundle(const Bundle_design& design, const Bundle_i
           throw std::invalid_argument("invalid domino master formula: " + master.base);
         }
         for (size_t v = 0; v < reference.registers.size(); ++v) {
-          auto& variant    = variants[m].emplace_back();
-          variant.cell     = domino_interface(master, v);
-          variant.geometry = generate_domino_macro(variant.cell, *metrics, reference, v, inputs.geometry);
-          variant.access   = check_domino_access(inputs.geometry, variant.geometry.macro, variant.geometry.halves, scratch);
-          if (!variant.access.failures.empty()) {
-            result.reason = std::format("{}: pin access check failed: {}", variant.cell.name, variant.access.failures.front());
-            fs::remove_all(out_dir, ec);
-            return result;
+          // Both PG rail templates of the rung: one per start-row parity, the
+          // same function, pins and drive.
+          std::array<bool, 2> parity{};
+          for (uint32_t rail_template = 0; rail_template < 2; ++rail_template) {
+            auto& variant    = variants[m].emplace_back();
+            variant.rung     = v;
+            variant.cell     = domino_interface(master, v, rail_template);
+            variant.twin     = domino_interface(master, v, 1 - rail_template).name;
+            variant.geometry = generate_domino_macro(variant.cell, *metrics, reference, v, inputs.geometry, {}, rail_template);
+            variant.access   = check_domino_access(inputs.geometry, variant.geometry.macro, variant.geometry.halves, scratch);
+            if (!variant.access.failures.empty()) {
+              result.reason = std::format("{}: pin access check failed: {}", variant.cell.name, variant.access.failures.front());
+              fs::remove_all(out_dir, ec);
+              return result;
+            }
+            for (int p = 0; p < 2; ++p) {
+              parity[p] = parity[p] || variant.access.parity[p];
+            }
+            unsupported.insert(variant.access.unsupported.begin(), variant.access.unsupported.end());
+            macros.emplace(variant.cell.name, variant.geometry.macro);
+            result.footprints.emplace(variant.cell.name, variant.geometry.a_footprint_um2);
+            emit_domino_model(library, master, variant.cell);
+            verilog += domino_verilog_model(master, variant.cell);
           }
-          unsupported.insert(variant.access.unsupported.begin(), variant.access.unsupported.end());
-          macros.emplace(variant.cell.name, variant.geometry.macro);
-          result.footprints.emplace(variant.cell.name, variant.geometry.a_footprint_um2);
-          emit_domino_model(library, master, variant.cell);
-          verilog += domino_verilog_model(master, variant.cell);
+          for (int p = 0; p < 2; ++p) {
+            if (!parity[p]) {
+              result.reason
+                  = std::format("{}: no PG rail template fits {} start rows", variants[m].back().cell.name, p ? "odd" : "even");
+              fs::remove_all(out_dir, ec);
+              return result;
+            }
+          }
         }
       }
       Hhds_graph_library::save(models);
@@ -302,6 +326,14 @@ Bundle_result generate_domino_bundle(const Bundle_design& design, const Bundle_i
     text(w, "site", site);
     real(w, "row_height_um", tech.sites.at(site).height);
     real(w, "site_width_um", tech.sites.at(site).width);
+    // The rail pattern every template derives from: the reference inverter's
+    // PG pins on the bottom and top edges of an N row.
+    w.Key("row_rails");
+    w.StartObject();
+    text(w, "source", "reference inverter " + inverter.name + " in an N row; flipped (FS, S) rows swap them");
+    text(w, "bottom", inputs.geometry.footprint.rails[0].pin);
+    text(w, "top", inputs.geometry.footprint.rails[1].pin);
+    w.EndObject();
     w.EndObject();
     w.Key("row_access");
     w.RawValue(row_access.data(), row_access.size(), rapidjson::kObjectType);
@@ -443,11 +475,24 @@ Bundle_result generate_domino_bundle(const Bundle_design& design, const Bundle_i
       number(w, "branches", metrics.branches);
       w.Key("variants");
       w.StartArray();
-      for (size_t v = 0; v < variants[m].size(); ++v) {
-        const auto& [cell, g, access] = variants[m][v];
+      for (const auto& [cell, g, access, v, twin] : variants[m]) {
         w.StartObject();
         text(w, "name", cell.name);
         text(w, "register", reference.registers[v].name);
+        number(w, "template", g.rail_template);
+        w.Key("pg_rails");
+        w.StartArray();
+        for (const auto& pin : g.pg_rails) {
+          json::string(w, pin);
+        }
+        w.EndArray();
+        w.Key("start_orientations");
+        w.StartArray();
+        for (const auto o : start_orientations(g.rail_template)) {
+          json::string(w, o);
+        }
+        w.EndArray();
+        text(w, "rail_twin", twin);
         real(w, "x", g.x);
         real(w, "a_not_um2", g.a_not_um2);
         real(w, "a_register_um2", g.a_register_um2);
@@ -527,6 +572,8 @@ Bundle_result generate_domino_bundle(const Bundle_design& design, const Bundle_i
                static_cast<uint64_t>(
                    std::count_if(access.cases.begin(), access.cases.end(), [](const auto& c) { return c.compatible; })));
         number(w, "x_phases", access.x_phases);
+        json::flag(w, "even_starts", access.parity[0]);
+        json::flag(w, "odd_starts", access.parity[1]);
         w.EndObject();
         w.EndObject();
       }
@@ -651,7 +698,7 @@ std::optional<Domino_sidecar> read_domino_sidecar(const rapidjson::Document& doc
     for (const auto& rail : master["rails"].GetArray()) {
       rails.push_back(string(rail, "pin"));
     }
-    uint32_t rank = 0;
+    std::map<std::string, uint32_t> ranks;  // by family: the register ladder order
     for (const auto& variant : master["variants"].GetArray()) {
       if (!variant.IsObject() || !variant.HasMember("name") || !variant["name"].IsString() || !variant.HasMember("halves")
           || !variant["halves"].IsArray() || variant["halves"].Size() != 2 || !variant.HasMember("width_dbu")
@@ -662,7 +709,6 @@ std::optional<Domino_sidecar> read_domino_sidecar(const rapidjson::Document& doc
       Catalog_entry entry;
       entry.name             = string(variant, "name");
       entry.register_cell    = string(variant, "register");
-      entry.rank             = rank++;  // the register ladder order
       entry.rails            = rails;
       entry.width_dbu        = static_cast<int64_t>(variant["width_dbu"].GetUint64());
       entry.a_footprint_um2  = estimate(variant, "a_footprint_um2").value_or(0);
@@ -683,6 +729,16 @@ std::optional<Domino_sidecar> read_domino_sidecar(const rapidjson::Document& doc
         return refuse("variant " + entry.name + " is not named after its master " + base);
       }
       entry.family = base + entry.name.substr(tag);
+      entry.base   = base;
+      entry.rank   = ranks[entry.family]++;
+      // The other PG rail template; without one, starts of the other rail
+      // parity are refused at placement.
+      if (variant.HasMember("rail_twin")) {
+        if (!variant["rail_twin"].IsString()) {
+          return refuse("variant " + entry.name + " has a malformed rail twin");
+        }
+        sidecar.rail_twins.emplace(entry.name, variant["rail_twin"].GetString());
+      }
       if (const auto& d = variant["drive"]; !d.IsNull()) {
         liberty::Output_drive model;
         model.sequential         = true;

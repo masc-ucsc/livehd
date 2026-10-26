@@ -829,7 +829,8 @@ Stage_timing evaluate_stage_timing(const hhds::Graph& graph, const physical::Par
     w.EndObject();
   };
   // Stage IDs: the flat instance path, joined to the sidecar's original
-  // state by its leaf name (the state name) and master family.
+  // state by its leaf name (the state name) and master base: placement swaps
+  // the rail template and sizing the drive variant, never the function.
   const auto source_state = [&](const std::string& name, const std::string& master) {
     const auto leaf = name.substr(name.rfind('.') == std::string::npos ? 0 : name.rfind('.') + 1);
     std::vector<const Domino_timing_view::Instance*> found;
@@ -837,7 +838,7 @@ Stage_timing evaluate_stage_timing(const hhds::Graph& graph, const physical::Par
       const auto* variant = variant_of(master);
       for (const auto* instance : candidates->second) {
         const auto* owned = variant_of(instance->master);
-        if (!variant || !owned || owned->family == variant->family) {
+        if (!variant || !owned || owned->base == variant->base) {
           found.push_back(instance);
         }
       }

@@ -111,9 +111,11 @@ ph::Rect microns(const ph::Rect& r, int64_t dbu) {
   const double d = double(dbu);
   return {r.xl / d, r.yl / d, r.xh / d, r.yh / d};
 }
-// The inverter's rails as in local row 0 and in their FS image in local row 1
-// (y -> 2H - y), stretched to the cell width: bottom polarity at 0 and 2H.
-void add_pg_pins(ph::Macro& m, const Domino_footprint& r, int64_t width, int64_t dbu) {
+// The inverter's rails stretched to the cell width, local row `row` holding
+// its N image when row + rail_template is even and its FS image (y -> H - y)
+// otherwise: t0 has the inverter's bottom polarity at 0 and 2H, t1 its top
+// polarity.
+void add_pg_pins(ph::Macro& m, const Domino_footprint& r, int64_t width, int64_t dbu, uint32_t rail_template) {
   const auto h = r.row_height;
   for (int edge = 0; edge < 2; ++edge) {
     const auto& rail = r.rails[edge];
@@ -124,8 +126,9 @@ void add_pg_pins(ph::Macro& m, const Domino_footprint& r, int64_t width, int64_t
       for (const auto& shape : rail.shapes) {
         const auto&     s    = shape.rect;
         const auto      y    = edge * h;
-        const auto      rect = row == 0 ? ph::Rect{s.xl, y + s.yl, width + s.xh, y + s.yh}
-                                        : ph::Rect{s.xl, 2 * h - y - s.yh, width + s.xh, 2 * h - y - s.yl};
+        const auto      base = row * h;
+        const auto      rect = (row + rail_template) % 2 == 0 ? ph::Rect{s.xl, base + y + s.yl, width + s.xh, base + y + s.yh}
+                                                              : ph::Rect{s.xl, base + h - y - s.yh, width + s.xh, base + h - y - s.yl};
         const ph::Shape placed{shape.layer, microns(rect, dbu)};
         if (std::find(pin.shapes.begin(), pin.shapes.end(), placed) == pin.shapes.end()) {
           pin.shapes.push_back(placed);
@@ -306,9 +309,16 @@ Geometry_inputs geometry_inputs(const ph::Technology& tech, const std::string& i
 std::array<Row_access, 2> template_halves(const ph::Row_access_convention& convention) {
   return {convention.at(0), convention.at(1)};
 }
+std::array<std::string, 3> template_rails(const Domino_footprint& footprint, uint32_t rail_template) {
+  if (rail_template > 1) {
+    refuse(std::format("rail template {} is not 0 or 1", rail_template));
+  }
+  const auto& outer = footprint.rails[rail_template].pin;
+  return {outer, footprint.rails[1 - rail_template].pin, outer};
+}
 Domino_variant_geometry generate_domino_macro(const usyn::Physical_cell_interface& pins, const usyn::Gate_formula::Metrics& pdn,
                                               const Domino_reference& reference_cells, size_t variant, const Geometry_inputs& in,
-                                              std::optional<int64_t> width_override) {
+                                              std::optional<int64_t> width_override, uint32_t rail_template) {
   if (!in.tech) {
     refuse("no technology");
   }
@@ -333,6 +343,8 @@ Domino_variant_geometry generate_domino_macro(const usyn::Physical_cell_interfac
   Domino_variant_geometry g;
   g.name           = pins.name;
   g.halves         = template_halves(in.row_access);
+  g.rail_template  = rail_template;
+  g.pg_rails       = template_rails(ref, rail_template);
   const auto sw    = ref.site_width;
   const auto h     = ref.row_height;
   const auto a_reg
@@ -416,7 +428,7 @@ Domino_variant_geometry generate_domino_macro(const usyn::Physical_cell_interfac
   if (m.pins.contains(ref.rails[0].pin) || m.pins.contains(ref.rails[1].pin)) {
     refuse("signal pin named like a PG pin in " + pins.name);
   }
-  add_pg_pins(m, ref, g.width, dbu);
+  add_pg_pins(m, ref, g.width, dbu, rail_template);
   g.a_footprint_um2 = double(g.width) * double(g.height) / dbu2;
   return g;
 }
@@ -503,13 +515,18 @@ Access_check check_domino_access(const Geometry_inputs& in, const ph::Macro& m, 
         for (const auto& shape : m.obstructions) {
           obstacles.push_back({shape.layer, place(shape)});
         }
-        // PG: a rail spanning the cell on each of the three row edges.
+        // PG: a rail spanning the cell on each of the three row edges, of the
+        // polarity the generated N/FS rows put there (row 0 N: the inverter's
+        // bottom rail on even edges).
         for (int64_t edge = start; edge <= start + 2; ++edge) {
           const auto rail = rail_on_edge(m, placed, double(edge * h), cell.place.x, cell.place.x + *w);
           if (rail.empty()) {
             fail(std::format("PG: {}: no rail on core row edge {}", where, edge));
           }
           c.pg_rows_match = c.pg_rows_match && rail == ref.rails[edge % 2].pin;
+        }
+        if (!c.pg_rows_match) {
+          continue;  // not a legal placement: the other rail template serves this start
         }
         for (const auto& name : signal_pins) {
           std::optional<ph::Pin_access_result> access;
@@ -540,7 +557,7 @@ Access_check check_domino_access(const Geometry_inputs& in, const ph::Macro& m, 
           }
         }
       }
-      c.ok = c.compatible && out.failures.size() == before;
+      c.ok = c.compatible && c.pg_rows_match && out.failures.size() == before;
       out.cases.push_back(c);
     }
   }
@@ -550,6 +567,11 @@ Access_check check_domino_access(const Geometry_inputs& in, const ph::Macro& m, 
         })) {
       fail(std::format("macro: no orientation fits {} start rows of the row-access convention", parity ? "odd" : "even"));
     }
+    out.parity[parity]
+        = std::any_of(out.cases.begin(), out.cases.end(), [&](const auto& c) { return c.ok && int(c.start_row % 2) == parity; });
+  }
+  if (out.failures.empty() && !out.parity[0] && !out.parity[1]) {
+    fail("macro: its PG rails fit no start row of alternating N/FS rows");
   }
   out.unsupported.assign(unsupported.begin(), unsupported.end());
   out.ok = out.failures.empty() && out.unsupported.empty();

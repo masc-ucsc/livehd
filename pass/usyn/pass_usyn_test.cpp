@@ -450,10 +450,10 @@ TEST_F(PassSynth, DominoProfileEmitsCellInstancesAndPublishesTheBundle) {
     const auto& physical = report["physical"];
     EXPECT_STREQ(physical["emission"].GetString(), "mixed");
     // The model bundle is published beside the report: every master in every
-    // register variant (DFF is the only rung here).
+    // register variant (DFF is the only rung here), in both PG rail templates.
     ASSERT_TRUE(physical["bundle"].IsObject());
     EXPECT_STREQ(physical["bundle"]["directory"].GetString(), "qor.json.domino");
-    EXPECT_EQ(physical["bundle"]["macros"].GetUint64(), 1U);
+    EXPECT_EQ(physical["bundle"]["macros"].GetUint64(), 2U);
     for (const auto file : {"domino_cells.lef", "domino_models.json", "domino_models.v", "row_access.json"}) {
       EXPECT_TRUE(fs::exists(fs::path(root) / "qor.json.domino" / file)) << file;
     }

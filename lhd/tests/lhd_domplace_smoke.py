@@ -100,7 +100,7 @@ assert logical_report['physical']['totals']['converted'] == 2, logical_report['p
 
 bundle = W / 'synth/qor.json.domino'
 sidecar = json.loads((bundle / 'domino_models.json').read_text())
-assert sidecar['schema'] == 3 and sidecar['units']['time'] == 'ps' and sidecar['units']['dbu'] == 1000, sidecar['units']
+assert sidecar['schema'] == 4 and sidecar['units']['time'] == 'ps' and sidecar['units']['dbu'] == 1000, sidecar['units']
 assert sidecar['stage_model']['clock'] == 'clk' and sidecar['stage_model']['hold_capture_ps'] is None, sidecar['stage_model']
 # The built-in stage delays: the logical-effort estimate with its provenance,
 # per variant for evaluate and precharge.

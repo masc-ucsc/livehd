@@ -105,7 +105,8 @@ assert {n: e['master'] for n, e in endpoints.items() if e['decision'] == 'domino
 assert widths[instances['q8']] == max(widths.values()), widths
 
 # Placement: legal, each converted state one two-row cell on whole rows in its
-# start row's orientation, and the retained states plain registers.
+# start row's orientation and the PG rail template of that row (t1 on FS
+# starts), and the retained states plain registers.
 place = cold['place']
 assert place['legal'] and place['mode'] == 'full', place
 assert place['multirow']['cells'] == 4 and place['multirow']['row_access'] == 'stand-in', place['multirow']
@@ -113,7 +114,8 @@ rows, components, nets = def_view('cold')
 by_state = {leaf(n): (n,) + c for n, c in components.items()}
 for state, master in instances.items():
     _, macro, _, y, orientation = by_state[state]
-    assert macro == master and y % row_height == 0 and y + row_height in rows, (state, by_state[state])
+    assert macro == domplace_view.rail_template(master, rows[y]), (state, by_state[state])
+    assert y % row_height == 0 and y + row_height in rows, (state, by_state[state])
     assert orientation == rows[y], (state, orientation, rows[y])
 for state in ('q9', 'q10'):
     assert by_state[state][1] == physical['cmos_register']['name'], by_state[state]

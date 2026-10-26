@@ -25,7 +25,7 @@ namespace livehd::domplace {
 // models, external simulators read the Verilog models; the sidecar records the
 // units, corner, technology, reference cells, coefficients, masters and the
 // original state that owns every instance.
-inline constexpr uint32_t         kBundleSchema      = 3;
+inline constexpr uint32_t         kBundleSchema      = 4;
 inline constexpr std::string_view kBundleLef         = "domino_cells.lef";
 inline constexpr std::string_view kBundleSidecar     = "domino_models.json";
 inline constexpr std::string_view kBundleVerilog     = "domino_models.v";
@@ -73,14 +73,16 @@ struct Bundle_result {
   std::string              reason;       // why the bundle was refused
   std::vector<std::string> diagnostics;  // labeled estimates, null coefficients, unverified pin access
   std::string                   delay_issue;  // why a stage-delay estimate is null (also in diagnostics); empty when none
-  size_t                   macros = 0;   // LEF macros: masters x register variants
+  size_t                        macros = 0;   // LEF macros: masters x register variants x 2 rail templates
   std::map<std::string, double> footprints;   // rounded LEF footprint (um^2) by macro
 };
 
 // Write out_dir/{domino_cells.lef, domino_models.json, domino_models.v,
 // row_access.json, models/}: every master in every variant of the reference
-// register ladder (template t0, sizing disabled so only variant 0 is
-// instantiated). out_dir is replaced; the caller writes into a staging
+// register ladder, each in both PG rail templates (t0 and t1, template_rails;
+// synthesis instantiates v0_t0, placement takes the template its start row
+// needs, sizing swaps variants). t0 and t1 of a rung must together fit both
+// start-row parities. out_dir is replaced; the caller writes into a staging
 // directory and publishes it whole. Each variant's abstract must pass
 // check_domino_access; a technology rule the pin-access engine cannot verify
 // is recorded as unverified, not as a pass. Any failure refuses the bundle.
@@ -90,9 +92,11 @@ Bundle_result generate_domino_bundle(const Bundle_design& design, const Bundle_i
 
 // One drive variant of a master as placement-side sizing sees it. Variants
 // of one family (the master base and its geometry template) share rails, CLK,
-// Q and port order; rank orders them by register drive.
+// Q and port order; rank orders them by register drive. Every variant and
+// rail template of one base realizes the same function.
 struct Catalog_entry {
   std::string                          name, family, register_cell;  // family = <base>_t<template>
+  std::string                          base;                         // the master: __lhd_domino_<h16>
   std::string                          clk_pin, q_pin;               // the register's own pin names (reference.registers)
   uint32_t                             rank = 0;
   std::vector<std::string>             rails;
@@ -107,7 +111,8 @@ struct Catalog_entry {
 struct Domino_sidecar {
   std::filesystem::path                                      lef;
   physical::Row_access_convention                            row_access;
-  std::map<std::string, std::array<physical::Row_access, 2>> templates;  // local row access by LEF macro
+  std::map<std::string, std::array<physical::Row_access, 2>> templates;   // local row access by LEF macro
+  std::map<std::string, std::string>                         rail_twins;  // the other PG rail template, by LEF macro
   size_t                                                     instances = 0;
   std::vector<Catalog_entry>                                 catalog;  // every variant, in sidecar order
 };

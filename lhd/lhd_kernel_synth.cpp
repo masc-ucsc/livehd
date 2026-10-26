@@ -1781,7 +1781,9 @@ void synth_command(Options& opts, Result& res) {
       place_options.lefs.push_back(sidecar->lef.string());
       place_options.row_access = sidecar->row_access;
       for (const auto& [macro, halves] : sidecar->templates) {
-        place_options.multirow_templates[macro] = {halves};
+        // Each master's rail twin: the template of the other start-row parity.
+        const auto twin                         = sidecar->rail_twins.find(macro);
+        place_options.multirow_templates[macro] = {halves, twin == sidecar->rail_twins.end() ? std::string{} : twin->second};
       }
       if (run_domino_sizing) {
         // The drive variants domino sizing may swap, from the sidecar catalog.

@@ -17,6 +17,7 @@ using Kind                  = usyn::Gate_formula::Kind;
 using Node                  = usyn::Gate_formula::Node;
 constexpr const char* kTlef = "inou/lefdef/tests/data/sky130hd.tlef";
 constexpr const char* kLef  = "inou/lefdef/tests/data/sky130hd.lef";
+constexpr const char* kInv  = "sky130_fd_sc_hd__inv_1";
 constexpr const char* kLib  = "inou/lefdef/tests/data/sky130hd.lib";
 
 Node          lit(uint32_t variable, bool negative = false) { return {Kind::literal, 0, 0, variable, negative}; }
@@ -72,7 +73,7 @@ TEST(DominoBundle, WritesARoundTrippingDeterministicBundle) {
   const auto second = fs::path(testing::TempDir()) / "bundle_b";
   const auto a      = generate_domino_bundle(f.design, f.inputs, first);
   ASSERT_TRUE(a.ok) << a.reason;
-  EXPECT_EQ(a.macros, f.design.masters.size() * f.reference.registers.size());
+  EXPECT_EQ(a.macros, f.design.masters.size() * f.reference.registers.size() * 2);  // t0 and t1 of every variant
   const auto b = generate_domino_bundle(f.design, f.inputs, second);
   ASSERT_TRUE(b.ok) << b.reason;
   for (const auto file : {kBundleLef, kBundleSidecar, kBundleVerilog, kBundleAccess}) {
@@ -84,9 +85,15 @@ TEST(DominoBundle, WritesARoundTrippingDeterministicBundle) {
   // The abstracts read back after the technology and cell LEFs.
   const auto back = ph::read_lef({kTlef, kLef, (first / kBundleLef).string()});
   for (const auto& m : f.design.masters) {
-    const auto& macro = back.macros.at(domino_interface(m, 0).name);
-    EXPECT_EQ(macro.klass, "CORE");
-    EXPECT_DOUBLE_EQ(macro.height, 5.44);
+    for (uint32_t rail_template = 0; rail_template < 2; ++rail_template) {
+      const auto& macro = back.macros.at(domino_interface(m, 0, rail_template).name);
+      EXPECT_EQ(macro.klass, "CORE");
+      EXPECT_DOUBLE_EQ(macro.height, 5.44);
+      // The outer rails: the inverter's bottom one (VGND) for t0, its top one for t1.
+      const auto& outer = macro.pins.at(rail_template ? "VPWR" : "VGND");
+      EXPECT_EQ(outer.shapes.size(), 2 * back.macros.at(kInv).pins.at(rail_template ? "VPWR" : "VGND").shapes.size());
+    }
+    EXPECT_EQ(back.macros.at(domino_interface(m, 0, 1).name).width, back.macros.at(domino_interface(m, 0).name).width);
   }
 
   rapidjson::Document doc;
@@ -202,7 +209,7 @@ TEST(DominoBundle, WritesARoundTrippingDeterministicBundle) {
   EXPECT_NE(read(first / kBundleVerilog).find("module " + f.design.instances[0].cell), std::string::npos);
 }
 
-TEST(DominoBundle, SchemaThreeRecordsRegisterPinsClockLoadsCoefficientsAndTheCatalog) {
+TEST(DominoBundle, SchemaFourRecordsRegisterPinsClockLoadsCoefficientsTemplatesAndTheCatalog) {
   Fixture    f;
   // A second rung: the fixture's register widened in LEF, with its own setup
   // and no CK capacitance or drive sample.
@@ -223,14 +230,16 @@ TEST(DominoBundle, SchemaThreeRecordsRegisterPinsClockLoadsCoefficientsAndTheCat
   f.inputs.area_margin_pct             = 25;
   f.inputs.stage.uncertainty_first_ps  = 0;
   f.inputs.stage.uncertainty_second_ps = 3;
-  const auto dir                       = fs::path(testing::TempDir()) / "bundle_schema3";
+  const auto dir                       = fs::path(testing::TempDir()) / "bundle_schema4";
   const auto result                    = generate_domino_bundle(f.design, f.inputs, dir);
   ASSERT_TRUE(result.ok) << result.reason;
   rapidjson::Document doc;
   const auto          text = read(dir / kBundleSidecar);
   doc.Parse(text.c_str());
   ASSERT_FALSE(doc.HasParseError());
-  EXPECT_EQ(doc["schema"].GetUint(), 3U);
+  EXPECT_EQ(doc["schema"].GetUint(), 4U);
+  EXPECT_STREQ(doc["technology"]["row_rails"]["bottom"].GetString(), "VGND");
+  EXPECT_STREQ(doc["technology"]["row_rails"]["top"].GetString(), "VPWR");
   const double fo4   = doc["fo4_ps"]["value"].GetDouble();
   const auto&  stage = doc["stage_model"];
   // Explicit FO4 options win over the estimate, coefficient by coefficient.
@@ -265,12 +274,28 @@ TEST(DominoBundle, SchemaThreeRecordsRegisterPinsClockLoadsCoefficientsAndTheCat
   EXPECT_TRUE(registers[1]["clock_capacitance_ff"].IsNull());
   for (const auto& m : doc["masters"].GetArray()) {
     const auto& variants = m["variants"];
-    ASSERT_EQ(variants.Size(), 2U);
+    ASSERT_EQ(variants.Size(), 4U);  // two rungs, each in PG rail templates t0 and t1
+    for (rapidjson::SizeType i = 0; i < variants.Size(); ++i) {
+      const auto& v    = variants[i];
+      const bool  t1   = i % 2;
+      const auto& twin = variants[i ^ 1];
+      EXPECT_EQ(v["template"].GetUint(), unsigned(t1));
+      EXPECT_STREQ(v["rail_twin"].GetString(), twin["name"].GetString());
+      EXPECT_STREQ(v["register"].GetString(), twin["register"].GetString());
+      EXPECT_EQ(v["width_dbu"], twin["width_dbu"]);
+      EXPECT_STREQ(v["pg_rails"][0].GetString(), t1 ? "VPWR" : "VGND");
+      EXPECT_STREQ(v["pg_rails"][1].GetString(), t1 ? "VGND" : "VPWR");
+      EXPECT_STREQ(v["pg_rails"][2].GetString(), t1 ? "VPWR" : "VGND");
+      EXPECT_STREQ(v["start_orientations"][0].GetString(), t1 ? "FS" : "N");
+      // On alternating N/FS rows each template fits one start parity.
+      EXPECT_EQ(v["access_check"]["even_starts"].GetBool(), !t1);
+      EXPECT_EQ(v["access_check"]["odd_starts"].GetBool(), t1);
+    }
     EXPECT_DOUBLE_EQ(variants[0]["pin_caps"]["clock_ff"].GetDouble(), ck + 2 * c_in);
     EXPECT_NE(std::string(variants[0]["pin_caps"]["source"].GetString()).find("4/2 reference-inverter inputs"), std::string::npos);
-    EXPECT_TRUE(variants[1]["pin_caps"]["clock_ff"].IsNull());
+    EXPECT_TRUE(variants[2]["pin_caps"]["clock_ff"].IsNull());
     EXPECT_EQ(variants[0]["setup_capture_ps"], registers[0]["setup_ps"]);
-    EXPECT_EQ(variants[1]["setup_capture_ps"].GetDouble(), 42);  // each variant's own register
+    EXPECT_EQ(variants[2]["setup_capture_ps"].GetDouble(), 42);  // each variant's own register
   }
   bool null_clock = false;
   for (const auto& note : doc["diagnostics"].GetArray()) {
@@ -281,26 +306,30 @@ TEST(DominoBundle, SchemaThreeRecordsRegisterPinsClockLoadsCoefficientsAndTheCat
   std::string why;
   const auto  sidecar = read_domino_sidecar(dir, &why);
   ASSERT_TRUE(sidecar) << why;
-  ASSERT_EQ(sidecar->catalog.size(), 2 * f.design.masters.size());
+  ASSERT_EQ(sidecar->catalog.size(), 4 * f.design.masters.size());
   for (size_t i = 0; i < sidecar->catalog.size(); ++i) {
-    const auto& entry  = sidecar->catalog[i];
-    const auto& master = f.design.masters[i / 2];
-    EXPECT_EQ(entry.name, domino_interface(master, i % 2).name);
-    EXPECT_EQ(entry.family, master.base + "_t0");
-    EXPECT_EQ(entry.rank, i % 2);
-    EXPECT_EQ(entry.register_cell, f.reference.registers[i % 2].name);
+    const auto& entry         = sidecar->catalog[i];
+    const auto& master        = f.design.masters[i / 4];
+    const auto  rung          = (i % 4) / 2;
+    const auto  rail_template = uint32_t(i % 2);
+    EXPECT_EQ(entry.name, domino_interface(master, rung, rail_template).name);
+    EXPECT_EQ(entry.family, master.base + "_t" + std::to_string(rail_template));
+    EXPECT_EQ(entry.rank, rung);  // the ladder order within each template's family
+    EXPECT_EQ(sidecar->rail_twins.at(entry.name), domino_interface(master, rung, 1 - rail_template).name);
+    EXPECT_EQ(sidecar->templates.at(entry.name), (std::array{ph::Row_access::horizontal, ph::Row_access::vertical}));
+    EXPECT_EQ(entry.register_cell, f.reference.registers[rung].name);
     EXPECT_EQ(entry.rails, domino_interface(master, 0).rails);
-    EXPECT_EQ(entry.width_dbu, static_cast<int64_t>(doc["masters"][i / 2]["variants"][i % 2]["width_dbu"].GetUint()));
+    EXPECT_EQ(entry.width_dbu, static_cast<int64_t>(doc["masters"][i / 4]["variants"][i % 4]["width_dbu"].GetUint()));
     EXPECT_GT(entry.a_footprint_um2, entry.a_estimate_um2 - 1e-9);
     EXPECT_DOUBLE_EQ(*entry.rail_ff, c_in);
-    EXPECT_EQ(entry.clock_ff.has_value(), i % 2 == 0);
-    EXPECT_EQ(entry.drive.has_value(), i % 2 == 0);
+    EXPECT_EQ(entry.clock_ff.has_value(), rung == 0);
+    EXPECT_EQ(entry.drive.has_value(), rung == 0);
     EXPECT_EQ(entry.clk_pin, "CLK");  // the register's own pins
     EXPECT_EQ(entry.q_pin, "Q");
     EXPECT_EQ(entry.setup_capture_ps,
-              i % 2 ? std::optional<double>{42} : std::optional<double>{registers[0]["setup_ps"].GetDouble()});
+              rung ? std::optional<double>{42} : std::optional<double>{registers[0]["setup_ps"].GetDouble()});
   }
-  EXPECT_GT(sidecar->catalog[1].width_dbu, sidecar->catalog[0].width_dbu);
+  EXPECT_GT(sidecar->catalog[2].width_dbu, sidecar->catalog[0].width_dbu);
   ASSERT_TRUE(sidecar->catalog[0].drive);
   EXPECT_TRUE(sidecar->catalog[0].drive->sequential);
   EXPECT_EQ(sidecar->catalog[0].drive->name, sidecar->catalog[0].name);
@@ -313,12 +342,13 @@ TEST(DominoBundle, SchemaThreeRecordsRegisterPinsClockLoadsCoefficientsAndTheCat
   EXPECT_FALSE(read_domino_sidecar(dir, &why));
   EXPECT_NE(why.find("names an unlisted register test_dfxtp_2"), std::string::npos) << why;
 
-  // Only schema 3 is read; an older sidecar asks for regeneration.
+  // Only schema 4 is read; an older sidecar (schema 3 had no t1 rail
+  // templates) asks for regeneration.
   auto older = text;
-  older.replace(older.find("\"schema\":3"), 10, "\"schema\":2");
+  older.replace(older.find("\"schema\":4"), 10, "\"schema\":3");
   std::ofstream(dir / kBundleSidecar, std::ios::trunc) << older;
   EXPECT_FALSE(read_domino_sidecar(dir, &why));
-  EXPECT_NE(why.find("is schema 2; this build reads schema 3 only (regenerate the bundle"), std::string::npos) << why;
+  EXPECT_NE(why.find("is schema 3; this build reads schema 4 only (regenerate the bundle"), std::string::npos) << why;
 }
 
 TEST(DominoBundle, MissingDelayDataIsNamedAndNeverZero) {

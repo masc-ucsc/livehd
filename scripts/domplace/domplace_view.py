@@ -18,6 +18,13 @@ def leaf(instance):
     return instance.rsplit('.', 1)[-1]
 
 
+def rail_template(master, orientation):
+    """The PG rail template of `master` (<base>_v<k>_t<t>) a start row of this
+    orientation needs: t0 on N/FN rows, its t1 twin on FS/S rows."""
+    base = master.rpartition('_t')[0]
+    return f'{base}_t{1 if orientation in ("FS", "S") else 0}'
+
+
 def read_def(path):
     """Rows (y -> orientation), components (name -> Component), nets
     (name -> [(instance or PIN, pin)]), the DBU, the die (xl, yl, xh, yh) and
