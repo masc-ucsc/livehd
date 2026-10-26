@@ -2,6 +2,8 @@
 #pragma once
 // Netlist/Liberty helpers shared by the legacy repair (repair.cpp) and the
 // path-based resize engine (resize_engine.cpp). Internal to pass/place.
+#include <functional>
+#include <initializer_list>
 #include <map>
 #include <memory>
 #include <set>
@@ -13,6 +15,7 @@
 #include "hhds/graph.hpp"
 #include "pass/liberty/liberty_dff.hpp"
 #include "place.hpp"
+#include "rapidjson/document.h"
 #include "repair.hpp"
 #include "steiner_repair.hpp"
 #include "technology_rc.hpp"
@@ -44,6 +47,12 @@ std::shared_ptr<hhds::GraphIO> buffer_io(hhds::Graph& graph, const Buffer& b);
 void                           change_master(Node n, const Buffer& from, const Buffer& to);
 Physical_sink                  physical_pin(hhds::Graph& graph, const std::string& label, const Node_index& nodes, bool driver);
 void                           connect_bit(hhds::Graph& graph, const Physical_sink& sink, Pin driver);
+// The accepted state's qor after an optimization engine: the `carried` blocks
+// of the prior qor that its re-placement dropped, then `adjust`, then `key`
+// set to the engine's JSON report; also written to <output_dir>/qor.json.
+void publish_engine_qor(Result& placed, const std::string& prior_qor, std::initializer_list<const char*> carried,
+                        const std::function<void(rapidjson::Document&)>& adjust, const char* key, const std::string& report,
+                        const std::string& output_dir);
 // Re-target timing weights after an accepted repair trial. Untimed placements
 // (no weights) stay unweighted, and aggregate-only feedback has no per-net
 // target to move toward.

@@ -7,6 +7,7 @@
 // Accepted moves form a plan that is materialized once, legalized (or refreshed
 // at floorplan GP coordinates) and confirmed by a full evaluation.
 #include <functional>
+#include <memory>
 #include <string>
 #include <vector>
 
@@ -14,9 +15,11 @@
 
 namespace livehd::placement {
 struct Resize_edit {
-  enum class Kind { resize, buffer, rewire };
+  enum class Kind { resize, buffer, rewire, variant };
   Kind                     kind = Kind::resize;
-  std::string              instance, master;  // resize: instance -> master; buffer: new instance of master
+  // resize: instance -> master; buffer: new instance of master; variant:
+  // instance -> master, a same-family variant of Options::custom_cells
+  std::string              instance, master;
   std::string              driver;            // buffer: driver label of the net it cuts; rewire: the sinks' new driver
   std::vector<std::string> sinks;             // buffer: sink labels moved behind the buffer; rewire: moved sinks
   Point                    position{};        // buffer: seeded center, DBU
@@ -37,6 +40,22 @@ Resize_plan plan_resize(const Result& state, const Options& options, const Timin
 // Materialize the edits (in order) in graph; origins maps each new buffer to its owner.
 void apply_resize_edits(hhds::Graph& graph, const Options& options, const std::vector<Resize_edit>& edits,
                         std::map<std::string, std::string>* origins = nullptr, std::map<std::string, double>* weights = nullptr);
+// One materialized trial: a clone of state's netlist with `edits` applied,
+// re-placed by ECO legalization against state's floorplan (its FIXED cells
+// and ports written to `floorplan`, a DEF path), with output in output_dir,
+// then evaluated. `state` is never mutated, so a rejected or failed trial
+// needs no rollback; place() errors (e.g. Multirow_failure) propagate.
+struct Resize_trial {
+  std::unique_ptr<hhds::GraphLibrary> owner;  // owns placed.graph
+  Result                              placed;
+  Timing_feedback                     timing;
+};
+Resize_trial     run_resize_trial(const Result& state, const Options& options, const std::vector<Resize_edit>& edits,
+                                  const Evaluate& evaluate, const std::string& output_dir, const std::string& floorplan);
+// The engine's smallest repeater buffer (its inventory order); empty without one.
+std::string      smallest_buffer(const Options& options);
+// The feedback summary the engines report per trial (ps).
+std::string      resize_feedback_json(const Timing_feedback& feedback);
 // Full-evaluation acceptance: setup WNS/TNS and electrical violations never worse
 // (hold is reported, not gated, as pre-CTS), and some improvement (timing,
 // electrical or area).

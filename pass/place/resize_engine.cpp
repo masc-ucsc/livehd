@@ -2153,7 +2153,8 @@ private:
 };
 
 double      scaled(const Timing_feedback& f, std::optional<double> v) { return v ? *v * f.time_unit_ps : 0; }
-std::string feedback_json(const Timing_feedback& f) {
+}  // namespace
+std::string resize_feedback_json(const Timing_feedback& f) {
   return std::format(
       R"({{"wns_ps":{:.4f},"tns_ps":{:.4f},"hold_wns_ps":{},"violations":{},"electrical_excess":{:.6f},"area":{:.6f}}})",
       scaled(f, f.wns),
@@ -2163,6 +2164,7 @@ std::string feedback_json(const Timing_feedback& f) {
       f.electrical_excess,
       f.area);
 }
+namespace {
 // Group-prefix of a plan; prefixes are closed under the dependence of later
 // edits on buffers created earlier.
 std::vector<Resize_edit> prefix(const std::vector<Resize_edit>& edits, unsigned groups) {
@@ -2185,6 +2187,77 @@ std::vector<std::string> changed_names(const std::vector<Resize_edit>& edits) {
 }
 }  // namespace
 
+void detail::publish_engine_qor(Result& placed, const std::string& prior_qor, std::initializer_list<const char*> carried,
+                                const std::function<void(rapidjson::Document&)>& adjust, const char* key, const std::string& report,
+                                const std::string& output_dir) {
+  rapidjson::Document qor;
+  qor.Parse(placed.qor.c_str());
+  rapidjson::Document prior;
+  prior.Parse(prior_qor.c_str());
+  if (qor.IsObject()) {
+    if (prior.IsObject()) {
+      for (const auto* name : carried) {
+        if (prior.HasMember(name) && !qor.HasMember(name)) {
+          qor.AddMember(rapidjson::Value(name, qor.GetAllocator()),
+                        rapidjson::Value(prior[name], qor.GetAllocator()),
+                        qor.GetAllocator());
+        }
+      }
+    }
+    if (adjust) {
+      adjust(qor);
+    }
+    rapidjson::Document block;
+    block.Parse(report.c_str());
+    if (qor.HasMember(key)) {
+      qor.RemoveMember(key);
+    }
+    qor.AddMember(rapidjson::Value(key, qor.GetAllocator()), rapidjson::Value(block, qor.GetAllocator()), qor.GetAllocator());
+    rapidjson::StringBuffer                    out;
+    rapidjson::Writer<rapidjson::StringBuffer> qw(out);
+    qor.Accept(qw);
+    placed.qor = out.GetString();
+  }
+  std::ofstream(output_dir + "/qor.json") << placed.qor << '\n';
+}
+
+Resize_trial run_resize_trial(const Result& state, const Options& options, const std::vector<Resize_edit>& edits,
+                              const Evaluate& evaluate, const std::string& output_dir, const std::string& floorplan) {
+  hhds::GraphLibrary draft;
+  auto graph = partition::flatten_hierarchy(state.graph.get(), &draft, state.graph->get_name(), nullptr, false, {}, {}, true);
+  if (!graph) {
+    throw std::runtime_error("cannot clone the placed netlist for resize");
+  }
+  auto inherited_weights = state.net_weights;
+  apply_resize_edits(*graph, options, edits, nullptr, &inherited_weights);
+  auto trial_options           = options;
+  trial_options.cache_dir      = {};
+  trial_options.legalize_cells = true;
+  trial_options.net_weights    = std::move(inherited_weights);
+  trial_options.previous       = std::make_shared<physical::Floorplan>(state.floorplan);
+  trial_options.changed_cells  = changed_names(edits);
+  trial_options.output_dir     = output_dir;
+  trial_options.floorplan      = floorplan;
+  auto frame                   = state.floorplan;
+  std::erase_if(frame.components, [](const auto& c) {
+    return c.place.status != Ann_place::Status::FIXED && c.place.status != Ann_place::Status::LOCKED;
+  });
+  for (auto& port : frame.terminals) {
+    port.status = Ann_place::Status::FIXED;
+  }
+  physical::write_def(frame, trial_options.floorplan);
+  Resize_trial trial;
+  trial.owner  = std::make_unique<hhds::GraphLibrary>();
+  trial.placed = place(*graph, *trial.owner, trial_options);
+  trial.timing = evaluate(trial.placed);
+  return trial;
+}
+
+std::string smallest_buffer(const Options& options) {
+  const auto lib = library(options);
+  return lib->buffers.empty() ? std::string{} : lib->buffers.front()->name;
+}
+
 Resize_plan plan_resize(const Result& state, const Options& options, const Timing_feedback& timing, Whatif& whatif,
                         Resize_stage stage) {
   const auto lib = library(options);
@@ -2204,6 +2277,17 @@ void apply_resize_edits(hhds::Graph& graph, const Options& options, const std::v
   std::map<std::string, std::vector<std::string>> inherited;
   std::unordered_map<std::string, std::string>    roots;
   for (const auto& e : edits) {
+    if (e.kind == Resize_edit::Kind::variant) {
+      auto        n    = nodes.at(e.instance);
+      const auto  io   = n.get_subnode_io();
+      const auto* from = options.custom_cells && io ? options.custom_cells->find(io->get_name()) : nullptr;
+      const auto* to   = options.custom_cells ? options.custom_cells->find(e.master) : nullptr;
+      if (!from || !to) {
+        throw std::runtime_error("variant edit outside the custom cell catalog: " + e.instance + " -> " + e.master);
+      }
+      change_custom_master(n, *from, *to);
+      continue;
+    }
     if (e.kind == Resize_edit::Kind::resize) {
       auto        n    = nodes.at(e.instance);
       const auto* from = combinational(n, lib->cells);
@@ -2346,51 +2430,25 @@ Repair_result resize_placed(Result initial, const Options& requested, const Eval
       }
       const auto t = Clock::now();
       ++commits;
-      hhds::GraphLibrary draft;
-      auto               graph = partition::flatten_hierarchy(result.placed.graph.get(),
-                                                              &draft,
-                                                              result.placed.graph->get_name(),
-                                                              nullptr,
-                                                              false,
-                                                              {},
-                                                              {},
-                                                              true);
-      if (!graph) {
-        throw std::runtime_error("cannot clone the placed netlist for resize");
-      }
-      auto inherited_weights = result.placed.net_weights;
-      apply_resize_edits(*graph, options, edits, nullptr, &inherited_weights);
-      auto trial_options           = options;
-      trial_options.cache_dir      = {};
-      trial_options.legalize_cells = true;
-      trial_options.net_weights    = std::move(inherited_weights);
-      trial_options.previous       = std::make_shared<physical::Floorplan>(result.placed.floorplan);
-      trial_options.changed_cells  = changed_names(edits);
-      trial_options.output_dir     = std::format("{}/commit_{}", directory, commits);
-      trial_options.floorplan      = directory + "/floorplan.def";
-      auto frame                   = result.placed.floorplan;
-      std::erase_if(frame.components, [](const auto& c) {
-        return c.place.status != Ann_place::Status::FIXED && c.place.status != Ann_place::Status::LOCKED;
-      });
-      for (auto& port : frame.terminals) {
-        port.status = Ann_place::Status::FIXED;
-      }
-      physical::write_def(frame, trial_options.floorplan);
-      auto       owner   = std::make_unique<hhds::GraphLibrary>();
-      auto       placed  = place(*graph, *owner, trial_options);
-      const auto next    = evaluate(placed);
-      const bool keep    = resize_accepts(score, next);
-      trials            += std::format(R"({}{{"groups":{},"edits":{},"timing":{},"accepted":{},"seconds":{:.3f}}})",
-                                       trials.empty() ? "" : ",",
-                                       groups,
-                                       edits.size(),
-                                       feedback_json(next),
-                                       keep,
-                                       elapsed(t));
+      auto       trial  = run_resize_trial(result.placed,
+                                    options,
+                                    edits,
+                                    evaluate,
+                                    std::format("{}/commit_{}", directory, commits),
+                                    directory + "/floorplan.def");
+      const auto next   = trial.timing;
+      const bool keep   = resize_accepts(score, next);
+      trials           += std::format(R"({}{{"groups":{},"edits":{},"timing":{},"accepted":{},"seconds":{:.3f}}})",
+                            trials.empty() ? "" : ",",
+                            groups,
+                            edits.size(),
+                            resize_feedback_json(next),
+                            keep,
+                            elapsed(t));
       if (keep) {
-        result.placed = std::move(placed);
+        result.placed = std::move(trial.placed);
         result.libraries.clear();
-        result.libraries.push_back(std::move(owner));
+        result.libraries.push_back(std::move(trial.owner));
         score = next;
         refresh_repair_weights(result.placed, options, score);
         accepted        = true;
@@ -2425,51 +2483,36 @@ Repair_result resize_placed(Result initial, const Options& requested, const Eval
   evaluate(result.placed);  // leave the timer on the accepted state
   result.report = std::format(
       R"({{"engine":"new","model":"placement_rc_path_sizing_buffering","before":{},"after":{},"rounds":[{}],"seconds":{:.3f}}})",
-      feedback_json(first),
-      feedback_json(score),
+      resize_feedback_json(first),
+      resize_feedback_json(score),
       rounds,
       elapsed(start));
   physical::write_def(result.placed.floorplan, options.output_dir + "/out.def");
-  rapidjson::Document qor;
-  qor.Parse(result.placed.qor.c_str());
-  rapidjson::Document prior;
-  prior.Parse(prior_qor.c_str());
-  if (qor.IsObject()) {
-    if (prior.IsObject()) {
-      for (const auto* key : {"timing_driven", "satlegalize"}) {
-        if (prior.HasMember(key) && !qor.HasMember(key)) {
-          qor.AddMember(rapidjson::Value(key, qor.GetAllocator()),
-                        rapidjson::Value(prior[key], qor.GetAllocator()),
-                        qor.GetAllocator());
+  publish_engine_qor(
+      result.placed,
+      prior_qor,
+      {"timing_driven", "satlegalize"},
+      [&](rapidjson::Document& qor) {
+        if (accepted_edits > 0 && qor.HasMember("satlegalize") && qor["satlegalize"].IsObject()) {
+          auto& alignment = qor["satlegalize"];
+          if (alignment.HasMember("retained")) {
+            if (!alignment.HasMember("previous_retained")) {
+              alignment.AddMember("previous_retained",
+                                  rapidjson::Value(alignment["retained"], qor.GetAllocator()),
+                                  qor.GetAllocator());
+            }
+            alignment["retained"].SetUint(0);
+          }
+          if (alignment.HasMember("relaxed_by")) {
+            alignment["relaxed_by"].SetString("resize", qor.GetAllocator());
+          } else {
+            alignment.AddMember("relaxed_by", "resize", qor.GetAllocator());
+          }
         }
-      }
-    }
-    if (accepted_edits > 0 && qor.HasMember("satlegalize") && qor["satlegalize"].IsObject()) {
-      auto& alignment = qor["satlegalize"];
-      if (alignment.HasMember("retained")) {
-        if (!alignment.HasMember("previous_retained")) {
-          alignment.AddMember("previous_retained", rapidjson::Value(alignment["retained"], qor.GetAllocator()), qor.GetAllocator());
-        }
-        alignment["retained"].SetUint(0);
-      }
-      if (alignment.HasMember("relaxed_by")) {
-        alignment["relaxed_by"].SetString("resize", qor.GetAllocator());
-      } else {
-        alignment.AddMember("relaxed_by", "resize", qor.GetAllocator());
-      }
-    }
-    rapidjson::Document report;
-    report.Parse(result.report.c_str());
-    if (qor.HasMember("resize")) {
-      qor.RemoveMember("resize");
-    }
-    qor.AddMember("resize", rapidjson::Value(report, qor.GetAllocator()), qor.GetAllocator());
-    rapidjson::StringBuffer                    out;
-    rapidjson::Writer<rapidjson::StringBuffer> qw(out);
-    qor.Accept(qw);
-    result.placed.qor = out.GetString();
-  }
-  std::ofstream(options.output_dir + "/qor.json") << result.placed.qor << '\n';
+      },
+      "resize",
+      result.report,
+      options.output_dir);
   std::ofstream(options.output_dir + "/resize.json") << result.report << '\n';
   result.timing = std::move(score);
   return result;
@@ -2514,12 +2557,12 @@ Floorplan_resize resize_floorplan_engine(Result& state, const Options& options, 
     refresh(trial);
     const auto next  = evaluate(trial);
     const bool keep  = resize_accepts(result.timing, next);
-    trials          += std::format(R"({}{{"groups":{},"edits":{},"timing":{},"accepted":{}}})",
-                                   trials.empty() ? "" : ",",
-                                   groups,
-                                   edits.size(),
-                                   feedback_json(next),
-                                   keep);
+    trials           += std::format(R"({}{{"groups":{},"edits":{},"timing":{},"accepted":{}}})",
+                          trials.empty() ? "" : ",",
+                          groups,
+                          edits.size(),
+                          resize_feedback_json(next),
+                          keep);
     if (keep) {
       const auto previous_owner = state.fp_library;  // outlive the assignment that drops the old graph
       state                     = std::move(trial);
