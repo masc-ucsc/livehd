@@ -51,6 +51,7 @@ genrule(
           "// unate-synthesis producer identity for caches and provenance.\\n" +
           "#pragma once\\n#include <cstdint>\\n" +
           "namespace livehd::usyn { inline constexpr uint64_t kUsynSrcSalt = 0x%sULL; }\\n' \"$$h\" > $@",
+    visibility = ["//visibility:public"],
 )
 
 # Boolean synthesis has no graph, solver or mapping dependency. Keep this
