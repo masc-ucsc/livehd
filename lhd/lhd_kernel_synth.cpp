@@ -1263,8 +1263,10 @@ void synth_command(Options& opts, Result& res) {
 
   std::unique_ptr<Physical_cache> physical_cache;
   if (user_workdir && opts.incremental && run_place && place_options.full) {
-    auto        dependencies = place_options.lefs;
-    std::string libraries    = liberty;
+    // Hash the learned-routing pool once: replay identity and placement share it.
+    place_options.uroute_pool = livehd::placement::load_uroute_pool(place_options);
+    auto        dependencies  = place_options.lefs;
+    std::string libraries     = liberty;
     std::replace(libraries.begin(), libraries.end(), ',', ' ');
     std::istringstream paths(libraries);
     for (std::string path; paths >> path;) {

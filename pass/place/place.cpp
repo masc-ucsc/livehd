@@ -2506,16 +2506,28 @@ static bool uroute_requested_by(const Options& options) {
   }
   return false;
 }
-std::string uroute_cache_identity(const Options& options) {
-  if (!uroute_requested_by(options)) {
-    return {};
+// The preloaded snapshot when it was built from these resolved controls, else a
+// fresh load of the manifest and weights.
+static std::shared_ptr<const Uroute_pool> uroute_pool_for(const Options& options) {
+  auto resolved = resolve_uroute_options(options.uroute);
+  if (options.uroute_pool && options.uroute_pool->options() == resolved) {
+    return options.uroute_pool;
   }
+  return std::make_shared<const Uroute_pool>(std::move(resolved));
+}
+std::shared_ptr<const Uroute_pool> load_uroute_pool(const Options& options) {
+  return uroute_requested_by(options) ? uroute_pool_for(options) : nullptr;
+}
+std::string uroute_cache_identity(const Options& options) {
   // Whole-flow replay can bypass place() entirely. Validate and fingerprint
   // the same pool snapshot before looking up that outer cache too.
-  const Uroute_pool pool(resolve_uroute_options(options.uroute));
+  const auto pool = load_uroute_pool(options);
+  if (!pool) {
+    return {};
+  }
   // An unchanged manifest can become unusable when a sample disappears or
   // fails its digest. Replay must retain the current fallback diagnostic.
-  return uroute_digest(pool.cache_identity() + ":" + pool.skipped());
+  return uroute_digest(pool->cache_identity() + ":" + pool->skipped());
 }
 void       initialize_route_tables() { initialize_flute_tables(); }
 // One net's FLUTE Steiner RC exactly as placement RC estimation builds it: pin
@@ -4597,13 +4609,13 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
           += double(c.place.width + 2 * v.halo_x) * (c.place.height + 2 * v.halo_y) - double(c.place.width) * c.place.height;
     }
   }
-  auto                         resolved_uroute  = resolve_uroute_options(options.uroute);
-  const bool                   uroute_requested = uroute_requested_by(options);
-  std::unique_ptr<Uroute_pool> uroute_data;
-  Uroute_selection             selected_uroute, macro_uroute;
+  auto                               resolved_uroute  = resolve_uroute_options(options.uroute);
+  const bool                         uroute_requested = uroute_requested_by(options);
+  std::shared_ptr<const Uroute_pool> uroute_data;
+  Uroute_selection                   selected_uroute, macro_uroute;
   if (uroute_requested && (options.routability || (options.macro_mode == "h2d" && options.macro_parameters.routability))
       && !options.timing_seed && !options.retain_placement) {
-    uroute_data = std::make_unique<Uroute_pool>(resolved_uroute);
+    uroute_data = uroute_pool_for(options);
   }
   std::string uroute_tech;
   const auto  uroute_id = [&](const View& view) {

@@ -295,6 +295,7 @@ void Uroute_selection::apply(dp::Options& options) const {
 }
 const std::string& Uroute_pool::cache_identity() const { return data_->identity; }
 const std::string& Uroute_pool::skipped() const { return data_->skipped; }
+const Uroute_options& Uroute_pool::options() const { return data_->options; }
 Uroute_selection   Uroute_pool::select(const dp::UrouteMaps& query, const Uroute_identity& id) const {
   const auto&      d = *data_;
   Uroute_selection result;

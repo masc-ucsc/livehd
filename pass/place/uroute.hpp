@@ -19,6 +19,7 @@ struct Uroute_options {
   int         shots = 5, min_shots = 1;
   std::string fallback  = "nearest";
   double      drc_level = 0;
+  bool        operator==(const Uroute_options&) const = default;
 };
 struct Uroute_identity {
   std::string top, technology, macro_signature;
@@ -38,9 +39,10 @@ struct Uroute_selection {
 class Uroute_pool {
 public:
   explicit Uroute_pool(Uroute_options);
-  Uroute_selection   select(const DreamPlace::native::UrouteMaps&, const Uroute_identity&) const;
-  const std::string& cache_identity() const;
-  const std::string& skipped() const;
+  Uroute_selection      select(const DreamPlace::native::UrouteMaps&, const Uroute_identity&) const;
+  const std::string&    cache_identity() const;
+  const std::string&    skipped() const;
+  const Uroute_options& options() const;
 
 private:
   struct Data;
