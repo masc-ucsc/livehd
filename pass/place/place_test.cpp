@@ -10,6 +10,7 @@
 #include <limits>
 #include <map>
 #include <numeric>
+#include <print>
 #include <random>
 #include <set>
 #include <sstream>
@@ -351,16 +352,16 @@ TEST(Placement, TerminalLegalizerIsLastAndPreservesItsExactOutput) {
   }
 }
 
-// A chain of 12 sky130 cells in which c1, c5 and c9 are a two-row copy of
-// inv_1 named `master`, given in its own LEF, for full placement through the
-// terminal legalizer.
+// A chain of sky130 cells (12 by default) in which c1, c5, c9... are a
+// two-row copy of inv_1 named `master`, given in its own LEF, for full
+// placement through the terminal legalizer.
 constexpr const char* kDominoTwoRow = "__lhd_domino_two_row";
 struct Two_row_chain {
   std::vector<std::string>     lefs{"inou/lefdef/tests/data/sky130hd.tlef", "inou/lefdef/tests/data/sky130hd.lef"};
   hhds::GraphLibrary           source, flat;
   std::shared_ptr<hhds::Graph> graph;
   Options                      options = plain_options();
-  explicit Two_row_chain(const std::string& master) {
+  explicit Two_row_chain(const std::string& master, unsigned cells = 12) {
     const auto tech  = physical::read_lef(lefs);
     auto       tall  = tech.macros.at("sky130_fd_sc_hd__inv_1");
     tall.height     *= 2;
@@ -385,7 +386,7 @@ struct Two_row_chain {
     }
     auto signal = graph->get_input_pin("a");
     gu::set_bits(signal, 1);
-    for (unsigned i = 0; i < 12; ++i) {
+    for (unsigned i = 0; i < cells; ++i) {
       auto node = gu::create_typed_node(*graph, Ntype_op::Sub);
       node.set_subnode(i % 4 == 1 ? two : inv);
       node.set_name("c" + std::to_string(i));
@@ -535,6 +536,71 @@ TEST(Placement, TwoRowCellsAreAnchoredBeforeTerminalLegalization) {
       EXPECT_NE(what.find(expected), std::string::npos) << what;
     }
   }
+}
+
+TEST(Placement, TwoRowPlacementsKeyTheCacheAndReuseItLegally) {
+  const auto cache = std::string(std::getenv("TEST_TMPDIR")) + "/two_row_cache";
+  const auto setup = [&](Two_row_chain& chain) {
+    chain.options.row_access                        = physical::Row_access_convention{};
+    chain.options.multirow_templates[kDominoTwoRow] = {
+        {physical::Row_access::horizontal, physical::Row_access::vertical}
+    };
+    chain.options.cache_dir = cache;
+  };
+  const auto environment = [&] {
+    std::ifstream       file(cache + "/placement.json");
+    const std::string   text{std::istreambuf_iterator<char>(file), {}};
+    rapidjson::Document doc;
+    doc.Parse(text.c_str());
+    return std::string(doc["environment"].GetString());
+  };
+  Two_row_chain chain(kDominoTwoRow);
+  setup(chain);
+  const auto all           = physical::read_lef(chain.options.lefs);
+  const auto expect_placed = [&](const Result& r, const char* what) {
+    SCOPED_TRACE(what);
+    EXPECT_NO_THROW(check_legality(all, r.floorplan));
+    rapidjson::Document qor;
+    qor.Parse(r.qor.c_str());
+    EXPECT_NEAR(lef_hpwl_um(all, r.floorplan), qor["hpwl_um"].GetDouble(), 1e-6);
+    for (const auto& c : r.floorplan.components) {
+      if (c.macro == kDominoTwoRow) {
+        const auto row
+            = std::find_if(r.floorplan.rows.begin(), r.floorplan.rows.end(), [&](const auto& x) { return x.y == c.place.y; });
+        ASSERT_NE(row, r.floorplan.rows.end()) << c.name;
+        EXPECT_EQ(c.place.orientation, row->orientation) << c.name;
+      }
+    }
+  };
+  expect_placed(place(*chain.graph, chain.flat, chain.options), "cold");
+  const auto key = environment();
+  expect_placed(place(*chain.graph, chain.flat, chain.options), "warm");
+  EXPECT_EQ(environment(), key);
+  // A design edit keeps the key, but the cached reference would re-place it
+  // through single-row ECO legalization: two-row cells place cold instead.
+  Two_row_chain edited(kDominoTwoRow, 14);
+  setup(edited);
+  const auto changed = place(*edited.graph, edited.flat, edited.options);
+  expect_placed(changed, "edited");
+  EXPECT_EQ(environment(), key);
+  rapidjson::Document qor;
+  qor.Parse(changed.qor.c_str());
+  EXPECT_FALSE(qor["eco"]["used"].GetBool());
+  ASSERT_TRUE(qor.HasMember("multirow"));
+  EXPECT_EQ(qor["multirow"]["cells"].GetUint64(), 4U);
+  // The row-access convention and the templates are part of the key.
+  auto renamed             = chain.options;
+  renamed.row_access->name = "owner";
+  expect_placed(place(*chain.graph, chain.flat, renamed), "renamed convention");
+  const auto renamed_key = environment();
+  EXPECT_NE(renamed_key, key);
+  auto templated                                     = chain.options;
+  templated.multirow_templates["__lhd_domino_other"] = {
+      {physical::Row_access::vertical, physical::Row_access::horizontal}
+  };
+  expect_placed(place(*chain.graph, chain.flat, templated), "another template");
+  EXPECT_NE(environment(), key);
+  EXPECT_NE(environment(), renamed_key);
 }
 
 TEST(Placement, LibraryTwoRowCellsKeepTheSingleRowPaths) {

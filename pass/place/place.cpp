@@ -5726,6 +5726,21 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
     if (options.previous || !options.changed_cells.empty() || options.legalize_cells) {
       refuse("ECO legalization is single-row");
     }
+    // A changed design would re-place around a cached reference through the
+    // same single-row ECO legalization. The cache must never fail a placement
+    // a cold run accepts, so these designs place cold: unlocked, every movable
+    // cell unflipped (terminal legalization orients it by its row again).
+    if (cached_reference && !cache.hit) {
+      previous.reset();
+      cache = CacheInfo{0, hashes.size(), false};
+      for (auto& c : v.cells) {
+        c.locked = false;
+        if (c.place.status != Ann_place::Status::FIXED && c.place.status != Ann_place::Status::LOCKED) {
+          c.place.orientation = Orientation::N;
+        }
+      }
+      make_arrays(v, tech);
+    }
   }
   std::optional<Busorder>      bus_order;
   std::optional<Boundary_pins> boundary_pins;
