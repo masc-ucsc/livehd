@@ -54,6 +54,32 @@ cc_binary(
     deps = ["//inou/lefdef:inou_lefdef", "//pass/place:late_timing", "//pass/place/objective:proxy_bridge", "@rapidjson", "@zlib//:zlib"],
 )
 
+# Offline domino stage timing (2d-domplace E): the lhd stage report on a saved
+# placement, with coefficient overrides for sweeps that must not re-place.
+cc_binary(
+    name = "stage_timing_probe",
+    srcs = ["stage_timing_probe.cpp"],
+    copts = COPTS,
+    deps = ["//core", "//graph", "//inou/lefdef:inou_lefdef", "//pass/domplace/timing:stage_timing", "@rapidjson"],
+)
+
+py_test(
+    name = "stage_timing_probe_smoke",
+    size = "small",
+    srcs = ["stage_timing_probe_smoke.py"],
+    args = [
+        "$(location :stage_timing_probe)",
+        "$(location //lhd)",
+    ],
+    data = [
+        ":stage_timing_probe",
+        "//inou/lefdef:test_data",
+        "//lhd",
+    ],
+    legacy_create_init = 0,
+    timeout = "short",
+)
+
 py_test(
     name = "late_timing_probe_smoke",
     srcs = ["late_timing_probe_smoke.py"],
