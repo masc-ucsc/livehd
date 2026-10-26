@@ -46,8 +46,7 @@ int main(int argc, char** argv) {
       const auto& master = tech.macros.at(c.macro);
       c.place.width      = std::llround(master.width * fp.dbu);
       c.place.height     = std::llround(master.height * fp.dbu);
-      if (c.place.orientation == Ann_place::Orientation::E || c.place.orientation == Ann_place::Orientation::W
-          || c.place.orientation == Ann_place::Orientation::FE || c.place.orientation == Ann_place::Orientation::FW) {
+      if (livehd::physical::swaps_axes(c.place.orientation)) {
         std::swap(c.place.width, c.place.height);
       }
     }

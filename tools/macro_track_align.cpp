@@ -62,8 +62,7 @@ int main(int argc, char** argv) {
       const auto& master = tech.macros.at(cell.macro);
       cell.place.width   = std::llround(master.width * fp.dbu);
       cell.place.height  = std::llround(master.height * fp.dbu);
-      if (cell.place.orientation == ph::Orientation::E || cell.place.orientation == ph::Orientation::W
-          || cell.place.orientation == ph::Orientation::FE || cell.place.orientation == ph::Orientation::FW) {
+      if (ph::swaps_axes(cell.place.orientation)) {
         std::swap(cell.place.width, cell.place.height);
       }
       if (!master.klass.starts_with("CORE") && ph::placement_mask(cell, tech) == ph::Placement_mask::none) {

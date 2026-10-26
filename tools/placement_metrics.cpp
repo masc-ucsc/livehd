@@ -380,8 +380,7 @@ int main(int argc, char** argv) {
         for (const auto& cell : fp.components) {
           const auto& master = tech.macros.at(cell.macro);
           double      width = master.width * fp.dbu, height = master.height * fp.dbu;
-          if (cell.place.orientation == ph::Orientation::E || cell.place.orientation == ph::Orientation::W
-              || cell.place.orientation == ph::Orientation::FE || cell.place.orientation == ph::Orientation::FW) {
+          if (ph::swaps_axes(cell.place.orientation)) {
             std::swap(width, height);
           }
           json.StartObject();
@@ -462,8 +461,7 @@ int main(int argc, char** argv) {
           const bool  macro     = !master.klass.starts_with("CORE");
           const auto [blocked_h, blocked_v] = macro ? pl::lef_track_capacity(tech, master.blocked_layers) : std::pair{0., 0.};
           double width = master.width * fp.dbu, height = master.height * fp.dbu;
-          if (cell.place.orientation == ph::Orientation::E || cell.place.orientation == ph::Orientation::W
-              || cell.place.orientation == ph::Orientation::FE || cell.place.orientation == ph::Orientation::FW) {
+          if (ph::swaps_axes(cell.place.orientation)) {
             std::swap(width, height);
           }
           snapshot << cell.place.x << ' ' << cell.place.y << ' ' << width << ' ' << height << ' ' << macro << ' ' << blocked_h
