@@ -14,6 +14,7 @@
 #include <stdexcept>
 #include <tuple>
 
+#include "cell_criticality.hpp"
 #include "rapidjson/stringbuffer.h"
 #include "rapidjson/writer.h"
 #include "sat_solver.hpp"
@@ -1650,15 +1651,14 @@ struct Model {
       untimed_inputs.resize(fp.components.size());
       support_nets.resize(fp.nets.size());
     }
-    const auto feedback = [&](const ph::Connection& c) -> const timing::Feedback::Pin* {
-      auto it = timing.pins.find(c.instance == "PIN" ? c.pin : c.instance + ":" + c.pin);
-      if (it == timing.pins.end() && c.instance != "PIN") {
-        it = timing.pins.find(c.instance + "/" + c.pin);
+    const auto excluded    = prects_networks(tech, fp, options.prects, timing);
+    report.ignored_nets    = std::count(excluded.ignored.begin(), excluded.ignored.end(), true);
+    const auto criticality = Cell_criticality::from(timing, fp, &excluded.ignored);
+    for (size_t i = 0; i < slacks.size(); ++i) {
+      if (movable[i]) {
+        slacks[i] = criticality.slack_ps[i];
       }
-      return it == timing.pins.end() ? nullptr : &it->second;
-    };
-    const auto excluded = prects_networks(tech, fp, options.prects, timing);
-    report.ignored_nets = std::count(excluded.ignored.begin(), excluded.ignored.end(), true);
+    }
     std::vector<Net> nets;
     for (size_t n = 0; n < fp.nets.size(); ++n) {
       if (excluded.ignored[n]) {
@@ -1671,7 +1671,7 @@ struct Model {
       Net                   item{slack, n, {}, {}};
       std::vector<size_t>   untimed_sinks;
       for (const auto& c : net.connections) {
-        const auto pin  = feedback(c);
+        const auto pin  = timing.find_pin(c.instance, c.pin);
         clock          |= pin && pin->clock;
         if (pin && pin->slack && std::isfinite(*pin->slack)) {
           slack = std::min(slack, *pin->slack * timing.time_unit_ps);
@@ -1697,10 +1697,6 @@ struct Model {
         }
         if (movable[i]) {
           item.cells.push_back(i);
-          if (pin && pin->slack && std::isfinite(*pin->slack)) {
-            const double value = *pin->slack * timing.time_unit_ps;
-            slacks[i]          = slacks[i] ? std::min(*slacks[i], value) : value;
-          }
         }
       }
       if (clock || power || item.cells.empty()) {

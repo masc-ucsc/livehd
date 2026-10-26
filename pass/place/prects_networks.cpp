@@ -134,11 +134,7 @@ Prects_networks prects_networks(const physical::Technology& tech, const physical
           && (roles.pins.contains(label) || roles.pins.contains(c.instance + "/" + c.pin))) {
         mark(n);
       }
-      auto t = timing.pins.find(label);
-      if (t == timing.pins.end() && c.instance != "PIN") {
-        t = timing.pins.find(c.instance + "/" + c.pin);
-      }
-      if (t != timing.pins.end() && t->second.clock) {
+      if (const auto* t = timing.find_pin(c.instance, c.pin); t && t->clock) {
         mark_clock(n);
         if (!roles.override_controls) {
           mark(n);

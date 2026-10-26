@@ -12,6 +12,7 @@
 #include <stdexcept>
 #include <tuple>
 
+#include "cell_criticality.hpp"
 #include "inou/lefdef/routing_geometry.hpp"
 #include "sat_solver.hpp"
 #include "signal_router.hpp"
@@ -280,11 +281,8 @@ std::vector<Pair> pairs(const ph::Technology& tech, const ph::Floorplan& fp, con
     }
     const auto& net       = fp.nets[n];
     const bool  clock_net = std::any_of(net.connections.begin(), net.connections.end(), [&](const auto& connection) {
-      auto pin = timing.pins.find(connection.instance == "PIN" ? connection.pin : connection.instance + ":" + connection.pin);
-      if (pin == timing.pins.end() && connection.instance != "PIN") {
-        pin = timing.pins.find(connection.instance + "/" + connection.pin);
-      }
-      return pin != timing.pins.end() && pin->second.clock;
+      const auto* pin = timing.find_pin(connection.instance, connection.pin);
+      return pin && pin->clock;
     });
     if (clock_net) {
       continue;
@@ -319,18 +317,15 @@ std::vector<Pair> pairs(const ph::Technology& tech, const ph::Floorplan& fp, con
       if (a == b || !movable(tech, fp.components[a]) || !movable(tech, fp.components[b])) {
         continue;
       }
-      auto t = timing.pins.find(sink.instance + ":" + sink.pin);
-      if (t == timing.pins.end()) {
-        t = timing.pins.find(sink.instance + "/" + sink.pin);
-      }
-      if (t == timing.pins.end() || !t->second.slack || t->second.clock) {
+      const auto* t = timing.find_pin(sink.instance, sink.pin);
+      if (!t || !t->slack || t->clock) {
         continue;
       }
       const auto& pa = fp.components[a].place;
       const auto& pb = fp.components[b].place;
       result.push_back({
           {a, b, driver->pin, sink.pin},
-          *t->second.slack,
+          *t->slack,
           double(std::abs(pa.x - pb.x) + std::abs(pa.y - pb.y))
       });
     }
@@ -537,79 +532,27 @@ struct Density_model {
     return result;
   }
 };
-const timing::Feedback::Pin* feedback_pin(const timing::Feedback& feedback, const ph::Connection& connection) {
-  auto found = feedback.pins.find(connection.instance == "PIN" ? connection.pin : connection.instance + ":" + connection.pin);
-  if (found == feedback.pins.end() && connection.instance != "PIN") {
-    found = feedback.pins.find(connection.instance + "/" + connection.pin);
-  }
-  return found == feedback.pins.end() ? nullptr : &found->second;
-}
-std::vector<bool> spillable(const ph::Technology& tech, const ph::Floorplan& fp, const timing::Feedback& feedback,
+// Noncritical cells only: fresh positive slack above the margin on every own
+// pin, no clock net, and a timed connection.
+std::vector<bool> spillable(const ph::Technology& tech, const ph::Floorplan& fp, const Cell_criticality& criticality,
                             const Satlegalize_options& options) {
-  std::map<std::string, size_t> cells;
-  std::vector<bool>             safe(fp.components.size(), std::isfinite(feedback.time_unit_ps) && feedback.time_unit_ps > 0);
-  std::vector<bool>             data(fp.components.size(), false);
-  for (size_t i = 0; i < fp.components.size(); ++i) {
-    cells[fp.components[i].name] = i;
-  }
-  for (const auto& net : fp.nets) {
-    const bool clock = std::any_of(net.connections.begin(), net.connections.end(), [&](const auto& connection) {
-      const auto* pin = feedback_pin(feedback, connection);
-      return pin && pin->clock;
-    });
-    for (const auto& connection : net.connections) {
-      const auto found = cells.find(connection.instance);
-      if (found == cells.end()) {
-        continue;
-      }
-      const auto  i   = found->second;
-      const auto* pin = feedback_pin(feedback, connection);
-      data[i]         = true;
-      if (clock || !pin || pin->clock || !pin->slack || !std::isfinite(*pin->slack)
-          || *pin->slack * feedback.time_unit_ps <= options.spill_slack_margin_ps) {
-        safe[i] = false;
-      }
-    }
-  }
+  std::vector<bool> safe(fp.components.size());
   for (size_t i = 0; i < safe.size(); ++i) {
-    safe[i] = safe[i] && data[i] && movable(tech, fp.components[i]);
+    safe[i] = criticality.timed_units && criticality.connected[i] && !criticality.clock_connected[i] && !criticality.untimed[i]
+              && *criticality.slack_ps[i] > options.spill_slack_margin_ps && movable(tech, fp.components[i]);
   }
   return safe;
 }
-std::pair<std::string, std::optional<double>> spill_evidence(const ph::Floorplan& fp, const timing::Feedback& feedback,
-                                                             const Satlegalize_options& options, size_t cell,
-                                                             bool protected_endpoint) {
-  std::optional<double> minimum;
-  bool clock = false, missing = !std::isfinite(feedback.time_unit_ps) || feedback.time_unit_ps <= 0, connected = false;
-  for (const auto& net : fp.nets) {
-    const bool touches = std::any_of(net.connections.begin(), net.connections.end(), [&](const auto& connection) {
-      return connection.instance == fp.components[cell].name;
-    });
-    if (!touches) {
-      continue;
-    }
-    for (const auto& connection : net.connections) {
-      const auto* pin = feedback_pin(feedback, connection);
-      clock           = clock || (pin && pin->clock);
-      if (connection.instance != fp.components[cell].name) {
-        continue;
-      }
-      connected = true;
-      if (!pin || !pin->slack || !std::isfinite(*pin->slack) || !std::isfinite(feedback.time_unit_ps) || feedback.time_unit_ps <= 0
-          || !std::isfinite(*pin->slack * feedback.time_unit_ps)) {
-        missing = true;
-      } else {
-        const auto slack = *pin->slack * feedback.time_unit_ps;
-        minimum          = minimum ? std::min(*minimum, slack) : slack;
-      }
-    }
-  }
-  std::string reason = !options.spill_neighbors                               ? "disabled"
-                       : protected_endpoint                                   ? "protected alignment endpoint"
-                       : clock                                                ? "clock"
-                       : missing || !connected                                ? "missing-or-nonfinite timing"
-                       : minimum && *minimum <= options.spill_slack_margin_ps ? "slack margin"
-                                                                              : "eligible";
+std::pair<std::string, std::optional<double>> spill_evidence(const Cell_criticality& criticality, const Satlegalize_options& options,
+                                                             size_t cell, bool protected_endpoint) {
+  const auto  minimum = criticality.timed_units ? criticality.slack_ps[cell] : std::nullopt;
+  const bool  missing = !criticality.timed_units || criticality.untimed[cell] || !criticality.connected[cell];
+  std::string reason  = !options.spill_neighbors                               ? "disabled"
+                        : protected_endpoint                                   ? "protected alignment endpoint"
+                        : criticality.clock_connected[cell]                    ? "clock"
+                        : missing                                              ? "missing-or-nonfinite timing"
+                        : minimum && *minimum <= options.spill_slack_margin_ps ? "slack margin"
+                                                                               : "eligible";
   return {reason, minimum};
 }
 
@@ -817,8 +760,9 @@ Satlegalize_report satlegalize(const ph::Technology& tech, ph::Floorplan& fp, co
   const auto                   excluded    = prects_networks(tech, fp, options.prects, timing);
   const auto                   data_timing = prects_data_timing(timing, excluded);
   const Hpwl_index             hpwl_index(tech, fp, excluded.ignored);
-  std::optional<Density_model> density;
-  std::vector<bool>            safe_spill;
+  std::optional<Density_model>    density;
+  std::vector<bool>               safe_spill;
+  std::optional<Cell_criticality> evidence_timing;  // unfiltered, diagnostic only
   if (advanced) {
     for (const auto& row : fp.rows) {
       const auto site = tech.sites.find(row.site);
@@ -828,7 +772,7 @@ Satlegalize_report satlegalize(const ph::Technology& tech, ph::Floorplan& fp, co
     }
     density.emplace(tech, fp, options);
     if (options.spill_neighbors) {
-      safe_spill = spillable(tech, fp, data_timing, options);
+      safe_spill = spillable(tech, fp, Cell_criticality::from(data_timing, fp), options);
     }
   }
   report.hpwl_before    = hpwl(fp, hpwl_index);
@@ -1328,7 +1272,10 @@ Satlegalize_report satlegalize(const ph::Technology& tech, ph::Floorplan& fp, co
         window_stats.first_no_candidate_master = original.macro;
         window_stats.first_no_candidate_place  = original.place;
         if (options.spill_neighbors) {
-          auto evidence = spill_evidence(fp, timing, options, cell.index, protected_cells.contains(cell.index));
+          if (!evidence_timing) {
+            evidence_timing = Cell_criticality::from(timing, fp);
+          }
+          auto evidence = spill_evidence(*evidence_timing, options, cell.index, protected_cells.contains(cell.index));
           window_stats.first_no_candidate_spill_reason = std::move(evidence.first);
           window_stats.first_no_candidate_slack_ps     = evidence.second;
         } else {

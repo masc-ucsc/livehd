@@ -747,7 +747,7 @@ cc_library(
     hdrs = ["terminal_legalize.hpp"],
     copts = COPTS,
     visibility = ["//visibility:public"],
-    deps = [":capacity_bins", ":warpspace", ":prects_networks", ":satlegalize", ":sat_solver", "//core", "//inou/lefdef:inou_lefdef", "@dreamplace//dreamplace/native:placer", "@rapidjson"],
+    deps = [":capacity_bins", ":cell_criticality", ":warpspace", ":prects_networks", ":satlegalize", ":sat_solver", "//core", "//inou/lefdef:inou_lefdef", "@dreamplace//dreamplace/native:placer", "@rapidjson"],
 )
 cc_test(
     name = "terminal_legalize_test",
@@ -762,7 +762,7 @@ cc_library(
     srcs = ["satlegalize.cpp"],
     hdrs = ["satlegalize.hpp"],
     copts = COPTS,
-    deps = [":prects_networks", ":sat_solver", ":signal_router", "//core", "//inou/lefdef:inou_lefdef"],
+    deps = [":cell_criticality", ":prects_networks", ":sat_solver", ":signal_router", "//core", "//inou/lefdef:inou_lefdef"],
 )
 cc_test(
     name = "sat_solver_test",
