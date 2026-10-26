@@ -13,7 +13,8 @@ cell picks) through `synth_salt`.
 
 The profile is a provisional model, not characterized PPA. Areas, widths and
 timing coefficients are labeled estimates until a real cell builder replaces
-them.
+them; the stage delays are a logical-effort estimate (below), not a
+characterization.
 
 ## Stages
 
@@ -88,9 +89,10 @@ uses and that its rail producers do not also need. A tie retains CMOS.
 ## Model schema
 
 `stage_model.hpp` holds `Stage_model` version 1: the clock domain, the
-schedule coefficients in ps (`std::nullopt` is a reported missing value, never
-an implicit zero) and `storage_init = 'x'`, since v1 converts no initialized
-state.
+stage-wide schedule coefficients in ps (`std::nullopt` is a reported missing
+value, never an implicit zero) and `storage_init = 'x'`, since v1 converts no
+initialized state. The evaluate and precharge delays depend on the gate, so
+they are per master variant, not in `Stage_model`.
 
 Master identity is exact Boolean identity: equal input, transistor and stack
 counts never make two functions interchangeable. A master is named
@@ -98,27 +100,87 @@ counts never make two functions interchangeable. A master is named
 geometry template) with pins `R0..R{n-1}` (physical rail order: per logical
 input, positive rail then negative rail), `CLK` and `Q`.
 
-The bundle sidecar (`domino_models.json`, schema 2) records the stage model,
-units (`ps`, `fF`, `um`, DBU), the corner, technology and row-access identity,
-the named reference inverter and register family (with each register's pin
-names and CK capacitance), FO4 as a labeled estimate, the coefficients and
+The bundle sidecar (`domino_models.json`, schema 3) records the stage model
+with each coefficient's source (`stage_model.sources`), units (`ps`, `fF`,
+`um`, DBU), the corner, technology and row-access identity, the named
+reference inverter and register family (with each register's pin names and CK
+capacitance), FO4 and the delay model (`delay_model`: source, citation,
+formula, parameters, tau and the FO4 derivation), the coefficients and
 experiment knobs, every master (formula, rails, metrics, variants with
-estimated and rounded areas, pin caps, per-variant capture setup, access
-checks) and every instance with the original state it owns. Unset
-coefficients are `null` with a diagnostic; `read_domino_sidecar` reads
-schema 2 only and returns the variant catalog for placement-side sizing.
+estimated and rounded areas, pin caps, per-variant capture setup, per-variant
+`timing` with the evaluate and precharge delays and their logical-effort
+terms, access checks) and every instance with the original state it owns. A
+coefficient that cannot be derived is `null` with a diagnostic;
+`read_domino_sidecar` reads schema 3 only, refuses another schema by number
+(regenerate the bundle), and returns the variant catalog for placement-side
+sizing.
 
-The stage coefficients have no built-in values: `pass.usyn.domino_eval_fo4`,
-`domino_precharge_fo4`, `domino_setup_eval_fo4` and
-`domino_precharge_margin_fo4` (FO4 multiples) and
-`domino_uncertainty_first_ps` / `domino_uncertainty_second_ps` set them, and
-an unset one leaves its timing class unmeasured. The CLK load is a labeled
-estimate: the register's CK input plus `domino_clock_devices` (default 2)
-clocked devices at half a reference-inverter input each. Two experiment knobs
-keep every default unchanged: `domino_pair_area_pct` (default 100) scales only
-the `x * A_NOT` term on both area bases, and `domino_area_margin_pct`
-(default 0) converts under `select=area` while `A_domino + A_rails <
-(100 + margin)%` of the CMOS estimate.
+Every stage coefficient has a built-in, labeled value under the profile (the
+U1 ruling; see Stage delay estimate). `pass.usyn.domino_eval_fo4`, `domino_precharge_fo4`,
+`domino_setup_eval_fo4` and `domino_precharge_margin_fo4` (FO4 multiples) and
+`domino_uncertainty_first_ps` / `domino_uncertainty_second_ps` override it
+coefficient by coefficient (source `option`); an unset uncertainty is the
+labeled ideal clock, 0 ps, as `synth.place.stage_timing.clock_uncertainty_ps`
+defaults to 0. The CLK load is a labeled estimate: the register's CK input
+plus `domino_clock_devices` (default 2) clocked devices at half a
+reference-inverter input each. Two experiment knobs keep every default
+unchanged: `domino_pair_area_pct` (default 100) scales only the `x * A_NOT`
+term on both area bases, and `domino_area_margin_pct` (default 0) converts
+under `select=area` while `A_domino + A_rails < (100 + margin)%` of the CMOS
+estimate.
+
+## Stage delay estimate
+
+`domino_delay.{hpp,cpp}` is the one place the formula lives. It applies the
+Sutherland-Sproull-Harris logical-effort model of a footed domino gate
+(I. Sutherland, R. Sproull, D. Harris, *Logical Effort: Designing Fast CMOS
+Circuits*, 1999, the circuit-families treatment of domino gates; also
+N. Weste, D. Harris, *CMOS VLSI Design*, logical effort of dynamic gates) in
+units of the technology's tau. Each converted stage is a
+footed dynamic pull-down, its output inverter and the variant's register.
+
+FO4 is measured on the reference inverter's Liberty NLDM tables: the inverter
+drives four of its own inputs (`4 C_in`, `C_in` the larger of its
+`capacitance`, `rise_capacitance` and `fall_capacitance`), each edge's input
+slew is the opposite output transition at that load (iterated to a fixed
+point, as in an FO4 chain), and FO4 is the mean of the rise and fall delays.
+Slew axes and transitions share the Liberty's thresholds, so nothing is
+derated. `tau = FO4 / (4 + p_inv)`.
+
+With `s` the formula's series stack, `b` its parallel branches, `n` its PDN
+transistors (`Gate_formula` metrics), `C_D` the variant register's D input
+and `C_in` the reference inverter's input (every rail is one `C_in`, so each
+pull-down device is width 3 in units where the unit inverter is NMOS 1 + PMOS 2):
+
+```
+eval      = tau * [ (s+1)/3 * k                         footed pull-down: g = (s+1)/3, h = k
+                  + p_inv (s+1) (b + l (n-b) + w/3) / 3   dynamic node: b branch tops, the precharge drain,
+                                                          n-b internal devices at weight l
+                  + C_D / (k C_in) + p_inv ]              output inverter into the register D input
+precharge = tau * 2 (3k + p_inv (3b + w)) / (3w)          PMOS of drive w/2 charging the output inverter
+                                                          gate and the dynamic-node diffusion
+setup_eval = 0.5 FO4      precharge_margin = 0.5 FO4
+```
+
+| Parameter | Default | Meaning |
+|---|---|---|
+| `p_inv` | 1 | reference-inverter parasitic delay in tau (FO4 = 5 tau) |
+| `precharge_width` `w` | 2 | precharge PMOS width, a unit inverter's pull-up |
+| `internal_load` `k` | 1 | the output inverter on the dynamic node, in reference-inverter inputs (the internal-load assumption; the keeper is not modeled) |
+| `internal_node_weight` `l` | 0.5 | diffusion of a device below a branch top, relative to one on the dynamic node |
+| `setup_eval_fo4`, `precharge_margin_fo4` | 0.5, 0.5 | FO4 fractions |
+
+A deeper stack is slower (logical effort and parasitic both grow with
+`s + 1`, the foot included); more branches or more devices are slower (more
+diffusion on the dynamic node); precharge grows with the branches. Internal
+stack nodes are not precharged and charge sharing, keeper contention and
+noise margins are not modeled. A missing NLDM arc or input capacitance leaves
+FO4 and everything it scales `null`, a register without a D capacitance
+leaves its variants' delays `null`; either is a bundle diagnostic and a
+`domino-delay` warning from pass.usyn, and the stage timing then reports the
+class unmeasured. On the sky130 fixture (inv_1, dfxtp_1) FO4 is 82.91 ps and
+an AND2/AND3/AND4 master evaluates in 80.8/109.3/143.4 ps with a 44.2 ps
+precharge (`domino_delay_test`).
 
 ## Stage timing
 
@@ -130,8 +192,9 @@ register's own clock-to-Q arcs; rails capture at `T/2 - uncertainty_first -
 setup_eval`, so a rail's period estimate is `T - slack / 0.5`. Each instance
 adds two constant checks that moving cells cannot fix: internal
 `2 (eval + setup_capture + uncertainty_second)` and precharge
-`2 (precharge + precharge_margin)`. A null coefficient is reported, never
-read as zero.
+`2 (precharge + precharge_margin)`, with the evaluate and precharge delays of
+the instance's own variant (a stage-wide override wins). A null coefficient is
+reported, never read as zero.
 
 Constraints come from the saved SDC when it parses, else one ideal clock on
 the named port (a non-50% waveform is refused: the schedule is a fixed T/2).
@@ -197,7 +260,8 @@ timing settings and the stage-timing code salt join the physical cache key.
 | Target | Contents |
 |---|---|
 | `contract` | `stage_model.hpp` (versioned schedule), `reason.hpp` (stable reason codes) and the salt |
-| `domino_reference` | the named reference inverter and register ladder, and `domino_area` |
+| `domino_reference` | the named reference inverter (with its NLDM cell) and register ladder (with D and CK capacitance), and `domino_area` |
+| `domino_delay` | the logical-effort stage-delay estimate: FO4 from the inverter's NLDM, evaluate and precharge per master variant |
 | `physical_eligibility` | the eligibility table above over a frozen `Stateful_region` |
 | `domino_cell` | exact master identity, `__lhd_domino_*` declarations (Q is a loop break) and behavioral lg/Verilog models |
 | `physical_select` | the per-state choice: recheck, cofactor/merge inputs, positive-output resynthesis, rail ledger, area comparison, bounded and deterministic |
@@ -294,8 +358,9 @@ scripts/domplace/arms.py --rtl top.v --top T --liberty L --lef T,C --sdc S \
     --arm3-set pass.usyn.domino_uncertainty_first_ps=0 --arm3-set pass.usyn.domino_uncertainty_second_ps=0
 ```
 
-The coefficients above are only an example: none is built in, and arm 3
-without them reports its unmeasured classes and status `incomplete`.
+The coefficients above are only an example of overrides: without them arm 3
+uses the built-in estimate, and its stage timing is `partial` only for the IO
+cuts.
 `--core-mode` reports the area-driven core (`--utilization`) and the fixed
 core (the core and die of the arm-1 area-driven run, as
 `synth.place.core`/`die`) separately. Each leg records wall time, the peak
@@ -315,6 +380,9 @@ in-repo fixture. Final RUDY is not reported (plan H3 is not implemented).
 
 Designs must map every retained register with the Liberty's register family
 (the 7-cell sky130 fixture has no reset or negative-edge flop). HighTide
-runs are not integrated: they wait on the decisions to patch `lhdsweep.py`
-(scoring arm 3's OpenSTA timing as unmeasured, U14) and on the fixed-core
-source (U15).
+runs (plan H5) are approved but not yet integrated: patching `lhdsweep.py` to
+score arm 3's OpenSTA timing as unmeasured and use the native stage period
+for every arm (U14) is pending. The fixed core comes from the arm-1
+area-driven run (U15); the placer's FS-import fix that DEF floorplan import
+needed has landed (`make_arrays` records CORE row flips in the native node
+orientations).

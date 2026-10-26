@@ -14,8 +14,11 @@
 netlist, place two-row domino cells, and measure stage timing with an explicit
 provisional model. Deliver reproducible placement experiments before a real
 domino cell builder and characterized LEF/Liberty exist.</p>
-<p><span class="status">Reviewed plan — 2026-10-25; implementation pending</span>
-Based on <a href="usyn_domino_placement_plan.md">the supplied pre-plan</a> and
+<p><span class="status">Checkpoints 1–2 landed — 2026-10-26 (branch <code>domplace-integ</code>);
+H5 HighTide runs pending; J deferred</span> A–G and the in-repository parts of H
+are implemented and tested; the subtask texts below are the reviewed plan they
+were built against, each with a <em>Landed</em> note. The code reference is
+<a href="../../pass/domplace/README.md">pass/domplace/README.md</a>. Based on <a href="usyn_domino_placement_plan.md">the supplied pre-plan</a> and
 the current working-tree interfaces. One domino evaluation phase is confirmed
 for v1: one terminal domino gate plus its output latch per converted stage,
 with earlier logic in CMOS. Two domino phases are future work. The estimates
@@ -45,7 +48,43 @@ controller, virtual-buffer optimization and resynthesis are not prerequisites.</
 
 <h2>Subtasks — pending</h2>
 <ul class="subtasks">
+<li id="H5"><strong>H5 — HighTide matched runs (external repository; approved, U14).</strong>
+<ul>
+<li>Patch <code>../HighTide</code> <code>lhdsweep.py</code>: score with the bundle LEF from
+<code>lefs.json</code>; mark arm 3's OpenSTA WNS/TNS <code>timing-unmeasured</code> and use the
+native stage period for every arm; read <code>rep/placement.json</code> and the usyn
+<code>physical</code> block; pin the matched settings; a per-design <code>domino_clock</code> table;
+status classes.</li>
+<li>Freeze an opt build of this branch at a recorded HEAD, run lfsr and sha3 first,
+then the matrix: nominal (the U1 estimate), aux 3/5, pair 75/125%, evaluate at the
+estimate versus 2 and 4 FO4 overrides, pessimistic margins, area margin 0/25/100 and
+<code>select=all</code>, fixed-core versus area-driven, three seeds.</li>
+<li><strong>Exit:</strong> manifests and results under <code>repros/domplace_&lt;date&gt;/</code>
+with the H exit criteria.</li>
+</ul></li>
+<li id="H3"><strong>H3 — Final RUDY in the arm reports (optional).</strong>
+<ul><li>One <code>dp::rudy</code> call on the final placement behind
+<code>synth.place.report.final_rudy</code>; until then <code>arms.py</code> reports no RUDY.</li></ul></li>
+<li id="J"><strong>J — Add two-row detailed moves if needed. 3–5 additional engineer-days. Deferred.</strong>
+<p>Not started in checkpoint 2. Trigger (U18): H shows a <code>Multirow_failure</code> on a fixed-core arm whose area-driven arm passes, mean domino displacement above two row heights, or a stage-period loss above 5% attributable to domino displacement.</p>
+<ul>
+<li>Use H's displacement/quality evidence to justify two-row shifts and swaps.
+Preserve the two-row occupancy and pin/orientation rules during every move;
+re-evaluate local wiring and stage timing.</li>
+<li><strong>Exit:</strong> matched comparison against the anchored v1, with
+independent legality, bounded runtime and preserved logical behavior.</li>
+</ul></li>
+</ul>
+
+<h2>Subtasks — landed</h2>
+<ul class="subtasks">
 <li id="A"><strong>A — Freeze the stage contract and a reproducible baseline. 1–2 engineer-days.</strong>
+<p><span class="status landed">landed</span> <code>stage_model.hpp</code> (Stage_model v1:
+clock, stage-wide coefficients, <code>storage_init='x'</code>), the eligibility table with
+stable reason codes (<code>reason.hpp</code>, <code>physical_eligibility</code>), and the
+opt-in profile <code>pass.usyn.physical=domino_provisional</code> that refuses every
+unsupported combination by name and moves no default. Provenance (HEAD, dirty-diff
+hash, input digests, options) is in the bundle sidecar and the H4 manifest.</p>
 <ul>
 <li>Implement the confirmed one-phase scope in Q1 below. Specify clock
 edges, evaluate/precharge windows, capture, source stability, setup/hold and
@@ -68,6 +107,12 @@ advertised as an already implemented CLI.</li>
 </ul></li>
 
 <li id="B"><strong>B — Adapt USYN selection to the physical profile. 2–4 engineer-days.</strong>
+<p><span class="status landed">landed</span> <code>physical_select</code> after
+freeze: recheck, cofactor/merge of inputs, positive-output resynthesis within the
+stack (≤4) and branch caps, a rail ledger charging every complemented rail as a
+real inverter, and the bounded deterministic <code>domino_select=area|all</code>
+choice with retained-CMOS reasons. <code>clock_phases=1</code> is required
+explicitly; the logical selection and its cache are unchanged.</p>
 <ul>
 <li>Consume <code>pass/usyn/function.hpp</code> and
 <code>endpoint_netlist.hpp</code>. USYN already carries a checked factored
@@ -100,6 +145,15 @@ has a legal formula and an explicit original-state owner.</li>
 </ul></li>
 
 <li id="C"><strong>C — Generate provisional physical and timing models. 3–5 engineer-days.</strong>
+<p><span class="status landed">landed</span> <code>domino_cell</code> (exact Boolean
+master identity, lg/Verilog models), <code>domino_geometry</code> (two-row
+<code>CLASS CORE</code> abstracts on the inverter's site, row-aware pin access for
+both parities and flips; sky130 mcon enclosure reported unverified) and
+<code>domino_bundle</code> (<code>&lt;qor&gt;.domino/</code>, sidecar schema 3,
+one LEF macro per master and register-ladder variant). Stage delays are the
+built-in logical-effort estimate of <code>domino_delay</code> (U1 below), with
+FO4 from the reference inverter's NLDM; missing data is <code>null</code> with a
+diagnostic.</p>
 <ul>
 <li>Generate real parseable LEF abstracts plus a versioned timing/model sidecar
 from B. Record formula hash, ordered physical pins, rail polarity, row/site/DBU
@@ -150,6 +204,13 @@ pin-access width are included.</li>
 </ul></li>
 
 <li id="D"><strong>D — Emit and verify the mixed physical netlist. 4–6 engineer-days.</strong>
+<p><span class="status landed">landed</span> Each converted state is one
+body-less <code>__lhd_domino_*</code> Sub (its Flop and private D logic removed),
+the residual CMOS and retained registers are technology-mapped with the domino
+instances as boundaries, lhd appends the bundle LEF, keys the physical cache on
+<code>domplace_salt</code>, and exports the bundle. Sequential LEC is proven with
+the bundle models; OpenTimer and the cgen simulator refuse the provisional cells
+by name.</p>
 <ul>
 <li>Add a physical emitter beside the current CMOS writer, preserving the frozen
 netlist as the logical authority. Prefer existing cell/module instances plus
@@ -181,6 +242,14 @@ connectivity intact. Unsupported cases retain CMOS or fail with a specific reaso
 </ul></li>
 
 <li id="E"><strong>E — Add half-cycle timing and stage reports. 3–5 engineer-days after the base proxy.</strong>
+<p><span class="status landed">landed</span> <code>pass/domplace/timing/</code>:
+provisional cells in the native late proxy (capture budgets, launch filter),
+half-cycle rail capture, per-instance internal and precharge checks, per-class
+slack, coverage with IO cuts listed, clock accounting, <code>stage_timing.json</code>
+schema 1; <code>synth.place.stage_timing</code> and
+<code>//tools:stage_timing_probe</code>. Hold is reported <code>unknown</code>.
+With the U1 estimate the profile's status is <code>complete</code>, or
+<code>partial</code> only for IO cuts.</p>
 <ul>
 <li>Use the shared 2t-timeclosure proxy with a provisional-cell model provider;
 do not hide OpenTimer calls inside a supposedly standalone proxy. Existing
@@ -207,6 +276,10 @@ assumptions are supplied.</li>
 </ul></li>
 
 <li id="F"><strong>F — Integrate GP, two-row legalization and anchored detail. 4–7 engineer-days.</strong>
+<p><span class="status landed">landed</span> Two-row rectangles through native
+GP, an anchor packer before terminal legalization, two-row refusals on every
+single-row path, FS anchors with their pin offsets, safe placement-cache reuse,
+and an imported-floorplan smoke. Known limits are listed under open issues.</p>
 <ul>
 <li>Pass actual two-row rectangles and oriented physical pins through
 <code>pass/place/place.cpp</code> to native DREAMPlace. Treat domino instances as
@@ -238,6 +311,12 @@ all-CMOS control and deliberate infeasibility.</li>
 </ul></li>
 
 <li id="G"><strong>G — Integrate sizing, buffering and clock accounting. 5–8 engineer-days.</strong>
+<p><span class="status landed">landed</span> A custom variant catalog, the
+bounded two-row ECO (<code>multirow_eco</code>), the <code>custom_sizing</code>
+engine on the resize trial harness (up/down steps, output buffering after the top
+variant or a rejected up move, full re-timing per trial, rollback of rejected
+trials) and <code>synth.place.domino_sizing</code>, with clock accounting per
+sink instance and variant.</p>
 <ul>
 <li>Extend <code>resize_engine</code>/repair's cell catalog and what-if model
 provider so domino variants are explicit same-function, same-interface choices.
@@ -266,6 +345,12 @@ USYN rerun in the placement loop.</li>
 </ul></li>
 
 <li id="H"><strong>H — Validate the complete flow and run matched experiments. 3–5 engineer-days.</strong>
+<p><span class="status landed">landed (in repository)</span> H1: the cases,
+floorplan, timing and sizing smokes under <code>lhd/tests/</code>; H2: the
+<code>domino_pair_area_pct</code>, <code>domino_area_margin_pct</code> and FO4
+override knobs; H4: <code>scripts/domplace/arms.py</code> with
+<code>arms_smoke</code>. H3 (final RUDY) is not implemented. H5, the HighTide
+matrix, is pending (below).</p>
 <ul>
 <li>Use tiny in-repository fixtures for the required cases from B–G, including
 unsupported state, complementary rails, shared consumers, fragmented rows,
@@ -297,20 +382,7 @@ placement with complete model provenance and honest timing coverage. A speedup
 is an experimental outcome, not a prerequisite for reporting the implementation
 working. This milestone makes no routed, silicon, noise-margin or CTS claim.</li>
 </ul></li>
-
-<li id="J"><strong>J — Add two-row detailed moves if needed. 3–5 additional engineer-days.</strong>
-<ul>
-<li>Use H's displacement/quality evidence to justify two-row shifts and swaps.
-Preserve the two-row occupancy and pin/orientation rules during every move;
-re-evaluate local wiring and stage timing.</li>
-<li><strong>Exit:</strong> matched comparison against the anchored v1, with
-independent legality, bounded runtime and preserved logical behavior.</li>
-</ul></li>
 </ul>
-
-<h2>Subtasks — landed</h2>
-<p>None yet. Existing USYN and placement infrastructure is reused; it does not
-constitute an implemented physical domino flow.</p>
 
 <h2>Design notes</h2>
 <h3>Confirmed decisions and scope</h3>
@@ -356,6 +428,51 @@ pin-access rules and fallback reporting. These are provisional parameters, not
 measured cell characteristics.</td></tr>
 </tbody>
 </table>
+
+<h3 id="decisions">Checkpoint-2 decisions (U1–U18)</h3>
+<p><strong>U1 — ruled 2026-10-26:</strong> “we should have a reasonable delay
+proxy, considering inputs as more transistors stack.” Under
+<code>pass.usyn.physical=domino_provisional</code> every stage coefficient now has
+a built-in, labeled value instead of “unset → unmeasured”; explicit
+<code>pass.usyn.domino_*_fo4</code> / <code>domino_uncertainty_*_ps</code> options
+still override it coefficient by coefficient. The estimate is
+Sutherland–Sproull–Harris logical effort for a footed domino gate, in tau =
+FO4 / (4 + p_inv), with FO4 measured on the reference inverter's NLDM (driving
+4 × its input capacitance at a self-consistent input slew). It is per master
+variant, which also answers U1b (not one global FO4 multiple):</p>
+<pre><code>eval      = tau [ (s+1)/3 · k + p_inv (s+1)(b + l(n−b) + w/3)/3 + C_D/(k·C_in) + p_inv ]
+precharge = tau · 2 (3k + p_inv (3b + w)) / (3w)
+setup_eval = 0.5 FO4    precharge_margin = 0.5 FO4    u1 = u2 = 0 ps (ideal clock)
+s stack, b branches, n PDN transistors; C_D register D input
+p_inv 1, w (precharge width) 2, k (output-inverter load) 1, l (internal-node weight) 0.5</code></pre>
+<p>The formula lives only in <code>pass/domplace/domino_delay.cpp</code>; the
+schema-3 sidecar records it with source <code>logical-effort-estimate</code>,
+its parameters, tau and the FO4 derivation, and refuses schema-2 bundles by
+number. Missing NLDM or D-pin data is <code>null</code> with a
+<code>domino-delay</code> warning. On sky130 (inv_1, dfxtp_1) FO4 = 82.9 ps and
+AND2/AND3/AND4 masters evaluate in 80.8/109.3/143.4 ps (44.2 ps precharge); on
+the HighTide ASAP7 RVT FF Liberty (INVx1, DFFHQNx1) FO4 = 14.4 ps and they
+evaluate in 14.6/19.5/25.4 ps (7.7 ps precharge). An estimate, not a
+characterization.</p>
+<table>
+<thead><tr><th>Item</th><th>Decision in effect</th></tr></thead>
+<tbody>
+<tr><td>U1, U1b</td><td>Ruled 2026-10-26: the per-master logical-effort estimate above.</td></tr>
+<tr><td>U2 uncertainties</td><td>u1/u2 replace the clock uncertainty at domino endpoints (never added); the full-cycle value is <code>synth.place.stage_timing.clock_uncertainty_ps</code> (default 0). Unset u1/u2 are the labeled 0 ps ideal clock.</td></tr>
+<tr><td>U3 CLK capacitance</td><td>Register CK plus <code>domino_clock_devices</code>/2 reference-inverter inputs (default 2 devices), labeled.</td></tr>
+<tr><td>U4 hold</td><td><code>unknown</code>; setup only, no early mode.</td></tr>
+<tr><td>U5 duty cycle</td><td>Fixed T/2; a non-50% waveform is refused.</td></tr>
+<tr><td>U6 unconstrained IO</td><td>Cut with listed reasons (status <code>partial</code>); <code>require_complete</code> is opt-in.</td></tr>
+<tr><td>U7–U11 sizing</td><td>A dedicated engine on the resize trial harness; post-legal ECO only; in place, shift ±64 sites, displace ≤16 cells, re-anchor; LEF footprint acceptance basis; buffering only after the top variant or a rejected up move.</td></tr>
+<tr><td>U12 knobs</td><td>Integer-percent pair-area knob on the x·A_NOT term; per-state area margin.</td></tr>
+<tr><td>U13 ASAP7 ladder</td><td>QN x1/x2/x3 under their own names; short ladders reported, not refused.</td></tr>
+<tr><td>U14 HighTide</td><td>Approved: edit <code>lhdsweep.py</code> in the HighTide repository; arm-3 OpenSTA is marked unmeasured and the native stage period is used for all arms. The edit itself (H5) is pending.</td></tr>
+<tr><td>U15 fixed core</td><td>Approved: <code>core</code>/<code>die</code> from the arm-1 area-driven run. The <code>make_arrays</code> FS-import fix it needed has landed: CORE row flips are recorded in the native node orientations, so a pinned or cache-locked FS cell is no longer flipped twice.</td></tr>
+<tr><td>U16–U18</td><td>OpenTimer off in arms 1–2 plus one STA-on comparison; power-on-initialized registers stay retained in the USYN arms; J only on the trigger under J.</td></tr>
+</tbody>
+</table>
+<p>U2–U13 and U16–U18 are the plan defaults in effect; they were not ruled
+separately and remain open to revision.</p>
 
 <h3 id="I">I — Row-access interface; routing implementation owned elsewhere</h3>
 <p>The routing implementation from the pre-plan's “pre-task 0” is outside this
@@ -499,6 +616,29 @@ belong in <code>../DREAMPlace/dreamplace/native/</code>, developed through a loc
 override and ultimately consumed by a published pin; never patch fetched
 external sources. The same ownership rule applies to OpenTimer if required.</p>
 
+<h3 id="open">Open issues</h3>
+<ul>
+<li><strong>HighTide (H5)</strong> is not run: the <code>lhdsweep.py</code> patch, a frozen
+binary and the matrix are pending. Arm-3 OpenSTA numbers are not comparable until it lands.</li>
+<li><strong>Delay estimate limits.</strong> The U1 estimate is uncharacterized: no charge
+sharing, keeper contention, noise margin, input-slope or wire load inside the gate; the
+output-inverter load (k = 1) and internal-node weight are assumptions; the HighTide ASAP7
+Liberty is the FF corner. The H5 matrix keeps 2 and 4 FO4 overrides as the pessimistic arms.</li>
+<li><strong>Hold, pulse width and skew</strong> are unknown (U4); SDC
+<code>set_clock_uncertainty</code> is outside the saved-SDC subset.</li>
+<li><strong>Pin access.</strong> sky130's mcon enclosure is reported unverified; ASAP7 needs
+real abstracts. Row-access and PG parity remain the owners' stand-ins.</li>
+<li><strong>Floorplans.</strong> Imported DEF placement blockages do not fragment rows yet
+(terminal legalization does not consult them); the greedy two-row packer has a pinned
+fragmentation limit (pairing/backtracking is F follow-up, not J).</li>
+<li><strong>Sizing reach.</strong> The netlist is always variant 0 at synthesis, so through
+lhd no instance steps down yet; drive injection at the <code>scan_output_drives</code> sites
+is deferred. A larger register's D input now slows its variant's evaluate.</li>
+<li><strong>Final RUDY</strong> (H3) is not reported.</li>
+<li>Unrelated to this task, <code>//tools/uroute:inference_test</code> fails on the
+branch as before.</li>
+</ul>
+
 <h3>Deferred beyond this task</h3>
 <p>Two cascaded domino phases (requiring a separate timing/rail-stability contract
 and estimate), real transistor layout and characterized Liberty/LEF,
@@ -508,6 +648,6 @@ handoff replaces the provisional model only after validating geometry, pin order
 rail availability, clock/capture semantics and units; equal filenames alone are
 not interface compatibility.</p>
 </main>
-<footer>LiveHD TODO · reviewed plan, no implementation or QoR claim</footer>
+<footer>LiveHD TODO · A–G and in-repo H landed; no QoR claim until H5</footer>
 </body>
 </html>
